@@ -24,7 +24,8 @@ import { createControl, type Control } from "../control.js";
 import { WatchWorkspaceRosterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_roster_pb";
 import { createDrawnStatusLog } from "../drawn-status.js";
 import { log } from "../log.js";
-import type { AppContext } from "../rpc/context.js";
+import type { AppContext, DaemonContext } from "../rpc/context.js";
+import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { requireCase, requireMessage, unreachablePushArm } from "../rpc/strict.js";
 import { watchStream } from "../rpc/streams.js";
 import { AttentionRegistry, type BlinkTimers } from "./attention.js";
@@ -124,7 +125,41 @@ function pageStorage(): Storage | null {
  * the roster is the daemon's whether anyone is watching or not.
  */
 export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDeps = {}): Handle {
-  log.debug("mounting the workspaces rail", { operation: "sidebar.mount" });
+  return mountSidebarIn(host, ctx, { case: "page", ctx }, deps);
+}
+
+/**
+ * Mount the ONE sidebar the webhost draws for every workspace page.
+ *
+ * It owns no workspace, so there is no page of its own to be seen or switched
+ * to: every push is drawn, the stream always stands (the webhost is on screen
+ * whenever any page is), and a child created from the form is a child of the
+ * roster's `current`, the workspace Emacs is standing in.
+ */
+export function mountWebhostSidebar(host: HTMLElement, ctx: DaemonContext, deps: WebhostSidebarDeps = {}): Handle {
+  return mountSidebarIn(host, ctx, { case: "webhost" }, deps);
+}
+
+/** What the webhost's sidebar may have injected, beside the shared deps. */
+export type WebhostSidebarDeps = Pick<SidebarDeps, "storage" | "timers" | "wallPhase"> & {
+  /** Told once, when the first push reveals the sidebar. */
+  revealed?: () => void;
+};
+
+/** Where a sidebar is drawn, and what that placement needs. */
+type SidebarPlacement =
+  /** In a workspace page on its own (dev mode, the webapp's own tests). */
+  | { case: "page"; ctx: AppContext }
+  /** In the webhost, once for every workspace page. */
+  | { case: "webhost" };
+
+function mountSidebarIn(
+  host: HTMLElement,
+  ctx: DaemonContext,
+  placement: SidebarPlacement,
+  deps: SidebarDeps & WebhostSidebarDeps,
+): Handle {
+  log.debug("mounting the workspaces rail", { operation: "sidebar.mount", context: { placement: placement.case } });
 
   retireStoredPrefs(deps.storage === undefined ? pageStorage() : deps.storage);
   const view = createSidebarView();
@@ -132,9 +167,11 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
   // THE ROSTER IS WHERE A SWITCH TO THIS WORKSPACE IS STATED, whichever path
   // made it, so the one edge every switch crosses is watched here.
   const selectionEdge =
-    deps.workspaceSelected === undefined
+    placement.case !== "page" || deps.workspaceSelected === undefined
       ? null
-      : createSelectionEdge(ctx.workspace.id, deps.workspaceSelected);
+      : createSelectionEdge(placement.ctx.workspace.id, deps.workspaceSelected);
+  /** The workspace the roster last named current, for the webhost's create form. */
+  let current: WorkspaceRef | null = null;
 
   /** Teardowns the CURRENT drawing owns; replaced wholesale on every push. */
   let disposers: Array<() => void> = [];
@@ -145,6 +182,7 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
 
   const sc: SidebarContext = {
     ctx,
+    parentWorkspace: () => (placement.case === "page" ? placement.ctx.workspace : current),
     view,
     openDetails: new Set<string>(),
     drawnStatus: createDrawnStatusLog("sidebar row", "sidebar.drawn-status"),
@@ -195,15 +233,20 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
   };
   host.addEventListener("click", dismiss);
 
-  const unseen = createUnseenGate(ctx.workspace.id, drawRoster, deps.unseen ?? unseenEnv(ctx.seen));
+  // ONLY A PAGE'S OWN SIDEBAR IS GATED: the webhost's is the one on screen.
+  const unseen =
+    placement.case === "page"
+      ? createUnseenGate(placement.ctx.workspace.id, drawRoster, deps.unseen ?? unseenEnv(placement.ctx.seen))
+      : null;
   const stream = watchStream(ctx, {
     name: "WatchWorkspaceRoster",
     schema: WatchWorkspaceRosterResponseSchema,
     open: (_client, signal) => ctx.streams.watch("roster", {}, signal),
     // A COLD PAGE'S SIDEBAR STANDS DOWN (host.ts, WARM_RECENT): no one sees it,
     // and a whole roster redrawn on every push in every page of the host is
-    // what held the startup's pages back. It reopens on a fresh snapshot.
-    standsWhile: warmthCondition(pagePresence()),
+    // what held the startup's pages back. It reopens on a fresh snapshot. The
+    // webhost's sidebar always stands.
+    standsWhile: placement.case === "page" ? warmthCondition(pagePresence()) : undefined,
     plannedEnding: (response) => response.push.case === "ending",
     // A run that ended forgets what `current` was: the next run's first push
     // is a baseline, so a reconnect restating it is never taken for a switch.
@@ -217,9 +260,14 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
         return unreachablePushArm("WatchWorkspaceRosterResponse.push", push.case);
       }
       const roster = requireMessage(push.value, "WatchWorkspaceRosterResponse.roster");
+      current =
+        roster.current === undefined
+          ? null
+          : requireMessage(roster.current.workspace, "WorkspaceRoster.current.workspace");
       // ONLY A SEEN PAGE DRAWS (unseen.ts): an unseen one keeps the newest
       // roster and draws it once when it is seen again.
-      unseen.offer(roster);
+      if (unseen === null) drawRoster(roster);
+      else unseen.offer(roster);
       // EVERY push moves the selection edge, drawn or held, so the edge's
       // baseline is the roster the daemon last stated, not the last one drawn.
       selectionEdge?.observe(roster);
@@ -245,7 +293,10 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
     // already-expanded is placed here, after the draw is in the document.
     placeOpenRowDetails(body);
     // THE FIRST PUSH REVEALS THE RAIL, and nothing else ever does.
-    host.hidden = false;
+    if (host.hidden) {
+      host.hidden = false;
+      deps.revealed?.();
+    }
     // Fitted once the rail is shown, so the band measures the rail it is in.
     bandFit.refit();
     // Seeked once the draw is in the document, where its animations run.
@@ -256,7 +307,7 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
     dispose(): void {
       log.debug("disposing the workspaces rail", { operation: "sidebar.dispose" });
       stream.cancel();
-      unseen.dispose();
+      unseen?.dispose();
       bandFit.dispose();
       wallPhase.dispose();
       window.removeEventListener("resize", replace);

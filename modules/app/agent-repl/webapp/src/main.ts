@@ -56,6 +56,8 @@ import { LevelWindow, selectionContext, selectionNote, selectLevel } from "../..
 import { installPagePresenceLog } from "./page-presence.js";
 import { connectToHost } from "./host/embed.js";
 import { mintConnectionId } from "./connection-id.js";
+import { watchShownEdge } from "./host/shown-edge.js";
+import { createWebhostFailureView, mergeFailureViews } from "./failure/webhost.js";
 import { clientLogSink } from "./rpc/client-log-sink.js";
 import { createStreamCostMeter, regionNodes } from "./stream-cost.js";
 import { pagePresence } from "./presence.js";
@@ -139,7 +141,8 @@ export async function boot(): Promise<void> {
 
     // Joined before anything draws, so the host's first word (shown or not)
     // reaches the page before the rail decides what it can skip.
-    connectToHost({ doc: document, win: window, presence: pagePresence() });
+    const webhostFailures = createWebhostFailureView();
+    connectToHost({ doc: document, win: window, presence: pagePresence(), webhostFailures });
 
     // The page's presence — hidden/shown, focused/blurred, resized, and the
     // repaint after each — is recorded from here on (src/page-presence.ts).
@@ -152,7 +155,8 @@ export async function boot(): Promise<void> {
     // once the chip that draws it exists, so a failure the catch files is
     // always one the page can show.
     const localFailures = createLocalFailures();
-    const topbar = mountTopbar(shell.topbar, { failures: localFailures });
+    // The chip lists the webhost's failures too: it has no chip of its own.
+    const topbar = mountTopbar(shell.topbar, { failures: mergeFailureViews(localFailures, webhostFailures) });
     failures = localFailures;
 
     // Copying is a page-wide affordance, not a component's: it is installed
@@ -258,9 +262,15 @@ export async function boot(): Promise<void> {
     });
 
     // A SWITCH TO THIS WORKSPACE RETURNS THE FEED TO ITS TAIL (owner ruling,
-    // 2026-10-02), whichever path made it: the rail watches the roster's
-    // `current`, the one fact every switch path ends in.
-    mountSidebar(shell.sidebar, ctx, { workspaceSelected: () => feed.workspaceSelected() });
+    // 2026-10-02), whichever path made it. IN THE WEBHOST the sidebar is the
+    // webhost's, drawn once for every page, and the webhost showing this page
+    // is the switch; a page on its own draws its own sidebar, which watches the
+    // roster's `current`, the one fact every switch path ends in.
+    if (pagePresence().embedded) {
+      watchShownEdge(pagePresence(), () => feed.workspaceSelected());
+    } else {
+      mountSidebar(shell.sidebar, ctx, { workspaceSelected: () => feed.workspaceSelected() });
+    }
 
     // A STANDING GATE DOCKS AT THE BOTTOM EDGE while Emacs hides the input
     // window over it; both read the daemon's one cold-gate standing.

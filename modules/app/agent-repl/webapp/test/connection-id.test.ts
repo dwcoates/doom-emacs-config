@@ -46,9 +46,14 @@ describe("mintConnectionId", () => {
     const here = path.dirname(fileURLToPath(import.meta.url));
 
     // Act
-    const main = readFileSync(path.join(here, "..", "src", "main.ts"), "utf8");
+    const documents = ["main.ts", path.join("host", "sidebar.ts")].map((file) =>
+      readFileSync(path.join(here, "..", "src", file), "utf8"),
+    );
 
     // Assert
-    expect([main.includes("mintConnectionId()"), main.includes("randomUUID")]).toEqual([true, false]);
+    expect(documents.map((source) => [source.includes("mintConnectionId()"), source.includes("randomUUID")])).toEqual([
+      [true, false],
+      [true, false],
+    ]);
   });
 });
