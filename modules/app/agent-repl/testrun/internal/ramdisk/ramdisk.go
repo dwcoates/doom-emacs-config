@@ -43,6 +43,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"agentrepl/testrun/reap"
 )
 
 // DefaultRegistry is where every run's lock record lives.
@@ -286,7 +288,7 @@ type Volume struct {
 func Default(log Logger) Manager {
 	return Manager{
 		Run: ExecRunner, Registry: DefaultRegistry, MountParent: DefaultMountParent, Pid: os.Getpid(),
-		KillUnder: KillProcessesUnder, Probe: RunBounded, Watch: RunWatched, Alive: ProcessAlive, Log: log, Now: time.Now,
+		KillUnder: reap.Under, Probe: RunBounded, Watch: RunWatched, Alive: ProcessAlive, Log: log, Now: time.Now,
 		LockBound: LockBound,
 	}
 }
@@ -930,32 +932,4 @@ func isAttachedRAMDisk(info, device string) bool {
 		}
 	}
 	return false
-}
-
-// KillProcessesUnder SIGKILLs every process whose command line names a path
-// under dir, the way the daemon integration harness reclaims a dead run root.
-func KillProcessesUnder(dir string) (int, error) {
-	out, err := exec.Command("ps", "-axo", "pid=,args=").Output()
-	if err != nil {
-		return 0, fmt.Errorf("list processes to reclaim %s: %w", dir, err)
-	}
-	prefix := strings.TrimSuffix(dir, "/") + "/"
-	killed := 0
-	var errs []error
-	for _, line := range strings.Split(string(out), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 2 || !strings.Contains(line, prefix) {
-			continue
-		}
-		pid, err := strconv.Atoi(fields[0])
-		if err != nil || pid == os.Getpid() {
-			continue
-		}
-		if err := syscall.Kill(pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
-			errs = append(errs, fmt.Errorf("kill leftover pid %d under %s: %w", pid, dir, err))
-			continue
-		}
-		killed++
-	}
-	return killed, errors.Join(errs...)
 }
