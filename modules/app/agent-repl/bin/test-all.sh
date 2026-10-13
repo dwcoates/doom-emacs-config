@@ -87,7 +87,9 @@ if [ -z "${AGENT_REPL_TEST_ALL_LOGGED:-}" ]; then
 
     printf "[agent-repl-tests] this run's full log: %s\n" "$RUN_LOG" | tee -a "$RUN_LOG"
     set +e
-    AGENT_REPL_TEST_ALL_LOGGED=1 bash "${BASH_SOURCE[0]}" "$@" 2>&1 | tee -a "$RUN_LOG"
+    # The runner is told its log (AGENT_REPL_TEST_RUN_LOG), so a run that falls
+    # back from its RAM disk names this file to the workspace that investigates.
+    AGENT_REPL_TEST_ALL_LOGGED=1 AGENT_REPL_TEST_RUN_LOG="$RUN_LOG" bash "${BASH_SOURCE[0]}" "$@" 2>&1 | tee -a "$RUN_LOG"
     RUN_RC=${PIPESTATUS[0]}
     set -e
     printf "[agent-repl-tests] exit %d; this run's full log: %s\n" "$RUN_RC" "$RUN_LOG" | tee -a "$RUN_LOG"
