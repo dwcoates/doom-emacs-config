@@ -5,21 +5,6 @@ import (
 	"testing"
 )
 
-// undoLayout43 strips layout 43's additions (hiddenAndDweltAtDDL) from a
-// migrated file, leaving its stamp alone.
-func undoLayout43(t *testing.T, path string) {
-	t.Helper()
-	execRaw(t, path, `ALTER TABLE workspaces DROP COLUMN hidden_at`)
-	execRaw(t, path, `ALTER TABLE workspaces DROP COLUMN dwelt_at`)
-}
-
-// undoLayout42 strips layout 42's addition (signedInTurnsDDL) from a migrated
-// file, leaving its stamp alone.
-func undoLayout42(t *testing.T, path string) {
-	t.Helper()
-	execRaw(t, path, `DROP TABLE signed_in_turns`)
-}
-
 func TestTheMigrationStampsEveryHiddenRowWithAHideInstant(t *testing.T) {
 	// Arrange: a layout-42 file holding one hidden workspace and one shown.
 	path := fixtureAt(t, 42)
