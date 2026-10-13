@@ -259,6 +259,66 @@ so stubbing the accessor would not reach the code under test."
     (should (equal (gethash "id-alpha" agent-repl--webhost-pages) "http://ws-alpha.localhost:2/"))
     (should (= 2 (length (agent-repl-test-wh--sent "ensure"))))))
 
+(ert-deftest agent-repl-test-wh-a-page-moved-to-another-daemon-reloads-the-host-there ()
+  "The host draws the sidebar over its own daemon connection, so it follows a handover."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-ensure-page "alpha")
+    (setq agent-repl--webhost-url "http://host.localhost:1/?host=1")
+    (let ((reloaded nil)
+          (successor (agent-repl-test-wh--conn "127.0.0.1:2")))
+      (cl-letf (((symbol-function 'agent-repl-frontend-webview-url)
+                 (lambda (_ws) "http://ws-alpha.localhost:2/"))
+                ((symbol-function 'agent-repl-host-conn) (lambda (_ws) successor))
+                ((symbol-function 'agent-repl-webhost-reload) (lambda (conn) (push conn reloaded))))
+        ;; Act
+        (agent-repl-webhost-reload-page "alpha"))
+      ;; Assert
+      (should (equal reloaded (list successor)))
+      (should (equal (gethash "id-alpha" agent-repl--webhost-pages) "http://ws-alpha.localhost:2/"))
+      (should (= 1 (length (agent-repl-test-wh--sent "ensure")))))))
+
+(ert-deftest agent-repl-test-wh-a-page-moved-to-the-hosts-own-daemon-is-re-pointed ()
+  "A page moved onto the daemon the host already talks to is re-pointed, the host left alone."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-ensure-page "alpha")
+    (setq agent-repl--webhost-url "http://host.localhost:2/?host=1")
+    (let ((reloaded nil)
+          (successor (agent-repl-test-wh--conn "127.0.0.1:2")))
+      (cl-letf (((symbol-function 'agent-repl-frontend-webview-url)
+                 (lambda (_ws) "http://ws-alpha.localhost:2/"))
+                ((symbol-function 'agent-repl-host-conn) (lambda (_ws) successor))
+                ((symbol-function 'agent-repl-webhost-reload) (lambda (conn) (push conn reloaded))))
+        ;; Act
+        (agent-repl-webhost-reload-page "alpha"))
+      ;; Assert
+      (should (null reloaded))
+      (should (= 2 (length (agent-repl-test-wh--sent "ensure")))))))
+
+(ert-deftest agent-repl-test-wh-a-host-reload-records-the-daemon-it-loads-from ()
+  "The host's URL is what a later handover is compared against."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (cl-letf (((symbol-function 'agent-repl--frontend-webview-navigate-widget) (lambda (_xw _url) nil)))
+      ;; Act
+      (agent-repl--webhost-reload-now (agent-repl-test-wh--conn "127.0.0.1:7")))
+    ;; Assert
+    (should (equal agent-repl--webhost-url "http://host.localhost:7/?host=1"))))
+
+(ert-deftest agent-repl-test-wh-killing-the-host-forgets-its-daemon ()
+  "A killed host talks to no daemon; the next one records its own."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (let ((buf (generate-new-buffer " host")))
+      (setq agent-repl--webhost-buffer buf
+            agent-repl--webhost-url "http://host.localhost:1/?host=1")
+      (cl-letf (((symbol-function 'agent-repl--frontend-kill-webview) #'kill-buffer))
+        ;; Act
+        (agent-repl-webhost-kill))
+      ;; Assert
+      (should (null agent-repl--webhost-url)))))
+
 (ert-deftest agent-repl-test-wh-an-input-background-is-kept-for-reloads ()
   "The background is recorded, so a reloaded host gets it again."
   ;; Arrange
