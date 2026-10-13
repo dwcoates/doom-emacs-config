@@ -370,6 +370,8 @@ export class TailFollow {
   private tailReached: (() => void) | null = null;
   /** The box's sizes the last resize pass saw, so only a real change is recorded. */
   private seenSize: { scrollHeight: number; clientHeight: number };
+  /** What the feed's content last changed, stated on every uncaused move (`witnessMoves`). */
+  private witness: () => MoveWitnessReport | null = () => null;
 
   /**
    * READLATEST is where the feed's latest entry sits; a box with no feed to
@@ -548,6 +550,15 @@ export class TailFollow {
     this.sync();
     this.reanchor("resize");
     this.follow();
+  }
+
+  /**
+   * State READ's answer -- the feed content's last change -- on every move the
+   * browser made with no reader input and no named cause, so the record shows
+   * what changed just before the box moved, and when (`MoveWitness`).
+   */
+  witnessMoves(read: () => MoveWitnessReport | null): void {
+    this.witness = read;
   }
 
   /** Wire the box's own events into the owner. */
@@ -825,6 +836,7 @@ export class TailFollow {
           client_height: this.box.clientHeight,
           following: this.following,
           cause: this.cause ?? "none",
+          ...(this.witness() ?? { mutated: "none" }),
         },
       });
     }
@@ -841,6 +853,87 @@ export class TailFollow {
       this.cause = null;
     }
     this.lastTop = top;
+  }
+}
+
+/** The most elements one witnessed change names, so a large render stays one readable record. */
+const WITNESS_TARGETS = 6;
+
+/** How many frames after a change the witness counts, enough to tell "before paint" from "after". */
+const WITNESS_FRAMES = 2;
+
+/** What the feed's content last changed, as an uncaused move's record states it. */
+export interface MoveWitnessReport {
+  /** The distinct elements the change touched, as `tag.class`, at most `WITNESS_TARGETS`. */
+  mutated: string[];
+  /** How many mutations the change held in all. */
+  mutations: number;
+  /** Milliseconds from the change to this report. */
+  ms_since_mutation: number;
+  /** The box's position read in the change's own task, once its mutations had landed. */
+  top_after_mutation: number;
+  /** Frames the browser started between the change and this report, counted up to `WITNESS_FRAMES`. */
+  frames_since_mutation: number;
+}
+
+/** NODE as `tag.class`, from the element a text node sits in. */
+function witnessName(node: Node): string {
+  const el = node instanceof Element ? node : node.parentElement;
+  if (el === null) return node.nodeName.toLowerCase();
+  const classes = [...el.classList].join(".");
+  return classes === "" ? el.tagName.toLowerCase() : `${el.tagName.toLowerCase()}.${classes}`;
+}
+
+/**
+ * THE WITNESS TO UNCAUSED MOVES (diagnosis, 2026-10-13). The feed's box moves
+ * with no reader input and no named cause (`scroll.feed-moved-uncaused`) once a
+ * second while an answered ask's ticking age is on the page, 16px per stamp,
+ * from the tail, with no change in its size. The record alone cannot say WHERE
+ * the move happens, so the witness keeps the content's last change beside it:
+ *
+ * - which elements it touched, so the record names the stamp or rules it out;
+ * - the box's position read in the change's own task: equal to the move's `to`,
+ *   the change's own layout moved the box; equal to its `from`, the browser
+ *   moved it later, in its frame;
+ * - how many frames started since: zero means the move was reported before the
+ *   next paint, so a correction made on it would never be seen.
+ *
+ * Reading the position forces the layout the browser would otherwise run at its
+ * next frame, on the content the change left.
+ */
+export class MoveWitness {
+  private last: (Omit<MoveWitnessReport, "ms_since_mutation"> & { at: number }) | null = null;
+
+  constructor(
+    private readonly box: Pick<ScrollPosition, "scrollTop">,
+    private readonly now: () => number,
+    private readonly nextFrame: (fn: () => void) => void,
+  ) {}
+
+  /** A change to the content landed, touching TARGETS. */
+  mutated(targets: readonly Node[]): void {
+    const names = [...new Set(targets.map(witnessName))].slice(0, WITNESS_TARGETS);
+    const change = {
+      mutated: names,
+      mutations: targets.length,
+      at: this.now(),
+      top_after_mutation: this.box.scrollTop,
+      frames_since_mutation: 0,
+    };
+    this.last = change;
+    const count = (): void => {
+      change.frames_since_mutation += 1;
+      if (change.frames_since_mutation < WITNESS_FRAMES) this.nextFrame(count);
+    };
+    this.nextFrame(count);
+  }
+
+  /** The content's last change, or null when none has landed yet. */
+  report(): MoveWitnessReport | null {
+    const last = this.last;
+    if (last === null) return null;
+    const { at, ...rest } = last;
+    return { ...rest, mutated: [...rest.mutated], ms_since_mutation: Math.round(this.now() - at) };
   }
 }
 
@@ -910,6 +1003,10 @@ export function observeScrollBox(box: HTMLElement, tail: TailFollow): () => void
     }
   };
   const children = new MutationObserver(watchChildren);
+  const witness = new MoveWitness(box, () => performance.now(), (fn) => requestAnimationFrame(fn));
+  const content = new MutationObserver((records) => witness.mutated(records.map((r) => r.target)));
+  content.observe(box, { subtree: true, childList: true, characterData: true, attributes: true });
+  tail.witnessMoves(() => witness.report());
   tail.observe(
     () => box.addEventListener("scroll", onScroll, { passive: true }),
     () => {
@@ -929,6 +1026,7 @@ export function observeScrollBox(box: HTMLElement, tail: TailFollow): () => void
       box.removeEventListener(kind, onInput, { capture: true });
     }
     children.disconnect();
+    content.disconnect();
     observer.disconnect();
     watched.clear();
   };
