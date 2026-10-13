@@ -1310,3 +1310,18 @@ func TestEveryQueueReorderingRunsThroughReorder(t *testing.T) {
 		t.Fatalf("reorder sites = %v, want %v", calls, want)
 	}
 }
+
+func TestAKickOfASynchronousOrchestratorReachesItsKickSeam(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	var kicked []wsm.RepoKey
+	h.o.onKick = func(repo wsm.RepoKey) { kicked = append(kicked, repo) }
+
+	// Act
+	h.o.kick(h.repoKey())
+
+	// Assert
+	if len(kicked) != 1 || kicked[0] != h.repoKey() {
+		t.Fatalf("kicks seen = %v, want the one kick of %s", kicked, h.repoKey())
+	}
+}

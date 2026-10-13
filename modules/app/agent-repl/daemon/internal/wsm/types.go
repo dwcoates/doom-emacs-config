@@ -979,6 +979,10 @@ type MergeSource struct {
 	PickStartedAt *time.Time
 	// PickTurn is the merge workspace's pick turn, set with PickStartedAt.
 	PickTurn TurnID
+	// CompactAfter compacts the requester's conversation once a DETACHED
+	// merge lands (agentrepl.v1.MergeWorkspaceSourceOwnBranchDetached.compact_after).
+	// Only a detached request carries it: the in-place run has no way to ask.
+	CompactAfter bool
 	// Front puts the merge at the FRONT of its queue when it is put in line
 	// (QueueMerge): ahead of every merge still waiting, never ahead of the one
 	// already running. Any arm may ask for it; a hotfix that must land before
@@ -1004,6 +1008,10 @@ type MergeOrigin struct {
 	// merge lands. Empty only on a merge workspace forked before layout 41
 	// recorded it.
 	ForkHead string
+	// CompactAfter is the detached request's ask that the requester's
+	// conversation be compacted once this merge workspace's branch lands
+	// (MergeSource.CompactAfter, carried over when the workspace is forked).
+	CompactAfter bool
 }
 
 // MergeQueueEntry is one workspace's place in its repository's merge queue. The

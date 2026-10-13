@@ -422,6 +422,7 @@ func TestAMergeEntryNamingOneSourceValidates(t *testing.T) {
 		{name: "own branch kept open", entry: Entry{Type: TypeMerge, Workspace: "w1", KeepOpen: true}},
 		{name: "own branch async", entry: Entry{Type: TypeMerge, Workspace: "w1", Detached: true, DetachedName: "reconnect-fix"}},
 		{name: "own branch async pick", entry: Entry{Type: TypeMerge, Workspace: "w1", Detached: true, DetachedName: "reconnect-fix", Pick: "the fix"}},
+		{name: "own branch async compact after", entry: Entry{Type: TypeMerge, Workspace: "w1", Detached: true, DetachedName: "reconnect-fix", CompactAfter: true}},
 		{name: "own branch one-shot", entry: Entry{Type: TypeMerge, Workspace: "w1", OneShot: true}},
 		{name: "a branch", entry: Entry{Type: TypeMerge, Workspace: "w1", Branch: "agent-1/fix"}},
 		{name: "another workspace", entry: Entry{Type: TypeMerge, Workspace: "w1", SourceDir: "/wt/two"}},
@@ -455,6 +456,9 @@ func TestAMergeEntryNamingTwoSourcesIsRefused(t *testing.T) {
 		{name: "a name with no detach", entry: Entry{Type: TypeMerge, Workspace: "w1", DetachedName: "n"}},
 		{name: "a pick with no detach", entry: Entry{Type: TypeMerge, Workspace: "w1", Pick: "the fix"}},
 		{name: "a blank pick", entry: Entry{Type: TypeMerge, Workspace: "w1", Detached: true, DetachedName: "n", Pick: "   "}},
+		{name: "compact_after in place", entry: Entry{Type: TypeMerge, Workspace: "w1", CompactAfter: true}},
+		{name: "compact_after in place kept open", entry: Entry{Type: TypeMerge, Workspace: "w1", KeepOpen: true, CompactAfter: true}},
+		{name: "compact_after on a branch", entry: Entry{Type: TypeMerge, Workspace: "w1", Branch: "b", CompactAfter: true}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

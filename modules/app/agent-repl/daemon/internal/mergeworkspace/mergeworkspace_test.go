@@ -95,20 +95,29 @@ type submitted struct {
 	delivery wsm.Delivery
 }
 
-// fakePrompts records every submission.
+// fakePrompts records every submission. err fails every submission;
+// errOnText fails only the submission whose text is exactly it.
 type fakePrompts struct {
-	mu   sync.Mutex
-	err  error
-	sent []submitted
+	mu        sync.Mutex
+	err       error
+	errOnText string
+	sent      []submitted
+	// keys are the idempotency keys of the submissions in sent.
+	keys []string
 }
 
-func (f *fakePrompts) Submit(_ context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, _ string, origin conversationv1.PromptOrigin, delivery wsm.Delivery, _ *feedid.Ref) (prompthandler.Outcome, error) {
+func (f *fakePrompts) Submit(_ context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, key string, origin conversationv1.PromptOrigin, delivery wsm.Delivery, _ *feedid.Ref) (prompthandler.Outcome, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	text := said.GetContent().GetBlocks()[0].GetText().GetText()
 	if f.err != nil {
 		return prompthandler.Outcome{}, f.err
 	}
-	f.sent = append(f.sent, submitted{ws: ws, text: said.GetContent().GetBlocks()[0].GetText().GetText(), origin: origin, delivery: delivery})
+	if f.errOnText != "" && text == f.errOnText {
+		return prompthandler.Outcome{}, errors.New("refused " + text)
+	}
+	f.sent = append(f.sent, submitted{ws: ws, text: text, origin: origin, delivery: delivery})
+	f.keys = append(f.keys, key)
 	return prompthandler.Outcome{Turn: "turn-handback"}, nil
 }
 
@@ -138,6 +147,8 @@ type fixture struct {
 	logs       *dlog.TestSurfaces
 	now        time.Time
 	briefErr   error
+	// keyErrOn fails MintKey for the one key prefix it names.
+	keyErrOn string
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -156,6 +167,12 @@ func newFixture(t *testing.T) *fixture {
 				return "", f.briefErr
 			}
 			return values["label"] + "\n\n" + values["report"], nil
+		},
+		MintKey: func(prefix string) (string, error) {
+			if prefix == f.keyErrOn {
+				return "", errors.New("no randomness")
+			}
+			return prompthandler.MintKey(prefix)
 		},
 		Now:          func() time.Time { return f.now },
 		WorktreeLock: filepath.Join(t.TempDir(), "worktree-reap.lock"),
@@ -194,7 +211,7 @@ func TestForkCreatesTheMergeWorkspace(t *testing.T) {
 	requester := register(t, f.db, "sample", nil)
 
 	// Act
-	ws, err := f.svc.Fork(context.Background(), requester, "request-1", "reconnect-fix", "sample")
+	ws, err := f.svc.Fork(context.Background(), requester, wsm.MergeOrigin{Requester: requester.ID, Request: "request-1"}, "reconnect-fix", "sample")
 
 	// Assert
 	if err != nil || ws.MergeOf == nil || ws.MergeOf.Request != "request-1" {
@@ -205,6 +222,39 @@ func TestForkCreatesTheMergeWorkspace(t *testing.T) {
 	}
 }
 
+func TestForkRecordsTheCompactAfterAskOnTheMergeWorkspace(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	requester := register(t, f.db, "sample", nil)
+	origin := wsm.MergeOrigin{Requester: requester.ID, Request: "request-1", CompactAfter: true}
+
+	// Act
+	ws, err := f.svc.Fork(context.Background(), requester, origin, "reconnect-fix", "sample")
+
+	// Assert
+	if err != nil || ws.MergeOf == nil || !ws.MergeOf.CompactAfter {
+		t.Fatalf("Fork = %+v, %v; want the merge workspace to carry the compact-after ask", ws.MergeOf, err)
+	}
+}
+
+func TestForkRefusesAnOriginNamingAnotherRequester(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	requester := register(t, f.db, "sample", nil)
+	origin := wsm.MergeOrigin{Requester: "ws-someone-else", Request: "request-1"}
+
+	// Act
+	_, err := f.svc.Fork(context.Background(), requester, origin, "reconnect-fix", "sample")
+
+	// Assert
+	if err == nil || len(f.workspaces.created) != 0 {
+		t.Fatalf("Fork = %v with %v created; want a refusal and nothing created", err, f.workspaces.created)
+	}
+	if !f.loggedAt(dlog.LevelError) {
+		t.Fatal("the contradictory fork was not recorded at ERROR")
+	}
+}
+
 func TestForkFindsTheWorkspaceARestartLeftForked(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
@@ -212,7 +262,7 @@ func TestForkFindsTheWorkspaceARestartLeftForked(t *testing.T) {
 	forked := register(t, f.db, "sample-merge", &wsm.MergeOrigin{Requester: requester.ID, Request: "request-1"})
 
 	// Act
-	ws, err := f.svc.Fork(context.Background(), requester, "request-1", "reconnect-fix", "sample")
+	ws, err := f.svc.Fork(context.Background(), requester, wsm.MergeOrigin{Requester: requester.ID, Request: "request-1"}, "reconnect-fix", "sample")
 
 	// Assert
 	if err != nil || ws.ID != forked.ID || len(f.workspaces.created) != 0 {
@@ -227,7 +277,7 @@ func TestForkAnswersTheCreatesFailure(t *testing.T) {
 	f.workspaces.createErr = errors.New("no worktree")
 
 	// Act
-	_, err := f.svc.Fork(context.Background(), requester, "request-1", "reconnect-fix", "sample")
+	_, err := f.svc.Fork(context.Background(), requester, wsm.MergeOrigin{Requester: requester.ID, Request: "request-1"}, "reconnect-fix", "sample")
 
 	// Assert
 	if !errors.Is(err, f.workspaces.createErr) {
@@ -301,6 +351,98 @@ func TestHandBackSubmitsADeferredReportLedByItsLabel(t *testing.T) {
 	}
 }
 
+// compactingMergeWS is a merge workspace whose requester asked to be
+// compacted once it lands.
+var compactingMergeWS = wsm.Workspace{ID: "ws-merge", Name: "sample-merge", Dir: "/w/sample-merge",
+	MergeOf: &wsm.MergeOrigin{Requester: "ws-requester", Request: "request-1", CompactAfter: true}}
+
+func TestHandBackOfALandingThatAskedToCompactSubmitsTheCompactionAfterTheHandback(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	out := merge.DetachedOutcome{Kind: merge.DetachedLanded, Summary: "it landed as commit abc", Branch: "sample"}
+
+	// Act
+	err := f.svc.HandBack(context.Background(), "ws-requester", compactingMergeWS, out)
+
+	// Assert: the handback first, then the requester's /compact, both down the
+	// one prompt path, the compaction under its own origin.
+	if err != nil || len(f.prompts.sent) != 2 {
+		t.Fatalf("HandBack = %v with %d submissions, want the handback and the compaction", err, len(f.prompts.sent))
+	}
+	if f.prompts.sent[0].origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK {
+		t.Fatalf("first submission = %+v, want the handback", f.prompts.sent[0])
+	}
+	want := submitted{ws: "ws-requester", text: CompactCommand, origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_COMPACT_AFTER, delivery: wsm.DeliveryDeferred}
+	if f.prompts.sent[1] != want {
+		t.Fatalf("second submission = %+v, want %+v", f.prompts.sent[1], want)
+	}
+	if _, ok := f.recordWith(dlog.LevelInfo, "submitted the compaction a landed detached merge asked for to its requester"); !ok {
+		t.Fatal("the compaction's submission was not recorded at INFO")
+	}
+}
+
+func TestHandBackCompactsNothingUnlessALandingAskedForIt(t *testing.T) {
+	noAsk := wsm.Workspace{ID: "ws-merge", Name: "sample-merge", Dir: "/w/sample-merge",
+		MergeOf: &wsm.MergeOrigin{Requester: "ws-requester", Request: "request-1"}}
+	tests := []struct {
+		name    string
+		mergeWS wsm.Workspace
+		kind    merge.DetachedOutcomeKind
+	}{
+		{name: "landed without the ask", mergeWS: noAsk, kind: merge.DetachedLanded},
+		{name: "failed with the ask", mergeWS: compactingMergeWS, kind: merge.DetachedFailed},
+		{name: "abandoned with the ask", mergeWS: compactingMergeWS, kind: merge.DetachedAbandoned},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+
+			// Act
+			err := f.svc.HandBack(context.Background(), "ws-requester", tt.mergeWS, merge.DetachedOutcome{Kind: tt.kind, Summary: "s", Branch: "sample"})
+
+			// Assert
+			if err != nil || len(f.prompts.sent) != 1 || f.prompts.sent[0].origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK {
+				t.Fatalf("HandBack = %v with %+v submitted, want the handback alone", err, f.prompts.sent)
+			}
+		})
+	}
+}
+
+func TestHandBackOfALandingWhoseCompactionFailsIsAnErrorAfterTheHandback(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(f *fixture)
+		message string
+	}{
+		{name: "the key", arrange: func(f *fixture) { f.keyErrOn = "merge-compact-after" },
+			message: "could not mint the idempotency key of a landed merge's compaction; its requester is not compacted"},
+		{name: "the submission", arrange: func(f *fixture) { f.prompts.errOnText = CompactCommand },
+			message: "could not submit the compaction a landed merge asked for; its requester is not compacted"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			tt.arrange(f)
+			out := merge.DetachedOutcome{Kind: merge.DetachedLanded, Summary: "it landed as commit abc", Branch: "sample"}
+
+			// Act
+			err := f.svc.HandBack(context.Background(), "ws-requester", compactingMergeWS, out)
+
+			// Assert: the handback stands, the compaction does not, and the
+			// failure is recorded at ERROR with whose compaction it was.
+			if err == nil || len(f.prompts.sent) != 1 || f.prompts.sent[0].origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK {
+				t.Fatalf("HandBack = %v with %+v submitted, want an error after the handback alone", err, f.prompts.sent)
+			}
+			rec, ok := f.recordWith(dlog.LevelError, tt.message)
+			if !ok || rec.Context["requester"] != "ws-requester" || rec.Context["merge_workspace"] != "ws-merge" || rec.Context["cause"] == nil {
+				t.Fatalf("ERROR record = %+v, %v; want one naming the requester, the merge workspace and the cause", rec, ok)
+			}
+		})
+	}
+}
+
 func TestHandBackFailsLoudlyWithNothingSubmitted(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -310,6 +452,8 @@ func TestHandBackFailsLoudlyWithNothingSubmitted(t *testing.T) {
 		{name: "the brief", arrange: func(f *fixture) { f.briefErr = errors.New("no brief") },
 			outcome: merge.DetachedOutcome{Kind: merge.DetachedLanded}},
 		{name: "the submission", arrange: func(f *fixture) { f.prompts.err = errors.New("refused") },
+			outcome: merge.DetachedOutcome{Kind: merge.DetachedLanded}},
+		{name: "the key", arrange: func(f *fixture) { f.keyErrOn = "merge-handback" },
 			outcome: merge.DetachedOutcome{Kind: merge.DetachedLanded}},
 		{name: "an undeclared outcome", arrange: func(*fixture) {},
 			outcome: merge.DetachedOutcome{Kind: merge.DetachedOutcomeKind(99)}},
@@ -578,16 +722,23 @@ func TestRunSweepsAtOnceAndOnEveryTick(t *testing.T) {
 	}
 }
 
-func TestHandbackKeyIsTheSharedDaemonKeyShape(t *testing.T) {
-	// Act
-	key, err := handbackKey()
+func TestEverySubmissionCarriesAKeyOfTheSharedDaemonShape(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	out := merge.DetachedOutcome{Kind: merge.DetachedLanded, Summary: "it landed as commit abc", Branch: "sample"}
 
-	// Assert
-	if err != nil {
-		t.Fatalf("handbackKey: %v", err)
+	// Act
+	err := f.svc.HandBack(context.Background(), "ws-requester", compactingMergeWS, out)
+
+	// Assert: the handback and the compaction each carry their own key, of
+	// prompthandler.MintKey's shape under their own prefix.
+	if err != nil || len(f.prompts.keys) != 2 {
+		t.Fatalf("HandBack = %v with keys %v, want two", err, f.prompts.keys)
 	}
-	if !regexp.MustCompile(`^merge-handback-[0-9a-f]{32}$`).MatchString(key) {
-		t.Fatalf("key = %q, want prompthandler.MintKey's shape under the merge-handback prefix", key)
+	for i, prefix := range []string{"merge-handback", "merge-compact-after"} {
+		if !regexp.MustCompile(`^` + prefix + `-[0-9a-f]{32}$`).MatchString(f.prompts.keys[i]) {
+			t.Fatalf("key %d = %q, want prompthandler.MintKey's shape under the %s prefix", i, f.prompts.keys[i], prefix)
+		}
 	}
 }
 
