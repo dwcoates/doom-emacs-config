@@ -2675,7 +2675,7 @@ func (g *fakeGit) AheadBehind(context.Context, string, string, string) (int, int
 // everyAttemptLeaves scripts every conflict resolution attempt the bound
 // allows leaving files conflicted.
 func everyAttemptLeaves(files ...string) [][]string {
-	out := make([][]string, maxConflictAttempts)
+	out := make([][]string, MaxConflictAttempts)
 	for i := range out {
 		out[i] = files
 	}
@@ -2685,7 +2685,7 @@ func everyAttemptLeaves(files ...string) [][]string {
 // everyAttemptCloses scripts every conflict resolution turn the bound allows
 // ending as how.
 func everyAttemptCloses(how wsm.TurnClose) []wsm.TurnClose {
-	out := make([]wsm.TurnClose, maxConflictAttempts)
+	out := make([]wsm.TurnClose, MaxConflictAttempts)
 	for i := range out {
 		out[i] = how
 	}

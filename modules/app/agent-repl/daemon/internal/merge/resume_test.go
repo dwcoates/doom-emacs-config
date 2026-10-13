@@ -832,7 +832,7 @@ func atConflict(attempts int) func(*progressDoc) {
 func TestAResumedConflictTheRestartOrphanedIsPromptedAgainWithoutSpendingAnAttempt(t *testing.T) {
 	// Arrange: the bound's last attempt was in flight when the restart cut it.
 	h := newHarness(t)
-	interruptedAt(t, h, atConflict(maxConflictAttempts))
+	interruptedAt(t, h, atConflict(MaxConflictAttempts))
 	orphaned := wsm.CloseOrphaned
 	recordTurn(h, &orphaned)
 	h.git.standing = true
@@ -856,7 +856,7 @@ func TestAResumedConflictKeepsTheAttemptsItSpent(t *testing.T) {
 	// Arrange: the bound's last attempt ended, unresolved, while the daemon
 	// was down.
 	h := newHarness(t)
-	interruptedAt(t, h, atConflict(maxConflictAttempts))
+	interruptedAt(t, h, atConflict(MaxConflictAttempts))
 	completed := wsm.CloseCompleted
 	recordTurn(h, &completed)
 	h.git.standing = true
