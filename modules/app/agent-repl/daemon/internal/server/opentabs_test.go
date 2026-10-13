@@ -162,7 +162,8 @@ func TestOpenTabsAnswersAWorkspaceThatIsNotVisibleHidden(t *testing.T) {
 	}{
 		{name: "a hidden workspace", arrange: func(h *harness) {
 			record := h.DB.workspaces[testWorkspaceID]
-			record.Hidden = true
+			hiddenAt := time.Unix(1_700_000_000, 0)
+			record.Hidden, record.HiddenAt = true, &hiddenAt
 			h.DB.workspaces[testWorkspaceID] = record
 		}},
 		{name: "a workspace in a collapsed section", arrange: func(h *harness) {

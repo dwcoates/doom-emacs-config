@@ -78,20 +78,20 @@ fixture rows first, so nil means the two agree row for row."
   "A table matching the fixture row for row has no mismatches."
   ;; Act / Assert
   (should (null (agent-repl-test--glyph-table-mismatches
-                 "gate_glyphs" '((:permission . "!") (:question . "?"))))))
+                 "gate_glyphs" '((:permission . "!") (:question . "?") (:cold-gate . "x"))))))
 
 (ert-deftest agent-repl-test-colors-glyph-mismatches-a-missing-row ()
   "A fixture row with no glyph in the table is reported."
   ;; Act / Assert
   (should (equal (agent-repl-test--glyph-table-mismatches
-                  "gate_glyphs" '((:permission . "!")))
+                  "gate_glyphs" '((:permission . "!") (:cold-gate . "x")))
                  '("question"))))
 
 (ert-deftest agent-repl-test-colors-glyph-mismatches-a-non-string-glyph ()
   "A table row whose glyph is not a string counts as missing."
   ;; Act / Assert
   (should (equal (agent-repl-test--glyph-table-mismatches
-                  "gate_glyphs" '((:permission . "!") (:question . nil)))
+                  "gate_glyphs" '((:permission . "!") (:question . nil) (:cold-gate . "x")))
                  '("question"))))
 
 (ert-deftest agent-repl-test-colors-glyph-mismatches-an-extra-row ()
@@ -99,7 +99,7 @@ fixture rows first, so nil means the two agree row for row."
   ;; Act / Assert
   (should (equal (agent-repl-test--glyph-table-mismatches
                   "gate_glyphs"
-                  '((:permission . "!") (:question . "?") (:waiting . "~")))
+                  '((:permission . "!") (:question . "?") (:cold-gate . "x") (:waiting . "~")))
                  '("waiting"))))
 
 ;;;; ---- roster_status, row for row --------------------------------------
@@ -202,6 +202,33 @@ A new glyph section checked by a hand-rolled loop instead of
       (when (and (string-suffix-p "_glyphs" (car entry))
                  (not (member (car entry) feed-sections)))
         (should (member (car entry) checked))))))
+
+;;;; ---- glyph_inks and one_shot_glyph_arms --------------------------------
+
+(ert-deftest agent-repl-test-colors-glyph-inks-match-the-fixture ()
+  "The glyph ink table is the fixture's `glyph_inks', row for row."
+  ;; Act / Assert
+  (should (equal (sort (mapcar (lambda (row)
+                                 (cons (agent-repl-test--wire-name (car row)) (cdr row)))
+                               agent-repl-status-glyph-inks)
+                       (lambda (a b) (string< (car a) (car b))))
+                 (sort (copy-sequence (agent-repl-test--fixture "glyph_inks"))
+                       (lambda (a b) (string< (car a) (car b)))))))
+
+(ert-deftest agent-repl-test-colors-every-ink-has-a-color ()
+  "Every ink the fixture names is one this renderer can draw."
+  ;; Act / Assert
+  (dolist (entry (agent-repl-test--fixture "glyph_inks"))
+    (should (stringp (cdr (assoc (cdr entry) agent-repl--ink-by-name))))))
+
+(ert-deftest agent-repl-test-colors-one-shot-glyph-arms-match-the-fixture ()
+  "The one-shot glyph's arms are the fixture's `one_shot_glyph_arms'."
+  ;; Act / Assert
+  (should (equal (sort (mapcar #'agent-repl-test--wire-name
+                               agent-repl-status-one-shot-glyph-arms)
+                       #'string<)
+                 (sort (copy-sequence (agent-repl-test--fixture "one_shot_glyph_arms"))
+                       #'string<))))
 
 ;;;; ---- The five colors -------------------------------------------------
 

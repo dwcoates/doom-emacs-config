@@ -136,11 +136,6 @@ func (o *orchestrator) handBack(ctx context.Context, ws ids.WorkspaceID, out Det
 	if !async {
 		return
 	}
-	// THE REQUESTER'S ROSTER IS TOLD FIRST, and whatever the reads below
-	// answer: the merge has ended either way, and the merge workspace's facts
-	// are published for the merge workspace alone, so this is the only word
-	// of the end the requester's one-shot outcome gets.
-	o.deps.Sidebar.SetDetachedMergeEnded(requester, out.Kind == DetachedLanded)
 	// AN END SOMEBODY ASKED FOR IS NOT A FAILURE: the bubble and the roster
 	// say the merge ended, and neither is the merge workspace revealed nor the
 	// requester's agent prompted to deal with it.

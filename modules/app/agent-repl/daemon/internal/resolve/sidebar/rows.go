@@ -37,8 +37,6 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 				"end": s.restoredEnd, "result": s.result.String(),
 			})
 	}
-	s.seedOneShot(rec, rowLog)
-	s.noteRenderForOneShot(rowLog)
 	armName := statusArm(s, rec, session, r.footer.Status(rec.ID), rowLog)
 	r.noteResult(rec.ID, s, rowLog)
 	// THE MARKER IS DERIVED FROM THE READ FACT, in the same breath as the
@@ -117,7 +115,13 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	}
 	// PRESENCE IS THE FACT, as `frontend.v1.RosterRowOneShot` states it: set
 	// for a workspace created as a one-shot, for its whole life.
-	out.OneShot = oneShot(rec, s)
+	out.OneShot = oneShot(rec)
+	// PRESENCE IS THE FACT, as `frontend.v1.RosterRowOpening` states it: set
+	// while an open of the workspace is in flight, when the status is
+	// `inactive` and the row takes no click.
+	if s.opening {
+		out.Opening = &frontendv1.RosterRowOpening{}
+	}
 	// THE DURABLE SELECTION INSTANT, for ordering only: clients order
 	// most-recently-selected first by it (the landing after a close, the
 	// editor's jump to the most recent workspace), and it survives a restart
@@ -200,7 +204,8 @@ func recedes(rec wsm.Workspace, session *wsm.Session) bool {
 // reintroducing either here is the exact regression the sidebar tests lock.
 //
 // Precedence: MERGED WINS (that the workspace is done is the more interesting
-// fact), else the last turn end, else the creation time. The last arm never
+// fact), else HIDDEN (a hidden row counts from its hide, owner request
+// 2026-10-13), else the last turn end, else the creation time. The last arm never
 // leaves the oneof unset for a registered workspace — every one has a creation
 // time — so a workspace whose first turn is still running falls back to
 // "created" rather than drawing empty.
@@ -211,6 +216,9 @@ func when(rec wsm.Workspace, s *wsState) *frontendv1.RosterRowWhen {
 	case rec.MergedAt != nil:
 		out.Shown = &frontendv1.RosterRowWhen_Merged{
 			Merged: &frontendv1.RosterRowWhenMerged{AtMs: rec.MergedAt.UnixMilli()}}
+	case rec.HiddenAt != nil:
+		out.Shown = &frontendv1.RosterRowWhen_Hidden{
+			Hidden: &frontendv1.RosterRowWhenHidden{AtMs: rec.HiddenAt.UnixMilli()}}
 	case ended != nil:
 		out.Shown = &frontendv1.RosterRowWhen_TurnEnded{
 			TurnEnded: &frontendv1.RosterRowWhenTurnEnded{AtMs: ended.UnixMilli()}}

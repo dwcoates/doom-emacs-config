@@ -395,6 +395,16 @@ function statusParts(
         substatusRequired: false,
       };
     }
+    case "starting":
+      // A BOOTING SESSION declares no substatus oneof (owner ruling,
+      // 2026-10-13: booting is an expected step, never a fault), so the cell
+      // merges the same way.
+      return {
+        substatus: undefined,
+        activity: status.value.activity,
+        substatusless: true,
+        substatusRequired: false,
+      };
     case "permission":
     case "question":
       // A GATE NAMES ITSELF (owner ruling, 2026-10-08): the status word is the

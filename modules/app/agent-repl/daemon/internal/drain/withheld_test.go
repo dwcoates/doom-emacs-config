@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	shimv1 "agentrepl/proto/shim/v1"
 
@@ -16,7 +17,7 @@ import (
 func (h *harness) hidden(t *testing.T) ids.WorkspaceID {
 	t.Helper()
 	ws := h.workspace(t, instant)
-	if err := h.db.SetHidden(context.Background(), ws, true); err != nil {
+	if err := h.db.SetHidden(context.Background(), ws, true, time.Unix(1_700_000_000, 0)); err != nil {
 		t.Fatalf("SetHidden: %v", err)
 	}
 	return ws
@@ -187,7 +188,7 @@ func TestADeferredStandDownOfAWorkspaceShownAgainIsDropped(t *testing.T) {
 	ws := h.hidden(t)
 	h.freeness.SetFree(ws, false)
 	h.c.StandDownWithheld(ws)
-	if err := h.db.SetHidden(context.Background(), ws, false); err != nil {
+	if err := h.db.SetHidden(context.Background(), ws, false, time.Unix(1_700_000_000, 0)); err != nil {
 		t.Fatalf("SetHidden: %v", err)
 	}
 	h.freeness.SetFree(ws, true)
@@ -268,7 +269,7 @@ func TestAWithheldWorkspaceWithNoSessionHasNothingToStandDown(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws := h.bare(t)
-	if err := h.db.SetHidden(context.Background(), ws, true); err != nil {
+	if err := h.db.SetHidden(context.Background(), ws, true, time.Unix(1_700_000_000, 0)); err != nil {
 		t.Fatalf("SetHidden: %v", err)
 	}
 

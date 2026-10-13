@@ -262,22 +262,83 @@ func TestRosterNeverReordersTheRegistrysSlice(t *testing.T) {
 	}
 }
 
-func TestRecentlyMergedOrdersByPlace(t *testing.T) {
-	// Arrange: the earlier merge holds the later place.
+func TestRecentlyMergedOrdersByMergeTimeNewestFirst(t *testing.T) {
+	// Arrange: the earlier merge holds the EARLIER place, so place and merge
+	// time disagree.
 	r, _ := newResolver(t)
-	older := placed(workspace("w-older", "older"), 2)
+	older := placed(workspace("w-older", "older"), 1)
 	older.MergedAt = at(0)
-	newer := placed(workspace("w-newer", "newer"), 1)
+	newer := placed(workspace("w-newer", "newer"), 2)
 	newer.MergedAt = at(time.Hour)
 
 	// Act.
 	r.SetRegistry(registry(older, newer))
 
-	// Assert: registry order, not merge time.
+	// Assert: merge time, newest first (owner request, 2026-10-13).
 	got := rowNames(rosterwalk.MergedRows(latest(t, r)))
 	if !equal(got, []string{"newer", "older"}) {
-		t.Fatalf("merged order = %v, want registry order [newer older]", got)
+		t.Fatalf("merged order = %v, want the latest merge first [newer older]", got)
 	}
+}
+
+func TestSortMergedNewestFirst(t *testing.T) {
+	tests := []struct {
+		name string
+		in   []wsm.Workspace
+		want []string
+	}{
+		{
+			name: "the latest merge leads whatever its place",
+			in: []wsm.Workspace{
+				withMergedAt(placed(workspace("w1", "first"), 1), at(0)),
+				withMergedAt(placed(workspace("w2", "second"), 2), at(2*time.Hour)),
+				withMergedAt(placed(workspace("w3", "third"), 3), at(time.Hour)),
+			},
+			want: []string{"second", "third", "first"},
+		},
+		{
+			name: "a tie keeps roster order",
+			in: []wsm.Workspace{
+				withMergedAt(placed(workspace("w2", "later-place"), 2), at(0)),
+				withMergedAt(placed(workspace("w1", "earlier-place"), 1), at(0)),
+			},
+			want: []string{"earlier-place", "later-place"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := sidebar.SortMergedNewestFirst(tc.in)
+
+			// Assert.
+			var names []string
+			for _, ws := range got {
+				names = append(names, ws.Name)
+			}
+			if !equal(names, tc.want) {
+				t.Fatalf("order = %v, want %v", names, tc.want)
+			}
+		})
+	}
+}
+
+func TestSortMergedNewestFirstRefusesARowWithNoMergeInstant(t *testing.T) {
+	// Arrange.
+	defer func() {
+		// Assert.
+		if recover() == nil {
+			t.Fatal("a merged row with no merge instant was sorted, not refused")
+		}
+	}()
+
+	// Act.
+	sidebar.SortMergedNewestFirst([]wsm.Workspace{workspace("w1", "unmerged")})
+}
+
+// withMergedAt stamps WS merged at AT.
+func withMergedAt(ws wsm.Workspace, at *time.Time) wsm.Workspace {
+	ws.MergedAt = at
+	return ws
 }
 
 func TestRosterOrdersRepositorySectionsByName(t *testing.T) {
@@ -401,8 +462,7 @@ func TestTheTabBarLeavesOutClosedWorkspaces(t *testing.T) {
 func TestTheTabBarWithholdsAHiddenWorkspace(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)
-	hidden := placed(workspace("w-h", "hidden"), 1)
-	hidden.Hidden = true
+	hidden := placed(hiddenWorkspace("w-h", "hidden"), 1)
 
 	// Act.
 	r.SetRegistry(registry(hidden))
@@ -434,7 +494,7 @@ func TestTheTabBarDrawsAMergedWorkspaceEvenWhenHidden(t *testing.T) {
 	r, _ := newResolver(t)
 	merged := placed(workspace("w-m", "merged"), 1)
 	merged.MergedAt = at(0)
-	merged.Hidden = true
+	merged = hiddenAt(merged, 0)
 
 	// Act.
 	r.SetRegistry(registry(merged))
@@ -459,5 +519,56 @@ func TestTheTabBarWithholdsAMergedWorkspaceOfACollapsedRepository(t *testing.T) 
 	// Assert.
 	if got := tabIDsOf(latest(t, r)); !equal(got, []string{"w-m:collapsed"}) {
 		t.Fatalf("tab bar = %v, want the merged tab withheld", got)
+	}
+}
+
+func TestSortHiddenNewestFirst(t *testing.T) {
+	// Arrange: hide order disagrees with place.
+	in := []wsm.Workspace{
+		hiddenAt(placed(workspace("w1", "first"), 1), 0),
+		hiddenAt(placed(workspace("w2", "second"), 2), 2*time.Hour),
+		hiddenAt(placed(workspace("w3", "third"), 3), time.Hour),
+	}
+
+	// Act.
+	got := sidebar.SortHiddenNewestFirst(in)
+
+	// Assert.
+	var names []string
+	for _, ws := range got {
+		names = append(names, ws.Name)
+	}
+	if !equal(names, []string{"second", "third", "first"}) {
+		t.Fatalf("order = %v, want the latest hide first", names)
+	}
+}
+
+func TestSortHiddenNewestFirstRefusesARowWithNoHideInstant(t *testing.T) {
+	// Arrange.
+	defer func() {
+		// Assert.
+		if recover() == nil {
+			t.Fatal("a hidden row with no hide instant was sorted, not refused")
+		}
+	}()
+
+	// Act.
+	sidebar.SortHiddenNewestFirst([]wsm.Workspace{workspace("w1", "unstamped")})
+}
+
+func TestTheHiddenSectionListsTheLatestHideFirst(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+
+	// Act.
+	r.SetRegistry(registry(
+		hiddenAt(placed(workspace("w1", "early"), 1), 0),
+		hiddenAt(placed(workspace("w2", "late"), 2), time.Hour),
+	))
+
+	// Assert.
+	got := rowNames(latest(t, r).GetHidden().GetRows().GetRows())
+	if !equal(got, []string{"late", "early"}) {
+		t.Fatalf("hidden rows = %v, want the latest hide first", got)
 	}
 }

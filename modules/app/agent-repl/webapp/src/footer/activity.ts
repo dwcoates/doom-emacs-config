@@ -80,7 +80,9 @@ import type {
   FooterStatusClosingActivity,
   FooterStatusClosingSalient,
   FooterStatusAgentReplFaultActivity,
+  FooterStatusStartingActivity,
   FooterStatusAgentReplFaultSalient,
+  FooterStatusStartingSalient,
   FooterStatusIdleActivity,
   FooterStatusIdleSalient,
   FooterStatusInterruptedActivity,
@@ -148,6 +150,7 @@ export type FooterActivity =
   | FooterStatusBackgroundActivity
   | FooterStatusVendorFaultActivity
   | FooterStatusAgentReplFaultActivity
+  | FooterStatusStartingActivity
   | FooterStatusNetworkFaultActivity
   | FooterStatusClosingActivity
   | FooterStatusLoadingActivity;
@@ -164,6 +167,7 @@ export type FooterSalient =
   | FooterStatusBackgroundSalient
   | FooterStatusVendorFaultSalient
   | FooterStatusAgentReplFaultSalient
+  | FooterStatusStartingSalient
   | FooterStatusNetworkFaultSalient
   | FooterStatusClosingSalient
   | FooterStatusLoadingSalient;

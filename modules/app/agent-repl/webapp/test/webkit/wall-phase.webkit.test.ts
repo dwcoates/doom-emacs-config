@@ -21,10 +21,10 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 /** A wall-clock instant mid-cycle for every rail loop. */
 const NOW = 1_700_000_000_500;
 
-/** The rail's animated marks: a breathing dot, a spinning merge glyph, a reviving name. */
-const RAIL = `<nav id="ws-sidebar"><div class="row"><span class="st st-thinking"></span><span class="name">a</span></div>
-<div class="row"><span class="st st-merging" data-glyph="recycle">⟳</span><span class="name">b</span></div>
-<div class="row"><span class="st st-ready"></span><span class="name reviving">c</span></div></nav>`;
+/** The rail's animated marks: a breathing dot, a breathing merge glyph, a reviving name. */
+const RAIL = `<nav id="ws-sidebar"><div class="row"><span class="st tone-red breathes" data-glyph="dot"></span><span class="name">a</span></div>
+<div class="row"><span class="st st-glyph tone-purple breathes" data-glyph="merge"></span><span class="name">b</span></div>
+<div class="row"><span class="st tone-green" data-glyph="dot"></span><span class="name reviving">c</span></div></nav>`;
 
 /** What the seek left on one animated element. */
 interface Sought {
@@ -69,12 +69,23 @@ describe("the rail's loops on the wall clock in WebKit", () => {
     await browser.close();
   });
 
-  it("finds the breathing dot, the merge spin and the reviving shimmer", async () => {
+  it("finds the breathing dot, the breathing merge glyph and the reviving shimmer", async () => {
     // Arrange / Act
     const sought = await seekRail(page);
 
     // Assert
-    expect(sought.map((s) => s.name).sort()).toEqual(["ws-pulse", "ws-revive-shimmer", "ws-spin"]);
+    expect(sought.map((s) => s.name).sort()).toEqual(["ws-pulse", "ws-pulse", "ws-revive-shimmer"]);
+  });
+
+  // ONE ANIMATION (owner ruling, 2026-10-13): the dot and the merge glyph
+  // breathe with the same parameters.
+  it("breathes the dot and the merge glyph alike", async () => {
+    // Arrange / Act
+    const breaths = (await seekRail(page)).filter((s) => s.name === "ws-pulse");
+
+    // Assert
+    expect(breaths.map((s) => s.duration)).toEqual([breaths[0]?.duration, breaths[0]?.duration]);
+    expect(breaths[0]?.duration).toBeGreaterThan(0);
   });
 
   it("puts each one at the wall clock's phase in its own period", async () => {

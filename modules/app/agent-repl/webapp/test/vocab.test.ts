@@ -29,6 +29,8 @@ import {
   failureSideColor,
   footerStatusColor,
   mergeGlyph,
+  glyphInk,
+  oneShotGlyphArm,
   gateGlyph,
   paintClass,
   protoArmName,
@@ -110,7 +112,12 @@ describe("footer_status is the FooterStatus.status arm set, row for row", () => 
 
 describe("rosterStatusColor", () => {
   const cases: ReadonlyArray<[string, string]> = [
-    ["init", "blue"],
+    // A BOOTING SESSION IS GREY (owner ruling, 2026-10-13): never a fault.
+    ["init", "none"],
+    ["inactive", "none"],
+    // A TERMINAL MERGE IS GREEN either way (owner ruling, 2026-10-13).
+    ["mergeFailed", "green"],
+    ["coldGate", "green"],
     // A VENDOR FAULT IS TURQUOISE (owner ruling, 2026-10-02): the workspace
     // stays usable and its prompts are held until the vendor serves.
     ["vendorBlocked", "turquoise"],
@@ -217,13 +224,38 @@ describe("gateGlyph", () => {
   });
 });
 
+describe("glyphInk", () => {
+  it.each([
+    ["mergeFailed", "red"],
+    ["compacting", "orange"],
+  ])("inks %s's mark %s", (arm, ink) => {
+    expect(glyphInk(arm)).toBe(ink);
+  });
+
+  it("names no ink for an arm whose mark takes its own color", () => {
+    expect(glyphInk("thinking")).toBeUndefined();
+  });
+});
+
+describe("oneShotGlyphArm", () => {
+  it.each(["submitting", "thinking", "clearing"])("draws the one-shot glyph on %s", (arm) => {
+    expect(oneShotGlyphArm(arm)).toBe(true);
+  });
+
+  it.each(["compacting", "permission", "idleAsync", "merging", "mergeQueued", "done"])(
+    "draws the arm's own mark on %s",
+    (arm) => {
+      expect(oneShotGlyphArm(arm)).toBe(false);
+    },
+  );
+});
+
 describe("mergeGlyph", () => {
   const cases: ReadonlyArray<[string, string]> = [
-    ["mergeQueued", "queue"],
-    ["mergeWaiting", "await"],
-    ["merging", "recycle"],
-    ["mergeFailed", "failed"],
-    ["merged", "check"],
+    ["mergeQueued", "merge"],
+    ["merging", "merge"],
+    ["mergeFailed", "merge"],
+    ["merged", "merge"],
   ];
   for (const [arm, glyph] of cases) {
     it(`reports ${arm} with the ${glyph} glyph`, () => {

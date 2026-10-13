@@ -10,21 +10,6 @@ import (
 	"agent-repld/internal/shimclient"
 )
 
-// The FooterStatus.status arms this resolver emits, in the precedence order
-// documented below. render-colors.json's footer_status table is asserted
-// against them at construction: an arm landing without a color would draw
-// unpainted, and a table row no arm claims is a state the vocabulary paints and
-// the resolver can never reach.
-//
-// `turn_failed` is NO LONGER EMITTED (owner ruling, 2026-10-06: a failed turn
-// is the fault its cause names). It stays in this list, and painted in the
-// table, because the arm stays in the contract for an older frame to decode.
-var statusArms = []string{
-	"agent_repl_fault", "network_fault", "closing", "interrupted", "loading", "vendor_fault", "merging",
-	"merge_failed", "merged", "degraded", "waiting", "permission", "question",
-	"working", "background", "turn_failed", "idle",
-}
-
 // status resolves the whole status family — the coarse status, its step and
 // its activity line — as ONE tree, so an illegal pairing is unrepresentable
 // rather than forbidden by comment.
@@ -77,6 +62,8 @@ func (r *resolver) rung(claim ladder.Claim, s *wsState, log dlog.Logger) *fronte
 		return r.merging(s, log)
 	case ladder.AgentReplFault:
 		return r.agentReplFault(s, log)
+	case ladder.Starting:
+		return r.starting(s, log)
 	case ladder.NetworkFault:
 		return r.networkFault(s, log)
 	case ladder.Closing:
@@ -146,22 +133,9 @@ func (r *resolver) agentReplFault(s *wsState, log dlog.Logger) *frontendv1.Foote
 		// session cannot be reached is evidence in its own right — a bring-up
 		// that never produced a link edge at all is exactly the case row N1 1
 		// of the footer topology audit was about.
-		if arm := r.agentReplByFault(s, log); arm != nil {
-			return arm
-		}
-		if !ladder.AwaitingBringUp(s.linkSeen, s.turn != nil, s.sessionStarted, s.bringingUp) {
-			return nil
-		}
-		// A TURN ACCEPTED, OR A SESSION ANNOUNCED, ON A ROUTE NEVER SEEN
-		// awaits the bring-up, and the roster draws that window `init`
-		// (resolve/ladder).
-		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "an accepted turn awaits the bring-up"})
-		return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_AgentReplFault{
-			AgentReplFault: &frontendv1.FooterStatusAgentReplFault{
-				Substatus: &frontendv1.FooterStatusAgentReplFault_Starting{
-					Starting: &frontendv1.FooterSubStatusAgentReplFaultStarting{}},
-				Activity: r.agentReplFaultActivity(s, log),
-			}}}
+		// A route never seen that only awaits its bring-up is the starting
+		// rung's, never a fault.
+		return r.agentReplByFault(s, log)
 	}
 	// A VENDOR THAT DID NOT START IS THE VENDOR'S FAULT, NOT THE LINK'S: a
 	// spawned shim stopped after its vendor failed reads as a dead link that
@@ -175,9 +149,12 @@ func (r *resolver) agentReplFault(s *wsState, log dlog.Logger) *frontendv1.Foote
 	arm := &frontendv1.FooterStatusAgentReplFault{}
 	switch {
 	case s.link == shimclient.LinkDialing:
+		// THE SHIM IS BEING DIALED: the session is booting, which the
+		// starting rung draws. The link state is the live truth about the
+		// link, so a standing fault does not outrank it here; the starting
+		// cell carries the fault's line instead.
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.link == shimclient.LinkDialing"})
-		arm.Substatus = &frontendv1.FooterStatusAgentReplFault_Starting{
-			Starting: &frontendv1.FooterSubStatusAgentReplFaultStarting{}}
+		return nil
 	case s.link == shimclient.LinkRedialing:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.link == shimclient.LinkRedialing"})
 		arm.Substatus = &frontendv1.FooterStatusAgentReplFault_Severed{
@@ -221,6 +198,23 @@ func (r *resolver) agentReplFault(s *wsState, log dlog.Logger) *frontendv1.Foote
 	arm.Activity = r.agentReplFaultActivity(s, log)
 	return &frontendv1.FooterStatus{
 		Status: &frontendv1.FooterStatus_AgentReplFault{AgentReplFault: arm}}
+}
+
+// starting resolves the starting rung: the session is BOOTING, an expected step
+// and never a fault (owner ruling, 2026-10-13). It stands while the shim is
+// being dialed, or while a turn accepted, a session announced or a bring-up
+// under way awaits a route never seen (ladder.AwaitingBringUp); the
+// agent_repl_fault rung above has already drawn any fault that stands.
+func (r *resolver) starting(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
+	booting := s.linkSeen && s.link == shimclient.LinkDialing ||
+		!s.linkSeen && ladder.AwaitingBringUp(s.linkSeen, s.turn != nil, s.sessionStarted, s.bringingUp)
+	if !booting {
+		return nil
+	}
+	log.Debug("daemon.footer.status_decision", "selected a footer status branch",
+		dlog.Context{"function": "status", "branch": "the session is booting", "link_seen": s.linkSeen})
+	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Starting{
+		Starting: &frontendv1.FooterStatusStarting{Activity: r.startingActivity(s)}}}
 }
 
 // agentReplByFault resolves the agent-repl step a STANDING FAULT claims, where
@@ -810,6 +804,8 @@ func statusName(status *frontendv1.FooterStatus) string {
 		return "turn_failed"
 	case *frontendv1.FooterStatus_AgentReplFault:
 		return "agent_repl_fault"
+	case *frontendv1.FooterStatus_Starting:
+		return "starting"
 	case *frontendv1.FooterStatus_Closing:
 		return "closing"
 	case *frontendv1.FooterStatus_Loading:
