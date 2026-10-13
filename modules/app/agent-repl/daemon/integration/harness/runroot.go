@@ -4,13 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"syscall"
 
 	"agent-repld/internal/tempdirs/tempdirstest"
+	"agentrepl/testrun/reap"
 )
 
 // A RUN ROOT IS ONE `go test` PROCESS'S WHOLE FOOTPRINT ON DISK, AND ITS
@@ -152,7 +150,7 @@ func (s runRootSpace) reclaimDeadRunsLocked() error {
 		if !dead {
 			continue
 		}
-		killed, err := killProcessesUnder(root)
+		killed, err := reap.Under(root)
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -187,33 +185,4 @@ func runIsDead(root string) (bool, error) {
 	default:
 		return false, fmt.Errorf("probe the owner lock of %s: %w", root, err)
 	}
-}
-
-// killProcessesUnder SIGKILLs every process whose command line names a path
-// under root: the daemons and fakes run out of its bin directory, and every
-// one of them is handed its state root under it on argv.
-func killProcessesUnder(root string) (int, error) {
-	out, err := exec.Command("ps", "-axo", "pid=,args=").Output()
-	if err != nil {
-		return 0, fmt.Errorf("list processes to reclaim %s: %w", root, err)
-	}
-	prefix := root + string(filepath.Separator)
-	killed := 0
-	var errs []error
-	for _, line := range strings.Split(string(out), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 2 || !strings.Contains(line, prefix) {
-			continue
-		}
-		pid, err := strconv.Atoi(fields[0])
-		if err != nil || pid == os.Getpid() {
-			continue
-		}
-		if err := syscall.Kill(pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
-			errs = append(errs, fmt.Errorf("kill leftover pid %d under %s: %w", pid, root, err))
-			continue
-		}
-		killed++
-	}
-	return killed, errors.Join(errs...)
 }
