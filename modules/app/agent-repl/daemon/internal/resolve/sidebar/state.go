@@ -188,8 +188,8 @@ const (
 	// build does not know.
 	resultNone resultState = iota
 	// resultUnread: the last turn COMPLETED, was INTERRUPTED or FAILED and
-	// the user has not seen it. An unread result holds the row on its turn-end arm,
-	// outranking `idle_async`.
+	// the user has not seen it. An unread result holds the row on its turn-end
+	// arm, except while detached work runs, which draws `idle_async` over it.
 	resultUnread
 	// resultRead: the user has seen the turn-end row since the last turn
 	// ended. A turn-end row whose result is read is drawn PARTIAL.
@@ -321,6 +321,15 @@ func readsResult(arm string) bool {
 	return isTurnEndArm(arm) || arm == "vendor_blocked" || arm == "turn_died"
 }
 
+// viewReadsResult reports whether a viewed report on arm READS the last
+// turn's result: every arm readsResult names, and `idle_async` while the
+// result is unread, because live detached work draws `idle_async` in place of
+// that unread turn end (idleArm). The user viewing that row is viewing the
+// finished turn, so the row comes back PARTIAL when the work ends.
+func (s *wsState) viewReadsResult(arm string) bool {
+	return readsResult(arm) || (arm == "idle_async" && s.resultUnreadNow())
+}
+
 // turnEndArm names the turn-end arm the last close resolves to, through
 // ladder.ResolveTurnEnd — the one table the desktop banner reads too, so the
 // row's colour and the banner cannot disagree (an expected stop reads `done`
@@ -370,7 +379,7 @@ func (s *wsState) viewedOn(arm string) bool {
 }
 
 // resultUnreadNow reports whether the last turn's result is unread, which
-// holds the row on its turn-end arm over live detached work.
+// holds the row on its turn-end arm once no detached work runs.
 func (s *wsState) resultUnreadNow() bool {
 	return s.result == resultUnread
 }

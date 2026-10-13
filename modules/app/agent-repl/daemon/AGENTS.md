@@ -2092,12 +2092,13 @@ The fact, `wsState.result`, has three writers and no others:
 - `SetTurnEnded` sets it `resultUnread` on a completed or killed close, and
   `resultNone` on any other close.
 - `SetViewed` (the editor's `MarkWorkspaceViewed`) sets it `resultRead`, but
-  only when the arm LAST PUBLISHED for the row is a turn end; otherwise it is
-  refused and recorded (`daemon.sidebar.row_viewed_refused`).
+  only when the arm LAST PUBLISHED for the row is a turn end, or `idle_async`
+  over an unread result (`wsState.viewReadsResult`); otherwise it is refused
+  and recorded (`daemon.sidebar.row_viewed_refused`).
 - `startTurn` (a new prompt) resets it to `resultNone`.
 
-An unread result outranks `idle_async` in `statusArm` (see the precedence in
-status.go). **Deriving the marker rather than clearing it on an arm change is
+Live detached work outranks an unread result in `idleArm` (status.go): a turn
+that ends with detached work live draws `idle_async` at once. **Deriving the marker rather than clearing it on an arm change is
 the point**: the read fact outlives the arm changes that are not a new result
 (detached work starting or ending, a link blip, a merge), so a read turn end
 returning from `idle_async` is PARTIAL on the very push that changes its arm,
