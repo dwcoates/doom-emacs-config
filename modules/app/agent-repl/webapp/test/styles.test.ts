@@ -4027,7 +4027,7 @@ describe("the rail's mark column", () => {
 
 /**
  * THE MARKS' ONE SIZE AND ONE CYCLE (owner ruling, 2026-10-13): every rail
- * mark draws at the dot's size, a breath shrinks a mark half as far as it once
+ * mark draws at the dot's size, a breath shrinks a mark 30% less far than it once
  * did, and one breath takes exactly as long as one turn of a spinning glyph.
  */
 describe("the rail's marks", () => {
@@ -4061,12 +4061,20 @@ describe("the rail's marks", () => {
     expect(defs).toHaveLength(1);
   });
 
-  it("shrinks a breathing mark to 86%, half the extent it once reached", () => {
+  it("shrinks a breathing mark to 90.2%, 30% less than the 14% it once shrank", () => {
     // Arrange / Act
     const keyframes = /@keyframes ws-pulse \{([^}]*\}[^}]*\})/.exec(stylesheet)?.[1] ?? "";
 
     // Assert
-    expect(keyframes).toMatch(/50%\s*\{[^}]*transform:\s*scale\(0\.86\)/);
+    expect(keyframes).toMatch(/50%\s*\{[^}]*transform:\s*scale\(0\.902\)/);
+  });
+
+  it("breathes once every 2s, 30% slower than the 1.4s it once took", () => {
+    // Arrange / Act
+    const cycle = /--ws-mark-cycle\s*:\s*([^;]+);/.exec(stylesheet)?.[1]?.trim();
+
+    // Assert
+    expect(cycle).toBe("2s");
   });
 
   it("draws a glyph's character at the dot's size", () => {
