@@ -120,12 +120,6 @@ type wsState struct {
 	// turn-end arm (SetViewed), and reset to none by a new turn (startTurn) —
 	// a new prompt is the user moving on.
 	result resultState
-	// readAt is when the result was READ: stamped by the read itself
-	// (readResult), seeded from the durable record (restoreResult), and nil
-	// whenever the result is not read. Only readResult, setResult and the one-time
-	// seed (restoreResult) write
-	// result, so the two can never disagree.
-	readAt *time.Time
 	// resultSettled reports that the result has been decided by this
 	// resolver: by a live turn event (a turn starting, ending, or being
 	// viewed), or by seeding it ONCE from the durable record (restoreResult).
@@ -258,7 +252,7 @@ func (s *wsState) startTurn(turn *footer.TurnStarted) {
 	s.permissions = map[string]struct{}{}
 	// A new prompt is the user moving on: whatever the last turn left, read
 	// or not, is no longer the result the row reports.
-	s.setResult(resultNone)
+	s.result = resultNone
 	s.settleResult()
 }
 
@@ -286,38 +280,11 @@ func (s *wsState) restoreResult(rec wsm.Workspace) bool {
 	s.persisted = &restored
 	s.turnEverRan = true
 	s.restoredEnd = string(restored.End)
-	s.setResult(resultUnread)
+	s.result = resultUnread
 	if restored.Read {
 		s.result = resultRead
-		s.readAt = restored.ReadAt
 	}
 	return true
-}
-
-// readResult records that the last turn's result was read AT that instant.
-func (s *wsState) readResult(at time.Time) {
-	s.result = resultRead
-	s.readAt = &at
-}
-
-// setResult records a result that is NOT read (none or unread), which has no
-// read instant. A read result goes through readResult, which states when;
-// asking this for one is a caller defect and panics.
-func (s *wsState) setResult(state resultState) {
-	if state == resultRead {
-		panic("sidebar: a read result is recorded through readResult, which states when it was read")
-	}
-	s.result = state
-	s.readAt = nil
-}
-
-// readAtNow is when the standing result was read, nil when it is not read or
-// was read before its instant was kept.
-func (s *wsState) readAtNow() *time.Time {
-	if s.result != resultRead {
-		return nil
-	}
-	return s.readAt
 }
 
 // resultSnapshot is the durable spelling of the result standing now, nil when
@@ -326,7 +293,7 @@ func (s *wsState) resultSnapshot() *wsm.TurnResult {
 	if s.result == resultNone {
 		return nil
 	}
-	return &wsm.TurnResult{End: wsm.TurnResultEnd(s.turnEndArm()), Read: s.result == resultRead, ReadAt: s.readAtNow()}
+	return &wsm.TurnResult{End: wsm.TurnResultEnd(s.turnEndArm()), Read: s.result == resultRead}
 }
 
 // sameResult reports whether two durable results are the same.
@@ -334,7 +301,7 @@ func sameResult(a, b *wsm.TurnResult) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
-	return a.Same(*b)
+	return *a == *b
 }
 
 // The three TURN-END arms: how the last turn ended, once nothing more urgent

@@ -36,7 +36,7 @@ import {
 } from "./harness.js";
 import { createSidebarView } from "../../src/sidebar/view.js";
 import stylesheet from "../../src/styles.css?raw";
-import { rulesOf } from "../stylesheet.js";
+import { cascadedValue, inRail, rulesOf } from "../stylesheet.js";
 
 const SELECT_OK = create(SelectWorkspaceResponseSchema, {
   result: { case: "success", value: {} },
@@ -285,18 +285,6 @@ describe("the when-column", () => {
       "R",
     );
     expect(drawn.querySelector(".when")?.textContent).toBe("1h");
-  });
-
-  it("draws a viewed row's last view as a relative age", () => {
-    const drawn = drawRosterRow(
-      row({ id: "ws-1", when: { case: "viewed", value: { atMs: BigInt(NOW - 720_000) } } }),
-      sidebarContext(),
-      "R",
-    );
-    expect([drawn.querySelector(".when")?.getAttribute("data-when"), drawn.querySelector(".when")?.textContent]).toEqual([
-      "viewed",
-      "12m",
-    ]);
   });
 
   it("draws a settled merge as a bare relative age", () => {
@@ -1258,15 +1246,15 @@ describe("the row's display mode", () => {
     expect(drawn.getAttribute("data-viewed")).toBe("true");
   });
 
-  it("leaves the status dot's tone untouched in partial mode", () => {
-    // Arrange: the mode says what the user has SEEN, never what the workspace
-    // is doing — the dot is what says that.
+  it("keeps the status dot's tone class in partial mode", () => {
+    // Arrange: the class still says what the workspace is doing; only the
+    // paint recedes (the stylesheet keys it off data-viewed).
     const sc = sidebarContext();
 
     // Act.
-    const full = drawRosterRow(row({ id: "ws-1", status: { case: "thinking", value: {} } }), sc, "R");
+    const full = drawRosterRow(row({ id: "ws-1", status: { case: "done", value: {} } }), sc, "R");
     const partial = drawRosterRow(
-      row({ id: "ws-2", status: { case: "thinking", value: {} }, viewed: true }),
+      row({ id: "ws-2", status: { case: "done", value: {} }, viewed: true }),
       sc,
       "R",
     );
@@ -1275,6 +1263,48 @@ describe("the row's display mode", () => {
     const dot = (el: HTMLElement): string =>
       (el.querySelector(":scope > .row > .st") as HTMLElement).className;
     expect(dot(partial)).toBe(dot(full));
+  });
+
+  describe("the status dot's paint", () => {
+    const paintOf = (drawn: HTMLElement, selector: string): string =>
+      inRail(drawn, () => cascadedValue(drawn.querySelector(selector) as HTMLElement, "color"));
+
+    it.each([
+      { name: "a viewed done row's dot is the name's grey", status: "done", viewed: true, want: "var(--muted)" },
+      { name: "a viewed interrupted row's dot is the name's grey", status: "interrupted", viewed: true, want: "var(--muted)" },
+      { name: "an unviewed done row's dot stays green", status: "done", viewed: false, want: "var(--ok)" },
+    ] as const)("$name", ({ status, viewed, want }) => {
+      // Arrange, Act.
+      const drawn = drawRosterRow(row({ id: "ws-1", status: { case: status, value: {} }, viewed }), sidebarContext(), "R");
+
+      // Assert.
+      expect(paintOf(drawn, ":scope > .row > .st")).toBe(want);
+    });
+
+    it("paints a viewed row's dot in the same colour as its name", () => {
+      // Arrange, Act.
+      const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "done", value: {} }, viewed: true }), sidebarContext(), "R");
+
+      // Assert.
+      expect(paintOf(drawn, ":scope > .row > .st")).toBe(paintOf(drawn, ":scope > .row > .name"));
+    });
+
+    it("leaves an unviewed child's dot green under a viewed parent", () => {
+      // Arrange, Act.
+      const drawn = drawRosterRow(
+        row({
+          id: "parent",
+          status: { case: "done", value: {} },
+          viewed: true,
+          children: [row({ id: "child", status: { case: "done", value: {} } })],
+        }),
+        sidebarContext(),
+        "R",
+      );
+
+      // Assert.
+      expect(paintOf(drawn, ".kids .st")).toBe("var(--ok)");
+    });
   });
 
   it("draws PARTIAL on the push that changes the status when the marker is set", () => {

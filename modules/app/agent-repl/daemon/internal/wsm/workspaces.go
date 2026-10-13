@@ -44,7 +44,7 @@ func normalizeDir(dir string) (string, error) {
 // the row, so it cannot drift from the closes it summarizes: CloseTurn's one
 // write of closed_at is the only edge, and turns_by_workspace keeps the MAX an
 // index range.
-const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at, result_end, result_read, result_read_at, hidden, merge_of, merge_request_id, merge_fork_head, landed_head, landed_at, commit_count, place, merge_revealed, ` +
+const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at, result_end, result_read, hidden, merge_of, merge_request_id, merge_fork_head, landed_head, landed_at, commit_count, place, merge_revealed, ` +
 	`EXISTS (SELECT 1 FROM creation_jobs WHERE creation_jobs.workspace_id = workspaces.id AND creation_jobs.one_shot = 1), ` +
 	`EXISTS (SELECT 1 FROM merge_queue WHERE merge_queue.workspace_id = workspaces.id ` +
 	`OR merge_queue.workspace_id IN (SELECT merge_ws.id FROM workspaces AS merge_ws WHERE merge_ws.merge_of = workspaces.id)), ` +
@@ -65,7 +65,6 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		created  int64
 		end      sql.NullString
 		read     bool
-		readAt   sql.NullInt64
 		mergeOf  sql.NullString
 		request  sql.NullString
 		forkHead sql.NullString
@@ -74,7 +73,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		commits  sql.NullInt64
 		ended    sql.NullInt64
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &readAt, &ws.Hidden, &mergeOf, &request, &forkHead, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &ws.OneShot, &ws.MergePending, &ended); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &mergeOf, &request, &forkHead, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &ws.OneShot, &ws.MergePending, &ended); err != nil {
 		return Workspace{}, err
 	}
 	if mergeOf.Valid != request.Valid {
@@ -95,7 +94,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		if !result.valid() {
 			return Workspace{}, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "result_end", Err: fmt.Errorf("unknown turn-end arm %q", end.String)}
 		}
-		ws.Result = &TurnResult{End: result, Read: read, ReadAt: optTime(readAt)}
+		ws.Result = &TurnResult{End: result, Read: read}
 	}
 	if spawned.Valid {
 		// A NON-POSITIVE RECORDED PID IS A CORRUPT ROW, never a silently
@@ -593,9 +592,8 @@ func (s *store) SetResult(ctx context.Context, id WorkspaceID, result *TurnResul
 	const op = "daemon.wsm.set_result"
 	fields := dlog.Context{"workspace": string(id)}
 	var (
-		end    any
-		read   bool
-		readAt any
+		end  any
+		read bool
 	)
 	if result != nil {
 		if !result.End.valid() {
@@ -603,16 +601,12 @@ func (s *store) SetResult(ctx context.Context, id WorkspaceID, result *TurnResul
 			s.log.Error(op, "refused an undeclared turn-end arm", withError(fields, err))
 			return err
 		}
-		end, read, readAt = string(result.End), result.Read, nullNanos(result.ReadAt)
+		end, read = string(result.End), result.Read
 		fields["end"], fields["read"] = string(result.End), result.Read
-		if result.ReadAt != nil {
-			fields["read_at"] = result.ReadAt.UTC().Format(time.RFC3339Nano)
-		}
 	}
 	return s.setWorkspaceColumns(ctx, op, id, fields,
 		workspaceColumn{name: "result_end", value: end},
-		workspaceColumn{name: "result_read", value: read},
-		workspaceColumn{name: "result_read_at", value: readAt})
+		workspaceColumn{name: "result_read", value: read})
 }
 
 // SetMergedAt records that the workspace's merge landed, and, when COMMITS is

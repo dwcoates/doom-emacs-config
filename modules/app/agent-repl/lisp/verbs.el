@@ -514,21 +514,19 @@ can never look for a row in fewer sections than the bar draws tabs from."
   (plist-get (plist-get (plist-get section :header) :label) :text))
 
 (defun agent-repl-verbs--section-of-ws (ws &optional roster)
-  "Return the repository section of WS's repository, or nil.
+  "Return the repository section WS's row sits in, or nil.
 The default repository for a create started from inside a workspace: the
-obvious answer is the repo the user is already working in.  The repository
-is the one WS's row states (`agent-repl-roster-repository-of'), so a
-workspace whose row sits in the viewed band answers exactly as one in its
-repository's section does."
-  (let* ((ref (agent-repl-host-ref ws))
-         (repository (and ref (agent-repl-roster-repository-of
-                               (plist-get ref :id)
-                               (agent-repl-verbs--roster-or-view roster)))))
-    (when repository
-      (cl-find-if (lambda (section)
-                    (equal (plist-get (agent-repl-verbs--section-ref section) :id)
-                           (plist-get repository :id)))
-                  (agent-repl-verbs--repo-sections roster)))))
+obvious answer is the repo the user is already working in."
+  (let ((ref (agent-repl-host-ref ws)))
+    (when ref
+      (cl-find-if
+       (lambda (section)
+         (cl-find-if (lambda (row)
+                       (equal (plist-get (agent-repl-verbs--row-ref row) :id)
+                              (plist-get ref :id)))
+                     (agent-repl-verbs--flatten-rows
+                      (plist-get (plist-get section :rows) :rows))))
+       (agent-repl-verbs--repo-sections roster)))))
 
 ;;;; ---- The workspace verbs ----------------------------------------------
 

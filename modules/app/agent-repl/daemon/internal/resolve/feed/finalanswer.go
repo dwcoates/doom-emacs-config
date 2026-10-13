@@ -153,8 +153,12 @@ func (r *resolver) raiseAnswerFault(s *wsState, turn, unit, why, message string)
 			dlog.Context{"turn": turn, "unit": unit, "why": why, "plane": s.plane.String()})
 		return
 	}
+	// THE PLANE AND THE ANSWER'S DRAWN ROW ARE THE DIAGNOSIS: a terminal
+	// replayed from history ahead of the response it names, and a response
+	// drawn under another id, read the same from `why` alone.
+	_, drawn := s.answerRows[unit]
 	log.Error("daemon.feed.final_answer_unresolved", message,
-		dlog.Context{"turn": turn, "unit": unit, "why": why})
+		dlog.Context{"turn": turn, "unit": unit, "why": why, "plane": s.plane.String(), "answer_row_known": drawn})
 	if s.answerFault != nil && s.answerFault.why == why && s.answerFault.unit == unit {
 		log.Debug("daemon.feed.final_answer_fault_already_standing",
 			"the same final-answer fault already stands; the record and its age are left alone",

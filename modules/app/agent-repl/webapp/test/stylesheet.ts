@@ -40,6 +40,26 @@ export function cascadedValue(el: Element, property: string): string {
   return window.getComputedStyle(el).getPropertyValue(property).trim();
 }
 
+/**
+ * Run CHECK against DRAWN mounted in the sidebar rail (`#ws-sidebar`) with the
+ * real stylesheet installed, and take both down afterwards, even when CHECK
+ * throws. Every sidebar paint assertion goes through this, so a test cannot
+ * leave a rail or a stylesheet behind for the next one.
+ */
+export function inRail<T>(drawn: HTMLElement, check: (rail: HTMLElement) => T): T {
+  const teardown = installStylesheet();
+  const rail = document.createElement("div");
+  rail.id = "ws-sidebar";
+  rail.appendChild(drawn);
+  document.body.appendChild(rail);
+  try {
+    return check(rail);
+  } finally {
+    rail.remove();
+    teardown();
+  }
+}
+
 /** One `selector-list { declarations }` block of a stylesheet. */
 export interface CssRule {
   selectors: string[];

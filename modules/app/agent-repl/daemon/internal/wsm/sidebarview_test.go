@@ -144,21 +144,6 @@ func TestSidebarViewWritesAreReadBack(t *testing.T) {
 			want: SidebarView{Grouping: GroupingRepository},
 		},
 		{
-			name:  "folding the viewed section keeps the other folds and the grouping",
-			write: func(s *store) error { return s.SetViewedSectionFolded(context.Background(), true) },
-			want:  SidebarView{ViewedFolded: true, Grouping: GroupingRepository},
-		},
-		{
-			name: "unfolding the viewed section again replaces its fold",
-			write: func(s *store) error {
-				if err := s.SetViewedSectionFolded(context.Background(), true); err != nil {
-					return err
-				}
-				return s.SetViewedSectionFolded(context.Background(), false)
-			},
-			want: SidebarView{Grouping: GroupingRepository},
-		},
-		{
 			name: "unfolding the band again replaces the fold",
 			write: func(s *store) error {
 				if err := s.SetMergedSectionFolded(context.Background(), true); err != nil {
