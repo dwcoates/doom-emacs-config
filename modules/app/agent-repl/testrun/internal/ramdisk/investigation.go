@@ -233,8 +233,12 @@ func investigationPrompt(t *Trouble, runLog string) string {
 	} else {
 		fmt.Fprintf(&b, "- The run's log: not named (%s was unset); the runner's ERROR line says the same.\n", EnvRunLog)
 	}
+	if !t.At.IsZero() {
+		fmt.Fprintf(&b, "- The check began at %s.\n", stamp(t.At))
+	}
 	writeAnswer(&b, "hdiutil info", t.Info)
 	writeAnswer(&b, "diskutil list", t.List)
+	writeBlock(&b, "The host when the disk manager did not answer:", t.Host)
 	b.WriteString("\n## What the owner wants\n\n")
 	b.WriteString("- Find why the runner's RAM disks leak, why the disk manager wedged and why the registry lock's holder is stuck, with every link evidenced in logs.\n")
 	b.WriteString("- Fix the root cause in code, with tests.\n")
@@ -244,10 +248,16 @@ func investigationPrompt(t *Trouble, runLog string) string {
 }
 
 func writeAnswer(b *strings.Builder, name, answer string) {
-	if strings.TrimSpace(answer) == "" {
+	writeBlock(b, fmt.Sprintf("`%s` answered:", name), answer)
+}
+
+// writeBlock writes body under heading as a fenced block; an empty body
+// writes nothing.
+func writeBlock(b *strings.Builder, heading, body string) {
+	if strings.TrimSpace(body) == "" {
 		return
 	}
-	fmt.Fprintf(b, "\n`%s` answered:\n\n```\n%s\n```\n", name, strings.TrimRight(answer, "\n"))
+	fmt.Fprintf(b, "\n%s\n\n```\n%s\n```\n", heading, strings.TrimRight(body, "\n"))
 }
 
 // ScriptDispatch is the real Investigation.Dispatch: it pipes the
