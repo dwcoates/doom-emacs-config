@@ -49,8 +49,9 @@ type Deps struct {
 	Backend Backend
 	// BackendErr is why no Backend was resolved.
 	BackendErr error
-	// Chime is the platform's sound player. Nil when none could be resolved,
-	// in which case ChimeErr says why and every chime records it.
+	// Chime is the platform's sound player, rung the instant each banner is
+	// made. Nil when none could be resolved, in which case ChimeErr says why
+	// and every chime records it.
 	Chime Chime
 	// ChimeErr is why no Chime was resolved.
 	ChimeErr error
@@ -62,10 +63,11 @@ type Deps struct {
 	Log dlog.Logger
 }
 
-// Notifier posts desktop banners and rings chimes. Every banner and chime runs
-// on a goroutine of its own, because composing a banner may call a model, a
-// read-back banner program blocks until the banner is clicked or dismissed,
-// and the player until the sound ends; Close cancels and joins them all.
+// Notifier posts desktop banners, each ringing its chime as it is made. Every
+// banner and chime runs on a goroutine of its own, because composing a banner
+// may call a model, a read-back banner program blocks until the banner is
+// clicked or dismissed, and the player until the sound ends; Close cancels and
+// joins them all.
 type Notifier struct {
 	deps   Deps
 	ctx    context.Context
@@ -94,50 +96,32 @@ func New(deps Deps) *Notifier {
 	return &Notifier{deps: deps, ctx: ctx, cancel: cancel}
 }
 
-// Post raises one banner for ws, unless Emacs is focused. The banner sounds
-// as it says itself (Banner.Silent); no chime rings with it.
-func (n *Notifier) Post(ws ids.WorkspaceID, kind string, compose Compose) {
-	n.post(ws, kind, compose, false)
-}
-
-// Announce raises a turn end's banner WITH ITS CHIME, the turn's one sound.
+// Post raises one banner for ws, unless Emacs is focused, and rings the chime
+// the instant the banner is made.
 //
-// THE CHIME RINGS AS THE BANNER SURFACES. Composing a turn's banner calls a
-// model, which takes seconds; the chime is rung at the instant the composed
-// banner is handed to the platform, so the sound and the banner arrive
-// together. The banner is posted silent, so the turn sounds exactly once.
+// A SOUND IS ONLY EVER A BANNER'S. The chime is rung from one place: the edge
+// the backend reports the banner made on (Backend.Post's made). A banner that
+// is not made -- Emacs is focused, the workspace cannot be named, no banner
+// program is installed, the program failed, the daemon is standing down --
+// rings nothing, and nothing else in the daemon plays a sound.
 //
-// THE CHIME RINGS WHETHER OR NOT A BANNER IS POSTED: a focused Emacs may be
-// showing another workspace, and the sound is what tells the user this one is
-// done. With no banner, it rings at the moment the banner is given up: at once
-// when Emacs is focused already, after composing when focus came meanwhile.
-// Only a daemon standing down rings nothing.
-func (n *Notifier) Announce(ws ids.WorkspaceID, kind string, compose Compose) {
-	n.post(ws, kind, compose, true)
-}
-
-// post raises one banner for ws, ringing the chime with it when chimed. The
-// focus is read twice: here, so a focused Emacs costs no composition at all,
-// and again once the banner is composed, so focus gained meanwhile still
+// The focus is read twice: here, so a focused Emacs costs no composition at
+// all, and again once the banner is composed, so focus gained meanwhile still
 // suppresses it.
-func (n *Notifier) post(ws ids.WorkspaceID, kind string, compose Compose, chimed bool) {
+func (n *Notifier) Post(ws ids.WorkspaceID, kind string, compose Compose) {
 	log := n.deps.Log.With(dlog.Context{"workspace": string(ws), "kind": kind})
-	ring := func() {}
-	if chimed {
-		ring = func() { n.ring(log) }
-	}
 	if n.deps.Focus.Focused() {
 		log.Info(opPost, "Emacs is focused; no desktop banner", nil)
-		ring()
 		return
 	}
-	if !n.spawn(func() { n.show(ws, log, compose, chimed, ring) }) {
+	if !n.spawn(func() { n.show(ws, log, compose) }) {
 		log.Info(opPost, "the daemon is standing down; no desktop banner", nil)
 	}
 }
 
 // ring plays the chime on a goroutine of its own, so it sounds alongside a
-// banner program that blocks until its banner is clicked.
+// banner program that blocks until its banner is clicked. It is called only
+// from a banner's made edge (show).
 func (n *Notifier) ring(log dlog.Logger) {
 	log.Debug(opChime, "ringing the chime", nil)
 	if !n.spawn(func() { n.play(log) }) {
@@ -192,11 +176,9 @@ func (n *Notifier) Raise(ws ids.WorkspaceID, kind, text string) {
 	})
 }
 
-// show composes and posts one banner, and relays its click. ring sounds the
-// banner's chime: once, at the moment the banner is handed to the platform or
-// given up, and never once the daemon is standing down. A chimed banner is
-// posted silent, so the chime is its one sound.
-func (n *Notifier) show(ws ids.WorkspaceID, log dlog.Logger, compose Compose, chimed bool, ring func()) {
+// show composes and posts one banner, rings its chime the instant it is made,
+// and relays its click.
+func (n *Notifier) show(ws ids.WorkspaceID, log dlog.Logger, compose Compose) {
 	workspace, err := n.deps.Workspaces.Workspace(n.ctx, ws)
 	switch {
 	case standdown.CutShort(n.ctx, err):
@@ -204,30 +186,31 @@ func (n *Notifier) show(ws ids.WorkspaceID, log dlog.Logger, compose Compose, ch
 		return
 	case err != nil:
 		log.Error(opPost, "could not name the workspace; no desktop banner", dlog.Context{"cause": err.Error()})
-		ring()
 		return
 	}
 	banner := compose(n.ctx, workspace.Name)
-	if chimed {
-		banner.Silent = true
-	}
 	if n.deps.Focus.Focused() {
 		log.Info(opPost, "Emacs was focused while the banner was composed; no desktop banner", nil)
-		ring()
 		return
 	}
 	if n.deps.Backend == nil {
 		log.Error(opPost, "no desktop banner program; the banner was not posted", dlog.Context{
 			"cause": n.deps.BackendErr.Error(), "title": banner.Title,
 		})
-		ring()
 		return
 	}
 	log.Info(opPost, "posting a desktop banner", dlog.Context{
 		"program": n.deps.Backend.Program(), "title": banner.Title,
 	})
-	ring()
-	outcome, err := n.deps.Backend.Post(n.ctx, Target{ID: ws, Dir: workspace.Dir}, banner)
+	made := false
+	outcome, err := n.deps.Backend.Post(n.ctx, Target{ID: ws, Dir: workspace.Dir}, banner, func() {
+		if made {
+			panic("desktopnotify: the banner backend reported one banner made twice")
+		}
+		made = true
+		log.Debug(opPost, "the desktop banner is made; ringing its chime", nil)
+		n.ring(log)
+	})
 	switch {
 	case standdown.CutShort(n.ctx, err):
 		log.Info(opPost, "the daemon stood down while a banner awaited its click", dlog.Context{"cause": err.Error()})

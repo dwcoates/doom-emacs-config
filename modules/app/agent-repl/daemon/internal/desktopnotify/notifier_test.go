@@ -10,14 +10,16 @@ import (
 	"agent-repld/internal/ids"
 )
 
-// fakeBackend records each posted banner and its target, and answers a
-// scripted outcome.
+// fakeBackend records each posted banner and its target, reports the banner
+// made unless its program is scripted to fail, and answers a scripted outcome.
 type fakeBackend struct {
 	mu      sync.Mutex
 	posted  []Banner
 	targets []Target
 	outcome Outcome
 	err     error
+	// madeTwice, when set, reports the banner made twice: a broken backend.
+	madeTwice bool
 	// block, when set, holds Post until closed or ctx ends.
 	block chan struct{}
 	// onPost, when set, runs as Post is called, which is where a test reads
@@ -27,7 +29,7 @@ type fakeBackend struct {
 
 func (b *fakeBackend) Program() string { return "fake-banner" }
 
-func (b *fakeBackend) Post(ctx context.Context, target Target, banner Banner) (Outcome, error) {
+func (b *fakeBackend) Post(ctx context.Context, target Target, banner Banner, made func()) (Outcome, error) {
 	if b.onPost != nil {
 		b.onPost()
 	}
@@ -35,6 +37,12 @@ func (b *fakeBackend) Post(ctx context.Context, target Target, banner Banner) (O
 	b.posted = append(b.posted, banner)
 	b.targets = append(b.targets, target)
 	b.mu.Unlock()
+	if b.err == nil {
+		made()
+		if b.madeTwice {
+			made()
+		}
+	}
 	if b.block != nil {
 		select {
 		case <-b.block:
@@ -70,6 +78,8 @@ type fakeChime struct {
 	err   error
 	// block, when set, holds Play until closed or ctx ends.
 	block chan struct{}
+	// playing, when set, is closed as the first Play begins.
+	playing chan struct{}
 }
 
 func (c *fakeChime) Program() string { return "fake-chime" }
@@ -77,7 +87,11 @@ func (c *fakeChime) Program() string { return "fake-chime" }
 func (c *fakeChime) Play(ctx context.Context) error {
 	c.mu.Lock()
 	c.plays++
+	first := c.plays == 1
 	c.mu.Unlock()
+	if first && c.playing != nil {
+		close(c.playing)
+	}
 	if c.block != nil {
 		select {
 		case <-c.block:
@@ -300,7 +314,7 @@ func TestNotifierPanicsOnAnUnknownOutcome(t *testing.T) {
 	}()
 
 	// Act
-	f.notifier.show("ws1", f.log, titledBy, false, func() {})
+	f.notifier.show("ws1", f.log, titledBy)
 }
 
 func TestNotifierRelaysNoClickForADismissal(t *testing.T) {
@@ -441,30 +455,23 @@ func TestNotifierPostsNothingAfterClose(t *testing.T) {
 	}
 }
 
-// silentlyTitled composes a banner that asks for the platform's sound.
-func silentlyTitled(_ context.Context, name string) Banner {
-	return Banner{Title: "title " + name, Body: "body", Silent: false}
-}
-
-func TestNotifierAnnounceRingsWithoutComposingWhenEmacsIsFocused(t *testing.T) {
+func TestNotifierRingsTheChimeOnceTheBannerIsMade(t *testing.T) {
 	// Arrange
 	f := newNotifierFixture(t, named)
-	f.focus.Attach(true)
-	composed := false
+	f.focus.Attach(false)
+	rungBeforeMade := false
+	f.backend.onPost = func() { rungBeforeMade = f.chime.played() > 0 }
 
 	// Act
-	f.notifier.Announce("ws1", KindTurnEnded, func(context.Context, string) Banner {
-		composed = true
-		return Banner{}
-	})
+	f.notifier.Post("ws1", KindTurnEnded, titledBy)
 	f.notifier.wg.Wait()
 
 	// Assert
-	if got := f.chime.played(); got != 1 {
-		t.Fatalf("played %d chimes while Emacs was focused, want 1", got)
+	if rungBeforeMade {
+		t.Fatal("the chime rang before the banner was handed to the platform")
 	}
-	if got := f.backend.banners(); len(got) != 0 || composed {
-		t.Fatalf("posted %d banners (composed=%v) while Emacs was focused, want none", len(got), composed)
+	if got := f.chime.played(); got != 1 {
+		t.Fatalf("played %d chimes for one made banner, want 1", got)
 	}
 	r, ok := hasRecord(f.log, "info", "playing the chime")
 	if !ok || r.Context["workspace"] != "ws1" || r.Context["kind"] != KindTurnEnded || r.Context["program"] != "fake-chime" {
@@ -475,152 +482,103 @@ func TestNotifierAnnounceRingsWithoutComposingWhenEmacsIsFocused(t *testing.T) {
 	}
 }
 
-func TestNotifierAnnounceRingsOnlyOnceTheBannerIsComposed(t *testing.T) {
+func TestNotifierRingsTheChimeForEveryKindOfBanner(t *testing.T) {
 	// Arrange
 	f := newNotifierFixture(t, named)
 	f.focus.Attach(false)
-	rungWhileComposing := false
 
 	// Act
-	f.notifier.Announce("ws1", KindTurnEnded, func(ctx context.Context, name string) Banner {
-		_, rungWhileComposing = hasRecord(f.log, "debug", "ringing the chime")
-		return titledBy(ctx, name)
-	})
+	f.notifier.Raise("ws1", "permission_requested", "Run the tests?")
 	f.notifier.wg.Wait()
 
 	// Assert
-	if rungWhileComposing {
-		t.Fatal("the chime rang before the banner was composed")
-	}
 	if got := f.chime.played(); got != 1 {
-		t.Fatalf("played %d chimes, want 1", got)
+		t.Fatalf("played %d chimes for an agent notification's banner, want 1", got)
 	}
 }
 
-func TestNotifierAnnounceRingsAsTheBannerIsHandedOver(t *testing.T) {
+// TestNotifierRingsNothingForABannerNotMade pins that a sound is only ever a
+// banner's: every way a banner is not made rings no chime.
+func TestNotifierRingsNothingForABannerNotMade(t *testing.T) {
+	cases := []struct {
+		name       string
+		workspaces Workspaces
+		focused    bool
+		focusLater bool
+		noProgram  bool
+		programErr error
+		wantLevel  string
+		wantRecord string
+	}{
+		{name: "Emacs is focused", workspaces: named, focused: true, wantLevel: "info", wantRecord: "Emacs is focused; no desktop banner"},
+		{name: "Emacs gained focus while composing", workspaces: named, focusLater: true, wantLevel: "info", wantRecord: "Emacs was focused while the banner was composed; no desktop banner"},
+		{name: "the workspace cannot be named", workspaces: fakeWorkspaces{err: errors.New("no such workspace")}, wantLevel: "error", wantRecord: "could not name the workspace; no desktop banner"},
+		{name: "no banner program is installed", workspaces: named, noProgram: true, wantLevel: "error", wantRecord: "no desktop banner program; the banner was not posted"},
+		{name: "the banner program failed", workspaces: named, programErr: errors.New("exit status 64"), wantLevel: "error", wantRecord: "the desktop banner program failed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			log := dlog.NewTestLogger()
+			focus := NewFocus(log)
+			focus.Attach(tc.focused)
+			chime := &fakeChime{}
+			deps := Deps{Focus: focus, Chime: chime, Clicks: &fakeClicks{}, Workspaces: tc.workspaces, Log: log}
+			if tc.noProgram {
+				deps.BackendErr = errors.New("terminal-notifier is not installed")
+			} else {
+				deps.Backend = &fakeBackend{err: tc.programErr}
+			}
+			n := New(deps)
+			compose := titledBy
+			if tc.focusLater {
+				compose = func(ctx context.Context, name string) Banner {
+					if err := focus.Report(true); err != nil {
+						t.Errorf("Report: %v", err)
+					}
+					return titledBy(ctx, name)
+				}
+			}
+
+			// Act
+			n.Post("ws1", KindTurnEnded, compose)
+			n.wg.Wait()
+
+			// Assert
+			if got := chime.played(); got != 0 {
+				t.Fatalf("played %d chimes for a banner that was not made, want none", got)
+			}
+			if _, ok := hasRecord(log, tc.wantLevel, tc.wantRecord); !ok {
+				t.Fatalf("no %s record %q of the banner not made", tc.wantLevel, tc.wantRecord)
+			}
+		})
+	}
+}
+
+func TestNotifierPanicsOnABannerMadeTwice(t *testing.T) {
 	// Arrange
 	f := newNotifierFixture(t, named)
-	f.focus.Attach(false)
-	rungByPost := false
-	f.backend.onPost = func() { _, rungByPost = hasRecord(f.log, "debug", "ringing the chime") }
-
-	// Act
-	f.notifier.Announce("ws1", KindTurnEnded, titledBy)
-	f.notifier.wg.Wait()
+	f.backend.madeTwice = true
 
 	// Assert
-	if !rungByPost {
-		t.Fatal("the chime had not rung when the banner was handed to the platform")
-	}
-	if got := f.backend.banners(); len(got) != 1 {
-		t.Fatalf("posted %d banners, want 1", len(got))
-	}
-}
-
-func TestNotifierAnnouncePostsTheBannerSilent(t *testing.T) {
-	// Arrange
-	f := newNotifierFixture(t, named)
-	f.focus.Attach(false)
-
-	// Act
-	f.notifier.Announce("ws1", KindTurnEnded, silentlyTitled)
-	f.notifier.wg.Wait()
-
-	// Assert
-	if got := f.backend.banners(); len(got) != 1 || !got[0].Silent {
-		t.Fatalf("banners = %+v, want one silent banner", got)
-	}
-}
-
-func TestNotifierPostRingsNothingAndKeepsTheBannersSound(t *testing.T) {
-	// Arrange
-	f := newNotifierFixture(t, named)
-	f.focus.Attach(false)
-
-	// Act
-	f.notifier.Post("ws1", "permission", silentlyTitled)
-	f.notifier.wg.Wait()
-
-	// Assert
-	if got := f.chime.played(); got != 0 {
-		t.Fatalf("played %d chimes for a plain banner, want none", got)
-	}
-	if got := f.backend.banners(); len(got) != 1 || got[0].Silent {
-		t.Fatalf("banners = %+v, want one banner with its sound", got)
-	}
-}
-
-func TestNotifierAnnounceRingsWhenFocusCameWhileComposing(t *testing.T) {
-	// Arrange
-	f := newNotifierFixture(t, named)
-	f.focus.Attach(false)
-
-	// Act
-	f.notifier.Announce("ws1", KindTurnEnded, func(ctx context.Context, name string) Banner {
-		if err := f.focus.Report(true); err != nil {
-			t.Errorf("Report: %v", err)
+	defer func() {
+		if recover() == nil {
+			t.Fatal("a backend reporting one banner made twice was accepted")
 		}
-		return titledBy(ctx, name)
-	})
-	f.notifier.wg.Wait()
-
-	// Assert
-	if got := f.backend.banners(); len(got) != 0 {
-		t.Fatalf("posted %d banners after Emacs gained focus, want none", len(got))
-	}
-	if got := f.chime.played(); got != 1 {
-		t.Fatalf("played %d chimes, want 1", got)
-	}
-}
-
-func TestNotifierAnnounceRingsForAnUnnameableWorkspace(t *testing.T) {
-	// Arrange
-	f := newNotifierFixture(t, fakeWorkspaces{err: errors.New("no such workspace")})
-	f.focus.Attach(false)
+		f.notifier.Close()
+	}()
 
 	// Act
-	f.notifier.Announce("ws1", KindTurnEnded, titledBy)
-	f.notifier.wg.Wait()
-
-	// Assert
-	if got := f.chime.played(); got != 1 {
-		t.Fatalf("played %d chimes, want 1", got)
-	}
-	if _, ok := hasRecord(f.log, "error", "could not name the workspace; no desktop banner"); !ok {
-		t.Fatal("the unnameable workspace left no record")
-	}
-}
-
-func TestNotifierAnnounceRingsWithNoBannerProgram(t *testing.T) {
-	// Arrange
-	log := dlog.NewTestLogger()
-	chime := &fakeChime{}
-	n := New(Deps{
-		Focus: NewFocus(log), BackendErr: errors.New("terminal-notifier is not installed"), Chime: chime,
-		Clicks: &fakeClicks{}, Workspaces: named, Log: log,
-	})
-
-	// Act
-	n.Announce("ws1", KindTurnEnded, titledBy)
-	n.wg.Wait()
-
-	// Assert
-	if got := chime.played(); got != 1 {
-		t.Fatalf("played %d chimes, want 1", got)
-	}
-	if _, ok := hasRecord(log, "error", "no desktop banner program; the banner was not posted"); !ok {
-		t.Fatal("the missing banner program left no record")
-	}
+	f.notifier.show("ws1", f.log, titledBy)
 }
 
 func TestNotifierRecordsAFailedChime(t *testing.T) {
 	// Arrange
 	f := newNotifierFixture(t, named)
-	f.focus.Attach(true)
 	f.chime.err = errors.New("exit status 1")
 
 	// Act
-	f.notifier.Announce("ws1", KindTurnEnded, titledBy)
+	f.notifier.Post("ws1", KindTurnEnded, titledBy)
 	f.notifier.wg.Wait()
 
 	// Assert
@@ -633,15 +591,13 @@ func TestNotifierRecordsAFailedChime(t *testing.T) {
 func TestNotifierRecordsAMissingChime(t *testing.T) {
 	// Arrange
 	log := dlog.NewTestLogger()
-	focus := NewFocus(log)
-	focus.Attach(true)
 	n := New(Deps{
-		Focus: focus, Backend: &fakeBackend{}, ChimeErr: errors.New("afplay is not installed"),
+		Focus: NewFocus(log), Backend: &fakeBackend{}, ChimeErr: errors.New("afplay is not installed"),
 		Clicks: &fakeClicks{}, Workspaces: named, Log: log,
 	})
 
 	// Act
-	n.Announce("ws1", KindTurnEnded, titledBy)
+	n.Post("ws1", KindTurnEnded, titledBy)
 	n.wg.Wait()
 
 	// Assert
@@ -654,9 +610,10 @@ func TestNotifierRecordsAMissingChime(t *testing.T) {
 func TestNotifierCloseEndsAPlayingChime(t *testing.T) {
 	// Arrange
 	f := newNotifierFixture(t, named)
-	f.focus.Attach(true)
 	f.chime.block = make(chan struct{})
-	f.notifier.Announce("ws1", KindTurnEnded, titledBy)
+	f.chime.playing = make(chan struct{})
+	f.notifier.Post("ws1", KindTurnEnded, titledBy)
+	<-f.chime.playing
 
 	// Act
 	f.notifier.Close()
@@ -673,11 +630,10 @@ func TestNotifierCloseEndsAPlayingChime(t *testing.T) {
 func TestNotifierRingsNothingAfterClose(t *testing.T) {
 	// Arrange
 	f := newNotifierFixture(t, named)
-	f.focus.Attach(true)
 	f.notifier.Close()
 
 	// Act
-	f.notifier.Announce("ws1", KindTurnEnded, titledBy)
+	f.notifier.ring(f.log)
 	f.notifier.wg.Wait()
 
 	// Assert

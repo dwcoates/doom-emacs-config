@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"agent-repld/internal/cpugov"
+	"agent-repld/internal/desktopnotify"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/gitclient"
@@ -239,6 +240,16 @@ type Names interface {
 	ClaimMergeName(ctx context.Context, repoDir, name string) (branch string, release func(), taken bool, err error)
 }
 
+// Banners raises the merge queue's desktop banners
+// (desktopnotify.MergeBanners). A MERGE RAISES EXACTLY TWO: Queued as it is
+// put in line, and Resolved as it leaves the queue for good. Nothing between
+// -- admission, a repair turn, the test gate, a detached merge's handback --
+// raises one.
+type Banners interface {
+	Queued(ws ids.WorkspaceID, label string)
+	Resolved(ws ids.WorkspaceID, end desktopnotify.MergeEnd, summary string)
+}
+
 // DetachedOutcome is how a detached merge ended, for its handback. THE KIND IS
 // THE END; Summary is its one-line account, and Branch is the requester's
 // branch the merge was asked for.
@@ -265,6 +276,20 @@ const (
 	// detached request whose merge workspace could not be forked.
 	DetachedAbandoned
 )
+
+// mergeEnd is the kind's resolved banner end. A kind outside the three is a
+// defect in the caller, and panics.
+func (k DetachedOutcomeKind) mergeEnd() desktopnotify.MergeEnd {
+	switch k {
+	case DetachedLanded:
+		return desktopnotify.MergeLanded
+	case DetachedFailed:
+		return desktopnotify.MergeFailed
+	case DetachedAbandoned:
+		return desktopnotify.MergeAbandoned
+	}
+	panic(fmt.Sprintf("merge: no banner end for %s", k))
+}
 
 // String names the kind for the log record.
 func (k DetachedOutcomeKind) String() string {
@@ -351,6 +376,9 @@ type Deps struct {
 	Sidebar sidebar.Resolver
 	// Holds carries the dequeue offer.
 	Holds holds.Sink
+	// Banners raises the merge queue's only two desktop banners: one as a
+	// merge is put in line, one as it leaves the queue for good.
+	Banners Banners
 	// Asks are the permission asks and question batches open in each
 	// workspace's session: a conflict-resolution or fixing tab whose agent
 	// has one open is drawn waiting on the user.
