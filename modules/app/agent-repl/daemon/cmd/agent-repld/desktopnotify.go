@@ -60,7 +60,8 @@ func selectWorkspaceClick(selfExe, stateDir string) desktopnotify.ClickAction {
 	}
 }
 
-// resolveChime resolves the platform's turn-end chime player once, at boot.
+// resolveChime resolves the platform's chime player once, at boot: the one
+// sound every desktop banner rings the instant it is made.
 func resolveChime(log dlog.Logger) (desktopnotify.Chime, error) {
 	return resolveNotifyProgram(log, "chime", desktopnotify.EnvChimeCmd,
 		func(goos, override string) (desktopnotify.Chime, error) {

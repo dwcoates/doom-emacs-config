@@ -711,8 +711,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Clicks: clicks, Workspaces: bannerWorkspaces{db: p.DB}, Log: log,
 	})
 	turnBanners := desktopnotify.NewTurnBanners(desktopnotify.TurnDeps{
-		Endings:   feedResolver,
-		Announcer: notifier,
+		Endings: feedResolver,
+		Poster:  notifier,
 		Summaries: desktopnotify.Summarizer{
 			Headless: headlessClient, ConfigDirs: configDirs, PromptsDir: paths.PromptsDir, Log: log,
 		},
@@ -975,6 +975,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Footer:          footerResolver,
 		Sidebar:         sidebarResolver,
 		Holds:           feedResolver,
+		Banners:         desktopnotify.NewMergeBanners(notifier, time.Now),
 		PromptsDir:      paths.PromptsDir,
 		CheckoutRoot:    paths.Checkout,
 		Briefs:          merge.BriefsFrom(paths.PromptsDir),

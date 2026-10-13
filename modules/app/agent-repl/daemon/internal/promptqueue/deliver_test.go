@@ -724,6 +724,44 @@ func TestStartedByMergeNamesExactlyTheMergesOwnOrigins(t *testing.T) {
 	}
 }
 
+func TestCausedByMergeQueueNamesEveryTurnTheMergeQueueCauses(t *testing.T) {
+	cases := []struct {
+		origin conversationv1.PromptOrigin
+		want   bool
+	}{
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR, true},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR, true},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION, true},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION, true},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK, true},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME, false},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_RETARGETED, false},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, false},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.origin.String(), func(t *testing.T) {
+			// Arrange / Act
+			got := causedByMergeQueue(tc.origin.String())
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("causedByMergeQueue(%s) = %v, want %v", tc.origin, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestEveryTurnTheMergeStartsIsCausedByTheMergeQueue pins that the two origin
+// sets cannot drift: a turn the merge starts is always one it caused.
+func TestEveryTurnTheMergeStartsIsCausedByTheMergeQueue(t *testing.T) {
+	for origin := range mergeStartedOrigins {
+		if !causedByMergeQueue(origin) {
+			t.Errorf("%s is started by the merge but not counted as caused by the merge queue", origin)
+		}
+	}
+}
+
 // errShimNoSession is the sender's refusal of a StartTurn by a shim holding
 // no session, as the workspace sender's typed refusal answers it.
 var errShimNoSession = fmt.Errorf("shim StartTurn refused: %w", ErrShimHasNoSession)

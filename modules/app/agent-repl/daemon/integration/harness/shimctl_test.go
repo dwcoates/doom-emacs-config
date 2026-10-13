@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	conversationv1 "agentrepl/proto/conversation/v1"
 )
 
 func TestShimInfoFlagFindsAValue(t *testing.T) {
@@ -171,5 +173,84 @@ func TestAnOpenedShimThatHangsUpBeforeItsFirstReplyIsADepartedShim(t *testing.T)
 	// Assert
 	if !s.departed || s.pid != exited.Process.Pid {
 		t.Fatalf("departed = %v, pid = %d; want the departed shim %d", s.departed, s.pid, exited.Process.Pid)
+	}
+}
+
+// serveSessionPushes serves a fake control socket: the opening info, then
+// every push_session_update answered with the next of counts (the last one
+// repeating). It reports each push's op on pushes.
+func serveSessionPushes(t *testing.T, counts []int) (socket string, pushes <-chan string) {
+	t.Helper()
+	socket = filepath.Join(ShortTempDir(t), "p.ctl")
+	ln, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	seen := make(chan string, 16)
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		scanner := bufio.NewScanner(conn)
+		enc := json.NewEncoder(conn)
+		next := 0
+		for scanner.Scan() {
+			var command controlCommand
+			if err := json.Unmarshal(scanner.Bytes(), &command); err != nil {
+				return
+			}
+			if command.Op == "info" {
+				_ = enc.Encode(controlReply{OK: true, Info: &ShimInfo{PID: 4242}})
+				continue
+			}
+			seen <- command.Op
+			count := counts[len(counts)-1]
+			if next < len(counts) {
+				count = counts[next]
+			}
+			next++
+			_ = enc.Encode(controlReply{OK: true, Count: count})
+		}
+	}()
+	return socket, seen
+}
+
+// TestASessionPushIsRetriedUntilASessionStreamReceivesIt pins the shared
+// subscribed push: a push no stream received is sent again, and the first
+// one received ends it.
+func TestASessionPushIsRetriedUntilASessionStreamReceivesIt(t *testing.T) {
+	cases := []struct {
+		name string
+		push func(*ShimControl)
+	}{
+		{name: "the readiness push", push: func(s *ShimControl) { s.PushHealthyWhenSubscribed() }},
+		{name: "an unhealthy push", push: func(s *ShimControl) { s.PushUnhealthy(&conversationv1.SessionFault{Component: "store client"}) }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the first two pushes reach no stream, the third one does.
+			socket, pushes := serveSessionPushes(t, []int{0, 0, 1})
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			t.Cleanup(cancel)
+			s := &ShimControl{Socket: socket, t: t, d: &Daemon{t: t, ctx: ctx}}
+			s.connect()
+			t.Cleanup(s.close)
+
+			// Act
+			tc.push(s)
+
+			// Assert
+			if got := len(pushes); got != 3 {
+				t.Fatalf("pushes sent = %d, want 3: retried until one was received, then no more", got)
+			}
+			for range 3 {
+				if op := <-pushes; op != "push_session_update" {
+					t.Fatalf("op = %q, want push_session_update", op)
+				}
+			}
+		})
 	}
 }

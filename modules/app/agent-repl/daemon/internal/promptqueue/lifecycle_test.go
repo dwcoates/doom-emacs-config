@@ -635,6 +635,7 @@ func TestOnTurnEndedRaisesNoBannerForAMergesOwnTurn(t *testing.T) {
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK,
 	}
 	for _, origin := range cases {
 		t.Run(origin.String(), func(t *testing.T) {
