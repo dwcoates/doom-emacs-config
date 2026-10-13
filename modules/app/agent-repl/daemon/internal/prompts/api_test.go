@@ -317,7 +317,7 @@ func TestTheRebaseConflictBriefKeepsItsPlaceholderSet(t *testing.T) {
 
 func TestTheFixingAttemptBriefKeepsItsPlaceholderSet(t *testing.T) {
 	// Arrange.
-	want := []string{"source_branch", "worktree_dir", "target_branch", "failing_suites", "archive_path", "failure_tail", "attempt", "max_attempts", "escalation_file", "escalation_marker"}
+	want := []string{"source_branch", "worktree_dir", "target_branch", "failing_suites", "archive_path", "failure_tail", "attempt", "max_attempts", "escalation_file", "escalation_marker", "failing_tests_file"}
 
 	// Act.
 	got, err := Load(repoPromptsDir, "merge-test-failure-resolve")
@@ -351,6 +351,32 @@ func TestTheFixingAttemptBriefPrescribesRunningOnlyTheFailingTestsUntilTheyPass(
 		if !strings.Contains(got.Body, phrase) {
 			t.Fatalf("merge-test-failure-resolve does not say %q", phrase)
 		}
+	}
+}
+
+func TestTheFixingAttemptBriefSaysTheSelectedSuitesRunAgain(t *testing.T) {
+	// Act.
+	got, err := Load(repoPromptsDir, "merge-test-failure-resolve")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !strings.Contains(got.Body, "runs the selected suites again") || strings.Contains(got.Body, "runs the whole suite again") {
+		t.Fatalf("merge-test-failure-resolve does not say the selected suites run again: %q", got.Body)
+	}
+}
+
+func TestTheFixingAttemptBriefRunsTheTestsTheFailingTestsFileLists(t *testing.T) {
+	// Act.
+	got, err := Load(repoPromptsDir, "merge-test-failure-resolve")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !strings.Contains(got.Body, "Run exactly the tests listed in {{failing_tests_file}}") {
+		t.Fatalf("merge-test-failure-resolve does not point the agent at the failing tests file: %q", got.Body)
 	}
 }
 

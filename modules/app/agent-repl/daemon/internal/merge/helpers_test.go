@@ -2104,7 +2104,7 @@ func newHarness(t *testing.T) *harness {
 	h.targetD = t.TempDir()
 	h.sourceD = t.TempDir()
 	h.briefs[BriefConflictResolve] = []string{"conflict_commit", "source_branch", "worktree_dir", "target_branch", "conflicted_files"}
-	h.briefs[BriefTestFailureResolve] = []string{"source_branch", "worktree_dir", "target_branch", "failing_suites", "archive_path", "failure_tail", "attempt", "max_attempts", "escalation_file", "escalation_marker"}
+	h.briefs[BriefTestFailureResolve] = []string{"source_branch", "worktree_dir", "target_branch", "failing_suites", "archive_path", "failure_tail", "attempt", "max_attempts", "escalation_file", "escalation_marker", "failing_tests_file"}
 
 	h.sampler = &fakeLoad{sample: cpugov.Sample{Utilization: 0, CPUs: 16}}
 	governor, err := cpugov.New(cpugov.DefaultConfig(), h.sampler, h.clock, h.logs.Global())

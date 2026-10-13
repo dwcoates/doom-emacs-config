@@ -761,6 +761,12 @@ func (r *run) promptFix(ctx context.Context, attempt int, suites []string, archi
 	if err := r.noteMachinery(ctx, targetBranch); err != nil {
 		return nil, err
 	}
+	// THE AGENT RUNS EXACTLY THE FAILING TESTS (owner ruling, 2026-10-12):
+	// they are read off the failing run's archive into the worktree before the
+	// brief that names the file is sent.
+	if _, err := r.writeFailingTests(ctx, archive); err != nil {
+		return nil, err
+	}
 	text, err := r.fixBrief(attempt, suites, archive, tail, targetBranch)
 	if err != nil {
 		return nil, err
@@ -792,16 +798,17 @@ func (r *run) drawFixing(ctx context.Context, round tabRound, attempt int, suite
 // fixBrief composes one fixing attempt's brief.
 func (r *run) fixBrief(attempt int, suites []string, archive, tail, targetBranch string) (string, error) {
 	text, err := r.o.deps.Briefs(BriefTestFailureResolve, map[string]string{
-		"source_branch":     r.subject.branch,
-		"worktree_dir":      r.subject.dir,
-		"target_branch":     r.briefTarget(targetBranch),
-		"failing_suites":    strings.Join(suites, ", "),
-		"archive_path":      archive,
-		"failure_tail":      tail,
-		"attempt":           fmt.Sprintf("%d", attempt),
-		"max_attempts":      fmt.Sprintf("%d", MaxFixAttempts),
-		"escalation_file":   EscalationFile,
-		"escalation_marker": EscalationMarker,
+		"source_branch":      r.subject.branch,
+		"worktree_dir":       r.subject.dir,
+		"target_branch":      r.briefTarget(targetBranch),
+		"failing_suites":     strings.Join(suites, ", "),
+		"archive_path":       archive,
+		"failure_tail":       tail,
+		"attempt":            fmt.Sprintf("%d", attempt),
+		"max_attempts":       fmt.Sprintf("%d", MaxFixAttempts),
+		"escalation_file":    EscalationFile,
+		"escalation_marker":  EscalationMarker,
+		"failing_tests_file": filepath.Join(r.subject.dir, FailingTestsFile),
 	})
 	if err != nil {
 		return "", fmt.Errorf("merge: composing the test-failure brief: %w", err)
