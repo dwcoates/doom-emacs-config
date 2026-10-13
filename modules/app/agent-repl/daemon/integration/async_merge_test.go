@@ -114,6 +114,12 @@ func TestAnAsyncMergeWorkspaceIsHiddenUntilItsMergeFailsAndThenRevealed(t *testi
 	s.d.AwaitWorkspaceLogOperationCount(mergeWS.GetDir(), harness.OpTurnOpened, 1)
 	hidden := rosterNow(t, s.d)
 	pushConcludedTurn(shim, mainAgent, "gave-up")
+	// The agent gives up on every further attempt the commit's conflict gets.
+	for attempt := 2; attempt <= 3; attempt++ {
+		shim.ExpectStartTurn()
+		s.d.AwaitWorkspaceLogOperationCount(mergeWS.GetDir(), harness.OpTurnOpened, attempt)
+		pushConcludedTurn(shim, mainAgent, "gave-up")
+	}
 
 	// Assert: hidden while the agent worked, revealed once the merge failed,
 	// with a row and a tab.
