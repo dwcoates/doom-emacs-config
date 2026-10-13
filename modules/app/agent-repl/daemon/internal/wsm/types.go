@@ -547,8 +547,14 @@ const (
 	HoldMerge
 	// HoldColdGate holds while the workspace's session is parked at its cold
 	// gate: the prompt waits for the user's answer to the gate, which a prompt
-	// never gives, and the session that answer brings up delivers it.
+	// never gives. Only a compact-and-resume answer delivers it: clear
+	// discards it, and pay or compact move it to HoldColdGateAnswered.
 	HoldColdGate
+	// HoldColdGateAnswered holds a prompt that was held at a cold gate the
+	// user answered with pay or compact: those answers send nothing, so the
+	// prompt waits for the user to send it (a release) or cancel it. Nothing
+	// else delivers it -- not the session coming up, not a turn's end.
+	HoldColdGateAnswered
 )
 
 // ClassificationArm is the classifier's verdict on a held prompt: ONE column

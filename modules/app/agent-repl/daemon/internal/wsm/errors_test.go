@@ -160,6 +160,7 @@ func TestHoldKindStoredValuesAreStable(t *testing.T) {
 		{name: "build refresh", hold: HoldBuildRefresh, want: 2},
 		{name: "merge", hold: HoldMerge, want: 3},
 		{name: "cold gate", hold: HoldColdGate, want: 4},
+		{name: "cold gate answered", hold: HoldColdGateAnswered, want: 5},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -181,6 +182,7 @@ func TestHoldKindStringNamesEveryArm(t *testing.T) {
 		{hold: HoldBuildRefresh, want: "build_refresh"},
 		{hold: HoldMerge, want: "merge"},
 		{hold: HoldColdGate, want: "cold_gate"},
+		{hold: HoldColdGateAnswered, want: "cold_gate_answered"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.want, func(t *testing.T) {
