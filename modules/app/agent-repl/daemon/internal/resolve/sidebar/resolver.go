@@ -85,16 +85,16 @@ func newResolver(colors vocab.RenderColors, log dlog.Surfaces, footer FooterStat
 	}, nil
 }
 
-// assertTables checks the roster_status table row for row against statusArms,
-// and merge_glyphs row for row against the merge arms, through the vocabulary's
-// OWN assertions. Both directions are checked: a missing row would draw an
+// assertTables checks the roster_status table row for row against the
+// proto's own arms (vocab.RosterStatusArms), and merge_glyphs row for row
+// against the merge arms, through the vocabulary's OWN assertions. Both directions are checked: a missing row would draw an
 // unpainted dot, and a surplus row is a state the vocabulary paints and the
 // resolver can never emit.
 func assertTables(colors vocab.RenderColors) error {
-	if err := colors.AssertRosterStatusArms(statusArms); err != nil {
+	if err := colors.AssertRosterStatusArms(vocab.RosterStatusArms()); err != nil {
 		return err
 	}
-	return colors.AssertMergeGlyphArms(mergeArms)
+	return colors.AssertMergeGlyphArms(vocab.RosterMergeArms())
 }
 
 // FooterStatusChanged redraws the roster on the footer's status edge, in line,

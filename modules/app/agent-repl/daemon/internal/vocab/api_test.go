@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -879,5 +880,111 @@ func TestLoadRenderColorsRefusesAMalformedGlyphTable(t *testing.T) {
 				t.Fatalf("LoadRenderColors accepted %s", tc.name)
 			}
 		})
+	}
+}
+
+func TestRosterStatusArmsAreTheProtosOneof(t *testing.T) {
+	// Arrange.
+	want, err := OneofArmNames((&frontendv1.RosterRow{}).ProtoReflect().Descriptor(), "status")
+	if err != nil {
+		t.Fatalf("OneofArmNames: %v", err)
+	}
+
+	// Act.
+	got := RosterStatusArms()
+
+	// Assert.
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("RosterStatusArms() = %v, want %v", got, want)
+	}
+}
+
+func TestRosterMergeArmsAreExactlyTheMergePipelinesArms(t *testing.T) {
+	// Act.
+	got := append([]string{}, RosterMergeArms()...)
+	sort.Strings(got)
+
+	// Assert.
+	want := append([]string{}, mergeArms...)
+	sort.Strings(want)
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("RosterMergeArms() = %v, want %v", got, want)
+	}
+}
+
+func TestIsMergeArm(t *testing.T) {
+	tests := []struct {
+		arm  string
+		want bool
+	}{
+		{arm: "merging", want: true},
+		{arm: "merge_queued", want: true},
+		{arm: "merge_failed", want: true},
+		{arm: "merged", want: true},
+		{arm: "thinking", want: false},
+		{arm: "ready", want: false},
+		{arm: "inactive", want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.arm, func(t *testing.T) {
+			// Act / Assert.
+			if got := IsMergeArm(tc.arm); got != tc.want {
+				t.Fatalf("IsMergeArm(%q) = %v, want %v", tc.arm, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFooterStatusArmsAreTheProtosOneof(t *testing.T) {
+	// Arrange.
+	want, err := OneofArmNames((&frontendv1.FooterStatus{}).ProtoReflect().Descriptor(), "status")
+	if err != nil {
+		t.Fatalf("OneofArmNames: %v", err)
+	}
+
+	// Act.
+	got := FooterStatusArms()
+
+	// Assert.
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("FooterStatusArms() = %v, want %v", got, want)
+	}
+}
+
+// THE RESOLVERS READ THEIR ARMS FROM THE ONE READER: no production file keeps
+// a hand-typed copy of a status oneof for the vocabulary to be asserted
+// against (vocab.RosterStatusArms, vocab.FooterStatusArms). A production file
+// declaring one by the old name fails here.
+func TestNoResolverKeepsAHandTypedStatusArmList(t *testing.T) {
+	// Arrange.
+	root := "../.."
+	var found []string
+
+	// Act.
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || filepath.Ext(path) != ".go" || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for _, name := range []string{"statusArms", "mergeArms"} {
+			if strings.Contains(string(raw), "var "+name+" = []string{") {
+				found = append(found, path)
+			}
+		}
+		return nil
+	})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("walking the module: %v", err)
+	}
+	if len(found) != 0 {
+		t.Fatalf("hand-typed status arm lists in %v, want every resolver on the vocab readers", found)
 	}
 }
