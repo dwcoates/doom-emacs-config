@@ -1106,3 +1106,25 @@ func TestLockRegistryLetsGoOfALockTakenPastItsBound(t *testing.T) {
 	}
 	unlock() //nolint:errcheck // cleanup
 }
+
+func TestTimedNotesEachCallsDurationAndResult(t *testing.T) {
+	// Arrange
+	var call string
+	var took time.Duration
+	var noted error
+	failing := errors.New("refused")
+	r := Timed(func(string, ...string) (string, error) { return "out", failing }, func(c string, d time.Duration, err error) {
+		call, took, noted = c, d, err
+	})
+
+	// Act
+	out, err := r("hdiutil", "attach", "-nomount", "ram://16")
+
+	// Assert
+	if out != "out" || !errors.Is(err, failing) {
+		t.Fatalf("Timed answered %q, %v; want the runner's own answer", out, err)
+	}
+	if call != "hdiutil attach -nomount ram://16" || !errors.Is(noted, failing) || took < 0 {
+		t.Fatalf("noted %q in %s with %v, want the call, its duration and its error", call, took, noted)
+	}
+}
