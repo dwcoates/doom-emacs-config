@@ -411,12 +411,7 @@ func backupsBeside(t *testing.T, path string) []string {
 // recordFor answers the first captured record matching an operation, level and
 // message, so a test can assert on the fields it carried.
 func recordFor(log *dlog.TestLogger, operation, level, message string) (dlog.Record, bool) {
-	for _, record := range log.Records() {
-		if record.Operation == operation && record.Level == level && record.Message == message {
-			return record, true
-		}
-	}
-	return dlog.Record{}, false
+	return dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: level, Operation: operation, Message: message})
 }
 
 // THE DURABLE RESIDUE. A build before the creation path minted the host

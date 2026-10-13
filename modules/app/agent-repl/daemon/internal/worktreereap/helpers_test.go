@@ -441,13 +441,7 @@ func (w *world) sweep() Report {
 
 // records answers every record at a level under an operation.
 func (w *world) records(level, operation string) []dlog.Record {
-	var out []dlog.Record
-	for _, r := range w.log.Records() {
-		if r.Level == level && r.Operation == operation {
-			out = append(out, r)
-		}
-	}
-	return out
+	return dlog.FilterRecords(w.log.Records(), dlog.RecordQuery{Level: level, Operation: operation})
 }
 
 // assertNoErrors fails on any ERROR or WARN record.

@@ -9,6 +9,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/resolve/footer"
@@ -1149,14 +1150,11 @@ func TestAnswerColdGateWhoseFateFailsStandsTheGateAgain(t *testing.T) {
 	if len(f.cards.reraised) != 1 || f.cards.reraised[0] != "vendor-1" {
 		t.Fatalf("reraised = %v, want vendor-1's gate stood again", f.cards.reraised)
 	}
-	for _, r := range f.log.logger.Records() {
-		if r.Level == "info" && r.Operation == opColdGate &&
-			r.Message == "the prompts held at the cold gate could not be settled; the answer is refused" &&
-			r.Context["cause"] == "disk full" && r.Context["choice"] == footer.ChoiceClear && r.Context["gate_stands_again"] == true {
-			return
-		}
+	r, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{
+		Level: "info", Operation: opColdGate, Message: "the prompts held at the cold gate could not be settled; the answer is refused"})
+	if !ok || r.Context["cause"] != "disk full" || r.Context["choice"] != footer.ChoiceClear || r.Context["gate_stands_again"] != true {
+		t.Fatalf("records = %+v, want the refused answer recorded with its cause", f.log.logger.Records())
 	}
-	t.Fatalf("records = %+v, want the refused answer recorded with its cause", f.log.logger.Records())
 }
 
 func TestAnswerColdGateWhoseFateFailsAndWhoseGateCannotStandRecordsAnError(t *testing.T) {
@@ -1171,14 +1169,11 @@ func TestAnswerColdGateWhoseFateFailsAndWhoseGateCannotStandRecordsAnError(t *te
 	_ = f.verbs.AnswerColdGate(context.Background(), "w1", clearAnswer())
 
 	// Assert.
-	for _, r := range f.log.logger.Records() {
-		if r.Level == "error" && r.Operation == opColdGate &&
-			r.Message == "the refused answer's gate could not stand again: its cold facts are gone" &&
-			r.Context["vendor_session_id"] == "vendor-1" {
-			return
-		}
+	r, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{
+		Level: "error", Operation: opColdGate, Message: "the refused answer's gate could not stand again: its cold facts are gone"})
+	if !ok || r.Context["vendor_session_id"] != "vendor-1" {
+		t.Fatalf("records = %+v, want the ERROR record naming the gate", f.log.logger.Records())
 	}
-	t.Fatalf("records = %+v, want the ERROR record naming the gate", f.log.logger.Records())
 }
 
 func TestAnswerColdGateWhoseFateFailsLeavesTheGateRowStanding(t *testing.T) {

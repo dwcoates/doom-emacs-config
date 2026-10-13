@@ -1127,12 +1127,8 @@ func abandonedFaults(db *fakeDB) []wsm.Fault {
 // recordedAt reports whether the captured log holds a record at this level for
 // this operation carrying this message.
 func recordedAt(f *fleetFixture, level, operation, message string) bool {
-	for _, r := range f.log.logger.Records() {
-		if r.Level == level && r.Operation == operation && r.Message == message {
-			return true
-		}
-	}
-	return false
+	_, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: level, Operation: operation, Message: message})
+	return ok
 }
 
 const (

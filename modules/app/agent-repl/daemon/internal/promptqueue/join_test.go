@@ -41,17 +41,6 @@ func verdictOf(t *testing.T, h *harness, turn ids.TurnID) wsm.Classification {
 	return *held.Classification
 }
 
-// hasRecord reports whether the queue logged a record at LEVEL under OP
-// whose message is MESSAGE.
-func hasRecord(h *harness, level, op, message string) bool {
-	for _, r := range h.log.Records() {
-		if r.Level == level && r.Operation == op && r.Message == message {
-			return true
-		}
-	}
-	return false
-}
-
 func TestAnAfterToolCallVerdictSendsThePromptToJoinTheRunningTurn(t *testing.T) {
 	// Arrange, Act
 	h := newHarness(t)
@@ -134,7 +123,7 @@ func TestAJoinTheShimRefusesWaitsForTheRunningTurnAndIsLogged(t *testing.T) {
 	if c.Arm != wsm.ArmHoldForTurnEnd || c.Reason != "the session would not take the prompt into the running turn, so it waits for it to end" {
 		t.Fatalf("verdict = %+v, want the prompt waiting with the refusal's reason", c)
 	}
-	if !hasRecord(h, dlog.LevelError, opJoin, "the shim refused the prompt sent to join the running turn; it waits for it to end") {
+	if !logged(h.log.Records(), dlog.LevelError, opJoin, "the shim refused the prompt sent to join the running turn; it waits for it to end") {
 		t.Fatalf("records = %+v, want the refusal at error", h.log.Records())
 	}
 	if got := h.watcher.openFailed; len(got) != 1 || got[0] != "t1" {
@@ -255,7 +244,7 @@ func TestAFoldReadWhileTheJoinIsAnsweredIsTheJoiningPrompts(t *testing.T) {
 	sentToJoin(t, h)
 
 	// Assert
-	if hasRecord(h, dlog.LevelError, opJoin, "a turn closed as folded that was not the prompt joining the running turn") {
+	if logged(h.log.Records(), dlog.LevelError, opJoin, "a turn closed as folded that was not the prompt joining the running turn") {
 		t.Fatalf("records = %+v, want the fold taken as the joining prompt's", h.log.Records())
 	}
 	if how, ok := h.db.closedTurn("t1"); !ok || how != wsm.CloseFolded {
@@ -323,7 +312,7 @@ func TestAFoldedCloseForATurnThatNeverJoinedIsAnError(t *testing.T) {
 	h.q.OnTurnEnded(theWorkspace, "stray", wsm.CloseFolded)
 
 	// Assert
-	if !hasRecord(h, dlog.LevelError, opJoin, "a turn closed as folded that was not the prompt joining the running turn") {
+	if !logged(h.log.Records(), dlog.LevelError, opJoin, "a turn closed as folded that was not the prompt joining the running turn") {
 		t.Fatalf("records = %+v, want the stray folded close at error", h.log.Records())
 	}
 }
@@ -380,7 +369,7 @@ func TestAJoinThatDidNotStandWhenItsTurnEndedIsAnError(t *testing.T) {
 	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
 
 	// Assert
-	if !hasRecord(h, dlog.LevelError, opJoin, "the turn a prompt was sent to join ended, but the prompt does not run in its place") {
+	if !logged(h.log.Records(), dlog.LevelError, opJoin, "the turn a prompt was sent to join ended, but the prompt does not run in its place") {
 		t.Fatalf("records = %+v, want the missing join at error", h.log.Records())
 	}
 }

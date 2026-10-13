@@ -17,6 +17,47 @@ type Record struct {
 	Context   Context
 }
 
+// RecordQuery names the record a test looks for. A field left empty matches
+// any value, so a query names only what the assertion is about.
+type RecordQuery struct {
+	Level     string
+	Operation string
+	Message   string
+}
+
+// matches reports whether R carries every field the query names.
+func (q RecordQuery) matches(r Record) bool {
+	return (q.Level == "" || r.Level == q.Level) &&
+		(q.Operation == "" || r.Operation == q.Operation) &&
+		(q.Message == "" || r.Message == q.Message)
+}
+
+// FindRecord answers the first of RECORDS the query matches. It is THE ONE
+// record lookup every package's tests share: a test helper that searches
+// records by level, operation or message delegates here rather than looping
+// itself (daemon/record_lookup_test.go fails on a hand-rolled copy).
+func FindRecord(records []Record, q RecordQuery) (Record, bool) {
+	for _, r := range records {
+		if q.matches(r) {
+			return r, true
+		}
+	}
+	return Record{}, false
+}
+
+// FilterRecords answers every one of RECORDS the query matches, in order: the
+// shared form of a test helper that collects or counts records by level,
+// operation or message.
+func FilterRecords(records []Record, q RecordQuery) []Record {
+	var out []Record
+	for _, r := range records {
+		if q.matches(r) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 // TestLogger is the no-op Logger every package's tests use in place of a real
 // sink. It captures records so an error-path test can assert the canonical
 // record and its context, and is safe for concurrent use.

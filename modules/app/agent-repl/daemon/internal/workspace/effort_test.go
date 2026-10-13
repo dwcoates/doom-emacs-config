@@ -10,6 +10,7 @@ import (
 	shimv1 "agentrepl/proto/shim/v1"
 
 	"agent-repld/internal/claudesettings"
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/wsm"
 )
 
@@ -26,10 +27,8 @@ func effortFailure(failure *shimv1.SetSessionEffortFailure) *shimv1.SetSessionEf
 // recordsAt lists the fleet fixture's records under OPERATION at LEVEL.
 func recordsAt(f *fakeSurfaces, operation, level string) []map[string]any {
 	var out []map[string]any
-	for _, record := range f.logger.Records() {
-		if record.Operation == operation && record.Level == level {
-			out = append(out, record.Context)
-		}
+	for _, record := range dlog.FilterRecords(f.logger.Records(), dlog.RecordQuery{Level: level, Operation: operation}) {
+		out = append(out, record.Context)
 	}
 	return out
 }

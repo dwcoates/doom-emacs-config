@@ -1283,10 +1283,8 @@ func awaitRecord(t *testing.T, f *fixture, level, operation string) {
 	ticker := time.NewTicker(time.Millisecond)
 	defer ticker.Stop()
 	for {
-		for _, r := range f.log.logger.Records() {
-			if r.Level == level && r.Operation == operation {
-				return
-			}
+		if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: level, Operation: operation}); ok {
+			return
 		}
 		select {
 		case <-ticker.C:

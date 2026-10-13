@@ -1409,24 +1409,12 @@ func (h *harness) workspace(t *testing.T) (ids.WorkspaceID, string) {
 
 // records returns every captured record whose operation matches.
 func records(log *dlog.TestSurfaces, operation string) []dlog.Record {
-	var out []dlog.Record
-	for _, rec := range log.Records() {
-		if rec.Operation == operation {
-			out = append(out, rec)
-		}
-	}
-	return out
+	return dlog.FilterRecords(log.Records(), dlog.RecordQuery{Operation: operation})
 }
 
 // levelRecords narrows captured records to one level, in order.
 func levelRecords(in []dlog.Record, level string) []dlog.Record {
-	var out []dlog.Record
-	for _, rec := range in {
-		if rec.Level == level {
-			out = append(out, rec)
-		}
-	}
-	return out
+	return dlog.FilterRecords(in, dlog.RecordQuery{Level: level})
 }
 
 // indexOf is the position of one step in a recorded sequence, or -1.

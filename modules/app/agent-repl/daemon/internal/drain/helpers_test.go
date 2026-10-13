@@ -618,13 +618,7 @@ func deployReason(t *testing.T) string {
 
 // records returns every captured record whose operation matches.
 func records(log *dlog.TestSurfaces, operation string) []dlog.Record {
-	var out []dlog.Record
-	for _, rec := range log.Records() {
-		if rec.Operation == operation {
-			out = append(out, rec)
-		}
-	}
-	return out
+	return dlog.FilterRecords(log.Records(), dlog.RecordQuery{Operation: operation})
 }
 
 // errFake is the failure the fakes return when a test asks one to fail.

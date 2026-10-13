@@ -100,12 +100,7 @@ func ready(w *waiter) bool {
 func speculative(rank int) Request { return Request{Workspace: "ws", Repo: "/repo/.git", Rank: rank} }
 
 func (r *rig) recordAt(level, op string) (dlog.Record, bool) {
-	for _, rec := range r.log.Records() {
-		if rec.Level == level && rec.Operation == op {
-			return rec, true
-		}
-	}
-	return dlog.Record{}, false
+	return dlog.FindRecord(r.log.Records(), dlog.RecordQuery{Level: level, Operation: op})
 }
 
 func lastDecision(log *dlog.TestLogger) (string, string) {

@@ -124,7 +124,7 @@ func TestAFlushStopsAtAPromptThatCannotJoinAndKeepsEverythingBehindItHeld(t *tes
 	if !stillHeld(t, h, "t2") || !stillHeld(t, h, "t3") {
 		t.Fatal("the act and the prompt behind it were not left held")
 	}
-	if !hasRecord(h, dlog.LevelInfo, opFlush, "a held prompt cannot be flushed; it and every prompt behind it wait as they would have") {
+	if !logged(h.log.Records(), dlog.LevelInfo, opFlush, "a held prompt cannot be flushed; it and every prompt behind it wait as they would have") {
 		t.Fatalf("records = %+v, want the stop recorded", h.log.Records())
 	}
 }
@@ -208,7 +208,7 @@ func TestAFlushKeptByTheWorkspaceStateSendsNothing(t *testing.T) {
 			if got := h.sender.joins; len(got) != 0 {
 				t.Fatalf("joins = %v, want nothing flushed", got)
 			}
-			if !hasRecord(h, dlog.LevelInfo, opFlush, "the held prompts are not flushed; they wait as they would have") {
+			if !logged(h.log.Records(), dlog.LevelInfo, opFlush, "the held prompts are not flushed; they wait as they would have") {
 				t.Fatalf("records = %+v, want why nothing was flushed", h.log.Records())
 			}
 		})

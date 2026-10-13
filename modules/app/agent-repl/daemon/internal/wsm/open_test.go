@@ -508,12 +508,8 @@ func digest(t *testing.T, path string) string {
 // loggedOperation reports whether the logger captured a record for operation at
 // level.
 func loggedOperation(log *dlog.TestLogger, operation, level string) bool {
-	for _, record := range log.Records() {
-		if record.Operation == operation && record.Level == level {
-			return true
-		}
-	}
-	return false
+	_, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: level, Operation: operation})
+	return ok
 }
 
 // TestAnAbsentRecordIsReadAtDebug pins that a lookup finding nothing is an

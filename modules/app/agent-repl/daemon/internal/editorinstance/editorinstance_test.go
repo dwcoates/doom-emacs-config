@@ -158,10 +158,6 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 
 // logged reports whether a record at level was written under op.
 func logged(logs *dlog.TestSurfaces, level string) bool {
-	for _, r := range logs.Records() {
-		if r.Operation == op && r.Level == level {
-			return true
-		}
-	}
-	return false
+	_, ok := dlog.FindRecord(logs.Records(), dlog.RecordQuery{Level: level, Operation: op})
+	return ok
 }

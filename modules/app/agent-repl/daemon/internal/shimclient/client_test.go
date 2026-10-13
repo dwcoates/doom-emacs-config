@@ -939,12 +939,8 @@ func TestPublishExitRecordsAnAskedForSignalledExitAsADeath(t *testing.T) {
 // hasRecordAt answers whether the test logger holds a record at one level for
 // one operation.
 func hasRecordAt(log *dlog.TestLogger, level, operation string) bool {
-	for _, r := range log.Records() {
-		if r.Level == level && r.Operation == operation {
-			return true
-		}
-	}
-	return false
+	_, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: level, Operation: operation})
+	return ok
 }
 
 // TestKillArmsTheStandDownLatchBeforeTheProcessIsEnded pins the invariant the
@@ -1181,12 +1177,8 @@ func (s *inertSessionStream) Close()                                      {}
 // hasRecordSaying answers whether the test logger holds a record at one level
 // for one operation whose message is exactly the one named.
 func hasRecordSaying(log *dlog.TestLogger, level, operation, message string) bool {
-	for _, r := range log.Records() {
-		if r.Level == level && r.Operation == operation && r.Message == message {
-			return true
-		}
-	}
-	return false
+	_, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: level, Operation: operation, Message: message})
+	return ok
 }
 
 // ---- a call that died in a teardown this daemon ordered ----
