@@ -12,9 +12,8 @@ import (
 // rosterArmClaims places every RosterRow.status arm, by its proto name.
 var rosterArmClaims = map[string]Claim{
 	"merge_queued":    Merging,
-	"merge_waiting":   Merging,
 	"merging":         Merging,
-	"init":            AgentReplFault,
+	"init":            Starting,
 	"severed":         AgentReplFault,
 	"dead":            AgentReplFault,
 	"start_failed":    AgentReplFault,
@@ -31,6 +30,7 @@ var rosterArmClaims = map[string]Claim{
 	"permission":      Waiting,
 	"question":        Waiting,
 	"waiting":         Waiting,
+	"cold_gate":       Waiting,
 	"submitting":      Thinking,
 	"thinking":        Thinking,
 	"clearing":        Thinking,
@@ -42,7 +42,6 @@ var rosterArmClaims = map[string]Claim{
 	"ready":           Idle,
 	"none":            Idle,
 	"inactive":        Inactive,
-	"opening":         Opening,
 }
 
 // RosterArmClaim names the claim a roster status arm makes, and false for an
@@ -75,6 +74,8 @@ func FooterClaim(status *frontendv1.FooterStatus) (Claim, bool) {
 		return Merging, true
 	case *frontendv1.FooterStatus_AgentReplFault:
 		return AgentReplFault, true
+	case *frontendv1.FooterStatus_Starting:
+		return Starting, true
 	case *frontendv1.FooterStatus_NetworkFault:
 		return NetworkFault, true
 	case *frontendv1.FooterStatus_Closing:

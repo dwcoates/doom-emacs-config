@@ -2407,7 +2407,6 @@ export const ROSTER_STATUS_ARMS = [
   "turnDied",
   "merging",
   "mergeQueued",
-  "mergeWaiting",
   "mergeFailed",
   "merged",
   "none",
@@ -2415,7 +2414,7 @@ export const ROSTER_STATUS_ARMS = [
   "closing",
   "daemonImpaired",
   "waiting",
-  "opening",
+  "coldGate",
 ] as const;
 export type RosterStatusArm = (typeof ROSTER_STATUS_ARMS)[number];
 
@@ -2436,14 +2435,13 @@ const PENDING_DIVERGENCE: MessageInitShape<typeof RosterRepoSectionSchema>["dive
 };
 
 /**
- * The merge arms the vocabulary paints with glyphs. All carry a glyph; only
- * the ones render-colors.json declares in `colored_merge_arms` also spend a
- * color (every one does since 2026-09-28; merge_failed is turquoise).
+ * The merge arms the vocabulary paints with the one merge glyph. Every one
+ * also spends a color (render-colors.json `colored_merge_arms`); a failed
+ * merge is green with a red-inked glyph (owner ruling, 2026-10-13).
  */
 export const ROSTER_MERGE_ARMS = [
   "merging",
   "mergeQueued",
-  "mergeWaiting",
   "mergeFailed",
   "merged",
 ] as const;

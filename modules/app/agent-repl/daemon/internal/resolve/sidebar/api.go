@@ -78,23 +78,6 @@ type Resolver interface {
 	// SetMerge installs one workspace's merge facts, which drive its merge
 	// status arm and its glyph.
 	SetMerge(ws ids.WorkspaceID, facts footer.MergeFacts)
-	// SetMergeRequested raises (true) or lowers (false) the fact that a merge
-	// is RECORDED for the workspace and waiting for its requesting turn to
-	// end. The merge orchestrator raises it the moment the request is
-	// recorded -- always before that turn ends -- and lowers it when the
-	// request is withdrawn. It is never drawn: it decides only the one-shot
-	// outcome, so no client learns of the merge before the turn ends.
-	SetMergeRequested(ws ids.WorkspaceID, requested bool)
-	// SetDetachedMergeEnded reports how a DETACHED merge the workspace asked
-	// for ended: the merge ran in a merge workspace forked from it, whose own
-	// facts are published for the merge workspace alone. The workspace's
-	// request fact stands from the request until this end (the orchestrator
-	// raises it again at the hand-off and on recovering the merge workspace's
-	// entry), so the requester counts as having a merge live all the while;
-	// the end lowers it, and a merge that did not land -- failed, abandoned,
-	// or never forked -- leaves the requester's one-shot failed. Like the
-	// request fact it is never drawn.
-	SetDetachedMergeEnded(ws ids.WorkspaceID, landed bool)
 	// SetSelected records the user's selection, which also clears that
 	// workspace's attention marker.
 	SetSelected(ws ids.WorkspaceID)
@@ -138,7 +121,8 @@ type Resolver interface {
 	SetBringingUp(ws ids.WorkspaceID, bringingUp bool)
 	// SetOpening raises (true) or lowers (false) the fact that an OpenTabs in
 	// flight names the workspace and has not answered it `opened` yet. While
-	// it stands the row draws `opening`, over every other arm. The OpenTabs
+	// it stands the row draws `inactive` with its `opening` marker, over every
+	// other arm. The OpenTabs
 	// coordinator is the one caller.
 	SetOpening(ws ids.WorkspaceID, opening bool)
 	// SetVendorStart installs where the workspace's vendor-start run stands

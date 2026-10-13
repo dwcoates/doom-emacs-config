@@ -304,9 +304,9 @@ message FooterStatus {
     // Tag 8 is RETIRED: the asleep status died with hibernation leaving
     // the contract.
     // AN AGENT-REPL FAULT: one of agent-repl's own services for this
-    // workspace is not serving — the shim is starting, severed, dead or
-    // failed to start, or the daemon itself is impaired. BLUE: the workspace
-    // is unusable and the composer is CLOSED. It outranks every other fault.
+    // workspace is not serving — the shim is severed, dead or failed to
+    // start, or the daemon itself is impaired. BLUE: the workspace is
+    // unusable and the composer is CLOSED. It outranks every other fault.
     FooterStatusAgentReplFault agent_repl_fault = 9;
     // A close was requested and has not completed.
     FooterStatusClosing closing = 10;
@@ -355,6 +355,14 @@ message FooterStatus {
     // ruling, 2026-10-08). It is the same coarse claim as the roster's
     // `question` arm.
     FooterStatusQuestion question = 19;
+    // THE SESSION IS BOOTING: its shim is being dialed, or a turn accepted or
+    // a session announced awaits the bring-up of a route never seen
+    // (ladder.AwaitingBringUp). An EXPECTED step, never a fault (owner
+    // ruling, 2026-10-13): GREY, and the composer stays OPEN, a prompt sent
+    // meanwhile is held until the session is up. It is the same coarse claim
+    // as the roster's `init` arm, and ranks directly beneath
+    // `agent_repl_fault`.
+    FooterStatusStarting starting = 20;
   }
   // Tag 12 (`merge_conflict`) is retired; see the note in the oneof.
   reserved 12;
@@ -872,7 +880,7 @@ message FooterStatusMerging {
     // stands again.
     FooterSubStatusMergingWaitingOnUser waiting_on_user = 21;
     // The merge holds the workspace but has not started: it waits for the
-    // workspace it drives to fall free. The roster draws it `merge_waiting`.
+    // workspace it drives to fall free. The roster draws it `merge_queued`.
     FooterSubStatusMergingAwaitingFree awaiting_free = 22;
   }
   // Tags 1-4, 6-9, 11 and 12 (enqueuing, queued, pre_prompt, merge, parked,
@@ -1485,8 +1493,8 @@ message FooterStatusActivityUpdateNoteShimWhenIdle {}
 message FooterStatusAgentReplFault {
   // The link's step.
   oneof substatus {
-    // The shim is starting.
-    FooterSubStatusAgentReplFaultStarting starting = 1;
+    // Tag 1 (`starting`) is RETIRED: a booting session is not a fault, and
+    // is the `starting` status arm (owner ruling, 2026-10-13).
     // NO LONGER EMITTED: a link that serves with degradation is USABLE, so
     // it is the `degraded` status arm (owner ruling, 2026-09-28), never
     // `agent_repl_fault`. Kept so an older frame still decodes.
@@ -1513,15 +1521,13 @@ message FooterStatusAgentReplFault {
   }
   // Tags 7–9 (`vendor_retry`, `vendor_rejection`, `vendor_failed`) moved to
   // `vendor_fault`: a vendor that will not start is the vendor's fault.
-  reserved 7, 8, 9;
-  reserved "vendor_retry", "vendor_rejection", "vendor_failed";
+  reserved 1, 7, 8, 9;
+  reserved "starting", "vendor_retry", "vendor_rejection", "vendor_failed";
 
   // The activity cell. ALWAYS SET: the enduring tier guarantees the cell has
   // something to draw under every status.
   FooterStatusAgentReplFaultActivity activity = 6;
 }
-// The shim is starting.
-message FooterSubStatusAgentReplFaultStarting {}
 // The link serves with degradation.
 message FooterSubStatusAgentReplFaultDegraded {}
 // The link was severed and reconnection is being attempted.
@@ -1539,8 +1545,8 @@ message FooterSubStatusVendorFaultVendorRejection {}
 // The vendor failed to start for the whole retry window.
 message FooterSubStatusVendorFaultVendorFailed {}
 // The activity cell while disconnected: the salient line, or the transient
-// over the enduring line. A step with no line of its own (starting, a
-// severed link being retried with no fault yet) draws unpinned.
+// over the enduring line. A step with no line of its own (a severed link
+// being retried with no fault yet) draws unpinned.
 message FooterStatusAgentReplFaultActivity {
   // WHICH TIER the daemon resolved. Exactly one is set, and a push with
   // neither is malformed.
@@ -1622,6 +1628,51 @@ message FooterStatusClosing {
 }
 // The close is refused while work is live.
 message FooterSubStatusCloseBlocked {}
+
+// The session is booting. GREY: an expected step, never a fault.
+message FooterStatusStarting {
+  // The activity cell. ALWAYS SET: the enduring tier guarantees the cell has
+  // something to draw under every status.
+  FooterStatusStartingActivity activity = 1;
+}
+// The activity cell while booting: the salient line, or the transient over
+// the enduring line.
+message FooterStatusStartingActivity {
+  // WHICH TIER the daemon resolved. Exactly one is set, and a push with
+  // neither is malformed.
+  oneof tier {
+    // A line that explains the boot stands.
+    FooterStatusStartingSalient salient = 1;
+    // Nothing salient stands: the newest transient (if any) over the
+    // enduring line.
+    FooterActivityTransientOverEnduring unpinned = 2;
+  }
+}
+// The salient kinds legal while booting. A previous bring-up's failure ranks
+// first, because it explains why the session is being brought up again; then
+// a standing agent-repl fault the dialing link outranks; then a deploy's
+// progress and the push notification, in that order.
+message FooterStatusStartingSalient {
+  // When this line began standing; the client ticks the relative age.
+  FooterStatusActivityAt at = 1;
+  // The one salient line.
+  oneof kind {
+    // WHY the session's last bring-up failed, standing until the next
+    // successful link edge clears it.
+    FooterStatusActivityStartFailed start_failed = 2;
+    // A DEPLOY'S PROGRESS. STATUS-INDEPENDENT: every status arm's salient
+    // oneof carries it. See FooterStatusActivityUpdate.
+    FooterStatusActivityUpdate update = 3;
+    // THE AGENT'S PUSH NOTIFICATION, standing until the next prompt is
+    // submitted. STATUS-INDEPENDENT: every status arm's salient oneof carries
+    // it.
+    FooterStatusActivityNotification notification = 4;
+    // A STANDING AGENT-REPL FAULT while the shim is being dialed: the link
+    // state is the live truth about the link, so the session is drawn
+    // booting, and the fault stands as its line until it is retracted.
+    FooterStatusActivityFault fault = 5;
+  }
+}
 // The activity cell while closing: the salient line, or the transient over
 // the enduring line.
 message FooterStatusClosingActivity {

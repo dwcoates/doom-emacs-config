@@ -35,25 +35,6 @@ func TestAOneShotRequestMarksTheRequesterAndRepublishesTheRoster(t *testing.T) {
 	}
 }
 
-func TestAOneShotRequestRaisesTheRequestBeforeTheRosterIsRepublished(t *testing.T) {
-	// Arrange: the announcing turn is still in flight.
-	h := newHarness(t)
-	h.inFlight = "turn-announcing"
-
-	// Act.
-	if err := h.requestOneShot(t, ownBranch, false); err != nil {
-		t.Fatalf("Enqueue: %v", err)
-	}
-
-	// Assert: the push that first draws the one-shot mark already knows the
-	// merge is requested, so the turn's end draws it armed, not failed.
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if len(h.requestedAtPublish) != 1 || len(h.requestedAtPublish[0]) != 1 || !h.requestedAtPublish[0][0] {
-		t.Fatalf("merge-requested facts at each republish = %v, want the request raised before the one republish", h.requestedAtPublish)
-	}
-}
-
 func TestAOneShotMergeClosesTheRequesterOnceItLands(t *testing.T) {
 	// Arrange: a one-shot request put in line, whose merge lands.
 	h := newHarness(t)

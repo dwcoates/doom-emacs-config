@@ -956,129 +956,15 @@ body::after {
 }
 #ws-sidebar .row:hover { background: var(--card); }
 
-/* Lifecycle dot: the row's single status element, class-keyed by the
-   status name (statusDotHtml). Breathing red = thinking, still blue = init
-   and the other route states, solid
-   green = done, grey = done+viewed, breathing yellow = awaiting
-   permission, hollow = idle, grey = dead; `none` holds the column's
-   alignment invisibly. */
-/* THE MARK COLUMN'S ONE WIDTH (owner request, 2026-10-08): the dot's
-   diameter, which every mark's box takes, a glyph's included, so every mark is
-   centered on one line and every name starts at one edge. */
-#ws-sidebar { --ws-mark-width: 9px; }
-#ws-sidebar .st { flex: 0 0 auto; width: var(--ws-mark-width); height: 9px; border-radius: 50%; }
-#ws-sidebar .st-thinking { background: var(--err); animation: ws-pulse 1.3s ease-in-out infinite; }
-/* SUBMITTING breathes exactly as thinking does: a turn is in flight and a
-   prompt cannot land, which is the same claim. Only the footer's phase word
-   says the shim has not taken it yet. */
-#ws-sidebar .st-submitting { background: var(--err); animation: ws-pulse 1.3s ease-in-out infinite; }
-/* The two context cuts breathe exactly as thinking does: the agent is busy
-   and a prompt cannot land, which is the same claim. Only the footer's phase
-   word says WHAT it is busy with. */
-#ws-sidebar .st-clearing { background: var(--err); animation: ws-pulse 1.3s ease-in-out infinite; }
-#ws-sidebar .st-compacting { background: var(--err); animation: ws-pulse 1.3s ease-in-out infinite; }
-/* The session-local monitoring overlay: the current row's quiescent dot
-   breathes the async amber while background work continues — the sidebar
-   home of the signal the topbar `monitoring…` datapoint used to carry. */
-#ws-sidebar .st-monitoring { background: var(--async); animation: ws-pulse 1.3s ease-in-out infinite; }
-/* Booting wears the tab-bar's init blue: red here read as an error on a
-   workspace that was merely starting, and as identical to a thinking one.
-   STILL, like every other blue dot below (severed, dead, start-failed,
-   degraded): blue marks the state of the ROUTE, and a route reads as a
-   standing condition rather than as work ticking over. One blue rule
-   breathing while the rest sat still made the same color mean two things. */
-#ws-sidebar .st-init { background: var(--init); }
-/* GREEN, breathing: a pending permission means the agent is READY for the
-   user to view the response and answer. The breath distinguishes "ready AND
-   waiting on you" from "ready"; the color says it is not a fault. */
-#ws-sidebar .st-permission { background: var(--ok); animation: ws-pulse 1.3s ease-in-out infinite; }
-#ws-sidebar .st-done { background: var(--ok); }
-/* GREEN, filled, exactly as done: an interrupted turn is a CONCLUDED turn —
-   the user asked for the stop, got it, and can prompt again immediately. The
-   WORD in the footer and the tab bar carries the distinction; the dot's color
-   claim is the same one done makes. */
-#ws-sidebar .st-interrupted { background: var(--ok); }
-/* GREEN, filled: a ready workspace is as available as a done one, and the
-   hollow ring said "nothing here" about a session ready to be used. */
-#ws-sidebar .st-ready { background: var(--ok); }
-#ws-sidebar .st-idle { background: var(--ok); }
-/* YELLOW, breathing: no foreground turn, but detached work continues. The
-   same --async the bubble border wears, so the two are one color rather than
-   two that nearly match. */
-#ws-sidebar .st-idle-async { background: var(--async); animation: ws-pulse 1.3s ease-in-out infinite; }
-/* PURPLE: blocked until a human or the vendor acts. Still, not breathing —
-   nothing is in progress. */
-#ws-sidebar .st-vendor-blocked { background: var(--blocked); }
-/* BLUE: a dead or never-started session is a compromised ROUTE, not a
-   terminal outcome, so it wears the same blue as bring-up — without the
-   breath, because nothing is in progress. */
-/* SEVERED: blue like init, and STILL — init pulses because a bring-up is in
-   flight, and a severed route means nothing is. Blue because it is the half of
-   the old DORMANT that really is evidence of breakage: a bring-up that could
-   not be completed, or a session controller that died on a terminal protocol error. */
-#ws-sidebar .st-severed { background: var(--init); }
-/* HIBERNATED: TEAL, and still. The benign half — asleep on purpose, or never
-   wired at all. Its own hue rather than a shade of --init, because these two
-   states were ONE and painting them alike is exactly what spent blue's
-   meaning. */
-#ws-sidebar .st-hibernated { background: var(--hibernated); }
-#ws-sidebar .st-dead { background: var(--init); }
-#ws-sidebar .st-start-failed { background: var(--init); }
-#ws-sidebar .st-degraded { background: var(--init); }
-#ws-sidebar .st-none { visibility: hidden; }
-/* A perspective-less workspace — registered in the roster but with no open
-   perspective, so it shows in the sidebar yet not the tab-bar.  No live session
-   backs it, so its lifecycle disc is replaced by a question-mark glyph.  Boxed
-   like the merge glyph (no disc fill, radius 0) so the emoji sits centered
-   rather than clipped inside the 9px disc. */
-#ws-sidebar .st-inactive {
-  width: 1em;
-  height: 1em;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 0;
-  background: none;
-  font-size: 0.8rem;
-  line-height: 1;
-}
-
-/* Merge lifecycle: the recycle glyph — spinning while the run is the queue's
-   active one, still while merely queued or once the run has failed. Its ink
-   is the arm's shared tone (the rules under THE TONE WINS below): purple in
-   progress and TURQUOISE on a failure (something went wrong, but the
-   workspace is usable) — owner rulings, 2026-09-28 and 2026-09-29.  `merged` is NOT here: a settled merge has left the pipeline and
-   renders in the Recently Merged section, where the recycle mark would
-   misread as still-queued, so it takes the green disc below instead (owner
-   ruling, 2026-09-28: a merge in progress is purple, a landed one green). */
-#ws-sidebar .st-merging,
-#ws-sidebar .st-merge-queued,
-#ws-sidebar .st-merge-waiting,
-#ws-sidebar .st-merge-failed {
-  /* The recycle glyph's ink sits off-center in its line box, so ws-spin
-     rotating it about the default box center (transform-origin 50% 50%) made it
-     orbit rather than turn in place.  Center the glyph geometrically inside a
-     fixed square box — a flex box that centers its single glyph on both axes —
-     so the box center lands on the glyph and the spin is on-axis.  The box is
-     sized in em so it tracks font-size, leaving the sibling size fix intact. */
-  width: 1em;
-  height: 1em;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 0;
-  background: none;
-  /* Sized ABOVE the 9px disc statuses above (#ws-sidebar .st): the recycle
-     glyph is a thin stroke, so at a disc-matching box it reads optically
-     SMALLER than a solid fill alongside the green/red/orange/yellow dots. The
-     bump grows its drawn ring until it optically matches the 9px disc. */
-  font-size: 1.3rem;
-  line-height: 1;
-}
-/* SPINNING: the workspace is the merge queue's ACTIVE one, `merging`, the
-   whole run from its rebase to its merge commit. `merge-failed` stays still:
-   that run is over. */
-#ws-sidebar .st-merging { animation: ws-spin 1.4s linear infinite; }
+/* THE STATUS MARK'S BOX. Every mark, a dot, the merge glyph or an emoji,
+   takes this one box, so every mark is centered on one line and every name
+   starts at one edge (owner request, 2026-10-08), and every mark draws at
+   the dot's VISIBLE SIZE (owner ruling, 2026-10-13): `--ws-mark-size` is the
+   dot's diameter and the size every glyph is drawn at. The mark's color, ink,
+   glyph and motion are keyed off the shared vocabulary below ("THE STATUS
+   MARK"), never off a per-state rule. */
+#ws-sidebar { --ws-mark-width: 9px; --ws-mark-size: 9px; }
+#ws-sidebar .st { flex: 0 0 auto; width: var(--ws-mark-width); height: var(--ws-mark-size); border-radius: 50%; }
 
 /* THE BANDS UNDER EVERY GROUPING -- Hidden Workspaces, then Recently Merged
    -- hold no grouping's sections, so each is set off from the list above by
@@ -1219,7 +1105,7 @@ body::after {
 #ws-sidebar .ws.gone > .row { opacity: 0.55; }
 
 /* The current row's merge (sidebar.ts `mergeRowHtml`). The rail LEADS on
-   merges, and the recycle glyph beside the name says only that one is
+   merges, and the merge glyph beside the name says only that one is
    happening — identically for a run on its last commit and a run parked on a
    conflict. These lines carry the rest: how far it has got, the commit or
    prompt in hand, and the note a stopped run leaves behind.
@@ -1292,9 +1178,11 @@ body::after {
 }
 #ws-sidebar .detail .summary { font-style: italic; color: var(--muted); margin: 0.35rem 0 0; }
 
+/* THE BREATH SHRINKS A MARK TO 86% (owner ruling, 2026-10-13: half the
+   extent of the 72% it once reached). */
 @keyframes ws-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.35; transform: scale(0.72); }
+  50% { opacity: 0.35; transform: scale(0.86); }
 }
 @keyframes ws-spin { to { transform: rotate(360deg); } }
 
@@ -3445,9 +3333,9 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    progress footer (`.pfooter`) is the one home for every in-flight signal now.
    `.thinking-pending` survives as the composer's own "processing…" row.
 
-   The monitoring indicator was never a feed-tail row: it breathes as the
-   sidebar's amber dot on the session's own row (`.st-monitoring`), and still
-   does — the footer's phase cell names the same state in words. */
+   The monitoring indicator was never a feed-tail row: detached work breathes
+   as the sidebar's amber `idle_async` dot on the session's own row, and the
+   footer's phase cell names the same state in words. */
 /* Pull the ellipsis flush against its status word. The row is flex with a
    0.5rem inter-item gap (so the spinner clears the word), but the ellipsis
    span is its OWN flex item too, so that same gap lands between the word and
@@ -5559,10 +5447,17 @@ ar-button.outcome-marker-pill {
    one color here and another in the footer or the Emacs tab bar. `currentColor`
    is what makes one fill rule serve every tone. */
 #ws-sidebar .st[data-glyph="dot"] { background: currentColor; }
-/* A WORKSPACE BEING OPENED (owner ruling, 2026-10-12): a grey dot, and the
-   row offers no click until the daemon answers it open. */
-#ws-sidebar .ws[data-arm="opening"] .st { color: var(--muted); }
-#ws-sidebar .ws[data-arm="opening"] > .row { cursor: default; }
+/* A GREY MARK (owner ruling, 2026-10-13): an arm that spends no color --
+   `inactive`, incidentally inactive, and `init`, a session booting -- draws the
+   muted dot. `none` draws nothing (below). */
+#ws-sidebar .st.tone-none[data-glyph="dot"] { color: var(--muted); }
+/* A WORKSPACE BEING OPENED (owner ruling, 2026-10-12): the row offers no
+   click until the daemon answers it open (frontend.v1.RosterRowOpening). */
+#ws-sidebar .ws[data-opening="true"] > .row { cursor: default; }
+/* A COLD GATE STRIKES THE NAME (owner ruling, 2026-10-13): the workspace is
+   parked on its cold gate's choice. The name alone, in every section, never
+   the mark or the when-column. */
+#ws-sidebar .ws[data-arm="coldGate"] > .row > .name { text-decoration: line-through; }
 /* A VIEWED WORKSPACE'S DOT (frontend.v1.RosterRowViewed, owner request,
    2026-10-12): the grey its name wears, so a workspace whose result the user
    has read stays in its grouping and still reads apart from one whose result
@@ -5571,43 +5466,58 @@ ar-button.outcome-marker-pill {
    nested under a viewed parent keeps its tone. */
 #ws-sidebar .ws[data-viewed="true"] > .row > .st { color: var(--muted); }
 /* The glyph statuses are not discs: a box that centers a single character, so
-   the recycle mark turns on its own axis rather than orbiting. The box is the
-   DOT'S width, not the character's (owner request, 2026-10-08: a 1em box,
-   left-aligned in the row like the 9px dot, put every glyph's center ~4px right
-   of the dots' and pushed its name right). The character is wider than the box
-   and overflows it equally on both sides (the flex default, unsafe centering),
-   so its center is the box's, which is the dots'. */
+   a turning glyph turns on its own axis rather than orbiting. The box is the
+   DOT'S width, not the character's (owner request, 2026-10-08), and the
+   character is drawn at the dot's size (owner ruling, 2026-10-13): an emoji's
+   image fills its em box, so an em of `--ws-mark-size` draws it as tall as the
+   dot. */
 #ws-sidebar .st-glyph {
   width: var(--ws-mark-width);
-  height: 1em;
+  height: var(--ws-mark-size);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: 0;
   background: none;
-  font-size: 1.1rem;
+  font-size: var(--ws-mark-size);
   line-height: 1;
+}
+/* THE MERGE GLYPH (owner ruling, 2026-10-13): three bars filling the dot's
+   box, drawn here rather than as a character, so it is exactly the dot's size
+   and its center is the box's: `merging` turns it on that center. Its ink is
+   the arm's tone, or its `glyph_inks` row. */
+#ws-sidebar .st-glyph[data-glyph="merge"] {
+  background:
+    linear-gradient(currentColor, currentColor) 0 0 / 100% 2px no-repeat,
+    linear-gradient(currentColor, currentColor) 0 50% / 100% 2px no-repeat,
+    linear-gradient(currentColor, currentColor) 0 100% / 100% 2px no-repeat;
 }
 /* THE TONE WINS OVER EVERY PER-STATE RULE. Every merge arm spends a color of
    its own (render-colors.json colored_merge_arms), so a glyph's ink is its
-   tone exactly as a disc's fill is. The six tones are restated here at the
-   rail's own specificity, after every `.st-*` rule, so neither a disc nor a
-   glyph can take a hand-picked hue (owner ruling, 2026-09-28: a merge conflict
-   is green and a failed merge turquoise — a red glyph for either was exactly
-   this drift). */
+   tone exactly as a disc's fill is, unless the arm declares an INK of its own
+   (below). The six tones are restated here at the rail's own specificity, so
+   neither a disc nor a glyph can take a hand-picked hue. */
 #ws-sidebar .st.tone-blue { color: var(--init); }
 #ws-sidebar .st.tone-purple { color: var(--blocked); }
 #ws-sidebar .st.tone-red { color: var(--err); }
 #ws-sidebar .st.tone-turquoise { color: var(--turquoise); }
 #ws-sidebar .st.tone-yellow { color: var(--async); }
 #ws-sidebar .st.tone-green { color: var(--ok); }
-#ws-sidebar .st[data-glyph="inactive"] { color: var(--muted); }
+/* THE MARK'S OWN INK (render-colors.json glyph_inks, owner ruling,
+   2026-10-13): where the mark's ink differs from the workspace's tone. A
+   failed merge is a green workspace whose merge glyph is red; a compacting
+   turn is a red workspace whose dot is the orange of the feed's compaction
+   rule. After the tones, at their specificity, so the ink wins. */
+#ws-sidebar .st.ink-red { color: var(--err); }
+#ws-sidebar .st.ink-orange { color: var(--compact-rule); }
 #ws-sidebar .st[data-glyph="none"] { visibility: hidden; }
-/* ONE breath and ONE spin for the whole rail, so the animation always makes
-   the same claim: breathing = work in flight, spinning = the merge queue is on
-   this run. */
-#ws-sidebar .st.breathes { animation: ws-pulse 1.3s ease-in-out infinite; }
-#ws-sidebar .st.spins { animation: ws-spin 1.4s linear infinite; }
+/* ONE CYCLE FOR THE WHOLE RAIL (owner ruling, 2026-10-13): a breath (normal,
+   shrunk, normal) takes exactly as long as one turn of a spinning glyph, as an
+   invariant, so both read from the one `--ws-mark-cycle` token. A breath is
+   work in flight or a gate on you; a spin is the merge the queue is running. */
+#ws-sidebar { --ws-mark-cycle: 1.4s; }
+#ws-sidebar .st.breathes { animation: ws-pulse var(--ws-mark-cycle) ease-in-out infinite; }
+#ws-sidebar .st.spins { animation: ws-spin var(--ws-mark-cycle) linear infinite; }
 
 /* THE ATTENTION MARKER, on the ONE cadence frontend.v1.RosterRowAttention
    specifies: two blinks of 500 ms on / 500 ms off, then steady. The phases are

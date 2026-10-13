@@ -28,7 +28,7 @@
 //   │   │ from    …  │                      │    three independently-omitted lines
 //   │   │ summary …  │                      │
 //   │   └────────────┘                      │
-//   │   ? closed-row  (greyed)        5d    │  inactive arm · RosterRowClosed
+//   │   ● closed-row  (grey dot)      5d    │  inactive arm · RosterRowClosed
 //   │ ▸ Recently Merged            (3)      │  RosterMergedSection (folded)
 //   │     repo-name                         │    RosterMergedRepoGroup
 //   └───────────────────────────────────────┘
@@ -232,44 +232,35 @@ message RosterRowReviving {}
 // through its status that background work runs beside it.
 message RosterRowDetachedLive {}
 
-// The ONE-SHOT mark: the workspace was created as a one-shot — given one
-// prompt and expected to finish by asking for its own merge — and whether it
-// has ended WITHOUT a merge live behind it.
+// The ONE-SHOT mark: the workspace was created as a one-shot, given one
+// prompt and expected to finish by asking for its own merge. Empty: presence
+// is the fact.
 //
 // THE DAEMON DECIDES IT. The workspace is a one-shot when its creation asked
 // for the one-shot form; that never changes, so the mark stands for the
-// workspace's whole life. The outcome is resolved from the turns and the
-// merge the daemon itself runs, never from the status arm: a merge the turn
-// asked for is put in line only after that turn ends, so the status arm alone
-// would read a one-shot that DID ask for its merge as one that did not.
+// workspace's whole life.
 //
-// Both surfaces draw both arms, with the same glyphs: the Emacs tab bar
-// before the workspace name, the webapp sidebar in place of the status dot.
-// A permission or question
-// gate's glyph is drawn in place of the mark while the gate is open.
+// DRAWN ONLY WHILE THE ONE-SHOT WORKS (owner ruling, 2026-10-13): both
+// surfaces draw the one-shot glyph in place of the status mark exactly while
+// the row's status is `submitting`, `thinking` or `clearing`, and draw the
+// row's own status mark on every other arm, `compacting` included. The glyph
+// is static. Tags 1 (`armed`) and 2 (`failed`) are RETIRED with the outcome
+// they carried: nothing draws a one-shot's outcome any more.
 message RosterRowOneShot {
-  // How the one-shot stands. Exactly one arm is set; an unset outcome is a
-  // contract breach and is rejected loudly.
-  oneof outcome {
-    // The one-shot has not ended without a live merge: its first turn has
-    // not ended yet, a turn is running, or a merge it asked for is recorded,
-    // queued, running or landed.
-    RosterRowOneShotArmed armed = 1;
-    // The one-shot ENDED WITHOUT A LIVE MERGE: its last turn ended with no
-    // merge asked for, or the merge it asked for failed. It stands until the
-    // workspace starts a turn that reaches `thinking`, which returns the row
-    // to `armed`.
-    RosterRowOneShotFailed failed = 2;
-  }
+  reserved 1, 2;
+  reserved "armed", "failed";
 }
 
-// A one-shot that has not ended without a live merge. Drawn as the one-shot
-// glyph on the tab bar, and not at all on the webapp sidebar.
-message RosterRowOneShotArmed {}
-
-// A one-shot whose last turn ended with no merge asked for, or whose merge
-// failed. Drawn as the failure glyph on the tab bar and the webapp sidebar.
-message RosterRowOneShotFailed {}
+// The OPENING marker: the editor is opening this workspace right now. Empty:
+// presence is the fact.
+//
+// PRESENT exactly while an OpenTabs names the workspace and has not answered
+// it `opened` yet, and only then; the row's status is `inactive` for as long
+// as it stands. NOT SELECTABLE: a click on a row carrying the marker does
+// nothing until the workspace is open, when the marker drops and the row
+// draws its real status. A daemon that restarted under open tabs never draws
+// it for them.
+message RosterRowOpening {}
 
 // The workspace's AVAILABILITY: whether the daemon has this workspace's
 // session to offer an editor. An editor OPENS a workspace — its tab, its
@@ -749,12 +740,17 @@ message RosterRow {
   // workspace. See RosterRowOneShot, which carries the mark's whole contract.
   optional RosterRowOneShot one_shot = 59;
 
+  // The row's OPENING marker: present while the editor is opening this
+  // workspace. See RosterRowOpening, which carries the marker's whole
+  // contract.
+  optional RosterRowOpening opening = 62;
+
   // The row's display name.
   RosterRowName name = 2;
 
   // The workspace's lifecycle AS THE DAEMON RESOLVES IT: its own RenderState
   // coarsened onto the dot vocabulary (idle and ready draw as one dot), plus
-  // the two states no session has (`none`, `inactive`). ONE RESOLVER — this
+  // the two states no session drives (`none`, `inactive`). ONE RESOLVER — this
   // is no longer a second spelling kept aligned by hand with an editor-side
   // table.
   //
@@ -821,15 +817,10 @@ message RosterRow {
     // are up. A NETWORK FAULT: BLUE, the workspace is unusable until the
     // network returns. The same coarse claim as the footer's `network_fault`.
     RosterRowStatusNetworkFault network_fault = 51;
-    // Starting up; the route is not yet proven.
+    // The session is booting; the route is not yet proven. An EXPECTED
+    // step, never a fault (owner ruling, 2026-10-13): GREY, the same mark as
+    // `inactive`, and the same coarse claim as the footer's `starting`.
     RosterRowStatusInit init = 13;
-    // THE EDITOR IS OPENING IT: an OpenTabs names this workspace and has not
-    // answered it `opened` yet. GREY, and NOT SELECTABLE: a click on the row
-    // does nothing until the workspace is open, when the row draws its real
-    // status. Only an open in flight draws this; a workspace whose open
-    // finished, or that no OpenTabs names, never does, so a daemon that
-    // restarted under open tabs draws them as they are.
-    RosterRowStatusOpening opening = 60;
     // The session's backing process is gone but the workspace is recoverable.
     RosterRowStatusSevered severed = 14;
     // Startup failed outright.
@@ -850,27 +841,24 @@ message RosterRow {
     // what ends it.
     RosterRowStatusTurnDied turn_died = 52;
 
-    // The merge pipeline. These render a glyph rather than a lifecycle dot,
-    // except merged, which is settled and files under recently_merged.
-    // merge_failed ALSO takes a color: turquoise, something went wrong and
-    // the workspace is usable. No merge fact reaches the roster before the
-    // turn that asked for the merge has ended, so a row goes straight to
+    // The merge pipeline. Every merge arm draws ONE merge glyph in place of
+    // the lifecycle dot (owner ruling, 2026-10-13); its ink and its motion
+    // say which arm it is. No merge fact reaches the roster before the turn
+    // that asked for the merge has ended, so a row goes straight to
     // merge_queued or merging.
-    // A merge is actively running in this workspace.
+    // A merge is actively running in this workspace. PURPLE, the glyph turns.
     RosterRowStatusMerging merging = 20;
-    // Enqueued behind another workspace's merge.
-    RosterRowStatusMergeQueued merge_queued = 21;
     // The merge was asked for and holds the workspace (prompts are held), but
-    // has NOT STARTED: it waits for this workspace -- or the one whose
-    // worktree it rebases in -- to fall free of its turn in flight and its
-    // detached work. PURPLE, like the other merge arms. No merge bubble is
-    // drawn yet: the bubble is placed when the merge starts, so nothing lands
-    // in the feed after it while it runs. The footer's
-    // `FooterSubStatusMergingAwaitingFree` names what it waits on.
-    RosterRowStatusMergeWaiting merge_waiting = 57;
-    // The merge failed and the workspace is back with the user. TURQUOISE.
+    // has NOT STARTED: it is enqueued behind another workspace's merge, or
+    // waits for this workspace (or the one whose worktree it rebases in) to
+    // fall free of its turn in flight and its detached work. PURPLE, still.
+    // The footer's `merging` substatus says which.
+    RosterRowStatusMergeQueued merge_queued = 21;
+    // The merge failed and the workspace is back with the user. GREEN, the
+    // workspace is ready to be looked at; the glyph's ink is RED, because
+    // what there is to look at is a failed merge (owner ruling, 2026-10-13).
     RosterRowStatusMergeFailed merge_failed = 23;
-    // The merge settled successfully.
+    // The merge settled successfully. GREEN, glyph and workspace alike.
     RosterRowStatusMerged merged = 24;
 
     // Registered, but no session was ever created for it: there is no
@@ -878,10 +866,11 @@ message RosterRow {
     // and there is none" is an assertion, where an unset oneof is the absence
     // of one.
     RosterRowStatusNone none = 25;
-    // Registered but with no open perspective in Emacs, so no live session
-    // whose lifecycle a dot could report. Drawn as a question mark. Dominates
-    // every session state: a perspective-less workspace is inactive whatever
-    // its session once was.
+    // INCIDENTALLY INACTIVE, never by a fault (owner ruling, 2026-10-13):
+    // registered with no open perspective in Emacs and nothing live behind
+    // it, or being opened by the editor right now (the row's `opening`
+    // marker). GREY. Dominates every session state: a perspective-less or
+    // opening workspace is inactive whatever its session is doing.
     RosterRowStatusInactive inactive = 26;
     // The vendor is retrying a call that failed mid-turn, so the session
     // cannot advance. It is a VENDOR fault, the same rung as the footer's
@@ -904,17 +893,23 @@ message RosterRow {
     // the same coarse claim as the footer's
     // `agent_repl_fault · daemon_impaired`.
     RosterRowStatusDaemonImpaired daemon_impaired = 54;
-    // The session waits on something other than a gate's card: a cold gate
-    // standing between it and the next turn, or an interrupt the user sent
-    // that has not yet landed. GREEN, the same coarse claim as the footer's
-    // `waiting` status in those substatuses; a permission or a question gate
-    // has its own arm.
+    // The session waits on an interrupt the user sent that has not yet
+    // landed. GREEN, the same coarse claim as the footer's `waiting ·
+    // interrupting`; a permission, a question or a cold gate has its own arm.
     RosterRowStatusWaiting waiting = 55;
+    // A COLD GATE stands between the session and its next turn: the session
+    // is parked on the user's remediation choice (pay / clear / compact).
+    // GREEN, the same coarse claim as the footer's `waiting · cold_gate`. The
+    // row's NAME is struck through while it stands, in every sidebar section.
+    RosterRowStatusColdGate cold_gate = 61;
   }
   // Tags 19 (`merge_enqueuing`) and 22 (`merge_conflict`) are RETIRED: no
   // merge fact is shown before the requesting turn ends, and nothing parks.
-  reserved 19, 22;
-  reserved "merge_enqueuing", "merge_conflict";
+  // Tags 57 (`merge_waiting`) and 60 (`opening`) are RETIRED (owner ruling,
+  // 2026-10-13): a merge that waits to start is `merge_queued`, and a
+  // workspace being opened is `inactive` with the row's `opening` marker.
+  reserved 19, 22, 57, 60;
+  reserved "merge_enqueuing", "merge_conflict", "merge_waiting";
 
   // Whether this row is the selected workspace — the row's highlight bar.
   // Redundant with a comparison against WorkspaceRoster.current and
@@ -1119,15 +1114,12 @@ message RosterRowStatusApiRetrying {}
 message RosterRowStatusClosing {}
 // The row's status while the daemon itself cannot serve the workspace.
 message RosterRowStatusDaemonImpaired {}
-// The row's status while the session waits on a cold gate's answer or on an
-// interrupt landing.
+// The row's status while the session waits on an interrupt landing.
 message RosterRowStatusWaiting {}
+// The row's status while the session is parked on its cold gate's answer.
+message RosterRowStatusColdGate {}
 
 message RosterRowStatusInit {}
-
-// The editor is opening the workspace. DELIBERATELY EMPTY: the arm is the
-// status, grey and not selectable.
-message RosterRowStatusOpening {}
 
 message RosterRowStatusSevered {}
 
@@ -1147,8 +1139,6 @@ message RosterRowStatusDead {}
 message RosterRowStatusMerging {}
 
 message RosterRowStatusMergeQueued {}
-
-message RosterRowStatusMergeWaiting {}
 
 message RosterRowStatusMergeFailed {}
 
