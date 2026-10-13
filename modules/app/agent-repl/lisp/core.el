@@ -326,6 +326,33 @@ empty string yields the state dir itself.  The parent directory is NOT
 created here."
   (expand-file-name relative (agent-repl--global-state-dir)))
 
+(defun agent-repl--write-file-atomically (file text)
+  "Write TEXT to FILE as UTF-8, ATOMICALLY, and return FILE.
+TEXT goes to a hidden temporary sibling of FILE, `.<name>.<random>.tmp',
+which is then renamed over FILE: FILE holds its previous contents or TEXT
+in full and never a torn write, and a directory watcher matching FILE\='s
+own name never sees the temporary.  FILE\='s parent directory is created
+when missing.  A failure removes the temporary and is re-signalled; the
+caller owns logging it, because only the caller knows what was lost."
+  (let* ((file (expand-file-name file))
+         (dir (file-name-directory file))
+         tmp)
+    (condition-case err
+        (progn
+          (make-directory dir t)
+          (setq tmp (make-temp-file
+                     (expand-file-name (concat "." (file-name-nondirectory file) ".") dir)
+                     nil ".tmp"))
+          (let ((coding-system-for-write 'utf-8-unix))
+            (with-temp-file tmp
+              (insert text)))
+          (rename-file tmp file t)
+          file)
+      (error
+       (when (and tmp (file-exists-p tmp))
+         (delete-file tmp))
+       (signal (car err) (cdr err))))))
+
 (defconst agent-repl--output-dir
   (file-name-as-directory (agent-repl--global-state-file "output"))
   "The daemon's workspace-command inbox at `~/.claude-emacs/output/'.

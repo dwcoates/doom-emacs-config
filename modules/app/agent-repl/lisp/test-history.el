@@ -1205,6 +1205,57 @@ silently start round-tripping back onto disk."
   (should-error
    (agent-repl--write-sexp-file "/nonexistent/parent/dir/file.el" '(data))))
 
+(ert-deftest agent-repl-test-write-sexp-file-leaves-no-temporary ()
+  "A successful write leaves FILE alone in its directory, with no temporary."
+  ;; Arrange.
+  (let* ((dir (make-temp-file "test-sexp-dir-" t))
+         (file (expand-file-name "state.el" dir)))
+    (unwind-protect
+        (progn
+          ;; Act.
+          (agent-repl--write-sexp-file file '("x"))
+          ;; Assert.
+          (should (equal (directory-files dir nil "\\`[^.]\\|\\`\\.[^.]") '("state.el"))))
+      (delete-directory dir t))))
+
+(ert-deftest agent-repl-test-write-sexp-file-non-ascii-round-trips ()
+  "A non-ASCII string is written as UTF-8 and reads back unchanged."
+  ;; Arrange.
+  (let ((file (make-temp-file "test-sexp-utf8-"))
+        (data '("caf\u00e9 \u2014 \U0001F600")))
+    (unwind-protect
+        (progn
+          ;; Act.
+          (agent-repl--write-sexp-file file data)
+          ;; Assert.
+          (should (equal (agent-repl--read-sexp-file file) data)))
+      (delete-file file))))
+
+(ert-deftest agent-repl-test-write-sexp-file-failed-write-keeps-previous-contents ()
+  "A write that fails before its rename leaves FILE's previous contents whole.
+The temporary is removed, the failure is logged with the file and its
+cause, and the error reaches the caller."
+  ;; Arrange.
+  (let* ((dir (make-temp-file "test-sexp-dir-" t))
+         (file (expand-file-name "state.el" dir))
+         logged)
+    (unwind-protect
+        (progn
+          (agent-repl--write-sexp-file file '("before"))
+          (cl-letf (((symbol-function 'rename-file)
+                     (lambda (&rest _) (signal 'file-error '("rename refused"))))
+                    ((symbol-function 'agent-repl--error)
+                     (lambda (_scope fmt &rest args) (push (apply #'format fmt args) logged))))
+            ;; Act.
+            (should-error (agent-repl--write-sexp-file file '("after")) :type 'file-error))
+          ;; Assert.
+          (should (equal (agent-repl--read-sexp-file file) '("before")))
+          (should (equal (directory-files dir nil "\\`[^.]\\|\\`\\.[^.]") '("state.el")))
+          (should (= (length logged) 1))
+          (should (string-match-p (regexp-quote (format "file=%s" file)) (car logged)))
+          (should (string-match-p "rename refused" (car logged))))
+      (delete-directory dir t))))
+
 ;;;; ---- Tests: read-sexp-file-if-exists edge cases ----
 
 (ert-deftest agent-repl-test-read-sexp-file-if-exists-empty-file ()
