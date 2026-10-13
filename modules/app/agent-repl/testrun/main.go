@@ -17,6 +17,7 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+	"time"
 
 	"agentrepl/testrun/internal/cli"
 	"agentrepl/testrun/internal/cover"
@@ -113,6 +114,13 @@ func runParent(log *run.Log, module string) (string, []string, func() error) {
 		return run.DefaultTmpParent, nil, disk
 	}
 	m := ramdisk.Default(log)
+	m.Run = ramdisk.Timed(m.Run, func(call string, took time.Duration, err error) {
+		if err != nil {
+			log.Infof("ramdisk: %s failed after %s", call, took.Round(time.Millisecond))
+			return
+		}
+		log.Infof("ramdisk: %s answered in %s", call, took.Round(time.Millisecond))
+	})
 	size, err := ramdisk.SizeFromEnv(os.Getenv)
 	if err != nil {
 		log.Errorf("RAM DISK UNAVAILABLE, this run's root falls back to the disk at %s: %v", run.DefaultTmpParent, err)
