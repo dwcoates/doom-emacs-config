@@ -658,7 +658,14 @@ type AgentQuestionSuccess struct {
 	//
 	//	*AgentQuestionSuccess_Answered
 	//	*AgentQuestionSuccess_Unanswered
-	Outcome       isAgentQuestionSuccess_Outcome `protobuf_oneof:"outcome"`
+	Outcome isAgentQuestionSuccess_Outcome `protobuf_oneof:"outcome"`
+	// When the ask concluded, with the instant it was posed restated
+	// (AgentActivitySettledAt.started_at), so the settled frame alone states how
+	// long the user was asked -- the start frame is gone from any store that
+	// keeps the latest frame of the ask. UNSET when the producer observed no
+	// conclusion instant; a consumer then states no wait at all rather than one
+	// measured against its own clock.
+	SettledAt     *AgentActivitySettledAt `protobuf:"bytes,4,opt,name=settled_at,json=settledAt,proto3,oneof" json:"settled_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -721,6 +728,13 @@ func (x *AgentQuestionSuccess) GetUnanswered() *AgentQuestionUnanswered {
 		if x, ok := x.Outcome.(*AgentQuestionSuccess_Unanswered); ok {
 			return x.Unanswered
 		}
+	}
+	return nil
+}
+
+func (x *AgentQuestionSuccess) GetSettledAt() *AgentActivitySettledAt {
+	if x != nil {
+		return x.SettledAt
 	}
 	return nil
 }
@@ -1181,14 +1195,17 @@ const file_conversation_v1_question_proto_rawDesc = "" +
 	"\n" +
 	"\b_preview\"0\n" +
 	"\x18AgentQuestionOptionLabel\x12\x14\n" +
-	"\x05label\x18\x01 \x01(\tR\x05label\"\xed\x01\n" +
+	"\x05label\x18\x01 \x01(\tR\x05label\"\xc9\x02\n" +
 	"\x14AgentQuestionSuccess\x129\n" +
 	"\x05batch\x18\x01 \x01(\v2#.conversation.v1.AgentQuestionBatchR\x05batch\x12C\n" +
 	"\banswered\x18\x02 \x01(\v2%.conversation.v1.AgentQuestionAnswersH\x00R\banswered\x12J\n" +
 	"\n" +
 	"unanswered\x18\x03 \x01(\v2(.conversation.v1.AgentQuestionUnansweredH\x00R\n" +
-	"unansweredB\t\n" +
-	"\aoutcome\"Y\n" +
+	"unanswered\x12K\n" +
+	"\n" +
+	"settled_at\x18\x04 \x01(\v2'.conversation.v1.AgentActivitySettledAtH\x01R\tsettledAt\x88\x01\x01B\t\n" +
+	"\aoutcomeB\r\n" +
+	"\v_settled_at\"Y\n" +
 	"\x14AgentQuestionAnswers\x12A\n" +
 	"\aanswers\x18\x01 \x03(\v2'.conversation.v1.AgentQuestionSelectionR\aanswers\"\xee\x01\n" +
 	"\x16AgentQuestionSelection\x12>\n" +
@@ -1244,7 +1261,8 @@ var file_conversation_v1_question_proto_goTypes = []any{
 	(*AgentQuestionId)(nil),           // 16: conversation.v1.AgentQuestionId
 	(*AgentQuestionAnswer)(nil),       // 17: conversation.v1.AgentQuestionAnswer
 	(*AgentActivityStartedAt)(nil),    // 18: conversation.v1.AgentActivityStartedAt
-	(*AgentToolFailure)(nil),          // 19: conversation.v1.AgentToolFailure
+	(*AgentActivitySettledAt)(nil),    // 19: conversation.v1.AgentActivitySettledAt
+	(*AgentToolFailure)(nil),          // 20: conversation.v1.AgentToolFailure
 }
 var file_conversation_v1_question_proto_depIdxs = []int32{
 	16, // 0: conversation.v1.AgentQuestion.id:type_name -> conversation.v1.AgentQuestionId
@@ -1263,19 +1281,20 @@ var file_conversation_v1_question_proto_depIdxs = []int32{
 	2,  // 13: conversation.v1.AgentQuestionSuccess.batch:type_name -> conversation.v1.AgentQuestionBatch
 	10, // 14: conversation.v1.AgentQuestionSuccess.answered:type_name -> conversation.v1.AgentQuestionAnswers
 	14, // 15: conversation.v1.AgentQuestionSuccess.unanswered:type_name -> conversation.v1.AgentQuestionUnanswered
-	11, // 16: conversation.v1.AgentQuestionAnswers.answers:type_name -> conversation.v1.AgentQuestionSelection
-	4,  // 17: conversation.v1.AgentQuestionSelection.question:type_name -> conversation.v1.AgentQuestionText
-	12, // 18: conversation.v1.AgentQuestionSelection.chosen:type_name -> conversation.v1.AgentQuestionChoice
-	13, // 19: conversation.v1.AgentQuestionSelection.free_text:type_name -> conversation.v1.AgentQuestionFreeText
-	8,  // 20: conversation.v1.AgentQuestionChoice.label:type_name -> conversation.v1.AgentQuestionOptionLabel
-	19, // 21: conversation.v1.AgentQuestionFailure.error:type_name -> conversation.v1.AgentToolFailure
-	16, // 22: conversation.v1.AgentQuestionAnswer.ask:type_name -> conversation.v1.AgentQuestionId
-	10, // 23: conversation.v1.AgentQuestionAnswer.answers:type_name -> conversation.v1.AgentQuestionAnswers
-	24, // [24:24] is the sub-list for method output_type
-	24, // [24:24] is the sub-list for method input_type
-	24, // [24:24] is the sub-list for extension type_name
-	24, // [24:24] is the sub-list for extension extendee
-	0,  // [0:24] is the sub-list for field type_name
+	19, // 16: conversation.v1.AgentQuestionSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
+	11, // 17: conversation.v1.AgentQuestionAnswers.answers:type_name -> conversation.v1.AgentQuestionSelection
+	4,  // 18: conversation.v1.AgentQuestionSelection.question:type_name -> conversation.v1.AgentQuestionText
+	12, // 19: conversation.v1.AgentQuestionSelection.chosen:type_name -> conversation.v1.AgentQuestionChoice
+	13, // 20: conversation.v1.AgentQuestionSelection.free_text:type_name -> conversation.v1.AgentQuestionFreeText
+	8,  // 21: conversation.v1.AgentQuestionChoice.label:type_name -> conversation.v1.AgentQuestionOptionLabel
+	20, // 22: conversation.v1.AgentQuestionFailure.error:type_name -> conversation.v1.AgentToolFailure
+	16, // 23: conversation.v1.AgentQuestionAnswer.ask:type_name -> conversation.v1.AgentQuestionId
+	10, // 24: conversation.v1.AgentQuestionAnswer.answers:type_name -> conversation.v1.AgentQuestionAnswers
+	25, // [25:25] is the sub-list for method output_type
+	25, // [25:25] is the sub-list for method input_type
+	25, // [25:25] is the sub-list for extension type_name
+	25, // [25:25] is the sub-list for extension extendee
+	0,  // [0:25] is the sub-list for field type_name
 }
 
 func init() { file_conversation_v1_question_proto_init() }

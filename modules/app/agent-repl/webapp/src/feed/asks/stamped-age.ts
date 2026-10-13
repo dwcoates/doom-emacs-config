@@ -1,10 +1,9 @@
 /**
  * stamped-age — a settled ask's instant as a ticking relative age ("3m ago").
  *
- * THE ONE DRAWING of an answered or resolved ask's "when": the permission, the
- * question and the cold gate each stamp the instant their ask settled, and a
- * shared helper keeps the three from drifting apart in wording or in which
- * clock they take. The age is a PRESENT clock (`tickWhileShown`): it stays true
+ * The cold gate's "when": the instant its ask settled. The purple-titled tool
+ * cards (a question, a permission) state their time with the tool card head's
+ * clock instead (`tool-head.ts`), so this is the cold gate's alone. The age is a PRESENT clock (`tickWhileShown`): it stays true
  * after the ask's turn ends, so the finished turn's backstop leaves it counting.
  */
 import { formatTickedAge } from "../../duration.js";

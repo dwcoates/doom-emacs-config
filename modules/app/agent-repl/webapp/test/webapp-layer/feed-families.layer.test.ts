@@ -260,7 +260,7 @@ it(
     // Assert — the BLOCKED arm specifically. src/feed/cards/hook.ts sets
     // `data-state` to the outcome's oneof case and gives only the blocked arm
     // the loud `.tool-hook-blocked` treatment, and the daemon composes the
-    // headline ("hook blocked: <name> (<event>)") into `.tool-head`.
+    // headline ("hook blocked: <name> (<event>)"), the head's title.
     expect(row.dataset.unit).toBe("hook");
     const card = row.querySelector<HTMLElement>("[data-state]");
     expect(card?.dataset.state).toBe("blocked");
@@ -268,7 +268,7 @@ it(
     // THE FULL HEADLINE, not merely a non-empty one: the name and the event
     // are exactly what the file plane's duplicate row could never carry, so
     // asserting them is what proves the SERVED row is the stream's.
-    expect(textOf(row.querySelector<HTMLElement>(".tool-head"))).toBe(
+    expect(textOf(row.querySelector<HTMLElement>(".tool-head > .tool-name"))).toBe(
       "hook blocked: PostToolUse:Edit (PostToolUse)",
     );
     // ONE ROW for the one firing !hook-blocked fires.

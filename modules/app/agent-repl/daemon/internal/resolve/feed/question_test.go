@@ -354,3 +354,105 @@ func TestASettledAskIsNotStandingAfterAStaleStart(t *testing.T) {
 		t.Fatalf("StandingAsk() = %+v, want none after the ask settled", ask)
 	}
 }
+
+// settledAfter is a settle instant SECONDS after an ask posed at 1_000, with
+// that start restated, as the shim stamps it.
+func settledAfter(seconds int64) *conversationv1.AgentActivitySettledAt {
+	return &conversationv1.AgentActivitySettledAt{
+		AtMs:      1_000 + seconds*1_000,
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	}
+}
+
+func TestAnAnsweredAsksClockStopsAtItsSettle(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	batch := twoQuestionBatch()
+	h.pose("ask-1", &conversationv1.AgentQuestionStart{
+		Batch: batch, StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Act.
+	h.pose("ask-1", &conversationv1.AgentQuestionSuccess{
+		Batch:     batch,
+		Outcome:   &conversationv1.AgentQuestionSuccess_Answered{Answered: &conversationv1.AgentQuestionAnswers{}},
+		SettledAt: settledAfter(134),
+	})
+
+	// Assert.
+	if start, end := clockOf(h.questionCard().GetClock()); start != 1_000 || end != 135_000 {
+		t.Fatalf("clock spans %d..%d, want 1000..135000", start, end)
+	}
+}
+
+func TestAnExpiredAsksClockStopsAtItsSettle(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	batch := twoQuestionBatch()
+	h.pose("ask-1", &conversationv1.AgentQuestionStart{
+		Batch: batch, StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Act.
+	h.pose("ask-1", &conversationv1.AgentQuestionSuccess{
+		Batch:     batch,
+		Outcome:   &conversationv1.AgentQuestionSuccess_Unanswered{Unanswered: &conversationv1.AgentQuestionUnanswered{}},
+		SettledAt: settledAfter(30),
+	})
+
+	// Assert.
+	if start, end := clockOf(h.questionCard().GetClock()); start != 1_000 || end != 31_000 {
+		t.Fatalf("clock spans %d..%d, want 1000..31000", start, end)
+	}
+}
+
+func TestAFailedAsksClockStopsAtTheFailuresInstant(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.pose("ask-1", &conversationv1.AgentQuestionStart{
+		Batch: twoQuestionBatch(), StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Act: the failure restates no start, so the start held is the one.
+	h.pose("ask-1", &conversationv1.AgentQuestionFailure{
+		Error: &conversationv1.AgentToolFailure{SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: 6_000}},
+	})
+
+	// Assert.
+	if start, end := clockOf(h.questionCard().GetClock()); start != 1_000 || end != 6_000 {
+		t.Fatalf("clock spans %d..%d, want 1000..6000", start, end)
+	}
+}
+
+func TestASettledAskWithNoSettleInstantHasNoClock(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	batch := twoQuestionBatch()
+	h.pose("ask-1", &conversationv1.AgentQuestionStart{
+		Batch: batch, StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Act: a frame stored before settles stated their instant.
+	h.pose("ask-1", &conversationv1.AgentQuestionSuccess{
+		Batch:   batch,
+		Outcome: &conversationv1.AgentQuestionSuccess_Answered{Answered: &conversationv1.AgentQuestionAnswers{}},
+	})
+
+	// Assert.
+	if clock := h.questionCard().Clock; clock != nil {
+		t.Fatalf("clock = %+v, want unset rather than one stopped on the daemon's clock", clock)
+	}
+}
+
+func TestAnOpenAsksClockRunsFromItsStart(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.pose("ask-1", &conversationv1.AgentQuestionStart{
+		Batch: twoQuestionBatch(), StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Assert.
+	if clock := h.questionCard().GetClock(); clock.GetRunning() == nil || clock.GetStartedAtMs() != 1_000 {
+		t.Fatalf("clock = %+v, want running from 1000", clock)
+	}
+}

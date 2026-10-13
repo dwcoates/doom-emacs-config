@@ -261,6 +261,7 @@ message AgentPermissionModeAuto {}
 
 // The gate was decided. A DENIAL IS AN ANSWER, not a failure.
 message AgentPermissionSuccess {
+  reserved 3;
   // The set arm is the decision.
   oneof decision {
     // The tool may run.
@@ -270,6 +271,13 @@ message AgentPermissionSuccess {
     // Tag 3 is RETIRED: the vendor declares permission prompts have NO park
     // deadline (vetting item 1), so an expiry arm had no producer.
   }
+  // When the gate was decided, with the instant the ask was posed restated
+  // (AgentActivitySettledAt.started_at), so the settled frame alone states how
+  // long the user was asked -- the start frame is gone from any store that
+  // keeps the latest frame of the ask. UNSET when the producer observed no
+  // decision instant; a consumer then states no wait at all rather than one
+  // measured against its own clock.
+  optional AgentActivitySettledAt settled_at = 4;
 }
 
 // Consent was given. The set arm is its scope.

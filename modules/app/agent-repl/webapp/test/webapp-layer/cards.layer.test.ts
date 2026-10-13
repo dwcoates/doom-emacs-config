@@ -140,7 +140,11 @@ it(
     // A deny's reason is typed in the editor: the card says so, and has no field.
     expect(card.querySelector("[data-permission-reason]")).toBeNull();
     expect(card.querySelector("[data-ask-hint]")).not.toBeNull();
-    expect(card.querySelector(".perm-waiting")).not.toBeNull();
+    // Waiting: the head's badge says so, and its clock counts the wait.
+    expect([card.querySelector(".tool-head .badge")?.textContent, card.querySelector(".tool-head .tool-clock")]).toEqual([
+      "waiting",
+      expect.anything(),
+    ]);
   },
   TURN_TEST_MS,
 );
@@ -180,13 +184,13 @@ it(
 
     // Assert — the ANSWERED state arrives on the feed push and is drawn on the
     // same row (a cold repaint from the row alone renders it), with the
-    // verdict naming its own arm.
+    // verdict, the head's badge, naming its own arm.
     await awaitDrawn(
       app,
       `the answered state on permission row ${id}`,
-      () => app.$(`[data-feed-row="${id}"] .perm-verdict`) !== null,
+      () => app.$(`[data-feed-row="${id}"] .tool-head [data-permission-verdict]`) !== null,
     );
-    const verdict = app.$(`[data-feed-row="${id}"] .perm-verdict`);
+    const verdict = app.$(`[data-feed-row="${id}"] .tool-head [data-permission-verdict]`);
     expect(verdict).not.toBeNull();
     expect(verdict?.getAttribute("data-arm")).not.toBe("");
     // The controls are gone: an answered card is not answerable twice.
@@ -336,7 +340,7 @@ it(
     const card = drawn[drawn.length - 1];
     expect(
       card
-        .querySelector(".perm-verdict")
+        .querySelector(".tool-head [data-permission-verdict]")
         ?.getAttribute("data-permission-verdict"),
     ).toBe("deniedUndecidable");
   },

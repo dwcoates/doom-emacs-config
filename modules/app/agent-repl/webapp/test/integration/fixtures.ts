@@ -387,6 +387,7 @@ export const toolCallRunningUnit = (
     name: { text: "Bash" },
     input: toolCallInput({ form }),
     outcome: { case: "running", value: { lastProgress: { atMs: lastProgressAtMs } } },
+    clock: { startedAtMs: 1_000n, span: { case: "running", value: {} } },
   },
 });
 
@@ -400,7 +401,6 @@ export const toolCallReturnedUnit = (
     value: {
       verdict: { case: verdict, value: {} },
       form: toolOutputForm(form),
-      runtime: { text: "ran 4.2 s" },
       diagnostics: { lines: ["one warning"] },
     },
   };
@@ -410,6 +410,7 @@ export const toolCallReturnedUnit = (
       name: { text: "Bash" },
       input: toolCallInput({ form: inputForm, link: true }),
       outcome,
+      clock: { startedAtMs: 1_000n, span: { case: "stopped", value: { endedAtMs: 5_200n } } },
     },
   };
 };
@@ -426,6 +427,7 @@ export const mcpToolCallUnit = (verdict: (typeof TOOL_VERDICTS)[number] = "succe
   value: {
     name: { text: "mcp__claude-in-chrome__navigate" },
     input: { text: '{"tabId":7,"url":"https://example.com"}' },
+    clock: { startedAtMs: 1_000n, span: { case: "stopped", value: { endedAtMs: 2_200n } } },
     outcome: {
       case: "returned",
       value: {
@@ -439,7 +441,6 @@ export const mcpToolCallUnit = (verdict: (typeof TOOL_VERDICTS)[number] = "succe
                 : "Error: Couldn't determine which page this action targets.",
           },
         },
-        runtime: { text: "ran 1.2 s" },
       },
     },
   },
@@ -941,6 +942,14 @@ export type PermissionAnswer = (typeof PERMISSION_ANSWERS)[number];
 type PermissionValue = Extract<RowArm, { case: "permission" }>["value"];
 type PermissionState = NonNullable<PermissionValue["state"]>;
 
+/**
+ * When the fixture's ask was posed: the harness clock's first instant
+ * (`HARNESS_EPOCH_MS`, harness.ts), so an open card's clock reads "0s" on
+ * arrival. Spelled here because the harness imports this module; the harness
+ * self-test holds the two equal.
+ */
+export const PERMISSION_POSED_AT_MS = 10_000n;
+
 export function permissionRow(
   state: "open" | "abandoned" | PermissionAnswer,
   init?: { standingOffered?: boolean },
@@ -951,7 +960,6 @@ export function permissionRow(
     ? {
         case: "answered",
         value: {
-          atMs: 5_000n,
           answer:
             state === "deniedByPolicy"
               ? { case: "deniedByPolicy", value: { text: "policy forbids it" } }
@@ -977,7 +985,7 @@ export function permissionRow(
         },
       }
     : state === "abandoned"
-      ? { case: "abandoned", value: { atMs: 5_000n } }
+      ? { case: "abandoned", value: {} }
       : { case: "open", value: {} };
   return feedRow(
     {
@@ -989,6 +997,12 @@ export function permissionRow(
         arguments: { lines: ["cwd=/repo", "timeout=120s"] },
         standingOffered: init?.standingOffered === false ? undefined : {},
         state: resolved,
+        // The head's clock: running from the ask's posing while it stands,
+        // stopped once it settled.
+        clock:
+          state === "open"
+            ? { startedAtMs: PERMISSION_POSED_AT_MS, span: { case: "running", value: {} } }
+            : { startedAtMs: PERMISSION_POSED_AT_MS, span: { case: "stopped", value: { endedAtMs: PERMISSION_POSED_AT_MS + 12_000n } } },
       },
     },
     overrides,
@@ -1060,7 +1074,6 @@ export function questionRow(
             ? {
                 case: "answered",
                 value: {
-                  atMs: 5_000n,
                   answers: [
                     {
                       header: { text: QUESTION_ONE.header },
@@ -1072,7 +1085,7 @@ export function questionRow(
                 },
               }
             : state === "expired"
-              ? { case: "expired", value: { atMs: 5_000n } }
+              ? { case: "expired", value: {} }
               : {
                   case: "open",
                   value: {

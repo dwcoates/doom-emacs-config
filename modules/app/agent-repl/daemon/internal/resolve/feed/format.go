@@ -18,17 +18,6 @@ func trimZero(v float64) string {
 	return strings.TrimSuffix(s, ".0")
 }
 
-// formatRuntime renders a settled call's clock — "ran 4.2 s", "ran 2m 14s",
-// "ran 340 ms" — from the milliseconds between its start and its settle. A
-// negative span is impossible to draw honestly, so it reports false and the
-// card shows no elapsed figure at all.
-func formatRuntime(startMs, endMs int64) (string, bool) {
-	if startMs <= 0 || endMs <= 0 || endMs < startMs {
-		return "", false
-	}
-	return "ran " + formatDuration(endMs-startMs), true
-}
-
 // formatDuration renders a millisecond span for a reader.
 func formatDuration(ms int64) string {
 	switch {

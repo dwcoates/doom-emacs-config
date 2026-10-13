@@ -64,8 +64,10 @@ func (r *resolver) drawQuestion(s *wsState, agent *conversationv1.AgentId, q *co
 			served.drafts = emptyDrafts(frame.Start.GetBatch())
 		}
 		served.batch = frame.Start.GetBatch()
+		served.startedAtMs = frame.Start.GetStartedAt().GetAtMs()
 		card.Questions = questionItems(frame.Start.GetBatch())
 		card.State = &frontendv1.FeedQuestion_Open{Open: openState(served)}
+		card.Clock = runningClock(served.startedAtMs)
 	case *conversationv1.AgentQuestion_Success:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "draw", "branch": "case *conversationv1.AgentQuestion_Success"})
 		card.Questions = questionItems(frame.Success.GetBatch())
@@ -76,17 +78,16 @@ func (r *resolver) drawQuestion(s *wsState, agent *conversationv1.AgentId, q *co
 		case *conversationv1.AgentQuestionSuccess_Answered:
 			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "draw", "branch": "case *conversationv1.AgentQuestionSuccess_Answered"})
 			card.State = &frontendv1.FeedQuestion_Answered{Answered: &frontendv1.FeedQuestionAnswered{
-				AtMs:    r.deps.Now().UnixMilli(),
 				Answers: givenAnswers(frame.Success.GetBatch(), outcome.Answered),
 			}}
+			card.Clock = settledClock(served.startedAtMs, frame.Success.GetSettledAt())
 		case *conversationv1.AgentQuestionSuccess_Unanswered:
 			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "draw", "branch": "case *conversationv1.AgentQuestionSuccess_Unanswered"})
 			// NOBODY ANSWERING IS AN ANSWER to a legitimate ask: the agent
 			// proceeded without a choice, so the card is expired rather than
 			// pending forever.
-			card.State = &frontendv1.FeedQuestion_Expired{Expired: &frontendv1.FeedQuestionExpired{
-				AtMs: r.deps.Now().UnixMilli(),
-			}}
+			card.State = &frontendv1.FeedQuestion_Expired{Expired: &frontendv1.FeedQuestionExpired{}}
+			card.Clock = settledClock(served.startedAtMs, frame.Success.GetSettledAt())
 		default:
 			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "draw", "branch": "default"})
 			return
@@ -98,9 +99,8 @@ func (r *resolver) drawQuestion(s *wsState, agent *conversationv1.AgentId, q *co
 		served.delivering = false
 		// The ask could not be put to the user at all; nothing was chosen and
 		// nothing waits.
-		card.State = &frontendv1.FeedQuestion_Expired{Expired: &frontendv1.FeedQuestionExpired{
-			AtMs: r.deps.Now().UnixMilli(),
-		}}
+		card.State = &frontendv1.FeedQuestion_Expired{Expired: &frontendv1.FeedQuestionExpired{}}
+		card.Clock = settledClock(served.startedAtMs, frame.Failure.GetError().GetSettledAt())
 	default:
 		return
 	}
