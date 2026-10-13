@@ -68,7 +68,12 @@ func runCmd(log *run.Log, argv []string) int {
 	// files and everything else the suites write never reach the SSD the
 	// owner's live store shares; a RAM disk that cannot be made falls back to
 	// the disk, saying so.
-	parent, prefix, release := runParent(log)
+	module, err := filepath.Abs(args.Module)
+	if err != nil {
+		log.Errorf("resolve the module root %s: %v", args.Module, err)
+		return 1
+	}
+	parent, prefix, release := runParent(log, module)
 	code := runRooted(log, args, self, histPath, parent, prefix)
 	if err := release(); err != nil {
 		log.Errorf("%v", err)
@@ -95,29 +100,28 @@ func runRooted(log *run.Log, args cli.Args, self, histPath, parent string, prefi
 	return code
 }
 
-// runParent reclaims every dead run's RAM disk, then makes this run's, and
-// answers the directory the run's root goes in with the release to call after
-// it. On a RAM disk it also exports ramdisk.EnvShortBase, the base the
-// harnesses that need short, socket-safe roots make them in instead of /tmp.
-func runParent(log *run.Log) (string, []string, func() error) {
+// runParent checks the disk manager, reclaims every dead run's RAM disk, then
+// makes this run's, and answers the directory the run's root goes in with the
+// release to call after it. On a RAM disk it also exports
+// ramdisk.EnvShortBase, the base the harnesses that need short, socket-safe
+// roots make them in instead of /tmp. A leaked RAM disk or a disk manager that
+// does not answer puts the run on the disk.
+func runParent(log *run.Log, module string) (string, []string, func() error) {
 	disk := func() error { return nil }
 	if runtime.GOOS != "darwin" {
 		return run.DefaultTmpParent, nil, disk
 	}
-	m := ramdisk.Default()
-	reclaimed, err := m.Reclaim()
-	for _, r := range reclaimed {
-		log.Infof("reclaimed the RAM disk %s at %s left by dead run pid %d (attached %v, killed %d leftover processes)", r.Device, r.Mount, r.Pid, r.Attached, r.Killed)
-	}
-	if err != nil {
-		log.Errorf("reclaiming a dead run's RAM disk failed: %v", err)
-	}
+	m := ramdisk.Default(log)
 	size, err := ramdisk.SizeFromEnv(os.Getenv)
 	if err != nil {
 		log.Errorf("RAM DISK UNAVAILABLE, this run's root falls back to the disk at %s: %v", run.DefaultTmpParent, err)
 		return run.DefaultTmpParent, nil, disk
 	}
-	v, err := m.Acquire(size)
+	v, trouble, err := m.Setup(size)
+	if trouble != nil {
+		log.Errorf("RAM DISK REFUSED, this run's root falls back to the disk at %s: %s", run.DefaultTmpParent, trouble)
+		return run.DefaultTmpParent, nil, disk
+	}
 	if err != nil {
 		log.Errorf("RAM DISK UNAVAILABLE, this run's root falls back to the disk at %s: %v", run.DefaultTmpParent, err)
 		return run.DefaultTmpParent, nil, disk
