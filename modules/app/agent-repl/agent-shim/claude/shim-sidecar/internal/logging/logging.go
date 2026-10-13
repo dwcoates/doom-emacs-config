@@ -266,7 +266,7 @@ type Logger struct {
 	// window that reverts to info by itself (see NewForwardingDurableOnlyWindow).
 	threshold *sharedlogging.Window
 	poisoned  error
-	files                 map[string]Context
+	files     map[string]Context
 	// The startup catch-up window. A restarted sidecar re-derives the owner's
 	// whole historical corpus from files, and the per-item records of that walk
 	// are a CONDITION OF THE BACKLOG rather than events worth an INFO line each
