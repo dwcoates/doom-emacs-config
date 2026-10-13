@@ -4,6 +4,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
+	"agentrepl/protohelpers/rosterwalk"
 
 	"agent-repld/internal/ids"
 )
@@ -64,12 +65,9 @@ func findRow(roster *frontendv1.WorkspaceRoster, ws string) *frontendv1.RosterRo
 
 // findInRows searches ROWS and their nested families for WS's row.
 func findInRows(rows []*frontendv1.RosterRow, ws string) *frontendv1.RosterRow {
-	for _, row := range rows {
+	for _, row := range rosterwalk.FlattenRows(rows) {
 		if row.GetWorkspace().GetWorkspace().GetId() == ws {
 			return row
-		}
-		if found := findInRows(row.GetChildren(), ws); found != nil {
-			return found
 		}
 	}
 	return nil
