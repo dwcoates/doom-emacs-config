@@ -64,6 +64,7 @@ describe("arm coverage", () => {
       "created",
       "merged",
       "turnEnded",
+      "hidden",
     ]);
   });
 

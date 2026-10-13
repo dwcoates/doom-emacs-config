@@ -210,11 +210,11 @@ describe("substatuses", () => {
     expect(harness.text(".footer-status")).toBe("merge failed");
   });
 
-  it("paints merge failed turquoise", async () => {
+  it("paints merge failed green, the workspace back with the user", async () => {
     // Arrange / Act
     await withFooter({ status: "mergeFailed", substatus: "conflicts" });
     // Assert
-    expect(harness.$(".footer-status")?.classList.contains("tone-turquoise")).toBe(true);
+    expect(harness.$(".footer-status")?.classList.contains("tone-green")).toBe(true);
   });
 });
 
