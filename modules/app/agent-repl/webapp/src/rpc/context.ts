@@ -22,6 +22,7 @@
  * at a daemon that has handed the workspace away, and every one of them would
  * come back as a refusal the user did nothing to cause.
  */
+import type { StreamCostMeter } from "../stream-cost.js";
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import type { Ticker } from "../clock.js";
 import type { FailureSink } from "../failure/sink.js";
@@ -96,6 +97,10 @@ export interface AppContext {
   noteLinkRestored(): void;
   /** Run FN every time the link comes back. Returns its unsubscriber. */
   onLinkRestored(fn: () => void): () => void;
+  /**
+   * Record one frame's main-thread cost. See StreamContext.noteStreamCost.
+   */
+  noteStreamCost(stream: string, ms: number): void;
 }
 
 export interface AppContextInit {
@@ -121,6 +126,11 @@ export interface AppContextInit {
    * passes it.
    */
   streams?: PageStreams;
+  /**
+   * Where each stream frame's cost is recorded (stream-cost.ts). main.ts
+   * passes the page's meter; a test that is not about the cost passes none.
+   */
+  costs?: StreamCostMeter;
 }
 
 /**
@@ -168,6 +178,9 @@ export function createAppContext(init: AppContextInit): AppContext {
       return () => {
         pushListeners.delete(fn);
       };
+    },
+    noteStreamCost(stream: string, ms: number): void {
+      init.costs?.record(stream, ms);
     },
     noteLinkRestored(): void {
       // A copy: a listener may unsubscribe itself as it runs.
