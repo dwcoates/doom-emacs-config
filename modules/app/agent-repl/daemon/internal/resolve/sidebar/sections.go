@@ -326,10 +326,18 @@ func setMergedGroupDrawn(group *frontendv1.RosterMergedRepoGroup, repositoryFold
 // hiddenSection resolves the hidden-workspaces section: the workspaces the
 // user hid (SetWorkspaceHidden), hoisted out of every grouping. Its rows nest
 // by lineage among the hidden workspaces alone, as a repository section's do
-// among its own, so a hidden family keeps its shape; its count is the rows it
-// draws, closed rows left out, exactly as a repository section counts.
+// among its own, so a hidden family keeps its shape; its top-level rows go in
+// HIDE ORDER, the latest hide first (sortHiddenNewestFirst, owner request
+// 2026-10-13), and its count is the rows it draws, closed rows left out,
+// exactly as a repository section counts.
 func (r *resolver) hiddenSection(hidden []wsm.Workspace, rc rowContext, log dlog.Logger) *frontendv1.RosterHiddenSection {
-	rows := r.sectionRows(hidden, rc, log.With(dlog.Context{"section": "hidden"}))
+	log = log.With(dlog.Context{"section": "hidden"})
+	rc.tree = nest(hidden, log)
+	rc.tree.roots = sortHiddenNewestFirst(rc.tree.roots)
+	rows := &frontendv1.RosterRows{}
+	for _, ws := range rc.tree.roots {
+		rows.Rows = append(rows.Rows, r.row(ws, rc, log))
+	}
 	section := &frontendv1.RosterHiddenSection{
 		Header: sectionHeader(HiddenSectionLabel, drawnLiveRowCount(rows)),
 		Rows:   rows,

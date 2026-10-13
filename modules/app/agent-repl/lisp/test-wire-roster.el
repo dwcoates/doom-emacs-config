@@ -375,6 +375,15 @@ reserved."
                   "{\"lastSelected\":{\"atMs\":\"1756400000000\"}}")
                  '("RosterRowWhen" lastSelected "unknown field"))))
 
+(ert-deftest agent-repl-test-wire-roster-when-arms-match-the-bindings ()
+  "The when-arm table is exactly the frozen schema's, read from the Go bindings."
+  (should (equal (sort (mapcar (lambda (arm) (symbol-name (nth 0 arm)))
+                               agent-repl-wire-roster-row-when-arms)
+                       #'string<)
+                 (sort (agent-repl-test--generated-oneof-arms
+                        "frontend/v1/sidebar.pb.go" "RosterRowWhen")
+                       #'string<))))
+
 (ert-deftest agent-repl-test-wire-roster-when-decodes-every-arm-of-its-table ()
   "Every arm of the one when-arm table is accepted by the key allow-list and
 decodes to its keyword: the decode and the allow-list read the same table."
@@ -406,7 +415,8 @@ name: each one's breach names that message exactly as the helper's does."
   (dolist (pair '((agent-repl-wire-decode-roster-row-last-selected . "RosterRowLastSelected")
                   (agent-repl-wire-decode-roster-row-when-merged . "RosterRowWhenMerged")
                   (agent-repl-wire-decode-roster-row-when-turn-ended . "RosterRowWhenTurnEnded")
-                  (agent-repl-wire-decode-roster-row-when-created . "RosterRowWhenCreated")))
+                  (agent-repl-wire-decode-roster-row-when-created . "RosterRowWhenCreated")
+                  (agent-repl-wire-decode-roster-row-when-hidden . "RosterRowWhenHidden")))
     (let ((json "{\"atMs\":\"1\",\"extra\":1}"))
       (should (equal (agent-repl-test-wire-roster--breach (car pair) json)
                      (agent-repl-test-wire-roster--breach

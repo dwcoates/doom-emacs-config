@@ -204,7 +204,8 @@ func recedes(rec wsm.Workspace, session *wsm.Session) bool {
 // reintroducing either here is the exact regression the sidebar tests lock.
 //
 // Precedence: MERGED WINS (that the workspace is done is the more interesting
-// fact), else the last turn end, else the creation time. The last arm never
+// fact), else HIDDEN (a hidden row counts from its hide, owner request
+// 2026-10-13), else the last turn end, else the creation time. The last arm never
 // leaves the oneof unset for a registered workspace — every one has a creation
 // time — so a workspace whose first turn is still running falls back to
 // "created" rather than drawing empty.
@@ -215,6 +216,9 @@ func when(rec wsm.Workspace, s *wsState) *frontendv1.RosterRowWhen {
 	case rec.MergedAt != nil:
 		out.Shown = &frontendv1.RosterRowWhen_Merged{
 			Merged: &frontendv1.RosterRowWhenMerged{AtMs: rec.MergedAt.UnixMilli()}}
+	case rec.HiddenAt != nil:
+		out.Shown = &frontendv1.RosterRowWhen_Hidden{
+			Hidden: &frontendv1.RosterRowWhenHidden{AtMs: rec.HiddenAt.UnixMilli()}}
 	case ended != nil:
 		out.Shown = &frontendv1.RosterRowWhen_TurnEnded{
 			TurnEnded: &frontendv1.RosterRowWhenTurnEnded{AtMs: ended.UnixMilli()}}

@@ -259,10 +259,16 @@ ticks."
   "Decode VALUE as `RosterRowWhenCreated', a plist `(:at-ms)'."
   (agent-repl-wire-roster--decode-instant "RosterRowWhenCreated" value))
 
+(defun agent-repl-wire-decode-roster-row-when-hidden (value)
+  "Decode VALUE as `RosterRowWhenHidden', a plist `(:at-ms)'.
+The instant the workspace was moved into the hidden section."
+  (agent-repl-wire-roster--decode-instant "RosterRowWhenHidden" value))
+
 (defconst agent-repl-wire-roster-row-when-arms
   '((turnEnded :turn-ended agent-repl-wire-decode-roster-row-when-turn-ended)
     (created :created agent-repl-wire-decode-roster-row-when-created)
-    (merged :merged agent-repl-wire-decode-roster-row-when-merged))
+    (merged :merged agent-repl-wire-decode-roster-row-when-merged)
+    (hidden :hidden agent-repl-wire-decode-roster-row-when-hidden))
   "`RosterRowWhen.shown''s arm table: (WIRE-KEY ARM-KEYWORD DECODER).
 The ONE list of the when-column's arms: the oneof decode and the key
 allow-list both read it.")
