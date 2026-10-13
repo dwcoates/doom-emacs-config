@@ -942,6 +942,14 @@ export type PermissionAnswer = (typeof PERMISSION_ANSWERS)[number];
 type PermissionValue = Extract<RowArm, { case: "permission" }>["value"];
 type PermissionState = NonNullable<PermissionValue["state"]>;
 
+/**
+ * When the fixture's ask was posed: the harness clock's first instant
+ * (`HARNESS_EPOCH_MS`, harness.ts), so an open card's clock reads "0s" on
+ * arrival. Spelled here because the harness imports this module; the harness
+ * self-test holds the two equal.
+ */
+export const PERMISSION_POSED_AT_MS = 10_000n;
+
 export function permissionRow(
   state: "open" | "abandoned" | PermissionAnswer,
   init?: { standingOffered?: boolean },
@@ -989,6 +997,12 @@ export function permissionRow(
         arguments: { lines: ["cwd=/repo", "timeout=120s"] },
         standingOffered: init?.standingOffered === false ? undefined : {},
         state: resolved,
+        // The head's clock: running from the ask's posing while it stands,
+        // stopped once it settled.
+        clock:
+          state === "open"
+            ? { startedAtMs: PERMISSION_POSED_AT_MS, span: { case: "running", value: {} } }
+            : { startedAtMs: PERMISSION_POSED_AT_MS, span: { case: "stopped", value: { endedAtMs: PERMISSION_POSED_AT_MS + 12_000n } } },
       },
     },
     overrides,
