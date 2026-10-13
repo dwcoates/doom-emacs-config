@@ -4,12 +4,12 @@
  *
  * Each is an environment substitution rather than a seam in the app: jsdom
  * performs no layout and runs no animations, so it ships no
- * `ResizeObserver`, no `IntersectionObserver` and no `Element.getAnimations`,
- * and the app reaches for all three. One installer keeps the projects from
+ * `ResizeObserver`, no `IntersectionObserver`, no `Element.getAnimations` and
+ * no `Element.animate`, and the app reaches for all four. One installer keeps the projects from
  * drifting apart: a capability added to one setup file and not the other let
  * the webapp layer throw on every roster push while the unit run stayed green.
  */
-import { installGetAnimations } from "./animations.js";
+import { installAnimate, installGetAnimations } from "./animations.js";
 import { installIntersectionObserver } from "./intersection-observer.js";
 import { installResizeObserver } from "./resize-observer.js";
 
@@ -18,4 +18,5 @@ export function installJsdomCapabilities(): void {
   installResizeObserver();
   installIntersectionObserver();
   installGetAnimations();
+  installAnimate();
 }
