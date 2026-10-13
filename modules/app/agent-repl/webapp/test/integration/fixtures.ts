@@ -2416,7 +2416,7 @@ type RosterRowInit = {
   current?: boolean;
   closed?: boolean;
   detail?: boolean;
-  when?: "merged" | "turnEnded" | "created";
+  when?: "merged" | "turnEnded" | "created" | "viewed";
   whenAtMs?: bigint;
   children?: RosterRow[];
 };
@@ -2485,6 +2485,8 @@ export function roster(init?: {
   mergedRepositoryCollapsed?: boolean;
   /** The hidden section's rows; none unless said, so the section is not drawn. */
   hidden?: RosterRow[];
+  /** The viewed section's rows; none unless said, so the section is not drawn. */
+  viewed?: RosterRow[];
 }): WorkspaceRoster {
   const rows = init?.rows ?? [rosterRow()];
   return create(WorkspaceRosterSchema, {
@@ -2522,8 +2524,13 @@ export function roster(init?: {
         maturityStageSection("merging", "Merging", [], false),
       ],
     },
+    viewed: {
+      header: { label: { text: "Viewed" }, count: { workspaces: (init?.viewed ?? []).length } },
+      rows: { rows: init?.viewed ?? [] },
+      fold: { case: "expanded", value: {} },
+    },
     hidden: {
-      header: { label: { text: "Hidden Workspaces" }, count: { workspaces: (init?.hidden ?? []).length } },
+      header: { label: { text: "Hidden" }, count: { workspaces: (init?.hidden ?? []).length } },
       rows: { rows: init?.hidden ?? [] },
       fold: { case: "expanded", value: {} },
     },

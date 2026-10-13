@@ -230,6 +230,13 @@ which carries the ref), and the decode preserves that nesting, so the
 reach-through lives here once instead of at every reader."
   (plist-get (plist-get row :workspace) :workspace))
 
+(defun agent-repl-roster-row-repository (row)
+  "Return ROW's `RepositoryRef' plist: the repository its workspace belongs to.
+The row states it (`RosterRowWorkspace.repository'), equal to its
+repository section's key, because the viewed, hidden and recently-merged
+bands hold rows outside that section."
+  (plist-get (plist-get row :workspace) :repository))
+
 (defun agent-repl-roster-row-id (row)
   "Return ROW's workspace id — the opaque, byte-wise-compared identity."
   (plist-get (agent-repl-roster-row-ref row) :id))
@@ -287,15 +294,33 @@ not a one-shot.  The tab bar draws its glyph from it
 
 ;;;; ---- The walk ---------------------------------------------------------
 
-(defun agent-repl-roster--walk-rows (rows label acc &optional collapsed)
-  "Walk ROWS depth-first under section LABEL, pushing entries onto ACC.
-Each entry is `(:row ROW :label LABEL :collapsed COLLAPSED)'; COLLAPSED is
-non-nil when the section's repository is folded.  A row precedes its
-children, which is the render order the contract's nesting states."
+(defun agent-repl-roster--walk-rows (rows labels acc &optional collapsed)
+  "Walk ROWS depth-first, pushing entries onto ACC.
+Each entry is `(:row ROW :label LABEL :collapsed COLLAPSED)'.  LABEL is
+the display label of the row's own repository, looked up in LABELS (see
+`agent-repl-roster--repository-labels') by the repository the row states,
+so a row is labelled the same whichever section or band holds it.
+COLLAPSED is non-nil when the section's repository is folded.  A row
+precedes its children, which is the render order the contract's nesting
+states."
   (dolist (row rows)
-    (push (list :row row :label label :collapsed collapsed) (car acc))
-    (agent-repl-roster--walk-rows (plist-get row :children) label acc collapsed))
+    (push (list :row row
+                :label (gethash (plist-get (agent-repl-roster-row-repository row) :id) labels)
+                :collapsed collapsed)
+          (car acc))
+    (agent-repl-roster--walk-rows (plist-get row :children) labels acc collapsed))
   acc)
+
+(defun agent-repl-roster--repository-labels (roster)
+  "Return a hash of ROSTER's repository ids to their sections' labels.
+Every registered repository has a section, rows or not, so this names
+the repository of every row the roster carries."
+  (let ((labels (make-hash-table :test 'equal)))
+    (dolist (section (plist-get (plist-get roster :repository) :sections))
+      (puthash (plist-get (plist-get (plist-get section :key) :repository) :id)
+               (plist-get (plist-get (plist-get section :header) :label) :text)
+               labels))
+    labels))
 
 (defun agent-repl-roster--section-collapsed-p (section)
   "Return non-nil when the daemon holds repository SECTION collapsed."
@@ -310,8 +335,10 @@ so its workspaces leave the bar exactly as that repository's others do."
 (defun agent-repl-roster-walk (roster)
   "Return ROSTER's rows in tab order: `(:row ROW :label REPO-LABEL)' entries.
 Repository sections in the resolver's order, each section's rows
-depth-first, then the hidden section's rows, then the recently-merged
-band's rows, group by group.  THE TASK VIEW IS IGNORED — it is the same
+depth-first, then the viewed section's rows, then the hidden
+section's rows, then the recently-merged band's rows, group by group.
+REPO-LABEL is the row's own repository's label, wherever the row sits.
+THE TASK VIEW IS IGNORED — it is the same
 workspaces regrouped, and walking it too would give every workspace a
 second tab.
 
@@ -319,54 +346,48 @@ A HIDDEN WORKSPACE IS WALKED AS A COLLAPSED REPOSITORY'S IS: it keeps its
 tab (its session is untouched), and `:collapsed' takes it off the bar's
 drawing, numbering and navigation by the one hiding machinery there is.
 The hidden section's own fold folds sidebar rows only, so its rows are
-hidden from the bar whichever way it is folded."
-  (let ((acc (list nil)))
+hidden from the bar whichever way it is folded.
+
+A VIEWED WORKSPACE IS WALKED LIKE ANY OTHER: the band is a sidebar
+grouping of read workspaces, and its rows keep their tabs.  Whether such a
+tab is drawn is the tab bar's own visibility arm, as for every tab."
+  (let ((acc (list nil))
+        (labels (agent-repl-roster--repository-labels roster)))
     (dolist (section (plist-get (plist-get roster :repository) :sections))
       (agent-repl-roster--walk-rows
        (plist-get (plist-get section :rows) :rows)
-       (plist-get (plist-get (plist-get section :header) :label) :text)
+       labels
        acc
        (agent-repl-roster--section-collapsed-p section)))
-    (let ((hidden (plist-get roster :hidden)))
+    (agent-repl-roster--walk-rows
+     (plist-get (plist-get (plist-get roster :viewed) :rows) :rows)
+     labels
+     acc)
+    (agent-repl-roster--walk-rows
+     (plist-get (plist-get (plist-get roster :hidden) :rows) :rows)
+     labels
+     acc
+     t)
+    (dolist (group (plist-get (plist-get roster :recently-merged) :groups))
       (agent-repl-roster--walk-rows
-       (plist-get (plist-get hidden :rows) :rows)
-       (plist-get (plist-get (plist-get hidden :header) :label) :text)
+       (plist-get (plist-get group :rows) :rows)
+       labels
        acc
-       t))
-    (let* ((merged (plist-get roster :recently-merged))
-           (label (plist-get (plist-get (plist-get merged :header) :label) :text)))
-      (dolist (group (plist-get merged :groups))
-        (agent-repl-roster--walk-rows
-         (plist-get (plist-get group :rows) :rows)
-         label
-         acc
-         (agent-repl-roster--merged-group-collapsed-p group))))
+       (agent-repl-roster--merged-group-collapsed-p group)))
     (nreverse (car acc))))
 
-(defun agent-repl-roster--section-holds-id-p (section id)
-  "Return non-nil when SECTION's rows include the workspace ID."
-  (let ((acc (list nil)))
-    (agent-repl-roster--walk-rows
-     (plist-get (plist-get section :rows) :rows) nil acc)
-    (seq-some (lambda (entry)
-                (equal (agent-repl-roster-row-id (plist-get entry :row)) id))
-              (car acc))))
-
 (defun agent-repl-roster-repository-of (id &optional roster)
-  "Return the `RepositoryRef' of the section holding workspace ID, or nil.
-ROSTER defaults to `agent-repl-roster-view'.  The repository is the
-SECTION'S OWN key, never anything derived from a row: sections are the
-repository grouping, and the key is the imported join token a verb echoes
-back.  Nil when no section holds ID — including before the first push,
-when Emacs holds no roster at all."
-  (let ((sections (plist-get (plist-get (or roster agent-repl-roster-view)
-                                        :repository)
-                             :sections))
-        (found nil))
-    (dolist (section sections)
-      (when (and (null found) (agent-repl-roster--section-holds-id-p section id))
-        (setq found (plist-get (plist-get section :key) :repository))))
-    found))
+  "Return the `RepositoryRef' of workspace ID's repository, or nil.
+ROSTER defaults to `agent-repl-roster-view'.  The repository is the one
+the row itself states (`agent-repl-roster-row-repository'), equal to its
+repository section's key, so it is found wherever the row sits -- a
+repository section or the viewed, hidden or recently-merged band -- and is
+the imported join token a verb echoes back.  Nil when no row is ID's --
+including before the first push, when Emacs holds no roster at all."
+  (let ((entry (seq-find (lambda (entry)
+                           (equal (agent-repl-roster-row-id (plist-get entry :row)) id))
+                         (agent-repl-roster-walk (or roster agent-repl-roster-view)))))
+    (and entry (agent-repl-roster-row-repository (plist-get entry :row)))))
 
 ;;;; ---- Invariants -------------------------------------------------------
 

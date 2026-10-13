@@ -2,6 +2,7 @@ package sidebar
 
 import (
 	"testing"
+	"time"
 
 	"agent-repld/internal/resolve/ladder"
 	"agent-repld/internal/wsm"
@@ -58,5 +59,75 @@ func TestTurnEndArmReadsTheLadder(t *testing.T) {
 				t.Fatalf("turnEndArm() = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestReadResultStampsTheReadInstant(t *testing.T) {
+	// Arrange.
+	s := newWSState()
+	at := time.UnixMilli(1_700_000_000_000)
+
+	// Act.
+	s.readResult(at)
+
+	// Assert.
+	if s.result != resultRead || s.readAtNow() == nil || !s.readAtNow().Equal(at) {
+		t.Fatalf("result = %v read at %v, want read at %v", s.result, s.readAtNow(), at)
+	}
+}
+
+func TestSetResultClearsTheReadInstant(t *testing.T) {
+	tests := []struct {
+		name  string
+		state resultState
+	}{{"none", resultNone}, {"unread", resultUnread}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			s := newWSState()
+			s.readResult(time.UnixMilli(1_700_000_000_000))
+
+			// Act.
+			s.setResult(tt.state)
+
+			// Assert.
+			if s.result != tt.state || s.readAt != nil || s.readAtNow() != nil {
+				t.Fatalf("result = %v read at %v, want %v with no read instant", s.result, s.readAt, tt.state)
+			}
+		})
+	}
+}
+
+func TestSetResultRefusesARead(t *testing.T) {
+	// Arrange.
+	s := newWSState()
+	defer func() {
+		// Assert: a read without its instant is a caller defect.
+		if recover() == nil {
+			t.Fatal("setResult(resultRead) did not panic")
+		}
+	}()
+
+	// Act.
+	s.setResult(resultRead)
+}
+
+func TestTheResultSnapshotCarriesTheReadInstantOnlyWhenRead(t *testing.T) {
+	// Arrange.
+	s := newWSState()
+	at := time.UnixMilli(1_700_000_000_000)
+	s.readResult(at)
+
+	// Act.
+	read := s.resultSnapshot()
+	s.setResult(resultUnread)
+	unread := s.resultSnapshot()
+
+	// Assert.
+	if !read.Read || read.ReadAt == nil || !read.ReadAt.Equal(at) {
+		t.Fatalf("read snapshot = %+v, want read at %v", read, at)
+	}
+	if unread.Read || unread.ReadAt != nil {
+		t.Fatalf("unread snapshot = %+v, want no read instant", unread)
 	}
 }

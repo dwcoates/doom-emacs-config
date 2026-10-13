@@ -45,7 +45,8 @@
   "Return a minimal valid RosterRow JSON carrying FRAGMENTS.
 A row's non-optional message fields are all present; FRAGMENTS supply the
 status arm and whatever else the case is about."
-  (concat "{\"workspace\":{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/1\"}},"
+  (concat "{\"workspace\":{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/1\"},"
+          "\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},"
           "\"name\":{\"text\":\"fix-flaky\"},"
           "\"current\":{},\"when\":{},\"detail\":{},\"closed\":{},"
           "\"availability\":{\"available\":{}}"
@@ -59,7 +60,8 @@ status arm and whatever else the case is about."
   (should (equal (agent-repl-test-wire-roster--decode
                   #'agent-repl-wire-decode-roster-row
                   (agent-repl-test-wire-roster--row "\"ready\":{}"))
-                 '(:workspace (:workspace (:id "ws-1" :dir "/w/1"))
+                 '(:workspace (:workspace (:id "ws-1" :dir "/w/1")
+                               :repository (:id "r1" :dir "/src"))
                    :attention nil
                    :priority nil
                    :viewed nil
@@ -342,7 +344,7 @@ reserved."
   "Every row has a display name element."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row
-                  (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},\"ready\":{},\"availability\":{\"available\":{}},"
+                  (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"},\"repository\":{\"id\":\"r1\"}},\"ready\":{},\"availability\":{\"available\":{}},"
                           "\"current\":{},\"when\":{},\"detail\":{},\"closed\":{}}"))
                  '("RosterRow" name "required message field is absent"))))
 
@@ -350,7 +352,7 @@ reserved."
   "The receded-styling element is stated by the resolver, always."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row
-                  (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},"
+                  (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"},\"repository\":{\"id\":\"r1\"}},"
                           "\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"current\":{},"
                           "\"when\":{},\"detail\":{}}"))
                  '("RosterRow" closed "required message field is absent"))))
@@ -359,7 +361,7 @@ reserved."
   "A closed row is switchable but its panes are dismissed."
   (should (equal (plist-get (agent-repl-test-wire-roster--decode
                              #'agent-repl-wire-decode-roster-row
-                             (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},"
+                             (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"},\"repository\":{\"id\":\"r1\"}},"
                                      "\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},"
                                      "\"current\":{},\"when\":{},\"detail\":{},"
                                      "\"closed\":{\"closed\":true}}"))
@@ -452,7 +454,7 @@ status."
   "The when element itself is a required message, even when its oneof is unset."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row
-                  (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},"
+                  (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"},\"repository\":{\"id\":\"r1\"}},"
                           "\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"current\":{},"
                           "\"detail\":{},\"closed\":{}}"))
                  '("RosterRow" when "required message field is absent"))))
@@ -515,7 +517,7 @@ status."
   "The detail panel element is required even when all three lines are absent."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row
-                  (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},"
+                  (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"},\"repository\":{\"id\":\"r1\"}},"
                           "\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"current\":{},"
                           "\"when\":{},\"closed\":{}}"))
                  '("RosterRow" detail "required message field is absent"))))
@@ -718,13 +720,15 @@ status."
           "\"header\":{\"label\":{\"text\":\"doom\"},\"count\":{\"workspaces\":2}},"
           "\"rows\":{\"rows\":[]},\"expanded\":{}}]},"
           "\"task\":{\"sections\":[]},\"maturity\":{\"sections\":[]},"
-          "\"hidden\":{\"header\":{\"label\":{\"text\":\"Hidden Workspaces\"},\"count\":{\"workspaces\":0}},"
+          "\"viewed\":{\"header\":{\"label\":{\"text\":\"Viewed\"},\"count\":{\"workspaces\":0}},"
+          "\"rows\":{\"rows\":[]},\"expanded\":{}},"
+          "\"hidden\":{\"header\":{\"label\":{\"text\":\"Hidden\"},\"count\":{\"workspaces\":0}},"
           "\"rows\":{\"rows\":[]},\"expanded\":{}},"
           "\"tabBar\":{},\"recentlyMerged\":{\"header\":{\"label\":{\"text\":\"Recently Merged\"},\"count\":{\"workspaces\":2}},"
           "\"groups\":[],\"collapsed\":{}},"
           "\"current\":{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/1\"}},"
           "\"shownRepository\":{}}")
-  "A whole roster: every grouping resolved, the hidden and merged sections, and current.")
+  "A whole roster: every grouping resolved, the viewed, hidden and merged sections, and current.")
 
 (ert-deftest agent-repl-test-wire-roster-decodes-the-whole-roster ()
   "The roster is always whole, never a delta, and decodes as one picture."
@@ -738,7 +742,10 @@ status."
                                             :divergence (:state (:arm :pending :value nil)))))
                    :task (:sections nil)
                    :maturity (:sections nil)
-                   :hidden (:header (:label (:text "Hidden Workspaces") :count (:workspaces 0))
+                   :viewed (:header (:label (:text "Viewed") :count (:workspaces 0))
+                            :rows (:rows nil)
+                            :fold (:arm :expanded :value nil))
+                   :hidden (:header (:label (:text "Hidden") :count (:workspaces 0))
                             :rows (:rows nil)
                             :fold (:arm :expanded :value nil))
                    :recently-merged (:header (:label (:text "Recently Merged") :count (:workspaces 2))
@@ -789,7 +796,7 @@ status."
                              #'agent-repl-wire-decode-workspace-roster
                              (concat "{\"repository\":{\"sections\":[]},"
                                      "\"task\":{\"sections\":[]},\"maturity\":{\"sections\":[]},"
-                                     "\"hidden\":{\"header\":{\"label\":{},\"count\":{}},\"rows\":{},\"expanded\":{}},"
+                                     "\"viewed\":{\"header\":{\"label\":{},\"count\":{}},\"rows\":{},\"expanded\":{}},\"hidden\":{\"header\":{\"label\":{},\"count\":{}},\"rows\":{},\"expanded\":{}},"
                                      "\"tabBar\":{},\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},"
                                      "\"groups\":[],\"collapsed\":{}},\"shownRepository\":{}}"))
                             :current)
@@ -800,7 +807,7 @@ status."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-workspace-roster
                   (concat "{\"task\":{\"sections\":[]},\"maturity\":{\"sections\":[]},"
-                          "\"hidden\":{\"header\":{\"label\":{},\"count\":{}},\"rows\":{},\"expanded\":{}},"
+                          "\"viewed\":{\"header\":{\"label\":{},\"count\":{}},\"rows\":{},\"expanded\":{}},\"hidden\":{\"header\":{\"label\":{},\"count\":{}},\"rows\":{},\"expanded\":{}},"
                           "\"tabBar\":{},\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},\"groups\":[]}}"))
                  '("WorkspaceRoster" repository "required message field is absent"))))
 
@@ -825,7 +832,7 @@ status."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-workspace-roster
                   (concat "{\"repository\":{\"sections\":[]},\"task\":{\"sections\":[]},\"maturity\":{\"sections\":[]},"
-                          "\"hidden\":{\"header\":{\"label\":{},\"count\":{}},\"rows\":{},\"expanded\":{}}}"))
+                          "\"viewed\":{\"header\":{\"label\":{},\"count\":{}},\"rows\":{},\"expanded\":{}},\"hidden\":{\"header\":{\"label\":{},\"count\":{}},\"rows\":{},\"expanded\":{}}}"))
                  '("WorkspaceRoster" recentlyMerged "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-roster-without-the-hidden-section-is-a-breach ()
@@ -833,8 +840,53 @@ status."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-workspace-roster
                   (concat "{\"repository\":{\"sections\":[]},\"task\":{\"sections\":[]},\"maturity\":{\"sections\":[]},"
+                          "\"viewed\":{\"header\":{\"label\":{},\"count\":{}},\"rows\":{},\"expanded\":{}},"
                           "\"tabBar\":{},\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},\"groups\":[],\"collapsed\":{}}}"))
                  '("WorkspaceRoster" hidden "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-roster-without-the-viewed-section-is-a-breach ()
+  "The viewed section is on every roster, empty when nothing is viewed."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-workspace-roster
+                  (replace-regexp-in-string "\"viewed\":{[^}]*}[^}]*}},\"rows\":{\"rows\":\\[\\]},\"expanded\":{}},"
+                                            "" agent-repl-test-wire-roster--roster-json))
+                 '("WorkspaceRoster" viewed "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-roster-decodes-a-collapsed-viewed-section ()
+  "The viewed section decodes its header, rows and fold."
+  (should (equal (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-viewed-section
+                  (concat "{\"header\":{\"label\":{\"text\":\"Viewed\"},\"count\":{\"workspaces\":1}},"
+                          "\"rows\":{\"rows\":[" (agent-repl-test-wire-roster--row "\"done\":{}" "\"viewed\":{}") "]},"
+                          "\"collapsed\":{}}"))
+                 (list :header '(:label (:text "Viewed") :count (:workspaces 1))
+                       :rows (list :rows (list (agent-repl-test-wire-roster--decode
+                                                #'agent-repl-wire-decode-roster-row
+                                                (agent-repl-test-wire-roster--row "\"done\":{}" "\"viewed\":{}"))))
+                       :fold '(:arm :collapsed :value nil)))))
+
+(ert-deftest agent-repl-test-wire-roster-viewed-section-without-a-fold-is-a-breach ()
+  "The viewed section's fold is the daemon's view state, never unset."
+  (should (agent-repl-test-wire-roster--breach
+           #'agent-repl-wire-decode-roster-viewed-section
+           "{\"header\":{\"label\":{},\"count\":{}},\"rows\":{}}")))
+
+(ert-deftest agent-repl-test-wire-roster-decodes-the-viewed-when-arm ()
+  "A viewed row's when-column is the instant the user last viewed it."
+  (should (equal (plist-get (agent-repl-test-wire-roster--decode
+                             #'agent-repl-wire-decode-roster-row
+                             (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"},\"repository\":{\"id\":\"r1\"}},"
+                                     "\"name\":{\"text\":\"n\"},\"done\":{},\"availability\":{\"available\":{}},"
+                                     "\"current\":{},\"when\":{\"viewed\":{\"atMs\":\"1700000000000\"}},\"detail\":{},\"closed\":{}}"))
+                            :when)
+                 '(:arm :viewed :value (:at-ms 1700000000000)))))
+
+(ert-deftest agent-repl-test-wire-roster-row-without-a-repository-is-a-breach ()
+  "Every row states its repository."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row-workspace
+                  "{\"workspace\":{\"id\":\"w\"}}")
+                 '("RosterRowWorkspace" repository "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-roster-decodes-a-collapsed-hidden-section ()
   "The hidden section decodes its header, rows and fold."
@@ -908,7 +960,7 @@ A hand-rolled hidden-section decoder would skip the shared helper and fail here.
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-workspace-roster
                   (concat "{\"repository\":{\"sections\":[]},\"task\":{\"sections\":[]},\"maturity\":{\"sections\":[]},"
-                          "\"hidden\":{\"header\":{\"label\":{},\"count\":{}},\"rows\":{},\"expanded\":{}},"
+                          "\"viewed\":{\"header\":{\"label\":{},\"count\":{}},\"rows\":{},\"expanded\":{}},\"hidden\":{\"header\":{\"label\":{},\"count\":{}},\"rows\":{},\"expanded\":{}},"
                           "\"tabBar\":{},\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},\"groups\":[]},"
                           "\"hibernating\":{}}"))
                  '("WorkspaceRoster" hibernating "unknown field"))))
@@ -916,7 +968,7 @@ A hand-rolled hidden-section decoder would skip the shared helper and fail here.
 ;;;; ---- The view state: folds and the grouping shown ----
 
 (defconst agent-repl-test-wire-roster--hidden-json
-  "\"hidden\":{\"header\":{\"label\":{},\"count\":{}},\"rows\":{},\"expanded\":{}}"
+  "\"viewed\":{\"header\":{\"label\":{},\"count\":{}},\"rows\":{},\"expanded\":{}},\"hidden\":{\"header\":{\"label\":{},\"count\":{}},\"rows\":{},\"expanded\":{}}"
   "An empty hidden section, expanded, as a JSON member.")
 
 (defconst agent-repl-test-wire-roster--merged-json
@@ -1169,7 +1221,7 @@ A hand-rolled hidden-section decoder would skip the shared helper and fail here.
   "Every row states whether its workspace may be opened yet."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row
-                  (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},"
+                  (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"},\"repository\":{\"id\":\"r1\"}},"
                           "\"name\":{\"text\":\"n\"},\"ready\":{},\"current\":{},"
                           "\"when\":{},\"detail\":{},\"closed\":{}}"))
                  '("RosterRow" availability "required message field is absent"))))

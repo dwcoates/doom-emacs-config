@@ -28,6 +28,14 @@
 #   2. Only when that repair FAILS, or the entry is healthy but keyed by a
 #      different lockfile than this package's, is the LINK removed (the entry is
 #      not touched) and a private node_modules installed here, loudly.
+#
+# ONE INSTALLER PER PACKAGE AT A TIME. Every caller that finds the deps
+# unsatisfied takes the package's install lock (lib-node-store.sh's lock, on
+# `<package>/node_modules`) and asks again under it, so concurrent callers --
+# the several processes one suite's units run as -- never install into one
+# node_modules side by side: the first installs, the rest find it satisfied.
+# Two `npm ci` runs interleaving into one tree once left a test building
+# against a half-extracted esbuild binary (2026-10-12).
 set -euo pipefail
 
 # shellcheck source=lib-node-store.sh
@@ -36,6 +44,12 @@ set -euo pipefail
 dir="${1:-$PWD}"
 cd "$dir"
 
+if npm ls --depth=0 >/dev/null 2>&1; then
+    exit 0
+fi
+
+node_store_lock "$PWD/node_modules"
+trap 'node_store_unlock "$PWD/node_modules"' EXIT
 if npm ls --depth=0 >/dev/null 2>&1; then
     exit 0
 fi
@@ -63,4 +77,4 @@ if [ -L node_modules ]; then
     rm node_modules
 fi
 
-exec npm ci --no-audit --no-fund
+npm ci --no-audit --no-fund
