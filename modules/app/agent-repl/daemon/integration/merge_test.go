@@ -226,28 +226,8 @@ func TestUpdateMergeQueueMoveSwapsTwoWaitingMerges(t *testing.T) {
 			}
 
 			// Assert: the queue reads running, then the last merge, then the
-			// one it swapped with. The daemon holds the sole writing handle
-			// while it runs, so the queue is read after its orderly exit; the
-			// queue is durable across it.
-			d.Stop()
-			var order []string
-			d.WithDB(func(db *sql.DB) {
-				rows, err := db.Query(`SELECT workspace_id FROM merge_queue ORDER BY seq`)
-				if err != nil {
-					t.Fatalf("read the merge queue: %v", err)
-				}
-				defer rows.Close()
-				for rows.Next() {
-					var id string
-					if err := rows.Scan(&id); err != nil {
-						t.Fatalf("scan the merge queue: %v", err)
-					}
-					order = append(order, id)
-				}
-				if err := rows.Err(); err != nil {
-					t.Fatalf("read the merge queue: %v", err)
-				}
-			})
+			// one it swapped with.
+			order := durableQueueOrder(t, d)
 			want := []string{front.ws.GetId(), last.ws.GetId(), behind.ws.GetId()}
 			if !slices.Equal(order, want) {
 				t.Fatalf("queue = %v, want %v", order, want)
@@ -376,10 +356,21 @@ func TestAnswerMergeQueueOfferPrioritizeRunsTheMergeNext(t *testing.T) {
 	}
 
 	// Assert: the queue reads the running merge, then the prioritized one,
-	// then the one it passed. The daemon holds its store open while it runs,
-	// so the queue is read after its orderly exit; the queue is durable.
+	// then the one it passed.
+	order := durableQueueOrder(t, d)
+	if want := []string{front.ws.GetId(), last.ws.GetId(), behind.ws.GetId()}; !slices.Equal(order, want) {
+		t.Fatalf("queue = %v, want %v", order, want)
+	}
+}
+
+// durableQueueOrder stops D and answers every workspace on its merge queue,
+// in queue order. The daemon holds the sole writing handle on its store while
+// it runs, so the queue is read after its orderly exit; the queue is durable
+// across it.
+func durableQueueOrder(t *testing.T, d *harness.Daemon) []string {
+	t.Helper()
 	d.Stop()
-	var order []string
+	order := []string{}
 	d.WithDB(func(db *sql.DB) {
 		rows, err := db.Query(`SELECT workspace_id FROM merge_queue ORDER BY seq`)
 		if err != nil {
@@ -397,9 +388,7 @@ func TestAnswerMergeQueueOfferPrioritizeRunsTheMergeNext(t *testing.T) {
 			t.Fatalf("read the merge queue: %v", err)
 		}
 	})
-	if want := []string{front.ws.GetId(), last.ws.GetId(), behind.ws.GetId()}; !slices.Equal(order, want) {
-		t.Fatalf("queue = %v, want %v", order, want)
-	}
+	return order
 }
 
 // raiseMergeQueueOffer interrupts F's idle, queued workspace and waits for the
