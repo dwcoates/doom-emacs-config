@@ -106,4 +106,23 @@ describe("buildAnswerColdGateRequest", () => {
       SessionCompactScope.RESPONSES,
     );
   });
+
+  it("sets the compact_and_resume arm for compact and resume", () => {
+    const req = buildAnswerColdGateRequest(WORKSPACE, ROW, {
+      kind: "compactAndResume",
+      model: MODEL,
+      scope: SessionCompactScope.ALL,
+    });
+    expect(req.choice.case).toBe("compactAndResume");
+  });
+
+  it("echoes compact and resume's summarizer and scope as the menu served them", () => {
+    const req = buildAnswerColdGateRequest(WORKSPACE, ROW, {
+      kind: "compactAndResume",
+      model: MODEL,
+      scope: SessionCompactScope.PROMPTS,
+    });
+    const value = req.choice.case === "compactAndResume" ? req.choice.value : null;
+    expect([value?.model, value?.scope]).toEqual([MODEL, SessionCompactScope.PROMPTS]);
+  });
 });
