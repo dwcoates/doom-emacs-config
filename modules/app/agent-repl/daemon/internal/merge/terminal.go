@@ -11,6 +11,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedid"
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/promptqueue"
@@ -893,6 +894,7 @@ func (o *orchestrator) publishAbandoned(ctx context.Context, ws ids.WorkspaceID,
 					Abandoned: &frontendv1.FeedMergeAbandoned{Summary: summary},
 				},
 			})
+		o.closeReleasedBubble(ctx, ws, ledger, cause)
 	}
 	o.handBack(ctx, ws, DetachedOutcome{Kind: DetachedAbandoned, Summary: summary})
 	// The surfaces come AFTER the terminal, in the teardown's own order: the
@@ -1047,6 +1049,7 @@ func (r *run) abandonTerminal(ctx context.Context, cause AbandonCause) {
 			EndedAtMs: r.o.nowMS(),
 			Reason:    &frontendv1.FeedMergeError_Abandoned{Abandoned: &frontendv1.FeedMergeAbandoned{Summary: summary}},
 		})
+		r.o.closeReleasedBubble(ctx, r.ws, r.lease.ID, cause)
 		r.o.handBack(ctx, r.ws, DetachedOutcome{Kind: DetachedAbandoned, Summary: summary})
 	})
 	// The surfaces come AFTER the terminal and the release, as a queued
@@ -1068,4 +1071,27 @@ func (r *run) closeOpenRounds(ctx context.Context, outcome string) {
 	for _, round := range open {
 		r.closeTab(ctx, round, outcome)
 	}
+}
+
+// closeReleasedBubble closes the bubble of a merge the user or the operator
+// RELEASED from the queue (owner ruling, 2026-10-12), exactly as the reader's
+// own close does: the reader's fold, recorded on the durable head, so it holds
+// across every push, reload and restart and the reader can open it again. The
+// head was just ended (abandoned), which also settled it out of the pinned
+// spot a live sync head takes, into its place as an ended row. A merge given
+// up under something else ending (its workspace closed, the daemon shut down)
+// keeps its bubble open, as every non-success end does.
+func (o *orchestrator) closeReleasedBubble(ctx context.Context, ws ids.WorkspaceID, lease ids.LeaseID, cause AbandonCause) {
+	const op = "daemon.merge.abandoned"
+	if !cause.releases() {
+		return
+	}
+	at := o.bubbleOf(ws)
+	if !o.deps.Feed.SetMergeFold(at.ws, feedid.Encode(headRef(at.ws, lease)), true) {
+		o.log(ctx, ws).Error(op, "a released merge's bubble could not be closed: its head is not in the feed", dlog.Context{
+			"workspace": string(ws), "bubble_workspace": string(at.ws), "lease": string(lease), "cause": string(cause)})
+		return
+	}
+	o.log(ctx, ws).Info(op, "closed the released merge's bubble", dlog.Context{
+		"workspace": string(ws), "bubble_workspace": string(at.ws), "lease": string(lease), "cause": string(cause)})
 }
