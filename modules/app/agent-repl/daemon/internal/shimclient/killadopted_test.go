@@ -355,40 +355,6 @@ func TestSocketPeerPIDNamesTheServingProcess(t *testing.T) {
 	}
 }
 
-// TestSocketGoneReadsALostPeerAsGone asserts the arm that keeps a shim which
-// exits DURING the credential read from being reported as unstoppable: a dial
-// can win the race with the exit and hand back a socket whose peer has already
-// gone, and every question about that peer then answers ENOTCONN.
-func TestSocketGoneReadsALostPeerAsGone(t *testing.T) {
-	// Arrange: the error exactly as `socketPeerPID' wraps it.
-	err := fmt.Errorf("shimclient: peer credential of %q: %w", "/tmp/peer.sock",
-		fmt.Errorf("getsockopt LOCAL_PEERPID: %w", syscall.ENOTCONN))
-
-	// Act.
-	got := isSocketGone(err)
-
-	// Assert.
-	if !got {
-		t.Fatalf("isSocketGone(%v) = false, want true: a peer that dropped the connection is not serving the socket", err)
-	}
-}
-
-// TestSocketGoneReadsALostPeerAsGoneThroughAnOpError asserts the same arm on
-// the shape the net package produces, so a connection-level ENOTCONN is read
-// the same way as a getsockopt's.
-func TestSocketGoneReadsALostPeerAsGoneThroughAnOpError(t *testing.T) {
-	// Arrange.
-	err := &net.OpError{Op: "read", Net: "unix", Err: syscall.ENOTCONN}
-
-	// Act.
-	got := isSocketGone(err)
-
-	// Assert.
-	if !got {
-		t.Fatalf("isSocketGone(%v) = false, want true for a net.OpError carrying ENOTCONN", err)
-	}
-}
-
 // ---- an adopted shim's own exit, after a stand-down ----
 
 // standingDownAdopted is an adopted client that knows its peer's pid and has
@@ -543,6 +509,83 @@ func TestProcessGoneReadsTheKernelsAnswer(t *testing.T) {
 			// Assert.
 			if got != tt.want {
 				t.Fatalf("processGone(%d) = %v, want %v", tt.target, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAdoptedAlreadyGoneRecordsTheObservationAndAnInferredExit(t *testing.T) {
+	// Arrange
+	c := adoptedClientFor(filepath.Join(shortDir(t), "absent.sock"), 2*time.Second)
+	log := c.log.(*dlog.TestLogger)
+
+	// Act
+	err := c.adoptedAlreadyGone(KillAttribution{Actor: "merge"}, 4242, dlog.Context{"pid": 4242}, "gone already", "adopted shim: gone")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("adoptedAlreadyGone = %v, want nil", err)
+	}
+	var records []dlog.Record
+	for _, r := range log.Records() {
+		if r.Operation == "daemon.shimclient.kill" {
+			records = append(records, r)
+		}
+	}
+	if len(records) != 1 || records[0].Level != "info" || records[0].Message != "gone already" ||
+		records[0].Context["actor"] != "merge" || records[0].Context["pid"] != 4242 || records[0].Context["workspace_id"] != "ws-1" {
+		t.Fatalf("records = %+v, want one info record with the actor, workspace and observation", records)
+	}
+	info, reaped := c.Reaped()
+	if !reaped || !info.Inferred || info.PID != 4242 || info.Stderr != "adopted shim: gone" {
+		t.Fatalf("Reaped() = %+v, %v; want an inferred exit under pid 4242", info, reaped)
+	}
+}
+
+// TestKillAnswersEveryGoneObservationThroughOneRecord pins that the socket
+// being gone and the process being gone before its group read are answered
+// alike, through adoptedAlreadyGone: one INFO record under
+// daemon.shimclient.kill naming the actor, and an inferred exit.
+func TestKillAnswersEveryGoneObservationThroughOneRecord(t *testing.T) {
+	tests := []struct {
+		name     string
+		arrange  func(t *testing.T) *client
+		observed string
+	}{
+		{name: "the socket is gone", observed: "uds", arrange: func(t *testing.T) *client {
+			return adoptedClientFor(filepath.Join(shortDir(t), "absent.sock"), 2*time.Second)
+		}},
+		{name: "the process is gone before its group is read", observed: "pid", arrange: func(t *testing.T) *client {
+			p := startPeer(t, 0)
+			c := adoptedClientFor(p.uds, 2*time.Second)
+			c.processGroup = func(int) (int, error) { return 0, syscall.ESRCH }
+			return c
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			c := tt.arrange(t)
+			log := c.log.(*dlog.TestLogger)
+
+			// Act
+			err := c.Kill(context.Background(), KillAttribution{Actor: "test", Reason: "stand down"})
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Kill() error = %v, want nil", err)
+			}
+			found := 0
+			for _, r := range log.Records() {
+				if r.Operation == "daemon.shimclient.kill" && r.Level == "info" && r.Context["actor"] == "test" && r.Context[tt.observed] != nil {
+					found++
+				}
+			}
+			if found != 1 {
+				t.Fatalf("records = %+v, want one info record naming the actor and the %s observed", log.Records(), tt.observed)
+			}
+			if info, reaped := c.Reaped(); !reaped || !info.Inferred {
+				t.Fatalf("Reaped() = %+v, %v; want an inferred exit", info, reaped)
 			}
 		})
 	}

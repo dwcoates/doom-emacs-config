@@ -549,6 +549,17 @@ func (q *queue) releaseReconnectHolds(ctx context.Context, ws ids.WorkspaceID, l
 // other one.
 func (q *queue) releaseReconnectHoldsLocked(ctx context.Context, d *delivery, log dlog.Logger) {
 	ws := d.ws
+	// A SHIM CALL IN FLIGHT SETTLES FIRST. Its outcome may be the very hold
+	// this edge exists to release (a delivery refused because the session was
+	// not up yet), stamped only after the call returns; a release that ran now
+	// would find nothing and the hold would wait for an edge already past. So
+	// the release is owed to the call's settle and taken there.
+	if q.deferToCall(d, log, "session-up release") {
+		q.mu.Lock()
+		d.state.releaseOwed = true
+		q.mu.Unlock()
+		return
+	}
 	// A VENDOR THAT STILL REFUSES THE SESSION SERVES NOTHING: the holds stand
 	// until the edge on which the block stops standing (OnVendorServes).
 	if block, blocked := q.vendorBlocked(ws); blocked {

@@ -386,6 +386,64 @@ test_dequeue_workspace_needs_a_directory() {
   fi
 }
 
+test_move_own_asks_for_its_direction() {
+  local verb want
+  for pair in "--move-up-own:merge-queue -move-up" "--move-down-own:merge-queue -move-down"; do
+    verb="${pair%%:*}"
+    want="${pair#*:}"
+    mkfixture
+    invoke "$verb"
+    expect_args "$verb asks to move this workspace's own merge one place" "$want"
+  done
+}
+
+test_move_own_refuses_an_argument() {
+  local verb
+  for verb in --move-up-own --move-down-own; do
+    mkfixture
+    invoke "$verb" extra
+    if [ "$RUN_RC" -eq 2 ] && [ -z "$(daemon_args)" ]; then
+      pass "$verb refuses an argument and requests nothing"
+    else
+      fail "$verb refuses an argument and requests nothing" "exit=$RUN_RC" "$RUN_OUT"
+    fi
+  done
+}
+
+test_move_workspace_names_the_moved_worktree() {
+  local verb want
+  for pair in "--move-up-workspace:-move-up" "--move-down-workspace:-move-down"; do
+    verb="${pair%%:*}"
+    want="${pair#*:}"
+    mkfixture
+    invoke "$verb" "$FX/other"
+    expect_args "$verb names the other workspace's worktree" "merge-queue $want -move-dir $FX/other"
+  done
+}
+
+test_move_workspace_needs_a_directory() {
+  local verb
+  for verb in --move-up-workspace --move-down-workspace; do
+    mkfixture
+    invoke "$verb"
+    if [ "$RUN_RC" -eq 2 ] && [ -z "$(daemon_args)" ]; then
+      pass "$verb without a directory is an error and requests nothing"
+    else
+      fail "$verb without a directory is an error and requests nothing" "exit=$RUN_RC" "$RUN_OUT"
+    fi
+  done
+}
+
+test_move_refuses_front() {
+  mkfixture
+  invoke --move-up-own --front
+  if [ "$RUN_RC" -eq 2 ] && [ -z "$(daemon_args)" ]; then
+    pass "--move-up-own refuses --front and requests nothing"
+  else
+    fail "--move-up-own refuses --front and requests nothing" "exit=$RUN_RC" "$RUN_OUT"
+  fi
+}
+
 test_pause_queue_pauses_every_repository() {
   mkfixture
   invoke --pause-queue
@@ -671,6 +729,11 @@ test_dequeue_own_evicts_the_own_merge
 test_dequeue_own_refuses_an_argument
 test_dequeue_workspace_names_the_evicted_worktree
 test_dequeue_workspace_needs_a_directory
+test_move_own_asks_for_its_direction
+test_move_own_refuses_an_argument
+test_move_workspace_names_the_moved_worktree
+test_move_workspace_needs_a_directory
+test_move_refuses_front
 test_pause_queue_pauses_every_repository
 test_pause_queue_names_one_repository
 test_resume_queue_resumes_every_repository

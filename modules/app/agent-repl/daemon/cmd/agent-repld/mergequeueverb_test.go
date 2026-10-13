@@ -860,6 +860,22 @@ func TestTheMergeQueueVerbWritesEachControl(t *testing.T) {
 			check: func(f *mergeFixture, e commandfile.Entry) bool {
 				return e.Type == commandfile.TypeMergeEvict && e.EvictDir == f.other
 			}},
+		{name: "move own up", args: func(*mergeFixture) []string { return []string{"-move-up"} },
+			check: func(_ *mergeFixture, e commandfile.Entry) bool {
+				return e.Type == commandfile.TypeMergeMoveUp && e.MoveDir == ""
+			}},
+		{name: "move own down", args: func(*mergeFixture) []string { return []string{"-move-down"} },
+			check: func(_ *mergeFixture, e commandfile.Entry) bool {
+				return e.Type == commandfile.TypeMergeMoveDown && e.MoveDir == ""
+			}},
+		{name: "move another workspace up", args: func(f *mergeFixture) []string { return []string{"-move-up", "-move-dir", f.other} },
+			check: func(f *mergeFixture, e commandfile.Entry) bool {
+				return e.Type == commandfile.TypeMergeMoveUp && e.MoveDir == f.other
+			}},
+		{name: "move another workspace down", args: func(f *mergeFixture) []string { return []string{"-move-down", "-move-dir", f.other} },
+			check: func(f *mergeFixture, e commandfile.Entry) bool {
+				return e.Type == commandfile.TypeMergeMoveDown && e.MoveDir == f.other
+			}},
 		{name: "pause every repository", args: func(*mergeFixture) []string { return []string{"-pause"} },
 			check: func(_ *mergeFixture, e commandfile.Entry) bool {
 				return e.Type == commandfile.TypeMergePause && e.RepositoryDir == ""
@@ -910,6 +926,9 @@ func TestTheMergeQueueVerbReportsEachAppliedOutcome(t *testing.T) {
 	}{
 		{outcome: "evicted", args: []string{"-evict"}},
 		{outcome: "not_queued", args: []string{"-evict"}},
+		{outcome: "moved_up", args: []string{"-move-up"}},
+		{outcome: "moved_down", args: []string{"-move-down"}},
+		{outcome: "unmoved", args: []string{"-move-up"}},
 		{outcome: "paused", args: []string{"-pause"}},
 		{outcome: "resumed", args: []string{"-resume"}},
 		{outcome: "held", args: []string{"-hold-rollouts"}},
@@ -1078,6 +1097,11 @@ func TestTheMergeQueueVerbRefusesAMalformedControl(t *testing.T) {
 		{name: "a hold and a release", args: func(*mergeFixture) []string { return []string{"-hold-rollouts", "-release-rollouts"} }},
 		{name: "a hold scoped by a repository", args: func(f *mergeFixture) []string { return []string{"-hold-rollouts", "-repository-dir", f.other} }},
 		{name: "a hold that waits", args: func(*mergeFixture) []string { return []string{"-hold-rollouts", "-wait"} }},
+		{name: "move up and move down", args: func(*mergeFixture) []string { return []string{"-move-up", "-move-down"} }},
+		{name: "move-dir off a move", args: func(f *mergeFixture) []string { return []string{"-evict", "-move-dir", f.other} }},
+		{name: "a move-dir that is not there", args: func(*mergeFixture) []string { return []string{"-move-up", "-move-dir", "/no/such/worktree"} }},
+		{name: "a move that waits", args: func(*mergeFixture) []string { return []string{"-move-down", "-wait"} }},
+		{name: "a move to the front", args: func(*mergeFixture) []string { return []string{"-move-up", "-front"} }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

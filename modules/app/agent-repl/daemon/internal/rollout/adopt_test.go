@@ -1799,3 +1799,26 @@ func TestAnOwnedAdoptionStopsHoldingDaemonAddr(t *testing.T) {
 		t.Fatalf("claimed adoptions = %d after the adoption was owned, want 0", claimed)
 	}
 }
+
+func TestTookOverClosesOnlyAtTheTakeover(t *testing.T) {
+	// Arrange: a successor that has joined but not yet taken over.
+	h := newHarness(t)
+	joinedWithOneOfTwo(t, h)
+	tookOver := h.c.TookOver()
+	select {
+	case <-tookOver:
+		t.Fatal("TookOver closed before the takeover")
+	default:
+	}
+
+	// Act
+	h.c.becomeIncumbent(nil)
+
+	// Assert
+	select {
+	case <-tookOver:
+	default:
+		t.Fatal("TookOver still open after the takeover")
+	}
+	h.registry.wait()
+}

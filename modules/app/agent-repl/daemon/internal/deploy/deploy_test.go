@@ -806,6 +806,125 @@ func TestLandingsDuringADeployGetOneFollowUp(t *testing.T) {
 	}
 }
 
+// joiningHarness is a harness whose daemon is a successor still joining, with
+// a latch that closes once a landing's deploy waits on the takeover.
+func joiningHarness(t *testing.T) (*harness, <-chan struct{}) {
+	t.Helper()
+	h := newHarness(t)
+	asked := make(chan struct{})
+	h.rollout.joining = true
+	h.rollout.tookOverAsked = asked
+	return h, asked
+}
+
+// noErrors fails t when any deploy record was written at ERROR.
+func noErrors(t *testing.T, h *harness) {
+	t.Helper()
+	for _, op := range []string{opLanding, opDeploy} {
+		for _, r := range records(h.log, op) {
+			if r.Level == "error" {
+				t.Fatalf("an ERROR record was written: %+v", r)
+			}
+		}
+	}
+}
+
+func TestALandingWhileJoiningDeploysOnceTheSuccessorTakesOver(t *testing.T) {
+	// Arrange: the change lands while this successor is still joining.
+	h, asked := joiningHarness(t)
+	h.d.Landed(context.Background(), commitsOf(1))
+	<-asked
+	if got := h.builder.count(); got != 0 {
+		t.Fatalf("builds = %d before the takeover, want none", got)
+	}
+
+	// Act
+	h.rollout.takeOver()
+	h.d.WaitLandings()
+
+	// Assert
+	if got := h.builder.count(); got != 1 {
+		t.Fatalf("builds = %d, want the landing deployed once after the takeover", got)
+	}
+	if !logged(h.log, "info", opLanding, "the landing is deployed") {
+		t.Fatalf("records = %+v, want the landing's deploy recorded", h.log.Records())
+	}
+	noErrors(t, h)
+}
+
+func TestALandingDuringTheTakeoverWaitIsCoveredByTheWaitingDeploy(t *testing.T) {
+	// Arrange: one landing's deploy waits on the takeover.
+	h, asked := joiningHarness(t)
+	h.d.Landed(context.Background(), commitsOf(1))
+	<-asked
+
+	// Act: a second change lands, then the successor takes over.
+	h.d.Landed(context.Background(), commitsOf(2))
+	h.rollout.takeOver()
+	h.d.WaitLandings()
+
+	// Assert
+	if got := h.builder.count(); got != 1 {
+		t.Fatalf("builds = %d, want ONE deploy covering both landings", got)
+	}
+	if !logged(h.log, "info", opLanding, "that deploy covers it") {
+		t.Fatalf("records = %+v, want the covered landing recorded", h.log.Records())
+	}
+	noErrors(t, h)
+}
+
+func TestALandingWhoseDaemonStopsBeforeTheTakeoverIsNotAFailure(t *testing.T) {
+	// Arrange: the daemon's lifetime ends while the landing waits.
+	h, asked := joiningHarness(t)
+	lifetime, stop := context.WithCancel(context.Background())
+	h.d.deps.Lifetime = lifetime
+	h.d.Landed(context.Background(), commitsOf(1))
+	<-asked
+
+	// Act
+	stop()
+	h.d.WaitLandings()
+
+	// Assert
+	if got := h.builder.count(); got != 0 {
+		t.Fatalf("builds = %d, want none from a daemon that never took over", got)
+	}
+	if !logged(h.log, "info", opLanding, "stopped before it took over") {
+		t.Fatalf("records = %+v, want the abandoned wait recorded", h.log.Records())
+	}
+	noErrors(t, h)
+}
+
+func TestADeployRefusedWhileJoiningLeavesTheLandingOwed(t *testing.T) {
+	// Arrange: a landing is owed while a deploy runs, so the landing's own
+	// deploy is the follow-up; the running deploy is then refused because
+	// this successor is joining.
+	h := newHarness(t)
+	h.rollout.joining = true
+
+	// Act: a refused deploy must not consume the landing.
+	if _, err := h.d.Deploy(context.Background(), false); !errors.Is(err, rollout.ErrJoining) {
+		t.Fatalf("Deploy = %v, want ErrJoining", err)
+	}
+	h.d.mu.Lock()
+	h.d.landed = true
+	h.d.mu.Unlock()
+	if _, err := h.d.Deploy(context.Background(), false); !errors.Is(err, rollout.ErrJoining) {
+		t.Fatalf("Deploy = %v, want ErrJoining", err)
+	}
+
+	// Assert
+	h.d.mu.Lock()
+	owed, running := h.d.landed, h.d.running
+	h.d.mu.Unlock()
+	if !owed || running {
+		t.Fatalf("landed = %v, running = %v; want the landing still owed and the slot free", owed, running)
+	}
+	if got := h.builder.count(); got != 0 {
+		t.Fatalf("builds = %d, want none: a refused deploy starts no follow-up", got)
+	}
+}
+
 func TestNewRefusesAMissingCollaborator(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

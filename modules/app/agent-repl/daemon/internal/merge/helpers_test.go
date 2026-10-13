@@ -82,6 +82,8 @@ type fakeDB struct {
 	// flight; pausedReads counts those reads.
 	onPausedRead func()
 	pausedReads  int
+	// moveErr, when set, is what every MoveMerge answers.
+	moveErr error
 
 	// mergedAt, closed and releasedLeases are what the teardown's ordering is
 	// asserted against.
@@ -503,31 +505,33 @@ func (f *fakeDB) QueueMerge(_ context.Context, repo wsm.RepoKey, id ids.Workspac
 	return 0, fmt.Errorf("no queue entry for %s", id)
 }
 
-// MoveMergeToFront marks an entry a front merge and moves a waiting one ahead
-// of the first ordinary waiting entry before it, exactly as the durable queue
-// re-sequences it.
-func (f *fakeDB) MoveMergeToFront(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID) (bool, error) {
+// MoveMerge swaps a waiting entry with the nearest waiting entry on the
+// move's side, the moved entry taking the passed entry's front mark, exactly
+// as the durable queue re-sequences it.
+func (f *fakeDB) MoveMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, move wsm.MergeMove) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.moveErr != nil {
+		return false, f.moveErr
+	}
 	queue := f.queues[repo]
 	for i, entry := range queue {
 		if entry.Workspace != id {
 			continue
 		}
-		if entry.State == wsm.MergeAdmitted || entry.Source.Front {
-			return false, nil
-		}
-		queue[i].Source.Front = true
 		if entry.State != wsm.MergeQueued {
 			return false, nil
 		}
-		for j := 0; j < i; j++ {
-			if queue[j].State != wsm.MergeQueued || queue[j].Source.Front {
+		step := -1
+		if move == wsm.MergeMoveDown {
+			step = 1
+		}
+		for j := i + step; j >= 0 && j < len(queue); j += step {
+			if queue[j].State != wsm.MergeQueued {
 				continue
 			}
-			moving := queue[i]
-			copy(queue[j+1:i+1], queue[j:i])
-			queue[j] = moving
+			queue[i].Source.Front = queue[j].Source.Front
+			queue[i], queue[j] = queue[j], queue[i]
 			f.renumber(repo)
 			return true, nil
 		}

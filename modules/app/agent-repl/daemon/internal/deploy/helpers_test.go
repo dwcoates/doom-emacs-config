@@ -173,11 +173,16 @@ func (b *fakeBuilder) count() int {
 
 // fakeRollout records what the deploy asked of the rollout.
 type fakeRollout struct {
-	mu        sync.Mutex
-	joining   bool
-	rolling   []ids.WorkspaceID
-	handovers []bool
-	handErr   error
+	mu      sync.Mutex
+	joining bool
+	// tookOver is the takeover latch; takeOver closes it.
+	tookOver chan struct{}
+	// tookOverAsked, when set, closes on the first TookOver call, so a test
+	// knows a landing's deploy is waiting on the takeover.
+	tookOverAsked chan struct{}
+	rolling       []ids.WorkspaceID
+	handovers     []bool
+	handErr       error
 	// onHandOver runs inside the handover, before it answers.
 	onHandOver func()
 	restarts   []bool
@@ -230,6 +235,33 @@ func (r *fakeRollout) Joining() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.joining
+}
+
+// TookOver closes once takeOver ends the joining.
+func (r *fakeRollout) TookOver() <-chan struct{} {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.tookOver == nil {
+		r.tookOver = make(chan struct{})
+	}
+	if r.tookOverAsked != nil {
+		close(r.tookOverAsked)
+		r.tookOverAsked = nil
+	}
+	return r.tookOver
+}
+
+// takeOver ends the joining and closes the takeover latch, as the rollout's
+// becomeIncumbent does.
+func (r *fakeRollout) takeOver() {
+	r.mu.Lock()
+	r.joining = false
+	if r.tookOver == nil {
+		r.tookOver = make(chan struct{})
+	}
+	ch := r.tookOver
+	r.mu.Unlock()
+	close(ch)
 }
 
 func (r *fakeRollout) RollingOut() ([]ids.WorkspaceID, bool) {

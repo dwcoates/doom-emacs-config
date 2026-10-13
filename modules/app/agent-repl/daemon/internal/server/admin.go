@@ -66,7 +66,7 @@ func (s *server) UpdateShutdownSchedule(
 
 // UpdateMergeQueue is the operator's control of the merge queue: pause or
 // resume (daemon-wide when the repository ref is UNSET), evict one
-// workspace's queued merge, or move one to the front of its queue.
+// workspace's queued merge, or move one a place up or down its queue.
 func (s *server) UpdateMergeQueue(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.UpdateMergeQueueRequest],
@@ -78,31 +78,16 @@ func (s *server) UpdateMergeQueue(
 	resp := &agentreplv1.UpdateMergeQueueResponse{}
 
 	if evict := req.Msg.GetEvict(); evict != nil {
-		subject, cerr, done := s.subjectFor(ctx, rpc, evict.GetWorkspace(), resp)
-		if done {
-			return answer(resp, cerr)
-		}
-		if err := s.deps.Merge.Evict(ctx, subject.Record.ID); err != nil {
-			return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
-		}
-		resp.Result = &agentreplv1.UpdateMergeQueueResponse_Success{
-			Success: &agentreplv1.UpdateMergeQueueSuccess{},
-		}
-		return connect.NewResponse(resp), nil
+		return s.actOnQueuedMerge(ctx, rpc, evict.GetWorkspace(), resp, func(ws ids.WorkspaceID) error {
+			return s.deps.Merge.Evict(ctx, ws)
+		})
 	}
 
-	if front := req.Msg.GetFront(); front != nil {
-		subject, cerr, done := s.subjectFor(ctx, rpc, front.GetWorkspace(), resp)
-		if done {
-			return answer(resp, cerr)
-		}
-		if err := s.deps.Merge.Front(ctx, subject.Record.ID); err != nil {
-			return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
-		}
-		resp.Result = &agentreplv1.UpdateMergeQueueResponse_Success{
-			Success: &agentreplv1.UpdateMergeQueueSuccess{},
-		}
-		return connect.NewResponse(resp), nil
+	if ref, move, ok := mergeMoveOf(req.Msg); ok {
+		return s.actOnQueuedMerge(ctx, rpc, ref, resp, func(ws ids.WorkspaceID) error {
+			_, err := s.deps.Merge.Move(ctx, ws, move)
+			return err
+		})
 	}
 
 	if req.Msg.GetHoldRollouts() != nil || req.Msg.GetReleaseRollouts() != nil {
@@ -139,6 +124,41 @@ func (s *server) UpdateMergeQueue(
 		Success: &agentreplv1.UpdateMergeQueueSuccess{},
 	}
 	return connect.NewResponse(resp), nil
+}
+
+// actOnQueuedMerge is the one body of every UpdateMergeQueue arm that acts on
+// ONE workspace's queued merge: the ref resolved to a registered workspace,
+// ACT run on it, a refusal answered as its typed arm, and success otherwise.
+func (s *server) actOnQueuedMerge(
+	ctx context.Context,
+	rpc string,
+	ref *workspacev1.WorkspaceRef,
+	resp *agentreplv1.UpdateMergeQueueResponse,
+	act func(ids.WorkspaceID) error,
+) (*connect.Response[agentreplv1.UpdateMergeQueueResponse], error) {
+	subject, cerr, done := s.subjectFor(ctx, rpc, ref, resp)
+	if done {
+		return answer(resp, cerr)
+	}
+	if err := act(subject.Record.ID); err != nil {
+		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+	}
+	resp.Result = &agentreplv1.UpdateMergeQueueResponse_Success{
+		Success: &agentreplv1.UpdateMergeQueueSuccess{},
+	}
+	return connect.NewResponse(resp), nil
+}
+
+// mergeMoveOf reads a move_up or move_down arm as the workspace it names and
+// the move it asks for; ok is false for every other arm.
+func mergeMoveOf(req *agentreplv1.UpdateMergeQueueRequest) (*workspacev1.WorkspaceRef, wsm.MergeMove, bool) {
+	switch action := req.GetAction().(type) {
+	case *agentreplv1.UpdateMergeQueueRequest_MoveUp:
+		return action.MoveUp.GetWorkspace(), wsm.MergeMoveUp, true
+	case *agentreplv1.UpdateMergeQueueRequest_MoveDown:
+		return action.MoveDown.GetWorkspace(), wsm.MergeMoveDown, true
+	}
+	return nil, 0, false
 }
 
 // scopeOf renders an optional RepositoryRef as the orchestrator's scope. An

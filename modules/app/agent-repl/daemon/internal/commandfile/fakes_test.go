@@ -137,6 +137,11 @@ type fakeMerge struct {
 	// evicted records every Evict, and evictErr is what Evict answers.
 	evicted  []ids.WorkspaceID
 	evictErr error
+	// moves records every Move; moveErr is what Move answers, and unmoved
+	// makes a successful Move answer that the merge stayed where it was.
+	moves   []fakeMove
+	moveErr error
+	unmoved bool
 	// paused and unpaused record every Pause and Unpause scope, and pauseErr
 	// is what either answers.
 	paused   []*merge.RepositoryScope
@@ -161,6 +166,20 @@ func (m *fakeMerge) ReleaseRollouts(context.Context) error {
 func (m *fakeMerge) Evict(_ context.Context, ws ids.WorkspaceID) error {
 	m.evicted = append(m.evicted, ws)
 	return m.evictErr
+}
+
+// fakeMove is one Move the fake was asked for.
+type fakeMove struct {
+	ws   ids.WorkspaceID
+	move wsm.MergeMove
+}
+
+func (m *fakeMerge) Move(_ context.Context, ws ids.WorkspaceID, move wsm.MergeMove) (bool, error) {
+	m.moves = append(m.moves, fakeMove{ws: ws, move: move})
+	if m.moveErr != nil {
+		return false, m.moveErr
+	}
+	return !m.unmoved, nil
 }
 
 func (m *fakeMerge) Pause(_ context.Context, scope *merge.RepositoryScope) error {

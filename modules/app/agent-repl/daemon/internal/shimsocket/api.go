@@ -99,7 +99,7 @@ func Probe(path string) (State, error) {
 		_ = conn.Close()
 		return StateLive, nil
 	}
-	if errors.Is(err, syscallECONNREFUSED) || errors.Is(err, os.ErrNotExist) {
+	if Gone(err) {
 		return StateStale, nil
 	}
 	return StateUndetermined, fmt.Errorf("shimsocket: dial %q: %w", path, err)
