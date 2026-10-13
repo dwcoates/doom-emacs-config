@@ -1639,12 +1639,12 @@ describe("recently merged rows", () => {
 
   it("draws the name in the repository names' colour, not the viewed grey", () => {
     const name = mergedRow(drawnMerged()).querySelector(".name");
-    expect([name?.classList.contains("merged-name"), name?.classList.contains("viewed")]).toEqual([true, false]);
+    expect([name?.classList.contains("band-name"), name?.classList.contains("viewed")]).toEqual([true, false]);
   });
 
   it("styles a merged name with the repository headers' colour variable", async () => {
     const css = (await import("../../src/styles.css?raw")).default;
-    expect(css).toContain("#ws-sidebar .row .name.merged-name { color: var(--repo-head-expanded); }");
+    expect(css).toContain("#ws-sidebar .row .name.band-name { color: var(--repo-head-expanded); }");
   });
 
   it("draws a row merged today with the off-white gutter bar", async () => {
@@ -1668,7 +1668,7 @@ describe("recently merged rows", () => {
 
   it("no longer colours a name merged today", async () => {
     const css = (await import("../../src/styles.css?raw")).default;
-    expect(css).not.toContain(".name.merged-name.merged-today");
+    expect(css).not.toContain(".name.band-name.merged-today");
   });
 
   it("keeps the merged arm on the row, the hook contract's", () => {
