@@ -73,24 +73,17 @@ func (m *manualTimers) live() []*manualTimer {
 
 // testColors is the render-colors double: every roster_status arm painted and
 // every merge arm glyphed, which is exactly what the resolver asserts. The
-// values are irrelevant — the resolver reads the tables' KEYS, never a color.
+// values are irrelevant — the resolver reads the tables' KEYS, never a color —
+// and the keys are read off the proto's own oneof, so the double never keeps a
+// second list of the arms.
 func testColors() vocab.RenderColors {
 	status := map[string]string{}
-	for _, arm := range []string{
-		"submitting", "thinking", "clearing", "compacting", "permission", "done",
-		"interrupted", "turn_failed", "ready", "idle_async", "vendor_blocked", "vendor_fault", "network_fault", "api_retrying", "init", "severed",
-		"start_failed", "degraded", "dead", "turn_died", "merging",
-		"merge_queued", "merge_waiting", "merge_failed", "merged", "none",
-		"inactive", "closing", "daemon_impaired", "waiting", "question", "opening",
-	} {
-		status[arm] = "grey"
-	}
 	glyphs := map[string]string{}
-	for _, arm := range []string{
-		"merging", "merge_queued", "merge_waiting",
-		"merge_failed", "merged",
-	} {
-		glyphs[arm] = "recycle"
+	for _, arm := range vocab.RosterStatusArms() {
+		status[arm] = "grey"
+		if vocab.IsMergeArm(arm) {
+			glyphs[arm] = "merge"
+		}
 	}
 	return vocab.RenderColors{RosterStatus: status, MergeGlyphs: glyphs}
 }
@@ -451,8 +444,6 @@ func statusName(row *frontendv1.RosterRow) string {
 		return "merging"
 	case *frontendv1.RosterRow_MergeQueued:
 		return "merge_queued"
-	case *frontendv1.RosterRow_MergeWaiting:
-		return "merge_waiting"
 	case *frontendv1.RosterRow_MergeFailed:
 		return "merge_failed"
 	case *frontendv1.RosterRow_Merged:
@@ -461,12 +452,12 @@ func statusName(row *frontendv1.RosterRow) string {
 		return "none"
 	case *frontendv1.RosterRow_Inactive:
 		return "inactive"
-	case *frontendv1.RosterRow_Opening:
-		return "opening"
 	case *frontendv1.RosterRow_Closing:
 		return "closing"
 	case *frontendv1.RosterRow_DaemonImpaired:
 		return "daemon_impaired"
+	case *frontendv1.RosterRow_ColdGate:
+		return "cold_gate"
 	case *frontendv1.RosterRow_Waiting:
 		return "waiting"
 	case *frontendv1.RosterRow_Question:

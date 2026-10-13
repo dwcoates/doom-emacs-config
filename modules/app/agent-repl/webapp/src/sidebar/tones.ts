@@ -1,7 +1,7 @@
 /**
  * tones — the rail's ONE table from a `RosterRow.status` arm to what the row
- * draws for it: a color class, a glyph name, and the character (if any) that
- * glyph is drawn with.
+ * draws for it: a color class, a glyph name, the character (if any) that
+ * glyph is drawn with, the ink the mark takes, and its motion.
  *
  * THIS TABLE IS A THIN WRAPPER, NEVER A SECOND OPINION. The colors live in
  * `proto/vocab/render-colors.json`, which Go, TypeScript and elisp all read,
@@ -12,60 +12,36 @@
  * arm added to the proto without a color, or a color added to the file without
  * a row here, fails loudly in the suite instead of drawing a quiet grey dot.
  *
- * GLYPHS, AND TWO EMOJIS. The merge arms report themselves with a glyph beside
- * their color; `inactive` draws a plain question mark, `none` and a landed
- * merge's `check` draw nothing at all but still hold the column's width so
- * names stay aligned. Every merge character is a plain text glyph. The two
- * gate arms are the one exception: a pending permission draws ❗ and a pending
- * question ❓ in place of the dot, the same two emoji the Emacs tab bar draws
- * before the workspace name (owner request, 2026-10-11). An armed one-shot's
- * 🎯 is drawn in place of the dot the same way, as the tab bar draws it
- * (owner request, 2026-10-12).
+ * ONE SIZE FOR EVERY MARK (owner ruling, 2026-10-13): the dot, the merge glyph
+ * and the three emojis all draw at the dot's visible size, so no mark reads
+ * bigger than another. The merge glyph is drawn by the stylesheet (three bars
+ * in the dot's box); the gate emojis ❗ ❓ ❄️ and
+ * a working one-shot's 🎯 are characters, the same ones the Emacs tab bar
+ * draws before the workspace name.
  */
-import { toneClass, rosterStatusColor, mergeGlyph, gateGlyph } from "../vocab.js";
+import {
+  toneClass,
+  rosterStatusColor,
+  mergeGlyph,
+  gateGlyph,
+  glyphInk,
+  oneShotGlyphArm,
+} from "../vocab.js";
 import { MalformedView } from "../rpc/malformed.js";
+import { oneofArms } from "../rpc/oneof.js";
+import { RosterRowSchema, type RosterRow } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+
+/** One arm of the status oneof, as the generated code spells it. */
+export type RosterStatusCase = NonNullable<RosterRow["status"]["case"]>;
 
 /**
  * Every arm of `frontend.v1.RosterRow.status`, in the generated lowerCamel
- * spelling a received row carries. Declaration order is the proto's.
+ * spelling a received row carries, read off the SCHEMA (`rpc/oneof.ts`) in
+ * the proto's declaration order. An arm added to the proto reaches the colour
+ * table below by itself, and `ROSTER_ARM_CLASS` then fails at import for an
+ * arm the shared vocabulary has no colour for.
  */
-export const ROSTER_STATUS_CASES = [
-  "submitting",
-  "thinking",
-  "clearing",
-  "compacting",
-  "permission",
-  "question",
-  "done",
-  "interrupted",
-  "turnFailed",
-  "ready",
-  "idleAsync",
-  "vendorBlocked",
-  "vendorFault",
-  "networkFault",
-  "apiRetrying",
-  "closing",
-  "daemonImpaired",
-  "waiting",
-  "init",
-  "severed",
-  "startFailed",
-  "degraded",
-  "dead",
-  "turnDied",
-  "merging",
-  "mergeQueued",
-  "mergeWaiting",
-  "mergeFailed",
-  "merged",
-  "none",
-  "inactive",
-  "opening",
-] as const;
-
-/** One arm of the status oneof, as the generated code spells it. */
-export type RosterStatusCase = (typeof ROSTER_STATUS_CASES)[number];
+export const ROSTER_STATUS_CASES = oneofArms(RosterRowSchema, "status") as readonly RosterStatusCase[];
 
 /**
  * The color class each arm paints, resolved through the shared vocabulary.
@@ -84,45 +60,44 @@ export const ROSTER_ARM_CLASS: Readonly<Record<RosterStatusCase, string>> = Obje
 /**
  * The character each shared glyph NAME is drawn with.
  *
- * The names are the vocabulary file's (`merge_glyphs`, `gate_glyphs`); which mark stands for
- * one is this surface's own business, which is exactly why the file ships
- * names rather than characters.
+ * The names are the vocabulary file's (`merge_glyphs`, `gate_glyphs`); which
+ * mark stands for one is this surface's own business, which is exactly why the
+ * file ships names rather than characters. A name mapped to "" is drawn by the
+ * stylesheet alone: the dot's disc, and the merge glyph's three bars.
  */
 export const GLYPH_CHARS: Readonly<Record<string, string>> = Object.freeze({
-  queue: "≡",
-  // A MERGE THAT HOLDS THE WORKSPACE AND WAITS FOR IT TO FALL FREE (owner
-  // ruling, 2026-10-08): an hourglass, so it reads as waiting, not running.
-  await: "⧗",
-  recycle: "⟳",
-  // THE ONE FAILURE MARK (owner ruling, 2026-10-11): a failed merge and a
-  // one-shot that ended without a live merge draw the same grey cross the
-  // Emacs tab bar does, with the emoji presentation selector.
-  failed: "\u2716\uFE0F",
-  // A LANDED MERGE DRAWS NOTHING (owner request, 2026-10-08: no green check in
-  // the rail). The vocabulary still names its glyph `check`, which other
-  // surfaces may draw; here the name maps to no character, so the mark's box
-  // (a `.st-glyph`, no disc) is empty yet holds the column, as `none` does.
-  check: "",
-  // A GATE ON YOU (owner request, 2026-10-11): the emoji replaces the dot, and
-  // matches the one the Emacs tab bar draws for the same arm.
+  // EVERY MERGE ARM (owner ruling, 2026-10-13): three bars, drawn by the
+  // stylesheet in the dot's box. Its ink says which arm, and `merging`
+  // breathes it.
+  merge: "",
+  // A GATE ON YOU (owner requests, 2026-10-11 and 2026-10-13): the emoji
+  // replaces the dot, and matches the one the Emacs tab bar draws.
   exclaim: "❗",
   ask: "❓",
-  // AN ARMED ONE-SHOT (owner request, 2026-10-12): the emoji replaces the dot,
-  // and matches the one the Emacs tab bar draws for the same outcome.
+  // A COLD GATE (owner ruling, 2026-10-13): the session has gone cold.
+  snowflake: "\u2744\uFE0F",
+  // A ONE-SHOT AT WORK (owner ruling, 2026-10-13): the emoji replaces the dot
+  // while the one-shot works, and matches the Emacs tab bar's.
   target: "🎯",
-  inactive: "?",
   dot: "",
   none: "",
 });
 
+/** How a mark moves: the rail's one animation, or none. */
+export type MarkMotion = "breathes" | "still";
+
 /** What a row draws for its status. */
 export interface RosterArmMark {
-  /** The `.tone-<color>` class from the shared vocabulary. */
+  /** The `.tone-<color>` class from the shared vocabulary: the WORKSPACE's color. */
   toneClass: string;
-  /** The `data-glyph` name: a merge or gate glyph, or `dot` / `inactive` / `none`. */
+  /** The `data-glyph` name: a merge, gate or one-shot glyph, or `dot` / `none`. */
   glyph: string;
-  /** The character drawn inside the mark; "" leaves a bare CSS disc. */
+  /** The character drawn inside the mark; "" leaves the stylesheet's shape. */
   char: string;
+  /** The mark's own ink where it differs from the tone (`glyph_inks`), or undefined. */
+  ink: string | undefined;
+  /** The mark's motion. */
+  motion: MarkMotion;
 }
 
 /**
@@ -141,70 +116,63 @@ export function rosterArmMark(arm: string): RosterArmMark {
     );
   }
   const glyph = glyphName(arm as RosterStatusCase);
-  return { toneClass: tone, glyph, char: GLYPH_CHARS[glyph] ?? "" };
+  return {
+    toneClass: tone,
+    glyph,
+    char: GLYPH_CHARS[glyph] ?? "",
+    ink: glyphInk(arm),
+    motion: armMotion(arm as RosterStatusCase),
+  };
 }
 
-/** The glyph NAME a one-shot's outcome (`RosterRowOneShot`) draws. */
-export type OneShotGlyph = "target" | "failed";
-
 /**
- * The mark for a row standing on ARM whose one-shot mark (`RosterRowOneShot`)
- * draws ONE_SHOT, or undefined for a row that is no one-shot.
+ * The mark for a row standing on ARM, ONE_SHOT saying whether the row carries
+ * the one-shot mark (`RosterRowOneShot`).
  *
- * A one-shot draws its outcome's glyph in place of the arm's own, on the
- * arm's own tone: 🎯 while armed, the failure mark once it ended without a
- * live merge, exactly as the Emacs tab bar draws them. An open permission or
- * question gate outranks it, so the gate's emoji stands while the gate does.
- * A merge the queue is on outranks it too (owner request, 2026-10-12): a
- * merging one-shot spins the ordinary merge glyph, never its own.
+ * A one-shot draws its glyph in place of the arm's own mark ONLY while it
+ * works (`render-colors.json#one_shot_glyph_arms`, owner ruling 2026-10-13):
+ * submitting, thinking or clearing, never compacting, a gate, a merge or any
+ * other arm. The glyph breathes, as the work it stands for does, and the
+ * row keeps the arm's tone.
  */
-export function rosterRowMark(arm: string, oneShot: OneShotGlyph | undefined): RosterArmMark {
+export function rosterRowMark(arm: string, oneShot: boolean): RosterArmMark {
   const mark = rosterArmMark(arm);
-  if (oneShot === undefined || gateGlyph(arm) !== undefined) return mark;
-  if (armSpins(arm as RosterStatusCase)) return mark;
-  return { toneClass: mark.toneClass, glyph: oneShot, char: GLYPH_CHARS[oneShot] ?? "" };
+  if (!oneShot || !oneShotGlyphArm(arm)) return mark;
+  return { toneClass: mark.toneClass, glyph: "target", char: GLYPH_CHARS.target, ink: undefined, motion: "breathes" };
 }
 
 /**
  * The glyph NAME an arm reports itself with.
  *
  * The merge and gate families ask the shared vocabulary (so the rail and the
- * tab bar name the same mark); the two session-less arms have their own names,
- * and every other lifecycle arm is simply the dot.
+ * tab bar name the same mark); `none` draws nothing, and every other arm,
+ * `inactive` and `init` included, is simply the dot.
  */
 export function glyphName(arm: RosterStatusCase): string {
-  if (arm === "inactive" || arm === "none") return arm;
+  if (arm === "none") return "none";
   if (arm.startsWith("merg")) return mergeGlyph(arm);
   return gateGlyph(arm) ?? "dot";
 }
 
 /**
- * Whether the arm's mark BREATHES — the rail's one animation, and its meaning
- * is always the same: work is in flight and a prompt cannot land right now.
- *
- * The legacy rail already made exactly this claim for these arms and it is
- * kept unchanged: the four busy states and a pending permission, question or
- * other wait on you (ready AND waiting on you) breathe; detached work breathes in its own amber; a merge
- * in hand spins instead. Everything else is still, because nothing about it is
- * in progress.
+ * How the arm's mark MOVES. The rail has ONE animation, the breath, and it
+ * makes ONE claim everywhere (owner ruling, 2026-10-13): something is in
+ * progress. A turn in flight, its context cuts, detached work, a session
+ * booting and a merge running breathe. A gate (permission, question, cold
+ * gate) and an interrupt landing wait on the user, so nothing is in progress
+ * and they hold still, as everything else does.
  */
-export function armBreathes(arm: RosterStatusCase): boolean {
+export function armMotion(arm: RosterStatusCase): MarkMotion {
   switch (arm) {
     case "submitting":
     case "thinking":
     case "clearing":
     case "compacting":
-    case "permission":
-    case "question":
-    case "waiting":
     case "idleAsync":
-      return true;
+    case "init":
+    case "merging":
+      return "breathes";
     default:
-      return false;
+      return "still";
   }
-}
-
-/** Whether the arm's glyph SPINS: the merge run the queue is actively on. */
-export function armSpins(arm: RosterStatusCase): boolean {
-  return arm === "merging";
 }

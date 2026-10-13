@@ -584,9 +584,9 @@ func (r *run) admit(ctx context.Context) error {
 	// no longer counted among the waiting. Its ledger interval opens here; its
 	// row is redrawn by the queue republish below.
 	r.queueRound = r.openTab(ctx, TabQueue)
-	// THE MERGE HOLDS THE WORKSPACE BUT HAS NOT STARTED: purple
-	// `merge_waiting` until the workspace falls free (owner ruling,
-	// 2026-10-08). The lease above already holds every prompt.
+	// THE MERGE HOLDS THE WORKSPACE BUT HAS NOT STARTED: purple, still
+	// `merge_queued` on the roster, until the workspace falls free (owner
+	// rulings, 2026-10-08 and 2026-10-13). The lease above already holds every prompt.
 	r.setStep(ctx, footer.StepAwaitingFree, nil)
 	// THE FIRST RECORD IS WRITTEN BEFORE ANY STEP ACTS: from here on a
 	// restart resumes this merge rather than starting it again. It follows

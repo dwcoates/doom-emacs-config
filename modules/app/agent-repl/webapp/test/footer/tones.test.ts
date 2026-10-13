@@ -22,7 +22,7 @@ describe("FOOTER_STATUS_CASES: the arm set is the schema's", () => {
     expect([...FOOTER_STATUS_CASES].sort()).toEqual([...SCHEMA_ARMS].sort());
   });
 
-  it("names the seventeen arms the contract carries", () => {
+  it("names the eighteen arms the contract carries", () => {
     expect([...FOOTER_STATUS_CASES].sort()).toEqual(
       [
         "agentReplFault",
@@ -39,6 +39,7 @@ describe("FOOTER_STATUS_CASES: the arm set is the schema's", () => {
         "merging",
         "permission",
         "question",
+        "starting",
         "working",
         "turnFailed",
         "waiting",
@@ -77,9 +78,11 @@ describe("statusArmClass", () => {
     // The footer speaks about ONE session, so a merge holding it is purple —
     // where a merging ROSTER row spends no color and reports itself by glyph.
     ["merging", "tone-purple"],
-    // A STOPPED merge is not `merging`: a failure is turquoise (something
-    // went wrong, the workspace is usable) and a landed merge is green.
-    ["mergeFailed", "tone-turquoise"],
+    // A STOPPED merge is not `merging`: failed or landed, the workspace is
+    // back with the user, green (owner ruling, 2026-10-13).
+    ["mergeFailed", "tone-green"],
+    // A BOOTING SESSION is grey: an expected step, never a fault.
+    ["starting", "tone-none"],
     ["turnFailed", "tone-turquoise"],
     ["degraded", "tone-turquoise"],
     ["merged", "tone-green"],

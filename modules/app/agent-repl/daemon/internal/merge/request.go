@@ -159,12 +159,8 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) error {
 	}
 	o.mu.Unlock()
 	log.Info(op, "recorded a merge request", withField(fields, "repo", string(repo)))
-	// THE ROSTER LEARNS OF THE REQUEST NOW, before the requesting turn can
-	// end, so a one-shot that asked for its merge is never read as one that
-	// ended without one. Nothing is drawn from it.
-	o.deps.Sidebar.SetMergeRequested(ws, true)
-	// AN ANNOUNCED ONE-SHOT is republished after the request is raised, so the
-	// push that first draws its one-shot mark draws it armed.
+	// AN ANNOUNCED ONE-SHOT is republished, so the roster draws its one-shot
+	// mark.
 	if req.OneShot {
 		o.publishOneShot(ctx, log, ws)
 	}
@@ -330,7 +326,6 @@ func (o *orchestrator) withdrawRequest(ws ids.WorkspaceID) bool {
 		delete(o.requested, ws)
 	}
 	o.mu.Unlock()
-	o.deps.Sidebar.SetMergeRequested(ws, false)
 	return standing
 }
 
@@ -443,10 +438,6 @@ func (o *orchestrator) handOffDetached(ctx context.Context, requester ids.Worksp
 	o.repoOf[forked.ID] = repo
 	o.mu.Unlock()
 	log.Info(op, "handed a detached merge to its merge workspace", fields)
-	// THE REQUESTER'S MERGE STAYS LIVE UNDER ANOTHER ID: from here its facts
-	// are the merge workspace's, so the requester's request fact stands until
-	// the merge workspace's merge ends (handBack lowers it).
-	o.deps.Sidebar.SetMergeRequested(requester, true)
 	if source.Pick == "" {
 		return o.queueRequest(ctx, forked.ID, repo)
 	}
@@ -475,9 +466,8 @@ func (o *orchestrator) dropDetached(ctx context.Context, requester ids.Workspace
 	delete(o.repoOf, requester)
 	o.mu.Unlock()
 	// A MERGE NEVER FORKED HAS ENDED WITHOUT LANDING: there is no merge
-	// workspace whose terminal would tell the requester's roster (handBack),
-	// or raise its resolved banner (ended), so both are done here.
-	o.deps.Sidebar.SetDetachedMergeEnded(requester, false)
+	// workspace whose terminal would raise its resolved banner (ended), so it
+	// is raised here.
 	out := DetachedOutcome{Kind: DetachedAbandoned, Summary: summary, Branch: source.DetachName}
 	o.deps.Banners.Resolved(requester, out.Kind.mergeEnd(), out.Summary)
 	return o.deps.Detached.HandBack(ctx, requester, wsm.Workspace{}, out)

@@ -66,6 +66,7 @@ status arm and whatever else the case is about."
                    :reviving nil
                    :detached-live nil
                    :one-shot nil
+                   :opening nil
                    :last-selected nil
                    :availability (:arm :available :value nil)
                    :name (:text "fix-flaky")
@@ -77,39 +78,36 @@ status arm and whatever else the case is about."
                    :closed (:closed nil)))))
 
 (ert-deftest agent-repl-test-wire-roster-row-decodes-the-one-shot-mark ()
-  "A row carrying `oneShot' decodes its outcome arm."
-  (dolist (case '(("armed" . :armed) ("failed" . :failed)))
-    (should (equal (plist-get (agent-repl-test-wire-roster--decode
-                               #'agent-repl-wire-decode-roster-row
-                               (agent-repl-test-wire-roster--row
-                                "\"ready\":{}"
-                                (format "\"oneShot\":{\"%s\":{}}" (car case))))
-                              :one-shot)
-                   (list :arm (cdr case) :value nil)))))
+  "A row carrying `oneShot' decodes it as PRESENT."
+  (should (eq (plist-get (agent-repl-test-wire-roster--decode
+                          #'agent-repl-wire-decode-roster-row
+                          (agent-repl-test-wire-roster--row "\"ready\":{}" "\"oneShot\":{}"))
+                         :one-shot)
+              t)))
 
-(ert-deftest agent-repl-test-wire-roster-row-one-shot-with-no-outcome-is-refused ()
-  "`RosterRowOneShot' with its outcome unset is a contract breach."
-  (should (equal (car (agent-repl-test-wire-roster--breach
-                       #'agent-repl-wire-decode-roster-row
-                       (agent-repl-test-wire-roster--row
-                        "\"ready\":{}" "\"oneShot\":{}")))
-                 "RosterRowOneShot")))
-
-(ert-deftest agent-repl-test-wire-roster-row-one-shot-with-two-outcomes-is-refused ()
-  "`RosterRowOneShot' with both arms set is a contract breach."
-  (should (equal (car (agent-repl-test-wire-roster--breach
-                       #'agent-repl-wire-decode-roster-row
-                       (agent-repl-test-wire-roster--row
-                        "\"ready\":{}" "\"oneShot\":{\"armed\":{},\"failed\":{}}")))
-                 "RosterRowOneShot")))
-
-(ert-deftest agent-repl-test-wire-roster-row-one-shot-arm-carries-no-payload ()
-  "`RosterRowOneShotFailed' is EMPTY: a field inside it is an unknown field."
+(ert-deftest agent-repl-test-wire-roster-row-one-shot-mark-carries-no-payload ()
+  "`RosterRowOneShot' is EMPTY: a retired outcome inside it is an unknown field."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row
                   (agent-repl-test-wire-roster--row
-                   "\"ready\":{}" "\"oneShot\":{\"failed\":{\"why\":1}}"))
-                 '("RosterRowOneShotFailed" why "unknown field"))))
+                   "\"ready\":{}" "\"oneShot\":{\"failed\":{}}"))
+                 '("RosterRowOneShot" failed "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-row-decodes-the-opening-marker ()
+  "A row carrying `opening' decodes it as PRESENT, beside its status arm."
+  (let ((row (agent-repl-test-wire-roster--decode
+              #'agent-repl-wire-decode-roster-row
+              (agent-repl-test-wire-roster--row "\"inactive\":{}" "\"opening\":{}"))))
+    (should (equal (list (plist-get row :opening) (plist-get row :status))
+                   '(t (:arm :inactive :value nil))))))
+
+(ert-deftest agent-repl-test-wire-roster-row-opening-marker-carries-no-payload ()
+  "`RosterRowOpening' is EMPTY: a field inside it is an unknown field."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row
+                  (agent-repl-test-wire-roster--row
+                   "\"inactive\":{}" "\"opening\":{\"why\":1}"))
+                 '("RosterRowOpening" why "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-row-decodes-the-viewed-marker ()
   "A row carrying `viewed' decodes it as PRESENT — the PARTIAL display mode."
@@ -209,20 +207,16 @@ arriving as an unknown field on some later push."
                        #'string<)))
     (should (equal spelled declared))))
 
-(ert-deftest agent-repl-test-wire-roster-row-status-count-is-thirty-two ()
-  "The status vocabulary is the 32 arms the contract declares."
-  (should (equal (length agent-repl-wire-roster-row-status-keywords) 32)))
+(ert-deftest agent-repl-test-wire-roster-row-status-count-is-thirty-one ()
+  "The status vocabulary is the 31 arms the contract declares."
+  (should (equal (length agent-repl-wire-roster-row-status-keywords) 31)))
 
-(ert-deftest agent-repl-test-wire-roster-decodes-the-opening-arm ()
-  "A workspace still opening decodes to its empty arm."
+(ert-deftest agent-repl-test-wire-roster-decodes-the-cold-gate-arm ()
+  "A session parked on its cold gate decodes to its empty arm."
   (should (equal (agent-repl-wire--decode-oneof
-                  "RosterRow" 'status '((opening))
+                  "RosterRow" 'status '((coldGate))
                   agent-repl-wire-roster-row-status-arms)
-                 '(:arm :opening :value nil))))
-
-(ert-deftest agent-repl-test-wire-roster-decodes-the-merge-waiting-arm ()
-  "The merge_waiting arm decodes to its keyword."
-  (should (memq :merge-waiting agent-repl-wire-roster-row-status-keywords)))
+                 '(:arm :cold-gate :value nil))))
 
 (ert-deftest agent-repl-test-wire-roster-decodes-the-closing-arm ()
   "The closing arm decodes to its keyword: a refused close."
@@ -381,6 +375,24 @@ reserved."
                   "{\"lastSelected\":{\"atMs\":\"1756400000000\"}}")
                  '("RosterRowWhen" lastSelected "unknown field"))))
 
+(ert-deftest agent-repl-test-wire-roster-when-arms-match-the-bindings ()
+  "The when-arm table is exactly the frozen schema's, read from the Go bindings."
+  (should (equal (sort (mapcar (lambda (arm) (symbol-name (nth 0 arm)))
+                               agent-repl-wire-roster-row-when-arms)
+                       #'string<)
+                 (sort (agent-repl-test--generated-oneof-arms
+                        "frontend/v1/sidebar.pb.go" "RosterRowWhen")
+                       #'string<))))
+
+(ert-deftest agent-repl-test-wire-roster-when-decodes-every-arm-of-its-table ()
+  "Every arm of the one when-arm table is accepted by the key allow-list and
+decodes to its keyword: the decode and the allow-list read the same table."
+  (dolist (arm agent-repl-wire-roster-row-when-arms)
+    (should (equal (agent-repl-test-wire-roster--decode
+                    #'agent-repl-wire-decode-roster-row-when
+                    (format "{\"%s\":{\"atMs\":\"1\"}}" (nth 0 arm)))
+                   (list :arm (nth 1 arm) :value '(:at-ms 1))))))
+
 ;;;; ---- The shared instant decoder ----
 
 (ert-deftest agent-repl-test-wire-roster-decode-instant-reads-at-ms ()
@@ -403,7 +415,8 @@ name: each one's breach names that message exactly as the helper's does."
   (dolist (pair '((agent-repl-wire-decode-roster-row-last-selected . "RosterRowLastSelected")
                   (agent-repl-wire-decode-roster-row-when-merged . "RosterRowWhenMerged")
                   (agent-repl-wire-decode-roster-row-when-turn-ended . "RosterRowWhenTurnEnded")
-                  (agent-repl-wire-decode-roster-row-when-created . "RosterRowWhenCreated")))
+                  (agent-repl-wire-decode-roster-row-when-created . "RosterRowWhenCreated")
+                  (agent-repl-wire-decode-roster-row-when-hidden . "RosterRowWhenHidden")))
     (let ((json "{\"atMs\":\"1\",\"extra\":1}"))
       (should (equal (agent-repl-test-wire-roster--breach (car pair) json)
                      (agent-repl-test-wire-roster--breach

@@ -630,9 +630,8 @@ sits flush on the bar with no ground of its own.  See
 (defconst agent-repl-status-color-table
   '((:none            . "none")
     (:inactive        . "none")
-    (:opening         . "none")
+    (:init            . "none")
 
-    (:init            . "blue")
     (:severed         . "blue")
     (:dead            . "blue")
     (:turn-died       . "blue")
@@ -662,11 +661,11 @@ sits flush on the bar with no ground of its own.  See
     (:permission      . "green")
     (:question        . "green")
     (:waiting         . "green")
+    (:cold-gate       . "green")
 
     (:merging         . "purple")
     (:merge-queued    . "purple")
-    (:merge-waiting   . "purple")
-    (:merge-failed    . "turquoise")
+    (:merge-failed    . "green")
     (:merged          . "green"))
   "Which of the six colors each ROSTER STATUS ARM takes, BY NAME.
 
@@ -687,28 +686,32 @@ It names the color rather than its value: each renderer keeps its own
 hex, since a tab-bar background and a CSS dot legitimately want
 different shades of one idea.  What may never differ is the ASSIGNMENT.
 
-\"none\" is a real answer: `none\=' and `inactive\=' take none because a
-workspace with no session has no lifecycle to report at all.
+\"none\" is a real answer, drawn grey: `none\=' (no session was ever
+created), `inactive\=' (incidentally inactive: no open perspective, or
+being opened) and `init\=' (a session booting, owner ruling 2026-10-13:
+an expected step, never a fault).
 
 WHAT EACH COLOR MEANS (owner ruling, 2026-09-28; restated in AGENTS.md,
 \"What each status color means\"): red, the agent is working; yellow,
 detached work runs while the main thread is idle; green, ready for the
 user; purple, a merge in progress; TURQUOISE, something went wrong but
-the workspace is usable (`:turn-failed\=', `:merge-failed\=',
-`:degraded\=', and the VENDOR FAULTS `:vendor-blocked\=', `:vendor-fault\='
-and `:api-retrying\='); BLUE, the workspace is unusable right now (an
-agent-repl fault -- `:init\=', `:severed\=', `:dead\=', `:start-failed\=',
+the workspace is usable (`:turn-failed\=', `:degraded\=', and the VENDOR
+FAULTS `:vendor-blocked\=', `:vendor-fault\=' and `:api-retrying\=');
+BLUE, the workspace is unusable right now (an agent-repl fault --
+`:severed\=', `:dead\=', `:start-failed\=',
 `:turn-died\=' (the last turn died with agent-repl\='s machinery),
 `:daemon-impaired\=' (the daemon itself cannot serve) -- a refused close
 `:closing\=', or the NETWORK FAULT `:network-fault\=').  A gate on the
-user -- `:permission\=' and `:question\=' -- is green, the same green as
-`:done\=' (owner ruling 2026-10-08), and so is `:waiting\=' (a cold gate
-or an interrupt landing).  Owner ruling 2026-10-02:
+user -- `:permission\=', `:question\=' and `:cold-gate\=' -- is green,
+the same green as `:done\=' (owner ruling 2026-10-08), and so is
+`:waiting\=' (an interrupt landing).  Owner ruling 2026-10-02:
 agent_repl_fault > network_fault > vendor_fault.
 
 EVERY MERGE ARM IS COLORED AS WELL AS GLYPHED (owner rulings,
-2026-09-28), as the fixture\='s `colored_merge_arms\=' declares: purple in
-progress, green on a landing, turquoise on a failure.  A merge never
+2026-09-28 and 2026-10-13), as the fixture\='s `colored_merge_arms\='
+declares: purple in progress, green once it landed or failed -- the
+workspace is back with the user -- with a failed merge\='s glyph inked
+red (`agent-repl-status-glyph-inks\=').  A merge never
 parks and no merge fact is shown before the requesting turn ends
 \(merge-landing.md, Landed change 1), so there is no conflict arm and no
 enqueuing arm.
@@ -747,32 +750,31 @@ rather than written out, so the tab bar\='s table can never disagree with
 the shared one about which arms EXIST — only about the four colors it
 explicitly overrides.")
 
-(defconst agent-repl-status-failure-glyph (string #x2716 #xFE0F)
-  "The tab bar\='s ONE failure mark, ✖️: something the user asked for failed.
-Drawn for a failed merge (`:merge-failed\=') and for a one-shot that
-ended without a live merge (`RosterRowOneShot\=' `failed\=').  It is
-HEAVY MULTIPLICATION X with the emoji presentation selector, so it draws
-double-width like the gate glyphs; bare U+2716 is a narrow text glyph.
-It is deliberately not ❌, which no tab draws (owner ruling, 2026-10-11).")
-
 (defconst agent-repl-status-one-shot-glyph "🎯"
-  "The glyph a one-shot workspace\='s tab draws while it stands `armed\='.
-`RosterRowOneShot\=' says the workspace was created as a one-shot and
-has not ended without a live merge (owner ruling, 2026-10-11).")
+  "The glyph a one-shot workspace\='s tab draws while the one-shot works.
+`RosterRowOneShot\=' says the workspace was created as a one-shot; its
+glyph is drawn ONLY on `agent-repl-status-one-shot-glyph-arms\=' (owner
+ruling, 2026-10-13), and it is static.")
+
+(defconst agent-repl-status-one-shot-glyph-arms '(:submitting :thinking :clearing)
+  "The status arms on which a one-shot\='s glyph is drawn, and the only ones.
+Emacs\='s corner of the fixture\='s `one_shot_glyph_arms\=', asserted
+against it: the one-shot works, and every other arm, `:compacting\='
+included, draws as any workspace\='s does.")
 
 (defconst agent-repl-status-merge-glyphs
-  `((:merge-queued    . "⧖")
-    (:merge-waiting   . "⧗")
-    (:merging         . "↻")
-    (:merge-failed    . ,agent-repl-status-failure-glyph)
-    (:merged          . "✓"))
+  '((:merge-queued    . "≡")
+    (:merging         . "≡")
+    (:merge-failed    . "≡")
+    (:merged          . "≡"))
   "The character each merge arm draws, keyed by the fixture\='s glyph NAMES.
 
 proto/vocab/render-colors.json\='s `merge_glyphs\=' section names WHICH
-glyph a merge state gets (queue, recycle, failed, check) and
-deliberately not which character: each renderer maps those names to
-whatever its surface can draw.  This is the tab bar\='s mapping, and the
-assertion test checks that every named glyph has a character here.
+glyph a merge state gets -- the one `merge\=' glyph for every arm (owner
+ruling, 2026-10-13) -- and deliberately not which character: each
+renderer maps those names to whatever its surface can draw.  This is the
+tab bar\='s mapping, and the assertion test checks that every named glyph
+has a character here.
 
 The tab bar DRAWS only the arms in
 `agent-repl-status-tab-bar-merge-glyph-arms\=': its purple already says
@@ -782,31 +784,52 @@ a merge is in flight, and a landed merge shows nothing.")
   "The merge arms whose glyph the TAB BAR draws: only a FAILED merge.
 A merge in flight is already the tab\='s purple, and a landed merge draws
 nothing (owner ruling, 2026-10-11): merges are reflected by a glyph only
-when they fail.  The full name-to-character mapping stays in
-`agent-repl-status-merge-glyphs\=', asserted against the shared fixture.")
+when they fail, and the failed merge\='s glyph is inked red on the green
+of a workspace back with the user (owner ruling, 2026-10-13).")
 
 (defconst agent-repl-status-gate-glyphs
   '((:permission . "❗")
-    (:question   . "❓"))
+    (:question   . "❓")
+    (:cold-gate  . "❄️"))
   "The character each gate arm draws, keyed by the fixture\='s glyph NAMES.
 
 proto/vocab/render-colors.json\='s `gate_glyphs\=' section names WHICH
-glyph a gate on the user gets (exclaim, ask); this is the tab bar\='s
-mapping, the same two emoji the webapp sidebar draws in place of its dot
-\(owner request, 2026-10-11).  The arm keeps its green, so the tab reads
-`[N] ❗ name\=' or `[N] ❓ name\='.")
+glyph a gate on the user gets (exclaim, ask, snowflake); this is the tab
+bar\='s mapping, the same emoji the webapp sidebar draws in place of its
+dot (owner requests, 2026-10-11 and 2026-10-13).  The arm keeps its
+green, so the tab reads `[N] ❗ name\=', `[N] ❓ name\=' or `[N] ❄️ name\='.")
 
-(defconst agent-repl-status-inactive-glyph "?"
-  "The glyph an `inactive\=' row draws.
-Registered but with no open perspective, so there is no live session
-whose lifecycle a dot could report — the contract itself says \"drawn as
-a question mark\".")
+(defconst agent-repl-status-dot-glyph "●"
+  "The status dot, drawn on the tab bar only where its ink differs from
+the tab\='s color (`agent-repl-status-glyph-inks\='): a compacting turn\='s
+orange on its red tab (owner ruling, 2026-10-13).")
+
+(defconst agent-repl-status-glyph-inks
+  '((:merge-failed . "red")
+    (:compacting   . "orange"))
+  "The ink a status arm\='s drawn mark takes where it differs from the arm\='s
+own color, keyed by roster status arm.
+
+Emacs\='s corner of the fixture\='s `glyph_inks\=', asserted against it.
+The arm\='s color stays the WORKSPACE\='s status -- the tab\='s ground --
+while the mark before the name takes the ink: a failed merge is a green
+tab with a red merge glyph, a compacting turn a red tab with an orange
+dot (owner ruling, 2026-10-13).")
 
 (defconst agent-repl-status-attention-glyph "●"
   "The steady attention marker: the workspace has an unseen notification.
 The daemon sets `RosterRow.attention\=' when a notification fires and
 CLEARS it when SelectWorkspace names the workspace, so an ordinary tab
 switch is the whole clearing act — no dedicated ack verb exists.")
+
+(defconst agent-repl--color-compaction-orange "#f97316"
+  "The orange of the feed\='s compaction rule (`--compact-rule\=' in the
+webapp\='s dark theme), which a compacting turn\='s dot is inked with.")
+
+(defconst agent-repl--ink-by-name
+  `(("red"    . ,agent-repl--color-thinking-red)
+    ("orange" . ,agent-repl--color-compaction-orange))
+  "Map each glyph INK name (`agent-repl-status-glyph-inks\=') to its color.")
 
 (defconst agent-repl--color-by-name
   `(("blue"   . ,agent-repl--color-init-blue)
@@ -887,14 +910,11 @@ in `agent-repl--color-default-bracket'."
                    :weight ,agent-repl--tab-weight))))
 
 (defconst agent-repl--tab-palette
-  `((:init . ,(agent-repl--tab-palette-row
-               'agent-repl-tab-init
-               agent-repl--color-init-blue
-               agent-repl--color-light))
-    ;; SEVERED borrows init's blue: the claim about what the user can do is
-    ;; identical — this workspace has no live session and something on our side
-    ;; broke — and only the word and the glyph distinguish "coming up" from
-    ;; "the substrate is gone".
+  `(;; `:init' HAS NO ROW (owner ruling, 2026-10-13): a booting session is an
+    ;; expected step, never a fault, so it takes no color and draws as an
+    ;; uncolored tab, as `:none' and `:inactive' do.
+    ;; SEVERED is BLUE: this workspace has no live session and something on
+    ;; our side broke.
     (:severed . ,(agent-repl--tab-palette-row
                   'agent-repl-tab-init
                   agent-repl--color-init-blue
@@ -951,13 +971,18 @@ in `agent-repl--color-default-bracket'."
                    'agent-repl-tab-permission
                    agent-repl--color-done-green
                    agent-repl--color-dark))
-    ;; WAITING is a permission's green: the session waits on the user for
-    ;; something other than a gate's card -- a cold gate, or an interrupt
+    ;; WAITING is a permission's green: the session waits on an interrupt
     ;; still landing.
     (:waiting . ,(agent-repl--tab-palette-row
                   'agent-repl-tab-permission
                   agent-repl--color-done-green
                   agent-repl--color-dark))
+    ;; A COLD GATE is a permission's green: a gate on the user, drawn with its
+    ;; snowflake (owner ruling, 2026-10-13).
+    (:cold-gate . ,(agent-repl--tab-palette-row
+                    'agent-repl-tab-permission
+                    agent-repl--color-done-green
+                    agent-repl--color-dark))
     (:ready . ,(agent-repl--tab-palette-row
                 'agent-repl-tab-ready
                 agent-repl--color-done-green
@@ -999,13 +1024,13 @@ in `agent-repl--color-default-bracket'."
                           'agent-repl-tab-init
                           agent-repl--color-init-blue
                           agent-repl--color-light))
-    ;; MERGE-FAILED is TURQUOISE and keeps its ✗ (owner ruling, 2026-09-28):
-    ;; something went wrong, but the merge no longer holds the workspace, so
-    ;; it is usable.
+    ;; MERGE-FAILED is GREEN (owner ruling, 2026-10-13): the workspace is
+    ;; back with the user and ready to be looked at; its merge glyph, inked
+    ;; red, says what there is to see.
     (:merge-failed . ,(agent-repl--tab-palette-row
-                       'agent-repl-tab-usable-fault
-                       agent-repl--color-usable-fault-turquoise
-                       agent-repl--color-light))
+                       'agent-repl-tab-ready
+                       agent-repl--color-done-green
+                       agent-repl--color-dark))
     ;; MERGED is GREEN and keeps its ✓ (owner ruling, 2026-09-28): a merge in
     ;; progress is purple, and one that landed successfully is green.
     (:merged . ,(agent-repl--tab-palette-row
@@ -1050,13 +1075,6 @@ in `agent-repl--color-default-bracket'."
                        'agent-repl-tab-merging
                        agent-repl--color-merging-purple
                        agent-repl--color-light))
-    ;; A merge that holds the workspace and waits for it to fall free before
-    ;; it starts (owner ruling, 2026-10-08): the same purple, since the daemon
-    ;; holds the workspace exactly as it does for the other two.
-    (:merge-waiting . ,(agent-repl--tab-palette-row
-                        'agent-repl-tab-merging
-                        agent-repl--color-merging-purple
-                        agent-repl--color-light))
     (:merging . ,(agent-repl--tab-palette-row
                   'agent-repl-tab-merging
                   agent-repl--color-merging-purple
@@ -1076,9 +1094,9 @@ the shared `agent-repl-status-color-table' with
 `agent-repl-status-tab-bar-color-overrides' (empty today) layered over it.
 
 The arms taking `none' have NO entry and fall through to
-`agent-repl--tab-default': `:none' and `:inactive' have no lifecycle
-to report at all.  `:merge-failed' (turquoise) and `:merged' (green)
-have rows, and draw their glyph over them.")
+`agent-repl--tab-default': `:none', `:inactive' and `:init' are grey.
+`:merge-failed' and `:merged' have green rows; a failed merge draws its
+red glyph before the name.")
 
 
 ;;; The roster is the state -----------------------------------------------
@@ -1118,16 +1136,19 @@ at ERROR rather than painted."
 
 (defun agent-repl-status-tab-glyph (ws arm)
   "Return the glyph WS draws for ARM, or nil when it draws none.
-In precedence order: a gate\='s emoji (a pending permission or question,
-drawn in place of the one-shot mark while it stands), the one-shot mark
-\(`agent-repl-status-tab-one-shot-glyph'), a failed merge\='s failure
-mark (the only merge glyph the tab bar draws), the inactive question
-mark, and the attention marker."
+In precedence order: a gate\='s emoji (a pending permission, question or
+cold gate), the one-shot mark while the one-shot works
+\(`agent-repl-status-tab-one-shot-glyph'), a failed merge\='s merge glyph
+\(the only merge glyph the tab bar draws), an inked dot
+\(`agent-repl-status-glyph-inks'), and the attention marker.  The glyph
+is a plain string; `agent-repl-status-tab-glyph-face' draws it."
   (let ((glyph (or (alist-get arm agent-repl-status-gate-glyphs)
-                   (agent-repl-status-tab-one-shot-glyph ws)
+                   (agent-repl-status-tab-one-shot-glyph ws arm)
                    (and (memq arm agent-repl-status-tab-bar-merge-glyph-arms)
                         (alist-get arm agent-repl-status-merge-glyphs))
-                   (and (eq arm :inactive) agent-repl-status-inactive-glyph)
+                   (and (alist-get arm agent-repl-status-glyph-inks)
+                        (not (memq arm (mapcar #'car agent-repl-status-merge-glyphs)))
+                        agent-repl-status-dot-glyph)
                    (and (agent-repl-status-attention-visible-p ws)
                         agent-repl-status-attention-glyph))))
     (agent-repl--log-decision (list 'tab-glyph ws) (cons arm glyph)
@@ -1135,22 +1156,118 @@ mark, and the attention marker."
                               ws arm (or glyph "none"))
     glyph))
 
-(defun agent-repl-status-tab-one-shot-glyph (ws)
-  "Return the one-shot glyph WS\='s tab draws, or nil when WS is no one-shot.
-The daemon resolves the outcome (`RosterRowOneShot'): `:armed' draws
-`agent-repl-status-one-shot-glyph', `:failed' draws
-`agent-repl-status-failure-glyph'.  An outcome this build does not know
-is a contract breach the codec already refused, so reaching here with
-one is logged at ERROR and draws nothing."
-  (let ((outcome (and (fboundp 'agent-repl-roster-one-shot-for-ws)
-                      (agent-repl-roster-one-shot-for-ws ws))))
-    (pcase outcome
-      ('nil nil)
-      (:armed agent-repl-status-one-shot-glyph)
-      (:failed agent-repl-status-failure-glyph)
-      (_
-       (agent-repl--error ws "elisp.status.tab-one-shot-glyph: unknown outcome=%S ws=%s" outcome ws)
-       nil))))
+(defun agent-repl-status-tab-one-shot-glyph (ws arm)
+  "Return the one-shot glyph WS\='s tab draws on ARM, or nil.
+Nil for a workspace that is no one-shot (`RosterRowOneShot' absent) and
+on every arm outside `agent-repl-status-one-shot-glyph-arms': the glyph
+says only that the one-shot is working (owner ruling, 2026-10-13)."
+  (and (memq arm agent-repl-status-one-shot-glyph-arms)
+       (fboundp 'agent-repl-roster-one-shot-for-ws)
+       (agent-repl-roster-one-shot-for-ws ws)
+       agent-repl-status-one-shot-glyph))
+
+;;; The glyph's face: its ink and its height ---------------------------------
+;;
+;; A GLYPH IS EXACTLY AS TALL AS THE TAB'S TEXT (owner request, 2026-10-13).
+;; An emoji drawn at the tab bar's own size comes from a font whose ascent and
+;; descent exceed the text font's (measured on the owner's frame: Menlo 13px
+;; is 12+3, Apple Color Emoji 13px is 16+5), and the tab bar's row grows to
+;; the tallest glyph on it.  So each glyph is drawn at the LARGEST pixel size
+;; whose font fits inside the text font's ascent AND descent, found from the
+;; fonts' own metrics on the frame at hand, never from a constant: the fit is
+;; exactly the text's line, whatever the fonts and sizes are.
+
+(defvar agent-repl-status--glyph-heights (make-hash-table :test 'equal)
+  "Cache: (TEXT-FONT-NAME . GLYPH) -> the face `:height' factor it draws at.
+Keyed by the text font, so a frame whose font changes measures again.")
+
+(defun agent-repl-status--glyph-fail (fmt &rest args)
+  "Record FMT and ARGS as an ERROR, then signal it.
+The tab glyph\='s face is computed from invariants the fonts guarantee;
+a violation is logged through `agent-repl--error' at the point it is
+found and then fails hard."
+  (let ((message (apply #'format fmt args)))
+    (agent-repl--error '(:agent-repl-central "tab rendering and shared assets span workspaces")
+                       "%s" message)
+    (error "%s" message)))
+
+(defun agent-repl-status-glyph-fit-size (text-ascent text-descent size glyph-metrics)
+  "Return the largest pixel size, at most SIZE, whose glyph font fits the text.
+TEXT-ASCENT and TEXT-DESCENT are the text font\='s metrics in pixels at
+SIZE.  GLYPH-METRICS is called with a pixel size and answers the glyph
+font\='s (ASCENT . DESCENT) at that size.  A size fits when neither
+metric exceeds the text\='s.  Signals an error when no size from SIZE down
+to 1 fits, which no real pair of fonts produces."
+  (or (cl-loop for px downfrom size to 1
+               for metrics = (funcall glyph-metrics px)
+               when (and (<= (car metrics) text-ascent)
+                         (<= (cdr metrics) text-descent))
+               return px)
+      (agent-repl-status--glyph-fail
+       "elisp.status.glyph-fit-size: no size up to %d fits ascent %d descent %d"
+       size text-ascent text-descent)))
+
+(defun agent-repl-status--font-metrics (font frame)
+  "Return FONT\='s (SIZE ASCENT . DESCENT) in pixels on FRAME.
+FONT is a font object or name; `font-info' supplies the metrics."
+  (let ((info (font-info font frame)))
+    (unless info
+      (agent-repl-status--glyph-fail "elisp.status.font-metrics: no font info for %S" font))
+    (cons (aref info 2) (cons (aref info 8) (aref info 9)))))
+
+(defun agent-repl-status--glyph-font-metrics-at (family frame)
+  "Return a function of a pixel size answering FAMILY\='s (ASCENT . DESCENT).
+The font is opened at that size on FRAME."
+  (lambda (px)
+    (let* ((entity (find-font (font-spec :family family :size px) frame))
+           (font (and entity (open-font entity px frame))))
+      (unless font
+        (agent-repl-status--glyph-fail
+         "elisp.status.glyph-font-metrics-at: cannot open %s at %dpx" family px))
+      (cdr (agent-repl-status--font-metrics font frame)))))
+
+(defun agent-repl-status-glyph-height (glyph &optional frame)
+  "Return the face `:height' factor GLYPH draws at on FRAME\='s tab bar.
+1.0 on a frame that is not graphic, where every character fills one
+cell.  On a graphic frame it is the fit of GLYPH\='s own font inside the
+tab bar\='s text font (`agent-repl-status-glyph-fit-size'), cached per
+text font, and 1.0 when GLYPH is drawn by the text font itself."
+  (let ((frame (or frame (selected-frame))))
+    (if (not (display-graphic-p frame))
+        1.0
+      (let* ((text-font (face-font 'tab-bar frame))
+             (key (cons text-font glyph))
+             (cached (gethash key agent-repl-status--glyph-heights)))
+        (or cached
+            (puthash
+             key
+             (let* ((text (agent-repl-status--font-metrics text-font frame))
+                    (family (font-get (font-at 0 nil glyph) :family))
+                    (size (car text)))
+               (if (equal family (font-get (find-font (font-spec :name text-font) frame) :family))
+                   1.0
+                 (let ((fit (agent-repl-status-glyph-fit-size
+                             (cadr text) (cddr text) size
+                             (agent-repl-status--glyph-font-metrics-at
+                              (symbol-name family) frame))))
+                   (agent-repl--log '(:agent-repl-central "tab rendering and shared assets span workspaces")
+                                    "elisp.status.glyph-height: glyph=%s font=%s text-font=%s size=%d fit=%d"
+                                    glyph family text-font size fit)
+                   (/ (float fit) size))))
+             agent-repl-status--glyph-heights))))))
+
+(defun agent-repl-status-tab-glyph-face (arm glyph)
+  "Return the face GLYPH draws with on a tab standing on ARM.
+Its `:height' is `agent-repl-status-glyph-height', so the glyph is
+exactly as tall as the tab\='s text, and its `:foreground' is ARM\='s ink
+from `agent-repl-status-glyph-inks' when ARM declares one."
+  (let ((ink (alist-get arm agent-repl-status-glyph-inks)))
+    `(:height ,(agent-repl-status-glyph-height glyph)
+      ,@(when ink
+          (list :foreground
+                (or (cdr (assoc ink agent-repl--ink-by-name))
+                    (agent-repl-status--glyph-fail
+                     "elisp.status.tab-glyph-face: ink %S of arm %S has no color" ink arm)))))))
 
 ;;; The attention marker and its blink ---------------------------------------
 ;;
@@ -1375,7 +1492,7 @@ never prompted, or went quiet after a clean conclusion.")
        :foreground ,agent-repl--color-light
        :weight ,agent-repl--tab-weight))
   "Face for workspace tabs where something went wrong while the workspace
-stays usable (turquoise): a failed turn, a failed merge, a degraded view.")
+stays usable (turquoise): a failed turn, a degraded view, a vendor fault.")
 
 (defface agent-repl-tab-idle-async
   `((t :background ,agent-repl--color-idle-async-yellow
@@ -1607,6 +1724,8 @@ run left with no parts is nil."
                    (agent-repl-roster-row-for-ws name)))
          (badge (and row (agent-repl-roster-row-priority-label row)))
          (glyph (agent-repl-status-tab-glyph name arm))
+         (glyph (and glyph
+                     (propertize glyph 'face (agent-repl-status-tab-glyph-face arm glyph))))
          (parts (seq-remove #'string-blank-p
                             (delq nil (list badge glyph)))))
     (when parts

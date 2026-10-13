@@ -19,24 +19,21 @@ import (
 // only one resolver therefore cannot split the surfaces: the roster has no
 // claim to make that the footer did not make first.
 //
-// TWO ARMS SIT ABOVE THE PROJECTION. `opening` FIRST: an OpenTabs names the
-// workspace and has not answered it `opened` yet, so the row is grey and not
-// selectable whatever its session or its registry record says, `inactive`
-// included (a closed workspace the editor is reopening is opening, not
-// inactive). Only an open in flight draws it, so a daemon that restarted under
-// open tabs draws them as they are. Then `inactive`, a registered workspace
-// with no open perspective and nothing live behind it. Each dominates every
-// session state, and no footer is ever drawn for either.
+// ONE ARM SITS ABOVE THE PROJECTION: `inactive`, a workspace INCIDENTALLY
+// inactive (owner ruling, 2026-10-13). It is drawn while an OpenTabs names the
+// workspace and has not answered it `opened` yet — the row also carries its
+// `opening` marker then, and takes no click, whatever its session or its
+// registry record says — and for a registered workspace with no open
+// perspective and nothing live behind it. Only an open in flight raises the
+// marker, so a daemon that restarted under open tabs draws them as they are.
+// It dominates every session state, and no footer is ever drawn for it.
 //
 // WITHIN A CLAIM the roster draws the footer's step as its own arm
 // (`projectArm`), except on the idle rung, whose detail is the roster's own
 // ruling (`idleArm`): live detached work draws `idle_async` over an unread
 // turn end, and a read turn end is drawn partial.
 func statusArm(s *wsState, rec wsm.Workspace, session *wsm.Session, status *frontendv1.FooterStatus, log dlog.Logger) string {
-	if s.opening {
-		return "opening"
-	}
-	if !s.live(session) && rec.Closed {
+	if s.opening || !s.live(session) && rec.Closed {
 		return "inactive"
 	}
 	claim, ok := ladder.FooterClaim(status)
@@ -77,11 +74,10 @@ func statusArm(s *wsState, rec wsm.Workspace, session *wsm.Session, status *fron
 func projectArm(status *frontendv1.FooterStatus, log dlog.Logger) string {
 	switch arm := status.GetStatus().(type) {
 	case *frontendv1.FooterStatus_Merging:
-		if arm.Merging.GetEnqueued() != nil {
+		// A MERGE THAT HAS NOT STARTED is `merge_queued`, whether it waits in
+		// line or for the workspace to fall free (owner ruling, 2026-10-13).
+		if arm.Merging.GetEnqueued() != nil || arm.Merging.GetAwaitingFree() != nil {
 			return "merge_queued"
-		}
-		if arm.Merging.GetAwaitingFree() != nil {
-			return "merge_waiting"
 		}
 		return "merging"
 	case *frontendv1.FooterStatus_MergeFailed:
@@ -90,6 +86,8 @@ func projectArm(status *frontendv1.FooterStatus, log dlog.Logger) string {
 		return "merged"
 	case *frontendv1.FooterStatus_AgentReplFault:
 		return agentReplFaultArm(arm.AgentReplFault)
+	case *frontendv1.FooterStatus_Starting:
+		return "init"
 	case *frontendv1.FooterStatus_NetworkFault:
 		return "network_fault"
 	case *frontendv1.FooterStatus_Closing:
@@ -103,6 +101,9 @@ func projectArm(status *frontendv1.FooterStatus, log dlog.Logger) string {
 	case *frontendv1.FooterStatus_Question:
 		return "question"
 	case *frontendv1.FooterStatus_Waiting:
+		if arm.Waiting.GetColdGate() != nil {
+			return "cold_gate"
+		}
 		return "waiting"
 	case *frontendv1.FooterStatus_Working:
 		switch {
@@ -131,8 +132,6 @@ func projectArm(status *frontendv1.FooterStatus, log dlog.Logger) string {
 // agentReplFaultArm projects the footer's agent-repl fault step.
 func agentReplFaultArm(fault *frontendv1.FooterStatusAgentReplFault) string {
 	switch fault.GetSubstatus().(type) {
-	case *frontendv1.FooterStatusAgentReplFault_Starting:
-		return "init"
 	case *frontendv1.FooterStatusAgentReplFault_Severed:
 		return "severed"
 	case *frontendv1.FooterStatusAgentReplFault_Dead:
@@ -306,9 +305,6 @@ func setStatus(row *frontendv1.RosterRow, arm string, log dlog.Logger) {
 	case "merge_queued":
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"merge_queued\""})
 		row.Status = &frontendv1.RosterRow_MergeQueued{MergeQueued: &frontendv1.RosterRowStatusMergeQueued{}}
-	case "merge_waiting":
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"merge_waiting\""})
-		row.Status = &frontendv1.RosterRow_MergeWaiting{MergeWaiting: &frontendv1.RosterRowStatusMergeWaiting{}}
 	case "merge_failed":
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"merge_failed\""})
 		row.Status = &frontendv1.RosterRow_MergeFailed{MergeFailed: &frontendv1.RosterRowStatusMergeFailed{}}
@@ -327,9 +323,9 @@ func setStatus(row *frontendv1.RosterRow, arm string, log dlog.Logger) {
 	case "waiting":
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"waiting\""})
 		row.Status = &frontendv1.RosterRow_Waiting{Waiting: &frontendv1.RosterRowStatusWaiting{}}
-	case "opening":
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"opening\""})
-		row.Status = &frontendv1.RosterRow_Opening{Opening: &frontendv1.RosterRowStatusOpening{}}
+	case "cold_gate":
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"cold_gate\""})
+		row.Status = &frontendv1.RosterRow_ColdGate{ColdGate: &frontendv1.RosterRowStatusColdGate{}}
 	case "inactive":
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"inactive\""})
 		row.Status = &frontendv1.RosterRow_Inactive{Inactive: &frontendv1.RosterRowStatusInactive{}}
@@ -339,7 +335,7 @@ func setStatus(row *frontendv1.RosterRow, arm string, log dlog.Logger) {
 			dlog.Context{
 				"arm":                 arm,
 				"invariant_violation": "a row would carry an unset status oneof",
-				"remediation":         "add the arm to setStatus and to statusArms",
+				"remediation":         "add the arm to setStatus",
 			})
 		row.Status = &frontendv1.RosterRow_None{None: &frontendv1.RosterRowStatusNone{}}
 	}

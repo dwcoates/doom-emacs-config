@@ -1774,74 +1774,14 @@ func (f *fakeFooter) last() footer.MergeFacts {
 
 type fakeSidebar struct {
 	sidebar.Resolver
-	mu           sync.Mutex
-	facts        []footer.MergeFacts
-	requested    []requestFact
-	detachedEnds []detachedEnd
-}
-
-// requestFact is one request fact the roster was told.
-type requestFact struct {
-	ws        ids.WorkspaceID
-	requested bool
-}
-
-// detachedEnd is one detached merge's end the roster was told.
-type detachedEnd struct {
-	ws     ids.WorkspaceID
-	landed bool
+	mu    sync.Mutex
+	facts []footer.MergeFacts
 }
 
 func (s *fakeSidebar) SetMerge(_ ids.WorkspaceID, facts footer.MergeFacts) {
 	s.mu.Lock()
 	s.facts = append(s.facts, facts)
 	s.mu.Unlock()
-}
-
-func (s *fakeSidebar) SetMergeRequested(ws ids.WorkspaceID, requested bool) {
-	s.mu.Lock()
-	s.requested = append(s.requested, requestFact{ws: ws, requested: requested})
-	s.mu.Unlock()
-}
-
-func (s *fakeSidebar) SetDetachedMergeEnded(ws ids.WorkspaceID, landed bool) {
-	s.mu.Lock()
-	s.detachedEnds = append(s.detachedEnds, detachedEnd{ws: ws, landed: landed})
-	s.mu.Unlock()
-}
-
-// requestedSeen answers every request fact the roster was told, in order,
-// whatever workspace it was told for.
-func (s *fakeSidebar) requestedSeen() []bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var out []bool
-	for _, fact := range s.requested {
-		out = append(out, fact.requested)
-	}
-	return out
-}
-
-// requestedSeenFor answers every request fact the roster was told for ws, in
-// order.
-func (s *fakeSidebar) requestedSeenFor(ws ids.WorkspaceID) []bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var out []bool
-	for _, fact := range s.requested {
-		if fact.ws == ws {
-			out = append(out, fact.requested)
-		}
-	}
-	return out
-}
-
-// detachedEndsSeen answers every detached merge's end the roster was told,
-// in order.
-func (s *fakeSidebar) detachedEndsSeen() []detachedEnd {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return append([]detachedEnd(nil), s.detachedEnds...)
 }
 
 // fakePainter turns text into one plain span, which is enough for the gate's
@@ -1965,9 +1905,6 @@ type harness struct {
 	// set, fails every one.
 	registryPublishes int
 	publishErr        error
-	// requestedAtPublish is the roster's merge-requested facts as they stood
-	// at each PublishRegistry call, so a test can assert what a push drew.
-	requestedAtPublish [][]bool
 	// pauseInTerminal is the terminal seam the drain's tests wire.
 	pauseInTerminal AdmissionPause
 	rollout         *fakeRollout
@@ -2248,11 +2185,9 @@ func (h *harness) deps() Deps {
 		Governor:   h.governor,
 		Painter:    fakePainter{},
 		PublishRegistry: func(context.Context) error {
-			requested := h.sidebar.requestedSeen()
 			h.mu.Lock()
 			defer h.mu.Unlock()
 			h.registryPublishes++
-			h.requestedAtPublish = append(h.requestedAtPublish, requested)
 			return h.publishErr
 		},
 		StartSession: func(_ context.Context, ws ids.WorkspaceID) error {

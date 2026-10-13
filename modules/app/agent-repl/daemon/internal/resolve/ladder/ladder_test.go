@@ -46,6 +46,10 @@ func TestResolveTakesTheStrongestClaimTheFactsMakeWithNoStoppedMerge(t *testing.
 		{name: "a permission ask outranks a turn in flight", claims: []Claim{Waiting, Thinking}, want: Waiting},
 		{name: "a turn in flight outranks idle", claims: []Claim{Thinking}, want: Thinking},
 		{name: "a parked session skips the link rung", parked: true, claims: []Claim{AgentReplFault}, want: Idle},
+		{name: "a parked session skips the starting rung", parked: true, claims: []Claim{Starting}, want: Idle},
+		{name: "an agent-repl fault outranks a booting session", claims: []Claim{AgentReplFault, Starting}, want: AgentReplFault},
+		{name: "a booting session outranks a network fault", claims: []Claim{Starting, NetworkFault}, want: Starting},
+		{name: "a merge in flight outranks a booting session", merge: "queued", claims: []Claim{Merging, Starting}, want: Merging},
 		{name: "a parked session still stands on its merge", merge: "failed", parked: true, claims: []Claim{MergeFailed, AgentReplFault}, want: MergeFailed},
 		{name: "an agent-repl fault outranks a network fault", claims: []Claim{AgentReplFault, NetworkFault}, want: AgentReplFault},
 		{name: "an agent-repl fault outranks a vendor fault", claims: []Claim{AgentReplFault, VendorFault}, want: AgentReplFault},
@@ -135,7 +139,7 @@ func TestEveryRosterArmIsPlacedOnALadderRung(t *testing.T) {
 			claim, _ := RosterArmClaim(arm)
 
 			// Assert
-			if claim != Inactive && claim != Opening && !slices.Contains(Order, claim) {
+			if claim != Inactive && !slices.Contains(Order, claim) {
 				t.Fatalf("roster arm %q projects onto %q, which is not a rung", arm, claim)
 			}
 		})

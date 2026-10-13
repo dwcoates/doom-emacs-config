@@ -18,6 +18,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import stylesheet from "../src/styles.css?raw";
+import renderColors from "../../proto/vocab/render-colors.json";
 import { TITLE_FOLD_OPEN_SELECTOR } from "../src/feed/title-fold.js";
 import {
   BUBBLE_CAP_LINES,
@@ -3607,20 +3608,33 @@ describe("the rail's tone rules", () => {
     expect(rules.at(-1)?.declarations).toContain(`color: ${color}`);
   });
 
-  it("lets no rail status rule set a color after the tone rules", () => {
+  // THE ONE DECLARED EXCEPTION is a mark's own ink (render-colors.json
+  // glyph_inks, owner ruling 2026-10-13), which must come after the tones.
+  it("lets no rail status rule but a declared ink set a color after the tone rules", () => {
     const rules = rulesOf(stylesheet);
     let lastTone = -1;
     rules.forEach((rule, index) => {
       if (rule.selectors.some((sel) => sel.startsWith("#ws-sidebar .st.tone-"))) lastTone = index;
     });
+    const inks = new Set(Object.values(renderColors.glyph_inks).map((ink) => `#ws-sidebar .st.ink-${ink}`));
     const later = rules
       .slice(lastTone + 1)
       .filter((rule) =>
         rule.selectors.some((sel) => /^#ws-sidebar \.st(-|\[|\.)/.test(sel)) &&
         /(?:^|;)\s*color\s*:/.test(rule.declarations) &&
-        !rule.selectors.every((sel) => sel.includes('data-glyph="inactive"')),
+        !rule.selectors.every((sel) => inks.has(sel)),
       );
     expect(later.map((rule) => rule.selectors.join(", "))).toEqual([]);
+  });
+
+  it.each(Object.values(renderColors.glyph_inks))("inks a mark %s after the tone rules", (ink) => {
+    const rules = rulesOf(stylesheet);
+    const lastIndex = (pred: (rule: (typeof rules)[number]) => boolean): number =>
+      rules.reduce((found, rule, index) => (pred(rule) ? index : found), -1);
+    const lastTone = lastIndex((rule) => rule.selectors.some((sel) => sel.startsWith("#ws-sidebar .st.tone-")));
+    const inkAt = lastIndex((rule) => rule.selectors.length === 1 && rule.selectors[0] === `#ws-sidebar .st.ink-${ink}`);
+    expect(inkAt).toBeGreaterThan(lastTone);
+    expect(rules[inkAt].declarations).toMatch(/(?:^|;)\s*color\s*:/);
   });
 });
 
@@ -4024,6 +4038,136 @@ describe("the rail's mark column", () => {
 
     // Assert
     expect(rule).toMatch(/justify-content:\s*center/);
+  });
+});
+
+/**
+ * THE MARKS' ONE SIZE AND ONE CYCLE (owner ruling, 2026-10-13): every rail
+ * mark draws at the dot's size, a breath shrinks a mark half as far as it once
+ * did, and one breath takes exactly as long as one turn of a spinning glyph.
+ */
+describe("the rail's marks", () => {
+  it("times the breath by the one mark cycle", () => {
+    // Arrange / Act
+    const rule = declarationsOf("#ws-sidebar .st.breathes");
+
+    // Assert
+    expect(rule).toMatch(/animation:\s*ws-pulse\s+var\(--ws-mark-cycle\)\s+ease-in-out\s+infinite/);
+  });
+
+  // ONE ANIMATION (owner ruling, 2026-10-13): no rail mark rule animates with
+  // anything but the breath.
+  it("animates no rail mark but by the breath", () => {
+    // Arrange / Act
+    const animated = rulesOf(stylesheet).filter(
+      (rule) =>
+        rule.selectors.some((sel) => /^#ws-sidebar \.st(\.|\[|-|$)/.test(sel)) &&
+        /(?:^|;)\s*animation\s*:/.test(rule.declarations),
+    );
+
+    // Assert
+    expect(animated.map((rule) => rule.selectors.join(", "))).toEqual(["#ws-sidebar .st.breathes"]);
+  });
+
+  it("states the mark cycle once", () => {
+    // Arrange / Act
+    const defs = stylesheet.match(/--ws-mark-cycle\s*:/g) ?? [];
+
+    // Assert
+    expect(defs).toHaveLength(1);
+  });
+
+  it("shrinks a breathing mark to 86%, half the extent it once reached", () => {
+    // Arrange / Act
+    const keyframes = /@keyframes ws-pulse \{([^}]*\}[^}]*\})/.exec(stylesheet)?.[1] ?? "";
+
+    // Assert
+    expect(keyframes).toMatch(/50%\s*\{[^}]*transform:\s*scale\(0\.86\)/);
+  });
+
+  it("draws a glyph's character at the dot's size", () => {
+    // Arrange / Act
+    const rule = declarationsOf("#ws-sidebar .st-glyph");
+
+    // Assert
+    expect(rule).toMatch(/(?:^|;)\s*font-size:\s*var\(--ws-mark-size\)/);
+    expect(rule).toMatch(/(?:^|;)\s*height:\s*var\(--ws-mark-size\)/);
+  });
+
+  it("sizes the dot by the same mark size", () => {
+    // Arrange / Act
+    const rule = declarationsOf("#ws-sidebar .st");
+
+    // Assert
+    expect(rule).toMatch(/(?:^|;)\s*height:\s*var\(--ws-mark-size\)/);
+  });
+
+  it("draws the merge glyph in the mark's box from its ink", () => {
+    // Arrange / Act
+    const rule = declarationsOf('#ws-sidebar .st-glyph[data-glyph="merge"]');
+
+    // Assert
+    expect(rule).toMatch(/linear-gradient\(currentColor, currentColor\)/);
+  });
+
+  it("strikes a cold-gated workspace's name and nothing else", () => {
+    // Arrange / Act
+    const rule = declarationsOf('#ws-sidebar .ws[data-arm="coldGate"] > .row > .name');
+
+    // Assert
+    expect(rule).toMatch(/text-decoration:\s*line-through/);
+  });
+
+  it("offers no click on a row still opening", () => {
+    // Arrange / Act
+    const rule = declarationsOf('#ws-sidebar .ws[data-opening="true"] > .row');
+
+    // Assert
+    expect(rule).toMatch(/cursor:\s*default/);
+  });
+
+  it("draws a grey arm's dot muted", () => {
+    // Arrange / Act
+    const rule = declarationsOf('#ws-sidebar .st.tone-none[data-glyph="dot"]');
+
+    // Assert
+    expect(rule).toMatch(/color:\s*var\(--muted\)/);
+  });
+
+  it("keeps no per-arm status rule", () => {
+    // Arrange / Act
+    const perArm = stylesheet.match(/#ws-sidebar \.st-(?!glyph\b)[a-z-]+/g) ?? [];
+
+    // Assert
+    expect(perArm).toEqual([]);
+  });
+});
+
+/**
+ * A REPOSITORY'S "+" SITS AT THE RIGHT EDGE (owner request, 2026-10-13), over
+ * the when-column of the rows beneath it.
+ */
+describe("the repository header's add control", () => {
+  it("pushes the add control to the header's right edge", () => {
+    // Arrange / Act
+    const rule = declarationsOf("#ws-sidebar .repo-head .sb-add");
+
+    // Assert
+    expect(rule).toMatch(/margin-left:\s*auto/);
+  });
+
+  it("pads the header's right edge as a row's", () => {
+    // Arrange / Act
+    const head = declarationsOf("#ws-sidebar .repo-head") ?? "";
+    const row = declarationsOf("#ws-sidebar .row") ?? "";
+    const right = (decl: string): string | undefined => {
+      const parts = /padding:\s*([^;]+)/.exec(decl)?.[1].trim().split(/\s+/) ?? [];
+      return parts.length >= 2 ? parts[1] : undefined;
+    };
+
+    // Assert
+    expect(right(head)).toBeDefined();
+    expect(right(head)).toBe(right(row));
   });
 });
 

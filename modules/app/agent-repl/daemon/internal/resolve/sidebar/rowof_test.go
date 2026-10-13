@@ -73,8 +73,7 @@ func TestRowFollowsALaterResolve(t *testing.T) {
 
 func TestRowFindsAHiddenWorkspace(t *testing.T) {
 	// Arrange.
-	hidden := workspace(string(theWS), "one")
-	hidden.Hidden = true
+	hidden := hiddenWorkspace(string(theWS), "one")
 	r := arrange(t, hidden)
 
 	// Act.

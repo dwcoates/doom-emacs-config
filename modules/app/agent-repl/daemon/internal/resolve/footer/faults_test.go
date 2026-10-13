@@ -44,8 +44,6 @@ func faultStep(status *frontendv1.FooterStatus) string {
 	switch status.GetAgentReplFault().GetSubstatus().(type) {
 	case *frontendv1.FooterStatusAgentReplFault_DaemonImpaired:
 		return "daemon_impaired"
-	case *frontendv1.FooterStatusAgentReplFault_Starting:
-		return "starting"
 	case *frontendv1.FooterStatusAgentReplFault_Degraded:
 		return "degraded"
 	case *frontendv1.FooterStatusAgentReplFault_Severed:
@@ -264,8 +262,12 @@ func TestTheLinkStateOutranksAFaultForTheDisconnectedStep(t *testing.T) {
 	h.r.OnLink(testWS, shimclient.LinkDialing)
 
 	// Assert
-	if got := faultStep(h.view(t).GetStrip().GetStatus()); got != "starting" {
-		t.Fatalf("substatus = %q, want starting: the link state is the live truth about the link", got)
+	status := h.view(t).GetStrip().GetStatus()
+	if status.GetStarting() == nil {
+		t.Fatalf("status = %v, want starting: the link state is the live truth about the link", status)
+	}
+	if got := status.GetStarting().GetActivity().GetSalient().GetFault().GetKind(); got != health.KindShimDied {
+		t.Fatalf("starting line's fault = %q, want %q: the fault stands as the boot's line", got, health.KindShimDied)
 	}
 }
 

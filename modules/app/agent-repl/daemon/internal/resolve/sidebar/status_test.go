@@ -1165,10 +1165,11 @@ func TestLiveDetachedWorkDrawsIdleAsyncOverAnUnreadTurnEnd(t *testing.T) {
 			wantViewed: true,
 		},
 		{
-			name:       "interrupted, async ends while unread is interrupted, full",
+			name:       "interrupted, async ends with no dwell is interrupted, partial: an interrupt is read at once",
 			how:        wsm.CloseKilled,
 			act:        func(r sidebarResolver) { r.OnLiveWorkChanged(theWS, sidebar.LiveWorkSet{}) },
 			wantStatus: "interrupted",
+			wantViewed: true,
 		},
 		{
 			name: "completed, a view after a new prompt cleared the result reads nothing",
@@ -1265,11 +1266,12 @@ func TestATurnEndWithNoAsyncShowsItsTurnEndArm(t *testing.T) {
 		how        sidebar.TurnClose
 		viewed     bool
 		wantStatus string
+		wantViewed bool
 	}{
 		{name: "completed, unread", how: wsm.CloseCompleted, wantStatus: "done"},
-		{name: "completed, viewed", how: wsm.CloseCompleted, viewed: true, wantStatus: "done"},
-		{name: "interrupted, unread", how: wsm.CloseKilled, wantStatus: "interrupted"},
-		{name: "interrupted, viewed", how: wsm.CloseKilled, viewed: true, wantStatus: "interrupted"},
+		{name: "completed, viewed", how: wsm.CloseCompleted, viewed: true, wantStatus: "done", wantViewed: true},
+		{name: "interrupted, with no dwell is already read", how: wsm.CloseKilled, wantStatus: "interrupted", wantViewed: true},
+		{name: "interrupted, viewed", how: wsm.CloseKilled, viewed: true, wantStatus: "interrupted", wantViewed: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1288,8 +1290,8 @@ func TestATurnEndWithNoAsyncShowsItsTurnEndArm(t *testing.T) {
 			if got := statusName(row); got != tc.wantStatus {
 				t.Fatalf("status = %q, want %q", got, tc.wantStatus)
 			}
-			if got := row.GetViewed() != nil; got != tc.viewed {
-				t.Fatalf("viewed = %v, want %v", got, tc.viewed)
+			if got := row.GetViewed() != nil; got != tc.wantViewed {
+				t.Fatalf("viewed = %v, want %v", got, tc.wantViewed)
 			}
 		})
 	}
@@ -1494,7 +1496,7 @@ func TestRosterResolvesEveryMergeArmWithNothingParked(t *testing.T) {
 		want  string
 	}{
 		{name: "queued", facts: footer.MergeFacts{State: "queued", Step: footer.StepEnqueued, QueuePlace: 1, QueueWaiting: 2}, want: "merge_queued"},
-		{name: "waiting for the workspace to fall free", facts: footer.MergeFacts{State: "merging", Step: footer.StepAwaitingFree}, want: "merge_waiting"},
+		{name: "waiting for the workspace to fall free is queued", facts: footer.MergeFacts{State: "merging", Step: footer.StepAwaitingFree}, want: "merge_queued"},
 		{name: "merging", facts: footer.MergeFacts{State: "merging", Step: footer.StepRebasing, Total: 1}, want: "merging"},
 		{name: "failed", facts: footer.MergeFacts{State: "failed", FailedArea: footer.FailedConflicts}, want: "merge_failed"},
 		{name: "merged", facts: footer.MergeFacts{State: "merged"}, want: "merged"},
@@ -1818,44 +1820,70 @@ func TestARedialingLinkOutranksTheVendorStartRun(t *testing.T) {
 	}
 }
 
-func TestOpeningDominatesALiveSession(t *testing.T) {
-	// Arrange.
-	r := live(t, arrange(t))
-
-	// Act.
-	r.SetOpening(theWS, true)
-
-	// Assert.
-	if got := statusName(onlyRow(t, r)); got != "opening" {
-		t.Fatalf("status = %q, want opening", got)
+// AN OPENING WORKSPACE IS INCIDENTALLY INACTIVE (owner ruling, 2026-10-13):
+// its row draws `inactive` with the `opening` marker over every other arm, and
+// a closed workspace with no open in flight draws `inactive` alone.
+func TestTheOpeningMarkerAndTheInactiveArm(t *testing.T) {
+	closedWS := func() wsm.Workspace {
+		ws := workspace(string(theWS), "one")
+		ws.Closed = true
+		return ws
 	}
-}
-
-func TestOpeningDominatesInactive(t *testing.T) {
-	// Arrange.
-	closed := workspace(string(theWS), "one")
-	closed.Closed = true
-	r := arrange(t, closed)
-
-	// Act.
-	r.SetOpening(theWS, true)
-
-	// Assert.
-	if got := statusName(onlyRow(t, r)); got != "opening" {
-		t.Fatalf("status = %q, want opening", got)
+	cases := []struct {
+		name        string
+		arrange     func(t *testing.T) sidebarResolver
+		act         func(r sidebarResolver)
+		wantStatus  string
+		wantOpening bool
+	}{
+		{
+			name:        "an open over a live session is inactive and opening",
+			arrange:     func(t *testing.T) sidebarResolver { return live(t, arrange(t)) },
+			act:         func(r sidebarResolver) { r.SetOpening(theWS, true) },
+			wantStatus:  "inactive",
+			wantOpening: true,
+		},
+		{
+			name:        "an open of a closed workspace is inactive and opening",
+			arrange:     func(t *testing.T) sidebarResolver { return arrange(t, closedWS()) },
+			act:         func(r sidebarResolver) { r.SetOpening(theWS, true) },
+			wantStatus:  "inactive",
+			wantOpening: true,
+		},
+		{
+			name:        "a closed workspace with no open in flight is inactive alone",
+			arrange:     func(t *testing.T) sidebarResolver { return arrange(t, closedWS()) },
+			act:         func(sidebarResolver) {},
+			wantStatus:  "inactive",
+			wantOpening: false,
+		},
+		{
+			name:    "a lowered open draws the session's own arm",
+			arrange: func(t *testing.T) sidebarResolver { return live(t, arrange(t)) },
+			act: func(r sidebarResolver) {
+				r.SetOpening(theWS, true)
+				r.SetOpening(theWS, false)
+			},
+			wantStatus:  "ready",
+			wantOpening: false,
+		},
 	}
-}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r := tc.arrange(t)
 
-func TestALoweredOpeningDrawsTheSessionsOwnArm(t *testing.T) {
-	// Arrange.
-	r := live(t, arrange(t))
-	r.SetOpening(theWS, true)
+			// Act.
+			tc.act(r)
 
-	// Act.
-	r.SetOpening(theWS, false)
-
-	// Assert.
-	if got := statusName(onlyRow(t, r)); got != "ready" {
-		t.Fatalf("status = %q, want the session's own arm", got)
+			// Assert.
+			row := onlyRow(t, r)
+			if got := statusName(row); got != tc.wantStatus {
+				t.Fatalf("status = %q, want %q", got, tc.wantStatus)
+			}
+			if got := row.GetOpening() != nil; got != tc.wantOpening {
+				t.Fatalf("opening marker = %v, want %v", got, tc.wantOpening)
+			}
+		})
 	}
 }
