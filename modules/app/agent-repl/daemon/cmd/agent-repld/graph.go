@@ -610,9 +610,15 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		BringUp: func(pending []ids.WorkspaceID, done func(ids.WorkspaceID, error)) {
 			editorBringUp(fleet, p.DB, ownership, bringingUp, log, pending, done)
 		},
-		Opening: sidebarResolver.SetOpening,
-		Now:     time.Now,
-		Log:     log,
+		Opening:          sidebarResolver.SetOpening,
+		ReadConversation: feedResolver.ReadNewest,
+		Owed: func(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
+			owed, err := p.DB.OwedTurns(ctx, ws)
+			return len(owed) > 0, err
+		},
+		Row: sidebarResolver.Row,
+		Now: time.Now,
+		Log: log,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the editor's opens: %w", err)
@@ -734,8 +740,12 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		SessionStarted: fleet.Serving,
 		SessionAbsent:  fleet.SessionAbsent,
 		StandingDown:   supervisor.StandingDown,
-		ColdGate:       fleet.ColdGateDetail,
-		DrainRefusals:  refusalNoter{ref: &drainController},
+		// AN OPEN WAITS FOR THE CUT TURN ITS BRING-UP RESUMES (opentabs).
+		Resumptions: func(ws ids.WorkspaceID, report promptqueue.ResumeReport) {
+			opens.Resumption(ws, opentabs.Resume{Kind: resumeKind(report.Kind), Text: report.Text})
+		},
+		ColdGate:      fleet.ColdGateDetail,
+		DrainRefusals: refusalNoter{ref: &drainController},
 		// A held-prompt edit is state on the host view; the server exists only
 		// later, so the publish reads it out of the relay forwarder.
 		PublishHost: relay.PublishHostWorkspace,
@@ -1877,4 +1887,23 @@ func editorBringUp(fleet editorFleet, db editorRecords, ownership workspace.Owne
 			Done:       done,
 		}, records)
 	})
+}
+
+// resumeKind translates the prompt queue's account of an owed resumption into
+// the editor's opens' own.
+func resumeKind(kind promptqueue.ResumeKind) opentabs.ResumeKind {
+	switch kind {
+	case promptqueue.ResumeStarting:
+		return opentabs.ResumeStarting
+	case promptqueue.ResumeStarted:
+		return opentabs.ResumeStarted
+	case promptqueue.ResumeFailed:
+		return opentabs.ResumeFailed
+	case promptqueue.ResumeNotNow:
+		return opentabs.ResumeNotNow
+	default:
+		// An account the opens do not know: the coordinator records it at
+		// ERROR rather than reading it as any known one.
+		return opentabs.ResumeKind(0)
+	}
 }
