@@ -110,17 +110,24 @@ type Logger interface {
 // InfoBound is how long `hdiutil info` may run before the disk manager is
 // taken not to answer.
 //
-// MEASURED, NOT GUESSED: 30 calls from Go on the owner's host at a load
-// average of 15.9 (2026-10-12) answered in p50 8.6ms, max 22ms. The bound is
-// just over twice that max. A wedged disk manager never answers at all
-// (2026-10-12: every call ran out its 60s bound), so the short bound costs a
-// healthy run nothing and a wedged one only this long.
-const InfoBound = 50 * time.Millisecond
+// MEASURED FROM THE RUNS' OWN LOGS, at the runs' own priority (nice 19, the
+// throttle I/O tier) on a host carrying several runs at once. The first bound,
+// 50ms, came from 30 quiet calls (max 22ms) and missed the tail: the run logs
+// of 2026-10-13 show healthy answers of 7-20ms, one of 42ms, and one still
+// running at 56ms when the 50ms bound killed it (load average 28). That one
+// was healthy: `diskutil list` answered in the same check, and the next run,
+// 13s later, had its answer in 7ms. A refusal on it put the run on the SSD
+// and opened an investigation workspace for a disk manager that was fine.
+// The bound is just over twice that 56ms. A wedged disk manager never
+// answers at all (2026-10-12: every call ran out its 60s bound), so the
+// bound costs a healthy run nothing and a wedged one only this long.
+const InfoBound = 120 * time.Millisecond
 
 // ListBound is how long the `diskutil list` probe may run before the disk
-// manager is taken not to answer: measured in the same 30 calls at p50 25ms,
-// max 44ms, and just over twice that max.
-const ListBound = 100 * time.Millisecond
+// manager is taken not to answer: the same run logs show healthy answers of
+// 21-49ms and one of 85ms (in the same check as the 56ms `hdiutil info`), and
+// this is just over twice that max.
+const ListBound = 175 * time.Millisecond
 
 // CommandBound is how long one hdiutil, diskutil or lsof call may run.
 //
@@ -575,9 +582,10 @@ const registryLockName = "registry.mutex"
 // MEASURED ON THE OWNER'S HOST (2026-10-12, load average 15-24). Uncontended,
 // the flock is taken in p50 10us, max 64us (200 takes). Contended, a run waits
 // out the other holder's hold:
-//   - an acquire holds it for `hdiutil info` (max 22ms) and the 8 GiB attach
-//     up to its record's write (95ms and 97ms, read off two live runs'
-//     records as their write time less their creation time): about 120ms;
+//   - an acquire holds it for `hdiutil info` (at most InfoBound, 120ms) and
+//     the 8 GiB attach up to its record's write (95ms and 97ms, read off two
+//     live runs' records as their write time less their creation time):
+//     about 220ms;
 //   - an investigation holds it for `git worktree list` (max 142ms) and the
 //     workspace CLI's dispatch (max 559ms): about 700ms, the longest hold.
 //
