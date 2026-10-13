@@ -1703,6 +1703,30 @@ describe("the hidden section's rows", () => {
     },
   );
 
+  it.each(["merged", "hidden"] as const)("draws a %s row's name in the bands' one name grey", (place) => {
+    const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "thinking", value: {} } }), sidebarContext(), "R", place);
+    expect(drawn.querySelector(":scope > .row > .name")?.classList.contains("band-name")).toBe(true);
+  });
+
+  it("leaves a grouping row's name out of the bands' grey", () => {
+    const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "thinking", value: {} } }), sidebarContext(), "R", "grouping");
+    expect(drawn.querySelector(":scope > .row > .name")?.classList.contains("band-name")).toBe(false);
+  });
+
+  it("paints a hidden row's name in the repository names' grey", () => {
+    const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "done", value: {} } }), sidebarContext(), "R", "hidden");
+    expect(inRail(drawn, () => cascadedValue(drawn.querySelector(":scope > .row > .name") as HTMLElement, "color"))).toBe(
+      "var(--repo-head-expanded)",
+    );
+  });
+
+  it("strikes a hidden row's name through at a cold gate", () => {
+    const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "coldGate", value: {} } }), sidebarContext(), "R", "hidden");
+    expect(inRail(drawn, () => cascadedValue(drawn.querySelector(":scope > .row > .name") as HTMLElement, "text-decoration"))).toBe(
+      "line-through",
+    );
+  });
+
   it("keeps the status color on the same row in a grouping", () => {
     const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "severed", value: {} } }), sidebarContext(), "R", "grouping");
     expect(drawn.classList.contains("tone-blue")).toBe(true);
