@@ -1304,7 +1304,9 @@ export const MERGE_TAB_STATES = ["live", "settled"] as const;
  * attempt, whose agent asks, and the rebasing and tests tabs they are drawn in.
  */
 export const MERGE_TAB_WAITING_KINDS = ["pick", "rebasing", "rebaseCommit", "tests", "testsRunFixing"] as const;
-export type MergeTabState = (typeof MERGE_TAB_STATES)[number] | "waitingOnUser";
+/** The kinds that can also be pending: a commit the replay has not reached. */
+export const MERGE_TAB_PENDING_KINDS = ["rebaseCommit"] as const;
+export type MergeTabState = (typeof MERGE_TAB_STATES)[number] | "waitingOnUser" | "pending";
 
 /** When every fixture tab's work began, and each queue entry its stage. */
 const MERGE_TAB_STARTED_AT_MS = 1_000n;
@@ -1321,6 +1323,7 @@ const settledState = () => ({
 /** The state arm a tab carries. Only the MERGE_TAB_WAITING_KINDS wait on the user. */
 const plainState = (state: MergeTabState) => {
   if (state === "waitingOnUser") throw new Error("only the MERGE_TAB_WAITING_KINDS wait on the user");
+  if (state === "pending") throw new Error("only the MERGE_TAB_PENDING_KINDS are pending");
   return state === "settled" ? settledState() : liveState();
 };
 
@@ -1404,11 +1407,11 @@ const mergeTabKindValue = (
       return {
         case: "rebaseCommit",
         value: {
-          state: agenticState(state),
+          state: state === "pending" ? { case: "pending" as const, value: {} } : agenticState(state),
           commit: { shortSha: "a1b2c3d4e5f6", subject: "fix the reconnect loop" },
           lines: [{ text: "conflicted in 2 file(s)" }],
           conflict: {
-            state: agenticState(state),
+            state: agenticState(state === "pending" ? "live" : state),
             files: [{ path: "daemon/x.go" }, { path: "webapp/y.ts" }],
           },
         },
