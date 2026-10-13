@@ -85,6 +85,18 @@ func UnitPrefix() []string { return []string{"/usr/sbin/taskpolicy", "-d", UnitI
 // Runner runs one external command and answers its combined output.
 type Runner func(name string, args ...string) (string, error)
 
+// Timed wraps r so every call's duration and result go to note: the
+// measurements CommandBound is set from (owner rule, 2026-10-12: a bound sits
+// just over twice the healthy latency, measured, not guessed).
+func Timed(r Runner, note func(call string, took time.Duration, err error)) Runner {
+	return func(name string, args ...string) (string, error) {
+		start := time.Now()
+		out, err := r(name, args...)
+		note(name+" "+strings.Join(args, " "), time.Since(start), err)
+		return out, err
+	}
+}
+
 // BoundedRunner runs one external command within bound and answers its
 // combined output.
 type BoundedRunner func(bound time.Duration, name string, args ...string) (string, error)
