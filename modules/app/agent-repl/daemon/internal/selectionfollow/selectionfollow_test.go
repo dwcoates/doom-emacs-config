@@ -77,12 +77,8 @@ func newWorld(t *testing.T) *world {
 }
 
 func (w *world) level(message string) string {
-	for _, r := range w.log.Records() {
-		if r.Message == message {
-			return r.Level
-		}
-	}
-	return ""
+	r, _ := dlog.FindRecord(w.log.Records(), dlog.RecordQuery{Message: message})
+	return r.Level
 }
 
 func TestCheckFollowsBeforeAnyFollowHasLanded(t *testing.T) {

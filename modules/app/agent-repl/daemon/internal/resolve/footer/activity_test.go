@@ -158,13 +158,7 @@ func TestTheBringUpFailureLineIsRecordedOnceWhenItIsComposed(t *testing.T) {
 
 // countOf counts the records at one level and operation.
 func countOf(records []dlog.Record, level, operation string) int {
-	n := 0
-	for _, rec := range records {
-		if rec.Level == level && rec.Operation == operation {
-			n++
-		}
-	}
-	return n
+	return len(dlog.FilterRecords(records, dlog.RecordQuery{Level: level, Operation: operation}))
 }
 
 // ---- the tier each status arm resolves ------------------------------------

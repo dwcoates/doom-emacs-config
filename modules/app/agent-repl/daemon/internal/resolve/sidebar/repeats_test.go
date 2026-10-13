@@ -18,13 +18,7 @@ func renderOnce(log dlog.Logger, last map[string]string, arms map[string]string)
 
 // countOf counts the captured records of one operation.
 func countOf(log *dlog.TestLogger, operation string) int {
-	n := 0
-	for _, r := range log.Records() {
-		if r.Operation == operation {
-			n++
-		}
-	}
-	return n
+	return len(dlog.FilterRecords(log.Records(), dlog.RecordQuery{Operation: operation}))
 }
 
 func TestARenderWhoseRowsDidNotChangeLogsNoneOfThemAgain(t *testing.T) {

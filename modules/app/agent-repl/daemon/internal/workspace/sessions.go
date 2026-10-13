@@ -12,6 +12,7 @@ import (
 
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
+	"google.golang.org/protobuf/proto"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -279,6 +280,11 @@ type Fleet struct {
 	// workspace's next watcher rather than failing or reading the gap as free.
 	sessionsMoved chan struct{}
 	coldGates     map[ids.WorkspaceID]coldGate
+	// heldAtGate is how many prompts are held at a cold gate per workspace,
+	// as the prompt queue last reported it (SetColdGateHeld). It is kept
+	// whether or not a gate stands, so a gate raised later offers its
+	// compact-and-resume answer from the first frame. Under mu.
+	heldAtGate map[ids.WorkspaceID]int
 	// handedOver names the workspaces a handover has taken from this daemon
 	// (HandOver), until a reclaim gives one back (Reclaimed). A start that
 	// spawns after its workspace was handed over must not serve it: see hold.
@@ -518,6 +524,7 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		sessions:       map[ids.WorkspaceID]*live{},
 		sessionsMoved:  make(chan struct{}),
 		coldGates:      map[ids.WorkspaceID]coldGate{},
+		heldAtGate:     map[ids.WorkspaceID]int{},
 		handedOver:     map[ids.WorkspaceID]bool{},
 		lastCold:       map[ids.WorkspaceID]*conversationv1.SessionCold{},
 		reapedAt:       map[ids.WorkspaceID]time.Time{},
@@ -654,6 +661,10 @@ type coldGate struct {
 	// configDir is the account root the parked session spends from, kept so
 	// a gate raised again serves the same menu.
 	configDir string
+	// standing is the gate row's facts as raised, without the
+	// compact-and-resume button, which publishColdGateRow adds from the held
+	// count each time the row is published.
+	standing *frontendv1.FeedColdGateStanding
 }
 
 // ColdGate answers the menu a STANDING cold gate served, which is what the
@@ -2457,11 +2468,19 @@ func (f *Fleet) raiseColdGate(ws ids.WorkspaceID, vendorSessionID string, cold *
 	cost := coldGateCost(cold, f.deps.Topbar.ContextWindow(ws))
 	detail := cost.Text()
 
+	standing := &frontendv1.FeedColdGateStanding{
+		ContextTokens: &frontendv1.FeedColdGateContextTokens{
+			Tokens: int64(cold.GetContextTokens()), WindowFill: cost.WindowFill},
+		LastRequest: &frontendv1.FeedColdGateLastRequest{AtMs: cold.GetLastRequestAtMs()},
+		Model:       &frontendv1.FeedColdGateModel{Model: cold.GetRequestedModel()},
+		Compact:     menu,
+	}
+
 	f.mu.Lock()
 	held, stood := f.coldGates[ws]
 	stood = stood && !held.answering
 	f.coldGates[ws] = coldGate{served: ServedColdGate{
-		VendorSessionID: vendorSessionID, Compact: compact, Detail: detail}, configDir: configDir}
+		VendorSessionID: vendorSessionID, Compact: compact, Detail: detail}, configDir: configDir, standing: standing}
 	f.lastCold[ws] = cold
 	f.mu.Unlock()
 	f.logTransition(ws, "cold_gate_standing", stood, true,
@@ -2470,24 +2489,57 @@ func (f *Fleet) raiseColdGate(ws ids.WorkspaceID, vendorSessionID string, cold *
 		f.deps.ColdGateRaised(ws)
 	}
 
-	f.deps.Feed.UpsertSynthesized(ws, feedid.Feed{Root: true}, &frontendv1.FeedRow{
-		Id: coldGateRowID(ws, vendorSessionID),
-		Row: &frontendv1.FeedRow_ColdGate{ColdGate: &frontendv1.FeedColdGate{
-			State: &frontendv1.FeedColdGate_Standing{Standing: &frontendv1.FeedColdGateStanding{
-				ContextTokens: &frontendv1.FeedColdGateContextTokens{
-					Tokens: int64(cold.GetContextTokens()), WindowFill: cost.WindowFill},
-				LastRequest: &frontendv1.FeedColdGateLastRequest{AtMs: cold.GetLastRequestAtMs()},
-				Model:       &frontendv1.FeedColdGateModel{Model: cold.GetRequestedModel()},
-				Compact:     menu,
-			}},
-		}},
-	})
+	f.publishColdGateRow(ws)
 	f.deps.Footer.SetColdGate(ws, footer.ColdGate{Standing: true, Cost: cost})
 	f.deps.Topbar.SetColdGate(ws, topbar.ColdGate{
 		Standing:      true,
 		ContextTokens: int64(cold.GetContextTokens()),
 	})
 	f.publishHost(ws)
+}
+
+// publishColdGateRow publishes the standing gate's row: its facts as raised,
+// plus the compact-and-resume button while prompts are held at the gate and
+// the gate offers compaction. A gate an answer has taken publishes nothing:
+// its row is already retired.
+func (f *Fleet) publishColdGateRow(ws ids.WorkspaceID) {
+	f.mu.RLock()
+	gate, ok := f.coldGates[ws]
+	held := f.heldAtGate[ws]
+	f.mu.RUnlock()
+	if !ok || gate.answering {
+		return
+	}
+	standing := proto.Clone(gate.standing).(*frontendv1.FeedColdGateStanding)
+	if held > 0 && standing.GetCompact() != nil {
+		standing.CompactAndResume = &frontendv1.FeedColdGateCompactAndResume{HeldPrompts: uint32(held)}
+	}
+	f.deps.Feed.UpsertSynthesized(ws, feedid.Feed{Root: true}, &frontendv1.FeedRow{
+		Id: coldGateRowID(ws, gate.served.VendorSessionID),
+		Row: &frontendv1.FeedRow_ColdGate{ColdGate: &frontendv1.FeedColdGate{
+			State: &frontendv1.FeedColdGate_Standing{Standing: standing},
+		}},
+	})
+}
+
+// SetColdGateHeld records how many prompts are held at a cold gate on WS (the
+// prompt queue's Deps.ColdGateHeld), and republishes a standing gate's row
+// when the count changes, so its compact-and-resume button stands exactly
+// while there is something to send.
+func (f *Fleet) SetColdGateHeld(ws ids.WorkspaceID, held int) {
+	f.mu.Lock()
+	was := f.heldAtGate[ws]
+	if held == 0 {
+		delete(f.heldAtGate, ws)
+	} else {
+		f.heldAtGate[ws] = held
+	}
+	f.mu.Unlock()
+	if was == held {
+		return
+	}
+	f.logTransition(ws, "cold_gate_held_prompts", was, held, nil)
+	f.publishColdGateRow(ws)
 }
 
 // coldCompactMenu is the compact menu a gate serves: the model the cold start

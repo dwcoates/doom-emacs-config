@@ -27,12 +27,7 @@ func socketPath(t *testing.T) string {
 
 // findRecord returns the first captured record with the operation.
 func findRecord(records []dlog.Record, operation string) (dlog.Record, bool) {
-	for _, rec := range records {
-		if rec.Operation == operation {
-			return rec, true
-		}
-	}
-	return dlog.Record{}, false
+	return dlog.FindRecord(records, dlog.RecordQuery{Operation: operation})
 }
 
 func TestOpenIsOffWhenTheAddressIsEmpty(t *testing.T) {

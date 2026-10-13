@@ -537,12 +537,8 @@ func TestDaemonLogsTheHealthyBranch(t *testing.T) {
 }
 
 func hasOperation(records []dlog.Record, operation string) bool {
-	for _, r := range records {
-		if r.Operation == operation {
-			return true
-		}
-	}
-	return false
+	_, ok := dlog.FindRecord(records, dlog.RecordQuery{Operation: operation})
+	return ok
 }
 
 // Evict satisfies dlog.Surfaces for the merged seam (the bootinfra agent added it).

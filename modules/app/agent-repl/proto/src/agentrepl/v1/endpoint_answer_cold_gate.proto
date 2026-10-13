@@ -23,19 +23,31 @@ message AnswerColdGateRequest {
   // The gate row, exactly as the feed served it.
   frontend.v1.FeedId gate = 2;
   // Which button. THE ARM IS THE REMEDIATION, mirroring
-  // conversation.v1.SessionColdRemediation's three forms.
+  // conversation.v1.SessionColdRemediation's three forms, plus what becomes of
+  // the prompts held at the gate. ONLY compact_and_resume sends them; no
+  // other answer sends anything.
   oneof choice {
-    // Pay & resume: take the cold read now, in the background.
+    // Pay & resume: take the cold read now, in the background. The prompts
+    // held at the gate are KEPT, held until the user sends them.
     AnswerColdGatePay pay = 3;
-    // Clear context and resume fresh.
+    // Clear context and resume fresh. The prompts held at the gate are
+    // DISCARDED the moment the daemon takes the answer: clear spends nothing.
     AnswerColdGateClear clear = 4;
-    // Compact first, then resume from the compacted transcript.
+    // Compact first, then resume from the compacted transcript. The prompts
+    // held at the gate are KEPT, held until the user sends them.
     AnswerColdGateCompact compact = 5;
+    // Compact exactly as `compact`, then SEND the prompts held at the gate
+    // once the compacted session is up. Served only while the gate's
+    // `frontend.v1.FeedColdGateStanding.compact_and_resume` is set; refused
+    // `unserved_remediation` when the gate served no compact menu. Prompts
+    // cancelled since the gate was drawn are simply not sent.
+    AnswerColdGateCompact compact_and_resume = 6;
   }
 }
 message AnswerColdGatePay {}
 message AnswerColdGateClear {}
-// The compact button's payload.
+// The payload of both compact buttons, compact and compact-and-resume: the
+// same submenu chooses the summarizer and the scope for either.
 message AnswerColdGateCompact {
   // The summarizer, echoed from the gate's menu.
   conversation.v1.AgentModel model = 1;

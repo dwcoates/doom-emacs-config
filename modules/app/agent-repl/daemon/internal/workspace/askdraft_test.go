@@ -7,6 +7,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/resolve/feed"
 )
@@ -17,12 +18,8 @@ import (
 
 // hasLogRecord reports whether the fixture's log holds LEVEL for OPERATION.
 func hasLogRecord(f *fixture, level, operation string) bool {
-	for _, r := range f.log.logger.Records() {
-		if r.Level == level && r.Operation == operation {
-			return true
-		}
-	}
-	return false
+	_, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: level, Operation: operation})
+	return ok
 }
 
 // standingBatch serves q-1 to agent-2 and makes the draft finish it.

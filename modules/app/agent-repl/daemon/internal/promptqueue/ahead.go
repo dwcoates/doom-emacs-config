@@ -50,6 +50,12 @@ func (q *queue) itemAhead(ctx context.Context, ws ids.WorkspaceID, turn ids.Turn
 		if standing[i].Turn == turn {
 			break
 		}
+		// A PROMPT KEPT AT A COLD GATE'S ANSWER STANDS OUTSIDE THE LINE: only
+		// the user sends it, so nothing is judged against it, folded into it or
+		// queued behind it (gatefate.go).
+		if standing[i].Hold != nil && *standing[i].Hold == wsm.HoldColdGateAnswered {
+			continue
+		}
 		prev = &standing[i]
 	}
 	if prev == nil {

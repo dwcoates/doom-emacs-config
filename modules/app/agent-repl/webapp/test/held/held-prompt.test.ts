@@ -556,6 +556,15 @@ describe("drawHeldPrompt hold arms", () => {
       arm: "coldGate",
       line: "wire coldGate",
     },
+    {
+      name: "cold_gate_answered",
+      prompt: heldPrompt({
+        classification: { case: "daemonHeld", value: {} },
+        hold: { case: "coldGateAnswered", value: {} },
+      }),
+      arm: "coldGateAnswered",
+      line: "wire coldGateAnswered",
+    },
   ];
 
   for (const hold of holds) {
@@ -738,6 +747,23 @@ describe("drawHeldPrompt release availability", () => {
     expect(
       card.querySelector<HTMLElement>('[data-held-action="release"]')?.title,
     ).toContain("a prompt never answers the gate");
+  });
+
+  it("offers a kept prompt's release with no warning, since only the reader sends it", () => {
+    // Arrange
+    const { tc } = trayContext();
+    // Act
+    const card = drawHeldPrompt(
+      heldPrompt({
+        classification: { case: "daemonHeld", value: {} },
+        hold: { case: "coldGateAnswered", value: {} },
+      }),
+      tc,
+    );
+    // Assert
+    expect(
+      card.querySelector<HTMLElement>('[data-held-action="release"]')?.title ?? "",
+    ).toBe("");
   });
 
   it("marks an awaiting-delivery entry's arm on the card", () => {
@@ -1213,6 +1239,7 @@ describe("the held prompt's spec: a prompt bubble on the held fill", () => {
     ["a merge hold", { case: "merge", value: {} }, ["lease-card"]],
     ["a session-starting hold", { case: "reconnect", value: {} }, []],
     ["a cold-gate hold", { case: "coldGate", value: {} }, []],
+    ["a hold kept at the cold gate's answer", { case: "coldGateAnswered", value: {} }, []],
   ] as const)(
     "names %s by its hook, which selects no border",
     (_name, hold, frames) => {
@@ -1387,6 +1414,7 @@ const EXPECTED_BADGES: Readonly<Record<HeldStatus, string>> = {
   reconnect: "teal",
   coldGate: "teal",
   awaitingDelivery: "muted",
+  coldGateAnswered: "muted",
   editing: "run",
 };
 
@@ -1464,6 +1492,14 @@ describe("the daemon's badge words", () => {
         heldPrompt({
           classification: { case: "daemonHeld", value: {} },
           hold: { case: "coldGate", value: {} },
+        }),
+    ],
+    [
+      "coldGateAnswered",
+      () =>
+        heldPrompt({
+          classification: { case: "daemonHeld", value: {} },
+          hold: { case: "coldGateAnswered", value: {} },
         }),
     ],
     [
@@ -1799,6 +1835,14 @@ describe("every status a held card shows is a badge in the table's tone", () => 
         heldPrompt({
           classification: { case: "daemonHeld", value: {} },
           hold: { case: "coldGate", value: {} },
+        }),
+    ],
+    [
+      "coldGateAnswered",
+      () =>
+        heldPrompt({
+          classification: { case: "daemonHeld", value: {} },
+          hold: { case: "coldGateAnswered", value: {} },
         }),
     ],
     [
