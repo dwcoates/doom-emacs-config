@@ -492,3 +492,28 @@ func TestARequestWhoseFlushFailsIsRefusedWithNothingRecorded(t *testing.T) {
 		t.Fatal("a request whose flush failed was recorded")
 	}
 }
+
+func TestNewDetachedRunTrimsTheNameAndThePickAndKeepsTheAsk(t *testing.T) {
+	tests := []struct {
+		name         string
+		inName, pick string
+		compactAfter bool
+		want         DetachedRun
+	}{
+		{name: "a whole branch", inName: " reconnect-fix ", want: DetachedRun{Name: "reconnect-fix"}},
+		{name: "a pick", inName: "reconnect-fix", pick: "\tthe fix \n", want: DetachedRun{Name: "reconnect-fix", Pick: "the fix"}},
+		{name: "a blank pick", inName: "reconnect-fix", pick: "   ", want: DetachedRun{Name: "reconnect-fix"}},
+		{name: "compacting after", inName: "reconnect-fix", compactAfter: true, want: DetachedRun{Name: "reconnect-fix", CompactAfter: true}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := NewDetachedRun(tt.inName, tt.pick, tt.compactAfter)
+
+			// Assert
+			if got == nil || *got != tt.want {
+				t.Fatalf("NewDetachedRun = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
