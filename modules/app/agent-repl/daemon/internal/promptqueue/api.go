@@ -249,6 +249,11 @@ type Queue interface {
 	// relaunch's resume, a cold-gate re-open): it un-stamps every reconnect
 	// hold and delivers the next entry down the ordinary path.
 	ReleaseReconnectHolds(ws ids.WorkspaceID)
+	// ColdGateAnswered settles what a cold gate's answer does to the prompts
+	// held at the gate (gatefate.go): discarded, kept for the user, or sent
+	// once the remediated session is up. The answer calls it BEFORE it brings
+	// the session back, and an error refuses the answer.
+	ColdGateAnswered(ctx context.Context, ws ids.WorkspaceID, fate GateFate) error
 	// OnVendorServes is told that the workspace's mid-session vendor block
 	// stopped standing (footer.WithVendorServes): off the caller's goroutine,
 	// it releases the prompts held after reconnect while the block stood,
@@ -436,6 +441,11 @@ type Deps struct {
 	// and this is what lets the queue give it rather than reporting a missing
 	// session. Nil means no workspace is ever read as gated.
 	ColdGate ColdGateFunc
+	// ColdGateHeld is told, on every republish of the hold tray, how many
+	// prompts are held at a cold gate (gatefate.go), so the standing gate
+	// offers its compact-and-resume answer exactly while there is something to
+	// send. nil tells nobody.
+	ColdGateHeld func(ws ids.WorkspaceID, held int)
 	// DrainRefusals records each submission the drain lease refused or held.
 	// The controller rate-limits its own record; the queue only reports.
 	DrainRefusals RefusalNoter
