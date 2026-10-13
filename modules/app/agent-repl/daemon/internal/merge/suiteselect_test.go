@@ -20,17 +20,17 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 			want:  []string{"build-frontend-harness", "webapp"},
 		},
 		{
-			name:  "a daemon change also selects the cross-system suites",
+			name:  "a daemon change selects only the daemon suite",
 			paths: []string{"modules/app/agent-repl/daemon/internal/merge/run.go"},
-			want:  []string{"daemon", "e2e", "e2e-emacs"},
+			want:  []string{"daemon"},
 		},
 		{
-			name:  "a proto change selects every generated consumer",
+			name:  "a proto change selects every generated consumer and the cross-system suite",
 			paths: []string{"modules/app/agent-repl/proto/src/frontend/v1/feed.proto"},
 			want:  []string{"daemon", "webapp", "shim", "proto", "e2e"},
 		},
 		{
-			name:  "the shared logging module selects its Go consumers",
+			name:  "the shared logging module selects its consumers and the cross-system suite",
 			paths: []string{"modules/app/agent-repl/agent-shim/logging/go/log.go"},
 			want:  []string{"daemon", "sidecar", "store", "logging", "logging-density", "e2e"},
 		},
@@ -40,24 +40,21 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 			want:  scriptHarnessSuites,
 		},
 		{
-			name:  "module-root elisp selects the ert and Emacs-client suites",
+			name:  "module-root elisp selects only ert",
 			paths: []string{"modules/app/agent-repl/config.el"},
-			want:  []string{"ert", "e2e-emacs"},
+			want:  []string{"ert"},
 		},
 		{
-			name:  "lisp/ selects the ert and Emacs-client suites",
+			name:  "lisp/ selects only ert",
 			paths: []string{"modules/app/agent-repl/lisp/core.el"},
-			want:  []string{"ert", "e2e-emacs"},
+			want:  []string{"ert"},
 		},
 		{
-			name:  "several regions union their radii",
+			name:  "several regions union their selections",
 			paths: []string{"modules/app/agent-repl/webapp/src/App.tsx", "modules/app/agent-repl/daemon/main.go"},
-			want:  []string{"build-frontend-harness", "daemon", "webapp", "e2e", "e2e-emacs"},
+			want:  []string{"build-frontend-harness", "daemon", "webapp"},
 		},
 		{
-			// The sandbox image is the Emacs client layer's precondition and
-			// nothing else's, so it is the one region that selects e2e-emacs
-			// WITHOUT the containerless cross-system suite.
 			name:  "the sandbox image selects only the Emacs client layer",
 			paths: []string{"modules/app/agent-repl/e2e/sandbox/Dockerfile"},
 			want:  []string{"e2e-emacs"},
@@ -68,18 +65,99 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 			want:  []string{"e2e", "e2e-emacs"},
 		},
 		{
-			// Blast radius, not name: the cross-system suites RUN a real
-			// agent-repld, so a daemon change can break them.
-			name:  "a daemon change reaches the cross-system suites",
-			paths: []string{"modules/app/agent-repl/daemon/main.go"},
-			want:  []string{"daemon", "e2e", "e2e-emacs"},
+			name:  "a shim change selects only the shim suite",
+			paths: []string{"modules/app/agent-repl/agent-shim/claude/shim/src/main.ts"},
+			want:  []string{"shim"},
 		},
 		{
-			// The shim runs for real in the containerless suite, but the Emacs
-			// client layer's own claim is the elisp seam, so it stays out.
-			name:  "a shim change reaches the containerless cross-system suite",
-			paths: []string{"modules/app/agent-repl/agent-shim/claude/shim/src/main.ts"},
-			want:  []string{"shim", "e2e"},
+			name:  "a sidecar change selects only the sidecar suite",
+			paths: []string{"modules/app/agent-repl/agent-shim/claude/shim-sidecar/main.go"},
+			want:  []string{"sidecar"},
+		},
+		{
+			name:  "a store change selects only the store suite",
+			paths: []string{"modules/app/agent-repl/agent-shim/shim-store/main.go"},
+			want:  []string{"store"},
+		},
+		{
+			name:  "the committed metaprompt selects the shim suite that reads it back",
+			paths: []string{"modules/app/agent-repl/metaprompt.md"},
+			want:  []string{"shim"},
+		},
+		{
+			name:  "documentation beside a daemon change selects only the daemon suite",
+			paths: []string{"modules/app/agent-repl/docs/USER-GUIDE.md", "modules/app/agent-repl/daemon/main.go"},
+			want:  []string{"daemon"},
+		},
+		{
+			name:  "the owner's configuration beside a daemon change selects only the daemon suite",
+			paths: []string{"config.el", "modules/app/agent-repl/daemon/main.go"},
+			want:  []string{"daemon"},
+		},
+		{
+			name:  "the pre-commit hook selects its harness, the installer's and the background scan",
+			paths: []string{".githooks/pre-commit"},
+			want:  []string{"precommit-harness", "install-harness", "background-harness"},
+		},
+		{
+			name:  "the pre-commit hook's own test selects its harness, the background scan and testrun",
+			paths: []string{".githooks/test-pre-commit.sh"},
+			want:  []string{"precommit-harness", "background-harness", "testrun"},
+		},
+		{
+			name:  "the reference-transaction hook selects its harness and the background scan",
+			paths: []string{".githooks/reference-transaction"},
+			want:  []string{"merge-queue-hook-harness", "background-harness"},
+		},
+		{
+			name:  "another hook selects the background scan and testrun",
+			paths: []string{".githooks/post-checkout"},
+			want:  []string{"background-harness", "testrun"},
+		},
+		{
+			name:  "the merge-queue skill selects its harness, the worktrees library's and testrun",
+			paths: []string{".claude/skills/merge-queue/run.sh"},
+			want:  []string{"merge-queue-skill-harness", "worktrees-lib-harness", "testrun"},
+		},
+		{
+			name:  "the safe test runner selects its harness, the background scan and the worktrees library's",
+			paths: []string{".claude/safe-test-run.sh"},
+			want:  []string{"safe-test-run-harness", "background-harness", "worktrees-lib-harness"},
+		},
+		{
+			name:  "the installer selects its harness, the background scan and the worktrees library's",
+			paths: []string{".claude/install.sh"},
+			want:  []string{"install-harness", "background-harness", "worktrees-lib-harness"},
+		},
+		{
+			name:  "another top-level .claude script selects the scans that read it",
+			paths: []string{".claude/check-external-boundaries.sh"},
+			want:  []string{"background-harness", "worktrees-lib-harness", "testrun"},
+		},
+		{
+			name:  "a deeper .claude script selects the worktrees library's harness and testrun",
+			paths: []string{".claude/skills/other/run.sh"},
+			want:  []string{"worktrees-lib-harness", "testrun"},
+		},
+		{
+			name:  "the workspace command selects its harness",
+			paths: []string{"bin/agent_repl_workspace"},
+			want:  []string{"workspace-cli-harness"},
+		},
+		{
+			name:  "the workspace-open command selects its harness",
+			paths: []string{"bin/agent_repl_workspace_open"},
+			want:  []string{"workspace-open-cli-harness"},
+		},
+		{
+			name:  "the workspace command's test selects its harness, the background scan and testrun",
+			paths: []string{"bin/test-agent_repl_workspace.sh"},
+			want:  []string{"workspace-cli-harness", "background-harness", "testrun"},
+		},
+		{
+			name:  "another repository bin script selects the background scan and testrun",
+			paths: []string{"bin/new-tool"},
+			want:  []string{"background-harness", "testrun"},
 		},
 	}
 	for _, tc := range tests {
@@ -105,7 +183,7 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 // rule: one unmapped path widens the whole selection.
 func TestSelectSuitesUnknownPathSelectsEverything(t *testing.T) {
 	// Arrange: a mapped path alongside one that matches no rule.
-	paths := []string{"modules/app/agent-repl/webapp/src/App.tsx", "tools/newthing/main.go"}
+	paths := []string{"modules/app/agent-repl/webapp/src/App.tsx", "modules/app/agent-repl/newthing/main.go"}
 
 	// Act.
 	got := SelectSuites(paths)
@@ -117,7 +195,7 @@ func TestSelectSuitesUnknownPathSelectsEverything(t *testing.T) {
 	if len(got.Suites) != len(AllSuites) {
 		t.Fatalf("full selection has %d suites, want the whole roster of %d", len(got.Suites), len(AllSuites))
 	}
-	if !strings.Contains(got.Reason, "tools/newthing/main.go") {
+	if !strings.Contains(got.Reason, "modules/app/agent-repl/newthing/main.go") {
 		t.Fatalf("the reason does not name the unmapped path: %q", got.Reason)
 	}
 }
@@ -148,16 +226,16 @@ func TestSelectSuitesRunnerScriptSelectsEverything(t *testing.T) {
 	}
 }
 
-// TestSelectSuitesMapsAModuleToItsOwnSuiteAndTheWorldItRunsIn covers the
-// shim-lock module: its own suite, plus the shim's (whose integration files
-// spawn the real lock helper) and e2e, which runs the real lock.
-func TestSelectSuitesMapsAModuleToItsOwnSuiteAndTheWorldItRunsIn(t *testing.T) {
+// TestSelectSuitesMapsShimLockToItsSuiteAndTheShims covers the shim-lock
+// module: its own suite, plus the shim's, whose integration files spawn the
+// real lock helper.
+func TestSelectSuitesMapsShimLockToItsSuiteAndTheShims(t *testing.T) {
 	// Act.
 	got := SelectSuites([]string{"modules/app/agent-repl/agent-shim/shim-lock/main.go"})
 
 	// Assert.
-	if got.Full || strings.Join(got.Suites, ",") != "lock,shim,e2e" {
-		t.Fatalf("shim-lock selected %v (full=%v), want lock, shim and e2e", got.Suites, got.Full)
+	if got.Full || strings.Join(got.Suites, ",") != "lock,shim" {
+		t.Fatalf("shim-lock selected %v (full=%v), want lock and shim", got.Suites, got.Full)
 	}
 }
 
@@ -181,18 +259,55 @@ func TestAllSuitesIsTheRunnersRoster(t *testing.T) {
 	}
 }
 
-// TestSelectSuitesEmptyPathsSelectsEverything covers the unread change: no
-// paths means the paths could not be read, never that nothing changed.
-func TestSelectSuitesEmptyPathsSelectsEverything(t *testing.T) {
-	// Arrange: nothing to go on.
-	var paths []string
+// TestSelectSuitesSelectsNothing covers every change that runs no suite.
+func TestSelectSuitesSelectsNothing(t *testing.T) {
+	tests := []struct {
+		name  string
+		paths []string
+	}{
+		{name: "an empty diff", paths: nil},
+		{name: "the module's docs", paths: []string{"modules/app/agent-repl/docs/USER-GUIDE.md"}},
+		{name: "the module's prompts", paths: []string{"modules/app/agent-repl/prompts/merge-pick.md"}},
+		{name: "the module's plans", paths: []string{"modules/app/agent-repl/plans/lazy-tail-first-replay-plan.md"}},
+		{name: "Markdown at the module root", paths: []string{"modules/app/agent-repl/AGENTS.md"}},
+		{name: "the owner's Doom configuration", paths: []string{"config.el"}},
+		{name: "another module of the configuration", paths: []string{"modules/lang/personal-cc/config.el"}},
+		{name: ".claude prose", paths: []string{".claude/agents/opus-medium.md"}},
+		{name: "the repository's settings", paths: []string{".claude/settings.json"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := SelectSuites(tc.paths)
 
+			// Assert.
+			if !got.Empty() {
+				t.Fatalf("%v selected %v (full=%v), want no suite", tc.paths, got.Suites, got.Full)
+			}
+		})
+	}
+}
+
+// TestSelectSuitesNamesWhyNothingRuns covers the empty selection's reason: it
+// names the paths that select nothing.
+func TestSelectSuitesNamesWhyNothingRuns(t *testing.T) {
 	// Act.
-	got := SelectSuites(paths)
+	got := SelectSuites([]string{"modules/app/agent-repl/docs/USER-GUIDE.md"})
 
 	// Assert.
-	if !got.Full || len(got.Suites) != len(AllSuites) {
-		t.Fatalf("an empty path set selected %v (full=%v), want the whole roster", got.Suites, got.Full)
+	if !strings.Contains(got.Reason, "modules/app/agent-repl/docs/USER-GUIDE.md") || !strings.Contains(got.Reason, "select no suite") {
+		t.Fatalf("reason = %q, want the path and why it selects nothing", got.Reason)
+	}
+}
+
+// TestFullSelectionIsTheWholeRoster covers the unread change's answer.
+func TestFullSelectionIsTheWholeRoster(t *testing.T) {
+	// Act.
+	got := FullSelection("the paths could not be read")
+
+	// Assert.
+	if !got.Full || strings.Join(got.Suites, ",") != strings.Join(AllSuites, ",") || got.Empty() {
+		t.Fatalf("FullSelection = %+v, want the whole roster", got)
 	}
 }
 
@@ -209,7 +324,7 @@ func TestSelectSuitesReportsInRosterOrder(t *testing.T) {
 	got := SelectSuites(paths)
 
 	// Assert.
-	if strings.Join(got.Suites, ",") != "ert,daemon,webapp,shim,proto,e2e,e2e-emacs" {
+	if strings.Join(got.Suites, ",") != "ert,daemon,webapp,shim,proto,e2e" {
 		t.Fatalf("selection order is %v, want the roster's own order", got.Suites)
 	}
 }
