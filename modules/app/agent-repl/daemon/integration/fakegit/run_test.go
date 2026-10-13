@@ -1740,6 +1740,45 @@ func TestRebaseStopsAfterEachReplayedCommit(t *testing.T) {
 	_ = dir
 }
 
+func TestRebaseAbortPutsTheWorktreeBackWhereItStood(t *testing.T) {
+	// Arrange: a rebase stands stopped after its first replayed commit.
+	s, repo, _ := world(t)
+	wt := branchWorld(t, s, repo)
+	before := repo.Worktree(wt).Head
+	tip := s.AddCommit(repo, "main", "main moved", []string{repo.BranchHeads["main"]}, []string{"c.go"}).SHA
+	Run(s, "/", []string{"-C", wt, "rebase", "-i", "--empty=drop", tip})
+
+	// Act.
+	got := Run(s, "/", []string{"-C", wt, "rebase", "--abort"})
+
+	// Assert.
+	if got.Exit != 0 || repo.Worktree(wt).Rebase != nil {
+		t.Fatalf("abort = %+v, rebase state %+v; want the rebase gone", got, repo.Worktree(wt).Rebase)
+	}
+	if head := repo.Worktree(wt).Head; head != before {
+		t.Fatalf("the worktree stands on %s after the abort, want %s", head, before)
+	}
+	if res := Run(s, "/", []string{"-C", wt, "rev-parse", "--git-path", "rebase-merge"}); res.Exit != 0 {
+		t.Fatalf("rev-parse --git-path = %+v", res)
+	} else if _, err := os.Stat(strings.TrimSpace(res.Stdout)); !os.IsNotExist(err) {
+		t.Fatalf("the rebase-merge directory survived the abort: %v", err)
+	}
+}
+
+func TestRebaseAbortWithNoRebaseFails(t *testing.T) {
+	// Arrange.
+	s, repo, _ := world(t)
+	wt := branchWorld(t, s, repo)
+
+	// Act.
+	got := Run(s, "/", []string{"-C", wt, "rebase", "--abort"})
+
+	// Assert.
+	if got.Exit != 128 || !strings.Contains(got.Stderr, "No rebase in progress") {
+		t.Fatalf("abort = %+v, want git's refusal", got)
+	}
+}
+
 func TestRebaseContinueFinishesAndMovesTheBranchOntoTheTip(t *testing.T) {
 	// Arrange.
 	s, repo, _ := world(t)

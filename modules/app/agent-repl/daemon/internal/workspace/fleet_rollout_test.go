@@ -254,6 +254,13 @@ func TestCaptureDisplacedEndsOnlyTheTurn(t *testing.T) {
 			wantLevel: "warn", wantMsg: "the displaced turn could not be ended", wantCause: "the shim would not answer",
 		},
 		{
+			name: "a kill that finds the turn already ended leaves the turn captured", openTurns: []wsm.Turn{record},
+			killTurnErr:  &ShimRefusal{Verb: "KillTurn", Arm: ArmShimNoTurnOpen, Detail: "no turn is open"},
+			wantCaptured: true, wantMarked: true, wantKills: 1,
+			wantLevel: "info", wantMsg: "the displaced turn had already ended when the kill landed",
+			wantCause: "shim KillTurn refused: no_turn_open: no turn is open",
+		},
+		{
 			name:         "an unreadable record captures and ends nothing",
 			openTurnsErr: errors.New("the store is down"),
 			wantErr:      "the store is down",

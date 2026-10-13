@@ -96,6 +96,16 @@ type orchestrator struct {
 	// overtakings are the races to land being won by the merge behind the
 	// head, by repository (race.go). Guarded by mu.
 	overtakings map[wsm.RepoKey]*overtaking
+	// waitingPass marks the repositories whose waiting members are being
+	// rebased now, and waitingAgain those whose landing asked for one more
+	// pass (rebasewaiting.go). Guarded by mu.
+	waitingPass, waitingAgain map[wsm.RepoKey]bool
+	// onWaitingRebased, when set, is called each time a waiting member's
+	// rebase settled back into line. TEST-ONLY.
+	onWaitingRebased func(ws ids.WorkspaceID)
+	// onWaitingPass, when set, is called each time a pass over a queue's
+	// waiting members ended. TEST-ONLY.
+	onWaitingPass func(repo wsm.RepoKey)
 	// repoLocks are the repositories' kernel locks this process holds: taken
 	// when a repository's first run is admitted, released when its chain and
 	// slot are both empty again.
@@ -249,6 +259,8 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		chainSignals:    map[wsm.RepoKey]chan struct{}{},
 		targetTips:      map[wsm.RepoKey]string{},
 		overtakings:     map[wsm.RepoKey]*overtaking{},
+		waitingPass:     map[wsm.RepoKey]bool{},
+		waitingAgain:    map[wsm.RepoKey]bool{},
 		repoLocks:       map[wsm.RepoKey]*repoLock{},
 		kicked:          map[wsm.RepoKey]bool{},
 		displaces:       map[ids.WorkspaceID]bool{},
