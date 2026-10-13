@@ -39,12 +39,13 @@ const opWatcherHold = "daemon.workspace.watcher_hold"
 // refused too, since the daemon's working directory is not the test's.
 func HoldFirstWatcherStartFromEnv(contracts envc.Contracts, getenv func(string) string, start WatcherStarter) (WatcherStarter, error) {
 	socket := getenv(EnvTestHoldFirstWatcherStart)
-	switch {
-	case socket == "":
+	if socket == "" {
 		return start, nil
-	case !contracts.ForbidVendorCalls():
-		return nil, fmt.Errorf("workspace: %s is a test-run seam and is honored only with %s set; a live daemon never holds a watcher's start", EnvTestHoldFirstWatcherStart, envc.EnvForbidVendorCalls)
-	case !filepath.IsAbs(socket):
+	}
+	if err := contracts.RequireTestRun(EnvTestHoldFirstWatcherStart, "a live daemon never holds a watcher's start"); err != nil {
+		return nil, fmt.Errorf("workspace: %w", err)
+	}
+	if !filepath.IsAbs(socket) {
 		return nil, fmt.Errorf("workspace: %s=%q is not an absolute socket path", EnvTestHoldFirstWatcherStart, socket)
 	}
 	return holdFirstWatcherStart(socket, dialHold, start), nil

@@ -28,8 +28,8 @@ func UnsyncedFromEnv(contracts envc.Contracts, getenv func(string) string) (bool
 	case "":
 		return false, nil
 	case "1":
-		if !contracts.ForbidVendorCalls() {
-			return false, fmt.Errorf("wsm: %s=1 is a test-run seam and is honored only with %s set; a live daemon keeps its state database durable", EnvTestUnsyncedWrites, envc.EnvForbidVendorCalls)
+		if err := contracts.RequireTestRun(EnvTestUnsyncedWrites+"=1", "a live daemon keeps its state database durable"); err != nil {
+			return false, fmt.Errorf("wsm: %w", err)
 		}
 		return true, nil
 	default:

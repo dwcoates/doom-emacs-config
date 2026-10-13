@@ -176,8 +176,10 @@ func New(tmpdir, testRoot string) (Guard, error) {
 // BOOT REFUSAL here rather than a silent exemption.
 func FromEnv(contracts envc.Contracts, tmpdir string, getenv func(string) string) (Guard, error) {
 	testRoot := getenv(EnvTestRoot)
-	if testRoot != "" && !contracts.ForbidVendorCalls() {
-		return Guard{}, fmt.Errorf("tempdirs: %s=%q is a test-run seam and is honored only with %s set", EnvTestRoot, testRoot, envc.EnvForbidVendorCalls)
+	if testRoot != "" {
+		if err := contracts.RequireTestRun(fmt.Sprintf("%s=%q", EnvTestRoot, testRoot), ""); err != nil {
+			return Guard{}, fmt.Errorf("tempdirs: %w", err)
+		}
 	}
 	g, err := New(tmpdir, testRoot)
 	if err != nil {
