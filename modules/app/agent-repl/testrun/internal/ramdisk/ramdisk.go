@@ -249,7 +249,7 @@ func SizeFromEnv(getenv func(string) string) (int, error) {
 // live run's record names answers a *LeakError, before any record is made.
 func (m Manager) Acquire(sizeMiB int) (_ *Volume, err error) {
 	start := m.Now()
-	m.Log.Infof("RAM disk acquire: begin, %d MiB", sizeMiB)
+	m.Log.Infof("RAM disk acquire: begin at %s, %d MiB", stamp(start), sizeMiB)
 	defer func() {
 		if err != nil {
 			m.Log.Infof("RAM disk acquire: failed after %s", m.Now().Sub(start))
@@ -396,7 +396,7 @@ func (m Manager) detachNewRAMDisks(before string) error {
 // lock drops with this run and the next run's Reclaim retries the detach.
 func (v *Volume) Release() error {
 	start := v.m.Now()
-	v.m.Log.Infof("RAM disk release: begin, %s at %s", v.Device, v.Mount)
+	v.m.Log.Infof("RAM disk release: begin at %s, %s mounted at %s", stamp(start), v.Device, v.Mount)
 	var errs []error
 	detached := true
 	if v.Device != "" {
