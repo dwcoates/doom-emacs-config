@@ -375,7 +375,7 @@ func TestEveryBriefWordingPinAssertsThroughUnsaid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading api_test.go: %v", err)
 	}
-	handRolled := "strings.Contains(got" + ".Body"
+	handRolled := "!strings.Contains(got" + ".Body"
 
 	// Act.
 	n := strings.Count(string(src), handRolled)
@@ -415,8 +415,11 @@ func TestTheFixingAttemptBriefSaysTheSelectedSuitesRunAgain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if !strings.Contains(got.Body, "runs the selected suites again") || strings.Contains(got.Body, "runs the whole suite again") {
-		t.Fatalf("merge-test-failure-resolve does not say the selected suites run again: %q", got.Body)
+	if phrase, missing := unsaid(got.Body, []string{"runs the selected suites again"}); missing {
+		t.Fatalf("merge-test-failure-resolve does not say %q", phrase)
+	}
+	if strings.Contains(got.Body, "runs the whole suite again") {
+		t.Fatalf("merge-test-failure-resolve still says the whole suite runs again: %q", got.Body)
 	}
 }
 
@@ -428,8 +431,8 @@ func TestTheFixingAttemptBriefRunsTheTestsTheFailingTestsFileLists(t *testing.T)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if !strings.Contains(got.Body, "Run exactly the tests listed in {{failing_tests_file}}") {
-		t.Fatalf("merge-test-failure-resolve does not point the agent at the failing tests file: %q", got.Body)
+	if phrase, missing := unsaid(got.Body, []string{"Run exactly the tests listed in {{failing_tests_file}}"}); missing {
+		t.Fatalf("merge-test-failure-resolve does not point the agent at the failing tests file: it does not say %q", phrase)
 	}
 }
 
