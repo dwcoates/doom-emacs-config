@@ -42,9 +42,19 @@ func (r *resolver) drawQuestion(s *wsState, agent *conversationv1.AgentId, q *co
 	switch frame := q.GetResult().(type) {
 	case *conversationv1.AgentQuestion_Start:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "draw", "branch": "case *conversationv1.AgentQuestion_Start"})
+		// A SETTLED ASK NEVER REOPENS. The ask is one tool call's, so a start
+		// arriving after its success or failure is a stale restatement — a
+		// history page read before the answer was stored — and redrawing it
+		// would put the answered card back to open on every reader.
+		if served.settled {
+			log.Debug("daemon.feed.question_start_after_settled",
+				"a question start arrived for an ask already settled; the settled card stands",
+				dlog.Context{"ask": askID, "row": served.row.GetValue()})
+			return
+		}
 		// A START RESTATED for an ask already standing (a stream re-opening
 		// with the start it announced) keeps the draft the user has built; only
-		// a first start, or one after the ask settled, begins an empty one.
+		// a first start begins an empty one.
 		if !served.open {
 			s.askSeq++
 			served.opened = s.askSeq
@@ -60,6 +70,7 @@ func (r *resolver) drawQuestion(s *wsState, agent *conversationv1.AgentId, q *co
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "draw", "branch": "case *conversationv1.AgentQuestion_Success"})
 		card.Questions = questionItems(frame.Success.GetBatch())
 		served.open = false
+		served.settled = true
 		served.delivering = false
 		switch outcome := frame.Success.GetOutcome().(type) {
 		case *conversationv1.AgentQuestionSuccess_Answered:
@@ -83,6 +94,7 @@ func (r *resolver) drawQuestion(s *wsState, agent *conversationv1.AgentId, q *co
 	case *conversationv1.AgentQuestion_Failure:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "draw", "branch": "case *conversationv1.AgentQuestion_Failure"})
 		served.open = false
+		served.settled = true
 		served.delivering = false
 		// The ask could not be put to the user at all; nothing was chosen and
 		// nothing waits.
