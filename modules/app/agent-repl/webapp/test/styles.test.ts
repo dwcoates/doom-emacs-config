@@ -4030,6 +4030,41 @@ describe("the rail's mark column", () => {
  * mark draws at the dot's size, a breath shrinks a mark 30% less far than it once
  * did, and one breath takes exactly as long as one turn of a spinning glyph.
  */
+/**
+ * THE SEARCH TOGGLE IS A FLOATING PURPLE MAGNIFIER (owner request,
+ * 2026-10-13): no fill, border or focus ring around it, the bands' purple on
+ * the glyph, and the same padded click square.
+ */
+describe("the rail's search toggle", () => {
+  it.each([
+    { name: "draws no fill", property: "background", want: "none" },
+    { name: "draws no border", property: "border", want: "none" },
+    { name: "draws no focus ring", property: "outline", want: "none" },
+    { name: "draws no native button look", property: "appearance", want: "none" },
+    { name: "wears the bands' header purple", property: "color", want: "var(--info-agents)" },
+    { name: "keeps its padded click square", property: "padding", want: "0.1rem" },
+  ])("$name", ({ property, want }) => {
+    // Arrange / Act
+    const rule = declarationsOf("#ws-sidebar .sb-search-btn") ?? "";
+
+    // Assert
+    expect(rule).toMatch(new RegExp(`(?:^|;)\\s*${property}:\\s*${want.replace(/[()]/g, "\\$&")}\\s*;`));
+  });
+
+  it("brightens to full on hover, keyboard focus and while open", () => {
+    // Arrange / Act
+    const rule = rulesOf(stylesheet).find((r) => r.selectors.includes("#ws-sidebar .sb-search-btn:focus-visible"));
+
+    // Assert
+    expect(rule?.selectors).toEqual([
+      "#ws-sidebar .sb-search-btn:hover",
+      "#ws-sidebar .sb-search-btn:focus-visible",
+      "#ws-sidebar .sb-search-btn.active",
+    ]);
+    expect(rule?.declarations).toMatch(/opacity:\s*1\b/);
+  });
+});
+
 describe("the rail's marks", () => {
   it("times the breath by the one mark cycle", () => {
     // Arrange / Act

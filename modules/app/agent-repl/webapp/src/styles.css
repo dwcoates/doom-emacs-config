@@ -740,16 +740,27 @@ html.webhost-sidebar #ws-sidebar[hidden] {
    rows. It overlaps .sb-scroll rather than taking room from it, so the band
    fit's measured height never moves for it. */
 #ws-sidebar { position: relative; }
+/* A FLOATING PURPLE MAGNIFIER (owner request, 2026-10-13): no visible
+   button around it -- no fill, no border, and no focus ring, which WebKit
+   otherwise draws as a grey bevelled box around the focused control. The
+   glyph wears the bands' header purple, held back a touch until hovered,
+   focused or open; the padding keeps the click square it always had. */
 #ws-sidebar .sb-search-btn {
   display: inline-flex;
   align-items: center;
-  color: var(--muted);
+  color: var(--info-agents);
+  background: none;
+  border: none;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+  opacity: 0.75;
   cursor: pointer;
-  border-radius: 4px;
   padding: 0.1rem;
 }
 #ws-sidebar .sb-search-btn:hover,
-#ws-sidebar .sb-search-btn.active { color: var(--fg); }
+#ws-sidebar .sb-search-btn:focus-visible,
+#ws-sidebar .sb-search-btn.active { opacity: 1; }
 #ws-sidebar .sb-search-glyph {
   width: 0.85rem;
   height: 0.85rem;
