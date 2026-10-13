@@ -59,6 +59,7 @@ import {
   HOOK_OUTCOMES,
   MERGE_TAB_KINDS,
   MERGE_TAB_STATES,
+  MERGE_TAB_PENDING_KINDS,
   MERGE_TAB_WAITING_KINDS,
   MERGE_TEST_LOG,
   PERMISSION_ANSWERS,
@@ -274,7 +275,12 @@ describe("arm coverage", () => {
     const field = FeedMergeTabSchema.fields.find((f) => f.localName === kind);
     if (field?.message === undefined) throw new Error(`no message under the ${kind} tab`);
     const waits = (MERGE_TAB_WAITING_KINDS as readonly string[]).includes(kind);
-    assertCoversOneof(field.message, "state", waits ? [...MERGE_TAB_STATES, "waitingOnUser"] : [...MERGE_TAB_STATES]);
+    const pends = (MERGE_TAB_PENDING_KINDS as readonly string[]).includes(kind);
+    assertCoversOneof(field.message, "state", [
+      ...MERGE_TAB_STATES,
+      ...(waits ? ["waitingOnUser"] : []),
+      ...(pends ? ["pending"] : []),
+    ]);
   });
 
   it("covers every updating main step", () => {
@@ -1540,6 +1546,13 @@ describe("merge tabs", () => {
     const row = await drawRow(mergeTabRow(kind, state));
     // Assert
     expect(row.querySelector(`[data-merge-tab="${kind}"]`)?.getAttribute("data-tab-state")).toBe(state);
+  });
+
+  it.each(MERGE_TAB_PENDING_KINDS)("draws the %s tab pending with no glyph", async (kind) => {
+    // Arrange / Act
+    const row = await drawRow(mergeTabRow(kind, "pending"));
+    // Assert
+    expect(row.querySelector(`[data-merge-tab="${kind}"]`)?.getAttribute("data-tab-state")).toBe("pending");
   });
 
   it.each(MERGE_TAB_WAITING_KINDS)("draws the %s tab waiting on the user with a ❓", async (kind) => {
