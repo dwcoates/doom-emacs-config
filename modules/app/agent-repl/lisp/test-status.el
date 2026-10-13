@@ -185,12 +185,45 @@ They can no more act on the workspace than during the merge itself."
   (should (equal agent-repl--color-merging-purple
                  (plist-get (agent-repl--tab-spec :merge-queued nil) :bg))))
 
-(ert-deftest agent-repl-test-tab-spec-async-merging-is-purple ()
-  "A workspace whose own branch merges async paints the tab purple (owner
-request, 2026-10-13): the merge is in flight, though the workspace is idle."
+(ert-deftest agent-repl-test-tab-spec-async-merge-paints-the-bracket-purple ()
+  "An async merge paints the [N] run with the merge purple (owner request,
+2026-10-13)."
   ;; Act / Assert
   (should (equal agent-repl--color-merging-purple
-                 (plist-get (agent-repl--tab-spec :async-merging nil) :bg))))
+                 (plist-get (agent-repl--tab-spec-async-merge
+                             (agent-repl--tab-spec :done nil))
+                            :bracket-bg))))
+
+(ert-deftest agent-repl-test-tab-spec-async-merge-keeps-the-name-ground ()
+  "An async merge leaves the name\='s ground on the workspace\='s own status."
+  ;; Act / Assert
+  (should (equal agent-repl--color-done-green
+                 (plist-get (agent-repl--tab-spec-async-merge
+                             (agent-repl--tab-spec :done nil))
+                            :bg))))
+
+(ert-deftest agent-repl-test-tab-spec-async-merge-overrides-a-selected-bracket ()
+  "A selected tab\='s bracket, which keeps its status color, takes the purple."
+  ;; Act / Assert
+  (should (equal agent-repl--color-merging-purple
+                 (plist-get (agent-repl--tab-spec-async-merge
+                             (agent-repl--tab-spec :thinking t))
+                            :bracket-bg))))
+
+(ert-deftest agent-repl-test-tab-spec-async-merge-bracket-clears-the-floor ()
+  "The purple bracket\='s numeral clears `agent-repl-tab-contrast-floor\='."
+  ;; Arrange
+  (let ((spec (agent-repl--tab-spec-async-merge (agent-repl--tab-spec :done nil))))
+    ;; Act / Assert
+    (should (>= (agent-repl-color-contrast-ratio
+                 (plist-get spec :bracket-fg) (plist-get spec :bracket-bg))
+                agent-repl-tab-contrast-floor))))
+
+(ert-deftest agent-repl-test-tab-spec-async-merge-marks-the-gap ()
+  "An async merge asks the renderer to draw the space after [N] in the bracket\='s face."
+  ;; Act / Assert
+  (should (plist-get (agent-repl--tab-spec-async-merge (agent-repl--tab-spec :done nil))
+                     :bracket-gap)))
 
 (ert-deftest agent-repl-test-tab-spec-vendor-blocked-is-turquoise ()
   "A vendor-blocked tab paints TURQUOISE: a vendor fault leaves the
@@ -1194,6 +1227,45 @@ foreground (owner ruling, 2026-10-01), for every state."
     (should (equal (plist-get face :background) "#cc3333"))
     (should (equal (plist-get face :foreground) "white"))))
 
+(ert-deftest agent-repl-test-render-tab-bracket-gap-takes-the-bracket-face ()
+  "With :bracket-gap the one space after [N] is drawn in the bracket\='s face."
+  ;; Arrange
+  (let* ((spec '(:bg "#22c55e" :fg "black" :bracket-bg "#a21caf" :bracket-fg "white"
+                 :bracket-gap t :weight bold))
+         ;; Act
+         (result (agent-repl--render-tab "ws1" spec "1" '+workspace-tab-face nil))
+         (gap-pos (1+ (string-match "\\]" result))))
+    ;; Assert
+    (should (equal (plist-get (get-text-property gap-pos 'face result) :background)
+                   "#a21caf"))
+    (should (eq (get-text-property (string-match "ws1" result) 'face result)
+                '+workspace-tab-face))))
+
+(ert-deftest agent-repl-test-render-tab-no-bracket-gap-gap-takes-the-name-face ()
+  "Without :bracket-gap the space after [N] stays in the name\='s face."
+  ;; Arrange
+  (let* ((spec '(:bg "#22c55e" :fg "black" :bracket-bg "#a21caf" :bracket-fg "white" :weight bold))
+         ;; Act
+         (result (agent-repl--render-tab "ws1" spec "1" '+workspace-tab-face nil))
+         (gap-pos (1+ (string-match "\\]" result))))
+    ;; Assert
+    (should (eq (get-text-property gap-pos 'face result) '+workspace-tab-face))))
+
+(ert-deftest agent-repl-test-render-tab-bracket-gap-with-a-badge ()
+  "With :bracket-gap and a badge, the space after [N] is the bracket\='s and the
+space before the name stays the name\='s."
+  ;; Arrange
+  (let* ((spec '(:bg "#22c55e" :fg "black" :bracket-bg "#a21caf" :bracket-fg "white"
+                 :bracket-gap t :weight bold))
+         ;; Act
+         (result (agent-repl--render-tab "ws1" spec "1" '+workspace-tab-face "IMG"))
+         (gap-pos (1+ (string-match "\\]" result)))
+         (name-pos (string-match "ws1" result)))
+    ;; Assert
+    (should (equal (plist-get (get-text-property gap-pos 'face result) :background)
+                   "#a21caf"))
+    (should (eq (get-text-property (1- name-pos) 'face result) '+workspace-tab-face))))
+
 (ert-deftest agent-repl-test-render-tab-bracket-bg-falls-back-to-bg ()
   "render-tab should fall back to :bg for bracket background when :bracket-bg is absent."
   (let* ((spec '(:bg "#c0c0c0" :fg "black" :bracket-fg "blue" :weight bold))
@@ -1697,6 +1769,59 @@ name carries the selection grey (owner ruling, 2026-10-01, replacing the
                    (plist-get bracket-face :background)))
     (should (equal agent-repl--color-selected-bg
                    (plist-get (nth 1 name-face) :background)))))
+
+(defmacro agent-repl-test-status--with-entry (state async-merging &rest body)
+  "Run BODY with tab \"ws1\" drawing STATE, ASYNC-MERGING saying whether its
+row carries the async-merging marker."
+  (declare (indent 2))
+  `(cl-letf (((symbol-function 'agent-repl--ws-display-state) (lambda (_) ,state))
+             ((symbol-function 'agent-repl-roster-async-merging-for-ws) (lambda (_) ,async-merging))
+             ((symbol-function 'agent-repl--tab-badge-str) (lambda (&rest _) nil)))
+     ,@body))
+
+(ert-deftest agent-repl-test-render-tab-entry-async-merge-paints-only-the-bracket ()
+  "An async-merging tab reads `[N] name\=' with `[N] \=' purple and the name on
+its own status ground (owner request, 2026-10-13)."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-status--with-entry :done t
+      ;; Act
+      (let* ((result (agent-repl--render-tab-entry "ws1" "other" 1))
+             (bracket-pos (string-match "\\[" result))
+             (gap-pos (1+ (string-match "\\]" result)))
+             (name-pos (string-match "ws1" result)))
+        ;; Assert
+        (should (equal (plist-get (get-text-property bracket-pos 'face result) :background)
+                       agent-repl--color-merging-purple))
+        (should (equal (plist-get (get-text-property gap-pos 'face result) :background)
+                       agent-repl--color-merging-purple))
+        (should (eq (get-text-property name-pos 'face result)
+                    (agent-repl--tab-face :done nil)))))))
+
+(ert-deftest agent-repl-test-render-tab-entry-without-async-merge-keeps-the-status-bracket ()
+  "A tab with no async merge keeps its bracket on its status color."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-status--with-entry :done nil
+      ;; Act
+      (let* ((result (agent-repl--render-tab-entry "ws1" "other" 1))
+             (bracket-pos (string-match "\\[" result)))
+        ;; Assert
+        (should (equal (plist-get (get-text-property bracket-pos 'face result) :background)
+                       agent-repl--color-done-green))))))
+
+(ert-deftest agent-repl-test-render-tab-entry-async-merge-draws-no-glyph ()
+  "An async merge adds no glyph: the tab\='s text is `[N] name\=' alone."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--ws-display-state) (lambda (_) :done))
+              ((symbol-function 'agent-repl-roster-async-merging-for-ws) (lambda (_) t))
+              ((symbol-function 'agent-repl-roster-row-for-ws) (lambda (_) nil))
+              ((symbol-function 'agent-repl-status-attention-visible-p) (lambda (_) nil)))
+      ;; Act
+      (let ((result (agent-repl--render-tab-entry "ws1" "other" 1)))
+        ;; Assert
+        (should (equal (string-trim (substring-no-properties result)) "[1] ws1"))))))
 
 (ert-deftest agent-repl-test-render-tab-entry-selected-foreground-clears-the-floor ()
   "A rendered SELECTED tab's bracket and name foregrounds both clear
@@ -3506,6 +3631,30 @@ test can assert the re-assertion left an already-correct frame alone."
       ;; Assert
       (should (equal (car logged) "elisp.status.tab-state: ws=alpha arm=:done")))))
 
+(ert-deftest agent-repl-test-status-tab-async-merging-reads-the-marker ()
+  "A tab is async-merging exactly while its roster row carries the marker."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl-roster-async-merging-for-ws)
+               (lambda (name) (equal name "alpha"))))
+      ;; Act / Assert
+      (should (eq (agent-repl-status-tab-async-merging "alpha") t))
+      (should-not (agent-repl-status-tab-async-merging "beta")))))
+
+(ert-deftest agent-repl-test-status-tab-async-merging-is-recorded-once ()
+  "Every redisplay reads the marker; only a change is recorded."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let (logged)
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged)))
+                ((symbol-function 'agent-repl-roster-async-merging-for-ws) (lambda (_) t)))
+        ;; Act
+        (agent-repl-status-tab-async-merging "alpha")
+        (agent-repl-status-tab-async-merging "alpha"))
+      ;; Assert
+      (should (equal logged '("elisp.status.tab-async-merging: ws=alpha async-merging=t"))))))
+
 (ert-deftest agent-repl-test-status-tab-state-is-nil-before-the-first-push ()
   "A workspace the roster has not spoken about is drawn uncoloured."
   ;; Arrange
@@ -3593,11 +3742,11 @@ usable (owner ruling, 2026-09-28)."
 else: no merge fact is shown before the requesting turn ends, so there is
 no enqueuing arm (merge-landing.md, Landed change 1); a merge that holds
 the workspace and waits for it to fall free is `:merge-queued' (owner
-ruling, 2026-10-13); and an otherwise idle workspace whose own branch
-merges async is `:async-merging' (owner request, 2026-10-13)."
+ruling, 2026-10-13).  An async merge of the workspace's own branch is no
+arm: it paints only the tab's [N] run."
   ;; Act / Assert
   (should (equal (sort (agent-repl-test-status--arms-taking "purple") #'string<)
-                 (sort (list :merge-queued :merging :async-merging) #'string<))))
+                 (sort (list :merge-queued :merging) #'string<))))
 
 (ert-deftest agent-repl-test-status-every-merge-arm-draws-the-one-merge-glyph ()
   "Every merge arm maps to the one merge glyph (owner ruling, 2026-10-13)."
