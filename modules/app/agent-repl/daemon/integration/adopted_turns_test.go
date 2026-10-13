@@ -118,11 +118,7 @@ func TestTheBootAdoptionOfASurvivorReconcilesItsOpenTurn(t *testing.T) {
 			})
 
 			// Act: the successor boots and adopts the survivor.
-			successor := harness.StartDaemon(t, harness.Opts{
-				StateDir: f.d.StateDir, ProfileDir: f.d.ProfileDir,
-				ExtraArgs: []string{"--default-config-dir", f.d.DefaultConfigDir},
-				ExtraEnv:  []string{"AGENT_REPL_LOCK_DIR=" + f.d.LockDir},
-			})
+			successor := harness.StartDaemon(t, f.d.SuccessorOpts())
 
 			// Assert
 			awaitAdoptedTurnOutcome(t, successor, f, turn, tc)
@@ -187,11 +183,7 @@ func TestTheBootAdoptionStandsTheGateTheSurvivorHoldsOpen(t *testing.T) {
 			})
 
 			// Act: the successor boots and adopts the survivor.
-			successor := harness.StartDaemon(t, harness.Opts{
-				StateDir: f.d.StateDir, ProfileDir: f.d.ProfileDir,
-				ExtraArgs: []string{"--default-config-dir", f.d.DefaultConfigDir},
-				ExtraEnv:  []string{"AGENT_REPL_LOCK_DIR=" + f.d.LockDir},
-			})
+			successor := harness.StartDaemon(t, f.d.SuccessorOpts())
 
 			// Assert: the successor's strip and row name the gate.
 			ctx, cancel := successor.WaitCtx()
@@ -333,11 +325,7 @@ func TestTheBootAdoptionKeepsATurnWaitingBehindAVendorStartedTurn(t *testing.T) 
 
 	// Act: the successor boots and adopts the survivor, then the vendor's
 	// turn ends and the waiting turn after it.
-	successor := harness.StartDaemon(t, harness.Opts{
-		StateDir: f.d.StateDir, ProfileDir: f.d.ProfileDir,
-		ExtraArgs: []string{"--default-config-dir", f.d.DefaultConfigDir},
-		ExtraEnv:  []string{"AGENT_REPL_LOCK_DIR=" + f.d.LockDir},
-	})
+	successor := harness.StartDaemon(t, f.d.SuccessorOpts())
 	successor.AwaitWorkspaceLogRecord(f.repo.Dir, "the INFO record keeping the waiting turn open", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.sessionwatcher.turn_open_at_attach" && r.Level == "info" && r.Context["turn_id"] == string(waiting)
 	})
@@ -376,11 +364,9 @@ func TestAnAdoptedSurvivorReadInertIsNotStartedAgainByItsAnnouncement(t *testing
 	})
 	// The successor probes a lock directory the survivor's lock is not in, so
 	// it reads the survivor INERT: a listening shim with no lock of its own.
-	successor := harness.StartDaemon(t, harness.Opts{
-		StateDir: f.d.StateDir, ProfileDir: f.d.ProfileDir,
-		ExtraArgs: []string{"--default-config-dir", f.d.DefaultConfigDir},
-		ExtraEnv:  []string{"AGENT_REPL_LOCK_DIR=" + t.TempDir()},
-	})
+	opts := f.d.SuccessorOpts()
+	opts.ExtraEnv = []string{"AGENT_REPL_LOCK_DIR=" + t.TempDir()}
+	successor := harness.StartDaemon(t, opts)
 	successor.AwaitLogRecord(successor.RunLogPath(), "the boot's adoption of the survivor as inert", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.boot.adopt" && r.Message == "a shim is listening with no session of its own; adopting the inert survivor"
 	})

@@ -152,15 +152,12 @@ func coldStartSelfRepoDaemonOn(t *testing.T, first *harness.Daemon, shimMain str
 	script := harness.NewTestAllScript(t, selfRepo.Dir)
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
-	d := harness.StartDaemon(t, harness.Opts{
-		StateDir:   first.StateDir,
-		ProfileDir: first.ProfileDir,
-		ExtraArgs:  []string{"--default-config-dir", first.DefaultConfigDir},
-		SelfRepo:   selfRepo.Dir,
-		ExtraEnv:   []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path},
-		Timeout:    harness.HandoverChainTimeout,
-		ShimMain:   shimMain,
-	})
+	opts := first.SuccessorOpts()
+	opts.SelfRepo = selfRepo.Dir
+	opts.ExtraEnv = []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path}
+	opts.Timeout = harness.HandoverChainTimeout
+	opts.ShimMain = shimMain
+	d := harness.StartDaemon(t, opts)
 	return selfRepo, d
 }
 

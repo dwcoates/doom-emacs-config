@@ -232,6 +232,17 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, err
 	}
 
+	// THE WATCHER-START HOLD (workspace.EnvTestHoldFirstWatcherStart): a test
+	// pins the window between a session marked started and its watcher
+	// opening, on the same vendor guard as every test-run seam.
+	startWatcher, err := workspace.HoldFirstWatcherStartFromEnv(p.Contracts, os.Getenv, sessionwatcher.Start)
+	if err != nil {
+		log.Error(graphOperation, "the watcher-start hold was refused", dlog.Context{
+			"cause": err.Error(),
+		})
+		return nil, err
+	}
+
 	paths, err := resolvePaths(p.Opts)
 	if err != nil {
 		log.Error(graphOperation, "the checkout's paths could not be resolved", dlog.Context{
@@ -670,6 +681,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Fake:         p.Contracts.Fake() || fakeShims(),
 		ForbidVendor: p.Contracts.ForbidVendorCalls(),
 		StartBound:   startBound,
+		StartWatcher: startWatcher,
 		Log:          p.Surfaces,
 	})
 	if err != nil {
