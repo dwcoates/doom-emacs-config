@@ -403,7 +403,9 @@ system\='s rather than the agent\='s, which is exactly why red is wrong for
 it: a merging workspace\='s turn ENDED before its merge began, and red
 would claim a turn was still running.  What purple shares with red is
 only the actionability claim — the user cannot act on the workspace
-until the merge resolves.
+until the merge resolves.  The one exception is `:async-merging\=': the
+workspace\='s own branch merges in a hidden merge workspace while the
+workspace itself is idle and takes prompts (owner request, 2026-10-13).
 
 It is purple on every surface: the tab bar, the sidebar and the footer
 \(owner ruling, 2026-09-28).
@@ -655,6 +657,8 @@ sits flush on the bar with no ground of its own.  See
 
     (:idle-async      . "yellow")
 
+    (:async-merging   . "purple")
+
     (:ready           . "green")
     (:done            . "green")
     (:interrupted     . "green")
@@ -694,7 +698,9 @@ an expected step, never a fault).
 WHAT EACH COLOR MEANS (owner ruling, 2026-09-28; restated in AGENTS.md,
 \"What each status color means\"): red, the agent is working; yellow,
 detached work runs while the main thread is idle; green, ready for the
-user; purple, a merge in progress; TURQUOISE, something went wrong but
+user; purple, a merge in progress -- the workspace\='s own, or
+\(`:async-merging\=') its branch\='s in a hidden merge workspace while it is
+otherwise idle; TURQUOISE, something went wrong but
 the workspace is usable (`:turn-failed\=', `:degraded\=', and the VENDOR
 FAULTS `:vendor-blocked\=', `:vendor-fault\=' and `:api-retrying\=');
 BLUE, the workspace is unusable right now (an agent-repl fault --
@@ -1070,7 +1076,7 @@ in `agent-repl--color-default-bracket'."
     ;; running" about a workspace whose turn ended before the merge began.
     ;; Purple says what is true: work is in flight, it is the SYSTEM's rather
     ;; than the agent's, and the user cannot act on the workspace while it
-    ;; runs.  Purple means this and nothing else here.
+    ;; runs.  Purple means a merge in flight and nothing else here.
     (:merge-queued . ,(agent-repl--tab-palette-row
                        'agent-repl-tab-merging
                        agent-repl--color-merging-purple
@@ -1078,7 +1084,15 @@ in `agent-repl--color-default-bracket'."
     (:merging . ,(agent-repl--tab-palette-row
                   'agent-repl-tab-merging
                   agent-repl--color-merging-purple
-                  agent-repl--color-light)))
+                  agent-repl--color-light))
+    ;; ASYNC-MERGING is the same PURPLE (owner request, 2026-10-13): the
+    ;; workspace is otherwise idle -- it would be green or yellow -- and its
+    ;; own branch merges in a hidden merge workspace.  The merge is in
+    ;; flight; unlike the two arms above, the workspace still takes prompts.
+    (:async-merging . ,(agent-repl--tab-palette-row
+                        'agent-repl-tab-merging
+                        agent-repl--color-merging-purple
+                        agent-repl--color-light)))
   "Per-arm tab-appearance palette, keyed by the ROSTER STATUS ARM.
 Each entry fully describes both selected and unselected looks for one
 `RosterRow.status' arm keyword via nested `:unselected' and `:selected'

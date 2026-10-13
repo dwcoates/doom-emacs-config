@@ -903,6 +903,18 @@ message RosterRow {
     // GREEN, the same coarse claim as the footer's `waiting · cold_gate`. The
     // row's NAME is struck through while it stands, in every sidebar section.
     RosterRowStatusColdGate cold_gate = 61;
+    // THE WORKSPACE'S OWN BRANCH IS MERGING ASYNC, in a hidden merge
+    // workspace forked from it, while this workspace is otherwise idle: it
+    // would draw `ready`, a turn end or `idle_async`. PURPLE, as every merge in
+    // flight is, from the moment the async request is recorded until it
+    // leaves the merge queue -- landed, failed or taken off (owner request,
+    // 2026-10-13). It is a ROSTER-ONLY arm on the idle claim: the footer
+    // keeps drawing the idle status, since the workspace itself is free and
+    // takes prompts. Every other claim (a turn in flight, a gate, a fault)
+    // keeps its own arm. It draws the plain status dot, breathing as work in
+    // progress does; it is not one of the workspace's own merge arms, so it
+    // draws no merge glyph.
+    RosterRowStatusAsyncMerging async_merging = 63;
   }
   // Tags 19 (`merge_enqueuing`) and 22 (`merge_conflict`) are RETIRED: no
   // merge fact is shown before the requesting turn ends, and nothing parks.
@@ -1111,6 +1123,9 @@ message RosterRowStatusTurnFailed {}
 message RosterRowStatusReady {}
 
 message RosterRowStatusIdleAsync {}
+
+// The row's status while its own branch merges async elsewhere.
+message RosterRowStatusAsyncMerging {}
 
 message RosterRowStatusVendorBlocked {}
 
