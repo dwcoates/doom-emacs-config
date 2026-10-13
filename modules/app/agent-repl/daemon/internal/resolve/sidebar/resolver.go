@@ -407,6 +407,26 @@ func (r *resolver) SetMerge(ws ids.WorkspaceID, facts footer.MergeFacts) {
 		})
 }
 
+// SetAsyncMerges replaces REPO's set of workspaces whose own branch merges
+// async.
+func (r *resolver) SetAsyncMerges(repo wsm.RepoKey, requesters []ids.WorkspaceID) {
+	names := make([]string, 0, len(requesters))
+	set := make(map[ids.WorkspaceID]struct{}, len(requesters))
+	for _, ws := range requesters {
+		set[ws] = struct{}{}
+		names = append(names, string(ws))
+	}
+	r.mutate("daemon.sidebar.set_async_merges", "the roster took a repository's async merges",
+		dlog.Context{"repo": string(repo), "requesters": names}, r.log.Global(),
+		func() {
+			if len(set) == 0 {
+				delete(r.state.asyncMerges, repo)
+				return
+			}
+			r.state.asyncMerges[repo] = set
+		})
+}
+
 // SetRepoDivergence installs a repository's latest ahead/behind measure.
 func (r *resolver) SetRepoDivergence(repo ids.RepoID, measure repodivergence.Measure) {
 	if measure == nil {

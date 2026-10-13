@@ -496,6 +496,12 @@ an assertion, where an unset oneof is the absence of one."
 The session is parked on its cold gate's answer."
   (agent-repl-wire--decode-empty "RosterRowStatusColdGate" value))
 
+(defun agent-repl-wire-decode-roster-row-status-async-merging (value)
+  "Decode VALUE as the empty `RosterRowStatusAsyncMerging'.
+The workspace is otherwise idle and its own branch merges async in a
+hidden merge workspace."
+  (agent-repl-wire--decode-empty "RosterRowStatusAsyncMerging" value))
+
 (defconst agent-repl-wire-roster-row-status-arms
   '((submitting :submitting agent-repl-wire-decode-roster-row-status-submitting)
     (thinking :thinking agent-repl-wire-decode-roster-row-status-thinking)
@@ -521,6 +527,8 @@ The session is parked on its cold gate's answer."
                     agent-repl-wire-decode-roster-row-status-daemon-impaired)
     (waiting :waiting agent-repl-wire-decode-roster-row-status-waiting)
     (coldGate :cold-gate agent-repl-wire-decode-roster-row-status-cold-gate)
+    (asyncMerging :async-merging
+                  agent-repl-wire-decode-roster-row-status-async-merging)
     (init :init agent-repl-wire-decode-roster-row-status-init)
     (severed :severed agent-repl-wire-decode-roster-row-status-severed)
     (startFailed :start-failed agent-repl-wire-decode-roster-row-status-start-failed)

@@ -424,6 +424,8 @@ func statusName(row *frontendv1.RosterRow) string {
 		return "ready"
 	case *frontendv1.RosterRow_IdleAsync:
 		return "idle_async"
+	case *frontendv1.RosterRow_AsyncMerging:
+		return "async_merging"
 	case *frontendv1.RosterRow_VendorBlocked:
 		return "vendor_blocked"
 	case *frontendv1.RosterRow_ApiRetrying:

@@ -2412,6 +2412,12 @@ is the finish edge (owner ruling, 2026-10-06)."
   ;; Act / Assert
   (should (agent-repl-roster--finish-edge-p :thinking :turn-failed)))
 
+(ert-deftest agent-repl-test-roster-running-to-async-merging-is-a-finish-edge ()
+  "A turn that ends with its own branch merging async has ended:
+thinking -> async-merging is the finish edge (owner request, 2026-10-13)."
+  ;; Act / Assert
+  (should (agent-repl-roster--finish-edge-p :thinking :async-merging)))
+
 ;;; test-roster.el ends here
 
 ;;;; ---- Tests: move-tab-to-back ----
