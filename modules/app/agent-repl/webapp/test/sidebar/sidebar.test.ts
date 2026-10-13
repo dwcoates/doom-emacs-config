@@ -10,9 +10,11 @@ import { testAppContext } from "../rpc/app-context.js";
 import { UpdateSidebarViewResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import type { ServiceImpl } from "@connectrpc/connect";
 import { GROUPING_PICK_LABELS, PREFS_KEY, drawRailHead, mountSidebar, retireStoredPrefs } from "../../src/sidebar/sidebar.js";
-import { GROUPINGS } from "../../src/sidebar/context.js";
+import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import { GROUPINGS, type SidebarContext } from "../../src/sidebar/context.js";
+import { createRailSearch } from "../../src/sidebar/search.js";
 import { GROUPING_VIEW_KEY } from "../../src/sidebar/view.js";
-import { captureLogRecords, type LogCapture } from "../log-capture.js";
+import { captureLogRecords, forwardedRecord, type LogCapture } from "../log-capture.js";
 import type { PhasedAnimation } from "../../src/sidebar/wall-phase.js";
 import type { UnseenEnv } from "../../src/sidebar/unseen.js";
 import { createPageSeen } from "../../src/page-seen.js";
@@ -153,9 +155,20 @@ describe("the preferences a page stored before the view was the daemon's", () =>
   });
 });
 
+/** The rail's header, with a search no test here types into. */
+function railHead(sc: SidebarContext): ReturnType<typeof drawRailHead> {
+  return drawRailHead(sc, createRailSearch(() => {}));
+}
+
 describe("the rail's header", () => {
+  it("draws the search toggle immediately left of the title", () => {
+    const head = railHead(sidebarContext());
+    const title = head.element.querySelector(".sb-title") as Element;
+    expect(title.previousElementSibling?.hasAttribute("data-search-toggle")).toBe(true);
+  });
+
   it("offers every grouping as a picker", () => {
-    const head = drawRailHead(sidebarContext());
+    const head = railHead(sidebarContext());
     const picks = [...head.element.querySelectorAll("[data-grouping-pick]")].map((el) =>
       el.getAttribute("data-grouping-pick"),
     );
@@ -163,18 +176,18 @@ describe("the rail's header", () => {
   });
 
   it("labels each grouping's button from the one label table", () => {
-    const head = drawRailHead(sidebarContext());
+    const head = railHead(sidebarContext());
     const labels = [...head.element.querySelectorAll("[data-grouping-pick]")].map((el) => el.textContent);
     expect(labels).toEqual(GROUPINGS.map((grouping) => GROUPING_PICK_LABELS[grouping]));
   });
 
   it("names the maturity grouping's button Stage", () => {
-    const head = drawRailHead(sidebarContext());
+    const head = railHead(sidebarContext());
     expect(head.element.querySelector("[data-grouping-pick='maturity']")?.textContent).toBe("Stage");
   });
 
   it("lights the grouping it is painted with", () => {
-    const head = drawRailHead(sidebarContext());
+    const head = railHead(sidebarContext());
     head.paintGrouping("task");
     expect(head.element.querySelector("[data-grouping-pick='task']")?.classList.contains("active")).toBe(true);
   });
@@ -189,7 +202,7 @@ describe("the rail's header", () => {
         },
       }),
     );
-    const head = drawRailHead(sc);
+    const head = railHead(sc);
     sc.view.track(GROUPING_VIEW_KEY, "repository", head.paintGrouping);
     await click(head.element.querySelector("[data-grouping-pick='task']") as Element);
     expect(asked).toEqual(["task"]);
@@ -205,7 +218,7 @@ describe("the rail's header", () => {
         },
       }),
     );
-    const head = drawRailHead(sc);
+    const head = railHead(sc);
     sc.view.track(GROUPING_VIEW_KEY, "repository", head.paintGrouping);
     await click(head.element.querySelector("[data-grouping-pick='maturity']") as Element);
     expect(asked).toEqual(["maturity"]);
@@ -213,7 +226,7 @@ describe("the rail's header", () => {
 
   it("lights the chosen grouping at once, before any push", async () => {
     const sc = sidebarContext();
-    const head = drawRailHead(sc);
+    const head = railHead(sc);
     sc.view.track(GROUPING_VIEW_KEY, "repository", head.paintGrouping);
     await click(head.element.querySelector("[data-grouping-pick='task']") as Element);
     expect(head.element.querySelector("[data-grouping-pick='task']")?.classList.contains("active")).toBe(true);
@@ -221,7 +234,7 @@ describe("the rail's header", () => {
 
   it("stays clickable after a choice the daemon took, because no push redraws it", async () => {
     const sc = sidebarContext();
-    const head = drawRailHead(sc);
+    const head = railHead(sc);
     sc.view.track(GROUPING_VIEW_KEY, "repository", head.paintGrouping);
     const pick = head.element.querySelector("[data-grouping-pick='task']") as HTMLButtonElement;
     await click(pick);
@@ -236,7 +249,7 @@ describe("the rail's header", () => {
         },
       }),
     );
-    const head = drawRailHead(sc);
+    const head = railHead(sc);
     sc.view.track(GROUPING_VIEW_KEY, "repository", head.paintGrouping);
     await click(head.element.querySelector("[data-grouping-pick='task']") as Element);
     expect(head.element.querySelector("[data-grouping-pick='repository']")?.classList.contains("active")).toBe(true);
@@ -288,6 +301,54 @@ describe("mounting the rail: the view is the daemon's", () => {
     );
     await settle();
     expect(host.querySelector(".merged-section")?.classList.contains("folded")).toBe(false);
+  });
+});
+
+describe("mounting the rail: the search", () => {
+  /** Open HOST's search and type QUERY into it. */
+  function search(host: HTMLElement, query: string): void {
+    (host.querySelector("[data-search-toggle]") as HTMLElement).click();
+    const input = host.querySelector("[data-search-input]") as HTMLInputElement;
+    input.value = query;
+    input.dispatchEvent(new Event("input"));
+  }
+
+  const pushes = (): WorkspaceRoster[] => [
+    roster({
+      repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-1", name: "alpha" }), row({ id: "ws-2", name: "beta" })] })],
+    }),
+  ];
+
+  it("hangs the bar between the head and the scroller, so it overlaps the rows", () => {
+    const host = document.createElement("nav");
+    mountSidebar(host, ctxFor([]), { storage: null, timers: fakeTimers() });
+    expect([...host.children].map((el) => el.className)).toEqual(["sb-head", "sb-search", "sb-scroll"]);
+  });
+
+  it("narrows the drawn rows as the query is typed", async () => {
+    const host = document.createElement("nav");
+    mountSidebar(host, ctxFor(pushes()), { storage: null, timers: fakeTimers() });
+    await settle();
+    search(host, "bet");
+    expect(host.querySelector("[data-roster-row='ws-1']")?.classList.contains("sb-search-miss")).toBe(true);
+  });
+
+  it("narrows a roster pushed after the query was typed", async () => {
+    const host = document.createElement("nav");
+    mountSidebar(host, ctxFor(pushes()), { storage: null, timers: fakeTimers() });
+    search(host, "bet");
+    await settle();
+    expect(host.querySelector("[data-roster-row='ws-1']")?.classList.contains("sb-search-miss")).toBe(true);
+  });
+
+  it("logs what each query kept and hid", async () => {
+    const capture = captureLogRecords("debug");
+    const host = document.createElement("nav");
+    mountSidebar(host, ctxFor(pushes()), { storage: null, timers: fakeTimers() });
+    await settle();
+    search(host, "bet");
+    const record = await forwardedRecord(capture, "sidebar.search");
+    expect(record.context).toMatchObject({ query: "bet", kept: 1, missed: 1 });
   });
 });
 
