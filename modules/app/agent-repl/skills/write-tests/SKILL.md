@@ -57,6 +57,7 @@ coverage impact (always none).
 5. **Wait bounds sized on an idle host.**
    - Evidence: wait-bound tests run 5-7x slower inside a full run than alone (ERT integration files 3.4s -> 28s; an e2e successor test 1.7s -> 10.5s, past its 5s bound) (docs/investigations/2026-10-11-test-speed.md).
    - Fix: a bound is a small multiple of the healthy max OBSERVED UNDER REALISTIC CONCURRENCY (a full run), stated at the site with its measurement; a genuinely long wait gets its own explicit bound. Never fix a flaky wait by raising a timeout without that measurement.
+   - Owner ruling, 2026-10-13: never make a timeout very long, and think carefully about what a reasonable one is. A long timeout is extremely expensive when it fails, because every failure, and every hang, pays the whole bound, and bounds 10-100x the healthy latency have hung runs and gates. A too-short timeout causes flakiness. Size it just over 2x the healthy latency measured under realistic concurrency, name the operation it bounds at the site, and give every blocking wait a bound (no unbounded channel receives, process waits or polls). The full rule is in AGENTS.md, "Every timeout is sized deliberately".
 
 6. **The macOS RAM disk throttles low-priority I/O.**
    - Evidence: units run at `taskpolicy -d utility`; on the run's RAM disk a 4KB fsync is p50 0.1ms but p90 166ms, p99 330ms during a run, and 86ms per fsync whenever default-tier I/O touches the same volume (the SSD shows no such effect) (test-speed investigation, fourth round).

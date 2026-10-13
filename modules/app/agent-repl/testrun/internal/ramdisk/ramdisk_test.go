@@ -232,6 +232,59 @@ func TestReleaseDetachesAndRemovesTheMountPointAndRecord(t *testing.T) {
 	}
 }
 
+func TestReleaseKillsWhatRunsOutOfTheVolumeBeforeDetaching(t *testing.T) {
+	// Arrange
+	h := &fakeHost{}
+	m := newManager(t, h)
+	var killedUnder string
+	callsAtKill := -1
+	m.KillUnder = func(dir string) (int, error) { killedUnder, callsAtKill = dir, len(h.calls); return 3, nil }
+	v, err := m.Acquire(16)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	before := len(h.calls)
+
+	// Act
+	err = v.Release()
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+	if killedUnder != h.mount || callsAtKill != before {
+		t.Fatalf("killed under %q after %d of the release's calls, want %q before any detach", killedUnder, callsAtKill-before, h.mount)
+	}
+}
+
+func TestReleaseKeepsTheDiskWhenWhatRunsOutOfItCannotBeKilled(t *testing.T) {
+	// Arrange
+	h := &fakeHost{}
+	m := newManager(t, h)
+	m.KillUnder = func(string) (int, error) { return 0, errors.New("ps failed") }
+	v, err := m.Acquire(16)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	before := len(h.calls)
+
+	// Act
+	err = v.Release()
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "ps failed") {
+		t.Fatalf("Release = %v, want the failed kill reported", err)
+	}
+	for _, call := range h.calls[before:] {
+		if strings.HasPrefix(call, "hdiutil detach") {
+			t.Fatalf("Release detached (%q) under processes it could not kill", call)
+		}
+	}
+	if _, statErr := os.Stat(filepath.Join(m.Registry, "4242.lock")); statErr != nil {
+		t.Fatalf("the record is gone (stat err = %v), want it kept for the next run's Reclaim", statErr)
+	}
+}
+
 func TestReleaseForcesARefusedDetachAndSaysSo(t *testing.T) {
 	// Arrange
 	h := &fakeHost{}
