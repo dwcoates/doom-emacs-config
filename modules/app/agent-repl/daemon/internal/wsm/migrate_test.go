@@ -733,6 +733,25 @@ func TestTheMigrationAddsTheMergeQueueFrontColumn(t *testing.T) {
 	}
 }
 
+func TestTheMigrationAddsTheDetachedLandingColumns(t *testing.T) {
+	// Arrange -- a file written before a detached merge's landing was recorded.
+	path := layout3Fixture(t)
+
+	// Act
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("Open on a layout-3 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	got := scalar[int](t, handle.(*store),
+		`SELECT count(*) FROM pragma_table_info('workspaces') WHERE name IN ('merge_fork_head', 'landed_head', 'landed_at')`)
+	if got != 3 {
+		t.Fatalf("%d of the three landing columns exist after the migration, want 3", got)
+	}
+}
+
 // TestTheMigratedHeldPromptsAreOrdinary pins the layout-12 default: no build
 // before it could hold a prompt any other way, so every migrated row reads as
 // the ordinary delivery.

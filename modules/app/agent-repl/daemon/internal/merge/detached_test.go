@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -664,7 +665,7 @@ func TestALandedAsyncMergeIsHandedBackAsLanded(t *testing.T) {
 	}
 }
 
-func TestAnEvictedAsyncMergeIsHandedBackAsAbandoned(t *testing.T) {
+func TestAnEvictedAsyncMergeIsNotHandedBack(t *testing.T) {
 	// Arrange: an async request handed off and waiting in line.
 	h := newHarness(t)
 	if err := requestDetached(t, h, RequestedByUser); err != nil {
@@ -676,10 +677,99 @@ func TestAnEvictedAsyncMergeIsHandedBackAsAbandoned(t *testing.T) {
 		t.Fatalf("Evict: %v", err)
 	}
 
+	// Assert: an end somebody asked for is no failure to hand back, and
+	// nothing needs the user, so the merge workspace stays hidden.
+	if sent := h.detached.sent(); len(sent) != 0 {
+		t.Fatalf("handbacks = %+v, want none for an eviction", sent)
+	}
+	if revealed := h.detached.revealed(); len(revealed) != 0 {
+		t.Fatalf("reveals = %v, want none for an eviction", revealed)
+	}
+	var r dlog.Record
+	for _, rec := range h.logs.Records() {
+		if rec.Level == dlog.LevelInfo && rec.Message == "an async merge was taken off at an explicit request; its requester is not handed it back" {
+			r = rec
+		}
+	}
+	if r.Context["requester"] != string(theWorkspace) || r.Context["outcome"] != "abandoned" {
+		t.Fatalf("no INFO record naming the requester the eviction was not handed back to: %+v", h.logs.Records())
+	}
+}
+
+func TestAnAsyncMergeWhoseWorkspaceClosedIsHandedBackAsAbandoned(t *testing.T) {
+	// Arrange: an async request handed off and waiting in line.
+	h := newHarness(t)
+	if err := requestDetached(t, h, RequestedByUser); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	// Act: nobody asked for the merge to go; its workspace went under it.
+	h.o.OnWorkspaceClosed(context.Background(), theMergeWorkspace)
+
 	// Assert
 	sent := h.detached.sent()
-	if len(sent) != 1 || sent[0].outcome.Kind != DetachedAbandoned || sent[0].requester != theWorkspace {
+	if len(sent) != 1 || sent[0].outcome.Kind != DetachedAbandoned || sent[0].requester != theWorkspace || sent[0].outcome.Requested {
 		t.Fatalf("handbacks = %+v, want the abandonment told to the requester", sent)
+	}
+}
+
+func TestHandBackOfARequestedEndSendsNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.registerMergeWorkspace(theWorkspace, "request-1", "feature")
+
+	// Act
+	h.o.handBack(context.Background(), theMergeWorkspace, DetachedOutcome{Kind: DetachedAbandoned, Summary: "evicted", Requested: true})
+
+	// Assert: the roster still hears the merge ended.
+	if sent := h.detached.sent(); len(sent) != 0 {
+		t.Fatalf("handbacks = %+v, want none", sent)
+	}
+	if got := h.sidebar.detachedEndsSeen(); !slices.Equal(got, []detachedEnd{{ws: theWorkspace, landed: false}}) {
+		t.Fatalf("detached ends = %+v, want the requester's roster told", got)
+	}
+}
+
+func TestOnlyAnExplicitRemovalIsARequestedEnd(t *testing.T) {
+	cases := []struct {
+		cause AbandonCause
+		want  bool
+	}{
+		{CauseUserDrop, true},
+		{CauseUserDequeue, true},
+		{CauseWorkspaceClosed, false},
+		{CauseDaemonShutdown, false},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.cause), func(t *testing.T) {
+			// Act
+			got := tc.cause.releases()
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("%s.releases() = %v, want %v", tc.cause, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestEveryAbandonedHandbackSaysWhetherItWasRequested fails an abandoned
+// handback that does not carry its cause's releases(), which would hand an
+// explicit removal back to the requester as a failure.
+func TestEveryAbandonedHandbackSaysWhetherItWasRequested(t *testing.T) {
+	// Arrange
+	src, err := os.ReadFile("terminal.go")
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+
+	// Act
+	abandoned := strings.Count(string(src), "DetachedOutcome{Kind: DetachedAbandoned")
+	marked := strings.Count(string(src), "Requested: cause.releases()")
+
+	// Assert
+	if abandoned == 0 || abandoned != marked {
+		t.Fatalf("terminal.go hands back %d abandonments and marks %d of them requested-or-not", abandoned, marked)
 	}
 }
 
