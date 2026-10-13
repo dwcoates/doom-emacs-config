@@ -180,6 +180,7 @@ func newManager(t *testing.T, h *fakeHost) Manager {
 		Probe:     h.probe,
 		Watch:     h.watch,
 		Alive:     func(int) bool { return false },
+		Mounted:   func(string) (bool, error) { return false, nil },
 		Log:       &fakeLog{logged: make(chan struct{}, 1)},
 		Now:       tickingClock(),
 		LockBound: 10 * time.Second,
@@ -1373,5 +1374,270 @@ func TestBoundedRunsShareOneOutcome(t *testing.T) {
 		if b := body(name); !strings.Contains(b, "commandOutcome(") || !strings.Contains(b, "boundedCommand(") || strings.Contains(b, "exec.CommandContext") {
 			t.Errorf("%s forms its command or its outcome by hand; want boundedCommand and commandOutcome", name)
 		}
+	}
+}
+
+// strayDir makes a mount point named name under m's mount parent, with a
+// file a dead run's process left under it.
+func strayDir(t *testing.T, m Manager, name string) string {
+	t.Helper()
+	dir := filepath.Join(m.MountParent, name)
+	if err := os.MkdirAll(filepath.Join(dir, "tr-1", "agent-repl-ert-x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "tr-1", "agent-repl-ert-x", "f"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestReclaimRemovesAStrayMountPointNoRecordNames(t *testing.T) {
+	// Arrange
+	h := &fakeHost{}
+	m := newManager(t, h)
+	dir := strayDir(t, m, "artr-28386")
+	var killedUnder string
+	m.KillUnder = func(d string) (int, error) { killedUnder = d; return 12, nil }
+
+	// Act
+	done, err := m.Reclaim()
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Reclaim: %v", err)
+	}
+	if _, statErr := os.Stat(dir); !os.IsNotExist(statErr) {
+		t.Fatalf("the stray mount point survives (stat err = %v)", statErr)
+	}
+	if _, statErr := os.Stat(dir + ".reclaim"); !os.IsNotExist(statErr) {
+		t.Fatalf("the stray's removal left %s.reclaim (stat err = %v)", dir, statErr)
+	}
+	want := []Reclaimed{{Pid: 28386, Mount: dir, Killed: 12, Stray: true}}
+	if !slices.Equal(done, want) || killedUnder != dir {
+		t.Fatalf("Reclaim = %+v, killed under %q; want %+v under %q", done, killedUnder, want, dir)
+	}
+}
+
+func TestReclaimLeavesAStrayWhoseRunIsAlive(t *testing.T) {
+	// Arrange: a run in its release, its record gone, its mount point not.
+	h := &fakeHost{}
+	m := newManager(t, h)
+	dir := strayDir(t, m, "artr-28386")
+	m.Alive = func(pid int) bool { return pid == 28386 }
+	m.KillUnder = func(string) (int, error) { t.Fatal("killed under a live run's mount point"); return 0, nil }
+
+	// Act
+	done, err := m.Reclaim()
+
+	// Assert
+	if _, statErr := os.Stat(dir); err != nil || len(done) != 0 || statErr != nil {
+		t.Fatalf("Reclaim = %+v, %v (stat err = %v); want the live run's mount point left alone", done, err, statErr)
+	}
+}
+
+func TestReclaimLeavesAMountPointARecordNames(t *testing.T) {
+	// Arrange: a live run's record, its lock held.
+	h := &fakeHost{}
+	m := newManager(t, h)
+	dir := strayDir(t, m, "artr-7")
+	record := deadRecord(t, m, "7", "/dev/disk7", dir)
+	f, err := os.OpenFile(record, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { f.Close() })
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	done, err := m.Reclaim()
+
+	// Assert
+	if _, statErr := os.Stat(dir); err != nil || len(done) != 0 || statErr != nil {
+		t.Fatalf("Reclaim = %+v, %v (stat err = %v); want the recorded mount point left alone", done, err, statErr)
+	}
+}
+
+func TestReclaimLeavesAStrayWithAVolumeMounted(t *testing.T) {
+	// Arrange
+	h := &fakeHost{}
+	m := newManager(t, h)
+	dir := strayDir(t, m, "artr-28386")
+	m.Mounted = func(d string) (bool, error) { return d == dir, nil }
+
+	// Act
+	done, err := m.Reclaim()
+
+	// Assert
+	if _, statErr := os.Stat(filepath.Join(dir, "tr-1", "agent-repl-ert-x", "f")); err != nil || len(done) != 0 || statErr != nil {
+		t.Fatalf("Reclaim = %+v, %v (stat err = %v); want the mounted volume left to the leak check", done, err, statErr)
+	}
+}
+
+func TestReclaimKeepsAStrayWhoseProcessesCannotBeKilled(t *testing.T) {
+	// Arrange
+	h := &fakeHost{}
+	m := newManager(t, h)
+	dir := strayDir(t, m, "artr-28386")
+	m.KillUnder = func(string) (int, error) { return 0, errors.New("ps failed") }
+
+	// Act
+	done, err := m.Reclaim()
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "kill what still runs out of the dead run's mount point "+dir) || len(done) != 0 {
+		t.Fatalf("Reclaim = %+v, %v; want the failed kill", done, err)
+	}
+	if _, statErr := os.Stat(dir); statErr != nil {
+		t.Fatalf("the stray went with its processes still running (stat err = %v)", statErr)
+	}
+}
+
+func TestReclaimFailsAStrayWhoseMountCannotBeTold(t *testing.T) {
+	// Arrange
+	h := &fakeHost{}
+	m := newManager(t, h)
+	dir := strayDir(t, m, "artr-28386")
+	m.Mounted = func(string) (bool, error) { return false, errors.New("stat failed") }
+
+	// Act
+	done, err := m.Reclaim()
+
+	// Assert
+	if _, statErr := os.Stat(dir); err == nil || len(done) != 0 || statErr != nil {
+		t.Fatalf("Reclaim = %+v, %v (stat err = %v); want the failure and the stray kept", done, err, statErr)
+	}
+}
+
+func TestReclaimFinishesAStrayAnEarlierRemovalLeft(t *testing.T) {
+	// Arrange
+	h := &fakeHost{}
+	m := newManager(t, h)
+	dir := strayDir(t, m, "artr-28386.reclaim")
+	m.KillUnder = func(string) (int, error) { t.Fatal("killed under a mount point already taken"); return 0, nil }
+
+	// Act
+	done, err := m.Reclaim()
+
+	// Assert
+	if _, statErr := os.Stat(dir); err != nil || !os.IsNotExist(statErr) {
+		t.Fatalf("Reclaim = %v (stat err = %v); want the half-removed stray gone", err, statErr)
+	}
+	if want := []Reclaimed{{Pid: 28386, Mount: dir, Stray: true}}; !slices.Equal(done, want) {
+		t.Fatalf("Reclaim = %+v, want %+v", done, want)
+	}
+}
+
+func TestReclaimLeavesOtherDirectoriesInTheMountParent(t *testing.T) {
+	// Arrange
+	h := &fakeHost{}
+	m := newManager(t, h)
+	var kept []string
+	for _, name := range []string{"artr-x", "arrun123", "artr-7.old"} {
+		kept = append(kept, strayDir(t, m, name))
+	}
+	file := filepath.Join(m.MountParent, "artr-9")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	kept = append(kept, file)
+
+	// Act
+	done, err := m.Reclaim()
+
+	// Assert
+	if err != nil || len(done) != 0 {
+		t.Fatalf("Reclaim = %+v, %v; want nothing reclaimed", done, err)
+	}
+	for _, path := range kept {
+		if _, statErr := os.Stat(path); statErr != nil {
+			t.Fatalf("%s went (stat err = %v)", path, statErr)
+		}
+	}
+}
+
+func TestReclaimLeavesThisRunsOwnMountPoint(t *testing.T) {
+	// Arrange
+	h := &fakeHost{}
+	m := newManager(t, h)
+	dir := strayDir(t, m, "artr-4242")
+
+	// Act
+	done, err := m.Reclaim()
+
+	// Assert
+	if _, statErr := os.Stat(dir); err != nil || len(done) != 0 || statErr != nil {
+		t.Fatalf("Reclaim = %+v, %v (stat err = %v); want this run's own mount point left alone", done, err, statErr)
+	}
+}
+
+func TestReclaimFailsAMountParentItCannotList(t *testing.T) {
+	// Arrange
+	h := &fakeHost{}
+	m := newManager(t, h)
+	m.MountParent = filepath.Join(t.TempDir(), "gone")
+
+	// Act
+	_, err := m.Reclaim()
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "list the RAM disk mount parent") {
+		t.Fatalf("Reclaim = %v, want the failed listing", err)
+	}
+}
+
+func TestIsMountPoint(t *testing.T) {
+	tests := []struct {
+		name string
+		dir  string
+		want bool
+	}{
+		{name: "a volume's mount point", dir: "/dev", want: true},
+		{name: "a plain directory", dir: t.TempDir(), want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got, err := IsMountPoint(tc.dir)
+
+			// Assert
+			if err != nil || got != tc.want {
+				t.Fatalf("IsMountPoint(%s) = %v, %v; want %v", tc.dir, got, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestIsMountPointFailsAMissingDirectory(t *testing.T) {
+	// Act
+	_, err := IsMountPoint(filepath.Join(t.TempDir(), "gone"))
+
+	// Assert
+	if err == nil {
+		t.Fatal("IsMountPoint of a missing directory succeeded")
+	}
+}
+
+func TestReclaimFailsAStrayWhenTheRegistryCannotBeMade(t *testing.T) {
+	// Arrange: the registry's place is taken by a file.
+	h := &fakeHost{}
+	m := newManager(t, h)
+	dir := strayDir(t, m, "artr-28386")
+	blocker := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(blocker, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m.Registry = filepath.Join(blocker, "registry")
+
+	// Act
+	done, err := m.Reclaim()
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "make the RAM disk registry") || len(done) != 0 {
+		t.Fatalf("Reclaim = %+v, %v; want the failed registry", done, err)
+	}
+	if _, statErr := os.Stat(dir); statErr != nil {
+		t.Fatalf("the stray went without the registry lock (stat err = %v)", statErr)
 	}
 }
