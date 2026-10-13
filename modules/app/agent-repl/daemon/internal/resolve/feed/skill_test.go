@@ -357,7 +357,7 @@ func TestASkillFailureKeepsTheHeldStartsArguments(t *testing.T) {
 	}
 }
 
-func TestALoadedSkillStatesHowLongItRan(t *testing.T) {
+func TestALoadedSkillsClockStopsAtItsSettle(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.skillFrame("unit-1", &conversationv1.AgentSkillUseStart{
@@ -373,12 +373,12 @@ func TestALoadedSkillStatesHowLongItRan(t *testing.T) {
 	})
 
 	// Assert.
-	if got := h.skillCard().GetLoaded().GetRuntime().GetText(); got != "ran 340 ms" {
-		t.Fatalf("runtime = %q, want %q", got, "ran 340 ms")
+	if start, end := clockOf(h.skillCard().GetClock()); start != 1_000 || end != 1_340 {
+		t.Fatalf("clock spans %d..%d, want 1000..1340", start, end)
 	}
 }
 
-func TestAFailedSkillStatesHowLongItRan(t *testing.T) {
+func TestAFailedSkillsClockStopsAtTheFailuresInstant(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.skillFrame("unit-1", &conversationv1.AgentSkillUseStart{
@@ -393,7 +393,21 @@ func TestAFailedSkillStatesHowLongItRan(t *testing.T) {
 	})
 
 	// Assert.
-	if got := h.skillCard().GetFailed().GetRuntime().GetText(); got != "ran 2 s" {
-		t.Fatalf("runtime = %q, want %q", got, "ran 2 s")
+	if start, end := clockOf(h.skillCard().GetClock()); start != 1_000 || end != 3_000 {
+		t.Fatalf("clock spans %d..%d, want 1000..3000", start, end)
+	}
+}
+
+func TestAnInvokedSkillsClockRunsFromItsStart(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.skillFrame("unit-1", &conversationv1.AgentSkillUseStart{
+		Skill:     &conversationv1.AgentSkillName{Name: "graphify"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Assert.
+	if clock := h.skillCard().GetClock(); clock.GetRunning() == nil || clock.GetStartedAtMs() != 1_000 {
+		t.Fatalf("clock = %+v, want running from 1000", clock)
 	}
 }

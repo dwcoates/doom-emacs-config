@@ -364,7 +364,7 @@ func settledAfter(seconds int64) *conversationv1.AgentActivitySettledAt {
 	}
 }
 
-func TestAnAnsweredAskStatesHowLongTheUserWasAsked(t *testing.T) {
+func TestAnAnsweredAsksClockStopsAtItsSettle(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	batch := twoQuestionBatch()
@@ -380,12 +380,12 @@ func TestAnAnsweredAskStatesHowLongTheUserWasAsked(t *testing.T) {
 	})
 
 	// Assert.
-	if got := h.questionCard().GetAnswered().GetRuntime().GetText(); got != "waited 2m 14s" {
-		t.Fatalf("runtime = %q, want %q", got, "waited 2m 14s")
+	if start, end := clockOf(h.questionCard().GetClock()); start != 1_000 || end != 135_000 {
+		t.Fatalf("clock spans %d..%d, want 1000..135000", start, end)
 	}
 }
 
-func TestAnExpiredAskStatesHowLongItWaited(t *testing.T) {
+func TestAnExpiredAsksClockStopsAtItsSettle(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	batch := twoQuestionBatch()
@@ -401,12 +401,12 @@ func TestAnExpiredAskStatesHowLongItWaited(t *testing.T) {
 	})
 
 	// Assert.
-	if got := h.questionCard().GetExpired().GetRuntime().GetText(); got != "waited 30 s" {
-		t.Fatalf("runtime = %q, want %q", got, "waited 30 s")
+	if start, end := clockOf(h.questionCard().GetClock()); start != 1_000 || end != 31_000 {
+		t.Fatalf("clock spans %d..%d, want 1000..31000", start, end)
 	}
 }
 
-func TestAnAskThatFailedStatesItsWaitFromTheFailuresInstant(t *testing.T) {
+func TestAFailedAsksClockStopsAtTheFailuresInstant(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.pose("ask-1", &conversationv1.AgentQuestionStart{
@@ -419,12 +419,12 @@ func TestAnAskThatFailedStatesItsWaitFromTheFailuresInstant(t *testing.T) {
 	})
 
 	// Assert.
-	if got := h.questionCard().GetExpired().GetRuntime().GetText(); got != "waited 5 s" {
-		t.Fatalf("runtime = %q, want %q", got, "waited 5 s")
+	if start, end := clockOf(h.questionCard().GetClock()); start != 1_000 || end != 6_000 {
+		t.Fatalf("clock spans %d..%d, want 1000..6000", start, end)
 	}
 }
 
-func TestASettledAskWithNoSettleInstantStatesNoWait(t *testing.T) {
+func TestASettledAskWithNoSettleInstantHasNoClock(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	batch := twoQuestionBatch()
@@ -439,7 +439,20 @@ func TestASettledAskWithNoSettleInstantStatesNoWait(t *testing.T) {
 	})
 
 	// Assert.
-	if rt := h.questionCard().GetAnswered().Runtime; rt != nil {
-		t.Fatalf("runtime = %+v, want unset rather than one measured on the daemon's clock", rt)
+	if clock := h.questionCard().Clock; clock != nil {
+		t.Fatalf("clock = %+v, want unset rather than one stopped on the daemon's clock", clock)
+	}
+}
+
+func TestAnOpenAsksClockRunsFromItsStart(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.pose("ask-1", &conversationv1.AgentQuestionStart{
+		Batch: twoQuestionBatch(), StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Assert.
+	if clock := h.questionCard().GetClock(); clock.GetRunning() == nil || clock.GetStartedAtMs() != 1_000 {
+		t.Fatalf("clock = %+v, want running from 1000", clock)
 	}
 }
