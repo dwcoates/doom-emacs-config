@@ -4517,3 +4517,40 @@ describe("the merge bubble's run badge", () => {
     expect(mountedPaint(badge("tests"), "font-size")).not.toBe("0.7em");
   });
 });
+
+/**
+ * THE MERGE QUEUE'S HEADER (owner request, 2026-10-13): the column names sit a
+ * shade darker than the muted grey, above a thicker line than the rows' own.
+ */
+describe("the merge queue's header", () => {
+  /** A queue table, a header then two rows, mounted with the real stylesheet; answers CHECK's result. */
+  function inQueue<T>(check: (rows: { header: HTMLElement; first: HTMLElement; second: HTMLElement }) => T): T {
+    const table = document.createElement("div");
+    table.className = "merge-queue list-rows";
+    const header = document.createElement("div");
+    header.className = "merge-queue-header footer-columns";
+    const first = document.createElement("div");
+    const second = document.createElement("div");
+    table.append(header, first, second);
+    const teardown = installStylesheet();
+    document.body.append(table);
+    try {
+      return check({ header, first, second });
+    } finally {
+      table.remove();
+      teardown();
+    }
+  }
+
+  it("paints the column names a shade darker than the muted grey", () => {
+    expect(inQueue(({ header }) => cascadedValue(header, "color"))).toBe("color-mix(in srgb, var(--muted) 70%, black)");
+  });
+
+  it("sets the first row off from the column names by a thicker line", () => {
+    expect(inQueue(({ first }) => cascadedValue(first, "border-top-width"))).toBe("2px");
+  });
+
+  it("keeps the rows' own delimiter between the rows", () => {
+    expect(inQueue(({ second }) => cascadedValue(second, "border-top-width"))).not.toBe("2px");
+  });
+});

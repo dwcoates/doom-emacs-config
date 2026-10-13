@@ -7373,8 +7373,12 @@ ar-button.merge-run-view-item.is-active { background: rgba(128, 128, 128, 0.16);
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* The header reads as the agents panel's does: muted words above their columns. */
-.merge-queue-header { color: var(--muted); }
+/* The header reads as the agents panel's does: muted words above their
+   columns, a shade darker than the muted grey and set off from the rows by a
+   thicker line than the rows' own delimiter (owner request, 2026-10-13), so the
+   column names never read as one more row. */
+.merge-queue-header { color: color-mix(in srgb, var(--muted) 70%, black); }
+.merge-queue > .merge-queue-header + * { border-top-width: 2px; }
 .merge-queue-header > .footer-column-header:not([data-column="duration"]) { justify-content: flex-start; }
 .merge-queue-header > [data-column="duration"],
 .merge-queue-line > .merge-queue-duration { justify-content: flex-end; }
