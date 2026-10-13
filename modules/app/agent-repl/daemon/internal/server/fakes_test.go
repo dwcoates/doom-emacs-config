@@ -1636,6 +1636,15 @@ func (f *fakeOpenWorld) deps() opentabs.Deps {
 			defer f.mu.Unlock()
 			f.opening = append(f.opening, fmt.Sprintf("%s:%v", ws, opening))
 		},
+		// The conversation reads at once, nothing is owed, and the roster
+		// answers a bare row naming the workspace: the server's own tests are
+		// about the stream, not the open's work (internal/opentabs covers it).
+		ReadConversation: func(context.Context, ids.WorkspaceID) error { return nil },
+		Owed:             func(context.Context, ids.WorkspaceID) (bool, error) { return false, nil },
+		Row: func(ws ids.WorkspaceID) (*frontendv1.RosterRow, uint64, bool) {
+			return &frontendv1.RosterRow{Workspace: &frontendv1.RosterRowWorkspace{
+				Workspace: &workspacev1.WorkspaceRef{Id: string(ws)}}}, 1, true
+		},
 		Now: time.Now,
 		Log: dlog.NewTestLogger(),
 	}

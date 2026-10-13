@@ -406,7 +406,9 @@ hid or whose repository section is collapsed. Hiding or collapsing stands the
 session down through the idle sweep's own gate and hibernation
 (`drain/withheld.go`); a turn in flight defers it to the free edge that turn's
 end raises, and a workspace shown again meanwhile is not stood down. Records:
-`daemon.opentabs.open` (INFO per answered workspace), `daemon.opentabs.page`
+`daemon.opentabs.open` (INFO per answered workspace, with its
+`roster_revision`; INFO when an open waits on an owed cut turn and when that
+wait ends), `daemon.opentabs.page`
 (DEBUG page facts), `daemon.drain.withheld` (INFO when a stand-down waits on a
 turn, is taken, or is dropped because the workspace was shown again).
 
@@ -921,6 +923,26 @@ is read through any shim client the fleet can reach (`workspace.Fleet.ReadHistor
   was made when that is later than the row before it (`order.go`
   `awaitsNewestPage`), so a cold gate made after a restart is not drawn above
   turns run since an older merge row.
+
+## A page carries the prompts of the turns it touches
+
+Design record: `../docs/protobuf-design/complete-pages.md`. A reader's load
+draws a page's `turn_heads` (the prompt entries of the turns its entries are
+stamped with whose prompts sit below it) BEFORE its own entries
+(`resolve/feed/heads.go`), so no entry is withheld (`withholds`) and an
+opening reads ONE store page. Under each head drawn an `earlier_steps` row
+stands (keyed from the head's place, so right after the prompt), until a
+load meets the head as an ordinary entry of an older page, which removes it
+(`removed`). A head whose turn the feed already saw opened is absorbed (no
+row). A page without heads draws as before: withheld entries, and the walk
+or `loadUntilDrawn` reading older pages until the prompt's page loads. A
+watch's catch-up page never draws heads. The earlier-steps row is never
+mirrored. OpenTabs reads the root's newest page through the same loading
+(`ReadNewest`). Records: `daemon.feed.opening_reads` (INFO with `reads` for
+an opening that read store pages), `daemon.feed.earlier_steps_drawn` and
+`daemon.feed.earlier_steps_removed` (INFO), `daemon.feed.turn_head_absorbed`
+(DEBUG), `daemon.feed.turn_head_not_prompt` (ERROR), `daemon.feed.read_newest`
+(INFO).
 
 ## The feed never serves a row the newest cut withholds
 

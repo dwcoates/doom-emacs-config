@@ -34,8 +34,13 @@ func (r *resolver) replayPage(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 	// from the daemon's durable record, and no read of a database belongs
 	// inside the resolver's mutex.
 	ported := r.portedPrompts(ws)
-	closes := r.recordedCloses(ws, page)
-	turns := entryTurns(page)
+	// A READER'S LOAD DRAWS THE PAGE'S TURN HEADS FIRST (heads.go): they are
+	// part of what the page draws, so every read taken before the lock knows
+	// their turns too.
+	all, own := withHeads(page, load)
+	whole := headsPage(page, all)
+	closes := r.recordedCloses(ws, whole)
+	turns := entryTurns(whole)
 	addresses := r.recordedAddresses(ws, turns)
 	mirrors := r.recordedMirrors(ws, turns)
 	r.learnLineage(ws, turns...)
@@ -94,14 +99,28 @@ func (r *resolver) replayPage(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 	for turn, m := range mirrors {
 		s.mirrorTurn(turn, m)
 	}
+	if load == nil && len(page.GetTurnHeads()) > 0 {
+		log.Debug("daemon.feed.catch_up_heads_ignored",
+			"a watch's catch-up page carried turn heads; only a reader's load draws them",
+			dlog.Context{"agent": agent.GetValue(), "heads": len(page.GetTurnHeads())})
+	}
 	var withheld []*conversationv1.HistoryEntryAt
-	for i := len(entries) - 1; i >= 0; i-- {
-		if load != nil && r.withholds(s, entries[i]) {
-			load.outcomes.note(entries[i], outcomeWithheld)
-			withheld = append(withheld, entries[i])
+	for i := len(all) - 1; i >= 0; i-- {
+		if i >= own {
+			// A TURN HEAD, placed below every entry of the page: drawn first,
+			// oldest first, so the page's own entries find their turns open.
+			r.replayHead(s, agent, all[i], load)
 			continue
 		}
-		r.replayLoadedEntry(s, agent, entries[i], load, outcomeDrew)
+		if load != nil && r.withholds(s, all[i]) {
+			load.outcomes.note(all[i], outcomeWithheld)
+			withheld = append(withheld, all[i])
+			continue
+		}
+		r.replayLoadedEntry(s, agent, all[i], load, outcomeDrew)
+		if load != nil {
+			r.closeGap(s, all[i], load)
+		}
 	}
 	if load != nil {
 		withheld = append(withheld, r.redrawPending(s, agent, load)...)

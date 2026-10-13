@@ -881,7 +881,9 @@ opens are OpenTabs streams."
              ("offline" "{}" :offline nil)
              ("served" "{}" :served nil)
              ("pageConnected" "{}" :page-connected nil)
-             ("pageDrawn" "{}" :page-drawn nil)))
+             ("pageDrawn" "{}" :page-drawn nil)
+             ("conversationRead" "{}" :conversation-read nil)
+             ("resumingCutTurn" "{}" :resuming-cut-turn nil)))
     (let ((frame (agent-repl-test-wire-host--decode
                   #'agent-repl-wire-decode-open-tabs-response
                   (format "{\"step\":{\"workspace\":%s,\"atMs\":\"5\",\"%s\":%s}}"
@@ -890,24 +892,70 @@ opens are OpenTabs streams."
                                  :value (list :workspace '(:id "w1" :dir "/t/w1") :at-ms 5
                                               :step (list :arm (nth 2 case) :value (nth 3 case)))))))))
 
-(ert-deftest agent-repl-test-wire-host-open-tabs-decodes-each-opened-outcome ()
-  "Every opened outcome arm decodes to its keyword and payload."
+(defconst agent-repl-test-wire-host--row-json
+  (concat "{\"workspace\":{\"workspace\":{\"id\":\"w1\",\"dir\":\"/t/w1\"}},"
+          "\"name\":{\"text\":\"one\"},"
+          "\"current\":{},\"when\":{},\"detail\":{},\"closed\":{},"
+          "\"availability\":{\"available\":{}},\"ready\":{}}")
+  "A minimal valid RosterRow for workspace w1.")
+
+(defun agent-repl-test-wire-host--opened (arm value)
+  "Decode an `opened' frame for w1 whose outcome is ARM carrying VALUE (JSON)."
+  (plist-get (plist-get (agent-repl-test-wire-host--decode
+                         #'agent-repl-wire-decode-open-tabs-response
+                         (format "{\"opened\":{\"workspace\":%s,\"atMs\":\"5\",\"%s\":%s}}"
+                                 agent-repl-test-wire-host--ref-json arm value))
+                        :value)
+             :outcome))
+
+(ert-deftest agent-repl-test-wire-host-open-tabs-ready-carries-its-row ()
+  "A ready answer decodes the workspace's roster row."
+  (let ((outcome (agent-repl-test-wire-host--opened
+                  "ready" (format "{\"row\":%s}" agent-repl-test-wire-host--row-json))))
+    (should (equal (list (plist-get outcome :arm)
+                         (plist-get (plist-get (plist-get (plist-get (plist-get outcome :value) :row)
+                                                          :workspace)
+                                               :workspace)
+                                    :id))
+                   '(:ready "w1")))))
+
+(ert-deftest agent-repl-test-wire-host-open-tabs-ready-carries-its-roster-revision ()
+  "A ready answer decodes the revision its row was taken from."
+  (should (equal (plist-get (plist-get (agent-repl-test-wire-host--opened
+                                        "ready" (format "{\"row\":%s,\"rosterRevision\":\"7\"}"
+                                                        agent-repl-test-wire-host--row-json))
+                                       :value)
+                            :roster-revision)
+                 7)))
+
+(ert-deftest agent-repl-test-wire-host-open-tabs-ready-without-a-row-is-a-breach ()
+  "A ready answer with no row is a contract breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-open-tabs-opened-ready "{}")
+                 '("OpenTabsOpenedReady" row "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-host-open-tabs-failed-carries-its-reason-and-row ()
+  "A failed answer decodes its reason and the workspace's roster row."
+  (let ((value (plist-get (agent-repl-test-wire-host--opened
+                           "failed" (format "{\"reason\":\"spawn refused\",\"row\":%s}"
+                                            agent-repl-test-wire-host--row-json))
+                          :value)))
+    (should (equal (list (plist-get value :reason)
+                         (plist-get (plist-get (plist-get (plist-get value :row) :workspace) :workspace) :id))
+                   '("spawn refused" "w1")))))
+
+(ert-deftest agent-repl-test-wire-host-open-tabs-decodes-each-other-outcome ()
+  "The hidden and refused outcomes decode to their keyword and payload."
   (dolist (case
-           '(("ready" "{}" :ready nil)
-             ("failed" "{\"reason\":\"spawn refused\"}" :failed (:reason "spawn refused"))
-             ("hidden" "{}" :hidden nil)
+           '(("hidden" "{}" :hidden nil)
              ("refused" "{\"unknownWorkspace\":{}}" :refused (:cause (:arm :unknown-workspace :value nil)))
              ("refused" "{\"workspaceRefMismatch\":{\"registryDir\":\"/r\"}}"
               :refused (:cause (:arm :workspace-ref-mismatch :value (:registry-dir "/r"))))
              ("refused" "{\"transferringAway\":{\"address\":\"127.0.0.1:9\"}}"
               :refused (:cause (:arm :transferring-away :value (:address "127.0.0.1:9"))))
              ("refused" "{\"notYetAdopted\":{}}" :refused (:cause (:arm :not-yet-adopted :value nil)))))
-    (let ((frame (agent-repl-test-wire-host--decode
-                  #'agent-repl-wire-decode-open-tabs-response
-                  (format "{\"opened\":{\"workspace\":%s,\"atMs\":\"5\",\"%s\":%s}}"
-                          agent-repl-test-wire-host--ref-json (nth 0 case) (nth 1 case)))))
-      (should (equal (plist-get (plist-get frame :value) :outcome)
-                     (list :arm (nth 2 case) :value (nth 3 case)))))))
+    (should (equal (agent-repl-test-wire-host--opened (nth 0 case) (nth 1 case))
+                   (list :arm (nth 2 case) :value (nth 3 case))))))
 
 (ert-deftest agent-repl-test-wire-host-open-tabs-decodes-the-finish ()
   "The finish decodes its counts and its failed workspaces."

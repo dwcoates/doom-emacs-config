@@ -900,6 +900,31 @@ describe("createFeedController: the walk", () => {
     expect(h.calls.getFeedPage[0]?.page.case).toBe("next");
   });
 
+  it("walks one page older when a turn's earlier-steps fold is activated", async () => {
+    // Arrange
+    const h = harness({
+      getFeedPage: () =>
+        create(GetFeedPageResponseSchema, {
+          result: {
+            case: "success",
+            value: page([withOrder(responseRow("older"), "a")]),
+          },
+        }),
+    });
+    const { controller, host } = fixture(h);
+    controller.applyPage(
+      page([rowWith("gap", { case: "earlierSteps", value: {} }), responseRow("b")], { hasMore: true }),
+      "replace",
+    );
+
+    // Act
+    host.querySelector<HTMLElement>("[data-earlier-steps]")?.click();
+    await settle();
+
+    // Assert
+    expect(h.calls.getFeedPage[0]?.page.case).toBe("next");
+  });
+
   it("names the walk the last page with more named", async () => {
     const h = harness({
       getFeedPage: () =>

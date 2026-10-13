@@ -79,6 +79,8 @@ type fakeDB struct {
 	// orphansErr fails CloseOrphans, and claimErr ClaimDisplacedTurn.
 	orphansErr error
 	claimErr   error
+	// resumeClaimErr fails ClaimResumptions.
+	resumeClaimErr error
 	// byTurnErr fails the one-hold read an edit resolves its prompt through,
 	// and replaceErr fails an edit's content replacement.
 	byTurnErr  error
@@ -403,6 +405,9 @@ func (d *fakeDB) OweResumption(_ context.Context, ws ids.WorkspaceID, turn ids.T
 func (d *fakeDB) ClaimResumptions(_ context.Context, ws ids.WorkspaceID) (int, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.resumeClaimErr != nil {
+		return 0, d.resumeClaimErr
+	}
 	n := len(d.owed[ws])
 	delete(d.owed, ws)
 	return n, nil

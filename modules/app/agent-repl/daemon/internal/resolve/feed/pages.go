@@ -58,8 +58,12 @@ func (r *resolver) walkPage(ctx context.Context, ws ids.WorkspaceID, feed feedid
 		}
 		r.mu.Unlock()
 		if err != nil || plan == nil {
+			if err == nil && open {
+				r.reportOpeningReads(ws, feed, step.reads)
+			}
 			return page, token, held, err
 		}
+		step.reads++
 		if _, err := r.load(ctx, *plan); err != nil {
 			if !errors.Is(err, ErrNoHistorySource) {
 				return nil, nil, nil, err
@@ -89,6 +93,25 @@ type pageStep struct {
 	// was up to read it from: whether older history exists is NOT KNOWN, so the
 	// walk is not at the feed's start and stays open for the reader to continue.
 	unsourced bool
+	// reads counts the store pages the walk read.
+	reads int
+}
+
+// reportOpeningReads says how many store pages an opening read before it was
+// served: none (served from memory), ONE (a page whose turn heads completed
+// it, or one that drew whole), or more (a page without heads whose rows waited
+// on an older page's prompts, read the old way).
+func (r *resolver) reportOpeningReads(ws ids.WorkspaceID, feed feedid.Feed, reads int) {
+	log := r.lockedLogger(ws)
+	fields := dlog.Context{"feed": r.feedKey(ws, feed), "reads": reads}
+	switch {
+	case reads == 0:
+		log.Debug("daemon.feed.opening_reads", "an opening was served from memory without reading a store page", fields)
+	case reads == 1:
+		log.Info("daemon.feed.opening_reads", "an opening was served from one store read", fields)
+	default:
+		log.Info("daemon.feed.opening_reads", "an opening read several store pages before a row drew: its newest page's turns had their prompts on older pages and it carried no turn heads", fields)
+	}
 }
 
 // stepPage composes the page a walk owes, or answers the load it needs first.
