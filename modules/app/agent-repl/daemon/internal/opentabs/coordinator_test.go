@@ -881,6 +881,40 @@ func TestABringUpParkedAtItsColdGateDoesNotWaitOnTheCutTurn(t *testing.T) {
 	w.expect(t, "a cold_gate", "a served", "a conversation_read", "a ready")
 }
 
+func TestAnOfflineVendorDoesNotHoldTheOpenOnItsCutTurn(t *testing.T) {
+	// Arrange
+	w := newWorld(t)
+	w.owe("a")
+	w.start(none("a"))
+	w.awaitBringUp(t)
+	w.c.Step("a", Step{Kind: StepServing})
+	w.expect(t, "a served", "a conversation_read")
+
+	// Act
+	w.c.Step("a", Step{Kind: StepOffline})
+
+	// Assert
+	w.expect(t, "a offline", "a ready")
+}
+
+func TestARetryingVendorDoesNotHoldAClaimedResumption(t *testing.T) {
+	// Arrange
+	w := newWorld(t)
+	w.owe("a")
+	w.start(none("a"))
+	w.awaitBringUp(t)
+	w.c.Step("a", Step{Kind: StepServing})
+	w.expect(t, "a served", "a conversation_read")
+	w.c.Resumption("a", Resume{Kind: ResumeStarting})
+	w.expect(t, "a resuming_cut_turn")
+
+	// Act
+	w.c.Step("a", Step{Kind: StepVendorRetrying, Attempt: 1})
+
+	// Assert
+	w.expect(t, "a vendor_retrying 1", "a ready")
+}
+
 func TestAnOpenJoiningADeliveredResumptionWaitsForItsStart(t *testing.T) {
 	// Arrange: the boot's bring-up is resuming the cut turn as the open joins.
 	w := newWorld(t)

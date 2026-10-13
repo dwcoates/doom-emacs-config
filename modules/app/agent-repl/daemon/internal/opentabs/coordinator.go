@@ -783,19 +783,33 @@ func (c *Coordinator) applyResume(out *sender, sl *slot, resume Resume) {
 	}
 }
 
-// vendorWontResume stops an open waiting on an owed cut turn when its
-// bring-up ended without a session the turn could be resumed in (a cold
-// gate, a vendor that refused or failed, a service failure): the debt stays
-// recorded for the next session-up, and vendor state never gates the open.
+// vendorWontResume stops an open waiting on an owed cut turn when the turn
+// cannot start for want of the vendor. VENDOR STATE NEVER GATES THE OPEN
+// (owner rulings, 2026-10-02 and 2026-10-12):
+//   - a bring-up that ended without a session the turn could be resumed in
+//     (a cold gate, a vendor that refused or failed, a service failure): the
+//     debt stays recorded for the next session-up;
+//   - a vendor that is not serving yet (offline, retrying its start), before
+//     or after the resumption was claimed: a claimed resumption is held by
+//     the prompt queue until the vendor serves, so the turn starts then, and
+//     the open does not wait for it.
 func (c *Coordinator) vendorWontResume(sl *slot, step Step) {
-	if !sl.awaitResume || sl.resumingTold {
+	if !sl.awaitResume {
 		return
 	}
 	switch step.Kind {
 	case StepColdGate, StepVendorRejected, StepVendorFailed, StepFailed:
+		if sl.resumingTold {
+			return
+		}
 		sl.awaitResume = false
 		c.deps.Log.Info(op, "the bring-up ended with no session to resume the cut turn in; it stays owed for the next session-up", dlog.Context{
 			dlog.KeyWorkspaceID: sl.ws.Ref.GetId(), "step": step.Kind.String(),
+		})
+	case StepOffline, StepVendorRetrying:
+		sl.awaitResume = false
+		c.deps.Log.Info(op, "the vendor is not serving yet; the open does not wait for the resumed turn, which starts once it serves", dlog.Context{
+			dlog.KeyWorkspaceID: sl.ws.Ref.GetId(), "step": step.Kind.String(), "claimed": sl.resumingTold,
 		})
 	}
 }
