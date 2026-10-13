@@ -263,6 +263,16 @@ func (g *chainGit) StartRebase(_ context.Context, dir, onto string, commits []st
 	return g.replayLocked(dir), nil
 }
 
+func (g *chainGit) AbortRebase(_ context.Context, dir string) error {
+	g.cmu.Lock()
+	defer g.cmu.Unlock()
+	if g.rebases[dir] == nil {
+		return fmt.Errorf("chain git: no rebase stands in %s", dir)
+	}
+	delete(g.rebases, dir)
+	return nil
+}
+
 func (g *chainGit) ContinueRebase(_ context.Context, dir string) (gitclient.RebaseStep, error) {
 	g.cmu.Lock()
 	defer g.cmu.Unlock()
