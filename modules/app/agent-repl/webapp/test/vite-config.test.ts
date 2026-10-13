@@ -39,9 +39,13 @@ const webappDir = path.dirname(fileURLToPath(new URL("../vite.config.ts", import
 // Vite's own default (`build.chunkSizeWarningLimit`), in kB.
 const VITE_DEFAULT_CHUNK_LIMIT_KB = 500;
 
-// A healthy build measured ~1.0s alone and ~2.5s with the whole unit suite
-// running beside it; ~3x the loaded figure, so a hang still fails.
-const BUILD_TIMEOUT_MS = 8000;
+// One build's bound, just over 2x its healthy maximum where it runs. A
+// build measured ~1.0s alone on a quiet host and ~2.5s beside the unit suite,
+// but the merge queue's gate runs every suite at once on 8 slots: on a host
+// at a load average of ~100-150 (2026-10-13), six passing gate runs took
+// 10.5-13.8s for this file's two builds (~7s each, ~3.5s each alone), and an
+// 8000ms bound timed one of them out. A hang still fails.
+const BUILD_TIMEOUT_MS = 15_000;
 
 type RecordedBuild = { outDir: string; output: Rollup.RollupOutput; warnings: string[] };
 
