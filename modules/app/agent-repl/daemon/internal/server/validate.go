@@ -760,16 +760,13 @@ func validateUpdateClassifierPromptRequest(req *agentreplv1.UpdateClassifierProm
 	return nil
 }
 
-// validateAnswerHeldOfferRequest is AnswerHeldOfferRequest's base function.
-func validateAnswerHeldOfferRequest(req *agentreplv1.AnswerHeldOfferRequest) *connect.Error {
+// validateAnswerMergeQueueOfferRequest is AnswerMergeQueueOfferRequest's base function.
+func validateAnswerMergeQueueOfferRequest(req *agentreplv1.AnswerMergeQueueOfferRequest) *connect.Error {
 	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
 		return err
 	}
-	if req.GetAnswer() == nil {
-		return invalid("answer", "an offer answer arm is required")
-	}
-	if dequeue := req.GetMergeDequeue(); dequeue != nil && dequeue.GetDecision() == nil {
-		return invalid("merge_dequeue.decision", "a dequeue decision arm is required")
+	if req.GetDecision() == nil {
+		return invalid("decision", "a merge-queue answer arm is required")
 	}
 	return nil
 }

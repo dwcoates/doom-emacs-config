@@ -29,7 +29,6 @@ import (
 	"agent-repld/internal/prompts"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/resolve/footer"
-	"agent-repld/internal/resolve/holds"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/scriptrunner"
 	"agent-repld/internal/sessionwatcher"
@@ -82,6 +81,8 @@ type fakeDB struct {
 	// flight; pausedReads counts those reads.
 	onPausedRead func()
 	pausedReads  int
+	// prioritizeErr, when set, is what every PrioritizeMerge answers.
+	prioritizeErr error
 	// moveErr, when set, is what every MoveMerge answers.
 	moveErr error
 
@@ -532,6 +533,38 @@ func (f *fakeDB) MoveMerge(_ context.Context, repo wsm.RepoKey, id ids.Workspace
 			}
 			queue[i].Source.Front = queue[j].Source.Front
 			queue[i], queue[j] = queue[j], queue[i]
+			f.renumber(repo)
+			return true, nil
+		}
+		return false, nil
+	}
+	return false, fmt.Errorf("no queue entry for %s: %w", id, wsm.ErrNotFound)
+}
+
+// PrioritizeMerge moves a waiting entry ahead of every other waiting entry,
+// marked front, exactly as the durable queue re-sequences it.
+func (f *fakeDB) PrioritizeMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.prioritizeErr != nil {
+		return false, f.prioritizeErr
+	}
+	queue := f.queues[repo]
+	for i, entry := range queue {
+		if entry.Workspace != id {
+			continue
+		}
+		if entry.State != wsm.MergeQueued {
+			return false, nil
+		}
+		for j := 0; j < i; j++ {
+			if queue[j].State != wsm.MergeQueued {
+				continue
+			}
+			moved := queue[i]
+			moved.Source.Front = true
+			copy(queue[j+1:i+1], queue[j:i])
+			queue[j] = moved
 			f.renumber(repo)
 			return true, nil
 		}
@@ -1626,6 +1659,19 @@ func (f *fakeFeed) heads() []string {
 	return out
 }
 
+// lastHead answers the last head-row push, nil when none was made.
+func (f *fakeFeed) lastHead() *synthesized {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := len(f.rows) - 1; i >= 0; i-- {
+		if f.rows[i].Row.GetActivity().GetMerge() != nil {
+			row := f.rows[i]
+			return &row
+		}
+	}
+	return nil
+}
+
 // lastMergeErrorArm names the error arm of the last head row that carried one.
 func (f *fakeFeed) lastMergeErrorArm() string {
 	f.mu.Lock()
@@ -1798,29 +1844,6 @@ func (s *fakeSidebar) detachedEndsSeen() []detachedEnd {
 	return append([]detachedEnd(nil), s.detachedEnds...)
 }
 
-// fakeHolds records the tray's offers.
-type fakeHolds struct {
-	holds.Sink
-	mu     sync.Mutex
-	offers []*frontendv1.HeldOffer
-}
-
-func (h *fakeHolds) SetOffer(_ ids.WorkspaceID, offer *frontendv1.HeldOffer) {
-	h.mu.Lock()
-	h.offers = append(h.offers, offer)
-	h.mu.Unlock()
-}
-
-// standing reports the offer currently standing, nil when none is.
-func (h *fakeHolds) standing() *frontendv1.HeldOffer {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if len(h.offers) == 0 {
-		return nil
-	}
-	return h.offers[len(h.offers)-1]
-}
-
 // fakePainter turns text into one plain span, which is enough for the gate's
 // tests: what the painter does with an escape is the paint package's own
 // subject, not the merge's.
@@ -1936,7 +1959,6 @@ type harness struct {
 	feed    *fakeFeed
 	footer  *fakeFooter
 	sidebar *fakeSidebar
-	holds   *fakeHolds
 	runner  *fakeRunner
 	logs    *dlog.TestSurfaces
 	// registryPublishes counts PublishRegistry calls, and publishErr, when
@@ -2145,7 +2167,6 @@ func newHarness(t *testing.T) *harness {
 		db:        newFakeDB(),
 		footer:    &fakeFooter{},
 		sidebar:   &fakeSidebar{},
-		holds:     &fakeHolds{},
 		runner:    &fakeRunner{},
 		logs:      dlog.NewTestSurfaces(),
 		stateDir:  t.TempDir(),
@@ -2212,7 +2233,7 @@ func newHarness(t *testing.T) *harness {
 func (h *harness) deps() Deps {
 	return Deps{
 		DB: h.db, Git: h.git, Queue: h.queue, Feed: h.feed, Footer: h.footer,
-		Sidebar: h.sidebar, Holds: h.holds, Asks: h.asks, Banners: h.banners, PromptsDir: "prompts",
+		Sidebar: h.sidebar, Asks: h.asks, Banners: h.banners, PromptsDir: "prompts",
 		Policy:      harnessPolicy{h: h},
 		Briefs:      h.loadBrief,
 		SelfRepoDir: "/self/checkout",

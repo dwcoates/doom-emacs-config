@@ -22,6 +22,10 @@ type InterruptOutcome struct {
 	DetachedCount int
 	// NothingRunning reports that there was nothing to interrupt.
 	NothingRunning bool
+	// MergeQueueOffered reports that nothing was running and the interrupt
+	// raised the merge-queue question in the workspace's pinned merge bubble
+	// instead: the interrupt is about the queued merge, and changed nothing.
+	MergeQueueOffered bool
 }
 
 // ConfirmRequired is the challenge an unconfirmed turn interrupt raises while
@@ -70,7 +74,6 @@ func (v *verbs) Interrupt(ctx context.Context, ws ids.WorkspaceID, target Interr
 			return InterruptOutcome{}, fmt.Errorf("interrupt %q: %w", ws, err)
 		}
 		if withdrawn {
-			v.deps.Merge.OnInterrupt(ctx, ws)
 			log.Debug(opInterrupt, "withdrew the accepted turn before its session came up", nil)
 			return InterruptOutcome{Turn: true}, nil
 		}
@@ -79,8 +82,8 @@ func (v *verbs) Interrupt(ctx context.Context, ws ids.WorkspaceID, target Interr
 	running, live := v.deps.Freeness(ws)
 	shim, hasShim := v.deps.Shim(ws)
 	if !live || !hasShim {
-		if target.Turn {
-			v.deps.Merge.OnInterrupt(ctx, ws)
+		if target.Turn && v.offerMergeQueue(ctx, log, ws) {
+			return InterruptOutcome{MergeQueueOffered: true}, nil
 		}
 		log.Debug(opInterrupt, "nothing is running", dlog.Context{"reason": "no live session"})
 		return InterruptOutcome{NothingRunning: true}, nil
@@ -88,13 +91,13 @@ func (v *verbs) Interrupt(ctx context.Context, ws ids.WorkspaceID, target Interr
 
 	switch {
 	case target.Turn:
-		// A workspace whose merge is queued raises the dequeue offer on an
-		// interrupt WHATEVER the turn is doing: the user interrupting a queued
-		// workspace is asking about the merge as much as about the turn, and
-		// an idle queued workspace is precisely the case where the turn has
-		// nothing to answer with. The offer is a no-op on a workspace with no
-		// queued merge.
-		v.deps.Merge.OnInterrupt(ctx, ws)
+		// A TURN STOP THAT FINDS NO TURN IS ABOUT THE QUEUED MERGE, when the
+		// workspace's own merge is queued: the merge is then the thing being
+		// interrupted, so the stop raises the merge-queue question and offers
+		// no rollback. A running turn is stopped as any turn is.
+		if running.Turn == nil && v.offerMergeQueue(ctx, log, ws) {
+			return InterruptOutcome{MergeQueueOffered: true}, nil
+		}
 		return v.interruptTurn(ctx, log, ws, shim, running, confirm)
 	case target.Detached != nil:
 		return v.interruptDetached(ctx, log, ws, shim, *target.Detached)
@@ -103,6 +106,16 @@ func (v *verbs) Interrupt(ctx context.Context, ws ids.WorkspaceID, target Interr
 	default:
 		return InterruptOutcome{}, fmt.Errorf("interrupt %q: the target names nothing", ws)
 	}
+}
+
+// offerMergeQueue raises the merge-queue question for WS's queued sync merge,
+// answering whether it did. A workspace with no such merge raises nothing.
+func (v *verbs) offerMergeQueue(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) bool {
+	if !v.deps.Merge.OnInterrupt(ctx, ws) {
+		return false
+	}
+	log.Info(opInterrupt, "nothing is running; the interrupt raised the merge-queue question", nil)
+	return true
 }
 
 // directCommand is a direct stop's HOW: the person stopped the turn itself.

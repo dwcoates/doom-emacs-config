@@ -98,7 +98,14 @@ These clicks jump to an entry in the feed:
   - While it waits for your workspace, the footer reads `merging · waiting for` what is still running (the turn, subagents, shells), and the sidebar dot and the Emacs tab are purple with the waiting glyph.
   - Prompts you send meanwhile are held, as during the merge.
 - **A merge bubble is open while the merge is queued, runs, waits on you, hits conflicts, fails or is abandoned.**
-  - Click its head to close it; it stays closed until you click the head again.
+  - While it is pinned to the bottom of the feed it cannot be closed.
+  - Once it stays where it finished, click its head to close it; it stays closed until you click the head again.
+- **`C-c C-k` with no turn running, while your workspace's sync merge is queued, asks what to do with the merge.**
+  - The question covers the pinned bubble's tabs, and its buttons take keyboard focus.
+  - `Evict` takes the merge off the queue.
+  - `Prioritize` moves it to the front of the merges waiting, so it runs next.
+  - `Cancel` leaves the queue as it is.
+  - Pressing `C-c C-k` changes nothing on the queue by itself, and offers no rollback.
 - **A merge bubble never closes on its own, with one exception: a merge that succeeds closes its bubble.**
   - Scrolling back to the bottom of the feed, scrolling it out of view after a jump opened it, switching windows and new merge progress all leave it open.
   - A merge that lands closes its bubble once, and a landed merge's bubble is drawn closed after a reload or a restart too.
@@ -218,6 +225,7 @@ you are replying to. Sending ends the selection.
     - Each line shows how long ago the prompt was sent and how full the context was just before it.
     - Picking one rolls back to just before it, after the usual confirmation, keeping files.
   - With no prompt to roll back, it says there is nothing to interrupt.
+  - While your workspace's sync merge is queued, it asks about the merge instead (see the merge bubble section).
 - **Every rollback asks for confirmation in the minibuffer.**
   - It names the prompt and says whether files are restored.
   - It names the other key, so you can switch.

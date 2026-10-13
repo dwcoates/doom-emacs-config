@@ -153,20 +153,22 @@ func TestInterruptTurnRetiresTheFooterStatusWhenTheKillFails(t *testing.T) {
 	}
 }
 
-func TestInterruptTurnRaisesTheMergeDequeueOffer(t *testing.T) {
-	// Arrange.
+func TestInterruptOfARunningTurnStopsTheTurnAndRaisesNoMergeQueueQuestion(t *testing.T) {
+	// Arrange: the workspace's merge is queued, and a turn is running.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	runningTurn(f, 0)
+	f.merge.queued = true
 
 	// Act.
-	if _, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Turn: true}, false); err != nil {
-		t.Fatalf("Interrupt: %v", err)
-	}
+	out, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Turn: true}, false)
 
 	// Assert.
-	if len(f.merge.interrupted) != 1 {
-		t.Fatalf("merge interrupts = %v, want exactly one", f.merge.interrupted)
+	if err != nil || !out.Turn || out.MergeQueueOffered {
+		t.Fatalf("Interrupt = (%+v, %v), want the turn stopped and no question", out, err)
+	}
+	if len(f.merge.interrupted) != 0 {
+		t.Fatalf("merge interrupts = %v, want none: the running turn is what was interrupted", f.merge.interrupted)
 	}
 }
 
@@ -544,14 +546,15 @@ func TestInterruptAllAgentsPropagatesANonBenignRefusal(t *testing.T) {
 	asRefusal(t, err, ArmShimNoSession)
 }
 
-// TestInterruptTurnOnAnIdleQueuedWorkspaceStillRaisesTheDequeueOffer covers the
-// case the offer exists for: a workspace whose merge is QUEUED and whose turn
-// has already ended. The interrupt has no turn to kill, and the user is asking
-// about the merge.
-func TestInterruptTurnOnAnIdleQueuedWorkspaceStillRaisesTheDequeueOffer(t *testing.T) {
-	// Arrange: a live session with nothing running.
+// TestInterruptTurnOnAnIdleQueuedWorkspaceRaisesTheMergeQueueQuestion covers
+// the case the question exists for: a workspace whose merge is QUEUED and whose
+// turn has already ended. The interrupt is about the merge, so it raises the
+// question instead of answering nothing_running, which would offer a rollback.
+func TestInterruptTurnOnAnIdleQueuedWorkspaceRaisesTheMergeQueueQuestion(t *testing.T) {
+	// Arrange: a live session with nothing running, its merge queued.
 	f := newFixture(t)
 	ws := f.workspace("w1", t.TempDir())
+	f.merge.queued = true
 
 	// Act.
 	out, err := f.verbs.Interrupt(context.Background(), ws.ID, InterruptTarget{Turn: true}, false)
@@ -560,11 +563,52 @@ func TestInterruptTurnOnAnIdleQueuedWorkspaceStillRaisesTheDequeueOffer(t *testi
 	if err != nil {
 		t.Fatalf("Interrupt: %v", err)
 	}
-	if !out.NothingRunning {
-		t.Fatalf("Interrupt = %+v, want nothing_running", out)
+	if !out.MergeQueueOffered || out.NothingRunning {
+		t.Fatalf("Interrupt = %+v, want merge_queue_offered", out)
 	}
 	if len(f.merge.interrupted) != 1 || f.merge.interrupted[0] != ws.ID {
-		t.Fatalf("merge interrupts = %v, want the dequeue offer raised once", f.merge.interrupted)
+		t.Fatalf("merge interrupts = %v, want the question raised once", f.merge.interrupted)
+	}
+	if len(f.shim.killedTurns) != 0 {
+		t.Fatalf("killed turns = %+v, want none", f.shim.killedTurns)
+	}
+	if !hasLogRecord(f, "info", opInterrupt) {
+		t.Fatal("raising the question was not recorded at INFO")
+	}
+}
+
+// TestInterruptTurnOnAnIdleWorkspaceWithNoQueuedMergeAnswersNothingRunning
+// covers the ordinary second press: with no merge queued the merge is asked and
+// declines, and the answer is nothing_running.
+func TestInterruptTurnOnAnIdleWorkspaceWithNoQueuedMergeAnswersNothingRunning(t *testing.T) {
+	// Arrange: a live session with nothing running and no merge.
+	f := newFixture(t)
+	ws := f.workspace("w1", t.TempDir())
+
+	// Act.
+	out, err := f.verbs.Interrupt(context.Background(), ws.ID, InterruptTarget{Turn: true}, false)
+
+	// Assert.
+	if err != nil || !out.NothingRunning || out.MergeQueueOffered {
+		t.Fatalf("Interrupt = (%+v, %v), want nothing_running", out, err)
+	}
+}
+
+// TestInterruptWithNoLiveSessionOnAQueuedWorkspaceRaisesTheMergeQueueQuestion
+// covers the same rule with no session up at all.
+func TestInterruptWithNoLiveSessionOnAQueuedWorkspaceRaisesTheMergeQueueQuestion(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.hasSession = false
+	f.merge.queued = true
+
+	// Act.
+	out, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Turn: true}, false)
+
+	// Assert.
+	if err != nil || !out.MergeQueueOffered {
+		t.Fatalf("Interrupt = (%+v, %v), want merge_queue_offered", out, err)
 	}
 }
 
@@ -925,21 +969,23 @@ func TestInterruptTurnWithdrawnDuringABringUpKillsNothing(t *testing.T) {
 	}
 }
 
-func TestInterruptTurnWithdrawnDuringABringUpRaisesTheMergeDequeueOffer(t *testing.T) {
-	// Arrange.
+func TestInterruptTurnWithdrawnDuringABringUpRaisesNoMergeQueueQuestion(t *testing.T) {
+	// Arrange: the withdrawn turn is what was interrupted.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	f.hasSession = false
 	f.queue.withdrawn = true
+	f.merge.queued = true
 
 	// Act.
-	if _, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Turn: true}, false); err != nil {
-		t.Fatalf("Interrupt: %v", err)
-	}
+	out, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Turn: true}, false)
 
 	// Assert.
-	if len(f.merge.interrupted) != 1 {
-		t.Fatalf("merge interrupts = %v, want exactly one", f.merge.interrupted)
+	if err != nil || !out.Turn {
+		t.Fatalf("Interrupt = (%+v, %v), want the turn arm", out, err)
+	}
+	if len(f.merge.interrupted) != 0 {
+		t.Fatalf("merge interrupts = %v, want none", f.merge.interrupted)
 	}
 }
 

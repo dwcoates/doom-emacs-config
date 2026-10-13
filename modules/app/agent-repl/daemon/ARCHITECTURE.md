@@ -399,7 +399,7 @@ the sink interfaces above plus daemon-fact setters:
   notification, cleared on SelectWorkspace), recently merged, `current`,
   status arm from session/merge/link facts; `SetMerge(ws, MergeFacts)`,
   `SetSelected(ws)`, `SetRegistry(...)` on any WSM change.
-- holds: `SetHeldPrompts(ws, []HeldPrompt)`, `SetOffer(ws, *HeldOffer)`;
+- holds: `SetHeldPrompts(ws, []HeldPrompt)`, `SetEditing(ws, turn)`;
   heading composed here.
 
 ### promptqueue (`internal/promptqueue`)
@@ -441,8 +441,8 @@ type Orchestrator interface {
   Enqueue(ctx, ws, by Requester) error           // MergeWorkspace (RequestedByUser) + command-file merge (RequestedByAgent); refuses pre-state (no layout facts, deleted session, already queued/merging)
   Pause(ctx, scope) error; Unpause(ctx, scope) error
   Evict(ctx, ws) error                           // a waiting merge leaves the queue; a RUNNING or PARKED one is abandoned
-  AnswerDequeue(ctx, ws, keep bool) error        // AnswerHeldOffer; releasing a running merge abandons it
-  OnInterrupt(ctx, ws)                           // raises the dequeue offer while queued or running
+  AnswerQueueOffer(ctx, ws, answer) error        // AnswerMergeQueueOffer: evict | prioritize | cancel
+  OnInterrupt(ctx, ws) bool                      // raises the question on an idle sync merge's pinned head
   OnWorkspaceClosed(ctx, ws)                     // abandons the workspace's merge, waiting or running
   RouteParked(ctx, ws, turn, said) error         // a parked merge's guidance: delivered to the workspace's own session and answered
   RetireConcluded(ctx, ws)                       // a failed/merged state retires once the workspace moves on
