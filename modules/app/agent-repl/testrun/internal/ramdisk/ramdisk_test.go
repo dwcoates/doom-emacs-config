@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -37,6 +39,9 @@ type fakeHost struct {
 	loadErr error
 	ps      string
 	psErr   error
+	// late, by call, is the channel a watched probe answers once it missed
+	// its bound; a call not in it answers as run does.
+	late map[string]chan Late
 }
 
 func (h *fakeHost) run(name string, args ...string) (string, error) {
@@ -81,24 +86,79 @@ func (h *fakeHost) probe(bound time.Duration, name string, args ...string) (stri
 	return h.run(name, args...)
 }
 
-// fakeLog records every line the Manager logs, "INFO " or "ERROR " first.
-type fakeLog struct{ lines []string }
-
-func (l *fakeLog) Infof(format string, args ...any) {
-	l.lines = append(l.lines, "INFO "+fmt.Sprintf(format, args...))
+func (h *fakeHost) watch(bound time.Duration, name string, args ...string) (string, <-chan Late, error) {
+	call := name + " " + strings.Join(args, " ")
+	if late, ok := h.late[call]; ok {
+		if h.bounds == nil {
+			h.bounds = map[string]time.Duration{}
+		}
+		h.bounds[call] = bound
+		h.calls = append(h.calls, call)
+		return "", late, unansweredError(bound, name, args, context.DeadlineExceeded)
+	}
+	out, err := h.probe(bound, name, args...)
+	return out, nil, err
 }
 
-func (l *fakeLog) Errorf(format string, args ...any) {
-	l.lines = append(l.lines, "ERROR "+fmt.Sprintf(format, args...))
+// fakeLog records every line the Manager logs, "INFO " or "ERROR " first. A
+// late probe logs from its own goroutine, so the lines are guarded, and every
+// line wakes a waiter.
+type fakeLog struct {
+	mu     sync.Mutex
+	lines  []string
+	logged chan struct{}
 }
 
-func (l *fakeLog) has(prefix string) bool {
-	for _, line := range l.lines {
-		if strings.HasPrefix(line, prefix) {
-			return true
+func (l *fakeLog) add(line string) {
+	l.mu.Lock()
+	l.lines = append(l.lines, line)
+	logged := l.logged
+	l.mu.Unlock()
+	if logged != nil {
+		select {
+		case logged <- struct{}{}:
+		default:
 		}
 	}
-	return false
+}
+
+func (l *fakeLog) Infof(format string, args ...any) { l.add("INFO " + fmt.Sprintf(format, args...)) }
+
+func (l *fakeLog) Errorf(format string, args ...any) { l.add("ERROR " + fmt.Sprintf(format, args...)) }
+
+func (l *fakeLog) has(prefix string) bool { return l.count(prefix) > 0 }
+
+func (l *fakeLog) count(prefix string) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	n := 0
+	for _, line := range l.lines {
+		if strings.HasPrefix(line, prefix) {
+			n++
+		}
+	}
+	return n
+}
+
+func (l *fakeLog) snapshot() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return slices.Clone(l.lines)
+}
+
+// waitFor waits, at most 5s, for a line starting with prefix. A late probe's
+// line comes from its own goroutine within microseconds of its outcome.
+func (l *fakeLog) waitFor(t *testing.T, prefix string) {
+	t.Helper()
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	for !l.has(prefix) {
+		select {
+		case <-l.logged:
+		case <-timer.C:
+			t.Fatalf("log = %q, want a line starting %q", l.snapshot(), prefix)
+		}
+	}
 }
 
 // tickingClock answers a time one second later on every call.
@@ -118,8 +178,9 @@ func newManager(t *testing.T, h *fakeHost) Manager {
 		Run: h.run, Registry: filepath.Join(t.TempDir(), "registry"), MountParent: parent, Pid: 4242,
 		KillUnder: func(string) (int, error) { return 0, nil },
 		Probe:     h.probe,
+		Watch:     h.watch,
 		Alive:     func(int) bool { return false },
-		Log:       &fakeLog{},
+		Log:       &fakeLog{logged: make(chan struct{}, 1)},
 		Now:       tickingClock(),
 		LockBound: 10 * time.Second,
 	}
@@ -1238,5 +1299,79 @@ func TestCommandOutcomeKeepsTheDeadlineInTheChain(t *testing.T) {
 	// Assert
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("err = %v, want context.DeadlineExceeded in its chain", err)
+	}
+}
+
+func TestRunWatchedAnswersACommandThatFinishesInTime(t *testing.T) {
+	// Act
+	out, late, err := runWatched(10*time.Second, 20*time.Second, "echo", "listed")
+
+	// Assert
+	if err != nil || late != nil || strings.TrimSpace(out) != "listed" {
+		t.Fatalf("runWatched(echo listed) = %q, %v, %v; want its output and no watch", out, late, err)
+	}
+}
+
+func TestRunWatchedReportsAFailingCommandInTime(t *testing.T) {
+	// Act
+	_, late, err := runWatched(10*time.Second, 20*time.Second, "sh", "-c", "echo refused >&2; exit 3")
+
+	// Assert
+	if err == nil || late != nil || !strings.Contains(err.Error(), "refused") {
+		t.Fatalf("runWatched(exit 3) = %v, %v; want the command's own failure and no watch", late, err)
+	}
+}
+
+func TestRunWatchedAnswersAtItsBoundAndWatchesTheLateAnswer(t *testing.T) {
+	// Act: the command cannot finish within 20ms.
+	_, late, err := runWatched(20*time.Millisecond, 20*time.Second, "sh", "-c", "sleep 0.3")
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "did not answer within 20ms") || late == nil {
+		t.Fatalf("runWatched = %v, %v; want the bound's failure and a watch", late, err)
+	}
+	select {
+	case outcome := <-late:
+		if outcome.Err != nil || outcome.Took < 300*time.Millisecond {
+			t.Fatalf("late = %+v, want the answer after at least 300ms", outcome)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the late answer never came")
+	}
+}
+
+func TestRunWatchedKillsALateCommandAtItsLimit(t *testing.T) {
+	// Act
+	_, late, _ := runWatched(20*time.Millisecond, 200*time.Millisecond, "sleep", "10")
+
+	// Assert
+	select {
+	case outcome := <-late:
+		if outcome.Err == nil || !strings.Contains(outcome.Err.Error(), "did not answer within 200ms") {
+			t.Fatalf("late = %+v, want the limit's failure", outcome)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the command outlived its limit")
+	}
+}
+
+func TestBoundedRunsShareOneOutcome(t *testing.T) {
+	// Arrange
+	src, err := os.ReadFile("ramdisk.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	body := func(name string) string {
+		rest := string(src)[strings.Index(string(src), "func "+name+"("):]
+		return rest[:strings.Index(rest, "\n}\n")]
+	}
+
+	// Assert
+	for _, name := range []string{"runBounded", "runWatched"} {
+		if b := body(name); !strings.Contains(b, "commandOutcome(") || !strings.Contains(b, "boundedCommand(") || strings.Contains(b, "exec.CommandContext") {
+			t.Errorf("%s forms its command or its outcome by hand; want boundedCommand and commandOutcome", name)
+		}
 	}
 }

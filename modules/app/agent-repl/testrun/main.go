@@ -130,7 +130,12 @@ func runParent(log *run.Log, module string) (string, []string, func() error) {
 	if trouble != nil {
 		log.Errorf("RAM DISK REFUSED, this run's root falls back to the disk at %s: %s", run.DefaultTmpParent, trouble)
 		investigate(log, m, module, trouble)
-		return run.DefaultTmpParent, nil, disk
+		// A PROBE THAT MISSED ITS BOUND IS WATCHED FOR THE WHOLE RUN, and
+		// one still unanswered when the run ends is recorded as such.
+		return run.DefaultTmpParent, nil, func() error {
+			m.SettleProbes(trouble)
+			return nil
+		}
 	}
 	if err != nil {
 		log.Errorf("RAM DISK UNAVAILABLE, this run's root falls back to the disk at %s: %v", run.DefaultTmpParent, err)
