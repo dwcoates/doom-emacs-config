@@ -35,6 +35,7 @@
  * reduced-motion ruling: under `prefers-reduced-motion` it paints nothing, and
  * the stylesheet drops the band's fill, so the wave is off exactly as before.
  */
+import { prefersReducedMotion } from "./reduced-motion.js";
 import {
   PROMPT_WAVE_ATTRIBUTE,
   PROMPT_WAVE_WORKING,
@@ -81,12 +82,6 @@ export interface PromptWaveDriver {
   stop(): void;
 }
 
-/** The default reduced-motion read: the media query, absent in a test host. */
-function mediaReducedMotion(doc: Document): boolean {
-  const view = doc.defaultView;
-  if (view === null || typeof view.matchMedia !== "function") return false;
-  return view.matchMedia("(prefers-reduced-motion: reduce)").matches;
-}
 
 /**
  * Build the driver. It is inert until {@link PromptWaveDriver.start}, and it
@@ -98,7 +93,7 @@ export function createPromptWaveDriver(options: PromptWaveDriverOptions = {}): P
   const doc = options.doc ?? document;
   const root: ParentNode = options.root ?? doc;
   const now = options.now ?? ((): number => Date.now());
-  const reducedMotion = options.reducedMotion ?? ((): boolean => mediaReducedMotion(doc));
+  const reducedMotion = options.reducedMotion ?? ((): boolean => prefersReducedMotion(doc));
   const html = doc.documentElement;
 
   let hiddenTimer: ReturnType<typeof setInterval> | null = null;

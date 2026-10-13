@@ -15,6 +15,7 @@
  * Under `prefers-reduced-motion` the change is instant, as it was.
  */
 import { log } from "../log.js";
+import { prefersReducedMotion } from "../reduced-motion.js";
 
 /** How long the bubble takes to ease into its interim look. */
 export const COLLAPSE_MS = 220;
@@ -39,11 +40,9 @@ export interface CollapseMotionDeps {
 
 /** The page's own frame clock and reduced-motion setting. */
 function pageDeps(bubble: HTMLElement): CollapseMotionDeps {
-  const view = bubble.ownerDocument.defaultView;
   return {
     nextFrame: (fn) => requestAnimationFrame(fn),
-    reducedMotion: () =>
-      view !== null && typeof view.matchMedia === "function" && view.matchMedia("(prefers-reduced-motion: reduce)").matches,
+    reducedMotion: () => prefersReducedMotion(bubble.ownerDocument),
   };
 }
 
