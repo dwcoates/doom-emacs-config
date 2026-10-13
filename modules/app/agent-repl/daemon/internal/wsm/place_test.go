@@ -456,8 +456,9 @@ func TestTheMigrationSeedsAChildRightAfterItsParent(t *testing.T) {
 	}
 	handle.Close()
 	stampRaw(t, path, 34)
-	// Layouts 39's through 43's additions come off too, so the file is a
+	// Layouts 39's through 44's additions come off too, so the file is a
 	// layout-34 file again.
+	undoLayout44(t, path)
 	undoLayout43(t, path)
 	undoLayout42(t, path)
 	undoLayout41(t, path)

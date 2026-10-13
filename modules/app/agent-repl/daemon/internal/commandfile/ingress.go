@@ -322,7 +322,7 @@ func (i *ingress) apply(ctx context.Context, log dlog.Logger, file string, index
 		// the turn in flight (merge.Requester).
 		var detached *merge.DetachedRun
 		if entry.Detached {
-			detached = &merge.DetachedRun{Name: strings.TrimSpace(entry.DetachedName), Pick: strings.TrimSpace(entry.Pick)}
+			detached = &merge.DetachedRun{Name: strings.TrimSpace(entry.DetachedName), Pick: strings.TrimSpace(entry.Pick), CompactAfter: entry.CompactAfter}
 		}
 		return i.deps.Merge.Enqueue(ctx, merge.Request{Workspace: ws, Source: source, By: merge.RequestedByAgent, Detached: detached, OneShot: entry.OneShot})
 	case TypeMergeEvict:
