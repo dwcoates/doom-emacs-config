@@ -54,6 +54,10 @@ message ReadAgentPageSuccess {
     ReadAgentPageMore more = 2;
     ReadAgentPageFloor floor = 3;
   }
+  // Tag 4 (`turn_heads`) is RETIRED for `heads`, which also says whether
+  // steps sit between each prompt and the page.
+  reserved 4;
+  reserved "turn_heads";
   // THE PROMPTS OF THE TURNS THIS PAGE TOUCHES THAT SIT BELOW IT, so the page
   // draws whole in one read (owner ruling, 2026-10-12: the newest page is
   // read complete before a workspace is answered open). For every turn a line
@@ -63,7 +67,7 @@ message ReadAgentPageSuccess {
   // or that the store holds no prompt line for, has none here. A head is ALSO
   // an ordinary line of an older page: a reader walking older meets it again,
   // and absorbs it by identity.
-  repeated StoreLineAt turn_heads = 4;
+  repeated StoreTurnHead heads = 5;
 }
 
 // The page could not be served. THE ARM IS WHY.

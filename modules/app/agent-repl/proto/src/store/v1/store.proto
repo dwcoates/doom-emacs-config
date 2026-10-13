@@ -516,6 +516,10 @@ message AgentSessionPage {
     ReadAgentPageMore more = 2;
     ReadAgentPageFloor floor = 3;
   }
+  // Tag 4 (`turn_heads`) is RETIRED for `heads`, which also says whether
+  // steps sit between each prompt and the page.
+  reserved 4;
+  reserved "turn_heads";
   // THE PROMPTS OF THE TURNS THIS PAGE TOUCHES THAT SIT BELOW IT, so the page
   // draws whole in one read (owner ruling, 2026-10-12: the newest page is
   // read complete before a workspace is answered open). For every turn a line
@@ -525,5 +529,29 @@ message AgentSessionPage {
   // or that the store holds no prompt line for, has none here. A head is ALSO
   // an ordinary line of an older page: a reader walking older meets it again,
   // and absorbs it by identity.
-  repeated StoreLineAt turn_heads = 4;
+  repeated StoreTurnHead heads = 5;
 }
+
+// One prompt a page carries for a turn it touches (AgentSessionPage.heads,
+// ReadAgentPageSuccess.heads).
+message StoreTurnHead {
+  // The prompt line, with its real pointer, turn and place.
+  StoreLineAt line = 1;
+  // WHETHER THE TURN HAS LINES BETWEEN THIS PROMPT AND THE PAGE. THE ARM IS
+  // THE ANSWER: a reader draws "earlier steps" under the prompt only when
+  // some sit between.
+  oneof between {
+    // The page's own lines of this turn follow the prompt directly: no line
+    // of the turn is placed between them.
+    StoreTurnHeadAdjacent adjacent = 2;
+    // At least one line of the turn is placed between the prompt and the
+    // page, on an older page.
+    StoreTurnHeadStepsBetween steps_between = 3;
+  }
+}
+
+// Nothing of the turn sits between its prompt and the page. DELIBERATELY EMPTY.
+message StoreTurnHeadAdjacent {}
+
+// Steps of the turn sit between its prompt and the page. DELIBERATELY EMPTY.
+message StoreTurnHeadStepsBetween {}

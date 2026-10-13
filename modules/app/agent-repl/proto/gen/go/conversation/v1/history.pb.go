@@ -53,7 +53,7 @@ type HistoryPage struct {
 	// or that the serving side holds no prompt entry for, has none here. A head is ALSO
 	// an ordinary entry of an older page: a reader walking older meets it again,
 	// and absorbs it by identity.
-	TurnHeads     []*HistoryEntryAt `protobuf:"bytes,4,rep,name=turn_heads,json=turnHeads,proto3" json:"turn_heads,omitempty"`
+	Heads         []*HistoryTurnHead `protobuf:"bytes,5,rep,name=heads,proto3" json:"heads,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -120,9 +120,9 @@ func (x *HistoryPage) GetFloor() *HistoryFloor {
 	return nil
 }
 
-func (x *HistoryPage) GetTurnHeads() []*HistoryEntryAt {
+func (x *HistoryPage) GetHeads() []*HistoryTurnHead {
 	if x != nil {
-		return x.TurnHeads
+		return x.Heads
 	}
 	return nil
 }
@@ -662,19 +662,191 @@ func (x *HistoryPointer) GetValue() string {
 	return ""
 }
 
+// One prompt a page carries for a turn it touches (HistoryPage.heads).
+type HistoryTurnHead struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The prompt entry, with its pointer, turn and place.
+	Entry *HistoryEntryAt `protobuf:"bytes,1,opt,name=entry,proto3" json:"entry,omitempty"`
+	// WHETHER THE TURN HAS ENTRIES BETWEEN THIS PROMPT AND THE PAGE. THE ARM IS
+	// THE ANSWER: a reader draws "earlier steps" under the prompt only when
+	// some sit between.
+	//
+	// Types that are valid to be assigned to Between:
+	//
+	//	*HistoryTurnHead_Adjacent
+	//	*HistoryTurnHead_StepsBetween
+	Between       isHistoryTurnHead_Between `protobuf_oneof:"between"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HistoryTurnHead) Reset() {
+	*x = HistoryTurnHead{}
+	mi := &file_conversation_v1_history_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HistoryTurnHead) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HistoryTurnHead) ProtoMessage() {}
+
+func (x *HistoryTurnHead) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_history_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HistoryTurnHead.ProtoReflect.Descriptor instead.
+func (*HistoryTurnHead) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_history_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *HistoryTurnHead) GetEntry() *HistoryEntryAt {
+	if x != nil {
+		return x.Entry
+	}
+	return nil
+}
+
+func (x *HistoryTurnHead) GetBetween() isHistoryTurnHead_Between {
+	if x != nil {
+		return x.Between
+	}
+	return nil
+}
+
+func (x *HistoryTurnHead) GetAdjacent() *HistoryTurnHeadAdjacent {
+	if x != nil {
+		if x, ok := x.Between.(*HistoryTurnHead_Adjacent); ok {
+			return x.Adjacent
+		}
+	}
+	return nil
+}
+
+func (x *HistoryTurnHead) GetStepsBetween() *HistoryTurnHeadStepsBetween {
+	if x != nil {
+		if x, ok := x.Between.(*HistoryTurnHead_StepsBetween); ok {
+			return x.StepsBetween
+		}
+	}
+	return nil
+}
+
+type isHistoryTurnHead_Between interface {
+	isHistoryTurnHead_Between()
+}
+
+type HistoryTurnHead_Adjacent struct {
+	// The page's own entries of this turn follow the prompt directly.
+	Adjacent *HistoryTurnHeadAdjacent `protobuf:"bytes,2,opt,name=adjacent,proto3,oneof"`
+}
+
+type HistoryTurnHead_StepsBetween struct {
+	// At least one entry of the turn sits between the prompt and the page.
+	StepsBetween *HistoryTurnHeadStepsBetween `protobuf:"bytes,3,opt,name=steps_between,json=stepsBetween,proto3,oneof"`
+}
+
+func (*HistoryTurnHead_Adjacent) isHistoryTurnHead_Between() {}
+
+func (*HistoryTurnHead_StepsBetween) isHistoryTurnHead_Between() {}
+
+// Nothing of the turn sits between its prompt and the page. DELIBERATELY EMPTY.
+type HistoryTurnHeadAdjacent struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HistoryTurnHeadAdjacent) Reset() {
+	*x = HistoryTurnHeadAdjacent{}
+	mi := &file_conversation_v1_history_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HistoryTurnHeadAdjacent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HistoryTurnHeadAdjacent) ProtoMessage() {}
+
+func (x *HistoryTurnHeadAdjacent) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_history_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HistoryTurnHeadAdjacent.ProtoReflect.Descriptor instead.
+func (*HistoryTurnHeadAdjacent) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_history_proto_rawDescGZIP(), []int{9}
+}
+
+// Steps of the turn sit between its prompt and the page. DELIBERATELY EMPTY.
+type HistoryTurnHeadStepsBetween struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HistoryTurnHeadStepsBetween) Reset() {
+	*x = HistoryTurnHeadStepsBetween{}
+	mi := &file_conversation_v1_history_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HistoryTurnHeadStepsBetween) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HistoryTurnHeadStepsBetween) ProtoMessage() {}
+
+func (x *HistoryTurnHeadStepsBetween) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_history_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HistoryTurnHeadStepsBetween.ProtoReflect.Descriptor instead.
+func (*HistoryTurnHeadStepsBetween) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_history_proto_rawDescGZIP(), []int{10}
+}
+
 var File_conversation_v1_history_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_history_proto_rawDesc = "" +
 	"\n" +
-	"\x1dconversation/v1/history.proto\x12\x0fconversation.v1\x1a\x1bconversation/v1/agent.proto\x1a\x1aconversation/v1/peer.proto\x1a\x1aconversation/v1/turn.proto\"\xff\x01\n" +
+	"\x1dconversation/v1/history.proto\x12\x0fconversation.v1\x1a\x1bconversation/v1/agent.proto\x1a\x1aconversation/v1/peer.proto\x1a\x1aconversation/v1/turn.proto\"\x89\x02\n" +
 	"\vHistoryPage\x129\n" +
 	"\aentries\x18\x01 \x03(\v2\x1f.conversation.v1.HistoryEntryAtR\aentries\x122\n" +
 	"\x04more\x18\x02 \x01(\v2\x1c.conversation.v1.HistoryMoreH\x00R\x04more\x125\n" +
-	"\x05floor\x18\x03 \x01(\v2\x1d.conversation.v1.HistoryFloorH\x00R\x05floor\x12>\n" +
+	"\x05floor\x18\x03 \x01(\v2\x1d.conversation.v1.HistoryFloorH\x00R\x05floor\x126\n" +
+	"\x05heads\x18\x05 \x03(\v2 .conversation.v1.HistoryTurnHeadR\x05headsB\n" +
 	"\n" +
-	"turn_heads\x18\x04 \x03(\v2\x1f.conversation.v1.HistoryEntryAtR\tturnHeadsB\n" +
-	"\n" +
-	"\bboundary\"\xd4\x02\n" +
+	"\bboundaryJ\x04\b\x04\x10\x05R\n" +
+	"turn_heads\"\xd4\x02\n" +
 	"\x0eHistoryEntryAt\x12/\n" +
 	"\x02at\x18\x01 \x01(\v2\x1f.conversation.v1.HistoryPointerR\x02at\x123\n" +
 	"\x05entry\x18\x02 \x01(\v2\x1d.conversation.v1.HistoryEntryR\x05entry\x120\n" +
@@ -700,7 +872,14 @@ const file_conversation_v1_history_proto_rawDesc = "" +
 	"last_entry\x18\x01 \x01(\v2\x1f.conversation.v1.HistoryPointerR\tlastEntry\"\x0e\n" +
 	"\fHistoryFloor\"&\n" +
 	"\x0eHistoryPointer\x12\x14\n" +
-	"\x05value\x18\x01 \x01(\tR\x05valueB0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
+	"\x05value\x18\x01 \x01(\tR\x05value\"\xf0\x01\n" +
+	"\x0fHistoryTurnHead\x125\n" +
+	"\x05entry\x18\x01 \x01(\v2\x1f.conversation.v1.HistoryEntryAtR\x05entry\x12F\n" +
+	"\badjacent\x18\x02 \x01(\v2(.conversation.v1.HistoryTurnHeadAdjacentH\x00R\badjacent\x12S\n" +
+	"\rsteps_between\x18\x03 \x01(\v2,.conversation.v1.HistoryTurnHeadStepsBetweenH\x00R\fstepsBetweenB\t\n" +
+	"\abetween\"\x19\n" +
+	"\x17HistoryTurnHeadAdjacent\"\x1d\n" +
+	"\x1bHistoryTurnHeadStepsBetweenB0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
 
 var (
 	file_conversation_v1_history_proto_rawDescOnce sync.Once
@@ -714,40 +893,46 @@ func file_conversation_v1_history_proto_rawDescGZIP() []byte {
 	return file_conversation_v1_history_proto_rawDescData
 }
 
-var file_conversation_v1_history_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_conversation_v1_history_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_conversation_v1_history_proto_goTypes = []any{
-	(*HistoryPage)(nil),         // 0: conversation.v1.HistoryPage
-	(*HistoryEntryAt)(nil),      // 1: conversation.v1.HistoryEntryAt
-	(*ConversationPlace)(nil),   // 2: conversation.v1.ConversationPlace
-	(*ConversationThrough)(nil), // 3: conversation.v1.ConversationThrough
-	(*HistoryEntry)(nil),        // 4: conversation.v1.HistoryEntry
-	(*HistoryMore)(nil),         // 5: conversation.v1.HistoryMore
-	(*HistoryFloor)(nil),        // 6: conversation.v1.HistoryFloor
-	(*HistoryPointer)(nil),      // 7: conversation.v1.HistoryPointer
-	(*TurnId)(nil),              // 8: conversation.v1.TurnId
-	(*AgentPrompt)(nil),         // 9: conversation.v1.AgentPrompt
-	(*AgentFrame)(nil),          // 10: conversation.v1.AgentFrame
-	(*PeerMessage)(nil),         // 11: conversation.v1.PeerMessage
+	(*HistoryPage)(nil),                 // 0: conversation.v1.HistoryPage
+	(*HistoryEntryAt)(nil),              // 1: conversation.v1.HistoryEntryAt
+	(*ConversationPlace)(nil),           // 2: conversation.v1.ConversationPlace
+	(*ConversationThrough)(nil),         // 3: conversation.v1.ConversationThrough
+	(*HistoryEntry)(nil),                // 4: conversation.v1.HistoryEntry
+	(*HistoryMore)(nil),                 // 5: conversation.v1.HistoryMore
+	(*HistoryFloor)(nil),                // 6: conversation.v1.HistoryFloor
+	(*HistoryPointer)(nil),              // 7: conversation.v1.HistoryPointer
+	(*HistoryTurnHead)(nil),             // 8: conversation.v1.HistoryTurnHead
+	(*HistoryTurnHeadAdjacent)(nil),     // 9: conversation.v1.HistoryTurnHeadAdjacent
+	(*HistoryTurnHeadStepsBetween)(nil), // 10: conversation.v1.HistoryTurnHeadStepsBetween
+	(*TurnId)(nil),                      // 11: conversation.v1.TurnId
+	(*AgentPrompt)(nil),                 // 12: conversation.v1.AgentPrompt
+	(*AgentFrame)(nil),                  // 13: conversation.v1.AgentFrame
+	(*PeerMessage)(nil),                 // 14: conversation.v1.PeerMessage
 }
 var file_conversation_v1_history_proto_depIdxs = []int32{
 	1,  // 0: conversation.v1.HistoryPage.entries:type_name -> conversation.v1.HistoryEntryAt
 	5,  // 1: conversation.v1.HistoryPage.more:type_name -> conversation.v1.HistoryMore
 	6,  // 2: conversation.v1.HistoryPage.floor:type_name -> conversation.v1.HistoryFloor
-	1,  // 3: conversation.v1.HistoryPage.turn_heads:type_name -> conversation.v1.HistoryEntryAt
+	8,  // 3: conversation.v1.HistoryPage.heads:type_name -> conversation.v1.HistoryTurnHead
 	7,  // 4: conversation.v1.HistoryEntryAt.at:type_name -> conversation.v1.HistoryPointer
 	4,  // 5: conversation.v1.HistoryEntryAt.entry:type_name -> conversation.v1.HistoryEntry
-	8,  // 6: conversation.v1.HistoryEntryAt.turn:type_name -> conversation.v1.TurnId
+	11, // 6: conversation.v1.HistoryEntryAt.turn:type_name -> conversation.v1.TurnId
 	2,  // 7: conversation.v1.HistoryEntryAt.recorded_place:type_name -> conversation.v1.ConversationPlace
 	2,  // 8: conversation.v1.HistoryEntryAt.received_place:type_name -> conversation.v1.ConversationPlace
-	9,  // 9: conversation.v1.HistoryEntry.user_prompt:type_name -> conversation.v1.AgentPrompt
-	10, // 10: conversation.v1.HistoryEntry.agent_frame:type_name -> conversation.v1.AgentFrame
-	11, // 11: conversation.v1.HistoryEntry.peer_message:type_name -> conversation.v1.PeerMessage
+	12, // 9: conversation.v1.HistoryEntry.user_prompt:type_name -> conversation.v1.AgentPrompt
+	13, // 10: conversation.v1.HistoryEntry.agent_frame:type_name -> conversation.v1.AgentFrame
+	14, // 11: conversation.v1.HistoryEntry.peer_message:type_name -> conversation.v1.PeerMessage
 	7,  // 12: conversation.v1.HistoryMore.last_entry:type_name -> conversation.v1.HistoryPointer
-	13, // [13:13] is the sub-list for method output_type
-	13, // [13:13] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	1,  // 13: conversation.v1.HistoryTurnHead.entry:type_name -> conversation.v1.HistoryEntryAt
+	9,  // 14: conversation.v1.HistoryTurnHead.adjacent:type_name -> conversation.v1.HistoryTurnHeadAdjacent
+	10, // 15: conversation.v1.HistoryTurnHead.steps_between:type_name -> conversation.v1.HistoryTurnHeadStepsBetween
+	16, // [16:16] is the sub-list for method output_type
+	16, // [16:16] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_conversation_v1_history_proto_init() }
@@ -771,13 +956,17 @@ func file_conversation_v1_history_proto_init() {
 		(*HistoryEntry_AgentFrame)(nil),
 		(*HistoryEntry_PeerMessage)(nil),
 	}
+	file_conversation_v1_history_proto_msgTypes[8].OneofWrappers = []any{
+		(*HistoryTurnHead_Adjacent)(nil),
+		(*HistoryTurnHead_StepsBetween)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_conversation_v1_history_proto_rawDesc), len(file_conversation_v1_history_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

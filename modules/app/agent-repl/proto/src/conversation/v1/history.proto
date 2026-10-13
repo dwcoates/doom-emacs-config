@@ -32,6 +32,10 @@ message HistoryPage {
     // beginning from a short page.
     HistoryFloor floor = 3;
   }
+  // Tag 4 (`turn_heads`) is RETIRED for `heads`, which also says whether
+  // steps sit between each prompt and the page.
+  reserved 4;
+  reserved "turn_heads";
   // THE PROMPTS OF THE TURNS THIS PAGE TOUCHES THAT SIT BELOW IT, so the page
   // draws whole in one read (owner ruling, 2026-10-12: the newest page is
   // read complete before a workspace is answered open). For every turn an entry
@@ -41,7 +45,7 @@ message HistoryPage {
   // or that the serving side holds no prompt entry for, has none here. A head is ALSO
   // an ordinary entry of an older page: a reader walking older meets it again,
   // and absorbs it by identity.
-  repeated HistoryEntryAt turn_heads = 4;
+  repeated HistoryTurnHead heads = 5;
 }
 
 // One entry, its pointer, its turn and its place in the conversation — so the
@@ -170,3 +174,24 @@ message HistoryPointer {
   // The opaque value.
   string value = 1;
 }
+
+// One prompt a page carries for a turn it touches (HistoryPage.heads).
+message HistoryTurnHead {
+  // The prompt entry, with its pointer, turn and place.
+  HistoryEntryAt entry = 1;
+  // WHETHER THE TURN HAS ENTRIES BETWEEN THIS PROMPT AND THE PAGE. THE ARM IS
+  // THE ANSWER: a reader draws "earlier steps" under the prompt only when
+  // some sit between.
+  oneof between {
+    // The page's own entries of this turn follow the prompt directly.
+    HistoryTurnHeadAdjacent adjacent = 2;
+    // At least one entry of the turn sits between the prompt and the page.
+    HistoryTurnHeadStepsBetween steps_between = 3;
+  }
+}
+
+// Nothing of the turn sits between its prompt and the page. DELIBERATELY EMPTY.
+message HistoryTurnHeadAdjacent {}
+
+// Steps of the turn sit between its prompt and the page. DELIBERATELY EMPTY.
+message HistoryTurnHeadStepsBetween {}
