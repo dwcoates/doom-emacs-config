@@ -1117,6 +1117,12 @@ describe("the compact-and-resume button", () => {
     ]);
   });
 
+  it("latches inert with every other button while an answer is in flight", () => {
+    const el = drawFeedColdGate(gate(standing({ heldPrompts: 1 })), askHarness().rc);
+    el.querySelector<Control>('[data-cold-gate="pay"]')?.click();
+    expect(compactAndResumeButton(el)?.disabled).toBe(true);
+  });
+
   it("wears the compact button's color", () => {
     const el = drawFeedColdGate(gate(standing({ heldPrompts: 1 })), askHarness().rc);
     expect(compactAndResumeButton(el)?.className).toBe(
