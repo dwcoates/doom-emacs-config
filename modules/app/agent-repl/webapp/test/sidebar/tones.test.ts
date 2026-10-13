@@ -147,8 +147,16 @@ describe("the rail's two animations", () => {
 });
 
 describe("a row's mark with its one-shot outcome", () => {
+  it("draws an armed one-shot's target in place of the dot, on the arm's own tone", () => {
+    expect(rosterRowMark("thinking", "target")).toEqual({
+      toneClass: rosterArmMark("thinking").toneClass,
+      glyph: "target",
+      char: "🎯",
+    });
+  });
+
   it("draws a failed one-shot's failure mark on the arm's own tone", () => {
-    expect(rosterRowMark("done", true)).toEqual({
+    expect(rosterRowMark("done", "failed")).toEqual({
       toneClass: "tone-green",
       glyph: "failed",
       char: GLYPH_CHARS.failed,
@@ -156,14 +164,18 @@ describe("a row's mark with its one-shot outcome", () => {
   });
 
   it.each(["permission", "question"])("lets an open %s gate outrank a failed one-shot", (arm) => {
-    expect(rosterRowMark(arm, true)).toEqual(rosterArmMark(arm));
+    expect(rosterRowMark(arm, "failed")).toEqual(rosterArmMark(arm));
   });
 
-  it("draws the arm's own mark when the one-shot has not failed", () => {
-    expect(rosterRowMark("thinking", false)).toEqual(rosterArmMark("thinking"));
+  it.each(["permission", "question"])("lets an open %s gate outrank an armed one-shot", (arm) => {
+    expect(rosterRowMark(arm, "target")).toEqual(rosterArmMark(arm));
   });
 
-  it("refuses an arm the rail cannot draw even for a failed one-shot", () => {
-    expect(() => rosterRowMark("notAnArm", true)).toThrow(MalformedView);
+  it("draws the arm's own mark for a row that is no one-shot", () => {
+    expect(rosterRowMark("thinking", undefined)).toEqual(rosterArmMark("thinking"));
+  });
+
+  it("refuses an arm the rail cannot draw even for a one-shot", () => {
+    expect(() => rosterRowMark("notAnArm", "failed")).toThrow(MalformedView);
   });
 });

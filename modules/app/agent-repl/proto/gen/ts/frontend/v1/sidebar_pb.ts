@@ -485,8 +485,9 @@ export const RosterRowDetachedLiveSchema: GenMessage<RosterRowDetachedLive> = /*
  * asked for is put in line only after that turn ends, so the status arm alone
  * would read a one-shot that DID ask for its merge as one that did not.
  *
- * Each surface chooses which outcomes it draws: the Emacs tab bar draws both
- * arms, the webapp sidebar draws only `failed`. A permission or question
+ * Both surfaces draw both arms, with the same glyphs: the Emacs tab bar
+ * before the workspace name, the webapp sidebar in place of the status dot.
+ * A permission or question
  * gate's glyph is drawn in place of the mark while the gate is open.
  *
  * @generated from message frontend.v1.RosterRowOneShot
