@@ -55,6 +55,7 @@ import { ForwardingLogger, LEVEL_WINDOW_OPERATION, bindLogContext, log, setLogge
 import { LevelWindow, selectionContext, selectionNote, selectLevel } from "../../agent-shim/logging/ts/level-window.js";
 import { installPagePresenceLog } from "./page-presence.js";
 import { connectToHost } from "./host/embed.js";
+import { mintConnectionId } from "./connection-id.js";
 import { clientLogSink } from "./rpc/client-log-sink.js";
 import { createStreamCostMeter, regionNodes } from "./stream-cost.js";
 import { pagePresence } from "./presence.js";
@@ -68,21 +69,6 @@ import { workspaceRef } from "./rpc/workspace-ref.js";
 import type { SubmitPromptCommandPanel } from "../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
 import { shellElements } from "./shell.js";
 import { composerClosedFor } from "./vocab.js";
-
-/**
- * This page's own identity, for correlating its records against the daemon's.
- *
- * A page, not a session: it is minted per load and says nothing about which
- * conversation the workspace owns. `crypto.randomUUID` is the browser's, with
- * a time-plus-entropy fallback for a context that does not expose it (an old
- * webview, a non-secure origin) — an unidentifiable page's logs are worth less
- * than a page that refuses to boot over the identifier.
- */
-function mintConnectionId(): string {
-  const uuid = globalThis.crypto?.randomUUID?.();
-  if (uuid !== undefined) return uuid;
-  return `web-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}
 
 export async function boot(): Promise<void> {
   let failures: LocalFailures | null = null;
