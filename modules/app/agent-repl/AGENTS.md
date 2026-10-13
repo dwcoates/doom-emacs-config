@@ -391,8 +391,11 @@ unreachable from a live process.
     from the leak check until the record names the new device.
   - A LEAK OR A WEDGED DISK MANAGER STOPS THE ATTACH (owner ruling,
     2026-10-12; one stuck run once led to 13 leaked 8 GiB disks).
-    - First, `diskutil list` within 100ms and `hdiutil info` within 50ms,
-      each just over 2x the healthy max measured under load (44ms, 22ms).
+    - First, `diskutil list` within 175ms and `hdiutil info` within 120ms,
+      each just over 2x the healthy max in the runs' own logs (85ms, 56ms),
+      read at the runs' own priority on a host carrying several runs. The
+      first bounds came from quiet calls (44ms, 22ms max) and refused a
+      healthy disk manager at load 28.
     - A leak is a `ram://` disk the runner made (named by a record, or
       mounted at an `artr-<pid>` mount point) that no live run's record names.
     - Either finding puts the run on `/tmp` with a `RAM DISK REFUSED` ERROR
@@ -407,13 +410,21 @@ unreachable from a live process.
       its create waits in the daemon's ingress; no daemon, no CLI or a failed
       dispatch is an ERROR line too.
   - THE REGISTRY LOCK WAIT IS BOUNDED at 1.5s (`ramdisk.LockBound`), just
-    over 2x the longest healthy hold: an acquire holds it about 120ms, an
+    over 2x the longest healthy hold: an acquire holds it about 220ms, an
     investigation's dispatch about 700ms. Past the bound the run is treated
     like one facing a wedged disk manager: on `/tmp`, an ERROR naming the lock
     and who has it open (`lsof`), and the investigation, deduplicated without
     the lock.
   - The acquire and release edges are logged at INFO with their timings, so
-    a stall shows as a begin line with no end.
+    a stall shows as a begin line with no end. The check and both begin lines
+    carry the wall-clock time, so one run's probes line up against another
+    run's attach or detach.
+  - A PROBE THAT DOES NOT ANSWER READS THE HOST AT ONCE: its load average
+    (`sysctl -n vm.loadavg`) and every disk process then running (`ps`,
+    hdiutil, diskutil and the daemons behind them), each within 500ms
+    (`ramdisk.HostBound`). It goes on the check's INFO line, the ERROR line
+    and the investigation's prompt, so a slow host and a busy disk manager
+    are told apart from the log alone.
   - A RAM disk that cannot be made falls back to `/tmp` with an ERROR line.
 
 ### Suite timings: what a row measures

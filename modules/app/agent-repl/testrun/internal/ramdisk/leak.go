@@ -175,6 +175,12 @@ type Trouble struct {
 	List     string
 	ListErr  error
 	ListTook time.Duration
+	// At is when the probes began, on the wall clock, so the check lines up
+	// against every other run's acquire and release edges.
+	At time.Time
+	// Host is what the host was doing when a probe did not answer
+	// (hostSnapshot); empty when both answered.
+	Host string
 }
 
 // Answered says whether the disk manager answered both probes.
@@ -194,6 +200,9 @@ func (t *Trouble) String() string {
 		parts = append(parts, fmt.Sprintf("%d leaked RAM disk(s): %s", len(t.Leaks), strings.Join(names, "; ")))
 	}
 	parts = append(parts, probeLine("hdiutil info", t.InfoErr, t.InfoTook), probeLine("diskutil list", t.ListErr, t.ListTook))
+	if t.Host != "" {
+		parts = append(parts, "the host then: "+hostLine(t.Host))
+	}
 	return strings.Join(parts, "; ")
 }
 
@@ -210,15 +219,16 @@ func probeLine(name string, err error, took time.Duration) string {
 // whose holder is stuck forbids any attach, or the error of an acquire that failed otherwise. With either of the
 // latter the run's root goes on the disk.
 func (m Manager) Setup(sizeMiB int) (*Volume, *Trouble, error) {
-	t := &Trouble{}
-	start := m.Now()
-	t.List, t.ListErr = m.Probe(ListBound, "diskutil", "list")
-	t.ListTook = m.Now().Sub(start)
-	start = m.Now()
-	t.Info, t.InfoErr = m.listImages()
-	t.InfoTook = m.Now().Sub(start)
-	m.Log.Infof("RAM disk check: %s; %s", probeLine("diskutil list", t.ListErr, t.ListTook), probeLine("hdiutil info", t.InfoErr, t.InfoTook))
+	t := &Trouble{At: m.Now()}
+	t.List, t.ListTook, t.ListErr = m.timeProbe(t.At, func() (string, error) { return m.Probe(ListBound, "diskutil", "list") })
+	t.Info, t.InfoTook, t.InfoErr = m.timeProbe(m.Now(), m.listImages)
+	m.Log.Infof("RAM disk check at %s: %s; %s", stamp(t.At), probeLine("diskutil list", t.ListErr, t.ListTook), probeLine("hdiutil info", t.InfoErr, t.InfoTook))
 	if !t.Answered() {
+		// WHAT THE HOST WAS DOING IS READ AT ONCE, so the next probe that does
+		// not answer says whether the host was starved (its load) or the disk
+		// manager was busy with another run's disk (its processes).
+		t.Host = m.hostSnapshot()
+		m.Log.Infof("RAM disk check: the host when the disk manager did not answer: %s", hostLine(t.Host))
 		// A DISK MANAGER THAT DOES NOT ANSWER IS NOT ASKED AGAIN: a reclaim's
 		// or an acquire's every command would run out its own bound in turn.
 		return nil, t, nil
@@ -246,3 +256,59 @@ func (m Manager) Setup(sizeMiB int) (*Volume, *Trouble, error) {
 	}
 	return v, nil, err
 }
+
+// timeProbe runs probe and answers its answer with how long it took since
+// start, by the Manager's clock.
+func (m Manager) timeProbe(start time.Time, probe func() (string, error)) (string, time.Duration, error) {
+	out, err := probe()
+	return out, m.Now().Sub(start), err
+}
+
+// HostBound is how long each read of the host's state (`sysctl`, `ps`) may
+// run when a probe did not answer: measured at the runs' own priority on the
+// owner's host (2026-10-13, load average 4.5, 60 calls each) at max 2ms and
+// 34ms. It is read exactly when the host is loaded, where the probes' own
+// answers ran up to 6.7x their quiet max (56ms against 8.4ms), so the bound
+// is just over twice 34ms scaled by that: 500ms.
+const HostBound = 500 * time.Millisecond
+
+// diskProcess matches a `ps` line of a process that serves or asks the disk
+// manager: another run's hdiutil or diskutil, or the daemons behind them.
+var diskProcess = regexp.MustCompile(`hdiutil|diskutil|diskimages|diskarbitration`)
+
+// hostSnapshot is what the host was doing when a probe did not answer, one
+// fact per line: its load average, and every disk process then running, as
+// `sysctl` and `ps` list them within HostBound. Either read's failure is named
+// in its place, never dropped.
+func (m Manager) hostSnapshot() string {
+	var b strings.Builder
+	if load, err := m.Probe(HostBound, "sysctl", "-n", "vm.loadavg"); err != nil {
+		fmt.Fprintf(&b, "load average unknown, sysctl failed: %v\n", err)
+	} else {
+		fmt.Fprintf(&b, "load average %s\n", strings.Trim(strings.TrimSpace(load), "{ }"))
+	}
+	ps, err := m.Probe(HostBound, "ps", "-axo", "pid=,stat=,etime=,args=")
+	if err != nil {
+		fmt.Fprintf(&b, "disk processes unknown, ps failed: %v\n", err)
+		return b.String()
+	}
+	found := false
+	for _, line := range strings.Split(ps, "\n") {
+		if line = strings.TrimSpace(line); line != "" && diskProcess.MatchString(line) {
+			fmt.Fprintf(&b, "disk process %s\n", strings.Join(strings.Fields(line), " "))
+			found = true
+		}
+	}
+	if !found {
+		b.WriteString("no disk process running\n")
+	}
+	return b.String()
+}
+
+// hostLine is a hostSnapshot on one line, for a log record.
+func hostLine(host string) string {
+	return strings.Join(strings.Split(strings.TrimRight(host, "\n"), "\n"), ", ")
+}
+
+// stamp is a log edge's wall-clock time, to the millisecond.
+func stamp(t time.Time) string { return t.Format("2006-01-02T15:04:05.000Z07:00") }
