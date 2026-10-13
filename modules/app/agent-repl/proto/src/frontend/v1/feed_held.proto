@@ -147,15 +147,15 @@ message HeldPrompt {
   // WHAT is holding this entry, when something other than a running turn is.
   //
   // An entry is held by at most one thing at a time: a drain lease, a
-  // pending reconnect, a standing cold gate, a build refresh and a merge are
-  // mutually exclusive
+  // pending reconnect, a standing cold gate, a cold gate already answered, a
+  // build refresh and a merge are mutually exclusive
   // session conditions, and an entry held by two of them at once
   // would have two different sets of exits and two different states to
   // render. Stating them as arms makes that impossible to express rather than
   // merely unlikely. No arm set means the entry is held by the ordinary case
   // — a turn is running — and the classifier decides when it is delivered.
   //
-  // THESE FIVE ARE THE WHOLE SET, and they are entry-scoped.
+  // THESE SIX ARE THE WHOLE SET, and they are entry-scoped.
   oneof hold {
     // The daemon is draining toward a scheduled shutdown and is not admitting
     // new work.
@@ -172,6 +172,10 @@ message HeldPrompt {
     // The workspace's session is parked at its cold gate, and the prompt
     // waits for the user's answer to the gate.
     HeldPromptColdGateHold cold_gate = 24;
+    // The workspace's cold gate was answered with pay or compact, and the
+    // prompt waits for the user to send it: no answer but compact-and-resume
+    // sends a prompt held at the gate.
+    HeldPromptColdGateAnsweredHold cold_gate_answered = 25;
   }
   // Tag 10 and the name `keep_alive` are RETIRED and must not be revived. A
   // cache keep-alive is the shim's own mechanism: a real prompt that arrives
@@ -315,6 +319,8 @@ message HeldPromptBadge {
     HeldPromptBadgeColdGate cold_gate = 14;
     // Waits its place in the queue; nothing is classifying it.
     HeldPromptBadgeAwaitingDelivery awaiting_delivery = 15;
+    // Held after the cold gate's answer, until the user sends it.
+    HeldPromptBadgeColdGateAnswered cold_gate_answered = 16;
   }
 }
 // The badge shows the classifier still deciding.
@@ -343,6 +349,8 @@ message HeldPromptBadgeMerge {}
 message HeldPromptBadgeColdGate {}
 // The badge shows an entry waiting its place in the queue, unclassified.
 message HeldPromptBadgeAwaitingDelivery {}
+// The badge shows the hold that keeps a prompt after the cold gate's answer.
+message HeldPromptBadgeColdGateAnswered {}
 // One standing fact the card's badge does not show, said in full.
 message HeldPromptStatusNote {
   // The fact as one sentence ("held until the merge ends"), drawn verbatim
@@ -496,12 +504,33 @@ message HeldPromptDaemonHeld {}
 // held when a revival parked at the gate waits here instead of being sent
 // into a session that does not exist.
 //
-// The exits are delivery once the answer brings the session up (the same
-// session-up edge that releases `reconnect`), or the user's cancel. The
-// classifier NEVER runs while an entry is held here, and there is NO
-// force-through. DELIBERATELY EMPTY: the gate's own sentence is the feed's
-// gate card and the footer's, never restated here.
+// THE ANSWER DECIDES THE ENTRY'S FATE, and only the compact-and-resume answer
+// sends it:
+//   - clear DISCARDS it the moment the daemon takes the answer;
+//   - pay and compact KEEP it, moving it to `cold_gate_answered`, so it is
+//     never sent until the user sends it;
+//   - compact-and-resume leaves it here, and the compacted session coming up
+//     (the same session-up edge that releases `reconnect`) delivers it.
+// The user's cancel is the other exit. The classifier NEVER runs while an
+// entry is held here, and there is NO force-through. DELIBERATELY EMPTY: the
+// gate's own sentence is the feed's gate card and the footer's, never
+// restated here.
 message HeldPromptColdGateHold {}
+
+// Held because the workspace's cold gate was ANSWERED WITH PAY OR COMPACT
+// while this prompt waited at it. Those answers re-open the session and send
+// nothing: when the held prompts go out is the user's call, never a side
+// effect of paying for the cold read or of compacting.
+//
+// The exits are the user's release (send now), which delivers it as any
+// release does once the session serves, and the user's cancel. Nothing else
+// delivers it: not the session coming up, not a turn's end, not a later
+// submission (a prompt submitted after it is neither queued behind it nor
+// folded into it). While a cold gate stands again, the release is refused, and
+// that gate counts this entry as held at it: its clear discards the entry and
+// its compact-and-resume sends it. The classifier NEVER runs while an entry is
+// held here. DELIBERATELY EMPTY: the arm's presence is the whole fact.
+message HeldPromptColdGateAnsweredHold {}
 
 // No classifier is running on this entry and no daemon condition holds it: it
 // waits its place in the queue and is delivered in order by the next drain.
