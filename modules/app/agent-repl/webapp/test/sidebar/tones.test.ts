@@ -171,6 +171,10 @@ describe("a row's mark with its one-shot outcome", () => {
     expect(rosterRowMark(arm, "target")).toEqual(rosterArmMark(arm));
   });
 
+  it.each(["target", "failed"] as const)("lets a merging arm's glyph outrank a %s one-shot", (oneShot) => {
+    expect(rosterRowMark("merging", oneShot)).toEqual(rosterArmMark("merging"));
+  });
+
   it("draws the arm's own mark for a row that is no one-shot", () => {
     expect(rosterRowMark("thinking", undefined)).toEqual(rosterArmMark("thinking"));
   });
