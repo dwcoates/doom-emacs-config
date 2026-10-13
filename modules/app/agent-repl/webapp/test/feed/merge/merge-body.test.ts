@@ -62,6 +62,16 @@ function testsWithRun(
   ];
 }
 
+/** The view a run's panel shows. */
+function runViewOf(host: HTMLElement): string | null {
+  return host.querySelector(".merge-run")?.getAttribute("data-run-view") ?? null;
+}
+
+/** The run's badge in the tests tab's strip. */
+function runBadge(host: HTMLElement): HTMLElement | null {
+  return host.querySelector<HTMLElement>('.merge-strip.is-nested > [data-merge-tab="testsRun"]');
+}
+
 /** The kind of the tab the strip marks active. */
 function activeKind(host: HTMLElement): string | null {
   return host.querySelector(".merge-tab.is-active")?.getAttribute("data-merge-tab") ?? null;
@@ -170,7 +180,7 @@ describe("which tab is active", () => {
       tabRow("t-fix", { kind: "testsRunFixing", state: "live", parent: "t-run" }),
     ]);
     const { host } = mount(view);
-    expect(activeKinds(host)).toEqual(["tests", "testsRun", "testsRunFixing"]);
+    expect([activeKinds(host), runViewOf(host)]).toEqual([["tests", "testsRun"], "remediation"]);
   });
 
   it("keeps each strip's own pick: a commit picked in the rebasing tab survives a push", () => {
@@ -281,21 +291,86 @@ describe("a tests tab is a strip of its runs", () => {
     expect(runs.map((e) => e.textContent)).toEqual(["run 1", "run 2"]);
   });
 
-  it("opens a run's strip with its output, badged with the run's own state", () => {
-    const view = new FakeSubfeed(testsWithRun({ suites: [] }, { state: "settled", outcome: "failed" }));
-    const { host } = mount(view);
-    const output = host.querySelector('[data-merge-tab="testsRunOutput"]');
-    expect([output?.querySelector(".merge-tab-label")?.textContent, output?.getAttribute("data-tab-outcome")]).toEqual(["output", "failed"]);
-  });
-
-  it("draws a run's fixing attempt beside its output", () => {
+  it("draws a run as one badge, never a strip of its own", () => {
     const view = new FakeSubfeed([
       ...testsWithRun({ suites: [] }, { state: "settled", outcome: "failed" }),
       tabRow("t-fix", { kind: "testsRunFixing", state: "live", parent: "t-run" }),
     ]);
     const { host } = mount(view);
-    const runStrip = host.querySelector('[data-merge-tab-body="testsRun"] .merge-strip.is-nested');
-    expect([...(runStrip?.children ?? [])].map((e) => e.getAttribute("data-merge-tab"))).toEqual(["testsRunOutput", "testsRunFixing"]);
+    expect([stripKinds(host), host.querySelector('[data-merge-tab-body="testsRun"] .merge-strip')]).toEqual([["tests", "testsRun"], null]);
+  });
+
+  it("shows a run's tests while no fixing attempt follows it", () => {
+    const view = new FakeSubfeed(testsWithRun({ suites: [] }, { state: "settled", outcome: "failed" }));
+    const { host } = mount(view);
+    expect([runViewOf(host), host.querySelector<HTMLElement>(".merge-run-output")?.hidden]).toEqual(["tests", false]);
+  });
+
+  it("shows a run's remediation once a fixing attempt follows it", () => {
+    const run = testsWithRun({ suites: [] }, { state: "settled", outcome: "failed" });
+    const view = new FakeSubfeed(run);
+    const { host } = mount(view);
+    view.push([...run, tabRow("t-fix", { kind: "testsRunFixing", state: "live", parent: "t-run" }), childRow("r1", "t-fix")]);
+    expect([runViewOf(host), host.querySelector(".merge-run-remediation:not([hidden]) [data-feed-row]")?.getAttribute("data-feed-row")]).toEqual([
+      "remediation",
+      "r1",
+    ]);
+  });
+
+  it("opens the view dropdown when the selected run's badge is clicked again", () => {
+    const view = new FakeSubfeed(fixingRun({ kind: "testsRunFixing", state: "live" }));
+    const { host } = mount(view);
+    runBadge(host)?.click();
+    const items = [...host.querySelectorAll<HTMLElement>(".merge-run-views:not([hidden]) .merge-run-view-item")];
+    expect(items.map((e) => [e.textContent, e.getAttribute("aria-checked")])).toEqual([
+      ["tests", "false"],
+      ["remediation", "true"],
+    ]);
+  });
+
+  it("switches a run to the view picked in its dropdown, and closes the dropdown", () => {
+    const view = new FakeSubfeed(fixingRun({ kind: "testsRunFixing", state: "live" }));
+    const { host } = mount(view);
+    runBadge(host)?.click();
+    host.querySelector<HTMLElement>('.merge-run-view-item[data-run-view="tests"]')?.click();
+    expect([runViewOf(host), host.querySelector<HTMLElement>(".merge-run-views")?.hidden]).toEqual(["tests", true]);
+  });
+
+  it("keeps the reader's picked view across a push", () => {
+    const rows = fixingRun({ kind: "testsRunFixing", state: "live" });
+    const view = new FakeSubfeed(rows);
+    const { host } = mount(view);
+    runBadge(host)?.click();
+    host.querySelector<HTMLElement>('.merge-run-view-item[data-run-view="tests"]')?.click();
+    view.push([...rows, childRow("r1", "t-fix")]);
+    expect(runViewOf(host)).toBe("tests");
+  });
+
+  it("offers no dropdown on a run with no remediation", () => {
+    const view = new FakeSubfeed(testsWithRun({ suites: [] }, { state: "settled", outcome: "failed" }));
+    const { host } = mount(view);
+    runBadge(host)?.click();
+    expect(host.querySelector<HTMLElement>(".merge-run-views")?.hidden).toBe(true);
+  });
+
+  it("closes an open dropdown when the run's badge is clicked once more", () => {
+    const view = new FakeSubfeed(fixingRun({ kind: "testsRunFixing", state: "live" }));
+    const { host } = mount(view);
+    document.body.append(host);
+    runBadge(host)?.click();
+    runBadge(host)?.click();
+    expect(host.querySelector<HTMLElement>(".merge-run-views")?.hidden).toBe(true);
+    host.remove();
+  });
+
+  it("closes an open dropdown on a click outside it", () => {
+    const view = new FakeSubfeed(fixingRun({ kind: "testsRunFixing", state: "live" }));
+    const { host } = mount(view);
+    document.body.append(host);
+    runBadge(host)?.click();
+    document.body.click();
+    expect(host.querySelector<HTMLElement>(".merge-run-views")?.hidden).toBe(true);
+    host.remove();
   });
 
   it("draws no fixing sub-subtab for a run that passed", () => {
@@ -493,7 +568,7 @@ describe("a fixing attempt names its attempt above its rows", () => {
   it("still draws the rows parented to it under the attempt", () => {
     const view = new FakeSubfeed(fixingRun({ kind: "testsRunFixing", state: "live" }, childRow("r1", "t-fix")));
     const { host } = mount(view);
-    expect(host.querySelector("[data-merge-attempt] ~ [data-nest] [data-feed-row]")?.getAttribute("data-feed-row")).toBe(
+    expect(host.querySelector(".merge-remediation-head ~ [data-nest] [data-feed-row]")?.getAttribute("data-feed-row")).toBe(
       "r1",
     );
   });
