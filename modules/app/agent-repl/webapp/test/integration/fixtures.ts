@@ -1627,7 +1627,10 @@ export const FOOTER_STATUS_SUBSTATUSES: Record<string, readonly string[]> = {
     "vendorFailed",
     "apiRetrying",
   ],
-  agentReplFault: ["starting", "degraded", "severed", "dead", "startFailed", "daemonImpaired"],
+  agentReplFault: ["degraded", "severed", "dead", "startFailed", "daemonImpaired"],
+  // A booting session is no fault (owner ruling, 2026-10-13): its own grey
+  // arm, with no substatus.
+  starting: [],
   networkFault: ["offline"],
   closing: ["blocked"],
   loading: ["memory", "invoked", "discovered", "listing"],
@@ -1791,6 +1794,7 @@ export const FOOTER_STATUS_SALIENTS: Record<string, readonly string[]> = {
   background: ["update", ...SHARED_SALIENTS],
   vendorFault: ["authenticating", "fault", "update", "retrying", "vendorStart", "turnEnded", ...SHARED_SALIENTS],
   agentReplFault: ["startFailed", "fault", "update", "turnEnded", ...SHARED_SALIENTS],
+  starting: ["startFailed", "fault", "update", ...SHARED_SALIENTS],
   networkFault: ["offline", "update", ...SHARED_SALIENTS],
   closing: ["closeBlocked", "update", ...SHARED_SALIENTS],
   loading: ["update", ...SHARED_SALIENTS],
