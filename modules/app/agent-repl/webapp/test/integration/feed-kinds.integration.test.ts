@@ -10,6 +10,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { chessWidgetLoader } from "../../src/feed/cards/chess-widget-loader";
+import { EARLIER_STEPS_LABEL } from "../../src/feed/rows/earlier-steps";
 
 import {
   FeedRowSchema,
@@ -84,6 +85,7 @@ import {
   coldGateStandingRow,
   commandPanelRow,
   commandRefusedRow,
+  earlierStepsRow,
   detachedShellRow,
   shellHeadRow,
   peerMessageRow,
@@ -121,6 +123,7 @@ import {
   assertCoversOneof,
 } from "./fixtures";
 import type { FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
+import type { GetFeedPageRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_get_feed_page_pb";
 
 let harness: Harness;
 
@@ -171,6 +174,7 @@ describe("arm coverage", () => {
       "mergeTab",
       "commandPanel",
       "commandRefused",
+      "earlierSteps",
     ]);
   });
 
@@ -1717,6 +1721,35 @@ describe("a refused command card", () => {
     const row = await drawRow(commandRefusedRow({ addSupport: false }));
     // Assert
     expect(row.querySelector("[data-add-support]")).toBeNull();
+  });
+});
+
+describe("an earlier-steps fold", () => {
+  it("carries the earlier-steps row kind", async () => {
+    // Arrange / Act
+    const row = await drawRow(earlierStepsRow());
+    // Assert
+    expect(row.dataset.rowKind).toBe("earlierSteps");
+  });
+
+  it("draws the fold's label", async () => {
+    // Arrange / Act
+    const row = await drawRow(earlierStepsRow());
+    // Assert
+    expect(row.querySelector("[data-earlier-steps]")?.textContent).toBe(EARLIER_STEPS_LABEL);
+  });
+
+  it("walks one page older when activated", async () => {
+    // Arrange
+    const row = await drawRow(earlierStepsRow());
+    const before = harness.fake.calls("getFeedPage").length;
+    // Act
+    row.querySelector<HTMLElement>("[data-earlier-steps]")?.click();
+    await harness.settle();
+    // Assert
+    const calls = harness.fake.calls<GetFeedPageRequest>("getFeedPage");
+    expect(calls).toHaveLength(before + 1);
+    expect(calls[calls.length - 1]?.page.case).toBe("next");
   });
 });
 

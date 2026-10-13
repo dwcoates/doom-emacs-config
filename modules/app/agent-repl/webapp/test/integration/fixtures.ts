@@ -699,6 +699,14 @@ export const mergeHandbackRow = (overrides?: Partial<RowInit>): FeedRow =>
 export const removedRow = (overrides?: Partial<RowInit>): FeedRow =>
   feedRow({ case: "removed", value: {} }, overrides);
 
+/**
+ * A TURN'S EARLIER-STEPS FOLD — `FeedRow.earlier_steps`: the daemon stands it
+ * under a turn's prompt when that turn's earlier steps sit on an older page.
+ * The arm carries no payload.
+ */
+export const earlierStepsRow = (overrides?: Partial<RowInit>): FeedRow =>
+  feedRow({ case: "earlierSteps", value: {} }, overrides);
+
 export const detachedSubagentRow = (
   state: "live" | SubagentOutcome = "live",
   overrides?: Partial<RowInit>,
