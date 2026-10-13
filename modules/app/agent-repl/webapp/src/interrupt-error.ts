@@ -35,15 +35,14 @@ import { InterruptErrorSchema, type InterruptError } from "../../proto/gen/ts/ag
 import { log } from "./log.js";
 import { crossCuttingSentence } from "./rpc/refuse.js";
 import { unreachableArm } from "./rpc/strict.js";
+import { oneofArms } from "./rpc/oneof.js";
 
 /**
  * Every `InterruptError.kind` arm, in the generated spelling, read off the
  * SCHEMA so an arm added to the proto reaches both call sites' suites without
  * anybody remembering to extend a list.
  */
-export const INTERRUPT_ERROR_ARMS: readonly string[] = (
-  InterruptErrorSchema.oneofs.find((oneof) => oneof.name === "kind")?.fields ?? []
-).map((field) => field.localName);
+export const INTERRUPT_ERROR_ARMS: readonly string[] = oneofArms(InterruptErrorSchema, "kind");
 
 /** A set arm of the refusal oneof. */
 export type InterruptErrorKind = NonNullable<InterruptError["kind"]> & { case: string };

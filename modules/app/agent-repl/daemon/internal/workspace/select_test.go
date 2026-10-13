@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"testing"
 	"time"
@@ -1153,5 +1154,195 @@ func TestShowingAWorkspaceStartsNothingAndStandsNothingDown(t *testing.T) {
 	// Assert
 	if len(f.standDowns) != 0 {
 		t.Fatalf("stand-downs = %v, want none for a show", f.standDowns)
+	}
+}
+
+// dweltAt is the instant D after the fixture clock's epoch, as a pointer.
+func dweltAt(d time.Duration) *time.Time {
+	at := time.Unix(1_700_000_000, 0).Add(d)
+	return &at
+}
+
+func TestHideLandingTarget(t *testing.T) {
+	visible := func(id ids.WorkspaceID, place int64, dwelt *time.Time) wsm.Workspace {
+		return wsm.Workspace{ID: id, Place: place, DweltAt: dwelt}
+	}
+	hiddenWS := visible("hidden-one", 1, dweltAt(time.Hour))
+	hiddenWS.Hidden, hiddenWS.HiddenAt = true, dweltAt(0)
+	merged := visible("merged", 1, dweltAt(time.Hour))
+	merged.MergedAt = dweltAt(0)
+	closed := visible("closed", 1, dweltAt(time.Hour))
+	closed.Closed = true
+	tests := []struct {
+		name       string
+		workspaces []wsm.Workspace
+		want       ids.WorkspaceID
+		wantFound  bool
+	}{
+		{
+			name: "the most recently dwelt workspace wins",
+			workspaces: []wsm.Workspace{
+				visible("w1", 1, nil), visible("older", 2, dweltAt(time.Minute)), visible("newer", 3, dweltAt(time.Hour)),
+			},
+			want: "newer", wantFound: true,
+		},
+		{
+			name:       "the workspace being hidden is never the landing",
+			workspaces: []wsm.Workspace{visible("w1", 1, dweltAt(2*time.Hour)), visible("other", 2, dweltAt(time.Minute))},
+			want:       "other", wantFound: true,
+		},
+		{
+			name:       "hidden, merged and closed workspaces are passed over",
+			workspaces: []wsm.Workspace{visible("w1", 1, nil), hiddenWS, merged, closed, visible("open", 2, dweltAt(time.Minute))},
+			want:       "open", wantFound: true,
+		},
+		{
+			name:       "a tie goes to roster order",
+			workspaces: []wsm.Workspace{visible("w1", 1, nil), visible("later-place", 3, dweltAt(time.Minute)), visible("earlier-place", 2, dweltAt(time.Minute))},
+			want:       "earlier-place", wantFound: true,
+		},
+		{
+			name:       "no workspace ever dwelt on finds none",
+			workspaces: []wsm.Workspace{visible("w1", 1, nil), visible("w2", 2, nil)},
+			wantFound:  false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got, found := hideLandingTarget(tt.workspaces, "w1")
+
+			// Assert
+			if found != tt.wantFound || found && got.ID != tt.want {
+				t.Fatalf("landing = (%q, %v), want (%q, %v)", got.ID, found, tt.want, tt.wantFound)
+			}
+		})
+	}
+}
+
+// hideFixture is a fixture with three workspaces, w1 current, and the given
+// dwells stamped on w2 and w3.
+func hideFixture(t *testing.T, w2Dwelt, w3Dwelt *time.Time) *fixture {
+	t.Helper()
+	f := newFixture(t)
+	for _, id := range []ids.WorkspaceID{"w1", "w2", "w3"} {
+		f.workspace(id, filepath.Join(t.TempDir(), string(id)))
+	}
+	for id, dwelt := range map[ids.WorkspaceID]*time.Time{"w2": w2Dwelt, "w3": w3Dwelt} {
+		ws := f.db.workspaces[id]
+		ws.DweltAt = dwelt
+		f.db.workspaces[id] = ws
+	}
+	current := ids.WorkspaceID("w1")
+	f.db.current = &current
+	return f
+}
+
+func TestHidingTheCurrentWorkspaceLandsOnTheMostRecentlyDweltOne(t *testing.T) {
+	// Arrange
+	f := hideFixture(t, dweltAt(time.Minute), dweltAt(time.Hour))
+
+	// Act
+	if err := f.verbs.SetHidden(context.Background(), "w1", true); err != nil {
+		t.Fatalf("SetHidden: %v", err)
+	}
+
+	// Assert
+	if f.db.current == nil || *f.db.current != "w3" {
+		t.Fatalf("current = %v, want w3, the most recently dwelt on", f.db.current)
+	}
+	landed := false
+	for _, r := range f.log.logger.Records() {
+		if r.Operation == opSetHidden && r.Level == dlog.LevelInfo && r.Context["workspace"] == "w3" && r.Context["hidden"] == "w1" && r.Context["dwelt_at"] != nil {
+			landed = true
+		}
+	}
+	if !landed {
+		t.Fatalf("no info record names the landing; records = %+v", f.log.logger.Records())
+	}
+}
+
+func TestHidingAnotherWorkspaceLeavesTheSelectionWhereItIs(t *testing.T) {
+	// Arrange: the user stands on w1 and hides w2.
+	f := hideFixture(t, nil, dweltAt(time.Hour))
+
+	// Act
+	if err := f.verbs.SetHidden(context.Background(), "w2", true); err != nil {
+		t.Fatalf("SetHidden: %v", err)
+	}
+
+	// Assert
+	if f.db.current == nil || *f.db.current != "w1" {
+		t.Fatalf("current = %v, want w1 unmoved", f.db.current)
+	}
+}
+
+func TestHidingWithNoWorkspaceDweltOnLeavesTheSelectionAndSaysSo(t *testing.T) {
+	// Arrange
+	f := hideFixture(t, nil, nil)
+
+	// Act
+	if err := f.verbs.SetHidden(context.Background(), "w1", true); err != nil {
+		t.Fatalf("SetHidden: %v", err)
+	}
+
+	// Assert
+	if f.db.current == nil || *f.db.current != "w1" {
+		t.Fatalf("current = %v, want w1 unmoved", f.db.current)
+	}
+	said := false
+	for _, r := range f.log.logger.Records() {
+		if r.Operation == opSetHidden && r.Level == dlog.LevelInfo && r.Context["dwell_threshold"] == wsm.DwellThreshold.String() {
+			said = true
+		}
+	}
+	if !said {
+		t.Fatalf("no info record says the selection stays; records = %+v", f.log.logger.Records())
+	}
+}
+
+func TestAConditionalSelectStandsWhenTheUserMovedOff(t *testing.T) {
+	// Arrange: the select is conditional on w1, but the user is on w2.
+	f := hideFixture(t, nil, nil)
+	moved := ids.WorkspaceID("w2")
+	f.db.current = &moved
+	from := ids.WorkspaceID("w1")
+	v := f.verbs.(*verbs)
+
+	// Act
+	applied, err := v.selectCurrent(context.Background(), f.log.logger, "w3", &from)
+
+	// Assert
+	if err != nil || applied {
+		t.Fatalf("selectCurrent = (%v, %v), want (false, nil)", applied, err)
+	}
+	if *f.db.current != "w2" {
+		t.Fatalf("current = %v, want w2, the user's own switch", *f.db.current)
+	}
+	stood := false
+	for _, r := range f.log.logger.Records() {
+		if r.Operation == opSelect && r.Level == dlog.LevelInfo && r.Context["from"] == "w1" && r.Context["current"] == "w2" {
+			stood = true
+		}
+	}
+	if !stood {
+		t.Fatalf("no info record says the user's switch stands; records = %+v", f.log.logger.Records())
+	}
+}
+
+func TestAFailedCurrentReadFailsTheLandingLoudly(t *testing.T) {
+	// Arrange
+	f := hideFixture(t, nil, dweltAt(time.Hour))
+	f.db.currentErr = errors.New("disk I/O error")
+
+	// Act
+	err := f.verbs.SetHidden(context.Background(), "w1", true)
+
+	// Assert
+	if err == nil {
+		t.Fatal("a landing whose current read failed was answered as success")
+	}
+	if !loggedAtError(f, opSetHidden) {
+		t.Fatalf("the failed read was not recorded at error: err=%v records=%+v", err, f.log.logger.Records())
 	}
 }

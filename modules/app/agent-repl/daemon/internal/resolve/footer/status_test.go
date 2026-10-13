@@ -1,13 +1,12 @@
 package footer
 
 import (
-	"slices"
-	"sort"
 	"testing"
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -804,7 +803,7 @@ func TestANewTurnClearsAStandingBlock(t *testing.T) {
 	}
 }
 
-func TestADialingLinkIsDisconnectedStarting(t *testing.T) {
+func TestADialingLinkIsStarting(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 
@@ -812,8 +811,8 @@ func TestADialingLinkIsDisconnectedStarting(t *testing.T) {
 	h.r.OnLink(testWS, shimclient.LinkDialing)
 
 	// Assert
-	if h.view(t).GetStrip().GetStatus().GetAgentReplFault().GetStarting() == nil {
-		t.Fatalf("want disconnected · starting")
+	if h.view(t).GetStrip().GetStatus().GetStarting() == nil {
+		t.Fatalf("status = %q, want starting", h.status(t))
 	}
 }
 
@@ -908,8 +907,8 @@ func TestATurnAcceptedBeforeAnyLinkAwaitsTheBringUp(t *testing.T) {
 
 	// Assert: the route is coming up, which the roster draws `init` from the
 	// same two facts (ladder.AwaitingBringUp).
-	if h.view(t).GetStrip().GetStatus().GetAgentReplFault().GetStarting() == nil {
-		t.Fatalf("status = %q, want disconnected · starting", h.status(t))
+	if h.view(t).GetStrip().GetStatus().GetStarting() == nil {
+		t.Fatalf("status = %q, want starting", h.status(t))
 	}
 }
 
@@ -922,8 +921,8 @@ func TestASessionAnnouncedBeforeAnyLinkAwaitsTheBringUp(t *testing.T) {
 	h.r.OnSessionStarted(testWS, &conversationv1.SessionStarted{VendorSessionId: "vendor-1"})
 
 	// Assert: the roster draws this window `init` from its own started fact.
-	if h.view(t).GetStrip().GetStatus().GetAgentReplFault().GetStarting() == nil {
-		t.Fatalf("status = %q, want disconnected · starting", h.status(t))
+	if h.view(t).GetStrip().GetStatus().GetStarting() == nil {
+		t.Fatalf("status = %q, want starting", h.status(t))
 	}
 }
 
@@ -1026,31 +1025,6 @@ func TestClearingTheCloseRefusalLeavesClosing(t *testing.T) {
 	}
 }
 
-// statusArmsFromProto lists the FooterStatus arms the generated code declares,
-// so an arm landing without a resolver branch fails here rather than drawing
-// nothing.
-func statusArmsFromProto() []string {
-	probes := []*frontendv1.FooterStatus{
-		{Status: &frontendv1.FooterStatus_Idle{}},
-		{Status: &frontendv1.FooterStatus_Working{}},
-		{Status: &frontendv1.FooterStatus_Waiting{}},
-		{Status: &frontendv1.FooterStatus_Interrupted{}},
-		{Status: &frontendv1.FooterStatus_Merging{}},
-		{Status: &frontendv1.FooterStatus_Background{}},
-		{Status: &frontendv1.FooterStatus_VendorFault{}},
-		{Status: &frontendv1.FooterStatus_AgentReplFault{}},
-		{Status: &frontendv1.FooterStatus_Closing{}},
-		{Status: &frontendv1.FooterStatus_Loading{}},
-		{Status: &frontendv1.FooterStatus_MergeFailed{}},
-		{Status: &frontendv1.FooterStatus_Merged{}},
-	}
-	out := make([]string, 0, len(probes))
-	for _, probe := range probes {
-		out = append(out, statusName(probe))
-	}
-	return out
-}
-
 func TestAServingLinkWithNoWebStreamIsDisconnected(t *testing.T) {
 	// Arrange: the daemon-to-shim hop serves, the web hop does not.
 	h := newHarness(t)
@@ -1132,9 +1106,8 @@ func TestAPeerHopDownDoesNotOutrankTheShimLinksOwnStep(t *testing.T) {
 	h.r.OnLink(testWS, shimclient.LinkDialing)
 
 	// Assert
-	arm := h.view(t).GetStrip().GetStatus().GetAgentReplFault()
-	if arm.GetStarting() == nil {
-		t.Fatalf("substatus = %+v, want starting", arm.GetSubstatus())
+	if h.view(t).GetStrip().GetStatus().GetStarting() == nil {
+		t.Fatalf("status = %q, want starting", h.status(t))
 	}
 }
 
@@ -1168,24 +1141,6 @@ func TestAPeerHopDownBeforeAnyLinkIsObservedIsNotDisconnected(t *testing.T) {
 // TestStatusArmsCoverTheProtoOneof pins the hardcoded arm list against the
 // FooterStatus.status oneof itself, so an arm landing in the proto cannot be
 // left out of the list and silently escape the render-colors assertion.
-func TestStatusArmsCoverTheProtoOneof(t *testing.T) {
-	// Arrange.
-	arms, err := vocab.OneofArmNames((&frontendv1.FooterStatus{}).ProtoReflect().Descriptor(), "status")
-	if err != nil {
-		t.Fatalf("OneofArmNames: %v", err)
-	}
-
-	// Act.
-	got := append([]string(nil), statusArms...)
-	sort.Strings(got)
-	sort.Strings(arms)
-
-	// Assert.
-	if !slices.Equal(got, arms) {
-		t.Fatalf("statusArms = %v, want the FooterStatus.status arms %v", got, arms)
-	}
-}
-
 // THE VENDOR ANNOUNCES A COMPACTION BEFORE THE TURN THAT RUNS IT. The
 // compacting signal and the turn-open edge arrive within a millisecond of each
 // other and the signal wins the race, so a turn opening must not wipe it.
@@ -1454,24 +1409,26 @@ func TestTheCloseRefusalStandsFromWhenItWasRefused(t *testing.T) {
 	}
 }
 
-func TestEveryFooterStatusArmTheContractDeclaresIsOneThisResolverEmits(t *testing.T) {
-	// Arrange: the arm names this resolver can emit.
-	emitted := map[string]bool{}
-	for _, arm := range statusArms {
-		emitted[arm] = true
-	}
+// EVERY ARM THE CONTRACT DECLARES IS ONE THIS RESOLVER NAMES: each
+// FooterStatus.status arm, read off the proto (vocab.FooterStatusArms), is
+// named by statusName, so an arm landing without a branch fails here.
+func TestStatusNameNamesEveryFooterStatusArm(t *testing.T) {
+	for _, arm := range vocab.FooterStatusArms() {
+		t.Run(arm, func(t *testing.T) {
+			// Arrange.
+			status := &frontendv1.FooterStatus{}
+			m := status.ProtoReflect()
+			field := m.Descriptor().Fields().ByName(protoreflect.Name(arm))
+			m.Set(field, m.NewField(field))
 
-	// Act
-	var missing []string
-	for _, arm := range statusArmsFromProto() {
-		if !emitted[arm] {
-			missing = append(missing, arm)
-		}
-	}
+			// Act.
+			got := statusName(status)
 
-	// Assert
-	if len(missing) > 0 {
-		t.Fatalf("arms %v exist in the contract but this resolver never emits them", missing)
+			// Assert.
+			if got != arm {
+				t.Fatalf("statusName(%s) = %q, want %q", arm, got, arm)
+			}
+		})
 	}
 }
 

@@ -847,10 +847,16 @@ func TestMaturitySectionStatesItsFold(t *testing.T) {
 	}
 }
 
-// hiddenWorkspace is a registered workspace the user hid.
+// hiddenWorkspace is a registered workspace the user hid at the epoch.
 func hiddenWorkspace(id, name string) wsm.Workspace {
-	ws := workspace(id, name)
+	return hiddenAt(workspace(id, name), 0)
+}
+
+// hiddenAt is WS hidden D after the epoch: hidden and its instant, together,
+// as wsm records them.
+func hiddenAt(ws wsm.Workspace, d time.Duration) wsm.Workspace {
 	ws.Hidden = true
+	ws.HiddenAt = at(d)
 	return ws
 }
 
@@ -1029,17 +1035,17 @@ func TestRecentlyMergedGroupKeepsTheRepositoryDir(t *testing.T) {
 	}
 }
 
-func TestRecentlyMergedGroupOrdersItsRowsByPlace(t *testing.T) {
+func TestRecentlyMergedGroupOrdersItsRowsByMergeTime(t *testing.T) {
 	// Arrange: the later merge holds the later place.
 	r, _ := newResolver(t)
 
 	// Act.
 	r.SetRegistry(registry(placed(mergedIn("older", repo, 0), 1), placed(mergedIn("newer", repo, time.Minute), 2)))
 
-	// Assert: registry order, not merge time (owner ruling, 2026-10-11).
+	// Assert: the latest merge first (owner request, 2026-10-13).
 	got := rowNames(latest(t, r).GetRecentlyMerged().GetGroups()[0].GetRows().GetRows())
-	if !equal(got, []string{"older", "newer"}) {
-		t.Fatalf("group rows = %v, want registry order", got)
+	if !equal(got, []string{"newer", "older"}) {
+		t.Fatalf("group rows = %v, want the latest merge first", got)
 	}
 }
 
@@ -1237,5 +1243,35 @@ func TestTheHiddenSectionIsLabelledHidden(t *testing.T) {
 	// Assert.
 	if got := latest(t, r).GetHidden().GetHeader().GetLabel().GetText(); got != "Hidden" {
 		t.Fatalf("hidden label = %q, want %q", got, "Hidden")
+	}
+}
+
+func TestAHiddenRowCountsFromItsHide(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+
+	// Act.
+	r.SetRegistry(registry(hiddenAt(workspace("w1", "one"), time.Hour)))
+
+	// Assert.
+	got := latest(t, r).GetHidden().GetRows().GetRows()[0].GetWhen().GetHidden()
+	if got == nil || got.GetAtMs() != at(time.Hour).UnixMilli() {
+		t.Fatalf("when = %v, want the hide instant", latest(t, r).GetHidden().GetRows().GetRows()[0].GetWhen())
+	}
+}
+
+func TestAMergedHiddenRowCountsFromItsMerge(t *testing.T) {
+	// Arrange: merged wins over hidden, as it files under Recently Merged.
+	r, _ := newResolver(t)
+	ws := hiddenAt(workspace("w1", "one"), time.Hour)
+	ws.MergedAt = at(2 * time.Hour)
+
+	// Act.
+	r.SetRegistry(registry(ws))
+
+	// Assert.
+	rows := rosterwalk.MergedRows(latest(t, r))
+	if len(rows) != 1 || rows[0].GetWhen().GetMerged() == nil {
+		t.Fatalf("merged rows = %v, want one counting from its merge", rows)
 	}
 }

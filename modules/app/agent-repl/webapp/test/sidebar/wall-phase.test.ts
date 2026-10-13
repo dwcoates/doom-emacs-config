@@ -14,7 +14,7 @@ function animation(timing: EffectTiming): PhasedAnimation {
   return { currentTime: null, effect: { getTiming: () => timing } };
 }
 
-/** An endless loop of DURATION milliseconds, as `ws-pulse` and `ws-spin` are. */
+/** An endless loop of DURATION milliseconds, as `ws-pulse` is. */
 function loop(duration: number, extra: EffectTiming = {}): PhasedAnimation {
   return animation({ duration, iterations: Infinity, delay: 0, direction: "normal", ...extra });
 }

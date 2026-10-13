@@ -26,35 +26,41 @@
 //     the row while it runs" (the roster's standing ruling). Nothing parks
 //     (owner ruling, 2026-09-29): a merge that gives up FAILS.
 //  2. agent_repl_fault  one of agent-repl's OWN services does not serve the
-//     workspace: the route to the session is not serving, a turn the daemon
-//     accepted awaits the bring-up of a route never seen (AwaitingBringUp),
-//     or the daemon itself is impaired. SKIPPED WHOLE while the session is
-//     PARKED: the idle sweep put the route down itself and a prompt brings
-//     it back, so a parked session is idle, not broken.
-//  3. network_fault     this machine cannot reach the network, as the shim
+//     workspace: the route to the session is severed, dead or failed to
+//     start, or the daemon itself is impaired. SKIPPED WHOLE while the
+//     session is PARKED: the idle sweep put the route down itself and a
+//     prompt brings it back, so a parked session is idle, not broken.
+//  3. starting          the session is BOOTING: its shim is being dialed, or a
+//     turn the daemon accepted awaits the bring-up of a route never seen
+//     (AwaitingBringUp). An expected step, never a fault (owner ruling,
+//     2026-10-13): GREY, and the composer stays open. It keeps the place the
+//     bring-up held inside agent_repl_fault, so only a real fault outranks
+//     it. Skipped while PARKED, as the link is.
+//  4. network_fault     this machine cannot reach the network, as the shim
 //     tells it apart from an answer the vendor gave. Skipped while PARKED: a
 //     parked session asks nothing of the network.
-//  4. closing           a close was refused. The roster observes no close
+//  5. closing           a close was refused. The roster observes no close
 //     refusal, so only the footer ever stands here.
-//  5. vendor_fault      agent-repl serves, but the vendor (Claude, the Agent
+//  6. vendor_fault      agent-repl serves, but the vendor (Claude, the Agent
 //     SDK) does not: a vendor start retried, rejected or given up on, an
 //     account or vendor block (ClassifyFailure), or a call the vendor is
 //     retrying. USABLE: the composer stays open and a prompt is held until
 //     the vendor serves.
-//  6. merge_failed      the merge failed. TERMINAL: the merge no longer holds
+//  7. merge_failed      the merge failed. TERMINAL: the merge no longer holds
 //     the session, so every claim that the workspace is UNUSABLE outranks it,
 //     while it outranks everything the session itself is doing.
-//  7. merged            the merge landed. Terminal, ranked as merge_failed is.
-//  8. degraded          the session serves, but the daemon's view of it is
+//  8. merged            the merge landed. Terminal, ranked as merge_failed is.
+//  9. degraded          the session serves, but the daemon's view of it is
 //     compromised: a shim component dropping or delaying observations, or a
 //     taken-back shim that never re-reported its session state. USABLE, so
 //     every unusable claim outranks it; SKIPPED while PARKED, as the link is.
-//  9. waiting           the session waits on the user: a permission gate
-//     (footer and roster `permission`), a question gate (`question`), an
-//     interrupt landing or a cold gate (`waiting`). GREEN, the same green as
+//  10. waiting          the session waits on the user: a permission gate
+//     (footer and roster `permission`), a question gate (`question`), a
+//     cold gate (footer `waiting`, roster `cold_gate`) or an interrupt
+//     landing (`waiting`). GREEN, the same green as
 //     idle (owner ruling, 2026-10-08): a gate is never drawn as working.
-//  10. thinking         a turn is in flight, a context cut included.
-//  11. idle             the foreground is free: a turn end (read or not, a
+//  11. thinking         a turn is in flight, a context cut included.
+//  12. idle             the foreground is free: a turn end (read or not, a
 //     failed one included), detached work running, a wakeup pending, or
 //     nothing at all.
 //
@@ -63,12 +69,12 @@
 // vendor_fault. The first two are BLUE and close the composer; a vendor fault
 // is TURQUOISE and leaves it open.
 //
-// THE COLORS FOLLOW THE RUNGS (owner rulings, 2026-09-28 and 2026-10-02):
-// every rung that makes the workspace UNUSABLE — agent_repl_fault,
-// network_fault, closing — is blue and ranks above every rung on which it is
-// usable; merging is purple; a usable rung with something wrong —
-// vendor_fault, merge_failed, degraded, and idle's failed turn — is
-// turquoise.
+// THE COLORS FOLLOW THE RUNGS (owner rulings, 2026-09-28, 2026-10-02 and
+// 2026-10-13): every rung that makes the workspace UNUSABLE —
+// agent_repl_fault, network_fault, closing — is blue; starting is grey;
+// merging is purple; a usable rung with something wrong — vendor_fault,
+// degraded, and idle's failed turn — is turquoise; a terminal merge, failed
+// or landed, is green.
 //
 // Momentary footer statuses sit INSIDE the rung their fact belongs to rather
 // than above it: `loading` is a turn taking on context (thinking) and the
@@ -111,6 +117,8 @@ const (
 	Merging Claim = "merging"
 	// AgentReplFault is one of agent-repl's own services not serving.
 	AgentReplFault Claim = "agent_repl_fault"
+	// Starting is the session booting: an expected step, never a fault.
+	Starting Claim = "starting"
 	// NetworkFault is this machine unable to reach the network.
 	NetworkFault Claim = "network_fault"
 	// Closing is a refused close.
@@ -131,33 +139,28 @@ const (
 	Idle Claim = "idle"
 )
 
-// Inactive is NOT a rung. It is the roster's `inactive` row — registered, with
-// no open perspective and nothing live behind it — which dominates the whole
-// ladder on the roster, and which no footer is ever drawn for: a workspace
-// with no perspective has no strip to disagree with.
+// Inactive is NOT a rung. It is the roster's `inactive` row — INCIDENTALLY
+// inactive (owner ruling, 2026-10-13): registered with no open perspective and
+// nothing live behind it, or being opened by the editor right now (the row's
+// `opening` marker) — which dominates the whole ladder on the roster, and
+// which no footer is ever drawn for: a workspace with no perspective, or one
+// still opening, has no strip to disagree with.
 const Inactive Claim = "inactive"
-
-// Opening is NOT a rung either. It is the roster's `opening` row — an OpenTabs
-// names the workspace and has not answered it `opened` yet — which dominates
-// the whole ladder on the roster, `inactive` included, for as long as the open
-// is in flight: the row is grey and not selectable until the workspace is
-// open, whatever its session is doing meanwhile. No footer is drawn for it.
-const Opening Claim = "opening"
 
 // Order is the ladder, strongest claim first. It is the ONE statement of the
 // precedence; the package comment explains every position.
 var Order = []Claim{
-	Merging, AgentReplFault, NetworkFault, Closing, VendorFault, MergeFailed,
-	Merged, Degraded, Waiting, Thinking, Idle,
+	Merging, AgentReplFault, Starting, NetworkFault, Closing, VendorFault,
+	MergeFailed, Merged, Degraded, Waiting, Thinking, Idle,
 }
 
 // AwaitingBringUp reports a workspace whose route has never been seen at all
 // while something already says a session is on its way: a turn the daemon
 // ACCEPTED (the prompt is held for a session still to be brought up), a
 // session that has announced itself, or a bring-up of the session under way.
-// It stands on the AGENT_REPL_FAULT rung — the route is coming up, and that is
-// the truest claim about it — so a cold submit walks monotonically (idle, then
-// the route coming up, then the turn) instead of drawing the turn, then the
+// It stands on the STARTING rung — the route is coming up, and that is the
+// truest claim about it — so a cold submit walks monotonically (idle, then the
+// route coming up, then the turn) instead of drawing the turn, then the
 // bring-up, then the turn again, and a booting daemon draws a workspace it is
 // bringing up as starting rather than ready.
 func AwaitingBringUp(linkSeen, turnInFlight, sessionAnnounced, bringingUp bool) bool {
@@ -198,7 +201,7 @@ func Resolve[T any](merge string, parked bool, probe func(Claim) (T, bool), idle
 			if claim != standing {
 				continue
 			}
-		case AgentReplFault, NetworkFault, Degraded:
+		case AgentReplFault, Starting, NetworkFault, Degraded:
 			if parked {
 				continue
 			}

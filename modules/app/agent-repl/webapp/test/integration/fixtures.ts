@@ -96,6 +96,7 @@ import {
   type SubmitPromptCommandPanel,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
 import { orderFor } from "../feed-order.js";
+import { ROSTER_STATUS_CASES, type RosterStatusCase } from "../../src/sidebar/tones.js";
 import { enduringLine } from "../footer/enduring-line.js";
 
 // ---------------------------------------------------------------------------
@@ -1626,7 +1627,10 @@ export const FOOTER_STATUS_SUBSTATUSES: Record<string, readonly string[]> = {
     "vendorFailed",
     "apiRetrying",
   ],
-  agentReplFault: ["starting", "degraded", "severed", "dead", "startFailed", "daemonImpaired"],
+  agentReplFault: ["degraded", "severed", "dead", "startFailed", "daemonImpaired"],
+  // A booting session is no fault (owner ruling, 2026-10-13): its own grey
+  // arm, with no substatus.
+  starting: [],
   networkFault: ["offline"],
   closing: ["blocked"],
   loading: ["memory", "invoked", "discovered", "listing"],
@@ -1790,6 +1794,7 @@ export const FOOTER_STATUS_SALIENTS: Record<string, readonly string[]> = {
   background: ["update", ...SHARED_SALIENTS],
   vendorFault: ["authenticating", "fault", "update", "retrying", "vendorStart", "turnEnded", ...SHARED_SALIENTS],
   agentReplFault: ["startFailed", "fault", "update", "turnEnded", ...SHARED_SALIENTS],
+  starting: ["startFailed", "fault", "update", ...SHARED_SALIENTS],
   networkFault: ["offline", "update", ...SHARED_SALIENTS],
   closing: ["closeBlocked", "update", ...SHARED_SALIENTS],
   loading: ["update", ...SHARED_SALIENTS],
@@ -2383,41 +2388,12 @@ export const emptyTopbarView = (): TopbarView => topbarView();
 // Sidebar
 // ---------------------------------------------------------------------------
 
-export const ROSTER_STATUS_ARMS = [
-  "submitting",
-  "thinking",
-  "clearing",
-  "compacting",
-  "permission",
-  "question",
-  "done",
-  "interrupted",
-  "turnFailed",
-  "ready",
-  "idleAsync",
-  "vendorBlocked",
-  "vendorFault",
-  "networkFault",
-  "apiRetrying",
-  "init",
-  "severed",
-  "startFailed",
-  "degraded",
-  "dead",
-  "turnDied",
-  "merging",
-  "mergeQueued",
-  "mergeWaiting",
-  "mergeFailed",
-  "merged",
-  "none",
-  "inactive",
-  "closing",
-  "daemonImpaired",
-  "waiting",
-  "opening",
-] as const;
-export type RosterStatusArm = (typeof ROSTER_STATUS_ARMS)[number];
+/**
+ * Every `RosterRow.status` arm, in the generated spelling: the sidebar's own
+ * list (`src/sidebar/tones.ts`), which reads it off the schema.
+ */
+export const ROSTER_STATUS_ARMS = ROSTER_STATUS_CASES;
+export type RosterStatusArm = RosterStatusCase;
 
 /**
  * A repository section's `fold` arm. The wire never leaves the oneof unset
@@ -2436,14 +2412,13 @@ const PENDING_DIVERGENCE: MessageInitShape<typeof RosterRepoSectionSchema>["dive
 };
 
 /**
- * The merge arms the vocabulary paints with glyphs. All carry a glyph; only
- * the ones render-colors.json declares in `colored_merge_arms` also spend a
- * color (every one does since 2026-09-28; merge_failed is turquoise).
+ * The merge arms the vocabulary paints with the one merge glyph. Every one
+ * also spends a color (render-colors.json `colored_merge_arms`); a failed
+ * merge is green with a red-inked glyph (owner ruling, 2026-10-13).
  */
 export const ROSTER_MERGE_ARMS = [
   "merging",
   "mergeQueued",
-  "mergeWaiting",
   "mergeFailed",
   "merged",
 ] as const;

@@ -13,7 +13,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
+	frontendv1 "agentrepl/proto/frontend/v1"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
@@ -55,6 +57,16 @@ type RenderColors struct {
 	ColoredMergeArms []string
 	// FeedMergeHeadGlyph is the glyph name a merge bubble's head carries.
 	FeedMergeHeadGlyph string
+	// GlyphInks maps a RosterRow.status arm whose drawn mark is inked apart
+	// from the arm's own color to that ink (owner ruling, 2026-10-13): the
+	// arm's color stays the workspace's status, the ink is the mark's.
+	GlyphInks map[string]string
+	// GlyphOnlyColors are the ink names no status may take, which only
+	// GlyphInks may name.
+	GlyphOnlyColors []string
+	// OneShotGlyphArms are the RosterRow.status arms on which a one-shot's
+	// glyph replaces the status mark, and the only ones.
+	OneShotGlyphArms []string
 	// FooterStatus maps each FooterStatus.status arm name to its color.
 	FooterStatus map[string]string
 	// ComposerClosedColors are the footer status colors under which a
@@ -88,6 +100,9 @@ type renderColorsJSON struct {
 	MergeGlyphs             map[string]string            `json:"merge_glyphs"`
 	ColoredMergeArms        []string                     `json:"colored_merge_arms"`
 	FeedMergeHeadGlyph      string                       `json:"feed_merge_head_glyph"`
+	GlyphInks               map[string]string            `json:"glyph_inks"`
+	GlyphOnlyColors         []string                     `json:"glyph_only_colors"`
+	OneShotGlyphArms        []string                     `json:"one_shot_glyph_arms"`
 	FooterStatus            map[string]string            `json:"footer_status"`
 	ComposerClosedColors    []string                     `json:"composer_closed_colors"`
 	ComposerOpenSubstatuses map[string][]string          `json:"composer_open_substatuses"`
@@ -216,6 +231,38 @@ func (c RenderColors) validate() error {
 	}
 	if c.FeedMergeHeadGlyph == "" {
 		return fmt.Errorf("feed_merge_head_glyph is empty")
+	}
+	for _, ink := range c.GlyphOnlyColors {
+		if c.knownColor(ink) {
+			return fmt.Errorf("glyph_only_colors names %q, which is already a color", ink)
+		}
+	}
+	for arm, ink := range c.GlyphInks {
+		color, ok := c.RosterStatus[arm]
+		if !ok {
+			return fmt.Errorf("glyph_inks[%q] names no roster_status arm", arm)
+		}
+		if ink == ColorNone || !(contains(c.Colors, ink) || contains(c.GlyphOnlyColors, ink)) {
+			return fmt.Errorf("glyph_inks[%q] = %q, which is neither a color nor a glyph-only color", arm, ink)
+		}
+		if ink == color {
+			return fmt.Errorf("glyph_inks[%q] = %q, the arm's own color; an ink row says only where the two differ", arm, ink)
+		}
+	}
+	for _, table := range []map[string]string{c.RosterStatus, c.FooterStatus, c.FailureSides} {
+		for state, color := range table {
+			if contains(c.GlyphOnlyColors, color) {
+				return fmt.Errorf("%q takes %q, which only a glyph may", state, color)
+			}
+		}
+	}
+	if len(c.OneShotGlyphArms) == 0 {
+		return fmt.Errorf("one_shot_glyph_arms is empty")
+	}
+	for _, arm := range c.OneShotGlyphArms {
+		if _, ok := c.RosterStatus[arm]; !ok {
+			return fmt.Errorf("one_shot_glyph_arms names %q, which is no roster_status arm", arm)
+		}
 	}
 	if len(c.TopbarTones) == 0 {
 		return fmt.Errorf("topbar_tones is empty")
@@ -455,4 +502,51 @@ func sameSet(a, b []string) bool {
 		delete(seen, s)
 	}
 	return len(seen) == 0
+}
+
+// RosterStatusArms is every RosterRow.status arm, by its proto name, read off
+// the generated descriptor in declaration order. It is the ONE list of the
+// roster's arms on the daemon's side: the resolver asserts the vocabulary's
+// tables against it, so an arm landing in the proto without a color fails
+// there. The descriptor always declares the oneof, so a failure to read it
+// is a broken build and panics.
+func RosterStatusArms() []string {
+	arms, err := OneofArmNames((&frontendv1.RosterRow{}).ProtoReflect().Descriptor(), "status")
+	if err != nil {
+		panic(fmt.Sprintf("vocab: RosterRow.status is unreadable: %v", err))
+	}
+	return arms
+}
+
+// FooterStatusArms is every FooterStatus.status arm, by its proto name, read
+// off the generated descriptor in declaration order: the footer resolver's
+// one list, against which footer_status is asserted. An arm the contract keeps
+// only so an older frame decodes (`turn_failed`) is in it, and painted, like
+// any other. A failure to read it is a broken build and panics.
+func FooterStatusArms() []string {
+	arms, err := OneofArmNames((&frontendv1.FooterStatus{}).ProtoReflect().Descriptor(), "status")
+	if err != nil {
+		panic(fmt.Sprintf("vocab: FooterStatus.status is unreadable: %v", err))
+	}
+	return arms
+}
+
+// IsMergeArm reports whether a RosterRow.status arm is one of the merge
+// pipeline's: every such arm, and only such an arm, is spelled `merg...`
+// (merging, merge_queued, merge_failed, merged), and each draws the merge
+// glyph rather than a lifecycle dot.
+func IsMergeArm(arm string) bool {
+	return strings.HasPrefix(arm, "merg")
+}
+
+// RosterMergeArms is every merge arm of RosterRow.status (IsMergeArm), in
+// declaration order.
+func RosterMergeArms() []string {
+	var out []string
+	for _, arm := range RosterStatusArms() {
+		if IsMergeArm(arm) {
+			out = append(out, arm)
+		}
+	}
+	return out
 }

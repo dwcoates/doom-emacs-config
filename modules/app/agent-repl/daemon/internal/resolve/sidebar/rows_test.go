@@ -726,7 +726,7 @@ func TestAContextCutsEndDrawsTheRowPartialAtOnce(t *testing.T) {
 	}{
 		{name: "a completed clear is read at once", act: footer.ActClear, how: wsm.CloseCompleted, wantStatus: "done", wantViewed: true},
 		{name: "a completed compaction is read at once", act: footer.ActCompact, how: wsm.CloseCompleted, wantStatus: "done", wantViewed: true},
-		{name: "an interrupted clear stays unread", act: footer.ActClear, how: wsm.CloseKilled, wantStatus: "interrupted", wantViewed: false},
+		{name: "an interrupted clear is read at once, as every interrupt is", act: footer.ActClear, how: wsm.CloseKilled, wantStatus: "interrupted", wantViewed: true},
 		{name: "a failed compaction stands as its turn fault", act: footer.ActCompact, how: wsm.CloseFailed, wantStatus: "vendor_blocked", wantViewed: false},
 		{name: "a completed prompt stays unread", act: footer.ActPrompt, how: wsm.CloseCompleted, wantStatus: "done", wantViewed: false},
 	}
@@ -766,6 +766,23 @@ func TestAContextCutReadAtOnceIsRecorded(t *testing.T) {
 		}
 	}
 	t.Fatal("no daemon.sidebar.result_read_on_cut record naming the clear")
+}
+
+func TestAnInterruptsEndRecordsItsResultReadAtOnce(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+
+	// Act.
+	r.SetTurnEnded(theWS, wsm.CloseKilled)
+
+	// Assert.
+	for _, rec := range r.surfaces.Records() {
+		if rec.Operation == "daemon.sidebar.result_read_on_interrupt" && rec.Context["status"] == "interrupted" {
+			return
+		}
+	}
+	t.Fatal("no daemon.sidebar.result_read_on_interrupt record naming the interrupt")
 }
 
 func TestAContextCutReadAtOnceStaysReadAfterItsDetachedWorkEnds(t *testing.T) {

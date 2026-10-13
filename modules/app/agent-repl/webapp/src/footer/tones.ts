@@ -22,6 +22,7 @@
  */
 import { FooterStatusSchema } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import { footerStatusColor, toneClass, type Color } from "../vocab.js";
+import { oneofArms } from "../rpc/oneof.js";
 
 /**
  * Every `FooterStatus.status` arm, in the generated spelling.
@@ -31,9 +32,7 @@ import { footerStatusColor, toneClass, type Color } from "../vocab.js";
  * strip's exhaustive switch, the colour map below, the suite's assertions —
  * without anybody remembering to extend a list.
  */
-export const FOOTER_STATUS_CASES: readonly string[] = (
-  FooterStatusSchema.oneofs.find((oneof) => oneof.name === "status")?.fields ?? []
-).map((field) => field.localName);
+export const FOOTER_STATUS_CASES: readonly string[] = oneofArms(FooterStatusSchema, "status");
 
 /**
  * The colour each status arm paints the strip, resolved through the shared

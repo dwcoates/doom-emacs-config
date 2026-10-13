@@ -76,6 +76,12 @@ type Workspace struct {
 	Task *TaskID
 	// LastSelectedAt is when the user last selected the workspace.
 	LastSelectedAt *time.Time
+	// HiddenAt is when the user moved the workspace into the hidden section,
+	// set exactly while Hidden is (SetHidden).
+	HiddenAt *time.Time
+	// DweltAt is the last instant the user LEFT the workspace after looking at
+	// it for at least DwellThreshold (SetCurrent); nil when they never have.
+	DweltAt *time.Time
 	// LastActivityAt is when the workspace LAST DID REAL WORK: the most recent
 	// turn start or turn close, stamped at the genuine activity edge inside the
 	// turn writes (PutTurn/CloseTurn), never at compose or select time. Nil

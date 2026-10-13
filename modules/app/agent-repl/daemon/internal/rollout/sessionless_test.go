@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"testing"
+	"time"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -138,7 +139,7 @@ func TestBringUpSessionlessDoesNotStartAHiddenWorkspace(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
-	if err := h.db.SetHidden(context.Background(), ws, true); err != nil {
+	if err := h.db.SetHidden(context.Background(), ws, true, time.Unix(1_700_000_000, 0)); err != nil {
 		t.Fatalf("SetHidden: %v", err)
 	}
 
@@ -173,7 +174,7 @@ func TestBringUpSessionlessNeverMarksAHiddenWorkspace(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
-	if err := h.db.SetHidden(context.Background(), ws, true); err != nil {
+	if err := h.db.SetHidden(context.Background(), ws, true, time.Unix(1_700_000_000, 0)); err != nil {
 		t.Fatalf("SetHidden: %v", err)
 	}
 
@@ -190,7 +191,7 @@ func TestBringUpSessionlessStatesTheWithheldWorkspacesAtInfo(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
-	if err := h.db.SetHidden(context.Background(), ws, true); err != nil {
+	if err := h.db.SetHidden(context.Background(), ws, true, time.Unix(1_700_000_000, 0)); err != nil {
 		t.Fatalf("SetHidden: %v", err)
 	}
 

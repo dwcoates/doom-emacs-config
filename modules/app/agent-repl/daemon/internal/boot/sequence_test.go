@@ -2541,7 +2541,7 @@ func TestTheBringUpWithholdsAWorkspaceTheUserCannotSee(t *testing.T) {
 		arrange func(t *testing.T, h *harness, ws wsm.Workspace)
 	}{
 		{name: "a hidden workspace", arrange: func(t *testing.T, h *harness, ws wsm.Workspace) {
-			if err := h.db.SetHidden(context.Background(), ws.ID, true); err != nil {
+			if err := h.db.SetHidden(context.Background(), ws.ID, true, time.Unix(1_700_000_000, 0)); err != nil {
 				t.Fatalf("SetHidden: %v", err)
 			}
 		}},
@@ -2579,7 +2579,7 @@ func TestAWithheldWorkspaceIsNeverMarkedBringingUp(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
-	if err := h.db.SetHidden(context.Background(), ws.ID, true); err != nil {
+	if err := h.db.SetHidden(context.Background(), ws.ID, true, time.Unix(1_700_000_000, 0)); err != nil {
 		t.Fatalf("SetHidden: %v", err)
 	}
 
@@ -2600,7 +2600,7 @@ func TestTheWithheldWorkspacesAreStatedAtInfo(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
-	if err := h.db.SetHidden(context.Background(), ws.ID, true); err != nil {
+	if err := h.db.SetHidden(context.Background(), ws.ID, true, time.Unix(1_700_000_000, 0)); err != nil {
 		t.Fatalf("SetHidden: %v", err)
 	}
 
@@ -2623,7 +2623,7 @@ func TestAVisibleWorkspaceBesideAHiddenOneIsStillBroughtUp(t *testing.T) {
 	h := newHarness(t)
 	hidden := h.register(t, t.TempDir(), sessionlock.StateFree)
 	shown := h.register(t, t.TempDir(), sessionlock.StateFree)
-	if err := h.db.SetHidden(context.Background(), hidden.ID, true); err != nil {
+	if err := h.db.SetHidden(context.Background(), hidden.ID, true, time.Unix(1_700_000_000, 0)); err != nil {
 		t.Fatalf("SetHidden: %v", err)
 	}
 

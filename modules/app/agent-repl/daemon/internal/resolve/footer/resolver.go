@@ -51,7 +51,7 @@ func newResolver(colors vocab.RenderColors, log dlog.Surfaces, opts ...Option) (
 	if log == nil {
 		return nil, fmt.Errorf("footer resolver needs log surfaces")
 	}
-	if err := colors.AssertFooterStatusArms(statusArms); err != nil {
+	if err := colors.AssertFooterStatusArms(vocab.FooterStatusArms()); err != nil {
 		return nil, fmt.Errorf("footer resolver refuses to serve an unpainted state: %w", err)
 	}
 	o := options{

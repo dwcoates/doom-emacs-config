@@ -43,9 +43,15 @@ func (v *verbs) Select(ctx context.Context, ws ids.WorkspaceID) error {
 	if err != nil {
 		return err
 	}
-	if err := v.selectCurrent(ctx, log, ws); err != nil {
+	if _, err := v.selectCurrent(ctx, log, ws, nil); err != nil {
 		return err
 	}
+	return v.reviveSelected(ctx, log, ws)
+}
+
+// reviveSelected brings a just-selected workspace's parked session back up, as
+// every selection does.
+func (v *verbs) reviveSelected(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) error {
 	if _, err := v.reviveIfSessionless(ctx, log, opSelect, ws); err != nil {
 		// A DAEMON THAT IS LEAVING ANSWERS `standing_down`. The selection
 		// above already stands; only the revival was not attempted, because
@@ -74,14 +80,28 @@ func (v *verbs) Select(ctx context.Context, ws ids.WorkspaceID) error {
 // read of the current workspace, its stamp and its roster push can never
 // interleave with another's, which would leave WSM naming one workspace and
 // the roster's selection another.
-func (v *verbs) selectCurrent(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) error {
+//
+// FROM, when set, makes the select CONDITIONAL: it applies only while FROM is
+// still the current workspace, read under the same lock, so a select made on
+// the user's behalf (the landing after a hide) can never undo a switch the
+// user made meanwhile. It answers whether the select applied.
+func (v *verbs) selectCurrent(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, from *ids.WorkspaceID) (bool, error) {
 	v.selection.Lock()
 	defer v.selection.Unlock()
 
 	current, err := v.deps.DB.Current(ctx)
 	if err != nil {
 		log.Error(opSelect, "could not read the current workspace", dlog.Context{"cause": err.Error()})
-		return fmt.Errorf("select %q: read the current workspace: %w", ws, err)
+		return false, fmt.Errorf("select %q: read the current workspace: %w", ws, err)
+	}
+	if from != nil && (current == nil || *current != *from) {
+		standing := ""
+		if current != nil {
+			standing = string(*current)
+		}
+		log.Info(opSelect, "the user moved off the workspace this select was conditional on; the selection stands",
+			dlog.Context{"from": string(*from), "current": standing})
+		return false, nil
 	}
 	// RE-SELECTION CHANGES NO VIEW. The selection instant is a roster column,
 	// so re-stamping it on the workspace already being looked at would push a
@@ -93,7 +113,7 @@ func (v *verbs) selectCurrent(ctx context.Context, log dlog.Logger, ws ids.Works
 		at := v.now()
 		if err := v.deps.DB.SetCurrent(ctx, ws, at); err != nil {
 			log.Error(opSelect, "could not record the selection", dlog.Context{"cause": err.Error()})
-			return fmt.Errorf("select %q: %w", ws, err)
+			return false, fmt.Errorf("select %q: %w", ws, err)
 		}
 		// A WORKSPACE SWITCH IS A PRODUCTION-VISIBLE ACTION, so its receipt
 		// stands at info: an info-level log that carried no trace of a switch
@@ -104,7 +124,7 @@ func (v *verbs) selectCurrent(ctx context.Context, log dlog.Logger, ws ids.Works
 	}
 	if err := v.deps.DB.SetAttention(ctx, ws, false); err != nil {
 		log.Error(opSelect, "could not clear the attention marker", dlog.Context{"cause": err.Error()})
-		return fmt.Errorf("select %q: clear attention: %w", ws, err)
+		return false, fmt.Errorf("select %q: clear attention: %w", ws, err)
 	}
 
 	// THE REGISTRY AND THE SELECTION REACH THE ROSTER AS ONE PUSH. Both facts
@@ -128,7 +148,7 @@ func (v *verbs) selectCurrent(ctx context.Context, log dlog.Logger, ws ids.Works
 	if !reselected {
 		v.deps.Host.ReturnFeedToTail(ws)
 	}
-	return nil
+	return true, nil
 }
 
 // FollowStoredSelection is the roster's half of a selection ANOTHER daemon
@@ -210,26 +230,86 @@ func (v *verbs) MarkViewed(ctx context.Context, ws ids.WorkspaceID) error {
 }
 
 // SetHidden moves a workspace into the roster's hidden section, or back out of
-// it. The roster hoists a hidden workspace's row out of every grouping, and the
-// editor's tab bar stops drawing its tab off that same push. HIDING STANDS ITS
-// SESSION DOWN (only visible workspaces run): at once when no turn runs, once
-// the turn ends otherwise. SHOWING starts nothing; the editor asks with
-// OpenTabs. Asking for the place it already holds is success.
+// it, stamping when it was hidden. The roster hoists a hidden workspace's row
+// out of every grouping, and the editor's tab bar stops drawing its tab off
+// that same push. HIDING STANDS ITS SESSION DOWN (only visible workspaces
+// run): at once when no turn runs, once the turn ends otherwise. HIDING THE
+// WORKSPACE THE USER STANDS ON LANDS THEM somewhere familiar (landAfterHiding).
+// SHOWING starts nothing; the editor asks with OpenTabs. Asking for the place
+// it already holds is success.
 func (v *verbs) SetHidden(ctx context.Context, ws ids.WorkspaceID, hidden bool) error {
 	_, log, err := v.owned(ctx, "SetWorkspaceHidden", ws)
 	if err != nil {
 		return err
 	}
-	if err := v.deps.DB.SetHidden(ctx, ws, hidden); err != nil {
+	if err := v.deps.DB.SetHidden(ctx, ws, hidden, v.now()); err != nil {
 		log.Error(opSetHidden, "could not record whether the workspace is hidden", dlog.Context{"hidden": hidden, "cause": err.Error()})
 		return fmt.Errorf("set hidden on %q: %w", ws, err)
 	}
 	log.Info(opSetHidden, "recorded whether the workspace is hidden", dlog.Context{"hidden": hidden})
 	v.republishRegistry(ctx, log, opSetHidden)
-	if hidden {
-		v.deps.StandDowns.StandDownWithheld(ws)
+	if !hidden {
+		return nil
 	}
-	return nil
+	v.deps.StandDowns.StandDownWithheld(ws)
+	return v.landAfterHiding(ctx, log, ws)
+}
+
+// landAfterHiding moves the user, when they stand on the workspace just
+// hidden, to the visible workspace they most recently LOOKED AT for at least
+// wsm.DwellThreshold (owner request, 2026-10-13): somewhere familiar, which
+// the most recently selected workspace need not be. The select is conditional
+// on the hidden workspace still being current, under the selection lock, so a
+// switch the user made meanwhile stands. With no such workspace the selection
+// stays where it is, and the record says so.
+func (v *verbs) landAfterHiding(ctx context.Context, log dlog.Logger, hidden ids.WorkspaceID) error {
+	reg, ok := v.readRegistry(ctx, log, opSetHidden)
+	if !ok {
+		return fmt.Errorf("land after hiding %q: the registry could not be read", hidden)
+	}
+	target, found := hideLandingTarget(reg.Workspaces, hidden)
+	if !found {
+		log.Info(opSetHidden, "no other visible workspace has held the user for the dwell threshold; the selection stays",
+			dlog.Context{"dwell_threshold": wsm.DwellThreshold.String()})
+		return nil
+	}
+	// THE LANDING IS A SELECT LIKE ANY OTHER, so it is taken only by the
+	// daemon that serves the workspace it lands on (owned refuses it, and
+	// records why, during a handover).
+	_, targetLog, err := v.owned(ctx, "SelectWorkspace", target.ID)
+	if err != nil {
+		return err
+	}
+	targetLog = targetLog.With(dlog.Context{"hidden": string(hidden)})
+	applied, err := v.selectCurrent(ctx, targetLog, target.ID, &hidden)
+	if err != nil {
+		return fmt.Errorf("land after hiding %q: %w", hidden, err)
+	}
+	if !applied {
+		return nil
+	}
+	targetLog.Info(opSetHidden, "landed the user on the workspace they most recently dwelt on",
+		dlog.Context{"dwelt_at": target.DweltAt.UTC()})
+	return v.reviveSelected(ctx, targetLog, target.ID)
+}
+
+// hideLandingTarget picks where hiding HIDDEN lands the user: among the
+// workspaces still drawn in a grouping (not hidden, not merged, not closed,
+// not a hidden merge workspace) other than HIDDEN, the one most recently
+// dwelt on. Roster order breaks a tie. It answers false when none was ever
+// dwelt on.
+func hideLandingTarget(workspaces []wsm.Workspace, hidden ids.WorkspaceID) (wsm.Workspace, bool) {
+	var best wsm.Workspace
+	found := false
+	for _, ws := range workspaces {
+		if ws.ID == hidden || ws.DweltAt == nil || ws.Hidden || ws.MergedAt != nil || ws.Closed || ws.MergeHidden() {
+			continue
+		}
+		if !found || ws.DweltAt.After(*best.DweltAt) || ws.DweltAt.Equal(*best.DweltAt) && ws.Place < best.Place {
+			best, found = ws, true
+		}
+	}
+	return best, found
 }
 
 // RevealMergeWorkspace draws a hidden merge workspace in the tab bar and the
