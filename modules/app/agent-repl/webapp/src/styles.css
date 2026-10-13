@@ -1765,20 +1765,22 @@ pre {
    and its content, as a share of the base. Vertical only: the left and right
    insets and the gaps between rows never read it. Kinds not named here (the
    agentic tool and monitor cards, the compaction summary) keep the base.
-   - PROMPT BUBBLES SIT 30% TIGHTER (owner request, 2026-10-12).
-   - RESPONSE BUBBLES, the yellow interim and the green answer alike, sit 30%
-     tighter again (owner request, 2026-10-13): 0.7 of 0.7.
+   - PROMPT AND RESPONSE BUBBLES SIT 30% TIGHTER (owner request, 2026-10-12).
+   - AN INTERIM RESPONSE, the amber-bordered one with no fill, sits 30% tighter
+     again (owner request, 2026-10-13): 0.7 of 0.7. The green answer keeps the
+     response's 0.7.
    - A THINKING BUBBLE has no fill, border or shadow, so its padding read only
      as empty feed around floating text; it keeps about a third of the base
      (owner request, 2026-10-13), which brings its visible gap to a neighbor to
      about 65% of what the base padding made it. */
+.bubble[data-variant="response"],
 .bubble[data-variant="user"],
 .bubble[data-variant="agent"],
 .bubble[data-variant="peer"],
 .bubble[data-variant="held"] {
   --bubble-pad-y: calc(var(--bubble-pad-y-base) * 0.7);
 }
-.bubble[data-variant="response"] {
+.bubble[data-variant="response"].interim-response {
   --bubble-pad-y: calc(var(--bubble-pad-y-base) * 0.49);
 }
 .bubble[data-variant="thinking"] {
@@ -4727,7 +4729,7 @@ bubble-body.bubble-body { display: block; }
 .usage-corner {
   /* THE ONE SIZE both figures read (owner ruling, 2026-09-15): set here and
      inherited, so the token, the duration and both reserves cannot differ. */
-  font-size: 0.85em;
+  font-size: var(--usage-font-size);
   /* One phase of the reveal; the two phases together take 0.5s. */
   --usage-phase: 0.25s;
   /* The hover hit area's padding (owner ruling, 2026-09-14). */
@@ -4787,6 +4789,10 @@ bubble-body.bubble-body { display: block; }
   --usage-corner-gap-x: calc(var(--bubble-pad-y-base) + var(--usage-half-leading));
   /* The normal gap between the token and the duration, unchanged. */
   --usage-pair-gap: 0.35rem;
+  /* THE FIGURES' ONE SIZE, read by the corner and by the ghost that measures
+     its footprint, so the two cannot differ: a quarter smaller than the 0.85em
+     it was (owner request, 2026-10-13). */
+  --usage-font-size: calc(0.85em * 0.75);
 }
 /* THE GHOST (see "THE SIZING GHOST" above): an invisible, zero-height float
    exactly the corner's footprint wide. That footprint is the corner's in-flow
@@ -4809,7 +4815,7 @@ bubble-body.bubble-body { display: block; }
   overflow: hidden;
   visibility: hidden;
   white-space: pre;
-  font-size: 0.85em;
+  font-size: var(--usage-font-size);
   font-variant-numeric: tabular-nums;
   padding-left: calc(6ch + var(--usage-pair-gap));
   padding-right: calc(var(--usage-corner-gap-x) - var(--bubble-scroll-gap));
