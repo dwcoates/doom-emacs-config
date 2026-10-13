@@ -122,7 +122,7 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) error {
 	// in this session, so neither flushes. A flush that could not read the
 	// queue refuses the request before anything of it is recorded; the queue
 	// records why.
-	if req.By == RequestedByAgent && !req.Detached {
+	if req.By == RequestedByAgent && req.Detached == nil {
 		if err := o.deps.Queue.FlushHeld(ctx, ws); err != nil {
 			return fmt.Errorf("merge: flushing the held prompts of %s before its in-place merge: %w", ws, err)
 		}
