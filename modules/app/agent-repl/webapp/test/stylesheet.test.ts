@@ -10,7 +10,9 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { cascadedValue, inRail, rulesOf, selectorOf } from "./stylesheet.js";
+import { cascadedValue, inDocument, inRail, rulesOf, selectorOf } from "./stylesheet.js";
+import STYLES_TEST from "./styles.test.ts?raw";
+import STYLESHEET from "./stylesheet.ts?raw";
 
 describe("rulesOf", () => {
   it.each([
@@ -58,6 +60,59 @@ describe("selectorOf", () => {
     expect(() => selectorOf(/(\.no-such-class-anywhere)\s*\{/, "phantom rule")).toThrow(
       "the stylesheet has no phantom rule",
     );
+  });
+});
+
+describe("inDocument", () => {
+  it("mounts the drawn element in the document with the real stylesheet", () => {
+    // Arrange: a dot carrying a tone, which only the real stylesheet paints.
+    const dot = document.createElement("span");
+    dot.className = "st tone-green";
+
+    // Act
+    const seen = inDocument(dot, (drawn) => ({ same: drawn === dot, attached: document.body.contains(dot), paint: cascadedValue(dot, "color") }));
+
+    // Assert
+    expect(seen).toEqual({ same: true, attached: true, paint: "var(--ok)" });
+  });
+
+  it("takes the element and the stylesheet down once the check returns", () => {
+    // Arrange
+    const el = document.createElement("span");
+    const sheets = document.head.querySelectorAll("style").length;
+
+    // Act
+    inDocument(el, () => undefined);
+
+    // Assert
+    expect([el.isConnected, document.head.querySelectorAll("style").length]).toEqual([false, sheets]);
+  });
+
+  it("takes the element and the stylesheet down when the check throws", () => {
+    // Arrange
+    const el = document.createElement("span");
+    const sheets = document.head.querySelectorAll("style").length;
+
+    // Act
+    const act = (): void =>
+      inDocument(el, () => {
+        throw new Error("boom");
+      });
+
+    // Assert
+    expect(act).toThrow("boom");
+    expect([el.isConnected, document.head.querySelectorAll("style").length]).toEqual([false, sheets]);
+  });
+
+  it("is the one mount-and-teardown the stylesheet suites share", () => {
+    // Arrange: the hand-rolled shape inDocument replaced, an element removed and then the sheet torn down.
+    const shape = /\.remove\(\);\s*teardown\(\);/g;
+
+    // Act
+    const sites = [STYLES_TEST.match(shape)?.length ?? 0, STYLESHEET.match(shape)?.length ?? 0];
+
+    // Assert
+    expect(sites).toEqual([0, 1]);
   });
 });
 
