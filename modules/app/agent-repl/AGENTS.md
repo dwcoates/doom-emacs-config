@@ -163,7 +163,7 @@ the path as its FIRST line and again, with the exit status, as its LAST:
 - The run's stderr is merged into the same stream and the same file.
 - `bin/test-test-all.sh` (`orchestrator-harness`) holds the contract.
 
-### One scheduled run at a time: `bin/test-all.sh` and `bin/suite-slot.sh`
+### Two ad-hoc scheduled runs at a time: `bin/test-all.sh` and `bin/suite-slot.sh`
 
 `bin/test-all.sh` builds `testrun`, which turns the whole roster into one DAG
 and schedules it across `runtime.NumCPU()/2` slots: HALF the host's cores
@@ -200,9 +200,10 @@ dependency chain first. Parallelism belongs to this scheduler:
 ordinary and merge-gate runs omit them. `--record` is reserved for the
 canonical post-merge timing run on master.
 
-The WHOLE scheduled run holds `bin/suite-slot.sh`. A second run does not go
-twice as fast: it competes with an already host-filling schedule and turns
-ordinary bounds into noise.
+The WHOLE scheduled run holds `bin/suite-slot.sh`, which allows two at once by
+default (`AGENT_REPL_SUITE_SLOTS`; owner ruling 2026-10-12, it was one). A run
+past that does not go faster: it competes with already host-filling schedules
+and turns ordinary bounds into noise.
 
 That is not hypothetical. Several agents each running their own suites at once
 took this box to a load average of 253, and the Emacs layer then failed 37 of
@@ -222,13 +223,17 @@ The gate counts what is actually running, claiming slots as directories via
 pid is gone. It is the same mechanism as the sandbox's container gate in
 `e2e/sandbox/bin/e2e-sandbox.sh`, for the same reason.
 
-**WAITERS ARE SERVED IN ORDER, MERGE QUEUE FIRST.** Each waiter takes a ticket
-in `$SLOT_DIR.queue` named `<priority>-<epoch seconds>-<pid>` and claims a
-freed slot only when it is at the front of the line. The merge queue's gate
-runs with `AGENT_REPL_SUITE_PRIORITY=merge` (priority 0), so it goes ahead of
-every ad-hoc run; everything else is first come, first served. Before this, a
-freed slot went to whichever 2-second poller woke first, and a merge's gate sat
-behind six ad-hoc runs from one agent session while master stood still. A dead
+**THE MERGE QUEUE'S GATES TAKE NO SLOT.** A gate runs with
+`AGENT_REPL_SUITE_PRIORITY=merge` and goes straight through, saying so: the two
+merges at the front of the queue race to land, each gating at once, and the
+merge queue's own governor admits them. A host slot on top serialized the two
+racers and once stood the queue's head behind the merge behind it (owner
+ruling, 2026-10-12).
+
+**WAITERS ARE SERVED IN ORDER.** Each waiter takes a ticket in
+`$SLOT_DIR.queue` named `<priority>-<epoch seconds>-<pid>` and claims a freed
+slot only when it is at the front of the line, first come, first served.
+Before this, a freed slot went to whichever 2-second poller woke first. A dead
 waiter's ticket is reaped by its pid, like a dead holder's slot.
 
 **IT NESTS.** A slot is held by a process TREE, so wrapping a script that

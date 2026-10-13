@@ -88,21 +88,25 @@ SLOT_DIR=${AGENT_REPL_SUITE_SLOT_DIR:-/tmp/agent-repl-suite.slots}
 
 # HOW MANY SUITES MAY RUN AT ONCE.
 #
-# One, by default, and the default is the whole point. A suite is sized to use
-# the machine; two of them do not go twice as fast, they go slower and one of
-# them reports a bound as missed that a quiet box meets. Raise it only for
-# suites you have measured as small, and then say so at the call site.
-SUITE_SLOTS=${AGENT_REPL_SUITE_SLOTS:-1}
+# Two, by default (owner ruling, 2026-10-12; it was one). A suite is sized to
+# use the machine, so this stays small: it caps the agents' own ad-hoc runs,
+# which pile up without it (the load-253 day above). The merge queue's gates
+# are not counted here at all; see the exemption below.
+SUITE_SLOTS=${AGENT_REPL_SUITE_SLOTS:-2}
 
-# WHERE IN THE LINE A WAITER STANDS. The merge queue's gate is the one run
-# that holds master still while it waits, so it is served first. Any other
-# value is a caller's mistake, refused rather than guessed at.
+# THE MERGE QUEUE'S GATES TAKE NO SLOT (owner ruling, 2026-10-12). The two
+# merges at the front of the queue race to land, each running its gate at
+# once, and the merge queue's own governor is what admits them; a host slot on
+# top serialized the two racers and stood the queue's head behind the merge
+# behind it. A gate runs straight through, saying so. Any other priority is a
+# caller's mistake, refused rather than guessed at.
 # A SIBLING of the slot directory, not inside it, so the slot directory holds
 # only slots and a count of its entries stays a count of running suites.
 QUEUE_DIR="$SLOT_DIR.queue"
+TICKET_PRIORITY=1
 case ${AGENT_REPL_SUITE_PRIORITY:-} in
-  merge) TICKET_PRIORITY=0 ;;
-  "") TICKET_PRIORITY=1 ;;
+  merge) MERGE_GATE=1 ;;
+  "") MERGE_GATE=0 ;;
   *) log "AGENT_REPL_SUITE_PRIORITY=${AGENT_REPL_SUITE_PRIORITY} is not a known priority (the only one is 'merge')"; exit 2 ;;
 esac
 
@@ -225,6 +229,11 @@ acquire_slot() {
 }
 
 (( $# > 0 )) || { log "usage: suite-slot.sh <command> [args...]"; exit 2; }
+if (( MERGE_GATE )); then
+  log "a merge-queue gate takes no host suite slot; the merge queue's governor admits it: $*"
+  "$@"
+  exit $?
+fi
 acquire_slot "$*"
 "$@"
 # The command's exit status is this script's: a gate must never turn a red

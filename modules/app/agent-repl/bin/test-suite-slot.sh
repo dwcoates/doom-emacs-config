@@ -44,6 +44,10 @@ SCRIPT_UNDER_TEST="$THIS_DIR/suite-slot.sh"
 # ordinary waiter.
 unset AGENT_REPL_SUITE_PRIORITY
 
+# The rows about waiting stand on ONE slot, so a single holder fills the host:
+# the slot count is fixture state too. Row 10b alone runs at the default.
+export AGENT_REPL_SUITE_SLOTS=1
+
 # The unified suite is itself expected to hold the host slot. Its exported
 # re-entrancy marker is not fixture state: each case below constructs its own
 # process tree and private slot directory, including the nested case that
@@ -267,25 +271,44 @@ else
     fail "a dead waiter's ticket is dropped instead of blocking the line" "rc=$RC err: $(cat "$d/err")"
 fi
 
-# --- 10. the merge queue's gate goes ahead of an earlier ordinary waiter ----
-# Master does not move while the merge queue waits, so its gate is served
-# before every ad-hoc run, however long that run has been waiting.
-d="$TMP/t10"; mkdir -p "$d"
+# --- 10. a merge-queue gate runs while every slot is held -----------------
+# The two merges racing to land each run a gate at once, admitted by the merge
+# queue's governor; a host slot serialized them, so a gate takes none.
+d="$TMP/t10"; mkdir -p "$d/slots"
 sleep 60 &
-EARLIER=$!
-stage_ticket "$d" 1 1 "$EARLIER"
+HOLDER=$!
+for i in 1 2; do mkdir -p "$d/slots/slot-$i"; echo "$HOLDER" > "$d/slots/slot-$i/pid"; done
 set +e
 # shellcheck disable=SC2016  # $0 is the inner bash's, expanded there on purpose
 timeout 30 env AGENT_REPL_SUITE_PRIORITY=merge AGENT_REPL_SUITE_SLOT_DIR="$d/slots" \
     bash "$SCRIPT_UNDER_TEST" bash -c 'echo ran > "$0"' "$d/marker" 2>"$d/err"
 RC=$?
-kill "$EARLIER" 2>/dev/null
-wait "$EARLIER" 2>/dev/null
+kill "$HOLDER" 2>/dev/null
+wait "$HOLDER" 2>/dev/null
 set -e
 if [ "$RC" -eq 0 ] && [ "$(cat "$d/marker" 2>/dev/null)" = "ran" ]; then
-    pass "a merge-priority waiter runs ahead of an earlier ordinary waiter"
+    pass "a merge-queue gate runs while every host slot is held"
 else
-    fail "a merge-priority waiter runs ahead of an earlier ordinary waiter" "rc=$RC err: $(cat "$d/err")"
+    fail "a merge-queue gate runs while every host slot is held" "rc=$RC err: $(cat "$d/err")"
+fi
+
+# --- 10b. the host allows two ad-hoc suites at once by default ---------------
+d="$TMP/t10b"; mkdir -p "$d/slots"
+sleep 60 &
+HOLDER=$!
+mkdir -p "$d/slots/slot-1"; echo "$HOLDER" > "$d/slots/slot-1/pid"
+set +e
+# shellcheck disable=SC2016  # $0 is the inner bash's, expanded there on purpose
+timeout 30 env -u AGENT_REPL_SUITE_SLOTS AGENT_REPL_SUITE_SLOT_DIR="$d/slots" \
+    bash "$SCRIPT_UNDER_TEST" bash -c 'echo ran > "$0"' "$d/marker" 2>"$d/err"
+RC=$?
+kill "$HOLDER" 2>/dev/null
+wait "$HOLDER" 2>/dev/null
+set -e
+if [ "$RC" -eq 0 ] && [ "$(cat "$d/marker" 2>/dev/null)" = "ran" ]; then
+    pass "a second ad-hoc suite runs beside a first by default"
+else
+    fail "a second ad-hoc suite runs beside a first by default" "rc=$RC err: $(cat "$d/err")"
 fi
 
 # --- 11. an unknown priority is refused, not guessed at ---------------------
