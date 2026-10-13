@@ -13,6 +13,7 @@ import {
   PARENT_KINDS,
   RESOLVED_KINDS,
   SECTIONED_KINDS,
+  VIEWED_KINDS,
   autoSelectedTab,
   childTabsOf,
   drawFeedMergeTab,
@@ -90,8 +91,8 @@ describe("childTabsOf: a strip is the sub-feed's tab rows it holds, in served or
 });
 
 describe("readMergeTab: the arms are read from the contract", () => {
-  it("holds to the schema: every kind is resolved, agentic, a parent, or sectioned", () => {
-    expect([...RESOLVED_KINDS, ...AGENTIC_KINDS, ...PARENT_KINDS, ...SECTIONED_KINDS].sort()).toEqual(
+  it("holds to the schema: every kind is resolved, agentic, a parent, sectioned, or viewed", () => {
+    expect([...RESOLVED_KINDS, ...AGENTIC_KINDS, ...PARENT_KINDS, ...SECTIONED_KINDS, ...VIEWED_KINDS].sort()).toEqual(
       [...oneofArms(FeedMergeTabSchema, "kind")].sort(),
     );
   });

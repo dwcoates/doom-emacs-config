@@ -28,6 +28,16 @@ function recordingPanel(tab: MergeTab, log: string[], accept = true): TabPanel {
   };
 }
 
+/** A panel recording every reselect it was asked for, by the badge's tab. */
+function reselectingPanel(tab: MergeTab, log: string[]): TabPanel {
+  return {
+    ...recordingPanel(tab, log),
+    reselect(badge: HTMLElement): void {
+      log.push(`reselect ${tab.id} ${badge.getAttribute("data-merge-tab") ?? ""}`);
+    },
+  };
+}
+
 /** A tab set mounted on a fresh host, with its panel log. */
 function mounted(depth: "top" | "nested" = "top", accept = true) {
   const host = document.createElement("div");
@@ -39,6 +49,24 @@ function mounted(depth: "top" | "nested" = "top", accept = true) {
 const tabs = (...rows: Parameters<typeof tabRow>[]) => childTabsOf(rows.map((r) => tabRow(...r)), undefined);
 
 describe("createTabSet", () => {
+  it("hands a click on the shown tab's badge to its panel", () => {
+    const host = document.createElement("div");
+    const log: string[] = [];
+    const set = createTabSet(host, createTicker(1000), "nested", (tab) => reselectingPanel(tab, log));
+    set.draw(tabs(["a", { kind: "committing", state: "live" }]));
+    host.querySelector<HTMLElement>(".merge-tab")?.click();
+    expect(log).toEqual(["draw a", "reselect a committing"]);
+  });
+
+  it("selects a tab not shown on a click, without a reselect", () => {
+    const host = document.createElement("div");
+    const log: string[] = [];
+    const set = createTabSet(host, createTicker(1000), "nested", (tab) => reselectingPanel(tab, log));
+    set.draw(tabs(["a", { kind: "queue", state: "settled", outcome: "succeeded" }], ["b", { kind: "committing", state: "live" }]));
+    host.querySelector<HTMLElement>('.merge-tab[data-merge-tab="queue"]')?.click();
+    expect(log).toEqual(["draw b", "draw a"]);
+  });
+
   it("mounts a strip, a summary line and a panel, in that order", () => {
     const { host } = mounted();
     expect([...host.children].map((c) => c.className)).toEqual(["merge-strip", "merge-tab-summary", "merge-tab-panel"]);
