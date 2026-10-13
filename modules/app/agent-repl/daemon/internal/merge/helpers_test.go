@@ -1332,6 +1332,11 @@ func (q *fakeQueue) flushes() []ids.WorkspaceID {
 // ReleaseReconnectHolds is a no-op: no merge scenario brings a session up.
 func (q *fakeQueue) ReleaseReconnectHolds(ids.WorkspaceID) {}
 
+// ColdGateAnswered is a no-op: no merge scenario answers a cold gate.
+func (q *fakeQueue) ColdGateAnswered(context.Context, ids.WorkspaceID, promptqueue.GateFate) error {
+	return nil
+}
+
 // OnVendorServes is a no-op: no merge scenario stands a vendor block.
 func (q *fakeQueue) OnVendorServes(ids.WorkspaceID) {}
 

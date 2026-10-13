@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -343,6 +344,59 @@ func TestAnswerColdGateRequiresACompactScope(t *testing.T) {
 	// Assert.
 	if code := connectCode(t, err); code != connect.CodeInvalidArgument {
 		t.Fatalf("code = %v, want InvalidArgument", code)
+	}
+}
+
+// TestAnswerColdGateRequiresACompactAndResumeScope pins that the
+// compact-and-resume arm's scope is never defaulted either.
+func TestAnswerColdGateRequiresACompactAndResumeScope(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	_, err := h.Client.AnswerColdGate(context.Background(),
+		connect.NewRequest(&agentreplv1.AnswerColdGateRequest{
+			Workspace: ref(),
+			Gate:      coldGateIDFor(testWorkspaceID),
+			Choice: &agentreplv1.AnswerColdGateRequest_CompactAndResume{
+				CompactAndResume: &agentreplv1.AnswerColdGateCompact{
+					Model: &conversationv1.AgentModel{Name: "claude-opus-5"},
+				},
+			},
+		}))
+
+	// Assert.
+	if code := connectCode(t, err); code != connect.CodeInvalidArgument {
+		t.Fatalf("code = %v, want InvalidArgument", code)
+	}
+}
+
+// TestAnswerColdGateHandsTheVerbTheRequestsChoice pins that the handler
+// passes the answer through whole, so the verb sees which compact button was
+// pressed.
+func TestAnswerColdGateHandsTheVerbTheRequestsChoice(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	req := &agentreplv1.AnswerColdGateRequest{
+		Workspace: ref(),
+		Gate:      coldGateIDFor(testWorkspaceID),
+		Choice: &agentreplv1.AnswerColdGateRequest_CompactAndResume{
+			CompactAndResume: &agentreplv1.AnswerColdGateCompact{
+				Model: &conversationv1.AgentModel{Name: "claude-opus-5"},
+				Scope: conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL,
+			},
+		},
+	}
+
+	// Act.
+	resp, err := h.Client.AnswerColdGate(context.Background(), connect.NewRequest(req))
+
+	// Assert.
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("AnswerColdGate = %v, %v; want success", resp, err)
+	}
+	if got := h.Verbs.coldGateAnswers; len(got) != 1 || !proto.Equal(got[0], req) {
+		t.Fatalf("verb answers = %v, want the request handed through whole", got)
 	}
 }
 
