@@ -33,7 +33,24 @@ import {
 export interface HostEnv {
   readonly doc: Document;
   readonly win: Window;
+  /** The clock warmth is judged by; tests substitute their own. */
+  readonly now?: () => number;
+  /** Arm a one-shot timer; tests substitute their own. Answers the disarm. */
+  readonly setTimer?: (fn: () => void, ms: number) => () => void;
 }
+
+/**
+ * A PAGE IS WARM while it is shown, or is among the WARM_RECENT pages shown
+ * most recently AND was shown within WARM_WINDOW_MS (owner ruling,
+ * 2026-10-12). A warm page keeps every stream it holds standing, so switching
+ * back to it draws at once; a cold page keeps its conversation live and
+ * stands its sidebar, topbar and footer streams down (presence.ts), because
+ * every page of the host shares one main thread and each standing view
+ * redraws on every push (2026-10-12: 37 pages redrawing every roster push held
+ * the startup's pages up to 34 s).
+ */
+export const WARM_RECENT = 6;
+export const WARM_WINDOW_MS = 5 * 60_000;
 
 /** The slot the docked gate takes, as Emacs last told it. */
 interface GateDockState {
@@ -53,6 +70,10 @@ interface Frame {
   drawn: DrawnWhat | null;
   selection: { text: string | null; focused: boolean };
   editing: boolean;
+  /** When the host last showed it (epoch ms), or null when it never did. */
+  lastShownMs: number | null;
+  /** The warmth the page was last told. */
+  warm: boolean;
 }
 
 /** The host's API, as Emacs calls it through `window.agentReplHost`. */
@@ -96,8 +117,16 @@ const NOTE_LIMIT = 50;
 /** Build the host over ENV and start listening to its pages. */
 export function createHost(env: HostEnv): Host {
   const { doc, win } = env;
+  const now = env.now ?? Date.now;
+  const setTimer =
+    env.setTimer ??
+    ((fn: () => void, ms: number) => {
+      const timer = win.setTimeout(fn, ms);
+      return () => win.clearTimeout(timer);
+    });
   const frames = new Map<string, Frame>();
   let shownId: string | null = null;
+  let disarmCooling: (() => void) | null = null;
   let notes: string[] = [];
 
   const note = (text: string): void => {
@@ -119,8 +148,52 @@ export function createHost(env: HostEnv): Host {
     target.postMessage(message, "*");
   };
 
+  const presenceOf = (frame: Frame): HostToPage => ({
+    channel: HOST_CHANNEL,
+    kind: "presence",
+    shown: frame.id === shownId,
+    warm: frame.warm,
+  });
+
+  /** The ids warm now: the shown page, and the most recent shown lately. */
+  const warmIds = (at: number): Set<string> => {
+    const recent = [...frames.values()]
+      .filter((f) => f.lastShownMs !== null && at - f.lastShownMs < WARM_WINDOW_MS)
+      .sort((a, b) => (b.lastShownMs ?? 0) - (a.lastShownMs ?? 0))
+      .slice(0, WARM_RECENT)
+      .map((f) => f.id);
+    const warm = new Set(recent);
+    if (shownId !== null) warm.add(shownId);
+    return warm;
+  };
+
+  /**
+   * Bring every page's warmth up to date, telling each page whose warmth
+   * changed, and arm the one timer that cools the next page to age out.
+   */
+  const rewarm = (): void => {
+    const at = now();
+    const warm = warmIds(at);
+    for (const frame of frames.values()) {
+      const next = warm.has(frame.id);
+      if (next === frame.warm) continue;
+      frame.warm = next;
+      note(`${frame.id} ${next ? "warm" : "cold"}`);
+      post(frame, presenceOf(frame));
+    }
+    disarmCooling?.();
+    disarmCooling = null;
+    let soonest: number | null = null;
+    for (const frame of frames.values()) {
+      if (!frame.warm || frame.id === shownId || frame.lastShownMs === null) continue;
+      const expires = frame.lastShownMs + WARM_WINDOW_MS;
+      if (soonest === null || expires < soonest) soonest = expires;
+    }
+    if (soonest !== null) disarmCooling = setTimer(rewarm, Math.max(0, soonest - at));
+  };
+
   const sendState = (frame: Frame): void => {
-    post(frame, { channel: HOST_CHANNEL, kind: "presence", shown: frame.id === shownId });
+    post(frame, presenceOf(frame));
     if (frame.inputBackground !== null) {
       post(frame, { channel: HOST_CHANNEL, kind: "inputBackground", background: frame.inputBackground });
     }
@@ -205,6 +278,8 @@ export function createHost(env: HostEnv): Host {
       drawn: null,
       selection: { text: "", focused: false },
       editing: false,
+      lastShownMs: null,
+      warm: id === shownId,
     };
     applyShown(frame, id === shownId);
     frames.set(id, frame);
@@ -236,12 +311,17 @@ export function createHost(env: HostEnv): Host {
       if (shownId === id) return answer("show", id, "unchanged");
       const previous = shownId === null ? undefined : frames.get(shownId);
       shownId = id;
+      next.lastShownMs = now();
+      // Warmth first: the page now shown is warm when it learns it is shown.
+      next.warm = true;
       if (previous !== undefined) {
+        previous.lastShownMs = now();
         applyShown(previous, false);
-        post(previous, { channel: HOST_CHANNEL, kind: "presence", shown: false });
+        post(previous, presenceOf(previous));
       }
       applyShown(next, true);
-      post(next, { channel: HOST_CHANNEL, kind: "presence", shown: true });
+      post(next, presenceOf(next));
+      rewarm();
       // The keyboard follows the page on screen: Emacs focused this web view,
       // so the focus within it moves to the page now shown.
       if (doc.hasFocus()) next.iframe.focus();
@@ -252,6 +332,7 @@ export function createHost(env: HostEnv): Host {
         frames.delete(id);
         frame.iframe.remove();
         if (shownId === id) shownId = null;
+        rewarm();
         return "removed";
       });
     },
@@ -303,6 +384,8 @@ export function createHost(env: HostEnv): Host {
     },
     dispose() {
       win.removeEventListener("message", onMessage);
+      disarmCooling?.();
+      disarmCooling = null;
       for (const frame of frames.values()) frame.iframe.remove();
       frames.clear();
       shownId = null;

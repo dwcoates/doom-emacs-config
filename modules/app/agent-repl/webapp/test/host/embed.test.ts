@@ -106,7 +106,7 @@ describe("joining", () => {
 describe("presence", () => {
   it("takes the host showing it", () => {
     // Act
-    fromHost({ channel: HOST_CHANNEL, kind: "presence", shown: true });
+    fromHost({ channel: HOST_CHANNEL, kind: "presence", shown: true, warm: true });
 
     // Assert
     expect(presence.shown()).toBe(true);
@@ -114,7 +114,7 @@ describe("presence", () => {
 
   it("records the host showing it at info", async () => {
     // Act
-    fromHost({ channel: HOST_CHANNEL, kind: "presence", shown: true });
+    fromHost({ channel: HOST_CHANNEL, kind: "presence", shown: true, warm: true });
 
     // Assert
     await operations();
@@ -123,7 +123,7 @@ describe("presence", () => {
 
   it("records nothing when the host repeats what it said", async () => {
     // Arrange
-    fromHost({ channel: HOST_CHANNEL, kind: "presence", shown: false });
+    fromHost({ channel: HOST_CHANNEL, kind: "presence", shown: false, warm: false });
 
     // Act / Assert
     expect(await operations()).not.toContain("page.host-presence");
@@ -131,7 +131,7 @@ describe("presence", () => {
 
   it("ignores a message from a window other than its host", () => {
     // Act
-    fromHost({ channel: HOST_CHANNEL, kind: "presence", shown: true }, pageWin);
+    fromHost({ channel: HOST_CHANNEL, kind: "presence", shown: true, warm: true }, pageWin);
 
     // Assert
     expect(presence.shown()).toBe(false);
@@ -145,6 +145,30 @@ describe("presence", () => {
     await operations();
     const record = capture.sent.find((r) => r.operation === "page.host-message-unreadable");
     expect(record?.level.case).toBe("warn");
+  });
+});
+
+
+describe("warmth", () => {
+  it("takes the host warming it", () => {
+    // Act
+    fromHost({ channel: HOST_CHANNEL, kind: "presence", shown: false, warm: true });
+
+    // Assert
+    expect(presence.warm()).toBe(true);
+  });
+
+  it("records the host cooling a hidden page at info", async () => {
+    // Arrange
+    fromHost({ channel: HOST_CHANNEL, kind: "presence", shown: false, warm: true });
+
+    // Act
+    fromHost({ channel: HOST_CHANNEL, kind: "presence", shown: false, warm: false });
+
+    // Assert
+    capture.logger.flush();
+    await Promise.resolve();
+    expect(capture.sent.find((r) => r.operation === "page.host-warmth" && r.context?.["warm"] === false)?.level.case).toBe("info");
   });
 });
 
