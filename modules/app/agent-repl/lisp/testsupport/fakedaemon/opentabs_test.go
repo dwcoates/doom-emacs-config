@@ -54,6 +54,9 @@ func TestOpenTabsAnswersEveryWorkspaceReadyThenFinishes(t *testing.T) {
 			if frame.Opened.GetReady().GetRow().GetWorkspace().GetWorkspace().GetId() != frame.Opened.GetWorkspace().GetId() {
 				t.Fatalf("opened %s carries no row of its own: %v", frame.Opened.GetWorkspace().GetId(), frame.Opened)
 			}
+			if frame.Opened.GetReady().GetRow().GetWorkspace().GetRepository() == nil {
+				t.Fatalf("opened %s carries a row with no repository, which Emacs refuses: %v", frame.Opened.GetWorkspace().GetId(), frame.Opened)
+			}
 			if frame.Opened.GetReady() == nil {
 				t.Fatalf("opened %s is not ready: %v", frame.Opened.GetWorkspace().GetId(), frame.Opened)
 			}
