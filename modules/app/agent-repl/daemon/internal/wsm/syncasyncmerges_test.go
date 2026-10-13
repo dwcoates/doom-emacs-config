@@ -40,12 +40,7 @@ func undoLayout39(t *testing.T, path string) {
 // migration over rows a layout-38 build wrote.
 func rewindTo38(t *testing.T, path string) {
 	t.Helper()
-	undoLayout44(t, path)
-	undoLayout43(t, path)
-	undoLayout42(t, path)
-	undoLayout41(t, path)
-	undoLayout40(t, path)
-	undoLayout39(t, path)
+	undoLayoutsAbove(t, path, 38)
 	stampRaw(t, path, 38)
 }
 
