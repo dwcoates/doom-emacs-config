@@ -400,11 +400,7 @@ func (m Manager) attach(sizeMiB int) (_ *Volume, err error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if closeErr := unlock(); closeErr != nil {
-			err = errors.Join(err, fmt.Errorf("release the RAM disk registry lock: %w", closeErr))
-		}
-	}()
+	defer releaseRegistry(unlock, &err)
 	before, err := m.listImages()
 	if err != nil {
 		return nil, fmt.Errorf("list the attached images before attaching: %w", err)
@@ -692,11 +688,7 @@ func (m Manager) takeStray(dir string, pid int) (killed int, taken bool, err err
 	if err != nil {
 		return 0, false, err
 	}
-	defer func() {
-		if closeErr := unlock(); closeErr != nil {
-			err = errors.Join(err, fmt.Errorf("release the RAM disk registry lock: %w", closeErr))
-		}
-	}()
+	defer releaseRegistry(unlock, &err)
 	if m.Alive(pid) {
 		return 0, false, nil
 	}
@@ -881,6 +873,15 @@ func (m Manager) lockRegistry() (func() error, error) {
 	}
 }
 
+// releaseRegistry releases the registry lock taken by lockRegistry, joining a
+// failed release into *err, never dropping it. A holder defers it right after
+// the take: `defer releaseRegistry(unlock, &err)`.
+func releaseRegistry(unlock func() error, err *error) {
+	if closeErr := unlock(); closeErr != nil {
+		*err = errors.Join(*err, fmt.Errorf("release the RAM disk registry lock: %w", closeErr))
+	}
+}
+
 // lockHolders names the processes other than this one with the lock file
 // open, as lsof lists them within LsofBound; lsof's own failure is named in
 // their place, never dropped.
@@ -927,11 +928,7 @@ func (m Manager) probeRecord(path string) (_ *os.File, dead bool, err error) {
 	if err != nil {
 		return nil, false, err
 	}
-	defer func() {
-		if closeErr := unlock(); closeErr != nil {
-			err = errors.Join(err, fmt.Errorf("release the RAM disk registry lock: %w", closeErr))
-		}
-	}()
+	defer releaseRegistry(unlock, &err)
 	return probeRecordLocked(path)
 }
 

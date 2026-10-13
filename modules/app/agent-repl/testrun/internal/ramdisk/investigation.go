@@ -91,11 +91,7 @@ func (m Manager) EnsureInvestigation(inv Investigation, t *Trouble) (_ Investiga
 	case err != nil:
 		return out, err
 	default:
-		defer func() {
-			if closeErr := unlock(); closeErr != nil {
-				err = errors.Join(err, fmt.Errorf("release the RAM disk registry lock: %w", closeErr))
-			}
-		}()
+		defer releaseRegistry(unlock, &err)
 	}
 	porcelain, err := inv.Git(GitBound, "git", "-C", inv.Module, "worktree", "list", "--porcelain")
 	if err != nil {
