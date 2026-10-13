@@ -454,6 +454,11 @@ func (q *queue) OnLeaseChanged(ws ids.WorkspaceID) {
 	// two events deliver from the same standing holds.
 	d := q.lockDelivery(ws)
 	defer d.unlock()
+	// A LEASE CHANGE IS A FREENESS EDGE for a registered bounce: a merge's
+	// release frees the workspace a stale-build bounce was deferred behind
+	// (rollout shimBounce), and nothing else would take it. Taken as a turn's
+	// end takes one, deferring to a shim call in flight.
+	defer q.checkRegistryLocked(d, log)
 
 	standing, err := q.deps.DB.HeldPrompts(ctx, ws)
 	if err != nil {
