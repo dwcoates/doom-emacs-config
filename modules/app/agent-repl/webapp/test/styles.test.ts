@@ -4130,6 +4130,34 @@ describe("the rail's marks", () => {
 });
 
 /**
+ * A REPOSITORY'S "+" SITS AT THE RIGHT EDGE (owner request, 2026-10-13), over
+ * the when-column of the rows beneath it.
+ */
+describe("the repository header's add control", () => {
+  it("pushes the add control to the header's right edge", () => {
+    // Arrange / Act
+    const rule = declarationsOf("#ws-sidebar .repo-head .sb-add");
+
+    // Assert
+    expect(rule).toMatch(/margin-left:\s*auto/);
+  });
+
+  it("pads the header's right edge as a row's", () => {
+    // Arrange / Act
+    const head = declarationsOf("#ws-sidebar .repo-head") ?? "";
+    const row = declarationsOf("#ws-sidebar .row") ?? "";
+    const right = (decl: string): string | undefined => {
+      const parts = /padding:\s*([^;]+)/.exec(decl)?.[1].trim().split(/\s+/) ?? [];
+      return parts.length >= 2 ? parts[1] : undefined;
+    };
+
+    // Assert
+    expect(right(head)).toBeDefined();
+    expect(right(head)).toBe(right(row));
+  });
+});
+
+/**
  * THE DIMMED PROSE (owner request, 2026-10-10): a thinking bubble's and an
  * interim response's text sits half way between the tool card's header grey
  * (the Bash command's `--tool-command`) and the body text (`--fg`) in either
