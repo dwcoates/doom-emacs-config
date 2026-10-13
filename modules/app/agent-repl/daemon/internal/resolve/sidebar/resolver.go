@@ -239,18 +239,13 @@ func (r *resolver) render(log dlog.Logger, cause string) *frontendv1.WorkspaceRo
 		defer filter.flush()
 		log = filter
 	}
-	rc := rowContext{sessions: r.state.sessions(), selected: r.state.selected, cause: cause,
-		facts: map[ids.WorkspaceID]rowFacts{}}
+	rc := rowContext{sessions: r.state.sessions(), selected: r.state.selected, cause: cause}
 
 	// A MERGED workspace files under recently_merged whatever its hidden flag:
 	// it has no tab to hide, and that it is done is the more useful fact.
 	// A merge older than the Recently Merged window is drawn NOWHERE: it is
 	// not live, and the band holds a week's worth (owner request, 2026-10-11).
-	// A hidden workspace files under hidden whether or not it is viewed: the
-	// user hid it, which outranks having read it. Every other workspace whose
-	// row is drawn PARTIAL files under viewed, decided from the SAME facts the
-	// row draws its marker from (resolver.facts).
-	var live, hidden, viewed, merged []wsm.Workspace
+	var live, hidden, merged []wsm.Workspace
 	var settled []wsm.Workspace
 	for _, ws := range r.state.reg.Workspaces {
 		switch {
@@ -261,8 +256,6 @@ func (r *resolver) render(log dlog.Logger, cause string) *frontendv1.WorkspaceRo
 			settled = append(settled, ws)
 		case ws.Hidden:
 			hidden = append(hidden, ws)
-		case r.facts(ws, rc, log).viewed:
-			viewed = append(viewed, ws)
 		default:
 			live = append(live, ws)
 		}
@@ -274,7 +267,6 @@ func (r *resolver) render(log dlog.Logger, cause string) *frontendv1.WorkspaceRo
 		Repository:     r.repositoryView(live, rc, log),
 		Task:           r.taskView(live, rc, log),
 		Maturity:       r.maturityView(live, rc, log),
-		Viewed:         r.viewedSection(viewed, rc, log),
 		Hidden:         r.hiddenSection(hidden, rc, log),
 		RecentlyMerged: r.mergedSection(merged, rc, log),
 		TabBar:         r.tabBar(),
@@ -498,7 +490,7 @@ func (r *resolver) SetViewed(ws ids.WorkspaceID) {
 					"was":        s.result.String(),
 					"async_live": s.asyncLive(),
 				})
-			s.readResult(r.now())
+			s.result = resultRead
 			s.resultSettled = true
 		})
 }
@@ -636,7 +628,7 @@ func (r *resolver) SetTurnEnded(ws ids.WorkspaceID, how TurnClose) {
 			}
 			end, known := ladder.ResolveTurnEnd(how, s.lastFailure)
 			if !known {
-				s.setResult(resultNone)
+				s.result = resultNone
 				log.Error("daemon.sidebar.set_turn_ended",
 					"the roster took a turn close it has no turn-end arm for", dlog.Context{
 						"close":               int(how),
@@ -652,7 +644,7 @@ func (r *resolver) SetTurnEnded(ws ids.WorkspaceID, how TurnClose) {
 			// dwell, so no editor timer is involved. A cut that was interrupted
 			// or failed is a result like any other turn's and stays unread.
 			if cut != "" && end == ladder.TurnEndDone {
-				s.readResult(r.now())
+				s.result = resultRead
 				log.Info("daemon.sidebar.result_read_on_cut",
 					"a context cut completed, so its result is read at once and the row is drawn PARTIAL with no dwell", dlog.Context{
 						"act":        cut,
@@ -661,7 +653,7 @@ func (r *resolver) SetTurnEnded(ws ids.WorkspaceID, how TurnClose) {
 					})
 				return
 			}
-			s.setResult(resultUnread)
+			s.result = resultUnread
 			log.Info("daemon.sidebar.result_unread",
 				"the turn ended, so its result is unread until the user views the row", dlog.Context{
 					"status":     end.String(),
