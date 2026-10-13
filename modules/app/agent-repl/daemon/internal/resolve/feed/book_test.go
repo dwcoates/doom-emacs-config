@@ -86,31 +86,50 @@ func (f *fakeHistory) ReadHistory(_ context.Context, _ ids.WorkspaceID, target *
 		page.Boundary = &conversationv1.HistoryPage_More{More: &conversationv1.HistoryMore{LastEntry: book[end-1].GetAt()}}
 	}
 	if f.heads {
-		page.TurnHeads = turnHeads(book, start, end)
+		page.Heads = turnHeads(book, start, end)
 	}
 	return page, nil
 }
 
 // turnHeads is the store's rule for a page of BOOK[start:end] (newest first):
 // the prompt entry of every turn an entry of the page is stamped with whose
-// prompt is placed below the page, newest first, each turn once.
-func turnHeads(book []*conversationv1.HistoryEntryAt, start, end int) []*conversationv1.HistoryEntryAt {
+// prompt is placed below the page, newest first, each turn once, each
+// `steps_between` when an entry of its turn sits between it and the page and
+// `adjacent` otherwise.
+func turnHeads(book []*conversationv1.HistoryEntryAt, start, end int) []*conversationv1.HistoryTurnHead {
 	seen := map[string]bool{}
-	var heads []*conversationv1.HistoryEntryAt
+	var heads []*conversationv1.HistoryTurnHead
 	for _, at := range book[start:end] {
 		turn := at.GetTurn().GetValue()
 		if turn == "" || seen[turn] {
 			continue
 		}
 		seen[turn] = true
-		for _, older := range book[end:] {
-			if older.GetEntry().GetUserPrompt().GetId().GetValue() == turn {
-				heads = append(heads, older)
-				break
+		for i, older := range book[end:] {
+			if older.GetEntry().GetUserPrompt().GetId().GetValue() != turn {
+				continue
 			}
+			between := false
+			for _, step := range book[end : end+i] {
+				between = between || step.GetTurn().GetValue() == turn
+			}
+			heads = append(heads, historyHead(older, between))
+			break
 		}
 	}
 	return heads
+}
+
+// historyHead is PROMPT as a turn head whose `between` arm is steps_between
+// when BETWEEN, adjacent otherwise.
+func historyHead(prompt *conversationv1.HistoryEntryAt, between bool) *conversationv1.HistoryTurnHead {
+	head := &conversationv1.HistoryTurnHead{Entry: prompt}
+	if between {
+		head.Between = &conversationv1.HistoryTurnHead_StepsBetween{StepsBetween: &conversationv1.HistoryTurnHeadStepsBetween{}}
+	} else {
+		head.Between = &conversationv1.HistoryTurnHead_Adjacent{Adjacent: &conversationv1.HistoryTurnHeadAdjacent{}}
+	}
+	return head
 }
 
 // readCount answers how many reads were made.

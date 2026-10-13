@@ -405,7 +405,7 @@ func (r *resolver) load(ctx context.Context, plan loadPlan) (loaded, error) {
 			"feed": f.key, "agent": plan.target.GetValue(), "newest": plan.newest,
 			"entries": len(entries), "floor": f.book.floor, "drew_rows": l.drew,
 			"bound": l.low, "quiet": len(l.quiet), "pending": len(f.book.pending),
-			"heads": len(page.GetTurnHeads()), "heads_drawn": l.heads, "gaps": len(f.book.gaps),
+			"heads": len(page.GetHeads()), "heads_drawn": l.heads, "gaps": len(f.book.gaps),
 			"outcomes": l.outcomes.String(),
 		})
 	return loaded{low: l.low, drew: l.drew}, nil
