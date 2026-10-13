@@ -814,9 +814,11 @@ async function selectWorkspace(
 }
 
 /**
- * Show a hidden workspace again: the click on its row in the hidden section.
- * The push that follows moves it back into its groupings and onto the tab
- * bar, so a success draws nothing here.
+ * Show a hidden workspace again, then select it: the click on its row in the
+ * hidden section (owner request, 2026-10-13). The push that follows moves it
+ * back into its groupings and onto the tab bar; once the daemon has answered
+ * the show, the same click selects it, so the user lands on what they clicked.
+ * A refused show selects nothing: the refusal stands on the row instead.
  */
 async function showWorkspace(
   line: HTMLElement,
@@ -827,12 +829,14 @@ async function showWorkspace(
     operation: "sidebar.row.show",
     context: { workspace: workspace.id },
   });
-  await runVerb(line, {
+  const shown = await runVerb(line, {
     sc,
     rpc: "SetWorkspaceHidden",
     call: (client) => client.setWorkspaceHidden(buildSetWorkspaceHiddenRequest(workspace, false)),
     schema: SetWorkspaceHiddenResponseSchema,
   });
+  if (!shown) return;
+  await selectWorkspace(line, sc, workspace);
 }
 
 /** One `<dt>/<dd>` pair in the detail panel. */
