@@ -23,11 +23,14 @@
 import { createPageSeen } from "../../src/page-seen.js";
 import { pagePresence } from "../../src/presence.js";
 import { TITLE_REVEALED_ATTRIBUTE } from "../../src/feed/title-reveal.js";
+import { CONVERSATION_DRAWN_ATTRIBUTE } from "../../src/feed/conversation-drawn.js";
 
 /** One animation frame of fake time, as `finishTypeOuts` steps it. */
 const TYPE_OUT_FRAME_MS = 16;
 /** The most frames a title type-out may take: 10 s of fake time. */
 const TYPE_OUT_FRAME_CAP = 625;
+/** The frames after an applied page before it is marked drawn. */
+const CONVERSATION_DRAWN_FRAMES = 2;
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { transferableAbortController } from "node:util";
@@ -862,6 +865,8 @@ async function mountApp(
       } catch {
         // A jsdom without storage is fine: there is then nothing to clear.
       }
+      // The drawn mark is the page's, set once per page: a fresh page per test.
+      document.documentElement.removeAttribute(CONVERSATION_DRAWN_ATTRIBUTE);
       vi.useRealTimers();
     },
 
@@ -889,6 +894,16 @@ async function mountApp(
     refusalArms: () => $$(".refusal[data-arm]").map((el) => el.dataset.arm ?? ""),
   };
 
+  await settle();
+  // A BOOTED PAGE HAS ITS CONVERSATION ON SCREEN. The opening page is marked
+  // drawn two animation frames after it is applied (conversation-drawn.ts),
+  // and the frames are faked, so they are run here rather than left to land
+  // inside whatever the case does next, where the mark's record would be read
+  // as the case's own.
+  for (let frame = 0; frame < CONVERSATION_DRAWN_FRAMES; frame += 1) {
+    if (document.documentElement.hasAttribute(CONVERSATION_DRAWN_ATTRIBUTE)) break;
+    await vi.advanceTimersByTimeAsync(TYPE_OUT_FRAME_MS);
+  }
   await settle();
   return harness;
 }
