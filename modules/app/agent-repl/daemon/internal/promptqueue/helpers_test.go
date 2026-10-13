@@ -92,6 +92,8 @@ type fakeDB struct {
 	coalescences int
 	// workspaceErr fails the workspace read when set.
 	workspaceErr error
+	// holdErr fails every hold restamp (UpdateHeldPromptHold).
+	holdErr error
 	// beforeHoldWrite, when set, runs under the fake's lock as a held prompt
 	// is written or restamped: the instant a merge's release can win the race.
 	beforeHoldWrite func(d *fakeDB)
@@ -211,6 +213,9 @@ func (d *fakeDB) UpdateHeldPromptHold(_ context.Context, turn ids.TurnID, kind *
 	h, ok := d.held[turn]
 	if !ok {
 		return errors.New("no such hold")
+	}
+	if d.holdErr != nil {
+		return d.holdErr
 	}
 	if d.beforeHoldWrite != nil {
 		d.beforeHoldWrite(d)
@@ -1556,6 +1561,11 @@ type harness struct {
 	// parked at its cold gate, or a session between its start and its watch.
 	noWatcher bool
 
+	// gateCounts records every count of prompts held at a cold gate the queue
+	// reported (Deps.ColdGateHeld), in order.
+	gateMu     sync.Mutex
+	gateCounts []int
+
 	// hostPublishes counts the host-view republications the queue asked for.
 	hostMu        sync.Mutex
 	hostPublishes int
@@ -1619,6 +1629,11 @@ func newHarness(t *testing.T) *harness {
 		StandingDown:   h.standingDown.Load,
 		ColdGate: func(ids.WorkspaceID) (string, bool) {
 			return h.coldGate, h.coldGate != ""
+		},
+		ColdGateHeld: func(_ ids.WorkspaceID, held int) {
+			h.gateMu.Lock()
+			defer h.gateMu.Unlock()
+			h.gateCounts = append(h.gateCounts, held)
 		},
 		DrainRefusals: h.drain,
 		PublishHost: func(ids.WorkspaceID) {
