@@ -1192,11 +1192,11 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 }
 #ws-sidebar .detail .summary { font-style: italic; color: var(--muted); margin: 0.35rem 0 0; }
 
-/* THE BREATH SHRINKS A MARK TO 86% (owner ruling, 2026-10-13: half the
-   extent of the 72% it once reached). */
+/* THE BREATH SHRINKS A MARK TO 90.2% (owner ruling, 2026-10-13: 30% less
+   than the 14% it shrank before, which was itself half of the 28% to 72%). */
 @keyframes ws-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.35; transform: scale(0.86); }
+  50% { opacity: 0.35; transform: scale(0.902); }
 }
 
 #topbar {
@@ -5519,8 +5519,9 @@ ar-button.outcome-marker-pill {
 #ws-sidebar .st[data-glyph="none"] { visibility: hidden; }
 /* ONE ANIMATION FOR THE WHOLE RAIL (owner ruling, 2026-10-13): every animated
    mark breathes (normal, shrunk, normal) with the same keyframes, easing and
-   `--ws-mark-cycle`, and a breath always means something is in progress. */
-#ws-sidebar { --ws-mark-cycle: 1.4s; }
+   `--ws-mark-cycle`, and a breath always means something is in progress. The
+   cycle is 2s (owner ruling, 2026-10-13: 30% slower than the 1.4s before). */
+#ws-sidebar { --ws-mark-cycle: 2s; }
 #ws-sidebar .st.breathes { animation: ws-pulse var(--ws-mark-cycle) ease-in-out infinite; }
 
 /* THE ATTENTION MARKER, on the ONE cadence frontend.v1.RosterRowAttention
