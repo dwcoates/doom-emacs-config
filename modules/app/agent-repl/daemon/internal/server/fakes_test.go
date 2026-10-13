@@ -698,13 +698,15 @@ func (f *fakeQueue) RollBack(ctx context.Context, _ ids.WorkspaceID, since time.
 // fakeMerge answers the orchestrator's four server-facing verbs.
 type fakeMerge struct {
 	merge.Orchestrator
-	enqueueErr       error
-	pauseErr         error
-	pauseScope       *merge.RepositoryScope
-	answerDequeueErr error
-	evictErr         error
-	holdErr          error
-	releaseErr       error
+	enqueueErr          error
+	pauseErr            error
+	pauseScope          *merge.RepositoryScope
+	answerQueueOfferErr error
+	// queueOfferAnswers is every AnswerQueueOffer answer, in order.
+	queueOfferAnswers []merge.QueueOfferAnswer
+	evictErr          error
+	holdErr           error
+	releaseErr        error
 	// holds and releases count the rollout-hold verbs.
 	holds, releases int
 	moveErr         error
@@ -770,8 +772,9 @@ func (f *fakeMerge) TestLogPath(_ context.Context, _ ids.WorkspaceID, token stri
 	return f.logPaths[token], nil
 }
 
-func (f *fakeMerge) AnswerDequeue(context.Context, ids.WorkspaceID, bool) error {
-	return f.answerDequeueErr
+func (f *fakeMerge) AnswerQueueOffer(_ context.Context, ws ids.WorkspaceID, answer merge.QueueOfferAnswer) error {
+	f.queueOfferAnswers = append(f.queueOfferAnswers, answer)
+	return f.answerQueueOfferErr
 }
 
 func (f *fakeMerge) Evict(_ context.Context, ws ids.WorkspaceID) error {

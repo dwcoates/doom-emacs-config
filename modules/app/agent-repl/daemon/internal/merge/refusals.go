@@ -34,15 +34,12 @@ const (
 	// ArmAlreadyMerging refuses an enqueue for the workspace whose merge is
 	// running right now.
 	ArmAlreadyMerging = "already_merging"
-	// ArmNoSuchQueuedMerge refuses an evict or a dequeue answer for a workspace
+	// ArmNoSuchQueuedMerge refuses an evict or a queue-offer answer for a workspace
 	// with nothing on the queue (UpdateMergeQueueError.no_such_queued_merge).
 	ArmNoSuchQueuedMerge = "no_such_queued_merge"
-	// ArmNoOfferStanding refuses a dequeue answer when no offer stands
-	// (AnswerHeldOfferError.no_offer_standing).
+	// ArmNoOfferStanding refuses an answer to the merge-queue question when
+	// none stands (AnswerMergeQueueOfferError.no_offer_standing).
 	ArmNoOfferStanding = "no_offer_standing"
-	// ArmOfferSuperseded refuses a dequeue answer for an offer a newer one
-	// replaced (AnswerHeldOfferError.offer_superseded).
-	ArmOfferSuperseded = "offer_superseded"
 	// ArmAlreadyPaused refuses a pause of a queue that is already paused
 	// (UpdateMergeQueueError.already_paused).
 	ArmAlreadyPaused = "already_paused"

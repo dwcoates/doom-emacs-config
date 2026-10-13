@@ -9,7 +9,6 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
-	"agent-repld/internal/protoarm"
 	"agent-repld/internal/resolve/holds"
 	"agent-repld/internal/wsm"
 )
@@ -28,10 +27,9 @@ import (
 // that found no session) returns the prompt to the section the same way.
 //
 // The prompt half is whatever the prompt queue says is standing
-// (SetHeldPrompts), minus the prompts whose row is already drawn; the offer is
-// what the merge orchestrator posed (SetOffer). The state lives on the resolver rather
-// than on wsState, because a bind's reset empties the feed and must not forget
-// what the queue and the orchestrator are still holding.
+// (SetHeldPrompts), minus the prompts whose row is already drawn. The state
+// lives on the resolver rather than on wsState, because a bind's reset empties
+// the feed and must not forget what the queue is still holding.
 
 // The operations this file's records carry.
 const opHeld = "daemon.feed.held"
@@ -43,8 +41,6 @@ type heldState struct {
 	// editing is the held prompt an EditHeldPrompt claim stands on, empty when
 	// none does.
 	editing ids.TurnID
-	// offer is the posed question, nil when none is posed.
-	offer *frontendv1.HeldOffer
 	// published is the section as last published; nil until the first.
 	published *frontendv1.FeedHeld
 }
@@ -86,27 +82,6 @@ func (r *resolver) SetEditing(ws ids.WorkspaceID, turn ids.TurnID) {
 	r.publishHeld(s, nil)
 }
 
-// SetOffer installs the question the section poses, or clears it with nil.
-//
-// The offer arrives ALREADY COMPOSED (merge.dequeueOffer is its one author). An
-// offer whose arm is unset is a contract breach recorded loudly and still
-// drawn: dropping it would hide a question the user is being asked.
-func (r *resolver) SetOffer(ws ids.WorkspaceID, offer *frontendv1.HeldOffer) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	s := r.state(ws)
-	log := r.logger(ws)
-	if offer != nil && offer.GetOffer() == nil {
-		log.Error(opHeld, "an offer arrived with no arm set and is drawn as given", dlog.Context{
-			"invariant_violation": "HeldOffer.offer is unset",
-			"remediation":         "raise the offer through merge.dequeueOffer",
-		})
-	}
-	r.heldOf(ws).offer = offer
-	log.Debug(opHeld, "the held section took the posed offer", dlog.Context{"posed": offer != nil})
-	r.publishHeld(s, nil)
-}
-
 // currentHeld answers the section as it stands at this moment of the root
 // feed's log: the one last published, or the empty section when none ever was
 // (which it then records as published, so the next change is judged against
@@ -142,10 +117,10 @@ func (r *resolver) publishHeld(s *wsState, rows []*frontendv1.FeedRow) {
 }
 
 // renderHeld composes the section from its accumulation: the held prompts
-// whose row is not drawn yet, in queue order, then the offer. The caller holds the lock.
+// whose row is not drawn yet, in queue order. The caller holds the lock.
 func (r *resolver) renderHeld(s *wsState, h *heldState) *frontendv1.FeedHeld {
 	log := r.logger(s.id)
-	items := make([]*frontendv1.FeedHeldItem, 0, len(h.prompts)+1)
+	items := make([]*frontendv1.FeedHeldItem, 0, len(h.prompts))
 	for _, card := range holds.Prompts(h.prompts, h.editing, log) {
 		id, drawn := r.promptRowDrawn(s, card.Turn)
 		if drawn {
@@ -159,23 +134,7 @@ func (r *resolver) renderHeld(s *wsState, h *heldState) *frontendv1.FeedHeld {
 			Item: &frontendv1.FeedHeldItem_Prompt{Prompt: card.Prompt},
 		})
 	}
-	if h.offer != nil {
-		items = append(items, &frontendv1.FeedHeldItem{
-			Id:   r.rowID(s.id, feedid.Feed{Root: true}, heldOfferKey(h.offer)),
-			Item: &frontendv1.FeedHeldItem_Offer{Offer: h.offer},
-		})
-	}
 	return &frontendv1.FeedHeld{Items: items}
-}
-
-// heldOfferKey is a posed offer's identity: its kind, since at most one offer
-// of a kind is posed at a time.
-func heldOfferKey(offer *frontendv1.HeldOffer) feedid.RowKey {
-	kind := "unset"
-	if arm, ok := protoarm.Name(offer.ProtoReflect(), "offer"); ok {
-		kind = string(arm)
-	}
-	return feedid.RowKey{Kind: feedid.KindHeldOffer, ID: kind}
 }
 
 // promptRowFor is the identity TURN's prompt row carries, on the feed the turn

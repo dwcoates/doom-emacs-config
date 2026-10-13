@@ -378,8 +378,10 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
   `merging.queued{position,depth}`, roster `merge_queued`; a second
   workspace in the same repo queues behind; pause/resume/evict via
   UpdateMergeQueue
-- Interrupt while queued raises the dequeue HeldOffer; AnswerHeldOffer
-  {release} evicts, {keep} keeps
+- Interrupt while queued and idle answers `merge_queue_offered` and raises
+  `FeedMerge.queue_offer` on the pinned head; AnswerMergeQueueOffer
+  {evict} evicts, {prioritize} runs it next, {cancel} keeps it and clears
+  the question
 - the emacs-repo method: pre-prompt tab (when configured) runs the session
   under the lease with origin MERGE_BEFORE_ACTION and its rows parented to
   the tab (output address); merge tab narrates the no-ff commit; a
@@ -516,9 +518,9 @@ audit's charge can be reconciled against the files.
   `base_ref`, and a file with ONE invalid entry applying NOTHING.
 - HOLD ARMS: `uninterruptible_turn` (a /clear's turn open) reaches the tray
   with NO classifying push and refuses release; a revival-time entry carries
-  `session_starting` and refuses release; `AnswerHeldOffer` with nothing
-  standing answers `no_offer_standing`; `UpdateMergeQueue{evict}` clears a
-  standing dequeue offer and the tray heading counts down.
+  `session_starting` and refuses release; `AnswerMergeQueueOffer` with nothing
+  standing answers `no_offer_standing`; `UpdateMergeQueue{evict}` retires a
+  standing merge-queue question.
 - ACCOUNT ROUTING: the topbar email and `HostVendorClaude.config_dir` are each
   asserted for a workspace inside the multi-repo root and one outside it; a
   fork created outside the root does not inherit its parent's account.

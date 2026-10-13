@@ -23,15 +23,15 @@ func TestSet(t *testing.T) {
 	}{
 		{
 			name:    "answers the set arm's field",
-			m:       (&frontendv1.HeldOffer{Offer: &frontendv1.HeldOffer_MergeDequeue{MergeDequeue: &frontendv1.HeldOfferMergeDequeue{}}}).ProtoReflect(),
-			oneof:   "offer",
-			want:    "merge_dequeue",
+			m:       (&frontendv1.FeedMerge{Result: &frontendv1.FeedMerge_Update{Update: &frontendv1.FeedMergeUpdate{}}}).ProtoReflect(),
+			oneof:   "result",
+			want:    "update",
 			wantSet: true,
 		},
 		{
 			name:    "answers false when no arm is set",
-			m:       (&frontendv1.HeldOffer{}).ProtoReflect(),
-			oneof:   "offer",
+			m:       (&frontendv1.FeedMerge{}).ProtoReflect(),
+			oneof:   "result",
 			wantSet: false,
 		},
 	}
@@ -56,11 +56,11 @@ func TestSet(t *testing.T) {
 
 func TestSetPanicsNamingAOneofTheMessageDoesNotDeclare(t *testing.T) {
 	// Arrange
-	m := (&frontendv1.HeldOffer{}).ProtoReflect()
+	m := (&frontendv1.FeedMerge{}).ProtoReflect()
 	defer func() {
 		// Assert
 		got, _ := recover().(string)
-		if !strings.Contains(got, "frontend.v1.HeldOffer") || !strings.Contains(got, `"nope"`) {
+		if !strings.Contains(got, "frontend.v1.FeedMerge") || !strings.Contains(got, `"nope"`) {
 			t.Fatalf("panic = %q, want it to name the message and the oneof", got)
 		}
 	}()
@@ -79,13 +79,13 @@ func TestName(t *testing.T) {
 	}{
 		{
 			name:    "answers the set arm's name",
-			m:       (&frontendv1.HeldOffer{Offer: &frontendv1.HeldOffer_MergeDequeue{MergeDequeue: &frontendv1.HeldOfferMergeDequeue{}}}).ProtoReflect(),
-			want:    "merge_dequeue",
+			m:       (&frontendv1.FeedMerge{Result: &frontendv1.FeedMerge_Update{Update: &frontendv1.FeedMergeUpdate{}}}).ProtoReflect(),
+			want:    "update",
 			wantSet: true,
 		},
 		{
 			name:    "answers an empty name and false when no arm is set",
-			m:       (&frontendv1.HeldOffer{}).ProtoReflect(),
+			m:       (&frontendv1.FeedMerge{}).ProtoReflect(),
 			want:    "",
 			wantSet: false,
 		},
@@ -93,7 +93,7 @@ func TestName(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			got, ok := Name(tt.m, "offer")
+			got, ok := Name(tt.m, "result")
 
 			// Assert
 			if got != tt.want || ok != tt.wantSet {

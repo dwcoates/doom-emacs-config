@@ -39,6 +39,29 @@ func TestInterruptAnswersNothingRunningAsASuccess(t *testing.T) {
 	}
 }
 
+// TestInterruptAnswersTheMergeQueueQuestionWithNoRollback pins that a stop which
+// raised the merge-queue question answers that arm, and never a rollback offer.
+func TestInterruptAnswersTheMergeQueueQuestionWithNoRollback(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Verbs.interruptOutcome = workspace.InterruptOutcome{MergeQueueOffered: true}
+
+	// Act.
+	resp, err := h.Client.Interrupt(context.Background(),
+		connect.NewRequest(&agentreplv1.InterruptRequest{
+			Workspace: ref(),
+			Target:    &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},
+		}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	if resp.Msg.GetSuccess().GetMergeQueueOffered() == nil {
+		t.Fatalf("result = %v, want merge_queue_offered", resp.Msg.GetResult())
+	}
+}
+
 // TestInterruptAnswersTheDetachedCount pins that a fan-wide interrupt reports
 // how many detached items it stopped.
 func TestInterruptAnswersTheDetachedCount(t *testing.T) {

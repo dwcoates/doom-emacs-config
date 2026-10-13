@@ -61,9 +61,19 @@ message InterruptSuccess {
     InterruptedDetached interrupted_detached = 2;
     // Nothing was running.
     InterruptNothingRunning nothing_running = 3;
+    // Nothing was running, and the workspace's own SYNC merge is in the
+    // queue: the interrupt is about that merge, so it raised the merge-queue
+    // question in the merge's pinned bubble
+    // (frontend.v1.FeedMerge.queue_offer) and did NOTHING ELSE. The queue is
+    // untouched until the question is answered, and no rollback is offered:
+    // the stop key's second press means the merge here, never the prompt.
+    InterruptMergeQueueOffered merge_queue_offered = 4;
   }
 }
 message InterruptedTurn {}
+// The frontend focuses the merge bubble's question. DELIBERATELY EMPTY: the
+// question itself rides the bubble's row.
+message InterruptMergeQueueOffered {}
 message InterruptedDetached {
   // How many detached agents the stop reached ("cancelled 3 agents"). The
   // shim's task ids stay on the shim wire — daemon bookkeeping a frontend

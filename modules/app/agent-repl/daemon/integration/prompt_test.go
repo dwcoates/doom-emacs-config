@@ -978,77 +978,59 @@ func TestPromptsHeldBeforeAMergeLeaseStayHeld(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// HeldOffer (audit-2 critique 17)
+// The merge-queue question (audit-2 critique 17)
 // ---------------------------------------------------------------------------
 
-func TestAnswerHeldOfferWithNoOfferStandingAnswersNoOfferStanding(t *testing.T) {
+func TestAnswerMergeQueueOfferWithNoOfferStandingAnswersNoOfferStanding(t *testing.T) {
 	t.Parallel()
-	// Arrange: an ordinary workspace with nothing ever raised in its tray.
+	// Arrange: an ordinary workspace with no question ever raised.
 	f := newOpened(t, harness.Opts{})
 
 	// Act
-	resp, err := f.d.Client().AnswerHeldOffer(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerHeldOfferRequest{
+	resp, err := f.d.Client().AnswerMergeQueueOffer(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerMergeQueueOfferRequest{
 		Workspace: f.ws,
-		Answer: &agentreplv1.AnswerHeldOfferRequest_MergeDequeue{MergeDequeue: &agentreplv1.AnswerHeldOfferMergeDequeue{
-			Decision: &agentreplv1.AnswerHeldOfferMergeDequeue_Keep{Keep: &agentreplv1.AnswerHeldOfferKeep{}},
-		}},
+		Decision:  &agentreplv1.AnswerMergeQueueOfferRequest_Cancel{Cancel: &agentreplv1.AnswerMergeQueueOfferCancel{}},
 	}))
 
 	// Assert: `no_offer_standing` is a LANDED arm, so the refusal is typed.
 	if err != nil {
-		t.Fatalf("AnswerHeldOffer with no offer standing = error %v, want the typed no_offer_standing answer", err)
+		t.Fatalf("AnswerMergeQueueOffer with no offer standing = error %v, want the typed no_offer_standing answer", err)
 	}
 	if resp.Msg.GetError().GetNoOfferStanding() == nil {
-		t.Fatalf("AnswerHeldOffer with no offer standing = %v, want error.no_offer_standing", resp.Msg)
+		t.Fatalf("AnswerMergeQueueOffer with no offer standing = %v, want error.no_offer_standing", resp.Msg)
 	}
 }
 
-// TestUpdateMergeQueueEvictWhileTheDequeueOfferStandsClearsItAndTheHeadingCounts
-// covers the rest of audit-2 critique 17: while a merge-dequeue HeldOffer
-// stands (raised by an interrupt on a queued workspace), the OPERATOR path
-// (UpdateMergeQueue{evict}) -- not the offer's own answer -- also clears it,
-// and the tray's composed heading counts the standing offer like any other
-// item.
-func TestUpdateMergeQueueEvictWhileTheDequeueOfferStandsClearsItAndTheHeadingCounts(t *testing.T) {
+// TestUpdateMergeQueueEvictWhileTheQuestionStandsClearsIt covers the rest of
+// audit-2 critique 17: while the merge-queue question stands (raised by an
+// interrupt on a queued workspace), the OPERATOR path
+// (UpdateMergeQueue{evict}) -- not the question's own answer -- also retires
+// it, and a later answer finds nothing standing.
+func TestUpdateMergeQueueEvictWhileTheQuestionStandsClearsIt(t *testing.T) {
 	t.Parallel()
 	// Arrange: a second workspace queued behind the first's blocked merge,
-	// then an interrupt raises the dequeue offer.
+	// then an interrupt raises the question.
 	_, behind, _, d := mergeBlockedQueueFixture(t)
 	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages, the queued merge the test abandons.
 	d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.drop_queued", "daemon.merge.merge_tab")
-	holds := behind.d.WatchHolds(behind.ws)
-	if _, err := behind.d.Client().Interrupt(behind.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
-		Workspace: behind.ws, Target: &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},
-	})); err != nil {
-		t.Fatalf("Interrupt(turn) = error %v, want a success", err)
-	}
-	tray := awaitView(t, behind, holds, "the merge-dequeue held offer", func(tray *frontendv1.FeedHeld) bool {
-		return mergeDequeueOffer(tray) != nil
-	})
-
-	// Assert: the heading reads the composed count for the one standing item.
-	if got := len(tray.GetItems()); got != 1 {
-		t.Fatalf("tray with one standing offer carried %d items, want 1", got)
-	}
+	raiseMergeQueueOffer(t, behind)
 
 	// Act: the OPERATOR path evicts the queued merge directly, never through
-	// AnswerHeldOffer.
+	// AnswerMergeQueueOffer.
 	resp, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
 		Action: &agentreplv1.UpdateMergeQueueRequest_Evict{Evict: &agentreplv1.UpdateMergeQueueEvict{Workspace: behind.ws}},
 	}))
 	if err != nil || resp.Msg.GetError() != nil {
-		t.Fatalf("UpdateMergeQueue{evict} while the offer stands = %v, %v, want a success", resp.Msg, err)
+		t.Fatalf("UpdateMergeQueue{evict} while the question stands = %v, %v, want a success", resp.Msg, err)
 	}
 
-	// Assert: the offer is cleared and the heading reflects the empty tray.
-	got := awaitView(t, behind, holds, "the offer cleared by the operator evict", func(tray *frontendv1.FeedHeld) bool {
-		return mergeDequeueOffer(tray) == nil
-	})
-	if mergeDequeueOffer(got) != nil {
-		t.Fatalf("held tray after UpdateMergeQueue{evict} = %v, want the dequeue offer gone", got)
-	}
-	if n := len(got.GetItems()); n != 0 {
-		t.Fatalf("tray after the evict carried %d items, want 0", n)
+	// Assert: the question is gone.
+	answer, err := d.Client().AnswerMergeQueueOffer(d.Ctx(), connect.NewRequest(&agentreplv1.AnswerMergeQueueOfferRequest{
+		Workspace: behind.ws,
+		Decision:  &agentreplv1.AnswerMergeQueueOfferRequest_Cancel{Cancel: &agentreplv1.AnswerMergeQueueOfferCancel{}},
+	}))
+	if err != nil || answer.Msg.GetError().GetNoOfferStanding() == nil {
+		t.Fatalf("an answer after the evict = %v, %v, want error.no_offer_standing", answer.Msg, err)
 	}
 }
 

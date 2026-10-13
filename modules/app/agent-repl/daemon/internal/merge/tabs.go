@@ -298,6 +298,12 @@ func (o *orchestrator) publishHead(ws ids.WorkspaceID, lease ids.LeaseID, label 
 		}
 	}
 	if result == nil && !at.async() {
+		o.mu.Lock()
+		offered := o.offers[ws]
+		o.mu.Unlock()
+		if offered {
+			row.GetActivity().GetMerge().QueueOffer = queueOffer()
+		}
 		o.deps.Feed.UpsertDurablePinned(at.ws, feedid.Feed{Root: true}, row)
 		return
 	}
@@ -376,18 +382,6 @@ func queueSnapshot(entries []wsm.MergeQueueEntry, self ids.WorkspaceID, names ma
 		}
 	}
 	return snap
-}
-
-// dequeueOffer composes the tray's merge-dequeue question. The daemon composes
-// the sentence; the card draws it and offers the two answers, which are the
-// answer request's arms rather than fields here.
-func dequeueOffer(name string) *frontendv1.HeldOffer {
-	return &frontendv1.HeldOffer{Offer: &frontendv1.HeldOffer_MergeDequeue{
-		MergeDequeue: &frontendv1.HeldOfferMergeDequeue{
-			Headline: &frontendv1.HeldOfferHeadline{Text: fmt.Sprintf(
-				"interrupting %s — keep its merge's queue slot, or release it?", name)},
-		},
-	}}
 }
 
 // saidText composes the one canonical prompt form the daemon submits a brief

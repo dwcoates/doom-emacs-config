@@ -972,58 +972,128 @@ func (o *orchestrator) RetireConcluded(ctx context.Context, ws ids.WorkspaceID) 
 	o.forget(ws)
 }
 
-// OnInterrupt raises the dequeue offer for a workspace whose merge is queued.
-// An interrupt no longer silently yanks a merge off the queue: the daemon asks.
-func (o *orchestrator) OnInterrupt(ctx context.Context, ws ids.WorkspaceID) {
+// OnInterrupt raises the merge-queue question in WS's PINNED bubble, answering
+// whether it did. The interrupt changes nothing on the queue: the question's
+// answer (AnswerQueueOffer) alone acts.
+//
+// The question needs a bubble to stand in, so it is raised only for a SYNC
+// merge whose live head is drawn, which is the pinned one. A workspace with no
+// queued merge, an async merge (whose bubble is placed in its requester's feed),
+// or a merge only requested (no bubble yet) raises nothing.
+func (o *orchestrator) OnInterrupt(ctx context.Context, ws ids.WorkspaceID) bool {
 	const op = "daemon.merge.interrupt"
+	log := o.log(ctx, ws)
 	if _, err := o.queueOf(ctx, ws); err != nil {
-		return
+		// A REFUSAL IS THE ORDINARY ANSWER: this workspace has no queued
+		// merge. Anything else is a store failure and is surfaced.
+		if _, refused := Refused(err); !refused {
+			log.Error(op, "could not tell whether the interrupted workspace has a queued merge",
+				dlog.Context{"workspace": string(ws), "error": err.Error()})
+		}
+		return false
 	}
-	record, err := o.deps.DB.Workspace(ctx, ws)
-	if err != nil {
-		o.deps.Log.Global().Error(op, "could not compose the dequeue offer",
-			dlog.Context{"workspace": string(ws), "error": err.Error()})
-		return
+	if o.bubbleOf(ws).async() {
+		log.Debug(op, "the interrupted workspace's merge is async; its bubble is not pinned, so no question is raised",
+			dlog.Context{"workspace": string(ws)})
+		return false
 	}
 	o.mu.Lock()
-	o.offers[ws] = true
+	head, drawn := o.heads[ws]
+	live := drawn && head.result == nil
+	if live {
+		o.offers[ws] = true
+	}
 	o.mu.Unlock()
-	o.deps.Holds.SetOffer(ws, dequeueOffer(record.Name))
-	o.log(ctx, ws).Debug(op, "raised the merge dequeue offer", dlog.Context{"workspace": string(ws)})
+	if !live {
+		log.Debug(op, "the interrupted workspace's merge has no live bubble yet; no question is raised",
+			dlog.Context{"workspace": string(ws), "drawn": drawn})
+		return false
+	}
+	o.restateHead(ws)
+	log.Info(op, "raised the merge-queue question in the pinned merge bubble", dlog.Context{"workspace": string(ws)})
+	return true
 }
 
-// AnswerDequeue answers the tray's offer: keep the queue slot, or release it.
-// Releasing a merge that is already running abandons it (dequeue).
-func (o *orchestrator) AnswerDequeue(ctx context.Context, ws ids.WorkspaceID, keep bool) error {
-	const op = "daemon.merge.answer_dequeue"
+// AnswerQueueOffer answers the merge-queue question: evict the merge, move it
+// to the front of the waiting merges, or leave the queue as it is. Every answer
+// retires the question.
+func (o *orchestrator) AnswerQueueOffer(ctx context.Context, ws ids.WorkspaceID, answer QueueOfferAnswer) error {
+	const op = "daemon.merge.answer_queue_offer"
+	log := o.log(ctx, ws)
 	o.mu.Lock()
 	standing := o.offers[ws]
 	o.mu.Unlock()
 	if !standing {
-		return refuse(ArmNoOfferStanding, ws, "no merge dequeue offer is standing for this workspace")
+		return refuse(ArmNoOfferStanding, ws, "no merge-queue question is standing for this workspace")
 	}
-	if keep {
-		o.clearOffer(ws)
-		o.log(ctx, ws).Debug(op, "kept a queued merge's slot", dlog.Context{"workspace": string(ws)})
-		return nil
+	fields := dlog.Context{"workspace": string(ws), "answer": answer.String()}
+	switch answer {
+	case QueueOfferCancel:
+		log.Debug(op, "left the queue as it is on the user's answer", fields)
+	case QueueOfferEvict:
+		// AN ANSWERED QUESTION IS AN ORDINARY OUTCOME. The work actually
+		// abandoned is recorded by the release path's own records.
+		log.Debug(op, "evicting the merge on the user's answer", fields)
+		if err := o.dequeue(ctx, ws, CauseUserDequeue); err != nil {
+			fields["error"] = err.Error()
+			log.Error(op, "could not evict the merge on the user's answer", fields)
+			return err
+		}
+	case QueueOfferPrioritize:
+		if err := o.prioritize(ctx, ws); err != nil {
+			fields["error"] = err.Error()
+			log.Error(op, "could not prioritize the merge on the user's answer", fields)
+			return err
+		}
+	default:
+		panic(fmt.Sprintf("merge: undeclared queue offer answer %d", int(answer)))
 	}
-	// AN ANSWERED MENU IS AN ORDINARY OUTCOME. Both arms of this answer are
-	// the user working the offer the daemon itself raised; the keep arm is
-	// DEBUG and the release arm is no more of a warning than it is. The work
-	// actually abandoned is recorded by dropQueued's own WARN below.
-	o.log(ctx, ws).Debug(op, "releasing a queued merge's slot on the user's answer", dlog.Context{"workspace": string(ws)})
-	return o.dequeue(ctx, ws, CauseUserDequeue)
+	o.clearOffer(ws)
+	return nil
 }
 
-// clearOffer retires the dequeue offer, whether it was answered, superseded by
-// the merge's own terminal, or ended by the merge leaving the queue.
+// prioritize moves WS's waiting merge to the front of the merges waiting in
+// its queue, and redraws every bubble on that queue when the order changed.
+func (o *orchestrator) prioritize(ctx context.Context, ws ids.WorkspaceID) error {
+	const op = "daemon.merge.prioritize"
+	log := o.log(ctx, ws)
+	repo, err := o.queueOf(ctx, ws)
+	if err != nil {
+		return err
+	}
+	fields := dlog.Context{"workspace": string(ws), "repo": string(repo)}
+	moved, err := o.deps.DB.PrioritizeMerge(ctx, repo, ws)
+	if err != nil {
+		return err
+	}
+	if !moved {
+		log.Info(op, "a merge asked to run next is running or already first in line, and stays where it is", fields)
+		return nil
+	}
+	log.Info(op, "moved a merge to the front of the merges waiting in its queue", fields)
+	return o.republishQueue(ctx, repo)
+}
+
+// clearOffer retires the merge-queue question, whether it was answered or
+// ended by the merge leaving the queue, and redraws the live head without it.
+// A head already settled carries no question, so it is not redrawn.
 func (o *orchestrator) clearOffer(ws ids.WorkspaceID) {
 	o.mu.Lock()
 	had := o.offers[ws]
 	delete(o.offers, ws)
+	head, drawn := o.heads[ws]
 	o.mu.Unlock()
-	if had {
-		o.deps.Holds.SetOffer(ws, nil)
+	if had && drawn && head.result == nil {
+		o.restateHead(ws)
+	}
+}
+
+// queueOffer is the question an interrupt raises in a pinned bubble.
+func queueOffer() *frontendv1.FeedMergeQueueOffer {
+	return &frontendv1.FeedMergeQueueOffer{
+		Headline: &frontendv1.FeedMergeQueueOfferHeadline{
+			Text: "this merge is in the queue: evict it, run it next, or leave it be?",
+		},
 	}
 }
 
