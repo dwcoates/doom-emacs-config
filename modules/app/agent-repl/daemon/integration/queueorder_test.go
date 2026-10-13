@@ -4,7 +4,6 @@ package integration
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -33,10 +32,18 @@ func TestDurableQueueOrderOfAnEmptyQueueIsEmpty(t *testing.T) {
 // hand-rolls its own read of the table.
 func TestTheDurableQueueIsReadThroughOneHelper(t *testing.T) {
 	t.Parallel()
-	// Arrange
-	files, err := filepath.Glob("*.go")
+	// Arrange: the suite's TEST sources, which is where the helper and every
+	// read it replaces live (the suite has no production source, so
+	// sourcescan.Production, which skips tests, does not apply).
+	entries, err := os.ReadDir(".")
 	if err != nil {
 		t.Fatalf("list the suite's sources: %v", err)
+	}
+	var files []string
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), "_test.go") {
+			files = append(files, entry.Name())
+		}
 	}
 
 	// Act
