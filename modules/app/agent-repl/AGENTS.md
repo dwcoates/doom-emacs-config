@@ -2110,14 +2110,26 @@ tab bar, is a projection of the footer's resolved status
 (`resolve/sidebar/status.go`, `statusArm`). A fact told to only one resolver
 therefore cannot split the surfaces. A new fact that should move a
 workspace's status is fed to the footer; the roster needs it only when it
-refines the idle rung's detail (an unread turn end).
+refines the idle rung's detail (an unread turn end, or an async merge of the
+workspace's own branch, below).
+
+ONE ROSTER-ONLY ARM (owner request, 2026-10-13): `async_merging`. While a
+workspace's own branch has an async merge on its repository's merge queue (the
+requester's detached request, then the hidden merge workspace's row, until the
+row leaves the queue), the roster draws `async_merging` (purple, a breathing
+dot) over the green or yellow idle arm it would draw (`ready`, `done`,
+`interrupted`, `idle_async`). It projects the idle claim, so the footer keeps
+drawing idle and the composer stays open; every other arm keeps its color. The
+merge orchestrator tells the roster the whole set per repository
+(`sidebar.Resolver.SetAsyncMerges`) after every write that adds or removes a
+queue row (`daemon/internal/merge/asyncmerges.go`).
 
 | Color | Meaning | Usable? | Statuses |
 |---|---|---|---|
 | Red | The agent is working. | Yes: a prompt is held or interjected. | submitting, thinking, clearing, compacting; footer `working`, `loading` |
 | Yellow | The main thread is idle while detached work (background subagents, shells) runs. | Yes | `idle_async`; footer `background` |
 | Green | Ready for you: idle, or waiting on your input. | Yes | ready, done, interrupted; a permission gate (roster and footer `permission`), a question gate (roster and footer `question`) and a cold gate (roster `cold_gate`, footer `waiting · cold_gate`), the same green as done; waiting (an interrupt landing); a merge that landed (`merged`) or failed (`merge_failed`, owner ruling 2026-10-13: its merge glyph is inked red, `glyph_inks`); footer `idle`, `waiting`, `interrupted`; a Stop hook's deliberate stop and a deferred tool read as done |
-| Purple | A merge is in progress; the daemon holds the workspace. | No: the composer is closed. | `merge_queued` (in line, or holding the workspace until it falls free; footer `merging · enqueued` or `merging · awaiting_free`, owner ruling 2026-10-13), `merging` |
+| Purple | A merge is in progress; the daemon holds the workspace. | No: the composer is closed (except under `async_merging`). | `merge_queued` (in line, or holding the workspace until it falls free; footer `merging · enqueued` or `merging · awaiting_free`, owner ruling 2026-10-13), `merging`; roster-only `async_merging`, an otherwise idle workspace whose own branch merges async in a hidden merge workspace (the footer stays idle and the composer open, owner request 2026-10-13) |
 | Turquoise | Something unexpected went wrong and wants your attention, but the workspace is usable. | Yes | roster `turn_failed` (a failed turn restored from the durable record only; live, a failed turn stands as its fault, below); `degraded`; every VENDOR FAULT: roster `vendor_fault` / footer `vendor_fault · vendor_retry`, `vendor_rejection`, `vendor_failed` (the vendor will not start), roster `vendor_blocked` / footer `vendor_fault · auth`, `usage_limit`, `billing`, `vendor_error` (a vendor or account block, and every turn the vendor ended or refused, until the next turn starts), roster and footer `api_retrying` (the vendor is retrying the turn's failed API call) |
 | Blue | The workspace is unusable right now. | No: the composer is closed (except under `turn_died`, declared in `composer_open_substatuses`). | every AGENT-REPL FAULT: roster `severed`, `dead`, `start_failed`, `turn_died`, `daemon_impaired` / footer `agent_repl_fault · degraded`, `severed`, `dead`, `start_failed`, `daemon_impaired`, `turn_died` (the last turn's vendor query or agent process died, until the next turn starts); every NETWORK FAULT: roster `network_fault` / footer `network_fault · offline`; a refused close: roster and footer `closing` |
 | Grey (uncolored) | Nothing is wrong and nothing runs. | Yes | `none` (never had a session); `inactive`, incidentally inactive (no open perspective, or being opened, the row's `opening` marker, which takes no click); a booting session, roster `init` / footer `starting` (owner ruling 2026-10-13: an expected step, never a fault, so the composer stays open and a prompt is held until the session is up) |

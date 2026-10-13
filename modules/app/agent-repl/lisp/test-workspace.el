@@ -2194,6 +2194,12 @@ in the same shape (still leftmost, nil-name still at head)."
   ":turn-died has a glyph in `agent-repl-ws-state-icons'."
   (should (equal (alist-get :turn-died agent-repl-ws-state-icons) "❌")))
 
+(ert-deftest agent-repl-test-ws-state-icon-async-merging ()
+  ":async-merging wears the merging glyph in `agent-repl-ws-state-icons'."
+  ;; Act / Assert
+  (should (equal (alist-get :async-merging agent-repl-ws-state-icons)
+                 (alist-get :merging agent-repl-ws-state-icons))))
+
 (ert-deftest agent-repl-test-ws-state-icon-turn-failed ()
   ":turn-failed has a glyph of its own in `agent-repl-ws-state-icons'."
   ;; Act / Assert

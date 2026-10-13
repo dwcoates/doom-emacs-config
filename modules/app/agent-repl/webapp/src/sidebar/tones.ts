@@ -158,7 +158,8 @@ export function glyphName(arm: RosterStatusCase): string {
  * How the arm's mark MOVES. The rail has ONE animation, the breath, and it
  * makes ONE claim everywhere (owner ruling, 2026-10-13): something is in
  * progress. A turn in flight, its context cuts, detached work, a session
- * booting and a merge running breathe. A gate (permission, question, cold
+ * booting, a merge running and an async merge of the workspace's own branch
+ * breathe. A gate (permission, question, cold
  * gate) and an interrupt landing wait on the user, so nothing is in progress
  * and they hold still, as everything else does.
  */
@@ -171,6 +172,7 @@ export function armMotion(arm: RosterStatusCase): MarkMotion {
     case "idleAsync":
     case "init":
     case "merging":
+    case "asyncMerging":
       return "breathes";
     default:
       return "still";

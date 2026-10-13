@@ -78,6 +78,12 @@ type Resolver interface {
 	// SetMerge installs one workspace's merge facts, which drive its merge
 	// status arm and its glyph.
 	SetMerge(ws ids.WorkspaceID, facts footer.MergeFacts)
+	// SetAsyncMerges installs, WHOLE, the workspaces whose own branch has an
+	// async merge on REPO's merge queue: from the moment the async request is
+	// recorded until its merge leaves the queue. Each draws `async_merging`
+	// (purple) over its green or yellow idle arm. The merge orchestrator is
+	// the one caller, on every change of the queue.
+	SetAsyncMerges(repo wsm.RepoKey, requesters []ids.WorkspaceID)
 	// SetSelected records the user's selection, which also clears that
 	// workspace's attention marker.
 	SetSelected(ws ids.WorkspaceID)
