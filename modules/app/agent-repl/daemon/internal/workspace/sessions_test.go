@@ -4908,3 +4908,19 @@ func TestBlockersAreNoneForAWorkspaceWithNoSession(t *testing.T) {
 		t.Fatalf("Blockers = %v, want none for a workspace with no session", got)
 	}
 }
+
+func TestARaisedColdGateTellsTheQueueTheSessionWentCold(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := f.workspace("ws-cold-queued")
+	var told []ids.WorkspaceID
+	f.fleet.deps.ColdGateRaised = func(w ids.WorkspaceID) { told = append(told, w) }
+
+	// Act.
+	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+
+	// Assert.
+	if len(told) != 1 || told[0] != ws.ID {
+		t.Fatalf("told = %v, want the workspace told once", told)
+	}
+}
