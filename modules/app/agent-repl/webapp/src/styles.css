@@ -78,8 +78,10 @@
      share this fill — the user's own and the agent-to-agent amber-bordered
      one (`.bubble[data-role="prompt"]`) — read as slightly too bright; this
      is one small step down in lightness, not a new color, applied once since
-     the two kinds already shared the one token. #e0ecff -> #ccdfff. */
-  --user: #ccdfff;
+     the two kinds already shared the one token. #e0ecff -> #ccdfff, then
+     the same step again (owner request, 2026-10-13, "just slightly
+     darker"): #ccdfff -> #b8d2ff. */
+  --user: #b8d2ff;
   /* THE RESPONSE BUBBLE'S FILL IS THE TOOL CARD'S (owner ruling, 2026-10-11,
      "a slightly darker background ... same color as the toolcard
      backgrounds"): derived from --tool-card-bg rather than copied, so a
@@ -459,8 +461,9 @@
        darker the same day because #0a84ff read a tad bright. */
     /* A further notch darker still (owner ruling, 2026-10-08, "a few percent
        darker"): #0978ea -> #086ed6, the same small lightness step the light
-       theme's pair takes. */
-    --user: #086ed6;
+       theme's pair takes. The same step again (owner request, 2026-10-13,
+       "just slightly darker"): #086ed6 -> #0764c2. */
+    --user: #0764c2;
     /* A dark navy, so a link stands out on the dark theme's prompt blue
        (owner ruling, 2026-09-27). */
     --prompt-link: #0a2a5e;
@@ -740,16 +743,27 @@ html.webhost-sidebar #ws-sidebar[hidden] {
    rows. It overlaps .sb-scroll rather than taking room from it, so the band
    fit's measured height never moves for it. */
 #ws-sidebar { position: relative; }
+/* A FLOATING PURPLE MAGNIFIER (owner request, 2026-10-13): no visible
+   button around it -- no fill, no border, and no focus ring, which WebKit
+   otherwise draws as a grey bevelled box around the focused control. The
+   glyph wears the bands' header purple, held back a touch until hovered,
+   focused or open; the padding keeps the click square it always had. */
 #ws-sidebar .sb-search-btn {
   display: inline-flex;
   align-items: center;
-  color: var(--muted);
+  color: var(--info-agents);
+  background: none;
+  border: none;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+  opacity: 0.75;
   cursor: pointer;
-  border-radius: 4px;
   padding: 0.1rem;
 }
 #ws-sidebar .sb-search-btn:hover,
-#ws-sidebar .sb-search-btn.active { color: var(--fg); }
+#ws-sidebar .sb-search-btn:focus-visible,
+#ws-sidebar .sb-search-btn.active { opacity: 1; }
 #ws-sidebar .sb-search-glyph {
   width: 0.85rem;
   height: 0.85rem;
@@ -1042,9 +1056,11 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 
 #ws-sidebar .row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* PARTIAL display mode (frontend.v1.RosterRowViewed): the user has already
-   seen this workspace, so its NAME recedes to the secondary text colour, and
-   its status dot with it (see THE STATUS MARK below). The Emacs tab-bar draws
-   the same distinction on the same message. `viewed.ts` decides which rows
+   seen this workspace, so its NAME recedes to the secondary text colour. The
+   status dot keeps its tone (owner ruling, 2026-10-13: a viewed done workspace
+   is green like any other) -- the mode says what has been seen, never what
+   the workspace is doing. The Emacs tab-bar draws the same distinction on the
+   same message. `viewed.ts` decides which rows
    carry the class. */
 #ws-sidebar .row .name.viewed { color: var(--muted); }
 /* A Recently Merged row's NAME is drawn in the repository section headers'
@@ -1190,11 +1206,11 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 }
 #ws-sidebar .detail .summary { font-style: italic; color: var(--muted); margin: 0.35rem 0 0; }
 
-/* THE BREATH SHRINKS A MARK TO 86% (owner ruling, 2026-10-13: half the
-   extent of the 72% it once reached). */
+/* THE BREATH SHRINKS A MARK TO 90.2% (owner ruling, 2026-10-13: 30% less
+   than the 14% it shrank before, which was itself half of the 28% to 72%). */
 @keyframes ws-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.35; transform: scale(0.86); }
+  50% { opacity: 0.35; transform: scale(0.902); }
 }
 
 #topbar {
@@ -5469,13 +5485,6 @@ ar-button.outcome-marker-pill {
    parked on its cold gate's choice. The name alone, in every section, never
    the mark or the when-column. */
 #ws-sidebar .ws[data-arm="coldGate"] > .row > .name { text-decoration: line-through; }
-/* A VIEWED WORKSPACE'S DOT (frontend.v1.RosterRowViewed, owner request,
-   2026-10-12): the grey its name wears, so a workspace whose result the user
-   has read stays in its grouping and still reads apart from one whose result
-   is waiting. The marker only rides a turn-end arm, so it greys a still dot,
-   never live work. Child combinators keep it to the row's own mark: a child
-   nested under a viewed parent keeps its tone. */
-#ws-sidebar .ws[data-viewed="true"] > .row > .st { color: var(--muted); }
 /* The glyph statuses are not discs: a box that centers a single character, so
    a breathing glyph shrinks about its own center. The box is the
    DOT'S width, not the character's (owner request, 2026-10-08), and the
@@ -5524,8 +5533,9 @@ ar-button.outcome-marker-pill {
 #ws-sidebar .st[data-glyph="none"] { visibility: hidden; }
 /* ONE ANIMATION FOR THE WHOLE RAIL (owner ruling, 2026-10-13): every animated
    mark breathes (normal, shrunk, normal) with the same keyframes, easing and
-   `--ws-mark-cycle`, and a breath always means something is in progress. */
-#ws-sidebar { --ws-mark-cycle: 1.4s; }
+   `--ws-mark-cycle`, and a breath always means something is in progress. The
+   cycle is 2s (owner ruling, 2026-10-13: 30% slower than the 1.4s before). */
+#ws-sidebar { --ws-mark-cycle: 2s; }
 #ws-sidebar .st.breathes { animation: ws-pulse var(--ws-mark-cycle) ease-in-out infinite; }
 
 /* THE ATTENTION MARKER, on the ONE cadence frontend.v1.RosterRowAttention
