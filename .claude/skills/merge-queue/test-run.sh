@@ -515,6 +515,18 @@ test_land_commits_refuses_a_commit_already_on_master() {
   fi
 }
 
+# THE SKILL CALLS THE INSTALLED SCRIPT ONLY: a worktree's own copy is as old as
+# its branch's base, and once refused a form master's script accepts.
+test_the_skill_calls_only_the_installed_script() {
+  local skill
+  skill="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)/SKILL.md"
+  if grep -nE '(call `|Bash\()\.claude/skills/merge-queue/run\.sh' "$skill" >/dev/null; then
+    fail "SKILL.md names a worktree's own run.sh; it must call ~/.claude/skills/merge-queue/run.sh"
+  else
+    pass "SKILL.md calls only the installed ~/.claude/skills/merge-queue/run.sh"
+  fi
+}
+
 test_land_commits_conflict_leaves_nothing_built() {
   mkfixture
   PICK_EXIT=1 invoke --land-commits c2
@@ -673,6 +685,7 @@ test_land_commits_refuses_the_main_worktree
 test_land_commits_refuses_an_unknown_commit
 test_land_commits_refuses_a_commit_off_the_branch
 test_land_commits_refuses_a_commit_already_on_master
+test_the_skill_calls_only_the_installed_script
 test_land_commits_conflict_leaves_nothing_built
 test_land_commits_refusal_leaves_nothing_built
 test_land_commits_flattens_a_prefixed_branch_into_one_directory
