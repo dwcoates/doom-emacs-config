@@ -23,7 +23,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file conversation/v1/history.proto.
  */
 export const file_conversation_v1_history: GenFile = /*@__PURE__*/
-  fileDesc("Ch1jb252ZXJzYXRpb24vdjEvaGlzdG9yeS5wcm90bxIPY29udmVyc2F0aW9uLnYxIt4BCgtIaXN0b3J5UGFnZRIwCgdlbnRyaWVzGAEgAygLMh8uY29udmVyc2F0aW9uLnYxLkhpc3RvcnlFbnRyeUF0EiwKBG1vcmUYAiABKAsyHC5jb252ZXJzYXRpb24udjEuSGlzdG9yeU1vcmVIABIuCgVmbG9vchgDIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5Rmxvb3JIABIzCgp0dXJuX2hlYWRzGAQgAygLMh8uY29udmVyc2F0aW9uLnYxLkhpc3RvcnlFbnRyeUF0QgoKCGJvdW5kYXJ5IqUCCg5IaXN0b3J5RW50cnlBdBIrCgJhdBgBIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5UG9pbnRlchIsCgVlbnRyeRgCIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5RW50cnkSKgoEdHVybhgDIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWRIAYgBARI8Cg5yZWNvcmRlZF9wbGFjZRgEIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Db252ZXJzYXRpb25QbGFjZUgAEjwKDnJlY2VpdmVkX3BsYWNlGAUgASgLMiIuY29udmVyc2F0aW9uLnYxLkNvbnZlcnNhdGlvblBsYWNlSABCBwoFcGxhY2VCBwoFX3R1cm4iMwoRQ29udmVyc2F0aW9uUGxhY2USDQoFYXRfbXMYASABKAMSDwoHb3JkaW5hbBgCIAEoDSIkChNDb252ZXJzYXRpb25UaHJvdWdoEg0KBWF0X21zGAEgASgDIrYBCgxIaXN0b3J5RW50cnkSMwoLdXNlcl9wcm9tcHQYASABKAsyHC5jb252ZXJzYXRpb24udjEuQWdlbnRQcm9tcHRIABIyCgthZ2VudF9mcmFtZRgCIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5BZ2VudEZyYW1lSAASNAoMcGVlcl9tZXNzYWdlGAMgASgLMhwuY29udmVyc2F0aW9uLnYxLlBlZXJNZXNzYWdlSABCBwoFZW50cnkiQgoLSGlzdG9yeU1vcmUSMwoKbGFzdF9lbnRyeRgBIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5UG9pbnRlciIOCgxIaXN0b3J5Rmxvb3IiHwoOSGlzdG9yeVBvaW50ZXISDQoFdmFsdWUYASABKAlCMFouYWdlbnRyZXBsL3Byb3RvL2NvbnZlcnNhdGlvbi92MTtjb252ZXJzYXRpb252MWIGcHJvdG8z", [file_conversation_v1_agent, file_conversation_v1_peer, file_conversation_v1_turn]);
+  fileDesc("Ch1jb252ZXJzYXRpb24vdjEvaGlzdG9yeS5wcm90bxIPY29udmVyc2F0aW9uLnYxIuwBCgtIaXN0b3J5UGFnZRIwCgdlbnRyaWVzGAEgAygLMh8uY29udmVyc2F0aW9uLnYxLkhpc3RvcnlFbnRyeUF0EiwKBG1vcmUYAiABKAsyHC5jb252ZXJzYXRpb24udjEuSGlzdG9yeU1vcmVIABIuCgVmbG9vchgDIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5Rmxvb3JIABIvCgVoZWFkcxgFIAMoCzIgLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5VHVybkhlYWRCCgoIYm91bmRhcnlKBAgEEAVSCnR1cm5faGVhZHMipQIKDkhpc3RvcnlFbnRyeUF0EisKAmF0GAEgASgLMh8uY29udmVyc2F0aW9uLnYxLkhpc3RvcnlQb2ludGVyEiwKBWVudHJ5GAIgASgLMh0uY29udmVyc2F0aW9uLnYxLkhpc3RvcnlFbnRyeRIqCgR0dXJuGAMgASgLMhcuY29udmVyc2F0aW9uLnYxLlR1cm5JZEgBiAEBEjwKDnJlY29yZGVkX3BsYWNlGAQgASgLMiIuY29udmVyc2F0aW9uLnYxLkNvbnZlcnNhdGlvblBsYWNlSAASPAoOcmVjZWl2ZWRfcGxhY2UYBSABKAsyIi5jb252ZXJzYXRpb24udjEuQ29udmVyc2F0aW9uUGxhY2VIAEIHCgVwbGFjZUIHCgVfdHVybiIzChFDb252ZXJzYXRpb25QbGFjZRINCgVhdF9tcxgBIAEoAxIPCgdvcmRpbmFsGAIgASgNIiQKE0NvbnZlcnNhdGlvblRocm91Z2gSDQoFYXRfbXMYASABKAMitgEKDEhpc3RvcnlFbnRyeRIzCgt1c2VyX3Byb21wdBgBIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5BZ2VudFByb21wdEgAEjIKC2FnZW50X2ZyYW1lGAIgASgLMhsuY29udmVyc2F0aW9uLnYxLkFnZW50RnJhbWVIABI0CgxwZWVyX21lc3NhZ2UYAyABKAsyHC5jb252ZXJzYXRpb24udjEuUGVlck1lc3NhZ2VIAEIHCgVlbnRyeSJCCgtIaXN0b3J5TW9yZRIzCgpsYXN0X2VudHJ5GAEgASgLMh8uY29udmVyc2F0aW9uLnYxLkhpc3RvcnlQb2ludGVyIg4KDEhpc3RvcnlGbG9vciIfCg5IaXN0b3J5UG9pbnRlchINCgV2YWx1ZRgBIAEoCSLRAQoPSGlzdG9yeVR1cm5IZWFkEi4KBWVudHJ5GAEgASgLMh8uY29udmVyc2F0aW9uLnYxLkhpc3RvcnlFbnRyeUF0EjwKCGFkamFjZW50GAIgASgLMiguY29udmVyc2F0aW9uLnYxLkhpc3RvcnlUdXJuSGVhZEFkamFjZW50SAASRQoNc3RlcHNfYmV0d2VlbhgDIAEoCzIsLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5VHVybkhlYWRTdGVwc0JldHdlZW5IAEIJCgdiZXR3ZWVuIhkKF0hpc3RvcnlUdXJuSGVhZEFkamFjZW50Ih0KG0hpc3RvcnlUdXJuSGVhZFN0ZXBzQmV0d2VlbkIwWi5hZ2VudHJlcGwvcHJvdG8vY29udmVyc2F0aW9uL3YxO2NvbnZlcnNhdGlvbnYxYgZwcm90bzM", [file_conversation_v1_agent, file_conversation_v1_peer, file_conversation_v1_turn]);
 
 /**
  * One page: a contiguous run of an agent's history in DESCENDING CONVERSATION
@@ -78,9 +78,9 @@ export type HistoryPage = Message<"conversation.v1.HistoryPage"> & {
    * an ordinary entry of an older page: a reader walking older meets it again,
    * and absorbs it by identity.
    *
-   * @generated from field: repeated conversation.v1.HistoryEntryAt turn_heads = 4;
+   * @generated from field: repeated conversation.v1.HistoryTurnHead heads = 5;
    */
-  turnHeads: HistoryEntryAt[];
+  heads: HistoryTurnHead[];
 };
 
 /**
@@ -365,4 +365,80 @@ export type HistoryPointer = Message<"conversation.v1.HistoryPointer"> & {
  */
 export const HistoryPointerSchema: GenMessage<HistoryPointer> = /*@__PURE__*/
   messageDesc(file_conversation_v1_history, 7);
+
+/**
+ * One prompt a page carries for a turn it touches (HistoryPage.heads).
+ *
+ * @generated from message conversation.v1.HistoryTurnHead
+ */
+export type HistoryTurnHead = Message<"conversation.v1.HistoryTurnHead"> & {
+  /**
+   * The prompt entry, with its pointer, turn and place.
+   *
+   * @generated from field: conversation.v1.HistoryEntryAt entry = 1;
+   */
+  entry?: HistoryEntryAt | undefined;
+
+  /**
+   * WHETHER THE TURN HAS ENTRIES BETWEEN THIS PROMPT AND THE PAGE. THE ARM IS
+   * THE ANSWER: a reader draws "earlier steps" under the prompt only when
+   * some sit between.
+   *
+   * @generated from oneof conversation.v1.HistoryTurnHead.between
+   */
+  between: {
+    /**
+     * The page's own entries of this turn follow the prompt directly.
+     *
+     * @generated from field: conversation.v1.HistoryTurnHeadAdjacent adjacent = 2;
+     */
+    value: HistoryTurnHeadAdjacent;
+    case: "adjacent";
+  } | {
+    /**
+     * At least one entry of the turn sits between the prompt and the page.
+     *
+     * @generated from field: conversation.v1.HistoryTurnHeadStepsBetween steps_between = 3;
+     */
+    value: HistoryTurnHeadStepsBetween;
+    case: "stepsBetween";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message conversation.v1.HistoryTurnHead.
+ * Use `create(HistoryTurnHeadSchema)` to create a new message.
+ */
+export const HistoryTurnHeadSchema: GenMessage<HistoryTurnHead> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_history, 8);
+
+/**
+ * Nothing of the turn sits between its prompt and the page. DELIBERATELY EMPTY.
+ *
+ * @generated from message conversation.v1.HistoryTurnHeadAdjacent
+ */
+export type HistoryTurnHeadAdjacent = Message<"conversation.v1.HistoryTurnHeadAdjacent"> & {
+};
+
+/**
+ * Describes the message conversation.v1.HistoryTurnHeadAdjacent.
+ * Use `create(HistoryTurnHeadAdjacentSchema)` to create a new message.
+ */
+export const HistoryTurnHeadAdjacentSchema: GenMessage<HistoryTurnHeadAdjacent> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_history, 9);
+
+/**
+ * Steps of the turn sit between its prompt and the page. DELIBERATELY EMPTY.
+ *
+ * @generated from message conversation.v1.HistoryTurnHeadStepsBetween
+ */
+export type HistoryTurnHeadStepsBetween = Message<"conversation.v1.HistoryTurnHeadStepsBetween"> & {
+};
+
+/**
+ * Describes the message conversation.v1.HistoryTurnHeadStepsBetween.
+ * Use `create(HistoryTurnHeadStepsBetweenSchema)` to create a new message.
+ */
+export const HistoryTurnHeadStepsBetweenSchema: GenMessage<HistoryTurnHeadStepsBetween> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_history, 10);
 

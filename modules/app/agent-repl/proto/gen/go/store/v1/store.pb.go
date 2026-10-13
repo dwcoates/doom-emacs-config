@@ -2117,7 +2117,7 @@ type AgentSessionPage struct {
 	// or that the store holds no prompt line for, has none here. A head is ALSO
 	// an ordinary line of an older page: a reader walking older meets it again,
 	// and absorbs it by identity.
-	TurnHeads     []*StoreLineAt `protobuf:"bytes,4,rep,name=turn_heads,json=turnHeads,proto3" json:"turn_heads,omitempty"`
+	Heads         []*StoreTurnHead `protobuf:"bytes,5,rep,name=heads,proto3" json:"heads,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2184,9 +2184,9 @@ func (x *AgentSessionPage) GetFloor() *ReadAgentPageFloor {
 	return nil
 }
 
-func (x *AgentSessionPage) GetTurnHeads() []*StoreLineAt {
+func (x *AgentSessionPage) GetHeads() []*StoreTurnHead {
 	if x != nil {
-		return x.TurnHeads
+		return x.Heads
 	}
 	return nil
 }
@@ -2206,6 +2206,181 @@ type AgentSessionPage_Floor struct {
 func (*AgentSessionPage_More) isAgentSessionPage_Boundary() {}
 
 func (*AgentSessionPage_Floor) isAgentSessionPage_Boundary() {}
+
+// One prompt a page carries for a turn it touches (AgentSessionPage.heads,
+// ReadAgentPageSuccess.heads).
+type StoreTurnHead struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The prompt line, with its real pointer, turn and place.
+	Line *StoreLineAt `protobuf:"bytes,1,opt,name=line,proto3" json:"line,omitempty"`
+	// WHETHER THE TURN HAS LINES BETWEEN THIS PROMPT AND THE PAGE. THE ARM IS
+	// THE ANSWER: a reader draws "earlier steps" under the prompt only when
+	// some sit between.
+	//
+	// Types that are valid to be assigned to Between:
+	//
+	//	*StoreTurnHead_Adjacent
+	//	*StoreTurnHead_StepsBetween
+	Between       isStoreTurnHead_Between `protobuf_oneof:"between"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StoreTurnHead) Reset() {
+	*x = StoreTurnHead{}
+	mi := &file_store_v1_store_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StoreTurnHead) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StoreTurnHead) ProtoMessage() {}
+
+func (x *StoreTurnHead) ProtoReflect() protoreflect.Message {
+	mi := &file_store_v1_store_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StoreTurnHead.ProtoReflect.Descriptor instead.
+func (*StoreTurnHead) Descriptor() ([]byte, []int) {
+	return file_store_v1_store_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *StoreTurnHead) GetLine() *StoreLineAt {
+	if x != nil {
+		return x.Line
+	}
+	return nil
+}
+
+func (x *StoreTurnHead) GetBetween() isStoreTurnHead_Between {
+	if x != nil {
+		return x.Between
+	}
+	return nil
+}
+
+func (x *StoreTurnHead) GetAdjacent() *StoreTurnHeadAdjacent {
+	if x != nil {
+		if x, ok := x.Between.(*StoreTurnHead_Adjacent); ok {
+			return x.Adjacent
+		}
+	}
+	return nil
+}
+
+func (x *StoreTurnHead) GetStepsBetween() *StoreTurnHeadStepsBetween {
+	if x != nil {
+		if x, ok := x.Between.(*StoreTurnHead_StepsBetween); ok {
+			return x.StepsBetween
+		}
+	}
+	return nil
+}
+
+type isStoreTurnHead_Between interface {
+	isStoreTurnHead_Between()
+}
+
+type StoreTurnHead_Adjacent struct {
+	// The page's own lines of this turn follow the prompt directly: no line
+	// of the turn is placed between them.
+	Adjacent *StoreTurnHeadAdjacent `protobuf:"bytes,2,opt,name=adjacent,proto3,oneof"`
+}
+
+type StoreTurnHead_StepsBetween struct {
+	// At least one line of the turn is placed between the prompt and the
+	// page, on an older page.
+	StepsBetween *StoreTurnHeadStepsBetween `protobuf:"bytes,3,opt,name=steps_between,json=stepsBetween,proto3,oneof"`
+}
+
+func (*StoreTurnHead_Adjacent) isStoreTurnHead_Between() {}
+
+func (*StoreTurnHead_StepsBetween) isStoreTurnHead_Between() {}
+
+// Nothing of the turn sits between its prompt and the page. DELIBERATELY EMPTY.
+type StoreTurnHeadAdjacent struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StoreTurnHeadAdjacent) Reset() {
+	*x = StoreTurnHeadAdjacent{}
+	mi := &file_store_v1_store_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StoreTurnHeadAdjacent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StoreTurnHeadAdjacent) ProtoMessage() {}
+
+func (x *StoreTurnHeadAdjacent) ProtoReflect() protoreflect.Message {
+	mi := &file_store_v1_store_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StoreTurnHeadAdjacent.ProtoReflect.Descriptor instead.
+func (*StoreTurnHeadAdjacent) Descriptor() ([]byte, []int) {
+	return file_store_v1_store_proto_rawDescGZIP(), []int{29}
+}
+
+// Steps of the turn sit between its prompt and the page. DELIBERATELY EMPTY.
+type StoreTurnHeadStepsBetween struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StoreTurnHeadStepsBetween) Reset() {
+	*x = StoreTurnHeadStepsBetween{}
+	mi := &file_store_v1_store_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StoreTurnHeadStepsBetween) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StoreTurnHeadStepsBetween) ProtoMessage() {}
+
+func (x *StoreTurnHeadStepsBetween) ProtoReflect() protoreflect.Message {
+	mi := &file_store_v1_store_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StoreTurnHeadStepsBetween.ProtoReflect.Descriptor instead.
+func (*StoreTurnHeadStepsBetween) Descriptor() ([]byte, []int) {
+	return file_store_v1_store_proto_rawDescGZIP(), []int{30}
+}
 
 var File_store_v1_store_proto protoreflect.FileDescriptor
 
@@ -2329,15 +2504,22 @@ const file_store_v1_store_proto_rawDesc = "" +
 	"\tlast_item\x18\x01 \x01(\v2\x1a.store.v1.StoreItemPointerR\blastItem\"\x14\n" +
 	"\x12ReadAgentPageFloor\")\n" +
 	"\x11AgentSessionToken\x12\x14\n" +
-	"\x05value\x18\x01 \x01(\tR\x05value\"\xea\x01\n" +
+	"\x05value\x18\x01 \x01(\tR\x05value\"\xf5\x01\n" +
 	"\x10AgentSessionPage\x12+\n" +
 	"\x05lines\x18\x01 \x03(\v2\x15.store.v1.StoreLineAtR\x05lines\x121\n" +
 	"\x04more\x18\x02 \x01(\v2\x1b.store.v1.ReadAgentPageMoreH\x00R\x04more\x124\n" +
-	"\x05floor\x18\x03 \x01(\v2\x1c.store.v1.ReadAgentPageFloorH\x00R\x05floor\x124\n" +
+	"\x05floor\x18\x03 \x01(\v2\x1c.store.v1.ReadAgentPageFloorH\x00R\x05floor\x12-\n" +
+	"\x05heads\x18\x05 \x03(\v2\x17.store.v1.StoreTurnHeadR\x05headsB\n" +
 	"\n" +
-	"turn_heads\x18\x04 \x03(\v2\x15.store.v1.StoreLineAtR\tturnHeadsB\n" +
-	"\n" +
-	"\bboundaryB\"Z agentrepl/proto/store/v1;storev1b\x06proto3"
+	"\bboundaryJ\x04\b\x04\x10\x05R\n" +
+	"turn_heads\"\xd0\x01\n" +
+	"\rStoreTurnHead\x12)\n" +
+	"\x04line\x18\x01 \x01(\v2\x15.store.v1.StoreLineAtR\x04line\x12=\n" +
+	"\badjacent\x18\x02 \x01(\v2\x1f.store.v1.StoreTurnHeadAdjacentH\x00R\badjacent\x12J\n" +
+	"\rsteps_between\x18\x03 \x01(\v2#.store.v1.StoreTurnHeadStepsBetweenH\x00R\fstepsBetweenB\t\n" +
+	"\abetween\"\x17\n" +
+	"\x15StoreTurnHeadAdjacent\"\x1b\n" +
+	"\x19StoreTurnHeadStepsBetweenB\"Z agentrepl/proto/store/v1;storev1b\x06proto3"
 
 var (
 	file_store_v1_store_proto_rawDescOnce sync.Once
@@ -2351,7 +2533,7 @@ func file_store_v1_store_proto_rawDescGZIP() []byte {
 	return file_store_v1_store_proto_rawDescData
 }
 
-var file_store_v1_store_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
+var file_store_v1_store_proto_msgTypes = make([]protoimpl.MessageInfo, 31)
 var file_store_v1_store_proto_goTypes = []any{
 	(*StoreEntry)(nil),                // 0: store.v1.StoreEntry
 	(*StoreAgentUpdate)(nil),          // 1: store.v1.StoreAgentUpdate
@@ -2381,71 +2563,77 @@ var file_store_v1_store_proto_goTypes = []any{
 	(*ReadAgentPageFloor)(nil),        // 25: store.v1.ReadAgentPageFloor
 	(*AgentSessionToken)(nil),         // 26: store.v1.AgentSessionToken
 	(*AgentSessionPage)(nil),          // 27: store.v1.AgentSessionPage
-	(*v1.SessionUpdate)(nil),          // 28: conversation.v1.SessionUpdate
-	(*v1.TurnId)(nil),                 // 29: conversation.v1.TurnId
-	(*v1.ConversationPlace)(nil),      // 30: conversation.v1.ConversationPlace
-	(*v1.AgentId)(nil),                // 31: conversation.v1.AgentId
-	(*v1.AgentPrompt)(nil),            // 32: conversation.v1.AgentPrompt
-	(*v1.AgentFrame)(nil),             // 33: conversation.v1.AgentFrame
-	(*v1.PeerMessage)(nil),            // 34: conversation.v1.PeerMessage
-	(*v1.AgentActivityId)(nil),        // 35: conversation.v1.AgentActivityId
-	(*v1.AgentBash)(nil),              // 36: conversation.v1.AgentBash
-	(*v1.AgentWorkflow)(nil),          // 37: conversation.v1.AgentWorkflow
-	(*structpb.Struct)(nil),           // 38: google.protobuf.Struct
+	(*StoreTurnHead)(nil),             // 28: store.v1.StoreTurnHead
+	(*StoreTurnHeadAdjacent)(nil),     // 29: store.v1.StoreTurnHeadAdjacent
+	(*StoreTurnHeadStepsBetween)(nil), // 30: store.v1.StoreTurnHeadStepsBetween
+	(*v1.SessionUpdate)(nil),          // 31: conversation.v1.SessionUpdate
+	(*v1.TurnId)(nil),                 // 32: conversation.v1.TurnId
+	(*v1.ConversationPlace)(nil),      // 33: conversation.v1.ConversationPlace
+	(*v1.AgentId)(nil),                // 34: conversation.v1.AgentId
+	(*v1.AgentPrompt)(nil),            // 35: conversation.v1.AgentPrompt
+	(*v1.AgentFrame)(nil),             // 36: conversation.v1.AgentFrame
+	(*v1.PeerMessage)(nil),            // 37: conversation.v1.PeerMessage
+	(*v1.AgentActivityId)(nil),        // 38: conversation.v1.AgentActivityId
+	(*v1.AgentBash)(nil),              // 39: conversation.v1.AgentBash
+	(*v1.AgentWorkflow)(nil),          // 40: conversation.v1.AgentWorkflow
+	(*structpb.Struct)(nil),           // 41: google.protobuf.Struct
 }
 var file_store_v1_store_proto_depIdxs = []int32{
 	7,  // 0: store.v1.StoreEntry.plane:type_name -> store.v1.Plane
 	1,  // 1: store.v1.StoreEntry.agent_update:type_name -> store.v1.StoreAgentUpdate
-	28, // 2: store.v1.StoreEntry.session_update:type_name -> conversation.v1.SessionUpdate
-	29, // 3: store.v1.StoreEntry.turn:type_name -> conversation.v1.TurnId
-	30, // 4: store.v1.StoreEntry.place:type_name -> conversation.v1.ConversationPlace
-	31, // 5: store.v1.StoreAgentUpdate.top_level:type_name -> conversation.v1.AgentId
+	31, // 2: store.v1.StoreEntry.session_update:type_name -> conversation.v1.SessionUpdate
+	32, // 3: store.v1.StoreEntry.turn:type_name -> conversation.v1.TurnId
+	33, // 4: store.v1.StoreEntry.place:type_name -> conversation.v1.ConversationPlace
+	34, // 5: store.v1.StoreAgentUpdate.top_level:type_name -> conversation.v1.AgentId
 	2,  // 6: store.v1.StoreAgentUpdate.serveable_frame:type_name -> store.v1.StorePageLine
 	10, // 7: store.v1.StoreAgentUpdate.unserved_item:type_name -> store.v1.StoreUnservedItem
 	5,  // 8: store.v1.StoreAgentUpdate.bash:type_name -> store.v1.StoreAgentBash
 	6,  // 9: store.v1.StoreAgentUpdate.workflow:type_name -> store.v1.StoreAgentWorkflow
-	31, // 10: store.v1.StorePageLine.page_agent_id:type_name -> conversation.v1.AgentId
+	34, // 10: store.v1.StorePageLine.page_agent_id:type_name -> conversation.v1.AgentId
 	3,  // 11: store.v1.StorePageLine.owner_unknown:type_name -> store.v1.StorePageLineOwnerUnknown
 	4,  // 12: store.v1.StorePageLine.agent_item:type_name -> store.v1.StoreAgentItem
-	32, // 13: store.v1.StoreAgentItem.agent_prompt:type_name -> conversation.v1.AgentPrompt
-	33, // 14: store.v1.StoreAgentItem.agent_frame:type_name -> conversation.v1.AgentFrame
-	34, // 15: store.v1.StoreAgentItem.peer_message:type_name -> conversation.v1.PeerMessage
-	35, // 16: store.v1.StoreAgentBash.run:type_name -> conversation.v1.AgentActivityId
-	36, // 17: store.v1.StoreAgentBash.frame:type_name -> conversation.v1.AgentBash
-	31, // 18: store.v1.StoreAgentWorkflow.run:type_name -> conversation.v1.AgentId
-	37, // 19: store.v1.StoreAgentWorkflow.frame:type_name -> conversation.v1.AgentWorkflow
+	35, // 13: store.v1.StoreAgentItem.agent_prompt:type_name -> conversation.v1.AgentPrompt
+	36, // 14: store.v1.StoreAgentItem.agent_frame:type_name -> conversation.v1.AgentFrame
+	37, // 15: store.v1.StoreAgentItem.peer_message:type_name -> conversation.v1.PeerMessage
+	38, // 16: store.v1.StoreAgentBash.run:type_name -> conversation.v1.AgentActivityId
+	39, // 17: store.v1.StoreAgentBash.frame:type_name -> conversation.v1.AgentBash
+	34, // 18: store.v1.StoreAgentWorkflow.run:type_name -> conversation.v1.AgentId
+	40, // 19: store.v1.StoreAgentWorkflow.frame:type_name -> conversation.v1.AgentWorkflow
 	8,  // 20: store.v1.Plane.stream:type_name -> store.v1.PlaneStream
 	9,  // 21: store.v1.Plane.file:type_name -> store.v1.PlaneFile
 	11, // 22: store.v1.StoreUnservedItem.vendor_specific:type_name -> store.v1.StoreVendorSpecific
 	12, // 23: store.v1.StoreUnservedItem.unknown:type_name -> store.v1.StoreUnknown
 	13, // 24: store.v1.StoreUnservedItem.unparsed:type_name -> store.v1.StoreUnparsed
-	38, // 25: store.v1.StoreVendorSpecific.raw:type_name -> google.protobuf.Struct
-	38, // 26: store.v1.StoreUnknown.raw:type_name -> google.protobuf.Struct
+	41, // 25: store.v1.StoreVendorSpecific.raw:type_name -> google.protobuf.Struct
+	41, // 26: store.v1.StoreUnknown.raw:type_name -> google.protobuf.Struct
 	0,  // 27: store.v1.EntryBatch.entries:type_name -> store.v1.StoreEntry
 	18, // 28: store.v1.EntryBatch.cursor_advance:type_name -> store.v1.CursorState
 	16, // 29: store.v1.EntryBatch.agent_locators:type_name -> store.v1.AgentLocator
 	17, // 30: store.v1.EntryBatch.retirements:type_name -> store.v1.StoreRetirement
 	15, // 31: store.v1.EntryBatch.shell_run_claims:type_name -> store.v1.ShellRunClaim
-	35, // 32: store.v1.ShellRunClaim.run:type_name -> conversation.v1.AgentActivityId
-	31, // 33: store.v1.AgentLocator.agent:type_name -> conversation.v1.AgentId
+	38, // 32: store.v1.ShellRunClaim.run:type_name -> conversation.v1.AgentActivityId
+	34, // 33: store.v1.AgentLocator.agent:type_name -> conversation.v1.AgentId
 	19, // 34: store.v1.CursorState.conversion:type_name -> store.v1.CursorConversion
 	20, // 35: store.v1.CursorConversion.current:type_name -> store.v1.CursorConversionCurrent
 	21, // 36: store.v1.CursorConversion.healing:type_name -> store.v1.CursorConversionHealing
 	22, // 37: store.v1.StoreLineAt.at:type_name -> store.v1.StoreItemPointer
 	2,  // 38: store.v1.StoreLineAt.line:type_name -> store.v1.StorePageLine
-	29, // 39: store.v1.StoreLineAt.turn:type_name -> conversation.v1.TurnId
-	30, // 40: store.v1.StoreLineAt.recorded_place:type_name -> conversation.v1.ConversationPlace
-	30, // 41: store.v1.StoreLineAt.received_place:type_name -> conversation.v1.ConversationPlace
+	32, // 39: store.v1.StoreLineAt.turn:type_name -> conversation.v1.TurnId
+	33, // 40: store.v1.StoreLineAt.recorded_place:type_name -> conversation.v1.ConversationPlace
+	33, // 41: store.v1.StoreLineAt.received_place:type_name -> conversation.v1.ConversationPlace
 	22, // 42: store.v1.ReadAgentPageMore.last_item:type_name -> store.v1.StoreItemPointer
 	23, // 43: store.v1.AgentSessionPage.lines:type_name -> store.v1.StoreLineAt
 	24, // 44: store.v1.AgentSessionPage.more:type_name -> store.v1.ReadAgentPageMore
 	25, // 45: store.v1.AgentSessionPage.floor:type_name -> store.v1.ReadAgentPageFloor
-	23, // 46: store.v1.AgentSessionPage.turn_heads:type_name -> store.v1.StoreLineAt
-	47, // [47:47] is the sub-list for method output_type
-	47, // [47:47] is the sub-list for method input_type
-	47, // [47:47] is the sub-list for extension type_name
-	47, // [47:47] is the sub-list for extension extendee
-	0,  // [0:47] is the sub-list for field type_name
+	28, // 46: store.v1.AgentSessionPage.heads:type_name -> store.v1.StoreTurnHead
+	23, // 47: store.v1.StoreTurnHead.line:type_name -> store.v1.StoreLineAt
+	29, // 48: store.v1.StoreTurnHead.adjacent:type_name -> store.v1.StoreTurnHeadAdjacent
+	30, // 49: store.v1.StoreTurnHead.steps_between:type_name -> store.v1.StoreTurnHeadStepsBetween
+	50, // [50:50] is the sub-list for method output_type
+	50, // [50:50] is the sub-list for method input_type
+	50, // [50:50] is the sub-list for extension type_name
+	50, // [50:50] is the sub-list for extension extendee
+	0,  // [0:50] is the sub-list for field type_name
 }
 
 func init() { file_store_v1_store_proto_init() }
@@ -2495,13 +2683,17 @@ func file_store_v1_store_proto_init() {
 		(*AgentSessionPage_More)(nil),
 		(*AgentSessionPage_Floor)(nil),
 	}
+	file_store_v1_store_proto_msgTypes[28].OneofWrappers = []any{
+		(*StoreTurnHead_Adjacent)(nil),
+		(*StoreTurnHead_StepsBetween)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_store_v1_store_proto_rawDesc), len(file_store_v1_store_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   28,
+			NumMessages:   31,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
