@@ -2522,6 +2522,22 @@ message FeedColdGateStanding {
   // draws only the pay and clear choices, and the daemon refuses a compact
   // answer to that gate.
   optional FeedColdGateCompactMenu compact = 4;
+  // The "compact and resume" button: compact through the same submenu, then
+  // send the prompts held at the gate once the compacted session is up. SET
+  // ONLY WHILE AT LEAST ONE PROMPT IS HELD AT THE GATE and the gate serves a
+  // compact menu; absent otherwise, and the client then draws no such button.
+  // Every other answer sends nothing: clear discards the held prompts, and pay
+  // and compact keep them for the user to send. The daemon republishes the
+  // row whenever the held count changes.
+  optional FeedColdGateCompactAndResume compact_and_resume = 5;
+}
+// The compact-and-resume button's props.
+message FeedColdGateCompactAndResume {
+  // How many prompts are held at the gate and would be sent once the
+  // compacted session is up. Always at least 1: with none held the element
+  // is absent. Prompts kept by an earlier pay or compact answer count, since
+  // they are still unsent.
+  uint32 held_prompts = 1;
 }
 // The token-figure element.
 message FeedColdGateContextTokens {

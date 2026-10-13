@@ -157,13 +157,7 @@ func (w *world) told() []told {
 }
 
 func (w *world) records(level, operation string) []dlog.Record {
-	var out []dlog.Record
-	for _, r := range w.log.Records() {
-		if r.Level == level && r.Operation == operation {
-			out = append(out, r)
-		}
-	}
-	return out
+	return dlog.FilterRecords(w.log.Records(), dlog.RecordQuery{Level: level, Operation: operation})
 }
 
 func (w *world) assertNoWarnings() {

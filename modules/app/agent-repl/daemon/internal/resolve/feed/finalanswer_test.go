@@ -800,13 +800,7 @@ func (h *harness) recordedByAnEarlierDaemon(turn, unit, why string) {
 // recordsAt answers the records logged under one operation at one level.
 func (h *harness) recordsAt(level, operation string) []dlog.Record {
 	h.t.Helper()
-	var out []dlog.Record
-	for _, rec := range h.log.Records() {
-		if rec.Level == level && rec.Operation == operation {
-			out = append(out, rec)
-		}
-	}
-	return out
+	return dlog.FilterRecords(h.log.Records(), dlog.RecordQuery{Level: level, Operation: operation})
 }
 
 // TestATerminalVerdictIsRaisedOncePerOccurrence pins that an adopted turn's

@@ -25,6 +25,7 @@ import {
   COLD_GATE_COPY,
   COLD_GATE_HEAT_PROPERTY,
   drawFeedColdGate,
+  heldPromptsPhrase,
   scopeLabel,
   scopeName,
 } from "../../../src/feed/asks/cold-gate.js";
@@ -56,6 +57,8 @@ function standing(
     scopes?: SessionCompactScope[];
     /** True for a gate whose account is not offered compaction. */
     noCompact?: boolean;
+    /** The served count of prompts held at the gate; absent serves no compact-and-resume. */
+    heldPrompts?: number;
   } = {},
 ): InitState {
   return {
@@ -76,8 +79,19 @@ function standing(
               ],
             },
           }),
+      ...(opts.heldPrompts === undefined ? {} : { compactAndResume: { heldPrompts: opts.heldPrompts } }),
     },
   };
+}
+
+/** The compact-and-resume button, when the card drew one. */
+function compactAndResumeButton(el: HTMLElement): Control | null {
+  return el.querySelector<Control>('[data-compact-open="compactAndResume"]');
+}
+
+/** The submenu's send button, in whichever mode it stands. */
+function submenuSend(el: HTMLElement): Control | null {
+  return el.querySelector<Control>(".cold-gate-submenu > .hibernation-compact");
 }
 
 /** A gate row in one STATE. */
@@ -1084,5 +1098,111 @@ describe("a resolved trace this build cannot read", () => {
     expect(() => drawFeedColdGate(u, askHarness().rc)).toThrow(
       "malformed view at FeedColdGate.resolved.choice: arm 'rehydrate' is not one this build can draw",
     );
+  });
+});
+
+describe("the compact-and-resume button", () => {
+  it("is not drawn while the daemon serves no held prompt", () => {
+    const el = drawFeedColdGate(gate(standing()), askHarness().rc);
+    expect(compactAndResumeButton(el)).toBeNull();
+  });
+
+  it("stands beside compact first while prompts are held at the gate", () => {
+    const el = drawFeedColdGate(gate(standing({ heldPrompts: 2 })), askHarness().rc);
+    expect([...el.querySelectorAll(".cold-gate-buttons > *")].map((n) => n.textContent)).toEqual([
+      COLD_GATE_COPY.compact.label,
+      COLD_GATE_COPY.compactAndResume.label,
+      COLD_GATE_COPY.clear.label,
+      COLD_GATE_COPY.pay.label,
+    ]);
+  });
+
+  it("latches inert with every other button while an answer is in flight", () => {
+    const el = drawFeedColdGate(gate(standing({ heldPrompts: 1 })), askHarness().rc);
+    el.querySelector<Control>('[data-cold-gate="pay"]')?.click();
+    expect(compactAndResumeButton(el)?.disabled).toBe(true);
+  });
+
+  it("wears the compact button's color", () => {
+    const el = drawFeedColdGate(gate(standing({ heldPrompts: 1 })), askHarness().rc);
+    expect(compactAndResumeButton(el)?.className).toBe(
+      el.querySelector('[data-compact-open="compact"]')?.className,
+    );
+  });
+
+  it("says in its tooltip how many held prompts it sends", () => {
+    const el = drawFeedColdGate(gate(standing({ heldPrompts: 3 })), askHarness().rc);
+    expect(compactAndResumeButton(el)?.title).toBe(
+      "summarize, then send the 3 held prompts once the session is back",
+    );
+  });
+
+  it("carries the served count as its hook", () => {
+    const el = drawFeedColdGate(gate(standing({ heldPrompts: 3 })), askHarness().rc);
+    expect(compactAndResumeButton(el)?.getAttribute("data-cold-gate-held-prompts")).toBe("3");
+  });
+
+  it("is not drawn on a gate that offers no compaction, whatever is held", () => {
+    const el = drawFeedColdGate(gate(standing({ noCompact: true, heldPrompts: 1 })), askHarness().rc);
+    expect(compactAndResumeButton(el)).toBeNull();
+  });
+
+  it("refuses an offer that holds no prompt", () => {
+    expect(() => drawFeedColdGate(gate(standing({ heldPrompts: 0 })), askHarness().rc)).toThrow(MalformedView);
+  });
+
+  it("opens the submenu with a send labelled compact and resume", () => {
+    const el = drawFeedColdGate(gate(standing({ heldPrompts: 1 })), askHarness().rc);
+    compactAndResumeButton(el)?.click();
+    expect([
+      el.querySelector<HTMLElement>(".cold-gate-submenu")?.hidden,
+      submenuSend(el)?.textContent,
+    ]).toEqual([false, COLD_GATE_COPY.submenu.send.compactAndResume]);
+  });
+
+  it("sends the compact_and_resume arm with the summarizer and scope picked", async () => {
+    const h = askHarness();
+    const el = drawFeedColdGate(gate(standing({ heldPrompts: 1 })), h.rc);
+    compactAndResumeButton(el)?.click();
+    const third = el.querySelectorAll<HTMLInputElement>("[data-compact-scope]")[2];
+    if (third !== undefined) third.checked = true;
+    submenuSend(el)?.click();
+    await settle();
+    const choice = h.calls.coldGate[0]?.choice;
+    expect(
+      choice?.case === "compactAndResume" ? [choice.value.model?.name, choice.value.scope] : null,
+    ).toEqual([SUMMARIZER, SessionCompactScope.RESPONSES]);
+  });
+
+  it("switches an open submenu to its own mode rather than closing it", () => {
+    const el = drawFeedColdGate(gate(standing({ heldPrompts: 1 })), askHarness().rc);
+    openSubmenu(el);
+    compactAndResumeButton(el)?.click();
+    expect([
+      el.querySelector<HTMLElement>(".cold-gate-submenu")?.hidden,
+      submenuSend(el)?.getAttribute("data-cold-gate"),
+    ]).toEqual([false, "compactAndResume"]);
+  });
+
+  it("closes the submenu on a second click of the same button", () => {
+    const el = drawFeedColdGate(gate(standing({ heldPrompts: 1 })), askHarness().rc);
+    compactAndResumeButton(el)?.click();
+    compactAndResumeButton(el)?.click();
+    expect(el.querySelector<HTMLElement>(".cold-gate-submenu")?.hidden).toBe(true);
+  });
+
+  it("leaves compact first's send labelled compact", () => {
+    const el = drawFeedColdGate(gate(standing({ heldPrompts: 1 })), askHarness().rc);
+    openSubmenu(el);
+    expect(submenuSend(el)?.textContent).toBe(COLD_GATE_COPY.submenu.send.compact);
+  });
+});
+
+describe("heldPromptsPhrase", () => {
+  it.each([
+    [1, "the held prompt"],
+    [2, "the 2 held prompts"],
+  ])("words %i held prompt(s) as %s", (held, want) => {
+    expect(heldPromptsPhrase(held)).toBe(want);
   });
 });

@@ -1332,6 +1332,11 @@ func (q *fakeQueue) flushes() []ids.WorkspaceID {
 // ReleaseReconnectHolds is a no-op: no merge scenario brings a session up.
 func (q *fakeQueue) ReleaseReconnectHolds(ids.WorkspaceID) {}
 
+// ColdGateAnswered is a no-op: no merge scenario answers a cold gate.
+func (q *fakeQueue) ColdGateAnswered(context.Context, ids.WorkspaceID, promptqueue.GateFate) error {
+	return nil
+}
+
 // OnVendorServes is a no-op: no merge scenario stands a vendor block.
 func (q *fakeQueue) OnVendorServes(ids.WorkspaceID) {}
 
@@ -2694,12 +2699,7 @@ func (f *fakeFooter) all() []footer.MergeFacts {
 
 // recordFor answers the first record with one level and operation.
 func (h *harness) recordFor(level, operation string) (dlog.Record, bool) {
-	for _, r := range h.logs.Records() {
-		if r.Level == level && r.Operation == operation {
-			return r, true
-		}
-	}
-	return dlog.Record{}, false
+	return dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: level, Operation: operation})
 }
 
 // commits answers n commits of work, the rebase's replay.

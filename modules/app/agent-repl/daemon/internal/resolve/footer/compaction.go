@@ -68,7 +68,7 @@ func CompactionLine(p *conversationv1.SessionCompactionProgress) string {
 // acknowledged, then the phases refine it.
 func CompactionRequestLine(choice, detail string) string {
 	switch choice {
-	case ChoiceCompact:
+	case ChoiceCompact, ChoiceCompactAndResume:
 		if detail != "" {
 			return "compaction requested (" + detail + ")"
 		}

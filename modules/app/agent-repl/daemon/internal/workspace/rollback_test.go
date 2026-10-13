@@ -7,6 +7,7 @@ import (
 
 	shimv1 "agentrepl/proto/shim/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/shimclient"
@@ -172,12 +173,8 @@ func TestRollBackSuccessCallsFeedAndCountsFilesRestored(t *testing.T) {
 // checked (RollBack runs on the caller's own goroutine, so there is nothing
 // to await).
 func hasRecord(f *fixture, level, operation string) bool {
-	for _, r := range f.log.logger.Records() {
-		if r.Level == level && r.Operation == operation {
-			return true
-		}
-	}
-	return false
+	_, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: level, Operation: operation})
+	return ok
 }
 
 // fakeRollBackTransport is the narrow shimclient.Client surface a shimAdapter

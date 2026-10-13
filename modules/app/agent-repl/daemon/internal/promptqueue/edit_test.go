@@ -44,12 +44,8 @@ func beginEdit(t *testing.T, h *harness, turn string) {
 
 // logged reports whether a record at LEVEL under OP carries MESSAGE.
 func logged(records []dlog.Record, level, op, message string) bool {
-	for _, r := range records {
-		if r.Level == level && r.Operation == op && r.Message == message {
-			return true
-		}
-	}
-	return false
+	_, ok := dlog.FindRecord(records, dlog.RecordQuery{Level: level, Operation: op, Message: message})
+	return ok
 }
 
 func TestBeginEditClaimsThePrompt(t *testing.T) {

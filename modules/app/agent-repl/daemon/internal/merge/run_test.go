@@ -272,12 +272,7 @@ func TestARealGitFailureStillAborts(t *testing.T) {
 
 // recordAt finds the first captured record with that level and operation.
 func recordAt(h *harness, level, operation string) (dlog.Record, bool) {
-	for _, record := range h.logs.Records() {
-		if record.Level == level && record.Operation == operation {
-			return record, true
-		}
-	}
-	return dlog.Record{}, false
+	return dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: level, Operation: operation})
 }
 
 // --- an admitted merge waits for the workspace to fall free --------------
