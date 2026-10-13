@@ -122,7 +122,7 @@ These clicks jump to an entry in the feed:
   - The agent names it; a name that is already a workspace, a branch or another merge's reservation is refused, and the agent asks again with another.
   - Commits you make after the merge was asked for are not part of it; they go through your next merge.
 - **An agent can announce a one-shot merge before its turn is over, with `/merge-queue one-shot`.**
-  - The workspace is marked a one-shot at once, so its tab shows the one-shot mark while the agent keeps working.
+  - The workspace is marked a one-shot at once, so its tab and its sidebar row show the one-shot mark (🎯) while the agent keeps working.
   - When the turn ends, the workspace's branch merges in place, and the workspace closes once the merge lands.
   - Work left uncommitted when the turn ends fails the merge, and the workspace stays open.
 - **`/merge-queue own async <name> pick <instruction>` lands only the changes the instruction names.**
