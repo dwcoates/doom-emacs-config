@@ -14,6 +14,9 @@
  * runs against a real DOM and against a plain object in a test alike.
  */
 
+/** The SVG namespace every drawn glyph's elements are created in. */
+export const SVG_NS = "http://www.w3.org/2000/svg";
+
 /**
  * Innermost node at or above `start` that satisfies `match`, stopping
  * below `stop` — `stop` itself is never a candidate, and neither is

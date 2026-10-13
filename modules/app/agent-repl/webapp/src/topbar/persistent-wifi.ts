@@ -26,6 +26,7 @@ import {
   type UpdatePersistentWifiModeResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_persistent_wifi_mode_pb";
 import type { TopbarPersistentWifi } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
+import { SVG_NS } from "../dom.js";
 import { whileInFlight } from "../feed/cards/controls.js";
 import { log } from "../log.js";
 import { guardMalformed } from "../rpc/guard.js";
@@ -40,8 +41,6 @@ import {
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 import type { TopbarContext } from "./context.js";
-
-const SVG_NS = "http://www.w3.org/2000/svg";
 
 /**
  * The wifi glyph: three arcs and a dot, stroked in the current color, drawn
