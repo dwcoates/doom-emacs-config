@@ -392,6 +392,9 @@ type DB interface {
 	// MoveMerge moves a waiting merge one place up or down its queue, past
 	// the nearest waiting merge on that side, answering whether it moved.
 	MoveMerge(ctx context.Context, repo RepoKey, id WorkspaceID, move MergeMove) (bool, error)
+	// PrioritizeMerge moves a waiting merge to the front of the merges
+	// waiting in its queue, so it runs next, answering whether it moved.
+	PrioritizeMerge(ctx context.Context, repo RepoKey, id WorkspaceID) (bool, error)
 	// AdmitMerge marks the entry the orchestrator is running now.
 	AdmitMerge(ctx context.Context, repo RepoKey, id WorkspaceID) error
 	// RemoveMergeQueueEntry drops one entry with the cause it was dropped for.

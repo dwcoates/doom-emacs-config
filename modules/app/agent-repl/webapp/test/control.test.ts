@@ -4,7 +4,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { CONTROL_SELECTOR, armButtonRole, createControl, isControl, labelledControl } from "../src/control.js";
+import { CONTROL_SELECTOR, armButtonRole, createControl, isControl, labelledControl, setControlsDisabled } from "../src/control.js";
 import { captureLogRecords, forwardedRecord } from "./log-capture.js";
 import { codeOf, withoutBlockComments } from "./source-text.js";
 
@@ -359,7 +359,7 @@ describe("labelledControl", () => {
     expect(clicks).toBe(0);
   });
 
-  it.each(["held/held-prompt.ts", "held/held-offer.ts", "held/classifier-update.ts"])(
+  it.each(["held/held-prompt.ts", "feed/merge/queue-offer.ts", "held/classifier-update.ts"])(
     "is how %s builds every row control",
     (file) => {
       // Arrange
@@ -368,4 +368,42 @@ describe("labelledControl", () => {
       expect(code).not.toMatch(/\bcreateControl\(/);
     },
   );
+});
+
+describe("setControlsDisabled", () => {
+  /** A root holding two controls, one nested a level down. */
+  const root = (): { el: HTMLElement; controls: HTMLElement[] } => {
+    const el = document.createElement("div");
+    const nested = document.createElement("span");
+    const a = createControl();
+    const b = createControl();
+    nested.append(b);
+    el.append(a, nested);
+    return { el, controls: [a, b] };
+  };
+
+  it("disables every control under the root", () => {
+    const { el, controls } = root();
+    setControlsDisabled(el, true);
+    expect(controls.map((c) => c.getAttribute("aria-disabled"))).toEqual(["true", "true"]);
+  });
+
+  it("re-enables every control under the root", () => {
+    const { el, controls } = root();
+    setControlsDisabled(el, true);
+    setControlsDisabled(el, false);
+    expect(controls.map((c) => c.getAttribute("aria-disabled"))).toEqual([null, null]);
+  });
+
+  it("does nothing for a root already gone", () => {
+    expect(() => setControlsDisabled(null, true)).not.toThrow();
+  });
+
+  it.each(["held/held-prompt.ts", "feed/merge/queue-offer.ts"])("is how %s disables its answers", (file) => {
+    const code = codeOf(readFileSync(path.join(SRC, file), "utf8"));
+    expect([/\bsetControlsDisabled\(/.test(code), /querySelectorAll<Control>\(CONTROL_SELECTOR\)/.test(code)]).toEqual([
+      true,
+      false,
+    ]);
+  });
 });

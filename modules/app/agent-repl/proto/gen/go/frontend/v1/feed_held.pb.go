@@ -1,7 +1,6 @@
 // feed_held.proto — THE HELD SECTION: the part of a workspace's ROOT feed
 // that holds what has not yet settled into the conversation's history — a
-// prompt the daemon is holding for delivery, a question waiting for the user's
-// answer. It is drawn at the root feed's tail, after every row, with no
+// prompt the daemon is holding for delivery. It is drawn at the root feed's tail, after every row, with no
 // heading and no divider, so a held item reads exactly as the feed's newest
 // row does.
 //
@@ -10,7 +9,6 @@
 //   │ ● merging ABC/fix-flaky-test → master          3m 12s │   (a row, not held)
 //   └───────────────────────────────────────────────────────┘
 //   "also fix the footer"        ⏳ held · merge running       FeedHeldItem.prompt
-//   ?  take this merge off the queue?      [dequeue] [keep]    FeedHeldItem.offer
 //
 // A RUNNING MERGE IS NOT HELD. Its bubble is a row of the feed pinned below
 // every settled row (FeedRowOrder.pinned), updated in place while it runs.
@@ -65,8 +63,8 @@ const (
 // the daemon is holding nothing for the user — not an absent one.
 type FeedHeld struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The held items, in display order: the held prompts in queue order, then a
-	// posed offer. The prompt that settles first sits nearest the settled rows.
+	// The held items, in display order: the held prompts in queue order. The
+	// prompt that settles first sits nearest the settled rows.
 	Items         []*FeedHeldItem `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -115,17 +113,14 @@ type FeedHeldItem struct {
 	// The item's identity, and the reconciliation key a client keeps its element
 	// under. For a prompt it is the FeedId its prompt row will carry once it
 	// settles, so the settled row and the held item are one element to the
-	// client. An offer, which never settles,
-	// has a FeedId of its own. Opaque and daemon-minted, like every FeedId.
+	// client. Opaque and daemon-minted, like every FeedId.
 	Id *FeedId `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	// What is held. THE ARM IS THE KIND, and each kind is answered differently —
-	// a prompt is released or dropped, an offer is answered — so a consumer
-	// routes on the arm rather than on anything inside it.
+	// What is held. THE ARM IS THE KIND, so a consumer routes on the arm rather
+	// than on anything inside it.
 	//
 	// Types that are valid to be assigned to Item:
 	//
 	//	*FeedHeldItem_Prompt
-	//	*FeedHeldItem_Offer
 	Item          isFeedHeldItem_Item `protobuf_oneof:"item"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -184,15 +179,6 @@ func (x *FeedHeldItem) GetPrompt() *HeldPrompt {
 	return nil
 }
 
-func (x *FeedHeldItem) GetOffer() *HeldOffer {
-	if x != nil {
-		if x, ok := x.Item.(*FeedHeldItem_Offer); ok {
-			return x.Offer
-		}
-	}
-	return nil
-}
-
 type isFeedHeldItem_Item interface {
 	isFeedHeldItem_Item()
 }
@@ -202,14 +188,7 @@ type FeedHeldItem_Prompt struct {
 	Prompt *HeldPrompt `protobuf:"bytes,3,opt,name=prompt,proto3,oneof"`
 }
 
-type FeedHeldItem_Offer struct {
-	// A question the daemon is holding for the user's answer.
-	Offer *HeldOffer `protobuf:"bytes,4,opt,name=offer,proto3,oneof"`
-}
-
 func (*FeedHeldItem_Prompt) isFeedHeldItem_Item() {}
-
-func (*FeedHeldItem_Offer) isFeedHeldItem_Item() {}
 
 // A prompt the daemon is holding for delivery.
 //
@@ -2533,191 +2512,17 @@ func (*HeldPromptBuildRefreshHold) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{38}
 }
 
-// A question the daemon holds for the user's answer. THE ARM IS THE QUESTION.
-type HeldOffer struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Which question is being asked. The arm determines both the card drawn and
-	// the answers available, so a consumer switches on it rather than inspecting
-	// the payload.
-	//
-	// Types that are valid to be assigned to Offer:
-	//
-	//	*HeldOffer_MergeDequeue
-	Offer         isHeldOffer_Offer `protobuf_oneof:"offer"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *HeldOffer) Reset() {
-	*x = HeldOffer{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[39]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *HeldOffer) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*HeldOffer) ProtoMessage() {}
-
-func (x *HeldOffer) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[39]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use HeldOffer.ProtoReflect.Descriptor instead.
-func (*HeldOffer) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{39}
-}
-
-func (x *HeldOffer) GetOffer() isHeldOffer_Offer {
-	if x != nil {
-		return x.Offer
-	}
-	return nil
-}
-
-func (x *HeldOffer) GetMergeDequeue() *HeldOfferMergeDequeue {
-	if x != nil {
-		if x, ok := x.Offer.(*HeldOffer_MergeDequeue); ok {
-			return x.MergeDequeue
-		}
-	}
-	return nil
-}
-
-type isHeldOffer_Offer interface {
-	isHeldOffer_Offer()
-}
-
-type HeldOffer_MergeDequeue struct {
-	// Take this workspace's merge off the queue? Raised by an interrupt during
-	// a merge; cleared by the answer, by the merge reaching its own terminal,
-	// or by the merge leaving the queue on its own. A frontend draws the card
-	// if and only if this item is present.
-	MergeDequeue *HeldOfferMergeDequeue `protobuf:"bytes,1,opt,name=merge_dequeue,json=mergeDequeue,proto3,oneof"`
-}
-
-func (*HeldOffer_MergeDequeue) isHeldOffer_Offer() {}
-
-// The merge-dequeue question, resolved for drawing: the daemon composes the
-// sentence ("interrupting — keep your merge's queue slot, or release it?");
-// the card draws it and offers the two answers, which are AnswerHeldOffer's
-// arms (keep | release), never fields here.
-type HeldOfferMergeDequeue struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The sentence the card leads with, composed by the daemon. The two answers
-	// are not fields here — they are the answer request's arms — so this message
-	// carries only what is drawn.
-	Headline      *HeldOfferHeadline `protobuf:"bytes,1,opt,name=headline,proto3" json:"headline,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *HeldOfferMergeDequeue) Reset() {
-	*x = HeldOfferMergeDequeue{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[40]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *HeldOfferMergeDequeue) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*HeldOfferMergeDequeue) ProtoMessage() {}
-
-func (x *HeldOfferMergeDequeue) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[40]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use HeldOfferMergeDequeue.ProtoReflect.Descriptor instead.
-func (*HeldOfferMergeDequeue) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{40}
-}
-
-func (x *HeldOfferMergeDequeue) GetHeadline() *HeldOfferHeadline {
-	if x != nil {
-		return x.Headline
-	}
-	return nil
-}
-
-// The sentence an offer card leads with, composed daemon-side.
-type HeldOfferHeadline struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The composed sentence, drawn verbatim. Never assembled client-side from
-	// the offer's kind.
-	Text          string `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *HeldOfferHeadline) Reset() {
-	*x = HeldOfferHeadline{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[41]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *HeldOfferHeadline) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*HeldOfferHeadline) ProtoMessage() {}
-
-func (x *HeldOfferHeadline) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[41]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use HeldOfferHeadline.ProtoReflect.Descriptor instead.
-func (*HeldOfferHeadline) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{41}
-}
-
-func (x *HeldOfferHeadline) GetText() string {
-	if x != nil {
-		return x.Text
-	}
-	return ""
-}
-
 var File_frontend_v1_feed_held_proto protoreflect.FileDescriptor
 
 const file_frontend_v1_feed_held_proto_rawDesc = "" +
 	"\n" +
 	"\x1bfrontend/v1/feed_held.proto\x12\vfrontend.v1\x1a#conversation/v1/slash_command.proto\x1a\x1aconversation/v1/turn.proto\x1a\x1aconversation/v1/user.proto\x1a\x16frontend/v1/feed.proto\";\n" +
 	"\bFeedHeld\x12/\n" +
-	"\x05items\x18\x01 \x03(\v2\x19.frontend.v1.FeedHeldItemR\x05items\"\xab\x01\n" +
+	"\x05items\x18\x01 \x03(\v2\x19.frontend.v1.FeedHeldItemR\x05items\"\x88\x01\n" +
 	"\fFeedHeldItem\x12#\n" +
 	"\x02id\x18\x01 \x01(\v2\x13.frontend.v1.FeedIdR\x02id\x121\n" +
-	"\x06prompt\x18\x03 \x01(\v2\x17.frontend.v1.HeldPromptH\x00R\x06prompt\x12.\n" +
-	"\x05offer\x18\x04 \x01(\v2\x16.frontend.v1.HeldOfferH\x00R\x05offerB\x06\n" +
-	"\x04itemJ\x04\b\x02\x10\x03R\x05merge\"\xb0\f\n" +
+	"\x06prompt\x18\x03 \x01(\v2\x17.frontend.v1.HeldPromptH\x00R\x06promptB\x06\n" +
+	"\x04itemJ\x04\b\x02\x10\x03J\x04\b\x04\x10\x05R\x05mergeR\x05offer\"\xb0\f\n" +
 	"\n" +
 	"HeldPrompt\x12+\n" +
 	"\x04turn\x18\x01 \x01(\v2\x17.conversation.v1.TurnIdR\x04turn\x12-\n" +
@@ -2820,14 +2625,7 @@ const file_frontend_v1_feed_held_proto_rawDesc = "" +
 	"\x14HeldPromptDaemonHeld\"\x18\n" +
 	"\x16HeldPromptColdGateHold\"\x1c\n" +
 	"\x1aHeldPromptAwaitingDelivery\"\x1c\n" +
-	"\x1aHeldPromptBuildRefreshHold\"_\n" +
-	"\tHeldOffer\x12I\n" +
-	"\rmerge_dequeue\x18\x01 \x01(\v2\".frontend.v1.HeldOfferMergeDequeueH\x00R\fmergeDequeueB\a\n" +
-	"\x05offer\"S\n" +
-	"\x15HeldOfferMergeDequeue\x12:\n" +
-	"\bheadline\x18\x01 \x01(\v2\x1e.frontend.v1.HeldOfferHeadlineR\bheadline\"'\n" +
-	"\x11HeldOfferHeadline\x12\x12\n" +
-	"\x04text\x18\x01 \x01(\tR\x04textB(Z&agentrepl/proto/frontend/v1;frontendv1b\x06proto3"
+	"\x1aHeldPromptBuildRefreshHoldB(Z&agentrepl/proto/frontend/v1;frontendv1b\x06proto3"
 
 var (
 	file_frontend_v1_feed_held_proto_rawDescOnce sync.Once
@@ -2841,7 +2639,7 @@ func file_frontend_v1_feed_held_proto_rawDescGZIP() []byte {
 	return file_frontend_v1_feed_held_proto_rawDescData
 }
 
-var file_frontend_v1_feed_held_proto_msgTypes = make([]protoimpl.MessageInfo, 42)
+var file_frontend_v1_feed_held_proto_msgTypes = make([]protoimpl.MessageInfo, 39)
 var file_frontend_v1_feed_held_proto_goTypes = []any{
 	(*FeedHeld)(nil),                           // 0: frontend.v1.FeedHeld
 	(*FeedHeldItem)(nil),                       // 1: frontend.v1.FeedHeldItem
@@ -2882,66 +2680,60 @@ var file_frontend_v1_feed_held_proto_goTypes = []any{
 	(*HeldPromptColdGateHold)(nil),             // 36: frontend.v1.HeldPromptColdGateHold
 	(*HeldPromptAwaitingDelivery)(nil),         // 37: frontend.v1.HeldPromptAwaitingDelivery
 	(*HeldPromptBuildRefreshHold)(nil),         // 38: frontend.v1.HeldPromptBuildRefreshHold
-	(*HeldOffer)(nil),                          // 39: frontend.v1.HeldOffer
-	(*HeldOfferMergeDequeue)(nil),              // 40: frontend.v1.HeldOfferMergeDequeue
-	(*HeldOfferHeadline)(nil),                  // 41: frontend.v1.HeldOfferHeadline
-	(*FeedId)(nil),                             // 42: frontend.v1.FeedId
-	(*v1.TurnId)(nil),                          // 43: conversation.v1.TurnId
-	(*v1.UserSaid)(nil),                        // 44: conversation.v1.UserSaid
-	(v1.SessionCommand)(0),                     // 45: conversation.v1.SessionCommand
+	(*FeedId)(nil),                             // 39: frontend.v1.FeedId
+	(*v1.TurnId)(nil),                          // 40: conversation.v1.TurnId
+	(*v1.UserSaid)(nil),                        // 41: conversation.v1.UserSaid
+	(v1.SessionCommand)(0),                     // 42: conversation.v1.SessionCommand
 }
 var file_frontend_v1_feed_held_proto_depIdxs = []int32{
 	1,  // 0: frontend.v1.FeedHeld.items:type_name -> frontend.v1.FeedHeldItem
-	42, // 1: frontend.v1.FeedHeldItem.id:type_name -> frontend.v1.FeedId
+	39, // 1: frontend.v1.FeedHeldItem.id:type_name -> frontend.v1.FeedId
 	2,  // 2: frontend.v1.FeedHeldItem.prompt:type_name -> frontend.v1.HeldPrompt
-	39, // 3: frontend.v1.FeedHeldItem.offer:type_name -> frontend.v1.HeldOffer
-	43, // 4: frontend.v1.HeldPrompt.turn:type_name -> conversation.v1.TurnId
-	44, // 5: frontend.v1.HeldPrompt.said:type_name -> conversation.v1.UserSaid
-	24, // 6: frontend.v1.HeldPrompt.queued_at:type_name -> frontend.v1.HeldPromptQueuedAt
-	25, // 7: frontend.v1.HeldPrompt.classifying:type_name -> frontend.v1.HeldPromptClassifying
-	26, // 8: frontend.v1.HeldPrompt.interject:type_name -> frontend.v1.HeldPromptInterject
-	28, // 9: frontend.v1.HeldPrompt.hold_for_turn_end:type_name -> frontend.v1.HeldPromptHoldForTurnEnd
-	27, // 10: frontend.v1.HeldPrompt.after_tool_call:type_name -> frontend.v1.HeldPromptAfterToolCall
-	30, // 11: frontend.v1.HeldPrompt.uninterruptible_turn:type_name -> frontend.v1.HeldPromptUninterruptibleTurn
-	31, // 12: frontend.v1.HeldPrompt.classification_error:type_name -> frontend.v1.HeldPromptClassificationError
-	35, // 13: frontend.v1.HeldPrompt.daemon_held:type_name -> frontend.v1.HeldPromptDaemonHeld
-	37, // 14: frontend.v1.HeldPrompt.awaiting_delivery:type_name -> frontend.v1.HeldPromptAwaitingDelivery
-	32, // 15: frontend.v1.HeldPrompt.shutdown:type_name -> frontend.v1.HeldPromptShutdownHold
-	33, // 16: frontend.v1.HeldPrompt.reconnect:type_name -> frontend.v1.HeldPromptReconnectHold
-	38, // 17: frontend.v1.HeldPrompt.build_refresh:type_name -> frontend.v1.HeldPromptBuildRefreshHold
-	34, // 18: frontend.v1.HeldPrompt.merge:type_name -> frontend.v1.HeldPromptMergeHold
-	36, // 19: frontend.v1.HeldPrompt.cold_gate:type_name -> frontend.v1.HeldPromptColdGateHold
-	23, // 20: frontend.v1.HeldPrompt.editing:type_name -> frontend.v1.HeldPromptEditing
-	8,  // 21: frontend.v1.HeldPrompt.badge:type_name -> frontend.v1.HeldPromptBadge
-	22, // 22: frontend.v1.HeldPrompt.notes:type_name -> frontend.v1.HeldPromptStatusNote
-	4,  // 23: frontend.v1.HeldPrompt.coalesced:type_name -> frontend.v1.HeldPromptCoalesced
-	5,  // 24: frontend.v1.HeldPrompt.act:type_name -> frontend.v1.HeldSessionAct
-	3,  // 25: frontend.v1.HeldPrompt.fold_above:type_name -> frontend.v1.HeldPromptFoldAbove
-	43, // 26: frontend.v1.HeldPromptFoldAbove.above:type_name -> conversation.v1.TurnId
-	6,  // 27: frontend.v1.HeldSessionAct.model:type_name -> frontend.v1.HeldSessionActModel
-	7,  // 28: frontend.v1.HeldSessionAct.permission_mode:type_name -> frontend.v1.HeldSessionActPermissionMode
-	9,  // 29: frontend.v1.HeldPromptBadge.classifying:type_name -> frontend.v1.HeldPromptBadgeClassifying
-	10, // 30: frontend.v1.HeldPromptBadge.interject:type_name -> frontend.v1.HeldPromptBadgeInterject
-	11, // 31: frontend.v1.HeldPromptBadge.after_tool_call:type_name -> frontend.v1.HeldPromptBadgeAfterToolCall
-	12, // 32: frontend.v1.HeldPromptBadge.hold_for_turn_end:type_name -> frontend.v1.HeldPromptBadgeHoldForTurnEnd
-	13, // 33: frontend.v1.HeldPromptBadge.uninterruptible_turn:type_name -> frontend.v1.HeldPromptBadgeUninterruptibleTurn
-	14, // 34: frontend.v1.HeldPromptBadge.classification_error:type_name -> frontend.v1.HeldPromptBadgeClassificationError
-	15, // 35: frontend.v1.HeldPromptBadge.editing:type_name -> frontend.v1.HeldPromptBadgeEditing
-	16, // 36: frontend.v1.HeldPromptBadge.shutdown:type_name -> frontend.v1.HeldPromptBadgeShutdown
-	17, // 37: frontend.v1.HeldPromptBadge.build_refresh:type_name -> frontend.v1.HeldPromptBadgeBuildRefresh
-	18, // 38: frontend.v1.HeldPromptBadge.reconnect:type_name -> frontend.v1.HeldPromptBadgeReconnect
-	19, // 39: frontend.v1.HeldPromptBadge.merge:type_name -> frontend.v1.HeldPromptBadgeMerge
-	20, // 40: frontend.v1.HeldPromptBadge.cold_gate:type_name -> frontend.v1.HeldPromptBadgeColdGate
-	21, // 41: frontend.v1.HeldPromptBadge.awaiting_delivery:type_name -> frontend.v1.HeldPromptBadgeAwaitingDelivery
-	29, // 42: frontend.v1.HeldPromptHoldForTurnEnd.accepted:type_name -> frontend.v1.HeldPromptAccepted
-	45, // 43: frontend.v1.HeldPromptUninterruptibleTurn.command:type_name -> conversation.v1.SessionCommand
-	40, // 44: frontend.v1.HeldOffer.merge_dequeue:type_name -> frontend.v1.HeldOfferMergeDequeue
-	41, // 45: frontend.v1.HeldOfferMergeDequeue.headline:type_name -> frontend.v1.HeldOfferHeadline
-	46, // [46:46] is the sub-list for method output_type
-	46, // [46:46] is the sub-list for method input_type
-	46, // [46:46] is the sub-list for extension type_name
-	46, // [46:46] is the sub-list for extension extendee
-	0,  // [0:46] is the sub-list for field type_name
+	40, // 3: frontend.v1.HeldPrompt.turn:type_name -> conversation.v1.TurnId
+	41, // 4: frontend.v1.HeldPrompt.said:type_name -> conversation.v1.UserSaid
+	24, // 5: frontend.v1.HeldPrompt.queued_at:type_name -> frontend.v1.HeldPromptQueuedAt
+	25, // 6: frontend.v1.HeldPrompt.classifying:type_name -> frontend.v1.HeldPromptClassifying
+	26, // 7: frontend.v1.HeldPrompt.interject:type_name -> frontend.v1.HeldPromptInterject
+	28, // 8: frontend.v1.HeldPrompt.hold_for_turn_end:type_name -> frontend.v1.HeldPromptHoldForTurnEnd
+	27, // 9: frontend.v1.HeldPrompt.after_tool_call:type_name -> frontend.v1.HeldPromptAfterToolCall
+	30, // 10: frontend.v1.HeldPrompt.uninterruptible_turn:type_name -> frontend.v1.HeldPromptUninterruptibleTurn
+	31, // 11: frontend.v1.HeldPrompt.classification_error:type_name -> frontend.v1.HeldPromptClassificationError
+	35, // 12: frontend.v1.HeldPrompt.daemon_held:type_name -> frontend.v1.HeldPromptDaemonHeld
+	37, // 13: frontend.v1.HeldPrompt.awaiting_delivery:type_name -> frontend.v1.HeldPromptAwaitingDelivery
+	32, // 14: frontend.v1.HeldPrompt.shutdown:type_name -> frontend.v1.HeldPromptShutdownHold
+	33, // 15: frontend.v1.HeldPrompt.reconnect:type_name -> frontend.v1.HeldPromptReconnectHold
+	38, // 16: frontend.v1.HeldPrompt.build_refresh:type_name -> frontend.v1.HeldPromptBuildRefreshHold
+	34, // 17: frontend.v1.HeldPrompt.merge:type_name -> frontend.v1.HeldPromptMergeHold
+	36, // 18: frontend.v1.HeldPrompt.cold_gate:type_name -> frontend.v1.HeldPromptColdGateHold
+	23, // 19: frontend.v1.HeldPrompt.editing:type_name -> frontend.v1.HeldPromptEditing
+	8,  // 20: frontend.v1.HeldPrompt.badge:type_name -> frontend.v1.HeldPromptBadge
+	22, // 21: frontend.v1.HeldPrompt.notes:type_name -> frontend.v1.HeldPromptStatusNote
+	4,  // 22: frontend.v1.HeldPrompt.coalesced:type_name -> frontend.v1.HeldPromptCoalesced
+	5,  // 23: frontend.v1.HeldPrompt.act:type_name -> frontend.v1.HeldSessionAct
+	3,  // 24: frontend.v1.HeldPrompt.fold_above:type_name -> frontend.v1.HeldPromptFoldAbove
+	40, // 25: frontend.v1.HeldPromptFoldAbove.above:type_name -> conversation.v1.TurnId
+	6,  // 26: frontend.v1.HeldSessionAct.model:type_name -> frontend.v1.HeldSessionActModel
+	7,  // 27: frontend.v1.HeldSessionAct.permission_mode:type_name -> frontend.v1.HeldSessionActPermissionMode
+	9,  // 28: frontend.v1.HeldPromptBadge.classifying:type_name -> frontend.v1.HeldPromptBadgeClassifying
+	10, // 29: frontend.v1.HeldPromptBadge.interject:type_name -> frontend.v1.HeldPromptBadgeInterject
+	11, // 30: frontend.v1.HeldPromptBadge.after_tool_call:type_name -> frontend.v1.HeldPromptBadgeAfterToolCall
+	12, // 31: frontend.v1.HeldPromptBadge.hold_for_turn_end:type_name -> frontend.v1.HeldPromptBadgeHoldForTurnEnd
+	13, // 32: frontend.v1.HeldPromptBadge.uninterruptible_turn:type_name -> frontend.v1.HeldPromptBadgeUninterruptibleTurn
+	14, // 33: frontend.v1.HeldPromptBadge.classification_error:type_name -> frontend.v1.HeldPromptBadgeClassificationError
+	15, // 34: frontend.v1.HeldPromptBadge.editing:type_name -> frontend.v1.HeldPromptBadgeEditing
+	16, // 35: frontend.v1.HeldPromptBadge.shutdown:type_name -> frontend.v1.HeldPromptBadgeShutdown
+	17, // 36: frontend.v1.HeldPromptBadge.build_refresh:type_name -> frontend.v1.HeldPromptBadgeBuildRefresh
+	18, // 37: frontend.v1.HeldPromptBadge.reconnect:type_name -> frontend.v1.HeldPromptBadgeReconnect
+	19, // 38: frontend.v1.HeldPromptBadge.merge:type_name -> frontend.v1.HeldPromptBadgeMerge
+	20, // 39: frontend.v1.HeldPromptBadge.cold_gate:type_name -> frontend.v1.HeldPromptBadgeColdGate
+	21, // 40: frontend.v1.HeldPromptBadge.awaiting_delivery:type_name -> frontend.v1.HeldPromptBadgeAwaitingDelivery
+	29, // 41: frontend.v1.HeldPromptHoldForTurnEnd.accepted:type_name -> frontend.v1.HeldPromptAccepted
+	42, // 42: frontend.v1.HeldPromptUninterruptibleTurn.command:type_name -> conversation.v1.SessionCommand
+	43, // [43:43] is the sub-list for method output_type
+	43, // [43:43] is the sub-list for method input_type
+	43, // [43:43] is the sub-list for extension type_name
+	43, // [43:43] is the sub-list for extension extendee
+	0,  // [0:43] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_feed_held_proto_init() }
@@ -2952,7 +2744,6 @@ func file_frontend_v1_feed_held_proto_init() {
 	file_frontend_v1_feed_proto_init()
 	file_frontend_v1_feed_held_proto_msgTypes[1].OneofWrappers = []any{
 		(*FeedHeldItem_Prompt)(nil),
-		(*FeedHeldItem_Offer)(nil),
 	}
 	file_frontend_v1_feed_held_proto_msgTypes[2].OneofWrappers = []any{
 		(*HeldPrompt_Classifying)(nil),
@@ -2988,16 +2779,13 @@ func file_frontend_v1_feed_held_proto_init() {
 		(*HeldPromptBadge_ColdGate)(nil),
 		(*HeldPromptBadge_AwaitingDelivery)(nil),
 	}
-	file_frontend_v1_feed_held_proto_msgTypes[39].OneofWrappers = []any{
-		(*HeldOffer_MergeDequeue)(nil),
-	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_frontend_v1_feed_held_proto_rawDesc), len(file_frontend_v1_feed_held_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   42,
+			NumMessages:   39,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

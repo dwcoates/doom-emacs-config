@@ -66,12 +66,12 @@ None of that is ours. `frontend.v1`'s `feed_held.proto` says it directly: a
 queued prompt is not a conversation record, it is daemon-owned pending intent
 the vendor never saw, drawn beside the feed and never in it. So:
 
-- **`FeedHeld` / `HeldPrompt` / `HeldOffer`** are `frontend.v1`. There is
+- **`FeedHeld` / `HeldPrompt`** are `frontend.v1`. There is
   no vendor fact for "a prompt the user typed that we have not sent yet"; it is
   an artifact of the DAEMON's decision to hold it back. It is never written to
   the store, so it has no `store.v1` envelope either.
 - **The tray's actions** are `agentrepl.v1` requests (`UpdateHeldPrompt`,
-  `AnswerHeldOffer`). None of them crosses to the store. They are the user's
+  `EditHeldPrompt`, `FoldHeldPrompt`). None of them crosses to the store. They are the user's
   INTENT; the MECHANISM is an `Interrupt` followed by a `SubmitPrompt`, and
   that mechanism is what actually crosses the shim boundary. Giving the store
   or `conversation.v1` a held-prompt arm would invent a vendor concept out of a

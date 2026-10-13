@@ -102,7 +102,7 @@ describe("every rpc answers", () => {
       ["setPermissionMode", client.setPermissionMode({ workspace, mode: "default" })],
       ["setEffort", client.setEffort({ workspace, effort: AgentEffortLevel.HIGH })],
       ["updateHeldPrompt", client.updateHeldPrompt({ workspace, action: { case: "release", value: {} } })],
-      ["answerHeldOffer", client.answerHeldOffer({ workspace })],
+      ["answerMergeQueueOffer", client.answerMergeQueueOffer({ workspace })],
       ["updateShutdownSchedule", client.updateShutdownSchedule({ action: { case: "cancel", value: {} } })],
       ["updateMergeQueue", client.updateMergeQueue({ action: { case: "pause", value: {} } })],
       ["daemonHealth", client.daemonHealth({})],

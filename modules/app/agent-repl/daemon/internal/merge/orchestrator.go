@@ -133,7 +133,7 @@ type orchestrator struct {
 	runsByWorkspace map[ids.WorkspaceID]*run
 	// requested are the requests waiting for their requesting turn to end.
 	requested map[ids.WorkspaceID]*requestWait
-	// offers records the workspaces with a dequeue offer standing.
+	// offers records the workspaces with a merge-queue question standing.
 	offers map[ids.WorkspaceID]bool
 	// repoOf remembers which queue a workspace was enqueued on, so an evict
 	// does not have to re-derive geometry that may no longer resolve.
@@ -329,7 +329,6 @@ func (d Deps) validate() error {
 	check(d.Feed != nil, "Feed")
 	check(d.Footer != nil, "Footer")
 	check(d.Sidebar != nil, "Sidebar")
-	check(d.Holds != nil, "Holds")
 	check(d.Banners != nil, "Banners")
 	check(d.Asks != nil, "Asks")
 	check(d.Names != nil, "Names")

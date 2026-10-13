@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { codeOf } from "../source-text.js";
 import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 import type { FailureSink } from "../../src/failure/sink.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
@@ -8,6 +11,8 @@ import { Code, ConnectError } from "@connectrpc/connect";
 import {
   callFailure,
   clearRefusals,
+  clearRefusalsAfter,
+  drawRefusalAfter,
   drawMalformedRefusal,
   drawTransportRefusal,
   drawTypedRefusal,
@@ -275,5 +280,54 @@ describe("drawTransportRefusal", () => {
     drawTransportRefusal(host);
 
     expect(host.querySelector(".refusal")?.textContent).toBe("the daemon could not be reached");
+  });
+});
+
+describe("drawRefusalAfter and clearRefusalsAfter", () => {
+  /** A card holding ANCHOR, with the card in the document. */
+  const card = (): { anchor: HTMLElement; parent: HTMLElement } => {
+    const parent = document.createElement("div");
+    const anchor = document.createElement("div");
+    parent.append(anchor);
+    document.body.replaceChildren(parent);
+    return { anchor, parent };
+  };
+
+  it("draws the note as the anchor's next sibling, with its kind and arm", () => {
+    const { anchor } = card();
+    drawRefusalAfter(anchor, "offer-refusal", "noOfferStanding", "gone");
+    const note = anchor.nextElementSibling;
+    expect([note?.className, note?.getAttribute("data-arm"), note?.textContent]).toEqual([
+      "refusal offer-refusal",
+      "noOfferStanding",
+      "gone",
+    ]);
+  });
+
+  it("draws nothing for a card already gone", () => {
+    expect(() => drawRefusalAfter(null, "offer-refusal", "error", "x")).not.toThrow();
+  });
+
+  it("clears only its own kind's notes", () => {
+    const { anchor, parent } = card();
+    drawRefusalAfter(anchor, "offer-refusal", "a", "one");
+    drawRefusalAfter(anchor, "queued-refusal", "b", "two");
+    clearRefusalsAfter(anchor, "offer-refusal");
+    expect([...parent.querySelectorAll(".refusal")].map((n) => n.className)).toEqual(["refusal queued-refusal"]);
+  });
+
+  it("clears nothing for a card already gone", () => {
+    expect(() => clearRefusalsAfter(null, "offer-refusal")).not.toThrow();
+  });
+});
+
+describe("every card that notes a refusal beside its controls uses the shared helpers", () => {
+  it.each(["held/held-prompt.ts", "feed/merge/queue-offer.ts"])("%s", (file) => {
+    const code = codeOf(readFileSync(join(process.cwd(), "src", file), "utf8"));
+    expect([
+      /\bdrawRefusalAfter\(/.test(code),
+      /\bclearRefusalsAfter\(/.test(code),
+      /\.after\(\s*refusal\s*\)/.test(code),
+    ]).toEqual([true, true, false]);
   });
 });

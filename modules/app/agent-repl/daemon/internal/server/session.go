@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 
 	"connectrpc.com/connect"
 
@@ -9,6 +10,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/merge"
 	"agent-repld/internal/workspace"
 )
 
@@ -232,29 +234,44 @@ func (s *server) FoldHeldPrompt(
 	return connect.NewResponse(resp), nil
 }
 
-// AnswerHeldOffer answers a question the daemon parked in the tray. The one
-// offer that exists is the merge dequeue: keep the queued merge, or release it.
-func (s *server) AnswerHeldOffer(
+// AnswerMergeQueueOffer answers the merge-queue question an interrupt raised
+// in a workspace's pinned merge bubble: evict, prioritize, or cancel.
+func (s *server) AnswerMergeQueueOffer(
 	ctx context.Context,
-	req *connect.Request[agentreplv1.AnswerHeldOfferRequest],
-) (*connect.Response[agentreplv1.AnswerHeldOfferResponse], error) {
-	const rpc = "AnswerHeldOffer"
-	if err := validateAnswerHeldOfferRequest(req.Msg); err != nil {
+	req *connect.Request[agentreplv1.AnswerMergeQueueOfferRequest],
+) (*connect.Response[agentreplv1.AnswerMergeQueueOfferResponse], error) {
+	const rpc = "AnswerMergeQueueOffer"
+	if err := validateAnswerMergeQueueOfferRequest(req.Msg); err != nil {
 		return nil, err
 	}
-	resp := &agentreplv1.AnswerHeldOfferResponse{}
+	resp := &agentreplv1.AnswerMergeQueueOfferResponse{}
 	subject, cerr, done := s.subjectFor(ctx, rpc, req.Msg.GetWorkspace(), resp)
 	if done {
 		return answer(resp, cerr)
 	}
-	keep := req.Msg.GetMergeDequeue().GetKeep() != nil
-	if err := s.deps.Merge.AnswerDequeue(ctx, subject.Record.ID, keep); err != nil {
+	decision := queueOfferAnswer(req.Msg)
+	if err := s.deps.Merge.AnswerQueueOffer(ctx, subject.Record.ID, decision); err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
-	subject.Log.Debug("daemon.server.answer_held_offer", "answered the merge dequeue offer",
-		dlog.Context{"keep": keep})
-	resp.Result = &agentreplv1.AnswerHeldOfferResponse_Success{
-		Success: &agentreplv1.AnswerHeldOfferSuccess{},
+	subject.Log.Debug("daemon.server.answer_merge_queue_offer", "answered the merge-queue question",
+		dlog.Context{"answer": decision.String()})
+	resp.Result = &agentreplv1.AnswerMergeQueueOfferResponse_Success{
+		Success: &agentreplv1.AnswerMergeQueueOfferSuccess{},
 	}
 	return connect.NewResponse(resp), nil
+}
+
+// queueOfferAnswer maps a validated request's decision arm to the
+// orchestrator's answer. Validation has already refused an unset arm, so an
+// arm this switch does not know is an invariant violation.
+func queueOfferAnswer(req *agentreplv1.AnswerMergeQueueOfferRequest) merge.QueueOfferAnswer {
+	switch req.GetDecision().(type) {
+	case *agentreplv1.AnswerMergeQueueOfferRequest_Evict:
+		return merge.QueueOfferEvict
+	case *agentreplv1.AnswerMergeQueueOfferRequest_Prioritize:
+		return merge.QueueOfferPrioritize
+	case *agentreplv1.AnswerMergeQueueOfferRequest_Cancel:
+		return merge.QueueOfferCancel
+	}
+	panic(fmt.Sprintf("server: undeclared AnswerMergeQueueOfferRequest.decision arm %T", req.GetDecision()))
 }

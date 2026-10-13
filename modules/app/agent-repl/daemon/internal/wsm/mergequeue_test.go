@@ -2,6 +2,7 @@ package wsm
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
@@ -1243,5 +1244,204 @@ func TestMergeMoveString(t *testing.T) {
 				t.Fatalf("String() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestPrioritizeMergePlacesTheMerge(t *testing.T) {
+	// Each case builds a queue, then prioritizes the merge named "m".
+	tests := []struct {
+		name      string
+		steps     []moveStep
+		wantOrder []string
+		wantMoved bool
+	}{
+		{
+			name:      "to the front of the waiting merges, behind the admitted one",
+			steps:     []moveStep{{"r", "admitted"}, {"a", "queued"}, {"b", "queued"}, {"m", "queued"}},
+			wantOrder: []string{"r", "m", "a", "b"},
+			wantMoved: true,
+		},
+		{
+			name:      "ahead of a front merge",
+			steps:     []moveStep{{"f", "front"}, {"a", "queued"}, {"m", "queued"}},
+			wantOrder: []string{"m", "f", "a"},
+			wantMoved: true,
+		},
+		{
+			name:      "past a request standing between",
+			steps:     []moveStep{{"a", "queued"}, {"p", "requested"}, {"m", "queued"}},
+			wantOrder: []string{"m", "a", "p"},
+			wantMoved: true,
+		},
+		{
+			name:      "the first waiting merge stays put",
+			steps:     []moveStep{{"r", "admitted"}, {"m", "queued"}, {"a", "queued"}},
+			wantOrder: []string{"r", "m", "a"},
+			wantMoved: false,
+		},
+		{
+			name:      "the admitted merge stays put",
+			steps:     []moveStep{{"m", "admitted"}, {"a", "queued"}},
+			wantOrder: []string{"m", "a"},
+			wantMoved: false,
+		},
+		{
+			name:      "a merge only requested stays put",
+			steps:     []moveStep{{"a", "queued"}, {"m", "requested"}},
+			wantOrder: []string{"a", "m"},
+			wantMoved: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			repo := RepoKey(t.TempDir())
+			named := buildMoveQueue(t, s, repo, tt.steps)
+
+			// Act
+			moved, err := s.PrioritizeMerge(context.Background(), repo, named["m"])
+
+			// Assert
+			if err != nil {
+				t.Fatalf("PrioritizeMerge: %v", err)
+			}
+			if moved != tt.wantMoved {
+				t.Fatalf("moved = %v, want %v", moved, tt.wantMoved)
+			}
+			if got := lettersOf(t, s, repo, named); !slices.Equal(got, tt.wantOrder) {
+				t.Fatalf("queue = %v, want %v", got, tt.wantOrder)
+			}
+		})
+	}
+}
+
+func TestPrioritizeMergeMarksTheMovedMergeFront(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	repo := RepoKey(t.TempDir())
+	named := buildMoveQueue(t, s, repo, []moveStep{{"a", "queued"}, {"m", "queued"}})
+
+	// Act
+	if _, err := s.PrioritizeMerge(context.Background(), repo, named["m"]); err != nil {
+		t.Fatalf("PrioritizeMerge: %v", err)
+	}
+
+	// Assert
+	entries, err := s.MergeQueue(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("MergeQueue: %v", err)
+	}
+	for _, entry := range entries {
+		want := entry.Workspace == named["m"]
+		if entry.Source.Front != want {
+			t.Fatalf("%s's front mark = %v, want %v", entry.Workspace, entry.Source.Front, want)
+		}
+	}
+}
+
+func TestPrioritizeMergeRefusesAWorkspaceNotInTheQueue(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	repo := RepoKey(t.TempDir())
+	ws := testWorkspace(t, s)
+
+	// Act
+	_, err := s.PrioritizeMerge(context.Background(), repo, ws.ID)
+
+	// Assert
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("PrioritizeMerge = %v, want ErrNotFound", err)
+	}
+}
+
+func TestEntryPlaceReadsTheEntrysPlaceAndState(t *testing.T) {
+	// Each case builds a queue and reads the place of the merge named "m".
+	tests := []struct {
+		name      string
+		steps     []moveStep
+		wantState MergeQueueState
+	}{
+		{name: "a waiting merge", steps: []moveStep{{"a", "queued"}, {"m", "queued"}}, wantState: MergeQueued},
+		{name: "a front merge waits too", steps: []moveStep{{"m", "front"}}, wantState: MergeQueued},
+		{name: "the admitted merge", steps: []moveStep{{"m", "admitted"}}, wantState: MergeAdmitted},
+		{name: "a merge only requested", steps: []moveStep{{"m", "requested"}}, wantState: MergeRequested},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			repo := RepoKey(t.TempDir())
+			named := buildMoveQueue(t, s, repo, tt.steps)
+			key, err := normalizeRepoKey(repo)
+			if err != nil {
+				t.Fatalf("normalizeRepoKey: %v", err)
+			}
+			entries, err := s.MergeQueue(context.Background(), repo)
+			if err != nil {
+				t.Fatalf("MergeQueue: %v", err)
+			}
+			var wantSeq int64
+			err = s.write(context.Background(), "daemon.wsm.test", nil, func(ctx context.Context, tx *sql.Tx) error {
+				return tx.QueryRowContext(ctx, `SELECT seq FROM merge_queue WHERE repo_key = ? AND workspace_id = ?`, key, named["m"]).Scan(&wantSeq)
+			})
+			if err != nil || len(entries) == 0 {
+				t.Fatalf("read the entry's seq: %v (%d entries)", err, len(entries))
+			}
+
+			// Act
+			var seq int64
+			var state MergeQueueState
+			err = s.write(context.Background(), "daemon.wsm.test", nil, func(ctx context.Context, tx *sql.Tx) error {
+				var err error
+				seq, state, err = entryPlace(ctx, tx, key, named["m"])
+				return err
+			})
+
+			// Assert
+			if err != nil || seq != wantSeq || state != tt.wantState {
+				t.Fatalf("entryPlace = %d, %v, %v; want %d, %v", seq, state, err, wantSeq, tt.wantState)
+			}
+		})
+	}
+}
+
+func TestEntryPlaceRefusesAWorkspaceNotInTheQueue(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	repo := RepoKey(t.TempDir())
+	key, err := normalizeRepoKey(repo)
+	if err != nil {
+		t.Fatalf("normalizeRepoKey: %v", err)
+	}
+	ws := testWorkspace(t, s)
+
+	// Act
+	err = s.write(context.Background(), "daemon.wsm.test", nil, func(ctx context.Context, tx *sql.Tx) error {
+		_, _, err := entryPlace(ctx, tx, key, ws.ID)
+		return err
+	})
+
+	// Assert
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("entryPlace = %v, want ErrNotFound", err)
+	}
+}
+
+func TestEveryReorderingReadsItsPlaceThroughEntryPlace(t *testing.T) {
+	// Arrange
+	code, err := os.ReadFile("mergequeue.go")
+	if err != nil {
+		t.Fatalf("read mergequeue.go: %v", err)
+	}
+
+	// Act
+	reads := strings.Count(string(code), "SELECT state, seq FROM merge_queue WHERE repo_key = ? AND workspace_id = ?")
+	calls := strings.Count(string(code), "entryPlace(ctx, tx, key, id)")
+
+	// Assert: the helper's own query, and one call per reordering (move,
+	// prioritize, and the yield's read of both racers).
+	if reads != 1 || calls != 3 {
+		t.Fatalf("state/seq reads = %d, entryPlace calls = %d; want 1 and 3", reads, calls)
 	}
 }

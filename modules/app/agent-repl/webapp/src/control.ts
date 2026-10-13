@@ -149,3 +149,13 @@ export function labelledControl(spec: LabelledControlSpec): Control {
   });
   return control;
 }
+
+/**
+ * Disable or re-enable every control under ROOT: an answer in flight disables
+ * its siblings with it, so a second answer cannot race the first. A null ROOT
+ * (a card already gone) does nothing.
+ */
+export function setControlsDisabled(root: Element | null, disabled: boolean): void {
+  if (root === null) return;
+  for (const control of root.querySelectorAll<Control>(CONTROL_SELECTOR)) control.disabled = disabled;
+}

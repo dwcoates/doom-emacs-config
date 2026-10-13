@@ -1,7 +1,6 @@
 package merge
 
 import (
-	"strings"
 	"testing"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -257,21 +256,15 @@ func TestEveryTabBuilderShipsTheBadgeItWasGiven(t *testing.T) {
 	}
 }
 
-// TestDequeueOfferNamesTheWorkspace covers the composed sentence: the card draws
-// it and never assembles one from the offer's kind.
-func TestDequeueOfferNamesTheWorkspace(t *testing.T) {
-	// Arrange: one workspace's name.
-	offer := dequeueOffer("fix-flaky")
-
-	// Act.
-	headline := offer.GetMergeDequeue().GetHeadline().GetText()
+// TestQueueOfferCarriesItsSentence covers the composed sentence: the overlay
+// draws it verbatim and never assembles one of its own.
+func TestQueueOfferCarriesItsSentence(t *testing.T) {
+	// Arrange, Act.
+	headline := queueOffer().GetHeadline().GetText()
 
 	// Assert.
 	if headline == "" {
-		t.Fatal("the offer carries no composed sentence")
-	}
-	if want := "fix-flaky"; !strings.Contains(headline, want) {
-		t.Fatalf("the offer reads %q, want it to name %q", headline, want)
+		t.Fatal("the question carries no composed sentence")
 	}
 }
 

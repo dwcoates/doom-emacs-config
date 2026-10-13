@@ -34,7 +34,6 @@ import (
 	"agent-repld/internal/prompts"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/resolve/footer"
-	"agent-repld/internal/resolve/holds"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/scriptrunner"
 	"agent-repld/internal/wsm"
@@ -65,6 +64,34 @@ const (
 	// EscalationMarker is the marker file's required first line.
 	EscalationMarker = "MERGE ESCALATION: ARCHITECTURAL CHANGE REQUIRED"
 )
+
+// QueueOfferAnswer is the user's answer to the merge-queue question
+// (agentrepl.v1.AnswerMergeQueueOfferRequest's decision arms).
+type QueueOfferAnswer int
+
+// The answers. The zero value is no answer, so an answer left unset is never
+// read as one of them.
+const (
+	// QueueOfferEvict takes the merge out of the queue.
+	QueueOfferEvict QueueOfferAnswer = iota + 1
+	// QueueOfferPrioritize moves the merge to the front of the merges waiting.
+	QueueOfferPrioritize
+	// QueueOfferCancel leaves the queue as it is.
+	QueueOfferCancel
+)
+
+// String names the answer in log records.
+func (a QueueOfferAnswer) String() string {
+	switch a {
+	case QueueOfferEvict:
+		return "evict"
+	case QueueOfferPrioritize:
+		return "prioritize"
+	case QueueOfferCancel:
+		return "cancel"
+	}
+	return fmt.Sprintf("QueueOfferAnswer(%d)", int(a))
+}
 
 // Orchestrator is the merge queue's whole surface.
 type Orchestrator interface {
@@ -100,12 +127,16 @@ type Orchestrator interface {
 	// A merge with no waiting merge on that side, or one not waiting (running,
 	// or only requested), is left where it is.
 	Move(ctx context.Context, ws ids.WorkspaceID, move wsm.MergeMove) (bool, error)
-	// AnswerDequeue answers the tray's dequeue offer: keep the merge queued,
-	// or take it out. Taking out a running merge abandons it, as Evict does.
-	AnswerDequeue(ctx context.Context, ws ids.WorkspaceID, keep bool) error
-	// OnInterrupt raises the dequeue offer when the user interrupts a
-	// workspace that is queued.
-	OnInterrupt(ctx context.Context, ws ids.WorkspaceID)
+	// AnswerQueueOffer answers the merge-queue question an interrupt raised:
+	// evict the merge (a running one is abandoned, as Evict does), move it to
+	// the front of the merges waiting in its queue, or leave the queue as it
+	// is. Every answer retires the question; with none standing it is refused
+	// (no_offer_standing).
+	AnswerQueueOffer(ctx context.Context, ws ids.WorkspaceID, answer QueueOfferAnswer) error
+	// OnInterrupt raises the merge-queue question in the PINNED bubble of a
+	// workspace whose sync merge is queued, answering whether it did. It
+	// changes nothing on the queue.
+	OnInterrupt(ctx context.Context, ws ids.WorkspaceID) bool
 	// OnWorkspaceClosed abandons a workspace's merge when the workspace
 	// itself is torn down (killed or nuked), recording the close as the
 	// abandon cause: a request or a waiting merge leaves its queue, and a
@@ -374,8 +405,6 @@ type Deps struct {
 	// Footer and Sidebar receive the merge facts.
 	Footer  footer.Resolver
 	Sidebar sidebar.Resolver
-	// Holds carries the dequeue offer.
-	Holds holds.Sink
 	// Banners raises the merge queue's only two desktop banners: one as a
 	// merge is put in line, one as it leaves the queue for good.
 	Banners Banners

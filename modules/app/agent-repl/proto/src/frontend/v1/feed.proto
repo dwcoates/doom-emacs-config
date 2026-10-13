@@ -2754,6 +2754,30 @@ message FeedMerge {
   // Tag 5 RETIRED (repeated FeedMergePhase phases): the tab strip moved to
   // the bubble's sub-feed as FeedMergeTab rows.
   reserved 5;
+  // The question an interrupt of this merge's workspace raised: what to do
+  // with the merge's place in the queue. PRESENT from the interrupt until it
+  // is answered (agentrepl.v1.AnswerMergeQueueOffer) or the merge ends; UNSET
+  // otherwise. Raised only on a SYNC merge's bubble while it is pinned, and
+  // only by an interrupt that found no turn running: the merge's place in the
+  // queue is then the one thing the interrupt can be about.
+  //
+  // THE INTERRUPT ITSELF CHANGES NOTHING ON THE QUEUE. The client draws the
+  // question as an overlay IN PLACE OF the bubble's tabs, focused, and only
+  // its answer acts: evict, prioritize or cancel, which are the answer
+  // request's arms and never fields here.
+  optional FeedMergeQueueOffer queue_offer = 6;
+}
+
+// The merge-queue question, resolved for drawing.
+message FeedMergeQueueOffer {
+  // The sentence the overlay leads with, composed by the daemon and drawn
+  // verbatim.
+  FeedMergeQueueOfferHeadline headline = 1;
+}
+
+// The overlay's lead sentence.
+message FeedMergeQueueOfferHeadline {
+  string text = 1;
 }
 
 // The bubble's head line: the constant props.
