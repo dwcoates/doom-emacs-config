@@ -310,8 +310,9 @@ func TestATargetThatMovedBeforeCommittingStartsTheMergeOver(t *testing.T) {
 	merge := row.GetActivity().GetMerge()
 	s.d.AwaitLandingDeployed()
 
-	// Assert: landed, after a second rebasing round that replayed the branch
-	// onto the new tip (the first found it already on the old one).
+	// Assert: landed, after a second replay of the branch onto the new tip (the
+	// first found it already on the old one), drawn under the one rebasing tab
+	// as that replay's commit subtabs.
 	if merge.GetSuccess() == nil {
 		t.Fatalf("the merge ended %v, want landed", merge.GetResult())
 	}
@@ -324,8 +325,8 @@ func TestATargetThatMovedBeforeCommittingStartsTheMergeOver(t *testing.T) {
 	if rebased != 1 {
 		t.Fatalf("the branch was replayed %d times, want once: onto the moved tip", rebased)
 	}
-	s.f.awaitRowInFeed(row.GetId(), "the second rebasing round", func(row *frontendv1.FeedRow) bool {
-		return row.GetMergeTab().GetRebasing() != nil && row.GetMergeTab().GetLabel().GetRound() == 2
+	s.f.awaitRowInFeed(row.GetId(), "a commit subtab of the second replay", func(row *frontendv1.FeedRow) bool {
+		return row.GetMergeTab().GetRebaseCommit() != nil && row.GetMergeTab().GetLabel().GetRound() == 2
 	})
 }
 
