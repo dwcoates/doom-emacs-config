@@ -40,6 +40,7 @@
  */
 import { drawToolHead } from "./cards/tool-head.js";
 import { armButtonRole, CONTROL_SELECTOR } from "../control.js";
+import { createConnectHookElement } from "../connect-hook.js";
 import { log } from "../log.js";
 import { announceItemExpanded } from "../expand.js";
 import { applyFeedTextScale } from "./feed-text-scale.js";
@@ -124,12 +125,53 @@ export interface BubbleOptions {
    */
   merge?: boolean;
   /**
+   * Whether the reader may fold the bubble as its row now stands, read on
+   * every draw. Unset means always. A merge bubble may not be folded while it
+   * is PINNED to the feed's bottom (`FeedRowOrder.pinned`): the merge is the
+   * one thing happening there. While it is not collapsible the bubble is held
+   * open, the head's click and keys fold nothing, and neither does a fold the
+   * daemon or a caller asks for.
+   */
+  collapsible?: (row: FeedRow) => boolean;
+  /**
+   * A question drawn IN PLACE OF the sub-feed while the row carries one (a
+   * merge bubble's merge-queue question). Its first appearance takes focus.
+   */
+  overlay?: BubbleOverlay;
+  /**
    * The page's scroll box and its one tail owner, so a collapse whose sub-feed
    * lies wholly above the viewport keeps the reader's content where it was.
    * Absent with the scroll box (a fixture rendering a feed on its own).
    */
   scroll?: { readonly box: Element; readonly tail: TailFollow };
 }
+
+/**
+ * A question a bubble draws over its sub-feed. `keyOf` answers the question's
+ * identity as the row states it, undefined while the row carries none; the
+ * overlay is drawn again only when the key changes, so a re-push of the same
+ * question keeps the drawn overlay and its focus.
+ */
+export interface BubbleOverlay {
+  keyOf(row: FeedRow): string | undefined;
+  draw(row: FeedRow, controls: OverlayControls): HTMLElement;
+}
+
+/**
+ * What a drawn overlay may do to itself: close at once on an answer, and come
+ * back when that answer is refused. Neither outlives the question: a row that
+ * no longer carries it removes the overlay, and a new one is drawn afresh.
+ */
+export interface OverlayControls {
+  dismiss(): void;
+  restore(): void;
+}
+
+/** The attribute focus lands on when an overlay first appears. */
+export const OVERLAY_AUTOFOCUS_ATTRIBUTE = "data-autofocus";
+
+/** The overlay slot's tag: a connect-hook element, so its focus waits for the page. */
+const OVERLAY_SLOT_TAG = "ar-bubble-overlay";
 
 /** The daemon's fold on a bubble row, and whether the reader decided it. */
 export interface WireFold {
@@ -174,7 +216,22 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
   panel.className = "agent-panel bubble-subfeed";
   panel.setAttribute("data-subfeed", "");
 
-  el.append(headLine, panel);
+  // THE OVERLAY STANDS WHERE THE SUB-FEED IS DRAWN, and hides it while shown:
+  // the sub-feed itself stays open underneath, so the tabs come back as they
+  // were the moment the question goes.
+  //
+  // ITS FOCUS LANDS WHEN THE SLOT IS ON THE PAGE. A question can arrive with
+  // the bubble's first draw, before the feed has placed the row, and focusing
+  // a detached element does nothing; so the focus is asked for here and taken
+  // as the slot joins the document (connect-hook.ts), or at once when it
+  // already has.
+  const overlaySlot = createConnectHookElement(OVERLAY_SLOT_TAG);
+  overlaySlot.className = "bubble-overlay";
+  overlaySlot.hidden = true;
+  let overlayFocusPending = false;
+  overlaySlot.onConnect(takeOverlayFocus);
+
+  el.append(headLine, overlaySlot, panel);
 
   let row = opts.row;
   let wireFold = opts.initialFolded;
@@ -194,9 +251,14 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
   let composer: Handle | null = null;
   let opening: Promise<boolean> | null = null;
   let disposed = false;
+  // The overlay drawn now, the key it was drawn for, and whether an answer
+  // closed it ahead of the push that retires its question.
+  let overlayKey: string | undefined;
+  let overlayDismissed = false;
 
   drawHead();
   applyExpanded(false);
+  drawOverlay();
 
   // CLICKING THE HEAD IS THE TOGGLE. A click that lands on an interactive
   // control the head carries — the stop button (`data-interrupt`), a link — is
@@ -204,6 +266,13 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
   // do their own thing.
   headLine.addEventListener("click", (event) => {
     if (isInteractiveTarget(event.target)) return;
+    if (!collapsible()) {
+      log.debug("a click on a bubble that cannot be folded now folds nothing", {
+        operation: "feed.bubble-fold-held",
+        context: { row: id.value },
+      });
+      return;
+    }
     toggleFold();
   });
   // KEYBOARD PARITY WITH THE REMOVED BUTTON comes from `armButtonRole`
@@ -213,6 +282,7 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
   // The wire's fold is the INITIAL state, so an unfolded merge bubble opens
   // itself once, here, and never again on a re-push.
   if (!opts.initialFolded) void expand();
+  holdOpenWhileNotCollapsible();
 
   return {
     element: el,
@@ -220,12 +290,14 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
       row = next;
       drawHead();
       applyWireFold();
+      holdOpenWhileNotCollapsible();
+      drawOverlay();
     },
     expand,
     isExpanded: () => expanded,
     isHeldOpenByReader: () => readerHeld && expanded,
     collapse: () => {
-      if (expanded) collapse();
+      if (expanded && collapsible()) collapse();
     },
     child: () => child,
     dispose,
@@ -251,6 +323,85 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
     else el.setAttribute("data-state", state);
   }
 
+  /** Whether the reader may fold the bubble as its row now stands. */
+  function collapsible(): boolean {
+    return opts.collapsible?.(row) ?? true;
+  }
+
+  /**
+   * A bubble that cannot be folded is open: one whose row turned
+   * uncollapsible while folded opens here.
+   */
+  function holdOpenWhileNotCollapsible(): void {
+    el.setAttribute("data-collapsible", collapsible() ? "true" : "false");
+    if (!collapsible() && !expanded) void expand();
+  }
+
+  /**
+   * Draw, keep or remove the overlay as the row now states it. A key that
+   * did not change keeps the drawn overlay; a new key draws it afresh and
+   * focuses it, and a row with no question removes it.
+   */
+  function drawOverlay(): void {
+    if (opts.overlay === undefined) return;
+    const key = opts.overlay.keyOf(row);
+    if (key === undefined) {
+      if (overlayKey !== undefined) {
+        log.debug("a bubble's overlay question was retired", {
+          operation: "feed.bubble-overlay-retired",
+          context: { row: id.value },
+        });
+      }
+      overlayKey = undefined;
+      overlayDismissed = false;
+      overlaySlot.replaceChildren();
+      applyOverlayShown();
+      return;
+    }
+    if (key === overlayKey) return;
+    overlayKey = key;
+    overlayDismissed = false;
+    overlaySlot.replaceChildren(
+      opts.overlay.draw(row, {
+        dismiss: () => {
+          overlayDismissed = true;
+          applyOverlayShown();
+        },
+        restore: () => {
+          overlayDismissed = false;
+          applyOverlayShown();
+        },
+      }),
+    );
+    applyOverlayShown();
+    log.info("a bubble's overlay question was drawn; focusing it", {
+      operation: "feed.bubble-overlay-drawn",
+      context: { row: id.value, attached: overlaySlot.isConnected },
+    });
+    overlayFocusPending = true;
+    if (overlaySlot.isConnected) takeOverlayFocus();
+  }
+
+  /**
+   * Focus the drawn question's autofocus control, once per question: the
+   * slot re-joining the document later (a page re-layout) takes no focus
+   * back from wherever the reader has moved it.
+   */
+  function takeOverlayFocus(): void {
+    if (!overlayFocusPending) return;
+    overlayFocusPending = false;
+    if (overlaySlot.hidden) return;
+    overlaySlot.querySelector<HTMLElement>(`[${OVERLAY_AUTOFOCUS_ATTRIBUTE}]`)?.focus();
+  }
+
+  /** Show the overlay in place of the sub-feed, or the sub-feed again. */
+  function applyOverlayShown(): void {
+    const shown = overlayKey !== undefined && !overlayDismissed;
+    overlaySlot.hidden = !shown;
+    el.setAttribute("data-overlay", shown ? "true" : "false");
+    panel.hidden = shown || !expanded;
+  }
+
   /**
    * THE DAEMON'S FOLD, APPLIED ON ITS CHANGE ONLY. A merge bubble is open
    * until its merge succeeds, when the daemon ships it folded; that change
@@ -270,6 +421,13 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
       return;
     }
     wireFold = next.folded;
+    if (next.folded && !collapsible()) {
+      log.debug("the daemon's fold reached a bubble that cannot be folded now; it stays open", {
+        operation: "feed.bubble-fold-held",
+        context: { row: id.value, byReader: next.byReader },
+      });
+      return;
+    }
     log.info(`the daemon's fold for a bubble changed to ${next.folded ? "folded" : "open"}; applying it`, {
       operation: "feed.bubble-fold-applied",
       context: { row: id.value, folded: next.folded, byReader: next.byReader, expanded },
@@ -294,7 +452,7 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
     el.closest("[data-feed-row]")?.setAttribute("data-expanded", next ? "true" : "false");
     // `aria-expanded` rides the head now that the head is the toggle.
     headLine.setAttribute("aria-expanded", next ? "true" : "false");
-    panel.hidden = !next;
+    panel.hidden = !next || (overlayKey !== undefined && !overlayDismissed);
     // The head's title fold follows this fold (title-fold.ts): re-measure it on
     // the toggle, which lifts or restores its one-line cap.
     refreshTitleFolds(headLine);

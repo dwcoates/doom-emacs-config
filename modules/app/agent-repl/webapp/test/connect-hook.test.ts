@@ -74,7 +74,7 @@ describe("every element that waits to join the document is a connect-hook elemen
     expect(defining).toEqual(["connect-hook.ts"]);
   });
 
-  it.each(["bubble/body.ts"])("builds its connect-hook element through the helper in %s", (file) => {
+  it.each(["bubble/body.ts", "feed/bubble.ts"])("builds its connect-hook element through the helper in %s", (file) => {
     expect(sources.get(file)).toMatch(/\bcreateConnectHookElement\(/);
   });
 });

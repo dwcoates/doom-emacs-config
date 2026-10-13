@@ -159,7 +159,7 @@ export function harness(script: FooterScript = {}): Harness {
 
 /** An Interrupt success carrying OUTCOME (`interrupted_detached` takes COUNT). */
 export function interruptSuccess(
-  outcome: "interruptedTurn" | "interruptedDetached" | "nothingRunning",
+  outcome: "interruptedTurn" | "interruptedDetached" | "nothingRunning" | "mergeQueueOffered",
   count = 0n,
 ): InterruptResponse {
   return create(InterruptResponseSchema, {
