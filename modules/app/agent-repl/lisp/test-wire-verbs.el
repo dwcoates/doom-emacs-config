@@ -1277,21 +1277,38 @@ never sent as an empty ref, because unset is what means every queue."
                    '(:action (:arm :evict :value nil)))
                   :type 'agent-repl-wire-error)))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-queue-front ()
-  "A front request names whose merge to move to the front of its queue."
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-move-up ()
+  "A move-up request names whose merge to move one place up its queue."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (json-serialize
                     (agent-repl-wire-encode-update-merge-queue-request
-                     (list :action (list :arm :front
+                     (list :action (list :arm :move-up
                                          :value (list :workspace
                                                       agent-repl-test-wire-verbs--ref)))))
-                   "{\"front\":{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"}}}"))))
+                   "{\"moveUp\":{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"}}}"))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-queue-front-without-workspace ()
-  "A front request with no workspace is incomplete and errors before send."
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-move-up-without-workspace ()
+  "A move-up request with no workspace is incomplete and errors before send."
   (agent-repl-test-wire-verbs--with-common
     (should-error (agent-repl-wire-encode-update-merge-queue-request
-                   '(:action (:arm :front :value nil)))
+                   '(:action (:arm :move-up :value nil)))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-move-down ()
+  "A move-down request names whose merge to move one place down its queue."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize
+                    (agent-repl-wire-encode-update-merge-queue-request
+                     (list :action (list :arm :move-down
+                                         :value (list :workspace
+                                                      agent-repl-test-wire-verbs--ref)))))
+                   "{\"moveDown\":{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"}}}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-move-down-without-workspace ()
+  "A move-down request with no workspace is incomplete and errors before send."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-update-merge-queue-request
+                   '(:action (:arm :move-down :value nil)))
                   :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-hold-rollouts ()
@@ -1559,13 +1576,13 @@ encoded here."
                  '("cancel" "now" "schedule"))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-action-arms-pinned ()
-  "UpdateMergeQueueRequest's action oneof has exactly the six arms encoded
+  "UpdateMergeQueueRequest's action oneof has exactly the seven arms encoded
 here."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_update_merge_queue.pb.go"
                         "UpdateMergeQueueRequest")
                        #'string<)
-                 '("evict" "front" "holdRollouts" "pause" "releaseRollouts" "resume"))))
+                 '("evict" "holdRollouts" "moveDown" "moveUp" "pause" "releaseRollouts" "resume"))))
 
 (ert-deftest agent-repl-test-wire-verbs-daemon-health-arms-pinned ()
   "DaemonHealthSuccess's health oneof has exactly the two verdict arms decoded
