@@ -1692,3 +1692,50 @@ describe("the bands draw no status mark", () => {
   });
 });
 
+// A HIDDEN ROW WEARS NO STATE (owner request, 2026-10-13): only a cold gate's
+// strike, which rides on `data-arm`.
+describe("the hidden section's rows", () => {
+  it.each(["severed", "dead", "thinking", "done", "idleAsync", "turnFailed", "merging"] as const)(
+    "draws a %s row in plain text, with no status color",
+    (arm) => {
+      const drawn = drawRosterRow(row({ id: "ws-1", status: { case: arm, value: {} } }), sidebarContext(), "R", "hidden");
+      expect([...drawn.classList].filter((c) => c.startsWith("tone-"))).toEqual(["tone-none"]);
+    },
+  );
+
+  it("keeps the status color on the same row in a grouping", () => {
+    const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "severed", value: {} } }), sidebarContext(), "R", "grouping");
+    expect(drawn.classList.contains("tone-blue")).toBe(true);
+  });
+
+  it("does not grey a read row's name", () => {
+    const drawn = drawRosterRow(
+      row({ id: "ws-1", status: { case: "done", value: {} }, viewed: true }),
+      sidebarContext(),
+      "R",
+      "hidden",
+    );
+    expect([drawn.querySelector(".name")?.classList.contains("viewed"), drawn.hasAttribute("data-viewed")]).toEqual([false, false]);
+  });
+
+  it("draws no attention marker", () => {
+    const drawn = drawRosterRow(row({ id: "ws-1", attention: true }), sidebarContext(), "R", "hidden");
+    expect([drawn.querySelector(".sb-attn"), drawn.hasAttribute("data-attention")]).toEqual([null, false]);
+  });
+
+  it("draws no reviving shimmer", () => {
+    const drawn = drawRosterRow(row({ id: "ws-1", reviving: true }), sidebarContext(), "R", "hidden");
+    expect(drawn.querySelector(".name")?.classList.contains("reviving")).toBe(false);
+  });
+
+  it("draws a hidden child row in plain text too", () => {
+    const drawn = drawRosterRow(
+      row({ id: "ws-1", children: [row({ id: "ws-2", status: { case: "dead", value: {} } })] }),
+      sidebarContext(),
+      "R",
+      "hidden",
+    );
+    expect(drawn.querySelector('[data-roster-row="ws-2"]')?.classList.contains("tone-blue")).toBe(false);
+  });
+});
+
