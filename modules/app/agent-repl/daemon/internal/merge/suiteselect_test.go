@@ -20,6 +20,11 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 			want:  []string{"build-frontend-harness", "webapp"},
 		},
 		{
+			name:  "a brief change selects the daemon suite that composes and pins it",
+			paths: []string{"modules/app/agent-repl/prompts/merge-test-failure-resolve.md"},
+			want:  []string{"daemon"},
+		},
+		{
 			name:  "a daemon change selects only the daemon suite",
 			paths: []string{"modules/app/agent-repl/daemon/internal/merge/run.go"},
 			want:  []string{"daemon"},
@@ -267,7 +272,6 @@ func TestSelectSuitesSelectsNothing(t *testing.T) {
 	}{
 		{name: "an empty diff", paths: nil},
 		{name: "the module's docs", paths: []string{"modules/app/agent-repl/docs/USER-GUIDE.md"}},
-		{name: "the module's prompts", paths: []string{"modules/app/agent-repl/prompts/merge-pick.md"}},
 		{name: "the module's plans", paths: []string{"modules/app/agent-repl/plans/lazy-tail-first-replay-plan.md"}},
 		{name: "Markdown at the module root", paths: []string{"modules/app/agent-repl/AGENTS.md"}},
 		{name: "the owner's Doom configuration", paths: []string{"config.el"}},

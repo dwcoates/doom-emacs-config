@@ -122,14 +122,20 @@ var suiteRules = []suiteRule{
 	// The wire contract every producer and consumer is generated from.
 	{Kind: matchSubtree, Path: moduleRoot + "proto/", Suites: []string{"proto", "daemon", "shim", "webapp", "e2e"}},
 
-	// DOCUMENTATION SELECTS NOTHING. The module's docs/, prompts/ (the briefs,
-	// owner-ruled) and plans/ hold prose, and so does every Markdown file at
+	// THE BRIEFS ARE THE DAEMON'S INPUT, not prose: the daemon composes every
+	// merge and repair prompt from prompts/, its suite pins each brief's
+	// placeholders (internal/prompts), and its integration harness copies them
+	// into every test daemon. A broken placeholder would land untested and then
+	// fail every merge's brief, so prompts/ selects the daemon suite.
+	{Kind: matchSubtree, Path: moduleRoot + "prompts/", Suites: []string{"daemon"}},
+
+	// DOCUMENTATION SELECTS NOTHING. The module's docs/ and plans/ hold
+	// prose, and so does every Markdown file at
 	// the module root -- except metaprompt.md, whose committed text the shim's
 	// own suite reads back (test/metaprompt.test.ts). Markdown deeper in the
 	// tree belongs to its system's region above: a suite may read it (the
 	// shim's AGENTS.md, a testdata MANIFEST.md, a skill's SKILL.md).
 	{Kind: matchSubtree, Path: moduleRoot + "docs/", Suites: []string{}},
-	{Kind: matchSubtree, Path: moduleRoot + "prompts/", Suites: []string{}},
 	{Kind: matchSubtree, Path: moduleRoot + "plans/", Suites: []string{}},
 	{Kind: matchExact, Path: moduleRoot + "metaprompt.md", Suites: []string{"shim"}},
 	{Kind: matchDirFile, Path: moduleRoot, Suffix: ".md", Suites: []string{}},
