@@ -216,6 +216,15 @@ export function createHost(env: HostEnv): Host {
     if (soonest !== null) disarmCooling = setTimer(rewarm, Math.max(0, soonest - at));
   };
 
+  /** Whether the sidebar is docked over the pages, as every page is told. */
+  const dockMessage = (): HostToPage => ({ channel: HOST_CHANNEL, kind: "sidebarDock", docked: sidebarDocked });
+  /** The webhost's failures, as every page is told. */
+  const failuresMessage = (): HostToPage => ({ channel: HOST_CHANNEL, kind: "webhostFailures", failures });
+  /** Tell every page MESSAGE. */
+  const broadcast = (message: HostToPage): void => {
+    for (const frame of frames.values()) post(frame, message);
+  };
+
   /** End the sidebar above the gate band of the page on screen. */
   const placeSidebar = (): void => {
     const shown = shownId === null ? undefined : frames.get(shownId);
@@ -224,8 +233,8 @@ export function createHost(env: HostEnv): Host {
 
   const sendState = (frame: Frame): void => {
     post(frame, presenceOf(frame));
-    post(frame, { channel: HOST_CHANNEL, kind: "sidebarDock", docked: sidebarDocked });
-    post(frame, { channel: HOST_CHANNEL, kind: "webhostFailures", failures });
+    post(frame, dockMessage());
+    post(frame, failuresMessage());
     if (frame.inputBackground !== null) {
       post(frame, { channel: HOST_CHANNEL, kind: "inputBackground", background: frame.inputBackground });
     }
@@ -427,11 +436,11 @@ export function createHost(env: HostEnv): Host {
     },
     setSidebarDocked(docked) {
       sidebarDocked = docked;
-      for (const frame of frames.values()) post(frame, { channel: HOST_CHANNEL, kind: "sidebarDock", docked });
+      broadcast(dockMessage());
     },
     setFailures(next) {
       failures = next;
-      for (const frame of frames.values()) post(frame, { channel: HOST_CHANNEL, kind: "webhostFailures", failures: next });
+      broadcast(failuresMessage());
     },
     ids() {
       return answer("ids", null, "listed", { ids: [...frames.keys()], shown: shownId });
