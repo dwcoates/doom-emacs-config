@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -497,5 +498,63 @@ func TestRecoverKeepsAResumedMergesSource(t *testing.T) {
 	entries, _ := h.db.MergeQueue(context.Background(), h.repoKey())
 	if len(entries) != 1 || entries[0].Source != recorded || entries[0].State != wsm.MergeQueued {
 		t.Fatalf("queue = %+v, want the merge back in line with its source", entries)
+	}
+}
+
+// recordedAt reports whether h logged a record at level whose message says msg.
+func recordedAt(h *harness, level, msg string) bool {
+	for _, r := range h.logs.Records() {
+		if r.Level == level && strings.Contains(r.Message, msg) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestRecoverSweepsTheMergeStateNoQueueEntryNames(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	if err := h.o.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+
+	// Assert
+	if h.db.sweeps != 1 {
+		t.Fatalf("SweepOrphanedMergeState ran %d times, want once per recovery", h.db.sweeps)
+	}
+}
+
+func TestRecoverRecordsWhatTheSweepRemoved(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.sweepProgress, h.db.sweepRounds = 1, 29
+
+	// Act
+	if err := h.o.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+
+	// Assert
+	if !recordedAt(h, "info", "swept the merge state no queue entry names any more") {
+		t.Fatal("the sweep's removals were not recorded")
+	}
+}
+
+func TestRecoverGoesOnWhenTheSweepFailsAndSaysSoAtError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.sweepErr = errors.New("disk full")
+
+	// Act
+	err := h.o.Recover(context.Background())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Recover = %v, want recovery to go on past a failed sweep", err)
+	}
+	if !recordedAt(h, "error", "could not sweep the merge state no queue entry names any more") {
+		t.Fatal("the failed sweep was not recorded at ERROR")
 	}
 }

@@ -47,6 +47,7 @@ func (o *orchestrator) Recover(ctx context.Context) error {
 	if err := o.recordRolloutHold(ctx); err != nil {
 		return err
 	}
+	o.sweepOrphanedState(ctx)
 	queues, err := o.deps.DB.AllMergeQueues(ctx)
 	if err != nil {
 		return err
@@ -519,4 +520,22 @@ func (o *orchestrator) recoverDisplaced(ctx context.Context) error {
 		o.deps.Log.Global().Info(op, "resubmitted a turn a merge displaced and never put back", fields)
 	}
 	return nil
+}
+
+// sweepOrphanedState drops what merges taken off their queues left behind (a
+// progress record, open ledger rounds; wsm.SweepOrphanedMergeState) before the
+// queues are recovered. A sweep that fails is recorded loudly and recovery
+// goes on: the leftovers are stale bookkeeping, never a reason to leave a
+// queue unrecovered.
+func (o *orchestrator) sweepOrphanedState(ctx context.Context) {
+	const op = "daemon.merge.recover"
+	progress, rounds, err := o.deps.DB.SweepOrphanedMergeState(ctx, o.deps.Now())
+	if err != nil {
+		o.deps.Log.Global().Error(op, "could not sweep the merge state no queue entry names any more", dlog.Context{"error": err.Error()})
+		return
+	}
+	if progress+rounds > 0 {
+		o.deps.Log.Global().Info(op, "swept the merge state no queue entry names any more", dlog.Context{
+			"progress_records": progress, "rounds_closed": rounds})
+	}
 }
