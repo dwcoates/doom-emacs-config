@@ -456,14 +456,9 @@ func TestTheMigrationSeedsAChildRightAfterItsParent(t *testing.T) {
 	}
 	handle.Close()
 	stampRaw(t, path, 34)
-	// Layouts 39's through 44's additions come off too, so the file is a
-	// layout-34 file again.
-	undoLayout44(t, path)
-	undoLayout43(t, path)
-	undoLayout42(t, path)
-	undoLayout41(t, path)
-	undoLayout40(t, path)
-	undoLayout39(t, path)
+	// Every later layout's additions from 39 up come off too, so the file
+	// is a layout-34 file again.
+	undoLayoutsAbove(t, path, 38)
 	execRaw(t, path, `DROP TRIGGER workspaces_land_unplaced`)
 	execRaw(t, path, `DROP INDEX workspaces_by_place`)
 	execRaw(t, path, `ALTER TABLE workspaces DROP COLUMN place`)
