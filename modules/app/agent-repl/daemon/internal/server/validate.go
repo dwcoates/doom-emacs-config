@@ -409,12 +409,22 @@ func validateAnswerColdGateRequest(req *agentreplv1.AnswerColdGateRequest) *conn
 		return invalid("choice", "a cold-gate choice arm is required")
 	}
 	if compact := req.GetCompact(); compact != nil {
-		if err := validateAgentModel("compact.model", compact.GetModel()); err != nil {
-			return err
-		}
-		if compact.GetScope() == conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_UNSPECIFIED {
-			return invalid("compact.scope", "a compaction scope is required")
-		}
+		return validateAnswerColdGateCompact("compact", compact)
+	}
+	if compact := req.GetCompactAndResume(); compact != nil {
+		return validateAnswerColdGateCompact("compact_and_resume", compact)
+	}
+	return nil
+}
+
+// validateAnswerColdGateCompact is the payload both compact arms share, at
+// FIELD: a summarizer and a scope, neither defaulted.
+func validateAnswerColdGateCompact(field string, compact *agentreplv1.AnswerColdGateCompact) *connect.Error {
+	if err := validateAgentModel(field+".model", compact.GetModel()); err != nil {
+		return err
+	}
+	if compact.GetScope() == conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_UNSPECIFIED {
+		return invalid(field+".scope", "a compaction scope is required")
 	}
 	return nil
 }

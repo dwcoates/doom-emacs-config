@@ -257,9 +257,19 @@ func (f *fakeRetarget) Retarget(_ context.Context, ws ids.WorkspaceID, parent *i
 	return f.err
 }
 
+// AnswerColdGate records the request the handler handed it.
+func (v *fakeVerbs) AnswerColdGate(_ context.Context, _ ids.WorkspaceID, answer *agentreplv1.AnswerColdGateRequest) error {
+	v.coldGateAnswers = append(v.coldGateAnswers, answer)
+	return nil
+}
+
 // fakeVerbs answers whatever the test wired, and records the calls made.
 type fakeVerbs struct {
 	workspace.Verbs
+
+	// coldGateAnswers records every AnswerColdGate request the handler handed
+	// the verb, in order.
+	coldGateAnswers []*agentreplv1.AnswerColdGateRequest
 
 	// createSpecs records every Create spec, in order.
 	createSpecs []workspace.CreateSpec

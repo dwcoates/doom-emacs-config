@@ -16,8 +16,8 @@ import (
 // THE 2026-10-10 INCIDENT, deterministically: a prompt is held for the revival
 // of a workspace with no session, the revival parks the session at its cold
 // gate, and the prompt must wait at the gate (never delivered, never stranded,
-// never an error) until the gate's answer brings the session up and delivers
-// it.
+// never an error) until the gate's answer settles it (gatefate_test.go): a
+// prompt still on the gate's hold when the session comes up is delivered.
 
 // gateDetail is the standing gate's own account in these tests.
 const gateDetail = "the conversation is cold at 90,000 context tokens"
@@ -153,7 +153,7 @@ func TestAColdGatedRevivalPublishesTheColdGateHold(t *testing.T) {
 	}
 }
 
-func TestAnsweringTheColdGateDeliversThePromptHeldBehindIt(t *testing.T) {
+func TestTheSessionUpEdgeDeliversAPromptStillHeldAtTheGate(t *testing.T) {
 	// Arrange
 	h := revivedIntoTheGate(t)
 	answerGate(h)
@@ -167,7 +167,7 @@ func TestAnsweringTheColdGateDeliversThePromptHeldBehindIt(t *testing.T) {
 	}
 }
 
-func TestAnsweringTheColdGateRetiresTheDeliveredHold(t *testing.T) {
+func TestTheSessionUpEdgeRetiresTheDeliveredGateHold(t *testing.T) {
 	// Arrange
 	h := revivedIntoTheGate(t)
 	answerGate(h)

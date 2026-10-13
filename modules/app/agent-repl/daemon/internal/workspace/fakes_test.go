@@ -1048,6 +1048,20 @@ type fakeQueue struct {
 	withdraws   []ids.WorkspaceID
 	withdrawn   bool
 	withdrawErr error
+	// gateFates records every ColdGateAnswered fate, in order; gateFateErr is
+	// what each answers, and onGateFate runs as each is settled.
+	gateFates   []promptqueue.GateFate
+	gateFateErr error
+	onGateFate  func()
+}
+
+// ColdGateAnswered records the fate and answers the scripted outcome.
+func (q *fakeQueue) ColdGateAnswered(_ context.Context, _ ids.WorkspaceID, fate promptqueue.GateFate) error {
+	q.gateFates = append(q.gateFates, fate)
+	if q.onGateFate != nil {
+		q.onGateFate()
+	}
+	return q.gateFateErr
 }
 
 // WithdrawRevivalTurn records the call and answers the scripted outcome.
@@ -1269,10 +1283,8 @@ func awaitRecord(t *testing.T, f *fixture, level, operation string) {
 	ticker := time.NewTicker(time.Millisecond)
 	defer ticker.Stop()
 	for {
-		for _, r := range f.log.logger.Records() {
-			if r.Level == level && r.Operation == operation {
-				return
-			}
+		if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: level, Operation: operation}); ok {
+			return
 		}
 		select {
 		case <-ticker.C:

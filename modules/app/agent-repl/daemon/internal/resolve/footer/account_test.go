@@ -109,12 +109,8 @@ func seatSample(allotmentMinor int64, spentMinor *int64, currency string, observ
 
 // loggedAt reports whether the operation was recorded at the level.
 func loggedAt(h *harness, operation string, level string) bool {
-	for _, rec := range recordsOf(h.log.Records(), operation) {
-		if rec.Level == level {
-			return true
-		}
-	}
-	return false
+	_, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: level, Operation: operation})
+	return ok
 }
 
 func TestASecondWorkspaceOnTheAccountDrawsTheFiguresTheFirstLearns(t *testing.T) {

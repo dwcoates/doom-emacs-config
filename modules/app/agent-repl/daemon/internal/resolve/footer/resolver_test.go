@@ -466,12 +466,8 @@ func armChanges(records []dlog.Record) []string {
 }
 
 func hasLevel(records []dlog.Record, level, operation string) bool {
-	for _, rec := range records {
-		if rec.Level == level && rec.Operation == operation {
-			return true
-		}
-	}
-	return false
+	_, ok := dlog.FindRecord(records, dlog.RecordQuery{Level: level, Operation: operation})
+	return ok
 }
 
 // ---- shared frame builders ------------------------------------------------

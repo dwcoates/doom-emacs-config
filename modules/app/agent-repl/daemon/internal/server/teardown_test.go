@@ -30,12 +30,8 @@ func receiveProgress(t *testing.T, stream *connect.ServerStreamForClient[agentre
 
 // hasRecordAt reports whether LOG holds a record at LEVEL for OPERATION.
 func hasRecordAt(log *dlog.TestLogger, level, operation string) bool {
-	for _, r := range log.Records() {
-		if r.Level == level && r.Operation == operation {
-			return true
-		}
-	}
-	return false
+	_, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: level, Operation: operation})
+	return ok
 }
 
 func TestAKillWithAnOpIDIsAcceptedAndItsEndPushed(t *testing.T) {

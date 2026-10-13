@@ -786,12 +786,8 @@ func TestSubmitRefusesAClaimStandingItDoesNotKnow(t *testing.T) {
 
 // loggedAt reports whether the handler recorded operation at level.
 func loggedAt(h *harness, operation, level string) bool {
-	for _, record := range h.h.deps.Log.(*dlog.TestSurfaces).Records() {
-		if record.Operation == operation && record.Level == level {
-			return true
-		}
-	}
-	return false
+	_, ok := dlog.FindRecord(h.h.deps.Log.(*dlog.TestSurfaces).Records(), dlog.RecordQuery{Level: level, Operation: operation})
+	return ok
 }
 
 func TestSubmitCarriesTheDeliveryToTheQueue(t *testing.T) {

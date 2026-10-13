@@ -508,12 +508,7 @@ func newTestClient(t *testing.T) (Git, *testSurfaces) {
 
 // recordFor finds the first captured record with that level and operation.
 func recordFor(records []dlog.Record, level, operation string) (dlog.Record, bool) {
-	for _, record := range records {
-		if record.Level == level && record.Operation == operation {
-			return record, true
-		}
-	}
-	return dlog.Record{}, false
+	return dlog.FindRecord(records, dlog.RecordQuery{Level: level, Operation: operation})
 }
 
 // existingDir makes a real directory, for the two methods whose answer depends

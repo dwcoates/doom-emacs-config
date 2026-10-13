@@ -342,12 +342,8 @@ func TestSelectFailsWhenTheRevivalFails(t *testing.T) {
 // recordLevel returns the level of the first captured record whose message
 // equals want, or "" when none matches.
 func recordLevel(f *fixture, want string) string {
-	for _, r := range f.log.logger.Records() {
-		if r.Message == want {
-			return r.Level
-		}
-	}
-	return ""
+	r, _ := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Message: want})
+	return r.Level
 }
 
 func TestSelectLogsTheSwitchReceiptAtInfo(t *testing.T) {

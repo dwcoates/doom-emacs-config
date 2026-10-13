@@ -469,12 +469,8 @@ func (h *harness) hasRecord(level, operation string) bool {
 
 // hasRecordIn reports whether LOG holds a record at LEVEL for OPERATION.
 func hasRecordIn(log *dlog.TestLogger, level, operation string) bool {
-	for _, record := range log.Records() {
-		if record.Level == level && record.Operation == operation {
-			return true
-		}
-	}
-	return false
+	_, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: level, Operation: operation})
+	return ok
 }
 
 // pageRows returns a served page's rows, failing when the page is an error.

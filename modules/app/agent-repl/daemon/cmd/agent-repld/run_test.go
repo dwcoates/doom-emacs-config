@@ -731,10 +731,8 @@ func stuckLoop(t *testing.T, name string) (*runningLoops, *dlog.TestLogger) {
 // there is none.
 func findRecord(t *testing.T, records []dlog.Record, message string) dlog.Record {
 	t.Helper()
-	for _, r := range records {
-		if r.Message == message {
-			return r
-		}
+	if r, ok := dlog.FindRecord(records, dlog.RecordQuery{Message: message}); ok {
+		return r
 	}
 	t.Fatalf("records = %+v, want one with message %q", records, message)
 	return dlog.Record{}
@@ -743,12 +741,8 @@ func findRecord(t *testing.T, records []dlog.Record, message string) dlog.Record
 // holdsRecord reports whether a captured record set names that level and
 // message.
 func holdsRecord(records []dlog.Record, level, message string) bool {
-	for _, r := range records {
-		if r.Level == level && r.Message == message {
-			return true
-		}
-	}
-	return false
+	_, ok := dlog.FindRecord(records, dlog.RecordQuery{Level: level, Message: message})
+	return ok
 }
 
 func TestJoinQueueWorkReturnsWhenTheQueuesWorkHasLeft(t *testing.T) {

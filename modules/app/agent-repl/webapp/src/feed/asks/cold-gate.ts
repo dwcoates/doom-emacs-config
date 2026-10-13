@@ -17,10 +17,13 @@
  * dismiss: a dismissed gate would come back on the next push having taught the
  * reader that the block is optional.
  *
- * THE THREE CHOICES ARE THE SCHEMA'S THREE ARMS, and each says what it KEEPS
- * rather than only what it costs — the reader is deciding what the conversation
- * loses, and a label that names only the price cannot be weighed against one
- * that names only the loss.
+ * THE CHOICES ARE THE SCHEMA'S ARMS, and each says what it KEEPS rather than
+ * only what it costs — the reader is deciding what the conversation loses, and
+ * a label that names only the price cannot be weighed against one that names
+ * only the loss. NO CHOICE SENDS A HELD PROMPT BUT "compact and resume" (owner
+ * ruling, 2026-10-13): clear discards them, pay and compact keep them for the
+ * reader to send, and the compact-and-resume button stands only while the
+ * daemon says prompts are held at the gate.
  *
  * THE WAIT IS THE DAEMON'S SENTENCE, NOT THIS CARD'S. "compact and resume"
  * starts a compaction that runs for as long as it runs — a minute is ordinary —
@@ -53,6 +56,7 @@ import type { AgentModel } from "../../../../proto/gen/ts/conversation/v1/api_pb
 import { SessionCompactScope } from "../../../../proto/gen/ts/conversation/v1/session_pb";
 import type {
   FeedColdGate,
+  FeedColdGateCompactAndResume,
   FeedColdGateCompactMenu,
   FeedColdGateContextTokens,
   FeedColdGateLastRequest,
@@ -93,10 +97,29 @@ export const COLD_GATE_COPY = {
   lead: "resuming this session re-reads {tokens} tokens of context at full price on {model}.",
   /** {age} is the ticking lapse since the last vendor request. */
   lapse: "last vendor request {age} ago",
-  pay: { label: "pay and resume", hint: "re-read everything now, in the background" },
-  clear: { label: "clear context", hint: "drop the conversation; keep the worktree" },
-  compact: { label: "compact first", hint: "summarize, then resume from the summary" },
-  submenu: { model: "summarizer", scope: "what to summarize", send: "compact and resume" },
+  pay: {
+    label: "pay and resume",
+    hint: "re-read everything now, in the background; held prompts stay held for you to send",
+  },
+  clear: {
+    label: "clear context",
+    hint: "drop the conversation and the held prompts; keep the worktree",
+  },
+  compact: {
+    label: "compact first",
+    hint: "summarize, then resume from the summary; held prompts stay held for you to send",
+  },
+  /** {held} is the served count of prompts held at the gate, worded by heldPromptsPhrase. */
+  compactAndResume: {
+    label: "compact and resume",
+    hint: "summarize, then send {held} once the session is back",
+  },
+  submenu: {
+    model: "summarizer",
+    scope: "what to summarize",
+    /** The send's label is the label of the button that opened the submenu. */
+    send: { compact: "compact", compactAndResume: "compact and resume" },
+  },
   scopes: {
     ALL: "everything",
     PROMPTS: "my prompts only",
@@ -149,11 +172,13 @@ export function drawFeedColdGateStanding(
   const lastRequest = requireMessage(u.lastRequest, `${path}.last_request`);
   const model = requireMessage(u.model, `${path}.model`);
   const menu = u.compact;
+  const resume = u.compactAndResume;
   log.debug("drawing a standing cold gate", {
     operation: "feed.asks.cold-gate.standing",
     context: {
       path,
       compaction_offered: menu !== undefined,
+      compact_and_resume_offered: resume !== undefined,
       models: menu?.models.length ?? 0,
       scopes: menu?.scopes.length ?? 0,
     },
@@ -179,7 +204,7 @@ export function drawFeedColdGateStanding(
   card.style.setProperty(COLD_GATE_HEAT_PROPERTY, figure.style.color);
   card.append(drawLead(figure, drawFeedColdGateModel(model, `${path}.model`)));
 
-  card.append(drawActions(rc, menu, `${path}.compact`));
+  card.append(drawActions(rc, menu, resume, path));
   return card;
 }
 
@@ -325,10 +350,37 @@ export function drawFeedColdGateResolvedCompact(
     .replace("{model}", drawFeedColdGateModel(model, `${path}.model`));
 }
 
-/** The one row of action buttons, plus the compact submenu the third one opens. */
+/**
+ * The compact-and-resume button's props: how many held prompts it would send,
+ * worded into its hint. The element stands only while the daemon serves it.
+ */
+export function drawFeedColdGateCompactAndResume(
+  u: FeedColdGateCompactAndResume,
+  path: string,
+): string {
+  log.debug("reading a cold gate's compact-and-resume offer", {
+    operation: "feed.asks.cold-gate.compact-and-resume",
+    context: { path, held_prompts: u.heldPrompts },
+  });
+  if (u.heldPrompts < 1) {
+    throw new MalformedView(`${path}.held_prompts`, "compact and resume was offered with no prompt held");
+  }
+  return COLD_GATE_COPY.compactAndResume.hint.replace("{held}", heldPromptsPhrase(u.heldPrompts));
+}
+
+/** "the held prompt", or "the N held prompts". */
+export function heldPromptsPhrase(held: number): string {
+  return held === 1 ? "the held prompt" : `the ${held} held prompts`;
+}
+
+/** Which compact button opened the submenu, and so what its send answers. */
+type CompactMode = "compact" | "compactAndResume";
+
+/** The one row of action buttons, plus the compact submenu the compact buttons open. */
 function drawActions(
   rc: RowContext,
   menu: FeedColdGateCompactMenu | undefined,
+  resume: FeedColdGateCompactAndResume | undefined,
   path: string,
 ): HTMLElement {
   const actions = document.createElement("div");
@@ -372,29 +424,42 @@ function drawActions(
     return actions;
   }
 
-  // The compact path needs two values before it can be sent, so its row opens a
-  // submenu rather than firing on the first click. The opener is not the verb's
-  // control — the submenu's send button is — so the two carry different hooks.
-  const opener = createControl();
-  opener.className = "hibernation-compact";
-  opener.setAttribute("data-compact-open", "");
-  opener.textContent = COLD_GATE_COPY.compact.label;
-  opener.title = COLD_GATE_COPY.compact.hint;
-  // COMPACT LEADS THE ROW (owner request, 2026-10-03): the first button on
-  // the left.
-  row.prepend(opener);
-
-  const submenu = drawCompactSubmenu(rc, menu, buttons, actions, progress, path);
+  // The compact path needs two values before it can be sent, so each compact
+  // button opens the ONE submenu rather than firing on the first click, and
+  // the button that opened it decides what its send answers. An opener is not
+  // the verb's control — the submenu's send button is — so the two carry
+  // different hooks.
+  const submenu = drawCompactSubmenu(rc, menu, buttons, actions, progress, `${path}.compact`);
   submenu.el.hidden = true;
   actions.append(submenu.el, progress);
-  buttons.push(opener);
-  opener.addEventListener("click", () => {
-    submenu.el.hidden = !submenu.el.hidden;
-    log.debug(`the reader ${submenu.el.hidden ? "closed" : "opened"} the compact submenu`, {
-      operation: "feed.asks.cold-gate.submenu-toggled",
-      context: { open: !submenu.el.hidden },
+  const opener = (mode: CompactMode, label: string, hint: string): Control => {
+    // BOTH WEAR THE COMPACT BUTTON'S COLOR (owner ruling, 2026-10-13).
+    const button = gateButton("hibernation-compact", ["data-compact-open", mode], { label, hint }, buttons);
+    button.addEventListener("click", () => {
+      const open = submenu.el.hidden || submenu.mode() !== mode;
+      submenu.setMode(mode);
+      submenu.el.hidden = !open;
+      log.debug(`the reader ${open ? "opened" : "closed"} the compact submenu`, {
+        operation: "feed.asks.cold-gate.submenu-toggled",
+        context: { open, mode },
+      });
     });
-  });
+    return button;
+  };
+  // COMPACT LEADS THE ROW (owner request, 2026-10-03): the first button on
+  // the left, with compact-and-resume beside it when it stands.
+  const compactFirst = opener("compact", COLD_GATE_COPY.compact.label, COLD_GATE_COPY.compact.hint);
+  if (resume === undefined) {
+    row.prepend(compactFirst);
+    return actions;
+  }
+  const compactAndResume = opener(
+    "compactAndResume",
+    COLD_GATE_COPY.compactAndResume.label,
+    drawFeedColdGateCompactAndResume(resume, `${path}.compact_and_resume`),
+  );
+  compactAndResume.setAttribute("data-cold-gate-held-prompts", String(resume.heldPrompts));
+  row.prepend(compactFirst, compactAndResume);
   return actions;
 }
 
@@ -404,9 +469,23 @@ function actionButton(
   copy: { label: string; hint: string },
   buttons: Control[],
 ): Control {
+  return gateButton(arm === "clear" ? "hibernation-clear" : "hibernation-direct", ["data-cold-gate", arm], copy, buttons);
+}
+
+/**
+ * One button on the gate's row: its color class, its hook, its label, and what
+ * it does as its hover tooltip. It joins BUTTONS, which an answer in flight
+ * latches inert together.
+ */
+function gateButton(
+  className: string,
+  [hook, value]: [string, string],
+  copy: { label: string; hint: string },
+  buttons: Control[],
+): Control {
   const button = createControl();
-  button.className = arm === "clear" ? "hibernation-clear" : "hibernation-direct";
-  button.setAttribute("data-cold-gate", arm);
+  button.className = className;
+  button.setAttribute(hook, value);
   button.textContent = copy.label;
   button.title = copy.hint;
   buttons.push(button);
@@ -419,6 +498,9 @@ function actionButton(
  * BOTH LISTS COME FROM THE SERVED MENU and the first of each is pre-selected, so
  * the send is always a legal answer: an unselected submenu would either need a
  * disabled send or a default this end invented.
+ *
+ * ITS MODE IS THE BUTTON THAT OPENED IT: the send answers `compact` or
+ * `compact_and_resume`, and is labelled as that button is.
  */
 function drawCompactSubmenu(
   rc: RowContext,
@@ -427,7 +509,7 @@ function drawCompactSubmenu(
   actions: HTMLElement,
   progress: HTMLElement,
   path: string,
-): { el: HTMLElement } {
+): { el: HTMLElement; mode: () => CompactMode; setMode: (mode: CompactMode) => void } {
   const el = document.createElement("div");
   el.className = "cold-gate-submenu";
 
@@ -485,10 +567,15 @@ function drawCompactSubmenu(
   });
   el.append(scopeLabelEl, scopeList);
 
+  let mode: CompactMode = "compact";
   const send = createControl();
   send.className = "hibernation-compact";
-  send.setAttribute("data-cold-gate", "compact");
-  send.textContent = COLD_GATE_COPY.submenu.send;
+  const setMode = (next: CompactMode): void => {
+    mode = next;
+    send.setAttribute("data-cold-gate", next);
+    send.textContent = COLD_GATE_COPY.submenu.send[next];
+  };
+  setMode("compact");
   el.append(send);
   buttons.push(send);
 
@@ -500,9 +587,9 @@ function drawCompactSubmenu(
       // must not invent either value.
       throw new MalformedView(path, "the compact menu offered no model or no scope");
     }
-    void answer(rc, actions, buttons, progress, { kind: "compact", model, scope });
+    void answer(rc, actions, buttons, progress, { kind: mode, model, scope });
   });
-  return { el };
+  return { el, mode: () => mode, setMode };
 }
 
 /** Send the choice, and draw a refusal at the buttons if it was refused. */
@@ -523,8 +610,8 @@ async function answer(
     context: {
       row: id.value,
       choice: choice.kind,
-      model: choice.kind === "compact" ? choice.model.name : undefined,
-      scope: choice.kind === "compact" ? choice.scope : undefined,
+      model: "model" in choice ? choice.model.name : undefined,
+      scope: "scope" in choice ? choice.scope : undefined,
     },
   });
   // THE FEEDBACK FOR THE WAIT. The buttons go inert the moment the call leaves

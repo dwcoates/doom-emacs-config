@@ -317,7 +317,7 @@ func TestAPopDuringAShimCallIsDeferredToItsSettle(t *testing.T) {
 	if started := h.sender.started(); len(started) != 1 || started[0] != "t1" {
 		t.Fatalf("started = %v, want t1 delivered once the rewind settled", started)
 	}
-	if !hasRecord(h, "info", opCall, "a shim call is in flight on the workspace; the decision is taken again once it settles") {
+	if !logged(h.log.Records(), "info", opCall, "a shim call is in flight on the workspace; the decision is taken again once it settles") {
 		t.Fatalf("records = %+v, want the deferral on disk", h.log.Records())
 	}
 }
@@ -397,7 +397,7 @@ func TestAReleaseDuringAShimCallIsRefused(t *testing.T) {
 	if !errors.Is(releaseErr, ErrReleaseRefused) {
 		t.Fatalf("Release during the call = %v, want ErrReleaseRefused", releaseErr)
 	}
-	if !hasRecord(h, "info", opRelease, "a delivery to the shim is in flight; the release is refused") {
+	if !logged(h.log.Records(), "info", opRelease, "a delivery to the shim is in flight; the release is refused") {
 		t.Fatalf("records = %+v, want the refusal on disk", h.log.Records())
 	}
 }
@@ -436,10 +436,10 @@ func TestAStepOnTheHoldBeingDeliveredIsRefusedAsBeingDelivered(t *testing.T) {
 			if !errors.Is(stepErr, ErrBeingDelivered) {
 				t.Fatalf("step during the delivery = %v, want it refused as being delivered", stepErr)
 			}
-			if !hasRecord(h, "info", opRelease, "the step is refused: the held prompt is being delivered to the shim") &&
-				!hasRecord(h, "info", opDrop, "the step is refused: the held prompt is being delivered to the shim") &&
-				!hasRecord(h, "info", opEditBegin, "the step is refused: the held prompt is being delivered to the shim") &&
-				!hasRecord(h, "info", opFold, "the step is refused: the held prompt is being delivered to the shim") {
+			if !logged(h.log.Records(), "info", opRelease, "the step is refused: the held prompt is being delivered to the shim") &&
+				!logged(h.log.Records(), "info", opDrop, "the step is refused: the held prompt is being delivered to the shim") &&
+				!logged(h.log.Records(), "info", opEditBegin, "the step is refused: the held prompt is being delivered to the shim") &&
+				!logged(h.log.Records(), "info", opFold, "the step is refused: the held prompt is being delivered to the shim") {
 				t.Fatalf("records = %+v, want the refusal on disk at INFO", h.log.Records())
 			}
 			if held := h.db.hold("t1"); held.Tombstone == nil || held.Tombstone.Kind != tombstoneDelivered {
@@ -496,7 +496,7 @@ func TestASecondShimCallWhileOneStandsFailsHard(t *testing.T) {
 	if recovered == nil {
 		t.Fatal("a second call beside a standing one did not fail hard")
 	}
-	if !hasRecord(h, "error", opCall, "a second shim call was made while one stands") {
+	if !logged(h.log.Records(), "error", opCall, "a second shim call was made while one stands") {
 		t.Fatalf("records = %+v, want the violation on disk", h.log.Records())
 	}
 	if _, standing := h.q.standingCall(theWorkspace); standing {
@@ -531,7 +531,7 @@ func TestABounceStartedWhileAShimCallStandsFailsHard(t *testing.T) {
 	if recovered == nil {
 		t.Fatal("a bounce started beside a standing call did not fail hard")
 	}
-	if !hasRecord(h, "error", opBounce, "a bounce was started while a shim call stands") {
+	if !logged(h.log.Records(), "error", opBounce, "a bounce was started while a shim call stands") {
 		t.Fatalf("records = %+v, want the violation on disk", h.log.Records())
 	}
 }
@@ -561,7 +561,7 @@ func TestARedriveForAnUnresolvableWorkspaceLeavesTheParkedPromptHeld(t *testing.
 	if held := h.db.hold("t2"); held.Turn != "t2" || held.Tombstone != nil {
 		t.Fatalf("hold of t2 = %+v, want it standing", held)
 	}
-	if !hasRecord(h, "error", opSubmit, "could not resolve the workspace") {
+	if !logged(h.log.Records(), "error", opSubmit, "could not resolve the workspace") {
 		t.Fatalf("records = %+v, want the unresolvable workspace on disk", h.log.Records())
 	}
 }
@@ -583,7 +583,7 @@ func TestARedriveThatCannotDeliverRecordsItAtError(t *testing.T) {
 	}
 
 	// Assert
-	if !hasRecord(h, "error", opCall, "the hold deferred behind the shim call was not delivered") {
+	if !logged(h.log.Records(), "error", opCall, "the hold deferred behind the shim call was not delivered") {
 		t.Fatalf("records = %+v, want the failed delivery on disk", h.log.Records())
 	}
 	if held := h.db.hold("t2"); held.Tombstone != nil {
@@ -636,7 +636,7 @@ func TestAParkedBubblePromptItsAgentRefusesStaysHeldAndIsRecorded(t *testing.T) 
 	}
 
 	// Assert
-	if !hasRecord(h, "error", opCall, "a prompt parked behind the shim call was not delivered to its agent; it stays held") {
+	if !logged(h.log.Records(), "error", opCall, "a prompt parked behind the shim call was not delivered to its agent; it stays held") {
 		t.Fatalf("records = %+v, want the refusal on disk", h.log.Records())
 	}
 	if held := h.db.hold("b1"); held.Tombstone != nil {
@@ -715,7 +715,7 @@ func TestAJoinVerdictReachedDuringAShimCallJoinsOnceTheCallSettles(t *testing.T)
 	if joins := h.sender.joins; len(joins) != 1 || joins[0] != "later" {
 		t.Fatalf("joins = %v, want later sent to join older once its StartTurn settled", joins)
 	}
-	if !hasRecord(h, "info", opCall, "a shim call is in flight on the workspace; the decision is taken again once it settles") {
+	if !logged(h.log.Records(), "info", opCall, "a shim call is in flight on the workspace; the decision is taken again once it settles") {
 		t.Fatalf("records = %+v, want the deferral on disk", h.log.Records())
 	}
 }

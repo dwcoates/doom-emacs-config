@@ -104,6 +104,23 @@ func AwaitView[T any](t *testing.T, ctx context.Context, s *Stream[T], what stri
 	}
 }
 
+// SessionServes reports whether a host push states the workspace's session
+// serves: live, its shim attached and its composer open. A remediated cold
+// re-open is wired a moment after the shim takes it, and a prompt submitted
+// before this push is refused, so a test that prompts after a re-open waits
+// for it (AwaitSessionServes).
+func SessionServes(r *agentreplv1.WatchHostWorkspaceResponse) bool {
+	live := r.GetHost().GetExisting().GetLive()
+	return live != nil && live.GetShimAttached() && live.GetOpen() != nil
+}
+
+// AwaitSessionServes waits on HOST for the push that states the session
+// serves (SessionServes), and answers it.
+func AwaitSessionServes(t *testing.T, ctx context.Context, host *Stream[*agentreplv1.WatchHostWorkspaceResponse]) *agentreplv1.WatchHostWorkspaceResponse {
+	t.Helper()
+	return AwaitView(t, ctx, host, "the session reporting live, attached and open", SessionServes)
+}
+
 // AwaitNext answers the next push, whatever it is.
 func AwaitNext[T any](t *testing.T, ctx context.Context, s *Stream[T], what string) T {
 	t.Helper()

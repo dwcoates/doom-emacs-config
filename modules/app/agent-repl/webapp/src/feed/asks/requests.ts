@@ -28,6 +28,9 @@ import {
   type UpdateQuestionDraftRequest,
 } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_update_question_draft_pb";
 import {
+  AnswerColdGateClearSchema,
+  AnswerColdGateCompactSchema,
+  AnswerColdGatePaySchema,
   AnswerColdGateRequestSchema,
   type AnswerColdGateRequest,
 } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_answer_cold_gate_pb";
@@ -126,7 +129,9 @@ export type ColdGateChoice =
   | { kind: "pay" }
   | { kind: "clear" }
   /** Both values are echoed from the gate's own menu. */
-  | { kind: "compact"; model: AgentModel; scope: SessionCompactScope };
+  | { kind: "compact"; model: AgentModel; scope: SessionCompactScope }
+  /** The same compaction, then the prompts held at the gate are sent. */
+  | { kind: "compactAndResume"; model: AgentModel; scope: SessionCompactScope };
 
 /** Answer the cold-context gate. */
 export function buildAnswerColdGateRequest(
@@ -134,14 +139,25 @@ export function buildAnswerColdGateRequest(
   gate: FeedId,
   choice: ColdGateChoice,
 ): AnswerColdGateRequest {
-  return create(AnswerColdGateRequestSchema, {
-    workspace,
-    gate,
-    choice:
-      choice.kind === "compact"
-        ? { case: "compact", value: { model: choice.model, scope: choice.scope } }
-        : choice.kind === "pay"
-          ? { case: "pay", value: {} }
-          : { case: "clear", value: {} },
-  });
+  return create(AnswerColdGateRequestSchema, { workspace, gate, choice: coldGateArm(choice) });
+}
+
+/** The request's choice arm for CHOICE. */
+function coldGateArm(choice: ColdGateChoice): AnswerColdGateRequest["choice"] {
+  switch (choice.kind) {
+    case "pay":
+      return { case: "pay", value: create(AnswerColdGatePaySchema, {}) };
+    case "clear":
+      return { case: "clear", value: create(AnswerColdGateClearSchema, {}) };
+    case "compact":
+      return {
+        case: "compact",
+        value: create(AnswerColdGateCompactSchema, { model: choice.model, scope: choice.scope }),
+      };
+    case "compactAndResume":
+      return {
+        case: "compactAndResume",
+        value: create(AnswerColdGateCompactSchema, { model: choice.model, scope: choice.scope }),
+      };
+  }
 }

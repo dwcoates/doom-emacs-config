@@ -39,13 +39,16 @@ type AnswerColdGateRequest struct {
 	// The gate row, exactly as the feed served it.
 	Gate *v11.FeedId `protobuf:"bytes,2,opt,name=gate,proto3" json:"gate,omitempty"`
 	// Which button. THE ARM IS THE REMEDIATION, mirroring
-	// conversation.v1.SessionColdRemediation's three forms.
+	// conversation.v1.SessionColdRemediation's three forms, plus what becomes of
+	// the prompts held at the gate. ONLY compact_and_resume sends them; no
+	// other answer sends anything.
 	//
 	// Types that are valid to be assigned to Choice:
 	//
 	//	*AnswerColdGateRequest_Pay
 	//	*AnswerColdGateRequest_Clear
 	//	*AnswerColdGateRequest_Compact
+	//	*AnswerColdGateRequest_CompactAndResume
 	Choice        isAnswerColdGateRequest_Choice `protobuf_oneof:"choice"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -129,23 +132,44 @@ func (x *AnswerColdGateRequest) GetCompact() *AnswerColdGateCompact {
 	return nil
 }
 
+func (x *AnswerColdGateRequest) GetCompactAndResume() *AnswerColdGateCompact {
+	if x != nil {
+		if x, ok := x.Choice.(*AnswerColdGateRequest_CompactAndResume); ok {
+			return x.CompactAndResume
+		}
+	}
+	return nil
+}
+
 type isAnswerColdGateRequest_Choice interface {
 	isAnswerColdGateRequest_Choice()
 }
 
 type AnswerColdGateRequest_Pay struct {
-	// Pay & resume: take the cold read now, in the background.
+	// Pay & resume: take the cold read now, in the background. The prompts
+	// held at the gate are KEPT, held until the user sends them.
 	Pay *AnswerColdGatePay `protobuf:"bytes,3,opt,name=pay,proto3,oneof"`
 }
 
 type AnswerColdGateRequest_Clear struct {
-	// Clear context and resume fresh.
+	// Clear context and resume fresh. The prompts held at the gate are
+	// DISCARDED the moment the daemon takes the answer: clear spends nothing.
 	Clear *AnswerColdGateClear `protobuf:"bytes,4,opt,name=clear,proto3,oneof"`
 }
 
 type AnswerColdGateRequest_Compact struct {
-	// Compact first, then resume from the compacted transcript.
+	// Compact first, then resume from the compacted transcript. The prompts
+	// held at the gate are KEPT, held until the user sends them.
 	Compact *AnswerColdGateCompact `protobuf:"bytes,5,opt,name=compact,proto3,oneof"`
+}
+
+type AnswerColdGateRequest_CompactAndResume struct {
+	// Compact exactly as `compact`, then SEND the prompts held at the gate
+	// once the compacted session is up. Served only while the gate's
+	// `frontend.v1.FeedColdGateStanding.compact_and_resume` is set; refused
+	// `unserved_remediation` when the gate served no compact menu. Prompts
+	// cancelled since the gate was drawn are simply not sent.
+	CompactAndResume *AnswerColdGateCompact `protobuf:"bytes,6,opt,name=compact_and_resume,json=compactAndResume,proto3,oneof"`
 }
 
 func (*AnswerColdGateRequest_Pay) isAnswerColdGateRequest_Choice() {}
@@ -153,6 +177,8 @@ func (*AnswerColdGateRequest_Pay) isAnswerColdGateRequest_Choice() {}
 func (*AnswerColdGateRequest_Clear) isAnswerColdGateRequest_Choice() {}
 
 func (*AnswerColdGateRequest_Compact) isAnswerColdGateRequest_Choice() {}
+
+func (*AnswerColdGateRequest_CompactAndResume) isAnswerColdGateRequest_Choice() {}
 
 type AnswerColdGatePay struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -226,7 +252,8 @@ func (*AnswerColdGateClear) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_answer_cold_gate_proto_rawDescGZIP(), []int{2}
 }
 
-// The compact button's payload.
+// The payload of both compact buttons, compact and compact-and-resume: the
+// same submenu chooses the summarizer and the scope for either.
 type AnswerColdGateCompact struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The summarizer, echoed from the gate's menu.
@@ -925,13 +952,14 @@ var File_agentrepl_v1_endpoint_answer_cold_gate_proto protoreflect.FileDescripto
 
 const file_agentrepl_v1_endpoint_answer_cold_gate_proto_rawDesc = "" +
 	"\n" +
-	",agentrepl/v1/endpoint_answer_cold_gate.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\x1a\x16frontend/v1/feed.proto\x1a\x19conversation/v1/api.proto\x1a\x1dconversation/v1/session.proto\"\xb5\x02\n" +
+	",agentrepl/v1/endpoint_answer_cold_gate.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\x1a\x16frontend/v1/feed.proto\x1a\x19conversation/v1/api.proto\x1a\x1dconversation/v1/session.proto\"\x8a\x03\n" +
 	"\x15AnswerColdGateRequest\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12'\n" +
 	"\x04gate\x18\x02 \x01(\v2\x13.frontend.v1.FeedIdR\x04gate\x123\n" +
 	"\x03pay\x18\x03 \x01(\v2\x1f.agentrepl.v1.AnswerColdGatePayH\x00R\x03pay\x129\n" +
 	"\x05clear\x18\x04 \x01(\v2!.agentrepl.v1.AnswerColdGateClearH\x00R\x05clear\x12?\n" +
-	"\acompact\x18\x05 \x01(\v2#.agentrepl.v1.AnswerColdGateCompactH\x00R\acompactB\b\n" +
+	"\acompact\x18\x05 \x01(\v2#.agentrepl.v1.AnswerColdGateCompactH\x00R\acompact\x12S\n" +
+	"\x12compact_and_resume\x18\x06 \x01(\v2#.agentrepl.v1.AnswerColdGateCompactH\x00R\x10compactAndResumeB\b\n" +
 	"\x06choice\"\x13\n" +
 	"\x11AnswerColdGatePay\"\x15\n" +
 	"\x13AnswerColdGateClear\"\x86\x01\n" +
@@ -1007,23 +1035,24 @@ var file_agentrepl_v1_endpoint_answer_cold_gate_proto_depIdxs = []int32{
 	1,  // 2: agentrepl.v1.AnswerColdGateRequest.pay:type_name -> agentrepl.v1.AnswerColdGatePay
 	2,  // 3: agentrepl.v1.AnswerColdGateRequest.clear:type_name -> agentrepl.v1.AnswerColdGateClear
 	3,  // 4: agentrepl.v1.AnswerColdGateRequest.compact:type_name -> agentrepl.v1.AnswerColdGateCompact
-	17, // 5: agentrepl.v1.AnswerColdGateCompact.model:type_name -> conversation.v1.AgentModel
-	18, // 6: agentrepl.v1.AnswerColdGateCompact.scope:type_name -> conversation.v1.SessionCompactScope
-	5,  // 7: agentrepl.v1.AnswerColdGateResponse.success:type_name -> agentrepl.v1.AnswerColdGateSuccess
-	6,  // 8: agentrepl.v1.AnswerColdGateResponse.error:type_name -> agentrepl.v1.AnswerColdGateError
-	7,  // 9: agentrepl.v1.AnswerColdGateError.unknown_workspace:type_name -> agentrepl.v1.AnswerColdGateUnknownWorkspace
-	8,  // 10: agentrepl.v1.AnswerColdGateError.workspace_ref_mismatch:type_name -> agentrepl.v1.AnswerColdGateWorkspaceRefMismatch
-	9,  // 11: agentrepl.v1.AnswerColdGateError.transferring_away:type_name -> agentrepl.v1.AnswerColdGateTransferringAway
-	10, // 12: agentrepl.v1.AnswerColdGateError.not_yet_adopted:type_name -> agentrepl.v1.AnswerColdGateNotYetAdopted
-	11, // 13: agentrepl.v1.AnswerColdGateError.no_cold_gate:type_name -> agentrepl.v1.AnswerColdGateNoColdGate
-	12, // 14: agentrepl.v1.AnswerColdGateError.unserved_remediation:type_name -> agentrepl.v1.AnswerColdGateUnservedRemediation
-	13, // 15: agentrepl.v1.AnswerColdGateError.no_session:type_name -> agentrepl.v1.AnswerColdGateNoSession
-	14, // 16: agentrepl.v1.AnswerColdGateError.reopen_failed:type_name -> agentrepl.v1.AnswerColdGateReopenFailed
-	17, // [17:17] is the sub-list for method output_type
-	17, // [17:17] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	3,  // 5: agentrepl.v1.AnswerColdGateRequest.compact_and_resume:type_name -> agentrepl.v1.AnswerColdGateCompact
+	17, // 6: agentrepl.v1.AnswerColdGateCompact.model:type_name -> conversation.v1.AgentModel
+	18, // 7: agentrepl.v1.AnswerColdGateCompact.scope:type_name -> conversation.v1.SessionCompactScope
+	5,  // 8: agentrepl.v1.AnswerColdGateResponse.success:type_name -> agentrepl.v1.AnswerColdGateSuccess
+	6,  // 9: agentrepl.v1.AnswerColdGateResponse.error:type_name -> agentrepl.v1.AnswerColdGateError
+	7,  // 10: agentrepl.v1.AnswerColdGateError.unknown_workspace:type_name -> agentrepl.v1.AnswerColdGateUnknownWorkspace
+	8,  // 11: agentrepl.v1.AnswerColdGateError.workspace_ref_mismatch:type_name -> agentrepl.v1.AnswerColdGateWorkspaceRefMismatch
+	9,  // 12: agentrepl.v1.AnswerColdGateError.transferring_away:type_name -> agentrepl.v1.AnswerColdGateTransferringAway
+	10, // 13: agentrepl.v1.AnswerColdGateError.not_yet_adopted:type_name -> agentrepl.v1.AnswerColdGateNotYetAdopted
+	11, // 14: agentrepl.v1.AnswerColdGateError.no_cold_gate:type_name -> agentrepl.v1.AnswerColdGateNoColdGate
+	12, // 15: agentrepl.v1.AnswerColdGateError.unserved_remediation:type_name -> agentrepl.v1.AnswerColdGateUnservedRemediation
+	13, // 16: agentrepl.v1.AnswerColdGateError.no_session:type_name -> agentrepl.v1.AnswerColdGateNoSession
+	14, // 17: agentrepl.v1.AnswerColdGateError.reopen_failed:type_name -> agentrepl.v1.AnswerColdGateReopenFailed
+	18, // [18:18] is the sub-list for method output_type
+	18, // [18:18] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_answer_cold_gate_proto_init() }
@@ -1035,6 +1064,7 @@ func file_agentrepl_v1_endpoint_answer_cold_gate_proto_init() {
 		(*AnswerColdGateRequest_Pay)(nil),
 		(*AnswerColdGateRequest_Clear)(nil),
 		(*AnswerColdGateRequest_Compact)(nil),
+		(*AnswerColdGateRequest_CompactAndResume)(nil),
 	}
 	file_agentrepl_v1_endpoint_answer_cold_gate_proto_msgTypes[4].OneofWrappers = []any{
 		(*AnswerColdGateResponse_Success)(nil),

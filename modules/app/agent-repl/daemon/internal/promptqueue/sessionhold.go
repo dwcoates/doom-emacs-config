@@ -31,9 +31,12 @@ import (
 //     wsm.HoldReconnect.
 //
 // Both holds are released by the ONE edge that is guaranteed to come: the
-// session coming up (ReleaseReconnectHolds). For a gate, that is the gate's own
-// answer bringing the session up. For a session that is not up, it is whatever
-// brings it up: a retry, a restart, a revival, an adoption.
+// session coming up (ReleaseReconnectHolds). For a gate, the entries still
+// on wsm.HoldColdGate when the answer brings the session up are the ones a
+// compact-and-resume answer sends; every other answer has already discarded
+// them or moved them to wsm.HoldColdGateAnswered (gatefate.go). For a session
+// that is not up, it is whatever brings it up: a retry, a restart, a revival,
+// an adoption.
 
 // sessionWait reports whether the workspace's session does not serve a
 // delivery now, the hold that names why, and the reason in words for the
