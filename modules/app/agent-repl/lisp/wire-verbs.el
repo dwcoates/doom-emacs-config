@@ -3303,15 +3303,26 @@ same as on the pause arm."
                (agent-repl-wire-verbs--require "UpdateMergeQueueEvict" "workspace"
                                                 (plist-get value :workspace))))))
 
-(defun agent-repl-wire-encode-update-merge-queue-front-workspace (ref)
-  "Encode UpdateMergeQueueFront's `workspace' use site from REF."
+(defun agent-repl-wire-encode-update-merge-queue-move-up-workspace (ref)
+  "Encode UpdateMergeQueueMoveUp's `workspace' use site from REF."
   (agent-repl-wire-encode-workspace-ref ref))
 
-(defun agent-repl-wire-encode-update-merge-queue-front (value)
-  "Encode UpdateMergeQueueFront from plist VALUE (:workspace REF)."
+(defun agent-repl-wire-encode-update-merge-queue-move-up (value)
+  "Encode UpdateMergeQueueMoveUp from plist VALUE (:workspace REF)."
   (list (cons 'workspace
-              (agent-repl-wire-encode-update-merge-queue-front-workspace
-               (agent-repl-wire-verbs--require "UpdateMergeQueueFront" "workspace"
+              (agent-repl-wire-encode-update-merge-queue-move-up-workspace
+               (agent-repl-wire-verbs--require "UpdateMergeQueueMoveUp" "workspace"
+                                                (plist-get value :workspace))))))
+
+(defun agent-repl-wire-encode-update-merge-queue-move-down-workspace (ref)
+  "Encode UpdateMergeQueueMoveDown's `workspace' use site from REF."
+  (agent-repl-wire-encode-workspace-ref ref))
+
+(defun agent-repl-wire-encode-update-merge-queue-move-down (value)
+  "Encode UpdateMergeQueueMoveDown from plist VALUE (:workspace REF)."
+  (list (cons 'workspace
+              (agent-repl-wire-encode-update-merge-queue-move-down-workspace
+               (agent-repl-wire-verbs--require "UpdateMergeQueueMoveDown" "workspace"
                                                 (plist-get value :workspace))))))
 
 (defun agent-repl-wire-encode-update-merge-queue-hold-rollouts (_value)
@@ -3334,9 +3345,13 @@ same as on the pause arm."
   "Encode UpdateMergeQueueRequest's `evict' action arm from VALUE."
   (agent-repl-wire-encode-update-merge-queue-evict value))
 
-(defun agent-repl-wire-encode-update-merge-queue-request-front (value)
-  "Encode UpdateMergeQueueRequest's `front' action arm from VALUE."
-  (agent-repl-wire-encode-update-merge-queue-front value))
+(defun agent-repl-wire-encode-update-merge-queue-request-move-up (value)
+  "Encode UpdateMergeQueueRequest's `move_up' action arm from VALUE."
+  (agent-repl-wire-encode-update-merge-queue-move-up value))
+
+(defun agent-repl-wire-encode-update-merge-queue-request-move-down (value)
+  "Encode UpdateMergeQueueRequest's `move_down' action arm from VALUE."
+  (agent-repl-wire-encode-update-merge-queue-move-down value))
 
 (defun agent-repl-wire-encode-update-merge-queue-request-hold-rollouts (value)
   "Encode UpdateMergeQueueRequest's `hold_rollouts' action arm from VALUE."
@@ -3353,7 +3368,8 @@ same as on the pause arm."
          (list (list :pause 'pause #'agent-repl-wire-encode-update-merge-queue-request-pause)
                (list :resume 'resume #'agent-repl-wire-encode-update-merge-queue-request-resume)
                (list :evict 'evict #'agent-repl-wire-encode-update-merge-queue-request-evict)
-               (list :front 'front #'agent-repl-wire-encode-update-merge-queue-request-front)
+               (list :move-up 'moveUp #'agent-repl-wire-encode-update-merge-queue-request-move-up)
+               (list :move-down 'moveDown #'agent-repl-wire-encode-update-merge-queue-request-move-down)
                (list :hold-rollouts 'holdRollouts #'agent-repl-wire-encode-update-merge-queue-request-hold-rollouts)
                (list :release-rollouts 'releaseRollouts #'agent-repl-wire-encode-update-merge-queue-request-release-rollouts)))))
 
