@@ -479,7 +479,7 @@ const COLD_BOOT_TIMEOUT_MS = 1_800;
  * So every file that boots the app calls this once at its top level: it
  * boots and stops one throwaway app (composer on, so the composer's mounts
  * are compiled too) in a `beforeAll` with its OWN bound, and no test body
- * carries the cold start. The 900ms test bound then means what it says: one
+ * carries the cold start. The test bound then means what it says: one
  * warm test. harness.self.test.ts checks that every file that calls
  * `startHarness` calls this.
  */
