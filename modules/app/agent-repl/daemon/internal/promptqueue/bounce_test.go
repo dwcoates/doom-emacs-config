@@ -1693,3 +1693,30 @@ func TestAnUnforcedBounceOfAStartedSessionWithATurnStillWaits(t *testing.T) {
 		t.Fatalf("decision = %+v, runs = %d: want the bounce registered behind the turn", got, g.runs.Load())
 	}
 }
+
+// A LEASE CHANGE TAKES A DEFERRED BOUNCE: a stale-build bounce a merge's lease
+// gave back unperformed reruns once the merge releases the lease, the edge it
+// was waiting on (rollout shimBounce).
+func TestABounceDeferredBehindALeaseRunsAgainWhenTheLeaseChanges(t *testing.T) {
+	// Arrange: the bounce runs at once and gives itself back deferred.
+	h := newHarness(t)
+	g := newGate()
+	if _, err := h.q.RequestBounce(context.Background(), theWorkspace, g.request("build_stale", false)); err != nil {
+		t.Fatalf("RequestBounce: %v", err)
+	}
+	g.awaitStart(t)
+	g.finish(h, bounce.ErrDeferred)
+
+	// Act
+	h.q.OnLeaseChanged(theWorkspace)
+
+	// Assert
+	g.awaitStart(t)
+	g.finish(h, nil)
+	if err := <-g.done; err != nil {
+		t.Fatalf("done = %v, want the rerun to finish cleanly", err)
+	}
+	if got := g.runs.Load(); got != 2 {
+		t.Fatalf("the bounce ran %d times, want twice: deferred, then taken at the lease change", got)
+	}
+}

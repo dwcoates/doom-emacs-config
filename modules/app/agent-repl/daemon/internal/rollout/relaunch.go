@@ -119,6 +119,23 @@ func (c *controller) shimBounce(reason RelaunchReason, force bool) bounce.Func {
 		fields := dlog.Context{"workspace": string(ws), "reason": string(reason), "force": force}
 
 		old, hasOld := c.deps.Shims.Client(ws)
+		// A MERGE IN FLIGHT DEFERS AN UNFORCED STALE-BUILD BOUNCE. The merge
+		// holds the workspace's lease for its whole run and drives the
+		// session between its turns, so the bounce cannot take its hold;
+		// before this it failed at ERROR and was never retried (2026-10-12
+		// 21:43, keyboard-scroll-prompt-nav stayed on the old build). The run
+		// gives the bounce back unperformed, before any prelaunch, and the
+		// registry reruns it when the merge releases the lease
+		// (promptqueue OnLeaseChanged).
+		if reason == ReasonBuildStale && !force {
+			if held, merging, err := c.deps.DB.Lease(ctx, ws); err != nil {
+				c.log.Error(opRelaunch, "could not read the workspace's lease before the stale-build bounce", withCause(fields, err))
+				return fmt.Errorf("rollout: relaunch %q: read the lease: %w", ws, err)
+			} else if merging && held.Holder == wsm.HolderMerge {
+				c.log.Info(opRelaunch, "a merge holds the workspace; the stale-build bounce waits for the merge to release it", merge(fields, dlog.Context{"lease": string(held.ID)}))
+				return fmt.Errorf("rollout: relaunch %q: a merge holds the workspace: %w", ws, bounce.ErrDeferred)
+			}
+		}
 		var lease *wsm.Lease
 		// mergeHeld records that the workspace's MERGE lease already holds its
 		// prompts for this restart (relaunchOnce), so no pass asks again.
@@ -721,6 +738,12 @@ func (c *controller) claimStaleBounce(ws ids.WorkspaceID, reported string) stale
 func (c *controller) settleStaleBounce(ws ids.WorkspaceID, err error) {
 	c.mu.Lock()
 	delete(c.staleInFlight, ws)
+	// A BOUNCE THAT FAILED REPLACED NOTHING, so the build it was claimed for
+	// was never bounced: the stamp goes, and the next judgement of that
+	// build bounces it again instead of calling it already bounced.
+	if err != nil {
+		delete(c.bouncedStamp, ws)
+	}
 	c.mu.Unlock()
 	if err == nil {
 		c.judgeStaleAsync(ws)
