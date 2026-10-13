@@ -50,7 +50,6 @@ import type {
   RosterTaskSection,
   RosterTaskSectionHeader,
   RosterTaskView,
-  RosterViewedSection,
   WorkspaceRoster,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import {
@@ -67,7 +66,6 @@ import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import {
   HIDDEN_FOLD_KEY,
   MERGED_FOLD_KEY,
-  VIEWED_FOLD_KEY,
   maturityFoldKey,
   repoFoldKey,
   taskFoldKey,
@@ -102,7 +100,6 @@ export function drawWorkspaceRoster(u: WorkspaceRoster, sc: SidebarContext): HTM
   const maturity = requireMessage(u.maturity, `${path}.maturity`);
   const merged = requireMessage(u.recentlyMerged, `${path}.recently_merged`);
   const hidden = requireMessage(u.hidden, `${path}.hidden`);
-  const viewed = requireMessage(u.viewed, `${path}.viewed`);
   const current =
     u.current === undefined
       ? null
@@ -115,7 +112,6 @@ export function drawWorkspaceRoster(u: WorkspaceRoster, sc: SidebarContext): HTM
       maturity_sections: maturity.sections.length,
       merged_groups: merged.groups.length,
       hidden_rows: hidden.rows?.rows.length ?? 0,
-      viewed_rows: viewed.rows?.rows.length ?? 0,
       current,
       grouping: drawRosterShown(u.shown, `${path}.shown`),
     },
@@ -137,7 +133,7 @@ export function drawWorkspaceRoster(u: WorkspaceRoster, sc: SidebarContext): HTM
 
   const roster = document.createElement("div");
   roster.className = "sb-roster";
-  const bands: PaneBands = { viewed, hidden, merged, path };
+  const bands: PaneBands = { hidden, merged, path };
   roster.appendChild(pane("repository", drawRosterRepositoryView(repository, sc, `${path}.repository`), sc, bands));
   roster.appendChild(pane("task", drawRosterTaskView(task, sc, `${path}.task`), sc, bands));
   roster.appendChild(pane("maturity", drawRosterMaturityView(maturity, sc, `${path}.maturity`), sc, bands));
@@ -174,7 +170,6 @@ export function showPane(roster: ParentNode, grouping: string): void {
 
 /** The sections drawn under EVERY grouping, and the roster path they sit at. */
 interface PaneBands {
-  viewed: RosterViewedSection;
   hidden: RosterHiddenSection;
   merged: RosterMergedSection;
   path: string;
@@ -182,15 +177,13 @@ interface PaneBands {
 
 /**
  * One grouping's pane, with its own copies of the sections every grouping
- * draws below its own: the viewed workspaces, the hidden workspaces, then the
- * recently-merged band.
+ * draws below its own: the hidden workspaces, then the recently-merged band.
  */
 function pane(grouping: Grouping, body: HTMLElement, sc: SidebarContext, bands: PaneBands): HTMLElement {
   const element = document.createElement("div");
   element.className = "sb-pane";
   element.setAttribute("data-grouping", grouping);
   element.appendChild(body);
-  element.appendChild(drawRosterViewedSection(bands.viewed, sc, `${bands.path}.viewed`));
   element.appendChild(drawRosterHiddenSection(bands.hidden, sc, `${bands.path}.hidden`));
   element.appendChild(drawRosterMergedSection(bands.merged, sc, `${bands.path}.recently_merged`));
   return element;
@@ -524,7 +517,11 @@ export function drawRosterMergedSection(
       foldKey: MERGED_FOLD_KEY,
       className: MERGED_SECTION_CLASS,
       target: { case: "recentlyMerged", value: {} },
-      leftOut: leftOutWhenEmpty("data-merged-empty"),
+      leftOut: {
+        when: (header, headerPath) =>
+          drawRosterSectionCount(requireMessage(header.count, `${headerPath}.count`), `${headerPath}.count`) === 0,
+        attribute: "data-merged-empty",
+      },
       decorateHeader: (header) => header.appendChild(drawMergedTodayCount(groups.flatMap((g) => g.shownMergedAt), sc)),
     },
     () => {
@@ -644,36 +641,6 @@ export function drawMergedTodayCount(mergedAt: number[], sc: SidebarContext): HT
   return count;
 }
 
-/** The class the viewed-workspaces section is drawn with. */
-export const VIEWED_SECTION_CLASS = "viewed-section";
-
-/**
- * The viewed-workspaces section: the workspaces whose last result the user
- * has read, hoisted out of every grouping and drawn directly under it, in the
- * daemon's roster order. Each row's when-column says how long since the user
- * last viewed it (`RosterRowWhen.viewed`).
- *
- * A SECTION THAT DRAWS NO ROW IS NOT DRAWN, exactly as the hidden section:
- * the wire always carries it, and a heading over nothing is a fold toggle onto
- * nothing.
- *
- * ITS ROWS ARE A GROUPING'S ROWS. Clicking one selects the workspace, as in
- * any grouping, and the band takes part in the rail's ordinary flow rather
- * than the bands `fitBands` caps: it is part of the list, not a footnote.
- */
-export function drawRosterViewedSection(
-  u: RosterViewedSection,
-  sc: SidebarContext,
-  path: string,
-): HTMLElement {
-  return drawHeadedSection(u, sc, path, {
-    foldKey: VIEWED_FOLD_KEY,
-    className: VIEWED_SECTION_CLASS,
-    target: { case: "viewed", value: {} },
-    leftOut: leftOutWhenEmpty("data-viewed-empty"),
-  });
-}
-
 /**
  * The hidden-workspaces section: the workspaces the user hid, hoisted out of
  * every grouping. They keep their sessions and their editor tabs; the Emacs
@@ -701,21 +668,12 @@ export function drawRosterHiddenSection(
     className: HIDDEN_SECTION_CLASS,
     target: { case: "hidden", value: {} },
     place: "hidden",
-    leftOut: leftOutWhenEmpty("data-hidden-empty"),
+    leftOut: {
+      when: (header, headerPath) =>
+        drawRosterSectionCount(requireMessage(header.count, `${headerPath}.count`), `${headerPath}.count`) === 0,
+      attribute: "data-hidden-empty",
+    },
   });
-}
-
-/**
- * The rule every band shares for leaving itself out of the rail: the daemon's
- * count of the rows it shows is zero, so its heading would be a fold toggle
- * onto nothing. ATTRIBUTE marks the left-out box for the record and the tests.
- */
-export function leftOutWhenEmpty(attribute: string): NonNullable<HeadedBoxShape["leftOut"]> {
-  return {
-    when: (header, headerPath) =>
-      drawRosterSectionCount(requireMessage(header.count, `${headerPath}.count`), `${headerPath}.count`) === 0,
-    attribute,
-  };
 }
 
 /** The header repos and the merged band share: a label and a fold toggle. */
