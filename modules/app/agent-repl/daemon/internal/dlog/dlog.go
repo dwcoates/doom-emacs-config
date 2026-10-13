@@ -82,6 +82,12 @@ type Surfaces interface {
 	// stated once per workspace at INFO; every other failure to resolve the
 	// workspace is still an error.
 	ClientLog(dir string, record ClientRecord) error
+	// CentralClientLog persists a console-less client's diagnostic record
+	// that belongs to NO workspace into the central sink. Its one caller is
+	// the webhost, which draws the sidebar for every workspace and owns none;
+	// the record carries the client's own runtime and identity, and
+	// client_source names the webhost.
+	CentralClientLog(record ClientRecord) error
 	// Evict releases one workspace's sinks when the workspace closes. The
 	// canonical links and their targets stay on disk; only the descriptors go.
 	// Evicting a workspace with no open sinks is success.

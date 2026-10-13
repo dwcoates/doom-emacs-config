@@ -107,7 +107,7 @@ describe("every rpc answers", () => {
       ["updateMergeQueue", client.updateMergeQueue({ action: { case: "pause", value: {} } })],
       ["daemonHealth", client.daemonHealth({})],
       ["sessionHealth", client.sessionHealth({ workspace })],
-      ["clientLog", client.clientLog({ workspace })],
+      ["clientLog", client.clientLog({ source: { case: "workspace", value: workspace } })],
       ["registerWorkspace", client.registerWorkspace({ dir: "/tmp/x" })],
       ["selectWorkspace", client.selectWorkspace({ workspace })],
       ["adoptHostWorkspace", client.adoptHostWorkspace({ workspace })],

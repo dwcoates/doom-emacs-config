@@ -597,7 +597,7 @@ async function mountApp(
     });
     clientLogger = new ForwardingLogger(
       async (record) => {
-        await client.clientLog({ workspace: ctx.workspace, record });
+        await client.clientLog({ source: { case: "workspace", value: ctx.workspace }, record });
         return "accepted";
       },
       () => {},
