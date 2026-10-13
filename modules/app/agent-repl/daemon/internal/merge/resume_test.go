@@ -740,3 +740,119 @@ func TestTheProgressRecordCarriesACommitsAuthorAndTime(t *testing.T) {
 		t.Fatalf("round trip = %+v, want %+v", out, in)
 	}
 }
+
+// fixingAttemptsDrawn answers the fixing attempts the footer drew, each once
+// per run of the same number.
+func fixingAttemptsDrawn(h *harness) []int {
+	var attempts []int
+	for _, f := range h.footer.all() {
+		if f.Step == "fixing" && (len(attempts) == 0 || attempts[len(attempts)-1] != f.Attempt) {
+			attempts = append(attempts, f.Attempt)
+		}
+	}
+	return attempts
+}
+
+func TestAResumedFixTheRestartOrphanedIsPromptedAgain(t *testing.T) {
+	// Arrange: the fixing turn was reconciled with no terminal.
+	h := newHarness(t)
+	interruptedAt(t, h, atFix)
+	orphaned := wsm.CloseOrphaned
+	recordTurn(h, &orphaned)
+	landsAfterResume(h)
+
+	// Act.
+	resume(t, h)
+
+	// Assert.
+	if got := h.queue.countOrigin(conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR); got != 1 {
+		t.Fatalf("fixing briefs = %d, want the cut attempt prompted again once", got)
+	}
+}
+
+func TestAResumedFixTheRestartCutSpendsNoAttempt(t *testing.T) {
+	// Arrange: the fixing turn was reconciled with no terminal.
+	h := newHarness(t)
+	interruptedAt(t, h, atFix)
+	orphaned := wsm.CloseOrphaned
+	recordTurn(h, &orphaned)
+	landsAfterResume(h)
+
+	// Act.
+	resume(t, h)
+
+	// Assert.
+	if got := fixingAttemptsDrawn(h); !slices.Equal(got, []int{1}) {
+		t.Fatalf("fixing attempts drawn = %v, want attempt 1 only", got)
+	}
+}
+
+func TestAResumedFixWhoseAgentDiedWhileSuspendedIsPromptedAgain(t *testing.T) {
+	// Arrange: the fixing turn's agent died while the daemon was down.
+	h := newHarness(t)
+	interruptedAt(t, h, atFix)
+	died := wsm.CloseAgentDied
+	recordTurn(h, &died)
+	landsAfterResume(h)
+
+	// Act.
+	resume(t, h)
+
+	// Assert.
+	if got := h.queue.countOrigin(conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR); got != 1 {
+		t.Fatalf("fixing briefs = %d, want the cut attempt prompted again once", got)
+	}
+}
+
+// atConflict stands a record at a conflict resolution whose turn is deadTurn,
+// attempts of the bound already spent on the conflicting commit.
+func atConflict(attempts int) func(*progressDoc) {
+	return func(d *progressDoc) {
+		atStep(TabConflicts, 1)(d)
+		d.Turn, d.ConflictFiles = string(deadTurn), []string{"a.go"}
+		d.ConflictCommit, d.ConflictAttempts = commits(3)[0].SHA, attempts
+	}
+}
+
+func TestAResumedConflictTheRestartOrphanedIsPromptedAgainWithoutSpendingAnAttempt(t *testing.T) {
+	// Arrange: the bound's last attempt was in flight when the restart cut it.
+	h := newHarness(t)
+	interruptedAt(t, h, atConflict(maxConflictAttempts))
+	orphaned := wsm.CloseOrphaned
+	recordTurn(h, &orphaned)
+	h.git.standing = true
+	h.git.rebaseTotal = 3
+	h.git.conflicted = [][]string{{"a.go"}, nil}
+	landsAfterResume(h)
+
+	// Act.
+	resume(t, h)
+
+	// Assert.
+	if got := h.queue.countOrigin(conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR); got != 1 {
+		t.Fatalf("conflict briefs = %d, want the cut resolution prompted again", got)
+	}
+	if got := h.footer.last(); got.State == StateFailed {
+		t.Fatalf("facts = %+v, want no failure: the cut attempt never counted", got)
+	}
+}
+
+func TestAResumedConflictKeepsTheAttemptsItSpent(t *testing.T) {
+	// Arrange: the bound's last attempt ended, unresolved, while the daemon
+	// was down.
+	h := newHarness(t)
+	interruptedAt(t, h, atConflict(maxConflictAttempts))
+	completed := wsm.CloseCompleted
+	recordTurn(h, &completed)
+	h.git.standing = true
+	h.git.rebaseTotal = 3
+	h.git.conflicted = [][]string{{"a.go"}}
+
+	// Act.
+	resume(t, h)
+
+	// Assert.
+	if got := h.footer.last(); got.State != StateFailed || got.FailedArea != "conflicts" {
+		t.Fatalf("facts = %+v, want the merge failed in conflicts: the restart forgot no attempt", got)
+	}
+}

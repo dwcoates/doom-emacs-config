@@ -1277,7 +1277,7 @@ func TestAConflictResolutionThatGivesUpFailsTheMergeInConflicts(t *testing.T) {
 	h := newHarness(t)
 	landing(h, 1)
 	h.git.rebaseConflicts[1] = []string{"a.go"}
-	h.git.conflicted = [][]string{{"a.go"}, {"a.go"}, {"a.go"}}
+	h.git.conflicted = everyAttemptLeaves("a.go")
 
 	// Act.
 	admitted(t, h)
@@ -1296,7 +1296,7 @@ func TestAConflictResolutionThatGivesUpLeavesTheRebaseInProgress(t *testing.T) {
 	h := newHarness(t)
 	landing(h, 2)
 	h.git.rebaseConflicts[1] = []string{"a.go"}
-	h.git.conflicted = [][]string{{"a.go"}, {"a.go"}, {"a.go"}}
+	h.git.conflicted = everyAttemptLeaves("a.go")
 
 	// Act.
 	admitted(t, h)
@@ -1315,7 +1315,7 @@ func TestAConflictResolutionWhoseTurnFailedGivesUp(t *testing.T) {
 	h := newHarness(t)
 	landing(h, 1)
 	h.git.rebaseConflicts[1] = []string{"a.go"}
-	h.turnCloses = []wsm.TurnClose{wsm.CloseFailed, wsm.CloseFailed, wsm.CloseFailed}
+	h.turnCloses = everyAttemptCloses(wsm.CloseFailed)
 
 	// Act.
 	admitted(t, h)
@@ -1331,7 +1331,7 @@ func TestAGivenUpConflictIsAnOutcomeRecordedAtInfo(t *testing.T) {
 	h := newHarness(t)
 	landing(h, 1)
 	h.git.rebaseConflicts[1] = []string{"a.go"}
-	h.git.conflicted = [][]string{{"a.go"}, {"a.go"}, {"a.go"}}
+	h.git.conflicted = everyAttemptLeaves("a.go")
 
 	// Act.
 	admitted(t, h)
@@ -1392,8 +1392,8 @@ func TestFixingAttemptsAreBoundedByTheOneBoundAndThenFailTheMergeInTests(t *test
 			}
 		}
 	}
-	if !slices.Equal(attempts, []int{1, 2, 3}) {
-		t.Fatalf("fixing attempts = %v, want 1, 2, 3", attempts)
+	if want := attemptsUpTo(MaxFixAttempts); !slices.Equal(attempts, want) {
+		t.Fatalf("fixing attempts = %v, want %v", attempts, want)
 	}
 	if got := h.footer.last(); got.State != StateFailed || got.FailedArea != "tests" {
 		t.Fatalf("facts = %+v, want merge failed in tests", got)
@@ -1771,7 +1771,7 @@ func TestAConflictFailsTheMergeOnlyAfterItsAttemptsOnOneCommitRunOut(t *testing.
 	h := newHarness(t)
 	landing(h, 1)
 	h.git.rebaseConflicts[1] = []string{"a.go"}
-	h.git.conflicted = [][]string{{"a.go"}, {"a.go"}, {"a.go"}}
+	h.git.conflicted = everyAttemptLeaves("a.go")
 
 	// Act.
 	admitted(t, h)
@@ -1803,5 +1803,79 @@ func TestAConflictsAttemptsStartAfreshOnTheNextCommit(t *testing.T) {
 	}
 	if got := h.footer.last().State; got != StateMerged {
 		t.Fatalf("state = %q, want merged: the count resets when the rebase advances", got)
+	}
+}
+
+func TestAPassingGateStartsTheFixingCountOver(t *testing.T) {
+	// Arrange: the first attempt passes after MaxFixAttempts-1 fixes, the
+	// target moves before it commits, and the second attempt needs two more:
+	// over the bound in all, never over it in a row.
+	h := newHarness(t)
+	landing(h, 1)
+	h.runner.runs = nil
+	for i := 0; i < MaxFixAttempts-1; i++ {
+		h.gateFails("daemon")
+	}
+	h.gatePasses("daemon")
+	h.gateFails("daemon")
+	h.gateFails("daemon")
+	h.gatePasses("daemon")
+	h.git.refSeqs["HEAD"] = []string{"old", "new", "new", "new"}
+
+	// Act.
+	admitted(t, h)
+
+	// Assert.
+	if got := h.footer.last(); got.State != StateMerged {
+		t.Fatalf("facts = %+v, want merged: a pass starts the count over", got)
+	}
+}
+
+func TestAResolvedConflictStartsTheCountOver(t *testing.T) {
+	// Arrange: a run one attempt short of the bound on a commit, whose
+	// resolution resolved it.
+	h := newHarness(t)
+	r := ledgeredRun(t, h)
+	r.subject = subject{dir: h.sourceD, branch: "feature", targetDir: h.targetD}
+	commit := commits(1)[0]
+	r.conflictCommit, r.conflictAttempts = commit.SHA, maxConflictAttempts-1
+	p := &replay{commits: commits(1)}
+	round := r.openTab(context.Background(), TabConflicts)
+
+	// Act.
+	if _, err := r.conflictSettled(context.Background(), p, round, wsm.CloseCompleted, commit, "master", false); err != nil {
+		t.Fatalf("conflictSettled: %v", err)
+	}
+
+	// Assert.
+	if r.conflictAttempts != 0 || r.conflictCommit != "" {
+		t.Fatalf("count = %d on %q, want it started over", r.conflictAttempts, r.conflictCommit)
+	}
+}
+
+func TestCutByRestartReadsOnlyARestartsCloses(t *testing.T) {
+	tests := []struct {
+		name    string
+		close   wsm.TurnClose
+		resumed bool
+		want    bool
+	}{
+		{name: "an orphaned turn", close: wsm.CloseOrphaned, want: true},
+		{name: "an agent that died while the merge was suspended", close: wsm.CloseAgentDied, resumed: true, want: true},
+		{name: "an agent that died under a live merge", close: wsm.CloseAgentDied, want: false},
+		{name: "a failed turn read back on a resume", close: wsm.CloseFailed, resumed: true, want: false},
+		{name: "a completed turn", close: wsm.CloseCompleted, resumed: true, want: false},
+		{name: "a user's interrupt", close: wsm.CloseKilled, resumed: true, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			got := cutByRestart(tt.close, tt.resumed)
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("cutByRestart(%v, %v) = %v, want %v", tt.close, tt.resumed, got, tt.want)
+			}
+		})
 	}
 }

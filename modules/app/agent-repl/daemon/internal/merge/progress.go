@@ -112,11 +112,17 @@ type progressDoc struct {
 	// the target's -- so a resume takes it as a speculative step whatever the
 	// merge's place is now. ChainBase is the commit the branch's own commits
 	// stand on; Tested is the speculative gate's pass; FixesUsed counts the
-	// fixing attempts the merge made, ahead of its turn or at the head.
+	// fixing attempts the merge made in a row, ahead of its turn or at the
+	// head.
 	Speculative bool       `json:"speculative,omitempty"`
 	ChainBase   string     `json:"chain_base,omitempty"`
 	Tested      *testedDoc `json:"tested,omitempty"`
 	FixesUsed   int        `json:"fixes_used"`
+	// ConflictCommit is the commit the conflict attempts count on and
+	// ConflictAttempts how many it has had in a row, so a restart neither
+	// spends an attempt nor forgets the ones spent.
+	ConflictCommit   string `json:"conflict_commit,omitempty"`
+	ConflictAttempts int    `json:"conflict_attempts,omitempty"`
 }
 
 // testedDoc is a speculative gate's pass: the base it ran on, the head it
@@ -318,6 +324,7 @@ func (r *run) checkpoint(ctx context.Context, step string, mutate func(*progress
 		doc.Displaced = nil
 	}
 	doc.ChainBase, doc.FixesUsed = r.chainBase, r.fixesUsed
+	doc.ConflictCommit, doc.ConflictAttempts = r.conflictCommit, r.conflictAttempts
 	if r.tested != nil {
 		tested := *r.tested
 		doc.Tested = &tested
@@ -430,6 +437,7 @@ func (r *run) restoreFrom(doc progressDoc) {
 		r.displaced = &Displaced{Turn: ids.TurnID(doc.Displaced.Turn), Text: doc.Displaced.Text}
 	}
 	r.chainBase, r.fixesUsed = doc.ChainBase, doc.FixesUsed
+	r.conflictCommit, r.conflictAttempts = doc.ConflictCommit, doc.ConflictAttempts
 	if doc.Tested != nil {
 		tested := *doc.Tested
 		r.tested = &tested

@@ -490,7 +490,15 @@ func (r *run) conflict(ctx context.Context, p *replay, files []string, targetBra
 	p.lines = append(p.lines, fmt.Sprintf("%s conflicted in %d file(s)", commitLine(commit.SHA, commit.Subject), len(files)))
 	r.settleRebasing(ctx, p, "the rebase stopped on a conflict")
 	r.o.log(ctx, r.ws).Info(op, "a replayed commit conflicted; the requester's session resolves it", dlog.Context{
-		"workspace": string(r.ws), "commit": commit.SHA, "files": strings.Join(files, ", "), "worktree": r.subject.dir})
+		"workspace": string(r.ws), "commit": commit.SHA, "files": strings.Join(files, ", "), "worktree": r.subject.dir,
+		"attempt": r.conflictAttempts, "of": maxConflictAttempts})
+	return r.promptConflict(ctx, p, commit, files, targetBranch)
+}
+
+// promptConflict hands one conflict to the requester's session in a new
+// conflicts round, and reads the resolution's end. It spends no attempt: the
+// caller counted it, or -- a resolution a restart cut -- it is not counted.
+func (r *run) promptConflict(ctx context.Context, p *replay, commit gitclient.Commit, files []string, targetBranch string) (*outcome, error) {
 	round := r.openTab(ctx, TabConflicts)
 	r.drawLive(ctx, round, footer.StepConflictResolution, conflictLine(commit.Subject, len(files)), nil, conflictsTab)
 	if err := r.noteMachinery(ctx, targetBranch); err != nil {
@@ -513,12 +521,27 @@ func (r *run) conflict(ctx context.Context, p *replay, files []string, targetBra
 	if err != nil {
 		return nil, err
 	}
-	return r.conflictSettled(ctx, p, round, close, commit, targetBranch)
+	return r.conflictSettled(ctx, p, round, close, commit, targetBranch, false)
+}
+
+// cutByRestart reports whether a merge turn ended because the session it ran
+// in went away under a restart rather than by the agent's own hand: a turn the
+// daemon reconciled with no terminal (orphaned), or -- read back on a resume --
+// one whose agent died while the merge was suspended. Such a step reruns
+// without spending an attempt.
+func cutByRestart(close wsm.TurnClose, resumed bool) bool {
+	return close == wsm.CloseOrphaned || (resumed && close == wsm.CloseAgentDied)
 }
 
 // maxConflictAttempts is how many resolution attempts one commit's conflict
-// gets in a row before the merge fails in conflicts.
-const maxConflictAttempts = 3
+// gets IN A ROW before the merge fails in conflicts: one failure of the
+// rebase-then-resolve cycle is one resolution attempt that left the commit
+// unresolved (its turn failed, or files still conflict). A resolution that
+// resolves starts the count over, and so does a conflict on another commit; an
+// attempt a restart cut is prompted again and never counts. The bound is
+// owner-ruled (2026-10-12): modules/app/agent-repl/AGENTS.md, "The merge
+// queue's test gate and remediation contract".
+const maxConflictAttempts = 5
 
 // conflictBrief composes the conflict resolution's brief.
 func (r *run) conflictBrief(commit gitclient.Commit, files []string, targetBranch string) (string, error) {
@@ -537,7 +560,7 @@ func (r *run) conflictBrief(commit gitclient.Commit, files []string, targetBranc
 
 // conflictSettled reads the conflict resolution's end: the failed outcome when
 // it gave up, or a new rebasing round the rebase continues in.
-func (r *run) conflictSettled(ctx context.Context, p *replay, round tabRound, close wsm.TurnClose, commit gitclient.Commit, targetBranch string) (*outcome, error) {
+func (r *run) conflictSettled(ctx context.Context, p *replay, round tabRound, close wsm.TurnClose, commit gitclient.Commit, targetBranch string, resumed bool) (*outcome, error) {
 	const op = "daemon.merge.conflicts"
 	if err := stillWanted(ctx); err != nil {
 		return nil, err
@@ -545,6 +568,16 @@ func (r *run) conflictSettled(ctx context.Context, p *replay, round tabRound, cl
 	remaining, err := r.git.ConflictedFiles(ctx, r.subject.dir)
 	if err != nil {
 		return nil, fmt.Errorf("merge: reading what still conflicts in %s: %w", r.subject.dir, err)
+	}
+	// A RESOLUTION A RESTART CUT SHORT IS PROMPTED AGAIN AND NEVER COUNTS
+	// (owner ruling, 2026-10-12): it did not fail, it was interrupted.
+	if cutByRestart(close, resumed) && len(remaining) > 0 {
+		r.settleAgentic()
+		r.upsert(round, conflictsTab(round.settled(r.o.nowMS(), "a restart cut this resolution short; it is prompted again")))
+		r.closeTab(ctx, round, "restarted")
+		r.o.log(ctx, r.ws).Info(op, "a restart cut the conflict resolution short; it is prompted again and spends no attempt", dlog.Context{
+			"workspace": string(r.ws), "commit": commit.SHA, "close": close.String(), "attempt": r.conflictAttempts, "of": maxConflictAttempts})
+		return r.promptConflict(ctx, p, commit, remaining, targetBranch)
 	}
 	why := ""
 	switch {
@@ -594,6 +627,9 @@ func (r *run) conflictSettled(ctx context.Context, p *replay, round tabRound, cl
 	r.settleAgentic()
 	r.upsert(round, conflictsTab(round.settled(r.o.nowMS(), "")))
 	r.closeTab(ctx, round, "succeeded")
+	// A RESOLUTION THAT RESOLVED ENDS THE RUN OF FAILURES: the next conflict
+	// starts its count afresh.
+	r.conflictCommit, r.conflictAttempts = "", 0
 	// THE REBASE CONTINUES IN A NEW ROUND: tabs never reopen.
 	p.round = r.openTab(ctx, TabRebasing)
 	p.lines = []string{fmt.Sprintf("the conflict in %s is resolved; the rebase continues", commit.Subject)}
@@ -636,7 +672,7 @@ func (r *run) resumeConflict(ctx context.Context, p *replay, tip, targetBranch s
 	if err != nil {
 		return nil, err
 	}
-	if gaveUp, err := r.conflictSettled(ctx, p, round, close, commit, targetBranch); err != nil || gaveUp != nil {
+	if gaveUp, err := r.conflictSettled(ctx, p, round, close, commit, targetBranch, true); err != nil || gaveUp != nil {
 		return gaveUp, err
 	}
 	step, err := r.git.ContinueRebase(ctx, dir)
@@ -662,6 +698,7 @@ func (r *run) testAndFix(ctx context.Context, tip, targetBranch string, fromAtte
 				return "", nil, err
 			}
 			if reused {
+				r.fixesUsed = 0
 				return head, nil, nil
 			}
 		}
@@ -691,6 +728,9 @@ func (r *run) testAndFix(ctx context.Context, tip, targetBranch string, fromAtte
 			out := failedIn(footer.FailedOther, verdict.broken)
 			return "", &out, nil
 		case verdict.result.Passed:
+			// A PASSING GATE ENDS THE RUN OF FAILURES: a later failure (a
+			// start-over on a moved target) starts its count afresh.
+			r.fixesUsed = 0
 			return head, nil, nil
 		case attempt == MaxFixAttempts:
 			summary := fmt.Sprintf("the tests still fail after %d fixing attempts; the whole run is archived at %s", MaxFixAttempts, verdict.result.ArchivePath)
@@ -710,13 +750,18 @@ func (r *run) testAndFix(ctx context.Context, tip, targetBranch string, fromAtte
 // branch in its worktree: fixing attempt x of MaxFixAttempts. It answers the
 // failed outcome when the agent escalated or changed the merge machinery.
 func (r *run) fix(ctx context.Context, attempt int, failing GateResult, targetBranch string) (*outcome, error) {
-	suites := failedSuites(failing.Suites)
+	return r.promptFix(ctx, attempt, failedSuites(failing.Suites), failing.ArchivePath, failing.Tail, targetBranch)
+}
+
+// promptFix submits fixing attempt x's brief in a new fixes round and reads
+// its end.
+func (r *run) promptFix(ctx context.Context, attempt int, suites []string, archive, tail, targetBranch string) (*outcome, error) {
 	round := r.openTab(ctx, TabFixes)
 	r.drawFixing(ctx, round, attempt, suites)
 	if err := r.noteMachinery(ctx, targetBranch); err != nil {
 		return nil, err
 	}
-	text, err := r.fixBrief(attempt, suites, failing.ArchivePath, failing.Tail, targetBranch)
+	text, err := r.fixBrief(attempt, suites, archive, tail, targetBranch)
 	if err != nil {
 		return nil, err
 	}
@@ -726,14 +771,15 @@ func (r *run) fix(ctx context.Context, attempt int, failing GateResult, targetBr
 	turn := wsm.NewTurnID()
 	if err := r.checkpoint(ctx, TabFixes, func(d *progressDoc) {
 		d.FixAttempt, d.Turn, d.FailingSuites = attempt, string(turn), suites
-		d.FailingArchive, d.FailingTail = failing.ArchivePath, failing.Tail
+		d.FailingArchive, d.FailingTail = archive, tail
 	}); err != nil {
 		return nil, err
 	}
-	if _, err := r.submit(ctx, turn, text, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR); err != nil {
+	close, err := r.submit(ctx, turn, text, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR)
+	if err != nil {
 		return nil, err
 	}
-	return r.fixSettled(ctx, round, attempt, targetBranch)
+	return r.fixSettled(ctx, round, attempt, suites, archive, tail, targetBranch, close, false)
 }
 
 // drawFixing stands fixing attempt x's round live, fresh or resumed.
@@ -764,11 +810,21 @@ func (r *run) fixBrief(attempt int, suites []string, archive, tail, targetBranch
 }
 
 // fixSettled reads a fixing attempt's end: the failed outcome when the agent
-// escalated or changed the merge machinery, nil when the gate runs again.
-func (r *run) fixSettled(ctx context.Context, round tabRound, attempt int, targetBranch string) (*outcome, error) {
+// escalated or changed the merge machinery, nil when the gate runs again. An
+// attempt a restart cut short is prompted again as the same attempt: it never
+// counts (owner ruling, 2026-10-12).
+func (r *run) fixSettled(ctx context.Context, round tabRound, attempt int, suites []string, archive, tail, targetBranch string, close wsm.TurnClose, resumed bool) (*outcome, error) {
 	const op = "daemon.merge.fixes"
 	if err := stillWanted(ctx); err != nil {
 		return nil, err
+	}
+	if cutByRestart(close, resumed) {
+		r.settleAgentic()
+		r.upsert(round, fixesTab(round.settled(r.o.nowMS(), "a restart cut this fixing attempt short; it is prompted again"), attempt))
+		r.closeTab(ctx, round, "restarted")
+		r.o.log(ctx, r.ws).Info(op, "a restart cut the fixing attempt short; it is prompted again and spends no attempt", dlog.Context{
+			"workspace": string(r.ws), "attempt": attempt, "of": MaxFixAttempts, "close": close.String()})
+		return r.promptFix(ctx, attempt, suites, archive, tail, targetBranch)
 	}
 	why := ""
 	if escalated, gaveUp := r.consumeEscalation(ctx); gaveUp {
@@ -802,10 +858,11 @@ func (r *run) resumeFix(ctx context.Context, res *progressDoc, targetBranch stri
 	if err != nil {
 		return nil, err
 	}
-	if _, err := r.reattachTurn(ctx, ids.TurnID(res.Turn), text, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR); err != nil {
+	close, err := r.reattachTurn(ctx, ids.TurnID(res.Turn), text, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR)
+	if err != nil {
 		return nil, err
 	}
-	return r.fixSettled(ctx, round, res.FixAttempt, targetBranch)
+	return r.fixSettled(ctx, round, res.FixAttempt, res.FailingSuites, res.FailingArchive, res.FailingTail, targetBranch, close, true)
 }
 
 // failedSuites names the suites a run failed, in the gate's order.
