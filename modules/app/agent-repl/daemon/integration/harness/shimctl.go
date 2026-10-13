@@ -501,24 +501,40 @@ func (s *ShimControl) pushSessionUpdate(u *conversationv1.SessionUpdate) int {
 
 // PushHealthyWhenSubscribed delivers the readiness diagnostics, retrying until
 // at least one session stream is subscribed to receive it.
+func (s *ShimControl) PushHealthyWhenSubscribed() {
+	s.t.Helper()
+	s.pushSessionUpdateWhenSubscribed("the readiness push", healthyUpdate())
+}
+
+// pushSessionUpdateWhenSubscribed delivers one session update, retrying until
+// at least one session stream received it.
 //
 // A push to a hub nobody has subscribed to is DROPPED, and the daemon
-// subscribes when its bring-up opens WatchSession — which a test cannot observe
-// from the wire. Retrying on the subscriber count is what makes "the shim came
-// up healthy" an event the daemon is guaranteed to see.
-func (s *ShimControl) PushHealthyWhenSubscribed() {
+// subscribes when its bring-up opens WatchSession, which a test cannot observe
+// from the wire. Retrying on the subscriber count is what makes the push an
+// event the daemon is guaranteed to see.
+func (s *ShimControl) pushSessionUpdateWhenSubscribed(what string, u *conversationv1.SessionUpdate) {
 	s.t.Helper()
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	for {
-		if s.PushHealthy() > 0 {
+		if s.pushSessionUpdate(u) > 0 {
 			return
 		}
 		select {
 		case <-ticker.C:
 		case <-s.d.Ctx().Done():
-			s.t.Fatalf("fake shim control %s: no session stream ever subscribed to receive the readiness push", s.Socket)
+			s.t.Fatalf("fake shim control %s: no session stream ever subscribed to receive %s", s.Socket, what)
 		}
+	}
+}
+
+// healthyUpdate is the healthy diagnostics push that gates readiness.
+func healthyUpdate() *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_Diagnostics{Diagnostics: &conversationv1.SessionDiagnostics{
+			Health: &conversationv1.SessionDiagnostics_Healthy{Healthy: &conversationv1.SessionHealthy{}},
+		}},
 	}
 }
 
@@ -526,17 +542,15 @@ func (s *ShimControl) PushHealthyWhenSubscribed() {
 // answers how many session streams received it.
 func (s *ShimControl) PushHealthy() int {
 	s.t.Helper()
-	return s.pushSessionUpdate(&conversationv1.SessionUpdate{
-		Update: &conversationv1.SessionUpdate_Diagnostics{Diagnostics: &conversationv1.SessionDiagnostics{
-			Health: &conversationv1.SessionDiagnostics_Healthy{Healthy: &conversationv1.SessionHealthy{}},
-		}},
-	})
+	return s.pushSessionUpdate(healthyUpdate())
 }
 
-// PushUnhealthy delivers an unhealthy diagnostics push carrying faults.
+// PushUnhealthy delivers an unhealthy diagnostics push carrying faults,
+// retrying until a session stream received it: a push dropped before the
+// daemon's WatchSession subscribed would leave the fault unreported forever.
 func (s *ShimControl) PushUnhealthy(faults ...*conversationv1.SessionFault) {
 	s.t.Helper()
-	s.PushSessionUpdate(&conversationv1.SessionUpdate{
+	s.pushSessionUpdateWhenSubscribed("the unhealthy push", &conversationv1.SessionUpdate{
 		Update: &conversationv1.SessionUpdate_Diagnostics{Diagnostics: &conversationv1.SessionDiagnostics{
 			Health: &conversationv1.SessionDiagnostics_Unhealthy{Unhealthy: &conversationv1.SessionUnhealthy{Faults: faults}},
 		}},
