@@ -307,12 +307,8 @@ func TestUnsetLocationIsRefused(t *testing.T) {
 // loggedAt reports whether the logger captured a record at LEVEL under
 // OPERATION.
 func loggedAt(log *dlog.TestLogger, level, operation string) bool {
-	for _, record := range log.Records() {
-		if record.Level == level && record.Operation == operation {
-			return true
-		}
-	}
-	return false
+	_, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: level, Operation: operation})
+	return ok
 }
 
 // ---------------------------------------------------------------------------

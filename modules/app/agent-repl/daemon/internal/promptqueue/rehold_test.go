@@ -204,7 +204,7 @@ func TestTheReHoldIsRecordedAtInfo(t *testing.T) {
 	endTried(h, wsm.CloseFailed)
 
 	// Assert
-	if !hasRecord(h, "info", opTurnEnded, "the vendor blocked the tried prompt; it is back on the after-reconnect hold in its place") {
+	if !logged(h.log.Records(), "info", opTurnEnded, "the vendor blocked the tried prompt; it is back on the after-reconnect hold in its place") {
 		t.Fatalf("no INFO record of the re-hold")
 	}
 }

@@ -62,13 +62,7 @@ func (h *harness) standing(pmset, link string) *harness {
 
 // records answers the captured records at level for operation.
 func (h *harness) records(level, operation string) []dlog.Record {
-	var out []dlog.Record
-	for _, r := range h.log.Records() {
-		if r.Level == level && r.Operation == operation {
-			out = append(out, r)
-		}
-	}
-	return out
+	return dlog.FilterRecords(h.log.Records(), dlog.RecordQuery{Level: level, Operation: operation})
 }
 
 func update(action string) *agentreplv1.UpdatePersistentWifiModeRequest {

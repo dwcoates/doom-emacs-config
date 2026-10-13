@@ -82,12 +82,8 @@ func (c *fakeShimClient) PID() int { return c.pid }
 
 // hasRecord reports whether the boot logged a record at level under operation.
 func (h *harness) hasRecord(level, operation string) bool {
-	for _, r := range h.log.Records() {
-		if r.Level == level && r.Operation == operation {
-			return true
-		}
-	}
-	return false
+	_, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: level, Operation: operation})
+	return ok
 }
 
 func (s *fakeSupervisor) paths() []string {

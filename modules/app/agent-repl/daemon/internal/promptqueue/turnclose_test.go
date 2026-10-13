@@ -43,7 +43,7 @@ func TestTheDoorRecordsTheDurableClose(t *testing.T) {
 	h.q.OnTurnEnded(theWorkspace, "turn-1", wsm.CloseCompleted)
 
 	// Assert
-	if !recordWith(h.log.Records(), "debug", opTurnEnded, "stamped the turn's close") {
+	if !logged(h.log.Records(), "debug", opTurnEnded, "stamped the turn's close") {
 		t.Fatalf("records = %+v, want the durable close recorded", h.log.Records())
 	}
 }

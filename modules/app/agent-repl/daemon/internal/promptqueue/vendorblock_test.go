@@ -143,7 +143,7 @@ func TestAHoldDecisionUnderAVendorBlockIsRecordedAtInfo(t *testing.T) {
 	submitAll(t, h, "t1")
 
 	// Assert
-	if !hasRecord(h, "info", opSubmit, "the vendor does not serve the session; the prompt is held after reconnect, unclassified, until it serves again") {
+	if !logged(h.log.Records(), "info", opSubmit, "the vendor does not serve the session; the prompt is held after reconnect, unclassified, until it serves again") {
 		t.Fatalf("no INFO record of the vendor-block hold decision")
 	}
 }

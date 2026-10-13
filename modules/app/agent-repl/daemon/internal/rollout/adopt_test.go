@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"agent-repld/internal/daemonaddr"
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/sessionlock"
@@ -980,12 +981,8 @@ func (h *harness) addrWritesSoFar() int {
 
 // recordWithMessage reports whether OPERATION recorded MESSAGE at LEVEL.
 func recordWithMessage(h *harness, operation, level, message string) bool {
-	for _, r := range levelRecords(records(h.log, operation), level) {
-		if r.Message == message {
-			return true
-		}
-	}
-	return false
+	_, ok := dlog.FindRecord(records(h.log, operation), dlog.RecordQuery{Level: level, Message: message})
+	return ok
 }
 
 // TestTheAdvertiseRetryEndsWithTheDaemonsLifetime pins that the retry is not
@@ -1296,10 +1293,8 @@ func awaitRecord(t *testing.T, h *harness, operation, message string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		for _, rec := range records(h.log, operation) {
-			if rec.Message == message {
-				return
-			}
+		if _, ok := dlog.FindRecord(records(h.log, operation), dlog.RecordQuery{Message: message}); ok {
+			return
 		}
 		runtime.Gosched()
 	}

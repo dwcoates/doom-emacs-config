@@ -53,13 +53,7 @@ func (f *fixture) ticks(offsets ...time.Duration) {
 
 // of is every record at one level and operation.
 func of(log *dlog.TestLogger, level, operation string) []dlog.Record {
-	var out []dlog.Record
-	for _, r := range log.Records() {
-		if r.Level == level && r.Operation == operation {
-			out = append(out, r)
-		}
-	}
-	return out
+	return dlog.FilterRecords(log.Records(), dlog.RecordQuery{Level: level, Operation: operation})
 }
 
 // seconds is n whole-second offsets from start.

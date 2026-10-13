@@ -1177,23 +1177,12 @@ func TestADrainingOrchestratorAdmitsNothing(t *testing.T) {
 // drain's tests assert the ABSENCE of the failed-transaction records the
 // defect produced.
 func recordsAtLevel(h *harness, level string) []dlog.Record {
-	var out []dlog.Record
-	for _, record := range h.logs.Global().(*dlog.TestLogger).Records() {
-		if record.Level == level {
-			out = append(out, record)
-		}
-	}
-	return out
+	return dlog.FilterRecords(h.logs.Global().(*dlog.TestLogger).Records(), dlog.RecordQuery{Level: level})
 }
 
 // recordWith finds the first captured record at one level and operation.
 func recordWith(h *harness, level, operation string) (dlog.Record, bool) {
-	for _, record := range h.logs.Global().(*dlog.TestLogger).Records() {
-		if record.Level == level && record.Operation == operation {
-			return record, true
-		}
-	}
-	return dlog.Record{}, false
+	return dlog.FindRecord(h.logs.Global().(*dlog.TestLogger).Records(), dlog.RecordQuery{Level: level, Operation: operation})
 }
 
 // TestAMergeEndingAfterTheDrainWritesNothingToTheClosedStore is the OTHER side

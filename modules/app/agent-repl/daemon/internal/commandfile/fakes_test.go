@@ -451,10 +451,8 @@ func (s *fakeSurfaces) Evict(_ string) error { return nil }
 // fails the test when there is none.
 func (f *fixture) record(t *testing.T, operation, level string) dlog.Record {
 	t.Helper()
-	for _, record := range f.log.logger.Records() {
-		if record.Operation == operation && record.Level == level {
-			return record
-		}
+	if record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: level, Operation: operation}); ok {
+		return record
 	}
 	t.Fatalf("records = %+v, want a %s record under %s", f.log.logger.Records(), level, operation)
 	return dlog.Record{}

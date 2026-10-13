@@ -90,7 +90,7 @@ func TestRetireDeliveredSurfacesAFailedTombstoneAndLogsIt(t *testing.T) {
 	err := h.q.retireDelivered(context.Background(), theWorkspace, "t1", h.log.Global())
 
 	// Assert
-	if err == nil || !hasRecord(h, dlog.LevelError, opDeliver, "the hold was delivered but not retired") {
+	if err == nil || !logged(h.log.Records(), dlog.LevelError, opDeliver, "the hold was delivered but not retired") {
 		t.Fatalf("err = %v, records = %+v; want the failure surfaced and logged at error", err, h.log.Records())
 	}
 }
