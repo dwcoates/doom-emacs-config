@@ -273,3 +273,36 @@ func TestIsZombie(t *testing.T) {
 		})
 	}
 }
+
+// TestHeldStateOfAStoppedProcessIsFrozenOnceTheStopHolds pins the wait's
+// read: stopped, with no thread running, once the stop has held.
+func TestHeldStateOfAStoppedProcessIsFrozenOnceTheStopHolds(t *testing.T) {
+	// Arrange
+	cmd := startIdle(t)
+	if err := stopFrozen(cmd.Process.Pid, freezeBound, syscall.Kill); err != nil {
+		t.Fatalf("stopFrozen: %v", err)
+	}
+
+	// Act
+	state, err := heldState(cmd.Process.Pid)
+
+	// Assert
+	if err != nil || !state.frozen || state.exited {
+		t.Fatalf("heldState = %+v, %v; want frozen, not exited", state, err)
+	}
+}
+
+// TestHeldStateOfARunningProcessIsNotFrozen pins that a process never stopped
+// is not read held.
+func TestHeldStateOfARunningProcessIsNotFrozen(t *testing.T) {
+	// Arrange
+	cmd := startIdle(t)
+
+	// Act
+	state, err := heldState(cmd.Process.Pid)
+
+	// Assert
+	if err != nil || state.frozen {
+		t.Fatalf("heldState = %+v, %v; want not frozen", state, err)
+	}
+}
