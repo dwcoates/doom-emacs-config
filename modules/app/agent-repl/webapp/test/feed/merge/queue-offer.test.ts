@@ -167,7 +167,7 @@ describe("answering the question", () => {
       "AnswerMergeQueueOffer refused a cancel",
       expect.objectContaining({
         operation: "merge.queue-offer.refused",
-        context: expect.objectContaining({ decision: "cancel", arm: "noOfferStanding" }),
+        context: expect.objectContaining({ decision: "cancel", arm: "noOfferStanding" }) as unknown,
       }),
     );
     warn.mockRestore();
