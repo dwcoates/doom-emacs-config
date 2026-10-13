@@ -411,8 +411,8 @@ func TestAMergeResumedAtItsTestsRunsTheGateAgainInTheSameRound(t *testing.T) {
 	resume(t, h)
 
 	// Assert.
-	if rounds := h.feed.roundsOfKind(TabTests); !slices.Equal(rounds, []int{2}) {
-		t.Fatalf("tests rounds drawn = %v, want the gate run again in round 2 alone", rounds)
+	if runs := h.feed.labelsOfKind(rowTestsRun); !slices.Equal(runs, []string{"run 2"}) {
+		t.Fatalf("runs drawn = %v, want the gate run again as run 2 alone", runs)
 	}
 }
 

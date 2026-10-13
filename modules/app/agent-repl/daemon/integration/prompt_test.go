@@ -894,7 +894,7 @@ func promptMergeFixture(t *testing.T) (*fixture, *harness.Repo, string) {
 // was still running.
 //
 // WHY CONFLICT RESOLUTION IS THE REST STATE. The fixture scripts a rebase
-// conflict, so the run opens its conflicts tab and then WAITS for the
+// conflict, so the run opens a conflict section and then WAITS for the
 // resolution's turn to conclude -- and only the fake shim can conclude it.
 // The lease is held and no further git runs and no further record are owed
 // while it waits.

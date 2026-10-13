@@ -3,6 +3,7 @@ package merge
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -13,7 +14,9 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedid"
 	"agent-repld/internal/gitclient"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/prompts"
 	"agent-repld/internal/wsm"
 )
@@ -307,9 +310,9 @@ func TestGatePassesNoNarrowingForTheFullSet(t *testing.T) {
 	}
 }
 
-// TestFixesLoopOpensASecondTestsTab covers the append-only rule: a re-run is a
-// SECOND tab carrying its round, never a reopened first tab.
-func TestFixesLoopOpensASecondTestsTab(t *testing.T) {
+// TestFixesLoopOpensASecondRunInTheOneTestsTab covers the nesting: a re-run is
+// a SECOND RUN subtab of the one tests tab, never a second tests tab.
+func TestFixesLoopOpensASecondRunInTheOneTestsTab(t *testing.T) {
 	// Arrange: a gate that fails once and then passes.
 	h := newHarness(t)
 	h.emacsRepo()
@@ -325,9 +328,14 @@ func TestFixesLoopOpensASecondTestsTab(t *testing.T) {
 	}
 
 	// Assert.
-	rounds := h.feed.roundsOfKind(TabTests)
-	if len(rounds) != 2 || rounds[0] != 1 || rounds[1] != 2 {
-		t.Fatalf("the tests tab drew rounds %v, want a first and a second", rounds)
+	if rounds := h.feed.roundsOfKind(TabTests); !slices.Equal(rounds, []int{1}) {
+		t.Fatalf("the tests tab drew rounds %v, want one tests tab", rounds)
+	}
+	if runs := h.feed.labelsOfKind(rowTestsRun); !slices.Equal(runs, []string{"run 1", "run 2"}) {
+		t.Fatalf("the runs drawn are %v, want a first and a second", runs)
+	}
+	if fixing := h.feed.labelsOfKind(rowTestsRunFixing); len(fixing) != 1 {
+		t.Fatalf("the fixing sub-subtabs drawn are %v, want the one attempt", fixing)
 	}
 }
 
@@ -382,10 +390,10 @@ func TestTestsTabCarriesPaintedSpans(t *testing.T) {
 	}
 
 	// Assert.
-	tab := h.feed.lastTabOfKind(TabTests)
-	suites := tab.GetTests().GetSuites()
+	tab := h.feed.lastTabOfKind(rowTestsRun)
+	suites := tab.GetTestsRun().GetOutput().GetSuites()
 	if len(suites) != 1 || suites[0].GetName() != "e2e-emacs" {
-		t.Fatalf("the tests tab drew %d suite(s), want the one that ran", len(suites))
+		t.Fatalf("the run drew %d suite(s), want the one that ran", len(suites))
 	}
 	if _, passed := suites[0].GetState().(*frontendv1.FeedMergeTestSuite_Passed); !passed {
 		t.Fatalf("the suite's state is %T, want passed", suites[0].GetState())
@@ -1004,9 +1012,16 @@ func TestTheEmacsRepoMethodDrawsItsTabsInOrder(t *testing.T) {
 	admitted(t, h)
 
 	// Assert.
+	// Assert: the bubble's own strip, and the subtabs drawn inside it.
 	want := []string{TabQueue, TabRebasing, TabTests, TabCommitting}
-	if got := h.feed.tabSequence(); !equal(got, want) {
-		t.Fatalf("tab sequence = %v, want %v", got, want)
+	if got := h.feed.topTabSequence(); !equal(got, want) {
+		t.Fatalf("top-level tab sequence = %v, want %v", got, want)
+	}
+	if got := h.feed.labelsOfKind(rowRebaseCommit); len(got) != 2 {
+		t.Fatalf("commit subtabs = %v, want one per replayed commit", got)
+	}
+	if got := h.feed.labelsOfKind(rowTestsRun); !slices.Equal(got, []string{"run 1"}) {
+		t.Fatalf("run subtabs = %v, want the one run", got)
 	}
 }
 
@@ -1206,8 +1221,21 @@ func TestAConflictIsResolvedByTheRequestersSessionAndTheRebaseContinues(t *testi
 	if got := h.footer.last().State; got != StateMerged {
 		t.Fatalf("state = %q, want merged", got)
 	}
-	if rounds := h.feed.roundsOfKind(TabRebasing); !slices.Equal(rounds, []int{1, 2}) {
-		t.Fatalf("rebasing rounds = %v, want the rebase continued in a second round", rounds)
+	// The rebase continued in the ONE rebasing tab, and the resolution is a
+	// section of the conflicted commit's subtab, settled with the commit on the
+	// tip.
+	if rounds := h.feed.roundsOfKind(TabRebasing); !slices.Equal(rounds, []int{1}) {
+		t.Fatalf("rebasing rounds = %v, want the one rebasing tab", rounds)
+	}
+	if got := h.feed.lastTabOfKind(TabRebasing).GetRebasing(); got.GetSettled().GetSucceeded() == nil || got.GetProgress().GetReplayed() != 2 {
+		t.Fatalf("rebasing tab = %+v, want it settled with both commits replayed", got)
+	}
+	conflicted := h.feed.lastCommitWithConflict()
+	if conflicted.GetConflict().GetSettled().GetSucceeded() == nil || conflicted.GetSettled().GetSucceeded() == nil {
+		t.Fatalf("conflicted commit = %+v, want its resolution and its replay settled", conflicted)
+	}
+	if files := conflicted.GetConflict().GetFiles(); len(files) != 2 || files[0].GetPath() != "a.go" {
+		t.Fatalf("conflict files = %+v, want git's two", files)
 	}
 }
 
@@ -1228,8 +1256,8 @@ func TestAConflictRerereResolvedPromptsNothingAndTheRebaseContinues(t *testing.T
 	if got := h.footer.last().State; got != StateMerged {
 		t.Fatalf("state = %q, want merged", got)
 	}
-	if rounds := h.feed.roundsOfKind(TabConflicts); len(rounds) != 0 {
-		t.Fatalf("conflicts rounds = %v, want none", rounds)
+	if conflicted := h.feed.lastCommitWithConflict(); conflicted != nil {
+		t.Fatalf("commit with a conflict section = %+v, want none for a conflict rerere resolved", conflicted)
 	}
 	if _, found := h.recordFor("info", "daemon.merge.rerere"); !found {
 		t.Fatal("the reused resolution was not recorded")
@@ -1347,7 +1375,7 @@ func TestAGivenUpConflictIsAnOutcomeRecordedAtInfo(t *testing.T) {
 	}
 }
 
-func TestAConflictRepairStandsItsAddressAtTheConflictsTab(t *testing.T) {
+func TestAConflictRepairStandsItsAddressAtItsCommitsSubtab(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	landing(h, 1)
@@ -1356,18 +1384,19 @@ func TestAConflictRepairStandsItsAddressAtTheConflictsTab(t *testing.T) {
 	// Act.
 	admitted(t, h)
 
-	// Assert: the merge's own turns are recorded at the tab, and only there.
+	// Assert: the merge's own turns are recorded at the subtab of the commit
+	// that conflicted (the first of the first replay), and only there.
 	for _, addr := range h.feed.installed() {
 		if addr == nil {
 			continue
 		}
-		want := tabRef(theWorkspace, *addr.Feed.Merge, TabConflicts, 1)
+		want := tabRef(theWorkspace, *addr.Feed.Merge, commitKey(1, 0))
 		if addr.Parent == nil || addr.Parent.Row != want.Row || addr.Parent.Feed.Merge == nil || *addr.Parent.Feed.Merge != *want.Feed.Merge {
-			t.Fatalf("address = %+v, want the conflicts tab %+v", addr, want)
+			t.Fatalf("address = %+v, want the commit's subtab %+v", addr, want)
 		}
 		return
 	}
-	t.Fatalf("addresses = %+v, want the conflicts tab addressed", h.feed.installed())
+	t.Fatalf("addresses = %+v, want the commit's subtab addressed", h.feed.installed())
 }
 
 func TestFixingAttemptsAreBoundedByTheOneBoundAndThenFailTheMergeInTests(t *testing.T) {
@@ -1455,9 +1484,9 @@ func TestTheFixesTabCarriesItsAttemptAndTheBound(t *testing.T) {
 	admitted(t, h)
 
 	// Assert.
-	attempt := h.feed.lastTabOfKind(TabFixes).GetFixes().GetAttempt()
+	attempt := h.feed.lastTabOfKind(rowTestsRunFixing).GetTestsRunFixing().GetAttempt()
 	if attempt.GetAttempt() != 1 || attempt.GetMaxAttempts() != MaxFixAttempts {
-		t.Fatalf("fixes attempt = %+v, want 1 of %d", attempt, MaxFixAttempts)
+		t.Fatalf("fixing attempt = %+v, want 1 of %d", attempt, MaxFixAttempts)
 	}
 }
 
@@ -1738,11 +1767,11 @@ func TestDrawFixingStandsTheAttemptLive(t *testing.T) {
 	round := r.openTab(context.Background(), TabFixes)
 
 	// Act.
-	r.drawFixing(context.Background(), round, 2, []string{"daemon"})
+	r.drawFixing(context.Background(), round, 1, 2, []string{"daemon"})
 
 	// Assert.
 	facts := h.footer.last()
-	if facts.Attempt != 2 || facts.MaxAttempts != MaxFixAttempts || h.feed.lastTabOfKind(TabFixes).GetFixes().GetAttempt().GetAttempt() != 2 {
+	if facts.Attempt != 2 || facts.MaxAttempts != MaxFixAttempts || h.feed.lastTabOfKind(rowTestsRunFixing).GetTestsRunFixing().GetAttempt().GetAttempt() != 2 {
 		t.Fatalf("facts = %+v, want attempt 2 of %d drawn", facts, MaxFixAttempts)
 	}
 }
@@ -1841,6 +1870,11 @@ func TestAResolvedConflictStartsTheCountOver(t *testing.T) {
 	r.conflictCommit, r.conflictAttempts = commit.SHA, MaxConflictAttempts-1
 	p := &replay{commits: commits(1)}
 	round := r.openTab(context.Background(), TabConflicts)
+	// The commit's subtab stands as the conflict left it: replayed up to it,
+	// its resolution handed to the session.
+	r.rebasing.beginReplay(p.commits, 1)
+	r.rebasing.reachCommit(0, 1)
+	r.rebasing.Commits[0].Conflict = &conflictView{Span: span{StartedMS: 1}, Files: []string{"a.go"}}
 
 	// Act.
 	if _, err := r.conflictSettled(context.Background(), p, round, wsm.CloseCompleted, commit, "master", false); err != nil {
@@ -1916,5 +1950,209 @@ func TestAStartOverThatRebasesToANewTreeRunsTheGateAgain(t *testing.T) {
 	// Assert.
 	if len(h.runner.argv) != 2 {
 		t.Fatalf("the gate ran %d times, want twice: a new tree is tested again", len(h.runner.argv))
+	}
+}
+
+// commitSubtabs reports the last push of each commit subtab, in the order the
+// subtabs were first published.
+func (f *fakeFeed) commitSubtabs() []*frontendv1.FeedMergeTab {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var order []string
+	last := map[string]*frontendv1.FeedMergeTab{}
+	for _, row := range f.rows {
+		tab := row.Row.GetMergeTab()
+		if tab.GetRebaseCommit() == nil {
+			continue
+		}
+		id := row.Row.GetId().GetValue()
+		if _, seen := last[id]; !seen {
+			order = append(order, id)
+		}
+		last[id] = tab
+	}
+	out := make([]*frontendv1.FeedMergeTab, 0, len(order))
+	for _, id := range order {
+		out = append(out, last[id])
+	}
+	return out
+}
+
+func TestEveryReplayedCommitIsASubtabSettledOnTheTip(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	landing(h, 3)
+
+	// Act.
+	admitted(t, h)
+
+	// Assert: three subtabs, each settled succeeded with its replay line, and
+	// the rebasing tab settled at 3/3.
+	subtabs := h.feed.commitSubtabs()
+	if len(subtabs) != 3 {
+		t.Fatalf("commit subtabs = %d, want 3", len(subtabs))
+	}
+	for i, tab := range subtabs {
+		commit := tab.GetRebaseCommit()
+		if commit.GetSettled().GetSucceeded() == nil {
+			t.Fatalf("commit %d = %+v, want it settled on the tip", i, commit)
+		}
+		if lines := commit.GetLines(); len(lines) != 1 || lines[0].GetText() != fmt.Sprintf("replayed %d/3", i+1) {
+			t.Fatalf("commit %d lines = %+v, want its replay line", i, lines)
+		}
+		if tab.GetLabel().GetRound() != 1 {
+			t.Fatalf("commit %d label = %+v, want round 1 (the first replay)", i, tab.GetLabel())
+		}
+	}
+	rebasing := h.feed.lastTabOfKind(TabRebasing).GetRebasing()
+	if rebasing.GetSettled().GetSucceeded() == nil || rebasing.GetProgress().GetReplayed() != 3 || rebasing.GetProgress().GetTotal() != 3 {
+		t.Fatalf("rebasing tab = %+v, want it settled at 3/3", rebasing)
+	}
+}
+
+func TestEveryCommitSubtabIsParentedToTheRebasingTab(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	landing(h, 2)
+
+	// Act.
+	admitted(t, h)
+
+	// Assert.
+	h.feed.mu.Lock()
+	defer h.feed.mu.Unlock()
+	lease := ids.LeaseID(h.db.ledger[theWorkspace][0].Lease)
+	want := feedid.Encode(tabRef(theWorkspace, lease, rebasingKey())).GetValue()
+	checked := 0
+	for _, row := range h.feed.rows {
+		if row.Row.GetMergeTab().GetRebaseCommit() == nil {
+			continue
+		}
+		if got := row.Row.GetParent().GetRow().GetValue(); got != want {
+			t.Fatalf("commit subtab parent = %q, want the rebasing tab %q", got, want)
+		}
+		checked++
+	}
+	if checked == 0 {
+		t.Fatal("no commit subtab was published")
+	}
+}
+
+func TestAFailedRebaseCommandSettlesItsCommitAndTheRebasingTabFailed(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	landing(h, 1)
+	h.git.rebaseErr = &gitclient.Error{Stderr: "error: could not apply c1\nmore\n", ExitCode: 1}
+
+	// Act.
+	admitted(t, h)
+
+	// Assert.
+	commit := h.feed.commitSubtabs()[0].GetRebaseCommit()
+	if commit.GetSettled().GetFailed() == nil || commit.GetLines()[len(commit.GetLines())-1].GetText() != "failed: error: could not apply c1" {
+		t.Fatalf("commit = %+v, want it settled failed with git's line", commit)
+	}
+	if got := h.feed.lastTabOfKind(TabRebasing).GetRebasing().GetSettled().GetFailed().GetSummary(); got != "the rebase failed" {
+		t.Fatalf("rebasing tab failure = %q, want the rebase failed", got)
+	}
+}
+
+func TestARerereResolvedConflictIsALineOnItsCommit(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	landing(h, 2)
+	h.git.rebaseResolved[2] = []string{"a.go"}
+
+	// Act.
+	admitted(t, h)
+
+	// Assert.
+	lines := h.feed.commitSubtabs()[1].GetRebaseCommit().GetLines()
+	if len(lines) == 0 || lines[0].GetText() != "conflicted in 1 file(s), resolved as before" {
+		t.Fatalf("second commit lines = %+v, want the reused resolution first", lines)
+	}
+}
+
+func TestAGivenUpConflictSettlesItsSectionItsCommitAndTheRebasingTabFailed(t *testing.T) {
+	// Arrange: the files still conflict when the turn ends.
+	h := newHarness(t)
+	landing(h, 1)
+	h.git.rebaseConflicts[1] = []string{"a.go"}
+	h.git.conflicted = everyAttemptLeaves("a.go")
+
+	// Act.
+	admitted(t, h)
+
+	// Assert.
+	commit := h.feed.lastCommitWithConflict()
+	if commit.GetConflict().GetSettled().GetFailed() == nil || commit.GetSettled().GetFailed() == nil {
+		t.Fatalf("commit = %+v, want its section and itself settled failed", commit)
+	}
+	if h.feed.lastTabOfKind(TabRebasing).GetRebasing().GetSettled().GetFailed() == nil {
+		t.Fatal("the rebasing tab was not settled failed")
+	}
+}
+
+func TestAPassingRunHasNoFixingSubSubtab(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	landing(h, 1)
+
+	// Act.
+	admitted(t, h)
+
+	// Assert.
+	if fixing := h.feed.labelsOfKind(rowTestsRunFixing); len(fixing) != 0 {
+		t.Fatalf("fixing sub-subtabs = %v, want none after a passing run", fixing)
+	}
+	if h.feed.lastTabOfKind(TabTests).GetTests().GetSettled().GetSucceeded() == nil {
+		t.Fatal("the tests tab was not settled succeeded")
+	}
+}
+
+func TestAFixingSubSubtabIsParentedToTheRunItFollows(t *testing.T) {
+	// Arrange: a gate that fails once and then passes.
+	h := newHarness(t)
+	landing(h, 1)
+	h.runner.runs = nil
+	h.gateFails("daemon")
+	h.gatePasses("daemon")
+
+	// Act.
+	admitted(t, h)
+
+	// Assert.
+	h.feed.mu.Lock()
+	defer h.feed.mu.Unlock()
+	lease := ids.LeaseID(h.db.ledger[theWorkspace][0].Lease)
+	want := feedid.Encode(tabRef(theWorkspace, lease, runKey(1))).GetValue()
+	for _, row := range h.feed.rows {
+		if row.Row.GetMergeTab().GetTestsRunFixing() == nil {
+			continue
+		}
+		if got := row.Row.GetParent().GetRow().GetValue(); got != want {
+			t.Fatalf("fixing parent = %q, want run 1 %q", got, want)
+		}
+		return
+	}
+	t.Fatal("no fixing sub-subtab was published")
+}
+
+func TestTheLastFailedFixSettlesTheTestsTabFailed(t *testing.T) {
+	// Arrange: every run fails.
+	h := newHarness(t)
+	landing(h, 1)
+	h.runner.runs = nil
+	for i := 0; i <= MaxFixAttempts; i++ {
+		h.gateFails("daemon")
+	}
+
+	// Act.
+	admitted(t, h)
+
+	// Assert.
+	failed := h.feed.lastTabOfKind(TabTests).GetTests().GetSettled().GetFailed()
+	if failed == nil || !strings.Contains(failed.GetSummary(), "fixing attempts") {
+		t.Fatalf("tests tab failure = %+v, want the attempts exhausted", failed)
 	}
 }

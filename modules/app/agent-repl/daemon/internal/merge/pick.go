@@ -138,9 +138,9 @@ func (o *orchestrator) resumePick(ctx context.Context, repo wsm.RepoKey, entry w
 // pick turn is drawn at in the requester's bubble.
 func (o *orchestrator) drawPickLive(p *pick) {
 	o.publishHead(p.ws, p.ledger, p.label, p.startedMS, nil)
-	o.publishTab(p.ws, p.ledger, TabPick, 1, pickTab(tabState{startedMS: p.startedMS, waiting: o.deps.Asks.Waiting(p.ws)}))
+	o.publishRoundTab(p.ws, p.ledger, TabPick, 1, pickTab(tabState{startedMS: p.startedMS, waiting: o.deps.Asks.Waiting(p.ws)}))
 	o.deps.Feed.SetOutputMirror(p.ws, &wsm.MirrorAddress{
-		Workspace: p.requester, Feed: mergeFeed(p.ledger), Parent: tabRef(p.requester, p.ledger, TabPick, 1),
+		Workspace: p.requester, Feed: mergeFeed(p.ledger), Parent: tabRef(p.requester, p.ledger, roundTabKey(TabPick, 1)),
 	})
 }
 
@@ -285,7 +285,7 @@ func (o *orchestrator) settlePick(p *pick, failure string) {
 	o.mu.Lock()
 	delete(o.picks, p.ws)
 	o.mu.Unlock()
-	o.publishTab(p.ws, p.ledger, TabPick, 1, pickTab(tabState{startedMS: p.startedMS, settled: true, endedMS: o.nowMS(), failure: failure}))
+	o.publishRoundTab(p.ws, p.ledger, TabPick, 1, pickTab(tabState{startedMS: p.startedMS, settled: true, endedMS: o.nowMS(), failure: failure}))
 }
 
 // pickFailed ends an async merge whose pick failed: the pick tab and the head
@@ -332,6 +332,6 @@ func (o *orchestrator) redrawPick(ws ids.WorkspaceID, waiting bool) bool {
 	if !picking {
 		return false
 	}
-	o.publishTab(ws, p.ledger, TabPick, 1, pickTab(tabState{startedMS: p.startedMS, waiting: waiting}))
+	o.publishRoundTab(ws, p.ledger, TabPick, 1, pickTab(tabState{startedMS: p.startedMS, waiting: waiting}))
 	return true
 }

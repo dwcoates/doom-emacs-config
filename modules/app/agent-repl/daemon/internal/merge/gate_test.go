@@ -35,7 +35,7 @@ func TestTheTestsTabFollowsEachSuiteFromRunningToPassed(t *testing.T) {
 	var states []string
 	h.feed.mu.Lock()
 	for _, row := range h.feed.rows {
-		for _, suite := range row.Row.GetMergeTab().GetTests().GetSuites() {
+		for _, suite := range row.Row.GetMergeTab().GetTestsRun().GetOutput().GetSuites() {
 			if suite.GetName() != "daemon" {
 				continue
 			}
@@ -91,7 +91,7 @@ func TestTheTestsTabLinksTheRoundsLog(t *testing.T) {
 	admitted(t, h)
 
 	// Assert.
-	link := h.feed.lastTabOfKind(TabTests).GetTests().GetLog()
+	link := h.feed.lastTabOfKind(rowTestsRun).GetTestsRun().GetOutput().GetLog()
 	lease := h.db.ledger[theWorkspace][0].Lease
 	if link.GetToken().GetValue() != string(lease)+"/1" {
 		t.Fatalf("log token = %q, want the lease and round", link.GetToken().GetValue())
@@ -241,8 +241,9 @@ func TestAnEmptySelectionDrawsASettledTestsTabWithNoSuites(t *testing.T) {
 
 	// Assert.
 	tests := h.feed.lastTabOfKind(TabTests).GetTests()
-	if tests.GetSettled().GetSucceeded() == nil || len(tests.GetSuites()) != 0 {
-		t.Fatalf("tests tab = %v, want settled succeeded with no suite rows", tests)
+	run := h.feed.lastTabOfKind(rowTestsRun).GetTestsRun()
+	if tests.GetSettled().GetSucceeded() == nil || run.GetSettled().GetSucceeded() == nil || len(run.GetOutput().GetSuites()) != 0 {
+		t.Fatalf("tests tab = %v, run = %v; want both settled succeeded with no suite rows", tests, run)
 	}
 }
 

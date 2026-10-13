@@ -46,18 +46,22 @@ export default defineConfig({
     isolate: false,
     env: { AGENT_REPL_FORBID_VENDOR_CALLS: "1" },
     css: true,
-    // TIGHT ON PURPOSE. These tests boot the whole app against a real
-    // loopback fake daemon, but the daemon is in-process and instant to
-    // start: a healthy run's slowest test (measured across all 13 files) is
-    // 274.8ms, in refusals.integration.test.ts. Vitest's own defaults
-    // (5000ms/10000ms) would let a genuinely hung test burn 20-40x that
-    // before failing. ~3x the observed max, so real variance has headroom
-    // without masking a hang. If a test needs more, it gets its own
+    // TIGHT ON PURPOSE, MEASURED WHERE THE SUITE RUNS. These tests boot the
+    // whole app against a real loopback fake daemon, which is in-process and
+    // instant to start, so a slow test is the host's load, not the app. The
+    // bound is just over 2x the healthy maximum measured under the full-host
+    // run the merge queue's gate makes (every suite at once on 8 slots):
+    // across 445 passing refusals.integration.test.ts tests in 251 archived
+    // gate runs (~/.claude-emacs/merge-logs, 2026-10-13), p50 368ms, p99
+    // 1006ms, max 1475ms. An unloaded run's slowest test is 274.8ms; a bound
+    // taken from that (900ms) timed out 34 healthy tests in those gate runs.
+    // Vitest's own defaults (5000ms/10000ms) would still let a hung test burn
+    // longer before failing. If a test needs more, it gets its own
     // `{ timeout: ... }` with a one-line reason, not a raised global.
     // A file's COLD boot is the one standing exception: it is paid once per
     // file in `bootColdOnce`'s `beforeAll` (test/integration/harness.ts),
     // under its own measured bound, so no test body carries it.
-    testTimeout: 900,
-    hookTimeout: 900,
+    testTimeout: 3000,
+    hookTimeout: 3000,
   },
 });

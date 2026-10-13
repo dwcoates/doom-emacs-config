@@ -80,8 +80,7 @@ type progressDoc struct {
 
 	// The Emacs-repo method's attempt: the target's branch and the tip the
 	// branch is rebased onto, the branch's head before the rebase began, the
-	// commits replayed and how many are on the tip, the rebasing tab's
-	// narration, the conflicted files, the fixing attempt and the suites it
+	// commits replayed and how many are on the tip, the conflicted files, the fixing attempt and the suites it
 	// fixes, the gated head, the scratch trees made, and the merge commit the
 	// target is fast-forwarded to.
 	TargetBranch  string      `json:"target_branch,omitempty"`
@@ -89,7 +88,6 @@ type progressDoc struct {
 	BranchHead    string      `json:"branch_head,omitempty"`
 	Commits       []commitDoc `json:"commits,omitempty"`
 	Replayed      int         `json:"replayed"`
-	Lines         []string    `json:"lines,omitempty"`
 	ConflictFiles []string    `json:"conflict_files,omitempty"`
 	FixAttempt    int         `json:"fix_attempt"`
 	FailingSuites []string    `json:"failing_suites,omitempty"`
@@ -123,6 +121,11 @@ type progressDoc struct {
 	// spends an attempt nor forgets the ones spent.
 	ConflictCommit   string `json:"conflict_commit,omitempty"`
 	ConflictAttempts int    `json:"conflict_attempts,omitempty"`
+
+	// Rebasing and Testing are the bubble's rebasing and tests tabs as last
+	// drawn (nested.go): a resumed run draws on from them.
+	Rebasing *rebaseView `json:"rebasing,omitempty"`
+	Testing  *testsView  `json:"testing,omitempty"`
 }
 
 // testedDoc is a speculative gate's pass: the base it ran on, the head it
@@ -335,6 +338,7 @@ func (r *run) checkpoint(ctx context.Context, step string, mutate func(*progress
 		doc.Tested = nil
 	}
 	doc.Speculative = speculative
+	doc.Rebasing, doc.Testing = r.rebasing.clone(), r.testing.clone()
 	if mutate != nil {
 		mutate(&doc)
 	}
@@ -444,6 +448,12 @@ func (r *run) restoreFrom(doc progressDoc) {
 	if doc.Tested != nil {
 		tested := *doc.Tested
 		r.tested = &tested
+	}
+	if doc.Rebasing != nil {
+		r.rebasing = *doc.Rebasing.clone()
+	}
+	if doc.Testing != nil {
+		r.testing = *doc.Testing.clone()
 	}
 }
 

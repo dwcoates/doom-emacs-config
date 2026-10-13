@@ -878,7 +878,8 @@ docs. File-per-area grouping is given in section E.
 41. **A rebase conflict in the requesting workspace**
     (`docs/protobuf-design/merge-landing.md`, landed change 1; nothing
     parks) — the conflict brief is a turn of the requesting workspace's own
-    session, drawn in the bubble's conflicts tab and on the main feed; a
+    session, drawn in the conflicted commit's subtab of the bubble's
+    rebasing tab and on the main feed; a
     resolution that gives up fails the merge in conflicts (footer and
     roster), leaves the rebase in progress, and the workspace takes its next
     prompt as an ordinary turn. The sources, keep_open, and the rebasing,

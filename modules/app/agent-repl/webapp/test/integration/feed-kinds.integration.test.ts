@@ -59,6 +59,7 @@ import {
   HOOK_OUTCOMES,
   MERGE_TAB_KINDS,
   MERGE_TAB_STATES,
+  MERGE_TAB_PENDING_KINDS,
   MERGE_TAB_WAITING_KINDS,
   MERGE_TEST_LOG,
   PERMISSION_ANSWERS,
@@ -274,7 +275,12 @@ describe("arm coverage", () => {
     const field = FeedMergeTabSchema.fields.find((f) => f.localName === kind);
     if (field?.message === undefined) throw new Error(`no message under the ${kind} tab`);
     const waits = (MERGE_TAB_WAITING_KINDS as readonly string[]).includes(kind);
-    assertCoversOneof(field.message, "state", waits ? [...MERGE_TAB_STATES, "waitingOnUser"] : [...MERGE_TAB_STATES]);
+    const pends = (MERGE_TAB_PENDING_KINDS as readonly string[]).includes(kind);
+    assertCoversOneof(field.message, "state", [
+      ...MERGE_TAB_STATES,
+      ...(waits ? ["waitingOnUser"] : []),
+      ...(pends ? ["pending"] : []),
+    ]);
   });
 
   it("covers every updating main step", () => {
@@ -1542,6 +1548,13 @@ describe("merge tabs", () => {
     expect(row.querySelector(`[data-merge-tab="${kind}"]`)?.getAttribute("data-tab-state")).toBe(state);
   });
 
+  it.each(MERGE_TAB_PENDING_KINDS)("draws the %s tab pending with no glyph", async (kind) => {
+    // Arrange / Act
+    const row = await drawRow(mergeTabRow(kind, "pending"));
+    // Assert
+    expect(row.querySelector(`[data-merge-tab="${kind}"]`)?.getAttribute("data-tab-state")).toBe("pending");
+  });
+
   it.each(MERGE_TAB_WAITING_KINDS)("draws the %s tab waiting on the user with a ❓", async (kind) => {
     // Arrange / Act
     const row = await drawRow(mergeTabRow(kind, "waitingOnUser"));
@@ -1580,6 +1593,32 @@ describe("merge tabs", () => {
     ]);
   });
 
+  it("draws a commit's narration lines verbatim", async () => {
+    // Arrange / Act
+    const row = await drawRow(mergeTabRow("rebaseCommit"));
+    // Assert
+    expect([...row.querySelectorAll(".merge-rebase-commit .merge-line")].map((el) => el.textContent)).toEqual([
+      "conflicted in 2 file(s)",
+    ]);
+  });
+
+  it("draws a commit's conflicted files in its conflict section", async () => {
+    // Arrange / Act
+    const row = await drawRow(mergeTabRow("rebaseCommit"));
+    // Assert
+    expect([...row.querySelectorAll(".merge-conflict .merge-conflict-file")].map((el) => el.textContent)).toEqual([
+      "daemon/x.go",
+      "webapp/y.ts",
+    ]);
+  });
+
+  it("draws a lone run with its output as the first entry of its strip", async () => {
+    // Arrange / Act
+    const row = await drawRow(mergeTabRow("testsRun"));
+    // Assert
+    expect(row.querySelector('.merge-strip.is-nested [data-merge-tab="testsRunOutput"]')?.textContent).toContain("output");
+  });
+
   it("draws the committing tab's merge commit subject", async () => {
     // Arrange / Act
     const row = await drawRow(mergeTabRow("committing"));
@@ -1594,46 +1633,46 @@ describe("merge tabs", () => {
     expect(row.querySelector(".merge-updating-main")?.textContent).toBe("fast-forwarding to 4f2a1c9");
   });
 
-  it("draws the fixes tab's attempt", async () => {
+  it("draws a fixing attempt's attempt", async () => {
     // Arrange / Act
-    const row = await drawRow(mergeTabRow("fixes"));
+    const row = await drawRow(mergeTabRow("testsRunFixing"));
     // Assert
     expect(row.querySelector("[data-merge-attempt]")?.textContent).toBe("attempt 2/3");
   });
 
   it("draws a suite's counts on the right of its row", async () => {
     // Arrange / Act
-    const row = await drawRow(mergeTabRow("tests"));
+    const row = await drawRow(mergeTabRow("testsRun"));
     // Assert
     expect(row.querySelector('[data-suite-state="running"] .merge-suite-counts')?.textContent).toBe("3/5");
   });
 
   it("breathes a running suite's dot green while every test so far passed", async () => {
     // Arrange / Act
-    const row = await drawRow(mergeTabRow("tests"));
+    const row = await drawRow(mergeTabRow("testsRun"));
     // Assert
     expect(row.querySelector('[data-suite-state="running"] .merge-suite-glyph')?.classList.contains("is-passing")).toBe(true);
   });
 
-  it("draws the tests tab's log link with the daemon's label", async () => {
+  it("draws a run's log link with the daemon's label", async () => {
     // Arrange / Act
-    const row = await drawRow(mergeTabRow("tests"));
+    const row = await drawRow(mergeTabRow("testsRun"));
     // Assert
     expect(row.querySelector("[data-merge-test-log]")?.textContent).toBe(MERGE_TEST_LOG.label);
   });
 
   it("wears the response bubble's link class on the test log link", async () => {
     // Arrange / Act
-    const row = await drawRow(mergeTabRow("tests"));
+    const row = await drawRow(mergeTabRow("testsRun"));
     // Assert
     expect(row.querySelector("[data-merge-test-log]")?.classList.contains("merge-test-log-link")).toBe(true);
   });
 
   it("opens the test log in the editor by the token the bubble served", async () => {
     // Arrange
-    await drawRow(mergeTabRow("tests", "live", { id: feedId("tab-tests") }));
+    await drawRow(mergeTabRow("testsRun", "live", { id: feedId("tab-run") }));
     // Act
-    await harness.click('[data-feed-row="tab-tests"] [data-merge-test-log]');
+    await harness.click('[data-feed-row="tab-run"] [data-merge-test-log]');
     // Assert
     const [request] = harness.fake.calls<OpenInEditorRequest>("openInEditor");
     expect(request.target.case === "mergeTestLog" ? request.target.value.value : request.target.case).toBe(
@@ -1643,24 +1682,24 @@ describe("merge tabs", () => {
 
   it("echoes the workspace on the test log's editor call", async () => {
     // Arrange
-    await drawRow(mergeTabRow("tests", "live", { id: feedId("tab-tests") }));
+    await drawRow(mergeTabRow("testsRun", "live", { id: feedId("tab-run") }));
     // Act
-    await harness.click('[data-feed-row="tab-tests"] [data-merge-test-log]');
+    await harness.click('[data-feed-row="tab-run"] [data-merge-test-log]');
     // Assert
     const [request] = harness.fake.calls<OpenInEditorRequest>("openInEditor");
     expect(request.workspace?.id).toBe(WORKSPACE_ID);
   });
 
-  it("draws the tests tab's suites", async () => {
+  it("draws a run's suites", async () => {
     // Arrange / Act
-    const row = await drawRow(mergeTabRow("tests"));
+    const row = await drawRow(mergeTabRow("testsRun"));
     // Assert
     expect(row.textContent).toContain("vitest");
   });
 
-  it("paints the tests tab's spans from the vocabulary", async () => {
+  it("paints a run's spans from the vocabulary", async () => {
     // Arrange / Act
-    const row = await drawRow(mergeTabRow("tests"));
+    const row = await drawRow(mergeTabRow("testsRun"));
     const drawn = [...row.querySelectorAll("span")].find((el) => el.textContent === "PASS ");
     // Assert
     expect(drawn?.className).toBe(expectedPaintClass("ansi-fg-green"));
@@ -2486,10 +2525,10 @@ describe("an agentic merge tab", () => {
   });
 
   it("draws no tab for a kind the daemon never served", async () => {
-    // Arrange / Act: tabs are CONDITIONAL — no conflicts means no tab.
+    // Arrange / Act: tabs are CONDITIONAL — no rebase means no commit subtab.
     await withChild("tab-pre");
     // Assert
-    expect(harness.$('[data-merge-tab="conflicts"]')).toBeNull();
+    expect(harness.$('[data-merge-tab="rebaseCommit"]')).toBeNull();
   });
 
   it("draws only the tab kinds that were served", async () => {
