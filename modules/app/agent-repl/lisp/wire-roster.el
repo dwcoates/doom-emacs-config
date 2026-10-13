@@ -162,38 +162,23 @@ from it: it is decoded because the codec refuses unknown fields."
   (agent-repl-wire--decode-empty "RosterRowDetachedLive" value)
   t)
 
-(defun agent-repl-wire-decode-roster-row-one-shot-armed (value)
-  "Decode VALUE as the empty `RosterRowOneShotArmed'.
-The one-shot has not ended without a live merge: the tab draws the
-one-shot glyph."
-  (agent-repl-wire--decode-empty "RosterRowOneShotArmed" value))
-
-(defun agent-repl-wire-decode-roster-row-one-shot-failed (value)
-  "Decode VALUE as the empty `RosterRowOneShotFailed'.
-The one-shot's last turn ended with no merge asked for, or its merge
-failed: the tab draws the failure glyph."
-  (agent-repl-wire--decode-empty "RosterRowOneShotFailed" value))
-
-(defconst agent-repl-wire-roster-row-one-shot-arms
-  '((armed :armed agent-repl-wire-decode-roster-row-one-shot-armed)
-    (failed :failed agent-repl-wire-decode-roster-row-one-shot-failed))
-  "`RosterRowOneShot.outcome''s arm table.
-Each entry is (WIRE-KEY ARM-KEYWORD DECODER).")
-
 (defun agent-repl-wire-decode-roster-row-one-shot (value)
-  "Decode VALUE as `RosterRowOneShot', a plist `(:arm ARM :value nil)'.
-The ONE-SHOT mark: the workspace was created as a one-shot, and ARM says
-whether it ended without a live merge (`:failed') or not (`:armed').  The
-row carries it only for a one-shot.  AN UNSET ONEOF IS INVALID and is
-rejected loudly, as for the status."
-  (let ((object (agent-repl-wire--object "RosterRowOneShot" value)))
-    (agent-repl-wire--check-keys "RosterRowOneShot" object
-                                 (mapcar #'car agent-repl-wire-roster-row-one-shot-arms))
-    (agent-repl-wire--decoded
-     "RosterRowOneShot"
-     (agent-repl-wire--decode-oneof
-      "RosterRowOneShot" 'outcome object
-      agent-repl-wire-roster-row-one-shot-arms))))
+  "Decode VALUE as `RosterRowOneShot' and return t.
+The ONE-SHOT mark: the workspace was created as a one-shot.  EMPTY, and
+PRESENCE IS THE FACT, as for the markers above.  Which status arms draw
+its glyph is the shared vocabulary's `one_shot_glyph_arms'."
+  (agent-repl-wire--decode-empty "RosterRowOneShot" value)
+  t)
+
+(defun agent-repl-wire-decode-roster-row-opening (value)
+  "Decode VALUE as `RosterRowOpening' and return t.
+The OPENING marker: the editor is opening this workspace, whose status
+is `inactive' while it stands.  EMPTY, and PRESENCE IS THE FACT, as for
+the markers above.  Emacs draws nothing from it: it is the webapp
+sidebar's not-selectable row, decoded because the codec refuses unknown
+fields."
+  (agent-repl-wire--decode-empty "RosterRowOpening" value)
+  t)
 
 (defun agent-repl-wire-decode-roster-row-availability-pending (value)
   "Decode VALUE as the empty `RosterRowAvailabilityPending'.
@@ -447,8 +432,8 @@ The daemon itself cannot serve the workspace: an agent-repl fault."
 
 (defun agent-repl-wire-decode-roster-row-status-waiting (value)
   "Decode VALUE as the empty `RosterRowStatusWaiting'.
-The session waits on a cold gate's answer or on an interrupt landing;
-a permission or a question gate has its own arm."
+The session waits on an interrupt landing; a permission, a question or
+a cold gate has its own arm."
   (agent-repl-wire--decode-empty "RosterRowStatusWaiting" value))
 
 (defun agent-repl-wire-decode-roster-row-status-init (value)
@@ -479,10 +464,6 @@ a permission or a question gate has its own arm."
   "Decode VALUE as the empty `RosterRowStatusMergeQueued'."
   (agent-repl-wire--decode-empty "RosterRowStatusMergeQueued" value))
 
-(defun agent-repl-wire-decode-roster-row-status-merge-waiting (value)
-  "Decode VALUE as the empty `RosterRowStatusMergeWaiting'."
-  (agent-repl-wire--decode-empty "RosterRowStatusMergeWaiting" value))
-
 (defun agent-repl-wire-decode-roster-row-status-merge-failed (value)
   "Decode VALUE as the empty `RosterRowStatusMergeFailed'."
   (agent-repl-wire--decode-empty "RosterRowStatusMergeFailed" value))
@@ -501,9 +482,10 @@ an assertion, where an unset oneof is the absence of one."
   "Decode VALUE as the empty `RosterRowStatusInactive'."
   (agent-repl-wire--decode-empty "RosterRowStatusInactive" value))
 
-(defun agent-repl-wire-decode-roster-row-status-opening (value)
-  "Decode VALUE as the empty `RosterRowStatusOpening'."
-  (agent-repl-wire--decode-empty "RosterRowStatusOpening" value))
+(defun agent-repl-wire-decode-roster-row-status-cold-gate (value)
+  "Decode VALUE as the empty `RosterRowStatusColdGate'.
+The session is parked on its cold gate's answer."
+  (agent-repl-wire--decode-empty "RosterRowStatusColdGate" value))
 
 (defconst agent-repl-wire-roster-row-status-arms
   '((submitting :submitting agent-repl-wire-decode-roster-row-status-submitting)
@@ -529,6 +511,7 @@ an assertion, where an unset oneof is the absence of one."
     (daemonImpaired :daemon-impaired
                     agent-repl-wire-decode-roster-row-status-daemon-impaired)
     (waiting :waiting agent-repl-wire-decode-roster-row-status-waiting)
+    (coldGate :cold-gate agent-repl-wire-decode-roster-row-status-cold-gate)
     (init :init agent-repl-wire-decode-roster-row-status-init)
     (severed :severed agent-repl-wire-decode-roster-row-status-severed)
     (startFailed :start-failed agent-repl-wire-decode-roster-row-status-start-failed)
@@ -537,12 +520,10 @@ an assertion, where an unset oneof is the absence of one."
     (turnDied :turn-died agent-repl-wire-decode-roster-row-status-turn-died)
     (merging :merging agent-repl-wire-decode-roster-row-status-merging)
     (mergeQueued :merge-queued agent-repl-wire-decode-roster-row-status-merge-queued)
-    (mergeWaiting :merge-waiting agent-repl-wire-decode-roster-row-status-merge-waiting)
     (mergeFailed :merge-failed agent-repl-wire-decode-roster-row-status-merge-failed)
     (merged :merged agent-repl-wire-decode-roster-row-status-merged)
     (none :none agent-repl-wire-decode-roster-row-status-none)
-    (inactive :inactive agent-repl-wire-decode-roster-row-status-inactive)
-    (opening :opening agent-repl-wire-decode-roster-row-status-opening))
+    (inactive :inactive agent-repl-wire-decode-roster-row-status-inactive))
   "`RosterRow.status''s arm table: (WIRE-KEY ARM-KEYWORD DECODER).
 The whole declared vocabulary, in the proto's own order.  A test pins it
 against the checked-in Go bindings, so an arm landed in the contract
@@ -586,14 +567,15 @@ Nested workspaces — a spawned family under its parent — in render order."
   (agent-repl-wire-decode-roster-row value))
 
 (defconst agent-repl-wire--roster-row-keys
-  (append '(workspace attention priority viewed reviving detachedLive oneShot lastSelected availability name current children when detail closed)
+  (append '(workspace attention priority viewed reviving detachedLive oneShot opening lastSelected availability name current children when detail closed)
           (mapcar #'car agent-repl-wire-roster-row-status-arms))
   "Every key `RosterRow' may carry: its own fields plus the 22 status arms.")
 
 (defun agent-repl-wire-decode-roster-row (value)
   "Decode VALUE as `RosterRow'.
 Returns `(:workspace W :attention A :priority P :viewed V :reviving R
-:detached-live DL :one-shot OS :last-selected L :availability AV :name N :status
+:detached-live DL :one-shot OS :opening O :last-selected L :availability AV
+:name N :status
 S :current C :children ROWS :when WHEN :detail D :closed CLOSED)', with
 the message tree preserved as the contract spells it."
   (let ((object (agent-repl-wire--object "RosterRow" value)))
@@ -621,6 +603,9 @@ the message tree preserved as the contract spells it."
            :one-shot (agent-repl-wire--decode-optional-message
                       "RosterRow" 'oneShot object
                       #'agent-repl-wire-decode-roster-row-one-shot)
+           :opening (agent-repl-wire--decode-optional-message
+                     "RosterRow" 'opening object
+                     #'agent-repl-wire-decode-roster-row-opening)
            :last-selected (agent-repl-wire--decode-optional-message
                            "RosterRow" 'lastSelected object
                            #'agent-repl-wire-decode-roster-row-last-selected)

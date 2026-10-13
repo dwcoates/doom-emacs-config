@@ -88,14 +88,6 @@ func (o *orchestrator) Recover(ctx context.Context) error {
 // per-entry recovery and a handover adoption's alike.
 func (o *orchestrator) recoverEntry(ctx context.Context, repo wsm.RepoKey, entry wsm.MergeQueueEntry) error {
 	const op = "daemon.merge.recover"
-	// A MERGE WORKSPACE'S ENTRY IS ITS REQUESTER'S MERGE TOO: the requester
-	// holds no entry of its own once its detached merge is handed off, so its
-	// request fact is raised here, before the entry's recovery can end it.
-	if requester, async := o.requesterOf(entry.Workspace); async {
-		o.deps.Log.Global().Info(op, "re-raised the request fact of a recovered detached merge's requester", dlog.Context{
-			"workspace": string(entry.Workspace), "requester": string(requester), "repo": string(repo)})
-		o.deps.Sidebar.SetMergeRequested(requester, true)
-	}
 	switch entry.State {
 	case wsm.MergeRequested:
 		o.mu.Lock()
@@ -104,7 +96,6 @@ func (o *orchestrator) recoverEntry(ctx context.Context, repo wsm.RepoKey, entry
 		// A MERGE WORKSPACE'S PICK is begun, or taken back where the restart
 		// left it, before its merge joins the queue.
 		if entry.Source.Pick != "" {
-			o.deps.Sidebar.SetMergeRequested(entry.Workspace, true)
 			if entry.Source.PickStartedAt == nil {
 				o.deps.Log.Global().Info(op, "begins an async merge's pick the restart cut short before it began", dlog.Context{
 					"workspace": string(entry.Workspace), "repo": string(repo)})
@@ -117,7 +108,6 @@ func (o *orchestrator) recoverEntry(ctx context.Context, repo wsm.RepoKey, entry
 		// restart -- has ended.
 		o.deps.Log.Global().Info(op, "re-armed a merge request still waiting for its turn to end", dlog.Context{
 			"workspace": string(entry.Workspace), "repo": string(repo)})
-		o.deps.Sidebar.SetMergeRequested(entry.Workspace, true)
 		o.awaitRequestingTurn(entry.Workspace, repo)
 		return nil
 	case wsm.MergeAdmitted:

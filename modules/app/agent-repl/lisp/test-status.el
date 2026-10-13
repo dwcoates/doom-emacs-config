@@ -156,11 +156,11 @@ would be a second vocabulary saying what the state color already says."
   (dolist (entry agent-repl--tab-palette)
     (should-not (plist-member (plist-get (cdr entry) :unselected) :bracket-bg))))
 
-(ert-deftest agent-repl-test-tab-spec-merge-failed-is-turquoise ()
-  "`:merge-failed' paints the tab TURQUOISE (owner ruling, 2026-09-28):
-something went wrong, but the workspace is usable."
+(ert-deftest agent-repl-test-tab-spec-merge-failed-is-green ()
+  "`:merge-failed' paints the tab GREEN (owner ruling, 2026-10-13): the
+workspace is back with the user, ready to be looked at."
   ;; Act / Assert
-  (should (equal agent-repl--color-usable-fault-turquoise
+  (should (equal agent-repl--color-done-green
                  (plist-get (agent-repl--tab-spec :merge-failed nil) :bg))))
 
 (ert-deftest agent-repl-test-tab-spec-merged-is-green ()
@@ -1121,13 +1121,18 @@ row, not blue."
 ;; color end to end, so the whole selected entry is grey.  The underline
 ;; is kept as a secondary marker.
 
-(ert-deftest agent-repl-test-tab-spec-selected-init-is-grey-not-blue ()
-  "Selected :init paints its name the selection grey, not the init blue,
-keeps the init blue on its bracket, and carries the underline."
-  (let ((spec (agent-repl--tab-spec :init t)))
+(ert-deftest agent-repl-test-tab-spec-selected-severed-is-grey-not-blue ()
+  "Selected :severed paints its name the selection grey, not the fault
+blue, keeps the blue on its bracket, and carries the underline."
+  (let ((spec (agent-repl--tab-spec :severed t)))
     (should (equal (plist-get spec :bg) agent-repl--color-selected-bg))
     (should (equal (plist-get spec :bracket-bg) agent-repl--color-init-blue))
     (should (eq t (plist-get spec :underline)))))
+
+(ert-deftest agent-repl-test-tab-spec-init-takes-no-palette-row ()
+  "A booting session has no palette row: it draws as an uncolored tab
+\(owner ruling, 2026-10-13: an expected step, never a fault)."
+  (should-not (assq :init agent-repl--tab-palette)))
 
 (ert-deftest agent-repl-test-tab-spec-selected-thinking-is-grey-not-red ()
   "Selected :thinking paints the selection grey, not the thinking red."
@@ -3558,7 +3563,7 @@ turn that died with agent-repl's machinery is one (owner ruling,
 2026-10-06), and so is the daemon itself being impaired."
   ;; Act / Assert
   (should (equal (sort (agent-repl-test-status--arms-taking "blue") #'string<)
-                 (sort (list :init :severed :dead :start-failed :turn-died :network-fault
+                 (sort (list :severed :dead :start-failed :turn-died :network-fault
                              :closing :daemon-impaired)
                        #'string<))))
 
@@ -3572,7 +3577,7 @@ turn that died with agent-repl's machinery is one (owner ruling,
 usable (owner ruling, 2026-09-28)."
   ;; Act / Assert
   (should (equal (sort (agent-repl-test-status--arms-taking "turquoise") #'string<)
-                 (sort (list :degraded :turn-failed :merge-failed
+                 (sort (list :degraded :turn-failed
                              :vendor-blocked :vendor-fault :api-retrying)
                        #'string<))))
 
@@ -3580,15 +3585,16 @@ usable (owner ruling, 2026-09-28)."
   "Purple is spent on the merge arms with no verdict yet, and on nothing
 else: no merge fact is shown before the requesting turn ends, so there is
 no enqueuing arm (merge-landing.md, Landed change 1); a merge that holds
-the workspace and waits for it to fall free is purple too (owner ruling,
-2026-10-08)."
+the workspace and waits for it to fall free is `:merge-queued' (owner
+ruling, 2026-10-13)."
   ;; Act / Assert
   (should (equal (sort (agent-repl-test-status--arms-taking "purple") #'string<)
-                 (sort (list :merge-queued :merge-waiting :merging) #'string<))))
+                 (sort (list :merge-queued :merging) #'string<))))
 
-(ert-deftest agent-repl-test-status-merge-waiting-draws-the-hourglass ()
-  "A merge waiting for its workspace to fall free draws its own glyph."
-  (should (equal (cdr (assq :merge-waiting agent-repl-status-merge-glyphs)) "⧗")))
+(ert-deftest agent-repl-test-status-every-merge-arm-draws-the-one-merge-glyph ()
+  "Every merge arm maps to the one merge glyph (owner ruling, 2026-10-13)."
+  (dolist (row agent-repl-status-merge-glyphs)
+    (should (equal (cdr row) "≡"))))
 
 (ert-deftest agent-repl-test-status-red-is-the-agent-holding-the-turn ()
   "Red is a turn in flight."
@@ -3603,14 +3609,13 @@ the workspace and waits for it to fall free is purple too (owner ruling,
   (should (equal (agent-repl-test-status--arms-taking "yellow") '(:idle-async))))
 
 (ert-deftest agent-repl-test-status-green-is-ready-or-landed ()
-  "Green covers ready, done, interrupted, a permission or question gate, any
-other wait on the user and a landed merge: the workspace is ready for the
-user.  A merge never parks on a conflict, so no merge arm but `:merged' is
-green \(merge-landing.md, Landed change 1)."
+  "Green covers ready, done, interrupted, a permission, question or cold
+gate, an interrupt landing and a terminal merge, landed or failed: the
+workspace is ready for the user (owner ruling, 2026-10-13)."
   ;; Act / Assert
   (should (equal (sort (agent-repl-test-status--arms-taking "green") #'string<)
                  (sort (list :ready :done :interrupted :permission :question
-                             :waiting :merged)
+                             :cold-gate :waiting :merged :merge-failed)
                        #'string<))))
 
 (ert-deftest agent-repl-test-status-a-question-gate-paints-the-tab-done-green ()
@@ -3624,10 +3629,11 @@ ruling, 2026-10-08), never the red of a working turn."
                    (plist-get (plist-get done :unselected) :bg)))))
 
 (ert-deftest agent-repl-test-status-none-is-a-real-answer ()
-  "Only the two sessionless arms and a workspace still opening take no colour."
+  "The grey arms take no colour: no session, incidentally inactive, and a
+session booting (owner ruling, 2026-10-13)."
   ;; Act / Assert
   (should (equal (sort (agent-repl-test-status--arms-taking "none") #'string<)
-                 (sort (list :none :inactive :opening)
+                 (sort (list :none :inactive :init)
                        #'string<))))
 
 (ert-deftest agent-repl-test-status-an-unknown-arm-paints-nothing ()
@@ -3646,23 +3652,53 @@ purple already says a merge is in flight, and a landed merge shows nothing
 \(owner ruling, 2026-10-11)."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    (dolist (arm '(:merge-queued :merge-waiting :merging :merged))
+    (dolist (arm '(:merge-queued :merging :merged))
       ;; Act / Assert
       (should (null (agent-repl-status-tab-glyph "alpha" arm))))))
 
-(ert-deftest agent-repl-test-status-a-merge-failed-tab-draws-the-failure-mark ()
-  "A `:merge-failed\=' tab draws the failure mark as well as its turquoise."
+(ert-deftest agent-repl-test-status-a-merge-failed-tab-draws-the-merge-glyph ()
+  "A `:merge-failed\=' tab draws the merge glyph before its name."
   ;; Arrange
   (agent-repl-test--with-clean-state
     ;; Act / Assert
-    (should (equal (agent-repl-status-tab-glyph "alpha" :merge-failed)
-                   agent-repl-status-failure-glyph))))
+    (should (equal (agent-repl-status-tab-glyph "alpha" :merge-failed) "≡"))))
 
-(ert-deftest agent-repl-test-status-the-failure-mark-is-the-emoji-cross ()
-  "The failure mark is ✖ with the emoji presentation selector, so it draws
-double-width like the gate glyphs."
-  ;; Act / Assert
-  (should (equal agent-repl-status-failure-glyph (string #x2716 #xFE0F))))
+(ert-deftest agent-repl-test-status-a-merge-failed-glyph-is-inked-red ()
+  "A failed merge\='s glyph is red on its green tab (owner ruling, 2026-10-13)."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl-status-glyph-height) (lambda (&rest _) 1.0)))
+    ;; Act / Assert
+    (should (equal (plist-get (agent-repl-status-tab-glyph-face :merge-failed "≡") :foreground)
+                   agent-repl--color-thinking-red))))
+
+(ert-deftest agent-repl-test-status-a-compacting-tab-draws-an-orange-dot ()
+  "A compacting turn draws the dot inked orange on its red tab."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl-status-glyph-height) (lambda (&rest _) 1.0)))
+      ;; Act / Assert
+      (should (equal (list (agent-repl-status-tab-glyph "alpha" :compacting)
+                           (plist-get (agent-repl-status-tab-glyph-face :compacting "●") :foreground))
+                     (list agent-repl-status-dot-glyph agent-repl--color-compaction-orange))))))
+
+(ert-deftest agent-repl-test-status-an-uninked-glyph-takes-no-foreground ()
+  "A glyph on an arm with no ink keeps the tab\='s foreground."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl-status-glyph-height) (lambda (&rest _) 1.0)))
+    ;; Act / Assert
+    (should-not (plist-member (agent-repl-status-tab-glyph-face :permission "❗") :foreground))))
+
+(ert-deftest agent-repl-test-status-an-ink-with-no-color-fails-loudly ()
+  "An ink this renderer has no color for is logged and signalled."
+  ;; Arrange
+  (let (logged)
+    (cl-letf (((symbol-function 'agent-repl-status-glyph-height) (lambda (&rest _) 1.0))
+              ((symbol-function 'agent-repl--error)
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+      (let ((agent-repl-status-glyph-inks '((:thinking . "chartreuse"))))
+        ;; Act / Assert
+        (should-error (agent-repl-status-tab-glyph-face :thinking "●"))
+        (should (string-match-p "ink \"chartreuse\" of arm :thinking has no color" (car logged)))))))
 
 (ert-deftest agent-repl-test-status-every-drawn-merge-arm-has-a-glyph ()
   "Every merge arm the tab bar draws takes its character from the one
@@ -3671,100 +3707,62 @@ merge glyph table, so a drawn arm cannot carry a hand-rolled character."
   (dolist (arm agent-repl-status-tab-bar-merge-glyph-arms)
     (should (stringp (alist-get arm agent-repl-status-merge-glyphs)))))
 
-(ert-deftest agent-repl-test-status-a-failed-merge-and-a-failed-one-shot-share-the-mark ()
-  "A failed merge and a failed one-shot draw the same failure mark."
-  ;; Act / Assert
-  (should (eq (alist-get :merge-failed agent-repl-status-merge-glyphs)
-              agent-repl-status-failure-glyph)))
-
-(defmacro agent-repl-test-status--with-one-shot (outcome &rest body)
-  "Run BODY with every workspace's roster one-shot outcome stubbed to OUTCOME."
+(defmacro agent-repl-test-status--with-one-shot (one-shot &rest body)
+  "Run BODY with every workspace's roster one-shot mark stubbed to ONE-SHOT."
   (declare (indent 1))
   `(cl-letf (((symbol-function 'agent-repl-roster-one-shot-for-ws)
-              (lambda (_ws) ,outcome)))
+              (lambda (_ws) ,one-shot)))
      ,@body))
 
-(ert-deftest agent-repl-test-status-an-armed-one-shot-draws-the-target ()
-  "An armed one-shot draws 🎯 on any non-gate arm."
+(ert-deftest agent-repl-test-status-a-working-one-shot-draws-the-target ()
+  "A one-shot draws 🎯 while it works: submitting, thinking or clearing."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    (agent-repl-test-status--with-one-shot :armed
-      ;; Act / Assert
-      (should (equal (agent-repl-status-tab-glyph "alpha" :thinking)
-                     agent-repl-status-one-shot-glyph)))))
+    (agent-repl-test-status--with-one-shot t
+      (dolist (arm '(:submitting :thinking :clearing))
+        ;; Act / Assert
+        (should (equal (agent-repl-status-tab-glyph "alpha" arm)
+                       agent-repl-status-one-shot-glyph))))))
 
-(ert-deftest agent-repl-test-status-a-failed-one-shot-draws-the-failure-mark ()
-  "A one-shot that ended without a live merge draws the failure mark."
+(ert-deftest agent-repl-test-status-a-one-shot-not-working-draws-its-arms-own-glyph ()
+  "A one-shot on any other arm draws as any workspace does (owner ruling,
+2026-10-13): no target on a compaction, a turn end, a gate or a merge."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    (agent-repl-test-status--with-one-shot :failed
-      ;; Act / Assert
-      (should (equal (agent-repl-status-tab-glyph "alpha" :done)
-                     agent-repl-status-failure-glyph)))))
+    (agent-repl-test-status--with-one-shot t
+      (cl-letf (((symbol-function 'agent-repl-status-glyph-height) (lambda (&rest _) 1.0)))
+        (dolist (arm '(:compacting :done :idle-async :permission :cold-gate
+                       :merge-queued :merging :merge-failed))
+          ;; Act
+          (let ((drawn (agent-repl-status-tab-glyph "alpha" arm)))
+            ;; Assert
+            (should-not (equal drawn agent-repl-status-one-shot-glyph))))))))
 
-(ert-deftest agent-repl-test-status-a-gate-replaces-the-one-shot-mark ()
-  "An open permission or question gate draws its emoji in place of the
-one-shot mark."
+(ert-deftest agent-repl-test-status-the-working-one-shot-outranks-the-attention-marker ()
+  "A working one-shot with an unseen notification draws its mark."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    (agent-repl-test-status--with-one-shot :armed
-      ;; Act / Assert
-      (should (equal (agent-repl-status-tab-glyph "alpha" :permission) "❗"))
-      (should (equal (agent-repl-status-tab-glyph "alpha" :question) "❓")))))
-
-(ert-deftest agent-repl-test-status-an-armed-one-shot-in-a-merge-draws-the-target ()
-  "A one-shot whose merge is in line keeps its 🎯."
-  ;; Arrange
-  (agent-repl-test--with-clean-state
-    (agent-repl-test-status--with-one-shot :armed
-      ;; Act / Assert
-      (should (equal (agent-repl-status-tab-glyph "alpha" :merge-queued)
-                     agent-repl-status-one-shot-glyph)))))
-
-(ert-deftest agent-repl-test-status-the-one-shot-mark-outranks-the-attention-marker ()
-  "A one-shot with an unseen notification draws its mark, not the marker."
-  ;; Arrange
-  (agent-repl-test--with-clean-state
-    (agent-repl-test-status--with-one-shot :armed
+    (agent-repl-test-status--with-one-shot t
       (let ((agent-repl-status--marker-on (make-hash-table :test 'equal)))
         (puthash "alpha" t agent-repl-status--marker-on)
         ;; Act / Assert
-        (should (equal (agent-repl-status-tab-glyph "alpha" :done)
+        (should (equal (agent-repl-status-tab-glyph "alpha" :thinking)
                        agent-repl-status-one-shot-glyph))))))
 
-(ert-deftest agent-repl-test-status-an-unknown-one-shot-outcome-draws-nothing ()
-  "An outcome this build does not know draws no one-shot mark."
-  ;; Arrange
-  (agent-repl-test--with-clean-state
-    (agent-repl-test-status--with-one-shot :exploded
-      (cl-letf (((symbol-function 'agent-repl--error) #'ignore))
-        ;; Act / Assert
-        (should (null (agent-repl-status-tab-one-shot-glyph "alpha")))))))
-
-(ert-deftest agent-repl-test-status-an-unknown-one-shot-outcome-is-logged ()
-  "An outcome this build does not know is recorded at ERROR with the outcome."
-  ;; Arrange
-  (agent-repl-test--with-clean-state
-    (let (logged)
-      (agent-repl-test-status--with-one-shot :exploded
-        (cl-letf (((symbol-function 'agent-repl--error)
-                   (lambda (ws fmt &rest args)
-                     (push (list ws (apply #'format fmt args)) logged))))
-          ;; Act
-          (agent-repl-status-tab-one-shot-glyph "alpha")))
-      ;; Assert
-      (should (equal (length logged) 1))
-      (should (equal (car (car logged)) "alpha"))
-      (should (string-match-p "elisp.status.tab-one-shot-glyph: unknown outcome=:exploded"
-                              (cadr (car logged)))))))
-
 (ert-deftest agent-repl-test-status-a-workspace-that-is-no-one-shot-draws-no-mark ()
-  "A workspace with no one-shot outcome draws no one-shot mark."
+  "A workspace with no one-shot mark draws no one-shot glyph."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (agent-repl-test-status--with-one-shot nil
       ;; Act / Assert
-      (should (null (agent-repl-status-tab-one-shot-glyph "alpha"))))))
+      (should (null (agent-repl-status-tab-one-shot-glyph "alpha" :thinking))))))
+
+(ert-deftest agent-repl-test-status-a-cold-gate-tab-draws-a-stop-sign ()
+  "A `:cold-gate\=' tab draws 🛑 between `[N]\=' and its name."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    ;; Act / Assert
+    (should (equal (agent-repl-status-tab-glyph "alpha" :cold-gate) "🛑"))))
 
 (ert-deftest agent-repl-test-status-a-permission-tab-draws-an-exclamation-emoji ()
   "A `:permission\=' tab draws ❗ between `[N]\=' and its name."
@@ -3796,13 +3794,14 @@ one-shot mark."
     ;; Act / Assert
     (should (null (agent-repl-status-tab-glyph "alpha" :waiting)))))
 
-(ert-deftest agent-repl-test-status-an-inactive-row-draws-a-question-mark ()
-  "A perspective-less workspace has no lifecycle a dot could report."
+(ert-deftest agent-repl-test-status-an-inactive-or-booting-row-draws-no-glyph ()
+  "An incidentally inactive workspace and a booting one draw no glyph: they
+are grey, with nothing to report (owner ruling, 2026-10-13)."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    ;; Act / Assert
-    (should (equal (agent-repl-status-tab-glyph "alpha" :inactive)
-                   agent-repl-status-inactive-glyph))))
+    (dolist (arm '(:inactive :init))
+      ;; Act / Assert
+      (should (null (agent-repl-status-tab-glyph "alpha" arm))))))
 
 (ert-deftest agent-repl-test-status-an-ordinary-arm-draws-no-glyph ()
   "A lifecycle arm reports itself with its colour."
@@ -3820,6 +3819,52 @@ one-shot mark."
       ;; Act / Assert
       (should (equal (agent-repl-status-tab-glyph "alpha" :thinking)
                      agent-repl-status-attention-glyph)))))
+
+;;;; ---- The glyph's height: exactly the tab's text ------------------------
+
+(defun agent-repl-test-status--metrics (table)
+  "Return a glyph-metrics function answering TABLE's (PX ASCENT . DESCENT)."
+  (lambda (px) (cdr (assq px table))))
+
+(ert-deftest agent-repl-test-status-glyph-fit-size-cases ()
+  "The fit is the largest size whose ascent AND descent fit the text's."
+  (dolist (case
+           ;; The owner's frame, measured 2026-10-13: Menlo 13px is 12+3, Apple
+           ;; Color Emoji 13..8px as listed.
+           `(("the emoji fits at 8px"
+              12 3 13 ((13 16 . 5) (12 15 . 5) (11 14 . 4) (10 13 . 4) (9 11 . 4) (8 10 . 3))
+              8)
+             ("a glyph that already fits keeps the text's size"
+              12 3 13 ((13 12 . 3))
+              13)
+             ("a descent alone too deep shrinks it"
+              12 3 13 ((13 12 . 4) (12 11 . 3))
+              12)))
+    (pcase-let ((`(,name ,ascent ,descent ,size ,table ,want) case))
+      ;; Act / Assert
+      (should (equal (cons name (agent-repl-status-glyph-fit-size
+                                 ascent descent size
+                                 (agent-repl-test-status--metrics table)))
+                     (cons name want))))))
+
+(ert-deftest agent-repl-test-status-glyph-fit-size-with-no-fit-fails-loudly ()
+  "No size fitting the text is an invariant violation: logged, then signalled."
+  ;; Arrange
+  (let (logged)
+    (cl-letf (((symbol-function 'agent-repl--error)
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+      ;; Act / Assert
+      (should-error (agent-repl-status-glyph-fit-size
+                     2 1 2 (agent-repl-test-status--metrics '((2 5 . 5) (1 5 . 5)))))
+      (should (string-match-p "glyph-fit-size: no size up to 2 fits ascent 2 descent 1"
+                              (car logged))))))
+
+(ert-deftest agent-repl-test-status-glyph-height-is-whole-on-a-text-frame ()
+  "A frame that is not graphic draws every glyph in one cell, unscaled."
+  ;; Arrange
+  (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) nil)))
+    ;; Act / Assert
+    (should (equal (agent-repl-status-glyph-height "🎯") 1.0))))
 
 ;;;; ---- The blink cadence (frontend.v1 RosterRowAttention) --------------
 
@@ -4069,8 +4114,21 @@ bracket-only paint, which is the blessed treatment."
               ((symbol-function 'agent-repl-roster-row-priority-label)
                (lambda (row) (plist-get (plist-get row :priority) :label))))
       ;; Act / Assert
-      (should (equal (agent-repl--tab-badge-str "alpha" :merge-failed)
-                     (concat "P1 " agent-repl-status-failure-glyph))))))
+      (cl-letf (((symbol-function 'agent-repl-status-glyph-height) (lambda (&rest _) 1.0)))
+        (should (equal (substring-no-properties (agent-repl--tab-badge-str "alpha" :merge-failed))
+                       "P1 ≡"))))))
+
+(ert-deftest agent-repl-test-status-the-badge-run-draws-the-glyph-in-its-face ()
+  "The glyph in the badge run carries its ink and its fitted height."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws) (lambda (_ws) nil))
+              ((symbol-function 'agent-repl-status-glyph-height) (lambda (&rest _) 0.5)))
+      ;; Act
+      (let ((run (agent-repl--tab-badge-str "alpha" :merge-failed)))
+        ;; Assert
+        (should (equal (get-text-property 0 'face run)
+                       (list :height 0.5 :foreground agent-repl--color-thinking-red)))))))
 
 (ert-deftest agent-repl-test-status-an-unprioritized-plain-row-draws-no-badge ()
   "The ordinary case is name and bracket alone."
@@ -4252,8 +4310,10 @@ green stays green and blue stays blue across the extent change."
 (ert-deftest agent-repl-test-blue-is-reserved-for-link-faults ()
   "Only the link-fault arms take blue; a live session's arms never do."
   ;; Link faults are blue.
-  (dolist (arm '(:init :severed :dead :start-failed))
+  (dolist (arm '(:severed :dead :start-failed))
     (should (equal (agent-repl-status-tab-color arm) "blue")))
+  ;; A booting session is grey, never a fault (owner ruling, 2026-10-13).
+  (should (equal (agent-repl-status-tab-color :init) "none"))
   ;; A live idle/ready session is not.
   (dolist (arm '(:ready :done :interrupted :permission))
     (should-not (equal (agent-repl-status-tab-color arm) "blue"))))

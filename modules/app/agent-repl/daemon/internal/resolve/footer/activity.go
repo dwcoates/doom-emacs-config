@@ -235,6 +235,33 @@ func (r *resolver) agentReplFaultActivity(s *wsState, log dlog.Logger) *frontend
 	return &frontendv1.FooterStatusAgentReplFaultActivity{Tier: &frontendv1.FooterStatusAgentReplFaultActivity_Salient{Salient: line}}
 }
 
+// startingActivity resolves the cell while booting: a previous bring-up's
+// failure first, because it explains why the session is being brought up
+// again; then a standing agent-repl fault the dialing link outranks; then the
+// shared salient lines; then unpinned.
+func (r *resolver) startingActivity(s *wsState) *frontendv1.FooterStatusStartingActivity {
+	salient := func(line *frontendv1.FooterStatusStartingSalient) *frontendv1.FooterStatusStartingActivity {
+		return &frontendv1.FooterStatusStartingActivity{Tier: &frontendv1.FooterStatusStartingActivity_Salient{Salient: line}}
+	}
+	if s.startFailed != nil {
+		return salient(&frontendv1.FooterStatusStartingSalient{
+			At: stamp(s.startFailed.at),
+			Kind: &frontendv1.FooterStatusStartingSalient_StartFailed{
+				StartFailed: &frontendv1.FooterStatusActivityStartFailed{Detail: s.startFailed.detail}},
+		})
+	}
+	if fault, at := r.salientFault(s, health.FaultStatusAgentReplFault); fault != nil {
+		return salient(&frontendv1.FooterStatusStartingSalient{
+			At:   stamp(at),
+			Kind: &frontendv1.FooterStatusStartingSalient_Fault{Fault: fault},
+		})
+	}
+	if line, ok := r.sharedSalient(s); ok {
+		return salient(fillShared(&frontendv1.FooterStatusStartingSalient{}, line))
+	}
+	return &frontendv1.FooterStatusStartingActivity{Tier: &frontendv1.FooterStatusStartingActivity_Unpinned{Unpinned: r.unpinned(s)}}
+}
+
 // closingActivity resolves the cell while closing: the refusal first, because
 // it explains the `closing · blocked` step; then the shared salient lines; then
 // unpinned.

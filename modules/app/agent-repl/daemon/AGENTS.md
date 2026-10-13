@@ -1127,7 +1127,7 @@ Owner rulings, 2026-09-30 (`internal/merge`; the contract is
   workspace writes while the merge waits or runs lands above the bubble, and
   every row after it resolves lands below. Admission takes the lease (prompts
   held from here), records the queue step, and publishes `merging ·
-  awaiting_free` (roster `merge_waiting`, purple) while the merge waits for
+  awaiting_free` (roster `merge_queued`, purple) while the merge waits for
   the workspace -- and a workspace whose worktree it rebases in -- to fall
   free; the footer reads what it waits on from its own state of the awaited
   workspace (`footer.awaitingFree`). `run.place`, once free, restates the head

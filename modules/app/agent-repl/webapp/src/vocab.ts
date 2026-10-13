@@ -57,6 +57,8 @@ const FOOTER_STATUS: Readonly<Record<string, Color>> = renderColors.footer_statu
 const TOPBAR_CONNECTIVITY: Readonly<Record<string, Color>> = renderColors.topbar_connectivity as Record<string, Color>;
 const MERGE_GLYPHS: Readonly<Record<string, string>> = renderColors.merge_glyphs;
 const GATE_GLYPHS: Readonly<Record<string, string>> = renderColors.gate_glyphs;
+const GLYPH_INKS: Readonly<Record<string, string>> = renderColors.glyph_inks;
+const ONE_SHOT_GLYPH_ARMS: readonly string[] = renderColors.one_shot_glyph_arms;
 const FAILURE_SIDES: Readonly<Record<string, Color>> = renderColors.failure_sides as Record<string, Color>;
 const FEED_SUBAGENT_DOT: Readonly<Record<string, Color>> = renderColors.feed_subagent_dot as Record<string, Color>;
 const FEED_SHELL_DOT: Readonly<Record<string, Color>> = renderColors.feed_shell_dot as Record<string, Color>;
@@ -161,8 +163,8 @@ export function topbarTone(tone: string): Color {
 /**
  * The glyph NAME a merge arm reports itself with.
  *
- * The merge arms take no color, so the glyph is the whole report. This returns
- * the shared NAME ("queue", "recycle", "failed", "check"); which
+ * Every merge arm draws the one shared NAME ("merge", owner ruling
+ * 2026-10-13); its ink and its motion say which arm it is, and which
  * character or CSS shape draws it is the surface's own business.
  */
 export function mergeGlyph(arm: string): string {
@@ -185,6 +187,27 @@ export function mergeGlyph(arm: string): string {
  */
 export function gateGlyph(arm: string): string | undefined {
   return GATE_GLYPHS[protoArmName(arm)];
+}
+
+/**
+ * The INK a status arm's drawn mark takes where it differs from the arm's own
+ * color (`render-colors.json#glyph_inks`, owner ruling 2026-10-13), or
+ * undefined for an arm whose mark is inked in its own color. The arm's color
+ * stays the WORKSPACE's status (the row's name); the ink is the mark's alone:
+ * a failed merge is a green workspace with a red merge glyph, a compacting
+ * turn a red workspace with an orange dot.
+ */
+export function glyphInk(arm: string): string | undefined {
+  return GLYPH_INKS[protoArmName(arm)];
+}
+
+/**
+ * Whether a one-shot's glyph replaces the status mark on ARM
+ * (`render-colors.json#one_shot_glyph_arms`, owner ruling 2026-10-13): only
+ * while the one-shot works, never on any other arm.
+ */
+export function oneShotGlyphArm(arm: string): boolean {
+  return ONE_SHOT_GLYPH_ARMS.includes(protoArmName(arm));
 }
 
 /**
