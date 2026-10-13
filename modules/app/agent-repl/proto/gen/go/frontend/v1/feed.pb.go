@@ -18757,8 +18757,8 @@ func (*FeedMergeFoldByReader) Descriptor() ([]byte, []int) {
 // attempt. PARENT tabs (rebasing, tests) carry their
 // own state and narration, and their content is the subtab rows parented to
 // them; a commit subtab carries its resolved content AND is the container of
-// its conflict resolution's agent rows, and a fixing sub-subtab is the
-// container of its attempt's agent rows.
+// its conflict resolution's agent rows, and a fixing attempt, its run's
+// remediation view, is the container of its attempt's agent rows.
 //
 // Top-level tabs are APPEND-ONLY and CONDITIONAL: a tab appears BECAUSE that
 // work began — an unconfigured prompt means no prompt tab — and a top-level
@@ -20411,11 +20411,11 @@ func (*FeedMergeTabTests_Settled) isFeedMergeTabTests_State() {}
 
 func (*FeedMergeTabTests_WaitingOnUser) isFeedMergeTabTests_State() {}
 
-// SUBTAB of the tests tab: one full run of the suites. Its own content is a
-// strip of SUB-SUBTABS: the run's output, which is this row's own `output`,
-// then — once a fixing attempt follows the failed run — that attempt, which is
-// the `tests_run_fixing` row parented to THIS row. When the last attempt
-// fails, the merge FAILS and the workspace is handed back.
+// SUBTAB of the tests tab: one full run of the suites. Its own content is two
+// VIEWS of one panel, never a strip: its tests, which are this row's own
+// `output`, and — once a fixing attempt follows the failed run — its
+// remediation, which is the `tests_run_fixing` row parented to THIS row. When
+// the last attempt fails, the merge FAILS and the workspace is handed back.
 type FeedMergeTabTestsRun struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The run of the suites itself, NOT the fixing after it.
@@ -20425,8 +20425,7 @@ type FeedMergeTabTestsRun struct {
 	//	*FeedMergeTabTestsRun_Live
 	//	*FeedMergeTabTestsRun_Settled
 	State isFeedMergeTabTestsRun_State `protobuf_oneof:"state"`
-	// The output sub-subtab: the suites and the log. Its badge is this run's
-	// own state.
+	// The run's tests view: the suites and the log.
 	Output        *FeedMergeTestsRunOutput `protobuf:"bytes,3,opt,name=output,proto3" json:"output,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -20512,7 +20511,7 @@ func (*FeedMergeTabTestsRun_Live) isFeedMergeTabTestsRun_State() {}
 
 func (*FeedMergeTabTestsRun_Settled) isFeedMergeTabTestsRun_State() {}
 
-// The output sub-subtab of a run: the programmatic test run — suites,
+// The tests view of a run: the programmatic test run — suites,
 // progress, and COLORED output. Replaced whole per push.
 type FeedMergeTestsRunOutput struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
@@ -20568,8 +20567,8 @@ func (x *FeedMergeTestsRunOutput) GetLog() *FeedMergeTestLog {
 	return nil
 }
 
-// SUB-SUBTAB of a run: the requesting workspace's session fixing the suites
-// that run failed, parented to the run's row. Absent for a run that passed and
+// The REMEDIATION VIEW of a run: the requesting workspace's session fixing the
+// suites that run failed, parented to the run's row. Absent for a run that passed and
 // for a failed run the merge gave up on with no attempt left. Its content is
 // the sub-feed rows parented to THIS row, below the attempt it names. A fixing
 // attempt that succeeds is followed by the NEXT run's subtab, never by a
