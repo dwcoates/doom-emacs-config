@@ -23,10 +23,28 @@ type rowContext struct {
 	tree forest
 	// cause is the operation whose fact is being rendered.
 	cause string
+	// facts memoizes each workspace's rowFacts for this render (resolver.facts).
+	facts map[ids.WorkspaceID]rowFacts
 }
 
-// row composes one workspace's row, and its family below it.
-func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *frontendv1.RosterRow {
+// rowFacts are a workspace's per-render decisions that more than one consumer
+// reads: the status arm, and whether the row is drawn PARTIAL. The partition
+// that files a viewed row under the viewed band and the row itself read the
+// SAME facts, so the band and the marker cannot disagree.
+type rowFacts struct {
+	// arm is the status arm published for the row.
+	arm string
+	// viewed reports the viewed (PARTIAL) marker (`wsState.viewedOn`).
+	viewed bool
+}
+
+// facts resolves a workspace's rowFacts ONCE per render, memoized on the
+// render's rowContext: the status arm is noted (noteArm) and its change
+// logged exactly once however many groupings draw the row.
+func (r *resolver) facts(rec wsm.Workspace, rc rowContext, log dlog.Logger) rowFacts {
+	if f, ok := rc.facts[rec.ID]; ok {
+		return f
+	}
 	s := r.state.workspace(rec.ID)
 	session := rc.sessions[rec.ID]
 	rowLog := log.With(dlog.Context{"workspace_id": string(rec.ID)})
@@ -50,6 +68,32 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 		r.logArmChange(rec.ID, armName, previousArm, rc.cause)
 	}
 	viewed := s.viewedOn(armName)
+	switch {
+	case wasViewed && !viewed:
+		rowLog.Debug("daemon.sidebar.row_viewed_cleared",
+			"the row left its read turn-end state, so it is drawn FULL and leaves the viewed band", dlog.Context{
+				"status": armName,
+				"result": s.result.String(),
+			})
+	case armChanged && !wasViewed && viewed:
+		rowLog.Debug("daemon.sidebar.row_viewed_restored",
+			"the row returned to its turn-end arm with the result already read, so it is drawn PARTIAL in the viewed band", dlog.Context{
+				"status": armName,
+			})
+	}
+	r.assertArm(armName, rowLog)
+	f := rowFacts{arm: armName, viewed: viewed}
+	rc.facts[rec.ID] = f
+	return f
+}
+
+// row composes one workspace's row, and its family below it.
+func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *frontendv1.RosterRow {
+	s := r.state.workspace(rec.ID)
+	session := rc.sessions[rec.ID]
+	rowLog := log.With(dlog.Context{"workspace_id": string(rec.ID)})
+	f := r.facts(rec, rc, log)
+	armName, viewed := f.arm, f.viewed
 	current := rc.selected != nil && *rc.selected == rec.ID
 	closed := recedes(rec, session)
 	detachedLive := s.asyncLive()
@@ -64,27 +108,14 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 		// The editor chooses its dwell threshold from this fact.
 		"detached_live": detachedLive,
 	})
-	switch {
-	case wasViewed && !viewed:
-		rowLog.Debug("daemon.sidebar.row_viewed_cleared",
-			"the row left its read turn-end state, so it is drawn FULL", dlog.Context{
-				"status": armName,
-				"result": s.result.String(),
-			})
-	case armChanged && !wasViewed && viewed:
-		rowLog.Debug("daemon.sidebar.row_viewed_restored",
-			"the row returned to its turn-end arm with the result already read, so it is drawn PARTIAL", dlog.Context{
-				"status": armName,
-			})
-	}
-	r.assertArm(armName, rowLog)
 
 	out := &frontendv1.RosterRow{
 		Workspace: &frontendv1.RosterRowWorkspace{
-			Workspace: &workspacev1.WorkspaceRef{Id: string(rec.ID), Dir: rec.Dir}},
+			Workspace:  &workspacev1.WorkspaceRef{Id: string(rec.ID), Dir: rec.Dir},
+			Repository: r.repositoryRef(rec.Repo, rowLog)},
 		Name:    &frontendv1.RosterRowName{Text: rec.Name},
 		Current: &frontendv1.RosterRowCurrent{Current: current},
-		When:    when(rec, s),
+		When:    when(rec, s, viewed),
 		Detail:  detail(rec, s.summary),
 		Closed:  &frontendv1.RosterRowClosed{Closed: closed},
 		// ALWAYS SET: an editor opens the workspace only once this leaves
@@ -199,18 +230,30 @@ func recedes(rec wsm.Workspace, session *wsm.Session) bool {
 // alone (lastTurnEnded) and NEVER LastSelectedAt or LastActivityAt —
 // reintroducing either here is the exact regression the sidebar tests lock.
 //
+// ONE EXCEPTION: a VIEWED row (its result read, drawn PARTIAL, filed under the
+// viewed band) shows how long since the user last viewed it (lastViewed),
+// because for a workspace whose result has been read that is the useful fact.
+//
 // Precedence: MERGED WINS (that the workspace is done is the more interesting
-// fact), else the last turn end, else the creation time. The last arm never
+// fact), else the last view of a viewed row, else the last turn end, else the
+// creation time. The last arm never
 // leaves the oneof unset for a registered workspace — every one has a creation
 // time — so a workspace whose first turn is still running falls back to
 // "created" rather than drawing empty.
-func when(rec wsm.Workspace, s *wsState) *frontendv1.RosterRowWhen {
+func when(rec wsm.Workspace, s *wsState, viewed bool) *frontendv1.RosterRowWhen {
 	out := &frontendv1.RosterRowWhen{}
 	ended := lastTurnEnded(rec, s)
+	var seen *time.Time
+	if viewed {
+		seen = lastViewed(rec, s)
+	}
 	switch {
 	case rec.MergedAt != nil:
 		out.Shown = &frontendv1.RosterRowWhen_Merged{
 			Merged: &frontendv1.RosterRowWhenMerged{AtMs: rec.MergedAt.UnixMilli()}}
+	case seen != nil:
+		out.Shown = &frontendv1.RosterRowWhen_Viewed{
+			Viewed: &frontendv1.RosterRowWhenViewed{AtMs: seen.UnixMilli()}}
 	case ended != nil:
 		out.Shown = &frontendv1.RosterRowWhen_TurnEnded{
 			TurnEnded: &frontendv1.RosterRowWhenTurnEnded{AtMs: ended.UnixMilli()}}
@@ -227,6 +270,13 @@ func when(rec wsm.Workspace, s *wsState) *frontendv1.RosterRowWhen {
 // moves the column at the close itself, before any registry republish.
 func lastTurnEnded(rec wsm.Workspace, s *wsState) *time.Time {
 	return laterInstant(rec.LastTurnEndedAt, s.turnEndedAt)
+}
+
+// lastViewed is when the user last looked at the workspace: the later of the
+// instant its result was read (wsState.readAt) and its durable last selection,
+// nil when neither is on record.
+func lastViewed(rec wsm.Workspace, s *wsState) *time.Time {
+	return laterInstant(s.readAtNow(), rec.LastSelectedAt)
 }
 
 // laterInstant is the later of two instants either of which may be absent: nil

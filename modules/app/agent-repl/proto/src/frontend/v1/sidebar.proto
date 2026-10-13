@@ -29,6 +29,9 @@
 //   │   │ summary …  │                      │
 //   │   └────────────┘                      │
 //   │   ? closed-row  (greyed)        5d    │  inactive arm · RosterRowClosed
+//   │ ▾ Viewed                              │  RosterViewedSection
+//   │   ● read-row                    12m   │    when = time since last viewed
+//   │ ▸ Hidden                     (2)      │  RosterHiddenSection (folded)
 //   │ ▸ Recently Merged            (3)      │  RosterMergedSection (folded)
 //   │     repo-name                         │    RosterMergedRepoGroup
 //   └───────────────────────────────────────┘
@@ -71,6 +74,15 @@ message WorkspaceRoster {
   // exactly as for a workspace of a collapsed repository section. A merged
   // workspace is in recently_merged, never here. Always set.
   RosterHiddenSection hidden = 9;
+  // Workspaces whose last turn's result the user has already READ — every
+  // row that carries the viewed marker (RosterRowViewed) — hoisted out of
+  // every grouping above and rendered under EVERY one, directly beneath the
+  // grouping and above the hidden band: a read workspace is less important
+  // than one with work running or a result still to read. A hidden workspace
+  // is in `hidden` and a merged one in `recently_merged`, never here, read
+  // or not. A viewed workspace keeps its editor tab exactly as it would in a
+  // grouping. Always set.
+  RosterViewedSection viewed = 12;
   // THE EDITOR'S TAB BAR, in registry order. The registry holds one order
   // of every workspace; this is that order restricted to open workspaces,
   // and it is independent of the groupings above, so repositories
@@ -625,6 +637,47 @@ message RosterHiddenSectionExpanded {}
 // A collapsed hidden-workspaces section. DELIBERATELY EMPTY: the arm is the fact.
 message RosterHiddenSectionCollapsed {}
 
+// The viewed-workspaces section: header and rows. It has no key of its own --
+// the roster carries exactly one, so its fold identity is fixed.
+//
+// MEMBERSHIP IS THE VIEWED MARKER. A row is here exactly when it carries
+// RosterRowViewed (PARTIAL), so the band and the marker can never disagree:
+// the daemon resolves both from one read fact in one render. A row that
+// leaves its read turn end (a new turn, live detached work) leaves the band
+// in the same push and returns to its grouping.
+//
+// ROSTER ORDER, NEVER RECENCY. Rows keep the registry's one order (the order
+// every grouping and the tab bar follow), nested by lineage among the viewed
+// workspaces alone, as a repository section's are among its own. The
+// when-column says how long ago each was viewed (RosterRowWhen.viewed); it
+// does not sort the band.
+//
+// A SECTION WITH NO ROWS IS NOT DRAWN: the wire always carries it, and the
+// client leaves it out of the rail until a workspace is viewed.
+message RosterViewedSection {
+  // The label and the count a folded section draws beside it.
+  RosterSectionHeader header = 1;
+  // The viewed workspaces, in roster order.
+  RosterRows rows = 2;
+  // WHETHER THE SECTION IS FOLDED. DAEMON-HELD (UpdateSidebarView), so every
+  // page draws the same fold. It folds the SIDEBAR's rows only: a viewed
+  // workspace's tab is drawn or withheld exactly as it would be in a grouping,
+  // whichever arm is set. Never folded or unfolded by anyone, it is EXPANDED.
+  // Never unset on the wire.
+  oneof fold {
+    // The viewed rows are shown in the sidebar.
+    RosterViewedSectionExpanded expanded = 3;
+    // The viewed rows are folded away; the header and its count stay.
+    RosterViewedSectionCollapsed collapsed = 4;
+  }
+}
+
+// An expanded viewed-workspaces section. DELIBERATELY EMPTY: the arm is the fact.
+message RosterViewedSectionExpanded {}
+
+// A collapsed viewed-workspaces section. DELIBERATELY EMPTY: the arm is the fact.
+message RosterViewedSectionCollapsed {}
+
 // A section header as repos, maturity stages and the merged section draw it.
 // The fold it toggles is the SECTION's (RosterRepoSection.fold,
 // RosterMaturitySection.fold, RosterMergedSection.fold), never an element of
@@ -940,6 +993,14 @@ message RosterRow {
 // call echoes back.
 message RosterRowWorkspace {
   workspace.v1.WorkspaceRef workspace = 1;
+  // The repository the workspace belongs to: the same key its repository
+  // section carries (RosterRepoSection.key). STATED ON THE ROW because a row
+  // need not sit in its repository's section -- the viewed, hidden and
+  // recently-merged bands hoist rows out of every grouping -- so a client
+  // that needs a workspace's repository (the default repository of a create
+  // started from it, the queue a merge-queue verb names) reads it here and
+  // never infers it from which section the row was found in. Always set.
+  workspace.v1.RepositoryRef repository = 2;
 }
 
 // A row's display name. Never an identity or a join key.
@@ -971,12 +1032,14 @@ message RosterRowCurrent {
   bool current = 1;
 }
 
-// The when-column: ONE value, chosen by the daemon. The column reflects when
-// the workspace's LAST TURN ENDED — how long it has sat since it last
+// The when-column: ONE value, chosen by the daemon. Except on a viewed row
+// (below), the column reflects when the workspace's LAST TURN ENDED — how long it has sat since it last
 // finished work — never when it was last VIEWED, so it is STABLE across mere
 // selection and navigation, and it does not reset when a new turn starts. The
 // daemon's precedence is: MERGED wins ("the workspace is done" is the more
-// interesting fact); else TURN_ENDED (the last turn close); else CREATED (a
+// interesting fact); else VIEWED, on a row carrying the viewed marker
+// (RosterRowViewed), whose read result makes "how long since the user last
+// looked" the useful fact; else TURN_ENDED (the last turn close); else CREATED (a
 // registered workspace always has a creation time, and a workspace whose
 // first turn is still running has no turn end yet). The client renders
 // whichever arm arrives and applies no precedence of its own.
@@ -998,7 +1061,23 @@ message RosterRowWhen {
     RosterRowWhenMerged merged = 2;
     RosterRowWhenCreated created = 4;
     RosterRowWhenTurnEnded turn_ended = 5;
+    RosterRowWhenViewed viewed = 6;
   }
+}
+
+// When the user last VIEWED the workspace, in epoch MILLISECONDS: the later of
+// the instant its last turn's result was read (the editor's dwell report,
+// MarkWorkspaceViewed, or a completed /clear or compaction) and its last
+// selection (RosterRow.last_selected). Renders as relative age ("3m", "2h").
+//
+// SET ONLY ON A ROW CARRYING THE VIEWED MARKER, so it appears exactly on the
+// rows of the viewed band (and on a hidden row that is also viewed). Both
+// instants are durable, so the age survives a restart of the daemon and of
+// every client. A viewed row with neither instant on record (a result read
+// before the read instant was kept, on a workspace never selected) falls to
+// the next arm in the precedence.
+message RosterRowWhenViewed {
+  int64 at_ms = 1;
 }
 
 // When the workspace's merge settled, in epoch MILLISECONDS.

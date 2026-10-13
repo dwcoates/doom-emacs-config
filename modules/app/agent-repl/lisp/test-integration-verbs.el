@@ -1736,7 +1736,7 @@ rest of this suite already asserts against."
              (divergence . ((pending . ()))) (expanded . ()))])))
     (task . ((sections . [])))
     (maturity . ((sections . [])))
-    (hidden . ((header . ((label . ((text . "Hidden Workspaces"))) (count . ((workspaces . 0)))))
+    (hidden . ((header . ((label . ((text . "Hidden"))) (count . ((workspaces . 0)))))
                (rows . ((rows . [])))
                (expanded . ())))
     (recentlyMerged . ((header . ((label . ((text . "recently merged"))) (count . ((workspaces . 1)))))
@@ -1763,7 +1763,7 @@ schema the rest of the suite does."
            (agent-repl-itest--await-subscriber ,daemon "roster")
            (agent-repl-itest--push
             ,daemon "roster"
-            (list (cons 'roster (agent-repl-itest--with-tab-bar
+            (list (cons 'roster (agent-repl-itest--as-the-daemon-sends
                                  (agent-repl-itest-verbs--roster ,rows)))))
            (agent-repl-itest--wait-until (lambda () agent-repl-roster-view) nil
                                          "the roster push to reach the view")

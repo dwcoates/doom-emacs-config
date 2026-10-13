@@ -95,7 +95,7 @@ OVERRIDES replaces top-level entries (notably `current')."
              (divergence . ((pending . ()))) (expanded . ()))])))
      (task . ((sections . [])))
      (maturity . ((sections . [])))
-     (hidden . ((header . ((label . ((text . "Hidden Workspaces"))) (count . ((workspaces . 0)))))
+     (hidden . ((header . ((label . ((text . "Hidden"))) (count . ((workspaces . 0)))))
                 (rows . ((rows . [])))
                 (expanded . ())))
      (recentlyMerged . ((header . ((label . ((text . "recently merged"))) (count . ((workspaces . 1)))))
@@ -115,7 +115,7 @@ ROWS is a vector of RosterRow alists; ARM is the `drawn' arm's key symbol,
 
 (defun agent-repl-itest-roster--push (daemon roster)
   "Push ROSTER on DAEMON's roster stream."
-  (agent-repl-itest--push daemon "roster" `((roster . ,(agent-repl-itest--with-tab-bar roster)))))
+  (agent-repl-itest--push daemon "roster" `((roster . ,(agent-repl-itest--as-the-daemon-sends roster)))))
 
 (defmacro agent-repl-itest-roster--with-subscription (daemon &rest body)
   "Subscribe the roster consumer to DAEMON, run BODY, then tear it down."
@@ -154,7 +154,7 @@ order apart from declaration order."
              (divergence . ((pending . ()))) (expanded . ()))])))
     (task . ((sections . [])))
     (maturity . ((sections . [])))
-    (hidden . ((header . ((label . ((text . "Hidden Workspaces"))) (count . ((workspaces . 0)))))
+    (hidden . ((header . ((label . ((text . "Hidden"))) (count . ((workspaces . 0)))))
                (rows . ((rows . [])))
                (expanded . ())))
     (recentlyMerged . ((header . ((label . ((text . "recently merged"))) (count . ((workspaces . 1)))))
@@ -1681,7 +1681,7 @@ the composer gate alone."
 Stored and replayed to the next subscriber, which is how a reconnect's
 re-pull is staged without driving the real link/reconnect machinery that
 test-integration-link.el owns."
-  (agent-repl-itest--push daemon "roster" `((roster . ,(agent-repl-itest--with-tab-bar roster))) nil t))
+  (agent-repl-itest--push daemon "roster" `((roster . ,(agent-repl-itest--as-the-daemon-sends roster))) nil t))
 
 ;; audit-3 #33
 (ert-deftest agent-repl-itest-roster-rename-re-keys-the-host-entry ()
@@ -2051,7 +2051,7 @@ repository's rows do: in the tab order, out of the drawn order."
          daemon (agent-repl-itest-roster--roster
                  (list (agent-repl-itest-roster--row "ws-repo" "ws-repo" 'ready))
                  `(hidden
-                   . ((header . ((label . ((text . "Hidden Workspaces"))) (count . ((workspaces . 1)))))
+                   . ((header . ((label . ((text . "Hidden"))) (count . ((workspaces . 1)))))
                       (rows . ((rows . ,(vector hidden-row))))
                       (expanded . ())))))
         ;; Assert.
@@ -2059,6 +2059,29 @@ repository's rows do: in the tab order, out of the drawn order."
          (lambda () (equal (agent-repl-roster-tab-order) '("ws-repo" "ws-hidden")))
          nil "the repo section's row, then the hidden row")
         (should (equal (agent-repl-roster-drawn-tab-order) '("ws-repo")))))))
+
+(ert-deftest agent-repl-itest-roster-a-viewed-row-keeps-a-drawn-tab ()
+  "A row in the viewed band keeps its tab, drawn, after the repository rows.
+sidebar.proto RosterViewedSection: a viewed workspace keeps its editor tab
+exactly as it would in a grouping."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      (let ((viewed-row (agent-repl-itest-roster--row "ws-viewed" "ws-viewed" 'done
+                                                     '(viewed . ()))))
+        ;; Act.
+        (agent-repl-itest-roster--push
+         daemon (agent-repl-itest-roster--roster
+                 (list (agent-repl-itest-roster--row "ws-repo" "ws-repo" 'ready))
+                 `(viewed
+                   . ((header . ((label . ((text . "Viewed"))) (count . ((workspaces . 1)))))
+                      (rows . ((rows . ,(vector viewed-row))))
+                      (expanded . ())))))
+        ;; Assert.
+        (agent-repl-itest--wait-until
+         (lambda () (equal (agent-repl-roster-tab-order) '("ws-repo" "ws-viewed")))
+         nil "the repo section's row, then the viewed row")
+        (should (equal (agent-repl-roster-drawn-tab-order) '("ws-repo" "ws-viewed")))))))
 
 ;; audit-3 #42
 (ert-deftest agent-repl-itest-roster-priority-badge-clears-when-the-row-drops-it ()
