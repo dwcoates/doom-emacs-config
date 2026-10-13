@@ -110,6 +110,7 @@ func newManager(t *testing.T, h *fakeHost) Manager {
 		Alive:     func(int) bool { return false },
 		Log:       &fakeLog{},
 		Now:       tickingClock(),
+		LockBound: 10 * time.Second,
 	}
 }
 
@@ -918,4 +919,190 @@ func TestProcessAliveAnswersTrueForThisProcess(t *testing.T) {
 	if !got {
 		t.Fatal("ProcessAlive(self) = false")
 	}
+}
+
+// holdRegistryLock takes the registry lock from outside the Manager, as
+// another run would, and answers its release.
+func holdRegistryLock(t *testing.T, m Manager) func() {
+	t.Helper()
+	if err := os.MkdirAll(m.Registry, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(filepath.Join(m.Registry, registryLockName), os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	released := false
+	release := func() {
+		if !released {
+			released = true
+			f.Close()
+		}
+	}
+	t.Cleanup(release)
+	return release
+}
+
+const lockLsof = "COMMAND   PID USER   FD   TYPE DEVICE SIZE/OFF NODE NAME\ntestrun  7583 me    3u    REG   1,30       0    5 /tmp/agent-repl-test-ramdisks/registry.mutex\n"
+
+func TestLockRegistryTakesAFreeLock(t *testing.T) {
+	// Arrange
+	m := newManager(t, &fakeHost{})
+	if err := os.MkdirAll(m.Registry, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	unlock, err := m.lockRegistry()
+
+	// Assert
+	if err != nil {
+		t.Fatalf("lockRegistry = %v, want the free lock taken", err)
+	}
+	if err := unlock(); err != nil {
+		t.Fatalf("unlock: %v", err)
+	}
+}
+
+func TestLockRegistryTakesALockItsHolderLetsGoOf(t *testing.T) {
+	// Arrange
+	m := newManager(t, &fakeHost{})
+	release := holdRegistryLock(t, m)
+	answered := make(chan error, 1)
+	go func() {
+		unlock, err := m.lockRegistry()
+		if err == nil {
+			err = unlock()
+		}
+		answered <- err
+	}()
+
+	// Act
+	release()
+
+	// Assert
+	if err := <-answered; err != nil {
+		t.Fatalf("lockRegistry = %v, want the lock taken once its holder let go", err)
+	}
+}
+
+func TestLockRegistryTimesOutOnAStuckHolder(t *testing.T) {
+	// Arrange
+	m := newManager(t, &fakeHost{})
+	m.LockBound = 20 * time.Millisecond
+	holdRegistryLock(t, m)
+
+	// Act
+	_, err := m.lockRegistry()
+
+	// Assert
+	var stuck *LockTimeoutError
+	if !errors.As(err, &stuck) || stuck.Path != filepath.Join(m.Registry, registryLockName) || stuck.Bound != 20*time.Millisecond {
+		t.Fatalf("lockRegistry = %v, want a LockTimeoutError naming the lock and its bound", err)
+	}
+}
+
+func TestLockRegistryNamesTheProcessesWithTheLockOpen(t *testing.T) {
+	// Arrange
+	m := newManager(t, &fakeHost{lsof: lockLsof})
+	m.LockBound = 20 * time.Millisecond
+	holdRegistryLock(t, m)
+
+	// Act
+	_, err := m.lockRegistry()
+
+	// Assert
+	var stuck *LockTimeoutError
+	if !errors.As(err, &stuck) || stuck.Holders != "testrun[7583]" {
+		t.Fatalf("lockRegistry = %v, want testrun[7583] named", err)
+	}
+}
+
+func TestLockRegistryLeavesThisProcessOutOfTheHolders(t *testing.T) {
+	// Arrange
+	self := fmt.Sprintf("COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\ntestrun %d me 3u REG 1,30 0 5 /x\n", os.Getpid())
+	m := newManager(t, &fakeHost{lsof: self})
+	m.LockBound = 20 * time.Millisecond
+	holdRegistryLock(t, m)
+
+	// Act
+	_, err := m.lockRegistry()
+
+	// Assert
+	var stuck *LockTimeoutError
+	if !errors.As(err, &stuck) || stuck.Holders != "no other process lsof could see" {
+		t.Fatalf("lockRegistry = %v, want this process left out", err)
+	}
+}
+
+func TestLockRegistrySaysWhenLsofSeesNoOtherProcess(t *testing.T) {
+	// Arrange: lsof answers exit 1 and no output when nothing has it open.
+	m := newManager(t, &fakeHost{lsofErr: errors.New("lsof -n -P -- x: exit status 1: ")})
+	m.LockBound = 20 * time.Millisecond
+	holdRegistryLock(t, m)
+
+	// Act
+	_, err := m.lockRegistry()
+
+	// Assert
+	var stuck *LockTimeoutError
+	if !errors.As(err, &stuck) || stuck.Holders != "no other process lsof could see" {
+		t.Fatalf("lockRegistry = %v, want lsof's empty answer stated", err)
+	}
+}
+
+func TestLockRegistryNamesAnLsofFailureInPlaceOfTheHolders(t *testing.T) {
+	// Arrange
+	m := newManager(t, &fakeHost{lsofErr: errors.New("lsof did not answer within 600ms")})
+	m.LockBound = 20 * time.Millisecond
+	holdRegistryLock(t, m)
+
+	// Act
+	_, err := m.lockRegistry()
+
+	// Assert
+	var stuck *LockTimeoutError
+	if !errors.As(err, &stuck) || stuck.Holders != "unknown, lsof failed: lsof did not answer within 600ms" {
+		t.Fatalf("lockRegistry = %v, want lsof's failure named", err)
+	}
+}
+
+func TestLockRegistryRunsLsofWithinItsBound(t *testing.T) {
+	// Arrange
+	h := &fakeHost{}
+	m := newManager(t, h)
+	m.LockBound = 20 * time.Millisecond
+	holdRegistryLock(t, m)
+
+	// Act
+	m.lockRegistry() //nolint:errcheck // the bound is the subject
+
+	// Assert
+	if got := h.bounds["lsof -n -P -- "+filepath.Join(m.Registry, registryLockName)]; got != LsofBound {
+		t.Fatalf("lsof ran under %s, want LsofBound %s", got, LsofBound)
+	}
+}
+
+func TestLockRegistryLetsGoOfALockTakenPastItsBound(t *testing.T) {
+	// Arrange: a wait that timed out, then its holder let go.
+	m := newManager(t, &fakeHost{})
+	m.LockBound = 20 * time.Millisecond
+	release := holdRegistryLock(t, m)
+	if _, err := m.lockRegistry(); err == nil {
+		t.Fatal("lockRegistry took a held lock")
+	}
+	release()
+	m.LockBound = 10 * time.Second
+
+	// Act: the abandoned wait takes the lock and must let it go again.
+	unlock, err := m.lockRegistry()
+
+	// Assert
+	if err != nil {
+		t.Fatalf("lockRegistry = %v, want the lock free once the abandoned wait let go", err)
+	}
+	unlock() //nolint:errcheck // cleanup
 }
