@@ -236,8 +236,11 @@ func TestAResolutionThatGivesUpFailsInConflictsLeavesTheRebaseAndLetsTheNextMerg
 	if _, err := s.d.Client().MergeWorkspace(s.d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: behind.ws, Source: harness.OwnBranch(false)})); err != nil {
 		t.Fatalf("MergeWorkspace(behind): %v", err)
 	}
-	s.awaitStartTurn(t, 2)
-	pushConcludedTurn(s.f.shim, mainAgent, "gave-up")
+	// The session gives up on every attempt the commit's conflict gets.
+	for attempt := 1; attempt <= 3; attempt++ {
+		s.awaitStartTurn(t, 1+attempt)
+		pushConcludedTurn(s.f.shim, mainAgent, "gave-up")
+	}
 
 	// Assert: merge failed in conflicts, turquoise on the roster, rebase left.
 	awaitFooter(t, s.f, footer, "merge failed in conflicts", func(v *frontendv1.FooterView) bool {
