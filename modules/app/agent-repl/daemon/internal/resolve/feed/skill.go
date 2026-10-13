@@ -58,6 +58,7 @@ func (r *resolver) drawSkill(s *wsState, at placement, act *conversationv1.Agent
 		card.Invocation = &frontendv1.FeedSkillInvocation{Text: u.input}
 		loaded := &frontendv1.FeedSkillLoaded{
 			Document: &frontendv1.FeedSkillDocument{Markdown: state.Success.GetDocument().GetMarkdown()},
+			Runtime:  settledRuntime(clockVerbRan, u.startedAtMs, state.Success.GetSettledAt()),
 		}
 		// The consent line: WHAT INVOKING IT PERMITS. Absent when the skill
 		// declared none — absence draws no line, never an empty one.
@@ -86,7 +87,8 @@ func (r *resolver) drawSkill(s *wsState, at placement, act *conversationv1.Agent
 		}
 		card.Invocation = &frontendv1.FeedSkillInvocation{Text: u.input}
 		card.Outcome = &frontendv1.FeedSkill_Failed{Failed: &frontendv1.FeedSkillFailed{
-			Text: skillFailureText(state.Failure.GetError()),
+			Text:    skillFailureText(state.Failure.GetError()),
+			Runtime: settledRuntime(clockVerbRan, u.startedAtMs, state.Failure.GetError().GetSettledAt()),
 		}}
 	default:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawSkill", "branch": "default"})

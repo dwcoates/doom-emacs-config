@@ -356,3 +356,44 @@ func TestASkillFailureKeepsTheHeldStartsArguments(t *testing.T) {
 		t.Fatalf("invocation = %q, want the held start's full line", got)
 	}
 }
+
+func TestALoadedSkillStatesHowLongItRan(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.skillFrame("unit-1", &conversationv1.AgentSkillUseStart{
+		Skill:     &conversationv1.AgentSkillName{Name: "graphify"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Act.
+	h.skillFrame("unit-1", &conversationv1.AgentSkillUseSuccess{
+		Skill:     &conversationv1.AgentSkillName{Name: "graphify"},
+		Document:  &conversationv1.AgentSkillDocument{Markdown: "# doc"},
+		SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: 1_340},
+	})
+
+	// Assert.
+	if got := h.skillCard().GetLoaded().GetRuntime().GetText(); got != "ran 340 ms" {
+		t.Fatalf("runtime = %q, want %q", got, "ran 340 ms")
+	}
+}
+
+func TestAFailedSkillStatesHowLongItRan(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.skillFrame("unit-1", &conversationv1.AgentSkillUseStart{
+		Skill:     &conversationv1.AgentSkillName{Name: "graphify"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Act.
+	h.skillFrame("unit-1", &conversationv1.AgentSkillUseFailure{
+		Skill: &conversationv1.AgentSkillName{Name: "graphify"},
+		Error: &conversationv1.AgentToolFailure{SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: 3_000}},
+	})
+
+	// Assert.
+	if got := h.skillCard().GetFailed().GetRuntime().GetText(); got != "ran 2 s" {
+		t.Fatalf("runtime = %q, want %q", got, "ran 2 s")
+	}
+}

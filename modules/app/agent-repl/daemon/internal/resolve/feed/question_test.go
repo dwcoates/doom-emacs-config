@@ -354,3 +354,92 @@ func TestASettledAskIsNotStandingAfterAStaleStart(t *testing.T) {
 		t.Fatalf("StandingAsk() = %+v, want none after the ask settled", ask)
 	}
 }
+
+// settledAfter is a settle instant SECONDS after an ask posed at 1_000, with
+// that start restated, as the shim stamps it.
+func settledAfter(seconds int64) *conversationv1.AgentActivitySettledAt {
+	return &conversationv1.AgentActivitySettledAt{
+		AtMs:      1_000 + seconds*1_000,
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	}
+}
+
+func TestAnAnsweredAskStatesHowLongTheUserWasAsked(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	batch := twoQuestionBatch()
+	h.pose("ask-1", &conversationv1.AgentQuestionStart{
+		Batch: batch, StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Act.
+	h.pose("ask-1", &conversationv1.AgentQuestionSuccess{
+		Batch:     batch,
+		Outcome:   &conversationv1.AgentQuestionSuccess_Answered{Answered: &conversationv1.AgentQuestionAnswers{}},
+		SettledAt: settledAfter(134),
+	})
+
+	// Assert.
+	if got := h.questionCard().GetAnswered().GetRuntime().GetText(); got != "waited 2m 14s" {
+		t.Fatalf("runtime = %q, want %q", got, "waited 2m 14s")
+	}
+}
+
+func TestAnExpiredAskStatesHowLongItWaited(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	batch := twoQuestionBatch()
+	h.pose("ask-1", &conversationv1.AgentQuestionStart{
+		Batch: batch, StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Act.
+	h.pose("ask-1", &conversationv1.AgentQuestionSuccess{
+		Batch:     batch,
+		Outcome:   &conversationv1.AgentQuestionSuccess_Unanswered{Unanswered: &conversationv1.AgentQuestionUnanswered{}},
+		SettledAt: settledAfter(30),
+	})
+
+	// Assert.
+	if got := h.questionCard().GetExpired().GetRuntime().GetText(); got != "waited 30 s" {
+		t.Fatalf("runtime = %q, want %q", got, "waited 30 s")
+	}
+}
+
+func TestAnAskThatFailedStatesItsWaitFromTheFailuresInstant(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.pose("ask-1", &conversationv1.AgentQuestionStart{
+		Batch: twoQuestionBatch(), StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Act: the failure restates no start, so the start held is the one.
+	h.pose("ask-1", &conversationv1.AgentQuestionFailure{
+		Error: &conversationv1.AgentToolFailure{SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: 6_000}},
+	})
+
+	// Assert.
+	if got := h.questionCard().GetExpired().GetRuntime().GetText(); got != "waited 5 s" {
+		t.Fatalf("runtime = %q, want %q", got, "waited 5 s")
+	}
+}
+
+func TestASettledAskWithNoSettleInstantStatesNoWait(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	batch := twoQuestionBatch()
+	h.pose("ask-1", &conversationv1.AgentQuestionStart{
+		Batch: batch, StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Act: a frame stored before settles stated their instant.
+	h.pose("ask-1", &conversationv1.AgentQuestionSuccess{
+		Batch:   batch,
+		Outcome: &conversationv1.AgentQuestionSuccess_Answered{Answered: &conversationv1.AgentQuestionAnswers{}},
+	})
+
+	// Assert.
+	if rt := h.questionCard().GetAnswered().Runtime; rt != nil {
+		t.Fatalf("runtime = %+v, want unset rather than one measured on the daemon's clock", rt)
+	}
+}

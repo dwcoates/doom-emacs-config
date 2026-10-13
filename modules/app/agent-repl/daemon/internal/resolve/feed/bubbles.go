@@ -384,7 +384,13 @@ func (r *resolver) drawHook(s *wsState, at placement, act *conversationv1.AgentA
 	case *conversationv1.AgentHook_NonBlockingError:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawHook", "branch": "case *conversationv1.AgentHook_NonBlockingError"})
 		card.Headline = &frontendv1.FeedHookHeadline{Text: hookFailedHeadline(u.input)}
-		failed := &frontendv1.FeedHookFailed{ExitCode: frame.NonBlockingError.GetExitCode()}
+		failed := &frontendv1.FeedHookFailed{
+			ExitCode: frame.NonBlockingError.GetExitCode(),
+			// The hook states its own duration, so the span is drawn as stated.
+			Runtime: &frontendv1.FeedToolCallRuntime{
+				Text: formatClockSpan(clockVerbRan, frame.NonBlockingError.GetDurationMs()),
+			},
+		}
 		if text := hookOutputText(frame.NonBlockingError.GetOutput()); text != "" {
 			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "text := hookOutputText(frame.NonBlockingError.GetOutput()); text != \"\""})
 			failed.Output = &frontendv1.FeedHookOutput{Text: text}
