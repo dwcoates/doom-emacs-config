@@ -13,6 +13,10 @@
                                             (or load-file-name buffer-file-name)))
       nil t)
 
+(defconst agent-repl-test-panels--lisp-dir
+  (file-name-directory (or load-file-name buffer-file-name))
+  "The directory holding the elisp sources, for the source scans below.")
+
 ;; persp-mode's hook, bound dynamically by the snapshot-count tests that
 ;; drive its deactivation protocol; persp-mode itself is not loaded here.
 (defvar persp-before-deactivate-functions)
@@ -1647,6 +1651,56 @@ foreign directory."
               (should (eq (window-buffer (selected-window)) input-buf))))
         (when (buffer-live-p input-buf) (kill-buffer input-buf))
         (when (buffer-live-p webview-buf) (kill-buffer webview-buf))))))
+
+;;;; ---- Tests: webview-window ----
+
+(ert-deftest agent-repl-test-panels-webview-window-finds-the-shown-webview ()
+  "The lookup answers the window showing the workspace's webview."
+  (agent-repl-test--with-clean-state
+    (let ((webview-buf (get-buffer-create "*webview-window-shown*")))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "test-ws" :frontend-buffer webview-buf)
+            (delete-other-windows)
+            (set-window-buffer (selected-window) webview-buf)
+            (should (eq (agent-repl--webview-window "test-ws") (selected-window))))
+        (when (buffer-live-p webview-buf) (kill-buffer webview-buf))))))
+
+(ert-deftest agent-repl-test-panels-webview-window-nil-when-not-shown ()
+  "A live webview no window shows answers nil."
+  (agent-repl-test--with-clean-state
+    (let ((webview-buf (get-buffer-create "*webview-window-hidden*"))
+          (other-buf (get-buffer-create "*webview-window-other*")))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "test-ws" :frontend-buffer webview-buf)
+            (delete-other-windows)
+            (set-window-buffer (selected-window) other-buf)
+            (should-not (agent-repl--webview-window "test-ws")))
+        (when (buffer-live-p webview-buf) (kill-buffer webview-buf))
+        (when (buffer-live-p other-buf) (kill-buffer other-buf))))))
+
+(ert-deftest agent-repl-test-panels-webview-window-nil-without-a-live-webview ()
+  "A workspace whose webview buffer is dead or unset answers nil."
+  (agent-repl-test--with-clean-state
+    (let ((webview-buf (get-buffer-create "*webview-window-dead*")))
+      (agent-repl--ws-put "test-ws" :frontend-buffer webview-buf)
+      (kill-buffer webview-buf)
+      (should-not (agent-repl--webview-window "test-ws"))
+      (should-not (agent-repl--webview-window "no-such-ws")))))
+
+(ert-deftest agent-repl-test-panels-webview-window-is-the-one-lookup ()
+  "Every caller handing the keyboard to the feed looks the window up through
+`agent-repl--webview-window', never by hand off `:frontend-buffer'."
+  (let ((hits 0))
+    (dolist (file '("panels.el" "verbs.el"))
+      (with-temp-buffer
+        (insert-file-contents (expand-file-name file agent-repl-test-panels--lisp-dir))
+        (goto-char (point-min))
+        (while (re-search-forward "(get-buffer-window[[:space:]]+webview)" nil t)
+          (setq hits (1+ hits)))))
+    ;; The helper's own body is the one site.
+    (should (= hits 1))))
 
 ;;;; ---- Tests: focus-input show-or-focus branch ----
 
