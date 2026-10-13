@@ -326,6 +326,19 @@ describe("the when-column", () => {
     expect(drawn.querySelector(".when")?.textContent).toBe("1h");
   });
 
+  it("draws a hidden workspace's age from its hide", () => {
+    const drawn = drawRosterRow(
+      row({ id: "ws-1", when: { case: "hidden", value: { atMs: BigInt(NOW - 120_000) } } }),
+      sidebarContext(),
+      "R",
+      "hidden",
+    );
+    expect([drawn.querySelector(".when")?.getAttribute("data-when"), drawn.querySelector(".when")?.textContent]).toEqual([
+      "hidden",
+      "2m",
+    ]);
+  });
+
 });
 
 describe("the detail panel", () => {

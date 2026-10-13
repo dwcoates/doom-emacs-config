@@ -42,6 +42,7 @@ import type {
   RosterRowPriorityBadge,
   RosterRowWhen,
   RosterRowWhenCreated,
+  RosterRowWhenHidden,
   RosterRowWhenMerged,
   RosterRowWhenTurnEnded,
   RosterRowReviving,
@@ -435,6 +436,9 @@ export function drawRosterRowWhen(
     case "merged":
       tickAge(when, sc, drawRosterRowWhenMerged(shown.value, `${path}.merged`));
       return when;
+    case "hidden":
+      tickAge(when, sc, drawRosterRowWhenHidden(shown.value, `${path}.hidden`));
+      return when;
     default: {
       const other: { case: string } = shown;
       return unreachableArm(`${path}.shown`, other.case);
@@ -454,6 +458,11 @@ export function drawRosterRowWhenCreated(u: RosterRowWhenCreated, path: string):
 
 /** When the workspace's merge settled, as an epoch instant. */
 export function drawRosterRowWhenMerged(u: RosterRowWhenMerged, path: string): number {
+  return msOf(u.atMs, `${path}.at_ms`);
+}
+
+/** When the workspace was hidden, as an epoch instant. */
+export function drawRosterRowWhenHidden(u: RosterRowWhenHidden, path: string): number {
   return msOf(u.atMs, `${path}.at_ms`);
 }
 

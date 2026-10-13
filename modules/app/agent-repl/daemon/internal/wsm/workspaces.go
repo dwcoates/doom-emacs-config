@@ -44,7 +44,7 @@ func normalizeDir(dir string) (string, error) {
 // the row, so it cannot drift from the closes it summarizes: CloseTurn's one
 // write of closed_at is the only edge, and turns_by_workspace keeps the MAX an
 // index range.
-const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at, result_end, result_read, hidden, merge_of, merge_request_id, merge_fork_head, landed_head, landed_at, commit_count, place, merge_revealed, ` +
+const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at, result_end, result_read, hidden, hidden_at, dwelt_at, merge_of, merge_request_id, merge_fork_head, landed_head, landed_at, commit_count, place, merge_revealed, ` +
 	`EXISTS (SELECT 1 FROM creation_jobs WHERE creation_jobs.workspace_id = workspaces.id AND creation_jobs.one_shot = 1), ` +
 	`EXISTS (SELECT 1 FROM merge_queue WHERE merge_queue.workspace_id = workspaces.id ` +
 	`OR merge_queue.workspace_id IN (SELECT merge_ws.id FROM workspaces AS merge_ws WHERE merge_ws.merge_of = workspaces.id)), ` +
@@ -72,8 +72,10 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		landAt   sql.NullInt64
 		commits  sql.NullInt64
 		ended    sql.NullInt64
+		hiddenAt sql.NullInt64
+		dweltAt  sql.NullInt64
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &mergeOf, &request, &forkHead, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &ws.OneShot, &ws.MergePending, &ended); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &hiddenAt, &dweltAt, &mergeOf, &request, &forkHead, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &ws.OneShot, &ws.MergePending, &ended); err != nil {
 		return Workspace{}, err
 	}
 	if mergeOf.Valid != request.Valid {
@@ -127,6 +129,14 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 	ws.LastTurnEndedAt = optTime(ended)
 	ws.MergedAt = optTime(merged)
 	ws.CreatedAt = fromNanos(created)
+	// HIDDEN AND ITS INSTANT STAND AND FALL TOGETHER (SetHidden writes both in
+	// one statement, and layout 43 stamped every row already hidden), so a
+	// row with one and not the other is corrupt.
+	if ws.Hidden != hiddenAt.Valid {
+		return Workspace{}, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "hidden_at", Err: errors.New("a workspace records when it was hidden exactly while it is hidden")}
+	}
+	ws.HiddenAt = optTime(hiddenAt)
+	ws.DweltAt = optTime(dweltAt)
 	count, err := decodeCommitCount(ws.ID, commits)
 	if err != nil {
 		return Workspace{}, err
@@ -658,18 +668,42 @@ func (s *store) SetPriority(ctx context.Context, id WorkspaceID, p *Priority) er
 	})
 }
 
-// SetHidden records whether a workspace sits in the roster's hidden section.
-// An unknown workspace is refused (ErrNotFound), never a write that touched
-// nothing.
-func (s *store) SetHidden(ctx context.Context, id WorkspaceID, hidden bool) error {
-	return s.setWorkspaceField(ctx, "daemon.wsm.set_hidden", "hidden", id, hidden, dlog.Context{"hidden": hidden})
+// SetHidden records whether a workspace sits in the roster's hidden section,
+// and, in the same statement, WHEN it was hidden: AT while it is hidden, none
+// once it is shown again. Hiding a workspace already hidden re-stamps it, so
+// the instant is always the latest hide. An unknown workspace is refused
+// (ErrNotFound), never a write that touched nothing.
+func (s *store) SetHidden(ctx context.Context, id WorkspaceID, hidden bool, at time.Time) error {
+	var hiddenAt any
+	fields := dlog.Context{"hidden": hidden}
+	if hidden {
+		hiddenAt = nanos(at)
+		fields["hidden_at"] = at
+	}
+	return s.setWorkspaceColumns(ctx, "daemon.wsm.set_hidden", id, fields,
+		workspaceColumn{name: "hidden", value: hidden},
+		workspaceColumn{name: "hidden_at", value: hiddenAt})
 }
+
+// DwellThreshold is how long the user must hold a workspace selected for it to
+// count as looked at (owner request, 2026-10-13: five seconds, the tab bar's
+// standard dwell): leaving it afterwards stamps its dwelt_at (SetCurrent).
+const DwellThreshold = 5 * time.Second
 
 // SetCurrent records the user's selection of a workspace at an instant. At most
 // one workspace is current, which the unique index makes structural: the clear
-// and the set are one transaction.
+// and the set are one transaction, and so is the departing workspace's dwell.
 func (s *store) SetCurrent(ctx context.Context, id WorkspaceID, at time.Time) error {
 	return s.write(ctx, "daemon.wsm.set_current", dlog.Context{"workspace": string(id), "at": at}, func(ctx context.Context, tx *sql.Tx) error {
+		// THE WORKSPACE THE USER LEAVES WAS DWELT ON when it held the
+		// selection for at least DwellThreshold: its dwelt_at is this switch,
+		// in the same transaction that ends its selection, so a departure and
+		// its dwell can never be told apart. A re-selection leaves nothing.
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE workspaces SET dwelt_at = ? WHERE is_current = 1 AND id <> ? AND last_selected_at IS NOT NULL AND last_selected_at <= ?`,
+			nanos(at), id, nanos(at.Add(-DwellThreshold))); err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET is_current = 0 WHERE is_current = 1`); err != nil {
 			return err
 		}

@@ -60,6 +60,28 @@ ALTER TABLE workspaces ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE sidebar_view ADD COLUMN hidden_folded INTEGER NOT NULL DEFAULT 0;
 `
 
+// hiddenAndDweltAtDDL is the layout-43 addition (owner requests, 2026-10-13):
+//
+//   - workspaces.hidden_at, when the workspace was moved into the hidden
+//     section, set exactly while `hidden` is: the hidden band orders by it,
+//     newest first, and its rows' when-column counts from it. A row already
+//     hidden when the column lands has no recorded instant, so the step
+//     stamps it with the migration's own instant, the earliest moment this
+//     build can vouch for: from here on `hidden` and `hidden_at` stand and
+//     fall together.
+//   - workspaces.dwelt_at, the last instant the user LEFT the workspace after
+//     looking at it for at least DwellThreshold (SetCurrent): hiding the
+//     workspace the user stands on lands them on the one most recently dwelt
+//     on. NULL is "never looked at that long", which no workspace is
+//     guessed at.
+//
+// IT IS ADDITIVE: the previous build names neither column.
+const hiddenAndDweltAtDDL = `
+ALTER TABLE workspaces ADD COLUMN hidden_at INTEGER;
+ALTER TABLE workspaces ADD COLUMN dwelt_at INTEGER;
+UPDATE workspaces SET hidden_at = CAST(strftime('%s', 'now') AS INTEGER) * 1000000000 WHERE hidden = 1;
+`
+
 // viewedWorkspacesDDL is the layout-40 addition, kept as shipped because
 // deployed files carry it: when each workspace's last turn result was read
 // (workspaces.result_read_at) and the fold of the roster's viewed band

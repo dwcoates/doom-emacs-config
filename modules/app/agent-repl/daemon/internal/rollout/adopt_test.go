@@ -1606,7 +1606,7 @@ func TestAnAdoptionOfAHiddenFreeLockStartsNoSession(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws := freeLockAdoption(t, h)
-	if err := h.db.SetHidden(context.Background(), ws, true); err != nil {
+	if err := h.db.SetHidden(context.Background(), ws, true, time.Unix(1_700_000_000, 0)); err != nil {
 		t.Fatalf("SetHidden: %v", err)
 	}
 
