@@ -284,7 +284,8 @@ func TestAShimThatDiesAgainBeforeAnyTurnEndsIsLeftDownUntilTheNextPrompt(t *test
 // bootAfterADeadShim kills a session's daemon AND its shim, then boots a
 // successor on the same machine -- state root, account root, profiles and
 // locks -- with the host and web streams a running Emacs and page hold.
-func bootAfterADeadShim(t *testing.T) (*fixture, *harness.Daemon, string) {
+// EXTRAENV is appended to the successor's environment only.
+func bootAfterADeadShim(t *testing.T, extraEnv ...string) (*fixture, *harness.Daemon, string) {
 	t.Helper()
 	f := newOpened(t, harness.Opts{DurableState: true})
 	f.shim.ExpectStartSession()
@@ -299,7 +300,7 @@ func bootAfterADeadShim(t *testing.T) (*fixture, *harness.Daemon, string) {
 	successor := harness.StartDaemon(t, harness.Opts{
 		StateDir: f.d.StateDir, ProfileDir: f.d.ProfileDir,
 		ExtraArgs: []string{"--default-config-dir", f.d.DefaultConfigDir},
-		ExtraEnv:  []string{"AGENT_REPL_LOCK_DIR=" + f.d.LockDir},
+		ExtraEnv:  append([]string{"AGENT_REPL_LOCK_DIR=" + f.d.LockDir}, extraEnv...),
 	})
 	f.d = successor
 	f.host = successor.WatchHost(f.ws)
@@ -346,6 +347,39 @@ func TestAPromptSentRightAfterABootOverADeadShimIsDelivered(t *testing.T) {
 	shim := d.ShimAt(d.SocketPath(f.ws) + ".ctl")
 	if got := text(shim.ExpectStartTurn().GetSaid()); got != "the prompt sent at boot" {
 		t.Fatalf("the delivered StartTurn said %q, want the prompt sent at boot", got)
+	}
+	expectRPCCount(t, shim, harness.RPCStartTurn, 1, harness.ProbeWindow)
+}
+
+// TestAPromptSentWhileABootsWatcherIsOpeningIsDelivered pins the window the
+// racing test above hits only under load: the boot's bring-up has marked the
+// session started and not yet opened its watcher. The watcher-start hold keeps
+// the bring-up there, so the prompt lands inside the window on every run
+// (integration suite, 2026-10-12: it was refused no_session).
+func TestAPromptSentWhileABootsWatcherIsOpeningIsDelivered(t *testing.T) {
+	t.Parallel()
+	// Arrange: the boot's bring-up held between the session started and its
+	// watcher opening.
+	hold := harness.HoldFirstWatcherStart(t)
+	f, d, _ := bootAfterADeadShim(t, hold.Env())
+	shim := d.ShimAt(d.SocketPath(f.ws) + ".ctl")
+	shim.ExpectStartSession()
+	hold.AwaitHeld(d.Ctx())
+
+	// Act
+	resp := f.submit("the prompt sent before the watcher", "k-dead-shim-watcher", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+
+	// Assert: accepted, and held for the session coming up.
+	if resp.GetSuccess() == nil {
+		t.Fatalf("SubmitPrompt before the watcher opened = %v, want accepted", resp)
+	}
+	d.AwaitWorkspaceLogRecord(f.repo.Dir, "the prompt held for the session coming up", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.promptqueue.submit" && r.Message == "the workspace's session does not serve yet; the prompt is held until it comes up"
+	})
+	// Assert: delivered once, as soon as the watcher opens.
+	hold.Release()
+	if got := text(shim.ExpectStartTurn().GetSaid()); got != "the prompt sent before the watcher" {
+		t.Fatalf("the delivered StartTurn said %q, want the prompt sent before the watcher", got)
 	}
 	expectRPCCount(t, shim, harness.RPCStartTurn, 1, harness.ProbeWindow)
 }
