@@ -40,3 +40,21 @@ view Emacs shows that holds every workspace page as an iframe.
   - Every Go `Surfaces` double gained `CentralClientLog`.
 - Approved by the owner's standing ruling that contract changes are decided and
   carried through without stopping to ask (2026-10-13).
+
+### The sidebar moves into the webhost (2026-10-13; no proto change beyond the one above)
+
+- WHAT: the webhost draws the one sidebar over every workspace page
+  (webapp/src/host/sidebar.ts); a page in the webhost mounts no sidebar. The
+  page/webhost messages (webapp/src/host/protocol.ts, not a proto) gained
+  `sidebarDock` and `webhostFailures` (webhost to page) and `gateBand` (page to
+  webhost).
+- CONSEQUENCES:
+  - The webapp's context splits: `DaemonContext` (no workspace) under
+    `AppContext`; the sidebar takes a `DaemonContext` and a parent-workspace
+    provider (the roster's `current` in the webhost).
+  - A page's "switched to" edge is the webhost showing it, not the roster's
+    `current`; a page's seen state counts the webhost showing it.
+  - The webhost follows a handover to the new daemon by reloading there
+    (lisp/webhost.el); every page of a handover reloads anyway.
+  - Cold pages still stand their topbar and footer down; their staleness on a
+    switch is the owner's to revisit with switching and page caching.
