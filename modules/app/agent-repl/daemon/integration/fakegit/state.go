@@ -84,6 +84,9 @@ type Rebase struct {
 	Todo    []string `json:"todo"`
 	Done    int      `json:"done"`
 	NewHead string   `json:"new_head"`
+	// OrigHead is where the worktree stood before the rebase began: what
+	// `rebase --abort` puts it back to.
+	OrigHead string `json:"orig_head,omitempty"`
 	// Stopped reports that the current commit stopped on a conflict.
 	Stopped bool `json:"stopped,omitempty"`
 }
