@@ -68,7 +68,7 @@ The owner chose the remedy: the vendor's `forkSession` writes the fork's transcr
   - The create records a pending fork (`wsm.pending_forks`), and the child's first bring-up makes it. While `promptqueue.Exclusively` holds the parent's turn sequence, it asks the parent's shim for the point and the child's shim for the fork. `wsm.ResolveFork` then records the vendor id and the lineage (`fork_lineage`, `fork_uninherited_turns`) in one transaction.
   - The feed's page walk crosses from the fork's own book into each generation's parent book (`feed.LineageSegment`). It draws those rows in the inherited plane with the same functions as every other row, and treats the parent book's agent as a root-feed agent.
   - The sidecar stores no record stamped `forkedFrom`. The re-minting port (`internal/remint`, `account.PortTranscript`, `workspace/forkconversation.go`, `wsm.ported_prompts` writes) is removed.
-  - Layout 32 adds the three tables. It is additive only, per the migration contract.
+  - Layout 47 adds the three tables. It is additive only, per the migration contract.
 - **Consequences**:
   - **Forks made before this build lose their inherited prompts** in the composer history and in the fork's feed. Their `ported_prompts` rows are no longer read, and they have no lineage row. Their vendor transcripts are untouched, so the conversation itself continues. Owner ruling 2026-10-12: no legacy path.
   - `wsm.ported_prompts` stays in the schema, unread and unwritten. A later breaking layout drops it.
