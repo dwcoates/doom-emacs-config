@@ -13,7 +13,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
+	frontendv1 "agentrepl/proto/frontend/v1"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
@@ -500,4 +502,51 @@ func sameSet(a, b []string) bool {
 		delete(seen, s)
 	}
 	return len(seen) == 0
+}
+
+// RosterStatusArms is every RosterRow.status arm, by its proto name, read off
+// the generated descriptor in declaration order. It is the ONE list of the
+// roster's arms on the daemon's side: the resolver asserts the vocabulary's
+// tables against it, so an arm landing in the proto without a color fails
+// there. The descriptor always declares the oneof, so a failure to read it
+// is a broken build and panics.
+func RosterStatusArms() []string {
+	arms, err := OneofArmNames((&frontendv1.RosterRow{}).ProtoReflect().Descriptor(), "status")
+	if err != nil {
+		panic(fmt.Sprintf("vocab: RosterRow.status is unreadable: %v", err))
+	}
+	return arms
+}
+
+// FooterStatusArms is every FooterStatus.status arm, by its proto name, read
+// off the generated descriptor in declaration order: the footer resolver's
+// one list, against which footer_status is asserted. An arm the contract keeps
+// only so an older frame decodes (`turn_failed`) is in it, and painted, like
+// any other. A failure to read it is a broken build and panics.
+func FooterStatusArms() []string {
+	arms, err := OneofArmNames((&frontendv1.FooterStatus{}).ProtoReflect().Descriptor(), "status")
+	if err != nil {
+		panic(fmt.Sprintf("vocab: FooterStatus.status is unreadable: %v", err))
+	}
+	return arms
+}
+
+// IsMergeArm reports whether a RosterRow.status arm is one of the merge
+// pipeline's: every such arm, and only such an arm, is spelled `merg...`
+// (merging, merge_queued, merge_failed, merged), and each draws the merge
+// glyph rather than a lifecycle dot.
+func IsMergeArm(arm string) bool {
+	return strings.HasPrefix(arm, "merg")
+}
+
+// RosterMergeArms is every merge arm of RosterRow.status (IsMergeArm), in
+// declaration order.
+func RosterMergeArms() []string {
+	var out []string
+	for _, arm := range RosterStatusArms() {
+		if IsMergeArm(arm) {
+			out = append(out, arm)
+		}
+	}
+	return out
 }

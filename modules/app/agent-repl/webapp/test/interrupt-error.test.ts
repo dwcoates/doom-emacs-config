@@ -5,6 +5,7 @@ import {
   type InterruptError,
 } from "../../proto/gen/ts/agentrepl/v1/endpoint_interrupt_pb";
 import { MalformedView } from "../src/rpc/malformed.js";
+import { oneofArms } from "../src/rpc/oneof.js";
 import { ForwardingLogger, setLogger } from "../src/log.js";
 import { registerWorkspaceMoved } from "../src/rpc/moved.js";
 import {
@@ -15,9 +16,7 @@ import {
 } from "../src/interrupt-error.js";
 
 /** Every `InterruptError.kind` arm, read off the generated schema. */
-const SCHEMA_ARMS: readonly string[] = (
-  InterruptErrorSchema.oneofs.find((oneof) => oneof.name === "kind")?.fields ?? []
-).map((field) => field.localName);
+const SCHEMA_ARMS: readonly string[] = oneofArms(InterruptErrorSchema, "kind");
 
 /** The refusal's set arm, built from an arm name and its own init. */
 function kindOf(arm: string, value: Record<string, unknown> = {}): InterruptErrorKind {

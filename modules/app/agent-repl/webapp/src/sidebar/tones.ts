@@ -28,47 +28,20 @@ import {
   oneShotGlyphArm,
 } from "../vocab.js";
 import { MalformedView } from "../rpc/malformed.js";
+import { oneofArms } from "../rpc/oneof.js";
+import { RosterRowSchema, type RosterRow } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+
+/** One arm of the status oneof, as the generated code spells it. */
+export type RosterStatusCase = NonNullable<RosterRow["status"]["case"]>;
 
 /**
  * Every arm of `frontend.v1.RosterRow.status`, in the generated lowerCamel
- * spelling a received row carries. Declaration order is the proto's.
+ * spelling a received row carries, read off the SCHEMA (`rpc/oneof.ts`) in
+ * the proto's declaration order. An arm added to the proto reaches the colour
+ * table below by itself, and `ROSTER_ARM_CLASS` then fails at import for an
+ * arm the shared vocabulary has no colour for.
  */
-export const ROSTER_STATUS_CASES = [
-  "submitting",
-  "thinking",
-  "clearing",
-  "compacting",
-  "permission",
-  "question",
-  "done",
-  "interrupted",
-  "turnFailed",
-  "ready",
-  "idleAsync",
-  "vendorBlocked",
-  "vendorFault",
-  "networkFault",
-  "apiRetrying",
-  "closing",
-  "daemonImpaired",
-  "waiting",
-  "coldGate",
-  "init",
-  "severed",
-  "startFailed",
-  "degraded",
-  "dead",
-  "turnDied",
-  "merging",
-  "mergeQueued",
-  "mergeFailed",
-  "merged",
-  "none",
-  "inactive",
-] as const;
-
-/** One arm of the status oneof, as the generated code spells it. */
-export type RosterStatusCase = (typeof ROSTER_STATUS_CASES)[number];
+export const ROSTER_STATUS_CASES = oneofArms(RosterRowSchema, "status") as readonly RosterStatusCase[];
 
 /**
  * The color class each arm paints, resolved through the shared vocabulary.

@@ -11,26 +11,6 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-// The roster's status arm names, exactly the RosterRow.status oneof and
-// exactly the keys of render-colors.json's roster_status table. The resolver
-// asserts the table against this list at construction, so an arm that lands
-// without a color fails there rather than drawing an unpainted dot.
-var statusArms = []string{
-	"submitting", "thinking", "clearing", "compacting", "permission", "done",
-	"interrupted", "turn_failed", "ready", "idle_async", "vendor_blocked", "vendor_fault", "network_fault", "api_retrying", "init", "severed",
-	"start_failed", "degraded", "dead", "turn_died", "merging",
-	"merge_queued", "merge_failed", "merged", "none",
-	"inactive", "closing", "daemon_impaired", "waiting", "question",
-	"cold_gate",
-}
-
-// The merge arms of RosterRow.status — the ones that render the MERGE GLYPH
-// rather than a lifecycle dot, and so are keyed in render-colors.json's
-// merge_glyphs table rather than only in roster_status.
-var mergeArms = []string{
-	"merging", "merge_queued", "merge_failed", "merged",
-}
-
 // wsState is one workspace's live session accumulation — the half of a row the
 // durable registry cannot state. It is in-memory only.
 type wsState struct {

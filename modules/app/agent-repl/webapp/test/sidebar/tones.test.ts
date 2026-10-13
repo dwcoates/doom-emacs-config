@@ -4,6 +4,7 @@ import renderColors from "../../../proto/vocab/render-colors.json";
 import { RosterRowSchema } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { toneClass, rosterStatusColor, protoArmName } from "../../src/vocab.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
+import { oneofArms } from "../../src/rpc/oneof.js";
 import {
   GLYPH_CHARS,
   ROSTER_ARM_CLASS,
@@ -15,8 +16,6 @@ import {
   type RosterStatusCase,
 } from "../../src/sidebar/tones.js";
 
-/** The proto's own arms, in the generated spelling a received row carries. */
-const SCHEMA_ARMS = RosterRowSchema.oneofs[0].fields.map((field) => field.localName);
 
 const ROSTER_STATUS = renderColors.roster_status as Record<string, string>;
 const MERGE_GLYPHS = renderColors.merge_glyphs as Record<string, string>;
@@ -28,12 +27,8 @@ const ONE_SHOT_ARMS: string[] = ROSTER_STATUS_CASES.filter((arm) =>
 );
 
 describe("the rail's arm table against the schema", () => {
-  it.each(SCHEMA_ARMS)("names the schema's %s arm", (arm) => {
-    expect(ROSTER_STATUS_CASES).toContain(arm);
-  });
-
-  it.each([...ROSTER_STATUS_CASES])("draws only arms the schema declares: %s", (arm) => {
-    expect(SCHEMA_ARMS).toContain(arm);
+  it("reads its arms off the schema through the one oneof reader", () => {
+    expect(ROSTER_STATUS_CASES).toEqual(oneofArms(RosterRowSchema, "status"));
   });
 });
 
