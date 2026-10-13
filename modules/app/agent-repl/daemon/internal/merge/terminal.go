@@ -337,6 +337,11 @@ func (r *run) teardown(ctx context.Context, out outcome, terminal func()) {
 		log.Error(op, "could not republish the queue", dlog.Context{"repo": string(r.repo), "error": err.Error()})
 	}
 	r.selfReload(ctx, out)
+	// A LANDING MOVED THE TARGET: every merge still waiting in line rebases
+	// onto it (rebasewaiting.go).
+	if out.failed == "" && out.abandoned == "" && out.landed != "" && out.alreadyOn == "" {
+		r.o.rebaseWaiting(r.repo)
+	}
 	r.o.kick(r.repo)
 }
 
