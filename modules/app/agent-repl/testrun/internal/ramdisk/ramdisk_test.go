@@ -1356,6 +1356,23 @@ func TestRunWatchedKillsALateCommandAtItsLimit(t *testing.T) {
 	}
 }
 
+func TestScriptDispatchStartsItsCommandThroughBoundedCommand(t *testing.T) {
+	// Arrange
+	src, err := os.ReadFile("investigation.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	rest := string(src)[strings.Index(string(src), "func ScriptDispatch("):]
+	body := rest[:strings.Index(rest, "\n}\n")]
+
+	// Assert
+	if !strings.Contains(body, "boundedCommand(") || strings.Contains(body, "exec.CommandContext") {
+		t.Fatal("ScriptDispatch starts its command by hand; want boundedCommand")
+	}
+}
+
 func TestBoundedRunsShareOneOutcome(t *testing.T) {
 	// Arrange
 	src, err := os.ReadFile("ramdisk.go")
