@@ -1042,9 +1042,11 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 
 #ws-sidebar .row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* PARTIAL display mode (frontend.v1.RosterRowViewed): the user has already
-   seen this workspace, so its NAME recedes to the secondary text colour, and
-   its status dot with it (see THE STATUS MARK below). The Emacs tab-bar draws
-   the same distinction on the same message. `viewed.ts` decides which rows
+   seen this workspace, so its NAME recedes to the secondary text colour. The
+   status dot keeps its tone (owner ruling, 2026-10-13: a viewed done workspace
+   is green like any other) -- the mode says what has been seen, never what
+   the workspace is doing. The Emacs tab-bar draws the same distinction on the
+   same message. `viewed.ts` decides which rows
    carry the class. */
 #ws-sidebar .row .name.viewed { color: var(--muted); }
 /* A Recently Merged row's NAME is drawn in the repository section headers'
@@ -5469,13 +5471,6 @@ ar-button.outcome-marker-pill {
    parked on its cold gate's choice. The name alone, in every section, never
    the mark or the when-column. */
 #ws-sidebar .ws[data-arm="coldGate"] > .row > .name { text-decoration: line-through; }
-/* A VIEWED WORKSPACE'S DOT (frontend.v1.RosterRowViewed, owner request,
-   2026-10-12): the grey its name wears, so a workspace whose result the user
-   has read stays in its grouping and still reads apart from one whose result
-   is waiting. The marker only rides a turn-end arm, so it greys a still dot,
-   never live work. Child combinators keep it to the row's own mark: a child
-   nested under a viewed parent keeps its tone. */
-#ws-sidebar .ws[data-viewed="true"] > .row > .st { color: var(--muted); }
 /* The glyph statuses are not discs: a box that centers a single character, so
    a breathing glyph shrinks about its own center. The box is the
    DOT'S width, not the character's (owner request, 2026-10-08), and the
