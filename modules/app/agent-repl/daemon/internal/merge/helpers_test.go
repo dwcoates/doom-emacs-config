@@ -687,7 +687,11 @@ func (f *fakeDB) MergeQueuePaused(_ context.Context, repo wsm.RepoKey) (bool, er
 // interface is declared, so a call the orchestrator adds later is a compile
 // error rather than a surprise at run time.
 type fakeGit struct {
-	mu sync.Mutex
+	// trees scripts TreeOf's answer per commit, and treeSeq its answers in
+	// order ahead of trees (TreeOf).
+	trees   map[string]string
+	treeSeq []string
+	mu      sync.Mutex
 	// standing answers RebaseInProgress: a rebase stands in the worktree.
 	standing bool
 	// onTip answers CommitsBetween(_, _, "HEAD"): what a standing rebase has
@@ -790,6 +794,7 @@ func newFakeGit(seq func() int) *fakeGit {
 		defaultBranch: "master",
 		commonDirs:    map[string]string{},
 		refs:          map[string]string{},
+		trees:         map[string]string{},
 		refSeqs:       map[string][]string{},
 		changedIn:     map[string][][]string{},
 		// A BRANCH CHANGES SOMETHING BY DEFAULT, and something no rule maps,
@@ -1185,8 +1190,22 @@ func (g *fakeGit) CommitterTime(context.Context, string, string) (time.Time, err
 	return time.Time{}, errors.New("merge fake git: CommitterTime is not a merge operation")
 }
 
-func (g *fakeGit) TreeOf(context.Context, string, string) (string, error) {
-	return "", errors.New("merge fake git: TreeOf is not a merge operation")
+// TreeOf answers a commit's scripted tree: treeSeq's answers in order, then
+// trees, else a tree of its own per commit, so two commits share a tree only
+// when a test says they do.
+func (g *fakeGit) TreeOf(_ context.Context, _, ref string) (string, error) {
+	g.record("tree_of")
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if len(g.treeSeq) > 0 {
+		tree := g.treeSeq[0]
+		g.treeSeq = g.treeSeq[1:]
+		return tree, nil
+	}
+	if tree, ok := g.trees[ref]; ok {
+		return tree, nil
+	}
+	return "tree-of-" + ref, nil
 }
 
 func (g *fakeGit) MergeTree(context.Context, string, string, string) (gitclient.MergeTreeOutcome, error) {
