@@ -636,7 +636,7 @@ func (r *resolver) coldGateAnswer(s *wsState, log dlog.Logger) *frontendv1.Foote
 	}
 	arm := &frontendv1.FooterStatusWorking{Activity: r.workingActivity(s)}
 	switch s.coldAnswer.Choice {
-	case ChoiceCompact:
+	case ChoiceCompact, ChoiceCompactAndResume:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "cold gate answered with compact"})
 		arm.Substatus = &frontendv1.FooterStatusWorking_Compacting{
 			Compacting: &frontendv1.FooterSubStatusWorkingCompacting{}}

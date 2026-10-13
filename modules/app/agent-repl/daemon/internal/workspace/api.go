@@ -14,7 +14,6 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
-	frontendv1 "agentrepl/proto/frontend/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
@@ -370,12 +369,11 @@ type Verbs interface {
 	UpdateTask(ctx context.Context, id ids.TaskID, change wsm.TaskChange) error
 	// AssignTask assigns a workspace to a task, or unassigns it.
 	AssignTask(ctx context.Context, ws ids.WorkspaceID, task *ids.TaskID) error
-	// AnswerColdGate resolves a standing cold gate: pay, clear, or
-	// compact{model, scope}. The scope travels beside the answer because
-	// FeedColdGateResolvedCompact carries only the model, while the shim's
-	// SessionColdCompact remediation requires both — and a scope is never
-	// defaulted.
-	AnswerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *frontendv1.FeedColdGateResolved, scope conversationv1.SessionCompactScope) error
+	// AnswerColdGate resolves a standing cold gate with the request's choice:
+	// pay, clear, compact{model, scope} or compact_and_resume{model, scope}.
+	// The choice also decides the prompts held at the gate (gatefate.go in the
+	// prompt queue), settled before the session is brought back.
+	AnswerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *agentreplv1.AnswerColdGateRequest) error
 	// SetModel switches the session's model through the QUEUE's session-act
 	// path, so it cannot overtake a queued prompt.
 	SetModel(ctx context.Context, ws ids.WorkspaceID, model string) error

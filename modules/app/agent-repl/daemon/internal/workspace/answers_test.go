@@ -6,10 +6,11 @@ import (
 	"strings"
 	"testing"
 
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
-	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/health"
+	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/topbar"
 )
@@ -338,15 +339,10 @@ func TestAnswerColdGateRefusesCompactWhenTheGateOfferedNone(t *testing.T) {
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	f.cards.coldGate = &ServedColdGate{VendorSessionID: "vendor-1"}
-	answer := &frontendv1.FeedColdGateResolved{
-		Choice: &frontendv1.FeedColdGateResolved_Compact{Compact: &frontendv1.FeedColdGateResolvedCompact{
-			Model: &frontendv1.FeedColdGateModel{Model: &conversationv1.AgentModel{Name: "opus"}},
-		}},
-	}
+	answer := compactAnswerOf("opus", conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL)
 
 	// Act.
-	err := f.verbs.AnswerColdGate(context.Background(), "w1", answer,
-		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL)
+	err := f.verbs.AnswerColdGate(context.Background(), "w1", answer)
 
 	// Assert.
 	asRefusal(t, err, ArmUnservedRemediation)
@@ -368,13 +364,10 @@ func TestAnswerColdGatePayReopensTheConversation(t *testing.T) {
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	standingGate(f)
-	answer := &frontendv1.FeedColdGateResolved{
-		Choice: &frontendv1.FeedColdGateResolved_Pay{Pay: &frontendv1.FeedColdGateResolvedPay{}},
-	}
+	answer := payAnswer()
 
 	// Act.
-	err := f.verbs.AnswerColdGate(context.Background(), "w1", answer,
-		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_UNSPECIFIED)
+	err := f.verbs.AnswerColdGate(context.Background(), "w1", answer)
 
 	// Assert.
 	if err != nil {
@@ -393,13 +386,10 @@ func TestAnswerColdGateClearReopensWithTheClearRemediation(t *testing.T) {
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	standingGate(f)
-	answer := &frontendv1.FeedColdGateResolved{
-		Choice: &frontendv1.FeedColdGateResolved_Clear{Clear: &frontendv1.FeedColdGateResolvedClear{}},
-	}
+	answer := clearAnswer()
 
 	// Act.
-	if err := f.verbs.AnswerColdGate(context.Background(), "w1", answer,
-		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_UNSPECIFIED); err != nil {
+	if err := f.verbs.AnswerColdGate(context.Background(), "w1", answer); err != nil {
 		t.Fatalf("AnswerColdGate: %v", err)
 	}
 
@@ -414,17 +404,10 @@ func TestAnswerColdGateCompactCarriesTheModelAndScope(t *testing.T) {
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	standingGate(f)
-	answer := &frontendv1.FeedColdGateResolved{
-		Choice: &frontendv1.FeedColdGateResolved_Compact{
-			Compact: &frontendv1.FeedColdGateResolvedCompact{
-				Model: &frontendv1.FeedColdGateModel{Model: &conversationv1.AgentModel{Name: "opus"}},
-			},
-		},
-	}
+	answer := compactAnswerOf("opus", conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL)
 
 	// Act.
-	if err := f.verbs.AnswerColdGate(context.Background(), "w1", answer,
-		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL); err != nil {
+	if err := f.verbs.AnswerColdGate(context.Background(), "w1", answer); err != nil {
 		t.Fatalf("AnswerColdGate: %v", err)
 	}
 
@@ -441,17 +424,10 @@ func TestAnswerColdGateRefusesAModelOutsideTheServedMenu(t *testing.T) {
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	standingGate(f)
-	answer := &frontendv1.FeedColdGateResolved{
-		Choice: &frontendv1.FeedColdGateResolved_Compact{
-			Compact: &frontendv1.FeedColdGateResolvedCompact{
-				Model: &frontendv1.FeedColdGateModel{Model: &conversationv1.AgentModel{Name: "haiku"}},
-			},
-		},
-	}
+	answer := compactAnswerOf("haiku", conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL)
 
 	// Act.
-	err := f.verbs.AnswerColdGate(context.Background(), "w1", answer,
-		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL)
+	err := f.verbs.AnswerColdGate(context.Background(), "w1", answer)
 
 	// Assert.
 	asRefusal(t, err, ArmUnservedRemediation)
@@ -462,17 +438,10 @@ func TestAnswerColdGateRefusesAScopeOutsideTheServedMenu(t *testing.T) {
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	standingGate(f)
-	answer := &frontendv1.FeedColdGateResolved{
-		Choice: &frontendv1.FeedColdGateResolved_Compact{
-			Compact: &frontendv1.FeedColdGateResolvedCompact{
-				Model: &frontendv1.FeedColdGateModel{Model: &conversationv1.AgentModel{Name: "opus"}},
-			},
-		},
-	}
+	answer := compactAnswerOf("opus", conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_PROMPTS)
 
 	// Act.
-	err := f.verbs.AnswerColdGate(context.Background(), "w1", answer,
-		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_PROMPTS)
+	err := f.verbs.AnswerColdGate(context.Background(), "w1", answer)
 
 	// Assert.
 	asRefusal(t, err, ArmUnservedRemediation)
@@ -482,13 +451,10 @@ func TestAnswerColdGateRefusesWhenNoGateStands(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
-	answer := &frontendv1.FeedColdGateResolved{
-		Choice: &frontendv1.FeedColdGateResolved_Pay{Pay: &frontendv1.FeedColdGateResolvedPay{}},
-	}
+	answer := payAnswer()
 
 	// Act.
-	err := f.verbs.AnswerColdGate(context.Background(), "w1", answer,
-		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_UNSPECIFIED)
+	err := f.verbs.AnswerColdGate(context.Background(), "w1", answer)
 
 	// Assert.
 	asRefusal(t, err, ArmNoColdGate)
@@ -499,13 +465,10 @@ func TestAnswerColdGateRetiresTheStandingGate(t *testing.T) {
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	standingGate(f)
-	answer := &frontendv1.FeedColdGateResolved{
-		Choice: &frontendv1.FeedColdGateResolved_Pay{Pay: &frontendv1.FeedColdGateResolvedPay{}},
-	}
+	answer := payAnswer()
 
 	// Act.
-	if err := f.verbs.AnswerColdGate(context.Background(), "w1", answer,
-		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_UNSPECIFIED); err != nil {
+	if err := f.verbs.AnswerColdGate(context.Background(), "w1", answer); err != nil {
 		t.Fatalf("AnswerColdGate: %v", err)
 	}
 
@@ -524,13 +487,10 @@ func TestAnswerColdGateRetiresTheStripsGateToo(t *testing.T) {
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	standingGate(f)
-	answer := &frontendv1.FeedColdGateResolved{
-		Choice: &frontendv1.FeedColdGateResolved_Pay{Pay: &frontendv1.FeedColdGateResolvedPay{}},
-	}
+	answer := payAnswer()
 
 	// Act.
-	if err := f.verbs.AnswerColdGate(context.Background(), "w1", answer,
-		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_UNSPECIFIED); err != nil {
+	if err := f.verbs.AnswerColdGate(context.Background(), "w1", answer); err != nil {
 		t.Fatalf("AnswerColdGate: %v", err)
 	}
 
@@ -548,8 +508,7 @@ func TestAnswerColdGateRefusesAnAnswerNamingNoChoice(t *testing.T) {
 	standingGate(f)
 
 	// Act.
-	err := f.verbs.AnswerColdGate(context.Background(), "w1", &frontendv1.FeedColdGateResolved{},
-		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_UNSPECIFIED)
+	err := f.verbs.AnswerColdGate(context.Background(), "w1", &agentreplv1.AnswerColdGateRequest{})
 
 	// Assert.
 	asRefusal(t, err, ArmUnservedRemediation)
@@ -640,8 +599,7 @@ func TestAnswerColdGateRetiresTheGateItAnswered(t *testing.T) {
 
 	// Act.
 	err := f.verbs.AnswerColdGate(context.Background(), "w1",
-		&frontendv1.FeedColdGateResolved{Choice: &frontendv1.FeedColdGateResolved_Pay{Pay: &frontendv1.FeedColdGateResolvedPay{}}},
-		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_UNSPECIFIED)
+		payAnswer())
 
 	// Assert.
 	if err != nil {
@@ -659,15 +617,13 @@ func TestASecondAnswerOfTheSameColdGateIsRefused(t *testing.T) {
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	f.cards.coldGate = &ServedColdGate{VendorSessionID: "vendor-1"}
-	pay := &frontendv1.FeedColdGateResolved{Choice: &frontendv1.FeedColdGateResolved_Pay{Pay: &frontendv1.FeedColdGateResolvedPay{}}}
-	if err := f.verbs.AnswerColdGate(context.Background(), "w1", pay,
-		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_UNSPECIFIED); err != nil {
+	pay := payAnswer()
+	if err := f.verbs.AnswerColdGate(context.Background(), "w1", pay); err != nil {
 		t.Fatalf("the first AnswerColdGate: %v", err)
 	}
 
 	// Act.
-	err := f.verbs.AnswerColdGate(context.Background(), "w1", pay,
-		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_UNSPECIFIED)
+	err := f.verbs.AnswerColdGate(context.Background(), "w1", pay)
 
 	// Assert.
 	asRefusal(t, err, ArmNoColdGate)
@@ -683,13 +639,10 @@ func TestAnswerColdGateAcceptsAnAnswerWhoseReopenFails(t *testing.T) {
 	f.workspace("w1", t.TempDir())
 	standingGate(f)
 	f.fleet.resumeErr = errors.New("the producer has already written rows")
-	answer := &frontendv1.FeedColdGateResolved{
-		Choice: &frontendv1.FeedColdGateResolved_Clear{Clear: &frontendv1.FeedColdGateResolvedClear{}},
-	}
+	answer := clearAnswer()
 
 	// Act.
-	err := f.verbs.AnswerColdGate(context.Background(), "w1", answer,
-		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_UNSPECIFIED)
+	err := f.verbs.AnswerColdGate(context.Background(), "w1", answer)
 
 	// Assert.
 	if err != nil {
@@ -703,13 +656,10 @@ func TestAnswerColdGateOpensTheFaultThatPutsTheFailureOnTheFooter(t *testing.T) 
 	f.workspace("w1", t.TempDir())
 	standingGate(f)
 	f.fleet.resumeErr = errors.New("the producer has already written rows")
-	answer := &frontendv1.FeedColdGateResolved{
-		Choice: &frontendv1.FeedColdGateResolved_Clear{Clear: &frontendv1.FeedColdGateResolvedClear{}},
-	}
+	answer := clearAnswer()
 
 	// Act.
-	_ = f.verbs.AnswerColdGate(context.Background(), "w1", answer,
-		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_UNSPECIFIED)
+	_ = f.verbs.AnswerColdGate(context.Background(), "w1", answer)
 
 	// Assert.
 	if len(f.health.opened) != 1 {
@@ -733,13 +683,10 @@ func TestAnswerColdGateStandsTheGateAgainWhenTheReopenFailed(t *testing.T) {
 	f.workspace("w1", t.TempDir())
 	standingGate(f)
 	f.fleet.resumeErr = errors.New("the producer has already written rows")
-	answer := &frontendv1.FeedColdGateResolved{
-		Choice: &frontendv1.FeedColdGateResolved_Clear{Clear: &frontendv1.FeedColdGateResolvedClear{}},
-	}
+	answer := clearAnswer()
 
 	// Act.
-	_ = f.verbs.AnswerColdGate(context.Background(), "w1", answer,
-		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_UNSPECIFIED)
+	_ = f.verbs.AnswerColdGate(context.Background(), "w1", answer)
 
 	// Assert.
 	if len(f.cards.reraised) != 1 || f.cards.reraised[0] != "vendor-1" {
@@ -755,11 +702,10 @@ func TestAnswerColdGateRetiresTheGateRowAtOnce(t *testing.T) {
 	standingGate(f)
 	f.fleet.resumeHold = make(chan struct{})
 	f.fleet.resumeSettled = make(chan struct{})
-	pay := &frontendv1.FeedColdGateResolved{Choice: &frontendv1.FeedColdGateResolved_Pay{Pay: &frontendv1.FeedColdGateResolvedPay{}}}
+	pay := payAnswer()
 
 	// Act.
-	err := f.verbs.AnswerColdGate(context.Background(), "w1", pay,
-		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_UNSPECIFIED)
+	err := f.verbs.AnswerColdGate(context.Background(), "w1", pay)
 
 	// Assert: answered, row retired, and the re-open not yet run.
 	retired, resumes := len(f.feed.retired), len(f.fleet.resumes)
@@ -784,13 +730,10 @@ func TestAnswerColdGateStatesAGateThatCouldNotStandAgain(t *testing.T) {
 	standingGate(f)
 	f.fleet.resumeErr = errors.New("the producer has already written rows")
 	f.cards.reraiseRefused = true
-	answer := &frontendv1.FeedColdGateResolved{
-		Choice: &frontendv1.FeedColdGateResolved_Clear{Clear: &frontendv1.FeedColdGateResolvedClear{}},
-	}
+	answer := clearAnswer()
 
 	// Act.
-	_ = f.verbs.AnswerColdGate(context.Background(), "w1", answer,
-		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_UNSPECIFIED)
+	_ = f.verbs.AnswerColdGate(context.Background(), "w1", answer)
 
 	// Assert.
 	for _, record := range f.log.logger.Records() {
@@ -811,13 +754,10 @@ func TestAnswerColdGateFilesNoFaultWhenTheDaemonStandsDown(t *testing.T) {
 	f.workspace("w1", t.TempDir())
 	standingGate(f)
 	f.fleet.resumeErr = context.Canceled
-	answer := &frontendv1.FeedColdGateResolved{
-		Choice: &frontendv1.FeedColdGateResolved_Clear{Clear: &frontendv1.FeedColdGateResolvedClear{}},
-	}
+	answer := clearAnswer()
 
 	// Act.
-	_ = f.verbs.AnswerColdGate(context.Background(), "w1", answer,
-		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_UNSPECIFIED)
+	_ = f.verbs.AnswerColdGate(context.Background(), "w1", answer)
 
 	// Assert.
 	if len(f.health.opened) != 0 || len(f.cards.reraised) != 0 {
@@ -835,16 +775,33 @@ func TestAnswerColdGateFilesNoFaultWhenTheDaemonStandsDown(t *testing.T) {
 // content: the request reaches the strip BEFORE the shim is dialed, every
 // relayed phase is one more line, and the completion line is stated.
 
-// compactAnswer is the gate's `compact and resume`, answered against the menu
-// standingGate serves.
-func compactAnswer() *frontendv1.FeedColdGateResolved {
-	return &frontendv1.FeedColdGateResolved{
-		Choice: &frontendv1.FeedColdGateResolved_Compact{
-			Compact: &frontendv1.FeedColdGateResolvedCompact{
-				Model: &frontendv1.FeedColdGateModel{Model: &conversationv1.AgentModel{Name: "opus"}},
-			},
-		},
+// payAnswer is the gate's `pay and resume`.
+func payAnswer() *agentreplv1.AnswerColdGateRequest {
+	return &agentreplv1.AnswerColdGateRequest{
+		Choice: &agentreplv1.AnswerColdGateRequest_Pay{Pay: &agentreplv1.AnswerColdGatePay{}},
 	}
+}
+
+// clearAnswer is the gate's `clear context`.
+func clearAnswer() *agentreplv1.AnswerColdGateRequest {
+	return &agentreplv1.AnswerColdGateRequest{
+		Choice: &agentreplv1.AnswerColdGateRequest_Clear{Clear: &agentreplv1.AnswerColdGateClear{}},
+	}
+}
+
+// compactAnswerOf is the gate's `compact first`, naming MODEL and SCOPE.
+func compactAnswerOf(model string, scope conversationv1.SessionCompactScope) *agentreplv1.AnswerColdGateRequest {
+	return &agentreplv1.AnswerColdGateRequest{
+		Choice: &agentreplv1.AnswerColdGateRequest_Compact{Compact: &agentreplv1.AnswerColdGateCompact{
+			Model: &conversationv1.AgentModel{Name: model}, Scope: scope,
+		}},
+	}
+}
+
+// compactAnswer is the gate's `compact first`, answered against the menu
+// standingGate serves.
+func compactAnswer() *agentreplv1.AnswerColdGateRequest {
+	return compactAnswerOf("opus", conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL)
 }
 
 // phase is one relayed compaction phase.
@@ -864,8 +821,7 @@ func TestAnswerColdGatePublishesTheRequestBeforeTheShimIsDialed(t *testing.T) {
 	f.fleet.observeResume = func() { atDial = f.footer.coldAnswerLines() }
 
 	// Act.
-	if err := f.verbs.AnswerColdGate(context.Background(), "w1", compactAnswer(),
-		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL); err != nil {
+	if err := f.verbs.AnswerColdGate(context.Background(), "w1", compactAnswer()); err != nil {
 		t.Fatalf("AnswerColdGate: %v", err)
 	}
 
@@ -888,8 +844,7 @@ func TestAnswerColdGatePublishesOneLinePerRelayedPhase(t *testing.T) {
 	}
 
 	// Act.
-	if err := f.verbs.AnswerColdGate(context.Background(), "w1", compactAnswer(),
-		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL); err != nil {
+	if err := f.verbs.AnswerColdGate(context.Background(), "w1", compactAnswer()); err != nil {
 		t.Fatalf("AnswerColdGate: %v", err)
 	}
 
@@ -910,8 +865,7 @@ func TestAnswerColdGatePublishesTheCompletionLine(t *testing.T) {
 	}
 
 	// Act.
-	if err := f.verbs.AnswerColdGate(context.Background(), "w1", compactAnswer(),
-		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL); err != nil {
+	if err := f.verbs.AnswerColdGate(context.Background(), "w1", compactAnswer()); err != nil {
 		t.Fatalf("AnswerColdGate: %v", err)
 	}
 
@@ -930,8 +884,7 @@ func TestAnswerColdGateClearsTheActWhenTheAnswerLands(t *testing.T) {
 	standingGate(f)
 
 	// Act.
-	if err := f.verbs.AnswerColdGate(context.Background(), "w1", compactAnswer(),
-		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL); err != nil {
+	if err := f.verbs.AnswerColdGate(context.Background(), "w1", compactAnswer()); err != nil {
 		t.Fatalf("AnswerColdGate: %v", err)
 	}
 
@@ -949,8 +902,7 @@ func TestAnswerColdGateClearsTheActWhenTheReopenFails(t *testing.T) {
 	f.fleet.resumeErr = errors.New("the shim died")
 
 	// Act.
-	err := f.verbs.AnswerColdGate(context.Background(), "w1", compactAnswer(),
-		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL)
+	err := f.verbs.AnswerColdGate(context.Background(), "w1", compactAnswer())
 
 	// Assert.
 	if err != nil {
@@ -968,8 +920,7 @@ func TestAnswerColdGateNamesTheRemediationInTheAct(t *testing.T) {
 	standingGate(f)
 
 	// Act.
-	if err := f.verbs.AnswerColdGate(context.Background(), "w1", compactAnswer(),
-		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL); err != nil {
+	if err := f.verbs.AnswerColdGate(context.Background(), "w1", compactAnswer()); err != nil {
 		t.Fatalf("AnswerColdGate: %v", err)
 	}
 
@@ -995,11 +946,10 @@ func TestAnswerColdGateEndsTheGateOnlyWhenTheReopenSucceeds(t *testing.T) {
 			f.workspace("w1", t.TempDir())
 			standingGate(f)
 			f.fleet.resumeErr = tt.resumeErr
-			pay := &frontendv1.FeedColdGateResolved{Choice: &frontendv1.FeedColdGateResolved_Pay{Pay: &frontendv1.FeedColdGateResolvedPay{}}}
+			pay := payAnswer()
 
 			// Act.
-			_ = f.verbs.AnswerColdGate(context.Background(), "w1", pay,
-				conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_UNSPECIFIED)
+			_ = f.verbs.AnswerColdGate(context.Background(), "w1", pay)
 
 			// Assert.
 			if len(f.cards.ended) != len(tt.wantEnded) || (len(tt.wantEnded) == 1 && f.cards.ended[0] != tt.wantEnded[0]) {
@@ -1017,8 +967,7 @@ func TestASucceededReopenRetiresTheGateBeforeClearingTheAnswer(t *testing.T) {
 	f.footer.coldEvents = nil
 
 	// Act.
-	if err := f.verbs.AnswerColdGate(context.Background(), "w1", compactAnswer(),
-		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL); err != nil {
+	if err := f.verbs.AnswerColdGate(context.Background(), "w1", compactAnswer()); err != nil {
 		t.Fatalf("AnswerColdGate: %v", err)
 	}
 
@@ -1039,8 +988,7 @@ func TestTheReopensCompactionPhasesReachTheFooterWithTheirProgress(t *testing.T)
 	f.fleet.resumePhases = []*conversationv1.SessionCompactionProgress{started}
 
 	// Act.
-	if err := f.verbs.AnswerColdGate(context.Background(), "w1", compactAnswer(),
-		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL); err != nil {
+	if err := f.verbs.AnswerColdGate(context.Background(), "w1", compactAnswer()); err != nil {
 		t.Fatalf("AnswerColdGate: %v", err)
 	}
 
@@ -1054,5 +1002,197 @@ func TestTheReopensCompactionPhasesReachTheFooterWithTheirProgress(t *testing.T)
 	}
 	if got.GetPhase() != conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_STARTED {
 		t.Fatalf("progress = %+v, want the started phase handed to the footer", got)
+	}
+}
+
+// compactAndResumeAnswer is the gate's `compact and resume`, answered against
+// the menu standingGate serves.
+func compactAndResumeAnswer() *agentreplv1.AnswerColdGateRequest {
+	return &agentreplv1.AnswerColdGateRequest{
+		Choice: &agentreplv1.AnswerColdGateRequest_CompactAndResume{CompactAndResume: &agentreplv1.AnswerColdGateCompact{
+			Model: &conversationv1.AgentModel{Name: "opus"}, Scope: conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL,
+		}},
+	}
+}
+
+// THE ANSWER SETTLES THE HELD PROMPTS' FATE (owner ruling, 2026-10-13): only
+// compact-and-resume sends them.
+func TestAnswerColdGateSettlesTheHeldPromptsFateByItsChoice(t *testing.T) {
+	tests := []struct {
+		name   string
+		answer *agentreplv1.AnswerColdGateRequest
+		want   promptqueue.GateFate
+	}{
+		{name: "pay keeps them", answer: payAnswer(), want: promptqueue.GateKeep},
+		{name: "clear discards them", answer: clearAnswer(), want: promptqueue.GateDiscard},
+		{name: "compact keeps them", answer: compactAnswer(), want: promptqueue.GateKeep},
+		{name: "compact and resume sends them", answer: compactAndResumeAnswer(), want: promptqueue.GateSend},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			standingGate(f)
+
+			// Act.
+			if err := f.verbs.AnswerColdGate(context.Background(), "w1", tt.answer); err != nil {
+				t.Fatalf("AnswerColdGate: %v", err)
+			}
+
+			// Assert.
+			if got := f.queue.gateFates; len(got) != 1 || got[0] != tt.want {
+				t.Fatalf("fates = %v, want exactly %s", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAnswerColdGateSettlesTheFateBeforeTheSessionIsReopened(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	standingGate(f)
+	reopensAtFate := -1
+	f.queue.onGateFate = func() { reopensAtFate = len(f.fleet.resumes) }
+
+	// Act.
+	if err := f.verbs.AnswerColdGate(context.Background(), "w1", clearAnswer()); err != nil {
+		t.Fatalf("AnswerColdGate: %v", err)
+	}
+
+	// Assert.
+	if reopensAtFate != 0 || len(f.fleet.resumes) != 1 {
+		t.Fatalf("re-opens when the fate was settled = %d, after = %d; want 0 then 1", reopensAtFate, len(f.fleet.resumes))
+	}
+}
+
+func TestAnswerColdGateCompactAndResumeCarriesTheCompactRemediation(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	standingGate(f)
+
+	// Act.
+	if err := f.verbs.AnswerColdGate(context.Background(), "w1", compactAndResumeAnswer()); err != nil {
+		t.Fatalf("AnswerColdGate: %v", err)
+	}
+
+	// Assert.
+	compact := f.fleet.resumes[0].Remediation.GetCompact()
+	if compact.GetModel().GetName() != "opus" ||
+		compact.GetScope() != conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL {
+		t.Fatalf("compact remediation = %v, want opus over the ALL scope", compact)
+	}
+}
+
+func TestAnswerColdGateCompactAndResumeIsNarratedAsTheCompactionItIs(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	standingGate(f)
+
+	// Act.
+	if err := f.verbs.AnswerColdGate(context.Background(), "w1", compactAndResumeAnswer()); err != nil {
+		t.Fatalf("AnswerColdGate: %v", err)
+	}
+
+	// Assert.
+	if got := f.footer.coldAnswers; len(got) == 0 || got[0] == nil || got[0].Choice != footer.ChoiceCompactAndResume {
+		t.Fatalf("footer answers = %+v, want the compact-and-resume choice published", got)
+	}
+}
+
+func TestAnswerColdGateRefusesCompactAndResumeWhenTheGateOfferedNoCompaction(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.cards.coldGate = &ServedColdGate{VendorSessionID: "vendor-1"}
+
+	// Act.
+	err := f.verbs.AnswerColdGate(context.Background(), "w1", compactAndResumeAnswer())
+
+	// Assert.
+	asRefusal(t, err, ArmUnservedRemediation)
+	if len(f.queue.gateFates) != 0 || f.cards.coldGatesCleared != 0 {
+		t.Fatalf("fates = %v, gates spent = %d; want nothing settled and the gate standing", f.queue.gateFates, f.cards.coldGatesCleared)
+	}
+}
+
+func TestAnswerColdGateWhoseFateFailsReopensNothing(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	standingGate(f)
+	f.queue.gateFateErr = errors.New("disk full")
+
+	// Act.
+	err := f.verbs.AnswerColdGate(context.Background(), "w1", clearAnswer())
+
+	// Assert.
+	if err == nil || len(f.fleet.resumes) != 0 {
+		t.Fatalf("AnswerColdGate = %v, re-opens = %d; want an error and nothing re-opened", err, len(f.fleet.resumes))
+	}
+}
+
+func TestAnswerColdGateWhoseFateFailsStandsTheGateAgain(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	standingGate(f)
+	f.queue.gateFateErr = errors.New("disk full")
+
+	// Act.
+	_ = f.verbs.AnswerColdGate(context.Background(), "w1", clearAnswer())
+
+	// Assert.
+	if len(f.cards.reraised) != 1 || f.cards.reraised[0] != "vendor-1" {
+		t.Fatalf("reraised = %v, want vendor-1's gate stood again", f.cards.reraised)
+	}
+	for _, r := range f.log.logger.Records() {
+		if r.Level == "info" && r.Operation == opColdGate &&
+			r.Message == "the prompts held at the cold gate could not be settled; the answer is refused" &&
+			r.Context["cause"] == "disk full" && r.Context["choice"] == footer.ChoiceClear && r.Context["gate_stands_again"] == true {
+			return
+		}
+	}
+	t.Fatalf("records = %+v, want the refused answer recorded with its cause", f.log.logger.Records())
+}
+
+func TestAnswerColdGateWhoseFateFailsAndWhoseGateCannotStandRecordsAnError(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	standingGate(f)
+	f.queue.gateFateErr = errors.New("disk full")
+	f.cards.reraiseRefused = true
+
+	// Act.
+	_ = f.verbs.AnswerColdGate(context.Background(), "w1", clearAnswer())
+
+	// Assert.
+	for _, r := range f.log.logger.Records() {
+		if r.Level == "error" && r.Operation == opColdGate &&
+			r.Message == "the refused answer's gate could not stand again: its cold facts are gone" &&
+			r.Context["vendor_session_id"] == "vendor-1" {
+			return
+		}
+	}
+	t.Fatalf("records = %+v, want the ERROR record naming the gate", f.log.logger.Records())
+}
+
+func TestAnswerColdGateWhoseFateFailsLeavesTheGateRowStanding(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	standingGate(f)
+	f.queue.gateFateErr = errors.New("disk full")
+
+	// Act.
+	_ = f.verbs.AnswerColdGate(context.Background(), "w1", clearAnswer())
+
+	// Assert.
+	if len(f.feed.retired) != 0 {
+		t.Fatalf("retired rows = %v, want the gate row left for the gate standing again", f.feed.retired)
 	}
 }

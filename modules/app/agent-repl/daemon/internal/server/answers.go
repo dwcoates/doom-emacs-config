@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
@@ -358,10 +357,8 @@ func (s *server) UpdateQuestionDraft(
 	return connect.NewResponse(resp), nil
 }
 
-// AnswerColdGate resolves the standing cold gate: pay, clear, or
-// compact{model, scope}. The scope travels beside the answer because the
-// resolved trace carries only the model while the shim's remediation needs
-// both, and a scope is never defaulted.
+// AnswerColdGate resolves the standing cold gate with the request's choice:
+// pay, clear, compact{model, scope} or compact_and_resume{model, scope}.
 func (s *server) AnswerColdGate(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.AnswerColdGateRequest],
@@ -379,29 +376,7 @@ func (s *server) AnswerColdGate(
 		return answer(resp, s.refuse(s.log, rpc, resp, *r))
 	}
 
-	resolvedGate := &frontendv1.FeedColdGateResolved{AtMs: time.Now().UnixMilli()}
-	scope := conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_UNSPECIFIED
-	switch {
-	case req.Msg.GetPay() != nil:
-		resolvedGate.Choice = &frontendv1.FeedColdGateResolved_Pay{
-			Pay: &frontendv1.FeedColdGateResolvedPay{},
-		}
-	case req.Msg.GetClear() != nil:
-		resolvedGate.Choice = &frontendv1.FeedColdGateResolved_Clear{
-			Clear: &frontendv1.FeedColdGateResolvedClear{},
-		}
-	default:
-		compact := req.Msg.GetCompact()
-		scope = compact.GetScope()
-		resolvedGate.Choice = &frontendv1.FeedColdGateResolved_Compact{
-			Compact: &frontendv1.FeedColdGateResolvedCompact{
-				Model: &frontendv1.FeedColdGateModel{Model: compact.GetModel()},
-				Scope: scope,
-			},
-		}
-	}
-
-	if err := s.deps.Verbs.AnswerColdGate(ctx, subject.Record.ID, resolvedGate, scope); err != nil {
+	if err := s.deps.Verbs.AnswerColdGate(ctx, subject.Record.ID, req.Msg); err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
 	resp.Result = &agentreplv1.AnswerColdGateResponse_Success{

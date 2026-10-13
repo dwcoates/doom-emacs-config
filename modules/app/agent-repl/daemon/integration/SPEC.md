@@ -198,9 +198,13 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
   {compact{model,scope}} echoes exactly; a scope the menu never served is
   refused with the intended arm
 - a prompt held for a revival whose resume answers `cold` waits at the gate
-  (tray `cold_gate` hold and badge, no StartTurn); AnswerColdGate{pay}
-  brings the session up and the held prompt is its first StartTurn (the
-  2026-10-10 doom incident)
+  (tray `cold_gate` hold and badge, no StartTurn; the 2026-10-10 doom
+  incident). The answer decides it (owner ruling 2026-10-13): {pay} keeps it
+  (tray `cold_gate_answered` hold and badge) and a fresh prompt is the
+  session's first StartTurn; {clear} discards it and a fresh prompt is the
+  first StartTurn; the standing row offers `compact_and_resume{held_prompts:
+  1}`, and {compact_and_resume} re-opens with `cold_remediation{compact}` and
+  the held prompt is its first StartTurn
 - the config dir is DETERMINED: a workspace under MULTI_REPO_ROOT spawns
   with CLAUDE_CONFIG_DIR = the multi-repo root, another with the default;
   the topbar account reads each root's .claude.json email; a root without

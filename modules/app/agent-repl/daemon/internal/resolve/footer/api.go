@@ -253,8 +253,12 @@ const (
 	ChoicePay = "pay"
 	// ChoiceClear is the gate's "clear context".
 	ChoiceClear = "clear"
-	// ChoiceCompact is the gate's "compact and resume".
+	// ChoiceCompact is the gate's "compact first".
 	ChoiceCompact = "compact"
+	// ChoiceCompactAndResume is the gate's "compact and resume": the same
+	// compaction, then the prompts held at the gate are sent. The footer
+	// narrates it exactly as ChoiceCompact.
+	ChoiceCompactAndResume = "compact_and_resume"
 )
 
 // SessionAct is what a turn was started to do. A prompt is the ordinary case;
