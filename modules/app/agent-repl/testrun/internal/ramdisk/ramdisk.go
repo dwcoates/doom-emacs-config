@@ -18,6 +18,17 @@
 // SIGKILL, a crash) leaves its RAM disk attached; the next run's Reclaim finds
 // the record, sees the lock free, kills whatever still runs out of the mount,
 // and detaches it.
+//
+// A LEAK OR A WEDGED DISK MANAGER STOPS THE ATTACH (owner ruling,
+// 2026-10-12). Before anything is attached, Setup asks the disk manager for
+// `diskutil list` and `hdiutil info` within short bounds, reclaims the dead
+// runs' disks, and then, under the registry lock, looks for a RAM disk this
+// runner made that no live run's record names. Either finding answers a
+// Trouble instead of a volume: the run's root goes on the disk, the run says
+// why at ERROR, and EnsureInvestigation opens ONE agent-repl workspace to find
+// and fix the cause. A run that went on attaching while one stood leaked an
+// 8 GiB disk per run, 13 at once, each of its disk commands running out its
+// bound first.
 package ramdisk
 
 import (
@@ -27,6 +38,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -73,6 +85,31 @@ func UnitPrefix() []string { return []string{"/usr/sbin/taskpolicy", "-d", UnitI
 // Runner runs one external command and answers its combined output.
 type Runner func(name string, args ...string) (string, error)
 
+// BoundedRunner runs one external command within bound and answers its
+// combined output.
+type BoundedRunner func(bound time.Duration, name string, args ...string) (string, error)
+
+// Logger is the run's log: testrun's run.Log.
+type Logger interface {
+	Infof(format string, args ...any)
+	Errorf(format string, args ...any)
+}
+
+// InfoBound is how long `hdiutil info` may run before the disk manager is
+// taken not to answer.
+//
+// MEASURED, NOT GUESSED: 30 calls from Go on the owner's host at a load
+// average of 15.9 (2026-10-12) answered in p50 8.6ms, max 22ms. The bound is
+// just over twice that max. A wedged disk manager never answers at all
+// (2026-10-12: every call ran out its 60s bound), so the short bound costs a
+// healthy run nothing and a wedged one only this long.
+const InfoBound = 50 * time.Millisecond
+
+// ListBound is how long the `diskutil list` probe may run before the disk
+// manager is taken not to answer: measured in the same 30 calls at p50 25ms,
+// max 44ms, and just over twice that max.
+const ListBound = 100 * time.Millisecond
+
 // CommandBound is how long one hdiutil, diskutil or lsof call may run.
 //
 // A WEDGED DISK MANAGER MUST FAIL THE ACQUIRE, NOT HANG THE RUN. Every one of
@@ -87,6 +124,11 @@ const CommandBound = 60 * time.Second
 // ExecRunner is the real Runner: the command, bounded by CommandBound.
 func ExecRunner(name string, args ...string) (string, error) {
 	return runBounded(CommandBound, name, args...)
+}
+
+// RunBounded is the real BoundedRunner.
+func RunBounded(bound time.Duration, name string, args ...string) (string, error) {
+	return runBounded(bound, name, args...)
 }
 
 // runBounded runs the command, killing it once bound has passed.
@@ -120,6 +162,15 @@ type Manager struct {
 	// KillUnder SIGKILLs every process whose command line names a path under
 	// dir, answering how many it killed.
 	KillUnder func(dir string) (int, error)
+	// Probe runs the short-bounded reads of the disk manager (`hdiutil info`,
+	// `diskutil list`).
+	Probe BoundedRunner
+	// Alive answers whether a process of pid exists.
+	Alive func(pid int) bool
+	// Log is the run's log: the acquire and release edges, with timings.
+	Log Logger
+	// Now is the clock the edges are timed by.
+	Now func() time.Time
 }
 
 // Volume is one attached, mounted RAM disk owned by this run.
@@ -134,8 +185,23 @@ type Volume struct {
 }
 
 // Default is the Manager a real run uses.
-func Default() Manager {
-	return Manager{Run: ExecRunner, Registry: DefaultRegistry, MountParent: DefaultMountParent, Pid: os.Getpid(), KillUnder: KillProcessesUnder}
+func Default(log Logger) Manager {
+	return Manager{
+		Run: ExecRunner, Registry: DefaultRegistry, MountParent: DefaultMountParent, Pid: os.Getpid(),
+		KillUnder: KillProcessesUnder, Probe: RunBounded, Alive: ProcessAlive, Log: log, Now: time.Now,
+	}
+}
+
+// ProcessAlive answers whether a process of pid exists, the way kill(pid, 0)
+// says so: a process this user may not signal exists too.
+func ProcessAlive(pid int) bool {
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
+}
+
+// listImages answers `hdiutil info`, within InfoBound.
+func (m Manager) listImages() (string, error) {
+	return m.Probe(InfoBound, "hdiutil", "info")
 }
 
 // SizeFromEnv answers EnvSizeMiB, or DefaultSizeMiB when it is unset. A value
@@ -156,40 +222,37 @@ func SizeFromEnv(getenv func(string) string) (int, error) {
 // timestamps the suites' mtime checks need, which HFS+'s one-second ones would
 // not give) and mounts it at <MountParent>/artr-<pid>. On any failure it
 // undoes what it did and answers the error; the caller falls back to disk.
+//
+// IT ATTACHES NOTHING WHILE A LEAK STANDS: a RAM disk this runner made that no
+// live run's record names answers a *LeakError, before any record is made.
 func (m Manager) Acquire(sizeMiB int) (_ *Volume, err error) {
+	start := m.Now()
+	m.Log.Infof("RAM disk acquire: begin, %d MiB", sizeMiB)
+	defer func() {
+		if err != nil {
+			m.Log.Infof("RAM disk acquire: failed after %s", m.Now().Sub(start))
+		}
+	}()
 	if err := os.MkdirAll(m.Registry, 0o755); err != nil {
 		return nil, fmt.Errorf("make the RAM disk registry %s: %w", m.Registry, err)
 	}
-	recordPath := m.recordPath(m.Pid)
-	lock, err := m.createRecord(recordPath)
+	v, err := m.attach(sizeMiB)
+	if v != nil {
+		defer func() {
+			if err != nil {
+				err = errors.Join(err, v.Release())
+			}
+		}()
+	}
 	if err != nil {
-		return nil, err
-	}
-	v := &Volume{m: m, lock: lock, Mount: filepath.Join(m.MountParent, fmt.Sprintf("artr-%d", m.Pid))}
-	defer func() {
-		if err != nil {
-			err = errors.Join(err, v.Release())
-		}
-	}()
-
-	out, err := m.Run("hdiutil", "attach", "-nomount", fmt.Sprintf("ram://%d", sizeMiB*2048))
-	if err != nil {
-		return v, fmt.Errorf("attach a %d MiB RAM disk: %w", sizeMiB, err)
-	}
-	fields := strings.Fields(out)
-	if len(fields) == 0 || !strings.HasPrefix(fields[0], "/dev/disk") {
-		return v, fmt.Errorf("attach a %d MiB RAM disk: hdiutil answered no device: %q", sizeMiB, out)
-	}
-	v.Device = fields[0]
-	// THE RECORD IS WRITTEN BEFORE ANYTHING ELSE CAN FAIL, so a run killed
-	// from here on leaves a device the next run can find.
-	if err := writeRecord(lock, v.Device, v.Mount); err != nil {
 		return v, err
 	}
+	attached := m.Now()
 	name := fmt.Sprintf("artr-%d", m.Pid)
 	if _, err := m.Run("diskutil", "eraseDisk", "APFS", name, v.Device); err != nil {
 		return v, fmt.Errorf("format the RAM disk %s: %w", v.Device, err)
 	}
+	formatted := m.Now()
 	// eraseDisk mounted the volume in /Volumes; it moves under /tmp.
 	info, err := m.Run("diskutil", "info", "/Volumes/"+name)
 	if err != nil {
@@ -214,37 +277,139 @@ func (m Manager) Acquire(sizeMiB int) (_ *Volume, err error) {
 	if _, err := m.Run("diskutil", "mount", "nobrowse", "-mountPoint", v.Mount, volume); err != nil {
 		return v, fmt.Errorf("mount the RAM disk's volume %s at %s: %w", volume, v.Mount, err)
 	}
+	end := m.Now()
+	m.Log.Infof("RAM disk acquire: %s mounted at %s in %s (attach %s, format %s, mount %s)",
+		v.Device, v.Mount, end.Sub(start), attached.Sub(start), formatted.Sub(attached), end.Sub(formatted))
 	return v, nil
+}
+
+// attach makes this run's record and attaches its RAM disk, all under the
+// registry lock, after looking for leaks under that same lock. It answers the
+// volume whenever a record was made, so the caller's Release undoes it.
+//
+// THE REGISTRY LOCK IS HELD FROM THE LEAK CHECK UNTIL THE RECORD NAMES THE
+// DEVICE, so no other run's check can see this run's disk attached and not
+// yet recorded, and no other run attaches between this run's listing and its
+// attach (which the cleanup of a failed attach below relies on).
+func (m Manager) attach(sizeMiB int) (_ *Volume, err error) {
+	unlock, err := m.lockRegistry()
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if closeErr := unlock(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("release the RAM disk registry lock: %w", closeErr))
+		}
+	}()
+	before, err := m.listImages()
+	if err != nil {
+		return nil, fmt.Errorf("list the attached images before attaching: %w", err)
+	}
+	if leaks, err := m.leaksLocked(before); err != nil {
+		return nil, err
+	} else if len(leaks) > 0 {
+		return nil, &LeakError{Leaks: leaks, Info: before}
+	}
+	lock, err := m.createRecordLocked(m.recordPath(m.Pid))
+	if err != nil {
+		return nil, err
+	}
+	v := &Volume{m: m, lock: lock, Mount: filepath.Join(m.MountParent, fmt.Sprintf("artr-%d", m.Pid))}
+	out, err := m.Run("hdiutil", "attach", "-nomount", fmt.Sprintf("ram://%d", sizeMiB*2048))
+	if err != nil {
+		// A KILLED ATTACH MAY STILL HAVE ATTACHED. hdiutil killed at its bound
+		// leaves the kernel's attach to finish without it, and nothing would
+		// ever name the device: each such run leaked one disk.
+		return v, errors.Join(fmt.Errorf("attach a %d MiB RAM disk: %w", sizeMiB, err), m.detachNewRAMDisks(before))
+	}
+	fields := strings.Fields(out)
+	if len(fields) == 0 || !strings.HasPrefix(fields[0], "/dev/disk") {
+		return v, errors.Join(fmt.Errorf("attach a %d MiB RAM disk: hdiutil answered no device: %q", sizeMiB, out), m.detachNewRAMDisks(before))
+	}
+	v.Device = fields[0]
+	// THE RECORD IS WRITTEN BEFORE ANYTHING ELSE CAN FAIL, so a run killed
+	// from here on leaves a device the next run can find.
+	if err := writeRecord(lock, v.Device, v.Mount); err != nil {
+		return v, err
+	}
+	return v, nil
+}
+
+// detachNewRAMDisks force-detaches every RAM disk `hdiutil info` lists now
+// that the listing before did not: what a failed attach left behind. Under the
+// registry lock nothing else attached in between. What it detached is named,
+// and so is every failure, never dropped.
+func (m Manager) detachNewRAMDisks(before string) error {
+	after, err := m.listImages()
+	if err != nil {
+		return fmt.Errorf("list the attached images after a failed attach, to detach what it may have left: %w", err)
+	}
+	old := map[string]bool{}
+	for _, img := range parseImages(before) {
+		if img.isRAM() && len(img.Devices) > 0 {
+			old[img.Devices[0]] = true
+		}
+	}
+	var errs []error
+	for _, img := range parseImages(after) {
+		if !img.isRAM() || len(img.Devices) == 0 || old[img.Devices[0]] {
+			continue
+		}
+		device := img.Devices[0]
+		if _, err := m.Run("hdiutil", "detach", "-force", device); err != nil {
+			errs = append(errs, fmt.Errorf("detach the RAM disk %s the failed attach left: %w", device, err))
+			continue
+		}
+		errs = append(errs, fmt.Errorf("the failed attach had attached %s anyway; it was detached", device))
+	}
+	return errors.Join(errs...)
 }
 
 // Release detaches the RAM disk and removes its mount point and record. A
 // plain detach that is refused (something still holds a file on the volume)
 // is forced, and the refusal is answered alongside, never dropped.
+//
+// A DISK THAT WOULD NOT DETACH KEEPS ITS RECORD. Removed, the record was the
+// only thing that named the device, and the disk leaked for good; kept, its
+// lock drops with this run and the next run's Reclaim retries the detach.
 func (v *Volume) Release() error {
+	start := v.m.Now()
+	v.m.Log.Infof("RAM disk release: begin, %s at %s", v.Device, v.Mount)
 	var errs []error
+	detached := true
 	if v.Device != "" {
 		if _, err := v.m.Run("hdiutil", "detach", v.Device); err != nil {
 			// WHO HELD IT IS READ BEFORE THE FORCE, which would close every
 			// holder's files and leave nothing to name.
 			holders := v.holders()
 			if _, forceErr := v.m.Run("hdiutil", "detach", "-force", v.Device); forceErr != nil {
+				detached = false
 				errs = append(errs, fmt.Errorf("detach the RAM disk %s (held by: %s): %w; forced: %w", v.Device, holders, err, forceErr))
 			} else {
 				errs = append(errs, fmt.Errorf("the RAM disk %s detached only when forced, so something still held it (held by: %s): %w", v.Device, holders, err))
 			}
 		}
 	}
-	if err := os.Remove(v.Mount); err != nil && !errors.Is(err, os.ErrNotExist) {
-		errs = append(errs, fmt.Errorf("remove the RAM disk's mount point %s: %w", v.Mount, err))
+	if detached {
+		if err := os.Remove(v.Mount); err != nil && !errors.Is(err, os.ErrNotExist) {
+			errs = append(errs, fmt.Errorf("remove the RAM disk's mount point %s: %w", v.Mount, err))
+		}
 	}
 	if v.lock != nil {
-		if err := os.Remove(v.lock.Name()); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if !detached {
+			errs = append(errs, fmt.Errorf("the RAM disk record %s is kept, so the next run reclaims %s", v.lock.Name(), v.Device))
+		} else if err := os.Remove(v.lock.Name()); err != nil && !errors.Is(err, os.ErrNotExist) {
 			errs = append(errs, fmt.Errorf("remove the RAM disk record %s: %w", v.lock.Name(), err))
 		}
 		if err := v.lock.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("close the RAM disk record: %w", err))
 		}
 		v.lock = nil
+	}
+	if len(errs) > 0 {
+		v.m.Log.Infof("RAM disk release: failed after %s", v.m.Now().Sub(start))
+	} else {
+		v.m.Log.Infof("RAM disk release: %s released in %s", v.Device, v.m.Now().Sub(start))
 	}
 	return errors.Join(errs...)
 }
@@ -346,7 +511,7 @@ func (m Manager) reclaimOne(path string) (Reclaimed, bool, error) {
 	device, mount := parseRecord(string(raw))
 	r := Reclaimed{Pid: pid, Device: device, Mount: mount}
 	if device != "" {
-		info, err := m.Run("hdiutil", "info")
+		info, err := m.listImages()
 		if err != nil {
 			return r, false, fmt.Errorf("list the attached images to reclaim %s: %w", device, err)
 		}
@@ -411,18 +576,9 @@ func (m Manager) lockRegistry() (func() error, error) {
 	return f.Close, nil
 }
 
-// createRecord creates this run's record and takes its flock, as one step
-// under the registry lock.
-func (m Manager) createRecord(recordPath string) (_ *os.File, err error) {
-	unlock, err := m.lockRegistry()
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if closeErr := unlock(); closeErr != nil {
-			err = errors.Join(err, fmt.Errorf("release the RAM disk registry lock: %w", closeErr))
-		}
-	}()
+// createRecordLocked creates this run's record and takes its flock. The
+// caller holds the registry lock, so the record is never seen unlocked.
+func (m Manager) createRecordLocked(recordPath string) (*os.File, error) {
 	lock, err := os.OpenFile(recordPath, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0o644)
 	if err != nil {
 		return nil, fmt.Errorf("open the RAM disk record %s: %w", recordPath, err)
@@ -448,6 +604,11 @@ func (m Manager) probeRecord(path string) (_ *os.File, dead bool, err error) {
 			err = errors.Join(err, fmt.Errorf("release the RAM disk registry lock: %w", closeErr))
 		}
 	}()
+	return probeRecordLocked(path)
+}
+
+// probeRecordLocked is probeRecord for a caller that holds the registry lock.
+func probeRecordLocked(path string) (_ *os.File, dead bool, err error) {
 	f, err := os.OpenFile(path, os.O_RDWR, 0)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, false, nil
@@ -521,22 +682,58 @@ func deviceIdentifier(info string) (string, error) {
 	return "", fmt.Errorf("diskutil info named no device identifier: %q", info)
 }
 
-// isAttachedRAMDisk reports whether `hdiutil info` lists device as the whole
-// disk of an image whose path is a ram:// URL. Each image's block starts at a
-// line of '=' and carries its image-path and its device lines.
-func isAttachedRAMDisk(info, device string) bool {
-	for _, block := range strings.Split(info, "================================================") {
-		ram, has := false, false
+// image is one attached disk image as `hdiutil info` lists it.
+type image struct {
+	// Path is its image-path: a ram:// URL for a RAM disk.
+	Path string
+	// Devices are its device lines' devices, the whole disk first.
+	Devices []string
+	// Mounts are the mount points its device lines name.
+	Mounts []string
+}
+
+func (img image) isRAM() bool { return strings.HasPrefix(img.Path, "ram://") }
+
+// imageSeparator starts each image's block in `hdiutil info`.
+const imageSeparator = "================================================"
+
+// parseImages reads `hdiutil info` into its images. Each image's block starts
+// at a line of '=' and carries its image-path line and its device lines,
+// "<device>\t<content hint>\t<mount point>", the mount point only when one is.
+func parseImages(info string) []image {
+	var images []image
+	for i, block := range strings.Split(info, imageSeparator) {
+		if i == 0 {
+			continue
+		}
+		var img image
 		for _, line := range strings.Split(block, "\n") {
-			line = strings.TrimSpace(line)
-			if v, ok := strings.CutPrefix(line, "image-path"); ok && strings.HasPrefix(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(v), ":")), "ram://") {
-				ram = true
+			if v, ok := strings.CutPrefix(strings.TrimSpace(line), "image-path"); ok {
+				img.Path = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(v), ":"))
+				continue
 			}
-			if f := strings.Fields(line); len(f) > 0 && f[0] == device {
-				has = true
+			cols := strings.Split(line, "\t")
+			device := strings.TrimSpace(cols[0])
+			if !strings.HasPrefix(device, "/dev/disk") {
+				continue
+			}
+			img.Devices = append(img.Devices, device)
+			if len(cols) >= 3 {
+				if mount := strings.TrimSpace(cols[2]); mount != "" {
+					img.Mounts = append(img.Mounts, mount)
+				}
 			}
 		}
-		if ram && has {
+		images = append(images, img)
+	}
+	return images
+}
+
+// isAttachedRAMDisk reports whether `hdiutil info` lists device as a device of
+// an image whose path is a ram:// URL.
+func isAttachedRAMDisk(info, device string) bool {
+	for _, img := range parseImages(info) {
+		if img.isRAM() && slices.Contains(img.Devices, device) {
 			return true
 		}
 	}

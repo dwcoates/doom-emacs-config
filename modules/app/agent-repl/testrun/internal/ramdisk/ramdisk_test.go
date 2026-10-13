@@ -2,6 +2,7 @@ package ramdisk
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,6 +21,15 @@ type fakeHost struct {
 	// lsof is what `lsof` answers; lsofErr is its failure, if any.
 	lsof    string
 	lsofErr error
+	// attached is set once `hdiutil attach` was called; from then on
+	// `hdiutil info` answers infoAfterAttach (when set) and infoErrAfterAttach.
+	attached           bool
+	infoAfterAttach    string
+	infoErrAfterAttach error
+	// attachOut, when set, is what `hdiutil attach` answers.
+	attachOut string
+	// bounds are the bounds the probes ran under, by call.
+	bounds map[string]time.Duration
 }
 
 func (h *fakeHost) run(name string, args ...string) (string, error) {
@@ -27,20 +37,66 @@ func (h *fakeHost) run(name string, args ...string) (string, error) {
 	h.calls = append(h.calls, call)
 	for prefix := range h.fail {
 		if strings.HasPrefix(call, prefix) {
+			if strings.HasPrefix(call, "hdiutil attach") {
+				h.attached = true
+			}
 			return "refused", errors.New("refused: " + call)
 		}
 	}
 	switch {
 	case strings.HasPrefix(call, "hdiutil attach"):
+		h.attached = true
+		if h.attachOut != "" {
+			return h.attachOut, nil
+		}
 		return "/dev/disk9          \t\n", nil
 	case strings.HasPrefix(call, "diskutil info"):
 		return "   Device Identifier:         disk10s1\n   Mount Point: /Volumes/x\n", nil
+	case strings.HasPrefix(call, "hdiutil info") && h.attached && (h.infoAfterAttach != "" || h.infoErrAfterAttach != nil):
+		return h.infoAfterAttach, h.infoErrAfterAttach
 	case strings.HasPrefix(call, "hdiutil info"):
 		return h.info, nil
 	case strings.HasPrefix(call, "lsof"):
 		return h.lsof, h.lsofErr
 	}
 	return "", nil
+}
+
+func (h *fakeHost) probe(bound time.Duration, name string, args ...string) (string, error) {
+	if h.bounds == nil {
+		h.bounds = map[string]time.Duration{}
+	}
+	h.bounds[name+" "+strings.Join(args, " ")] = bound
+	return h.run(name, args...)
+}
+
+// fakeLog records every line the Manager logs, "INFO " or "ERROR " first.
+type fakeLog struct{ lines []string }
+
+func (l *fakeLog) Infof(format string, args ...any) {
+	l.lines = append(l.lines, "INFO "+fmt.Sprintf(format, args...))
+}
+
+func (l *fakeLog) Errorf(format string, args ...any) {
+	l.lines = append(l.lines, "ERROR "+fmt.Sprintf(format, args...))
+}
+
+func (l *fakeLog) has(prefix string) bool {
+	for _, line := range l.lines {
+		if strings.HasPrefix(line, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// tickingClock answers a time one second later on every call.
+func tickingClock() func() time.Time {
+	now := time.Date(2026, 10, 12, 0, 0, 0, 0, time.UTC)
+	return func() time.Time {
+		now = now.Add(time.Second)
+		return now
+	}
 }
 
 func newManager(t *testing.T, h *fakeHost) Manager {
@@ -50,6 +106,10 @@ func newManager(t *testing.T, h *fakeHost) Manager {
 	return Manager{
 		Run: h.run, Registry: filepath.Join(t.TempDir(), "registry"), MountParent: parent, Pid: 4242,
 		KillUnder: func(string) (int, error) { return 0, nil },
+		Probe:     h.probe,
+		Alive:     func(int) bool { return false },
+		Log:       &fakeLog{},
+		Now:       tickingClock(),
 	}
 }
 
@@ -67,6 +127,7 @@ func TestAcquireAttachesFormatsAndMountsUnderTheMountParent(t *testing.T) {
 	}
 	t.Cleanup(func() { v.Release() })
 	want := []string{
+		"hdiutil info",
 		"hdiutil attach -nomount ram://32768",
 		"diskutil eraseDisk APFS artr-4242 /dev/disk9",
 		"diskutil info /Volumes/artr-4242",
@@ -559,5 +620,302 @@ func TestRunBoundedReportsAFailingCommandsOutput(t *testing.T) {
 	// Assert
 	if err == nil || !strings.Contains(err.Error(), "refused") || strings.Contains(err.Error(), "did not answer") {
 		t.Fatalf("runBounded(exit 3) = %v, want the command's own failure with its output", err)
+	}
+}
+
+// ramInfo is `hdiutil info` listing one RAM disk image per device given, each
+// "<device>[=<mount>]".
+func ramInfo(disks ...string) string {
+	var b strings.Builder
+	b.WriteString("framework : 1\n")
+	for _, d := range disks {
+		device, mount, _ := strings.Cut(d, "=")
+		b.WriteString("================================================\nimage-path      : ram://32768\n")
+		b.WriteString(device + "\tGUID_partition_scheme\t\n")
+		if mount != "" {
+			b.WriteString(device + "s1\t41504653-0000-11AA-AA11-00306543ECAC\t" + mount + "\n")
+		}
+	}
+	return b.String()
+}
+
+func TestAcquireDetachesWhatAKilledAttachLeft(t *testing.T) {
+	// Arrange: hdiutil is killed at its bound, but the kernel's attach lands.
+	h := &fakeHost{fail: map[string]bool{"hdiutil attach": true}, infoAfterAttach: ramInfo("/dev/disk9")}
+	m := newManager(t, h)
+
+	// Act
+	_, err := m.Acquire(16)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "attached /dev/disk9 anyway; it was detached") {
+		t.Fatalf("Acquire = %v, want the stray disk named as detached", err)
+	}
+	if last := h.calls[len(h.calls)-1]; last != "hdiutil detach -force /dev/disk9" {
+		t.Fatalf("last call = %q, want the stray disk force-detached", last)
+	}
+}
+
+func TestAcquireLeavesTheDisksListedBeforeAFailedAttachAttached(t *testing.T) {
+	// Arrange: a live run's disk is attached before and after the failed attach.
+	h := &fakeHost{fail: map[string]bool{"hdiutil attach": true}, info: ramInfo("/dev/disk5"), infoAfterAttach: ramInfo("/dev/disk5")}
+	m := newManager(t, h)
+
+	// Act
+	m.Acquire(16) //nolint:errcheck // the calls are the subject
+
+	// Assert
+	for _, call := range h.calls {
+		if strings.HasPrefix(call, "hdiutil detach") {
+			t.Fatalf("called %q, want the disk attached before the failed attach left alone", call)
+		}
+	}
+}
+
+func TestAcquireNamesAFailedListingAfterAFailedAttach(t *testing.T) {
+	// Arrange
+	h := &fakeHost{fail: map[string]bool{"hdiutil attach": true}, infoErrAfterAttach: errors.New("hdiutil info did not answer within 50ms")}
+	m := newManager(t, h)
+
+	// Act
+	_, err := m.Acquire(16)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "after a failed attach, to detach what it may have left: hdiutil info did not answer") {
+		t.Fatalf("Acquire = %v, want the failed listing named", err)
+	}
+}
+
+func TestAcquireDetachesWhatAnAttachAnsweringNoDeviceLeft(t *testing.T) {
+	// Arrange
+	h := &fakeHost{attachOut: "hdiutil: attach: interrupted\n", infoAfterAttach: ramInfo("/dev/disk9")}
+	m := newManager(t, h)
+
+	// Act
+	_, err := m.Acquire(16)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "answered no device") {
+		t.Fatalf("Acquire = %v, want the deviceless answer refused", err)
+	}
+	if last := h.calls[len(h.calls)-1]; last != "hdiutil detach -force /dev/disk9" {
+		t.Fatalf("last call = %q, want the stray disk force-detached", last)
+	}
+}
+
+func TestAcquireAttachesNothingWhenTheImagesCannotBeListed(t *testing.T) {
+	// Arrange
+	h := &fakeHost{fail: map[string]bool{"hdiutil info": true}}
+	m := newManager(t, h)
+
+	// Act
+	_, err := m.Acquire(16)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "list the attached images before attaching") {
+		t.Fatalf("Acquire = %v, want the failed listing named", err)
+	}
+	for _, call := range h.calls {
+		if strings.HasPrefix(call, "hdiutil attach") {
+			t.Fatalf("attached (%q) without a listing to check for leaks", call)
+		}
+	}
+}
+
+func TestAcquireListsTheImagesWithinTheInfoBound(t *testing.T) {
+	// Arrange
+	h := &fakeHost{}
+	m := newManager(t, h)
+
+	// Act
+	v, err := m.Acquire(16)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	t.Cleanup(func() { v.Release() })
+	if got := h.bounds["hdiutil info"]; got != InfoBound {
+		t.Fatalf("hdiutil info ran under %s, want InfoBound %s", got, InfoBound)
+	}
+}
+
+func TestAcquireLogsItsEdgesWithTimings(t *testing.T) {
+	// Arrange
+	h := &fakeHost{}
+	m := newManager(t, h)
+	log := m.Log.(*fakeLog)
+
+	// Act
+	v, err := m.Acquire(16)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	t.Cleanup(func() { v.Release() })
+	want := []string{
+		"INFO RAM disk acquire: begin, 16 MiB",
+		"INFO RAM disk acquire: /dev/disk9 mounted at " + h.mount + " in 3s (attach 1s, format 1s, mount 1s)",
+	}
+	if strings.Join(log.lines, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("log =\n%s\nwant\n%s", strings.Join(log.lines, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+func TestAcquireLogsAFailedEdgeWithItsTiming(t *testing.T) {
+	// Arrange
+	h := &fakeHost{fail: map[string]bool{"diskutil eraseDisk": true}}
+	m := newManager(t, h)
+	log := m.Log.(*fakeLog)
+
+	// Act
+	m.Acquire(16) //nolint:errcheck // the log is the subject
+
+	// Assert
+	if !log.has("INFO RAM disk acquire: failed after ") {
+		t.Fatalf("log = %q, want the failed acquire's edge", log.lines)
+	}
+}
+
+func TestReleaseKeepsTheRecordOfADiskThatWouldNotDetach(t *testing.T) {
+	// Arrange
+	h := &fakeHost{}
+	m := newManager(t, h)
+	v, err := m.Acquire(16)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	h.fail = map[string]bool{"hdiutil detach": true}
+
+	// Act
+	err = v.Release()
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "is kept, so the next run reclaims /dev/disk9") {
+		t.Fatalf("Release = %v, want the kept record said", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(m.Registry, "4242.lock")); statErr != nil {
+		t.Fatalf("the record of a disk still attached is gone: %v", statErr)
+	}
+}
+
+func TestReleaseLeavesTheMountPointOfADiskThatWouldNotDetach(t *testing.T) {
+	// Arrange
+	h := &fakeHost{}
+	m := newManager(t, h)
+	v, err := m.Acquire(16)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	h.fail = map[string]bool{"hdiutil detach": true}
+
+	// Act
+	v.Release() //nolint:errcheck // the mount point is the subject
+
+	// Assert
+	if _, statErr := os.Stat(h.mount); statErr != nil {
+		t.Fatalf("the mount point of a disk still attached is gone: %v", statErr)
+	}
+}
+
+func TestReleaseLogsItsEdgesWithTimings(t *testing.T) {
+	// Arrange
+	h := &fakeHost{}
+	m := newManager(t, h)
+	v, err := m.Acquire(16)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	log := m.Log.(*fakeLog)
+	log.lines = nil
+
+	// Act
+	if err := v.Release(); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+
+	// Assert
+	want := []string{
+		"INFO RAM disk release: begin, /dev/disk9 at " + h.mount,
+		"INFO RAM disk release: /dev/disk9 released in 1s",
+	}
+	if strings.Join(log.lines, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("log =\n%s\nwant\n%s", strings.Join(log.lines, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+func TestReleaseLogsAFailedEdgeWithItsTiming(t *testing.T) {
+	// Arrange
+	h := &fakeHost{}
+	m := newManager(t, h)
+	v, err := m.Acquire(16)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	h.fail = map[string]bool{"hdiutil detach": true}
+	log := m.Log.(*fakeLog)
+
+	// Act
+	v.Release() //nolint:errcheck // the log is the subject
+
+	// Assert
+	if !log.has("INFO RAM disk release: failed after 1s") {
+		t.Fatalf("log = %q, want the failed release's edge", log.lines)
+	}
+}
+
+func TestReclaimListsTheImagesWithinTheInfoBound(t *testing.T) {
+	// Arrange
+	h := &fakeHost{info: attachedInfo}
+	m := newManager(t, h)
+	deadRecord(t, m, "7", "/dev/disk7", filepath.Join(t.TempDir(), "artr-7"))
+
+	// Act
+	if _, err := m.Reclaim(); err != nil {
+		t.Fatalf("Reclaim: %v", err)
+	}
+
+	// Assert
+	if got := h.bounds["hdiutil info"]; got != InfoBound {
+		t.Fatalf("hdiutil info ran under %s, want InfoBound %s", got, InfoBound)
+	}
+}
+
+func TestParseImages(t *testing.T) {
+	tests := []struct {
+		name string
+		info string
+		want []image
+	}{
+		{name: "no image", info: "framework : 1\n", want: nil},
+		{name: "an unmounted RAM disk", info: ramInfo("/dev/disk9"), want: []image{{Path: "ram://32768", Devices: []string{"/dev/disk9"}}}},
+		{
+			name: "a mounted RAM disk",
+			info: ramInfo("/dev/disk4=/private/tmp/artr-63245"),
+			want: []image{{Path: "ram://32768", Devices: []string{"/dev/disk4", "/dev/disk4s1"}, Mounts: []string{"/private/tmp/artr-63245"}}},
+		},
+		{name: "a mount point with a space", info: ramInfo("/dev/disk4=/Volumes/my disk"), want: []image{{Path: "ram://32768", Devices: []string{"/dev/disk4", "/dev/disk4s1"}, Mounts: []string{"/Volumes/my disk"}}}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := parseImages(tc.info)
+
+			// Assert
+			if fmt.Sprint(got) != fmt.Sprint(tc.want) {
+				t.Fatalf("parseImages = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestProcessAliveAnswersTrueForThisProcess(t *testing.T) {
+	// Act
+	got := ProcessAlive(os.Getpid())
+
+	// Assert
+	if !got {
+		t.Fatal("ProcessAlive(self) = false")
 	}
 }
