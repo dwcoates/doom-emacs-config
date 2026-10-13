@@ -550,15 +550,35 @@ describe("expandVisibleRows", () => {
 });
 
 describe("the row click in the hidden section", () => {
-  it("shows the workspace again, and selects nothing", async () => {
-    const shown: string[] = [];
-    const selected: string[] = [];
+  // OWNER REQUEST, 2026-10-13: the click shows the workspace and then
+  // selects it, so the user lands on what they clicked.
+  it("shows the workspace again, then selects it", async () => {
+    const calls: string[] = [];
     const sc = sidebarContext(
       appContext({
         setWorkspaceHidden: (request) => {
-          shown.push(`${request.workspace?.id ?? ""}:${request.visibility.case ?? ""}`);
+          calls.push(`hidden:${request.workspace?.id ?? ""}:${request.visibility.case ?? ""}`);
           return create(SetWorkspaceHiddenResponseSchema, { result: { case: "success", value: {} } });
         },
+        selectWorkspace: (request) => {
+          calls.push(`select:${request.workspace?.id ?? ""}`);
+          return SELECT_OK;
+        },
+      }),
+    );
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sc, "R", "hidden");
+    await click(drawn.querySelector("[data-select]") as Element);
+    expect(calls).toEqual(["hidden:ws-1:show", "select:ws-1"]);
+  });
+
+  it("selects nothing when the show is refused", async () => {
+    const selected: string[] = [];
+    const sc = sidebarContext(
+      appContext({
+        setWorkspaceHidden: () =>
+          create(SetWorkspaceHiddenResponseSchema, {
+            result: { case: "error", value: { cause: { case: "unknownWorkspace", value: {} } } },
+          }),
         selectWorkspace: (request) => {
           selected.push(request.workspace?.id ?? "");
           return SELECT_OK;
@@ -567,7 +587,7 @@ describe("the row click in the hidden section", () => {
     );
     const drawn = drawRosterRow(row({ id: "ws-1" }), sc, "R", "hidden");
     await click(drawn.querySelector("[data-select]") as Element);
-    expect([shown, selected]).toEqual([["ws-1:show"], []]);
+    expect(selected).toEqual([]);
   });
 
   it("shows a hidden child row by its own ref", async () => {
@@ -578,6 +598,7 @@ describe("the row click in the hidden section", () => {
           shown.push(request.workspace?.id ?? "");
           return create(SetWorkspaceHiddenResponseSchema, { result: { case: "success", value: {} } });
         },
+        selectWorkspace: () => SELECT_OK,
       }),
     );
     const drawn = drawRosterRow(row({ id: "ws-1", children: [row({ id: "ws-2" })] }), sc, "R", "hidden");
