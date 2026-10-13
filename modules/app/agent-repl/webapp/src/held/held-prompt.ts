@@ -64,6 +64,7 @@ import type {
   HeldPromptBuildRefreshHold,
   HeldPromptClassificationError,
   HeldPromptClassifying,
+  HeldPromptColdGateAnsweredHold,
   HeldPromptColdGateHold,
   HeldPromptDaemonHeld,
   HeldPromptHoldForTurnEnd,
@@ -163,7 +164,7 @@ export const NO_RELEASE_TITLES: Readonly<Record<string, string>> = {
   merge:
     "a merge is driving the session, so a prompt sent now would run inside it — it is delivered the moment the merge ends",
   coldGate:
-    "the session is parked at its cold gate, and a prompt never answers the gate — it is delivered once the gate is answered",
+    "the session is parked at its cold gate, and a prompt never answers the gate — the gate's answer decides it: clear discards it, pay and compact keep it for you to send, compact and resume sends it",
 };
 
 /**
@@ -348,6 +349,7 @@ function holdCardHooks(hold: string | null): string[] {
       return ["held-right", "lease-card"];
     case "reconnect":
     case "coldGate":
+    case "coldGateAnswered":
       // The card's `data-hold` names the wait; it wears no hook of its own.
       return ["held-right"];
     default:
@@ -641,6 +643,11 @@ function drawHold(
       return drawHeldPromptMergeHold(hold.value, `${path}.merge`);
     case "coldGate":
       return drawHeldPromptColdGateHold(hold.value, `${path}.cold_gate`);
+    case "coldGateAnswered":
+      return drawHeldPromptColdGateAnsweredHold(
+        hold.value,
+        `${path}.cold_gate_answered`,
+      );
     default: {
       const other: { case: string } = hold;
       return unreachableArm(path, other.case);
@@ -706,6 +713,21 @@ export function drawHeldPromptColdGateHold(
     context: { path },
   });
   return "coldGate";
+}
+
+/**
+ * Kept when the cold gate was answered with pay or compact: only the reader's
+ * own "Send now" sends it. Empty on the wire: presence is the fact.
+ */
+export function drawHeldPromptColdGateAnsweredHold(
+  _u: HeldPromptColdGateAnsweredHold,
+  path: string,
+): HeldStatus {
+  log.debug("drawing a hold kept at the cold gate's answer", {
+    operation: "held.held-prompt.cold-gate-answered-hold",
+    context: { path },
+  });
+  return "coldGateAnswered";
 }
 
 /** What the actions row needs to know about the entry it acts on. */
@@ -1232,6 +1254,8 @@ export type HeldBadgeTone = "ok" | "err" | "run" | "muted" | "amber" | "teal";
  *   - a cold-gate hold: the session is not up either, waiting on the gate's
  *     answer, so the same teal;
  *   - awaiting delivery: nothing is acting on the entry, muted;
+ *   - kept at the cold gate's answer: nothing acts on it until the reader
+ *     sends it, so muted too;
  *   - editing (EditHeldPrompt): the prompt is being worked on in the editor,
  *     the in-flight orange.
  */
@@ -1248,6 +1272,7 @@ export const HELD_STATUS_BADGES = {
   reconnect: "teal",
   coldGate: "teal",
   awaitingDelivery: "muted",
+  coldGateAnswered: "muted",
   editing: "run",
 } as const satisfies Record<HeldStatus, HeldBadgeTone>;
 
