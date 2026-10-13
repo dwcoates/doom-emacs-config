@@ -1,7 +1,7 @@
 /**
  * tab-set — ONE strip of merge tabs, the line under it, and the selected tab's
  * panel: the shape the bubble's own strip and every nested strip (a rebasing
- * tab's commits, a tests tab's runs, a run's output and fixing) share.
+ * tab's commits, a tests tab's runs) share.
  *
  * SELECTION IS LOCAL AND THE READER'S. The auto rule (the last live tab, else
  * the last tab) decides until the reader clicks, and their choice then stands —
@@ -45,6 +45,12 @@ export interface TabPanel {
    * whether it could; false has the panel drawn afresh.
    */
   update(tab: MergeTab): boolean;
+  /**
+   * The reader clicked BADGE, the badge of the tab this panel already shows.
+   * A panel with views of its own (a run's tests and remediation) offers them
+   * here; a panel without leaves it unset, and the click only pins the tab.
+   */
+  reselect?(badge: HTMLElement): void;
 }
 
 /** Builds the panel of one tab. */
@@ -109,6 +115,10 @@ export function createTabSet(
         const el = drawFeedMergeTab(tab, { active: isActive, ticker });
         el.addEventListener("click", () => {
           picked = tab.id;
+          if (shown !== null && shown.tab.id === tab.id) {
+            shown.panel.reselect?.(el);
+            return;
+          }
           draw(served);
         });
         drawnTabs.set(tab.id, { el, tab, active: isActive });

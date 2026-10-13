@@ -1612,11 +1612,14 @@ describe("merge tabs", () => {
     ]);
   });
 
-  it("draws a lone run with its output as the first entry of its strip", async () => {
+  it("draws a lone run as its tests view, with no strip of its own", async () => {
     // Arrange / Act
     const row = await drawRow(mergeTabRow("testsRun"));
     // Assert
-    expect(row.querySelector('.merge-strip.is-nested [data-merge-tab="testsRunOutput"]')?.textContent).toContain("output");
+    expect([row.querySelector(".merge-run")?.getAttribute("data-run-view"), row.querySelector(".merge-tab-panel .merge-strip")]).toEqual([
+      "tests",
+      null,
+    ]);
   });
 
   it("draws the committing tab's merge commit subject", async () => {

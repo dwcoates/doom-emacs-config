@@ -4485,3 +4485,35 @@ describe("the tighter prompt and response padding", () => {
     expect(props).toEqual(["--bubble-pad-y"]);
   });
 });
+
+
+/** EL's cascaded PROPERTY, mounted with the real stylesheet. */
+function mountedPaint(el: HTMLElement, property: string): string {
+  const teardown = installStylesheet();
+  document.body.append(el);
+  try {
+    return cascadedValue(el, property);
+  } finally {
+    el.remove();
+    teardown();
+  }
+}
+
+/** A merge run's badge is about half a tab (owner request, 2026-10-13). */
+describe("the merge bubble's run badge", () => {
+  /** A merge tab badge of KIND. */
+  function badge(kind: string): HTMLElement {
+    const el = document.createElement("ar-button");
+    el.className = "merge-tab";
+    el.setAttribute("data-merge-tab", kind);
+    return el;
+  }
+
+  it("draws a run's badge at about half a tab's size", () => {
+    expect(mountedPaint(badge("testsRun"), "font-size")).toBe("0.7em");
+  });
+
+  it("leaves every other tab's badge at its own size", () => {
+    expect(mountedPaint(badge("tests"), "font-size")).not.toBe("0.7em");
+  });
+});

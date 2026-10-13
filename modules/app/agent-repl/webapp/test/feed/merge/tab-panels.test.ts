@@ -1,7 +1,14 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { childTabsOf, readMergeTab, type MergeTab } from "../../../src/feed/merge/tab-strip.js";
-import { RUN_OUTPUT_KIND, mergeTabPanel, runOutputEntry, swapHeading } from "../../../src/feed/merge/tab-panels.js";
+import {
+  autoRunView,
+  drawRemediationHeading,
+  fixingOf,
+  mergeTabPanel,
+  swapHeading,
+} from "../../../src/feed/merge/tab-panels.js";
+import { createTicker } from "../../../src/clock.js";
 import { harness, mergeRow, rowContext } from "../harness.js";
 import { FakeSubfeed, childRow, tabRow } from "./fixtures.js";
 import TAB_PANELS from "../../../src/feed/merge/tab-panels.ts?raw";
@@ -29,22 +36,57 @@ const SWITCH = {
   },
 };
 
-describe("runOutputEntry", () => {
+describe("autoRunView", () => {
+  it("shows a run's tests while no fixing attempt follows it", () => {
+    expect(autoRunView(undefined)).toBe("tests");
+  });
+
+  it("shows a run's remediation once a fixing attempt follows it", () => {
+    expect(autoRunView(tabOf(tabRow("t-fix", { kind: "testsRunFixing", state: "live", parent: "t-run" })))).toBe("remediation");
+  });
+});
+
+describe("fixingOf", () => {
   const run = () => tabOf(tabRow("t-run", { kind: "testsRun", state: "settled", outcome: "failed", parent: "t-tests" }));
 
-  it("is labelled 'output' and drawn as the run's output kind", () => {
-    const entry = runOutputEntry(run());
-    expect([entry.label.text, entry.label.round, entry.kind]).toEqual(["output", 1, RUN_OUTPUT_KIND]);
+  it("finds the fixing attempt parented to the run", () => {
+    const view = new FakeSubfeed([tabRow("t-fix", { kind: "testsRunFixing", state: "live", parent: "t-run" })]);
+    expect(fixingOf(run(), view)?.id).toBe("t-fix");
   });
 
-  it("wears the run's own state", () => {
-    const entry = runOutputEntry(run());
-    expect([entry.state, entry.outcome]).toEqual(["settled", "failed"]);
+  it("finds none for a run nothing followed", () => {
+    expect(fixingOf(run(), new FakeSubfeed([tabRow("t-fix", { kind: "testsRunFixing", state: "live", parent: "t-other" })]))).toBeUndefined();
   });
 
-  it("never shares the run row's id", () => {
-    const tab = run();
-    expect(runOutputEntry(tab).id).not.toBe(tab.id);
+  it("refuses a run followed by two fixing attempts", () => {
+    const view = new FakeSubfeed([
+      tabRow("t-fix1", { kind: "testsRunFixing", state: "settled", outcome: "failed", parent: "t-run" }),
+      tabRow("t-fix2", { kind: "testsRunFixing", state: "live", parent: "t-run" }),
+    ]);
+    expect(() => fixingOf(run(), view)).toThrow("a run has at most one");
+  });
+});
+
+describe("drawRemediationHeading", () => {
+  it("draws the attempt, its clock and its state glyph on one line", () => {
+    const fix = tabOf(tabRow("t-fix", { kind: "testsRunFixing", state: "live", payload: { attempt: { attempt: 2, maxAttempts: 3 } } }));
+    const line = drawRemediationHeading(fix, createTicker(1000)).querySelector(".merge-remediation-line");
+    expect([...(line?.children ?? [])].map((e) => e.className.split(" ")[0])).toEqual([
+      "merge-fix-attempt",
+      "merge-tab-duration",
+      "merge-tab-glyph",
+    ]);
+  });
+
+  it("states a failed attempt's own account under the line", () => {
+    const fix = tabOf(tabRow("t-fix", { kind: "testsRunFixing", state: "settled", outcome: "failed" }));
+    const summary = drawRemediationHeading(fix, createTicker(1000)).querySelector<HTMLElement>(".merge-tab-summary");
+    expect([summary?.hidden, summary?.querySelector(".merge-tab-failed") !== null]).toEqual([false, true]);
+  });
+
+  it("states nothing under the line of an attempt still at work", () => {
+    const fix = tabOf(tabRow("t-fix", { kind: "testsRunFixing", state: "live" }));
+    expect(drawRemediationHeading(fix, createTicker(1000)).querySelector<HTMLElement>(".merge-tab-summary")?.hidden).toBe(true);
   });
 });
 
@@ -112,6 +154,43 @@ describe("mergeTabPanel", () => {
     expect(host.querySelector('.merge-strip.is-nested [data-merge-tab="testsRun"]')).not.toBeNull();
   });
 
+  it("draws a run as its views, with no strip of its own", () => {
+    const rows = [
+      tabRow("t-run", { kind: "testsRun", state: "settled", outcome: "failed", parent: "t-tests" }),
+      tabRow("t-fix", { kind: "testsRunFixing", state: "live", parent: "t-run" }),
+    ];
+    const panel = mergeTabPanel(tabOf(rows[0]), new FakeSubfeed(rows), rc());
+    const host = document.createElement("div");
+    host.append(...panel.nodes);
+    expect([[...host.querySelectorAll(".merge-run-view")].map((e) => e.getAttribute("data-run-view")), host.querySelector(".merge-strip")]).toEqual([
+      ["tests", "remediation"],
+      null,
+    ]);
+  });
+
+  it("offers a run's views on reselect only once it has a remediation", () => {
+    const run = tabRow("t-run", { kind: "testsRun", state: "settled", outcome: "failed", parent: "t-tests" });
+    const view = new FakeSubfeed([run]);
+    const panel = mergeTabPanel(tabOf(run), view, rc());
+    const host = document.createElement("div");
+    host.append(...panel.nodes);
+    const badge = document.createElement("div");
+    panel.reselect?.(badge);
+    const closed = host.querySelector<HTMLElement>(".merge-run-views")?.hidden;
+    view.push([run, tabRow("t-fix", { kind: "testsRunFixing", state: "live", parent: "t-run" })]);
+    panel.update(tabOf(run));
+    panel.reselect?.(badge);
+    expect([closed, host.querySelector<HTMLElement>(".merge-run-views")?.hidden]).toEqual([true, false]);
+  });
+
+  it("refuses a run whose fixing attempt disappeared", () => {
+    const run = tabRow("t-run", { kind: "testsRun", state: "settled", outcome: "failed", parent: "t-tests" });
+    const view = new FakeSubfeed([run, tabRow("t-fix", { kind: "testsRunFixing", state: "live", parent: "t-run" })]);
+    const panel = mergeTabPanel(tabOf(run), view, rc());
+    view.push([run]);
+    expect(() => panel.update(tabOf(run))).toThrow("disappeared");
+  });
+
   it("draws a child tab a later push adds to a parent's strip", () => {
     const parent = tabRow("t-tests", { kind: "tests", state: "live" });
     const view = new FakeSubfeed([parent]);
@@ -135,6 +214,27 @@ describe("swapHeading", () => {
 
   it("keeps no heading on a panel that has none", () => {
     expect(swapHeading(null, document.createElement("p"))).toBeNull();
+  });
+
+  it("stops the old heading's clock", () => {
+    const inner = createTicker(1000);
+    let live = 0;
+    const ticker = {
+      now: () => inner.now(),
+      subscribe(fn: (nowMs: number) => void): () => void {
+        live += 1;
+        const off = inner.subscribe(fn);
+        return () => {
+          live -= 1;
+          off();
+        };
+      },
+    };
+    const head = drawRemediationHeading(tabOf(tabRow("t-fix", { kind: "testsRunFixing", state: "live" })), ticker);
+    const subscribed = live;
+    document.createElement("div").append(head);
+    swapHeading(head, document.createElement("p"));
+    expect([subscribed, live]).toEqual([1, 0]);
   });
 
   it("keeps the old heading when no next one is drawn", () => {
