@@ -48,6 +48,7 @@ func (r *resolver) toolRow(s *wsState, at placement, unitID, name string, outcom
 			"a tool call's start arrived after its return; the returned card stands",
 			dlog.Context{"unit": unitID})
 		card.Outcome = &frontendv1.FeedSimpleToolCall_Returned{Returned: returned}
+		card.Clock = u.row.GetActivity().GetSimpleToolCall().GetClock()
 	}
 	row := &frontendv1.FeedRow{
 		Id: r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindActivity, ID: unitID}),
@@ -74,6 +75,7 @@ func runningOutcome(u *unitState) toolOutcome {
 	}
 	return func(card *frontendv1.FeedSimpleToolCall) {
 		card.Outcome = &frontendv1.FeedSimpleToolCall_Running{Running: running}
+		card.Clock = runningClock(u.startedAtMs)
 	}
 }
 
@@ -95,14 +97,13 @@ func returnedOutcome(u *unitState, ok bool, form returnedForm, settledAtMs int64
 		returned.Verdict = &frontendv1.FeedToolCallReturned_Failed{Failed: &frontendv1.FeedToolCallFailed{}}
 	}
 	applyReturnedForm(returned, form)
-	if text, ok := formatRuntime(u.startedAtMs, settledAtMs); ok {
-		returned.Runtime = &frontendv1.FeedToolCallRuntime{Text: text}
-	}
+	clock := stoppedClock(u.startedAtMs, settledAtMs)
 	if len(u.diagnostics) > 0 {
 		returned.Diagnostics = &frontendv1.FeedToolCallDiagnostics{Lines: u.diagnostics}
 	}
 	return func(card *frontendv1.FeedSimpleToolCall) {
 		card.Outcome = &frontendv1.FeedSimpleToolCall_Returned{Returned: returned}
+		card.Clock = clock
 	}
 }
 

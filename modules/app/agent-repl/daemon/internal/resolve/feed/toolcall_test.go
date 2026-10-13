@@ -813,8 +813,8 @@ func TestASettledCardStatesItsRuntime(t *testing.T) {
 	}))
 
 	// Assert.
-	if got := h.card().GetReturned().GetRuntime().GetText(); got != "ran 4.2 s" {
-		t.Fatalf("runtime = %q", got)
+	if start, end := clockOf(h.card().GetClock()); start != 1_000 || end != 5_200 {
+		t.Fatalf("clock spans %d..%d, want 1000..5200", start, end)
 	}
 }
 
@@ -830,8 +830,8 @@ func TestASettleWithNoStartInstantShowsNoElapsedFigure(t *testing.T) {
 	}))
 
 	// Assert: no ticking and no invented figure.
-	if h.card().GetReturned().GetRuntime() != nil {
-		t.Fatalf("runtime = %+v, want unset", h.card().GetReturned().GetRuntime())
+	if h.card().Clock != nil {
+		t.Fatalf("clock = %+v, want unset", h.card().Clock)
 	}
 }
 
@@ -1646,8 +1646,8 @@ func TestAReplayedCardStatesItsRuntimeFromTheRestatedStart(t *testing.T) {
 			h.send(bound(tc.act))
 
 			// Assert: 4000 - 1000.
-			if got := h.card().GetReturned().GetRuntime().GetText(); got != "ran 3 s" {
-				t.Fatalf("runtime = %q, want the span from the restated start", got)
+			if start, end := clockOf(h.card().GetClock()); start != 1_000 || end != 4_000 {
+				t.Fatalf("clock spans %d..%d, want the span from the restated start", start, end)
 			}
 		})
 	}
@@ -1667,8 +1667,8 @@ func TestAHeldStartOutranksTheRestatedStart(t *testing.T) {
 	h.send(bound(replayedSettles(1_000)[0].act))
 
 	// Assert: the live clock does not jump.
-	if got := h.card().GetReturned().GetRuntime().GetText(); got != "ran 2 s" {
-		t.Fatalf("runtime = %q, want the span from the held start", got)
+	if start, end := clockOf(h.card().GetClock()); start != 2_000 || end != 4_000 {
+		t.Fatalf("clock spans %d..%d, want the span from the held start", start, end)
 	}
 }
 
@@ -1699,8 +1699,8 @@ func TestABoundSettleRestatingNoStartStillDrawsItsCard(t *testing.T) {
 			h.send(bound(tc.act))
 
 			// Assert: the card stands; only its runtime is lost.
-			if returned := h.card().GetReturned(); returned == nil || returned.GetRuntime() != nil {
-				t.Fatalf("returned = %+v, want a settled card with no runtime", returned)
+			if card := h.card(); card.GetReturned() == nil || card.Clock != nil {
+				t.Fatalf("card = %+v, want a settled card with no clock", card)
 			}
 		})
 	}
@@ -1836,8 +1836,8 @@ func TestAnMcpToolCallsSuccessStatesItsRuntime(t *testing.T) {
 	h.send(mcpSuccess(t, textResultBlock("ok")))
 
 	// Assert: the settle restates its start, so a replay states the runtime.
-	if h.card().GetReturned().GetRuntime() == nil {
-		t.Fatal("runtime unset; want the settle's restated start to state it")
+	if h.card().GetClock().GetStopped() == nil {
+		t.Fatal("clock not stopped; want the settle's restated start to state its span")
 	}
 }
 
@@ -1988,5 +1988,52 @@ func TestMcpInputLineSpellsANumberJSONCannotAsItsName(t *testing.T) {
 	// Assert.
 	if err != nil || got != `{"x":"NaN"}` {
 		t.Fatalf("mcpInputLine = (%q, %v), want NaN spelled by name", got, err)
+	}
+}
+
+func TestARunningCallsClockRunsFromItsStart(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentRead{
+		Result: &conversationv1.AgentRead_Start{Start: &conversationv1.AgentReadStart{
+			Path:      &conversationv1.ReadPath{Path: "a.go"},
+			StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+		}},
+	}))
+
+	// Assert.
+	if clock := h.card().GetClock(); clock.GetRunning() == nil || clock.GetStartedAtMs() != 1_000 {
+		t.Fatalf("clock = %+v, want running from 1000", clock)
+	}
+}
+
+func TestAStartAfterTheReturnKeepsTheStoppedClock(t *testing.T) {
+	// Arrange: the stream plane's return lands first.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentRead{
+		Result: &conversationv1.AgentRead_Start{Start: &conversationv1.AgentReadStart{
+			Path:      &conversationv1.ReadPath{Path: "a.go"},
+			StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+		}},
+	}))
+	h.send(activityOf("unit-1", &conversationv1.AgentRead{
+		Result: &conversationv1.AgentRead_Success{Success: &conversationv1.AgentReadSuccess{
+			Path:      &conversationv1.ReadPath{Path: "a.go"},
+			Extent:    &conversationv1.AgentReadSuccess_Whole{Whole: &conversationv1.AgentReadWhole{Contents: "x"}},
+			SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: 5_200},
+		}},
+	}))
+
+	// Act: the file plane's start arrives after it.
+	h.send(activityOf("unit-1", &conversationv1.AgentRead{
+		Result: &conversationv1.AgentRead_Start{Start: &conversationv1.AgentReadStart{
+			Path:      &conversationv1.ReadPath{Path: "a.go"},
+			StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+		}},
+	}))
+
+	// Assert: the returned card and its stopped clock stand.
+	if start, end := clockOf(h.card().GetClock()); start != 1_000 || end != 5_200 {
+		t.Fatalf("clock spans %d..%d, want the stopped 1000..5200", start, end)
 	}
 }
