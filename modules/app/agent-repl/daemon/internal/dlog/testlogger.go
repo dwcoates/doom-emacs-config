@@ -216,8 +216,11 @@ type TestSurfaces struct {
 
 // ClientLogCall is one captured ClientLog call.
 type ClientLogCall struct {
-	Dir    string
-	Record ClientRecord
+	// Dir is the owning workspace's directory; empty for a central record.
+	Dir string
+	// Central is true for a record filed with CentralClientLog.
+	Central bool
+	Record  ClientRecord
 }
 
 // NewTestSurfaces returns Surfaces that write nowhere and remember everything.
@@ -304,6 +307,14 @@ func (s *TestSurfaces) ClientLog(dir string, record ClientRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.clientRecords = append(s.clientRecords, ClientLogCall{Dir: dir, Record: record})
+	return nil
+}
+
+// CentralClientLog implements Surfaces by capturing the call.
+func (s *TestSurfaces) CentralClientLog(record ClientRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.clientRecords = append(s.clientRecords, ClientLogCall{Central: true, Record: record})
 	return nil
 }
 

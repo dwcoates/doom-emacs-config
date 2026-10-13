@@ -219,24 +219,35 @@ func (s *server) ClientLog(
 		return nil, err
 	}
 	resp := &agentreplv1.ClientLogResponse{}
+	record := req.Msg.GetRecord()
+	// THE WEBHOST OWNS NO WORKSPACE: its records go to the central sink, and
+	// no workspace is resolved for them.
+	if _, ok := req.Msg.GetSource().(*agentreplv1.ClientLogRequest_Webhost); ok {
+		clientKind, err := clientRuntime(record)
+		if err != nil {
+			return nil, fail(s.log, rpc, err)
+		}
+		if err := s.deps.Log.CentralClientLog(clientRecord(clientKind, record)); err != nil {
+			return nil, fail(s.log, rpc, fmt.Errorf("persist a webhost client record: %w", err))
+		}
+		s.log.Debug("daemon.server.client_log", "persisted a forwarded webhost client record", dlog.Context{
+			"client_kind":        clientKind,
+			"operation":          record.GetOperation(),
+			"verbose":            record.GetVerbose(),
+			dlog.KeyClientSource: dlog.ClientSourceWebhost,
+		})
+		resp.Result = &agentreplv1.ClientLogResponse_Success{Success: &agentreplv1.ClientLogSuccess{}}
+		return connect.NewResponse(resp), nil
+	}
 	subject, cerr, done := s.subjectForClientLog(ctx, rpc, req.Msg.GetWorkspace(), resp)
 	if done {
 		return answer(resp, cerr)
 	}
-	record := req.Msg.GetRecord()
 	clientKind, err := clientRuntime(record)
 	if err != nil {
 		return nil, fail(subject.Log, rpc, err)
 	}
-	if err := s.deps.Log.ClientLog(subject.Record.Dir, dlog.ClientRecord{
-		ClientKind: clientKind,
-		Level:      clientLevel(record),
-		Operation:  record.GetOperation(),
-		Message:    record.GetMessage(),
-		Context:    dlog.Context(record.GetContext().AsMap()),
-		Timestamp:  record.GetTimestamp(),
-		Verbose:    record.GetVerbose(),
-	}); err != nil {
+	if err := s.deps.Log.ClientLog(subject.Record.Dir, clientRecord(clientKind, record)); err != nil {
 		return nil, fail(subject.Log, rpc, fmt.Errorf("persist a client record: %w", err))
 	}
 	subject.Log.Debug("daemon.server.client_log", "persisted a forwarded client record", dlog.Context{
@@ -246,6 +257,20 @@ func (s *server) ClientLog(
 	})
 	resp.Result = &agentreplv1.ClientLogResponse_Success{Success: &agentreplv1.ClientLogSuccess{}}
 	return connect.NewResponse(resp), nil
+}
+
+// clientRecord is RECORD, written by a client of kind CLIENT_KIND, as the
+// durable log takes it.
+func clientRecord(clientKind string, record *agentreplv1.ClientLogRecord) dlog.ClientRecord {
+	return dlog.ClientRecord{
+		ClientKind: clientKind,
+		Level:      clientLevel(record),
+		Operation:  record.GetOperation(),
+		Message:    record.GetMessage(),
+		Context:    dlog.Context(record.GetContext().AsMap()),
+		Timestamp:  record.GetTimestamp(),
+		Verbose:    record.GetVerbose(),
+	}
 }
 
 // subjectForClientLog is subjectFor for ClientLog, whose unknown-workspace

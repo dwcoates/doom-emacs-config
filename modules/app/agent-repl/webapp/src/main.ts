@@ -51,22 +51,21 @@ import { mountTopbar } from "./topbar/topbar.js";
 import { installProseLinkRouting } from "./link.js";
 import { bootFailed } from "./failure/sink.js";
 import { createLocalFailures, type LocalFailures } from "./failure/local.js";
-import { ForwardingLogger, LEVEL_WINDOW_OPERATION, bindLogContext, log, setLogger, type ClientLogSink } from "./log.js";
+import { ForwardingLogger, LEVEL_WINDOW_OPERATION, bindLogContext, log, setLogger } from "./log.js";
 import { LevelWindow, selectionContext, selectionNote, selectLevel } from "../../agent-shim/logging/ts/level-window.js";
 import { installPagePresenceLog } from "./page-presence.js";
 import { connectToHost } from "./host/embed.js";
+import { clientLogSink } from "./rpc/client-log-sink.js";
 import { createStreamCostMeter, regionNodes } from "./stream-cost.js";
 import { pagePresence } from "./presence.js";
 import { installPageDrawnReport } from "./page-drawn-report.js";
 import { createPageSeen } from "./page-seen.js";
-import { createAgentReplClient, type AgentReplClient } from "./rpc/client.js";
+import { createAgentReplClient } from "./rpc/client.js";
 import { createAppContext, type AppContext } from "./rpc/context.js";
-import { reportClientFailure } from "./rpc/link.js";
 import { isHostAddress, pageAddress } from "./rpc/page-address.js";
 import { createDaemonTransport } from "./rpc/transport.js";
 import { workspaceRef } from "./rpc/workspace-ref.js";
 import type { SubmitPromptCommandPanel } from "../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
-import type { WorkspaceRef } from "../../proto/gen/ts/workspace/v1/workspace_pb";
 import { shellElements } from "./shell.js";
 import { composerClosedFor } from "./vocab.js";
 
@@ -83,45 +82,6 @@ function mintConnectionId(): string {
   const uuid = globalThis.crypto?.randomUUID?.();
   if (uuid !== undefined) return uuid;
   return `web-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-/**
- * The logger's sink: one `ClientLog` call per record.
- *
- * DELIBERATELY NOT THROUGH `callUnary`. That helper logs the call it is
- * making, so routing the log sink through it would log every log — and its
- * strict check would refuse a `ClientLogResponse` by throwing into the
- * logger's own failure path. This is the one rpc the app makes without it; the
- * rejection is what `ForwardingLogger` counts.
- */
-export function clientLogSink(
-  getClient: () => AgentReplClient,
-  workspace: WorkspaceRef,
-): ClientLogSink {
-  return async (record) => {
-    let response;
-    try {
-      response = await getClient().clientLog({ workspace, record });
-    } catch (err) {
-      // THE SINK ITSELF IS DOWN. `ForwardingLogger` counts the rejection and
-      // says so on the console exactly once, and nothing else knew (the
-      // audit's N2 row 10) -- so the footer is told, with a FIXED line. The
-      // report logs, that log is forwarded through this same sink, and it
-      // fails again: an identical repeat is dropped by `reportClientFailure`,
-      // which is what makes that loop terminate. The rejection is rethrown
-      // unchanged, because the logger's own count is still its to keep.
-      reportClientFailure("client_log_failed", "ClientLog forwarding failed");
-      throw err;
-    }
-    // `unknown_workspace` is TERMINAL, not a failure: this page's workspace has
-    // been closed or forgotten and the daemon has nowhere to file the record.
-    // The logger reads it as the cue to stop forwarding; every other arm is a
-    // refusal of one record, which leaves forwarding alone.
-    return response.result.case === "error" &&
-      response.result.value.cause.case === "unknownWorkspace"
-      ? "workspace_departed"
-      : "accepted";
-  };
 }
 
 export async function boot(): Promise<void> {
@@ -174,7 +134,7 @@ export async function boot(): Promise<void> {
     const levelSelection = selectLevel(address.logLevel, address.logLevelUntil, Date.now(), "log_level");
     setLogger(
       new ForwardingLogger(
-        clientLogSink(() => client, workspace),
+        clientLogSink(() => client, { case: "workspace", value: workspace }),
         undefined,
         {},
         new LevelWindow(levelSelection),

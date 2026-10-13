@@ -310,6 +310,7 @@ func (s *fakeSurfaces) DetachDir(string) error { return nil }
 func (s *fakeSurfaces) AttachDir(string) error { return nil }
 
 func (s *fakeSurfaces) ClientLog(string, dlog.ClientRecord) error { return errFake }
+func (s *fakeSurfaces) CentralClientLog(dlog.ClientRecord) error  { return errFake }
 
 func (s *fakeSurfaces) Close() error { return nil }
 

@@ -485,6 +485,10 @@ func (s *testSurfaces) ClientLog(string, dlog.ClientRecord) error {
 	panic("gitclient must never persist a client record")
 }
 
+func (s *testSurfaces) CentralClientLog(dlog.ClientRecord) error {
+	panic("gitclient must never persist a client record")
+}
+
 func (s *testSurfaces) Evict(string) error {
 	panic("gitclient must never evict a workspace's sinks")
 }
