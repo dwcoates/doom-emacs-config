@@ -105,6 +105,18 @@ func driveHookScenarioWatched(t *testing.T, w *World, ws *workspacev1.WorkspaceR
 	return driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, scenario)
 }
 
+// awaitHookCard waits for the hook card WHAT names on ws's root feed: in the
+// page, else on its watch. A failed or blocked hook's card is live only, and
+// it reaches the daemon on the store's watch while the turn's end reaches it on
+// the session's own stream, so nothing orders the card before the turn's end:
+// a snapshot taken once the turn has ended can predate it.
+func awaitHookCard(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, what string) *frontendv1.FeedHook {
+	t.Helper()
+	return awaitFeedRow(t, w, ws, what, func(row *frontendv1.FeedRow) bool {
+		return row.GetActivity().GetHook() != nil
+	}).GetActivity().GetHook()
+}
+
 // hookRow answers the one FeedHook card in a feed snapshot, or nil if the
 // feed drew none — which, per bubbles.go's drawHook, is the CORRECT outcome
 // for a succeeded or a cancelled hook, not a gap in this test.
@@ -191,10 +203,7 @@ func TestHookBlocked(t *testing.T) {
 	if ended.GetConcluded() == nil {
 		t.Fatalf("turn ended = %v, want a plain conclusion (a blocked tool never stops the turn)", ended)
 	}
-	h := hookRow(rows)
-	if h == nil {
-		t.Fatalf("feed drew no hook card, want the blocked hook's card")
-	}
+	h := awaitHookCard(t, w, ws, "the blocked hook's card")
 	blocked := h.GetBlocked()
 	if blocked == nil {
 		t.Fatalf("hook card = %v, want the blocked outcome arm", h)
@@ -227,10 +236,7 @@ func TestHookFailed(t *testing.T) {
 	if ended.GetConcluded() == nil {
 		t.Fatalf("turn ended = %v, want a plain conclusion (a failed hook blocks nothing)", ended)
 	}
-	h := hookRow(rows)
-	if h == nil {
-		t.Fatalf("feed drew no hook card, want the failed hook's card")
-	}
+	h := awaitHookCard(t, w, ws, "the failed hook's card")
 	failed := h.GetFailed()
 	if failed == nil {
 		t.Fatalf("hook card = %v, want the failed outcome arm", h)
