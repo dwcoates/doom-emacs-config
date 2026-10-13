@@ -4,11 +4,13 @@ import { create } from "@bufbuild/protobuf";
 import {
   CreateWorkspaceErrorSchema,
   CreateWorkspaceResponseSchema,
+  type CreateWorkspaceRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_create_workspace_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { createWorkspaceRefusal } from "../../src/sidebar/create.js";
 import { oneofArms } from "../arms.js";
-import { RepositoryRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
+import { RepositoryRefSchema, WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
+import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import {
   buildCreateWorkspaceRequest,
   collect,
@@ -98,6 +100,10 @@ describe("what the form collects", () => {
 
   it("carries the fork only under a parent, because the schema confines it", () => {
     expect(collect(raw({ parent: true, fork: true }))?.parent?.fork).toBe(true);
+  });
+
+  it("refuses to collect a child with no parent named, which the form never asks", () => {
+    expect(() => collect(raw({ parent: true, workspace: null }))).toThrow(/invariant/);
   });
 
   it("drops a fork with no parent, which is unrepresentable on the wire", () => {
@@ -316,6 +322,63 @@ describe("the form on screen", () => {
       0,
       "missing_prompt",
     ]);
+  });
+
+  it("says no workspace is selected rather than creating an orphan of a child", async () => {
+    let calls = 0;
+    const sc = {
+      ...sidebarContext(
+        appContext({
+          createWorkspace: () => {
+            calls += 1;
+            return create(CreateWorkspaceResponseSchema, {
+              result: { case: "success", value: { workspace: WORKSPACE } },
+            });
+          },
+        }),
+      ),
+      parentWorkspace: () => null,
+    };
+    const form = drawCreateWorkspaceForm(REPO, sc);
+    const parent = form.querySelector("input[name='parent']") as HTMLInputElement;
+    parent.checked = true;
+    parent.dispatchEvent(new Event("change"));
+    await click(form.querySelector("[data-create-submit]") as Element);
+    expect([calls, form.querySelector(".refusal")?.getAttribute("data-arm")]).toEqual([0, "no_parent"]);
+  });
+
+  it("records a child asked for with no parent at info", async () => {
+    const capture = captureLogRecords();
+    const sc = { ...sidebarContext(), parentWorkspace: () => null };
+    const form = drawCreateWorkspaceForm(REPO, sc);
+    const parent = form.querySelector("input[name='parent']") as HTMLInputElement;
+    parent.checked = true;
+    await click(form.querySelector("[data-create-submit]") as Element);
+    const record = await forwardedRecord(capture, "sidebar.create-no-parent");
+    expect(record.level.case).toBe("info");
+  });
+
+  it("spawns from the workspace the sidebar names as the parent", async () => {
+    const OTHER = create(WorkspaceRefSchema, { id: "ws-current", dir: "/w/current" });
+    let request: CreateWorkspaceRequest | null = null;
+    const sc = {
+      ...sidebarContext(
+        appContext({
+          createWorkspace: (r) => {
+            request = r;
+            return create(CreateWorkspaceResponseSchema, {
+              result: { case: "success", value: { workspace: WORKSPACE } },
+            });
+          },
+        }),
+      ),
+      parentWorkspace: () => OTHER,
+    };
+    const form = drawCreateWorkspaceForm(REPO, sc);
+    const parent = form.querySelector("input[name='parent']") as HTMLInputElement;
+    parent.checked = true;
+    await click(form.querySelector("[data-create-submit]") as Element);
+    expect((request as CreateWorkspaceRequest | null)?.parent?.workspace?.id).toBe("ws-current");
   });
 
   it("closes itself once the daemon created the workspace", async () => {

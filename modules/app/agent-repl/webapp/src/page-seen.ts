@@ -13,13 +13,15 @@
  * reports "hidden" whenever Emacs is not the frontmost application, even for
  * the page on screen (prompt-wave-driver.ts), and that page must keep drawing
  * for a reader glancing at it from another application. So a page is seen
- * while its presence says so OR while its own workspace is the roster's
- * `current` -- the workspace Emacs is standing in, whose page is the one shown.
- * A page is unseen only when both say no.
+ * while its presence says so, OR while the webhost shows it (the webhost shows
+ * exactly the page of the workspace Emacs is standing in), OR, for a page on
+ * its own, while its own workspace is the roster's `current`. A page is unseen
+ * only when all say no.
  *
- * The presence half is read off presence.ts; the current half is told
- * (`noteCurrent`) by the one reader of the roster stream, the rail
- * (sidebar/unseen.ts). Until the first roster arrives no workspace is current.
+ * The presence halves are read off presence.ts; the current half is told
+ * (`noteCurrent`) by the one reader of the roster stream in a page on its own,
+ * its sidebar (sidebar/unseen.ts). A page in the webhost draws no sidebar and
+ * is never told. Until the first roster arrives no workspace is current.
  */
 import type { Presence } from "./presence.js";
 
@@ -45,7 +47,7 @@ export interface PageSeen {
 export function createPageSeen(own: string, presence: Presence): PageSeen {
   let current: string | null = null;
   const listeners = new Set<(seen: boolean, cause: SeenCause) => void>();
-  const seenNow = (): boolean => presence.seen() || current === own;
+  const seenNow = (): boolean => presence.seen() || (presence.embedded && presence.shown()) || current === own;
   let seen = seenNow();
 
   const settle = (cause: SeenCause): void => {

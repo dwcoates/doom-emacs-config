@@ -12,9 +12,13 @@
  */
 import { CONVERSATION_DRAWN_ATTRIBUTE } from "../feed/conversation-drawn.js";
 import { DOCK_BACKGROUND_PROPERTY, DOCK_HEIGHT_PROPERTY } from "../feed/gate-dock.js";
+
+/** The id of the page's docked gate band (index.html). */
+const GATE_DOCK_ID = "gate-dock";
 import { log } from "../log.js";
 import { closeStandingNewsDigest } from "../news-digest/news-digest.js";
 import type { PresenceSource } from "../presence.js";
+import type { WebhostFailureView } from "../failure/webhost.js";
 import { HOST_CHANNEL, onHostChannel, parseHostToPage, type HostToPage, type PageToHost } from "./protocol.js";
 
 /** What the link needs from its environment, injectable for tests. */
@@ -22,7 +26,15 @@ export interface EmbedEnv {
   readonly doc: Document;
   readonly win: Window;
   readonly presence: PresenceSource;
+  /** Where the webhost's own failures are listed for this page's warning chip. */
+  readonly webhostFailures: WebhostFailureView;
 }
+
+/**
+ * The class the page's root wears while the webhost draws the sidebar over the
+ * page's sidebar column, which the page then keeps empty and reserved.
+ */
+export const WEBHOST_SIDEBAR_CLASS = "webhost-sidebar";
 
 /** The installed link; `dispose` removes every listener. */
 export interface HostLink {
@@ -36,7 +48,7 @@ function isTextField(element: Element | null): boolean {
 
 /** Connect the page in ENV to its host; null when the page is in no host. */
 export function connectToHost(env: EmbedEnv): HostLink | null {
-  const { doc, win, presence } = env;
+  const { doc, win, presence, webhostFailures } = env;
   if (win.parent === win) return null;
   const host = win.parent;
   const send = (message: PageToHost): void => {
@@ -68,6 +80,18 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
       case "gateDock":
         root.setProperty(DOCK_HEIGHT_PROPERTY, `${message.pixels}px`);
         if (message.background !== null) root.setProperty(DOCK_BACKGROUND_PROPERTY, message.background);
+        return;
+      case "sidebarDock":
+        if (doc.documentElement.classList.contains(WEBHOST_SIDEBAR_CLASS) !== message.docked) {
+          log.info(message.docked ? "the webhost docked its sidebar over this page" : "the webhost undocked its sidebar", {
+            operation: "page.webhost-sidebar-dock",
+            context: { docked: message.docked },
+          });
+        }
+        doc.documentElement.classList.toggle(WEBHOST_SIDEBAR_CLASS, message.docked);
+        return;
+      case "webhostFailures":
+        webhostFailures.set(message.failures);
         return;
       case "dismissDigest": {
         // Escape in Emacs's composer (or a sent prompt) closing the digest is
@@ -132,6 +156,24 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
     const what = doc.documentElement.getAttribute(CONVERSATION_DRAWN_ATTRIBUTE);
     if (what === "page" || what === "refused") send({ channel: HOST_CHANNEL, kind: "drawn", what });
   };
+  // THE GATE BAND'S HEIGHT, as laid out: the webhost ends its sidebar above it.
+  // A dock that is hidden measures 0, which is the band being gone.
+  let gateBand = -1;
+  const reportGateBand = (pixels: number): void => {
+    const rounded = Math.round(pixels);
+    if (rounded === gateBand) return;
+    gateBand = rounded;
+    send({ channel: HOST_CHANNEL, kind: "gateBand", pixels: rounded });
+  };
+  const gateDock = doc.getElementById(GATE_DOCK_ID);
+  const gateWatch =
+    gateDock === null
+      ? null
+      : new ResizeObserver(() => {
+          reportGateBand(gateDock.getBoundingClientRect().height);
+        });
+  gateWatch?.observe(gateDock as Element);
+
   const drawnWatch = new MutationObserver(reportDrawn);
   drawnWatch.observe(doc.documentElement, { attributes: true, attributeFilter: [CONVERSATION_DRAWN_ATTRIBUTE] });
 
@@ -144,10 +186,12 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
 
   send({ channel: HOST_CHANNEL, kind: "hello" });
   reportDrawn();
+  if (gateDock !== null) reportGateBand(gateDock.getBoundingClientRect().height);
   log.info("the page joined its host", { operation: "page.host-joined", context: {} });
 
   return {
     dispose() {
+      gateWatch?.disconnect();
       drawnWatch.disconnect();
       win.removeEventListener("message", onMessage);
       doc.removeEventListener("selectionchange", reportSelection);
