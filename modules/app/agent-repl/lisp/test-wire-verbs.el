@@ -3312,6 +3312,13 @@ arm, never an error."
                     (agent-repl-test-wire-verbs--parse "{\"success\":{\"nothingRunning\":{}}}"))
                    '(:arm :success :value (:arm :nothing-running :value (:rollback nil)))))))
 
+(ert-deftest agent-repl-test-wire-verbs-interrupt-response-merge-queue-offered ()
+  "A stop that raised the merge-queue question decodes to its own SUCCESS arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-interrupt-response
+                    (agent-repl-test-wire-verbs--parse "{\"success\":{\"mergeQueueOffered\":{}}}"))
+                   '(:arm :success :value (:arm :merge-queue-offered :value nil))))))
+
 (ert-deftest agent-repl-test-wire-verbs-interrupt-nothing-running-immediate-offer ()
   "An immediate rollback offer carries the plan's token."
   (agent-repl-test-wire-verbs--with-common
@@ -3426,11 +3433,12 @@ Emacs encodes two of them and refuses the FeedId-bearing `detached' and
                  (sort (list "turn" "detached" "allAgents" "mergeTab") #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-interrupt-success-arms-pinned ()
-  "InterruptSuccess's outcome oneof has exactly the three arms decoded here."
+  "InterruptSuccess's outcome oneof has exactly the four arms decoded here."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_interrupt.pb.go" "InterruptSuccess")
                        #'string<)
-                 (sort (list "interruptedTurn" "interruptedDetached" "nothingRunning")
+                 (sort (list "interruptedTurn" "interruptedDetached" "nothingRunning"
+                             "mergeQueueOffered")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-interrupt-error-arms-pinned ()

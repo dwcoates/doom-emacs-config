@@ -1091,9 +1091,12 @@ type fakeMerge struct {
 
 	facts       map[ids.WorkspaceID]footer.MergeFacts
 	interrupted []ids.WorkspaceID
-	closed      []ids.WorkspaceID
-	enqueued    []ids.WorkspaceID
-	enqueueErr  error
+	// queued reports the workspace's sync merge is queued, so OnInterrupt
+	// raises the merge-queue question.
+	queued     bool
+	closed     []ids.WorkspaceID
+	enqueued   []ids.WorkspaceID
+	enqueueErr error
 	// steps records the restart's suspension and take-back, in order, and
 	// the rollout's bounces are appended by the tests that need the order.
 	steps      []string
@@ -1121,8 +1124,9 @@ func (m *fakeMerge) Facts(ws ids.WorkspaceID) (footer.MergeFacts, bool) {
 	return f, ok
 }
 
-func (m *fakeMerge) OnInterrupt(_ context.Context, ws ids.WorkspaceID) {
+func (m *fakeMerge) OnInterrupt(_ context.Context, ws ids.WorkspaceID) bool {
 	m.interrupted = append(m.interrupted, ws)
+	return m.queued
 }
 
 func (m *fakeMerge) OnWorkspaceClosed(_ context.Context, ws ids.WorkspaceID) {

@@ -4373,46 +4373,25 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
   color: var(--err);
   font-weight: 600;
 }
-/* --- The merge dequeue offer (merge-dequeue.ts) ---------------------------
-   The card an interrupt raises over a workspace whose merge is on the queue,
-   asking whether to take that merge off.
+/* --- The merge-queue question (feed/merge/queue-offer.ts) ------------------
+   The question an interrupt raises over a workspace whose sync merge is
+   queued, drawn INSIDE the pinned merge bubble in place of its tabs
+   (`.bubble-overlay`), never as a card of its own.
 
-   RED FRAME, NOT THE PICKER'S YELLOW. Every other card that puts a question to
-   the user wears --q-border, and this one deliberately does not: those choose
-   between answers that can be given again, and the confirm button on this one
-   aborts or discards minutes of someone's work. The frame is the alarm --err,
-   the same red every failure surface uses, so the difference registers before
-   the sentence is read.
-
-   The FILL is a wash rather than a solid, unlike the revival gate above. That
-   gate blocks the composer and nothing else is available until it is answered,
-   so it hides the feed on purpose; this card sits over a workspace the user can
-   still read and still prompt, and blanking the conversation behind a question
-   about the merge queue would overstate it. */
-#merge-dequeue {
-  border: 1px solid var(--err);
-  border-radius: 8px;
-  padding: 0.6rem 0.85rem;
-  margin: 0.35rem 0.75rem;
-  font-size: 0.85rem;
-  color: var(--fg);
-  background: color-mix(in srgb, var(--err) 8%, transparent);
-}
-/* No outstanding question pays no layout. */
-#merge-dequeue:empty { display: none; }
-.merge-dequeue-head {
-  font-weight: 700;
-  color: var(--err);
-}
-/* WHERE the merge stands, in one sentence. It leads because it is the fact
-   that decides whether the confirm button costs anything. */
-.merge-dequeue-text { margin-top: 0.25rem; }
-.merge-dequeue-actions {
+   THE DESTRUCTIVE BUTTON IS THE FILLED ONE, in the alarm red rather than an
+   affirmative color: Evict is the one answer that throws work away, so it
+   must not look like the safe default. Prioritize and Cancel stay outlined,
+   and Cancel takes the focus. */
+.bubble-overlay { display: block; padding: 0.6rem 0.85rem; }
+.bubble-overlay[hidden] { display: none; }
+.merge-queue-offer { font-size: 0.85rem; color: var(--fg); }
+.merge-queue-offer-head { font-weight: 700; }
+.merge-queue-offer-actions {
   margin-top: 0.55rem;
   display: flex;
   gap: 0.5rem;
 }
-.merge-dequeue-actions ar-button {
+.merge-queue-offer-actions ar-button {
   font: inherit;
   padding: 0.25rem 0.7rem;
   border-radius: 6px;
@@ -4421,15 +4400,18 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
   background: var(--bg);
   color: var(--fg);
 }
-/* THE DESTRUCTIVE BUTTON IS THE FILLED ONE, and it is filled in the alarm red
-   rather than in an affirmative color. It is not the safe default and must not
-   look like one; keeping the merge queued stays plainly outlined beside it. */
-.merge-dequeue-actions ar-button.merge-dequeue-confirm {
+.merge-queue-offer-actions ar-button.merge-queue-offer-evict {
   background: var(--err);
   border-color: var(--err);
   color: var(--bg);
   font-weight: 700;
 }
+.merge-queue-offer-actions ar-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+/* A bubble that cannot be folded now (a pinned merge) offers no toggle. */
+.tool-card.bubble-fold[data-collapsible="false"] > .bubble-head { cursor: default; }
 
 /* The composer's own one-line reason, sharing the merge gate's slot and its
    muted, non-alarming tone: a hibernated session is deliberate and benign. */
@@ -5395,17 +5377,6 @@ ar-button.outcome-marker-pill {
 .classifier-update-actions ar-button[aria-disabled="true"] { cursor: not-allowed; opacity: 0.5; }
 .classifier-update-status { margin-top: 0.35rem; font-size: 0.75rem; }
 
-/* The parked question, sharing the merge-dequeue card's alarm frame. It is
-   the same statement — a button here destroys work — so it is the same look,
-   reached through the existing `#merge-dequeue` rules by class. */
-.held-offer {
-  border: 1px solid var(--err);
-  border-radius: 8px;
-  padding: 0.6rem 0.85rem;
-  font-size: 0.85rem;
-  color: var(--fg);
-  background: color-mix(in srgb, var(--err) 8%, transparent);
-}
 .offer-refusal { margin-top: 0.35rem; font-size: 0.75rem; }
 
 /* ---- composer (src/composer) ------------------------------------------- */

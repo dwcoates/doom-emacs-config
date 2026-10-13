@@ -1,5 +1,5 @@
 /**
- * HOLD TRAY — held prompts and daemon-posed offers at the feed's tail.
+ * HOLD TRAY — held prompts at the feed's tail.
  *
  * A held prompt is a `UserSaid` the daemon has NOT yet delivered, so it is
  * never a feed row: it lives in its own whole-list-replaced region. The rules
@@ -18,21 +18,17 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   FeedHeldItemSchema,
   HeldPromptSchema,
-  HeldOfferSchema,
 } from "../../../proto/gen/ts/frontend/v1/feed_held_pb";
 import {
   UpdateHeldPromptRequestSchema,
   UpdateHeldPromptResponseSchema,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_held_prompt_pb";
-import { AnswerHeldOfferRequestSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_answer_held_offer_pb";
 import { FoldHeldPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_fold_held_prompt_pb";
 import { ClassifierRoute } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_classifier_prompt_pb";
 import { create } from "@bufbuild/protobuf";
 
 import { bootColdOnce, startHarness, type Harness } from "./harness";
 import {
-  HELD_OFFER_ARMS,
-  HELD_OFFER_HEADLINE,
   HELD_TURN_ID,
   HOLD_BADGES,
   HOLD_ACCEPTABLE_ARM,
@@ -40,7 +36,6 @@ import {
   HOLD_CLASSIFICATION_ARMS,
   WORKSPACE_ID,
   assertCoversOneof,
-  heldOfferItem,
   heldPromptItem,
   heldSection,
   type HoldClassificationArm,
@@ -62,7 +57,7 @@ async function withTray(init: Parameters<typeof heldSection>[0]): Promise<Harnes
 
 describe("arm coverage", () => {
   it("covers every held item kind", () => {
-    assertCoversOneof(FeedHeldItemSchema, "item", ["prompt", "offer"]);
+    assertCoversOneof(FeedHeldItemSchema, "item", ["prompt"]);
   });
 
   it("covers every hold classification arm", () => {
@@ -71,10 +66,6 @@ describe("arm coverage", () => {
 
   it("covers every hold arm", () => {
     assertCoversOneof(HeldPromptSchema, "hold", [...HOLD_ARMS]);
-  });
-
-  it("covers every offer arm", () => {
-    assertCoversOneof(HeldOfferSchema, "offer", [...HELD_OFFER_ARMS]);
   });
 
   it("covers every UpdateHeldPrompt action", () => {
@@ -439,70 +430,6 @@ describe("the accept button", () => {
   });
 });
 
-describe("the merge-dequeue offer", () => {
-  it("carries its offer arm", async () => {
-    // Arrange / Act
-    await withTray({ items: [heldOfferItem()] });
-    // Assert
-    expect(harness.$("[data-offer]")?.dataset.offer).toBe("mergeDequeue");
-  });
-
-  it("draws the composed headline verbatim", async () => {
-    // Arrange / Act
-    await withTray({ items: [heldOfferItem()] });
-    // Assert
-    expect(harness.$("[data-offer]")?.textContent).toContain(HELD_OFFER_HEADLINE);
-  });
-
-  it("calls AnswerHeldOffer with the keep decision", async () => {
-    // Arrange
-    await withTray({ items: [heldOfferItem()] });
-    // Act
-    await harness.click('[data-offer-decision="keep"]');
-    // Assert
-    const [request] = harness.fake.calls<{
-      answer: { value?: { decision: { case?: string } } };
-    }>("answerHeldOffer");
-    expect(request.answer.value?.decision.case).toBe("keep");
-  });
-
-  it("calls AnswerHeldOffer with the release decision", async () => {
-    // Arrange
-    await withTray({ items: [heldOfferItem()] });
-    // Act
-    await harness.click('[data-offer-decision="release"]');
-    // Assert
-    const [request] = harness.fake.calls<{
-      answer: { value?: { decision: { case?: string } } };
-    }>("answerHeldOffer");
-    expect(request.answer.value?.decision.case).toBe("release");
-  });
-
-  it("sends the merge-dequeue answer arm", async () => {
-    // Arrange
-    await withTray({ items: [heldOfferItem()] });
-    // Act
-    await harness.click('[data-offer-decision="keep"]');
-    // Assert
-    const [request] = harness.fake.calls<{ answer: { case?: string } }>("answerHeldOffer");
-    expect(request.answer.case).toBe("mergeDequeue");
-  });
-
-  it("echoes the workspace on the answer", async () => {
-    // Arrange
-    await withTray({ items: [heldOfferItem()] });
-    // Act
-    await harness.click('[data-offer-decision="keep"]');
-    // Assert
-    const [request] = harness.fake.calls<{ workspace?: { id: string } }>("answerHeldOffer");
-    expect(request.workspace?.id).toBe(WORKSPACE_ID);
-  });
-
-  it("covers every arm of the AnswerHeldOffer request", () => {
-    assertCoversOneof(AnswerHeldOfferRequestSchema, "answer", [...HELD_OFFER_ARMS]);
-  });
-});
-
 describe("an empty tray", () => {
   it("draws nothing at all, so the region collapses", async () => {
     // Arrange / Act
@@ -538,12 +465,5 @@ describe("whole-list replacement", () => {
     await harness.settle();
     // Assert
     expect(harness.$('[data-held-turn="turn-b"]')).toBeNull();
-  });
-
-  it("draws both a prompt and an offer together", async () => {
-    // Arrange / Act
-    await withTray({ items: [heldPromptItem(), heldOfferItem()] });
-    // Assert
-    expect(harness.$$("[data-held-turn], [data-offer]")).toHaveLength(2);
   });
 });

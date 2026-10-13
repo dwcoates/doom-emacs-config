@@ -504,6 +504,9 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "tells the user the interrupt outcome could not be read")
     ("verbs.el" agent-repl-verb-interrupt "agent-repl: turn left running"
      "tells the user the interrupt left the turn running")
+    ("verbs.el" agent-repl-verbs--focus-merge-queue-offer
+     "agent-repl: the merge is queued -- Evict, Prioritize or Cancel in its bubble"
+     "tells the user their interrupt raised the merge-queue question and where to answer it")
     ("verbs.el" agent-repl-verb-set-priority "agent-repl: priority %s"
      "confirms the user's priority command")
     ("verbs.el" agent-repl-verb-set-hidden "agent-repl: %s %s"

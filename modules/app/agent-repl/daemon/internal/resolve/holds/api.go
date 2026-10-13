@@ -19,8 +19,8 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-// Sink is what the prompt queue and the merge orchestrator tell the held
-// section. The feed resolver implements it.
+// Sink is what the prompt queue tells the held section. The feed resolver
+// implements it.
 type Sink interface {
 	// SetHeldPrompts installs a workspace's standing holds, whole. The prompt
 	// queue is the only caller.
@@ -29,10 +29,6 @@ type Sink interface {
 	// clears it with the empty turn. Its card carries HeldPrompt.editing. The
 	// prompt queue is the only caller.
 	SetEditing(ws ids.WorkspaceID, turn ids.TurnID)
-	// SetOffer installs the question the section poses — currently the merge
-	// dequeue offer — or clears it with nil. The merge orchestrator is the only
-	// caller.
-	SetOffer(ws ids.WorkspaceID, offer *frontendv1.HeldOffer)
 }
 
 // Prompts renders the standing holds as the held section's prompt cards, in

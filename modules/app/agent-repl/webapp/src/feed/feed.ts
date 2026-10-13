@@ -40,6 +40,7 @@ import {
 import { guardMalformed } from "../rpc/guard.js";
 import { selectFeedRow } from "./select-feed-row.js";
 import { foldMergeBubble } from "./fold-merge-bubble.js";
+import { mergeQueueOfferOverlay } from "./merge/queue-offer.js";
 import { refreshHasMore } from "./bubble-more.js";
 import { refreshTitleFolds } from "./title-fold.js";
 import { applyFeedTextScale } from "./feed-text-scale.js";
@@ -573,6 +574,12 @@ export function mountFeed(
         initialFolded: mergeFoldOf(row).folded,
         foldOf: mergeFoldOf,
         merge: true,
+        // A PINNED MERGE BUBBLE CANNOT BE FOLDED: while the merge is in
+        // flight it stands at the feed's bottom as the one thing happening
+        // there. Once it settles where it stands, it folds like any bubble.
+        collapsible: (current) => current.order?.pinned === undefined,
+        // The merge-queue question an interrupt raised stands over the tabs.
+        overlay: mergeQueueOfferOverlay(ctx, mergeOf),
         // THE READER'S FOLD OUTLIVES THE PAGE AND WINS (owner ruling,
         // 2026-10-08): it is recorded on the daemon's durable head, so a
         // reload, a page and a daemon restart all draw the bubble the way the

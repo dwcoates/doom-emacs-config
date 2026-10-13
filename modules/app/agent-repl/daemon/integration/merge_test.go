@@ -21,7 +21,7 @@ import (
 	"connectrpc.com/connect"
 )
 
-// merge_test.go exercises MergeWorkspace, UpdateMergeQueue, AnswerHeldOffer
+// merge_test.go exercises MergeWorkspace, UpdateMergeQueue, AnswerMergeQueueOffer
 // and the merge orchestrator's visible effects (feed sub-feed, footer,
 // roster, host composer) against a daemon whose own-checkout identity is
 // injected via harness.Opts.SelfRepo, with a FAKE bin/test-all.sh
@@ -226,28 +226,8 @@ func TestUpdateMergeQueueMoveSwapsTwoWaitingMerges(t *testing.T) {
 			}
 
 			// Assert: the queue reads running, then the last merge, then the
-			// one it swapped with. The daemon holds the sole writing handle
-			// while it runs, so the queue is read after its orderly exit; the
-			// queue is durable across it.
-			d.Stop()
-			var order []string
-			d.WithDB(func(db *sql.DB) {
-				rows, err := db.Query(`SELECT workspace_id FROM merge_queue ORDER BY seq`)
-				if err != nil {
-					t.Fatalf("read the merge queue: %v", err)
-				}
-				defer rows.Close()
-				for rows.Next() {
-					var id string
-					if err := rows.Scan(&id); err != nil {
-						t.Fatalf("scan the merge queue: %v", err)
-					}
-					order = append(order, id)
-				}
-				if err := rows.Err(); err != nil {
-					t.Fatalf("read the merge queue: %v", err)
-				}
-			})
+			// one it swapped with.
+			order := durableQueueOrder(t, d)
 			want := []string{front.ws.GetId(), last.ws.GetId(), behind.ws.GetId()}
 			if !slices.Equal(order, want) {
 				t.Fatalf("queue = %v, want %v", order, want)
@@ -257,11 +237,11 @@ func TestUpdateMergeQueueMoveSwapsTwoWaitingMerges(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Interrupt on a queued merge raises the dequeue HeldOffer; AnswerHeldOffer
-// releases or keeps it.
+// Interrupt on a queued merge raises the merge-queue question in the pinned
+// bubble; AnswerMergeQueueOffer evicts, prioritizes or cancels.
 // ---------------------------------------------------------------------------
 
-func TestInterruptOnAQueuedWorkspaceRaisesTheDequeueHeldOffer(t *testing.T) {
+func TestInterruptOnAQueuedWorkspaceRaisesTheMergeQueueQuestion(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	_, behind, _, _ := mergeBlockedQueueFixture(t)
@@ -271,7 +251,7 @@ func TestInterruptOnAQueuedWorkspaceRaisesTheDequeueHeldOffer(t *testing.T) {
 	awaitRoster(t, behind.d, roster, "the behind workspace queued", func(r *frontendv1.WorkspaceRoster) bool {
 		return rosterRow(r, behind.ws.GetId()).GetMergeQueued() != nil
 	})
-	holds := behind.d.WatchHolds(behind.ws)
+	feed := behind.watchRootFeed()
 
 	// Act
 	resp, err := behind.d.Client().Interrupt(behind.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
@@ -279,95 +259,71 @@ func TestInterruptOnAQueuedWorkspaceRaisesTheDequeueHeldOffer(t *testing.T) {
 		Target:    &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},
 	}))
 
-	// Assert: nothing was running.
+	// Assert: the stop is about the merge, and offers no rollback.
 	if err != nil {
 		t.Fatalf("Interrupt(turn) on a queued, idle workspace = error %v, want a success", err)
 	}
-	if resp.Msg.GetSuccess().GetNothingRunning() == nil {
-		t.Fatalf("Interrupt(turn) = %v, want InterruptSuccess.nothing_running", resp.Msg)
+	if resp.Msg.GetSuccess().GetMergeQueueOffered() == nil {
+		t.Fatalf("Interrupt(turn) = %v, want InterruptSuccess.merge_queue_offered", resp.Msg)
 	}
 
-	// Assert: the dequeue offer is raised.
-	got := awaitView(t, behind, holds, "the merge-dequeue held offer", func(tray *frontendv1.FeedHeld) bool {
-		return mergeDequeueOffer(tray) != nil
+	// Assert: the question stands in the pinned bubble.
+	row := awaitRow(t, behind, feed, "the merge head carrying the question", func(r *frontendv1.FeedRow) bool {
+		return mergeQueueOffer(r) != nil
 	})
-	if mergeDequeueOffer(got) == nil {
-		t.Fatalf("held tray = %v, want a merge_dequeue offer", got)
+	if row.GetOrder().Pinned == nil {
+		t.Fatalf("the merge head carrying the question = %v, want it pinned", row)
 	}
 }
 
-func TestAnswerHeldOfferReleaseEvictsTheQueuedMerge(t *testing.T) {
+func TestAnswerMergeQueueOfferEvictTakesTheQueuedMergeOff(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	_, behind, _, _ := mergeBlockedQueueFixture(t)
 	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages, the queued merge the test abandons.
 	behind.d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.drop_queued", "daemon.merge.merge_tab")
-	holds := behind.d.WatchHolds(behind.ws)
-	if _, err := behind.d.Client().Interrupt(behind.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
-		Workspace: behind.ws, Target: &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},
-	})); err != nil {
-		t.Fatalf("Interrupt(turn) = error %v, want a success", err)
-	}
-	awaitView(t, behind, holds, "the merge-dequeue held offer", func(tray *frontendv1.FeedHeld) bool {
-		return mergeDequeueOffer(tray) != nil
-	})
+	raiseMergeQueueOffer(t, behind)
 
 	// Act
-	resp, err := behind.d.Client().AnswerHeldOffer(behind.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerHeldOfferRequest{
+	resp, err := behind.d.Client().AnswerMergeQueueOffer(behind.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerMergeQueueOfferRequest{
 		Workspace: behind.ws,
-		Answer: &agentreplv1.AnswerHeldOfferRequest_MergeDequeue{MergeDequeue: &agentreplv1.AnswerHeldOfferMergeDequeue{
-			Decision: &agentreplv1.AnswerHeldOfferMergeDequeue_Release{Release: &agentreplv1.AnswerHeldOfferRelease{}},
-		}},
+		Decision:  &agentreplv1.AnswerMergeQueueOfferRequest_Evict{Evict: &agentreplv1.AnswerMergeQueueOfferEvict{}},
 	}))
 
 	// Assert
 	if err != nil || resp.Msg.GetError() != nil {
-		t.Fatalf("AnswerHeldOffer(release) = %v, %v, want a success", resp.Msg, err)
+		t.Fatalf("AnswerMergeQueueOffer(evict) = %v, %v, want a success", resp.Msg, err)
 	}
 	roster := behind.d.WatchRoster()
-	got := awaitRoster(t, behind.d, roster, "the released workspace off the queue", func(r *frontendv1.WorkspaceRoster) bool {
+	got := awaitRoster(t, behind.d, roster, "the evicted workspace off the queue", func(r *frontendv1.WorkspaceRoster) bool {
 		return rosterRow(r, behind.ws.GetId()).GetMergeQueued() == nil
 	})
 	if row := rosterRow(got, behind.ws.GetId()); row.GetMergeQueued() != nil {
-		t.Fatalf("released workspace roster status = %v, want no longer merge_queued", row)
+		t.Fatalf("evicted workspace roster status = %v, want no longer merge_queued", row)
 	}
 }
 
-func TestAnswerHeldOfferKeepKeepsTheQueuedMerge(t *testing.T) {
+func TestAnswerMergeQueueOfferCancelKeepsTheQueuedMergeAndClearsTheQuestion(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	_, behind, _, _ := mergeBlockedQueueFixture(t)
 	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages.
 	behind.d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab")
-	holds := behind.d.WatchHolds(behind.ws)
-	if _, err := behind.d.Client().Interrupt(behind.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
-		Workspace: behind.ws, Target: &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},
-	})); err != nil {
-		t.Fatalf("Interrupt(turn) = error %v, want a success", err)
-	}
-	awaitView(t, behind, holds, "the merge-dequeue held offer", func(tray *frontendv1.FeedHeld) bool {
-		return mergeDequeueOffer(tray) != nil
-	})
+	feed := raiseMergeQueueOffer(t, behind)
 
 	// Act
-	resp, err := behind.d.Client().AnswerHeldOffer(behind.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerHeldOfferRequest{
+	resp, err := behind.d.Client().AnswerMergeQueueOffer(behind.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerMergeQueueOfferRequest{
 		Workspace: behind.ws,
-		Answer: &agentreplv1.AnswerHeldOfferRequest_MergeDequeue{MergeDequeue: &agentreplv1.AnswerHeldOfferMergeDequeue{
-			Decision: &agentreplv1.AnswerHeldOfferMergeDequeue_Keep{Keep: &agentreplv1.AnswerHeldOfferKeep{}},
-		}},
+		Decision:  &agentreplv1.AnswerMergeQueueOfferRequest_Cancel{Cancel: &agentreplv1.AnswerMergeQueueOfferCancel{}},
 	}))
 
 	// Assert
 	if err != nil || resp.Msg.GetError() != nil {
-		t.Fatalf("AnswerHeldOffer(keep) = %v, %v, want a success", resp.Msg, err)
+		t.Fatalf("AnswerMergeQueueOffer(cancel) = %v, %v, want a success", resp.Msg, err)
 	}
-	holds2 := behind.d.WatchHolds(behind.ws)
-	got := awaitView(t, behind, holds2, "the tray with the offer cleared", func(tray *frontendv1.FeedHeld) bool {
-		return mergeDequeueOffer(tray) == nil
+	awaitRow(t, behind, feed, "the merge head without the question", func(r *frontendv1.FeedRow) bool {
+		return r.GetActivity().GetMerge() != nil && mergeQueueOffer(r) == nil
 	})
-	if mergeDequeueOffer(got) != nil {
-		t.Fatalf("held tray = %v, want the offer cleared after keep", got)
-	}
 	roster := behind.d.WatchRoster()
 	rgot := awaitRoster(t, behind.d, roster, "the kept workspace still queued", func(r *frontendv1.WorkspaceRoster) bool {
 		return rosterRow(r, behind.ws.GetId()) != nil
@@ -375,6 +331,86 @@ func TestAnswerHeldOfferKeepKeepsTheQueuedMerge(t *testing.T) {
 	if row := rosterRow(rgot, behind.ws.GetId()); row.GetMergeQueued() == nil {
 		t.Fatalf("kept workspace roster status = %v, want still merge_queued", row)
 	}
+}
+
+func TestAnswerMergeQueueOfferPrioritizeRunsTheMergeNext(t *testing.T) {
+	t.Parallel()
+	// Arrange: a held merge runs, and two more wait behind it.
+	front, behind, repo, d := mergeBlockedQueueFixture(t)
+	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages.
+	d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab")
+	last := mergeCreateChild(t, d, mergeRepositoryRef(t, d, repo), "last", "last work", nil)
+	harness.CommitWork(t, last.ws.GetDir())
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: last.ws, Source: harness.OwnBranch(false)})); err != nil {
+		t.Fatalf("MergeWorkspace(last) = error %v, want the merge enqueued", err)
+	}
+	raiseMergeQueueOffer(t, last)
+
+	// Act
+	resp, err := d.Client().AnswerMergeQueueOffer(d.Ctx(), connect.NewRequest(&agentreplv1.AnswerMergeQueueOfferRequest{
+		Workspace: last.ws,
+		Decision:  &agentreplv1.AnswerMergeQueueOfferRequest_Prioritize{Prioritize: &agentreplv1.AnswerMergeQueueOfferPrioritize{}},
+	}))
+	if err != nil || resp.Msg.GetError() != nil {
+		t.Fatalf("AnswerMergeQueueOffer(prioritize) = %v, %v, want a success", resp.Msg, err)
+	}
+
+	// Assert: the queue reads the running merge, then the prioritized one,
+	// then the one it passed.
+	order := durableQueueOrder(t, d)
+	if want := []string{front.ws.GetId(), last.ws.GetId(), behind.ws.GetId()}; !slices.Equal(order, want) {
+		t.Fatalf("queue = %v, want %v", order, want)
+	}
+}
+
+// durableQueueOrder stops D and answers every workspace on its merge queue,
+// in queue order. The daemon holds the sole writing handle on its store while
+// it runs, so the queue is read after its orderly exit; the queue is durable
+// across it.
+func durableQueueOrder(t *testing.T, d *harness.Daemon) []string {
+	t.Helper()
+	d.Stop()
+	order := []string{}
+	d.WithDB(func(db *sql.DB) {
+		rows, err := db.Query(`SELECT workspace_id FROM merge_queue ORDER BY seq`)
+		if err != nil {
+			t.Fatalf("read the merge queue: %v", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				t.Fatalf("scan the merge queue: %v", err)
+			}
+			order = append(order, id)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatalf("read the merge queue: %v", err)
+		}
+	})
+	return order
+}
+
+// raiseMergeQueueOffer interrupts F's idle, queued workspace and waits for the
+// question to stand in its pinned merge bubble, answering the root feed's tail
+// it watched.
+func raiseMergeQueueOffer(t *testing.T, f *fixture) *harness.Stream[*frontendv1.FeedRow] {
+	t.Helper()
+	roster := f.d.WatchRoster()
+	awaitRoster(t, f.d, roster, "the workspace queued", func(r *frontendv1.WorkspaceRoster) bool {
+		return rosterRow(r, f.ws.GetId()).GetMergeQueued() != nil
+	})
+	feed := f.watchRootFeed()
+	resp, err := f.d.Client().Interrupt(f.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
+		Workspace: f.ws, Target: &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},
+	}))
+	if err != nil || resp.Msg.GetSuccess().GetMergeQueueOffered() == nil {
+		t.Fatalf("Interrupt(turn) = %v, %v, want merge_queue_offered", resp, err)
+	}
+	awaitRow(t, f, feed, "the merge head carrying the question", func(r *frontendv1.FeedRow) bool {
+		return mergeQueueOffer(r) != nil
+	})
+	return feed
 }
 
 // ---------------------------------------------------------------------------
@@ -1482,14 +1518,10 @@ func mergeBranchOf(t *testing.T, ws *workspacev1.WorkspaceRef) string {
 	return filepath.Base(ws.GetDir())
 }
 
-// mergeDequeueOffer finds the merge_dequeue held offer, if standing.
-func mergeDequeueOffer(tray *frontendv1.FeedHeld) *frontendv1.HeldOffer {
-	for _, item := range tray.GetItems() {
-		if offer := item.GetOffer(); offer.GetMergeDequeue() != nil {
-			return offer
-		}
-	}
-	return nil
+// mergeQueueOffer answers the merge-queue question a merge head row carries,
+// nil when the row is no merge head or carries none.
+func mergeQueueOffer(row *frontendv1.FeedRow) *frontendv1.FeedMergeQueueOffer {
+	return row.GetActivity().GetMerge().GetQueueOffer()
 }
 
 // TestAMergeOverATurnWithDetachedWorkEndsOnlyTheTurnAndWaitsForTheWork covers

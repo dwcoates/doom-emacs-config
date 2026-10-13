@@ -66,7 +66,7 @@ type Deps struct {
 	// Retarget backs SetWorkspaceParent: the retarget and its notice to the
 	// workspace's session, as one operation.
 	Retarget retarget.Retargeter
-	// Merge backs MergeWorkspace, UpdateMergeQueue and AnswerHeldOffer.
+	// Merge backs MergeWorkspace, UpdateMergeQueue and AnswerMergeQueueOffer.
 	Merge merge.Orchestrator
 	// Drain backs UpdateShutdownSchedule.
 	Drain drain.Controller

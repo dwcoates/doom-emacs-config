@@ -98,7 +98,7 @@ func TestUnexpectedWarningsSkipsADeclaredOperation(t *testing.T) {
 func TestUnexpectedWarningsIgnoresRecordsBelowAWarningLevel(t *testing.T) {
 	// Arrange
 	records := []LogRecord{
-		{Level: "debug", Operation: "daemon.merge.answer_dequeue"},
+		{Level: "debug", Operation: "daemon.merge.answer_queue_offer"},
 		{Level: "info", Operation: "daemon.rollout.relaunch"},
 	}
 

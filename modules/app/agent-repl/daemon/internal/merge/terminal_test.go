@@ -409,9 +409,33 @@ func TestOutputAddressIsClearedAtTeardown(t *testing.T) {
 	}
 }
 
-// TestInterruptRaisesTheDequeueOffer covers the ruling that an interrupt no
-// longer silently yanks a merge off the queue: the daemon asks.
-func TestInterruptRaisesTheDequeueOffer(t *testing.T) {
+// TestInterruptRaisesTheQueueOfferInThePinnedHead covers the ruling that an
+// interrupt never yanks a merge off the queue: it asks, in the merge's own
+// pinned bubble.
+func TestInterruptRaisesTheQueueOfferInThePinnedHead(t *testing.T) {
+	// Arrange: a queued merge.
+	h := newHarness(t)
+	enqueue(t, h)
+
+	// Act.
+	offered := h.o.OnInterrupt(context.Background(), theWorkspace)
+
+	// Assert.
+	if !offered {
+		t.Fatal("OnInterrupt answered false for a queued sync merge")
+	}
+	head := h.feed.lastHead()
+	if head == nil || !head.Pinned {
+		t.Fatalf("the last head push is %+v, want a pinned head", head)
+	}
+	if head.Row.GetActivity().GetMerge().GetQueueOffer().GetHeadline().GetText() == "" {
+		t.Fatalf("the pinned head carries no question: %v", head.Row)
+	}
+}
+
+// TestInterruptLeavesTheQueueAsItIs covers the other half of that ruling: the
+// interrupt itself changes nothing on the queue.
+func TestInterruptLeavesTheQueueAsItIs(t *testing.T) {
 	// Arrange: a queued merge.
 	h := newHarness(t)
 	enqueue(t, h)
@@ -420,73 +444,93 @@ func TestInterruptRaisesTheDequeueOffer(t *testing.T) {
 	h.o.OnInterrupt(context.Background(), theWorkspace)
 
 	// Assert.
-	offer := h.holds.standing()
-	if offer == nil || offer.GetMergeDequeue() == nil {
-		t.Fatalf("the tray holds %v, want the merge dequeue offer", offer)
-	}
-	if !strings.Contains(offer.GetMergeDequeue().GetHeadline().GetText(), "ws-one") {
-		t.Fatalf("the offer's sentence is %q, want it to name the workspace",
-			offer.GetMergeDequeue().GetHeadline().GetText())
+	if got := h.queuedEntries(); !equal(got, []string{string(theWorkspace)}) {
+		t.Fatalf("the queue holds %v, want the merge still queued", got)
 	}
 }
 
 // TestInterruptRaisesNothingWithoutAQueuedMerge covers the guard: an interrupt
-// of an ordinary workspace poses no question.
+// of an ordinary workspace poses no question and draws nothing.
 func TestInterruptRaisesNothingWithoutAQueuedMerge(t *testing.T) {
 	// Arrange: a workspace with no queued merge.
 	h := newHarness(t)
 
 	// Act.
-	h.o.OnInterrupt(context.Background(), theWorkspace)
+	offered := h.o.OnInterrupt(context.Background(), theWorkspace)
 
 	// Assert.
-	if h.holds.standing() != nil {
-		t.Fatal("an interrupt raised a dequeue offer for a workspace with no merge")
+	if offered || h.feed.lastHead() != nil {
+		t.Fatalf("an interrupt with no merge answered %v and drew %+v", offered, h.feed.lastHead())
 	}
 }
 
-// TestAnswerDequeueKeepKeepsTheSlot covers the keep answer: the merge stays
-// exactly where it was.
-func TestAnswerDequeueKeepKeepsTheSlot(t *testing.T) {
-	// Arrange: a queued merge with the offer standing.
+// TestInterruptRaisesNothingForAnAsyncMerge covers the in-place rule: an async
+// merge's bubble is placed in its requester's feed, never pinned, so the
+// question has nowhere to stand.
+func TestInterruptRaisesNothingForAnAsyncMerge(t *testing.T) {
+	// Arrange: the queued workspace is a merge workspace forked from another.
+	h := newHarness(t)
+	h.db.mu.Lock()
+	record := h.db.workspaces[theWorkspace]
+	record.MergeOf = &wsm.MergeOrigin{Requester: otherWorkspace}
+	h.db.workspaces[theWorkspace] = record
+	h.db.mu.Unlock()
+	enqueue(t, h)
+	before := h.feed.lastHead()
+
+	// Act.
+	offered := h.o.OnInterrupt(context.Background(), theWorkspace)
+
+	// Assert.
+	if offered {
+		t.Fatal("OnInterrupt raised the question for an async merge")
+	}
+	if after := h.feed.lastHead(); after != nil && (before == nil || after.At != before.At) {
+		t.Fatalf("an async merge's head was redrawn: %+v", after)
+	}
+}
+
+// TestAnswerQueueOfferCancelLeavesTheQueue covers the cancel answer: the merge
+// stays exactly where it was and the question leaves the bubble.
+func TestAnswerQueueOfferCancelLeavesTheQueue(t *testing.T) {
+	// Arrange: a queued merge with the question standing.
 	h := newHarness(t)
 	enqueue(t, h)
 	h.o.OnInterrupt(context.Background(), theWorkspace)
 
 	// Act.
-	err := h.o.AnswerDequeue(context.Background(), theWorkspace, true)
+	err := h.o.AnswerQueueOffer(context.Background(), theWorkspace, QueueOfferCancel)
 
 	// Assert.
 	if err != nil {
-		t.Fatalf("AnswerDequeue failed: %v", err)
+		t.Fatalf("AnswerQueueOffer failed: %v", err)
 	}
-	entries, _ := h.db.MergeQueue(context.Background(), h.repoKey())
-	if len(entries) != 1 {
-		t.Fatalf("the queue holds %d entries, want the kept merge", len(entries))
+	if got := h.queuedEntries(); !equal(got, []string{string(theWorkspace)}) {
+		t.Fatalf("the queue holds %v, want the merge still queued", got)
 	}
-	if h.holds.standing() != nil {
-		t.Fatal("the answered offer is still standing")
+	head := h.feed.lastHead()
+	if head == nil || !head.Pinned || head.Row.GetActivity().GetMerge().GetQueueOffer() != nil {
+		t.Fatalf("the last head push is %+v, want the pinned head without the question", head)
 	}
 }
 
-// TestAnswerDequeueReleaseTakesTheMergeOff covers the release answer, which is
-// a DIFFERENT end from an eviction and records its own cause.
-func TestAnswerDequeueReleaseTakesTheMergeOff(t *testing.T) {
-	// Arrange: a queued merge with the offer standing.
+// TestAnswerQueueOfferEvictTakesTheMergeOff covers the evict answer, which is a
+// DIFFERENT end from an operator's eviction and records its own cause.
+func TestAnswerQueueOfferEvictTakesTheMergeOff(t *testing.T) {
+	// Arrange: a queued merge with the question standing.
 	h := newHarness(t)
 	enqueue(t, h)
 	h.o.OnInterrupt(context.Background(), theWorkspace)
 
 	// Act.
-	err := h.o.AnswerDequeue(context.Background(), theWorkspace, false)
+	err := h.o.AnswerQueueOffer(context.Background(), theWorkspace, QueueOfferEvict)
 
 	// Assert.
 	if err != nil {
-		t.Fatalf("AnswerDequeue failed: %v", err)
+		t.Fatalf("AnswerQueueOffer failed: %v", err)
 	}
-	entries, _ := h.db.MergeQueue(context.Background(), h.repoKey())
-	if len(entries) != 0 {
-		t.Fatalf("the queue still holds %d entries", len(entries))
+	if got := h.queuedEntries(); len(got) != 0 {
+		t.Fatalf("the queue still holds %v", got)
 	}
 	h.db.mu.Lock()
 	defer h.db.mu.Unlock()
@@ -495,40 +539,137 @@ func TestAnswerDequeueReleaseTakesTheMergeOff(t *testing.T) {
 	}
 }
 
-// TestAnswerDequeuesAbandonedTerminalCarriesTheUsersCause is the other reachable
-// cause: the user released the slot, and the summary says so rather than
+// TestAnswerQueueOfferEvictsAbandonedTerminalCarriesTheUsersCause covers the
+// bubble's end: the summary says the user released the slot rather than
 // reading like the operator's eviction.
-func TestAnswerDequeuesAbandonedTerminalCarriesTheUsersCause(t *testing.T) {
+func TestAnswerQueueOfferEvictsAbandonedTerminalCarriesTheUsersCause(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	enqueue(t, h)
 	h.o.OnInterrupt(context.Background(), theWorkspace)
 
 	// Act.
-	if err := h.o.AnswerDequeue(context.Background(), theWorkspace, false); err != nil {
-		t.Fatalf("AnswerDequeue failed: %v", err)
+	if err := h.o.AnswerQueueOffer(context.Background(), theWorkspace, QueueOfferEvict); err != nil {
+		t.Fatalf("AnswerQueueOffer failed: %v", err)
 	}
 
 	// Assert.
 	if got := h.feed.lastAbandonedSummary(); got != "the user released this merge's queue slot" {
-		t.Fatalf("the dequeued merge's summary = %q, want the user's cause", got)
+		t.Fatalf("the evicted merge's summary = %q, want the user's cause", got)
 	}
 }
 
-// TestAnswerDequeueRefusesWithNoOfferStanding covers the refusal an answer gets
-// when the question it answers is gone.
-func TestAnswerDequeueRefusesWithNoOfferStanding(t *testing.T) {
-	// Arrange: a queued merge with no offer raised.
+// TestAnswerQueueOfferPrioritizeRunsTheMergeNext covers the prioritize answer:
+// the merge moves ahead of every merge waiting, every bubble on the queue is
+// told its new place, and the question leaves the bubble.
+func TestAnswerQueueOfferPrioritizeRunsTheMergeNext(t *testing.T) {
+	// Arrange: three merges wait, the asking one last.
 	h := newHarness(t)
+	queueAnother(t, h, "ws-2", "two")
+	queueAnother(t, h, "ws-3", "three")
 	enqueue(t, h)
+	h.o.OnInterrupt(context.Background(), theWorkspace)
 
 	// Act.
-	err := h.o.AnswerDequeue(context.Background(), theWorkspace, false)
+	err := h.o.AnswerQueueOffer(context.Background(), theWorkspace, QueueOfferPrioritize)
 
 	// Assert.
-	refusal, refused := Refused(err)
-	if !refused || refusal.Arm != ArmNoOfferStanding {
-		t.Fatalf("AnswerDequeue answered %v, want the %s refusal", err, ArmNoOfferStanding)
+	if err != nil {
+		t.Fatalf("AnswerQueueOffer failed: %v", err)
+	}
+	if got, want := h.queuedEntries(), []string{string(theWorkspace), "ws-2", "ws-3"}; !equal(got, want) {
+		t.Fatalf("the queue reads %v, want %v", got, want)
+	}
+	for ws, want := range map[wsm.WorkspaceID]int{theWorkspace: 1, "ws-2": 2, "ws-3": 3} {
+		if got := h.factsOf(ws).QueuePlace; got != want {
+			t.Fatalf("%s's place = %d, want %d", ws, got, want)
+		}
+	}
+	h.o.mu.Lock()
+	standing := h.o.offers[theWorkspace]
+	h.o.mu.Unlock()
+	if standing {
+		t.Fatal("the answered question is still standing")
+	}
+}
+
+// TestAnswerQueueOfferPrioritizeFailureIsRecordedAndKeepsTheQuestion covers the
+// store failing the move: the error reaches the caller, is recorded at ERROR
+// with its context, and the question stands so the reader can answer again.
+func TestAnswerQueueOfferPrioritizeFailureIsRecordedAndKeepsTheQuestion(t *testing.T) {
+	// Arrange: two merges wait, and the store fails every prioritize.
+	h := newHarness(t)
+	queueAnother(t, h, "ws-2", "two")
+	enqueue(t, h)
+	h.o.OnInterrupt(context.Background(), theWorkspace)
+	h.db.prioritizeErr = errors.New("database is locked")
+
+	// Act.
+	err := h.o.AnswerQueueOffer(context.Background(), theWorkspace, QueueOfferPrioritize)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("AnswerQueueOffer succeeded over a failing store")
+	}
+	record, logged := h.recordFor("error", "daemon.merge.prioritize")
+	if !logged || record.Context["error"] != "database is locked" || record.Context["workspace"] != string(theWorkspace) {
+		t.Fatalf("the failure was not recorded at ERROR with its context: %+v", h.logs.Records())
+	}
+	if _, twice := h.recordFor("error", "daemon.merge.answer_queue_offer"); twice {
+		t.Fatalf("the failure was recorded again by the answer: %+v", h.logs.Records())
+	}
+	if got, want := h.queuedEntries(), []string{"ws-2", string(theWorkspace)}; !equal(got, want) {
+		t.Fatalf("the queue reads %v, want %v", got, want)
+	}
+	h.o.mu.Lock()
+	standing := h.o.offers[theWorkspace]
+	h.o.mu.Unlock()
+	if !standing {
+		t.Fatal("the question was retired although its answer failed")
+	}
+}
+
+// TestAnswerQueueOfferRefusesWithNoOfferStanding covers the refusal an answer
+// gets when the question it answers is gone, for every answer.
+func TestAnswerQueueOfferRefusesWithNoOfferStanding(t *testing.T) {
+	for _, answer := range []QueueOfferAnswer{QueueOfferEvict, QueueOfferPrioritize, QueueOfferCancel} {
+		t.Run(answer.String(), func(t *testing.T) {
+			// Arrange: a queued merge with no question raised.
+			h := newHarness(t)
+			enqueue(t, h)
+
+			// Act.
+			err := h.o.AnswerQueueOffer(context.Background(), theWorkspace, answer)
+
+			// Assert.
+			refusal, refused := Refused(err)
+			if !refused || refusal.Arm != ArmNoOfferStanding {
+				t.Fatalf("AnswerQueueOffer answered %v, want the %s refusal", err, ArmNoOfferStanding)
+			}
+			if got := h.queuedEntries(); !equal(got, []string{string(theWorkspace)}) {
+				t.Fatalf("the queue holds %v, want it untouched", got)
+			}
+		})
+	}
+}
+
+// TestTheMergesEndRetiresTheQuestion covers the question's other exit: a merge
+// that leaves the queue on its own takes its question with it.
+func TestTheMergesEndRetiresTheQuestion(t *testing.T) {
+	// Arrange: a queued merge with the question standing.
+	h := newHarness(t)
+	enqueue(t, h)
+	h.o.OnInterrupt(context.Background(), theWorkspace)
+
+	// Act.
+	if err := h.o.Evict(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("Evict: %v", err)
+	}
+
+	// Assert.
+	err := h.o.AnswerQueueOffer(context.Background(), theWorkspace, QueueOfferCancel)
+	if refusal, refused := Refused(err); !refused || refusal.Arm != ArmNoOfferStanding {
+		t.Fatalf("an answer after the merge ended answered %v, want the %s refusal", err, ArmNoOfferStanding)
 	}
 }
 
@@ -1310,9 +1451,11 @@ var resolutions = []resolution{
 		}
 	}},
 	{name: "dequeued", resolve: func(t *testing.T, h *harness, ctx context.Context) {
-		h.o.OnInterrupt(ctx, theWorkspace)
-		if err := h.o.AnswerDequeue(ctx, theWorkspace, false); err != nil {
-			t.Errorf("AnswerDequeue: %v", err)
+		h.o.mu.Lock()
+		h.o.offers[theWorkspace] = true
+		h.o.mu.Unlock()
+		if err := h.o.AnswerQueueOffer(ctx, theWorkspace, QueueOfferEvict); err != nil {
+			t.Errorf("AnswerQueueOffer: %v", err)
 		}
 	}},
 	{name: "its workspace closed", resolve: func(t *testing.T, h *harness, ctx context.Context) {

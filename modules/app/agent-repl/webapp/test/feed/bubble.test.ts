@@ -2,11 +2,11 @@
 import { createControl } from "../../src/control.js";
 import { ITEM_EXPANDED_EVENT } from "../../src/expand.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { create } from "@bufbuild/protobuf";
+import { clone, create } from "@bufbuild/protobuf";
 import { OpenFeedResponseSchema, type OpenFeedResponse } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_feed_pb";
-import { FeedIdSchema, FeedRowSchema, type FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
+import { FeedIdSchema, FeedRowOrderPinnedSchema, FeedRowSchema, type FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { clearClientFailures, onClientVerdict } from "../../src/rpc/link.js";
-import { mountBubble, type WireFold } from "../../src/feed/bubble.js";
+import { mountBubble, type BubbleOverlay, type OverlayControls, type WireFold } from "../../src/feed/bubble.js";
 import { foldTitle } from "../../src/feed/title-fold.js";
 import { HAS_MORE_CLASS } from "../../src/feed/bubble-more.js";
 import { drawFeedSubagent } from "../../src/feed/rows/subagent.js";
@@ -72,6 +72,12 @@ function mount(
     merge?: boolean;
     /** Told each fold the reader makes with the head's toggle. */
     readerFold?: (folded: boolean) => void;
+    /** Whether the reader may fold the bubble as its row stands. */
+    collapsible?: (row: FeedRow) => boolean;
+    /** The question drawn in place of the sub-feed. */
+    overlay?: BubbleOverlay;
+    /** Leave the bubble off the page, as the feed does before it places a row. */
+    detached?: boolean;
   } = {},
 ) {
   const heads: number[] = [];
@@ -102,9 +108,11 @@ function mount(
     foldOf: opts.foldOf,
     merge: opts.merge,
     readerFold: opts.readerFold,
+    collapsible: opts.collapsible,
+    overlay: opts.overlay,
     scroll: opts.scroll,
   });
-  document.body.replaceChildren(bubble.element);
+  if (opts.detached !== true) document.body.replaceChildren(bubble.element);
   return { bubble, h, heads };
 }
 
@@ -1878,5 +1886,217 @@ describe("mountBubble: the non-row frames a sub-feed tail carries", () => {
     await settle();
     // Assert
     expect(h.sink.reported).toEqual(["frameUndecodable"]);
+  });
+});
+
+/** A copy of ROW pinned to its feed's bottom (FeedRowOrder.pinned). */
+function pinned(row: FeedRow): FeedRow {
+  const copy = clone(FeedRowSchema, row);
+  copy.order = { ...copy.order!, pinned: create(FeedRowOrderPinnedSchema, {}) };
+  return copy;
+}
+
+/** A merge bubble's rule: foldable only while placed. */
+const placedOnly = (row: FeedRow): boolean => row.order?.pinned === undefined;
+
+describe("mountBubble: a bubble that cannot be folded now", () => {
+  it("opens a pinned merge bubble the daemon shipped folded", async () => {
+    const { bubble } = mount(pinned(mergeRow("m1", true)), harness(), { folded: true, collapsible: placedOnly, merge: true });
+    await settle();
+    expect(bubble.isExpanded()).toBe(true);
+  });
+
+  it("folds nothing on a head click while pinned", async () => {
+    const { bubble } = mount(pinned(mergeRow("m1", false)), harness(), { folded: false, collapsible: placedOnly, merge: true });
+    await settle();
+    bubble.element.querySelector<HTMLElement>("[data-expand]")?.click();
+    await settle();
+    expect(bubble.isExpanded()).toBe(true);
+  });
+
+  it("tells the reader's fold nothing for a click that folded nothing", async () => {
+    const told: boolean[] = [];
+    const { bubble } = mount(pinned(mergeRow("m1", false)), harness(), {
+      folded: false,
+      collapsible: placedOnly,
+      merge: true,
+      readerFold: (folded) => told.push(folded),
+    });
+    await settle();
+    bubble.element.querySelector<HTMLElement>("[data-expand]")?.click();
+    await settle();
+    expect(told).toEqual([]);
+  });
+
+  it("keeps a pinned bubble open over a daemon fold that turns folded", async () => {
+    const { bubble } = mount(pinned(mergeRow("m1", false)), harness(), {
+      folded: false,
+      collapsible: placedOnly,
+      foldOf: mergeFold,
+      merge: true,
+    });
+    await settle();
+    bubble.update(pinned(mergeRow("m1", true)));
+    await settle();
+    expect(bubble.isExpanded()).toBe(true);
+  });
+
+  it("folds nothing through the collapse handle while pinned", async () => {
+    const { bubble } = mount(pinned(mergeRow("m1", false)), harness(), { folded: false, collapsible: placedOnly, merge: true });
+    await settle();
+    bubble.collapse();
+    expect(bubble.isExpanded()).toBe(true);
+  });
+
+  it("folds on a head click once the bubble settles where it stands", async () => {
+    const { bubble } = mount(pinned(mergeRow("m1", false)), harness(), { folded: false, collapsible: placedOnly, merge: true });
+    await settle();
+    bubble.update(mergeRow("m1", false));
+    bubble.element.querySelector<HTMLElement>("[data-expand]")?.click();
+    await settle();
+    expect(bubble.isExpanded()).toBe(false);
+  });
+
+  it("says on its element whether it can be folded now", async () => {
+    const { bubble } = mount(pinned(mergeRow("m1", false)), harness(), { folded: false, collapsible: placedOnly, merge: true });
+    const pinnedSays = bubble.element.getAttribute("data-collapsible");
+    bubble.update(mergeRow("m1", false));
+    expect([pinnedSays, bubble.element.getAttribute("data-collapsible")]).toEqual(["false", "true"]);
+  });
+
+  it("can always be folded when no rule is given", async () => {
+    const { bubble } = mount(pinned(subagentRow("b1")), harness(), { folded: false });
+    await settle();
+    bubble.element.querySelector<HTMLElement>("[data-expand]")?.click();
+    await settle();
+    expect(bubble.isExpanded()).toBe(false);
+  });
+});
+
+describe("mountBubble: an overlay question in place of the sub-feed", () => {
+  /** An overlay keyed by a merge row's label when it starts with "Q:". */
+  function questionOverlay(): BubbleOverlay & { draws: number; controls: OverlayControls[] } {
+    const overlay = {
+      draws: 0,
+      controls: [] as OverlayControls[],
+      keyOf: (row: FeedRow) => {
+        const label =
+          row.row.case === "activity" && row.row.value.unit.case === "merge"
+            ? row.row.value.unit.value.head?.label?.text ?? ""
+            : "";
+        return label.startsWith("Q:") ? label : undefined;
+      },
+      draw: (_row: FeedRow, controls: OverlayControls) => {
+        overlay.draws += 1;
+        overlay.controls.push(controls);
+        const el = document.createElement("div");
+        el.className = "test-question";
+        const answer = createControl();
+        answer.setAttribute("data-autofocus", "");
+        el.append(answer);
+        return el;
+      },
+    };
+    return overlay;
+  }
+  const overlaySlot = (bubble: { element: HTMLElement }) =>
+    bubble.element.querySelector<HTMLElement>(".bubble-overlay")!;
+  const panel = (bubble: { element: HTMLElement }) =>
+    bubble.element.querySelector<HTMLElement>("[data-subfeed]")!;
+
+  it("draws the question in place of the sub-feed", async () => {
+    const { bubble } = mount(mergeRow("m1", false, "Q: evict?"), harness(), { folded: false, overlay: questionOverlay() });
+    await settle();
+    expect([overlaySlot(bubble).hidden, panel(bubble).hidden, bubble.isExpanded()]).toEqual([false, true, true]);
+  });
+
+  it("focuses the question's autofocus control when it first appears", async () => {
+    const { bubble } = mount(mergeRow("m1", false), harness(), { folded: false, overlay: questionOverlay() });
+    await settle();
+    bubble.update(mergeRow("m1", false, "Q: evict?"));
+    expect(document.activeElement).toBe(overlaySlot(bubble).querySelector("[data-autofocus]"));
+  });
+
+  it("focuses a question drawn before the bubble was placed once it joins the page", async () => {
+    // Arrange: the first draw carries the question while the bubble is detached.
+    document.body.replaceChildren();
+    const { bubble: late } = mount(mergeRow("m2", false, "Q: evict?"), harness(), {
+      folded: false,
+      overlay: questionOverlay(),
+      detached: true,
+    });
+    // Act: the feed places the row.
+    document.body.replaceChildren(late.element);
+    // Assert
+    expect(document.activeElement).toBe(late.element.querySelector("[data-autofocus]"));
+  });
+
+  it("takes no focus back when the slot re-joins the page", async () => {
+    // Arrange
+    const { bubble } = mount(mergeRow("m1", false, "Q: evict?"), harness(), { folded: false, overlay: questionOverlay() });
+    const elsewhere = document.createElement("input");
+    document.body.append(elsewhere);
+    elsewhere.focus();
+    // Act
+    bubble.element.remove();
+    document.body.prepend(bubble.element);
+    // Assert
+    expect(document.activeElement).toBe(elsewhere);
+  });
+
+  it("keeps the drawn question on a re-push asking the same", async () => {
+    const overlay = questionOverlay();
+    const { bubble } = mount(mergeRow("m1", false, "Q: evict?"), harness(), { folded: false, overlay });
+    bubble.update(mergeRow("m1", false, "Q: evict?"));
+    expect(overlay.draws).toBe(1);
+  });
+
+  it("removes the question and shows the sub-feed once the row carries none", async () => {
+    const { bubble } = mount(mergeRow("m1", false, "Q: evict?"), harness(), { folded: false, overlay: questionOverlay() });
+    await settle();
+    bubble.update(mergeRow("m1", false));
+    expect([overlaySlot(bubble).hidden, overlaySlot(bubble).childElementCount, panel(bubble).hidden]).toEqual([true, 0, false]);
+  });
+
+  it("closes the question at once when it is dismissed", async () => {
+    const overlay = questionOverlay();
+    const { bubble } = mount(mergeRow("m1", false, "Q: evict?"), harness(), { folded: false, overlay });
+    await settle();
+    overlay.controls[0].dismiss();
+    expect([overlaySlot(bubble).hidden, panel(bubble).hidden]).toEqual([true, false]);
+  });
+
+  it("brings a dismissed question back when it is restored", async () => {
+    const overlay = questionOverlay();
+    const { bubble } = mount(mergeRow("m1", false, "Q: evict?"), harness(), { folded: false, overlay });
+    await settle();
+    overlay.controls[0].dismiss();
+    overlay.controls[0].restore();
+    expect([overlaySlot(bubble).hidden, panel(bubble).hidden]).toEqual([false, true]);
+  });
+
+  it("draws the same question afresh once it was retired and asked again", async () => {
+    const overlay = questionOverlay();
+    const { bubble } = mount(mergeRow("m1", false, "Q: evict?"), harness(), { folded: false, overlay });
+    overlay.controls[0].dismiss();
+    bubble.update(mergeRow("m1", false));
+    bubble.update(mergeRow("m1", false, "Q: evict?"));
+    expect([overlay.draws, overlaySlot(bubble).hidden]).toEqual([2, false]);
+  });
+
+  it("records the question's arrival", async () => {
+    const capture = captureLogRecords();
+    mount(mergeRow("m1", false, "Q: evict?"), harness(), { folded: false, overlay: questionOverlay() });
+    capture.logger.flush();
+    await Promise.resolve();
+    expect(capture.sent.filter((r) => r.operation === "feed.bubble-overlay-drawn")).toHaveLength(1);
+  });
+
+  it("guards the overlay's display with a [hidden] rule", () => {
+    const sets = rulesOf(STYLESHEET).filter(
+      (rule) => rule.selectors.join(", ").includes(".bubble-overlay") && /(^|[;\s])display\s*:/.test(rule.declarations),
+    );
+    const last = sets[sets.length - 1];
+    expect(sets.length === 0 || (last.selectors.join(", ").includes("[hidden]") && /display\s*:\s*none/.test(last.declarations))).toBe(true);
   });
 });

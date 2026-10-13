@@ -368,11 +368,11 @@ func (s *requestLoggingServer) UpdateClassifierPrompt(
 	return serveUnary(s, ctx, "UpdateClassifierPrompt", req, s.server.UpdateClassifierPrompt)
 }
 
-func (s *requestLoggingServer) AnswerHeldOffer(
+func (s *requestLoggingServer) AnswerMergeQueueOffer(
 	ctx context.Context,
-	req *connect.Request[agentreplv1.AnswerHeldOfferRequest],
-) (*connect.Response[agentreplv1.AnswerHeldOfferResponse], error) {
-	return serveUnary(s, ctx, "AnswerHeldOffer", req, s.server.AnswerHeldOffer)
+	req *connect.Request[agentreplv1.AnswerMergeQueueOfferRequest],
+) (*connect.Response[agentreplv1.AnswerMergeQueueOfferResponse], error) {
+	return serveUnary(s, ctx, "AnswerMergeQueueOffer", req, s.server.AnswerMergeQueueOffer)
 }
 
 func (s *requestLoggingServer) Deploy(

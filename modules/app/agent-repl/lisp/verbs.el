@@ -63,6 +63,7 @@
 (declare-function agent-repl--read-sexp-file-if-exists "history" (file))
 (declare-function agent-repl--write-sexp-file "history" (file data))
 (declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--webview-window "agent-repl-panels" (ws))
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--next-log-request-id "agent-repl-core" ())
@@ -765,7 +766,10 @@ in-flight vendor query is ended.
 THE OUTCOME IS THE ARM, and every arm reaches the user.  `interrupted_turn'
 says the turn was stopped; `nothing_running' is a SUCCESS arm, not a
 failure -- the daemon found the session already quiet -- so it is a calm
-message rather than an error.  `no_session' (the workspace never had a
+message rather than an error.  `merge_queue_offered' is the quiet
+workspace whose sync merge is queued: the stop raised the merge-queue
+question in the pinned merge bubble, so no rollback is offered and the
+keyboard goes to the feed.  `no_session' (the workspace never had a
 session) is a daemon refusal reported through the generic path, likewise as
 a message and never a raised error, so an idle workspace is a no-op with
 feedback either way.
@@ -799,6 +803,12 @@ surfaced loudly by the shared dispatcher."
             (if offer
                 (agent-repl--input-rollback-offer ws offer)
               (message "agent-repl: nothing to interrupt"))))
+         (:merge-queue-offered
+          ;; THE STOP WAS ABOUT THE QUEUED MERGE: the daemon raised the
+          ;; merge-queue question in the pinned merge bubble and touched
+          ;; nothing else.  No rollback is offered; the keyboard goes to the
+          ;; feed, where the question has taken focus.
+          (agent-repl-verbs--focus-merge-queue-offer ws))
          (:interrupted-detached
           ;; A turn stop confirmed with live agents also ends them; the
           ;; daemon may answer with the fan-wide count rather than the bare
@@ -829,6 +839,18 @@ surfaced loudly by the shared dispatcher."
                (agent-repl--info ws "elisp.verbs.interrupt-confirm-declined ws=%s" ws)
                (message "agent-repl: turn left running")))
            t))))))
+
+(defun agent-repl-verbs--focus-merge-queue-offer (ws)
+  "Hand the keyboard to WS's feed, where the merge-queue question stands.
+The webview's own question takes focus inside the page; selecting the
+webview window is what makes the next key reach it.  With no window
+showing the webview the question still stands in the bubble, and the
+message says where to answer it."
+  (let ((win (agent-repl--webview-window ws)))
+    (agent-repl--info ws "elisp.verbs.interrupt-merge-queue-offered ws=%s webview-window=%s"
+                      ws (and win t))
+    (when win (select-window win))
+    (message "agent-repl: the merge is queued -- Evict, Prioritize or Cancel in its bubble")))
 
 (defun agent-repl-verb-set-priority (ws priority)
   "Set WS's PRIORITY, or CLEAR it when PRIORITY is nil.
@@ -1757,7 +1779,12 @@ at once, the prompt landing in the composer, when nothing has answered it
 in the feed yet; otherwise it lists the prompts a rollback can reach,
 newest first with the time since each was sent and the context size
 before it, and rolls back to the one picked after confirming.  With no
-prompt to roll back it says there is nothing to interrupt."
+prompt to roll back it says there is nothing to interrupt.
+
+With no turn in flight while the workspace's own sync merge is queued, it
+rolls nothing back: it asks about the merge instead, in the pinned merge
+bubble (Evict, Prioritize or Cancel), and hands the keyboard to the feed.
+The press itself changes nothing on the queue."
   (interactive)
   (agent-repl-verb-interrupt (agent-repl-verbs--target-ws ws "Interrupt turn in workspace: ")))
 
