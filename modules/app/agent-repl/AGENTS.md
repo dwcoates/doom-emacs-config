@@ -1255,7 +1255,7 @@ so the push is on the wire ahead of the ack rather than waiting for a later one.
 
 A repository whose section is drawn with NO rows is still an ordinary state
 (every workspace under it closed), so neither the daemon's roster resolver nor
-the webapp's rail may drop an empty section.
+the webapp's sidebar may drop an empty section.
 
 ## `SPC p p` offers EVERY KNOWN workspace, not only the live ones
 
@@ -2011,6 +2011,28 @@ per workspace on the marker's present->absent edge (a restated marker is not a
 clear, and neither is a first sighting without it). The reaction only re-arms
 the dwell clock, since the tab already draws full from the row.
 
+## Main components and systems go by their canonical names, and no others
+
+Every agent, in every response, commit message, comment and doc, names a
+main component or system of agent-repl by its CANONICAL name only: the name
+its directory, element or program carries. A synonym, metaphor or nickname
+(owner ruling, 2026-10-13: "rail" for the sidebar) makes the reader translate,
+and a reader who does not know the code cannot.
+
+| Canonical name | What it is | Never called |
+|---|---|---|
+| sidebar | the webapp's list of every workspace (`webapp/src/sidebar/`, `<nav id="ws-sidebar">`) | rail, dock, workspace list |
+| topbar | the strip at the top of a workspace page (`webapp/src/topbar/`) | header, title bar |
+| footer | the progress footer at the bottom of a page (`webapp/src/footer/`); its detail section is the "expanded footer" | status bar |
+| feed | a workspace page's conversation (`webapp/src/feed/`) | transcript view, log |
+| tab bar | Emacs's row of workspace tabs | tab strip |
+| host | the one web view Emacs shows, holding every workspace page as an iframe (`webapp/src/host/`) | wrapper, shell page |
+| daemon, shim, sidecar, store, webapp | the cooperating programs (`daemon/`, `agent-shim/`, `shim-claude-sidecar`, `shim-store`, `webapp/`) | backend, server, agent process |
+
+Code that still uses an old nickname (comments saying "rail" in
+`webapp/src/sidebar/`) is not a licence to repeat it: the canonical name is
+used in what an agent writes.
+
 ## "WatchDaemon", "the daemon watching in Emacs" and "the editor stream" are one thing
 
 All three names mean Emacs's `WatchDaemon` subscription
@@ -2194,7 +2216,7 @@ The rules that keep this true:
   row's menu, a task's menu, a row's detail popover) or a form is NOT view
   state: it is transient to the page that opened it. Every sidebar dropdown
   shares ONE dismiss rule (`webapp/src/sidebar/dropdowns.ts`): a click in the
-  rail outside it closes it, a click inside it or on its opener keeps it, and
+  sidebar outside it closes it, a click inside it or on its opener keeps it, and
   opening one closes the other.
 - **The webapp composer is closed exactly when the footer is blue**
   (`render-colors.json#composer_closed_colors`, read by
