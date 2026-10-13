@@ -55,6 +55,7 @@ import { ForwardingLogger, LEVEL_WINDOW_OPERATION, bindLogContext, log, setLogge
 import { LevelWindow, selectionContext, selectionNote, selectLevel } from "../../agent-shim/logging/ts/level-window.js";
 import { installPagePresenceLog } from "./page-presence.js";
 import { connectToHost } from "./host/embed.js";
+import { createStreamCostMeter, regionNodes } from "./stream-cost.js";
 import { pagePresence } from "./presence.js";
 import { installPageDrawnReport } from "./page-drawn-report.js";
 import { createPageSeen } from "./page-seen.js";
@@ -225,6 +226,15 @@ export async function boot(): Promise<void> {
       seen: createPageSeen(workspace.id, pagePresence()),
       composerEnabled: address.composer,
       page: connectionId,
+      costs: createStreamCostMeter({
+        now: () => performance.now(),
+        every: (fn, ms) => {
+          const timer = window.setInterval(fn, ms);
+          return () => window.clearInterval(timer);
+        },
+        nodes: () => regionNodes(document),
+        presence: () => ({ shown: pagePresence().shown(), warm: pagePresence().warm() }),
+      }),
     });
     opened = ctx;
     // The daemon declares this workspace open (and the editor shows its tab)
