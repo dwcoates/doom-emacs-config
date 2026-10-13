@@ -205,6 +205,23 @@ The answer is always a string: a null answer is dropped without a callback."
              (agent-repl--ws-by-ref-id id))
         agent-repl--webhost-central)))
 
+(defun agent-repl--webhost-record-note (scope op note)
+  "Record NOTE, which the host attached to its answer to OP, under SCOPE.
+NOTE is (:level LEVEL :text TEXT): LEVEL \"info\" for what a working host
+does (a page cooling, a page from another build mid-rollout) and \"warn\"
+for what it should never see.  A bare string is a host from a build before
+notes carried a level, recorded at WARN as that build recorded them all; a
+level this build does not know is an ERROR naming it, never dropped."
+  (cond
+   ((stringp note)
+    (agent-repl--warn scope "elisp.webhost.note op=%s note=%s" op note))
+   ((equal (plist-get note :level) "info")
+    (agent-repl--info scope "elisp.webhost.note op=%s note=%s" op (plist-get note :text)))
+   ((equal (plist-get note :level) "warn")
+    (agent-repl--warn scope "elisp.webhost.note op=%s note=%s" op (plist-get note :text)))
+   (t
+    (agent-repl--error scope "elisp.webhost.note-unknown-level op=%s note=%S" op note))))
+
 (defun agent-repl--webhost-answered (raw)
   "Record the host's RAW answer to a call, and every note it carries.
 The xwidget `javascript-callback' handler calls this BY SYMBOL: see
@@ -216,7 +233,7 @@ The xwidget `javascript-callback' handler calls this BY SYMBOL: see
         (agent-repl--log scope "elisp.webhost.answer op=%s id=%s outcome=%s"
                          (plist-get answer :op) (plist-get answer :id) (plist-get answer :outcome))
         (dolist (note (plist-get answer :notes))
-          (agent-repl--warn scope "elisp.webhost.note op=%s note=%s" (plist-get answer :op) note)))
+          (agent-repl--webhost-record-note scope (plist-get answer :op) note)))
     (error
      (agent-repl--error agent-repl--webhost-central
                         "elisp.webhost.answer-unreadable raw=%S error=%S" raw err))))

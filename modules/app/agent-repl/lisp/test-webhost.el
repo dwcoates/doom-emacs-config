@@ -98,18 +98,55 @@ so stubbing the accessor would not reach the code under test."
       ;; Assert
       (should (equal logged '("elisp.webhost.answer op=show id=nil outcome=shown"))))))
 
-(ert-deftest agent-repl-test-wh-a-note-is-recorded-at-warn ()
-  "A note the host made reaches the log at WARN, never dropped."
-  ;; Arrange
+(defun agent-repl-test-wh--note-levels (raw)
+  "Record the host's RAW answer and return (LEVEL . LINE) for every note logged."
+  (let (logged)
+    (cl-letf (((symbol-function 'agent-repl--log) #'ignore)
+              ((symbol-function 'agent-repl--info)
+               (lambda (_ws fmt &rest args) (push (cons 'info (apply #'format fmt args)) logged)))
+              ((symbol-function 'agent-repl--warn)
+               (lambda (_ws fmt &rest args) (push (cons 'warn (apply #'format fmt args)) logged)))
+              ((symbol-function 'agent-repl--error)
+               (lambda (_ws fmt &rest args) (push (cons 'error (apply #'format fmt args)) logged))))
+      (agent-repl--webhost-answered raw))
+    (nreverse logged)))
+
+(ert-deftest agent-repl-test-wh-an-info-note-is-recorded-at-info ()
+  "What a working host does (a page cooling, a page mid-rollout) is INFO."
   (agent-repl-test--with-clean-state
-    (let (warned)
-      (cl-letf (((symbol-function 'agent-repl--log) #'ignore)
-                ((symbol-function 'agent-repl--warn)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned))))
-        ;; Act
-        (agent-repl--webhost-answered "{\"op\":\"ids\",\"id\":null,\"outcome\":\"listed\",\"notes\":[\"unreadable\"]}"))
+    ;; Act
+    (let ((logged (agent-repl-test-wh--note-levels
+                   "{\"op\":\"ids\",\"id\":null,\"outcome\":\"listed\",\"notes\":[{\"level\":\"info\",\"text\":\"b cold\"}]}")))
       ;; Assert
-      (should (equal warned '("elisp.webhost.note op=ids note=unreadable"))))))
+      (should (equal logged '((info . "elisp.webhost.note op=ids note=b cold")))))))
+
+(ert-deftest agent-repl-test-wh-a-warn-note-is-recorded-at-warn ()
+  "What a host should never see reaches the log at WARN, never dropped."
+  (agent-repl-test--with-clean-state
+    ;; Act
+    (let ((logged (agent-repl-test-wh--note-levels
+                   "{\"op\":\"ids\",\"id\":null,\"outcome\":\"listed\",\"notes\":[{\"level\":\"warn\",\"text\":\"stray\"}]}")))
+      ;; Assert
+      (should (equal logged '((warn . "elisp.webhost.note op=ids note=stray")))))))
+
+(ert-deftest agent-repl-test-wh-a-bare-note-from-an-older-host-is-recorded-at-warn ()
+  "A host from before notes carried a level sends strings, recorded as it recorded them."
+  (agent-repl-test--with-clean-state
+    ;; Act
+    (let ((logged (agent-repl-test-wh--note-levels
+                   "{\"op\":\"ids\",\"id\":null,\"outcome\":\"listed\",\"notes\":[\"unreadable\"]}")))
+      ;; Assert
+      (should (equal logged '((warn . "elisp.webhost.note op=ids note=unreadable")))))))
+
+(ert-deftest agent-repl-test-wh-a-note-of-an-unknown-level-is-an-error ()
+  "A level this build does not know is an ERROR naming the note, never dropped."
+  (agent-repl-test--with-clean-state
+    ;; Act
+    (let ((logged (agent-repl-test-wh--note-levels
+                   "{\"op\":\"ids\",\"id\":null,\"outcome\":\"listed\",\"notes\":[{\"level\":\"loud\",\"text\":\"x\"}]}")))
+      ;; Assert
+      (should (eq 'error (car (car logged))))
+      (should (string-prefix-p "elisp.webhost.note-unknown-level op=ids" (cdr (car logged)))))))
 
 (ert-deftest agent-repl-test-wh-an-unreadable-answer-is-an-error ()
   "An answer that is not the host's JSON is recorded at ERROR."

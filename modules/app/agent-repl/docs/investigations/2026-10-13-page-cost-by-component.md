@@ -101,3 +101,32 @@ garbage collection), so the sidebar's real share of CPU is still open.
   attached to the Emacs web view) during a busy minute, to attribute the 93%.
 - Repeat this measurement after the sidebar moves into the webhost: same
   meter, same process sampling, same kind of activity.
+
+## Addendum: where the rest of the CPU goes (2026-10-13, after the sidebar moved)
+
+A 10-second native sample (`sample`) of the webhost's WebKit page process
+(pid 27327, 10 pages, the sidebar now drawn once in the webhost; the process
+read 20% CPU at the time, against 37% averaged before the move, though the
+two moments' activity differs):
+
+| Main-thread samples (1ms each) | Count | Share of busy |
+|---|---|---|
+| idle (waiting in the run loop) | 6,778 of 8,268 | - |
+| busy | about 1,490 | 100% |
+| rendering update (`WebPage::updateRendering`) | 909 | 61% |
+| of which style recalculation (`Document::updateStyleIfNeeded`) | 489 | 33% |
+| of which compositing (`RenderLayerCompositor`) | about 140 | 9% |
+| JavaScript calls | 108 | 7% |
+| garbage collection | 55 | 4% |
+
+- The streams' JavaScript is a small part, as the meter said; the rendering
+  update is most of it, and style recalculation is most of that.
+- The rendering update runs over and over while nothing is happening, and
+  transform-animation extents appear in the compositing frames, so running
+  CSS animations are the likely driver: a page hidden with `visibility:
+  hidden` keeps its animations running (host.css), and every one forces a
+  style pass on its document every frame.
+- Not yet known: which animations, in which pages. The next step is Safari's
+  Web Inspector, attached to the Emacs web view, Timelines tab, Animations and
+  Layout & Rendering, for one minute of idle, to name them; pausing animations
+  in pages that are not shown is then the likely fix.

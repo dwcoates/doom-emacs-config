@@ -132,6 +132,16 @@ export const FRAME_WORKSPACE_ATTRIBUTE = "data-workspace-id";
 /** The attribute the shown iframe wears. */
 export const FRAME_SHOWN_ATTRIBUTE = "data-shown";
 
+/**
+ * One note the host made for Emacs to record, at the level it deserves: INFO
+ * for what a working webhost does (a page cooling, a page from another build
+ * mid-rollout), WARN for what it should never see.
+ */
+export interface HostNote {
+  readonly level: "info" | "warn";
+  readonly text: string;
+}
+
 /** The longest a run of notes grows before the oldest are dropped. */
 const NOTE_LIMIT = 50;
 
@@ -151,10 +161,10 @@ export function createHost(env: HostEnv): Host {
   let sidebarDocked = false;
   let failures: readonly WebhostFailure[] = [];
   let disarmCooling: (() => void) | null = null;
-  let notes: string[] = [];
+  let notes: HostNote[] = [];
 
-  const note = (text: string): void => {
-    notes.push(text);
+  const note = (level: HostNote["level"], text: string): void => {
+    notes.push({ level, text });
     if (notes.length > NOTE_LIMIT) notes = notes.slice(notes.length - NOTE_LIMIT);
   };
 
@@ -202,7 +212,7 @@ export function createHost(env: HostEnv): Host {
       const next = warm.has(frame.id);
       if (next === frame.warm) continue;
       frame.warm = next;
-      note(`${frame.id} ${next ? "warm" : "cold"}`);
+      note("info", `${frame.id} ${next ? "warm" : "cold"}`);
       post(frame, presenceOf(frame));
     }
     disarmCooling?.();
@@ -288,12 +298,15 @@ export function createHost(env: HostEnv): Host {
     if (!onHostChannel(event.data)) return;
     const frame = frameOf(event.source);
     if (frame === null) {
-      note(`a message on the host channel came from no workspace page: ${JSON.stringify(event.data)}`);
+      note("warn", `a message on the host channel came from no workspace page: ${JSON.stringify(event.data)}`);
       return;
     }
     const message = parsePageToHost(event.data);
     if (message === null) {
-      note(`workspace ${frame.id} sent a host message this build cannot read: ${JSON.stringify(event.data)}`);
+      // A PAGE FROM ANOTHER BUILD, which a rollout makes for the moment between
+      // re-pointing the pages and reloading the webhost: expected, and over by
+      // itself once both run the same build.
+      note("info", `workspace ${frame.id} sent a host message this build cannot read: ${JSON.stringify(event.data)}`);
       return;
     }
     take(frame, message);
