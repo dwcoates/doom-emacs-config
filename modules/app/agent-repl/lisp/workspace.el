@@ -996,7 +996,7 @@ Returns:
     (:permission     . "❓")
     (:question       . "❓")
     (:waiting        . "❓")
-    (:cold-gate      . "🛑")
+    (:cold-gate      . "❄️")
     (:closing        . "🚪")
     (:daemon-impaired . "🔧")
     (:vendor-blocked . "⛔")

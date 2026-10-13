@@ -790,14 +790,14 @@ of a workspace back with the user (owner ruling, 2026-10-13).")
 (defconst agent-repl-status-gate-glyphs
   '((:permission . "❗")
     (:question   . "❓")
-    (:cold-gate  . "🛑"))
+    (:cold-gate  . "❄️"))
   "The character each gate arm draws, keyed by the fixture\='s glyph NAMES.
 
 proto/vocab/render-colors.json\='s `gate_glyphs\=' section names WHICH
-glyph a gate on the user gets (exclaim, ask, stop); this is the tab
+glyph a gate on the user gets (exclaim, ask, snowflake); this is the tab
 bar\='s mapping, the same emoji the webapp sidebar draws in place of its
 dot (owner requests, 2026-10-11 and 2026-10-13).  The arm keeps its
-green, so the tab reads `[N] ❗ name\=', `[N] ❓ name\=' or `[N] 🛑 name\='.")
+green, so the tab reads `[N] ❗ name\=', `[N] ❓ name\=' or `[N] ❄️ name\='.")
 
 (defconst agent-repl-status-dot-glyph "●"
   "The status dot, drawn on the tab bar only where its ink differs from
@@ -978,7 +978,7 @@ in `agent-repl--color-default-bracket'."
                   agent-repl--color-done-green
                   agent-repl--color-dark))
     ;; A COLD GATE is a permission's green: a gate on the user, drawn with its
-    ;; stop sign (owner ruling, 2026-10-13).
+    ;; snowflake (owner ruling, 2026-10-13).
     (:cold-gate . ,(agent-repl--tab-palette-row
                     'agent-repl-tab-permission
                     agent-repl--color-done-green

@@ -545,9 +545,8 @@ export function drawRosterRowDetailSummary(u: RosterRowDetailSummary, path: stri
  * working one-shot.
  *
  * The color and the ink are the shared vocabulary's, through `tones.ts`; the
- * motion is `tones.rosterRowMark`'s, and it says the same thing everywhere —
- * a breath means work in flight or a gate on you, a spin means the merge
- * queue is on this run.
+ * motion is `tones.rosterRowMark`'s, and it says the same thing everywhere:
+ * a breath means something is in progress.
  */
 export function drawStatusMark(arm: RosterStatusCase, path: string, oneShot: boolean): HTMLElement {
   const mark = rosterRowMark(arm, oneShot);

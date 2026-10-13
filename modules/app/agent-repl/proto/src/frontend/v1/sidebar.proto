@@ -846,7 +846,8 @@ message RosterRow {
     // say which arm it is. No merge fact reaches the roster before the turn
     // that asked for the merge has ended, so a row goes straight to
     // merge_queued or merging.
-    // A merge is actively running in this workspace. PURPLE, the glyph turns.
+    // A merge is actively running in this workspace. PURPLE, the glyph
+    // breathes.
     RosterRowStatusMerging merging = 20;
     // The merge was asked for and holds the workspace (prompts are held), but
     // has NOT STARTED: it is enqueued behind another workspace's merge, or
