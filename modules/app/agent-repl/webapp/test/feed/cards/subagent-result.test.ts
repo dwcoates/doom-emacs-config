@@ -38,6 +38,7 @@ function rc(): RowContext {
       composerEnabled: false,
     }),
     feed: "root",
+    arrival: "page",
     row: create(FeedRowSchema, {}),
     revealRow: async () => false,
   };

@@ -65,6 +65,7 @@ function harness(answer?: OpenInEditorResponse, previous?: HTMLElement): Harness
         composerEnabled: false,
       }),
       feed: "root",
+      arrival: "page",
       row: create(FeedRowSchema, {}),
       revealRow: async () => false,
       previous,
