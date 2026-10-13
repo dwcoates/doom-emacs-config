@@ -37,6 +37,11 @@ describe("drawFeedTextBlock", () => {
     expect(el.querySelector("strong")?.textContent).toBe("bold");
   });
 
+  it("draws each typed line as its own paragraph, spaced as a response's are", () => {
+    const el = painted(drawFeedTextBlock(create(FeedTextBlockSchema, { text: "one\ntwo" })));
+    expect([...el.querySelectorAll("p")].map((p) => p.textContent)).toEqual(["one", "two"]);
+  });
+
   it("draws an empty block as an empty body rather than refusing", () => {
     expect(painted(drawFeedTextBlock(create(FeedTextBlockSchema, { text: "" }))).textContent).toBe("");
   });
