@@ -3,6 +3,7 @@ package sidebar
 import (
 	"fmt"
 	"sort"
+	"time"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -68,15 +69,32 @@ func sortWorkspaces(in []wsm.Workspace) []wsm.Workspace {
 // Every row it is handed is merged; one with no merge instant is a defect, and
 // panics. It sorts a copy, as sortWorkspaces does.
 func sortMergedNewestFirst(in []wsm.Workspace) []wsm.Workspace {
+	return sortNewestFirst(in, "recently-merged", func(ws wsm.Workspace) *time.Time { return ws.MergedAt })
+}
+
+// sortHiddenNewestFirst puts the hidden band's top-level rows in HIDE ORDER,
+// the latest hide first (owner request, 2026-10-13), roster order breaking a
+// tie. Every row it is handed is hidden, and a hidden workspace always records
+// when it was hidden (wsm), so one with no hide instant is a defect, and
+// panics. It sorts a copy, as sortWorkspaces does.
+func sortHiddenNewestFirst(in []wsm.Workspace) []wsm.Workspace {
+	return sortNewestFirst(in, "hidden", func(ws wsm.Workspace) *time.Time { return ws.HiddenAt })
+}
+
+// sortNewestFirst sorts a copy of IN by the instant AT names, the latest
+// first, roster order breaking a tie. A row with no instant is a defect in
+// the band named BAND, and panics: the bands it orders hold only rows that
+// carry one.
+func sortNewestFirst(in []wsm.Workspace, band string, at func(wsm.Workspace) *time.Time) []wsm.Workspace {
 	out := make([]wsm.Workspace, len(in))
 	copy(out, in)
 	for _, ws := range out {
-		if ws.MergedAt == nil {
-			panic(fmt.Sprintf("sidebar: recently-merged row %s has no merge instant", ws.ID))
+		if at(ws) == nil {
+			panic(fmt.Sprintf("sidebar: %s row %s has no instant to order by", band, ws.ID))
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {
-		a, b := *out[i].MergedAt, *out[j].MergedAt
+		a, b := *at(out[i]), *at(out[j])
 		if !a.Equal(b) {
 			return a.After(b)
 		}

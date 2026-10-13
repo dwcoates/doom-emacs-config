@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestNormalizeDirCollapsesEverySpelling(t *testing.T) {
@@ -709,7 +710,7 @@ func TestSetHiddenIsReadBack(t *testing.T) {
 
 			// Act
 			for _, hidden := range tt.writes {
-				if err := s.SetHidden(context.Background(), ws.ID, hidden); err != nil {
+				if err := s.SetHidden(context.Background(), ws.ID, hidden, time.Unix(1_700_000_000, 0)); err != nil {
 					t.Fatalf("SetHidden(%v): %v", hidden, err)
 				}
 			}
@@ -726,12 +727,122 @@ func TestSetHiddenIsReadBack(t *testing.T) {
 	}
 }
 
+func TestSetHiddenRecordsWhenTheWorkspaceWasHidden(t *testing.T) {
+	first, second := time.Unix(1_700_000_000, 0), time.Unix(1_700_000_600, 0)
+	tests := []struct {
+		name   string
+		writes []struct {
+			hidden bool
+			at     time.Time
+		}
+		want *time.Time
+	}{
+		{name: "hiding stamps the instant", writes: []struct {
+			hidden bool
+			at     time.Time
+		}{{true, first}}, want: &first},
+		{name: "hiding again re-stamps the latest hide", writes: []struct {
+			hidden bool
+			at     time.Time
+		}{{true, first}, {true, second}}, want: &second},
+		{name: "showing clears the instant", writes: []struct {
+			hidden bool
+			at     time.Time
+		}{{true, first}, {false, second}}, want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+
+			// Act
+			for _, w := range tt.writes {
+				if err := s.SetHidden(context.Background(), ws.ID, w.hidden, w.at); err != nil {
+					t.Fatalf("SetHidden(%v): %v", w.hidden, err)
+				}
+			}
+
+			// Assert
+			got, err := s.Workspace(context.Background(), ws.ID)
+			if err != nil {
+				t.Fatalf("Workspace: %v", err)
+			}
+			if (got.HiddenAt == nil) != (tt.want == nil) || got.HiddenAt != nil && !got.HiddenAt.Equal(*tt.want) {
+				t.Fatalf("hidden at = %v, want %v", got.HiddenAt, tt.want)
+			}
+		})
+	}
+}
+
+func TestAHiddenRowWithNoHideInstantIsCorrupt(t *testing.T) {
+	// Arrange: a row hidden with no instant, which no write path produces.
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	if _, err := s.db().Exec(`UPDATE workspaces SET hidden = 1, hidden_at = NULL WHERE id = ?`, ws.ID); err != nil {
+		t.Fatalf("corrupting the row: %v", err)
+	}
+
+	// Act
+	_, err := s.Workspace(context.Background(), ws.ID)
+
+	// Assert
+	var decode *DecodeError
+	if !errors.As(err, &decode) || decode.Field != "hidden_at" {
+		t.Fatalf("Workspace = %v, want a hidden_at DecodeError", err)
+	}
+}
+
+func TestSetCurrentStampsTheDwellOfTheWorkspaceLeft(t *testing.T) {
+	tests := []struct {
+		name      string
+		held      time.Duration
+		reselect  bool
+		wantDwelt bool
+	}{
+		{name: "a workspace held for the threshold is dwelt on", held: DwellThreshold, wantDwelt: true},
+		{name: "a workspace held longer is dwelt on", held: time.Minute, wantDwelt: true},
+		{name: "a workspace held a moment is not", held: DwellThreshold - time.Millisecond, wantDwelt: false},
+		{name: "a re-selection leaves no dwell", held: time.Minute, reselect: true, wantDwelt: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			left := testWorkspace(t, s)
+			next := testWorkspace(t, s)
+			if err := s.SetCurrent(context.Background(), left.ID, instant); err != nil {
+				t.Fatalf("SetCurrent: %v", err)
+			}
+			target := next.ID
+			if tt.reselect {
+				target = left.ID
+			}
+			switchAt := instant.Add(tt.held)
+
+			// Act
+			if err := s.SetCurrent(context.Background(), target, switchAt); err != nil {
+				t.Fatalf("SetCurrent: %v", err)
+			}
+
+			// Assert
+			got, err := s.Workspace(context.Background(), left.ID)
+			if err != nil {
+				t.Fatalf("Workspace: %v", err)
+			}
+			if (got.DweltAt != nil) != tt.wantDwelt || got.DweltAt != nil && !got.DweltAt.Equal(switchAt) {
+				t.Fatalf("dwelt at = %v, want dwelt %v at %v", got.DweltAt, tt.wantDwelt, switchAt)
+			}
+		})
+	}
+}
+
 func TestSetHiddenRefusesAnUnknownWorkspace(t *testing.T) {
 	// Arrange
 	s, log := testStore(t)
 
 	// Act
-	err := s.SetHidden(context.Background(), WorkspaceID("no-such-workspace"), true)
+	err := s.SetHidden(context.Background(), WorkspaceID("no-such-workspace"), true, time.Unix(1_700_000_000, 0))
 
 	// Assert
 	if !errors.Is(err, ErrNotFound) {

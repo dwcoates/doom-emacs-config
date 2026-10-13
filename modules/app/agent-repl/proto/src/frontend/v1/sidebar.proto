@@ -985,7 +985,9 @@ message RosterRowCurrent {
 // finished work — never when it was last VIEWED, so it is STABLE across mere
 // selection and navigation, and it does not reset when a new turn starts. The
 // daemon's precedence is: MERGED wins ("the workspace is done" is the more
-// interesting fact); else TURN_ENDED (the last turn close); else CREATED (a
+// interesting fact); else HIDDEN (a workspace in the hidden section counts from
+// when it was hidden, owner request 2026-10-13); else TURN_ENDED (the last
+// turn close); else CREATED (a
 // registered workspace always has a creation time, and a workspace whose
 // first turn is still running has no turn end yet). The client renders
 // whichever arm arrives and applies no precedence of its own.
@@ -1010,7 +1012,14 @@ message RosterRowWhen {
     RosterRowWhenMerged merged = 2;
     RosterRowWhenCreated created = 4;
     RosterRowWhenTurnEnded turn_ended = 5;
+    RosterRowWhenHidden hidden = 7;
   }
+}
+
+// When the workspace was moved into the hidden section, in epoch
+// MILLISECONDS. Set for exactly the rows the hidden section draws.
+message RosterRowWhenHidden {
+  int64 at_ms = 1;
 }
 
 // When the workspace's merge settled, in epoch MILLISECONDS.

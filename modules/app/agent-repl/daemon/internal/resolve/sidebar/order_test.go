@@ -462,8 +462,7 @@ func TestTheTabBarLeavesOutClosedWorkspaces(t *testing.T) {
 func TestTheTabBarWithholdsAHiddenWorkspace(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)
-	hidden := placed(workspace("w-h", "hidden"), 1)
-	hidden.Hidden = true
+	hidden := placed(hiddenWorkspace("w-h", "hidden"), 1)
 
 	// Act.
 	r.SetRegistry(registry(hidden))
@@ -495,7 +494,7 @@ func TestTheTabBarDrawsAMergedWorkspaceEvenWhenHidden(t *testing.T) {
 	r, _ := newResolver(t)
 	merged := placed(workspace("w-m", "merged"), 1)
 	merged.MergedAt = at(0)
-	merged.Hidden = true
+	merged = hiddenAt(merged, 0)
 
 	// Act.
 	r.SetRegistry(registry(merged))
@@ -520,5 +519,56 @@ func TestTheTabBarWithholdsAMergedWorkspaceOfACollapsedRepository(t *testing.T) 
 	// Assert.
 	if got := tabIDsOf(latest(t, r)); !equal(got, []string{"w-m:collapsed"}) {
 		t.Fatalf("tab bar = %v, want the merged tab withheld", got)
+	}
+}
+
+func TestSortHiddenNewestFirst(t *testing.T) {
+	// Arrange: hide order disagrees with place.
+	in := []wsm.Workspace{
+		hiddenAt(placed(workspace("w1", "first"), 1), 0),
+		hiddenAt(placed(workspace("w2", "second"), 2), 2*time.Hour),
+		hiddenAt(placed(workspace("w3", "third"), 3), time.Hour),
+	}
+
+	// Act.
+	got := sidebar.SortHiddenNewestFirst(in)
+
+	// Assert.
+	var names []string
+	for _, ws := range got {
+		names = append(names, ws.Name)
+	}
+	if !equal(names, []string{"second", "third", "first"}) {
+		t.Fatalf("order = %v, want the latest hide first", names)
+	}
+}
+
+func TestSortHiddenNewestFirstRefusesARowWithNoHideInstant(t *testing.T) {
+	// Arrange.
+	defer func() {
+		// Assert.
+		if recover() == nil {
+			t.Fatal("a hidden row with no hide instant was sorted, not refused")
+		}
+	}()
+
+	// Act.
+	sidebar.SortHiddenNewestFirst([]wsm.Workspace{workspace("w1", "unstamped")})
+}
+
+func TestTheHiddenSectionListsTheLatestHideFirst(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+
+	// Act.
+	r.SetRegistry(registry(
+		hiddenAt(placed(workspace("w1", "early"), 1), 0),
+		hiddenAt(placed(workspace("w2", "late"), 2), time.Hour),
+	))
+
+	// Assert.
+	got := rowNames(latest(t, r).GetHidden().GetRows().GetRows())
+	if !equal(got, []string{"late", "early"}) {
+		t.Fatalf("hidden rows = %v, want the latest hide first", got)
 	}
 }
