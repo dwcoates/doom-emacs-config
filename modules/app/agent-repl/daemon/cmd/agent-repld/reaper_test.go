@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -135,5 +136,40 @@ func TestARefusedReaperKnobIsABootFatalRecordedAtError(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("records = %v, want the refusal at ERROR", log.Records())
+	}
+}
+
+func TestTheWorktreeLockIsTheReapLockInTheRunDir(t *testing.T) {
+	// Act
+	got := worktreeLockPath("/run/agent-repl")
+
+	// Assert
+	if got != "/run/agent-repl/worktree-reap.lock" {
+		t.Fatalf("worktreeLockPath = %q, want the reap lock in the run dir", got)
+	}
+}
+
+// TestTheWorktreeLockSitesShareOnePath fails a site that spells the worktree
+// lock's path by hand: the reaper and the merge workspace sweep exclude each
+// other only while both name the same file.
+func TestTheWorktreeLockSitesShareOnePath(t *testing.T) {
+	// Arrange
+	var text strings.Builder
+	for _, name := range []string{"reaper.go", "graph.go"} {
+		src, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		text.Write(src)
+	}
+
+	// Act
+	shared := strings.Count(text.String(), "worktreeLockPath(")
+	byHand := strings.Count(text.String(), "worktreeReapLockName)")
+
+	// Assert: the helper's definition, the reaper and the merge workspace
+	// sweep.
+	if shared != 3 || byHand != 1 {
+		t.Fatalf("the worktree lock is named through the helper %d times and by hand %d times, want 3 and 1 (the helper's own body)", shared, byHand)
 	}
 }

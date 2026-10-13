@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"agent-repld/internal/account"
@@ -37,7 +38,7 @@ func mergeWorkspaceSpec(t *testing.T, f *fixture, requester ids.WorkspaceID) Cre
 		RepoDir:   mainWorktree(t, f),
 		BaseRef:   "ABC/sample",
 		ForkFrom:  &requester,
-		MergeOf:   &wsm.MergeOrigin{Requester: requester, Request: "request-1"},
+		MergeOf:   &wsm.MergeOrigin{Requester: requester, Request: "request-1", ForkHead: "fork-head"},
 		MergeName: "reconnect-fix",
 	}
 }
@@ -116,7 +117,7 @@ func TestCreateLandsAMergeWorkspaceWhereItsRequesterWould(t *testing.T) {
 		t.Fatalf("job = %+v, want the requester's target, actions and branch as base", job)
 	}
 	facts := f.db.registered[len(f.db.registered)-1]
-	want := wsm.MergeOrigin{Requester: requester.ID, Request: "request-1"}
+	want := wsm.MergeOrigin{Requester: requester.ID, Request: "request-1", ForkHead: "fork-head"}
 	if facts.ParentBranch != "master" || facts.Parent == nil || *facts.Parent != requester.ID || facts.MergeOf == nil || *facts.MergeOf != want {
 		t.Fatalf("registered = %+v, want parent branch master, parent and merge origin the requester's", facts)
 	}
@@ -131,6 +132,7 @@ func TestCreateRefusesAContradictoryMergeWorkspaceSpecWithNothingBuilt(t *testin
 		{name: "a name", alter: func(spec *CreateSpec) { spec.Name = "chosen" }},
 		{name: "no fork", alter: func(spec *CreateSpec) { spec.ForkFrom = nil }},
 		{name: "a one-shot", alter: func(spec *CreateSpec) { spec.OneShot = true }},
+		{name: "no fork head", alter: func(spec *CreateSpec) { spec.MergeOf.ForkHead = "" }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -187,16 +189,58 @@ func TestCreateMergeWorkspaceForksInTheRequestersRepository(t *testing.T) {
 	}
 
 	// Assert: forked from the requester under the name its request reserved,
-	// cut from its branch, recorded as its merge workspace.
+	// cut at its branch's tip, recorded as its merge workspace with that tip as
+	// its fork head.
 	facts := f.db.registered[len(f.db.registered)-1]
-	if facts.MergeOf == nil || *facts.MergeOf != origin || len(f.account.ported) != 1 {
+	want := wsm.MergeOrigin{Requester: requester.ID, Request: "request-1", ForkHead: "sha-of-refs/heads/ABC/sample"}
+	if facts.MergeOf == nil || *facts.MergeOf != want || len(f.account.ported) != 1 {
 		t.Fatalf("registered %+v with %d ported transcripts, want the requester's fork", facts, len(f.account.ported))
 	}
 	if job := f.db.putJobs[len(f.db.putJobs)-1]; job.BaseRef != "ABC/sample" {
 		t.Fatalf("base = %q, want the requester's branch", job.BaseRef)
 	}
-	if len(f.git.created) != 1 || f.git.created[0].RepoDir != repoDir {
-		t.Fatalf("created = %+v, want the worktree cut in the requester's repository", f.git.created)
+	if len(f.git.created) != 1 || f.git.created[0].RepoDir != repoDir || f.git.created[0].BaseRef != want.ForkHead {
+		t.Fatalf("created = %+v, want the worktree cut at the fork head in the requester's repository", f.git.created)
+	}
+}
+
+func TestCreateCutsAMergeWorkspaceAtItsForkHeadAndKeepsTheBranchAsItsBase(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	requester, _ := mergeRequester(t, f)
+
+	// Act
+	if _, err := f.verbs.Create(context.Background(), mergeWorkspaceSpec(t, f, requester.ID)); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert
+	if len(f.git.created) != 1 || f.git.created[0].BaseRef != "fork-head" {
+		t.Fatalf("created = %+v, want the worktree cut at the fork head", f.git.created)
+	}
+	if job := f.db.putJobs[len(f.db.putJobs)-1]; job.BaseRef != "ABC/sample" {
+		t.Fatalf("base = %q, want the requester's branch", job.BaseRef)
+	}
+}
+
+func TestCreateMergeWorkspaceFailsLoudlyWhenTheBranchDoesNotResolve(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	requester, _ := mergeRequester(t, f)
+	mainWorktree(t, f)
+	requester.Repo = f.db.repositories[len(f.db.repositories)-1].ID
+	f.db.with(requester)
+	f.git.resolveErr = errors.New("fatal: not a valid ref")
+
+	// Act
+	_, err := f.verbs.CreateMergeWorkspace(context.Background(), requester, wsm.MergeOrigin{Requester: requester.ID, Request: "request-1"}, "reconnect-fix", "ABC/sample")
+
+	// Assert
+	if err == nil || len(f.git.created) != 0 || len(f.db.putJobs) != 0 {
+		t.Fatalf("CreateMergeWorkspace = %v with %d worktrees and %d jobs, want an error with nothing built", err, len(f.git.created), len(f.db.putJobs))
+	}
+	if !loggedAtError(f, opCreate) {
+		t.Fatal("the unresolved branch was not recorded at ERROR")
 	}
 }
 

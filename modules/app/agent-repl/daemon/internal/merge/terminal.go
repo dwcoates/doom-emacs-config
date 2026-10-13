@@ -128,6 +128,14 @@ func (o *orchestrator) handBack(ctx context.Context, ws ids.WorkspaceID, out Det
 	// are published for the merge workspace alone, so this is the only word
 	// of the end the requester's one-shot outcome gets.
 	o.deps.Sidebar.SetDetachedMergeEnded(requester, out.Kind == DetachedLanded)
+	// AN END SOMEBODY ASKED FOR IS NOT A FAILURE: the bubble and the roster
+	// say the merge ended, and neither is the merge workspace revealed nor the
+	// requester's agent prompted to deal with it.
+	if out.Requested {
+		o.log(ctx, ws).Info("daemon.merge.detached", "an async merge was taken off at an explicit request; its requester is not handed it back", dlog.Context{
+			"workspace": string(ws), "requester": string(requester), "outcome": out.Kind.String(), "summary": out.Summary})
+		return
+	}
 	if out.Kind != DetachedLanded {
 		o.reveal(ctx, ws, "its merge "+out.Kind.String())
 	}
@@ -905,7 +913,7 @@ func (o *orchestrator) publishAbandoned(ctx context.Context, ws ids.WorkspaceID,
 			})
 		o.closeReleasedBubble(ctx, ws, ledger, cause)
 	}
-	o.handBack(ctx, ws, DetachedOutcome{Kind: DetachedAbandoned, Summary: summary})
+	o.handBack(ctx, ws, DetachedOutcome{Kind: DetachedAbandoned, Summary: summary, Requested: cause.releases()})
 	// The surfaces come AFTER the terminal, in the teardown's own order: the
 	// footer leaves its merging state and the roster sheds every merge arm
 	// only once the bubble a reader is looking at has ended.
@@ -1059,7 +1067,7 @@ func (r *run) abandonTerminal(ctx context.Context, cause AbandonCause) {
 			Reason:    &frontendv1.FeedMergeError_Abandoned{Abandoned: &frontendv1.FeedMergeAbandoned{Summary: summary}},
 		})
 		r.o.closeReleasedBubble(ctx, r.ws, r.lease.ID, cause)
-		r.o.handBack(ctx, r.ws, DetachedOutcome{Kind: DetachedAbandoned, Summary: summary})
+		r.o.handBack(ctx, r.ws, DetachedOutcome{Kind: DetachedAbandoned, Summary: summary, Requested: cause.releases()})
 	})
 	// The surfaces come AFTER the terminal and the release, as a queued
 	// merge's abandon orders them: the merge never happened as far as the
