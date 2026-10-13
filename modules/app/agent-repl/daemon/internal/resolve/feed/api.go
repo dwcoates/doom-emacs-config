@@ -118,6 +118,15 @@ type Resolver interface {
 	// that reads held rows past the oldest loaded one, pushing its rows to
 	// every tail; false when nothing older can be loaded (loadthrough.go).
 	LoadOlder(ctx context.Context, ws ids.WorkspaceID) (bool, error)
+	// ReadNewest reads the root feed's newest page WHOLE for a workspace
+	// being opened (OpenTabs' conversation read): the page and the turn
+	// prompts its rows belong to, through the same loading a reader's open
+	// takes, and pushed to every tail. A page held and unmoved is not read
+	// again, and an OpenFeed after it serves the page from memory.
+	// ErrNoHistorySource: no shim is up to read from (the page is loaded for
+	// the first reader once one is); ErrHistoryUnavailable (wrapped): the
+	// read failed (book.go).
+	ReadNewest(ctx context.Context, ws ids.WorkspaceID) error
 	// SourceUp says a history source for the workspace came up (a shim
 	// client the fleet can read history through, whatever the vendor session
 	// is doing): every feed a reader opened while none was up has its newest

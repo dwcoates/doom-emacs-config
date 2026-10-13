@@ -36,6 +36,9 @@ type fakeHistory struct {
 	// readDone, when set, is sent one value after every read, so a test
 	// knows a read running off its goroutine has been answered.
 	readDone chan struct{}
+	// heads serves every page's turn heads, as a store that fills them does;
+	// false serves none, as the store did before it did.
+	heads bool
 }
 
 // historyRead is one read the resolver made.
@@ -82,7 +85,32 @@ func (f *fakeHistory) ReadHistory(_ context.Context, _ ids.WorkspaceID, target *
 	} else {
 		page.Boundary = &conversationv1.HistoryPage_More{More: &conversationv1.HistoryMore{LastEntry: book[end-1].GetAt()}}
 	}
+	if f.heads {
+		page.TurnHeads = turnHeads(book, start, end)
+	}
 	return page, nil
+}
+
+// turnHeads is the store's rule for a page of BOOK[start:end] (newest first):
+// the prompt entry of every turn an entry of the page is stamped with whose
+// prompt is placed below the page, newest first, each turn once.
+func turnHeads(book []*conversationv1.HistoryEntryAt, start, end int) []*conversationv1.HistoryEntryAt {
+	seen := map[string]bool{}
+	var heads []*conversationv1.HistoryEntryAt
+	for _, at := range book[start:end] {
+		turn := at.GetTurn().GetValue()
+		if turn == "" || seen[turn] {
+			continue
+		}
+		seen[turn] = true
+		for _, older := range book[end:] {
+			if older.GetEntry().GetUserPrompt().GetId().GetValue() == turn {
+				heads = append(heads, older)
+				break
+			}
+		}
+	}
+	return heads
 }
 
 // readCount answers how many reads were made.

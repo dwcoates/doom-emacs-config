@@ -116,6 +116,14 @@ func (r *resolver) mirrorRow(s *wsState, row *frontendv1.FeedRow) {
 	if !mirrored {
 		return
 	}
+	if row.GetEarlierSteps() != nil {
+		// A FOLD OVER THIS BOOK'S UNLOADED PAGES is about this feed's own
+		// walk: the mirror pages nothing of this book, so it never stands there.
+		r.logger(s.id).Debug("daemon.feed.mirror_skipped_earlier_steps",
+			"a mirrored turn's earlier-steps row was not mirrored; it is about this feed's own walk",
+			dlog.Context{"turn": string(turn), "row": row.GetId().GetValue()})
+		return
+	}
 	fields := dlog.Context{"turn": string(turn), "row": row.GetId().GetValue(), "mirror_workspace": string(m.Workspace)}
 	ref, err := r.deps.Decode(row.GetId())
 	if err != nil {

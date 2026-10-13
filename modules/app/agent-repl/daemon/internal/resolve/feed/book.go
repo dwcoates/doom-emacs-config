@@ -102,6 +102,9 @@ type bookState struct {
 	// entry lies on an unloaded page is not drawn until that page is), oldest
 	// first. Each later load draws the ones its page made whole.
 	pending []*conversationv1.HistoryEntryAt
+	// gaps are the earlier-steps rows this book's loads drew under the turn
+	// heads they drew, by turn, until a load meets the head itself (heads.go).
+	gaps map[ids.TurnID]gapRow
 }
 
 // lowest is the oldest bound, "" when nothing was loaded.
@@ -148,6 +151,8 @@ type pageLoad struct {
 	// outcomes tallies what became of each entry the load replayed, by
 	// entry kind and outcome (outcomes.go).
 	outcomes entryOutcomes
+	// heads counts the turn heads whose prompts this load drew (heads.go).
+	heads int
 }
 
 // noteDrawn records one row a load drew in its feed, and reports whether it is
@@ -400,6 +405,7 @@ func (r *resolver) load(ctx context.Context, plan loadPlan) (loaded, error) {
 			"feed": f.key, "agent": plan.target.GetValue(), "newest": plan.newest,
 			"entries": len(entries), "floor": f.book.floor, "drew_rows": l.drew,
 			"bound": l.low, "quiet": len(l.quiet), "pending": len(f.book.pending),
+			"heads": len(page.GetTurnHeads()), "heads_drawn": l.heads, "gaps": len(f.book.gaps),
 			"outcomes": l.outcomes.String(),
 		})
 	return loaded{low: l.low, drew: l.drew}, nil
@@ -519,6 +525,35 @@ func (r *resolver) kickWaitingFeed(s *wsState, f *feedState, addr feedid.Feed, w
 // page loaded, so a reader holds those rows exactly as a page would have
 // served them. False when nothing could be loaded.
 func (r *resolver) loadPushed(ctx context.Context, ws ids.WorkspaceID, addr feedid.Feed, newest bool) (bool, error) {
+	loadedAny, err := r.loadPushedSourced(ctx, ws, addr, newest)
+	if errors.Is(err, ErrNoHistorySource) {
+		return false, nil
+	}
+	return loadedAny, err
+}
+
+// ReadNewest implements Resolver.
+func (r *resolver) ReadNewest(ctx context.Context, ws ids.WorkspaceID) error {
+	read, err := r.loadPushedSourced(ctx, ws, feedid.Feed{Root: true}, true)
+	if err != nil {
+		r.lockedLogger(ws).Info("daemon.feed.read_newest_failed",
+			"the conversation's newest page could not be read for the workspace being opened",
+			dlog.Context{"cause": err.Error()})
+		return err
+	}
+	r.mu.Lock()
+	f := r.feed(r.state(ws), feedid.Feed{Root: true})
+	heldPages, gaps := len(f.book.bounds), len(f.book.gaps)
+	r.mu.Unlock()
+	r.lockedLogger(ws).Info("daemon.feed.read_newest",
+		"the conversation's newest page is held whole for the workspace being opened; its OpenFeed serves it from memory",
+		dlog.Context{"read": read, "loaded_pages": heldPages, "gaps": gaps})
+	return nil
+}
+
+// loadPushedSourced is loadPushed answering ErrNoHistorySource when no source
+// was up to read the page from, rather than reporting nothing loaded.
+func (r *resolver) loadPushedSourced(ctx context.Context, ws ids.WorkspaceID, addr feedid.Feed, newest bool) (bool, error) {
 	mu := r.loadMu(ws)
 	mu.Lock()
 	defer mu.Unlock()
@@ -553,7 +588,7 @@ func (r *resolver) loadPushed(ctx context.Context, ws ids.WorkspaceID, addr feed
 		if plan.newest {
 			r.awaitSource(plan)
 		}
-		return false, nil
+		return false, err
 	}
 	if err != nil {
 		return false, err
