@@ -53,7 +53,7 @@
  * listens in production (the composer is host-native) and the event is
  * harmless there — it is the seam, not a promise about who is on the far end.
  */
-import { labelledControl, CONTROL_SELECTOR, type Control } from "../control.js";
+import { labelledControl, setControlsDisabled, type Control } from "../control.js";
 import { getOption } from "@bufbuild/protobuf";
 import type {
   HeldPrompt,
@@ -121,7 +121,9 @@ import { isMalformedView } from "../rpc/malformed.js";
 import { guardMalformed } from "../rpc/guard.js";
 import {
   callFailure,
+  clearRefusalsAfter,
   crossCuttingSentence,
+  drawRefusalAfter,
   refusalOf,
   type SentenceTable,
 } from "../rpc/refuse.js";
@@ -137,6 +139,9 @@ import {
   classifierRouteOf,
   type ClassifierUpdateForm,
 } from "./classifier-update.js";
+
+/** The class a held card's refusal notes carry. */
+const REFUSAL_KIND = "queued-refusal";
 
 /** The event a dropped prompt hands its text back on. */
 export const DROPPED_EVENT = "held-prompt-dropped";
@@ -868,12 +873,12 @@ async function rowCall(
   attempt: () => Promise<RowRefusal | null>,
 ): Promise<boolean> {
   const row = button.parentElement;
-  clearRowRefusal(row);
-  setRowDisabled(row, true);
+  clearRefusalsAfter(row, REFUSAL_KIND);
+  setControlsDisabled(row, true);
   try {
     const refused = await attempt();
     if (refused === null) return true;
-    drawRowRefusal(row, refused.arm, refused.say);
+    drawRefusalAfter(row, REFUSAL_KIND, refused.arm, refused.say);
     log.warn(`${rpc} refused a ${action}`, {
       operation: "held.held-prompt.action-refused",
       context: { turn, action, arm: refused.arm, sentence: refused.say },
@@ -884,7 +889,7 @@ async function rowCall(
     // this renderer could not read the answer. It travels up loudly rather
     // than being drawn as "could not be reached", which would be a lie.
     if (isMalformedView(err)) throw err;
-    drawRowRefusal(row, "error", "the daemon could not be reached");
+    drawRefusalAfter(row, REFUSAL_KIND, "error", "the daemon could not be reached");
     log.error(`${rpc} failed for a ${action}: ${String(err)}`, {
       operation: "held.held-prompt.action-failed",
       context: { turn, action, cause: err },
@@ -896,7 +901,7 @@ async function rowCall(
       row !== null &&
       row.parentElement?.querySelector(".queued-refusal") != null
     ) {
-      setRowDisabled(row, false);
+      setControlsDisabled(row, false);
     }
   }
 }
@@ -1058,7 +1063,7 @@ async function beginEdit(spec: ActionSpec, button: Control): Promise<void> {
     operation: "held.held-prompt.edit",
     context: { turn: spec.turn.value },
   });
-  setRowDisabled(row, true);
+  setControlsDisabled(row, true);
   try {
     let response;
     try {
@@ -1121,7 +1126,7 @@ async function beginEdit(spec: ActionSpec, button: Control): Promise<void> {
       }
     }
   } finally {
-    setRowDisabled(row, false);
+    setControlsDisabled(row, false);
   }
 }
 
@@ -1200,31 +1205,6 @@ function handBackDroppedText(
   button.dispatchEvent(
     new CustomEvent(DROPPED_EVENT, { detail, bubbles: true }),
   );
-}
-
-function setRowDisabled(row: Element | null, disabled: boolean): void {
-  if (row === null) return;
-  for (const control of row.querySelectorAll<Control>(CONTROL_SELECTOR))
-    control.disabled = disabled;
-}
-
-function drawRowRefusal(
-  row: Element | null,
-  arm: string,
-  message: string,
-): void {
-  if (row === null) return;
-  const refusal = document.createElement("div");
-  refusal.className = "refusal queued-refusal";
-  refusal.setAttribute("data-arm", arm);
-  refusal.textContent = message;
-  row.after(refusal);
-}
-
-function clearRowRefusal(row: Element | null): void {
-  row?.parentElement
-    ?.querySelectorAll(".queued-refusal")
-    .forEach((node) => node.remove());
 }
 
 /**

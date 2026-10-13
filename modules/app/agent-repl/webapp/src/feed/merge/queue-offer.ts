@@ -17,7 +17,7 @@
  *
  * THE HEADLINE IS THE DAEMON'S SENTENCE, drawn verbatim.
  */
-import { labelledControl, CONTROL_SELECTOR, type Control } from "../../control.js";
+import { labelledControl, setControlsDisabled, type Control } from "../../control.js";
 import type { FeedMergeQueueOffer, FeedRow } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import {
   AnswerMergeQueueOfferResponseSchema,
@@ -28,11 +28,14 @@ import type { AppContext } from "../../rpc/context.js";
 import { callUnary } from "../../rpc/unary.js";
 import { isMalformedView } from "../../rpc/malformed.js";
 import { guardMalformed } from "../../rpc/guard.js";
-import { crossCuttingSentence } from "../../rpc/refuse.js";
+import { clearRefusalsAfter, crossCuttingSentence, drawRefusalAfter } from "../../rpc/refuse.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import type { BubbleOverlay, OverlayControls } from "../bubble.js";
 
 const PATH = "FeedMerge.queue_offer";
+
+/** The class this overlay's refusal notes carry. */
+const REFUSAL_KIND = "offer-refusal";
 
 /** The three answers the merge-queue question takes. */
 export type QueueOfferDecision = "evict" | "prioritize" | "cancel";
@@ -119,8 +122,8 @@ async function answer(
   button: Control,
 ): Promise<void> {
   const actions = button.parentElement;
-  clearRefusal(actions);
-  setDisabled(actions, true);
+  clearRefusalsAfter(actions, REFUSAL_KIND);
+  setControlsDisabled(actions, true);
   controls.dismiss();
   log.info(`answering the merge-queue question: ${decision}`, {
     operation: "merge.queue-offer.answer",
@@ -141,7 +144,7 @@ async function answer(
     if (result.case === "success") return;
     const cause = requireCase(result.value.cause, "AnswerMergeQueueOfferError.cause");
     const say = crossCuttingSentence("AnswerMergeQueueOffer", cause) ?? answerMergeQueueOfferRefusal(cause);
-    drawRefusal(actions, cause.case, say);
+    drawRefusalAfter(actions, REFUSAL_KIND, cause.case, say);
     controls.restore();
     log.warn(`AnswerMergeQueueOffer refused a ${decision}`, {
       operation: "merge.queue-offer.refused",
@@ -152,14 +155,14 @@ async function answer(
     // this renderer could not read the answer. It travels up loudly rather
     // than being drawn as "could not be reached", which would be a lie.
     if (isMalformedView(err)) throw err;
-    drawRefusal(actions, "error", "the daemon could not be reached");
+    drawRefusalAfter(actions, REFUSAL_KIND, "error", "the daemon could not be reached");
     controls.restore();
     log.error(`AnswerMergeQueueOffer failed for a ${decision}: ${String(err)}`, {
       operation: "merge.queue-offer.failed",
       context: { decision, cause: err },
     });
   } finally {
-    setDisabled(actions, false);
+    setControlsDisabled(actions, false);
   }
 }
 
@@ -180,11 +183,6 @@ function decisionArm(
   }
 }
 
-function setDisabled(actions: Element | null, disabled: boolean): void {
-  if (actions === null) return;
-  for (const control of actions.querySelectorAll<Control>(CONTROL_SELECTOR)) control.disabled = disabled;
-}
-
 /** `AnswerMergeQueueOfferError`'s cause union, narrowed to a SET arm. */
 type AnswerMergeQueueOfferCause = NonNullable<AnswerMergeQueueOfferError["cause"]> & { case: string };
 
@@ -200,17 +198,4 @@ export function answerMergeQueueOfferRefusal(cause: AnswerMergeQueueOfferCause):
       return unreachableArm("AnswerMergeQueueOfferError.cause", other.case);
     }
   }
-}
-
-function drawRefusal(actions: Element | null, arm: string, message: string): void {
-  if (actions === null) return;
-  const refusal = document.createElement("div");
-  refusal.className = "refusal offer-refusal";
-  refusal.setAttribute("data-arm", arm);
-  refusal.textContent = message;
-  actions.after(refusal);
-}
-
-function clearRefusal(actions: Element | null): void {
-  actions?.parentElement?.querySelectorAll(".offer-refusal").forEach((node) => node.remove());
 }

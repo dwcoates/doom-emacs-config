@@ -57,6 +57,26 @@ export function refusal(arm: string, text: string): HTMLElement {
   return el;
 }
 
+/**
+ * THE REFUSAL NOTE BESIDE A CARD'S CONTROLS: a `div.refusal.<KIND>` drawn as
+ * ANCHOR's next sibling, where the reader who pressed a control under ANCHOR
+ * is already looking. KIND names the card family, so each family clears only
+ * its own notes. A null ANCHOR (a card already gone) draws nothing.
+ */
+export function drawRefusalAfter(anchor: Element | null, kind: string, arm: string, text: string): void {
+  if (anchor === null) return;
+  const note = document.createElement("div");
+  note.className = `refusal ${kind}`;
+  note.setAttribute("data-arm", arm);
+  note.textContent = text;
+  anchor.after(note);
+}
+
+/** Remove every KIND refusal note drawn beside ANCHOR (`drawRefusalAfter`). */
+export function clearRefusalsAfter(anchor: Element | null, kind: string): void {
+  anchor?.parentElement?.querySelectorAll(`.${kind}`).forEach((node) => node.remove());
+}
+
 /** The one wording for a call that never landed. */
 const UNREACHABLE = "the daemon could not be reached";
 
