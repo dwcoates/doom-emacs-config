@@ -1777,8 +1777,8 @@ func TestAConflictFailsTheMergeOnlyAfterItsAttemptsOnOneCommitRunOut(t *testing.
 	admitted(t, h)
 
 	// Assert.
-	if got := h.queue.countOrigin(conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR); got != maxConflictAttempts {
-		t.Fatalf("conflict briefs = %d, want %d before the merge fails", got, maxConflictAttempts)
+	if got := h.queue.countOrigin(conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR); got != MaxConflictAttempts {
+		t.Fatalf("conflict briefs = %d, want %d before the merge fails", got, MaxConflictAttempts)
 	}
 	if got := h.footer.last(); got.State != StateFailed || got.FailedArea != "conflicts" {
 		t.Fatalf("facts = %+v, want merge failed in conflicts", got)
@@ -1838,7 +1838,7 @@ func TestAResolvedConflictStartsTheCountOver(t *testing.T) {
 	r := ledgeredRun(t, h)
 	r.subject = subject{dir: h.sourceD, branch: "feature", targetDir: h.targetD}
 	commit := commits(1)[0]
-	r.conflictCommit, r.conflictAttempts = commit.SHA, maxConflictAttempts-1
+	r.conflictCommit, r.conflictAttempts = commit.SHA, MaxConflictAttempts-1
 	p := &replay{commits: commits(1)}
 	round := r.openTab(context.Background(), TabConflicts)
 
