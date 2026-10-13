@@ -530,6 +530,11 @@ func (d *DB) applyEntry(ctx context.Context, tx *sql.Tx, base logging.Fields, r 
 		if err := d.writeTurnPrompt(ctx, tx, position, r.book.String, r); err != nil {
 			return d.refuse(fields, err)
 		}
+		// THE TURN-LINE INDEX TOO, from the place just written, so a head's
+		// `between` never misses a step that is stored.
+		if err := d.writeTurnLine(ctx, tx, position, r.book.String, r, place); err != nil {
+			return d.refuse(fields, err)
+		}
 	}
 	if err := d.recordApplied(ctx, tx, r, cursor, seq, now); err != nil {
 		return d.refuse(fields, err)
