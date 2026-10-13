@@ -826,16 +826,6 @@ export function logCorrelation(
  * mocked vendor, which is what makes an offline test a test of the shim rather
  * than of a second implementation of it.
  */
-/**
- * The vendor's session fork for this process: the real SDK's, or under `--fake`
- * the mocked vendor's, chosen by the same flag that chooses the query so a fake
- * session never forks through the real vendor.
- */
-export function forkFactory(fake: boolean, environment: ShimEnvironment): ForkVendorSession {
-  if (!fake) return forkRealSession;
-  return (spec) => Promise.resolve(forkFakeSession(environment.claudeConfigDir, spec));
-}
-
 export function queryFactory(fake: boolean, environment: ShimEnvironment, cwd: string): CreateQuery {
   // THE WORKSPACE IS TRUSTED BEFORE ANY VENDOR IS CONSTRUCTED, mocked one
   // included. This is the single place a query comes into being, so trust
@@ -892,6 +882,16 @@ export function queryFactory(fake: boolean, environment: ShimEnvironment, cwd: s
       }),
     );
   };
+}
+
+/**
+ * The vendor's session fork for this process: the real SDK's, or under `--fake`
+ * the mocked vendor's, chosen by the same flag that chooses the query so a fake
+ * session never forks through the real vendor.
+ */
+export function forkFactory(fake: boolean, environment: ShimEnvironment): ForkVendorSession {
+  if (!fake) return forkRealSession;
+  return (spec) => Promise.resolve(forkFakeSession(environment.claudeConfigDir, spec));
 }
 
 export async function main(): Promise<void> {
