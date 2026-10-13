@@ -298,12 +298,13 @@ func readsResult(arm string) bool {
 }
 
 // viewReadsResult reports whether a viewed report on arm READS the last
-// turn's result: every arm readsResult names, and `idle_async` while the
-// result is unread, because live detached work draws `idle_async` in place of
-// that unread turn end (idleArm). The user viewing that row is viewing the
+// turn's result: every arm readsResult names, and `idle_async` or
+// `async_merging` while the result is unread, because live detached work or
+// an async merge of the workspace's branch draws that arm in place of the
+// unread turn end (idleArm, asyncMergeArm). The user viewing that row is viewing the
 // finished turn, so the row comes back PARTIAL when the work ends.
 func (s *wsState) viewReadsResult(arm string) bool {
-	return readsResult(arm) || (arm == "idle_async" && s.resultUnreadNow())
+	return readsResult(arm) || ((arm == "idle_async" || arm == armAsyncMerging) && s.resultUnreadNow())
 }
 
 // turnEndArm names the turn-end arm the last close resolves to, through
@@ -409,14 +410,31 @@ type rosterState struct {
 	// renderLogs are the decision records each workspace's row last logged,
 	// fingerprinted, so a render logs only the rows that changed (repeats.go).
 	renderLogs map[string]string
+	// asyncMerges are, per repository, the workspaces whose own branch has an
+	// async merge on that repository's merge queue (SetAsyncMerges). Each
+	// repository's set is replaced WHOLE, so a merge that left the queue can
+	// never linger in it.
+	asyncMerges map[wsm.RepoKey]map[ids.WorkspaceID]struct{}
 }
 
 // newRosterState builds an empty roster accumulation.
 func newRosterState() *rosterState {
 	return &rosterState{
-		workspaces: map[ids.WorkspaceID]*wsState{},
-		divergence: map[ids.RepoID]repodivergence.Measure{},
+		workspaces:  map[ids.WorkspaceID]*wsState{},
+		divergence:  map[ids.RepoID]repodivergence.Measure{},
+		asyncMerges: map[wsm.RepoKey]map[ids.WorkspaceID]struct{}{},
 	}
+}
+
+// asyncMerging reports whether WS's own branch has an async merge on any
+// repository's merge queue.
+func (r *rosterState) asyncMerging(ws ids.WorkspaceID) bool {
+	for _, requesters := range r.asyncMerges {
+		if _, ok := requesters[ws]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // workspace resolves a workspace's live half, minting it on first sight.

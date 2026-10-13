@@ -1010,7 +1010,8 @@ Returns:
     (:merged         . "🔀")
     (:merge-failed   . "⛔")
     (:merging        . "🔄")
-    (:merge-queued   . "🕒"))
+    (:merge-queued   . "🕒")
+    (:async-merging  . "🔄"))
   "Alist mapping a render-state keyword to its indicator glyph.
 The glyph half of the render-state unification: renderers resolve a
 workspace's state through `agent-repl--ws-render-status' and look the
