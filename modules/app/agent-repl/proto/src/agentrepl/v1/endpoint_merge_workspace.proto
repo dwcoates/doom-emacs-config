@@ -130,6 +130,17 @@ message MergeWorkspaceSourceOwnBranchDetached {
     // joins the queue only once that turn ends.
     MergeWorkspaceSourceOwnBranchDetachedPick pick = 3;
   }
+  // TRUE compacts the REQUESTER's conversation once its branch lands: right
+  // after the landed handback, the daemon sends `/compact` to the requester's
+  // session through the prompt queue
+  // (conversation.v1.PromptOrigin.PROMPT_ORIGIN_MERGE_COMPACT_AFTER), so it
+  // runs behind the handback's turn and draws exactly as any compaction does
+  // (the footer's compacting status, the feed's compaction separator) with no
+  // prompt bubble for the command. A merge that fails or does not run
+  // compacts nothing. It lives on the detached run alone because only an
+  // async merge leaves its requester open and free to compact; the in-place
+  // run has no way to ask for it.
+  bool compact_after = 4;
 }
 // The whole requester branch is merged. No fields: the branch is the
 // requester's own.

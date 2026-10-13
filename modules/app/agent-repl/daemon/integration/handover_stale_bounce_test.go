@@ -83,6 +83,16 @@ func TestAHandoverWithANewerShimBuildBouncesTheAdoptedShimCleanly(t *testing.T) 
 	host := cold.WatchHost(f.ws)
 	harness.AwaitNext(t, cold.Ctx(), host, "the fresh host push")
 	daemonStream := cold.WatchDaemonStream()
+	// THE INCUMBENT HAS JUDGED ITS SHIM'S BUILD REPORT before the newer build
+	// is installed: the report arrives on its own after the session opens, and
+	// one judged after the install below reads the incumbent's own shim as
+	// stale, so the INCUMBENT bounces it and the successor adopts a shim that
+	// already runs the newer build (test run 2026-10-13: the incumbent bounced
+	// at the report, and the successor's stale-build bounce never came).
+	cold.AwaitLogRecord(cold.RunLogPath(), "the incumbent's judgement of its shim's build", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.rollout.staleness" && r.Message == "the shim runs the installed build" &&
+			r.Context["workspace"] == f.ws.GetId()
+	})
 
 	// Arrange: a newer shim build is installed. The running shim still
 	// reports the one it was spawned from.

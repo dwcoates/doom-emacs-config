@@ -44,7 +44,7 @@ func normalizeDir(dir string) (string, error) {
 // the row, so it cannot drift from the closes it summarizes: CloseTurn's one
 // write of closed_at is the only edge, and turns_by_workspace keeps the MAX an
 // index range.
-const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at, result_end, result_read, hidden, hidden_at, dwelt_at, merge_of, merge_request_id, merge_fork_head, landed_head, landed_at, commit_count, place, merge_revealed, ` +
+const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at, result_end, result_read, hidden, hidden_at, dwelt_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, landed_head, landed_at, commit_count, place, merge_revealed, ` +
 	`EXISTS (SELECT 1 FROM creation_jobs WHERE creation_jobs.workspace_id = workspaces.id AND creation_jobs.one_shot = 1), ` +
 	`EXISTS (SELECT 1 FROM merge_queue WHERE merge_queue.workspace_id = workspaces.id ` +
 	`OR merge_queue.workspace_id IN (SELECT merge_ws.id FROM workspaces AS merge_ws WHERE merge_ws.merge_of = workspaces.id)), ` +
@@ -68,6 +68,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		mergeOf  sql.NullString
 		request  sql.NullString
 		forkHead sql.NullString
+		compact  bool
 		landHead sql.NullString
 		landAt   sql.NullInt64
 		commits  sql.NullInt64
@@ -75,16 +76,18 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		hiddenAt sql.NullInt64
 		dweltAt  sql.NullInt64
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &hiddenAt, &dweltAt, &mergeOf, &request, &forkHead, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &ws.OneShot, &ws.MergePending, &ended); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &hiddenAt, &dweltAt, &mergeOf, &request, &forkHead, &compact, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &ws.OneShot, &ws.MergePending, &ended); err != nil {
 		return Workspace{}, err
 	}
 	if mergeOf.Valid != request.Valid {
 		return Workspace{}, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "merge_of", Err: errors.New("a merge workspace records both its requester and its request")}
 	}
 	if mergeOf.Valid {
-		ws.MergeOf = &MergeOrigin{Requester: WorkspaceID(mergeOf.String), Request: DetachedMergeID(request.String), ForkHead: forkHead.String}
+		ws.MergeOf = &MergeOrigin{Requester: WorkspaceID(mergeOf.String), Request: DetachedMergeID(request.String), ForkHead: forkHead.String, CompactAfter: compact}
 	} else if forkHead.Valid {
 		return Workspace{}, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "merge_fork_head", Err: errors.New("only a merge workspace records a fork head")}
+	} else if compact {
+		return Workspace{}, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "merge_compact_after", Err: errors.New("only a merge workspace compacts its requester after it lands")}
 	}
 	landed, err := decodeLanding(ws.ID, landHead, landAt)
 	if err != nil {
@@ -215,7 +218,9 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 			MergeOf:      facts.MergeOf,
 		}
 		var mergeOf, request, forkHead any
+		compactAfter := false
 		if out.MergeOf != nil {
+			compactAfter = out.MergeOf.CompactAfter
 			mergeOf, request = string(out.MergeOf.Requester), string(out.MergeOf.Request)
 			if out.MergeOf.ForkHead != "" {
 				forkHead = out.MergeOf.ForkHead
@@ -226,9 +231,9 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 			return err
 		}
 		_, err = tx.ExecContext(ctx,
-			`INSERT INTO workspaces (id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, is_current, last_selected_at, merged_at, serving_instance, created_at, merge_of, merge_request_id, merge_fork_head, place)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, NULL, 0, NULL, NULL, NULL, ?, ?, ?, ?, ?)`,
-			out.ID, out.Repo, out.Dir, out.Name, out.Branch, out.ParentBranch, nullWorkspace(out.Parent), priority, nanos(out.CreatedAt), mergeOf, request, forkHead, out.Place)
+			`INSERT INTO workspaces (id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, is_current, last_selected_at, merged_at, serving_instance, created_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, place)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, NULL, 0, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?)`,
+			out.ID, out.Repo, out.Dir, out.Name, out.Branch, out.ParentBranch, nullWorkspace(out.Parent), priority, nanos(out.CreatedAt), mergeOf, request, forkHead, compactAfter, out.Place)
 		if err != nil {
 			return err
 		}

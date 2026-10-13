@@ -59,7 +59,13 @@ type Workspaces interface {
 	RetireLanded(ctx context.Context, ws ids.WorkspaceID) (string, error)
 }
 
-// Prompts submits the handback to the requester's session.
+// CompactCommand is what a requester whose detached merge landed and asked to
+// compact after it is sent (MergeOrigin.CompactAfter): the vendor's own
+// /compact, recognized by the prompt handler as the context cut it is.
+const CompactCommand = "/compact"
+
+// Prompts submits the handback, and a compaction asked for after a landing, to
+// the requester's session.
 type Prompts interface {
 	Submit(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, idempotencyKey string, origin conversationv1.PromptOrigin, delivery wsm.Delivery, target *feedid.Ref) (prompthandler.Outcome, error)
 }
@@ -77,8 +83,12 @@ type Deps struct {
 	Feed       Feed
 	// Briefs loads and splices a brief at use time.
 	Briefs merge.BriefLoader
-	Log    dlog.Surfaces
-	Now    func() time.Time
+	// MintKey mints an idempotency key for one submission
+	// (prompthandler.MintKey): every handback, and every compaction after a
+	// landing, is its own submission.
+	MintKey func(prefix string) (string, error)
+	Log     dlog.Surfaces
+	Now     func() time.Time
 	// WorktreeLock is the landed-worktree reaper's kernel lock
 	// (worktreereap.Deps.LockPath). The requesters are retired under it, so
 	// the reaper never judges a worktree a retirement is removing.
@@ -97,12 +107,19 @@ func New(deps Deps) *Service {
 	return &Service{deps: deps}
 }
 
-// Fork answers the merge workspace forked for REQUEST, creating it when none is
-// registered: a restart that cut a hand-off short finds the one it forked.
-func (s *Service) Fork(ctx context.Context, requester wsm.Workspace, request wsm.DetachedMergeID, name, base string) (wsm.Workspace, error) {
+// Fork answers the merge workspace forked for ORIGIN's request, creating it
+// when none is registered: a restart that cut a hand-off short finds the one
+// it forked. ORIGIN names REQUESTER as its requester; one that names another
+// is a defect in the caller, and refused.
+func (s *Service) Fork(ctx context.Context, requester wsm.Workspace, origin wsm.MergeOrigin, name, base string) (wsm.Workspace, error) {
 	log := s.deps.Log.Global()
-	fields := dlog.Context{"requester": string(requester.ID), "request": string(request), "name": name, "base": base}
-	existing, found, err := s.deps.DB.MergeWorkspaceFor(ctx, request)
+	fields := dlog.Context{"requester": string(requester.ID), "request": string(origin.Request), "name": name, "base": base, "compact_after": origin.CompactAfter}
+	if origin.Requester != requester.ID {
+		err := fmt.Errorf("mergeworkspace: a fork for %s names %s as its requester", requester.ID, origin.Requester)
+		log.Error(op, "a detached merge's fork names another requester than the workspace it forks", withCause(fields, err))
+		return wsm.Workspace{}, err
+	}
+	existing, found, err := s.deps.DB.MergeWorkspaceFor(ctx, origin.Request)
 	if err != nil {
 		log.Error(op, "could not read whether a detached merge's workspace was already forked", withCause(fields, err))
 		return wsm.Workspace{}, err
@@ -113,7 +130,7 @@ func (s *Service) Fork(ctx context.Context, requester wsm.Workspace, request wsm
 		return existing, nil
 	}
 	// Create records its own failures at their site.
-	created, err := s.deps.Workspaces.CreateMergeWorkspace(ctx, requester, wsm.MergeOrigin{Requester: requester.ID, Request: request}, name, base)
+	created, err := s.deps.Workspaces.CreateMergeWorkspace(ctx, requester, origin, name, base)
 	if err != nil {
 		return wsm.Workspace{}, err
 	}
@@ -132,6 +149,10 @@ func (s *Service) Reveal(ctx context.Context, mergeWS ids.WorkspaceID) (bool, er
 // deferred prompt, so it never interrupts a running turn, whose first line is
 // the feed's handback badge. MERGEWS is the zero value when the merge workspace
 // was never forked.
+//
+// A LANDED MERGE THAT ASKED TO COMPACT AFTER (MergeOrigin.CompactAfter) is
+// followed by the requester's compaction, submitted right after the handback
+// down the same one delivery path, so it runs behind the handback's turn.
 func (s *Service) HandBack(ctx context.Context, requester ids.WorkspaceID, mergeWS wsm.Workspace, out merge.DetachedOutcome) error {
 	log := s.deps.Log.Global()
 	fields := dlog.Context{"requester": string(requester), "merge_workspace": string(mergeWS.ID), "outcome": out.Kind.String(), "branch": out.Branch}
@@ -145,7 +166,7 @@ func (s *Service) HandBack(ctx context.Context, requester ids.WorkspaceID, merge
 		log.Error(op, "could not compose a detached merge's handback; its requester is not told", withCause(fields, err))
 		return err
 	}
-	key, err := handbackKey()
+	key, err := s.deps.MintKey("merge-handback")
 	if err != nil {
 		log.Error(op, "could not mint a detached merge handback's idempotency key; its requester is not told", withCause(fields, err))
 		return err
@@ -161,6 +182,36 @@ func (s *Service) HandBack(ctx context.Context, requester ids.WorkspaceID, merge
 	}
 	fields["turn"] = string(outcome.Turn)
 	log.Info(op, "handed a detached merge's outcome back to its requester", fields)
+	if out.Kind == merge.DetachedLanded && mergeWS.MergeOf != nil && mergeWS.MergeOf.CompactAfter {
+		return s.compactAfter(ctx, requester, fields)
+	}
+	return nil
+}
+
+// compactAfter sends REQUESTER's session /compact once its detached merge has
+// landed and been handed back. It goes through the same prompt path the
+// handback took, which recognizes it as the context cut it is: held behind
+// the handback's turn, drawn with no prompt bubble, and shown as any
+// compaction is.
+func (s *Service) compactAfter(ctx context.Context, requester ids.WorkspaceID, handback dlog.Context) error {
+	log := s.deps.Log.Global()
+	fields := dlog.Context{"handback_turn": handback["turn"]}
+	for _, k := range []string{"requester", "merge_workspace", "branch"} {
+		fields[k] = handback[k]
+	}
+	key, err := s.deps.MintKey("merge-compact-after")
+	if err != nil {
+		log.Error(op, "could not mint the idempotency key of a landed merge's compaction; its requester is not compacted", withCause(fields, err))
+		return err
+	}
+	outcome, err := s.deps.Prompts.Submit(ctx, requester, feed.SaidText(CompactCommand), key,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_COMPACT_AFTER, wsm.DeliveryDeferred, nil)
+	if err != nil {
+		log.Error(op, "could not submit the compaction a landed merge asked for; its requester is not compacted", withCause(fields, err))
+		return err
+	}
+	fields["turn"] = string(outcome.Turn)
+	log.Info(op, "submitted the compaction a landed detached merge asked for to its requester", fields)
 	return nil
 }
 
@@ -200,12 +251,6 @@ func handbackText(mergeWS wsm.Workspace, out merge.DetachedOutcome) (string, str
 			fmt.Sprintf("It did not run: %s.", out.Summary), nil
 	}
 	return "", "", fmt.Errorf("mergeworkspace: undeclared detached merge outcome %s", out.Kind)
-}
-
-// handbackKey mints a handback's idempotency key: every ending is its own
-// report.
-func handbackKey() (string, error) {
-	return prompthandler.MintKey("merge-handback")
 }
 
 // Run sweeps for idle merge workspaces at once and then on every TICK, until

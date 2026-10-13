@@ -407,7 +407,18 @@ type MergeWorkspaceSourceOwnBranchDetached struct {
 	//
 	//	*MergeWorkspaceSourceOwnBranchDetached_WholeBranch
 	//	*MergeWorkspaceSourceOwnBranchDetached_Pick
-	Content       isMergeWorkspaceSourceOwnBranchDetached_Content `protobuf_oneof:"content"`
+	Content isMergeWorkspaceSourceOwnBranchDetached_Content `protobuf_oneof:"content"`
+	// TRUE compacts the REQUESTER's conversation once its branch lands: right
+	// after the landed handback, the daemon sends `/compact` to the requester's
+	// session through the prompt queue
+	// (conversation.v1.PromptOrigin.PROMPT_ORIGIN_MERGE_COMPACT_AFTER), so it
+	// runs behind the handback's turn and draws exactly as any compaction does
+	// (the footer's compacting status, the feed's compaction separator) with no
+	// prompt bubble for the command. A merge that fails or does not run
+	// compacts nothing. It lives on the detached run alone because only an
+	// async merge leaves its requester open and free to compact; the in-place
+	// run has no way to ask for it.
+	CompactAfter  bool `protobuf:"varint,4,opt,name=compact_after,json=compactAfter,proto3" json:"compact_after,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -472,6 +483,13 @@ func (x *MergeWorkspaceSourceOwnBranchDetached) GetPick() *MergeWorkspaceSourceO
 		}
 	}
 	return nil
+}
+
+func (x *MergeWorkspaceSourceOwnBranchDetached) GetCompactAfter() bool {
+	if x != nil {
+		return x.CompactAfter
+	}
+	return false
 }
 
 type isMergeWorkspaceSourceOwnBranchDetached_Content interface {
@@ -1530,11 +1548,12 @@ const file_agentrepl_v1_endpoint_merge_workspace_proto_rawDesc = "" +
 	"\bdetached\x18\x03 \x01(\v23.agentrepl.v1.MergeWorkspaceSourceOwnBranchDetachedH\x00R\bdetachedB\x05\n" +
 	"\x03runJ\x04\b\x01\x10\x02R\tkeep_open\"C\n" +
 	"$MergeWorkspaceSourceOwnBranchInPlace\x12\x1b\n" +
-	"\tkeep_open\x18\x01 \x01(\bR\bkeepOpen\"\xfa\x01\n" +
+	"\tkeep_open\x18\x01 \x01(\bR\bkeepOpen\"\x9f\x02\n" +
 	"%MergeWorkspaceSourceOwnBranchDetached\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12c\n" +
 	"\fwhole_branch\x18\x02 \x01(\v2>.agentrepl.v1.MergeWorkspaceSourceOwnBranchDetachedWholeBranchH\x00R\vwholeBranch\x12M\n" +
-	"\x04pick\x18\x03 \x01(\v27.agentrepl.v1.MergeWorkspaceSourceOwnBranchDetachedPickH\x00R\x04pickB\t\n" +
+	"\x04pick\x18\x03 \x01(\v27.agentrepl.v1.MergeWorkspaceSourceOwnBranchDetachedPickH\x00R\x04pick\x12#\n" +
+	"\rcompact_after\x18\x04 \x01(\bR\fcompactAfterB\t\n" +
 	"\acontent\"2\n" +
 	"0MergeWorkspaceSourceOwnBranchDetachedWholeBranch\"M\n" +
 	")MergeWorkspaceSourceOwnBranchDetachedPick\x12 \n" +

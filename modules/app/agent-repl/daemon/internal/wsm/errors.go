@@ -360,6 +360,11 @@ func (m MergeSource) validate() error {
 	if m.Pick != "" && (m.Kind != MergeSourceOwnBranch || m.KeepOpen) {
 		return fmt.Errorf("a pick is an own-branch merge that never keeps the requester open, not a %s source with keep_open %v", m.Kind, m.KeepOpen)
 	}
+	// COMPACT AFTER rides a detached request alone: only an async merge
+	// leaves its requester open and free to compact once it lands.
+	if m.CompactAfter && m.Detach == "" {
+		return fmt.Errorf("compact_after is a detached merge's ask, not a %s source's that runs in place", m.Kind)
+	}
 	// A PICK THAT BEGAN names its turn, and only a pick begins.
 	if (m.PickStartedAt != nil) != (m.PickTurn != "") || (m.PickStartedAt != nil && m.Pick == "") {
 		return fmt.Errorf("a begun pick records both when it began and its turn, and only a pick begins (pick %v, started %v, turn %q)", m.Pick != "", m.PickStartedAt != nil, m.PickTurn)

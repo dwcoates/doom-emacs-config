@@ -814,6 +814,8 @@ func TestApplyFileMapsEachMergeSourceOntoTheRequest(t *testing.T) {
 			want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, detached: &merge.DetachedRun{Name: "reconnect-fix"}},
 		{name: "own branch async pick", body: `[{"type":"merge","workspace":"w1","detached":true,"detached_name":"reconnect-fix","pick":" the reconnect fix "}]`,
 			want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, detached: &merge.DetachedRun{Name: "reconnect-fix", Pick: "the reconnect fix"}},
+		{name: "own branch async compact after", body: `[{"type":"merge","workspace":"w1","detached":true,"detached_name":"reconnect-fix","compact_after":true}]`,
+			want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, detached: &merge.DetachedRun{Name: "reconnect-fix", CompactAfter: true}},
 		{name: "own branch one-shot", body: `[{"type":"merge","workspace":"w1","one_shot":true}]`, want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, oneShot: true},
 		{name: "own branch kept open", body: `[{"type":"merge","workspace":"w1","keep_open":true}]`, want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, KeepOpen: true}},
 		{name: "a branch", body: `[{"type":"merge","workspace":"w1","branch":"agent-1/fix"}]`, want: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix"}},
