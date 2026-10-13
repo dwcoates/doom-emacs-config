@@ -107,10 +107,12 @@ const (
 	// and how agent-repl could avoid or resolve such links. Submitted without
 	// interrupting the running turn.
 	PromptOrigin_PROMPT_ORIGIN_LINK_UNRESOLVED PromptOrigin = 30
-	// The daemon's report to a workspace's session that a DETACHED merge it
-	// asked for has ended (agentrepl.v1.MergeWorkspaceSourceOwnBranchDetached):
-	// that the branch landed, or what failed and that the merge workspace is
-	// open for the user to finish. Submitted through the prompt queue like any
+	// The daemon's report to a workspace's session that a merge it asked for
+	// has ended: an ASYNC merge (agentrepl.v1.MergeWorkspaceAsync) that landed
+	// or failed, or a ONE-SHOT (agentrepl.v1.MergeWorkspaceOneShot) that
+	// failed — a one-shot that lands closes the workspace and is not reported.
+	// It says that the branch landed, or what failed and where the user
+	// finishes it. Submitted through the prompt queue like any
 	// submission, so it waits behind a running turn. The feed draws it as the
 	// FeedRow.merge_handback marker, never as a prompt bubble: the words are
 	// the daemon's, and the merge itself is read in its bubble.
@@ -122,18 +124,18 @@ const (
 	// through the prompt queue as a deferred prompt, so it waits behind a
 	// running turn and wakes an idle agent. Drawn as an ordinary prompt bubble.
 	PromptOrigin_PROMPT_ORIGIN_WORKSPACE_RETARGETED PromptOrigin = 32
-	// The daemon's pick brief: the first turn of an ASYNC merge workspace forked
-	// to land only some changes of its requester's branch
-	// (agentrepl.v1.MergeWorkspaceSourceOwnBranchDetachedPick). It carries the
-	// requesting agent's instruction, wrapped in the brief that tells the merge
-	// agent its worktree is on the target branch and has it cherry-pick and
-	// commit those changes. The turn is the merge's own: its rows draw under the
-	// bubble's pick tab (frontend.v1.FeedMergeTabPick), and the merge joins the
-	// queue once it ends.
+	// The daemon's resolving brief: the first turn of an ASYNC merge workspace
+	// whose request carries an instruction
+	// (agentrepl.v1.MergeWorkspaceAsync.instruction). It carries the requesting
+	// agent's instruction, wrapped in the brief that tells the merge agent its
+	// worktree is on the merge's branch and has it prepare that branch as the
+	// instruction says. The turn is the merge's own: its rows draw under the
+	// bubble's resolving tab (frontend.v1.FeedMergeTabResolving), and the merge
+	// joins the queue once it ends.
 	PromptOrigin_PROMPT_ORIGIN_MERGE_PICK PromptOrigin = 33
 	// The daemon's `/compact` of a requester whose ASYNC merge landed and asked
 	// to compact after it
-	// (agentrepl.v1.MergeWorkspaceSourceOwnBranchDetached.compact_after).
+	// (agentrepl.v1.MergeWorkspaceAsync.compact_after).
 	// Submitted through the prompt queue right after the landed handback, so it
 	// runs behind the handback's turn. It is a context cut like any `/compact`:
 	// no prompt bubble, and the compaction's status, footer and separator drawn
