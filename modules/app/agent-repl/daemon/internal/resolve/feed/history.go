@@ -99,17 +99,17 @@ func (r *resolver) replayPage(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 	for turn, m := range mirrors {
 		s.mirrorTurn(turn, m)
 	}
-	if load == nil && len(page.GetTurnHeads()) > 0 {
+	if load == nil && len(page.GetHeads()) > 0 {
 		log.Debug("daemon.feed.catch_up_heads_ignored",
 			"a watch's catch-up page carried turn heads; only a reader's load draws them",
-			dlog.Context{"agent": agent.GetValue(), "heads": len(page.GetTurnHeads())})
+			dlog.Context{"agent": agent.GetValue(), "heads": len(page.GetHeads())})
 	}
 	var withheld []*conversationv1.HistoryEntryAt
 	for i := len(all) - 1; i >= 0; i-- {
 		if i >= own {
 			// A TURN HEAD, placed below every entry of the page: drawn first,
 			// oldest first, so the page's own entries find their turns open.
-			r.replayHead(s, agent, all[i], load)
+			r.replayHead(s, agent, page.GetHeads()[i-own], load)
 			continue
 		}
 		if load != nil && r.withholds(s, all[i]) {
