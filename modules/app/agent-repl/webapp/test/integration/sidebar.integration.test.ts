@@ -77,7 +77,9 @@ describe("arm coverage", () => {
   });
 
   it.each([
-    ["mergeFailed", "turquoise"],
+    // A failed merge is green, the workspace back with the user (owner
+    // ruling, 2026-10-13); its glyph's red is an ink, not the arm's color.
+    ["mergeFailed", "green"],
     ["merging", "purple"],
   ])("paints the colored merge arm %s %s", (arm, color) => {
     expect(rosterStatusColor(arm)).toBe(color);
