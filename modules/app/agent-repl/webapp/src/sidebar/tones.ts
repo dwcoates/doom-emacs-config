@@ -155,10 +155,13 @@ export type OneShotGlyph = "target" | "failed";
  * arm's own tone: 🎯 while armed, the failure mark once it ended without a
  * live merge, exactly as the Emacs tab bar draws them. An open permission or
  * question gate outranks it, so the gate's emoji stands while the gate does.
+ * A merge the queue is on outranks it too (owner request, 2026-10-12): a
+ * merging one-shot spins the ordinary merge glyph, never its own.
  */
 export function rosterRowMark(arm: string, oneShot: OneShotGlyph | undefined): RosterArmMark {
   const mark = rosterArmMark(arm);
   if (oneShot === undefined || gateGlyph(arm) !== undefined) return mark;
+  if (armSpins(arm as RosterStatusCase)) return mark;
   return { toneClass: mark.toneClass, glyph: oneShot, char: GLYPH_CHARS[oneShot] ?? "" };
 }
 
