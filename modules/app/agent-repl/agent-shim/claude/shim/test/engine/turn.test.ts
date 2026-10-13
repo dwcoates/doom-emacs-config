@@ -60,8 +60,6 @@ interface Harness {
   submitRejects: Error | undefined;
   /** Every prompt sent to join the running turn, with the turn it joins. */
   readonly joins: { prompt: conversationv1.AgentPrompt; turn: string; into: string }[];
-  /** What `SessionContext.joiningTurn()` answers. */
-  joining: OpenTurn | undefined;
   /** When set, `SessionContext.joinRunningTurn` throws it, as a refused push does. */
   joinRejects: Error | undefined;
   /** Every store_unreachable the turn verbs reported to the session. */
@@ -134,7 +132,6 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
     persistedRejects: undefined,
     submitRejects: undefined,
     joins: [],
-    joining: undefined,
     joinRejects: undefined,
     storeFaults: [] as string[],
     storeRecoveries: [] as number[],
@@ -188,10 +185,8 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
     setOpenTurn: (turn) => {
       state.open = turn;
     },
-    joiningTurn: () => state.joining,
     joinRunningTurn: (prompt, turn, into) => {
       if (state.joinRejects !== undefined) throw state.joinRejects;
-      state.joining = turn;
       state.joins.push({ prompt, turn: turn.id.value, into: into.id.value });
     },
     releaseTurn: (turn) => {
@@ -1211,7 +1206,7 @@ describe("StartTurn joining the running turn", () => {
     expect(h.open).toBe(running);
   });
 
-  it("refuses a second join while one waits, as turn_already_open", async () => {
+  it("accepts a second join while one waits", async () => {
     // Arrange
     const h = await harness();
     openDaemonTurn(h);
@@ -1221,7 +1216,23 @@ describe("StartTurn joining the running turn", () => {
     const response = await h.turns.startTurn(joinTurn(create(conversationv1.TurnIdSchema, { value: "turn-3" })));
 
     // Assert
-    expect(failureKind(response)).toBe("turnAlreadyOpen");
+    expect(response.result.case).toBe("success");
+  });
+
+  it("sends every waiting join to join the running turn, in the order they came", async () => {
+    // Arrange
+    const h = await harness();
+    openDaemonTurn(h);
+    await h.turns.startTurn(joinTurn());
+
+    // Act
+    await h.turns.startTurn(joinTurn(create(conversationv1.TurnIdSchema, { value: "turn-3" })));
+
+    // Assert
+    expect(h.joins.map((join) => [join.turn, join.into])).toEqual([
+      ["turn-2", "turn-1"],
+      ["turn-3", "turn-1"],
+    ]);
   });
 
   it("refuses a join against a dead query as query_dead", async () => {

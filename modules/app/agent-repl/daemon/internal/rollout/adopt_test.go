@@ -1674,3 +1674,128 @@ func TestAnAdoptionWhoseMergesCannotBeTakenSaysSo(t *testing.T) {
 		t.Fatalf("records = %+v, want the failure surfaced at ERROR", h.log.Records())
 	}
 }
+
+// DAEMON.ADDR WAITS FOR EVERY ADOPTION PAST ITS SERVING CLAIM: the claim is
+// what lets the incumbent exit, and the exit is what writes the address, so a
+// client dialing it must find the workspace owned, never not_yet_adopted.
+
+// claimAdoption counts one adoption past its serving claim, as adopt does.
+func claimAdoption(h *harness) {
+	h.c.mu.Lock()
+	defer h.c.mu.Unlock()
+	h.c.beginClaimedLocked()
+}
+
+// ownClaimedAdoption retires one claimed adoption, as adopt does once owned.
+func ownClaimedAdoption(h *harness) {
+	h.c.mu.Lock()
+	defer h.c.mu.Unlock()
+	h.c.endClaimedLocked()
+}
+
+func TestDaemonAddrWaitsForAClaimedAdoptionToBeOwned(t *testing.T) {
+	// Arrange: an adoption has claimed its row, and the incumbent exits.
+	h := newHarness(t)
+	claimAdoption(h)
+	h.incumbentExits()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.c.takeOverOnClaim(context.Background(), nil, nil)
+	}()
+	awaitRecord(t, h, opAdopt, "the incumbent exited while adoptions were still finishing; daemon.addr waits for them to be owned")
+	written := h.addrWritesSoFar()
+
+	// Act
+	ownClaimedAdoption(h)
+
+	// Assert
+	<-done
+	if written != 0 || h.addrWritesSoFar() != 1 {
+		t.Fatalf("daemon.addr writes = %d before the adoption was owned and %d after, want 0 then 1", written, h.addrWritesSoFar())
+	}
+}
+
+func TestDaemonAddrIsWrittenAtOnceWithNoClaimedAdoption(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.incumbentExits()
+
+	// Act
+	h.c.takeOverOnClaim(context.Background(), nil, nil)
+
+	// Assert
+	if h.addrWritesSoFar() != 1 {
+		t.Fatalf("daemon.addr writes = %d, want 1", h.addrWritesSoFar())
+	}
+}
+
+func TestDaemonAddrIsNotWrittenWhenTheLifetimeEndsBeforeTheAdoptionIsOwned(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	claimAdoption(h)
+	h.incumbentExits()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act
+	h.c.takeOverOnClaim(ctx, nil, nil)
+
+	// Assert
+	if h.addrWritesSoFar() != 0 {
+		t.Fatalf("daemon.addr writes = %d, want none", h.addrWritesSoFar())
+	}
+	if !recordWithMessage(h, opAdopt, "debug", "the daemon's lifetime ended before the adoptions in flight were owned; daemon.addr is not written") {
+		t.Fatalf("records = %+v, want the ended wait at DEBUG", records(h.log, opAdopt))
+	}
+}
+
+func TestAClaimedAdoptionEndedWithNoneCountedPanics(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	defer func() {
+		// Assert
+		if recover() == nil {
+			t.Fatal("endClaimedLocked with none counted did not panic")
+		}
+	}()
+
+	// Act
+	ownClaimedAdoption(h)
+}
+
+func TestAClaimedAdoptionThatFailsStopsHoldingDaemonAddr(t *testing.T) {
+	// Arrange: the adoption claims its row and then fails publishing views.
+	h := newHarness(t, func(d *Deps) {
+		d.PublishViews = func(context.Context, ids.WorkspaceID) error { return errFake }
+	})
+	ws := freeLockAdoption(t, h)
+	arm(t, h, ws, Participants{})
+
+	// Act
+	h.c.mu.Lock()
+	claimed := h.c.claimedAdoptions
+	h.c.mu.Unlock()
+
+	// Assert
+	if claimed != 0 {
+		t.Fatalf("claimed adoptions = %d after the adoption failed, want 0", claimed)
+	}
+}
+
+func TestAnOwnedAdoptionStopsHoldingDaemonAddr(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	arm(t, h, ws, Participants{})
+
+	// Act
+	h.c.mu.Lock()
+	claimed := h.c.claimedAdoptions
+	h.c.mu.Unlock()
+
+	// Assert
+	if claimed != 0 {
+		t.Fatalf("claimed adoptions = %d after the adoption was owned, want 0", claimed)
+	}
+}

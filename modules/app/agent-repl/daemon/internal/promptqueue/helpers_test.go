@@ -69,6 +69,8 @@ type fakeDB struct {
 	allHeldErr error
 	// heldErr fails every standing-holds read.
 	heldErr error
+	// leaseErr fails every lease read.
+	leaseErr error
 	// openTurnsErr fails the open-turns read the judge compares against.
 	openTurnsErr error
 	// closeTurnErrs fails one turn's close each.
@@ -152,6 +154,9 @@ func (d *fakeDB) ListWorkspaces(context.Context) ([]wsm.Workspace, error) {
 func (d *fakeDB) Lease(_ context.Context, id ids.WorkspaceID) (wsm.Lease, bool, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.leaseErr != nil {
+		return wsm.Lease{}, false, d.leaseErr
+	}
 	lease, ok := d.leases[id]
 	return lease, ok, nil
 }

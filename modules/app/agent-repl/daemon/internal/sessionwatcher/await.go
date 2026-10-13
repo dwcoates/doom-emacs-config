@@ -170,18 +170,27 @@ func (w *watcher) turnEndedLocked(turn ids.TurnID, how TurnClose) {
 	w.signalFreenessLocked()
 }
 
-// standNextWaitingLocked stands the newest turn waiting behind `ended` in
-// flight, now that the turn ahead of it ended. An accepted turn takes the open
-// edges the views were not given while it waited; one still opening takes
-// them from its own OnTurnOpened. It runs BEFORE the ended turn's end reaches
-// the lifecycle sink, so the queue finds this turn running and pops nothing
-// into it.
+// standNextWaitingLocked stands the next turn waiting behind `ended` in
+// flight, now that the turn ahead of it ended: the OLDEST prompt sent to join
+// it when one waits, since the shim runs those in the order they were sent
+// (the rest of them fold into it as the vendor's prompt batch), and otherwise
+// the newest turn waiting. An accepted turn takes the open edges the views
+// were not given while it waited; one still opening takes them from its own
+// OnTurnOpened. It runs BEFORE the ended turn's end reaches the lifecycle
+// sink, so the queue finds this turn running and pops nothing into it.
 func (w *watcher) standNextWaitingLocked(ended ids.TurnID) {
 	if len(w.waiting) == 0 {
 		return
 	}
-	next := w.waiting[len(w.waiting)-1]
-	w.waiting = w.waiting[:len(w.waiting)-1]
+	at := len(w.waiting) - 1
+	for i, entry := range w.waiting {
+		if entry.joined {
+			at = i
+			break
+		}
+	}
+	next := w.waiting[at]
+	w.waiting = append(w.waiting[:at], w.waiting[at+1:]...)
 	turn := next.turn
 	w.turn = &turn
 	w.turnAccepted = next.accepted || next.adopted
