@@ -346,7 +346,7 @@ describe("mirrored facts", () => {
 });
 
 describe("notes", () => {
-  it("notes a message it cannot read and hands the note to the next answer", () => {
+  it("notes a message from another build at info and hands the note to the next answer", () => {
     // Arrange
     host.ensure("a", "http://ws-a.localhost:1/");
     fromPage("a", { channel: HOST_CHANNEL, kind: "wave" });
@@ -355,7 +355,7 @@ describe("notes", () => {
     const answer = parsed(host.ids());
 
     // Assert
-    expect(answer.notes).toEqual([expect.stringContaining("cannot read")]);
+    expect(answer.notes).toEqual([{ level: "info", text: expect.stringContaining("cannot read") as unknown }]);
   });
 
   it("notes a message on its channel from no page it holds", () => {
@@ -366,7 +366,7 @@ describe("notes", () => {
     const answer = parsed(host.ids());
 
     // Assert
-    expect(answer.notes).toEqual([expect.stringContaining("no workspace page")]);
+    expect(answer.notes).toEqual([{ level: "warn", text: expect.stringContaining("no workspace page") as unknown }]);
   });
 
   it("hands each note to one answer only", () => {
@@ -525,6 +525,23 @@ describe("warmth", () => {
 
     // Assert
     expect(posted.filter((m) => m.kind === "presence")).toEqual([]);
+  });
+
+  it("notes a page cooling at info, as what a working webhost does", () => {
+    // Arrange
+    const { host: h, at, fire } = clocked();
+    pages(h, "a", "b");
+    h.show("b");
+    h.show("a");
+    h.ids();
+
+    // Act
+    at.ms += 60 * 60_000;
+    fire();
+    const answer = parsed(h.ids());
+
+    // Assert
+    expect(answer.notes).toContainEqual({ level: "info", text: "b cold" });
   });
 
   it("leaves a page never shown cold", () => {

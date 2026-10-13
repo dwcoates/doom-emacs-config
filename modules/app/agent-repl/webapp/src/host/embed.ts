@@ -117,7 +117,9 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
     if (event.source !== host || !onHostChannel(event.data)) return;
     const message = parseHostToPage(event.data);
     if (message === null) {
-      log.warn("the host sent a message this build cannot read", {
+      // A WEBHOST FROM ANOTHER BUILD, which a rollout makes for a moment:
+      // expected, and over by itself once both run the same build.
+      log.info("the host sent a message this build cannot read", {
         operation: "page.host-message-unreadable",
         context: { message: JSON.stringify(event.data) },
       });
