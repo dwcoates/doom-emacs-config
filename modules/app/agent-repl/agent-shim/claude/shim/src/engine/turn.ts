@@ -147,18 +147,15 @@ export interface SessionContext {
   /** How long a `StartTurn` waits behind a keep-alive before refusing, loudly. */
   readonly keepaliveYieldBudgetMs: number;
   /**
-   * The prompt waiting to JOIN the running turn
-   * (`StartTurnRequest.join_running_turn`), or absence. At most one waits.
-   */
-  joiningTurn(): OpenTurn | undefined;
-  /**
    * Push `prompt` into the vendor's input as the send of `turn` while `into`,
    * the daemon's turn in the send slot, runs: no interrupt, and no rewind,
-   * since none is owed while a real turn runs. The session writes the
-   * prompt's row once the vendor decides its fate: folded into `into` at a
-   * tool boundary, or opened as its own turn the moment `into` leaves the
-   * slot. Synchronous, so nothing can take the slot between the caller's
-   * check of it and the push.
+   * since none is owed while a real turn runs. Any number of prompts may wait
+   * to join `into`, in the order they were pushed, as the vendor queues them.
+   * The session writes the prompt's row once the vendor decides its fate:
+   * folded into `into` at a tool boundary, or run once `into` leaves the slot
+   * (the first waiting prompt as its own turn, the rest folded into it as the
+   * vendor's prompt batch). Synchronous, so nothing can take the slot between
+   * the caller's check of it and the push.
    */
   joinRunningTurn(prompt: conversationv1.AgentPrompt, turn: OpenTurn, into: OpenTurn): void;
   /**
@@ -762,18 +759,6 @@ export class TurnEngine {
     agentId: conversationv1.AgentId,
     running: OpenTurn,
   ): Promise<shimv1.StartTurnResponse> {
-    const requested = request.turn?.value ?? "";
-    const waiting = this.session.joiningTurn();
-    if (waiting !== undefined) {
-      LOGGER.debug(
-        { joining_turn: waiting.id.value, requested_turn: requested, running_turn: running.id.value },
-        "refused a join because another prompt already waits to join the running turn",
-      );
-      return startTurnRefused(
-        { kind: "turnAlreadyOpen" },
-        `turn ${waiting.id.value} already waits to join turn ${running.id.value}; the daemon holds the queue and the shim never does`,
-      );
-    }
     if (this.session.query() === undefined) {
       return startTurnRefused({ kind: "queryDead" }, "the vendor query is dead; nothing can accept a prompt");
     }

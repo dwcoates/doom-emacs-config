@@ -112,6 +112,21 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) error {
 		log.Warn(op, "refused a merge request while the workspace's merge runs", withField(fields, "error", err.Error()))
 		return err
 	}
+	// AN IN-PLACE MERGE THE AGENT'S TURN ASKED FOR FLUSHES THE HELD QUEUE
+	// (owner ruling, 2026-10-12): the merge runs in this session once the
+	// turn ends, and what the user sent before then is meant to be handled
+	// before the merge, never after it. Every held prompt is sent to the shim
+	// at once to join the running turn, nothing interrupted, and the merge
+	// waits for the turn that answers them (awaitFree). The user's own ask
+	// displaces the turn in flight instead, and a detached merge never runs
+	// in this session, so neither flushes. A flush that could not read the
+	// queue refuses the request before anything of it is recorded; the queue
+	// records why.
+	if req.By == RequestedByAgent && req.Detached == nil {
+		if err := o.deps.Queue.FlushHeld(ctx, ws); err != nil {
+			return fmt.Errorf("merge: flushing the held prompts of %s before its in-place merge: %w", ws, err)
+		}
+	}
 	requestMerge := o.deps.DB.RequestMerge
 	if req.OneShot {
 		requestMerge = o.deps.DB.RequestOneShotMerge

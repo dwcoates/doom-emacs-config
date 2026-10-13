@@ -712,6 +712,19 @@ func TestTheFakeModelsAJoinAsTheRealShimDoes(t *testing.T) {
 			srv.foldTurn(MainAgentID, folded)
 			srv.settleTurn(MainAgentID, "turn-1", success)
 		}, wantInFlight: ""},
+		{name: "the oldest of two joins takes the running turn's place", act: func(srv *server) {
+			srv.openTurn(started)
+			srv.joinTurn(join)
+			srv.joinTurn(&shimv1.StartTurnRequest{Turn: &conversationv1.TurnId{Value: "turn-3"}, JoinRunningTurn: true})
+			srv.settleTurn(MainAgentID, "turn-1", success)
+		}, wantInFlight: "turn-2"},
+		{name: "the join behind the oldest takes its place once it ends", act: func(srv *server) {
+			srv.openTurn(started)
+			srv.joinTurn(join)
+			srv.joinTurn(&shimv1.StartTurnRequest{Turn: &conversationv1.TurnId{Value: "turn-3"}, JoinRunningTurn: true})
+			srv.settleTurn(MainAgentID, "turn-1", success)
+			srv.settleTurn(MainAgentID, "turn-2", success)
+		}, wantInFlight: "turn-3"},
 		{name: "a join with nothing running joins nothing", act: func(srv *server) {
 			if srv.joinTurn(join) {
 				srv.openTurn(started)

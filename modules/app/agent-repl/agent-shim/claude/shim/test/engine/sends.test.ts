@@ -386,6 +386,71 @@ describe("the send ledger", () => {
     expect(() => ledger.sent(FIRST)).toThrow(/registered twice/);
   });
 
+  it("attributes a batch answering a member to the batch's first send", () => {
+    // Arrange
+    const ledger = ledgerWith(FIRST, SECOND);
+    ledger.batched(FIRST.turnId, [SECOND.turnId]);
+
+    // Act
+    const verdict = ledger.attribute(reply(stamp(FIRST.uuid, SECOND.uuid)));
+
+    // Assert
+    expect(turnOf(verdict)).toBe("send:turn-1");
+  });
+
+  it("reports the batch's other members ABSORBED into its first send's turn", () => {
+    // Arrange
+    const ledger = ledgerWith(FIRST, SECOND);
+    ledger.batched(FIRST.turnId, [SECOND.turnId]);
+
+    // Act
+    const verdict = ledger.attribute(reply(stamp(FIRST.uuid, SECOND.uuid)));
+
+    // Assert
+    expect(verdict.absorbed).toEqual([{ kind: "send", send: SECOND }]);
+  });
+
+  it("keeps a batch's later frames on its first send's turn once the member is retired", () => {
+    // Arrange
+    const ledger = ledgerWith(FIRST, SECOND);
+    ledger.batched(FIRST.turnId, [SECOND.turnId]);
+    ledger.attribute(reply(stamp(FIRST.uuid, SECOND.uuid)));
+
+    // Act
+    const verdict = ledger.attribute(result(stamp(FIRST.uuid, SECOND.uuid)));
+
+    // Assert
+    expect([turnOf(verdict), verdict.ended]).toEqual(["send:turn-1", true]);
+  });
+
+  it("attributes a batch member answered alone to the member itself", () => {
+    // Arrange: the vendor ran the member as its own turn, not beside the first.
+    const ledger = ledgerWith(FIRST, SECOND);
+    ledger.batched(FIRST.turnId, [SECOND.turnId]);
+
+    // Act
+    const verdict = ledger.attribute(reply(stamp(SECOND.uuid)));
+
+    // Assert
+    expect(turnOf(verdict)).toBe("send:turn-2");
+  });
+
+  it("REFUSES a batch headed by a turn with no open send", () => {
+    // Arrange
+    const ledger = ledgerWith(SECOND);
+
+    // Act / Assert
+    expect(() => ledger.batched(FIRST.turnId, [SECOND.turnId])).toThrow(/heads a prompt batch with no open send/);
+  });
+
+  it("REFUSES a batch member with no open send", () => {
+    // Arrange
+    const ledger = ledgerWith(FIRST);
+
+    // Act / Assert
+    expect(() => ledger.batched(FIRST.turnId, [SECOND.turnId])).toThrow(/batched behind turn-1 with no open send/);
+  });
+
   it("REFUSES more open sends than its bound", () => {
     // Arrange
     const ledger = new SendLedger();

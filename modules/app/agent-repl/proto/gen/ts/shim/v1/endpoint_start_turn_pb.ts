@@ -122,8 +122,14 @@ export type StartTurnRequest = Message<"shim.v1.StartTurnRequest"> & {
    * then, before either fate. With no turn of the daemon's open, the flag
    * changes nothing: the prompt starts its turn as any StartTurn does.
    *
-   * ONE PROMPT MAY WAIT TO JOIN A TURN AT A TIME. A second, while one waits,
-   * is refused `turn_already_open`; the daemon holds it instead.
+   * ANY NUMBER OF PROMPTS MAY WAIT TO JOIN A TURN, in the order they were
+   * sent, as the vendor queues them: the daemon sends every prompt it holds
+   * at once when it flushes its queue (an in-place merge asked for by the
+   * agent's turn). The vendor folds every queued prompt at the running turn's
+   * next tool boundary; when the running turn ends with prompts still
+   * queued, the vendor runs them all as ONE turn (a prompt batch), which runs
+   * under the FIRST's id and origin, every other member written FOLDED into
+   * it.
    *
    * @generated from field: bool join_running_turn = 6;
    */
@@ -247,8 +253,9 @@ export type StartTurnFailure = Message<"shim.v1.StartTurnFailure"> & {
      * shim's own cache keep-alive never produces it either -- a StartTurn that
      * arrives while a keep-alive runs waits inside the shim for the keep-alive
      * to end and then opens its turn, so no keep-alive is ever visible on this
-     * wire. A `join_running_turn` start while another prompt still waits to
-     * join the running turn is refused under this arm too.
+     * wire. A `join_running_turn` start is never refused under this arm
+     * while a turn of the daemon's runs, however many prompts already wait to
+     * join it.
      *
      * @generated from field: shim.v1.StartTurnTurnAlreadyOpen turn_already_open = 2;
      */

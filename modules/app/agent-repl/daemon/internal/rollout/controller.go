@@ -115,6 +115,11 @@ type controller struct {
 	// deployTakeover is the handover the successor joined was a DEPLOY's, so
 	// this daemon says `updated` on the footer once it has taken over.
 	deployTakeover bool
+	// claimedAdoptions counts the adoptions past their serving claim that have
+	// not yet made the workspace owned here, and claimedIdle closes when the
+	// count falls to zero (adopt.go, awaitClaimedOwned). Guarded by mu.
+	claimedAdoptions int
+	claimedIdle      chan struct{}
 	// stragglerAdoptions counts the adoptions becomeIncumbent started for
 	// workspaces whose handover never finished, for the same reason.
 	stragglerAdoptions sync.WaitGroup
