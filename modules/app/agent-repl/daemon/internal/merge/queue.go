@@ -178,6 +178,14 @@ var runningSummaries = map[AbandonCause]string{
 	CauseWorkspaceClosed: "the workspace was closed while this merge was running",
 }
 
+// releases reports whether C is a RELEASE the user or the operator asked for
+// (an evict, a dequeue), as against a merge given up under something else
+// ending (its workspace closing, the daemon shutting down). A released merge's
+// bubble is closed (closeReleasedBubble).
+func (c AbandonCause) releases() bool {
+	return c == CauseUserDrop || c == CauseUserDequeue
+}
+
 // summaryRunning resolves the sentence of a merge abandoned while it ran.
 func (c AbandonCause) summaryRunning() (string, bool) {
 	sentence, declared := runningSummaries[c]
@@ -299,7 +307,13 @@ func (o *orchestrator) dropQueued(ctx context.Context, ws ids.WorkspaceID, cause
 	ledger := o.ledgerOf[ws]
 	delete(o.ledgerOf, ws)
 	o.mu.Unlock()
-	log.Warn(op, "dropped a queued merge", dlog.Context{"workspace": string(ws), "repo": string(repo), "cause": string(cause)})
+	// A RELEASE THE USER OR OPERATOR ASKED FOR IS NO WARNING: it is the queue
+	// doing what it was told. A drop under something else ending stays WARN.
+	if cause.releases() {
+		log.Info(op, "released a queued merge", dlog.Context{"workspace": string(ws), "repo": string(repo), "cause": string(cause)})
+	} else {
+		log.Warn(op, "dropped a queued merge", dlog.Context{"workspace": string(ws), "repo": string(repo), "cause": string(cause)})
+	}
 	o.publishAbandoned(ctx, ws, ledger, entry, cause)
 	o.clearOffer(ws)
 	if err := o.republishQueue(ctx, repo); err != nil {

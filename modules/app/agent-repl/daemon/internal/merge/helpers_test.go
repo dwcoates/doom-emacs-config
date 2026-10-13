@@ -1388,6 +1388,8 @@ type fakeFeed struct {
 	// onUpsert, when set, runs on every push before it is recorded, so a test
 	// can read the harness's state at the instant a row is published.
 	onUpsert func(row *frontendv1.FeedRow)
+	// folds is every merge fold the merge set on a bubble, in order.
+	folds []foldCall
 }
 
 // synthesized is one published row with the feed it landed on and when it was
@@ -1408,6 +1410,40 @@ type synthesized struct {
 // interface rather than passing unrecorded.
 func (f *fakeFeed) UpsertDurable(ws ids.WorkspaceID, feed feedid.Feed, row *frontendv1.FeedRow) {
 	f.record(ws, feed, row, false)
+}
+
+// foldCall is one SetMergeFold the merge made.
+type foldCall struct {
+	ws     ids.WorkspaceID
+	row    string
+	folded bool
+}
+
+// SetMergeFold records the fold and answers whether the row was ever published
+// as a merge head, as the resolver does.
+func (f *fakeFeed) SetMergeFold(ws ids.WorkspaceID, id *frontendv1.FeedId, folded bool) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.folds = append(f.folds, foldCall{ws: ws, row: id.GetValue(), folded: folded})
+	for _, r := range f.rows {
+		if r.WS == ws && r.Row.GetId().GetValue() == id.GetValue() && r.Row.GetActivity().GetMerge().GetHead() != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// foldsOf answers the folds set on WS's bubbles.
+func (f *fakeFeed) foldsOf(ws ids.WorkspaceID) []foldCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []foldCall
+	for _, c := range f.folds {
+		if c.ws == ws {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // UpsertDurablePinned is UpsertDurable for a row pinned to its feed's bottom:
