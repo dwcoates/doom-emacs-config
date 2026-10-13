@@ -15,9 +15,8 @@ stamp is also what knocked the feed off its tail once a second in WebKit.
   card's head is built by one function, in Bash's arrangement: title, badge,
   settled time, chips. The vocabulary of the title and the badge is bespoke
   per card; the arrangement, fonts and spacing are not.
-  - Consequence for the contract: every settled tool card carries the same
-    settled-time element, `frontend.v1.FeedToolCallRuntime`, composed by the
-    daemon.
+  - Consequence for the contract: every tool card carries the same head
+    clock element, `frontend.v1.FeedToolCardClock`.
   - Reopens: the question and permission cards' `at_ms` stamps (they become
     runtimes), and the permission card's client-side `waiting` clock (dropped).
   - Does not claim: anything about responses, prompts, the cold-context gate

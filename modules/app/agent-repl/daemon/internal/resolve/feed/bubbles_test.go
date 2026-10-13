@@ -965,7 +965,7 @@ func TestALiveHookCardIsServedToAReaderThatOpensAfterIt(t *testing.T) {
 	}
 }
 
-func TestAFailingHookStatesTheDurationItReported(t *testing.T) {
+func TestAFailingHooksClockSpansTheDurationItReported(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.hookStart("unit-1", "lint", conversationv1.AgentHookEvent_AGENT_HOOK_EVENT_POST_TOOL_USE, "")
@@ -981,7 +981,7 @@ func TestAFailingHookStatesTheDurationItReported(t *testing.T) {
 	})
 
 	// Assert.
-	if got := h.hookCard().GetFailed().GetRuntime().GetText(); got != "ran 4.2 s" {
-		t.Fatalf("runtime = %q, want %q", got, "ran 4.2 s")
+	if start, end := clockOf(h.hookCard().GetClock()); start <= 0 || end-start != 4_200 {
+		t.Fatalf("clock spans %d..%d, want 4200 ms from the hook's start", start, end)
 	}
 }

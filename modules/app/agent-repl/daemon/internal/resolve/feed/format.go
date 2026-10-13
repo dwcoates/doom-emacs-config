@@ -5,9 +5,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-
-	conversationv1 "agentrepl/proto/conversation/v1"
-	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // The daemon formats every figure a client draws. A client that formatted one
@@ -19,58 +16,6 @@ import (
 func trimZero(v float64) string {
 	s := strconv.FormatFloat(v, 'f', 1, 64)
 	return strings.TrimSuffix(s, ".0")
-}
-
-// The verbs a settled tool card's clock is worded with: a unit that did work
-// RAN, an ask the user was posed WAITED.
-const (
-	clockVerbRan    = "ran"
-	clockVerbWaited = "waited"
-)
-
-// formatRuntime renders a settled call's clock — "ran 4.2 s", "ran 2m 14s",
-// "ran 340 ms" — from the milliseconds between its start and its settle.
-func formatRuntime(startMs, endMs int64) (string, bool) {
-	return formatSettledClock(clockVerbRan, startMs, endMs)
-}
-
-// formatSettledClock renders any settled tool card's clock — VERB and the span
-// between its start and its settle ("waited 2m 14s"). EVERY TOOL CARD HEADS
-// WITH THIS ONE FIGURE, so every card's clock is worded here. A negative or
-// unstated span is impossible to draw honestly, so it reports false and the
-// card shows no elapsed figure at all.
-func formatSettledClock(verb string, startMs, endMs int64) (string, bool) {
-	if startMs <= 0 || endMs <= 0 || endMs < startMs {
-		return "", false
-	}
-	return formatClockSpan(verb, endMs-startMs), true
-}
-
-// formatClockSpan renders a span the producer stated directly — a hook's own
-// duration — in the same words as a span between two instants.
-func formatClockSpan(verb string, ms int64) string {
-	return verb + " " + formatDuration(ms)
-}
-
-// settledRuntime is the settled clock element for a unit whose SETTLE carries
-// its instant: the span from the start the settle restates — or, when it
-// restates none, the start this process HELD from the unit's own start frame —
-// to the settle. Nil when the settle states no instant or no start is known,
-// so the card's head shows no figure rather than one measured against the
-// daemon's own clock.
-func settledRuntime(verb string, heldStartMs int64, settled *conversationv1.AgentActivitySettledAt) *frontendv1.FeedToolCallRuntime {
-	if settled == nil {
-		return nil
-	}
-	start := heldStartMs
-	if restated := settled.GetStartedAt(); restated != nil {
-		start = restated.GetAtMs()
-	}
-	text, ok := formatSettledClock(verb, start, settled.GetAtMs())
-	if !ok {
-		return nil
-	}
-	return &frontendv1.FeedToolCallRuntime{Text: text}
 }
 
 // formatDuration renders a millisecond span for a reader.
