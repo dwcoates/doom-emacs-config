@@ -893,8 +893,7 @@ opens are OpenTabs streams."
                                               :step (list :arm (nth 2 case) :value (nth 3 case)))))))))
 
 (defconst agent-repl-test-wire-host--row-json
-  (concat "{\"workspace\":{\"workspace\":{\"id\":\"w1\",\"dir\":\"/t/w1\"},"
-          "\"repository\":{\"id\":\"r1\",\"dir\":\"/t\"}},"
+  (concat "{\"workspace\":{\"workspace\":{\"id\":\"w1\",\"dir\":\"/t/w1\"}},"
           "\"name\":{\"text\":\"one\"},"
           "\"current\":{},\"when\":{},\"detail\":{},\"closed\":{},"
           "\"availability\":{\"available\":{}},\"ready\":{}}")

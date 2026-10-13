@@ -79,14 +79,12 @@ func TestATurnEndIsReportedUnreadThenRead(t *testing.T) {
 	r.SetViewed(theWS)
 
 	// Assert.
-	// The read carries its instant: the resolver's clock at the viewed report.
-	readAt := epoch
-	want := []wsm.TurnResult{{End: wsm.TurnResultDone}, {End: wsm.TurnResultDone, Read: true, ReadAt: &readAt}}
+	want := []wsm.TurnResult{{End: wsm.TurnResultDone}, {End: wsm.TurnResultDone, Read: true}}
 	if len(*reports) != len(want) {
 		t.Fatalf("reports = %+v, want %v", *reports, want)
 	}
 	for i, report := range *reports {
-		if report.ws != theWS || report.result == nil || !report.result.Same(want[i]) {
+		if report.ws != theWS || report.result == nil || *report.result != want[i] {
 			t.Fatalf("report %d = %+v, want %v", i, report, want[i])
 		}
 	}
