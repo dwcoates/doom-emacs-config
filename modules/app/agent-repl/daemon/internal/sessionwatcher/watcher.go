@@ -1075,6 +1075,18 @@ func (w *watcher) Departed() (Departure, bool) {
 	return *w.departure, true
 }
 
+// ShimGone implements Watcher.
+func (w *watcher) ShimGone() bool {
+	w.mu.Lock()
+	departed := w.departure != nil
+	w.mu.Unlock()
+	if departed {
+		return true
+	}
+	_, reaped := w.client.Reaped()
+	return reaped
+}
+
 // departLocked records the shim's departure, answering it the FIRST time only
 // (nil after), so the sink is told once per watcher whichever edge came first.
 // The caller holds mu, and tells the sink once it is released.

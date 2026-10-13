@@ -405,13 +405,17 @@ func (q *queue) reviveInBackground(ctx context.Context, ws ids.WorkspaceID, log 
 			// next prompt. Its holds stand for whichever brings a session up.
 			// Regression, 2026-09-27: a revived shim killed the instant it came
 			// up read as this ERROR (TestAShimThatDiesAgainBeforeAnyTurnEnds...).
-			if watcher, served := q.deps.Watcher(ws); served {
+			// Regression, 2026-10-12: the same kill landed after the client was
+			// reaped and before the watcher recorded the departure. ShimGone
+			// reads the reap itself, the very fact that made Client answer
+			// no session, so there is no window between the two reads.
+			if watcher, served := q.deps.Watcher(ws); served && watcher.ShimGone() {
+				fields := dlog.Context{"departure": "pending"}
 				if departure, departed := watcher.Departed(); departed {
-					log.Info(opSubmit, "the revived session came up and has since departed; its departure decides what follows", dlog.Context{
-						"ordered": departure.Ordered, "cause": string(departure.Cause),
-					})
-					return
+					fields = dlog.Context{"ordered": departure.Ordered, "cause": string(departure.Cause)}
 				}
+				log.Info(opSubmit, "the revived session came up and has since departed; its departure decides what follows", fields)
+				return
 			}
 			log.Error(opSubmit, "the revival reported success but the workspace still has no session", nil)
 			q.keepReconnectHolds(ctx, ws, log, "the revival reported success but no session came up")

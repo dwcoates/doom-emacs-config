@@ -94,7 +94,9 @@ export type SelectFeedRowRequest = Message<"agentrepl.v1.SelectFeedRowRequest"> 
      * Select exactly the bubble the reader clicked. The daemon decides which
      * arm the selection takes (a final response, a prompt a rollback can
      * reach, or any other bubble); a row it did not publish selectable is
-     * refused with `not_selectable`.
+     * refused with `not_selectable`. A click naming the SELECTED row
+     * deselects it instead (success `none`), and the push leaves the
+     * viewport where it is (frontend.v1.FeedSelectionNoneStay).
      *
      * @generated from field: agentrepl.v1.SelectFeedRowBubble bubble = 6;
      */
@@ -251,7 +253,8 @@ export type SelectFeedRowSuccess = Message<"agentrepl.v1.SelectFeedRowSuccess"> 
     case: "nothingSelectable";
   } | {
     /**
-     * Nothing is selected: the move was a clear, or a left-view report.
+     * Nothing is selected: the move was a clear, a left-view report, a step
+     * newer past the newest row, or a click on the selected bubble.
      *
      * @generated from field: agentrepl.v1.SelectFeedRowSuccessNone none = 3;
      */
@@ -475,8 +478,12 @@ export const SelectFeedRowNotYetAdoptedSchema: GenMessage<SelectFeedRowNotYetAdo
   messageDesc(file_agentrepl_v1_endpoint_select_feed_row, 15);
 
 /**
- * Which way a step moves along the selectable rows. Both directions start at
- * the newest row when nothing of that kind is selected, and wrap at each end.
+ * Which way a step moves along the selectable rows. With nothing selected,
+ * OLDER starts at the newest row and NEWER at the oldest; from a row of the
+ * other kind, both start at the newest. OLDER wraps past the oldest; NEWER
+ * past the newest ends the selection (success `none`, pushed as
+ * frontend.v1.FeedSelectionNoneReturnToTail), so the next NEWER rolls round
+ * to the oldest.
  *
  * @generated from enum agentrepl.v1.SelectFeedRowDirection
  */

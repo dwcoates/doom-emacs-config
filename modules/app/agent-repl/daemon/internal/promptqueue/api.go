@@ -581,6 +581,9 @@ type Watcher interface {
 	// Departed reports that the watched shim is gone. A departed watcher's
 	// turn and live work ended with the shim, so a bounce never waits on them.
 	Departed() (sessionwatcher.Departure, bool)
+	// ShimGone reports that the watched shim is gone: departed, or reaped
+	// with its departure still on its way (sessionwatcher.Watcher.ShimGone).
+	ShimGone() bool
 	// LiveWork is the live detached work: what a bounce registered on the
 	// workspace waits on besides the turn.
 	LiveWork() sessionwatcher.LiveWorkSet

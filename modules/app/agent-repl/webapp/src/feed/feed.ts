@@ -290,11 +290,9 @@ export function mountFeed(
     onSelectionExpand: afterSelectionToggle,
   });
 
-  // A CLICK ON A ROOT-FEED PROMPT OR RESPONSE BUBBLE selects it, or clears the
-  // selection when it is the selected one (owner ruling, 2026-10-01).
-  const uninstallSelect = installBubbleSelect(host, ctx, () =>
-    root.selectedRow(),
-  );
+  // A CLICK ON A ROOT-FEED PROMPT OR RESPONSE BUBBLE selects it, or, on the
+  // selected one, deselects it where the reader is (owner ruling, 2026-10-01).
+  const uninstallSelect = installBubbleSelect(host, ctx);
 
   // A CLICK ON THE FEED OUTSIDE ANY BUBBLE ends the feed's selection
   // (owner ruling, 2026-09-23). It asks the daemon, which owns the selection;

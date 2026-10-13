@@ -16,8 +16,9 @@
 #   1. The helper, HERMETICALLY: uname, perl and nice are stubs, so every
 #      platform branch (wrap, pass-through, unreadable niceness, refusal) is
 #      exercised on any host.
-#   2. The helper on THIS host, for real: a wrapped command's grandchild reads
-#      niceness 19, and a nested wrap does not push it further.
+#   2. The helper on THIS host, for real: the harness runs at niceness 19 or
+#      above, a wrapped command's grandchild reads the harness's own niceness,
+#      and a nested wrap does not push it further.
 #   3. The source scan over the real repository, and over fixture trees that
 #      each carry exactly one violation, so the scan is shown to catch it.
 #
@@ -269,10 +270,14 @@ fi
 # 2. The helper on this host, for real.
 # ============================================================================
 #
-# This harness itself runs at niceness 19 (its prologue saw to that), and an
-# unprivileged process can never lower its niceness again, so the wrap from
-# normal priority is pinned hermetically above. Here the real kernel answers
-# what inheritance and idempotency depend on.
+# This harness itself runs at niceness 19 or above (its prologue saw to that:
+# below 19 it was demoted to 19, at 19 or above it passed straight through, as
+# when the whole run was started at macOS's 20), and an unprivileged process
+# can never lower its niceness again, so the wrap from normal priority is
+# pinned hermetically above. Here the real kernel answers what inheritance and
+# idempotency depend on, measured against the harness's OWN niceness: a
+# wrapped or nested command must run at exactly that, never lower and never
+# demoted further.
 
 HOST_OS="$(uname -s)"
 # The niceness query every case reads back, the same one the helper uses.
@@ -283,30 +288,30 @@ case $HOST_OS in
 esac
 
 if [ -n "$QUERY" ]; then
-    # --- 2a. this harness runs at niceness 19 ---------------------------------
-    out="$(bash -c "$QUERY" 2>&1)" || true
-    if [ "$out" = 19 ]; then
-        pass "$HOST_OS (real): a test entry point runs at niceness 19"
+    # --- 2a. this harness runs at niceness 19 or above ------------------------
+    BASE="$(bash -c "$QUERY" 2>&1)" || true
+    if [[ $BASE =~ ^[0-9]+$ ]] && [ "$BASE" -ge 19 ]; then
+        pass "$HOST_OS (real): a test entry point runs at niceness 19 or above"
     else
-        fail "$HOST_OS (real): a test entry point runs at niceness 19" "niceness=$out"
+        fail "$HOST_OS (real): a test entry point runs at niceness 19 or above" "niceness=$BASE"
     fi
 
-    # --- 2b. a wrapped command's grandchild inherits niceness 19 --------------
+    # --- 2b. a wrapped command's grandchild inherits the harness's niceness ---
     out="$(env -u AGENT_REPL_BACKGROUND_PRIORITY bash "$HELPER" bash -c "bash -c '$QUERY'" 2>&1)" || true
-    if [ "$out" = 19 ]; then
-        pass "$HOST_OS (real): a grandchild of a wrapped command runs at niceness 19"
+    if [ "$out" = "$BASE" ]; then
+        pass "$HOST_OS (real): a grandchild of a wrapped command runs at the harness's niceness"
     else
-        fail "$HOST_OS (real): a grandchild of a wrapped command runs at niceness 19" "niceness=$out"
+        fail "$HOST_OS (real): a grandchild of a wrapped command runs at the harness's niceness" "niceness=$out want=$BASE"
     fi
 
     # --- 2c. a nested wrap does not demote further ----------------------------
     # macOS lets niceness climb to 20, so a second `nice -n 19` would show here.
     out="$(env -u AGENT_REPL_BACKGROUND_PRIORITY bash "$HELPER" \
         env -u AGENT_REPL_BACKGROUND_PRIORITY bash "$HELPER" bash -c "$QUERY" 2>&1)" || true
-    if [ "$out" = 19 ]; then
-        pass "$HOST_OS (real): a helper nested in a helper leaves the niceness at 19"
+    if [ "$out" = "$BASE" ]; then
+        pass "$HOST_OS (real): a helper nested in a helper leaves the niceness where it was"
     else
-        fail "$HOST_OS (real): a helper nested in a helper leaves the niceness at 19" "niceness=$out"
+        fail "$HOST_OS (real): a helper nested in a helper leaves the niceness where it was" "niceness=$out want=$BASE"
     fi
 
     # --- 2d. the wrap EXECs: the caller's pid is the command's ----------------

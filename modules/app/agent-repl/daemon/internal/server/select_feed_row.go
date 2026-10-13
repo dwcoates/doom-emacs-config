@@ -21,9 +21,8 @@ const opSelectFeedRow = "daemon.server.select_feed_row"
 //
 // THE DAEMON IS THE ONLY HOLDER OF THE SELECTION. A step reads the ordered
 // selectable rows of its kind from the feed resolver (final responses, or the
-// prompts a rollback can reach), computes the new row — both directions start
-// at the newest when nothing of that kind is selected, and wrap at each end —
-// and pushes the result to the webapp's root feed watch and to Emacs's host
+// prompts a rollback can reach), computes the new row — see stepIndex for
+// where a step starts and how it runs off each end — and pushes the result to the webapp's root feed watch and to Emacs's host
 // watch. A sent prompt and a rollback read this same state, so nothing a
 // client holds can disagree with what the webapp draws.
 func (s *server) SelectFeedRow(
@@ -223,7 +222,13 @@ func (s *server) stepSelection(
 	if held && currentKind == kind {
 		at = indexOfFeedID(rows, current)
 	}
-	at = stepIndex(at, len(rows), direction)
+	at, ended := stepIndex(at, len(rows), held, direction)
+	if ended {
+		s.setNoSelection(ws, returnToTail())
+		log.Info(opSelectFeedRow, "a step newer ran past the newest row; the selection ended and the feed returns to its tail",
+			dlog.Context{"kind": kind.String(), "row": current.GetValue(), "of": len(rows)})
+		return selectedNone(), nil
+	}
 	sel := selectionOf(kind, rows[at])
 	if err := s.setRowSelection(ws, sel); err != nil {
 		return nil, err
@@ -242,12 +247,17 @@ func selectedSuccess(sel *frontendv1.FeedSelection) *agentreplv1.SelectFeedRowSu
 // its kind takes: a final response is a `response`, a prompt a rollback can
 // reach a `prompt`, and any other selectable bubble a `bubble`. selectable is
 // false (and nothing changes) for a row the resolver did not publish
-// selectable. Clicking the selected bubble again is the webapp's CLEAR, so a
-// click naming the selected row restates it.
+// selectable. A click naming the SELECTED row deselects it, leaving the
+// viewport where the reader has it (stay): the daemon, the selection's one
+// holder, decides the toggle, so a click can never act on a selection the
+// webapp has not yet heard has moved.
 func (s *server) selectBubble(log dlog.Logger, ws ids.WorkspaceID, row *frontendv1.FeedId) (*agentreplv1.SelectFeedRowSuccess, bool, error) {
 	if _, ok := s.deps.Feed.SelectableText(ws, row); !ok {
 		log.Info(opSelectFeedRow, "a clicked row is not selectable", dlog.Context{"row": row.GetValue()})
 		return nil, false, nil
+	}
+	if s.endSelection(log, ws, row, stayInView(), "clicked_selected") {
+		return selectedNone(), true, nil
 	}
 	kind := selectionBubble
 	switch {
@@ -266,17 +276,30 @@ func (s *server) selectBubble(log dlog.Logger, ws ids.WorkspaceID, row *frontend
 	return selectedSuccess(sel), true, nil
 }
 
-// stepIndex is the index a step lands on among N rows from AT (-1 when
-// nothing of the kind is selected): the newest from nothing, wrapping at
-// each end.
-func stepIndex(at, n int, direction agentreplv1.SelectFeedRowDirection) int {
-	if at < 0 {
-		return n - 1
+// stepIndex is the index a step lands on among N rows (oldest first) from AT,
+// -1 when no row of the kind is selected; HELD is whether any row (of any
+// kind) is selected. ended is true, and the index meaningless, when the step
+// ends the selection instead.
+//
+//   - From nothing selected at all, OLDER starts at the newest row and NEWER
+//     at the oldest, so a NEWER right after a step ran past the newest rolls
+//     round to the oldest.
+//   - From a row of another kind, either direction starts at the newest.
+//   - OLDER past the oldest wraps to the newest.
+//   - NEWER past the newest ends the selection (the feed returns to its tail).
+func stepIndex(at, n int, held bool, direction agentreplv1.SelectFeedRowDirection) (index int, ended bool) {
+	older := direction == agentreplv1.SelectFeedRowDirection_SELECT_FEED_ROW_DIRECTION_OLDER
+	switch {
+	case at < 0 && !held && !older:
+		return 0, false
+	case at < 0:
+		return n - 1, false
+	case older:
+		return (at - 1 + n) % n, false
+	case at == n-1:
+		return 0, true
 	}
-	if direction == agentreplv1.SelectFeedRowDirection_SELECT_FEED_ROW_DIRECTION_OLDER {
-		return (at - 1 + n) % n
-	}
-	return (at + 1) % n
+	return at + 1, false
 }
 
 // endSelection ends the workspace's selection and pushes NONE. With ONLY set,
