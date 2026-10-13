@@ -588,6 +588,8 @@ func (r *run) speculativeGate(ctx context.Context, place chainPlace, targetBranc
 			return nil, fmt.Errorf("merge: reading the tree the speculative gate passed: %w", err)
 		}
 		r.tested = &testedDoc{Base: place.base, Head: head, Tree: tree}
+		// A PASSING GATE ENDS THE RUN OF FAILURES, ahead of its turn too.
+		r.fixesUsed = 0
 		r.o.log(ctx, r.ws).Info(op, "the merge passed its tests ahead of its turn; the pass stands for exactly this tree", dlog.Context{
 			"workspace": string(r.ws), "base": place.base, "head": head, "tree": tree, "rank": place.rank})
 		return nil, r.checkpoint(ctx, TabTests, nil)

@@ -57,9 +57,17 @@ const (
 )
 
 // MaxFixAttempts is THE ONE BOUND on fixing: the most fixing attempts a merge
-// makes, drawn as the y of "fixing attempt x/y", and the bound that decides the
-// merge has failed its tests. Stated once so the two can never disagree.
-const MaxFixAttempts = 3
+// makes IN A ROW, drawn as the y of "fixing attempt x/y", and the bound that
+// decides the merge has failed its tests. Stated once so the two can never
+// disagree.
+//
+// THE INTENDED DESIGN, OWNER-RULED (2026-10-12): modules/app/agent-repl/AGENTS.md,
+// "The merge queue's test gate and remediation contract". Five consecutive
+// fixing attempts that leave the gate failing fail the merge; a passing gate
+// starts the count over, and an attempt the daemon's own exit, a restart, a
+// transfer or a speculative base move cut never counts. Do not change it
+// without a conversation with the owner first.
+const MaxFixAttempts = 5
 
 // holderMerge is the occupancy guard's holder name, matching the lease holder.
 const holderMerge = "merge"
