@@ -7,14 +7,6 @@ import (
 	"testing"
 )
 
-// undoLayout40 strips layout 40's additions (viewedWorkspacesDDL) from a
-// migrated file, leaving its stamp alone.
-func undoLayout40(t *testing.T, path string) {
-	t.Helper()
-	execRaw(t, path, `ALTER TABLE workspaces DROP COLUMN result_read_at`)
-	execRaw(t, path, `ALTER TABLE sidebar_view DROP COLUMN viewed_folded`)
-}
-
 func TestSetTaskFoldedIsReadBack(t *testing.T) {
 	tests := []struct {
 		name   string

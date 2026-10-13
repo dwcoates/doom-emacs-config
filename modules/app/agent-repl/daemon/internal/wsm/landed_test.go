@@ -7,15 +7,6 @@ import (
 	"time"
 )
 
-// undoLayout41 strips layout 41's columns from a migrated file, leaving its
-// stamp alone.
-func undoLayout41(t *testing.T, path string) {
-	t.Helper()
-	for _, column := range []string{"merge_fork_head", "landed_head", "landed_at"} {
-		execRaw(t, path, `ALTER TABLE workspaces DROP COLUMN `+column)
-	}
-}
-
 func TestRegisterWorkspaceRecordsAMergeWorkspacesForkHead(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)

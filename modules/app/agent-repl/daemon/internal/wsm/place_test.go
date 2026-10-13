@@ -440,37 +440,19 @@ func TestTheMigrationSeedsPlacesFromTheTabOrderBeforePlaces(t *testing.T) {
 func TestTheMigrationSeedsAChildRightAfterItsParent(t *testing.T) {
 	// Arrange: parent "b" with child "z", and a sibling "c" of the parent.
 	// The fixture's own workspace shares the repository.
-	path := layout3Fixture(t)
+	// The file is a layout-34 one, the last before places, built forward.
+	path := fixtureAt(t, 34)
 	execRaw(t, path, `INSERT INTO workspaces (id, repo_id, dir, name, branch, parent_branch, closed, attention, is_current, created_at)
 		VALUES ('ws-b', 'repo-1', '/tmp/ws-b', 'b', 'b', 'master', 0, 0, 0, 1)`)
 	execRaw(t, path, `INSERT INTO workspaces (id, repo_id, dir, name, branch, parent_branch, closed, attention, is_current, created_at)
 		VALUES ('ws-c', 'repo-1', '/tmp/ws-c', 'c', 'c', 'master', 0, 0, 0, 1)`)
-	execRaw(t, path, `INSERT INTO workspaces (id, repo_id, dir, name, branch, parent_branch, closed, attention, is_current, created_at)
-		VALUES ('ws-z', 'repo-1', '/tmp/ws-z', 'z', 'z', 'b', 0, 0, 0, 1)`)
+	execRaw(t, path, `INSERT INTO workspaces (id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, is_current, created_at)
+		VALUES ('ws-z', 'repo-1', '/tmp/ws-z', 'z', 'z', 'b', 'ws-b', 0, 0, 0, 1)`)
 
-	// Act: the child's recorded parent arrives with a later layout, so it is
-	// stamped by hand once the file has migrated up to that column.
+	// Act
 	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("Open: %v", err)
-	}
-	handle.Close()
-	stampRaw(t, path, 34)
-	// Every later layout's additions from 39 up come off too, so the file
-	// is a layout-34 file again.
-	undoLayoutsAbove(t, path, 38)
-	execRaw(t, path, `DROP TRIGGER workspaces_land_unplaced`)
-	execRaw(t, path, `DROP INDEX workspaces_by_place`)
-	execRaw(t, path, `ALTER TABLE workspaces DROP COLUMN place`)
-	// Layouts 36 and 37 go too: a file at layout 34 has neither.
-	execRaw(t, path, `ALTER TABLE merge_queue DROP COLUMN source_front`)
-	execRaw(t, path, `DROP TABLE merge_rollout_hold`)
-	// Layout 38's table goes too.
-	execRaw(t, path, `DROP TABLE owed_resumptions`)
-	execRaw(t, path, `UPDATE workspaces SET parent_id = 'ws-b' WHERE id = 'ws-z'`)
-	handle, err = Open(context.Background(), path, WithUnsyncedWrites())
-	if err != nil {
-		t.Fatalf("re-Open: %v", err)
 	}
 	defer handle.Close()
 
