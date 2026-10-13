@@ -5,12 +5,13 @@ import (
 	"errors"
 	"fmt"
 
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
-	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/topbar"
 	"agent-repld/internal/wsm"
@@ -189,12 +190,20 @@ func validateQuestionEcho(log dlog.Logger, batch *conversationv1.AgentQuestionBa
 // A re-open that FAILS opens the `cold_gate_reopen_failed` fault and stands the
 // gate again from the facts it was first raised with: the session is still
 // parked, so the choice is the user's again.
-func (v *verbs) AnswerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *frontendv1.FeedColdGateResolved, scope conversationv1.SessionCompactScope) error {
+//
+// THE PROMPTS HELD AT THE GATE ARE SETTLED BEFORE THE SESSION COMES BACK
+// (owner ruling, 2026-10-13): clear discards them, pay and compact keep them
+// for the user, and only compact-and-resume sends them
+// (promptqueue.Queue.ColdGateAnswered). The re-open starts only after the
+// queue has settled them, so the session-up release it raises cannot send a
+// prompt the answer kept or discarded. A queue that cannot settle them
+// refuses the answer, and the gate stands again.
+func (v *verbs) AnswerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *agentreplv1.AnswerColdGateRequest) error {
 	_, log, err := v.owned(ctx, "AnswerColdGate", ws)
 	if err != nil {
 		return err
 	}
-	if answer == nil {
+	if answer.GetChoice() == nil {
 		return refuse(log, "AnswerColdGate", ArmUnservedRemediation, "the answer names no choice", false)
 	}
 	served, ok := v.deps.Cards.ColdGate(ws)
@@ -202,19 +211,32 @@ func (v *verbs) AnswerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *
 		return refuse(log, "AnswerColdGate", ArmNoColdGate,
 			fmt.Sprintf("no cold gate is standing on workspace %q", ws), false)
 	}
-	remediation, err := coldRemediation(log, served, answer, scope)
+	remediation, err := coldRemediation(log, served, answer)
 	if err != nil {
 		return err
 	}
+	choice := coldChoiceName(answer)
 	// THE GATE IS SPENT, in one step with the check that it still stands: of
 	// two answers racing for one gate, the second finds nothing to spend.
 	if !v.deps.Cards.TakeColdGate(ws, served.VendorSessionID) {
 		return refuse(log, "AnswerColdGate", ArmNoColdGate,
 			fmt.Sprintf("the cold gate on workspace %q was already answered", ws), false)
 	}
+	if err := v.deps.Queue.ColdGateAnswered(ctx, ws, coldGateFate(answer)); err != nil {
+		// The queue recorded the failure at ERROR as its owner; what is the
+		// verb's own is that the gate stands again, unspent.
+		stood := v.deps.Cards.ReraiseColdGate(ws, served.VendorSessionID)
+		log.Info(opColdGate, "the prompts held at the cold gate could not be settled; the answer is refused", dlog.Context{
+			"choice": choice, "gate_stands_again": stood, "cause": err.Error(),
+		})
+		if !stood {
+			log.Error(opColdGate, "the refused answer's gate could not stand again: its cold facts are gone",
+				dlog.Context{"vendor_session_id": served.VendorSessionID})
+		}
+		return fmt.Errorf("settle the prompts held at the cold gate of %q: %w", ws, err)
+	}
 	v.deps.Feed.RetireRow(ws, rootFeed(), coldGateRowID(ws, served.VendorSessionID))
 
-	choice := coldChoiceName(answer)
 	v.spendingColdGate(ws, choice, footer.CompactionRequestLine(choice, served.Detail))
 	log.Info(opColdGate, "answering the cold gate: "+choice, dlog.Context{"choice": choice})
 
@@ -285,44 +307,72 @@ func (v *verbs) spendingColdGate(ws ids.WorkspaceID, choice, line string) {
 }
 
 // coldRemediation translates the answered gate into the shim's remediation,
-// validating a compaction against the served menu.
-func coldRemediation(log dlog.Logger, served ServedColdGate, answer *frontendv1.FeedColdGateResolved, scope conversationv1.SessionCompactScope) (*conversationv1.SessionColdRemediation, error) {
-	switch {
-	case answer.GetPay() != nil:
-		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch", dlog.Context{"function": "workspace", "branch": "case answer.GetPay() != nil"})
+// validating a compaction against the served menu. Both compact answers carry
+// the same remediation: what tells them apart is the held prompts' fate
+// (coldGateFate), never the shim's work.
+func coldRemediation(log dlog.Logger, served ServedColdGate, answer *agentreplv1.AnswerColdGateRequest) (*conversationv1.SessionColdRemediation, error) {
+	switch choice := answer.GetChoice().(type) {
+	case *agentreplv1.AnswerColdGateRequest_Pay:
+		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch", dlog.Context{"function": "workspace", "branch": "pay"})
 		return &conversationv1.SessionColdRemediation{
 			Remediation: &conversationv1.SessionColdRemediation_Pay{Pay: &conversationv1.SessionColdPay{}},
 		}, nil
-	case answer.GetClear() != nil:
-		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch", dlog.Context{"function": "workspace", "branch": "case answer.GetClear() != nil"})
+	case *agentreplv1.AnswerColdGateRequest_Clear:
+		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch", dlog.Context{"function": "workspace", "branch": "clear"})
 		return &conversationv1.SessionColdRemediation{
 			Remediation: &conversationv1.SessionColdRemediation_Clear{Clear: &conversationv1.SessionColdClear{}},
 		}, nil
-	case answer.GetCompact() != nil:
-		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch", dlog.Context{"function": "workspace", "branch": "case answer.GetCompact() != nil"})
-		if served.Compact == nil {
-			return nil, refuse(log, "AnswerColdGate", ArmUnservedRemediation,
-				"the cold gate offered no compaction for this account", false)
-		}
-		model := answer.GetCompact().GetModel().GetModel()
-		if !servedModel(served.Compact.Models, model) {
-			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "!servedModel(served.Compact.Models, model)"})
-			return nil, refuse(log, "AnswerColdGate", ArmUnservedRemediation,
-				fmt.Sprintf("the compact menu never offered the model %q", model.GetName()), false)
-		}
-		if !servedScope(served.Compact.Scopes, scope) {
-			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "!servedScope(served.Compact.Scopes, scope)"})
-			return nil, refuse(log, "AnswerColdGate", ArmUnservedRemediation,
-				fmt.Sprintf("the compact menu never offered the scope %s", scope), false)
-		}
-		return &conversationv1.SessionColdRemediation{
-			Remediation: &conversationv1.SessionColdRemediation_Compact{
-				Compact: &conversationv1.SessionColdCompact{Model: model, Scope: scope},
-			},
-		}, nil
+	case *agentreplv1.AnswerColdGateRequest_Compact:
+		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch", dlog.Context{"function": "workspace", "branch": "compact"})
+		return compactRemediation(log, served, choice.Compact)
+	case *agentreplv1.AnswerColdGateRequest_CompactAndResume:
+		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch", dlog.Context{"function": "workspace", "branch": "compact_and_resume"})
+		return compactRemediation(log, served, choice.CompactAndResume)
 	default:
 		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch", dlog.Context{"function": "workspace", "branch": "default"})
 		return nil, refuse(log, "AnswerColdGate", ArmUnservedRemediation, "the answer names no choice", false)
+	}
+}
+
+// compactRemediation is the compaction a compact answer asks for, refused
+// unless the gate served a compact menu offering its model and scope.
+func compactRemediation(log dlog.Logger, served ServedColdGate, compact *agentreplv1.AnswerColdGateCompact) (*conversationv1.SessionColdRemediation, error) {
+	if served.Compact == nil {
+		return nil, refuse(log, "AnswerColdGate", ArmUnservedRemediation,
+			"the cold gate offered no compaction for this account", false)
+	}
+	model, scope := compact.GetModel(), compact.GetScope()
+	if !servedModel(served.Compact.Models, model) {
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "!servedModel(served.Compact.Models, model)"})
+		return nil, refuse(log, "AnswerColdGate", ArmUnservedRemediation,
+			fmt.Sprintf("the compact menu never offered the model %q", model.GetName()), false)
+	}
+	if !servedScope(served.Compact.Scopes, scope) {
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "!servedScope(served.Compact.Scopes, scope)"})
+		return nil, refuse(log, "AnswerColdGate", ArmUnservedRemediation,
+			fmt.Sprintf("the compact menu never offered the scope %s", scope), false)
+	}
+	return &conversationv1.SessionColdRemediation{
+		Remediation: &conversationv1.SessionColdRemediation_Compact{
+			Compact: &conversationv1.SessionColdCompact{Model: model, Scope: scope},
+		},
+	}, nil
+}
+
+// coldGateFate is what the answer does to the prompts held at the gate: only
+// compact-and-resume sends them. The caller has validated the choice
+// (coldRemediation), so an answer naming none is an invariant violation the
+// queue refuses loudly.
+func coldGateFate(answer *agentreplv1.AnswerColdGateRequest) promptqueue.GateFate {
+	switch answer.GetChoice().(type) {
+	case *agentreplv1.AnswerColdGateRequest_Clear:
+		return promptqueue.GateDiscard
+	case *agentreplv1.AnswerColdGateRequest_Pay, *agentreplv1.AnswerColdGateRequest_Compact:
+		return promptqueue.GateKeep
+	case *agentreplv1.AnswerColdGateRequest_CompactAndResume:
+		return promptqueue.GateSend
+	default:
+		return 0
 	}
 }
 
@@ -344,14 +394,16 @@ func servedScope(scopes []conversationv1.SessionCompactScope, want conversationv
 	return false
 }
 
-func coldChoiceName(answer *frontendv1.FeedColdGateResolved) string {
-	switch {
-	case answer.GetPay() != nil:
-		return "pay"
-	case answer.GetClear() != nil:
-		return "clear"
-	case answer.GetCompact() != nil:
-		return "compact"
+func coldChoiceName(answer *agentreplv1.AnswerColdGateRequest) string {
+	switch answer.GetChoice().(type) {
+	case *agentreplv1.AnswerColdGateRequest_Pay:
+		return footer.ChoicePay
+	case *agentreplv1.AnswerColdGateRequest_Clear:
+		return footer.ChoiceClear
+	case *agentreplv1.AnswerColdGateRequest_Compact:
+		return footer.ChoiceCompact
+	case *agentreplv1.AnswerColdGateRequest_CompactAndResume:
+		return footer.ChoiceCompactAndResume
 	default:
 		return "none"
 	}

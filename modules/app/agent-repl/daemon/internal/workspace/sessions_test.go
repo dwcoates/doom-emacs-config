@@ -16,6 +16,7 @@ import (
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
 	"google.golang.org/protobuf/proto"
@@ -4922,5 +4923,128 @@ func TestARaisedColdGateTellsTheQueueTheSessionWentCold(t *testing.T) {
 	// Assert.
 	if len(told) != 1 || told[0] != ws.ID {
 		t.Fatalf("told = %v, want the workspace told once", told)
+	}
+}
+
+// ---- the gate's compact-and-resume button follows the held prompts ----
+
+// lastGateStanding answers the standing gate the last synthesized row drew.
+func lastGateStanding(t *testing.T, f *fleetFixture) *frontendv1.FeedColdGateStanding {
+	t.Helper()
+	if len(f.feed.synthesized) == 0 {
+		t.Fatal("no gate row was published")
+	}
+	standing := f.feed.synthesized[len(f.feed.synthesized)-1].GetColdGate().GetStanding()
+	if standing == nil {
+		t.Fatalf("last row = %v, want a standing gate", f.feed.synthesized[len(f.feed.synthesized)-1])
+	}
+	return standing
+}
+
+func TestAGateWithNothingHeldOffersNoCompactAndResume(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+
+	// Act.
+	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+
+	// Assert.
+	if got := lastGateStanding(t, f).GetCompactAndResume(); got != nil {
+		t.Fatalf("compact_and_resume = %v, want none with nothing held", got)
+	}
+}
+
+func TestAGateRaisedOverHeldPromptsOffersCompactAndResumeAtOnce(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.fleet.SetColdGateHeld(ws.ID, 2)
+
+	// Act.
+	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+
+	// Assert.
+	if got := lastGateStanding(t, f).GetCompactAndResume().GetHeldPrompts(); got != 2 {
+		t.Fatalf("held_prompts = %d, want 2", got)
+	}
+}
+
+func TestAPromptHeldAtAStandingGateRepublishesItWithCompactAndResume(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+
+	// Act.
+	f.fleet.SetColdGateHeld(ws.ID, 1)
+
+	// Assert.
+	if got := lastGateStanding(t, f).GetCompactAndResume().GetHeldPrompts(); got != 1 {
+		t.Fatalf("held_prompts = %d, want 1", got)
+	}
+}
+
+func TestTheLastHeldPromptLeavingRepublishesTheGateWithoutCompactAndResume(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.fleet.SetColdGateHeld(ws.ID, 1)
+	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+
+	// Act.
+	f.fleet.SetColdGateHeld(ws.ID, 0)
+
+	// Assert.
+	if got := lastGateStanding(t, f).GetCompactAndResume(); got != nil {
+		t.Fatalf("compact_and_resume = %v, want none once nothing is held", got)
+	}
+}
+
+func TestAnUnchangedHeldCountRepublishesNothing(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.fleet.SetColdGateHeld(ws.ID, 1)
+	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+	rows := len(f.feed.synthesized)
+
+	// Act.
+	f.fleet.SetColdGateHeld(ws.ID, 1)
+
+	// Assert.
+	if len(f.feed.synthesized) != rows {
+		t.Fatalf("rows = %d, want %d: an unchanged count publishes nothing", len(f.feed.synthesized), rows)
+	}
+}
+
+func TestAHeldCountChangeOnAnAnsweredGatePublishesNoRow(t *testing.T) {
+	// Arrange: the answered gate's row is retired; nothing may bring it back.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+	f.fleet.TakeColdGate(ws.ID, "vendor-1")
+	rows := len(f.feed.synthesized)
+
+	// Act.
+	f.fleet.SetColdGateHeld(ws.ID, 1)
+
+	// Assert.
+	if len(f.feed.synthesized) != rows {
+		t.Fatalf("rows = %d, want %d: an answered gate publishes no row", len(f.feed.synthesized), rows)
+	}
+}
+
+func TestAHeldCountChangeWithNoGatePublishesNoRow(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+
+	// Act.
+	f.fleet.SetColdGateHeld(ws.ID, 1)
+
+	// Assert.
+	if len(f.feed.synthesized) != 0 {
+		t.Fatalf("rows = %v, want none with no gate standing", f.feed.synthesized)
 	}
 }

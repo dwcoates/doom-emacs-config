@@ -770,7 +770,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Resumptions: func(ws ids.WorkspaceID, report promptqueue.ResumeReport) {
 			opens.Resumption(ws, opentabs.Resume{Kind: resumeKind(report.Kind), Text: report.Text})
 		},
-		ColdGate:      fleet.ColdGateDetail,
+		ColdGate: fleet.ColdGateDetail,
+		// The standing gate offers its compact-and-resume answer exactly
+		// while prompts are held at it.
+		ColdGateHeld:  fleet.SetColdGateHeld,
 		DrainRefusals: refusalNoter{ref: &drainController},
 		// A held-prompt edit is state on the host view; the server exists only
 		// later, so the publish reads it out of the relay forwarder.

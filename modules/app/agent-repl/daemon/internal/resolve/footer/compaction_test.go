@@ -202,6 +202,31 @@ func TestAnAnsweredColdGateDrawsTheDaemonsOwnLine(t *testing.T) {
 	}
 }
 
+func TestACompactAndResumeGateAnswerTakesTheCompactingStep(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	connected(h)
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: ColdGateCost{Lead: "the conversation is cold"}})
+
+	// Act.
+	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceCompactAndResume, Text: "compaction requested"})
+
+	// Assert.
+	if got := h.view(t).GetStrip().GetStatus().GetWorking().GetCompacting(); got == nil {
+		t.Fatalf("status = %+v, want working·compacting, as for compact", h.view(t).GetStrip().GetStatus())
+	}
+}
+
+func TestCompactionRequestLineWordsCompactAndResumeAsACompaction(t *testing.T) {
+	// Arrange / Act.
+	line := CompactionRequestLine(ChoiceCompactAndResume, "the conversation is cold at 101600 context tokens")
+
+	// Assert.
+	if line != "compaction requested (the conversation is cold at 101600 context tokens)" {
+		t.Fatalf("line = %q, want the compaction's request line", line)
+	}
+}
+
 func TestAClearedGateAnswerTakesTheClearingStep(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)

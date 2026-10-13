@@ -440,14 +440,22 @@ func TestStartSessionResumeColdStandsAGateBlockingReopenUntilAnswered(t *testing
 	})
 }
 
-// TestAPromptHeldForARevivalThatParksAtTheColdGateWaitsThereAndTheAnswerDeliversIt
-// is the 2026-10-10 doom incident end to end: a prompt sent to a workspace
-// with no live session is held for the revival, the revival's resume is
-// answered cold, and the prompt must wait at the gate (badge "awaiting cold
-// gate", no StartTurn) until AnswerColdGate brings the session up and delivers
-// it. A prompt never answers the gate.
-func TestAPromptHeldForARevivalThatParksAtTheColdGateWaitsThereAndTheAnswerDeliversIt(t *testing.T) {
-	t.Parallel()
+// heldAtTheGate is the 2026-10-10 doom incident's arrangement: a prompt sent to
+// a workspace with no live session is held for the revival, the revival's
+// resume is answered cold, and the prompt waits at the gate (badge "awaiting
+// cold gate", no StartTurn). A prompt never answers the gate.
+type heldAtTheGate struct {
+	f       *fixture
+	shim    *harness.ShimControl
+	gateRow *frontendv1.FeedRow
+	turn    *conversationv1.TurnId
+	holds   *harness.Stream[*frontendv1.FeedHeld]
+	feed    *harness.Stream[*frontendv1.FeedRow]
+}
+
+// promptHeldAtTheGate arranges heldAtTheGate and asserts the prompt waits there.
+func promptHeldAtTheGate(t *testing.T) heldAtTheGate {
+	t.Helper()
 	// Arrange: kill to get a resumable session, then script the resume as cold.
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
@@ -469,7 +477,7 @@ func TestAPromptHeldForARevivalThatParksAtTheColdGateWaitsThereAndTheAnswerDeliv
 	feed := f.watchRootFeed()
 	holds := f.d.WatchHolds(f.ws)
 
-	// Act: the prompt revives the workspace, and the revival parks at the gate.
+	// The prompt revives the workspace, and the revival parks at the gate.
 	resp := f.submit("the owner's prompt", "k-cold-gate-held", origin)
 	turn := resp.GetSuccess().GetTurn().GetTurn()
 	if turn.GetValue() == "" {
@@ -481,7 +489,7 @@ func TestAPromptHeldForARevivalThatParksAtTheColdGateWaitsThereAndTheAnswerDeliv
 		return r.GetColdGate().GetStanding() != nil
 	})
 
-	// Assert: the prompt waits at the gate, badged as such, and nothing was sent.
+	// The prompt waits at the gate, badged as such, and nothing was sent.
 	harness.AwaitView(t, f.d.Ctx(), holds, "the prompt held at the cold gate", func(tray *frontendv1.FeedHeld) bool {
 		p := promptHeldEntry(tray, turn)
 		return p.GetColdGate() != nil && p.GetBadge().GetColdGate() != nil
@@ -489,20 +497,115 @@ func TestAPromptHeldForARevivalThatParksAtTheColdGateWaitsThereAndTheAnswerDeliv
 	if n := shim.Count(harness.RPCStartTurn); n != 0 {
 		t.Fatalf("StartTurn count = %d while the gate stands, want 0: a prompt never answers the gate", n)
 	}
+	return heldAtTheGate{f: f, shim: shim, gateRow: gateRow, turn: turn, holds: holds, feed: feed}
+}
 
-	// Act: the user answers the gate.
-	if _, err := f.d.Client().AnswerColdGate(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerColdGateRequest{
-		Workspace: f.ws,
-		Gate:      gateRow.GetId(),
-		Choice:    &agentreplv1.AnswerColdGateRequest_Pay{Pay: &agentreplv1.AnswerColdGatePay{}},
-	})); err != nil {
-		t.Fatalf("AnswerColdGate{pay} = error %v, want a success", err)
+// answer answers the gate with CHOICE, failing the test on anything but a
+// success.
+func (g heldAtTheGate) answer(t *testing.T, choice *agentreplv1.AnswerColdGateRequest) {
+	t.Helper()
+	choice.Workspace, choice.Gate = g.f.ws, g.gateRow.GetId()
+	resp, err := g.f.d.Client().AnswerColdGate(g.f.d.Ctx(), connect.NewRequest(choice))
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("AnswerColdGate = %v, %v; want a success", resp, err)
 	}
+}
 
-	// Assert: the session the answer brings up is handed the held prompt.
-	shim.ExpectStartSession()
-	if got := shim.ExpectStartTurn(); got.GetTurn().GetValue() != turn.GetValue() {
-		t.Fatalf("StartTurn turn = %q, want the held prompt %q delivered", got.GetTurn().GetValue(), turn.GetValue())
+// firstTurnAfterTheAnswerIsANewPrompt submits a fresh prompt once the answer
+// brought the session up, and asserts it is the FIRST turn the session is
+// handed: a held prompt the answer sent would have gone before it.
+func (g heldAtTheGate) firstTurnAfterTheAnswerIsANewPrompt(t *testing.T) {
+	t.Helper()
+	g.shim.ExpectStartSession()
+	// The remediated re-open is wired a moment after the shim takes it, and a
+	// prompt submitted before is refused by the gate's name. The host view
+	// reporting the session live, attached and open is the wire's statement
+	// that it serves.
+	host := g.f.d.WatchHost(g.f.ws)
+	defer host.Close()
+	ctx, cancel := g.f.d.WaitCtx()
+	defer cancel()
+	harness.AwaitView(t, ctx, host, "the re-opened session reporting live, attached and open",
+		func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
+			live := r.GetHost().GetExisting().GetLive()
+			return live != nil && live.GetShimAttached() && live.GetOpen() != nil
+		})
+	fresh := g.f.submit("a fresh prompt", "k-after-the-gate", origin).GetSuccess().GetTurn().GetTurn()
+	if got := g.shim.ExpectStartTurn(); got.GetTurn().GetValue() != fresh.GetValue() {
+		t.Fatalf("first StartTurn = %q, want the fresh prompt %q: the held prompt %q must not be sent by the answer",
+			got.GetTurn().GetValue(), fresh.GetValue(), g.turn.GetValue())
+	}
+}
+
+// TestAPromptHeldAtTheColdGateIsKeptForTheUserByPay pins the owner's ruling
+// (2026-10-13): pay re-opens the session and sends nothing; the held prompt
+// waits, badged "held for you", for the user to send it.
+func TestAPromptHeldAtTheColdGateIsKeptForTheUserByPay(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	g := promptHeldAtTheGate(t)
+
+	// Act.
+	g.answer(t, &agentreplv1.AnswerColdGateRequest{Choice: &agentreplv1.AnswerColdGateRequest_Pay{Pay: &agentreplv1.AnswerColdGatePay{}}})
+
+	// Assert.
+	harness.AwaitView(t, g.f.d.Ctx(), g.holds, "the prompt kept for the user", func(tray *frontendv1.FeedHeld) bool {
+		p := promptHeldEntry(tray, g.turn)
+		return p.GetColdGateAnswered() != nil && p.GetBadge().GetColdGateAnswered() != nil
+	})
+	g.firstTurnAfterTheAnswerIsANewPrompt(t)
+}
+
+// TestAPromptHeldAtTheColdGateIsDiscardedByClear pins the owner's ruling
+// (2026-10-13): clear is the gate's big red button, and discards the held
+// prompts rather than sending them into the cleared session.
+func TestAPromptHeldAtTheColdGateIsDiscardedByClear(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	g := promptHeldAtTheGate(t)
+
+	// Act.
+	g.answer(t, &agentreplv1.AnswerColdGateRequest{Choice: &agentreplv1.AnswerColdGateRequest_Clear{Clear: &agentreplv1.AnswerColdGateClear{}}})
+
+	// Assert.
+	harness.AwaitView(t, g.f.d.Ctx(), g.holds, "the held prompt discarded", func(tray *frontendv1.FeedHeld) bool {
+		return promptHeldEntry(tray, g.turn) == nil
+	})
+	g.firstTurnAfterTheAnswerIsANewPrompt(t)
+}
+
+// TestAPromptHeldAtTheColdGateIsSentByCompactAndResume pins that the gate
+// offers compact-and-resume while a prompt is held at it, and that this one
+// answer sends the held prompt once the compacted session is up.
+func TestAPromptHeldAtTheColdGateIsSentByCompactAndResume(t *testing.T) {
+	t.Parallel()
+	// Arrange: the gate offers the button for the one held prompt.
+	g := promptHeldAtTheGate(t)
+	offers := func(r *frontendv1.FeedRow) bool {
+		return r.GetColdGate().GetStanding().GetCompactAndResume().GetHeldPrompts() == 1
+	}
+	// The gate is raised before or after the prompt is held at it; either way
+	// a row offering the button follows the last of the two.
+	row := g.gateRow
+	if !offers(row) {
+		row = awaitRow(t, g.f, g.feed, "the cold gate offering compact and resume", offers)
+	}
+	model := row.GetColdGate().GetStanding().GetCompact().GetModels()[0].GetModel()
+
+	// Act.
+	g.answer(t, &agentreplv1.AnswerColdGateRequest{Choice: &agentreplv1.AnswerColdGateRequest_CompactAndResume{
+		CompactAndResume: &agentreplv1.AnswerColdGateCompact{
+			Model: &conversationv1.AgentModel{Name: model.GetName()},
+			Scope: conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL,
+		},
+	}})
+
+	// Assert: the compacted session is handed the held prompt.
+	if compact := g.shim.ExpectStartSession().GetResume().GetColdRemediation().GetCompact(); compact == nil {
+		t.Fatal("the re-open carried no compact remediation")
+	}
+	if got := g.shim.ExpectStartTurn(); got.GetTurn().GetValue() != g.turn.GetValue() {
+		t.Fatalf("StartTurn turn = %q, want the held prompt %q sent", got.GetTurn().GetValue(), g.turn.GetValue())
 	}
 }
 
