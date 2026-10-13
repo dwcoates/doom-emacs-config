@@ -1340,10 +1340,10 @@ NAME is the canonical spelling, e.g. \"Content-Type\"."
   "Return the protojson ROSTER with a `tabBar', unless it already carries one.
 The daemon always sends the tab bar; a fixture that states no order of its
 own gets the open rows in the order it lists them -- each repository
-section depth-first, then the viewed rows, then the hidden rows, then each
-merged group's rows -- with a collapsed section's or merged group's tabs
-and every hidden row's withheld, exactly as the daemon withholds them.  A
-fixture testing an order of its own sets `tabBar' itself."
+section depth-first, then the hidden rows, then each merged group's rows --
+with a collapsed section's or merged group's tabs and every hidden row's
+withheld, exactly as the daemon withholds them.  A fixture testing an order of its own sets
+`tabBar' itself."
   (if (assq 'tabBar roster)
       roster
     (let (tabs)
@@ -1357,80 +1357,11 @@ fixture testing an order of its own sets `tabBar' itself."
         (seq-doseq (section (or (alist-get 'sections (alist-get 'repository roster)) []))
           (walk (or (alist-get 'rows (alist-get 'rows section)) [])
                 (if (assq 'collapsed section) 'withheldCollapsed 'drawn)))
-        (walk (or (alist-get 'rows (alist-get 'rows (alist-get 'viewed roster))) []) 'drawn)
         (walk (or (alist-get 'rows (alist-get 'rows (alist-get 'hidden roster))) []) 'withheldHidden)
         (seq-doseq (group (or (alist-get 'groups (alist-get 'recentlyMerged roster)) []))
           (walk (or (alist-get 'rows (alist-get 'rows group)) [])
                 (if (assq 'repositoryCollapsed group) 'withheldCollapsed 'drawn))))
       (append roster `((tabBar . ((tabs . ,(vconcat (nreverse tabs))))))))))
-
-(defun agent-repl-itest--rows-of-repository (rows repository)
-  "Return ROWS, children included, each stating REPOSITORY unless it states one.
-The daemon states every row's repository (`RosterRowWorkspace.repository'),
-equal to its section's key; a fixture row that already states one, or that
-is not an alist row, is kept as written."
-  (vconcat
-   (seq-map (lambda (row)
-              (let* ((ws (alist-get 'workspace row))
-                     (ws (if (or (null repository) (assq 'repository ws))
-                             ws
-                           (append ws `((repository . ,repository)))))
-                     (children (alist-get 'children row)))
-                (append `((workspace . ,ws))
-                        (and children
-                             `((children . ,(agent-repl-itest--rows-of-repository children repository))))
-                        (seq-remove (lambda (cell) (memq (car-safe cell) '(workspace children))) row))))
-            rows)))
-
-(defun agent-repl-itest--as-the-daemon-sends (roster)
-  "Return the protojson ROSTER completed as the daemon always sends it.
-Fills what a fixture states no fact about: the `viewed' section (empty,
-expanded), each row's repository (its section's or merged group's key;
-a task, maturity or band row takes the first repository section's), and
-the tab bar
-\(`agent-repl-itest--with-tab-bar').  A field the fixture states -- or
-deliberately omits from a section it builds -- is never touched beyond
-that."
-  (let* ((sections (or (alist-get 'sections (alist-get 'repository roster)) []))
-         (first-key (and (> (length sections) 0)
-                         (alist-get 'repository (alist-get 'key (aref sections 0)))))
-         (rows-in (lambda (holder repository)
-                    (if (assq 'rows holder)
-                        (cons `(rows . ((rows . ,(agent-repl-itest--rows-of-repository
-                                                   (or (alist-get 'rows (alist-get 'rows holder)) [])
-                                                   repository))))
-                              (assq-delete-all 'rows (copy-sequence holder)))
-                      holder)))
-         (roster (copy-sequence roster)))
-    (when (assq 'repository roster)
-      (setf (alist-get 'repository roster)
-            `((sections . ,(vconcat
-                            (seq-map (lambda (section)
-                                       (funcall rows-in section
-                                                (alist-get 'repository (alist-get 'key section))))
-                                     sections))))))
-    (dolist (grouping '(task maturity))
-      (when (assq grouping roster)
-        (setf (alist-get grouping roster)
-              `((sections . ,(vconcat
-                              (seq-map (lambda (section) (funcall rows-in section first-key))
-                                       (or (alist-get 'sections (alist-get grouping roster)) []))))))))
-    (dolist (band '(viewed hidden))
-      (when (assq band roster)
-        (setf (alist-get band roster) (funcall rows-in (alist-get band roster) first-key))))
-    (when (assq 'recentlyMerged roster)
-      (let ((merged (copy-sequence (alist-get 'recentlyMerged roster))))
-        (setf (alist-get 'groups merged)
-              (vconcat (seq-map (lambda (group)
-                                  (funcall rows-in group (alist-get 'repository (alist-get 'key group))))
-                                (or (alist-get 'groups merged) []))))
-        (setf (alist-get 'recentlyMerged roster) merged)))
-    (unless (assq 'viewed roster)
-      (setq roster (append roster
-                           '((viewed . ((header . ((label . ((text . "Viewed"))) (count . ((workspaces . 0)))))
-                                        (rows . ((rows . [])))
-                                        (expanded . ())))))))
-    (agent-repl-itest--with-tab-bar roster)))
 
 (provide 'test-integration-helpers)
 

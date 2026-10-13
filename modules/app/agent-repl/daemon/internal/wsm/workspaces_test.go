@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 )
 
 func TestNormalizeDirCollapsesEverySpelling(t *testing.T) {
@@ -1220,7 +1219,6 @@ func TestSetResultStoresTheLastTurnResult(t *testing.T) {
 		{name: "an unread done", want: TurnResult{End: TurnResultDone}},
 		{name: "a read interrupted", want: TurnResult{End: TurnResultInterrupted, Read: true}},
 		{name: "an unread failed turn", want: TurnResult{End: TurnResultFailed}},
-		{name: "a read done with its read instant", want: TurnResult{End: TurnResultDone, Read: true, ReadAt: func() *time.Time { at := time.Date(2026, 10, 12, 9, 30, 0, 123456789, time.UTC); return &at }()}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1238,37 +1236,8 @@ func TestSetResultStoresTheLastTurnResult(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Workspace: %v", err)
 			}
-			if got.Result == nil || !got.Result.Same(tt.want) {
-				t.Fatalf("result = %+v, want %+v", got.Result, tt.want)
-			}
-		})
-	}
-}
-
-func TestTurnResultSame(t *testing.T) {
-	at := time.Date(2026, 10, 12, 9, 30, 0, 0, time.UTC)
-	sameInstantElsewhere := at.In(time.FixedZone("plus2", 2*60*60))
-	later := at.Add(time.Second)
-	tests := []struct {
-		name string
-		a, b TurnResult
-		want bool
-	}{
-		{"identical unread", TurnResult{End: TurnResultDone}, TurnResult{End: TurnResultDone}, true},
-		{"different ends", TurnResult{End: TurnResultDone}, TurnResult{End: TurnResultFailed}, false},
-		{"different read states", TurnResult{End: TurnResultDone}, TurnResult{End: TurnResultDone, Read: true}, false},
-		{"one read instant missing", TurnResult{End: TurnResultDone, Read: true, ReadAt: &at}, TurnResult{End: TurnResultDone, Read: true}, false},
-		{"one instant in two zones, distinct pointers", TurnResult{End: TurnResultDone, Read: true, ReadAt: &at}, TurnResult{End: TurnResultDone, Read: true, ReadAt: &sameInstantElsewhere}, true},
-		{"different instants", TurnResult{End: TurnResultDone, Read: true, ReadAt: &at}, TurnResult{End: TurnResultDone, Read: true, ReadAt: &later}, false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Act
-			got := tt.a.Same(tt.b)
-
-			// Assert
-			if got != tt.want {
-				t.Fatalf("Same = %v, want %v", got, tt.want)
+			if got.Result == nil || *got.Result != tt.want {
+				t.Fatalf("result = %v, want %v", got.Result, tt.want)
 			}
 		})
 	}

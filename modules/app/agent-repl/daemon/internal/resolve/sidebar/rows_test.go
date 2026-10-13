@@ -267,84 +267,6 @@ func TestTheWhenColumnCountsFromTheLastTurnEnd(t *testing.T) {
 	}
 }
 
-func TestAViewedRowShowsTimeSinceItWasLastViewed(t *testing.T) {
-	tests := []struct {
-		name     string
-		selected *time.Time
-		want     time.Time
-	}{
-		{name: "never selected: the read", selected: nil, want: epoch},
-		{name: "selected again after the read: the selection", selected: at(time.Hour), want: epoch.Add(time.Hour)},
-		{name: "selected before the read: the read", selected: at(-time.Hour), want: epoch},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange: the resolver's clock reads epoch, so the read is at epoch.
-			ws := workspace(string(theWS), "one")
-			ws.LastSelectedAt = tc.selected
-			r := finished(t, arrange(t, ws))
-
-			// Act.
-			r.SetViewed(theWS)
-
-			// Assert.
-			when := onlyRow(t, r).GetWhen()
-			if when.GetViewed() == nil || when.GetViewed().GetAtMs() != tc.want.UnixMilli() {
-				t.Fatalf("when = %v, want the viewed arm at %d", when, tc.want.UnixMilli())
-			}
-		})
-	}
-}
-
-func TestAnUnreadRowNeverShowsTheViewedArm(t *testing.T) {
-	// Arrange.
-	ws := workspace(string(theWS), "one")
-	ws.LastSelectedAt = at(time.Hour)
-
-	// Act.
-	r := finished(t, arrange(t, ws))
-
-	// Assert: the viewed arm is only ever on a viewed row.
-	when := onlyRow(t, r).GetWhen()
-	if when.GetViewed() != nil {
-		t.Fatalf("when = %v, want no viewed arm on an unread row", when)
-	}
-}
-
-func TestARestoredReadResultShowsItsDurableReadInstant(t *testing.T) {
-	tests := []struct {
-		name       string
-		readAt     *time.Time
-		wantViewed bool
-	}{
-		{name: "a kept read instant", readAt: at(3 * time.Hour), wantViewed: true},
-		{name: "a read from before the instant was kept, never selected", readAt: nil, wantViewed: false},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange.
-			ws := workspace(string(theWS), "one")
-			ws.LastTurnEndedAt = at(time.Hour)
-			ws.Result = &wsm.TurnResult{End: wsm.TurnResultDone, Read: true, ReadAt: tc.readAt}
-
-			// Act.
-			r := live(t, arrange(t, ws))
-
-			// Assert.
-			when := onlyRow(t, r).GetWhen()
-			if tc.wantViewed {
-				if when.GetViewed().GetAtMs() != tc.readAt.UnixMilli() {
-					t.Fatalf("when = %v, want the viewed arm at the durable read instant", when)
-				}
-				return
-			}
-			if when.GetTurnEnded().GetAtMs() != epoch.Add(time.Hour).UnixMilli() {
-				t.Fatalf("when = %v, want the turn_ended arm with no viewing instant on record", when)
-			}
-		})
-	}
-}
-
 func TestTheRosterKeepsTheLatestLiveTurnClose(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)
@@ -1002,9 +924,8 @@ func TestAnotherWorkspacesStatusChangeLeavesThisMarkerStanding(t *testing.T) {
 	// Act: the OTHER workspace takes a turn.
 	r.SetTurn(ids.WorkspaceID("w2"), &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 
-	// Assert: the reset is per row, never roster-wide. The viewed row stays
-	// in the viewed band.
-	row := rowFor(latest(t, r).GetViewed().GetRows().GetRows(), string(theWS))
+	// Assert: the reset is per row, never roster-wide.
+	row := rowFor(repoRows(t, latest(t, r)), string(theWS))
 	if row == nil {
 		t.Fatal("the viewed workspace lost its row")
 	}
