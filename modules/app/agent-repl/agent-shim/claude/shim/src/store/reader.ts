@@ -203,20 +203,53 @@ function toHistoryBoundary(
  * its boundary. THE ONE PLACE A STORE PAGE BECOMES A HISTORY PAGE, for the
  * opening page and a continuation alike.
  *
- * A TURN HEAD IS A LINE, converted by the very converter its lines are
+ * A TURN HEAD'S LINE IS A LINE, converted by the very converter its lines are
  * ({@link toHistoryEntryAt}): the prompt of a turn the page touches whose
- * prompt sits below it (store.v1 `turn_heads`), so the page draws whole in one
+ * prompt sits below it (store.v1 `heads`), so the page draws whole in one
  * read. A head that does not convert refuses the page exactly as a line that
- * does not convert does.
+ * does not convert does. Its `between` arm is carried over unchanged
+ * ({@link toHistoryTurnHead}).
  */
 function toHistoryPage(
-  page: Pick<storev1.AgentSessionPage, "lines" | "turnHeads" | "boundary">,
+  page: Pick<storev1.AgentSessionPage, "lines" | "heads" | "boundary">,
 ): conversationv1.HistoryPage {
   return create(conversationv1.HistoryPageSchema, {
     entries: page.lines.map(toHistoryEntryAt),
     boundary: toHistoryBoundary(page.boundary),
-    turnHeads: page.turnHeads.map(toHistoryEntryAt),
+    heads: page.heads.map(toHistoryTurnHead),
   });
+}
+
+/**
+ * One store turn head as a history turn head: its prompt line through
+ * {@link toHistoryEntryAt}, and its `between` arm as the store answered it.
+ *
+ * A HEAD WITH NO LINE OR NO `between` ARM REFUSES THE PAGE, never served as a
+ * guess: the store always sets both, and a reader told nothing would have to
+ * choose whether to draw "earlier steps".
+ */
+function toHistoryTurnHead(head: storev1.StoreTurnHead): conversationv1.HistoryTurnHead {
+  if (head.line === undefined) {
+    throw new PersistenceError("store_unavailable", "the store served a turn head with no prompt line");
+  }
+  const entry = toHistoryEntryAt(head.line);
+  switch (head.between.case) {
+    case "adjacent":
+      return create(conversationv1.HistoryTurnHeadSchema, {
+        entry,
+        between: { case: "adjacent", value: create(conversationv1.HistoryTurnHeadAdjacentSchema, {}) },
+      });
+    case "stepsBetween":
+      return create(conversationv1.HistoryTurnHeadSchema, {
+        entry,
+        between: { case: "stepsBetween", value: create(conversationv1.HistoryTurnHeadStepsBetweenSchema, {}) },
+      });
+    default:
+      throw new PersistenceError(
+        "store_unavailable",
+        "the store served a turn head with no between arm set",
+      );
+  }
 }
 
 /**

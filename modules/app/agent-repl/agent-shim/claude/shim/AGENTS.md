@@ -1451,12 +1451,14 @@ serves one on every entry it hands out.
   served with no place (one that predates places) is served unplaced and
   traced at debug; the proto defines that as "the serving side states no
   places", which the consumer orders by its own receipt.
-- **A PAGE CARRIES ITS TURN HEADS** (`turn_heads`,
+- **A PAGE CARRIES ITS TURN HEADS** (`heads`,
   `docs/protobuf-design/complete-pages.md`). `toHistoryPage`
   (`store/reader.ts`) is the one place a store page (an open's
   `AgentSessionPage` or a `ReadAgentPageSuccess`) becomes a `HistoryPage`, and
-  it converts each head with `toHistoryEntryAt`, so a head that does not
-  convert refuses the page exactly as such a line does. The catch-up walks
+  it converts each head's line with `toHistoryEntryAt` (`toHistoryTurnHead`),
+  so a head that does not convert refuses the page exactly as such a line
+  does, and carries its `between` arm (`adjacent` / `steps_between`) over
+  unchanged; a head with no line or no arm refuses the page. The catch-up walks
   (`walkToMark`, `walkEntriesToMark`) flatten store pages into TAIL entries,
   not a page, and carry no heads.
 - **`ReadHistory.through`** is validated (a positive `at_ms`,

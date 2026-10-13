@@ -419,12 +419,14 @@ export async function startFakeStore(socketPath: string, options: FakeStoreOptio
   const placedRowsOf = (agentId: string): StoredRow[] => [...rowsOf(agentId)].sort(placeOrder);
 
   /**
-   * A page's TURN HEADS, as the real store serves them (store.v1 `turn_heads`):
+   * A page's TURN HEADS, as the real store serves them (store.v1 `heads`):
    * for each turn a row of `window` (ascending place) is stamped with, its
    * prompt row when that is placed below the page's lowest row, newest first,
    * each turn once. A turn whose prompt is on the page, or with none, has none.
+   * Each head is `stepsBetween` when a row of its turn is placed strictly
+   * between it and the page's lowest row, `adjacent` otherwise.
    */
-  const turnHeadsOf = (agentId: string, window: readonly StoredRow[]): storev1.StoreLineAt[] => {
+  const turnHeadsOf = (agentId: string, window: readonly StoredRow[]): storev1.StoreTurnHead[] => {
     const lowest = window[0];
     if (lowest === undefined) return [];
     const isPrompt = (row: StoredRow): boolean => row.line.agentItem?.item.case === "agentPrompt";
@@ -432,14 +434,25 @@ export async function startFakeStore(socketPath: string, options: FakeStoreOptio
     const wanted = new Set(
       window.map((row) => row.turn?.value ?? "").filter((turn) => turn !== "" && !onPage.has(turn)),
     );
-    const heads: StoredRow[] = [];
-    for (const row of placedRowsOf(agentId).reverse()) {
+    const placed = placedRowsOf(agentId);
+    const heads: storev1.StoreTurnHead[] = [];
+    for (const row of [...placed].reverse()) {
       const turn = row.turn?.value ?? "";
       if (!isPrompt(row) || !wanted.has(turn) || placeOrder(row, lowest) >= 0) continue;
       wanted.delete(turn);
-      heads.push(row);
+      const stepsBetween = placed.some(
+        (step) => step.turn?.value === turn && placeOrder(step, row) > 0 && placeOrder(step, lowest) < 0,
+      );
+      heads.push(
+        create(storev1.StoreTurnHeadSchema, {
+          line: lineAt(row),
+          between: stepsBetween
+            ? { case: "stepsBetween", value: create(storev1.StoreTurnHeadStepsBetweenSchema, {}) }
+            : { case: "adjacent", value: create(storev1.StoreTurnHeadAdjacentSchema, {}) },
+        }),
+      );
     }
-    return heads.map(lineAt);
+    return heads;
   };
 
   /**
@@ -763,7 +776,7 @@ export async function startFakeStore(socketPath: string, options: FakeStoreOptio
             value: create(storev1.OpenAgentSessionSuccessSchema, {
               page: create(storev1.AgentSessionPageSchema, {
                 lines,
-                turnHeads: turnHeadsOf(bookId, window),
+                heads: turnHeadsOf(bookId, window),
                 boundary:
                   olderExist && oldestInPage !== undefined
                     ? {
@@ -966,7 +979,7 @@ export async function startFakeStore(socketPath: string, options: FakeStoreOptio
             case: "success",
             value: create(storev1.ReadAgentPageSuccessSchema, {
               lines,
-              turnHeads: turnHeadsOf(bookId, window),
+              heads: turnHeadsOf(bookId, window),
               boundary:
                 olderExist && oldestInPage !== undefined
                   ? {

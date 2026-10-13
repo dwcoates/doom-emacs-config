@@ -2508,7 +2508,9 @@ describe("ReadHistory", () => {
 
     // Assert.
     const success = response.result.value as shimv1.ReadHistorySuccess;
-    expect(success.page?.turnHeads.map((head) => head.at?.value)).toEqual(["prompt-1"]);
+    expect(success.page?.heads.map((head) => [head.entry?.at?.value, head.between.case])).toEqual([
+      ["prompt-1", "stepsBetween"],
+    ]);
   });
 
   it("does NOT report a session fault for an unknown agent", async () => {
@@ -3020,7 +3022,9 @@ describe("the opening page StartTurn paints", () => {
 
     // Assert.
     const success = response.result.value as shimv1.StartTurnSuccess;
-    expect(success.page?.turnHeads.map((head) => head.at?.value)).toEqual(["prompt-1"]);
+    expect(success.page?.heads.map((head) => [head.entry?.at?.value, head.between.case])).toEqual([
+      ["prompt-1", "stepsBetween"],
+    ]);
   });
 
   it("is read AFTER the prompt is durable, so the first paint holds the new turn", async () => {
@@ -4172,7 +4176,7 @@ describe("RollBackSession's turn steps", () => {
   });
 });
 
-/** A floor page of one step whose turn's prompt, at `headPointer`, rides as its turn head. */
+/** A floor page of one step whose turn's prompt, at `headPointer`, rides as its turn head with steps between. */
 function pageWithHead(headPointer: string): conversationv1.HistoryPage {
   return create(conversationv1.HistoryPageSchema, {
     entries: [
@@ -4184,12 +4188,15 @@ function pageWithHead(headPointer: string): conversationv1.HistoryPage {
       }),
     ],
     boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
-    turnHeads: [
-      create(conversationv1.HistoryEntryAtSchema, {
-        at: create(conversationv1.HistoryPointerSchema, { value: headPointer }),
-        entry: create(conversationv1.HistoryEntrySchema, {
-          entry: { case: "userPrompt", value: create(conversationv1.AgentPromptSchema, {}) },
+    heads: [
+      create(conversationv1.HistoryTurnHeadSchema, {
+        entry: create(conversationv1.HistoryEntryAtSchema, {
+          at: create(conversationv1.HistoryPointerSchema, { value: headPointer }),
+          entry: create(conversationv1.HistoryEntrySchema, {
+            entry: { case: "userPrompt", value: create(conversationv1.AgentPromptSchema, {}) },
+          }),
         }),
+        between: { case: "stepsBetween", value: create(conversationv1.HistoryTurnHeadStepsBetweenSchema, {}) },
       }),
     ],
   });
