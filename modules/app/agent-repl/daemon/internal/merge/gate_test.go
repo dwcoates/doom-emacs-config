@@ -326,3 +326,146 @@ func TestUnreadablePathsRunEverySuite(t *testing.T) {
 		t.Fatalf("runner argv = %v, want one unnarrowed run", h.runner.argv)
 	}
 }
+
+// gateRecord answers the first INFO record of the gate whose message holds
+// message.
+func gateRecord(t *testing.T, h *harness, message string) map[string]any {
+	t.Helper()
+	for _, rec := range h.logs.Records() {
+		if rec.Level == "info" && rec.Operation == "daemon.merge.tests" && strings.Contains(rec.Message, message) {
+			return rec.Context
+		}
+	}
+	t.Fatalf("no INFO daemon.merge.tests record says %q", message)
+	return nil
+}
+
+// gateRecords counts the INFO records of the gate whose message holds message.
+func gateRecords(h *harness, message string) int {
+	n := 0
+	for _, rec := range h.logs.Records() {
+		if rec.Level == "info" && rec.Operation == "daemon.merge.tests" && strings.Contains(rec.Message, message) {
+			n++
+		}
+	}
+	return n
+}
+
+// gateRuns scripts one gate run with output and exit code, and runs the merge.
+func gateRuns(t *testing.T, output string, code int) *harness {
+	t.Helper()
+	h := newHarness(t)
+	landing(h, 1)
+	h.runner.runs = []scriptedRun{{Output: output, Code: code}}
+	admitted(t, h)
+	return h
+}
+
+func TestAGatesStartIsRecordedWithItsSelection(t *testing.T) {
+	// Act.
+	h := gateRuns(t, "[agent-repl-tests] daemon: passed in 3s\n", 0)
+
+	// Assert.
+	got := gateRecord(t, h, "the merge's test gate started")
+	if got["suites"] != "daemon" || got["speculative"] != false {
+		t.Fatalf("start = %v, want the daemon suite, not speculative", got)
+	}
+}
+
+func TestAGatesSuiteSlotIsRecordedWithItsWait(t *testing.T) {
+	// Act.
+	h := gateRuns(t, "suite-slot: slot 2 acquired after 294s\n[agent-repl-tests] daemon: passed in 3s\n", 0)
+
+	// Assert.
+	got := gateRecord(t, h, "took the host's suite slot")
+	if got["wait_seconds"] != 294 || got["slot"] != "2" {
+		t.Fatalf("slot = %v, want slot 2 after 294s", got)
+	}
+}
+
+func TestAGateThatWaitedForNoSlotRecordsNoWait(t *testing.T) {
+	// Act.
+	h := gateRuns(t, "[agent-repl-tests] daemon: passed in 3s\n", 0)
+
+	// Assert.
+	if got := gateRecord(t, h, "took the host's suite slot"); got["wait_seconds"] != 0 {
+		t.Fatalf("slot = %v, want no wait", got)
+	}
+}
+
+func TestAGatesSuiteSlotIsRecordedOnce(t *testing.T) {
+	// Act.
+	h := gateRuns(t, "suite-slot: slot 1 acquired after 3s\n[agent-repl-tests] daemon: starting\n[agent-repl-tests] daemon: passed in 3s\n", 0)
+
+	// Assert.
+	if got := gateRecords(h, "took the host's suite slot"); got != 1 {
+		t.Fatalf("slot records = %d, want one", got)
+	}
+}
+
+func TestAGatesRunnerEndIsRecordedWithItsExit(t *testing.T) {
+	// Act.
+	h := gateRuns(t, "[agent-repl-tests] ERROR: daemon failed after 4s with exit code 1\n", 1)
+
+	// Assert.
+	got := gateRecord(t, h, "test runner finished")
+	if got["exit_code"] != 1 {
+		t.Fatalf("runner end = %v, want exit 1", got)
+	}
+	if _, timed := got["run_seconds"]; !timed {
+		t.Fatalf("runner end = %v, want its run seconds", got)
+	}
+}
+
+func TestAPassingGatesVerdictIsRecordedWithItsTotal(t *testing.T) {
+	// Act.
+	h := gateRuns(t, "[agent-repl-tests] daemon: passed in 3s\n", 0)
+
+	// Assert.
+	got := gateRecord(t, h, "the merge's suites passed")
+	if _, timed := got["total_seconds"]; !timed || got["verdict"] != "passed" {
+		t.Fatalf("verdict = %v, want passed with its total", got)
+	}
+}
+
+func TestAFailingGatesVerdictIsRecordedWithItsTotal(t *testing.T) {
+	// Act.
+	h := gateRuns(t, "[agent-repl-tests] ERROR: daemon failed after 4s with exit code 1\n", 1)
+
+	// Assert.
+	got := gateRecord(t, h, "the merge's suites failed")
+	if _, timed := got["total_seconds"]; !timed || got["verdict"] != "failed" {
+		t.Fatalf("verdict = %v, want failed with its total", got)
+	}
+}
+
+func TestAnEmptySelectionsVerdictIsRecordedWithItsTotal(t *testing.T) {
+	// Arrange.
+	h := docsOnlyMerge(t)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	got := gateRecord(t, h, "no suite is selected")
+	if _, timed := got["total_seconds"]; !timed || got["verdict"] != "no suite selected" {
+		t.Fatalf("verdict = %v, want no suite selected with its total", got)
+	}
+}
+
+func TestAGateTheDaemonsExitCutIsRecorded(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.landsCleanly("abc123def4567")
+
+	// Act.
+	heldInGate(t, h)
+
+	// Assert.
+	got := gateRecord(t, h, "test gate was cut before its verdict")
+	if _, timed := got["since_gate_start_seconds"]; !timed {
+		t.Fatalf("cut = %v, want how long the gate had run", got)
+	}
+}
