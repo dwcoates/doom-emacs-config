@@ -12,8 +12,18 @@
  * its transcript: a resume at a fork point appends the next record as the fork
  * point's child, so a file that was rolled back before still holds the dropped
  * branch. The conversation is the chain walked from its head back through
- * `parentUuid` (and across a compaction through `logicalParentUuid`), and every
- * question here is asked of that chain.
+ * `parentUuid`, and every question here is asked of that chain.
+ *
+ * A COMPACTION IS WHERE THE CHAIN STARTS. Its `compact_boundary` has a null
+ * `parentUuid`, and the walk ends there exactly as the vendor's own loader
+ * does. It never crosses through the boundary's `logicalParentUuid`: nothing
+ * before the newest compaction or clear can be rolled back to (owner ruling,
+ * 2026-10-13; the daemon's `rollbackPrompts` offers none), so the history
+ * behind a boundary is never a question asked here. Crossing it was also how a
+ * real vendor boundary broke resumes: Claude Code 2.1.296 wrote the last
+ * PRESERVED record after the summary, under the anchor, and named it as the
+ * boundary's logical parent, so the crossing walked back into its own chain
+ * and every resume of that transcript answered `unreadable`.
  *
  * THE HEAD IS ONE RULE ({@link readLiveChain}). The vendor's head is the last
  * chained record in the file. Right after a rollback nothing new has been
@@ -76,7 +86,6 @@ export function vendorCutRefusal(evidence: string, anchorUuid?: string): string 
 export interface ChainRecord extends TitleDigestRecord {
   readonly uuid: string;
   readonly parentUuid?: unknown;
-  readonly logicalParentUuid?: unknown;
   readonly origin?: { readonly kind?: unknown };
 }
 
@@ -102,8 +111,8 @@ export type ChainRead =
  * the vendor itself resumes from.
  *
  * A LINE THAT DOES NOT PARSE IS SKIPPED, as every transcript reader here skips
- * one: a live process appends to the file, so the last line can be torn. A
- * CYCLE, or a named head the file does not hold, is a broken chain and answers
+ * one: a live process appends to the file, so the last line can be torn. The
+ * walk ends at the newest compaction's boundary. A CYCLE, or a named head the file does not hold, is a broken chain and answers
  * `unreadable`: the cut would be planned on a conversation that does not exist.
  */
 export function readTranscriptChain(file: string, head?: string): ChainRead {
@@ -154,15 +163,22 @@ export function readTranscriptChain(file: string, head?: string): ChainRead {
     at = parentOf(record);
   }
   chain.reverse();
+  const opening = chain[0];
+  if (opening?.type === "system" && opening.subtype === "compact_boundary") {
+    LOGGER.debug(
+      { file, head: start ?? "", boundary: opening.uuid, length: chain.length },
+      "the conversation starts at its newest compaction",
+    );
+  }
   return { kind: "ok", transcript: { byUuid, chain } };
 }
 
-/** A record's predecessor in the conversation, across a compaction too. */
+/**
+ * A record's predecessor in the conversation. A compaction's boundary has
+ * none: the chain starts there (see the module comment).
+ */
 function parentOf(record: ChainRecord): string | undefined {
   if (typeof record.parentUuid === "string" && record.parentUuid !== "") return record.parentUuid;
-  if (typeof record.logicalParentUuid === "string" && record.logicalParentUuid !== "") {
-    return record.logicalParentUuid;
-  }
   return undefined;
 }
 
