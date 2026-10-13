@@ -1,6 +1,7 @@
 package sidebar
 
 import (
+	"fmt"
 	"sort"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -57,6 +58,30 @@ func sortWorkspaces(in []wsm.Workspace) []wsm.Workspace {
 	out := make([]wsm.Workspace, len(in))
 	copy(out, in)
 	sort.SliceStable(out, func(i, j int) bool { return lessWorkspace(out[i], out[j]) })
+	return out
+}
+
+// sortMergedNewestFirst puts the recently-merged band's rows in MERGE ORDER,
+// the latest merge first (owner request, 2026-10-13: the band reads as the
+// sequence the merges landed in, newest on top). Roster order breaks a tie, so
+// two merges stamped the same instant still draw in one order everywhere.
+// Every row it is handed is merged; one with no merge instant is a defect, and
+// panics. It sorts a copy, as sortWorkspaces does.
+func sortMergedNewestFirst(in []wsm.Workspace) []wsm.Workspace {
+	out := make([]wsm.Workspace, len(in))
+	copy(out, in)
+	for _, ws := range out {
+		if ws.MergedAt == nil {
+			panic(fmt.Sprintf("sidebar: recently-merged row %s has no merge instant", ws.ID))
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := *out[i].MergedAt, *out[j].MergedAt
+		if !a.Equal(b) {
+			return a.After(b)
+		}
+		return lessWorkspace(out[i], out[j])
+	})
 	return out
 }
 
