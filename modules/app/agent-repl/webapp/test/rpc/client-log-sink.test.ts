@@ -1,15 +1,13 @@
 // The webapp logger's sink: one ClientLog call per record, filed under the
 // source the caller names. See src/rpc/client-log-sink.ts.
 import { create } from "@bufbuild/protobuf";
-import { createRouterTransport } from "@connectrpc/connect";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { ClientLogRecordSchema, ClientLogResponseSchema, type ClientLogRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_client_log_pb";
-import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
+import { ClientLogRecordSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_client_log_pb";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
-import { createAgentReplClient } from "../../src/rpc/client.js";
 import { clearClientFailures, standingClientFailure } from "../../src/rpc/link.js";
 import { clientLogSink } from "../../src/rpc/client-log-sink.js";
+import { clientLogRecorder } from "./client-log-recorder.js";
 
 afterEach(() => {
   clearClientFailures();
@@ -22,33 +20,23 @@ const RECORD = create(ClientLogRecordSchema, {
   message: "m",
 });
 
-/** A client whose ClientLog records each request and answers ANSWER, or throws. */
+/** A client answering ANSWER: success, the unknown-workspace refusal, a refusal naming no cause, or a throw. */
 function clientAnswering(answer: "success" | "unknownWorkspace" | "refused" | "throws") {
-  const requests: ClientLogRequest[] = [];
-  const transport = createRouterTransport(({ service }) => {
-    service(AgentRepl, {
-      clientLog(request) {
-        requests.push(request);
-        if (answer === "throws") throw new Error("the sink is down");
-        if (answer === "success") return create(ClientLogResponseSchema, { result: { case: "success", value: {} } });
-        // A refusal whose cause this build does not name arrives with the
-        // cause unset.
-        return create(ClientLogResponseSchema, {
-          result: {
-            case: "error",
-            value: answer === "unknownWorkspace" ? { cause: { case: "unknownWorkspace", value: {} } } : {},
-          },
-        });
-      },
-    });
+  if (answer === "throws") return clientLogRecorder(new Error("the sink is down"));
+  if (answer === "success") return clientLogRecorder();
+  // A refusal whose cause this build does not name arrives with the cause unset.
+  return clientLogRecorder({
+    result: {
+      case: "error",
+      value: answer === "unknownWorkspace" ? { cause: { case: "unknownWorkspace", value: {} } } : {},
+    },
   });
-  return { client: createAgentReplClient(transport), requests };
 }
 
 describe("clientLogSink", () => {
   it("files a workspace page's record under its workspace", async () => {
     // Arrange
-    const { client, requests } = clientAnswering("success");
+    const { client, logged: requests } = clientAnswering("success");
     const sink = clientLogSink(() => client, { case: "workspace", value: WORKSPACE });
 
     // Act
@@ -60,7 +48,7 @@ describe("clientLogSink", () => {
 
   it("files the webhost's record as the webhost's", async () => {
     // Arrange
-    const { client, requests } = clientAnswering("success");
+    const { client, logged: requests } = clientAnswering("success");
     const sink = clientLogSink(() => client, { case: "webhost", value: {} });
 
     // Act

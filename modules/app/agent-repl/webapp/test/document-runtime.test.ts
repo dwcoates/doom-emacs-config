@@ -4,33 +4,16 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { create } from "@bufbuild/protobuf";
-import { createRouterTransport } from "@connectrpc/connect";
 import { describe, expect, it } from "vitest";
 
-import { ClientLogResponseSchema, type ClientLogRequest } from "../../proto/gen/ts/agentrepl/v1/endpoint_client_log_pb";
-import { AgentRepl } from "../../proto/gen/ts/agentrepl/v1/service_pb";
+import type { ClientLogRequest } from "../../proto/gen/ts/agentrepl/v1/endpoint_client_log_pb";
 import { installForwardingLogger, installTextAffordances } from "../src/document-runtime.js";
+import { clientLogRecorder } from "./rpc/client-log-recorder.js";
 import { setLogger, log, type ForwardingLogger } from "../src/log.js";
-import { createAgentReplClient } from "../src/rpc/client.js";
-
-/** A client recording every ClientLog request. */
-function recordingClient() {
-  const logged: ClientLogRequest[] = [];
-  const transport = createRouterTransport(({ service }) => {
-    service(AgentRepl, {
-      clientLog(request) {
-        logged.push(request);
-        return create(ClientLogResponseSchema, { result: { case: "success", value: {} } });
-      },
-    });
-  });
-  return { client: createAgentReplClient(transport), logged };
-}
 
 /** Install a forwarding logger as SOURCE at THRESHOLD, log at LEVEL, and answer what reached the daemon. */
 async function forwardOne(threshold: "info" | "warn", level: "info" | "warn"): Promise<ClientLogRequest[]> {
-  const { client, logged } = recordingClient();
+  const { client, logged } = clientLogRecorder();
   let installed: ForwardingLogger | null = null;
   installForwardingLogger(() => client, { case: "webhost", value: {} }, threshold, (logger) => {
     installed = logger;
@@ -61,7 +44,7 @@ describe("installForwardingLogger", () => {
 
   it("answers the logger it installed", () => {
     // Arrange
-    const { client } = recordingClient();
+    const { client } = clientLogRecorder();
     let installed: ForwardingLogger | null = null;
 
     // Act
