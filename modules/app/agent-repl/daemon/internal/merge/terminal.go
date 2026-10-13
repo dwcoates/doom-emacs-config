@@ -1040,9 +1040,8 @@ func (o *orchestrator) AnswerQueueOffer(ctx context.Context, ws ids.WorkspaceID,
 			return err
 		}
 	case QueueOfferPrioritize:
+		// A store failure is recorded once, by the reorder itself.
 		if err := o.prioritize(ctx, ws); err != nil {
-			fields["error"] = err.Error()
-			log.Error(op, "could not prioritize the merge on the user's answer", fields)
 			return err
 		}
 	default:
@@ -1055,23 +1054,16 @@ func (o *orchestrator) AnswerQueueOffer(ctx context.Context, ws ids.WorkspaceID,
 // prioritize moves WS's waiting merge to the front of the merges waiting in
 // its queue, and redraws every bubble on that queue when the order changed.
 func (o *orchestrator) prioritize(ctx context.Context, ws ids.WorkspaceID) error {
-	const op = "daemon.merge.prioritize"
-	log := o.log(ctx, ws)
-	repo, err := o.queueOf(ctx, ws)
-	if err != nil {
-		return err
-	}
-	fields := dlog.Context{"workspace": string(ws), "repo": string(repo)}
-	moved, err := o.deps.DB.PrioritizeMerge(ctx, repo, ws)
-	if err != nil {
-		return err
-	}
-	if !moved {
-		log.Info(op, "a merge asked to run next is running or already first in line, and stays where it is", fields)
-		return nil
-	}
-	log.Info(op, "moved a merge to the front of the merges waiting in its queue", fields)
-	return o.republishQueue(ctx, repo)
+	_, err := o.reorder(ctx, ws, reordering{
+		op:      "daemon.merge.prioritize",
+		failed:  "could not move a merge to the front of the merges waiting in its queue",
+		unmoved: "a merge asked to run next is running or already first in line, and stays where it is",
+		moved:   "moved a merge to the front of the merges waiting in its queue",
+		do: func(repo wsm.RepoKey) (bool, error) {
+			return o.deps.DB.PrioritizeMerge(ctx, repo, ws)
+		},
+	})
+	return err
 }
 
 // clearOffer retires the merge-queue question, whether it was answered or
