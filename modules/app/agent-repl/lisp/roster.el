@@ -269,8 +269,7 @@ it leaves `:pending'."
   "Return the viewed marker of WS's current roster row, or nil.
 Nil before any push has carried a row for WS.  This is the ONLY input to
 the tab-bar's partial/full decision: the daemon owns the mode."
-  (let ((row (agent-repl-roster-row-for-ws ws)))
-    (and row (plist-get row :viewed))))
+  (agent-repl-roster--for-ws ws (lambda (row) (plist-get row :viewed))))
 
 (defun agent-repl-roster-row-one-shot (row)
   "Return non-nil when ROW carries the one-shot mark (`RosterRowOneShot').
@@ -282,8 +281,7 @@ The mark is presence alone: the workspace was created as a one-shot."
 Nil before any push has carried a row for WS, and for a workspace that is
 not a one-shot.  The tab bar draws its glyph from it while the one-shot
 works \(`agent-repl-status-tab-glyph')."
-  (let ((row (agent-repl-roster-row-for-ws ws)))
-    (and row (agent-repl-roster-row-one-shot row))))
+  (agent-repl-roster--for-ws ws #'agent-repl-roster-row-one-shot))
 
 (defun agent-repl-roster-row-async-merging (row)
   "Return non-nil when ROW carries the async-merging marker.
@@ -296,8 +294,7 @@ own branch merges async in a hidden merge workspace."
 Nil before any push has carried a row for WS, and while no async merge of
 its branch is in flight.  The tab bar paints its [N] run purple from it
 \(`agent-repl--tab-spec-async-merge\=')."
-  (let ((row (agent-repl-roster-row-for-ws ws)))
-    (and row (agent-repl-roster-row-async-merging row))))
+  (agent-repl-roster--for-ws ws #'agent-repl-roster-row-async-merging))
 
 ;;;; ---- The walk ---------------------------------------------------------
 
@@ -788,8 +785,14 @@ A row that fails to reconcile is contained rather than fatal; see
 
 (defun agent-repl-roster-status-for-ws (ws)
   "Return WS's roster status arm keyword, or nil before its first push."
+  (agent-repl-roster--for-ws ws #'agent-repl-roster-row-status))
+
+(defun agent-repl-roster--for-ws (ws reader)
+  "Return READER applied to WS's current roster row, or nil.
+Nil, with READER never called, before any push has carried a row for WS.
+The one shape every `agent-repl-roster-*-for-ws' reader shares."
   (let ((row (agent-repl-roster-row-for-ws ws)))
-    (and row (agent-repl-roster-row-status row))))
+    (and row (funcall reader row))))
 
 (defun agent-repl-roster-last-selected-ms (ws)
   "Return WS's durable last-selected instant in epoch ms, or nil.
