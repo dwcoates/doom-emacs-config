@@ -732,6 +732,17 @@ func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.Wo
 			dlog.Context{"repo": string(repo), "workspace": string(front.Workspace)})
 		return "", nil, false, nil
 	}
+	// A FRONT WHOSE BACKGROUND REBASE IS STILL RUNNING is admitted once it
+	// settles back into line (rebasewaiting.go kicks the pump then).
+	o.mu.Lock()
+	held := o.runsByWorkspace[front.Workspace]
+	rebasing := held != nil && held.background
+	o.mu.Unlock()
+	if rebasing {
+		o.deps.Log.Global().Debug(op, "the queue front is rebasing in the background; it is admitted once that settles",
+			dlog.Context{"repo": string(repo), "workspace": string(front.Workspace)})
+		return "", nil, false, nil
+	}
 	// A FRONT ALREADY STARTING BEHIND THE HEAD is its chain's: it is promoted
 	// once its admission is written, never started a second time here.
 	if o.inChain(repo, front.Workspace) {

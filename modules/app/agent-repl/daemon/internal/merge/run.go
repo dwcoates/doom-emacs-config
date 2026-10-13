@@ -75,6 +75,9 @@ type run struct {
 	// conflictAttempts how many it has had in a row (process.go conflict).
 	conflictCommit   string
 	conflictAttempts int
+	// background reports a waiting member's rebase (rebasewaiting.go): it
+	// records no progress and settles back into its place in line.
+	background bool
 	// claimedOn is the base the run last claimed the race to land on, so it
 	// claims once per base (race.go).
 	claimedOn string
