@@ -27,6 +27,8 @@ import {
   centerDelta,
   observeScrollBox,
   latestEntryVisible,
+  MoveWitness,
+  type MoveWitnessReport,
   type RevealGeometry,
 } from "../src/scroll.js";
 import { captureLogRecords, forwardedRecord, type LogCapture } from "./log-capture.js";
@@ -1685,6 +1687,69 @@ describe("observeScrollBox", () => {
     ]);
   });
 
+  it("states the content's last change on a move no cause wrote", async () => {
+    // Arrange — the stamp's text changes inside the box, then the box moves.
+    const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    const stamp = document.createElement("span");
+    stamp.className = "q-when";
+    stamp.textContent = "1m 5s ago";
+    box.content.append(stamp);
+    const tail = new TailFollow(box.element);
+    tail.initialPlacement();
+    observeScrollBox(box.element, tail);
+    const capture = captureLogRecords("info");
+    // Act
+    stamp.textContent = "1m 6s ago";
+    await Promise.resolve();
+    box.element.scrollTop = 684;
+    box.element.dispatchEvent(new Event("scroll"));
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.feed-moved-uncaused");
+    expect(record.context).toMatchObject({
+      from: 700,
+      to: 684,
+      mutated: ["span.q-when"],
+      mutations: 1,
+      top_after_mutation: 700,
+    });
+  });
+
+  it("says no change was witnessed when the content never changed", async () => {
+    // Arrange
+    const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    const tail = new TailFollow(box.element);
+    tail.initialPlacement();
+    observeScrollBox(box.element, tail);
+    const capture = captureLogRecords("info");
+    // Act
+    box.element.scrollTop = 684;
+    box.element.dispatchEvent(new Event("scroll"));
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.feed-moved-uncaused");
+    expect(record.context).toMatchObject({ from: 700, to: 684, mutated: "none" });
+  });
+
+  it("stops witnessing the content once unsubscribed", async () => {
+    // Arrange
+    const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    const stamp = document.createElement("span");
+    box.content.append(stamp);
+    const tail = new TailFollow(box.element);
+    tail.initialPlacement();
+    const stop = observeScrollBox(box.element, tail);
+    const capture = captureLogRecords("info");
+    // Act
+    stop();
+    stamp.textContent = "changed";
+    await Promise.resolve();
+    tail.isFollowing();
+    box.element.scrollTop = 684;
+    tail.isFollowing();
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.feed-moved-uncaused");
+    expect(record.context).toMatchObject({ mutated: "none" });
+  });
+
   it("does not record the reader's own move as uncaused", async () => {
     // Arrange
     const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
@@ -2929,5 +2994,145 @@ describe("expandCenterDelta", () => {
     ["an item near the end, clamped at the last position", { boxTop: 0, boxHeight: 300, nodeTop: 900, nodeHeight: 50 }, 600],
   ])("moves %s by its middle-to-middle offset", (_name, g, want) => {
     expect(expandCenterDelta(g, box)).toBe(want);
+  });
+});
+
+/**
+ * `MoveWitness` — what the feed's content last changed, beside every move the
+ * browser made on its own.
+ */
+describe("MoveWitness", () => {
+  /** A witness on a box at TOP, its clock and frames driven by hand. */
+  function witnessAt(top: number) {
+    const box = { scrollTop: top };
+    let now = 1000;
+    const frames: (() => void)[] = [];
+    const witness = new MoveWitness(box, () => now, (fn) => frames.push(fn));
+    return {
+      box,
+      witness,
+      advance: (ms: number) => {
+        now += ms;
+      },
+      /** Start one frame: run every callback waiting for it. */
+      frame: () => {
+        for (const fn of frames.splice(0)) fn();
+      },
+    };
+  }
+
+  /** An element of TAG wearing CLASSES. */
+  function el(tag: string, ...classes: string[]): HTMLElement {
+    const e = document.createElement(tag);
+    e.classList.add(...classes);
+    return e;
+  }
+
+  it("reports nothing before any change has landed", () => {
+    // Arrange
+    const { witness } = witnessAt(700);
+    // Act
+    const report = witness.report();
+    // Assert
+    expect(report).toBeNull();
+  });
+
+  it.each([
+    { name: "an element by its tag and classes", target: () => el("span", "q-when"), want: "span.q-when" },
+    { name: "an element with no class by its tag", target: () => el("div"), want: "div" },
+    {
+      name: "a text node by the element it sits in",
+      target: () => el("span", "perm-when").appendChild(document.createTextNode("3s ago")),
+      want: "span.perm-when",
+    },
+    { name: "a detached text node by its node name", target: () => document.createTextNode("x"), want: "#text" },
+  ])("names $name", ({ target, want }) => {
+    // Arrange
+    const { witness } = witnessAt(700);
+    // Act
+    witness.mutated([target()]);
+    // Assert
+    expect(witness.report()?.mutated).toEqual([want]);
+  });
+
+  it("names each element once, however many of its mutations landed", () => {
+    // Arrange
+    const { witness } = witnessAt(700);
+    const stamp = el("span", "q-when");
+    // Act
+    witness.mutated([stamp, stamp, stamp]);
+    // Assert
+    expect(witness.report()).toMatchObject({ mutated: ["span.q-when"], mutations: 3 });
+  });
+
+  it("names at most six elements of a large change, and counts every mutation", () => {
+    // Arrange
+    const { witness } = witnessAt(700);
+    const targets = Array.from({ length: 9 }, (_, i) => el("div", `c${i.toString()}`));
+    // Act
+    witness.mutated(targets);
+    // Assert
+    expect(witness.report()).toMatchObject({
+      mutated: ["div.c0", "div.c1", "div.c2", "div.c3", "div.c4", "div.c5"],
+      mutations: 9,
+    });
+  });
+
+  it("reads the box's position in the change's own task", () => {
+    // Arrange
+    const { box, witness } = witnessAt(700);
+    // Act — the position at the change, then a later move.
+    witness.mutated([el("span")]);
+    box.scrollTop = 684;
+    // Assert
+    expect(witness.report()?.top_after_mutation).toBe(700);
+  });
+
+  it("states how long ago the change landed", () => {
+    // Arrange
+    const { witness, advance } = witnessAt(700);
+    witness.mutated([el("span")]);
+    // Act
+    advance(12.4);
+    // Assert
+    expect(witness.report()?.ms_since_mutation).toBe(12);
+  });
+
+  it.each([
+    { frames: 0, want: 0 },
+    { frames: 1, want: 1 },
+    { frames: 2, want: 2 },
+    { frames: 5, want: 2 },
+  ])("counts $frames started frames as $want", ({ frames, want }) => {
+    // Arrange
+    const { witness, frame } = witnessAt(700);
+    witness.mutated([el("span")]);
+    // Act
+    for (let i = 0; i < frames; i++) frame();
+    // Assert
+    expect(witness.report()?.frames_since_mutation).toBe(want);
+  });
+
+  it("reports only the latest change, its frames counted afresh", () => {
+    // Arrange
+    const { witness, frame } = witnessAt(700);
+    witness.mutated([el("div", "old")]);
+    frame();
+    frame();
+    // Act
+    witness.mutated([el("span", "new")]);
+    // Assert
+    expect(witness.report()).toMatchObject({ mutated: ["span.new"], frames_since_mutation: 0 });
+  });
+
+  it("hands out a copy its caller cannot alter", () => {
+    // Arrange
+    const { witness } = witnessAt(700);
+    witness.mutated([el("span", "q-when")]);
+    const first: MoveWitnessReport | null = witness.report();
+    // Act
+    first?.mutated.push("tampered");
+    // Assert
+    expect(witness.report()?.mutated).toEqual(["span.q-when"]);
   });
 });
