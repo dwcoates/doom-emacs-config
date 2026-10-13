@@ -14,10 +14,30 @@ import "google/protobuf/struct.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
+// One forwarded record and the sink it is filed in.
 message ClientLogRequest {
-  workspace.v1.WorkspaceRef workspace = 1;
+  // WHOSE RECORD THIS IS, which decides the sink the daemon files it in. A
+  // workspace page's records belong to its workspace and land in that
+  // workspace's own log beside the rest of its telemetry. The webhost owns no
+  // workspace (it draws the sidebar, which shows every workspace), so its
+  // records land in the daemon's central log. Exactly one is set; a request
+  // with neither is refused as malformed.
+  oneof source {
+    // The workspace whose page wrote the record.
+    workspace.v1.WorkspaceRef workspace = 1;
+    // The webhost wrote the record.
+    ClientLogWebhost webhost = 3;
+  }
+  // The record itself.
   ClientLogRecord record = 2;
 }
+
+// The webhost as a log source: the one web view Emacs shows, which holds every
+// workspace page as an iframe and draws the sidebar once for all of them. It
+// carries nothing, because there is one webhost per Emacs and its records need
+// no identity beyond the client's own connection id, which every record
+// already carries in its context.
+message ClientLogWebhost {}
 
 // One diagnostic record, written to the daemon's on-disk structured log
 // beside the workspace's other telemetry.

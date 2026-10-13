@@ -57,5 +57,5 @@ func TestRequestBoundaryAfterCloseReadsNoRegistry(t *testing.T) {
 
 // clientLogRequestMessage is a ClientLog request naming the harness workspace.
 func clientLogRequestMessage() *agentreplv1.ClientLogRequest {
-	return &agentreplv1.ClientLogRequest{Workspace: ref()}
+	return &agentreplv1.ClientLogRequest{Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: ref()}}
 }

@@ -17,13 +17,18 @@
  * these messages, each tagged with {@link HOST_CHANNEL} so nothing else that
  * might post to a window is mistaken for one.
  *
- *   host -> page   presence, and the commands Emacs gives a workspace page;
- *   page -> host   hello (replay my state), and the facts Emacs reads back.
+ *   host -> page   presence, the commands Emacs gives a workspace page, and
+ *                  what the webhost's own sidebar needs the page to know
+ *                  (that it is docked over the page, and its failures);
+ *   page -> host   hello (replay my state), the facts Emacs reads back, and
+ *                  how tall the page's docked gate band is.
  *
  * Emacs reads the host synchronously (a script evaluation answers at once), so
  * every fact Emacs reads about a page is PUSHED to the host by the page when
  * it changes, and the host answers from that mirror.
  */
+
+import { isClientFailureArm, type ClientFailureArm } from "../failure/sink.js";
 
 /** The tag every message of this protocol carries. */
 export const HOST_CHANNEL = "agent-repl-host";
@@ -62,8 +67,45 @@ interface DismissDigestMessage {
   readonly kind: "dismissDigest";
 }
 
+/**
+ * host -> page: whether the webhost draws the sidebar over the page's sidebar
+ * column. While it does, the page keeps that column empty and reserved, so its
+ * main column and docked gate sit exactly where they would beside its own
+ * sidebar. Sent once the webhost's sidebar has drawn, and replayed on hello.
+ */
+interface SidebarDockMessage {
+  readonly channel: typeof HOST_CHANNEL;
+  readonly kind: "sidebarDock";
+  readonly docked: boolean;
+}
+
+/** One failure of the webhost's own machinery, as a warning chip row draws it. */
+export interface WebhostFailure {
+  readonly arm: ClientFailureArm;
+  readonly headline: string;
+  readonly evidence: ReadonlyArray<readonly [string, string]>;
+}
+
+/**
+ * host -> page: every failure of the webhost's own machinery standing now (its
+ * sidebar's stream or verbs). The topbar's warning chip is the webapp's one
+ * error surface and the webhost has no topbar, so every page lists these in
+ * its own chip. The whole set, every time it changes, and replayed on hello.
+ */
+interface WebhostFailuresMessage {
+  readonly channel: typeof HOST_CHANNEL;
+  readonly kind: "webhostFailures";
+  readonly failures: readonly WebhostFailure[];
+}
+
 /** Every message the host sends a page. */
-export type HostToPage = PresenceMessage | InputBackgroundMessage | GateDockMessage | DismissDigestMessage;
+export type HostToPage =
+  | PresenceMessage
+  | InputBackgroundMessage
+  | GateDockMessage
+  | DismissDigestMessage
+  | SidebarDockMessage
+  | WebhostFailuresMessage;
 
 /** page -> host: the page booted; send it everything it should know. */
 interface HelloMessage {
@@ -94,8 +136,20 @@ interface EditingMessage {
   readonly editing: boolean;
 }
 
+/**
+ * page -> host: how tall the page's docked gate band is now, in CSS pixels; 0
+ * while no gate stands. The band spans the whole window's width under the
+ * sidebar column, so the webhost ends its sidebar above the band of the page
+ * on screen, exactly where the page's own sidebar would end.
+ */
+interface GateBandMessage {
+  readonly channel: typeof HOST_CHANNEL;
+  readonly kind: "gateBand";
+  readonly pixels: number;
+}
+
 /** Every message a page sends the host. */
-export type PageToHost = HelloMessage | DrawnMessage | SelectionMessage | EditingMessage;
+export type PageToHost = HelloMessage | DrawnMessage | SelectionMessage | EditingMessage | GateBandMessage;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -126,9 +180,30 @@ export function parseHostToPage(data: unknown): HostToPage | null {
         : null;
     case "dismissDigest":
       return { channel: HOST_CHANNEL, kind: "dismissDigest" };
+    case "sidebarDock":
+      return typeof data.docked === "boolean" ? { channel: HOST_CHANNEL, kind: "sidebarDock", docked: data.docked } : null;
+    case "webhostFailures": {
+      if (!Array.isArray(data.failures)) return null;
+      const failures = data.failures.map(parseWebhostFailure);
+      return failures.every((f): f is WebhostFailure => f !== null)
+        ? { channel: HOST_CHANNEL, kind: "webhostFailures", failures }
+        : null;
+    }
     default:
       return null;
   }
+}
+
+/** DATA as one webhost failure, or null when it is not one. */
+function parseWebhostFailure(data: unknown): WebhostFailure | null {
+  if (!isRecord(data) || typeof data.arm !== "string" || !isClientFailureArm(data.arm)) return null;
+  if (typeof data.headline !== "string" || !Array.isArray(data.evidence)) return null;
+  const evidence: Array<readonly [string, string]> = [];
+  for (const row of data.evidence) {
+    if (!Array.isArray(row) || row.length !== 2 || typeof row[0] !== "string" || typeof row[1] !== "string") return null;
+    evidence.push([row[0], row[1]]);
+  }
+  return { arm: data.arm, headline: data.headline, evidence };
 }
 
 /** DATA as a page-to-host message, or null when it is not one of ours. */
@@ -147,6 +222,10 @@ export function parsePageToHost(data: unknown): PageToHost | null {
         : null;
     case "editing":
       return typeof data.editing === "boolean" ? { channel: HOST_CHANNEL, kind: "editing", editing: data.editing } : null;
+    case "gateBand":
+      return typeof data.pixels === "number" && Number.isFinite(data.pixels) && data.pixels >= 0
+        ? { channel: HOST_CHANNEL, kind: "gateBand", pixels: data.pixels }
+        : null;
     default:
       return null;
   }

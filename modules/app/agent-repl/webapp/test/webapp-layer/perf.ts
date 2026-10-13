@@ -297,7 +297,7 @@ export async function shipSamples(app: MountedApp, recorders: PerfRecorder[]): P
   const context: Record<string, number> = {};
   for (const recorder of recorders) Object.assign(context, recorder.toContext());
   await app.ctx.client.clientLog({
-    workspace: app.ctx.workspace,
+    source: { case: "workspace", value: app.ctx.workspace },
     record: {
       level: { case: "info", value: {} },
       operation: PERF_SAMPLES_OPERATION,

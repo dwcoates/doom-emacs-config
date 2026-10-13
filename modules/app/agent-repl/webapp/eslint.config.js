@@ -183,11 +183,11 @@ export default tseslint.config(
 
   // ---- the one logger boundary ---------------------------------------
   {
-    // main.ts owns the sanctioned `ClientLog` sink and log.ts owns every
-    // record. Everywhere else a direct rpc call or the retired generic
-    // `log(level, ...)` spelling bypasses the one-method-per-level API.
+    // rpc/client-log-sink.ts owns the sanctioned `ClientLog` sink and log.ts
+    // owns every record. Everywhere else a direct rpc call or the retired
+    // generic `log(level, ...)` spelling bypasses the one-method-per-level API.
     files: ["src/**/*.ts"],
-    ignores: ["src/log.ts", "src/main.ts"],
+    ignores: ["src/log.ts", "src/main.ts", "src/rpc/client-log-sink.ts"],
     rules: {
       "no-restricted-syntax": [
         "error",
@@ -198,7 +198,7 @@ export default tseslint.config(
         {
           selector:
             "CallExpression[callee.type='MemberExpression'][callee.property.name='clientLog']",
-          message: "ClientLog is owned by the sink in src/main.ts; emit through src/log.ts.",
+          message: "ClientLog is owned by the sink in src/rpc/client-log-sink.ts; emit through src/log.ts.",
         },
       ],
     },

@@ -43,6 +43,15 @@
 (declare-function agent-repl-frontend-reload-webview "frontend")
 (declare-function agent-repl-frontend-reload-webapp "frontend")
 
+(defun agent-repl-itest-host--navigate-and-load (record)
+  "A stand-in for navigating the host web view: RECORD the URL, then load.
+A real navigation ends in the host's load, which replays every page it should
+hold (`agent-repl--webhost-replay'); the stub widget never loads, so the
+replay is run here, exactly where the load would run it."
+  (lambda (_widget url)
+    (funcall record url)
+    (agent-repl--webhost-replay)))
+
 (defun agent-repl-itest-host--ensured-url (script)
   "The page URL a host call SCRIPT asks the host to hold, or nil.
 Every page lives in the one host web view (webhost.el), so pointing a page
@@ -1343,7 +1352,8 @@ the observable is the URL the host is asked to hold."
       (agent-repl-itest--with-second-daemon primary successor
         (let ((successor-conn (agent-repl-connect-open
                                (agent-repl-itest-daemon-address successor)))
-              (navigated nil))
+              (navigated nil)
+              (host-moved nil))
           (unwind-protect
               (cl-letf (((symbol-function 'agent-repl-link-successor)
                          (lambda () successor-conn))
@@ -1357,6 +1367,10 @@ the observable is the URL the host is asked to hold."
                         ;; a symbol rather than an xwidget.  The watcher is the
                         ;; host's replay, not the redial under test.
                         ((symbol-function 'agent-repl--webhost-watch-load) #'ignore)
+                        ;; THE WEBHOST FOLLOWS THE PAGE TO THE SUCCESSOR: it is
+                        ;; navigated there, and its load replays every page.
+                        ((symbol-function 'agent-repl--frontend-webview-navigate-widget)
+                         (agent-repl-itest-host--navigate-and-load (lambda (url) (push url host-moved))))
                         ((symbol-function 'agent-repl--frontend-webview-execute-script-value)
                          (lambda (_widget script _callback)
                            (when-let ((url (agent-repl-itest-host--ensured-url script)))
@@ -1373,6 +1387,12 @@ the observable is the URL the host is asked to hold."
                 (agent-repl-itest--wait-until (lambda () navigated) nil
                                               "the webview redial")
                 (should (equal 1 (length navigated)))
+                ;; The webhost moved with it: its sidebar talks to the daemon
+                ;; that served it.
+                (should (string-match-p
+                         (format "\\`http://host\\.localhost:%s/"
+                                 (car (last (split-string (agent-repl-itest-daemon-address successor) ":"))))
+                         (car host-moved)))
                 (should (equal (car navigated)
                                (format "http://ws-%s.localhost:%s/?workspace=%s&dir=%s&log_level=info"
                                        (agent-repl--frontend-page-host-label (plist-get ref :id))
@@ -2076,13 +2096,16 @@ the page is re-pointed in the one host web view rather than remounted."
       (agent-repl-itest--with-second-daemon primary successor
         (let ((fresh (agent-repl-connect-open
                       (agent-repl-itest-daemon-address successor)))
-              (navigated nil))
+              (navigated nil)
+              (host-moved nil))
           (unwind-protect
               (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
                          (lambda () t))
                         ((symbol-function 'agent-repl--frontend-webview-live-widget)
                          (lambda (&rest _) 'fake-widget))
                         ((symbol-function 'agent-repl--webhost-watch-load) #'ignore)
+                        ((symbol-function 'agent-repl--frontend-webview-navigate-widget)
+                         (agent-repl-itest-host--navigate-and-load (lambda (url) (push url host-moved))))
                         ((symbol-function 'agent-repl--frontend-webview-execute-script-value)
                          (lambda (_widget script _callback)
                            (when-let ((url (agent-repl-itest-host--ensured-url script)))
@@ -2104,7 +2127,12 @@ the page is re-pointed in the one host web view rather than remounted."
                 (should (string-match-p
                          (format "\\`http://ws-[a-z0-9-]+\\.localhost:%s/"
                                  (car (last (split-string (agent-repl-itest-daemon-address successor) ":"))))
-                         (car navigated))))
+                         (car navigated)))
+                ;; The webhost moved with it.
+                (should (string-match-p
+                         (format "\\`http://host\\.localhost:%s/"
+                                 (car (last (split-string (agent-repl-itest-daemon-address successor) ":"))))
+                         (car host-moved))))
             (agent-repl-connect-close fresh)))))))
 
 ;; audit-3 #24

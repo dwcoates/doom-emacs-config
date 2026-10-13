@@ -434,8 +434,8 @@ func TestClientLogRoutesEachRuntimeToItsOwningSink(t *testing.T) {
 
 			// Act.
 			if _, err := h.Client.ClientLog(context.Background(), connect.NewRequest(&agentreplv1.ClientLogRequest{
-				Workspace: ref(),
-				Record:    record,
+				Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: ref()},
+				Record: record,
 			})); err != nil {
 				t.Fatalf("ClientLog: %v", err)
 			}
@@ -458,7 +458,7 @@ func TestClientLogForwardsTheClientsTimestamp(t *testing.T) {
 
 	// Act.
 	if _, err := h.Client.ClientLog(context.Background(), connect.NewRequest(&agentreplv1.ClientLogRequest{
-		Workspace: ref(),
+		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: ref()},
 		Record: &agentreplv1.ClientLogRecord{
 			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
 			Operation: "webapp.render",
@@ -481,7 +481,7 @@ func TestClientLogForwardsTheClientsVerboseClass(t *testing.T) {
 
 	// Act.
 	if _, err := h.Client.ClientLog(context.Background(), connect.NewRequest(&agentreplv1.ClientLogRequest{
-		Workspace: ref(),
+		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: ref()},
 		Record: &agentreplv1.ClientLogRecord{
 			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
 			Operation: "webapp.trace",
@@ -504,7 +504,7 @@ func TestClientLogForwardsTheClientsNormalClass(t *testing.T) {
 
 	// Act.
 	if _, err := h.Client.ClientLog(context.Background(), connect.NewRequest(&agentreplv1.ClientLogRequest{
-		Workspace: ref(),
+		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: ref()},
 		Record: &agentreplv1.ClientLogRecord{
 			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
 			Operation: "webapp.render",
@@ -530,7 +530,7 @@ func TestClientLogRecordsTheSuccessfulRequestBoundaryAtDebug(t *testing.T) {
 
 	// Act.
 	if _, err := h.Client.ClientLog(context.Background(), connect.NewRequest(&agentreplv1.ClientLogRequest{
-		Workspace: ref(),
+		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: ref()},
 		Record: &agentreplv1.ClientLogRecord{
 			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
 			Operation: "webapp.render",
@@ -568,7 +568,7 @@ func TestClientLogAnswersTheLandedUnknownWorkspaceArm(t *testing.T) {
 
 	// Act.
 	resp, err := h.Client.ClientLog(context.Background(), connect.NewRequest(&agentreplv1.ClientLogRequest{
-		Workspace: &workspacev1.WorkspaceRef{Id: "ws-forgotten"},
+		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: &workspacev1.WorkspaceRef{Id: "ws-forgotten"}},
 		Record: &agentreplv1.ClientLogRecord{
 			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
 			Operation: "webapp.render",
@@ -597,7 +597,7 @@ func TestClientLogRecordsTheUnknownWorkspaceRefusalAtInfo(t *testing.T) {
 
 	// Act.
 	if _, err := h.Client.ClientLog(context.Background(), connect.NewRequest(&agentreplv1.ClientLogRequest{
-		Workspace: &workspacev1.WorkspaceRef{Id: "ws-forgotten"},
+		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: &workspacev1.WorkspaceRef{Id: "ws-forgotten"}},
 		Record: &agentreplv1.ClientLogRecord{
 			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
 			Operation: "webapp.render",
@@ -651,7 +651,7 @@ func TestClientLogIsFiledWhateverTheServingStanding(t *testing.T) {
 
 			// Act.
 			resp, err := h.Client.ClientLog(context.Background(), connect.NewRequest(&agentreplv1.ClientLogRequest{
-				Workspace: ref(),
+				Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: ref()},
 				Record: &agentreplv1.ClientLogRecord{
 					Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
 					Operation: "sidecar.tail.pickup",
@@ -679,7 +679,7 @@ func TestClientLogIsFiledWhateverTheServingStanding(t *testing.T) {
 // clientLogOnce sends one ordinary forwarded record.
 func clientLogOnce(h *harness) error {
 	_, err := h.Client.ClientLog(context.Background(), connect.NewRequest(&agentreplv1.ClientLogRequest{
-		Workspace: ref(),
+		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: ref()},
 		Record: &agentreplv1.ClientLogRecord{
 			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
 			Operation: "webapp.drain.banner",
@@ -790,5 +790,31 @@ func TestEveryQueuedMergeArmSharesOneAnswer(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestClientLogFilesAWebhostRecordCentrally(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	if _, err := h.Client.ClientLog(context.Background(), connect.NewRequest(&agentreplv1.ClientLogRequest{
+		Source: &agentreplv1.ClientLogRequest_Webhost{Webhost: &agentreplv1.ClientLogWebhost{}},
+		Record: &agentreplv1.ClientLogRecord{
+			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
+			Operation: "sidebar.roster",
+			Message:   "drew the roster",
+		},
+	})); err != nil {
+		t.Fatalf("ClientLog: %v", err)
+	}
+
+	// Assert.
+	if len(h.Surfaces.centralRecords) != 1 || len(h.Surfaces.clientRecords) != 0 {
+		t.Fatalf("central = %d, workspace = %d, want the one record filed centrally",
+			len(h.Surfaces.centralRecords), len(h.Surfaces.clientRecords))
+	}
+	if got := h.Surfaces.centralRecords[0]; got.ClientKind != dlog.RuntimeWebapp || got.Operation != "sidebar.roster" {
+		t.Fatalf("record = %+v, want the webapp's sidebar.roster record", got)
 	}
 }

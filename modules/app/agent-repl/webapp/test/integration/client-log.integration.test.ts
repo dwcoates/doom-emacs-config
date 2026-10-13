@@ -36,9 +36,13 @@ afterEach(async () => {
 
 /** One `ClientLog` request, as the fake recorded it. */
 interface LoggedCall {
-  workspace?: { id: string; dir: string };
+  source?: { case: "workspace"; value: { id: string; dir: string } } | { case: "webhost"; value: object };
   record?: ClientLogRecord;
 }
+
+/** The workspace CALL was filed under, or undefined when it names none. */
+const workspaceOf = (call: LoggedCall | undefined): { id: string; dir: string } | undefined =>
+  call?.source?.case === "workspace" ? call.source.value : undefined;
 
 /** The records the daemon has been handed, oldest first. */
 const recorded = (): LoggedCall[] => harness.fake.calls<LoggedCall>("clientLog");
@@ -122,7 +126,7 @@ describe("a warning", () => {
     log.warn("the view arrived thin", { operation: "harness.warn-case" });
     await flush();
     // Assert
-    expect(recorded().at(-1)?.workspace?.id).toBe(WORKSPACE_ID);
+    expect(workspaceOf(recorded().at(-1))?.id).toBe(WORKSPACE_ID);
   });
 
   it("carries the call site's evidence in the record's context", async () => {
@@ -187,7 +191,7 @@ describe("an error", () => {
     log.error("the stream died", { operation: "harness.error-case" });
     await harness.settle();
     // Assert
-    expect(recorded().at(-1)?.workspace?.id).toBe(WORKSPACE_ID);
+    expect(workspaceOf(recorded().at(-1))?.id).toBe(WORKSPACE_ID);
   });
 });
 
@@ -265,7 +269,7 @@ describe("the app's own diagnostics", () => {
     // Act
     await harness.tick(2_000);
     // Assert
-    expect(recorded().at(-1)?.workspace?.dir).toBe(harness.ctx.workspace.dir);
+    expect(workspaceOf(recorded().at(-1))?.dir).toBe(harness.ctx.workspace.dir);
   });
 });
 

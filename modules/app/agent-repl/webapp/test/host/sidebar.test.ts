@@ -1,0 +1,163 @@
+// @vitest-environment jsdom
+// The webhost's own sidebar: started once for every workspace page, logging as
+// the webhost, its failures relayed to every page. See src/host/sidebar.ts.
+import { afterEach, describe, expect, it } from "vitest";
+
+import type { WebhostFailure } from "../../src/host/protocol.js";
+import type { Host } from "../../src/host/host.js";
+import { startWebhostSidebar, type WebhostSidebarStartDeps } from "../../src/host/sidebar.js";
+import { ForwardingLogger, log, setLogger } from "../../src/log.js";
+import { daemonUnreachable } from "../../src/failure/sink.js";
+import type { DaemonContext } from "../../src/rpc/context.js";
+import { captureLogRecords } from "../log-capture.js";
+import { clientLogRecorder } from "../rpc/client-log-recorder.js";
+
+let stop: { dispose(): void } | null = null;
+
+afterEach(() => {
+  stop?.dispose();
+  stop = null;
+});
+
+/** A webhost that records what the sidebar tells it. */
+function recordingHost() {
+  const told = { docked: [] as boolean[], failures: [] as Array<readonly WebhostFailure[]> };
+  const host = {
+    setSidebarDocked: (docked: boolean) => told.docked.push(docked),
+    setFailures: (failures: readonly WebhostFailure[]) => told.failures.push(failures),
+  } as unknown as Host;
+  return { host, told };
+}
+
+/** Start the sidebar with DEPS over a quiet client, keeping the page-wide logger. */
+function start(host: Host, deps: WebhostSidebarStartDeps) {
+  const { client, logged } = clientLogRecorder();
+  stop = startWebhostSidebar(document, window, host, document.createElement("nav"), {
+    client,
+    installLogger: () => undefined,
+    ...deps,
+  });
+  return logged;
+}
+
+describe("startWebhostSidebar", () => {
+  it("files its records as the webhost's", async () => {
+    // Arrange
+    const { host } = recordingHost();
+    let installed: ForwardingLogger | null = null;
+    const logged = start(host, {
+      installLogger: (logger) => {
+        installed = logger;
+        setLogger(logger);
+      },
+      mount: () => ({ dispose: () => undefined }),
+    });
+
+    // Act
+    log.info("a sidebar record", { operation: "test.webhost-record", context: {} });
+    (installed as ForwardingLogger | null)?.flush();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Assert
+    expect(logged.map((r) => r.source.case)).toContain("webhost");
+    expect(logged.every((r) => r.source.case === "webhost")).toBe(true);
+  });
+
+  it("docks the sidebar over every page once it has drawn", () => {
+    // Arrange
+    const { host, told } = recordingHost();
+
+    // Act
+    start(host, {
+      mount: (_nav, _ctx, deps) => {
+        deps?.revealed?.();
+        return { dispose: () => undefined };
+      },
+    });
+
+    // Assert
+    expect(told.docked).toEqual([true]);
+  });
+
+  it("does not dock a sidebar that has not drawn", () => {
+    // Arrange
+    const { host, told } = recordingHost();
+
+    // Act
+    start(host, { mount: () => ({ dispose: () => undefined }) });
+
+    // Assert
+    expect(told.docked).toEqual([]);
+  });
+
+  it("hands every page the failures its sidebar files", () => {
+    // Arrange
+    const { host, told } = recordingHost();
+    let ctx: DaemonContext | null = null;
+    start(host, {
+      mount: (_nav, c) => {
+        ctx = c;
+        return { dispose: () => undefined };
+      },
+    });
+
+    // Act
+    (ctx as DaemonContext | null)?.failures.report(daemonUnreachable(1006, "gone"));
+
+    // Assert
+    expect(told.failures.at(-1)?.map((f) => f.arm)).toEqual(["daemonUnreachable"]);
+  });
+
+  it("lists a sidebar that failed to start in every page's chip", () => {
+    // Arrange
+    const { host, told } = recordingHost();
+
+    // Act
+    start(host, {
+      mount: () => {
+        throw new Error("no roster");
+      },
+    });
+
+    // Assert
+    expect(told.failures.at(-1)?.map((f) => f.arm)).toEqual(["bootFailed"]);
+  });
+
+  it("records a sidebar that failed to start at error", () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const { host } = recordingHost();
+
+    // Act
+    start(host, {
+      mount: () => {
+        throw new Error("no roster");
+      },
+    });
+
+    // Assert
+    capture.logger.flush();
+    const record = capture.sent.find((r) => r.operation === "webhost.sidebar-start-failed");
+    expect([record?.level.case, record?.context?.["cause"]]).toEqual(["error", "Error: no roster"]);
+  });
+
+  it("closes the sidebar when stopped", () => {
+    // Arrange
+    const { host } = recordingHost();
+    let disposed = false;
+    start(host, {
+      mount: () => ({
+        dispose: () => {
+          disposed = true;
+        },
+      }),
+    });
+
+    // Act
+    stop?.dispose();
+    stop = null;
+
+    // Assert
+    expect(disposed).toBe(true);
+  });
+});

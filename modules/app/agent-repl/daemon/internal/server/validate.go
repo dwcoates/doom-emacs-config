@@ -840,8 +840,14 @@ func validateUpdateShutdownScheduleRequest(req *agentreplv1.UpdateShutdownSchedu
 
 // validateClientLogRequest is ClientLogRequest's base function.
 func validateClientLogRequest(req *agentreplv1.ClientLogRequest) *connect.Error {
-	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
-		return err
+	switch req.GetSource().(type) {
+	case *agentreplv1.ClientLogRequest_Workspace:
+		if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
+			return err
+		}
+	case *agentreplv1.ClientLogRequest_Webhost:
+	default:
+		return invalid("source", "a source arm (workspace or webhost) is required")
 	}
 	return validateClientLogRecord("record", req.GetRecord())
 }
