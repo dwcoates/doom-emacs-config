@@ -485,7 +485,6 @@ func cronStart(name string, input map[string]any, ts int64) *conversationv1.Agen
 	return start
 }
 
-
 // chessBoardSession reads the CEE session and game a board call named, or nil
 // when its input names either as empty or not at all.
 func chessBoardSession(input map[string]any) *conversationv1.AgentChessBoardSession {
@@ -495,6 +494,7 @@ func chessBoardSession(input map[string]any) *conversationv1.AgentChessBoardSess
 	}
 	return &conversationv1.AgentChessBoardSession{SessionId: sessionID, GameId: gameID}
 }
+
 // item wraps one built arm as the activity carrying it. The generated oneof
 // interface is unexported, so a builder outside the proto package returns the
 // message rather than the arm.
