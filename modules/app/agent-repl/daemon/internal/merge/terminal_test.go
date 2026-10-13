@@ -611,9 +611,12 @@ func TestAnswerQueueOfferPrioritizeFailureIsRecordedAndKeepsTheQuestion(t *testi
 	if err == nil {
 		t.Fatal("AnswerQueueOffer succeeded over a failing store")
 	}
-	record, logged := h.recordFor("error", "daemon.merge.answer_queue_offer")
-	if !logged || record.Context["error"] != "database is locked" || record.Context["answer"] != "prioritize" {
+	record, logged := h.recordFor("error", "daemon.merge.prioritize")
+	if !logged || record.Context["error"] != "database is locked" || record.Context["workspace"] != string(theWorkspace) {
 		t.Fatalf("the failure was not recorded at ERROR with its context: %+v", h.logs.Records())
+	}
+	if _, twice := h.recordFor("error", "daemon.merge.answer_queue_offer"); twice {
+		t.Fatalf("the failure was recorded again by the answer: %+v", h.logs.Records())
 	}
 	if got, want := h.queuedEntries(), []string{"ws-2", string(theWorkspace)}; !equal(got, want) {
 		t.Fatalf("the queue reads %v, want %v", got, want)
