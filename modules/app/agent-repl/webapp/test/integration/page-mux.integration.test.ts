@@ -113,7 +113,7 @@ describe("the page's one connection", () => {
 /**
  * THE RECONNECT CASES' OWN BOUND. A reconnect is TWO page attaches -- the
  * boot's, then the re-subscribe of every view over a fresh page stream, each a
- * real stream over the fake daemon's socket with its replay -- where the 900ms
+ * real stream over the fake daemon's socket with its replay -- where the then-900ms
  * global (vitest.integration.config.ts) was sized on single-attach pages
  * (slowest healthy test 274.8ms). Measured 2026-10-06, the file run 12 times
  * on a quiet host: these three tests' medians 63-67ms against 33-45ms for the

@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
-  FeedMergeTabTestsSchema,
+  FeedMergeTestsRunOutputSchema,
   FeedMergeTestLogSchema,
   FeedMergeTestSuiteRunningSchema,
   FeedMergeTestSuiteSchema,
@@ -12,12 +12,12 @@ import { harness } from "../harness.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import { PAINT_CLASS_NAMES } from "../../../src/vocab.js";
 import {
-  drawFeedMergeTabTests,
+  drawFeedMergeTestsRunOutput,
   drawFeedMergeTestLog,
   drawFeedMergeTestSpan,
   drawFeedMergeTestSuite,
   drawTestSuites,
-  updateFeedMergeTabTests,
+  updateFeedMergeTestsRunOutput,
   updateTestSuites,
 } from "../../../src/feed/merge/tests-tab.js";
 import { oneofArms } from "../../arms.js";
@@ -268,37 +268,36 @@ describe("a suite state this build cannot draw is a refusal, never a default", (
   });
 });
 
-describe("drawFeedMergeTabTests: the suites, then the round's log", () => {
-  /** A tests tab carrying SUITES and, when given, LOG. */
+describe("drawFeedMergeTestsRunOutput: the suites, then the run's log", () => {
+  /** A run's output carrying SUITES and, when given, LOG. */
   function testsTab(log?: { token: string; label: string }) {
-    return create(FeedMergeTabTestsSchema, {
-      state: { case: "live", value: {} },
+    return create(FeedMergeTestsRunOutputSchema, {
       suites: [{ name: "unit", state: { case: "running", value: { soFar: { case: "unreported", value: {} } } }, output: [] }],
       ...(log === undefined ? {} : { log: { token: { value: log.token }, label: { text: log.label } } }),
     });
   }
 
   it("draws the suites first", () => {
-    const parts = drawFeedMergeTabTests(testsTab(), harness().ctx, "FeedMergeTabTests");
+    const parts = drawFeedMergeTestsRunOutput(testsTab(), harness().ctx, "FeedMergeTestsRunOutput");
     expect(parts[0]?.classList.contains("merge-suites")).toBe(true);
   });
 
   it("draws no log line before the daemon has written the log", () => {
-    expect(drawFeedMergeTabTests(testsTab(), harness().ctx, "FeedMergeTabTests")).toHaveLength(1);
+    expect(drawFeedMergeTestsRunOutput(testsTab(), harness().ctx, "FeedMergeTestsRunOutput")).toHaveLength(1);
   });
 
   it("draws the log line after the suites once the log is written", () => {
-    const parts = drawFeedMergeTabTests(testsTab({ token: "t", label: "~/x.log" }), harness().ctx, "FeedMergeTabTests");
+    const parts = drawFeedMergeTestsRunOutput(testsTab({ token: "t", label: "~/x.log" }), harness().ctx, "FeedMergeTestsRunOutput");
     expect(parts[1]?.classList.contains("merge-test-log")).toBe(true);
   });
 
   it("draws the log's link with the daemon's label", () => {
-    const parts = drawFeedMergeTabTests(testsTab({ token: "t", label: "~/x.log" }), harness().ctx, "FeedMergeTabTests");
+    const parts = drawFeedMergeTestsRunOutput(testsTab({ token: "t", label: "~/x.log" }), harness().ctx, "FeedMergeTestsRunOutput");
     expect(parts[1]?.querySelector("[data-merge-test-log]")?.textContent).toBe("~/x.log");
   });
 
   it("introduces the link as the log", () => {
-    const parts = drawFeedMergeTabTests(testsTab({ token: "t", label: "~/x.log" }), harness().ctx, "FeedMergeTabTests");
+    const parts = drawFeedMergeTestsRunOutput(testsTab({ token: "t", label: "~/x.log" }), harness().ctx, "FeedMergeTestsRunOutput");
     expect(parts[1]?.textContent).toBe("log: ~/x.log");
   });
 });
@@ -385,20 +384,20 @@ describe("updateTestSuites", () => {
   });
 });
 
-describe("updateFeedMergeTabTests", () => {
+describe("updateFeedMergeTestsRunOutput", () => {
   it("keeps the log line while its link is unchanged", () => {
     // Arrange
     const ctx = harness().ctx;
-    const tab = create(FeedMergeTabTestsSchema, {
+    const tab = create(FeedMergeTestsRunOutputSchema, {
       suites: [countedSuite("unit", 1, 10)],
       log: create(FeedMergeTestLogSchema, { token: { value: "tok" }, label: { text: "the log" } }),
     });
     const host = document.createElement("div");
-    host.append(...drawFeedMergeTabTests(tab, ctx, "p"));
+    host.append(...drawFeedMergeTestsRunOutput(tab, ctx, "p"));
     const logLine = host.querySelector(".merge-test-log");
-    const next = create(FeedMergeTabTestsSchema, { suites: [countedSuite("unit", 2, 10)], log: tab.log });
+    const next = create(FeedMergeTestsRunOutputSchema, { suites: [countedSuite("unit", 2, 10)], log: tab.log });
     // Act
-    updateFeedMergeTabTests(host, next, tab, ctx, "p");
+    updateFeedMergeTestsRunOutput(host, next, tab, ctx, "p");
     // Assert
     expect(host.querySelector(".merge-test-log")).toBe(logLine);
   });
@@ -406,15 +405,15 @@ describe("updateFeedMergeTabTests", () => {
   it("draws the log line once the daemon has written it", () => {
     // Arrange
     const ctx = harness().ctx;
-    const tab = create(FeedMergeTabTestsSchema, { suites: [countedSuite("unit", 1, 10)] });
+    const tab = create(FeedMergeTestsRunOutputSchema, { suites: [countedSuite("unit", 1, 10)] });
     const host = document.createElement("div");
-    host.append(...drawFeedMergeTabTests(tab, ctx, "p"));
-    const next = create(FeedMergeTabTestsSchema, {
+    host.append(...drawFeedMergeTestsRunOutput(tab, ctx, "p"));
+    const next = create(FeedMergeTestsRunOutputSchema, {
       suites: [countedSuite("unit", 1, 10)],
       log: create(FeedMergeTestLogSchema, { token: { value: "tok" }, label: { text: "the log" } }),
     });
     // Act
-    updateFeedMergeTabTests(host, next, tab, ctx, "p");
+    updateFeedMergeTestsRunOutput(host, next, tab, ctx, "p");
     // Assert
     expect(host.querySelector(".merge-test-log")).not.toBeNull();
   });

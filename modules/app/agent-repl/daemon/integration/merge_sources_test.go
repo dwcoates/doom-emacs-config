@@ -310,8 +310,9 @@ func TestATargetThatMovedBeforeCommittingStartsTheMergeOver(t *testing.T) {
 	merge := row.GetActivity().GetMerge()
 	s.d.AwaitLandingDeployed()
 
-	// Assert: landed, after a second rebasing round that replayed the branch
-	// onto the new tip (the first found it already on the old one).
+	// Assert: landed, after a second replay of the branch onto the new tip (the
+	// first found it already on the old one), drawn under the one rebasing tab
+	// as that replay's commit subtabs.
 	if merge.GetSuccess() == nil {
 		t.Fatalf("the merge ended %v, want landed", merge.GetResult())
 	}
@@ -324,8 +325,8 @@ func TestATargetThatMovedBeforeCommittingStartsTheMergeOver(t *testing.T) {
 	if rebased != 1 {
 		t.Fatalf("the branch was replayed %d times, want once: onto the moved tip", rebased)
 	}
-	s.f.awaitRowInFeed(row.GetId(), "the second rebasing round", func(row *frontendv1.FeedRow) bool {
-		return row.GetMergeTab().GetRebasing() != nil && row.GetMergeTab().GetLabel().GetRound() == 2
+	s.f.awaitRowInFeed(row.GetId(), "a commit subtab of the second replay", func(row *frontendv1.FeedRow) bool {
+		return row.GetMergeTab().GetRebaseCommit() != nil && row.GetMergeTab().GetLabel().GetRound() == 2
 	})
 }
 
@@ -397,10 +398,10 @@ func TestTheTestLogOpensThroughOpenInEditorByItsToken(t *testing.T) {
 		return row.GetActivity().GetMerge().GetSuccess() != nil
 	})
 	s.d.AwaitLandingDeployed()
-	tests := s.f.awaitRowInFeed(merge.GetId(), "the tests tab with its log", func(row *frontendv1.FeedRow) bool {
-		return row.GetMergeTab().GetTests().GetLog() != nil
+	run := s.f.awaitRowInFeed(merge.GetId(), "the run with its log", func(row *frontendv1.FeedRow) bool {
+		return row.GetMergeTab().GetTestsRun().GetOutput().GetLog() != nil
 	})
-	link := tests.GetMergeTab().GetTests().GetLog()
+	link := run.GetMergeTab().GetTestsRun().GetOutput().GetLog()
 
 	// Act.
 	resp, err := s.d.Client().OpenInEditor(s.d.Ctx(), connect.NewRequest(&agentreplv1.OpenInEditorRequest{
@@ -546,7 +547,7 @@ func TestALandedMergesLedgerRecordsEachStepsInterval(t *testing.T) {
 }
 
 // A LATE READER SEES THE FEED A LIVE ONE SAW. The repair turn's rows are drawn
-// in the merge's conflicts tab, and nowhere else, live; a daemon relaunched
+// in the conflicted commit's subtab, and nowhere else, live; a daemon relaunched
 // afterwards rebuilds the feed from the store's book alone, and its replay
 // must draw them in the same tab and nowhere else, because the turn's record
 // carries the address it ran at.

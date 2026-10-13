@@ -8,8 +8,9 @@
  * ANYWHERE ELSE the tab still arrived, and a feed that silently swallowed it
  * would hide a phase of a real run from the reader with no evidence left
  * behind. So it draws through EXACTLY the pieces the strip draws with — the
- * same badge (`drawFeedMergeTab`) and the same content (`drawTabBody`) — and
- * gains no second rendering of its own to drift from the strip's.
+ * same badge (`drawFeedMergeTab`), the same summary (`drawSummary`) and the
+ * same content (`mergeTabPanel`) — and gains no second rendering of its own to
+ * drift from the strip's.
  *
  * The badge is drawn ACTIVE because a lone tab is the only tab there is; there
  * is nothing to select between.
@@ -18,7 +19,9 @@ import { log } from "../../log.js";
 import type { FeedMergeTab, FeedRow } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { RowContext, SubfeedView } from "../renderers.js";
 import { drawFeedMergeTab, readMergeTab } from "./tab-strip.js";
-import { drawSummary, drawTabBody } from "./merge-body.js";
+import { drawSummary } from "./tab-set.js";
+import { mergeTabPanel } from "./tab-panels.js";
+import { replaceTicking } from "../ticking.js";
 
 /** One merge tab, as a feed row: its badge, its failure summary, its content. */
 export function drawFeedMergeTabRow(
@@ -47,7 +50,8 @@ export function drawFeedMergeTabRow(
 
   const panel = document.createElement("div");
   panel.className = "merge-tab-panel";
-  drawTabBody(panel, tab, view, rc);
+  panel.setAttribute("data-merge-tab-body", tab.kind);
+  replaceTicking(panel, [...mergeTabPanel(tab, view, rc).nodes]);
 
   el.append(strip, summary, panel);
   return el;

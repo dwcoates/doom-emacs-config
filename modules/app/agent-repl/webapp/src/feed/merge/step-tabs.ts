@@ -1,6 +1,7 @@
 /**
- * step-tabs — the merge bubble's rebase-first tabs: what the rebasing,
- * committing and updating-main tabs carry, and the attempt a fixes tab names.
+ * step-tabs — the merge bubble's rebase-first tabs: what the rebasing tab
+ * draws above its commits, what a commit's subtab carries, what the committing
+ * and updating-main tabs carry, and the attempt a fixing sub-subtab names.
  *
  * RESOLVED, REPLACED WHOLE PER PUSH. Each of these tabs carries its content in
  * its own row, so a push redraws it from the message and nothing accumulates
@@ -15,17 +16,22 @@ import { log } from "../../log.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import type {
   FeedMergeCommitSubject,
+  FeedMergeConflictFile,
   FeedMergeFixAttempt,
   FeedMergeRebaseLine,
   FeedMergeRebaseProgress,
   FeedMergeTabCommitting,
-  FeedMergeTabFixes,
+  FeedMergeTabRebaseCommit,
   FeedMergeTabRebasing,
+  FeedMergeTabTestsRunFixing,
   FeedMergeTabUpdatingMain,
   FeedMergeUpdatingMainStep,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 
-/** The rebasing tab: its progress, then its narration, oldest first. */
+/**
+ * The rebasing tab's own heading, above its commits' strip: its progress, then
+ * the rebase-wide narration, oldest first.
+ */
 export function drawFeedMergeTabRebasing(u: FeedMergeTabRebasing, path: string): HTMLElement {
   const progress = requireMessage(u.progress, `${path}.progress`);
   log.debug("drawing a merge rebasing tab", {
@@ -34,11 +40,40 @@ export function drawFeedMergeTabRebasing(u: FeedMergeTabRebasing, path: string):
   });
   const el = document.createElement("div");
   el.className = "merge-rebasing";
-  el.append(drawFeedMergeRebaseProgress(progress));
-  const lines = document.createElement("div");
-  lines.className = "merge-lines list-rows";
-  for (const line of u.lines) lines.append(drawFeedMergeRebaseLine(line));
-  el.append(lines);
+  el.append(drawFeedMergeRebaseProgress(progress), drawFeedMergeRebaseLines(u.lines));
+  return el;
+}
+
+/** Narration lines, oldest first, as one list. */
+export function drawFeedMergeRebaseLines(lines: readonly FeedMergeRebaseLine[]): HTMLElement {
+  const el = document.createElement("div");
+  el.className = "merge-lines list-rows";
+  for (const line of lines) el.append(drawFeedMergeRebaseLine(line));
+  return el;
+}
+
+/**
+ * A commit subtab's own content: its narration, oldest first. The conflict
+ * section beneath it, when the commit has one, is `drawFeedMergeConflictFiles`
+ * over the resolution's rows.
+ */
+export function drawFeedMergeTabRebaseCommit(u: FeedMergeTabRebaseCommit): HTMLElement {
+  const el = document.createElement("div");
+  el.className = "merge-rebase-commit";
+  el.append(drawFeedMergeRebaseLines(u.lines));
+  return el;
+}
+
+/** The files a commit's replay conflicted in, as its conflict section's heading. */
+export function drawFeedMergeConflictFiles(files: readonly FeedMergeConflictFile[]): HTMLElement {
+  const el = document.createElement("div");
+  el.className = "merge-conflict-files list-rows";
+  for (const file of files) {
+    const line = document.createElement("div");
+    line.className = "merge-conflict-file";
+    line.textContent = file.path;
+    el.append(line);
+  }
   return el;
 }
 
@@ -102,8 +137,8 @@ export function drawFeedMergeUpdatingMainStep(u: FeedMergeUpdatingMainStep, path
   }
 }
 
-/** The attempt a fixes tab is, read off its tab message. */
-export function drawFeedMergeTabFixesAttempt(u: FeedMergeTabFixes, path: string): HTMLElement {
+/** The attempt a fixing sub-subtab is, read off its tab message. */
+export function drawFeedMergeTabFixingAttempt(u: FeedMergeTabTestsRunFixing, path: string): HTMLElement {
   return drawFeedMergeFixAttempt(requireMessage(u.attempt, `${path}.attempt`));
 }
 

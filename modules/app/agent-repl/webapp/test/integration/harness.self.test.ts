@@ -95,7 +95,7 @@ describe("settle with a request outstanding", () => {
     await harness.tick(2_000);
     // Assert: the settle returned once the answer landed, and the record went.
     expect(harness.fake.calls("clientLog")).toHaveLength(1);
-  }, 1_500); // the 200ms hold on top of the boot; the 900ms global is for pages that wait on nothing real
+  }, 1_500); // the 200ms hold on top of the boot; the integration global is for pages that wait on nothing real
 });
 
 describe("settle with a view's subscription outstanding", () => {

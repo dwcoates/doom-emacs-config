@@ -1572,6 +1572,20 @@ func (f *fakeFeed) tabSequence() []string {
 	return out
 }
 
+// lastCommitWithConflict reports the last push of a commit subtab that carried
+// a conflict section.
+func (f *fakeFeed) lastCommitWithConflict() *frontendv1.FeedMergeTabRebaseCommit {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var found *frontendv1.FeedMergeTabRebaseCommit
+	for _, row := range f.rows {
+		if commit := row.Row.GetMergeTab().GetRebaseCommit(); commit.GetConflict() != nil {
+			found = commit
+		}
+	}
+	return found
+}
+
 // lastTabOfKind reports the last push of one tab kind.
 func (f *fakeFeed) lastTabOfKind(kind string) *frontendv1.FeedMergeTab {
 	f.mu.Lock()
@@ -1656,12 +1670,14 @@ func tabKindOf(tab *frontendv1.FeedMergeTab) string {
 		return TabCommitting
 	case *frontendv1.FeedMergeTab_UpdatingMain:
 		return TabUpdatingMain
-	case *frontendv1.FeedMergeTab_Conflicts:
-		return TabConflicts
+	case *frontendv1.FeedMergeTab_RebaseCommit:
+		return rowRebaseCommit
 	case *frontendv1.FeedMergeTab_Tests:
 		return TabTests
-	case *frontendv1.FeedMergeTab_Fixes:
-		return TabFixes
+	case *frontendv1.FeedMergeTab_TestsRun:
+		return rowTestsRun
+	case *frontendv1.FeedMergeTab_TestsRunFixing:
+		return rowTestsRunFixing
 	case *frontendv1.FeedMergeTab_PostPrompt:
 		return TabPostPrompt
 	}
@@ -2495,6 +2511,46 @@ func (f *fakeFeed) roundsOfKind(kind string) []int {
 		}
 		seen[round] = true
 		out = append(out, int(round))
+	}
+	return out
+}
+
+// labelsOfKind reports the distinct drawn labels of one tab kind, in the
+// order each was first published.
+func (f *fakeFeed) labelsOfKind(kind string) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []string
+	seen := map[string]bool{}
+	for _, row := range f.rows {
+		tab := row.Row.GetMergeTab()
+		if tab == nil || tabKindOf(tab) != kind {
+			continue
+		}
+		label := tab.GetLabel().GetText()
+		if seen[label] {
+			continue
+		}
+		seen[label] = true
+		out = append(out, label)
+	}
+	return out
+}
+
+// topTabSequence reports the TOP-LEVEL tab kinds (rows with no parent) in the
+// order they were first published: the bubble's own strip.
+func (f *fakeFeed) topTabSequence() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []string
+	seen := map[string]bool{}
+	for _, row := range f.rows {
+		tab := row.Row.GetMergeTab()
+		if tab == nil || row.Row.GetParent() != nil || seen[tabKindOf(tab)] {
+			continue
+		}
+		seen[tabKindOf(tab)] = true
+		out = append(out, tabKindOf(tab))
 	}
 	return out
 }

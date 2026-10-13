@@ -106,7 +106,14 @@ These clicks jump to an entry in the feed:
   - Open a landed merge's bubble and it stays open, across a reload too; close a running merge's bubble and it stays closed, even when the merge later fails.
   - Reloading the page, restarting Emacs or restarting the daemon draws the bubble the way you left it.
   - If the daemon cannot record your choice, the failure is listed under the warning chip in the top bar, and the bubble stays the way you left it on this page.
-- **A merge never opens the expanded footer.** The bubble's tests tab lists the suites, each with passed/failed/total counts on the right.
+- **A merge never opens the expanded footer.**
+- **The bubble has one rebasing tab and one tests tab, each with tabs of its own inside.**
+  - The rebasing tab has a tab for each commit being replayed, named by its short hash and subject; commits the rebase has not reached yet show no clock.
+  - A commit whose replay conflicted shows the conflicted files, and below them the agent's conflict resolution as it streams.
+  - The tests tab has a tab for each full run of the suites (`run 1`, `run 2`, ...).
+  - Each run has an `output` tab listing the suites, each with passed/failed/total counts on the right, and the run's log; a failed run that the agent then fixed also has a `fixing` tab streaming that fix.
+  - A merge that starts over because the target moved replays under the same rebasing tab, its commits marked `(2)`, and its runs keep counting under the same tests tab.
+  - Each strip keeps the tab you clicked until a new tab appears in it.
 - **If a subagent's feed cannot be opened, the jump still scrolls to its bubble.**
   - The failure is listed under the warning chip in the top bar.
 

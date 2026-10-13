@@ -72,6 +72,10 @@ func (r *resolver) restoreDurable(s *wsState) {
 			log.Error(opDurable, "a durable row could not be decoded and is drawn nowhere", fields)
 			continue
 		}
+		if retiredMergeTab(row) {
+			log.Info(opDurable, "a durable merge tab of a kind this daemon no longer draws is not drawn again", fields)
+			continue
+		}
 		ref, err := r.deps.Decode(row.GetId())
 		if err != nil {
 			fields["cause"] = err.Error()
@@ -134,4 +138,13 @@ func reserveOrder(f *feedState, key string) error {
 		f.entryRows[base] = uint32(sub) + 1
 	}
 	return nil
+}
+
+// retiredMergeTab reports whether ROW is a merge tab recorded with a kind
+// arm frontend.v1.FeedMergeTab has retired (the conflicts and fixes tabs, now
+// parts of a commit's and a run's subtabs): it decodes with no kind, and no
+// client can draw it.
+func retiredMergeTab(row *frontendv1.FeedRow) bool {
+	tab := row.GetMergeTab()
+	return tab != nil && tab.GetKind() == nil
 }

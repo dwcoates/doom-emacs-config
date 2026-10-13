@@ -594,10 +594,7 @@ func (r *run) speculativeGate(ctx context.Context, place chainPlace, targetBranc
 			"workspace": string(r.ws), "base": place.base, "head": head, "tree": tree, "rank": place.rank})
 		return nil, r.checkpoint(ctx, TabTests, nil)
 	case r.fixesUsed >= MaxFixAttempts:
-		summary := fmt.Sprintf("the tests still fail after %d fixing attempts; the whole run is archived at %s", MaxFixAttempts, verdict.result.ArchivePath)
-		r.o.log(ctx, r.ws).Info("daemon.merge.fixes", "the last fixing attempt left suites failing; the merge fails", dlog.Context{
-			"workspace": string(r.ws), "attempts": MaxFixAttempts, "archive": verdict.result.ArchivePath, "speculative": true})
-		out := failedIn(footer.FailedTests, summary)
+		out := r.fixesExhausted(ctx, verdict.result.ArchivePath, dlog.Context{"speculative": true})
 		return &out, nil
 	}
 	attempt := r.fixesUsed + 1
@@ -655,7 +652,7 @@ func (r *run) resumeSpeculative(ctx context.Context, res *progressDoc, targetBra
 	if res.Tip == "" {
 		return r.contradiction(ctx, fmt.Sprintf("the record of its speculative %s step names no base", res.Step)), nil
 	}
-	p := &replay{round: r.activeRound(), commits: fromCommitDocs(res.Commits), done: res.Replayed, lines: res.Lines}
+	p := &replay{round: r.activeRound(), commits: fromCommitDocs(res.Commits), done: res.Replayed}
 	switch res.Step {
 	case TabRebasing:
 		if gaveUp, err := r.resumeRebase(ctx, p, res.Tip, targetBranch, res.BranchHead); err != nil || gaveUp != nil {
@@ -674,7 +671,9 @@ func (r *run) resumeSpeculative(ctx context.Context, res *progressDoc, targetBra
 		r.o.log(ctx, r.ws).Info(op, "the speculative gate the restart cut runs again once admitted", dlog.Context{
 			"workspace": string(r.ws), "lease": string(r.lease.ID), "round": round.n})
 		if res.Tested == nil {
-			r.upsert(round, testsTab(round.settled(r.o.nowMS(), "the daemon restarted under this run; the tests run again"), nil, nil))
+			const cut = "the daemon restarted under this run; the tests run again"
+			r.publishRun(round, round.settled(r.o.nowMS(), cut), nil, nil)
+			r.settleTesting(cut)
 			r.closeTab(ctx, round, "restarted")
 		}
 		return nil, nil

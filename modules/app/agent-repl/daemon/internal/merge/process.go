@@ -167,7 +167,7 @@ func (r *run) resumeAttempt(ctx context.Context, res *progressDoc) (outcome, boo
 	if tip == "" || targetBranch == "" {
 		return *r.contradiction(ctx, fmt.Sprintf("the record of its %s step names no tip or target branch", res.Step)), false, nil
 	}
-	p := &replay{round: r.activeRound(), commits: fromCommitDocs(res.Commits), done: res.Replayed, lines: res.Lines}
+	p := &replay{round: r.activeRound(), commits: fromCommitDocs(res.Commits), done: res.Replayed}
 	finish := func(gaveUp *outcome, err error) (outcome, bool, error, bool) {
 		if gaveUp != nil {
 			return *gaveUp, false, nil, true
@@ -207,7 +207,9 @@ func (r *run) resumeAttempt(ctx context.Context, res *progressDoc) (outcome, boo
 			// A GATE ON A TIP THE TARGET LEFT can never land: the merge goes
 			// back to the rebase step first (owner ruling, 2026-10-12).
 			round := r.activeRound()
-			r.upsert(round, testsTab(round.settled(r.o.nowMS(), "the daemon restarted under this run and the target moved; the branch rebases onto its new tip first"), nil, nil))
+			const moved = "the daemon restarted under this run and the target moved; the branch rebases onto its new tip first"
+			r.publishRun(round, round.settled(r.o.nowMS(), moved), nil, nil)
+			r.settleTesting(moved)
 			r.closeTab(ctx, round, "restarted")
 			return r.rebaseOntoMoved(ctx, tip, now, targetBranch, res.FixAttempt)
 		}
@@ -236,8 +238,10 @@ func (r *run) resumeAttempt(ctx context.Context, res *progressDoc) (outcome, boo
 // landed, with nothing to merge and nothing to deploy, and says so.
 func (r *run) alreadyOn(ctx context.Context, targetBranch string) (outcome, error) {
 	round := r.openTab(ctx, TabRebasing)
-	line := fmt.Sprintf("already on %s; nothing to merge", targetBranch)
-	r.upsert(round, rebasingTab(round.settled(r.o.nowMS(), ""), 0, 0, []string{line}))
+	r.rebasing.Span.relive(round.started.UnixMilli())
+	r.rebasing.Lines = append(r.rebasing.Lines, fmt.Sprintf("already on %s; nothing to merge", targetBranch))
+	r.rebasing.Span.settle(r.o.nowMS(), "")
+	r.publishRebasing(false)
 	r.closeTab(ctx, round, "succeeded")
 	tip, err := r.git.ResolveRef(ctx, r.subject.dir, r.subject.branch)
 	if err != nil {
@@ -248,13 +252,13 @@ func (r *run) alreadyOn(ctx context.Context, targetBranch string) (outcome, erro
 	return outcome{landed: tip, alreadyOn: targetBranch}, nil
 }
 
-// replay is one rebase's progress: the commits it replays, how many are done,
-// and the narration its tab draws.
+// replay is one rebase's progress: the ledger round it stands in, the commits
+// it replays and how many are done. What the bubble draws of it is the
+// rebasing view (nested.go).
 type replay struct {
 	round   tabRound
 	commits []gitclient.Commit
 	done    int
-	lines   []string
 }
 
 // rebase replays the branch onto tip, commit by commit, in the branch's
@@ -286,6 +290,7 @@ func (r *run) rebase(ctx context.Context, tip, targetBranch string) (*outcome, e
 		return nil, fmt.Errorf("merge: listing what %s replays onto %s: %w", branch, short(tip), err)
 	}
 	p := &replay{round: r.openTab(ctx, TabRebasing), commits: commits}
+	r.rebasing.beginReplay(commits, p.round.started.UnixMilli())
 	based, err := r.git.IsAncestor(ctx, dir, tip, branch)
 	if err != nil {
 		return nil, fmt.Errorf("merge: asking whether %s is already on %s's tip: %w", branch, targetBranch, err)
@@ -304,9 +309,12 @@ func (r *run) rebase(ctx context.Context, tip, targetBranch string) (*outcome, e
 		// target did not move after all, or an author who rebased by hand), so
 		// there is nothing to replay.
 		p.done = len(commits)
-		p.lines = append(p.lines, fmt.Sprintf("%s is already on %s's tip; nothing to replay", branch, targetBranch))
+		now := r.o.nowMS()
+		r.rebasing.reachCommit(len(commits), now)
+		r.rebasing.Lines = append(r.rebasing.Lines, fmt.Sprintf("%s is already on %s's tip; nothing to replay", branch, targetBranch))
+		r.rebasing.Span.settle(now, "")
 		r.setStep(ctx, footer.StepRebasing, func(f *footer.MergeFacts) { f.Replayed, f.Total = p.done, len(commits) })
-		r.upsert(p.round, rebasingTab(p.round.settled(r.o.nowMS(), ""), p.done, len(commits), p.lines))
+		r.publishReplay()
 		r.closeTab(ctx, p.round, "succeeded")
 		return nil, nil
 	}
@@ -322,13 +330,14 @@ func (r *run) rebase(ctx context.Context, tip, targetBranch string) (*outcome, e
 		f.Total = len(commits)
 		f.Line = rebaseCommandLine(pickLine(commits[0]))
 	})
-	p.lines = append(p.lines, fmt.Sprintf("replaying %d commits of %s onto %s at %s", len(commits), branch, targetBranch, short(tip)))
-	r.upsert(p.round, rebasingTab(p.round.live(), 0, len(commits), p.lines))
+	r.rebasing.Lines = append(r.rebasing.Lines, fmt.Sprintf("replaying %d commits of %s onto %s at %s", len(commits), branch, targetBranch, short(tip)))
+	r.rebasing.reachCommit(0, r.o.nowMS())
+	r.publishReplay()
 	// THE REBASE'S RECORD NAMES THE TIP, THE COMMITS AND THE BRANCH'S HEAD
 	// BEFORE IT: a resume reads where git stopped against exactly these.
 	if err := r.checkpoint(ctx, TabRebasing, func(d *progressDoc) {
 		d.TargetBranch, d.Tip, d.BranchHead = targetBranch, tip, head
-		d.Commits, d.Replayed, d.Lines = toCommitDocs(commits), 0, p.lines
+		d.Commits, d.Replayed = toCommitDocs(commits), 0
 		d.Turn, d.ConflictFiles, d.FixAttempt, d.FailingSuites, d.Head, d.MergeCommit = "", nil, 0, nil, "", ""
 		d.FailingArchive, d.FailingTail = "", ""
 	}); err != nil {
@@ -373,9 +382,10 @@ func (r *run) replayLoop(ctx context.Context, p *replay, step gitclient.RebaseSt
 			// A CONFLICT ALREADY RESOLVED ONCE IS NEVER PROMPTED AGAIN: rerere
 			// staged the resolution the session recorded for this same
 			// conflict, and the rebase only waits to be continued.
-			commit := p.commits[min(p.done, len(p.commits)-1)]
-			p.lines = append(p.lines, fmt.Sprintf("%s conflicted in %d file(s), resolved as before", commitLine(commit.SHA, commit.Subject), len(step.Resolved)))
-			r.upsert(p.round, rebasingTab(p.round.live(), p.done, len(p.commits), p.lines))
+			i := p.commitAt()
+			commit := p.commits[i]
+			r.rebasing.Commits[i].Lines = append(r.rebasing.Commits[i].Lines, fmt.Sprintf("conflicted in %d file(s), resolved as before", len(step.Resolved)))
+			r.publishCommit(i, false)
 			r.o.log(ctx, r.ws).Info("daemon.merge.rerere", "a replayed commit conflicted as before; the recorded resolution was reused and nothing is prompted", dlog.Context{
 				"workspace": string(r.ws), "commit": commit.SHA, "files": strings.Join(step.Resolved, ", "), "worktree": dir})
 			step, err = r.git.ContinueRebase(ctx, dir)
@@ -385,7 +395,7 @@ func (r *run) replayLoop(ctx context.Context, p *replay, step gitclient.RebaseSt
 		if step.Done {
 			return nil, nil
 		}
-		if err := r.checkpoint(ctx, TabRebasing, func(d *progressDoc) { d.Replayed, d.Lines = p.done, p.lines }); err != nil {
+		if err := r.checkpoint(ctx, TabRebasing, func(d *progressDoc) { d.Replayed = p.done }); err != nil {
 			return nil, err
 		}
 		if err := stillWanted(ctx); err != nil {
@@ -433,7 +443,8 @@ func (r *run) resumeRebase(ctx context.Context, p *replay, tip, targetBranch, br
 			f.Replayed, f.Total = p.done, len(p.commits)
 			f.Line = rebaseCommandLine(pickLine(p.commits[p.done]))
 		})
-		r.upsert(p.round, rebasingTab(p.round.live(), p.done, len(p.commits), p.lines))
+		r.resumeReplay(p)
+		r.publishReplay()
 		if len(files) > 0 {
 			return r.replayLoop(ctx, p, gitclient.RebaseStep{Conflicted: files}, nil, tip, targetBranch)
 		}
@@ -448,6 +459,7 @@ func (r *run) resumeRebase(ctx context.Context, p *replay, tip, targetBranch, br
 		r.o.log(ctx, r.ws).Info(op, "the rebase had finished before the restart; the merge goes on to its tests", dlog.Context{
 			"workspace": string(r.ws), "worktree": dir, "total": len(p.commits)})
 		p.done = max(len(p.commits)-1, 0)
+		r.resumeReplay(p)
 		r.replayed(ctx, p, true)
 		return nil, nil
 	}
@@ -458,6 +470,8 @@ func (r *run) resumeRebase(ctx context.Context, p *replay, tip, targetBranch, br
 	if head == branchHead && p.done == 0 {
 		r.o.log(ctx, r.ws).Info(op, "the rebase had not begun before the restart; it begins now", dlog.Context{
 			"workspace": string(r.ws), "worktree": dir, "total": len(p.commits)})
+		r.resumeReplay(p)
+		r.publishReplay()
 		step, err := r.git.StartRebase(ctx, dir, tip, shasOf(p.commits))
 		return r.replayLoop(ctx, p, step, err, tip, targetBranch)
 	}
@@ -489,21 +503,32 @@ func (r *run) rebaseSettled(ctx context.Context, tip, targetBranch string) (*out
 // replayed records one commit replayed. A rebase that finished is complete
 // whatever the count read: every commit is on the tip.
 func (r *run) replayed(ctx context.Context, p *replay, done bool) {
-	current := p.commits[min(p.done, len(p.commits)-1)]
+	i := p.commitAt()
 	p.done++
 	if done {
 		p.done = len(p.commits)
 	}
-	p.lines = append(p.lines, fmt.Sprintf("replayed %d/%d · %s", p.done, len(p.commits), current.Subject))
+	now := r.o.nowMS()
+	current := &r.rebasing.Commits[i]
+	current.Lines = append(current.Lines, fmt.Sprintf("replayed %d/%d", p.done, len(p.commits)))
+	if !current.Span.begun() {
+		current.Span.StartedMS = now
+	}
+	current.Span.settle(now, "")
 	if done {
+		r.rebasing.reachCommit(len(p.commits), now)
+		r.rebasing.Span.settle(now, "")
 		r.updateFacts(func(f *footer.MergeFacts) { f.Replayed, f.Line = p.done, nil })
-		r.upsert(p.round, rebasingTab(p.round.settled(r.o.nowMS(), ""), p.done, len(p.commits), p.lines))
+		r.publishReplay()
 		r.closeTab(ctx, p.round, "succeeded")
 		return
 	}
+	r.rebasing.reachCommit(p.done, now)
 	next := p.commits[p.done]
 	r.updateFacts(func(f *footer.MergeFacts) { f.Replayed, f.Line = p.done, rebaseCommandLine(pickLine(next)) })
-	r.upsert(p.round, rebasingTab(p.round.live(), p.done, len(p.commits), p.lines))
+	r.publishRebasing(false)
+	r.publishCommit(i, false)
+	r.publishCommit(p.done, false)
 }
 
 // rebaseFailed settles the rebasing tab and the footer's line on a rebase
@@ -511,13 +536,25 @@ func (r *run) replayed(ctx context.Context, p *replay, done bool) {
 func (r *run) rebaseFailed(ctx context.Context, p *replay, err error) {
 	line := failureLine(err)
 	r.updateFacts(func(f *footer.MergeFacts) { f.Line = rebaseFailureLine(line) })
-	p.lines = append(p.lines, "failed: "+line)
-	r.settleRebasing(ctx, p, "the rebase failed")
+	const summary = "the rebase failed"
+	now := r.o.nowMS()
+	if len(p.commits) > 0 {
+		c := &r.rebasing.Commits[p.commitAt()]
+		c.Lines = append(c.Lines, "failed: "+line)
+		if !c.Span.begun() {
+			c.Span.StartedMS = now
+		}
+		c.Span.settle(now, summary)
+	} else {
+		r.rebasing.Lines = append(r.rebasing.Lines, "failed: "+line)
+	}
+	r.settleRebasing(ctx, p, summary)
 }
 
-// settleRebasing settles a rebasing round as failed.
+// settleRebasing settles the rebasing tab and its ledger round as failed.
 func (r *run) settleRebasing(ctx context.Context, p *replay, summary string) {
-	r.upsert(p.round, rebasingTab(p.round.settled(r.o.nowMS(), summary), p.done, len(p.commits), p.lines))
+	r.rebasing.Span.settle(r.o.nowMS(), summary)
+	r.publishReplay()
 	r.closeTab(ctx, p.round, "failed")
 }
 
@@ -526,7 +563,8 @@ func (r *run) settleRebasing(ctx context.Context, p *replay, summary string) {
 // rebase continues in a new rebasing round.
 func (r *run) conflict(ctx context.Context, p *replay, files []string, targetBranch string) (*outcome, error) {
 	const op = "daemon.merge.conflicts"
-	commit := p.commits[min(p.done, len(p.commits)-1)]
+	i := p.commitAt()
+	commit := p.commits[i]
 	// THE ATTEMPTS COUNT PER COMMIT (owner ruling, 2026-10-12): a conflict on
 	// a commit the rebase has not met before starts its count afresh, so a
 	// rebase that advanced is never failed for the attempts an earlier commit
@@ -535,8 +573,11 @@ func (r *run) conflict(ctx context.Context, p *replay, files []string, targetBra
 		r.conflictCommit, r.conflictAttempts = commit.SHA, 0
 	}
 	r.conflictAttempts++
-	p.lines = append(p.lines, fmt.Sprintf("%s conflicted in %d file(s)", commitLine(commit.SHA, commit.Subject), len(files)))
-	r.settleRebasing(ctx, p, "the rebase stopped on a conflict")
+	r.rebasing.Commits[i].Lines = append(r.rebasing.Commits[i].Lines, fmt.Sprintf("conflicted in %d file(s)", len(files)))
+	// THE LEDGER'S REBASING ROUND ENDS AT THE CONFLICT, and the rebase goes on
+	// in a new one once it is resolved. The bubble's rebasing tab and this
+	// commit's subtab stay live across the resolution.
+	r.closeTab(ctx, p.round, "failed")
 	r.o.log(ctx, r.ws).Info(op, "a replayed commit conflicted; the requester's session resolves it", dlog.Context{
 		"workspace": string(r.ws), "commit": commit.SHA, "files": strings.Join(files, ", "), "worktree": r.subject.dir,
 		"attempt": r.conflictAttempts, "of": MaxConflictAttempts})
@@ -547,8 +588,10 @@ func (r *run) conflict(ctx context.Context, p *replay, files []string, targetBra
 // conflicts round, and reads the resolution's end. It spends no attempt: the
 // caller counted it, or -- a resolution a restart cut -- it is not counted.
 func (r *run) promptConflict(ctx context.Context, p *replay, commit gitclient.Commit, files []string, targetBranch string) (*outcome, error) {
+	i := p.commitAt()
 	round := r.openTab(ctx, TabConflicts)
-	r.drawLive(ctx, round, footer.StepConflictResolution, conflictLine(commit.Subject, len(files)), nil, conflictsTab)
+	r.rebasing.Commits[i].Conflict = &conflictView{Span: span{StartedMS: round.started.UnixMilli()}, Files: append([]string(nil), files...)}
+	r.drawConflict(ctx, round, i, len(files))
 	if err := r.noteMachinery(ctx, targetBranch); err != nil {
 		return nil, err
 	}
@@ -561,7 +604,7 @@ func (r *run) promptConflict(ctx context.Context, p *replay, commit gitclient.Co
 	}
 	turn := wsm.NewTurnID()
 	if err := r.checkpoint(ctx, TabConflicts, func(d *progressDoc) {
-		d.Replayed, d.Lines, d.ConflictFiles, d.Turn = p.done, p.lines, files, string(turn)
+		d.Replayed, d.ConflictFiles, d.Turn = p.done, files, string(turn)
 	}); err != nil {
 		return nil, err
 	}
@@ -621,7 +664,7 @@ func (r *run) conflictSettled(ctx context.Context, p *replay, round tabRound, cl
 	// (owner ruling, 2026-10-12): it did not fail, it was interrupted.
 	if cutByRestart(close, resumed) && len(remaining) > 0 {
 		r.settleAgentic()
-		r.upsert(round, conflictsTab(round.settled(r.o.nowMS(), "a restart cut this resolution short; it is prompted again")))
+		r.settleConflictAttempt(p, "a restart cut this resolution short; it is prompted again")
 		r.closeTab(ctx, round, "restarted")
 		r.o.log(ctx, r.ws).Info(op, "a restart cut the conflict resolution short; it is prompted again and spends no attempt", dlog.Context{
 			"workspace": string(r.ws), "commit": commit.SHA, "close": close.String(), "attempt": r.conflictAttempts, "of": MaxConflictAttempts})
@@ -649,7 +692,7 @@ func (r *run) conflictSettled(ctx context.Context, p *replay, round tabRound, cl
 	if why != "" && !machinery && r.conflictAttempts < MaxConflictAttempts {
 		r.settleAgentic()
 		retry := fmt.Sprintf("attempt %d of %d did not resolve it (%s); trying again", r.conflictAttempts, MaxConflictAttempts, why)
-		r.upsert(round, conflictsTab(round.settled(r.o.nowMS(), retry)))
+		r.settleConflictAttempt(p, retry)
 		r.closeTab(ctx, round, "failed")
 		r.o.log(ctx, r.ws).Info(op, "the conflict resolution did not resolve the commit; the session tries again", dlog.Context{
 			"workspace": string(r.ws), "commit": commit.SHA, "attempt": r.conflictAttempts, "of": MaxConflictAttempts, "why": why})
@@ -665,7 +708,13 @@ func (r *run) conflictSettled(ctx context.Context, p *replay, round tabRound, cl
 	if why != "" {
 		summary := fmt.Sprintf("conflict resolution gave up: %s; the rebase is left in progress in %s", why, r.subject.dir)
 		r.settleAgentic()
-		r.upsert(round, conflictsTab(round.settled(r.o.nowMS(), summary)))
+		i, now := p.commitAt(), r.o.nowMS()
+		c := &r.rebasing.Commits[i]
+		c.Conflict.Span.settle(now, summary)
+		c.Span.settle(now, summary)
+		r.rebasing.Span.settle(now, summary)
+		r.publishRebasing(false)
+		r.publishCommit(i, false)
 		r.closeTab(ctx, round, "failed")
 		r.o.log(ctx, r.ws).Info(op, "the conflict resolution gave up; the merge fails and the rebase is left in progress", dlog.Context{
 			"workspace": string(r.ws), "why": why, "worktree": r.subject.dir})
@@ -673,21 +722,25 @@ func (r *run) conflictSettled(ctx context.Context, p *replay, round tabRound, cl
 		return &out, nil
 	}
 	r.settleAgentic()
-	r.upsert(round, conflictsTab(round.settled(r.o.nowMS(), "")))
+	i := p.commitAt()
+	c := &r.rebasing.Commits[i]
+	c.Conflict.Span.settle(r.o.nowMS(), "")
+	c.Lines = append(c.Lines, "the conflict is resolved; the rebase continues")
+	r.publishRebasing(false)
+	r.publishCommit(i, false)
 	r.closeTab(ctx, round, "succeeded")
 	// A RESOLUTION THAT RESOLVED ENDS THE RUN OF FAILURES: the next conflict
 	// starts its count afresh.
 	r.conflictCommit, r.conflictAttempts = "", 0
-	// THE REBASE CONTINUES IN A NEW ROUND: tabs never reopen.
+	// THE REBASE CONTINUES IN A NEW LEDGER ROUND, drawn in the same rebasing
+	// tab and the same commit's subtab.
 	p.round = r.openTab(ctx, TabRebasing)
-	p.lines = []string{fmt.Sprintf("the conflict in %s is resolved; the rebase continues", commit.Subject)}
 	r.setStep(ctx, footer.StepRebasing, func(f *footer.MergeFacts) {
 		f.Replayed, f.Total = p.done, len(p.commits)
 		f.Line = rebaseCommandLine("git rebase --continue")
 	})
-	r.upsert(p.round, rebasingTab(p.round.live(), p.done, len(p.commits), p.lines))
 	if err := r.checkpoint(ctx, TabRebasing, func(d *progressDoc) {
-		d.Replayed, d.Lines, d.ConflictFiles, d.Turn = p.done, p.lines, nil, ""
+		d.Replayed, d.ConflictFiles, d.Turn = p.done, nil, ""
 	}); err != nil {
 		return nil, err
 	}
@@ -709,9 +762,15 @@ func (r *run) resumeConflict(ctx context.Context, p *replay, tip, targetBranch s
 	if len(p.commits) == 0 {
 		return r.contradiction(ctx, "the record of the conflict resolution names no commit the rebase replays"), nil
 	}
-	commit := p.commits[min(p.done, len(p.commits)-1)]
+	i := p.commitAt()
+	commit := p.commits[i]
 	round := r.activeRound()
-	r.drawLive(ctx, round, footer.StepConflictResolution, conflictLine(commit.Subject, len(res.ConflictFiles)), nil, conflictsTab)
+	r.resumeReplay(p)
+	if r.rebasing.Commits[i].Conflict == nil {
+		r.rebasing.Commits[i].Conflict = &conflictView{Span: span{StartedMS: round.started.UnixMilli()}, Files: append([]string(nil), res.ConflictFiles...)}
+	}
+	r.publishReplay()
+	r.drawConflict(ctx, round, i, len(res.ConflictFiles))
 	text, err := r.conflictBrief(commit, res.ConflictFiles, targetBranch)
 	if err != nil {
 		return nil, err
@@ -790,10 +849,7 @@ func (r *run) testAndFix(ctx context.Context, tip, targetBranch string, fromAtte
 			r.tested = &testedDoc{Base: tip, Head: head, Tree: tree, Own: true}
 			return head, nil, nil
 		case attempt == MaxFixAttempts:
-			summary := fmt.Sprintf("the tests still fail after %d fixing attempts; the whole run is archived at %s", MaxFixAttempts, verdict.result.ArchivePath)
-			r.o.log(ctx, r.ws).Info("daemon.merge.fixes", "the last fixing attempt left suites failing; the merge fails", dlog.Context{
-				"workspace": string(r.ws), "attempts": MaxFixAttempts, "archive": verdict.result.ArchivePath})
-			out := failedIn(footer.FailedTests, summary)
+			out := r.fixesExhausted(ctx, verdict.result.ArchivePath, nil)
 			return "", &out, nil
 		}
 		if gaveUp, err := r.fix(ctx, attempt+1, verdict.result, targetBranch); err != nil || gaveUp != nil {
@@ -803,6 +859,20 @@ func (r *run) testAndFix(ctx context.Context, tip, targetBranch string, fromAtte
 	}
 }
 
+// fixesExhausted fails a merge whose last fixing attempt left suites failing:
+// the outcome, the record at INFO (with EXTRA's fields), and the tests tab
+// settled failed, all with the one summary.
+func (r *run) fixesExhausted(ctx context.Context, archive string, extra dlog.Context) outcome {
+	summary := fmt.Sprintf("the tests still fail after %d fixing attempts; the whole run is archived at %s", MaxFixAttempts, archive)
+	fields := dlog.Context{"workspace": string(r.ws), "attempts": MaxFixAttempts, "archive": archive}
+	for k, v := range extra {
+		fields[k] = v
+	}
+	r.o.log(ctx, r.ws).Info("daemon.merge.fixes", "the last fixing attempt left suites failing; the merge fails", fields)
+	r.settleTesting(summary)
+	return failedIn(footer.FailedTests, summary)
+}
+
 // fix hands one failing run to the requester's session, which repairs the
 // branch in its worktree: fixing attempt x of MaxFixAttempts. It answers the
 // failed outcome when the agent escalated or changed the merge machinery.
@@ -810,11 +880,12 @@ func (r *run) fix(ctx context.Context, attempt int, failing GateResult, targetBr
 	return r.promptFix(ctx, attempt, failedSuites(failing.Suites), failing.ArchivePath, failing.Tail, targetBranch)
 }
 
-// promptFix submits fixing attempt x's brief in a new fixes round and reads
-// its end.
+// promptFix submits fixing attempt x's brief in a new fixes round, drawn as
+// the sub-subtab of the run it follows, and reads its end.
 func (r *run) promptFix(ctx context.Context, attempt int, suites []string, archive, tail, targetBranch string) (*outcome, error) {
+	n := r.testsRound()
 	round := r.openTab(ctx, TabFixes)
-	r.drawFixing(ctx, round, attempt, suites)
+	r.drawFixing(ctx, round, n, attempt, suites)
 	if err := r.noteMachinery(ctx, targetBranch); err != nil {
 		return nil, err
 	}
@@ -842,14 +913,7 @@ func (r *run) promptFix(ctx context.Context, attempt int, suites []string, archi
 	if err != nil {
 		return nil, err
 	}
-	return r.fixSettled(ctx, round, attempt, suites, archive, tail, targetBranch, close, false)
-}
-
-// drawFixing stands fixing attempt x's round live, fresh or resumed.
-func (r *run) drawFixing(ctx context.Context, round tabRound, attempt int, suites []string) {
-	r.drawLive(ctx, round, footer.StepFixing, fixingLine(suites), func(f *footer.MergeFacts) {
-		f.Attempt, f.MaxAttempts = attempt, MaxFixAttempts
-	}, func(st tabState) *frontendv1.FeedMergeTab { return fixesTab(st, attempt) })
+	return r.fixSettled(ctx, round, n, attempt, suites, archive, tail, targetBranch, close, false)
 }
 
 // fixBrief composes one fixing attempt's brief.
@@ -875,16 +939,16 @@ func (r *run) fixBrief(attempt int, suites []string, archive, tail, targetBranch
 
 // fixSettled reads a fixing attempt's end: the failed outcome when the agent
 // escalated or changed the merge machinery, nil when the gate runs again. An
-// attempt a restart cut short is prompted again as the same attempt: it never
-// counts (owner ruling, 2026-10-12).
-func (r *run) fixSettled(ctx context.Context, round tabRound, attempt int, suites []string, archive, tail, targetBranch string, close wsm.TurnClose, resumed bool) (*outcome, error) {
+// attempt a restart cut short is prompted again as the same attempt, in the
+// same run's fixing sub-subtab: it never counts (owner ruling, 2026-10-12).
+func (r *run) fixSettled(ctx context.Context, round tabRound, n, attempt int, suites []string, archive, tail, targetBranch string, close wsm.TurnClose, resumed bool) (*outcome, error) {
 	const op = "daemon.merge.fixes"
 	if err := stillWanted(ctx); err != nil {
 		return nil, err
 	}
 	if cutByRestart(close, resumed) {
 		r.settleAgentic()
-		r.upsert(round, fixesTab(round.settled(r.o.nowMS(), "a restart cut this fixing attempt short; it is prompted again"), attempt))
+		r.publish(fixingKey(n), fixingTab(round.settled(r.o.nowMS(), "a restart cut this fixing attempt short; it is prompted again"), attempt))
 		r.closeTab(ctx, round, "restarted")
 		r.o.log(ctx, r.ws).Info(op, "a restart cut the fixing attempt short; it is prompted again and spends no attempt", dlog.Context{
 			"workspace": string(r.ws), "attempt": attempt, "of": MaxFixAttempts, "close": close.String()})
@@ -900,7 +964,8 @@ func (r *run) fixSettled(ctx context.Context, round tabRound, attempt int, suite
 	}
 	if why != "" {
 		r.settleAgentic()
-		r.upsert(round, fixesTab(round.settled(r.o.nowMS(), why), attempt))
+		r.publish(fixingKey(n), fixingTab(round.settled(r.o.nowMS(), why), attempt))
+		r.settleTesting(why)
 		r.closeTab(ctx, round, "failed")
 		r.o.log(ctx, r.ws).Info(op, "the fixing attempt gave up; the merge fails", dlog.Context{
 			"workspace": string(r.ws), "attempt": attempt, "why": why})
@@ -908,7 +973,8 @@ func (r *run) fixSettled(ctx context.Context, round tabRound, attempt int, suite
 		return &out, nil
 	}
 	r.settleAgentic()
-	r.upsert(round, fixesTab(round.settled(r.o.nowMS(), ""), attempt))
+	r.publish(fixingKey(n), fixingTab(round.settled(r.o.nowMS(), ""), attempt))
+	r.publishTesting(false)
 	r.closeTab(ctx, round, "succeeded")
 	return nil, nil
 }
@@ -917,7 +983,8 @@ func (r *run) fixSettled(ctx context.Context, round tabRound, attempt int, suite
 // reattaches to the fixing turn and reads its end.
 func (r *run) resumeFix(ctx context.Context, res *progressDoc, targetBranch string) (*outcome, error) {
 	round := r.activeRound()
-	r.drawFixing(ctx, round, res.FixAttempt, res.FailingSuites)
+	n := r.testsRound()
+	r.drawFixing(ctx, round, n, res.FixAttempt, res.FailingSuites)
 	text, err := r.fixBrief(res.FixAttempt, res.FailingSuites, res.FailingArchive, res.FailingTail, targetBranch)
 	if err != nil {
 		return nil, err
@@ -926,7 +993,7 @@ func (r *run) resumeFix(ctx context.Context, res *progressDoc, targetBranch stri
 	if err != nil {
 		return nil, err
 	}
-	return r.fixSettled(ctx, round, res.FixAttempt, res.FailingSuites, res.FailingArchive, res.FailingTail, targetBranch, close, true)
+	return r.fixSettled(ctx, round, n, res.FixAttempt, res.FailingSuites, res.FailingArchive, res.FailingTail, targetBranch, close, true)
 }
 
 // failedSuites names the suites a run failed, in the gate's order.

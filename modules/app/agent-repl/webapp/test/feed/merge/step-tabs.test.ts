@@ -3,15 +3,18 @@ import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
   FeedMergeTabCommittingSchema,
-  FeedMergeTabFixesSchema,
+  FeedMergeTabRebaseCommitSchema,
   FeedMergeTabRebasingSchema,
+  FeedMergeTabTestsRunFixingSchema,
   FeedMergeTabUpdatingMainSchema,
   FeedMergeUpdatingMainStepSchema,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import {
+  drawFeedMergeConflictFiles,
   drawFeedMergeTabCommitting,
-  drawFeedMergeTabFixesAttempt,
+  drawFeedMergeTabFixingAttempt,
+  drawFeedMergeTabRebaseCommit,
   drawFeedMergeTabRebasing,
   drawFeedMergeTabUpdatingMain,
   drawFeedMergeUpdatingMainStep,
@@ -117,14 +120,36 @@ describe("drawFeedMergeTabUpdatingMain", () => {
   });
 });
 
-describe("drawFeedMergeTabFixesAttempt", () => {
+describe("drawFeedMergeTabFixingAttempt", () => {
   it("draws the attempt as 'attempt 2/3'", () => {
-    const u = create(FeedMergeTabFixesSchema, { state: LIVE, attempt: { attempt: 2, maxAttempts: 3 } });
-    expect(drawFeedMergeTabFixesAttempt(u, "fixes").textContent).toBe("attempt 2/3");
+    const u = create(FeedMergeTabTestsRunFixingSchema, { state: LIVE, attempt: { attempt: 2, maxAttempts: 3 } });
+    expect(drawFeedMergeTabFixingAttempt(u, "tests_run_fixing").textContent).toBe("attempt 2/3");
   });
 
   it("refuses a fixes tab with no attempt", () => {
-    const u = create(FeedMergeTabFixesSchema, { state: LIVE });
-    expect(() => drawFeedMergeTabFixesAttempt(u, "fixes")).toThrow(MalformedView);
+    const u = create(FeedMergeTabTestsRunFixingSchema, { state: LIVE });
+    expect(() => drawFeedMergeTabFixingAttempt(u, "tests_run_fixing")).toThrow(MalformedView);
+  });
+});
+
+describe("drawFeedMergeTabRebaseCommit", () => {
+  it("draws the commit's narration lines verbatim, oldest first", () => {
+    const u = create(FeedMergeTabRebaseCommitSchema, {
+      state: LIVE,
+      lines: [{ text: "conflicted in 1 file(s)" }, { text: "replayed 1/2" }],
+    });
+    expect([...drawFeedMergeTabRebaseCommit(u).querySelectorAll(".merge-line")].map((e) => e.textContent)).toEqual([
+      "conflicted in 1 file(s)",
+      "replayed 1/2",
+    ]);
+  });
+});
+
+describe("drawFeedMergeConflictFiles", () => {
+  it("draws each conflicted path verbatim, in git's order", () => {
+    const u = create(FeedMergeTabRebaseCommitSchema, { conflict: { files: [{ path: "b.go" }, { path: "a.go" }] } });
+    expect(
+      [...drawFeedMergeConflictFiles(u.conflict?.files ?? []).querySelectorAll(".merge-conflict-file")].map((e) => e.textContent),
+    ).toEqual(["b.go", "a.go"]);
   });
 });

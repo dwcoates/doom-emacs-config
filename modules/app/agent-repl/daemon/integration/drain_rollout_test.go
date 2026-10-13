@@ -1504,7 +1504,7 @@ func drainOpenWorkspace(t *testing.T, d *harness.Daemon) *fixture {
 // repository, with a PASSING test gate.
 //
 // The gate matters: the deploy runs only off a merge that LANDED, and a merge
-// whose gate fails opens the fixes tab instead. Without the override the gate
+// whose gate fails opens a fixing attempt instead. Without the override the gate
 // runs the repository's own bin/test-all.sh, which a fake repository does not
 // have, and every landing died at exit 127.
 func drainSelfRepoDaemon(t *testing.T) (*harness.Repo, *harness.Daemon) {
