@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -322,7 +321,7 @@ func (i *ingress) apply(ctx context.Context, log dlog.Logger, file string, index
 		// the turn in flight (merge.Requester).
 		var detached *merge.DetachedRun
 		if entry.Detached {
-			detached = &merge.DetachedRun{Name: strings.TrimSpace(entry.DetachedName), Pick: strings.TrimSpace(entry.Pick), CompactAfter: entry.CompactAfter}
+			detached = merge.NewDetachedRun(entry.DetachedName, entry.Pick, entry.CompactAfter)
 		}
 		return i.deps.Merge.Enqueue(ctx, merge.Request{Workspace: ws, Source: source, By: merge.RequestedByAgent, Detached: detached, OneShot: entry.OneShot})
 	case TypeMergeEvict:
