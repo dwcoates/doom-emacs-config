@@ -1,7 +1,6 @@
 // feed_held.proto — THE HELD SECTION: the part of a workspace's ROOT feed
 // that holds what has not yet settled into the conversation's history — a
-// prompt the daemon is holding for delivery, a question waiting for the user's
-// answer. It is drawn at the root feed's tail, after every row, with no
+// prompt the daemon is holding for delivery. It is drawn at the root feed's tail, after every row, with no
 // heading and no divider, so a held item reads exactly as the feed's newest
 // row does.
 //
@@ -10,7 +9,6 @@
 //   │ ● merging ABC/fix-flaky-test → master          3m 12s │   (a row, not held)
 //   └───────────────────────────────────────────────────────┘
 //   "also fix the footer"        ⏳ held · merge running       FeedHeldItem.prompt
-//   ?  take this merge off the queue?      [dequeue] [keep]    FeedHeldItem.offer
 //
 // A RUNNING MERGE IS NOT HELD. Its bubble is a row of the feed pinned below
 // every settled row (FeedRowOrder.pinned), updated in place while it runs.
@@ -51,8 +49,8 @@ option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 // carried WHOLE on every change. An empty items list is a meaningful value —
 // the daemon is holding nothing for the user — not an absent one.
 message FeedHeld {
-  // The held items, in display order: the held prompts in queue order, then a
-  // posed offer. The prompt that settles first sits nearest the settled rows.
+  // The held items, in display order: the held prompts in queue order. The
+  // prompt that settles first sits nearest the settled rows.
   repeated FeedHeldItem items = 1;
 }
 
@@ -61,22 +59,21 @@ message FeedHeldItem {
   // The item's identity, and the reconciliation key a client keeps its element
   // under. For a prompt it is the FeedId its prompt row will carry once it
   // settles, so the settled row and the held item are one element to the
-  // client. An offer, which never settles,
-  // has a FeedId of its own. Opaque and daemon-minted, like every FeedId.
+  // client. Opaque and daemon-minted, like every FeedId.
   FeedId id = 1;
-  // What is held. THE ARM IS THE KIND, and each kind is answered differently —
-  // a prompt is released or dropped, an offer is answered — so a consumer
-  // routes on the arm rather than on anything inside it.
+  // What is held. THE ARM IS THE KIND, so a consumer routes on the arm rather
+  // than on anything inside it.
   oneof item {
     // A prompt the daemon is holding for delivery.
     HeldPrompt prompt = 3;
-    // A question the daemon is holding for the user's answer.
-    HeldOffer offer = 4;
   }
   // Tag 2 and the name `merge` are RETIRED: a running merge's bubble is the
-  // row pinned to the feed's bottom (FeedRowOrder.pinned), never held.
-  reserved 2;
-  reserved "merge";
+  // row pinned to the feed's bottom (FeedRowOrder.pinned), never held. Tag 4
+  // and the name `offer` are RETIRED: the one offer there was, the merge
+  // dequeue question an interrupt raises, is drawn inside the merge bubble
+  // it is about (frontend.v1.FeedMerge.queue_offer).
+  reserved 2, 4;
+  reserved "merge", "offer";
 }
 
 // A prompt the daemon is holding for delivery.
@@ -516,35 +513,3 @@ message HeldPromptAwaitingDelivery {}
 // runs on such an entry; the exit is delivery the moment the restarted shim
 // reports ready.
 message HeldPromptBuildRefreshHold {}
-
-// A question the daemon holds for the user's answer. THE ARM IS THE QUESTION.
-message HeldOffer {
-  // Which question is being asked. The arm determines both the card drawn and
-  // the answers available, so a consumer switches on it rather than inspecting
-  // the payload.
-  oneof offer {
-    // Take this workspace's merge off the queue? Raised by an interrupt during
-    // a merge; cleared by the answer, by the merge reaching its own terminal,
-    // or by the merge leaving the queue on its own. A frontend draws the card
-    // if and only if this item is present.
-    HeldOfferMergeDequeue merge_dequeue = 1;
-  }
-}
-
-// The merge-dequeue question, resolved for drawing: the daemon composes the
-// sentence ("interrupting — keep your merge's queue slot, or release it?");
-// the card draws it and offers the two answers, which are AnswerHeldOffer's
-// arms (keep | release), never fields here.
-message HeldOfferMergeDequeue {
-  // The sentence the card leads with, composed by the daemon. The two answers
-  // are not fields here — they are the answer request's arms — so this message
-  // carries only what is drawn.
-  HeldOfferHeadline headline = 1;
-}
-
-// The sentence an offer card leads with, composed daemon-side.
-message HeldOfferHeadline {
-  // The composed sentence, drawn verbatim. Never assembled client-side from
-  // the offer's kind.
-  string text = 1;
-}

@@ -278,68 +278,6 @@ func TestARetiredHoldIsNotHeld(t *testing.T) {
 	}
 }
 
-func TestTheSectionOrdersPromptsThenTheOffer(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-
-	// Act
-	h.resolver.SetOffer(testWorkspace, &frontendv1.HeldOffer{Offer: &frontendv1.HeldOffer_MergeDequeue{
-		MergeDequeue: &frontendv1.HeldOfferMergeDequeue{}}})
-	h.resolver.SetHeldPrompts(testWorkspace, []wsm.HeldPrompt{standingHold("turn-1", "first", 0)})
-
-	// Assert
-	items := h.heldNow().GetItems()
-	if len(items) != 2 || items[0].GetPrompt() == nil || items[1].GetOffer() == nil {
-		t.Fatalf("held items = %v, want prompt, offer", items)
-	}
-}
-
-func TestAnOfferIsKeyedByItsKind(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-
-	// Act
-	h.resolver.SetOffer(testWorkspace, &frontendv1.HeldOffer{Offer: &frontendv1.HeldOffer_MergeDequeue{
-		MergeDequeue: &frontendv1.HeldOfferMergeDequeue{}}})
-
-	// Assert
-	want := testEncode(feedid.Ref{WS: testWorkspace, Feed: rootFeed(), Row: feedid.RowKey{Kind: feedid.KindHeldOffer, ID: "merge_dequeue"}}).GetValue()
-	if got := itemIDs(h.heldNow()); !sameIDs(got, []string{want}) {
-		t.Fatalf("held ids = %v, want %q", got, want)
-	}
-}
-
-func TestAnOfferWithNoArmIsRecordedAndStillHeld(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-
-	// Act
-	h.resolver.SetOffer(testWorkspace, &frontendv1.HeldOffer{})
-
-	// Assert
-	if !h.hasRecord("error", opHeld) {
-		t.Fatal("an offer with no arm was not recorded at ERROR")
-	}
-	if items := h.heldNow().GetItems(); len(items) != 1 || items[0].GetOffer() == nil {
-		t.Fatalf("held items = %v, want the offer still held", items)
-	}
-}
-
-func TestAClearedOfferLeavesTheSection(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	h.resolver.SetOffer(testWorkspace, &frontendv1.HeldOffer{Offer: &frontendv1.HeldOffer_MergeDequeue{
-		MergeDequeue: &frontendv1.HeldOfferMergeDequeue{}}})
-
-	// Act
-	h.resolver.SetOffer(testWorkspace, nil)
-
-	// Assert
-	if items := h.heldNow().GetItems(); len(items) != 0 {
-		t.Fatalf("held items = %v, want none", items)
-	}
-}
-
 func TestTheEditClaimMarksItsHeldPrompt(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

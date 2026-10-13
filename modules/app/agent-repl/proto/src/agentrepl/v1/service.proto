@@ -65,7 +65,7 @@ import "agentrepl/v1/endpoint_update_held_prompt.proto";
 import "agentrepl/v1/endpoint_edit_held_prompt.proto";
 import "agentrepl/v1/endpoint_fold_held_prompt.proto";
 import "agentrepl/v1/endpoint_update_classifier_prompt.proto";
-import "agentrepl/v1/endpoint_answer_held_offer.proto";
+import "agentrepl/v1/endpoint_answer_merge_queue_offer.proto";
 import "agentrepl/v1/endpoint_deploy.proto";
 import "agentrepl/v1/endpoint_dismiss_news_digest.proto";
 import "agentrepl/v1/endpoint_update_shutdown_schedule.proto";
@@ -293,9 +293,9 @@ service AgentRepl {
   // endpoint_update_classifier_prompt.proto.
   rpc UpdateClassifierPrompt(UpdateClassifierPromptRequest) returns (UpdateClassifierPromptResponse);
 
-  // Answer a question the daemon holds in the feed's held section. See
-  // endpoint_answer_held_offer.proto.
-  rpc AnswerHeldOffer(AnswerHeldOfferRequest) returns (AnswerHeldOfferResponse);
+  // Answer the merge-queue question an interrupt raised in the merge bubble.
+  // See endpoint_answer_merge_queue_offer.proto.
+  rpc AnswerMergeQueueOffer(AnswerMergeQueueOfferRequest) returns (AnswerMergeQueueOfferResponse);
 
   // ---- DAEMON ADMIN ----
 

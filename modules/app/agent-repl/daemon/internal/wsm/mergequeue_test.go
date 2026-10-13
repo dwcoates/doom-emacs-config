@@ -1245,3 +1245,111 @@ func TestMergeMoveString(t *testing.T) {
 		})
 	}
 }
+
+func TestPrioritizeMergePlacesTheMerge(t *testing.T) {
+	// Each case builds a queue, then prioritizes the merge named "m".
+	tests := []struct {
+		name      string
+		steps     []moveStep
+		wantOrder []string
+		wantMoved bool
+	}{
+		{
+			name:      "to the front of the waiting merges, behind the admitted one",
+			steps:     []moveStep{{"r", "admitted"}, {"a", "queued"}, {"b", "queued"}, {"m", "queued"}},
+			wantOrder: []string{"r", "m", "a", "b"},
+			wantMoved: true,
+		},
+		{
+			name:      "ahead of a front merge",
+			steps:     []moveStep{{"f", "front"}, {"a", "queued"}, {"m", "queued"}},
+			wantOrder: []string{"m", "f", "a"},
+			wantMoved: true,
+		},
+		{
+			name:      "past a request standing between",
+			steps:     []moveStep{{"a", "queued"}, {"p", "requested"}, {"m", "queued"}},
+			wantOrder: []string{"m", "a", "p"},
+			wantMoved: true,
+		},
+		{
+			name:      "the first waiting merge stays put",
+			steps:     []moveStep{{"r", "admitted"}, {"m", "queued"}, {"a", "queued"}},
+			wantOrder: []string{"r", "m", "a"},
+			wantMoved: false,
+		},
+		{
+			name:      "the admitted merge stays put",
+			steps:     []moveStep{{"m", "admitted"}, {"a", "queued"}},
+			wantOrder: []string{"m", "a"},
+			wantMoved: false,
+		},
+		{
+			name:      "a merge only requested stays put",
+			steps:     []moveStep{{"a", "queued"}, {"m", "requested"}},
+			wantOrder: []string{"a", "m"},
+			wantMoved: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			repo := RepoKey(t.TempDir())
+			named := buildMoveQueue(t, s, repo, tt.steps)
+
+			// Act
+			moved, err := s.PrioritizeMerge(context.Background(), repo, named["m"])
+
+			// Assert
+			if err != nil {
+				t.Fatalf("PrioritizeMerge: %v", err)
+			}
+			if moved != tt.wantMoved {
+				t.Fatalf("moved = %v, want %v", moved, tt.wantMoved)
+			}
+			if got := lettersOf(t, s, repo, named); !slices.Equal(got, tt.wantOrder) {
+				t.Fatalf("queue = %v, want %v", got, tt.wantOrder)
+			}
+		})
+	}
+}
+
+func TestPrioritizeMergeMarksTheMovedMergeFront(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	repo := RepoKey(t.TempDir())
+	named := buildMoveQueue(t, s, repo, []moveStep{{"a", "queued"}, {"m", "queued"}})
+
+	// Act
+	if _, err := s.PrioritizeMerge(context.Background(), repo, named["m"]); err != nil {
+		t.Fatalf("PrioritizeMerge: %v", err)
+	}
+
+	// Assert
+	entries, err := s.MergeQueue(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("MergeQueue: %v", err)
+	}
+	for _, entry := range entries {
+		want := entry.Workspace == named["m"]
+		if entry.Source.Front != want {
+			t.Fatalf("%s's front mark = %v, want %v", entry.Workspace, entry.Source.Front, want)
+		}
+	}
+}
+
+func TestPrioritizeMergeRefusesAWorkspaceNotInTheQueue(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	repo := RepoKey(t.TempDir())
+	ws := testWorkspace(t, s)
+
+	// Act
+	_, err := s.PrioritizeMerge(context.Background(), repo, ws.ID)
+
+	// Assert
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("PrioritizeMerge = %v, want ErrNotFound", err)
+	}
+}
