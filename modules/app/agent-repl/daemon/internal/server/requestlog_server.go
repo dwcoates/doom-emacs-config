@@ -83,6 +83,13 @@ func (s *requestLoggingServer) PlanRollback(
 	return serveUnary(s, ctx, "PlanRollback", req, s.server.PlanRollback)
 }
 
+func (s *requestLoggingServer) ListRollbackPrompts(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ListRollbackPromptsRequest],
+) (*connect.Response[agentreplv1.ListRollbackPromptsResponse], error) {
+	return serveUnary(s, ctx, "ListRollbackPrompts", req, s.server.ListRollbackPrompts)
+}
+
 func (s *requestLoggingServer) RollBack(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.RollBackRequest],

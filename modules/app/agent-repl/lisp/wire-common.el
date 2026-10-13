@@ -238,14 +238,31 @@ field."
           (agent-repl-wire--fail message-name field "expected a non-negative integer"))
         n))))
 
-(defun agent-repl-wire--decode-optional-uint32 (message-name field object)
-  "Decode OBJECT's optional uint32 FIELD of MESSAGE-NAME, nil when absent."
+(defun agent-repl-wire--decode-optional-unsigned (message-name field object)
+  "Decode OBJECT's optional unsigned FIELD of MESSAGE-NAME, nil when absent.
+The one body every optional unsigned width shares: protojson spells a
+32-bit one as a number and a 64-bit one as a decimal string, and both
+spellings are honored; a negative value is a contract breach."
   (let ((raw (agent-repl-wire--raw object field)))
     (when raw
       (let ((n (agent-repl-wire--parse-integer message-name field raw)))
         (when (< n 0)
           (agent-repl-wire--fail message-name field "expected a non-negative integer"))
         n))))
+
+(defun agent-repl-wire--decode-optional-uint32 (message-name field object)
+  "Decode OBJECT's optional uint32 FIELD of MESSAGE-NAME, nil when absent."
+  (agent-repl-wire--decode-optional-unsigned message-name field object))
+
+(defun agent-repl-wire--decode-optional-uint64 (message-name field object)
+  "Decode OBJECT's optional uint64 FIELD of MESSAGE-NAME, nil when absent."
+  (agent-repl-wire--decode-optional-unsigned message-name field object))
+
+(defun agent-repl-wire--decode-optional-int64 (message-name field object)
+  "Decode OBJECT's optional int64 FIELD of MESSAGE-NAME, nil when absent."
+  (let ((raw (agent-repl-wire--raw object field)))
+    (when raw
+      (agent-repl-wire--parse-integer message-name field raw))))
 
 (defun agent-repl-wire--decode-double (message-name field object)
   "Decode OBJECT's non-optional double FIELD of MESSAGE-NAME as a float.

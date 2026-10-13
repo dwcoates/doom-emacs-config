@@ -413,3 +413,152 @@ func assertRecordedFault(t *testing.T, h *harness, op, cause string) {
 		t.Fatalf("warnings = %v, want one keyed %s", h.warnings.keys(), op)
 	}
 }
+
+func TestRollbackChoicesAreTheReachablePromptsOldestFirstWithTheirWords(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	threeTurns(h)
+
+	// Act
+	got := h.resolver.RollbackChoices(testWorkspace)
+
+	// Assert
+	if len(got) != 3 {
+		t.Fatalf("RollbackChoices() holds %d prompts, want 3", len(got))
+	}
+	for i, turn := range []string{"t1", "t2", "t3"} {
+		if got[i].Turn != ids.TurnID(turn) || got[i].Row.GetValue() != promptRowID(turn).GetValue() {
+			t.Fatalf("choice %d = %s %s, want turn %s", i, got[i].Turn, got[i].Row.GetValue(), turn)
+		}
+		if text := got[i].Said.GetContent().GetBlocks()[0].GetText().GetText(); text != "question "+turn {
+			t.Fatalf("choice %d said %q, want %q", i, text, "question "+turn)
+		}
+	}
+}
+
+func TestRollbackChoicesAreEmptyForAWorkspaceTheFeedNeverSaw(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	got := h.resolver.RollbackChoices(ids.WorkspaceID("never-seen"))
+
+	// Assert
+	if len(got) != 0 {
+		t.Fatalf("RollbackChoices() = %d prompts, want none", len(got))
+	}
+}
+
+func TestPromptFollowed(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(h *harness)
+		row     *frontendv1.FeedId
+		want    bool
+	}{
+		{
+			name:    "a prompt nothing has answered is bare",
+			arrange: func(h *harness) { h.deliverPromptAt("t1", "first", 1_000) },
+			row:     promptRowID("t1"),
+		},
+		{
+			name: "a response bubble after the prompt follows it",
+			arrange: func(h *harness) {
+				h.deliverPromptAt("t1", "first", 1_000)
+				h.sendAt(responseSuccessActivity("u1", "answer"), 1_010)
+			},
+			row:  promptRowID("t1"),
+			want: true,
+		},
+		{
+			name: "a turn's end marker alone does not follow it",
+			arrange: func(h *harness) {
+				h.deliverPromptAt("t1", "first", 1_000)
+				h.concludeWithoutAnswer("t1")
+			},
+			row: promptRowID("t1"),
+		},
+		{
+			name: "output before the prompt does not follow it",
+			arrange: func(h *harness) {
+				h.deliverPromptAt("t1", "first", 1_000)
+				h.sendAt(responseSuccessActivity("u1", "answer"), 1_010)
+				h.deliverPromptAt("t2", "second", 1_100)
+			},
+			row: promptRowID("t2"),
+		},
+		{
+			name:    "a row the root feed does not hold follows nothing",
+			arrange: func(h *harness) { h.deliverPromptAt("t1", "first", 1_000) },
+			row:     &frontendv1.FeedId{Value: "row|not-drawn"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			tc.arrange(h)
+
+			// Act
+			got := h.resolver.PromptFollowed(testWorkspace, tc.row)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("PromptFollowed() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAPinnedRowAfterThePromptDoesNotFollowIt(t *testing.T) {
+	// Arrange: a pinned row stands at the feed's bottom whatever it belongs to.
+	h := newHarness(t)
+	h.deliverPromptAt("t1", "first", 1_000)
+	h.sendAt(responseSuccessActivity("u1", "answer"), 1_010)
+	h.resolver.mu.Lock()
+	f := h.resolver.feed(h.resolver.state(testWorkspace), rootFeed())
+	id := h.responseRowID("u1")
+	rank := f.rank[id]
+	rank.key = string(pinClass) + rank.key
+	f.rank[id] = rank
+	h.resolver.mu.Unlock()
+
+	// Act
+	got := h.resolver.PromptFollowed(testWorkspace, promptRowID("t1"))
+
+	// Assert
+	if got {
+		t.Fatal("PromptFollowed() counted a pinned row, want false")
+	}
+}
+
+func TestAnswersPromptIsTheAgentOutputKinds(t *testing.T) {
+	tests := []struct {
+		name string
+		row  *frontendv1.FeedRow
+		want bool
+	}{
+		{name: "an activity row", row: &frontendv1.FeedRow{Row: &frontendv1.FeedRow_Activity{}}, want: true},
+		{name: "a detached subagent", row: &frontendv1.FeedRow{Row: &frontendv1.FeedRow_DetachedSubagent{}}, want: true},
+		{name: "a shell head", row: &frontendv1.FeedRow{Row: &frontendv1.FeedRow_ShellHead{}}, want: true},
+		{name: "a permission card", row: &frontendv1.FeedRow{Row: &frontendv1.FeedRow_Permission{}}, want: true},
+		{name: "a question card", row: &frontendv1.FeedRow{Row: &frontendv1.FeedRow_Question{}}, want: true},
+		{name: "a turn's end", row: &frontendv1.FeedRow{Row: &frontendv1.FeedRow_TurnEnded{}}},
+		{name: "a separation", row: &frontendv1.FeedRow{Row: &frontendv1.FeedRow_Separation{}}},
+		{name: "a user prompt", row: &frontendv1.FeedRow{Row: &frontendv1.FeedRow_UserPrompt{}}},
+		{name: "a peer message", row: &frontendv1.FeedRow{Row: &frontendv1.FeedRow_PeerMessage{}}},
+		{name: "a command panel", row: &frontendv1.FeedRow{Row: &frontendv1.FeedRow_CommandPanel{}}},
+		{name: "a subagent hand-back badge", row: &frontendv1.FeedRow{Row: &frontendv1.FeedRow_SubagentHandback{}}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := answersPrompt(tc.row)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("answersPrompt() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

@@ -92,6 +92,7 @@
 (declare-function agent-repl-link-primary "agent-repl-daemon-link" ())
 (declare-function agent-repl-link-connect "agent-repl-daemon-link" ())
 (declare-function agent-repl--read-input-buffer "agent-repl-input" (ws))
+(declare-function agent-repl--input-rollback-offer "agent-repl-input" (ws offer))
 (declare-function agent-repl-rpc-close-workspace "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-kill-workspace "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-nuke-workspace "agent-repl-rpc" (conn request &rest keys))
@@ -785,8 +786,15 @@ surfaced loudly by the shared dispatcher."
           (agent-repl--info ws "elisp.verbs.interrupt-stopped ws=%s" ws)
           (message "agent-repl: turn stopped"))
          (:nothing-running
-          (agent-repl--info ws "elisp.verbs.interrupt-nothing-running ws=%s" ws)
-          (message "agent-repl: nothing to interrupt"))
+          ;; NOTHING RUNNING IS THE STOP KEY'S SECOND PRESS: the daemon says
+          ;; what rolling the latest prompt back offers, and input.el acts
+          ;; on it.  No offer means there is no prompt to roll back.
+          (let ((offer (plist-get (plist-get value :value) :rollback)))
+            (agent-repl--info ws "elisp.verbs.interrupt-nothing-running ws=%s offer=%S"
+                              ws (plist-get offer :arm))
+            (if offer
+                (agent-repl--input-rollback-offer ws offer)
+              (message "agent-repl: nothing to interrupt"))))
          (:interrupted-detached
           ;; A turn stop confirmed with live agents also ends them; the
           ;; daemon may answer with the fan-wide count rather than the bare
@@ -1738,9 +1746,14 @@ running daemon does not."
   "Interrupt the running turn of the current workspace (`C-c C-k').
 The clean turn stop the footer's stop button drives: the in-flight vendor
 query is ended, the session is left standing and the agent is not resumed.
-When there is no turn in flight the daemon answers `nothing_running' and
-this is a message, not an error; when the stop would also end live detached
-agents the user is asked first."
+When the stop would also end live detached agents the user is asked first.
+
+PRESSED AGAIN, with no turn in flight, it rolls the latest prompt back:
+at once, the prompt landing in the composer, when nothing has answered it
+in the feed yet; otherwise it lists the prompts a rollback can reach,
+newest first with the time since each was sent and the context size
+before it, and rolls back to the one picked after confirming.  With no
+prompt to roll back it says there is nothing to interrupt."
   (interactive)
   (agent-repl-verb-interrupt (agent-repl-verbs--target-ws ws "Interrupt turn in workspace: ")))
 
