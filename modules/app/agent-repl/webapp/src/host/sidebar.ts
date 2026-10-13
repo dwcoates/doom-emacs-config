@@ -24,15 +24,13 @@
  */
 import { createTicker } from "../clock.js";
 import { mintConnectionId } from "../connection-id.js";
-import { installCopyFallback } from "../copy.js";
 import { createLocalFailures } from "../failure/local.js";
 import { bootFailed } from "../failure/sink.js";
-import { ForwardingLogger, bindLogContext, log, setLogger } from "../log.js";
+import { bindLogContext, log, setLogger, type ForwardingLogger } from "../log.js";
+import { installForwardingLogger, installTextAffordances } from "../document-runtime.js";
 import { createAgentReplClient, type AgentReplClient } from "../rpc/client.js";
-import { clientLogSink } from "../rpc/client-log-sink.js";
 import { createDaemonContext } from "../rpc/context.js";
 import { createDaemonTransport } from "../rpc/transport.js";
-import { installSelectionClickGuard } from "../selection.js";
 import { mountWebhostSidebar } from "../sidebar/sidebar.js";
 import type { Host } from "./host.js";
 
@@ -66,7 +64,7 @@ export function startWebhostSidebar(
   const client = deps.client ?? createAgentReplClient(createDaemonTransport(win.location.origin));
   const connectionId = mintConnectionId();
   bindLogContext({ connection_id: connectionId });
-  (deps.installLogger ?? setLogger)(new ForwardingLogger(clientLogSink(() => client, { case: "webhost", value: {} })));
+  installForwardingLogger(() => client, { case: "webhost", value: {} }, "info", deps.installLogger ?? setLogger);
 
   // THE WEBHOST'S FAILURES ARE LISTED IN EVERY PAGE'S CHIP: the whole set,
   // every time it changes.
@@ -79,8 +77,7 @@ export function startWebhostSidebar(
   try {
     log.info("the webhost is starting its sidebar", { operation: "webhost.sidebar-start", context: {} });
     // Text in the sidebar copies and selects exactly as it does in a page.
-    installCopyFallback(doc);
-    installSelectionClickGuard(doc);
+    installTextAffordances(doc);
     const ctx = createDaemonContext({ client, ticker: createTicker(), failures, page: connectionId });
     const sidebar = (deps.mount ?? mountWebhostSidebar)(nav, ctx, {
       // THE PAGES RESERVE THE COLUMN ONLY ONCE THERE IS A SIDEBAR TO FILL IT,

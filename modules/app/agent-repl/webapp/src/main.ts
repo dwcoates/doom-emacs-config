@@ -34,8 +34,6 @@
 import { installGateDock } from "./feed/gate-dock.js";
 import "./styles.css";
 import { createTicker } from "./clock.js";
-import { installCopyFallback } from "./copy.js";
-import { installSelectionClickGuard } from "./selection.js";
 import { createComposerGate, mountComposer } from "./composer/composer.js";
 import { createRowRenderers } from "./feed/renderers.js";
 import { mountFeed } from "./feed/feed.js";
@@ -51,14 +49,14 @@ import { mountTopbar } from "./topbar/topbar.js";
 import { installProseLinkRouting } from "./link.js";
 import { bootFailed } from "./failure/sink.js";
 import { createLocalFailures, type LocalFailures } from "./failure/local.js";
-import { ForwardingLogger, LEVEL_WINDOW_OPERATION, bindLogContext, log, setLogger } from "./log.js";
+import { LEVEL_WINDOW_OPERATION, bindLogContext, log } from "./log.js";
 import { LevelWindow, selectionContext, selectionNote, selectLevel } from "../../agent-shim/logging/ts/level-window.js";
 import { installPagePresenceLog } from "./page-presence.js";
 import { connectToHost } from "./host/embed.js";
+import { installForwardingLogger, installTextAffordances } from "./document-runtime.js";
 import { mintConnectionId } from "./connection-id.js";
 import { watchShownEdge } from "./host/shown-edge.js";
 import { createWebhostFailureView, mergeFailureViews } from "./failure/webhost.js";
-import { clientLogSink } from "./rpc/client-log-sink.js";
 import { createStreamCostMeter, regionNodes } from "./stream-cost.js";
 import { pagePresence } from "./presence.js";
 import { installPageDrawnReport } from "./page-drawn-report.js";
@@ -120,14 +118,7 @@ export async function boot(): Promise<void> {
     // A level other than info is a window (proto/vocab/log-level-window.json):
     // a page reloaded from an address whose window has ended boots at info.
     const levelSelection = selectLevel(address.logLevel, address.logLevelUntil, Date.now(), "log_level");
-    setLogger(
-      new ForwardingLogger(
-        clientLogSink(() => client, { case: "workspace", value: workspace }),
-        undefined,
-        {},
-        new LevelWindow(levelSelection),
-      ),
-    );
+    installForwardingLogger(() => client, { case: "workspace", value: workspace }, new LevelWindow(levelSelection));
     const levelNote = selectionNote(levelSelection);
     if (levelNote !== null) log.info(levelNote, { operation: LEVEL_WINDOW_OPERATION, context: selectionContext(levelSelection) });
 
@@ -161,11 +152,10 @@ export async function boot(): Promise<void> {
 
     // Copying is a page-wide affordance, not a component's: it is installed
     // once, here, so every surface mounted below is copyable from its first
-    // paint. See src/copy.ts for why the page carries a fallback at all.
-    installCopyFallback(document);
-    // So is selecting: a click that ends a drag-select activates nothing, on
-    // any surface (src/selection.ts).
-    installSelectionClickGuard(document);
+    // paint. See src/copy.ts for why the page carries a fallback at all. So is
+    // selecting: a click that ends a drag-select activates nothing, on any
+    // surface (src/selection.ts).
+    installTextAffordances(document);
 
     const ticker = createTicker();
     const ctx = createAppContext({
