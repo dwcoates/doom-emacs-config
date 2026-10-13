@@ -25,24 +25,21 @@
  * the ask, and the policy denial is worded by the daemon precisely so it never
  * reads as the user's own act.
  *
- * THE CARD IS A TOOL CARD (owner ruling, 2026-10-11): the grey `.tool-card`
- * chrome a Bash call wears, with the vendor's headline where a call names its
- * tool and the waiting clock beside it where a call's badge sits.
+ * THE CARD IS A TOOL CARD (owner ruling, 2026-10-11), AND HEADS AS ONE
+ * (owner ruling, 2026-10-13): the grey `.tool-card` chrome a Bash call wears,
+ * and the one tool card head (`drawToolCardHead`) -- the vendor's headline
+ * where a call names its tool, the ask's state as its badge ("waiting", or the
+ * verdict), and the head's clock, which counts the wait while the ask stands
+ * and freezes at the answer.
  *
  * A DENY WITH A REASON IS TYPED IN THE EDITOR. The card's deny button refuses
  * with no reason; a plain send made while the card stands denies it with the
  * text as the reason relayed to the agent (agentrepl.v1.
  * SubmitPromptAskAnswered), and the card says so. It has no text field.
- *
- * THE WAITING CLOCK IS THE CLIENT'S, from the row's FIRST DRAW. The schema
- * carries no arrival instant for an open ask — the proto says the wait is the
- * row's own concern — so the instant is stamped on the element and carried
- * across re-pushes, which keeps a growing wait from restarting every push.
  */
-import { drawToolHead, drawToolName } from "../cards/tool-head.js";
+import { drawToolCardHead } from "../cards/tool-head.js";
 import { drawAskHint } from "./hint.js";
 import { createControl, type Control } from "../../control.js";
-import { formatTickedAge } from "../../duration.js";
 import { log } from "../../log.js";
 import {
   AnswerPermissionResponseSchema,
@@ -68,15 +65,9 @@ import {
 import { refusalOf, type SentenceTable } from "../../rpc/refuse.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
-import { tick } from "../ticking.js";
-import { drawOutcomeMarker } from "../marker.js";
-import { stampedAge } from "./stamped-age.js";
 import { buildAnswerPermissionRequest, type PermissionAnswer } from "./requests.js";
 
 const PATH = "FeedPermission";
-
-/** The attribute the first draw's instant is carried on across re-pushes. */
-export const WAITING_SINCE_ATTRIBUTE = "data-waiting-since";
 
 /** The three buttons, in the order they are drawn. */
 export const PERMISSION_BUTTONS = ["allowOnce", "allowStanding", "deny"] as const;
@@ -105,7 +96,13 @@ export const PERMISSION_ANSWERED_ARMS: readonly string[] = [
   "deniedUndecidable",
 ];
 
-/** The attribute the verdict element names its answered arm with. */
+/** What the badge of a card still waiting on the user says. */
+export const WAITING_WORD = "waiting";
+
+/** What the badge of a card nobody answered says. */
+export const ABANDONED_WORD = "went away unanswered";
+
+/** The attribute the verdict badge names its answered arm with. */
 export const VERDICT_ATTRIBUTE = "data-permission-verdict";
 
 /** The consent card. */
@@ -119,11 +116,16 @@ export function drawFeedPermission(u: FeedPermission, rc: RowContext): HTMLEleme
   const card = document.createElement("div");
   card.setAttribute("data-state", state.case);
 
-  const head = drawToolHead("perm-head");
-  head.append(
-    drawFeedPermissionHeadline(requireMessage(u.headline, `${PATH}.headline`), `${PATH}.headline`),
+  card.append(
+    drawToolCardHead({
+      title: drawFeedPermissionHeadline(requireMessage(u.headline, `${PATH}.headline`), `${PATH}.headline`),
+      badge: drawFeedPermissionBadge(u),
+      clock: u.clock,
+      clockPath: `${PATH}.clock`,
+      ticker: rc.ctx.ticker,
+      classes: ["perm-head"],
+    }),
   );
-  card.append(head);
 
   if (u.subtitle !== undefined) {
     card.append(drawFeedPermissionSubtitle(u.subtitle, `${PATH}.subtitle`));
@@ -141,7 +143,6 @@ export function drawFeedPermission(u: FeedPermission, rc: RowContext): HTMLEleme
   switch (state.case) {
     case "open":
       card.className = "tool-card ask-card permission pending";
-      head.append(waitingClock(card, rc));
       card.append(drawOpenActions(u, rc));
       card.append(drawAskHint(DENY_IN_EDITOR_HINT));
       return card;
@@ -151,12 +152,10 @@ export function drawFeedPermission(u: FeedPermission, rc: RowContext): HTMLEleme
       // only that the ask is over, never whether it was allowed or refused.
       const answer = requireCase(state.value.answer, `${PATH}.answered.answer`);
       card.setAttribute("data-state", answer.case);
-      card.append(drawFeedPermissionAnswered(state.value, rc, `${PATH}.answered`));
       return card;
     }
     case "abandoned":
       card.className = "tool-card ask-card permission resolved";
-      card.append(drawFeedPermissionAbandoned(state.value, rc, `${PATH}.abandoned`));
       return card;
     default:
       return unreachableArm(`${PATH}.state`, armName(state));
@@ -172,7 +171,10 @@ export function drawFeedPermissionHeadline(
     operation: "feed.asks.permission.headline",
     context: { path },
   });
-  return drawToolName(u.text, "perm-headline");
+  const el = document.createElement("span");
+  el.className = "perm-headline";
+  el.textContent = u.text;
+  return el;
 }
 
 /** The qualifying subtitle, verbatim. */
@@ -231,83 +233,81 @@ export function drawFeedPermissionArguments(
   return el;
 }
 
-/** The answered state: the verdict line, and when it landed. */
-export function drawFeedPermissionAnswered(
-  u: FeedPermissionAnswered,
-  rc: RowContext,
-  path: string,
-): HTMLElement {
+/** The head's badge: the ask's state, in the consent card's own words. */
+export function drawFeedPermissionBadge(u: FeedPermission): HTMLElement {
+  const state = requireCase(u.state, `${PATH}.state`);
+  switch (state.case) {
+    case "open": {
+      const word = document.createElement("span");
+      word.className = "badge";
+      word.textContent = WAITING_WORD;
+      return word;
+    }
+    case "answered":
+      return drawFeedPermissionAnswered(state.value, `${PATH}.answered`);
+    case "abandoned":
+      return drawFeedPermissionAbandoned(state.value, `${PATH}.abandoned`);
+    default:
+      return unreachableArm(`${PATH}.state`, armName(state));
+  }
+}
+
+/** The answered state's badge: the verdict. */
+export function drawFeedPermissionAnswered(u: FeedPermissionAnswered, path: string): HTMLElement {
   const answer = requireCase(u.answer, `${path}.answer`);
   log.debug("drawing an answered permission", {
     operation: "feed.asks.permission.answered",
     context: { path, answer: answer.case },
   });
-  const el = document.createElement("div");
-  el.className = "perm-verdict";
-  el.setAttribute("data-arm", answer.case);
-  el.setAttribute(VERDICT_ATTRIBUTE, answer.case);
-
-  // A DENIAL BY THE USER IS AN ANSWER, NOT AN ERROR (owner ruling,
-  // 2026-10-06): it draws its neutral outcome marker, never the red badge.
-  if (answer.case === "deniedByUser") {
-    el.append(
-      drawOutcomeMarker(
-        requireMessage(answer.value.marker, `${path}.denied_by_user.marker`),
-        { ctx: rc.ctx, previous: rc.previous },
-        `${path}.denied_by_user.marker`,
-      ),
-      stampedAge(u.atMs, `${path}.at_ms`, rc, "perm-when"),
-    );
-    return el;
-  }
   const word = document.createElement("span");
-  word.className =
-    answer.case === "allowedOnce" || answer.case === "allowedStanding"
-      ? "badge ok"
-      : "badge err";
+  word.setAttribute("data-arm", answer.case);
+  word.setAttribute(VERDICT_ATTRIBUTE, answer.case);
   switch (answer.case) {
     case "allowedOnce":
     case "allowedStanding":
+      word.className = "badge ok";
       word.textContent = VERDICT_WORDS[answer.case];
-      break;
+      return word;
+    case "deniedByUser":
+      // A DENIAL BY THE USER IS AN ANSWER, NOT AN ERROR (owner ruling,
+      // 2026-10-06): its badge is neutral, never red, and says it in the
+      // daemon's own words.
+      word.className = "badge muted";
+      word.textContent = requireMessage(
+        requireMessage(answer.value.marker, `${path}.denied_by_user.marker`).label,
+        `${path}.denied_by_user.marker.label`,
+      ).text;
+      return word;
     case "deniedByPolicy":
       // The daemon's own wording, so a policy refusal never reads as the user's
       // act — which is the whole reason this arm carries text at all.
+      word.className = "badge err";
       word.textContent = answer.value.text;
-      break;
+      return word;
     case "deniedUndecidable":
       // ITS OWN ARM, NOT A POLICY DENIAL. Nobody decided — no rule refused and
       // no user refused — so it carries its own verdict value and its own
       // class, and like the policy arm its wording is the daemon's, verbatim,
       // so it can never read as the user's act.
-      word.classList.add("arm-deniedUndecidable");
+      word.className = "badge err arm-deniedUndecidable";
       word.textContent = answer.value.text;
-      break;
+      return word;
     default:
       return unreachableArm(`${path}.answer`, armName(answer));
   }
-  el.append(word, stampedAge(u.atMs, `${path}.at_ms`, rc, "perm-when"));
-  return el;
 }
 
-/** The abandoned state: the ask went away unanswered, and when. */
-export function drawFeedPermissionAbandoned(
-  u: FeedPermissionAbandoned,
-  rc: RowContext,
-  path: string,
-): HTMLElement {
+/** The abandoned state's badge: the ask went away unanswered. */
+export function drawFeedPermissionAbandoned(_u: FeedPermissionAbandoned, path: string): HTMLElement {
   log.debug("drawing an abandoned permission", {
     operation: "feed.asks.permission.abandoned",
     context: { path },
   });
-  const el = document.createElement("div");
-  el.className = "perm-verdict";
-  el.setAttribute("data-arm", "abandoned");
   const word = document.createElement("span");
   word.className = "badge muted";
-  word.textContent = "went away unanswered";
-  el.append(word, stampedAge(u.atMs, `${path}.at_ms`, rc, "perm-when"));
-  return el;
+  word.setAttribute("data-arm", "abandoned");
+  word.textContent = ABANDONED_WORD;
+  return word;
 }
 
 /** The open state's buttons. */
@@ -415,33 +415,3 @@ function drawAnswerOutcome(
       unreachableArm("AnswerPermissionResponse.result", armName(result));
   }
 }
-
-/**
- * "waiting 45s", ticking from the row's FIRST draw.
- *
- * The instant is stamped on the card and read back off the previous draw, so a
- * push that arrives while the user is still deciding does not reset the wait
- * they have actually been waiting.
- */
-function waitingClock(card: HTMLElement, rc: RowContext): HTMLElement {
-  const since = firstDrawnAt(rc);
-  card.setAttribute(WAITING_SINCE_ATTRIBUTE, String(since));
-  const el = document.createElement("span");
-  el.className = "perm-waiting";
-  tick(el, rc.ctx.ticker, (nowMs) => {
-    el.textContent = `waiting ${formatTickedAge(nowMs - since)}`;
-  });
-  return el;
-}
-
-/** When this card was first drawn: the previous draw's stamp, or now. */
-export function firstDrawnAt(rc: RowContext): number {
-  const held = rc.previous?.getAttribute(WAITING_SINCE_ATTRIBUTE) ?? null;
-  if (held === null) return rc.ctx.ticker.now();
-  const parsed = Number.parseInt(held, 10);
-  // An unreadable stamp is this renderer's own bookkeeping gone missing, never
-  // contract data, so it falls back to "the wait starts now" rather than
-  // throwing a malformed view over a value the wire never carried.
-  return Number.isFinite(parsed) ? parsed : rc.ctx.ticker.now();
-}
-

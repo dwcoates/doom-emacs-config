@@ -36,7 +36,7 @@
  * can no longer match. Markdown is presentation only: what a click echoes is
  * the served string, never the drawn one.
  */
-import { drawTitledToolHead } from "../cards/tool-head.js";
+import { drawToolCardHead } from "../cards/tool-head.js";
 import { createControl, type Control } from "../../control.js";
 import { log } from "../../log.js";
 import { setInlineMarkdown } from "../../markdown.js";
@@ -48,7 +48,6 @@ import type {
   FeedQuestion,
   FeedQuestionAnswered,
   FeedQuestionDraft,
-  FeedQuestionExpired,
   FeedQuestionGivenAnswer,
   FeedQuestionHeader,
   FeedQuestionItem,
@@ -69,7 +68,6 @@ import { refusalOf, type SentenceTable } from "../../rpc/refuse.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
 import { drawFeedTab, drawFeedTabStrip } from "../tabs.js";
-import { stampedAge } from "./stamped-age.js";
 import { buildUpdateQuestionDraftRequest, type QuestionDraftEdit } from "./requests.js";
 
 const PATH = "FeedQuestion";
@@ -83,8 +81,14 @@ export const CONFIRM_TEXT = "done";
 /** The label in front of an answer typed in the editor. */
 export const TYPED_LABEL = "typed:";
 
-/** What an expired card says. */
+/** What an expired card's badge says. */
 export const EXPIRED_TEXT = "expired unanswered";
+
+/** What the badge of a card still waiting on the user says. */
+export const WAITING_TEXT = "waiting";
+
+/** What an answered card's badge says. */
+export const ANSWERED_TEXT = "answered";
 
 /** The glyph an answered question's tab wears, and an unanswered one's. */
 export const TAB_GLYPHS = { answered: "✓", pending: "?" } as const;
@@ -102,7 +106,15 @@ export function drawFeedQuestion(u: FeedQuestion, rc: RowContext): HTMLElement {
 
   const card = document.createElement("div");
   card.setAttribute("data-state", state.case);
-  card.append(drawTitledToolHead(QUESTION_TITLE));
+  card.append(
+    drawToolCardHead({
+      title: QUESTION_TITLE,
+      badge: drawFeedQuestionBadge(state.case),
+      clock: u.clock,
+      clockPath: `${PATH}.clock`,
+      ticker: rc.ctx.ticker,
+    }),
+  );
 
   switch (state.case) {
     case "open":
@@ -111,11 +123,11 @@ export function drawFeedQuestion(u: FeedQuestion, rc: RowContext): HTMLElement {
       return card;
     case "answered":
       card.className = "tool-card ask-card question resolved";
-      card.append(drawFeedQuestionAnswered(state.value, rc, `${PATH}.answered`));
+      card.append(drawFeedQuestionAnswered(state.value, `${PATH}.answered`));
       return card;
     case "expired":
+      // The badge says it all: an expired ask drew no answers.
       card.className = "tool-card ask-card question resolved";
-      card.append(drawFeedQuestionExpired(state.value, rc, `${PATH}.expired`));
       return card;
     default:
       return unreachableArm(`${PATH}.state`, armName(state));
@@ -367,12 +379,30 @@ export function optionNumeral(number: number): string {
   return `${String(number)}.`;
 }
 
+/** The head's badge: the ask's state, in the question card's own words. */
+export function drawFeedQuestionBadge(state: string): HTMLElement {
+  const word = document.createElement("span");
+  word.setAttribute("data-arm", state);
+  switch (state) {
+    case "open":
+      word.className = "badge";
+      word.textContent = WAITING_TEXT;
+      return word;
+    case "answered":
+      word.className = "badge ok";
+      word.textContent = ANSWERED_TEXT;
+      return word;
+    case "expired":
+      word.className = "badge muted";
+      word.textContent = EXPIRED_TEXT;
+      return word;
+    default:
+      return unreachableArm(`${PATH}.state`, state);
+  }
+}
+
 /** The answered state: one verdict line per question, in the batch's order. */
-export function drawFeedQuestionAnswered(
-  u: FeedQuestionAnswered,
-  rc: RowContext,
-  path: string,
-): HTMLElement {
+export function drawFeedQuestionAnswered(u: FeedQuestionAnswered, path: string): HTMLElement {
   log.debug("drawing an answered question card", {
     operation: "feed.asks.question.answered",
     context: { path, answers: u.answers.length },
@@ -382,7 +412,6 @@ export function drawFeedQuestionAnswered(
   u.answers.forEach((answer, index) => {
     el.append(drawFeedQuestionGivenAnswer(answer, `${path}.answers[${index}]`));
   });
-  el.append(stampedAge(u.atMs, `${path}.at_ms`, rc, "q-when"));
   return el;
 }
 
@@ -420,26 +449,6 @@ export function drawFeedQuestionGivenAnswer(
     other.textContent = u.otherText.text;
     el.append(other);
   }
-  return el;
-}
-
-/** The expired state: the ask timed out, and the agent went on without it. */
-export function drawFeedQuestionExpired(
-  u: FeedQuestionExpired,
-  rc: RowContext,
-  path: string,
-): HTMLElement {
-  log.debug("drawing an expired question card", {
-    operation: "feed.asks.question.expired",
-    context: { path },
-  });
-  const el = document.createElement("div");
-  el.className = "q-verdict";
-  el.setAttribute("data-arm", "expired");
-  const word = document.createElement("span");
-  word.className = "badge muted";
-  word.textContent = EXPIRED_TEXT;
-  el.append(word, stampedAge(u.atMs, `${path}.at_ms`, rc, "q-when"));
   return el;
 }
 

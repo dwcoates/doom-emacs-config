@@ -16,7 +16,8 @@
  * fact would be two things to keep in step, and the reader wants to land on the
  * real card with its output.
  */
-import { drawToolHead, drawToolName } from "./tool-head.js";
+import { drawToolExitLine } from "./exit-line.js";
+import { drawToolCardHead } from "./tool-head.js";
 import { armButtonRole } from "../../control.js";
 import type {
   FeedHook,
@@ -52,19 +53,23 @@ export function drawFeedHook(u: FeedHook, rc: RowContext): HTMLElement {
     outcome.case === "blocked" ? "tool-card tool-hook tool-hook-blocked" : "tool-card tool-hook";
   card.setAttribute("data-state", outcome.case);
 
-  const head = drawToolHead();
   // THE HEADLINE IS THE CARD'S TITLE (owner ruling, 2026-09-23): the
   // one-line title fold. A hook card has no card-level fold, so the headline is
   // its own (title-fold.ts). No draw here stops the card's ticking, so folding
   // it at once keeps its measurer.
-  head.appendChild(
-    foldTitle(
-      drawFeedHookHeadline(requireMessage(u.headline, `${path}.headline`), `${path}.headline`),
-      "standalone",
-      rc,
-    ),
+  card.appendChild(
+    drawToolCardHead({
+      title: foldTitle(
+        drawFeedHookHeadline(requireMessage(u.headline, `${path}.headline`), `${path}.headline`),
+        "standalone",
+        rc,
+      ),
+      badge: drawFeedHookBadge(outcome.case),
+      clock: u.clock,
+      clockPath: `${path}.clock`,
+      ticker: rc.ctx.ticker,
+    }),
   );
-  card.appendChild(head);
 
   if (u.gatedCall !== undefined) {
     card.appendChild(drawFeedHookGatedCall(u.gatedCall, rc, `${path}.gated_call`));
@@ -75,10 +80,10 @@ export function drawFeedHook(u: FeedHook, rc: RowContext): HTMLElement {
       card.appendChild(drawFeedHookBlocked(outcome.value, `${path}.blocked`));
       break;
     case "failed": {
-      // The chip belongs beside the headline it qualifies; the output belongs
-      // below the card's divider, exactly as a tool call's does.
+      // The exit chip is bespoke to a hook, so it is content, leading the
+      // output exactly as a shell call's does (exit-line.ts).
       const failed = drawFeedHookFailed(outcome.value, `${path}.failed`);
-      head.appendChild(failed.chip);
+      card.appendChild(drawToolExitLine(failed.chip));
       if (failed.output !== null) card.appendChild(failed.output);
       break;
     }
@@ -99,7 +104,22 @@ export function drawFeedHookHeadline(u: FeedHookHeadline, path: string): HTMLEle
     operation: "feed.cards.hook.headline",
     context: { path },
   });
-  return drawToolName(u.text);
+  const el = document.createElement("span");
+  el.textContent = u.text;
+  return el;
+}
+
+/** The words a hook card's badge says, per outcome. */
+export const HOOK_BADGE_WORDS = { blocked: "blocked", failed: "failed" } as const;
+
+/** The head's badge: how the hook failed. */
+export function drawFeedHookBadge(outcome: string): HTMLElement {
+  if (outcome !== "blocked" && outcome !== "failed") return unreachableArm("FeedHook.outcome", outcome);
+  const word = document.createElement("span");
+  word.className = "badge err";
+  word.setAttribute("data-arm", outcome);
+  word.textContent = HOOK_BADGE_WORDS[outcome];
+  return word;
 }
 
 /**

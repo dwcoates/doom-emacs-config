@@ -28,7 +28,7 @@
  * row's `data-unit="skill"` so a skill's nested work keeps the teal card's
  * always-open, shared-cap, scrolled-not-clipped guarantees.
  */
-import { drawTitledToolHead } from "./tool-head.js";
+import { drawToolCardHead } from "./tool-head.js";
 import type {
   FeedSkill,
   FeedSkillAllowances,
@@ -76,8 +76,15 @@ export function drawFeedSkill(u: FeedSkill, rc: RowContext): HTMLElement {
   // status as a badge beside it, so a skill card heads "Skill" exactly as a
   // Bash card heads "Bash", and the invocation sits under the head where a
   // Bash card's command line does.
-  const head = drawTitledToolHead(SKILL_TITLE);
-  card.append(head);
+  card.append(
+    drawToolCardHead({
+      title: SKILL_TITLE,
+      badge: drawFeedSkillBadge(outcome.case),
+      clock: u.clock,
+      clockPath: `${PATH}.clock`,
+      ticker: rc.ctx.ticker,
+    }),
+  );
 
   // THE INVOCATION LINE IS THE CARD'S TITLE (owner ruling, 2026-09-23): the
   // one-line title fold. A LOADED card is a `.tool-fold` (below) and owns it; a
@@ -94,10 +101,8 @@ export function drawFeedSkill(u: FeedSkill, rc: RowContext): HTMLElement {
 
   switch (outcome.case) {
     case "running":
-      head.append(badge("running"));
       return card;
     case "loaded": {
-      head.append(badge("loaded"));
       const loaded = outcome.value;
       // CARD-LEVEL FOLD (owner ruling, 2026-09-15): the whole card is the
       // toggle (`.tool-fold`, CAPPED_CLASSES in expand.ts), so the SKILL.md
@@ -120,11 +125,9 @@ export function drawFeedSkill(u: FeedSkill, rc: RowContext): HTMLElement {
       return card;
     }
     case "failed":
-      head.append(badge("failed"));
       card.append(drawFeedSkillFailed(outcome.value, `${PATH}.failed`));
       return card;
     case "denied":
-      head.append(badge("denied"));
       return card;
     default:
       return unreachableArm(`${PATH}.outcome`, armName(outcome));
@@ -199,8 +202,9 @@ export function drawFeedSkillFailed(u: FeedSkillFailed, path: string): HTMLEleme
 }
 
 /** One of the four badges, by arm. */
-function badge(arm: keyof typeof OUTCOME_BADGES): HTMLElement {
-  const spec = OUTCOME_BADGES[arm];
+export function drawFeedSkillBadge(arm: string): HTMLElement {
+  if (!Object.hasOwn(OUTCOME_BADGES, arm)) return unreachableArm(`${PATH}.outcome`, arm);
+  const spec = OUTCOME_BADGES[arm as keyof typeof OUTCOME_BADGES];
   const el = document.createElement("span");
   el.className = spec.className;
   el.textContent = spec.text;

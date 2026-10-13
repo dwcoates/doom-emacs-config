@@ -26,7 +26,9 @@ import {
   drawFeedQuestion,
   EXPIRED_TEXT,
   QUESTION_STATE_ARMS,
+  ANSWERED_TEXT,
   QUESTION_TITLE,
+  WAITING_TEXT,
   TAB_GLYPHS,
   optionNumeral,
   TYPED_LABEL,
@@ -34,7 +36,7 @@ import {
 import { drawFeedTab, FEED_TAB_CLASS, FEED_TAB_STRIP_CLASS } from "../../../src/feed/tabs.js";
 import { armsOf } from "../arms.js";
 import { askHarness, ROW_ID, settle as drain, WORKSPACE } from "./harness.js";
-import { stopClocks } from "../../../src/feed/ticking.js";
+import { runningClock, stoppedClock, toolCardHeadParts } from "../cards/tool-card-head-shape.js";
 import { orderFor } from "../../feed-order.js";
 
 type InitState = MessageInitShape<typeof FeedQuestionSchema>["state"];
@@ -106,12 +108,42 @@ afterEach(() => {
 describe("the card's chrome", () => {
   it.each([
     ["open", open()],
-    ["answered", question({ case: "answered", value: { atMs: 0n, answers: [] } })],
-    ["expired", question({ case: "expired", value: { atMs: 0n } })],
+    ["answered", question({ case: "answered", value: { answers: [] } })],
+    ["expired", question({ case: "expired", value: {} })],
   ] as const)("wears the tool card's chrome when %s", (_state, u) => {
     const el = drawFeedQuestion(u, askHarness().rc);
     expect(el.classList.contains("tool-card")).toBe(true);
     expect(el.querySelector(".tool-head .tool-name")?.textContent).toBe(QUESTION_TITLE);
+  });
+
+  it("heads with the title, the waiting badge and the running clock while it stands", () => {
+    // Arrange
+    vi.setSystemTime(30_000);
+    const u = open();
+    u.clock = runningClock(0);
+
+    // Act
+    const el = drawFeedQuestion(u, askHarness().rc);
+
+    // Assert
+    expect(toolCardHeadParts(el)).toEqual([`title:${QUESTION_TITLE}`, `badge:${WAITING_TEXT}`, "clock:30s"]);
+  });
+
+  it("heads with the answered badge and the stopped clock once answered", () => {
+    // Arrange
+    const u = question({ case: "answered", value: { answers: [] } });
+    u.clock = stoppedClock(1_000, 135_000);
+
+    // Act
+    const el = drawFeedQuestion(u, askHarness().rc);
+
+    // Assert
+    expect(toolCardHeadParts(el)).toEqual([`title:${QUESTION_TITLE}`, `badge:${ANSWERED_TEXT}`, "clock:2m 14s"]);
+  });
+
+  it("draws no ticking stamp of its own once settled", () => {
+    const el = drawFeedQuestion(question({ case: "answered", value: { answers: [] } }), askHarness().rc);
+    expect(el.querySelector("[data-ticking]")).toBeNull();
   });
 
   it("draws every state the schema carries", () => {
@@ -428,7 +460,6 @@ describe("the settled card", () => {
       question({
         case: "answered",
         value: {
-          atMs: 0n,
           answers: [
             { header: { text: "Auth method" }, chosen: ["OAuth 2.0"] },
             { header: { text: "Scope" }, chosen: ["read"] },
@@ -444,7 +475,7 @@ describe("the settled card", () => {
     const el = drawFeedQuestion(
       question({
         case: "answered",
-        value: { atMs: 0n, answers: [{ header: { text: "Scope" }, chosen: ["read", "write"] }] },
+        value: { answers: [{ header: { text: "Scope" }, chosen: ["read", "write"] }] },
       }),
       askHarness().rc,
     );
@@ -455,7 +486,7 @@ describe("the settled card", () => {
     const el = drawFeedQuestion(
       question({
         case: "answered",
-        value: { atMs: 0n, answers: [{ header: { text: "Scope" }, chosen: ["*a", "b*"] }] },
+        value: { answers: [{ header: { text: "Scope" }, chosen: ["*a", "b*"] }] },
       }),
       askHarness().rc,
     );
@@ -466,7 +497,7 @@ describe("the settled card", () => {
     const el = drawFeedQuestion(
       question({
         case: "answered",
-        value: { atMs: 0n, answers: [{ header: { text: "`Scope`" }, chosen: ["read"] }] },
+        value: { answers: [{ header: { text: "`Scope`" }, chosen: ["read"] }] },
       }),
       askHarness().rc,
     );
@@ -477,7 +508,7 @@ describe("the settled card", () => {
     const el = drawFeedQuestion(
       question({
         case: "answered",
-        value: { atMs: 0n, answers: [{ header: { text: "Scope" }, chosen: [], otherText: { text: "admin only" } }] },
+        value: { answers: [{ header: { text: "Scope" }, chosen: [], otherText: { text: "admin only" } }] },
       }),
       askHarness().rc,
     );
@@ -488,7 +519,7 @@ describe("the settled card", () => {
     const el = drawFeedQuestion(
       question({
         case: "answered",
-        value: { atMs: 0n, answers: [{ header: { text: "Scope" }, chosen: [], otherText: { text: "admin only" } }] },
+        value: { answers: [{ header: { text: "Scope" }, chosen: [], otherText: { text: "admin only" } }] },
       }),
       askHarness().rc,
     );
@@ -496,32 +527,17 @@ describe("the settled card", () => {
   });
 
   it("offers no controls once the batch is settled", () => {
-    const el = drawFeedQuestion(question({ case: "answered", value: { atMs: 0n, answers: [] } }), askHarness().rc);
+    const el = drawFeedQuestion(question({ case: "answered", value: { answers: [] } }), askHarness().rc);
     expect(el.querySelector("ar-button")).toBeNull();
   });
 
-  it("stamps when the answers landed", () => {
-    vi.setSystemTime(60_000);
-    const el = drawFeedQuestion(question({ case: "answered", value: { atMs: 0n, answers: [] } }), askHarness().rc);
-    expect(el.querySelector(".q-when")?.textContent).toBe("1m ago");
-  });
-
-  it("keeps ticking the stamp after its turn's clocks are stopped", async () => {
-    vi.setSystemTime(0);
-    const el = drawFeedQuestion(question({ case: "answered", value: { atMs: 0n, answers: [] } }), askHarness().rc);
-    document.body.append(el);
-    stopClocks(el);
-    await vi.advanceTimersByTimeAsync(5_000);
-    expect(el.querySelector(".q-when")?.textContent).toBe("5s ago");
-  });
-
   it("draws an expired ask as expired, never as pending forever", () => {
-    const el = drawFeedQuestion(question({ case: "expired", value: { atMs: 0n } }), askHarness().rc);
-    expect(el.querySelector(".q-verdict .badge")?.textContent).toBe(EXPIRED_TEXT);
+    const el = drawFeedQuestion(question({ case: "expired", value: {} }), askHarness().rc);
+    expect(el.querySelector(".tool-head .badge")?.textContent).toBe(EXPIRED_TEXT);
   });
 
   it("offers no controls on an expired ask", () => {
-    const el = drawFeedQuestion(question({ case: "expired", value: { atMs: 0n } }), askHarness().rc);
+    const el = drawFeedQuestion(question({ case: "expired", value: {} }), askHarness().rc);
     expect(el.querySelector("ar-button")).toBeNull();
   });
 });
