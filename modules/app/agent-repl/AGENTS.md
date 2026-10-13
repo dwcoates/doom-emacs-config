@@ -42,7 +42,7 @@ when coverage is the question being asked, never for routine verification.
 
 Test load must never starve the owner's live runtime (shim, daemon, store,
 sidecar, Emacs, webview). `bin/background.sh <cmd>` runs a command and its
-whole process tree at the host's background priority, and it is the ONE
+whole process tree at the machine's background priority, and it is the ONE
 helper every test entry point goes through.
 
 - macOS and Linux: `nice -n 19` (owner ruling 2026-09-23, "very low").
@@ -87,7 +87,7 @@ or deploy path that references it.
 
 No artificial CPU load, ever, to reproduce a flaky or timing-dependent failure:
 no `bin/with-cpu-load.sh`, no busy loops, no batches oversubscribed to stress
-the host. The host is the owner's working machine; on 2026-10-06 an agent's
+the machine. That machine is the owner's working one; on 2026-10-06 an agent's
 32 load loops plus 48 test processes (load average 173) preceded the owner's
 keyboard dying, twice that evening.
 
@@ -106,7 +106,7 @@ Instead:
 
 ### When to run which tests (owner ruling, 2026-10-06)
 
-Tests are not free: every suite here is sized to fill the host, and runs
+Tests are not free: every suite here is sized to fill the machine, and runs
 from several agents multiply. Tests are still used ACTIVELY; what this rules
 is how broad a run is at each moment.
 
@@ -116,7 +116,7 @@ is how broad a run is at each moment.
   confidence; a flaky test is rerun alone, not with its suite.
 - WHEN A COMPLETE SET OF CHANGES IS FINISHED (a feature fully added, a bug
   fixed, a prescribed change made): one full unit + integration run of the
-  systems it touched, through the scheduler so it holds the host slot:
+  systems it touched, through the scheduler so it holds the machine slot:
   `bin/test-all.sh --suites <touched suites>` (roster names, e.g.
   `daemon,webapp,ert`). Add `e2e` only with a stated reason — the change could
   have systemic knock-on effects. A failure goes back to targeted runs; the set
@@ -129,7 +129,7 @@ is how broad a run is at each moment.
     workspace-merge flow): the queue already runs the full suite as its gate,
     so an agent never runs it again (owner ruling, 2026-10-06).
 - Full runs go through `bin/test-all.sh`, never a hand-assembled set of
-  per-suite commands: the scheduler holds the host's one suite slot, so two
+  per-suite commands: the scheduler holds the machine's one suite slot, so two
   agents' full runs never overlap.
 - A SYSTEM'S SUITE IS ITS UNIT AND INTEGRATION TESTS TOGETHER. The roster
   entry carries both (`testrun/roster/roster.go`), so `--suites daemon` runs
@@ -166,7 +166,7 @@ the path as its FIRST line and again, with the exit status, as its LAST:
 ### Two ad-hoc scheduled runs at a time: `bin/test-all.sh` and `bin/suite-slot.sh`
 
 `bin/test-all.sh` builds `testrun`, which turns the whole roster into one DAG
-and schedules it across `runtime.NumCPU()/2` slots: HALF the host's cores
+and schedules it across `runtime.NumCPU()/2` slots: HALF the machine's cores
 (owner ruling, 2026-10-06), so a run never takes the machine from the owner's
 live runtime, input handling and apps. There is no special case
 for smaller hosts. The planner chooses each suite's chunk count by simulating
@@ -193,7 +193,7 @@ dependency chain first. Parallelism belongs to this scheduler:
   the sandbox VM is exactly such a case, so a unit like that must be capped
   by its own command line. A unit starts only when its whole
   width is free, nothing narrower overtakes it while it waits, and a plan with
-  a unit wider than the host's slot count is refused before anything runs.
+  a unit wider than the machine's slot count is refused before anything runs.
 
 `--suites a,b` selects a roster subset and refuses an unknown name.
 `--coverage` explicitly adds Go and vitest instrumentation and report units;
@@ -202,7 +202,7 @@ canonical post-merge timing run on master.
 
 The WHOLE scheduled run holds `bin/suite-slot.sh`, which allows two at once by
 default (`AGENT_REPL_SUITE_SLOTS`; owner ruling 2026-10-12, it was one). A run
-past that does not go faster: it competes with already host-filling schedules
+past that does not go faster: it competes with already machine-filling schedules
 and turns ordinary bounds into noise.
 
 That is not hypothetical. Several agents each running their own suites at once
@@ -226,7 +226,7 @@ pid is gone. It is the same mechanism as the sandbox's container gate in
 **THE MERGE QUEUE'S GATES TAKE NO SLOT.** A gate runs with
 `AGENT_REPL_SUITE_PRIORITY=merge` and goes straight through, saying so: the two
 merges at the front of the queue race to land, each gating at once, and the
-merge queue's own governor admits them. A host slot on top serialized the two
+merge queue's own governor admits them. A machine slot on top serialized the two
 racers and once stood the queue's head behind the merge behind it (owner
 ruling, 2026-10-12).
 
@@ -244,18 +244,18 @@ bin/e2e-repeat.sh ...` deadlocked — every per-run acquisition queued behind th
 outer holder that was waiting for those very runs to finish, 6000s of "still
 waiting" with nothing running.
 
-**ONE HOST-WIDE TEST BUDGET** (owner ruling, 2026-10-11). Every run behind the
+**ONE MACHINE-WIDE TEST BUDGET** (owner ruling, 2026-10-11). Every run behind the
 gate also claims, with the same atomic `mkdir`, PROCESSOR tokens
 (`core-N`, one per logical processor) and MEMORY tokens (`mem-N`, one GiB each,
-half the host's memory in all) under the slot directory, and is handed the
+half the machine's memory in all) under the slot directory, and is handed the
 processors it got as `AGENT_REPL_TEST_CPU_BUDGET` -- the parallelism the runner
 sizes itself to, instead of assuming it owns half the machine. The first half
 of the processors, and one RAM disk's memory, are the merge queue HEAD's
 (`AGENT_REPL_SUITE_PRIORITY=head`): nothing else may claim them. A head run
-wants half the host; every other run a quarter, from the rest, taking what the
+wants half the machine; every other run a quarter, from the rest, taking what the
 runs before it left. A run's memory is its whole RAM disk
 (`AGENT_REPL_TEST_RAMDISK_MIB`, 8 GiB) or nothing, so three runs never exhaust
-the host. A run short of memory or of a single processor gives back what it
+the machine. A run short of memory or of a single processor gives back what it
 claimed and waits; nothing is held while waiting. The merge queue's gates
 (`head`, `speculative`) take no run slot: the daemon bounds them to its queue
 window, and the budget is what they share with every other run.
@@ -295,7 +295,7 @@ Every temp file a test makes lives under a root its runner owns and removes.
   creates there stalled for seconds and timed tests out.
 - Roots live under `/tmp`, not `os.TempDir()`: a unix socket path is capped at
   104 bytes on macOS and the user temp directory's own path spends 49.
-- There is NO before/after check of the user temp directory. The whole host
+- There is NO before/after check of the user temp directory. The whole machine
   writes there (other agents' runs, the owner's Emacs on every bounce), so a
   listing cannot tell this run's entry from theirs; it failed two runs that
   leaked nothing. A `sandbox-exec` write denial would attribute exactly, but it
@@ -323,7 +323,7 @@ pipes into any of them.
 
 ### Test databases stay off the SSD (owner ruling, 2026-10-06)
 
-A full run once wrote and fsynced hundreds of SQLite files on the host's one
+A full run once wrote and fsynced hundreds of SQLite files on the machine's one
 SSD, and the owner's live store waited 54s for a WAL checkpoint behind them.
 Production durability is untouched by everything below; every seam is
 unreachable from a live process.
@@ -438,11 +438,11 @@ unreachable from a live process.
     a stall shows as a begin line with no end. The check and both begin lines
     carry the wall-clock time, so one run's probes line up against another
     run's attach or detach.
-  - A PROBE THAT DOES NOT ANSWER READS THE HOST AT ONCE: its load average
+  - A PROBE THAT DOES NOT ANSWER READS THE MACHINE AT ONCE: its load average
     (`sysctl -n vm.loadavg`) and every disk process then running (`ps`,
     hdiutil, diskutil and the daemons behind them), each within 500ms
     (`ramdisk.HostBound`). It goes on the check's INFO line, the ERROR line
-    and the investigation's prompt, so a slow host and a busy disk manager
+    and the investigation's prompt, so a slow machine and a busy disk manager
     are told apart from the log alone.
   - A RAM disk that cannot be made falls back to `/tmp` with an ERROR line.
 
@@ -454,7 +454,7 @@ the repository root `AGENTS.md`, "Canonical test timing history"). Its
 
 | measure | written by | what it is |
 |---|---|---|
-| `serial-wall` | the retired serial `bin/test-all.sh` (rows up to 2026-08-04), never again | `time` of the suite run ALONE on the host, its `go test -count=1 -cover`, vitest-with-coverage or Emacs processes free to use every core |
+| `serial-wall` | the retired serial `bin/test-all.sh` (rows up to 2026-08-04), never again | `time` of the suite run ALONE on the machine, its `go test -count=1 -cover`, vitest-with-coverage or Emacs processes free to use every core |
 | `unit-wall-sum` | `testrun finish-record` (staged by `testrun run --record`) | the sum of the suite's own units' wall times, each unit on one core slot, prebuild/compile units included |
 
 The regression report compares a suite only with prior rows of its own
@@ -479,7 +479,7 @@ Why `unit-wall-sum` and not the alternatives:
 What still moves `unit-wall-sum` without the suite changing:
 
 - The planner's chunk count for a Go or vitest suite: each extra chunk pays its process start (and `TestMain`) once more.
-- Contention from the units sharing the host at the same moment.
+- Contention from the units sharing the machine at the same moment.
 
 So a regression is a lead to investigate, not a verdict. Read the unit lines
 (`unit <id> [<suite>] ok, <wall>s wall, <cpu>s cpu`) and the plan line's chunk
@@ -518,7 +518,7 @@ poll limit in every test, harness and suite configuration, in every language.
 - **Never set a very long timeout.** A timeout is paid in full every time the
   thing it bounds fails: a 10-minute bound on a 2-second operation turns one
   hung test into 10 minutes of a blocked run. Bounds 10-100x the healthy
-  latency have been found hanging runs, gates and the host. A long bound is a
+  latency have been found hanging runs, gates and the machine. A long bound is a
   defect even when nothing has failed yet.
 - **Never set a too-short timeout.** A bound with no headroom over the healthy
   latency under realistic load makes the test flaky, and a flake is fixed at
@@ -557,7 +557,7 @@ number).
 | restart's own ensure build/start-ran (4 sites, `test-integration-daemon.el`) | file-flag checks after a restart's cold-start ensure | 5s | 3s | the flag file is touched synchronously once `agent-repl-daemon-ensure` proceeds; no observed case needs more than a fraction of a second |
 | restart-abandonment message (`test-integration-daemon.el`) | echo-area message after a refused stop | 5s | 3s | same shape as the build/start-ran checks above |
 | indicator-names-the-cause loop (`test-integration-link.el`) | per-case wait inside a `dolist` whose whole multi-case test runs in ~0.2s | 2s | 1s | still >3x any single case's real share of that 0.2s |
-| fake-daemon exit on teardown (`test-integration-helpers.el`) | `agent-repl-itest--stop-daemon`, runs after EVERY scenario in every suite | 5s | 5s (unchanged) | genuinely needs longer: this reclaims a REAL OS process via its own graceful-shutdown path after every single test, and a slow CI host is exactly the case a bound exists to tolerate — a spurious failure here still falls through to `delete-process` |
+| fake-daemon exit on teardown (`test-integration-helpers.el`) | `agent-repl-itest--stop-daemon`, runs after EVERY scenario in every suite | 5s | 5s (unchanged) | genuinely needs longer: this reclaims a REAL OS process via its own graceful-shutdown path after every single test, and a slow CI machine is exactly the case a bound exists to tolerate — a spurious failure here still falls through to `delete-process` |
 | fake daemon's own HTTP graceful-shutdown grace (`lisp/testsupport/fakedaemon/main.go`) | `context.WithTimeout` around `httpServer.Shutdown` | 2s | 2s (never reached) | the exit path now aborts every standing stream first (`abortAllStreams`), so `Shutdown` returns on its own rather than waiting this out; the bound survives as the backstop it was always meant to be |
 
 Re-measure before loosening any of these: `git log -p` on this section names
@@ -614,7 +614,7 @@ what the suite costs to run.
   own state is already woken by the event, and the interval is the floor under
   a predicate whose fact lives on the DAEMON (a subscriber count, a recorded
   call) and so cannot announce itself. It was 20ms, and at 20ms nearly every
-  wait in the suite slept a whole slot: 454 waits, 10.0s of an 11.5s host run.
+  wait in the suite slept a whole slot: 454 waits, 10.0s of an 11.5s machine run.
 
 - **Nothing here spawns a process to speak HTTP, production included.**
   `agent-repl-itest--control` speaks HTTP/1.1 over `make-network-process` to
@@ -623,10 +623,10 @@ what the suite costs to run.
   call cost 471 spawns and 3.3s of a 9.4s roster run. Production's transport
   dials the same way now, through `agent-repl-connect--open-socket`; that is
   the one boundary these suites run for real on purpose, and it was the
-  largest remaining per-scenario cost (~270 spawns, ~3.7s, in a host run)
+  largest remaining per-scenario cost (~270 spawns, ~3.7s, in a machine run)
   until it stopped being a spawn at all. Measured on one box, alternating
   branch point and tip: a unary round trip 60.1ms -> 3.5ms, composer
-  3.1/3.1s -> 2.1/2.2s, host 3.8/3.9s -> 3.0/3.1s, verbs 3.8/4.3s ->
+  3.1/3.1s -> 2.1/2.2s, machine 3.8/3.9s -> 3.0/3.1s, verbs 3.8/4.3s ->
   2.8/2.8s, connect 1.5/1.5s -> 0.90/0.90s.
 
   ITS CONNECT BLOCKS, AND THAT IS NOT A TUNING CHOICE. The peer is a
@@ -666,7 +666,7 @@ what the suite costs to run.
   scenarios were relying on the old 20ms poll to hide the window.
 
 What those rules bought, measured by running each suite at the branch point
-and at the tip alternately on one host, so both sides met the same load
+and at the tip alternately on one machine, so both sides met the same load
 (ERT's own reported suite time, seconds):
 
 | suite | before | after |
@@ -1009,7 +1009,7 @@ like an improvement still needs that conversation. Code:
   queue it would show no longer holds it, and the queue tab's contract has no
   standing for a merge outside the line.
 - **Every gate edge is recorded at INFO with its timing** (`daemon.merge.tests`):
-  its start, the host's suite slot taken with its wait, the runner's end, the
+  its start, the machine's suite slot taken with its wait, the runner's end, the
   verdict with its total, and a cut.
 
 ## A finished branch lands on master at once, with no question asked
@@ -1132,7 +1132,7 @@ its state closes the ones an earlier daemon left.
 
 A FAILED DEPLOY ROLLS BACK (owner ruling, 2026-09-28): any failure after the
 install began puts every replaced artifact back and restarts every service
-the deploy restarted onto the restored build, so the host is left exactly on
+the deploy restarted onto the restored build, so the machine is left exactly on
 the build it ran before; the fault line says `rolled back`. A rollback that
 fails is its own `deploy_failed` fault (the `rollback` step). Both stand in
 the TOPBAR's warning strip as well as on every footer, and the next deploy
@@ -1255,7 +1255,7 @@ so the push is on the wire ahead of the ack rather than waiting for a later one.
 
 A repository whose section is drawn with NO rows is still an ordinary state
 (every workspace under it closed), so neither the daemon's roster resolver nor
-the webapp's rail may drop an empty section.
+the webapp's sidebar may drop an empty section.
 
 ## `SPC p p` offers EVERY KNOWN workspace, not only the live ones
 
@@ -1420,8 +1420,8 @@ the top when absent) and a directory opens in dired. A path that does not exist
 is refused, never created. It shares its display with `agent-repl-popup-show`
 (a buffer rather than a path), so every agent-repl popup has one geometry.
 
-- **Every agent-repl file open goes through it.** Its callers are the host
-  stream's `open_in_editor` push (`agent-repl-host--open-in-editor`), the plan
+- **Every agent-repl file open goes through it.** Its callers are the
+  `WatchHostWorkspace` stream's `open_in_editor` push (`agent-repl-host--open-in-editor`), the plan
   bubble's edit button and every findings-row location jump (both ride that
   push), the worktree divider's paths and `commands.el`'s link-code, and
   `notes.el`'s notes file. A call site never calls `find-file` or
@@ -1682,7 +1682,7 @@ with the source tree and running artifacts.
 `bin/store-reset.sh` throws `events.db` away and brings the store and the
 sidecar back up. The store holds nothing that is not re-derivable, and during
 development it needs no retention (owner ruling 2026-09-13), so this is the
-answer to a database that has outgrown its host — not pruning, and not a
+answer to a database that has outgrown its machine — not pruning, and not a
 migration.
 
 ```sh
@@ -2011,6 +2011,41 @@ per workspace on the marker's present->absent edge (a restated marker is not a
 clear, and neither is a first sighting without it). The reaction only re-arms
 the dwell clock, since the tab already draws full from the row.
 
+## Main components and systems go by their canonical names, and no others
+
+Every agent, in every response, commit message, comment and doc, names a
+main component or system of agent-repl by its CANONICAL name only: the name
+its directory, element or program carries. A synonym, metaphor or nickname
+(owner ruling, 2026-10-13: "rail" for the sidebar) makes the reader translate,
+and a reader who does not know the code cannot.
+
+| Canonical name | What it is | Never called |
+|---|---|---|
+| sidebar | the webapp's list of every workspace (`webapp/src/sidebar/`, `<nav id="ws-sidebar">`) | rail, dock, workspace list |
+| topbar | the strip at the top of a workspace page (`webapp/src/topbar/`) | header, title bar |
+| footer | the progress footer at the bottom of a page (`webapp/src/footer/`); its detail section is the "expanded footer" | status bar |
+| feed | a workspace page's conversation (`webapp/src/feed/`) | transcript view, log |
+| tab bar | Emacs's row of workspace tabs | tab strip |
+| webhost | the one web view Emacs shows, holding every workspace page as an iframe (`lisp/webhost.el`, `webapp/src/host/`, the webapp at `?host=1`) | host, host page, wrapper, shell page |
+| daemon, shim, sidecar, store, webapp | the cooperating programs (`daemon/`, `agent-shim/`, `shim-claude-sidecar`, `shim-store`, `webapp/`) | backend, server, agent process |
+
+"HOST" ALONE NAMES NOTHING, so it is never written bare (owner ruling,
+2026-10-13). It has meant three things here, and a reader cannot tell which:
+
+- the one web view holding every workspace page: write **webhost**;
+- Emacs in its role toward the daemon (registering, selecting and watching
+  workspaces, `lisp/host.el`): write **Emacs**, or name the message or rpc in full
+  (`agentrepl.v1.WatchHostWorkspace`, `HostWorkspace.gate`);
+- the computer everything runs on: write **machine**.
+
+A code identifier that contains the word (`agent-repl-host-ref`,
+`webapp/src/host/`, `test-integration-host.el`) is quoted as the identifier
+it is; only the bare prose word is banned.
+
+Code that still uses an old nickname (comments saying "rail" in
+`webapp/src/sidebar/`) is not a licence to repeat it: the canonical name is
+used in what an agent writes.
+
 ## "WatchDaemon", "the daemon watching in Emacs" and "the editor stream" are one thing
 
 All three names mean Emacs's `WatchDaemon` subscription
@@ -2018,7 +2053,7 @@ All three names mean Emacs's `WatchDaemon` subscription
 long-lived daemon stream an Emacs process holds, carrying the roster, the
 elisp reload, persistent Wi-Fi and the daemon's standing faults. Use any of
 the three; never use them for the per-workspace
-`WatchHostWorkspace` stream, which is "the host stream".
+`WatchHostWorkspace` stream, which is named by that rpc name and never "the host stream".
 
 - **`WatchDaemonEmacs.instance` is required.** Emacs mints one `EditorInstance`
   per process (`agent-repl-editor-instance`), and the daemon refuses a watch
@@ -2036,7 +2071,7 @@ the three; never use them for the per-workspace
 
 Owner, 2026-10-02. A gate is a choice whose answer replaces the composer;
 only the cold gate is one today. While it stands the daemon states it twice
-from the one cold-gate standing: `HostWorkspace.gate` on the host stream and
+from the one cold-gate standing: `HostWorkspace.gate` on the `WatchHostWorkspace` stream and
 the root feed's standing `FeedColdGate` row. Emacs reads the first
 (`agent-repl-input-hidden-p`, `lisp/window.el`) and lays the workspace out
 with no input window; the webapp reads the second (`src/feed/gate-dock.ts`)
@@ -2194,7 +2229,7 @@ The rules that keep this true:
   row's menu, a task's menu, a row's detail popover) or a form is NOT view
   state: it is transient to the page that opened it. Every sidebar dropdown
   shares ONE dismiss rule (`webapp/src/sidebar/dropdowns.ts`): a click in the
-  rail outside it closes it, a click inside it or on its opener keeps it, and
+  sidebar outside it closes it, a click inside it or on its opener keeps it, and
   opening one closes the other.
 - **The webapp composer is closed exactly when the footer is blue**
   (`render-colors.json#composer_closed_colors`, read by
@@ -2206,7 +2241,7 @@ The rules that keep this true:
   `api_retrying` is a vendor fault and turquoise, open by its color). A merge in flight (purple) leaves it open:
   what is submitted is held until the merge ends, and a prompt held so keeps
   the workspace open past the landing. Emacs's composer is gated by the
-  daemon's host composer arm instead (a drain, a restart; a holding merge
+  composer arm of the daemon's `WatchHostWorkspace` push instead (a drain, a restart; a holding merge
   lease answers `open`), and while the
   workspace is unusable it still takes prompts and holds them durably (the held
   ingress), per the ruling that held prompts survive outages.
@@ -2871,7 +2906,7 @@ never set it.
   - A realtest starts Emacs once per test with `open -g -a Emacs` only.
   - Reason (owner, 2026-09-11): an agent's repeated `Emacs -Q` probes stole
     the owner's focus over and over and launched the wrong Emacs.
-- Realtests run against the real Emacs.app on the host: real keystrokes, no
+- Realtests run against the real Emacs.app on the machine: real keystrokes, no
   sandbox, no focus grab, no pictures.
   - A realtest is remediated only when the harvest of ALL logs in the run
     window is clean.
@@ -2956,6 +2991,6 @@ and its commit (or the open item). Test-performance lessons also go into the
 `/write-tests` skill; runtime profiling and the perf-sensitive list live in
 `/profile-agent-repl`.
 
-- The host has ONE suite slot shared by every session's full runs and every merge gate. Gates waited 64-338s for it before any suite started; a load average of 25-95 turned timing-sensitive tests red across unrelated merges (docs/investigations/2026-10-12-merge-queue-latency.md). Run targeted tests while developing and one full run per complete change.
+- The machine has ONE suite slot shared by every session's full runs and every merge gate. Gates waited 64-338s for it before any suite started; a load average of 25-95 turned timing-sensitive tests red across unrelated merges (docs/investigations/2026-10-12-merge-queue-latency.md). Run targeted tests while developing and one full run per complete change.
 - Direct pushes to master outside the merge queue move the target under gates that already passed, and that work is thrown away; master that is red makes every gate inherit the failure (same report). Land only what was rebased onto master and tested there.
 - Startup: a boot used to hold every workspace's bring-up behind a stale sidecar's restart (29s). Since b438e783b bring-ups run beside it: at the 15:34 hard bounce the daemon served +0.9s, every workspace had its go-ahead +1.8s, all 26 sessions were up 14.6s after the Emacs relaunch (54s at 13:39).
