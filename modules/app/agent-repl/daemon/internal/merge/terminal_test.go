@@ -1753,7 +1753,7 @@ func TestAMadeBranchWorktreeIsKeptWhenItsConflictResolutionGaveUp(t *testing.T) 
 	// Arrange.
 	h := newHarness(t)
 	h.git.rebaseConflicts[1] = []string{"a.go"}
-	h.git.conflicted = [][]string{{"a.go"}}
+	h.git.conflicted = [][]string{{"a.go"}, {"a.go"}, {"a.go"}}
 
 	// Act.
 	landedAs(t, h, wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix"})
@@ -1769,7 +1769,7 @@ func TestAFailedMergeLeavesTheQueueAtOnceForTheMergeBehindIt(t *testing.T) {
 	h := newHarness(t)
 	landing(h, 1)
 	h.git.rebaseConflicts[1] = []string{"a.go"}
-	h.git.conflicted = [][]string{{"a.go"}}
+	h.git.conflicted = [][]string{{"a.go"}, {"a.go"}, {"a.go"}}
 	enqueue(t, h)
 
 	// Act.
@@ -1847,7 +1847,7 @@ func TestAFailedMergesTerminalIsPublishedOnlyAfterItsLeaseIsReleased(t *testing.
 	h := newHarness(t)
 	landing(h, 1)
 	h.git.rebaseConflicts[1] = []string{"a.go"}
-	h.git.conflicted = [][]string{{"a.go"}}
+	h.git.conflicted = [][]string{{"a.go"}, {"a.go"}, {"a.go"}}
 	heldAtFailure := []bool{}
 	h.feed.onUpsert = func(row *frontendv1.FeedRow) {
 		if row.GetActivity().GetMerge().GetError() != nil {

@@ -479,6 +479,14 @@ func (r *run) settleRebasing(ctx context.Context, p *replay, summary string) {
 func (r *run) conflict(ctx context.Context, p *replay, files []string, targetBranch string) (*outcome, error) {
 	const op = "daemon.merge.conflicts"
 	commit := p.commits[min(p.done, len(p.commits)-1)]
+	// THE ATTEMPTS COUNT PER COMMIT (owner ruling, 2026-10-12): a conflict on
+	// a commit the rebase has not met before starts its count afresh, so a
+	// rebase that advanced is never failed for the attempts an earlier commit
+	// took.
+	if r.conflictCommit != commit.SHA {
+		r.conflictCommit, r.conflictAttempts = commit.SHA, 0
+	}
+	r.conflictAttempts++
 	p.lines = append(p.lines, fmt.Sprintf("%s conflicted in %d file(s)", commitLine(commit.SHA, commit.Subject), len(files)))
 	r.settleRebasing(ctx, p, "the rebase stopped on a conflict")
 	r.o.log(ctx, r.ws).Info(op, "a replayed commit conflicted; the requester's session resolves it", dlog.Context{
@@ -507,6 +515,10 @@ func (r *run) conflict(ctx context.Context, p *replay, files []string, targetBra
 	}
 	return r.conflictSettled(ctx, p, round, close, commit, targetBranch)
 }
+
+// maxConflictAttempts is how many resolution attempts one commit's conflict
+// gets in a row before the merge fails in conflicts.
+const maxConflictAttempts = 3
 
 // conflictBrief composes the conflict resolution's brief.
 func (r *run) conflictBrief(commit gitclient.Commit, files []string, targetBranch string) (string, error) {
@@ -541,12 +553,33 @@ func (r *run) conflictSettled(ctx context.Context, p *replay, round tabRound, cl
 	case len(remaining) > 0:
 		why = fmt.Sprintf("%d file(s) still conflict: %s", len(remaining), strings.Join(remaining, ", "))
 	}
+	machinery := false
 	if why == "" {
 		if line, refused, err := r.machineryChanged(ctx, targetBranch); err != nil {
 			return nil, err
 		} else if refused {
-			why = line
+			why, machinery = line, true
 		}
+	}
+	// A RESOLUTION THAT DID NOT RESOLVE IS TRIED AGAIN on the same commit, up
+	// to maxConflictAttempts in a row (owner ruling, 2026-10-12); only then
+	// does the merge fail. A change to the merge machinery is refused at once:
+	// another attempt cannot make it acceptable.
+	if why != "" && !machinery && r.conflictAttempts < maxConflictAttempts {
+		r.settleAgentic()
+		retry := fmt.Sprintf("attempt %d of %d did not resolve it (%s); trying again", r.conflictAttempts, maxConflictAttempts, why)
+		r.upsert(round, conflictsTab(round.settled(r.o.nowMS(), retry)))
+		r.closeTab(ctx, round, "failed")
+		r.o.log(ctx, r.ws).Info(op, "the conflict resolution did not resolve the commit; the session tries again", dlog.Context{
+			"workspace": string(r.ws), "commit": commit.SHA, "attempt": r.conflictAttempts, "of": maxConflictAttempts, "why": why})
+		files := remaining
+		if len(files) == 0 {
+			files, err = r.git.ConflictedFiles(ctx, r.subject.dir)
+			if err != nil {
+				return nil, fmt.Errorf("merge: reading what still conflicts in %s: %w", r.subject.dir, err)
+			}
+		}
+		return r.conflict(ctx, p, files, targetBranch)
 	}
 	if why != "" {
 		summary := fmt.Sprintf("conflict resolution gave up: %s; the rebase is left in progress in %s", why, r.subject.dir)
