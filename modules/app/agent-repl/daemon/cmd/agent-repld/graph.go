@@ -641,6 +641,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// fleet, whose watchers report every ask edge into it, and handed to the
 	// merge orchestrator built below.
 	mergeAsks := merge.NewAsks()
+	// THE COLD GATE EJECTS A QUEUED MERGE (owner ruling, 2026-10-13). The
+	// fleet is built before the merge orchestrator, so the eviction is bound
+	// once the orchestrator exists.
+	var ejectCold func(ids.WorkspaceID)
 
 	// THE SESSIONS' SLASH-COMMAND CATALOGS, as the Emacs composer completes
 	// from them. Fed by the fleet's watchers and read by ListSlashCommands.
@@ -672,6 +676,14 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		VendorStarts: sidebarResolver.SetVendorStart,
 		Steps:        opens.Step,
 		SessionsUp:   lifecycle.SessionUp,
+		// OFF THE BRING-UP'S GOROUTINE: the merge being ejected may itself be
+		// what is bringing the session up (its repair's ensureSession), and
+		// the eviction waits for that run to stop.
+		ColdGateRaised: func(ws ids.WorkspaceID) {
+			if eject := ejectCold; eject != nil {
+				go eject(ws)
+			}
+		},
 		SocketPath:   func(ws ids.WorkspaceID) string { return p.Layout.ShimSocket(string(ws)) },
 		StoreSocket:  p.Opts.storeSocket,
 		NodeBin:      p.Opts.node,
@@ -1004,6 +1016,18 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("agent-repld: build the merge orchestrator: %w", err)
 	}
 	mergeMover.bind(mergeOrchestrator)
+	ejectCold = func(ws ids.WorkspaceID) {
+		const op = "daemon.merge.cold_gate"
+		err := mergeOrchestrator.Evict(context.Background(), ws)
+		if refusal, ok := merge.Refused(err); ok && refusal.Arm == merge.ArmNoSuchQueuedMerge {
+			return
+		}
+		if err != nil {
+			log.Error(op, "could not take the merge of a workspace whose session parked at its cold gate off the queue", dlog.Context{"workspace": string(ws), "error": err.Error()})
+			return
+		}
+		log.Info(op, "the session parked at its cold gate; its merge leaves the queue", dlog.Context{"workspace": string(ws)})
+	}
 
 	// ---- health, login, the verbs ----
 

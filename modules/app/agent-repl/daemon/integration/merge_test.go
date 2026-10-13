@@ -1580,3 +1580,48 @@ func mergeBrokenGateRepo(t *testing.T) (first, second *fixture, d *harness.Daemo
 	second = mergeCreateChild(t, d, repoRef, "after-bubble", "the next thing", nil)
 	return first, second, d, script
 }
+
+// TestAQueuedMergeWhoseSessionParksAtItsColdGateLeavesTheQueue pins the owner's
+// 2026-10-13 ruling: a queued merge whose session went cold is ejected from
+// the queue, not kept waiting on a session that cannot take its prompts.
+func TestAQueuedMergeWhoseSessionParksAtItsColdGateLeavesTheQueue(t *testing.T) {
+	t.Parallel()
+	// Arrange: behind waits in line; the daemon restarts, and behind's
+	// resume is scripted cold.
+	_, behind, _, d := mergeBlockedQueueFixture(t)
+	// The sweep covers every test; the declared records are evidence of the restart under test.
+	expectSessionKillRecords(d)
+	// PAUSED, so nothing the restart cuts can let behind run before its
+	// session comes up: a paused queue advances nothing.
+	if resp, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+		Action: &agentreplv1.UpdateMergeQueueRequest_Pause{Pause: &agentreplv1.UpdateMergeQueuePause{}},
+	})); err != nil || resp.Msg.GetError() != nil {
+		t.Fatalf("UpdateMergeQueue(pause) = %v, %v, want the queue paused", resp, err)
+	}
+	if _, err := d.Client().UpdateShutdownSchedule(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
+		Action: &agentreplv1.UpdateShutdownScheduleRequest_Now{Now: &agentreplv1.UpdateShutdownScheduleNow{
+			Reason: drainReasonOperator("the restart under test"),
+		}},
+	})); err != nil {
+		t.Fatalf("UpdateShutdownSchedule{now} = %v, want the immediate shutdown accepted", err)
+	}
+	d.AwaitExit()
+	d.WriteShimProfile(behind.ws.GetDir(), harness.ShimProfile{ColdOnResume: &harness.ShimColdFacts{
+		ContextTokens: 160210, LastRequestAtMS: 1_700_000_000_000, RequestedModel: "opus", CacheTTLMS: 300_000,
+	}})
+
+	// Act: the successor boots, and behind's session comes up parked at its
+	// cold gate.
+	d2 := harness.StartDaemon(t, d.SuccessorOpts())
+	d2.DefaultConfigDir = d.DefaultConfigDir
+	roster := d2.WatchRoster()
+
+	// Assert: the merge left the queue, and the leaving is recorded at INFO.
+	awaitRoster(t, d2, roster, "the cold workspace off the queue", func(r *frontendv1.WorkspaceRoster) bool {
+		row := rosterRow(r, behind.ws.GetId())
+		return row != nil && row.GetMergeQueued() == nil
+	})
+	d2.AwaitRunLogRecordFromAnyProcess("the cold gate's ejection", func(r harness.LogRecord) bool {
+		return r.Level == "info" && r.Operation == "daemon.merge.cold_gate" && r.Context["workspace"] == behind.ws.GetId()
+	})
+}
