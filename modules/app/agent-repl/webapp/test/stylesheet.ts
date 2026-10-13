@@ -47,15 +47,25 @@ export function cascadedValue(el: Element, property: string): string {
  * leave a rail or a stylesheet behind for the next one.
  */
 export function inRail<T>(drawn: HTMLElement, check: (rail: HTMLElement) => T): T {
-  const teardown = installStylesheet();
   const rail = document.createElement("div");
   rail.id = "ws-sidebar";
   rail.appendChild(drawn);
-  document.body.appendChild(rail);
+  return inDocument(rail, check);
+}
+
+/**
+ * Run CHECK against DRAWN mounted in the document with the real stylesheet
+ * installed, and take both down afterwards, even when CHECK throws. Every paint
+ * assertion that mounts an element goes through this (the rail's through
+ * `inRail`), so none can leave an element or a stylesheet behind for the next.
+ */
+export function inDocument<T>(drawn: HTMLElement, check: (drawn: HTMLElement) => T): T {
+  const teardown = installStylesheet();
+  document.body.appendChild(drawn);
   try {
-    return check(rail);
+    return check(drawn);
   } finally {
-    rail.remove();
+    drawn.remove();
     teardown();
   }
 }
