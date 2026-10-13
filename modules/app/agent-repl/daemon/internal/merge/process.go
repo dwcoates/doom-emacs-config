@@ -116,6 +116,35 @@ func (r *run) attempt(ctx context.Context) (outcome, bool, error) {
 	return r.afterRebase(ctx, tip, targetBranch, r.fixesUsed, false)
 }
 
+// targetTip resolves the merge target's tip as it stands now.
+func (r *run) targetTip(ctx context.Context) (string, error) {
+	target := r.subject.targetDir
+	now, err := r.git.ResolveRef(ctx, target, "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("merge: resolving %s's tip: %w", target, err)
+	}
+	r.o.noteTargetTip(r.repo, now)
+	return now, nil
+}
+
+// rebaseOntoMoved takes a merge resumed after its rebase step, whose target
+// moved from tip to now while the daemon was down, back to the rebase step on
+// now; the gate then runs on the new tip, keeping its fixing attempts.
+func (r *run) rebaseOntoMoved(ctx context.Context, tip, now, targetBranch string, fromAttempt int) (outcome, bool, error) {
+	r.o.log(ctx, r.ws).Info("daemon.merge.resume", "the target moved while the daemon was down; the merge rebases onto its new tip before it goes on", dlog.Context{
+		"workspace": string(r.ws), "lease": string(r.lease.ID), "target": targetBranch, "rebased_on": tip, "tip": now})
+	if gaveUp, err := r.rebase(ctx, now, targetBranch); err != nil || gaveUp != nil {
+		if gaveUp != nil {
+			return *gaveUp, false, nil
+		}
+		return outcome{}, false, err
+	}
+	if err := r.settledOn(ctx, now); err != nil {
+		return outcome{}, false, err
+	}
+	return r.afterRebase(ctx, now, targetBranch, fromAttempt, false)
+}
+
 // afterRebase is the attempt once its branch stands on tip: the gate (with its
 // fixing attempts from fromAttempt on), then the commit. resumeTests runs the
 // first gate in the tests round the record left live rather than a new one.
@@ -170,6 +199,18 @@ func (r *run) resumeAttempt(ctx context.Context, res *progressDoc) (outcome, boo
 			out, again, err, _ := finish(gaveUp, err)
 			return out, again, err
 		}
+		now, err := r.targetTip(ctx)
+		if err != nil {
+			return outcome{}, false, err
+		}
+		if now != tip {
+			// A GATE ON A TIP THE TARGET LEFT can never land: the merge goes
+			// back to the rebase step first (owner ruling, 2026-10-12).
+			round := r.activeRound()
+			r.upsert(round, testsTab(round.settled(r.o.nowMS(), "the daemon restarted under this run and the target moved; the branch rebases onto its new tip first"), nil, nil))
+			r.closeTab(ctx, round, "restarted")
+			return r.rebaseOntoMoved(ctx, tip, now, targetBranch, res.FixAttempt)
+		}
 		r.o.log(ctx, r.ws).Info("daemon.merge.resume", "the test gate the restart cut runs again from its start", dlog.Context{
 			"workspace": string(r.ws), "lease": string(r.lease.ID), "round": r.activeRound().n, "attempt": res.FixAttempt})
 		return r.afterRebase(ctx, tip, targetBranch, res.FixAttempt, true)
@@ -177,6 +218,13 @@ func (r *run) resumeAttempt(ctx context.Context, res *progressDoc) (outcome, boo
 		if gaveUp, err := r.resumeFix(ctx, res, targetBranch); err != nil || gaveUp != nil {
 			out, again, err, _ := finish(gaveUp, err)
 			return out, again, err
+		}
+		now, err := r.targetTip(ctx)
+		if err != nil {
+			return outcome{}, false, err
+		}
+		if now != tip {
+			return r.rebaseOntoMoved(ctx, tip, now, targetBranch, res.FixAttempt)
 		}
 		return r.afterRebase(ctx, tip, targetBranch, res.FixAttempt, false)
 	default:
@@ -731,6 +779,15 @@ func (r *run) testAndFix(ctx context.Context, tip, targetBranch string, fromAtte
 			// A PASSING GATE ENDS THE RUN OF FAILURES: a later failure (a
 			// start-over on a moved target) starts its count afresh.
 			r.fixesUsed = 0
+			// THE PASS IS KEPT FOR A START-OVER (owner ruling, 2026-10-12): a
+			// merge whose target moves before it commits rebases again, and
+			// when that rebase gives the very tree that passed, the tests are
+			// not run again (reuseTested).
+			tree, err := r.git.TreeOf(ctx, r.subject.dir, head)
+			if err != nil {
+				return "", nil, fmt.Errorf("merge: reading the tree of %s: %w", short(head), err)
+			}
+			r.tested = &testedDoc{Base: tip, Head: head, Tree: tree, Own: true}
 			return head, nil, nil
 		case attempt == MaxFixAttempts:
 			summary := fmt.Sprintf("the tests still fail after %d fixing attempts; the whole run is archived at %s", MaxFixAttempts, verdict.result.ArchivePath)

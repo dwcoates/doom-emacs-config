@@ -131,6 +131,9 @@ type testedDoc struct {
 	Base string `json:"base"`
 	Head string `json:"head"`
 	Tree string `json:"tree"`
+	// Own marks the pass of the head's own gate, as against a speculative
+	// gate's: a start-over that rebases to the very same tree reuses it.
+	Own bool `json:"own,omitempty"`
 }
 
 // subjectDoc is the durable subject.

@@ -705,8 +705,16 @@ func (r *run) reuseTested(ctx context.Context, tip, head string) (bool, error) {
 	fields := dlog.Context{"workspace": string(r.ws), "lease": string(r.lease.ID), "tip": tip, "head": head, "tree": tree,
 		"tested_base": tested.Base, "tested_head": tested.Head, "tested_tree": tested.Tree}
 	if tree == tested.Tree {
+		if tested.Own {
+			r.o.log(ctx, r.ws).Info("daemon.merge.tests", "the branch rebased to the very tree its gate passed; the pass stands and the tests are not run again", fields)
+			return true, nil
+		}
 		r.o.log(ctx, r.ws).Info(op, "the merge ahead landed exactly as tested; the speculative pass stands and the tests are not run again", fields)
 		return true, nil
+	}
+	if tested.Own {
+		r.o.log(ctx, r.ws).Info("daemon.merge.tests", "the branch rebased to a tree its gate never passed; the tests run again", fields)
+		return false, nil
 	}
 	r.o.log(ctx, r.ws).Info(op, "the branch about to land is not the tree the speculative gate passed; the pass is invalidated and the tests run again", fields)
 	return false, nil

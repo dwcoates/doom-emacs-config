@@ -871,3 +871,85 @@ func TestAResumedConflictKeepsTheAttemptsItSpent(t *testing.T) {
 		t.Fatalf("facts = %+v, want the merge failed in conflicts: the restart forgot no attempt", got)
 	}
 }
+
+// movedTip is the target's tip after it moved while the daemon was down.
+const movedTip = "moved0000000tip"
+
+// targetMovedWhileDown stands the target on movedTip, with the branch
+// rebased onto it once the resumed merge rebases.
+func targetMovedWhileDown(h *harness) {
+	h.git.refs["HEAD"] = movedTip
+	h.git.ancestry[movedTip+">feature"] = true
+}
+
+func TestAMergeResumedAtItsTestsRebasesOntoATargetThatMovedFirst(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	interruptedAt(t, h, atStep(TabTests, 1))
+	landsAfterResume(h)
+	targetMovedWhileDown(h)
+
+	// Act.
+	resume(t, h)
+
+	// Assert: the one gate runs on the moved tip, none on the tip it left.
+	if len(h.runner.argv) != 1 {
+		t.Fatalf("the gate ran %d times, want once, after the rebase onto the moved tip", len(h.runner.argv))
+	}
+	if len(h.git.queueBases) != 1 || h.git.queueBases[0] != movedTip {
+		t.Fatalf("merge commits made on %v, want one on the moved tip", h.git.queueBases)
+	}
+}
+
+func TestAMergeResumedAtItsTestsSettlesTheCutRoundWhenTheTargetMoved(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	interruptedAt(t, h, atStep(TabTests, 1))
+	if err := h.db.OpenMergeLedger(context.Background(), theWorkspace, deadLease); err != nil {
+		t.Fatalf("OpenMergeLedger: %v", err)
+	}
+	landsAfterResume(h)
+	targetMovedWhileDown(h)
+
+	// Act.
+	resume(t, h)
+
+	// Assert.
+	if got := testsRoundOutcome(h, 1); got != "restarted" {
+		t.Fatalf("the cut tests round closed %q, want restarted", got)
+	}
+}
+
+// testsRoundOutcome is how the ledger closed the given tests round.
+func testsRoundOutcome(h *harness, round int) string {
+	h.db.mu.Lock()
+	defer h.db.mu.Unlock()
+	for _, entries := range h.db.ledger {
+		for _, entry := range entries {
+			for _, interval := range entry.Intervals {
+				if interval.Kind == TabTests && interval.Round == round && interval.EndedAt != nil {
+					return interval.Outcome
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func TestAMergeResumedAtAFixRebasesOntoATargetThatMovedBeforeItsGate(t *testing.T) {
+	// Arrange: the fixing turn ended while the daemon was down.
+	h := newHarness(t)
+	interruptedAt(t, h, atFix)
+	closed := wsm.CloseCompleted
+	recordTurn(h, &closed)
+	landsAfterResume(h)
+	targetMovedWhileDown(h)
+
+	// Act.
+	resume(t, h)
+
+	// Assert: the fix's gate runs on the moved tip, none on the tip it left.
+	if len(h.runner.argv) != 1 {
+		t.Fatalf("the gate ran %d times, want once, after the rebase onto the moved tip", len(h.runner.argv))
+	}
+}
