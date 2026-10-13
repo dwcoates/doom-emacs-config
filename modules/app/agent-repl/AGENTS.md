@@ -385,17 +385,35 @@ unreachable from a live process.
     reported, naming what held it (`lsof +f -- <mount>`, read before the
     force). A run killed outright leaves an flock'd record in
     `/tmp/agent-repl-test-ramdisks`, and the next run reclaims the disk.
+  - EVERY PROCESS RUNNING OUT OF THE VOLUME IS KILLED before a detach, by a
+    release or a reclaim (`testrun/reap.Under`, shared with the daemon
+    harness's run-root reclaim): one whose command line OR environment
+    names the mount. By command line alone, a dead run's ERT Emacs (handed
+    the volume only through `TMPDIR`) outlived the reclaim and refilled the
+    detached mount point.
+  - A MOUNT POINT NO RECORD NAMES IS REMOVED by the next run's reclaim, once
+    its run is dead and no volume is mounted on it: what a process wrote
+    under it after its disk went, or what a release could not remove. It is
+    taken under the registry lock, killed out of, and renamed
+    `artr-<pid>.reclaim` before its removal outside the lock.
   - NO PATH LEAVES A DISK UNNAMED. A disk that will not detach keeps its
     record for the next run's reclaim. A failed attach (hdiutil killed at its
     bound) force-detaches any RAM disk it left. The registry lock is held
     from the leak check until the record names the new device.
   - A LEAK OR A WEDGED DISK MANAGER STOPS THE ATTACH (owner ruling,
     2026-10-12; one stuck run once led to 13 leaked 8 GiB disks).
-    - First, `diskutil list` within 175ms and `hdiutil info` within 120ms,
-      each just over 2x the healthy max in the runs' own logs (85ms, 56ms),
-      read at the runs' own priority on a host carrying several runs. The
-      first bounds came from quiet calls (44ms, 22ms max) and refused a
-      healthy disk manager at load 28.
+    - First, `diskutil list` and `hdiutil info`, each within 1s: just over
+      2x the slowest healthy read of the disk manager the runs record at
+      their own priority (`diskutil info` in the acquire, 471ms). The bounds
+      cover the run's own wait for a CPU at nice 19, not only the disk
+      manager's answer: bounds of 175ms and 120ms refused seven runs at load
+      6.6 to 281 whose disk manager was idle.
+    - A PROBE THAT MISSES ITS BOUND IS WATCHED TO ITS OWN ANSWER, for at most
+      `ramdisk.CommandBound`: an answer is logged at INFO ("answered ...
+      late, after ..., so it was slow, not wedged"), a failure at ERROR
+      ("never answered"), and one still out when the run ends at INFO. So a
+      refusal says from the log alone whether the disk manager was slow or
+      wedged, and the bounds can be set again from uncut times.
     - A leak is a `ram://` disk the runner made (named by a record, or
       mounted at an `artr-<pid>` mount point) that no live run's record names.
     - Either finding puts the run on `/tmp` with a `RAM DISK REFUSED` ERROR
@@ -409,8 +427,9 @@ unreachable from a live process.
     - No other is created while a worktree on a branch of that name exists or
       its create waits in the daemon's ingress; no daemon, no CLI or a failed
       dispatch is an ERROR line too.
-  - THE REGISTRY LOCK WAIT IS BOUNDED at 1.5s (`ramdisk.LockBound`), just
-    over 2x the longest healthy hold: an acquire holds it about 220ms, an
+  - THE REGISTRY LOCK WAIT IS BOUNDED at 2s (`ramdisk.LockBound`), just
+    over 2x the longest healthy hold: an acquire holds it for its listing
+    and its attach, about 800ms at their slowest healthy times, an
     investigation's dispatch about 700ms. Past the bound the run is treated
     like one facing a wedged disk manager: on `/tmp`, an ERROR naming the lock
     and who has it open (`lsof`), and the investigation, deduplicated without
