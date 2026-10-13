@@ -24,8 +24,9 @@ import {
   drawFeedPermission,
   DENY_IN_EDITOR_HINT,
   PERMISSION_ANSWERED_ARMS,
-  WAITING_WORD,
+
 } from "../../../src/feed/asks/permission.js";
+import { ASK_WAITING_WORD } from "../../../src/feed/asks/ask-words.js";
 import { runningClock, stoppedClock, toolCardHeadParts } from "../cards/tool-card-head-shape.js";
 import { armsOf } from "../arms.js";
 import { askHarness, ROW_ID, settle as drain, WORKSPACE } from "./harness.js";
@@ -89,7 +90,7 @@ describe("the card's chrome", () => {
     const el = drawFeedPermission(u, askHarness().rc);
 
     // Assert
-    expect(toolCardHeadParts(el)).toEqual([`title:${HEADLINE}`, `badge:${WAITING_WORD}`, "clock:45s"]);
+    expect(toolCardHeadParts(el)).toEqual([`title:${HEADLINE}`, `badge:${ASK_WAITING_WORD}`, "clock:45s"]);
   });
 
   it("heads with the verdict and the stopped clock once answered", () => {
@@ -106,7 +107,7 @@ describe("the card's chrome", () => {
 
   it("heads with no clock when the producer stated no start", () => {
     const el = drawFeedPermission(permission({ case: "open", value: {} }), askHarness().rc);
-    expect(toolCardHeadParts(el)).toEqual([`title:${HEADLINE}`, `badge:${WAITING_WORD}`]);
+    expect(toolCardHeadParts(el)).toEqual([`title:${HEADLINE}`, `badge:${ASK_WAITING_WORD}`]);
   });
 
   it("draws no editor hint once the ask is settled", () => {

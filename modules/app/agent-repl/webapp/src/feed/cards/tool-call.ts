@@ -26,7 +26,7 @@
  * no ticking clock on a settled call.
  */
 import { drawToolExitLine } from "./exit-line.js";
-import { drawToolCardHead } from "./tool-head.js";
+import { drawToolCardBadge, drawToolCardHead } from "./tool-head.js";
 import { createControl } from "../../control.js";
 import {
   type FeedCodeSpan,
@@ -345,13 +345,11 @@ export function drawFeedToolCallRunning(
   rc: RowContext,
   path: string,
 ): OutcomeParts {
-  const badge = document.createElement("span");
-  badge.className = "badge run";
+  const badge = drawToolCardBadge("running…", ["run"]);
   const spinner = document.createElement("span");
   spinner.className = "tool-spinner";
   spinner.setAttribute("aria-hidden", "true");
-  badge.appendChild(spinner);
-  badge.appendChild(document.createTextNode("running…"));
+  badge.prepend(spinner);
 
   if (u.lastProgress === undefined) {
     log.debug("drawing a running tool call with no observed beat", {
@@ -420,10 +418,7 @@ export function drawFeedToolCallDenied(_u: FeedToolCallDenied, path: string): Ou
     operation: "feed.cards.tool-call.denied",
     context: { path },
   });
-  const badge = document.createElement("span");
-  badge.className = "badge perm";
-  badge.textContent = "denied";
-  return { badge, body: [] };
+  return { badge: drawToolCardBadge("denied", ["perm"]), body: [] };
 }
 
 /**
@@ -565,10 +560,7 @@ export function drawFeedToolCallSucceeded(path: string): HTMLElement {
     operation: "feed.cards.tool-call.succeeded",
     context: { path },
   });
-  const badge = document.createElement("span");
-  badge.className = "badge ok";
-  badge.textContent = "done";
-  return badge;
+  return drawToolCardBadge("done", ["ok"]);
 }
 
 /** The err badge. The error TEXT is the output section's, in its own form. */
@@ -577,10 +569,7 @@ export function drawFeedToolCallFailed(path: string): HTMLElement {
     operation: "feed.cards.tool-call.failed",
     context: { path },
   });
-  const badge = document.createElement("span");
-  badge.className = "badge err";
-  badge.textContent = "error";
-  return badge;
+  return drawToolCardBadge("error", ["err"]);
 }
 
 /**
