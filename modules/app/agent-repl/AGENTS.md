@@ -841,6 +841,84 @@ park, failure or refusal it reports and stops, and never merges by hand.
   `git config agentrepl.mergeQueueEnforce true` (off, the hook is a silent no-op).
   Until then the hand merges the next section describes still land.
 
+## The merge queue's test gate and remediation contract
+
+Owner rulings, 2026-10-12. THIS IS THE INTENDED DESIGN. Do not change any rule
+below without a conversation with the owner first; a change that only looks
+like an improvement still needs that conversation. Code:
+`daemon/internal/merge/suiteselect.go`, `gate.go`, `failingtests.go`,
+`process.go`, `chain.go`, `queue.go`.
+
+- **Runs go to completion past failures.** The runner keeps going after a suite
+  fails, every selected suite reports, and the whole run is archived under
+  `<state>/merge-logs/<lease>-tests-<round>.log`. There is no flake re-run.
+- **Only relevant systems run.** The suites are chosen from the paths the
+  rebased branch changes against the tip it stands on:
+  - a change to one system runs only that system's own suites, its unit and
+    integration tests, and never an end-to-end suite:
+    - Emacs elisp (`lisp/` and the module-root `.el` files): `ert`;
+    - `daemon/`: `daemon`;
+    - the shim, the sidecar and the store: `shim`, `sidecar` and `store`;
+    - `agent-shim/shim-lock/`: `lock`, plus `shim`, whose integration tests
+      spawn the real lock helper;
+    - `webapp/`: `webapp` and `build-frontend-harness`;
+    - the module's `bin/`: every `bin/` harness;
+  - a change to something several systems share fans out to its consumers and
+    the cross-system suite:
+    - `proto/`: `proto`, `daemon`, `shim`, `webapp` and `e2e`;
+    - `agent-shim/logging/`: `logging`, `logging-density`, `daemon`, `store`,
+      `sidecar` and `e2e`;
+    - `e2e/`: `e2e` and `e2e-emacs`, and `e2e/sandbox/` only `e2e-emacs`;
+  - the runner itself (`testrun/`, `bin/test-all.sh` and the two report
+    scripts it delegates to) runs every suite;
+  - documentation runs nothing: the module's `docs/`, `prompts/` and `plans/`,
+    and every Markdown file at the module root, except `metaprompt.md`, which
+    the shim's own suite reads back and so runs `shim`;
+  - outside the module, the paths a roster harness reads run exactly the
+    suites that read them: the git hooks, the `.claude` scripts and the
+    repository's `bin/` (each one's harness, plus `background-harness`,
+    `worktrees-lib-harness` and `testrun` where they scan it);
+  - everything else outside the module is the owner's Doom configuration,
+    which no suite exercises, and runs nothing;
+  - a path inside the module that matches no rule runs every suite, so a new
+    directory makes the gate more conservative, never less;
+  - paths that cannot be read run every suite.
+- **Nothing runs when nothing relevant changed.** An empty selection, an empty
+  diff included, passes the gate without starting the runner. It is recorded
+  at INFO naming the paths and why they select nothing, and drawn truthfully:
+  the testing step, and a settled tests tab with no suite rows whose log says
+  no suite was selected.
+- **Remediation runs only the failing tests.** After a failing gate the daemon
+  reads every failing test out of the archive and writes them, grouped by
+  suite with the command that runs exactly that group, to
+  `.agent-repl-merge-failing-tests` at the root of the merging worktree. The
+  file is kept out of commits through the repository's `info/exclude`. A failed
+  unit whose tests cannot be named is said so, pointing at its block in the
+  archive. The fixing brief names the file and tells the agent to run exactly
+  those tests while it fixes.
+- **After remediation, the selected suites run again**, selected afresh from
+  the branch's whole diff, fixing commits included.
+- **Five consecutive failures per cycle, and interruptions never count.**
+  - The tests cycle fails the merge when five fixing attempts in a row leave
+    the gate failing (`MaxFixAttempts`).
+  - The conflict cycle fails the merge when five resolution attempts in a row
+    leave one commit's conflict unresolved (`maxConflictAttempts`); one
+    failure is a resolution turn that failed or left files conflicted.
+  - A passing gate, a resolution that resolves, and a conflict on another
+    commit each start their cycle's count over.
+  - A step cut by the daemon's own exit, a crash, a restart, a transfer or a
+    speculative base move resumes or reruns without spending an attempt, and
+    the conflict count is kept in the progress record across restarts.
+- **Every queue tab updates on any exit.** When a merge lands, fails, or is
+  ejected or dequeued, every merge still in line has its queue tab redrawn
+  without it. The leaving merge's own queue tab is settled once, as it leaves,
+  on the queue as it stood at that moment, and is not redrawn after: the
+  queue it would show no longer holds it, and the queue tab's contract has no
+  standing for a merge outside the line.
+- **Every gate edge is recorded at INFO with its timing** (`daemon.merge.tests`):
+  its start, the host's suite slot taken with its wait, the runner's end, the
+  verdict with its total, and a cut.
+
 ## A finished branch lands on master at once, with no question asked
 
 Owner policy, standing (2026-09-27). A branch whose work is done — its

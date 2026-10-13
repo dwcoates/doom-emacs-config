@@ -1132,10 +1132,31 @@ Owner rulings, 2026-09-30 (`internal/merge`; the contract is
   conflicts with the rebase LEFT in progress; testing in the branch's worktree
   (streamed per suite into `<state>/merge-logs/<lease>-tests-<round>.log`);
   fixing attempts x/y under ONE bound (`MaxFixAttempts`), the last failing
-  attempt failing the merge in tests; committing -- a moved target STARTS
+  attempt failing the merge in tests (the gate and remediation contract below); committing -- a moved target STARTS
   OVER, else the non-ff merge commit is made in a detached scratch tree
   (`<state>/merge-trees/`) and the target fast-forwarded; postprocessing;
   landed.
+- **THE TEST GATE AND REMEDIATION CONTRACT IS OWNER-RULED** (2026-10-12; the
+  intended design, changed only after a conversation with the owner; in full
+  in the module's AGENTS.md, "The merge queue's test gate and remediation
+  contract"). In short:
+  - only the changed systems' own suites run (`suiteselect.go`); a shared
+    region fans out to its consumers plus `e2e`; documentation and the owner's
+    configuration outside the module run nothing; an unmapped module path runs
+    everything;
+  - an empty selection passes without starting the runner, at INFO, drawn as
+    a settled tests tab with no suites (`gate.go`, `gateNothing`);
+  - a fixing attempt is handed the failing tests by name in
+    `.agent-repl-merge-failing-tests` (`failingtests.go`), kept out of commits
+    through the repository's `info/exclude`, and the selected suites run again
+    after it;
+  - each cycle, tests-then-fix and rebase-then-resolve, fails the merge after
+    five failures in a row; a pass resets it; a step a restart cut (a turn
+    closed orphaned, or its agent dead while the merge was suspended:
+    `cutByRestart`) is prompted again as the same attempt;
+  - every exit settles the leaving merge's own queue tab and redraws every
+    merge still in line (`settleLeavingQueueTab`, `republishQueue`);
+  - every gate edge is INFO `daemon.merge.tests`, timed.
 - **THE TARGET IS NEVER A WORKING TREE FOR A MERGE.** The target moves only by
   `gitclient.FastForward`, the ONE git carrying `gitclient.MergeQueueMarker`
   (`AGENT_REPL_MERGE_QUEUE=1`), which is how the repository's
