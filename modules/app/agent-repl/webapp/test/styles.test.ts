@@ -3545,10 +3545,10 @@ describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
 
   it("paints a prompt in the light theme one more step darker (owner request, 2026-10-13)", () => {
     // Arrange / Act
-    const user = /:root\s*\{[^}]*?--user:\s*(#[0-9a-f]{6})/i.exec(stylesheet)?.[1];
+    const user = rgbOf(declarationsOf(":root") ?? "", "--user");
 
     // Assert
-    expect(user).toBe("#b8d2ff");
+    expect(user).toEqual([0xb8, 0xd2, 0xff]);
   });
 
   it("paints a response a neutral grey rather than a hue", () => {
@@ -4114,10 +4114,11 @@ describe("the rail's marks", () => {
 
   it("breathes once every 2s, 30% slower than the 1.4s it once took", () => {
     // Arrange / Act
-    const cycle = /--ws-mark-cycle\s*:\s*([^;]+);/.exec(stylesheet)?.[1]?.trim();
+    const rule = rulesOf(stylesheet).find((r) => /(?:^|;)\s*--ws-mark-cycle\s*:/.test(r.declarations));
 
     // Assert
-    expect(cycle).toBe("2s");
+    expect(rule?.selectors).toEqual(["#ws-sidebar"]);
+    expect(rule?.declarations).toMatch(/(?:^|;)\s*--ws-mark-cycle:\s*2s\s*;/);
   });
 
   it("draws a glyph's character at the dot's size", () => {
