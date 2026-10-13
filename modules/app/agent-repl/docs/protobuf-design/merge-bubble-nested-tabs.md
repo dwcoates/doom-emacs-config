@@ -90,3 +90,31 @@ The owner answered "continue" to the proposed layout and questions
   its fixing sub-subtab from its child row. A commit's conflict resolution
   stays on the commit's row, because the owner asked for it as a section of
   the commit's tab rather than a tab of its own.
+
+### 3. Rebased onto master's async merges (feed.proto, daemon, webapp)
+
+- **What**: the branch was rebased onto master after master had landed async
+  merges, the pick tab, and merge-tab interrupts.
+  - `FeedMergeTab.rebase_commit` and `tests_run` moved to tags 13 and 14,
+    and `tests_run_fixing` to tag 15, because master's `pick` arm took 12.
+  - The per-tab `workspace_switch` fields are gone from
+    `FeedMergeRebaseCommitConflict` and `FeedMergeTabTestsRunFixing`, as
+    master retired them on every agentic tab. An async merge's agent rows are
+    mirrored into the requester's bubble, parented to the same row: a commit's
+    subtab for a conflict, a run's fixing row for a fix.
+  - A merge-tab interrupt (`agentrepl.v1.InterruptRequest.merge_tab`) names
+    the row the live agent stream is drawn in: the pick or a prompt tab, a
+    commit's subtab, or a fixing row. The run records that row when it stands
+    the agentic round live (`run.liveAgentic`).
+  - `mergetab.Agentic` counts a commit subtab as agentic only once it carries
+    a conflict section.
+  - The stop control sits above every running agent stream, including a
+    commit's conflict section.
+- **Why**: the owner asked for the branch to be rebased onto master and
+  queued.
+- **Consequences**:
+  - Master's conflict retries (up to `MaxConflictAttempts` per commit) and
+    restart re-prompts keep each attempt in the same commit's subtab. A retry
+    ends the attempt's section with its line, and the next attempt opens a new
+    section.
+  - Master's fixing re-prompt after a restart reuses the run's fixing row.
