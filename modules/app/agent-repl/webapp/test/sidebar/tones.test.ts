@@ -66,20 +66,20 @@ describe("the status mark", () => {
   // A GATE IS READY FOR YOU (owner ruling, 2026-10-08): the green of a
   // finished turn, with the gate's emoji in place of the dot (owner requests,
   // 2026-10-11 and 2026-10-13).
-  it("draws a permission gate as a green exclamation emoji", () => {
-    expect(rosterArmMark("permission")).toEqual({ toneClass: "tone-green", glyph: "exclaim", char: "❗", ink: undefined, motion: "breathes" });
+  it("draws a permission gate as a still green exclamation emoji", () => {
+    expect(rosterArmMark("permission")).toEqual({ toneClass: "tone-green", glyph: "exclaim", char: "❗", ink: undefined, motion: "still" });
   });
 
-  it("draws a question gate as a green question emoji", () => {
-    expect(rosterArmMark("question")).toEqual({ toneClass: "tone-green", glyph: "ask", char: "❓", ink: undefined, motion: "breathes" });
+  it("draws a question gate as a still green question emoji", () => {
+    expect(rosterArmMark("question")).toEqual({ toneClass: "tone-green", glyph: "ask", char: "❓", ink: undefined, motion: "still" });
   });
 
-  it("draws a cold gate as a green stop sign", () => {
-    expect(rosterArmMark("coldGate")).toEqual({ toneClass: "tone-green", glyph: "stop", char: "🛑", ink: undefined, motion: "breathes" });
+  it("draws a cold gate as a still green snowflake", () => {
+    expect(rosterArmMark("coldGate")).toEqual({ toneClass: "tone-green", glyph: "snowflake", char: "\u2744\uFE0F", ink: undefined, motion: "still" });
   });
 
-  it("draws an interrupt landing as the plain green dot, since it is no gate", () => {
-    expect(rosterArmMark("waiting")).toEqual({ toneClass: "tone-green", glyph: "dot", char: "", ink: undefined, motion: "breathes" });
+  it("draws an interrupt landing as the still green dot, since it is no gate", () => {
+    expect(rosterArmMark("waiting")).toEqual({ toneClass: "tone-green", glyph: "dot", char: "", ink: undefined, motion: "still" });
   });
 
   it("draws a compaction as a red workspace with an orange dot", () => {
@@ -99,8 +99,8 @@ describe("the status mark", () => {
     expect(rosterArmMark("mergeQueued")).toEqual({ toneClass: "tone-purple", glyph: "merge", char: "", ink: undefined, motion: "still" });
   });
 
-  it("draws a running merge as the turning purple merge glyph", () => {
-    expect(rosterArmMark("merging")).toEqual({ toneClass: "tone-purple", glyph: "merge", char: "", ink: undefined, motion: "spins" });
+  it("draws a running merge as the breathing purple merge glyph", () => {
+    expect(rosterArmMark("merging")).toEqual({ toneClass: "tone-purple", glyph: "merge", char: "", ink: undefined, motion: "breathes" });
   });
 
   it("draws a failed merge as a green workspace with a red merge glyph", () => {
@@ -115,8 +115,8 @@ describe("the status mark", () => {
     expect(rosterArmMark("inactive")).toEqual({ toneClass: "tone-none", glyph: "dot", char: "", ink: undefined, motion: "still" });
   });
 
-  it("draws a booting session as the same grey dot", () => {
-    expect(rosterArmMark("init")).toEqual(rosterArmMark("inactive"));
+  it("draws a booting session as the same grey dot, breathing", () => {
+    expect(rosterArmMark("init")).toEqual({ ...rosterArmMark("inactive"), motion: "breathes" });
   });
 
   it("draws nothing at all for a workspace with no session", () => {
@@ -128,34 +128,32 @@ describe("the status mark", () => {
   });
 });
 
-describe("the rail's two animations", () => {
-  it.each(["submitting", "thinking", "clearing", "compacting", "permission", "question", "coldGate", "waiting", "idleAsync"] as const)(
+// ONE ANIMATION, ONE CLAIM (owner ruling, 2026-10-13): a breath is something
+// in progress; a gate or an interrupt landing waits on the user and is still.
+describe("the rail's one animation", () => {
+  it.each(["submitting", "thinking", "clearing", "compacting", "idleAsync", "init", "merging"] as const)(
     "breathes on %s",
     (arm) => {
       expect(armMotion(arm)).toBe("breathes");
     },
   );
 
-  it.each(["ready", "done", "interrupted", "turnFailed", "dead", "init", "none", "inactive", "closing", "daemonImpaired", "mergeQueued", "mergeFailed", "merged"] as const)(
+  it.each(["permission", "question", "coldGate", "waiting", "ready", "done", "interrupted", "turnFailed", "dead", "none", "inactive", "closing", "daemonImpaired", "mergeQueued", "mergeFailed", "merged"] as const)(
     "is still on %s",
     (arm) => {
       expect(armMotion(arm)).toBe("still");
     },
   );
-
-  it("spins on merging", () => {
-    expect(armMotion("merging")).toBe("spins");
-  });
 });
 
 describe("a row's mark with its one-shot mark", () => {
-  it.each(ONE_SHOT_ARMS)("draws a still target in place of the %s mark, on the arm's own tone", (arm) => {
+  it.each(ONE_SHOT_ARMS)("draws a breathing target in place of the %s mark, on the arm's own tone", (arm) => {
     expect(rosterRowMark(arm, true)).toEqual({
       toneClass: rosterArmMark(arm).toneClass,
       glyph: "target",
       char: "🎯",
       ink: undefined,
-      motion: "still",
+      motion: "breathes",
     });
   });
 

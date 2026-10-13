@@ -15,7 +15,7 @@
  * ONE SIZE FOR EVERY MARK (owner ruling, 2026-10-13): the dot, the merge glyph
  * and the three emojis all draw at the dot's visible size, so no mark reads
  * bigger than another. The merge glyph is drawn by the stylesheet (three bars
- * in the dot's box, so it turns on its own center); the gate emojis ❗ ❓ 🛑 and
+ * in the dot's box); the gate emojis ❗ ❓ ❄️ and
  * a working one-shot's 🎯 are characters, the same ones the Emacs tab bar
  * draws before the workspace name.
  */
@@ -67,14 +67,15 @@ export const ROSTER_ARM_CLASS: Readonly<Record<RosterStatusCase, string>> = Obje
  */
 export const GLYPH_CHARS: Readonly<Record<string, string>> = Object.freeze({
   // EVERY MERGE ARM (owner ruling, 2026-10-13): three bars, drawn by the
-  // stylesheet in the dot's box. Its ink says which arm, and `merging` turns
-  // it on its own center.
+  // stylesheet in the dot's box. Its ink says which arm, and `merging`
+  // breathes it.
   merge: "",
   // A GATE ON YOU (owner requests, 2026-10-11 and 2026-10-13): the emoji
   // replaces the dot, and matches the one the Emacs tab bar draws.
   exclaim: "❗",
   ask: "❓",
-  stop: "🛑",
+  // A COLD GATE (owner ruling, 2026-10-13): the session has gone cold.
+  snowflake: "\u2744\uFE0F",
   // A ONE-SHOT AT WORK (owner ruling, 2026-10-13): the emoji replaces the dot
   // while the one-shot works, and matches the Emacs tab bar's.
   target: "🎯",
@@ -82,8 +83,8 @@ export const GLYPH_CHARS: Readonly<Record<string, string>> = Object.freeze({
   none: "",
 });
 
-/** How a mark moves: the rail's two animations, or none. */
-export type MarkMotion = "breathes" | "spins" | "still";
+/** How a mark moves: the rail's one animation, or none. */
+export type MarkMotion = "breathes" | "still";
 
 /** What a row draws for its status. */
 export interface RosterArmMark {
@@ -131,12 +132,13 @@ export function rosterArmMark(arm: string): RosterArmMark {
  * A one-shot draws its glyph in place of the arm's own mark ONLY while it
  * works (`render-colors.json#one_shot_glyph_arms`, owner ruling 2026-10-13):
  * submitting, thinking or clearing, never compacting, a gate, a merge or any
- * other arm. The glyph is STILL, and the row keeps the arm's tone.
+ * other arm. The glyph breathes, as the work it stands for does, and the
+ * row keeps the arm's tone.
  */
 export function rosterRowMark(arm: string, oneShot: boolean): RosterArmMark {
   const mark = rosterArmMark(arm);
   if (!oneShot || !oneShotGlyphArm(arm)) return mark;
-  return { toneClass: mark.toneClass, glyph: "target", char: GLYPH_CHARS.target, ink: undefined, motion: "still" };
+  return { toneClass: mark.toneClass, glyph: "target", char: GLYPH_CHARS.target, ink: undefined, motion: "breathes" };
 }
 
 /**
@@ -153,13 +155,12 @@ export function glyphName(arm: RosterStatusCase): string {
 }
 
 /**
- * How the arm's mark MOVES. Both animations make one claim each, everywhere on
- * the rail: a breath is work in flight or a gate waiting on you, a spin is the
- * merge the queue is running.
- *
- * The four busy states, the three gates, an interrupt landing and detached
- * work breathe; `merging` spins; everything else is still, because nothing
- * about it is in progress.
+ * How the arm's mark MOVES. The rail has ONE animation, the breath, and it
+ * makes ONE claim everywhere (owner ruling, 2026-10-13): something is in
+ * progress. A turn in flight, its context cuts, detached work, a session
+ * booting and a merge running breathe. A gate (permission, question, cold
+ * gate) and an interrupt landing wait on the user, so nothing is in progress
+ * and they hold still, as everything else does.
  */
 export function armMotion(arm: RosterStatusCase): MarkMotion {
   switch (arm) {
@@ -167,14 +168,10 @@ export function armMotion(arm: RosterStatusCase): MarkMotion {
     case "thinking":
     case "clearing":
     case "compacting":
-    case "permission":
-    case "question":
-    case "coldGate":
-    case "waiting":
     case "idleAsync":
-      return "breathes";
+    case "init":
     case "merging":
-      return "spins";
+      return "breathes";
     default:
       return "still";
   }

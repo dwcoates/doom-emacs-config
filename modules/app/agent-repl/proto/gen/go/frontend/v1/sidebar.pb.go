@@ -4149,7 +4149,8 @@ type RosterRow_Merging struct {
 	// say which arm it is. No merge fact reaches the roster before the turn
 	// that asked for the merge has ended, so a row goes straight to
 	// merge_queued or merging.
-	// A merge is actively running in this workspace. PURPLE, the glyph turns.
+	// A merge is actively running in this workspace. PURPLE, the glyph
+	// breathes.
 	Merging *RosterRowStatusMerging `protobuf:"bytes,20,opt,name=merging,proto3,oneof"`
 }
 

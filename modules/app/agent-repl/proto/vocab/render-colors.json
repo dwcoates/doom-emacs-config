@@ -177,7 +177,7 @@
     "",
     "EVERY MERGE ARM DRAWS THE ONE 'merge' GLYPH (owner ruling, 2026-10-13):",
     "its ink says which arm it is (the arm's color, or its 'glyph_inks' row)",
-    "and 'merging' turns it on its own center.",
+    "and 'merging' breathes, as every animated mark does.",
     "",
     "Keyed by the merge arms of RosterRow.status. 'feed_merge_head_glyph' is",
     "separate because it names FeedMergeGlyph.icon on the feed's merge",
@@ -205,13 +205,14 @@
     "",
     "Keyed by the gate arms of RosterRow.status. Every renderer maps",
     "'exclaim' to an exclamation-mark emoji, 'ask' to a question-mark emoji",
-    "and 'stop' to a stop-sign emoji, so the tab bar and the sidebar draw the",
+    "and 'snowflake' to a snowflake emoji (the session has gone cold, owner",
+    "ruling 2026-10-13), so the tab bar and the sidebar draw the",
     "same mark."
   ],
   "gate_glyphs": {
     "permission": "exclaim",
     "question": "ask",
-    "cold_gate": "stop"
+    "cold_gate": "snowflake"
   },
   "_glyph_inks_comment": [
     "THE GLYPH'S INK, where it differs from the arm's color (owner ruling,",

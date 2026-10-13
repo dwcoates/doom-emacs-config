@@ -3757,12 +3757,13 @@ merge glyph table, so a drawn arm cannot carry a hand-rolled character."
       ;; Act / Assert
       (should (null (agent-repl-status-tab-one-shot-glyph "alpha" :thinking))))))
 
-(ert-deftest agent-repl-test-status-a-cold-gate-tab-draws-a-stop-sign ()
-  "A `:cold-gate\=' tab draws 🛑 between `[N]\=' and its name."
+(ert-deftest agent-repl-test-status-a-cold-gate-tab-draws-a-snowflake ()
+  "A `:cold-gate\=' tab draws ❄️ between `[N]\=' and its name: the session
+has gone cold (owner ruling, 2026-10-13)."
   ;; Arrange
   (agent-repl-test--with-clean-state
     ;; Act / Assert
-    (should (equal (agent-repl-status-tab-glyph "alpha" :cold-gate) "🛑"))))
+    (should (equal (agent-repl-status-tab-glyph "alpha" :cold-gate) "❄️"))))
 
 (ert-deftest agent-repl-test-status-a-permission-tab-draws-an-exclamation-emoji ()
   "A `:permission\=' tab draws ❗ between `[N]\=' and its name."
