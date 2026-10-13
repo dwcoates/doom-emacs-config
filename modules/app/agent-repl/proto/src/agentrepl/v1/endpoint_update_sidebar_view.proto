@@ -10,7 +10,7 @@
 //
 //   - a section's fold: RosterRepoSection.fold, RosterTaskSection.fold,
 //     RosterMaturitySection.fold, RosterMergedSection.fold,
-//     RosterHiddenSection.fold;
+//     RosterHiddenSection.fold, RosterViewedSection.fold;
 //   - the grouping shown: WorkspaceRoster.shown.
 //
 // Both are DURABLE: they survive a daemon restart.
@@ -64,6 +64,10 @@ message SidebarViewFoldSection {
     // fold hides rows in the sidebar only: a hidden workspace is off the
     // Emacs tab bar whether the section is folded or not.
     SidebarViewHidden hidden = 7;
+    // The viewed-workspaces section; the roster carries exactly one. Its
+    // fold hides rows in the sidebar only: a viewed workspace's tab is drawn
+    // or withheld exactly as it would be in a grouping.
+    SidebarViewViewed viewed = 8;
   }
   // THE ARM IS THE FOLD ASKED FOR. Unset is malformed.
   oneof fold {
@@ -77,6 +81,9 @@ message SidebarViewRecentlyMerged {}
 
 // The hidden-workspaces section. DELIBERATELY EMPTY: the arm is the section.
 message SidebarViewHidden {}
+
+// The viewed-workspaces section. DELIBERATELY EMPTY: the arm is the section.
+message SidebarViewViewed {}
 
 // Show the section's rows.
 message SidebarViewExpand {}

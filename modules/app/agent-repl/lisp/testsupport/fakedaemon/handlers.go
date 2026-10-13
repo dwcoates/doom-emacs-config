@@ -426,10 +426,12 @@ func (s *fakeServer) OpenTabs(ctx context.Context, req *connect.Request[v1.OpenT
 	}
 	for _, w := range req.Msg.GetWorkspaces() {
 		// The ready answer carries the workspace's roster row; the fake's is
-		// the legal default row naming the workspace.
+		// the legal default row naming the workspace. Only the row's workspace
+		// ref is replaced: every other required field of its
+		// RosterRowWorkspace (the repository) keeps its legal default.
 		row := &frontendv1.RosterRow{}
 		fillRequired(row.ProtoReflect(), 0)
-		row.Workspace = &frontendv1.RosterRowWorkspace{Workspace: w.GetWorkspace()}
+		row.Workspace.Workspace = w.GetWorkspace()
 		opened := &v1.OpenTabsResponse{Frame: &v1.OpenTabsResponse_Opened{Opened: &v1.OpenTabsOpened{
 			Workspace: w.GetWorkspace(),
 			Outcome:   &v1.OpenTabsOpened_Ready{Ready: &v1.OpenTabsOpenedReady{Row: row}},

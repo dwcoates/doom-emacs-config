@@ -35,11 +35,12 @@ func undoLayout39(t *testing.T, path string) {
 	}
 }
 
-// rewindTo38 strips layout 39's additions from a migrated file and stamps it
-// 38, so the next open runs the sync_async_merges migration over rows a
-// layout-38 build wrote.
+// rewindTo38 strips the additions of layout 39 and every later layout from a
+// migrated file and stamps it 38, so the next open runs the sync_async_merges
+// migration over rows a layout-38 build wrote.
 func rewindTo38(t *testing.T, path string) {
 	t.Helper()
+	undoLayout40(t, path)
 	undoLayout39(t, path)
 	stampRaw(t, path, 38)
 }
