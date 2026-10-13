@@ -6,6 +6,9 @@ import { createTicker } from "../../src/clock.js";
 import type { FailureSink } from "../../src/failure/sink.js";
 import { createAgentReplClient } from "../../src/rpc/client.js";
 import { testAppContext } from "./app-context.js";
+import { createAppContext, createDaemonContext } from "../../src/rpc/context.js";
+import { directPageStreams } from "./direct-page-streams.js";
+import { fakePageSeen } from "../page-seen-fake.js";
 
 const SINK: FailureSink = { report: () => {}, retract: () => {} };
 const client = () => createAgentReplClient(createRouterTransport(() => {}));
@@ -219,5 +222,64 @@ describe("noteStreamCost", () => {
   it("records nothing for a page given no meter", () => {
     // Arrange / Act / Assert
     expect(() => ctx().noteStreamCost("WatchFooter", 3)).not.toThrow();
+  });
+});
+
+describe("createDaemonContext", () => {
+  it("talks to the daemon with no workspace in it", () => {
+    // Arrange
+    const c = client();
+
+    // Act
+    const daemon = createDaemonContext({
+      client: c,
+      ticker: createTicker(1000),
+      failures: SINK,
+      page: "webhost-page",
+      streams: directPageStreams(c),
+    });
+
+    // Assert
+    expect(["workspace" in daemon, daemon.client === c]).toEqual([false, true]);
+  });
+
+  it("goes quiet like a page's context", () => {
+    // Arrange
+    const c = client();
+    const daemon = createDaemonContext({
+      client: c,
+      ticker: createTicker(1000),
+      failures: SINK,
+      page: "webhost-page",
+      streams: directPageStreams(c),
+    });
+
+    // Act
+    daemon.quiesce();
+
+    // Assert
+    expect(daemon.isQuiesced()).toBe(true);
+  });
+
+  it("is what a page's context is built on, with the page's workspace added", () => {
+    // Arrange
+    const c = client();
+    const workspace = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
+
+    // Act
+    const app = createAppContext({
+      client: c,
+      ticker: createTicker(1000),
+      failures: SINK,
+      page: "page",
+      streams: directPageStreams(c),
+      workspace,
+      seen: fakePageSeen(),
+      composerEnabled: false,
+    });
+    app.quiesce();
+
+    // Assert
+    expect([app.workspace.id, app.isQuiesced()]).toEqual(["ws-1", true]);
   });
 });
