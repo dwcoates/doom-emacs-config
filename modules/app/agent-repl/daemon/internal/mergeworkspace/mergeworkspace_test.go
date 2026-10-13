@@ -205,16 +205,6 @@ func (f *fixture) loggedAt(level string) bool {
 	return false
 }
 
-// record answers this package's record of level and message.
-func (f *fixture) record(level, message string) (dlog.Record, bool) {
-	for _, r := range f.logs.Records() {
-		if r.Level == level && r.Operation == op && r.Message == message {
-			return r, true
-		}
-	}
-	return dlog.Record{}, false
-}
-
 func TestForkCreatesTheMergeWorkspace(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
@@ -386,7 +376,7 @@ func TestHandBackOfALandingThatAskedToCompactSubmitsTheCompactionAfterTheHandbac
 	if f.prompts.sent[1] != want {
 		t.Fatalf("second submission = %+v, want %+v", f.prompts.sent[1], want)
 	}
-	if _, ok := f.record(dlog.LevelInfo, "submitted the compaction a landed detached merge asked for to its requester"); !ok {
+	if _, ok := f.recordWith(dlog.LevelInfo, "submitted the compaction a landed detached merge asked for to its requester"); !ok {
 		t.Fatal("the compaction's submission was not recorded at INFO")
 	}
 }
@@ -445,7 +435,7 @@ func TestHandBackOfALandingWhoseCompactionFailsIsAnErrorAfterTheHandback(t *test
 			if err == nil || len(f.prompts.sent) != 1 || f.prompts.sent[0].origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK {
 				t.Fatalf("HandBack = %v with %+v submitted, want an error after the handback alone", err, f.prompts.sent)
 			}
-			rec, ok := f.record(dlog.LevelError, tt.message)
+			rec, ok := f.recordWith(dlog.LevelError, tt.message)
 			if !ok || rec.Context["requester"] != "ws-requester" || rec.Context["merge_workspace"] != "ws-merge" || rec.Context["cause"] == nil {
 				t.Fatalf("ERROR record = %+v, %v; want one naming the requester, the merge workspace and the cause", rec, ok)
 			}
