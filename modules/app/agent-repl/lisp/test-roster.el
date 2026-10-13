@@ -1591,33 +1591,6 @@ user's next sidebar click."
   (agent-repl-test-roster--with-editor
     (should-not (agent-repl-roster-viewed-for-ws "one"))))
 
-(ert-deftest agent-repl-test-roster-row-detached-live-p-when-marker-present ()
-  "A row carrying `RosterRowDetachedLive' reads as having live detached work."
-  (should (agent-repl-roster-row-detached-live-p
-           (agent-repl-test-roster--row "a" "one" :done :detached-live t))))
-
-(ert-deftest agent-repl-test-roster-row-detached-live-p-when-marker-absent ()
-  "A row without the marker reads as having no live detached work."
-  (should-not (agent-repl-roster-row-detached-live-p
-               (agent-repl-test-roster--row "a" "one" :done))))
-
-(ert-deftest agent-repl-test-roster-detached-live-for-ws-after-a-push ()
-  "After a push, a workspace's detached-work fact is its current row's."
-  ;; Arrange
-  (agent-repl-test-roster--with-editor
-    ;; Act
-    (agent-repl-roster-apply
-     (agent-repl-test-roster--roster
-      :sections (list (agent-repl-test-roster--section
-                       "repo" (list (agent-repl-test-roster--row "a" "one" :done :detached-live t))))))
-    ;; Assert
-    (should (agent-repl-roster-detached-live-for-ws "one"))))
-
-(ert-deftest agent-repl-test-roster-detached-live-for-ws-before-any-push ()
-  "Before any push carried its row, a workspace has no detached-work fact."
-  (agent-repl-test-roster--with-editor
-    (should-not (agent-repl-roster-detached-live-for-ws "one"))))
-
 (ert-deftest agent-repl-test-roster-row-one-shot-reads-the-outcome ()
   "A row carrying `RosterRowOneShot' reads as its outcome arm."
   (dolist (outcome '(:armed :failed))

@@ -407,12 +407,12 @@ export const RosterRowAttentionSchema: GenMessage<RosterRowAttention> = /*@__PUR
  * agreement and a client draws the marker as it arrives, with no rule of its
  * own. A turn that completes, is interrupted or fails leaves its result UNREAD; a
  * dwell on the turn-end row READS it, and so does a completed /clear or
- * compaction, at once (see MarkWorkspaceViewed); the next turn resets it. While the
- * result is unread the row holds its turn-end arm even over live detached
- * work (see the `status` oneof's `idle_async`), FULL. Once read, the marker stands
- * whenever the row is on its turn-end arm, including when it returns there
- * from `idle_async`: a read result is never drawn as unread, and an unread
- * one never as read.
+ * compaction, at once (see MarkWorkspaceViewed); the next turn resets it. Live
+ * detached work draws `idle_async` over an unread result at once, FULL (see the
+ * `status` oneof's `idle_async`), and a dwell on that `idle_async` row READS the
+ * result too. Once read, the marker stands whenever the row is on its turn-end
+ * arm, including when it returns there from `idle_async`: a read result is
+ * never drawn as unread, and an unread one never as read.
  *
  * @generated from message frontend.v1.RosterRowViewed
  */
@@ -464,13 +464,9 @@ export const RosterRowRevivingSchema: GenMessage<RosterRowReviving> = /*@__PURE_
  * the daemon counts such work as live, on ANY status arm, and absent
  * otherwise; presence is the whole fact.
  *
- * WHY THE ROW STATES IT SEPARATELY: an UNREAD turn end deliberately outranks
- * `idle_async` in the `status` oneof, so a `done` row whose result is unread
- * cannot say through its status that background work runs beside it. The
- * editor needs that fact to pick its dwell threshold (owner ruling,
- * 2026-10-01): a `done` row with live detached work goes PARTIAL after ONE
- * second of viewing, where it then draws `idle_async`. The threshold stays
- * the editor's own; this marker only states the fact it is chosen from.
+ * WHY THE ROW STATES IT SEPARATELY: `idle_async` is only the idle rung's arm,
+ * so a row on any arm above it (thinking, a permission ask) cannot say
+ * through its status that background work runs beside it.
  *
  * @generated from message frontend.v1.RosterRowDetachedLive
  */
@@ -1934,8 +1930,8 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
     case: "question";
   } | {
     /**
-     * The turn finished. While its result is UNREAD this arm outranks
-     * `idle_async`; once read it is drawn with `viewed` (see RosterRowViewed).
+     * The turn finished. Live detached work draws `idle_async` in its place;
+     * once read it is drawn with `viewed` (see RosterRowViewed).
      *
      * @generated from field: frontend.v1.RosterRowStatusDone done = 8;
      */
@@ -1952,8 +1948,8 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
   } | {
     /**
      * The last turn ended by FAILING. It is a TURN END like `done` and
-     * `interrupted`, with the same read rule: while its result is UNREAD it
-     * outranks `idle_async`; once read it is drawn with `viewed` (see
+     * `interrupted`, with the same read rule: live detached work draws
+     * `idle_async` in its place; once read it is drawn with `viewed` (see
      * RosterRowViewed). TURQUOISE (owner ruling, 2026-09-28), where the
      * other two turn ends are green. While the failed turn's FAULT stands
      * (until the next turn starts, owner ruling 2026-10-06) the row draws the
@@ -1976,8 +1972,9 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
     case: "ready";
   } | {
     /**
-     * No foreground turn, but detached work is still running, and the last
-     * turn's result (if any) has been read: an unread turn end outranks it.
+     * No foreground turn, but detached work is still running. It outranks the
+     * last turn's end, read or not: a turn that ends with detached work live
+     * draws this arm at once, and the turn end returns when the work ends.
      *
      * @generated from field: frontend.v1.RosterRowStatusIdleAsync idle_async = 11;
      */
