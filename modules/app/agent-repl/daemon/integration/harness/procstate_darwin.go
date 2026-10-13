@@ -34,29 +34,25 @@ func readProcessState(pid int) (processState, error) {
 	if err != nil {
 		return processState{}, err
 	}
-	state, err := stateOf(info.Proc.P_stat, info.Proc.P_flag)
-	if err != nil || !state.frozen || state.exited {
-		return state, err
-	}
-	// A STOPPED p_stat IS NOT YET A STOPPED PROCESS. The kernel marks the
-	// process SSTOP as it posts SIGSTOP, before its threads are suspended: a
-	// thread already running finishes its slice first. Under a loaded host a
-	// daemon read "stopped" here went on to read a frame from its shim, log it
-	// and close a turn (TestTheTakeoversOrphanRecoveryReconcilesItsOpenTurn).
-	// So the process is frozen only once none of its threads runs: a thread
-	// woken after that is held by the task's suspension before it can return
-	// to user mode, so it can observe nothing.
+	return stateOf(info.Proc.P_stat, info.Proc.P_flag)
+}
+
+// threadsHalted reports whether none of a stopped pid's threads runs, and
+// how many still do. A thread the kernel wakes after this (a child's exit, a
+// socket's data) is held by the task's suspension before it can return to
+// user mode, so once this holds the process can observe nothing.
+func threadsHalted(pid int) (bool, string, error) {
 	running, err := runningThreads(pid)
 	if errors.Is(err, unix.ESRCH) {
-		return processState{frozen: true, exited: true, name: "gone"}, nil
+		return true, "gone", nil
 	}
 	if err != nil {
-		return processState{}, fmt.Errorf("read the threads of process %d: %w", pid, err)
+		return false, "", fmt.Errorf("read the threads of process %d: %w", pid, err)
 	}
 	if running > 0 {
-		return processState{name: fmt.Sprintf("stopping (%d thread(s) still running)", running)}, nil
+		return false, fmt.Sprintf("stopping (%d thread(s) still running)", running), nil
 	}
-	return state, nil
+	return true, "", nil
 }
 
 // The <sys/proc_info.h> values runningThreads reads the kernel with.

@@ -56,9 +56,10 @@ func TestRunningThreadsCountsTheCallersOwnThread(t *testing.T) {
 	}
 }
 
-// TestAStoppedProcessRunsNoThread pins the condition readProcessState waits
-// for: once a stop has held, no thread of the process runs.
-func TestAStoppedProcessRunsNoThread(t *testing.T) {
+// TestAStoppedProcessSoonRunsNoThread pins the condition the stop-hold waits
+// poll for: a stop the kernel has reported (WUNTRACED) may still have a thread
+// running for an instant, and within freezeBound none runs.
+func TestAStoppedProcessSoonRunsNoThread(t *testing.T) {
 	// Arrange: a child stopped, as the kernel reports it to its parent.
 	cmd := startIdle(t)
 	if err := cmd.Process.Signal(syscall.SIGSTOP); err != nil {
@@ -69,12 +70,15 @@ func TestAStoppedProcessRunsNoThread(t *testing.T) {
 		t.Fatalf("wait for the stop: %v", err)
 	}
 
-	// Act
-	running, err := runningThreads(cmd.Process.Pid)
+	// Act: the wait's own poll.
+	err := awaitFrozen(cmd.Process.Pid, freezeBound)
 
 	// Assert
-	if err != nil || running != 0 {
-		t.Fatalf("runningThreads(stopped child) = %d, %v; want none running", running, err)
+	if err != nil {
+		t.Fatalf("awaitFrozen = %v, want the stop to hold", err)
+	}
+	if running, err := runningThreads(cmd.Process.Pid); err != nil || running != 0 {
+		t.Fatalf("runningThreads after the stop held = %d, %v; want none", running, err)
 	}
 }
 
