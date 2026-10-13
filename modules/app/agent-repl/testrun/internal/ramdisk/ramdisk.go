@@ -171,6 +171,8 @@ type Manager struct {
 	Log Logger
 	// Now is the clock the edges are timed by.
 	Now func() time.Time
+	// LockBound is how long the registry lock is waited for (LockBound).
+	LockBound time.Duration
 }
 
 // Volume is one attached, mounted RAM disk owned by this run.
@@ -189,6 +191,7 @@ func Default(log Logger) Manager {
 	return Manager{
 		Run: ExecRunner, Registry: DefaultRegistry, MountParent: DefaultMountParent, Pid: os.Getpid(),
 		KillUnder: KillProcessesUnder, Probe: RunBounded, Alive: ProcessAlive, Log: log, Now: time.Now,
+		LockBound: LockBound,
 	}
 }
 
@@ -554,7 +557,41 @@ func (m Manager) reclaimOne(path string) (Reclaimed, bool, error) {
 // never read as a run's record.
 const registryLockName = "registry.mutex"
 
-// lockRegistry takes the registry's lock, blocking until it is free, and
+// LockBound is how long a run waits for the registry lock before it takes
+// the lock's holder to be stuck.
+//
+// MEASURED ON THE OWNER'S HOST (2026-10-12, load average 15-24). Uncontended,
+// the flock is taken in p50 10us, max 64us (200 takes). Contended, a run waits
+// out the other holder's hold:
+//   - an acquire holds it for `hdiutil info` (max 22ms) and the 8 GiB attach
+//     up to its record's write (95ms and 97ms, read off two live runs'
+//     records as their write time less their creation time): about 120ms;
+//   - an investigation holds it for `git worktree list` (max 142ms) and the
+//     workspace CLI's dispatch (max 559ms): about 700ms, the longest hold.
+//
+// The bound is just over twice the longest hold, so a run queued behind a
+// healthy investigation is never taken for one behind a stuck holder.
+const LockBound = 1500 * time.Millisecond
+
+// LsofBound is how long `lsof` may run when it names who has the registry lock
+// open: measured 70-100ms warm and 260ms cold on the owner's host
+// (2026-10-12, 23 calls at a load average of 24), and just over twice the max.
+const LsofBound = 600 * time.Millisecond
+
+// LockTimeoutError is a registry lock that was not taken within its bound.
+type LockTimeoutError struct {
+	Path  string
+	Bound time.Duration
+	// Holders names the other processes with the lock file open (its holder,
+	// and any run waiting beside this one), as lsof saw them.
+	Holders string
+}
+
+func (e *LockTimeoutError) Error() string {
+	return fmt.Sprintf("the RAM disk registry lock %s was not taken within %s, so its holder is taken to be stuck (processes with it open: %s)", e.Path, e.Bound, e.Holders)
+}
+
+// lockRegistry takes the registry's lock, waiting at most m.LockBound, and
 // answers its release.
 //
 // IT CLOSES THE WINDOW BETWEEN A RECORD'S CREATION AND ITS FLOCK. Acquire
@@ -563,17 +600,58 @@ const registryLockName = "registry.mutex"
 // removed it from under the live run, whose RAM disk then had no record a
 // later Reclaim could find. Under the registry lock a record is never seen
 // unlocked between its creation and its owner's flock.
+//
+// THE WAIT IS BOUNDED. A holder stuck in the kernel (2026-10-12: a run 16
+// hours in its exit) would otherwise hang every later run. Past the bound the
+// answer is a *LockTimeoutError; the flock still waiting is left to finish on
+// its own and is let go the moment it is taken, so nothing is held after.
 func (m Manager) lockRegistry() (func() error, error) {
 	path := filepath.Join(m.Registry, registryLockName)
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return nil, fmt.Errorf("open the RAM disk registry lock %s: %w", path, err)
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		f.Close()
-		return nil, fmt.Errorf("take the RAM disk registry lock %s: %w", path, err)
+	taken := make(chan error, 1)
+	go func() { taken <- syscall.Flock(int(f.Fd()), syscall.LOCK_EX) }()
+	timer := time.NewTimer(m.LockBound)
+	defer timer.Stop()
+	select {
+	case err := <-taken:
+		if err != nil {
+			f.Close()
+			return nil, fmt.Errorf("take the RAM disk registry lock %s: %w", path, err)
+		}
+		return f.Close, nil
+	case <-timer.C:
+		go func() {
+			<-taken
+			f.Close()
+		}()
+		return nil, &LockTimeoutError{Path: path, Bound: m.LockBound, Holders: m.lockHolders(path)}
 	}
-	return f.Close, nil
+}
+
+// lockHolders names the processes other than this one with the lock file
+// open, as lsof lists them within LsofBound; lsof's own failure is named in
+// their place, never dropped.
+func (m Manager) lockHolders(path string) string {
+	out, err := m.Probe(LsofBound, "lsof", "-n", "-P", "--", path)
+	var others []string
+	for _, name := range holderNames(out) {
+		if !strings.HasSuffix(name, fmt.Sprintf("[%d]", os.Getpid())) {
+			others = append(others, name)
+		}
+	}
+	switch {
+	case len(others) > 0:
+		return strings.Join(others, ", ")
+	case err != nil && strings.TrimSpace(out) != "":
+		return fmt.Sprintf("unknown, lsof failed: %v", err)
+	case err != nil && !strings.Contains(err.Error(), "exit status 1"):
+		return fmt.Sprintf("unknown, lsof failed: %v", err)
+	default:
+		return "no other process lsof could see"
+	}
 }
 
 // createRecordLocked creates this run's record and takes its flock. The

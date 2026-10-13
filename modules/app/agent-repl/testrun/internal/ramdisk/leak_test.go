@@ -189,6 +189,11 @@ func TestTroubleString(t *testing.T) {
 			want:    "1 leaked RAM disk(s): /dev/disk7 (owning pid unknown, not mounted, named by no record); the disk manager answered hdiutil info in 9ms; the disk manager answered diskutil list in 25ms",
 		},
 		{
+			name:    "a stuck registry lock",
+			trouble: Trouble{Lock: &LockTimeoutError{Path: "/r/registry.mutex", Bound: time.Second, Holders: "testrun[7583]"}},
+			want:    "the RAM disk registry lock /r/registry.mutex was not taken within 1s, so its holder is taken to be stuck (processes with it open: testrun[7583]); the disk manager answered hdiutil info in 0s; the disk manager answered diskutil list in 0s",
+		},
+		{
 			name:    "a disk manager that did not answer",
 			trouble: Trouble{ListErr: errors.New("timed out"), ListTook: 100 * time.Millisecond, InfoTook: 9 * time.Millisecond},
 			want:    "the disk manager answered hdiutil info in 9ms; the disk manager did not answer diskutil list after 100ms: timed out",
@@ -352,5 +357,44 @@ func TestSetupLogsAFailedReclaimAtError(t *testing.T) {
 	// Assert
 	if !log.has("ERROR reclaiming a dead run's RAM disk failed: detach the dead run's RAM disk /dev/disk7") {
 		t.Fatalf("log = %q, want the failed reclaim at ERROR", log.lines)
+	}
+}
+
+func TestSetupAnswersAStuckRegistryLockAsTrouble(t *testing.T) {
+	// Arrange
+	h := &fakeHost{}
+	m := newManager(t, h)
+	m.LockBound = 20 * time.Millisecond
+	holdRegistryLock(t, m)
+
+	// Act
+	v, trouble, err := m.Setup(16)
+
+	// Assert
+	if err != nil || v != nil || trouble == nil || trouble.Lock == nil {
+		t.Fatalf("Setup = %v, %+v, %v; want the stuck lock as trouble", v, trouble, err)
+	}
+}
+
+func TestSetupWaitsOnAStuckRegistryLockOnce(t *testing.T) {
+	// Arrange: a dead run's record makes the reclaim wait on the lock first.
+	h := &fakeHost{info: attachedInfo}
+	m := newManager(t, h)
+	m.LockBound = 20 * time.Millisecond
+	deadRecord(t, m, "7", "/dev/disk7", filepath.Join(t.TempDir(), "artr-7"))
+	holdRegistryLock(t, m)
+
+	// Act
+	m.Setup(16) //nolint:errcheck // the calls are the subject
+
+	// Assert
+	lsofs := 0
+	for _, call := range h.calls {
+		if strings.HasPrefix(call, "lsof") {
+			lsofs++
+		}
+	}
+	if lsofs != 1 || attachCalled(h.calls) {
+		t.Fatalf("calls = %q, want one timed-out wait and no attach", h.calls)
 	}
 }

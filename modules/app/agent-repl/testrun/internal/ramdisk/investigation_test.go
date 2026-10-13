@@ -244,6 +244,8 @@ func TestEnsureInvestigationSurfacesADispatchFailure(t *testing.T) {
 	}
 }
 
+var stuckLock = &Trouble{Lock: &LockTimeoutError{Path: "/r/registry.mutex", Bound: time.Second, Holders: "testrun[7583]"}}
+
 func TestInvestigationPrompt(t *testing.T) {
 	wedged := &Trouble{ListErr: errors.New("diskutil list did not answer within 100ms"), ListTook: 100 * time.Millisecond, Info: "framework : 1\n", InfoTook: 9 * time.Millisecond}
 	tests := []struct {
@@ -260,7 +262,9 @@ func TestInvestigationPrompt(t *testing.T) {
 		{name: "carries hdiutil info's answer", trouble: wedged, want: "`hdiutil info` answered:\n\n```\nframework : 1\n```\n"},
 		{name: "names the run's log", trouble: leakTrouble, runLog: "/tmp/runs/1/test-all.log", want: "- The run's log: /tmp/runs/1/test-all.log\n"},
 		{name: "says when the run's log is unnamed", trouble: leakTrouble, want: "- The run's log: not named (AGENT_REPL_TEST_RUN_LOG was unset)"},
-		{name: "asks for the root cause", trouble: leakTrouble, want: "- Find why the runner's RAM disks leak and why the disk manager wedged"},
+		{name: "says the cause is a stuck registry lock", trouble: stuckLock, want: "because the RAM disk registry lock /r/registry.mutex was not taken within 1s (processes with it open: testrun[7583])."},
+		{name: "says the leak check never ran", trouble: stuckLock, want: "- Leaked RAM disks: none found (the check runs under the registry lock, so it never ran).\n"},
+		{name: "asks for the root cause", trouble: leakTrouble, want: "- Find why the runner's RAM disks leak, why the disk manager wedged and why the registry lock's holder is stuck"},
 		{name: "forbids hand repair", trouble: leakTrouble, want: "- Never hand-repair:"},
 	}
 	for _, tc := range tests {
@@ -370,5 +374,39 @@ func TestEnsureInvestigationWaitsForTheRegistryLock(t *testing.T) {
 	// Assert
 	if err != nil || len(f.dispatched) != 0 {
 		t.Fatalf("EnsureInvestigation = %v with %d dispatches; want it to have waited and seen the other run's create", err, len(f.dispatched))
+	}
+}
+
+func TestEnsureInvestigationDispatchesWithoutAStuckRegistryLock(t *testing.T) {
+	// Arrange
+	f := &fakeWorkspaces{porcelain: mainOnly}
+	m := newManager(t, &fakeHost{})
+	m.LockBound = 20 * time.Millisecond
+	holdRegistryLock(t, m)
+
+	// Act
+	out, err := m.EnsureInvestigation(newInvestigation(t, f), stuckLock)
+
+	// Assert
+	if err != nil || !out.Unlocked || len(f.dispatched) != 1 {
+		t.Fatalf("EnsureInvestigation = %+v, %v with %d dispatches; want one dispatch, said to be unlocked", out, err, len(f.dispatched))
+	}
+}
+
+func TestEnsureInvestigationDeduplicatesWithoutAStuckRegistryLock(t *testing.T) {
+	// Arrange
+	f := &fakeWorkspaces{porcelain: mainOnly}
+	m := newManager(t, &fakeHost{})
+	m.LockBound = 20 * time.Millisecond
+	holdRegistryLock(t, m)
+	inv := newInvestigation(t, f)
+	pendingFile(t, filepath.Join(inv.StateDir, "output"), `[{"type":"create","name":"ramdisk-leak-investigation-abc"}]`)
+
+	// Act
+	out, err := m.EnsureInvestigation(inv, stuckLock)
+
+	// Assert
+	if err != nil || out.Existing == "" || len(f.dispatched) != 0 {
+		t.Fatalf("EnsureInvestigation = %+v, %v with %d dispatches; want the pending create found without the lock", out, err, len(f.dispatched))
 	}
 }

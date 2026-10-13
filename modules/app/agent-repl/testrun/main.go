@@ -160,6 +160,9 @@ func investigate(log *run.Log, m ramdisk.Manager, module string, trouble *ramdis
 		RunLog:   os.Getenv(ramdisk.EnvRunLog),
 	}
 	out, err := m.EnsureInvestigation(inv, trouble)
+	if out.Unlocked {
+		log.Infof("the check for an open RAM disk investigation workspace ran without the registry lock, which was not taken within %s", m.LockBound)
+	}
 	switch {
 	case err != nil:
 		log.Errorf("the RAM disk investigation workspace was not created: %v", err)
