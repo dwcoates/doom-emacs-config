@@ -3978,31 +3978,30 @@ are grey, with nothing to report (owner ruling, 2026-10-13)."
       (should (equal (agent-repl-status-tab-glyph "alpha" :thinking)
                      agent-repl-status-attention-glyph)))))
 
-;;;; ---- The glyph's height: exactly the tab's text ------------------------
+;;;; ---- The glyph's height: never a taller row than the text's --------------
 
-(defun agent-repl-test-status--metrics (table)
-  "Return a glyph-metrics function answering TABLE's (PX ASCENT . DESCENT)."
+(defun agent-repl-test-status--rows (table)
+  "Return a row-height function answering TABLE's (PX . ROW-HEIGHT)."
   (lambda (px) (cdr (assq px table))))
 
 (ert-deftest agent-repl-test-status-glyph-fit-size-cases ()
-  "The fit is the largest size whose ascent AND descent fit the text's."
+  "The fit is the largest size whose row is no taller than the text's."
   (dolist (case
-           ;; The owner's frame, measured 2026-10-13: Menlo 13px is 12+3, Apple
-           ;; Color Emoji 13..8px as listed.
+           ;; The owner's frame, measured 2026-10-13: a Menlo 13px row is 15px;
+           ;; an Apple Color Emoji row at 13..7px is as listed.
            `(("the emoji fits at 8px"
-              12 3 13 ((13 16 . 5) (12 15 . 5) (11 14 . 4) (10 13 . 4) (9 11 . 4) (8 10 . 3))
+              15 13 ((13 . 21) (12 . 20) (11 . 18) (10 . 17) (9 . 16) (8 . 15) (7 . 15))
               8)
              ("a glyph that already fits keeps the text's size"
-              12 3 13 ((13 12 . 3))
+              15 13 ((13 . 15))
               13)
-             ("a descent alone too deep shrinks it"
-              12 3 13 ((13 12 . 4) (12 11 . 3))
+             ("a row one pixel too tall shrinks it one size"
+              15 13 ((13 . 16) (12 . 15))
               12)))
-    (pcase-let ((`(,name ,ascent ,descent ,size ,table ,want) case))
+    (pcase-let ((`(,name ,text-height ,size ,table ,want) case))
       ;; Act / Assert
       (should (equal (cons name (agent-repl-status-glyph-fit-size
-                                 ascent descent size
-                                 (agent-repl-test-status--metrics table)))
+                                 text-height size (agent-repl-test-status--rows table)))
                      (cons name want))))))
 
 (ert-deftest agent-repl-test-status-glyph-fit-size-with-no-fit-fails-loudly ()
@@ -4013,9 +4012,84 @@ are grey, with nothing to report (owner ruling, 2026-10-13)."
                (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
       ;; Act / Assert
       (should-error (agent-repl-status-glyph-fit-size
-                     2 1 2 (agent-repl-test-status--metrics '((2 5 . 5) (1 5 . 5)))))
-      (should (string-match-p "glyph-fit-size: no size up to 2 fits ascent 2 descent 1"
+                     3 2 (agent-repl-test-status--rows '((2 . 9) (1 . 9)))))
+      (should (string-match-p "glyph-fit-size: no size up to 2 fits a row of 3px"
                               (car logged))))))
+
+(defmacro agent-repl-test-status--measuring (rows measured &rest body)
+  "Run BODY on a graphic frame whose rows measure per ROWS, recording onto MEASURED.
+ROWS maps the glyph's absolute `:height' (nil for the text alone) to the
+row's pixel height; the text font is 13px.  Each measured string is
+pushed onto MEASURED."
+  (declare (indent 2))
+  `(let ((agent-repl-status--glyph-heights (make-hash-table :test 'equal)))
+     (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) t))
+               ((symbol-function 'face-font) (lambda (&rest _) "Menlo-13"))
+               ((symbol-function 'agent-repl-status--font-size) (lambda (&rest _) 13))
+               ((symbol-function 'agent-repl--log) #'ignore)
+               ((symbol-function 'agent-repl-status--row-height)
+                (lambda (_frame text)
+                  (push text ,measured)
+                  (let ((glyph-height (and (> (length text) 1)
+                                           (plist-get (get-text-property 1 'face text) :height))))
+                    (cdr (assoc glyph-height ,rows))))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-status-glyph-height-is-the-largest-fitting-absolute-height ()
+  "A glyph whose row grows draws at the largest fitting size, as an absolute height."
+  ;; Arrange
+  (let (measured)
+    (agent-repl-test-status--measuring
+        '((nil . 15) (130 . 21) (120 . 20) (110 . 18) (100 . 17) (90 . 16) (80 . 15))
+        measured
+      ;; Act / Assert
+      (should (equal (agent-repl-status-glyph-height "🎯") 80)))))
+
+(ert-deftest agent-repl-test-status-glyph-height-is-whole-when-the-row-keeps-its-height ()
+  "A glyph that leaves the text's row unchanged at full size draws unscaled."
+  ;; Arrange
+  (let (measured)
+    (agent-repl-test-status--measuring '((nil . 15) (130 . 15)) measured
+      ;; Act / Assert
+      (should (equal (agent-repl-status-glyph-height "●") 1.0)))))
+
+(ert-deftest agent-repl-test-status-glyph-height-measures-the-whole-emoji-sequence ()
+  "The cold gate's snowflake is measured as the whole U+2744 U+FE0F sequence.
+`font-at' answered the text font for its first code point and left it at
+full size (2026-10-13); the measured row is what sizes it now."
+  ;; Arrange
+  (let (measured)
+    (agent-repl-test-status--measuring
+        '((nil . 15) (130 . 21) (120 . 20) (110 . 18) (100 . 17) (90 . 16) (80 . 15))
+        measured
+      ;; Act
+      (let ((height (agent-repl-status-glyph-height "❄️")))
+        ;; Assert
+        (should (equal height 80))
+        (should (cl-some (lambda (text) (string-suffix-p "❄️" text)) measured))))))
+
+(ert-deftest agent-repl-test-status-glyph-height-is-measured-once-per-text-font ()
+  "A second ask for the same glyph and text font answers from the cache."
+  ;; Arrange
+  (let (measured)
+    (agent-repl-test-status--measuring '((nil . 15) (130 . 15)) measured
+      (agent-repl-status-glyph-height "●")
+      (let ((first (length measured)))
+        ;; Act
+        (agent-repl-status-glyph-height "●")
+        ;; Assert
+        (should (= (length measured) first))))))
+
+(ert-deftest agent-repl-test-status-font-size-with-no-font-info-fails-loudly ()
+  "A text font with no font info is an invariant violation: logged, then signalled."
+  ;; Arrange
+  (let (logged)
+    (cl-letf (((symbol-function 'font-info) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--error)
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+      ;; Act / Assert
+      (should-error (agent-repl-status--font-size "Menlo-13" nil))
+      (should (string-match-p "font-size: no font info for \"Menlo-13\"" (car logged))))))
 
 (ert-deftest agent-repl-test-status-glyph-height-is-whole-on-a-text-frame ()
   "A frame that is not graphic draws every glyph in one cell, unscaled."
