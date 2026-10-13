@@ -187,16 +187,23 @@ func (r *Repo) CommitIn(worktree, file, content string) string {
 	return sha
 }
 
+// DefaultWorkPath is the path work touches when a test names none: a path in
+// the agent-repl module that no rule of the merge gate's selection maps, so
+// the gate runs every suite exactly as it did before selection narrowed (a
+// path outside the module, the owner's configuration, selects nothing and
+// the gate would run nothing).
+const DefaultWorkPath = "modules/app/agent-repl/work.txt"
+
 // CommitWork records one commit of WORK on the branch checked out in the
 // worktree at dir, as the workspace's agent would have made it, and answers
 // its sha. A branch with nothing on it is already on its target, so its merge
 // concludes at once with nothing to land (merge: "already on <target>"); a
 // test that means to exercise a merge's phases commits work first. paths are
-// what the commit touches, `work.txt` when none are named.
+// what the commit touches, DefaultWorkPath when none are named.
 func CommitWork(t *testing.T, dir string, paths ...string) string {
 	t.Helper()
 	if len(paths) == 0 {
-		paths = []string{"work.txt"}
+		paths = []string{DefaultWorkPath}
 	}
 	for _, path := range paths {
 		writeFile(t, filepath.Join(dir, path), "work\n")
