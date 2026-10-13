@@ -786,7 +786,7 @@ duration actually observed, never left at a tool default. Measured against
 | bound | old (default) | new | observed healthy max | why |
 |---|---|---|---|---|
 | unit `testTimeout`/`hookTimeout` (`vitest.config.ts`) | 5000ms / 10000ms | 850ms / 850ms | 272.8ms (`test/feed/cards/shell.test.ts`, re-measured; see below) | no real I/O, everything fake-timered |
-| integration `testTimeout`/`hookTimeout` (`vitest.integration.config.ts`) | 5000ms / 10000ms | 900ms / 900ms | 274.8ms (in `refusals.integration.test.ts`) | in-process loopback fake daemon, instant to start |
+| integration `testTimeout`/`hookTimeout` (`vitest.integration.config.ts`) | 5000ms / 10000ms | 3000ms / 3000ms | 1475ms under the merge queue's full-host gate run (445 passing `refusals.integration.test.ts` tests across 251 gate runs, 2026-10-13; p50 368ms, p99 1006ms); 274.8ms unloaded | in-process loopback fake daemon, instant to start, so the spread is the host's load; a 900ms bound from the unloaded figure timed out 34 healthy tests in gate runs |
 | `COLD_BOOT_TIMEOUT_MS` (`bootColdOnce`, `test/integration/harness.ts`) | 900ms (the hook bound) | 1800ms | 602ms at a load average of ~60 (971ms at 100-300) | a file's FIRST app boot compiles the whole app lazily, ~3-4x a warm boot; it is paid in a `beforeAll` so no test body carries it |
 | `COLD_BOOT_TIMEOUT_MS` (`beforeAll`, `test/main.test.ts`) | 5000ms (the file's test bound, paid by its first test) | 15000ms | 3.15s over 20 runs at a load average of ~112; 5.59s once on the contended host | the first `import("../src/main.js")` in a worker fetches and compiles the whole graph, ~10x a warm import; paid once before any test |
 | `BOOT_TIMEOUT_MS` (`test/main.test.ts`, each test and its `afterEach`) | 5000ms | 4500ms | 536ms at ~112; 1.45s on the contended host | each test re-evaluates the whole mocked graph (`vi.resetModules`), because `main.ts` boots at import time; `afterEach` awaits a boot still in flight so none outlives its test |
@@ -795,7 +795,7 @@ duration actually observed, never left at a tool default. Measured against
 
 **Every integration file that boots the app calls `bootColdOnce()` at its top
 level.** The first boot in an isolated file is its cold start, and under load
-it alone crossed the 900ms `testTimeout`, failing exactly the first test of
+it alone crossed the then-900ms `testTimeout`, failing exactly the first test of
 each file. The helper pays it in a `beforeAll` under its own measured bound
 (above); `harness.self.test.ts` fails any file that calls `startHarness`
 without it.
