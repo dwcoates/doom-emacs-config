@@ -1346,10 +1346,10 @@ message — the fixture must set it that way."
                "P1" (agent-repl--tab-badge-str "itest-badge" (agent-repl-status-tab-state
                                                               "itest-badge")))))))
 
-(ert-deftest agent-repl-itest-roster-inactive-arm-draws-the-question-mark-glyph ()
-  "The `inactive' arm draws \"?\", read through `agent-repl-status-tab-state'.
-Fanout §8: \"inactive → none with a '?' glyph\" — inactive rows still need
-SOME visual marker even though they take no lifecycle color."
+(ert-deftest agent-repl-itest-roster-inactive-arm-draws-no-glyph ()
+  "The `inactive' arm draws no glyph, read through `agent-repl-status-tab-state'.
+An incidentally inactive workspace is grey with nothing to report (owner
+ruling, 2026-10-13)."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-roster--with-subscription daemon
@@ -1364,15 +1364,15 @@ SOME visual marker even though they take no lifecycle color."
               (eq (agent-repl-status-tab-state "itest-glyph-inactive") :inactive)))
        nil "the inactive state")
       ;; Assert.
-      (should (equal (agent-repl-status-tab-glyph
-                      "itest-glyph-inactive"
-                      (agent-repl-status-tab-state "itest-glyph-inactive"))
-                     "?")))))
+      (should (null (agent-repl-status-tab-glyph
+                     "itest-glyph-inactive"
+                     (agent-repl-status-tab-state "itest-glyph-inactive")))))))
 
 (ert-deftest agent-repl-itest-roster-merge-failed-arm-draws-its-glyph ()
-  "The `merge_failed' arm draws the failure mark through the render path.
-A failed merge is turquoise AND glyphed, so the tab says both that
-something went wrong and that it was the merge."
+  "The `merge_failed' arm draws the merge glyph through the render path.
+A failed merge is a green tab whose merge glyph is inked red (owner
+ruling, 2026-10-13), so the tab says both that the workspace is back with
+the user and that what there is to see is a failed merge."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-roster--with-subscription daemon
@@ -1390,22 +1390,22 @@ something went wrong and that it was the merge."
       (should (equal (agent-repl-status-tab-glyph
                       "itest-glyph-failed"
                       (agent-repl-status-tab-state "itest-glyph-failed"))
-                     agent-repl-status-failure-glyph)))))
+                     (alist-get :merge-failed agent-repl-status-merge-glyphs))))))
 
-(ert-deftest agent-repl-itest-roster-one-shot-row-draws-its-mark ()
-  "A one-shot row's outcome draws its mark through the render path: 🎯 while
-armed, the failure mark once a push says it failed."
+(ert-deftest agent-repl-itest-roster-one-shot-row-draws-its-mark-while-it-works ()
+  "A one-shot row draws 🎯 through the render path while it works, and its
+arm's own mark once it stops (owner ruling, 2026-10-13)."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-roster--with-subscription daemon
       (agent-repl-itest-roster--push
        daemon (agent-repl-itest-roster--roster
                (list (agent-repl-itest-roster--row
-                      "itest-one-shot" "itest-one-shot" 'done
-                      '(oneShot . ((armed . ())))))))
+                      "itest-one-shot" "itest-one-shot" 'thinking
+                      '(oneShot . ())))))
       (agent-repl-itest--wait-until
-       (lambda () (eq (agent-repl-roster-one-shot-for-ws "itest-one-shot") :armed))
-       nil "the armed one-shot")
+       (lambda () (eq (agent-repl-status-tab-state "itest-one-shot") :thinking))
+       nil "the working one-shot")
       (should (equal (agent-repl-status-tab-glyph
                       "itest-one-shot" (agent-repl-status-tab-state "itest-one-shot"))
                      agent-repl-status-one-shot-glyph))
@@ -1414,14 +1414,13 @@ armed, the failure mark once a push says it failed."
        daemon (agent-repl-itest-roster--roster
                (list (agent-repl-itest-roster--row
                       "itest-one-shot" "itest-one-shot" 'done
-                      '(oneShot . ((failed . ())))))))
+                      '(oneShot . ())))))
       (agent-repl-itest--wait-until
-       (lambda () (eq (agent-repl-roster-one-shot-for-ws "itest-one-shot") :failed))
-       nil "the failed one-shot")
+       (lambda () (eq (agent-repl-status-tab-state "itest-one-shot") :done))
+       nil "the one-shot's turn end")
       ;; Assert.
-      (should (equal (agent-repl-status-tab-glyph
-                      "itest-one-shot" (agent-repl-status-tab-state "itest-one-shot"))
-                     agent-repl-status-failure-glyph)))))
+      (should (null (agent-repl-status-tab-glyph
+                     "itest-one-shot" (agent-repl-status-tab-state "itest-one-shot")))))))
 
 (ert-deftest agent-repl-itest-roster-logs-the-roster-stream-open ()
   "The roster subscription is logged through the canonical ladder."
