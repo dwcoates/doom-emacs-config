@@ -2,6 +2,7 @@ package merge
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"slices"
 	"strings"
@@ -485,7 +486,7 @@ func TestFixesExhaustedFailsTheMergeRecordsItAndSettlesTheTestsTab(t *testing.T)
 	out := r.fixesExhausted(context.Background(), "/a/log", dlog.Context{"speculative": true})
 
 	// Assert
-	want := "the tests still fail after 3 fixing attempts; the whole run is archived at /a/log"
+	want := fmt.Sprintf("the tests still fail after %d fixing attempts; the whole run is archived at /a/log", MaxFixAttempts)
 	if out.failed != want || out.area != footer.FailedTests {
 		t.Fatalf("outcome = %+v, want the tests failure %q", out, want)
 	}
