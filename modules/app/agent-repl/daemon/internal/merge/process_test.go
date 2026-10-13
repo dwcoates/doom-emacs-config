@@ -1879,3 +1879,42 @@ func TestCutByRestartReadsOnlyARestartsCloses(t *testing.T) {
 		})
 	}
 }
+
+func TestAStartOverThatRebasesToTheTreeThatPassedRunsNoGateAgain(t *testing.T) {
+	// Arrange: the target moves before committing; the rebase onto it gives
+	// the very tree the gate passed.
+	h := newHarness(t)
+	landing(h, 1)
+	h.gatePasses("daemon")
+	h.git.refSeqs["HEAD"] = []string{"old", "new", "new", "new"}
+	h.git.treeSeq = []string{"same-tree", "same-tree"}
+
+	// Act.
+	admitted(t, h)
+
+	// Assert.
+	if len(h.runner.argv) != 1 {
+		t.Fatalf("the gate ran %d times, want once: the pass stands for the same tree", len(h.runner.argv))
+	}
+	if len(h.git.queueBases) != 1 || h.git.queueBases[0] != "new" {
+		t.Fatalf("merge commits made on %v, want one on the new tip", h.git.queueBases)
+	}
+}
+
+func TestAStartOverThatRebasesToANewTreeRunsTheGateAgain(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	landing(h, 1)
+	h.gatePasses("daemon")
+	h.gatePasses("daemon")
+	h.git.refSeqs["HEAD"] = []string{"old", "new", "new", "new"}
+	h.git.treeSeq = []string{"passed-tree", "new-tree"}
+
+	// Act.
+	admitted(t, h)
+
+	// Assert.
+	if len(h.runner.argv) != 2 {
+		t.Fatalf("the gate ran %d times, want twice: a new tree is tested again", len(h.runner.argv))
+	}
+}
