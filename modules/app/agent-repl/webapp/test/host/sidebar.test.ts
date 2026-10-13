@@ -1,20 +1,16 @@
 // @vitest-environment jsdom
 // The webhost's own sidebar: started once for every workspace page, logging as
 // the webhost, its failures relayed to every page. See src/host/sidebar.ts.
-import { create } from "@bufbuild/protobuf";
-import { createRouterTransport } from "@connectrpc/connect";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { ClientLogResponseSchema, type ClientLogRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_client_log_pb";
-import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
 import type { WebhostFailure } from "../../src/host/protocol.js";
 import type { Host } from "../../src/host/host.js";
 import { startWebhostSidebar, type WebhostSidebarStartDeps } from "../../src/host/sidebar.js";
 import { ForwardingLogger, log, setLogger } from "../../src/log.js";
 import { daemonUnreachable } from "../../src/failure/sink.js";
-import { createAgentReplClient } from "../../src/rpc/client.js";
 import type { DaemonContext } from "../../src/rpc/context.js";
 import { captureLogRecords } from "../log-capture.js";
+import { clientLogRecorder } from "../rpc/client-log-recorder.js";
 
 let stop: { dispose(): void } | null = null;
 
@@ -22,23 +18,6 @@ afterEach(() => {
   stop?.dispose();
   stop = null;
 });
-
-/** A client whose ClientLog records each request and whose page stream stands quiet. */
-function quietClient() {
-  const logged: ClientLogRequest[] = [];
-  const transport = createRouterTransport(({ service }) => {
-    service(AgentRepl, {
-      clientLog(request) {
-        logged.push(request);
-        return create(ClientLogResponseSchema, { result: { case: "success", value: {} } });
-      },
-      async *watchPage(_request, context) {
-        await new Promise<void>((resolve) => context.signal.addEventListener("abort", () => resolve()));
-      },
-    });
-  });
-  return { client: createAgentReplClient(transport), logged };
-}
 
 /** A webhost that records what the sidebar tells it. */
 function recordingHost() {
@@ -52,7 +31,7 @@ function recordingHost() {
 
 /** Start the sidebar with DEPS over a quiet client, keeping the page-wide logger. */
 function start(host: Host, deps: WebhostSidebarStartDeps) {
-  const { client, logged } = quietClient();
+  const { client, logged } = clientLogRecorder();
   stop = startWebhostSidebar(document, window, host, document.createElement("nav"), {
     client,
     installLogger: () => undefined,
