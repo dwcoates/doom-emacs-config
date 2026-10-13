@@ -64,6 +64,7 @@ func (r *resolver) drawQuestion(s *wsState, agent *conversationv1.AgentId, q *co
 			served.drafts = emptyDrafts(frame.Start.GetBatch())
 		}
 		served.batch = frame.Start.GetBatch()
+		served.startedAtMs = frame.Start.GetStartedAt().GetAtMs()
 		card.Questions = questionItems(frame.Start.GetBatch())
 		card.State = &frontendv1.FeedQuestion_Open{Open: openState(served)}
 	case *conversationv1.AgentQuestion_Success:
@@ -76,7 +77,7 @@ func (r *resolver) drawQuestion(s *wsState, agent *conversationv1.AgentId, q *co
 		case *conversationv1.AgentQuestionSuccess_Answered:
 			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "draw", "branch": "case *conversationv1.AgentQuestionSuccess_Answered"})
 			card.State = &frontendv1.FeedQuestion_Answered{Answered: &frontendv1.FeedQuestionAnswered{
-				AtMs:    r.deps.Now().UnixMilli(),
+				Runtime: settledRuntime(clockVerbWaited, served.startedAtMs, frame.Success.GetSettledAt()),
 				Answers: givenAnswers(frame.Success.GetBatch(), outcome.Answered),
 			}}
 		case *conversationv1.AgentQuestionSuccess_Unanswered:
@@ -85,7 +86,7 @@ func (r *resolver) drawQuestion(s *wsState, agent *conversationv1.AgentId, q *co
 			// proceeded without a choice, so the card is expired rather than
 			// pending forever.
 			card.State = &frontendv1.FeedQuestion_Expired{Expired: &frontendv1.FeedQuestionExpired{
-				AtMs: r.deps.Now().UnixMilli(),
+				Runtime: settledRuntime(clockVerbWaited, served.startedAtMs, frame.Success.GetSettledAt()),
 			}}
 		default:
 			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "draw", "branch": "default"})
@@ -99,7 +100,7 @@ func (r *resolver) drawQuestion(s *wsState, agent *conversationv1.AgentId, q *co
 		// The ask could not be put to the user at all; nothing was chosen and
 		// nothing waits.
 		card.State = &frontendv1.FeedQuestion_Expired{Expired: &frontendv1.FeedQuestionExpired{
-			AtMs: r.deps.Now().UnixMilli(),
+			Runtime: settledRuntime(clockVerbWaited, served.startedAtMs, frame.Failure.GetError().GetSettledAt()),
 		}}
 	default:
 		return

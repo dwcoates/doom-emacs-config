@@ -574,3 +574,61 @@ func TestAnOpenedAsksHeadlineSurvivesItsAnswer(t *testing.T) {
 		t.Fatalf("headline = %q, want the vendor's own sentence", got)
 	}
 }
+
+func TestAnAnsweredPermissionStatesHowLongTheUserWasAsked(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.ask("ask-1", "unit-1", &conversationv1.AgentPermissionStart{
+		Prompt:    &conversationv1.AgentPermissionPrompt{Title: "Claude wants to read foo.txt"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Act.
+	h.ask("ask-1", "unit-1", &conversationv1.AgentPermissionSuccess{
+		Decision: &conversationv1.AgentPermissionSuccess_Allowed{
+			Allowed: &conversationv1.AgentPermissionAllowed{
+				Scope: &conversationv1.AgentPermissionAllowed_Once{Once: &conversationv1.AgentPermissionAllowedOnce{}},
+			},
+		},
+		SettledAt: settledAfter(12),
+	})
+
+	// Assert.
+	if got := h.permissionCard().GetAnswered().GetRuntime().GetText(); got != "waited 12 s" {
+		t.Fatalf("runtime = %q, want %q", got, "waited 12 s")
+	}
+}
+
+func TestAnAbandonedPermissionStatesItsWaitFromTheFailuresInstant(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.ask("ask-1", "unit-1", &conversationv1.AgentPermissionStart{
+		Prompt:    &conversationv1.AgentPermissionPrompt{Title: "Claude wants to read foo.txt"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Act.
+	h.ask("ask-1", "unit-1", &conversationv1.AgentPermissionFailure{
+		Error: &conversationv1.AgentToolFailure{SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: 4_000}},
+	})
+
+	// Assert.
+	if got := h.permissionCard().GetAbandoned().GetRuntime().GetText(); got != "waited 3 s" {
+		t.Fatalf("runtime = %q, want %q", got, "waited 3 s")
+	}
+}
+
+func TestAPolicyDenialThatPosedNoAskStatesNoWait(t *testing.T) {
+	// Arrange, Act: no start, and a settle with no instant.
+	h := newHarness(t)
+	h.ask("ask-1", "unit-1", &conversationv1.AgentPermissionSuccess{
+		Decision: &conversationv1.AgentPermissionSuccess_Denied{
+			Denied: &conversationv1.AgentPermissionDenied{},
+		},
+	})
+
+	// Assert.
+	if rt := h.permissionCard().GetAnswered().Runtime; rt != nil {
+		t.Fatalf("runtime = %+v, want unset", rt)
+	}
+}

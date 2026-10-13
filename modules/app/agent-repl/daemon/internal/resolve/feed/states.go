@@ -364,6 +364,9 @@ type permissionState struct {
 	// opened is the workspace's ask sequence at the card's first draw, so the
 	// OLDEST standing ask is the one a typed answer goes to (StandingAsk).
 	opened uint64
+	// startedAtMs is the instant the ask was posed, as its start frame stated
+	// it: the start a settle that restates none is measured from.
+	startedAtMs int64
 }
 
 // questionState is what the daemon SERVED for one question ask, which is what
@@ -404,6 +407,9 @@ type questionState struct {
 	drafts []*frontendv1.FeedQuestionDraft
 	// opened is the workspace's ask sequence at the ask's start (StandingAsk).
 	opened uint64
+	// startedAtMs is the instant the ask was posed, as its start frame stated
+	// it: the start a settle that restates none is measured from.
+	startedAtMs int64
 }
 
 // subagentState is one bubble's carried facts across its frames.
