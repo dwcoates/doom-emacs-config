@@ -1067,6 +1067,14 @@ func (g *fakeGit) StartRebase(_ context.Context, _, onto string, commits []strin
 	return g.replayLocked()
 }
 
+func (g *fakeGit) AbortRebase(context.Context, string) error {
+	g.record("abort_rebase")
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.rebaseCommands = append(g.rebaseCommands, "abort")
+	return nil
+}
+
 func (g *fakeGit) ContinueRebase(context.Context, string) (gitclient.RebaseStep, error) {
 	g.record("continue_rebase")
 	g.mu.Lock()
@@ -1951,7 +1959,9 @@ type harness struct {
 // answering awaitErr, so a test observes the held merge on a channel rather
 // than on elapsed time.
 type fakeFreeness struct {
-	busy     bool
+	busy bool
+	// busyWS marks single workspaces busy, beside busy for every one.
+	busyWS   map[ids.WorkspaceID]bool
 	blockers []string
 	awaitErr error
 	waiting  chan struct{}
@@ -1961,7 +1971,11 @@ type fakeFreeness struct {
 	awaited int
 }
 
-func (f *fakeFreeness) Free(ids.WorkspaceID) bool { return !f.busy }
+func (f *fakeFreeness) Free(ws ids.WorkspaceID) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return !f.busy && !f.busyWS[ws]
+}
 
 // Blockers answers the scripted blockers while busy, none once free.
 func (f *fakeFreeness) Blockers(ids.WorkspaceID) []string {

@@ -1466,6 +1466,16 @@ func rebase(s *State, repo *Repo, wt *Worktree, subject []string) Result {
 	}
 	stateDir := filepath.Join(gitDir(repo, wt), "rebase-merge")
 	switch {
+	case contains(subject, "--abort"):
+		if wt.Rebase == nil {
+			return Result{Stderr: "fatal: No rebase in progress?\n", Exit: 128}
+		}
+		wt.Head = wt.Rebase.OrigHead
+		wt.Rebase, wt.Conflicted = nil, nil
+		if err := os.RemoveAll(stateDir); err != nil {
+			return Result{Stderr: err.Error() + "\n", Exit: 128}
+		}
+		return Result{}
 	case contains(subject, "--continue"):
 		if wt.Rebase == nil {
 			return Result{Stderr: "fatal: No rebase in progress?\n", Exit: 128}
@@ -1488,12 +1498,12 @@ func rebase(s *State, repo *Repo, wt *Worktree, subject []string) Result {
 				todo = append(todo, c.SHA)
 			}
 		}
-		wt.Rebase = &Rebase{Onto: onto, Todo: todo, NewHead: onto}
+		wt.Rebase = &Rebase{Onto: onto, Todo: todo, NewHead: onto, OrigHead: wt.Head}
 		if err := os.MkdirAll(stateDir, 0o755); err != nil {
 			return Result{Stderr: err.Error() + "\n", Exit: 128}
 		}
 	default:
-		return Result{Stderr: "fatal: fakegit: only `rebase -i` and `rebase --continue` are modeled\n", Exit: 128}
+		return Result{Stderr: "fatal: fakegit: only `rebase -i`, `rebase --continue` and `rebase --abort` are modeled\n", Exit: 128}
 	}
 	r := wt.Rebase
 	if r.Done < len(r.Todo) {
