@@ -345,6 +345,9 @@ func (q *queue) pushTray(ctx context.Context, ws ids.WorkspaceID, log dlog.Logge
 		return fmt.Errorf("read the holds for %q: %w", ws, err)
 	}
 	q.deps.Holds.SetHeldPrompts(ws, standing)
+	if q.deps.ColdGateHeld != nil {
+		q.deps.ColdGateHeld(ws, countHeldAtGate(standing))
+	}
 	log.Debug(opTray, "republished the hold tray", dlog.Context{"holds": len(standing)})
 	return nil
 }

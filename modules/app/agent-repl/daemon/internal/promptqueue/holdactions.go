@@ -91,6 +91,13 @@ func (q *queue) Release(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID
 		log.Info(opRelease, "the session is parked at its cold gate; the release is refused until the gate is answered", nil)
 		return ErrReleaseRefused
 	}
+	// A PROMPT KEPT AT AN EARLIER ANSWER is sent by its release, but not into
+	// a session parked at a gate standing again: the gate's own answer decides
+	// it there, as it decides every prompt held at it.
+	if kind, why, waiting := q.sessionWait(ws); waiting && kind == wsm.HoldColdGate {
+		log.Info(opRelease, "the session is parked at its cold gate; the release is refused until the gate is answered", dlog.Context{"why": why})
+		return ErrReleaseRefused
+	}
 	// A MERGE DRIVES THE SESSION: a prompt forced into it would run inside the
 	// merge's own turns. The merge's end delivers it.
 	if held.Hold != nil && *held.Hold == wsm.HoldMerge {
