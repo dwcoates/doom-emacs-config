@@ -1192,22 +1192,31 @@ says only that the one-shot is working (owner ruling, 2026-10-13)."
 
 ;;; The glyph's face: its ink and its height ---------------------------------
 ;;
-;; A GLYPH IS EXACTLY AS TALL AS THE TAB'S TEXT (owner request, 2026-10-13).
-;; An emoji drawn at the tab bar's own size comes from a font whose ascent and
-;; descent exceed the text font's (measured on the owner's frame: Menlo 13px
-;; is 12+3, Apple Color Emoji 13px is 16+5), and the tab bar's row grows to
-;; the tallest glyph on it.  So each glyph is drawn at the LARGEST pixel size
-;; whose font fits inside the text font's ascent AND descent, found from the
-;; fonts' own metrics on the frame at hand, never from a constant: the fit is
-;; exactly the text's line, whatever the fonts and sizes are.
+;; A GLYPH NEVER MAKES THE TAB BAR'S ROW TALLER (owner request, 2026-10-13).
+;; Emacs sizes a row by the space each font RESERVES above and below the
+;; baseline, not by what it draws, and the emoji font reserves far more than
+;; the text font (measured on the owner's frame: Menlo 13px reserves 12+3,
+;; Apple Color Emoji 13px 16+5).  So each glyph is drawn at the LARGEST pixel
+;; size whose row is no taller than the text's own row.
+;;
+;; THE ROW IS MEASURED, NOT INFERRED.  Which font draws a glyph is decided by
+;; Emacs's composition and fontset machinery, and asking for it (`font-at')
+;; answers the text font for an emoji presentation sequence such as "❄️"
+;; (U+2744 U+FE0F), which Apple Color Emoji draws: the cold gate's snowflake
+;; was left at the text's full size and grew every row by its reserved space
+;; (2026-10-13).  Measuring the row the glyph lays out with
+;; (`buffer-text-pixel-size') answers whatever font Emacs really picks, on
+;; the tab bar's own face, so the fit cannot disagree with the tab bar.  The size is handed back as an ABSOLUTE `:height' (tenths of a
+;; point, a point being a pixel on macOS), never a fraction of the text's,
+;; so no rounding moves it off the measured size.
 
 (defvar agent-repl-status--glyph-heights (make-hash-table :test 'equal)
-  "Cache: (TEXT-FONT-NAME . GLYPH) -> the face `:height' factor it draws at.
+  "Cache: (TEXT-FONT-NAME . GLYPH) -> the face `:height' it draws at.
 Keyed by the text font, so a frame whose font changes measures again.")
 
 (defun agent-repl-status--glyph-fail (fmt &rest args)
   "Record FMT and ARGS as an ERROR, then signal it.
-The tab glyph\='s face is computed from invariants the fonts guarantee;
+The tab glyph\='s face is computed from invariants the layout guarantees;
 a violation is logged through `agent-repl--error' at the point it is
 found and then fails hard."
   (let ((message (apply #'format fmt args)))
@@ -1215,76 +1224,81 @@ found and then fails hard."
                        "%s" message)
     (error "%s" message)))
 
-(defun agent-repl-status-glyph-fit-size (text-ascent text-descent size glyph-metrics)
-  "Return the largest pixel size, at most SIZE, whose glyph font fits the text.
-TEXT-ASCENT and TEXT-DESCENT are the text font\='s metrics in pixels at
-SIZE.  GLYPH-METRICS is called with a pixel size and answers the glyph
-font\='s (ASCENT . DESCENT) at that size.  A size fits when neither
-metric exceeds the text\='s.  Signals an error when no size from SIZE down
+(defun agent-repl-status-glyph-fit-size (text-height size row-height-at)
+  "Return the largest pixel size, at most SIZE, whose row fits the text\='s.
+TEXT-HEIGHT is the pixel height of a row holding the tab\='s text alone.
+ROW-HEIGHT-AT is called with a pixel size and answers the pixel height of
+a row holding the glyph at that size.  A size fits when its row is no
+taller than TEXT-HEIGHT.  Signals an error when no size from SIZE down
 to 1 fits, which no real pair of fonts produces."
   (or (cl-loop for px downfrom size to 1
-               for metrics = (funcall glyph-metrics px)
-               when (and (<= (car metrics) text-ascent)
-                         (<= (cdr metrics) text-descent))
+               when (<= (funcall row-height-at px) text-height)
                return px)
       (agent-repl-status--glyph-fail
-       "elisp.status.glyph-fit-size: no size up to %d fits ascent %d descent %d"
-       size text-ascent text-descent)))
+       "elisp.status.glyph-fit-size: no size up to %d fits a row of %dpx"
+       size text-height)))
 
-(defun agent-repl-status--font-metrics (font frame)
-  "Return FONT\='s (SIZE ASCENT . DESCENT) in pixels on FRAME.
-FONT is a font object or name; `font-info' supplies the metrics."
+(defun agent-repl-status--glyph-face-spec (glyph-height)
+  "Return the face spec a tab glyph is measured with at GLYPH-HEIGHT.
+GLYPH-HEIGHT is a face `:height' value; the spec inherits the tab bar\='s
+face, so the measurement lays the glyph out in the tab bar\='s fonts."
+  `(:inherit tab-bar :height ,glyph-height))
+
+(defun agent-repl-status--row-height (frame text)
+  "Return the pixel height of one row holding TEXT, laid out on FRAME.
+TEXT carries its own faces.  The row is measured in a scratch buffer
+against FRAME\='s first window (`buffer-text-pixel-size'), which lays it
+out with the fonts Emacs really picks, composition included."
+  (let ((buffer (get-buffer-create " *agent-repl-glyph-measure*")))
+    (with-current-buffer buffer
+      (erase-buffer)
+      (insert text))
+    (cdr (buffer-text-pixel-size buffer (frame-first-window frame)))))
+
+(defun agent-repl-status--font-size (font frame)
+  "Return FONT\='s pixel size on FRAME; `font-info' supplies it."
   (let ((info (font-info font frame)))
     (unless info
-      (agent-repl-status--glyph-fail "elisp.status.font-metrics: no font info for %S" font))
-    (cons (aref info 2) (cons (aref info 8) (aref info 9)))))
-
-(defun agent-repl-status--glyph-font-metrics-at (family frame)
-  "Return a function of a pixel size answering FAMILY\='s (ASCENT . DESCENT).
-The font is opened at that size on FRAME."
-  (lambda (px)
-    (let* ((entity (find-font (font-spec :family family :size px) frame))
-           (font (and entity (open-font entity px frame))))
-      (unless font
-        (agent-repl-status--glyph-fail
-         "elisp.status.glyph-font-metrics-at: cannot open %s at %dpx" family px))
-      (cdr (agent-repl-status--font-metrics font frame)))))
+      (agent-repl-status--glyph-fail "elisp.status.font-size: no font info for %S" font))
+    (aref info 2)))
 
 (defun agent-repl-status-glyph-height (glyph &optional frame)
-  "Return the face `:height' factor GLYPH draws at on FRAME\='s tab bar.
+  "Return the face `:height' GLYPH draws at on FRAME\='s tab bar.
 1.0 on a frame that is not graphic, where every character fills one
-cell.  On a graphic frame it is the fit of GLYPH\='s own font inside the
-tab bar\='s text font (`agent-repl-status-glyph-fit-size'), cached per
-text font, and 1.0 when GLYPH is drawn by the text font itself."
+cell, and 1.0 when GLYPH at the text\='s full size leaves the row
+unchanged.  Otherwise the absolute `:height' (tenths of a point) of the
+largest pixel size whose measured row is no taller than the text\='s
+\(`agent-repl-status-glyph-fit-size'), cached per text font."
   (let ((frame (or frame (selected-frame))))
     (if (not (display-graphic-p frame))
         1.0
       (let* ((text-font (face-font 'tab-bar frame))
-             (key (cons text-font glyph))
-             (cached (gethash key agent-repl-status--glyph-heights)))
-        (or cached
+             (key (cons text-font glyph)))
+        (or (gethash key agent-repl-status--glyph-heights)
             (puthash
              key
-             (let* ((text (agent-repl-status--font-metrics text-font frame))
-                    (family (font-get (font-at 0 nil glyph) :family))
-                    (size (car text)))
-               (if (equal family (font-get (find-font (font-spec :name text-font) frame) :family))
-                   1.0
-                 (let ((fit (agent-repl-status-glyph-fit-size
-                             (cadr text) (cddr text) size
-                             (agent-repl-status--glyph-font-metrics-at
-                              (symbol-name family) frame))))
-                   (agent-repl--log '(:agent-repl-central "tab rendering and shared assets span workspaces")
-                                    "elisp.status.glyph-height: glyph=%s font=%s text-font=%s size=%d fit=%d"
-                                    glyph family text-font size fit)
-                   (/ (float fit) size))))
+             (let* ((size (agent-repl-status--font-size text-font frame))
+                    (text-height (agent-repl-status--row-height
+                                  frame (propertize "x" 'face 'tab-bar)))
+                    (fit (agent-repl-status-glyph-fit-size
+                          text-height size
+                          (lambda (px)
+                            (agent-repl-status--row-height
+                             frame
+                             (concat (propertize "x" 'face 'tab-bar)
+                                     (propertize glyph 'face (agent-repl-status--glyph-face-spec
+                                                              (* 10 px)))))))))
+               (agent-repl--log '(:agent-repl-central "tab rendering and shared assets span workspaces")
+                                "elisp.status.glyph-height: glyph=%s text-font=%s size=%d row=%d fit=%d"
+                                glyph text-font size text-height fit)
+               (if (= fit size) 1.0 (* 10 fit)))
              agent-repl-status--glyph-heights))))))
 
 (defun agent-repl-status-tab-glyph-face (arm glyph)
   "Return the face GLYPH draws with on a tab standing on ARM.
-Its `:height' is `agent-repl-status-glyph-height', so the glyph is
-exactly as tall as the tab\='s text, and its `:foreground' is ARM\='s ink
-from `agent-repl-status-glyph-inks' when ARM declares one."
+Its `:height' is `agent-repl-status-glyph-height', so the glyph never
+makes the tab bar\='s row taller than its text, and its `:foreground' is
+ARM\='s ink from `agent-repl-status-glyph-inks' when ARM declares one."
   (let ((ink (alist-get arm agent-repl-status-glyph-inks)))
     `(:height ,(agent-repl-status-glyph-height glyph)
       ,@(when ink
