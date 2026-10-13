@@ -234,7 +234,7 @@ type ReadAgentPageSuccess struct {
 	// or that the store holds no prompt line for, has none here. A head is ALSO
 	// an ordinary line of an older page: a reader walking older meets it again,
 	// and absorbs it by identity.
-	TurnHeads     []*StoreLineAt `protobuf:"bytes,4,rep,name=turn_heads,json=turnHeads,proto3" json:"turn_heads,omitempty"`
+	Heads         []*StoreTurnHead `protobuf:"bytes,5,rep,name=heads,proto3" json:"heads,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -301,9 +301,9 @@ func (x *ReadAgentPageSuccess) GetFloor() *ReadAgentPageFloor {
 	return nil
 }
 
-func (x *ReadAgentPageSuccess) GetTurnHeads() []*StoreLineAt {
+func (x *ReadAgentPageSuccess) GetHeads() []*StoreTurnHead {
 	if x != nil {
-		return x.TurnHeads
+		return x.Heads
 	}
 	return nil
 }
@@ -626,15 +626,15 @@ const file_store_v1_endpoint_read_agent_page_proto_rawDesc = "" +
 	"\x15ReadAgentPageResponse\x12:\n" +
 	"\asuccess\x18\x01 \x01(\v2\x1e.store.v1.ReadAgentPageSuccessH\x00R\asuccess\x12:\n" +
 	"\afailure\x18\x02 \x01(\v2\x1e.store.v1.ReadAgentPageFailureH\x00R\afailureB\b\n" +
-	"\x06result\"\xee\x01\n" +
+	"\x06result\"\xf9\x01\n" +
 	"\x14ReadAgentPageSuccess\x12+\n" +
 	"\x05lines\x18\x01 \x03(\v2\x15.store.v1.StoreLineAtR\x05lines\x121\n" +
 	"\x04more\x18\x02 \x01(\v2\x1b.store.v1.ReadAgentPageMoreH\x00R\x04more\x124\n" +
-	"\x05floor\x18\x03 \x01(\v2\x1c.store.v1.ReadAgentPageFloorH\x00R\x05floor\x124\n" +
+	"\x05floor\x18\x03 \x01(\v2\x1c.store.v1.ReadAgentPageFloorH\x00R\x05floor\x12-\n" +
+	"\x05heads\x18\x05 \x03(\v2\x17.store.v1.StoreTurnHeadR\x05headsB\n" +
 	"\n" +
-	"turn_heads\x18\x04 \x03(\v2\x15.store.v1.StoreLineAtR\tturnHeadsB\n" +
-	"\n" +
-	"\bboundary\"\xf2\x02\n" +
+	"\bboundaryJ\x04\b\x04\x10\x05R\n" +
+	"turn_heads\"\xf2\x02\n" +
 	"\x14ReadAgentPageFailure\x12\x16\n" +
 	"\x06detail\x18\x01 \x01(\tR\x06detail\x12P\n" +
 	"\x0finvalid_request\x18\x02 \x01(\v2%.store.v1.ReadAgentPageInvalidRequestH\x00R\x0einvalidRequest\x12J\n" +
@@ -676,6 +676,7 @@ var file_store_v1_endpoint_read_agent_page_proto_goTypes = []any{
 	(*StoreLineAt)(nil),                 // 11: store.v1.StoreLineAt
 	(*ReadAgentPageMore)(nil),           // 12: store.v1.ReadAgentPageMore
 	(*ReadAgentPageFloor)(nil),          // 13: store.v1.ReadAgentPageFloor
+	(*StoreTurnHead)(nil),               // 14: store.v1.StoreTurnHead
 }
 var file_store_v1_endpoint_read_agent_page_proto_depIdxs = []int32{
 	8,  // 0: store.v1.ReadAgentPageRequest.book:type_name -> conversation.v1.AgentId
@@ -686,7 +687,7 @@ var file_store_v1_endpoint_read_agent_page_proto_depIdxs = []int32{
 	11, // 5: store.v1.ReadAgentPageSuccess.lines:type_name -> store.v1.StoreLineAt
 	12, // 6: store.v1.ReadAgentPageSuccess.more:type_name -> store.v1.ReadAgentPageMore
 	13, // 7: store.v1.ReadAgentPageSuccess.floor:type_name -> store.v1.ReadAgentPageFloor
-	11, // 8: store.v1.ReadAgentPageSuccess.turn_heads:type_name -> store.v1.StoreLineAt
+	14, // 8: store.v1.ReadAgentPageSuccess.heads:type_name -> store.v1.StoreTurnHead
 	5,  // 9: store.v1.ReadAgentPageFailure.invalid_request:type_name -> store.v1.ReadAgentPageInvalidRequest
 	7,  // 10: store.v1.ReadAgentPageFailure.stale_pointer:type_name -> store.v1.ReadAgentPageStalePointer
 	6,  // 11: store.v1.ReadAgentPageFailure.storage_failure:type_name -> store.v1.ReadAgentPageStorageFailure

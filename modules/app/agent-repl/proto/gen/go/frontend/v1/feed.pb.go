@@ -1051,8 +1051,9 @@ type FeedRow_Removed struct {
 
 type FeedRow_EarlierSteps struct {
 	// A TURN'S EARLIER STEPS ARE ON AN OLDER PAGE. Drawn right under a turn's
-	// prompt when the page that carried the prompt (as one of its turn heads)
-	// did not carry the steps between that prompt and the page's own rows.
+	// prompt when the page that carried the prompt (as one of its heads) says
+	// steps sit between that prompt and the page's own rows
+	// (HistoryTurnHead.steps_between); never when they follow it directly.
 	// The client draws it as a fold ("earlier steps") whose activation runs
 	// the same older-page walk the "load previous page" control runs. The
 	// daemon REMOVES it (the `removed` arm) once the walk has loaded every

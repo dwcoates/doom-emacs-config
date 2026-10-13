@@ -31,3 +31,12 @@ prompt sits below it.
   daemon removes it (`removed`) once those steps are loaded.
 - WHY: the prompt and the newest steps are drawn together without implying
   nothing happened between them.
+
+### `heads` replaces `turn_heads`, saying whether steps sit between (owner, 2026-10-12)
+- WHAT: each carried prompt is a `StoreTurnHead` / `HistoryTurnHead` whose
+  `between` arm is `adjacent` (the page's rows of the turn follow the prompt
+  directly) or `steps_between`. Field 4 (`turn_heads`) is reserved; `heads`
+  is field 5. The "earlier steps" row is drawn only for `steps_between`.
+- WHY: a fold that loaded nothing when clicked misled the reader.
+- CONSEQUENCE: a reader built before the change sees no heads and walks
+  older as before, so a rolling deploy cannot break an opening.
