@@ -388,8 +388,8 @@ func TestAnInterruptVerdictAgainstAQueuedPromptCoalescesTheTwo(t *testing.T) {
 	if err != nil || len(standing) != 1 || standing[0].Turn != "older" || !standing[0].Coalesced {
 		t.Fatalf("standing = (%+v, %v), want the older prompt alone, coalesced", standing, err)
 	}
-	if got := saidText(standing[0].Said); got != "an earlier question\ndo it the other way" {
-		t.Fatalf("merged text = %q, want the older prompt's text then the later one's", got)
+	if got := saidText(standing[0].Said); got != "an earlier question\n\ndo it the other way" {
+		t.Fatalf("merged text = %q, want the older prompt's text then the later one's after a blank line", got)
 	}
 	if killed := h.sender.killed(); len(killed) != 0 {
 		t.Fatalf("killed = %v, want nothing interrupted: the prompt ahead had not started", killed)

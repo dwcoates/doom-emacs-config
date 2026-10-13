@@ -331,6 +331,61 @@ func TestTheFixingAttemptBriefKeepsItsPlaceholderSet(t *testing.T) {
 	}
 }
 
+// unsaid answers the first of want that body does not say, and whether one
+// is missing: every test pinning a brief's wording asserts through it.
+func unsaid(body string, want []string) (string, bool) {
+	for _, phrase := range want {
+		if !strings.Contains(body, phrase) {
+			return phrase, true
+		}
+	}
+	return "", false
+}
+
+func TestUnsaid(t *testing.T) {
+	tests := []struct {
+		name        string
+		body        string
+		want        []string
+		wantPhrase  string
+		wantMissing bool
+	}{
+		{name: "every phrase said", body: "alpha beta gamma", want: []string{"alpha", "gamma"}},
+		{name: "nothing wanted", body: "alpha", want: nil},
+		{name: "one phrase missing", body: "alpha beta", want: []string{"alpha", "delta"}, wantPhrase: "delta", wantMissing: true},
+		{name: "the first missing phrase is named", body: "alpha", want: []string{"beta", "gamma"}, wantPhrase: "beta", wantMissing: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			phrase, missing := unsaid(tt.body, tt.want)
+
+			// Assert.
+			if phrase != tt.wantPhrase || missing != tt.wantMissing {
+				t.Fatalf("unsaid = (%q, %v), want (%q, %v)", phrase, missing, tt.wantPhrase, tt.wantMissing)
+			}
+		})
+	}
+}
+
+func TestEveryBriefWordingPinAssertsThroughUnsaid(t *testing.T) {
+	// Arrange: a pin that hand-rolls its own phrase check drifts from the
+	// rest, so none may.
+	src, err := os.ReadFile("api_test.go")
+	if err != nil {
+		t.Fatalf("reading api_test.go: %v", err)
+	}
+	handRolled := "!strings.Contains(got" + ".Body"
+
+	// Act.
+	n := strings.Count(string(src), handRolled)
+
+	// Assert.
+	if n != 0 {
+		t.Fatalf("api_test.go hand-rolls %d phrase checks on a brief's body; assert through unsaid", n)
+	}
+}
+
 func TestTheFixingAttemptBriefPrescribesRunningOnlyTheFailingTestsUntilTheyPass(t *testing.T) {
 	// Arrange.
 	want := []string{
@@ -347,10 +402,8 @@ func TestTheFixingAttemptBriefPrescribesRunningOnlyTheFailingTestsUntilTheyPass(
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	for _, phrase := range want {
-		if !strings.Contains(got.Body, phrase) {
-			t.Fatalf("merge-test-failure-resolve does not say %q", phrase)
-		}
+	if phrase, missing := unsaid(got.Body, want); missing {
+		t.Fatalf("merge-test-failure-resolve does not say %q", phrase)
 	}
 }
 
@@ -362,8 +415,11 @@ func TestTheFixingAttemptBriefSaysTheSelectedSuitesRunAgain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if !strings.Contains(got.Body, "runs the selected suites again") || strings.Contains(got.Body, "runs the whole suite again") {
-		t.Fatalf("merge-test-failure-resolve does not say the selected suites run again: %q", got.Body)
+	if phrase, missing := unsaid(got.Body, []string{"runs the selected suites again"}); missing {
+		t.Fatalf("merge-test-failure-resolve does not say %q", phrase)
+	}
+	if strings.Contains(got.Body, "runs the whole suite again") {
+		t.Fatalf("merge-test-failure-resolve still says the whole suite runs again: %q", got.Body)
 	}
 }
 
@@ -375,8 +431,8 @@ func TestTheFixingAttemptBriefRunsTheTestsTheFailingTestsFileLists(t *testing.T)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if !strings.Contains(got.Body, "Run exactly the tests listed in {{failing_tests_file}}") {
-		t.Fatalf("merge-test-failure-resolve does not point the agent at the failing tests file: %q", got.Body)
+	if phrase, missing := unsaid(got.Body, []string{"Run exactly the tests listed in {{failing_tests_file}}"}); missing {
+		t.Fatalf("merge-test-failure-resolve does not point the agent at the failing tests file: it does not say %q", phrase)
 	}
 }
 
@@ -399,10 +455,8 @@ func TestTheFixingAttemptBriefHandsAFailingTestThatCannotRunAloneToAnInvestigati
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	for _, phrase := range want {
-		if !strings.Contains(got.Body, phrase) {
-			t.Fatalf("merge-test-failure-resolve does not say %q", phrase)
-		}
+	if phrase, missing := unsaid(got.Body, want); missing {
+		t.Fatalf("merge-test-failure-resolve does not say %q", phrase)
 	}
 }
 
@@ -458,5 +512,28 @@ func TestLoadSharesParsesVerdict(t *testing.T) {
 	// Assert.
 	if loadErr == nil || parseErr == nil || loadErr.Error() != parseErr.Error() {
 		t.Fatalf("Load error %v and Parse error %v, want the same refusal", loadErr, parseErr)
+	}
+}
+
+func TestTheRoutingBriefRoutesAnAddendumOpenerAfterTheToolCall(t *testing.T) {
+	// Arrange: a prompt opening "also, ..." appends to the request ahead of
+	// it, so the routing brief sends it after the tool call and never holds
+	// it. Against a queued prompt that verdict coalesces the two
+	// (promptqueue.settleQueued).
+	want := []string{
+		"A new message that OPENS as an addendum always answers {{token_after_tool_call}}",
+		`starting with "also", "also,"`,
+		"so it never waits for the turn to finish ({{token_hold}})",
+	}
+
+	// Act.
+	got, err := Load(repoPromptsDir, "queue-routing-classifier")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if phrase, missing := unsaid(got.Body, want); missing {
+		t.Fatalf("queue-routing-classifier does not say %q", phrase)
 	}
 }
