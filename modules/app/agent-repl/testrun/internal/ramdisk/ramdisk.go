@@ -188,6 +188,60 @@ func unansweredError(bound time.Duration, name string, args []string, cause erro
 		name, strings.Join(args, " "), bound, cause)
 }
 
+// Late is the own outcome of a probe that missed its bound: its answer, or
+// its failure, at the latest when CommandBound passed.
+type Late struct {
+	// Took is how long the command ran, from its start.
+	Took time.Duration
+	Err  error
+}
+
+// WatchedRunner runs one probe and answers its combined output within bound.
+// A probe still running at bound answers its timeout error at once, and late,
+// which later carries the probe's own outcome; late is nil for a probe that
+// ended within bound.
+type WatchedRunner func(bound time.Duration, name string, args ...string) (out string, late <-chan Late, err error)
+
+// RunWatched is the real WatchedRunner: a probe that misses its bound goes on
+// running for at most CommandBound, the bound every other disk command has,
+// so the time the disk manager really took is known instead of cut off at
+// the bound.
+func RunWatched(bound time.Duration, name string, args ...string) (string, <-chan Late, error) {
+	return runWatched(bound, CommandBound, name, args...)
+}
+
+// runWatched runs the command for at most limit, and answers within bound.
+func runWatched(bound, limit time.Duration, name string, args ...string) (string, <-chan Late, error) {
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), limit)
+	type result struct {
+		out []byte
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		out, err := boundedCommand(ctx, name, args...).CombinedOutput()
+		done <- result{out, err}
+	}()
+	timer := time.NewTimer(bound)
+	defer timer.Stop()
+	select {
+	case r := <-done:
+		cancel()
+		out, err := commandOutcome(ctx, limit, name, args, r.out, r.err)
+		return out, nil, err
+	case <-timer.C:
+	}
+	late := make(chan Late, 1)
+	go func() {
+		defer cancel()
+		r := <-done
+		_, err := commandOutcome(ctx, limit, name, args, r.out, r.err)
+		late <- Late{Took: time.Since(start), Err: err}
+	}()
+	return "", late, unansweredError(bound, name, args, context.DeadlineExceeded)
+}
+
 // Manager creates, releases and reclaims run RAM disks.
 type Manager struct {
 	// Run runs hdiutil and diskutil.
@@ -201,9 +255,12 @@ type Manager struct {
 	// KillUnder SIGKILLs every process whose command line names a path under
 	// dir, answering how many it killed.
 	KillUnder func(dir string) (int, error)
-	// Probe runs the short-bounded reads of the disk manager (`hdiutil info`,
-	// `diskutil list`).
+	// Probe runs the short-bounded reads of the disk manager and the host
+	// (`hdiutil info`, `sysctl`, `ps`, `lsof`).
 	Probe BoundedRunner
+	// Watch runs Setup's two probes of the disk manager, watching one that
+	// misses its bound to its own answer.
+	Watch WatchedRunner
 	// Alive answers whether a process of pid exists.
 	Alive func(pid int) bool
 	// Log is the run's log: the acquire and release edges, with timings.
@@ -229,7 +286,7 @@ type Volume struct {
 func Default(log Logger) Manager {
 	return Manager{
 		Run: ExecRunner, Registry: DefaultRegistry, MountParent: DefaultMountParent, Pid: os.Getpid(),
-		KillUnder: KillProcessesUnder, Probe: RunBounded, Alive: ProcessAlive, Log: log, Now: time.Now,
+		KillUnder: KillProcessesUnder, Probe: RunBounded, Watch: RunWatched, Alive: ProcessAlive, Log: log, Now: time.Now,
 		LockBound: LockBound,
 	}
 }
