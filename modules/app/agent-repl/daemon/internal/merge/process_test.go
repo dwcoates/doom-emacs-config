@@ -286,11 +286,11 @@ func TestGateRunsAtMergePriority(t *testing.T) {
 // TestGatePassesNoNarrowingForTheFullSet covers the conservative answer: running
 // everything is the script's own default, so a full selection hands it no flag.
 func TestGatePassesNoNarrowingForTheFullSet(t *testing.T) {
-	// Arrange: a merge touching a path no rule maps.
+	// Arrange: a merge touching a module path no rule maps.
 	h := newHarness(t)
 	h.emacsRepo()
 	h.landsCleanly("abc123def4567")
-	h.git.changed = []string{"tools/unknown/main.go"}
+	h.git.changed = []string{"modules/app/agent-repl/tools/unknown/main.go"}
 	h.gatePasses("daemon")
 	enqueue(t, h)
 
