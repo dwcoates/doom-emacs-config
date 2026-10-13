@@ -731,3 +731,21 @@ func TestSettleProbesLeavesALoggedOutcomeAlone(t *testing.T) {
 		t.Fatalf("log = %q, want the logged outcome to stand alone", log.snapshot())
 	}
 }
+
+func TestSetupLogsAStrayMountPointItRemoved(t *testing.T) {
+	// Arrange
+	h := &fakeHost{}
+	m := newManager(t, h)
+	dir := strayDir(t, m, "artr-28386")
+	m.KillUnder = func(string) (int, error) { return 12, nil }
+	log := m.Log.(*fakeLog)
+
+	// Act
+	v, _, _ := m.Setup(16)
+
+	// Assert
+	t.Cleanup(func() { v.Release() })
+	if !log.has("INFO removed the mount point " + dir + " left by dead run pid 28386, which no record named (killed 12 leftover processes)") {
+		t.Fatalf("log = %q, want the stray's removal at INFO", log.snapshot())
+	}
+}

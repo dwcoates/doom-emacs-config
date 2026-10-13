@@ -288,6 +288,10 @@ func (m Manager) Setup(sizeMiB int) (*Volume, *Trouble, error) {
 	}
 	reclaimed, err := m.Reclaim()
 	for _, r := range reclaimed {
+		if r.Stray {
+			m.Log.Infof("removed the mount point %s left by dead run pid %d, which no record named (killed %d leftover processes)", r.Mount, r.Pid, r.Killed)
+			continue
+		}
 		m.Log.Infof("reclaimed the RAM disk %s at %s left by dead run pid %d (attached %v, killed %d leftover processes)", r.Device, r.Mount, r.Pid, r.Attached, r.Killed)
 	}
 	// A STUCK REGISTRY LOCK IS NOT WAITED ON TWICE: the acquire would wait
