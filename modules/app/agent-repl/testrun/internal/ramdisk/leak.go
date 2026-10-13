@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -181,6 +182,57 @@ type Trouble struct {
 	// Host is what the host was doing when a probe did not answer
 	// (hostSnapshot); empty when both answered.
 	Host string
+
+	// late are the probes that missed their bounds, still watched.
+	late []*lateProbe
+}
+
+// lateProbe is one probe that missed its bound, watched to its own outcome.
+// Its outcome is logged exactly once: when it arrives, or, when the run ends
+// first, as still unanswered (SettleProbes).
+type lateProbe struct {
+	call  string
+	asked time.Time
+	once  sync.Once
+}
+
+// watchProbe is the probe of call within bound, asked at asked, as timeProbe
+// runs it. A probe that misses its bound is recorded in t and watched to its
+// own outcome, which goes to the run's log.
+func (m Manager) watchProbe(t *Trouble, asked time.Time, bound time.Duration, name string, args ...string) func() (string, error) {
+	return func() (string, error) {
+		out, late, err := m.Watch(bound, name, args...)
+		if late != nil {
+			p := &lateProbe{call: name + " " + strings.Join(args, " "), asked: asked}
+			t.late = append(t.late, p)
+			go func() {
+				outcome := <-late
+				p.once.Do(func() { m.logLate(t, p, outcome) })
+			}()
+		}
+		return out, err
+	}
+}
+
+// logLate records a late probe's own outcome. An answer says the disk manager
+// was slow, not wedged; a failure at CommandBound says it was wedged.
+func (m Manager) logLate(t *Trouble, p *lateProbe, outcome Late) {
+	if outcome.Err != nil {
+		m.Log.Errorf("RAM disk check at %s: the disk manager never answered %s, which failed after %s: %v", stamp(t.At), p.call, outcome.Took, outcome.Err)
+		return
+	}
+	m.Log.Infof("RAM disk check at %s: the disk manager answered %s late, after %s, so it was slow, not wedged", stamp(t.At), p.call, outcome.Took)
+}
+
+// SettleProbes ends the watch of t's late probes when the run ends: a probe
+// whose own outcome has not arrived is recorded as still unanswered, and its
+// outcome, should it arrive later, is not.
+func (m Manager) SettleProbes(t *Trouble) {
+	for _, p := range t.late {
+		p.once.Do(func() {
+			m.Log.Infof("RAM disk check at %s: the disk manager had still not answered %s when the run ended, %s after it was asked", stamp(t.At), p.call, m.Now().Sub(p.asked))
+		})
+	}
 }
 
 // Answered says whether the disk manager answered both probes.
@@ -220,8 +272,9 @@ func probeLine(name string, err error, took time.Duration) string {
 // latter the run's root goes on the disk.
 func (m Manager) Setup(sizeMiB int) (*Volume, *Trouble, error) {
 	t := &Trouble{At: m.Now()}
-	t.List, t.ListTook, t.ListErr = m.timeProbe(t.At, func() (string, error) { return m.Probe(ListBound, "diskutil", "list") })
-	t.Info, t.InfoTook, t.InfoErr = m.timeProbe(m.Now(), m.listImages)
+	t.List, t.ListTook, t.ListErr = m.timeProbe(t.At, m.watchProbe(t, t.At, ListBound, "diskutil", "list"))
+	infoAsked := m.Now()
+	t.Info, t.InfoTook, t.InfoErr = m.timeProbe(infoAsked, m.watchProbe(t, infoAsked, InfoBound, "hdiutil", "info"))
 	m.Log.Infof("RAM disk check at %s: %s; %s", stamp(t.At), probeLine("diskutil list", t.ListErr, t.ListTook), probeLine("hdiutil info", t.InfoErr, t.InfoTook))
 	if !t.Answered() {
 		// WHAT THE HOST WAS DOING IS READ AT ONCE, so the next probe that does
@@ -235,6 +288,10 @@ func (m Manager) Setup(sizeMiB int) (*Volume, *Trouble, error) {
 	}
 	reclaimed, err := m.Reclaim()
 	for _, r := range reclaimed {
+		if r.Stray {
+			m.Log.Infof("removed the mount point %s left by dead run pid %d, which no record named (killed %d leftover processes)", r.Mount, r.Pid, r.Killed)
+			continue
+		}
 		m.Log.Infof("reclaimed the RAM disk %s at %s left by dead run pid %d (attached %v, killed %d leftover processes)", r.Device, r.Mount, r.Pid, r.Attached, r.Killed)
 	}
 	// A STUCK REGISTRY LOCK IS NOT WAITED ON TWICE: the acquire would wait

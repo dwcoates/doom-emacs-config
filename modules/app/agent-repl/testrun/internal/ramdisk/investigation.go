@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -91,11 +90,7 @@ func (m Manager) EnsureInvestigation(inv Investigation, t *Trouble) (_ Investiga
 	case err != nil:
 		return out, err
 	default:
-		defer func() {
-			if closeErr := unlock(); closeErr != nil {
-				err = errors.Join(err, fmt.Errorf("release the RAM disk registry lock: %w", closeErr))
-			}
-		}()
+		defer releaseRegistry(unlock, &err)
 	}
 	porcelain, err := inv.Git(GitBound, "git", "-C", inv.Module, "worktree", "list", "--porcelain")
 	if err != nil {
@@ -271,10 +266,8 @@ func ScriptDispatch(script string, bound time.Duration) func(commands []byte) er
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), bound)
 		defer cancel()
-		cmd := exec.CommandContext(ctx, script, "--emit-commands")
+		cmd := boundedCommand(ctx, script, "--emit-commands")
 		cmd.Stdin = bytes.NewReader(commands)
-		// A killed command's output pipe is not waited on past this.
-		cmd.WaitDelay = time.Second
 		out, err := cmd.CombinedOutput()
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return fmt.Errorf("%s --emit-commands did not answer within %s: %w", script, bound, ctx.Err())

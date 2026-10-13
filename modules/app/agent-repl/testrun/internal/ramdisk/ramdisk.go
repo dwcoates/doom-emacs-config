@@ -38,11 +38,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
+
+	"agentrepl/testrun/reap"
 )
 
 // DefaultRegistry is where every run's lock record lives.
@@ -110,24 +113,28 @@ type Logger interface {
 // InfoBound is how long `hdiutil info` may run before the disk manager is
 // taken not to answer.
 //
-// MEASURED FROM THE RUNS' OWN LOGS, at the runs' own priority (nice 19, the
-// throttle I/O tier) on a host carrying several runs at once. The first bound,
-// 50ms, came from 30 quiet calls (max 22ms) and missed the tail: the run logs
-// of 2026-10-13 show healthy answers of 7-20ms, one of 42ms, and one still
-// running at 56ms when the 50ms bound killed it (load average 28). That one
-// was healthy: `diskutil list` answered in the same check, and the next run,
-// 13s later, had its answer in 7ms. A refusal on it put the run on the SSD
-// and opened an investigation workspace for a disk manager that was fine.
-// The bound is just over twice that 56ms. A wedged disk manager never
-// answers at all (2026-10-12: every call ran out its 60s bound), so the
-// bound costs a healthy run nothing and a wedged one only this long.
-const InfoBound = 120 * time.Millisecond
+// A PROBE'S BOUND COVERS THE RUN'S OWN STARVATION, not only the disk
+// manager's answer. A run is at nice 19 (bin/background.sh), so on a loaded
+// host every probe waits behind every other runnable process before it even
+// starts asking. The bounds of 120ms and 175ms, sized from answers that came
+// in time, refused seven runs on 2026-10-13 (load averages 6.6 to 281) whose
+// disk manager was idle (diskarbitrationd sleeping, no other disk command
+// running): the next run, 29s after one of them, had both answers in 34ms and
+// 21ms. Each refused run's own timer fired up to 80ms late (247ms measured
+// against a 175ms bound), so the runner itself was waiting for a CPU.
+//
+// The slowest healthy read of the disk manager the runs record at their own
+// priority is `diskutil info` in the acquire: 79-471ms across 40 runs
+// (2026-10-12 and 13), which carries the same process start and the same
+// question to diskarbitrationd as both probes. Both bounds are just over
+// twice its 471ms. A probe that misses its bound is still watched to its own
+// answer (RunWatched), so every refusal records how long the disk manager
+// really took, and the bounds can be set again from that.
+const InfoBound = 1000 * time.Millisecond
 
 // ListBound is how long the `diskutil list` probe may run before the disk
-// manager is taken not to answer: the same run logs show healthy answers of
-// 21-49ms and one of 85ms (in the same check as the 56ms `hdiutil info`), and
-// this is just over twice that max.
-const ListBound = 175 * time.Millisecond
+// manager is taken not to answer: the same measurement as InfoBound.
+const ListBound = 1000 * time.Millisecond
 
 // CommandBound is how long one hdiutil, diskutil or lsof call may run.
 //
@@ -154,18 +161,88 @@ func RunBounded(bound time.Duration, name string, args ...string) (string, error
 func runBounded(bound time.Duration, name string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), bound)
 	defer cancel()
+	out, err := boundedCommand(ctx, name, args...).CombinedOutput()
+	return commandOutcome(ctx, bound, name, args, out, err)
+}
+
+// boundedCommand is the command, killed once ctx is done.
+func boundedCommand(ctx context.Context, name string, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, name, args...)
 	// A killed command's output pipe is not waited on past this.
 	cmd.WaitDelay = time.Second
-	out, err := cmd.CombinedOutput()
+	return cmd
+}
+
+// commandOutcome is a finished command's answer: its output, or an error
+// naming the command and saying whether ctx's bound killed it or it failed on
+// its own.
+func commandOutcome(ctx context.Context, bound time.Duration, name string, args []string, out []byte, err error) (string, error) {
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return string(out), fmt.Errorf("%s %s did not answer within %s; the disk manager (diskarbitrationd) may be wedged: %w",
-			name, strings.Join(args, " "), bound, ctx.Err())
+		return string(out), unansweredError(bound, name, args, ctx.Err())
 	}
 	if err != nil {
 		return string(out), fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
 	return string(out), nil
+}
+
+func unansweredError(bound time.Duration, name string, args []string, cause error) error {
+	return fmt.Errorf("%s %s did not answer within %s; the disk manager (diskarbitrationd) may be wedged: %w",
+		name, strings.Join(args, " "), bound, cause)
+}
+
+// Late is the own outcome of a probe that missed its bound: its answer, or
+// its failure, at the latest when CommandBound passed.
+type Late struct {
+	// Took is how long the command ran, from its start.
+	Took time.Duration
+	Err  error
+}
+
+// WatchedRunner runs one probe and answers its combined output within bound.
+// A probe still running at bound answers its timeout error at once, and late,
+// which later carries the probe's own outcome; late is nil for a probe that
+// ended within bound.
+type WatchedRunner func(bound time.Duration, name string, args ...string) (out string, late <-chan Late, err error)
+
+// RunWatched is the real WatchedRunner: a probe that misses its bound goes on
+// running for at most CommandBound, the bound every other disk command has,
+// so the time the disk manager really took is known instead of cut off at
+// the bound.
+func RunWatched(bound time.Duration, name string, args ...string) (string, <-chan Late, error) {
+	return runWatched(bound, CommandBound, name, args...)
+}
+
+// runWatched runs the command for at most limit, and answers within bound.
+func runWatched(bound, limit time.Duration, name string, args ...string) (string, <-chan Late, error) {
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), limit)
+	type result struct {
+		out []byte
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		out, err := boundedCommand(ctx, name, args...).CombinedOutput()
+		done <- result{out, err}
+	}()
+	timer := time.NewTimer(bound)
+	defer timer.Stop()
+	select {
+	case r := <-done:
+		cancel()
+		out, err := commandOutcome(ctx, limit, name, args, r.out, r.err)
+		return out, nil, err
+	case <-timer.C:
+	}
+	late := make(chan Late, 1)
+	go func() {
+		defer cancel()
+		r := <-done
+		_, err := commandOutcome(ctx, limit, name, args, r.out, r.err)
+		late <- Late{Took: time.Since(start), Err: err}
+	}()
+	return "", late, unansweredError(bound, name, args, context.DeadlineExceeded)
 }
 
 // Manager creates, releases and reclaims run RAM disks.
@@ -181,11 +258,16 @@ type Manager struct {
 	// KillUnder SIGKILLs every process whose command line names a path under
 	// dir, answering how many it killed.
 	KillUnder func(dir string) (int, error)
-	// Probe runs the short-bounded reads of the disk manager (`hdiutil info`,
-	// `diskutil list`).
+	// Probe runs the short-bounded reads of the disk manager and the host
+	// (`hdiutil info`, `sysctl`, `ps`, `lsof`).
 	Probe BoundedRunner
+	// Watch runs Setup's two probes of the disk manager, watching one that
+	// misses its bound to its own answer.
+	Watch WatchedRunner
 	// Alive answers whether a process of pid exists.
 	Alive func(pid int) bool
+	// Mounted answers whether a volume is mounted on a directory.
+	Mounted func(dir string) (bool, error)
 	// Log is the run's log: the acquire and release edges, with timings.
 	Log Logger
 	// Now is the clock the edges are timed by.
@@ -209,7 +291,7 @@ type Volume struct {
 func Default(log Logger) Manager {
 	return Manager{
 		Run: ExecRunner, Registry: DefaultRegistry, MountParent: DefaultMountParent, Pid: os.Getpid(),
-		KillUnder: KillProcessesUnder, Probe: RunBounded, Alive: ProcessAlive, Log: log, Now: time.Now,
+		KillUnder: reap.Under, Probe: RunBounded, Watch: RunWatched, Alive: ProcessAlive, Mounted: IsMountPoint, Log: log, Now: time.Now,
 		LockBound: LockBound,
 	}
 }
@@ -318,11 +400,7 @@ func (m Manager) attach(sizeMiB int) (_ *Volume, err error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if closeErr := unlock(); closeErr != nil {
-			err = errors.Join(err, fmt.Errorf("release the RAM disk registry lock: %w", closeErr))
-		}
-	}()
+	defer releaseRegistry(unlock, &err)
 	before, err := m.listImages()
 	if err != nil {
 		return nil, fmt.Errorf("list the attached images before attaching: %w", err)
@@ -505,10 +583,15 @@ type Reclaimed struct {
 	// (the host rebooted since), so only the record and mount point went.
 	Attached bool
 	Killed   int
+	// Stray is set when no record named the mount point (Device is then
+	// empty): its disk was already gone, and only the mount point went.
+	Stray bool
 }
 
 // Reclaim takes down the RAM disk of every dead run in the registry: one whose
 // record's lock nobody holds. A live run's record is left strictly alone.
+// Then it removes every mount point a dead run left that no record names
+// (reclaimStrays).
 func (m Manager) Reclaim() ([]Reclaimed, error) {
 	records, err := filepath.Glob(filepath.Join(m.Registry, "*.lock"))
 	if err != nil {
@@ -526,7 +609,129 @@ func (m Manager) Reclaim() ([]Reclaimed, error) {
 			done = append(done, r)
 		}
 	}
+	strays, err := m.reclaimStrays()
+	return append(done, strays...), errors.Join(append(errs, err)...)
+}
+
+// strayMount is the name of a run's mount point under MountParent, and of
+// one a reclaim is removing.
+var strayMount = regexp.MustCompile(`^artr-([0-9]+)(\.reclaim)?$`)
+
+// reclaimStrays removes every mount point under MountParent that a dead run
+// left and no record names, with everything under it.
+//
+// A MOUNT POINT OUTLIVES ITS RECORD whenever something wrote under it after
+// its disk went: a release whose mount point would not go removes its record
+// all the same, and a dead run's process that outlived a reclaim (2026-10-13,
+// artr-28386 and artr-74298, before reap.Under read the environment) made its
+// directories there after the reclaim had removed it. Nothing named either
+// directory again, so each stayed for good.
+//
+// ONLY A DEAD RUN'S MOUNT POINT IS TAKEN, and it is taken under the registry
+// lock (takeStray), where a run of the same pid cannot be between its record
+// and its mount. It is renamed to <name>.reclaim before its removal, so the
+// removal runs outside the lock, and one a removal left behind is removed by
+// the next reclaim.
+func (m Manager) reclaimStrays() ([]Reclaimed, error) {
+	entries, err := os.ReadDir(m.MountParent)
+	if err != nil {
+		return nil, fmt.Errorf("list the RAM disk mount parent %s: %w", m.MountParent, err)
+	}
+	var done []Reclaimed
+	var errs []error
+	for _, e := range entries {
+		match := strayMount.FindStringSubmatch(e.Name())
+		if match == nil || !e.IsDir() {
+			continue
+		}
+		pid, err := strconv.Atoi(match[1])
+		if err != nil {
+			return nil, fmt.Errorf("the mount point %s is not named by a pid: %w", e.Name(), err)
+		}
+		if pid == m.Pid {
+			continue
+		}
+		dir := filepath.Join(m.MountParent, e.Name())
+		r := Reclaimed{Pid: pid, Mount: dir, Stray: true}
+		if match[2] == "" {
+			killed, taken, err := m.takeStray(dir, pid)
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			if !taken {
+				continue
+			}
+			r.Killed = killed
+			dir += ".reclaim"
+		}
+		if err := os.RemoveAll(dir); err != nil {
+			errs = append(errs, fmt.Errorf("remove the dead run's mount point %s: %w", dir, err))
+			continue
+		}
+		done = append(done, r)
+	}
 	return done, errors.Join(errs...)
+}
+
+// takeStray takes dir, the mount point of a run of pid, for removal: under
+// the registry lock, when the run is dead, no record names it and no volume
+// is mounted on it, it kills what still runs out of it and renames it to
+// <dir>.reclaim. taken is false when dir is not a dead run's stray.
+func (m Manager) takeStray(dir string, pid int) (killed int, taken bool, err error) {
+	// A host's first run, or its first since /tmp was cleared, has no registry
+	// yet, and so no lock to take.
+	if err := os.MkdirAll(m.Registry, 0o755); err != nil {
+		return 0, false, fmt.Errorf("make the RAM disk registry %s: %w", m.Registry, err)
+	}
+	unlock, err := m.lockRegistry()
+	if err != nil {
+		return 0, false, err
+	}
+	defer releaseRegistry(unlock, &err)
+	if m.Alive(pid) {
+		return 0, false, nil
+	}
+	if _, err := os.Stat(m.recordPath(pid)); err == nil {
+		return 0, false, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return 0, false, fmt.Errorf("look for the RAM disk record of pid %d: %w", pid, err)
+	}
+	// A VOLUME STILL MOUNTED THERE IS A LEAK, not a stray: the leak check
+	// names it, and nothing under it is removed.
+	mounted, err := m.Mounted(dir)
+	if err != nil {
+		return 0, false, err
+	}
+	if mounted {
+		return 0, false, nil
+	}
+	killed, err = m.KillUnder(dir)
+	if err != nil {
+		return killed, false, fmt.Errorf("kill what still runs out of the dead run's mount point %s: %w", dir, err)
+	}
+	if err := os.Rename(dir, dir+".reclaim"); err != nil {
+		return killed, false, fmt.Errorf("take the dead run's mount point %s for removal: %w", dir, err)
+	}
+	return killed, true, nil
+}
+
+// IsMountPoint reports whether a volume is mounted on dir: whether dir is on
+// another device than the directory holding it.
+func IsMountPoint(dir string) (bool, error) {
+	devices := make([]uint64, 2)
+	for i, path := range []string{dir, filepath.Dir(dir)} {
+		info, err := os.Stat(path)
+		if err != nil {
+			return false, fmt.Errorf("stat %s to tell whether a volume is mounted there: %w", path, err)
+		}
+		stat, ok := info.Sys().(*syscall.Stat_t)
+		if !ok {
+			return false, fmt.Errorf("stat %s answered no device", path)
+		}
+		devices[i] = uint64(stat.Dev)
+	}
+	return devices[0] != devices[1], nil
 }
 
 func (m Manager) reclaimOne(path string) (Reclaimed, bool, error) {
@@ -598,16 +803,17 @@ const registryLockName = "registry.mutex"
 // MEASURED ON THE OWNER'S HOST (2026-10-12, load average 15-24). Uncontended,
 // the flock is taken in p50 10us, max 64us (200 takes). Contended, a run waits
 // out the other holder's hold:
-//   - an acquire holds it for `hdiutil info` (at most InfoBound, 120ms) and
-//     the 8 GiB attach up to its record's write (95ms and 97ms, read off two
-//     live runs' records as their write time less their creation time):
-//     about 220ms;
+//   - an acquire holds it for `hdiutil info` and the 8 GiB attach up to its
+//     record's write: the listing's healthy max is InfoBound's 471ms, and the
+//     attach measured at most 332ms across 40 runs (2026-10-12 and 13), so
+//     about 800ms;
 //   - an investigation holds it for `git worktree list` (max 142ms) and the
-//     workspace CLI's dispatch (max 559ms): about 700ms, the longest hold.
+//     workspace CLI's dispatch (max 559ms): about 700ms.
 //
 // The bound is just over twice the longest hold, so a run queued behind a
-// healthy investigation is never taken for one behind a stuck holder.
-const LockBound = 1500 * time.Millisecond
+// healthy acquire or investigation is never taken for one behind a stuck
+// holder.
+const LockBound = 2000 * time.Millisecond
 
 // LsofBound is how long `lsof` may run when it names who has the registry lock
 // open: measured 70-100ms warm and 260ms cold on the owner's host
@@ -667,6 +873,15 @@ func (m Manager) lockRegistry() (func() error, error) {
 	}
 }
 
+// releaseRegistry releases the registry lock taken by lockRegistry, joining a
+// failed release into *err, never dropping it. A holder defers it right after
+// the take: `defer releaseRegistry(unlock, &err)`.
+func releaseRegistry(unlock func() error, err *error) {
+	if closeErr := unlock(); closeErr != nil {
+		*err = errors.Join(*err, fmt.Errorf("release the RAM disk registry lock: %w", closeErr))
+	}
+}
+
 // lockHolders names the processes other than this one with the lock file
 // open, as lsof lists them within LsofBound; lsof's own failure is named in
 // their place, never dropped.
@@ -713,11 +928,7 @@ func (m Manager) probeRecord(path string) (_ *os.File, dead bool, err error) {
 	if err != nil {
 		return nil, false, err
 	}
-	defer func() {
-		if closeErr := unlock(); closeErr != nil {
-			err = errors.Join(err, fmt.Errorf("release the RAM disk registry lock: %w", closeErr))
-		}
-	}()
+	defer releaseRegistry(unlock, &err)
 	return probeRecordLocked(path)
 }
 
@@ -852,32 +1063,4 @@ func isAttachedRAMDisk(info, device string) bool {
 		}
 	}
 	return false
-}
-
-// KillProcessesUnder SIGKILLs every process whose command line names a path
-// under dir, the way the daemon integration harness reclaims a dead run root.
-func KillProcessesUnder(dir string) (int, error) {
-	out, err := exec.Command("ps", "-axo", "pid=,args=").Output()
-	if err != nil {
-		return 0, fmt.Errorf("list processes to reclaim %s: %w", dir, err)
-	}
-	prefix := strings.TrimSuffix(dir, "/") + "/"
-	killed := 0
-	var errs []error
-	for _, line := range strings.Split(string(out), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 2 || !strings.Contains(line, prefix) {
-			continue
-		}
-		pid, err := strconv.Atoi(fields[0])
-		if err != nil || pid == os.Getpid() {
-			continue
-		}
-		if err := syscall.Kill(pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
-			errs = append(errs, fmt.Errorf("kill leftover pid %d under %s: %w", pid, dir, err))
-			continue
-		}
-		killed++
-	}
-	return killed, errors.Join(errs...)
 }
