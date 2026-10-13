@@ -1496,7 +1496,10 @@ describe("the cost corner", () => {
       const corner = declarationsOf(".usage-corner") ?? "";
 
       // Assert
-      expect(corner).toMatch(/(?:^|[\s;])font-size:\s*0\.85em/);
+      expect([corner.match(/(?:^|[\s;])font-size:\s*([^;]+)/)?.[1]?.trim(), /--usage-font-size:\s*calc\(0\.85em \* 0\.75\)/.test(stylesheet)]).toEqual([
+        "var(--usage-font-size)",
+        true,
+      ]);
     });
 
     it.each([".usage-stamp", ".usage-ago", ".usage-slider", ".usage-reserve", ".usage-corner::before"])(
@@ -3096,9 +3099,9 @@ describe("the one bubble rule set", () => {
             !prop.startsWith("border") &&
             prop !== "--bubble-bg" &&
             !(prop === "max-width" && rule.selectors.length === 1 && rule.selectors[0] === held) &&
-            // The tighter vertical padding of a prompt or response bubble
-            // (owner request, 2026-10-12) is the one padding token a variant
-            // sets; its own suite pins it.
+            // The vertical padding ladder (owner requests, 2026-10-12 and
+            // 2026-10-13) is the one padding token a variant sets; its own
+            // suite pins it.
             !(prop === "--bubble-pad-y" && rule.selectors.every((sel) => TIGHTER_PAD_SELECTORS.includes(sel))) &&
             // The dimmed prose of a thinking or interim bubble (owner request,
             // 2026-10-08) is the one text color a variant sets; its own suite
@@ -3878,10 +3881,20 @@ describe("the tool card's command grey", () => {
  * background is not there in either theme; every other response keeps the
  * purple, and the interim keeps its pear border.
  */
-/** The prompt and response variants whose vertical padding is 30% tighter (owner request, 2026-10-12). */
-const TIGHTER_PAD_SELECTORS: readonly string[] = ["response", "user", "agent", "peer", "held"].map(
-  (variant) => `.bubble[data-variant="${variant}"]`,
-);
+/**
+ * The vertical padding ladder: each rule that sets `--bubble-pad-y`, by its
+ * selectors, and the share of the base it sets (owner requests, 2026-10-12 and
+ * 2026-10-13).
+ */
+/** A bubble variant's selector. */
+const variantSelector = (variant: string): string => `.bubble[data-variant="${variant}"]`;
+const PAD_LADDER: readonly { selectors: readonly string[]; value: string }[] = [
+  { selectors: ["response", "user", "agent", "peer", "held"].map(variantSelector), value: "calc(var(--bubble-pad-y-base)*0.7)" },
+  { selectors: [`${variantSelector("response")}.interim-response`], value: "calc(var(--bubble-pad-y-base)*0.49)" },
+  { selectors: [variantSelector("thinking")], value: "calc(var(--bubble-pad-y-base)*0.35)" },
+];
+/** Every variant selector the ladder pads. */
+const TIGHTER_PAD_SELECTORS: readonly string[] = PAD_LADDER.flatMap((rung) => rung.selectors);
 /** The two bubble kinds whose prose is the dimmed `--interim-text` (half way from the command grey to the body text). */
 const DIMMED_TEXT_SELECTORS: readonly string[] = ['.bubble[data-variant="thinking"]', ".bubble.interim-response"];
 
@@ -4389,7 +4402,6 @@ describe("the ask cards' square controls", () => {
     ["a merge tab", "merge-tabs", "merge-tab"],
     ["a question option", "q-opts", "q-opt"],
     ["a question verdict's header chip", "q-verdict", "badge q-chip"],
-    ["a permission verdict's badge", "perm-verdict", "badge ok"],
   ])("rounds %s by the one tab corner", (_name, parentClass, childClass) => {
     // Arrange
     const teardown = installStylesheet();
@@ -4403,7 +4415,6 @@ describe("the ask cards' square controls", () => {
   it.each([
     ["the given answers", "tool-card", "q-verdicts"],
     ["a question verdict's header chip", "q-verdict", "badge q-chip"],
-    ["a permission verdict's badge", "perm-verdict", "badge err"],
   ])("sizes %s by the one settled-answer size", (_name, parentClass, childClass) => {
     // Arrange
     const teardown = installStylesheet();
@@ -4440,32 +4451,35 @@ describe("the stylesheet's real-height contract", () => {
 });
 
 /**
- * PROMPT AND RESPONSE BUBBLES SIT 30% TIGHTER TOP AND BOTTOM (owner request,
- * 2026-10-12): the vertical padding token shrinks to 0.7 of the base on the
- * prompt and response variants only, while thinking, the agentic tool and
- * monitor cards and the compaction summary keep the base. The horizontal
- * padding never reads the vertical token, so it cannot move with it.
+ * THE VERTICAL PADDING LADDER: prompt and response bubbles sit 30% tighter top
+ * and bottom (owner request, 2026-10-12), an interim response 30% tighter again
+ * and thinking bubbles at about a third of the base (owner requests,
+ * 2026-10-13), while the
+ * agentic tool and monitor cards and the compaction summary keep the base. The
+ * horizontal padding never reads the vertical token, so it cannot move with it.
  */
-describe("the tighter prompt and response padding", () => {
-  const SHRUNK = "calc(var(--bubble-pad-y-base)*0.7)";
+describe("the vertical padding ladder", () => {
+  const PROMPT = "calc(var(--bubble-pad-y-base)*0.7)";
+  const INTERIM = "calc(var(--bubble-pad-y-base)*0.49)";
+  const THINKING = "calc(var(--bubble-pad-y-base)*0.35)";
   const BASE = "var(--bubble-pad-y-base)";
 
-  /** The `--bubble-pad-y` the cascade hands a bubble of VARIANT. */
-  function padOf(variant: string): string {
+  /** The `--bubble-pad-y` the cascade hands a bubble of VARIANT, wearing CLASSES. */
+  function padOf(variant: string, classes: readonly string[] = []): string {
     const el = document.createElement("div");
-    el.className = "bubble";
+    el.classList.add("bubble", ...classes);
     el.setAttribute("data-role", BUBBLE_VARIANTS[variant as keyof typeof BUBBLE_VARIANTS]);
     el.setAttribute("data-variant", variant);
     return inDocument(el, () => cascadedValue(el, "--bubble-pad-y"));
   }
 
   const cases: readonly { variant: keyof typeof BUBBLE_VARIANTS; want: string }[] = [
-    { variant: "response", want: SHRUNK },
-    { variant: "user", want: SHRUNK },
-    { variant: "agent", want: SHRUNK },
-    { variant: "peer", want: SHRUNK },
-    { variant: "held", want: SHRUNK },
-    { variant: "thinking", want: BASE },
+    { variant: "response", want: PROMPT },
+    { variant: "user", want: PROMPT },
+    { variant: "agent", want: PROMPT },
+    { variant: "peer", want: PROMPT },
+    { variant: "held", want: PROMPT },
+    { variant: "thinking", want: THINKING },
     { variant: "agentic", want: BASE },
     { variant: "compaction", want: BASE },
   ];
@@ -4478,6 +4492,14 @@ describe("the tighter prompt and response padding", () => {
     expect(stated).toEqual(Object.keys(BUBBLE_VARIANTS).sort());
   });
 
+  it("gives an interim response 30% less than the green answer it is not", () => {
+    // Arrange / Act
+    const got = [padOf("response", ["interim-response"]), padOf("response", ["final-response"])];
+
+    // Assert
+    expect(got).toEqual([INTERIM, PROMPT]);
+  });
+
   it.each(cases)("gives a $variant bubble the expected vertical padding", ({ variant, want }) => {
     // Arrange / Act
     const got = padOf(variant);
@@ -4486,17 +4508,19 @@ describe("the tighter prompt and response padding", () => {
     expect(got).toBe(want);
   });
 
-  it("keys the tighter rule on exactly the prompt and response variants", () => {
+  it("keys each rung of the ladder on exactly its variants, and no other rule pads a variant", () => {
     // Arrange / Act
-    const rule = rulesOf(stylesheet).find((r) => /--bubble-pad-y\s*:/.test(r.declarations) && r.selectors[0] !== ".bubble");
+    const rungs = rulesOf(stylesheet)
+      .filter((r) => /--bubble-pad-y\s*:/.test(r.declarations) && r.selectors[0] !== ".bubble")
+      .map((r) => r.selectors);
 
     // Assert
-    expect(rule?.selectors).toEqual(TIGHTER_PAD_SELECTORS);
+    expect(rungs).toEqual(PAD_LADDER.map((rung) => rung.selectors));
   });
 
-  it("sets nothing but the vertical token on the tighter rule, so the horizontal padding stays the base rule's", () => {
+  it.each(PAD_LADDER)("sets nothing but the vertical token on the $selectors rung", ({ selectors }) => {
     // Arrange / Act
-    const props = (rulesOf(stylesheet).find((r) => r.selectors.join(",") === TIGHTER_PAD_SELECTORS.join(","))?.declarations ?? "")
+    const props = (rulesOf(stylesheet).find((r) => r.selectors.join(",") === selectors.join(","))?.declarations ?? "")
       .split(";")
       .map((decl) => decl.split(":")[0]?.trim() ?? "")
       .filter((prop) => prop !== "");
@@ -4552,8 +4576,12 @@ describe("the merge queue's header", () => {
     expect(inQueue(({ header }) => cascadedValue(header, "color"))).toBe("color-mix(in srgb, var(--muted) 70%, black)");
   });
 
-  it("sets the first row off from the column names by a thicker line", () => {
-    expect(inQueue(({ first }) => cascadedValue(first, "border-top-width"))).toBe("2px");
+  it("sets the first row off from the column names by a thicker line, the header's own border on the row's delimiter", () => {
+    // The extra pixel is the header's, so every row keeps one box height
+    // (test/webkit/merge-queue-columns.webkit.test.ts).
+    expect(
+      inQueue(({ header, first }) => [cascadedValue(header, "border-bottom-width"), cascadedValue(first, "border-top-width") === "2px"]),
+    ).toEqual(["1px", false]);
   });
 
   it("keeps the rows' own delimiter between the rows", () => {

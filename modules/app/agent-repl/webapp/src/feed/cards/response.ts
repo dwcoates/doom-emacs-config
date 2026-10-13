@@ -102,6 +102,7 @@ import { shouldShowMore } from "../bubble-more.js";
 import { tokenHeatColor } from "../../token-heat.js";
 import type { RowContext } from "./context.js";
 import { FINAL_RESPONSE_CLASS } from "../rows/turn-ended.js";
+import { easeIntoLook, readBubbleLook } from "../../bubble/collapse-motion.js";
 
 /** The attribute the shown length is carried on across a redraw. */
 export const REVEALED_ATTRIBUTE = "data-revealed";
@@ -239,6 +240,13 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   }
   // Read off the previous draw BEFORE the in-place redraw below reuses it.
   const resumed = revealedSoFar(rc.previous);
+  // A WHOLE RESPONSE TURNING INTERIM EASES INTO IT (collapse-motion.ts): the
+  // whole bubble's look is read here, while it still stands, and the interim
+  // bubble that replaces it animates from it.
+  const turningInterim =
+    rc.previous !== undefined && isInterimResponse(u) && !rc.previous.classList.contains(INTERIM_RESPONSE_CLASS)
+      ? readBubbleLook(rc.previous)
+      : undefined;
   const prose = markdownSlot(RESPONSE_PROSE_CLASS, markdown);
 
   // A RE-PUSH UPDATES THE BUBBLE IN PLACE (owner rule, 2026-09-23: the user
@@ -267,6 +275,9 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   // bubble by the corner's footprint. Set only while the bubble has a corner.
   if (corner === undefined) bubble.style.removeProperty(USAGE_RESERVE_LABELS_PROPERTY);
   else bubble.style.setProperty(USAGE_RESERVE_LABELS_PROPERTY, usageReserveLabelsCss());
+  if (turningInterim !== undefined && turningInterim.height > 0 && bubble !== rc.previous) {
+    easeIntoLook(bubble, turningInterim);
+  }
   bubble.toggleAttribute("data-thinking", u.thinking);
   bubble.toggleAttribute("data-notice", u.notice !== undefined);
   if (result.case === "update") {

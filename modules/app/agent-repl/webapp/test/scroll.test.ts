@@ -1687,6 +1687,97 @@ describe("observeScrollBox", () => {
     ]);
   });
 
+  it("parks the tail again when the browser moves a standing follow off it", async () => {
+    // Arrange — a standing follow at the tail of 1000 - 300.
+    const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    const tail = new TailFollow(box.element);
+    tail.initialPlacement();
+    observeScrollBox(box.element, tail);
+    const capture = captureLogRecords("info");
+    // Act — the browser pulls the box 16px up on its own, at an unchanged size.
+    box.element.scrollTop = 684;
+    box.element.dispatchEvent(new Event("scroll"));
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.feed-moved");
+    expect([box.top(), tail.isFollowing(), record.context]).toMatchObject([
+      700,
+      true,
+      { cause: "initialPlacement", from: 684, to: 700, follow: true },
+    ]);
+  });
+
+  it("parks the tail on the scroll event even when a render read the move first", () => {
+    // Arrange
+    const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    const tail = new TailFollow(box.element);
+    tail.initialPlacement();
+    observeScrollBox(box.element, tail);
+    // Act — a render asks before the browser's scroll event arrives.
+    box.element.scrollTop = 684;
+    tail.isFollowing();
+    box.element.dispatchEvent(new Event("scroll"));
+    // Assert
+    expect(box.top()).toBe(700);
+  });
+
+  it("leaves the reader's own move where the reader put it", () => {
+    // Arrange
+    const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    const tail = new TailFollow(box.element);
+    tail.initialPlacement();
+    observeScrollBox(box.element, tail);
+    // Act — a wheel precedes the movement.
+    box.element.dispatchEvent(new Event("wheel"));
+    box.element.scrollTop = 684;
+    box.element.dispatchEvent(new Event("scroll"));
+    // Assert
+    expect([box.top(), tail.isFollowing()]).toEqual([684, false]);
+  });
+
+  it("does not move a box no follow stands on", () => {
+    // Arrange — the reader scrolled away, so no follow stands.
+    const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    const tail = new TailFollow(box.element);
+    tail.initialPlacement();
+    observeScrollBox(box.element, tail);
+    box.element.dispatchEvent(new Event("wheel"));
+    box.element.scrollTop = 400;
+    box.element.dispatchEvent(new Event("scroll"));
+    // Act — the browser then moves the box on its own.
+    box.element.scrollTop = 384;
+    box.element.dispatchEvent(new Event("scroll"));
+    // Assert
+    expect([box.top(), tail.isFollowing()]).toEqual([384, false]);
+  });
+
+  it("does not park a move a release took over before its scroll event", () => {
+    // Arrange
+    const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    const tail = new TailFollow(box.element);
+    tail.initialPlacement();
+    observeScrollBox(box.element, tail);
+    // Act — the browser moves the box, then the reader steps the selection
+    // (which releases the follow) before the scroll event arrives.
+    box.element.scrollTop = 684;
+    tail.selectionMoved(null);
+    box.element.dispatchEvent(new Event("scroll"));
+    // Assert
+    expect([box.top(), tail.isFollowing()]).toEqual([684, false]);
+  });
+
+  it("leaves the box's clamp on shrinking content where the clamp put it", () => {
+    // Arrange
+    const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    const tail = new TailFollow(box.element);
+    tail.initialPlacement();
+    observeScrollBox(box.element, tail);
+    // Act — the content loses 100px and the box clamps to its new tail.
+    box.contentGrows(-100);
+    box.element.dispatchEvent(new Event("scroll"));
+    // Assert
+    expect([box.top(), tail.isFollowing()]).toEqual([600, true]);
+  });
+
   it("states the content's last change on a move no cause wrote", async () => {
     // Arrange — the stamp's text changes inside the box, then the box moves.
     const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });

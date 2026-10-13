@@ -1048,6 +1048,38 @@ message FeedSimpleToolCall {
     // is drawn in its place, which is the same foreground→detached
     // transition FeedRow.shell_head's own doc already describes.
   }
+  // The head's clock: how long the call has taken, counting up while it
+  // runs and stopped once it settles. UNSET when the producer stated no
+  // start for it; the head then draws no clock rather than one started from
+  // the client's own arrival.
+  optional FeedToolCardClock clock = 7;
+}
+// THE HEAD'S CLOCK, shared by every purple-titled tool card -- a tool call, a
+// question, a permission, a skill, a hook -- so every one of them states its
+// time the same way: it starts when the unit starts, counts up while the unit
+// is under way, and freezes the moment the unit settles. The client ticks it
+// on its own clock from the instants here; nothing about a running clock is
+// pushed, and nothing in a settled one ticks.
+message FeedToolCardClock {
+  // When the unit began, epoch ms, as the producer observed it: the call's
+  // start, the ask being posed, the skill being invoked, the hook starting.
+  int64 started_at_ms = 1;
+  // Whether the unit is still under way. The set arm IS the clock's state.
+  oneof span {
+    // Under way: the client counts up from started_at_ms.
+    FeedToolCardClockRunning running = 2;
+    // Settled: the client shows the span to ended_at_ms and never ticks it.
+    FeedToolCardClockStopped stopped = 3;
+  }
+}
+// The unit is under way. Empty: the arm is the fact, and the count is the
+// client's, from the clock's started_at_ms.
+message FeedToolCardClockRunning {}
+// The unit settled, and the clock stopped.
+message FeedToolCardClockStopped {
+  // When the unit settled, epoch ms, as the producer observed it. Never
+  // before the clock's started_at_ms.
+  int64 ended_at_ms = 1;
 }
 // The head's name element.
 message FeedToolCallName {
@@ -1157,11 +1189,10 @@ message FeedToolCallReturned {
     // not a sentinel.
     FeedToolCallNoOutput none = 10;
   }
-  // The settled clock — "ran 4.2 s" — composed by the daemon from the
-  // call's start and settle instants, drawn beside the badge. UNSET when
-  // either instant is missing; the card then shows no elapsed figure
-  // rather than a ticking or invented one.
-  optional FeedToolCallRuntime runtime = 9;
+  // Tag 9 is RETIRED: the settled clock is the head's FeedToolCardClock on
+  // FeedSimpleToolCall, which every tool card heads with.
+  reserved 9;
+  reserved "runtime";
   // The IDE's findings against this change, one composed line each, drawn
   // below the output. Present iff the edit raised any — a later re-push of
   // the settled card adds them when they arrive.
@@ -1172,11 +1203,6 @@ message FeedToolCallDiagnostics {
   // The composed lines ("render.ts:214 · error · 'x' is never used"),
   // client-capped.
   repeated string lines = 1;
-}
-// The settled clock element.
-message FeedToolCallRuntime {
-  // The composed sentence, drawn verbatim.
-  string text = 1;
 }
 // The call succeeded. Empty: the arm is the badge.
 message FeedToolCallSucceeded {}
@@ -1285,6 +1311,11 @@ message FeedSkill {
     // The permission gate refused it; nothing was loaded.
     FeedSkillDenied denied = 5;
   }
+  // The head's clock: how long the skill's load has taken, counting up while it
+  // loads and stopped once it settles. UNSET when the producer stated no
+  // start for it; the head then draws no clock rather than one started from
+  // the client's own arrival.
+  optional FeedToolCardClock clock = 6;
 }
 // The invocation-line element.
 message FeedSkillInvocation {
@@ -1338,6 +1369,11 @@ message FeedHook {
     // The hook itself failed; ordinary card with the capped output.
     FeedHookFailed failed = 4;
   }
+  // The head's clock: how long the hook has taken, counting up while it
+  // runs and stopped once it settles. UNSET when the producer stated no
+  // start for it; the head then draws no clock rather than one started from
+  // the client's own arrival.
+  optional FeedToolCardClock clock = 5;
 }
 // The headline element.
 message FeedHookHeadline {
@@ -2111,6 +2147,11 @@ message FeedPermission {
     FeedPermissionAnswered answered = 7;
     FeedPermissionAbandoned abandoned = 8;
   }
+  // The head's clock: how long the ask has taken, counting up while it
+  // waits on the user and stopped once it settles. UNSET when the producer stated no
+  // start for it; the head then draws no clock rather than one started from
+  // the client's own arrival.
+  optional FeedToolCardClock clock = 9;
 }
 // The headline element.
 message FeedPermissionHeadline {
@@ -2136,13 +2177,13 @@ message FeedPermissionArguments {
 }
 // The always-allow affordance marker. Empty: presence is the fact.
 message FeedPermissionStandingOffered {}
-// Open: awaiting the user. Empty — the card's chrome says waiting; how long
-// is the row's own clock concern (drawn from arrival, client-side).
+// Open: awaiting the user. Empty -- the head's badge says waiting, and the
+// head's clock (FeedPermission.clock) counts how long.
 message FeedPermissionOpen {}
 // Answered: how, and when.
 message FeedPermissionAnswered {
-  // When the answer landed, epoch ms.
-  int64 at_ms = 1;
+  reserved 1;
+  reserved "at_ms";
   // The verdict line's treatment. A DENIAL IS AN ANSWER, not an error.
   oneof answer {
     // Allowed for this call alone.
@@ -2181,8 +2222,8 @@ message FeedPermissionDeniedByPolicy {
 }
 // The ask went away unanswered — the turn ended, the session stopped.
 message FeedPermissionAbandoned {
-  // When it went away, epoch ms.
-  int64 at_ms = 1;
+  reserved 1;
+  reserved "at_ms";
 }
 
 // The question card: the turn blocked on a choice the agent posed — a batch
@@ -2201,6 +2242,11 @@ message FeedQuestion {
     FeedQuestionAnswered answered = 3;
     FeedQuestionExpired expired = 4;
   }
+  // The head's clock: how long the ask has taken, counting up while it
+  // waits on the user and stopped once it settles. UNSET when the producer stated no
+  // start for it; the head then draws no clock rather than one started from
+  // the client's own arrival.
+  optional FeedToolCardClock clock = 5;
 }
 // One question of the batch.
 message FeedQuestionItem {
@@ -2281,8 +2327,8 @@ message FeedQuestionDraft {
 // answers ride the row because the settled card is drawn from the row alone
 // — a cold repaint has nothing else to draw the choices from.
 message FeedQuestionAnswered {
-  // When the answers landed, epoch ms.
-  int64 at_ms = 1;
+  reserved 1;
+  reserved "at_ms";
   // One per question, in the batch's order.
   repeated FeedQuestionGivenAnswer answers = 2;
 }
@@ -2304,8 +2350,8 @@ message FeedQuestionOtherText {
 // The ask expired unanswered (the producer's idle timeout) — the agent
 // proceeded without a choice; drawn as expired, never as pending forever.
 message FeedQuestionExpired {
-  // When it expired, epoch ms.
-  int64 at_ms = 1;
+  reserved 1;
+  reserved "at_ms";
 }
 
 // ① What a person typed — or, nested inside a detached bubble, the prompt

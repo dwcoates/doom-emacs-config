@@ -25,7 +25,8 @@
  * computed the other way round: there is no client threshold on quietness and
  * no ticking clock on a settled call.
  */
-import { drawToolHead, drawToolName } from "./tool-head.js";
+import { drawToolExitLine } from "./exit-line.js";
+import { drawToolCardBadge, drawToolCardHead } from "./tool-head.js";
 import { createControl } from "../../control.js";
 import {
   type FeedCodeSpan,
@@ -52,7 +53,6 @@ import {
   type FeedToolCallOmitted,
   type FeedToolCallReturned,
   type FeedToolCallRunning,
-  type FeedToolCallRuntime,
   type FeedToolCallTextOutput,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { formatTickedAge } from "../../duration.js";
@@ -114,16 +114,20 @@ export function drawFeedSimpleToolCall(u: FeedSimpleToolCall, rc: RowContext): H
   card.className = "tool-card tool-fold";
   card.setAttribute("data-state", outcome.case);
 
-  const head = drawToolHead();
-  head.appendChild(drawFeedToolCallName(requireMessage(u.name, `${path}.name`), `${path}.name`));
-  card.appendChild(head);
-
   const callInput = requireMessage(u.input, `${path}.input`);
   // A SHELL's output is never markdown (markdown-output.ts): the input line's
   // form is the feed's structured word that this call ran a command.
   const shell = callInput.form.case === "command";
   const parts = drawOutcome(outcome, rc, path, card, shell);
-  head.appendChild(parts.badge);
+  card.appendChild(
+    drawToolCardHead({
+      title: drawFeedToolCallName(requireMessage(u.name, `${path}.name`), `${path}.name`),
+      badge: parts.badge,
+      clock: u.clock,
+      clockPath: `${path}.clock`,
+      ticker: rc.ctx.ticker,
+    }),
+  );
 
   const input = drawFeedToolCallInput(callInput, rc, `${path}.input`);
   card.appendChild(input);
@@ -166,13 +170,13 @@ function drawOutcome(
   }
 }
 
-/** ① The head's name, verbatim. */
-export function drawFeedToolCallName(u: FeedToolCallName, path: string): HTMLElement {
+/** ① The head's title: the tool's name, verbatim. */
+export function drawFeedToolCallName(u: FeedToolCallName, path: string): string {
   log.debug("drawing a tool call name", {
     operation: "feed.cards.tool-call.name",
     context: { path },
   });
-  return drawToolName(u.text);
+  return u.text;
 }
 
 /**
@@ -341,13 +345,11 @@ export function drawFeedToolCallRunning(
   rc: RowContext,
   path: string,
 ): OutcomeParts {
-  const badge = document.createElement("span");
-  badge.className = "badge run";
+  const badge = drawToolCardBadge("running…", ["run"]);
   const spinner = document.createElement("span");
   spinner.className = "tool-spinner";
   spinner.setAttribute("aria-hidden", "true");
-  badge.appendChild(spinner);
-  badge.appendChild(document.createTextNode("running…"));
+  badge.prepend(spinner);
 
   if (u.lastProgress === undefined) {
     log.debug("drawing a running tool call with no observed beat", {
@@ -416,19 +418,16 @@ export function drawFeedToolCallDenied(_u: FeedToolCallDenied, path: string): Ou
     operation: "feed.cards.tool-call.denied",
     context: { path },
   });
-  const badge = document.createElement("span");
-  badge.className = "badge perm";
-  badge.textContent = "denied";
-  return { badge, body: [] };
+  return { badge: drawToolCardBadge("denied", ["perm"]), body: [] };
 }
 
 /**
- * ③ The returned state: the verdict badge, the runtime beside it, the output
+ * ③ The returned state: the verdict badge, the shell's exit line, the output
  * section below the dashed divider, and the IDE's diagnostics under that.
  *
- * The runtime is appended to the HEAD (the card's element is handed in for
- * exactly that reason) because it belongs beside the badge it qualifies, while
- * the output belongs below the divider.
+ * The exit code is bespoke to a shell call, so it is CONTENT, never the head
+ * (owner ruling, 2026-10-13: a tool card's head is its title, badge and clock
+ * alone). It leads the content, and folds away with the output.
  */
 export function drawFeedToolCallReturned(
   u: FeedToolCallReturned,
@@ -456,24 +455,17 @@ export function drawFeedToolCallReturned(
         ? drawFeedToolCallFailed(`${path}.failed`)
         : unreachableArm(`${path}.verdict`, verdictArm);
 
-  const head = card.querySelector(".tool-head");
-  if (u.runtime !== undefined && head !== null) {
-    head.appendChild(drawFeedToolCallRuntime(u.runtime, `${path}.runtime`));
-  }
-  // THE EXIT CHIP IS THE DETACHED SHELL'S CHIP, drawn by the detached shell's
-  // own function on the same element. The two cards are the same command told
-  // twice, so a second chip renderer here could only drift from that one.
-  // Absence draws no chip at all — never a zero.
-  if (u.exit !== undefined && head !== null) {
-    head.appendChild(drawFeedToolCallExit(u.exit, `${path}.exit`));
-  }
-
   // The output FORM is a fact about the card, and the `none` arm draws nothing
   // at all — so the arm is stated on the card rather than inferred from whether
   // an output element happens to be there.
   card.setAttribute("data-output-form", form.case);
   const body = [...drawForm(form, rc, path, verdict.case === "failed", shell)];
   for (const element of body) element.setAttribute("data-output-body", "");
+  // THE EXIT CHIP IS THE DETACHED SHELL'S CHIP, drawn by the detached shell's
+  // own function on the same element. The two cards are the same command told
+  // twice, so a second chip renderer here could only drift from that one.
+  // Absence draws no line at all — never a zero.
+  if (u.exit !== undefined) body.unshift(drawToolExitLine(drawFeedToolCallExit(u.exit, `${path}.exit`)));
   if (u.diagnostics !== undefined) {
     body.push(drawFeedToolCallDiagnostics(u.diagnostics, `${path}.diagnostics`));
   }
@@ -568,10 +560,7 @@ export function drawFeedToolCallSucceeded(path: string): HTMLElement {
     operation: "feed.cards.tool-call.succeeded",
     context: { path },
   });
-  const badge = document.createElement("span");
-  badge.className = "badge ok";
-  badge.textContent = "done";
-  return badge;
+  return drawToolCardBadge("done", ["ok"]);
 }
 
 /** The err badge. The error TEXT is the output section's, in its own form. */
@@ -580,22 +569,7 @@ export function drawFeedToolCallFailed(path: string): HTMLElement {
     operation: "feed.cards.tool-call.failed",
     context: { path },
   });
-  const badge = document.createElement("span");
-  badge.className = "badge err";
-  badge.textContent = "error";
-  return badge;
-}
-
-/** The settled clock's composed sentence ("ran 4.2 s"), verbatim. */
-export function drawFeedToolCallRuntime(u: FeedToolCallRuntime, path: string): HTMLElement {
-  log.debug("drawing a tool call runtime", {
-    operation: "feed.cards.tool-call.runtime",
-    context: { path },
-  });
-  const runtime = document.createElement("span");
-  runtime.className = "tool-runtime";
-  runtime.textContent = u.text;
-  return runtime;
+  return drawToolCardBadge("error", ["err"]);
 }
 
 /**

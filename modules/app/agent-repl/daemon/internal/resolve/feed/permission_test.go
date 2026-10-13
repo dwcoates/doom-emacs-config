@@ -574,3 +574,75 @@ func TestAnOpenedAsksHeadlineSurvivesItsAnswer(t *testing.T) {
 		t.Fatalf("headline = %q, want the vendor's own sentence", got)
 	}
 }
+
+func TestAnAnsweredPermissionsClockStopsAtItsSettle(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.ask("ask-1", "unit-1", &conversationv1.AgentPermissionStart{
+		Prompt:    &conversationv1.AgentPermissionPrompt{Title: "Claude wants to read foo.txt"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Act.
+	h.ask("ask-1", "unit-1", &conversationv1.AgentPermissionSuccess{
+		Decision: &conversationv1.AgentPermissionSuccess_Allowed{
+			Allowed: &conversationv1.AgentPermissionAllowed{
+				Scope: &conversationv1.AgentPermissionAllowed_Once{Once: &conversationv1.AgentPermissionAllowedOnce{}},
+			},
+		},
+		SettledAt: settledAfter(12),
+	})
+
+	// Assert.
+	if start, end := clockOf(h.permissionCard().GetClock()); start != 1_000 || end != 13_000 {
+		t.Fatalf("clock spans %d..%d, want 1000..13000", start, end)
+	}
+}
+
+func TestAnAbandonedPermissionsClockStopsAtTheFailuresInstant(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.ask("ask-1", "unit-1", &conversationv1.AgentPermissionStart{
+		Prompt:    &conversationv1.AgentPermissionPrompt{Title: "Claude wants to read foo.txt"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Act.
+	h.ask("ask-1", "unit-1", &conversationv1.AgentPermissionFailure{
+		Error: &conversationv1.AgentToolFailure{SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: 4_000}},
+	})
+
+	// Assert.
+	if start, end := clockOf(h.permissionCard().GetClock()); start != 1_000 || end != 4_000 {
+		t.Fatalf("clock spans %d..%d, want 1000..4000", start, end)
+	}
+}
+
+func TestAPolicyDenialThatPosedNoAskHasNoClock(t *testing.T) {
+	// Arrange, Act: no start, and a settle with no instant.
+	h := newHarness(t)
+	h.ask("ask-1", "unit-1", &conversationv1.AgentPermissionSuccess{
+		Decision: &conversationv1.AgentPermissionSuccess_Denied{
+			Denied: &conversationv1.AgentPermissionDenied{},
+		},
+	})
+
+	// Assert.
+	if clock := h.permissionCard().Clock; clock != nil {
+		t.Fatalf("clock = %+v, want unset", clock)
+	}
+}
+
+func TestAnOpenPermissionsClockRunsFromItsStart(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.ask("ask-1", "unit-1", &conversationv1.AgentPermissionStart{
+		Prompt:    &conversationv1.AgentPermissionPrompt{Title: "Claude wants to read foo.txt"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Assert.
+	if clock := h.permissionCard().GetClock(); clock.GetRunning() == nil || clock.GetStartedAtMs() != 1_000 {
+		t.Fatalf("clock = %+v, want running from 1000", clock)
+	}
+}

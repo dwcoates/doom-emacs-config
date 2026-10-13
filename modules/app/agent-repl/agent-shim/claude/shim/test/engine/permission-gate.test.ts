@@ -33,6 +33,7 @@ const SUBAGENT = create(conversationv1.AgentIdSchema, { value: "agent-sub" });
 function gateWith(
   keepalive: (agentId: conversationv1.AgentId) => boolean = () => false,
   turn: (agentId: conversationv1.AgentId) => conversationv1.TurnId | undefined = () => undefined,
+  nowMs: () => number = () => 1000,
 ): { gate: PermissionGate; written: PersistEntry[]; modes: conversationv1.AgentPermissionMode[] } {
   const written: PersistEntry[] = [];
   const modes: conversationv1.AgentPermissionMode[] = [];
@@ -42,7 +43,7 @@ function gateWith(
     persist: (entries) => written.push(...entries),
     keepalive,
     turn,
-    nowMs: () => 1000,
+    nowMs,
     onPermissionModeSet: (mode) => modes.push(mode),
   });
   return { gate, written, modes };
@@ -1494,5 +1495,70 @@ describe("the asks a re-announcement states", () => {
 
     // Assert
     expect(asks).toEqual([]);
+  });
+});
+
+/** A clock reading each of READINGS in turn, then holding the last. */
+function clock(...readings: number[]): () => number {
+  let next = 0;
+  return () => readings[Math.min(next++, readings.length - 1)] ?? 0;
+}
+
+/** The settle instant on the SECOND frame written: an ask's success frame. */
+function settledAtOf(written: PersistEntry[]): { atMs: bigint; startedAtMs: bigint | undefined } | undefined {
+  const item = written[1]?.item;
+  if (item?.kind !== "frame" || item.frame.result.case !== "update") return undefined;
+  const update = item.frame.result.value.update;
+  const settled =
+    update.case === "question" && update.value.result.case === "success"
+      ? update.value.result.value.settledAt
+      : update.case === "permission" && update.value.result.case === "success"
+        ? update.value.result.value.settledAt
+        : undefined;
+  return settled === undefined ? undefined : { atMs: settled.atMs, startedAtMs: settled.startedAt?.atMs };
+}
+
+describe("the settle instant an ask states", () => {
+  it("stamps an answered question's settle with the ask's start restated", async () => {
+    // Arrange — posed at 1000, answered at 4000.
+    const { gate, written } = gateWith(undefined, undefined, clock(1000, 4000));
+    void gate.canUseTool(ASK_USER_QUESTION_TOOL, QUESTION_INPUT, callOptions());
+    await Promise.resolve();
+    // Act
+    gate.answerQuestion(create(conversationv1.AgentQuestionIdSchema, { value: "toolu_1" }), answers(["Pepperoni"]));
+    // Assert
+    expect(settledAtOf(written)).toEqual({ atMs: 4000n, startedAtMs: 1000n });
+  });
+
+  it("stamps a stood-down question's settle with the ask's start restated", async () => {
+    // Arrange
+    const { gate, written } = gateWith(undefined, undefined, clock(1000, 7000));
+    void gate.canUseTool(ASK_USER_QUESTION_TOOL, QUESTION_INPUT, callOptions());
+    await Promise.resolve();
+    // Act
+    gate.standDown("the session was killed");
+    // Assert
+    expect(settledAtOf(written)).toEqual({ atMs: 7000n, startedAtMs: 1000n });
+  });
+
+  it("stamps a decided permission's settle with the ask's start restated", async () => {
+    // Arrange
+    const { gate, written } = gateWith(undefined, undefined, clock(1000, 2500));
+    void gate.canUseTool("Bash", {}, callOptions());
+    await Promise.resolve();
+    // Act
+    gate.decidePermission(
+      create(conversationv1.AgentPermissionDecisionSchema, {
+        ask: create(conversationv1.AgentPermissionIdSchema, { value: "toolu_1" }),
+        decision: {
+          case: "allowed",
+          value: create(conversationv1.AgentPermissionAllowedSchema, {
+            scope: { case: "once", value: create(conversationv1.AgentPermissionAllowedOnceSchema, {}) },
+          }),
+        },
+      }),
+    );
+    // Assert
+    expect(settledAtOf(written)).toEqual({ atMs: 2500n, startedAtMs: 1000n });
   });
 });

@@ -24,11 +24,12 @@ import {
   drawFeedPermission,
   DENY_IN_EDITOR_HINT,
   PERMISSION_ANSWERED_ARMS,
-  WAITING_SINCE_ATTRIBUTE,
+
 } from "../../../src/feed/asks/permission.js";
+import { ASK_WAITING_WORD } from "../../../src/feed/asks/ask-words.js";
+import { runningClock, stoppedClock, toolCardHeadParts } from "../cards/tool-card-head-shape.js";
 import { armsOf } from "../arms.js";
 import { askHarness, ROW_ID, settle as drain, WORKSPACE } from "./harness.js";
-import { stopClocks } from "../../../src/feed/ticking.js";
 import { orderFor } from "../../feed-order.js";
 
 type InitState = MessageInitShape<typeof FeedPermissionSchema>["state"];
@@ -72,20 +73,45 @@ afterEach(() => {
 describe("the card's chrome", () => {
   it.each([
     ["open", { case: "open", value: {} }],
-    ["abandoned", { case: "abandoned", value: { atMs: 0n } }],
+    ["abandoned", { case: "abandoned", value: {} }],
   ] as const)("wears the tool card's chrome when %s, the headline where a call names its tool", (_s, state) => {
     const el = drawFeedPermission(permission(state), askHarness().rc);
     expect(el.classList.contains("tool-card")).toBe(true);
     expect(el.querySelector(".tool-head .tool-name.perm-headline")?.textContent).toBe(HEADLINE);
   });
 
-  it("draws the waiting clock in the head, where a call's badge sits", () => {
+  it("heads with the headline, the waiting badge and the running clock, in that order", () => {
+    // Arrange
+    vi.setSystemTime(45_000);
+    const u = permission({ case: "open", value: {} });
+    u.clock = runningClock(0);
+
+    // Act
+    const el = drawFeedPermission(u, askHarness().rc);
+
+    // Assert
+    expect(toolCardHeadParts(el)).toEqual([`title:${HEADLINE}`, `badge:${ASK_WAITING_WORD}`, "clock:45s"]);
+  });
+
+  it("heads with the verdict and the stopped clock once answered", () => {
+    // Arrange
+    const u = permission({ case: "answered", value: { answer: { case: "allowedOnce", value: {} } } });
+    u.clock = stoppedClock(1_000, 13_000);
+
+    // Act
+    const el = drawFeedPermission(u, askHarness().rc);
+
+    // Assert
+    expect(toolCardHeadParts(el)).toEqual([`title:${HEADLINE}`, "badge:allowed once", "clock:12s"]);
+  });
+
+  it("heads with no clock when the producer stated no start", () => {
     const el = drawFeedPermission(permission({ case: "open", value: {} }), askHarness().rc);
-    expect(el.querySelector(".tool-head .perm-waiting")).not.toBeNull();
+    expect(toolCardHeadParts(el)).toEqual([`title:${HEADLINE}`, `badge:${ASK_WAITING_WORD}`]);
   });
 
   it("draws no editor hint once the ask is settled", () => {
-    const el = drawFeedPermission(permission({ case: "abandoned", value: { atMs: 0n } }), askHarness().rc);
+    const el = drawFeedPermission(permission({ case: "abandoned", value: {} }), askHarness().rc);
     expect(el.querySelector("[data-ask-hint]")).toBeNull();
   });
 });
@@ -148,28 +174,6 @@ describe("the standing card", () => {
       askHarness().rc,
     );
     expect(el.querySelector('[data-permission="allowStanding"]')).not.toBeNull();
-  });
-
-  it("ticks a waiting clock from the row's first draw", () => {
-    vi.setSystemTime(10_000);
-    const el = drawFeedPermission(permission({ case: "open", value: {} }), askHarness().rc);
-    expect(el.querySelector(".perm-waiting")?.textContent).toBe("waiting 0s");
-  });
-
-  it("keeps the wait growing across a re-push rather than restarting it", () => {
-    const first = drawFeedPermission(permission({ case: "open", value: {} }), askHarness().rc);
-    vi.setSystemTime(45_000);
-    const second = drawFeedPermission(
-      permission({ case: "open", value: {} }),
-      askHarness({}, first).rc,
-    );
-    expect(second.querySelector(".perm-waiting")?.textContent).toBe("waiting 45s");
-  });
-
-  it("stamps the first-draw instant so the next draw can find it", () => {
-    vi.setSystemTime(7000);
-    const el = drawFeedPermission(permission({ case: "open", value: {} }), askHarness().rc);
-    expect(el.getAttribute(WAITING_SINCE_ATTRIBUTE)).toBe("7000");
   });
 });
 
@@ -368,13 +372,12 @@ describe("the settled card", () => {
         permission({
           case: "answered",
           value: create(FeedPermissionAnsweredSchema, {
-            atMs: 0n,
             answer: { case: c.arm, value: c.value } as never,
           }),
         }),
         askHarness().rc,
       );
-      expect(el.querySelector(".perm-verdict .badge")?.textContent).toBe(c.text);
+      expect(el.querySelector(".tool-head .badge")?.textContent).toBe(c.text);
     });
 
     it(`carries ${c.arm} as the verdict's arm`, () => {
@@ -382,13 +385,12 @@ describe("the settled card", () => {
         permission({
           case: "answered",
           value: create(FeedPermissionAnsweredSchema, {
-            atMs: 0n,
             answer: { case: c.arm, value: c.value } as never,
           }),
         }),
         askHarness().rc,
       );
-      expect(el.querySelector(".perm-verdict")?.getAttribute("data-arm")).toBe(c.arm);
+      expect(el.querySelector(".tool-head .badge")?.getAttribute("data-arm")).toBe(c.arm);
     });
   }
 
@@ -398,7 +400,6 @@ describe("the settled card", () => {
       permission({
         case: "answered",
         value: create(FeedPermissionAnsweredSchema, {
-          atMs: 0n,
           answer: {
             case: "deniedByUser",
             value: {
@@ -411,28 +412,22 @@ describe("the settled card", () => {
     );
   }
 
-  it("draws the user's denial as its neutral outcome marker, never the red badge (owner ruling 2026-10-06)", () => {
-    const el = deniedByUser();
-    const marker = el.querySelector(".perm-verdict .outcome-marker");
-    expect([marker?.getAttribute("data-family"), marker?.textContent, el.querySelector(".perm-verdict .badge")]).toEqual([
-      "neutral",
-      "◼permission denied by you",
-      null,
+  it("badges the user's denial neutrally, in the daemon's words, never in red (owner ruling 2026-10-06)", () => {
+    const badge = deniedByUser().querySelector(".tool-head .badge");
+    expect([badge?.textContent, badge?.classList.contains("muted"), badge?.classList.contains("err")]).toEqual([
+      "permission denied by you",
+      true,
+      false,
     ]);
   });
 
   it("carries deniedByUser as the verdict's arm", () => {
-    expect(deniedByUser().querySelector(".perm-verdict")?.getAttribute("data-arm")).toBe("deniedByUser");
-  });
-
-  it("still stamps when the user denied it", () => {
-    expect(deniedByUser().querySelector(".perm-verdict .perm-when")).not.toBeNull();
+    expect(deniedByUser().querySelector(".tool-head .badge")?.getAttribute("data-arm")).toBe("deniedByUser");
   });
 
   it("gives the undecidable denial its own verdict value, apart from the policy denial", () => {
     // Arrange
     const answered = create(FeedPermissionAnsweredSchema, {
-      atMs: 0n,
       answer: { case: "deniedUndecidable", value: { text: "denied for want of a decider" } },
     });
 
@@ -443,7 +438,7 @@ describe("the settled card", () => {
     );
 
     // Assert
-    expect(el.querySelector(".perm-verdict")?.getAttribute("data-permission-verdict")).toBe(
+    expect(el.querySelector(".tool-head .badge")?.getAttribute("data-permission-verdict")).toBe(
       "deniedUndecidable",
     );
   });
@@ -451,7 +446,6 @@ describe("the settled card", () => {
   it("does not style the undecidable denial as the user's own act", () => {
     // Arrange
     const answered = create(FeedPermissionAnsweredSchema, {
-      atMs: 0n,
       answer: { case: "deniedUndecidable", value: { text: "nobody could decide" } },
     });
 
@@ -463,7 +457,7 @@ describe("the settled card", () => {
 
     // Assert — the arm-specific class the user denial never wears.
     expect(
-      el.querySelector(".perm-verdict .badge")?.classList.contains("arm-deniedUndecidable"),
+      el.querySelector(".tool-head .badge")?.classList.contains("arm-deniedUndecidable"),
     ).toBe(true);
   });
 
@@ -477,65 +471,24 @@ describe("the settled card", () => {
     const el = drawFeedPermission(
       permission({
         case: "answered",
-        value: { atMs: 0n, answer: { case: "allowedOnce", value: {} } },
+        value: { answer: { case: "allowedOnce", value: {} } },
       }),
       askHarness().rc,
     );
     expect(el.querySelector("[data-permission]")).toBeNull();
   });
 
-  it("stamps when the answer landed", () => {
-    vi.setSystemTime(60_000);
-    const el = drawFeedPermission(
-      permission({
-        case: "answered",
-        value: { atMs: 0n, answer: { case: "allowedOnce", value: {} } },
-      }),
-      askHarness().rc,
-    );
-    expect(el.querySelector(".perm-when")?.textContent).toBe("1m ago");
-  });
-
-  it("keeps ticking the stamp after its turn's clocks are stopped", async () => {
-    vi.setSystemTime(0);
-    const el = drawFeedPermission(
-      permission({
-        case: "answered",
-        value: { atMs: 0n, answer: { case: "allowedOnce", value: {} } },
-      }),
-      askHarness().rc,
-    );
-    document.body.append(el);
-    stopClocks(el);
-    await vi.advanceTimersByTimeAsync(5_000);
-    expect(el.querySelector(".perm-when")?.textContent).toBe("5s ago");
-  });
-
-  it("reads the stamp's nearest second when a tick samples just short of one", () => {
-    // Arrange + Act: the answer instant does not share the shared ticker's phase.
-    vi.setSystemTime(4920);
-    const el = drawFeedPermission(
-      permission({
-        case: "answered",
-        value: { atMs: 0n, answer: { case: "allowedOnce", value: {} } },
-      }),
-      askHarness().rc,
-    );
-    // Assert: five real seconds ago reads 5s, not the lagging 4s.
-    expect(el.querySelector(".perm-when")?.textContent).toBe("5s ago");
-  });
-
   it("draws an abandoned ask as gone, not as pending", () => {
     const el = drawFeedPermission(
-      permission({ case: "abandoned", value: { atMs: 0n } }),
+      permission({ case: "abandoned", value: {} }),
       askHarness().rc,
     );
-    expect(el.querySelector(".perm-verdict")?.getAttribute("data-arm")).toBe("abandoned");
+    expect(el.querySelector(".tool-head .badge")?.getAttribute("data-arm")).toBe("abandoned");
   });
 
   it("offers no buttons on an abandoned ask", () => {
     const el = drawFeedPermission(
-      permission({ case: "abandoned", value: { atMs: 0n } }),
+      permission({ case: "abandoned", value: {} }),
       askHarness().rc,
     );
     expect(el.querySelector("[data-permission]")).toBeNull();
@@ -564,7 +517,7 @@ describe("drawFeedPermission malformed input", () => {
   });
 
   it("refuses an answered card whose answer oneof is unset", () => {
-    const u = permission({ case: "answered", value: { atMs: 0n } });
+    const u = permission({ case: "answered", value: {} });
     expect(() => drawFeedPermission(u, askHarness().rc)).toThrow(MalformedView);
   });
 
@@ -644,7 +597,7 @@ describe("an answered verdict this build cannot read", () => {
     // Arrange
     const u = permission({
       case: "answered",
-      value: { atMs: 0n, answer: { case: "allowedOnce", value: {} } },
+      value: { answer: { case: "allowedOnce", value: {} } },
     });
     (
       u.state as unknown as { value: { answer: { case: string; value: unknown } } }

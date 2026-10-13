@@ -21,12 +21,12 @@ import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { bootColdOnce, startHarness, type Harness } from "./harness";
+import { HARNESS_EPOCH_MS, bootColdOnce, startHarness, type Harness } from "./harness";
 import { log } from "../../src/log";
 import { TITLE_REVEALED_ATTRIBUTE } from "../../src/feed/title-reveal.js";
 import { CONVERSATION_DRAWN_ATTRIBUTE } from "../../src/feed/conversation-drawn.js";
 import { ROOT_FEED } from "./fake-daemon";
-import { WORKSPACE_ID, activityRow, feedId, toolCallRunningUnit } from "./fixtures";
+import { PERMISSION_POSED_AT_MS, WORKSPACE_ID, activityRow, feedId, toolCallRunningUnit } from "./fixtures";
 
 let harness: Harness | undefined;
 let restoreFetch: (() => void) | undefined;
@@ -206,5 +206,11 @@ describe("the boot's drawn mark", () => {
     await harness.stop();
     // Assert
     expect(document.documentElement.hasAttribute(CONVERSATION_DRAWN_ATTRIBUTE)).toBe(false);
+  });
+});
+
+describe("the fixtures' instants", () => {
+  it("poses the permission fixture's ask at the harness clock's first instant", () => {
+    expect(PERMISSION_POSED_AT_MS).toBe(BigInt(HARNESS_EPOCH_MS));
   });
 });

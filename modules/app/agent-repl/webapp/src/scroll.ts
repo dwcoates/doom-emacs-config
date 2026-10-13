@@ -335,6 +335,17 @@ function rowName(row: Element): string {
  *   same pass (`compensate`), so a change is never counted twice;
  * - a reader following the tail holds no anchor: the follow keeps the tail.
  *
+ * A MOVE NOBODY MADE IS UNDONE WHILE A FOLLOW STANDS (2026-10-13). WebKit
+ * moves the box on its own -- a layout after an in-flow text change measures
+ * the content short and clamps the position, then restores the height but not
+ * the position -- with no reader input and no change in size, so neither the
+ * reader nor a resize names it. A standing follow means "the view is at the
+ * tail", so such a move is a follow that no longer holds: `sync` marks it
+ * (`strayed`), and the scroll event that reports it parks the tail again under
+ * the follow's own cause, before the frame is painted. A reader's own move
+ * always has input behind it and ends the follow instead, and a reader off the
+ * tail has no follow to restore, so this never moves a reader who scrolled.
+ *
  * It measures BEFORE it re-takes, on the scroll event too. A layout read
  * between a height change and its resize callback (any scroll handler's)
  * already carries the change, so an anchor taken from it would hide the change
@@ -348,6 +359,8 @@ export class TailFollow {
   private lastTop: number;
   /** Whether the READER has reached this box since the tail was last parked. */
   private touched = false;
+  /** Whether the box moved off a standing follow with no reader input, awaiting its scroll event. */
+  private strayed = false;
   /** Whether a reply selection is active, holding the latest-visible latch off. */
   private selectionActive = false;
   /** Whether the held-off latch was last reported, so it is reported once per spell. */
@@ -526,6 +539,10 @@ export class TailFollow {
    */
   onScroll(): void {
     this.sync();
+    if (this.strayed) {
+      this.strayed = false;
+      if (this.following && this.cause !== null) this.park(this.cause);
+    }
     this.reanchor("scroll");
     this.latchIfLatestVisible("scroll");
   }
@@ -607,6 +624,7 @@ export class TailFollow {
     this.cause = cause;
     this.anchor = null;
     this.latestHidden = false;
+    this.strayed = false;
     // The reader's last input spoke about a position this park has replaced.
     this.touched = false;
     // A follow that found the box already at its tail moved nothing, and is
@@ -806,6 +824,7 @@ export class TailFollow {
     this.sync();
     this.following = false;
     this.cause = null;
+    this.strayed = false;
   }
 
   /**
@@ -839,6 +858,9 @@ export class TailFollow {
           ...(this.witness() ?? { mutated: "none" }),
         },
       });
+      // A standing follow the browser moved off: its scroll event parks the
+      // tail again (`onScroll`).
+      if (this.following) this.strayed = true;
     }
     // The reader's movement ends a standing follow unless it went DOWN and
     // landed at the tail: any upward pixel ends it (a flick upward starts with

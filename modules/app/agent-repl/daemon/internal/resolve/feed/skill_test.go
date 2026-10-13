@@ -356,3 +356,58 @@ func TestASkillFailureKeepsTheHeldStartsArguments(t *testing.T) {
 		t.Fatalf("invocation = %q, want the held start's full line", got)
 	}
 }
+
+func TestALoadedSkillsClockStopsAtItsSettle(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.skillFrame("unit-1", &conversationv1.AgentSkillUseStart{
+		Skill:     &conversationv1.AgentSkillName{Name: "graphify"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Act.
+	h.skillFrame("unit-1", &conversationv1.AgentSkillUseSuccess{
+		Skill:     &conversationv1.AgentSkillName{Name: "graphify"},
+		Document:  &conversationv1.AgentSkillDocument{Markdown: "# doc"},
+		SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: 1_340},
+	})
+
+	// Assert.
+	if start, end := clockOf(h.skillCard().GetClock()); start != 1_000 || end != 1_340 {
+		t.Fatalf("clock spans %d..%d, want 1000..1340", start, end)
+	}
+}
+
+func TestAFailedSkillsClockStopsAtTheFailuresInstant(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.skillFrame("unit-1", &conversationv1.AgentSkillUseStart{
+		Skill:     &conversationv1.AgentSkillName{Name: "graphify"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Act.
+	h.skillFrame("unit-1", &conversationv1.AgentSkillUseFailure{
+		Skill: &conversationv1.AgentSkillName{Name: "graphify"},
+		Error: &conversationv1.AgentToolFailure{SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: 3_000}},
+	})
+
+	// Assert.
+	if start, end := clockOf(h.skillCard().GetClock()); start != 1_000 || end != 3_000 {
+		t.Fatalf("clock spans %d..%d, want 1000..3000", start, end)
+	}
+}
+
+func TestAnInvokedSkillsClockRunsFromItsStart(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.skillFrame("unit-1", &conversationv1.AgentSkillUseStart{
+		Skill:     &conversationv1.AgentSkillName{Name: "graphify"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Assert.
+	if clock := h.skillCard().GetClock(); clock.GetRunning() == nil || clock.GetStartedAtMs() != 1_000 {
+		t.Fatalf("clock = %+v, want running from 1000", clock)
+	}
+}

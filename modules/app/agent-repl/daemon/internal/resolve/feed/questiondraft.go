@@ -477,6 +477,7 @@ func (r *resolver) publishOpenQuestion(s *wsState, served *questionState) {
 		Row: &frontendv1.FeedRow_Question{Question: &frontendv1.FeedQuestion{
 			Questions: questionItems(served.batch),
 			State:     &frontendv1.FeedQuestion_Open{Open: openState(served)},
+			Clock:     runningClock(served.startedAtMs),
 		}},
 	}
 	r.stampTurn(s, row, served.turn)
