@@ -1926,7 +1926,57 @@ describe("turn heads", () => {
 
     // Assert.
     const page = response.result.case === "success" ? response.result.value.page : undefined;
-    expect(page?.turnHeads.map((head) => head.at?.value)).toEqual(["1"]);
+    expect(page?.heads.map((head) => head.line?.at?.value)).toEqual(["1"]);
+  });
+
+  it("says a head is adjacent when the page's lowest line follows it directly", async () => {
+    // Arrange: a one-line page holds only the turn's one step.
+    const { client } = await store({ pageSize: 1 });
+    await write(client, stamped(pageLineEntry("a", "prompt:t1", "t1"), "t1"));
+    await write(client, stamped(spawnEntry("a", "spawn-1", "sub-1"), "t1"));
+
+    // Act.
+    const response = await client.openAgentSession(
+      create(storev1.OpenAgentSessionRequestSchema, { agent: agentId("a"), pageOnly: true }),
+    );
+
+    // Assert.
+    const page = response.result.case === "success" ? response.result.value.page : undefined;
+    expect(page?.heads.map((head) => head.between.case)).toEqual(["adjacent"]);
+  });
+
+  it("says a head has steps between when a line of its turn sits below the page", async () => {
+    // Arrange: a one-line page holds the turn's newest step; the older one sits between.
+    const { client } = await store({ pageSize: 1 });
+    await write(client, stamped(pageLineEntry("a", "prompt:t1", "t1"), "t1"));
+    await write(client, stamped(spawnEntry("a", "spawn-1", "sub-1"), "t1"));
+    await write(client, stamped(spawnEntry("a", "spawn-2", "sub-2"), "t1"));
+
+    // Act.
+    const response = await client.openAgentSession(
+      create(storev1.OpenAgentSessionRequestSchema, { agent: agentId("a"), pageOnly: true }),
+    );
+
+    // Assert.
+    const page = response.result.case === "success" ? response.result.value.page : undefined;
+    expect(page?.heads.map((head) => head.between.case)).toEqual(["stepsBetween"]);
+  });
+
+  it("says a head is adjacent when only another turn's lines sit between", async () => {
+    // Arrange: a one-line page holds t1's step; t2's line sits between t1's prompt and it.
+    const { client } = await store({ pageSize: 1 });
+    await write(client, stamped(pageLineEntry("a", "prompt:t1", "t1"), "t1"));
+    await write(client, stamped(spawnEntry("a", "spawn-2", "sub-2"), "t2"));
+    await write(client, stamped(spawnEntry("a", "spawn-1", "sub-1"), "t1"));
+
+    // Act.
+    const response = await client.openAgentSession(
+      create(storev1.OpenAgentSessionRequestSchema, { agent: agentId("a"), pageOnly: true }),
+    );
+
+    // Assert.
+    const page = response.result.case === "success" ? response.result.value.page : undefined;
+    expect(page?.heads.map((head) => head.between.case)).toEqual(["adjacent"]);
   });
 
   it("serves no head on a page that holds its turn's prompt", async () => {
@@ -1944,6 +1994,6 @@ describe("turn heads", () => {
     );
 
     // Assert.
-    expect(response.result.case === "success" ? response.result.value.turnHeads : undefined).toEqual([]);
+    expect(response.result.case === "success" ? response.result.value.heads : undefined).toEqual([]);
   });
 });
