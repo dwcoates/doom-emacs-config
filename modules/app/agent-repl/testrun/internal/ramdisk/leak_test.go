@@ -546,3 +546,47 @@ func TestHostLine(t *testing.T) {
 		})
 	}
 }
+
+func TestTimeProbe(t *testing.T) {
+	failing := errors.New("did not answer")
+	tests := []struct {
+		name string
+		out  string
+		err  error
+	}{
+		{name: "an answer", out: "framework : 1\n"},
+		{name: "a failure", out: "partial", err: failing},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			m := newManager(t, &fakeHost{})
+			start := m.Now()
+
+			// Act
+			out, took, err := m.timeProbe(start, func() (string, error) { return tc.out, tc.err })
+
+			// Assert
+			if out != tc.out || !errors.Is(err, tc.err) || took != time.Second {
+				t.Fatalf("timeProbe = %q, %v, %s; want %q, %v, 1s", out, err, took, tc.out, tc.err)
+			}
+		})
+	}
+}
+
+func TestSetupTimesBothProbesThroughTimeProbe(t *testing.T) {
+	// Arrange
+	src, err := os.ReadFile("leak.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	setup := string(src)[strings.Index(string(src), "func (m Manager) Setup("):]
+	setup = setup[:strings.Index(setup, "\n}\n")]
+
+	// Assert
+	if strings.Count(setup, "m.timeProbe(") != 2 || strings.Contains(setup, ".Sub(start)") {
+		t.Fatalf("Setup times its probes by hand; want both through timeProbe")
+	}
+}
