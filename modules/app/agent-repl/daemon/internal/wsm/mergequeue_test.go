@@ -2,6 +2,7 @@ package wsm
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
@@ -1351,5 +1352,96 @@ func TestPrioritizeMergeRefusesAWorkspaceNotInTheQueue(t *testing.T) {
 	// Assert
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("PrioritizeMerge = %v, want ErrNotFound", err)
+	}
+}
+
+func TestEntryPlaceReadsTheEntrysPlaceAndState(t *testing.T) {
+	// Each case builds a queue and reads the place of the merge named "m".
+	tests := []struct {
+		name      string
+		steps     []moveStep
+		wantState MergeQueueState
+	}{
+		{name: "a waiting merge", steps: []moveStep{{"a", "queued"}, {"m", "queued"}}, wantState: MergeQueued},
+		{name: "a front merge waits too", steps: []moveStep{{"m", "front"}}, wantState: MergeQueued},
+		{name: "the admitted merge", steps: []moveStep{{"m", "admitted"}}, wantState: MergeAdmitted},
+		{name: "a merge only requested", steps: []moveStep{{"m", "requested"}}, wantState: MergeRequested},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			repo := RepoKey(t.TempDir())
+			named := buildMoveQueue(t, s, repo, tt.steps)
+			key, err := normalizeRepoKey(repo)
+			if err != nil {
+				t.Fatalf("normalizeRepoKey: %v", err)
+			}
+			entries, err := s.MergeQueue(context.Background(), repo)
+			if err != nil {
+				t.Fatalf("MergeQueue: %v", err)
+			}
+			var wantSeq int64
+			err = s.write(context.Background(), "daemon.wsm.test", nil, func(ctx context.Context, tx *sql.Tx) error {
+				return tx.QueryRowContext(ctx, `SELECT seq FROM merge_queue WHERE repo_key = ? AND workspace_id = ?`, key, named["m"]).Scan(&wantSeq)
+			})
+			if err != nil || len(entries) == 0 {
+				t.Fatalf("read the entry's seq: %v (%d entries)", err, len(entries))
+			}
+
+			// Act
+			var seq int64
+			var state MergeQueueState
+			err = s.write(context.Background(), "daemon.wsm.test", nil, func(ctx context.Context, tx *sql.Tx) error {
+				var err error
+				seq, state, err = entryPlace(ctx, tx, key, named["m"])
+				return err
+			})
+
+			// Assert
+			if err != nil || seq != wantSeq || state != tt.wantState {
+				t.Fatalf("entryPlace = %d, %v, %v; want %d, %v", seq, state, err, wantSeq, tt.wantState)
+			}
+		})
+	}
+}
+
+func TestEntryPlaceRefusesAWorkspaceNotInTheQueue(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	repo := RepoKey(t.TempDir())
+	key, err := normalizeRepoKey(repo)
+	if err != nil {
+		t.Fatalf("normalizeRepoKey: %v", err)
+	}
+	ws := testWorkspace(t, s)
+
+	// Act
+	err = s.write(context.Background(), "daemon.wsm.test", nil, func(ctx context.Context, tx *sql.Tx) error {
+		_, _, err := entryPlace(ctx, tx, key, ws.ID)
+		return err
+	})
+
+	// Assert
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("entryPlace = %v, want ErrNotFound", err)
+	}
+}
+
+func TestEveryReorderingReadsItsPlaceThroughEntryPlace(t *testing.T) {
+	// Arrange
+	code, err := os.ReadFile("mergequeue.go")
+	if err != nil {
+		t.Fatalf("read mergequeue.go: %v", err)
+	}
+
+	// Act
+	reads := strings.Count(string(code), "SELECT state, seq FROM merge_queue WHERE repo_key = ? AND workspace_id = ?")
+	calls := strings.Count(string(code), "entryPlace(ctx, tx, key, id)")
+
+	// Assert: the helper's own query, and one call per reordering (move,
+	// prioritize, and the yield's read of both racers).
+	if reads != 1 || calls != 3 {
+		t.Fatalf("state/seq reads = %d, entryPlace calls = %d; want 1 and 3", reads, calls)
 	}
 }
