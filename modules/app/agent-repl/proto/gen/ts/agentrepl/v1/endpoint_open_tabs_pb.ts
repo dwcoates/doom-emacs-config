@@ -27,6 +27,8 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { RosterRow } from "../../frontend/v1/sidebar_pb";
+import { file_frontend_v1_sidebar } from "../../frontend/v1/sidebar_pb";
 import type { WorkspaceRef } from "../../workspace/v1/workspace_pb";
 import { file_workspace_v1_workspace } from "../../workspace/v1/workspace_pb";
 import type { Message } from "@bufbuild/protobuf";
@@ -35,7 +37,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_open_tabs.proto.
  */
 export const file_agentrepl_v1_endpoint_open_tabs: GenFile = /*@__PURE__*/
-  fileDesc("CiVhZ2VudHJlcGwvdjEvZW5kcG9pbnRfb3Blbl90YWJzLnByb3RvEgxhZ2VudHJlcGwudjEiRgoPT3BlblRhYnNSZXF1ZXN0EjMKCndvcmtzcGFjZXMYASADKAsyHy5hZ2VudHJlcGwudjEuT3BlblRhYnNXb3Jrc3BhY2UisAEKEU9wZW5UYWJzV29ya3NwYWNlEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSNAoHbG9hZGluZxgCIAEoCzIhLmFnZW50cmVwbC52MS5PcGVuVGFic1BhZ2VMb2FkaW5nSAASLgoEbm9uZRgDIAEoCzIeLmFnZW50cmVwbC52MS5PcGVuVGFic1BhZ2VOb25lSABCBgoEcGFnZSIVChNPcGVuVGFic1BhZ2VMb2FkaW5nIhIKEE9wZW5UYWJzUGFnZU5vbmUiqwEKEE9wZW5UYWJzUmVzcG9uc2USKgoEc3RlcBgBIAEoCzIaLmFnZW50cmVwbC52MS5PcGVuVGFic1N0ZXBIABIuCgZvcGVuZWQYAiABKAsyHC5hZ2VudHJlcGwudjEuT3BlblRhYnNPcGVuZWRIABIyCghmaW5pc2hlZBgDIAEoCzIeLmFnZW50cmVwbC52MS5PcGVuVGFic0ZpbmlzaGVkSABCBwoFZnJhbWUi8wUKDE9wZW5UYWJzU3RlcBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEg0KBWF0X21zGAIgASgDEkUKEHN0YXJ0aW5nX3Nlc3Npb24YAyABKAsyKS5hZ2VudHJlcGwudjEuT3BlblRhYnNTdGVwU3RhcnRpbmdTZXNzaW9uSAASMgoGd2FraW5nGAQgASgLMiAuYWdlbnRyZXBsLnYxLk9wZW5UYWJzU3RlcFdha2luZ0gAEjYKCHJlc3VtaW5nGAUgASgLMiIuYWdlbnRyZXBsLnYxLk9wZW5UYWJzU3RlcFJlc3VtaW5nSAASQwoPdmVuZG9yX3JldHJ5aW5nGAYgASgLMiguYWdlbnRyZXBsLnYxLk9wZW5UYWJzU3RlcFZlbmRvclJldHJ5aW5nSAASQwoPdmVuZG9yX3JlamVjdGVkGAcgASgLMiguYWdlbnRyZXBsLnYxLk9wZW5UYWJzU3RlcFZlbmRvclJlamVjdGVkSAASPwoNdmVuZG9yX2ZhaWxlZBgIIAEoCzImLmFnZW50cmVwbC52MS5PcGVuVGFic1N0ZXBWZW5kb3JGYWlsZWRIABI3Cgljb2xkX2dhdGUYCSABKAsyIi5hZ2VudHJlcGwudjEuT3BlblRhYnNTdGVwQ29sZEdhdGVIABI0CgdvZmZsaW5lGAogASgLMiEuYWdlbnRyZXBsLnYxLk9wZW5UYWJzU3RlcE9mZmxpbmVIABIyCgZzZXJ2ZWQYCyABKAsyIC5hZ2VudHJlcGwudjEuT3BlblRhYnNTdGVwU2VydmVkSAASQQoOcGFnZV9jb25uZWN0ZWQYDCABKAsyJy5hZ2VudHJlcGwudjEuT3BlblRhYnNTdGVwUGFnZUNvbm5lY3RlZEgAEjkKCnBhZ2VfZHJhd24YDSABKAsyIy5hZ2VudHJlcGwudjEuT3BlblRhYnNTdGVwUGFnZURyYXduSABCBgoEc3RlcCIdChtPcGVuVGFic1N0ZXBTdGFydGluZ1Nlc3Npb24iFAoST3BlblRhYnNTdGVwV2FraW5nIhYKFE9wZW5UYWJzU3RlcFJlc3VtaW5nIi0KGk9wZW5UYWJzU3RlcFZlbmRvclJldHJ5aW5nEg8KB2F0dGVtcHQYASABKA0iKwoaT3BlblRhYnNTdGVwVmVuZG9yUmVqZWN0ZWQSDQoFY2F1c2UYASABKAkiGgoYT3BlblRhYnNTdGVwVmVuZG9yRmFpbGVkIhYKFE9wZW5UYWJzU3RlcENvbGRHYXRlIhUKE09wZW5UYWJzU3RlcE9mZmxpbmUiFAoST3BlblRhYnNTdGVwU2VydmVkIhsKGU9wZW5UYWJzU3RlcFBhZ2VDb25uZWN0ZWQiFwoVT3BlblRhYnNTdGVwUGFnZURyYXduIrECCg5PcGVuVGFic09wZW5lZBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEg0KBWF0X21zGAIgASgDEjIKBXJlYWR5GAMgASgLMiEuYWdlbnRyZXBsLnYxLk9wZW5UYWJzT3BlbmVkUmVhZHlIABI0CgZmYWlsZWQYBCABKAsyIi5hZ2VudHJlcGwudjEuT3BlblRhYnNPcGVuZWRGYWlsZWRIABI0CgZoaWRkZW4YBSABKAsyIi5hZ2VudHJlcGwudjEuT3BlblRhYnNPcGVuZWRIaWRkZW5IABI2CgdyZWZ1c2VkGAYgASgLMiMuYWdlbnRyZXBsLnYxLk9wZW5UYWJzT3BlbmVkUmVmdXNlZEgAQgkKB291dGNvbWUiFQoTT3BlblRhYnNPcGVuZWRSZWFkeSImChRPcGVuVGFic09wZW5lZEZhaWxlZBIOCgZyZWFzb24YASABKAkiFgoUT3BlblRhYnNPcGVuZWRIaWRkZW4i1AIKFU9wZW5UYWJzT3BlbmVkUmVmdXNlZBJKChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzItLmFnZW50cmVwbC52MS5PcGVuVGFic1JlZnVzZWRVbmtub3duV29ya3NwYWNlSAASUwoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIxLmFnZW50cmVwbC52MS5PcGVuVGFic1JlZnVzZWRXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkoKEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMi0uYWdlbnRyZXBsLnYxLk9wZW5UYWJzUmVmdXNlZFRyYW5zZmVycmluZ0F3YXlIABJFCg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyKi5hZ2VudHJlcGwudjEuT3BlblRhYnNSZWZ1c2VkTm90WWV0QWRvcHRlZEgAQgcKBWNhdXNlIiEKH09wZW5UYWJzUmVmdXNlZFVua25vd25Xb3Jrc3BhY2UiOwojT3BlblRhYnNSZWZ1c2VkV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjIKH09wZW5UYWJzUmVmdXNlZFRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIeChxPcGVuVGFic1JlZnVzZWROb3RZZXRBZG9wdGVkImcKEE9wZW5UYWJzRmluaXNoZWQSDQoFcmVhZHkYASABKA0SDQoFdG90YWwYAiABKA0SNQoGZmFpbGVkGAMgAygLMiUuYWdlbnRyZXBsLnYxLk9wZW5UYWJzRmFpbGVkV29ya3NwYWNlIlYKF09wZW5UYWJzRmFpbGVkV29ya3NwYWNlEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSDAoEbmFtZRgCIAEoCUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
+  fileDesc("CiVhZ2VudHJlcGwvdjEvZW5kcG9pbnRfb3Blbl90YWJzLnByb3RvEgxhZ2VudHJlcGwudjEiRgoPT3BlblRhYnNSZXF1ZXN0EjMKCndvcmtzcGFjZXMYASADKAsyHy5hZ2VudHJlcGwudjEuT3BlblRhYnNXb3Jrc3BhY2UisAEKEU9wZW5UYWJzV29ya3NwYWNlEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSNAoHbG9hZGluZxgCIAEoCzIhLmFnZW50cmVwbC52MS5PcGVuVGFic1BhZ2VMb2FkaW5nSAASLgoEbm9uZRgDIAEoCzIeLmFnZW50cmVwbC52MS5PcGVuVGFic1BhZ2VOb25lSABCBgoEcGFnZSIVChNPcGVuVGFic1BhZ2VMb2FkaW5nIhIKEE9wZW5UYWJzUGFnZU5vbmUiqwEKEE9wZW5UYWJzUmVzcG9uc2USKgoEc3RlcBgBIAEoCzIaLmFnZW50cmVwbC52MS5PcGVuVGFic1N0ZXBIABIuCgZvcGVuZWQYAiABKAsyHC5hZ2VudHJlcGwudjEuT3BlblRhYnNPcGVuZWRIABIyCghmaW5pc2hlZBgDIAEoCzIeLmFnZW50cmVwbC52MS5PcGVuVGFic0ZpbmlzaGVkSABCBwoFZnJhbWUihAcKDE9wZW5UYWJzU3RlcBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEg0KBWF0X21zGAIgASgDEkUKEHN0YXJ0aW5nX3Nlc3Npb24YAyABKAsyKS5hZ2VudHJlcGwudjEuT3BlblRhYnNTdGVwU3RhcnRpbmdTZXNzaW9uSAASMgoGd2FraW5nGAQgASgLMiAuYWdlbnRyZXBsLnYxLk9wZW5UYWJzU3RlcFdha2luZ0gAEjYKCHJlc3VtaW5nGAUgASgLMiIuYWdlbnRyZXBsLnYxLk9wZW5UYWJzU3RlcFJlc3VtaW5nSAASQwoPdmVuZG9yX3JldHJ5aW5nGAYgASgLMiguYWdlbnRyZXBsLnYxLk9wZW5UYWJzU3RlcFZlbmRvclJldHJ5aW5nSAASQwoPdmVuZG9yX3JlamVjdGVkGAcgASgLMiguYWdlbnRyZXBsLnYxLk9wZW5UYWJzU3RlcFZlbmRvclJlamVjdGVkSAASPwoNdmVuZG9yX2ZhaWxlZBgIIAEoCzImLmFnZW50cmVwbC52MS5PcGVuVGFic1N0ZXBWZW5kb3JGYWlsZWRIABI3Cgljb2xkX2dhdGUYCSABKAsyIi5hZ2VudHJlcGwudjEuT3BlblRhYnNTdGVwQ29sZEdhdGVIABI0CgdvZmZsaW5lGAogASgLMiEuYWdlbnRyZXBsLnYxLk9wZW5UYWJzU3RlcE9mZmxpbmVIABIyCgZzZXJ2ZWQYCyABKAsyIC5hZ2VudHJlcGwudjEuT3BlblRhYnNTdGVwU2VydmVkSAASQQoOcGFnZV9jb25uZWN0ZWQYDCABKAsyJy5hZ2VudHJlcGwudjEuT3BlblRhYnNTdGVwUGFnZUNvbm5lY3RlZEgAEjkKCnBhZ2VfZHJhd24YDSABKAsyIy5hZ2VudHJlcGwudjEuT3BlblRhYnNTdGVwUGFnZURyYXduSAASRwoRY29udmVyc2F0aW9uX3JlYWQYDiABKAsyKi5hZ2VudHJlcGwudjEuT3BlblRhYnNTdGVwQ29udmVyc2F0aW9uUmVhZEgAEkYKEXJlc3VtaW5nX2N1dF90dXJuGA8gASgLMikuYWdlbnRyZXBsLnYxLk9wZW5UYWJzU3RlcFJlc3VtaW5nQ3V0VHVybkgAQgYKBHN0ZXAiHQobT3BlblRhYnNTdGVwU3RhcnRpbmdTZXNzaW9uIhQKEk9wZW5UYWJzU3RlcFdha2luZyIWChRPcGVuVGFic1N0ZXBSZXN1bWluZyItChpPcGVuVGFic1N0ZXBWZW5kb3JSZXRyeWluZxIPCgdhdHRlbXB0GAEgASgNIisKGk9wZW5UYWJzU3RlcFZlbmRvclJlamVjdGVkEg0KBWNhdXNlGAEgASgJIhoKGE9wZW5UYWJzU3RlcFZlbmRvckZhaWxlZCIWChRPcGVuVGFic1N0ZXBDb2xkR2F0ZSIVChNPcGVuVGFic1N0ZXBPZmZsaW5lIhQKEk9wZW5UYWJzU3RlcFNlcnZlZCIbChlPcGVuVGFic1N0ZXBQYWdlQ29ubmVjdGVkIhcKFU9wZW5UYWJzU3RlcFBhZ2VEcmF3biIeChxPcGVuVGFic1N0ZXBDb252ZXJzYXRpb25SZWFkIh0KG09wZW5UYWJzU3RlcFJlc3VtaW5nQ3V0VHVybiKxAgoOT3BlblRhYnNPcGVuZWQSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhINCgVhdF9tcxgCIAEoAxIyCgVyZWFkeRgDIAEoCzIhLmFnZW50cmVwbC52MS5PcGVuVGFic09wZW5lZFJlYWR5SAASNAoGZmFpbGVkGAQgASgLMiIuYWdlbnRyZXBsLnYxLk9wZW5UYWJzT3BlbmVkRmFpbGVkSAASNAoGaGlkZGVuGAUgASgLMiIuYWdlbnRyZXBsLnYxLk9wZW5UYWJzT3BlbmVkSGlkZGVuSAASNgoHcmVmdXNlZBgGIAEoCzIjLmFnZW50cmVwbC52MS5PcGVuVGFic09wZW5lZFJlZnVzZWRIAEIJCgdvdXRjb21lIlMKE09wZW5UYWJzT3BlbmVkUmVhZHkSIwoDcm93GAEgASgLMhYuZnJvbnRlbmQudjEuUm9zdGVyUm93EhcKD3Jvc3Rlcl9yZXZpc2lvbhgCIAEoBCJkChRPcGVuVGFic09wZW5lZEZhaWxlZBIOCgZyZWFzb24YASABKAkSIwoDcm93GAIgASgLMhYuZnJvbnRlbmQudjEuUm9zdGVyUm93EhcKD3Jvc3Rlcl9yZXZpc2lvbhgDIAEoBCIWChRPcGVuVGFic09wZW5lZEhpZGRlbiLUAgoVT3BlblRhYnNPcGVuZWRSZWZ1c2VkEkoKEXVua25vd25fd29ya3NwYWNlGAEgASgLMi0uYWdlbnRyZXBsLnYxLk9wZW5UYWJzUmVmdXNlZFVua25vd25Xb3Jrc3BhY2VIABJTChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMjEuYWdlbnRyZXBsLnYxLk9wZW5UYWJzUmVmdXNlZFdvcmtzcGFjZVJlZk1pc21hdGNoSAASSgoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyLS5hZ2VudHJlcGwudjEuT3BlblRhYnNSZWZ1c2VkVHJhbnNmZXJyaW5nQXdheUgAEkUKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIqLmFnZW50cmVwbC52MS5PcGVuVGFic1JlZnVzZWROb3RZZXRBZG9wdGVkSABCBwoFY2F1c2UiIQofT3BlblRhYnNSZWZ1c2VkVW5rbm93bldvcmtzcGFjZSI7CiNPcGVuVGFic1JlZnVzZWRXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiMgofT3BlblRhYnNSZWZ1c2VkVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIh4KHE9wZW5UYWJzUmVmdXNlZE5vdFlldEFkb3B0ZWQiZwoQT3BlblRhYnNGaW5pc2hlZBINCgVyZWFkeRgBIAEoDRINCgV0b3RhbBgCIAEoDRI1CgZmYWlsZWQYAyADKAsyJS5hZ2VudHJlcGwudjEuT3BlblRhYnNGYWlsZWRXb3Jrc3BhY2UiVgoXT3BlblRhYnNGYWlsZWRXb3Jrc3BhY2USLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIMCgRuYW1lGAIgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_frontend_v1_sidebar, file_workspace_v1_workspace]);
 
 /**
  * The workspaces the editor wants open.
@@ -303,6 +305,24 @@ export type OpenTabsStep = Message<"agentrepl.v1.OpenTabsStep"> & {
      */
     value: OpenTabsStepPageDrawn;
     case: "pageDrawn";
+  } | {
+    /**
+     * Its conversation's newest page was read whole: the page and every
+     * turn prompt its rows belong to ("conversation read.").
+     *
+     * @generated from field: agentrepl.v1.OpenTabsStepConversationRead conversation_read = 14;
+     */
+    value: OpenTabsStepConversationRead;
+    case: "conversationRead";
+  } | {
+    /**
+     * A turn the daemon's own stand-down cut (a restart, a bounce) is being
+     * resumed ("resuming the turn the restart cut…").
+     *
+     * @generated from field: agentrepl.v1.OpenTabsStepResumingCutTurn resuming_cut_turn = 15;
+     */
+    value: OpenTabsStepResumingCutTurn;
+    case: "resumingCutTurn";
   } | { case: undefined; value?: undefined };
 };
 
@@ -491,6 +511,36 @@ export const OpenTabsStepPageDrawnSchema: GenMessage<OpenTabsStepPageDrawn> = /*
   messageDesc(file_agentrepl_v1_endpoint_open_tabs, 16);
 
 /**
+ * The conversation's newest page was read whole.
+ *
+ * @generated from message agentrepl.v1.OpenTabsStepConversationRead
+ */
+export type OpenTabsStepConversationRead = Message<"agentrepl.v1.OpenTabsStepConversationRead"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenTabsStepConversationRead.
+ * Use `create(OpenTabsStepConversationReadSchema)` to create a new message.
+ */
+export const OpenTabsStepConversationReadSchema: GenMessage<OpenTabsStepConversationRead> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 17);
+
+/**
+ * A turn the daemon's own stand-down cut is being resumed.
+ *
+ * @generated from message agentrepl.v1.OpenTabsStepResumingCutTurn
+ */
+export type OpenTabsStepResumingCutTurn = Message<"agentrepl.v1.OpenTabsStepResumingCutTurn"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenTabsStepResumingCutTurn.
+ * Use `create(OpenTabsStepResumingCutTurnSchema)` to create a new message.
+ */
+export const OpenTabsStepResumingCutTurnSchema: GenMessage<OpenTabsStepResumingCutTurn> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 18);
+
+/**
  * One workspace is open.
  *
  * Sent ONCE per workspace of the request, as soon as that workspace is open,
@@ -522,8 +572,11 @@ export type OpenTabsOpened = Message<"agentrepl.v1.OpenTabsOpened"> & {
    */
   outcome: {
     /**
-     * Served, and its page drawn when one was loading: show the tab
-     * ("<name>: ready.").
+     * EVERYTHING THE WORKSPACE NEEDS IS DONE (owner ruling, 2026-10-12):
+     * its session served, its conversation's newest page read whole
+     * (`conversation_read`), any turn the daemon's own stand-down cut
+     * resumed (started again, not finished), and its page drawn when one was
+     * loading. Show the tab ("<name>: ready.").
      *
      * @generated from field: agentrepl.v1.OpenTabsOpenedReady ready = 3;
      */
@@ -563,14 +616,32 @@ export type OpenTabsOpened = Message<"agentrepl.v1.OpenTabsOpened"> & {
  * Use `create(OpenTabsOpenedSchema)` to create a new message.
  */
 export const OpenTabsOpenedSchema: GenMessage<OpenTabsOpened> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 17);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 19);
 
 /**
- * Served (and drawn). DELIBERATELY EMPTY: the arm is the outcome.
+ * Everything the workspace needs is done.
  *
  * @generated from message agentrepl.v1.OpenTabsOpenedReady
  */
 export type OpenTabsOpenedReady = Message<"agentrepl.v1.OpenTabsOpenedReady"> & {
+  /**
+   * THE WORKSPACE'S ROSTER ROW AS OF THIS ANSWER: its status, name and
+   * markers, so the tab is drawn true from the frame that opens it rather
+   * than from the next roster push. The roster stream carries every later
+   * change.
+   *
+   * @generated from field: frontend.v1.RosterRow row = 1;
+   */
+  row?: RosterRow | undefined;
+
+  /**
+   * The revision of the roster `row` was taken from (WorkspaceRoster.revision):
+   * a consumer that already holds that revision or a later one already holds
+   * this row or a newer one, and keeps what it has.
+   *
+   * @generated from field: uint64 roster_revision = 2;
+   */
+  rosterRevision: bigint;
 };
 
 /**
@@ -578,7 +649,7 @@ export type OpenTabsOpenedReady = Message<"agentrepl.v1.OpenTabsOpenedReady"> & 
  * Use `create(OpenTabsOpenedReadySchema)` to create a new message.
  */
 export const OpenTabsOpenedReadySchema: GenMessage<OpenTabsOpenedReady> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 18);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 20);
 
 /**
  * The service-level start failed.
@@ -592,6 +663,21 @@ export type OpenTabsOpenedFailed = Message<"agentrepl.v1.OpenTabsOpenedFailed"> 
    * @generated from field: string reason = 1;
    */
   reason: string;
+
+  /**
+   * The workspace's roster row as of this answer, drawing the failure; as
+   * OpenTabsOpenedReady.row.
+   *
+   * @generated from field: frontend.v1.RosterRow row = 2;
+   */
+  row?: RosterRow | undefined;
+
+  /**
+   * As OpenTabsOpenedReady.roster_revision.
+   *
+   * @generated from field: uint64 roster_revision = 3;
+   */
+  rosterRevision: bigint;
 };
 
 /**
@@ -599,7 +685,7 @@ export type OpenTabsOpenedFailed = Message<"agentrepl.v1.OpenTabsOpenedFailed"> 
  * Use `create(OpenTabsOpenedFailedSchema)` to create a new message.
  */
 export const OpenTabsOpenedFailedSchema: GenMessage<OpenTabsOpenedFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 19);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 21);
 
 /**
  * Not visible, so nothing was started. DELIBERATELY EMPTY.
@@ -614,7 +700,7 @@ export type OpenTabsOpenedHidden = Message<"agentrepl.v1.OpenTabsOpenedHidden"> 
  * Use `create(OpenTabsOpenedHiddenSchema)` to create a new message.
  */
 export const OpenTabsOpenedHiddenSchema: GenMessage<OpenTabsOpenedHidden> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 20);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 22);
 
 /**
  * The daemon refused to open the workspace.
@@ -667,7 +753,7 @@ export type OpenTabsOpenedRefused = Message<"agentrepl.v1.OpenTabsOpenedRefused"
  * Use `create(OpenTabsOpenedRefusedSchema)` to create a new message.
  */
 export const OpenTabsOpenedRefusedSchema: GenMessage<OpenTabsOpenedRefused> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 21);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 23);
 
 /**
  * The workspace id is not in the daemon's registry. DELIBERATELY EMPTY.
@@ -682,7 +768,7 @@ export type OpenTabsRefusedUnknownWorkspace = Message<"agentrepl.v1.OpenTabsRefu
  * Use `create(OpenTabsRefusedUnknownWorkspaceSchema)` to create a new message.
  */
 export const OpenTabsRefusedUnknownWorkspaceSchema: GenMessage<OpenTabsRefusedUnknownWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 22);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 24);
 
 /**
  * The echoed dir disagrees with the registry's dir for this id.
@@ -703,7 +789,7 @@ export type OpenTabsRefusedWorkspaceRefMismatch = Message<"agentrepl.v1.OpenTabs
  * Use `create(OpenTabsRefusedWorkspaceRefMismatchSchema)` to create a new message.
  */
 export const OpenTabsRefusedWorkspaceRefMismatchSchema: GenMessage<OpenTabsRefusedWorkspaceRefMismatch> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 23);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 25);
 
 /**
  * This daemon released the workspace to a successor.
@@ -724,7 +810,7 @@ export type OpenTabsRefusedTransferringAway = Message<"agentrepl.v1.OpenTabsRefu
  * Use `create(OpenTabsRefusedTransferringAwaySchema)` to create a new message.
  */
 export const OpenTabsRefusedTransferringAwaySchema: GenMessage<OpenTabsRefusedTransferringAway> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 24);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 26);
 
 /**
  * A joining daemon has not finished adopting this workspace yet.
@@ -740,7 +826,7 @@ export type OpenTabsRefusedNotYetAdopted = Message<"agentrepl.v1.OpenTabsRefused
  * Use `create(OpenTabsRefusedNotYetAdoptedSchema)` to create a new message.
  */
 export const OpenTabsRefusedNotYetAdoptedSchema: GenMessage<OpenTabsRefusedNotYetAdopted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 25);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 27);
 
 /**
  * Every workspace of the request has had its `opened`.
@@ -776,7 +862,7 @@ export type OpenTabsFinished = Message<"agentrepl.v1.OpenTabsFinished"> & {
  * Use `create(OpenTabsFinishedSchema)` to create a new message.
  */
 export const OpenTabsFinishedSchema: GenMessage<OpenTabsFinished> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 26);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 28);
 
 /**
  * A workspace that opened with a service-level failure.
@@ -804,5 +890,5 @@ export type OpenTabsFailedWorkspace = Message<"agentrepl.v1.OpenTabsFailedWorksp
  * Use `create(OpenTabsFailedWorkspaceSchema)` to create a new message.
  */
 export const OpenTabsFailedWorkspaceSchema: GenMessage<OpenTabsFailedWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 27);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 29);
 

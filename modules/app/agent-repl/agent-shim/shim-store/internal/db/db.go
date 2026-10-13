@@ -943,7 +943,14 @@ var lineageIndexes = []struct{ name, ddl string }{
 // the table would have held had it existed when they were written. A fresh
 // database runs it too, over no rows. It never runs against a database that
 // already carries the table, so it is a one-time step per database.
-var inPlaceTables = []struct{ name, ddl, backfill string }{
+// A TABLE WHOSE BOOKKEEPING LIVES INSIDE THE STORED FRAMES carries its backfill
+// as Go instead (`backfillRows`): SQL cannot open a frame, so the rows are
+// read and decoded in the same transaction as the create. It runs exactly when
+// a SQL backfill would.
+var inPlaceTables = []struct {
+	name, ddl, backfill string
+	backfillRows        func(context.Context, *sql.Tx) error
+}{
 	// THE FILE PLANE'S CONVERSION BOOKKEEPING, one row per cursor (store.v1
 	// CursorConversion): the conversion version every byte below the cursor's
 	// offset was converted under, and — while a re-derivation is in progress —
@@ -955,7 +962,7 @@ var inPlaceTables = []struct{ name, ddl, backfill string }{
   file_id         TEXT    PRIMARY KEY,
   version         INTEGER NOT NULL,
   healing_through INTEGER
-)`, ""},
+)`, "", nil},
 	// THE CONVERSATION PLACE EVERY BOOK IS ORDERED BY (conversation.v1
 	// ConversationPlace), one row per row that has a book: the `entry` row at
 	// `position`, its book (copied, because the page order is an index over
@@ -987,7 +994,7 @@ var inPlaceTables = []struct{ name, ddl, backfill string }{
 );
 CREATE INDEX IF NOT EXISTS entry_place_book_order ON entry_place(book_agent_id, at_ms, ordinal, position)`,
 		`INSERT INTO entry_place (position, book_agent_id, at_ms, ordinal, recorded)
-  SELECT position, book_agent_id, first_inserted_at_ms, 0, 0 FROM entry WHERE book_agent_id IS NOT NULL`},
+  SELECT position, book_agent_id, first_inserted_at_ms, 0, 0 FROM entry WHERE book_agent_id IS NOT NULL`, nil},
 	// THE SHELL RUN CLAIMS (store.v1 ShellRunClaim): the vendor's task id —
 	// the name of a detached shell's spool — paired with the run, as the shim
 	// read both off the vendor's task stream (EntryBatch.shell_run_claims). The
@@ -1001,7 +1008,20 @@ CREATE INDEX IF NOT EXISTS entry_place_book_order ON entry_place(book_agent_id, 
   run_id         TEXT    NOT NULL,
   recorded_at_ms INTEGER NOT NULL,
   PRIMARY KEY (vendor_task_id, run_id)
-)`, ""},
+)`, "", nil},
+	// THE PROMPT LINE OF EVERY TURN, by book and turn: the index a page's turn
+	// heads are read through (turnhead.go). One row per page line whose item is
+	// a prompt and whose row is stamped with a turn, at the row's position.
+	// writeTurnPrompt is its one writer, in the write's own transaction.
+	//
+	// WHY IN PLACE AND NOT A VERSION BUMP: as for entry_place, a bump nukes the
+	// owner's database and every stream-plane row in it.
+	//
+	// ITS BACKFILL DECODES THE STORED FRAMES, because the turn and the item arm
+	// live only there (the frame is a blob the store never unpacks into DDL);
+	// backfillTurnPrompts reads every page line once, in the create's own
+	// transaction.
+	{turnPromptTable, turnPromptDDL, "", backfillTurnPrompts},
 }
 
 // indexMigrationError is a failure to build a missing lineage index or
@@ -1018,7 +1038,7 @@ func (e *indexMigrationError) Unwrap() error { return e.err }
 // compared against what is on disk so a database carrying the RIGHT version
 // stamp on the WRONG shape — a half-applied create, a hand-edited file, a
 // binary that crashed between DROP and CREATE — is nuked rather than trusted.
-var schemaTables = []string{"agent", "cursor", "cursor_conversion", "detached_work", "entry", "entry_place", "residue_shapes", "schema_meta", "shell_run_claim", "vendor_task", "workflow", "write_ledger"}
+var schemaTables = []string{"agent", "cursor", "cursor_conversion", "detached_work", "entry", "entry_place", "residue_shapes", "schema_meta", "shell_run_claim", "turn_prompt", "vendor_task", "workflow", "write_ledger"}
 
 // shapeTables is a table set with the in-place tables taken out: the part of a
 // database's shape that must match EXACTLY, because the in-place tables are the
@@ -1183,7 +1203,7 @@ func (d *DB) createSchema(ctx context.Context) error {
 	// SAME transaction as the rest, so no database this binary creates is ever
 	// without them.
 	for _, table := range inPlaceTables {
-		if err := createInPlaceTable(ctx, tx, table.name, table.ddl, table.backfill); err != nil {
+		if err := createInPlaceTable(ctx, tx, table.name, table.ddl, table.backfill, table.backfillRows); err != nil {
 			return err
 		}
 	}
@@ -1290,7 +1310,7 @@ func (d *DB) ensureInPlaceTables(ctx context.Context, path string, present []str
 		if !contains(missing, table.name) {
 			continue
 		}
-		if err := createInPlaceTable(ctx, tx, table.name, table.ddl, table.backfill); err != nil {
+		if err := createInPlaceTable(ctx, tx, table.name, table.ddl, table.backfill, table.backfillRows); err != nil {
 			return fail(err)
 		}
 	}
@@ -1305,9 +1325,14 @@ func (d *DB) ensureInPlaceTables(ctx context.Context, path string, present []str
 // createInPlaceTable creates one in-place table and runs its backfill, if it
 // has one, inside the caller's transaction, so the table never exists without
 // the bookkeeping its reader relies on.
-func createInPlaceTable(ctx context.Context, tx *sql.Tx, name, ddl, backfill string) error {
+func createInPlaceTable(ctx context.Context, tx *sql.Tx, name, ddl, backfill string, backfillRows func(context.Context, *sql.Tx) error) error {
 	if _, err := tx.ExecContext(ctx, ddl); err != nil {
 		return storagef(err, "creating table %s", name)
+	}
+	if backfillRows != nil {
+		if err := backfillRows(ctx, tx); err != nil {
+			return storagef(err, "backfilling table %s", name)
+		}
 	}
 	if backfill == "" {
 		return nil

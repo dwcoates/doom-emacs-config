@@ -516,4 +516,14 @@ message AgentSessionPage {
     ReadAgentPageMore more = 2;
     ReadAgentPageFloor floor = 3;
   }
+  // THE PROMPTS OF THE TURNS THIS PAGE TOUCHES THAT SIT BELOW IT, so the page
+  // draws whole in one read (owner ruling, 2026-10-12: the newest page is
+  // read complete before a workspace is answered open). For every turn a line
+  // of this page is stamped with whose prompt line (the line holding the
+  // turn's UserPrompt entry) is placed below this page, that prompt line,
+  // newest first; each turn at most once. A turn whose prompt is on this page,
+  // or that the store holds no prompt line for, has none here. A head is ALSO
+  // an ordinary line of an older page: a reader walking older meets it again,
+  // and absorbs it by identity.
+  repeated StoreLineAt turn_heads = 4;
 }

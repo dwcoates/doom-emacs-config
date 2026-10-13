@@ -8,6 +8,7 @@ import (
 	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
@@ -41,6 +42,18 @@ type Deps struct {
 	// lock, so its edges reach the roster in the order the set changed; it
 	// must not call back into the coordinator.
 	Opening func(ws ids.WorkspaceID, opening bool)
+	// ReadConversation reads the workspace's root feed's newest page whole,
+	// through the feed resolver's own loading, so the page is held and the
+	// page's OpenFeed serves it from memory (feed.Resolver.ReadNewest). It is
+	// called once the workspace is served, off the run's goroutine.
+	ReadConversation func(ctx context.Context, ws ids.WorkspaceID) error
+	// Owed reports whether the daemon's own stand-down left the workspace a
+	// cut turn to resume (wsm.DB.OwedTurns), read once an open that brings
+	// the workspace up has joined, so the open knows to wait for it.
+	Owed func(ctx context.Context, ws ids.WorkspaceID) (bool, error)
+	// Row answers the workspace's roster row as the roster last resolved it,
+	// with that roster's revision (sidebar.Resolver.Row), for the answer.
+	Row func(ws ids.WorkspaceID) (*frontendv1.RosterRow, uint64, bool)
 	// Now stamps every frame.
 	Now func() time.Time
 	// Log is the global logger: an open is the editor's, no workspace's.
@@ -93,6 +106,9 @@ type Coordinator struct {
 	pages   map[string]*page
 	opening map[ids.WorkspaceID]int
 	runs    map[*run]struct{}
+	// resuming are the workspaces whose owed resumption is being delivered
+	// right now: claimed (ResumeStarting) and not yet ended.
+	resuming map[ids.WorkspaceID]bool
 }
 
 // New builds a coordinator, refusing a missing collaborator.
@@ -104,17 +120,24 @@ func New(deps Deps) (*Coordinator, error) {
 		return nil, errors.New("opentabs: the bring-up is required")
 	case deps.Opening == nil:
 		return nil, errors.New("opentabs: the roster's opening marker is required")
+	case deps.ReadConversation == nil:
+		return nil, errors.New("opentabs: the conversation read is required")
+	case deps.Owed == nil:
+		return nil, errors.New("opentabs: the owed-resumption read is required")
+	case deps.Row == nil:
+		return nil, errors.New("opentabs: the roster row is required")
 	case deps.Now == nil:
 		return nil, errors.New("opentabs: a clock is required")
 	case deps.Log == nil:
 		return nil, errors.New("opentabs: a logger is required")
 	}
 	return &Coordinator{
-		deps:    deps,
-		phases:  map[ids.WorkspaceID]*phase{},
-		pages:   map[string]*page{},
-		opening: map[ids.WorkspaceID]int{},
-		runs:    map[*run]struct{}{},
+		deps:     deps,
+		phases:   map[ids.WorkspaceID]*phase{},
+		pages:    map[string]*page{},
+		opening:  map[ids.WorkspaceID]int{},
+		runs:     map[*run]struct{}{},
+		resuming: map[ids.WorkspaceID]bool{},
 	}, nil
 }
 
@@ -147,6 +170,64 @@ func (c *Coordinator) Step(ws ids.WorkspaceID, step Step) {
 	})
 	for _, r := range runs {
 		r.post(note{ws: ws, step: &step})
+	}
+}
+
+// ResumeKind is what a session-up release did about the cut turn the
+// workspace is owed (promptqueue.ResumeKind, translated where it is wired).
+type ResumeKind int
+
+const (
+	// ResumeStarting is the owed resumption claimed and being delivered.
+	ResumeStarting ResumeKind = iota + 1
+	// ResumeStarted is the resumed turn started.
+	ResumeStarted
+	// ResumeFailed is a resumption that could not be claimed or delivered.
+	ResumeFailed
+	// ResumeNotNow is a release that resumed nothing now.
+	ResumeNotNow
+)
+
+// String names the kind for the records.
+func (k ResumeKind) String() string {
+	switch k {
+	case ResumeStarting:
+		return "starting"
+	case ResumeStarted:
+		return "started"
+	case ResumeFailed:
+		return "failed"
+	case ResumeNotNow:
+		return "not_now"
+	default:
+		return fmt.Sprintf("resume(%d)", int(k))
+	}
+}
+
+// Resume is one release's account of the cut turn a workspace is owed.
+type Resume struct {
+	Kind ResumeKind
+	// Text is a failure's cause, or why nothing was resumed now.
+	Text string
+}
+
+// Resumption takes one session-up release's account of a workspace's owed
+// cut turn. Every open of the workspace hears it; one that began while a
+// resumption was being delivered knows it from the coordinator's own record.
+func (c *Coordinator) Resumption(ws ids.WorkspaceID, resume Resume) {
+	c.mu.Lock()
+	if resume.Kind == ResumeStarting {
+		c.resuming[ws] = true
+	} else {
+		delete(c.resuming, ws)
+	}
+	runs := c.runsLocked()
+	c.mu.Unlock()
+	c.deps.Log.Debug(op, "a session-up release accounted for the cut turn its workspace is owed", dlog.Context{
+		dlog.KeyWorkspaceID: string(ws), "resume": resume.Kind.String(), "text": resume.Text,
+	})
+	for _, r := range runs {
+		r.post(note{ws: ws, resume: &resume})
 	}
 }
 
@@ -291,6 +372,11 @@ type note struct {
 	connected bool
 	// drawn is a page of the workspace having drawn.
 	drawn bool
+	// resume is a release's account of the workspace's owed cut turn.
+	resume *Resume
+	// read is the conversation read having returned, with its error.
+	read    bool
+	readErr error
 }
 
 // run is one open, for one stream.
@@ -334,6 +420,21 @@ type slot struct {
 	ready    bool
 	// tracked is a workspace this open marks `opening` until it is answered.
 	tracked bool
+	// bringing is a bring-up of it under way or asked for by this open: the
+	// session-up release that pays an owed cut turn is still to come.
+	bringing bool
+	// reading is the conversation read started; read is it done.
+	reading bool
+	read    bool
+	// awaitResume holds `ready` until the release that pays the owed cut turn
+	// has accounted for it; resumingTold is `resuming_cut_turn` sent.
+	awaitResume  bool
+	resumingTold bool
+	// fault is a failure of the open's own work (the read, the resumption),
+	// which answers the workspace `failed` whether or not it was served.
+	fault string
+	// failedWith is the reason the workspace was answered `failed`.
+	failedWith string
 }
 
 // Emit sends one frame; an error is the client gone.
@@ -373,13 +474,27 @@ func (c *Coordinator) Run(ctx context.Context, workspaces []Workspace, emit Emit
 			// another open's): its steps reach this run, and how far it has
 			// got is known.
 			sl.served = p.serving
+			sl.bringing = true
 		case c.deps.Live(id):
 			sl.served = true
 		default:
 			pending = append(pending, id)
+			sl.bringing = true
+		}
+		// A RESUMPTION BEING DELIVERED AS THE RUN JOINS is waited for: its
+		// end reaches this run, as every later account does.
+		if c.resuming[id] {
+			sl.awaitResume = true
 		}
 	}
 	c.mu.Unlock()
+	// WHAT A STAND-DOWN CUT IS RESUMED INSIDE THE OPEN: the session-up release
+	// of the bring-up this open follows pays it (promptqueue restartredrive),
+	// and `ready` waits for its account. Read after the run joined, so no
+	// account falls between the read and the run hearing it.
+	for _, sl := range slots {
+		c.readOwed(ctx, sl)
+	}
 	defer func() {
 		c.mu.Lock()
 		delete(c.runs, r)
@@ -398,8 +513,9 @@ func (c *Coordinator) Run(ctx context.Context, workspaces []Workspace, emit Emit
 		"workspaces": len(slots), "starting": len(pending),
 	})
 	out := &sender{now: c.deps.Now, emit: emit}
+	work := &openWork{ctx: ctx, run: r}
 	for _, sl := range slots {
-		c.begin(out, sl)
+		c.begin(out, work, sl)
 	}
 	if len(pending) > 0 {
 		c.deps.BringUp(pending, func(ws ids.WorkspaceID, err error) {
@@ -423,7 +539,7 @@ func (c *Coordinator) Run(ctx context.Context, workspaces []Workspace, emit Emit
 			if !ok || sl.answered {
 				continue
 			}
-			c.apply(out, sl, n)
+			c.apply(out, work, sl, n)
 			c.answerIfOpen(out, sl)
 		}
 	}
@@ -462,7 +578,7 @@ func (s *sender) opened(ref *workspacev1.WorkspaceRef, set func(*agentreplv1.Ope
 
 // begin sends what one workspace's open already knows at the run's start: a
 // refusal or a hidden answer at once, else the facts already standing.
-func (c *Coordinator) begin(out *sender, sl *slot) {
+func (c *Coordinator) begin(out *sender, work *openWork, sl *slot) {
 	ref := sl.ws.Ref
 	fields := dlog.Context{dlog.KeyWorkspaceID: ref.GetId(), "name": sl.ws.Name}
 	switch {
@@ -484,6 +600,11 @@ func (c *Coordinator) begin(out *sender, sl *slot) {
 	}
 	if sl.served {
 		out.step(ref, servedStep)
+		c.startRead(work, sl)
+	}
+	if sl.awaitResume && c.resumingNow(sl) {
+		sl.resumingTold = true
+		out.step(ref, resumingCutTurnStep)
 	}
 	if sl.connected || sl.drawn {
 		sl.connected = true
@@ -496,7 +617,7 @@ func (c *Coordinator) begin(out *sender, sl *slot) {
 }
 
 // apply folds one note into a slot, relaying the steps the editor prints.
-func (c *Coordinator) apply(out *sender, sl *slot, n note) {
+func (c *Coordinator) apply(out *sender, work *openWork, sl *slot, n note) {
 	ref := sl.ws.Ref
 	switch {
 	case n.step != nil:
@@ -505,10 +626,20 @@ func (c *Coordinator) apply(out *sender, sl *slot, n note) {
 		}
 		switch {
 		case n.step.serves():
-			markServed(out, sl)
+			c.markServed(out, work, sl)
 		case n.step.Kind == StepFailed && !sl.served:
 			sl.failed = n.step.Text
 		}
+		c.vendorWontResume(sl, *n.step)
+	case n.resume != nil:
+		c.applyResume(out, sl, *n.resume)
+	case n.read:
+		sl.read = true
+		if n.readErr != nil {
+			sl.fault = "the conversation could not be read: " + n.readErr.Error()
+			return
+		}
+		out.step(ref, conversationReadStep)
 	case n.ended:
 		// A START THIS OPEN ASKED FOR HAS RETURNED. Its steps have said how it
 		// went (they were posted before it returned); a start that ended with
@@ -516,7 +647,7 @@ func (c *Coordinator) apply(out *sender, sl *slot, n note) {
 		// session record could not be read, the daemon is leaving) settles
 		// failed here.
 		if n.err == nil {
-			markServed(out, sl)
+			c.markServed(out, work, sl)
 			return
 		}
 		if !sl.served && sl.failed == "" {
@@ -542,13 +673,145 @@ func (c *Coordinator) apply(out *sender, sl *slot, n note) {
 	}
 }
 
-// markServed records the workspace served, telling the editor once.
-func markServed(out *sender, sl *slot) {
+// markServed records the workspace served, telling the editor once, and
+// starts the conversation read the served workspace's answer waits on.
+func (c *Coordinator) markServed(out *sender, work *openWork, sl *slot) {
 	if sl.served {
 		return
 	}
 	sl.served = true
 	out.step(sl.ws.Ref, servedStep)
+	c.startRead(work, sl)
+}
+
+// merged answers A with B's fields added.
+func merged(a, b dlog.Context) dlog.Context {
+	out := dlog.Context{}
+	for k, v := range a {
+		out[k] = v
+	}
+	for k, v := range b {
+		out[k] = v
+	}
+	return out
+}
+
+// openWork is what one open's own work runs under: its lifetime, and the run
+// its results are posted to.
+type openWork struct {
+	ctx context.Context
+	run *run
+}
+
+// startRead reads the served workspace's conversation once, off the run's
+// goroutine, posting the result to the run.
+func (c *Coordinator) startRead(work *openWork, sl *slot) {
+	if sl.reading {
+		return
+	}
+	sl.reading = true
+	ws := ids.WorkspaceID(sl.ws.Ref.GetId())
+	go func() {
+		err := c.deps.ReadConversation(work.ctx, ws)
+		work.run.post(note{ws: ws, read: true, readErr: err})
+	}()
+}
+
+// readOwed reads whether a workspace this open brings up is owed a cut turn,
+// and if so holds its `ready` for the release that pays it. A workspace
+// already serving when the open began had its release already: whatever it
+// still owes waits for its next session-up, and its open does not wait.
+func (c *Coordinator) readOwed(ctx context.Context, sl *slot) {
+	if !sl.tracked || !sl.bringing || sl.awaitResume {
+		return
+	}
+	ws := sl.ws.Ref.GetId()
+	owed, err := c.deps.Owed(ctx, ids.WorkspaceID(ws))
+	if err != nil {
+		c.deps.Log.Error(op, "whether the workspace is owed a cut turn could not be read; the open answers it failed", dlog.Context{
+			dlog.KeyWorkspaceID: ws, "cause": err.Error(),
+		})
+		sl.fault = "whether a turn the restart cut is owed could not be read: " + err.Error()
+		return
+	}
+	if !owed {
+		return
+	}
+	sl.awaitResume = true
+	c.deps.Log.Info(op, "the workspace is owed a turn the daemon's own stand-down cut; its open waits for the resumed turn to start", dlog.Context{
+		dlog.KeyWorkspaceID: ws,
+	})
+}
+
+// resumingNow reports whether a resumption of the slot's workspace is being
+// delivered right now.
+func (c *Coordinator) resumingNow(sl *slot) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.resuming[ids.WorkspaceID(sl.ws.Ref.GetId())]
+}
+
+// applyResume folds a release's account of the owed cut turn into a slot.
+func (c *Coordinator) applyResume(out *sender, sl *slot, resume Resume) {
+	fields := dlog.Context{dlog.KeyWorkspaceID: sl.ws.Ref.GetId(), "resume": resume.Kind.String(), "text": resume.Text}
+	switch resume.Kind {
+	case ResumeStarting:
+		sl.awaitResume = true
+		if !sl.resumingTold {
+			sl.resumingTold = true
+			out.step(sl.ws.Ref, resumingCutTurnStep)
+		}
+	case ResumeStarted:
+		if sl.awaitResume {
+			c.deps.Log.Info(op, "the turn the stand-down cut was resumed and has started; the open no longer waits on it", fields)
+		}
+		sl.awaitResume = false
+	case ResumeFailed:
+		if sl.awaitResume || sl.resumingTold {
+			sl.fault = "the turn the restart cut could not be resumed: " + resume.Text
+		}
+		sl.awaitResume = false
+	case ResumeNotNow:
+		if sl.awaitResume && !sl.resumingTold {
+			c.deps.Log.Info(op, "the release resumed nothing now; what the workspace is owed waits for its next session-up, and the open does not wait", fields)
+			sl.awaitResume = false
+		}
+	default:
+		c.deps.Log.Error(op, "a release's account of the owed cut turn is of no known kind; the open keeps waiting on the account it expects", merged(fields, dlog.Context{
+			"invariant_violation": "every account is starting, started, failed or not now",
+		}))
+	}
+}
+
+// vendorWontResume stops an open waiting on an owed cut turn when the turn
+// cannot start for want of the vendor. VENDOR STATE NEVER GATES THE OPEN
+// (owner rulings, 2026-10-02 and 2026-10-12):
+//   - a bring-up that ended without a session the turn could be resumed in
+//     (a cold gate, a vendor that refused or failed, a service failure): the
+//     debt stays recorded for the next session-up;
+//   - a vendor that is not serving yet (offline, retrying its start), before
+//     or after the resumption was claimed: a claimed resumption is held by
+//     the prompt queue until the vendor serves, so the turn starts then, and
+//     the open does not wait for it.
+func (c *Coordinator) vendorWontResume(sl *slot, step Step) {
+	if !sl.awaitResume {
+		return
+	}
+	switch step.Kind {
+	case StepColdGate, StepVendorRejected, StepVendorFailed, StepFailed:
+		if sl.resumingTold {
+			return
+		}
+		sl.awaitResume = false
+		c.deps.Log.Info(op, "the bring-up ended with no session to resume the cut turn in; it stays owed for the next session-up", dlog.Context{
+			dlog.KeyWorkspaceID: sl.ws.Ref.GetId(), "step": step.Kind.String(),
+		})
+	case StepOffline, StepVendorRetrying:
+		sl.awaitResume = false
+		c.deps.Log.Info(op, "the vendor is not serving yet; the open does not wait for the resumed turn, which starts once it serves", dlog.Context{
+			dlog.KeyWorkspaceID: sl.ws.Ref.GetId(), "step": step.Kind.String(), "claimed": sl.resumingTold,
+		})
+	}
 }
 
 // answerIfOpen sends the workspace's `opened` once it is open: served, and
@@ -560,24 +823,56 @@ func (c *Coordinator) answerIfOpen(out *sender, sl *slot) {
 	}
 	ref := sl.ws.Ref
 	fields := dlog.Context{dlog.KeyWorkspaceID: ref.GetId(), "name": sl.ws.Name, "page": sl.ws.Page}
+	ws := ids.WorkspaceID(ref.GetId())
+	reason := ""
 	switch {
-	case sl.served && (!sl.ws.Page || sl.drawn):
-		sl.answered, sl.ready = true, true
-		c.deps.Log.Info(op, "a workspace is open; its tab may show", fields)
-		out.opened(ref, func(o *agentreplv1.OpenTabsOpened) {
-			o.Outcome = &agentreplv1.OpenTabsOpened_Ready{Ready: &agentreplv1.OpenTabsOpenedReady{}}
-		})
+	case sl.fault != "":
+		reason = sl.fault
 	case !sl.served && sl.failed != "":
-		sl.answered = true
-		fields["reason"] = sl.failed
-		c.deps.Log.Info(op, "a workspace's session failed to start; its tab shows the fault", fields)
-		out.opened(ref, func(o *agentreplv1.OpenTabsOpened) {
-			o.Outcome = &agentreplv1.OpenTabsOpened_Failed{Failed: &agentreplv1.OpenTabsOpenedFailed{Reason: sl.failed}}
-		})
+		reason = sl.failed
+	case sl.served && sl.read && !sl.awaitResume && (!sl.ws.Page || sl.drawn):
 	default:
 		return
 	}
-	c.lower(ids.WorkspaceID(ref.GetId()))
+	// THE OPEN ENDS BEFORE THE ROW IS TAKEN: the answer's row is the one the
+	// roster resolves once this open no longer marks the workspace opening,
+	// with that roster's revision, taken together.
+	sl.answered = true
+	c.lower(ws)
+	row, revision := c.answerRow(ws)
+	fields["roster_revision"] = revision
+	if reason != "" {
+		sl.failedWith = reason
+		fields["reason"] = reason
+		c.deps.Log.Info(op, "a workspace's open failed; its tab shows the fault", fields)
+		out.opened(ref, func(o *agentreplv1.OpenTabsOpened) {
+			o.Outcome = &agentreplv1.OpenTabsOpened_Failed{Failed: &agentreplv1.OpenTabsOpenedFailed{
+				Reason: reason, Row: row, RosterRevision: revision}}
+		})
+		return
+	}
+	sl.ready = true
+	c.deps.Log.Info(op, "a workspace is open; its tab may show", fields)
+	out.opened(ref, func(o *agentreplv1.OpenTabsOpened) {
+		o.Outcome = &agentreplv1.OpenTabsOpened_Ready{Ready: &agentreplv1.OpenTabsOpenedReady{
+			Row: row, RosterRevision: revision}}
+	})
+}
+
+// answerRow takes the workspace's roster row and its roster's revision for an
+// answer. A roster that carries no row of it is an invariant violation (an
+// open names only registered workspaces): it is recorded, and the answer goes
+// without a row rather than never.
+func (c *Coordinator) answerRow(ws ids.WorkspaceID) (*frontendv1.RosterRow, uint64) {
+	row, revision, ok := c.deps.Row(ws)
+	if !ok {
+		c.deps.Log.Error(op, "the roster carries no row of a workspace being answered open; the answer carries none", dlog.Context{
+			dlog.KeyWorkspaceID:   string(ws),
+			"invariant_violation": "every workspace an open answers is registered, so the roster resolves its row",
+		})
+		return nil, 0
+	}
+	return row, revision
 }
 
 // allAnswered reports whether every workspace has had its `opened`.
@@ -616,7 +911,7 @@ func (c *Coordinator) finish(out *sender, slots []*slot) {
 		switch {
 		case sl.ready:
 			done.Ready++
-		case sl.failed != "" && !sl.served:
+		case sl.failedWith != "":
 			done.Failed = append(done.Failed, &agentreplv1.OpenTabsFailedWorkspace{Workspace: sl.ws.Ref, Name: sl.ws.Name})
 			failedNames = append(failedNames, sl.ws.Name)
 		}
@@ -633,6 +928,14 @@ func servedStep(s *agentreplv1.OpenTabsStep) {
 
 func pageConnectedStep(s *agentreplv1.OpenTabsStep) {
 	s.Step = &agentreplv1.OpenTabsStep_PageConnected{PageConnected: &agentreplv1.OpenTabsStepPageConnected{}}
+}
+
+func conversationReadStep(s *agentreplv1.OpenTabsStep) {
+	s.Step = &agentreplv1.OpenTabsStep_ConversationRead{ConversationRead: &agentreplv1.OpenTabsStepConversationRead{}}
+}
+
+func resumingCutTurnStep(s *agentreplv1.OpenTabsStep) {
+	s.Step = &agentreplv1.OpenTabsStep_ResumingCutTurn{ResumingCutTurn: &agentreplv1.OpenTabsStepResumingCutTurn{}}
 }
 
 func pageDrawnStep(s *agentreplv1.OpenTabsStep) {

@@ -266,6 +266,14 @@ message FeedRow {
     // and draws nothing. A fresh page never carries this arm — a removed row
     // is simply omitted from the page — so it exists solely as a tail event.
     FeedRowRemoved removed = 18;
+    // A TURN'S EARLIER STEPS ARE ON AN OLDER PAGE. Drawn right under a turn's
+    // prompt when the page that carried the prompt (as one of its turn heads)
+    // did not carry the steps between that prompt and the page's own rows.
+    // The client draws it as a fold ("earlier steps") whose activation runs
+    // the same older-page walk the "load previous page" control runs. The
+    // daemon REMOVES it (the `removed` arm) once the walk has loaded every
+    // step between the prompt and the rows below it.
+    FeedTurnEarlierSteps earlier_steps = 24;
     // A MESSAGE FROM ANOTHER CLAUDE — an inter-session peer message. It is
     // NOT a prompt: it is a low-priority, abbreviated aside, drawn
     // RIGHT-ALIGNED (the prompt side) but PURPLE rather than the blue prompt
@@ -301,6 +309,10 @@ message FeedRow {
 
 // The row-removal marker. Empty: the FeedRow's own `id` names what to drop,
 // and the arm's presence is the whole instruction — remove that row.
+// A turn's earlier steps are on an older page. DELIBERATELY EMPTY: the arm is
+// the fact; the row's `turn` names the turn.
+message FeedTurnEarlierSteps {}
+
 message FeedRowRemoved {}
 
 // A ROW'S PLACE IN ITS FEED: an opaque key the daemon mints at the row's first

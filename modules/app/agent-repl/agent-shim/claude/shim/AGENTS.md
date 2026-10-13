@@ -1451,6 +1451,14 @@ serves one on every entry it hands out.
   served with no place (one that predates places) is served unplaced and
   traced at debug; the proto defines that as "the serving side states no
   places", which the consumer orders by its own receipt.
+- **A PAGE CARRIES ITS TURN HEADS** (`turn_heads`,
+  `docs/protobuf-design/complete-pages.md`). `toHistoryPage`
+  (`store/reader.ts`) is the one place a store page (an open's
+  `AgentSessionPage` or a `ReadAgentPageSuccess`) becomes a `HistoryPage`, and
+  it converts each head with `toHistoryEntryAt`, so a head that does not
+  convert refuses the page exactly as such a line does. The catch-up walks
+  (`walkToMark`, `walkEntriesToMark`) flatten store pages into TAIL entries,
+  not a page, and carry no heads.
 - **`ReadHistory.through`** is validated (a positive `at_ms`,
   `read_history.through`) and forwarded to the store's `ReadAgentPage.through`
   through `Persistence.readPageThrough`. It never vouches for the book: any book
@@ -1459,7 +1467,8 @@ serves one on every entry it hands out.
 - The fake store (`test/fakes/store-server.ts`) reproduces the same contract:
   first stated place kept, an unplaced row served at its receipt instant,
   pages in descending place, `after` below the named line's current place,
-  `through` with its `unknown_agent` refusal, and catch-up by write order.
+  `through` with its `unknown_agent` refusal, catch-up by write order, and
+  every page's turn heads.
 
 ## Validation and errors
 

@@ -32,6 +32,16 @@ message HistoryPage {
     // beginning from a short page.
     HistoryFloor floor = 3;
   }
+  // THE PROMPTS OF THE TURNS THIS PAGE TOUCHES THAT SIT BELOW IT, so the page
+  // draws whole in one read (owner ruling, 2026-10-12: the newest page is
+  // read complete before a workspace is answered open). For every turn an entry
+  // of this page is stamped with whose prompt entry (the entry holding the
+  // turn's UserPrompt) is placed below this page, that prompt entry,
+  // newest first; each turn at most once. A turn whose prompt is on this page,
+  // or that the serving side holds no prompt entry for, has none here. A head is ALSO
+  // an ordinary entry of an older page: a reader walking older meets it again,
+  // and absorbs it by identity.
+  repeated HistoryEntryAt turn_heads = 4;
 }
 
 // One entry, its pointer, its turn and its place in the conversation — so the

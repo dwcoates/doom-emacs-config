@@ -107,6 +107,12 @@ type Resolver interface {
 	// already agrees with the selection WSM stores before pushing a roster
 	// that would change nothing.
 	Selected() (ids.WorkspaceID, bool)
+	// Row answers one workspace's row exactly as the roster last resolved
+	// carries it, with that roster's revision: both taken from the SAME
+	// roster under the lock that resolved it, so the row is never older or
+	// newer than the revision it is stated with. False when no roster was
+	// resolved yet or the last one carries no row of the workspace.
+	Row(ws ids.WorkspaceID) (*frontendv1.RosterRow, uint64, bool)
 	// SetViewed records that the user has READ the last turn's result — the
 	// editor's report that the user has now SEEN this workspace. It takes
 	// only on a turn-end row (done, interrupted or turn_failed); a report on

@@ -29,6 +29,13 @@ const (
 	outcomeWithheld entryOutcome = "withheld"
 	// outcomeNoRow: the entry was replayed and drew no row in the load's feed.
 	outcomeNoRow entryOutcome = "no_row"
+	// outcomeHead: a page's turn head drew its turn's prompt (heads.go).
+	outcomeHead entryOutcome = "head"
+	// outcomeHeadAbsorbed: a turn head named a turn the feed already saw
+	// opened, and drew nothing more.
+	outcomeHeadAbsorbed entryOutcome = "head_absorbed"
+	// outcomeHeadRefused: a turn head was no prompt entry, and was not drawn.
+	outcomeHeadRefused entryOutcome = "head_refused"
 )
 
 // entryOutcomeDepth bounds how far an entry's kind follows its nested arms:

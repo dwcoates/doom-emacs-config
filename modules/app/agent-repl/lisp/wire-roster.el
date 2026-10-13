@@ -30,6 +30,7 @@
 (declare-function agent-repl-wire--decode-empty "wire-common")
 (declare-function agent-repl-wire--decode-int64 "wire-common")
 (declare-function agent-repl-wire--decode-uint32 "wire-common")
+(declare-function agent-repl-wire--decode-uint64 "wire-common")
 (declare-function agent-repl-wire--decode-message "wire-common")
 (declare-function agent-repl-wire--decode-oneof "wire-common")
 (declare-function agent-repl-wire--decode-optional-message "wire-common")
@@ -1258,15 +1259,15 @@ THE ARM IS THE GROUPING every page shows; it is never unset."
 (defun agent-repl-wire-decode-workspace-roster (value)
   "Decode VALUE as `WorkspaceRoster'.
 Returns `(:repository V :task V :maturity V :hidden H :recently-merged S
-:tab-bar B :current C-or-nil :shown ARM)'.  EVERY grouping arrives fully
-resolved:
+:tab-bar B :current C-or-nil :shown ARM :revision N)'.  EVERY grouping
+arrives fully resolved:
 which one is drawn is the daemon's view state (`shown'), a selection
 between resolved views, never a derivation."
   (let ((object (agent-repl-wire--object "WorkspaceRoster" value)))
     (agent-repl-wire--check-keys
      "WorkspaceRoster" object
      '(repository task maturity hidden recentlyMerged tabBar current
-                  shownRepository shownTask shownMaturity))
+                  shownRepository shownTask shownMaturity revision))
     (agent-repl-wire--decoded
      "WorkspaceRoster"
      (list :repository (agent-repl-wire--decode-message
@@ -1290,7 +1291,8 @@ between resolved views, never a derivation."
            :current (agent-repl-wire--decode-optional-message
                      "WorkspaceRoster" 'current object
                      #'agent-repl-wire-decode-workspace-roster-current)
-           :shown (agent-repl-wire-decode-workspace-roster-shown object)))))
+           :shown (agent-repl-wire-decode-workspace-roster-shown object)
+           :revision (agent-repl-wire--decode-uint64 "WorkspaceRoster" 'revision object)))))
 
 ;;;; ---- The rpc ----
 

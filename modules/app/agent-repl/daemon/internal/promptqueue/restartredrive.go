@@ -35,10 +35,63 @@ import (
 // comes before the delivery and the database arbitrates it, so a second boot
 // or a second session-up edge resumes nothing twice.
 //
+// AN OPEN WAITS FOR IT. Every release reports what it did about the debt
+// (Deps.Resumptions: starting, started, failed, not now), and an editor's
+// OpenTabs that brought the workspace up answers it `ready` only once the
+// resumed turn has started (internal/opentabs).
+//
 // IT IS UNDER THE HOOD. The instruction is the daemon's, not the user's: the
 // feed draws no prompt row for this origin (feed.drawAgentPrompt and the
 // queue's own mirror skip it), and the turn it opens shows only as the status
 // any running turn shows.
+
+// ResumeKind is what one session-up release did about the resumption a
+// stand-down owes the workspace.
+type ResumeKind int
+
+const (
+	// ResumeStarting is a resumption claimed and being delivered.
+	ResumeStarting ResumeKind = iota + 1
+	// ResumeStarted is the claimed resumption delivered: its turn started.
+	ResumeStarted
+	// ResumeFailed is a resumption that could not be claimed or delivered.
+	ResumeFailed
+	// ResumeNotNow is a release that resumed nothing: nothing was owed, or
+	// what is owed waits for a later session-up (a turn already runs, the
+	// session does not serve, the vendor refuses it).
+	ResumeNotNow
+)
+
+// String names the kind for the records.
+func (k ResumeKind) String() string {
+	switch k {
+	case ResumeStarting:
+		return "starting"
+	case ResumeStarted:
+		return "started"
+	case ResumeFailed:
+		return "failed"
+	case ResumeNotNow:
+		return "not_now"
+	default:
+		return "unknown"
+	}
+}
+
+// ResumeReport is one release's account of the owed resumption.
+type ResumeReport struct {
+	Kind ResumeKind
+	// Text is a failure's cause, or why nothing was resumed now.
+	Text string
+}
+
+// reportResume tells Deps.Resumptions one release's account.
+func (q *queue) reportResume(ws ids.WorkspaceID, kind ResumeKind, text string) {
+	if q.deps.Resumptions == nil {
+		return
+	}
+	q.deps.Resumptions(ws, ResumeReport{Kind: kind, Text: text})
+}
 
 // resumptionInstruction is the text the resumed turn is driven with (the
 // pre-overhaul session controller's, 184d84fcd). It names the situation
@@ -70,24 +123,30 @@ func (q *queue) redriveOwedLocked(ctx context.Context, d *delivery, log dlog.Log
 	ws := d.ws
 	if running, ok := q.runningTurn(ws); ok {
 		log.Debug(opResume, "a turn runs on the serving session; anything owed waits for the next session-up", dlog.Context{"running": string(running)})
+		q.reportResume(ws, ResumeNotNow, "a turn already runs on the serving session")
 		return false
 	}
 	owed, err := q.deps.DB.ClaimResumptions(ctx, ws)
 	if err != nil {
 		log.Error(opResume, "could not claim the resumptions the workspace is owed", dlog.Context{"cause": err.Error()})
+		q.reportResume(ws, ResumeFailed, "could not claim the resumption owed: "+err.Error())
 		return false
 	}
 	if owed == 0 {
+		q.reportResume(ws, ResumeNotNow, "nothing is owed")
 		return false
 	}
+	q.reportResume(ws, ResumeStarting, "")
 	sender, ok := q.deps.Client(ws)
 	if !ok {
 		log.Error(opResume, "the session serves but has no shim client; the claimed resumption is lost", dlog.Context{"owed": owed})
+		q.reportResume(ws, ResumeFailed, "the session serves but has no shim client")
 		return false
 	}
 	watcher, ok := q.deps.Watcher(ws)
 	if !ok {
 		log.Error(opResume, "the session serves but has no watcher; the claimed resumption is lost", dlog.Context{"owed": owed})
+		q.reportResume(ws, ResumeFailed, "the session serves but has no watcher")
 		return false
 	}
 	sub := Submission{WS: ws, Turn: wsm.NewTurnID(), Said: textSaid(resumptionInstruction),
@@ -95,13 +154,16 @@ func (q *queue) redriveOwedLocked(ctx context.Context, d *delivery, log dlog.Log
 	disposition, err := q.deliver(ctx, d, sub, sender, watcher, log)
 	if err != nil {
 		log.Error(opResume, "could not deliver the resumption of the work the stand-down cut", dlog.Context{"owed": owed, "cause": err.Error()})
+		q.reportResume(ws, ResumeFailed, "could not deliver the resumption: "+err.Error())
 		return false
 	}
 	if !disposition.Delivered {
 		log.Error(opResume, "the serving session took no turn for the resumption; the cut work is not resumed", dlog.Context{"owed": owed})
+		q.reportResume(ws, ResumeFailed, "the serving session took no turn for the resumption")
 		return false
 	}
 	log.Info(opResume, "resumed the work the stand-down cut, with no prompt shown", dlog.Context{"owed": owed, "turn": string(sub.Turn)})
+	q.reportResume(ws, ResumeStarted, "")
 	return true
 }
 

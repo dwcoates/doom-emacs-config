@@ -83,3 +83,24 @@ workspace's web page was checked by Emacs alone, never by the daemon.
 - Collapsed repository sections count as not visible, like hidden ones.
 - A workspace whose session fails to start still opens, showing its fault.
 - Hiding with a turn in flight stands the session down once the turn ends.
+
+## Landed change: `opened` means everything is done (owner, 2026-10-12)
+
+- WHAT: `ready` is sent only once the workspace's session is served, its
+  conversation's newest page was read whole (step `conversation_read`), any
+  turn the daemon's own stand-down cut was resumed (step `resuming_cut_turn`;
+  started again, not finished), and its page drew when one was loading.
+  `ready` and `failed` carry the workspace's `RosterRow` as of the answer.
+- WHY: "everything specific to the workspace should be done by the time the
+  daemon acks the workspace open", and the tab's status lands with the ack.
+- CONSEQUENCE: the cut-turn resume moves from "whenever the next session
+  serves" to inside the open, so a workspace is never shown before its cut
+  work restarted.
+
+### Roster revision orders the answer's row against the roster
+- WHAT: `WorkspaceRoster.revision` rises with every resolved roster; `ready`
+  and `failed` carry the `roster_revision` their row was taken from. A
+  consumer applies the answer's row only when it is newer than the roster it
+  holds.
+- WHY: the answer and the roster ride separate streams, and a row applied
+  out of order would roll a status back.
