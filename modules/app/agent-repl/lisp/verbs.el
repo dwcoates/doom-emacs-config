@@ -50,6 +50,7 @@
 
 (require 'cl-lib)
 (require 'subr-x)
+(require 'seq)
 
 (declare-function agent-repl-popup-show "popup" (buffer))
 (declare-function agent-repl--panels-note-arrival-reason "agent-repl-panels"
@@ -58,6 +59,9 @@
 (declare-function agent-repl--meta-wrap "agent-repl-core" (text))
 (declare-function agent-repl--repo-key-for-dir "agent-repl-workspace" (dir))
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--global-state-file "agent-repl-core" (relative))
+(declare-function agent-repl--read-sexp-file-if-exists "history" (file))
+(declare-function agent-repl--write-sexp-file "history" (file data))
 (declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
@@ -1993,10 +1997,15 @@ opened."
      :on-error
      (lambda (value) (agent-repl-verbs--register-repository-on-error path value)))))
 
-(defun agent-repl-verbs--read-prompt (prompt-text)
+(defun agent-repl-verbs--read-prompt (prompt-text &optional history-file)
   "Read the creation prompt, defaulting to the composer's current text.
 The composer is where the user was already writing, so its contents are
-the obvious default rather than something to retype."
+the obvious default rather than something to retype.
+
+With HISTORY-FILE, the prompt's history lives in that file and the text
+being typed is saved there on every edit
+\(`agent-repl-verbs--read-string-persisted').  Without it, the read uses
+the ordinary minibuffer history."
   (let* ((ws (agent-repl--ws-current-log-name))
          (buffered (and ws (agent-repl--read-input-buffer ws)))
          (initial (and buffered (not (string-empty-p (string-trim buffered)))
@@ -2004,13 +2013,16 @@ the obvious default rather than something to retype."
     (unless ws
       (agent-repl--log '(:agent-repl-central "the current buffer has no workspace composer")
                        "elisp.verbs.read-prompt prompt=%S composer=none" prompt-text))
-    (read-string prompt-text initial)))
+    (if history-file
+        (agent-repl-verbs--read-string-persisted prompt-text initial history-file)
+      (read-string prompt-text initial))))
 
-(defun agent-repl-verbs--read-required-prompt (prompt-text refusal)
+(defun agent-repl-verbs--read-required-prompt (prompt-text refusal &optional history-file)
   "Read a creation prompt with PROMPT-TEXT that must not be blank.
 The text is returned as read.  A blank or whitespace-only answer is
-refused with REFUSAL, before any request is built."
-  (let ((text (agent-repl-verbs--read-prompt prompt-text)))
+refused with REFUSAL, before any request is built.  HISTORY-FILE is
+passed to `agent-repl-verbs--read-prompt'."
+  (let ((text (agent-repl-verbs--read-prompt prompt-text history-file)))
     (when (string-empty-p (string-trim text))
       (user-error "agent-repl: %s" refusal))
     text))
@@ -2020,6 +2032,86 @@ refused with REFUSAL, before any request is built."
   "The central log scope every creation command records under.
 A create runs before the workspace it makes exists, so it can own no
 workspace log of its own.")
+
+;;;; ---- Persisted prompt history ------------------------------------------
+;;
+;; A prompt read with a HISTORY FILE keeps its minibuffer history on disk,
+;; and keeps the text being typed there too: every edit rewrites the file
+;; with the live text at the head of the history.  A crash mid-typing
+;; therefore loses nothing -- the next read of the same prompt offers the
+;; text, in full, one `M-p' / up-arrow away.  The text stays a history
+;; entry however the read ends: submitted, quit, or never ended at all.
+;;
+;; The file is the only store.  Each read loads it afresh and every write
+;; is atomic (`agent-repl--write-sexp-file'), so no Emacs-side copy can go
+;; stale and no torn write can leave a file that does not read.
+
+(defvar agent-repl-verbs--persisted-history nil
+  "The history list of the persisted read in progress.
+Let-bound around each read by `agent-repl-verbs--read-string-persisted',
+from the history file, and handed to `read-string' as its HIST.")
+
+(defun agent-repl-verbs--persisted-history-load (file)
+  "Return the list of strings saved in history FILE, or nil when it is absent.
+FILE is written only by `agent-repl-verbs--persisted-history-save', so a
+value that is not a list of strings is a broken invariant: it is logged
+with the file and the value, and signalled."
+  (let ((entries (agent-repl--read-sexp-file-if-exists file)))
+    (unless (and (listp entries) (cl-every #'stringp entries))
+      (agent-repl--error agent-repl-verbs--create-log-scope
+                         "elisp.verbs.persisted-history-invalid file=%s value=%S"
+                         file entries)
+      (error "agent-repl: prompt history %s holds %S, not a list of strings"
+             file entries))
+    entries))
+
+(defun agent-repl-verbs--persisted-history-entries (text base)
+  "Return history BASE with TEXT at its head.
+A blank TEXT adds nothing and BASE is returned as is.  An earlier entry
+equal to TEXT is dropped, so a resubmitted prompt appears once, and the
+list is cut to `history-length' when that is a number."
+  (if (or (null text) (string-empty-p (string-trim text)))
+      base
+    (let ((entries (cons text (remove text base))))
+      (if (integerp history-length)
+          (seq-take entries history-length)
+        entries))))
+
+(defun agent-repl-verbs--persisted-history-save (file text base)
+  "Write history BASE with TEXT at its head to FILE.
+A failed write is logged by `agent-repl--write-sexp-file' and re-signalled."
+  (agent-repl--write-sexp-file
+   file (agent-repl-verbs--persisted-history-entries text base)))
+
+(defun agent-repl-verbs--read-string-persisted (prompt-text initial file)
+  "Read a string with PROMPT-TEXT and INITIAL input, its history kept in FILE.
+FILE's history is what `M-p' and the up arrow walk.  Every edit of the
+minibuffer saves FILE with the live text at its head, and the read saves
+it once more as it ends, so the text is never lost to a crash.
+
+Text that is blank, or already one of FILE\='s entries, is not a new
+draft, so it leaves the saved draft in place rather than displacing it.
+That is what `M-p' shows while the user browses: it empties the
+minibuffer, then inserts an entry.  A failed
+save aborts the read loudly rather than letting the user type on
+believing the text is kept."
+  (let* ((base (agent-repl-verbs--persisted-history-load file))
+         (agent-repl-verbs--persisted-history base)
+         (text initial))
+    (unwind-protect
+        (setq text
+              (minibuffer-with-setup-hook
+                  (lambda ()
+                    (add-hook 'after-change-functions
+                              (lambda (&rest _)
+                                (let ((live (minibuffer-contents-no-properties)))
+                                  (unless (or (string-empty-p (string-trim live))
+                                              (member live base))
+                                    (setq text live)
+                                    (agent-repl-verbs--persisted-history-save file text base))))
+                              nil t))
+                (read-string prompt-text initial 'agent-repl-verbs--persisted-history)))
+      (agent-repl-verbs--persisted-history-save file text base))))
 
 (defun agent-repl-verbs--create-invoked (command)
   "Record that the creation COMMAND was invoked, before it asks anything.
@@ -2242,6 +2334,15 @@ commands that read it, which are its only consumer."
   :type '(repeat string)
   :group 'agent-repl)
 
+(defconst agent-repl-verbs--oneshot-history-basename "oneshot-commission-history.el"
+  "The file, under the global state directory, holding one-shot commissions.")
+
+(defun agent-repl-verbs--oneshot-history-file ()
+  "Return the file the one-shot commission prompt keeps its history in.
+It is process-wide, under `agent-repl--global-state-dir', because a
+one-shot is commissioned from any workspace or none."
+  (agent-repl--global-state-file agent-repl-verbs--oneshot-history-basename))
+
 (defun agent-repl-verbs--read-model ()
   "Read a model, or nil for the daemon's default.
 Completes against `agent-repl-oneshot-model-candidates' without requiring
@@ -2281,7 +2382,8 @@ A prefix argument PICK-MODEL asks for the model."
                   command 'prompt
                   (lambda ()
                     (agent-repl-verbs--read-required-prompt
-                     "One-shot commission: " "a one-shot IS its prompt"))))
+                     "One-shot commission: " "a one-shot IS its prompt"
+                     (agent-repl-verbs--oneshot-history-file)))))
          (model (and pick-model
                      (agent-repl-verbs--read-for
                       command 'model #'agent-repl-verbs--read-model))))
