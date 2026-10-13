@@ -590,3 +590,32 @@ func TestKillAnswersEveryGoneObservationThroughOneRecord(t *testing.T) {
 		})
 	}
 }
+
+// TestKillOfAnAdoptedShimWhoseGroupCannotBeReadIsAnError covers every other
+// failure of the group read: the shim cannot be stopped, and that is loud.
+func TestKillOfAnAdoptedShimWhoseGroupCannotBeReadIsAnError(t *testing.T) {
+	// Arrange.
+	p := startPeer(t, 0)
+	c := adoptedClientFor(p.uds, 2*time.Second)
+	c.processGroup = func(int) (int, error) { return 0, syscall.EPERM }
+
+	// Act.
+	err := c.Kill(context.Background(), KillAttribution{Actor: "test", Reason: "a merge landed"})
+
+	// Assert.
+	if !errors.Is(err, syscall.EPERM) {
+		t.Fatalf("Kill() error = %v, want the group read's EPERM", err)
+	}
+	if _, reaped := c.Reaped(); reaped {
+		t.Fatal("an exit was published for a shim that was never stopped")
+	}
+	found := false
+	for _, r := range c.log.(*dlog.TestLogger).Records() {
+		if r.Level == "error" && r.Message == "could not read the adopted shim's process group" && r.Context["pid"] == p.pid {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("the unreadable group was not recorded at ERROR with its pid")
+	}
+}

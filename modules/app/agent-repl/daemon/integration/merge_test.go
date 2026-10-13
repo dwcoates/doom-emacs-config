@@ -592,6 +592,39 @@ func TestALandedMergeProducesSuccessFooterRosterAndRemovesTheWorktree(t *testing
 	d.AwaitFileGone(dir)
 }
 
+// TestALandedMergeRaisesOnlyItsQueuedAndLandedBanners pins the merge queue's
+// two desktop banners: one as the merge is put in line, one as it lands, and
+// none for any step between.
+func TestALandedMergeRaisesOnlyItsQueuedAndLandedBanners(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f, d, _, script := mergeCleanRepo(t)
+	script.SetExitCode(0)
+	script.SetStdout("daemon: passed in 1s\n")
+
+	// Act
+	harness.CommitWork(t, f.ws.GetDir())
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws, Source: harness.OwnBranch(false)})); err != nil {
+		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
+	}
+
+	// Assert
+	d.AwaitLogRecord(d.RunLogPath(), "the landed merge's banner", func(r harness.LogRecord) bool {
+		return bannerSettled(r) && r.Context["kind"] == "merge_resolved"
+	})
+	var merges [][]string
+	for _, inv := range bannerRuns(f) {
+		argv := [][]string{inv.Argv}
+		if bannerCarrying(argv, "merge queued") || bannerCarrying(argv, "merge landed") ||
+			bannerCarrying(argv, "merge failed") || bannerCarrying(argv, "merge abandoned") {
+			merges = append(merges, inv.Argv)
+		}
+	}
+	if len(merges) != 2 || !bannerCarrying(merges[:1], "🔀", "merge queued") || !bannerCarrying(merges[1:], "✅", "merge landed") {
+		t.Fatalf("merge banners %q, want the queued banner then the landed one, and nothing else", merges)
+	}
+}
+
 func TestLandingAMergeWhoseTargetIsTheSelfRepoDeploysOnce(t *testing.T) {
 	t.Parallel()
 	// Arrange: the deploy's build fails, which is the landing's loud answer.
