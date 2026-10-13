@@ -4576,8 +4576,12 @@ describe("the merge queue's header", () => {
     expect(inQueue(({ header }) => cascadedValue(header, "color"))).toBe("color-mix(in srgb, var(--muted) 70%, black)");
   });
 
-  it("sets the first row off from the column names by a thicker line", () => {
-    expect(inQueue(({ first }) => cascadedValue(first, "border-top-width"))).toBe("2px");
+  it("sets the first row off from the column names by a thicker line, the header's own border on the row's delimiter", () => {
+    // The extra pixel is the header's, so every row keeps one box height
+    // (test/webkit/merge-queue-columns.webkit.test.ts).
+    expect(
+      inQueue(({ header, first }) => [cascadedValue(header, "border-bottom-width"), cascadedValue(first, "border-top-width") === "2px"]),
+    ).toEqual(["1px", false]);
   });
 
   it("keeps the rows' own delimiter between the rows", () => {
