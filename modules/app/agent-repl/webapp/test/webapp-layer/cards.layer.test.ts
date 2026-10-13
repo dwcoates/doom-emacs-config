@@ -184,13 +184,13 @@ it(
 
     // Assert — the ANSWERED state arrives on the feed push and is drawn on the
     // same row (a cold repaint from the row alone renders it), with the
-    // verdict naming its own arm.
+    // verdict, the head's badge, naming its own arm.
     await awaitDrawn(
       app,
       `the answered state on permission row ${id}`,
-      () => app.$(`[data-feed-row="${id}"] .perm-verdict`) !== null,
+      () => app.$(`[data-feed-row="${id}"] .tool-head [data-permission-verdict]`) !== null,
     );
-    const verdict = app.$(`[data-feed-row="${id}"] .perm-verdict`);
+    const verdict = app.$(`[data-feed-row="${id}"] .tool-head [data-permission-verdict]`);
     expect(verdict).not.toBeNull();
     expect(verdict?.getAttribute("data-arm")).not.toBe("");
     // The controls are gone: an answered card is not answerable twice.
@@ -340,7 +340,7 @@ it(
     const card = drawn[drawn.length - 1];
     expect(
       card
-        .querySelector(".perm-verdict")
+        .querySelector(".tool-head [data-permission-verdict]")
         ?.getAttribute("data-permission-verdict"),
     ).toBe("deniedUndecidable");
   },
