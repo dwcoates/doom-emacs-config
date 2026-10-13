@@ -964,3 +964,24 @@ func TestALiveHookCardIsServedToAReaderThatOpensAfterIt(t *testing.T) {
 		t.Fatalf("hook cards on the reloaded page = %d, want the live one", n)
 	}
 }
+
+func TestAFailingHookStatesTheDurationItReported(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.hookStart("unit-1", "lint", conversationv1.AgentHookEvent_AGENT_HOOK_EVENT_POST_TOOL_USE, "")
+
+	// Act.
+	h.send(&conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "unit-1"},
+		Item: &conversationv1.AgentActivity_Hook{Hook: &conversationv1.AgentHook{
+			Result: &conversationv1.AgentHook_NonBlockingError{
+				NonBlockingError: &conversationv1.AgentHookNonBlockingError{Command: "./lint.sh", ExitCode: 1, DurationMs: 4_200},
+			},
+		}},
+	})
+
+	// Assert.
+	if got := h.hookCard().GetFailed().GetRuntime().GetText(); got != "ran 4.2 s" {
+		t.Fatalf("runtime = %q, want %q", got, "ran 4.2 s")
+	}
+}
