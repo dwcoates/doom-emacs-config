@@ -461,7 +461,7 @@ func TestClientLogWritesARecordIntoTheWebappSink(t *testing.T) {
 
 	// Act
 	resp, err := f.d.Client().ClientLog(f.d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
-		Workspace: f.ws,
+		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: f.ws},
 		Record: &agentreplv1.ClientLogRecord{
 			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
 			Operation: "command-dispatch.deferred",
@@ -512,7 +512,7 @@ func TestClientLogWritesASidecarRecordIntoTheSidecarSink(t *testing.T) {
 
 	// Act.
 	resp, err := f.d.Client().ClientLog(f.d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
-		Workspace: f.ws,
+		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: f.ws},
 		Record: &agentreplv1.ClientLogRecord{
 			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
 			Operation: "sidecar.transcript.read",
@@ -553,7 +553,7 @@ func TestClientLogPersistsTheClientsVerboseClass(t *testing.T) {
 
 	// Act.
 	resp, err := f.d.Client().ClientLog(f.d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
-		Workspace: f.ws,
+		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: f.ws},
 		Record: &agentreplv1.ClientLogRecord{
 			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
 			Operation: "webapp.trace",
@@ -587,7 +587,7 @@ func TestClientLogAtWarnLandsAtWarnInTheWebappSink(t *testing.T) {
 
 	// Act
 	resp, err := f.d.Client().ClientLog(f.d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
-		Workspace: f.ws,
+		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: f.ws},
 		Record: &agentreplv1.ClientLogRecord{
 			Level:     &agentreplv1.ClientLogRecord_Warn{Warn: &agentreplv1.ClientLogLevelWarn{}},
 			Operation: "webapp.render.slow",
@@ -618,7 +618,7 @@ func TestClientLogAtErrorLandsAtErrorInTheWebappSink(t *testing.T) {
 
 	// Act
 	resp, err := f.d.Client().ClientLog(f.d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
-		Workspace: f.ws,
+		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: f.ws},
 		Record: &agentreplv1.ClientLogRecord{
 			Level:     &agentreplv1.ClientLogRecord_Error{Error: &agentreplv1.ClientLogLevelError{}},
 			Operation: "webapp.crash",
@@ -651,7 +651,7 @@ func TestClientLogWithAnUnsetLevelAnswersInvalidArgumentNamingLevel(t *testing.T
 
 	// Act
 	_, err := f.d.Client().ClientLog(f.d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
-		Workspace: f.ws,
+		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: f.ws},
 		Record: &agentreplv1.ClientLogRecord{
 			Operation: "webapp.something",
 			Message:   "a message with no level",
@@ -682,7 +682,7 @@ func TestClientLogOnAnUnknownWorkspaceIsRefused(t *testing.T) {
 
 	// Act
 	resp, err := d.Client().ClientLog(d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
-		Workspace: &workspacev1.WorkspaceRef{Id: "no-such-workspace", Dir: t.TempDir()},
+		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: &workspacev1.WorkspaceRef{Id: "no-such-workspace", Dir: t.TempDir()}},
 		Record: &agentreplv1.ClientLogRecord{
 			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
 			Operation: "webapp.something",
@@ -709,7 +709,7 @@ func TestClientLogNeverAppearsInTheDaemonRunLog(t *testing.T) {
 
 	// Act
 	if _, err := f.d.Client().ClientLog(f.d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
-		Workspace: f.ws,
+		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: f.ws},
 		Record: &agentreplv1.ClientLogRecord{
 			Level:     &agentreplv1.ClientLogRecord_Error{Error: &agentreplv1.ClientLogLevelError{}},
 			Operation: "webapp.crash",
@@ -740,7 +740,7 @@ func TestClientLogForAWorkspaceWhoseDirectoryIsGoneLandsInTheRunLog(t *testing.T
 
 	// Act.
 	resp, err := f.d.Client().ClientLog(f.d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
-		Workspace: f.ws,
+		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: f.ws},
 		Record: &agentreplv1.ClientLogRecord{
 			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
 			Operation: "sidecar.transcript.read",

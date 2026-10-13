@@ -71,8 +71,10 @@ func (f fakeLogger) With(dlog.Context) dlog.Logger    { return f }
 type fakeSurfaces struct {
 	dlog.Surfaces
 	clientRecords []dlog.ClientRecord
-	workspaceErr  error
-	workspace     dlog.Logger
+	// centralRecords are the records filed with CentralClientLog (the webhost's).
+	centralRecords []dlog.ClientRecord
+	workspaceErr   error
+	workspace      dlog.Logger
 	// global, when set, is the global sink, so a test can assert on what the
 	// daemon-wide logger recorded rather than discarding it.
 	global dlog.Logger
@@ -107,6 +109,11 @@ func (f *fakeSurfaces) WorkspaceOrCentral(dir string) dlog.Logger {
 
 func (f *fakeSurfaces) ClientLog(_ string, rec dlog.ClientRecord) error {
 	f.clientRecords = append(f.clientRecords, rec)
+	return nil
+}
+
+func (f *fakeSurfaces) CentralClientLog(rec dlog.ClientRecord) error {
+	f.centralRecords = append(f.centralRecords, rec)
 	return nil
 }
 

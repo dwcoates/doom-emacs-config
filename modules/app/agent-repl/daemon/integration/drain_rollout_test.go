@@ -884,7 +884,7 @@ func TestRegistryReadsAcrossTheSuccessorsPromotionAreServed(t *testing.T) {
 				default:
 				}
 				if _, err := successor.ClientLog(d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
-					Workspace: f.ws,
+					Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: f.ws},
 					Record: &agentreplv1.ClientLogRecord{
 						Level:     &agentreplv1.ClientLogRecord_Debug{Debug: &agentreplv1.ClientLogLevelDebug{}},
 						Operation: "integration.promotion-read",

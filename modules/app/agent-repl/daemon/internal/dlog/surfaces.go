@@ -398,21 +398,8 @@ func (s *surfaces) ShimRollRequests() <-chan ShimRollRequest { return s.shimRoll
 // own runtime and its own identity; the daemon only converts the foreign
 // timestamp into the local zone every runtime's records are compared in.
 func (s *surfaces) ClientLog(dir string, rec ClientRecord) error {
-	name, runtime, err := clientSink(rec.ClientKind)
-	if err != nil {
-		return err
-	}
-	if !validLevel(rec.Level) {
-		return fmt.Errorf("client record level %q is not one of debug, info, warn, error", rec.Level)
-	}
-	if rec.Operation == "" {
-		return fmt.Errorf("client record operation is empty")
-	}
-	if !s.admits(rec.Level) {
-		return nil
-	}
-	at, stamped, err := clientInstant(rec.Timestamp, s.now)
-	if err != nil {
+	prepared, admitted, err := s.prepareClient(rec)
+	if err != nil || !admitted {
 		return err
 	}
 	// A WORKSPACE WHOSE DIRECTORY IS GONE STILL OWNS ITS RECORDS. A client
@@ -427,7 +414,7 @@ func (s *surfaces) ClientLog(dir string, rec ClientRecord) error {
 	var dest interface{ write([]byte) error }
 	var who workspaceIdentity
 	central := false
-	ws, sk, err := s.resolve(dir, name)
+	ws, sk, err := s.resolve(dir, prepared.sink)
 	switch {
 	case err == nil:
 		dest, who = sk, workspaceIdentity{dir: ws.dir, id: ws.id, dirHash: ws.dirHash}
@@ -449,8 +436,58 @@ func (s *surfaces) ClientLog(dir string, rec ClientRecord) error {
 	if central {
 		fields[KeyUnroutableWorkspace] = who.dir
 	}
-	ctx := merge(rec.Context, fields)
-	if stamped {
+	return s.writeClient(dest, prepared, fields)
+}
+
+// CentralClientLog persists a record that belongs to no workspace (the
+// webhost's) into the central sink, naming the webhost as its source.
+func (s *surfaces) CentralClientLog(rec ClientRecord) error {
+	prepared, admitted, err := s.prepareClient(rec)
+	if err != nil || !admitted {
+		return err
+	}
+	return s.writeClient(s.runLog, prepared, Context{KeyClientSource: ClientSourceWebhost})
+}
+
+// preparedClient is a forwarded client record checked and stamped, ready to
+// be written to whichever sink owns it.
+type preparedClient struct {
+	rec     ClientRecord
+	sink    string
+	runtime string
+	at      time.Time
+	stamped bool
+}
+
+// prepareClient checks REC and stamps its instant. ADMITTED is false for a
+// record below the level the daemon keeps, which is not written and is no
+// error.
+func (s *surfaces) prepareClient(rec ClientRecord) (preparedClient, bool, error) {
+	name, runtime, err := clientSink(rec.ClientKind)
+	if err != nil {
+		return preparedClient{}, false, err
+	}
+	if !validLevel(rec.Level) {
+		return preparedClient{}, false, fmt.Errorf("client record level %q is not one of debug, info, warn, error", rec.Level)
+	}
+	if rec.Operation == "" {
+		return preparedClient{}, false, fmt.Errorf("client record operation is empty")
+	}
+	if !s.admits(rec.Level) {
+		return preparedClient{}, false, nil
+	}
+	at, stamped, err := clientInstant(rec.Timestamp, s.now)
+	if err != nil {
+		return preparedClient{}, false, err
+	}
+	return preparedClient{rec: rec, sink: name, runtime: runtime, at: at, stamped: stamped}, true, nil
+}
+
+// writeClient writes a prepared record to DEST with FIELDS merged over the
+// client's own context, and mirrors it to the terminal.
+func (s *surfaces) writeClient(dest interface{ write([]byte) error }, p preparedClient, fields Context) error {
+	ctx := merge(p.rec.Context, fields)
+	if p.stamped {
 		// The client sent no instant; say whose clock the timestamp is,
 		// rather than let it read as the client's own.
 		ctx["timestamp_source"] = "daemon_arrival"
@@ -458,10 +495,10 @@ func (s *surfaces) ClientLog(dir string, rec ClientRecord) error {
 	// pid is deliberately 0 (omitted): a forwarded record carries the sending
 	// runtime's identity, and the daemon's pid would misattribute it.
 	verbosity := VerbosityNormal
-	if rec.Verbose {
+	if p.rec.Verbose {
 		verbosity = VerbosityVerbose
 	}
-	out := newRecordWithVerbosity(at, runtime, rec.Level, verbosity, rec.Operation, rec.Message, ctx, 0)
+	out := newRecordWithVerbosity(p.at, p.runtime, p.rec.Level, verbosity, p.rec.Operation, p.rec.Message, ctx, 0)
 	line := out.marshal()
 	if err := dest.write(line); err != nil {
 		return err

@@ -2163,6 +2163,7 @@ func (b *fakeBorrowed) File() *os.File {
 func (b *fakeBorrowed) Close() error { return nil }
 
 func (s *fakeSurfaces) ClientLog(string, dlog.ClientRecord) error { return errFake }
+func (s *fakeSurfaces) CentralClientLog(dlog.ClientRecord) error  { return errFake }
 
 func (s *fakeSurfaces) Close() error { return nil }
 
