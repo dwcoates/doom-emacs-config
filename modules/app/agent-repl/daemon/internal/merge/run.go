@@ -71,6 +71,10 @@ type run struct {
 	// landing reports the run began committing: nothing overtakes it from
 	// here (race.go). Guarded by o.mu.
 	landing bool
+	// conflictCommit is the commit the run's conflict attempts count on, and
+	// conflictAttempts how many it has had in a row (process.go conflict).
+	conflictCommit   string
+	conflictAttempts int
 	// claimedOn is the base the run last claimed the race to land on, so it
 	// claims once per base (race.go).
 	claimedOn string

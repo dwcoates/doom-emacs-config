@@ -1277,7 +1277,7 @@ func TestAConflictResolutionThatGivesUpFailsTheMergeInConflicts(t *testing.T) {
 	h := newHarness(t)
 	landing(h, 1)
 	h.git.rebaseConflicts[1] = []string{"a.go"}
-	h.git.conflicted = [][]string{{"a.go"}}
+	h.git.conflicted = [][]string{{"a.go"}, {"a.go"}, {"a.go"}}
 
 	// Act.
 	admitted(t, h)
@@ -1296,7 +1296,7 @@ func TestAConflictResolutionThatGivesUpLeavesTheRebaseInProgress(t *testing.T) {
 	h := newHarness(t)
 	landing(h, 2)
 	h.git.rebaseConflicts[1] = []string{"a.go"}
-	h.git.conflicted = [][]string{{"a.go"}}
+	h.git.conflicted = [][]string{{"a.go"}, {"a.go"}, {"a.go"}}
 
 	// Act.
 	admitted(t, h)
@@ -1315,7 +1315,7 @@ func TestAConflictResolutionWhoseTurnFailedGivesUp(t *testing.T) {
 	h := newHarness(t)
 	landing(h, 1)
 	h.git.rebaseConflicts[1] = []string{"a.go"}
-	h.turnCloses = []wsm.TurnClose{wsm.CloseFailed}
+	h.turnCloses = []wsm.TurnClose{wsm.CloseFailed, wsm.CloseFailed, wsm.CloseFailed}
 
 	// Act.
 	admitted(t, h)
@@ -1331,7 +1331,7 @@ func TestAGivenUpConflictIsAnOutcomeRecordedAtInfo(t *testing.T) {
 	h := newHarness(t)
 	landing(h, 1)
 	h.git.rebaseConflicts[1] = []string{"a.go"}
-	h.git.conflicted = [][]string{{"a.go"}}
+	h.git.conflicted = [][]string{{"a.go"}, {"a.go"}, {"a.go"}}
 
 	// Act.
 	admitted(t, h)
@@ -1744,5 +1744,64 @@ func TestDrawFixingStandsTheAttemptLive(t *testing.T) {
 	facts := h.footer.last()
 	if facts.Attempt != 2 || facts.MaxAttempts != MaxFixAttempts || h.feed.lastTabOfKind(TabFixes).GetFixes().GetAttempt().GetAttempt() != 2 {
 		t.Fatalf("facts = %+v, want attempt 2 of %d drawn", facts, MaxFixAttempts)
+	}
+}
+
+func TestAConflictTheFirstAttemptLeavesUnresolvedIsTriedAgainAndTheMergeLands(t *testing.T) {
+	// Arrange: the first attempt leaves a.go conflicted, the second resolves it.
+	h := newHarness(t)
+	landing(h, 1)
+	h.git.rebaseConflicts[1] = []string{"a.go"}
+	h.git.conflicted = [][]string{{"a.go"}}
+
+	// Act.
+	admitted(t, h)
+
+	// Assert.
+	if got := h.queue.countOrigin(conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR); got != 2 {
+		t.Fatalf("conflict briefs = %d, want 2: one attempt, then one more on the same commit", got)
+	}
+	if got := h.footer.last().State; got != StateMerged {
+		t.Fatalf("state = %q, want merged", got)
+	}
+}
+
+func TestAConflictFailsTheMergeOnlyAfterItsAttemptsOnOneCommitRunOut(t *testing.T) {
+	// Arrange: every attempt leaves a.go conflicted.
+	h := newHarness(t)
+	landing(h, 1)
+	h.git.rebaseConflicts[1] = []string{"a.go"}
+	h.git.conflicted = [][]string{{"a.go"}, {"a.go"}, {"a.go"}}
+
+	// Act.
+	admitted(t, h)
+
+	// Assert.
+	if got := h.queue.countOrigin(conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR); got != maxConflictAttempts {
+		t.Fatalf("conflict briefs = %d, want %d before the merge fails", got, maxConflictAttempts)
+	}
+	if got := h.footer.last(); got.State != StateFailed || got.FailedArea != "conflicts" {
+		t.Fatalf("facts = %+v, want merge failed in conflicts", got)
+	}
+}
+
+func TestAConflictsAttemptsStartAfreshOnTheNextCommit(t *testing.T) {
+	// Arrange: two commits conflict; each needs two attempts. Four in all is
+	// over the bound, but never more than two in a row on one commit.
+	h := newHarness(t)
+	landing(h, 2)
+	h.git.rebaseConflicts[1] = []string{"a.go"}
+	h.git.rebaseConflicts[2] = []string{"b.go"}
+	h.git.conflicted = [][]string{{"a.go"}, nil, {"b.go"}, nil}
+
+	// Act.
+	admitted(t, h)
+
+	// Assert.
+	if got := h.queue.countOrigin(conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR); got != 4 {
+		t.Fatalf("conflict briefs = %d, want 4: two per commit", got)
+	}
+	if got := h.footer.last().State; got != StateMerged {
+		t.Fatalf("state = %q, want merged: the count resets when the rebase advances", got)
 	}
 }
