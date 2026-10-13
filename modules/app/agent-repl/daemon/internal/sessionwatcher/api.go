@@ -615,6 +615,12 @@ type Watcher interface {
 	// how. A departed watcher's recorded turn and live work are HISTORY, not
 	// work in flight: they ended with the shim.
 	Departed() (Departure, bool)
+	// ShimGone reports whether the watched shim is gone: departed, OR reaped
+	// with the dead-link edge that records its departure still on its way.
+	// The shim client marks itself reaped BEFORE it publishes that edge, so a
+	// caller that saw no client (shimclient.Client.Reaped) reads the same
+	// fact here and never falls in the gap between the two.
+	ShimGone() bool
 	// Connected reports whether the daemon-to-shim link is serving.
 	Connected() bool
 	// Link is the current link state.
