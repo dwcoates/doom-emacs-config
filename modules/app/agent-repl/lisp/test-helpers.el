@@ -862,12 +862,16 @@ re-routes their frontend resolution instead."
 
 (defun agent-repl-test--open-tabs-answer-ready (workspaces on-frame _on-close)
   "Stand in for the daemon: answer every one of WORKSPACES open, at once.
-ON-FRAME takes each `opened' frame, as the daemon's stream would hand it."
+ON-FRAME takes each `opened' frame, as the daemon's stream would hand it;
+each carries the row the roster already indexed for its workspace."
   (dolist (workspace workspaces)
     (funcall on-frame (list :arm :opened
                             :value (list :workspace (plist-get workspace :workspace)
                                          :at-ms 0
-                                         :outcome (list :arm :ready :value nil)))))
+                                         :outcome
+                                         (list :arm :ready
+                                               :value (list :row (gethash (plist-get (plist-get workspace :workspace) :id)
+                                                                          agent-repl-roster--rows-by-id)))))))
   t)
 
 (defmacro agent-repl-test--with-mocked-git-probes (&rest body)

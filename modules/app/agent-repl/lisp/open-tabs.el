@@ -43,6 +43,7 @@
 (declare-function agent-repl-roster-refresh-order "roster" ())
 (declare-function agent-repl-roster-apply-current "roster" ())
 (declare-function agent-repl-roster-drawn-tab-order "roster" ())
+(declare-function agent-repl-roster-note-row "roster" (row revision))
 (declare-function agent-repl-host-request-switch "host" (ws trigger))
 (declare-function agent-repl--ensure-input-buffer "panels" (ws))
 (declare-function agent-repl--frontend-precreate-webview "frontend" (ws))
@@ -145,6 +146,9 @@ open in the same walk."
       (:offline (agent-repl-open-tabs--say "%s: offline, waiting for the network…" ws))
       (:served (agent-repl-open-tabs--say "%s: session up, waiting for its page…" ws))
       (:page-connected (agent-repl-open-tabs--say "%s: page connected, drawing the conversation…" ws))
+      (:conversation-read (agent-repl-open-tabs--say "%s: conversation read." ws))
+      (:resuming-cut-turn
+       (agent-repl-open-tabs--say "%s: resuming the turn the restart cut…" ws))
       (:page-drawn
        (agent-repl-open-tabs--say "%s: page drawn." ws)
        (when (fboundp 'agent-repl-open-progress-note-loaded)
@@ -356,6 +360,11 @@ once a daemon is serving."
          ;; Hidden while it opened: the daemon stands it down.
          (agent-repl-open-tabs--hide row))
         (t
+         ;; THE ROW RIDES THE ANSWER: indexed before the tab is drawn, so it
+         ;; is drawn with the workspace's status as of the answer.
+         (let ((value (plist-get outcome :value)))
+           (agent-repl-roster-note-row (plist-get value :row)
+                                       (or (plist-get value :roster-revision) 0)))
          (when (eq (plist-get outcome :arm) :failed)
            (agent-repl-open-tabs--say "%s: session failed to start: %s."
                                       ws (plist-get (plist-get outcome :value) :reason)))
