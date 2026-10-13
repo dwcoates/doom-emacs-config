@@ -142,14 +142,14 @@ describe("presence", () => {
     expect(presence.shown()).toBe(false);
   });
 
-  it("records a host message it cannot read at warn", async () => {
+  it("records a host message from another build at info", async () => {
     // Act
     fromHost({ channel: HOST_CHANNEL, kind: "teleport" });
 
     // Assert
     await operations();
     const record = capture.sent.find((r) => r.operation === "page.host-message-unreadable");
-    expect(record?.level.case).toBe("warn");
+    expect(record?.level.case).toBe("info");
   });
 });
 
