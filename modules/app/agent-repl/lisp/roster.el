@@ -212,18 +212,14 @@ waiting on the user, so permission -> thinking is a move within this set
 and no finish edge at all.  So is any other wait on the user (`waiting').")
 
 (defconst agent-repl-roster-settled-statuses
-  '(:ready :done :interrupted :turn-failed :vendor-blocked :turn-died :idle-async
-    :async-merging)
+  '(:ready :done :interrupted :turn-failed :vendor-blocked :turn-died :idle-async)
   "The SETTLED half of the finish edge — the foreground turn has ended.
 `turn-failed' is settled: a turn that FAILED has ended as surely as one
 that finished or was stopped.  So are `vendor-blocked' and `turn-died',
 the faults a failed turn now stands as until the next one (owner ruling,
 2026-10-06): the turn they report has ended.
 `idle-async' is settled deliberately: no FOREGROUND turn is running, and
-detached work is work the user may talk over.  So is `async-merging': it
-is drawn only over a settled idle arm, while the workspace\='s own branch
-merges in a hidden merge workspace, so a turn that ends with its async
-merge in line reaches it directly and still finishes.")
+detached work is work the user may talk over.")
 
 ;;;; ---- Reading a row ----------------------------------------------------
 
@@ -288,6 +284,20 @@ not a one-shot.  The tab bar draws its glyph from it while the one-shot
 works \(`agent-repl-status-tab-glyph')."
   (let ((row (agent-repl-roster-row-for-ws ws)))
     (and row (agent-repl-roster-row-one-shot row))))
+
+(defun agent-repl-roster-row-async-merging (row)
+  "Return non-nil when ROW carries the async-merging marker.
+The marker (`RosterRowAsyncMerging\=') is presence alone: the workspace\='s
+own branch merges async in a hidden merge workspace."
+  (plist-get row :async-merging))
+
+(defun agent-repl-roster-async-merging-for-ws (ws)
+  "Return non-nil when WS\='s current roster row carries the async-merging marker.
+Nil before any push has carried a row for WS, and while no async merge of
+its branch is in flight.  The tab bar paints its [N] run purple from it
+\(`agent-repl--tab-spec-async-merge\=')."
+  (let ((row (agent-repl-roster-row-for-ws ws)))
+    (and row (agent-repl-roster-row-async-merging row))))
 
 ;;;; ---- The walk ---------------------------------------------------------
 

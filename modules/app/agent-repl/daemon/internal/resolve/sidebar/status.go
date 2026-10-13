@@ -31,10 +31,10 @@ import (
 // WITHIN A CLAIM the roster draws the footer's step as its own arm
 // (`projectArm`), except on the idle rung, whose detail is the roster's own
 // ruling (`idleArm`): live detached work draws `idle_async` over an unread
-// turn end, a read turn end is drawn partial, and a workspace whose own
-// branch merges async (ASYNCMERGING) draws `async_merging` over every green or
-// yellow idle arm (`asyncMergeArm`).
-func statusArm(s *wsState, rec wsm.Workspace, session *wsm.Session, status *frontendv1.FooterStatus, asyncMerging bool, log dlog.Logger) string {
+// turn end, and a read turn end is drawn partial. An async merge of the
+// workspace's own branch is NO ARM: it is the row's `async_merging` marker
+// beside whatever arm this resolves (`asyncMergingMarker`).
+func statusArm(s *wsState, rec wsm.Workspace, session *wsm.Session, status *frontendv1.FooterStatus, log dlog.Logger) string {
 	if s.opening || !s.live(session) && rec.Closed {
 		return "inactive"
 	}
@@ -48,7 +48,7 @@ func statusArm(s *wsState, rec wsm.Workspace, session *wsm.Session, status *fron
 			})
 		return "none"
 	}
-	arm := asyncMergeArm(idleArm(s, session, log), asyncMerging, log)
+	arm := idleArm(s, session, log)
 	if claim != ladder.Idle {
 		arm = projectArm(status, log)
 	}
@@ -229,31 +229,19 @@ func idleArm(s *wsState, session *wsm.Session, log dlog.Logger) string {
 	}
 }
 
-// armAsyncMerging is the arm a workspace on the idle claim draws while its own
-// branch merges async in a hidden merge workspace.
-const armAsyncMerging = "async_merging"
-
-// asyncMergeArm draws `async_merging` over IDLE, the idle rung's arm, while the
-// workspace's own branch merges async (owner request, 2026-10-13): PURPLE in
-// place of the green of `ready` and a read or unread `done` or `interrupted`,
-// and of the yellow of `idle_async`. Every other idle arm keeps its color:
-// `turn_failed` is turquoise, something the user should look at, and `none`
-// is a workspace with no session, which asked for no merge. The footer is not
-// consulted: it draws the idle status throughout, since the workspace is free.
-func asyncMergeArm(idle string, asyncMerging bool, log dlog.Logger) string {
+// asyncMergingMarker answers the row's `async_merging` marker: present
+// exactly while the workspace's own branch has an async merge on a
+// repository's merge queue, on ANY status arm (owner request, 2026-10-13).
+// The arm keeps resolving as for any free workspace, so the row's name keeps
+// its status color; the marker is the one extra fact the surfaces draw.
+func asyncMergingMarker(asyncMerging bool, arm string, log dlog.Logger) *frontendv1.RosterRowAsyncMerging {
 	if !asyncMerging {
-		return idle
+		return nil
 	}
-	switch idle {
-	case "ready", armDone, armInterrupted, "idle_async":
-		log.Debug("daemon.sidebar.status_decision", "the workspace's own branch merges async, so the row is purple over its idle arm",
-			dlog.Context{"function": "asyncMergeArm", "idle": idle})
-		return armAsyncMerging
-	default:
-		log.Debug("daemon.sidebar.status_decision", "the workspace's own branch merges async, but its idle arm keeps its own color",
-			dlog.Context{"function": "asyncMergeArm", "idle": idle})
-		return idle
-	}
+	log.Debug("daemon.sidebar.async_merging_marker",
+		"the workspace's own branch merges async, so the row carries the async_merging marker beside its status",
+		dlog.Context{"status": arm})
+	return &frontendv1.RosterRowAsyncMerging{}
 }
 
 // setStatus installs the named arm on the row. It is the ONE place a name
@@ -355,9 +343,6 @@ func setStatus(row *frontendv1.RosterRow, arm string, log dlog.Logger) {
 	case "cold_gate":
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"cold_gate\""})
 		row.Status = &frontendv1.RosterRow_ColdGate{ColdGate: &frontendv1.RosterRowStatusColdGate{}}
-	case armAsyncMerging:
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"async_merging\""})
-		row.Status = &frontendv1.RosterRow_AsyncMerging{AsyncMerging: &frontendv1.RosterRowStatusAsyncMerging{}}
 	case "inactive":
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"inactive\""})
 		row.Status = &frontendv1.RosterRow_Inactive{Inactive: &frontendv1.RosterRowStatusInactive{}}

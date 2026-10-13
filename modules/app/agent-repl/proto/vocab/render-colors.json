@@ -123,10 +123,9 @@
     "(owner ruling, 2026-10-02). 'permission', 'question' and 'cold_gate' (a",
     "gate waits on the user) are GREEN, the same green as 'done' (owner",
     "ruling, 2026-10-08), and so is 'waiting' (an interrupt landing). Every",
-    "roster arm takes the color of the footer status it projects, save",
-    "'async_merging': a workspace on the footer's idle claim whose own branch",
-    "merges async in a hidden merge workspace is PURPLE where it would be",
-    "green or yellow, while the footer stays idle (owner request, 2026-10-13)."
+    "roster arm takes the color of the footer status it projects. An async",
+    "merge of the workspace's own branch is no arm: it is the row's",
+    "RosterRowAsyncMerging marker, drawn per 'async_merge_mark'."
   ],
   "roster_status": {
     "none": "none",
@@ -151,7 +150,6 @@
     "clearing": "red",
     "compacting": "red",
     "idle_async": "yellow",
-    "async_merging": "purple",
     "ready": "green",
     "done": "green",
     "interrupted": "green",
@@ -238,6 +236,28 @@
   "glyph_only_colors": [
     "orange"
   ],
+  "_async_merge_mark_comment": [
+    "THE ASYNC-MERGE MARK (frontend.v1.RosterRowAsyncMerging, owner request",
+    "2026-10-13): the workspace's own branch merges async in a hidden merge",
+    "workspace while the workspace stays free. The row's status arm, and so",
+    "its NAME's color in the sidebar and its NAME's background on the Emacs",
+    "tab, is the workspace's own status throughout. Only the mark changes:",
+    "",
+    "  sidebar  the row's PLAIN status dot -- glyph 'dot' with no",
+    "           'glyph_inks' row and no one-shot glyph standing -- takes",
+    "           'ink' and 'motion' in place of the arm's own. Every other",
+    "           mark outranks it: a gate's glyph, the one-shot glyph, a merge",
+    "           glyph, an inked dot (compacting's orange) and no mark at all.",
+    "  tab bar  the tab's '[N] ' run takes 'tab_bracket' as its background;",
+    "           the name keeps its status background. No glyph is drawn.",
+    "",
+    "A SYNC merge raises no mark: it is the row's own merge arms."
+  ],
+  "async_merge_mark": {
+    "ink": "purple",
+    "motion": "breathes",
+    "tab_bracket": "purple"
+  },
   "_one_shot_glyph_arms_comment": [
     "THE ONE-SHOT GLYPH (frontend.v1.RosterRowOneShot) is drawn in place of",
     "the status mark ONLY while the one-shot works: on these arms and no",

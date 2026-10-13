@@ -185,6 +185,8 @@ export function row(init: {
   /** The ONE-SHOT mark's outcome; omitted = the workspace is no one-shot. */
   oneShot?: boolean;
   opening?: boolean;
+  /** The ASYNC-MERGING marker: present while the workspace's own branch merges async. */
+  asyncMerging?: boolean;
   /** The durable last-selected instant, epoch ms; omitted = never selected. */
   lastSelectedAtMs?: bigint;
   priority?: string;
@@ -207,6 +209,7 @@ export function row(init: {
     ...(init.reviving === true ? { reviving: {} } : {}),
     ...(init.oneShot === true ? { oneShot: {} } : {}),
     ...(init.opening === true ? { opening: {} } : {}),
+    ...(init.asyncMerging === true ? { asyncMerging: {} } : {}),
     ...(init.lastSelectedAtMs === undefined ? {} : { lastSelected: { atMs: init.lastSelectedAtMs } }),
     ...(init.priority === undefined ? {} : { priority: { label: init.priority } }),
   });
