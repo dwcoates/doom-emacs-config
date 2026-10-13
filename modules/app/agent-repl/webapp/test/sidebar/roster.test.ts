@@ -28,7 +28,7 @@ import {
   MERGED_TODAY_COUNT_CLASS,
   SECTION_LABEL_CLASS,
 } from "../../src/sidebar/roster.js";
-import { cascadedValue, installStylesheet } from "../stylesheet.js";
+import { cascadedValue, inRail } from "../stylesheet.js";
 import {
   appContext,
   fakeTicker,
@@ -70,21 +70,6 @@ function pane(drawn: HTMLElement, grouping: string): HTMLElement {
  *  new-task form carries a `[data-task-title]` of its own. */
 function taskHead(drawn: HTMLElement): HTMLElement {
   return pane(drawn, "task").querySelector(".task-head") as HTMLElement;
-}
-
-/** The rail with the real stylesheet, around one drawn roster. */
-function inRail<T>(drawn: HTMLElement, check: (rail: HTMLElement) => T): T {
-  const teardown = installStylesheet();
-  const rail = document.createElement("div");
-  rail.id = "ws-sidebar";
-  rail.appendChild(drawn);
-  document.body.appendChild(rail);
-  try {
-    return check(rail);
-  } finally {
-    rail.remove();
-    teardown();
-  }
 }
 
 describe("drawRosterSectionFold", () => {
@@ -223,18 +208,11 @@ describe("the sections", () => {
     [false, "var(--repo-head-expanded)"],
     [true, "var(--repo-head-collapsed)"],
   ])("colors a repository header collapsed=%s with %s", (collapsed, want) => {
-    const teardown = installStylesheet();
-    try {
-      const rail = document.createElement("div");
-      rail.id = "ws-sidebar";
-      rail.appendChild(drawWorkspaceRoster(roster({ repos: [repoSection({ id: "repo-1", collapsed })] }), sidebarContext()));
-      document.body.appendChild(rail);
+    const drawn = drawWorkspaceRoster(roster({ repos: [repoSection({ id: "repo-1", collapsed })] }), sidebarContext());
+    inRail(drawn, (rail) => {
       const header = rail.querySelector(".repo-section > .repo-head") as HTMLElement;
       expect(cascadedValue(header, "color")).toBe(want);
-      rail.remove();
-    } finally {
-      teardown();
-    }
+    });
   });
 
   it("marks a repository section so its header takes its fold's grey", () => {
@@ -776,20 +754,12 @@ describe("recently merged", () => {
     // The glyph is written by `paintTriangle`; a CSS rotation on top of it
     // turned the folded \u25b8 a further quarter turn and drew \u25b2, which
     // reads as "collapse me" on a section already collapsed.
-    const teardown = installStylesheet();
-    try {
-      const rail = document.createElement("div");
-      rail.id = "ws-sidebar";
-      rail.appendChild(drawWorkspaceRoster(landed(), sidebarContext()));
-      document.body.appendChild(rail);
+    inRail(drawWorkspaceRoster(landed(), sidebarContext()), (rail) => {
       const triangle = rail.querySelector(
         ".merged-section.folded [data-section-fold]",
       ) as HTMLElement;
       expect(cascadedValue(triangle, "transform")).toBe("none");
-      rail.remove();
-    } finally {
-      teardown();
-    }
+    });
   });
 
   it("draws unfolded when the daemon says every page has it unfolded", () => {

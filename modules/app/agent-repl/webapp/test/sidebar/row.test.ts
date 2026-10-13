@@ -36,7 +36,7 @@ import {
 } from "./harness.js";
 import { createSidebarView } from "../../src/sidebar/view.js";
 import stylesheet from "../../src/styles.css?raw";
-import { cascadedValue, installStylesheet, rulesOf } from "../stylesheet.js";
+import { cascadedValue, inRail, rulesOf } from "../stylesheet.js";
 
 const SELECT_OK = create(SelectWorkspaceResponseSchema, {
   result: { case: "success", value: {} },
@@ -1266,19 +1266,8 @@ describe("the row's display mode", () => {
   });
 
   describe("the status dot's paint", () => {
-    const paintOf = (drawn: HTMLElement, selector: string): string => {
-      const teardown = installStylesheet();
-      const rail = document.createElement("div");
-      rail.id = "ws-sidebar";
-      rail.appendChild(drawn);
-      document.body.appendChild(rail);
-      try {
-        return cascadedValue(drawn.querySelector(selector) as HTMLElement, "color");
-      } finally {
-        rail.remove();
-        teardown();
-      }
-    };
+    const paintOf = (drawn: HTMLElement, selector: string): string =>
+      inRail(drawn, () => cascadedValue(drawn.querySelector(selector) as HTMLElement, "color"));
 
     it.each([
       { name: "a viewed done row's dot is the name's grey", status: "done", viewed: true, want: "var(--muted)" },
