@@ -1336,8 +1336,8 @@ describe("the row's display mode", () => {
   });
 
   it("keeps the status dot's tone class in partial mode", () => {
-    // Arrange: the class still says what the workspace is doing; only the
-    // paint recedes (the stylesheet keys it off data-viewed).
+    // Arrange: the mode says what the user has SEEN, never what the workspace
+    // is doing -- the dot is what says that.
     const sc = sidebarContext();
 
     // Act.
@@ -1359,9 +1359,8 @@ describe("the row's display mode", () => {
       inRail(drawn, () => cascadedValue(drawn.querySelector(selector) as HTMLElement, "color"));
 
     it.each([
-      { name: "a viewed done row's dot is the name's grey", status: "done", viewed: true, want: "var(--muted)" },
-      { name: "a viewed interrupted row's dot is the name's grey", status: "interrupted", viewed: true, want: "var(--muted)" },
-      { name: "an unviewed done row's dot stays green", status: "done", viewed: false, want: "var(--ok)" },
+      { name: "a viewed done row's dot is green", status: "done", viewed: true, want: "var(--ok)" },
+      { name: "an unviewed done row's dot is green", status: "done", viewed: false, want: "var(--ok)" },
     ] as const)("$name", ({ status, viewed, want }) => {
       // Arrange, Act.
       const drawn = drawRosterRow(row({ id: "ws-1", status: { case: status, value: {} }, viewed }), sidebarContext(), "R");
@@ -1370,12 +1369,21 @@ describe("the row's display mode", () => {
       expect(paintOf(drawn, ":scope > .row > .st")).toBe(want);
     });
 
-    it("paints a viewed row's dot in the same colour as its name", () => {
+    it("paints a viewed interrupted row's dot as an unviewed one", () => {
+      // Arrange, Act.
+      const at = (viewed: boolean): HTMLElement =>
+        drawRosterRow(row({ id: "ws-1", status: { case: "interrupted", value: {} }, viewed }), sidebarContext(), "R");
+
+      // Assert.
+      expect(paintOf(at(true), ":scope > .row > .st")).toBe(paintOf(at(false), ":scope > .row > .st"));
+    });
+
+    it("paints a viewed row's name grey while its dot keeps its tone", () => {
       // Arrange, Act.
       const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "done", value: {} }, viewed: true }), sidebarContext(), "R");
 
       // Assert.
-      expect(paintOf(drawn, ":scope > .row > .st")).toBe(paintOf(drawn, ":scope > .row > .name"));
+      expect(paintOf(drawn, ":scope > .row > .name")).toBe("var(--muted)");
     });
 
     it("leaves an unviewed child's dot green under a viewed parent", () => {

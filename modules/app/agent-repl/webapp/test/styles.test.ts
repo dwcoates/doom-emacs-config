@@ -3524,11 +3524,11 @@ const luminance = ([r, g, b]: [number, number, number]): number => {
 };
 
 describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
-  it("paints a prompt the iMessage dark-mode blue, a further notch darker (owner ruling, 2026-10-08)", () => {
+  it("paints a prompt the iMessage dark-mode blue, two notches darker (owner rulings, 2026-10-08 and 2026-10-13)", () => {
     // Arrange / Act
     const user = rgbOf(darkThemeBlock(), "--user");
     // Assert
-    expect(user).toEqual([0x08, 0x6e, 0xd6]);
+    expect(user).toEqual([0x07, 0x64, 0xc2]);
   });
 
   it.each([
@@ -3541,6 +3541,14 @@ describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
     const [low, high] = [luminance(rgbOf(block, darker)), luminance(rgbOf(block, lighter))];
     // Assert
     expect(low).toBeLessThan(high);
+  });
+
+  it("paints a prompt in the light theme one more step darker (owner request, 2026-10-13)", () => {
+    // Arrange / Act
+    const user = rgbOf(declarationsOf(":root") ?? "", "--user");
+
+    // Assert
+    expect(user).toEqual([0xb8, 0xd2, 0xff]);
   });
 
   it("paints a response a neutral grey rather than a hue", () => {
@@ -4027,9 +4035,44 @@ describe("the rail's mark column", () => {
 
 /**
  * THE MARKS' ONE SIZE AND ONE CYCLE (owner ruling, 2026-10-13): every rail
- * mark draws at the dot's size, a breath shrinks a mark half as far as it once
+ * mark draws at the dot's size, a breath shrinks a mark 30% less far than it once
  * did, and one breath takes exactly as long as one turn of a spinning glyph.
  */
+/**
+ * THE SEARCH TOGGLE IS A FLOATING PURPLE MAGNIFIER (owner request,
+ * 2026-10-13): no fill, border or focus ring around it, the bands' purple on
+ * the glyph, and the same padded click square.
+ */
+describe("the rail's search toggle", () => {
+  it.each([
+    { name: "draws no fill", property: "background", want: "none" },
+    { name: "draws no border", property: "border", want: "none" },
+    { name: "draws no focus ring", property: "outline", want: "none" },
+    { name: "draws no native button look", property: "appearance", want: "none" },
+    { name: "wears the bands' header purple", property: "color", want: "var(--info-agents)" },
+    { name: "keeps its padded click square", property: "padding", want: "0.1rem" },
+  ])("$name", ({ property, want }) => {
+    // Arrange / Act
+    const rule = declarationsOf("#ws-sidebar .sb-search-btn") ?? "";
+
+    // Assert
+    expect(rule).toMatch(new RegExp(`(?:^|;)\\s*${property}:\\s*${want.replace(/[()]/g, "\\$&")}\\s*;`));
+  });
+
+  it("brightens to full on hover, keyboard focus and while open", () => {
+    // Arrange / Act
+    const rule = rulesOf(stylesheet).find((r) => r.selectors.includes("#ws-sidebar .sb-search-btn:focus-visible"));
+
+    // Assert
+    expect(rule?.selectors).toEqual([
+      "#ws-sidebar .sb-search-btn:hover",
+      "#ws-sidebar .sb-search-btn:focus-visible",
+      "#ws-sidebar .sb-search-btn.active",
+    ]);
+    expect(rule?.declarations).toMatch(/opacity:\s*1\b/);
+  });
+});
+
 describe("the rail's marks", () => {
   it("times the breath by the one mark cycle", () => {
     // Arrange / Act
@@ -4061,12 +4104,21 @@ describe("the rail's marks", () => {
     expect(defs).toHaveLength(1);
   });
 
-  it("shrinks a breathing mark to 86%, half the extent it once reached", () => {
+  it("shrinks a breathing mark to 90.2%, 30% less than the 14% it once shrank", () => {
     // Arrange / Act
     const keyframes = /@keyframes ws-pulse \{([^}]*\}[^}]*\})/.exec(stylesheet)?.[1] ?? "";
 
     // Assert
-    expect(keyframes).toMatch(/50%\s*\{[^}]*transform:\s*scale\(0\.86\)/);
+    expect(keyframes).toMatch(/50%\s*\{[^}]*transform:\s*scale\(0\.902\)/);
+  });
+
+  it("breathes once every 2s, 30% slower than the 1.4s it once took", () => {
+    // Arrange / Act
+    const rule = rulesOf(stylesheet).find((r) => /(?:^|;)\s*--ws-mark-cycle\s*:/.test(r.declarations));
+
+    // Assert
+    expect(rule?.selectors).toEqual(["#ws-sidebar"]);
+    expect(rule?.declarations).toMatch(/(?:^|;)\s*--ws-mark-cycle:\s*2s\s*;/);
   });
 
   it("draws a glyph's character at the dot's size", () => {
