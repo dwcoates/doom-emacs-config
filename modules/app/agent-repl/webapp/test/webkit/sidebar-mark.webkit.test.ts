@@ -2,7 +2,7 @@
  * THE RAIL'S STATUS MARKS SHARE ONE CENTER AND ONE SIZE, IN WEBKIT (owner
  * requests, 2026-10-08 and 2026-10-13).
  *
- * Every glyph (the merge glyph's three bars, the gate emojis ❗ ❓ 🛑 and a
+ * Every glyph (the merge glyph's three bars, the gate emojis ❗ ❓ ❄️ and a
  * working one-shot's 🎯) must sit centered on the same vertical line as the
  * filled status dots, draw at the dot's size, and hold one column width with
  * every other mark, the hidden `none` one included, so the names beside them
@@ -30,7 +30,7 @@ const GLYPHS: readonly Mark[] = [
   { arm: "mergeQueued", glyph: "merge", char: "" },
   { arm: "permission", glyph: "exclaim", char: "❗" },
   { arm: "question", glyph: "ask", char: "❓" },
-  { arm: "coldGate", glyph: "stop", char: "🛑" },
+  { arm: "coldGate", glyph: "snowflake", char: "\u2744\uFE0F" },
   { arm: "thinking", glyph: "target", char: "🎯" },
 ];
 const NONE: Mark = { arm: "none", glyph: "none", char: "" };

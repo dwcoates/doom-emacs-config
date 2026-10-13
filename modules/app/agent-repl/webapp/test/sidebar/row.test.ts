@@ -145,8 +145,9 @@ describe("the status mark", () => {
     ]);
   });
 
-  it("draws a stop sign for a cold gate", () => {
-    expect(drawStatusMark("coldGate", "R.status", false).textContent).toBe("🛑");
+  it("draws a still snowflake for a cold gate", () => {
+    const mark = drawStatusMark("coldGate", "R.status", false);
+    expect([mark.textContent, mark.classList.contains("breathes")]).toEqual(["\u2744\uFE0F", false]);
   });
 
   it("draws no character for a workspace with no session", () => {
@@ -157,13 +158,17 @@ describe("the status mark", () => {
     expect(drawStatusMark("thinking", "R.status", false).classList.contains("breathes")).toBe(true);
   });
 
-  it("spins while the merge queue is on this run", () => {
-    expect(drawStatusMark("merging", "R.status", false).classList.contains("spins")).toBe(true);
+  it("breathes while the merge queue is on this run", () => {
+    expect(drawStatusMark("merging", "R.status", false).classList.contains("breathes")).toBe(true);
+  });
+
+  it.each(["permission", "question", "waiting"] as const)("holds a %s mark still", (arm) => {
+    expect(drawStatusMark(arm, "R.status", false).classList.contains("breathes")).toBe(false);
   });
 
   it("holds a queued merge still", () => {
     const mark = drawStatusMark("mergeQueued", "R.status", false);
-    expect([mark.classList.contains("spins"), mark.classList.contains("breathes")]).toEqual([false, false]);
+    expect(mark.classList.contains("breathes")).toBe(false);
   });
 });
 
@@ -1583,12 +1588,12 @@ describe("a merge that landed today", () => {
 });
 
 describe("the one-shot mark", () => {
-  it.each(["submitting", "thinking", "clearing"] as const)("draws a still target in place of the %s mark", (arm) => {
+  it.each(["submitting", "thinking", "clearing"] as const)("draws a breathing target in place of the %s mark", (arm) => {
     const drawn = drawRosterRow(row({ id: "ws-1", status: { case: arm, value: {} }, oneShot: true }), sidebarContext(), "R");
     expect([dotOf(drawn).getAttribute("data-glyph"), dotOf(drawn).textContent, dotOf(drawn).classList.contains("breathes")]).toEqual([
       "target",
       "🎯",
-      false,
+      true,
     ]);
   });
 

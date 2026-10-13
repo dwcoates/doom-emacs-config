@@ -4047,12 +4047,26 @@ describe("the rail's mark column", () => {
  * did, and one breath takes exactly as long as one turn of a spinning glyph.
  */
 describe("the rail's marks", () => {
-  it.each(["#ws-sidebar .st.breathes", "#ws-sidebar .st.spins"])("times %s by the one mark cycle", (selector) => {
+  it("times the breath by the one mark cycle", () => {
     // Arrange / Act
-    const rule = declarationsOf(selector);
+    const rule = declarationsOf("#ws-sidebar .st.breathes");
 
     // Assert
-    expect(rule).toMatch(/animation:\s*ws-(pulse|spin)\s+var\(--ws-mark-cycle\)/);
+    expect(rule).toMatch(/animation:\s*ws-pulse\s+var\(--ws-mark-cycle\)\s+ease-in-out\s+infinite/);
+  });
+
+  // ONE ANIMATION (owner ruling, 2026-10-13): no rail mark rule animates with
+  // anything but the breath.
+  it("animates no rail mark but by the breath", () => {
+    // Arrange / Act
+    const animated = rulesOf(stylesheet).filter(
+      (rule) =>
+        rule.selectors.some((sel) => /^#ws-sidebar \.st(\.|\[|-|$)/.test(sel)) &&
+        /(?:^|;)\s*animation\s*:/.test(rule.declarations),
+    );
+
+    // Assert
+    expect(animated.map((rule) => rule.selectors.join(", "))).toEqual(["#ws-sidebar .st.breathes"]);
   });
 
   it("states the mark cycle once", () => {

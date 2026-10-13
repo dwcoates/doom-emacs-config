@@ -1188,7 +1188,6 @@ body::after {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.35; transform: scale(0.86); }
 }
-@keyframes ws-spin { to { transform: rotate(360deg); } }
 
 #topbar {
   display: flex;
@@ -5470,7 +5469,7 @@ ar-button.outcome-marker-pill {
    nested under a viewed parent keeps its tone. */
 #ws-sidebar .ws[data-viewed="true"] > .row > .st { color: var(--muted); }
 /* The glyph statuses are not discs: a box that centers a single character, so
-   a turning glyph turns on its own axis rather than orbiting. The box is the
+   a breathing glyph shrinks about its own center. The box is the
    DOT'S width, not the character's (owner request, 2026-10-08), and the
    character is drawn at the dot's size (owner ruling, 2026-10-13): an emoji's
    image fills its em box, so an em of `--ws-mark-size` draws it as tall as the
@@ -5488,7 +5487,7 @@ ar-button.outcome-marker-pill {
 }
 /* THE MERGE GLYPH (owner ruling, 2026-10-13): three bars filling the dot's
    box, drawn here rather than as a character, so it is exactly the dot's size
-   and its center is the box's: `merging` turns it on that center. Its ink is
+   and its center is the box's: `merging` breathes it about that center. Its ink is
    the arm's tone, or its `glyph_inks` row. */
 #ws-sidebar .st-glyph[data-glyph="merge"] {
   background:
@@ -5515,13 +5514,11 @@ ar-button.outcome-marker-pill {
 #ws-sidebar .st.ink-red { color: var(--err); }
 #ws-sidebar .st.ink-orange { color: var(--compact-rule); }
 #ws-sidebar .st[data-glyph="none"] { visibility: hidden; }
-/* ONE CYCLE FOR THE WHOLE RAIL (owner ruling, 2026-10-13): a breath (normal,
-   shrunk, normal) takes exactly as long as one turn of a spinning glyph, as an
-   invariant, so both read from the one `--ws-mark-cycle` token. A breath is
-   work in flight or a gate on you; a spin is the merge the queue is running. */
+/* ONE ANIMATION FOR THE WHOLE RAIL (owner ruling, 2026-10-13): every animated
+   mark breathes (normal, shrunk, normal) with the same keyframes, easing and
+   `--ws-mark-cycle`, and a breath always means something is in progress. */
 #ws-sidebar { --ws-mark-cycle: 1.4s; }
 #ws-sidebar .st.breathes { animation: ws-pulse var(--ws-mark-cycle) ease-in-out infinite; }
-#ws-sidebar .st.spins { animation: ws-spin var(--ws-mark-cycle) linear infinite; }
 
 /* THE ATTENTION MARKER, on the ONE cadence frontend.v1.RosterRowAttention
    specifies: two blinks of 500 ms on / 500 ms off, then steady. The phases are
