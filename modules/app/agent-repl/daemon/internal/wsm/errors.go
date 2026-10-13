@@ -203,7 +203,7 @@ func (p LeasePolicy) valid() bool { return p >= PolicyRefuse && p <= PolicyParke
 func (p Priority) valid() bool { return p >= PriorityP05 && p <= PriorityP3 }
 
 // valid reports whether the hold kind is one of the declared arms.
-func (h HoldKind) valid() bool { return h >= HoldShutdown && h <= HoldColdGate }
+func (h HoldKind) valid() bool { return h >= HoldShutdown && h <= HoldColdGateAnswered }
 
 // String names a hold kind, for logs and refusals.
 func (h HoldKind) String() string {
@@ -218,6 +218,8 @@ func (h HoldKind) String() string {
 		return "merge"
 	case HoldColdGate:
 		return "cold_gate"
+	case HoldColdGateAnswered:
+		return "cold_gate_answered"
 	default:
 		return fmt.Sprintf("hold_kind(%d)", int(h))
 	}

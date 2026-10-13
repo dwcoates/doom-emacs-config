@@ -405,6 +405,31 @@ func TestUpdateHeldPromptHoldRoundTripsAColdGateHold(t *testing.T) {
 	}
 }
 
+// TestUpdateHeldPromptHoldRoundTripsAColdGateAnsweredHold pins that the hold
+// a pay or compact answer moves the gate's prompts to is stored and read back
+// as that kind.
+func TestUpdateHeldPromptHoldRoundTripsAColdGateAnsweredHold(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	turn := standingHold(t, s, ws.ID)
+	hold := HoldColdGateAnswered
+
+	// Act
+	if err := s.UpdateHeldPromptHold(context.Background(), turn, &hold, ""); err != nil {
+		t.Fatalf("UpdateHeldPromptHold: %v", err)
+	}
+	got, err := s.HeldPrompts(context.Background(), ws.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("HeldPrompts: %v", err)
+	}
+	if got[0].Hold == nil || *got[0].Hold != HoldColdGateAnswered {
+		t.Fatalf("hold = %v, want the answered cold-gate hold", got[0].Hold)
+	}
+}
+
 func TestUpdateHeldPromptHoldRefusesAnUnknownPrompt(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
