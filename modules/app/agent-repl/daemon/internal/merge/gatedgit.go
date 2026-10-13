@@ -427,6 +427,14 @@ func (g *gatedGit) ContinueRebase(ctx context.Context, dir string) (gitclient.Re
 	return g.inner.ContinueRebase(ctx, dir)
 }
 
+func (g *gatedGit) AbortRebase(ctx context.Context, dir string) error {
+	if err := g.enter("AbortRebase"); err != nil {
+		return err
+	}
+	defer g.leave()
+	return g.inner.AbortRebase(ctx, dir)
+}
+
 func (g *gatedGit) RebaseInProgress(ctx context.Context, dir string) (bool, error) {
 	if err := g.enter("RebaseInProgress"); err != nil {
 		return false, err
