@@ -439,6 +439,11 @@ type Deps struct {
 	// resumption, and nothing held is delivered into a shim about to go
 	// (restartredrive.go). REQUIRED.
 	StandingDown func() bool
+	// Resumptions is told what every session-up release did about the
+	// resumption a stand-down owes the workspace (restartredrive.go), so an
+	// editor's open of the workspace waits for a resumed turn to have started
+	// before it answers the workspace open (opentabs). nil tells nobody.
+	Resumptions func(ws ids.WorkspaceID, report ResumeReport)
 	// StripSentinels removes the host's metaprompt sentinel spans from the
 	// MIRRORED text; the full text stays on the durable record and on the
 	// prompt the shim receives. nil is the identity.

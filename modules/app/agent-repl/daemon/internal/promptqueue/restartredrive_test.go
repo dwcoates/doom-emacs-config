@@ -2,11 +2,16 @@ package promptqueue
 
 import (
 	"context"
+	"errors"
+	"slices"
+	"strings"
+	"sync"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/classifier"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
 
@@ -180,5 +185,123 @@ func TestAServingSessionWithATurnRunningLeavesTheDebtOwed(t *testing.T) {
 	// Assert
 	if got := h.db.owedCount(theWorkspace); got != 1 || len(h.sender.started()) != 0 {
 		t.Fatalf("owed = %d, started = %v; want the debt left for a free session", got, h.sender.started())
+	}
+}
+
+// resumeReports collects every account the queue gives of an owed resumption.
+func resumeReports(h *harness) func() []ResumeReport {
+	var mu sync.Mutex
+	var got []ResumeReport
+	h.q.deps.Resumptions = func(ws ids.WorkspaceID, report ResumeReport) {
+		mu.Lock()
+		defer mu.Unlock()
+		got = append(got, report)
+	}
+	return func() []ResumeReport {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]ResumeReport(nil), got...)
+	}
+}
+
+// resumeKinds names the kinds of REPORTS in order.
+func resumeKinds(reports []ResumeReport) []ResumeKind {
+	out := make([]ResumeKind, 0, len(reports))
+	for _, r := range reports {
+		out = append(out, r.Kind)
+	}
+	return out
+}
+
+func TestAResumedTurnIsReportedStartingThenStarted(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	reports := resumeReports(h)
+	owe(t, h)
+
+	// Act
+	h.q.ReleaseReconnectHolds(theWorkspace)
+
+	// Assert
+	if got := resumeKinds(reports()); !slices.Equal(got, []ResumeKind{ResumeStarting, ResumeStarted}) {
+		t.Fatalf("reports = %v, want starting then started", got)
+	}
+}
+
+func TestAReleaseWithNothingOwedIsReportedNotNow(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	reports := resumeReports(h)
+
+	// Act
+	h.q.ReleaseReconnectHolds(theWorkspace)
+
+	// Assert
+	if got := resumeKinds(reports()); !slices.Equal(got, []ResumeKind{ResumeNotNow}) {
+		t.Fatalf("reports = %v, want not_now", got)
+	}
+}
+
+func TestADebtLeftForARunningTurnIsReportedNotNow(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	reports := resumeReports(h)
+	owe(t, h)
+	h.watcher.running("adopted-turn")
+
+	// Act
+	h.q.ReleaseReconnectHolds(theWorkspace)
+
+	// Assert
+	if got := resumeKinds(reports()); !slices.Equal(got, []ResumeKind{ResumeNotNow}) {
+		t.Fatalf("reports = %v, want not_now", got)
+	}
+}
+
+func TestAResumptionThatCannotBeClaimedIsReportedFailed(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	reports := resumeReports(h)
+	owe(t, h)
+	h.db.resumeClaimErr = errors.New("database is locked")
+
+	// Act
+	h.q.ReleaseReconnectHolds(theWorkspace)
+
+	// Assert
+	got := reports()
+	if len(got) != 1 || got[0].Kind != ResumeFailed || !strings.Contains(got[0].Text, "database is locked") {
+		t.Fatalf("reports = %+v, want one failure naming the cause", got)
+	}
+}
+
+func TestAReleaseTheVendorStillRefusesIsReportedNotNow(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	reports := resumeReports(h)
+	owe(t, h)
+	h.footer.standVendorBlock("rate_limited")
+
+	// Act
+	h.q.ReleaseReconnectHolds(theWorkspace)
+
+	// Assert
+	if got := resumeKinds(reports()); !slices.Equal(got, []ResumeKind{ResumeNotNow}) {
+		t.Fatalf("reports = %v, want not_now", got)
+	}
+}
+
+func TestAReleaseIntoASessionThatDoesNotServeIsReportedNotNow(t *testing.T) {
+	// Arrange
+	h := revivedIntoTheGate(t)
+	reports := resumeReports(h)
+	owe(t, h)
+
+	// Act
+	h.q.ReleaseReconnectHolds(theWorkspace)
+
+	// Assert
+	if got := resumeKinds(reports()); !slices.Equal(got, []ResumeKind{ResumeNotNow}) {
+		t.Fatalf("reports = %v, want not_now", got)
 	}
 }
