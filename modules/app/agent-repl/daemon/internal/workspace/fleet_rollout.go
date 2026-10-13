@@ -240,9 +240,15 @@ func (f *Fleet) CaptureDisplaced(ctx context.Context, ws ids.WorkspaceID) (Displ
 	if err := (&shimAdapter{client: session.client}).KillTurn(ctx, *inFlight, false, nil); err != nil {
 		// The kill failing does NOT unmark the turn: it is still the turn the
 		// holder displaced, and putting it back at release is right either way.
-		f.deps.Log.Global().Warn(opFleetRollout, "the displaced turn could not be ended", dlog.Context{
-			"workspace": string(ws), "turn": string(*inFlight), "cause": err.Error(),
-		})
+		// A kill that found no turn open is the turn having ended on its own
+		// between the in-flight read and the kill, an expected race: the
+		// release's claim keeps the close the turn already has.
+		fields := dlog.Context{"workspace": string(ws), "turn": string(*inFlight), "cause": err.Error()}
+		if refusal, ok := AsShimRefusal(err); ok && refusal.KillFoundNoTurnOpen() {
+			f.deps.Log.Global().Info(opFleetRollout, "the displaced turn had already ended when the kill landed", fields)
+		} else {
+			f.deps.Log.Global().Warn(opFleetRollout, "the displaced turn could not be ended", fields)
+		}
 	}
 	f.deps.Log.Global().Debug(opFleetRollout, "captured the displaced turn", dlog.Context{
 		"workspace": string(ws), "turn": string(*inFlight),
