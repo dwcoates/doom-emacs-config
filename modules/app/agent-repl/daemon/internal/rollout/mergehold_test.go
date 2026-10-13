@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"agent-repld/internal/bounce"
 	"agent-repld/internal/wsm"
 )
 
@@ -51,10 +52,13 @@ func TestARestartOverAMergesLeaseLeavesTheLeaseToTheMerge(t *testing.T) {
 	}
 }
 
-// TestAnyOtherBounceOverAMergesLeaseStillFails pins the scope: only the
-// restart verb suspends the merge first, so every other bounce still refuses
-// to replace a shim a merge drives.
-func TestAnyOtherBounceOverAMergesLeaseStillFails(t *testing.T) {
+// TestAStaleBuildBounceOverAMergesLeaseIsDeferred pins the scope: only the
+// restart verb suspends the merge first, so a stale-build bounce never
+// replaces a shim a merge drives. It gives itself back unperformed, before
+// any prelaunch, and the registry reruns it once the merge releases the lease
+// (owner ruling 2026-10-12: a graceful restart that fails to restart a
+// session is a defect; before this it failed at ERROR and was never retried).
+func TestAStaleBuildBounceOverAMergesLeaseIsDeferred(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
@@ -63,11 +67,33 @@ func TestAnyOtherBounceOverAMergesLeaseStillFails(t *testing.T) {
 	}
 
 	// Act.
-	err := runRelaunch(t, h, ws, ReasonBuildStale)
+	err := h.c.shimBounce(ReasonBuildStale, false)(context.Background(), ws)
 
 	// Assert.
-	var held *wsm.LeaseHeldError
-	if !errors.As(err, &held) {
-		t.Fatalf("bounce = %v, want the merge's lease refusing the hold", err)
+	if !errors.Is(err, bounce.ErrDeferred) {
+		t.Fatalf("bounce = %v, want it deferred behind the merge", err)
+	}
+	if len(h.fleet.resumes) != 0 {
+		t.Fatalf("resumes = %v, want nothing replaced under the merge", h.fleet.resumes)
+	}
+}
+
+// TestAFailedStaleBuildBounceLeavesItsBuildToBeBouncedAgain pins the stamp: a
+// bounce that failed replaced nothing, so the same build is bounced again at
+// its next judgement rather than called already bounced.
+func TestAFailedStaleBuildBounceLeavesItsBuildToBeBouncedAgain(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	if got := h.c.claimStaleBounce(ws, "old-build"); got != staleBounceClaimed {
+		t.Fatalf("first claim = %v, want claimed", got)
+	}
+
+	// Act.
+	h.c.settleStaleBounce(ws, errors.New("the bounce failed"))
+
+	// Assert.
+	if got := h.c.claimStaleBounce(ws, "old-build"); got != staleBounceClaimed {
+		t.Fatalf("claim after a failed bounce = %v, want the build claimed again", got)
 	}
 }
