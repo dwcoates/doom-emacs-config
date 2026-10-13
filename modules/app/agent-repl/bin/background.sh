@@ -106,6 +106,11 @@ case $os in
         if (( niceness >= 19 )); then
             exec "$@"
         fi
+        # TO EXACTLY 19, FROM WHEREVER IT STANDS. nice(1) adds its increment to
+        # the current niceness, so `nice -n 19` from any niceness above 0
+        # overshoots to 20 (macOS's ceiling); the increment is the distance to
+        # 19 instead.
+        increment=$(( 19 - niceness ))
         # DISK, TOO, ON macOS (owner ruling 2026-10-06): the CPU demotion left a
         # run's disk I/O at normal priority, and a full run's hundreds of
         # SQLite files starved the live store (a 111-page checkpoint took 54 s,
@@ -113,9 +118,9 @@ case $os in
         # -- not `-b`, which also pins to the efficiency cores and was rejected
         # 2026-09-23 -- and children inherit it with the niceness.
         if [[ $os == Darwin ]]; then
-            exec taskpolicy -d throttle nice -n 19 "$@"
+            exec taskpolicy -d throttle nice -n "$increment" "$@"
         fi
-        exec nice -n 19 "$@"
+        exec nice -n "$increment" "$@"
         ;;
     *)
         refuse "no background-priority mechanism is known for platform '$os'"

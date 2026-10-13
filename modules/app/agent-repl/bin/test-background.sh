@@ -151,13 +151,15 @@ for platform in Darwin Linux; do
         fail "$platform: a run already above niceness 19 passes through without re-wrapping" "rc=$RC log: $(cat "$d/log")"
     fi
 
-    # --- 1d. a niceness below 19 but not 0: still demoted --------------------
+    # --- 1d. a niceness below 19 but not 0: demoted to exactly 19 -----------
+    # nice(1)'s increment is relative, so from 10 it is 9: `nice -n 19` would
+    # land at 20 on macOS.
     d="$TMP/h1d-$platform"
     run_helper "$d" STUB_UNAME="$platform" STUB_NICENESS=10 -- "${MARKER_CMD[@]}"
-    if [ "$RC" -eq 0 ] && grep -q '^nice -n 19 bash -c' "$d/log"; then
-        pass "$platform: a run at niceness 10 is still demoted"
+    if [ "$RC" -eq 0 ] && grep -q '^nice -n 9 bash -c' "$d/log"; then
+        pass "$platform: a run at niceness 10 is demoted to exactly 19"
     else
-        fail "$platform: a run at niceness 10 is still demoted" "rc=$RC log: $(cat "$d/log")"
+        fail "$platform: a run at niceness 10 is demoted to exactly 19" "rc=$RC log: $(cat "$d/log")"
     fi
 
     # --- 1e. the niceness cannot be read: refused, command not run -----------
