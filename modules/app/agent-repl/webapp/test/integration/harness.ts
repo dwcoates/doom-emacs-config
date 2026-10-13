@@ -20,6 +20,7 @@
  * otherwise never complete; `settle()` is how a test waits for the DOM instead
  * of sleeping.
  */
+import { clientLogSink } from "../../src/rpc/client-log-sink.js";
 import { createPageSeen } from "../../src/page-seen.js";
 import { pagePresence } from "../../src/presence.js";
 import { TITLE_REVEALED_ATTRIBUTE } from "../../src/feed/title-reveal.js";
@@ -596,10 +597,7 @@ async function mountApp(
       workspace_dir: ctx.workspace.dir,
     });
     clientLogger = new ForwardingLogger(
-      async (record) => {
-        await client.clientLog({ source: { case: "workspace", value: ctx.workspace }, record });
-        return "accepted";
-      },
+      clientLogSink(() => client, { case: "workspace", value: ctx.workspace }),
       () => {},
       {},
       options.logLevel ?? "info",
