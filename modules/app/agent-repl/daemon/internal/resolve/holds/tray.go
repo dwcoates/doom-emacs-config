@@ -238,6 +238,10 @@ func setHold(out *frontendv1.HeldPrompt, h wsm.HeldPrompt, log dlog.Logger) {
 		ctx["hold"] = "cold_gate"
 		log.Debug("daemon.holds.hold", "the hold waits for the cold gate's answer", ctx)
 		out.Hold = &frontendv1.HeldPrompt_ColdGate{ColdGate: &frontendv1.HeldPromptColdGateHold{}}
+	case wsm.HoldColdGateAnswered:
+		ctx["hold"] = "cold_gate_answered"
+		log.Debug("daemon.holds.hold", "the hold waits for the user to send the prompt kept at the cold gate's answer", ctx)
+		out.Hold = &frontendv1.HeldPrompt_ColdGateAnswered{ColdGateAnswered: &frontendv1.HeldPromptColdGateAnsweredHold{}}
 	default:
 		ctx["hold"] = int(*h.Hold)
 		ctx["invariant_violation"] = "unknown wsm.HoldKind"
@@ -377,6 +381,10 @@ func holdBadge(p *frontendv1.HeldPrompt, ctx dlog.Context, log dlog.Logger) *fro
 	case *frontendv1.HeldPrompt_ColdGate:
 		return badge("awaiting cold gate", "held until the cold gate is answered; a prompt never answers it", func(b *frontendv1.HeldPromptBadge) {
 			b.StandsFor = &frontendv1.HeldPromptBadge_ColdGate{ColdGate: &frontendv1.HeldPromptBadgeColdGate{}}
+		})
+	case *frontendv1.HeldPrompt_ColdGateAnswered:
+		return badge("held for you", "kept when the cold gate was answered; only you send it", func(b *frontendv1.HeldPromptBadge) {
+			b.StandsFor = &frontendv1.HeldPromptBadge_ColdGateAnswered{ColdGateAnswered: &frontendv1.HeldPromptBadgeColdGateAnswered{}}
 		})
 	default:
 		ctx["invariant_violation"] = "HeldPrompt.hold has no badge"
