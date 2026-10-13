@@ -15,7 +15,7 @@
  */
 import { requireCase, unreachableArm } from "../../rpc/strict.js";
 import { log } from "../../log.js";
-import { markdownSlot } from "../../bubble/body.js";
+import { typedTextSlot } from "../../bubble/body.js";
 import { quoteSlot } from "../../bubble/quote.js";
 import { armName } from "../renderers.js";
 import type {
@@ -47,7 +47,7 @@ export function drawFeedTextBlock(block: FeedTextBlock): HTMLElement {
     operation: "feed.draw-text-block",
     context: { characters: block.text.length },
   });
-  return markdownSlot("prompt-block prompt-block-text", block.text);
+  return typedTextSlot("prompt-block prompt-block-text", block.text);
 }
 
 /**
