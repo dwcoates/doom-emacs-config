@@ -7294,14 +7294,55 @@ ar-button.outcome-marker-pill {
    or a conflicted commit's section's. */
 .merge-tab-panel > .merge-tab-stop,
 .merge-conflict > .merge-tab-stop { display: block; margin-bottom: 0.3rem; }
-/* A NESTED STRIP (a rebasing tab's commits, a tests tab's runs, a run's output
-   and fixing) scrolls with its panel: only the bubble's own strip is pinned,
-   and a second sticky strip would stack over it. */
+/* A NESTED STRIP (a rebasing tab's commits, a tests tab's runs) scrolls with
+   its panel: only the bubble's own strip is pinned, and a second sticky strip
+   would stack over it. */
 .merge-strip.is-nested {
   position: static;
   z-index: auto;
   background: none;
 }
+/* A RUN'S BADGE IS ABOUT HALF A TAB (owner request, 2026-10-13): a run is a
+   view switch inside the tests tab, not a phase of the merge, and reads as the
+   smaller thing it is. */
+.merge-tab[data-merge-tab="testsRun"] {
+  font-size: 0.7em;
+  padding: 0.05rem 0.3rem;
+}
+/* A run's panel: its tests and its remediation, one shown at a time, with the
+   dropdown that switches them floating over the top of the panel, under the
+   run's badge (feed/merge/tab-panels.ts `runPanel`). */
+.merge-run { position: relative; }
+.merge-run-view[hidden],
+.merge-run-views[hidden] { display: none; }
+.merge-run-views {
+  position: absolute;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  min-width: 8em;
+  border: 1px solid var(--border);
+  border-radius: var(--tab-radius);
+  background: var(--tool-card-bg);
+  font-size: 0.85em;
+}
+ar-button.merge-run-view-item {
+  display: block;
+  padding: 0.15rem 0.5rem;
+  text-align: left;
+  cursor: pointer;
+}
+ar-button.merge-run-view-item:hover { background: rgba(128, 128, 128, 0.12); }
+ar-button.merge-run-view-item.is-active { background: rgba(128, 128, 128, 0.16); }
+/* The remediation view's heading: the attempt, its clock and its glyph on one
+   line, the badge the fixing attempt no longer has. */
+.merge-remediation-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+}
+.merge-remediation-head { margin-bottom: 0.3rem; }
 /* A commit's conflict section: the conflicted files, then the resolution's
    own rows. */
 .merge-conflict { padding-top: 0.3rem; }
