@@ -64,6 +64,19 @@ func TestAHandoverWithANewerShimBuildBouncesTheAdoptedShimCleanly(t *testing.T) 
 		t.Fatalf("write the shim bundle: %v", err)
 	}
 	selfRepo, cold := coldStartSelfRepoDaemonOn(t, first, shimMain)
+	// ON FAILURE, EVERY STALENESS JUDGEMENT IS SHOWN, debug included: the
+	// skips that decide a shim is NOT bounced are DEBUG records in the shared
+	// run log, which the wait's own dump leaves out (merge run 2026-10-12: the
+	// successor judged the adopted shim and bounced nothing, and which skip
+	// decided it was unrecoverable).
+	t.Cleanup(func() {
+		if !t.Failed() {
+			return
+		}
+		for _, r := range stalenessRecords(t, cold) {
+			t.Logf("staleness record: %s pid=%d %s %s: %s %v", r.Timestamp, r.PID, r.Level, r.Operation, r.Message, r.Context)
+		}
+	})
 	if resp, err := cold.Client().OpenWorkspace(cold.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil || resp.Msg.GetSuccess() == nil {
 		t.Fatalf("OpenWorkspace on the cold daemon = (%v, %v), want the session live", resp, err)
 	}
@@ -159,6 +172,19 @@ func recordTime(t *testing.T, r harness.LogRecord) time.Time {
 		t.Fatalf("record timestamp %q: %v", r.Timestamp, err)
 	}
 	return at
+}
+
+// stalenessRecords answers every process's staleness and relaunch records in
+// D's run log, debug included, oldest first.
+func stalenessRecords(t *testing.T, d *harness.Daemon) []harness.LogRecord {
+	t.Helper()
+	var out []harness.LogRecord
+	for _, r := range harness.ReadLog(t, d.RunLogPath()) {
+		if r.Operation == "daemon.rollout.staleness" || r.Operation == "daemon.rollout.relaunch" {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // successorWarnings answers every WARN or ERROR pid wrote to the run log and
