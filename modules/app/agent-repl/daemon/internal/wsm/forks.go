@@ -28,7 +28,7 @@ import (
 // but its book stays in the store, and the fork's inherited past is still read
 // from it; a foreign key would cascade the fork's lineage away with the parent.
 
-// forkLineageDDL is the layout-43 addition. Kept apart from the rest of the
+// forkLineageDDL is the layout-47 addition. Kept apart from the rest of the
 // schema because two paths write it: a fresh file as part of schemaDDL, and a
 // layout-42 file from the 42 -> 43 migration.
 const forkLineageDDL = `
