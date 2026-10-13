@@ -41,16 +41,22 @@ func stoppedClock(startMs, endMs int64) *frontendv1.FeedToolCardClock {
 }
 
 // settledClock is the clock of a unit whose SETTLE carries its instant: from
-// the start the settle restates -- or, when it restates none, the start this
-// process HELD from the unit's own start frame -- to the settle. Nil when the
-// settle states no instant.
+// its start (clockStart) to the settle. Nil when the settle states no instant.
 func settledClock(heldStartMs int64, settled *conversationv1.AgentActivitySettledAt) *frontendv1.FeedToolCardClock {
 	if settled == nil {
 		return nil
 	}
-	start := heldStartMs
-	if restated := settled.GetStartedAt(); restated != nil {
-		start = restated.GetAtMs()
+	return stoppedClock(clockStart(heldStartMs, settled), settled.GetAtMs())
+}
+
+// clockStart is the start a settled unit's clock counts from. A START THIS
+// PROCESS HELD STANDS: the restated start is the same instant, and taking the
+// held one keeps a live card's clock exactly where it was. A replayed card,
+// whose start the store no longer holds, counts from the start its settle
+// RESTATES. Zero when neither is known.
+func clockStart(heldStartMs int64, settled *conversationv1.AgentActivitySettledAt) int64 {
+	if heldStartMs != 0 {
+		return heldStartMs
 	}
-	return stoppedClock(start, settled.GetAtMs())
+	return settled.GetStartedAt().GetAtMs()
 }

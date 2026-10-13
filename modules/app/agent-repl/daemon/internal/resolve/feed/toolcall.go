@@ -299,22 +299,17 @@ func (r *resolver) restatedOrHeld(s *wsState, act *conversationv1.AgentActivity,
 }
 
 // settledOutcome is returnedOutcome for a settle that carries a settle
-// instant: the card's runtime counts from the start the settle RESTATES, so a
-// replayed card, whose start the store no longer holds, still states how long
-// the call ran.
-//
-// A START THIS PROCESS HELD STANDS: the restated start is the same instant,
-// and taking the held one keeps a live card's clock exactly where it was. A
-// settle instant that restates no start is graded like any other bare settle
-// (unrestated); the card is still drawn, with no runtime chip if no start was
-// held, because the runtime is the only thing the missing start costs it.
+// instant: the card's clock counts from clockStart -- the start this process
+// held, else the one the settle RESTATES -- so a replayed card, whose start
+// the store no longer holds, still states how long the call ran. A settle
+// instant that restates no start is graded like any other bare settle
+// (unrestated); the card is still drawn, with no clock if no start was held,
+// because the clock is the only thing the missing start costs it.
 func (r *resolver) settledOutcome(s *wsState, act *conversationv1.AgentActivity, u *unitState, kind string, ok bool, form returnedForm, settled *conversationv1.AgentActivitySettledAt) toolOutcome {
 	if settled != nil {
 		switch restated := settled.GetStartedAt(); {
 		case restated != nil:
-			if u.startedAtMs == 0 {
-				u.startedAtMs = restated.GetAtMs()
-			}
+			u.startedAtMs = clockStart(u.startedAtMs, settled)
 		case u.startedAtMs != 0:
 			r.unrestated(s, act, kind, "started_at", "the start this process held")
 		default:
