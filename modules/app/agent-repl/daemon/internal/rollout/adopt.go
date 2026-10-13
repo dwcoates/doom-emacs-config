@@ -633,6 +633,22 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 			withCause(merge(fields, dlog.Context{"serving_daemon": string(holder)}), err))
 		return err
 	}
+	// FROM THE CLAIM UNTIL THE WORKSPACE IS OWNED HERE, daemon.addr waits for
+	// this adoption (awaitClaimedOwned): the claim is what lets the incumbent
+	// exit, and a client that dials the address the exit writes must find the
+	// workspace served, never refused not_yet_adopted.
+	c.mu.Lock()
+	c.beginClaimedLocked()
+	c.mu.Unlock()
+	claimEnded := false
+	defer func() {
+		if claimEnded {
+			return
+		}
+		c.mu.Lock()
+		c.endClaimedLocked()
+		c.mu.Unlock()
+	}()
 	// FROM THE CLAIM ON, THE HANDOVER HOLD IS THIS DAEMON'S TO DRAIN, and it
 	// is drained whether or not the shim answers: a workspace this daemon
 	// serves with the incumbent's hold still standing refuses every prompt
@@ -711,6 +727,8 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 		c.owned = map[ids.WorkspaceID]bool{}
 	}
 	c.owned[ws] = true
+	c.endClaimedLocked()
+	claimEnded = true
 	// ONLY A JOINING DAEMON ADVERTISES FROM HERE: once it has taken over
 	// (becomeIncumbent), daemon.addr is already written and a late adoption
 	// finishing must not write it a second time.
@@ -1245,12 +1263,59 @@ func (c *controller) takeOverOnClaim(ctx context.Context, awaited error, fields 
 		c.log.Error(opAdopt, "the boot claim could not be awaited; daemon.addr is not written", withCause(fields, awaited))
 		return
 	}
+	if err := c.awaitClaimedOwned(ctx, fields); err != nil {
+		c.log.Debug(opAdopt, "the daemon's lifetime ended before the adoptions in flight were owned; daemon.addr is not written", withCause(fields, err))
+		return
+	}
 	if err := c.deps.WriteDaemonAddr(ctx); err != nil {
 		c.log.Error(opAdopt, "daemon.addr could not be written under the held boot claim", withCause(fields, err))
 		return
 	}
 	c.log.Info(opAdopt, "the incumbent exited; wrote daemon.addr", fields)
 	c.becomeIncumbent(fields)
+}
+
+// beginClaimedLocked counts one adoption past its serving claim. The caller
+// holds c.mu.
+func (c *controller) beginClaimedLocked() {
+	if c.claimedAdoptions == 0 {
+		c.claimedIdle = make(chan struct{})
+	}
+	c.claimedAdoptions++
+}
+
+// endClaimedLocked retires one claimed adoption, which either made its
+// workspace owned or failed. The caller holds c.mu. An end with none counted
+// is an accounting defect.
+func (c *controller) endClaimedLocked() {
+	if c.claimedAdoptions <= 0 {
+		panic("rollout: a claimed adoption ended with none counted")
+	}
+	c.claimedAdoptions--
+	if c.claimedAdoptions == 0 {
+		close(c.claimedIdle)
+	}
+}
+
+// awaitClaimedOwned waits until every adoption past its serving claim has
+// made its workspace owned here (or failed), or for ctx. An adoption still
+// waiting for the incumbent's release is not waited on: the incumbent is
+// gone, and the takeover's straggler pass takes that workspace up.
+func (c *controller) awaitClaimedOwned(ctx context.Context, fields dlog.Context) error {
+	c.mu.Lock()
+	n, idle := c.claimedAdoptions, c.claimedIdle
+	c.mu.Unlock()
+	if n == 0 {
+		return nil
+	}
+	c.log.Info(opAdopt, "the incumbent exited while adoptions were still finishing; daemon.addr waits for them to be owned",
+		merge(fields, dlog.Context{"claimed_adoptions": n}))
+	select {
+	case <-idle:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // releaseHeadless undoes a headless claim whose adoption failed.
