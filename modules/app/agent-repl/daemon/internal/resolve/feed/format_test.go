@@ -7,38 +7,6 @@ import "testing"
 // disagrees with the first. The TOKEN figure itself is daemon-wide and is
 // pinned once, in internal/figures.
 
-func TestFormatRuntime(t *testing.T) {
-	tests := []struct {
-		name   string
-		start  int64
-		end    int64
-		want   string
-		wantOK bool
-	}{
-		{name: "sub-second reads in milliseconds", start: 1_000, end: 1_340, want: "ran 340 ms", wantOK: true},
-		{name: "seconds carry one digit", start: 1_000, end: 5_200, want: "ran 4.2 s", wantOK: true},
-		{name: "a whole second drops the digit", start: 1_000, end: 3_000, want: "ran 2 s", wantOK: true},
-		{name: "minutes split from seconds", start: 1_000, end: 135_000, want: "ran 2m 14s", wantOK: true},
-		{name: "a missing settle draws no figure", start: 1_000, end: 0, wantOK: false},
-		{name: "a missing start draws no figure", start: 0, end: 1_000, wantOK: false},
-		{name: "a settle before the start is undrawable", start: 5_000, end: 1_000, wantOK: false},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange, Act.
-			got, ok := formatRuntime(tc.start, tc.end)
-
-			// Assert.
-			if ok != tc.wantOK {
-				t.Fatalf("formatRuntime(%d, %d) ok = %v, want %v", tc.start, tc.end, ok, tc.wantOK)
-			}
-			if ok && got != tc.want {
-				t.Fatalf("formatRuntime(%d, %d) = %q, want %q", tc.start, tc.end, got, tc.want)
-			}
-		})
-	}
-}
-
 func TestFormatCount(t *testing.T) {
 	tests := []struct {
 		name string

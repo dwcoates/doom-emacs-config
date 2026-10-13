@@ -463,11 +463,13 @@ describe.each(TOOL_OUTPUT_FORMS)("a returned tool call with %s output", (form) =
     expect(row.dataset.state).toBe("returned");
   });
 
-  it("draws the settled runtime verbatim rather than ticking", async () => {
-    // Arrange / Act
-    const row = await drawRow(activityRow(toolCallReturnedUnit(form)));
-    // Assert
-    expect(row.textContent).toContain("ran 4.2 s");
+  it("heads with the stopped clock's span rather than ticking", async () => {
+    // Arrange
+    await drawRow(activityRow(toolCallReturnedUnit(form)));
+    // Act
+    await harness.tick(5_000);
+    // Assert: the fixture ran from 1 s to 5.2 s, and time passing changes nothing.
+    expect(harness.row("row-1")?.querySelector(".tool-head .tool-clock")?.textContent).toBe("4s");
   });
 
   it("draws the omission note when the output was capped", async () => {
@@ -592,11 +594,11 @@ describe("a tool call that returned no output", () => {
     expect(row.querySelector('[data-verdict="failed"]')).not.toBeNull();
   });
 
-  it("still draws its runtime", async () => {
+  it("still heads with its clock", async () => {
     // Arrange / Act
     const row = await drawRow(activityRow(toolCallReturnedUnit("none")));
     // Assert
-    expect(row.textContent).toContain("ran 4.2 s");
+    expect(row.querySelector(".tool-head .tool-clock")?.textContent).toBe("4s");
   });
 });
 
@@ -1398,7 +1400,7 @@ describe("an undecidable denial", () => {
     const row = await drawRow(permissionRow("deniedUndecidable"));
     // Assert
     expect(
-      row.querySelector(".perm-verdict")?.getAttribute("data-permission-verdict"),
+      row.querySelector(".tool-head [data-permission-verdict]")?.getAttribute("data-permission-verdict"),
     ).toBe("deniedUndecidable");
   });
 });
@@ -2667,12 +2669,15 @@ describe("a live merge head's clock", () => {
   });
 });
 
-describe("an open permission's waiting clock", () => {
-  it("starts at zero when the card arrives", async () => {
-    // Arrange / Act: the wait is stamped at the FIRST DRAW, not on the wire.
-    const row = await drawRow(permissionRow("open"));
+describe("an open permission's head clock", () => {
+  /** The clock in the permission card's head. */
+  const clock = (): string | null | undefined => harness.row("row-1")?.querySelector(".tool-head .tool-clock")?.textContent;
+
+  it("counts from the instant the ask was posed, as the wire states it", async () => {
+    // Arrange / Act
+    await drawRow(permissionRow("open"));
     // Assert
-    expect(row.querySelector(".perm-waiting")?.textContent).toBe("waiting 0s");
+    expect(clock()).toBe("0s");
   });
 
   it("ticks up while the card stands", async () => {
@@ -2681,7 +2686,7 @@ describe("an open permission's waiting clock", () => {
     // Act
     await harness.tick(5_000);
     // Assert
-    expect(harness.row("row-1")?.querySelector(".perm-waiting")?.textContent).toBe("waiting 5s");
+    expect(clock()).toBe("5s");
   });
 
   it("keeps counting the real wait across a re-push of the open card", async () => {
@@ -2691,30 +2696,32 @@ describe("an open permission's waiting clock", () => {
     // Act
     harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, permissionRow("open"));
     await harness.settle();
-    // Assert: a push while the reader is deciding does not reset their wait.
-    expect(harness.row("row-1")?.querySelector(".perm-waiting")?.textContent).toBe("waiting 5s");
+    // Assert: the start is the wire's, so a push does not reset the wait.
+    expect(clock()).toBe("5s");
   });
 
-  it("stops on the answered push", async () => {
+  it("stops at the span the answered push states", async () => {
     // Arrange
     await drawRow(permissionRow("open"));
     await harness.tick(5_000);
     // Act
     harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, permissionRow("allowedOnce"));
     await harness.settle();
+    await harness.tick(5_000);
     // Assert
-    expect(harness.row("row-1")?.querySelector(".perm-waiting")).toBeNull();
+    expect(clock()).toBe("12s");
   });
 
-  it("stops on the abandoned push", async () => {
+  it("stops at the span the abandoned push states", async () => {
     // Arrange
     await drawRow(permissionRow("open"));
     await harness.tick(5_000);
     // Act
     harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, permissionRow("abandoned"));
     await harness.settle();
+    await harness.tick(5_000);
     // Assert
-    expect(harness.row("row-1")?.querySelector(".perm-waiting")).toBeNull();
+    expect(clock()).toBe("12s");
   });
 });
 

@@ -370,6 +370,7 @@ func (r *resolver) drawHook(s *wsState, at placement, act *conversationv1.AgentA
 	case *conversationv1.AgentHook_Start:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawHook", "branch": "case *conversationv1.AgentHook_Start"})
 		u.input = hookHeadline(frame.Start.GetHookName(), frame.Start.GetEvent(), false)
+		u.startedAtMs = frame.Start.GetStartedAt().GetAtMs()
 		if gated := frame.Start.GetGatedCall(); gated.GetValue() != "" {
 			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "gated := frame.Start.GetGatedCall(); gated.GetValue() != \"\""})
 			s.gatedCalls["hook:"+unitID] = gated.GetValue()
@@ -385,6 +386,9 @@ func (r *resolver) drawHook(s *wsState, at placement, act *conversationv1.AgentA
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawHook", "branch": "case *conversationv1.AgentHook_NonBlockingError"})
 		card.Headline = &frontendv1.FeedHookHeadline{Text: hookFailedHeadline(u.input)}
 		failed := &frontendv1.FeedHookFailed{ExitCode: frame.NonBlockingError.GetExitCode()}
+		// The hook states its own duration, so it stopped that long after it
+		// started. A BLOCKED hook states neither, and has no clock.
+		card.Clock = stoppedClock(u.startedAtMs, u.startedAtMs+frame.NonBlockingError.GetDurationMs())
 		if text := hookOutputText(frame.NonBlockingError.GetOutput()); text != "" {
 			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "text := hookOutputText(frame.NonBlockingError.GetOutput()); text != \"\""})
 			failed.Output = &frontendv1.FeedHookOutput{Text: text}

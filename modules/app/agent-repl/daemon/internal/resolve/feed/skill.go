@@ -34,6 +34,7 @@ func (r *resolver) drawSkill(s *wsState, at placement, act *conversationv1.Agent
 			break
 		}
 		card.Outcome = &frontendv1.FeedSkill_Running{Running: &frontendv1.FeedSkillRunning{}}
+		card.Clock = runningClock(u.startedAtMs)
 		// A START AFTER THE SETTLE DOES NOT REOPEN THE CARD. The file plane's
 		// start can arrive after the stream plane's success under the same
 		// key; the invocation it states is taken, the running arm is not,
@@ -44,11 +45,13 @@ func (r *resolver) drawSkill(s *wsState, at placement, act *conversationv1.Agent
 				"a skill's start arrived after it settled; the settled card stands",
 				dlog.Context{"unit": unitID})
 			card.Outcome = prior.GetOutcome()
+			card.Clock = prior.GetClock()
 		}
 	case *conversationv1.AgentSkillUse_Progress:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawSkill", "branch": "case *conversationv1.AgentSkillUse_Progress"})
 		card.Invocation = &frontendv1.FeedSkillInvocation{Text: u.input}
 		card.Outcome = &frontendv1.FeedSkill_Running{Running: &frontendv1.FeedSkillRunning{}}
+		card.Clock = runningClock(u.startedAtMs)
 	case *conversationv1.AgentSkillUse_Success:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawSkill", "branch": "case *conversationv1.AgentSkillUse_Success"})
 		if u.input == "" {
@@ -59,6 +62,7 @@ func (r *resolver) drawSkill(s *wsState, at placement, act *conversationv1.Agent
 		loaded := &frontendv1.FeedSkillLoaded{
 			Document: &frontendv1.FeedSkillDocument{Markdown: state.Success.GetDocument().GetMarkdown()},
 		}
+		card.Clock = settledClock(u.startedAtMs, state.Success.GetSettledAt())
 		// The consent line: WHAT INVOKING IT PERMITS. Absent when the skill
 		// declared none — absence draws no line, never an empty one.
 		if allowed := state.Success.GetAllowedTools().GetToolNames(); len(allowed) > 0 {
@@ -88,6 +92,7 @@ func (r *resolver) drawSkill(s *wsState, at placement, act *conversationv1.Agent
 		card.Outcome = &frontendv1.FeedSkill_Failed{Failed: &frontendv1.FeedSkillFailed{
 			Text: skillFailureText(state.Failure.GetError()),
 		}}
+		card.Clock = settledClock(u.startedAtMs, state.Failure.GetError().GetSettledAt())
 	default:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawSkill", "branch": "default"})
 		return nil, errNotARow

@@ -72,8 +72,21 @@ describe("stampedAge", () => {
   });
 });
 
-describe("stampedAge: the asks share it", () => {
-  it.each(["permission.ts", "question.ts", "cold-gate.ts"])(
+describe("stampedAge: the cold gate's own", () => {
+  it.each(["permission.ts", "question.ts"])(
+    "%s draws no age of its own: its time is the tool card head's clock",
+    (file) => {
+      // Arrange
+      const source = readFileSync(join(__dirname, "../../../src/feed/asks", file), "utf8");
+      // Act
+      const handRolled = /`\$\{formatTickedAge\([^)]*\)\} ago`/.test(source);
+      const stamped = /stampedAge\(/.test(source);
+      // Assert
+      expect([handRolled, stamped]).toEqual([false, false]);
+    },
+  );
+
+  it.each(["cold-gate.ts"])(
     "%s draws its settled instant through the shared helper, not a hand-rolled age",
     (file) => {
       // Arrange

@@ -1761,17 +1761,30 @@ pre {
   --bubble-bg: var(--assistant);
   max-width: calc(var(--bubble-max-width) / 2);
 }
-/* PROMPT AND RESPONSE BUBBLES SIT 30% TIGHTER TOP AND BOTTOM (owner request,
-   2026-10-12): the gap between the bubble's edge and its content shrinks
-   vertically only. The left and right insets, the gaps between bubbles and
-   every other kind (thinking, the agentic tool and monitor cards, the
-   compaction summary) keep the base padding. */
+/* THE VERTICAL PADDING LADDER: the gap between a bubble's top and bottom edge
+   and its content, as a share of the base. Vertical only: the left and right
+   insets and the gaps between rows never read it. Kinds not named here (the
+   agentic tool and monitor cards, the compaction summary) keep the base.
+   - PROMPT AND RESPONSE BUBBLES SIT 30% TIGHTER (owner request, 2026-10-12).
+   - AN INTERIM RESPONSE, the amber-bordered one with no fill, sits 30% tighter
+     again (owner request, 2026-10-13): 0.7 of 0.7. The green answer keeps the
+     response's 0.7.
+   - A THINKING BUBBLE has no fill, border or shadow, so its padding read only
+     as empty feed around floating text; it keeps about a third of the base
+     (owner request, 2026-10-13), which brings its visible gap to a neighbor to
+     about 65% of what the base padding made it. */
 .bubble[data-variant="response"],
 .bubble[data-variant="user"],
 .bubble[data-variant="agent"],
 .bubble[data-variant="peer"],
 .bubble[data-variant="held"] {
   --bubble-pad-y: calc(var(--bubble-pad-y-base) * 0.7);
+}
+.bubble[data-variant="response"].interim-response {
+  --bubble-pad-y: calc(var(--bubble-pad-y-base) * 0.49);
+}
+.bubble[data-variant="thinking"] {
+  --bubble-pad-y: calc(var(--bubble-pad-y-base) * 0.35);
 }
 /* THE SECOND BACKGROUND A KIND SETS (owner request, 2026-10-08): a THINKING
    bubble and an INTERIM response (`.interim-response`, response.ts
@@ -2682,6 +2695,7 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    entirely rather than showing a height-capped peek of it — collapsed is the
    header alone. (The `.tool-diagnostics` block is part of that section.) */
 .tool-fold:not(.expanded) > .tool-output,
+.tool-fold:not(.expanded) > .tool-exit-line,
 .tool-fold:not(.expanded) > .tool-diagnostics {
   display: none;
 }
@@ -4547,12 +4561,18 @@ body.draining #composer-input::placeholder {
   color: var(--muted);
   font-style: italic;
 }
-/* "ran 4.2 s", composed daemon-side, sitting beside the verdict badge it
-   qualifies. It is a settled figure, so it gets no motion and no hue. */
-.tool-runtime {
+/* The tool card head's clock (feed/cards/tool-head.ts), last in the head after
+   the badge: counting up while the unit runs, the span it took once it
+   settled. It gets no motion and no hue of its own. */
+.tool-clock {
   color: var(--muted);
   font-size: 0.7rem;
   font-variant-numeric: tabular-nums;
+}
+/* A card's exit code (feed/cards/exit-line.ts): content, leading the output,
+   never the head. */
+.tool-exit-line {
+  margin: 0.25rem 0;
 }
 /* The composed truncation line, below its output box and outside it, so the
    count stays put while the box scrolls. No divider of its own: the output
@@ -4709,7 +4729,7 @@ bubble-body.bubble-body { display: block; }
 .usage-corner {
   /* THE ONE SIZE both figures read (owner ruling, 2026-09-15): set here and
      inherited, so the token, the duration and both reserves cannot differ. */
-  font-size: 0.85em;
+  font-size: var(--usage-font-size);
   /* One phase of the reveal; the two phases together take 0.5s. */
   --usage-phase: 0.25s;
   /* The hover hit area's padding (owner ruling, 2026-09-14). */
@@ -4769,6 +4789,10 @@ bubble-body.bubble-body { display: block; }
   --usage-corner-gap-x: calc(var(--bubble-pad-y-base) + var(--usage-half-leading));
   /* The normal gap between the token and the duration, unchanged. */
   --usage-pair-gap: 0.35rem;
+  /* THE FIGURES' ONE SIZE, read by the corner and by the ghost that measures
+     its footprint, so the two cannot differ: a quarter smaller than the 0.85em
+     it was (owner request, 2026-10-13). */
+  --usage-font-size: calc(0.85em * 0.75);
 }
 /* THE GHOST (see "THE SIZING GHOST" above): an invisible, zero-height float
    exactly the corner's footprint wide. That footprint is the corner's in-flow
@@ -4791,7 +4815,7 @@ bubble-body.bubble-body { display: block; }
   overflow: hidden;
   visibility: hidden;
   white-space: pre;
-  font-size: 0.85em;
+  font-size: var(--usage-font-size);
   font-variant-numeric: tabular-nums;
   padding-left: calc(6ch + var(--usage-pair-gap));
   padding-right: calc(var(--usage-corner-gap-x) - var(--bubble-scroll-gap));
@@ -6385,14 +6409,6 @@ ar-button.outcome-marker-pill {
   padding: 0.1rem 0;
   overflow-wrap: anywhere;
 }
-/* How long the turn has been blocked on this ask, ticking from the row's first
-   draw, in the head where a tool call's badge sits. Muted: it is a fact about
-   the wait, not a deadline. */
-.perm-waiting {
-  color: var(--muted);
-  font-size: 0.75rem;
-  font-variant-numeric: tabular-nums;
-}
 /* WHERE TO TYPE (both ask cards): a deny's reason and a question's own answer
    are typed in the Emacs composer, never on the card, and this line says so.
    Quiet, under the card's controls. */
@@ -6406,23 +6422,15 @@ ar-button.outcome-marker-pill {
   opacity: 0.45;
   cursor: not-allowed;
 }
-/* The settled verdict: the badge says what was decided, the stamp when. A
-   DENIAL IS AN ANSWER, so the denied badge takes the error hue for legibility
-   and the row itself stays the settled grey rather than reading as a fault. */
-.perm-verdict {
-  display: flex;
-  align-items: baseline;
-  gap: 0.4rem;
-  margin-top: 0.4rem;
-}
-/* A SETTLED VERDICT'S BADGES ARE SQUARE AND THE ANSWER'S SIZE (owner ruling,
-   2026-10-11): the tab corner, and the given answer's type size, on the
-   question's header chips and the permission's verdict word alike. */
-.q-verdict .badge, .perm-verdict .badge {
+/* A QUESTION'S GIVEN ANSWERS' HEADER CHIPS ARE SQUARE AND THE ANSWER'S SIZE
+   (owner ruling, 2026-10-11): the tab corner, and the given answer's type
+   size. The card's verdict itself is the tool card head's badge, drawn as
+   every tool card's badge is. */
+.q-verdict .badge {
   border-radius: var(--tab-radius);
   font-size: var(--ask-verdict-size);
 }
-.perm-when, .q-when, .cold-gate-when {
+.cold-gate-when {
   color: var(--muted);
   font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
@@ -7394,9 +7402,15 @@ ar-button.merge-run-view-item.is-active { background: rgba(128, 128, 128, 0.16);
 /* The header reads as the agents panel's does: muted words above their
    columns, a shade darker than the muted grey and set off from the rows by a
    thicker line than the rows' own delimiter (owner request, 2026-10-13), so the
-   column names never read as one more row. */
-.merge-queue-header { color: color-mix(in srgb, var(--muted) 70%, black); }
-.merge-queue > .merge-queue-header + * { border-top-width: 2px; }
+   column names never read as one more row. The extra pixel is the HEADER's own
+   bottom border, meeting the first row's 1px delimiter, so every row keeps the
+   same box height. */
+.merge-queue-header {
+  color: color-mix(in srgb, var(--muted) 70%, black);
+  border-bottom-width: 1px;
+  border-bottom-style: solid;
+  border-bottom-color: var(--border);
+}
 .merge-queue-header > .footer-column-header:not([data-column="duration"]) { justify-content: flex-start; }
 .merge-queue-header > [data-column="duration"],
 .merge-queue-line > .merge-queue-duration { justify-content: flex-end; }
@@ -7533,7 +7547,7 @@ ar-button.merge-queue-move[aria-disabled="true"] {
 }
 
 /* ---- undecidable permission verdict (src/feed/asks/permission.ts) ---- */
-.perm-verdict .badge.arm-deniedUndecidable {
+.badge.arm-deniedUndecidable {
   font-style: italic;
   opacity: 0.85;
 }

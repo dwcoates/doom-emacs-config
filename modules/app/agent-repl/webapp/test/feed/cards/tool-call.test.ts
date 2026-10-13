@@ -39,6 +39,7 @@ import { HAS_MORE_CLASS, TITLE_FOLD_CLASS } from "../../../src/feed/bubble-more.
 import { fireResize } from "../../resize-observer.js";
 import { measureTitle } from "../title-measure.js";
 import { orderFor } from "../../feed-order.js";
+import { runningClock, stoppedClock, toolCardHeadParts } from "./tool-card-head-shape.js";
 
 const SINK: FailureSink = { report: () => {}, retract: () => {} };
 
@@ -408,24 +409,24 @@ describe("the returned state", () => {
     expect(el.getAttribute("data-verdict")).toBe("failed");
   });
 
-  it("draws the composed runtime beside the badge when present", () => {
-    const el = drawFeedSimpleToolCall(
-      card({
-        outcome: {
-          case: "returned",
-          value: {
-            verdict: { case: "succeeded", value: {} },
-            form: { case: "text", value: { text: "ok" } },
-            runtime: { text: "ran 4.2 s" },
-          },
-        },
-      }),
-      rowContext(),
-    );
-    expect(el.querySelector(".tool-head .tool-runtime")?.textContent).toBe("ran 4.2 s");
+  it("heads with the name, the verdict badge and the stopped clock, in that order", () => {
+    // Arrange
+    const u = card({
+      outcome: {
+        case: "returned",
+        value: { verdict: { case: "succeeded", value: {} }, form: { case: "text", value: { text: "ok" } } },
+      },
+    });
+    u.clock = stoppedClock(1_000, 5_200);
+
+    // Act
+    const el = drawFeedSimpleToolCall(u, rowContext());
+
+    // Assert
+    expect(toolCardHeadParts(el)).toEqual(["title:Bash", "badge:done", "clock:4s"]);
   });
 
-  it("draws no runtime figure when the view carries none", () => {
+  it("heads with no clock when the view carries none", () => {
     const el = drawFeedSimpleToolCall(
       card({
         outcome: {
@@ -435,7 +436,20 @@ describe("the returned state", () => {
       }),
       rowContext(),
     );
-    expect(el.querySelector(".tool-runtime")).toBeNull();
+    expect(toolCardHeadParts(el)).toEqual(["title:Bash", "badge:done"]);
+  });
+
+  it("heads a running call with a clock counting up from its start", () => {
+    // Arrange
+    vi.setSystemTime(12_000);
+    const u = card({ outcome: { case: "running", value: {} } });
+    u.clock = runningClock(0);
+
+    // Act
+    const el = drawFeedSimpleToolCall(u, rowContext());
+
+    // Assert
+    expect(toolCardHeadParts(el)).toEqual(["title:Bash", "badge:running…", "clock:12s"]);
   });
 });
 
@@ -488,21 +502,21 @@ describe("the no-output form", () => {
     expect(el.querySelector(".badge.ok")?.textContent).toBe("done");
   });
 
-  it("still draws the settled runtime beside the badge", () => {
-    const el = drawFeedSimpleToolCall(
-      card({
-        outcome: {
-          case: "returned",
-          value: {
-            verdict: { case: "succeeded", value: {} },
-            form: { case: "none", value: {} },
-            runtime: { text: "ran 0.1 s" },
-          },
-        },
-      }),
-      rowContext(),
-    );
-    expect(el.querySelector(".tool-head .tool-runtime")?.textContent).toBe("ran 0.1 s");
+  it("still heads with its stopped clock", () => {
+    // Arrange
+    const u = card({
+      outcome: {
+        case: "returned",
+        value: { verdict: { case: "succeeded", value: {} }, form: { case: "none", value: {} } },
+      },
+    });
+    u.clock = stoppedClock(1_000, 3_000);
+
+    // Act
+    const el = drawFeedSimpleToolCall(u, rowContext());
+
+    // Assert
+    expect(toolCardHeadParts(el)).toEqual(["title:Bash", "badge:done", "clock:2s"]);
   });
 
   it("still draws the diagnostics an edit with no output raised", () => {
@@ -1114,7 +1128,7 @@ describe("the image output form (landing 16)", () => {
 });
 
 describe("the returned card's exit chip (landing 16)", () => {
-  it("draws the code the command reported, on the head", () => {
+  it("draws the code the command reported as content, never on the head", () => {
     const el = drawFeedSimpleToolCall(
       card({
         outcome: {
@@ -1128,9 +1142,12 @@ describe("the returned card's exit chip (landing 16)", () => {
       }),
       rowContext(),
     );
-    const chip = el.querySelector(".tool-head .shell-exit");
-    expect(chip?.textContent).toBe("exit 3");
-    expect(chip?.getAttribute("data-exit-code")).toBe("3");
+    const chip = el.querySelector(".tool-exit-line > .shell-exit");
+    expect([chip?.textContent, chip?.getAttribute("data-exit-code"), el.querySelector(".tool-head .shell-exit")]).toEqual([
+      "exit 3",
+      "3",
+      null,
+    ]);
   });
 
   it("gives a zero exit the ok tone, as the detached shell's chip does", () => {
@@ -1209,6 +1226,31 @@ describe("the card-level fold", () => {
       document.body.replaceChildren(el);
       // Act / Assert — the section is hidden entirely, not a height-capped peek.
       expect(cascadedValue(el.querySelector(".tool-output") as Element, "display")).toBe("none");
+    } finally {
+      remove();
+    }
+  });
+
+  it("folds the exit line away with the output while collapsed", () => {
+    // Arrange — the real stylesheet, so the collapse rule can win the cascade.
+    const remove = installStylesheet();
+    try {
+      const el = drawFeedSimpleToolCall(
+        card({
+          outcome: {
+            case: "returned",
+            value: {
+              verdict: { case: "failed", value: {} },
+              form: { case: "text", value: { text: "boom" } },
+              exit: { code: 3 },
+            },
+          },
+        }),
+        rowContext(),
+      );
+      document.body.replaceChildren(el);
+      // Act / Assert
+      expect(cascadedValue(el.querySelector(".tool-exit-line") as Element, "display")).toBe("none");
     } finally {
       remove();
     }

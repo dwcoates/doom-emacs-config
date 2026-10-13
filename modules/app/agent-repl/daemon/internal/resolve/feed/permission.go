@@ -78,9 +78,12 @@ func (r *resolver) drawPermission(s *wsState, agent *conversationv1.AgentId, p *
 		}
 		card.State = &frontendv1.FeedPermission_Open{Open: &frontendv1.FeedPermissionOpen{}}
 		s.gatedCalls[askID] = p.GetGatedCall().GetValue()
+		state.startedAtMs = start.GetStartedAt().GetAtMs()
+		card.Clock = runningClock(state.startedAtMs)
 	case *conversationv1.AgentPermission_Success:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawPermission", "branch": "case *conversationv1.AgentPermission_Success"})
-		answered := &frontendv1.FeedPermissionAnswered{AtMs: r.deps.Now().UnixMilli()}
+		answered := &frontendv1.FeedPermissionAnswered{}
+		card.Clock = settledClock(state.startedAtMs, frame.Success.GetSettledAt())
 		decisionArm(frame.Success)(answered)
 		card.State = &frontendv1.FeedPermission_Answered{Answered: answered}
 		// A DENIED CALL NEVER RAN, so its own card says denied rather than
@@ -94,9 +97,8 @@ func (r *resolver) drawPermission(s *wsState, agent *conversationv1.AgentId, p *
 		}
 	case *conversationv1.AgentPermission_Failure:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawPermission", "branch": "case *conversationv1.AgentPermission_Failure"})
-		card.State = &frontendv1.FeedPermission_Abandoned{Abandoned: &frontendv1.FeedPermissionAbandoned{
-			AtMs: r.deps.Now().UnixMilli(),
-		}}
+		card.State = &frontendv1.FeedPermission_Abandoned{Abandoned: &frontendv1.FeedPermissionAbandoned{}}
+		card.Clock = settledClock(state.startedAtMs, frame.Failure.GetError().GetSettledAt())
 	default:
 		return
 	}
