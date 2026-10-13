@@ -227,8 +227,9 @@ export function drawRosterRow(
   const label = document.createElement("span");
   label.className = "name";
   label.textContent = name;
-  // THE DISPLAY MODE IS THE NAME'S ALONE. `viewed.ts` decides it, from the
-  // wire's marker alone: the daemon resolves it with the status it rides on.
+  // THE DISPLAY MODE GREYS THE NAME, AND THE DOT THROUGH `data-viewed` (the
+  // stylesheet). `viewed.ts` decides it, from the wire's marker alone: the
+  // daemon resolves it with the status it rides on.
   const mode = viewedMode(
     workspace.id,
     status.case,
