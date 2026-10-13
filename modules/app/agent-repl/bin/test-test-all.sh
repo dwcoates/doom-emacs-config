@@ -61,6 +61,7 @@ cat >"$3" <<'INNER'
 #!/usr/bin/env bash
 printf 'testrun %s\n' "$*" >>"$STUB_LOG"
 printf 'marker=%s\n' "${AGENT_REPL_TEST_ALL_LOGGED:-}" >>"$STUB_LOG"
+printf 'runlog=%s\n' "${AGENT_REPL_TEST_RUN_LOG:-}" >>"$STUB_LOG"
 echo "stub testrun output"
 exit "${STUB_TESTRUN_EXIT:-0}"
 INNER
@@ -279,7 +280,7 @@ test_runs_testrun_inside_the_slot_and_the_git_net() {
     local module want
     module="$(cd "$tree/modules/app/agent-repl" && pwd)"
     want="$(printf 'slot\nsafe --\ntestrun run --module %s --suites ert,daemon' "$module")"
-    if [ "$RUN_RC" -eq 0 ] && [ "$(grep -v -e '^go ' -e '^marker=' "$STUB_LOG")" = "$want" ]; then
+    if [ "$RUN_RC" -eq 0 ] && [ "$(grep -v -e '^go ' -e '^marker=' -e '^runlog=' "$STUB_LOG")" = "$want" ]; then
         pass "testrun runs under the suite slot, then the git net, with every argument"
     else
         fail "wrapper order or arguments (rc=$RUN_RC): $(cat "$STUB_LOG")"
@@ -490,6 +491,20 @@ test_the_runner_does_not_inherit_the_logging_marker() {
     rm -rf "$tree"
 }
 
+test_the_runner_is_told_its_log() {
+    local tree log
+    tree="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    make_tree "$tree"
+    run_test_all "$tree" "$(stub_path "$tree")"
+    log="$(run_log_of "$tree")"
+    if [ -n "$log" ] && grep -qxF "runlog=$log" "$STUB_LOG"; then
+        pass "the runner is told the run's log in AGENT_REPL_TEST_RUN_LOG"
+    else
+        fail "the runner is told its log" "log=$log stub=$(cat "$STUB_LOG")"
+    fi
+    rm -rf "$tree"
+}
+
 test_runs_testrun_inside_the_slot_and_the_git_net
 test_record_stages_inside_the_net_then_finishes_outside_it
 test_a_failed_record_run_never_finishes
@@ -508,6 +523,7 @@ test_the_log_holds_the_scripts_own_errors
 test_two_runs_write_two_logs
 test_old_run_logs_past_the_keep_are_removed
 test_the_runner_does_not_inherit_the_logging_marker
+test_the_runner_is_told_its_log
 
 echo "-----"
 echo "passed: $PASS  failed: $FAIL"
