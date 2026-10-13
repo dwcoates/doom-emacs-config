@@ -841,6 +841,10 @@ body::after {
   cursor: pointer;
 }
 #ws-sidebar .sb-add:hover { background: var(--card); }
+/* A REPOSITORY'S "+" SITS AT THE RIGHT EDGE (owner request, 2026-10-13): the
+   header's right padding is the row's, so the button's right edge lines up
+   with the when-column of the rows beneath it. */
+#ws-sidebar .repo-head .sb-add { margin-left: auto; }
 
 /* THE SCROLLER'S HEIGHT IS THE RAIL'S, NEVER ITS CONTENT'S: a zero basis
    gives it exactly the room left under the head, however tall the rows are.
