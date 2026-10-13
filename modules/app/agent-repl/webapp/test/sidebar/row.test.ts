@@ -13,6 +13,7 @@ import {
   MERGED_TODAY_CLASS,
   drawRosterRow,
   drawRosterRowOneShot,
+  drawRosterRowAsyncMerging,
   mergedToday,
   drawRosterRowWhen,
   drawStatusMark,
@@ -22,7 +23,7 @@ import {
   toggleRowMenu,
 } from "../../src/sidebar/row.js";
 import { REVEAL_MARGIN_PX } from "../../src/topbar/clamp.js";
-import { ROSTER_ARM_CLASS, ROSTER_STATUS_CASES } from "../../src/sidebar/tones.js";
+import { NO_MARKERS, ROSTER_ARM_CLASS, ROSTER_STATUS_CASES } from "../../src/sidebar/tones.js";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import {
   NOW,
@@ -95,16 +96,16 @@ describe("the row's identity and hooks", () => {
 
 describe("the status mark", () => {
   it.each([...ROSTER_STATUS_CASES])("paints %s the shared vocabulary's color", (arm) => {
-    const mark = drawStatusMark(arm, "R.status", false);
+    const mark = drawStatusMark(arm, "R.status", NO_MARKERS);
     expect(mark.classList.contains(ROSTER_ARM_CLASS[arm])).toBe(true);
   });
 
   it.each([...ROSTER_STATUS_CASES])("names %s's glyph", (arm) => {
-    expect(drawStatusMark(arm, "R.status", false).hasAttribute("data-glyph")).toBe(true);
+    expect(drawStatusMark(arm, "R.status", NO_MARKERS).hasAttribute("data-glyph")).toBe(true);
   });
 
   it("draws a failed turn end as a turquoise dot", () => {
-    const mark = drawStatusMark("turnFailed", "R.status", false);
+    const mark = drawStatusMark("turnFailed", "R.status", NO_MARKERS);
     expect(mark.classList.contains("tone-turquoise")).toBe(true);
     expect(mark.getAttribute("data-glyph")).toBe("dot");
   });
@@ -112,7 +113,7 @@ describe("the status mark", () => {
   it.each(["mergeQueued", "merging", "mergeFailed", "merged"] as const)(
     "draws %s as the one merge glyph in a glyph box",
     (arm) => {
-      const mark = drawStatusMark(arm, "R.status", false);
+      const mark = drawStatusMark(arm, "R.status", NO_MARKERS);
       expect([mark.getAttribute("data-glyph"), mark.classList.contains("st-glyph"), mark.textContent]).toEqual([
         "merge",
         true,
@@ -122,22 +123,22 @@ describe("the status mark", () => {
   );
 
   it("inks a failed merge's glyph red on its green tone", () => {
-    const mark = drawStatusMark("mergeFailed", "R.status", false);
+    const mark = drawStatusMark("mergeFailed", "R.status", NO_MARKERS);
     expect([mark.classList.contains("tone-green"), mark.classList.contains("ink-red")]).toEqual([true, true]);
   });
 
   it("inks a compaction's dot orange on its red tone", () => {
-    const mark = drawStatusMark("compacting", "R.status", false);
+    const mark = drawStatusMark("compacting", "R.status", NO_MARKERS);
     expect([mark.classList.contains("tone-red"), mark.classList.contains("ink-orange")]).toEqual([true, true]);
   });
 
   it("inks a thinking dot in its own tone", () => {
-    const mark = drawStatusMark("thinking", "R.status", false);
+    const mark = drawStatusMark("thinking", "R.status", NO_MARKERS);
     expect([...mark.classList].filter((c) => c.startsWith("ink-"))).toEqual([]);
   });
 
   it("draws a grey dot for an incidentally inactive workspace", () => {
-    const mark = drawStatusMark("inactive", "R.status", false);
+    const mark = drawStatusMark("inactive", "R.status", NO_MARKERS);
     expect([mark.getAttribute("data-glyph"), mark.classList.contains("tone-none"), mark.textContent]).toEqual([
       "dot",
       true,
@@ -146,28 +147,28 @@ describe("the status mark", () => {
   });
 
   it("draws a still snowflake for a cold gate", () => {
-    const mark = drawStatusMark("coldGate", "R.status", false);
+    const mark = drawStatusMark("coldGate", "R.status", NO_MARKERS);
     expect([mark.textContent, mark.classList.contains("breathes")]).toEqual(["\u2744\uFE0F", false]);
   });
 
   it("draws no character for a workspace with no session", () => {
-    expect(drawStatusMark("none", "R.status", false).textContent).toBe("");
+    expect(drawStatusMark("none", "R.status", NO_MARKERS).textContent).toBe("");
   });
 
   it("breathes while a turn is in flight", () => {
-    expect(drawStatusMark("thinking", "R.status", false).classList.contains("breathes")).toBe(true);
+    expect(drawStatusMark("thinking", "R.status", NO_MARKERS).classList.contains("breathes")).toBe(true);
   });
 
   it("breathes while the merge queue is on this run", () => {
-    expect(drawStatusMark("merging", "R.status", false).classList.contains("breathes")).toBe(true);
+    expect(drawStatusMark("merging", "R.status", NO_MARKERS).classList.contains("breathes")).toBe(true);
   });
 
   it.each(["permission", "question", "waiting"] as const)("holds a %s mark still", (arm) => {
-    expect(drawStatusMark(arm, "R.status", false).classList.contains("breathes")).toBe(false);
+    expect(drawStatusMark(arm, "R.status", NO_MARKERS).classList.contains("breathes")).toBe(false);
   });
 
   it("holds a queued merge still", () => {
-    const mark = drawStatusMark("mergeQueued", "R.status", false);
+    const mark = drawStatusMark("mergeQueued", "R.status", NO_MARKERS);
     expect(mark.classList.contains("breathes")).toBe(false);
   });
 });
@@ -1609,7 +1610,7 @@ describe("the one-shot mark", () => {
     "draws a one-shot's own %s mark",
     (arm) => {
       const drawn = drawRosterRow(row({ id: "ws-1", status: { case: arm, value: {} }, oneShot: true }), sidebarContext(), "R");
-      expect(dotOf(drawn).outerHTML).toBe(drawStatusMark(arm, "R.status", false).outerHTML);
+      expect(dotOf(drawn).outerHTML).toBe(drawStatusMark(arm, "R.status", NO_MARKERS).outerHTML);
     },
   );
 
@@ -1622,6 +1623,55 @@ describe("the one-shot mark", () => {
     const mark = row({ id: "ws-1", oneShot: true }).oneShot;
     expect(mark).toBeDefined();
     expect(drawRosterRowOneShot(mark!, "R.oneShot")).toBe(true);
+  });
+});
+
+// AN ASYNC MERGE OF THE WORKSPACE'S OWN BRANCH (owner request, 2026-10-13):
+// the NAME keeps the workspace's own status color and only a plain dot turns
+// purple; every other mark outranks it.
+describe("the async-merging marker", () => {
+  it.each([
+    ["ready", "tone-green"],
+    ["done", "tone-green"],
+    ["thinking", "tone-red"],
+    ["idleAsync", "tone-yellow"],
+  ] as const)("keeps a %s row's own %s and inks its dot purple, breathing", (arm, tone) => {
+    const drawn = drawRosterRow(row({ id: "ws-1", status: { case: arm, value: {} }, asyncMerging: true }), sidebarContext(), "R");
+    expect([
+      drawn.classList.contains(tone),
+      drawn.classList.contains("tone-purple"),
+      dotOf(drawn).classList.contains(tone),
+      dotOf(drawn).classList.contains("ink-purple"),
+      dotOf(drawn).classList.contains("breathes"),
+    ]).toEqual([true, false, true, true, true]);
+  });
+
+  it.each(["compacting", "permission", "question", "coldGate", "mergeFailed"] as const)(
+    "draws the %s row's own mark over the async merge",
+    (arm) => {
+      const drawn = drawRosterRow(row({ id: "ws-1", status: { case: arm, value: {} }, asyncMerging: true }), sidebarContext(), "R");
+      expect(dotOf(drawn).outerHTML).toBe(drawStatusMark(arm, "R.status", NO_MARKERS).outerHTML);
+    },
+  );
+
+  it("draws a working one-shot's target over the async merge", () => {
+    const drawn = drawRosterRow(
+      row({ id: "ws-1", status: { case: "thinking", value: {} }, oneShot: true, asyncMerging: true }),
+      sidebarContext(),
+      "R",
+    );
+    expect(dotOf(drawn).getAttribute("data-glyph")).toBe("target");
+  });
+
+  it("draws no purple ink on a row with no async merge", () => {
+    const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "ready", value: {} } }), sidebarContext(), "R");
+    expect(dotOf(drawn).classList.contains("ink-purple")).toBe(false);
+  });
+
+  it("answers true for an async-merging marker that is there", () => {
+    const mark = row({ id: "ws-1", asyncMerging: true }).asyncMerging;
+    expect(mark).toBeDefined();
+    expect(drawRosterRowAsyncMerging(mark!, "R.asyncMerging")).toBe(true);
   });
 });
 

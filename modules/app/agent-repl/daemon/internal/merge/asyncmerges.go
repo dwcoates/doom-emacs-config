@@ -11,8 +11,8 @@ import (
 )
 
 // This file tells the roster which workspaces' own branches merge ASYNC: the
-// requesters the roster draws `async_merging` (purple) over their green or
-// yellow idle arm, while their footer stays idle (owner request, 2026-10-13).
+// requesters whose roster rows carry the `async_merging` marker beside their
+// own status, while their footer stays as it is (owner request, 2026-10-13).
 //
 // THE MERGE QUEUE IS THE ONE TRUTH. An async merge is in flight exactly while
 // a row of its repository's queue carries it: the requester's own row from the

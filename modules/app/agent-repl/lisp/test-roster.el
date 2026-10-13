@@ -26,8 +26,9 @@
   "Return a decoded `RosterRow' plist for ID, NAME and STATUS.
 OVERRIDES is a plist merged over the defaults: `:closed', `:children',
 `:attention', `:priority', `:viewed', `:detached-live', `:one-shot'
-\(non-nil for a one-shot), `:current', `:dir', `:availability'
-\(an arm keyword, default `:available')."
+\(non-nil for a one-shot), `:async-merging' (non-nil while the branch
+merges async), `:current', `:dir', `:availability' (an arm keyword,
+default `:available')."
   (let ((dir (or (plist-get overrides :dir) (concat "/w/" id))))
     (list :workspace (list :workspace (list :id id :dir dir))
           :attention (plist-get overrides :attention)
@@ -35,6 +36,7 @@ OVERRIDES is a plist merged over the defaults: `:closed', `:children',
           :viewed (plist-get overrides :viewed)
           :detached-live (plist-get overrides :detached-live)
           :one-shot (and (plist-get overrides :one-shot) t)
+          :async-merging (and (plist-get overrides :async-merging) t)
           :availability (list :arm (or (plist-get overrides :availability) :available)
                               :value nil)
           :name (list :text name)
@@ -1617,6 +1619,33 @@ user's next sidebar click."
   (agent-repl-test-roster--with-editor
     (should-not (agent-repl-roster-one-shot-for-ws "one"))))
 
+(ert-deftest agent-repl-test-roster-row-async-merging-reads-the-marker ()
+  "A row carrying `RosterRowAsyncMerging' reads as async-merging."
+  (should (agent-repl-roster-row-async-merging
+           (agent-repl-test-roster--row "a" "one" :thinking :async-merging t))))
+
+(ert-deftest agent-repl-test-roster-row-async-merging-when-absent ()
+  "A row without the marker reads as not async-merging."
+  (should-not (agent-repl-roster-row-async-merging
+               (agent-repl-test-roster--row "a" "one" :done))))
+
+(ert-deftest agent-repl-test-roster-async-merging-for-ws-after-a-push ()
+  "After a push, a workspace's async-merging marker is its current row's."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    ;; Act
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (agent-repl-test-roster--row "a" "one" :done :async-merging t))))))
+    ;; Assert
+    (should (agent-repl-roster-async-merging-for-ws "one"))))
+
+(ert-deftest agent-repl-test-roster-async-merging-for-ws-before-any-push ()
+  "Before any push carried its row, a workspace carries no async-merging marker."
+  (agent-repl-test-roster--with-editor
+    (should-not (agent-repl-roster-async-merging-for-ws "one"))))
+
 (defmacro agent-repl-test-roster--recording-viewed-clears (var &rest body)
   "Run BODY with the viewed-cleared hook recording each WS onto VAR."
   (declare (indent 1))
@@ -2412,11 +2441,11 @@ is the finish edge (owner ruling, 2026-10-06)."
   ;; Act / Assert
   (should (agent-repl-roster--finish-edge-p :thinking :turn-failed)))
 
-(ert-deftest agent-repl-test-roster-running-to-async-merging-is-a-finish-edge ()
-  "A turn that ends with its own branch merging async has ended:
-thinking -> async-merging is the finish edge (owner request, 2026-10-13)."
+(ert-deftest agent-repl-test-roster-async-merging-is-no-settled-status ()
+  "An async merge is a row marker, not a status: no status list names it."
   ;; Act / Assert
-  (should (agent-repl-roster--finish-edge-p :thinking :async-merging)))
+  (should-not (memq :async-merging agent-repl-roster-settled-statuses))
+  (should-not (memq :async-merging agent-repl-roster-running-statuses)))
 
 ;;; test-roster.el ends here
 

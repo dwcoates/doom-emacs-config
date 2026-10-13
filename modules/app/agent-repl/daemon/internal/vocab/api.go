@@ -67,6 +67,9 @@ type RenderColors struct {
 	// OneShotGlyphArms are the RosterRow.status arms on which a one-shot's
 	// glyph replaces the status mark, and the only ones.
 	OneShotGlyphArms []string
+	// AsyncMergeMark is how both surfaces draw RosterRowAsyncMerging: the
+	// workspace's own branch merging async while the row keeps its status.
+	AsyncMergeMark AsyncMergeMark
 	// FooterStatus maps each FooterStatus.status arm name to its color.
 	FooterStatus map[string]string
 	// ComposerClosedColors are the footer status colors under which a
@@ -91,6 +94,20 @@ type RenderColors struct {
 	FailureSides map[string]string
 }
 
+// AsyncMergeMark is the shared drawing of an async merge of the workspace's
+// own branch (frontend.v1.RosterRowAsyncMerging): the ink and motion the
+// sidebar's plain status dot takes, and the background of the Emacs tab's
+// [N] run. Every renderer reads it here, so no surface picks its own purple.
+type AsyncMergeMark struct {
+	Ink        string `json:"ink"`
+	Motion     string `json:"motion"`
+	TabBracket string `json:"tab_bracket"`
+}
+
+// asyncMergeMotions are the motions a mark may take: the rail's one
+// animation, or none.
+var asyncMergeMotions = []string{"breathes", "still"}
+
 // renderColorsJSON is the file's on-disk shape. It is separate from
 // RenderColors so an absent table is distinguishable from an empty one.
 type renderColorsJSON struct {
@@ -103,6 +120,7 @@ type renderColorsJSON struct {
 	GlyphInks               map[string]string            `json:"glyph_inks"`
 	GlyphOnlyColors         []string                     `json:"glyph_only_colors"`
 	OneShotGlyphArms        []string                     `json:"one_shot_glyph_arms"`
+	AsyncMergeMark          AsyncMergeMark               `json:"async_merge_mark"`
 	FooterStatus            map[string]string            `json:"footer_status"`
 	ComposerClosedColors    []string                     `json:"composer_closed_colors"`
 	ComposerOpenSubstatuses map[string][]string          `json:"composer_open_substatuses"`
@@ -263,6 +281,15 @@ func (c RenderColors) validate() error {
 		if _, ok := c.RosterStatus[arm]; !ok {
 			return fmt.Errorf("one_shot_glyph_arms names %q, which is no roster_status arm", arm)
 		}
+	}
+	if m := c.AsyncMergeMark; m.Ink == ColorNone || !contains(c.Colors, m.Ink) {
+		return fmt.Errorf("async_merge_mark.ink = %q, which is not a color", m.Ink)
+	}
+	if m := c.AsyncMergeMark; !contains(asyncMergeMotions, m.Motion) {
+		return fmt.Errorf("async_merge_mark.motion = %q, which is none of %v", m.Motion, asyncMergeMotions)
+	}
+	if m := c.AsyncMergeMark; m.TabBracket == ColorNone || !contains(c.Colors, m.TabBracket) {
+		return fmt.Errorf("async_merge_mark.tab_bracket = %q, which is not a color", m.TabBracket)
 	}
 	if len(c.TopbarTones) == 0 {
 		return fmt.Errorf("topbar_tones is empty")

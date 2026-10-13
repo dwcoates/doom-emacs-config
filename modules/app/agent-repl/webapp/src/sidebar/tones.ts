@@ -26,6 +26,7 @@ import {
   gateGlyph,
   glyphInk,
   oneShotGlyphArm,
+  asyncMergeMark,
 } from "../vocab.js";
 import { MalformedView } from "../rpc/malformed.js";
 import { oneofArms } from "../rpc/oneof.js";
@@ -126,19 +127,44 @@ export function rosterArmMark(arm: string): RosterArmMark {
 }
 
 /**
- * The mark for a row standing on ARM, ONE_SHOT saying whether the row carries
- * the one-shot mark (`RosterRowOneShot`).
+ * The row's markers that change its status MARK, each read off its own
+ * `frontend.v1.RosterRow` field by presence: `one_shot`
+ * (`RosterRowOneShot`) and `async_merging` (`RosterRowAsyncMerging`).
+ */
+export interface RowMarkers {
+  oneShot: boolean;
+  asyncMerging: boolean;
+}
+
+/** A row carrying neither marker. */
+export const NO_MARKERS: RowMarkers = Object.freeze({ oneShot: false, asyncMerging: false });
+
+/**
+ * The mark for a row standing on ARM with MARKERS.
  *
  * A one-shot draws its glyph in place of the arm's own mark ONLY while it
  * works (`render-colors.json#one_shot_glyph_arms`, owner ruling 2026-10-13):
  * submitting, thinking or clearing, never compacting, a gate, a merge or any
  * other arm. The glyph breathes, as the work it stands for does, and the
  * row keeps the arm's tone.
+ *
+ * An ASYNC MERGE of the workspace's own branch inks the PLAIN dot -- the
+ * `dot` glyph with no ink of its own -- in `render-colors.json#async_merge_mark`
+ * (owner request, 2026-10-13). Every other mark outranks it: a gate's glyph,
+ * the one-shot glyph, a merge glyph, an inked dot (compacting's orange) and no
+ * mark at all. The row keeps the arm's tone either way, so its NAME stays the
+ * workspace's own status color.
  */
-export function rosterRowMark(arm: string, oneShot: boolean): RosterArmMark {
+export function rosterRowMark(arm: string, markers: RowMarkers): RosterArmMark {
   const mark = rosterArmMark(arm);
-  if (!oneShot || !oneShotGlyphArm(arm)) return mark;
-  return { toneClass: mark.toneClass, glyph: "target", char: GLYPH_CHARS.target, ink: undefined, motion: "breathes" };
+  if (markers.oneShot && oneShotGlyphArm(arm)) {
+    return { toneClass: mark.toneClass, glyph: "target", char: GLYPH_CHARS.target, ink: undefined, motion: "breathes" };
+  }
+  if (markers.asyncMerging && mark.glyph === "dot" && mark.ink === undefined) {
+    const merge = asyncMergeMark();
+    return { ...mark, ink: merge.ink, motion: merge.motion as MarkMotion };
+  }
+  return mark;
 }
 
 /**
@@ -158,8 +184,8 @@ export function glyphName(arm: RosterStatusCase): string {
  * How the arm's mark MOVES. The rail has ONE animation, the breath, and it
  * makes ONE claim everywhere (owner ruling, 2026-10-13): something is in
  * progress. A turn in flight, its context cuts, detached work, a session
- * booting, a merge running and an async merge of the workspace's own branch
- * breathe. A gate (permission, question, cold
+ * booting and a merge running breathe (and an async merge's dot, through
+ * `rosterRowMark`). A gate (permission, question, cold
  * gate) and an interrupt landing wait on the user, so nothing is in progress
  * and they hold still, as everything else does.
  */
@@ -172,7 +198,6 @@ export function armMotion(arm: RosterStatusCase): MarkMotion {
     case "idleAsync":
     case "init":
     case "merging":
-    case "asyncMerging":
       return "breathes";
     default:
       return "still";
