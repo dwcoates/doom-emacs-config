@@ -525,11 +525,7 @@ func (g heldAtTheGate) firstTurnAfterTheAnswerIsANewPrompt(t *testing.T) {
 	defer host.Close()
 	ctx, cancel := g.f.d.WaitCtx()
 	defer cancel()
-	harness.AwaitView(t, ctx, host, "the re-opened session reporting live, attached and open",
-		func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
-			live := r.GetHost().GetExisting().GetLive()
-			return live != nil && live.GetShimAttached() && live.GetOpen() != nil
-		})
+	harness.AwaitSessionServes(t, ctx, host)
 	fresh := g.f.submit("a fresh prompt", "k-after-the-gate", origin).GetSuccess().GetTurn().GetTurn()
 	if got := g.shim.ExpectStartTurn(); got.GetTurn().GetValue() != fresh.GetValue() {
 		t.Fatalf("first StartTurn = %q, want the fresh prompt %q: the held prompt %q must not be sent by the answer",
