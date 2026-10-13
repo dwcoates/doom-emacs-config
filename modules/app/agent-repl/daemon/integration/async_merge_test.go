@@ -12,6 +12,7 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/integration/harness"
+	"agent-repld/internal/merge"
 )
 
 // async_merge_test.go covers the ASYNC (detached) merge
@@ -115,7 +116,7 @@ func TestAnAsyncMergeWorkspaceIsHiddenUntilItsMergeFailsAndThenRevealed(t *testi
 	hidden := rosterNow(t, s.d)
 	pushConcludedTurn(shim, mainAgent, "gave-up")
 	// The agent gives up on every further attempt the commit's conflict gets.
-	for attempt := 2; attempt <= 3; attempt++ {
+	for attempt := 2; attempt <= merge.MaxConflictAttempts; attempt++ {
 		shim.ExpectStartTurn()
 		s.d.AwaitWorkspaceLogOperationCount(mergeWS.GetDir(), harness.OpTurnOpened, attempt)
 		pushConcludedTurn(shim, mainAgent, "gave-up")

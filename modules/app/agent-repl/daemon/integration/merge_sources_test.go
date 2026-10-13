@@ -15,6 +15,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/integration/harness"
+	"agent-repld/internal/merge"
 
 	"connectrpc.com/connect"
 )
@@ -237,7 +238,7 @@ func TestAResolutionThatGivesUpFailsInConflictsLeavesTheRebaseAndLetsTheNextMerg
 		t.Fatalf("MergeWorkspace(behind): %v", err)
 	}
 	// The session gives up on every attempt the commit's conflict gets.
-	for attempt := 1; attempt <= 3; attempt++ {
+	for attempt := 1; attempt <= merge.MaxConflictAttempts; attempt++ {
 		s.awaitStartTurn(t, 1+attempt)
 		pushConcludedTurn(s.f.shim, mainAgent, "gave-up")
 	}
@@ -273,7 +274,7 @@ func TestExhaustedFixingAttemptsFailTheMergeInTests(t *testing.T) {
 
 	// Act: each fixing attempt's turn ends without a fix.
 	s.mergeAs(t, harness.OwnBranch(false))
-	for attempt := 1; attempt <= 3; attempt++ {
+	for attempt := 1; attempt <= merge.MaxFixAttempts; attempt++ {
 		s.awaitStartTurn(t, 1+attempt)
 		pushConcludedTurn(s.f.shim, mainAgent, "fix-attempt")
 	}
