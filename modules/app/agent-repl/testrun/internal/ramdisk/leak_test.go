@@ -590,3 +590,33 @@ func TestSetupTimesBothProbesThroughTimeProbe(t *testing.T) {
 		t.Fatalf("Setup times its probes by hand; want both through timeProbe")
 	}
 }
+
+func TestProbeBoundsCoverTwiceTheSlowestHealthyRead(t *testing.T) {
+	// Arrange: the slowest healthy `diskutil info` the runs recorded at their
+	// own priority (2026-10-12 and 13).
+	const slowestHealthyRead = 471 * time.Millisecond
+
+	// Act
+	bounds := map[string]time.Duration{"InfoBound": InfoBound, "ListBound": ListBound}
+
+	// Assert
+	for name, bound := range bounds {
+		if bound < 2*slowestHealthyRead {
+			t.Errorf("%s = %s, want at least twice the slowest healthy read %s", name, bound, slowestHealthyRead)
+		}
+	}
+}
+
+func TestLockBoundCoversTwiceTheLongestHealthyAcquireHold(t *testing.T) {
+	// Arrange: an acquire's hold is its listing and its attach, at their
+	// slowest healthy times recorded by the runs (2026-10-12 and 13).
+	const longestHold = 471*time.Millisecond + 332*time.Millisecond
+
+	// Act
+	bound := LockBound
+
+	// Assert
+	if bound < 2*longestHold {
+		t.Fatalf("LockBound = %s, want at least twice the longest healthy hold %s", bound, longestHold)
+	}
+}

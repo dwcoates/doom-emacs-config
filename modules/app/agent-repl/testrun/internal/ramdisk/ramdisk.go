@@ -110,24 +110,28 @@ type Logger interface {
 // InfoBound is how long `hdiutil info` may run before the disk manager is
 // taken not to answer.
 //
-// MEASURED FROM THE RUNS' OWN LOGS, at the runs' own priority (nice 19, the
-// throttle I/O tier) on a host carrying several runs at once. The first bound,
-// 50ms, came from 30 quiet calls (max 22ms) and missed the tail: the run logs
-// of 2026-10-13 show healthy answers of 7-20ms, one of 42ms, and one still
-// running at 56ms when the 50ms bound killed it (load average 28). That one
-// was healthy: `diskutil list` answered in the same check, and the next run,
-// 13s later, had its answer in 7ms. A refusal on it put the run on the SSD
-// and opened an investigation workspace for a disk manager that was fine.
-// The bound is just over twice that 56ms. A wedged disk manager never
-// answers at all (2026-10-12: every call ran out its 60s bound), so the
-// bound costs a healthy run nothing and a wedged one only this long.
-const InfoBound = 120 * time.Millisecond
+// A PROBE'S BOUND COVERS THE RUN'S OWN STARVATION, not only the disk
+// manager's answer. A run is at nice 19 (bin/background.sh), so on a loaded
+// host every probe waits behind every other runnable process before it even
+// starts asking. The bounds of 120ms and 175ms, sized from answers that came
+// in time, refused seven runs on 2026-10-13 (load averages 6.6 to 281) whose
+// disk manager was idle (diskarbitrationd sleeping, no other disk command
+// running): the next run, 29s after one of them, had both answers in 34ms and
+// 21ms. Each refused run's own timer fired up to 80ms late (247ms measured
+// against a 175ms bound), so the runner itself was waiting for a CPU.
+//
+// The slowest healthy read of the disk manager the runs record at their own
+// priority is `diskutil info` in the acquire: 79-471ms across 40 runs
+// (2026-10-12 and 13), which carries the same process start and the same
+// question to diskarbitrationd as both probes. Both bounds are just over
+// twice its 471ms. A probe that misses its bound is still watched to its own
+// answer (RunWatched), so every refusal records how long the disk manager
+// really took, and the bounds can be set again from that.
+const InfoBound = 1000 * time.Millisecond
 
 // ListBound is how long the `diskutil list` probe may run before the disk
-// manager is taken not to answer: the same run logs show healthy answers of
-// 21-49ms and one of 85ms (in the same check as the 56ms `hdiutil info`), and
-// this is just over twice that max.
-const ListBound = 175 * time.Millisecond
+// manager is taken not to answer: the same measurement as InfoBound.
+const ListBound = 1000 * time.Millisecond
 
 // CommandBound is how long one hdiutil, diskutil or lsof call may run.
 //
@@ -598,16 +602,17 @@ const registryLockName = "registry.mutex"
 // MEASURED ON THE OWNER'S HOST (2026-10-12, load average 15-24). Uncontended,
 // the flock is taken in p50 10us, max 64us (200 takes). Contended, a run waits
 // out the other holder's hold:
-//   - an acquire holds it for `hdiutil info` (at most InfoBound, 120ms) and
-//     the 8 GiB attach up to its record's write (95ms and 97ms, read off two
-//     live runs' records as their write time less their creation time):
-//     about 220ms;
+//   - an acquire holds it for `hdiutil info` and the 8 GiB attach up to its
+//     record's write: the listing's healthy max is InfoBound's 471ms, and the
+//     attach measured at most 332ms across 40 runs (2026-10-12 and 13), so
+//     about 800ms;
 //   - an investigation holds it for `git worktree list` (max 142ms) and the
-//     workspace CLI's dispatch (max 559ms): about 700ms, the longest hold.
+//     workspace CLI's dispatch (max 559ms): about 700ms.
 //
 // The bound is just over twice the longest hold, so a run queued behind a
-// healthy investigation is never taken for one behind a stuck holder.
-const LockBound = 1500 * time.Millisecond
+// healthy acquire or investigation is never taken for one behind a stuck
+// holder.
+const LockBound = 2000 * time.Millisecond
 
 // LsofBound is how long `lsof` may run when it names who has the registry lock
 // open: measured 70-100ms warm and 260ms cold on the owner's host
