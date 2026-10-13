@@ -79,15 +79,22 @@ func (q *queue) Submit(ctx context.Context, sub Submission) (Disposition, error)
 		return q.holdForRevival(ctx, sub, log)
 	}
 
-	// A SHIM WITH NO STARTED SESSION TAKES NO PROMPT. A relaunch installs its
-	// shim before it resumes, and a vendor start being retried -- or one that
-	// failed -- leaves a shim with no session at all. Sent there, the prompt
-	// was drawn in the feed and then refused `no_session` and lost
-	// (2026-10-02). It waits under the reconnect hold, and the session's
-	// coming up delivers it (ReleaseReconnectHolds).
-	if sub.Target == nil && !q.deps.SessionStarted(sub.WS) {
-		log.Info(opSubmit, "the workspace's shim holds no started session; the prompt is held until it reconnects", nil)
-		return q.hold(ctx, sub, "", &leaseHold{kind: wsm.HoldReconnect}, log)
+	// A SESSION THAT DOES NOT SERVE YET TAKES NO PROMPT. A relaunch installs
+	// its shim before it resumes, and a vendor start being retried -- or one
+	// that failed -- leaves a shim with no session at all. Sent there, the
+	// prompt was drawn in the feed and then refused `no_session` and lost
+	// (2026-10-02). A started session's watcher opens after the session is
+	// marked started, and a prompt landing between the two was refused the
+	// same way (integration TestAPromptSentRightAfterABootOverADeadShimIsDelivered,
+	// 2026-10-12). It waits under the hold sessionWait names, and the session's
+	// coming up -- raised only once its watcher is installed -- delivers it
+	// (ReleaseReconnectHolds).
+	if sub.Target == nil {
+		if kind, why, waiting := q.sessionWait(sub.WS); waiting {
+			log.Info(opSubmit, "the workspace's session does not serve yet; the prompt is held until it comes up",
+				dlog.Context{"hold": kind.String(), "why": why})
+			return q.hold(ctx, sub, "", &leaseHold{kind: kind}, log)
+		}
 	}
 
 	// A MID-SESSION VENDOR BLOCK HOLDS THE PROMPT AFTER RECONNECT, UNCLASSIFIED
