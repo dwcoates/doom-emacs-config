@@ -433,13 +433,8 @@ function drawActions(
   submenu.el.hidden = true;
   actions.append(submenu.el, progress);
   const opener = (mode: CompactMode, label: string, hint: string): Control => {
-    const button = createControl();
     // BOTH WEAR THE COMPACT BUTTON'S COLOR (owner ruling, 2026-10-13).
-    button.className = "hibernation-compact";
-    button.setAttribute("data-compact-open", mode);
-    button.textContent = label;
-    button.title = hint;
-    buttons.push(button);
+    const button = gateButton("hibernation-compact", ["data-compact-open", mode], { label, hint }, buttons);
     button.addEventListener("click", () => {
       const open = submenu.el.hidden || submenu.mode() !== mode;
       submenu.setMode(mode);
@@ -474,9 +469,23 @@ function actionButton(
   copy: { label: string; hint: string },
   buttons: Control[],
 ): Control {
+  return gateButton(arm === "clear" ? "hibernation-clear" : "hibernation-direct", ["data-cold-gate", arm], copy, buttons);
+}
+
+/**
+ * One button on the gate's row: its color class, its hook, its label, and what
+ * it does as its hover tooltip. It joins BUTTONS, which an answer in flight
+ * latches inert together.
+ */
+function gateButton(
+  className: string,
+  [hook, value]: [string, string],
+  copy: { label: string; hint: string },
+  buttons: Control[],
+): Control {
   const button = createControl();
-  button.className = arm === "clear" ? "hibernation-clear" : "hibernation-direct";
-  button.setAttribute("data-cold-gate", arm);
+  button.className = className;
+  button.setAttribute(hook, value);
   button.textContent = copy.label;
   button.title = copy.hint;
   buttons.push(button);
