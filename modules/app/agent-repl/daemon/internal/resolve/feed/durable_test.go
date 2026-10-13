@@ -117,7 +117,17 @@ func mergeTabRow() (feedid.Feed, *frontendv1.FeedRow) {
 	feed := feedid.Feed{Merge: &lease}
 	return feed, &frontendv1.FeedRow{
 		Id:  testEncode(feedid.Ref{WS: testWorkspace, Feed: feed, Row: feedid.RowKey{Kind: feedid.KindMergeTab, ID: "lease-7", Sub: "tests:1"}}),
-		Row: &frontendv1.FeedRow_MergeTab{MergeTab: &frontendv1.FeedMergeTab{Label: &frontendv1.FeedMergeTabLabel{Text: "tests", Round: 1}}},
+		Row: &frontendv1.FeedRow_MergeTab{MergeTab: liveTestsTab()},
+	}
+}
+
+// liveTestsTab is a live tests tab: a merge tab of a kind every daemon draws.
+func liveTestsTab() *frontendv1.FeedMergeTab {
+	return &frontendv1.FeedMergeTab{
+		Label: &frontendv1.FeedMergeTabLabel{Text: "tests", Round: 1},
+		Kind: &frontendv1.FeedMergeTab_Tests{Tests: &frontendv1.FeedMergeTabTests{
+			State: &frontendv1.FeedMergeTabTests_Live{Live: &frontendv1.FeedMergeTabLive{StartedAtMs: 1}},
+		}},
 	}
 }
 
@@ -210,7 +220,7 @@ func TestARowDrawnAfterTheRedrawFollowsIt(t *testing.T) {
 	// Act: the new daemon makes a row of its own.
 	later := &frontendv1.FeedRow{
 		Id:  testEncode(feedid.Ref{WS: testWorkspace, Feed: rootFeed(), Row: feedid.RowKey{Kind: feedid.KindSynth, ID: "after"}}),
-		Row: &frontendv1.FeedRow_MergeTab{MergeTab: &frontendv1.FeedMergeTab{}},
+		Row: &frontendv1.FeedRow_MergeTab{MergeTab: liveTestsTab()},
 	}
 	second.UpsertSynthesized(testWorkspace, rootFeed(), later)
 
@@ -230,7 +240,7 @@ func TestARowDrawnAfterSeveralRedrawnRowsFollowsThemAll(t *testing.T) {
 	for _, id := range []string{"one", "two", "three"} {
 		first.UpsertDurable(testWorkspace, tabFeed, &frontendv1.FeedRow{
 			Id:  testEncode(feedid.Ref{WS: testWorkspace, Feed: tabFeed, Row: feedid.RowKey{Kind: feedid.KindSynth, ID: id}}),
-			Row: &frontendv1.FeedRow_MergeTab{MergeTab: &frontendv1.FeedMergeTab{}},
+			Row: &frontendv1.FeedRow_MergeTab{MergeTab: liveTestsTab()},
 		})
 	}
 	second, _ := daemonOver(t, store)
@@ -238,7 +248,7 @@ func TestARowDrawnAfterSeveralRedrawnRowsFollowsThemAll(t *testing.T) {
 	// Act: the new daemon draws a row of its own on the same feed.
 	later := &frontendv1.FeedRow{
 		Id:  testEncode(feedid.Ref{WS: testWorkspace, Feed: tabFeed, Row: feedid.RowKey{Kind: feedid.KindSynth, ID: "four"}}),
-		Row: &frontendv1.FeedRow_MergeTab{MergeTab: &frontendv1.FeedMergeTab{}},
+		Row: &frontendv1.FeedRow_MergeTab{MergeTab: liveTestsTab()},
 	}
 	second.UpsertDurable(testWorkspace, tabFeed, later)
 
@@ -331,6 +341,53 @@ func TestAnUndecodableRowIsAnErrorAndTheOthersAreStillDrawn(t *testing.T) {
 	if !hasRecordIn(log, "error", opDurable) {
 		t.Fatalf("records = %+v, want the undecodable row at error", log.Records())
 	}
+}
+
+func TestARedrawnMergeTabOfARetiredKindIsNotDrawn(t *testing.T) {
+	// Arrange: a merge tab recorded with a kind arm the schema retired. Tag 5
+	// was the conflicts tab; it decodes as a tab with no kind.
+	store := newFakeDurableRows()
+	first, _ := daemonOver(t, store)
+	tabFeed, tab := mergeTabRow()
+	first.UpsertDurable(testWorkspace, tabFeed, tab)
+	retired, err := proto.Marshal(&frontendv1.FeedRow{
+		Id:  testEncode(feedid.Ref{WS: testWorkspace, Feed: tabFeed, Row: feedid.RowKey{Kind: feedid.KindMergeTab, ID: "conflicts", Sub: "1"}}),
+		Row: &frontendv1.FeedRow_MergeTab{MergeTab: &frontendv1.FeedMergeTab{Label: &frontendv1.FeedMergeTabLabel{Text: "conflicts", Round: 1}}},
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	retired = append(retired, protowireRetiredConflictsArm()...)
+	if err := store.PutDurableFeedRow(context.Background(), wsm.DurableFeedRow{
+		Workspace: testWorkspace, RowID: "row|retired", Plane: int(planeLive), OrderKey: "2zzzz", Row: retired,
+	}); err != nil {
+		t.Fatalf("PutDurableFeedRow: %v", err)
+	}
+
+	// Act
+	second, log := daemonOver(t, store)
+	rows := feedRows(second, tabFeed)
+
+	// Assert: the tab with a kind is drawn, the retired one is not, and the
+	// skip is recorded at INFO, never at WARN or ERROR.
+	if len(rows) != 1 || rows[0].GetMergeTab().GetTests() == nil {
+		t.Fatalf("rows = %+v, want the tests tab alone", rows)
+	}
+	if !hasRecordIn(log, "info", opDurable) {
+		t.Fatalf("records = %+v, want the retired tab recorded at info", log.Records())
+	}
+	if hasRecordIn(log, "error", opDurable) || hasRecordIn(log, "warn", opDurable) {
+		t.Fatalf("records = %+v, want no warn or error for a retired tab", log.Records())
+	}
+}
+
+// protowireRetiredConflictsArm encodes the retired FeedRow.merge_tab (14) ->
+// FeedMergeTab.conflicts (5) field as an empty message, as a row recorded
+// before the arm was retired carries it.
+func protowireRetiredConflictsArm() []byte {
+	// merge_tab: field 14, wire type 2, holding conflicts: field 5, wire type 2,
+	// length 0.
+	return []byte{14<<3 | 2, 2, 5<<3 | 2, 0}
 }
 
 func TestAResetForgetsTheDurableRows(t *testing.T) {

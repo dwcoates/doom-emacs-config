@@ -31,14 +31,18 @@ export interface TabSpec {
     | "queue"
     | "prePrompt"
     | "rebasing"
-    | "conflicts"
+    | "rebaseCommit"
     | "tests"
-    | "fixes"
+    | "testsRun"
+    | "testsRunFixing"
     | "committing"
     | "updatingMain"
     | "postPrompt";
-  /** `waitingOnUser` only for the agentic kinds that carry it (pick, conflicts, fixes). */
-  state: "live" | "settled" | "waitingOnUser";
+  /**
+   * `waitingOnUser` only for the kinds that carry it (pick, rebasing, a
+   * commit, tests, a fixing attempt); `pending` only for a commit.
+   */
+  state: "live" | "settled" | "waitingOnUser" | "pending";
   /** For `settled`. */
   outcome?: "succeeded" | "failed";
   /** For a settled failure. */
@@ -49,8 +53,10 @@ export interface TabSpec {
   endedAtMs?: bigint;
   label?: string;
   round?: number;
-  /** Extra kind-level fields (`queue`, `progress`, `lines`, `suites`, `log`, …). */
+  /** Extra kind-level fields (`queue`, `progress`, `lines`, `output`, `conflict`, …). */
   payload?: Record<string, unknown>;
+  /** The row id of the tab this one is a subtab of. */
+  parent?: string;
 }
 
 /** When a fixture tab's work began, unless the spec says otherwise. */
@@ -79,14 +85,18 @@ const REQUIRED_PAYLOADS: Readonly<Record<string, Record<string, unknown>>> = {
   rebasing: { progress: { replayed: 0, total: 1 } },
   committing: { subject: { text: "Merge branch 'mine'" } },
   updatingMain: { step: { step: { case: "fetching", value: {} } } },
-  fixes: { attempt: { attempt: 1, maxAttempts: 3 } },
+  rebaseCommit: { commit: { shortSha: "a1b2c3d4e5f6", subject: "fix the loop" } },
+  testsRun: { output: { suites: [] } },
+  testsRunFixing: { attempt: { attempt: 1, maxAttempts: 3 } },
 };
 
 /** A merge-tab row, built from the generated schemas. */
 export function tabRow(rowId: string, spec: TabSpec): FeedRow {
   const startedAtMs = spec.startedAtMs ?? TAB_STARTED_AT_MS;
   const state =
-    spec.state === "live"
+    spec.state === "pending"
+      ? { case: "pending" as const, value: {} }
+      : spec.state === "live"
       ? { case: "live" as const, value: { startedAtMs } }
       : spec.state === "waitingOnUser"
         ? { case: "waitingOnUser" as const, value: { startedAtMs } }
@@ -107,6 +117,7 @@ export function tabRow(rowId: string, spec: TabSpec): FeedRow {
   return create(FeedRowSchema, {
     id: id(rowId),
     order: orderFor(rowId),
+    ...(spec.parent === undefined ? {} : { parent: { row: id(spec.parent) } }),
     row: {
       case: "mergeTab",
       value: create(FeedMergeTabSchema, {

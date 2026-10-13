@@ -385,7 +385,7 @@ func TestTheTestsTabCountsEachUnitAsItsVerdictLands(t *testing.T) {
 	var passed []uint32
 	h.feed.mu.Lock()
 	for _, row := range h.feed.rows {
-		for _, suite := range row.Row.GetMergeTab().GetTests().GetSuites() {
+		for _, suite := range row.Row.GetMergeTab().GetTestsRun().GetOutput().GetSuites() {
 			if c := suite.GetCounts(); c != nil && (len(passed) == 0 || passed[len(passed)-1] != c.GetPassed()) {
 				passed = append(passed, c.GetPassed())
 			}

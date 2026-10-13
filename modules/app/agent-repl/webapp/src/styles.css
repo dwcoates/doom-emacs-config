@@ -7383,8 +7383,22 @@ ar-button.outcome-marker-pill {
   color: var(--err);
 }
 .merge-tab-panel { padding-top: 0.3rem; }
-/* A running agentic tab's stop sits on its own line above the tab's rows. */
-.merge-tab-panel > .merge-tab-stop { display: block; margin-bottom: 0.3rem; }
+/* A running agent stream's stop sits on its own line above its rows: a tab's,
+   or a conflicted commit's section's. */
+.merge-tab-panel > .merge-tab-stop,
+.merge-conflict > .merge-tab-stop { display: block; margin-bottom: 0.3rem; }
+/* A NESTED STRIP (a rebasing tab's commits, a tests tab's runs, a run's output
+   and fixing) scrolls with its panel: only the bubble's own strip is pinned,
+   and a second sticky strip would stack over it. */
+.merge-strip.is-nested {
+  position: static;
+  z-index: auto;
+  background: none;
+}
+/* A commit's conflict section: the conflicted files, then the resolution's
+   own rows. */
+.merge-conflict { padding-top: 0.3rem; }
+.merge-conflict-files { color: var(--muted); }
 
 /* The queue snapshot: a COLUMN TABLE (shared column tables, above) of
    workspace · stage · duration under a header row. Rows are delimited by the
