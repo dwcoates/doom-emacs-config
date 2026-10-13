@@ -194,6 +194,11 @@ type FleetDeps struct {
 	// cold-gate re-open, an adoption -- so the prompts held until it
 	// reconnected are delivered (promptqueue.Queue.ReleaseReconnectHolds).
 	SessionsUp func(ws ids.WorkspaceID)
+	// ColdGateRaised is told that a workspace's session parked at its cold
+	// gate, so a merge it has in the queue leaves it (owner ruling,
+	// 2026-10-13: a queued merge whose session went cold is ejected). Nil
+	// tells nobody.
+	ColdGateRaised func(ws ids.WorkspaceID)
 }
 
 // live is one workspace's live session: the client, its watcher, and the facts
@@ -2461,6 +2466,9 @@ func (f *Fleet) raiseColdGate(ws ids.WorkspaceID, vendorSessionID string, cold *
 	f.mu.Unlock()
 	f.logTransition(ws, "cold_gate_standing", stood, true,
 		dlog.Context{"vendor_session_id": vendorSessionID, "compaction_offered": compact != nil})
+	if f.deps.ColdGateRaised != nil {
+		f.deps.ColdGateRaised(ws)
+	}
 
 	f.deps.Feed.UpsertSynthesized(ws, feedid.Feed{Root: true}, &frontendv1.FeedRow{
 		Id: coldGateRowID(ws, vendorSessionID),
