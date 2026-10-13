@@ -400,6 +400,22 @@ func (v *Volume) Release() error {
 	var errs []error
 	detached := true
 	if v.Device != "" {
+		// NOTHING IS DETACHED UNDER A LIVE PROCESS. A run stopped mid-suite
+		// leaves children in process groups of their own (a test daemon, its
+		// fake shim, fake git); a detach forced under them revoked their
+		// executable and left them spinning, orphaned, for 13 hours at about
+		// half a core each (artr-43519, 2026-10-13). Every process running
+		// out of the volume is killed first, as Reclaim does; a kill that
+		// fails keeps the disk and its record for the next run's Reclaim.
+		killed, err := v.m.KillUnder(v.Mount)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("kill what still runs out of %s before detaching %s: %w", v.Mount, v.Device, err))
+			detached = false
+		} else if killed > 0 {
+			v.m.Log.Infof("RAM disk release: killed %d process(es) still running out of %s before detaching %s", killed, v.Mount, v.Device)
+		}
+	}
+	if v.Device != "" && detached {
 		if _, err := v.m.Run("hdiutil", "detach", v.Device); err != nil {
 			// WHO HELD IT IS READ BEFORE THE FORCE, which would close every
 			// holder's files and leave nothing to name.
