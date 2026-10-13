@@ -3,6 +3,8 @@ package sidebar
 import (
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	"fmt"
 	"sync"
 
@@ -35,6 +37,11 @@ type resolver struct {
 	mu    sync.Mutex
 	state *rosterState
 	topic publish.Topic[*frontendv1.WorkspaceRoster]
+	// revision is the last roster's WorkspaceRoster.revision: raised for
+	// every roster resolved, never lowered for the daemon's life.
+	revision uint64
+	// last is the roster last resolved and published, which Row reads.
+	last *frontendv1.WorkspaceRoster
 
 	// results is told every change of a workspace's last turn result, so the
 	// daemon keeps it durable (wsm.SetResult). nil tells nobody.
@@ -162,6 +169,17 @@ func (r *resolver) mutate(operation, message string, ctx dlog.Context, log dlog.
 	var roster *frontendv1.WorkspaceRoster
 	if ready {
 		roster = r.render(log, operation)
+		// EVERY RESOLVED ROSTER TAKES THE NEXT REVISION, under the lock that
+		// rendered it, so the revision orders rosters exactly as they were
+		// resolved (frontend.v1 WorkspaceRoster.revision). A render identical
+		// to the last one is not a new roster: it keeps the last revision, so
+		// the topic still drops it as the duplicate it is.
+		roster.Revision = r.revision
+		if r.last == nil || !proto.Equal(roster, r.last) {
+			r.revision++
+			roster.Revision = r.revision
+			r.last = roster
+		}
 	}
 	changes := r.pendingResults
 	r.pendingResults = nil
