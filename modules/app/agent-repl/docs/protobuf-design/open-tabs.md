@@ -96,3 +96,11 @@ workspace's web page was checked by Emacs alone, never by the daemon.
 - CONSEQUENCE: the cut-turn resume moves from "whenever the next session
   serves" to inside the open, so a workspace is never shown before its cut
   work restarted.
+
+### Roster revision orders the answer's row against the roster
+- WHAT: `WorkspaceRoster.revision` rises with every resolved roster; `ready`
+  and `failed` carry the `roster_revision` their row was taken from. A
+  consumer applies the answer's row only when it is newer than the roster it
+  holds.
+- WHY: the answer and the roster ride separate streams, and a row applied
+  out of order would roll a status back.
