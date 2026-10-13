@@ -72,7 +72,7 @@ describe("the type-out loop", () => {
     typeOut(s);
     frames(3);
     // Assert
-    expect([recorded.shown.length > 1, recorded.shown.every((n, i) => i === 0 || n >= recorded.shown[i - 1]!)]).toEqual([true, true]);
+    expect([recorded.shown.length > 1, recorded.shown.every((n, i) => i === 0 || n >= recorded.shown[i - 1])]).toEqual([true, true]);
   });
 
   it("resumes from the length an earlier draw showed", () => {
@@ -159,7 +159,7 @@ describe("the type-out loop", () => {
   it("waits for the text to render before typing", () => {
     // Arrange
     let rendered: (() => void) | undefined;
-    let total: number | undefined;
+    let total: number | undefined = undefined;
     const { surface: s, recorded } = surface({
       total: () => total,
       whenRendered: (fn) => {
