@@ -1,6 +1,7 @@
 package ramdisk
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -1189,5 +1190,53 @@ func TestTimedNotesEachCallsDurationAndResult(t *testing.T) {
 	}
 	if call != "hdiutil attach -nomount ram://16" || !errors.Is(noted, failing) || took < 0 {
 		t.Fatalf("noted %q in %s with %v, want the call, its duration and its error", call, took, noted)
+	}
+}
+
+func TestCommandOutcome(t *testing.T) {
+	expired, cancel := context.WithTimeout(context.Background(), 0)
+	defer cancel()
+	<-expired.Done()
+	tests := []struct {
+		name    string
+		ctx     context.Context
+		out     string
+		err     error
+		wantOut string
+		wantErr string
+	}{
+		{name: "an answer is the output", ctx: context.Background(), out: "framework : 1\n", wantOut: "framework : 1\n"},
+		{name: "a failure names the command and its output", ctx: context.Background(), out: "refused\n", err: errors.New("exit status 1"), wantOut: "refused\n", wantErr: "hdiutil info: exit status 1: refused"},
+		{name: "a killed command did not answer within its bound", ctx: expired, out: "", err: errors.New("signal: killed"), wantErr: "hdiutil info did not answer within 1s; the disk manager (diskarbitrationd) may be wedged: context deadline exceeded"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			out, err := commandOutcome(tc.ctx, time.Second, "hdiutil", []string{"info"}, []byte(tc.out), tc.err)
+
+			// Assert
+			gotErr := ""
+			if err != nil {
+				gotErr = err.Error()
+			}
+			if out != tc.wantOut || gotErr != tc.wantErr {
+				t.Fatalf("commandOutcome = %q, %q; want %q, %q", out, gotErr, tc.wantOut, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestCommandOutcomeKeepsTheDeadlineInTheChain(t *testing.T) {
+	// Arrange
+	expired, cancel := context.WithTimeout(context.Background(), 0)
+	defer cancel()
+	<-expired.Done()
+
+	// Act
+	_, err := commandOutcome(expired, time.Second, "diskutil", []string{"list"}, nil, errors.New("signal: killed"))
+
+	// Assert
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want context.DeadlineExceeded in its chain", err)
 	}
 }

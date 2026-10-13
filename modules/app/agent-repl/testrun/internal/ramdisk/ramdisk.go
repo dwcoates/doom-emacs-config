@@ -158,18 +158,34 @@ func RunBounded(bound time.Duration, name string, args ...string) (string, error
 func runBounded(bound time.Duration, name string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), bound)
 	defer cancel()
+	out, err := boundedCommand(ctx, name, args...).CombinedOutput()
+	return commandOutcome(ctx, bound, name, args, out, err)
+}
+
+// boundedCommand is the command, killed once ctx is done.
+func boundedCommand(ctx context.Context, name string, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, name, args...)
 	// A killed command's output pipe is not waited on past this.
 	cmd.WaitDelay = time.Second
-	out, err := cmd.CombinedOutput()
+	return cmd
+}
+
+// commandOutcome is a finished command's answer: its output, or an error
+// naming the command and saying whether ctx's bound killed it or it failed on
+// its own.
+func commandOutcome(ctx context.Context, bound time.Duration, name string, args []string, out []byte, err error) (string, error) {
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return string(out), fmt.Errorf("%s %s did not answer within %s; the disk manager (diskarbitrationd) may be wedged: %w",
-			name, strings.Join(args, " "), bound, ctx.Err())
+		return string(out), unansweredError(bound, name, args, ctx.Err())
 	}
 	if err != nil {
 		return string(out), fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
 	return string(out), nil
+}
+
+func unansweredError(bound time.Duration, name string, args []string, cause error) error {
+	return fmt.Errorf("%s %s did not answer within %s; the disk manager (diskarbitrationd) may be wedged: %w",
+		name, strings.Join(args, " "), bound, cause)
 }
 
 // Manager creates, releases and reclaims run RAM disks.
