@@ -123,7 +123,10 @@
     "(owner ruling, 2026-10-02). 'permission', 'question' and 'cold_gate' (a",
     "gate waits on the user) are GREEN, the same green as 'done' (owner",
     "ruling, 2026-10-08), and so is 'waiting' (an interrupt landing). Every",
-    "roster arm takes the color of the footer status it projects."
+    "roster arm takes the color of the footer status it projects, save",
+    "'async_merging': a workspace on the footer's idle claim whose own branch",
+    "merges async in a hidden merge workspace is PURPLE where it would be",
+    "green or yellow, while the footer stays idle (owner request, 2026-10-13)."
   ],
   "roster_status": {
     "none": "none",
@@ -148,6 +151,7 @@
     "clearing": "red",
     "compacting": "red",
     "idle_async": "yellow",
+    "async_merging": "purple",
     "ready": "green",
     "done": "green",
     "interrupted": "green",

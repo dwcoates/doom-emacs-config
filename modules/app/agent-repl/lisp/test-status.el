@@ -185,6 +185,13 @@ They can no more act on the workspace than during the merge itself."
   (should (equal agent-repl--color-merging-purple
                  (plist-get (agent-repl--tab-spec :merge-queued nil) :bg))))
 
+(ert-deftest agent-repl-test-tab-spec-async-merging-is-purple ()
+  "A workspace whose own branch merges async paints the tab purple (owner
+request, 2026-10-13): the merge is in flight, though the workspace is idle."
+  ;; Act / Assert
+  (should (equal agent-repl--color-merging-purple
+                 (plist-get (agent-repl--tab-spec :async-merging nil) :bg))))
+
 (ert-deftest agent-repl-test-tab-spec-vendor-blocked-is-turquoise ()
   "A vendor-blocked tab paints TURQUOISE: a vendor fault leaves the
 workspace usable (owner ruling, 2026-10-02)."
@@ -237,7 +244,7 @@ is usable, but the daemon's view of it is compromised."
                  (plist-get (agent-repl--tab-spec :degraded nil) :bg))))
 
 (ert-deftest agent-repl-test-tab-spec-vendor-blocked-is-not-purple ()
-  "Nothing but the merge states may paint purple on this surface.
+  "Nothing but a merge in flight may paint purple on this surface.
 The collision is the whole reason vendor-blocked moved, so it is pinned
 directly rather than left implied by the blue assertion."
   ;; Act / Assert
@@ -3582,14 +3589,15 @@ usable (owner ruling, 2026-09-28)."
                        #'string<))))
 
 (ert-deftest agent-repl-test-status-purple-is-the-queued-or-running-merge ()
-  "Purple is spent on the merge arms with no verdict yet, and on nothing
+  "Purple is spent on the merges with no verdict yet, and on nothing
 else: no merge fact is shown before the requesting turn ends, so there is
 no enqueuing arm (merge-landing.md, Landed change 1); a merge that holds
 the workspace and waits for it to fall free is `:merge-queued' (owner
-ruling, 2026-10-13)."
+ruling, 2026-10-13); and an otherwise idle workspace whose own branch
+merges async is `:async-merging' (owner request, 2026-10-13)."
   ;; Act / Assert
   (should (equal (sort (agent-repl-test-status--arms-taking "purple") #'string<)
-                 (sort (list :merge-queued :merging) #'string<))))
+                 (sort (list :merge-queued :merging :async-merging) #'string<))))
 
 (ert-deftest agent-repl-test-status-every-merge-arm-draws-the-one-merge-glyph ()
   "Every merge arm maps to the one merge glyph (owner ruling, 2026-10-13)."

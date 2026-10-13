@@ -212,14 +212,18 @@ waiting on the user, so permission -> thinking is a move within this set
 and no finish edge at all.  So is any other wait on the user (`waiting').")
 
 (defconst agent-repl-roster-settled-statuses
-  '(:ready :done :interrupted :turn-failed :vendor-blocked :turn-died :idle-async)
+  '(:ready :done :interrupted :turn-failed :vendor-blocked :turn-died :idle-async
+    :async-merging)
   "The SETTLED half of the finish edge — the foreground turn has ended.
 `turn-failed' is settled: a turn that FAILED has ended as surely as one
 that finished or was stopped.  So are `vendor-blocked' and `turn-died',
 the faults a failed turn now stands as until the next one (owner ruling,
 2026-10-06): the turn they report has ended.
 `idle-async' is settled deliberately: no FOREGROUND turn is running, and
-detached work is work the user may talk over.")
+detached work is work the user may talk over.  So is `async-merging': it
+is drawn only over a settled idle arm, while the workspace\='s own branch
+merges in a hidden merge workspace, so a turn that ends with its async
+merge in line reaches it directly and still finishes.")
 
 ;;;; ---- Reading a row ----------------------------------------------------
 

@@ -111,6 +111,13 @@ describe("the status mark", () => {
     expect(rosterArmMark("merged")).toEqual({ toneClass: "tone-green", glyph: "merge", char: "", ink: undefined, motion: "still" });
   });
 
+  // AN ASYNC MERGE OF THE WORKSPACE'S OWN BRANCH (owner request, 2026-10-13):
+  // the workspace is idle, so it draws the dot, purple, breathing as the
+  // merge in flight does; it is not one of its own merge arms.
+  it("draws an async merge of the workspace's branch as the breathing purple dot", () => {
+    expect(rosterArmMark("asyncMerging")).toEqual({ toneClass: "tone-purple", glyph: "dot", char: "", ink: undefined, motion: "breathes" });
+  });
+
   it("draws an incidentally inactive workspace as the grey dot", () => {
     expect(rosterArmMark("inactive")).toEqual({ toneClass: "tone-none", glyph: "dot", char: "", ink: undefined, motion: "still" });
   });
@@ -131,7 +138,7 @@ describe("the status mark", () => {
 // ONE ANIMATION, ONE CLAIM (owner ruling, 2026-10-13): a breath is something
 // in progress; a gate or an interrupt landing waits on the user and is still.
 describe("the rail's one animation", () => {
-  it.each(["submitting", "thinking", "clearing", "compacting", "idleAsync", "init", "merging"] as const)(
+  it.each(["submitting", "thinking", "clearing", "compacting", "idleAsync", "init", "merging", "asyncMerging"] as const)(
     "breathes on %s",
     (arm) => {
       expect(armMotion(arm)).toBe("breathes");

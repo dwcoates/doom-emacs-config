@@ -207,9 +207,9 @@ arriving as an unknown field on some later push."
                        #'string<)))
     (should (equal spelled declared))))
 
-(ert-deftest agent-repl-test-wire-roster-row-status-count-is-thirty-one ()
-  "The status vocabulary is the 31 arms the contract declares."
-  (should (equal (length agent-repl-wire-roster-row-status-keywords) 31)))
+(ert-deftest agent-repl-test-wire-roster-row-status-count-is-thirty-two ()
+  "The status vocabulary is the 32 arms the contract declares."
+  (should (equal (length agent-repl-wire-roster-row-status-keywords) 32)))
 
 (ert-deftest agent-repl-test-wire-roster-decodes-the-cold-gate-arm ()
   "A session parked on its cold gate decodes to its empty arm."
@@ -240,6 +240,12 @@ arriving as an unknown field on some later push."
   "The turn-died arm decodes to its keyword (owner ruling, 2026-10-06)."
   (should (assq 'turnDied agent-repl-wire-roster-row-status-arms))
   (should (memq :turn-died agent-repl-wire-roster-row-status-keywords)))
+
+(ert-deftest agent-repl-test-wire-roster-decodes-the-async-merging-arm ()
+  "The async-merging arm decodes to its keyword (owner request, 2026-10-13)."
+  ;; Act / Assert
+  (should (assq 'asyncMerging agent-repl-wire-roster-row-status-arms))
+  (should (memq :async-merging agent-repl-wire-roster-row-status-keywords)))
 
 (ert-deftest agent-repl-test-wire-roster-row-unset-status-is-a-breach ()
   "A row with no lifecycle is a contract breach, not a default dot."

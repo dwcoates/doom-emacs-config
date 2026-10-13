@@ -39,6 +39,7 @@ var rosterArmClaims = map[string]Claim{
 	"interrupted":     Idle,
 	"turn_failed":     Idle,
 	"idle_async":      Idle,
+	"async_merging":   Idle,
 	"ready":           Idle,
 	"none":            Idle,
 	"inactive":        Inactive,
