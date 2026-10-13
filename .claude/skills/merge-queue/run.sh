@@ -16,7 +16,7 @@
 #
 # Verbs:
 #   --enqueue-own [--in-place | --sync | --keep-open |
-#                  --async <name> [--pick <instruction>]]
+#                  --async <name> [--pick <instruction>] [--compact-after]]
 #                                Merge this workspace's own branch. By
 #                                default it runs SYNC, in this workspace,
 #                                which closes once it lands; --in-place and
@@ -27,7 +27,11 @@
 #                                workspace free; with --pick <instruction>
 #                                only the changes the instruction names land,
 #                                cherry-picked onto the target by the merge
-#                                workspace's agent.
+#                                workspace's agent; with --compact-after this
+#                                workspace's conversation is compacted once
+#                                the merge lands. --compact-after goes with
+#                                --async alone and is refused on every other
+#                                form.
 #   --announce-one-shot          Announce, from inside the current turn, that
 #                                this workspace one-shot merges once the turn
 #                                ends: its own branch in place, this workspace
@@ -156,6 +160,14 @@ for arg in "$@"; do
 done
 set -- "${ARGS[@]+"${ARGS[@]}"}"
 
+# --compact-after rides an async own-branch merge alone: every other verb
+# refuses it here, and --enqueue-own refuses it on every form but --async.
+if [ "${1:-}" != --enqueue-own ]; then
+  for arg in "$@"; do
+    [ "$arg" != --compact-after ] || die "--compact-after goes with --enqueue-own --async <name> alone, not ${1:-no verb}"
+  done
+fi
+
 # no_front refuses --front on a verb that requests no merge.
 no_front() {
   [ "${#FRONT[@]}" -eq 0 ] || die "--front goes with a merge verb; $1 requests no merge"
@@ -194,6 +206,10 @@ case "${1:-}" in
   --enqueue-own)
     shift
     mode=()
+    for arg in "$@"; do
+      [ "$arg" != --compact-after ] || [ "${1:-}" = --async ] ||
+        die "--compact-after goes with --async <name> alone: only an async merge leaves this workspace free to compact once it lands"
+    done
     case "${1:-}" in
       "") ;;
       --keep-open)
@@ -203,17 +219,27 @@ case "${1:-}" in
         [ "$#" -eq 1 ] || die "--enqueue-own $1 takes nothing after it, not ${2}"
         mode=(-in-place) ;;
       --async)
-        [ -n "${2:-}" ] || die "--enqueue-own --async needs the merge workspace's name"
+        [ -n "${2:-}" ] && [ "$2" != --compact-after ] && [ "$2" != --pick ] || die "--enqueue-own --async needs the merge workspace's name"
         mode=(-async -name "$2")
-        case "${3:-}" in
-          "") [ "$#" -eq 2 ] || die "--enqueue-own --async takes only a name and --pick" ;;
-          --pick)
-            [ -n "${4:-}" ] || die "--pick needs the instruction naming the changes to land"
-            [ "$#" -eq 4 ] || die "--pick takes one instruction; quote it"
-            mode+=(-pick "$4") ;;
-          *) die "--enqueue-own --async <name> takes only --pick, not $3" ;;
-        esac ;;
-      *) die "--enqueue-own takes only --in-place, --sync, --keep-open or --async <name> [--pick <instruction>], not $1" ;;
+        shift 2
+        picked=0 compact=0
+        while [ "$#" -gt 0 ]; do
+          case "$1" in
+            --pick)
+              [ "$picked" -eq 0 ] || die "--pick is given once"
+              [ -n "${2:-}" ] && [ "$2" != --compact-after ] || die "--pick needs the instruction naming the changes to land"
+              mode+=(-pick "$2")
+              picked=1
+              shift 2 ;;
+            --compact-after)
+              [ "$compact" -eq 0 ] || die "--compact-after is given once"
+              mode+=(-compact-after)
+              compact=1
+              shift ;;
+            *) die "--enqueue-own --async <name> takes only --pick <instruction> and --compact-after, not $1; quote a pick's instruction as one argument" ;;
+          esac
+        done ;;
+      *) die "--enqueue-own takes only --in-place, --sync, --keep-open or --async <name> [--pick <instruction>] [--compact-after], not $1" ;;
     esac
     top="$(workspace_top)" || exit 2
     if [ -n "$(git -C "$top" status --porcelain 2>/dev/null)" ]; then
@@ -339,7 +365,7 @@ case "${1:-}" in
     run_verb "$control"
     ;;
   *)
-    printf 'usage: run.sh --enqueue-own [--in-place | --sync | --keep-open | --async <name> [--pick <instruction>]] | --announce-one-shot | --land-workspace <dir> | --land-branch <branch> | --land-commits <commit>... | --pr-merged | --remove-branch <branch> | --dequeue-own | --dequeue-workspace <dir> | --move-up-own | --move-up-workspace <dir> | --move-down-own | --move-down-workspace <dir> | --pause-queue [<repo-dir>] | --resume-queue [<repo-dir>] | --hold-rollouts | --release-rollouts  (any merge verb also takes --front)\n' >&2
+    printf 'usage: run.sh --enqueue-own [--in-place | --sync | --keep-open | --async <name> [--pick <instruction>] [--compact-after]] | --announce-one-shot | --land-workspace <dir> | --land-branch <branch> | --land-commits <commit>... | --pr-merged | --remove-branch <branch> | --dequeue-own | --dequeue-workspace <dir> | --move-up-own | --move-up-workspace <dir> | --move-down-own | --move-down-workspace <dir> | --pause-queue [<repo-dir>] | --resume-queue [<repo-dir>] | --hold-rollouts | --release-rollouts  (any merge verb also takes --front)\n' >&2
     exit 1
     ;;
 esac
