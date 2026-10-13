@@ -1091,7 +1091,7 @@ type CreateWorkspaceError_ForkSourceHasNoConversation struct {
 type CreateWorkspaceError_NameReserved struct {
 	// The supplied name is reserved by a pending async merge, whose merge
 	// workspace will be created under it when the requesting turn ends
-	// (agentrepl.v1.MergeWorkspaceSourceOwnBranchDetached.name).
+	// (agentrepl.v1.MergeWorkspaceAsync.name).
 	NameReserved *CreateWorkspaceNameReserved `protobuf:"bytes,18,opt,name=name_reserved,json=nameReserved,proto3,oneof"`
 }
 

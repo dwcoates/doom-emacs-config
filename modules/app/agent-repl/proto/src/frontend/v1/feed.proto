@@ -3052,7 +3052,7 @@ message FeedMergeFoldByReader {}
 // (its runs keep counting), and each is drawn live again while it works.
 //
 // The Emacs-repo run is queue | pre-prompt | rebasing | tests | committing |
-// post-prompt, an async pick merge opening with its pick tab; a branch already merged upstream is queue | updating main |
+// post-prompt, an async merge with an instruction opening with its resolving tab; a branch already merged upstream is queue | updating main |
 // post-prompt; every other repo's run is queue | pre-prompt | post-prompt.
 //
 // NOTHING PARKS. A conflict resolution or a fixing loop that gives up FAILS
@@ -3079,7 +3079,7 @@ message FeedMergeTab {
     FeedMergeTabCommitting committing = 10;
     FeedMergeTabUpdatingMain updating_main = 11;
     FeedMergeTabPostPrompt post_prompt = 8;
-    FeedMergeTabPick pick = 12;
+    FeedMergeTabResolving resolving = 12;
   }
   // Tag 4 (`merge`, the no-FF merge made before the gate) is RETIRED: the
   // branch is rebased first and the merge commit is made only after the gate
@@ -3151,22 +3151,22 @@ message FeedMergeTabQueue {
   FeedMergeQueue queue = 3;
 }
 
-// AGENTIC: an async merge's pick — the first turn of a merge workspace forked
-// to land only some changes of its requester's branch
-// (agentrepl.v1.MergeWorkspaceSourceOwnBranchDetachedPick), its agent
-// cherry-picking those changes onto the target branch and resolving whatever
-// does not apply on its own. Present only on such a merge, as its first tab.
-// Live while the turn runs; settled succeeded when the turn ended with at
-// least one commit ahead of the target and a clean worktree, failed otherwise
-// (which FAILS the merge and reveals the merge workspace). The merge joins
-// the queue once this tab settles succeeded. Content: sub-feed rows parented
-// to this row, mirrored from the merge workspace's feed.
-message FeedMergeTabPick {
+// AGENTIC: an async merge's resolving turn -- the first turn of its merge
+// workspace, carrying out the requester's instruction
+// (agentrepl.v1.MergeWorkspaceAsync.instruction) on the merge's branch and
+// resolving whatever does not apply on its own. Present only on a merge that
+// carries an instruction, as its first tab, left of queue. Live while the
+// turn runs; settled succeeded when the turn ended with at least one commit
+// ahead of the target and a clean worktree, failed otherwise (which FAILS the
+// merge and reveals the merge workspace). The merge joins the queue once this
+// tab settles succeeded. Content: sub-feed rows parented to this row,
+// mirrored from the merge workspace's feed.
+message FeedMergeTabResolving {
   oneof state {
     FeedMergeTabLive live = 1;
     FeedMergeTabSettled settled = 2;
-    // The pick is held on the user: the merge workspace's session has a
-    // permission ask or a question batch open, which also reveals that
+    // The resolving turn is held on the user: the merge workspace's session
+    // has a permission ask or a question batch open, which also reveals that
     // workspace.
     FeedMergeTabWaitingOnUser waiting_on_user = 3;
   }
