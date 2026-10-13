@@ -616,6 +616,9 @@ func (o *orchestrator) mintLedger(ws ids.WorkspaceID) ids.LeaseID {
 // running for it.
 func (o *orchestrator) kick(repo wsm.RepoKey) {
 	if !o.async {
+		if o.onKick != nil {
+			o.onKick(repo)
+		}
 		return
 	}
 	o.mu.Lock()
