@@ -19,7 +19,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** One rail row, as the sidebar draws its line. */
 function wsRow(id: string, merged: boolean): string {
-  return `<div class="ws${merged ? " gone" : ""}" data-roster-row="${id}"><div class="row"><span class="st st-ready tone-green" data-glyph="dot"></span><span class="name${merged ? " merged-name" : ""}">${id}</span></div></div>`;
+  return `<div class="ws${merged ? " gone" : ""}" data-roster-row="${id}"><div class="row"><span class="st st-ready tone-green" data-glyph="dot"></span><span class="name${merged ? " band-name" : ""}">${id}</span></div></div>`;
 }
 
 /** One band's section around its rows region's INNER markup, drawn as roster.ts draws it. */
