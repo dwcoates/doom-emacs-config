@@ -4,15 +4,18 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { CONVERSATION_DRAWN_ATTRIBUTE } from "../../src/feed/conversation-drawn.js";
 import { DOCK_BACKGROUND_PROPERTY, DOCK_HEIGHT_PROPERTY } from "../../src/feed/gate-dock.js";
-import { connectToHost, type HostLink } from "../../src/host/embed.js";
+import { WEBHOST_SIDEBAR_CLASS, connectToHost, type HostLink } from "../../src/host/embed.js";
+import { fireResize } from "../resize-observer.js";
 import { HOST_CHANNEL, type PageToHost } from "../../src/host/protocol.js";
 import { createPresence, type PresenceSource } from "../../src/presence.js";
+import { createWebhostFailureView, type WebhostFailureView } from "../../src/failure/webhost.js";
 import { captureLogRecords, type LogCapture } from "../log-capture.js";
 
 let pageWin: Window;
 let pageDoc: Document;
 let hostWin: Window;
 let presence: PresenceSource;
+let webhostFailures: WebhostFailureView;
 let link: HostLink | null;
 let received: PageToHost[];
 let capture: LogCapture;
@@ -65,7 +68,8 @@ beforeEach(() => {
   pageWin = pageWindow(hostWin);
   pageDoc = document;
   presence = createPresence(pageDoc, true);
-  link = connectToHost({ doc: pageDoc, win: pageWin, presence });
+  webhostFailures = createWebhostFailureView();
+  link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures });
 });
 
 afterEach(() => {
@@ -73,6 +77,7 @@ afterEach(() => {
   presence.dispose();
   pageDoc.documentElement.removeAttribute(CONVERSATION_DRAWN_ATTRIBUTE);
   pageDoc.documentElement.removeAttribute("style");
+  pageDoc.documentElement.classList.remove(WEBHOST_SIDEBAR_CLASS);
   pageDoc.body.replaceChildren();
 });
 
@@ -82,7 +87,7 @@ describe("joining", () => {
     const alone = createPresence(document, false);
 
     // Act
-    const none = connectToHost({ doc: document, win: window, presence: alone });
+    const none = connectToHost({ doc: document, win: window, presence: alone, webhostFailures });
 
 
     // Assert
@@ -274,7 +279,7 @@ describe("reported facts", () => {
     received = [];
 
     // Act
-    link = connectToHost({ doc: pageDoc, win: pageWin, presence });
+    link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures });
 
     // Assert
     await delivered();
@@ -344,5 +349,118 @@ describe("reported facts", () => {
     // Assert
     await delivered();
     expect(received).toEqual([]);
+  });
+});
+
+describe("the webhost's sidebar", () => {
+  it("keeps the sidebar column for the webhost's sidebar while it is docked", () => {
+    // Act
+    fromHost({ channel: HOST_CHANNEL, kind: "sidebarDock", docked: true });
+
+    // Assert
+    expect(pageDoc.documentElement.classList.contains(WEBHOST_SIDEBAR_CLASS)).toBe(true);
+  });
+
+  it("gives the column back when the webhost undocks its sidebar", () => {
+    // Arrange
+    fromHost({ channel: HOST_CHANNEL, kind: "sidebarDock", docked: true });
+
+    // Act
+    fromHost({ channel: HOST_CHANNEL, kind: "sidebarDock", docked: false });
+
+    // Assert
+    expect(pageDoc.documentElement.classList.contains(WEBHOST_SIDEBAR_CLASS)).toBe(false);
+  });
+
+  it("records the dock at info when it changes", async () => {
+    // Act
+    fromHost({ channel: HOST_CHANNEL, kind: "sidebarDock", docked: true });
+
+    // Assert
+    capture.logger.flush();
+    await Promise.resolve();
+    const record = capture.sent.find((r) => r.operation === "page.webhost-sidebar-dock");
+    expect([record?.level.case, record?.context?.["docked"]]).toEqual(["info", true]);
+  });
+
+  it("records nothing when the webhost restates the dock", async () => {
+    // Arrange
+    fromHost({ channel: HOST_CHANNEL, kind: "sidebarDock", docked: true });
+    capture.logger.flush();
+    await Promise.resolve();
+    capture.sent.length = 0;
+
+    // Act
+    fromHost({ channel: HOST_CHANNEL, kind: "sidebarDock", docked: true });
+
+    // Assert
+    expect(await operations()).not.toContain("page.webhost-sidebar-dock");
+  });
+
+  it("lists the webhost's failures for the warning chip", () => {
+    // Arrange
+    const failure = { arm: "daemonUnreachable", headline: "lost the connection", evidence: [["close", "1006"]] };
+
+    // Act
+    fromHost({ channel: HOST_CHANNEL, kind: "webhostFailures", failures: [failure] });
+
+    // Assert
+    expect(webhostFailures.standing()).toEqual([failure]);
+  });
+});
+
+describe("the gate band", () => {
+  /** A page whose shell carries a gate dock BAND pixels tall, joined to its host afresh. */
+  function joinWithDock(band: number): HTMLElement {
+    link?.dispose();
+    const dock = pageDoc.createElement("div");
+    dock.id = "gate-dock";
+    dock.getBoundingClientRect = () => ({ height: band }) as DOMRect;
+    pageDoc.body.append(dock);
+    received = [];
+    link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures });
+    return dock;
+  }
+
+  it("reports how tall the band is when it joins", async () => {
+    // Act
+    joinWithDock(120.4);
+
+    // Assert
+    await delivered();
+    expect(received).toContainEqual({ channel: HOST_CHANNEL, kind: "gateBand", pixels: 120 });
+  });
+
+  it("reports the band again when its height changes", async () => {
+    // Arrange
+    const dock = joinWithDock(0);
+    dock.getBoundingClientRect = () => ({ height: 90 }) as DOMRect;
+    received = [];
+
+    // Act
+    fireResize(dock);
+
+    // Assert
+    await delivered();
+    expect(received).toEqual([{ channel: HOST_CHANNEL, kind: "gateBand", pixels: 90 }]);
+  });
+
+  it("reports nothing when the band's height stays the same", async () => {
+    // Arrange
+    const dock = joinWithDock(90);
+    received = [];
+
+    // Act
+    fireResize(dock);
+
+    // Assert
+    await delivered();
+    expect(received).toEqual([]);
+  });
+
+  it("reports no band for a page with no gate dock", async () => {
+    // Assert
+    await delivered();
+    expect(received.some((m) => m.kind === "gateBand")).toBe(false);
   });
 });

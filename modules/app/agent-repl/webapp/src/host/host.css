@@ -23,6 +23,25 @@ html.agent-repl-host body::after {
   content: none;
 }
 
+/* The stack of workspace pages fills the window; the sidebar floats over it. */
+.webhost-frames {
+  position: absolute;
+  inset: 0;
+}
+
+/* THE ONE SIDEBAR (host/sidebar.ts), drawn over the sidebar column every page
+   keeps empty for it, so it sits exactly where a page's own sidebar would: the
+   page's stylesheet gives it its width, inset, rounding and shadow, and this
+   places it over the window instead of in a grid cell. It ends above the gate
+   band of the page on screen, as a page's own sidebar ends above its band. */
+html.agent-repl-host #ws-sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: var(--webhost-sidebar-bottom, 0px);
+  z-index: 1;
+}
+
 .workspace-frame {
   position: absolute;
   inset: 0;

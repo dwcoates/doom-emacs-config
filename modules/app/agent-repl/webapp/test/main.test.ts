@@ -71,6 +71,8 @@ interface BootRecord {
   /** The footer's `selectDetachedWork`, and the feed handle's it must reach. */
   footerSelectDetachedWork: ((id: unknown) => void) | null;
   feedSelectDetachedWork: Mock;
+  /** The feed's "this workspace was switched to", as the boot wires it. */
+  feedWorkspaceSelected: Mock;
   /** The last `mountFeed` deps, for the composer-factory and held-host contracts. */
   feedDeps: { composerFactory?: unknown; heldHost?: unknown } | null;
   /** The context the boot built, so its stream's fate can be read off it. */
@@ -103,6 +105,7 @@ function freshRecord(): BootRecord {
     loginOpen: vi.fn(),
     footerSelectDetachedWork: null,
     feedSelectDetachedWork: vi.fn(),
+    feedWorkspaceSelected: vi.fn(),
     feedDeps: null,
     bootedContext: null,
     drawnPanel: null,
@@ -259,6 +262,7 @@ async function runBoot(rec: BootRecord): Promise<void> {
         return {
           dispose: vi.fn(),
           selectDetachedWork: rec.feedSelectDetachedWork,
+          workspaceSelected: rec.feedWorkspaceSelected,
         };
       },
     ),
@@ -635,6 +639,50 @@ function chipEvidence(arm: string): string[] {
     (line) => line.textContent ?? "",
   );
 }
+
+/** Put the page in the webhost's iframe: a parent window that takes its posts. */
+function embedInWebhost(): Window {
+  const webhost = { postMessage: vi.fn() } as unknown as Window;
+  vi.stubGlobal("parent", webhost);
+  return webhost;
+}
+
+/** Deliver DATA to the page as the webhost posting it. */
+function fromWebhost(webhost: Window, data: unknown): void {
+  window.dispatchEvent(new MessageEvent("message", { data, source: webhost }));
+}
+
+describe("a page in the webhost", { timeout: BOOT_TIMEOUT_MS }, () => {
+  test("draws no sidebar of its own: the webhost draws the one sidebar", async () => {
+    embedInWebhost();
+
+    await bootMain();
+
+    expect(page.mounts.sidebar).not.toHaveBeenCalled();
+  });
+
+  test("returns the feed to its tail when the webhost shows it", async () => {
+    const webhost = embedInWebhost();
+    await bootMain();
+
+    fromWebhost(webhost, { channel: "agent-repl-host", kind: "presence", shown: true, warm: true });
+
+    expect(page.feedWorkspaceSelected).toHaveBeenCalledTimes(1);
+  });
+
+  test("lists the webhost's failures in its warning chip", async () => {
+    const webhost = embedInWebhost();
+    await bootMain();
+
+    fromWebhost(webhost, {
+      channel: "agent-repl-host",
+      kind: "webhostFailures",
+      failures: [{ arm: "daemonUnreachable", headline: "lost the daemon", evidence: [["close code", "1006"]] }],
+    });
+
+    expect(chipEvidence("daemonUnreachable")).toEqual(["close code: 1006"]);
+  });
+});
 
 describe("a boot that fails", { timeout: BOOT_TIMEOUT_MS }, () => {
   test("files boot_failed in the topbar's warning chip when adoption never completes", async () => {
