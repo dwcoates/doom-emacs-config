@@ -212,6 +212,38 @@ func TestContinueRebaseContinuesWithNoEditor(t *testing.T) {
 	}
 }
 
+func TestAbortRebaseAbortsTheStandingRebaseWithNoEditor(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok("", "rebase"))
+
+	// Act.
+	if err := git.AbortRebase(context.Background(), "/wt"); err != nil {
+		t.Fatalf("AbortRebase: %v", err)
+	}
+
+	// Assert.
+	fake.assertSubject(0, "rebase", "--abort")
+	if got := envValues(fake.call(0).Env, "GIT_EDITOR"); !reflect.DeepEqual(got, []string{"GIT_EDITOR=true"}) {
+		t.Fatalf("GIT_EDITOR bindings = %v, want exactly [GIT_EDITOR=true]", got)
+	}
+}
+
+func TestAbortRebaseFailurePropagatesTheGitEvidence(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	newFakeGit(t, fails(128, "fatal: No rebase in progress?\n", "rebase"))
+
+	// Act.
+	err := git.AbortRebase(context.Background(), "/wt")
+
+	// Assert.
+	var failure *Error
+	if !errors.As(err, &failure) || !strings.Contains(failure.Stderr, "No rebase in progress") {
+		t.Fatalf("AbortRebase error = %v, want git's own evidence", err)
+	}
+}
+
 func TestARebaseFailureWithoutConflictsIsAFailure(t *testing.T) {
 	// Arrange.
 	git, surfaces := newTestClient(t)

@@ -149,6 +149,9 @@ type Git interface {
 	ContinueRebase(ctx context.Context, dir string) (RebaseStep, error)
 	// RebaseInProgress reports whether a rebase stands in dir's checkout.
 	RebaseInProgress(ctx context.Context, dir string) (bool, error)
+	// AbortRebase ends the rebase standing in dir's checkout, putting the
+	// branch back where it stood before the rebase began.
+	AbortRebase(ctx context.Context, dir string) error
 	// AddWorktree checks an existing branch out at worktreeDir.
 	AddWorktree(ctx context.Context, repoDir, worktreeDir, branch string) error
 	// Fetch fetches remote into dir's repository.

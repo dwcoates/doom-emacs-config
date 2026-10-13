@@ -1067,6 +1067,14 @@ func (g *fakeGit) StartRebase(_ context.Context, _, onto string, commits []strin
 	return g.replayLocked()
 }
 
+func (g *fakeGit) AbortRebase(context.Context, string) error {
+	g.record("abort_rebase")
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.rebaseCommands = append(g.rebaseCommands, "abort")
+	return nil
+}
+
 func (g *fakeGit) ContinueRebase(context.Context, string) (gitclient.RebaseStep, error) {
 	g.record("continue_rebase")
 	g.mu.Lock()
