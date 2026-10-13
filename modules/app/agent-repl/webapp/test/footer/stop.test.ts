@@ -116,6 +116,15 @@ describe("drawTurnStopControl", () => {
     expect(control.querySelector("[data-stop-outcome]")?.textContent).toBe("nothing running");
   });
 
+  it("notes a stop that raised the merge-queue question — an ANSWER, not a refusal", async () => {
+    const h = harness({ interrupt: () => interruptSuccess("mergeQueueOffered") });
+    const control = turnStop(h.ctx);
+    press(control);
+    await settle();
+    expect(control.querySelector(".refusal")).toBeNull();
+    expect(control.querySelector("[data-stop-outcome]")?.textContent).toBe("asking about the queued merge");
+  });
+
   it("draws the confirm step naming the live agents the stop would also end", async () => {
     const h = harness({ interrupt: () => confirmRequired(3n) });
     const control = turnStop(h.ctx);

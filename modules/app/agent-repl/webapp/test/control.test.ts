@@ -359,7 +359,7 @@ describe("labelledControl", () => {
     expect(clicks).toBe(0);
   });
 
-  it.each(["held/held-prompt.ts", "held/held-offer.ts", "held/classifier-update.ts"])(
+  it.each(["held/held-prompt.ts", "feed/merge/queue-offer.ts", "held/classifier-update.ts"])(
     "is how %s builds every row control",
     (file) => {
       // Arrange

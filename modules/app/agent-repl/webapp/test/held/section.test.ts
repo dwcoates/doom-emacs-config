@@ -66,17 +66,6 @@ const promptItem = (turn: string, text = "hi"): FeedHeldItem => heldPromptItem(`
 /** A held prompt on TURN whose words run to a second line. */
 const multiLineItem = (turn: string): FeedHeldItem => promptItem(turn, "first\nsecond");
 
-const offerItem = (): FeedHeldItem =>
-  create(FeedHeldItemSchema, {
-    id: { value: "offer:merge_dequeue" },
-    item: {
-      case: "offer",
-      value: {
-        offer: { case: "mergeDequeue", value: { headline: { text: "keep the slot?" } } },
-      },
-    },
-  });
-
 const section = (items: FeedHeldItem[]): FeedHeld => create(FeedHeldSchema, { items });
 
 /** A section mounted on a fresh host. */
@@ -120,13 +109,12 @@ describe("drawSection", () => {
 
   it("names every held item, in order, by its held-entry selector", () => {
     // Arrange
-    const drawn = draw(section([promptItem("t1"), offerItem(), promptItem("t2")]));
+    const drawn = draw(section([promptItem("t1"), promptItem("t2")]));
     // Act
     const entries = [...(drawn?.querySelectorAll(HELD_ENTRY_SELECTOR) ?? [])];
     // Assert
     expect(entries.map((node) => node.getAttribute(HELD_ITEM_ATTRIBUTE))).toEqual([
       "prompt:t1",
-      "offer:merge_dequeue",
       "prompt:t2",
     ]);
   });
@@ -140,12 +128,8 @@ describe("drawHeldItem", () => {
     expect(draw(promptItem("t1")).getAttribute("data-held-turn")).toBe("t1");
   });
 
-  it("routes an offer to the offer card", () => {
-    expect(draw(offerItem()).getAttribute("data-offer")).toBe("mergeDequeue");
-  });
-
   it("marks the item's element with the item's id", () => {
-    expect(draw(offerItem()).getAttribute(HELD_ITEM_ATTRIBUTE)).toBe("offer:merge_dequeue");
+    expect(draw(promptItem("t1")).getAttribute(HELD_ITEM_ATTRIBUTE)).toBe("prompt:t1");
   });
 
   it("refuses an item whose oneof is unset", () => {
@@ -154,7 +138,7 @@ describe("drawHeldItem", () => {
   });
 
   it("refuses an item with no id", () => {
-    const anonymous = create(FeedHeldItemSchema, { item: offerItem().item });
+    const anonymous = create(FeedHeldItemSchema, { item: promptItem("t1").item });
     expect(() => draw(anonymous)).toThrow(MalformedView);
   });
 });
@@ -302,12 +286,6 @@ describe("mountHeldSection's park on a held prompt's first draw", () => {
   it("does not park when a held prompt leaves the section", () => {
     const m = applied([section([promptItem("t1"), promptItem("t2")]), section([promptItem("t1")])]);
     expect(m.promptHeld.mock.calls).toEqual([["t2"]]);
-    m.dispose();
-  });
-
-  it("does not park for an offer, which is no prompt", () => {
-    const m = applied([section([offerItem()])]);
-    expect(m.promptHeld).not.toHaveBeenCalled();
     m.dispose();
   });
 
