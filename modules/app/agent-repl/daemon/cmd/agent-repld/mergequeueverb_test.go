@@ -260,7 +260,13 @@ func TestTheMergeQueueVerbNamesEachSource(t *testing.T) {
 			check: func(_ *mergeFixture, e commandfile.Entry) bool { return !e.Detached && !e.KeepOpen }},
 		{name: "own branch async", args: func(*mergeFixture) []string { return []string{"-own", "-async", "-name", "reconnect-fix"} },
 			check: func(_ *mergeFixture, e commandfile.Entry) bool {
-				return e.Detached && e.DetachedName == "reconnect-fix" && e.Pick == "" && !e.KeepOpen
+				return e.Detached && e.DetachedName == "reconnect-fix" && e.Pick == "" && !e.KeepOpen && !e.CompactAfter
+			}},
+		{name: "own branch async compacting after", args: func(*mergeFixture) []string {
+			return []string{"-own", "-async", "-name", "reconnect-fix", "-compact-after"}
+		},
+			check: func(_ *mergeFixture, e commandfile.Entry) bool {
+				return e.Detached && e.DetachedName == "reconnect-fix" && e.CompactAfter
 			}},
 		{name: "own branch async pick", args: func(*mergeFixture) []string {
 			return []string{"-own", "-async", "-name", "reconnect-fix", "-pick", "the reconnect fix"}
@@ -332,6 +338,11 @@ func TestTheMergeQueueVerbRefusesAMalformedRequest(t *testing.T) {
 		{name: "a name with no async", args: []string{"-own", "-name", "n"}},
 		{name: "a pick with no async", args: []string{"-own", "-pick", "the fix"}},
 		{name: "a blank pick", args: []string{"-own", "-async", "-name", "n", "-pick", " "}},
+		{name: "compact-after in place", args: []string{"-own", "-compact-after"}},
+		{name: "compact-after sync", args: []string{"-own", "-in-place", "-compact-after"}},
+		{name: "compact-after kept open", args: []string{"-own", "-keep-open", "-compact-after"}},
+		{name: "compact-after one-shot", args: []string{"-own", "-one-shot", "-compact-after"}},
+		{name: "compact-after off the own branch", args: []string{"-branch", "b", "-compact-after"}},
 		{name: "a dir that is not there", args: []string{"-dir", "/no/such/worktree"}},
 	}
 	for _, tt := range tests {

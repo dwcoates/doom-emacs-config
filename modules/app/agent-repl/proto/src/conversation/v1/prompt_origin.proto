@@ -120,4 +120,12 @@ enum PromptOrigin {
   // bubble's pick tab (frontend.v1.FeedMergeTabPick), and the merge joins the
   // queue once it ends.
   PROMPT_ORIGIN_MERGE_PICK = 33;
+  // The daemon's `/compact` of a requester whose ASYNC merge landed and asked
+  // to compact after it
+  // (agentrepl.v1.MergeWorkspaceSourceOwnBranchDetached.compact_after).
+  // Submitted through the prompt queue right after the landed handback, so it
+  // runs behind the handback's turn. It is a context cut like any `/compact`:
+  // no prompt bubble, and the compaction's status, footer and separator drawn
+  // as for one the user typed.
+  PROMPT_ORIGIN_MERGE_COMPACT_AFTER = 34;
 }

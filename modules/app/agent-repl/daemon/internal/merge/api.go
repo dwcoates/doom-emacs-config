@@ -21,6 +21,7 @@ package merge
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"agent-repld/internal/cpugov"
@@ -234,6 +235,17 @@ type DetachedRun struct {
 	// Pick is the instruction naming which changes of the requester's branch
 	// the merge lands, empty when the whole branch is merged.
 	Pick string
+	// CompactAfter compacts the requester's conversation once the merge
+	// lands (agentrepl.v1.MergeWorkspaceSourceOwnBranchDetached.compact_after).
+	CompactAfter bool
+}
+
+// NewDetachedRun is the async run an ingress reads off a request: the merge
+// workspace's name and the pick instruction with their surrounding space
+// trimmed, and the compact-after ask as given. Every ingress builds its run
+// here, so the rpc and the command file cannot read the same request apart.
+func NewDetachedRun(name, pick string, compactAfter bool) *DetachedRun {
+	return &DetachedRun{Name: strings.TrimSpace(name), Pick: strings.TrimSpace(pick), CompactAfter: compactAfter}
 }
 
 // DetachedMerges forks the merge workspace a detached request runs in, and
@@ -241,14 +253,15 @@ type DetachedRun struct {
 // The merge package never creates a workspace or submits to another
 // workspace's session itself: this seam is the one way it does either.
 type DetachedMerges interface {
-	// Fork answers the merge workspace forked for REQUEST, creating it when
-	// none is registered yet: a fork of the requester's conversation named
-	// NAME (the name the request reserved), its own worktree on BASE as it
-	// stands now — the requester's branch for a whole-branch merge, the
-	// target branch for a pick — landing where the requester would. It is
-	// idempotent per request, so a hand-off a restart cut short finds the
-	// workspace already forked.
-	Fork(ctx context.Context, requester wsm.Workspace, request wsm.DetachedMergeID, name, base string) (wsm.Workspace, error)
+	// Fork answers the merge workspace forked for ORIGIN's request, creating
+	// it when none is registered yet: a fork of the requester's conversation
+	// named NAME (the name the request reserved), its own worktree on BASE as
+	// it stands now — the requester's branch for a whole-branch merge, the
+	// target branch for a pick — landing where the requester would, and
+	// recording ORIGIN (whose Requester is REQUESTER's id) as what it was
+	// forked for. It is idempotent per request, so a hand-off a restart cut
+	// short finds the workspace already forked.
+	Fork(ctx context.Context, requester wsm.Workspace, origin wsm.MergeOrigin, name, base string) (wsm.Workspace, error)
 	// HandBack reports how a detached merge ended to the conversation of the
 	// workspace that asked for it.
 	HandBack(ctx context.Context, requester ids.WorkspaceID, mergeWS wsm.Workspace, outcome DetachedOutcome) error

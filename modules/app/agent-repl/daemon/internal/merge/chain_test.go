@@ -471,10 +471,15 @@ func (d *decisionLog) Info(op, msg string, ctx dlog.Context) {
 
 // chain is one chain test's world.
 type chain struct {
-	h         *harness
-	git       *chainGit
-	runner    *chainRunner
-	idle      chan ids.WorkspaceID
+	h      *harness
+	git    *chainGit
+	runner *chainRunner
+	idle   chan ids.WorkspaceID
+	// kicks latches a kick of the queue, which pumps nothing in the harness
+	// (kick is a no-op without o.async): drain wakes on it as production's
+	// pump is woken. One pending kick is all a wake needs, so a kick that
+	// finds one pending is dropped rather than blocking the orchestrator.
+	kicks     chan wsm.RepoKey
 	decisions chan dlog.Context
 	dirs      map[ids.WorkspaceID]string
 	branches  map[ids.WorkspaceID]string
@@ -497,7 +502,7 @@ func newChainOfWidth(t *testing.T, width int) *chain {
 	h.emacsRepo()
 	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
 	c := &chain{h: h, git: newChainGit(h.git), runner: newChainRunner(),
-		idle: make(chan ids.WorkspaceID, 1024), decisions: make(chan dlog.Context, 1024),
+		idle: make(chan ids.WorkspaceID, 1024), kicks: make(chan wsm.RepoKey, 1), decisions: make(chan dlog.Context, 1024),
 		dirs: map[ids.WorkspaceID]string{theWorkspace: h.sourceD}, branches: map[ids.WorkspaceID]string{theWorkspace: "feature"}}
 	cfg := cpugov.DefaultConfig()
 	if width > 0 {
@@ -522,6 +527,12 @@ func (c *chain) wire(o *orchestrator) {
 	o.deps.TestRunner = c.runner
 	o.deps.Governor = c.h.governor
 	o.onChainIdle = func(ws ids.WorkspaceID) { c.idle <- ws }
+	o.onKick = func(repo wsm.RepoKey) {
+		select {
+		case c.kicks <- repo:
+		default:
+		}
+	}
 }
 
 // queue puts another workspace's merge in line, its branch carrying patches.
@@ -595,7 +606,12 @@ func (c *chain) promote(t *testing.T) {
 // very admission. A pass that changes nothing therefore waits for a run to
 // go idle -- the started merge, admitted and waiting to be promoted -- before
 // pumping again, instead of spinning past the start (the "outlived its test"
-// flake under load: the start's goroutine had not been scheduled yet).
+// flake under load: the start's goroutine had not been scheduled yet). It also
+// wakes on every kick, the edge that pumps production's queue: a pass that
+// found a waiting member still in its background rebase (rebasewaiting.go)
+// skipped it, and only that rebase's settling kick says it may be admitted
+// now (2026-10-13: ws-d stood queued until the drain's bound, its settling
+// kick lost).
 func (c *chain) drain(t *testing.T) {
 	t.Helper()
 	bound := time.NewTimer(10 * time.Second)
@@ -618,6 +634,7 @@ func (c *chain) drain(t *testing.T) {
 		}
 		select {
 		case <-c.idle:
+		case <-c.kicks:
 		case <-bound.C:
 			t.Fatalf("the queue never drained: %v still in line", after)
 		}

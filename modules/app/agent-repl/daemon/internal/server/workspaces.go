@@ -669,7 +669,7 @@ func (s *server) MergeWorkspace(
 	}
 	var detached *merge.DetachedRun
 	if run := req.Msg.GetSource().GetOwnBranch().GetDetached(); run != nil {
-		detached = &merge.DetachedRun{Name: strings.TrimSpace(run.GetName()), Pick: strings.TrimSpace(run.GetPick().GetInstruction())}
+		detached = merge.NewDetachedRun(run.GetName(), run.GetPick().GetInstruction(), run.GetCompactAfter())
 	}
 	if err := s.deps.Merge.Enqueue(ctx, merge.Request{Workspace: subject.Record.ID, Source: source, By: merge.RequestedByUser, Detached: detached}); err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))

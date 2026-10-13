@@ -1114,6 +1114,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Prompts:    handler,
 		Feed:       feedResolver,
 		Briefs:     merge.BriefsFrom(paths.PromptsDir),
+		MintKey:    prompthandler.MintKey,
 		Log:        p.Surfaces,
 		Now:        time.Now,
 		// THE REAPER'S OWN LOCK: a requester is retired only while the

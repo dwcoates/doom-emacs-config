@@ -85,9 +85,11 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) error {
 		source.Detach = wsm.NewDetachedMergeID()
 		source.DetachName = req.Detached.Name
 		source.Pick = req.Detached.Pick
+		source.CompactAfter = req.Detached.CompactAfter
 		fields["detach"] = string(source.Detach)
 		fields["name"] = source.DetachName
 		fields["pick"] = source.Pick != ""
+		fields["compact_after"] = source.CompactAfter
 	}
 	if source.Branch != "" {
 		fields["branch"] = source.Branch
@@ -409,7 +411,7 @@ func (o *orchestrator) requestOf(ctx context.Context, repo wsm.RepoKey, ws ids.W
 func (o *orchestrator) handOffDetached(ctx context.Context, requester ids.WorkspaceID, repo wsm.RepoKey, source wsm.MergeSource) error {
 	const op = "daemon.merge.detached"
 	log := o.log(ctx, requester)
-	fields := dlog.Context{"workspace": string(requester), "repo": string(repo), "detach": string(source.Detach), "branch": source.Branch, "name": source.DetachName, "pick": source.Pick != ""}
+	fields := dlog.Context{"workspace": string(requester), "repo": string(repo), "detach": string(source.Detach), "branch": source.Branch, "name": source.DetachName, "pick": source.Pick != "", "compact_after": source.CompactAfter}
 	record, err := o.deps.DB.Workspace(ctx, requester)
 	if err != nil {
 		log.Error(op, "could not read the workspace a detached merge was asked for", withField(fields, "error", err.Error()))
@@ -423,7 +425,8 @@ func (o *orchestrator) handOffDetached(ctx context.Context, requester ids.Worksp
 		}
 	}
 	fields["base"] = base
-	forked, err := o.deps.Detached.Fork(ctx, record, source.Detach, source.DetachName, base)
+	origin := wsm.MergeOrigin{Requester: requester, Request: source.Detach, CompactAfter: source.CompactAfter}
+	forked, err := o.deps.Detached.Fork(ctx, record, origin, source.DetachName, base)
 	if err != nil {
 		log.Error(op, "could not fork the merge workspace for a detached merge; the request is dropped and the requester told", withField(fields, "error", err.Error()))
 		return o.dropDetached(ctx, requester, repo, source, fmt.Sprintf("the merge workspace could not be created: %v", err))

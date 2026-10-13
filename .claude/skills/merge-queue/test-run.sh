@@ -158,6 +158,18 @@ test_enqueue_own_async_pick_carries_the_instruction() {
   expect_args "--enqueue-own --async --pick carries the pick instruction" "merge-queue -own -async -name reconnect-fix -pick the reconnect fix"
 }
 
+test_enqueue_own_async_compact_after_asks_for_the_compaction() {
+  mkfixture
+  invoke --enqueue-own --async reconnect-fix --compact-after
+  expect_args "--enqueue-own --async --compact-after asks for the compaction" "merge-queue -own -async -name reconnect-fix -compact-after"
+}
+
+test_enqueue_own_async_pick_compact_after_carries_both() {
+  mkfixture
+  invoke --enqueue-own --async reconnect-fix --compact-after --pick "the reconnect fix"
+  expect_args "--enqueue-own --async --compact-after --pick carries both" "merge-queue -own -async -name reconnect-fix -compact-after -pick the reconnect fix"
+}
+
 # expect_refused NAME ARGS... — the run exits 2 and requests nothing.
 expect_refused() {
   local name="$1"
@@ -178,6 +190,21 @@ test_enqueue_own_refuses_malformed_forms() {
   expect_refused "--enqueue-own --pick refuses more than one instruction" --enqueue-own --async n --pick a b
   expect_refused "--enqueue-own --keep-open refuses anything after it" --enqueue-own --keep-open --async n
   expect_refused "--enqueue-own --sync refuses anything after it" --enqueue-own --sync --keep-open
+}
+
+test_compact_after_is_refused_on_every_form_but_async() {
+  expect_refused "--compact-after is refused on a plain own merge" --enqueue-own --compact-after
+  expect_refused "--compact-after is refused in place" --enqueue-own --in-place --compact-after
+  expect_refused "--compact-after is refused sync" --enqueue-own --sync --compact-after
+  expect_refused "--compact-after is refused kept open" --enqueue-own --keep-open --compact-after
+  expect_refused "--compact-after is refused as the async name" --enqueue-own --async --compact-after
+  expect_refused "--compact-after is refused given twice" --enqueue-own --async n --compact-after --compact-after
+  expect_refused "--compact-after is refused on a one-shot" --announce-one-shot --compact-after
+  expect_refused "--compact-after is refused on another workspace" --land-workspace /tmp --compact-after
+  expect_refused "--compact-after is refused on a branch" --land-branch b --compact-after
+  expect_refused "--compact-after is refused on commits" --land-commits c1 --compact-after
+  expect_refused "--compact-after is refused on pr-merged" --pr-merged --compact-after
+  expect_refused "--compact-after is refused on a queue control" --dequeue-own --compact-after
 }
 
 test_enqueue_own_refuses_an_unknown_option() {
@@ -714,6 +741,9 @@ test_enqueue_own_sync_is_in_place
 test_enqueue_own_async_names_its_merge_workspace
 test_enqueue_own_async_pick_carries_the_instruction
 test_enqueue_own_refuses_malformed_forms
+test_enqueue_own_async_compact_after_asks_for_the_compaction
+test_enqueue_own_async_pick_compact_after_carries_both
+test_compact_after_is_refused_on_every_form_but_async
 test_land_workspace_requests_without_waiting
 test_land_workspace_refuses_its_own
 test_land_branch_requests_the_branch
