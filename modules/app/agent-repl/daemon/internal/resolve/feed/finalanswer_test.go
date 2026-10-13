@@ -1001,3 +1001,48 @@ func TestAStallThatRecursOnTheSameFoldIsRaisedAgain(t *testing.T) {
 		t.Fatalf("faults opened = %d, want one per stall", got)
 	}
 }
+
+// TestAnUnresolvedAnswerRecordNamesItsPlaneAndWhetherTheRowWasDrawn pins the
+// diagnosis the ERROR record carries: which plane delivered the terminal, and
+// whether the named answer ever drew a row.
+func TestAnUnresolvedAnswerRecordNamesItsPlaneAndWhetherTheRowWasDrawn(t *testing.T) {
+	tests := []struct {
+		name      string
+		arrive    func(h *harness)
+		wantPlane string
+	}{
+		{
+			name: "a live terminal naming a unit no row drew",
+			arrive: func(h *harness) {
+				h.deliverPrompt("turn-1", "do the thing")
+				turn := ids.TurnID("turn-1")
+				h.resolver.OnAgentTerminal(testWorkspace, mainAgent(), &turn, completedWith("unit-never-drawn"), nil, nil)
+			},
+			wantPlane: "live",
+		},
+		{
+			name:      "a replayed terminal naming a unit the page never drew",
+			arrive:    func(h *harness) { h.replay(adoptedHistory()) },
+			wantPlane: "history",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			tt.arrive(h)
+
+			// Assert.
+			records := h.recordsAt("error", "daemon.feed.final_answer_unresolved")
+			if len(records) != 1 {
+				t.Fatalf("unresolved ERROR records = %d, want exactly one", len(records))
+			}
+			ctx := records[0].Context
+			if ctx["plane"] != tt.wantPlane || ctx["answer_row_known"] != false {
+				t.Fatalf("record context = %v, want plane %q and answer_row_known false", ctx, tt.wantPlane)
+			}
+		})
+	}
+}
