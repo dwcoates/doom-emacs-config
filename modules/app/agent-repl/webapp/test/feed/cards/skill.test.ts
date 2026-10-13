@@ -19,6 +19,7 @@ import {
 } from "../../../src/feed/bubble-more.js";
 import { fireResize } from "../../resize-observer.js";
 import { measureTitle } from "../title-measure.js";
+import { runningClock, stoppedClock, toolCardHeadParts } from "./tool-card-head-shape.js";
 
 /**
  * The oneof as an INIT shape rather than a built message: the fixtures below
@@ -407,5 +408,32 @@ describe("drawFeedSkill: the title fold", () => {
     } finally {
       remove();
     }
+  });
+});
+
+describe("the head's clock", () => {
+  it("heads a loading skill with a clock counting up from its invocation", () => {
+    // Arrange
+    vi.setSystemTime(7_000);
+    const u = skill({ case: "running", value: {} });
+    u.clock = runningClock(0);
+
+    // Act
+    const el = drawFeedSkill(u, rc());
+
+    // Assert
+    expect(toolCardHeadParts(el)).toEqual([`title:${SKILL_TITLE}`, "badge:loading", "clock:7s"]);
+  });
+
+  it("heads a loaded skill with the span its load took", () => {
+    // Arrange
+    const u = skill(loaded("# heading"));
+    u.clock = stoppedClock(1_000, 3_000);
+
+    // Act
+    const el = drawFeedSkill(u, rc());
+
+    // Assert
+    expect(toolCardHeadParts(el)).toEqual([`title:${SKILL_TITLE}`, "badge:loaded", "clock:2s"]);
   });
 });

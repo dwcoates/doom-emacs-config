@@ -140,7 +140,11 @@ it(
     // A deny's reason is typed in the editor: the card says so, and has no field.
     expect(card.querySelector("[data-permission-reason]")).toBeNull();
     expect(card.querySelector("[data-ask-hint]")).not.toBeNull();
-    expect(card.querySelector(".perm-waiting")).not.toBeNull();
+    // Waiting: the head's badge says so, and its clock counts the wait.
+    expect([card.querySelector(".tool-head .badge")?.textContent, card.querySelector(".tool-head .tool-clock")]).toEqual([
+      "waiting",
+      expect.anything(),
+    ]);
   },
   TURN_TEST_MS,
 );

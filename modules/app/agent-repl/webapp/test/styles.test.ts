@@ -4389,7 +4389,6 @@ describe("the ask cards' square controls", () => {
     ["a merge tab", "merge-tabs", "merge-tab"],
     ["a question option", "q-opts", "q-opt"],
     ["a question verdict's header chip", "q-verdict", "badge q-chip"],
-    ["a permission verdict's badge", "perm-verdict", "badge ok"],
   ])("rounds %s by the one tab corner", (_name, parentClass, childClass) => {
     // Arrange
     const teardown = installStylesheet();
@@ -4403,7 +4402,6 @@ describe("the ask cards' square controls", () => {
   it.each([
     ["the given answers", "tool-card", "q-verdicts"],
     ["a question verdict's header chip", "q-verdict", "badge q-chip"],
-    ["a permission verdict's badge", "perm-verdict", "badge err"],
   ])("sizes %s by the one settled-answer size", (_name, parentClass, childClass) => {
     // Arrange
     const teardown = installStylesheet();

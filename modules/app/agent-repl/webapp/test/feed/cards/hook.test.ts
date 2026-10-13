@@ -30,6 +30,7 @@ import { fireResize } from "../../resize-observer.js";
 import { cascadedValue, installStylesheet } from "../../stylesheet.js";
 import { measureTitle } from "../title-measure.js";
 import { orderFor } from "../../feed-order.js";
+import { stoppedClock, toolCardHeadParts } from "./tool-card-head-shape.js";
 
 const SINK: FailureSink = { report: () => {}, retract: () => {} };
 
@@ -272,7 +273,8 @@ describe("the title fold on the headline", () => {
     const { title } = drawn(outcome);
 
     // Assert
-    expect([...title.classList]).toEqual(["tool-name", TITLE_FOLD_CLASS, TITLE_FOLD_STANDALONE_CLASS]);
+    // The head builder, not the hook, puts the title class on.
+    expect([...title.classList].sort()).toEqual(["tool-name", TITLE_FOLD_CLASS, TITLE_FOLD_STANDALONE_CLASS].sort());
   });
 
   it("wears has-more when the headline overflows its one line", () => {
@@ -353,5 +355,38 @@ describe("the title fold on the headline", () => {
     } finally {
       remove();
     }
+  });
+});
+
+describe("the head", () => {
+  it("heads a blocked hook with its headline and its badge, and no clock it has no instants for", () => {
+    // Arrange / Act
+    const el = drawFeedHook(hook(blocked("master is protected")), harness().rc);
+
+    // Assert
+    expect(toolCardHeadParts(el)).toEqual([`title:${HEADLINE}`, "badge:blocked"]);
+  });
+
+  it("heads a failed hook with its headline, its badge and the span it ran", () => {
+    // Arrange
+    const u = hook(failed(1, "boom"));
+    u.clock = stoppedClock(1_000, 5_200);
+
+    // Act
+    const el = drawFeedHook(u, harness().rc);
+
+    // Assert
+    expect(toolCardHeadParts(el)).toEqual([`title:${HEADLINE}`, "badge:failed", "clock:4s"]);
+  });
+
+  it("draws the exit chip as content, never in the head", () => {
+    // Arrange / Act
+    const el = drawFeedHook(hook(failed(1, "boom")), harness().rc);
+
+    // Assert
+    expect([el.querySelector(".tool-head .hook-exit"), el.querySelector(".tool-exit-line > .hook-exit")?.textContent]).toEqual([
+      null,
+      "exit 1",
+    ]);
   });
 });
