@@ -794,7 +794,17 @@ func wlDriveAreaWorld(t *testing.T, vitestFile string, expectWarnings ...string)
 	// no SubmitPrompt reaching the daemon at all. The hold therefore runs on
 	// the bound of the thing it is held for, and is DRAINED so the harness's
 	// own pump cannot wedge on a buffer nobody reads.
-	holdCtx, releaseHold := context.WithTimeout(context.Background(), WebappLayerTimeout)
+	//
+	// AND IT IS RELEASED BY ITS HOLDER, NEVER BY A CLOCK OF ITS OWN. The file
+	// waits for the shared vitest server (wlServer.Run takes one file at a
+	// time) BEFORE its own WebappLayerTimeout starts, so a hold timed from
+	// here expired while the file was still queued: run 2 of the
+	// held-prompt-merge-flush gate (2026-10-13) dropped `host_stream` 45.004s
+	// after this line, the instant roster.layer.test.ts began, and the page's
+	// footer drew `severed` and closed the composer for both tray scenarios.
+	// The child's run is what is bounded (wlServer.Run's deadline); the hold
+	// lives exactly as long as this area does.
+	holdCtx, releaseHold := context.WithCancel(context.Background())
 	defer releaseHold()
 	host := w.Daemon.WatchHostFor(holdCtx, ws)
 	host.Drain()
