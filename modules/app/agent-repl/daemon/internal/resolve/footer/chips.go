@@ -562,10 +562,10 @@ func (r *resolver) blockFor(failure *conversationv1.AgentFailure) *blockedState 
 
 // apiBlockKind maps the vendor's own error taxonomy onto the blocked step.
 func apiBlockKind(failed *conversationv1.ApiRequestFailed) blockedKind {
-	switch failed.GetKind().(type) {
-	case *conversationv1.ApiRequestFailed_AuthenticationFailed,
-		*conversationv1.ApiRequestFailed_OauthOrgNotAllowed:
+	if ladder.ApiFailureCuredBySignIn(failed) {
 		return blockedAuth
+	}
+	switch failed.GetKind().(type) {
 	case *conversationv1.ApiRequestFailed_RateLimited:
 		return blockedUsageLimit
 	case *conversationv1.ApiRequestFailed_BillingError:

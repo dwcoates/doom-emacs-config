@@ -61,6 +61,12 @@ type wsState struct {
 	// rolledBack is the turns rolled back (rollback.go): no row of one is
 	// drawn.
 	rolledBack map[ids.TurnID]bool
+	// signedIn is the turns whose account failure a completed sign-in
+	// answered (signin.go): no failure row of one is drawn.
+	signedIn map[ids.TurnID]bool
+	// signInTurns is the turns whose ending offers the sign-in action, so
+	// every broken bubble of one carries the action too (signin.go).
+	signInTurns map[ids.TurnID]bool
 	// promptSaid is each delivered prompt as said, by the turn it opened, so a
 	// rollback can hand it back to the composer (rollback.go).
 	promptSaid map[ids.TurnID]*conversationv1.UserSaid
@@ -675,6 +681,7 @@ func (r *resolver) state(ws ids.WorkspaceID) *wsState {
 	r.workspaces[ws] = s
 	r.restoreDurable(s)
 	r.restoreRolledBack(s)
+	r.restoreSignedIn(s)
 	return s
 }
 
@@ -724,6 +731,8 @@ func newWSState(ws ids.WorkspaceID) *wsState {
 		answerRows:           map[string]*frontendv1.FeedId{},
 		finalAnswerSeen:      map[string]bool{},
 		rolledBack:           map[ids.TurnID]bool{},
+		signedIn:             map[ids.TurnID]bool{},
+		signInTurns:          map[ids.TurnID]bool{},
 		promptSaid:           map[ids.TurnID]*conversationv1.UserSaid{},
 		turnAddresses:        map[ids.TurnID]*sessionwatcher.OutputAddress{},
 		turnMirrors:          map[ids.TurnID]*wsm.MirrorAddress{},
@@ -986,7 +995,7 @@ func (r *resolver) outputPlacement(s *wsState, turn *ids.TurnID) placement {
 // feed its placement names; nothing copies it onto another.
 func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, durable bool) {
 	f := r.feed(s, at.feed)
-	if r.rolledBackRow(s, f, row) {
+	if r.rolledBackRow(s, f, row) || r.signedInRow(s, f, row) {
 		return
 	}
 	id := row.GetId().GetValue()

@@ -622,6 +622,7 @@ func (r *resolver) SetTurnEnded(ws ids.WorkspaceID, how TurnClose) {
 			s.retrying = ""
 			s.turnEverRan = true
 			s.lastClose = how
+			s.endAnswered = false
 			s.compacting = false
 			s.settleResult()
 			// A COMPLETED, INTERRUPTED or FAILED turn leaves a result the
@@ -821,6 +822,7 @@ func (r *resolver) OnAgentTerminal(ws ids.WorkspaceID, agent *conversationv1.Age
 				return
 			}
 			s.lastFailure = class
+			s.lastFailureSignInCures = ladder.FailureCuredBySignIn(failure)
 			if class == ladder.VendorBlocked {
 				s.vendorBlocked = true
 			}
@@ -953,4 +955,27 @@ func (r *resolver) holdsNetworkFault(ws ids.WorkspaceID, id string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.state.workspace(ws).networkFaults[id]
+}
+
+// OnSignedIn takes a completed sign-in for the workspace's account root. When
+// the last turn failed on an account cause a sign-in cures, that failure is
+// answered: its fault and its block lift, its unread result is retired, and
+// the row draws `ready` until the next turn. Any other last turn is left
+// exactly as it stands.
+func (r *resolver) OnSignedIn(ws ids.WorkspaceID) {
+	r.mutateWorkspaceLogged(ws, "daemon.sidebar.on_signed_in", "the roster took a completed sign-in",
+		nil, func(s *wsState, log dlog.Logger) {
+			if !s.lastFailureSignInCures {
+				log.Debug("daemon.sidebar.signed_in", "a sign-in completed and the last turn did not fail on an account cause; the row is unchanged", nil)
+				return
+			}
+			s.lastFailure = ladder.NoFailure
+			s.lastFailureSignInCures = false
+			s.turnFault = ladder.NoTurnFault
+			s.vendorBlocked = false
+			s.result = resultNone
+			s.endAnswered = true
+			s.settleResult()
+			log.Info("daemon.sidebar.signed_in", "a completed sign-in answered the last turn's account failure; the row draws ready", nil)
+		})
 }

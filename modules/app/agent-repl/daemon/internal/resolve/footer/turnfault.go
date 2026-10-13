@@ -38,6 +38,9 @@ type pendingEnding struct {
 	words turnfault.Words
 	// retryAt is when the vendor's stated wait ends, nil when it stated none.
 	retryAt *time.Time
+	// signInCures reports an account cause signing in again cures
+	// (ladder.FailureCuredBySignIn).
+	signInCures bool
 }
 
 // turnFaultState is the standing turn fault.
@@ -50,6 +53,8 @@ type turnFaultState struct {
 	retryAt *time.Time
 	// at is when the fault was raised.
 	at time.Time
+	// signInCures reports a fault a completed sign-in lifts (OnSignedIn).
+	signInCures bool
 }
 
 // recordFailedEnding records how the turn in flight failed, from its own
@@ -57,8 +62,9 @@ type turnFaultState struct {
 // class all the same, so the close reads it as one.
 func (r *resolver) recordFailedEnding(s *wsState, failure *conversationv1.AgentFailure, refused bool) {
 	ending := &pendingEnding{
-		class: ladder.ClassifyFailure(failure),
-		words: turnfault.OfAgentFailure(failure, refused),
+		class:       ladder.ClassifyFailure(failure),
+		words:       turnfault.OfAgentFailure(failure, refused),
+		signInCures: ladder.FailureCuredBySignIn(failure),
 	}
 	if wait, ok := turnfault.RetryAfter(failure); ok {
 		at := r.opts.clock.Now().Add(wait)
@@ -116,6 +122,7 @@ func (r *resolver) SetTurnEnded(ws ids.WorkspaceID, how wsm.TurnClose) {
 			case ending != nil && class != ladder.NoFailure && how != wsm.CloseAgentDied:
 				raised.words = ending.words
 				raised.retryAt = ending.retryAt
+				raised.signInCures = ending.signInCures
 			default:
 				// NO TERMINAL EXPLAINED THE CLOSE, or the agent process died
 				// under the turn: the close is all there is to tell it by.
@@ -161,4 +168,27 @@ func (s *wsState) turnEndedLine() *frontendv1.FooterStatusActivityTurnEnded {
 		line.RetryAt = stamp(*s.turnFault.retryAt)
 	}
 	return line
+}
+
+// OnSignedIn takes a completed sign-in for the workspace's account root: the
+// account failure it answers stops standing on the strip. A turn fault whose
+// cause a sign-in cures, and a standing `auth` block, are lifted, so the
+// status returns to whatever the rest of the workspace resolves to — `idle`
+// for a session that is simply waiting. Every other fault stands.
+func (r *resolver) OnSignedIn(ws ids.WorkspaceID) {
+	r.mutate(ws, "daemon.footer.on_signed_in", "the footer took a completed sign-in",
+		nil, func(s *wsState) {
+			log := r.logOf(ws, s)
+			fields := dlog.Context{
+				"turn_fault_lifted": s.turnFault != nil && s.turnFault.signInCures,
+				"auth_block_lifted": s.blocked != nil && s.blocked.kind == blockedAuth,
+			}
+			if s.turnFault != nil && s.turnFault.signInCures {
+				s.turnFault = nil
+			}
+			if s.blocked != nil && s.blocked.kind == blockedAuth {
+				s.blocked = nil
+			}
+			log.Info("daemon.footer.signed_in", "a completed sign-in lifted the account failure it answers", fields)
+		})
 }

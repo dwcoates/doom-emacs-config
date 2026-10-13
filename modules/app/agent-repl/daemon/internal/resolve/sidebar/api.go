@@ -168,6 +168,10 @@ type Resolver interface {
 	// `done`, `interrupted` and `turn_failed` apart. No agent terminal states it: a user interrupt
 	// is a DAEMON fact, so the roster is told directly.
 	SetTurnEnded(ws ids.WorkspaceID, how TurnClose)
+	// OnSignedIn takes a completed sign-in for the workspace's account root:
+	// a last turn that failed on an account cause a sign-in cures is answered,
+	// and the row draws `ready` until the next turn.
+	OnSignedIn(ws ids.WorkspaceID)
 	// SetTurnClosedAt installs the instant one of the workspace's turns
 	// closed, which the when-column counts from. The prompt queue's turn-close
 	// door tells it on EVERY close — completed, interrupted, failed, orphaned

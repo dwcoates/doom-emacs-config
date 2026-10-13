@@ -1,8 +1,6 @@
 package feed
 
 import (
-	"sort"
-
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
@@ -59,14 +57,8 @@ func (r *resolver) OnPeerMessageRetired(ws ids.WorkspaceID, peer *conversationv1
 // never drew (a directive's suppressed prompt, one placed nowhere, one on a
 // feed this resolver never opened) is an ordinary outcome, not a fault.
 func (r *resolver) retireEntryRows(s *wsState, kind, key string, keys ...feedid.RowKey) {
-	feeds := make([]string, 0, len(s.feeds))
-	for feed := range s.feeds {
-		feeds = append(feeds, feed)
-	}
-	// Sorted, so the removals publish in the same order on every run.
-	sort.Strings(feeds)
 	removed := 0
-	for _, feed := range feeds {
+	for _, feed := range sortedFeedKeys(s) {
 		addr := s.feedAddrs[feed]
 		for _, rowKey := range keys {
 			id := r.rowID(s.id, addr, rowKey).GetValue()

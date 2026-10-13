@@ -120,3 +120,28 @@ func RateLimitBlocks(status *conversationv1.SessionRateLimitStatus) bool {
 	_, rejected := status.GetStatus().(*conversationv1.SessionRateLimitStatus_Rejected)
 	return rejected
 }
+
+// ApiFailureCuredBySignIn reports whether a failed api request names an
+// ACCOUNT CAUSE that signing in again cures: the credential rejected, or the
+// organization the account may not use. It is the one definition every
+// surface that offers or answers a sign-in reads — the feed's sign-in action,
+// the footer's `auth` step, and the lift a completed sign-in makes on the
+// feed, the footer and the roster — so no two can disagree about which
+// failures a sign-in answers.
+func ApiFailureCuredBySignIn(failed *conversationv1.ApiRequestFailed) bool {
+	switch failed.GetKind().(type) {
+	case *conversationv1.ApiRequestFailed_AuthenticationFailed,
+		*conversationv1.ApiRequestFailed_OauthOrgNotAllowed:
+		return true
+	default:
+		return false
+	}
+}
+
+// FailureCuredBySignIn reports whether a turn-ending failure is a failed api
+// request ApiFailureCuredBySignIn says a sign-in cures. Every other failure,
+// and none, is not.
+func FailureCuredBySignIn(failure *conversationv1.AgentFailure) bool {
+	api, ok := failure.GetFailure().(*conversationv1.AgentFailure_ApiRequestFailed)
+	return ok && ApiFailureCuredBySignIn(api.ApiRequestFailed)
+}

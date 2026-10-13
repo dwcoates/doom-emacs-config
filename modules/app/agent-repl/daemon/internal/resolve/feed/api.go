@@ -307,6 +307,12 @@ type Resolver interface {
 	// removal always happens; an error says only that recording it durably
 	// failed, already logged and raised.
 	RollBackTurns(ws ids.WorkspaceID, turns []ids.TurnID) error
+	// OnSignedIn takes a completed sign-in for the workspace's account root
+	// (signin.go): the failure rows of every drawn turn whose ending offers
+	// the sign-in action leave the feed for good. The removal always happens;
+	// an error says only that recording it durably failed, already logged and
+	// raised.
+	OnSignedIn(ws ids.WorkspaceID) error
 	// LiveDetachedIn answers how many detached subagents and shells drawn in
 	// the turns are still live: what a files-restoring rollback stops.
 	LiveDetachedIn(ws ids.WorkspaceID, turns []ids.TurnID) int
@@ -480,6 +486,10 @@ type Deps struct {
 	// records and loads nothing, which is what a test that is not about
 	// surviving a restart wants.
 	RolledBack RolledBackTurnStore
+	// SignedIn is the durable record of turns whose account failure a sign-in
+	// answered (wsm.DB). nil records and loads nothing, which is what a test
+	// that is not about surviving a restart wants.
+	SignedIn SignedInTurnStore
 	// History reads the store pages a reader's request needs (book.go). nil
 	// pages nothing: every feed serves exactly what it holds, which is what a
 	// test that is not about loading history wants. Production always wires

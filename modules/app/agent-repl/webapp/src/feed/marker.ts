@@ -39,7 +39,7 @@ import {
 import { submitPromptRefusal } from "../composer/composer.js";
 import { formatDurationCeil } from "../duration.js";
 import { log } from "../log.js";
-import { requestLogin } from "../login/request.js";
+import { drawSignInAction } from "../login/request.js";
 import { callUnary } from "../rpc/unary.js";
 import { isMalformedView } from "../rpc/malformed.js";
 import { callFailure, clearRefusals, refusal } from "../rpc/refuse.js";
@@ -219,7 +219,7 @@ function drawVendorExpansion(x: FeedOutcomeVendorFaultExpansion, mc: MarkerConte
   if (x.account !== undefined) box.append(line("account", "account", x.account.email));
   const actions = document.createElement("div");
   actions.className = "outcome-marker-actions";
-  if (x.signIn !== undefined) actions.append(signInAction());
+  if (x.signIn !== undefined) actions.append(drawSignInAction("outcome-marker-action", "feed.outcome-marker-sign-in"));
   if (x.resend !== undefined) actions.append(resendAction(x.resend, mc, `${path}.resend`));
   if (actions.childElementCount > 0) box.append(actions);
   return box;
@@ -277,20 +277,6 @@ function drawRetryCountdown(atMs: number, mc: MarkerContext): HTMLElement {
     stopTicking(el);
   });
   return el;
-}
-
-/** The sign-in action: the page's login flow, as the account cell opens it. */
-function signInAction(): HTMLElement {
-  const button = createControl();
-  button.className = "outcome-marker-action";
-  button.setAttribute("data-action", "sign-in");
-  button.textContent = "sign in";
-  button.addEventListener("click", (event) => {
-    event.preventDefault();
-    log.info("the reader asked to sign in from an outcome marker", { operation: "feed.outcome-marker-sign-in" });
-    requestLogin(button);
-  });
-  return button;
 }
 
 /** The resend action: the prompt as said, through the ordinary submission. */
