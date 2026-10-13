@@ -92,7 +92,7 @@ it(
       textOf(app.$(".footer-status")) !== "",
     );
     await app.ctx.client.clientLog({
-      workspace: app.ctx.workspace,
+      source: { case: "workspace", value: app.ctx.workspace },
       record: {
         level: { case: "info", value: {} },
         operation: MOUNTED_MARKER,

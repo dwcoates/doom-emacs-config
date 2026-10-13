@@ -212,8 +212,8 @@ func TestUnsetClientLogLevelIsInvalidArgument(t *testing.T) {
 	// Act.
 	_, err := h.Client.ClientLog(context.Background(),
 		connect.NewRequest(&agentreplv1.ClientLogRequest{
-			Workspace: ref(),
-			Record:    &agentreplv1.ClientLogRecord{Operation: "webapp.x", Message: "m"},
+			Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: ref()},
+			Record: &agentreplv1.ClientLogRecord{Operation: "webapp.x", Message: "m"},
 		}))
 
 	// Assert.
@@ -750,5 +750,25 @@ func TestUpdateClassifierPromptAcceptsAnExampleWithNoText(t *testing.T) {
 	// Assert.
 	if err != nil {
 		t.Fatalf("UpdateClassifierPrompt = %v, want it accepted", err)
+	}
+}
+
+func TestClientLogWithNoSourceIsInvalidArgument(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	_, err := h.Client.ClientLog(context.Background(),
+		connect.NewRequest(&agentreplv1.ClientLogRequest{
+			Record: &agentreplv1.ClientLogRecord{
+				Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
+				Operation: "webapp.x",
+				Message:   "m",
+			},
+		}))
+
+	// Assert.
+	if code := connectCode(t, err); code != connect.CodeInvalidArgument {
+		t.Fatalf("code = %v, want InvalidArgument", code)
 	}
 }

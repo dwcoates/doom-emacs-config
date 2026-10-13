@@ -54,6 +54,15 @@ const (
 // stamps the same field for the same condition.
 const KeyUnroutableWorkspace = "unroutable_workspace"
 
+// KeyClientSource names, on a forwarded client record filed centrally because
+// it belongs to no workspace, which client wrote it. Its one value today is
+// ClientSourceWebhost.
+const KeyClientSource = "client_source"
+
+// ClientSourceWebhost is KeyClientSource's value for the webhost: the one web
+// view Emacs shows, which draws the sidebar for every workspace.
+const ClientSourceWebhost = "webhost"
+
 // KeyWorkspaceDirHash is an ORDINARY context key, not a reserved one: the
 // workspace directory hash is evidence about the workspace's kernel lock file
 // name, never the workspace's identity. It stays inside `context` so nothing

@@ -34,8 +34,6 @@
 import { installGateDock } from "./feed/gate-dock.js";
 import "./styles.css";
 import { createTicker } from "./clock.js";
-import { installCopyFallback } from "./copy.js";
-import { installSelectionClickGuard } from "./selection.js";
 import { createComposerGate, mountComposer } from "./composer/composer.js";
 import { createRowRenderers } from "./feed/renderers.js";
 import { mountFeed } from "./feed/feed.js";
@@ -51,78 +49,26 @@ import { mountTopbar } from "./topbar/topbar.js";
 import { installProseLinkRouting } from "./link.js";
 import { bootFailed } from "./failure/sink.js";
 import { createLocalFailures, type LocalFailures } from "./failure/local.js";
-import { ForwardingLogger, LEVEL_WINDOW_OPERATION, bindLogContext, log, setLogger, type ClientLogSink } from "./log.js";
+import { LEVEL_WINDOW_OPERATION, bindLogContext, log } from "./log.js";
 import { LevelWindow, selectionContext, selectionNote, selectLevel } from "../../agent-shim/logging/ts/level-window.js";
 import { installPagePresenceLog } from "./page-presence.js";
 import { connectToHost } from "./host/embed.js";
+import { installForwardingLogger, installTextAffordances } from "./document-runtime.js";
+import { mintConnectionId } from "./connection-id.js";
+import { watchShownEdge } from "./host/shown-edge.js";
+import { createWebhostFailureView, mergeFailureViews } from "./failure/webhost.js";
 import { createStreamCostMeter, regionNodes } from "./stream-cost.js";
 import { pagePresence } from "./presence.js";
 import { installPageDrawnReport } from "./page-drawn-report.js";
 import { createPageSeen } from "./page-seen.js";
-import { createAgentReplClient, type AgentReplClient } from "./rpc/client.js";
+import { createAgentReplClient } from "./rpc/client.js";
 import { createAppContext, type AppContext } from "./rpc/context.js";
-import { reportClientFailure } from "./rpc/link.js";
 import { isHostAddress, pageAddress } from "./rpc/page-address.js";
 import { createDaemonTransport } from "./rpc/transport.js";
 import { workspaceRef } from "./rpc/workspace-ref.js";
 import type { SubmitPromptCommandPanel } from "../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
-import type { WorkspaceRef } from "../../proto/gen/ts/workspace/v1/workspace_pb";
 import { shellElements } from "./shell.js";
 import { composerClosedFor } from "./vocab.js";
-
-/**
- * This page's own identity, for correlating its records against the daemon's.
- *
- * A page, not a session: it is minted per load and says nothing about which
- * conversation the workspace owns. `crypto.randomUUID` is the browser's, with
- * a time-plus-entropy fallback for a context that does not expose it (an old
- * webview, a non-secure origin) — an unidentifiable page's logs are worth less
- * than a page that refuses to boot over the identifier.
- */
-function mintConnectionId(): string {
-  const uuid = globalThis.crypto?.randomUUID?.();
-  if (uuid !== undefined) return uuid;
-  return `web-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-/**
- * The logger's sink: one `ClientLog` call per record.
- *
- * DELIBERATELY NOT THROUGH `callUnary`. That helper logs the call it is
- * making, so routing the log sink through it would log every log — and its
- * strict check would refuse a `ClientLogResponse` by throwing into the
- * logger's own failure path. This is the one rpc the app makes without it; the
- * rejection is what `ForwardingLogger` counts.
- */
-export function clientLogSink(
-  getClient: () => AgentReplClient,
-  workspace: WorkspaceRef,
-): ClientLogSink {
-  return async (record) => {
-    let response;
-    try {
-      response = await getClient().clientLog({ workspace, record });
-    } catch (err) {
-      // THE SINK ITSELF IS DOWN. `ForwardingLogger` counts the rejection and
-      // says so on the console exactly once, and nothing else knew (the
-      // audit's N2 row 10) -- so the footer is told, with a FIXED line. The
-      // report logs, that log is forwarded through this same sink, and it
-      // fails again: an identical repeat is dropped by `reportClientFailure`,
-      // which is what makes that loop terminate. The rejection is rethrown
-      // unchanged, because the logger's own count is still its to keep.
-      reportClientFailure("client_log_failed", "ClientLog forwarding failed");
-      throw err;
-    }
-    // `unknown_workspace` is TERMINAL, not a failure: this page's workspace has
-    // been closed or forgotten and the daemon has nowhere to file the record.
-    // The logger reads it as the cue to stop forwarding; every other arm is a
-    // refusal of one record, which leaves forwarding alone.
-    return response.result.case === "error" &&
-      response.result.value.cause.case === "unknownWorkspace"
-      ? "workspace_departed"
-      : "accepted";
-  };
-}
 
 export async function boot(): Promise<void> {
   let failures: LocalFailures | null = null;
@@ -172,14 +118,7 @@ export async function boot(): Promise<void> {
     // A level other than info is a window (proto/vocab/log-level-window.json):
     // a page reloaded from an address whose window has ended boots at info.
     const levelSelection = selectLevel(address.logLevel, address.logLevelUntil, Date.now(), "log_level");
-    setLogger(
-      new ForwardingLogger(
-        clientLogSink(() => client, workspace),
-        undefined,
-        {},
-        new LevelWindow(levelSelection),
-      ),
-    );
+    installForwardingLogger(() => client, { case: "workspace", value: workspace }, new LevelWindow(levelSelection));
     const levelNote = selectionNote(levelSelection);
     if (levelNote !== null) log.info(levelNote, { operation: LEVEL_WINDOW_OPERATION, context: selectionContext(levelSelection) });
 
@@ -193,7 +132,8 @@ export async function boot(): Promise<void> {
 
     // Joined before anything draws, so the host's first word (shown or not)
     // reaches the page before the rail decides what it can skip.
-    connectToHost({ doc: document, win: window, presence: pagePresence() });
+    const webhostFailures = createWebhostFailureView();
+    connectToHost({ doc: document, win: window, presence: pagePresence(), webhostFailures });
 
     // The page's presence — hidden/shown, focused/blurred, resized, and the
     // repaint after each — is recorded from here on (src/page-presence.ts).
@@ -206,16 +146,16 @@ export async function boot(): Promise<void> {
     // once the chip that draws it exists, so a failure the catch files is
     // always one the page can show.
     const localFailures = createLocalFailures();
-    const topbar = mountTopbar(shell.topbar, { failures: localFailures });
+    // The chip lists the webhost's failures too: it has no chip of its own.
+    const topbar = mountTopbar(shell.topbar, { failures: mergeFailureViews(localFailures, webhostFailures) });
     failures = localFailures;
 
     // Copying is a page-wide affordance, not a component's: it is installed
     // once, here, so every surface mounted below is copyable from its first
-    // paint. See src/copy.ts for why the page carries a fallback at all.
-    installCopyFallback(document);
-    // So is selecting: a click that ends a drag-select activates nothing, on
-    // any surface (src/selection.ts).
-    installSelectionClickGuard(document);
+    // paint. See src/copy.ts for why the page carries a fallback at all. So is
+    // selecting: a click that ends a drag-select activates nothing, on any
+    // surface (src/selection.ts).
+    installTextAffordances(document);
 
     const ticker = createTicker();
     const ctx = createAppContext({
@@ -312,9 +252,15 @@ export async function boot(): Promise<void> {
     });
 
     // A SWITCH TO THIS WORKSPACE RETURNS THE FEED TO ITS TAIL (owner ruling,
-    // 2026-10-02), whichever path made it: the rail watches the roster's
-    // `current`, the one fact every switch path ends in.
-    mountSidebar(shell.sidebar, ctx, { workspaceSelected: () => feed.workspaceSelected() });
+    // 2026-10-02), whichever path made it. IN THE WEBHOST the sidebar is the
+    // webhost's, drawn once for every page, and the webhost showing this page
+    // is the switch; a page on its own draws its own sidebar, which watches the
+    // roster's `current`, the one fact every switch path ends in.
+    if (pagePresence().embedded) {
+      watchShownEdge(pagePresence(), () => feed.workspaceSelected());
+    } else {
+      mountSidebar(shell.sidebar, ctx, { workspaceSelected: () => feed.workspaceSelected() });
+    }
 
     // A STANDING GATE DOCKS AT THE BOTTOM EDGE while Emacs hides the input
     // window over it; both read the daemon's one cold-gate standing.

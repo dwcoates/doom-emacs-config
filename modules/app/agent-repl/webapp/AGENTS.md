@@ -55,6 +55,26 @@ test/integration/         the whole app under jsdom against a fake daemon
    lifecycle (just before it), because the lifecycle's `WatchDaemon` stream is
    what carries its `news_digest` standing.
 
+   A page IN THE WEBHOST mounts no sidebar: the webhost draws the one sidebar
+   over every page (src/host/sidebar.ts), the page keeps its sidebar column
+   empty while it is docked (`html.webhost-sidebar`), and the feed returns to
+   its tail when the webhost shows the page (src/host/shown-edge.ts). A page on
+   its own (dev mode, the suites) still mounts its own sidebar.
+
+## The webhost draws the sidebar
+
+The webhost (src/host/, the webapp at `?host=1`, the one web view Emacs shows)
+holds every workspace page as an iframe and draws the sidebar ONCE, over them.
+It has its own daemon connection on its own origin, registers its own page
+stream (`WatchPage`, no workspace), logs as `ClientLogRequest.source.webhost`
+(filed in the daemon's central log), and relays its failures to every page's
+warning chip (`webhostFailures`), the webapp's one error surface. Its sidebar
+ends above the gate band of the page on screen (`gateBand`). A page that moves
+to another daemon moves the webhost with it (lisp/webhost.el
+`agent-repl-webhost-reload-page`). Why: one copy of the sidebar cannot be stale
+on a switch, and it was 91% of every page's elements and drawn in every page
+(docs/investigations/2026-10-13-page-cost-by-component.md).
+
 ## The seams
 
 - **`RowRenderers` (src/feed/renderers.ts).** The feed mechanism and the cards

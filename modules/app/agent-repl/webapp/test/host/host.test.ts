@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   FRAME_SHOWN_ATTRIBUTE,
   FRAME_WORKSPACE_ATTRIBUTE,
+  SIDEBAR_BOTTOM_PROPERTY,
   createHost,
   hostHasFocus,
   type Host,
@@ -42,6 +43,11 @@ function postsTo(id: string): HostToPage[] {
     posted.push(message as HostToPage);
   });
   return posted;
+}
+
+/** Ensure pages for IDS on H. */
+function pages(h: Host, ...ids: string[]): void {
+  for (const id of ids) h.ensure(id, `http://ws-${id}.localhost:1/`);
 }
 
 /** Deliver DATA to the host as though ID's page posted it. */
@@ -265,6 +271,8 @@ describe("hello", () => {
     // Assert
     expect(posted).toEqual([
       { channel: HOST_CHANNEL, kind: "presence", shown: true, warm: true },
+      { channel: HOST_CHANNEL, kind: "sidebarDock", docked: false },
+      { channel: HOST_CHANNEL, kind: "webhostFailures", failures: [] },
       { channel: HOST_CHANNEL, kind: "inputBackground", background: "#202020" },
       { channel: HOST_CHANNEL, kind: "gateDock", pixels: 90, background: "#202020" },
     ]);
@@ -452,11 +460,6 @@ describe("warmth", () => {
     };
   }
 
-  /** Ensure pages for IDS. */
-  function pages(h: Host, ...ids: string[]): void {
-    for (const id of ids) h.ensure(id, `http://ws-${id}.localhost:1/`);
-  }
-
   /** The last presence the host posted to ID's page. */
   function lastPresence(posted: HostToPage[]): HostToPage | undefined {
     return [...posted].reverse().find((m) => m.kind === "presence");
@@ -550,5 +553,158 @@ describe("warmth", () => {
 
     // Assert
     expect(lastPresence(posted)).toEqual({ channel: HOST_CHANNEL, kind: "presence", shown: false, warm: true });
+  });
+});
+
+describe("the webhost's sidebar", () => {
+  /** A failure row as the webhost relays it. */
+  const FAILURE = { arm: "daemonUnreachable", headline: "lost the connection", evidence: [["close", "1006"]] } as const;
+
+  /** ID's page reports its gate band PIXELS tall. */
+  function band(id: string, pixels: number): void {
+    fromPage(id, { channel: HOST_CHANNEL, kind: "gateBand", pixels });
+  }
+
+  /** Where the sidebar ends, as the webhost set it. */
+  function sidebarBottom(): string {
+    return document.documentElement.style.getPropertyValue(SIDEBAR_BOTTOM_PROPERTY);
+  }
+
+  afterEach(() => {
+    document.documentElement.style.removeProperty(SIDEBAR_BOTTOM_PROPERTY);
+  });
+
+  it("tells every page when it docks the sidebar over it", () => {
+    // Arrange
+    pages(host, "a", "b");
+    const toA = postsTo("a");
+    const toB = postsTo("b");
+
+    // Act
+    host.setSidebarDocked(true);
+
+    // Assert
+    const dock = { channel: HOST_CHANNEL, kind: "sidebarDock", docked: true };
+    expect([toA, toB]).toEqual([[dock], [dock]]);
+  });
+
+  it("tells a page that says hello after the dock that the sidebar is docked", () => {
+    // Arrange
+    pages(host, "a");
+    host.setSidebarDocked(true);
+    const posted = postsTo("a");
+
+    // Act
+    fromPage("a", { channel: HOST_CHANNEL, kind: "hello" });
+
+    // Assert
+    expect(posted).toContainEqual({ channel: HOST_CHANNEL, kind: "sidebarDock", docked: true });
+  });
+
+  it("tells every page its own standing failures", () => {
+    // Arrange
+    pages(host, "a", "b");
+    const toB = postsTo("b");
+
+    // Act
+    host.setFailures([FAILURE]);
+
+    // Assert
+    expect(toB).toEqual([{ channel: HOST_CHANNEL, kind: "webhostFailures", failures: [FAILURE] }]);
+  });
+
+  it("tells a page that says hello the failures standing", () => {
+    // Arrange
+    pages(host, "a");
+    host.setFailures([FAILURE]);
+    const posted = postsTo("a");
+
+    // Act
+    fromPage("a", { channel: HOST_CHANNEL, kind: "hello" });
+
+    // Assert
+    expect(posted).toContainEqual({ channel: HOST_CHANNEL, kind: "webhostFailures", failures: [FAILURE] });
+  });
+
+  it("ends the sidebar above the gate band of the page on screen", () => {
+    // Arrange
+    pages(host, "a");
+    host.show("a");
+
+    // Act
+    band("a", 120);
+
+    // Assert
+    expect(sidebarBottom()).toBe("120px");
+  });
+
+  it("ignores the gate band of a page that is not on screen", () => {
+    // Arrange
+    pages(host, "a", "b");
+    host.show("a");
+    band("a", 0);
+
+    // Act
+    band("b", 120);
+
+    // Assert
+    expect(sidebarBottom()).toBe("0px");
+  });
+
+  it("moves the sidebar's end to the band of the page shown next", () => {
+    // Arrange
+    pages(host, "a", "b");
+    host.show("a");
+    band("b", 90);
+
+    // Act
+    host.show("b");
+
+    // Assert
+    expect(sidebarBottom()).toBe("90px");
+  });
+
+  it("runs the sidebar to the bottom once the page on screen is removed", () => {
+    // Arrange
+    pages(host, "a");
+    host.show("a");
+    band("a", 120);
+
+    // Act
+    host.remove("a");
+
+    // Assert
+    expect(sidebarBottom()).toBe("0px");
+  });
+
+  it("answers text selected in the webhost itself as the selection", () => {
+    // Arrange
+    pages(host, "a");
+    host.show("a");
+    const text = document.createElement("p");
+    text.textContent = "a sidebar row";
+    document.body.append(text);
+    window.getSelection()?.selectAllChildren(text);
+
+    // Act
+    const answer = parsed(host.selection());
+
+    // Assert
+    expect([answer.outcome, answer.text]).toEqual(["webhost", "a sidebar row"]);
+    window.getSelection()?.removeAllRanges();
+  });
+
+  it("holds the workspace pages in the element it is given", () => {
+    // Arrange
+    host.dispose();
+    const stack = document.createElement("div");
+    document.body.append(stack);
+    host = createHost({ doc: document, win: window, frames: stack });
+
+    // Act
+    host.ensure("a", "http://ws-a.localhost:1/");
+
+    // Assert
+    expect(stack.querySelector("iframe")).toBe(frame("a"));
   });
 });

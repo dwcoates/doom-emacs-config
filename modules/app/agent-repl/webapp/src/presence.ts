@@ -40,6 +40,8 @@ export interface Presence {
   warm(): boolean;
   /** Tell LISTENER on every change of either fact; answers the unsubscribe. */
   onChange(listener: PresenceListener): () => void;
+  /** Whether the page sits in the webhost (its iframe), rather than on its own. */
+  readonly embedded: boolean;
 }
 
 /** The presence plus the one writer the host link holds. */
@@ -69,6 +71,7 @@ export function createPresence(doc: Document, embedded: boolean): PresenceSource
   const onVisibility = (): void => tell("visibility");
   doc.addEventListener("visibilitychange", onVisibility);
   return {
+    embedded,
     seen,
     shown: () => hostShown,
     warm: () => hostShown || hostWarm,

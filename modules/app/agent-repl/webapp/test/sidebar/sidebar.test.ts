@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { CreateWorkspaceResponseSchema, type CreateWorkspaceRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_create_workspace_pb";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { WatchWorkspaceRosterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_roster_pb";
@@ -9,7 +10,7 @@ import { type AppContext } from "../../src/rpc/context.js";
 import { testAppContext } from "../rpc/app-context.js";
 import { UpdateSidebarViewResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import type { ServiceImpl } from "@connectrpc/connect";
-import { GROUPING_PICK_LABELS, PREFS_KEY, drawRailHead, mountSidebar, retireStoredPrefs } from "../../src/sidebar/sidebar.js";
+import { GROUPING_PICK_LABELS, PREFS_KEY, drawRailHead, mountSidebar, mountWebhostSidebar, retireStoredPrefs } from "../../src/sidebar/sidebar.js";
 import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { GROUPINGS, type SidebarContext } from "../../src/sidebar/context.js";
 import { createRailSearch } from "../../src/sidebar/search.js";
@@ -18,7 +19,7 @@ import { captureLogRecords, forwardedRecord, type LogCapture } from "../log-capt
 import type { PhasedAnimation } from "../../src/sidebar/wall-phase.js";
 import type { UnseenEnv } from "../../src/sidebar/unseen.js";
 import { createPageSeen } from "../../src/page-seen.js";
-import { createPresence } from "../../src/presence.js";
+import { createPresence, pagePresence } from "../../src/presence.js";
 import { visibilityDoc } from "../visibility-doc.js";
 import { fireResize } from "../resize-observer.js";
 import {
@@ -1041,5 +1042,103 @@ describe("mounting the rail: a page no one can see", () => {
 
     // Assert
     expect(arrived).toBe(1);
+  });
+});
+
+describe("mounting the webhost's sidebar", () => {
+  afterEach(() => {
+    // The page's own presence is shared by every test in the file: put it back.
+    pagePresence().setShown(true);
+    pagePresence().setWarm(true);
+  });
+
+  it("draws every push: there is no page of its own to be unseen", async () => {
+    // Arrange
+    const host = document.createElement("nav");
+    host.hidden = true;
+
+    // Act
+    mountWebhostSidebar(
+      host,
+      ctxFor([
+        roster({ current: "ws-other", repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-1" })] })] }),
+        roster({ current: "ws-other", repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-2" })] })] }),
+      ]),
+      { storage: null, timers: fakeTimers() },
+    );
+    await settle();
+
+    // Assert
+    expect(host.querySelector("[data-roster-row='ws-2']")).not.toBeNull();
+  });
+
+  it("is told once, when the first push reveals it", async () => {
+    // Arrange
+    const host = document.createElement("nav");
+    host.hidden = true;
+    let revealed = 0;
+
+    // Act
+    mountWebhostSidebar(host, ctxFor([roster(), roster()]), {
+      storage: null,
+      timers: fakeTimers(),
+      revealed: () => {
+        revealed += 1;
+      },
+    });
+    await settle();
+
+    // Assert
+    expect([revealed, host.hidden]).toEqual([1, false]);
+  });
+
+  it("stands whatever the page's warmth: the webhost is on screen whenever any page is", async () => {
+    // Arrange
+    pagePresence().setShown(false);
+    pagePresence().setWarm(false);
+    const host = document.createElement("nav");
+
+    // Act
+    mountWebhostSidebar(
+      host,
+      ctxFor([roster({ repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-1" })] })] })]),
+      { storage: null, timers: fakeTimers() },
+    );
+    await settle();
+
+    // Assert
+    expect(host.querySelector("[data-roster-row='ws-1']")).not.toBeNull();
+  });
+});
+
+describe("the webhost sidebar's create form", () => {
+  it("spawns a child from the workspace the roster names current", async () => {
+    // Arrange
+    let request: CreateWorkspaceRequest | null = null;
+    const host = document.createElement("nav");
+    document.body.append(host);
+    mountWebhostSidebar(
+      host,
+      ctxFor([roster({ current: "ws-current", repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-1" })] })] })], {
+        createWorkspace: (r) => {
+          request = r;
+          return create(CreateWorkspaceResponseSchema, {
+            result: { case: "success", value: { workspace: { id: "ws-new", dir: "/w/new" } } },
+          });
+        },
+      }),
+      { storage: null, timers: fakeTimers() },
+    );
+    await settle();
+    await click(host.querySelector(".sb-add") as Element);
+    const parent = host.querySelector("input[name='parent']") as HTMLInputElement;
+    parent.checked = true;
+
+    // Act
+    await click(host.querySelector("[data-create-submit]") as Element);
+
+    // Assert
+    expect((request as CreateWorkspaceRequest | null)?.parent?.workspace?.id).toBe("ws-current");
+    host.remove();
   });
 });

@@ -77,6 +77,7 @@ func (f *fakeSurfaces) AttachDir(string) error { return nil }
 
 // ClientLog implements dlog.Surfaces.
 func (f *fakeSurfaces) ClientLog(dir string, record dlog.ClientRecord) error { return nil }
+func (f *fakeSurfaces) CentralClientLog(dlog.ClientRecord) error             { return nil }
 
 // Evict implements dlog.Surfaces.
 func (f *fakeSurfaces) Evict(dir string) error { return nil }

@@ -226,9 +226,21 @@ export function drawCreateWorkspaceForm(
   submit.textContent = "Create";
   submit.addEventListener("click", (event) => {
     event.preventDefault();
+    const parentWorkspace = sc.parentWorkspace();
+    if (parent.checked && parentWorkspace === null) {
+      // A child needs a parent, and no workspace is selected to be it (the
+      // roster has named no current workspace yet). The form says so rather
+      // than sending a creation that silently drops the parent.
+      log.info("the create form was asked for a child with no workspace selected to be its parent", {
+        operation: "sidebar.create-no-parent",
+        context: {},
+      });
+      submit.after(noParentNote());
+      return;
+    }
     const spec = collect({
       repository,
-      workspace: sc.ctx.workspace,
+      workspace: parentWorkspace,
       oneShotMode: mode[1].checked,
       initialPrompt: initialPrompt.value,
       baseRef: baseRef.value,
@@ -328,7 +340,8 @@ export function createWorkspaceRefusal(cause: CreateWorkspaceCause): string {
 /** What the form's controls read as, before blanks are dropped. */
 interface RawForm {
   repository: RepositoryRef;
-  workspace: WorkspaceRef;
+  /** The workspace a child is created under; never null when `parent` is set. */
+  workspace: WorkspaceRef | null;
   oneShotMode: boolean;
   initialPrompt: string;
   baseRef: string;
@@ -370,7 +383,12 @@ export function collect(raw: RawForm): CreateWorkspaceSpec | null {
     allowUngated: raw.allowUngated,
   };
   if (spec.form.case === "oneShot" && spec.form.prompt === "") return null;
-  if (raw.parent) spec.parent = { workspace: raw.workspace, fork: raw.fork };
+  if (raw.parent) {
+    if (raw.workspace === null) {
+      throw new Error("invariant: a child is collected only once a parent workspace is named");
+    }
+    spec.parent = { workspace: raw.workspace, fork: raw.fork };
+  }
   const model = trimmed(raw.model);
   if (model !== undefined) spec.model = model;
   if (raw.priority !== "") spec.priority = raw.priority as Exclude<PriorityChoice, "clear">;
@@ -382,6 +400,14 @@ function missingPromptNote(): HTMLElement {
   note.className = "refusal sb-refusal";
   note.setAttribute("data-arm", "missing_prompt");
   note.textContent = "a one-shot needs a prompt";
+  return note;
+}
+
+function noParentNote(): HTMLElement {
+  const note = document.createElement("div");
+  note.className = "refusal sb-refusal";
+  note.setAttribute("data-arm", "no_parent");
+  note.textContent = "no workspace is selected to be the parent";
   return note;
 }
 
