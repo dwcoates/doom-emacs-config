@@ -220,12 +220,8 @@ func probeLine(name string, err error, took time.Duration) string {
 // latter the run's root goes on the disk.
 func (m Manager) Setup(sizeMiB int) (*Volume, *Trouble, error) {
 	t := &Trouble{At: m.Now()}
-	start := t.At
-	t.List, t.ListErr = m.Probe(ListBound, "diskutil", "list")
-	t.ListTook = m.Now().Sub(start)
-	start = m.Now()
-	t.Info, t.InfoErr = m.listImages()
-	t.InfoTook = m.Now().Sub(start)
+	t.List, t.ListTook, t.ListErr = m.timeProbe(t.At, func() (string, error) { return m.Probe(ListBound, "diskutil", "list") })
+	t.Info, t.InfoTook, t.InfoErr = m.timeProbe(m.Now(), m.listImages)
 	m.Log.Infof("RAM disk check at %s: %s; %s", stamp(t.At), probeLine("diskutil list", t.ListErr, t.ListTook), probeLine("hdiutil info", t.InfoErr, t.InfoTook))
 	if !t.Answered() {
 		// WHAT THE HOST WAS DOING IS READ AT ONCE, so the next probe that does
@@ -259,6 +255,13 @@ func (m Manager) Setup(sizeMiB int) (*Volume, *Trouble, error) {
 		return nil, t, nil
 	}
 	return v, nil, err
+}
+
+// timeProbe runs probe and answers its answer with how long it took since
+// start, by the Manager's clock.
+func (m Manager) timeProbe(start time.Time, probe func() (string, error)) (string, time.Duration, error) {
+	out, err := probe()
+	return out, m.Now().Sub(start), err
 }
 
 // HostBound is how long each read of the host's state (`sysctl`, `ps`) may
