@@ -30,6 +30,9 @@ The owner's rulings (2026-10-10):
   session-up edge (`promptqueue.Queue.ReleaseReconnectHolds`) that releases
   `reconnect`, or the user's cancel. No classifier runs and there is no
   force-through.
+- **Superseded exit (owner ruling, 2026-10-13):** only a compact-and-resume
+  answer delivers the entry. Clear discards it, and pay or compact move it to
+  `cold_gate_answered`. See cold-gate-answer-holds.md.
 - **Why its own arm, not `reconnect`:** a reconnect waits on machinery that
   ends by itself. A gate waits on the user, and the card has to say so.
 - **Durable:** `wsm.HoldColdGate` (stored value 4). The change is additive,
