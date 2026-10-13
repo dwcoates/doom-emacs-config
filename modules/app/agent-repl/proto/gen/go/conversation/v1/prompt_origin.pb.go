@@ -131,6 +131,14 @@ const (
 	// bubble's pick tab (frontend.v1.FeedMergeTabPick), and the merge joins the
 	// queue once it ends.
 	PromptOrigin_PROMPT_ORIGIN_MERGE_PICK PromptOrigin = 33
+	// The daemon's `/compact` of a requester whose ASYNC merge landed and asked
+	// to compact after it
+	// (agentrepl.v1.MergeWorkspaceSourceOwnBranchDetached.compact_after).
+	// Submitted through the prompt queue right after the landed handback, so it
+	// runs behind the handback's turn. It is a context cut like any `/compact`:
+	// no prompt bubble, and the compaction's status, footer and separator drawn
+	// as for one the user typed.
+	PromptOrigin_PROMPT_ORIGIN_MERGE_COMPACT_AFTER PromptOrigin = 34
 )
 
 // Enum value maps for PromptOrigin.
@@ -169,6 +177,7 @@ var (
 		31: "PROMPT_ORIGIN_MERGE_HANDBACK",
 		32: "PROMPT_ORIGIN_WORKSPACE_RETARGETED",
 		33: "PROMPT_ORIGIN_MERGE_PICK",
+		34: "PROMPT_ORIGIN_MERGE_COMPACT_AFTER",
 	}
 	PromptOrigin_value = map[string]int32{
 		"PROMPT_ORIGIN_UNSPECIFIED":                 0,
@@ -204,6 +213,7 @@ var (
 		"PROMPT_ORIGIN_MERGE_HANDBACK":              31,
 		"PROMPT_ORIGIN_WORKSPACE_RETARGETED":        32,
 		"PROMPT_ORIGIN_MERGE_PICK":                  33,
+		"PROMPT_ORIGIN_MERGE_COMPACT_AFTER":         34,
 	}
 )
 
@@ -238,7 +248,8 @@ var File_conversation_v1_prompt_origin_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"\n" +
-	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1*\xf3\t\n" +
+	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1*\x9a\n" +
+	"\n" +
 	"\fPromptOrigin\x12\x1d\n" +
 	"\x19PROMPT_ORIGIN_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17PROMPT_ORIGIN_USER_SENT\x10\x01\x12$\n" +
@@ -273,7 +284,8 @@ const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"\x1dPROMPT_ORIGIN_LINK_UNRESOLVED\x10\x1e\x12 \n" +
 	"\x1cPROMPT_ORIGIN_MERGE_HANDBACK\x10\x1f\x12&\n" +
 	"\"PROMPT_ORIGIN_WORKSPACE_RETARGETED\x10 \x12\x1c\n" +
-	"\x18PROMPT_ORIGIN_MERGE_PICK\x10!B0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
+	"\x18PROMPT_ORIGIN_MERGE_PICK\x10!\x12%\n" +
+	"!PROMPT_ORIGIN_MERGE_COMPACT_AFTER\x10\"B0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
 
 var (
 	file_conversation_v1_prompt_origin_proto_rawDescOnce sync.Once
