@@ -18,6 +18,23 @@
 // only once an attached page of it has also reported itself drawn
 // (ReportPageDrawn). A service-level failure opens it too, `failed`.
 //
+// `ready` MEANS EVERYTHING THE WORKSPACE NEEDS IS DONE (owner ruling,
+// 2026-10-12): besides served (and drawn), its conversation's newest page was
+// read whole through the feed resolver's own loading (`conversation_read`;
+// the page's OpenFeed then serves it from memory), and a turn the daemon's own
+// stand-down cut was resumed and has STARTED (`resuming_cut_turn`). The resume
+// is paid by the session-up release of the bring-up the open follows (the
+// prompt queue's restartredrive), which reports every account to the
+// coordinator (Resumption); an open that brings a workspace owed a cut turn up
+// waits for that account. A workspace already serving when the open began had
+// its release already, and a bring-up ending with no session to resume in (a
+// cold gate, a vendor refusal) leaves the debt recorded for the next
+// session-up: vendor state still never gates the open. A hidden workspace is
+// answered at once and its debt is left untouched until it is shown and
+// opened. A failed read or resumption answers `failed`. `ready` and `failed`
+// carry the workspace's roster row, taken with its roster's revision once the
+// open no longer marks it `opening`.
+//
 // NO WORKSPACE WAITS ON ANOTHER. Each is answered the moment it opens; the
 // editor places tabs by the registry's order, never by the answers'.
 //

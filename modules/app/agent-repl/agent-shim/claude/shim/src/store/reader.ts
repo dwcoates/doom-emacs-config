@@ -198,11 +198,24 @@ function toHistoryBoundary(
   }
 }
 
-/** The opening page, whole. */
-function toHistoryPage(page: storev1.AgentSessionPage): conversationv1.HistoryPage {
+/**
+ * A store page as the history page it renders: its lines, its turn heads and
+ * its boundary. THE ONE PLACE A STORE PAGE BECOMES A HISTORY PAGE, for the
+ * opening page and a continuation alike.
+ *
+ * A TURN HEAD IS A LINE, converted by the very converter its lines are
+ * ({@link toHistoryEntryAt}): the prompt of a turn the page touches whose
+ * prompt sits below it (store.v1 `turn_heads`), so the page draws whole in one
+ * read. A head that does not convert refuses the page exactly as a line that
+ * does not convert does.
+ */
+function toHistoryPage(
+  page: Pick<storev1.AgentSessionPage, "lines" | "turnHeads" | "boundary">,
+): conversationv1.HistoryPage {
   return create(conversationv1.HistoryPageSchema, {
     entries: page.lines.map(toHistoryEntryAt),
     boundary: toHistoryBoundary(page.boundary),
+    turnHeads: page.turnHeads.map(toHistoryEntryAt),
   });
 }
 
@@ -1292,10 +1305,7 @@ export function createReader(options: ReaderOptions): Reader {
     // EVERY LINE CARRIES ITS OWN POINTER (landing 3): a continuation page is
     // a reconnect mark like any other, so nothing here is minted and nothing
     // has to be refused if a caller echoes one back.
-    return create(conversationv1.HistoryPageSchema, {
-      entries: read.lines.map(toHistoryEntryAt),
-      boundary: toHistoryBoundary(read.boundary),
-    });
+    return toHistoryPage(read);
   };
 
   /**

@@ -238,12 +238,13 @@ func TestOpenTabsOpensALiveWorkspaceWithNoPageOnceServed(t *testing.T) {
 
 	// Act
 	served := nextOpenFrame(t, stream).GetStep().GetServed()
+	read := nextOpenFrame(t, stream).GetStep().GetConversationRead()
 	opened := nextOpenFrame(t, stream).GetOpened()
 	finished := nextOpenFrame(t, stream).GetFinished()
 
 	// Assert
-	if served == nil || opened.GetReady() == nil || finished.GetReady() != 1 || finished.GetTotal() != 1 {
-		t.Fatalf("frames = served %v, opened %v, finished %v", served, opened, finished)
+	if served == nil || read == nil || opened.GetReady() == nil || finished.GetReady() != 1 || finished.GetTotal() != 1 {
+		t.Fatalf("frames = served %v, conversation read %v, opened %v, finished %v", served, read, opened, finished)
 	}
 	if stream.Receive() {
 		t.Fatalf("a frame followed the finish: %v", stream.Msg())
@@ -260,6 +261,9 @@ func TestOpenTabsWaitsForTheWorkspacesPageToConnectAndDraw(t *testing.T) {
 	stream := openTabs(t, h, ctx, loadingPage(ref()))
 	if nextOpenFrame(t, stream).GetStep().GetServed() == nil {
 		t.Fatal("the first frame was not served")
+	}
+	if nextOpenFrame(t, stream).GetStep().GetConversationRead() == nil {
+		t.Fatal("the second frame was not the conversation read")
 	}
 
 	// Act: the page's footer subscription names the workspace, then it draws.
@@ -290,7 +294,8 @@ func TestATopbarSubscriptionServesItsWorkspace(t *testing.T) {
 	defer cancel()
 	attachPageStream(t, h, ctx, "page-1")
 	stream := openTabs(t, h, ctx, loadingPage(ref()))
-	nextOpenFrame(t, stream)
+	nextOpenFrame(t, stream) // served
+	nextOpenFrame(t, stream) // conversation read
 
 	// Act
 	if _, err := h.Client.SubscribePage(ctx, connect.NewRequest(&agentreplv1.SubscribePageRequest{

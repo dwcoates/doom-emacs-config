@@ -2955,6 +2955,32 @@ Its own fold is EXPANDED here: that fold is the sidebar's, never the bar's."
         :sections (list (agent-repl-test-roster--section "repo" (list one two)))))
       (should (equal (agent-repl-roster-drawn-tab-order) '("one" "two"))))))
 
+;;;; ---- One row, indexed ahead of the next push ----
+
+(ert-deftest agent-repl-test-roster-note-row-indexes-a-newer-row ()
+  "A row from a revision past the roster held is indexed under its id."
+  (agent-repl-test-roster--with-editor
+    ;; Arrange
+    (let ((row (agent-repl-test-roster--row "a" "one" :thinking))
+          (agent-repl-roster-view '(:revision 4)))
+      ;; Act
+      (agent-repl-roster-note-row row 5)
+      ;; Assert
+      (should (eq (gethash "a" agent-repl-roster--rows-by-id) row)))))
+
+(ert-deftest agent-repl-test-roster-note-row-keeps-a-row-no-newer-than-the-roster ()
+  "A row from a revision the held roster already reached is kept out."
+  (agent-repl-test-roster--with-editor
+    ;; Arrange
+    (let ((held (agent-repl-test-roster--row "a" "one" :done))
+          (stale (agent-repl-test-roster--row "a" "one" :thinking))
+          (agent-repl-roster-view '(:revision 5)))
+      (puthash "a" held agent-repl-roster--rows-by-id)
+      ;; Act
+      (agent-repl-roster-note-row stale 5)
+      ;; Assert
+      (should (eq (gethash "a" agent-repl-roster--rows-by-id) held)))))
+
 ;;;; ---- A fresh tab is held until the daemon answers it open ----
 
 (defmacro agent-repl-test-roster--opens-unanswered (&rest body)

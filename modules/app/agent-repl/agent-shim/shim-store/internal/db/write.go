@@ -525,6 +525,11 @@ func (d *DB) applyEntry(ctx context.Context, tx *sql.Tx, base logging.Fields, r 
 		if err := d.placeRow(ctx, tx, position, r.book.String, place); err != nil {
 			return d.refuse(fields, err)
 		}
+		// THE TURN-PROMPT INDEX IS KEPT IN THE SAME TRANSACTION, so a page's
+		// turn heads (turnhead.go) never miss a prompt that is stored.
+		if err := d.writeTurnPrompt(ctx, tx, position, r.book.String, r); err != nil {
+			return d.refuse(fields, err)
+		}
 	}
 	if err := d.recordApplied(ctx, tx, r, cursor, seq, now); err != nil {
 		return d.refuse(fields, err)

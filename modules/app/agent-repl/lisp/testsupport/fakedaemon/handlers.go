@@ -12,6 +12,7 @@ import (
 	"fmt"
 
 	v1 "agentrepl/proto/agentrepl/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 	"connectrpc.com/connect"
 )
 
@@ -420,9 +421,14 @@ func (s *fakeServer) OpenTabs(ctx context.Context, req *connect.Request[v1.OpenT
 		return connect.NewError(connect.CodeInvalidArgument, err)
 	}
 	for _, w := range req.Msg.GetWorkspaces() {
+		// The ready answer carries the workspace's roster row; the fake's is
+		// the legal default row naming the workspace.
+		row := &frontendv1.RosterRow{}
+		fillRequired(row.ProtoReflect(), 0)
+		row.Workspace = &frontendv1.RosterRowWorkspace{Workspace: w.GetWorkspace()}
 		opened := &v1.OpenTabsResponse{Frame: &v1.OpenTabsResponse_Opened{Opened: &v1.OpenTabsOpened{
 			Workspace: w.GetWorkspace(),
-			Outcome:   &v1.OpenTabsOpened_Ready{Ready: &v1.OpenTabsOpenedReady{}},
+			Outcome:   &v1.OpenTabsOpened_Ready{Ready: &v1.OpenTabsOpenedReady{Row: row}},
 		}}}
 		if err := stream.Send(opened); err != nil {
 			return err

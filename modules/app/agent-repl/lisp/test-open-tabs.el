@@ -32,6 +32,8 @@
 (defvar agent-repl-test-open-tabs--armed 0 "How often Doom's one-time setup was armed.")
 (defvar agent-repl-test-open-tabs--noted nil "Workspaces whose open placeholder learned the page is up.")
 (defvar agent-repl-test-open-tabs--buffer nil "The live buffer standing in for every page.")
+(defvar agent-repl-test-open-tabs--rows-noted nil "Every roster row an answer indexed, oldest first.")
+(defvar agent-repl-test-open-tabs--noted-at-show nil "The rows indexed when each tab was drawn.")
 
 (defmacro agent-repl-test-open-tabs--with (&rest body)
   "Run BODY with fresh opens in their process-start state, boundaries stubbed.
@@ -56,6 +58,8 @@ A ref id names the workspace of the same name."
            (agent-repl-test-open-tabs--undrawn nil)
            (agent-repl-test-open-tabs--armed 0)
            (agent-repl-test-open-tabs--noted nil)
+           (agent-repl-test-open-tabs--rows-noted nil)
+           (agent-repl-test-open-tabs--noted-at-show nil)
            (agent-repl-test-open-tabs--buffer (generate-new-buffer " *open-tabs-page*")))
        (unwind-protect
            (cl-letf (((symbol-function 'agent-repl--phase-echo)
@@ -82,7 +86,14 @@ A ref id names the workspace of the same name."
                         (push ws agent-repl-test-open-tabs--dropped)
                         (setq agent-repl-test-open-tabs--paged
                               (remove ws agent-repl-test-open-tabs--paged))))
-                     ((symbol-function 'agent-repl-roster-refresh-order) #'ignore)
+                     ((symbol-function 'agent-repl-roster-note-row)
+                      (lambda (row _revision)
+                        (setq agent-repl-test-open-tabs--rows-noted
+                              (append agent-repl-test-open-tabs--rows-noted (list row)))))
+                     ((symbol-function 'agent-repl-roster-refresh-order)
+                      (lambda ()
+                        (push (copy-sequence agent-repl-test-open-tabs--rows-noted)
+                              agent-repl-test-open-tabs--noted-at-show)))
                      ((symbol-function 'agent-repl-roster-apply-current) #'ignore)
                      ((symbol-function 'agent-repl-roster-drawn-tab-order)
                       (lambda ()
@@ -736,6 +747,50 @@ leaves the tab open."
     ;; Assert
     (should (eq agent-repl-open-tabs--startup 'expected))))
 
+;;;; ---- The row rides the answer ----
+
+(ert-deftest agent-repl-test-open-tabs-a-ready-answer-indexes-its-row ()
+  "A ready answer's roster row is indexed."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+    ;; Act
+    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready '(:row (:name "a"))))
+    ;; Assert
+    (should (equal agent-repl-test-open-tabs--rows-noted '((:name "a"))))))
+
+(ert-deftest agent-repl-test-open-tabs-the-row-is-indexed-before-the-tab-draws ()
+  "The tab is drawn with the answer's row already indexed."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (setq agent-repl-open-tabs--startup 'done)
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+    ;; Act
+    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready '(:row (:name "a"))))
+    ;; Assert
+    (should (equal (car agent-repl-test-open-tabs--noted-at-show) '((:name "a"))))))
+
+(ert-deftest agent-repl-test-open-tabs-a-failed-answer-indexes-its-row ()
+  "A failed answer's roster row is indexed too: it draws the failure."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+    ;; Act
+    (agent-repl-test-open-tabs--frame
+     (agent-repl-test-open-tabs--opened "a" :failed '(:reason "x" :row (:name "a"))))
+    ;; Assert
+    (should (equal agent-repl-test-open-tabs--rows-noted '((:name "a"))))))
+
+(ert-deftest agent-repl-test-open-tabs-a-hidden-answer-indexes-no-row ()
+  "A hidden answer carries no row and indexes none."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" t))
+    ;; Act
+    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :hidden))
+    ;; Assert
+    (should (null agent-repl-test-open-tabs--rows-noted))))
+
 ;;;; ---- Lines ----
 
 (ert-deftest agent-repl-test-open-tabs-says-each-step-as-the-design-lists-it ()
@@ -747,7 +802,8 @@ leaves the tab open."
     ;; Act
     (dolist (step '((:starting-session) (:waking) (:resuming) (:vendor-retrying (:attempt 2))
                     (:vendor-rejected (:cause "bad key")) (:vendor-failed) (:cold-gate)
-                    (:offline) (:served) (:page-connected) (:page-drawn)))
+                    (:offline) (:served) (:page-connected) (:conversation-read)
+                    (:resuming-cut-turn) (:page-drawn)))
       (agent-repl-test-open-tabs--frame
        (agent-repl-test-open-tabs--step "a" (car step) (cadr step))))
     ;; Assert
@@ -762,6 +818,8 @@ leaves the tab open."
                      "a: offline, waiting for the network…"
                      "a: session up, waiting for its page…"
                      "a: page connected, drawing the conversation…"
+                     "a: conversation read."
+                     "a: resuming the turn the restart cut…"
                      "a: page drawn.")))))
 
 (ert-deftest agent-repl-test-open-tabs-a-drawn-page-tells-its-open-placeholder ()

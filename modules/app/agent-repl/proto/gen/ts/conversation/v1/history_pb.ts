@@ -23,7 +23,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file conversation/v1/history.proto.
  */
 export const file_conversation_v1_history: GenFile = /*@__PURE__*/
-  fileDesc("Ch1jb252ZXJzYXRpb24vdjEvaGlzdG9yeS5wcm90bxIPY29udmVyc2F0aW9uLnYxIqkBCgtIaXN0b3J5UGFnZRIwCgdlbnRyaWVzGAEgAygLMh8uY29udmVyc2F0aW9uLnYxLkhpc3RvcnlFbnRyeUF0EiwKBG1vcmUYAiABKAsyHC5jb252ZXJzYXRpb24udjEuSGlzdG9yeU1vcmVIABIuCgVmbG9vchgDIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5Rmxvb3JIAEIKCghib3VuZGFyeSKlAgoOSGlzdG9yeUVudHJ5QXQSKwoCYXQYASABKAsyHy5jb252ZXJzYXRpb24udjEuSGlzdG9yeVBvaW50ZXISLAoFZW50cnkYAiABKAsyHS5jb252ZXJzYXRpb24udjEuSGlzdG9yeUVudHJ5EioKBHR1cm4YAyABKAsyFy5jb252ZXJzYXRpb24udjEuVHVybklkSAGIAQESPAoOcmVjb3JkZWRfcGxhY2UYBCABKAsyIi5jb252ZXJzYXRpb24udjEuQ29udmVyc2F0aW9uUGxhY2VIABI8Cg5yZWNlaXZlZF9wbGFjZRgFIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Db252ZXJzYXRpb25QbGFjZUgAQgcKBXBsYWNlQgcKBV90dXJuIjMKEUNvbnZlcnNhdGlvblBsYWNlEg0KBWF0X21zGAEgASgDEg8KB29yZGluYWwYAiABKA0iJAoTQ29udmVyc2F0aW9uVGhyb3VnaBINCgVhdF9tcxgBIAEoAyK2AQoMSGlzdG9yeUVudHJ5EjMKC3VzZXJfcHJvbXB0GAEgASgLMhwuY29udmVyc2F0aW9uLnYxLkFnZW50UHJvbXB0SAASMgoLYWdlbnRfZnJhbWUYAiABKAsyGy5jb252ZXJzYXRpb24udjEuQWdlbnRGcmFtZUgAEjQKDHBlZXJfbWVzc2FnZRgDIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5QZWVyTWVzc2FnZUgAQgcKBWVudHJ5IkIKC0hpc3RvcnlNb3JlEjMKCmxhc3RfZW50cnkYASABKAsyHy5jb252ZXJzYXRpb24udjEuSGlzdG9yeVBvaW50ZXIiDgoMSGlzdG9yeUZsb29yIh8KDkhpc3RvcnlQb2ludGVyEg0KBXZhbHVlGAEgASgJQjBaLmFnZW50cmVwbC9wcm90by9jb252ZXJzYXRpb24vdjE7Y29udmVyc2F0aW9udjFiBnByb3RvMw", [file_conversation_v1_agent, file_conversation_v1_peer, file_conversation_v1_turn]);
+  fileDesc("Ch1jb252ZXJzYXRpb24vdjEvaGlzdG9yeS5wcm90bxIPY29udmVyc2F0aW9uLnYxIt4BCgtIaXN0b3J5UGFnZRIwCgdlbnRyaWVzGAEgAygLMh8uY29udmVyc2F0aW9uLnYxLkhpc3RvcnlFbnRyeUF0EiwKBG1vcmUYAiABKAsyHC5jb252ZXJzYXRpb24udjEuSGlzdG9yeU1vcmVIABIuCgVmbG9vchgDIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5Rmxvb3JIABIzCgp0dXJuX2hlYWRzGAQgAygLMh8uY29udmVyc2F0aW9uLnYxLkhpc3RvcnlFbnRyeUF0QgoKCGJvdW5kYXJ5IqUCCg5IaXN0b3J5RW50cnlBdBIrCgJhdBgBIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5UG9pbnRlchIsCgVlbnRyeRgCIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5RW50cnkSKgoEdHVybhgDIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWRIAYgBARI8Cg5yZWNvcmRlZF9wbGFjZRgEIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Db252ZXJzYXRpb25QbGFjZUgAEjwKDnJlY2VpdmVkX3BsYWNlGAUgASgLMiIuY29udmVyc2F0aW9uLnYxLkNvbnZlcnNhdGlvblBsYWNlSABCBwoFcGxhY2VCBwoFX3R1cm4iMwoRQ29udmVyc2F0aW9uUGxhY2USDQoFYXRfbXMYASABKAMSDwoHb3JkaW5hbBgCIAEoDSIkChNDb252ZXJzYXRpb25UaHJvdWdoEg0KBWF0X21zGAEgASgDIrYBCgxIaXN0b3J5RW50cnkSMwoLdXNlcl9wcm9tcHQYASABKAsyHC5jb252ZXJzYXRpb24udjEuQWdlbnRQcm9tcHRIABIyCgthZ2VudF9mcmFtZRgCIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5BZ2VudEZyYW1lSAASNAoMcGVlcl9tZXNzYWdlGAMgASgLMhwuY29udmVyc2F0aW9uLnYxLlBlZXJNZXNzYWdlSABCBwoFZW50cnkiQgoLSGlzdG9yeU1vcmUSMwoKbGFzdF9lbnRyeRgBIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5UG9pbnRlciIOCgxIaXN0b3J5Rmxvb3IiHwoOSGlzdG9yeVBvaW50ZXISDQoFdmFsdWUYASABKAlCMFouYWdlbnRyZXBsL3Byb3RvL2NvbnZlcnNhdGlvbi92MTtjb252ZXJzYXRpb252MWIGcHJvdG8z", [file_conversation_v1_agent, file_conversation_v1_peer, file_conversation_v1_turn]);
 
 /**
  * One page: a contiguous run of an agent's history in DESCENDING CONVERSATION
@@ -66,6 +66,21 @@ export type HistoryPage = Message<"conversation.v1.HistoryPage"> & {
     value: HistoryFloor;
     case: "floor";
   } | { case: undefined; value?: undefined };
+
+  /**
+   * THE PROMPTS OF THE TURNS THIS PAGE TOUCHES THAT SIT BELOW IT, so the page
+   * draws whole in one read (owner ruling, 2026-10-12: the newest page is
+   * read complete before a workspace is answered open). For every turn an entry
+   * of this page is stamped with whose prompt entry (the entry holding the
+   * turn's UserPrompt) is placed below this page, that prompt entry,
+   * newest first; each turn at most once. A turn whose prompt is on this page,
+   * or that the serving side holds no prompt entry for, has none here. A head is ALSO
+   * an ordinary entry of an older page: a reader walking older meets it again,
+   * and absorbs it by identity.
+   *
+   * @generated from field: repeated conversation.v1.HistoryEntryAt turn_heads = 4;
+   */
+  turnHeads: HistoryEntryAt[];
 };
 
 /**

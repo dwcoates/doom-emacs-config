@@ -77,6 +77,12 @@ message WorkspaceRoster {
   // interleave and a child need not follow its parent. Clients draw it as
   // sent and never derive a tab order from the groupings. Always set.
   RosterTabBar tab_bar = 10;
+  // THE ROSTER'S REVISION: the daemon raises it for every roster it
+  // resolves, so of two rosters (or a roster and an OpenTabs answer's row,
+  // OpenTabsOpenedReady.roster_revision) the higher revision is the newer
+  // state. It orders what arrives over separate streams; nothing else is
+  // read off it.
+  uint64 revision = 11;
   // The selected workspace — the last SelectWorkspace the daemon received.
   // UNSET when there is none.
   optional RosterCurrentWorkspace current = 4;

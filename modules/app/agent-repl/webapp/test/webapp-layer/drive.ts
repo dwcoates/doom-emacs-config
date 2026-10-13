@@ -13,6 +13,7 @@
 import { type Control } from "../../src/control.js";
 import { fullTextOf } from "../../src/bubble/text-reveal.js";
 import { RESPONSE_PROSE_CLASS } from "../../src/feed/cards/response.js";
+import { TITLE_REVEALED_ATTRIBUTE } from "../../src/feed/title-reveal.js";
 import { expect } from "vitest";
 
 import type { MountedApp } from "../integration/harness";
@@ -436,6 +437,17 @@ export async function awaitTypedOut(app: MountedApp, row: HTMLElement): Promise<
     const prose = row.querySelector(`.${RESPONSE_PROSE_CLASS}`);
     return prose !== null && (prose.textContent ?? "") === fullTextOf(prose);
   });
+}
+
+/**
+ * Wait until ROW's card title has typed out whole: a row that arrived live
+ * types its title (src/feed/title-reveal.ts), and a part-shown title carries
+ * its shown length on `TITLE_REVEALED_ATTRIBUTE` until it is shown whole.
+ */
+export async function awaitTitleTypedOut(app: MountedApp, row: HTMLElement): Promise<void> {
+  await awaitDrawn(app, `the whole title of row ${rowID(row)}`, () =>
+    row.querySelector(`[${TITLE_REVEALED_ATTRIBUTE}]`) === null,
+  );
 }
 
 /** The trimmed text of an element, for a verbatim assertion. */

@@ -20,7 +20,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file store/v1/endpoint_read_agent_page.proto.
  */
 export const file_store_v1_endpoint_read_agent_page: GenFile = /*@__PURE__*/
-  fileDesc("CidzdG9yZS92MS9lbmRwb2ludF9yZWFkX2FnZW50X3BhZ2UucHJvdG8SCHN0b3JlLnYxIsEBChRSZWFkQWdlbnRQYWdlUmVxdWVzdBImCgRib29rGAEgASgLMhguY29udmVyc2F0aW9uLnYxLkFnZW50SWQSKwoFYWZ0ZXIYAyABKAsyGi5zdG9yZS52MS5TdG9yZUl0ZW1Qb2ludGVySAASNwoHdGhyb3VnaBgEIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5Db252ZXJzYXRpb25UaHJvdWdoSABCCgoIcG9zaXRpb25KBAgCEANSCXBhZ2Vfc2l6ZSKHAQoVUmVhZEFnZW50UGFnZVJlc3BvbnNlEjEKB3N1Y2Nlc3MYASABKAsyHi5zdG9yZS52MS5SZWFkQWdlbnRQYWdlU3VjY2Vzc0gAEjEKB2ZhaWx1cmUYAiABKAsyHi5zdG9yZS52MS5SZWFkQWdlbnRQYWdlRmFpbHVyZUgAQggKBnJlc3VsdCKkAQoUUmVhZEFnZW50UGFnZVN1Y2Nlc3MSJAoFbGluZXMYASADKAsyFS5zdG9yZS52MS5TdG9yZUxpbmVBdBIrCgRtb3JlGAIgASgLMhsuc3RvcmUudjEuUmVhZEFnZW50UGFnZU1vcmVIABItCgVmbG9vchgDIAEoCzIcLnN0b3JlLnYxLlJlYWRBZ2VudFBhZ2VGbG9vckgAQgoKCGJvdW5kYXJ5Iq4CChRSZWFkQWdlbnRQYWdlRmFpbHVyZRIOCgZkZXRhaWwYASABKAkSQAoPaW52YWxpZF9yZXF1ZXN0GAIgASgLMiUuc3RvcmUudjEuUmVhZEFnZW50UGFnZUludmFsaWRSZXF1ZXN0SAASPAoNc3RhbGVfcG9pbnRlchgDIAEoCzIjLnN0b3JlLnYxLlJlYWRBZ2VudFBhZ2VTdGFsZVBvaW50ZXJIABJACg9zdG9yYWdlX2ZhaWx1cmUYBCABKAsyJS5zdG9yZS52MS5SZWFkQWdlbnRQYWdlU3RvcmFnZUZhaWx1cmVIABI8Cg11bmtub3duX2FnZW50GAUgASgLMiMuc3RvcmUudjEuUmVhZEFnZW50UGFnZVVua25vd25BZ2VudEgAQgYKBGtpbmQiGwoZUmVhZEFnZW50UGFnZVVua25vd25BZ2VudCIsChtSZWFkQWdlbnRQYWdlSW52YWxpZFJlcXVlc3QSDQoFZmllbGQYASABKAkiHQobUmVhZEFnZW50UGFnZVN0b3JhZ2VGYWlsdXJlIhsKGVJlYWRBZ2VudFBhZ2VTdGFsZVBvaW50ZXJCIlogYWdlbnRyZXBsL3Byb3RvL3N0b3JlL3YxO3N0b3JldjFiBnByb3RvMw", [file_conversation_v1_agent_activity, file_conversation_v1_history, file_store_v1_store]);
+  fileDesc("CidzdG9yZS92MS9lbmRwb2ludF9yZWFkX2FnZW50X3BhZ2UucHJvdG8SCHN0b3JlLnYxIsEBChRSZWFkQWdlbnRQYWdlUmVxdWVzdBImCgRib29rGAEgASgLMhguY29udmVyc2F0aW9uLnYxLkFnZW50SWQSKwoFYWZ0ZXIYAyABKAsyGi5zdG9yZS52MS5TdG9yZUl0ZW1Qb2ludGVySAASNwoHdGhyb3VnaBgEIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5Db252ZXJzYXRpb25UaHJvdWdoSABCCgoIcG9zaXRpb25KBAgCEANSCXBhZ2Vfc2l6ZSKHAQoVUmVhZEFnZW50UGFnZVJlc3BvbnNlEjEKB3N1Y2Nlc3MYASABKAsyHi5zdG9yZS52MS5SZWFkQWdlbnRQYWdlU3VjY2Vzc0gAEjEKB2ZhaWx1cmUYAiABKAsyHi5zdG9yZS52MS5SZWFkQWdlbnRQYWdlRmFpbHVyZUgAQggKBnJlc3VsdCLPAQoUUmVhZEFnZW50UGFnZVN1Y2Nlc3MSJAoFbGluZXMYASADKAsyFS5zdG9yZS52MS5TdG9yZUxpbmVBdBIrCgRtb3JlGAIgASgLMhsuc3RvcmUudjEuUmVhZEFnZW50UGFnZU1vcmVIABItCgVmbG9vchgDIAEoCzIcLnN0b3JlLnYxLlJlYWRBZ2VudFBhZ2VGbG9vckgAEikKCnR1cm5faGVhZHMYBCADKAsyFS5zdG9yZS52MS5TdG9yZUxpbmVBdEIKCghib3VuZGFyeSKuAgoUUmVhZEFnZW50UGFnZUZhaWx1cmUSDgoGZGV0YWlsGAEgASgJEkAKD2ludmFsaWRfcmVxdWVzdBgCIAEoCzIlLnN0b3JlLnYxLlJlYWRBZ2VudFBhZ2VJbnZhbGlkUmVxdWVzdEgAEjwKDXN0YWxlX3BvaW50ZXIYAyABKAsyIy5zdG9yZS52MS5SZWFkQWdlbnRQYWdlU3RhbGVQb2ludGVySAASQAoPc3RvcmFnZV9mYWlsdXJlGAQgASgLMiUuc3RvcmUudjEuUmVhZEFnZW50UGFnZVN0b3JhZ2VGYWlsdXJlSAASPAoNdW5rbm93bl9hZ2VudBgFIAEoCzIjLnN0b3JlLnYxLlJlYWRBZ2VudFBhZ2VVbmtub3duQWdlbnRIAEIGCgRraW5kIhsKGVJlYWRBZ2VudFBhZ2VVbmtub3duQWdlbnQiLAobUmVhZEFnZW50UGFnZUludmFsaWRSZXF1ZXN0Eg0KBWZpZWxkGAEgASgJIh0KG1JlYWRBZ2VudFBhZ2VTdG9yYWdlRmFpbHVyZSIbChlSZWFkQWdlbnRQYWdlU3RhbGVQb2ludGVyQiJaIGFnZW50cmVwbC9wcm90by9zdG9yZS92MTtzdG9yZXYxYgZwcm90bzM", [file_conversation_v1_agent_activity, file_conversation_v1_history, file_store_v1_store]);
 
 /**
  * The store's page read: N page lines of one book, in descending conversation
@@ -136,6 +136,21 @@ export type ReadAgentPageSuccess = Message<"store.v1.ReadAgentPageSuccess"> & {
     value: ReadAgentPageFloor;
     case: "floor";
   } | { case: undefined; value?: undefined };
+
+  /**
+   * THE PROMPTS OF THE TURNS THIS PAGE TOUCHES THAT SIT BELOW IT, so the page
+   * draws whole in one read (owner ruling, 2026-10-12: the newest page is
+   * read complete before a workspace is answered open). For every turn a line
+   * of this page is stamped with whose prompt line (the line holding the
+   * turn's UserPrompt entry) is placed below this page, that prompt line,
+   * newest first; each turn at most once. A turn whose prompt is on this page,
+   * or that the store holds no prompt line for, has none here. A head is ALSO
+   * an ordinary line of an older page: a reader walking older meets it again,
+   * and absorbs it by identity.
+   *
+   * @generated from field: repeated store.v1.StoreLineAt turn_heads = 4;
+   */
+  turnHeads: StoreLineAt[];
 };
 
 /**

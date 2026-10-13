@@ -2498,6 +2498,19 @@ describe("ReadHistory", () => {
     expect(h.storeFaults).toHaveLength(1);
   });
 
+  it("serves the page's turn heads with it", async () => {
+    // Arrange.
+    const h = await harness();
+    h.persistence.page = pageWithHead("prompt-1");
+
+    // Act.
+    const response = await h.turns.readHistory(first());
+
+    // Assert.
+    const success = response.result.value as shimv1.ReadHistorySuccess;
+    expect(success.page?.turnHeads.map((head) => head.at?.value)).toEqual(["prompt-1"]);
+  });
+
   it("does NOT report a session fault for an unknown agent", async () => {
     // A caller error is not the record plane being unreachable.
     const h = await harness();
@@ -2995,6 +3008,19 @@ describe("the opening page StartTurn paints", () => {
 
     const success = response.result.value as shimv1.StartTurnSuccess;
     expect(success.page?.entries).toHaveLength(1);
+  });
+
+  it("carries the page's turn heads", async () => {
+    // Arrange.
+    const h = await harness();
+    h.persistence.page = pageWithHead("prompt-1");
+
+    // Act.
+    const response = await h.turns.startTurn(startTurn());
+
+    // Assert.
+    const success = response.result.value as shimv1.StartTurnSuccess;
+    expect(success.page?.turnHeads.map((head) => head.at?.value)).toEqual(["prompt-1"]);
   });
 
   it("is read AFTER the prompt is durable, so the first paint holds the new turn", async () => {
@@ -4145,3 +4171,26 @@ describe("RollBackSession's turn steps", () => {
     });
   });
 });
+
+/** A floor page of one step whose turn's prompt, at `headPointer`, rides as its turn head. */
+function pageWithHead(headPointer: string): conversationv1.HistoryPage {
+  return create(conversationv1.HistoryPageSchema, {
+    entries: [
+      create(conversationv1.HistoryEntryAtSchema, {
+        at: create(conversationv1.HistoryPointerSchema, { value: "step-1" }),
+        entry: create(conversationv1.HistoryEntrySchema, {
+          entry: { case: "agentFrame", value: create(conversationv1.AgentFrameSchema, {}) },
+        }),
+      }),
+    ],
+    boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
+    turnHeads: [
+      create(conversationv1.HistoryEntryAtSchema, {
+        at: create(conversationv1.HistoryPointerSchema, { value: headPointer }),
+        entry: create(conversationv1.HistoryEntrySchema, {
+          entry: { case: "userPrompt", value: create(conversationv1.AgentPromptSchema, {}) },
+        }),
+      }),
+    ],
+  });
+}
