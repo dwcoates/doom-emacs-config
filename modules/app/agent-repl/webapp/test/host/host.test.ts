@@ -130,7 +130,7 @@ describe("show", () => {
     host.show("a");
 
     // Assert
-    expect(posted).toContainEqual({ channel: HOST_CHANNEL, kind: "presence", shown: true });
+    expect(posted).toContainEqual({ channel: HOST_CHANNEL, kind: "presence", shown: true, warm: true });
   });
 
   it("tells the previously shown page it is hidden", () => {
@@ -144,7 +144,7 @@ describe("show", () => {
     host.show("b");
 
     // Assert
-    expect(posted).toContainEqual({ channel: HOST_CHANNEL, kind: "presence", shown: false });
+    expect(posted).toContainEqual({ channel: HOST_CHANNEL, kind: "presence", shown: false, warm: true });
   });
 
   it("answers absent for a workspace it holds no page for", () => {
@@ -264,7 +264,7 @@ describe("hello", () => {
 
     // Assert
     expect(posted).toEqual([
-      { channel: HOST_CHANNEL, kind: "presence", shown: true },
+      { channel: HOST_CHANNEL, kind: "presence", shown: true, warm: true },
       { channel: HOST_CHANNEL, kind: "inputBackground", background: "#202020" },
       { channel: HOST_CHANNEL, kind: "gateDock", pixels: 90, background: "#202020" },
     ]);
@@ -420,5 +420,135 @@ describe("hostHasFocus", () => {
 
     // Act / Assert
     expect(hostHasFocus(doc, host)).toBe(false);
+  });
+});
+
+describe("warmth", () => {
+  /** A host on a hand-driven clock whose cooling timer is held, not armed. */
+  function clocked(): { host: Host; at: { ms: number }; fire: () => void } {
+    host.dispose();
+    const at = { ms: 1_000_000 };
+    let armed: (() => void) | null = null;
+    const h = createHost({
+      doc: document,
+      win: window,
+      now: () => at.ms,
+      setTimer: (fn) => {
+        armed = fn;
+        return () => {
+          armed = null;
+        };
+      },
+    });
+    host = h;
+    return {
+      host: h,
+      at,
+      fire: () => {
+        const fn = armed;
+        armed = null;
+        fn?.();
+      },
+    };
+  }
+
+  /** Ensure pages for IDS. */
+  function pages(h: Host, ...ids: string[]): void {
+    for (const id of ids) h.ensure(id, `http://ws-${id}.localhost:1/`);
+  }
+
+  /** The last presence the host posted to ID's page. */
+  function lastPresence(posted: HostToPage[]): HostToPage | undefined {
+    return [...posted].reverse().find((m) => m.kind === "presence");
+  }
+
+  it("keeps a page shown a moment ago warm", () => {
+    // Arrange
+    const { host: h } = clocked();
+    pages(h, "a", "b");
+    h.show("a");
+    const posted = postsTo("a");
+
+    // Act
+    h.show("b");
+
+    // Assert
+    expect(lastPresence(posted)).toEqual({ channel: HOST_CHANNEL, kind: "presence", shown: false, warm: true });
+  });
+
+  it("cools the page that falls out of the most recent six", () => {
+    // Arrange
+    const { host: h, at } = clocked();
+    pages(h, "a", "b", "c", "d", "e", "f", "g");
+    h.show("a");
+    const posted = postsTo("a");
+
+    // Act
+    for (const id of ["b", "c", "d", "e", "f", "g"]) {
+      at.ms += 1;
+      h.show(id);
+    }
+
+    // Assert
+    expect(lastPresence(posted)).toEqual({ channel: HOST_CHANNEL, kind: "presence", shown: false, warm: false });
+  });
+
+  it("cools a page once its window has passed", () => {
+    // Arrange
+    const { host: h, at, fire } = clocked();
+    pages(h, "a", "b");
+    h.show("a");
+    h.show("b");
+    const posted = postsTo("a");
+
+    // Act
+    at.ms += 5 * 60_000;
+    fire();
+
+    // Assert
+    expect(lastPresence(posted)).toEqual({ channel: HOST_CHANNEL, kind: "presence", shown: false, warm: false });
+  });
+
+  it("never cools the page it shows", () => {
+    // Arrange
+    const { host: h, at, fire } = clocked();
+    pages(h, "a");
+    h.show("a");
+    const posted = postsTo("a");
+
+    // Act
+    at.ms += 60 * 60_000;
+    fire();
+
+    // Assert
+    expect(posted.filter((m) => m.kind === "presence")).toEqual([]);
+  });
+
+  it("leaves a page never shown cold", () => {
+    // Arrange
+    const { host: h } = clocked();
+    pages(h, "a", "b");
+    const posted = postsTo("b");
+
+    // Act
+    h.show("a");
+
+    // Assert
+    expect(lastPresence(posted)).toBeUndefined();
+  });
+
+  it("tells a page hello with its warmth", () => {
+    // Arrange
+    const { host: h } = clocked();
+    pages(h, "a", "b");
+    h.show("a");
+    h.show("b");
+    const posted = postsTo("a");
+
+    // Act
+    fromPage("a", { channel: HOST_CHANNEL, kind: "hello" });
+
+    // Assert
+    expect(lastPresence(posted)).toEqual({ channel: HOST_CHANNEL, kind: "presence", shown: false, warm: true });
   });
 });

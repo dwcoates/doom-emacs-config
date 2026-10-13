@@ -31,6 +31,13 @@ export interface Presence {
   seen(): boolean;
   /** Whether the host shows the page (always, for a page in no host). */
   shown(): boolean;
+  /**
+   * Whether the page is WARM: shown, or among the pages the user switched to
+   * most recently and lately (host.ts). A cold page keeps its conversation
+   * live but stands its sidebar, topbar and footer streams down until it
+   * warms. Always true for a page in no host.
+   */
+  warm(): boolean;
   /** Tell LISTENER on every change of either fact; answers the unsubscribe. */
   onChange(listener: PresenceListener): () => void;
 }
@@ -39,6 +46,8 @@ export interface Presence {
 export interface PresenceSource extends Presence {
   /** The host showed (true) or hid (false) this page. */
   setShown(shown: boolean): void;
+  /** The host warmed (true) or cooled (false) this page. */
+  setWarm(warm: boolean): void;
   /** Stop listening to the document. */
   dispose(): void;
 }
@@ -49,6 +58,7 @@ export interface PresenceSource extends Presence {
  */
 export function createPresence(doc: Document, embedded: boolean): PresenceSource {
   let hostShown = !embedded;
+  let hostWarm = !embedded;
   const listeners = new Set<PresenceListener>();
   const visible = (): boolean => doc.visibilityState === "visible";
   const seen = (): boolean => hostShown && visible();
@@ -61,6 +71,7 @@ export function createPresence(doc: Document, embedded: boolean): PresenceSource
   return {
     seen,
     shown: () => hostShown,
+    warm: () => hostShown || hostWarm,
     onChange(listener) {
       listeners.add(listener);
       return () => {
@@ -70,6 +81,11 @@ export function createPresence(doc: Document, embedded: boolean): PresenceSource
     setShown(shown) {
       if (shown === hostShown) return;
       hostShown = shown;
+      tell("host");
+    },
+    setWarm(warm) {
+      if (warm === hostWarm) return;
+      hostWarm = warm;
       tell("host");
     },
     dispose() {
@@ -95,4 +111,12 @@ export function pagePresence(): PresenceSource {
     pageSources.set(document, source);
   }
   return source;
+}
+
+/** The stand condition of a page's standing views: they stand while it is warm. */
+export function warmthCondition(presence: Presence): { active(): boolean; onChange(fn: () => void): () => void } {
+  return {
+    active: () => presence.warm(),
+    onChange: (fn) => presence.onChange(() => fn()),
+  };
 }

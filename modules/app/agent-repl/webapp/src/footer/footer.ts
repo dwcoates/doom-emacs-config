@@ -33,6 +33,7 @@
  * current arm immediately, because a composer mounted mid-merge must not wait
  * for the next push to learn it should be closed.
  */
+import { pagePresence, warmthCondition } from "../presence.js";
 import { create } from "@bufbuild/protobuf";
 import {
   WatchFooterRequestSchema,
@@ -156,6 +157,8 @@ export function mountFooter(
     schema: WatchFooterResponseSchema,
     open: (_client, signal) =>
       ctx.streams.watch("footer", buildWatchFooterRequest(ctx), signal),
+    // A cold page's footer stands down until it warms (host.ts).
+    standsWhile: warmthCondition(pagePresence()),
     onPush: (response) => {
       view = requireMessage(response.footer, "WatchFooterResponse.footer");
       applyFocus(view);

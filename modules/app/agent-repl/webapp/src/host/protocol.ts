@@ -31,11 +31,13 @@ export const HOST_CHANNEL = "agent-repl-host";
 /** What a page reports drawn: an opening page, or a refused open. */
 export type DrawnWhat = "page" | "refused";
 
-/** host -> page: whether the host is showing this page now. */
+/** host -> page: whether the host is showing this page now, and whether it is warm. */
 interface PresenceMessage {
   readonly channel: typeof HOST_CHANNEL;
   readonly kind: "presence";
   readonly shown: boolean;
+  /** Shown, or among the pages switched to most recently and lately (host.ts). */
+  readonly warm: boolean;
 }
 
 /** host -> page: the background the workspace's Emacs input window paints. */
@@ -109,7 +111,9 @@ export function parseHostToPage(data: unknown): HostToPage | null {
   if (!isRecord(data) || data.channel !== HOST_CHANNEL) return null;
   switch (data.kind) {
     case "presence":
-      return typeof data.shown === "boolean" ? { channel: HOST_CHANNEL, kind: "presence", shown: data.shown } : null;
+      return typeof data.shown === "boolean" && typeof data.warm === "boolean"
+        ? { channel: HOST_CHANNEL, kind: "presence", shown: data.shown, warm: data.warm }
+        : null;
     case "inputBackground":
       return typeof data.background === "string"
         ? { channel: HOST_CHANNEL, kind: "inputBackground", background: data.background }
