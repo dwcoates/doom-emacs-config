@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -58,6 +60,7 @@ func (r *run) gate(ctx context.Context, round tabRound, tip, head string, permit
 		}
 	}
 	defer func() { release(0, 0, false) }()
+	begun := r.o.deps.Now()
 	dir := r.subject.dir
 	rangeSpec := tip + ".." + head
 	paths, err := r.git.ChangedPaths(ctx, dir, rangeSpec)
@@ -76,8 +79,16 @@ func (r *run) gate(ctx context.Context, round tabRound, tip, head string, permit
 		"workspace": string(r.ws), "suites": strings.Join(selection.Suites, ","),
 		"full": selection.Full, "reason": selection.Reason})
 	if selection.Empty() {
-		return r.gateNothing(ctx, round, paths, selection)
+		return r.gateNothing(ctx, round, paths, selection, begun)
 	}
+	// EVERY EDGE OF A GATE IS RECORDED AT INFO, timed: its start, the host's
+	// suite slot taken, the runner's end, the verdict, and a cut. A tests tab
+	// that ran long is explained from these, its interval included when it
+	// spans a restart and the archive holds only the last run.
+	speculative := r.isSpeculative()
+	r.o.log(ctx, r.ws).Info(op, "the merge's test gate started", dlog.Context{
+		"workspace": string(r.ws), "round": round.n, "suites": strings.Join(selection.Suites, ","),
+		"full": selection.Full, "reason": selection.Reason, "speculative": speculative})
 	if permit == nil {
 		permit, err = r.o.deps.Governor.Acquire(ctx, cpugov.Request{Workspace: r.ws, Repo: string(r.repo), Head: true})
 		if err != nil {
@@ -86,7 +97,7 @@ func (r *run) gate(ctx context.Context, round tabRound, tip, head string, permit
 	}
 
 	g := &gateRun{r: r, round: round, log: r.o.testLog(r.lease.ID, round.n),
-		states: map[string]suiteState{}, counts: newSuiteCounts(), release: release}
+		states: map[string]suiteState{}, counts: newSuiteCounts(), release: release, begun: begun}
 	r.setStep(ctx, footer.StepTesting, nil)
 	r.upsert(round, testsTab(round.live(), nil, nil))
 
@@ -105,7 +116,7 @@ func (r *run) gate(ctx context.Context, round tabRound, tip, head string, permit
 	// (bin/suite-slot.sh): master does not move while it waits, so it is served
 	// ahead of every ad-hoc run instead of racing them for a freed slot. A
 	// speculative gate (one behind the head) runs niced; see gateArgv.
-	argv = gateArgv(append([]string(nil), argv...), r.isSpeculative())
+	argv = gateArgv(append([]string(nil), argv...), speculative)
 	// The FULL selection passes no narrowing: running everything is the
 	// script's own default, and a repository whose script knows no --suites
 	// flag is never handed one.
@@ -124,9 +135,13 @@ func (r *run) gate(ctx context.Context, round tabRound, tip, head string, permit
 		// A SPECULATIVE GATE WHOSE BASE MOVED was cut on purpose: it runs
 		// again on the new base, and says so.
 		if errors.Is(context.Cause(ctx), errBaseMoved) {
+			g.cut(ctx, "the merge ahead moved")
 			r.upsert(round, testsTab(round.settled(r.o.nowMS(), "the merge ahead moved; the tests run again on its new tip"), nil, g.link()))
 			r.closeTab(ctx, round, "restarted")
 			return gateVerdict{}, err
+		}
+		if ctx.Err() != nil || r.o.isDraining() {
+			g.cut(ctx, "the daemon's exit, a restart or a transfer")
 		}
 		r.upsert(round, testsTab(round.settled(r.o.nowMS(), "the test gate could not run"), nil, g.link()))
 		r.closeTab(ctx, round, "failed")
@@ -138,15 +153,17 @@ func (r *run) gate(ctx context.Context, round tabRound, tip, head string, permit
 	if result.Passed {
 		r.upsert(round, testsTab(round.settled(r.o.nowMS(), ""), result.Suites, g.link()))
 		r.closeTab(ctx, round, "succeeded")
-		r.o.log(ctx, r.ws).Debug(op, "the merge's suites passed", dlog.Context{
-			"workspace": string(r.ws), "round": round.n, "archive": result.ArchivePath})
+		r.o.log(ctx, r.ws).Info(op, "the merge's suites passed", dlog.Context{
+			"workspace": string(r.ws), "round": round.n, "archive": result.ArchivePath, "verdict": "passed",
+			"total_seconds": g.since()})
 		return gateVerdict{result: result, round: round.n}, nil
 	}
 	summary := fmt.Sprintf("the test suite failed (exit %d); the whole run is archived at %s", result.ExitCode, result.ArchivePath)
 	r.upsert(round, testsTab(round.settled(r.o.nowMS(), summary), result.Suites, g.link()))
 	r.closeTab(ctx, round, "failed")
 	r.o.log(ctx, r.ws).Info(op, "the merge's suites failed", dlog.Context{
-		"workspace": string(r.ws), "round": round.n, "exit_code": result.ExitCode, "archive": result.ArchivePath})
+		"workspace": string(r.ws), "round": round.n, "exit_code": result.ExitCode, "archive": result.ArchivePath,
+		"verdict": "failed", "total_seconds": g.since()})
 	return gateVerdict{result: result, round: round.n}, nil
 }
 
@@ -166,7 +183,7 @@ func gateDidNotRun(code int) (string, bool) {
 // runner (owner ruling, 2026-10-12): nothing the branch changed is something a
 // suite tests. It is still drawn truthfully: the testing step, and a tests tab
 // settled with no suite rows whose log says no suite was selected and why.
-func (r *run) gateNothing(ctx context.Context, round tabRound, paths []string, selection SuiteSelection) (gateVerdict, error) {
+func (r *run) gateNothing(ctx context.Context, round tabRound, paths []string, selection SuiteSelection, begun time.Time) (gateVerdict, error) {
 	log := r.o.testLog(r.lease.ID, round.n)
 	r.setStep(ctx, footer.StepTesting, nil)
 	if err := os.MkdirAll(filepath.Dir(log.path), 0o755); err != nil {
@@ -183,7 +200,8 @@ func (r *run) gateNothing(ctx context.Context, round tabRound, paths []string, s
 	r.upsert(round, testsTab(round.settled(r.o.nowMS(), ""), nil, r.o.testLogLink(log)))
 	r.closeTab(ctx, round, "succeeded")
 	r.o.log(ctx, r.ws).Info("daemon.merge.tests", "no suite is selected for the merge's change; the gate passes without starting the runner", dlog.Context{
-		"workspace": string(r.ws), "round": round.n, "paths": strings.Join(paths, ","), "reason": selection.Reason, "archive": log.path})
+		"workspace": string(r.ws), "round": round.n, "paths": strings.Join(paths, ","), "reason": selection.Reason, "archive": log.path,
+		"verdict": "no suite selected", "total_seconds": r.o.deps.Now().Sub(begun).Seconds()})
 	return gateVerdict{result: GateResult{Passed: true, ArchivePath: log.path}, round: round.n}, nil
 }
 
@@ -197,6 +215,10 @@ type gateRun struct {
 
 	// release gives the governor's permit back with the run's measured cost.
 	release func(cores float64, wall time.Duration, measured bool)
+	// begun is when the gate began; slotTaken reports that the host's suite
+	// slot was recorded taken (guarded by mu).
+	begun     time.Time
+	slotTaken bool
 
 	mu sync.Mutex
 	// suites are the tab's live rows, in the order the suites started.
@@ -238,6 +260,11 @@ func (g *gateRun) run(ctx context.Context, dir string, argv, selected []string) 
 		g.edge(line)
 	})
 	g.release(measured.Cores(), measured.Wall, runErr == nil)
+	if runErr == nil {
+		g.r.o.log(ctx, g.r.ws).Info("daemon.merge.tests", "the merge's test runner finished", dlog.Context{
+			"workspace": string(g.r.ws), "round": g.round.n, "exit_code": measured.ExitCode,
+			"run_seconds": measured.Wall.Seconds(), "since_gate_start_seconds": g.since()})
+	}
 	output, code := measured.Output, measured.ExitCode
 	if err := writer.Flush(); err != nil && writeErr == nil {
 		writeErr = err
@@ -270,6 +297,7 @@ func (g *gateRun) run(ctx context.Context, dir string, argv, selected []string) 
 // moves its tab row and takes the testing step's line, and a unit's verdict
 // or a suite's planned total moves the suite's counts.
 func (g *gateRun) edge(line string) {
+	g.slotEdge(line)
 	if name, counted := g.countLine(line); counted {
 		g.mu.Lock()
 		state, started := g.states[name]
@@ -296,6 +324,52 @@ func (g *gateRun) edge(line string) {
 		f.Line = suiteLine(name, state)
 	})
 	g.r.upsert(g.round, testsTab(g.round.live(), suites, g.link()))
+}
+
+// slotLine is bin/suite-slot.sh's line once a run waited for the host's suite
+// slot; a run that did not wait prints none.
+var slotLine = regexp.MustCompile(`suite-slot: slot (\d+) acquired after (\d+)s`)
+
+// slotEdge records, once, the host's suite slot taken: from suite-slot's own
+// line with its wait, or -- a run that did not wait prints none -- from the
+// runner's first line, with no wait.
+func (g *gateRun) slotEdge(line string) {
+	m := slotLine.FindStringSubmatch(line)
+	if m == nil && !strings.Contains(line, testrunPrefix) {
+		return
+	}
+	g.mu.Lock()
+	taken := g.slotTaken
+	g.slotTaken = true
+	g.mu.Unlock()
+	if taken {
+		return
+	}
+	fields := dlog.Context{"workspace": string(g.r.ws), "round": g.round.n, "since_gate_start_seconds": g.since()}
+	if m != nil {
+		wait, err := strconv.Atoi(m[2])
+		if err != nil {
+			g.r.o.log(context.Background(), g.r.ws).Error("daemon.merge.tests", "the suite slot's wait could not be read", dlog.Context{
+				"workspace": string(g.r.ws), "round": g.round.n, "line": line, "error": err.Error()})
+			return
+		}
+		fields["slot"], fields["wait_seconds"] = m[1], wait
+	} else {
+		fields["wait_seconds"] = 0
+	}
+	g.r.o.log(context.Background(), g.r.ws).Info("daemon.merge.tests", "the merge's test gate took the host's suite slot", fields)
+}
+
+// testrunPrefix opens every line the test runner itself prints.
+const testrunPrefix = "[agent-repl-tests]"
+
+// since is the seconds since the gate began.
+func (g *gateRun) since() float64 { return g.r.o.deps.Now().Sub(g.begun).Seconds() }
+
+// cut records a gate cut before its verdict, which runs again from its start.
+func (g *gateRun) cut(ctx context.Context, by string) {
+	g.r.o.log(ctx, g.r.ws).Info("daemon.merge.tests", "the merge's test gate was cut before its verdict; it runs again from its start", dlog.Context{
+		"workspace": string(g.r.ws), "round": g.round.n, "by": by, "since_gate_start_seconds": g.since()})
 }
 
 // countLine moves the counts one line reports, answering the suite it moved.
@@ -345,6 +419,7 @@ func (g *gateRun) brokenGate(ctx context.Context, result GateResult, why string)
 	g.r.upsert(g.round, testsTab(g.round.settled(g.r.o.nowMS(), line), result.Suites, g.link()))
 	g.r.closeTab(ctx, g.round, "gate_broken")
 	g.r.o.log(ctx, g.r.ws).Warn("daemon.merge.tests", "the test gate itself failed to run; the merge fails with no fixing attempt", dlog.Context{
-		"workspace": string(g.r.ws), "round": g.round.n, "why": why, "exit_code": result.ExitCode, "archive": result.ArchivePath})
+		"workspace": string(g.r.ws), "round": g.round.n, "why": why, "exit_code": result.ExitCode, "archive": result.ArchivePath,
+		"verdict": "broken", "total_seconds": g.since()})
 	return gateVerdict{result: result, round: g.round.n, broken: line}
 }
