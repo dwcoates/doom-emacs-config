@@ -195,3 +195,29 @@ describe("onQuiesced after the page has already gone quiet", () => {
     expect(told).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("noteStreamCost", () => {
+  it("records a frame's cost in the page's meter", () => {
+    // Arrange
+    const recorded: Array<[string, number]> = [];
+    const c = testAppContext({
+      client: client(),
+      workspace: create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" }),
+      ticker: createTicker(1000),
+      failures: SINK,
+      composerEnabled: false,
+      costs: { record: (stream, ms) => recorded.push([stream, ms]), flush: () => {}, dispose: () => {} },
+    });
+
+    // Act
+    c.noteStreamCost("WatchFooter", 3);
+
+    // Assert
+    expect(recorded).toEqual([["WatchFooter", 3]]);
+  });
+
+  it("records nothing for a page given no meter", () => {
+    // Arrange / Act / Assert
+    expect(() => ctx().noteStreamCost("WatchFooter", 3)).not.toThrow();
+  });
+});

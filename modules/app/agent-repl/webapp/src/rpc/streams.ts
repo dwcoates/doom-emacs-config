@@ -102,6 +102,11 @@ export interface StreamContext {
    * still talking, not a new one answering. Optional for the same reason.
    */
   noteLinkRestored?: () => void;
+  /**
+   * Record that one frame of STREAM took MS of main-thread work to handle
+   * (stream-cost.ts). Optional for the same reason.
+   */
+  noteStreamCost?: (stream: string, ms: number) => void;
 }
 
 export interface WatchStreamOptions<Res extends Message> {
@@ -350,7 +355,9 @@ export function watchStream<Res extends Message>(
       try {
         for await (const response of opts.open(ctx.client, controller.signal)) {
           if (cancelled || standingDown) break;
+          const began = performance.now();
           consume(response);
+          ctx.noteStreamCost?.(opts.name, performance.now() - began);
         }
         end = cancelled ? { kind: "cancelled" } : standingDown ? { kind: "stood_down" } : { kind: "producer_ended" };
       } catch (err) {

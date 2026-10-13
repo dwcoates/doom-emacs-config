@@ -106,7 +106,7 @@ describe("mergeTabPanel", () => {
       tabRow("t-tests", { kind: "tests", state: "live" }),
       tabRow("t-run", { kind: "testsRun", state: "live", parent: "t-tests" }),
     ];
-    const panel = mergeTabPanel(childTabsOf(rows, undefined)[0] as MergeTab, new FakeSubfeed(rows), rc());
+    const panel = mergeTabPanel(childTabsOf(rows, undefined)[0], new FakeSubfeed(rows), rc());
     const host = document.createElement("div");
     host.append(...panel.nodes);
     expect(host.querySelector('.merge-strip.is-nested [data-merge-tab="testsRun"]')).not.toBeNull();

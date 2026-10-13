@@ -1053,6 +1053,30 @@ describe("watchStream and the client's link verdict", () => {
   });
 });
 
+describe("noteStreamCost: every frame's handling is timed", () => {
+  it("records each frame it handles under the stream's name", async () => {
+    // Arrange
+    const { client } = scriptedClient([[push(), push()], new ConnectError("gone", Code.Unavailable)]);
+    const costs: Array<[string, number]> = [];
+    const ctx = { ...contextFor(client, new RecordingSink()), noteStreamCost: (stream: string, ms: number) => costs.push([stream, ms]) };
+
+    // Act
+    const handle = watchStream(ctx, {
+      name: "WatchFooter",
+      schema: WatchFooterResponseSchema,
+      open: (c, signal) => c.watchFooter({ workspace: WORKSPACE }, { signal }),
+      onPush: () => undefined,
+      backoff: BACKOFF,
+    });
+    await settle();
+    handle.cancel();
+
+    // Assert
+    expect(costs.map(([stream]) => stream)).toEqual(["WatchFooter", "WatchFooter"]);
+    expect(costs.every(([, ms]) => ms >= 0)).toBe(true);
+  });
+});
+
 describe("standsWhile: a stream stands only while its condition holds", () => {
   /** A hand-flipped stand condition. */
   function condition(initially: boolean) {
