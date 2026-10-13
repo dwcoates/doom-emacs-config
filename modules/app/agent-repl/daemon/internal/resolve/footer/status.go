@@ -10,21 +10,6 @@ import (
 	"agent-repld/internal/shimclient"
 )
 
-// The FooterStatus.status arms this resolver emits, in the precedence order
-// documented below. render-colors.json's footer_status table is asserted
-// against them at construction: an arm landing without a color would draw
-// unpainted, and a table row no arm claims is a state the vocabulary paints and
-// the resolver can never reach.
-//
-// `turn_failed` is NO LONGER EMITTED (owner ruling, 2026-10-06: a failed turn
-// is the fault its cause names). It stays in this list, and painted in the
-// table, because the arm stays in the contract for an older frame to decode.
-var statusArms = []string{
-	"agent_repl_fault", "starting", "network_fault", "closing", "interrupted", "loading", "vendor_fault", "merging",
-	"merge_failed", "merged", "degraded", "waiting", "permission", "question",
-	"working", "background", "turn_failed", "idle",
-}
-
 // status resolves the whole status family — the coarse status, its step and
 // its activity line — as ONE tree, so an illegal pairing is unrepresentable
 // rather than forbidden by comment.

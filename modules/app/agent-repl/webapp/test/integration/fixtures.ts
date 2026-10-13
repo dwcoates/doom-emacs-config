@@ -96,6 +96,7 @@ import {
   type SubmitPromptCommandPanel,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
 import { orderFor } from "../feed-order.js";
+import { ROSTER_STATUS_CASES, type RosterStatusCase } from "../../src/sidebar/tones.js";
 import { enduringLine } from "../footer/enduring-line.js";
 
 // ---------------------------------------------------------------------------
@@ -2383,40 +2384,12 @@ export const emptyTopbarView = (): TopbarView => topbarView();
 // Sidebar
 // ---------------------------------------------------------------------------
 
-export const ROSTER_STATUS_ARMS = [
-  "submitting",
-  "thinking",
-  "clearing",
-  "compacting",
-  "permission",
-  "question",
-  "done",
-  "interrupted",
-  "turnFailed",
-  "ready",
-  "idleAsync",
-  "vendorBlocked",
-  "vendorFault",
-  "networkFault",
-  "apiRetrying",
-  "init",
-  "severed",
-  "startFailed",
-  "degraded",
-  "dead",
-  "turnDied",
-  "merging",
-  "mergeQueued",
-  "mergeFailed",
-  "merged",
-  "none",
-  "inactive",
-  "closing",
-  "daemonImpaired",
-  "waiting",
-  "coldGate",
-] as const;
-export type RosterStatusArm = (typeof ROSTER_STATUS_ARMS)[number];
+/**
+ * Every `RosterRow.status` arm, in the generated spelling: the sidebar's own
+ * list (`src/sidebar/tones.ts`), which reads it off the schema.
+ */
+export const ROSTER_STATUS_ARMS = ROSTER_STATUS_CASES;
+export type RosterStatusArm = RosterStatusCase;
 
 /**
  * A repository section's `fold` arm. The wire never leaves the oneof unset

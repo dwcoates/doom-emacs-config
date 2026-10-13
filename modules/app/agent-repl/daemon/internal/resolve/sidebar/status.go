@@ -335,7 +335,7 @@ func setStatus(row *frontendv1.RosterRow, arm string, log dlog.Logger) {
 			dlog.Context{
 				"arm":                 arm,
 				"invariant_violation": "a row would carry an unset status oneof",
-				"remediation":         "add the arm to setStatus and to statusArms",
+				"remediation":         "add the arm to setStatus",
 			})
 		row.Status = &frontendv1.RosterRow_None{None: &frontendv1.RosterRowStatusNone{}}
 	}

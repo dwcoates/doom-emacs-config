@@ -101,7 +101,7 @@ type harness struct {
 // resolver reads the table's KEYS.
 func testColors() vocab.RenderColors {
 	status := map[string]string{}
-	for _, arm := range statusArms {
+	for _, arm := range vocab.FooterStatusArms() {
 		status[arm] = "grey"
 	}
 	return vocab.RenderColors{FooterStatus: status}

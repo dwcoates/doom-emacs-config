@@ -2,7 +2,6 @@ package sidebar_test
 
 import (
 	"context"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -78,15 +77,11 @@ func (m *manualTimers) live() []*manualTimer {
 // and the keys are read off the proto's own oneof, so the double never keeps a
 // second list of the arms.
 func testColors() vocab.RenderColors {
-	arms, err := vocab.OneofArmNames((&frontendv1.RosterRow{}).ProtoReflect().Descriptor(), "status")
-	if err != nil {
-		panic(err)
-	}
 	status := map[string]string{}
 	glyphs := map[string]string{}
-	for _, arm := range arms {
+	for _, arm := range vocab.RosterStatusArms() {
 		status[arm] = "grey"
-		if strings.HasPrefix(arm, "merg") {
+		if vocab.IsMergeArm(arm) {
 			glyphs[arm] = "merge"
 		}
 	}
