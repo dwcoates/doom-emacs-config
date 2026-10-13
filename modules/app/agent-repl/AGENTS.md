@@ -380,6 +380,29 @@ unreachable from a live process.
     reported, naming what held it (`lsof +f -- <mount>`, read before the
     force). A run killed outright leaves an flock'd record in
     `/tmp/agent-repl-test-ramdisks`, and the next run reclaims the disk.
+  - NO PATH LEAVES A DISK UNNAMED. A disk that will not detach keeps its
+    record for the next run's reclaim. A failed attach (hdiutil killed at its
+    bound) force-detaches any RAM disk it left. The registry lock is held
+    from the leak check until the record names the new device.
+  - A LEAK OR A WEDGED DISK MANAGER STOPS THE ATTACH (owner ruling,
+    2026-10-12; one stuck run once led to 13 leaked 8 GiB disks).
+    - First, `diskutil list` within 100ms and `hdiutil info` within 50ms,
+      each just over 2x the healthy max measured under load (44ms, 22ms).
+    - A leak is a `ram://` disk the runner made (named by a record, or
+      mounted at an `artr-<pid>` mount point) that no live run's record names.
+    - Either finding puts the run on `/tmp` with a `RAM DISK REFUSED` ERROR
+      line naming the devices, their pids and whether those live, and the
+      probes' answers or timeouts; the run's result is unaffected.
+    - It also opens ONE workspace, `ramdisk-leak-investigation`, through the
+      `/create-or-update-workspace` skill's `run.sh --emit-commands`
+      (`AGENT_REPL_TEST_WORKSPACE_DISPATCH` overrides the script), its prompt
+      naming the evidence and the run's log (`AGENT_REPL_TEST_RUN_LOG`, set by
+      `bin/test-all.sh`).
+    - No other is created while a worktree on a branch of that name exists or
+      its create waits in the daemon's ingress; no daemon, no CLI or a failed
+      dispatch is an ERROR line too.
+  - The acquire and release edges are logged at INFO with their timings, so
+    a stall shows as a begin line with no end.
   - A RAM disk that cannot be made falls back to `/tmp` with an ERROR line.
 
 ### Suite timings: what a row measures
