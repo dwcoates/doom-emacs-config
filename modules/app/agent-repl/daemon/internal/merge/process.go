@@ -491,7 +491,7 @@ func (r *run) conflict(ctx context.Context, p *replay, files []string, targetBra
 	r.settleRebasing(ctx, p, "the rebase stopped on a conflict")
 	r.o.log(ctx, r.ws).Info(op, "a replayed commit conflicted; the requester's session resolves it", dlog.Context{
 		"workspace": string(r.ws), "commit": commit.SHA, "files": strings.Join(files, ", "), "worktree": r.subject.dir,
-		"attempt": r.conflictAttempts, "of": maxConflictAttempts})
+		"attempt": r.conflictAttempts, "of": MaxConflictAttempts})
 	return r.promptConflict(ctx, p, commit, files, targetBranch)
 }
 
@@ -533,7 +533,7 @@ func cutByRestart(close wsm.TurnClose, resumed bool) bool {
 	return close == wsm.CloseOrphaned || (resumed && close == wsm.CloseAgentDied)
 }
 
-// maxConflictAttempts is how many resolution attempts one commit's conflict
+// MaxConflictAttempts is how many resolution attempts one commit's conflict
 // gets IN A ROW before the merge fails in conflicts: one failure of the
 // rebase-then-resolve cycle is one resolution attempt that left the commit
 // unresolved (its turn failed, or files still conflict). A resolution that
@@ -541,7 +541,7 @@ func cutByRestart(close wsm.TurnClose, resumed bool) bool {
 // attempt a restart cut is prompted again and never counts. The bound is
 // owner-ruled (2026-10-12): modules/app/agent-repl/AGENTS.md, "The merge
 // queue's test gate and remediation contract".
-const maxConflictAttempts = 5
+const MaxConflictAttempts = 5
 
 // conflictBrief composes the conflict resolution's brief.
 func (r *run) conflictBrief(commit gitclient.Commit, files []string, targetBranch string) (string, error) {
@@ -576,7 +576,7 @@ func (r *run) conflictSettled(ctx context.Context, p *replay, round tabRound, cl
 		r.upsert(round, conflictsTab(round.settled(r.o.nowMS(), "a restart cut this resolution short; it is prompted again")))
 		r.closeTab(ctx, round, "restarted")
 		r.o.log(ctx, r.ws).Info(op, "a restart cut the conflict resolution short; it is prompted again and spends no attempt", dlog.Context{
-			"workspace": string(r.ws), "commit": commit.SHA, "close": close.String(), "attempt": r.conflictAttempts, "of": maxConflictAttempts})
+			"workspace": string(r.ws), "commit": commit.SHA, "close": close.String(), "attempt": r.conflictAttempts, "of": MaxConflictAttempts})
 		return r.promptConflict(ctx, p, commit, remaining, targetBranch)
 	}
 	why := ""
@@ -595,16 +595,16 @@ func (r *run) conflictSettled(ctx context.Context, p *replay, round tabRound, cl
 		}
 	}
 	// A RESOLUTION THAT DID NOT RESOLVE IS TRIED AGAIN on the same commit, up
-	// to maxConflictAttempts in a row (owner ruling, 2026-10-12); only then
+	// to MaxConflictAttempts in a row (owner ruling, 2026-10-12); only then
 	// does the merge fail. A change to the merge machinery is refused at once:
 	// another attempt cannot make it acceptable.
-	if why != "" && !machinery && r.conflictAttempts < maxConflictAttempts {
+	if why != "" && !machinery && r.conflictAttempts < MaxConflictAttempts {
 		r.settleAgentic()
-		retry := fmt.Sprintf("attempt %d of %d did not resolve it (%s); trying again", r.conflictAttempts, maxConflictAttempts, why)
+		retry := fmt.Sprintf("attempt %d of %d did not resolve it (%s); trying again", r.conflictAttempts, MaxConflictAttempts, why)
 		r.upsert(round, conflictsTab(round.settled(r.o.nowMS(), retry)))
 		r.closeTab(ctx, round, "failed")
 		r.o.log(ctx, r.ws).Info(op, "the conflict resolution did not resolve the commit; the session tries again", dlog.Context{
-			"workspace": string(r.ws), "commit": commit.SHA, "attempt": r.conflictAttempts, "of": maxConflictAttempts, "why": why})
+			"workspace": string(r.ws), "commit": commit.SHA, "attempt": r.conflictAttempts, "of": MaxConflictAttempts, "why": why})
 		files := remaining
 		if len(files) == 0 {
 			files, err = r.git.ConflictedFiles(ctx, r.subject.dir)

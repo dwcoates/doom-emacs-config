@@ -902,7 +902,7 @@ like an improvement still needs that conversation. Code:
   - The tests cycle fails the merge when five fixing attempts in a row leave
     the gate failing (`MaxFixAttempts`).
   - The conflict cycle fails the merge when five resolution attempts in a row
-    leave one commit's conflict unresolved (`maxConflictAttempts`); one
+    leave one commit's conflict unresolved (`MaxConflictAttempts`); one
     failure is a resolution turn that failed or left files conflicted.
   - A passing gate, a resolution that resolves, and a conflict on another
     commit each start their cycle's count over.
