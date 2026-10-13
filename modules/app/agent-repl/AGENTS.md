@@ -871,9 +871,11 @@ like an improvement still needs that conversation. Code:
     - `e2e/`: `e2e` and `e2e-emacs`, and `e2e/sandbox/` only `e2e-emacs`;
   - the runner itself (`testrun/`, `bin/test-all.sh` and the two report
     scripts it delegates to) runs every suite;
-  - documentation runs nothing: the module's `docs/`, `prompts/` and `plans/`,
-    and every Markdown file at the module root, except `metaprompt.md`, which
-    the shim's own suite reads back and so runs `shim`;
+  - the briefs (`prompts/`) run `daemon`: the daemon composes every merge and
+    repair prompt from them and its suite pins their placeholders;
+  - documentation runs nothing: the module's `docs/` and `plans/`, and every
+    Markdown file at the module root, except `metaprompt.md`, which the shim's
+    own suite reads back and so runs `shim`;
   - outside the module, the paths a roster harness reads run exactly the
     suites that read them: the git hooks, the `.claude` scripts and the
     repository's `bin/` (each one's harness, plus `background-harness`,
