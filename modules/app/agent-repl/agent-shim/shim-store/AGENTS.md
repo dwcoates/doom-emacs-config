@@ -163,10 +163,21 @@ overwrites their real `shim-store.build.json`.
   `book_agent_id`, `turn_id`), indexed `(book_agent_id, turn_id)`.
   `writeTurnPrompt` (`internal/db/turnhead.go`) is its one writer, in the
   write's own transaction beside `placeRow`. It exists for a page's
-  `turn_heads` (below). An IN-PLACE table whose backfill is Go
+  `heads` (below). An IN-PLACE table whose backfill is Go
   (`backfillTurnPrompts`), because the turn and the item arm live only in the
   frame blob: it decodes every stored page line once, in the transaction that
   creates the table, and a frame it cannot decode fails the open (never nukes).
+- `turn_line` — EVERY PAGE LINE STAMPED WITH A TURN, WITH ITS PLACE: one row
+  per page line whose row is stamped with a turn (`position` PK,
+  `book_agent_id`, `turn_id`, `at_ms`, `ordinal`), indexed `(book_agent_id,
+  turn_id, at_ms, ordinal, position)`. The place is copied from the value
+  `placeRow` wrote, by `writeTurnLine` (`internal/db/turnhead.go`), its one
+  writer, in the same transaction, because an index cannot span two tables.
+  It exists for each head's `between` arm (below). A retired line keeps its
+  row; the reader's kind check excludes it. An IN-PLACE table whose backfill
+  is Go (`backfillTurnLines`): it decodes every stored page line and reads its
+  place from `entry_place`, and an undecodable frame or a missing place fails
+  the open (never nukes).
 - `write_ledger` — one row per write APPLIED AND STILL RE-READABLE (`write_id`
   PK, `upsert_key`, `write_seq`, `applied_at_ms`, `source_file_id`,
   `source_offset`), written in the same transaction as the row it applied and
@@ -881,7 +892,7 @@ and not something this change touches.
   `known_through` catch-up serves the lines FIRST WRITTEN AFTER the mark
   (`position > mark`, write order, not place), ordered by descending place, so
   a late-written line placed earlier is delivered rather than skipped.
-- **EVERY PAGE CARRIES ITS TURN HEADS** (`turn_heads`, owner ruling
+- **EVERY PAGE CARRIES ITS TURN HEADS** (`heads`, owner ruling
   2026-10-12, `docs/protobuf-design/complete-pages.md`): the open's page (a
   tail-only page has no lines and so none), an `after` page and a `through`
   page. For each turn a line of the page is stamped with, its prompt line when
@@ -889,7 +900,11 @@ and not something this change touches.
   the page), newest first, each turn once; a turn whose prompt line is on the
   page, or that holds none, has none. ONE statement per page (`turnHeadsSQL`,
   a seek of `turn_prompt` per turn, read in the page's own transaction); a
-  retired prompt line is not a head.
+  retired prompt line is not a head. EACH HEAD SAYS WHETHER STEPS SIT BETWEEN
+  (`StoreTurnHead.between`): `steps_between` when a page line stamped with the
+  turn (retired lines excluded) is placed strictly between the prompt and the
+  page's lowest line, else `adjacent`, answered in the same statement by one
+  EXISTS per head that seeks `turn_line`'s ordered index.
 - **ONE PAGE SIZE, THE STORE'S: `db.PageSize` = 50 lines** (owner ruling,
   `docs/protobuf-design/feed-paging-on-demand.md` change 1). Every page — the
   open's, a continuation, a `through` read — holds at most that many lines, and

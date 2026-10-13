@@ -18,10 +18,16 @@ import (
 // only steps and the prompt sits on the page below.
 func writeLongTurn(ctx context.Context, t *testing.T, shim *producer, book, turn string) {
 	t.Helper()
+	writeTurnOf(ctx, t, shim, book, turn, db.PageSize)
+}
+
+// writeTurnOf writes one turn whose prompt is followed by `steps` answers.
+func writeTurnOf(ctx context.Context, t *testing.T, shim *producer, book, turn string, steps int) {
+	t.Helper()
 	prompt := shim.agentEntry("w-"+turn, turn, promptLine(agentID(book), promptFact(turn, book, "ask")))
 	prompt.Turn = turnID(turn)
 	entries := []*storev1.StoreEntry{prompt}
-	for i := 1; i <= db.PageSize; i++ {
+	for i := 1; i <= steps; i++ {
 		label := fmt.Sprintf("L%d", i)
 		step := shim.agentEntry("w-"+turn+"-"+label, "u-"+turn+"-"+label, frameLine(agentID(book), responseFrame(book, "act-"+label, label)))
 		step.Turn = turnID(turn)
@@ -33,20 +39,20 @@ func writeLongTurn(ctx context.Context, t *testing.T, shim *producer, book, turn
 func TestTurnHeadsOverTheWire(t *testing.T) {
 	tests := []struct {
 		name  string
-		heads func(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, opened *storev1.OpenAgentSessionSuccess) []*storev1.StoreLineAt
+		heads func(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, opened *storev1.OpenAgentSessionSuccess) []*storev1.StoreTurnHead
 		want  []string
 	}{
 		{
 			name: "the opening page carries the prompt below it",
-			heads: func(_ context.Context, _ *testing.T, _ storev1connect.ShimStoreClient, opened *storev1.OpenAgentSessionSuccess) []*storev1.StoreLineAt {
-				return opened.GetPage().GetTurnHeads()
+			heads: func(_ context.Context, _ *testing.T, _ storev1connect.ShimStoreClient, opened *storev1.OpenAgentSessionSuccess) []*storev1.StoreTurnHead {
+				return opened.GetPage().GetHeads()
 			},
 			want: []string{"prompt:ask"},
 		},
 		{
 			name: "the continuation holding the prompt carries no head",
-			heads: func(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, opened *storev1.OpenAgentSessionSuccess) []*storev1.StoreLineAt {
-				return readPage(ctx, t, cli, "main", assertPageMore(t, opened.GetPage())).GetTurnHeads()
+			heads: func(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, opened *storev1.OpenAgentSessionSuccess) []*storev1.StoreTurnHead {
+				return readPage(ctx, t, cli, "main", assertPageMore(t, opened.GetPage())).GetHeads()
 			},
 			want: []string{},
 		},
@@ -67,10 +73,35 @@ func TestTurnHeadsOverTheWire(t *testing.T) {
 			// Assert
 			got := make([]string, 0, len(heads))
 			for _, head := range heads {
-				got = append(got, lineText(head.GetLine()))
+				got = append(got, lineText(head.GetLine().GetLine()))
 			}
 			assertTexts(t, "the turn heads", got, test.want)
+			for _, head := range heads {
+				if head.GetAdjacent() == nil {
+					t.Fatalf("head %v: want adjacent, the turn's steps follow its prompt directly", head)
+				}
+			}
 			store.assertNoErrorRecords()
 		})
 	}
+}
+
+func TestATurnHeadWithStepsBelowThePageSaysStepsBetweenOverTheWire(t *testing.T) {
+	// Arrange: one step more than a page, so the oldest step sits between the
+	// prompt and the newest page.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	cli := store.client()
+	writeTurnOf(ctx, t, streamProducer(cli), "main", "turn-1", db.PageSize+1)
+
+	// Act
+	opened := openSession(ctx, t, cli, "main", nil)
+
+	// Assert
+	heads := opened.GetPage().GetHeads()
+	if len(heads) != 1 || heads[0].GetStepsBetween() == nil {
+		t.Fatalf("heads = %v, want the prompt with steps between", heads)
+	}
+	store.assertNoErrorRecords()
 }
