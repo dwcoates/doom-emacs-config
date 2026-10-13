@@ -1781,6 +1781,27 @@ type fakeSidebar struct {
 	sidebar.Resolver
 	mu    sync.Mutex
 	facts []footer.MergeFacts
+	// async is each repository's last async set (SetAsyncMerges), and
+	// asyncTold every set told, in order.
+	async     map[wsm.RepoKey][]ids.WorkspaceID
+	asyncTold [][]ids.WorkspaceID
+}
+
+func (s *fakeSidebar) SetAsyncMerges(repo wsm.RepoKey, requesters []ids.WorkspaceID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.async == nil {
+		s.async = map[wsm.RepoKey][]ids.WorkspaceID{}
+	}
+	s.async[repo] = requesters
+	s.asyncTold = append(s.asyncTold, requesters)
+}
+
+// asyncOf answers the last async set REPO was told.
+func (s *fakeSidebar) asyncOf(repo wsm.RepoKey) []ids.WorkspaceID {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.async[repo]
 }
 
 func (s *fakeSidebar) SetMerge(_ ids.WorkspaceID, facts footer.MergeFacts) {
