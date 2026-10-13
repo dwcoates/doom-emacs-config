@@ -119,8 +119,8 @@ export function expandVisibleRows(rows: readonly RosterRow[], basePath: string):
  *   - `merged`: the recently-merged band. Drawn plain; a click selects it.
  *   - `hidden`: the hidden-workspaces section. Drawn with NO STATE (owner
  *     request, 2026-10-13): no status color, no status mark, no read greying,
- *     no reviving shimmer and no attention marker; only a cold gate's strike
- *     through the name. A click SHOWS it again (`SetWorkspaceHidden`), which
+ *     no reviving shimmer and no attention marker; its name is in the
+ *     Recently Merged band's grey, struck through only at a cold gate. A click SHOWS it again (`SetWorkspaceHidden`), which
  *     is the section's one gesture.
  */
 export type RowPlace = "grouping" | "merged" | "hidden";
@@ -227,8 +227,8 @@ export function drawRosterRow(
 
   // THE BANDS DRAW NO STATUS MARK (owner requests, 2026-10-02 and
   // 2026-10-13): a recently-merged row and a hidden row show no dot or glyph.
-  // A merged row's name is in the grey a viewed workspace's wears; a hidden
-  // row's is in plain text, struck through only at a cold gate.
+  // Both bands' names are in the repository names' grey; a hidden row's is
+  // struck through only at a cold gate.
   // With no mark, the NAME is the detail panel's pointer trigger (owner
   // request, 2026-10-11).
   let statusMark: HTMLElement | null = null;
@@ -252,9 +252,10 @@ export function drawRosterRow(
     label.classList.add("viewed");
     ws.setAttribute("data-viewed", "true");
   }
-  // A MERGED ROW'S NAME TAKES THE REPOSITORY NAMES' COLOUR (owner request,
-  // 2026-10-03); its timestamp keeps the secondary grey.
-  if (merged) label.classList.add("merged-name");
+  // A BAND ROW'S NAME TAKES THE REPOSITORY NAMES' COLOUR, Recently Merged and
+  // Hidden alike (owner requests, 2026-10-03 and 2026-10-13); a merged row's
+  // timestamp keeps the secondary grey.
+  if (merged || hidden) label.classList.add("band-name");
   // THE REVIVING SHIMMER IS THE NAME'S TOO, and only while the wire carries
   // the marker: the daemon lowers it when the revival ends, whichever way.
   if (!hidden && u.reviving !== undefined && drawRosterRowReviving(u.reviving, `${path}.reviving`)) {
