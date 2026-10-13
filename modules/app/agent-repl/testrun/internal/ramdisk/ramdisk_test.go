@@ -1641,3 +1641,61 @@ func TestReclaimFailsAStrayWhenTheRegistryCannotBeMade(t *testing.T) {
 		t.Fatalf("the stray went without the registry lock (stat err = %v)", statErr)
 	}
 }
+
+func TestReleaseRegistry(t *testing.T) {
+	earlier := errors.New("attach refused")
+	closeFailed := errors.New("bad file descriptor")
+	tests := []struct {
+		name     string
+		err      error
+		closeErr error
+		want     []error
+		wantNil  bool
+	}{
+		{name: "a clean release keeps no error", wantNil: true},
+		{name: "a clean release keeps the holder's error", err: earlier, want: []error{earlier}},
+		{name: "a failed release is answered", closeErr: closeFailed, want: []error{closeFailed}},
+		{name: "a failed release joins the holder's error", err: earlier, closeErr: closeFailed, want: []error{earlier, closeFailed}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			err := tc.err
+
+			// Act
+			releaseRegistry(func() error { return tc.closeErr }, &err)
+
+			// Assert
+			if tc.wantNil != (err == nil) {
+				t.Fatalf("err = %v, want nil %v", err, tc.wantNil)
+			}
+			for _, want := range tc.want {
+				if !errors.Is(err, want) {
+					t.Fatalf("err = %v, want %v in its chain", err, want)
+				}
+			}
+			if tc.closeErr != nil && !strings.Contains(err.Error(), "release the RAM disk registry lock") {
+				t.Fatalf("err = %v, want the release named", err)
+			}
+		})
+	}
+}
+
+func TestRegistryHoldersShareReleaseRegistry(t *testing.T) {
+	for _, file := range []string{"ramdisk.go", "investigation.go"} {
+		// Arrange
+		src, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Act
+		takes := strings.Count(string(src), "unlock, err := m.lockRegistry()")
+		releases := strings.Count(string(src), "\tdefer releaseRegistry(unlock, &err)")
+
+		// Assert
+		if takes == 0 || takes != releases || strings.Count(string(src), "closeErr := unlock()") > 1 {
+			t.Errorf("%s takes the registry lock %d times and releases it through releaseRegistry %d times; want every release through it", file, takes, releases)
+		}
+	}
+}
