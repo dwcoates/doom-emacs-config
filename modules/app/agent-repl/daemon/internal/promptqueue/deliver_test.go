@@ -815,3 +815,62 @@ func TestAnOrdinaryStartTurnRefusalIsStillSurfaced(t *testing.T) {
 		t.Fatal("Submit = nil error, want a refusal other than no_session surfaced")
 	}
 }
+
+// THE SESSION COMING UP DURING THE REFUSED CALL STILL DELIVERS THE PROMPT: the
+// release is owed to the call's settle, so the hold the refusal stamps is
+// released by it rather than waiting for an edge already past.
+func TestASessionThatComesUpDuringTheRefusedCallDeliversThePrompt(t *testing.T) {
+	// Arrange: the first StartTurn finds no session, and the revival's
+	// session-up edge lands while that call stands; the second succeeds.
+	h := newHarness(t)
+	h.sender.startErr = errShimNoSession
+	h.sender.startHook = func() {
+		switch h.sender.attempts {
+		case 1:
+			h.q.ReleaseReconnectHolds("ws-1")
+		case 2:
+			h.sender.startErr = nil
+		}
+	}
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "hello")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Assert
+	if got := h.sender.turns; len(got) != 1 || got[0] != "t1" {
+		t.Fatalf("started turns = %v, want t1 delivered once the release ran", got)
+	}
+	standing, err := h.db.HeldPrompts(context.Background(), "ws-1")
+	if err != nil {
+		t.Fatalf("HeldPrompts: %v", err)
+	}
+	for _, held := range standing {
+		if held.Tombstone == nil && held.Hold != nil {
+			t.Fatalf("standing = %+v, want no hold left waiting", standing)
+		}
+	}
+}
+
+// A SESSION-UP EDGE DURING A CALL THAT SUCCEEDS delivers nothing twice: the
+// owed release finds nothing held.
+func TestASessionUpDuringASuccessfulCallDeliversThePromptOnce(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.sender.startHook = func() {
+		if h.sender.attempts == 1 {
+			h.q.ReleaseReconnectHolds("ws-1")
+		}
+	}
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "hello")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Assert
+	if h.sender.attempts != 1 {
+		t.Fatalf("StartTurn attempts = %d, want 1", h.sender.attempts)
+	}
+}

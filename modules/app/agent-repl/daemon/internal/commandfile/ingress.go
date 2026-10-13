@@ -31,8 +31,8 @@ const (
 	opEntry      = "daemon.commandfile.entry"
 	opGate       = "daemon.commandfile.gate"
 	// opMergeQueue is the outcome record of a merge-queue control entry
-	// (merge_evict, merge_pause, merge_resume, merge_hold_rollouts,
-	// merge_release_rollouts): the answer the requesting
+	// (merge_evict, merge_move_up, merge_move_down, merge_pause, merge_resume,
+	// merge_hold_rollouts, merge_release_rollouts): the answer the requesting
 	// agent reads back, keyed by the file's path like every other record here.
 	opMergeQueue = "daemon.commandfile.merge_queue"
 )
@@ -327,6 +327,8 @@ func (i *ingress) apply(ctx context.Context, log dlog.Logger, file string, index
 		return i.deps.Merge.Enqueue(ctx, merge.Request{Workspace: ws, Source: source, By: merge.RequestedByAgent, Detached: detached, OneShot: entry.OneShot})
 	case TypeMergeEvict:
 		return i.applyMergeEvict(ctx, log, entry)
+	case TypeMergeMoveUp, TypeMergeMoveDown:
+		return i.applyMergeMove(ctx, log, entry)
 	case TypeMergePause, TypeMergeResume:
 		return i.applyMergePause(ctx, log, entry)
 	case TypeMergeHoldRollouts, TypeMergeReleaseRollouts:
@@ -423,29 +425,16 @@ func (i *ingress) mergeSourceArm(ctx context.Context, requester ids.WorkspaceID,
 // an agent asking to take a merge out is satisfied when none is in, so the
 // file is applied and the outcome record says nothing was queued.
 func (i *ingress) applyMergeEvict(ctx context.Context, log dlog.Logger, entry Entry) error {
-	requester, err := i.target(ctx, entry)
+	requester, evicted, err := i.queueSubject(ctx, entry, "evict_dir", entry.EvictDir)
 	if err != nil {
 		return err
-	}
-	evicted := requester
-	if entry.EvictDir != "" {
-		if i.deps.DB == nil {
-			return fmt.Errorf("this entry names an evict_dir and the ingress has no state client to resolve it with")
-		}
-		record, err := i.deps.DB.WorkspaceByDir(ctx, entry.EvictDir)
-		if err != nil {
-			return fmt.Errorf("unknown_workspace: no workspace is registered at evict_dir %q: %w", entry.EvictDir, err)
-		}
-		evicted = record.ID
 	}
 	outcome := dlog.Context{
 		"type": entry.Type, "requester": string(requester), "workspace": string(evicted),
 		"own": evicted == requester,
 	}
 	err = i.deps.Merge.Evict(ctx, evicted)
-	if refusal, ok := merge.Refused(err); ok && refusal.Arm == merge.ArmNoSuchQueuedMerge {
-		outcome["outcome"] = "not_queued"
-		log.Info(opMergeQueue, "nothing to evict: the workspace has no merge on the queue", outcome)
+	if answeredNotQueued(log, err, outcome, "nothing to evict: the workspace has no merge on the queue") {
 		return nil
 	}
 	if err != nil {
@@ -453,6 +442,79 @@ func (i *ingress) applyMergeEvict(ctx context.Context, log dlog.Logger, entry En
 	}
 	outcome["outcome"] = "evicted"
 	log.Info(opMergeQueue, "evicted the workspace's merge from the queue", outcome)
+	return nil
+}
+
+// queueSubject resolves a queue control's two workspaces: the REQUESTER the
+// entry targets, and the SUBJECT whose merge it addresses -- the requester's
+// own unless DIR (the entry's FIELD) names another workspace's worktree.
+func (i *ingress) queueSubject(ctx context.Context, entry Entry, field, dir string) (requester, subject wsm.WorkspaceID, err error) {
+	requester, err = i.target(ctx, entry)
+	if err != nil {
+		return "", "", err
+	}
+	if dir == "" {
+		return requester, requester, nil
+	}
+	if i.deps.DB == nil {
+		return "", "", fmt.Errorf("this entry names a %s and the ingress has no state client to resolve it with", field)
+	}
+	record, err := i.deps.DB.WorkspaceByDir(ctx, dir)
+	if err != nil {
+		return "", "", fmt.Errorf("unknown_workspace: no workspace is registered at %s %q: %w", field, dir, err)
+	}
+	return requester, record.ID, nil
+}
+
+// answeredNotQueued records ERR as the `not_queued` outcome when it is the
+// orchestrator's no_such_queued_merge refusal, answering whether it was: a
+// queue control addressing a merge that is not there is satisfied, not
+// failed. Any other ERR is left to the caller.
+func answeredNotQueued(log dlog.Logger, err error, outcome dlog.Context, message string) bool {
+	refusal, ok := merge.Refused(err)
+	if !ok || refusal.Arm != merge.ArmNoSuchQueuedMerge {
+		return false
+	}
+	outcome["outcome"] = "not_queued"
+	log.Info(opMergeQueue, message, outcome)
+	return true
+}
+
+// applyMergeMove maps a merge_move_up or merge_move_down entry onto the
+// orchestrator's Move, the entry point UpdateMergeQueue's move arms call. The
+// requester's own merge moves unless move_dir names another workspace's.
+//
+// A MERGE THAT DOES NOT MOVE IS AN ANSWER, NOT A FAILURE, exactly as an evict
+// of nothing is: a merge with no waiting merge to pass is applied with the
+// outcome `unmoved`, and a workspace with nothing on the queue with
+// `not_queued`.
+func (i *ingress) applyMergeMove(ctx context.Context, log dlog.Logger, entry Entry) error {
+	requester, subject, err := i.queueSubject(ctx, entry, "move_dir", entry.MoveDir)
+	if err != nil {
+		return err
+	}
+	move := wsm.MergeMoveUp
+	if entry.Type == TypeMergeMoveDown {
+		move = wsm.MergeMoveDown
+	}
+	outcome := dlog.Context{
+		"type": entry.Type, "requester": string(requester), "workspace": string(subject),
+		"own": subject == requester, "move": move.String(),
+	}
+	moved, err := i.deps.Merge.Move(ctx, subject, move)
+	if answeredNotQueued(log, err, outcome, "nothing to move: the workspace has no merge on the queue") {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !moved {
+		outcome["outcome"] = "unmoved"
+		log.Info(opMergeQueue, "the merge has no waiting merge to pass that way, and stays where it is", outcome)
+		return nil
+	}
+	outcome["outcome"] = "moved_" + move.String()
+	log.Info(opMergeQueue, "moved the workspace's merge one place in its queue", outcome)
 	return nil
 }
 

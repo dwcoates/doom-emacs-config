@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"os/exec"
 	"strings"
@@ -22,6 +21,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/shimsocket"
 )
 
 // HealthyStandDownExit is the MEASURED time a healthy shim takes to leave on
@@ -589,19 +589,12 @@ const adoptedGonePoll = 25 * time.Millisecond
 func (c *client) killAdopted(ctx context.Context, attr KillAttribution, grace time.Duration) error {
 	pid, err := socketPeerPID(c.udsPath)
 	if err != nil {
-		if isSocketGone(err) {
+		if shimsocket.Gone(err) {
 			// The socket refuses or is absent: the shim the caller asked to
 			// stop is already gone. That is the state they asked for.
-			c.log.Info("daemon.shimclient.kill", "the adopted shim's socket is gone; nothing to stop", dlog.Context{
-				"workspace_id": string(c.ws), "uds": c.udsPath, "actor": attr.Actor,
-			})
-			c.publishExit(ExitInfo{
-				PID:      c.PID(),
-				Code:     -1,
-				Inferred: true,
-				Stderr:   "adopted shim: the socket was already gone when the daemon went to stop it",
-			})
-			return nil
+			return c.adoptedAlreadyGone(attr, c.PID(), dlog.Context{"uds": c.udsPath},
+				"the adopted shim's socket is gone; nothing to stop",
+				"adopted shim: the socket was already gone when the daemon went to stop it")
 		}
 		c.log.Error("daemon.shimclient.kill", "could not learn the adopted shim's pid; it cannot be stopped", dlog.Context{
 			"workspace_id": string(c.ws), "uds": c.udsPath, "error": err.Error(),
@@ -619,16 +612,9 @@ func (c *client) killAdopted(ctx context.Context, attr KillAttribution, grace ti
 		// exactly as an absent socket is (seen under load: a merge's teardown
 		// stopping the merged workspace's adopted shim failed the merge on
 		// "process group of the adopted shim ...: no such process").
-		c.log.Info("daemon.shimclient.kill", "the adopted shim exited before it could be stopped; nothing to stop", dlog.Context{
-			"workspace_id": string(c.ws), "pid": pid, "actor": attr.Actor,
-		})
-		c.publishExit(ExitInfo{
-			PID:      pid,
-			Code:     -1,
-			Inferred: true,
-			Stderr:   "adopted shim: the process had exited when the daemon went to stop it",
-		})
-		return nil
+		return c.adoptedAlreadyGone(attr, pid, dlog.Context{"pid": pid},
+			"the adopted shim exited before it could be stopped; nothing to stop",
+			"adopted shim: the process had exited when the daemon went to stop it")
 	}
 	if err != nil {
 		c.log.Error("daemon.shimclient.kill", "could not read the adopted shim's process group", dlog.Context{
@@ -697,6 +683,20 @@ func (c *client) killAdopted(ctx context.Context, attr KillAttribution, grace ti
 		return fmt.Errorf("shimclient: adopted shim %d for %q did not go down within %s of SIGKILL", pid, c.ws, grace)
 	}
 	c.publishAdoptedKill(pid, syscall.SIGKILL)
+	return nil
+}
+
+// adoptedAlreadyGone is the one answer to an adopted kill that finds the shim
+// already gone, whichever observation found it: the stop the caller asked for
+// has happened, so it is recorded at INFO with what was observed, the exit is
+// published as inferred under PID, and the kill succeeds.
+func (c *client) adoptedAlreadyGone(attr KillAttribution, pid int, observed dlog.Context, message, stderr string) error {
+	fields := dlog.Context{"workspace_id": string(c.ws), "actor": attr.Actor}
+	for k, v := range observed {
+		fields[k] = v
+	}
+	c.log.Info("daemon.shimclient.kill", message, fields)
+	c.publishExit(ExitInfo{PID: pid, Code: -1, Inferred: true, Stderr: stderr})
 	return nil
 }
 
@@ -1403,7 +1403,7 @@ func (c *client) witnessAdoptedDeath(dialErr error) bool {
 	c.mu.Lock()
 	spawned := c.cmd != nil
 	c.mu.Unlock()
-	if spawned || c.lockProbe == nil || !isSocketGone(dialErr) {
+	if spawned || c.lockProbe == nil || !shimsocket.Gone(dialErr) {
 		return false
 	}
 	free, err := c.lockProbe(c.ws)
@@ -1485,34 +1485,6 @@ func recvLoop[T any](stream Stream[T], done <-chan struct{}) (<-chan T, <-chan e
 		}
 	}()
 	return frames, errs
-}
-
-// isSocketGone reports whether an error means the process serving the unix
-// socket is not there: ECONNREFUSED or ENOENT on the dial, and ENOTCONN on a
-// connection that was made and then lost before anything could be read off it.
-//
-// ENOTCONN IS THE SAME EVIDENCE ARRIVING ONE INSTANT LATER. A dial to a shim
-// that is on its way out can win the race with the shim's exit and hand back a
-// connected socket whose peer is already gone; the kernel then answers every
-// question about that peer -- `LOCAL_PEERPID' on Darwin, a read on either
-// platform -- with ENOTCONN. Reading that as a hard failure made `killAdopted'
-// report "could not learn the adopted shim's pid; it cannot be stopped" about a
-// shim that had just stopped itself, which is the one thing a caller asking for
-// a stop cannot act on. There is no other way for a socket handed back by a
-// successful `net.Dial' to be unconnected, so the arm is not broader than the
-// evidence it names.
-func isSocketGone(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ENOENT) || errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ENOTCONN) {
-		return true
-	}
-	var opErr *net.OpError
-	if errors.As(err, &opErr) {
-		return errors.Is(opErr.Err, syscall.ECONNREFUSED) || errors.Is(opErr.Err, syscall.ENOENT) || errors.Is(opErr.Err, syscall.ENOTCONN)
-	}
-	return false
 }
 
 // errText renders a stream break for a log record; a producer-side end is

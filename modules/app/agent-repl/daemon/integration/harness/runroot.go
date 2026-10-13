@@ -90,7 +90,7 @@ func (s runRootSpace) withCreationLock(body func() error) error {
 		return fmt.Errorf("open the run-root creation lock: %w", err)
 	}
 	defer f.Close()
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+	if err := takeExclusive(f, nil); err != nil {
 		return fmt.Errorf("take the run-root creation lock: %w", err)
 	}
 	return body()

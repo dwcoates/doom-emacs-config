@@ -42,6 +42,7 @@ import {
   commandRefusedRow,
   detachedShellRow,
   detachedSubagentRow,
+  earlierStepsRow,
   feedId,
   chessBoardUnit,
   findingsUnit,
@@ -154,6 +155,7 @@ export function everyRow(): FeedRow[] {
     mergeHandbackRow(),
     ...FEED_COMMAND_PANEL_ARMS.map((arm) => commandPanelRow(arm)),
     commandRefusedRow({ reason: `a long reason ${RUN}` }),
+    earlierStepsRow(),
   ];
   return rows.map((row, i) => {
     const id = `contained-${i.toString().padStart(3, "0")}`;

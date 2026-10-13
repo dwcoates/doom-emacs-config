@@ -2,14 +2,20 @@ package harness
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"time"
 )
 
 // ArtifactsEnv names the directory a FAILING integration test copies its
-// daemon's structured logs into. Unset, the logs are emitted as bounded tails
-// into the test's own output instead -- never nothing.
+// daemon's structured logs into. Unset, MainAt points it at a fresh run
+// directory under the user cache dir (defaultArtifacts), so a red always
+// keeps its WHOLE logs: a bounded tail of a verbose run log routinely ends
+// before the record that explains the failure (2026-10-12: a handover's
+// landing deploy was nowhere in the 64 KiB a failing test printed).
 //
 // WHY: the state root is a per-test temp dir the testing package deletes on
 // the way out, so a red in a full run used to leave only its one failure line
@@ -78,4 +84,53 @@ func tailBytes(body []byte, limit int) string {
 // artifactDirName turns a Go test name into one path segment.
 func artifactDirName(name string) string {
 	return strings.NewReplacer("/", "_", string(filepath.Separator), "_").Replace(name)
+}
+
+// keptArtifactRuns is how many runs' preserved logs the default artifacts
+// root keeps: the newest, so a red from a recent run is always there to read
+// and the directory never grows without bound.
+const keptArtifactRuns = 10
+
+// defaultArtifacts creates this run's directory under root, named for its
+// start instant and pid so runs sort by age and never collide, and removes
+// every run directory but the newest keptArtifactRuns (this one included).
+func defaultArtifacts(root string, now time.Time, pid int) (string, error) {
+	dir := filepath.Join(root, fmt.Sprintf("%s-%d", now.UTC().Format("20060102T150405.000000000Z"), pid))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("harness: create the run's artifacts directory: %w", err)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return "", fmt.Errorf("harness: list the artifacts root %s: %w", root, err)
+	}
+	var runs []string
+	for _, e := range entries {
+		if e.IsDir() {
+			runs = append(runs, e.Name())
+		}
+	}
+	slices.Sort(runs)
+	for _, old := range runs[:max(0, len(runs)-keptArtifactRuns)] {
+		if err := os.RemoveAll(filepath.Join(root, old)); err != nil {
+			return "", fmt.Errorf("harness: remove the old artifacts run %s: %w", old, err)
+		}
+	}
+	return dir, nil
+}
+
+// useDefaultArtifacts points ArtifactsEnv at a fresh run directory under the
+// user cache dir when the run did not name one.
+func useDefaultArtifacts() error {
+	if os.Getenv(ArtifactsEnv) != "" {
+		return nil
+	}
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		return fmt.Errorf("harness: locate the user cache dir for test artifacts: %w", err)
+	}
+	dir, err := defaultArtifacts(filepath.Join(cache, "agent-repl", "integration-artifacts"), time.Now(), os.Getpid())
+	if err != nil {
+		return err
+	}
+	return os.Setenv(ArtifactsEnv, dir)
 }
