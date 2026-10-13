@@ -7,14 +7,6 @@ import (
 	"time"
 )
 
-// undoLayout44 strips layout 44's columns (compactAfterDDL) from a migrated
-// file, leaving its stamp alone.
-func undoLayout44(t *testing.T, path string) {
-	t.Helper()
-	execRaw(t, path, `ALTER TABLE merge_queue DROP COLUMN source_compact_after`)
-	execRaw(t, path, `ALTER TABLE workspaces DROP COLUMN merge_compact_after`)
-}
-
 func TestRegisterWorkspaceRecordsAMergeWorkspacesCompactAfterAsk(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
