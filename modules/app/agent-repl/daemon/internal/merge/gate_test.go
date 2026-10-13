@@ -1,10 +1,14 @@
 package merge
 
 import (
-	frontendv1 "agentrepl/proto/frontend/v1"
+	"context"
+	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
+
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // streamingGate scripts one passing gate run that announces each suite.
@@ -179,5 +183,146 @@ func TestDeclinedSuiteUsesTheNonFailurePresentation(t *testing.T) {
 	}
 	if _, passed := line.GetEdge().(*frontendv1.FooterMergeStepSuite_Passed); !passed {
 		t.Fatalf("footer edge = %T, want passed/non-failure", line.GetEdge())
+	}
+}
+
+// docsOnlyMerge is a merge whose branch changes only documentation, so the
+// gate selects no suite.
+func docsOnlyMerge(t *testing.T) *harness {
+	t.Helper()
+	h := newHarness(t)
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/docs/USER-GUIDE.md"}
+	enqueue(t, h)
+	return h
+}
+
+func TestAnEmptySelectionStartsNoRunner(t *testing.T) {
+	// Arrange.
+	h := docsOnlyMerge(t)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	h.runner.mu.Lock()
+	defer h.runner.mu.Unlock()
+	if len(h.runner.argv) != 0 {
+		t.Fatalf("the runner was started %d times, want none", len(h.runner.argv))
+	}
+}
+
+func TestAnEmptySelectionLands(t *testing.T) {
+	// Arrange.
+	h := docsOnlyMerge(t)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	if got := h.footer.last(); got.State != StateMerged {
+		t.Fatalf("facts = %+v, want the merge landed", got)
+	}
+}
+
+func TestAnEmptySelectionDrawsASettledTestsTabWithNoSuites(t *testing.T) {
+	// Arrange.
+	h := docsOnlyMerge(t)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	tests := h.feed.lastTabOfKind(TabTests).GetTests()
+	if tests.GetSettled().GetSucceeded() == nil || len(tests.GetSuites()) != 0 {
+		t.Fatalf("tests tab = %v, want settled succeeded with no suite rows", tests)
+	}
+}
+
+func TestAnEmptySelectionsLogSaysNoSuiteWasSelected(t *testing.T) {
+	// Arrange.
+	h := docsOnlyMerge(t)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	lease := h.db.ledger[theWorkspace][0].Lease
+	body, err := os.ReadFile(h.o.testLog(lease, 1).path)
+	if err != nil || !strings.Contains(string(body), "no suite selected") || !strings.Contains(string(body), "docs/USER-GUIDE.md") {
+		t.Fatalf("log = (%q, %v), want why no suite ran and the paths", body, err)
+	}
+}
+
+func TestAnEmptySelectionIsRecordedAtInfoNamingThePaths(t *testing.T) {
+	// Arrange.
+	h := docsOnlyMerge(t)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	for _, rec := range h.logs.Records() {
+		if rec.Level == "info" && strings.Contains(rec.Message, "no suite is selected") {
+			if !strings.Contains(fmt.Sprint(rec.Context["paths"]), "docs/USER-GUIDE.md") {
+				t.Fatalf("record context = %v, want the paths named", rec.Context)
+			}
+			return
+		}
+	}
+	t.Fatal("no INFO record says no suite was selected")
+}
+
+func TestAnEmptyDiffStartsNoRunner(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{}
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	h.runner.mu.Lock()
+	defer h.runner.mu.Unlock()
+	if len(h.runner.argv) != 0 {
+		t.Fatalf("the runner was started %d times for an empty diff, want none", len(h.runner.argv))
+	}
+}
+
+func TestUnreadablePathsRunEverySuite(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	h.git.changedErr = errors.New("git diff failed")
+	h.gatePasses("daemon")
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	h.runner.mu.Lock()
+	defer h.runner.mu.Unlock()
+	if len(h.runner.argv) != 1 || strings.Contains(strings.Join(h.runner.argv[0], " "), "--suites") {
+		t.Fatalf("runner argv = %v, want one unnarrowed run", h.runner.argv)
 	}
 }

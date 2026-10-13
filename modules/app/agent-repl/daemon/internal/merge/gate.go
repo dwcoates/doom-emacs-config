@@ -50,36 +50,40 @@ type gateVerdict struct {
 // run's measured cost, which the governor learns from.
 func (r *run) gate(ctx context.Context, round tabRound, tip, head string, permit *cpugov.Permit) (gateVerdict, error) {
 	const op = "daemon.merge.tests"
-	if permit == nil {
-		var err error
-		permit, err = r.o.deps.Governor.Acquire(ctx, cpugov.Request{Workspace: r.ws, Repo: string(r.repo), Head: true})
-		if err != nil {
-			return gateVerdict{}, fmt.Errorf("merge: admitting the head's gate: %w", err)
-		}
-	}
 	released := false
 	release := func(cores float64, wall time.Duration, measured bool) {
-		if !released {
+		if !released && permit != nil {
 			released = true
 			permit.Release(cores, wall, measured)
 		}
 	}
-	defer release(0, 0, false)
+	defer func() { release(0, 0, false) }()
 	dir := r.subject.dir
 	rangeSpec := tip + ".." + head
 	paths, err := r.git.ChangedPaths(ctx, dir, rangeSpec)
 	if err != nil && r.stopping(err) {
 		return gateVerdict{}, err
 	}
+	var selection SuiteSelection
 	if err != nil {
 		r.o.log(ctx, r.ws).Warn(op, "could not read the rebased branch's paths; every suite runs",
 			dlog.Context{"workspace": string(r.ws), "range": rangeSpec, "error": err.Error()})
-		paths = nil
+		selection = FullSelection(fmt.Sprintf("the changed paths of %s could not be read, so every suite runs", rangeSpec))
+	} else {
+		selection = SelectSuites(paths)
 	}
-	selection := SelectSuites(paths)
 	r.o.log(ctx, r.ws).Debug(op, "selected the merge's suites", dlog.Context{
 		"workspace": string(r.ws), "suites": strings.Join(selection.Suites, ","),
 		"full": selection.Full, "reason": selection.Reason})
+	if selection.Empty() {
+		return r.gateNothing(ctx, round, paths, selection)
+	}
+	if permit == nil {
+		permit, err = r.o.deps.Governor.Acquire(ctx, cpugov.Request{Workspace: r.ws, Repo: string(r.repo), Head: true})
+		if err != nil {
+			return gateVerdict{}, fmt.Errorf("merge: admitting the head's gate: %w", err)
+		}
+	}
 
 	g := &gateRun{r: r, round: round, log: r.o.testLog(r.lease.ID, round.n),
 		states: map[string]suiteState{}, counts: newSuiteCounts(), release: release}
@@ -156,6 +160,31 @@ func gateDidNotRun(code int) (string, bool) {
 		return "its command could not be executed (exit 126)", true
 	}
 	return "", false
+}
+
+// gateNothing passes a gate whose selection is EMPTY without starting the
+// runner (owner ruling, 2026-10-12): nothing the branch changed is something a
+// suite tests. It is still drawn truthfully: the testing step, and a tests tab
+// settled with no suite rows whose log says no suite was selected and why.
+func (r *run) gateNothing(ctx context.Context, round tabRound, paths []string, selection SuiteSelection) (gateVerdict, error) {
+	log := r.o.testLog(r.lease.ID, round.n)
+	r.setStep(ctx, footer.StepTesting, nil)
+	if err := os.MkdirAll(filepath.Dir(log.path), 0o755); err != nil {
+		return gateVerdict{}, fmt.Errorf("merge: creating the test log directory %s: %w", filepath.Dir(log.path), err)
+	}
+	body := fmt.Sprintf("no suite selected: %s\nchanged paths (%d):\n", selection.Reason, len(paths))
+	for _, path := range paths {
+		body += "  " + path + "\n"
+	}
+	body += "nothing ran.\n"
+	if err := os.WriteFile(log.path, []byte(body), 0o644); err != nil {
+		return gateVerdict{}, fmt.Errorf("merge: writing the test log %s: %w", log.path, err)
+	}
+	r.upsert(round, testsTab(round.settled(r.o.nowMS(), ""), nil, r.o.testLogLink(log)))
+	r.closeTab(ctx, round, "succeeded")
+	r.o.log(ctx, r.ws).Info("daemon.merge.tests", "no suite is selected for the merge's change; the gate passes without starting the runner", dlog.Context{
+		"workspace": string(r.ws), "round": round.n, "paths": strings.Join(paths, ","), "reason": selection.Reason, "archive": log.path})
+	return gateVerdict{result: GateResult{Passed: true, ArchivePath: log.path}, round: round.n}, nil
 }
 
 // gateRun is one gate run's live account.

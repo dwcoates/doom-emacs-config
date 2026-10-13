@@ -781,13 +781,17 @@ type fakeGit struct {
 
 func newFakeGit(seq func() int) *fakeGit {
 	return &fakeGit{
-		seq:             seq,
-		at:              map[string]int{},
-		defaultBranch:   "master",
-		commonDirs:      map[string]string{},
-		refs:            map[string]string{},
-		refSeqs:         map[string][]string{},
-		changedIn:       map[string][][]string{},
+		seq:           seq,
+		at:            map[string]int{},
+		defaultBranch: "master",
+		commonDirs:    map[string]string{},
+		refs:          map[string]string{},
+		refSeqs:       map[string][]string{},
+		changedIn:     map[string][][]string{},
+		// A BRANCH CHANGES SOMETHING BY DEFAULT, and something no rule maps,
+		// so the gate selects (and runs) every suite: a test that cares what
+		// the gate selects says what the branch changed.
+		changed:         []string{"modules/app/agent-repl/unmapped/file"},
 		clean:           true,
 		ancestry:        map[string]bool{},
 		branches:        map[string]string{},
