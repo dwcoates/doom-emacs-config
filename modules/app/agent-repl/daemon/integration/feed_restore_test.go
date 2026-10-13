@@ -49,11 +49,7 @@ func restarted(f *fixture, profile harness.ShimProfile) *fixture {
 
 	// WRITTEN BEFORE THE SUCCESSOR STARTS: its boot spawns the shim that reads it.
 	f.d.WriteShimProfile(f.repo.Dir, profile)
-	d2 := harness.StartDaemon(t, harness.Opts{
-		StateDir:   f.d.StateDir,
-		ProfileDir: f.d.ProfileDir,
-		ExtraArgs:  []string{"--default-config-dir", f.d.DefaultConfigDir},
-	})
+	d2 := harness.StartDaemon(t, f.d.SuccessorOpts())
 	// THE SUCCESSOR RUNS ON ITS PREDECESSOR'S ACCOUNT ROOT — the flag above
 	// overrides the one the harness minted for it — so its fixture names that
 	// root, and a further restart hands the same one on. Naming the minted one
