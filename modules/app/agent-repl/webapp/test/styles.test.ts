@@ -3524,11 +3524,11 @@ const luminance = ([r, g, b]: [number, number, number]): number => {
 };
 
 describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
-  it("paints a prompt the iMessage dark-mode blue, a further notch darker (owner ruling, 2026-10-08)", () => {
+  it("paints a prompt the iMessage dark-mode blue, two notches darker (owner rulings, 2026-10-08 and 2026-10-13)", () => {
     // Arrange / Act
     const user = rgbOf(darkThemeBlock(), "--user");
     // Assert
-    expect(user).toEqual([0x08, 0x6e, 0xd6]);
+    expect(user).toEqual([0x07, 0x64, 0xc2]);
   });
 
   it.each([
@@ -3541,6 +3541,14 @@ describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
     const [low, high] = [luminance(rgbOf(block, darker)), luminance(rgbOf(block, lighter))];
     // Assert
     expect(low).toBeLessThan(high);
+  });
+
+  it("paints a prompt in the light theme one more step darker (owner request, 2026-10-13)", () => {
+    // Arrange / Act
+    const user = /:root\s*\{[^}]*?--user:\s*(#[0-9a-f]{6})/i.exec(stylesheet)?.[1];
+
+    // Assert
+    expect(user).toBe("#b8d2ff");
   });
 
   it("paints a response a neutral grey rather than a hue", () => {
