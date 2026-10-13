@@ -109,18 +109,18 @@ func TestRosterStatusFollowsTheSessionLifecycle(t *testing.T) {
 	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
 	awaitRoster(t, f.d, roster, "done after the turn concludes", statusIs(func(row *frontendv1.RosterRow) bool { return row.GetDone() != nil }))
 
-	// Act / Assert: the unread result holds the row on done while detached
-	// work runs.
-	// The row does not move, so no roster push comes: the roster's own
-	// record of the decision is what proves the work was weighed and the
-	// unread result kept the row on done.
+	// Act / Assert: idle_async, FULL, as soon as detached work runs, without
+	// waiting for the user to view the unread result.
 	pushDetachedShell(f.shim, "work-1", "sleep 1")
-	f.d.AwaitWorkspaceLogOperation(f.ws.GetDir(), "daemon.sidebar.unread_outranks_async")
-
-	// Act / Assert: idle_async, FULL, once the user has viewed the result.
-	markViewed(t, f.d, f.ws)
-	awaitRoster(t, f.d, roster, "idle_async with detached work and the result read",
+	awaitRoster(t, f.d, roster, "idle_async with detached work over the unread result",
 		statusIs(func(row *frontendv1.RosterRow) bool { return row.GetIdleAsync() != nil && row.GetViewed() == nil }))
+	f.d.AwaitWorkspaceLogOperation(f.ws.GetDir(), "daemon.sidebar.async_outranks_unread")
+
+	// Act / Assert: viewing the idle_async row reads the unread result.
+	// The row does not move, so no roster push comes: the roster's own
+	// record of the read is what proves the report took.
+	markViewed(t, f.d, f.ws)
+	f.d.AwaitWorkspaceLogOperation(f.ws.GetDir(), "daemon.sidebar.result_read")
 }
 
 // tabBarIDs lists the roster's tab bar, first tab first.

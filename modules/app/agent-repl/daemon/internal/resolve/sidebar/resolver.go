@@ -457,22 +457,25 @@ func (r *resolver) SetSelected(ws ids.WorkspaceID) {
 // (done, interrupted or turn_failed), or on a VENDOR_BLOCKED row, whose block
 // a failed turn raised: viewing it reads that turn's result (owner ruling,
 // 2026-09-28), though the marker itself is still drawn only on a turn end.
+// It also reads an UNREAD result from an IDLE_ASYNC row, which live detached
+// work draws over that turn end (idleArm): the user viewing it is viewing the
+// finished turn.
 //
 // The editor is the only caller (MarkWorkspaceViewed): dwell is an editor
 // fact, and the editor reports it whatever the status. Whether it takes is
 // the roster's decision, made against the arm the row last PUBLISHED — the
 // one the user was looking at — under the same lock as the render this
-// mutation runs. A report on a turn-end row reads the result: an unread one
-// held over live detached work then yields to `idle_async`, drawn FULL, and
-// the row comes back PARTIAL on its turn-end arm when that work ends. A
-// report on any other row is refused and recorded, and changes nothing.
+// mutation runs. A report on a turn-end row, or on an `idle_async` row over an
+// unread result, reads the result, and the row comes back PARTIAL on its
+// turn-end arm once detached work ends. A report on any other row is refused
+// and recorded, and changes nothing.
 // There is no companion lowering setter, deliberately: a new turn is what
 // makes the next result unread (startTurn, SetTurnEnded).
 func (r *resolver) SetViewed(ws ids.WorkspaceID) {
 	r.mutateWorkspaceLogged(ws, "daemon.sidebar.set_viewed",
 		"the roster took the editor's viewed report; it reads the result only on a turn-end row",
 		nil, func(s *wsState, log dlog.Logger) {
-			if !s.lastArmSeen || !readsResult(s.lastArm) {
+			if !s.lastArmSeen || !s.viewReadsResult(s.lastArm) {
 				log.Debug("daemon.sidebar.row_viewed_refused",
 					"the row is not on a turn-end arm, so the viewed report was dropped and the row stays FULL",
 					dlog.Context{"status": s.lastArm, "result": s.result.String()})
