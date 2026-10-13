@@ -3293,7 +3293,41 @@ arm, never an error."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-interrupt-response
                     (agent-repl-test-wire-verbs--parse "{\"success\":{\"nothingRunning\":{}}}"))
-                   '(:arm :success :value (:arm :nothing-running :value nil))))))
+                   '(:arm :success :value (:arm :nothing-running :value (:rollback nil)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-interrupt-nothing-running-immediate-offer ()
+  "An immediate rollback offer carries the plan's token."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-interrupt-response
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"success\":{\"nothingRunning\":{\"rollback\":{\"immediate\":{\"token\":{\"value\":\"tok-9\"}}}}}}"))
+                   '(:arm :success :value
+                     (:arm :nothing-running
+                      :value (:rollback (:arm :immediate :value (:token (:value "tok-9"))))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-interrupt-nothing-running-choose-offer ()
+  "A choose offer is the empty arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-interrupt-response
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"success\":{\"nothingRunning\":{\"rollback\":{\"choose\":{}}}}}"))
+                   '(:arm :success :value
+                     (:arm :nothing-running :value (:rollback (:arm :choose :value nil))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-interrupt-nothing-running-immediate-without-token-refused ()
+  "An immediate offer with no token cannot be performed: a contract breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-interrupt-response
+                   (agent-repl-test-wire-verbs--parse
+                    "{\"success\":{\"nothingRunning\":{\"rollback\":{\"immediate\":{}}}}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-interrupt-rollback-offer-arms-pinned ()
+  "InterruptNothingRunningRollback's offer oneof has exactly the arms decoded here."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_interrupt.pb.go" "InterruptNothingRunningRollback")
+                       #'string<)
+                 '("choose" "immediate"))))
 
 (ert-deftest agent-repl-test-wire-verbs-interrupt-response-interrupted-detached ()
   "The interrupted_detached arm carries the count the stop reached."
@@ -3728,6 +3762,32 @@ webapp's alone."
                            :files '(:arm :restore-files :value nil))))
                    "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"restoreFiles\":{}}"))))
 
+(ert-deftest agent-repl-test-wire-verbs-plan-rollback-named-prompt-request-shape ()
+  "A named prompt rides `prompt', echoed as ListRollbackPrompts served it."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize
+                    (agent-repl-wire-encode-plan-rollback-request
+                     (list :workspace agent-repl-test-wire-verbs--ref
+                           :files '(:arm :keep-files :value nil)
+                           :prompt '(:value "row|p1"))))
+                   "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"keepFiles\":{},\"prompt\":{\"value\":\"row|p1\"}}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-plan-rollback-named-target ()
+  "A named target decodes to `:named'."
+  (agent-repl-test-wire-verbs--with-common
+    (should (eq (plist-get (plist-get (agent-repl-test-wire-verbs--plan
+                                       "{\"token\":{\"value\":\"t\"},\"target\":{\"named\":{},\"excerpt\":\"x\",\"promptsDropped\":2},\"files\":{\"kept\":{}}}")
+                                      :target)
+                           :chosen)
+                :named))))
+
+(ert-deftest agent-repl-test-wire-verbs-plan-rollback-target-arms-pinned ()
+  "RollbackPlanTarget's chosen oneof has exactly the arms decoded here."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_plan_rollback.pb.go" "RollbackPlanTarget")
+                       #'string<)
+                 '("latest" "named" "selected"))))
+
 (ert-deftest agent-repl-test-wire-verbs-plan-rollback-missing-files-refused ()
   "The files choice is REQUIRED."
   (agent-repl-test-wire-verbs--with-common
@@ -3829,7 +3889,9 @@ webapp's alone."
                      (:arm :workspace-ref-mismatch :value (:registry-dir "/w/real")))
                     ("{\"transferringAway\":{\"address\":\"127.0.0.1:9\"}}"
                      (:arm :transferring-away :value (:address "127.0.0.1:9")))
-                    ("{\"notYetAdopted\":{}}" (:arm :not-yet-adopted :value nil))))
+                    ("{\"notYetAdopted\":{}}" (:arm :not-yet-adopted :value nil))
+                    ("{\"promptNotReachable\":{\"prompt\":{\"value\":\"row|p1\"}}}"
+                     (:arm :prompt-not-reachable :value (:prompt (:value "row|p1"))))))
       (should (equal (agent-repl-wire-decode-plan-rollback-response
                       (agent-repl-test-wire-verbs--parse
                        (concat "{\"error\":" (car case) "}")))
@@ -3840,7 +3902,8 @@ webapp's alone."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_plan_rollback.pb.go" "PlanRollbackError")
                        #'string<)
-                 '("notYetAdopted" "transferringAway" "unknownWorkspace" "workspaceRefMismatch"))))
+                 '("notYetAdopted" "promptNotReachable" "transferringAway" "unknownWorkspace"
+                   "workspaceRefMismatch"))))
 
 (ert-deftest agent-repl-test-wire-verbs-plan-rollback-outcome-arms-pinned ()
   "PlanRollbackSuccess's outcome oneof has exactly the arms decoded here."
@@ -3848,6 +3911,72 @@ webapp's alone."
                         "agentrepl/v1/endpoint_plan_rollback.pb.go" "PlanRollbackSuccess")
                        #'string<)
                  '("nothingToRollBack" "plan"))))
+
+;;;; ---- ListRollbackPrompts ----------------------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-list-rollback-prompts-request-shape ()
+  "The request is the workspace ref alone."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize
+                    (agent-repl-wire-encode-list-rollback-prompts-request
+                     (list :workspace agent-repl-test-wire-verbs--ref)))
+                   "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"}}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-list-rollback-prompts-missing-workspace-refused ()
+  "The workspace ref is REQUIRED."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-list-rollback-prompts-request nil)
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-list-rollback-prompts-entries ()
+  "Entries decode in order, each figure nil when unset and a number when set."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-list-rollback-prompts-response
+                    (agent-repl-test-wire-verbs--parse
+                     (concat "{\"success\":{\"prompts\":["
+                             "{\"prompt\":{\"value\":\"p2\"},\"excerpt\":\"newer\",\"sentAtMs\":\"1700000000000\",\"contextTokens\":\"42000\"},"
+                             "{\"prompt\":{\"value\":\"p1\"},\"excerpt\":\"older\"}]}}")))
+                   '(:arm :success :value
+                     (:prompts ((:prompt (:value "p2") :excerpt "newer"
+                                 :sent-at-ms 1700000000000 :context-tokens 42000)
+                                (:prompt (:value "p1") :excerpt "older"
+                                 :sent-at-ms nil :context-tokens nil))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-list-rollback-prompts-empty ()
+  "No reachable prompt is an empty success."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-list-rollback-prompts-response
+                    (agent-repl-test-wire-verbs--parse "{\"success\":{}}"))
+                   '(:arm :success :value (:prompts nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-list-rollback-prompts-entry-without-prompt-refused ()
+  "An entry with no row cannot be picked: a contract breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-list-rollback-prompts-response
+                   (agent-repl-test-wire-verbs--parse
+                    "{\"success\":{\"prompts\":[{\"excerpt\":\"x\"}]}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-list-rollback-prompts-error-arms ()
+  "Every ListRollbackPrompts refusal arm decodes to its keyword and payload."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (case '(("{\"unknownWorkspace\":{}}" (:arm :unknown-workspace :value nil))
+                    ("{\"workspaceRefMismatch\":{\"registryDir\":\"/w/real\"}}"
+                     (:arm :workspace-ref-mismatch :value (:registry-dir "/w/real")))
+                    ("{\"transferringAway\":{\"address\":\"127.0.0.1:9\"}}"
+                     (:arm :transferring-away :value (:address "127.0.0.1:9")))
+                    ("{\"notYetAdopted\":{}}" (:arm :not-yet-adopted :value nil))))
+      (should (equal (agent-repl-wire-decode-list-rollback-prompts-response
+                      (agent-repl-test-wire-verbs--parse
+                       (concat "{\"error\":" (car case) "}")))
+                     (list :arm :error :value (list :cause (cadr case))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-list-rollback-prompts-error-arms-pinned ()
+  "ListRollbackPromptsError's cause oneof has exactly the arms decoded here."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_list_rollback_prompts.pb.go" "ListRollbackPromptsError")
+                       #'string<)
+                 '("notYetAdopted" "transferringAway" "unknownWorkspace" "workspaceRefMismatch"))))
 
 ;;;; ---- RollBack ---------------------------------------------------------
 

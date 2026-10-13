@@ -388,6 +388,11 @@ type questionState struct {
 	// open is true while the ask stands: from its start until its success or
 	// failure frame.
 	open bool
+	// settled is true once the ask's success or failure frame was drawn. An
+	// ask is one tool call's, so it never stands again: a start drawn after it
+	// is a stale restatement (a history page read before the answer was
+	// stored) and leaves the settled card as it is.
+	settled bool
 	// delivering is true from the edit that answered the last question until
 	// the delivery settles: the batch is CLAIMED, so no second edit can
 	// deliver it twice and a typed answer no longer routes to it.

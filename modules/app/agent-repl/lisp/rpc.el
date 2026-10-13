@@ -107,6 +107,8 @@
 (declare-function agent-repl-wire-decode-plan-rollback-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-roll-back-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-roll-back-response "wire-verbs" (alist))
+(declare-function agent-repl-wire-encode-list-rollback-prompts-request "wire-verbs" (request))
+(declare-function agent-repl-wire-decode-list-rollback-prompts-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-adjust-feed-text-scale-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-adjust-feed-text-scale-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-interrupt-request "wire-verbs" (request))
@@ -437,6 +439,16 @@ The request carries the workspace ref and whether files are restored too;
 the daemon answers a plan (its opaque token, the target prompt, the files
 choice and every side effect) for the user to confirm, or that there is
 nothing to roll back.  Planning changes nothing.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-list-rollback-prompts
+  "ListRollbackPrompts"
+  agent-repl-wire-encode-list-rollback-prompts-request
+  agent-repl-wire-decode-list-rollback-prompts-response
+  "List the prompts a rollback of a workspace's conversation can reach.
+The request carries the workspace ref; the daemon answers them newest
+first, each with its row (handed back to PlanRollback to name it), its
+opening words, when it was sent and how full the context was just before
+it.  Listing changes nothing.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-roll-back
   "RollBack"

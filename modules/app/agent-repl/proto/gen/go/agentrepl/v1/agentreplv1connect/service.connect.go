@@ -73,6 +73,9 @@ const (
 	AgentReplPlanRollbackProcedure = "/agentrepl.v1.AgentRepl/PlanRollback"
 	// AgentReplRollBackProcedure is the fully-qualified name of the AgentRepl's RollBack RPC.
 	AgentReplRollBackProcedure = "/agentrepl.v1.AgentRepl/RollBack"
+	// AgentReplListRollbackPromptsProcedure is the fully-qualified name of the AgentRepl's
+	// ListRollbackPrompts RPC.
+	AgentReplListRollbackPromptsProcedure = "/agentrepl.v1.AgentRepl/ListRollbackPrompts"
 	// AgentReplAnswerPermissionProcedure is the fully-qualified name of the AgentRepl's
 	// AnswerPermission RPC.
 	AgentReplAnswerPermissionProcedure = "/agentrepl.v1.AgentRepl/AnswerPermission"
@@ -266,6 +269,7 @@ var (
 	agentReplInspectChessBoardSquareMethodDescriptor  = agentReplServiceDescriptor.Methods().ByName("InspectChessBoardSquare")
 	agentReplPlanRollbackMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("PlanRollback")
 	agentReplRollBackMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("RollBack")
+	agentReplListRollbackPromptsMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("ListRollbackPrompts")
 	agentReplAnswerPermissionMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("AnswerPermission")
 	agentReplAnswerQuestionMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("AnswerQuestion")
 	agentReplUpdateQuestionDraftMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("UpdateQuestionDraft")
@@ -380,6 +384,9 @@ type AgentReplClient interface {
 	PlanRollback(context.Context, *connect.Request[v1.PlanRollbackRequest]) (*connect.Response[v1.PlanRollbackResponse], error)
 	// Perform a confirmed plan. See endpoint_roll_back.proto.
 	RollBack(context.Context, *connect.Request[v1.RollBackRequest]) (*connect.Response[v1.RollBackResponse], error)
+	// The prompts a rollback can reach, newest first, for a frontend to offer
+	// as a choice; changes nothing. See endpoint_list_rollback_prompts.proto.
+	ListRollbackPrompts(context.Context, *connect.Request[v1.ListRollbackPromptsRequest]) (*connect.Response[v1.ListRollbackPromptsResponse], error)
 	// The permission card's verdicts and the question card's answers. See
 	// endpoint_answer_permission.proto.
 	AnswerPermission(context.Context, *connect.Request[v1.AnswerPermissionRequest]) (*connect.Response[v1.AnswerPermissionResponse], error)
@@ -672,6 +679,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			httpClient,
 			baseURL+AgentReplRollBackProcedure,
 			connect.WithSchema(agentReplRollBackMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		listRollbackPrompts: connect.NewClient[v1.ListRollbackPromptsRequest, v1.ListRollbackPromptsResponse](
+			httpClient,
+			baseURL+AgentReplListRollbackPromptsProcedure,
+			connect.WithSchema(agentReplListRollbackPromptsMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		answerPermission: connect.NewClient[v1.AnswerPermissionRequest, v1.AnswerPermissionResponse](
@@ -1088,6 +1101,7 @@ type agentReplClient struct {
 	inspectChessBoardSquare  *connect.Client[v1.InspectChessBoardSquareRequest, v1.InspectChessBoardSquareResponse]
 	planRollback             *connect.Client[v1.PlanRollbackRequest, v1.PlanRollbackResponse]
 	rollBack                 *connect.Client[v1.RollBackRequest, v1.RollBackResponse]
+	listRollbackPrompts      *connect.Client[v1.ListRollbackPromptsRequest, v1.ListRollbackPromptsResponse]
 	answerPermission         *connect.Client[v1.AnswerPermissionRequest, v1.AnswerPermissionResponse]
 	answerQuestion           *connect.Client[v1.AnswerQuestionRequest, v1.AnswerQuestionResponse]
 	updateQuestionDraft      *connect.Client[v1.UpdateQuestionDraftRequest, v1.UpdateQuestionDraftResponse]
@@ -1219,6 +1233,11 @@ func (c *agentReplClient) PlanRollback(ctx context.Context, req *connect.Request
 // RollBack calls agentrepl.v1.AgentRepl.RollBack.
 func (c *agentReplClient) RollBack(ctx context.Context, req *connect.Request[v1.RollBackRequest]) (*connect.Response[v1.RollBackResponse], error) {
 	return c.rollBack.CallUnary(ctx, req)
+}
+
+// ListRollbackPrompts calls agentrepl.v1.AgentRepl.ListRollbackPrompts.
+func (c *agentReplClient) ListRollbackPrompts(ctx context.Context, req *connect.Request[v1.ListRollbackPromptsRequest]) (*connect.Response[v1.ListRollbackPromptsResponse], error) {
+	return c.listRollbackPrompts.CallUnary(ctx, req)
 }
 
 // AnswerPermission calls agentrepl.v1.AgentRepl.AnswerPermission.
@@ -1597,6 +1616,9 @@ type AgentReplHandler interface {
 	PlanRollback(context.Context, *connect.Request[v1.PlanRollbackRequest]) (*connect.Response[v1.PlanRollbackResponse], error)
 	// Perform a confirmed plan. See endpoint_roll_back.proto.
 	RollBack(context.Context, *connect.Request[v1.RollBackRequest]) (*connect.Response[v1.RollBackResponse], error)
+	// The prompts a rollback can reach, newest first, for a frontend to offer
+	// as a choice; changes nothing. See endpoint_list_rollback_prompts.proto.
+	ListRollbackPrompts(context.Context, *connect.Request[v1.ListRollbackPromptsRequest]) (*connect.Response[v1.ListRollbackPromptsResponse], error)
 	// The permission card's verdicts and the question card's answers. See
 	// endpoint_answer_permission.proto.
 	AnswerPermission(context.Context, *connect.Request[v1.AnswerPermissionRequest]) (*connect.Response[v1.AnswerPermissionResponse], error)
@@ -1885,6 +1907,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		AgentReplRollBackProcedure,
 		svc.RollBack,
 		connect.WithSchema(agentReplRollBackMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplListRollbackPromptsHandler := connect.NewUnaryHandler(
+		AgentReplListRollbackPromptsProcedure,
+		svc.ListRollbackPrompts,
+		connect.WithSchema(agentReplListRollbackPromptsMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplAnswerPermissionHandler := connect.NewUnaryHandler(
@@ -2311,6 +2339,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplPlanRollbackHandler.ServeHTTP(w, r)
 		case AgentReplRollBackProcedure:
 			agentReplRollBackHandler.ServeHTTP(w, r)
+		case AgentReplListRollbackPromptsProcedure:
+			agentReplListRollbackPromptsHandler.ServeHTTP(w, r)
 		case AgentReplAnswerPermissionProcedure:
 			agentReplAnswerPermissionHandler.ServeHTTP(w, r)
 		case AgentReplAnswerQuestionProcedure:
@@ -2502,6 +2532,10 @@ func (UnimplementedAgentReplHandler) PlanRollback(context.Context, *connect.Requ
 
 func (UnimplementedAgentReplHandler) RollBack(context.Context, *connect.Request[v1.RollBackRequest]) (*connect.Response[v1.RollBackResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.RollBack is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) ListRollbackPrompts(context.Context, *connect.Request[v1.ListRollbackPromptsRequest]) (*connect.Response[v1.ListRollbackPromptsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ListRollbackPrompts is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) AnswerPermission(context.Context, *connect.Request[v1.AnswerPermissionRequest]) (*connect.Response[v1.AnswerPermissionResponse], error) {

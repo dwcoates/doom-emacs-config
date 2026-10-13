@@ -96,6 +96,7 @@ func (r *resolver) drawActivity(s *wsState, agent *conversationv1.AgentId, act *
 	if account, recorded := r.recordUsage(s, unit, agent, act.GetUsage()); recorded {
 		r.restampOpenBubbles(s, account)
 		r.restampSubagentCard(s, agent)
+		r.recordContextReading(s, unit, agent, act.GetUsage())
 	}
 
 	var (

@@ -15,6 +15,7 @@ import "agentrepl/v1/endpoint_submit_prompt.proto";
 import "agentrepl/v1/endpoint_select_feed_row.proto";
 import "agentrepl/v1/endpoint_fold_merge_bubble.proto";
 import "agentrepl/v1/endpoint_plan_rollback.proto";
+import "agentrepl/v1/endpoint_list_rollback_prompts.proto";
 import "agentrepl/v1/endpoint_roll_back.proto";
 import "agentrepl/v1/endpoint_adjust_feed_text_scale.proto";
 import "agentrepl/v1/endpoint_open_feed.proto";
@@ -149,6 +150,9 @@ service AgentRepl {
   rpc PlanRollback(PlanRollbackRequest) returns (PlanRollbackResponse);
   // Perform a confirmed plan. See endpoint_roll_back.proto.
   rpc RollBack(RollBackRequest) returns (RollBackResponse);
+  // The prompts a rollback can reach, newest first, for a frontend to offer
+  // as a choice; changes nothing. See endpoint_list_rollback_prompts.proto.
+  rpc ListRollbackPrompts(ListRollbackPromptsRequest) returns (ListRollbackPromptsResponse);
 
   // The permission card's verdicts and the question card's answers. See
   // endpoint_answer_permission.proto.
