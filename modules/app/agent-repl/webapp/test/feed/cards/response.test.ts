@@ -2595,6 +2595,82 @@ describe("the response bubble at its full height", () => {
   });
 });
 
+/**
+ * A WHOLE RESPONSE TURNING INTERIM EASES INTO IT (owner request, 2026-10-13):
+ * the interim bubble that replaces it animates from the whole bubble's look
+ * (src/bubble/collapse-motion.ts). Only that change eases.
+ */
+describe("the whole-to-interim easing", () => {
+  /** A settled response carrying "an answer", proven interim when INTERIM. */
+  function settled(interim: boolean, final = false): FeedResponse {
+    return response({ finalAnswer: final, interim, result: { case: "success", value: { prose: { markdown: "an answer" } } } });
+  }
+
+  /** A drawn, connected bubble for U, standing HEIGHT px tall. */
+  function standing(u: FeedResponse, height: number): HTMLElement {
+    const el = drawFeedResponse(u, rowContext());
+    el.getBoundingClientRect = () => ({ height }) as DOMRect;
+    document.body.append(el);
+    return el;
+  }
+
+  /** Redraw U over PREVIOUS in its place, let a frame run, and say whether it animated. */
+  async function animatesOver(previous: HTMLElement, u: FeedResponse): Promise<boolean> {
+    const animate = vi.spyOn(HTMLElement.prototype, "animate");
+    const next = drawFeedResponse(u, rowContext(previous));
+    if (next !== previous) previous.replaceWith(next);
+    await vi.advanceTimersByTimeAsync(50);
+    const animated = animate.mock.contexts.includes(next);
+    animate.mockRestore();
+    return animated;
+  }
+
+  it("eases a whole response into its interim look", async () => {
+    // Arrange
+    const whole = standing(settled(false), 180);
+
+    // Act / Assert
+    expect(await animatesOver(whole, settled(true))).toBe(true);
+  });
+
+  it("does not ease an interim response redrawn as interim", async () => {
+    // Arrange
+    const interim = standing(settled(true), 30);
+
+    // Act / Assert
+    expect(await animatesOver(interim, settled(true))).toBe(false);
+  });
+
+  it("does not ease a whole response redrawn whole", async () => {
+    // Arrange
+    const whole = standing(settled(false), 180);
+
+    // Act / Assert
+    expect(await animatesOver(whole, settled(false))).toBe(false);
+  });
+
+  it("does not ease the answer the turn's terminal names", async () => {
+    // Arrange
+    const whole = standing(settled(false), 180);
+
+    // Act / Assert
+    expect(await animatesOver(whole, settled(true, true))).toBe(false);
+  });
+
+  it("does not ease a first draw", async () => {
+    // Arrange
+    const animate = vi.spyOn(HTMLElement.prototype, "animate");
+
+    // Act
+    document.body.append(drawFeedResponse(settled(true), rowContext()));
+    await vi.advanceTimersByTimeAsync(50);
+
+    // Assert
+    expect(animate).not.toHaveBeenCalled();
+    animate.mockRestore();
+  });
+});
+
 describe("isInterimResponse", () => {
   it.each([
     { name: "an arriving response proven interim", thinking: false, interim: true, final: false, state: "update", want: true },

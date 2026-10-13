@@ -22,3 +22,17 @@ export function installGetAnimations(): void {
     return [];
   };
 }
+
+/**
+ * `Element.animate` FOR JSDOM: jsdom runs no animations, so the element is
+ * left as it is and a finished animation is answered. A suite that asserts on
+ * an animation drives the app's own seam (`collapse-motion.ts`'s deps) or spies
+ * on this method.
+ */
+export function installAnimate(): void {
+  if (typeof Element === "undefined") return;
+  if (typeof Element.prototype.animate === "function") return;
+  Element.prototype.animate = function inert(): Animation {
+    return { finished: Promise.resolve(), cancel: () => {} } as unknown as Animation;
+  };
+}
