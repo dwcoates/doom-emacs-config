@@ -1,11 +1,14 @@
 package ramdisk
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -36,6 +39,9 @@ type fakeHost struct {
 	loadErr error
 	ps      string
 	psErr   error
+	// late, by call, is the channel a watched probe answers once it missed
+	// its bound; a call not in it answers as run does.
+	late map[string]chan Late
 }
 
 func (h *fakeHost) run(name string, args ...string) (string, error) {
@@ -80,24 +86,79 @@ func (h *fakeHost) probe(bound time.Duration, name string, args ...string) (stri
 	return h.run(name, args...)
 }
 
-// fakeLog records every line the Manager logs, "INFO " or "ERROR " first.
-type fakeLog struct{ lines []string }
-
-func (l *fakeLog) Infof(format string, args ...any) {
-	l.lines = append(l.lines, "INFO "+fmt.Sprintf(format, args...))
+func (h *fakeHost) watch(bound time.Duration, name string, args ...string) (string, <-chan Late, error) {
+	call := name + " " + strings.Join(args, " ")
+	if late, ok := h.late[call]; ok {
+		if h.bounds == nil {
+			h.bounds = map[string]time.Duration{}
+		}
+		h.bounds[call] = bound
+		h.calls = append(h.calls, call)
+		return "", late, unansweredError(bound, name, args, context.DeadlineExceeded)
+	}
+	out, err := h.probe(bound, name, args...)
+	return out, nil, err
 }
 
-func (l *fakeLog) Errorf(format string, args ...any) {
-	l.lines = append(l.lines, "ERROR "+fmt.Sprintf(format, args...))
+// fakeLog records every line the Manager logs, "INFO " or "ERROR " first. A
+// late probe logs from its own goroutine, so the lines are guarded, and every
+// line wakes a waiter.
+type fakeLog struct {
+	mu     sync.Mutex
+	lines  []string
+	logged chan struct{}
 }
 
-func (l *fakeLog) has(prefix string) bool {
-	for _, line := range l.lines {
-		if strings.HasPrefix(line, prefix) {
-			return true
+func (l *fakeLog) add(line string) {
+	l.mu.Lock()
+	l.lines = append(l.lines, line)
+	logged := l.logged
+	l.mu.Unlock()
+	if logged != nil {
+		select {
+		case logged <- struct{}{}:
+		default:
 		}
 	}
-	return false
+}
+
+func (l *fakeLog) Infof(format string, args ...any) { l.add("INFO " + fmt.Sprintf(format, args...)) }
+
+func (l *fakeLog) Errorf(format string, args ...any) { l.add("ERROR " + fmt.Sprintf(format, args...)) }
+
+func (l *fakeLog) has(prefix string) bool { return l.count(prefix) > 0 }
+
+func (l *fakeLog) count(prefix string) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	n := 0
+	for _, line := range l.lines {
+		if strings.HasPrefix(line, prefix) {
+			n++
+		}
+	}
+	return n
+}
+
+func (l *fakeLog) snapshot() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return slices.Clone(l.lines)
+}
+
+// waitFor waits, at most 5s, for a line starting with prefix. A late probe's
+// line comes from its own goroutine within microseconds of its outcome.
+func (l *fakeLog) waitFor(t *testing.T, prefix string) {
+	t.Helper()
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	for !l.has(prefix) {
+		select {
+		case <-l.logged:
+		case <-timer.C:
+			t.Fatalf("log = %q, want a line starting %q", l.snapshot(), prefix)
+		}
+	}
 }
 
 // tickingClock answers a time one second later on every call.
@@ -117,8 +178,10 @@ func newManager(t *testing.T, h *fakeHost) Manager {
 		Run: h.run, Registry: filepath.Join(t.TempDir(), "registry"), MountParent: parent, Pid: 4242,
 		KillUnder: func(string) (int, error) { return 0, nil },
 		Probe:     h.probe,
+		Watch:     h.watch,
 		Alive:     func(int) bool { return false },
-		Log:       &fakeLog{},
+		Mounted:   func(string) (bool, error) { return false, nil },
+		Log:       &fakeLog{logged: make(chan struct{}, 1)},
 		Now:       tickingClock(),
 		LockBound: 10 * time.Second,
 	}
@@ -1189,5 +1252,467 @@ func TestTimedNotesEachCallsDurationAndResult(t *testing.T) {
 	}
 	if call != "hdiutil attach -nomount ram://16" || !errors.Is(noted, failing) || took < 0 {
 		t.Fatalf("noted %q in %s with %v, want the call, its duration and its error", call, took, noted)
+	}
+}
+
+func TestCommandOutcome(t *testing.T) {
+	expired, cancel := context.WithTimeout(context.Background(), 0)
+	defer cancel()
+	<-expired.Done()
+	tests := []struct {
+		name    string
+		ctx     context.Context
+		out     string
+		err     error
+		wantOut string
+		wantErr string
+	}{
+		{name: "an answer is the output", ctx: context.Background(), out: "framework : 1\n", wantOut: "framework : 1\n"},
+		{name: "a failure names the command and its output", ctx: context.Background(), out: "refused\n", err: errors.New("exit status 1"), wantOut: "refused\n", wantErr: "hdiutil info: exit status 1: refused"},
+		{name: "a killed command did not answer within its bound", ctx: expired, out: "", err: errors.New("signal: killed"), wantErr: "hdiutil info did not answer within 1s; the disk manager (diskarbitrationd) may be wedged: context deadline exceeded"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			out, err := commandOutcome(tc.ctx, time.Second, "hdiutil", []string{"info"}, []byte(tc.out), tc.err)
+
+			// Assert
+			gotErr := ""
+			if err != nil {
+				gotErr = err.Error()
+			}
+			if out != tc.wantOut || gotErr != tc.wantErr {
+				t.Fatalf("commandOutcome = %q, %q; want %q, %q", out, gotErr, tc.wantOut, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestCommandOutcomeKeepsTheDeadlineInTheChain(t *testing.T) {
+	// Arrange
+	expired, cancel := context.WithTimeout(context.Background(), 0)
+	defer cancel()
+	<-expired.Done()
+
+	// Act
+	_, err := commandOutcome(expired, time.Second, "diskutil", []string{"list"}, nil, errors.New("signal: killed"))
+
+	// Assert
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want context.DeadlineExceeded in its chain", err)
+	}
+}
+
+func TestRunWatchedAnswersACommandThatFinishesInTime(t *testing.T) {
+	// Act
+	out, late, err := runWatched(10*time.Second, 20*time.Second, "echo", "listed")
+
+	// Assert
+	if err != nil || late != nil || strings.TrimSpace(out) != "listed" {
+		t.Fatalf("runWatched(echo listed) = %q, %v, %v; want its output and no watch", out, late, err)
+	}
+}
+
+func TestRunWatchedReportsAFailingCommandInTime(t *testing.T) {
+	// Act
+	_, late, err := runWatched(10*time.Second, 20*time.Second, "sh", "-c", "echo refused >&2; exit 3")
+
+	// Assert
+	if err == nil || late != nil || !strings.Contains(err.Error(), "refused") {
+		t.Fatalf("runWatched(exit 3) = %v, %v; want the command's own failure and no watch", late, err)
+	}
+}
+
+func TestRunWatchedAnswersAtItsBoundAndWatchesTheLateAnswer(t *testing.T) {
+	// Act: the command cannot finish within 20ms.
+	_, late, err := runWatched(20*time.Millisecond, 20*time.Second, "sh", "-c", "sleep 0.3")
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "did not answer within 20ms") || late == nil {
+		t.Fatalf("runWatched = %v, %v; want the bound's failure and a watch", late, err)
+	}
+	select {
+	case outcome := <-late:
+		if outcome.Err != nil || outcome.Took < 300*time.Millisecond {
+			t.Fatalf("late = %+v, want the answer after at least 300ms", outcome)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the late answer never came")
+	}
+}
+
+func TestRunWatchedKillsALateCommandAtItsLimit(t *testing.T) {
+	// Act
+	_, late, _ := runWatched(20*time.Millisecond, 200*time.Millisecond, "sleep", "10")
+
+	// Assert
+	select {
+	case outcome := <-late:
+		if outcome.Err == nil || !strings.Contains(outcome.Err.Error(), "did not answer within 200ms") {
+			t.Fatalf("late = %+v, want the limit's failure", outcome)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the command outlived its limit")
+	}
+}
+
+func TestScriptDispatchStartsItsCommandThroughBoundedCommand(t *testing.T) {
+	// Arrange
+	src, err := os.ReadFile("investigation.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	rest := string(src)[strings.Index(string(src), "func ScriptDispatch("):]
+	body := rest[:strings.Index(rest, "\n}\n")]
+
+	// Assert
+	if !strings.Contains(body, "boundedCommand(") || strings.Contains(body, "exec.CommandContext") {
+		t.Fatal("ScriptDispatch starts its command by hand; want boundedCommand")
+	}
+}
+
+func TestBoundedRunsShareOneOutcome(t *testing.T) {
+	// Arrange
+	src, err := os.ReadFile("ramdisk.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	body := func(name string) string {
+		rest := string(src)[strings.Index(string(src), "func "+name+"("):]
+		return rest[:strings.Index(rest, "\n}\n")]
+	}
+
+	// Assert
+	for _, name := range []string{"runBounded", "runWatched"} {
+		if b := body(name); !strings.Contains(b, "commandOutcome(") || !strings.Contains(b, "boundedCommand(") || strings.Contains(b, "exec.CommandContext") {
+			t.Errorf("%s forms its command or its outcome by hand; want boundedCommand and commandOutcome", name)
+		}
+	}
+}
+
+// strayDir makes a mount point named name under m's mount parent, with a
+// file a dead run's process left under it.
+func strayDir(t *testing.T, m Manager, name string) string {
+	t.Helper()
+	dir := filepath.Join(m.MountParent, name)
+	if err := os.MkdirAll(filepath.Join(dir, "tr-1", "agent-repl-ert-x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "tr-1", "agent-repl-ert-x", "f"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestReclaimRemovesAStrayMountPointNoRecordNames(t *testing.T) {
+	// Arrange
+	h := &fakeHost{}
+	m := newManager(t, h)
+	dir := strayDir(t, m, "artr-28386")
+	var killedUnder string
+	m.KillUnder = func(d string) (int, error) { killedUnder = d; return 12, nil }
+
+	// Act
+	done, err := m.Reclaim()
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Reclaim: %v", err)
+	}
+	if _, statErr := os.Stat(dir); !os.IsNotExist(statErr) {
+		t.Fatalf("the stray mount point survives (stat err = %v)", statErr)
+	}
+	if _, statErr := os.Stat(dir + ".reclaim"); !os.IsNotExist(statErr) {
+		t.Fatalf("the stray's removal left %s.reclaim (stat err = %v)", dir, statErr)
+	}
+	want := []Reclaimed{{Pid: 28386, Mount: dir, Killed: 12, Stray: true}}
+	if !slices.Equal(done, want) || killedUnder != dir {
+		t.Fatalf("Reclaim = %+v, killed under %q; want %+v under %q", done, killedUnder, want, dir)
+	}
+}
+
+func TestReclaimLeavesAStrayWhoseRunIsAlive(t *testing.T) {
+	// Arrange: a run in its release, its record gone, its mount point not.
+	h := &fakeHost{}
+	m := newManager(t, h)
+	dir := strayDir(t, m, "artr-28386")
+	m.Alive = func(pid int) bool { return pid == 28386 }
+	m.KillUnder = func(string) (int, error) { t.Fatal("killed under a live run's mount point"); return 0, nil }
+
+	// Act
+	done, err := m.Reclaim()
+
+	// Assert
+	if _, statErr := os.Stat(dir); err != nil || len(done) != 0 || statErr != nil {
+		t.Fatalf("Reclaim = %+v, %v (stat err = %v); want the live run's mount point left alone", done, err, statErr)
+	}
+}
+
+func TestReclaimLeavesAMountPointARecordNames(t *testing.T) {
+	// Arrange: a live run's record, its lock held.
+	h := &fakeHost{}
+	m := newManager(t, h)
+	dir := strayDir(t, m, "artr-7")
+	record := deadRecord(t, m, "7", "/dev/disk7", dir)
+	f, err := os.OpenFile(record, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { f.Close() })
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	done, err := m.Reclaim()
+
+	// Assert
+	if _, statErr := os.Stat(dir); err != nil || len(done) != 0 || statErr != nil {
+		t.Fatalf("Reclaim = %+v, %v (stat err = %v); want the recorded mount point left alone", done, err, statErr)
+	}
+}
+
+func TestReclaimLeavesAStrayWithAVolumeMounted(t *testing.T) {
+	// Arrange
+	h := &fakeHost{}
+	m := newManager(t, h)
+	dir := strayDir(t, m, "artr-28386")
+	m.Mounted = func(d string) (bool, error) { return d == dir, nil }
+
+	// Act
+	done, err := m.Reclaim()
+
+	// Assert
+	if _, statErr := os.Stat(filepath.Join(dir, "tr-1", "agent-repl-ert-x", "f")); err != nil || len(done) != 0 || statErr != nil {
+		t.Fatalf("Reclaim = %+v, %v (stat err = %v); want the mounted volume left to the leak check", done, err, statErr)
+	}
+}
+
+func TestReclaimKeepsAStrayWhoseProcessesCannotBeKilled(t *testing.T) {
+	// Arrange
+	h := &fakeHost{}
+	m := newManager(t, h)
+	dir := strayDir(t, m, "artr-28386")
+	m.KillUnder = func(string) (int, error) { return 0, errors.New("ps failed") }
+
+	// Act
+	done, err := m.Reclaim()
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "kill what still runs out of the dead run's mount point "+dir) || len(done) != 0 {
+		t.Fatalf("Reclaim = %+v, %v; want the failed kill", done, err)
+	}
+	if _, statErr := os.Stat(dir); statErr != nil {
+		t.Fatalf("the stray went with its processes still running (stat err = %v)", statErr)
+	}
+}
+
+func TestReclaimFailsAStrayWhoseMountCannotBeTold(t *testing.T) {
+	// Arrange
+	h := &fakeHost{}
+	m := newManager(t, h)
+	dir := strayDir(t, m, "artr-28386")
+	m.Mounted = func(string) (bool, error) { return false, errors.New("stat failed") }
+
+	// Act
+	done, err := m.Reclaim()
+
+	// Assert
+	if _, statErr := os.Stat(dir); err == nil || len(done) != 0 || statErr != nil {
+		t.Fatalf("Reclaim = %+v, %v (stat err = %v); want the failure and the stray kept", done, err, statErr)
+	}
+}
+
+func TestReclaimFinishesAStrayAnEarlierRemovalLeft(t *testing.T) {
+	// Arrange
+	h := &fakeHost{}
+	m := newManager(t, h)
+	dir := strayDir(t, m, "artr-28386.reclaim")
+	m.KillUnder = func(string) (int, error) { t.Fatal("killed under a mount point already taken"); return 0, nil }
+
+	// Act
+	done, err := m.Reclaim()
+
+	// Assert
+	if _, statErr := os.Stat(dir); err != nil || !os.IsNotExist(statErr) {
+		t.Fatalf("Reclaim = %v (stat err = %v); want the half-removed stray gone", err, statErr)
+	}
+	if want := []Reclaimed{{Pid: 28386, Mount: dir, Stray: true}}; !slices.Equal(done, want) {
+		t.Fatalf("Reclaim = %+v, want %+v", done, want)
+	}
+}
+
+func TestReclaimLeavesOtherDirectoriesInTheMountParent(t *testing.T) {
+	// Arrange
+	h := &fakeHost{}
+	m := newManager(t, h)
+	var kept []string
+	for _, name := range []string{"artr-x", "arrun123", "artr-7.old"} {
+		kept = append(kept, strayDir(t, m, name))
+	}
+	file := filepath.Join(m.MountParent, "artr-9")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	kept = append(kept, file)
+
+	// Act
+	done, err := m.Reclaim()
+
+	// Assert
+	if err != nil || len(done) != 0 {
+		t.Fatalf("Reclaim = %+v, %v; want nothing reclaimed", done, err)
+	}
+	for _, path := range kept {
+		if _, statErr := os.Stat(path); statErr != nil {
+			t.Fatalf("%s went (stat err = %v)", path, statErr)
+		}
+	}
+}
+
+func TestReclaimLeavesThisRunsOwnMountPoint(t *testing.T) {
+	// Arrange
+	h := &fakeHost{}
+	m := newManager(t, h)
+	dir := strayDir(t, m, "artr-4242")
+
+	// Act
+	done, err := m.Reclaim()
+
+	// Assert
+	if _, statErr := os.Stat(dir); err != nil || len(done) != 0 || statErr != nil {
+		t.Fatalf("Reclaim = %+v, %v (stat err = %v); want this run's own mount point left alone", done, err, statErr)
+	}
+}
+
+func TestReclaimFailsAMountParentItCannotList(t *testing.T) {
+	// Arrange
+	h := &fakeHost{}
+	m := newManager(t, h)
+	m.MountParent = filepath.Join(t.TempDir(), "gone")
+
+	// Act
+	_, err := m.Reclaim()
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "list the RAM disk mount parent") {
+		t.Fatalf("Reclaim = %v, want the failed listing", err)
+	}
+}
+
+func TestIsMountPoint(t *testing.T) {
+	tests := []struct {
+		name string
+		dir  string
+		want bool
+	}{
+		{name: "a volume's mount point", dir: "/dev", want: true},
+		{name: "a plain directory", dir: t.TempDir(), want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got, err := IsMountPoint(tc.dir)
+
+			// Assert
+			if err != nil || got != tc.want {
+				t.Fatalf("IsMountPoint(%s) = %v, %v; want %v", tc.dir, got, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestIsMountPointFailsAMissingDirectory(t *testing.T) {
+	// Act
+	_, err := IsMountPoint(filepath.Join(t.TempDir(), "gone"))
+
+	// Assert
+	if err == nil {
+		t.Fatal("IsMountPoint of a missing directory succeeded")
+	}
+}
+
+func TestReclaimFailsAStrayWhenTheRegistryCannotBeMade(t *testing.T) {
+	// Arrange: the registry's place is taken by a file.
+	h := &fakeHost{}
+	m := newManager(t, h)
+	dir := strayDir(t, m, "artr-28386")
+	blocker := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(blocker, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m.Registry = filepath.Join(blocker, "registry")
+
+	// Act
+	done, err := m.Reclaim()
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "make the RAM disk registry") || len(done) != 0 {
+		t.Fatalf("Reclaim = %+v, %v; want the failed registry", done, err)
+	}
+	if _, statErr := os.Stat(dir); statErr != nil {
+		t.Fatalf("the stray went without the registry lock (stat err = %v)", statErr)
+	}
+}
+
+func TestReleaseRegistry(t *testing.T) {
+	earlier := errors.New("attach refused")
+	closeFailed := errors.New("bad file descriptor")
+	tests := []struct {
+		name     string
+		err      error
+		closeErr error
+		want     []error
+		wantNil  bool
+	}{
+		{name: "a clean release keeps no error", wantNil: true},
+		{name: "a clean release keeps the holder's error", err: earlier, want: []error{earlier}},
+		{name: "a failed release is answered", closeErr: closeFailed, want: []error{closeFailed}},
+		{name: "a failed release joins the holder's error", err: earlier, closeErr: closeFailed, want: []error{earlier, closeFailed}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			err := tc.err
+
+			// Act
+			releaseRegistry(func() error { return tc.closeErr }, &err)
+
+			// Assert
+			if tc.wantNil != (err == nil) {
+				t.Fatalf("err = %v, want nil %v", err, tc.wantNil)
+			}
+			for _, want := range tc.want {
+				if !errors.Is(err, want) {
+					t.Fatalf("err = %v, want %v in its chain", err, want)
+				}
+			}
+			if tc.closeErr != nil && !strings.Contains(err.Error(), "release the RAM disk registry lock") {
+				t.Fatalf("err = %v, want the release named", err)
+			}
+		})
+	}
+}
+
+func TestRegistryHoldersShareReleaseRegistry(t *testing.T) {
+	for _, file := range []string{"ramdisk.go", "investigation.go"} {
+		// Arrange
+		src, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Act
+		takes := strings.Count(string(src), "unlock, err := m.lockRegistry()")
+		releases := strings.Count(string(src), "\tdefer releaseRegistry(unlock, &err)")
+
+		// Assert
+		if takes == 0 || takes != releases || strings.Count(string(src), "closeErr := unlock()") > 1 {
+			t.Errorf("%s takes the registry lock %d times and releases it through releaseRegistry %d times; want every release through it", file, takes, releases)
+		}
 	}
 }

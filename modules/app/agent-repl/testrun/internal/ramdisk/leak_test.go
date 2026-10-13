@@ -590,3 +590,162 @@ func TestSetupTimesBothProbesThroughTimeProbe(t *testing.T) {
 		t.Fatalf("Setup times its probes by hand; want both through timeProbe")
 	}
 }
+
+func TestProbeBoundsCoverTwiceTheSlowestHealthyRead(t *testing.T) {
+	// Arrange: the slowest healthy `diskutil info` the runs recorded at their
+	// own priority (2026-10-12 and 13).
+	const slowestHealthyRead = 471 * time.Millisecond
+
+	// Act
+	bounds := map[string]time.Duration{"InfoBound": InfoBound, "ListBound": ListBound}
+
+	// Assert
+	for name, bound := range bounds {
+		if bound < 2*slowestHealthyRead {
+			t.Errorf("%s = %s, want at least twice the slowest healthy read %s", name, bound, slowestHealthyRead)
+		}
+	}
+}
+
+func TestLockBoundCoversTwiceTheLongestHealthyAcquireHold(t *testing.T) {
+	// Arrange: an acquire's hold is its listing and its attach, at their
+	// slowest healthy times recorded by the runs (2026-10-12 and 13).
+	const longestHold = 471*time.Millisecond + 332*time.Millisecond
+
+	// Act
+	bound := LockBound
+
+	// Assert
+	if bound < 2*longestHold {
+		t.Fatalf("LockBound = %s, want at least twice the longest healthy hold %s", bound, longestHold)
+	}
+}
+
+func TestSetupLogsAProbeThatAnswersLate(t *testing.T) {
+	// Arrange
+	late := make(chan Late, 1)
+	h := &fakeHost{late: map[string]chan Late{"diskutil list": late}}
+	m := newManager(t, h)
+	log := m.Log.(*fakeLog)
+	m.Setup(16) //nolint:errcheck // the late answer is the subject
+
+	// Act
+	late <- Late{Took: 247 * time.Millisecond}
+
+	// Assert
+	log.waitFor(t, "INFO RAM disk check at 2026-10-12T00:00:01.000Z: the disk manager answered diskutil list late, after 247ms, so it was slow, not wedged")
+}
+
+func TestSetupLogsAProbeThatNeverAnswersAtError(t *testing.T) {
+	// Arrange
+	late := make(chan Late, 1)
+	h := &fakeHost{late: map[string]chan Late{"hdiutil info": late}}
+	m := newManager(t, h)
+	log := m.Log.(*fakeLog)
+	m.Setup(16) //nolint:errcheck // the late failure is the subject
+
+	// Act
+	late <- Late{Took: CommandBound, Err: errors.New("hdiutil info did not answer within 1m0s")}
+
+	// Assert
+	log.waitFor(t, "ERROR RAM disk check at 2026-10-12T00:00:01.000Z: the disk manager never answered hdiutil info, which failed after 1m0s: hdiutil info did not answer within 1m0s")
+}
+
+func TestSetupWatchesEveryProbeThatMissedItsBound(t *testing.T) {
+	// Arrange
+	h := &fakeHost{late: map[string]chan Late{"diskutil list": make(chan Late), "hdiutil info": make(chan Late)}}
+	m := newManager(t, h)
+
+	// Act
+	_, trouble, _ := m.Setup(16)
+
+	// Assert
+	if trouble == nil || len(trouble.late) != 2 || trouble.late[0].call != "diskutil list" || trouble.late[1].call != "hdiutil info" {
+		t.Fatalf("trouble = %+v, want both probes watched", trouble)
+	}
+}
+
+func TestSetupWatchesNoProbeThatAnswered(t *testing.T) {
+	// Arrange
+	h := &fakeHost{fail: map[string]bool{"diskutil list": true}}
+	m := newManager(t, h)
+
+	// Act
+	_, trouble, _ := m.Setup(16)
+
+	// Assert
+	if trouble == nil || len(trouble.late) != 0 {
+		t.Fatalf("trouble = %+v, want no probe watched: the failed one answered", trouble)
+	}
+}
+
+func TestSettleProbesRecordsAProbeStillUnanswered(t *testing.T) {
+	// Arrange
+	h := &fakeHost{late: map[string]chan Late{"diskutil list": make(chan Late)}}
+	m := newManager(t, h)
+	log := m.Log.(*fakeLog)
+	_, trouble, _ := m.Setup(16)
+
+	// Act
+	m.SettleProbes(trouble)
+
+	// Assert
+	if !log.has("INFO RAM disk check at 2026-10-12T00:00:01.000Z: the disk manager had still not answered diskutil list when the run ended, ") {
+		t.Fatalf("log = %q, want the unanswered probe recorded", log.snapshot())
+	}
+}
+
+func TestSettleProbesKeepsAnOutcomeAfterTheRunFromTheLog(t *testing.T) {
+	// Arrange
+	late := make(chan Late)
+	h := &fakeHost{late: map[string]chan Late{"diskutil list": late}}
+	m := newManager(t, h)
+	log := m.Log.(*fakeLog)
+	_, trouble, _ := m.Setup(16)
+	m.SettleProbes(trouble)
+
+	// Act: the unbuffered send returns once the watch has taken the outcome.
+	late <- Late{Took: time.Second}
+
+	// Assert
+	if log.has("INFO RAM disk check at 2026-10-12T00:00:01.000Z: the disk manager answered diskutil list late") {
+		t.Fatalf("log = %q, want an outcome after the run's end left out", log.snapshot())
+	}
+}
+
+func TestSettleProbesLeavesALoggedOutcomeAlone(t *testing.T) {
+	// Arrange
+	late := make(chan Late, 1)
+	h := &fakeHost{late: map[string]chan Late{"diskutil list": late}}
+	m := newManager(t, h)
+	log := m.Log.(*fakeLog)
+	_, trouble, _ := m.Setup(16)
+	late <- Late{Took: time.Second}
+	log.waitFor(t, "INFO RAM disk check at 2026-10-12T00:00:01.000Z: the disk manager answered diskutil list late")
+
+	// Act
+	m.SettleProbes(trouble)
+
+	// Assert
+	if log.has("INFO RAM disk check at 2026-10-12T00:00:01.000Z: the disk manager had still not answered") {
+		t.Fatalf("log = %q, want the logged outcome to stand alone", log.snapshot())
+	}
+}
+
+func TestSetupLogsAStrayMountPointItRemoved(t *testing.T) {
+	// Arrange
+	h := &fakeHost{}
+	m := newManager(t, h)
+	dir := strayDir(t, m, "artr-28386")
+	m.KillUnder = func(string) (int, error) { return 12, nil }
+	log := m.Log.(*fakeLog)
+
+	// Act
+	v, _, _ := m.Setup(16)
+
+	// Assert
+	t.Cleanup(func() { v.Release() })
+	if !log.has("INFO removed the mount point " + dir + " left by dead run pid 28386, which no record named (killed 12 leftover processes)") {
+		t.Fatalf("log = %q, want the stray's removal at INFO", log.snapshot())
+	}
+}
