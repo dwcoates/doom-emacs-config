@@ -214,7 +214,7 @@ func (d *DB) OpenPage(ctx context.Context, agentID string, opening Opening) (Ope
 		return OpenedPage{}, d.refuse(base, err)
 	}
 
-	page := &storev1.AgentSessionPage{Lines: lines, TurnHeads: heads}
+	page := &storev1.AgentSessionPage{Lines: lines, Heads: heads}
 	if more {
 		page.Boundary = &storev1.AgentSessionPage_More{
 			More: &storev1.ReadAgentPageMore{LastItem: lines[len(lines)-1].GetAt()},
@@ -226,7 +226,7 @@ func (d *DB) OpenPage(ctx context.Context, agentID string, opening Opening) (Ope
 	d.traceStatement(ctx, StatementOpenPage, "entry", base, int64(len(lines)))
 	verbose := base
 	verbose.WriteSeq = pinSeq
-	d.log.LogVerbose(verbose, "page opened lines=%d turn_heads=%d more=%t opening=%s", len(lines), len(heads), more, opening)
+	d.log.LogVerbose(verbose, "page opened lines=%d heads=%d more=%t opening=%s", len(lines), len(heads), more, opening)
 	return OpenedPage{Page: page, PinSeq: pinSeq, Newest: newest}, nil
 }
 
@@ -289,7 +289,7 @@ func (d *DB) ReadPage(ctx context.Context, agentID string, after *storev1.StoreI
 	success := continuationPage(lines, heads, more)
 	d.observeQuery(StatementReadPage, "entry", base, started, int64(len(lines)))
 	d.traceStatement(ctx, StatementReadPage, "entry", base, int64(len(lines)))
-	d.log.LogVerbose(base, "page read lines=%d turn_heads=%d more=%t", len(lines), len(heads), more)
+	d.log.LogVerbose(base, "page read lines=%d heads=%d more=%t", len(lines), len(heads), more)
 	return success, nil
 }
 
@@ -331,19 +331,19 @@ func (d *DB) ReadPageThrough(ctx context.Context, agentID string, throughAtMs in
 	success := continuationPage(lines, heads, more)
 	d.observeQuery(StatementReadPage, "entry", base, started, int64(len(lines)))
 	d.traceStatement(ctx, StatementReadPage, "entry", base, int64(len(lines)))
-	d.log.LogVerbose(base, "page read through at_ms=%d lines=%d turn_heads=%d more=%t", throughAtMs, len(lines), len(heads), more)
+	d.log.LogVerbose(base, "page read through at_ms=%d lines=%d heads=%d more=%t", throughAtMs, len(lines), len(heads), more)
 	return success, nil
 }
 
 // continuationPage wraps a ReadAgentPage's lines with its turn heads and its
 // boundary.
-func continuationPage(lines, heads []*storev1.StoreLineAt, more bool) *storev1.ReadAgentPageSuccess {
+func continuationPage(lines []*storev1.StoreLineAt, heads []*storev1.StoreTurnHead, more bool) *storev1.ReadAgentPageSuccess {
 	// EVERY CONTINUATION LINE CARRIES ITS OWN POINTER, exactly as the opening
 	// page's do. A reader walking older must be able to echo a real position
 	// back — for a later ReadAgentPage, for a known_through re-open — and a
 	// page that served bare lines forced it to mint a placeholder mark or to
 	// track positions it was never given.
-	success := &storev1.ReadAgentPageSuccess{Lines: lines, TurnHeads: heads}
+	success := &storev1.ReadAgentPageSuccess{Lines: lines, Heads: heads}
 	if more {
 		success.Boundary = &storev1.ReadAgentPageSuccess_More{
 			More: &storev1.ReadAgentPageMore{LastItem: lines[len(lines)-1].GetAt()},
