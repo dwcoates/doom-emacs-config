@@ -2107,7 +2107,17 @@ type AgentSessionPage struct {
 	//
 	//	*AgentSessionPage_More
 	//	*AgentSessionPage_Floor
-	Boundary      isAgentSessionPage_Boundary `protobuf_oneof:"boundary"`
+	Boundary isAgentSessionPage_Boundary `protobuf_oneof:"boundary"`
+	// THE PROMPTS OF THE TURNS THIS PAGE TOUCHES THAT SIT BELOW IT, so the page
+	// draws whole in one read (owner ruling, 2026-10-12: the newest page is
+	// read complete before a workspace is answered open). For every turn a line
+	// of this page is stamped with whose prompt line (the line holding the
+	// turn's UserPrompt entry) is placed below this page, that prompt line,
+	// newest first; each turn at most once. A turn whose prompt is on this page,
+	// or that the store holds no prompt line for, has none here. A head is ALSO
+	// an ordinary line of an older page: a reader walking older meets it again,
+	// and absorbs it by identity.
+	TurnHeads     []*StoreLineAt `protobuf:"bytes,4,rep,name=turn_heads,json=turnHeads,proto3" json:"turn_heads,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2170,6 +2180,13 @@ func (x *AgentSessionPage) GetFloor() *ReadAgentPageFloor {
 		if x, ok := x.Boundary.(*AgentSessionPage_Floor); ok {
 			return x.Floor
 		}
+	}
+	return nil
+}
+
+func (x *AgentSessionPage) GetTurnHeads() []*StoreLineAt {
+	if x != nil {
+		return x.TurnHeads
 	}
 	return nil
 }
@@ -2312,11 +2329,13 @@ const file_store_v1_store_proto_rawDesc = "" +
 	"\tlast_item\x18\x01 \x01(\v2\x1a.store.v1.StoreItemPointerR\blastItem\"\x14\n" +
 	"\x12ReadAgentPageFloor\")\n" +
 	"\x11AgentSessionToken\x12\x14\n" +
-	"\x05value\x18\x01 \x01(\tR\x05value\"\xb4\x01\n" +
+	"\x05value\x18\x01 \x01(\tR\x05value\"\xea\x01\n" +
 	"\x10AgentSessionPage\x12+\n" +
 	"\x05lines\x18\x01 \x03(\v2\x15.store.v1.StoreLineAtR\x05lines\x121\n" +
 	"\x04more\x18\x02 \x01(\v2\x1b.store.v1.ReadAgentPageMoreH\x00R\x04more\x124\n" +
-	"\x05floor\x18\x03 \x01(\v2\x1c.store.v1.ReadAgentPageFloorH\x00R\x05floorB\n" +
+	"\x05floor\x18\x03 \x01(\v2\x1c.store.v1.ReadAgentPageFloorH\x00R\x05floor\x124\n" +
+	"\n" +
+	"turn_heads\x18\x04 \x03(\v2\x15.store.v1.StoreLineAtR\tturnHeadsB\n" +
 	"\n" +
 	"\bboundaryB\"Z agentrepl/proto/store/v1;storev1b\x06proto3"
 
@@ -2421,11 +2440,12 @@ var file_store_v1_store_proto_depIdxs = []int32{
 	23, // 43: store.v1.AgentSessionPage.lines:type_name -> store.v1.StoreLineAt
 	24, // 44: store.v1.AgentSessionPage.more:type_name -> store.v1.ReadAgentPageMore
 	25, // 45: store.v1.AgentSessionPage.floor:type_name -> store.v1.ReadAgentPageFloor
-	46, // [46:46] is the sub-list for method output_type
-	46, // [46:46] is the sub-list for method input_type
-	46, // [46:46] is the sub-list for extension type_name
-	46, // [46:46] is the sub-list for extension extendee
-	0,  // [0:46] is the sub-list for field type_name
+	23, // 46: store.v1.AgentSessionPage.turn_heads:type_name -> store.v1.StoreLineAt
+	47, // [47:47] is the sub-list for method output_type
+	47, // [47:47] is the sub-list for method input_type
+	47, // [47:47] is the sub-list for extension type_name
+	47, // [47:47] is the sub-list for extension extendee
+	0,  // [0:47] is the sub-list for field type_name
 }
 
 func init() { file_store_v1_store_proto_init() }

@@ -224,7 +224,17 @@ type ReadAgentPageSuccess struct {
 	//
 	//	*ReadAgentPageSuccess_More
 	//	*ReadAgentPageSuccess_Floor
-	Boundary      isReadAgentPageSuccess_Boundary `protobuf_oneof:"boundary"`
+	Boundary isReadAgentPageSuccess_Boundary `protobuf_oneof:"boundary"`
+	// THE PROMPTS OF THE TURNS THIS PAGE TOUCHES THAT SIT BELOW IT, so the page
+	// draws whole in one read (owner ruling, 2026-10-12: the newest page is
+	// read complete before a workspace is answered open). For every turn a line
+	// of this page is stamped with whose prompt line (the line holding the
+	// turn's UserPrompt entry) is placed below this page, that prompt line,
+	// newest first; each turn at most once. A turn whose prompt is on this page,
+	// or that the store holds no prompt line for, has none here. A head is ALSO
+	// an ordinary line of an older page: a reader walking older meets it again,
+	// and absorbs it by identity.
+	TurnHeads     []*StoreLineAt `protobuf:"bytes,4,rep,name=turn_heads,json=turnHeads,proto3" json:"turn_heads,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -287,6 +297,13 @@ func (x *ReadAgentPageSuccess) GetFloor() *ReadAgentPageFloor {
 		if x, ok := x.Boundary.(*ReadAgentPageSuccess_Floor); ok {
 			return x.Floor
 		}
+	}
+	return nil
+}
+
+func (x *ReadAgentPageSuccess) GetTurnHeads() []*StoreLineAt {
+	if x != nil {
+		return x.TurnHeads
 	}
 	return nil
 }
@@ -609,11 +626,13 @@ const file_store_v1_endpoint_read_agent_page_proto_rawDesc = "" +
 	"\x15ReadAgentPageResponse\x12:\n" +
 	"\asuccess\x18\x01 \x01(\v2\x1e.store.v1.ReadAgentPageSuccessH\x00R\asuccess\x12:\n" +
 	"\afailure\x18\x02 \x01(\v2\x1e.store.v1.ReadAgentPageFailureH\x00R\afailureB\b\n" +
-	"\x06result\"\xb8\x01\n" +
+	"\x06result\"\xee\x01\n" +
 	"\x14ReadAgentPageSuccess\x12+\n" +
 	"\x05lines\x18\x01 \x03(\v2\x15.store.v1.StoreLineAtR\x05lines\x121\n" +
 	"\x04more\x18\x02 \x01(\v2\x1b.store.v1.ReadAgentPageMoreH\x00R\x04more\x124\n" +
-	"\x05floor\x18\x03 \x01(\v2\x1c.store.v1.ReadAgentPageFloorH\x00R\x05floorB\n" +
+	"\x05floor\x18\x03 \x01(\v2\x1c.store.v1.ReadAgentPageFloorH\x00R\x05floor\x124\n" +
+	"\n" +
+	"turn_heads\x18\x04 \x03(\v2\x15.store.v1.StoreLineAtR\tturnHeadsB\n" +
 	"\n" +
 	"\bboundary\"\xf2\x02\n" +
 	"\x14ReadAgentPageFailure\x12\x16\n" +
@@ -667,15 +686,16 @@ var file_store_v1_endpoint_read_agent_page_proto_depIdxs = []int32{
 	11, // 5: store.v1.ReadAgentPageSuccess.lines:type_name -> store.v1.StoreLineAt
 	12, // 6: store.v1.ReadAgentPageSuccess.more:type_name -> store.v1.ReadAgentPageMore
 	13, // 7: store.v1.ReadAgentPageSuccess.floor:type_name -> store.v1.ReadAgentPageFloor
-	5,  // 8: store.v1.ReadAgentPageFailure.invalid_request:type_name -> store.v1.ReadAgentPageInvalidRequest
-	7,  // 9: store.v1.ReadAgentPageFailure.stale_pointer:type_name -> store.v1.ReadAgentPageStalePointer
-	6,  // 10: store.v1.ReadAgentPageFailure.storage_failure:type_name -> store.v1.ReadAgentPageStorageFailure
-	4,  // 11: store.v1.ReadAgentPageFailure.unknown_agent:type_name -> store.v1.ReadAgentPageUnknownAgent
-	12, // [12:12] is the sub-list for method output_type
-	12, // [12:12] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	11, // 8: store.v1.ReadAgentPageSuccess.turn_heads:type_name -> store.v1.StoreLineAt
+	5,  // 9: store.v1.ReadAgentPageFailure.invalid_request:type_name -> store.v1.ReadAgentPageInvalidRequest
+	7,  // 10: store.v1.ReadAgentPageFailure.stale_pointer:type_name -> store.v1.ReadAgentPageStalePointer
+	6,  // 11: store.v1.ReadAgentPageFailure.storage_failure:type_name -> store.v1.ReadAgentPageStorageFailure
+	4,  // 12: store.v1.ReadAgentPageFailure.unknown_agent:type_name -> store.v1.ReadAgentPageUnknownAgent
+	13, // [13:13] is the sub-list for method output_type
+	13, // [13:13] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_store_v1_endpoint_read_agent_page_proto_init() }

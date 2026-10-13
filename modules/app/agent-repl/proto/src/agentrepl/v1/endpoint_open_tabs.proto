@@ -24,6 +24,7 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
+import "frontend/v1/sidebar.proto";
 import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -111,6 +112,12 @@ message OpenTabsStep {
     OpenTabsStepPageConnected page_connected = 12;
     // Its web page has drawn its conversation ("page drawn.").
     OpenTabsStepPageDrawn page_drawn = 13;
+    // Its conversation's newest page was read whole: the page and every
+    // turn prompt its rows belong to ("conversation read.").
+    OpenTabsStepConversationRead conversation_read = 14;
+    // A turn the daemon's own stand-down cut (a restart, a bounce) is being
+    // resumed ("resuming the turn the restart cut…").
+    OpenTabsStepResumingCutTurn resuming_cut_turn = 15;
   }
 }
 
@@ -153,6 +160,12 @@ message OpenTabsStepPageConnected {}
 // The workspace's web page drew its conversation.
 message OpenTabsStepPageDrawn {}
 
+// The conversation's newest page was read whole.
+message OpenTabsStepConversationRead {}
+
+// A turn the daemon's own stand-down cut is being resumed.
+message OpenTabsStepResumingCutTurn {}
+
 // ---- Opened: the go-ahead to show one tab ----
 
 // One workspace is open.
@@ -168,8 +181,11 @@ message OpenTabsOpened {
   int64 at_ms = 2;
   // THE ARM IS HOW IT OPENED; exactly one is set.
   oneof outcome {
-    // Served, and its page drawn when one was loading: show the tab
-    // ("<name>: ready.").
+    // EVERYTHING THE WORKSPACE NEEDS IS DONE (owner ruling, 2026-10-12):
+    // its session served, its conversation's newest page read whole
+    // (`conversation_read`), any turn the daemon's own stand-down cut
+    // resumed (started again, not finished), and its page drawn when one was
+    // loading. Show the tab ("<name>: ready.").
     OpenTabsOpenedReady ready = 3;
     // Its service-level start failed; show the tab, which draws the fault
     // ("<name>: session failed to start: <reason>.").
@@ -182,13 +198,22 @@ message OpenTabsOpened {
   }
 }
 
-// Served (and drawn). DELIBERATELY EMPTY: the arm is the outcome.
-message OpenTabsOpenedReady {}
+// Everything the workspace needs is done.
+message OpenTabsOpenedReady {
+  // THE WORKSPACE'S ROSTER ROW AS OF THIS ANSWER: its status, name and
+  // markers, so the tab is drawn true from the frame that opens it rather
+  // than from the next roster push. The roster stream carries every later
+  // change.
+  frontend.v1.RosterRow row = 1;
+}
 
 // The service-level start failed.
 message OpenTabsOpenedFailed {
   // Why, in the daemon's words. Printed verbatim.
   string reason = 1;
+  // The workspace's roster row as of this answer, drawing the failure; as
+  // OpenTabsOpenedReady.row.
+  frontend.v1.RosterRow row = 2;
 }
 
 // Not visible, so nothing was started. DELIBERATELY EMPTY.
