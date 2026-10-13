@@ -85,6 +85,12 @@ workspace's own.")
 (defvar agent-repl--webhost-reload-timer nil
   "The pending host reload of a rollout burst, or nil.")
 
+(defvar agent-repl--webhost-url nil
+  "The URL the host was last loaded at, which names the daemon it talks to.
+The host draws the sidebar over its own connection to that daemon, so when
+the workspaces move to another daemon the host must move with them
+\(`agent-repl-webhost-reload-page').")
+
 (defvar agent-repl--webhost-killing nil
   "Non-nil only while this module itself kills the host buffer.")
 
@@ -161,7 +167,8 @@ the host buffer is never displayed itself; workspace slots display it."
             (let ((agent-repl--webhost-killing t))
               (agent-repl--frontend-kill-webview buf))
             (error "agent-repl: the web view host was created without a live xwidget"))
-          (setq agent-repl--webhost-buffer buf)
+          (setq agent-repl--webhost-buffer buf
+                agent-repl--webhost-url url)
           (agent-repl--webhost-watch-load xw)
           (agent-repl--info agent-repl--webhost-central "elisp.webhost.created url=%s" url)
           xw))))
@@ -171,7 +178,8 @@ the host buffer is never displayed itself; workspace slots display it."
   (when-let ((buf (agent-repl-webhost-buffer)))
     (let ((agent-repl--webhost-killing t))
       (agent-repl--frontend-kill-webview buf))
-    (setq agent-repl--webhost-buffer nil)
+    (setq agent-repl--webhost-buffer nil
+          agent-repl--webhost-url nil)
     (agent-repl--info agent-repl--webhost-central "elisp.webhost.killed")))
 
 ;;;; ---- Calls -----------------------------------------------------------------
@@ -281,13 +289,29 @@ be built (`agent-repl-frontend-webview-url')."
 
 (defun agent-repl-webhost-reload-page (ws)
   "Load WS's page again, at its URL now: re-point it when the URL moved
-\(a daemon handover), reload it in place otherwise."
+\(a daemon handover), reload it in place otherwise.
+
+THE HOST FOLLOWS THE WORKSPACES TO THEIR NEW DAEMON.  The host draws the
+sidebar over its own connection to the daemon that served it, which a
+handover leaves behind, so a page re-pointed to a daemon other than the
+host's reloads the whole host on that daemon instead (once per burst,
+`agent-repl-webhost-reload'); its load replays every page at the URL it
+should be held at, WS's new one included.  Every page of a handover
+reloads anyway, so nothing more is reloaded than the handover already
+reloads."
   (let* ((url (agent-repl-frontend-webview-url ws))
          (id (agent-repl--webhost-id ws)))
     (if (equal (gethash id agent-repl--webhost-pages) url)
         (agent-repl--webhost-call "reload" id)
       (puthash id url agent-repl--webhost-pages)
-      (agent-repl--webhost-call "ensure" id url))
+      (let* ((conn (agent-repl-host-conn ws))
+             (host-url (and agent-repl--webhost-url (agent-repl-webhost-url conn))))
+        (if (and host-url (not (equal host-url agent-repl--webhost-url)))
+            (progn
+              (agent-repl--info ws "elisp.webhost.follows-daemon ws=%s from=%s to=%s"
+                                ws agent-repl--webhost-url host-url)
+              (agent-repl-webhost-reload conn))
+          (agent-repl--webhost-call "ensure" id url))))
     (agent-repl--info ws "elisp.webhost.page-reloaded ws=%s id=%s" ws id)
     id))
 
@@ -329,7 +353,8 @@ each page's state.  Run on every load of the host, which starts empty."
   (setq agent-repl--webhost-reload-timer nil)
   (if-let ((xw (agent-repl-webhost-xwidget)))
       (progn
-        (agent-repl--frontend-webview-navigate-widget xw (agent-repl-webhost-url conn))
+        (setq agent-repl--webhost-url (agent-repl-webhost-url conn))
+        (agent-repl--frontend-webview-navigate-widget xw agent-repl--webhost-url)
         (agent-repl--info agent-repl--webhost-central "elisp.webhost.reloaded pages=%d"
                           (hash-table-count agent-repl--webhost-pages)))
     (agent-repl--log agent-repl--webhost-central "elisp.webhost.reload-skipped reason=no-host")))
