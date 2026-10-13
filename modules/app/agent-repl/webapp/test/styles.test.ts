@@ -3096,9 +3096,9 @@ describe("the one bubble rule set", () => {
             !prop.startsWith("border") &&
             prop !== "--bubble-bg" &&
             !(prop === "max-width" && rule.selectors.length === 1 && rule.selectors[0] === held) &&
-            // The tighter vertical padding of a prompt or response bubble
-            // (owner request, 2026-10-12) is the one padding token a variant
-            // sets; its own suite pins it.
+            // The vertical padding ladder (owner requests, 2026-10-12 and
+            // 2026-10-13) is the one padding token a variant sets; its own
+            // suite pins it.
             !(prop === "--bubble-pad-y" && rule.selectors.every((sel) => TIGHTER_PAD_SELECTORS.includes(sel))) &&
             // The dimmed prose of a thinking or interim bubble (owner request,
             // 2026-10-08) is the one text color a variant sets; its own suite
@@ -3878,10 +3878,18 @@ describe("the tool card's command grey", () => {
  * background is not there in either theme; every other response keeps the
  * purple, and the interim keeps its pear border.
  */
-/** The prompt and response variants whose vertical padding is 30% tighter (owner request, 2026-10-12). */
-const TIGHTER_PAD_SELECTORS: readonly string[] = ["response", "user", "agent", "peer", "held"].map(
-  (variant) => `.bubble[data-variant="${variant}"]`,
-);
+/**
+ * The vertical padding ladder: each rule that sets `--bubble-pad-y`, by its
+ * selectors, and the share of the base it sets (owner requests, 2026-10-12 and
+ * 2026-10-13).
+ */
+const PAD_LADDER: readonly { selectors: readonly string[]; value: string }[] = [
+  { selectors: ["user", "agent", "peer", "held"], value: "calc(var(--bubble-pad-y-base)*0.7)" },
+  { selectors: ["response"], value: "calc(var(--bubble-pad-y-base)*0.49)" },
+  { selectors: ["thinking"], value: "calc(var(--bubble-pad-y-base)*0.35)" },
+].map((rung) => ({ ...rung, selectors: rung.selectors.map((variant) => `.bubble[data-variant="${variant}"]`) }));
+/** Every variant selector the ladder pads. */
+const TIGHTER_PAD_SELECTORS: readonly string[] = PAD_LADDER.flatMap((rung) => rung.selectors);
 /** The two bubble kinds whose prose is the dimmed `--interim-text` (half way from the command grey to the body text). */
 const DIMMED_TEXT_SELECTORS: readonly string[] = ['.bubble[data-variant="thinking"]', ".bubble.interim-response"];
 
@@ -4438,14 +4446,16 @@ describe("the stylesheet's real-height contract", () => {
 });
 
 /**
- * PROMPT AND RESPONSE BUBBLES SIT 30% TIGHTER TOP AND BOTTOM (owner request,
- * 2026-10-12): the vertical padding token shrinks to 0.7 of the base on the
- * prompt and response variants only, while thinking, the agentic tool and
- * monitor cards and the compaction summary keep the base. The horizontal
- * padding never reads the vertical token, so it cannot move with it.
+ * THE VERTICAL PADDING LADDER: prompt bubbles sit 30% tighter top and bottom
+ * (owner request, 2026-10-12), response bubbles 30% tighter again and thinking
+ * bubbles at about a third of the base (owner requests, 2026-10-13), while the
+ * agentic tool and monitor cards and the compaction summary keep the base. The
+ * horizontal padding never reads the vertical token, so it cannot move with it.
  */
-describe("the tighter prompt and response padding", () => {
-  const SHRUNK = "calc(var(--bubble-pad-y-base)*0.7)";
+describe("the vertical padding ladder", () => {
+  const PROMPT = "calc(var(--bubble-pad-y-base)*0.7)";
+  const RESPONSE = "calc(var(--bubble-pad-y-base)*0.49)";
+  const THINKING = "calc(var(--bubble-pad-y-base)*0.35)";
   const BASE = "var(--bubble-pad-y-base)";
 
   /** The `--bubble-pad-y` the cascade hands a bubble of VARIANT. */
@@ -4458,12 +4468,12 @@ describe("the tighter prompt and response padding", () => {
   }
 
   const cases: readonly { variant: keyof typeof BUBBLE_VARIANTS; want: string }[] = [
-    { variant: "response", want: SHRUNK },
-    { variant: "user", want: SHRUNK },
-    { variant: "agent", want: SHRUNK },
-    { variant: "peer", want: SHRUNK },
-    { variant: "held", want: SHRUNK },
-    { variant: "thinking", want: BASE },
+    { variant: "response", want: RESPONSE },
+    { variant: "user", want: PROMPT },
+    { variant: "agent", want: PROMPT },
+    { variant: "peer", want: PROMPT },
+    { variant: "held", want: PROMPT },
+    { variant: "thinking", want: THINKING },
     { variant: "agentic", want: BASE },
     { variant: "compaction", want: BASE },
   ];
@@ -4484,17 +4494,19 @@ describe("the tighter prompt and response padding", () => {
     expect(got).toBe(want);
   });
 
-  it("keys the tighter rule on exactly the prompt and response variants", () => {
+  it("keys each rung of the ladder on exactly its variants, and no other rule pads a variant", () => {
     // Arrange / Act
-    const rule = rulesOf(stylesheet).find((r) => /--bubble-pad-y\s*:/.test(r.declarations) && r.selectors[0] !== ".bubble");
+    const rungs = rulesOf(stylesheet)
+      .filter((r) => /--bubble-pad-y\s*:/.test(r.declarations) && r.selectors[0] !== ".bubble")
+      .map((r) => r.selectors);
 
     // Assert
-    expect(rule?.selectors).toEqual(TIGHTER_PAD_SELECTORS);
+    expect(rungs).toEqual(PAD_LADDER.map((rung) => rung.selectors));
   });
 
-  it("sets nothing but the vertical token on the tighter rule, so the horizontal padding stays the base rule's", () => {
+  it.each(PAD_LADDER)("sets nothing but the vertical token on the $selectors rung", ({ selectors }) => {
     // Arrange / Act
-    const props = (rulesOf(stylesheet).find((r) => r.selectors.join(",") === TIGHTER_PAD_SELECTORS.join(","))?.declarations ?? "")
+    const props = (rulesOf(stylesheet).find((r) => r.selectors.join(",") === selectors.join(","))?.declarations ?? "")
       .split(";")
       .map((decl) => decl.split(":")[0]?.trim() ?? "")
       .filter((prop) => prop !== "");
