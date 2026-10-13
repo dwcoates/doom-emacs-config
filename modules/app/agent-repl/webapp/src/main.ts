@@ -57,6 +57,7 @@ import { installPagePresenceLog } from "./page-presence.js";
 import { connectToHost } from "./host/embed.js";
 import { pagePresence } from "./presence.js";
 import { installPageDrawnReport } from "./page-drawn-report.js";
+import { createPageSeen } from "./page-seen.js";
 import { createAgentReplClient, type AgentReplClient } from "./rpc/client.js";
 import { createAppContext, type AppContext } from "./rpc/context.js";
 import { reportClientFailure } from "./rpc/link.js";
@@ -221,6 +222,7 @@ export async function boot(): Promise<void> {
       workspace,
       ticker,
       failures: localFailures,
+      seen: createPageSeen(workspace.id, pagePresence()),
       composerEnabled: address.composer,
       page: connectionId,
     });

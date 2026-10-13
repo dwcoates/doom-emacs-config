@@ -23,6 +23,10 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { bootColdOnce, startHarness, type Harness } from "./harness";
 import { log } from "../../src/log";
+import { TITLE_REVEALED_ATTRIBUTE } from "../../src/feed/title-reveal.js";
+import { CONVERSATION_DRAWN_ATTRIBUTE } from "../../src/feed/conversation-drawn.js";
+import { ROOT_FEED } from "./fake-daemon";
+import { WORKSPACE_ID, activityRow, feedId, toolCallRunningUnit } from "./fixtures";
 
 let harness: Harness | undefined;
 let restoreFetch: (() => void) | undefined;
@@ -150,5 +154,57 @@ describe("the cold boot", () => {
 
     // Assert: exactly one top-level call, so the file's first boot is warm.
     expect(calls).toHaveLength(1);
+  });
+});
+
+/**
+ * A ROW A LIVE PUSH DRAWS TYPES ITS TITLE OUT (title-reveal.ts), and
+ * `finishTypeOuts` runs that type-out to its end on the faked frames.
+ */
+describe("finishing the page's title type-outs", () => {
+  /** Boot, push a running tool call live, and settle. */
+  async function pushedToolCall(): Promise<HTMLElement> {
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchFeed");
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, activityRow(toolCallRunningUnit(), { id: feedId("call-1") }));
+    await harness.settle();
+    const row = harness.row("call-1");
+    if (row === null || row === undefined) throw new Error("the feed drew no row for call-1");
+    return row;
+  }
+
+  it("shows the title whole once the type-outs are finished", async () => {
+    // Arrange
+    const row = await pushedToolCall();
+    // Act
+    await harness!.finishTypeOuts();
+    // Assert
+    expect([row.querySelector(`[${TITLE_REVEALED_ATTRIBUTE}]`), row.textContent?.includes("npm test")]).toEqual([
+      null,
+      true,
+    ]);
+  });
+});
+
+/**
+ * A BOOTED PAGE HAS ITS CONVERSATION ON SCREEN: the boot runs the frames the
+ * drawn mark waits for, so its record never lands inside a case, and every
+ * test's page starts unmarked.
+ */
+describe("the boot's drawn mark", () => {
+  it("is set by the time the boot returns", async () => {
+    // Arrange, Act
+    harness = await startHarness();
+    // Assert
+    expect(document.documentElement.hasAttribute(CONVERSATION_DRAWN_ATTRIBUTE)).toBe(true);
+  });
+
+  it("is cleared when the harness stops", async () => {
+    // Arrange
+    harness = await startHarness();
+    // Act
+    await harness.stop();
+    // Assert
+    expect(document.documentElement.hasAttribute(CONVERSATION_DRAWN_ATTRIBUTE)).toBe(false);
   });
 });

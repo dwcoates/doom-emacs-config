@@ -28,7 +28,9 @@ import {
   subagentRow,
   tokenFor,
   type Harness,
+  pagedRowContext,
 } from "./harness.js";
+import type { RowContext } from "../../src/feed/cards/context.js";
 import type { WatchFeedResponse } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_feed_pb";
 import { TailFollow } from "../../src/scroll.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
@@ -62,7 +64,7 @@ function mount(
     /** What the head states about itself, per draw. */
     states?: (string | null)[];
     /** A head of the suite's own, in place of the marked stub. */
-    head?: () => HTMLElement;
+    head?: (rc: RowContext) => HTMLElement;
     /** The page's scroll box and tail owner. */
     scroll?: { box: Element; tail: TailFollow };
     /** The daemon's fold, read off each push (a merge row ships one). */
@@ -77,8 +79,8 @@ function mount(
     ctx: h.ctx,
     row,
     rc: rowContext(h.ctx, row),
-    head: () => {
-      if (opts.head !== undefined) return opts.head();
+    head: (_row, rc) => {
+      if (opts.head !== undefined) return opts.head(rc);
       const el = document.createElement("span");
       el.className = "stub-head";
       const state = opts.states?.[heads.length];
@@ -105,6 +107,40 @@ function mount(
   document.body.replaceChildren(bubble.element);
   return { bubble, h, heads };
 }
+
+describe("mountBubble: a head redraw reads its previous head", () => {
+  it("draws the first head with no previous", () => {
+    // Arrange
+    const previous: (HTMLElement | undefined)[] = [];
+    // Act
+    mount(subagentRow("b1"), harness(), {
+      head: (rc) => {
+        previous.push(rc.previous);
+        return document.createElement("span");
+      },
+    });
+    // Assert
+    expect(previous).toEqual([undefined]);
+  });
+
+  it("hands a re-push's head the head it replaces", () => {
+    // Arrange
+    const drawn: HTMLElement[] = [];
+    const previous: (HTMLElement | undefined)[] = [];
+    const { bubble } = mount(subagentRow("b1"), harness(), {
+      head: (rc) => {
+        previous.push(rc.previous);
+        const el = document.createElement("span");
+        drawn.push(el);
+        return el;
+      },
+    });
+    // Act
+    bubble.update(subagentRow("b1", { tokens: "9k" }));
+    // Assert
+    expect(previous[1]).toBe(drawn[0]);
+  });
+});
 
 describe("mountBubble: the collapsed head", () => {
   it("starts collapsed for a subagent row, which ships no fold", () => {
@@ -1702,7 +1738,7 @@ describe("mountBubble: the head's title fold follows the bubble's fold", () => {
       title,
       head: () => {
         const el = document.createElement("div");
-        el.append(foldTitle(title, "card"));
+        el.append(foldTitle(title, "card", pagedRowContext()));
         return el;
       },
     };

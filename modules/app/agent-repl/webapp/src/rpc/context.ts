@@ -25,6 +25,7 @@
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import type { Ticker } from "../clock.js";
 import type { FailureSink } from "../failure/sink.js";
+import type { PageSeen } from "../page-seen.js";
 import { log } from "../log.js";
 import type { AgentReplClient } from "./client.js";
 import { startPageStreams, type PageStreams, type PageStreamContext } from "./page-streams.js";
@@ -48,6 +49,11 @@ export interface AppContext {
   readonly ticker: Ticker;
   /** Where a component reports its OWN machinery failing. */
   readonly failures: FailureSink;
+  /**
+   * Whether a reader can see this page now (page-seen.ts). Work only a reader
+   * would notice, a type-out say, is skipped while it says no.
+   */
+  readonly seen: PageSeen;
   /**
    * Whether the browser-local dev composer is on (`&composer=1`). Production
    * runs composer-less: the root composer is host-native (Emacs).
@@ -97,6 +103,8 @@ export interface AppContextInit {
   workspace: WorkspaceRef;
   ticker: Ticker;
   failures: FailureSink;
+  /** The page's seen state; main.ts builds it over the page's own document. */
+  seen: PageSeen;
   composerEnabled: boolean;
   /**
    * This page's own id, which its one standing stream is registered under.
@@ -134,6 +142,7 @@ export function createAppContext(init: AppContextInit): AppContext {
     workspace: init.workspace,
     ticker: init.ticker,
     failures: init.failures,
+    seen: init.seen,
     composerEnabled: init.composerEnabled,
     quiesce(): void {
       if (quiesced) return;

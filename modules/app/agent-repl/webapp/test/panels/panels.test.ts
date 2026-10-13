@@ -47,6 +47,7 @@ function rowContext(): RowContext {
   return {
     ctx: appContext(),
     feed: "root",
+    arrival: "page",
     row: create(FeedRowSchema, {}),
     revealRow: async () => true,
   };

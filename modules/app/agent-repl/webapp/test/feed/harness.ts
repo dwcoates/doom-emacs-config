@@ -770,14 +770,24 @@ export function stubRenderers(overrides: Partial<RowRenderers> = {}): RowRendere
 }
 
 /** A row context for a renderer under test on its own. */
-export function rowContext(ctx: AppContext, row: FeedRow, extra: Partial<RowContext> = {}) {
+export function rowContext(ctx: AppContext, row: FeedRow, extra: Partial<RowContext> = {}): RowContext {
   return {
     ctx,
     feed: "root" as const,
     row,
+    // A row drawn from a page: its title shows whole, as history does.
+    arrival: "page",
     revealRow: async () => false,
     ...extra,
   };
+}
+
+/**
+ * A row context for a card drawn from a page, so its title shows whole: what a
+ * test of anything but the title's type-out hands `foldTitle`.
+ */
+export function pagedRowContext(): RowContext {
+  return rowContext(harness().ctx, create(FeedRowSchema, {}));
 }
 
 /** Let every scripted answer settle; the router hands them back on timers. */

@@ -20,6 +20,17 @@
  * otherwise never complete; `settle()` is how a test waits for the DOM instead
  * of sleeping.
  */
+import { createPageSeen } from "../../src/page-seen.js";
+import { pagePresence } from "../../src/presence.js";
+import { TITLE_REVEALED_ATTRIBUTE } from "../../src/feed/title-reveal.js";
+import { CONVERSATION_DRAWN_ATTRIBUTE } from "../../src/feed/conversation-drawn.js";
+
+/** One animation frame of fake time, as `finishTypeOuts` steps it. */
+const TYPE_OUT_FRAME_MS = 16;
+/** The most frames a title type-out may take: 10 s of fake time. */
+const TYPE_OUT_FRAME_CAP = 625;
+/** The frames after an applied page before it is marked drawn. */
+const CONVERSATION_DRAWN_FRAMES = 2;
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { transferableAbortController } from "node:util";
@@ -186,6 +197,13 @@ export interface MountedApp {
   settle(): Promise<void>;
   /** Advance fake time by `ms` and settle. */
   tick(ms: number): Promise<void>;
+  /**
+   * Run every title type-out on the page to its end (title-reveal.ts), one
+   * animation frame of fake time at a time, and settle. A row a live push
+   * drew types its title out; a case about what the title SAYS reads it once
+   * it is whole.
+   */
+  finishTypeOuts(): Promise<void>;
   /**
    * Dispose every mount while LEAVING the daemon up, so a test can observe
    * what the app's own cancellation does to the server's live streams.
@@ -502,7 +520,24 @@ async function mountApp(
   // the page's clock is put ten seconds after the epoch rather than at the
   // real wall clock, where those same timestamps would read as fifty years
   // ago and every countdown would already have expired.
-  vi.useFakeTimers({ shouldAdvanceTime: true, now: HARNESS_EPOCH_MS });
+  // ANIMATION FRAMES ARE FAKED WITH THE REST, so a type-out runs on the same
+  // clock as everything else and a case can run one to its end without
+  // waiting real time (`finishTypeOuts`).
+  vi.useFakeTimers({
+    shouldAdvanceTime: true,
+    now: HARNESS_EPOCH_MS,
+    toFake: [
+      "setTimeout",
+      "clearTimeout",
+      "setImmediate",
+      "clearImmediate",
+      "setInterval",
+      "clearInterval",
+      "Date",
+      "requestAnimationFrame",
+      "cancelAnimationFrame",
+    ],
+  });
 
   const { baseUrl, socketPath } = endpoint;
   const dispatcher = socketPath === undefined ? undefined : new Agent({ connect: { socketPath } });
@@ -538,11 +573,14 @@ async function mountApp(
   // which is the only place in the suites where the multiplexing itself is
   // exercised end to end. Each mounted app takes its own page id, so two
   // harnesses in one file cannot collide on the daemon's page registry.
+  const workspace = workspaceRef(options.workspaceId ?? WORKSPACE_ID, options.workspaceDir ?? WORKSPACE_DIR);
   const ctx = createAppContext({
     client,
-    workspace: workspaceRef(options.workspaceId ?? WORKSPACE_ID, options.workspaceDir ?? WORKSPACE_DIR),
+    workspace,
     ticker,
     failures,
+    // MAIN.TS'S OWN SEEN STATE, over the harness's own document.
+    seen: createPageSeen(workspace.id, pagePresence()),
     composerEnabled,
     page: `harness-page-${(pageSerial += 1)}`,
   });
@@ -775,6 +813,17 @@ async function mountApp(
       await vi.advanceTimersByTimeAsync(ms);
       await settle();
     },
+    async finishTypeOuts() {
+      for (let frame = 0; document.querySelector(`[${TITLE_REVEALED_ATTRIBUTE}]`) !== null; frame += 1) {
+        // A title types at no less than its pace's minimum, so a bound past
+        // any title's length at that speed means the loop has stopped.
+        if (frame >= TYPE_OUT_FRAME_CAP) {
+          throw new Error(`a title type-out never ended within ${TYPE_OUT_FRAME_CAP} frames`);
+        }
+        await vi.advanceTimersByTimeAsync(TYPE_OUT_FRAME_MS);
+      }
+      await settle();
+    },
     async disposeMounts() {
       for (const handle of [...handles].reverse()) handle.dispose();
       handles.length = 0;
@@ -816,6 +865,8 @@ async function mountApp(
       } catch {
         // A jsdom without storage is fine: there is then nothing to clear.
       }
+      // The drawn mark is the page's, set once per page: a fresh page per test.
+      document.documentElement.removeAttribute(CONVERSATION_DRAWN_ATTRIBUTE);
       vi.useRealTimers();
     },
 
@@ -843,6 +894,16 @@ async function mountApp(
     refusalArms: () => $$(".refusal[data-arm]").map((el) => el.dataset.arm ?? ""),
   };
 
+  await settle();
+  // A BOOTED PAGE HAS ITS CONVERSATION ON SCREEN. The opening page is marked
+  // drawn two animation frames after it is applied (conversation-drawn.ts),
+  // and the frames are faked, so they are run here rather than left to land
+  // inside whatever the case does next, where the mark's record would be read
+  // as the case's own.
+  for (let frame = 0; frame < CONVERSATION_DRAWN_FRAMES; frame += 1) {
+    if (document.documentElement.hasAttribute(CONVERSATION_DRAWN_ATTRIBUTE)) break;
+    await vi.advanceTimersByTimeAsync(TYPE_OUT_FRAME_MS);
+  }
   await settle();
   return harness;
 }

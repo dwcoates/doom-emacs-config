@@ -36,7 +36,7 @@ import { placeOpenRowDetails } from "./row.js";
 import { installBandFit } from "./band-fit.js";
 import { createSelectionEdge } from "./selection-edge.js";
 import { installWallPhase, type WallPhaseEnv } from "./wall-phase.js";
-import { createUnseenGate, type UnseenEnv } from "./unseen.js";
+import { createUnseenGate, unseenEnv, type UnseenEnv } from "./unseen.js";
 import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 
 /** What every mount answers with. */
@@ -183,7 +183,7 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
   };
   host.addEventListener("click", dismiss);
 
-  const unseen = createUnseenGate(ctx.workspace.id, drawRoster, deps.unseen);
+  const unseen = createUnseenGate(ctx.workspace.id, drawRoster, deps.unseen ?? unseenEnv(ctx.seen));
   const stream = watchStream(ctx, {
     name: "WatchWorkspaceRoster",
     schema: WatchWorkspaceRosterResponseSchema,

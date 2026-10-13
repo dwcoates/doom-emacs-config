@@ -65,6 +65,7 @@ function harness(answer?: OpenExternalResponse): Harness {
     rc: {
       ctx,
       feed: "root",
+      arrival: "page",
       row: create(FeedRowSchema, {}),
       revealRow: async () => false,
     },

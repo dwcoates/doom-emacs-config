@@ -11,9 +11,17 @@
  */
 import { createAppContext, type AppContext, type AppContextInit } from "../../src/rpc/context.js";
 import { directPageStreams } from "./direct-page-streams.js";
+import { fakePageSeen } from "../page-seen-fake.js";
 
-export function testAppContext(init: Omit<AppContextInit, "page" | "streams">): AppContext {
+/**
+ * A test that is not about the page being seen leaves `seen` unset and gets a
+ * page that is seen (page-seen-fake.ts).
+ */
+export function testAppContext(
+  init: Omit<AppContextInit, "page" | "streams" | "seen"> & Partial<Pick<AppContextInit, "seen">>,
+): AppContext {
   return createAppContext({
+    seen: fakePageSeen(),
     ...init,
     page: "test-page",
     streams: directPageStreams(init.client),
