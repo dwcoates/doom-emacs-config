@@ -45,6 +45,7 @@
 (declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--global-state-file "agent-repl-core" (relative))
+(declare-function agent-repl--write-file-atomically "agent-repl-core" (file text))
 (declare-function agent-repl--ws-dir-hash-cached "agent-repl-core" (ws))
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
 (declare-function agent-repl--input-set-waiting "agent-repl-input" (ws text))
@@ -157,14 +158,9 @@ owns telling the user their words were not saved."
           existing)
       (let* ((name (format "held_%s_%s_%s.json"
                            (format-time-string "%Y%m%dT%H%M%S.%N" nil t) hash key))
-             (path (expand-file-name name dir))
-             (tmp (expand-file-name (concat "." name ".tmp") dir))
-             (body (agent-repl-held-ingress--body ws said origin key delivery)))
-        (make-directory dir t)
-        (let ((coding-system-for-write 'utf-8-unix))
-          (with-temp-file tmp
-            (insert body)))
-        (rename-file tmp path)
+             (path (expand-file-name name dir)))
+        (agent-repl--write-file-atomically
+         path (agent-repl-held-ingress--body ws said origin key delivery))
         (agent-repl--info ws "elisp.held-ingress.written ws=%s key=%s origin=%S delivery=%S file=%s"
                           ws key origin delivery path)
         (agent-repl-held-ingress-refresh ws)

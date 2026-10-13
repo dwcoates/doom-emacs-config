@@ -235,6 +235,15 @@ When Emacs quits, each workspace's input window is saved to that workspace's pro
   - It stops coming back once you send it, or once you send any other prompt after it.
   - Only the most recent such text comes back.
 
+## One-shot commissions across a crash
+
+The one-shot commission prompt (`SPC TAB o`) saves what you type to its history on every keystroke.
+
+- If Emacs crashes while you type, press `SPC TAB o` again, then the up arrow or `M-p`.
+  - The text you were typing is the first history entry, in full.
+- The text also stays in the history when you press `C-g`.
+- The history is shared by every workspace, in `~/.claude-emacs/oneshot-commission-history.el`.
+
 ## Changing the reasoning effort
 
 The top bar's effort selector sits between the model selector and the permission-mode picker.

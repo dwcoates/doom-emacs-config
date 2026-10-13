@@ -9,6 +9,8 @@
 ;; so the declarations below exist for the byte-compiler alone.
 (declare-function agent-repl--log "core")
 (declare-function agent-repl--warn "core")
+(declare-function agent-repl--error "core")
+(declare-function agent-repl--write-file-atomically "core" (file text))
 (declare-function agent-repl--info "core")
 (declare-function agent-repl--log-verbose "core")
 (declare-function agent-repl--buffer-owner "core")
@@ -104,16 +106,26 @@ Catches errors and displays a user-visible warning via
       data)))
 
 (defun agent-repl--write-sexp-file (file data)
-  "Write DATA as a sexp to FILE.
+  "Write DATA as a sexp to FILE, ATOMICALLY.
 Creates FILE's parent directory if missing so the relocated `.claude/emacs/'
-data dir is auto-provisioned on first save."
+data dir is auto-provisioned on first save.
+
+The write goes through `agent-repl--write-file-atomically', so FILE holds
+either its previous contents or DATA in full and never a torn write: a
+crash mid-save cannot leave a file that no longer reads.  The text is
+UTF-8, so a non-ASCII string never asks which coding to use.  A failed
+write is recorded with the file and its cause, and re-signalled."
   (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "write-sexp-file: file=%s" file)
-  (let ((dir (file-name-directory file)))
-    (when (and dir (not (file-directory-p dir)))
-      (make-directory dir t)
-      (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "write-sexp-file: created parent-dir=%s" dir)))
-  (with-temp-file file
-    (prin1 data (current-buffer)))
+  (condition-case err
+      (agent-repl--write-file-atomically
+       file (let ((print-length nil)
+                  (print-level nil))
+              (prin1-to-string data)))
+    (error
+     (agent-repl--error '(:agent-repl-central "saved workspace state spans workspaces")
+                        "write-sexp-file: failed file=%s value-type=%s cause=%S"
+                        file (type-of data) err)
+     (signal (car err) (cdr err))))
   (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "write-sexp-file: complete file=%s value-type=%s" file (type-of data)))
 
 (defun agent-repl--read-sexp-file-if-exists (file)
