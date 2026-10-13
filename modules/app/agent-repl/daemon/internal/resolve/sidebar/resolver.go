@@ -404,31 +404,6 @@ func (r *resolver) SetMerge(ws ids.WorkspaceID, facts footer.MergeFacts) {
 	r.mutateWorkspaceLogged(ws, "daemon.sidebar.set_merge", "the roster took the merge facts",
 		dlog.Context{"state": facts.State}, func(s *wsState, log dlog.Logger) {
 			s.merge = facts
-			// THE MERGE'S OWN FACTS SUPERSEDE ITS REQUEST: a merge the
-			// orchestrator reports is in line (or done), and one it forgot was
-			// abandoned, so either way no request is left standing.
-			s.mergeRequested = false
-			s.noteMergeForOneShot(facts, log)
-		})
-}
-
-// SetMergeRequested raises (true) or lowers (false) the fact that a merge is
-// RECORDED for the workspace and waiting for its requesting turn to end.
-func (r *resolver) SetMergeRequested(ws ids.WorkspaceID, requested bool) {
-	r.mutateWorkspaceLogged(ws, "daemon.sidebar.set_merge_requested", "the roster took whether a merge request is recorded",
-		dlog.Context{"requested": requested}, func(s *wsState, log dlog.Logger) {
-			s.mergeRequested = requested
-			if requested {
-				s.setOneShotFailed(false, "merge_requested", log)
-			}
-		})
-}
-
-// SetDetachedMergeEnded reports how the workspace's detached merge ended.
-func (r *resolver) SetDetachedMergeEnded(ws ids.WorkspaceID, landed bool) {
-	r.mutateWorkspaceLogged(ws, "daemon.sidebar.set_detached_merge_ended", "the roster took how the workspace's detached merge ended",
-		dlog.Context{"landed": landed}, func(s *wsState, log dlog.Logger) {
-			s.noteDetachedMergeEndedForOneShot(landed, log)
 		})
 }
 
@@ -504,7 +479,7 @@ func (r *resolver) SetBringingUp(ws ids.WorkspaceID, bringingUp bool) {
 }
 
 // SetOpening raises or lowers the workspace's open-in-flight fact, which
-// draws the `opening` arm over every other.
+// draws the `inactive` arm and the row's `opening` marker over every other.
 func (r *resolver) SetOpening(ws ids.WorkspaceID, opening bool) {
 	r.mutateWorkspace(ws, "daemon.sidebar.set_opening",
 		"the roster took whether an open of the workspace is in flight",
@@ -609,7 +584,6 @@ func (r *resolver) SetTurnEnded(ws ids.WorkspaceID, how TurnClose) {
 		dlog.Context{"close": int(how)}, func(s *wsState, log dlog.Logger) {
 			cut := contextCut(s.turn)
 			s.turn = nil
-			s.noteTurnEndedForOneShot(log)
 			// THE TURN'S END IS THE RETRY'S END: nothing is left to retry for.
 			s.retrying = ""
 			s.turnEverRan = true
@@ -648,6 +622,19 @@ func (r *resolver) SetTurnEnded(ws ids.WorkspaceID, how TurnClose) {
 				log.Info("daemon.sidebar.result_read_on_cut",
 					"a context cut completed, so its result is read at once and the row is drawn PARTIAL with no dwell", dlog.Context{
 						"act":        cut,
+						"status":     end.String(),
+						"async_live": s.asyncLive(),
+					})
+				return
+			}
+			// AN INTERRUPTED TURN IS READ THE MOMENT IT ENDS (owner ruling,
+			// 2026-10-13): the user stopped it, so there is nothing new to
+			// look at, and the row is drawn PARTIAL on the very push that
+			// ends it, in the sidebar and the tab bar alike.
+			if end == ladder.TurnEndInterrupted {
+				s.result = resultRead
+				log.Info("daemon.sidebar.result_read_on_interrupt",
+					"the turn was interrupted, so its result is read at once and the row is drawn PARTIAL with no dwell", dlog.Context{
 						"status":     end.String(),
 						"async_live": s.asyncLive(),
 					})

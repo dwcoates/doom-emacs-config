@@ -38,6 +38,7 @@ import type {
   RosterRowDetailSummary,
   RosterRowName,
   RosterRowOneShot,
+  RosterRowOpening,
   RosterRowPriorityBadge,
   RosterRowWhen,
   RosterRowWhenCreated,
@@ -57,13 +58,7 @@ import type { SidebarContext } from "./context.js";
 import { toggleHiddenDropdown } from "./dropdowns.js";
 import { markReviving } from "./reviving.js";
 import { viewedMode } from "./viewed.js";
-import {
-  armBreathes,
-  armSpins,
-  rosterRowMark,
-  type OneShotGlyph,
-  type RosterStatusCase,
-} from "./tones.js";
+import { rosterRowMark, type RosterStatusCase } from "./tones.js";
 import { guardMalformed } from "../rpc/guard.js";
 import { clampReveal } from "../topbar/clamp.js";
 import {
@@ -169,10 +164,9 @@ export function drawRosterRow(
   // the semantic color of a workspace belongs to the whole row: the hook
   // contract targets `[data-roster-row]` for `tone-<color>`, so the class is
   // set here, from the same one vocabulary table the mark reads.
-  // PRESENCE IS THE FACT: only a one-shot carries the mark, and its outcome's
-  // glyph replaces the dot.
-  const oneShot =
-    u.oneShot === undefined ? undefined : drawRosterRowOneShot(u.oneShot, `${path}.oneShot`);
+  // PRESENCE IS THE FACT: only a one-shot carries the mark, and its glyph
+  // replaces the dot while the one-shot works (`tones.rosterRowMark`).
+  const oneShot = u.oneShot !== undefined && drawRosterRowOneShot(u.oneShot, `${path}.oneShot`);
   const mark = rosterRowMark(status.case, oneShot);
   const ws = document.createElement("div");
   ws.className = `ws ${mark.toneClass}`;
@@ -188,9 +182,11 @@ export function drawRosterRow(
   if (sc.openDetails.has(workspace.id)) ws.classList.add("open");
 
   // A WORKSPACE BEING OPENED IS NOT SELECTABLE (owner ruling, 2026-10-12):
-  // its row is grey and a click does nothing until the daemon answers it
-  // open, when the row draws its real status and selects again.
-  const opening = status.case === "opening";
+  // its row carries the `opening` marker over the grey `inactive` arm, and a
+  // click does nothing until the daemon answers it open, when the marker
+  // drops and the row draws its real status and selects again.
+  const opening = u.opening !== undefined && drawRosterRowOpening(u.opening, `${path}.opening`);
+  if (opening) ws.setAttribute("data-opening", "true");
   const line = document.createElement("div");
   line.className = "row";
   if (opening) line.setAttribute("aria-disabled", "true");
@@ -215,11 +211,14 @@ export function drawRosterRow(
     toggleRowMenu(ws, { sc, workspace, name });
   });
 
-  // A RECENTLY-MERGED ROW DRAWS PLAIN (owner request, 2026-10-02): no status
-  // dot, and its name in the grey a viewed workspace's wears. With no dot, its
-  // NAME is the detail panel's pointer trigger (owner request, 2026-10-11).
+  // THE BANDS DRAW NO STATUS MARK (owner requests, 2026-10-02 and
+  // 2026-10-13): a recently-merged row and a hidden row show no dot or glyph.
+  // A merged row's name is in the grey a viewed workspace's wears; a hidden
+  // row's keeps its status color, and a cold gate's strike, like every row's.
+  // With no mark, the NAME is the detail panel's pointer trigger (owner
+  // request, 2026-10-11).
   let statusMark: HTMLElement | null = null;
-  if (!merged) {
+  if (place === "grouping") {
     statusMark = drawStatusMark(status.case, `${path}.status`, oneShot);
     line.appendChild(statusMark);
   }
@@ -340,19 +339,25 @@ export function drawRosterRowReviving(u: RosterRowReviving, path: string): boole
 }
 
 /**
- * The ONE-SHOT mark: the workspace was created as a one-shot. Answers the
- * glyph its outcome draws in place of the dot: `target` while `armed`,
- * `failed` once it ENDED WITHOUT A LIVE MERGE. An unset outcome is a
- * MalformedView.
+ * The ONE-SHOT mark: the workspace was created as a one-shot. EMPTY —
+ * presence is the fact — so this answers `true` for a mark that is there at
+ * all; `tones.rosterRowMark` decides on which arms its glyph is drawn.
  */
-export function drawRosterRowOneShot(u: RosterRowOneShot, path: string): OneShotGlyph {
-  const outcome = requireCase(u.outcome, `${path}.outcome`);
-  switch (outcome.case) {
-    case "armed":
-      return "target";
-    case "failed":
-      return "failed";
-  }
+export function drawRosterRowOneShot(u: RosterRowOneShot, path: string): boolean {
+  void u;
+  void path;
+  return true;
+}
+
+/**
+ * The OPENING marker: the editor is opening this workspace. EMPTY — presence
+ * is the fact — so this answers `true` for a marker that is there at all; the
+ * row takes no click while it stands.
+ */
+export function drawRosterRowOpening(u: RosterRowOpening, path: string): boolean {
+  void u;
+  void path;
+  return true;
 }
 
 /** The receded styling: the workspace exists, its panes are dismissed. */
@@ -527,30 +532,28 @@ export function drawRosterRowDetailSummary(u: RosterRowDetailSummary, path: stri
 }
 
 /**
- * The status mark: a dot for a lifecycle, a glyph for the merge pipeline.
+ * The status mark: a dot for a lifecycle, a glyph for a merge, a gate or a
+ * working one-shot.
  *
- * The color is the shared vocabulary's, through `tones.ts`; the animation is
- * this surface's, and it says the same thing everywhere — a breath means work
- * is in flight, a spin means the merge queue is on this run.
+ * The color and the ink are the shared vocabulary's, through `tones.ts`; the
+ * motion is `tones.rosterRowMark`'s, and it says the same thing everywhere —
+ * a breath means work in flight or a gate on you, a spin means the merge
+ * queue is on this run.
  */
-export function drawStatusMark(
-  arm: RosterStatusCase,
-  path: string,
-  oneShot?: OneShotGlyph,
-): HTMLElement {
+export function drawStatusMark(arm: RosterStatusCase, path: string, oneShot: boolean): HTMLElement {
   const mark = rosterRowMark(arm, oneShot);
   log.debug("drawing a row's status mark", {
     operation: "sidebar.row.status",
-    context: { path, arm, glyph: mark.glyph, tone: mark.toneClass },
+    context: { path, arm, glyph: mark.glyph, tone: mark.toneClass, ink: mark.ink ?? "", motion: mark.motion },
   });
   const dot = document.createElement("span");
-  dot.className = `st st-${arm} ${mark.toneClass}`;
+  dot.className = `st ${mark.toneClass}`;
   dot.setAttribute("data-glyph", mark.glyph);
   dot.title = arm;
   if (mark.char !== "") dot.textContent = mark.char;
   if (mark.glyph !== "dot") dot.classList.add("st-glyph");
-  if (armBreathes(arm)) dot.classList.add("breathes");
-  if (armSpins(arm)) dot.classList.add("spins");
+  if (mark.ink !== undefined) dot.classList.add(`ink-${mark.ink}`);
+  if (mark.motion !== "still") dot.classList.add(mark.motion);
   return dot;
 }
 

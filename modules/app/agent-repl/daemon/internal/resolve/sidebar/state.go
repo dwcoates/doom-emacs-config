@@ -19,16 +19,16 @@ var statusArms = []string{
 	"submitting", "thinking", "clearing", "compacting", "permission", "done",
 	"interrupted", "turn_failed", "ready", "idle_async", "vendor_blocked", "vendor_fault", "network_fault", "api_retrying", "init", "severed",
 	"start_failed", "degraded", "dead", "turn_died", "merging",
-	"merge_queued", "merge_waiting", "merge_failed", "merged", "none",
+	"merge_queued", "merge_failed", "merged", "none",
 	"inactive", "closing", "daemon_impaired", "waiting", "question",
-	"opening",
+	"cold_gate",
 }
 
-// The merge arms of RosterRow.status — the ones that render a RECYCLE GLYPH
+// The merge arms of RosterRow.status — the ones that render the MERGE GLYPH
 // rather than a lifecycle dot, and so are keyed in render-colors.json's
 // merge_glyphs table rather than only in roster_status.
 var mergeArms = []string{
-	"merging", "merge_queued", "merge_waiting", "merge_failed", "merged",
+	"merging", "merge_queued", "merge_failed", "merged",
 }
 
 // wsState is one workspace's live session accumulation — the half of a row the
@@ -141,7 +141,8 @@ type wsState struct {
 	// (SetBringingUp). It is what holds the row's availability at `pending`.
 	bringingUp bool
 	// opening reports an OpenTabs in flight that names this workspace and has
-	// not answered it `opened` yet (SetOpening). It draws the `opening` arm
+	// not answered it `opened` yet (SetOpening). It draws the `inactive` arm
+	// with the row's `opening` marker
 	// over every other.
 	opening bool
 	// vendorStart is where the vendor-start run stands (SetVendorStart): the
@@ -162,20 +163,6 @@ type wsState struct {
 
 	// merge is what the merge orchestrator last told the roster.
 	merge footer.MergeFacts
-	// mergeRequested reports a merge RECORDED for this workspace that has no
-	// facts of its own on this row: its requesting turn has not ended
-	// (SetMergeRequested), or it was handed to a DETACHED merge workspace
-	// whose merge has not ended yet (SetDetachedMergeEnded lowers it). It is
-	// never drawn; it feeds only the one-shot outcome (oneshot.go), and the
-	// merge's own facts supersede it once the merge is in line here.
-	mergeRequested bool
-	// oneShotFailed is the one-shot outcome: the workspace ended without a
-	// live merge behind it (oneshot.go). Tracked for every workspace and drawn
-	// only on a one-shot's row.
-	oneShotFailed bool
-	// oneShotSettled reports that a live edge has decided the outcome, which
-	// retires the one-time seed from the durable record.
-	oneShotSettled bool
 	// summary is the row detail's summary line, empty when none is set.
 	summary string
 	// turnEndedAt is the latest turn close the prompt queue's door told this

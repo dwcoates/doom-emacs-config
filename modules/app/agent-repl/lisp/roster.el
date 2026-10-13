@@ -273,15 +273,15 @@ the tab-bar's partial/full decision: the daemon owns the mode."
     (and row (plist-get row :viewed))))
 
 (defun agent-repl-roster-row-one-shot (row)
-  "Return ROW's one-shot outcome keyword, or nil when ROW is no one-shot.
-`:armed' or `:failed', as `RosterRowOneShot' resolves it."
-  (plist-get (plist-get row :one-shot) :arm))
+  "Return non-nil when ROW carries the one-shot mark (`RosterRowOneShot').
+The mark is presence alone: the workspace was created as a one-shot."
+  (plist-get row :one-shot))
 
 (defun agent-repl-roster-one-shot-for-ws (ws)
-  "Return the one-shot outcome of WS's current roster row, or nil.
+  "Return non-nil when WS's current roster row is a one-shot's.
 Nil before any push has carried a row for WS, and for a workspace that is
-not a one-shot.  The tab bar draws its glyph from it
-\(`agent-repl-status-tab-glyph')."
+not a one-shot.  The tab bar draws its glyph from it while the one-shot
+works \(`agent-repl-status-tab-glyph')."
   (let ((row (agent-repl-roster-row-for-ws ws)))
     (and row (agent-repl-roster-row-one-shot row))))
 

@@ -95,48 +95,78 @@ describe("the row's identity and hooks", () => {
 
 describe("the status mark", () => {
   it.each([...ROSTER_STATUS_CASES])("paints %s the shared vocabulary's color", (arm) => {
-    const mark = drawStatusMark(arm, "R.status");
+    const mark = drawStatusMark(arm, "R.status", false);
     expect(mark.classList.contains(ROSTER_ARM_CLASS[arm])).toBe(true);
   });
 
   it.each([...ROSTER_STATUS_CASES])("names %s's glyph", (arm) => {
-    expect(drawStatusMark(arm, "R.status").hasAttribute("data-glyph")).toBe(true);
+    expect(drawStatusMark(arm, "R.status", false).hasAttribute("data-glyph")).toBe(true);
   });
 
   it("draws a failed turn end as a turquoise dot", () => {
-    const mark = drawStatusMark("turnFailed", "R.status");
+    const mark = drawStatusMark("turnFailed", "R.status", false);
     expect(mark.classList.contains("tone-turquoise")).toBe(true);
     expect(mark.getAttribute("data-glyph")).toBe("dot");
   });
 
-  it("draws a merge as the recycle glyph rather than a lifecycle dot", () => {
-    expect(drawStatusMark("merging", "R.status").getAttribute("data-glyph")).toBe("recycle");
+  it.each(["mergeQueued", "merging", "mergeFailed", "merged"] as const)(
+    "draws %s as the one merge glyph in a glyph box",
+    (arm) => {
+      const mark = drawStatusMark(arm, "R.status", false);
+      expect([mark.getAttribute("data-glyph"), mark.classList.contains("st-glyph"), mark.textContent]).toEqual([
+        "merge",
+        true,
+        "",
+      ]);
+    },
+  );
+
+  it("inks a failed merge's glyph red on its green tone", () => {
+    const mark = drawStatusMark("mergeFailed", "R.status", false);
+    expect([mark.classList.contains("tone-green"), mark.classList.contains("ink-red")]).toEqual([true, true]);
   });
 
-  it("draws a question mark for a perspective-less workspace", () => {
-    expect(drawStatusMark("inactive", "R.status").textContent).toBe("?");
+  it("inks a compaction's dot orange on its red tone", () => {
+    const mark = drawStatusMark("compacting", "R.status", false);
+    expect([mark.classList.contains("tone-red"), mark.classList.contains("ink-orange")]).toEqual([true, true]);
+  });
+
+  it("inks a thinking dot in its own tone", () => {
+    const mark = drawStatusMark("thinking", "R.status", false);
+    expect([...mark.classList].filter((c) => c.startsWith("ink-"))).toEqual([]);
+  });
+
+  it("draws a grey dot for an incidentally inactive workspace", () => {
+    const mark = drawStatusMark("inactive", "R.status", false);
+    expect([mark.getAttribute("data-glyph"), mark.classList.contains("tone-none"), mark.textContent]).toEqual([
+      "dot",
+      true,
+      "",
+    ]);
+  });
+
+  it("draws a stop sign for a cold gate", () => {
+    expect(drawStatusMark("coldGate", "R.status", false).textContent).toBe("🛑");
   });
 
   it("draws no character for a workspace with no session", () => {
-    expect(drawStatusMark("none", "R.status").textContent).toBe("");
-  });
-
-  it("draws no check for a landed merge", () => {
-    expect(drawStatusMark("merged", "R.status").textContent).toBe("");
-  });
-
-  it("draws no disc for a landed merge either: its box is a glyph box", () => {
-    expect(drawStatusMark("merged", "R.status").classList.contains("st-glyph")).toBe(true);
+    expect(drawStatusMark("none", "R.status", false).textContent).toBe("");
   });
 
   it("breathes while a turn is in flight", () => {
-    expect(drawStatusMark("thinking", "R.status").classList.contains("breathes")).toBe(true);
+    expect(drawStatusMark("thinking", "R.status", false).classList.contains("breathes")).toBe(true);
   });
 
   it("spins while the merge queue is on this run", () => {
-    expect(drawStatusMark("merging", "R.status").classList.contains("spins")).toBe(true);
+    expect(drawStatusMark("merging", "R.status", false).classList.contains("spins")).toBe(true);
+  });
+
+  it("holds a queued merge still", () => {
+    const mark = drawStatusMark("mergeQueued", "R.status", false);
+    expect([mark.classList.contains("spins"), mark.classList.contains("breathes")]).toEqual([false, false]);
   });
 });
+
 
 describe("the highlight and the receded styling", () => {
   it("highlights the row the RESOLVER called current", () => {
@@ -602,7 +632,7 @@ describe("the row click", () => {
         },
       }),
     );
-    const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "opening", value: {} } }), sc, "R");
+    const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "inactive", value: {} }, opening: true }), sc, "R");
 
     // Act
     await click(drawn.querySelector(".row") as Element);
@@ -616,13 +646,33 @@ describe("the row click", () => {
     const sc = sidebarContext(appContext({}));
 
     // Act
-    const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "opening", value: {} } }), sc, "R");
+    const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "inactive", value: {} }, opening: true }), sc, "R");
 
     // Assert
     expect([drawn.querySelector("[data-select]"), drawn.querySelector(".row")?.getAttribute("aria-disabled")]).toEqual([
       null,
       "true",
     ]);
+  });
+
+  it("selects an inactive workspace no open is in flight for", async () => {
+    // Arrange
+    const calls: string[] = [];
+    const sc = sidebarContext(
+      appContext({
+        selectWorkspace: (request) => {
+          calls.push(request.workspace?.id ?? "");
+          return SELECT_OK;
+        },
+      }),
+    );
+    const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "inactive", value: {} } }), sc, "R");
+
+    // Act
+    await click(drawn.querySelector(".row") as Element);
+
+    // Assert
+    expect(calls).toEqual(["ws-1"]);
   });
 
   it("echoes the served ref rather than rebuilding one", async () => {
@@ -1499,82 +1549,49 @@ describe("a merge that landed today", () => {
 });
 
 describe("the one-shot mark", () => {
-  it("draws a failed one-shot's failure mark in place of the dot", () => {
-    const drawn = drawRosterRow(
-      row({ id: "ws-1", status: { case: "done", value: {} }, oneShot: "failed" }),
-      sidebarContext(),
-      "R",
-    );
-    expect(dotOf(drawn).getAttribute("data-glyph")).toBe("failed");
-    expect(dotOf(drawn).textContent).toBe("\u2716\uFE0F");
+  it.each(["submitting", "thinking", "clearing"] as const)("draws a still target in place of the %s mark", (arm) => {
+    const drawn = drawRosterRow(row({ id: "ws-1", status: { case: arm, value: {} }, oneShot: true }), sidebarContext(), "R");
+    expect([dotOf(drawn).getAttribute("data-glyph"), dotOf(drawn).textContent, dotOf(drawn).classList.contains("breathes")]).toEqual([
+      "target",
+      "🎯",
+      false,
+    ]);
   });
 
-  it("draws an armed one-shot's target in place of the dot", () => {
-    const drawn = drawRosterRow(
-      row({ id: "ws-1", status: { case: "done", value: {} }, oneShot: "armed" }),
-      sidebarContext(),
-      "R",
-    );
-    expect(dotOf(drawn).getAttribute("data-glyph")).toBe("target");
-    expect(dotOf(drawn).textContent).toBe("🎯");
-  });
+  it.each(["compacting", "done", "idleAsync", "permission", "question", "coldGate", "mergeQueued", "merging", "mergeFailed"] as const)(
+    "draws a one-shot's own %s mark",
+    (arm) => {
+      const drawn = drawRosterRow(row({ id: "ws-1", status: { case: arm, value: {} }, oneShot: true }), sidebarContext(), "R");
+      expect(dotOf(drawn).outerHTML).toBe(drawStatusMark(arm, "R.status", false).outerHTML);
+    },
+  );
 
-  it("draws the plain dot for a row that is no one-shot", () => {
-    const drawn = drawRosterRow(
-      row({ id: "ws-1", status: { case: "done", value: {} } }),
-      sidebarContext(),
-      "R",
-    );
+  it("draws the plain dot for a thinking row that is no one-shot", () => {
+    const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "thinking", value: {} } }), sidebarContext(), "R");
     expect(dotOf(drawn).getAttribute("data-glyph")).toBe("dot");
   });
 
-  it("keeps an open gate's emoji over an armed one-shot", () => {
-    const drawn = drawRosterRow(
-      row({ id: "ws-1", status: { case: "question", value: {} }, oneShot: "armed" }),
-      sidebarContext(),
-      "R",
-    );
-    expect(dotOf(drawn).getAttribute("data-glyph")).toBe("ask");
-  });
-
-  it("spins the ordinary merge glyph for a merging armed one-shot", () => {
-    const drawn = drawRosterRow(
-      row({ id: "ws-1", status: { case: "merging", value: {} }, oneShot: "armed" }),
-      sidebarContext(),
-      "R",
-    );
-    expect(dotOf(drawn).outerHTML).toBe(drawStatusMark("merging", "R.status").outerHTML);
-  });
-
-  it("keeps an open gate's emoji over a failed one-shot", () => {
-    const drawn = drawRosterRow(
-      row({ id: "ws-1", status: { case: "permission", value: {} }, oneShot: "failed" }),
-      sidebarContext(),
-      "R",
-    );
-    expect(dotOf(drawn).getAttribute("data-glyph")).toBe("exclaim");
-  });
-
-  it("refuses a one-shot mark with no outcome", () => {
-    const malformed = create(RosterRowSchema, {
-      workspace: { workspace: { id: "ws-1", dir: "/w" } },
-      name: { text: "one" },
-      status: { case: "done", value: {} },
-      current: { current: false },
-      closed: { closed: false },
-      when: {},
-      detail: {},
-      oneShot: {},
-    });
-    expect(() => drawRosterRow(malformed, sidebarContext(), "R")).toThrow(MalformedView);
-  });
-
-  it.each([
-    ["armed", "target"],
-    ["failed", "failed"],
-  ] as const)("answers the glyph the %s outcome draws", (outcome, drawn) => {
-    const mark = row({ id: "ws-1", oneShot: outcome }).oneShot;
+  it("answers true for a one-shot mark that is there", () => {
+    const mark = row({ id: "ws-1", oneShot: true }).oneShot;
     expect(mark).toBeDefined();
-    expect(drawRosterRowOneShot(mark!, "R.oneShot")).toBe(drawn);
+    expect(drawRosterRowOneShot(mark!, "R.oneShot")).toBe(true);
   });
 });
+
+describe("the bands draw no status mark", () => {
+  it.each(["merged", "hidden"] as const)("draws no mark for a row in the %s band", (place) => {
+    const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "thinking", value: {} } }), sidebarContext(), "R", place);
+    expect(drawn.querySelector(".st")).toBeNull();
+  });
+
+  it("draws the mark for a row in a grouping", () => {
+    const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "thinking", value: {} } }), sidebarContext(), "R", "grouping");
+    expect(drawn.querySelector(".st")).not.toBeNull();
+  });
+
+  it.each(["grouping", "merged", "hidden"] as const)("keeps a cold gate's arm on the %s row for its strike", (place) => {
+    const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "coldGate", value: {} } }), sidebarContext(), "R", place);
+    expect(drawn.getAttribute("data-arm")).toBe("coldGate");
+  });
+});
+

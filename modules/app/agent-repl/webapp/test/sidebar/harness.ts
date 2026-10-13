@@ -182,7 +182,8 @@ export function row(init: {
   /** The REVIVING marker: present while the daemon revives this workspace. */
   reviving?: boolean;
   /** The ONE-SHOT mark's outcome; omitted = the workspace is no one-shot. */
-  oneShot?: "armed" | "failed";
+  oneShot?: boolean;
+  opening?: boolean;
   /** The durable last-selected instant, epoch ms; omitted = never selected. */
   lastSelectedAtMs?: bigint;
   priority?: string;
@@ -203,7 +204,8 @@ export function row(init: {
     ...(init.attention === true ? { attention: {} } : {}),
     ...(init.viewed === true ? { viewed: {} } : {}),
     ...(init.reviving === true ? { reviving: {} } : {}),
-    ...(init.oneShot === undefined ? {} : { oneShot: { outcome: { case: init.oneShot, value: {} } } }),
+    ...(init.oneShot === true ? { oneShot: {} } : {}),
+    ...(init.opening === true ? { opening: {} } : {}),
     ...(init.lastSelectedAtMs === undefined ? {} : { lastSelected: { atMs: init.lastSelectedAtMs } }),
     ...(init.priority === undefined ? {} : { priority: { label: init.priority } }),
   });

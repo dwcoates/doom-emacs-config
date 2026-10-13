@@ -292,9 +292,9 @@ describe("drawFooterSubStatus: the word is the arm, lowercase, with spaces", () 
     expect(row.querySelector(".footer-status")?.textContent).toBe("merge failed");
   });
 
-  it("paints the merge failed status turquoise", () => {
+  it("paints the merge failed status green, the workspace being back with the user", () => {
     const { row } = drawStrip({ status: withSubStatus("mergeFailed", "conflicts") });
-    expect(row.querySelector(".footer-status")?.classList.contains("tone-turquoise")).toBe(true);
+    expect(row.querySelector(".footer-status")?.classList.contains("tone-green")).toBe(true);
   });
 
   it("refuses a merge failed push that names no area", () => {

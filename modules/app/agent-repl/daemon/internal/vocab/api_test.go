@@ -21,7 +21,6 @@ const repoVocabDir = "../../../proto/vocab"
 var mergeArms = []string{
 	"merging",
 	"merge_queued",
-	"merge_waiting",
 	"merge_failed",
 	"merged",
 }
@@ -152,15 +151,15 @@ func TestLoadRenderColorsFailsWhenAnUndeclaredMergeArmSpendsAColor(t *testing.T)
 }
 
 func TestLoadRenderColorsAcceptsADeclaredColoredMergeArm(t *testing.T) {
-	// Arrange: merge_failed spends turquoise, and colored_merge_arms declares it.
+	// Arrange: merge_failed spends green, and colored_merge_arms declares it.
 	c := loadColors(t)
 
 	// Act.
 	got := c.RosterStatus["merge_failed"]
 
 	// Assert.
-	if got != "turquoise" {
-		t.Fatalf("roster_status[merge_failed] = %q, want turquoise (owner ruling, 2026-09-28)", got)
+	if got != "green" {
+		t.Fatalf("roster_status[merge_failed] = %q, want green (owner ruling, 2026-10-13)", got)
 	}
 }
 
@@ -692,19 +691,21 @@ func TestTheColorAssignmentsFollowTheOwnersColorMeaningsWithNothingParked(t *tes
 		want  string
 	}{
 		{name: "a failed turn is turquoise on the roster", table: "roster", arm: "turn_failed", want: "turquoise"},
-		{name: "a failed merge is turquoise on the roster", table: "roster", arm: "merge_failed", want: "turquoise"},
+		{name: "a failed merge is green on the roster", table: "roster", arm: "merge_failed", want: "green"},
 		{name: "a degraded view is turquoise on the roster", table: "roster", arm: "degraded", want: "turquoise"},
 		{name: "a vendor or account block is turquoise on the roster", table: "roster", arm: "vendor_blocked", want: "turquoise"},
 		{name: "a vendor that will not start is turquoise on the roster", table: "roster", arm: "vendor_fault", want: "turquoise"},
 		{name: "a call the vendor retries is turquoise on the roster", table: "roster", arm: "api_retrying", want: "turquoise"},
 		{name: "an unreachable network is blue on the roster", table: "roster", arm: "network_fault", want: "blue"},
-		{name: "a starting route is blue on the roster", table: "roster", arm: "init", want: "blue"},
+		{name: "a booting session is grey on the roster", table: "roster", arm: "init", want: "none"},
+		{name: "an incidentally inactive workspace is grey on the roster", table: "roster", arm: "inactive", want: "none"},
+		{name: "a cold gate is green on the roster", table: "roster", arm: "cold_gate", want: "green"},
 		{name: "a queued merge is purple on the roster", table: "roster", arm: "merge_queued", want: "purple"},
-		{name: "a merge waiting for the workspace to fall free is purple on the roster", table: "roster", arm: "merge_waiting", want: "purple"},
 		{name: "a running merge is purple on the roster", table: "roster", arm: "merging", want: "purple"},
 		{name: "a landed merge is green on the roster", table: "roster", arm: "merged", want: "green"},
 		{name: "a failed turn is turquoise on the footer", table: "footer", arm: "turn_failed", want: "turquoise"},
-		{name: "a failed merge is turquoise on the footer", table: "footer", arm: "merge_failed", want: "turquoise"},
+		{name: "a failed merge is green on the footer", table: "footer", arm: "merge_failed", want: "green"},
+		{name: "a booting session is grey on the footer", table: "footer", arm: "starting", want: "none"},
 		{name: "a degraded view is turquoise on the footer", table: "footer", arm: "degraded", want: "turquoise"},
 		{name: "a vendor fault is turquoise on the footer", table: "footer", arm: "vendor_fault", want: "turquoise"},
 		{name: "an agent-repl fault is blue on the footer", table: "footer", arm: "agent_repl_fault", want: "blue"},
@@ -802,6 +803,80 @@ func TestLoadRenderColorsRefusesABadComposerOpenSubstatuses(t *testing.T) {
 			// Assert.
 			if err == nil {
 				t.Fatalf("LoadRenderColors accepted composer_open_substatuses = %v", tc.value)
+			}
+		})
+	}
+}
+
+func TestTheGlyphInksAreAFailedMergesRedAndCompactionsOrange(t *testing.T) {
+	// Arrange.
+	c := loadColors(t)
+
+	// Act.
+	got := c.GlyphInks
+
+	// Assert.
+	if len(got) != 2 || got["merge_failed"] != "red" || got["compacting"] != "orange" {
+		t.Fatalf("glyph_inks = %v, want merge_failed: red and compacting: orange (owner ruling, 2026-10-13)", got)
+	}
+}
+
+func TestTheOneShotGlyphDrawsOnlyWhileTheOneShotWorks(t *testing.T) {
+	// Arrange.
+	c := loadColors(t)
+
+	// Act.
+	got := append([]string{}, c.OneShotGlyphArms...)
+	sort.Strings(got)
+
+	// Assert.
+	want := []string{"clearing", "submitting", "thinking"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("one_shot_glyph_arms = %v, want %v (owner ruling, 2026-10-13)", got, want)
+	}
+}
+
+func TestLoadRenderColorsRefusesAMalformedGlyphTable(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(m map[string]any)
+	}{
+		{name: "an ink row naming no roster arm", mutate: func(m map[string]any) {
+			m["glyph_inks"].(map[string]any)["no_such_arm"] = "red"
+		}},
+		{name: "an ink that is neither a color nor glyph-only", mutate: func(m map[string]any) {
+			m["glyph_inks"].(map[string]any)["merge_failed"] = "chartreuse"
+		}},
+		{name: "an ink of none", mutate: func(m map[string]any) {
+			m["glyph_inks"].(map[string]any)["merge_failed"] = "none"
+		}},
+		{name: "an ink equal to the arm's own color", mutate: func(m map[string]any) {
+			m["glyph_inks"].(map[string]any)["merge_failed"] = "green"
+		}},
+		{name: "a glyph-only color that is already a color", mutate: func(m map[string]any) {
+			m["glyph_only_colors"] = []any{"orange", "red"}
+		}},
+		{name: "a status taking a glyph-only color", mutate: func(m map[string]any) {
+			m["roster_status"].(map[string]any)["compacting"] = "orange"
+		}},
+		{name: "an empty one-shot arm list", mutate: func(m map[string]any) {
+			m["one_shot_glyph_arms"] = []any{}
+		}},
+		{name: "a one-shot arm naming no roster arm", mutate: func(m map[string]any) {
+			m["one_shot_glyph_arms"] = []any{"thinking", "no_such_arm"}
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			dir := writeColors(t, tc.mutate)
+
+			// Act.
+			_, err := LoadRenderColors(dir)
+
+			// Assert.
+			if err == nil {
+				t.Fatalf("LoadRenderColors accepted %s", tc.name)
 			}
 		})
 	}
