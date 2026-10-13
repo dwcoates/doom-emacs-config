@@ -532,11 +532,7 @@ func assertSessionProceeds(t *testing.T, g *coldGate) {
 	defer host.Close()
 	ctx, cancel := context.WithTimeout(g.w.Ctx(), coldGateChainTimeout)
 	defer cancel()
-	harness.AwaitView(t, ctx, host, "the re-opened session reporting live, attached and open",
-		func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
-			live := r.GetHost().GetExisting().GetLive()
-			return live != nil && live.GetShimAttached() && live.GetOpen() != nil
-		})
+	harness.AwaitSessionServes(t, ctx, host)
 
 	driveScenarioToCompletion(t, g.w, g.ws, g.configDir, "prose-streamed")
 }
