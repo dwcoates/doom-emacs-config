@@ -153,7 +153,7 @@ describe("readTranscriptChain", () => {
     expect(uuids(chain)).toEqual(["p0", "a0"]);
   });
 
-  it("crosses a compaction through its logical parent", () => {
+  it("starts the chain at a compaction's boundary", () => {
     // Arrange.
     const file = transcript([
       user("p0", null),
@@ -166,7 +166,27 @@ describe("readTranscriptChain", () => {
     const chain = chainOf(file);
 
     // Assert.
-    expect(uuids(chain)).toEqual(["p0", "a0", "b0", "p1"]);
+    expect(uuids(chain)).toEqual(["b0", "p1"]);
+  });
+
+  it("reads a boundary whose logical parent the vendor wrote after the summary", () => {
+    // Arrange: Claude Code 2.1.296's layout on the owner's doom transcript
+    // (2026-10-13). The last preserved record t0 is written under the summary
+    // s0, and the boundary names it as its logical parent.
+    const file = transcript([
+      user("p0", null),
+      assistant("a0", "p0"),
+      { type: "system", subtype: "compact_boundary", uuid: "b0", parentUuid: null, logicalParentUuid: "t0" },
+      { ...user("s0", "b0", "summary"), isCompactSummary: true },
+      { type: "attachment", uuid: "t0", parentUuid: "s0" },
+      user("p1", "t0"),
+    ]);
+
+    // Act.
+    const chain = chainOf(file);
+
+    // Assert.
+    expect(uuids(chain)).toEqual(["b0", "s0", "t0", "p1"]);
   });
 
   it("answers unreadable when the chain names a record the file does not hold", () => {
@@ -277,6 +297,27 @@ describe("planCut", () => {
 
     // Act.
     const plan = planCut(dropped, "p1", ["p1"], "keep");
+
+    // Assert.
+    expect(plan.kind).toBe("promptNotRecorded");
+  });
+
+  it("refuses a prompt from before the newest compaction", () => {
+    // Arrange.
+    const compacted = chainOf(
+      transcript([
+        user("p0", null),
+        assistant("a0", "p0"),
+        user("p1", "a0"),
+        assistant("a1", "p1"),
+        { type: "system", subtype: "compact_boundary", uuid: "b0", parentUuid: null, logicalParentUuid: "a1" },
+        { ...user("s0", "b0", "summary"), isCompactSummary: true },
+        user("p2", "s0"),
+      ]),
+    );
+
+    // Act.
+    const plan = planCut(compacted, "p1", ["p1", "p2"], "keep");
 
     // Assert.
     expect(plan.kind).toBe("promptNotRecorded");
@@ -408,7 +449,7 @@ describe("liveEnd", () => {
     expect(liveEnd(chain, rolledBack("p1"))).toEqual({ kind: "whole" });
   });
 
-  it("crosses a compaction to the rolled-back prompt before it", () => {
+  it("answers whole for a rolled-back prompt from before the newest compaction", () => {
     // Arrange.
     const chain = chainOf(
       transcript([
@@ -422,7 +463,7 @@ describe("liveEnd", () => {
     );
 
     // Act, Assert.
-    expect(liveEnd(chain, rolledBack("p1"))).toEqual({ kind: "cut", promptUuid: "p1", forkPoint: "a0" });
+    expect(liveEnd(chain, rolledBack("p1"))).toEqual({ kind: "whole" });
   });
 
   it("answers firstPrompt when a rolled-back prompt opens the chain", () => {

@@ -14493,7 +14493,7 @@ describe("RollBackSession", () => {
       expect(spec).not.toHaveProperty("resumeSessionAt");
     });
 
-    it("crosses a compaction to the rolled-back prompt before it", async () => {
+    it("resumes the whole conversation when the rolled-back prompt is before the newest compaction", async () => {
       // Arrange, Act
       const spec = await resumed(
         [
@@ -14505,7 +14505,7 @@ describe("RollBackSession", () => {
       );
 
       // Assert
-      expect(spec.resumeSessionAt).toBe("a1");
+      expect(spec).not.toHaveProperty("resumeSessionAt");
     });
 
     it("records the cut it resumes at", async () => {
