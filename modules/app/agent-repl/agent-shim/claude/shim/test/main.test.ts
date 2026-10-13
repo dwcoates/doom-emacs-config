@@ -12,6 +12,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { logRecordsDuring } from "./log-records.js";
+import { keepGeneratedProtosAcrossResets } from "./stateless-modules.js";
 import { LOCK_DIR_ENV, lockBinaryPath, lockDir } from "../src/locks.js";
 import { DEFAULT_RETRY_POLICY } from "../src/store/persistence.js";
 import {
@@ -52,6 +53,11 @@ import {
 import { VendorCallsForbiddenError } from "../src/vendor-guard.js";
 import type { Engine } from "../src/engine/engine.js";
 import type { QuerySpec, SessionEngine } from "../src/engine/session.js";
+
+// EVERY `main` TEST RE-IMPORTS `main.js` AFTER A MODULE RESET, so the generated
+// protobuf modules are pinned for the whole file rather than re-evaluated by
+// each one (see keepGeneratedProtosAcrossResets).
+keepGeneratedProtosAcrossResets();
 
 /** A complete, legal spawn environment. */
 function spawnEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
