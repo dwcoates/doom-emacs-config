@@ -37,7 +37,7 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 				"end": s.restoredEnd, "result": s.result.String(),
 			})
 	}
-	armName := statusArm(s, rec, session, r.footer.Status(rec.ID), r.state.asyncMerging(rec.ID), rowLog)
+	armName := statusArm(s, rec, session, r.footer.Status(rec.ID), rowLog)
 	r.noteResult(rec.ID, s, rowLog)
 	// THE MARKER IS DERIVED FROM THE READ FACT, in the same breath as the
 	// status, so the row's display mode cannot lag its status by a push and a
@@ -122,6 +122,9 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	if s.opening {
 		out.Opening = &frontendv1.RosterRowOpening{}
 	}
+	// PRESENCE IS THE FACT, as `frontend.v1.RosterRowAsyncMerging` states it:
+	// set while the workspace's own branch merges async, beside any arm.
+	out.AsyncMerging = asyncMergingMarker(r.state.asyncMerging(rec.ID), armName, rowLog)
 	// THE DURABLE SELECTION INSTANT, for ordering only: clients order
 	// most-recently-selected first by it (the landing after a close, the
 	// editor's jump to the most recent workspace), and it survives a restart

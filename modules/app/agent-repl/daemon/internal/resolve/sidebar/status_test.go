@@ -1891,62 +1891,52 @@ func TestTheOpeningMarkerAndTheInactiveArm(t *testing.T) {
 // theRepo is the repository the async merge tests put the workspace's merge on.
 const theRepo = wsm.RepoKey("/repo/.git")
 
-// TestAsyncMergeArm walks which arms an async merge of the workspace's own
-// branch draws `async_merging` (purple) over (owner request, 2026-10-13):
-// every green or yellow arm on the idle claim, and nothing else.
-func TestAsyncMergeArm(t *testing.T) {
+// TestAsyncMergeMarker walks the row an async merge of the workspace's own
+// branch draws (owner request, 2026-10-13): the status arm is the
+// workspace's own, whatever it is, and the `async_merging` marker stands
+// beside it.
+func TestAsyncMergeMarker(t *testing.T) {
 	tests := []struct {
 		name    string
 		arrange func(t *testing.T) sidebarResolver
 		want    string
 	}{
 		{
-			name:    "ready is purple",
+			name:    "ready keeps ready",
 			arrange: func(t *testing.T) sidebarResolver { return live(t, arrange(t)) },
-			want:    "async_merging",
+			want:    "ready",
 		},
 		{
-			name: "an unread done is purple",
+			name: "an unread done keeps done",
 			arrange: func(t *testing.T) sidebarResolver {
 				r := live(t, arrange(t))
 				r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 				r.SetTurnEnded(theWS, wsm.CloseCompleted)
 				return r
 			},
-			want: "async_merging",
+			want: "done",
 		},
 		{
-			name: "a read done is purple",
-			arrange: func(t *testing.T) sidebarResolver {
-				r := live(t, arrange(t))
-				r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
-				r.SetTurnEnded(theWS, wsm.CloseCompleted)
-				r.SetViewed(theWS)
-				return r
-			},
-			want: "async_merging",
-		},
-		{
-			name: "interrupted is purple",
+			name: "interrupted keeps interrupted",
 			arrange: func(t *testing.T) sidebarResolver {
 				r := live(t, arrange(t))
 				r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 				r.SetTurnEnded(theWS, wsm.CloseKilled)
 				return r
 			},
-			want: "async_merging",
+			want: "interrupted",
 		},
 		{
-			name: "idle_async is purple",
+			name: "idle_async keeps idle_async",
 			arrange: func(t *testing.T) sidebarResolver {
 				r := live(t, arrange(t))
 				r.OnLiveWorkChanged(theWS, liveShell())
 				return r
 			},
-			want: "async_merging",
+			want: "idle_async",
 		},
 		{
-			name: "turn_failed keeps its turquoise arm",
+			name: "turn_failed keeps turn_failed",
 			arrange: func(t *testing.T) sidebarResolver {
 				ws := workspace(string(theWS), "one")
 				ws.Result = &wsm.TurnResult{End: wsm.TurnResultEnd("turn_failed")}
@@ -1955,7 +1945,7 @@ func TestAsyncMergeArm(t *testing.T) {
 			want: "turn_failed",
 		},
 		{
-			name: "a turn in flight keeps its red arm",
+			name: "a turn in flight keeps its working arm",
 			arrange: func(t *testing.T) sidebarResolver {
 				r := live(t, arrange(t))
 				r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
@@ -1964,7 +1954,7 @@ func TestAsyncMergeArm(t *testing.T) {
 			want: "submitting",
 		},
 		{
-			name: "a permission gate keeps its own arm",
+			name: "a permission gate keeps its gate arm",
 			arrange: func(t *testing.T) sidebarResolver {
 				r := live(t, arrange(t))
 				r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
@@ -1988,14 +1978,49 @@ func TestAsyncMergeArm(t *testing.T) {
 			r.SetAsyncMerges(theRepo, []ids.WorkspaceID{theWS})
 
 			// Assert.
-			if got := statusName(onlyRow(t, r)); got != tc.want {
-				t.Fatalf("status = %q, want %q", got, tc.want)
+			row := onlyRow(t, r)
+			if got := statusName(row); got != tc.want {
+				t.Fatalf("status = %q, want %q: an async merge never changes the status arm", got, tc.want)
+			}
+			if row.GetAsyncMerging() == nil {
+				t.Fatal("the row carries no async_merging marker while its branch merges async")
 			}
 		})
 	}
 }
 
-func TestAsyncMergeLeavingTheQueueRestoresTheIdleArm(t *testing.T) {
+func TestAsyncMergeMarkerIsLogged(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+
+	// Act.
+	r.SetAsyncMerges(theRepo, []ids.WorkspaceID{theWS})
+	onlyRow(t, r)
+
+	// Assert.
+	got := dlog.FilterRecords(r.surfaces.Records(), dlog.RecordQuery{Operation: "daemon.sidebar.async_merging_marker"})
+	if len(got) == 0 {
+		t.Fatal("no daemon.sidebar.async_merging_marker record for a row carrying the marker")
+	}
+	if status := got[len(got)-1].Context["status"]; status != "ready" {
+		t.Fatalf("record status = %v, want ready", status)
+	}
+}
+
+func TestNoAsyncMergeLeavesNoMarker(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+
+	// Act.
+	row := onlyRow(t, r)
+
+	// Assert.
+	if row.GetAsyncMerging() != nil {
+		t.Fatal("the row carries the async_merging marker with no async merge in flight")
+	}
+}
+
+func TestAsyncMergeLeavingTheQueueDropsTheMarker(t *testing.T) {
 	// Arrange.
 	r := live(t, arrange(t))
 	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
@@ -2006,8 +2031,12 @@ func TestAsyncMergeLeavingTheQueueRestoresTheIdleArm(t *testing.T) {
 	r.SetAsyncMerges(theRepo, nil)
 
 	// Assert.
-	if got := statusName(onlyRow(t, r)); got != "done" {
-		t.Fatalf("status = %q, want done once the async merge left the queue", got)
+	row := onlyRow(t, r)
+	if row.GetAsyncMerging() != nil {
+		t.Fatal("the async_merging marker stands after the merge left the queue")
+	}
+	if got := statusName(row); got != "done" {
+		t.Fatalf("status = %q, want done", got)
 	}
 }
 
@@ -2019,8 +2048,8 @@ func TestAsyncMergeOfAnotherWorkspaceLeavesTheRow(t *testing.T) {
 	r.SetAsyncMerges(theRepo, []ids.WorkspaceID{"other"})
 
 	// Assert.
-	if got := statusName(onlyRow(t, r)); got != "ready" {
-		t.Fatalf("status = %q, want ready: another workspace's branch merges", got)
+	if onlyRow(t, r).GetAsyncMerging() != nil {
+		t.Fatal("the row carries the async_merging marker for another workspace's branch")
 	}
 }
 
@@ -2033,8 +2062,8 @@ func TestAsyncMergeSetsAreReplacedPerRepository(t *testing.T) {
 	r.SetAsyncMerges(wsm.RepoKey("/other/.git"), nil)
 
 	// Assert.
-	if got := statusName(onlyRow(t, r)); got != "async_merging" {
-		t.Fatalf("status = %q, want async_merging: only this repository's set says so", got)
+	if onlyRow(t, r).GetAsyncMerging() == nil {
+		t.Fatal("the marker dropped: only this repository's set says the branch merges")
 	}
 }
 
@@ -2045,38 +2074,14 @@ func TestAsyncMergeLeavesTheFooterIdle(t *testing.T) {
 	// Act.
 	r.SetAsyncMerges(theRepo, []ids.WorkspaceID{theWS})
 
-	// Assert: the roster is purple and the footer still draws idle.
-	if got := statusName(onlyRow(t, r)); got != "async_merging" {
-		t.Fatalf("status = %q, want async_merging", got)
-	}
+	// Assert.
 	status := r.Resolver.(*fanned).footer.Status(theWS)
 	if status.GetIdle() == nil {
 		t.Fatalf("footer status = %v, want idle: the footer is unaffected by an async merge", status)
 	}
 }
 
-func TestViewingAnAsyncMergingRowReadsTheUnreadResult(t *testing.T) {
-	// Arrange: an unread done drawn purple.
-	r := live(t, arrange(t))
-	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
-	r.SetTurnEnded(theWS, wsm.CloseCompleted)
-	r.SetAsyncMerges(theRepo, []ids.WorkspaceID{theWS})
-
-	// Act: the user views it, and the merge then leaves the queue.
-	r.SetViewed(theWS)
-	r.SetAsyncMerges(theRepo, nil)
-
-	// Assert: the done it stood over comes back read, so PARTIAL.
-	row := onlyRow(t, r)
-	if got := statusName(row); got != "done" {
-		t.Fatalf("status = %q, want done", got)
-	}
-	if row.GetViewed() == nil {
-		t.Fatal("the row is FULL, want PARTIAL: viewing the purple row read the result under it")
-	}
-}
-
-func TestAnAsyncMergingRowIsNeverPartial(t *testing.T) {
+func TestAReadResultStaysPartialUnderAnAsyncMerge(t *testing.T) {
 	// Arrange: a read done.
 	r := live(t, arrange(t))
 	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
@@ -2086,8 +2091,8 @@ func TestAnAsyncMergingRowIsNeverPartial(t *testing.T) {
 	// Act.
 	r.SetAsyncMerges(theRepo, []ids.WorkspaceID{theWS})
 
-	// Assert: PARTIAL stands on a turn end alone.
-	if onlyRow(t, r).GetViewed() != nil {
-		t.Fatal("the async_merging row is PARTIAL, want FULL")
+	// Assert: the arm is still the read done, so the row stays PARTIAL.
+	if onlyRow(t, r).GetViewed() == nil {
+		t.Fatal("the row is FULL, want PARTIAL: the async merge does not unread the result")
 	}
 }

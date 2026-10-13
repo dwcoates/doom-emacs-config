@@ -251,6 +251,31 @@ message RosterRowOneShot {
   reserved "armed", "failed";
 }
 
+// The ASYNC-MERGING marker: the workspace's OWN BRANCH is merging async, in a
+// hidden merge workspace forked from it. Empty: presence is the fact.
+//
+// PRESENT from the moment the async request is recorded on the repository's
+// merge queue until it leaves the queue -- landed, failed or taken off -- and
+// absent otherwise, whatever the row's status arm says. A SYNC merge, which
+// runs in the workspace itself, never raises it: that merge is the row's own
+// `merge_queued` or `merging` arm.
+//
+// WHY A MARKER AND NOT A STATUS ARM: the workspace itself is free while its
+// branch merges elsewhere. It takes prompts, runs turns and raises gates, so
+// its status arm keeps resolving exactly as for any other workspace (the
+// footer's projection), and the row's NAME keeps that status's color. The
+// marker is the one extra fact both surfaces draw beside it:
+//
+//   - the sidebar inks the row's PLAIN status dot purple, breathing, in place
+//     of the arm's own color. Any other mark the row draws in the dot's place
+//     outranks it: a gate's glyph, the one-shot glyph, a merge glyph, or a
+//     dot with an ink of its own (`render-colors.json#glyph_inks`, e.g. the
+//     compacting orange). Which marks are plain is the shared vocabulary's
+//     `async_merge_mark` section.
+//   - the Emacs tab bar paints the tab's `[N] ` run with the merge purple
+//     background, and the workspace name keeps its status background.
+message RosterRowAsyncMerging {}
+
 // The OPENING marker: the editor is opening this workspace right now. Empty:
 // presence is the fact.
 //
@@ -745,6 +770,11 @@ message RosterRow {
   // contract.
   optional RosterRowOpening opening = 62;
 
+  // The row's ASYNC-MERGING marker: present while the workspace's own branch
+  // merges async in a hidden merge workspace, on ANY status arm. See
+  // RosterRowAsyncMerging, which carries the marker's whole contract.
+  optional RosterRowAsyncMerging async_merging = 64;
+
   // The row's display name.
   RosterRowName name = 2;
 
@@ -903,25 +933,15 @@ message RosterRow {
     // GREEN, the same coarse claim as the footer's `waiting · cold_gate`. The
     // row's NAME is struck through while it stands, in every sidebar section.
     RosterRowStatusColdGate cold_gate = 61;
-    // THE WORKSPACE'S OWN BRANCH IS MERGING ASYNC, in a hidden merge
-    // workspace forked from it, while this workspace is otherwise idle: it
-    // would draw `ready`, a turn end or `idle_async`. PURPLE, as every merge in
-    // flight is, from the moment the async request is recorded until it
-    // leaves the merge queue -- landed, failed or taken off (owner request,
-    // 2026-10-13). It is a ROSTER-ONLY arm on the idle claim: the footer
-    // keeps drawing the idle status, since the workspace itself is free and
-    // takes prompts. Every other claim (a turn in flight, a gate, a fault)
-    // keeps its own arm. It draws the plain status dot, breathing as work in
-    // progress does; it is not one of the workspace's own merge arms, so it
-    // draws no merge glyph.
-    RosterRowStatusAsyncMerging async_merging = 63;
   }
   // Tags 19 (`merge_enqueuing`) and 22 (`merge_conflict`) are RETIRED: no
   // merge fact is shown before the requesting turn ends, and nothing parks.
   // Tags 57 (`merge_waiting`) and 60 (`opening`) are RETIRED (owner ruling,
   // 2026-10-13): a merge that waits to start is `merge_queued`, and a
   // workspace being opened is `inactive` with the row's `opening` marker.
-  reserved 19, 22, 57, 60;
+  // Tag 63 is RETIRED: an async merge of the workspace's own branch is the
+  // row's `async_merging` marker beside its real status, never a status.
+  reserved 19, 22, 57, 60, 63;
   reserved "merge_enqueuing", "merge_conflict", "merge_waiting";
 
   // Whether this row is the selected workspace — the row's highlight bar.
@@ -1123,9 +1143,6 @@ message RosterRowStatusTurnFailed {}
 message RosterRowStatusReady {}
 
 message RosterRowStatusIdleAsync {}
-
-// The row's status while its own branch merges async elsewhere.
-message RosterRowStatusAsyncMerging {}
 
 message RosterRowStatusVendorBlocked {}
 

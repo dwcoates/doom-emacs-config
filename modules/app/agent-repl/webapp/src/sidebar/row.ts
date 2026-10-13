@@ -39,6 +39,7 @@ import type {
   RosterRowName,
   RosterRowOneShot,
   RosterRowOpening,
+  RosterRowAsyncMerging,
   RosterRowPriorityBadge,
   RosterRowWhen,
   RosterRowWhenCreated,
@@ -59,7 +60,8 @@ import type { SidebarContext } from "./context.js";
 import { toggleHiddenDropdown } from "./dropdowns.js";
 import { markReviving } from "./reviving.js";
 import { viewedMode } from "./viewed.js";
-import { rosterRowMark, type RosterStatusCase } from "./tones.js";
+import { rosterRowMark, type RosterStatusCase, type RowMarkers } from "./tones.js";
+import { toneClass } from "../vocab.js";
 import { guardMalformed } from "../rpc/guard.js";
 import { clampReveal } from "../topbar/clamp.js";
 import {
@@ -115,8 +117,11 @@ export function expandVisibleRows(rows: readonly RosterRow[], basePath: string):
  *
  *   - `grouping`: a live grouping's section. Drawn whole; a click selects it.
  *   - `merged`: the recently-merged band. Drawn plain; a click selects it.
- *   - `hidden`: the hidden-workspaces section. Drawn whole; a click SHOWS it
- *     again (`SetWorkspaceHidden`), which is the section's one gesture.
+ *   - `hidden`: the hidden-workspaces section. Drawn with NO STATE (owner
+ *     request, 2026-10-13): no status color, no status mark, no read greying,
+ *     no reviving shimmer and no attention marker; only a cold gate's strike
+ *     through the name. A click SHOWS it again (`SetWorkspaceHidden`), which
+ *     is the section's one gesture.
  */
 export type RowPlace = "grouping" | "merged" | "hidden";
 
@@ -136,6 +141,7 @@ export function drawRosterRow(
   place: RowPlace = "grouping",
 ): HTMLElement {
   const merged = place === "merged";
+  const hidden = place === "hidden";
   const workspace = drawRosterRowWorkspace(
     requireMessage(u.workspace, `${path}.workspace`),
     `${path}.workspace`,
@@ -166,11 +172,18 @@ export function drawRosterRow(
   // contract targets `[data-roster-row]` for `tone-<color>`, so the class is
   // set here, from the same one vocabulary table the mark reads.
   // PRESENCE IS THE FACT: only a one-shot carries the mark, and its glyph
-  // replaces the dot while the one-shot works (`tones.rosterRowMark`).
-  const oneShot = u.oneShot !== undefined && drawRosterRowOneShot(u.oneShot, `${path}.oneShot`);
-  const mark = rosterRowMark(status.case, oneShot);
+  // replaces the dot while the one-shot works; an async merge of the
+  // workspace's own branch inks a plain dot purple (`tones.rosterRowMark`).
+  const markers: RowMarkers = {
+    oneShot: u.oneShot !== undefined && drawRosterRowOneShot(u.oneShot, `${path}.oneShot`),
+    asyncMerging: u.asyncMerging !== undefined && drawRosterRowAsyncMerging(u.asyncMerging, `${path}.asyncMerging`),
+  };
+  const mark = rosterRowMark(status.case, markers);
   const ws = document.createElement("div");
-  ws.className = `ws ${mark.toneClass}`;
+  // A HIDDEN ROW WEARS NO STATUS COLOR (owner request, 2026-10-13): its name
+  // takes the rail's plain text; `data-arm` still carries the arm, which is
+  // what draws a cold gate's strike.
+  ws.className = `ws ${hidden ? toneClass("none") : mark.toneClass}`;
   ws.setAttribute("data-roster-row", workspace.id);
   ws.setAttribute("data-arm", status.case);
   sc.drawnStatus.note(workspace.id, { arm: status.case, source: "daemon" });
@@ -215,12 +228,12 @@ export function drawRosterRow(
   // THE BANDS DRAW NO STATUS MARK (owner requests, 2026-10-02 and
   // 2026-10-13): a recently-merged row and a hidden row show no dot or glyph.
   // A merged row's name is in the grey a viewed workspace's wears; a hidden
-  // row's keeps its status color, and a cold gate's strike, like every row's.
+  // row's is in plain text, struck through only at a cold gate.
   // With no mark, the NAME is the detail panel's pointer trigger (owner
   // request, 2026-10-11).
   let statusMark: HTMLElement | null = null;
   if (place === "grouping") {
-    statusMark = drawStatusMark(status.case, `${path}.status`, oneShot);
+    statusMark = drawStatusMark(status.case, `${path}.status`, markers);
     line.appendChild(statusMark);
   }
 
@@ -235,7 +248,7 @@ export function drawRosterRow(
     status.case,
     u.viewed !== undefined && drawRosterRowViewed(u.viewed, `${path}.viewed`),
   );
-  if (mode === "partial") {
+  if (mode === "partial" && !hidden) {
     label.classList.add("viewed");
     ws.setAttribute("data-viewed", "true");
   }
@@ -244,14 +257,14 @@ export function drawRosterRow(
   if (merged) label.classList.add("merged-name");
   // THE REVIVING SHIMMER IS THE NAME'S TOO, and only while the wire carries
   // the marker: the daemon lowers it when the revival ends, whichever way.
-  if (u.reviving !== undefined && drawRosterRowReviving(u.reviving, `${path}.reviving`)) {
+  if (!hidden && u.reviving !== undefined && drawRosterRowReviving(u.reviving, `${path}.reviving`)) {
     markReviving(ws, label);
   }
   line.appendChild(label);
 
   // PRESENCE, NEVER A SENTINEL: an absent marker or badge draws nothing at
   // all rather than an empty element holding its place.
-  if (u.attention !== undefined) {
+  if (!hidden && u.attention !== undefined) {
     const marker = drawRosterRowAttention(u.attention, `${path}.attention`);
     ws.setAttribute("data-attention", "");
     line.appendChild(marker);
@@ -345,6 +358,17 @@ export function drawRosterRowReviving(u: RosterRowReviving, path: string): boole
  * all; `tones.rosterRowMark` decides on which arms its glyph is drawn.
  */
 export function drawRosterRowOneShot(u: RosterRowOneShot, path: string): boolean {
+  void u;
+  void path;
+  return true;
+}
+
+/**
+ * The ASYNC-MERGING marker: the workspace's own branch merges async in a
+ * hidden merge workspace. Presence is the whole fact; `tones.rosterRowMark`
+ * decides which marks it inks.
+ */
+export function drawRosterRowAsyncMerging(u: RosterRowAsyncMerging, path: string): boolean {
   void u;
   void path;
   return true;
@@ -548,11 +572,20 @@ export function drawRosterRowDetailSummary(u: RosterRowDetailSummary, path: stri
  * motion is `tones.rosterRowMark`'s, and it says the same thing everywhere:
  * a breath means something is in progress.
  */
-export function drawStatusMark(arm: RosterStatusCase, path: string, oneShot: boolean): HTMLElement {
-  const mark = rosterRowMark(arm, oneShot);
+export function drawStatusMark(arm: RosterStatusCase, path: string, markers: RowMarkers): HTMLElement {
+  const mark = rosterRowMark(arm, markers);
   log.debug("drawing a row's status mark", {
     operation: "sidebar.row.status",
-    context: { path, arm, glyph: mark.glyph, tone: mark.toneClass, ink: mark.ink ?? "", motion: mark.motion },
+    context: {
+      path,
+      arm,
+      one_shot: markers.oneShot,
+      async_merging: markers.asyncMerging,
+      glyph: mark.glyph,
+      tone: mark.toneClass,
+      ink: mark.ink ?? "",
+      motion: mark.motion,
+    },
   });
   const dot = document.createElement("span");
   dot.className = `st ${mark.toneClass}`;

@@ -3619,15 +3619,18 @@ describe("the rail's tone rules", () => {
     expect(rules.at(-1)?.declarations).toContain(`color: ${color}`);
   });
 
-  // THE ONE DECLARED EXCEPTION is a mark's own ink (render-colors.json
-  // glyph_inks, owner ruling 2026-10-13), which must come after the tones.
+  // THE ONE DECLARED EXCEPTION is a mark's own ink, which must come after the
+  // tones: an arm's (render-colors.json glyph_inks, owner ruling 2026-10-13)
+  // or an async merge's (async_merge_mark.ink, owner request 2026-10-13).
+  const DECLARED_INKS = [...new Set([...Object.values(renderColors.glyph_inks), renderColors.async_merge_mark.ink])];
+
   it("lets no rail status rule but a declared ink set a color after the tone rules", () => {
     const rules = rulesOf(stylesheet);
     let lastTone = -1;
     rules.forEach((rule, index) => {
       if (rule.selectors.some((sel) => sel.startsWith("#ws-sidebar .st.tone-"))) lastTone = index;
     });
-    const inks = new Set(Object.values(renderColors.glyph_inks).map((ink) => `#ws-sidebar .st.ink-${ink}`));
+    const inks = new Set(DECLARED_INKS.map((ink) => `#ws-sidebar .st.ink-${ink}`));
     const later = rules
       .slice(lastTone + 1)
       .filter((rule) =>
@@ -3638,7 +3641,7 @@ describe("the rail's tone rules", () => {
     expect(later.map((rule) => rule.selectors.join(", "))).toEqual([]);
   });
 
-  it.each(Object.values(renderColors.glyph_inks))("inks a mark %s after the tone rules", (ink) => {
+  it.each(DECLARED_INKS)("inks a mark %s after the tone rules", (ink) => {
     const rules = rulesOf(stylesheet);
     const lastIndex = (pred: (rule: (typeof rules)[number]) => boolean): number =>
       rules.reduce((found, rule, index) => (pred(rule) ? index : found), -1);

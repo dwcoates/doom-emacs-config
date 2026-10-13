@@ -170,6 +170,15 @@ its glyph is the shared vocabulary's `one_shot_glyph_arms'."
   (agent-repl-wire--decode-empty "RosterRowOneShot" value)
   t)
 
+(defun agent-repl-wire-decode-roster-row-async-merging (value)
+  "Decode VALUE as `RosterRowAsyncMerging' and return t.
+The ASYNC-MERGING marker: the workspace\='s own branch merges async in a
+hidden merge workspace, on whatever status arm the row stands.  EMPTY,
+and PRESENCE IS THE FACT, as for the markers above.  The tab bar paints
+its [N] run with the shared vocabulary\='s `async_merge_mark\='."
+  (agent-repl-wire--decode-empty "RosterRowAsyncMerging" value)
+  t)
+
 (defun agent-repl-wire-decode-roster-row-opening (value)
   "Decode VALUE as `RosterRowOpening' and return t.
 The OPENING marker: the editor is opening this workspace, whose status
@@ -496,12 +505,6 @@ an assertion, where an unset oneof is the absence of one."
 The session is parked on its cold gate's answer."
   (agent-repl-wire--decode-empty "RosterRowStatusColdGate" value))
 
-(defun agent-repl-wire-decode-roster-row-status-async-merging (value)
-  "Decode VALUE as the empty `RosterRowStatusAsyncMerging'.
-The workspace is otherwise idle and its own branch merges async in a
-hidden merge workspace."
-  (agent-repl-wire--decode-empty "RosterRowStatusAsyncMerging" value))
-
 (defconst agent-repl-wire-roster-row-status-arms
   '((submitting :submitting agent-repl-wire-decode-roster-row-status-submitting)
     (thinking :thinking agent-repl-wire-decode-roster-row-status-thinking)
@@ -527,8 +530,6 @@ hidden merge workspace."
                     agent-repl-wire-decode-roster-row-status-daemon-impaired)
     (waiting :waiting agent-repl-wire-decode-roster-row-status-waiting)
     (coldGate :cold-gate agent-repl-wire-decode-roster-row-status-cold-gate)
-    (asyncMerging :async-merging
-                  agent-repl-wire-decode-roster-row-status-async-merging)
     (init :init agent-repl-wire-decode-roster-row-status-init)
     (severed :severed agent-repl-wire-decode-roster-row-status-severed)
     (startFailed :start-failed agent-repl-wire-decode-roster-row-status-start-failed)
@@ -584,14 +585,15 @@ Nested workspaces — a spawned family under its parent — in render order."
   (agent-repl-wire-decode-roster-row value))
 
 (defconst agent-repl-wire--roster-row-keys
-  (append '(workspace attention priority viewed reviving detachedLive oneShot opening lastSelected availability name current children when detail closed)
+  (append '(workspace attention priority viewed reviving detachedLive oneShot opening asyncMerging lastSelected availability name current children when detail closed)
           (mapcar #'car agent-repl-wire-roster-row-status-arms))
   "Every key `RosterRow' may carry: its own fields plus the 22 status arms.")
 
 (defun agent-repl-wire-decode-roster-row (value)
   "Decode VALUE as `RosterRow'.
 Returns `(:workspace W :attention A :priority P :viewed V :reviving R
-:detached-live DL :one-shot OS :opening O :last-selected L :availability AV
+:detached-live DL :one-shot OS :opening O :async-merging AM
+:last-selected L :availability AV
 :name N :status
 S :current C :children ROWS :when WHEN :detail D :closed CLOSED)', with
 the message tree preserved as the contract spells it."
@@ -623,6 +625,9 @@ the message tree preserved as the contract spells it."
            :opening (agent-repl-wire--decode-optional-message
                      "RosterRow" 'opening object
                      #'agent-repl-wire-decode-roster-row-opening)
+           :async-merging (agent-repl-wire--decode-optional-message
+                           "RosterRow" 'asyncMerging object
+                           #'agent-repl-wire-decode-roster-row-async-merging)
            :last-selected (agent-repl-wire--decode-optional-message
                            "RosterRow" 'lastSelected object
                            #'agent-repl-wire-decode-roster-row-last-selected)
