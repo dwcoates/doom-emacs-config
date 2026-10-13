@@ -29,6 +29,7 @@
 import { create, equals } from "@bufbuild/protobuf";
 import { bindLog } from "../log.js";
 import { conversationv1 } from "../proto.js";
+import { settledAt } from "../convert/entries.js";
 import { permissionId, questionId, toolCallActivityId } from "../convert/ids.js";
 import { permissionUpsertKey, questionUpsertKey } from "../store/keys.js";
 import type { PersistEntry } from "../store/persistence.js";
@@ -776,6 +777,9 @@ export class PermissionGate {
             case: "success",
             value: create(conversationv1.AgentQuestionSuccessSchema, {
               batch: pending.batch,
+              // The settle restates the ask's start, so the settled frame
+              // alone states how long the user was asked.
+              settledAt: settledAt(this.deps.nowMs(), pending.startedAtMs),
               outcome:
                 answers === undefined
                   ? { case: "unanswered", value: create(conversationv1.AgentQuestionUnansweredSchema, {}) }
@@ -988,7 +992,12 @@ export class PermissionGate {
           gatedCall: toolCallActivityId(pending.toolUseId),
           result: {
             case: "success",
-            value: create(conversationv1.AgentPermissionSuccessSchema, { decision }),
+            value: create(conversationv1.AgentPermissionSuccessSchema, {
+              decision,
+              // The settle restates the ask's start, so the settled frame
+              // alone states how long the user was asked.
+              settledAt: settledAt(this.deps.nowMs(), pending.startedAtMs),
+            }),
           },
         }),
       }),
