@@ -38,8 +38,8 @@ func InMemoryFromEnv(contracts envc.Contracts, getenv func(string) string) (InMe
 	case "":
 		return InMemoryTestRun{}, nil
 	case "1":
-		if !contracts.ForbidVendorCalls() {
-			return InMemoryTestRun{}, fmt.Errorf("wsm: %s=1 is a test-run seam and is honored only with %s set; a live daemon keeps its state in wsm.db", EnvTestStateInMemory, envc.EnvForbidVendorCalls)
+		if err := contracts.RequireTestRun(EnvTestStateInMemory+"=1", "a live daemon keeps its state in wsm.db"); err != nil {
+			return InMemoryTestRun{}, fmt.Errorf("wsm: %w", err)
 		}
 		return InMemoryTestRun{enabled: true}, nil
 	default:
