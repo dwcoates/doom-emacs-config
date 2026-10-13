@@ -861,7 +861,6 @@ func TestSubmitRecordsAStandingRefusalAtItsLevelOrDebugForARedrive(t *testing.T)
 		merging   = "the submission is refused: a merge is in flight"
 		coldGate  = "the session is parked at its cold gate, so the submission is refused by the gate's own name"
 		noSession = "the workspace has no session to submit to"
-		noWatcher = "the workspace has no session watcher"
 	)
 	tests := []struct {
 		name      string
@@ -876,8 +875,6 @@ func TestSubmitRecordsAStandingRefusalAtItsLevelOrDebugForARedrive(t *testing.T)
 		{name: "a re-driven cold gate refusal is debug", arrange: coldGatedHarness, redrive: true, message: coldGate, wantLevel: "debug"},
 		{name: "a live no-session refusal warns", arrange: sessionlessHarness, message: noSession, wantLevel: "warn"},
 		{name: "a re-driven no-session refusal is debug", arrange: sessionlessHarness, redrive: true, message: noSession, wantLevel: "debug"},
-		{name: "a live missing-watcher refusal warns", arrange: watcherlessHarness, message: noWatcher, wantLevel: "warn"},
-		{name: "a re-driven missing-watcher refusal is debug", arrange: watcherlessHarness, redrive: true, message: noWatcher, wantLevel: "debug"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -920,20 +917,6 @@ func sessionlessHarness(t *testing.T) *harness {
 	return h
 }
 
-// watcherlessHarness has a shim client and no session watcher: the reaped-shim
-// window the second no-session arm answers.
-func watcherlessHarness(t *testing.T) *harness {
-	h := newHarness(t)
-	deps := h.q.deps
-	deps.Watcher = func(ids.WorkspaceID) (Watcher, bool) { return nil, false }
-	q, err := newQueue(deps)
-	if err != nil {
-		t.Fatalf("newQueue: %v", err)
-	}
-	h.q = q
-	return h
-}
-
 // A SHIM WITH NO STARTED SESSION TAKES NO PROMPT: the submission waits under
 // the reconnect hold (2026-10-02: one was drawn and then refused no_session).
 func TestSubmitHoldsAPromptForASessionThatIsNotStarted(t *testing.T) {
@@ -947,6 +930,44 @@ func TestSubmitHoldsAPromptForASessionThatIsNotStarted(t *testing.T) {
 	// Assert
 	if err != nil || got.Held == nil || *got.Held != wsm.HoldReconnect {
 		t.Fatalf("Submit = (%+v, %v), want the reconnect hold", got, err)
+	}
+}
+
+// A STARTED SESSION WHOSE WATCHER HAS NOT OPENED YET TAKES NO PROMPT EITHER:
+// the bring-up marks the session started before its watcher opens, and a
+// prompt in between was refused no_session (2026-10-12).
+func TestSubmitHoldsAPromptForAStartedSessionWithNoWatcherYet(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.noWatcher = true
+
+	// Act
+	got, err := h.q.Submit(context.Background(), submission("t1", "hello"))
+
+	// Assert
+	if err != nil || got.Held == nil || *got.Held != wsm.HoldReconnect {
+		t.Fatalf("Submit = (%+v, %v), want the reconnect hold", got, err)
+	}
+	if !logged(h.log.Records(), "info", opSubmit, "the workspace's session does not serve yet; the prompt is held until it comes up") {
+		t.Fatalf("records = %+v, want the hold recorded at info", h.log.Records())
+	}
+}
+
+func TestAWatcherOpeningDeliversThePromptHeldForIt(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.noWatcher = true
+	if _, err := h.q.Submit(context.Background(), submission("t1", "hello")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.noWatcher = false
+
+	// Act
+	h.q.ReleaseReconnectHolds("ws-1")
+
+	// Assert
+	if got := h.sender.started(); len(got) != 1 || got[0] != "t1" {
+		t.Fatalf("started turns = %v, want t1 delivered once the watcher is up", got)
 	}
 }
 
