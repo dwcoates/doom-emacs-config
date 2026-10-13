@@ -1256,3 +1256,51 @@ func TestAnArmItCannotReadIsRecordedAsAnError(t *testing.T) {
 		t.Fatal("an unreadable hibernate answer was deferred without being recorded")
 	}
 }
+
+// queuedAt puts ws's own-branch merge in line, requested at.
+func queuedAt(t *testing.T, h *harness, ws ids.WorkspaceID, at time.Time) {
+	t.Helper()
+	repo := wsm.RepoKey(t.TempDir())
+	if err := h.db.RequestMerge(context.Background(), repo, ws, wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, at); err != nil {
+		t.Fatalf("RequestMerge: %v", err)
+	}
+	if _, err := h.db.QueueMerge(context.Background(), repo, ws, wsm.NewLeaseID()); err != nil {
+		t.Fatalf("QueueMerge: %v", err)
+	}
+}
+
+func TestSweepKeepsAnIdleSessionWhoseMergeJoinedTheQueueInsideTheCutoff(t *testing.T) {
+	// Arrange: engaged two hours ago, its merge queued half an hour ago.
+	h := newHarness(t)
+	ws := h.workspace(t, instant.Add(-2*time.Hour))
+	queuedAt(t, h, ws, instant.Add(-30*time.Minute))
+
+	// Act
+	hibernated, err := h.c.Sweep(context.Background(), instant)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if len(hibernated) != 0 {
+		t.Fatalf("hibernated = %v, want the queued merge's session kept warm", hibernated)
+	}
+}
+
+func TestSweepHibernatesAQueuedSessionIdlePastTheCutoffSinceItJoined(t *testing.T) {
+	// Arrange: queued two hours ago, past the harness's one-hour cutoff.
+	h := newHarness(t)
+	ws := h.workspace(t, instant.Add(-3*time.Hour))
+	queuedAt(t, h, ws, instant.Add(-2*time.Hour))
+
+	// Act
+	hibernated, err := h.c.Sweep(context.Background(), instant)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if len(hibernated) != 1 || hibernated[0] != ws {
+		t.Fatalf("hibernated = %v, want [%s]", hibernated, ws)
+	}
+}

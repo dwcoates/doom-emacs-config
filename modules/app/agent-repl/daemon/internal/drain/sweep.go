@@ -29,6 +29,10 @@ func (c *controller) Sweep(ctx context.Context, now time.Time) ([]ids.WorkspaceI
 		c.log.Error(opSweep, "could not list the workspaces to sweep", withCause(nil, err))
 		return nil, fmt.Errorf("drain: sweep: %w", err)
 	}
+	queued, err := c.queuedSince(ctx)
+	if err != nil {
+		return nil, err
+	}
 	var hibernated []ids.WorkspaceID
 	for _, ws := range workspaces {
 		fields := dlog.Context{"workspace": string(ws.ID), "cutoff": c.deps.IdleCutoff.String()}
@@ -53,7 +57,16 @@ func (c *controller) Sweep(ctx context.Context, now time.Time) ([]ids.WorkspaceI
 				merge(fields, dlog.Context{"terminal_kind": session.Terminal.Kind}))
 			continue
 		}
-		idle := now.Sub(session.LastEngagementAt)
+		// A QUEUED MERGE KEEPS ITS SESSION WARM (owner ruling, 2026-10-13):
+		// the idle clock restarts when the workspace's merge joins the queue,
+		// so its shim and keep-alive stand for a whole cutoff in line, and a
+		// merge whose session went cold is ejected rather than kept waiting.
+		since := session.LastEngagementAt
+		if enqueued, ok := queued[ws.ID]; ok && enqueued.After(since) {
+			since = enqueued
+			fields["queued_at"] = enqueued.Format(time.RFC3339)
+		}
+		idle := now.Sub(since)
 		fields["idle"] = idle.String()
 		if idle < c.deps.IdleCutoff {
 			log.Debug(opSweep, "the session was engaged inside the cutoff", fields)
@@ -440,4 +453,21 @@ func (c *controller) claimFire() bool {
 // of the work itself.
 func cancelled(err error) bool {
 	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
+// queuedSince answers when each workspace with a queued merge joined its
+// queue.
+func (c *controller) queuedSince(ctx context.Context) (map[ids.WorkspaceID]time.Time, error) {
+	queues, err := c.deps.DB.AllMergeQueues(ctx)
+	if err != nil {
+		c.log.Error(opSweep, "could not read the merge queues to sweep", withCause(nil, err))
+		return nil, fmt.Errorf("drain: sweep: read the merge queues: %w", err)
+	}
+	since := map[ids.WorkspaceID]time.Time{}
+	for _, entries := range queues {
+		for _, e := range entries {
+			since[e.Workspace] = e.EnqueuedAt
+		}
+	}
+	return since, nil
 }
