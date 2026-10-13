@@ -61,6 +61,7 @@ export function drawFeedHook(u: FeedHook, rc: RowContext): HTMLElement {
     foldTitle(
       drawFeedHookHeadline(requireMessage(u.headline, `${path}.headline`), `${path}.headline`),
       "standalone",
+      rc,
     ),
   );
   card.appendChild(head);

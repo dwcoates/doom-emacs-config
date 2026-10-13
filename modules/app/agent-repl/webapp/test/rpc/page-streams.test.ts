@@ -9,6 +9,7 @@
  * received a live row. jsdom has no such cap, which is exactly why the count
  * has to be asserted rather than the symptom.
  */
+import { fakePageSeen } from "../page-seen-fake.js";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -251,6 +252,7 @@ function contextFor(
     workspace: WORKSPACE,
     ticker: createTicker(1000),
     failures,
+    seen: fakePageSeen(),
     composerEnabled: false,
     page: "page-1",
   });

@@ -67,37 +67,13 @@ import type {
   FeedSubagentResult,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { FeedChessBoard } from "../../../proto/gen/ts/frontend/v1/chess_board_pb";
+import type { RowArrival, RowContext } from "./cards/context.js";
 
 export type { Handle };
+// THE ONE ROW CONTEXT is declared in cards/context.ts; the feed core's
+// imports reach it through here.
+export type { RowArrival, RowContext };
 
-/** What every row renderer is handed. */
-export interface RowContext {
-  /** The page's one context: client, workspace, ticker, failures. */
-  ctx: AppContext;
-  /** Which feed this row is on — the root feed, or a bubble's own id. */
-  feed: FeedId | "root";
-  /** The whole row, so a renderer can reach its id, turn and placement arm. */
-  row: FeedRow;
-  /**
-   * JUMP to another row (owner request, 2026-10-01): open the bubbles along
-   * the way, expand the entry, center it (`entryJumped`), and mark it.
-   */
-  readonly revealRow: (id: FeedId) => Promise<boolean>;
-  /**
-   * The element this row's PREVIOUS draw produced, when it had one.
-   *
-   * The ONLY channel for local UI state across a re-push: a renderer reads its
-   * own `data-*` off it (a fold the reader toggled, a section they expanded)
-   * and re-applies it, so a push can never undo the reader's own act. A
-   * renderer may also update it in place and return it (see context.ts).
-   */
-  previous?: HTMLElement;
-  /**
-   * Find another row's element ON THIS FEED. Provided by the controller that
-   * owns the rows; a renderer with nothing to look up simply never calls it.
-   */
-  findRowElement?(id: FeedId): HTMLElement | null;
-}
 
 /**
  * The card renderers the feed dispatches to, one per drawn message.

@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { type Control } from "../../src/control.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
@@ -639,5 +641,19 @@ describe("createRowRenderers", () => {
   it("fills no seam the interface does not declare", () => {
     const h = harness();
     expect(Object.keys(createRowRenderers(h.ctx)).sort()).toEqual([...REGISTRY_KEYS].sort());
+  });
+});
+
+describe("the row context", () => {
+  it("is declared once, in cards/context.ts, and only re-exported elsewhere", () => {
+    // Arrange: every webapp source.
+    const root = join(process.cwd(), "src");
+    const sources = (readdirSync(root, { recursive: true }) as string[]).filter((path) => path.endsWith(".ts"));
+    // Act
+    const declaring = sources.filter((path) =>
+      /\binterface RowContext\b/.test(readFileSync(join(root, path), "utf8")),
+    );
+    // Assert
+    expect(declaring).toEqual(["feed/cards/context.ts"]);
   });
 });

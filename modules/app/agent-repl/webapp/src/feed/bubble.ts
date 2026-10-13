@@ -235,7 +235,13 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
   function drawHead(): void {
     const previous = headSlot.firstElementChild;
     if (previous !== null) stopTicking(previous);
-    const head = opts.head(row, { ...opts.rc, row });
+    // The previous head is the redraw's `previous`, as a card's previous body
+    // is: a head reads what its last draw carried (a title's type-out) off it.
+    const head = opts.head(row, {
+      ...opts.rc,
+      row,
+      ...(previous instanceof HTMLElement ? { previous } : {}),
+    });
     headSlot.replaceChildren(head);
     // THE HEAD'S STATE IS THE BUBBLE'S. The head states the arm (live, settled
     // succeeded, …); the bubble is the element the feed hands upward, so it

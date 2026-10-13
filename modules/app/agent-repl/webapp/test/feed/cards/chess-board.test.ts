@@ -88,6 +88,7 @@ function rowContext(previous?: HTMLElement): RowContext {
       composerEnabled: false,
     }),
     feed: "root",
+    arrival: "page",
     row: create(FeedRowSchema, {}),
     revealRow: async () => false,
     previous,

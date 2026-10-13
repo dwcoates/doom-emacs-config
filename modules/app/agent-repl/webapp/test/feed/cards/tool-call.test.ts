@@ -59,6 +59,7 @@ function rowContext(ticker: Ticker = createTicker(1000)): RowContext {
       composerEnabled: false,
     }),
     feed: "root",
+    arrival: "page",
     row: create(FeedRowSchema, { id: create(FeedIdSchema, { value: "row-1" }), order: orderFor("row-1") }),
     revealRow: async () => true,
   };

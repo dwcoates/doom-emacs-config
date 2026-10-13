@@ -128,6 +128,8 @@ function fixture(
   opts: {
     feed?: FeedId;
     renderers?: Partial<Parameters<typeof stubRenderers>[0]>;
+    /** Told the context each bubble row is built with. */
+    onBubble?: (row: FeedRow, rc: RowContext) => void;
   } = {},
 ): Fixture {
   const host = document.createElement("div");
@@ -140,13 +142,15 @@ function fixture(
     renderers: stubRenderers(opts.renderers),
     body: defaultBubbleBody,
     revealRow: async () => false,
-    bubble: (row) => {
+    bubble: (row, rc) => {
+      opts.onBubble?.(row, rc);
       const bubble = stubBubble(row);
       bubbles.set(row.id?.value ?? "", bubble);
       return bubble;
     },
     bodyContext: {
       ctx: h.ctx,
+      arrival: "page",
       feed: "root",
       row: create(FeedRowSchema, {}),
       revealRow: async () => false,
@@ -416,6 +420,7 @@ describe("createFeedController: upserts", () => {
       bubble: (row) => stubBubble(row),
       bodyContext: {
         ctx: h.ctx,
+        arrival: "page",
         feed: "root",
         row: create(FeedRowSchema, {}),
         revealRow: async () => false,
@@ -1553,6 +1558,7 @@ describe("createFeedController: following the tail", () => {
       bubble: (row) => stubBubble(row),
       bodyContext: {
         ctx: h.ctx,
+        arrival: "page",
         feed: "root",
         row: create(FeedRowSchema, {}),
         revealRow: async () => false,
@@ -1943,6 +1949,7 @@ describe("createFeedController: a landed thinking row", () => {
       bubble: (row) => stubBubble(row),
       bodyContext: {
         ctx: h.ctx,
+        arrival: "page",
         feed: "root",
         row: create(FeedRowSchema, {}),
         revealRow: async () => false,
@@ -2045,6 +2052,7 @@ describe("createFeedController: the feed selection", () => {
       bubble: (row) => stubBubble(row),
       bodyContext: {
         ctx: h.ctx,
+        arrival: "page",
         feed: "root",
         row: create(FeedRowSchema, {}),
         revealRow: async () => false,
@@ -2839,6 +2847,78 @@ describe("createFeedController: what a body renderer reads", () => {
         .rows()
         .map((row) => row.id?.value),
     ).toEqual(["a"]);
+  });
+});
+
+/**
+ * HOW A ROW ARRIVED rides every draw of it (RowContext.arrival): a row placed
+ * by a page is "page" for its life, one first placed by a live push "push", so
+ * a card types its title out only for a row new to a reader (title-reveal.ts).
+ */
+describe("createFeedController: how a row arrived", () => {
+  /** A fixture whose tool card renderer records the arrival of every draw. */
+  function recording(): { controller: FeedController; arrivals: string[] } {
+    const arrivals: string[] = [];
+    const { controller } = fixture(harness(), {}, {
+      renderers: {
+        simpleToolCall: (_u, rc) => {
+          arrivals.push(rc.arrival);
+          return document.createElement("div");
+        },
+      },
+    });
+    return { controller, arrivals };
+  }
+
+  it("draws a row a page placed as arrived by page", () => {
+    // Arrange
+    const { controller, arrivals } = recording();
+    // Act
+    controller.applyPage(page([toolCallRow("t", "running")]), "replace");
+    // Assert
+    expect(arrivals).toEqual(["page"]);
+  });
+
+  it("draws a row a live push placed as arrived by push", () => {
+    // Arrange
+    const { controller, arrivals } = recording();
+    controller.applyPage(page([]), "replace");
+    // Act
+    controller.upsert(toolCallRow("t", "running"));
+    // Assert
+    expect(arrivals).toEqual(["push"]);
+  });
+
+  it("keeps a paged row's arrival through a later push of it", () => {
+    // Arrange
+    const { controller, arrivals } = recording();
+    controller.applyPage(page([toolCallRow("t", "running")]), "replace");
+    // Act
+    controller.upsert(toolCallRow("t", "returned"));
+    // Assert
+    expect(arrivals).toEqual(["page", "page"]);
+  });
+
+  it("keeps a pushed row's arrival through a later push of it", () => {
+    // Arrange
+    const { controller, arrivals } = recording();
+    controller.applyPage(page([]), "replace");
+    controller.upsert(toolCallRow("t", "running"));
+    // Act
+    controller.upsert(toolCallRow("t", "returned"));
+    // Assert
+    expect(arrivals).toEqual(["push", "push"]);
+  });
+
+  it("builds a pushed bubble row's bubble as arrived by push", () => {
+    // Arrange
+    const arrivals: string[] = [];
+    const { controller } = fixture(harness(), {}, { onBubble: (_row, rc) => arrivals.push(rc.arrival) });
+    controller.applyPage(page([subagentRow("b0")]), "replace");
+    // Act
+    controller.upsert(subagentRow("b1"));
+    // Assert
+    expect(arrivals).toEqual(["page", "push"]);
   });
 });
 
@@ -3729,6 +3809,7 @@ describe("createFeedController: selected and expanded are one state", () => {
       bubble: (row) => stubBubble(row),
       bodyContext: {
         ctx: h.ctx,
+        arrival: "page",
         feed,
         row: create(FeedRowSchema, {}),
         revealRow: async () => false,
