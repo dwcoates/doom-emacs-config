@@ -2,8 +2,9 @@
 // for the user to confirm. ROLLBACK section.
 //
 // A rollback returns the main agent's conversation to just before one of its
-// prompts: the selected prompt (frontend.v1.FeedSelectionPrompt) when one is
-// selected, else the latest prompt — which is cancelling it. Emacs asks for a
+// prompts: the prompt the request names, else the selected prompt
+// (frontend.v1.FeedSelectionPrompt) when one is selected, else the latest
+// prompt — which is cancelling it. Emacs asks for a
 // plan with the user's key (`C-c C-RET` keeps files, `C-c M-RET` restores
 // them), shows its effects in the minibuffer, and on a yes sends the plan's
 // token to RollBack. Planning changes nothing.
@@ -18,13 +19,15 @@ import type { WorkspaceRef } from "../../workspace/v1/workspace_pb";
 import { file_workspace_v1_workspace } from "../../workspace/v1/workspace_pb";
 import type { RollbackToken } from "./rollback_pb";
 import { file_agentrepl_v1_rollback } from "./rollback_pb";
+import type { FeedId } from "../../frontend/v1/feed_pb";
+import { file_frontend_v1_feed } from "../../frontend/v1/feed_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file agentrepl/v1/endpoint_plan_rollback.proto.
  */
 export const file_agentrepl_v1_endpoint_plan_rollback: GenFile = /*@__PURE__*/
-  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfcGxhbl9yb2xsYmFjay5wcm90bxIMYWdlbnRyZXBsLnYxIskBChNQbGFuUm9sbGJhY2tSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSOQoKa2VlcF9maWxlcxgCIAEoCzIjLmFnZW50cmVwbC52MS5QbGFuUm9sbGJhY2tLZWVwRmlsZXNIABI/Cg1yZXN0b3JlX2ZpbGVzGAMgASgLMiYuYWdlbnRyZXBsLnYxLlBsYW5Sb2xsYmFja1Jlc3RvcmVGaWxlc0gAQgcKBWZpbGVzIhcKFVBsYW5Sb2xsYmFja0tlZXBGaWxlcyIaChhQbGFuUm9sbGJhY2tSZXN0b3JlRmlsZXMiiAEKFFBsYW5Sb2xsYmFja1Jlc3BvbnNlEjQKB3N1Y2Nlc3MYASABKAsyIS5hZ2VudHJlcGwudjEuUGxhblJvbGxiYWNrU3VjY2Vzc0gAEjAKBWVycm9yGAIgASgLMh8uYWdlbnRyZXBsLnYxLlBsYW5Sb2xsYmFja0Vycm9ySABCCAoGcmVzdWx0IpkBChNQbGFuUm9sbGJhY2tTdWNjZXNzEioKBHBsYW4YASABKAsyGi5hZ2VudHJlcGwudjEuUm9sbGJhY2tQbGFuSAASSwoUbm90aGluZ190b19yb2xsX2JhY2sYAiABKAsyKy5hZ2VudHJlcGwudjEuUGxhblJvbGxiYWNrTm90aGluZ1RvUm9sbEJhY2tIAEIJCgdvdXRjb21lIh8KHVBsYW5Sb2xsYmFja05vdGhpbmdUb1JvbGxCYWNrIrcCCgxSb2xsYmFja1BsYW4SKgoFdG9rZW4YASABKAsyGy5hZ2VudHJlcGwudjEuUm9sbGJhY2tUb2tlbhIwCgZ0YXJnZXQYAiABKAsyIC5hZ2VudHJlcGwudjEuUm9sbGJhY2tQbGFuVGFyZ2V0Ei4KBWZpbGVzGAMgASgLMh8uYWdlbnRyZXBsLnYxLlJvbGxiYWNrUGxhbkZpbGVzEjsKCWludGVycnVwdBgEIAEoCzIjLmFnZW50cmVwbC52MS5Sb2xsYmFja1BsYW5JbnRlcnJ1cHRIAIgBARI+Cgtkcm9wX3F1ZXVlZBgFIAEoCzIkLmFnZW50cmVwbC52MS5Sb2xsYmFja1BsYW5Ecm9wUXVldWVkSAGIAQFCDAoKX2ludGVycnVwdEIOCgxfZHJvcF9xdWV1ZWQiwAEKElJvbGxiYWNrUGxhblRhcmdldBI8CghzZWxlY3RlZBgBIAEoCzIoLmFnZW50cmVwbC52MS5Sb2xsYmFja1BsYW5UYXJnZXRTZWxlY3RlZEgAEjgKBmxhdGVzdBgCIAEoCzImLmFnZW50cmVwbC52MS5Sb2xsYmFja1BsYW5UYXJnZXRMYXRlc3RIABIPCgdleGNlcnB0GAMgASgJEhcKD3Byb21wdHNfZHJvcHBlZBgEIAEoDUIICgZjaG9zZW4iHAoaUm9sbGJhY2tQbGFuVGFyZ2V0U2VsZWN0ZWQiGgoYUm9sbGJhY2tQbGFuVGFyZ2V0TGF0ZXN0Io4BChFSb2xsYmFja1BsYW5GaWxlcxIzCgRrZXB0GAEgASgLMiMuYWdlbnRyZXBsLnYxLlJvbGxiYWNrUGxhbkZpbGVzS2VwdEgAEjsKCHJlc3RvcmVkGAIgASgLMicuYWdlbnRyZXBsLnYxLlJvbGxiYWNrUGxhbkZpbGVzUmVzdG9yZWRIAEIHCgVmaWxlcyIXChVSb2xsYmFja1BsYW5GaWxlc0tlcHQidwoZUm9sbGJhY2tQbGFuRmlsZXNSZXN0b3JlZBJGCg9jYW5jZWxfZGV0YWNoZWQYASABKAsyKC5hZ2VudHJlcGwudjEuUm9sbGJhY2tQbGFuQ2FuY2VsRGV0YWNoZWRIAIgBAUISChBfY2FuY2VsX2RldGFjaGVkIisKGlJvbGxiYWNrUGxhbkNhbmNlbERldGFjaGVkEg0KBWl0ZW1zGAEgASgNIhcKFVJvbGxiYWNrUGxhbkludGVycnVwdCIpChZSb2xsYmFja1BsYW5Ecm9wUXVldWVkEg8KB3Byb21wdHMYASABKA0ixAIKEVBsYW5Sb2xsYmFja0Vycm9yEkcKEXVua25vd25fd29ya3NwYWNlGAEgASgLMiouYWdlbnRyZXBsLnYxLlBsYW5Sb2xsYmFja1Vua25vd25Xb3Jrc3BhY2VIABJQChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMi4uYWdlbnRyZXBsLnYxLlBsYW5Sb2xsYmFja1dvcmtzcGFjZVJlZk1pc21hdGNoSAASRwoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyKi5hZ2VudHJlcGwudjEuUGxhblJvbGxiYWNrVHJhbnNmZXJyaW5nQXdheUgAEkIKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzInLmFnZW50cmVwbC52MS5QbGFuUm9sbGJhY2tOb3RZZXRBZG9wdGVkSABCBwoFY2F1c2UiHgocUGxhblJvbGxiYWNrVW5rbm93bldvcmtzcGFjZSI4CiBQbGFuUm9sbGJhY2tXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiLwocUGxhblJvbGxiYWNrVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIhsKGVBsYW5Sb2xsYmFja05vdFlldEFkb3B0ZWRCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace, file_agentrepl_v1_rollback]);
+  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfcGxhbl9yb2xsYmFjay5wcm90bxIMYWdlbnRyZXBsLnYxIv4BChNQbGFuUm9sbGJhY2tSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSOQoKa2VlcF9maWxlcxgCIAEoCzIjLmFnZW50cmVwbC52MS5QbGFuUm9sbGJhY2tLZWVwRmlsZXNIABI/Cg1yZXN0b3JlX2ZpbGVzGAMgASgLMiYuYWdlbnRyZXBsLnYxLlBsYW5Sb2xsYmFja1Jlc3RvcmVGaWxlc0gAEigKBnByb21wdBgEIAEoCzITLmZyb250ZW5kLnYxLkZlZWRJZEgBiAEBQgcKBWZpbGVzQgkKB19wcm9tcHQiFwoVUGxhblJvbGxiYWNrS2VlcEZpbGVzIhoKGFBsYW5Sb2xsYmFja1Jlc3RvcmVGaWxlcyKIAQoUUGxhblJvbGxiYWNrUmVzcG9uc2USNAoHc3VjY2VzcxgBIAEoCzIhLmFnZW50cmVwbC52MS5QbGFuUm9sbGJhY2tTdWNjZXNzSAASMAoFZXJyb3IYAiABKAsyHy5hZ2VudHJlcGwudjEuUGxhblJvbGxiYWNrRXJyb3JIAEIICgZyZXN1bHQimQEKE1BsYW5Sb2xsYmFja1N1Y2Nlc3MSKgoEcGxhbhgBIAEoCzIaLmFnZW50cmVwbC52MS5Sb2xsYmFja1BsYW5IABJLChRub3RoaW5nX3RvX3JvbGxfYmFjaxgCIAEoCzIrLmFnZW50cmVwbC52MS5QbGFuUm9sbGJhY2tOb3RoaW5nVG9Sb2xsQmFja0gAQgkKB291dGNvbWUiHwodUGxhblJvbGxiYWNrTm90aGluZ1RvUm9sbEJhY2sitwIKDFJvbGxiYWNrUGxhbhIqCgV0b2tlbhgBIAEoCzIbLmFnZW50cmVwbC52MS5Sb2xsYmFja1Rva2VuEjAKBnRhcmdldBgCIAEoCzIgLmFnZW50cmVwbC52MS5Sb2xsYmFja1BsYW5UYXJnZXQSLgoFZmlsZXMYAyABKAsyHy5hZ2VudHJlcGwudjEuUm9sbGJhY2tQbGFuRmlsZXMSOwoJaW50ZXJydXB0GAQgASgLMiMuYWdlbnRyZXBsLnYxLlJvbGxiYWNrUGxhbkludGVycnVwdEgAiAEBEj4KC2Ryb3BfcXVldWVkGAUgASgLMiQuYWdlbnRyZXBsLnYxLlJvbGxiYWNrUGxhbkRyb3BRdWV1ZWRIAYgBAUIMCgpfaW50ZXJydXB0Qg4KDF9kcm9wX3F1ZXVlZCL4AQoSUm9sbGJhY2tQbGFuVGFyZ2V0EjwKCHNlbGVjdGVkGAEgASgLMiguYWdlbnRyZXBsLnYxLlJvbGxiYWNrUGxhblRhcmdldFNlbGVjdGVkSAASOAoGbGF0ZXN0GAIgASgLMiYuYWdlbnRyZXBsLnYxLlJvbGxiYWNrUGxhblRhcmdldExhdGVzdEgAEjYKBW5hbWVkGAUgASgLMiUuYWdlbnRyZXBsLnYxLlJvbGxiYWNrUGxhblRhcmdldE5hbWVkSAASDwoHZXhjZXJwdBgDIAEoCRIXCg9wcm9tcHRzX2Ryb3BwZWQYBCABKA1CCAoGY2hvc2VuIhwKGlJvbGxiYWNrUGxhblRhcmdldFNlbGVjdGVkIhoKGFJvbGxiYWNrUGxhblRhcmdldExhdGVzdCIZChdSb2xsYmFja1BsYW5UYXJnZXROYW1lZCKOAQoRUm9sbGJhY2tQbGFuRmlsZXMSMwoEa2VwdBgBIAEoCzIjLmFnZW50cmVwbC52MS5Sb2xsYmFja1BsYW5GaWxlc0tlcHRIABI7CghyZXN0b3JlZBgCIAEoCzInLmFnZW50cmVwbC52MS5Sb2xsYmFja1BsYW5GaWxlc1Jlc3RvcmVkSABCBwoFZmlsZXMiFwoVUm9sbGJhY2tQbGFuRmlsZXNLZXB0IncKGVJvbGxiYWNrUGxhbkZpbGVzUmVzdG9yZWQSRgoPY2FuY2VsX2RldGFjaGVkGAEgASgLMiguYWdlbnRyZXBsLnYxLlJvbGxiYWNrUGxhbkNhbmNlbERldGFjaGVkSACIAQFCEgoQX2NhbmNlbF9kZXRhY2hlZCIrChpSb2xsYmFja1BsYW5DYW5jZWxEZXRhY2hlZBINCgVpdGVtcxgBIAEoDSIXChVSb2xsYmFja1BsYW5JbnRlcnJ1cHQiKQoWUm9sbGJhY2tQbGFuRHJvcFF1ZXVlZBIPCgdwcm9tcHRzGAEgASgNIpIDChFQbGFuUm9sbGJhY2tFcnJvchJHChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzIqLmFnZW50cmVwbC52MS5QbGFuUm9sbGJhY2tVbmtub3duV29ya3NwYWNlSAASUAoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIuLmFnZW50cmVwbC52MS5QbGFuUm9sbGJhY2tXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkcKEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMiouYWdlbnRyZXBsLnYxLlBsYW5Sb2xsYmFja1RyYW5zZmVycmluZ0F3YXlIABJCCg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyJy5hZ2VudHJlcGwudjEuUGxhblJvbGxiYWNrTm90WWV0QWRvcHRlZEgAEkwKFHByb21wdF9ub3RfcmVhY2hhYmxlGAUgASgLMiwuYWdlbnRyZXBsLnYxLlBsYW5Sb2xsYmFja1Byb21wdE5vdFJlYWNoYWJsZUgAQgcKBWNhdXNlIh4KHFBsYW5Sb2xsYmFja1Vua25vd25Xb3Jrc3BhY2UiOAogUGxhblJvbGxiYWNrV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIi8KHFBsYW5Sb2xsYmFja1RyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIbChlQbGFuUm9sbGJhY2tOb3RZZXRBZG9wdGVkIkUKHlBsYW5Sb2xsYmFja1Byb21wdE5vdFJlYWNoYWJsZRIjCgZwcm9tcHQYASABKAsyEy5mcm9udGVuZC52MS5GZWVkSWRCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace, file_agentrepl_v1_rollback, file_frontend_v1_feed]);
 
 /**
  * @generated from message agentrepl.v1.PlanRollbackRequest
@@ -61,6 +64,17 @@ export type PlanRollbackRequest = Message<"agentrepl.v1.PlanRollbackRequest"> & 
     value: PlanRollbackRestoreFiles;
     case: "restoreFiles";
   } | { case: undefined; value?: undefined };
+
+  /**
+   * The prompt to roll back to just before, by its root-feed row exactly as
+   * ListRollbackPrompts served it. UNSET means the selected prompt, else the
+   * latest. A named prompt a rollback can no longer reach (rolled back since,
+   * or cut off by a clear or compaction) is refused as `prompt_not_reachable`,
+   * never quietly replaced by another prompt.
+   *
+   * @generated from field: optional frontend.v1.FeedId prompt = 4;
+   */
+  prompt?: FeedId | undefined;
 };
 
 /**
@@ -259,6 +273,14 @@ export type RollbackPlanTarget = Message<"agentrepl.v1.RollbackPlanTarget"> & {
      */
     value: RollbackPlanTargetLatest;
     case: "latest";
+  } | {
+    /**
+     * The prompt the request named (PlanRollbackRequest.prompt).
+     *
+     * @generated from field: agentrepl.v1.RollbackPlanTargetNamed named = 5;
+     */
+    value: RollbackPlanTargetNamed;
+    case: "named";
   } | { case: undefined; value?: undefined };
 
   /**
@@ -314,6 +336,21 @@ export const RollbackPlanTargetLatestSchema: GenMessage<RollbackPlanTargetLatest
   messageDesc(file_agentrepl_v1_endpoint_plan_rollback, 9);
 
 /**
+ * The prompt the request named, whether or not anything is selected.
+ *
+ * @generated from message agentrepl.v1.RollbackPlanTargetNamed
+ */
+export type RollbackPlanTargetNamed = Message<"agentrepl.v1.RollbackPlanTargetNamed"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.RollbackPlanTargetNamed.
+ * Use `create(RollbackPlanTargetNamedSchema)` to create a new message.
+ */
+export const RollbackPlanTargetNamedSchema: GenMessage<RollbackPlanTargetNamed> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_plan_rollback, 10);
+
+/**
  * What happens to files and detached work. Exactly one is set.
  *
  * @generated from message agentrepl.v1.RollbackPlanFiles
@@ -346,7 +383,7 @@ export type RollbackPlanFiles = Message<"agentrepl.v1.RollbackPlanFiles"> & {
  * Use `create(RollbackPlanFilesSchema)` to create a new message.
  */
 export const RollbackPlanFilesSchema: GenMessage<RollbackPlanFiles> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_plan_rollback, 10);
+  messageDesc(file_agentrepl_v1_endpoint_plan_rollback, 11);
 
 /**
  * Files and detached work are left alone.
@@ -361,7 +398,7 @@ export type RollbackPlanFilesKept = Message<"agentrepl.v1.RollbackPlanFilesKept"
  * Use `create(RollbackPlanFilesKeptSchema)` to create a new message.
  */
 export const RollbackPlanFilesKeptSchema: GenMessage<RollbackPlanFilesKept> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_plan_rollback, 11);
+  messageDesc(file_agentrepl_v1_endpoint_plan_rollback, 12);
 
 /**
  * Files are restored. Only changes the agent's file-editing tools made are
@@ -385,7 +422,7 @@ export type RollbackPlanFilesRestored = Message<"agentrepl.v1.RollbackPlanFilesR
  * Use `create(RollbackPlanFilesRestoredSchema)` to create a new message.
  */
 export const RollbackPlanFilesRestoredSchema: GenMessage<RollbackPlanFilesRestored> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_plan_rollback, 12);
+  messageDesc(file_agentrepl_v1_endpoint_plan_rollback, 13);
 
 /**
  * Running detached work that will be stopped.
@@ -407,7 +444,7 @@ export type RollbackPlanCancelDetached = Message<"agentrepl.v1.RollbackPlanCance
  * Use `create(RollbackPlanCancelDetachedSchema)` to create a new message.
  */
 export const RollbackPlanCancelDetachedSchema: GenMessage<RollbackPlanCancelDetached> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_plan_rollback, 13);
+  messageDesc(file_agentrepl_v1_endpoint_plan_rollback, 14);
 
 /**
  * A running turn will be interrupted.
@@ -422,7 +459,7 @@ export type RollbackPlanInterrupt = Message<"agentrepl.v1.RollbackPlanInterrupt"
  * Use `create(RollbackPlanInterruptSchema)` to create a new message.
  */
 export const RollbackPlanInterruptSchema: GenMessage<RollbackPlanInterrupt> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_plan_rollback, 14);
+  messageDesc(file_agentrepl_v1_endpoint_plan_rollback, 15);
 
 /**
  * Held prompts that will be dropped.
@@ -443,7 +480,7 @@ export type RollbackPlanDropQueued = Message<"agentrepl.v1.RollbackPlanDropQueue
  * Use `create(RollbackPlanDropQueuedSchema)` to create a new message.
  */
 export const RollbackPlanDropQueuedSchema: GenMessage<RollbackPlanDropQueued> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_plan_rollback, 15);
+  messageDesc(file_agentrepl_v1_endpoint_plan_rollback, 16);
 
 /**
  * Arms derived from the daemon's refusal sites, mirroring SelectFeedRow.
@@ -486,6 +523,14 @@ export type PlanRollbackError = Message<"agentrepl.v1.PlanRollbackError"> & {
      */
     value: PlanRollbackNotYetAdopted;
     case: "notYetAdopted";
+  } | {
+    /**
+     * The request named a prompt a rollback cannot reach.
+     *
+     * @generated from field: agentrepl.v1.PlanRollbackPromptNotReachable prompt_not_reachable = 5;
+     */
+    value: PlanRollbackPromptNotReachable;
+    case: "promptNotReachable";
   } | { case: undefined; value?: undefined };
 };
 
@@ -494,7 +539,7 @@ export type PlanRollbackError = Message<"agentrepl.v1.PlanRollbackError"> & {
  * Use `create(PlanRollbackErrorSchema)` to create a new message.
  */
 export const PlanRollbackErrorSchema: GenMessage<PlanRollbackError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_plan_rollback, 16);
+  messageDesc(file_agentrepl_v1_endpoint_plan_rollback, 17);
 
 /**
  * The workspace id is not in the daemon's registry.
@@ -509,7 +554,7 @@ export type PlanRollbackUnknownWorkspace = Message<"agentrepl.v1.PlanRollbackUnk
  * Use `create(PlanRollbackUnknownWorkspaceSchema)` to create a new message.
  */
 export const PlanRollbackUnknownWorkspaceSchema: GenMessage<PlanRollbackUnknownWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_plan_rollback, 17);
+  messageDesc(file_agentrepl_v1_endpoint_plan_rollback, 18);
 
 /**
  * The echoed dir disagrees with the registry's dir for this id.
@@ -530,7 +575,7 @@ export type PlanRollbackWorkspaceRefMismatch = Message<"agentrepl.v1.PlanRollbac
  * Use `create(PlanRollbackWorkspaceRefMismatchSchema)` to create a new message.
  */
 export const PlanRollbackWorkspaceRefMismatchSchema: GenMessage<PlanRollbackWorkspaceRefMismatch> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_plan_rollback, 18);
+  messageDesc(file_agentrepl_v1_endpoint_plan_rollback, 19);
 
 /**
  * This daemon released the workspace to a successor.
@@ -551,7 +596,7 @@ export type PlanRollbackTransferringAway = Message<"agentrepl.v1.PlanRollbackTra
  * Use `create(PlanRollbackTransferringAwaySchema)` to create a new message.
  */
 export const PlanRollbackTransferringAwaySchema: GenMessage<PlanRollbackTransferringAway> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_plan_rollback, 19);
+  messageDesc(file_agentrepl_v1_endpoint_plan_rollback, 20);
 
 /**
  * A joining daemon has not finished adopting this workspace yet.
@@ -566,5 +611,28 @@ export type PlanRollbackNotYetAdopted = Message<"agentrepl.v1.PlanRollbackNotYet
  * Use `create(PlanRollbackNotYetAdoptedSchema)` to create a new message.
  */
 export const PlanRollbackNotYetAdoptedSchema: GenMessage<PlanRollbackNotYetAdopted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_plan_rollback, 20);
+  messageDesc(file_agentrepl_v1_endpoint_plan_rollback, 21);
+
+/**
+ * The named prompt is not one a rollback can reach: it was rolled back
+ * already, a clear or compaction now stands after it, or it was never a prompt
+ * of the main agent's own. The frontend asks for the list again.
+ *
+ * @generated from message agentrepl.v1.PlanRollbackPromptNotReachable
+ */
+export type PlanRollbackPromptNotReachable = Message<"agentrepl.v1.PlanRollbackPromptNotReachable"> & {
+  /**
+   * The row the request named, echoed.
+   *
+   * @generated from field: frontend.v1.FeedId prompt = 1;
+   */
+  prompt?: FeedId | undefined;
+};
+
+/**
+ * Describes the message agentrepl.v1.PlanRollbackPromptNotReachable.
+ * Use `create(PlanRollbackPromptNotReachableSchema)` to create a new message.
+ */
+export const PlanRollbackPromptNotReachableSchema: GenMessage<PlanRollbackPromptNotReachable> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_plan_rollback, 22);
 

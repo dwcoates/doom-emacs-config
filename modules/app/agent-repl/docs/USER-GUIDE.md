@@ -194,7 +194,15 @@ you are replying to. Sending ends the selection.
 | `C-c C-RET` | Roll the conversation back to just before the selected prompt. | Roll back the latest prompt: this cancels it. |
 | `C-c M-RET` | The same, and also restore files to their state when that prompt was sent. | The same for the latest prompt, with files. |
 
-- `RET` still sends, and `C-c C-k` still only interrupts.
+- `RET` still sends.
+- **`C-c C-k` pressed again, with no turn running, rolls back too.**
+  - When nothing has answered the latest prompt in the feed yet, that prompt is rolled back at once, with no question, and its words land in the input window.
+    - A prompt counts as answered once a response bubble or a purple-titled card has landed after the prompt.
+  - When something has answered it, a selection list opens instead, in your completion framework.
+    - It holds every prompt a rollback can reach, newest at the top.
+    - Each line shows how long ago the prompt was sent and how full the context was just before it.
+    - Picking one rolls back to just before it, after the usual confirmation, keeping files.
+  - With no prompt to roll back, it says there is nothing to interrupt.
 - **Every rollback asks for confirmation in the minibuffer.**
   - It names the prompt and says whether files are restored.
   - It names the other key, so you can switch.

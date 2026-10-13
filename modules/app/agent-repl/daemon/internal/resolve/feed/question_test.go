@@ -289,3 +289,68 @@ func TestAQuestionFrameWithNoAskIdentityIsRefusedLoudly(t *testing.T) {
 		t.Fatalf("records = %+v, want an ERROR daemon.feed.question_without_identity", h.records())
 	}
 }
+
+func TestAStartAfterTheAskSettledLeavesTheSettledCard(t *testing.T) {
+	tests := []struct {
+		name    string
+		settle  any
+		settled func(*frontendv1.FeedQuestion) bool
+	}{
+		{
+			name: "an answered ask",
+			settle: &conversationv1.AgentQuestionSuccess{
+				Batch: twoQuestionBatch(),
+				Outcome: &conversationv1.AgentQuestionSuccess_Answered{
+					Answered: &conversationv1.AgentQuestionAnswers{},
+				},
+			},
+			settled: func(card *frontendv1.FeedQuestion) bool { return card.GetAnswered() != nil },
+		},
+		{
+			name:    "an ask that could not be put to the user",
+			settle:  &conversationv1.AgentQuestionFailure{},
+			settled: func(card *frontendv1.FeedQuestion) bool { return card.GetExpired() != nil },
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the ask settled, then a history page read before the
+			// answer was stored restates its start.
+			h := newHarness(t)
+			start := &conversationv1.AgentQuestionStart{
+				Batch: twoQuestionBatch(), StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+			}
+			h.pose("ask-1", start)
+			h.pose("ask-1", tc.settle)
+
+			// Act.
+			h.pose("ask-1", start)
+
+			// Assert: the card stays settled, and the drop is recorded.
+			if card := h.questionCard(); !tc.settled(card) {
+				t.Fatalf("state = %T, want the settled card to stand", card.GetState())
+			}
+			if !h.hasRecord("debug", "daemon.feed.question_start_after_settled") {
+				t.Fatalf("records = %+v, want the stale start recorded", h.records())
+			}
+		})
+	}
+}
+
+func TestASettledAskIsNotStandingAfterAStaleStart(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	start := &conversationv1.AgentQuestionStart{
+		Batch: twoQuestionBatch(), StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	}
+	h.pose("ask-1", start)
+	h.pose("ask-1", &conversationv1.AgentQuestionFailure{})
+
+	// Act.
+	h.pose("ask-1", start)
+
+	// Assert: a typed answer finds no ask to go to.
+	if ask, ok := h.resolver.StandingAsk(testWorkspace, nil); ok {
+		t.Fatalf("StandingAsk() = %+v, want none after the ask settled", ask)
+	}
+}

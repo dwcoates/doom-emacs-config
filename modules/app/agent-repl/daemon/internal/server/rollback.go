@@ -35,14 +35,24 @@ type rollbackPlan struct {
 	ws       ids.WorkspaceID
 	row      *frontendv1.FeedId
 	selected bool
-	restore  bool
-	turns    []ids.TurnID
-	since    time.Time
-	dropHeld []ids.TurnID
-	running  bool
-	detached int
-	excerpt  string
-	said     *conversationv1.UserSaid
+	// named marks a plan for the prompt the request named
+	// (PlanRollbackRequest.prompt).
+	named   bool
+	restore bool
+	// followed reports agent output drawn after the prompt
+	// (feed.Resolver.PromptFollowed).
+	followed bool
+	// requireBare marks a plan minted without a confirmation because nothing
+	// followed its prompt (the stop key's second press): it stays valid only
+	// while nothing does.
+	requireBare bool
+	turns       []ids.TurnID
+	since       time.Time
+	dropHeld    []ids.TurnID
+	running     bool
+	detached    int
+	excerpt     string
+	said        *conversationv1.UserSaid
 }
 
 // sameEffects reports whether two plans would do the same thing.
@@ -71,20 +81,29 @@ func (s *server) PlanRollback(
 		return answer(resp, cerr)
 	}
 	restore := req.Msg.GetRestoreFiles() != nil
-	plan, ok, err := s.planRollback(ctx, subject.Record.ID, restore, nil)
+	named := req.Msg.GetPrompt()
+	plan, ok, err := s.planRollback(ctx, subject.Record.ID, restore, named)
 	if err != nil {
 		return nil, fail(subject.Log, rpc, err)
 	}
+	if !ok && named != nil {
+		// A NAMED PROMPT IS NEVER QUIETLY REPLACED by another: the reader chose
+		// that one, so a prompt rolled back or cut off since is refused.
+		return answer(resp, s.refuse(subject.Log, rpc, resp, s.fill(refusal{
+			Arm:    "prompt_not_reachable",
+			Reason: "the named prompt is not one a rollback can reach",
+			Fields: map[string]any{"prompt": named},
+			Info:   true,
+		})))
+	}
+	plan.named = named != nil
 	if !ok {
 		subject.Log.Info(opRollback, "a rollback was asked for with no prompt to roll back to", dlog.Context{"restore_files": restore})
 		resp.Result = &agentreplv1.PlanRollbackResponse_Success{Success: &agentreplv1.PlanRollbackSuccess{
 			Outcome: &agentreplv1.PlanRollbackSuccess_NothingToRollBack{NothingToRollBack: &agentreplv1.PlanRollbackNothingToRollBack{}}}}
 		return connect.NewResponse(resp), nil
 	}
-	token := uuid.New().String()
-	s.mu.Lock()
-	s.rollbackPlans[token] = plan
-	s.mu.Unlock()
+	token := s.mintRollbackToken(plan)
 	subject.Log.Info(opRollback, "planned a rollback for the user to confirm", plan.context())
 	resp.Result = &agentreplv1.PlanRollbackResponse_Success{Success: &agentreplv1.PlanRollbackSuccess{
 		Outcome: &agentreplv1.PlanRollbackSuccess_Plan{Plan: plan.view(token)}}}
@@ -128,6 +147,9 @@ func (s *server) RollBack(
 	if !ok || !now.sameEffects(planned) {
 		return stale("the conversation changed since the rollback was planned")
 	}
+	if planned.requireBare && now.followed {
+		return stale("agent output landed after the prompt since the rollback was offered without a confirmation")
+	}
 	result, err := s.deps.Verbs.RollBack(ctx, ws, workspace.RollbackRequest{
 		Turns: planned.turns, Since: planned.since, DropHeld: planned.dropHeld, RestoreFiles: planned.restore,
 	})
@@ -159,6 +181,46 @@ func (s *server) RollBack(
 	return connect.NewResponse(resp), nil
 }
 
+// mintRollbackToken files PLAN under a fresh token and answers the token: the
+// one way a plan becomes one RollBack can perform.
+func (s *server) mintRollbackToken(plan rollbackPlan) string {
+	token := uuid.New().String()
+	s.mu.Lock()
+	s.rollbackPlans[token] = plan
+	s.mu.Unlock()
+	return token
+}
+
+// interruptRollbackOffer answers what the stop key's second press offers for
+// WS: nil when no prompt can be rolled back; `immediate`, with a token minted
+// for the latest prompt, when nothing the agent produced follows it; `choose`
+// when agent output does. See endpoint_interrupt.proto.
+func (s *server) interruptRollbackOffer(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) (*agentreplv1.InterruptNothingRunningRollback, error) {
+	prompts := s.deps.Feed.RollbackPrompts(ws)
+	if len(prompts) == 0 {
+		log.Info(opRollback, "the stop key found nothing running and no prompt to roll back", nil)
+		return nil, nil
+	}
+	plan, ok, err := s.planRollback(ctx, ws, false, prompts[len(prompts)-1])
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		log.Info(opRollback, "the stop key found nothing running and the latest prompt could not be planned", dlog.Context{"row": prompts[len(prompts)-1].GetValue()})
+		return nil, nil
+	}
+	if plan.followed {
+		log.Info(opRollback, "the stop key found nothing running; agent output follows the latest prompt, so the reader chooses", plan.context())
+		return &agentreplv1.InterruptNothingRunningRollback{Offer: &agentreplv1.InterruptNothingRunningRollback_Choose{
+			Choose: &agentreplv1.InterruptNothingRunningRollbackChoose{}}}, nil
+	}
+	plan.requireBare = true
+	token := s.mintRollbackToken(plan)
+	log.Info(opRollback, "the stop key found nothing running and nothing after the latest prompt; it is offered for rollback at once", plan.context())
+	return &agentreplv1.InterruptNothingRunningRollback{Offer: &agentreplv1.InterruptNothingRunningRollback_Immediate{
+		Immediate: &agentreplv1.InterruptNothingRunningRollbackImmediate{Token: &agentreplv1.RollbackToken{Value: token}}}}, nil
+}
+
 // rollbackRefusal maps the shim's refusal onto RollBackError's arm.
 func rollbackRefusal(s *server, shim *workspace.ShimRefusal) refusal {
 	r := refusal{Arm: shim.Arm, Reason: shim.Detail}
@@ -170,8 +232,8 @@ func rollbackRefusal(s *server, shim *workspace.ShimRefusal) refusal {
 }
 
 // planRollback works out what rolling back would do. ROW names the prompt
-// (a plan being checked again); nil resolves it: the selected prompt, else
-// the latest. ok is false when no prompt can be rolled back to.
+// (a named prompt, or a plan being checked again); nil resolves it: the
+// selected prompt, else the latest. ok is false when no prompt can be rolled back to.
 func (s *server) planRollback(ctx context.Context, ws ids.WorkspaceID, restore bool, row *frontendv1.FeedId) (rollbackPlan, bool, error) {
 	plan := rollbackPlan{ws: ws, restore: restore, row: row}
 	if row == nil {
@@ -209,6 +271,7 @@ func (s *server) planRollback(ctx context.Context, ws ids.WorkspaceID, restore b
 		return rollbackPlan{}, false, err
 	}
 	plan.running = len(open) > 0
+	plan.followed = s.deps.Feed.PromptFollowed(ws, plan.row)
 	if restore {
 		plan.detached = s.deps.Feed.LiveDetachedIn(ws, target.Turns)
 	}
@@ -222,9 +285,12 @@ func (p rollbackPlan) view(token string) *agentreplv1.RollbackPlan {
 		Target: &agentreplv1.RollbackPlanTarget{Excerpt: p.excerpt, PromptsDropped: uint32(len(p.turns))},
 		Files:  &agentreplv1.RollbackPlanFiles{},
 	}
-	if p.selected {
+	switch {
+	case p.named:
+		view.Target.Chosen = &agentreplv1.RollbackPlanTarget_Named{Named: &agentreplv1.RollbackPlanTargetNamed{}}
+	case p.selected:
 		view.Target.Chosen = &agentreplv1.RollbackPlanTarget_Selected{Selected: &agentreplv1.RollbackPlanTargetSelected{}}
-	} else {
+	default:
 		view.Target.Chosen = &agentreplv1.RollbackPlanTarget_Latest{Latest: &agentreplv1.RollbackPlanTargetLatest{}}
 	}
 	if p.restore {
@@ -247,8 +313,9 @@ func (p rollbackPlan) view(token string) *agentreplv1.RollbackPlan {
 
 func (p rollbackPlan) context() dlog.Context {
 	return dlog.Context{
-		"row": p.row.GetValue(), "selected": p.selected, "restore_files": p.restore,
+		"row": p.row.GetValue(), "selected": p.selected, "named": p.named, "restore_files": p.restore,
 		"turns": len(p.turns), "drop_held": len(p.dropHeld), "running": p.running, "detached": p.detached,
+		"followed": p.followed, "require_bare": p.requireBare,
 	}
 }
 

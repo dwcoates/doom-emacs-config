@@ -322,3 +322,31 @@ func TestARegressedFreshInputIsRecordedAndTheTallyTakesTheRestatement(t *testing
 	}
 	h.wantStamps("1k")
 }
+
+func TestIsMainAgent(t *testing.T) {
+	tests := []struct {
+		name      string
+		mainAgent string
+		agent     string
+		want      bool
+	}{
+		{name: "the named main agent", mainAgent: "m", agent: "m", want: true},
+		{name: "another agent", mainAgent: "m", agent: "s"},
+		{name: "an unnamed agent", mainAgent: "m", agent: "", want: true},
+		{name: "any agent while none is named", mainAgent: "", agent: "s", want: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			s := &wsState{mainAgent: tc.mainAgent}
+
+			// Act
+			got := s.isMainAgent(&conversationv1.AgentId{Value: tc.agent})
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("isMainAgent() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

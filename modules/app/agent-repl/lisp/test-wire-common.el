@@ -289,6 +289,49 @@ does not write to the durable sink."
                      "M" 'line (agent-repl-test-wire-common--parse "{\"line\":-1}"))))
                  '("M" line "expected a non-negative integer"))))
 
+(ert-deftest agent-repl-test-wire-common-optional-uint64-absent-is-nil ()
+  "An absent optional uint64 is nil — presence, never a sentinel."
+  (should (equal (agent-repl-wire--decode-optional-uint64 "M" 'tokens nil) nil)))
+
+(ert-deftest agent-repl-test-wire-common-optional-uint64-present-is-a-number ()
+  "protojson carries uint64 as a decimal string, which decodes to a number."
+  (let ((object (agent-repl-test-wire-common--parse "{\"tokens\":\"42000\"}")))
+    (should (equal (agent-repl-wire--decode-optional-uint64 "M" 'tokens object) 42000))))
+
+(ert-deftest agent-repl-test-wire-common-optional-uint64-refuses-a-negative ()
+  "A negative value cannot be a uint64 and is refused."
+  (should (equal (agent-repl-test-wire-common--breach
+                  (lambda ()
+                    (agent-repl-wire--decode-optional-uint64
+                     "M" 'tokens (agent-repl-test-wire-common--parse "{\"tokens\":\"-1\"}"))))
+                 '("M" tokens "expected a non-negative integer"))))
+
+(ert-deftest agent-repl-test-wire-common-optional-unsigned-widths-share-one-body ()
+  "Every optional unsigned width decodes through the one shared body."
+  (let ((calls nil))
+    (cl-letf (((symbol-function 'agent-repl-wire--decode-optional-unsigned)
+               (lambda (message field _object) (push (list message field) calls) 7)))
+      (agent-repl-wire--decode-optional-uint32 "M" 'a nil)
+      (agent-repl-wire--decode-optional-uint64 "M" 'b nil))
+    (should (equal (nreverse calls) '(("M" a) ("M" b))))))
+
+(ert-deftest agent-repl-test-wire-common-optional-int64-absent-is-nil ()
+  "An absent optional int64 is nil — presence, never a sentinel."
+  (should (equal (agent-repl-wire--decode-optional-int64 "M" 'sentAtMs nil) nil)))
+
+(ert-deftest agent-repl-test-wire-common-optional-int64-present-is-a-number ()
+  "protojson carries int64 as a decimal string, which decodes to a number."
+  (let ((object (agent-repl-test-wire-common--parse "{\"sentAtMs\":\"1700000000000\"}")))
+    (should (equal (agent-repl-wire--decode-optional-int64 "M" 'sentAtMs object) 1700000000000))))
+
+(ert-deftest agent-repl-test-wire-common-optional-int64-refuses-a-non-integer ()
+  "A value that is not an integer is a contract breach."
+  (should (equal (agent-repl-test-wire-common--breach
+                  (lambda ()
+                    (agent-repl-wire--decode-optional-int64
+                     "M" 'sentAtMs (agent-repl-test-wire-common--parse "{\"sentAtMs\":\"soon\"}"))))
+                 '("M" sentAtMs "expected an integer"))))
+
 (ert-deftest agent-repl-test-wire-common-bool-absent-is-false ()
   "An omitted bool is false: protojson never emits the default."
   (should (equal (agent-repl-wire--decode-bool "M" 'shimAttached nil) nil)))

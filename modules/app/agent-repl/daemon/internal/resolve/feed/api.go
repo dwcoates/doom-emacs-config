@@ -295,6 +295,14 @@ type Resolver interface {
 	// drops — its turn and every later reachable turn — and the prompt as
 	// said; false when the row is not a prompt a rollback can reach.
 	RollbackTarget(ws ids.WorkspaceID, row *frontendv1.FeedId) (RollbackTarget, bool)
+	// RollbackChoices answers the prompts a rollback can reach, oldest first,
+	// each with the context figure that stood just before it, for a reader to
+	// choose among (agentrepl.v1 ListRollbackPrompts).
+	RollbackChoices(ws ids.WorkspaceID) []RollbackChoice
+	// PromptFollowed reports whether agent output (a response bubble or a
+	// purple-titled card) is drawn after the prompt row in the root feed:
+	// whether rolling back to it drops anything a reader has seen.
+	PromptFollowed(ws ids.WorkspaceID, row *frontendv1.FeedId) bool
 	// RollBackTurns removes turns from the feed for good (rollback.go). The
 	// removal always happens; an error says only that recording it durably
 	// failed, already logged and raised.
