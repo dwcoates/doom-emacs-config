@@ -137,3 +137,30 @@ func TestFailureClassNamesEveryClass(t *testing.T) {
 		})
 	}
 }
+
+func TestFailureCuredBySignIn(t *testing.T) {
+	cases := []struct {
+		name    string
+		failure *conversationv1.AgentFailure
+		want    bool
+	}{
+		{name: "no failure", failure: nil, want: false},
+		{name: "authentication failed", failure: apiFailed(&conversationv1.ApiRequestFailed{Kind: &conversationv1.ApiRequestFailed_AuthenticationFailed{AuthenticationFailed: &conversationv1.ApiAuthenticationFailed{}}}), want: true},
+		{name: "organization not allowed", failure: apiFailed(&conversationv1.ApiRequestFailed{Kind: &conversationv1.ApiRequestFailed_OauthOrgNotAllowed{OauthOrgNotAllowed: &conversationv1.ApiOauthOrgNotAllowed{}}}), want: true},
+		{name: "permission denied blocks but is not an account cause", failure: apiFailed(&conversationv1.ApiRequestFailed{Kind: &conversationv1.ApiRequestFailed_PermissionDenied{PermissionDenied: &conversationv1.ApiPermissionDenied{}}}), want: false},
+		{name: "rate limited", failure: apiFailed(&conversationv1.ApiRequestFailed{Kind: &conversationv1.ApiRequestFailed_RateLimited{RateLimited: &conversationv1.ApiRateLimited{}}}), want: false},
+		{name: "api failure of an unstated kind", failure: apiFailed(&conversationv1.ApiRequestFailed{}), want: false},
+		{name: "a non-api failure", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ModelError{ModelError: &conversationv1.AgentModelError{}}}, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := FailureCuredBySignIn(tc.failure)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("FailureCuredBySignIn = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

@@ -1,11 +1,10 @@
 package feed
 
 import (
-	"sort"
-
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 )
 
@@ -25,34 +24,25 @@ func (r *resolver) MarkMergeWorkspaceRemoved(ws, mergeWS ids.WorkspaceID, remove
 	defer r.mu.Unlock()
 	s := r.state(ws)
 	marked := 0
-	keys := make([]string, 0, len(s.feeds))
-	for key := range s.feeds {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		f := s.feeds[key]
-		at := placement{feed: s.feedAddrs[key]}
-		for _, id := range append([]string(nil), f.order...) {
-			stored := f.rows[id]
-			if !switchesTo(stored, mergeWS) {
-				continue
-			}
-			durable := !f.nonDurable[id]
-			restated := r.restateRow(s, at, stored, durable, unclonable{
-				operation: "daemon.feed.merge_workspace_removed_unclonable",
-				message:   "a merge bubble row could not be cloned; its switch still offers the removed merge workspace",
-				context:   dlog.Context{"row": id, "merge_workspace": string(mergeWS)},
-			}, func(row *frontendv1.FeedRow) { markSwitchRemoved(row, removedAtMS) })
-			if !restated {
-				continue
-			}
-			if durable {
-				r.recordDurable(s, at.feed, id, "")
-			}
-			marked++
+	r.eachStoredRow(s, func(addr feedid.Feed, f *feedState, id string, stored *frontendv1.FeedRow) {
+		if !switchesTo(stored, mergeWS) {
+			return
 		}
-	}
+		at := placement{feed: addr}
+		durable := !f.nonDurable[id]
+		restated := r.restateRow(s, at, stored, durable, unclonable{
+			operation: "daemon.feed.merge_workspace_removed_unclonable",
+			message:   "a merge bubble row could not be cloned; its switch still offers the removed merge workspace",
+			context:   dlog.Context{"row": id, "merge_workspace": string(mergeWS)},
+		}, func(row *frontendv1.FeedRow) { markSwitchRemoved(row, removedAtMS) })
+		if !restated {
+			return
+		}
+		if durable {
+			r.recordDurable(s, at.feed, id, "")
+		}
+		marked++
+	})
 	r.logger(ws).Info("daemon.feed.merge_workspace_removed",
 		"a removed merge workspace's switches were restated as removed", dlog.Context{
 			"merge_workspace": string(mergeWS), "rows": marked, "removed_at_ms": removedAtMS})

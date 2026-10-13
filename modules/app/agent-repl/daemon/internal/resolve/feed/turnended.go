@@ -114,6 +114,11 @@ func (r *resolver) drawTerminal(s *wsState, agent *conversationv1.AgentId, turn 
 		r.upsert(s, at, row, true)
 		s.awaitRestart(at, row)
 	}
+	// AN ENDING THAT OFFERS THE SIGN-IN ACTION puts it inside the turn's
+	// broken bubble too, drawn or suppressed alike (signin.go).
+	if offersSignIn(row) {
+		r.noteSignInEnding(s, *turn)
+	}
 
 	// A LIVE ENDING IS FILED FOR THE DESKTOP BANNER — unless a confirmed /clear
 	// suppressed it, whose divider is the whole of its outcome.

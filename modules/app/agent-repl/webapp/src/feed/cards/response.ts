@@ -74,6 +74,7 @@ import type {
   FeedResponseSuccess,
   FeedResponseUsageStamp,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
+import { drawSignInAction } from "../../login/request.js";
 import { log } from "../../log.js";
 import {
   BUBBLE_MORE_ELLIPSIS,
@@ -256,7 +257,7 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
       strip,
       ...(corner === undefined ? {} : { corner }),
       content: [prose],
-      footer: result.case === "error" ? [cutShortMarker()] : [],
+      footer: result.case === "error" ? cutShortFooter(result.value) : [],
       ...responseCap(u),
     },
     rc.previous,
@@ -650,6 +651,25 @@ function renderedText(slot: HTMLElement): string {
 }
 
 /** The broken bubble's marker. The WHY is the turn's terminal row. */
+/**
+ * The broken bubble's footer: the "cut short" marker, then — when the daemon
+ * set it (`FeedResponseError.sign_in`: the turn ended on an account cause a
+ * sign-in cures) — the sign-in action, inside the red-bordered bubble itself.
+ */
+function cutShortFooter(u: FeedResponseError): HTMLElement[] {
+  const footer = [cutShortMarker()];
+  if (u.signIn !== undefined) {
+    const actions = document.createElement("div");
+    actions.className = RESPONSE_CUT_SHORT_ACTIONS_CLASS;
+    actions.append(drawSignInAction("response-sign-in", "feed.response-sign-in"));
+    footer.push(actions);
+  }
+  return footer;
+}
+
+/** The class of the broken bubble's action row. */
+export const RESPONSE_CUT_SHORT_ACTIONS_CLASS = "response-cut-short-actions";
+
 function cutShortMarker(): HTMLElement {
   const marker = document.createElement("span");
   marker.className = "response-cut-short-marker";

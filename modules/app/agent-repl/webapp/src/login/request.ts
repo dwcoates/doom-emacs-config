@@ -8,6 +8,7 @@
  * so it raises this page-level request, and `main.ts` answers it with the
  * overlay's own `open`. One overlay, one request, whichever control asked.
  */
+import { createControl } from "../control.js";
 import { log } from "../log.js";
 
 /** The page-level event a control raises to ask for the login flow. */
@@ -47,4 +48,30 @@ export function answerLoginRequests(open: (control: HTMLElement) => void): () =>
   };
   document.addEventListener(LOGIN_REQUESTED_EVENT, onRequest);
   return () => document.removeEventListener(LOGIN_REQUESTED_EVENT, onRequest);
+}
+
+/** The attribute and value every sign-in action carries, wherever it is drawn. */
+export const SIGN_IN_ACTION_ATTRIBUTE = "data-action";
+export const SIGN_IN_ACTION = "sign-in";
+
+/**
+ * A "sign in" action: the one control every feed surface offering the sign-in
+ * draws (an outcome marker's expansion, a broken response bubble), so they
+ * cannot drift apart. CLASSNAME is the surface's own class for it; OPERATION
+ * is the record its click is logged under. Its click asks the page's one login
+ * overlay to open (`requestLogin`) and goes no further: the bubble or row it
+ * sits inside never takes the click as its own (a bubble's click selects it).
+ */
+export function drawSignInAction(className: string, operation: string): HTMLElement {
+  const button = createControl();
+  button.className = className;
+  button.setAttribute(SIGN_IN_ACTION_ATTRIBUTE, SIGN_IN_ACTION);
+  button.textContent = "sign in";
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    log.info("the reader asked to sign in from the feed", { operation });
+    requestLogin(button);
+  });
+  return button;
 }
