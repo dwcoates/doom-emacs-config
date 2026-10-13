@@ -1507,6 +1507,15 @@ describe("the one-shot mark", () => {
     expect(dotOf(drawn).getAttribute("data-glyph")).toBe("ask");
   });
 
+  it("spins the ordinary merge glyph for a merging armed one-shot", () => {
+    const drawn = drawRosterRow(
+      row({ id: "ws-1", status: { case: "merging", value: {} }, oneShot: "armed" }),
+      sidebarContext(),
+      "R",
+    );
+    expect(dotOf(drawn).outerHTML).toBe(drawStatusMark("merging", "R.status").outerHTML);
+  });
+
   it("keeps an open gate's emoji over a failed one-shot", () => {
     const drawn = drawRosterRow(
       row({ id: "ws-1", status: { case: "permission", value: {} }, oneShot: "failed" }),
