@@ -3304,3 +3304,130 @@ describe("the store's own page size", () => {
     expect([page.entries.length, page.boundary.case]).toEqual([FAKE_STORE_PAGE_SIZE, "more"]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Turn heads: every history page built from a store page carries the prompts
+// of the turns it touches that sit below it, converted as its lines are.
+// ---------------------------------------------------------------------------
+
+/** One stored prompt line of `turn`, at a pointer, stamped with its turn and placed. */
+function storedPrompt(pointerValue: string, turn: string): storev1.StoreLineAt {
+  const id = create(conversationv1.TurnIdSchema, { value: turn });
+  return create(storev1.StoreLineAtSchema, {
+    at: create(storev1.StoreItemPointerSchema, { value: pointerValue }),
+    line: create(storev1.StorePageLineSchema, {
+      book: { case: "pageAgentId", value: BOOK },
+      agentItem: create(storev1.StoreAgentItemSchema, {
+        item: { case: "agentPrompt", value: create(conversationv1.AgentPromptSchema, { id, agent: BOOK }) },
+      }),
+    }),
+    turn: id,
+    place: { case: "recordedPlace", value: create(conversationv1.ConversationPlaceSchema, { atMs: 100n, ordinal: 2 }) },
+  });
+}
+
+/** A ReadAgentPage answer at its floor, holding `lines` and `turnHeads`. */
+function readSuccess(
+  lines: storev1.StoreLineAt[],
+  turnHeads: storev1.StoreLineAt[],
+): storev1.ReadAgentPageResponse {
+  return create(storev1.ReadAgentPageResponseSchema, {
+    result: {
+      case: "success",
+      value: create(storev1.ReadAgentPageSuccessSchema, {
+        lines,
+        turnHeads,
+        boundary: { case: "floor", value: create(storev1.ReadAgentPageFloorSchema, {}) },
+      }),
+    },
+  });
+}
+
+/** A page at its floor, holding `lines` and the turn heads below it. */
+function floorPageWithHeads(lines: storev1.StoreLineAt[], turnHeads: storev1.StoreLineAt[]): storev1.AgentSessionPage {
+  return create(storev1.AgentSessionPageSchema, {
+    lines,
+    turnHeads,
+    boundary: { case: "floor", value: create(storev1.ReadAgentPageFloorSchema, {}) },
+  });
+}
+
+describe("turn heads", () => {
+  it("converts a head exactly as a line is converted: pointer, prompt entry, turn and place", async () => {
+    // Arrange.
+    const head = storedPrompt("1", "turn-a");
+    const reader = readerOver({
+      openAgentSession: async () => opened(floorPageWithHeads([storedLine("3", "unit-0")], [head]), undefined),
+    });
+
+    // Act.
+    const page = await reader.readFirstPage(BOOK, REPAINT);
+
+    // Assert.
+    const served = page.turnHeads[0];
+    expect([
+      page.turnHeads.length,
+      served?.at?.value,
+      served?.entry?.entry.case,
+      served?.turn?.value,
+      served?.place.case,
+      served?.place.value?.atMs,
+    ]).toEqual([1, "1", "userPrompt", "turn-a", "recordedPlace", 100n]);
+  });
+
+  it("carries the heads on a watched open's opening page", async () => {
+    // Arrange.
+    const reader = readerOver({
+      openAgentSession: async () =>
+        opened(floorPageWithHeads([storedLine("3", "unit-0")], [storedPrompt("1", "turn-a")]), WATCH),
+      watchAgentSession: () => standingWatch([]),
+    });
+
+    // Act.
+    const session = await reader.openAgentPage(BOOK, REPAINT);
+    session.close();
+
+    // Assert.
+    expect(session.page.turnHeads.map((head) => head.at?.value)).toEqual(["1"]);
+  });
+
+  it("carries the heads of an older page, in the order the store served them", async () => {
+    // Arrange.
+    const reader = readerOver({
+      readAgentPage: async () =>
+        readSuccess([storedLine("5", "unit-0")], [storedPrompt("3", "turn-b"), storedPrompt("1", "turn-a")]),
+    });
+
+    // Act.
+    const page = await reader.readAgentPage(BOOK, create(conversationv1.HistoryPointerSchema, { value: "9" }));
+
+    // Assert.
+    expect(page.turnHeads.map((head) => head.turn?.value)).toEqual(["turn-b", "turn-a"]);
+  });
+
+  it("carries the heads of a through page", async () => {
+    // Arrange.
+    const reader = readerOver({
+      readAgentPage: async () => readSuccess([storedLine("5", "unit-0")], [storedPrompt("1", "turn-a")]),
+    });
+
+    // Act.
+    const page = await reader.readPageThrough(BOOK, create(conversationv1.ConversationThroughSchema, { atMs: 2_500n }));
+
+    // Assert.
+    expect(page.turnHeads.map((head) => head.at?.value)).toEqual(["1"]);
+  });
+
+  it("refuses a page whose head does not convert, exactly as it refuses such a line", async () => {
+    // Arrange: a head with a pointer but no content.
+    const head = create(storev1.StoreLineAtSchema, { at: create(storev1.StoreItemPointerSchema, { value: "1" }) });
+    const reader = readerOver({
+      openAgentSession: async () => opened(floorPageWithHeads([storedLine("3", "unit-0")], [head]), WATCH),
+    });
+
+    // Act, Assert.
+    await expect(reader.openAgentPage(BOOK, REPAINT)).rejects.toMatchObject({
+      kind: "store_unavailable",
+    });
+  });
+});

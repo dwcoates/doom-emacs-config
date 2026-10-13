@@ -1905,3 +1905,45 @@ describe("GetDetachedWork", () => {
     expect(fake.reads().map((read) => read.rpc)).toEqual(["GetDetachedWork"]);
   });
 });
+
+describe("turn heads", () => {
+  /** `entry` stamped with `turn`, as the shim stamps every row of a turn. */
+  const stamped = (entry: storev1.StoreEntry, turn: string): storev1.StoreEntry => {
+    entry.turn = create(conversationv1.TurnIdSchema, { value: turn });
+    return entry;
+  };
+
+  it("heads the opening page with the prompt of its turn that sits below it", async () => {
+    // Arrange: a one-line page holds only the turn's step.
+    const { client } = await store({ pageSize: 1 });
+    await write(client, stamped(pageLineEntry("a", "prompt:t1", "t1"), "t1"));
+    await write(client, stamped(spawnEntry("a", "spawn-1", "sub-1"), "t1"));
+
+    // Act.
+    const response = await client.openAgentSession(
+      create(storev1.OpenAgentSessionRequestSchema, { agent: agentId("a"), pageOnly: true }),
+    );
+
+    // Assert.
+    const page = response.result.case === "success" ? response.result.value.page : undefined;
+    expect(page?.turnHeads.map((head) => head.at?.value)).toEqual(["1"]);
+  });
+
+  it("serves no head on a page that holds its turn's prompt", async () => {
+    // Arrange.
+    const { client } = await store({ pageSize: 1 });
+    await write(client, stamped(pageLineEntry("a", "prompt:t1", "t1"), "t1"));
+    await write(client, stamped(spawnEntry("a", "spawn-1", "sub-1"), "t1"));
+
+    // Act.
+    const response = await client.readAgentPage(
+      create(storev1.ReadAgentPageRequestSchema, {
+        book: agentId("a"),
+        position: { case: "after", value: create(storev1.StoreItemPointerSchema, { value: "2" }) },
+      }),
+    );
+
+    // Assert.
+    expect(response.result.case === "success" ? response.result.value.turnHeads : undefined).toEqual([]);
+  });
+});

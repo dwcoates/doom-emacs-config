@@ -419,6 +419,30 @@ export async function startFakeStore(socketPath: string, options: FakeStoreOptio
   const placedRowsOf = (agentId: string): StoredRow[] => [...rowsOf(agentId)].sort(placeOrder);
 
   /**
+   * A page's TURN HEADS, as the real store serves them (store.v1 `turn_heads`):
+   * for each turn a row of `window` (ascending place) is stamped with, its
+   * prompt row when that is placed below the page's lowest row, newest first,
+   * each turn once. A turn whose prompt is on the page, or with none, has none.
+   */
+  const turnHeadsOf = (agentId: string, window: readonly StoredRow[]): storev1.StoreLineAt[] => {
+    const lowest = window[0];
+    if (lowest === undefined) return [];
+    const isPrompt = (row: StoredRow): boolean => row.line.agentItem?.item.case === "agentPrompt";
+    const onPage = new Set(window.filter(isPrompt).map((row) => row.turn?.value ?? ""));
+    const wanted = new Set(
+      window.map((row) => row.turn?.value ?? "").filter((turn) => turn !== "" && !onPage.has(turn)),
+    );
+    const heads: StoredRow[] = [];
+    for (const row of placedRowsOf(agentId).reverse()) {
+      const turn = row.turn?.value ?? "";
+      if (!isPrompt(row) || !wanted.has(turn) || placeOrder(row, lowest) >= 0) continue;
+      wanted.delete(turn);
+      heads.push(row);
+    }
+    return heads.map(lineAt);
+  };
+
+  /**
    * Deliver a line to every tail watching its book.
    *
    * EVERY WRITE IS SERVED, INCLUDING AN UPSERT OF A ROW OLDER THAN THE WATCH.
@@ -739,6 +763,7 @@ export async function startFakeStore(socketPath: string, options: FakeStoreOptio
             value: create(storev1.OpenAgentSessionSuccessSchema, {
               page: create(storev1.AgentSessionPageSchema, {
                 lines,
+                turnHeads: turnHeadsOf(bookId, window),
                 boundary:
                   olderExist && oldestInPage !== undefined
                     ? {
@@ -941,6 +966,7 @@ export async function startFakeStore(socketPath: string, options: FakeStoreOptio
             case: "success",
             value: create(storev1.ReadAgentPageSuccessSchema, {
               lines,
+              turnHeads: turnHeadsOf(bookId, window),
               boundary:
                 olderExist && oldestInPage !== undefined
                   ? {
