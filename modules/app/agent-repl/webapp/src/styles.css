@@ -1080,13 +1080,11 @@ body::after {
    that run is over. */
 #ws-sidebar .st-merging { animation: ws-spin 1.4s linear infinite; }
 
-/* THE BANDS UNDER EVERY GROUPING -- Viewed, Hidden, then Recently Merged --
-   hold no grouping's sections, so each is set off from the list above by ONE
-   shared light rule. Every band's header is drawn purple: Recently Merged's
-   matches its rows' dots, and Hidden's and Viewed's match Recently Merged's
-   (owner requests, 2026-10-11 and 2026-10-12). The rows under each keep their
-   own colours. */
-#ws-sidebar .repo.viewed-section,
+/* THE BANDS UNDER EVERY GROUPING -- Hidden Workspaces, then Recently Merged
+   -- hold no grouping's sections, so each is set off from the list above by
+   ONE shared light rule. Both bands' headers are drawn purple: Recently
+   Merged's matches its rows' dots, and Hidden's matches Recently Merged's
+   (owner request, 2026-10-11). The rows under either keep their own colours. */
 #ws-sidebar .repo.hidden-section,
 #ws-sidebar .repo.merged-section {
   margin-top: 0.5rem;
@@ -1132,7 +1130,6 @@ body::after {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-#ws-sidebar .repo.viewed-section > .repo-head,
 #ws-sidebar .repo.hidden-section > .repo-head,
 #ws-sidebar .repo.merged-section > .repo-head { color: var(--info-agents); }
 /* The LINE BOX is pinned, not the row height. Setting `height` drew every

@@ -21,7 +21,6 @@ import { MalformedView } from "../../src/rpc/malformed.js";
 import { repoFoldKey } from "../../src/sidebar/context.js";
 import {
   drawHeadedSection,
-  leftOutWhenEmpty,
   drawRosterRepoDivergence,
   drawRosterSectionFold,
   drawSectionLabel,
@@ -34,7 +33,6 @@ import {
   appContext,
   fakeTicker,
   hiddenSection,
-  viewedSection,
   maturitySection,
   mergedBand,
   mergedGroup,
@@ -58,7 +56,6 @@ const VIEW_UNKNOWN_TASK = create(UpdateSidebarViewResponseSchema, {
 const MERGED_ROW = row({ id: "ws-9", closed: true, status: { case: "merged", value: {} } });
 /** One hidden workspace, so the hidden section draws. */
 const HIDDEN_ROW = row({ id: "ws-8" });
-const VIEWED_ROW = row({ id: "ws-9", viewed: true, when: { case: "viewed", value: { atMs: BigInt(0) } } });
 
 async function click(control: Element): Promise<void> {
   (control as HTMLElement).dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -313,12 +310,6 @@ const FOLDING_SECTIONS = [
     kind: "hidden",
     roster: (collapsed: boolean) => roster({ hidden: hiddenSection([HIDDEN_ROW], 1, collapsed) }),
     selector: ".hidden-section",
-    id: "",
-  },
-  {
-    kind: "viewed",
-    roster: (collapsed: boolean) => roster({ viewed: viewedSection([VIEWED_ROW], 1, collapsed) }),
-    selector: ".viewed-section",
     id: "",
   },
 ] as const;
@@ -633,7 +624,6 @@ describe("drawHeadedSection", () => {
     ["repository", ".repo-section", roster({ repos: [repoSection({ id: "repo-1" })] })],
     ["maturity", ".maturity-section", roster({ maturity: [maturitySection({ stage: "backlog" })] })],
     ["hidden", ".hidden-section", roster({ hidden: hiddenSection([HIDDEN_ROW]) })],
-    ["viewed", ".viewed-section", roster({ viewed: viewedSection([VIEWED_ROW]) })],
     ["merged", ".merged-section", roster({ merged: mergedSection([MERGED_ROW]) })],
   ] as const)("draws the %s section in the one headed shape", (_kind, selector, made) => {
     const drawn = drawWorkspaceRoster(made, sidebarContext());
@@ -902,121 +892,6 @@ describe("hidden workspaces", () => {
     const section = hiddenSection();
     section.fold = { case: undefined };
     expect(() => drawWorkspaceRoster(roster({ hidden: section }), sidebarContext())).toThrow(MalformedView);
-  });
-});
-
-describe("leftOutWhenEmpty", () => {
-  it.each([
-    [0, true],
-    [1, false],
-    [7, false],
-  ] as const)("leaves a band whose daemon count is %d out: %s", (count, want) => {
-    const header = create(RosterSectionHeaderSchema, { label: { text: "Band" }, count: { workspaces: count } });
-    expect(leftOutWhenEmpty("data-band-empty").when(header, "p.header")).toBe(want);
-  });
-
-  it("marks the left-out box with the attribute it is given", () => {
-    expect(leftOutWhenEmpty("data-band-empty").attribute).toBe("data-band-empty");
-  });
-
-  it("refuses a header with no count as a malformed view", () => {
-    const header = create(RosterSectionHeaderSchema, { label: { text: "Band" } });
-    expect(() => leftOutWhenEmpty("data-band-empty").when(header, "p.header")).toThrow(MalformedView);
-  });
-
-  // EVERY BAND LEAVES ITSELF OUT BY THE ONE RULE: an empty band is hidden and
-  // marked with its own attribute, which a hand-rolled rule would not share.
-  it.each([
-    ["viewed", ".viewed-section", "data-viewed-empty"],
-    ["hidden", ".hidden-section", "data-hidden-empty"],
-    ["merged", ".merged-section", "data-merged-empty"],
-  ] as const)("leaves the empty %s band out through the shared rule", (_kind, selector, attribute) => {
-    const drawn = drawWorkspaceRoster(roster({ merged: mergedSection([], 0) }), sidebarContext());
-    const section = pane(drawn, "repository").querySelector(selector) as HTMLElement;
-    expect([section.hidden, section.getAttribute(attribute)]).toEqual([true, "true"]);
-  });
-});
-
-describe("viewed workspaces", () => {
-  it("draws the viewed row under every grouping", () => {
-    const drawn = drawWorkspaceRoster(roster({ viewed: viewedSection([VIEWED_ROW]) }), sidebarContext());
-    expect(
-      ["repository", "task", "maturity"].map(
-        (grouping) => pane(drawn, grouping).querySelector(".viewed-section [data-roster-row='ws-9']") !== null,
-      ),
-    ).toEqual([true, true, true]);
-  });
-
-  it("draws the section directly under the grouping, above the hidden and recently-merged bands", () => {
-    const drawn = drawWorkspaceRoster(
-      roster({
-        repos: [repoSection({ id: "repo-1" })],
-        viewed: viewedSection([VIEWED_ROW]),
-        hidden: hiddenSection([HIDDEN_ROW]),
-        merged: mergedSection([MERGED_ROW]),
-      }),
-      sidebarContext(),
-    );
-    const order = [...pane(drawn, "repository").querySelectorAll(".repo-section, .viewed-section, .hidden-section, .merged-section")].map(
-      (section) => [...section.classList].find((c) => c.endsWith("-section")),
-    );
-    expect(order).toEqual(["repo-section", "viewed-section", "hidden-section", "merged-section"]);
-  });
-
-  it("draws the daemon's heading and count", () => {
-    const drawn = drawWorkspaceRoster(roster({ viewed: viewedSection([VIEWED_ROW], 1) }), sidebarContext());
-    const section = pane(drawn, "repository").querySelector(".viewed-section") as HTMLElement;
-    expect([section.querySelector(".sb-label")?.textContent, section.querySelector(".sb-count")?.textContent]).toEqual([
-      "Viewed",
-      "(1)",
-    ]);
-  });
-
-  it("draws each row's time since it was last viewed", () => {
-    const drawn = drawWorkspaceRoster(roster({ viewed: viewedSection([VIEWED_ROW]) }), sidebarContext());
-    const when = pane(drawn, "repository").querySelector(".viewed-section [data-roster-row='ws-9'] .when");
-    expect(when?.getAttribute("data-when")).toBe("viewed");
-  });
-
-  it("keeps the rows in the order the daemon sent them", () => {
-    const rows = ["ws-c", "ws-a", "ws-b"].map((id) => row({ id, viewed: true }));
-    const drawn = drawWorkspaceRoster(roster({ viewed: viewedSection(rows) }), sidebarContext());
-    const section = pane(drawn, "repository").querySelector(".viewed-section") as HTMLElement;
-    expect([...section.querySelectorAll("[data-roster-row]")].map((r) => r.getAttribute("data-roster-row"))).toEqual([
-      "ws-c",
-      "ws-a",
-      "ws-b",
-    ]);
-  });
-
-  it("keeps the section out of the rail when nothing is viewed", () => {
-    const drawn = drawWorkspaceRoster(roster(), sidebarContext());
-    const section = pane(drawn, "repository").querySelector(".viewed-section") as HTMLElement;
-    expect([section.hidden, section.querySelector(".sb-label")]).toEqual([true, null]);
-  });
-
-  it("leaves the section out of the bands the rail caps", () => {
-    const drawn = drawWorkspaceRoster(roster({ viewed: viewedSection([VIEWED_ROW]) }), sidebarContext());
-    const section = pane(drawn, "repository").querySelector(".viewed-section") as HTMLElement;
-    expect([section.classList.contains("hidden-section"), section.classList.contains("merged-section")]).toEqual([false, false]);
-  });
-
-  it("refuses a roster with no viewed section as a malformed view", () => {
-    const bare = create(WorkspaceRosterSchema, {
-      repository: { sections: [] },
-      task: { sections: [] },
-      maturity: { sections: [] },
-      recentlyMerged: mergedSection(),
-      hidden: hiddenSection(),
-      shown: { case: "shownRepository", value: {} },
-    });
-    expect(() => drawWorkspaceRoster(bare, sidebarContext())).toThrow(MalformedView);
-  });
-
-  it("refuses an empty viewed section with no fold as a malformed view", () => {
-    const section = viewedSection();
-    section.fold = { case: undefined };
-    expect(() => drawWorkspaceRoster(roster({ viewed: section }), sidebarContext())).toThrow(MalformedView);
   });
 });
 
@@ -1447,7 +1322,6 @@ describe("a recently-merged section with no rows box", () => {
 describe("the bands' header color", () => {
   it.each([
     ["hidden", ".hidden-section", roster({ hidden: hiddenSection([HIDDEN_ROW]) })],
-    ["viewed", ".viewed-section", roster({ viewed: viewedSection([VIEWED_ROW]) })],
     ["merged", ".merged-section", roster({ merged: mergedSection([MERGED_ROW]) })],
   ] as const)("draws the %s band's header in the merged band's purple", (_kind, selector, made) => {
     // Arrange

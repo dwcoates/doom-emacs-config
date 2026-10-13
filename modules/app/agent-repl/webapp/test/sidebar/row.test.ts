@@ -287,18 +287,6 @@ describe("the when-column", () => {
     expect(drawn.querySelector(".when")?.textContent).toBe("1h");
   });
 
-  it("draws a viewed row's last view as a relative age", () => {
-    const drawn = drawRosterRow(
-      row({ id: "ws-1", when: { case: "viewed", value: { atMs: BigInt(NOW - 720_000) } } }),
-      sidebarContext(),
-      "R",
-    );
-    expect([drawn.querySelector(".when")?.getAttribute("data-when"), drawn.querySelector(".when")?.textContent]).toEqual([
-      "viewed",
-      "12m",
-    ]);
-  });
-
   it("draws a settled merge as a bare relative age", () => {
     const drawn = drawRosterRow(
       row({ id: "ws-1", when: { case: "merged", value: { atMs: BigInt(NOW - 3_600_000) } } }),
