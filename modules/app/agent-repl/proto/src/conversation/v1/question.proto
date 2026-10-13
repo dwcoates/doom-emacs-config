@@ -161,6 +161,13 @@ message AgentQuestionSuccess {
     // forever.
     AgentQuestionUnanswered unanswered = 3;
   }
+  // When the ask concluded, with the instant it was posed restated
+  // (AgentActivitySettledAt.started_at), so the settled frame alone states how
+  // long the user was asked -- the start frame is gone from any store that
+  // keeps the latest frame of the ask. UNSET when the producer observed no
+  // conclusion instant; a consumer then states no wait at all rather than one
+  // measured against its own clock.
+  optional AgentActivitySettledAt settled_at = 4;
 }
 
 // The user's answers to one ask, one per question.
