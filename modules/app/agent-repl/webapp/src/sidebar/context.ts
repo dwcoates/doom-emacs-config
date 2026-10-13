@@ -9,7 +9,8 @@
  * view state: it is transient to the page that opened it.
  */
 import type { DrawnStatusLog } from "../drawn-status.js";
-import type { AppContext } from "../rpc/context.js";
+import type { DaemonContext } from "../rpc/context.js";
+import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import type { AttentionRegistry } from "./attention.js";
 import type { Dropdowns } from "./dropdowns.js";
 import type { SidebarView } from "./view.js";
@@ -33,8 +34,15 @@ export interface TaskChoice {
 
 /** What a draw of the rail carries with it. */
 export interface SidebarContext {
-  /** The app-wide capabilities: client, workspace, ticker, failures. */
-  ctx: AppContext;
+  /** What talking to the daemon takes: client, stream, ticker, failures. */
+  ctx: DaemonContext;
+  /**
+   * The workspace a new workspace created "as a child" is a child of: the
+   * page's own workspace when the sidebar is drawn in a page on its own, and
+   * the roster's `current` (the workspace Emacs stands in) when it is drawn in
+   * the webhost. Null when there is none to name.
+   */
+  parentWorkspace(): WorkspaceRef | null;
   /** The daemon-held view state, with this page's asks still in flight. */
   view: SidebarView;
   /**

@@ -31,7 +31,14 @@ import { log } from "../log.js";
 import type { AgentReplClient } from "./client.js";
 import { startPageStreams, type PageStreams, type PageStreamContext } from "./page-streams.js";
 
-export interface AppContext {
+/**
+ * What talking to the daemon takes, with no workspace in it: the client, the
+ * one standing stream, the clock, where failures go, and the quiet switch.
+ * The webhost holds one of these for the sidebar it draws, which shows every
+ * workspace and owns none; a workspace page's AppContext is one of these plus
+ * its workspace.
+ */
+export interface DaemonContext {
   /** The daemon client as of NOW; re-read it per call, never cache it. */
   readonly client: AgentReplClient;
   /**
@@ -44,22 +51,10 @@ export interface AppContext {
    * more; see page-streams.ts for what that cost when it did.
    */
   readonly streams: PageStreams;
-  /** The workspace every request on this page is addressed to. */
-  readonly workspace: WorkspaceRef;
   /** The shared one-second clock; components subscribe, never setInterval. */
   readonly ticker: Ticker;
   /** Where a component reports its OWN machinery failing. */
   readonly failures: FailureSink;
-  /**
-   * Whether a reader can see this page now (page-seen.ts). Work only a reader
-   * would notice, a type-out say, is skipped while it says no.
-   */
-  readonly seen: PageSeen;
-  /**
-   * Whether the browser-local dev composer is on (`&composer=1`). Production
-   * runs composer-less: the root composer is host-native (Emacs).
-   */
-  readonly composerEnabled: boolean;
   /**
    * Stop talking to this daemon. Idempotent, and one-way: nothing lifts it,
    * because nothing on this page can give the workspace a daemon back.
@@ -103,14 +98,27 @@ export interface AppContext {
   noteStreamCost(stream: string, ms: number): void;
 }
 
-export interface AppContextInit {
+/** A workspace page's context: the daemon context, plus the workspace it shows. */
+export interface AppContext extends DaemonContext {
+  /** The workspace every request on this page is addressed to. */
+  readonly workspace: WorkspaceRef;
+  /**
+   * Whether a reader can see this page now (page-seen.ts). Work only a reader
+   * would notice, a type-out say, is skipped while it says no.
+   */
+  readonly seen: PageSeen;
+  /**
+   * Whether the browser-local dev composer is on (`&composer=1`). Production
+   * runs composer-less: the root composer is host-native (Emacs).
+   */
+  readonly composerEnabled: boolean;
+}
+
+/** What a daemon context is built from. */
+export interface DaemonContextInit {
   client: AgentReplClient;
-  workspace: WorkspaceRef;
   ticker: Ticker;
   failures: FailureSink;
-  /** The page's seen state; main.ts builds it over the page's own document. */
-  seen: PageSeen;
-  composerEnabled: boolean;
   /**
    * This page's own id, which its one standing stream is registered under.
    *
@@ -133,6 +141,14 @@ export interface AppContextInit {
   costs?: StreamCostMeter;
 }
 
+/** What a workspace page's context is built from. */
+export interface AppContextInit extends DaemonContextInit {
+  workspace: WorkspaceRef;
+  /** The page's seen state; main.ts builds it over the page's own document. */
+  seen: PageSeen;
+  composerEnabled: boolean;
+}
+
 /**
  * Build the context main.ts hands to every mount, and OPEN THE PAGE'S ONE
  * STANDING STREAM as part of building it.
@@ -143,17 +159,27 @@ export interface AppContextInit {
  * whose stream has not been asked for.
  */
 export function createAppContext(init: AppContextInit): AppContext {
+  return {
+    ...createDaemonContext(init),
+    workspace: init.workspace,
+    seen: init.seen,
+    composerEnabled: init.composerEnabled,
+  };
+}
+
+/**
+ * Build a daemon context, and OPEN ITS ONE STANDING STREAM as part of building
+ * it, for the same reason `createAppContext` gives.
+ */
+export function createDaemonContext(init: DaemonContextInit): DaemonContext {
   let quiesced = false;
   const quietListeners = new Set<() => void>();
   const pushListeners = new Set<() => void>();
   const restoredListeners = new Set<() => void>();
   const base = {
     client: init.client,
-    workspace: init.workspace,
     ticker: init.ticker,
     failures: init.failures,
-    seen: init.seen,
-    composerEnabled: init.composerEnabled,
     quiesce(): void {
       if (quiesced) return;
       quiesced = true;

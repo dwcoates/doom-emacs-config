@@ -14,13 +14,20 @@
  * that reloads is handed the state it lost the moment it says hello.
  *
  * EVERY CALL ANSWERS. Emacs reads each answer back and records it, which is
- * the host's only way into the logs (it holds no daemon connection of its
- * own): an answer names the call, the workspace, the outcome, and any notes
- * the host made since the last answer (a message it could not read, say).
- * Answers are JSON strings because that is what a script evaluation can hand
- * Emacs.
+ * how what this module does reaches the logs: an answer names the call, the
+ * workspace, the outcome, and any notes the host made since the last answer
+ * (a message it could not read, say). Answers are JSON strings because that
+ * is what a script evaluation can hand Emacs. (The webhost's sidebar has a
+ * daemon connection and a logger of its own, host/sidebar.ts; this module
+ * applies Emacs's calls and uses neither.)
+ *
+ * THE SIDEBAR IS DRAWN OVER THE PAGES, once (host/sidebar.ts). This module
+ * tells every page whether it is docked and which of the webhost's failures
+ * stand, and ends the sidebar above the gate band of the page on screen.
  */
+import { selectedText } from "../selection.js";
 import {
+  type WebhostFailure,
   HOST_CHANNEL,
   onHostChannel,
   parsePageToHost,
@@ -37,7 +44,15 @@ export interface HostEnv {
   readonly now?: () => number;
   /** Arm a one-shot timer; tests substitute their own. Answers the disarm. */
   readonly setTimer?: (fn: () => void, ms: number) => () => void;
+  /** Where the workspace iframes go; the document's body when omitted. */
+  readonly frames?: HTMLElement;
 }
+
+/**
+ * The root custom property the webhost's sidebar ends above: the gate band of
+ * the page on screen, in pixels (host/protocol.ts `gateBand`).
+ */
+export const SIDEBAR_BOTTOM_PROPERTY = "--webhost-sidebar-bottom";
 
 /**
  * A PAGE IS WARM while it is shown, or is among the WARM_RECENT pages shown
@@ -74,6 +89,8 @@ interface Frame {
   lastShownMs: number | null;
   /** The warmth the page was last told. */
   warm: boolean;
+  /** How tall the page's docked gate band is, as it last reported. */
+  gateBand: number;
 }
 
 /** The host's API, as Emacs calls it through `window.agentReplHost`. */
@@ -100,6 +117,10 @@ export interface Host {
   editing(): boolean;
   /** Every workspace id the host holds a page for. */
   ids(): string;
+  /** Tell every page whether the webhost's sidebar is docked over it. */
+  setSidebarDocked(docked: boolean): void;
+  /** Tell every page the webhost's own failures standing now. */
+  setFailures(failures: readonly WebhostFailure[]): void;
   /** Stop listening and drop every page. */
   dispose(): void;
 }
@@ -125,7 +146,10 @@ export function createHost(env: HostEnv): Host {
       return () => win.clearTimeout(timer);
     });
   const frames = new Map<string, Frame>();
+  const frameParent = env.frames ?? doc.body;
   let shownId: string | null = null;
+  let sidebarDocked = false;
+  let failures: readonly WebhostFailure[] = [];
   let disarmCooling: (() => void) | null = null;
   let notes: string[] = [];
 
@@ -192,8 +216,25 @@ export function createHost(env: HostEnv): Host {
     if (soonest !== null) disarmCooling = setTimer(rewarm, Math.max(0, soonest - at));
   };
 
+  /** Whether the sidebar is docked over the pages, as every page is told. */
+  const dockMessage = (): HostToPage => ({ channel: HOST_CHANNEL, kind: "sidebarDock", docked: sidebarDocked });
+  /** The webhost's failures, as every page is told. */
+  const failuresMessage = (): HostToPage => ({ channel: HOST_CHANNEL, kind: "webhostFailures", failures });
+  /** Tell every page MESSAGE. */
+  const broadcast = (message: HostToPage): void => {
+    for (const frame of frames.values()) post(frame, message);
+  };
+
+  /** End the sidebar above the gate band of the page on screen. */
+  const placeSidebar = (): void => {
+    const shown = shownId === null ? undefined : frames.get(shownId);
+    doc.documentElement.style.setProperty(SIDEBAR_BOTTOM_PROPERTY, `${shown?.gateBand ?? 0}px`);
+  };
+
   const sendState = (frame: Frame): void => {
     post(frame, presenceOf(frame));
+    post(frame, dockMessage());
+    post(frame, failuresMessage());
     if (frame.inputBackground !== null) {
       post(frame, { channel: HOST_CHANNEL, kind: "inputBackground", background: frame.inputBackground });
     }
@@ -235,6 +276,10 @@ export function createHost(env: HostEnv): Host {
         return;
       case "editing":
         frame.editing = message.editing;
+        return;
+      case "gateBand":
+        frame.gateBand = message.pixels;
+        if (frame.id === shownId) placeSidebar();
         return;
     }
   };
@@ -280,10 +325,11 @@ export function createHost(env: HostEnv): Host {
       editing: false,
       lastShownMs: null,
       warm: id === shownId,
+      gateBand: 0,
     };
     applyShown(frame, id === shownId);
     frames.set(id, frame);
-    doc.body.append(iframe);
+    frameParent.append(iframe);
     return frame;
   };
 
@@ -321,6 +367,7 @@ export function createHost(env: HostEnv): Host {
       }
       applyShown(next, true);
       post(next, presenceOf(next));
+      placeSidebar();
       rewarm();
       // The keyboard follows the page on screen: Emacs focused this web view,
       // so the focus within it moves to the page now shown.
@@ -331,7 +378,10 @@ export function createHost(env: HostEnv): Host {
       return withFrame("remove", id, (frame) => {
         frames.delete(id);
         frame.iframe.remove();
-        if (shownId === id) shownId = null;
+        if (shownId === id) {
+          shownId = null;
+          placeSidebar();
+        }
         rewarm();
         return "removed";
       });
@@ -368,6 +418,11 @@ export function createHost(env: HostEnv): Host {
       return answer("drawn", id, frame === undefined ? "absent" : "present", { drawn: frame?.drawn ?? null });
     },
     selection() {
+      // TEXT SELECTED IN THE WEBHOST ITSELF (its sidebar) is the selection:
+      // the pages cannot see it, and while it stands the user is not selecting
+      // in a page.
+      const own = selectedText(win);
+      if (own !== "") return answer("selection", null, "webhost", { text: own, focused: doc.hasFocus() });
       const frame = shownId === null ? undefined : frames.get(shownId);
       if (frame === undefined) return answer("selection", null, "none-shown", { text: null, focused: false });
       return answer("selection", frame.id, "present", {
@@ -378,6 +433,14 @@ export function createHost(env: HostEnv): Host {
     editing() {
       const frame = shownId === null ? undefined : frames.get(shownId);
       return frame?.editing ?? false;
+    },
+    setSidebarDocked(docked) {
+      sidebarDocked = docked;
+      broadcast(dockMessage());
+    },
+    setFailures(next) {
+      failures = next;
+      broadcast(failuresMessage());
     },
     ids() {
       return answer("ids", null, "listed", { ids: [...frames.keys()], shown: shownId });

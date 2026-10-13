@@ -19,6 +19,14 @@ afterEach(() => {
 });
 
 describe("presence", () => {
+  it.each([true, false])("says whether it sits in the webhost (%s)", (embedded) => {
+    // Arrange / Act
+    presence = createPresence(document, embedded);
+
+    // Assert
+    expect(presence.embedded).toBe(embedded);
+  });
+
   it("is not seen in a host until the host shows it", () => {
     // Arrange / Act
     presence = createPresence(document, true);

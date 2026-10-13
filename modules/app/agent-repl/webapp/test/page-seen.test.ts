@@ -29,6 +29,27 @@ describe("whether a reader can see the page", () => {
     expect(tracker.isSeen()).toBe(seen);
   });
 
+  it("answers true for a page the webhost shows while Emacs is not frontmost", () => {
+    // Arrange: the web view reports hidden, as it does whenever Emacs is not
+    // the frontmost application.
+    const presence = createPresence(page("hidden").doc, true);
+    const tracker = createPageSeen(OWN, presence);
+
+    // Act
+    presence.setShown(true);
+
+    // Assert
+    expect(tracker.isSeen()).toBe(true);
+  });
+
+  it("answers false for a page the webhost holds behind another", () => {
+    // Arrange / Act
+    const tracker = createPageSeen(OWN, createPresence(page("visible").doc, true));
+
+    // Assert
+    expect(tracker.isSeen()).toBe(false);
+  });
+
   it("tells subscribers when the page turns unseen by hiding", () => {
     // Arrange
     const p = page("visible");

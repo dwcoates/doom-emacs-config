@@ -2132,3 +2132,76 @@ func TestAnOpenSinkKeepsWritingAfterItsDirectoryIsGone(t *testing.T) {
 		t.Fatal("the open sink's target did not receive the record written after its directory was removed")
 	}
 }
+
+func TestCentralClientLogLandsInTheRunLogNamingTheWebhost(t *testing.T) {
+	// Arrange.
+	s, runLogPath := testSurfaces(t)
+
+	// Act.
+	err := s.CentralClientLog(ClientRecord{
+		ClientKind: RuntimeWebapp,
+		Level:      LevelInfo,
+		Operation:  "sidebar.test.op",
+		Message:    "forwarded from the webhost",
+	})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("CentralClientLog: %v", err)
+	}
+	var got map[string]any
+	for _, rec := range readRecords(t, runLogPath) {
+		if rec["operation"] == "sidebar.test.op" {
+			got = rec
+		}
+	}
+	if got == nil {
+		t.Fatalf("the run log does not carry the webhost record")
+	}
+	ctx, _ := got["context"].(map[string]any)
+	if got["runtime"] != RuntimeWebapp || ctx[KeyClientSource] != ClientSourceWebhost {
+		t.Fatalf("record = %v, want runtime %q and %s %q", got, RuntimeWebapp, KeyClientSource, ClientSourceWebhost)
+	}
+	if _, named := got[KeyWorkspaceDir]; named {
+		t.Fatalf("record = %v, want no workspace named on a webhost record", got)
+	}
+}
+
+func TestCentralClientLogFiltersBelowThresholdBeforePersistence(t *testing.T) {
+	// Arrange.
+	runLogPath := filepath.Join(t.TempDir(), "logs", "daemon.run.log")
+	s, err := openSurfaces(runLogPath, LevelWarn, io.Discard)
+	if err != nil {
+		t.Fatalf("openSurfaces: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	// Act.
+	err = s.CentralClientLog(ClientRecord{
+		ClientKind: RuntimeWebapp,
+		Level:      LevelInfo,
+		Operation:  "sidebar.test.filtered",
+		Message:    "filtered",
+	})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("CentralClientLog: %v", err)
+	}
+	if hasOperation(readRecords(t, runLogPath), "sidebar.test.filtered") {
+		t.Fatalf("the INFO webhost record was persisted at WARN")
+	}
+}
+
+func TestCentralClientLogRefusesAKindTheDaemonDoesNotOwn(t *testing.T) {
+	// Arrange.
+	s, _ := testSurfaces(t)
+
+	// Act.
+	err := s.CentralClientLog(ClientRecord{ClientKind: "emacs", Level: LevelInfo, Operation: "x.y", Message: "m"})
+
+	// Assert.
+	if err == nil {
+		t.Fatalf("CentralClientLog accepted the kind emacs")
+	}
+}

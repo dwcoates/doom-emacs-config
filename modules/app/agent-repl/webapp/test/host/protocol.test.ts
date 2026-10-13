@@ -11,6 +11,16 @@ describe("parseHostToPage", () => {
     ["gateDock with a background", { channel: HOST_CHANNEL, kind: "gateDock", pixels: 120, background: "#000" }],
     ["gateDock without a background", { channel: HOST_CHANNEL, kind: "gateDock", pixels: 120, background: null }],
     ["dismissDigest", { channel: HOST_CHANNEL, kind: "dismissDigest" }],
+    ["sidebarDock", { channel: HOST_CHANNEL, kind: "sidebarDock", docked: true }],
+    ["webhostFailures with none", { channel: HOST_CHANNEL, kind: "webhostFailures", failures: [] }],
+    [
+      "webhostFailures with a row",
+      {
+        channel: HOST_CHANNEL,
+        kind: "webhostFailures",
+        failures: [{ arm: "daemonUnreachable", headline: "lost the connection", evidence: [["close", "1006"]] }],
+      },
+    ],
   ])("reads a %s message", (_name, data) => {
     // Arrange / Act
     const message = parseHostToPage(data);
@@ -28,6 +38,16 @@ describe("parseHostToPage", () => {
     ["presence without its warmth", { channel: HOST_CHANNEL, kind: "presence", shown: true }],
     ["an inputBackground without a string", { channel: HOST_CHANNEL, kind: "inputBackground", background: 3 }],
     ["a gateDock with a non-finite height", { channel: HOST_CHANNEL, kind: "gateDock", pixels: Infinity, background: null }],
+    ["a sidebarDock without a boolean", { channel: HOST_CHANNEL, kind: "sidebarDock", docked: 1 }],
+    ["webhostFailures without a list", { channel: HOST_CHANNEL, kind: "webhostFailures", failures: {} }],
+    [
+      "webhostFailures with an arm no frontend mints",
+      { channel: HOST_CHANNEL, kind: "webhostFailures", failures: [{ arm: "shimCrashed", headline: "h", evidence: [] }] },
+    ],
+    [
+      "webhostFailures with a malformed evidence row",
+      { channel: HOST_CHANNEL, kind: "webhostFailures", failures: [{ arm: "bootFailed", headline: "h", evidence: [["only"]] }] },
+    ],
     ["a gateDock with a numeric background", { channel: HOST_CHANNEL, kind: "gateDock", pixels: 10, background: 4 }],
   ])("refuses %s", (_name, data) => {
     // Arrange / Act
@@ -46,6 +66,8 @@ describe("parsePageToHost", () => {
     ["selection", { channel: HOST_CHANNEL, kind: "selection", text: "abc", focused: true }],
     ["selection with no selection object", { channel: HOST_CHANNEL, kind: "selection", text: null, focused: false }],
     ["editing", { channel: HOST_CHANNEL, kind: "editing", editing: true }],
+    ["gateBand", { channel: HOST_CHANNEL, kind: "gateBand", pixels: 120 }],
+    ["gateBand with no band", { channel: HOST_CHANNEL, kind: "gateBand", pixels: 0 }],
   ])("reads a %s message", (_name, data) => {
     // Arrange / Act
     const message = parsePageToHost(data);
@@ -60,6 +82,8 @@ describe("parsePageToHost", () => {
     ["a drawn of an unknown sort", { channel: HOST_CHANNEL, kind: "drawn", what: "half" }],
     ["a selection without focus", { channel: HOST_CHANNEL, kind: "selection", text: "abc" }],
     ["an editing without a boolean", { channel: HOST_CHANNEL, kind: "editing", editing: 1 }],
+    ["a gateBand below zero", { channel: HOST_CHANNEL, kind: "gateBand", pixels: -1 }],
+    ["a gateBand that is not finite", { channel: HOST_CHANNEL, kind: "gateBand", pixels: NaN }],
   ])("refuses %s", (_name, data) => {
     // Arrange / Act
     const message = parsePageToHost(data);

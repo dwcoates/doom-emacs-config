@@ -267,8 +267,8 @@ func (c *Client) deliver(
 	requestRecord *agentreplv1.ClientLogRecord,
 ) (departed bool, err error) {
 	response, err := client.ClientLog(ctx, connect.NewRequest(&agentreplv1.ClientLogRequest{
-		Workspace: workspace,
-		Record:    requestRecord,
+		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: workspace},
+		Record: requestRecord,
 	}))
 	if err != nil {
 		return false, fmt.Errorf("ClientLog at %s: %w", address, err)

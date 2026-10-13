@@ -140,6 +140,7 @@ export function sidebarContext(
   const disposers: Array<() => void> = [];
   return {
     ctx,
+    parentWorkspace: () => ctx.workspace,
     view,
     openDetails,
     drawnStatus: createDrawnStatusLog("sidebar row", "sidebar.drawn-status"),

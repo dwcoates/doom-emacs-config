@@ -21,6 +21,7 @@
  * whether one of its text fields holds the focus (embed.ts).
  */
 import { createHost, hostHasFocus, type Host } from "./host.js";
+import { WEBHOST_SIDEBAR_ID, startWebhostSidebar } from "./sidebar.js";
 import "./host.css";
 
 /** A call Emacs made before the host started, queued on the page. */
@@ -37,15 +38,34 @@ declare global {
 /** The class the host page's root wears. */
 export const HOST_ROOT_CLASS = "agent-repl-host";
 
+/** The class of the element the workspace pages are stacked in. */
+export const WEBHOST_FRAMES_CLASS = "webhost-frames";
+
 /** Turn the page in DOC and WIN into the host, and hand it to Emacs. */
-export function startHost(doc: Document, win: Window): Host {
+/** What the start may have injected, for a suite that is not about the sidebar. */
+export interface StartHostDeps {
+  /** Start the webhost's sidebar; the real one dials the daemon. */
+  startSidebar?: (doc: Document, win: Window, host: Host, nav: HTMLElement) => unknown;
+}
+
+export function startHost(doc: Document, win: Window, deps: StartHostDeps = {}): Host {
   doc.body.replaceChildren();
   doc.documentElement.classList.add(HOST_ROOT_CLASS);
-  const host = createHost({ doc, win });
+  // THE SIDEBAR OVER THE PAGES: one nav, drawn over every page's reserved
+  // sidebar column (host/sidebar.ts), and the stack of workspace pages under it.
+  const nav = doc.createElement("nav");
+  nav.id = WEBHOST_SIDEBAR_ID;
+  nav.setAttribute("data-component", "sidebar");
+  nav.hidden = true;
+  const frames = doc.createElement("div");
+  frames.className = WEBHOST_FRAMES_CLASS;
+  doc.body.append(frames, nav);
+  const host = createHost({ doc, win, frames });
   win.agentReplHost = host;
   const pending = win.__agentReplHostPending ?? [];
   delete win.__agentReplHostPending;
   for (const call of pending) call(host);
+  (deps.startSidebar ?? startWebhostSidebar)(doc, win, host, nav);
   const answerFocus = (): boolean => hostHasFocus(doc, host);
   win.xwHasFocus = answerFocus;
   // Emacs injects its own definition as a user script, which can run after
