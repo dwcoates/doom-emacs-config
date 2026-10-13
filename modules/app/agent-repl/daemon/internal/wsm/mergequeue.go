@@ -283,18 +283,9 @@ func (s *store) MoveMerge(ctx context.Context, repo RepoKey, id WorkspaceID, mov
 	fields["repo"] = string(key)
 	var moved bool
 	err = s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		var state int
-		var seq int64
-		err := tx.QueryRowContext(ctx, `SELECT state, seq FROM merge_queue WHERE repo_key = ? AND workspace_id = ?`, key, id).
-			Scan(&state, &seq)
-		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("wsm: merge queue entry for workspace %s in repo %q: %w", id, key, ErrNotFound)
-		}
-		if err != nil {
+		seq, state, err := entryPlace(ctx, tx, key, id)
+		if err != nil || state != MergeQueued {
 			return err
-		}
-		if MergeQueueState(state) != MergeQueued {
-			return nil
 		}
 		query := `SELECT seq, source_front FROM merge_queue WHERE repo_key = ? AND state = ? AND seq < ? ORDER BY seq DESC LIMIT 1`
 		if move == MergeMoveDown {
@@ -343,18 +334,9 @@ func (s *store) PrioritizeMerge(ctx context.Context, repo RepoKey, id WorkspaceI
 	fields["repo"] = string(key)
 	var moved bool
 	err = s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		var state int
-		var seq int64
-		err := tx.QueryRowContext(ctx, `SELECT state, seq FROM merge_queue WHERE repo_key = ? AND workspace_id = ?`, key, id).
-			Scan(&state, &seq)
-		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("wsm: merge queue entry for workspace %s in repo %q: %w", id, key, ErrNotFound)
-		}
-		if err != nil {
+		seq, state, err := entryPlace(ctx, tx, key, id)
+		if err != nil || state != MergeQueued {
 			return err
-		}
-		if MergeQueueState(state) != MergeQueued {
-			return nil
 		}
 		var first int64
 		if err := tx.QueryRowContext(ctx, `SELECT min(seq) FROM merge_queue WHERE repo_key = ? AND state = ?`,
@@ -377,6 +359,23 @@ func (s *store) PrioritizeMerge(ctx context.Context, repo RepoKey, id WorkspaceI
 		return false, err
 	}
 	return moved, nil
+}
+
+// entryPlace answers the sequence number and the state of ID's queue entry, the
+// two facts every reordering checks before it moves a merge. A workspace with
+// no queue entry is refused with ErrNotFound.
+func entryPlace(ctx context.Context, tx *sql.Tx, key RepoKey, id WorkspaceID) (int64, MergeQueueState, error) {
+	var state int
+	var seq int64
+	err := tx.QueryRowContext(ctx, `SELECT state, seq FROM merge_queue WHERE repo_key = ? AND workspace_id = ?`, key, id).
+		Scan(&state, &seq)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, 0, fmt.Errorf("wsm: merge queue entry for workspace %s in repo %q: %w", id, key, ErrNotFound)
+	}
+	if err != nil {
+		return 0, 0, err
+	}
+	return seq, MergeQueueState(state), nil
 }
 
 // swapPlaces trades the places of the row for ID (at own) and the row at
@@ -479,17 +478,12 @@ func (s *store) YieldMergeHead(ctx context.Context, repo RepoKey, loser, winner 
 	fields := dlog.Context{"repo": string(key), "loser": string(loser), "winner": string(winner)}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		seqOf := func(id WorkspaceID) (int64, error) {
-			var state int
-			var seq int64
-			err := tx.QueryRowContext(ctx, `SELECT state, seq FROM merge_queue WHERE repo_key = ? AND workspace_id = ?`, key, id).Scan(&state, &seq)
-			if errors.Is(err, sql.ErrNoRows) {
-				return 0, fmt.Errorf("wsm: merge queue entry for workspace %s in repo %q: %w", id, key, ErrNotFound)
-			}
+			seq, state, err := entryPlace(ctx, tx, key, id)
 			if err != nil {
 				return 0, err
 			}
-			if MergeQueueState(state) != MergeAdmitted {
-				return 0, fmt.Errorf("wsm: workspace %s in repo %q yields or wins a race to land while %s, not admitted", id, key, MergeQueueState(state))
+			if state != MergeAdmitted {
+				return 0, fmt.Errorf("wsm: workspace %s in repo %q yields or wins a race to land while %s, not admitted", id, key, state)
 			}
 			return seq, nil
 		}
