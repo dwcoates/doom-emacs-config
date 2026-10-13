@@ -274,6 +274,11 @@ func (r *run) checkpoint(ctx context.Context, step string, mutate func(*progress
 	if r.exiting() {
 		return errMergeStopping
 	}
+	// A WAITING MEMBER'S REBASE RECORDS NOTHING (rebasewaiting.go): a restart
+	// in the middle leaves it to catch up at a later landing.
+	if r.background {
+		return nil
+	}
 	speculative := r.isSpeculative()
 	r.mu.Lock()
 	doc := r.prog
