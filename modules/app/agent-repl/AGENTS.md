@@ -491,6 +491,33 @@ than one version.
 - An upgrade of a shared dependency lands in EVERY module that requires it, in
   the same commit, followed by each affected module's tests.
 
+### Every timeout is sized deliberately: never very long, never too short
+
+Owner ruling, 2026-10-13. Applies to every timeout, deadline, wait bound and
+poll limit in every test, harness and suite configuration, in every language.
+
+- **Never set a very long timeout.** A timeout is paid in full every time the
+  thing it bounds fails: a 10-minute bound on a 2-second operation turns one
+  hung test into 10 minutes of a blocked run. Bounds 10-100x the healthy
+  latency have been found hanging runs, gates and the host. A long bound is a
+  defect even when nothing has failed yet.
+- **Never set a too-short timeout.** A bound with no headroom over the healthy
+  latency under realistic load makes the test flaky, and a flake is fixed at
+  its source, never by rerunning.
+- **The size: just over 2x the healthy latency measured under realistic
+  concurrency** (a full run, a merge gate), stated at the site with its
+  measurement. No measurement yet: instrument the operation, then size the
+  bound from the data, rather than guessing generously.
+- **Think about what the timeout bounds.** Name the operation at the site. A
+  bound on a whole package or suite is a backstop; the waits inside it carry
+  their own tight bounds, so a hang is reported by the wait that hung, at its
+  own bound, not by the backstop.
+- **No unbounded wait.** A channel receive, a process wait or a poll loop
+  without a bound can hang a run forever; every blocking wait in a test has
+  one.
+- **Ask whether the healthy latency is itself too long.** Bounding a slow
+  operation is not a fix for its slowness.
+
 ### Test wait/timeout bounds are measured, not guessed
 
 Every synchronization wait in `test-integration-*.el` funnels through
