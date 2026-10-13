@@ -57,7 +57,13 @@ import type { SidebarContext } from "./context.js";
 import { toggleHiddenDropdown } from "./dropdowns.js";
 import { markReviving } from "./reviving.js";
 import { viewedMode } from "./viewed.js";
-import { armBreathes, armSpins, rosterRowMark, type RosterStatusCase } from "./tones.js";
+import {
+  armBreathes,
+  armSpins,
+  rosterRowMark,
+  type OneShotGlyph,
+  type RosterStatusCase,
+} from "./tones.js";
 import { guardMalformed } from "../rpc/guard.js";
 import { clampReveal } from "../topbar/clamp.js";
 import {
@@ -163,11 +169,11 @@ export function drawRosterRow(
   // the semantic color of a workspace belongs to the whole row: the hook
   // contract targets `[data-roster-row]` for `tone-<color>`, so the class is
   // set here, from the same one vocabulary table the mark reads.
-  // PRESENCE IS THE FACT: only a one-shot carries the mark, and the rail draws
-  // only its `failed` outcome.
-  const oneShotFailed =
-    u.oneShot !== undefined && drawRosterRowOneShot(u.oneShot, `${path}.oneShot`);
-  const mark = rosterRowMark(status.case, oneShotFailed);
+  // PRESENCE IS THE FACT: only a one-shot carries the mark, and its outcome's
+  // glyph replaces the dot.
+  const oneShot =
+    u.oneShot === undefined ? undefined : drawRosterRowOneShot(u.oneShot, `${path}.oneShot`);
+  const mark = rosterRowMark(status.case, oneShot);
   const ws = document.createElement("div");
   ws.className = `ws ${mark.toneClass}`;
   ws.setAttribute("data-roster-row", workspace.id);
@@ -214,7 +220,7 @@ export function drawRosterRow(
   // NAME is the detail panel's pointer trigger (owner request, 2026-10-11).
   let statusMark: HTMLElement | null = null;
   if (!merged) {
-    statusMark = drawStatusMark(status.case, `${path}.status`, oneShotFailed);
+    statusMark = drawStatusMark(status.case, `${path}.status`, oneShot);
     line.appendChild(statusMark);
   }
 
@@ -333,17 +339,18 @@ export function drawRosterRowReviving(u: RosterRowReviving, path: string): boole
 }
 
 /**
- * The ONE-SHOT mark: the workspace was created as a one-shot. Answers whether
- * it ENDED WITHOUT A LIVE MERGE (`failed`), the only outcome the rail draws;
- * `armed` draws nothing here. An unset outcome is a MalformedView.
+ * The ONE-SHOT mark: the workspace was created as a one-shot. Answers the
+ * glyph its outcome draws in place of the dot: `target` while `armed`,
+ * `failed` once it ENDED WITHOUT A LIVE MERGE. An unset outcome is a
+ * MalformedView.
  */
-export function drawRosterRowOneShot(u: RosterRowOneShot, path: string): boolean {
+export function drawRosterRowOneShot(u: RosterRowOneShot, path: string): OneShotGlyph {
   const outcome = requireCase(u.outcome, `${path}.outcome`);
   switch (outcome.case) {
     case "armed":
-      return false;
+      return "target";
     case "failed":
-      return true;
+      return "failed";
   }
 }
 
@@ -528,9 +535,9 @@ export function drawRosterRowDetailSummary(u: RosterRowDetailSummary, path: stri
 export function drawStatusMark(
   arm: RosterStatusCase,
   path: string,
-  oneShotFailed = false,
+  oneShot?: OneShotGlyph,
 ): HTMLElement {
-  const mark = rosterRowMark(arm, oneShotFailed);
+  const mark = rosterRowMark(arm, oneShot);
   log.debug("drawing a row's status mark", {
     operation: "sidebar.row.status",
     context: { path, arm, glyph: mark.glyph, tone: mark.toneClass },

@@ -127,7 +127,31 @@ func newEmacsWorkspaceFixture(t *testing.T, box sandbox) *emacsWorkspaceFixture 
 
 	f := &emacsWorkspaceFixture{World: w, Emacs: e, Repo: repo, Name: name}
 	f.RefID = f.awaitRefID()
+	awaitTabsOpen(e, emacsVerbBound, []string{name})
 	return f
+}
+
+// emacsTabOrderForm reads `agent-repl-roster--tab-order' as names: the tabs
+// the daemon has answered OPEN (open-tabs.el), in roster walk order.
+const emacsTabOrderForm = `(mapcar (lambda (n) (format "%s" n)) agent-repl-roster--tab-order)`
+
+// awaitTabsOpen waits until every one of NAMES is in the tab order. A tab is
+// held out of the order until the daemon answers its `OpenTabs' open
+// (open-tabs.el), so a scenario that reads the order before that reads a
+// workspace that is registered but not yet open.
+func awaitTabsOpen(e *Emacs, bound time.Duration, names []string) []string {
+	e.t.Helper()
+	return decodeStrings(e.AwaitEvalFor(bound, fmt.Sprintf("the tabs %q to be answered open", names),
+		emacsTabOrderForm,
+		func(raw json.RawMessage) bool {
+			order := decodeStrings(raw)
+			for _, name := range names {
+				if !containsString(order, name) {
+					return false
+				}
+			}
+			return true
+		}))
 }
 
 // awaitRefID waits for the daemon-minted ref to land in Emacs's host table
@@ -162,7 +186,7 @@ func (f *emacsWorkspaceFixture) tabNames() []string {
 // the tab bar follows strictly.
 func (f *emacsWorkspaceFixture) rosterTabOrder() []string {
 	f.Emacs.t.Helper()
-	return f.Emacs.EvalStrings(`(mapcar (lambda (n) (format "%s" n)) agent-repl-roster--tab-order)`)
+	return f.Emacs.EvalStrings(emacsTabOrderForm)
 }
 
 // openPanel opens the agent-repl panel through the ordinary command and waits
@@ -344,10 +368,11 @@ func TestEmacsCreateWorkspaceAppearsOnTheRoster(t *testing.T) {
 			return !isJSONNull(raw) && json.Unmarshal(raw, &n) == nil && n > before
 		})
 
-	order := f.rosterTabOrder()
-	if len(order) <= before {
-		t.Fatalf("agent-repl-roster--tab-order = %v, want more than the %d it started with", order, before)
-	}
+	// The created workspace's tab joins the order once the daemon answers its
+	// open (open-tabs.el), which follows its row.
+	order := decodeStrings(e.AwaitEvalFor(emacsVerbBound, "the created workspace's tab to be answered open",
+		emacsTabOrderForm,
+		func(raw json.RawMessage) bool { return len(decodeStrings(raw)) > before }))
 
 	// The tab bar follows the roster's order strictly, so every name the
 	// roster walk produced must have a tab.

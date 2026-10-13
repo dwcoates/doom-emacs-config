@@ -58,6 +58,7 @@ func emacsPanelWorld(t *testing.T, count int) (*EmacsWorld, []string) {
 		names = registryNames(raw)
 		awaitRegistrationLanding(e, repository.Dir)
 	}
+	awaitTabsOpen(e, emacsVerbBound, names)
 	// The registry is a hash, so its iteration order says nothing; the
 	// current workspace is what the panel verbs act on, and it is the one
 	// most recently added.
@@ -188,7 +189,7 @@ func TestEmacsPlainCloseHidesPanelsAndLeavesTheTabAlone(t *testing.T) {
 
 	openPanel(e)
 	awaitPanelWindows(e, frontendPrefix, panelPrefix)
-	orderBefore := e.EvalStrings(`agent-repl-roster--tab-order`)
+	orderBefore := e.EvalStrings(emacsTabOrderForm)
 
 	if want, got := "agent-repl-simple", e.LeaderBinding("o c"); got != want {
 		t.Fatalf("SPC o c resolves to %q, want %q: the module's `map!' leader form did not take", got, want)
@@ -201,7 +202,7 @@ func TestEmacsPlainCloseHidesPanelsAndLeavesTheTabAlone(t *testing.T) {
 			return panelBufferCount(decodeStrings(raw), frontendPrefix, panelPrefix) == 0
 		})
 
-	orderAfter := e.EvalStrings(`agent-repl-roster--tab-order`)
+	orderAfter := e.EvalStrings(emacsTabOrderForm)
 	if strings.Join(orderBefore, "\x00") != strings.Join(orderAfter, "\x00") {
 		t.Fatalf("the plain close moved the tab order: %q -> %q; only the deprio close may touch it", orderBefore, orderAfter)
 	}
@@ -258,12 +259,12 @@ func TestEmacsPlainCloseTogglesThePanelsBack(t *testing.T) {
 }
 
 // TestEmacsWebviewIsAtHomeOnItsOwnDaemon is the rescue's own predicate,
-// against the real running daemon: `agent-repl--frontend-webview-at-home-p`
-// decides whether `SPC o L` navigates or leaves the page alone, so a
+// against the real running daemon: `agent-repl--frontend-host-at-home-p`
+// decides whether `SPC o L` navigates or leaves the host page alone, so a
 // predicate that cannot be CALLED makes the rescue unreachable.
 //
-// It reached a `agent-repl--frontend-base-url` that no longer exists, and
-// every unit test of the rescue mocked around it.
+// It once reached a `agent-repl--frontend-base-url` that no longer existed,
+// and every unit test of the rescue mocked around it.
 func TestEmacsWebviewIsAtHomeOnItsOwnDaemon(t *testing.T) {
 	t.Parallel()
 	w, _ := emacsPanelWorld(t, 1)
@@ -274,24 +275,20 @@ func TestEmacsWebviewIsAtHomeOnItsOwnDaemon(t *testing.T) {
 	openPanel(e)
 	awaitPanelWindows(e, frontendPrefix, panelPrefix)
 
-	// Home is the origin of the connection that OWNS the workspace, and it is
-	// the origin the webview's own URL is built from.
-	origin := e.EvalString(`(or (agent-repl--frontend-home-origin ` + elispString(current) + `) "")`)
-	if origin == "" {
-		t.Fatalf("workspace %q has no home origin while its daemon link is up", current)
+	// Home is the host page on the daemon that OWNS the workspace: the URL the
+	// one host web view is loaded from.
+	home := e.EvalString(`(agent-repl-webhost-url (agent-repl-host-conn ` + elispString(current) + `))`)
+	if home == "" {
+		t.Fatalf("workspace %q has no host page URL while its daemon link is up", current)
 	}
-	url := e.EvalString(`(agent-repl-frontend-webview-url ` + elispString(current) + `)`)
-	if !strings.HasPrefix(url, origin) {
-		t.Fatalf("the webview URL %q is not served from the workspace's own home origin %q", url, origin)
-	}
-	if !e.EvalBool(`(and (agent-repl--frontend-webview-at-home-p ` + elispString(current) + ` ` + elispString(url) + `) t)`) {
-		t.Fatalf("the workspace's own webview URL %q does not read as home", url)
+	if !e.EvalBool(`(and (agent-repl--frontend-host-at-home-p ` + elispString(current) + ` ` + elispString(home) + `) t)`) {
+		t.Fatalf("the host page's own URL %q does not read as home for workspace %q", home, current)
 	}
 	// And a page that left the daemon does not: this is the state the rescue
 	// exists for, and reading it wrong either strands the user or throws away
 	// a rendered feed.
-	if e.EvalBool(`(and (agent-repl--frontend-webview-at-home-p ` + elispString(current) + ` "about:blank") t)`) {
-		t.Fatal("`about:blank` reads as home; the rescue would refuse to bring a stranded webview back")
+	if e.EvalBool(`(and (agent-repl--frontend-host-at-home-p ` + elispString(current) + ` "about:blank") t)`) {
+		t.Fatal("`about:blank` reads as home; the rescue would refuse to bring a stranded host page back")
 	}
 }
 
@@ -318,7 +315,7 @@ func TestEmacsDeprioCloseShufflesTheTab(t *testing.T) {
 		`(agent-repl--ws-get `+elispString(current)+` :saved-tab-index)`,
 		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
 
-	order := e.EvalStrings(`agent-repl-roster--tab-order`)
+	order := e.EvalStrings(emacsTabOrderForm)
 	if len(order) < 2 {
 		t.Fatalf("the tab order holds %d entries, need two for a push-to-back to be observable: %q", len(order), order)
 	}

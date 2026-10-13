@@ -46,7 +46,9 @@ ended without a live merge.
   and the one-shot glyph returns. What `/clear` or `/compact` do is
   irrelevant to the rule: only reaching `thinking` clears it.
 - The webapp sidebar draws ✖️ by the same rule, and never draws the one-shot
-  glyph.
+  glyph. SUPERSEDED 2026-10-12 (owner request): the sidebar draws the
+  one-shot glyph 🎯 too, in place of the status dot, by the same rule as the
+  tab bar; a gate's emoji still outranks it.
 
 ## Verification evidence
 
