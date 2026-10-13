@@ -427,12 +427,12 @@ func (f *detachedForwarder) service() (*mergeworkspace.Service, error) {
 	return f.target, nil
 }
 
-func (f *detachedForwarder) Fork(ctx context.Context, requester wsm.Workspace, request wsm.DetachedMergeID, name, base string) (wsm.Workspace, error) {
+func (f *detachedForwarder) Fork(ctx context.Context, requester wsm.Workspace, origin wsm.MergeOrigin, name, base string) (wsm.Workspace, error) {
 	target, err := f.service()
 	if err != nil {
 		return wsm.Workspace{}, err
 	}
-	return target.Fork(ctx, requester, request, name, base)
+	return target.Fork(ctx, requester, origin, name, base)
 }
 
 func (f *detachedForwarder) Reveal(ctx context.Context, mergeWS ids.WorkspaceID) (bool, error) {
