@@ -927,13 +927,15 @@ is read through any shim client the fleet can reach (`workspace.Fleet.ReadHistor
 ## A page carries the prompts of the turns it touches
 
 Design record: `../docs/protobuf-design/complete-pages.md`. A reader's load
-draws a page's `turn_heads` (the prompt entries of the turns its entries are
+draws a page's `heads` (the prompt entries of the turns its entries are
 stamped with whose prompts sit below it) BEFORE its own entries
 (`resolve/feed/heads.go`), so no entry is withheld (`withholds`) and an
-opening reads ONE store page. Under each head drawn an `earlier_steps` row
-stands (keyed from the head's place, so right after the prompt), until a
-load meets the head as an ordinary entry of an older page, which removes it
-(`removed`). A head whose turn the feed already saw opened is absorbed (no
+opening reads ONE store page. Under each head drawn whose `between` arm is
+`steps_between` an `earlier_steps` row stands (keyed from the head's place, so
+right after the prompt), until a load meets the head as an ordinary entry of
+an older page, which removes it (`removed`). An `adjacent` head draws no such
+row, so no walk has one to remove. A head with no `between` arm is refused
+(not drawn). A head whose turn the feed already saw opened is absorbed (no
 row). A page without heads draws as before: withheld entries, and the walk
 or `loadUntilDrawn` reading older pages until the prompt's page loads. A
 watch's catch-up page never draws heads. The earlier-steps row is never
@@ -941,8 +943,9 @@ mirrored. OpenTabs reads the root's newest page through the same loading
 (`ReadNewest`). Records: `daemon.feed.opening_reads` (INFO with `reads` for
 an opening that read store pages), `daemon.feed.earlier_steps_drawn` and
 `daemon.feed.earlier_steps_removed` (INFO), `daemon.feed.turn_head_absorbed`
-(DEBUG), `daemon.feed.turn_head_not_prompt` (ERROR), `daemon.feed.read_newest`
-(INFO).
+and `daemon.feed.turn_head_adjacent` (DEBUG),
+`daemon.feed.turn_head_not_prompt` and `daemon.feed.turn_head_no_between`
+(ERROR), `daemon.feed.read_newest` (INFO).
 
 ## The feed never serves a row the newest cut withholds
 

@@ -24,6 +24,15 @@ func (h *harness) headsBook() *fakeHistory {
 	return store
 }
 
+// adjacentHeadsBook is longTurnBook(2) on a store page of two, the store
+// serving turn heads: [ans-2 ans-1 | head prompt-1, adjacent] [prompt-1
+// prompt-0].
+func (h *harness) adjacentHeadsBook() *fakeHistory {
+	store := h.mainBook(2, longTurnBook(2))
+	store.heads = true
+	return store
+}
+
 // earlierStepsRowID is TURN's earlier-steps row on the root feed.
 func (h *harness) earlierStepsRowID(turn string) string {
 	return testEncode(feedid.Ref{
@@ -90,6 +99,99 @@ func TestAnOpeningFromOneReadIsRecordedAtInfo(t *testing.T) {
 	// Assert.
 	if !h.hasRecordWith(dlog.LevelInfo, "daemon.feed.opening_reads", "reads", 1) {
 		t.Fatal("no INFO record says the opening was served from one read")
+	}
+}
+
+func TestAnAdjacentHeadDrawsThePromptAndItsStepsWithNoGapRow(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.adjacentHeadsBook()
+
+	// Act.
+	page, _ := h.openPage(rootFeed(), "reader-1")
+
+	// Assert.
+	want := strings.Join([]string{
+		h.promptRowID("turn-1"), h.responseRowID("ans-1"), h.responseRowID("ans-2"),
+	}, ",")
+	if got := strings.Join(rowIDs(pageRows(t, page)), ","); got != want {
+		t.Fatalf("page rows = %v, want %v", got, want)
+	}
+}
+
+func TestAnOpeningWithAnAdjacentHeadReadsOneStorePage(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	store := h.adjacentHeadsBook()
+
+	// Act.
+	h.openPage(rootFeed(), "reader-1")
+
+	// Assert.
+	if got := store.readCount(); got != 1 {
+		t.Fatalf("reads = %d, want exactly one", got)
+	}
+}
+
+func TestAnAdjacentHeadIsRecordedAndDrawsNoGapRecord(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.adjacentHeadsBook()
+
+	// Act.
+	h.openPage(rootFeed(), "reader-1")
+
+	// Assert.
+	if !h.hasRecordWith(dlog.LevelDebug, "daemon.feed.turn_head_adjacent", "turn", "turn-1") {
+		t.Fatal("no record says the adjacent head drew no gap row")
+	}
+	if got := len(h.recordsAt(dlog.LevelInfo, "daemon.feed.earlier_steps_drawn")); got != 0 {
+		t.Fatalf("gap rows drawn = %d, want none for an adjacent head", got)
+	}
+}
+
+func TestTheWalkMeetingAnAdjacentHeadRemovesNoRow(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.adjacentHeadsBook()
+	rows := h.follow(rootFeed(), "reader-1")
+
+	// Act.
+	h.nextPage("reader-1")
+	pushed := pushedRowsBefore(t, rows, h.sendSentinel())
+
+	// Assert.
+	for _, row := range pushed {
+		if row.GetRemoved() != nil {
+			t.Fatalf("pushed the removal of %v; an adjacent head left no row to remove", row.GetId())
+		}
+	}
+	if h.hasRecord(dlog.LevelInfo, "daemon.feed.earlier_steps_removed") {
+		t.Fatal("a gap row was recorded removed though none was drawn")
+	}
+}
+
+func TestAHeadWithNoBetweenArmIsAnErrorAndDrawsNothing(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	book := newestFirst(longTurnBook(1))
+	h.resolver.deps.History = historyFunc(func(context.Context, ids.WorkspaceID, *conversationv1.AgentId, *conversationv1.HistoryPointer) (*conversationv1.HistoryPage, error) {
+		return &conversationv1.HistoryPage{
+			Entries:  book[:1],
+			Heads:    []*conversationv1.HistoryTurnHead{{Entry: book[1]}},
+			Boundary: &conversationv1.HistoryPage_Floor{Floor: &conversationv1.HistoryFloor{}},
+		}, nil
+	})
+
+	// Act.
+	h.openPage(rootFeed(), "reader-1")
+
+	// Assert.
+	if !h.hasRecordWith(dlog.LevelError, "daemon.feed.turn_head_no_between", "turn", "turn-1") {
+		t.Fatal("no ERROR record names the head with no between arm")
+	}
+	if _, drawn := h.findRow(rootFeed(), h.promptRowID("turn-1")); drawn {
+		t.Fatal("a head with no between arm was drawn")
 	}
 }
 
@@ -227,9 +329,9 @@ func TestAHeadThatIsNotAPromptIsAnErrorAndDrawsNothing(t *testing.T) {
 	steps := newestFirst(longTurnBook(1))[:1]
 	h.resolver.deps.History = historyFunc(func(context.Context, ids.WorkspaceID, *conversationv1.AgentId, *conversationv1.HistoryPointer) (*conversationv1.HistoryPage, error) {
 		return &conversationv1.HistoryPage{
-			Entries:   steps,
-			TurnHeads: []*conversationv1.HistoryEntryAt{bogus},
-			Boundary:  &conversationv1.HistoryPage_Floor{Floor: &conversationv1.HistoryFloor{}},
+			Entries:  steps,
+			Heads:    []*conversationv1.HistoryTurnHead{historyHead(bogus, true)},
+			Boundary: &conversationv1.HistoryPage_Floor{Floor: &conversationv1.HistoryFloor{}},
 		}, nil
 	})
 
@@ -250,9 +352,9 @@ func TestACatchUpPagesTurnHeadsAreNotDrawn(t *testing.T) {
 	h := newHarness(t)
 	book := newestFirst(longTurnBook(1))
 	page := &conversationv1.HistoryPage{
-		Entries:   book[:1],
-		TurnHeads: []*conversationv1.HistoryEntryAt{book[1]},
-		Boundary:  &conversationv1.HistoryPage_More{More: &conversationv1.HistoryMore{LastEntry: book[0].GetAt()}},
+		Entries:  book[:1],
+		Heads:    []*conversationv1.HistoryTurnHead{historyHead(book[1], true)},
+		Boundary: &conversationv1.HistoryPage_More{More: &conversationv1.HistoryMore{LastEntry: book[0].GetAt()}},
 	}
 
 	// Act.
