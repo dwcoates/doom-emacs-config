@@ -158,9 +158,12 @@ func (m Manager) leaksLocked(info string) ([]Leak, error) {
 	return leaks, nil
 }
 
-// Trouble is why a run must not attach a RAM disk: leaked RAM disks, or a
-// disk manager that did not answer.
+// Trouble is why a run must not attach a RAM disk: leaked RAM disks, a disk
+// manager that did not answer, or a registry lock whose holder is stuck.
 type Trouble struct {
+	// Lock is the registry lock that was not taken within its bound; nil when
+	// it was, or was never waited for.
+	Lock *LockTimeoutError
 	// Leaks are the leaked RAM disks; empty when none were found (or the disk
 	// manager did not answer the listing).
 	Leaks []Leak
@@ -180,6 +183,9 @@ func (t *Trouble) Answered() bool { return t.InfoErr == nil && t.ListErr == nil 
 // String is the trouble in one line, for the run's ERROR record.
 func (t *Trouble) String() string {
 	var parts []string
+	if t.Lock != nil {
+		parts = append(parts, t.Lock.Error())
+	}
 	if len(t.Leaks) > 0 {
 		names := make([]string, len(t.Leaks))
 		for i, l := range t.Leaks {
@@ -200,8 +206,8 @@ func probeLine(name string, err error, took time.Duration) string {
 
 // Setup is a run's whole RAM disk start. It probes the disk manager, reclaims
 // the dead runs' disks, and acquires this run's. It answers the volume, or a
-// Trouble when a leak or a disk manager that does not answer forbids any
-// attach, or the error of an acquire that failed otherwise. With either of the
+// Trouble when a leak, a disk manager that does not answer or a registry lock
+// whose holder is stuck forbids any attach, or the error of an acquire that failed otherwise. With either of the
 // latter the run's root goes on the disk.
 func (m Manager) Setup(sizeMiB int) (*Volume, *Trouble, error) {
 	t := &Trouble{}
@@ -221,6 +227,11 @@ func (m Manager) Setup(sizeMiB int) (*Volume, *Trouble, error) {
 	for _, r := range reclaimed {
 		m.Log.Infof("reclaimed the RAM disk %s at %s left by dead run pid %d (attached %v, killed %d leftover processes)", r.Device, r.Mount, r.Pid, r.Attached, r.Killed)
 	}
+	// A STUCK REGISTRY LOCK IS NOT WAITED ON TWICE: the acquire would wait
+	// out the same bound on the same holder.
+	if errors.As(err, &t.Lock) {
+		return nil, t, nil
+	}
 	if err != nil {
 		m.Log.Errorf("reclaiming a dead run's RAM disk failed: %v", err)
 	}
@@ -228,6 +239,9 @@ func (m Manager) Setup(sizeMiB int) (*Volume, *Trouble, error) {
 	var leaked *LeakError
 	if errors.As(err, &leaked) {
 		t.Leaks, t.Info = leaked.Leaks, leaked.Info
+		return nil, t, nil
+	}
+	if errors.As(err, &t.Lock) {
 		return nil, t, nil
 	}
 	return v, nil, err

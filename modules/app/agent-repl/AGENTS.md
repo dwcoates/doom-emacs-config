@@ -401,6 +401,12 @@ unreachable from a live process.
     - No other is created while a worktree on a branch of that name exists or
       its create waits in the daemon's ingress; no daemon, no CLI or a failed
       dispatch is an ERROR line too.
+  - THE REGISTRY LOCK WAIT IS BOUNDED at 1.5s (`ramdisk.LockBound`), just
+    over 2x the longest healthy hold: an acquire holds it about 120ms, an
+    investigation's dispatch about 700ms. Past the bound the run is treated
+    like one facing a wedged disk manager: on `/tmp`, an ERROR naming the lock
+    and who has it open (`lsof`), and the investigation, deduplicated without
+    the lock.
   - The acquire and release edges are logged at INFO with their timings, so
     a stall shows as a begin line with no end.
   - A RAM disk that cannot be made falls back to `/tmp` with an ERROR line.

@@ -60,6 +60,9 @@ type InvestigationOutcome struct {
 	// Existing names the investigation already open (a worktree, or a create
 	// still waiting in the daemon's ingress); empty when one was dispatched.
 	Existing string
+	// Unlocked is set when the registry lock was not taken within its bound,
+	// so the check for an open investigation ran without it.
+	Unlocked bool
 }
 
 // EnsureInvestigation opens the investigation workspace for t, unless one is
@@ -75,36 +78,48 @@ func (m Manager) EnsureInvestigation(inv Investigation, t *Trouble) (_ Investiga
 	if err := os.MkdirAll(m.Registry, 0o755); err != nil {
 		return InvestigationOutcome{}, fmt.Errorf("make the RAM disk registry %s: %w", m.Registry, err)
 	}
+	// A STUCK REGISTRY LOCK STILL GETS ITS INVESTIGATION: the check for an
+	// open one runs without the lock, and only two runs checking in the same
+	// instant could both dispatch (the first's create is in the ingress before
+	// its dispatch returns).
+	var out InvestigationOutcome
 	unlock, err := m.lockRegistry()
-	if err != nil {
-		return InvestigationOutcome{}, err
+	var stuck *LockTimeoutError
+	switch {
+	case errors.As(err, &stuck):
+		out.Unlocked = true
+	case err != nil:
+		return out, err
+	default:
+		defer func() {
+			if closeErr := unlock(); closeErr != nil {
+				err = errors.Join(err, fmt.Errorf("release the RAM disk registry lock: %w", closeErr))
+			}
+		}()
 	}
-	defer func() {
-		if closeErr := unlock(); closeErr != nil {
-			err = errors.Join(err, fmt.Errorf("release the RAM disk registry lock: %w", closeErr))
-		}
-	}()
 	porcelain, err := inv.Git(GitBound, "git", "-C", inv.Module, "worktree", "list", "--porcelain")
 	if err != nil {
-		return InvestigationOutcome{}, fmt.Errorf("list the repository's worktrees: %w", err)
+		return out, fmt.Errorf("list the repository's worktrees: %w", err)
 	}
 	root, open := readWorktrees(porcelain)
 	if root == "" {
-		return InvestigationOutcome{}, fmt.Errorf("git worktree list named no main worktree for %s", inv.Module)
+		return out, fmt.Errorf("git worktree list named no main worktree for %s", inv.Module)
 	}
 	if open != "" {
-		return InvestigationOutcome{Existing: open}, nil
+		out.Existing = open
+		return out, nil
 	}
 	pending, err := pendingCreate(filepath.Join(inv.StateDir, "output"))
 	if err != nil {
-		return InvestigationOutcome{}, err
+		return out, err
 	}
 	if pending != "" {
-		return InvestigationOutcome{Existing: pending}, nil
+		out.Existing = pending
+		return out, nil
 	}
 	addr := filepath.Join(inv.StateDir, "daemon.addr")
 	if _, err := os.Stat(addr); err != nil {
-		return InvestigationOutcome{}, fmt.Errorf("no agent-repl daemon serves to create the investigation workspace (%w)", err)
+		return out, fmt.Errorf("no agent-repl daemon serves to create the investigation workspace (%w)", err)
 	}
 	commands, err := json.Marshal([]createCommand{{
 		Type:     "create",
@@ -114,12 +129,12 @@ func (m Manager) EnsureInvestigation(inv Investigation, t *Trouble) (_ Investiga
 		Prompt:   investigationPrompt(t, inv.RunLog),
 	}})
 	if err != nil {
-		return InvestigationOutcome{}, fmt.Errorf("encode the investigation workspace's create: %w", err)
+		return out, fmt.Errorf("encode the investigation workspace's create: %w", err)
 	}
 	if err := inv.Dispatch(commands); err != nil {
-		return InvestigationOutcome{}, fmt.Errorf("dispatch the investigation workspace's create: %w", err)
+		return out, fmt.Errorf("dispatch the investigation workspace's create: %w", err)
 	}
-	return InvestigationOutcome{}, nil
+	return out, nil
 }
 
 // createCommand is one create entry of the workspace CLI's dispatch array.
@@ -191,15 +206,20 @@ func pendingCreate(dir string) (string, error) {
 func investigationPrompt(t *Trouble, runLog string) string {
 	var b strings.Builder
 	b.WriteString("The agent-repl test runner (modules/app/agent-repl/testrun, package internal/ramdisk) refused to attach its RAM disk and ran on the ordinary disk instead, because ")
-	if t.Answered() {
+	switch {
+	case t.Lock != nil:
+		fmt.Fprintf(&b, "the RAM disk registry lock %s was not taken within %s (processes with it open: %s).\n\n", t.Lock.Path, t.Lock.Bound, t.Lock.Holders)
+	case t.Answered():
 		b.WriteString("RAM disks it made had leaked.\n\n")
-	} else {
+	default:
 		b.WriteString("the macOS disk manager (diskarbitrationd) did not answer.\n\n")
 	}
 	b.WriteString("## Evidence\n\n")
 	if len(t.Leaks) == 0 {
 		b.WriteString("- Leaked RAM disks: none found")
-		if !t.Answered() {
+		if t.Lock != nil {
+			b.WriteString(" (the check runs under the registry lock, so it never ran)")
+		} else if !t.Answered() {
 			b.WriteString(" (the listing could not be read)")
 		}
 		b.WriteString(".\n")
@@ -216,7 +236,7 @@ func investigationPrompt(t *Trouble, runLog string) string {
 	writeAnswer(&b, "hdiutil info", t.Info)
 	writeAnswer(&b, "diskutil list", t.List)
 	b.WriteString("\n## What the owner wants\n\n")
-	b.WriteString("- Find why the runner's RAM disks leak and why the disk manager wedged, with every link evidenced in logs.\n")
+	b.WriteString("- Find why the runner's RAM disks leak, why the disk manager wedged and why the registry lock's holder is stuck, with every link evidenced in logs.\n")
 	b.WriteString("- Fix the root cause in code, with tests.\n")
 	b.WriteString("- Never hand-repair: do not detach the leaked disks or restart the disk manager by hand; land the fix and let it heal the live state.\n")
 	b.WriteString("- Mock every hdiutil, diskutil and workspace call in tests; never attach or detach a real RAM disk while developing.\n")
