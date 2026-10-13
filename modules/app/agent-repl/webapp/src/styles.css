@@ -1761,17 +1761,28 @@ pre {
   --bubble-bg: var(--assistant);
   max-width: calc(var(--bubble-max-width) / 2);
 }
-/* PROMPT AND RESPONSE BUBBLES SIT 30% TIGHTER TOP AND BOTTOM (owner request,
-   2026-10-12): the gap between the bubble's edge and its content shrinks
-   vertically only. The left and right insets, the gaps between bubbles and
-   every other kind (thinking, the agentic tool and monitor cards, the
-   compaction summary) keep the base padding. */
-.bubble[data-variant="response"],
+/* THE VERTICAL PADDING LADDER: the gap between a bubble's top and bottom edge
+   and its content, as a share of the base. Vertical only: the left and right
+   insets and the gaps between rows never read it. Kinds not named here (the
+   agentic tool and monitor cards, the compaction summary) keep the base.
+   - PROMPT BUBBLES SIT 30% TIGHTER (owner request, 2026-10-12).
+   - RESPONSE BUBBLES, the yellow interim and the green answer alike, sit 30%
+     tighter again (owner request, 2026-10-13): 0.7 of 0.7.
+   - A THINKING BUBBLE has no fill, border or shadow, so its padding read only
+     as empty feed around floating text; it keeps about a third of the base
+     (owner request, 2026-10-13), which brings its visible gap to a neighbor to
+     about 65% of what the base padding made it. */
 .bubble[data-variant="user"],
 .bubble[data-variant="agent"],
 .bubble[data-variant="peer"],
 .bubble[data-variant="held"] {
   --bubble-pad-y: calc(var(--bubble-pad-y-base) * 0.7);
+}
+.bubble[data-variant="response"] {
+  --bubble-pad-y: calc(var(--bubble-pad-y-base) * 0.49);
+}
+.bubble[data-variant="thinking"] {
+  --bubble-pad-y: calc(var(--bubble-pad-y-base) * 0.35);
 }
 /* THE SECOND BACKGROUND A KIND SETS (owner request, 2026-10-08): a THINKING
    bubble and an INTERIM response (`.interim-response`, response.ts
