@@ -1173,7 +1173,11 @@ message FeedToolCallDiagnostics {
   // client-capped.
   repeated string lines = 1;
 }
-// The settled clock element.
+// The settled clock element: how long a settled tool card's unit took, drawn
+// in the card's head beside its badge. Every purple-titled tool card -- a
+// tool call, a question, a permission, a skill, a hook -- carries this one
+// element, so their heads state their time the same way. Fixed once the unit
+// settles; nothing in a settled head ticks.
 message FeedToolCallRuntime {
   // The composed sentence, drawn verbatim.
   string text = 1;
@@ -1302,6 +1306,12 @@ message FeedSkillLoaded {
   // ("allows: Bash, Write"), composed by the daemon. UNSET when the skill
   // declared none; absence draws no line, never an empty one.
   optional FeedSkillAllowances allowances = 2;
+  // The settled clock the card's head states beside its badge -- "ran 4.2
+  // s" -- composed by the daemon from the producer's own instants. The SAME
+  // element a settled tool call's head carries, because every tool card heads
+  // the same way. UNSET when the producer stated no instants; the head then
+  // shows no figure rather than a ticking or invented one.
+  optional FeedToolCallRuntime runtime = 3;
 }
 // The document element.
 message FeedSkillDocument {
@@ -1317,6 +1327,12 @@ message FeedSkillAllowances {
 message FeedSkillFailed {
   // The daemon's composed reason, drawn verbatim.
   string text = 1;
+  // The settled clock the card's head states beside its badge -- "ran 4.2
+  // s" -- composed by the daemon from the producer's own instants. The SAME
+  // element a settled tool call's head carries, because every tool card heads
+  // the same way. UNSET when the producer stated no instants; the head then
+  // shows no figure rather than a ticking or invented one.
+  optional FeedToolCallRuntime runtime = 2;
 }
 // The denied state. Empty: the badge says it; consent is the permission
 // card's story.
@@ -1360,6 +1376,12 @@ message FeedHookFailed {
   int32 exit_code = 1;
   // The capped output text, drawn verbatim. UNSET when none.
   optional FeedHookOutput output = 2;
+  // The settled clock the card's head states beside its badge -- "ran 4.2
+  // s" -- composed by the daemon from the producer's own instants. The SAME
+  // element a settled tool call's head carries, because every tool card heads
+  // the same way. UNSET when the producer stated no instants; the head then
+  // shows no figure rather than a ticking or invented one.
+  optional FeedToolCallRuntime runtime = 3;
 }
 // The output element.
 message FeedHookOutput {
@@ -2136,13 +2158,22 @@ message FeedPermissionArguments {
 }
 // The always-allow affordance marker. Empty: presence is the fact.
 message FeedPermissionStandingOffered {}
-// Open: awaiting the user. Empty — the card's chrome says waiting; how long
-// is the row's own clock concern (drawn from arrival, client-side).
+// Open: awaiting the user. Empty -- the head's badge says waiting, and the
+// head states no figure until the ask settles, exactly as a running tool
+// call's head does.
 message FeedPermissionOpen {}
 // Answered: how, and when.
 message FeedPermissionAnswered {
-  // When the answer landed, epoch ms.
-  int64 at_ms = 1;
+  reserved 1;
+  reserved "at_ms";
+  // The settled clock the card's head states beside its badge -- "waited 2m
+  // 14s" -- composed by the daemon from the instant the ask was posed and the
+  // instant it settled, both as the producer observed them. The SAME element
+  // a settled tool call's head carries (FeedSimpleToolCall's returned
+  // runtime), because every tool card heads the same way. UNSET when either
+  // instant is missing; the head then shows no figure rather than a ticking or
+  // invented one.
+  optional FeedToolCallRuntime runtime = 7;
   // The verdict line's treatment. A DENIAL IS AN ANSWER, not an error.
   oneof answer {
     // Allowed for this call alone.
@@ -2181,8 +2212,16 @@ message FeedPermissionDeniedByPolicy {
 }
 // The ask went away unanswered — the turn ended, the session stopped.
 message FeedPermissionAbandoned {
-  // When it went away, epoch ms.
-  int64 at_ms = 1;
+  reserved 1;
+  reserved "at_ms";
+  // The settled clock the card's head states beside its badge -- "waited 2m
+  // 14s" -- composed by the daemon from the instant the ask was posed and the
+  // instant it settled, both as the producer observed them. The SAME element
+  // a settled tool call's head carries (FeedSimpleToolCall's returned
+  // runtime), because every tool card heads the same way. UNSET when either
+  // instant is missing; the head then shows no figure rather than a ticking or
+  // invented one.
+  optional FeedToolCallRuntime runtime = 2;
 }
 
 // The question card: the turn blocked on a choice the agent posed — a batch
@@ -2281,8 +2320,16 @@ message FeedQuestionDraft {
 // answers ride the row because the settled card is drawn from the row alone
 // — a cold repaint has nothing else to draw the choices from.
 message FeedQuestionAnswered {
-  // When the answers landed, epoch ms.
-  int64 at_ms = 1;
+  reserved 1;
+  reserved "at_ms";
+  // The settled clock the card's head states beside its badge -- "waited 2m
+  // 14s" -- composed by the daemon from the instant the ask was posed and the
+  // instant it settled, both as the producer observed them. The SAME element
+  // a settled tool call's head carries (FeedSimpleToolCall's returned
+  // runtime), because every tool card heads the same way. UNSET when either
+  // instant is missing; the head then shows no figure rather than a ticking or
+  // invented one.
+  optional FeedToolCallRuntime runtime = 3;
   // One per question, in the batch's order.
   repeated FeedQuestionGivenAnswer answers = 2;
 }
@@ -2304,8 +2351,16 @@ message FeedQuestionOtherText {
 // The ask expired unanswered (the producer's idle timeout) — the agent
 // proceeded without a choice; drawn as expired, never as pending forever.
 message FeedQuestionExpired {
-  // When it expired, epoch ms.
-  int64 at_ms = 1;
+  reserved 1;
+  reserved "at_ms";
+  // The settled clock the card's head states beside its badge -- "waited 2m
+  // 14s" -- composed by the daemon from the instant the ask was posed and the
+  // instant it settled, both as the producer observed them. The SAME element
+  // a settled tool call's head carries (FeedSimpleToolCall's returned
+  // runtime), because every tool card heads the same way. UNSET when either
+  // instant is missing; the head then shows no figure rather than a ticking or
+  // invented one.
+  optional FeedToolCallRuntime runtime = 2;
 }
 
 // ① What a person typed — or, nested inside a detached bubble, the prompt

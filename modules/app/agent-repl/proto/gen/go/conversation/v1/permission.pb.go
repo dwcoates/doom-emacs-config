@@ -1744,7 +1744,14 @@ type AgentPermissionSuccess struct {
 	//
 	//	*AgentPermissionSuccess_Allowed
 	//	*AgentPermissionSuccess_Denied
-	Decision      isAgentPermissionSuccess_Decision `protobuf_oneof:"decision"`
+	Decision isAgentPermissionSuccess_Decision `protobuf_oneof:"decision"`
+	// When the gate was decided, with the instant the ask was posed restated
+	// (AgentActivitySettledAt.started_at), so the settled frame alone states how
+	// long the user was asked -- the start frame is gone from any store that
+	// keeps the latest frame of the ask. UNSET when the producer observed no
+	// decision instant; a consumer then states no wait at all rather than one
+	// measured against its own clock.
+	SettledAt     *AgentActivitySettledAt `protobuf:"bytes,4,opt,name=settled_at,json=settledAt,proto3,oneof" json:"settled_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1800,6 +1807,13 @@ func (x *AgentPermissionSuccess) GetDenied() *AgentPermissionDenied {
 		if x, ok := x.Decision.(*AgentPermissionSuccess_Denied); ok {
 			return x.Denied
 		}
+	}
+	return nil
+}
+
+func (x *AgentPermissionSuccess) GetSettledAt() *AgentActivitySettledAt {
+	if x != nil {
+		return x.SettledAt
 	}
 	return nil
 }
@@ -2400,12 +2414,15 @@ const file_conversation_v1_permission_proto_rawDesc = "" +
 	"\x19AgentPermissionModeBypass\"\x19\n" +
 	"\x17AgentPermissionModePlan\"\x1c\n" +
 	"\x1aAgentPermissionModeDontAsk\"\x19\n" +
-	"\x17AgentPermissionModeAuto\"\xab\x01\n" +
+	"\x17AgentPermissionModeAuto\"\x8d\x02\n" +
 	"\x16AgentPermissionSuccess\x12C\n" +
 	"\aallowed\x18\x01 \x01(\v2'.conversation.v1.AgentPermissionAllowedH\x00R\aallowed\x12@\n" +
-	"\x06denied\x18\x02 \x01(\v2&.conversation.v1.AgentPermissionDeniedH\x00R\x06deniedB\n" +
+	"\x06denied\x18\x02 \x01(\v2&.conversation.v1.AgentPermissionDeniedH\x00R\x06denied\x12K\n" +
 	"\n" +
-	"\bdecision\"\xb3\x01\n" +
+	"settled_at\x18\x04 \x01(\v2'.conversation.v1.AgentActivitySettledAtH\x01R\tsettledAt\x88\x01\x01B\n" +
+	"\n" +
+	"\bdecisionB\r\n" +
+	"\v_settled_atJ\x04\b\x03\x10\x04\"\xb3\x01\n" +
 	"\x16AgentPermissionAllowed\x12A\n" +
 	"\x04once\x18\x01 \x01(\v2+.conversation.v1.AgentPermissionAllowedOnceH\x00R\x04once\x12M\n" +
 	"\bstanding\x18\x02 \x01(\v2/.conversation.v1.AgentPermissionAllowedStandingH\x00R\bstandingB\a\n" +
@@ -2499,7 +2516,8 @@ var file_conversation_v1_permission_proto_goTypes = []any{
 	(*AgentPermissionFailure)(nil),                // 35: conversation.v1.AgentPermissionFailure
 	(*AgentActivityId)(nil),                       // 36: conversation.v1.AgentActivityId
 	(*AgentActivityStartedAt)(nil),                // 37: conversation.v1.AgentActivityStartedAt
-	(*AgentToolFailure)(nil),                      // 38: conversation.v1.AgentToolFailure
+	(*AgentActivitySettledAt)(nil),                // 38: conversation.v1.AgentActivitySettledAt
+	(*AgentToolFailure)(nil),                      // 39: conversation.v1.AgentToolFailure
 }
 var file_conversation_v1_permission_proto_depIdxs = []int32{
 	3,  // 0: conversation.v1.AgentPermission.id:type_name -> conversation.v1.AgentPermissionId
@@ -2540,18 +2558,19 @@ var file_conversation_v1_permission_proto_depIdxs = []int32{
 	26, // 35: conversation.v1.AgentPermissionMode.auto:type_name -> conversation.v1.AgentPermissionModeAuto
 	28, // 36: conversation.v1.AgentPermissionSuccess.allowed:type_name -> conversation.v1.AgentPermissionAllowed
 	31, // 37: conversation.v1.AgentPermissionSuccess.denied:type_name -> conversation.v1.AgentPermissionDenied
-	29, // 38: conversation.v1.AgentPermissionAllowed.once:type_name -> conversation.v1.AgentPermissionAllowedOnce
-	30, // 39: conversation.v1.AgentPermissionAllowed.standing:type_name -> conversation.v1.AgentPermissionAllowedStanding
-	11, // 40: conversation.v1.AgentPermissionAllowedStanding.standing:type_name -> conversation.v1.AgentPermissionStanding
-	33, // 41: conversation.v1.AgentPermissionDenied.user:type_name -> conversation.v1.AgentPermissionDeniedByUser
-	34, // 42: conversation.v1.AgentPermissionDenied.policy:type_name -> conversation.v1.AgentPermissionDeniedByPolicy
-	32, // 43: conversation.v1.AgentPermissionDenied.undecidable:type_name -> conversation.v1.AgentPermissionDeniedForWantOfDecider
-	38, // 44: conversation.v1.AgentPermissionFailure.error:type_name -> conversation.v1.AgentToolFailure
-	45, // [45:45] is the sub-list for method output_type
-	45, // [45:45] is the sub-list for method input_type
-	45, // [45:45] is the sub-list for extension type_name
-	45, // [45:45] is the sub-list for extension extendee
-	0,  // [0:45] is the sub-list for field type_name
+	38, // 38: conversation.v1.AgentPermissionSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
+	29, // 39: conversation.v1.AgentPermissionAllowed.once:type_name -> conversation.v1.AgentPermissionAllowedOnce
+	30, // 40: conversation.v1.AgentPermissionAllowed.standing:type_name -> conversation.v1.AgentPermissionAllowedStanding
+	11, // 41: conversation.v1.AgentPermissionAllowedStanding.standing:type_name -> conversation.v1.AgentPermissionStanding
+	33, // 42: conversation.v1.AgentPermissionDenied.user:type_name -> conversation.v1.AgentPermissionDeniedByUser
+	34, // 43: conversation.v1.AgentPermissionDenied.policy:type_name -> conversation.v1.AgentPermissionDeniedByPolicy
+	32, // 44: conversation.v1.AgentPermissionDenied.undecidable:type_name -> conversation.v1.AgentPermissionDeniedForWantOfDecider
+	39, // 45: conversation.v1.AgentPermissionFailure.error:type_name -> conversation.v1.AgentToolFailure
+	46, // [46:46] is the sub-list for method output_type
+	46, // [46:46] is the sub-list for method input_type
+	46, // [46:46] is the sub-list for extension type_name
+	46, // [46:46] is the sub-list for extension extendee
+	0,  // [0:46] is the sub-list for field type_name
 }
 
 func init() { file_conversation_v1_permission_proto_init() }
