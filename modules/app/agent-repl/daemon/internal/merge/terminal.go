@@ -287,6 +287,10 @@ func (r *run) teardown(ctx context.Context, out outcome, terminal func()) {
 		terminal()
 	}
 
+	if err := r.o.settleLeavingQueueTab(ctx, r.repo, r.ws, r.lease.ID, terminalCause(out)); err != nil {
+		log.Error(op, "could not settle the finished merge's queue tab", dlog.Context{
+			"workspace": string(r.ws), "repo": string(r.repo), "error": err.Error()})
+	}
 	if err := r.o.deps.DB.RemoveMergeQueueEntry(ctx, r.repo, r.ws, terminalCause(out)); err != nil {
 		log.Error(op, "could not drop the finished merge's queue entry", dlog.Context{
 			"workspace": string(r.ws), "repo": string(r.repo), "error": err.Error()})

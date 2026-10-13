@@ -3,6 +3,8 @@ package merge
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 
 	"time"
 
@@ -294,6 +296,11 @@ func (o *orchestrator) dropQueued(ctx context.Context, ws ids.WorkspaceID, cause
 		log.Error(op, "could not read a queued merge's queue entry", dlog.Context{"workspace": string(ws), "repo": string(repo), "error": err.Error()})
 		return err
 	}
+	if ledger, ok := o.leaseOf(ws); ok {
+		if err := o.settleLeavingQueueTab(ctx, repo, ws, ledger, string(cause)); err != nil {
+			log.Error(op, "could not settle a dropped merge's queue tab", dlog.Context{"workspace": string(ws), "repo": string(repo), "cause": string(cause), "error": err.Error()})
+		}
+	}
 	if err := o.deps.DB.RemoveMergeQueueEntry(ctx, repo, ws, string(cause)); err != nil {
 		log.Error(op, "could not drop a queued merge", dlog.Context{"workspace": string(ws), "repo": string(repo), "cause": string(cause), "error": err.Error()})
 		return err
@@ -360,15 +367,9 @@ func (o *orchestrator) republishQueue(ctx context.Context, repo wsm.RepoKey) err
 		return err
 	}
 	entries := inLine(stored)
-	names := map[ids.WorkspaceID]string{}
-	dirs := map[ids.WorkspaceID]string{}
-	for _, entry := range entries {
-		record, err := o.deps.DB.Workspace(ctx, entry.Workspace)
-		if err != nil {
-			return err
-		}
-		names[entry.Workspace] = record.Name
-		dirs[entry.Workspace] = record.Dir
+	view, err := o.viewQueue(ctx, repo, entries)
+	if err != nil {
+		return err
 	}
 	o.mu.Lock()
 	front := o.running[repo]
@@ -376,13 +377,7 @@ func (o *orchestrator) republishQueue(ctx context.Context, repo wsm.RepoKey) err
 	var ahead *frontendv1.FooterStatusActivityMergeStep
 	var aheadAt time.Time
 	if front != nil {
-		ahead, aheadAt = front.enqueuedLine(names[front.ws])
-	}
-	standings, err := o.queueStandings(entries)
-	if err != nil {
-		o.deps.Log.Global().Error("daemon.merge.queue", "could not resolve when a queued merge entered its stage; the queue is not drawn",
-			dlog.Context{"repo": string(repo), "entries": len(entries), "error": err.Error()})
-		return err
+		ahead, aheadAt = front.enqueuedLine(view.names[front.ws])
 	}
 	waiting := 0
 	for _, entry := range entries {
@@ -391,6 +386,7 @@ func (o *orchestrator) republishQueue(ctx context.Context, repo wsm.RepoKey) err
 		}
 	}
 	place := 0
+	var drawn, unledgered []string
 	for _, entry := range entries {
 		// EVERY MERGE IN LINE HAS A BUBBLE, from the moment it is queued, PINNED
 		// to the feed's bottom until it resolves (owner ruling, 2026-10-10;
@@ -407,19 +403,25 @@ func (o *orchestrator) republishQueue(ctx context.Context, repo wsm.RepoKey) err
 			if clocked {
 				o.publishHead(entry.Workspace, lease, o.bubbleLabel(ctx, entry), clock, nil)
 			}
-			state, drawn, err := o.queueTabState(entry)
+			state, shown, err := o.queueTabState(entry)
 			if err != nil {
 				o.deps.Log.Global().Error("daemon.merge.queue", "could not resolve when a queued merge's queue tab began; the queue is not drawn",
 					dlog.Context{"repo": string(repo), "workspace": string(entry.Workspace), "error": err.Error()})
 				return err
 			}
-			if drawn {
+			if shown {
 				o.publishTab(entry.Workspace, lease, TabQueue, 1,
-					queueTab(queueSnapshot(entries, entry.Workspace, names, dirs, standings), state))
+					queueTab(view.snapshot(entries, entry.Workspace), state))
+				drawn = append(drawn, string(entry.Workspace))
 			} else {
 				o.log(ctx, entry.Workspace).Debug("daemon.merge.queue", "an admitted merge's run is not registered yet; its admission draws its queue tab",
 					dlog.Context{"repo": string(repo), "workspace": string(entry.Workspace)})
 			}
+		} else {
+			// A MERGE IN LINE WITH NO BUBBLE IDENTITY IN THIS DAEMON has a
+			// queue tab nothing here can redraw: the stale tab a reader
+			// would otherwise find with no record of why.
+			unledgered = append(unledgered, string(entry.Workspace))
 		}
 		if entry.State != wsm.MergeQueued {
 			continue
@@ -432,6 +434,94 @@ func (o *orchestrator) republishQueue(ctx context.Context, repo wsm.RepoKey) err
 			Line: ahead, LineAt: aheadAt,
 		})
 	}
+	if len(unledgered) > 0 {
+		o.deps.Log.Global().Info("daemon.merge.queue", "merges in line have no bubble identity in this daemon; their queue tabs are not redrawn",
+			dlog.Context{"repo": string(repo), "workspaces": strings.Join(unledgered, ",")})
+	}
+	o.deps.Log.Global().Debug("daemon.merge.queue", "redrew the queue tab of every merge in line", dlog.Context{
+		"repo": string(repo), "in_line": len(entries), "drawn": strings.Join(drawn, ",")})
+	return nil
+}
+
+// queueView is what every drawing of one repository's queue reads: each
+// in-line workspace's name and directory, and each entry's standing.
+type queueView struct {
+	names     map[ids.WorkspaceID]string
+	dirs      map[ids.WorkspaceID]string
+	standings []*frontendv1.FeedMergeQueueEntry
+}
+
+// viewQueue resolves the queue view of one repository's in-line entries.
+func (o *orchestrator) viewQueue(ctx context.Context, repo wsm.RepoKey, entries []wsm.MergeQueueEntry) (queueView, error) {
+	view := queueView{names: map[ids.WorkspaceID]string{}, dirs: map[ids.WorkspaceID]string{}}
+	for _, entry := range entries {
+		record, err := o.deps.DB.Workspace(ctx, entry.Workspace)
+		if err != nil {
+			return queueView{}, err
+		}
+		view.names[entry.Workspace] = record.Name
+		view.dirs[entry.Workspace] = record.Dir
+	}
+	standings, err := o.queueStandings(entries)
+	if err != nil {
+		o.deps.Log.Global().Error("daemon.merge.queue", "could not resolve when a queued merge entered its stage; the queue is not drawn",
+			dlog.Context{"repo": string(repo), "entries": len(entries), "error": err.Error()})
+		return queueView{}, err
+	}
+	view.standings = standings
+	return view, nil
+}
+
+// snapshot is the queue as self sees it.
+func (v queueView) snapshot(entries []wsm.MergeQueueEntry, self ids.WorkspaceID) *frontendv1.FeedMergeQueue {
+	return queueSnapshot(entries, self, v.names, v.dirs, v.standings)
+}
+
+// settleLeavingQueueTab draws a merge's own queue tab ONE LAST TIME as it
+// leaves the queue -- landed, failed, abandoned or dropped -- before its entry
+// is removed: SETTLED, with the queue as it stands at that moment and itself
+// as the current entry. Its tab is no longer redrawn once it has left, because
+// the queue it would show no longer holds it; every merge still in line is
+// redrawn by the republish that follows the removal (owner ruling,
+// 2026-10-12; AGENTS.md, "The merge queue's test gate and remediation
+// contract").
+//
+// A merge only REQUESTED has no bubble and draws nothing.
+func (o *orchestrator) settleLeavingQueueTab(ctx context.Context, repo wsm.RepoKey, ws ids.WorkspaceID, ledger ids.LeaseID, why string) error {
+	const op = "daemon.merge.queue"
+	stored, err := o.deps.DB.MergeQueue(ctx, repo)
+	if err != nil {
+		return err
+	}
+	entries := inLine(stored)
+	idx := slices.IndexFunc(entries, func(e wsm.MergeQueueEntry) bool { return e.Workspace == ws })
+	if idx < 0 || ledger == "" {
+		o.log(ctx, ws).Debug(op, "a merge left a queue it never stood in line in; it has no queue tab to settle",
+			dlog.Context{"workspace": string(ws), "repo": string(repo), "why": why})
+		return nil
+	}
+	view, err := o.viewQueue(ctx, repo, entries)
+	if err != nil {
+		return err
+	}
+	state, shown, err := o.queueTabState(entries[idx])
+	if err != nil {
+		return err
+	}
+	if !shown || !state.settled {
+		// IT LEFT WHILE STILL WAITING: its wait ends now.
+		state = tabState{startedMS: state.startedMS, settled: true, endedMS: o.nowMS()}
+		if !shown {
+			queued, err := enqueuedMS(entries[idx])
+			if err != nil {
+				return err
+			}
+			state.startedMS = queued
+		}
+	}
+	o.publishTab(ws, ledger, TabQueue, 1, queueTab(view.snapshot(entries, ws), state))
+	o.log(ctx, ws).Info(op, "settled the leaving merge's queue tab on the queue as it stood when it left", dlog.Context{
+		"workspace": string(ws), "repo": string(repo), "ledger": string(ledger), "why": why, "in_line": len(entries)})
 	return nil
 }
 

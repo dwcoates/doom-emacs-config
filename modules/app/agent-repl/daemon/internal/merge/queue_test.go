@@ -3,6 +3,9 @@ package merge
 import (
 	"context"
 	"errors"
+	"fmt"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -980,4 +983,169 @@ func TestAWaitingHeadClockWithNoQueuedTimeIsRefused(t *testing.T) {
 	if err == nil || clocked {
 		t.Fatalf("headClockMS answered clocked %v, error %v, want an error and no clock", clocked, err)
 	}
+}
+
+// queueNames answers a queue snapshot's workspaces, ahead / current / behind.
+func queueNames(q *frontendv1.FeedMergeQueue) (ahead []string, current string, behind []string) {
+	for _, e := range q.GetAhead() {
+		ahead = append(ahead, e.GetWorkspace().GetRef().GetId())
+	}
+	for _, e := range q.GetBehind() {
+		behind = append(behind, e.GetWorkspace().GetRef().GetId())
+	}
+	return ahead, q.GetCurrent().GetWorkspace().GetRef().GetId(), behind
+}
+
+// threeInLine queues the harness's merge at the front and two more behind it.
+func threeInLine(t *testing.T, h *harness) {
+	t.Helper()
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	enqueue(t, h)
+	queueAnother(t, h, "ws-2", "two")
+	queueAnother(t, h, "ws-3", "three")
+}
+
+func TestAWaitingMergesQueueTabDropsTheFrontOnceItLands(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	threeInLine(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the front's merge failed: %v", err)
+	}
+
+	// Assert.
+	ahead, current, behind := queueNames(lastQueueTabOf(t, h, "ws-2").GetQueue())
+	if len(ahead) != 0 || current != "ws-2" || !slices.Equal(behind, []string{"ws-3"}) {
+		t.Fatalf("ws-2 sees ahead %v, current %q, behind %v: want the landed front gone", ahead, current, behind)
+	}
+}
+
+func TestAWaitingMergesQueueTabDropsTheFrontOnceItFails(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	threeInLine(t, h)
+	h.runner.runs = nil
+	h.gateBroken(1)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("pumpOnce: %v", err)
+	}
+
+	// Assert.
+	ahead, _, _ := queueNames(lastQueueTabOf(t, h, "ws-2").GetQueue())
+	if len(ahead) != 0 {
+		t.Fatalf("ws-2 sees %v ahead, want the failed front gone", ahead)
+	}
+}
+
+func TestAWaitingMergesQueueTabDropsAMergeEvictedBehindIt(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	threeInLine(t, h)
+
+	// Act.
+	if err := h.o.Evict(context.Background(), "ws-3"); err != nil {
+		t.Fatalf("Evict: %v", err)
+	}
+
+	// Assert.
+	_, _, behind := queueNames(lastQueueTabOf(t, h, "ws-2").GetQueue())
+	if len(behind) != 0 {
+		t.Fatalf("ws-2 sees %v behind, want the evicted merge gone", behind)
+	}
+}
+
+func TestAnEvictedMergesOwnQueueTabIsSettled(t *testing.T) {
+	// Arrange: ws-3 waits, its queue tab live.
+	h := newHarness(t)
+	threeInLine(t, h)
+
+	// Act.
+	if err := h.o.Evict(context.Background(), "ws-3"); err != nil {
+		t.Fatalf("Evict: %v", err)
+	}
+
+	// Assert.
+	if tab := lastQueueTabOf(t, h, "ws-3"); tab.GetSettled() == nil {
+		t.Fatalf("ws-3's queue tab = %v, want it settled: the merge left the queue", tab)
+	}
+}
+
+func TestAnEvictedMergesOwnQueueTabShowsTheQueueItLeft(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	threeInLine(t, h)
+
+	// Act.
+	if err := h.o.Evict(context.Background(), "ws-3"); err != nil {
+		t.Fatalf("Evict: %v", err)
+	}
+
+	// Assert.
+	ahead, current, _ := queueNames(lastQueueTabOf(t, h, "ws-3").GetQueue())
+	if current != "ws-3" || !slices.Equal(ahead, []string{string(theWorkspace), "ws-2"}) {
+		t.Fatalf("ws-3 sees ahead %v, current %q: want the queue as it stood when it left", ahead, current)
+	}
+}
+
+func TestALandedMergesOwnQueueTabShowsTheQueueItLeft(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	threeInLine(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the front's merge failed: %v", err)
+	}
+
+	// Assert.
+	_, current, behind := queueNames(lastQueueTabOf(t, h, theWorkspace).GetQueue())
+	if current != string(theWorkspace) || !slices.Equal(behind, []string{"ws-2", "ws-3"}) {
+		t.Fatalf("the landed merge sees current %q, behind %v: want the queue it left", current, behind)
+	}
+}
+
+func TestALeavingMergesQueueTabIsSettledAtInfo(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	threeInLine(t, h)
+
+	// Act.
+	if err := h.o.Evict(context.Background(), "ws-3"); err != nil {
+		t.Fatalf("Evict: %v", err)
+	}
+
+	// Assert.
+	for _, rec := range h.logs.Records() {
+		if rec.Level == "info" && rec.Operation == "daemon.merge.queue" && strings.Contains(rec.Message, "settled the leaving merge's queue tab") && rec.Context["workspace"] == "ws-3" {
+			return
+		}
+	}
+	t.Fatal("no INFO record says the leaving merge's queue tab was settled")
+}
+
+func TestAMergeInLineWithNoBubbleIdentityIsRecordedAtInfo(t *testing.T) {
+	// Arrange: ws-2's ledger identity is gone from this daemon.
+	h := newHarness(t)
+	threeInLine(t, h)
+	h.o.mu.Lock()
+	delete(h.o.ledgerOf, "ws-2")
+	h.o.mu.Unlock()
+
+	// Act.
+	if err := h.o.republishQueue(context.Background(), h.repoKey()); err != nil {
+		t.Fatalf("republishQueue: %v", err)
+	}
+
+	// Assert.
+	for _, rec := range h.logs.Records() {
+		if rec.Level == "info" && strings.Contains(rec.Message, "have no bubble identity") && strings.Contains(fmt.Sprint(rec.Context["workspaces"]), "ws-2") {
+			return
+		}
+	}
+	t.Fatal("no INFO record names the merge whose queue tab cannot be redrawn")
 }
