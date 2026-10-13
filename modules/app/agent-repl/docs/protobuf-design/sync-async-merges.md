@@ -150,6 +150,24 @@ contract rather than per-increment agreement.
   the hidden agent, and that interrupting opens the workspace as a failing
   merge does.
 
+### `agentrepl.v1.MergeWorkspaceSourceOwnBranchDetached.compact_after` and `conversation.v1.PromptOrigin.PROMPT_ORIGIN_MERGE_COMPACT_AFTER` (2026-10-13)
+
+- WHAT: an async merge may ask that its REQUESTER be compacted once the
+  branch lands. Right after the landed handback the daemon submits `/compact`
+  to the requester's session down the same prompt path, under
+  `PROMPT_ORIGIN_MERGE_COMPACT_AFTER`, so it runs behind the handback's turn
+  and draws as any compaction does (footer compacting status, the feed's
+  compaction separator) with no prompt bubble. A failed or abandoned merge
+  compacts nothing.
+- WHY: the owner asked for compact-after-merge as an explicit merge-queue
+  argument that only async merges accept. The field lives on the detached run
+  alone, so an in-place merge that compacts after it cannot be expressed on
+  the wire; the command file and the CLI refuse `compact_after` without
+  `detached`, and `wsm` refuses it on a request that is not detached.
+- `wsm`: layout 43 adds `merge_queue.source_compact_after` (the requester's
+  request) and `workspaces.merge_compact_after` (the merge workspace's origin,
+  which the handback reads).
+
 ## Daemon-internal consequences (no contract text)
 
 - `wsm`: layout 39 adds `merge_queue.source_detach_name`,

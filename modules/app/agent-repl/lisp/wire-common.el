@@ -711,7 +711,7 @@ no client ever sends them.")
 (defconst agent-repl-wire-shim-only-prompt-origins
   '("PROMPT_ORIGIN_VENDOR_STARTED" "PROMPT_ORIGIN_LINK_UNRESOLVED"
     "PROMPT_ORIGIN_MERGE_HANDBACK" "PROMPT_ORIGIN_WORKSPACE_RETARGETED"
-    "PROMPT_ORIGIN_MERGE_PICK")
+    "PROMPT_ORIGIN_MERGE_PICK" "PROMPT_ORIGIN_MERGE_COMPACT_AFTER")
   "PromptOrigin values no client ever sends: only the shim or the daemon does.
 VENDOR_STARTED names a turn the vendor began on its own, which the shim
 adopts; an editor submit carrying it would claim the vendor started a
@@ -720,7 +720,9 @@ after a clicked feed link resolved to no file.  MERGE_HANDBACK is the
 daemon's report of how a detached merge ended.  WORKSPACE_RETARGETED is
 the daemon's notice that a workspace's merge target changed.  MERGE_PICK is
 the daemon's pick brief opening an async merge workspace that lands only some
-changes.  None has an elisp spelling at all.")
+changes.  MERGE_COMPACT_AFTER is the daemon's /compact of a requester whose
+async merge landed and asked to compact after it.  None has an elisp
+spelling at all.")
 
 (defun agent-repl-wire-encode-prompt-origin (value)
   "Encode the PromptOrigin keyword VALUE as its protojson enum name.
