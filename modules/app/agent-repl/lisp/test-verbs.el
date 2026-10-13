@@ -603,6 +603,63 @@ the offer goes to input.el, and nothing claims there was nothing to do."
       (should-not offered)
       (should (agent-repl-test-verbs--messaged-p "nothing to interrupt")))))
 
+(ert-deftest agent-repl-verbs-interrupt-merge-queue-offered-offers-no-rollback ()
+  "A stop that raised the merge-queue question hands nothing to the composer's
+rollback, and never says there was nothing to interrupt."
+  (agent-repl-test-verbs--with
+      '((:interrupt . (:response (:arm :success :value (:arm :merge-queue-offered :value nil)))))
+    (let ((offered nil))
+      (cl-letf (((symbol-function 'agent-repl--input-rollback-offer)
+                 (lambda (&rest args) (push args offered)))
+                ((symbol-function 'agent-repl--webview-window) (lambda (_ws) nil)))
+        ;; Act
+        (agent-repl-verb-interrupt "ws-one"))
+      ;; Assert
+      (should-not offered)
+      (should-not (agent-repl-test-verbs--messaged-p "nothing to interrupt"))
+      (should (agent-repl-test-verbs--messaged-p "Evict, Prioritize or Cancel")))))
+
+(ert-deftest agent-repl-verbs-interrupt-merge-queue-offered-selects-the-webview ()
+  "A stop that raised the merge-queue question selects the workspace's webview
+window, so the next key reaches the focused question."
+  (agent-repl-test-verbs--with
+      '((:interrupt . (:response (:arm :success :value (:arm :merge-queue-offered :value nil)))))
+    (let ((selected nil))
+      (cl-letf (((symbol-function 'agent-repl--webview-window) (lambda (ws) (list :win ws)))
+                ((symbol-function 'select-window) (lambda (win &rest _) (push win selected))))
+        ;; Act
+        (agent-repl-verb-interrupt "ws-one"))
+      ;; Assert
+      (should (equal selected '((:win "ws-one")))))))
+
+(ert-deftest agent-repl-verbs-interrupt-merge-queue-offered-without-a-webview-selects-nothing ()
+  "With no window showing the webview, nothing is selected and the message
+still says where the question stands."
+  (agent-repl-test-verbs--with
+      '((:interrupt . (:response (:arm :success :value (:arm :merge-queue-offered :value nil)))))
+    (let ((selected nil))
+      (cl-letf (((symbol-function 'agent-repl--webview-window) (lambda (_ws) nil))
+                ((symbol-function 'select-window) (lambda (win &rest _) (push win selected))))
+        ;; Act
+        (agent-repl-verb-interrupt "ws-one"))
+      ;; Assert
+      (should-not selected)
+      (should (agent-repl-test-verbs--messaged-p "in its bubble")))))
+
+(ert-deftest agent-repl-verbs-interrupt-merge-queue-offered-is-logged ()
+  "Raising the merge-queue question is recorded through the canonical log."
+  (agent-repl-test-verbs--with
+      '((:interrupt . (:response (:arm :success :value (:arm :merge-queue-offered :value nil)))))
+    (let ((records nil))
+      (cl-letf (((symbol-function 'agent-repl--webview-window) (lambda (_ws) nil))
+                ((symbol-function 'agent-repl--info)
+                 (lambda (ws fmt &rest args) (push (list ws (apply #'format fmt args)) records))))
+        ;; Act
+        (agent-repl-verb-interrupt "ws-one"))
+      ;; Assert
+      (should (cl-find-if (lambda (r) (string-match-p "elisp.verbs.interrupt-merge-queue-offered ws=ws-one" (cadr r)))
+                          records)))))
+
 (ert-deftest agent-repl-verbs-interrupt-detached-count-is-stated ()
   "A confirmed stop that also ended agents states the count."
   (agent-repl-test-verbs--with
