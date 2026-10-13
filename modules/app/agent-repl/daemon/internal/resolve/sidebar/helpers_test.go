@@ -193,6 +193,13 @@ func (f *fanned) OnAgentTerminal(ws ids.WorkspaceID, agent *conversationv1.Agent
 	f.Resolver.OnAgentTerminal(ws, agent, turn, success, failure)
 }
 
+// OnSignedIn tells the footer first, as the daemon's sign-in fan-out does, so
+// the row reads the footer's lifted status.
+func (f *fanned) OnSignedIn(ws ids.WorkspaceID) {
+	f.footer.OnSignedIn(ws)
+	f.Resolver.OnSignedIn(ws)
+}
+
 func (f *fanned) OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId, act *conversationv1.AgentActivity) {
 	f.footer.OnActivity(ws, agent, act)
 	f.Resolver.OnActivity(ws, agent, act)

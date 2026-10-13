@@ -15,6 +15,13 @@ type LoginSessions interface {
 	LoginCompleted(ctx context.Context, at time.Time)
 }
 
+// LoginSignIns is told of a completed login's ACCOUNT ROOT, so every
+// workspace on that root lifts the account failure the login answers
+// (internal/signin).
+type LoginSignIns interface {
+	SignedIn(ctx context.Context, configDir string)
+}
+
 // LoginWatch tells a login made THROUGH agent-repl from a flow that was opened
 // and abandoned. It is the login manager's observer (login.Observer).
 //
@@ -31,6 +38,7 @@ type LoginSessions interface {
 type LoginWatch struct {
 	read     func(configDir string) (account.LoginRecord, error)
 	sessions LoginSessions
+	signIns  LoginSignIns
 	now      func() time.Time
 	log      dlog.Logger
 
@@ -45,18 +53,20 @@ type openedFlow struct {
 }
 
 // NewLoginWatch builds the watch, refusing a missing collaborator.
-func NewLoginWatch(read func(string) (account.LoginRecord, error), sessions LoginSessions, now func() time.Time, log dlog.Logger) (*LoginWatch, error) {
+func NewLoginWatch(read func(string) (account.LoginRecord, error), sessions LoginSessions, signIns LoginSignIns, now func() time.Time, log dlog.Logger) (*LoginWatch, error) {
 	switch {
 	case read == nil:
 		return nil, errors.New("agentreplsession: a login record reader is required")
 	case sessions == nil:
 		return nil, errors.New("agentreplsession: a session to begin is required")
+	case signIns == nil:
+		return nil, errors.New("agentreplsession: a sign-in fan-out is required")
 	case now == nil:
 		return nil, errors.New("agentreplsession: a clock is required")
 	case log == nil:
 		return nil, errors.New("agentreplsession: a logger is required")
 	}
-	return &LoginWatch{read: read, sessions: sessions, now: now, log: log, opened: map[string]openedFlow{}}, nil
+	return &LoginWatch{read: read, sessions: sessions, signIns: signIns, now: now, log: log, opened: map[string]openedFlow{}}, nil
 }
 
 // LoginOpened reads the root's login record as the flow opens.
@@ -110,4 +120,6 @@ func (w *LoginWatch) LoginEnded(configDir string) {
 	fields["at"] = at.UTC().Format(time.RFC3339Nano)
 	w.log.Info(op, "a login made through agent-repl completed", fields)
 	w.sessions.LoginCompleted(context.Background(), at)
+	// THE SAME LOGIN ANSWERS every account failure standing on the root.
+	w.signIns.SignedIn(context.Background(), configDir)
 }

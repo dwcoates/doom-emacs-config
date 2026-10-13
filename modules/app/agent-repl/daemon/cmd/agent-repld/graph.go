@@ -64,6 +64,7 @@ import (
 	"agent-repld/internal/sessionlock"
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/shimclient"
+	"agent-repld/internal/signin"
 	"agent-repld/internal/titlesynth"
 	"agent-repld/internal/vocab"
 	"agent-repld/internal/workspace"
@@ -536,6 +537,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Faults:      p.DB,
 		// A ROLLED-BACK TURN STAYS ROLLED BACK across a restart.
 		RolledBack: p.DB,
+		SignedIn:   p.DB,
 		// A row the feed cannot place is drawn nowhere and raised on the
 		// topbar's warning chip, the webapp's one error surface.
 		Warnings: topbarResolver,
@@ -799,7 +801,20 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build agent-repl's session: %w", err)
 	}
-	loginWatch, err := agentreplsession.NewLoginWatch(account.ReadLoginRecord, agentReplSession, time.Now, log)
+	// A LOGIN ANSWERS every account failure on its root: each workspace
+	// spending from that root lifts it from its feed, footer and roster.
+	signIns, err := signin.New(signin.Deps{
+		Workspaces:   p.DB.ListWorkspaces,
+		ConfigDirFor: accounts.ConfigDirFor,
+		Feed:         feedResolver,
+		Footer:       footerResolver,
+		Roster:       sidebarResolver,
+		Log:          log,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("agent-repld: build the sign-in fan-out: %w", err)
+	}
+	loginWatch, err := agentreplsession.NewLoginWatch(account.ReadLoginRecord, agentReplSession, signIns, time.Now, log)
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the login watch: %w", err)
 	}
