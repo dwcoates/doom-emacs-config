@@ -30,6 +30,12 @@ type fakeHost struct {
 	attachOut string
 	// bounds are the bounds the probes ran under, by call.
 	bounds map[string]time.Duration
+	// load and ps are what `sysctl -n vm.loadavg` and `ps` answer; loadErr
+	// and psErr their failures, if any.
+	load    string
+	loadErr error
+	ps      string
+	psErr   error
 }
 
 func (h *fakeHost) run(name string, args ...string) (string, error) {
@@ -58,6 +64,10 @@ func (h *fakeHost) run(name string, args ...string) (string, error) {
 		return h.info, nil
 	case strings.HasPrefix(call, "lsof"):
 		return h.lsof, h.lsofErr
+	case strings.HasPrefix(call, "sysctl"):
+		return h.load, h.loadErr
+	case strings.HasPrefix(call, "ps "):
+		return h.ps, h.psErr
 	}
 	return "", nil
 }
@@ -756,7 +766,7 @@ func TestAcquireLogsItsEdgesWithTimings(t *testing.T) {
 	}
 	t.Cleanup(func() { v.Release() })
 	want := []string{
-		"INFO RAM disk acquire: begin, 16 MiB",
+		"INFO RAM disk acquire: begin at 2026-10-12T00:00:01.000Z, 16 MiB",
 		"INFO RAM disk acquire: /dev/disk9 mounted at " + h.mount + " in 3s (attach 1s, format 1s, mount 1s)",
 	}
 	if strings.Join(log.lines, "\n") != strings.Join(want, "\n") {
@@ -838,7 +848,7 @@ func TestReleaseLogsItsEdgesWithTimings(t *testing.T) {
 
 	// Assert
 	want := []string{
-		"INFO RAM disk release: begin, /dev/disk9 at " + h.mount,
+		"INFO RAM disk release: begin at 2026-10-12T00:00:05.000Z, /dev/disk9 mounted at " + h.mount,
 		"INFO RAM disk release: /dev/disk9 released in 1s",
 	}
 	if strings.Join(log.lines, "\n") != strings.Join(want, "\n") {

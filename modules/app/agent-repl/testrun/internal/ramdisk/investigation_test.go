@@ -266,6 +266,8 @@ func TestInvestigationPrompt(t *testing.T) {
 		{name: "says the leak check never ran", trouble: stuckLock, want: "- Leaked RAM disks: none found (the check runs under the registry lock, so it never ran).\n"},
 		{name: "asks for the root cause", trouble: leakTrouble, want: "- Find why the runner's RAM disks leak, why the disk manager wedged and why the registry lock's holder is stuck"},
 		{name: "forbids hand repair", trouble: leakTrouble, want: "- Never hand-repair:"},
+		{name: "says when the check began", trouble: &Trouble{At: time.Date(2026, 10, 13, 3, 19, 9, 120e6, time.UTC)}, want: "- The check began at 2026-10-13T03:19:09.120Z.\n"},
+		{name: "carries the host's state", trouble: &Trouble{InfoErr: errors.New("timed out"), Host: "load average 28.72 21.45 17.25\nno disk process running\n"}, want: "The host when the disk manager did not answer:\n\n```\nload average 28.72 21.45 17.25\nno disk process running\n```\n"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -408,5 +410,30 @@ func TestEnsureInvestigationDeduplicatesWithoutAStuckRegistryLock(t *testing.T) 
 	// Assert
 	if err != nil || out.Existing == "" || len(f.dispatched) != 0 {
 		t.Fatalf("EnsureInvestigation = %+v, %v with %d dispatches; want the pending create found without the lock", out, err, len(f.dispatched))
+	}
+}
+
+func TestWriteBlock(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "fences the body under its heading", body: "a\nb\n", want: "\nH:\n\n```\na\nb\n```\n"},
+		{name: "writes nothing for an empty body", body: " \n", want: ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			var b strings.Builder
+
+			// Act
+			writeBlock(&b, "H:", tc.body)
+
+			// Assert
+			if b.String() != tc.want {
+				t.Fatalf("block = %q, want %q", b.String(), tc.want)
+			}
+		})
 	}
 }

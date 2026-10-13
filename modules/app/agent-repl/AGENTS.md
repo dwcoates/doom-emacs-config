@@ -416,7 +416,15 @@ unreachable from a live process.
     and who has it open (`lsof`), and the investigation, deduplicated without
     the lock.
   - The acquire and release edges are logged at INFO with their timings, so
-    a stall shows as a begin line with no end.
+    a stall shows as a begin line with no end. The check and both begin lines
+    carry the wall-clock time, so one run's probes line up against another
+    run's attach or detach.
+  - A PROBE THAT DOES NOT ANSWER READS THE HOST AT ONCE: its load average
+    (`sysctl -n vm.loadavg`) and every disk process then running (`ps`,
+    hdiutil, diskutil and the daemons behind them), each within 500ms
+    (`ramdisk.HostBound`). It goes on the check's INFO line, the ERROR line
+    and the investigation's prompt, so a slow host and a busy disk manager
+    are told apart from the log alone.
   - A RAM disk that cannot be made falls back to `/tmp` with an ERROR line.
 
 ### Suite timings: what a row measures
