@@ -4970,6 +4970,16 @@ bubble-body.bubble-body { display: block; }
   cursor: pointer;
 }
 .feed-load-more[aria-disabled="true"] { cursor: progress; opacity: 0.6; }
+/* A TURN'S EARLIER STEPS ON AN OLDER PAGE: the load control's look, under the
+   prompt it belongs to (feed/rows/earlier-steps.ts). */
+.feed-earlier-steps {
+  display: block;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.9em;
+  padding: 2px 0;
+}
+.feed-earlier-steps:hover { text-decoration: underline; }
 
 /* The breadcrumb header a nested page draws — ONLY when the trail is non-empty
    (R6): expansion is inline, so this is context, never navigation. */

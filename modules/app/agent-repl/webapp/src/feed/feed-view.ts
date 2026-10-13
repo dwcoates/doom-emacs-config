@@ -34,6 +34,7 @@
  * the rest of the feed goes on working — a feed that blanks itself because one
  * card was unreadable would lose the reader everything, including the evidence.
  */
+import { drawFeedEarlierSteps } from "./rows/earlier-steps.js";
 import { createControl } from "../control.js";
 import { log } from "../log.js";
 import { SELECTED_ROW_ATTRIBUTE, syncSelectedEntry } from "./selected-entry.js";
@@ -1470,6 +1471,10 @@ export function createFeedController(
         return opts.renderers.commandPanel(arm.value, rc);
       case "commandRefused":
         return opts.renderers.commandRefused(arm.value, rc);
+      case "earlierSteps":
+        return drawFeedEarlierSteps(() => {
+          void guardMalformed(opts.ctx, "feed.earlier-steps", serializeWalk(loadOlder));
+        });
       case "mergeTab":
         // INSIDE a merge bubble the strip consumes these and this path is never
         // reached. On any other feed the tab is still a row the daemon served,
