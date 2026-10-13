@@ -24,6 +24,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { bootColdOnce, startHarness, type Harness } from "./harness";
 import { log } from "../../src/log";
 import { TITLE_REVEALED_ATTRIBUTE } from "../../src/feed/title-reveal.js";
+import { CONVERSATION_DRAWN_ATTRIBUTE } from "../../src/feed/conversation-drawn.js";
 import { ROOT_FEED } from "./fake-daemon";
 import { WORKSPACE_ID, activityRow, feedId, toolCallRunningUnit } from "./fixtures";
 
@@ -182,5 +183,28 @@ describe("finishing the page's title type-outs", () => {
       null,
       true,
     ]);
+  });
+});
+
+/**
+ * A BOOTED PAGE HAS ITS CONVERSATION ON SCREEN: the boot runs the frames the
+ * drawn mark waits for, so its record never lands inside a case, and every
+ * test's page starts unmarked.
+ */
+describe("the boot's drawn mark", () => {
+  it("is set by the time the boot returns", async () => {
+    // Arrange, Act
+    harness = await startHarness();
+    // Assert
+    expect(document.documentElement.hasAttribute(CONVERSATION_DRAWN_ATTRIBUTE)).toBe(true);
+  });
+
+  it("is cleared when the harness stops", async () => {
+    // Arrange
+    harness = await startHarness();
+    // Act
+    await harness.stop();
+    // Assert
+    expect(document.documentElement.hasAttribute(CONVERSATION_DRAWN_ATTRIBUTE)).toBe(false);
   });
 });
