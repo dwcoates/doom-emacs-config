@@ -550,6 +550,7 @@ func (q *queue) releaseReconnectHoldsLocked(ctx context.Context, d *delivery, lo
 	if block, blocked := q.vendorBlocked(ws); blocked {
 		log.Info(opSubmit, "the vendor still does not serve the session; the after-reconnect holds stay standing",
 			dlog.Context{"vendor_block": block})
+		q.reportResume(ws, ResumeNotNow, "the vendor does not serve the session")
 		return
 	}
 	// A SESSION THAT DOES NOT SERVE IS HANDED NOTHING: what waits on it is
@@ -561,6 +562,7 @@ func (q *queue) releaseReconnectHoldsLocked(ctx context.Context, d *delivery, lo
 			message = "the session is parked at its cold gate; the prompts waiting on it are held until the gate is answered, which a prompt never does"
 		}
 		log.Info(opSubmit, message, dlog.Context{"hold": kind.String(), "why": why, "moved": moved})
+		q.reportResume(ws, ResumeNotNow, "the session does not serve: "+why)
 		return
 	}
 	// THE FACTS COME FIRST: until they are in, an adopted shim's running turn
