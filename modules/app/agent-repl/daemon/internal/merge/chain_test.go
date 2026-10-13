@@ -3,6 +3,7 @@ package merge
 import (
 	"agent-repld/internal/wsm"
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"sort"
@@ -936,5 +937,41 @@ func waitGone(t *testing.T, o *orchestrator) {
 	case <-gone:
 	case <-time.After(5 * time.Second):
 		t.Fatal("the exiting orchestrator's runs did not end")
+	}
+}
+
+func TestASpeculativePassStartsTheFixingCountOver(t *testing.T) {
+	// Arrange: the merge behind the head fails its first speculative gate,
+	// is fixed, and passes the next.
+	c := newChain(t)
+	enqueue(t, c.h)
+	c.queue(t, "ws-b", "b1")
+	c.runner.script(c.dirs["ws-b"], failing)
+
+	// Act.
+	c.behindWins(t)
+
+	// Assert: the record its pass wrote counts no fixing attempt.
+	c.h.db.mu.Lock()
+	defer c.h.db.mu.Unlock()
+	fixed, passed := false, false
+	for _, p := range c.h.db.progressHistory {
+		if p.Workspace != "ws-b" {
+			continue
+		}
+		var doc progressDoc
+		if err := json.Unmarshal(p.Document, &doc); err != nil {
+			t.Fatalf("decoding a record: %v", err)
+		}
+		fixed = fixed || doc.FixesUsed == 1
+		if doc.Tested != nil {
+			passed = true
+			if doc.FixesUsed != 0 {
+				t.Fatalf("the pass recorded %d fixing attempts, want the count started over", doc.FixesUsed)
+			}
+		}
+	}
+	if !fixed || !passed {
+		t.Fatalf("fixed=%v passed=%v, want a fixing attempt and then a speculative pass", fixed, passed)
 	}
 }

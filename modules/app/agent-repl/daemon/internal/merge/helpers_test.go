@@ -48,6 +48,9 @@ import (
 // only what the orchestrator actually calls: anything else would panic loudly
 // rather than quietly answering a zero value.
 type fakeDB struct {
+	// progressHistory is every progress record written, in order.
+	progressHistory []wsm.MergeProgress
+
 	wsm.DB
 
 	// sweeps counts SweepOrphanedMergeState calls; sweepProgress, sweepRounds
@@ -166,6 +169,7 @@ func (f *fakeDB) PutMergeProgress(_ context.Context, p wsm.MergeProgress) error 
 	}
 	f.progress[p.Workspace] = p
 	f.progressSteps = append(f.progressSteps, doc.Step)
+	f.progressHistory = append(f.progressHistory, p)
 	return nil
 }
 
@@ -2666,4 +2670,33 @@ func (g *fakeGit) Upstream(context.Context, string, string) (gitclient.Upstream,
 func (g *fakeGit) AheadBehind(context.Context, string, string, string) (int, int, error) {
 	g.record("ahead_behind")
 	return 0, 0, errors.New("fakeGit: the merge never counts ahead/behind")
+}
+
+// everyAttemptLeaves scripts every conflict resolution attempt the bound
+// allows leaving files conflicted.
+func everyAttemptLeaves(files ...string) [][]string {
+	out := make([][]string, maxConflictAttempts)
+	for i := range out {
+		out[i] = files
+	}
+	return out
+}
+
+// everyAttemptCloses scripts every conflict resolution turn the bound allows
+// ending as how.
+func everyAttemptCloses(how wsm.TurnClose) []wsm.TurnClose {
+	out := make([]wsm.TurnClose, maxConflictAttempts)
+	for i := range out {
+		out[i] = how
+	}
+	return out
+}
+
+// attemptsUpTo answers 1..n, the fixing attempts a bound of n draws.
+func attemptsUpTo(n int) []int {
+	out := make([]int, n)
+	for i := range out {
+		out[i] = i + 1
+	}
+	return out
 }
