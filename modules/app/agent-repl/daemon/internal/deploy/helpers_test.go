@@ -52,13 +52,7 @@ func (c *stepClock) After(d time.Duration) <-chan time.Time {
 
 // records filters a test logger's records by operation.
 func records(log *dlog.TestSurfaces, operation string) []dlog.Record {
-	var out []dlog.Record
-	for _, r := range log.Records() {
-		if r.Operation == operation {
-			out = append(out, r)
-		}
-	}
-	return out
+	return dlog.FilterRecords(log.Records(), dlog.RecordQuery{Operation: operation})
 }
 
 // logged reports whether a record at level under operation contains substr.

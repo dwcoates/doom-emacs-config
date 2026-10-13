@@ -318,13 +318,7 @@ func compactedCut() *conversationv1.ContextCut {
 
 // recordsOf answers every record of one operation.
 func recordsOf(records []dlog.Record, operation string) []dlog.Record {
-	var out []dlog.Record
-	for _, rec := range records {
-		if rec.Operation == operation {
-			out = append(out, rec)
-		}
-	}
-	return out
+	return dlog.FilterRecords(records, dlog.RecordQuery{Operation: operation})
 }
 
 func TestTheTurnsTerminalEndsACompactionLineItsCutNeverEnded(t *testing.T) {

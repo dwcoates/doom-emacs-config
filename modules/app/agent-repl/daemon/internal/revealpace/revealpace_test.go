@@ -63,12 +63,7 @@ func observeAll(p *Pacer, key Key, speeds []float64) {
 }
 
 func hasRecord(log *dlog.TestLogger, level, operation string) (dlog.Record, bool) {
-	for _, r := range log.Records() {
-		if r.Level == level && r.Operation == operation {
-			return r, true
-		}
-	}
-	return dlog.Record{}, false
+	return dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: level, Operation: operation})
 }
 
 func TestDefaultBoundsPerKind(t *testing.T) {

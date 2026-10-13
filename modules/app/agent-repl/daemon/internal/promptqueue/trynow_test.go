@@ -234,7 +234,7 @@ func TestTheTryNowIsRecordedAtInfo(t *testing.T) {
 	submitAll(t, h, "t2")
 
 	// Assert
-	if !hasRecord(h, "info", opSubmit, "prompts are held and nothing runs; the submission is held behind them and the oldest is tried now") {
+	if !logged(h.log.Records(), "info", opSubmit, "prompts are held and nothing runs; the submission is held behind them and the oldest is tried now") {
 		t.Fatalf("no INFO record of the try-now decision")
 	}
 }

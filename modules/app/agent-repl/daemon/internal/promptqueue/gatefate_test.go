@@ -262,7 +262,7 @@ func TestAClearWhoseDiscardFailsIsRecordedAtError(t *testing.T) {
 	_ = h.q.ColdGateAnswered(context.Background(), theWorkspace, GateDiscard)
 
 	// Assert
-	r, ok := recordFor(h.log.Records(), "error", opColdGate, "the prompts held at the cold gate could not be discarded; the clear is refused")
+	r, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error", Operation: opColdGate, Message: "the prompts held at the cold gate could not be discarded; the clear is refused"})
 	if !ok || r.Context["cause"] != "disk full" || r.Context["held"] != 1 || r.Context["fate"] != "discard" {
 		t.Fatalf("records = %+v, want the ERROR record with its cause, count and fate", h.log.Records())
 	}
@@ -291,7 +291,7 @@ func TestAKeepWhoseRestampFailsIsRecordedAtError(t *testing.T) {
 	_ = h.q.ColdGateAnswered(context.Background(), theWorkspace, GateKeep)
 
 	// Assert
-	r, ok := recordFor(h.log.Records(), "error", opColdGate, "a prompt held at the cold gate could not be moved to its answer's hold; the answer is refused")
+	r, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error", Operation: opColdGate, Message: "a prompt held at the cold gate could not be moved to its answer's hold; the answer is refused"})
 	if !ok || r.Context["turn"] != "t1" || r.Context["cause"] != "disk full" || r.Context["hold"] != "cold_gate_answered" {
 		t.Fatalf("records = %+v, want the ERROR record with the turn, hold and cause", h.log.Records())
 	}
@@ -319,7 +319,7 @@ func TestAnUnknownFateIsRefusedLoudly(t *testing.T) {
 	err := h.q.ColdGateAnswered(context.Background(), theWorkspace, GateFate(99))
 
 	// Assert
-	r, ok := recordFor(h.log.Records(), "error", opColdGate, "the cold gate's answer named no fate for its held prompts")
+	r, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error", Operation: opColdGate, Message: "the cold gate's answer named no fate for its held prompts"})
 	if err == nil || !ok || r.Context["invariant_violation"] == nil || !heldUnder(h, "t1", wsm.HoldColdGate) {
 		t.Fatalf("ColdGateAnswered = %v, records = %+v; want an error, the invariant record, and t1 unmoved", err, h.log.Records())
 	}
@@ -362,13 +362,3 @@ func TestTheTrayCountsAPromptWaitingAtTheGate(t *testing.T) {
 
 // kindPtr is a hold kind's address.
 func kindPtr(k wsm.HoldKind) *wsm.HoldKind { return &k }
-
-// recordFor answers the first record at LEVEL under OP carrying MESSAGE.
-func recordFor(records []dlog.Record, level, op, message string) (dlog.Record, bool) {
-	for _, r := range records {
-		if r.Level == level && r.Operation == op && r.Message == message {
-			return r, true
-		}
-	}
-	return dlog.Record{}, false
-}

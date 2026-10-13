@@ -156,12 +156,7 @@ func titledBy(ctx context.Context, name string) Banner {
 
 // hasRecord reports whether a record at level with operation and message stood.
 func hasRecord(log *dlog.TestLogger, level, message string) (dlog.Record, bool) {
-	for _, r := range log.Records() {
-		if r.Level == level && r.Message == message {
-			return r, true
-		}
-	}
-	return dlog.Record{}, false
+	return dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: level, Message: message})
 }
 
 func TestNotifierPostsWhenEmacsIsUnfocused(t *testing.T) {

@@ -191,12 +191,7 @@ func TestOpenRecordsNoViolationWhenEveryRepositoryIsRegistered(t *testing.T) {
 
 // findRecord answers the first captured record at level whose message matches.
 func findRecord(log *dlog.TestLogger, level, message string) (dlog.Record, bool) {
-	for _, record := range log.Records() {
-		if record.Level == level && record.Message == message {
-			return record, true
-		}
-	}
-	return dlog.Record{}, false
+	return dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: level, Message: message})
 }
 
 // THE CONSTRAINT SURVIVES THE MIGRATION. `workspaces.repo_id` has carried

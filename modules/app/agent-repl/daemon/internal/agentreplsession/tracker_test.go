@@ -75,12 +75,8 @@ func newTracker(t *testing.T, store *fakeStore) (*Tracker, *fakePublisher, *dlog
 
 // logged reports whether a record at level was written under operation.
 func logged(log *dlog.TestLogger, level, operation string) bool {
-	for _, r := range log.Records() {
-		if r.Level == level && r.Operation == operation {
-			return true
-		}
-	}
-	return false
+	_, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: level, Operation: operation})
+	return ok
 }
 
 func TestNewRefusesAMissingCollaborator(t *testing.T) {

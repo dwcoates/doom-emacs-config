@@ -50,12 +50,8 @@ func exists(t *testing.T, path string) bool {
 // hasRecord reports whether a record with this operation, level and message
 // was captured.
 func hasRecord(h *harness, operation, level, message string) bool {
-	for _, rec := range levelRecords(records(h.log, operation), level) {
-		if rec.Message == message {
-			return true
-		}
-	}
-	return false
+	_, ok := dlog.FindRecord(records(h.log, operation), dlog.RecordQuery{Level: level, Message: message})
+	return ok
 }
 
 func TestMidWorkCompatible(t *testing.T) {

@@ -538,12 +538,8 @@ func queryDiedSink(bouncer *fakeShimBouncer) (*lifecycleSink, *dlog.TestLogger) 
 
 // hasLifecycleRecord reports whether a lifecycle record at level carries msg.
 func hasLifecycleRecord(log *dlog.TestLogger, level, msg string) bool {
-	for _, r := range log.Records() {
-		if r.Level == level && r.Message == msg {
-			return true
-		}
-	}
-	return false
+	_, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: level, Message: msg})
+	return ok
 }
 
 func TestADeadQueryReplacesTheShimAtFreeness(t *testing.T) {

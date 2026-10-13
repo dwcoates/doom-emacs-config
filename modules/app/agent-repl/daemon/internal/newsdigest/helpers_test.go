@@ -333,13 +333,7 @@ const ipoJSON = `{"anthropic":{"estimate":"Q2 2027","basis":"Banks were hired in
 
 // records answers the records at level under operation.
 func records(log *dlog.TestLogger, level, operation string) []dlog.Record {
-	var out []dlog.Record
-	for _, r := range log.Records() {
-		if r.Level == level && r.Operation == operation {
-			out = append(out, r)
-		}
-	}
-	return out
+	return dlog.FilterRecords(log.Records(), dlog.RecordQuery{Level: level, Operation: operation})
 }
 
 // latestStanding is the topic's latest value, failing when there is none.

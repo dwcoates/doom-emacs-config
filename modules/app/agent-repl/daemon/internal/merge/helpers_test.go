@@ -2699,12 +2699,7 @@ func (f *fakeFooter) all() []footer.MergeFacts {
 
 // recordFor answers the first record with one level and operation.
 func (h *harness) recordFor(level, operation string) (dlog.Record, bool) {
-	for _, r := range h.logs.Records() {
-		if r.Level == level && r.Operation == operation {
-			return r, true
-		}
-	}
-	return dlog.Record{}, false
+	return dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: level, Operation: operation})
 }
 
 // commits answers n commits of work, the rebase's replay.

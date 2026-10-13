@@ -1255,12 +1255,8 @@ func (h *harness) route(stream *fakeStream[*shimv1.WatchAgentResponse], frame *s
 // hasRecord reports whether the watcher logged a record with this operation at
 // this level.
 func (h *harness) hasRecord(level, operation string) bool {
-	for _, r := range h.log.Records() {
-		if r.Level == level && r.Operation == operation {
-			return true
-		}
-	}
-	return false
+	_, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: level, Operation: operation})
+	return ok
 }
 
 // ---- frame builders ----
@@ -2087,12 +2083,7 @@ func (h *harness) awaitMessages(t *testing.T, level, message string, n int) {
 	t.Helper()
 	deadline := time.After(waitDeadline)
 	for {
-		count := 0
-		for _, r := range h.log.Records() {
-			if r.Level == level && r.Message == message {
-				count++
-			}
-		}
+		count := len(dlog.FilterRecords(h.log.Records(), dlog.RecordQuery{Level: level, Message: message}))
 		if count >= n {
 			return
 		}
@@ -2261,10 +2252,8 @@ func (h *harness) sendSessionStarted(t *testing.T, started *conversationv1.Sessi
 // that it happened.
 func (h *harness) recordContext(t *testing.T, level, operation string) dlog.Context {
 	t.Helper()
-	for _, r := range h.log.Records() {
-		if r.Level == level && r.Operation == operation {
-			return dlog.Context(r.Context)
-		}
+	if r, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: level, Operation: operation}); ok {
+		return dlog.Context(r.Context)
 	}
 	t.Fatalf("no %s/%s record was logged", level, operation)
 	return nil

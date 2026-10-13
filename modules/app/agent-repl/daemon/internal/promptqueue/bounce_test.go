@@ -14,7 +14,6 @@ import (
 
 	"agent-repld/internal/bounce"
 	"agent-repld/internal/classifier"
-	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/wsm"
@@ -76,17 +75,6 @@ func monitors(n int) sessionwatcher.LiveWorkSet {
 		live.Monitors = append(live.Monitors, &conversationv1.DetachedWorkId{Value: "monitor"})
 	}
 	return live
-}
-
-// recordWith reports whether the test logger holds a record at the level and
-// operation whose message is exactly msg.
-func recordWith(records []dlog.Record, level, operation, msg string) bool {
-	for _, r := range records {
-		if r.Level == level && r.Operation == operation && r.Message == msg {
-			return true
-		}
-	}
-	return false
 }
 
 func TestRequestBounceDecidesByWhatIsInFlight(t *testing.T) {
@@ -169,7 +157,7 @@ func TestRequestBounceDecidesByWhatIsInFlight(t *testing.T) {
 			} else if g.runs.Load() != 0 {
 				t.Fatalf("a registered bounce ran %d times before its work ended", g.runs.Load())
 			}
-			if !recordWith(h.log.Records(), "info", opBounce, tc.wantMessage) {
+			if !logged(h.log.Records(), "info", opBounce, tc.wantMessage) {
 				t.Fatalf("records = %+v, want %q", h.log.Records(), tc.wantMessage)
 			}
 		})
@@ -430,7 +418,7 @@ func TestAFailedBounceResumesDispatchAndSaysSo(t *testing.T) {
 	if started := h.sender.started(); len(started) != 1 || started[0] != "queued" {
 		t.Fatalf("started = %v, want the held prompt delivered to the shim that still serves", started)
 	}
-	if !recordWith(h.log.Records(), "error", opBounce, "the bounce failed; dispatch resumes on what serves the workspace") {
+	if !logged(h.log.Records(), "error", opBounce, "the bounce failed; dispatch resumes on what serves the workspace") {
 		t.Fatalf("records = %+v, want the failure at ERROR", h.log.Records())
 	}
 }
@@ -593,7 +581,7 @@ func TestAMalformedBounceRequestIsRefusedLoudly(t *testing.T) {
 			if !errors.Is(err, ErrBounceMalformed) {
 				t.Fatalf("RequestBounce = %v, want ErrBounceMalformed", err)
 			}
-			if !recordWith(h.log.Records(), "error", opBounce, "refused a malformed bounce request") {
+			if !logged(h.log.Records(), "error", opBounce, "refused a malformed bounce request") {
 				t.Fatalf("records = %+v, want the refusal at ERROR", h.log.Records())
 			}
 		})
@@ -751,7 +739,7 @@ func TestADepartureDecidesTheRegisteredBounceAtOnce(t *testing.T) {
 					t.Fatalf("an unregistered bounce ran %d times", runs)
 				}
 			}
-			if !recordWith(h.log.Records(), "info", opBounce, tc.wantMsg) {
+			if !logged(h.log.Records(), "info", opBounce, tc.wantMsg) {
 				t.Fatalf("records = %+v, want %q", h.log.Records(), tc.wantMsg)
 			}
 		})
@@ -777,7 +765,7 @@ func TestADepartureWhoseWorkspaceCannotBeReadFailsTheBounceLoudly(t *testing.T) 
 		t.Fatalf("the bounce ran %d times on a workspace that could not be read", runs)
 	}
 	const want = "the shim departed under a registered bounce and its workspace could not be read; the bounce is failed rather than left waiting"
-	if !recordWith(h.log.Records(), "error", opBounce, want) {
+	if !logged(h.log.Records(), "error", opBounce, want) {
 		t.Fatalf("records = %+v, want %q at ERROR", h.log.Records(), want)
 	}
 }
@@ -924,7 +912,7 @@ func TestADepartureWithNoBounceRegisteredDecidesNothing(t *testing.T) {
 	depart(h, h.watcher, departedUnasked)
 
 	// Assert
-	if !recordWith(h.log.Records(), "debug", opBounce, "the shim departed with no bounce registered") {
+	if !logged(h.log.Records(), "debug", opBounce, "the shim departed with no bounce registered") {
 		t.Fatalf("records = %+v, want the no-op recorded", h.log.Records())
 	}
 	if h.q.isDraining(theWorkspace) {
@@ -949,7 +937,7 @@ func TestADepartureAfterTheExitsDrainDecidesNothing(t *testing.T) {
 	if runs := g.runs.Load(); runs != 0 {
 		t.Fatalf("a departure at the exit ran the bounce %d times", runs)
 	}
-	if !recordWith(h.log.Records(), "debug", opBounce, "the daemon is exiting; a shim departure at the exit decides nothing") {
+	if !logged(h.log.Records(), "debug", opBounce, "the daemon is exiting; a shim departure at the exit decides nothing") {
 		t.Fatalf("records = %+v, want the exit's no-op recorded", h.log.Records())
 	}
 }
@@ -1036,7 +1024,7 @@ func TestADeathWithNoBounceIsRecordedAtInfo(t *testing.T) {
 	dieAndRevive(h, departedUnasked)
 
 	// Assert
-	if !recordWith(h.log.Records(), "info", opRevive, "the shim died on its own; its session is brought back now") {
+	if !logged(h.log.Records(), "info", opRevive, "the shim died on its own; its session is brought back now") {
 		t.Fatalf("records = %+v, want the INFO revival record", h.log.Records())
 	}
 }
@@ -1050,7 +1038,7 @@ func TestADeathWhoseWorkspaceCannotBeReadIsRecordedAtError(t *testing.T) {
 	dieAndRevive(h, departedUnasked)
 
 	// Assert
-	if !recordWith(h.log.Records(), "error", opRevive, "the shim died and its workspace could not be read; its session is not brought back") {
+	if !logged(h.log.Records(), "error", opRevive, "the shim died and its workspace could not be read; its session is not brought back") {
 		t.Fatalf("records = %+v, want the ERROR record", h.log.Records())
 	}
 }
@@ -1067,7 +1055,7 @@ func TestASecondDeathBeforeAnyTurnEndedIsLeftDown(t *testing.T) {
 	if h.revivals != 1 {
 		t.Fatalf("revivals = %d, want only the first", h.revivals)
 	}
-	if !recordWith(h.log.Records(), "warn", opRevive, "the shim died again before any turn ended since the daemon last brought it back; it is left down until the next prompt") {
+	if !logged(h.log.Records(), "warn", opRevive, "the shim died again before any turn ended since the daemon last brought it back; it is left down until the next prompt") {
 		t.Fatalf("records = %+v, want the WARN naming the loop", h.log.Records())
 	}
 }
@@ -1176,7 +1164,7 @@ func TestAMoveAskedWhileAReplacementRunsIsQueuedBehindIt(t *testing.T) {
 	if err != nil || !decision.Now || !decision.AlreadyPending {
 		t.Fatalf("RequestBounce = (%+v, %v), want the move queued behind the running bounce", decision, err)
 	}
-	if !recordWith(h.log.Records(), "info", opBounce, "a bounce is already running for the workspace; the request's move runs after it") {
+	if !logged(h.log.Records(), "info", opBounce, "a bounce is already running for the workspace; the request's move runs after it") {
 		t.Fatalf("records = %+v, want the queued move recorded", h.log.Records())
 	}
 	restart.releaseStage(nil)
@@ -1212,7 +1200,7 @@ func TestAFailedReplacementStillRunsTheMove(t *testing.T) {
 	if err := transfer.awaitDone(t); err != nil {
 		t.Fatalf("transfer done = %v, want the move's own clean finish", err)
 	}
-	if !recordWith(h.log.Records(), "error", opBounce, "a stage of the bounce failed; the workspace stays draining for the stage after it") {
+	if !logged(h.log.Records(), "error", opBounce, "a stage of the bounce failed; the workspace stays draining for the stage after it") {
 		t.Fatalf("records = %+v, want the failed stage at ERROR", h.log.Records())
 	}
 }
@@ -1272,7 +1260,7 @@ func TestADepartureDropsTheReplacementButTakesTheMove(t *testing.T) {
 	if restart.runs.Load() != 0 {
 		t.Fatalf("the unregistered replacement ran")
 	}
-	if !recordWith(h.log.Records(), "info", opBounce, "the shim departed under a registered bounce; its move is taken now without the replacement") {
+	if !logged(h.log.Records(), "info", opBounce, "the shim departed under a registered bounce; its move is taken now without the replacement") {
 		t.Fatalf("records = %+v, want the move taken without the replacement", h.log.Records())
 	}
 }
@@ -1450,7 +1438,7 @@ func TestAMoveThatFinishesWithoutSealingFailsItsCarriedReplacementLoudly(t *test
 	if err := restart.awaitDone(t); !errors.Is(err, errMoveNeverSealed) {
 		t.Fatalf("restart done = %v, want errMoveNeverSealed", err)
 	}
-	if !recordWith(h.log.Records(), "error", opBounce, "the move finished without sealing the replacements it carried; they were not handed to the next daemon") {
+	if !logged(h.log.Records(), "error", opBounce, "the move finished without sealing the replacements it carried; they were not handed to the next daemon") {
 		t.Fatalf("records = %+v, want the broken carry at ERROR", h.log.Records())
 	}
 }
@@ -1510,7 +1498,7 @@ func TestADeferredReplacementIsRegisteredAgainBehindTheWork(t *testing.T) {
 	if g.runs.Load() != 1 {
 		t.Fatalf("the replacement ran %d times, want once: the turn still runs", g.runs.Load())
 	}
-	if !recordWith(h.log.Records(), "info", opBounce, "the shim refused to stand down over live work; the bounce is re-registered behind that work and dispatch resumes on the shim that keeps serving") {
+	if !logged(h.log.Records(), "info", opBounce, "the shim refused to stand down over live work; the bounce is re-registered behind that work and dispatch resumes on the shim that keeps serving") {
 		t.Fatalf("records = %+v, want the deferral at INFO", h.log.Records())
 	}
 }

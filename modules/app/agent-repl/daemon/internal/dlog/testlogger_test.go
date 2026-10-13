@@ -152,3 +152,86 @@ func TestTestSurfacesDoesNotTeeTheGlobalLogger(t *testing.T) {
 		t.Fatalf("tee got %+v, want nothing from the global logger", tee.got)
 	}
 }
+
+func TestFindRecord(t *testing.T) {
+	records := []Record{
+		{Level: "info", Operation: "op.a", Message: "first"},
+		{Level: "error", Operation: "op.a", Message: "second"},
+		{Level: "error", Operation: "op.b", Message: "second"},
+	}
+	tests := []struct {
+		name      string
+		query     RecordQuery
+		wantFound bool
+		wantIndex int
+	}{
+		{name: "every field named matches the one record carrying all three", query: RecordQuery{Level: "error", Operation: "op.b", Message: "second"}, wantFound: true, wantIndex: 2},
+		{name: "an empty level matches any level", query: RecordQuery{Operation: "op.a", Message: "second"}, wantFound: true, wantIndex: 1},
+		{name: "an empty operation matches any operation", query: RecordQuery{Level: "info", Message: "first"}, wantFound: true, wantIndex: 0},
+		{name: "an empty message matches any message", query: RecordQuery{Level: "error", Operation: "op.a"}, wantFound: true, wantIndex: 1},
+		{name: "the first of several matches is answered", query: RecordQuery{Message: "second"}, wantFound: true, wantIndex: 1},
+		{name: "a query nothing matches finds nothing", query: RecordQuery{Level: "warn"}, wantFound: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got, found := FindRecord(records, tc.query)
+
+			// Assert
+			if found != tc.wantFound {
+				t.Fatalf("found = %t, want %t", found, tc.wantFound)
+			}
+			if found && got.Message != records[tc.wantIndex].Message || found && got.Operation != records[tc.wantIndex].Operation {
+				t.Fatalf("record = %+v, want %+v", got, records[tc.wantIndex])
+			}
+		})
+	}
+}
+
+func TestFindRecordInNoRecordsFindsNothing(t *testing.T) {
+	// Act
+	got, found := FindRecord(nil, RecordQuery{})
+
+	// Assert
+	if found || got.Operation != "" {
+		t.Fatalf("FindRecord(nil) = %+v, %t; want nothing", got, found)
+	}
+}
+
+func TestFilterRecords(t *testing.T) {
+	records := []Record{
+		{Level: "info", Operation: "op.a", Message: "first"},
+		{Level: "error", Operation: "op.a", Message: "second"},
+		{Level: "error", Operation: "op.b", Message: "third"},
+	}
+	tests := []struct {
+		name  string
+		query RecordQuery
+		want  []string
+	}{
+		{name: "every match is answered, in order", query: RecordQuery{Level: "error"}, want: []string{"second", "third"}},
+		{name: "every field named must match", query: RecordQuery{Level: "error", Operation: "op.a"}, want: []string{"second"}},
+		{name: "an empty query matches every record", query: RecordQuery{}, want: []string{"first", "second", "third"}},
+		{name: "a query nothing matches answers none", query: RecordQuery{Operation: "op.c"}, want: nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := FilterRecords(records, tc.query)
+
+			// Assert
+			var messages []string
+			for _, r := range got {
+				messages = append(messages, r.Message)
+			}
+			if len(messages) != len(tc.want) {
+				t.Fatalf("messages = %v, want %v", messages, tc.want)
+			}
+			for i := range messages {
+				if messages[i] != tc.want[i] {
+					t.Fatalf("messages = %v, want %v", messages, tc.want)
+				}
+			}
+		})
+	}
+}
