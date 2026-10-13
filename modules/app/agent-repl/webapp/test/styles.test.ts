@@ -36,7 +36,7 @@ import { HAS_MORE_CLASS } from "../src/feed/bubble-more.js";
 import { BUBBLE_QUOTE_CLASS } from "../src/bubble/quote.js";
 import { HELD_STATUS_BADGES } from "../src/held/held-prompt.js";
 import { INTERIM_CAP_LINES, THINKING_CAP_LINES } from "../src/feed/cards/response.js";
-import { cascadedValue, installStylesheet, rulesOf, type CssRule } from "./stylesheet.js";
+import { cascadedValue, inDocument, installStylesheet, rulesOf, type CssRule } from "./stylesheet.js";
 import { withoutBlockComments } from "./source-text.js";
 
 /** The selectors on which any `user-select`/`-webkit-user-select` is `none`. */
@@ -3880,18 +3880,10 @@ const DIMMED_TEXT_SELECTORS: readonly string[] = ['.bubble[data-variant="thinkin
 describe("the page-colored fill", () => {
   /** The `--bubble-bg` the cascade hands a bubble with ATTRS and HOOKS. */
   function fillOf(attrs: Readonly<Record<string, string>>, hooks: readonly string[]): string {
-    const teardown = installStylesheet();
-    try {
-      const el = document.createElement("div");
-      el.className = ["bubble", "md", ...hooks].join(" ");
-      for (const [name, value] of Object.entries(attrs)) el.setAttribute(name, value);
-      document.body.append(el);
-      const got = cascadedValue(el, "--bubble-bg");
-      el.remove();
-      return got;
-    } finally {
-      teardown();
-    }
+    const el = document.createElement("div");
+    el.className = ["bubble", "md", ...hooks].join(" ");
+    for (const [name, value] of Object.entries(attrs)) el.setAttribute(name, value);
+    return inDocument(el, () => cascadedValue(el, "--bubble-bg"));
   }
 
   it("fills a thinking bubble with the page background", () => {
@@ -3950,18 +3942,10 @@ describe("the box-shadow neither a thinking nor an interim bubble may carry", ()
 
   /** The `box-shadow` the cascade resolves for a bubble with ATTRS and HOOKS. */
   function shadowOf(attrs: Readonly<Record<string, string>>, hooks: readonly string[]): string {
-    const teardown = installStylesheet();
-    try {
-      const el = document.createElement("div");
-      el.className = ["bubble", "md", ...hooks].join(" ");
-      for (const [name, value] of Object.entries(attrs)) el.setAttribute(name, value);
-      document.body.append(el);
-      const got = cascadedValue(el, "box-shadow");
-      el.remove();
-      return got;
-    } finally {
-      teardown();
-    }
+    const el = document.createElement("div");
+    el.className = ["bubble", "md", ...hooks].join(" ");
+    for (const [name, value] of Object.entries(attrs)) el.setAttribute(name, value);
+    return inDocument(el, () => cascadedValue(el, "box-shadow"));
   }
 
   it("drops the bubble shadow and highlight on a thinking bubble", () => {
@@ -4180,20 +4164,12 @@ describe("the repository header's add control", () => {
 describe("the dimmed prose of a thinking or interim bubble", () => {
   /** The `color` the cascade hands a response bubble with HOOKS and VARIANT. */
   function textOf(variant: string, hooks: readonly string[]): string {
-    const teardown = installStylesheet();
-    try {
-      const el = document.createElement("div");
-      el.className = ["bubble", "md", ...hooks].join(" ");
-      el.setAttribute("data-role", "response");
-      el.setAttribute("data-variant", variant);
-      el.setAttribute("data-state", "success");
-      document.body.append(el);
-      const got = cascadedValue(el, "color");
-      el.remove();
-      return got;
-    } finally {
-      teardown();
-    }
+    const el = document.createElement("div");
+    el.className = ["bubble", "md", ...hooks].join(" ");
+    el.setAttribute("data-role", "response");
+    el.setAttribute("data-variant", variant);
+    el.setAttribute("data-state", "success");
+    return inDocument(el, () => cascadedValue(el, "color"));
   }
 
   it("dims a thinking bubble's prose", () => {
@@ -4424,19 +4400,11 @@ describe("the tighter prompt and response padding", () => {
 
   /** The `--bubble-pad-y` the cascade hands a bubble of VARIANT. */
   function padOf(variant: string): string {
-    const teardown = installStylesheet();
-    try {
-      const el = document.createElement("div");
-      el.className = "bubble";
-      el.setAttribute("data-role", BUBBLE_VARIANTS[variant as keyof typeof BUBBLE_VARIANTS]);
-      el.setAttribute("data-variant", variant);
-      document.body.append(el);
-      const got = cascadedValue(el, "--bubble-pad-y");
-      el.remove();
-      return got;
-    } finally {
-      teardown();
-    }
+    const el = document.createElement("div");
+    el.className = "bubble";
+    el.setAttribute("data-role", BUBBLE_VARIANTS[variant as keyof typeof BUBBLE_VARIANTS]);
+    el.setAttribute("data-variant", variant);
+    return inDocument(el, () => cascadedValue(el, "--bubble-pad-y"));
   }
 
   const cases: readonly { variant: keyof typeof BUBBLE_VARIANTS; want: string }[] = [
@@ -4489,14 +4457,7 @@ describe("the tighter prompt and response padding", () => {
 
 /** EL's cascaded PROPERTY, mounted with the real stylesheet. */
 function mountedPaint(el: HTMLElement, property: string): string {
-  const teardown = installStylesheet();
-  document.body.append(el);
-  try {
-    return cascadedValue(el, property);
-  } finally {
-    el.remove();
-    teardown();
-  }
+  return inDocument(el, () => cascadedValue(el, property));
 }
 
 /** A merge run's badge is about half a tab (owner request, 2026-10-13). */
@@ -4532,14 +4493,7 @@ describe("the merge queue's header", () => {
     const first = document.createElement("div");
     const second = document.createElement("div");
     table.append(header, first, second);
-    const teardown = installStylesheet();
-    document.body.append(table);
-    try {
-      return check({ header, first, second });
-    } finally {
-      table.remove();
-      teardown();
-    }
+    return inDocument(table, () => check({ header, first, second }));
   }
 
   it("paints the column names a shade darker than the muted grey", () => {
