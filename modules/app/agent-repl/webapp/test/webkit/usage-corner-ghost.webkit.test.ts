@@ -276,7 +276,7 @@ describe("an ellipsis bubble with a corner in WebKit", () => {
     expect(Math.abs(open.bubble - closed.bubble)).toBeLessThanOrEqual(1);
   });
 
-  it.each([4, 10, 16, 40])("keeps a %i-word interim's first line once opened", async (n) => {
+  it.each([4, 10, 16])("keeps a %i-word interim's first line once opened", async (n) => {
     // Arrange
     const closed = await draw(page, { text: prose(n), ghost: true, ellipsis: "closed" });
 
@@ -285,5 +285,18 @@ describe("an ellipsis bubble with a corner in WebKit", () => {
 
     // Assert
     expect(open.firstLine).toBe(closed.firstLine);
+  });
+
+  it("keeps every word an overflowing interim showed, in place, once opened", async () => {
+    // Arrange: 40 words overflow the one clamped line, which ends in "…"; the
+    // clamp may give the ellipsis the room of the line's last word, which the
+    // opened line then shows in its place.
+    const closed = await draw(page, { text: prose(40), ghost: true, ellipsis: "closed" });
+
+    // Act
+    const open = await draw(page, { text: prose(40), ghost: true, ellipsis: "open" });
+
+    // Assert: no word the closed line showed moves.
+    expect(open.firstLine.startsWith(closed.firstLine)).toBe(true);
   });
 });

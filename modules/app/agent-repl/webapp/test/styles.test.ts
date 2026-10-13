@@ -1496,7 +1496,10 @@ describe("the cost corner", () => {
       const corner = declarationsOf(".usage-corner") ?? "";
 
       // Assert
-      expect(corner).toMatch(/(?:^|[\s;])font-size:\s*0\.85em/);
+      expect([corner.match(/(?:^|[\s;])font-size:\s*([^;]+)/)?.[1]?.trim(), /--usage-font-size:\s*calc\(0\.85em \* 0\.75\)/.test(stylesheet)]).toEqual([
+        "var(--usage-font-size)",
+        true,
+      ]);
     });
 
     it.each([".usage-stamp", ".usage-ago", ".usage-slider", ".usage-reserve", ".usage-corner::before"])(
@@ -3883,11 +3886,13 @@ describe("the tool card's command grey", () => {
  * selectors, and the share of the base it sets (owner requests, 2026-10-12 and
  * 2026-10-13).
  */
+/** A bubble variant's selector. */
+const variantSelector = (variant: string): string => `.bubble[data-variant="${variant}"]`;
 const PAD_LADDER: readonly { selectors: readonly string[]; value: string }[] = [
-  { selectors: ["user", "agent", "peer", "held"], value: "calc(var(--bubble-pad-y-base)*0.7)" },
-  { selectors: ["response"], value: "calc(var(--bubble-pad-y-base)*0.49)" },
-  { selectors: ["thinking"], value: "calc(var(--bubble-pad-y-base)*0.35)" },
-].map((rung) => ({ ...rung, selectors: rung.selectors.map((variant) => `.bubble[data-variant="${variant}"]`) }));
+  { selectors: ["response", "user", "agent", "peer", "held"].map(variantSelector), value: "calc(var(--bubble-pad-y-base)*0.7)" },
+  { selectors: [`${variantSelector("response")}.interim-response`], value: "calc(var(--bubble-pad-y-base)*0.49)" },
+  { selectors: [variantSelector("thinking")], value: "calc(var(--bubble-pad-y-base)*0.35)" },
+];
 /** Every variant selector the ladder pads. */
 const TIGHTER_PAD_SELECTORS: readonly string[] = PAD_LADDER.flatMap((rung) => rung.selectors);
 /** The two bubble kinds whose prose is the dimmed `--interim-text` (half way from the command grey to the body text). */
@@ -4446,29 +4451,30 @@ describe("the stylesheet's real-height contract", () => {
 });
 
 /**
- * THE VERTICAL PADDING LADDER: prompt bubbles sit 30% tighter top and bottom
- * (owner request, 2026-10-12), response bubbles 30% tighter again and thinking
- * bubbles at about a third of the base (owner requests, 2026-10-13), while the
+ * THE VERTICAL PADDING LADDER: prompt and response bubbles sit 30% tighter top
+ * and bottom (owner request, 2026-10-12), an interim response 30% tighter again
+ * and thinking bubbles at about a third of the base (owner requests,
+ * 2026-10-13), while the
  * agentic tool and monitor cards and the compaction summary keep the base. The
  * horizontal padding never reads the vertical token, so it cannot move with it.
  */
 describe("the vertical padding ladder", () => {
   const PROMPT = "calc(var(--bubble-pad-y-base)*0.7)";
-  const RESPONSE = "calc(var(--bubble-pad-y-base)*0.49)";
+  const INTERIM = "calc(var(--bubble-pad-y-base)*0.49)";
   const THINKING = "calc(var(--bubble-pad-y-base)*0.35)";
   const BASE = "var(--bubble-pad-y-base)";
 
-  /** The `--bubble-pad-y` the cascade hands a bubble of VARIANT. */
-  function padOf(variant: string): string {
+  /** The `--bubble-pad-y` the cascade hands a bubble of VARIANT, wearing CLASSES. */
+  function padOf(variant: string, classes: readonly string[] = []): string {
     const el = document.createElement("div");
-    el.className = "bubble";
+    el.classList.add("bubble", ...classes);
     el.setAttribute("data-role", BUBBLE_VARIANTS[variant as keyof typeof BUBBLE_VARIANTS]);
     el.setAttribute("data-variant", variant);
     return inDocument(el, () => cascadedValue(el, "--bubble-pad-y"));
   }
 
   const cases: readonly { variant: keyof typeof BUBBLE_VARIANTS; want: string }[] = [
-    { variant: "response", want: RESPONSE },
+    { variant: "response", want: PROMPT },
     { variant: "user", want: PROMPT },
     { variant: "agent", want: PROMPT },
     { variant: "peer", want: PROMPT },
@@ -4484,6 +4490,14 @@ describe("the vertical padding ladder", () => {
 
     // Assert
     expect(stated).toEqual(Object.keys(BUBBLE_VARIANTS).sort());
+  });
+
+  it("gives an interim response 30% less than the green answer it is not", () => {
+    // Arrange / Act
+    const got = [padOf("response", ["interim-response"]), padOf("response", ["final-response"])];
+
+    // Assert
+    expect(got).toEqual([INTERIM, PROMPT]);
   });
 
   it.each(cases)("gives a $variant bubble the expected vertical padding", ({ variant, want }) => {
