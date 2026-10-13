@@ -76,6 +76,8 @@ function mount(
     collapsible?: (row: FeedRow) => boolean;
     /** The question drawn in place of the sub-feed. */
     overlay?: BubbleOverlay;
+    /** Leave the bubble off the page, as the feed does before it places a row. */
+    detached?: boolean;
   } = {},
 ) {
   const heads: number[] = [];
@@ -110,7 +112,7 @@ function mount(
     overlay: opts.overlay,
     scroll: opts.scroll,
   });
-  document.body.replaceChildren(bubble.element);
+  if (opts.detached !== true) document.body.replaceChildren(bubble.element);
   return { bubble, h, heads };
 }
 
@@ -1997,24 +1999,6 @@ describe("mountBubble: an overlay question in place of the sub-feed", () => {
     };
     return overlay;
   }
-  /** A merge bubble mounted with OVERLAY and left off the page. */
-  const mountBubbleDetached = (row: FeedRow, overlay: BubbleOverlay) => {
-    const h = harness();
-    return mountBubble({
-      ctx: h.ctx,
-      row,
-      rc: rowContext(h.ctx, row),
-      head: () => document.createElement("span"),
-      body: defaultBubbleBody,
-      renderers: stubRenderers(),
-      revealRow: async () => false,
-      bubble: () => {
-        throw new Error("no nested bubble in this fixture");
-      },
-      initialFolded: false,
-      overlay,
-    });
-  };
   const overlaySlot = (bubble: { element: HTMLElement }) =>
     bubble.element.querySelector<HTMLElement>(".bubble-overlay")!;
   const panel = (bubble: { element: HTMLElement }) =>
@@ -2036,7 +2020,11 @@ describe("mountBubble: an overlay question in place of the sub-feed", () => {
   it("focuses a question drawn before the bubble was placed once it joins the page", async () => {
     // Arrange: the first draw carries the question while the bubble is detached.
     document.body.replaceChildren();
-    const late = mountBubbleDetached(mergeRow("m2", false, "Q: evict?"), questionOverlay());
+    const { bubble: late } = mount(mergeRow("m2", false, "Q: evict?"), harness(), {
+      folded: false,
+      overlay: questionOverlay(),
+      detached: true,
+    });
     // Act: the feed places the row.
     document.body.replaceChildren(late.element);
     // Assert
