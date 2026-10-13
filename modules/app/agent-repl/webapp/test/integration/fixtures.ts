@@ -2366,6 +2366,7 @@ export const ROSTER_STATUS_ARMS = [
   "closing",
   "daemonImpaired",
   "waiting",
+  "opening",
 ] as const;
 export type RosterStatusArm = (typeof ROSTER_STATUS_ARMS)[number];
 
@@ -2780,9 +2781,6 @@ export const WATCH_DAEMON_PUSHES = [
   // The news digest standing: a WEBVIEW stream's alone, drawn as the overlay
   // over the feed (news-digest.integration.test.ts).
   "newsDigest",
-  // The editor's startup events: an EMACS stream's alone (a new Emacs
-  // process's bring-up), skipped by a page as the same skew.
-  "startup",
 ] as const;
 
 export function shutdownAnnounced(init?: {
