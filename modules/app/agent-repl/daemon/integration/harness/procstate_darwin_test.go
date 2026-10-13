@@ -1,6 +1,13 @@
 package harness
 
-import "testing"
+import (
+	"errors"
+	"os"
+	"syscall"
+	"testing"
+
+	"golang.org/x/sys/unix"
+)
 
 // TestStateOf pins the classification of the process-table entries a live
 // process cannot be put into on demand: the instant between the exit event
@@ -34,5 +41,58 @@ func TestStateOf(t *testing.T) {
 				t.Fatalf("stateOf(%d, %#x) = %+v, want frozen %v, exited %v", tc.stat, tc.flag, got, tc.wantFrozen, tc.wantExited)
 			}
 		})
+	}
+}
+
+// TestRunningThreadsCountsTheCallersOwnThread pins that runningThreads reads
+// the kernel's thread table: the thread asking runs while it asks.
+func TestRunningThreadsCountsTheCallersOwnThread(t *testing.T) {
+	// Act
+	running, err := runningThreads(os.Getpid())
+
+	// Assert
+	if err != nil || running < 1 {
+		t.Fatalf("runningThreads(self) = %d, %v; want at least the calling thread", running, err)
+	}
+}
+
+// TestAStoppedProcessRunsNoThread pins the condition readProcessState waits
+// for: once a stop has held, no thread of the process runs.
+func TestAStoppedProcessRunsNoThread(t *testing.T) {
+	// Arrange: a child stopped, as the kernel reports it to its parent.
+	cmd := startIdle(t)
+	if err := cmd.Process.Signal(syscall.SIGSTOP); err != nil {
+		t.Fatalf("SIGSTOP: %v", err)
+	}
+	var ws syscall.WaitStatus
+	if _, err := syscall.Wait4(cmd.Process.Pid, &ws, syscall.WUNTRACED, nil); err != nil {
+		t.Fatalf("wait for the stop: %v", err)
+	}
+
+	// Act
+	running, err := runningThreads(cmd.Process.Pid)
+
+	// Assert
+	if err != nil || running != 0 {
+		t.Fatalf("runningThreads(stopped child) = %d, %v; want none running", running, err)
+	}
+}
+
+// TestRunningThreadsOfAGoneProcessIsESRCH pins the answer readProcessState
+// reads as gone.
+func TestRunningThreadsOfAGoneProcessIsESRCH(t *testing.T) {
+	// Arrange: a child that has exited and been reaped.
+	cmd := startIdle(t)
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatalf("kill: %v", err)
+	}
+	_ = cmd.Wait()
+
+	// Act
+	_, err := runningThreads(cmd.Process.Pid)
+
+	// Assert
+	if !errors.Is(err, unix.ESRCH) {
+		t.Fatalf("runningThreads(gone) = %v, want ESRCH", err)
 	}
 }
