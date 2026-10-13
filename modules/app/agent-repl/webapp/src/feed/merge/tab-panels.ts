@@ -2,20 +2,22 @@
  * tab-panels — what a selected merge tab shows beneath its strip, one panel per
  * kind, at every level of the bubble's nested strips.
  *
- * FOUR SHAPES, ONE FACTORY. RESOLVED tabs (queue, committing, updating main)
+ * FIVE SHAPES, ONE FACTORY. RESOLVED tabs (queue, committing, updating main)
  * draw their own row. AGENTIC tabs (the configured prompts, a fixing attempt)
  * are containers: their content is the sub-feed rows parented to them, drawn
  * through `view.drawRow` — the ordinary row path, chrome included — which is
  * what keeps a merge agent's conversation identical to any other agent's.
- * PARENT tabs (rebasing, tests, a run) draw a nested strip of the tab rows
- * parented to them, through the same `createTabSet` the bubble's own strip is.
+ * PARENT tabs (rebasing, tests) draw a nested strip of the tab rows parented
+ * to them, through the same `createTabSet` the bubble's own strip is.
  * A COMMIT draws its narration and, once its conflict was handed to the
  * session, a conflict section holding the files and that resolution's rows.
  *
- * A RUN'S STRIP OPENS WITH ITS OWN OUTPUT. The output is the run row's own
- * content rather than a row of its own, so the strip draws it as an entry
- * built from the run row, badged with the run's own state and labelled
- * "output"; the fixing attempt that followed the run is the run's child row.
+ * A RUN IS ONE PANEL OF TWO VIEWS, NEVER A STRIP (owner request, 2026-10-13):
+ * "tests", the run row's own output, and "remediation", the fixing attempt
+ * that followed a failed run (the run's one child row). The run shows its
+ * tests until a fixing attempt exists, and that attempt from then on; clicking
+ * the run's already selected badge opens a dropdown that switches between the
+ * two, and the reader's choice then stands (`runPanel`).
  *
  * AN AGENT STREAM IS THE SAME FOR EVERY MERGE: this workspace's own turns for a
  * sync merge, or the hidden merge workspace's turns the daemon mirrors here for
@@ -23,19 +25,22 @@
  * stream's agent runs it offers "stop" above it (stop-control.ts), aimed at the
  * row the stream is parented to.
  */
-import { create, equals } from "@bufbuild/protobuf";
+import { equals } from "@bufbuild/protobuf";
 import { placeChildren } from "../../dom.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import {
-  FeedMergeTabLabelSchema,
   FeedRowSchema,
   type FeedMergeConflictFile,
   type FeedMergeTestsRunOutput,
   type FeedRow,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { NEST_ATTRIBUTE, type RowContext, type SubfeedView } from "../renderers.js";
-import { AGENTIC_KINDS, childTabsOf, type MergeTab } from "./tab-strip.js";
-import { createTabSet, type TabPanel } from "./tab-set.js";
+import { createControl } from "../../control.js";
+import { log } from "../../log.js";
+import type { Ticker } from "../../clock.js";
+import { stopTicking } from "../ticking.js";
+import { AGENTIC_KINDS, childTabsOf, drawTabDuration, drawTabStateGlyph, type MergeTab } from "./tab-strip.js";
+import { createTabSet, drawSummary, type TabPanel } from "./tab-set.js";
 import { drawFeedMergeQueue } from "./queue.js";
 import { drawFeedMergeTestsRunOutput, updateFeedMergeTestsRunOutput } from "./tests-tab.js";
 import {
@@ -61,15 +66,9 @@ const MERGE_TAB_STOP: StopSite = {
 
 const PATH = "FeedMergeTab.kind";
 
-/** The kind a run's own output entry is drawn as in the run's strip. */
-export const RUN_OUTPUT_KIND = "testsRunOutput";
-
-/** What a run's output entry's id adds to the run row's, so the two never meet. */
-const RUN_OUTPUT_SUFFIX = "#output";
-
 /** The panel of TAB, over VIEW. */
 export function mergeTabPanel(tab: MergeTab, view: SubfeedView, rc: RowContext): TabPanel {
-  const kind = tab.kind === RUN_OUTPUT_KIND ? RUN_OUTPUT_KIND : requireCase(tab.tab.kind, PATH).case;
+  const kind = requireCase(tab.tab.kind, PATH).case;
   switch (kind) {
     case "queue":
       return rowPanel(tab, () => drawFeedMergeQueue(requireMessage(armOf(tab, "queue").queue, "FeedMergeTabQueue.queue"), rc));
@@ -94,26 +93,12 @@ export function mergeTabPanel(tab: MergeTab, view: SubfeedView, rc: RowContext):
     case "tests":
       return parentPanel(tab, view, rc, () => null, (t) => childTabsOf(view.rows(), t.id));
     case "testsRun":
-      return parentPanel(tab, view, rc, () => null, (t) => [runOutputEntry(t), ...childTabsOf(view.rows(), t.id)]);
-    case RUN_OUTPUT_KIND:
-      return runOutputPanel(tab, rc);
+      return runPanel(tab, view, rc);
     default:
       return unreachableArm(PATH, kind);
   }
 }
 
-/**
- * A run's output as an entry of the run's own strip: the run row itself,
- * labelled "output" and badged with the run's own state.
- */
-export function runOutputEntry(run: MergeTab): MergeTab {
-  return {
-    ...run,
-    id: `${run.id}${RUN_OUTPUT_SUFFIX}`,
-    kind: RUN_OUTPUT_KIND,
-    label: create(FeedMergeTabLabelSchema, { text: "output", round: 1 }),
-  };
-}
 
 /** The kind arm's own message of TAB, as the arm CASE. */
 function armOf<K extends string>(tab: MergeTab, kase: K): Extract<NonNullable<MergeTab["tab"]["kind"]>, { case: K }>["value"] {
@@ -170,6 +155,9 @@ function agenticPanel(
  */
 export function swapHeading(head: HTMLElement | null, next: HTMLElement | null): HTMLElement | null {
   if (head === null || next === null) return head;
+  // The heading may hold a clock (a run's remediation heading does), which
+  // must not keep ticking once the heading is gone.
+  stopTicking(head);
   head.replaceWith(next);
   return next;
 }
@@ -315,20 +303,190 @@ function parentPanel(
   };
 }
 
-/** A run's output panel: its suites and its log, updated where they stand. */
-function runOutputPanel(tab: MergeTab, rc: RowContext): TabPanel {
+/** The two views of a run's panel. */
+export type RunView = "tests" | "remediation";
+
+/** Every view of a run, in the order its dropdown lists them. */
+export const RUN_VIEWS: readonly RunView[] = ["tests", "remediation"];
+
+/**
+ * The view a run shows while the reader has not chosen one: its remediation
+ * once a fixing attempt followed it, its tests until then.
+ */
+export function autoRunView(fixing: MergeTab | undefined): RunView {
+  return fixing === undefined ? "tests" : "remediation";
+}
+
+/** The fixing attempt that followed RUN, off VIEW's rows; a run has at most one. */
+export function fixingOf(run: MergeTab, view: SubfeedView): MergeTab | undefined {
+  const fixing = childTabsOf(view.rows(), run.id).filter((tab) => tab.kind === "testsRunFixing");
+  if (fixing.length > 1) throw new Error(`merge: run ${run.id} has ${fixing.length} fixing attempts, and a run has at most one`);
+  return fixing[0];
+}
+
+/**
+ * A run's panel: its TESTS view (the suites and the log, updated where they
+ * stand) and, once a fixing attempt followed the run, its REMEDIATION view (the
+ * attempt's agent stream under its heading). BOTH VIEWS STAY DRAWN and only
+ * the one shown is unhidden, so switching views neither redraws a row nor
+ * restarts a clock. `reselect` (the reader clicked the run's badge again)
+ * opens the dropdown that switches them; a run with no remediation has only
+ * the one view, and offers none.
+ */
+function runPanel(tab: MergeTab, view: SubfeedView, rc: RowContext): TabPanel {
   const path = `${PATH}.tests_run.output`;
-  let shown = outputOf(tab);
+  let shownOutput = outputOf(tab);
+  /** The view the reader picked; null while `autoRunView` decides. */
+  let chosen: RunView | null = null;
+
   const host = document.createElement("div");
-  host.className = "merge-run-output";
-  host.append(...drawFeedMergeTestsRunOutput(shown, rc.ctx, path));
+  host.className = "merge-run";
+  const tests = document.createElement("div");
+  tests.className = "merge-run-output merge-run-view";
+  tests.setAttribute(RUN_VIEW_ATTRIBUTE, "tests");
+  tests.append(...drawFeedMergeTestsRunOutput(shownOutput, rc.ctx, path));
+  const remediation = document.createElement("div");
+  remediation.className = "merge-run-remediation merge-run-view";
+  remediation.setAttribute(RUN_VIEW_ATTRIBUTE, "remediation");
+  host.append(tests, remediation);
+
+  let fixing: { tab: MergeTab; panel: TabPanel } | null = null;
+  const menu = createRunViewMenu(host, (picked) => {
+    chosen = picked;
+    show();
+  });
+
+  /** Bring the remediation view to FIX: in place where its panel can follow, afresh otherwise. */
+  const placeFixing = (fix: MergeTab | undefined): void => {
+    if (fix === undefined) {
+      if (fixing !== null) throw new Error(`merge: run ${tab.id}'s fixing attempt ${fixing.tab.id} disappeared`);
+      return;
+    }
+    if (fixing !== null && fixing.tab.id === fix.id && fixing.panel.update(fix)) {
+      fixing.tab = fix;
+      return;
+    }
+    const panel = agenticPanel(fix, view, rc, (t) => drawRemediationHeading(t, rc.ctx.ticker));
+    for (const child of remediation.children) stopTicking(child);
+    remediation.replaceChildren(...panel.nodes);
+    fixing = { tab: fix, panel };
+  };
+
+  const show = (): void => {
+    const current = chosen ?? autoRunView(fixing?.tab);
+    host.setAttribute(RUN_VIEW_ATTRIBUTE, current);
+    tests.hidden = current !== "tests";
+    remediation.hidden = current !== "remediation";
+  };
+
+  placeFixing(fixingOf(tab, view));
+  show();
   return {
     nodes: [host],
     update(next: MergeTab): boolean {
       const output = outputOf(next);
-      updateFeedMergeTestsRunOutput(host, output, shown, rc.ctx, path);
-      shown = output;
+      updateFeedMergeTestsRunOutput(tests, output, shownOutput, rc.ctx, path);
+      shownOutput = output;
+      placeFixing(fixingOf(next, view));
+      show();
       return true;
+    },
+    reselect(badge: HTMLElement): void {
+      if (fixing === null) {
+        log.debug("a run with no remediation has only its tests to show", {
+          operation: "merge.run-views-single",
+          context: { run: tab.id },
+        });
+        return;
+      }
+      menu.toggle(badge, chosen ?? autoRunView(fixing.tab));
+    },
+  };
+}
+
+/** The attribute a run's panel and each of its views name a view under. */
+export const RUN_VIEW_ATTRIBUTE = "data-run-view";
+
+/**
+ * The remediation view's heading, standing in for the badge the fixing attempt
+ * no longer has: "attempt 2/3", how long it has been at it, its state glyph,
+ * and, once it gave up, its own account of why.
+ */
+export function drawRemediationHeading(fixing: MergeTab, ticker: Ticker): HTMLElement {
+  const el = document.createElement("div");
+  el.className = "merge-remediation-head";
+  const line = document.createElement("div");
+  line.className = "merge-remediation-line";
+  line.append(
+    drawFeedMergeTabFixingAttempt(armOf(fixing, "testsRunFixing"), `${PATH}.tests_run_fixing`),
+    drawTabDuration(fixing, ticker),
+    drawTabStateGlyph(fixing),
+  );
+  const summary = document.createElement("div");
+  summary.className = "merge-tab-summary";
+  drawSummary(summary, fixing);
+  el.append(line, summary);
+  return el;
+}
+
+/** A run's view dropdown, as its panel drives it. */
+interface RunViewMenu {
+  /** Open the dropdown under BADGE with CURRENT marked, or close it when open. */
+  toggle(badge: HTMLElement, current: RunView): void;
+}
+
+/**
+ * The dropdown a run's panel switches its views through, drawn at the top of
+ * HOST under the run's badge. Picking a view hands it to PICK and closes the
+ * dropdown; a click anywhere outside it, the badge's own excepted (that click
+ * is the toggle's), closes it too.
+ */
+function createRunViewMenu(host: HTMLElement, pick: (view: RunView) => void): RunViewMenu {
+  const el = document.createElement("div");
+  el.className = "merge-run-views list-rows";
+  el.setAttribute("role", "menu");
+  el.hidden = true;
+  host.prepend(el);
+  let opener: HTMLElement | null = null;
+
+  const close = (): void => {
+    el.hidden = true;
+    opener = null;
+    document.removeEventListener("click", dismiss, true);
+  };
+  const dismiss = (event: MouseEvent): void => {
+    const target = event.target;
+    if (target instanceof Node && (el.contains(target) || opener?.contains(target) === true)) return;
+    close();
+  };
+
+  return {
+    toggle(badge: HTMLElement, current: RunView): void {
+      if (!el.hidden) {
+        close();
+        return;
+      }
+      log.debug("opening a run's view dropdown", { operation: "merge.run-views-open", context: { current } });
+      el.replaceChildren(
+        ...RUN_VIEWS.map((view) => {
+          const item = createControl();
+          item.className = "merge-run-view-item";
+          item.setAttribute("role", "menuitemradio");
+          item.setAttribute(RUN_VIEW_ATTRIBUTE, view);
+          item.setAttribute("aria-checked", view === current ? "true" : "false");
+          item.classList.toggle("is-active", view === current);
+          item.textContent = view;
+          item.addEventListener("click", () => {
+            close();
+            pick(view);
+          });
+          return item;
+        }),
+      );
+      el.style.left = `${badge.getBoundingClientRect().left - host.getBoundingClientRect().left}px`;
+      el.hidden = false;
+      opener = badge;
+      document.addEventListener("click", dismiss, true);
     },
   };
 }
