@@ -210,6 +210,12 @@ type orchestrator struct {
 	// idle between steps, waiting for its chain to change. Nil in production;
 	// a test reads where the chain stands from it.
 	onChainIdle func(ws ids.WorkspaceID)
+	// onKick, when set, is called by every kick of a synchronous (test)
+	// orchestrator, whose kick starts no pump: a test that pumps by hand
+	// wakes on it, so an edge that would have pumped production's queue
+	// (a waiting member's rebase settling) is never lost to it. Nil in
+	// production.
+	onKick func(repo wsm.RepoKey)
 	// onGitStopWait, when set, is called once the drain has stopped every
 	// suspended run's git gate, immediately before it waits for the commands
 	// in flight: a test releases a held command from inside that wait.
