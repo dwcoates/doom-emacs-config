@@ -832,6 +832,89 @@ func TestARevivedSessionThatHasSinceDepartedKeepsItsHolds(t *testing.T) {
 	}
 }
 
+// TestARevivedSessionReapedBeforeItsDepartureIsNotAFailedRevival is the
+// narrower race: the revived shim's client is reaped, and the watcher has not
+// yet recorded the departure the dead-link edge will bring.
+func TestARevivedSessionReapedBeforeItsDepartureIsNotAFailedRevival(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.noSession = true
+	h.reviveHook = func() {
+		h.noSession = false
+		h.clientReaped = true
+		h.watcher.reap()
+	}
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "wake up")); err != nil {
+		t.Fatalf("Submit = %v, want the submission held pending the revival", err)
+	}
+	h.waitRevivals()
+
+	// Assert
+	if logged(h.log.Records(), "error", opSubmit, "the revival reported success but the workspace still has no session") {
+		t.Fatalf("a revival whose session came up and was reaped was recorded as a failed revival")
+	}
+	for _, rec := range h.log.Records() {
+		if rec.Level == "info" && rec.Message == "the revived session came up and has since departed; its departure decides what follows" {
+			if rec.Context["departure"] != "pending" {
+				t.Fatalf("context = %v, want the departure named pending", rec.Context)
+			}
+			return
+		}
+	}
+	t.Fatalf("records = %+v, want the reaped session named at INFO", h.log.Records())
+}
+
+func TestARevivedSessionReapedBeforeItsDepartureKeepsItsHolds(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.noSession = true
+	h.reviveHook = func() {
+		h.noSession = false
+		h.clientReaped = true
+		h.watcher.reap()
+	}
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "wake up")); err != nil {
+		t.Fatalf("Submit = %v, want the submission held pending the revival", err)
+	}
+	h.waitRevivals()
+
+	// Assert
+	standing, err := h.db.HeldPrompts(context.Background(), "ws-1")
+	if err != nil {
+		t.Fatalf("reading the standing holds: %v", err)
+	}
+	if len(standing) != 1 {
+		t.Fatalf("standing holds = %+v, want the prompt still held for the next bring-up", standing)
+	}
+}
+
+// TestARevivalWhoseWatcherStillRunsIsRecordedAtError pins that a served
+// watcher alone does not excuse a missing client: only a gone shim does.
+func TestARevivalWhoseWatcherStillRunsIsRecordedAtError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.noSession = true
+	h.reviveHook = func() {
+		h.noSession = false
+		h.clientReaped = true
+	}
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "wake up")); err != nil {
+		t.Fatalf("Submit = %v, want the submission held pending the revival", err)
+	}
+	h.waitRevivals()
+
+	// Assert
+	if !logged(h.log.Records(), "error", opSubmit, "the revival reported success but the workspace still has no session") {
+		t.Fatalf("records = %+v, want the unexplained missing client at ERROR", h.log.Records())
+	}
+}
+
 func TestARevivalThatLeavesNoSessionAtAllIsRecordedAtError(t *testing.T) {
 	// Arrange: the revival answers success and nothing serves the workspace.
 	h := newHarness(t)

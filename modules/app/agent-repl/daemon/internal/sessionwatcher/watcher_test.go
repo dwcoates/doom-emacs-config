@@ -2460,6 +2460,51 @@ func TestClosingTheWatchOfARunningShimIsNoDeparture(t *testing.T) {
 	}
 }
 
+// TestShimGone pins what ShimGone answers: a running shim is not gone, a
+// reaped client is gone before its dead-link edge records the departure, and
+// a departed shim is gone.
+func TestShimGone(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness)
+		want    bool
+	}{
+		{name: "a running shim is not gone", arrange: func(*testing.T, *harness) {}, want: false},
+		{
+			name: "a reaped client is gone before its departure is recorded",
+			arrange: func(_ *testing.T, h *harness) {
+				h.client.setReaped(shimclient.ExitInfo{PID: 4242, Code: 1})
+			},
+			want: true,
+		},
+		{
+			name: "a departed shim is gone",
+			arrange: func(t *testing.T, h *harness) {
+				h.client.setReaped(shimclient.ExitInfo{PID: 4242, Code: 1})
+				h.client.links <- shimclient.LinkDead
+				h.awaitDeparture(t)
+			},
+			want: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, Session{Started: sessionStarted("")})
+			h.quiet()
+			tc.arrange(t, h)
+
+			// Act.
+			got := h.w.ShimGone()
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("ShimGone() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestADepartureIsToldOnlyOnceAcrossItsEdges(t *testing.T) {
 	// Arrange: the link dies, and the dead session is then retired.
 	h := newHarness(t, Session{Started: sessionStarted("")})
