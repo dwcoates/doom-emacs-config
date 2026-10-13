@@ -187,55 +187,72 @@ func TestUpdateMergeQueueEvictRemovesOneWorkspacesQueuedMerge(t *testing.T) {
 	}
 }
 
-func TestUpdateMergeQueueFrontMovesAWaitingMergeAheadOfTheOthers(t *testing.T) {
+func TestUpdateMergeQueueMoveSwapsTwoWaitingMerges(t *testing.T) {
 	t.Parallel()
-	// Arrange: a held merge runs, and two more wait behind it.
-	front, behind, repo, d := mergeBlockedQueueFixture(t)
-	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages.
-	d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab")
-	last := mergeCreateChild(t, d, mergeRepositoryRef(t, d, repo), "last", "last work", nil)
-	harness.CommitWork(t, last.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: last.ws, Source: harness.OwnBranch(false)})); err != nil {
-		t.Fatalf("MergeWorkspace(last) = error %v, want the merge enqueued", err)
+	tests := []struct {
+		name string
+		// action names the moved merge: the last one up, or the one behind
+		// the running merge down. Either way the two waiting merges swap.
+		action func(behind, last *workspacev1.WorkspaceRef) *agentreplv1.UpdateMergeQueueRequest
+	}{
+		{name: "the last merge up", action: func(_, last *workspacev1.WorkspaceRef) *agentreplv1.UpdateMergeQueueRequest {
+			return &agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_MoveUp{MoveUp: &agentreplv1.UpdateMergeQueueMoveUp{Workspace: last}}}
+		}},
+		{name: "the merge behind the running one down", action: func(behind, _ *workspacev1.WorkspaceRef) *agentreplv1.UpdateMergeQueueRequest {
+			return &agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_MoveDown{MoveDown: &agentreplv1.UpdateMergeQueueMoveDown{Workspace: behind}}}
+		}},
 	}
-	roster := d.WatchRoster()
-	awaitRoster(t, d, roster, "both waiting workspaces queued", func(r *frontendv1.WorkspaceRoster) bool {
-		return rosterRow(r, behind.ws.GetId()).GetMergeQueued() != nil && rosterRow(r, last.ws.GetId()).GetMergeQueued() != nil
-	})
-
-	// Act
-	resp, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
-		Action: &agentreplv1.UpdateMergeQueueRequest_Front{Front: &agentreplv1.UpdateMergeQueueFront{Workspace: last.ws}},
-	}))
-	if err != nil || resp.Msg.GetError() != nil {
-		t.Fatalf("UpdateMergeQueue(front) = %v, %v, want a success", resp.Msg, err)
-	}
-
-	// Assert: the queue reads running, then the fronted merge, then the one
-	// it passed. The daemon holds the sole writing handle while it runs, so
-	// the queue is read after its orderly exit; the queue is durable across it.
-	d.Stop()
-	var order []string
-	d.WithDB(func(db *sql.DB) {
-		rows, err := db.Query(`SELECT workspace_id FROM merge_queue ORDER BY seq`)
-		if err != nil {
-			t.Fatalf("read the merge queue: %v", err)
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var id string
-			if err := rows.Scan(&id); err != nil {
-				t.Fatalf("scan the merge queue: %v", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			// Arrange: a held merge runs, and two more wait behind it.
+			front, behind, repo, d := mergeBlockedQueueFixture(t)
+			// The sweep covers every test; the declared records are evidence of the merge conflict the test stages.
+			d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab")
+			last := mergeCreateChild(t, d, mergeRepositoryRef(t, d, repo), "last", "last work", nil)
+			harness.CommitWork(t, last.ws.GetDir())
+			if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: last.ws, Source: harness.OwnBranch(false)})); err != nil {
+				t.Fatalf("MergeWorkspace(last) = error %v, want the merge enqueued", err)
 			}
-			order = append(order, id)
-		}
-		if err := rows.Err(); err != nil {
-			t.Fatalf("read the merge queue: %v", err)
-		}
-	})
-	want := []string{front.ws.GetId(), last.ws.GetId(), behind.ws.GetId()}
-	if !slices.Equal(order, want) {
-		t.Fatalf("queue = %v, want %v", order, want)
+			roster := d.WatchRoster()
+			awaitRoster(t, d, roster, "both waiting workspaces queued", func(r *frontendv1.WorkspaceRoster) bool {
+				return rosterRow(r, behind.ws.GetId()).GetMergeQueued() != nil && rosterRow(r, last.ws.GetId()).GetMergeQueued() != nil
+			})
+
+			// Act
+			resp, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(tt.action(behind.ws, last.ws)))
+			if err != nil || resp.Msg.GetError() != nil {
+				t.Fatalf("UpdateMergeQueue(move) = %v, %v, want a success", resp.Msg, err)
+			}
+
+			// Assert: the queue reads running, then the last merge, then the
+			// one it swapped with. The daemon holds the sole writing handle
+			// while it runs, so the queue is read after its orderly exit; the
+			// queue is durable across it.
+			d.Stop()
+			var order []string
+			d.WithDB(func(db *sql.DB) {
+				rows, err := db.Query(`SELECT workspace_id FROM merge_queue ORDER BY seq`)
+				if err != nil {
+					t.Fatalf("read the merge queue: %v", err)
+				}
+				defer rows.Close()
+				for rows.Next() {
+					var id string
+					if err := rows.Scan(&id); err != nil {
+						t.Fatalf("scan the merge queue: %v", err)
+					}
+					order = append(order, id)
+				}
+				if err := rows.Err(); err != nil {
+					t.Fatalf("read the merge queue: %v", err)
+				}
+			})
+			want := []string{front.ws.GetId(), last.ws.GetId(), behind.ws.GetId()}
+			if !slices.Equal(order, want) {
+				t.Fatalf("queue = %v, want %v", order, want)
+			}
+		})
 	}
 }
 

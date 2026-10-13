@@ -247,6 +247,10 @@ func (q *queue) redrive(d *delivery) {
 		return
 	}
 	log.Debug(opCall, "re-deciding what was deferred while a shim call stood", dlog.Context{"parked": len(parked)})
+	q.mu.Lock()
+	releaseOwed := d.state.releaseOwed
+	d.state.releaseOwed = false
+	q.mu.Unlock()
 	bounced := q.decideBounceLocked(d, log)
 	// A deferred join is settled either way: under a bounce it is recorded
 	// waiting for the new session (joinBlocked), so none is left standing.
@@ -254,6 +258,12 @@ func (q *queue) redrive(d *delivery) {
 	if bounced {
 		log.Info(opCall, "a bounce deferred behind the shim call was taken; what is held waits for it", nil)
 		return
+	}
+	// THE SESSION CAME UP WHILE THE CALL STOOD (releaseReconnectHoldsLocked):
+	// the release runs now, over whatever the call's outcome stamped. A bounce
+	// taken above brings its own session up, and that edge releases instead.
+	if releaseOwed {
+		q.releaseReconnectHoldsLocked(ctx, d, log)
 	}
 	// A PROMPT ADDRESSED TO AN AGENT IS NOT THE SESSION'S TURN: it goes now
 	// whatever the session is running, as it would have gone at submission.

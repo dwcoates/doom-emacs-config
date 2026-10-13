@@ -122,6 +122,9 @@ func (idleRollout) Joining() bool { return false }
 
 func (idleRollout) RollingOut() ([]ids.WorkspaceID, bool) { return nil, false }
 
+// TookOver is a latch that never closes: an idle rollout never joined.
+func (idleRollout) TookOver() <-chan struct{} { return nil }
+
 // noProgress drops the update line.
 type noProgress struct{}
 

@@ -94,11 +94,11 @@ type Orchestrator interface {
 	// which gives back its lease, its queue entry, its ledger interval and its
 	// repository's slot, and the call returns once that is done.
 	Evict(ctx context.Context, ws ids.WorkspaceID) error
-	// Front moves a workspace's waiting merge to the front of its queue: ahead
-	// of every ordinary merge waiting, behind the merge running and every merge
-	// already at the front. A merge already there, or already running, is left
-	// where it is; a merge only requested takes the front when it is queued.
-	Front(ctx context.Context, ws ids.WorkspaceID) error
+	// Move moves a workspace's waiting merge one place up or down its queue,
+	// past the nearest waiting merge on that side, answering whether it moved.
+	// A merge with no waiting merge on that side, or one not waiting (running,
+	// or only requested), is left where it is.
+	Move(ctx context.Context, ws ids.WorkspaceID, move wsm.MergeMove) (bool, error)
 	// AnswerDequeue answers the tray's dequeue offer: keep the merge queued,
 	// or take it out. Taking out a running merge abandons it, as Evict does.
 	AnswerDequeue(ctx context.Context, ws ids.WorkspaceID, keep bool) error

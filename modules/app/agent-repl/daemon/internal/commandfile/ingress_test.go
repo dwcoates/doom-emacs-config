@@ -12,6 +12,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/promptqueue"
@@ -864,7 +865,8 @@ func TestApplyFileRefusesASourceDirNoWorkspaceIsAt(t *testing.T) {
 	}
 }
 
-// THE MERGE QUEUE'S CONTROLS (merge_evict, merge_pause, merge_resume) reach
+// THE MERGE QUEUE'S CONTROLS (merge_evict, merge_move_up, merge_move_down,
+// merge_pause, merge_resume) reach
 // the orchestrator entry points UpdateMergeQueue calls, and answer the
 // requesting agent through the file's fate and a daemon.commandfile.merge_queue
 // record.
@@ -952,6 +954,107 @@ func TestApplyFileQuarantinesAnEvictionTheOrchestratorFails(t *testing.T) {
 	}
 }
 
+func TestApplyFileMovesAMergeInTheQueue(t *testing.T) {
+	tests := []struct {
+		name        string
+		body        string
+		wantMove    fakeMove
+		wantOwn     bool
+		wantType    string
+		wantOutcome string
+	}{
+		{name: "the requester's own, up", body: `[{"type":"merge_move_up","project_dir":"/tree/w1","workspace":"one"}]`,
+			wantMove: fakeMove{ws: "w1", move: wsm.MergeMoveUp}, wantOwn: true, wantType: TypeMergeMoveUp, wantOutcome: "moved_up"},
+		{name: "another workspace's, down, by its worktree", body: `[{"type":"merge_move_down","project_dir":"/tree/w1","move_dir":"/tree/w2"}]`,
+			wantMove: fakeMove{ws: "w2", move: wsm.MergeMoveDown}, wantOwn: false, wantType: TypeMergeMoveDown, wantOutcome: "moved_down"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", "/tree/w1")
+			f.workspace("w2", "/tree/w2")
+			path := f.write(t, "workspace_commands_move.json", tt.body)
+
+			// Act.
+			err := f.ingress.ApplyFile(context.Background(), path)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("ApplyFile: %v", err)
+			}
+			if !reflect.DeepEqual(f.merge.moves, []fakeMove{tt.wantMove}) {
+				t.Fatalf("moves %v, want [%v]", f.merge.moves, tt.wantMove)
+			}
+			record := f.record(t, opMergeQueue, "info")
+			want := map[string]any{"type": tt.wantType, "requester": "w1", "workspace": string(tt.wantMove.ws), "own": tt.wantOwn,
+				"move": tt.wantMove.move.String(), "outcome": tt.wantOutcome, "path": path}
+			for key, value := range want {
+				if record.Context[key] != value {
+					t.Fatalf("record context %v, want %s=%v", record.Context, key, value)
+				}
+			}
+		})
+	}
+}
+
+func TestApplyFileAnswersAMoveThatDoesNotHappenAsAnOrdinaryOutcome(t *testing.T) {
+	tests := []struct {
+		name        string
+		arrange     func(m *fakeMerge)
+		wantOutcome string
+	}{
+		{name: "a merge with no waiting merge to pass", arrange: func(m *fakeMerge) { m.unmoved = true }, wantOutcome: "unmoved"},
+		{name: "a workspace with nothing queued", arrange: func(m *fakeMerge) {
+			m.moveErr = &merge.RefusalError{Arm: merge.ArmNoSuchQueuedMerge, Workspace: "w1", Reason: "no merge of this workspace is on any queue"}
+		}, wantOutcome: "not_queued"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", "/tree/w1")
+			tt.arrange(f.merge)
+			path := f.write(t, "workspace_commands_move.json", `[{"type":"merge_move_up","project_dir":"/tree/w1"}]`)
+
+			// Act.
+			err := f.ingress.ApplyFile(context.Background(), path)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("ApplyFile = %v, want the file applied", err)
+			}
+			if got := entries(t, filepath.Join(f.dir, "applied")); len(got) != 1 {
+				t.Fatalf("applied files = %v, want the file applied", got)
+			}
+			record := f.record(t, opMergeQueue, "info")
+			if record.Context["outcome"] != tt.wantOutcome || record.Context["workspace"] != "w1" {
+				t.Fatalf("record context %v, want outcome=%s for w1", record.Context, tt.wantOutcome)
+			}
+		})
+	}
+}
+
+func TestApplyFileQuarantinesAMoveTheOrchestratorFails(t *testing.T) {
+	// Arrange: any failure other than "not queued" is the rpc's failure too.
+	f := newFixture(t)
+	f.workspace("w1", "/tree/w1")
+	f.merge.moveErr = errFake
+	path := f.write(t, "workspace_commands_move.json", `[{"type":"merge_move_down","project_dir":"/tree/w1"}]`)
+
+	// Act.
+	err := f.ingress.ApplyFile(context.Background(), path)
+
+	// Assert.
+	if !errors.Is(err, ErrQuarantined) {
+		t.Fatalf("ApplyFile = %v, want the file quarantined", err)
+	}
+	record := f.record(t, opEntry, "warn")
+	if record.Context["type"] != TypeMergeMoveDown || !strings.Contains(record.Context["cause"].(string), errFake.Error()) {
+		t.Fatalf("record context %v, want the merge_move_down refusal and its cause", record.Context)
+	}
+}
+
 func TestApplyFileRefusesAMergeQueueControlFromAnUnknownWorkspace(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -960,6 +1063,8 @@ func TestApplyFileRefusesAMergeQueueControlFromAnUnknownWorkspace(t *testing.T) 
 	}{
 		{name: "an unregistered requester evicting", body: `[{"type":"merge_evict","project_dir":"/tree/none"}]`, wantCause: `no workspace is registered at "/tree/none"`},
 		{name: "an unregistered evict_dir", body: `[{"type":"merge_evict","project_dir":"/tree/w1","evict_dir":"/tree/none"}]`, wantCause: `unknown_workspace: no workspace is registered at evict_dir "/tree/none"`},
+		{name: "an unregistered requester moving", body: `[{"type":"merge_move_up","project_dir":"/tree/none"}]`, wantCause: `no workspace is registered at "/tree/none"`},
+		{name: "an unregistered move_dir", body: `[{"type":"merge_move_down","project_dir":"/tree/w1","move_dir":"/tree/none"}]`, wantCause: `unknown_workspace: no workspace is registered at move_dir "/tree/none"`},
 		{name: "an unregistered requester pausing", body: `[{"type":"merge_pause","project_dir":"/tree/none"}]`, wantCause: `no workspace is registered at "/tree/none"`},
 		{name: "an unregistered requester resuming", body: `[{"type":"merge_resume","project_dir":"/tree/none"}]`, wantCause: `no workspace is registered at "/tree/none"`},
 	}
@@ -977,8 +1082,8 @@ func TestApplyFileRefusesAMergeQueueControlFromAnUnknownWorkspace(t *testing.T) 
 			if !errors.Is(err, ErrQuarantined) {
 				t.Fatalf("ApplyFile = %v, want the file quarantined", err)
 			}
-			if len(f.merge.evicted)+len(f.merge.paused)+len(f.merge.unpaused) != 0 {
-				t.Fatalf("the orchestrator was driven (evicted %v, paused %v, unpaused %v), want nothing", f.merge.evicted, f.merge.paused, f.merge.unpaused)
+			if len(f.merge.evicted)+len(f.merge.moves)+len(f.merge.paused)+len(f.merge.unpaused) != 0 {
+				t.Fatalf("the orchestrator was driven (evicted %v, moves %v, paused %v, unpaused %v), want nothing", f.merge.evicted, f.merge.moves, f.merge.paused, f.merge.unpaused)
 			}
 			record := f.record(t, opEntry, "warn")
 			if cause, _ := record.Context["cause"].(string); !strings.Contains(cause, tt.wantCause) {
@@ -998,6 +1103,9 @@ func TestApplyFileQuarantinesAMalformedMergeQueueControl(t *testing.T) {
 		{name: "a pause naming no requester", body: `[{"type":"merge_pause"}]`, wantCause: "merge_pause: a project_dir (or a dir, or a workspace id) is required"},
 		{name: "an eviction scoped by a repository", body: `[{"type":"merge_evict","project_dir":"/tree/w1","repository_dir":"/repo"}]`, wantCause: "merge_evict: repository_dir is a merge_pause's or a merge_resume's field"},
 		{name: "a resume naming a workspace to evict", body: `[{"type":"merge_resume","project_dir":"/tree/w1","evict_dir":"/tree/w2"}]`, wantCause: "merge_resume: evict_dir is a merge_evict's field"},
+		{name: "a move naming no requester", body: `[{"type":"merge_move_up"}]`, wantCause: "merge_move_up: a project_dir (or a dir, or a workspace id) is required"},
+		{name: "an eviction naming a workspace to move", body: `[{"type":"merge_evict","project_dir":"/tree/w1","move_dir":"/tree/w2"}]`, wantCause: "merge_evict: move_dir is a merge_move_up's or a merge_move_down's field"},
+		{name: "a relative move_dir", body: `[{"type":"merge_move_down","project_dir":"/tree/w1","move_dir":"w2"}]`, wantCause: "merge_move_down: move_dir: "},
 		{name: "a pause carrying a merge's source", body: `[{"type":"merge_pause","project_dir":"/tree/w1","branch":"b"}]`, wantCause: "merge_pause: branch is a merge's field"},
 		{name: "a relative repository_dir", body: `[{"type":"merge_pause","project_dir":"/tree/w1","repository_dir":"repo"}]`, wantCause: "merge_pause: repository_dir: "},
 	}
@@ -1016,8 +1124,8 @@ func TestApplyFileQuarantinesAMalformedMergeQueueControl(t *testing.T) {
 			if !errors.Is(err, ErrQuarantined) {
 				t.Fatalf("ApplyFile = %v, want the file quarantined", err)
 			}
-			if len(f.merge.evicted)+len(f.merge.paused)+len(f.merge.unpaused) != 0 {
-				t.Fatalf("the orchestrator was driven (evicted %v, paused %v, unpaused %v), want nothing", f.merge.evicted, f.merge.paused, f.merge.unpaused)
+			if len(f.merge.evicted)+len(f.merge.moves)+len(f.merge.paused)+len(f.merge.unpaused) != 0 {
+				t.Fatalf("the orchestrator was driven (evicted %v, moves %v, paused %v, unpaused %v), want nothing", f.merge.evicted, f.merge.moves, f.merge.paused, f.merge.unpaused)
 			}
 			record := f.record(t, opQuarantine, "warn")
 			if cause, _ := record.Context["cause"].(string); !strings.Contains(cause, tt.wantCause) {
@@ -1302,5 +1410,120 @@ func TestCreateAndRetargetShareTheParentSpelling(t *testing.T) {
 	}
 	if len(f.retarget.calls) != 1 || f.retarget.calls[0].Parent != "" {
 		t.Fatalf("retargets = %+v, want top-level for the main checkout", f.retarget.calls)
+	}
+}
+
+// TestQueueSubjectResolvesTheRequesterAndTheWorkspaceItAddresses covers the
+// one resolution every queue control that names a workspace shares: the
+// requester's own merge when the control's directory is unset, another
+// workspace's by its worktree otherwise, and a refusal naming the control's
+// own field for a directory no workspace is registered at.
+func TestQueueSubjectResolvesTheRequesterAndTheWorkspaceItAddresses(t *testing.T) {
+	tests := []struct {
+		name          string
+		entry         Entry
+		dir           string
+		wantRequester wsm.WorkspaceID
+		wantSubject   wsm.WorkspaceID
+		wantErr       string
+	}{
+		{name: "the requester's own", entry: Entry{ProjectDir: "/tree/w1"}, wantRequester: "w1", wantSubject: "w1"},
+		{name: "another workspace's, by its worktree", entry: Entry{ProjectDir: "/tree/w1"}, dir: "/tree/w2", wantRequester: "w1", wantSubject: "w2"},
+		{name: "an unregistered directory", entry: Entry{ProjectDir: "/tree/w1"}, dir: "/tree/none",
+			wantErr: `unknown_workspace: no workspace is registered at some_dir "/tree/none"`},
+		{name: "an unregistered requester", entry: Entry{ProjectDir: "/tree/none"}, dir: "/tree/w2",
+			wantErr: `no workspace is registered at "/tree/none"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", "/tree/w1")
+			f.workspace("w2", "/tree/w2")
+			in := f.ingress.(*ingress)
+
+			// Act.
+			requester, subject, err := in.queueSubject(context.Background(), tt.entry, "some_dir", tt.dir)
+
+			// Assert.
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("queueSubject = %v, want an error containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || requester != tt.wantRequester || subject != tt.wantSubject {
+				t.Fatalf("queueSubject = %s, %s, %v; want %s, %s", requester, subject, err, tt.wantRequester, tt.wantSubject)
+			}
+		})
+	}
+}
+
+// TestAnsweredNotQueuedRecordsOnlyTheNotQueuedRefusal covers the one place a
+// queue control's "nothing is queued" refusal becomes an ordinary outcome:
+// that refusal is recorded as not_queued, and every other error (or none) is
+// left to the caller with nothing recorded.
+func TestAnsweredNotQueuedRecordsOnlyTheNotQueuedRefusal(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		answered bool
+	}{
+		{name: "the not-queued refusal", err: &merge.RefusalError{Arm: merge.ArmNoSuchQueuedMerge, Reason: "none"}, answered: true},
+		{name: "another refusal", err: &merge.RefusalError{Arm: merge.ArmAlreadyPaused, Reason: "paused"}},
+		{name: "a plain failure", err: errFake},
+		{name: "no error", err: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			log := dlog.NewTestLogger()
+			outcome := dlog.Context{"workspace": "w1"}
+
+			// Act.
+			answered := answeredNotQueued(log, tt.err, outcome, "nothing there")
+
+			// Assert.
+			if answered != tt.answered {
+				t.Fatalf("answered = %v, want %v", answered, tt.answered)
+			}
+			records := log.Records()
+			if !tt.answered {
+				if len(records) != 0 || outcome["outcome"] != nil {
+					t.Fatalf("records %v, outcome %v; want nothing recorded", records, outcome)
+				}
+				return
+			}
+			if len(records) != 1 || records[0].Operation != opMergeQueue || records[0].Level != "info" || records[0].Context["outcome"] != "not_queued" {
+				t.Fatalf("records = %+v, want one info not_queued record", records)
+			}
+		})
+	}
+}
+
+// TestEveryQueueControlAnswersNothingQueuedAlike pins that evict and both
+// moves answer a merge that is not there through the one shared outcome.
+func TestEveryQueueControlAnswersNothingQueuedAlike(t *testing.T) {
+	for _, typ := range []string{TypeMergeEvict, TypeMergeMoveUp, TypeMergeMoveDown} {
+		t.Run(typ, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", "/tree/w1")
+			refusal := &merge.RefusalError{Arm: merge.ArmNoSuchQueuedMerge, Workspace: "w1", Reason: "none"}
+			f.merge.evictErr, f.merge.moveErr = refusal, refusal
+			path := f.write(t, "workspace_commands_control.json", `[{"type":"`+typ+`","project_dir":"/tree/w1"}]`)
+
+			// Act.
+			err := f.ingress.ApplyFile(context.Background(), path)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("ApplyFile = %v, want the file applied", err)
+			}
+			record := f.record(t, opMergeQueue, "info")
+			if record.Context["outcome"] != "not_queued" || record.Context["type"] != typ {
+				t.Fatalf("record context %v, want outcome=not_queued for %s", record.Context, typ)
+			}
+		})
 	}
 }

@@ -51,7 +51,7 @@ const (
 	// TypeTaskAddWorkspace assigns a workspace to a task.
 	TypeTaskAddWorkspace = "task-add-workspace"
 
-	// THE MERGE QUEUE'S CONTROLS, mirroring UpdateMergeQueue's three arms
+	// THE MERGE QUEUE'S CONTROLS, mirroring UpdateMergeQueue's arms
 	// (endpoint_update_merge_queue.proto) and calling the same orchestrator
 	// entry points it calls. Each entry's workspace is the REQUESTER, the one
 	// whose agent wrote it, exactly as a merge's is.
@@ -59,6 +59,13 @@ const (
 	// TypeMergeEvict takes one workspace's merge off the queue
 	// (UpdateMergeQueueEvict): the requester's own, or the one at evict_dir.
 	TypeMergeEvict = "merge_evict"
+	// TypeMergeMoveUp moves one workspace's waiting merge one place up its
+	// queue (UpdateMergeQueueMoveUp): the requester's own, or the one at
+	// move_dir.
+	TypeMergeMoveUp = "merge_move_up"
+	// TypeMergeMoveDown moves one workspace's waiting merge one place down
+	// its queue (UpdateMergeQueueMoveDown), named as TypeMergeMoveUp names it.
+	TypeMergeMoveDown = "merge_move_down"
 	// TypeMergePause stops the queue admitting merges (UpdateMergeQueuePause):
 	// the repository at repository_dir, or every repository when it is unset.
 	TypeMergePause = "merge_pause"
@@ -196,6 +203,11 @@ type Entry struct {
 	// merge_evict takes off the queue (UpdateMergeQueueEvict.workspace).
 	// Unset evicts the requester's own merge. Evict-only.
 	EvictDir string `json:"evict_dir,omitempty"`
+	// MoveDir names ANOTHER workspace, by its worktree root, whose merge a
+	// merge_move_up or merge_move_down moves (UpdateMergeQueueMoveUp.workspace,
+	// UpdateMergeQueueMoveDown.workspace). Unset moves the requester's own
+	// merge. Move-only.
+	MoveDir string `json:"move_dir,omitempty"`
 	// THE RETARGET'S FIELD.
 
 	// Parent is a retarget's new parent, by its worktree root: a registered
@@ -288,6 +300,9 @@ func (e Entry) Validate() error {
 	if e.Type != TypeMergeEvict && e.EvictDir != "" && e.Type != "" {
 		return fmt.Errorf("%s: evict_dir is a %s's field, and no %s reads it", e.Type, TypeMergeEvict, e.Type)
 	}
+	if e.Type != TypeMergeMoveUp && e.Type != TypeMergeMoveDown && e.MoveDir != "" && e.Type != "" {
+		return fmt.Errorf("%s: move_dir is a %s's or a %s's field, and no %s reads it", e.Type, TypeMergeMoveUp, TypeMergeMoveDown, e.Type)
+	}
 	if e.Type != TypeRetarget && e.Parent.Present && e.Type != "" {
 		return fmt.Errorf("%s: parent is a %s's field, and no %s reads it", e.Type, TypeRetarget, e.Type)
 	}
@@ -320,8 +335,8 @@ func (e Entry) Validate() error {
 			return fmt.Errorf("%s: parent is required: a workspace's directory, or null for top-level", TypeRetarget)
 		}
 		return nil
-	case TypeClose, TypeForget, TypeOpen, TypeSwitch, TypeMergeEvict, TypeMergePause, TypeMergeResume,
-		TypeMergeHoldRollouts, TypeMergeReleaseRollouts:
+	case TypeClose, TypeForget, TypeOpen, TypeSwitch, TypeMergeEvict, TypeMergeMoveUp, TypeMergeMoveDown,
+		TypeMergePause, TypeMergeResume, TypeMergeHoldRollouts, TypeMergeReleaseRollouts:
 		return e.requireTarget()
 	case TypeTaskCreate:
 		if e.Title == "" {
@@ -522,6 +537,7 @@ func (e Entry) withAbsolutePaths(home string) (Entry, error) {
 		{name: "dir", value: &e.Dir},
 		{name: "source_dir", value: &e.SourceDir},
 		{name: "evict_dir", value: &e.EvictDir},
+		{name: "move_dir", value: &e.MoveDir},
 		{name: "repository_dir", value: &e.RepositoryDir},
 	}
 	if e.Parent.Dir != "" {

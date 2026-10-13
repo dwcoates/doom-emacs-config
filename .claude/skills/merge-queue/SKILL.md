@@ -1,13 +1,13 @@
 ---
 name: merge-queue
-description: Land work on master through the agent-repl merge queue — the ONLY way into master in this repository. From this workspace, request the merge of its own branch, only some changes of its own branch (a fix made amid unfinished work), another workspace's branch, a subagent's branch, or a branch already merged upstream, then end the turn. It also announces, from anywhere inside a turn, a one-shot merge of this workspace that runs once the turn ends and closes this workspace once it lands. Merges are SYNC by default, running in this workspace, and the outcome (landed, or failed in conflicts, tests or other) and any conflict or test-failure repairs arrive in this session. Its own branch can instead merge ASYNC, in a hidden merge workspace named by the caller, so this workspace stays free; reserved for genuinely tangential or explicitly detached work. Any merge may be asked for at the FRONT of the queue, ahead of every ordinary merge waiting (a hotfix). Also controls the queue itself, taking this workspace's or another workspace's merge off the queue, pausing or resuming the queue for one repository or all, and holding or releasing the queue's rollouts (merges still land, but a landing no longer redeploys the running runtime). Use whenever work is finished and must reach master, whenever you would otherwise run git merge, git commit, git cherry-pick or git push onto master, when a subagent reports a finished branch, whenever a queued merge must be removed or the queue paused or resumed, whenever a hand-deployed build (a profiling build) must not be replaced by the next landing, or when invoked as /merge-queue.
-argument-hint: "own [in-place | sync | keep-open] [front] | own async <name> [pick <instruction>] [front] | one-shot [front] | workspace <worktree-dir> [front] | branch <branch-name> [front] | commits <commit>... [front] | pr-merged [front] | dequeue own | dequeue workspace <worktree-dir> | pause [<repo-dir>] | resume [<repo-dir>] | hold-rollouts | release-rollouts"
+description: Land work on master through the agent-repl merge queue — the ONLY way into master in this repository. From this workspace, request the merge of its own branch, only some changes of its own branch (a fix made amid unfinished work), another workspace's branch, a subagent's branch, or a branch already merged upstream, then end the turn. It also announces, from anywhere inside a turn, a one-shot merge of this workspace that runs once the turn ends and closes this workspace once it lands. Merges are SYNC by default, running in this workspace, and the outcome (landed, or failed in conflicts, tests or other) and any conflict or test-failure repairs arrive in this session. Its own branch can instead merge ASYNC, in a hidden merge workspace named by the caller, so this workspace stays free; reserved for genuinely tangential or explicitly detached work. Any merge may be asked for at the FRONT of the queue, ahead of every ordinary merge waiting (a hotfix). Also controls the queue itself, taking this workspace's or another workspace's merge off the queue, moving a waiting merge one place up or down the queue, pausing or resuming the queue for one repository or all, and holding or releasing the queue's rollouts (merges still land, but a landing no longer redeploys the running runtime). Use whenever work is finished and must reach master, whenever you would otherwise run git merge, git commit, git cherry-pick or git push onto master, when a subagent reports a finished branch, whenever a queued merge must be removed, moved up or down, or the queue paused or resumed, whenever a hand-deployed build (a profiling build) must not be replaced by the next landing, or when invoked as /merge-queue.
+argument-hint: "own [in-place | sync | keep-open] [front] | own async <name> [pick <instruction>] [front] | one-shot [front] | workspace <worktree-dir> [front] | branch <branch-name> [front] | commits <commit>... [front] | pr-merged [front] | dequeue own | dequeue workspace <worktree-dir> | move-up own | move-up workspace <worktree-dir> | move-down own | move-down workspace <worktree-dir> | pause [<repo-dir>] | resume [<repo-dir>] | hold-rollouts | release-rollouts"
 allowed-tools: Bash(~/.claude/skills/merge-queue/run.sh:*)
 ---
 
 ## What This Skill Does
 
-Asks the merge queue, from this workspace, to land a finished branch in its merge target: master for a workspace made off the main checkout, the PARENT workspace's checkout for a workspace created explicitly as a child of another. Once the turn ends, the merge runs SYNC by default: in this workspace, reporting into this session, with this session's agent resolving conflicts and test failures. An `own async` merge runs ASYNC instead: in a hidden merge workspace forked from this one under a name the caller supplies, while this workspace stays free; its progress streams into the merge bubble here, and the merge workspace is revealed when it fails, asks a question or permission, is stopped from the bubble, or is selected. Nothing merges by hand. It also removes a queued merge, pauses or resumes the queue, and holds or releases the queue's rollouts, answering at once.
+Asks the merge queue, from this workspace, to land a finished branch in its merge target: master for a workspace made off the main checkout, the PARENT workspace's checkout for a workspace created explicitly as a child of another. Once the turn ends, the merge runs SYNC by default: in this workspace, reporting into this session, with this session's agent resolving conflicts and test failures. An `own async` merge runs ASYNC instead: in a hidden merge workspace forked from this one under a name the caller supplies, while this workspace stays free; its progress streams into the merge bubble here, and the merge workspace is revealed when it fails, asks a question or permission, is stopped from the bubble, or is selected. Nothing merges by hand. It also removes a queued merge, moves a waiting merge one place up or down the queue, pauses or resumes the queue, and holds or releases the queue's rollouts, answering at once.
 
 ## Arguments
 
@@ -27,6 +27,10 @@ Asks the merge queue, from this workspace, to land a finished branch in its merg
 | `front` | Added to any merge argument above (`own`, `one-shot`, `workspace`, `branch`, `commits`, `pr-merged`): the merge goes to the FRONT of its queue once it is put in line, ahead of every ordinary merge waiting and behind any earlier front merge, never ahead of the merge already running. |
 | `dequeue own` | Take this workspace's own merge off the queue. |
 | `dequeue workspace <worktree-dir>` | Take ANOTHER workspace's merge off the queue, by its worktree. |
+| `move-up own` | Move this workspace's own waiting merge one place up the queue, past the waiting merge directly ahead of it. |
+| `move-up workspace <worktree-dir>` | Move ANOTHER workspace's waiting merge one place up the queue, by its worktree. |
+| `move-down own` | Move this workspace's own waiting merge one place down the queue, past the waiting merge directly behind it. |
+| `move-down workspace <worktree-dir>` | Move ANOTHER workspace's waiting merge one place down the queue, by its worktree. |
 | `pause [<repo-dir>]` | Pause the queue of the repository whose main checkout is `<repo-dir>`, else of every repository. A paused queue advances nothing: merges still enqueue, but every merge running in it is suspended at once (it resumes at the step it recorded), and nothing is admitted, promoted or resumed until `resume`. |
 | `resume [<repo-dir>]` | Resume a paused queue, scoped as `pause` is. |
 | `hold-rollouts` | Hold the queue's ROLLOUTS, daemon-wide and durably: merges keep landing, but a landing in the daemon's own checkout no longer redeploys, hot-reloads or bounces the running runtime. |
@@ -34,7 +38,7 @@ Asks the merge queue, from this workspace, to land a finished branch in its merg
 
 ## Steps
 
-0. Confirm the work is ready (merge arguments only; skip to step 1 for `one-shot`, `dequeue`, `pause`, `resume`, `hold-rollouts` and `release-rollouts`).
+0. Confirm the work is ready (merge arguments only; skip to step 1 for `one-shot`, `dequeue`, `move-up`, `move-down`, `pause`, `resume`, `hold-rollouts` and `release-rollouts`).
   - Every change is committed, and the applicable tests passed before each commit.
   - The branch to land is the one checked out in the worktree being merged; a worktree with no branch checked out is refused.
   - For every `own` form except `own async <name> pick`: this workspace's requested changes are FULLY implemented.
@@ -110,6 +114,15 @@ Asks the merge queue, from this workspace, to land a finished branch in its merg
     - `EXIT CODE 0:` The hold or release is applied. Go to step 5.
     - `EXIT CODE 2:` IMMEDIATELY terminate and surface the raw error.
     - `EXIT CODE 5:` Refused: the rollouts were already held, or were not held. Go to step 4.
+  - l. If `move-up own` or `move-down own`: call `~/.claude/skills/merge-queue/run.sh --move-up-own` or `~/.claude/skills/merge-queue/run.sh --move-down-own` respectively.
+    - `EXIT CODE 0:` The move is applied. Go to step 5.
+    - `EXIT CODE 2:` IMMEDIATELY terminate and surface the raw error.
+    - `EXIT CODE 5:` The move was refused. Go to step 4.
+    - `EXIT CODE 8:` No answer arrived in time. Go to step 6.
+  - m. If `move-up workspace <worktree-dir>` or `move-down workspace <worktree-dir>`: call `~/.claude/skills/merge-queue/run.sh --move-up-workspace <worktree-dir>` or `~/.claude/skills/merge-queue/run.sh --move-down-workspace <worktree-dir>` respectively.
+    - `EXIT CODE 0:` The move is applied. Go to step 5.
+    - `EXIT CODE 2:` IMMEDIATELY terminate and surface the raw error.
+    - `EXIT CODE 5:` The move was refused. Go to step 4.
     - `EXIT CODE 8:` No answer arrived in time. Go to step 6.
 
 2. End the turn.
@@ -129,11 +142,12 @@ Asks the merge queue, from this workspace, to land a finished branch in its merg
 4. Refused.
   - Report the printed refusal verbatim and STOP.
 
-5. Applied (`dequeue`, `pause`, `resume`, `hold-rollouts`, `release-rollouts`).
-  - Report the printed outcome (`evicted`, `not_queued`, `paused`, `resumed`, `held`, `released`, or `unread`) and any other printed lines verbatim, then STOP.
-  - *NOTE*: removing a merge that is not queued is applied with `not_queued`, not refused.
+5. Applied (`dequeue`, `move-up`, `move-down`, `pause`, `resume`, `hold-rollouts`, `release-rollouts`).
+  - Report the printed outcome (`evicted`, `moved_up`, `moved_down`, `unmoved`, `not_queued`, `paused`, `resumed`, `held`, `released`, or `unread`) and any other printed lines verbatim, then STOP.
+  - *NOTE*: removing or moving a merge that is not queued is applied with `not_queued`, not refused.
+  - *NOTE*: a move with no waiting merge to pass on that side is applied with `unmoved`.
 
-6. Unanswered (`dequeue`, `pause`, `resume`, `hold-rollouts`, `release-rollouts`).
+6. Unanswered (`dequeue`, `move-up`, `move-down`, `pause`, `resume`, `hold-rollouts`, `release-rollouts`).
   - Report the printed lines verbatim and STOP.
   - CRITICAL: NEVER re-issue the request; it stays pending.
 
@@ -156,6 +170,6 @@ Asks the merge queue, from this workspace, to land a finished branch in its merg
 - **IMPORTANT NOTE: A subagent's branch goes through `branch`, and a fix without the unfinished work around it goes through `own async <name> pick` or `commits`.** Never cherry-pick onto master by hand.
 - **IMPORTANT NOTE: A merge that must land before the work already waiting is asked for with `front`.** Never pause, dequeue or reorder other merges by hand to get ahead of them.
 - **CRITICAL: NEVER request a workspace merge for a branch that is not checked out in that worktree.** Check the branch out there first, or use `branch <branch-name>` for a branch that is no workspace.
-- **CRITICAL: Removing a merge from the queue, pausing or resuming the queue, or holding or releasing its rollouts, goes through this skill, NEVER by hand.**
+- **CRITICAL: Removing or moving a merge in the queue, pausing or resuming the queue, or holding or releasing its rollouts, goes through this skill, NEVER by hand.**
 - **IMPORTANT NOTE: While the rollouts are held, a landing does NOT redeploy.** Merges land on master exactly as before, but the running daemon, shims, webapp and Emacs keep the build they run; whoever holds it deploys by hand (`/manage-agent-repl-runtime deploy`) when they want what landed. The hold exists for perf work: a hand-deployed profiling build that the next landing would otherwise replace. It is durable (a restart or a handover keeps it) and daemon-wide, so release it when that work ends rather than leaving it standing; a landing that was held is recorded at INFO as `daemon.merge.self_reload` "...while the rollouts are held; the deploy is not told".
 - **CRITICAL NOTE: Do not self-remediate a `run.sh` failure or read its internals.** React only to the documented exit codes.
