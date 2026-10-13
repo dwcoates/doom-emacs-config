@@ -105,7 +105,8 @@ func runRooted(log *run.Log, args cli.Args, self, histPath, parent string, prefi
 // release to call after it. On a RAM disk it also exports
 // ramdisk.EnvShortBase, the base the harnesses that need short, socket-safe
 // roots make them in instead of /tmp. A leaked RAM disk or a disk manager that
-// does not answer puts the run on the disk.
+// does not answer puts the run on the disk and opens the one workspace that
+// investigates it.
 func runParent(log *run.Log, module string) (string, []string, func() error) {
 	disk := func() error { return nil }
 	if runtime.GOOS != "darwin" {
@@ -120,6 +121,7 @@ func runParent(log *run.Log, module string) (string, []string, func() error) {
 	v, trouble, err := m.Setup(size)
 	if trouble != nil {
 		log.Errorf("RAM DISK REFUSED, this run's root falls back to the disk at %s: %s", run.DefaultTmpParent, trouble)
+		investigate(log, m, module, trouble)
 		return run.DefaultTmpParent, nil, disk
 	}
 	if err != nil {
@@ -135,6 +137,36 @@ func runParent(log *run.Log, module string) (string, []string, func() error) {
 			return fmt.Errorf("release the run's RAM disk: %w", err)
 		}
 		return nil
+	}
+}
+
+// investigate opens the workspace that investigates the trouble, unless one
+// is open already, saying which at INFO and any failure at ERROR.
+func investigate(log *run.Log, m ramdisk.Manager, module string, trouble *ramdisk.Trouble) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		log.Errorf("the RAM disk investigation workspace was not created: resolve the home directory: %v", err)
+		return
+	}
+	dispatch := os.Getenv(ramdisk.EnvDispatch)
+	if dispatch == "" {
+		dispatch = filepath.Join(home, ".claude", "skills", "create-or-update-workspace", "run.sh")
+	}
+	inv := ramdisk.Investigation{
+		Module:   module,
+		Git:      ramdisk.RunBounded,
+		Dispatch: ramdisk.ScriptDispatch(dispatch, ramdisk.DispatchBound),
+		StateDir: filepath.Join(home, ".claude-emacs"),
+		RunLog:   os.Getenv(ramdisk.EnvRunLog),
+	}
+	out, err := m.EnsureInvestigation(inv, trouble)
+	switch {
+	case err != nil:
+		log.Errorf("the RAM disk investigation workspace was not created: %v", err)
+	case out.Existing != "":
+		log.Infof("a RAM disk investigation workspace is already open (%s); no other is created", out.Existing)
+	default:
+		log.Infof("dispatched the RAM disk investigation workspace %q through %s", ramdisk.InvestigationName, dispatch)
 	}
 }
 
