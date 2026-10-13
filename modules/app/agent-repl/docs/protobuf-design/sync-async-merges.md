@@ -164,7 +164,7 @@ contract rather than per-increment agreement.
   alone, so an in-place merge that compacts after it cannot be expressed on
   the wire; the command file and the CLI refuse `compact_after` without
   `detached`, and `wsm` refuses it on a request that is not detached.
-- `wsm`: layout 43 adds `merge_queue.source_compact_after` (the requester's
+- `wsm`: layout 44 adds `merge_queue.source_compact_after` (the requester's
   request) and `workspaces.merge_compact_after` (the merge workspace's origin,
   which the handback reads).
 
