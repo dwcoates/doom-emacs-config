@@ -375,6 +375,15 @@ reserved."
                   "{\"lastSelected\":{\"atMs\":\"1756400000000\"}}")
                  '("RosterRowWhen" lastSelected "unknown field"))))
 
+(ert-deftest agent-repl-test-wire-roster-when-decodes-every-arm-of-its-table ()
+  "Every arm of the one when-arm table is accepted by the key allow-list and
+decodes to its keyword: the decode and the allow-list read the same table."
+  (dolist (arm agent-repl-wire-roster-row-when-arms)
+    (should (equal (agent-repl-test-wire-roster--decode
+                    #'agent-repl-wire-decode-roster-row-when
+                    (format "{\"%s\":{\"atMs\":\"1\"}}" (nth 0 arm)))
+                   (list :arm (nth 1 arm) :value '(:at-ms 1))))))
+
 ;;;; ---- The shared instant decoder ----
 
 (ert-deftest agent-repl-test-wire-roster-decode-instant-reads-at-ms ()

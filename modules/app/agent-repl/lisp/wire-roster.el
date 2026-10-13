@@ -241,10 +241,9 @@ restart.  Emacs orders by it and never draws it
 ;; REGRESSION WATCH (2026-09-15): this strict decoder rejects the whole
 ;; WatchWorkspaceRoster push on an unknown `shown' arm, which blanks the roster
 ;; and drops every tab to a stale blue status.  When the daemon adds a `when'
-;; arm (it added `active' and `created' here, and later renamed `active' to
-;; `turnEnded'), it MUST be added to both the
-;; oneof list and the check-keys allow-list below in the same change, or the
-;; tab bar goes dark.  Watch for a new arm outrunning this file again.
+;; arm, it MUST be added to `agent-repl-wire-roster-row-when-arms' in the same
+;; change, or the tab bar goes dark.  The decode and the allow-list both read
+;; that one table, so they cannot disagree with each other.
 
 (defun agent-repl-wire-decode-roster-row-when-merged (value)
   "Decode VALUE as `RosterRowWhenMerged', a plist `(:at-ms)'."
@@ -260,22 +259,26 @@ ticks."
   "Decode VALUE as `RosterRowWhenCreated', a plist `(:at-ms)'."
   (agent-repl-wire-roster--decode-instant "RosterRowWhenCreated" value))
 
+(defconst agent-repl-wire-roster-row-when-arms
+  '((turnEnded :turn-ended agent-repl-wire-decode-roster-row-when-turn-ended)
+    (created :created agent-repl-wire-decode-roster-row-when-created)
+    (merged :merged agent-repl-wire-decode-roster-row-when-merged))
+  "`RosterRowWhen.shown''s arm table: (WIRE-KEY ARM-KEYWORD DECODER).
+The ONE list of the when-column's arms: the oneof decode and the key
+allow-list both read it.")
+
 (defun agent-repl-wire-decode-roster-row-when-shown (value)
   "Decode `RosterRowWhen''s `shown' oneof from the object VALUE.
 UNSET IS LEGAL and means nothing to show — no turn ended, not created, not
 merged — so the column is empty rather than \"0ms ago\"."
   (agent-repl-wire--decode-oneof
-   "RosterRowWhen" 'shown value
-   '((turnEnded :turn-ended agent-repl-wire-decode-roster-row-when-turn-ended)
-     (created :created agent-repl-wire-decode-roster-row-when-created)
-     (merged :merged agent-repl-wire-decode-roster-row-when-merged))
-   t))
+   "RosterRowWhen" 'shown value agent-repl-wire-roster-row-when-arms t))
 
 (defun agent-repl-wire-decode-roster-row-when (value)
   "Decode VALUE as `RosterRowWhen': the oneof plist, or nil when unset."
   (let ((object (agent-repl-wire--object "RosterRowWhen" value)))
     (agent-repl-wire--check-keys "RosterRowWhen" object
-                                 '(turnEnded created merged))
+                                 (mapcar #'car agent-repl-wire-roster-row-when-arms))
     (agent-repl-wire--decoded
      "RosterRowWhen" (agent-repl-wire-decode-roster-row-when-shown object))))
 
