@@ -12,6 +12,7 @@ import (
 	"agentrepl/testrun/roster"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/shellword"
 )
 
 // This file reads a failing gate run's archive for every failing TEST, not
@@ -326,7 +327,7 @@ func readVitestUnit(s *failingSuite, unit string, suite roster.Suite, lines []st
 		for i, name := range byFile[file] {
 			patterns[i] = regexp.QuoteMeta(name)
 		}
-		command := fmt.Sprintf("cd %s && %s npx vitest run%s %s -t %s", dir, runner, config, file, shellQuote(strings.Join(patterns, "|")))
+		command := fmt.Sprintf("cd %s && %s npx vitest run%s %s -t %s", dir, runner, config, file, shellword.Quote(strings.Join(patterns, "|")))
 		for _, name := range byFile[file] {
 			s.add("vitest:"+file, command, file+": "+name)
 		}
@@ -352,16 +353,11 @@ func readScriptUnit(s *failingSuite, suite roster.Suite, lines []string, module 
 	return named
 }
 
-// shellQuote quotes one argument for a POSIX shell.
-func shellQuote(arg string) string {
-	return "'" + strings.ReplaceAll(arg, "'", `'\''`) + "'"
-}
-
 // render writes the failing tests as the file the fixing agent reads.
 func (f failingTests) render(archive string) string {
 	var b strings.Builder
 	b.WriteString("# The failing tests of the merge queue's last test gate run.\n")
-	fmt.Fprintf(&b, "# The whole run is archived at %s.\n", archive)
+	b.WriteString(fmt.Sprintf("# The whole run is archived at %s.\n", archive))
 	b.WriteString("# Run exactly these while fixing, with the command given for each group.\n")
 	b.WriteString("# After your turn the queue runs the selected suites again.\n")
 	if len(f.suites) == 0 {
@@ -369,16 +365,16 @@ func (f failingTests) render(archive string) string {
 		return b.String()
 	}
 	for _, s := range f.suites {
-		fmt.Fprintf(&b, "\n## %s\n", s.name)
+		b.WriteString(fmt.Sprintf("\n## %s\n", s.name))
 		for _, g := range s.groups {
-			fmt.Fprintf(&b, "\nrun: %s\n", g.command)
+			b.WriteString(fmt.Sprintf("\nrun: %s\n", g.command))
 			for _, test := range g.tests {
-				fmt.Fprintf(&b, "- %s\n", test)
+				b.WriteString(fmt.Sprintf("- %s\n", test))
 			}
 		}
 		for _, unit := range s.unnamed {
-			fmt.Fprintf(&b, "\nunnamed: the tests of %s could not be named (a build, vet or typecheck failure, a crash or a timeout); read its output in the archive: grep -n '%s' %s\n",
-				unit, regexp.QuoteMeta(unit), archive)
+			b.WriteString(fmt.Sprintf("\nunnamed: the tests of %s could not be named (a build, vet or typecheck failure, a crash or a timeout); read its output in the archive: grep -n %s %s\n",
+				unit, shellword.Quote(regexp.QuoteMeta(unit)), archive))
 		}
 	}
 	return b.String()
