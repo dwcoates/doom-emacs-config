@@ -11,9 +11,11 @@
  *     or collapses on a click of its own (`SELECTION_GOVERNED_ATTRIBUTE`), and
  *     which of those the daemon says can be selected right now
  *     (`SELECTABLE_ATTRIBUTE`);
- *   - the click: a selectable bubble asks the daemon to select it, the
- *     selected one asks it to clear, and a governed bubble that has not landed
- *     does nothing;
+ *   - the click: a selectable bubble asks the daemon to select it, and a
+ *     governed bubble that has not landed does nothing. A click on the
+ *     SELECTED bubble asks the same; the daemon, the selection's one holder,
+ *     answers it by deselecting with the viewport left where the reader has
+ *     it (`none.stay`), so a deselecting click never scrolls the feed;
  *   - the click's requests, sent through the one `SelectFeedRow` call the
  *     webapp makes (`selectFeedRow`, select-feed-row.ts).
  *
@@ -83,55 +85,38 @@ export function governedRowAt(target: EventTarget | null, host: HTMLElement): HT
 /** What a click on a governed bubble asks of the daemon. */
 export type BubbleClick =
   | { case: "select"; row: string }
-  | { case: "clear" }
   | { case: "ignore"; reason: "not-landed" | "interactive" | "text-selection" };
 
 /**
  * The whole click decision for a governed ROW. A click on a link or a control
  * belongs to it, and a click that ends a text highlight is a selection
- * gesture; a row the daemon has not made selectable yet does nothing; the
- * selected row clears; any other selectable row is selected.
+ * gesture; a row the daemon has not made selectable yet does nothing; any
+ * selectable row, the selected one included, is sent as selected (the daemon
+ * toggles the selected one off).
  */
-export function bubbleClick(opts: {
-  row: HTMLElement;
-  target: Element;
-  selectedRow: string | null;
-  selectedText: string;
-}): BubbleClick {
+export function bubbleClick(opts: { row: HTMLElement; target: Element; selectedText: string }): BubbleClick {
   if (opts.target.closest(CLICK_THROUGH_SELECTOR) !== null) return { case: "ignore", reason: "interactive" };
   if (opts.selectedText.trim() !== "") return { case: "ignore", reason: "text-selection" };
   if (!opts.row.hasAttribute(SELECTABLE_ATTRIBUTE)) return { case: "ignore", reason: "not-landed" };
-  const id = opts.row.getAttribute("data-feed-row") ?? "";
-  return id === opts.selectedRow ? { case: "clear" } : { case: "select", row: id };
+  return { case: "select", row: opts.row.getAttribute("data-feed-row") ?? "" };
 }
 
-/**
- * Arm click-to-select on the root feed HOST. SELECTEDROW answers the row the
- * daemon's last push selected (null for none). Answers the uninstall.
- */
+/** Arm click-to-select on the root feed HOST. Answers the uninstall. */
 export function installBubbleSelect(
   host: HTMLElement,
   ctx: AppContext,
-  selectedRow: () => string | null,
   selection: () => string = () => selectedText(),
 ): () => void {
   const onClick = (event: MouseEvent): void => {
     const row = governedRowAt(event.target, host);
     if (row === null || !(event.target instanceof Element)) return;
-    const click = bubbleClick({ row, target: event.target, selectedRow: selectedRow(), selectedText: selection() });
+    const click = bubbleClick({ row, target: event.target, selectedText: selection() });
     switch (click.case) {
       case "ignore":
         log.debug("a click on a governed bubble selects nothing", {
           operation: "feed.bubble-click-ignored",
           context: { row: row.getAttribute("data-feed-row") ?? "unset", reason: click.reason },
         });
-        return;
-      case "clear":
-        log.info("a click on the selected bubble clears the selection", {
-          operation: "feed.bubble-click-clear",
-          context: { row: row.getAttribute("data-feed-row") ?? "unset" },
-        });
-        void guardMalformed(ctx, "feed.selection-clear", selectFeedRow(ctx, { case: "clear", value: {} }, DESELECT_REQUEST));
         return;
       case "select":
         log.info("a click on a bubble selects it", {
@@ -156,8 +141,5 @@ export function installBubbleSelect(
   };
 }
 
-/** What the chip's `request` evidence names a click's selection as. */
+/** What the chip's `request` evidence names a click's selection (or deselection) as. */
 export const SELECT_REQUEST = "select the clicked bubble";
-
-/** What the chip's `request` evidence names a click on the selected bubble as. */
-export const DESELECT_REQUEST = "clear the selection of the clicked bubble";

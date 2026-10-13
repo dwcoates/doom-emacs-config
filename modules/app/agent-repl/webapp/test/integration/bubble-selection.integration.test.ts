@@ -79,14 +79,14 @@ describe("a click on a bubble", () => {
     expect(moves()).toEqual([]);
   });
 
-  it("asks the daemon to clear when the selected bubble is clicked", async () => {
+  it("names the selected bubble to the daemon when it is clicked, never a clear", async () => {
     // Arrange
     await withRows(selectable(responseRow("success", "the answer", { id: feedId("r1") })));
     await pushSelection("r1");
     // Act
     await harness.click('[data-feed-row="r1"] .bubble-body');
     // Assert
-    expect(moves()).toEqual(["clear"]);
+    expect(moves()).toEqual(["bubble:r1"]);
   });
 });
 

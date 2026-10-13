@@ -768,6 +768,9 @@ type fakeWatcher struct {
 	refuseJoins bool
 	// departure is the watched shim's departure, nil while it runs.
 	departure *sessionwatcher.Departure
+	// reaped reports the shim's client reaped while its departure has not
+	// been recorded yet.
+	reaped bool
 	// factsPending reports a pure attach whose session facts have not
 	// arrived: the watcher then answers not free, whatever it holds.
 	factsPending bool
@@ -836,6 +839,22 @@ func (w *fakeWatcher) Departed() (sessionwatcher.Departure, bool) {
 		return sessionwatcher.Departure{}, false
 	}
 	return *w.departure, true
+}
+
+// ShimGone answers departed, or reaped with the departure still to come.
+func (w *fakeWatcher) ShimGone() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.departure != nil || w.reaped
+}
+
+// reap marks the watched shim's client reaped, its departure not yet
+// recorded: the gap between the client's reap and the watcher's dead-link
+// edge.
+func (w *fakeWatcher) reap() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.reaped = true
 }
 
 // depart records the watched shim as gone, as the real watcher does on its

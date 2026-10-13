@@ -240,8 +240,6 @@ export interface FeedController extends Handle {
   applySelection(selection: FeedSelection): void;
   /** Whether the daemon's last pushed selection names a row. */
   selectionActive(): boolean;
-  /** The row the daemon's last push selected, or null for none. */
-  selectedRow(): string | null;
   rows(): readonly FeedRow[];
   breadcrumbs(): readonly FeedBreadcrumb[];
   onChange(fn: () => void): () => void;
@@ -340,7 +338,6 @@ export function createFeedController(
     upsert,
     applySelection,
     selectionActive: () => selectedRow !== null,
-    selectedRow: () => selectedRow,
     rows,
     breadcrumbs: () => crumbs,
     onChange,
@@ -1025,7 +1022,8 @@ export function createFeedController(
    *    without pulling the viewport off the centered selection. When the
    *    selection ends the feed either returns to its tail (`return_to_tail`:
    *    the reader dismissed it, `selectionCleared`) or stays where the reader
-   *    has it (`stay`: the row left the viewport, `selectionEnded`);
+   *    has it (`stay`: the row left the viewport, or the reader clicked the
+   *    selected bubble, `selectionEnded`);
    *  - a newly selected row is scrolled to the middle of the viewport, clamped
    *    at the feed edges (`selectionMoved`).
    *
