@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -753,10 +755,23 @@ func fixingAttemptsDrawn(h *harness) []int {
 	return attempts
 }
 
+// atFixArchived is atFix with the failing run's archive on disk, which a
+// fixing attempt prompted again reads its failing tests from.
+func atFixArchived(t *testing.T) func(*progressDoc) {
+	archive := filepath.Join(t.TempDir(), "tests-1.log")
+	if err := os.WriteFile(archive, []byte("[agent-repl-tests] ERROR: daemon failed after 4s with exit code 1\n"), 0o644); err != nil {
+		t.Fatalf("writing the archive: %v", err)
+	}
+	return func(d *progressDoc) {
+		atFix(d)
+		d.FailingArchive = archive
+	}
+}
+
 func TestAResumedFixTheRestartOrphanedIsPromptedAgain(t *testing.T) {
 	// Arrange: the fixing turn was reconciled with no terminal.
 	h := newHarness(t)
-	interruptedAt(t, h, atFix)
+	interruptedAt(t, h, atFixArchived(t))
 	orphaned := wsm.CloseOrphaned
 	recordTurn(h, &orphaned)
 	landsAfterResume(h)
@@ -773,7 +788,7 @@ func TestAResumedFixTheRestartOrphanedIsPromptedAgain(t *testing.T) {
 func TestAResumedFixTheRestartCutSpendsNoAttempt(t *testing.T) {
 	// Arrange: the fixing turn was reconciled with no terminal.
 	h := newHarness(t)
-	interruptedAt(t, h, atFix)
+	interruptedAt(t, h, atFixArchived(t))
 	orphaned := wsm.CloseOrphaned
 	recordTurn(h, &orphaned)
 	landsAfterResume(h)
@@ -790,7 +805,7 @@ func TestAResumedFixTheRestartCutSpendsNoAttempt(t *testing.T) {
 func TestAResumedFixWhoseAgentDiedWhileSuspendedIsPromptedAgain(t *testing.T) {
 	// Arrange: the fixing turn's agent died while the daemon was down.
 	h := newHarness(t)
-	interruptedAt(t, h, atFix)
+	interruptedAt(t, h, atFixArchived(t))
 	died := wsm.CloseAgentDied
 	recordTurn(h, &died)
 	landsAfterResume(h)
