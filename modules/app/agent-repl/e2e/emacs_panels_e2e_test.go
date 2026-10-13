@@ -189,7 +189,7 @@ func TestEmacsPlainCloseHidesPanelsAndLeavesTheTabAlone(t *testing.T) {
 
 	openPanel(e)
 	awaitPanelWindows(e, frontendPrefix, panelPrefix)
-	orderBefore := e.EvalStrings(`agent-repl-roster--tab-order`)
+	orderBefore := e.EvalStrings(emacsTabOrderForm)
 
 	if want, got := "agent-repl-simple", e.LeaderBinding("o c"); got != want {
 		t.Fatalf("SPC o c resolves to %q, want %q: the module's `map!' leader form did not take", got, want)
@@ -202,7 +202,7 @@ func TestEmacsPlainCloseHidesPanelsAndLeavesTheTabAlone(t *testing.T) {
 			return panelBufferCount(decodeStrings(raw), frontendPrefix, panelPrefix) == 0
 		})
 
-	orderAfter := e.EvalStrings(`agent-repl-roster--tab-order`)
+	orderAfter := e.EvalStrings(emacsTabOrderForm)
 	if strings.Join(orderBefore, "\x00") != strings.Join(orderAfter, "\x00") {
 		t.Fatalf("the plain close moved the tab order: %q -> %q; only the deprio close may touch it", orderBefore, orderAfter)
 	}
@@ -315,7 +315,7 @@ func TestEmacsDeprioCloseShufflesTheTab(t *testing.T) {
 		`(agent-repl--ws-get `+elispString(current)+` :saved-tab-index)`,
 		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
 
-	order := e.EvalStrings(`agent-repl-roster--tab-order`)
+	order := e.EvalStrings(emacsTabOrderForm)
 	if len(order) < 2 {
 		t.Fatalf("the tab order holds %d entries, need two for a push-to-back to be observable: %q", len(order), order)
 	}
