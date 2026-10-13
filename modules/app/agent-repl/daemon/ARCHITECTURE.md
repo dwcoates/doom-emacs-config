@@ -456,13 +456,22 @@ post-prompt, where one attempt is: a detached scratch tree of the queue's own
 at the target's tip (`<state>/merge-trees/<lease>-<n>`) → no-ff merge there →
 conflicts (the agent brings ITS OWN branch up to date, once per source tip,
 then parked) → tests (the tree's own `bin/test-all.sh --suites <selected>`,
-no flake re-run, output archived; a gate that failed to run parks at once) →
-fixes (the agent commits a repair on its own branch; loop until pass or
-escalation record, then parked) → a fast-forward of the target to the tested
+the suites selected from the branch's changed paths by `suiteselect.go`: only
+the changed systems' own suites, a shared region's consumers plus `e2e`,
+nothing for documentation or the owner's configuration outside the module --
+an empty selection passes without starting the runner; no flake re-run,
+output archived, every edge timed at INFO; a gate that failed to run fails
+the merge at once) → fixes (the agent is handed the failing tests by name in
+`.agent-repl-merge-failing-tests`, read off the archive by `failingtests.go`,
+and commits a repair on its own branch; the selected suites run again; five
+fixing attempts in a row that leave the gate failing fail the merge, a pass
+resets the count, and an attempt a restart cut never counts) → a fast-forward of the target to the tested
 commit (a target that moved is merged onto again). The target is never a
 working tree for the merge, so a failed, parked or abandoned merge leaves it
 untouched. A branch already contained in the target concludes as merged with
-nothing to land.
+nothing to land. The gate and remediation rules are owner-ruled (2026-10-12)
+and stated in full in the module's AGENTS.md, "The merge queue's test gate and
+remediation contract"; they change only after a conversation with the owner.
 
 A repository's SLOT (`slot.go`) is the one right to make a tree, run the
 gate and move the target; the admission pump is its only grantor and the
