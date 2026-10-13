@@ -205,6 +205,10 @@ message OpenTabsOpenedReady {
   // than from the next roster push. The roster stream carries every later
   // change.
   frontend.v1.RosterRow row = 1;
+  // The revision of the roster `row` was taken from (WorkspaceRoster.revision):
+  // a consumer that already holds that revision or a later one already holds
+  // this row or a newer one, and keeps what it has.
+  uint64 roster_revision = 2;
 }
 
 // The service-level start failed.
@@ -214,6 +218,8 @@ message OpenTabsOpenedFailed {
   // The workspace's roster row as of this answer, drawing the failure; as
   // OpenTabsOpenedReady.row.
   frontend.v1.RosterRow row = 2;
+  // As OpenTabsOpenedReady.roster_revision.
+  uint64 roster_revision = 3;
 }
 
 // Not visible, so nothing was started. DELIBERATELY EMPTY.

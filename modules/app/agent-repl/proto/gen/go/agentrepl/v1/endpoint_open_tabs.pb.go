@@ -1329,9 +1329,13 @@ type OpenTabsOpenedReady struct {
 	// markers, so the tab is drawn true from the frame that opens it rather
 	// than from the next roster push. The roster stream carries every later
 	// change.
-	Row           *v11.RosterRow `protobuf:"bytes,1,opt,name=row,proto3" json:"row,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Row *v11.RosterRow `protobuf:"bytes,1,opt,name=row,proto3" json:"row,omitempty"`
+	// The revision of the roster `row` was taken from (WorkspaceRoster.revision):
+	// a consumer that already holds that revision or a later one already holds
+	// this row or a newer one, and keeps what it has.
+	RosterRevision uint64 `protobuf:"varint,2,opt,name=roster_revision,json=rosterRevision,proto3" json:"roster_revision,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *OpenTabsOpenedReady) Reset() {
@@ -1371,6 +1375,13 @@ func (x *OpenTabsOpenedReady) GetRow() *v11.RosterRow {
 	return nil
 }
 
+func (x *OpenTabsOpenedReady) GetRosterRevision() uint64 {
+	if x != nil {
+		return x.RosterRevision
+	}
+	return 0
+}
+
 // The service-level start failed.
 type OpenTabsOpenedFailed struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -1378,9 +1389,11 @@ type OpenTabsOpenedFailed struct {
 	Reason string `protobuf:"bytes,1,opt,name=reason,proto3" json:"reason,omitempty"`
 	// The workspace's roster row as of this answer, drawing the failure; as
 	// OpenTabsOpenedReady.row.
-	Row           *v11.RosterRow `protobuf:"bytes,2,opt,name=row,proto3" json:"row,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Row *v11.RosterRow `protobuf:"bytes,2,opt,name=row,proto3" json:"row,omitempty"`
+	// As OpenTabsOpenedReady.roster_revision.
+	RosterRevision uint64 `protobuf:"varint,3,opt,name=roster_revision,json=rosterRevision,proto3" json:"roster_revision,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *OpenTabsOpenedFailed) Reset() {
@@ -1425,6 +1438,13 @@ func (x *OpenTabsOpenedFailed) GetRow() *v11.RosterRow {
 		return x.Row
 	}
 	return nil
+}
+
+func (x *OpenTabsOpenedFailed) GetRosterRevision() uint64 {
+	if x != nil {
+		return x.RosterRevision
+	}
+	return 0
 }
 
 // Not visible, so nothing was started. DELIBERATELY EMPTY.
@@ -1934,12 +1954,14 @@ const file_agentrepl_v1_endpoint_open_tabs_proto_rawDesc = "" +
 	"\x06failed\x18\x04 \x01(\v2\".agentrepl.v1.OpenTabsOpenedFailedH\x00R\x06failed\x12<\n" +
 	"\x06hidden\x18\x05 \x01(\v2\".agentrepl.v1.OpenTabsOpenedHiddenH\x00R\x06hidden\x12?\n" +
 	"\arefused\x18\x06 \x01(\v2#.agentrepl.v1.OpenTabsOpenedRefusedH\x00R\arefusedB\t\n" +
-	"\aoutcome\"?\n" +
+	"\aoutcome\"h\n" +
 	"\x13OpenTabsOpenedReady\x12(\n" +
-	"\x03row\x18\x01 \x01(\v2\x16.frontend.v1.RosterRowR\x03row\"X\n" +
+	"\x03row\x18\x01 \x01(\v2\x16.frontend.v1.RosterRowR\x03row\x12'\n" +
+	"\x0froster_revision\x18\x02 \x01(\x04R\x0erosterRevision\"\x81\x01\n" +
 	"\x14OpenTabsOpenedFailed\x12\x16\n" +
 	"\x06reason\x18\x01 \x01(\tR\x06reason\x12(\n" +
-	"\x03row\x18\x02 \x01(\v2\x16.frontend.v1.RosterRowR\x03row\"\x16\n" +
+	"\x03row\x18\x02 \x01(\v2\x16.frontend.v1.RosterRowR\x03row\x12'\n" +
+	"\x0froster_revision\x18\x03 \x01(\x04R\x0erosterRevision\"\x16\n" +
 	"\x14OpenTabsOpenedHidden\"\x9d\x03\n" +
 	"\x15OpenTabsOpenedRefused\x12\\\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2-.agentrepl.v1.OpenTabsRefusedUnknownWorkspaceH\x00R\x10unknownWorkspace\x12i\n" +
