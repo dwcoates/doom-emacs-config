@@ -1175,6 +1175,26 @@ changed underneath their status buffer."
     (let ((row (plist-get entry :row)))
       (puthash (agent-repl-roster-row-id row) row agent-repl-roster--rows-by-id))))
 
+(defun agent-repl-roster-note-row (row revision)
+  "Index ROW, taken from the daemon's roster REVISION, when it is newer.
+An OpenTabs answer carries the row as of the answer (open-tabs.el), so the
+tab it opens is drawn with its true status rather than the last push's.
+The answer and the roster ride separate streams: a row from a revision the
+last applied roster already reached is older or the same, and indexing it
+would roll a status back, so it is kept out.  Answers t when indexed."
+  (let ((held (or (plist-get agent-repl-roster-view :revision) 0)))
+    (if (<= revision held)
+        (progn
+          (agent-repl--log '(:agent-repl-central "roster reconciliation spans every workspace")
+                           "elisp.roster.answer-row-kept: id=%s revision=%d held=%d"
+                           (agent-repl-roster-row-id row) revision held)
+          nil)
+      (puthash (agent-repl-roster-row-id row) row agent-repl-roster--rows-by-id)
+      (agent-repl--info '(:agent-repl-central "roster reconciliation spans every workspace")
+                        "elisp.roster.answer-row-indexed: id=%s revision=%d held=%d"
+                        (agent-repl-roster-row-id row) revision held)
+      t)))
+
 (defun agent-repl-roster--record-statuses (entries)
   "Replace the previous-status table from ENTRIES, keyed by ref id."
   (clrhash agent-repl-roster--status-by-id)

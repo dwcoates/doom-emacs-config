@@ -746,7 +746,17 @@ status."
                                      :fold (:arm :collapsed :value nil))
                    :tab-bar (:tabs nil)
                    :current (:workspace (:id "ws-1" :dir "/w/1"))
-                   :shown (:arm :shown-repository :value nil)))))
+                   :shown (:arm :shown-repository :value nil)
+                   :revision 0))))
+
+(ert-deftest agent-repl-test-wire-roster-decodes-the-revision ()
+  "The roster's revision decodes from protojson's decimal string."
+  (should (equal (plist-get (agent-repl-test-wire-roster--decode
+                             #'agent-repl-wire-decode-workspace-roster
+                             (concat (substring agent-repl-test-wire-roster--roster-json 0 -1)
+                                     ",\"revision\":\"9\"}"))
+                            :revision)
+                 9)))
 
 (ert-deftest agent-repl-test-wire-roster-decodes-the-tab-bar ()
   "The tab bar is the registry's order, each tab its ref and visibility arm."
