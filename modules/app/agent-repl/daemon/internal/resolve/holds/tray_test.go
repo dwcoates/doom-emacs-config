@@ -66,6 +66,11 @@ func TestTrayConvertsEachClassificationArm(t *testing.T) {
 			want: "daemon_held",
 		},
 		{
+			name: "unjudged under the answered cold-gate hold draws daemon_held",
+			held: func() wsm.HeldPrompt { h := hold("t1", "wake up"); h.Hold = kindOf(wsm.HoldColdGateAnswered); return h }(),
+			want: "daemon_held",
+		},
+		{
 			name: "a verdict under a daemon hold keeps its verdict",
 			held: func() wsm.HeldPrompt {
 				h := verdict(hold("t1", "then run the tests"), wsm.ArmHoldForTurnEnd, "no urgency")
@@ -191,6 +196,7 @@ func TestTrayConvertsEachHoldArm(t *testing.T) {
 		{name: "build refresh", kind: kindOf(wsm.HoldBuildRefresh), want: "build_refresh"},
 		{name: "merge", kind: kindOf(wsm.HoldMerge), want: "merge"},
 		{name: "cold gate", kind: kindOf(wsm.HoldColdGate), want: "cold_gate"},
+		{name: "cold gate answered", kind: kindOf(wsm.HoldColdGateAnswered), want: "cold_gate_answered"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -399,6 +405,8 @@ func holdName(p *frontendv1.HeldPrompt) string {
 		return "merge"
 	case *frontendv1.HeldPrompt_ColdGate:
 		return "cold_gate"
+	case *frontendv1.HeldPrompt_ColdGateAnswered:
+		return "cold_gate_answered"
 	default:
 		return ""
 	}
@@ -541,6 +549,11 @@ func TestHeldStatusComposesEveryStatus(t *testing.T) {
 			want: wantStatus{badge: wantBadge{"awaiting cold gate", "held until the cold gate is answered; a prompt never answers it"}, fact: "cold_gate", notes: []string{"after this turn"}},
 		},
 		{
+			name: "answered cold-gate hold under daemon_held draws the hold's badge alone",
+			p:    &frontendv1.HeldPrompt{Classification: &frontendv1.HeldPrompt_DaemonHeld{DaemonHeld: &frontendv1.HeldPromptDaemonHeld{}}, Hold: &frontendv1.HeldPrompt_ColdGateAnswered{ColdGateAnswered: &frontendv1.HeldPromptColdGateAnsweredHold{}}},
+			want: wantStatus{badge: wantBadge{"held for you", "kept when the cold gate was answered; only you send it"}, fact: "cold_gate_answered", notes: []string{}},
+		},
+		{
 			name: "awaiting delivery",
 			p:    &frontendv1.HeldPrompt{Classification: &frontendv1.HeldPrompt_AwaitingDelivery{AwaitingDelivery: &frontendv1.HeldPromptAwaitingDelivery{}}},
 			want: wantStatus{badge: wantBadge{"queued", "waits its turn in the queue; nothing is classifying it"}, fact: "awaiting_delivery", notes: []string{}},
@@ -582,6 +595,7 @@ func TestHeldStatusLabelsAreOneToThreeWords(t *testing.T) {
 		{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_Reconnect{Reconnect: &frontendv1.HeldPromptReconnectHold{}}},
 		{Classification: &frontendv1.HeldPrompt_DaemonHeld{DaemonHeld: &frontendv1.HeldPromptDaemonHeld{}}, Hold: &frontendv1.HeldPrompt_Merge{Merge: &frontendv1.HeldPromptMergeHold{}}},
 		{Classification: &frontendv1.HeldPrompt_DaemonHeld{DaemonHeld: &frontendv1.HeldPromptDaemonHeld{}}, Hold: &frontendv1.HeldPrompt_ColdGate{ColdGate: &frontendv1.HeldPromptColdGateHold{}}},
+		{Classification: &frontendv1.HeldPrompt_DaemonHeld{DaemonHeld: &frontendv1.HeldPromptDaemonHeld{}}, Hold: &frontendv1.HeldPrompt_ColdGateAnswered{ColdGateAnswered: &frontendv1.HeldPromptColdGateAnsweredHold{}}},
 		{Classification: &frontendv1.HeldPrompt_AwaitingDelivery{AwaitingDelivery: &frontendv1.HeldPromptAwaitingDelivery{}}},
 	}
 
