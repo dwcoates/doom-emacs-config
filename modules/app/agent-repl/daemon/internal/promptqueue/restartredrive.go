@@ -35,6 +35,11 @@ import (
 // comes before the delivery and the database arbitrates it, so a second boot
 // or a second session-up edge resumes nothing twice.
 //
+// AN OPEN WAITS FOR IT. Every release reports what it did about the debt
+// (Deps.Resumptions: starting, started, failed, not now), and an editor's
+// OpenTabs that brought the workspace up answers it `ready` only once the
+// resumed turn has started (internal/opentabs).
+//
 // IT IS UNDER THE HOOD. The instruction is the daemon's, not the user's: the
 // feed draws no prompt row for this origin (feed.drawAgentPrompt and the
 // queue's own mirror skip it), and the turn it opens shows only as the status

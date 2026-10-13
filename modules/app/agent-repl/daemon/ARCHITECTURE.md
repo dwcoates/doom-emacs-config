@@ -1086,10 +1086,36 @@ asks for the workspaces it wants open with the `OpenTabs` server stream.
   workspace, topbar or footer: `server.pageSubscriptionWorkspace`, hooked at
   `SubscribePage`'s acceptance), and `page_drawn` when `ReportPageDrawn` says
   an attached page of it drew.
-- **`opened`** is `ready` once served, and drawn when the request's `page` arm
-  is `loading` (`none`: served alone); `failed` on a service-level failure.
-  Vendor and network state never gate it. Each workspace is answered as soon
-  as it opens: no registry-order gating. `finished` is last.
+- **`opened`** is `ready` once EVERYTHING the workspace needs is done (owner
+  ruling 2026-10-12): served; its conversation's newest page read whole
+  (`conversation_read`: `feed.Resolver.ReadNewest`, the feed resolver's own
+  loading, so the page is held and the page's OpenFeed serves it from
+  memory); a turn the daemon's own stand-down cut resumed and STARTED
+  (`resuming_cut_turn`, see below); and drawn when the request's `page` arm
+  is `loading` (`none`: no page step). `failed` on a service-level failure,
+  a conversation read that failed, an owed-resumption read that failed, or a
+  resumption that could not be claimed or delivered. Vendor and network
+  state never gate it. Each workspace is answered as soon as it opens: no
+  registry-order gating. `finished` is last.
+- **The cut-turn resume is part of the open.** The debt is paid where it
+  always was, by the session-up release of the bring-up (the prompt queue's
+  `redriveOwedLocked`), because a daemon-only restart sends no OpenTabs for
+  the tabs it keeps and their cut turns must still resume. Every release
+  reports its account (`promptqueue.Deps.Resumptions` ->
+  `opentabs.Coordinator.Resumption`: starting, started, failed, not now). An
+  open that brings a workspace up reads whether it is owed (`Deps.Owed`,
+  `wsm.OwedTurns`, after the run joined) and holds `ready` until the account
+  ends: `resuming_cut_turn` on `starting`, released on `started` or `not now`,
+  `failed` on `failed`; a bring-up ending in a cold gate or a vendor refusal
+  releases it too (the debt stays recorded). An open joining a resumption
+  already being delivered waits for it; a workspace already serving when the
+  open began is not waited on. A hidden workspace is answered at once and its
+  debt is untouched until it is shown and opened.
+- **`ready` and `failed` carry the roster row** (`sidebar.Resolver.Row`): the
+  row and its roster's `revision` taken together from the last resolved
+  roster, after the open lowered the workspace's `opening`. The roster raises
+  `WorkspaceRoster.revision` for every roster it resolves (an identical render
+  keeps it and is not republished).
 - **A client that goes away** ends the stream; the bring-ups carry on (they
   run on the fleet's detached lifetime).
 - **Page facts live with the page stream**: `attachPage`/`detachPage` tell the
