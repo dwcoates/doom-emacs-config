@@ -105,8 +105,8 @@ func TestSetWorkspaceParentToTopLevelUnnestsTellsTheSessionAndMergesToTheMainChe
 	}
 	awaitRoster(t, f.d, f.roster, "the child at the top level", f.topLevel)
 	notice := f.expectNotice(t)
-	if !strings.Contains(notice, "main checkout at `"+repo.Dir+"`") || !strings.Contains(notice, "`/merge-queue own`") {
-		t.Fatalf("notice = %q, want the main checkout named and /merge-queue own", notice)
+	if !strings.Contains(notice, "main checkout at `"+repo.Dir+"`") || !strings.Contains(notice, "`/merge-queue one-shot`") {
+		t.Fatalf("notice = %q, want the main checkout named and /merge-queue one-shot", notice)
 	}
 	pushConcludedTurn(f.d.Shim(f.child), mainAgent, "notice-read")
 
