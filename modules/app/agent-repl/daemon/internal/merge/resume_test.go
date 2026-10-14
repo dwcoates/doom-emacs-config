@@ -217,6 +217,23 @@ func TestRecoverDrawsTheResumedMergesHeadClockFromItsAdmission(t *testing.T) {
 	}
 }
 
+func TestRecoverCountsTheResumedMergeFromWhenItWasQueued(t *testing.T) {
+	// Arrange: a merge a restart interrupted in its tests.
+	h := newHarness(t)
+	interruptedAt(t, h, atStep(TabTests, 1))
+	queued := queuedAtMS(t, h, theWorkspace)
+
+	// Act.
+	if err := h.o.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+
+	// Assert: the restart does not move the instant the roster counts from.
+	if got := h.footer.last().QueuedAt.UnixMilli(); got != queued {
+		t.Fatalf("the resumed merge's facts are queued at %d, want the recorded %d", got, queued)
+	}
+}
+
 func TestRecoverAdoptsTheResumedMergesLease(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)

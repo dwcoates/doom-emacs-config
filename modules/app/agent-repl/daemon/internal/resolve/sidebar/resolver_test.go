@@ -33,6 +33,10 @@ func (idleFooter) Status(ids.WorkspaceID) *frontendv1.FooterStatus {
 	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Idle{Idle: &frontendv1.FooterStatusIdle{}}}
 }
 
+func (idleFooter) MergeStartedAt(ids.WorkspaceID) *int64 {
+	return nil
+}
+
 func (idleFooter) TurnClock(ids.WorkspaceID) *frontendv1.FooterClock {
 	return &frontendv1.FooterClock{}
 }

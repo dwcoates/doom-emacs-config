@@ -17,11 +17,12 @@
  * user picked, and the roster's new `current` arrives on the stream.
  *
  * WHAT TICKS AND WHAT DOES NOT. The when-column's arms that ship an INSTANT
- * (`merged`, `hidden`, and `turn_running`'s start) are animated here off the
- * shared ticker — never a `setInterval` of this module's own. A running turn
- * reads exactly what the footer strip's turn clock reads
- * (`liveElapsedReading`, from the same start instant), and `no_turn_running`
- * reads "0s" and never ticks (owner request, 2026-10-13).
+ * (`merged`, `hidden`, and the starts of `sync_merging` and `turn_running`)
+ * are animated here off the shared ticker — never a `setInterval` of this
+ * module's own. A sync merge and a running turn read exactly what the footer
+ * strip's turn clock reads (`liveElapsedReading`, from the start instant the
+ * daemon chose), and `no_turn_running` reads "0s" and never ticks (owner
+ * request, 2026-10-13).
  */
 import { createControl } from "../control.js";
 import type {
@@ -44,6 +45,7 @@ import type {
   RosterRowWhenHiddenCache,
   RosterRowWhenMerged,
   RosterRowWhenNoTurnRunning,
+  RosterRowWhenSyncMerging,
   RosterRowWhenTurnRunning,
   RosterRowReviving,
   RosterRowViewed,
@@ -434,10 +436,10 @@ export function drawRosterRowPriorityBadge(
 /**
  * The when-column. ONE value, chosen by the daemon; never unset.
  *
- * A running turn ticks its elapsed time with the footer turn clock's own
- * reading, from the start instant the daemon read off that clock, so the row
- * and the strip read the same number; with no turn running the column reads
- * the zero reading, "0s".
+ * A sync merge ticks its elapsed time from when it joined its queue, and a
+ * running turn from the start instant the daemon read off the footer's turn
+ * clock, both with that clock's own reading, so the row and the strip read
+ * the same number; with neither the column reads the zero reading, "0s".
  */
 export function drawRosterRowWhen(
   u: RosterRowWhen,
@@ -455,13 +457,12 @@ export function drawRosterRowWhen(
   when.className = "when";
   when.setAttribute("data-when", shown.case);
   switch (shown.case) {
-    case "turnRunning": {
-      const startedMs = drawRosterRowWhenTurnRunning(shown.value, `${path}.turn_running`);
-      tickPaint(sc, (nowMs) => {
-        when.textContent = liveElapsedReading(startedMs, nowMs);
-      });
+    case "syncMerging":
+      tickElapsed(when, sc, drawRosterRowWhenSyncMerging(shown.value, `${path}.sync_merging`));
       return when;
-    }
+    case "turnRunning":
+      tickElapsed(when, sc, drawRosterRowWhenTurnRunning(shown.value, `${path}.turn_running`));
+      return when;
     case "merged":
       tickAge(when, sc, drawRosterRowWhenMerged(shown.value, `${path}.merged`));
       return when;
@@ -484,6 +485,11 @@ export function drawRosterRowWhen(
       return unreachableArm(`${path}.shown`, other.case);
     }
   }
+}
+
+/** When the sync merge joined its repository's queue, as an epoch instant. */
+export function drawRosterRowWhenSyncMerging(u: RosterRowWhenSyncMerging, path: string): number {
+  return msOf(u.startedAtMs, `${path}.started_at_ms`);
 }
 
 /** When the running turn started, as an epoch instant: the footer clock's own start. */
@@ -916,6 +922,16 @@ function appendDetailLine(list: HTMLElement, label: string, value: string): void
   dd.appendChild(code);
   list.appendChild(dt);
   list.appendChild(dd);
+}
+
+/**
+ * Ticks EL with the footer turn clock's own reading of the time since
+ * STARTED_MS: the one reading every counting arm of the column shows.
+ */
+function tickElapsed(el: HTMLElement, sc: SidebarContext, startedMs: number): void {
+  tickPaint(sc, (nowMs) => {
+    el.textContent = liveElapsedReading(startedMs, nowMs);
+  });
 }
 
 /**

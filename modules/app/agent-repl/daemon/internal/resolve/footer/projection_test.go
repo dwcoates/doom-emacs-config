@@ -3,6 +3,7 @@ package footer
 import (
 	"sync"
 	"testing"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 
@@ -208,6 +209,7 @@ func TestTheStatusEdgeIsToldWhenTheTurnClockMoves(t *testing.T) {
 		{name: "the arm alone", pub: publication{armChanged: true}, want: true},
 		{name: "the step alone", pub: publication{subChanged: true}, want: true},
 		{name: "the line alone", pub: publication{lineChanged: true}, want: false},
+		{name: "the merge start alone", pub: publication{mergeStartChanged: true}, want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -239,4 +241,99 @@ func TestObserveClockReportsAChangeOnlyWhenTheClockMoves(t *testing.T) {
 	if !first || again {
 		t.Fatalf("observeClock = %v then %v, want a change then none", first, again)
 	}
+}
+
+func TestMergeStartedAtAnswersAMergeTheStripDraws(t *testing.T) {
+	queued := instant.Add(-time.Hour)
+	tests := []struct {
+		name  string
+		facts MergeFacts
+		want  *int64
+	}{
+		{name: "a merge waiting in line", facts: MergeFacts{State: "queued", QueuedAt: queued, Step: StepEnqueued, QueuePlace: 1, QueueWaiting: 1}, want: millisOf(queued)},
+		{name: "a merge being worked on", facts: MergeFacts{State: "merging", QueuedAt: queued, Step: StepTesting}, want: millisOf(queued)},
+		{name: "a failed merge", facts: MergeFacts{State: "failed", QueuedAt: queued, FailedArea: FailedTests}, want: nil},
+		{name: "no merge", facts: MergeFacts{State: "none"}, want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+
+			// Act
+			h.r.SetMerge(testWS, tt.facts)
+
+			// Assert
+			got := h.r.MergeStartedAt(testWS)
+			if (got == nil) != (tt.want == nil) || (got != nil && *got != *tt.want) {
+				t.Fatalf("MergeStartedAt = %v, want %v under the published %q", got, tt.want, h.status(t))
+			}
+		})
+	}
+}
+
+func TestMergeStartedAtResolvesAWorkspaceTheFooterNeverSawAsNoMerge(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	got := h.r.MergeStartedAt(ids.WorkspaceID("ws-never-seen"))
+
+	// Assert
+	if got != nil {
+		t.Fatalf("MergeStartedAt = %d, want no merge", *got)
+	}
+}
+
+func TestTheStatusEdgeIsToldWhenAMergeStarts(t *testing.T) {
+	// Arrange
+	h, edges := newEdgeHarness(t)
+	connected(h)
+	before := edges.count()
+
+	// Act
+	h.r.SetMerge(testWS, MergeFacts{State: "merging", QueuedAt: instant, Step: StepTesting})
+
+	// Assert
+	if got := edges.count() - before; got != 1 {
+		t.Fatalf("edges told = %d, want 1 for the merge appearing", got)
+	}
+}
+
+func TestObserveMergeStartReportsAChangeOnlyWhenTheStartMoves(t *testing.T) {
+	early, late := int64(1_000), int64(2_000)
+	tests := []struct {
+		name   string
+		before *mergeStart
+		after  *mergeStart
+		want   bool
+	}{
+		{name: "the first publication", before: nil, after: &mergeStart{}, want: true},
+		{name: "still no merge", before: &mergeStart{}, after: &mergeStart{}, want: false},
+		{name: "a merge appearing", before: &mergeStart{}, after: &mergeStart{ms: &early}, want: true},
+		{name: "a merge leaving", before: &mergeStart{ms: &early}, after: &mergeStart{}, want: true},
+		{name: "the same merge", before: &mergeStart{ms: &early}, after: &mergeStart{ms: &early}, want: false},
+		{name: "another instant", before: &mergeStart{ms: &early}, after: &mergeStart{ms: &late}, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s := newWSState()
+			s.publishedMergeStart = tt.before
+
+			// Act
+			got := s.observeMergeStart(tt.after)
+
+			// Assert
+			if got != tt.want || s.publishedMergeStart != tt.after {
+				t.Fatalf("observeMergeStart = %v, want %v, and the start recorded", got, tt.want)
+			}
+		})
+	}
+}
+
+func millisOf(t time.Time) *int64 {
+	ms := t.UnixMilli()
+	return &ms
 }

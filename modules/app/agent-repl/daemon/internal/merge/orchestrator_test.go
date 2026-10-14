@@ -3,6 +3,9 @@ package merge
 import (
 	"strings"
 	"testing"
+	"time"
+
+	"agent-repld/internal/resolve/footer"
 )
 
 // TestNewRefusesAnIncompleteDependencySet covers the construction guard:
@@ -103,5 +106,63 @@ func TestTestCommandFallsBackToTheRepositoryEntrypoint(t *testing.T) {
 	want := "/checkout/modules/app/agent-repl/bin/test-all.sh"
 	if len(got) != 2 || got[1] != want {
 		t.Fatalf("TestCommandFor answered %v, want %q", got, want)
+	}
+}
+
+func TestAMergeInLineOrInFlightWithNoQueueInstantIsRecorded(t *testing.T) {
+	tests := []struct {
+		name  string
+		facts MergeFacts
+	}{
+		{name: "queued", facts: MergeFacts{State: StateQueued, Step: footer.StepEnqueued}},
+		{name: "merging", facts: MergeFacts{State: StateMerging, Step: footer.StepTesting}},
+		{name: "merging from the epoch", facts: MergeFacts{State: StateMerging, QueuedAt: time.UnixMilli(0), Step: footer.StepTesting}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			h.o.publish(theWorkspace, tc.facts)
+
+			// Assert: recorded with what diagnoses it, and still published.
+			record, ok := h.recordFor("error", "daemon.merge.publish")
+			if !ok {
+				t.Fatal("no daemon.merge.publish error was recorded")
+			}
+			if record.Context["state"] != tc.facts.State || record.Context["step"] != string(tc.facts.Step) || record.Context["invariant_violation"] == nil {
+				t.Fatalf("record context = %v, want the state, the step and the violated invariant", record.Context)
+			}
+			if got := h.footer.last(); got.State != tc.facts.State {
+				t.Fatalf("footer facts = %+v, want the published %q", got, tc.facts.State)
+			}
+		})
+	}
+}
+
+func TestAMergeWithItsQueueInstantOrNoneStandingIsNotRecorded(t *testing.T) {
+	tests := []struct {
+		name  string
+		facts MergeFacts
+	}{
+		{name: "queued with its instant", facts: MergeFacts{State: StateQueued, QueuedAt: time.UnixMilli(1_000), Step: footer.StepEnqueued}},
+		{name: "merging with its instant", facts: MergeFacts{State: StateMerging, QueuedAt: time.UnixMilli(1_000), Step: footer.StepTesting}},
+		{name: "failed", facts: MergeFacts{State: StateFailed, FailedArea: footer.FailedTests}},
+		{name: "merged", facts: MergeFacts{State: StateMerged}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			h.o.publish(theWorkspace, tc.facts)
+
+			// Assert.
+			if record, ok := h.recordFor("error", "daemon.merge.publish"); ok {
+				t.Fatalf("recorded %v for a merge that keeps the invariant", record)
+			}
+		})
 	}
 }

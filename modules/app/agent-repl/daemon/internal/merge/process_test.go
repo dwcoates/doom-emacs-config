@@ -987,6 +987,37 @@ func admitted(t *testing.T, h *harness) {
 	}
 }
 
+func TestEveryStepOfALandingCarriesWhenTheMergeWasQueued(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	landing(h, 2)
+	enqueue(t, h)
+	queued := queuedAtMS(t, h, theWorkspace)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Logf("the merge ended on: %v", err)
+	}
+
+	// Assert: every fact in line or in flight counts from the queue entry.
+	standing := 0
+	for _, f := range h.footer.all() {
+		if f.State != StateQueued && f.State != StateMerging {
+			continue
+		}
+		standing++
+		if got := f.QueuedAt.UnixMilli(); got != queued {
+			t.Fatalf("%s facts on step %q are queued at %d, want the entry's %d", f.State, f.Step, got, queued)
+		}
+	}
+	if standing == 0 {
+		t.Fatal("the landing published no fact in line or in flight")
+	}
+	if record, ok := h.recordFor("error", "daemon.merge.publish"); ok {
+		t.Fatalf("recorded %v", record)
+	}
+}
+
 func TestTheEmacsRepoMethodWalksItsStepsInOrder(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)

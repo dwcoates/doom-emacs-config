@@ -268,6 +268,16 @@ The instant the running turn started, exactly the footer clock's."
      (list :started-at-ms (agent-repl-wire--decode-int64
                            "RosterRowWhenTurnRunning" 'startedAtMs object)))))
 
+(defun agent-repl-wire-decode-roster-row-when-sync-merging (value)
+  "Decode VALUE as `RosterRowWhenSyncMerging', a plist `(:started-at-ms)'.
+The instant the workspace's sync merge joined its repository's queue."
+  (let ((object (agent-repl-wire--object "RosterRowWhenSyncMerging" value)))
+    (agent-repl-wire--check-keys "RosterRowWhenSyncMerging" object '(startedAtMs))
+    (agent-repl-wire--decoded
+     "RosterRowWhenSyncMerging"
+     (list :started-at-ms (agent-repl-wire--decode-int64
+                           "RosterRowWhenSyncMerging" 'startedAtMs object)))))
+
 (defun agent-repl-wire-decode-roster-row-when-no-turn-running (value)
   "Decode VALUE as the empty message `RosterRowWhenNoTurnRunning'."
   (agent-repl-wire--decode-empty "RosterRowWhenNoTurnRunning" value))
@@ -297,7 +307,8 @@ no hidden row, but the roster push carries them, so this decodes them whole."
                    #'agent-repl-wire-decode-roster-row-when-hidden-cache)))))
 
 (defconst agent-repl-wire-roster-row-when-arms
-  '((turnRunning :turn-running agent-repl-wire-decode-roster-row-when-turn-running)
+  '((syncMerging :sync-merging agent-repl-wire-decode-roster-row-when-sync-merging)
+    (turnRunning :turn-running agent-repl-wire-decode-roster-row-when-turn-running)
     (noTurnRunning :no-turn-running agent-repl-wire-decode-roster-row-when-no-turn-running)
     (merged :merged agent-repl-wire-decode-roster-row-when-merged)
     (hidden :hidden agent-repl-wire-decode-roster-row-when-hidden))

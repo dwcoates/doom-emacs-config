@@ -404,12 +404,34 @@ func (o *orchestrator) Facts(ws ids.WorkspaceID) (MergeFacts, bool) {
 // The footer and the roster read the SAME value, so the two can never disagree
 // about a merge.
 func (o *orchestrator) publish(ws ids.WorkspaceID, facts MergeFacts) {
+	checkQueuedAt(o.log(context.Background(), ws), ws, facts)
 	o.mu.Lock()
 	o.facts[ws] = facts
 	o.mu.Unlock()
 	o.footerSetMerge(ws, facts)
 	o.deps.Sidebar.SetMerge(ws, facts)
 	o.publishHost(ws)
+}
+
+// checkQueuedAt records a merge standing in line or in flight that carries no
+// queue instant. Every such publish site stamps the queue entry's EnqueuedAt
+// (MergeFacts.QueuedAt), so a missing one is a site that forgot to, and the
+// roster's when-column would count that merge from the epoch.
+func checkQueuedAt(log dlog.Logger, ws ids.WorkspaceID, facts MergeFacts) {
+	if facts.State != StateQueued && facts.State != StateMerging {
+		return
+	}
+	if facts.QueuedAt.UnixMilli() > 0 {
+		return
+	}
+	log.Error("daemon.merge.publish", "a merge in line or in flight was published with no queue instant",
+		dlog.Context{
+			"workspace":           string(ws),
+			"state":               facts.State,
+			"step":                string(facts.Step),
+			"queued_at_ms":        facts.QueuedAt.UnixMilli(),
+			"invariant_violation": "every queued or merging merge carries its queue entry's EnqueuedAt",
+		})
 }
 
 // publishHost republishes the workspace's host view when a surface is wired.
