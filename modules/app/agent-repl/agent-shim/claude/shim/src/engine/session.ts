@@ -1718,8 +1718,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * rather than an absent field, because "we did not ask" and "the service is
    * down" are different facts to a consumer deciding whether to warn a user.
    */
-  function accountUsageUpdate(usage: AccountUsageLike): conversationv1.SessionUpdate {
-    const observedAtMs = BigInt(deps.nowMs());
+  function accountUsageUpdate(usage: AccountUsageLike, observedAtMs: bigint): conversationv1.SessionUpdate {
     const subscriptionType = subscriptionTypeOf(usage.subscription_type);
     const unavailable = (
       reason: conversationv1.SessionAccountUsageUnavailable["reason"],
@@ -1959,12 +1958,56 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     });
   }
 
-  async function pushAccountUsage(): Promise<void> {
+  /**
+   * THE ACCOUNT'S USAGE SAMPLES ARE SERIAL (engine/serial-probe.ts). The daemon
+   * draws only the newest sample by its `observed_at_ms`, across every session
+   * on the account; serial samples make one shim's stamps rise in the order its
+   * answers land, so its own samples never race each other there.
+   */
+  const accountUsageProbe = new SerialProbe(() => sampleAccountUsage());
+
+  /** Sample the account's usage behind every sample already asked for. */
+  function pushAccountUsage(): Promise<void> {
+    return accountUsageProbe.run();
+  }
+
+  /**
+   * Sample the account's usage again, folded into a sample already queued.
+   * Never rejects: `sampleAccountUsage` states its own failure as a sample.
+   */
+  function refreshAccountUsage(trigger: string): void {
+    if (accountUsageProbe.refreshPending) {
+      LOGGER.logVerbose({ trigger }, "an account usage sample is already queued; this trigger rides it");
+      return;
+    }
+    LOGGER.debug({ trigger }, "refreshing the account's usage sample");
+    void accountUsageProbe.refresh();
+  }
+
+  /**
+   * A LIVE RATE-LIMIT EVENT MEANS THE ACCOUNT'S USAGE MOVED, so it asks for a
+   * fresh sample. The event's own utilization is never the drawn figure: it
+   * carries no instant, so it cannot be ordered against the samples every
+   * session on the account takes; the daemon takes only its verdict.
+   */
+  function noteRateLimitEvent(message: SdkMessage): void {
+    if (message.type !== "rate_limit_event") return;
+    refreshAccountUsage("rate_limit_event");
+  }
+
+  /**
+   * One usage sample. STAMPED WHEN IT IS ASKED FOR, not when it answers: the
+   * vendor reads the usage at some instant between the two, and a stamp taken
+   * on the answer would let a slow sample asked earlier outrank a fast one
+   * asked later, on this shim or another on the same account.
+   */
+  async function sampleAccountUsage(): Promise<void> {
     const active = query;
     if (active === undefined) return;
+    const observedAtMs = BigInt(deps.nowMs());
     try {
       pushes.push(
-        accountUsageUpdate(await active.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET()),
+        accountUsageUpdate(await active.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET(), observedAtMs),
       );
     } catch (err) {
       pushes.push(
@@ -1972,7 +2015,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           update: {
             case: "accountUsage",
             value: create(conversationv1.SessionAccountUsageSchema, {
-              observedAtMs: BigInt(deps.nowMs()),
+              observedAtMs,
               outcome: {
                 case: "unavailable",
                 value: create(conversationv1.SessionAccountUsageUnavailableSchema, {
@@ -1990,6 +2033,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       );
     }
   }
+
 
   /** The five declared healths, each its own arm. */
   function mcpUpdate(status: McpServerStatusLike): conversationv1.SessionUpdate {
@@ -2108,6 +2152,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     notePreInitMessage(message);
     noteIdentityFacts(message, attribution);
     noteMainApiResponse(message, attribution, verdict.turn);
+    noteRateLimitEvent(message);
     noteCacheRequest(message);
     settleStartOnBlockingHook(message);
     settleStartOnErrorResult(message);
@@ -4750,7 +4795,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     const cacheAnchor = startingCacheAnchor(facts, clearedTo, coldCompacted);
     cadence.start(cacheAnchor.anchor, cacheAnchor.reason);
     accountUsageHandle = (deps.scheduler ?? REAL_SCHEDULER).setInterval(
-      () => void pushAccountUsage(),
+      () => refreshAccountUsage("interval"),
       ACCOUNT_USAGE_INTERVAL_MS,
     );
     pushModel();
