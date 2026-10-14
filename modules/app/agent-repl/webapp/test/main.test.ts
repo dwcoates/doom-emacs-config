@@ -190,6 +190,12 @@ async function runBoot(rec: BootRecord): Promise<void> {
       },
     };
   });
+  // THE STYLESHEET, EMPTIED. Under `css: true` every fresh import of main.ts
+  // had jsdom re-parse the whole of styles.css (370KB and growing), so each
+  // warm boot's cost grew with the stylesheet until one crossed its bound under
+  // the merge gate's load. No boot test reads a style; the stylesheet's own
+  // suites (test/styles.test.ts) load it once per file.
+  vi.doMock("../src/styles.css", () => ({}));
   vi.doMock("../src/rpc/transport.js", () => ({
     createDaemonTransport: vi.fn(() => ({ transport: true })),
   }));
