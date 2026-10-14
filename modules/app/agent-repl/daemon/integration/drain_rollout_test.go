@@ -244,7 +244,15 @@ func TestUpdateShutdownScheduleNowLeavesNoShimBehindEvenAtAPermissionGate(t *tes
 // SCENARIO'S OWN Xvfb and sidecar and so could never come up empty. This is
 // the assertion that says so from the daemon's side, and the one that would
 // fail first if the exit ever did start riding a bound.
-func TestUpdateShutdownScheduleNowAfterACompletedTurnExitsWellInsideItsOwnBound(t *testing.T) {
+//
+// IT READS THE BOUNDS FROM THE LOG, NOT THE CLOCK. Every bound the exit can
+// ride reports itself at WARN or worse (the gate's waits, the http grace, the
+// merge drain, the loop joins, the shim's own stop escalation), which the
+// sweep StartDaemon armed fails on; the one that reports at INFO -- a kill the
+// shim did not answer, inside a stand-down this daemon ordered -- is asserted
+// absent here. A wall-clock bound measured the same thing and failed whenever
+// the host was saturated (292ms against 250ms at load average ~50).
+func TestUpdateShutdownScheduleNowAfterACompletedTurnExitsRidingNoBound(t *testing.T) {
 	t.Parallel()
 	// Arrange: a live session that has run one turn to its terminal, with the
 	// feed watch and the session's own watches still standing.
@@ -267,7 +275,6 @@ func TestUpdateShutdownScheduleNowAfterACompletedTurnExitsWellInsideItsOwnBound(
 	})
 
 	// Act: exactly what Emacs sends.
-	asked := time.Now()
 	resp, err := f.d.Client().UpdateShutdownSchedule(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
 		Action: &agentreplv1.UpdateShutdownScheduleRequest_Now{Now: &agentreplv1.UpdateShutdownScheduleNow{
 			Reason: drainReasonOperator("emacs"),
@@ -279,26 +286,17 @@ func TestUpdateShutdownScheduleNowAfterACompletedTurnExitsWellInsideItsOwnBound(
 		t.Fatalf("UpdateShutdownSchedule{now} after a completed turn = (%v, %v), want a success", resp, err)
 	}
 	f.d.AwaitExit()
-	took := time.Since(asked)
-	t.Logf("the stop after a completed turn was asked and the process was gone %s later", took.Round(time.Millisecond))
-	if took > stopAfterATurnBound {
-		t.Fatalf("the stop after a completed turn took %s to leave no process (bound %s); the daemon acked a stop it then rode a bound to perform",
-			took.Round(time.Millisecond), stopAfterATurnBound)
+	for _, r := range f.d.WorkspaceLogRecords() {
+		if r.Message == killDidNotAnswer {
+			t.Errorf("the stop after a completed turn rode the session kill's bound: %+v", r)
+		}
 	}
 }
 
-// stopAfterATurnBound is how long the whole stop above may take, from the
-// request leaving the client to the daemon's process being reaped.
-//
-// MEASURED rather than chosen: 12-40ms across a -count=20 run of this test
-// alone, 17-73ms inside the parallel integration suite, and 314ms at worst in
-// that suite on a box at load average ~40. It covers the WHOLE orderly exit --
-// the announcement, the forced stand-down of the one live session, the
-// in-flight write grace, the merge drain, the watchers and the background
-// loops. 1s is ~3x the loaded worst case, and still under every bound the exit
-// states in seconds, so an exit riding one of THOSE fails here. It is above
-// `writesQuietBound` (250ms), so an exit riding that one bound alone does not.
-const stopAfterATurnBound = time.Second
+// killDidNotAnswer is the INFO record of a session kill the shim did not
+// answer inside a stand-down this daemon ordered: the one bound the exit can
+// ride without a WARN.
+const killDidNotAnswer = "the session kill did not answer; stopping the process anyway"
 
 // strayReclaimBound is how long the kernel is given to finish reaping a
 // process group the daemon already SIGKILLed and already waited on.

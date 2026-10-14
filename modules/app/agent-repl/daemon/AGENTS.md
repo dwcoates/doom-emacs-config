@@ -970,21 +970,21 @@ reader from ever being handed a row it will withhold:
   tail's retained-log replay obeys the same rule. Before this a 16-cut page
   pushed every pre-cut row and the webapp then truncated ~1,850 of them
   (ship-gns, 2026-09-27).
-- **A fork's inherited past rides `planeInherited` and is never pushed.** A
-  fork resumes a copy of its parent's transcript, which the file plane
-  ingests into the fork's book WHILE the fork runs, so the past arrives live,
-  after the fork's own prompt, and on a later replay sits around it (the book
-  orders by first insert). On a fork (a workspace with ported prompts), a
-  main-agent entry stamped with a turn the workspace recorded
-  (`wsm.RecordedTurns`, `Deps.OwnedTurns`) is its own; every other main-agent
-  entry — a turn it never opened, or unstamped — is inherited: drawn below
-  everything the fork produced, in a stance of its own (it never becomes the
-  turn in flight, its prompts are drawn settled), and served by pages only.
-  An inherited cut therefore bounds only inherited rows, and by `boundHides`
-  the fork's OWN cut hides the whole inherited and ported past. A subagent's
-  entries are never classified. Known gap: an UNSTAMPED entry the fork itself
-  produced outside an open turn (a keep-alive-era handback, a cold-gate
-  compaction) is read as inherited.
+- **A fork's inherited past is its parent's book, read by page, in
+  `planeInherited`** (`resolve/feed/lineage.go`, docs/protobuf-design/
+  fork-lineage.md). The file plane never stores the records the vendor's
+  fork copied (they carry `forkedFrom`), so the fork's own book holds only
+  what the fork said. The fleet states the workspace's lineage at every
+  bring-up (`Resolver.NoteLineage`, from `wsm.Lineage`); the root feed's walk
+  reads the fork's own book to its start and then each generation's book
+  through `HistorySource.ReadInherited` (ReadHistory's bounded `through`
+  read), leaving out entries, and turn heads, of the turns open when the fork
+  was taken. An
+  inherited book's agent is a root-feed agent (`wsState.agentFeed`), and its
+  rows are drawn by the same functions as any row, so they read exactly as
+  the parent draws them; the plane only orders them below the fork's own and
+  keeps them off the live push. By `boundHides` the fork's OWN cut hides the
+  whole inherited past.
 - **An opening page's spawns above its newest cut open no subagent watch**
   (`sessionwatcher.watchSpawnedSubagentsOnPageLocked`): their bubbles are
   withheld, so their books have no reader.
@@ -1859,7 +1859,7 @@ A create's stages, in order, are `deriving_name` (only when the daemon mints
 the name), `creating_worktree`, and `starting_session`. EVERY create that gets
 past the worktree enters `starting_session`, with or without an initial
 prompt: it is reported the moment `worktree add` returns, before
-registration, and covers registration, a fork's transcript copy, the shim
+registration, and covers registration, a fork's record, the shim
 spawn and vendor bring-up, and the initial prompt's submission to the queue.
 It ends at the terminal step -- `succeeded` once the session is up and any
 initial prompt is accepted, or `failed` for anything that went wrong inside
@@ -1917,12 +1917,13 @@ once and then REFUSED on `naming_failed`; no generic name is ever
 substituted. A FORK is named by that same call, handed its prompt (possibly
 blank) PLUS the conversation it continues as the brief's `{{conversation}}`
 (owner ruling, 2026-09-27). The conversation is the daemon's own record of
-the parent's requests -- `ConversationPrompts`, exactly what the fork ports
--- composed by `titlesynth.ComposeDigest`, so it needs no live parent shim
+the parent's requests -- `RecentConversationPrompts`, its own turns and the
+ones it inherited through its lineage -- composed by
+`titlesynth.ComposeDigest`, so it needs no live parent shim
 and "what the conversation is about" has one spelling. A fork of a parent
 with no conversation is refused on `fork_parent_has_no_conversation` before
 the naming call is paid for (`forkableParentSession`, shared with the
-transcript port). Only a create with neither a prompt nor a recorded
+create itself). Only a create with neither a prompt nor a recorded
 conversation is named after its minted id (`workspace-<id>`); that is the
 "nothing to name from" rule, not a fallback from a failed call.
 

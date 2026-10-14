@@ -51,10 +51,7 @@ import (
 
 // orderClass is the leading character of a key: the plane family.
 func orderClass(p rowPlane) byte {
-	switch p {
-	case planePorted:
-		return '0'
-	case planeInherited:
+	if p == planeInherited {
 		return '1'
 	}
 	return '2'

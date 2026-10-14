@@ -549,6 +549,14 @@ func (c *fakeClient) GatherTitleDigest(context.Context, *shimv1.GatherTitleDiges
 	panic("sessionwatcher must not call GatherTitleDigest")
 }
 
+func (c *fakeClient) GetForkPoint(context.Context, *shimv1.GetForkPointRequest) (*shimv1.GetForkPointResponse, error) {
+	panic("sessionwatcher must not call GetForkPoint")
+}
+
+func (c *fakeClient) ForkSession(context.Context, *shimv1.ForkSessionRequest) (*shimv1.ForkSessionResponse, error) {
+	panic("sessionwatcher must not call ForkSession")
+}
+
 func (c *fakeClient) Occupy(string) (func(), error) { panic("sessionwatcher must not take the lease") }
 func (c *fakeClient) Kill(context.Context, shimclient.KillAttribution) error {
 	panic("sessionwatcher must never kill: attach ends nothing")

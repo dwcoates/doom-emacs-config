@@ -6,10 +6,11 @@
  * scenario stands on, because a defect here is invisible in a scenario test
  * (which asserts what the scenario said, not how the engine said it).
  */
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { logRecordsSince } from "../log-records.js";
+import { writeTranscript } from "../vendor-transcript.js";
 import { join } from "node:path";
 
 import {
@@ -26,7 +27,7 @@ import {
   TURN_GATE_TEXT_ENV,
 } from "../../src/fake/index.js";
 import type { CanUseToolLike, QueryLike, SdkMessage, SdkUserMessage } from "../../src/sdk/types.js";
-import { transcriptPath } from "../../src/fake/vendor-files.js";
+
 import { RESUME_DROPS_TURN_REFUSAL_PREFIX } from "../../src/engine/rollback.js";
 import {
   FAKE_DEFAULT_EFFORT,
@@ -1278,9 +1279,7 @@ describe("a truncating resume and file checkpointing", () => {
     const root = mkdtempSync(join(tmpdir(), "fake-rollback-"));
     const configDir = join(root, "cfg");
     const cwd = join(root, "workspace");
-    const file = transcriptPath(configDir, cwd, "sess-r");
-    mkdirSync(join(file, ".."), { recursive: true });
-    writeFileSync(file, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
+    const file = writeTranscript(configDir, cwd, "sess-r", lines);
     return { configDir, cwd, file };
   }
 

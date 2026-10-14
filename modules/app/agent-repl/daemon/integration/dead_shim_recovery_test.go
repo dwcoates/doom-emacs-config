@@ -5,7 +5,6 @@ package integration
 import (
 	"syscall"
 	"testing"
-	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -31,23 +30,15 @@ import (
 // INFO (2026-10-06).
 var deadShimRecords = []string{"daemon.shimclient.exit", "daemon.health.open_fault"}
 
-// deadShimRecoveryBound is how long a live death may take, from the SIGKILL to
-// a footer serving idle with no fault. MEASURED: 122-196ms across eight runs
-// alone and 120-147ms in four full-suite runs at -parallel 8; the bound is ~5x
-// the slowest, and well inside harness.DefaultTimeout.
-const deadShimRecoveryBound = time.Second
-
 // killShim SIGKILLs a fake shim outside every daemon verb and waits for the
-// kernel to confirm it is gone, answering the instant it was killed.
-func killShim(t *testing.T, f *fixture, shim *harness.ShimControl) time.Time {
+// kernel to confirm it is gone.
+func killShim(t *testing.T, f *fixture, shim *harness.ShimControl) {
 	t.Helper()
 	pid := shim.Info().PID
-	killedAt := time.Now()
 	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
 		t.Fatalf("kill the fake shim %d: %v", pid, err)
 	}
 	harness.AwaitProcessGone(t, f.d.Ctx(), pid)
-	return killedAt
 }
 
 // concludeFirstTurn runs one turn to its end, so the session has a
@@ -124,10 +115,17 @@ func TestAShimThatDiesOnItsOwnIsBroughtBackUnasked(t *testing.T) {
 	roster := f.d.WatchRoster()
 
 	// Act: the shim dies on its own, and nobody does anything.
-	killedAt := killShim(t, f, f.shim)
+	killShim(t, f, f.shim)
 
 	// Assert: a new shim resumes the same conversation, unasked.
 	revived := f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl")
+	// THE REVIVAL IS TAKEN ON THE DEATH ITSELF, not on a later prompt or a
+	// periodic pass: the record is the decision, written as the departure is
+	// handled. A wall-clock bound from the kill to the settled footer stood in
+	// for this and failed whenever the host was saturated.
+	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the revival taken on the death", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.promptqueue.revive" && r.Message == "the shim died on its own; its session is brought back now"
+	})
 	resume := revived.ExpectStartSession()
 	if got := resume.GetResume().GetVendorSessionId(); got != vendor || start.GetFresh() == nil {
 		t.Fatalf("the revival's StartSession = %v, want a resume of the original vendor session %q", resume, vendor)
@@ -141,17 +139,11 @@ func TestAShimThatDiesOnItsOwnIsBroughtBackUnasked(t *testing.T) {
 	awaitFooter(t, f, footer, "the footer drawing the death", footerDisconnected)
 	awaitRoster(t, f.d, roster, "the roster row drawing the death", rosterLost(f))
 	awaitFooter(t, f, footer, "the footer idle with no fault", footerSettled)
-	settledAt := time.Now()
 	awaitTopbar(t, f, topbar, "the topbar with no warning", func(v *frontendv1.TopbarView) bool {
 		return len(v.GetWarnings().GetWarnings()) == 0
 	})
 	awaitRoster(t, f.d, roster, "the roster row serving again", rosterServing(f))
 	expectSessionHealthy(t, f.d, f)
-	if took := settledAt.Sub(killedAt); took > deadShimRecoveryBound {
-		t.Fatalf("death to a settled footer took %s, want within %s", took, deadShimRecoveryBound)
-	} else {
-		t.Logf("death to a settled footer: %s", took)
-	}
 }
 
 func TestAPromptSentRightAfterAShimDiesIsDelivered(t *testing.T) {

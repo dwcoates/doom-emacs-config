@@ -65,6 +65,27 @@ func (f *Fleet) ReadHistory(ctx context.Context, ws ids.WorkspaceID, target *con
 	return page, nil
 }
 
+// ReadInherited reads one page of BOOK — a generation of a fork's inherited
+// past — through WS's shim: from THROUGHMS when AFTER is nil, the page before
+// AFTER otherwise. Any shim reads any book the store holds, so the fork's own
+// shim serves its parent's book. Unlike ReadHistory it tells the session's
+// views nothing: the page is the parent's past, and naming its agent as WS's
+// main agent, or reconciling WS's footer from it, would state a fact of the
+// parent's session as the fork's.
+func (f *Fleet) ReadInherited(ctx context.Context, ws ids.WorkspaceID, book *conversationv1.AgentId, after *conversationv1.HistoryPointer, throughMs int64) (*conversationv1.HistoryPage, error) {
+	client, ok := f.historyClient(ws)
+	if !ok {
+		return nil, feed.ErrNoHistorySource
+	}
+	req := &shimv1.ReadHistoryRequest{Target: book}
+	if after != nil {
+		req.Position = &shimv1.ReadHistoryRequest_After{After: after}
+	} else {
+		req.Position = &shimv1.ReadHistoryRequest_Through{Through: &conversationv1.ConversationThrough{AtMs: throughMs}}
+	}
+	return readHistoryPage(ctx, client, req)
+}
+
 // noteHistoryWithoutWatcher states for the views what a loaded page states when
 // no session watcher is up to take it (sessionwatcher.NoteHistoryLoaded): the
 // main agent a root page names, so the feed places its rows on the root, and
@@ -119,6 +140,12 @@ func readHistory(ctx context.Context, client historyReader, target *conversation
 	} else {
 		req.Position = &shimv1.ReadHistoryRequest_First{First: &shimv1.ReadHistoryFirst{}}
 	}
+	return readHistoryPage(ctx, client, req)
+}
+
+// readHistoryPage makes one ReadHistory call and unwraps its outcome: the one
+// unwrapping ReadHistory's own reads and a fork's inherited reads share.
+func readHistoryPage(ctx context.Context, client historyReader, req *shimv1.ReadHistoryRequest) (*conversationv1.HistoryPage, error) {
 	response, err := client.ReadHistory(ctx, req)
 	if err != nil {
 		return nil, err
@@ -128,7 +155,7 @@ func readHistory(ctx context.Context, client historyReader, target *conversation
 	}
 	success := response.GetSuccess()
 	if success == nil || success.GetPage() == nil {
-		return nil, fmt.Errorf("shim ReadHistory answered neither a page nor a failure for agent %q", target.GetValue())
+		return nil, fmt.Errorf("shim ReadHistory answered neither a page nor a failure for agent %q", req.GetTarget().GetValue())
 	}
 	return success.GetPage(), nil
 }

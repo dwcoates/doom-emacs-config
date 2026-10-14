@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -38,31 +37,22 @@ import (
 //
 // WHERE A FORK'S INHERITED CONVERSATION ACTUALLY LIVES
 //
-// The daemon ports a fork's conversation in two halves, and only one of them is
-// readable from outside:
+// A fork's conversation is its parent's, continued (docs/protobuf-design/
+// fork-lineage.md):
 //
-//   - The VENDOR TRANSCRIPT half. `PortTranscript`
-//     (daemon/internal/account/transcript.go) copies the parent's
-//     `<vendor id>.jsonl` into the child's config root under a FRESH vendor
-//     session id, re-minting every identity in it through one `remint.Mapper`.
-//     That is why the child's `sessions.vendor_session_id` is its own and never
-//     the parent's, which this test checks as far as it can see it.
-//   - The DAEMON'S OWN PROMPT ROWS. The vendor transcript records what the
-//     AGENT said; what the PERSON asked is a row the daemon draws, so porting
-//     only the transcript left a forked feed showing an answer to a question it
-//     did not show. `forkconversation.go` therefore reads the parent's whole
-//     `ConversationPrompts` (its own inherited rows PLUS its `turns`, so a fork
-//     of a fork keeps the grandparent's questions), re-mints every turn id
-//     under the same mapping the transcript was ported with, and writes the
-//     result to `ported_prompts` in one all-or-nothing transaction.
+//   - The VENDOR TRANSCRIPT is the vendor's own fork of the parent's, made by
+//     the child's shim (shim.v1 ForkSession) with its content unchanged, under
+//     the fork's own vendor session id, which this test checks.
+//   - The FEED reads the inherited past from the PARENT's book, bounded to the
+//     fork point; nothing of it is copied. The daemon records where it is read
+//     from in `fork_lineage`, in one transaction with the fork's vendor id
+//     (`wsm.ResolveFork`), and nothing else writes that row.
 //
-// `ported_prompts` is what this test asserts on, read read-only out of
-// `~/.claude-emacs/wsm.db`. It is the right evidence for three reasons: a
-// workspace has rows there if and only if it was forked, because the fork path
-// is the only writer; the rows carry the parent's prompt TEXT verbatim, so
-// "carries the conversation" is a comparison and not an inference; and their
-// turn ids are the child's own re-minted ones, so the test can also show the
-// port was a port and not a shared reference.
+// `fork_lineage` is what this test asserts on, read read-only out of
+// `~/.claude-emacs/wsm.db`, together with the parent's recorded turns it
+// bounds: a workspace has the row if and only if it was forked, and the
+// conversation it names — the parent's turns up to the fork point — is a
+// comparison of prompt TEXT against the parent's, not an inference.
 //
 // What this test deliberately does NOT rest the verdict on:
 //
@@ -86,14 +76,14 @@ import (
 // (residue: `kind = 'vendor_specific'`, no `book_agent_id`) rather than
 // re-booking rows that already belong to another agent's book.
 //
-// A forked WORKSPACE is the opposite in every respect that matters here: the
-// DAEMON does the copying, every identity is re-minted rather than preserved,
-// the copied records are first-class rows in the child's own book, the fact is
-// recorded durably in `ported_prompts`, and the parent's whole conversation IS
-// drawn on the fork's feed. The two paths never meet: the sidecar's guard
-// requires a non-empty agent type, which only a subagent transcript with a
-// companion meta file has, and a workspace fork's ported artifact is a session
-// transcript with neither. Nothing here asserts on quoted-context residue, and
+// A forked WORKSPACE is a different thing: the vendor's SESSION fork copies the
+// parent's records into the fork's transcript stamped `forkedFrom`, the sidecar
+// stores none of them (they are the parent's, already in the parent's book),
+// the fact is recorded durably in `fork_lineage`, and the parent's whole
+// conversation IS drawn on the fork's feed, read from the parent's book. The
+// two paths never meet: the sidecar's quoted-context guard requires a non-empty
+// agent type, which only a subagent transcript with a companion meta file has,
+// and a workspace fork's transcript is a session transcript with neither. Nothing here asserts on quoted-context residue, and
 // a finding about it in this run's harvest would be about the other mechanism.
 //
 // A DEDICATED SCRATCH REPOSITORY (lead's standing decision, 2026-09-12), the
@@ -540,12 +530,11 @@ func rt7SeedConversation(ctx context.Context, t *testing.T, client *Client, dbPa
 type rt7State struct {
 	Facts rt78Facts
 	Row   Workspace
-	// Conversation is what a fork of this workspace would inherit: its
-	// inherited rows followed by its own turns.
+	// Conversation is the workspace's whole conversation: what it inherited
+	// through its lineage followed by its own turns.
 	Conversation []rt78Prompt
-	// Ported is only the inherited half, so a test can say whether this
-	// workspace was itself forked.
-	Ported  []rt78Prompt
+	// Lineage says whether this workspace was itself forked, and from where.
+	Lineage rt78Lineage
 	Turns   []rt78Prompt
 	Session rt78Session
 }
@@ -566,7 +555,7 @@ func rt7Snapshot(ctx context.Context, t *testing.T, dbPath, id, what string) rt7
 		t.Fatalf("read %s: %v", what, err)
 	}
 	record, _ := wsActWorkspaceByID(all, id)
-	ported, err := rt78PortedPrompts(ctx, dbPath, id)
+	lineage, err := rt78ReadLineage(ctx, dbPath, id)
 	if err != nil {
 		t.Fatalf("read %s: %v", what, err)
 	}
@@ -584,7 +573,7 @@ func rt7Snapshot(ctx context.Context, t *testing.T, dbPath, id, what string) rt7
 	}
 	return rt7State{
 		Facts: row, Row: record, Conversation: conversation,
-		Ported: ported, Turns: turns, Session: session,
+		Lineage: lineage, Turns: turns, Session: session,
 	}
 }
 
@@ -641,34 +630,43 @@ func rt7AssertForkCarriesTheConversation(ctx context.Context, t *testing.T, dbPa
 	parent Workspace, fork Workspace, before rt7State) {
 	t.Helper()
 
-	// The port is one transaction on the create path, but the create is
-	// answered asynchronously, so the rows are waited for rather than read the
+	// The lineage is recorded when the bring-up makes the fork, which the
+	// create answers asynchronously, so it is waited for rather than read the
 	// instant the tab appears.
-	var ported []rt78Prompt
-	waitUntil(ctx, t, "the daemon to write the fork's inherited conversation", wsActActCeiling, func() bool {
-		read, err := rt78PortedPrompts(ctx, dbPath, fork.ID)
+	var lineage rt78Lineage
+	waitUntil(ctx, t, "the daemon to record the fork's lineage", wsActActCeiling, func() bool {
+		read, err := rt78ReadLineage(ctx, dbPath, fork.ID)
 		if err != nil {
 			return false
 		}
-		ported = read
-		return len(ported) >= len(before.Conversation)
+		lineage = read
+		return lineage.Found
 	})
-
-	if len(ported) == 0 {
-		t.Fatalf("the fork %s has NO rows in `ported_prompts`, so it carries none of its parent's "+
-			"conversation. That table is written from exactly one place, the daemon's fork path "+
-			"(daemon/internal/workspace/forkconversation.go), in one all-or-nothing transaction, so an "+
-			"empty table means the port did not happen at all rather than that it happened partially",
-			fork.ID)
+	if !lineage.Found {
+		t.Fatalf("the fork %s has NO `fork_lineage` row, so nothing says where its inherited past is read "+
+			"from. The row is written in one transaction with the fork's vendor session id when the "+
+			"bring-up makes the fork (daemon/internal/workspace/forking.go), so its absence means the fork "+
+			"was never made", fork.ID)
+	}
+	if lineage.Parent != parent.ID {
+		t.Errorf("the fork %s reads its past from workspace %s, not the parent %s it was forked from",
+			fork.ID, lineage.Parent, parent.ID)
+	}
+	if lineage.Book == "" {
+		t.Errorf("the fork %s names no parent book to read its inherited past from", fork.ID)
 	}
 
+	// THE INHERITED CONVERSATION is the parent's turns the lineage bounds,
+	// compared against the parent's conversation AS IT WAS BEFORE THE FORK.
+	conversation, err := rt78Conversation(ctx, dbPath, fork.ID)
+	if err != nil {
+		t.Fatalf("read the fork's conversation: %v", err)
+	}
 	wantTexts := rt78PromptTexts(before.Conversation)
-	gotTexts := rt78PromptTexts(ported)
-	if len(gotTexts) != len(wantTexts) {
-		t.Errorf("the fork %s inherited %d prompt(s) and the parent's conversation was %d at the moment it "+
-			"was forked. A fork ports the WHOLE conversation, and a partial port is the defect the "+
-			"single-transaction write exists to prevent.\n  parent: %q\n  fork:   %q",
-			fork.ID, len(gotTexts), len(wantTexts), wantTexts, gotTexts)
+	gotTexts := rt78PromptTexts(conversation)
+	if len(gotTexts) < len(wantTexts) {
+		t.Errorf("the fork %s inherits %d prompt(s) and the parent's conversation was %d at the moment it "+
+			"was forked.\n  parent: %q\n  fork:   %q", fork.ID, len(gotTexts), len(wantTexts), wantTexts, gotTexts)
 	}
 	for i := range wantTexts {
 		if i >= len(gotTexts) {
@@ -682,47 +680,18 @@ func rt7AssertForkCarriesTheConversation(ctx context.Context, t *testing.T, dbPa
 
 	// THE SEED PROMPT IS NAMED EXPLICITLY, beside the whole-conversation
 	// comparison, because the two fail differently: a length or ordering
-	// mismatch says the port went wrong, and this says the port did not carry
-	// the one sentence this run put into the parent on purpose.
+	// mismatch says the lineage bound is wrong, and this says the fork does not
+	// carry the one sentence this run put into the parent on purpose.
 	if !rt7AnyContains(gotTexts, rt7SeedPrompt) {
-		t.Errorf("the fork %s inherited %d prompt(s), none containing the prompt this run sent the parent "+
-			"(%q). Whatever it carried, it is not this parent's conversation",
+		t.Errorf("the fork %s inherits %d prompt(s), none containing the prompt this run sent the parent "+
+			"(%q). Whatever it carries, it is not this parent's conversation",
 			fork.ID, len(gotTexts), rt7SeedPrompt)
 	}
 
-	// The ordinals are the ordering key both the port and the replay read, and
-	// the port re-numbers them from zero so the child's copy is a whole
-	// conversation in its own right. A gap or a repeat is a feed that draws the
-	// parent's questions in the wrong order or twice.
-	for i, row := range ported {
-		want := strconv.Itoa(i)
-		if row.Ordinal != want {
-			t.Errorf("the fork's inherited row %d carries ordinal %q, not %q: the port re-numbers a child's "+
-				"conversation contiguously from zero", i, row.Ordinal, want)
-		}
-	}
-
-	// A PORT, NOT A SHARED REFERENCE. Every ported turn id is re-minted under
-	// the same mapping the transcript was ported with, so the child's rows name
-	// the child's own turns. A ported row still carrying one of the parent's
-	// live turn ids would mean the two workspaces share a turn identity, which
-	// is what `RemintPortedPrompts` exists to prevent.
-	parentTurns := make(map[string]bool, len(before.Turns))
-	for _, turn := range before.Turns {
-		parentTurns[turn.Turn] = true
-	}
-	for _, row := range ported {
-		if parentTurns[row.Turn] {
-			t.Errorf("the fork's inherited row at ordinal %s carries turn id %s, which is one of the "+
-				"PARENT'S own live turn ids. A fork re-mints every turn id it inherits; sharing one means "+
-				"the two workspaces name the same turn", row.Ordinal, row.Turn)
-		}
-	}
-
-	// The transcript half, as far as it is visible from here: the child resumes
-	// under a vendor session id of its own. The parent's id appearing on the
-	// child would mean two workspaces claiming one vendor session, which is
-	// single-occupancy by contract.
+	// The transcript half: the child resumes the vendor's fork under a vendor
+	// session id of its own. The parent's id appearing on the child would mean
+	// two workspaces claiming one vendor session, which is single-occupancy by
+	// contract.
 	forkSession, err := rt78ReadSession(ctx, dbPath, fork.ID)
 	if err != nil {
 		t.Fatalf("read the fork's session row: %v", err)
@@ -730,20 +699,18 @@ func rt7AssertForkCarriesTheConversation(ctx context.Context, t *testing.T, dbPa
 	switch {
 	case !forkSession.Exists:
 		t.Errorf("the fork %s has no `sessions` row, so nothing says which vendor session carries its "+
-			"ported transcript", fork.ID)
+			"transcript", fork.ID)
 	case forkSession.VendorID == "":
-		t.Errorf("the fork %s has a session row with no vendor session id, so its ported transcript has no "+
-			"identity to resume under", fork.ID)
+		t.Errorf("the fork %s has a session row with no vendor session id, so the fork was never made", fork.ID)
 	case before.Session.Exists && forkSession.VendorID == before.Session.VendorID:
-		t.Errorf("the fork %s and its parent %s share the vendor session id %s. A fork mints a FRESH one "+
-			"and re-mints the transcript into it; a vendor session id is single-occupancy",
-			fork.ID, parent.ID, forkSession.VendorID)
+		t.Errorf("the fork %s and its parent %s share the vendor session id %s. The vendor's fork mints one "+
+			"of its own; a vendor session id is single-occupancy", fork.ID, parent.ID, forkSession.VendorID)
 	default:
 		t.Logf("the fork resumes under its own vendor session id, not the parent's")
 	}
 
-	t.Logf("the fork carries the parent's whole conversation: %d inherited prompt(s), contiguous from "+
-		"ordinal 0, under the fork's own re-minted turn ids", len(ported))
+	t.Logf("the fork carries the parent's whole conversation: %d inherited prompt(s), read from the "+
+		"parent's book %s", len(wantTexts), lineage.Book)
 }
 
 // rt7AssertParentIsUnchanged is the plan's third assertion: forking is not a
@@ -752,9 +719,10 @@ func rt7AssertForkCarriesTheConversation(ctx context.Context, t *testing.T, dbPa
 // It compares the parent against the snapshot taken before the fork field by
 // field, because "unchanged" phrased as one comparison would name nothing when
 // it failed, and these fields fail for entirely different reasons. The parent
-// GAINING rows in `ported_prompts` gets its own check: those rows are what a
-// workspace INHERITED, and a parent that suddenly has them has been treated as
-// somebody's child by the very operation that made it a parent.
+// GAINING a `fork_lineage` row gets its own check: that row says where a
+// workspace's INHERITED past is read from, and a parent that suddenly has one
+// has been treated as somebody's child by the very operation that made it a
+// parent.
 func rt7AssertParentIsUnchanged(ctx context.Context, t *testing.T, dbPath string,
 	parent Workspace, parentName string, before rt7State) {
 	t.Helper()
@@ -776,10 +744,10 @@ func rt7AssertParentIsUnchanged(ctx context.Context, t *testing.T, dbPath string
 		t.Errorf("the parent %s went from closed=%v to closed=%v when it was forked",
 			parent.ID, before.Facts.Closed, after.Facts.Closed)
 	}
-	if len(after.Ported) != len(before.Ported) {
-		t.Errorf("the parent %s went from %d to %d row(s) in `ported_prompts`. Those rows are what a "+
-			"workspace INHERITED, and forking gives them to the child, never to the parent",
-			parent.ID, len(before.Ported), len(after.Ported))
+	if after.Lineage.Found != before.Lineage.Found || after.Lineage.Parent != before.Lineage.Parent {
+		t.Errorf("the parent %s's own lineage went from %+v to %+v across the fork. A lineage says where a "+
+			"workspace's INHERITED past is read from, and forking gives one to the child, never to the parent",
+			parent.ID, before.Lineage, after.Lineage)
 	}
 
 	beforeTexts := rt78PromptTexts(before.Conversation)
@@ -797,8 +765,8 @@ func rt7AssertParentIsUnchanged(ctx context.Context, t *testing.T, dbPath string
 	}
 
 	if before.Session.Exists && after.Session.Exists && after.Session.VendorID != before.Session.VendorID {
-		t.Errorf("the parent %s changed vendor session id from %s to %s across the fork: the fork ports a "+
-			"COPY of the transcript and leaves the parent's own alone",
+		t.Errorf("the parent %s changed vendor session id from %s to %s across the fork: the vendor's fork "+
+			"is the child's and leaves the parent's own conversation alone",
 			parent.ID, before.Session.VendorID, after.Session.VendorID)
 	}
 	if after.Session.TerminalKind != before.Session.TerminalKind {

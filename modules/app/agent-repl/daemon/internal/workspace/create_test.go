@@ -560,55 +560,59 @@ func TestCreateRecordsTheOneShotFormInTheCreationJob(t *testing.T) {
 	}
 }
 
-func TestCreateForksTheParentTranscriptBeforeTheSessionStarts(t *testing.T) {
-	// Arrange.
+// forkFixture arranges a parent with a conversation to fork, whose recorded
+// prompts are PARENTPROMPTS, and answers the spec that forks it.
+func forkFixture(t *testing.T, parentPrompts []wsm.ConversationPrompt) (*fixture, ids.WorkspaceID, CreateSpec) {
+	t.Helper()
 	f := newFixture(t)
 	parent := f.workspace("parent", t.TempDir())
 	f.db.sessions[parent.ID] = wsm.Session{Workspace: parent.ID, VendorSessionID: "vendor-1"}
-	f.account.transcript = account.Transcript{Path: "/transcripts/vendor-1.jsonl", ConfigDir: "/roots/default"}
+	f.db.conversations = map[ids.WorkspaceID][]wsm.ConversationPrompt{parent.ID: parentPrompts}
 	spec := standardSpec(t, f)
 	id := parent.ID
 	spec.ForkFrom = &id
-
-	// Act.
-	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	// Assert.
-	if len(f.account.ported) != 1 || f.account.ported[0].Path != "/transcripts/vendor-1.jsonl" {
-		t.Fatalf("ported transcripts = %+v, want the parent's ported once", f.account.ported)
-	}
+	return f, parent.ID, spec
 }
 
-// TestCreateForkRecordsAFreshConversationForResume covers the fork's identity
-// rule: a vendor session id is single-occupancy under the shim's session lock,
-// so the child is recorded against an id of its OWN -- never the parent's,
-// which its live shim still holds -- and the ported copy is filed under that
-// same id.
-func TestCreateForkRecordsAFreshConversationForResume(t *testing.T) {
+// TestCreateRecordsTheForkTheWorkspaceOwes covers the create's whole part in a
+// fork: it records the fork owed and a session with no conversation yet, and
+// copies nothing. The bring-up makes the fork through the vendor (forking.go).
+func TestCreateRecordsTheForkTheWorkspaceOwes(t *testing.T) {
 	// Arrange.
-	f := newFixture(t)
-	parent := f.workspace("parent", t.TempDir())
-	f.db.sessions[parent.ID] = wsm.Session{Workspace: parent.ID, VendorSessionID: "vendor-1"}
-	f.account.transcript = account.Transcript{Path: "/transcripts/vendor-1.jsonl", ConfigDir: "/roots/default"}
-	spec := standardSpec(t, f)
-	id := parent.ID
-	spec.ForkFrom = &id
+	f, parent, spec := forkFixture(t, nil)
 
 	// Act.
 	created, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert.
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-
-	// Assert: a fork RESUMES a conversation, under a fresh id of its own.
-	recorded := f.db.sessions[created.ID].VendorSessionID
-	if recorded == "" || recorded == "vendor-1" {
-		t.Fatalf("child session = %+v, want a fresh vendor session id, never the parent's", f.db.sessions[created.ID])
+	if got := f.db.pendingForks[created.ID]; got != (wsm.PendingFork{Workspace: created.ID, Parent: parent}) {
+		t.Fatalf("pending fork = %+v, want the child owing a fork of %s", got, parent)
 	}
-	if len(f.account.ported) != 1 || f.account.ported[0].VendorSessionID != recorded {
-		t.Fatalf("ported transcripts = %+v, want the copy filed under the child's own id %q", f.account.ported, recorded)
+	if recorded := f.db.putSessions[0].VendorSessionID; recorded != "" {
+		t.Fatalf("the create recorded vendor session %q, want none until the fork is made", recorded)
+	}
+}
+
+func TestCreateFailsAForkWhoseOwedForkCannotBeRecorded(t *testing.T) {
+	// Arrange.
+	f, _, spec := forkFixture(t, nil)
+	f.db.putPendingErr = errors.New("disk full")
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "record the fork") {
+		t.Fatalf("Create = %v, want the fork record's failure", err)
+	}
+	if len(f.fleet.started) != 0 {
+		t.Fatalf("sessions started = %v, want none for a fork that was never recorded", f.fleet.started)
+	}
+	if !hasRecord(f, "error", opCreate) {
+		t.Fatalf("records = %+v, want the failure logged at error", f.log.logger.Records())
 	}
 }
 
@@ -1071,9 +1075,9 @@ func TestCreateEndsItsStagesAtTheFailingStep(t *testing.T) {
 // SAID, with the fork's own prompt set to PROMPT.
 func namingForkFixture(t *testing.T, prompt string, said ...string) (*fixture, CreateSpec) {
 	t.Helper()
-	rows := make([]wsm.PortedPrompt, 0, len(said))
+	rows := make([]wsm.ConversationPrompt, 0, len(said))
 	for i, text := range said {
-		rows = append(rows, wsm.PortedPrompt{
+		rows = append(rows, wsm.ConversationPrompt{
 			Turn: ids.TurnID("turn-" + string(rune('a'+i))), Ordinal: int64(i), Text: text, Origin: "webapp",
 		})
 	}
@@ -1389,8 +1393,13 @@ func TestCreateForkIntoPrimaryHasNoParentAndStartsFromThePrimaryBranch(t *testin
 	if facts := f.db.registered[len(f.db.registered)-1]; facts.Parent != nil {
 		t.Fatalf("registered parent = %v, want none", *facts.Parent)
 	}
-	if len(f.account.ported) != 1 {
-		t.Fatalf("ported transcripts = %+v, want the source's ported once", f.account.ported)
+	if len(f.db.pendingForks) != 1 {
+		t.Fatalf("pending forks = %+v, want the source's conversation owed once", f.db.pendingForks)
+	}
+	for _, fork := range f.db.pendingForks {
+		if fork.Parent != source.ID {
+			t.Fatalf("pending fork = %+v, want one from the source %s", fork, source.ID)
+		}
 	}
 }
 
@@ -1533,7 +1542,7 @@ func TestCreateWithAParentForkAndABaseOnThePrimaryBranchForksIntoIt(t *testing.T
 		t.Fatalf("Create: %v", err)
 	}
 
-	// Assert: no parent, the conversation ported, the note in the first message.
+	// Assert: no parent, the note in the first message.
 	if facts := f.db.registered[len(f.db.registered)-1]; facts.Parent != nil {
 		t.Fatalf("registered parent = %v, want none", *facts.Parent)
 	}

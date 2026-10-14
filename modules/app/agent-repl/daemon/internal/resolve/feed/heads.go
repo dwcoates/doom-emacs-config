@@ -124,12 +124,9 @@ func (r *resolver) replayHead(s *wsState, agent *conversationv1.AgentId, head *c
 			dlog.Context{"feed": load.feedKey, "turn": string(turn)})
 		return
 	}
-	draw := func() { r.drawEarlierSteps(s, prompt, turn, load) }
-	if classAgent, classTurn := entryClass(prompt, agent); r.inherits(s, classAgent, classTurn) {
-		r.drawInherited(s, draw)
-		return
-	}
-	draw()
+	// THE ROW IS DRAWN IN THE PAGE'S OWN PLANE: a head of a fork's inherited
+	// past is drawn in the inherited plane its page is replayed in.
+	r.drawEarlierSteps(s, prompt, turn, load)
 }
 
 // drawEarlierSteps draws the row under TURN's head saying its earlier steps

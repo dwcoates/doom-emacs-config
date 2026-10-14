@@ -82,6 +82,10 @@ const (
 	ShimReadTranscriptsProcedure = "/shim.v1.Shim/ReadTranscripts"
 	// ShimGatherTitleDigestProcedure is the fully-qualified name of the Shim's GatherTitleDigest RPC.
 	ShimGatherTitleDigestProcedure = "/shim.v1.Shim/GatherTitleDigest"
+	// ShimGetForkPointProcedure is the fully-qualified name of the Shim's GetForkPoint RPC.
+	ShimGetForkPointProcedure = "/shim.v1.Shim/GetForkPoint"
+	// ShimForkSessionProcedure is the fully-qualified name of the Shim's ForkSession RPC.
+	ShimForkSessionProcedure = "/shim.v1.Shim/ForkSession"
 )
 
 // These variables are the protoreflect.Descriptor objects for the RPCs defined in this package.
@@ -108,6 +112,8 @@ var (
 	shimReadHistoryMethodDescriptor              = shimServiceDescriptor.Methods().ByName("ReadHistory")
 	shimReadTranscriptsMethodDescriptor          = shimServiceDescriptor.Methods().ByName("ReadTranscripts")
 	shimGatherTitleDigestMethodDescriptor        = shimServiceDescriptor.Methods().ByName("GatherTitleDigest")
+	shimGetForkPointMethodDescriptor             = shimServiceDescriptor.Methods().ByName("GetForkPoint")
+	shimForkSessionMethodDescriptor              = shimServiceDescriptor.Methods().ByName("ForkSession")
 )
 
 // ShimClient is a client for the shim.v1.Shim service.
@@ -185,6 +191,14 @@ type ShimClient interface {
 	// no ai-title. Reads the transcript the shim owns; produces nothing and ends
 	// nothing.
 	GatherTitleDigest(context.Context, *connect.Request[v1.GatherTitleDigestRequest]) (*connect.Response[v1.GatherTitleDigestResponse], error)
+	// Where a fork of this shim's conversation would end if taken now, and which
+	// of its stored rows the fork carries. Asked of the PARENT's shim under the
+	// parent's delivery lock; spends nothing. See endpoint_get_fork_point.proto.
+	GetForkPoint(context.Context, *connect.Request[v1.GetForkPointRequest]) (*connect.Response[v1.GetForkPointResponse], error)
+	// Make this shim's conversation a vendor fork of another, cut at a fork
+	// point, before any session starts. Asked of the CHILD's shim. See
+	// endpoint_fork_session.proto.
+	ForkSession(context.Context, *connect.Request[v1.ForkSessionRequest]) (*connect.Response[v1.ForkSessionResponse], error)
 }
 
 // NewShimClient constructs a client for the shim.v1.Shim service. By default, it uses the Connect
@@ -323,6 +337,18 @@ func NewShimClient(httpClient connect.HTTPClient, baseURL string, opts ...connec
 			connect.WithSchema(shimGatherTitleDigestMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		getForkPoint: connect.NewClient[v1.GetForkPointRequest, v1.GetForkPointResponse](
+			httpClient,
+			baseURL+ShimGetForkPointProcedure,
+			connect.WithSchema(shimGetForkPointMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		forkSession: connect.NewClient[v1.ForkSessionRequest, v1.ForkSessionResponse](
+			httpClient,
+			baseURL+ShimForkSessionProcedure,
+			connect.WithSchema(shimForkSessionMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -349,6 +375,8 @@ type shimClient struct {
 	readHistory              *connect.Client[v1.ReadHistoryRequest, v1.ReadHistoryResponse]
 	readTranscripts          *connect.Client[v1.ReadTranscriptsRequest, v1.ReadTranscriptsResponse]
 	gatherTitleDigest        *connect.Client[v1.GatherTitleDigestRequest, v1.GatherTitleDigestResponse]
+	getForkPoint             *connect.Client[v1.GetForkPointRequest, v1.GetForkPointResponse]
+	forkSession              *connect.Client[v1.ForkSessionRequest, v1.ForkSessionResponse]
 }
 
 // StartSession calls shim.v1.Shim.StartSession.
@@ -456,6 +484,16 @@ func (c *shimClient) GatherTitleDigest(ctx context.Context, req *connect.Request
 	return c.gatherTitleDigest.CallUnary(ctx, req)
 }
 
+// GetForkPoint calls shim.v1.Shim.GetForkPoint.
+func (c *shimClient) GetForkPoint(ctx context.Context, req *connect.Request[v1.GetForkPointRequest]) (*connect.Response[v1.GetForkPointResponse], error) {
+	return c.getForkPoint.CallUnary(ctx, req)
+}
+
+// ForkSession calls shim.v1.Shim.ForkSession.
+func (c *shimClient) ForkSession(ctx context.Context, req *connect.Request[v1.ForkSessionRequest]) (*connect.Response[v1.ForkSessionResponse], error) {
+	return c.forkSession.CallUnary(ctx, req)
+}
+
 // ShimHandler is an implementation of the shim.v1.Shim service.
 type ShimHandler interface {
 	// SPAWN: bind to a vendor session and bring it to the point where a prompt
@@ -531,6 +569,14 @@ type ShimHandler interface {
 	// no ai-title. Reads the transcript the shim owns; produces nothing and ends
 	// nothing.
 	GatherTitleDigest(context.Context, *connect.Request[v1.GatherTitleDigestRequest]) (*connect.Response[v1.GatherTitleDigestResponse], error)
+	// Where a fork of this shim's conversation would end if taken now, and which
+	// of its stored rows the fork carries. Asked of the PARENT's shim under the
+	// parent's delivery lock; spends nothing. See endpoint_get_fork_point.proto.
+	GetForkPoint(context.Context, *connect.Request[v1.GetForkPointRequest]) (*connect.Response[v1.GetForkPointResponse], error)
+	// Make this shim's conversation a vendor fork of another, cut at a fork
+	// point, before any session starts. Asked of the CHILD's shim. See
+	// endpoint_fork_session.proto.
+	ForkSession(context.Context, *connect.Request[v1.ForkSessionRequest]) (*connect.Response[v1.ForkSessionResponse], error)
 }
 
 // NewShimHandler builds an HTTP handler from the service implementation. It returns the path on
@@ -665,6 +711,18 @@ func NewShimHandler(svc ShimHandler, opts ...connect.HandlerOption) (string, htt
 		connect.WithSchema(shimGatherTitleDigestMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	shimGetForkPointHandler := connect.NewUnaryHandler(
+		ShimGetForkPointProcedure,
+		svc.GetForkPoint,
+		connect.WithSchema(shimGetForkPointMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	shimForkSessionHandler := connect.NewUnaryHandler(
+		ShimForkSessionProcedure,
+		svc.ForkSession,
+		connect.WithSchema(shimForkSessionMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/shim.v1.Shim/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ShimStartSessionProcedure:
@@ -709,6 +767,10 @@ func NewShimHandler(svc ShimHandler, opts ...connect.HandlerOption) (string, htt
 			shimReadTranscriptsHandler.ServeHTTP(w, r)
 		case ShimGatherTitleDigestProcedure:
 			shimGatherTitleDigestHandler.ServeHTTP(w, r)
+		case ShimGetForkPointProcedure:
+			shimGetForkPointHandler.ServeHTTP(w, r)
+		case ShimForkSessionProcedure:
+			shimForkSessionHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -800,4 +862,12 @@ func (UnimplementedShimHandler) ReadTranscripts(context.Context, *connect.Reques
 
 func (UnimplementedShimHandler) GatherTitleDigest(context.Context, *connect.Request[v1.GatherTitleDigestRequest]) (*connect.Response[v1.GatherTitleDigestResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("shim.v1.Shim.GatherTitleDigest is not implemented"))
+}
+
+func (UnimplementedShimHandler) GetForkPoint(context.Context, *connect.Request[v1.GetForkPointRequest]) (*connect.Response[v1.GetForkPointResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("shim.v1.Shim.GetForkPoint is not implemented"))
+}
+
+func (UnimplementedShimHandler) ForkSession(context.Context, *connect.Request[v1.ForkSessionRequest]) (*connect.Response[v1.ForkSessionResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("shim.v1.Shim.ForkSession is not implemented"))
 }

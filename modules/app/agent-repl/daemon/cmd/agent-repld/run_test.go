@@ -64,7 +64,7 @@ func newTestHooks() *testHooks {
 			return nil, errServed
 		},
 		Server: func(server.Deps) (server.Server, error) { return nil, errServed },
-		Serve: func(_ context.Context, _ net.Listener, _ http.Handler, _, _ func(), _ func(string, time.Time)) error {
+		Serve: func(context.Context, net.Listener, http.Handler, serveExit) error {
 			th.served <- struct{}{}
 			return errServed
 		},
@@ -350,7 +350,9 @@ func TestServeWithdrawsTheAdvertisementBeforeItStopsAccepting(t *testing.T) {
 
 	// Act.
 	served := make(chan error, 1)
-	go func() { served <- serve(ctx, listener, gate, onShuttingDown, nil, nil) }()
+	go func() {
+		served <- serve(ctx, listener, gate, serveExit{OnShuttingDown: onShuttingDown, Log: dlog.NewTestLogger()})
+	}()
 	cancel()
 	if err := <-served; err != nil {
 		t.Fatalf("serve() = %v, want an orderly shutdown", err)
@@ -858,7 +860,7 @@ func TestTheExitWaitsForTheStandingStreamsPushesBeforeShuttingDown(t *testing.T)
 
 	// Act
 	served := make(chan error, 1)
-	go func() { served <- serve(ctx, listener, gate, nil, nil, nil) }()
+	go func() { served <- serve(ctx, listener, gate, serveExit{Log: dlog.NewTestLogger()}) }()
 	cancel()
 	if err := <-served; err != nil {
 		t.Fatalf("serve() = %v, want an orderly shutdown", err)
@@ -893,7 +895,9 @@ func TestTheExitEndsEveryStandingStreamBeforeShuttingDown(t *testing.T) {
 
 	// Act
 	served := make(chan error, 1)
-	go func() { served <- serve(ctx, listener, gate, nil, endStreams, nil) }()
+	go func() {
+		served <- serve(ctx, listener, gate, serveExit{EndStreams: endStreams, Log: dlog.NewTestLogger()})
+	}()
 	cancel()
 	if err := <-served; err != nil {
 		t.Fatalf("serve() = %v, want an orderly shutdown", err)
@@ -1136,9 +1140,10 @@ func TestARequestlessConnectionDoesNotHoldTheExit(t *testing.T) {
 		t.Fatalf("Listen: %v", err)
 	}
 	gate := &recordingGate{Handler: http.NotFoundHandler()}
+	log := dlog.NewTestLogger()
 	ctx, cancel := context.WithCancel(context.Background())
 	served := make(chan error, 1)
-	go func() { served <- serve(ctx, listener, gate, nil, nil, nil) }()
+	go func() { served <- serve(ctx, listener, gate, serveExit{Log: log}) }()
 	idle, err := net.Dial("tcp", listener.Addr().String())
 	if err != nil {
 		t.Fatalf("dial the requestless connection: %v", err)
@@ -1151,16 +1156,79 @@ func TestARequestlessConnectionDoesNotHoldTheExit(t *testing.T) {
 	resp.Body.Close()
 
 	// Act
-	start := time.Now()
 	cancel()
 	if err := <-served; err != nil {
 		t.Fatalf("serve() = %v, want an orderly shutdown", err)
 	}
 
-	// Assert: well inside the grace the poll used to spend.
-	if took := time.Since(start); took >= shutdownGrace/2 {
-		t.Fatalf("the exit took %s with a requestless connection open, want it closed rather than waited on (grace %s)", took, shutdownGrace)
+	// Assert: the shutdown ended on the connections going idle, not on its
+	// grace -- the grace running out is the stall, and it is reported.
+	if holdsRecord(log.Records(), "warn", graceExpired) {
+		t.Fatalf("records = %+v, want the requestless connection closed rather than waited on until the grace ran out", log.Records())
 	}
+}
+
+// graceExpired is the record serve writes when the http shutdown's grace runs
+// out with connections still held.
+const graceExpired = "the exit's http shutdown grace expired with connections still held; closing them under their requests"
+
+// TestServeReportsAnHTTPShutdownGraceThatRunsOut pins that the one bound the
+// http shutdown can ride is reported, not only timed: a request still being
+// answered when the grace ends is closed under, and the exit says so.
+func TestServeReportsAnHTTPShutdownGraceThatRunsOut(t *testing.T) {
+	// Arrange: a handler that answers only once the test is over, so the
+	// shutdown can end only on its grace.
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	gate := &recordingGate{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(entered)
+		<-release
+	})}
+	log := dlog.NewTestLogger()
+	ctx, cancel := context.WithCancel(context.Background())
+	served := make(chan error, 1)
+	go func() { served <- serve(ctx, listener, gate, serveExit{Grace: 10 * time.Millisecond, Log: log}) }()
+	go func() {
+		if resp, err := http.Get("http://" + listener.Addr().String() + "/"); err == nil {
+			resp.Body.Close()
+		}
+	}()
+	<-entered
+
+	// Act
+	cancel()
+	if err := <-served; err != nil {
+		t.Fatalf("serve() = %v, want the held connection closed under", err)
+	}
+
+	// Assert
+	rec := findRecord(t, log.Records(), graceExpired)
+	if rec.Level != "warn" || rec.Context["grace_ms"] != int64(10) {
+		t.Fatalf("record = %+v, want a warn naming the 10ms grace", rec)
+	}
+}
+
+func TestServeRefusesToRunWithoutALogger(t *testing.T) {
+	// Arrange
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	defer listener.Close()
+	defer func() {
+		// Assert
+		if recover() == nil {
+			t.Fatal("serve() ran with no logger, want a panic: the exit could not report a grace it ran out")
+		}
+	}()
+
+	// Act
+	_ = serve(context.Background(), listener, http.NotFoundHandler(), serveExit{})
 }
 
 func TestCloseRequestlessClosesOnlyConnectionsWithNoRequest(t *testing.T) {

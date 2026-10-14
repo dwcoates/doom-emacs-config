@@ -10,7 +10,6 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
-  cwdSlug,
   FAKE_CLI_VERSION,
   lastChainedUuid,
   SpoolWriter,
@@ -19,7 +18,6 @@ import {
   subagentMetaPath,
   subagentTranscriptPath,
   TranscriptWriter,
-  transcriptPath,
   VendorFiles,
 } from "../../src/fake/vendor-files.js";
 
@@ -31,31 +29,7 @@ const lines = (path: string): Record<string, unknown>[] =>
     .filter((l) => l.trim() !== "")
     .map((l) => JSON.parse(l) as Record<string, unknown>);
 
-describe("cwdSlug", () => {
-  it("replaces every slash and dot, as the observed dotfile-config path does", () => {
-    // Arrange + Act + Assert
-    expect(cwdSlug("/Users/x/.config/y")).toBe("-Users-x--config-y");
-  });
-
-  it("replaces an UNDERSCORE too, which the macOS temp-folder path depends on", () => {
-    // Arrange + Act + Assert. `_m` becomes `-m`, so the vendor directory for a
-    // /private/var/folders session carries a dash where the underscore was; a
-    // reader that only replaced / and . would look in a folder that never exists.
-    expect(cwdSlug("/private/var/folders/_m/x")).toBe("-private-var-folders--m-x");
-  });
-
-  it("preserves case and leaves existing dashes alone", () => {
-    // Arrange + Act + Assert
-    expect(cwdSlug("/Users/ABC/doom-worktrees/Feature")).toBe("-Users-ABC-doom-worktrees-Feature");
-  });
-});
-
 describe("paths", () => {
-  it("names the session transcript under projects/<slug>/", () => {
-    // Arrange + Act + Assert
-    expect(transcriptPath("/cfg", "/w/s", "sess-1")).toBe("/cfg/projects/-w-s/sess-1.jsonl");
-  });
-
   it("names a subagent transcript under the session's own directory", () => {
     // Arrange + Act + Assert
     expect(subagentTranscriptPath("/cfg", "/w/s", "sess-1", "a1b2")).toBe(

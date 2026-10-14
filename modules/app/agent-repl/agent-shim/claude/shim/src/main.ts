@@ -76,6 +76,9 @@ import {
 } from "./store/persistence.js";
 import { createRealQuery, PER_TASK_STOP_AFFORDANCE } from "./sdk/real-query.js";
 import { createFakeQuery } from "./fake/index.js";
+import { forkFakeSession } from "./fake/fork.js";
+import { forkRealSession } from "./sdk/real-fork.js";
+import type { ForkVendorSession } from "./engine/fork-session.js";
 import {
   createFakeReachabilityProbe,
   createReachabilityProbe,
@@ -881,6 +884,16 @@ export function queryFactory(fake: boolean, environment: ShimEnvironment, cwd: s
   };
 }
 
+/**
+ * The vendor's session fork for this process: the real SDK's, or under `--fake`
+ * the mocked vendor's, chosen by the same flag that chooses the query so a fake
+ * session never forks through the real vendor.
+ */
+export function forkFactory(fake: boolean, environment: ShimEnvironment): ForkVendorSession {
+  if (!fake) return forkRealSession;
+  return (spec) => Promise.resolve(forkFakeSession(environment.claudeConfigDir, spec));
+}
+
 export async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
@@ -995,6 +1008,7 @@ export async function main(): Promise<void> {
     }),
     fold: createFold(),
     createQuery: queryFactory(args.fake, environment, cwd),
+    forkVendorSession: forkFactory(args.fake, environment),
     runtime: { shimBuildSha: identity.shimBuildSha, sdkVersion: identity.sdkVersion },
     env: { stateDir: environment.stateDir, configDir: environment.claudeConfigDir, cwd },
     nowMs: () => Date.now(),

@@ -1773,3 +1773,4 @@ and its commit (or the open item). Test-performance lessons also go into the
 
 - A shim starts in ~70ms to its argv refusal; ~17ms of it is compiling the 2.3MB bundle, most of the rest Node's own builtins. The protobuf registry guard took ~43ms off a 108ms start. NODE_COMPILE_CACHE trims ~13%; not adopted alone.
 - shim integration (412 tests) is CPU-bound, each test spawning a real node shim; a test that re-imports the engine's whole module graph needs ~1.2s even idle, so its bound is its own (bf7a42269).
+- Re-evaluating the generated protobuf modules is 220-270ms of every `vi.resetModules()` re-import (2026-10-13); `test/main.test.ts` timed out at 2.5s on a loaded host. A suite that resets pins them with `keepGeneratedProtosAcrossResets()` (`test/stateless-modules.ts`): its test time fell 7.9s to 2.65s. Pinning in the shared setup file instead cost the whole suite more CPU (56s to 67s user) and was rejected (27dc1e550).

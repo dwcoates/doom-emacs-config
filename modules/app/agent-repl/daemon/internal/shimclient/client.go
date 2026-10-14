@@ -1632,6 +1632,16 @@ func (c *client) GatherTitleDigest(ctx context.Context, req *shimv1.GatherTitleD
 	return unary(ctx, c, "gather_title_digest", req, validateGatherTitleDigestRequest, c.rpc.GatherTitleDigest)
 }
 
+// GetForkPoint asks the shim where a fork of its conversation would end.
+func (c *client) GetForkPoint(ctx context.Context, req *shimv1.GetForkPointRequest) (*shimv1.GetForkPointResponse, error) {
+	return unary(ctx, c, "get_fork_point", req, validateGetForkPointRequest, c.rpc.GetForkPoint)
+}
+
+// ForkSession makes the shim's conversation a fork of another.
+func (c *client) ForkSession(ctx context.Context, req *shimv1.ForkSessionRequest) (*shimv1.ForkSessionResponse, error) {
+	return unary(ctx, c, "fork_session", req, validateForkSessionRequest, c.rpc.ForkSession)
+}
+
 // unary is every unary verb's body: validate through the message's base
 // function, log the branch, call the generated client, log the outcome.
 func unary[Req any, Resp any](

@@ -12,7 +12,7 @@ import (
 
 // newsDigestDDL is the layout-19 addition: the daily news digest's durable
 // state (internal/newsdigest), kept apart from the rest of the schema for the
-// reason portedPromptsDDL is: a fresh file gets it as part of schemaDDL, a
+// reason forkLineageDDL is: a fresh file gets it as part of schemaDDL, a
 // layout-18 file from the 18 -> 19 migration, so one text keeps the two shapes
 // from drifting.
 //

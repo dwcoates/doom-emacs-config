@@ -257,17 +257,18 @@ func (v *verbs) reviveRecordedConversation(ctx context.Context, log dlog.Logger,
 		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "v.deps.Sessions.Live(record.ID)"})
 		return
 	}
-	session, exists, err := v.deps.DB.Session(ctx, record.ID)
+	recorded, err := readRecordedSession(ctx, v.deps.DB, record.ID)
 	if err != nil {
 		log.Error(opRegister, "could not read the announced workspace's session record", dlog.Context{
 			"workspace": string(record.ID), "cause": err.Error(),
 		})
 		return
 	}
-	if !exists || session.VendorSessionID == "" {
-		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "!exists || session.VendorSessionID == \"\""})
+	if !recorded.hasConversation() {
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "!recorded.hasConversation()"})
 		return
 	}
+	session := recorded.session
 	if session.Terminal != nil && (session.Terminal.Kind == terminalDeleted || session.Terminal.Kind == terminalHibernated) {
 		log.Debug(opRegister, "the announced workspace's session is not revived by an announcement", dlog.Context{
 			"workspace": string(record.ID), "terminal": session.Terminal.Kind,

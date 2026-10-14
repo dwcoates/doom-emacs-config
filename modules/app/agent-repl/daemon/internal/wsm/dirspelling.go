@@ -186,6 +186,8 @@ var heldStateQueries = []struct {
 	{kind: "merge_ledger", query: `SELECT count(*) FROM merge_ledger WHERE workspace_id = ?`},
 	{kind: "merge_queue", query: `SELECT count(*) FROM merge_queue WHERE workspace_id = ?`},
 	{kind: "ported_prompts", query: `SELECT count(*) FROM ported_prompts WHERE workspace_id = ?`},
+	{kind: "pending_fork", query: `SELECT count(*) FROM pending_forks WHERE workspace_id = ?`},
+	{kind: "fork_lineage", query: `SELECT count(*) FROM fork_lineage WHERE workspace_id = ?`},
 }
 
 // stateHeldBy names every kind of state one workspace still holds.

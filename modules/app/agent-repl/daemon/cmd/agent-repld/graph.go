@@ -11,8 +11,6 @@ import (
 	"sync"
 	"time"
 
-	conversationv1 "agentrepl/proto/conversation/v1"
-
 	"agent-repld/internal/account"
 	"agent-repld/internal/agentreplsession"
 	"agent-repld/internal/boot"
@@ -359,25 +357,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		}
 		return record.Dir, nil
 	}
-	// A FORK'S PORTED CONVERSATION is the daemon's own record of the parent's
-	// questions, carried over under the child's turn ids at the fork. The feed
-	// draws it above everything the workspace has of its own, which is what
-	// makes a forked feed the parent's conversation followed by the fork's.
-	portedPrompts := func(ctx context.Context, ws ids.WorkspaceID) ([]feed.PortedPrompt, error) {
-		rows, err := p.DB.PortedPrompts(ctx, ws)
-		if err != nil {
-			return nil, err
-		}
-		out := make([]feed.PortedPrompt, 0, len(rows))
-		for _, row := range rows {
-			out = append(out, feed.PortedPrompt{
-				Turn:   string(row.Turn),
-				Text:   row.Text,
-				Origin: conversationv1.PromptOrigin(conversationv1.PromptOrigin_value[row.Origin]),
-			})
-		}
-		return out, nil
-	}
 	// The metaprompt sentinels are stripped from DRAWN text only; the record
 	// keeps the full text. Both the feed resolver and the queue's mirror draw
 	// prompt rows, so both take the same one implementation.
@@ -521,6 +500,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	}
 
 	history := &historyForwarder{}
+	deliveries := &deliveryForwarder{}
 	feedResolver, err := feed.New(feed.Deps{
 		Log: p.Surfaces,
 		// HISTORY IS READ ONLY ON A READER'S REQUEST, from the workspace's
@@ -533,16 +513,12 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// An image reference is turned into a source on the daemon's own
 		// image origin (`path`) or answered verbatim (`url`); an unset arm
 		// is refused loudly rather than drawn as an empty src.
-		ResolveImage:  resolveImage,
-		PortedPrompts: portedPrompts,
+		ResolveImage: resolveImage,
 		// A REPLAYED TURN WHOSE PAGE CARRIES NO TERMINAL is ended from its
 		// durable close, the record the prompt queue's door wrote.
 		TurnCloses:    p.DB.TurnCloses,
 		TurnAddresses: p.DB.TurnAddresses,
 		TurnMirrors:   p.DB.TurnMirrors,
-		// A FORK'S OWN TURNS are the ones its workspace recorded; every other
-		// main-agent entry of its book is the conversation it inherited.
-		OwnedTurns: p.DB.RecordedTurns,
 		// A MERGE'S BUBBLE is drawn again by a new daemon from this record.
 		DurableRows: p.DB,
 		Faults:      p.DB,
@@ -694,7 +670,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		ForbidVendor: p.Contracts.ForbidVendorCalls(),
 		StartBound:   startBound,
 		StartWatcher: startWatcher,
-		Log:          p.Surfaces,
+		// A FORK IS MADE while its parent's deliveries are held, through the
+		// queue built below (forward.go).
+		Deliveries: deliveries,
+		Log:        p.Surfaces,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the session fleet: %w", err)
@@ -786,6 +765,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	}
 	lifecycle.queue = queue
 	vendorServes.bind(queue)
+	deliveries.bind(queue)
 
 	// ---- the handover halves ----
 
