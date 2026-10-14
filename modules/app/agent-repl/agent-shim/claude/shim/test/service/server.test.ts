@@ -20,7 +20,6 @@ import {
   flushStreamHead,
   isKillSessionPath,
   isStreamingContentType,
-  isStreamingPath,
   probeSocket,
   recordStreamReset,
   serve,
@@ -392,18 +391,6 @@ describe("standing streams", () => {
   });
 });
 
-describe("isStreamingPath", () => {
-  it("names WatchAgent a streaming rpc, so the exit never waits on its tail", () => {
-    // Arrange, Act, Assert.
-    expect(isStreamingPath("/shim.v1.Shim/WatchAgent")).toBe(true);
-  });
-
-  it("names KillSession a unary rpc, so the exit waits for its response", () => {
-    // Arrange, Act, Assert.
-    expect(isStreamingPath("/shim.v1.Shim/KillSession")).toBe(false);
-  });
-});
-
 describe("isKillSessionPath", () => {
   it("names the KillSession rpc", () => {
     // Arrange, Act, Assert.
@@ -480,32 +467,6 @@ describe("waiting for the daemon to hang up", () => {
 
     // Act, Assert.
     await expect(server.hungUp()).rejects.toThrow(/no KillSession was served/);
-  });
-});
-
-describe("quiet", () => {
-  it("resolves at once when no response is in flight", async () => {
-    // Arrange.
-    const server = await start(socketPath());
-
-    // Act, Assert.
-    await expect(server.quiet(50)).resolves.toBeUndefined();
-  });
-
-  it("resolves once the unary response in flight has closed", async () => {
-    // The KillSession exit rides this: the process may only end after the
-    // daemon actually has its answer.
-    // Arrange.
-    const sock = socketPath();
-    const server = await start(sock);
-
-    // Act.
-    await client(sock, "1.1")
-      .hibernate(create(shimv1.HibernateRequestSchema, {}))
-      .catch(() => undefined);
-
-    // Assert.
-    await expect(server.quiet(1_000)).resolves.toBeUndefined();
   });
 });
 
@@ -847,100 +808,17 @@ function heldHibernateEngine(): {
   return { engine, entered, release };
 }
 
-describe("waiting for the wire to go quiet", () => {
-  let written: string[] = [];
-  beforeEach(() => {
-    written = [];
-    vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
-      written.push(String(chunk));
-      return true;
-    });
-  });
-
-  it("resolves once the response that was in flight has closed", async () => {
-    // Arrange.
-    const sock = socketPath();
-    const { engine, entered, release } = heldHibernateEngine();
-    const server = await serve(sock, shimRoutes(engine));
-    started.push(server);
-    const pending = client(sock, "1.1").hibernate(create(shimv1.HibernateRequestSchema, {}));
-    await entered;
-
-    // Act.
-    const quiet = server.quiet(30_000);
-    release();
-    await pending;
-
-    // Assert.
-    await expect(quiet).resolves.toBeUndefined();
-  });
-
-  it("says NOTHING about giving up when the response closed inside the budget", async () => {
-    // Arrange.
-    const sock = socketPath();
-    const { engine, entered, release } = heldHibernateEngine();
-    const server = await serve(sock, shimRoutes(engine));
-    started.push(server);
-    const pending = client(sock, "1.1").hibernate(create(shimv1.HibernateRequestSchema, {}));
-    await entered;
-
-    // Act.
-    const quiet = server.quiet(30_000);
-    release();
-    await pending;
-    await quiet;
-
-    // Assert.
-    expect(mirroredRecords(written).some((record) => record.context.budget_ms !== undefined)).toBe(
-      false,
-    );
-  });
-
-  it("keeps waiting while a SECOND response is still open", async () => {
-    // A counter that fired on the first close would cut the other response off
-    // the wire on exit.
-    // Arrange.
-    const sock = socketPath();
-    const first = heldHibernateEngine();
-    const second = heldHibernateEngine();
-    let turn = 0;
-    const engine = new NotImplementedEngine();
-    engine.hibernate = (): Promise<shimv1.HibernateResponse> =>
-      (turn++ === 0 ? first : second).engine.hibernate();
-    const server = await serve(sock, shimRoutes(engine));
-    started.push(server);
-    const calls = client(sock, "1.1");
-    const pendingFirst = calls.hibernate(create(shimv1.HibernateRequestSchema, {}));
-    await first.entered;
-    const pendingSecond = calls.hibernate(create(shimv1.HibernateRequestSchema, {}));
-    await second.entered;
-
-    // Act.
-    let quietSettled = false;
-    const quiet = server.quiet(30_000).then(() => {
-      quietSettled = true;
-    });
-    first.release();
-    await pendingFirst;
-    await new Promise<void>((resolve) => setImmediate(() => resolve()));
-    const settledAfterFirst = quietSettled;
-    second.release();
-    await pendingSecond;
-    await quiet;
-
-    // Assert.
-    expect([settledAfterFirst, quietSettled]).toEqual([false, true]);
-  });
-
-  // THE REGRESSION THIS FILE EXISTS FOR, over h2c: `quiet` resolving is not
-  // the same as the answer being on the wire. A response's `close` means its
-  // frames reached the http2 session; the session writes them on a LATER turn,
-  // and the exit's `close()` used to destroy the socket before that turn came
-  // — 30 of 30 answers lost in this shape, and in the e2e suite a `KillSession`
-  // the shim had performed reaching the daemon as `unexpected EOF`.
-  it("delivers the answer of a call that ends the process, though the exit closes in the same breath", async () => {
-    // Arrange — main.ts's endProcess exactly: the exit is requested from
-    // inside the handler, BEFORE the response is returned.
+describe("closing the listener under a call that ends the process", () => {
+  // THE REGRESSION THIS FILE EXISTS FOR, over h2c: a response's `close` is
+  // not the same as the answer being on the wire. It means its frames reached
+  // the http2 session; the session writes them on a LATER turn, and `close()`
+  // used to destroy the socket before that turn came — 30 of 30 answers lost
+  // in this shape, and in the e2e suite a `KillSession` the shim had performed
+  // reaching the daemon as `unexpected EOF`.
+  it("delivers the answer of a call that ends the process, though the listener closes in the same breath", async () => {
+    // Arrange — a close requested from inside the handler, BEFORE the
+    // response is returned. The kill exit no longer closes before the
+    // daemon hangs up, so `close()` alone must still never cut an answer.
     const sock = socketPath();
     const engine = new NotImplementedEngine();
     // The server is reachable from the handler through a holder, because the
@@ -948,7 +826,6 @@ describe("waiting for the wire to go quiet", () => {
     const exiting: { server?: ShimServer } = {};
     engine.killSession = async (): Promise<shimv1.KillSessionResponse> => {
       void (async (): Promise<void> => {
-        await exiting.server?.quiet(30_000);
         await exiting.server?.close();
       })();
       return create(shimv1.KillSessionResponseSchema, {});
@@ -963,31 +840,6 @@ describe("waiting for the wire to go quiet", () => {
 
     // Assert — the answer arrives whole rather than as a cut connection.
     await expect(answer).resolves.toBeDefined();
-  });
-
-  it("REPORTS giving up and returns once the budget is spent on a response that never closes", async () => {
-    // A stream that never ends must not keep a killed shim alive forever.
-    // Arrange.
-    const sock = socketPath();
-    const { engine, entered, release } = heldHibernateEngine();
-    const server = await serve(sock, shimRoutes(engine));
-    started.push(server);
-    const pending = client(sock, "1.1")
-      .hibernate(create(shimv1.HibernateRequestSchema, {}))
-      .catch(() => undefined);
-    await entered;
-
-    // Act.
-    await server.quiet(10);
-
-    // Assert.
-    expect(
-      mirroredRecords(written).some(
-        (record) => record.level === "error" && record.context.in_flight === 1,
-      ),
-    ).toBe(true);
-    release();
-    await pending;
   });
 });
 
