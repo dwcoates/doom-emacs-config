@@ -193,15 +193,20 @@ func mainIn(m *testing.M, module, root string) int {
 	for _, b := range []struct {
 		out, pkg string
 		covered  bool
+		// links are the -ldflags -X bindings the build sets.
+		links []string
 	}{
 		// ONLY THE DAEMON IS INSTRUMENTED. The two fakes are harness
 		// scaffolding, not a system under test, and both inherit the
 		// daemon's environment when they run — an instrumented fake would
 		// write its counters into the daemon's own GOCOVERDIR and appear in
 		// the daemon's profile as covered "production" code.
-		{daemonBinary, "./cmd/agent-repld", true},
-		{fakeshimBinary, "./integration/fakeshim", false},
-		{gitBinary, "./integration/fakegit/git", false},
+		// THE DAEMON RUNS THE MOCKED GIT BY CONSTRUCTION: it is linked in as
+		// the daemon's git binary, so no PATH a test or a child sets can
+		// reach the host's git.
+		{daemonBinary, "./cmd/agent-repld", true, []string{MockedGitLink(gitBinary)}},
+		{fakeshimBinary, "./integration/fakeshim", false, nil},
+		{gitBinary, "./integration/fakegit/git", false, nil},
 	} {
 		// An instrumented build when coverage is on; the plain build
 		// otherwise. `-cover` changes only what the binary WRITES, never
@@ -211,6 +216,9 @@ func mainIn(m *testing.M, module, root string) int {
 		buildArgs := []string{"build", "-buildvcs=false"}
 		if b.covered {
 			buildArgs = append(buildArgs, CoverageBuildArgs(CoverageRoot())...)
+		}
+		if len(b.links) > 0 {
+			buildArgs = append(buildArgs, "-ldflags="+strings.Join(b.links, " "))
 		}
 		buildArgs = append(buildArgs, "-o", b.out, b.pkg)
 		cmd := exec.Command("go", buildArgs...)
@@ -346,6 +354,15 @@ func DaemonBinary(t *testing.T) string {
 	return daemonBinary
 }
 
+// MockedGitBinary is the mocked git every test daemon is linked to run.
+func MockedGitBinary(t *testing.T) string {
+	t.Helper()
+	if gitBinary == "" {
+		t.Fatal("harness: the suite's TestMain must call harness.Main")
+	}
+	return gitBinary
+}
+
 // FakeShimBinary is the built fake shim.
 func FakeShimBinary(t *testing.T) string {
 	t.Helper()
@@ -392,4 +409,13 @@ func RepoRoot(t *testing.T) string {
 		t.Fatalf("harness: %v", err)
 	}
 	return filepath.Dir(module)
+}
+
+// gitBinaryVar is the daemon's link-time git binary (internal/gitclient).
+const gitBinaryVar = "agent-repld/internal/gitclient.gitBinary"
+
+// MockedGitLink is the -X binding that makes a daemon build run gitPath as its
+// git. Every test build of the daemon carries it.
+func MockedGitLink(gitPath string) string {
+	return "-X " + gitBinaryVar + "=" + gitPath
 }
