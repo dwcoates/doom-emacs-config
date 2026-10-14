@@ -14,7 +14,7 @@
  * fork point's record and the parent's book are all resolved before the vendor
  * is asked, so every refusal leaves the disk as it was.
  */
-import { existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { shimv1 } from "../proto.js";
 import { bindLog } from "../log.js";
@@ -175,9 +175,76 @@ export async function forkSession(deps: ForkSessionDeps, ask: ForkSessionAsk): P
     mkdirSync(path.dirname(filed), { recursive: true });
     renameSync(written, filed);
   }
+  const remapped = repairForkedTranscript(filed);
   LOGGER.info(
-    { ...context, up_to: upTo.upTo ?? "", vendor_session_id: forkedId, parent_book: parentBook, transcript: filed },
+    { ...context, up_to: upTo.upTo ?? "", vendor_session_id: forkedId, parent_book: parentBook, transcript: filed, boundary_references_remapped: remapped },
     "forked the parent conversation through the vendor and filed it under this workspace",
   );
   return { kind: "forked", vendorSessionId: forkedId, parentBook };
+}
+
+/**
+ * Point a forked transcript's compaction boundaries at the forked records,
+ * rewriting the file in place; answers how many references were remapped.
+ *
+ * THE VENDOR'S FORK GIVES EVERY RECORD A NEW UUID (`forkedFrom.messageUuid`
+ * names the parent record it was copied from) but copies each
+ * `compact_boundary`'s `compactMetadata` whole, so its preserved segment and
+ * preserved messages -- the tail of the conversation a resumed session
+ * re-attaches after the summary -- still name the PARENT's uuids. Nothing in
+ * the fork answers to them, so the fork's first request left that tail out:
+ * its history differed from the parent's right after the summary, every cache
+ * breakpoint after the system prompt missed, and the server dropped every
+ * thinking block as `prefix_mismatch` (measured 2026-10-14: a 600k-token fork
+ * read 28,550 from the cache; the same fork with the boundaries remapped read
+ * 769,496 and wrote 10,020).
+ *
+ * ONLY THE BOUNDARY LINES ARE REWRITTEN; every other line keeps its bytes, so
+ * nothing the request carries changes but the boundaries the vendor reads.
+ */
+export function repairForkedTranscript(file: string): number {
+  const repaired = remapForkedCompactBoundaries(readFileSync(file, "utf8"));
+  if (repaired.remapped === 0) return 0;
+  const staged = `${file}.repairing`;
+  writeFileSync(staged, repaired.text);
+  renameSync(staged, file);
+  return repaired.remapped;
+}
+
+/**
+ * The transcript text with every `compact_boundary`'s `compactMetadata`
+ * pointing at the forked records, and how many references were remapped. A
+ * reference naming no forked record (a record the fork did not copy) is left
+ * as it is.
+ */
+export function remapForkedCompactBoundaries(text: string): { text: string; remapped: number } {
+  const lines = text.split("\n");
+  const records = lines.map((line) => (line.trim() === "" ? undefined : (JSON.parse(line) as Record<string, unknown>)));
+  const forkedOf = new Map<string, string>();
+  for (const record of records) {
+    const from = record?.["forkedFrom"] as { messageUuid?: unknown } | undefined;
+    if (typeof from?.messageUuid === "string" && typeof record?.["uuid"] === "string") forkedOf.set(from.messageUuid, record["uuid"]);
+  }
+  let remapped = 0;
+  const remap = (value: unknown): unknown => {
+    if (typeof value === "string") {
+      const forked = forkedOf.get(value);
+      if (forked === undefined) return value;
+      remapped++;
+      return forked;
+    }
+    if (Array.isArray(value)) return value.map(remap);
+    if (value !== null && typeof value === "object") {
+      return Object.fromEntries(Object.entries(value).map(([key, inner]) => [key, remap(inner)]));
+    }
+    return value;
+  };
+  const out = lines.map((line, at) => {
+    const record = records[at];
+    if (record?.["type"] !== "system" || record["subtype"] !== "compact_boundary" || record["compactMetadata"] === undefined) return line;
+    const before = remapped;
+    const metadata = remap(record["compactMetadata"]);
+    return remapped === before ? line : JSON.stringify({ ...record, compactMetadata: metadata });
+  });
+  return { text: out.join("\n"), remapped };
 }

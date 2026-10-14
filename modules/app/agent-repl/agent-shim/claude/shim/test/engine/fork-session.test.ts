@@ -1,5 +1,5 @@
 import { create } from "@bufbuild/protobuf";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
@@ -8,6 +8,8 @@ import {
   forkSession,
   resolveUpTo,
   type ForkVendorSession,
+  remapForkedCompactBoundaries,
+  repairForkedTranscript,
 } from "../../src/engine/fork-session.js";
 import { createAgentIdentityStore } from "../../src/engine/identity.js";
 import { forkFakeSession } from "../../src/fake/fork.js";
@@ -258,3 +260,139 @@ describe("forkSession", () => {
 function forkRecordsSince(mark: number): ReturnType<typeof logRecordsSince> {
   return logRecordsSince(mark).filter((record) => record.operation === "shim.engine.fork_session");
 }
+
+/** A compacted parent: a summary whose boundary preserves the tail a1 -> u2. */
+function writeCompactedParent(configDir: string): string {
+  const lines = [
+    { type: "user", uuid: "u1", parentUuid: null, message: { role: "user", content: "hello" } },
+    { type: "assistant", uuid: "a1", parentUuid: "u1", message: { role: "assistant", content: [{ type: "text", text: "hi" }] } },
+    {
+      type: "system", subtype: "compact_boundary", uuid: "b1", parentUuid: null, logicalParentUuid: "a1",
+      compactMetadata: { trigger: "manual", preservedSegment: { headUuid: "a1", anchorUuid: "s1", tailUuid: "u2" }, preservedMessages: ["a1", "u2"] },
+    },
+    { type: "user", uuid: "s1", parentUuid: "b1", isCompactSummary: true, message: { role: "user", content: "summary" } },
+    { type: "user", uuid: "u2", parentUuid: "s1", message: { role: "user", content: "again" } },
+  ];
+  return writeTranscript(configDir, PARENT_DIR, PARENT_ID, lines);
+}
+
+/** A forked boundary line and the records it was forked with. */
+function forkedText(metadata: unknown): string {
+  return [
+    JSON.stringify({ type: "user", uuid: "f-a1", forkedFrom: { sessionId: PARENT_ID, messageUuid: "a1" } }),
+    JSON.stringify({ type: "user", uuid: "f-u2", forkedFrom: { sessionId: PARENT_ID, messageUuid: "u2" } }),
+    JSON.stringify({ type: "system", subtype: "compact_boundary", uuid: "f-b1", compactMetadata: metadata, forkedFrom: { sessionId: PARENT_ID, messageUuid: "b1" } }),
+    "",
+  ].join("\n");
+}
+
+describe("remapForkedCompactBoundaries", () => {
+  it("points a boundary's preserved segment and messages at the forked records", () => {
+    // Arrange
+    const text = forkedText({ preservedSegment: { headUuid: "a1", tailUuid: "u2" }, preservedMessages: ["a1", "u2"] });
+
+    // Act
+    const out = remapForkedCompactBoundaries(text);
+
+    // Assert
+    const boundary = JSON.parse(out.text.split("\n")[2]) as { compactMetadata: unknown };
+    expect(boundary.compactMetadata).toEqual({ preservedSegment: { headUuid: "f-a1", tailUuid: "f-u2" }, preservedMessages: ["f-a1", "f-u2"] });
+    expect(out.remapped).toBe(4);
+  });
+
+  it("leaves every other line's bytes as they were", () => {
+    // Arrange
+    const text = forkedText({ preservedSegment: { headUuid: "a1" } });
+
+    // Act
+    const out = remapForkedCompactBoundaries(text);
+
+    // Assert
+    expect(out.text.split("\n").slice(0, 2)).toEqual(text.split("\n").slice(0, 2));
+    expect(out.text.endsWith("\n")).toBe(true);
+  });
+
+  it("leaves a reference that names no forked record", () => {
+    // Arrange
+    const text = forkedText({ preservedSegment: { headUuid: "gone" }, trigger: "auto" });
+
+    // Act
+    const out = remapForkedCompactBoundaries(text);
+
+    // Assert
+    expect(out).toEqual({ text, remapped: 0 });
+  });
+
+  it("changes nothing in a transcript with no boundary", () => {
+    // Arrange
+    const text = `${JSON.stringify({ type: "user", uuid: "f-a1", forkedFrom: { sessionId: PARENT_ID, messageUuid: "a1" } })}\n`;
+
+    // Act
+    const out = remapForkedCompactBoundaries(text);
+
+    // Assert
+    expect(out).toEqual({ text, remapped: 0 });
+  });
+
+  it("refuses a transcript line that is not JSON, the vendor's own output gone wrong", () => {
+    // Act / Assert
+    expect(() => remapForkedCompactBoundaries("{not json\n")).toThrow();
+  });
+});
+
+describe("repairForkedTranscript", () => {
+  it("rewrites the file with the boundary remapped", () => {
+    // Arrange
+    const file = writeTranscript(testTempDir("fork-repair-"), CHILD_DIR, "forked", []);
+    writeFileSync(file, forkedText({ preservedSegment: { headUuid: "a1" } }));
+
+    // Act
+    const remapped = repairForkedTranscript(file);
+
+    // Assert
+    expect(remapped).toBe(1);
+    expect(readFileSync(file, "utf8")).toContain('"headUuid":"f-a1"');
+    expect(existsSync(`${file}.repairing`)).toBe(false);
+  });
+
+  it("leaves the file untouched when nothing needs remapping", () => {
+    // Arrange
+    const file = writeTranscript(testTempDir("fork-repair-"), CHILD_DIR, "forked", []);
+    const text = forkedText({ trigger: "auto" });
+    writeFileSync(file, text);
+
+    // Act
+    const remapped = repairForkedTranscript(file);
+
+    // Assert
+    expect(remapped).toBe(0);
+    expect(readFileSync(file, "utf8")).toBe(text);
+  });
+});
+
+describe("forkSession over a compacted parent", () => {
+  it("files a fork whose boundary names the forked records, and records how many it remapped", async () => {
+    // Arrange
+    const { configDir, stateDir } = await fixture();
+    writeCompactedParent(configDir);
+    const fork: ForkVendorSession = (spec) => Promise.resolve(forkFakeSession(configDir, spec, sequentialIds()));
+    const mark = logSinkMark();
+
+    // Act
+    const outcome = await forkSession(
+      { configDir, stateDir, cwd: CHILD_DIR, forkVendorSession: fork },
+      { parentVendorSessionId: PARENT_ID, parentWorkspaceDir: PARENT_DIR, point: whole() },
+    );
+
+    // Assert: every reference names a record of the fork, none the parent's.
+    if (outcome.kind !== "forked") throw new Error(`outcome = ${outcome.kind}`);
+    const records = readFileSync(transcriptPath(configDir, CHILD_DIR, outcome.vendorSessionId), "utf8")
+      .split("\n").filter((line) => line !== "").map((line) => JSON.parse(line) as Record<string, unknown>);
+    const uuids = new Set(records.map((record) => record["uuid"]));
+    const boundary = records.find((record) => record["subtype"] === "compact_boundary") as { compactMetadata: { preservedSegment: Record<string, string>; preservedMessages: string[] } };
+    for (const reference of [...Object.values(boundary.compactMetadata.preservedSegment), ...boundary.compactMetadata.preservedMessages]) {
+      expect(uuids.has(reference)).toBe(true);
+    }
+    expect(forkRecordsSince(mark)).toMatchObject([{ level: "info", context: { boundary_references_remapped: 5 } }]);
+  });
+});
