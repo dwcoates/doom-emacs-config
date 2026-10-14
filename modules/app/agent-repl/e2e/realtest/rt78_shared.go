@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -23,8 +24,8 @@ import (
 // What is left over is three things it has no reason to hold, all read-only:
 //
 //   - Columns of `wsm.db` no realtest before these two asserted on:
-//     `ported_prompts` (a fork's inherited conversation), `turns` (a
-//     workspace's own prompts), `sessions` (the vendor identity, and the pid
+//     `fork_lineage` (where a fork's inherited conversation is read from),
+//     `turns` (a workspace's own prompts), `sessions` (the vendor identity, and the pid
 //     and terminal a kill leaves behind), and `workspaces.parent_id` and
 //     `priority`. `ReadWorkspaces` reads four columns and is right not to grow.
 //   - The orphan scan a kill has to pass: whether a shim is still listening for
@@ -66,7 +67,7 @@ func rt78Quote(value string) string {
 // a plain child (`SPC TAB c`, its own command since the 2026-09-12 ruling and
 // no longer a prefix argument on the plain create) sets it identically,
 // because the daemon's CreateSpec makes ForkFrom imply Parent. What separates
-// a fork from a plain child is `ported_prompts`.
+// a fork from a plain child is its `fork_lineage` row.
 //
 // `priority` is the stored enum ordinal (0 = P0.5, 1 = P1, 2 = P2, 3 = P3),
 // carried as text so UNSET is a value this reader can report rather than a
@@ -101,33 +102,63 @@ func rt78ReadFacts(ctx context.Context, dbPath string) (map[string]rt78Facts, er
 	return out, nil
 }
 
-// rt78Prompt is one row of a conversation, from either `ported_prompts` or
-// `turns`. The two tables carry the same three facts these tests compare on
-// (which turn, what was said, where it came from), so one shape reads both.
+// rt78Prompt is one prompt of a conversation, read off `turns`: which turn,
+// when it started, what was said, and where it came from.
 type rt78Prompt struct {
-	Turn    string
-	Ordinal string
-	Text    string
-	Origin  string
+	Turn string
+	// StartedAt is when the turn opened, as `turns.started_at` stores it
+	// (epoch nanoseconds, as text).
+	StartedAt string
+	Text      string
+	Origin    string
 }
 
-// rt78PortedPrompts is a workspace's INHERITED conversation: the rows it
-// carried over from its parent when it was forked, oldest first.
+// rt78Lineage is a workspace's fork lineage: the parent it was forked from,
+// the parent's book its inherited past is read from, the instant that bounds
+// it, and the parent's turns that were open at the fork. Found is false for a
+// workspace that is no fork.
 //
-// THIS IS A FORK'S EVIDENCE, and it is the daemon's own expression of it. A
-// workspace has rows here if and only if it was forked: `PutPortedPrompts` is
-// written from exactly one place, the fork path
-// (daemon/internal/workspace/forkconversation.go), in one all-or-nothing
-// transaction, because "half a ported conversation is a feed that shows some
-// of the parent's questions and not others".
-func rt78PortedPrompts(ctx context.Context, dbPath, id string) ([]rt78Prompt, error) {
+// THIS IS A FORK'S EVIDENCE, and it is the daemon's own expression of it: the
+// row is written in one transaction with the fork's own vendor session id, by
+// the bring-up that made the fork (daemon/internal/workspace/forking.go,
+// `wsm.ResolveFork`), and nothing else writes it.
+type rt78Lineage struct {
+	Found       bool
+	Parent      string
+	Book        string
+	ThroughMs   int64
+	Uninherited map[string]bool
+}
+
+// rt78ReadLineage reads one workspace's fork lineage.
+func rt78ReadLineage(ctx context.Context, dbPath, id string) (rt78Lineage, error) {
 	rows, err := rt78Query(ctx, dbPath, fmt.Sprintf(
-		`SELECT turn_id, ordinal, text, origin FROM ported_prompts
-		 WHERE workspace_id = %s ORDER BY ordinal, turn_id;`, rt78Quote(id)))
+		`SELECT parent_workspace_id, parent_book, through_ms FROM fork_lineage WHERE workspace_id = %s;`, rt78Quote(id)))
 	if err != nil {
-		return nil, err
+		return rt78Lineage{}, err
 	}
-	return rt78ScanPrompts(rows, "ported_prompts", dbPath)
+	if len(rows) == 0 {
+		return rt78Lineage{}, nil
+	}
+	if len(rows) != 1 || len(rows[0]) != 3 {
+		return rt78Lineage{}, fmt.Errorf("`fork_lineage` in %s holds %d row(s) for %s, not one of 3 fields: %q", dbPath, len(rows), id, rows)
+	}
+	through, err := strconv.ParseInt(rows[0][2], 10, 64)
+	if err != nil {
+		return rt78Lineage{}, fmt.Errorf("`fork_lineage.through_ms` for %s in %s is %q: %w", id, dbPath, rows[0][2], err)
+	}
+	open, err := rt78Query(ctx, dbPath, fmt.Sprintf(
+		`SELECT turn_id FROM fork_uninherited_turns WHERE workspace_id = %s;`, rt78Quote(id)))
+	if err != nil {
+		return rt78Lineage{}, err
+	}
+	uninherited := make(map[string]bool, len(open))
+	for _, fields := range open {
+		if len(fields) == 1 {
+			uninherited[fields[0]] = true
+		}
+	}
+	return rt78Lineage{Found: true, Parent: rows[0][0], Book: rows[0][1], ThroughMs: through, Uninherited: uninherited}, nil
 }
 
 // rt78Turns is a workspace's OWN prompts, in the order the daemon's
@@ -149,29 +180,40 @@ func rt78ScanPrompts(rows [][]string, table, dbPath string) ([]rt78Prompt, error
 			return nil, fmt.Errorf("row %d of `%s` in %s has %d fields, not 4: %q",
 				i+1, table, dbPath, len(fields), strings.Join(fields, "|"))
 		}
-		out = append(out, rt78Prompt{Turn: fields[0], Ordinal: fields[1], Text: fields[2], Origin: fields[3]})
+		out = append(out, rt78Prompt{Turn: fields[0], StartedAt: fields[1], Text: fields[2], Origin: fields[3]})
 	}
 	return out, nil
 }
 
-// rt78Conversation is what A FORK OF THIS WORKSPACE would inherit: everything
-// the workspace itself inherited, followed by every prompt of its own.
-//
-// It is the Go reading of the daemon's own `ConversationPrompts`
-// (daemon/internal/wsm/portedprompts.go), spelled out rather than approximated
-// by reading `turns` alone, for the reason that function gives: a fork of a
-// fork must carry the grandparent's questions too, and reading only `turns`
-// truncates the conversation at each generation.
+// rt78Conversation is a workspace's whole conversation as its feed reads it,
+// oldest first: what it inherited through its fork lineage — each ancestor's
+// turns that started by the fork's bound and were not open at the fork — then
+// its own turns. It is the Go reading of the daemon's
+// `wsm.RecentConversationPrompts` with no limit.
 func rt78Conversation(ctx context.Context, dbPath, id string) ([]rt78Prompt, error) {
-	inherited, err := rt78PortedPrompts(ctx, dbPath, id)
-	if err != nil {
-		return nil, err
-	}
 	own, err := rt78Turns(ctx, dbPath, id)
 	if err != nil {
 		return nil, err
 	}
-	return append(inherited, own...), nil
+	lineage, err := rt78ReadLineage(ctx, dbPath, id)
+	if err != nil || !lineage.Found {
+		return own, err
+	}
+	inherited, err := rt78Conversation(ctx, dbPath, lineage.Parent)
+	if err != nil {
+		return nil, err
+	}
+	var kept []rt78Prompt
+	for _, p := range inherited {
+		startedNs, err := strconv.ParseInt(p.StartedAt, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("turn %s started at %q: %w", p.Turn, p.StartedAt, err)
+		}
+		if startedNs/1_000_000 <= lineage.ThroughMs && !lineage.Uninherited[p.Turn] {
+			kept = append(kept, p)
+		}
+	}
+	return append(kept, own...), nil
 }
 
 // rt78PromptTexts is a conversation reduced to what was said, in order: the

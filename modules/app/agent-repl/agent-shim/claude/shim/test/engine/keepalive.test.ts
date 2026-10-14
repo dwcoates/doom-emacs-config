@@ -6,9 +6,11 @@
  * context whose last several exchanges are keep-alives — the model reads them,
  * the user paid for them, and nothing on any surface says they are there.
  */
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { logRecordsSince, logSinkMark } from "../log-records.js";
 import {
+  conversationRecordUuid,
   isKeepalivePrompt,
   KEEPALIVE_INTERVAL_MS,
   KEEPALIVE_PROMPT_MARKER,
@@ -1465,5 +1467,38 @@ describe("the keep-alive turn scope", () => {
       "info",
       "a vendor turn the keep-alive did not start ended; the keep-alive's own turn stays open",
     ]);
+  });
+});
+
+describe("conversationRecordUuid", () => {
+  it.each([
+    { name: "a main-thread assistant record", message: { type: "assistant", uuid: "a1", parent_tool_use_id: null }, expected: "a1" },
+    { name: "a main-thread user record", message: { type: "user", uuid: "u1", parent_tool_use_id: null }, expected: "u1" },
+    { name: "a subagent's record", message: { type: "assistant", uuid: "a1", parent_tool_use_id: "toolu_1" }, expected: undefined },
+    { name: "a result", message: { type: "result", uuid: "r1" }, expected: undefined },
+    { name: "a record with an empty uuid", message: { type: "assistant", uuid: "", parent_tool_use_id: null }, expected: undefined },
+    { name: "a record with no uuid", message: { type: "user", parent_tool_use_id: null }, expected: undefined },
+  ])("answers $name as $expected", ({ message, expected }) => {
+    // Act
+    const uuid = conversationRecordUuid(message as never);
+
+    // Assert
+    expect(uuid).toBe(expected);
+  });
+
+  it("is the one test session.ts books records by: every rewind booking goes through the shared helpers", () => {
+    // Arrange
+    const source = readFileSync(new URL("../../src/engine/session.ts", import.meta.url), "utf8");
+
+    // Act
+    const noteRecordSites = source.match(/rewind\.noteRecord\(/g) ?? [];
+    const noteSendSites = source.match(/rewind\.noteSend\(/g) ?? [];
+
+    // Assert: one call each, inside noteConversationRecord and noteSendRecord,
+    // so the rewind and the fork point can never count different records.
+    expect(noteRecordSites).toHaveLength(1);
+    expect(noteSendSites).toHaveLength(1);
+    expect(source).toMatch(/function noteConversationRecord\([^)]*\): void \{\n\s+rewind\.noteRecord\(/);
+    expect(source).toMatch(/function noteSendRecord\([^)]*\): void \{\n\s+rewind\.noteSend\(/);
   });
 });

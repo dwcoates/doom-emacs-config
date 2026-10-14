@@ -153,6 +153,8 @@ const (
 	RPCDetachForeground         = "DetachForeground"
 	RPCReadHistory              = "ReadHistory"
 	RPCReadTranscripts          = "ReadTranscripts"
+	RPCGetForkPoint             = "GetForkPoint"
+	RPCForkSession              = "ForkSession"
 )
 
 // Stream families drop_stream severs.
@@ -589,6 +591,21 @@ func (s *ShimControl) PushAgentFramePlaced(agent string, atMs int64, f *conversa
 	s.send(controlCommand{Op: "push_agent_frame", Agent: agent, PlaceMs: atMs, Payload: encode(s.t, f)})
 }
 
+// FileAgentFrame files one agent frame of TURN into AGENT's book on the fake
+// store WITHOUT delivering it on any stream: a row of a book this session
+// never watches, such as a fork's parent's, which the fork reads by page.
+func (s *ShimControl) FileAgentFrame(agent, turn string, f *conversationv1.AgentFrame) {
+	s.t.Helper()
+	s.send(controlCommand{Op: "file_agent_frame", Agent: agent, Turn: turn, Payload: encode(s.t, f)})
+}
+
+// FileUserPrompt files one delivered prompt into AGENT's book on the fake
+// store WITHOUT delivering it on any stream (see FileAgentFrame).
+func (s *ShimControl) FileUserPrompt(agent string, p *conversationv1.AgentPrompt) {
+	s.t.Helper()
+	s.send(controlCommand{Op: "file_user_prompt", Agent: agent, Payload: encode(s.t, p)})
+}
+
 // PushUserPrompt delivers one DELIVERED PROMPT on the matching WatchAgent
 // stream — the history entry the vendor lays down when a turn's prompt is
 // delivered, and the only path by which a prompt's own content blocks reach
@@ -652,6 +669,24 @@ func (s *ShimControl) ExpectStartSession() *shimv1.StartSessionRequest {
 	s.t.Helper()
 	msg := &shimv1.StartSessionRequest{}
 	s.expect(RPCStartSession, msg)
+	return msg
+}
+
+// ExpectGetForkPoint pops the next GetForkPoint call: a PARENT's shim asked
+// where a fork of its conversation ends.
+func (s *ShimControl) ExpectGetForkPoint() *shimv1.GetForkPointRequest {
+	s.t.Helper()
+	msg := &shimv1.GetForkPointRequest{}
+	s.expect(RPCGetForkPoint, msg)
+	return msg
+}
+
+// ExpectForkSession pops the next ForkSession call: a CHILD's shim asked to
+// make the vendor's fork of its parent.
+func (s *ShimControl) ExpectForkSession() *shimv1.ForkSessionRequest {
+	s.t.Helper()
+	msg := &shimv1.ForkSessionRequest{}
+	s.expect(RPCForkSession, msg)
 	return msg
 }
 

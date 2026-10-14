@@ -1,0 +1,64 @@
+// fork_point.proto — where a fork of a conversation ends: the vocabulary
+// GetForkPoint answers and ForkSession takes.
+//
+// WHY THE PARENT'S SHIM NAMES IT. A fork carries only FINISHED turns of the
+// parent's conversation, so a fork taken while the parent is mid-turn ends just
+// before that turn began. Only the shim that drives the parent has seen every
+// message of every turn in order — including a turn the vendor started on its
+// own — so only it can name the transcript record a finished turn ended on
+// without racing the vendor. The daemon relays the point to the CHILD's shim
+// unchanged; it never reads, builds or compares a record token.
+
+syntax = "proto3";
+
+package shim.v1;
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// How much of the parent's transcript a fork carries. THE ARM IS THE EXTENT.
+message ForkPoint {
+  // Exactly one arm is set; a point with none is malformed and refused.
+  oneof extent {
+    // Every record of the parent's transcript.
+    ForkPointWhole whole = 1;
+    // Every record up to and including one record.
+    ForkPointThroughRecord through_record = 2;
+    // Every record before one record, which is left out with everything after
+    // it.
+    ForkPointBeforeRecord before_record = 3;
+  }
+}
+
+// The whole transcript. The daemon states it itself for a parent with no
+// running session — nothing drives such a conversation, so no turn of it can
+// be in flight — and the parent's shim states it when it is idle and has
+// concluded no turn this process can name.
+message ForkPointWhole {}
+
+// Through the final record of the parent's newest concluded turn, inclusive.
+// The parent's shim states it whenever it has concluded a turn whose last
+// record it saw: whatever happened in the parent after that record — a turn in
+// flight, a turn the vendor started on its own — lies outside the fork by
+// construction.
+message ForkPointThroughRecord {
+  // The record the fork ends on.
+  ForkRecordToken record = 1;
+}
+
+// Before the record that opened the parent's turn in flight, exclusive. The
+// parent's shim states it when a turn is in flight and no earlier turn's final
+// record is known to it (a shim that has concluded nothing since it started).
+// The child's shim resolves it to the record just before that opener in the
+// parent's transcript.
+message ForkPointBeforeRecord {
+  // The record that opened the turn in flight.
+  ForkRecordToken record = 1;
+}
+
+// One record of the parent's vendor transcript, minted by the parent's shim and
+// echoed verbatim to the child's. Opaque to the daemon: it is relayed, never
+// parsed, constructed or compared.
+message ForkRecordToken {
+  // The opaque value.
+  string value = 1;
+}

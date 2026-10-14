@@ -1,276 +1,125 @@
 package feed
 
 import (
-	"context"
-	"sync"
-
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 )
 
-// A FORK'S INHERITED PAST.
+// A FORK'S INHERITED PAST IS ITS PARENT'S BOOK (docs/protobuf-design/
+// fork-lineage.md).
 //
-// A fork's vendor session resumes a COPY of its parent's transcript, and the
-// file plane ingests that copy into the fork's own book WHILE THE FORK IS
-// ALREADY RUNNING: the conversation's past reaches the fork's watch as live
-// entries, oldest first, for as long as the ingestion takes, interleaved with
-// the fork's own first turn — and on every later replay it sits in the book
-// AROUND the fork's first prompt, because the book orders by first insert.
-// Drawn by arrival, the past sorted below the fork's own prompt, its prompts
-// became the turn in flight, its context cuts bounded the fork's own rows (the
-// fork's first prompt was withheld and its responses scattered through the
-// replay), and every row above each later cut was pushed and then truncated
-// (ship-gns, 2026-09-27).
+// A forked workspace's own book holds only what the fork itself said: the file
+// plane never stores the records the vendor's fork copied from the parent. The
+// conversation it inherited is read from the PARENT's book, bounded to the fork
+// point, and — when the parent is itself a fork — from the grandparent's below
+// that, one segment per generation. The root feed's page walk reads the fork's
+// own book to its start and then each segment in turn (book.go).
 //
-// WHAT THE FORK ITSELF PRODUCED IS KNOWN EXACTLY. Every turn the daemon opens
-// is recorded against its workspace before it is delivered (wsm turns), and
-// every entry a producing session writes within an open turn carries that
-// turn's stamp — the file plane's copy of a turn the stream plane stamped keeps
-// the stream plane's stamp. So ON A FORK, a main-agent entry stamped with a
-// turn the workspace recorded is the fork's own, and every other main-agent
-// entry — stamped with a turn the fork never opened, or unstamped — is the
-// inherited past. A subagent's entries ride its own watch and are never the
-// copied transcript, so they are never classified.
+// INHERITED ROWS ARE DRAWN BY THE SAME FUNCTIONS AS EVERY OTHER ROW, so they
+// read exactly as the parent's feed draws them (the owner's principle): their
+// final answers, caps and turn endings come from the parent's own prompts and
+// terminals, which are on those pages. Two things alone mark them:
 //
-// THE INHERITED PAST RIDES ITS OWN PLANE (planeInherited): below everything the
-// fork has of its own, whichever plane that arrived on, and in the order the
-// copy arrives, which is the copied transcript's own order. The delivery bound
-// needs no special case: a cut in the inherited plane withholds the inherited
-// rows drawn before it, and by boundHides' plane rule it can never hide a row
-// of a later plane — nothing the fork produced.
-//
-// IT IS DRAWN IN A STANCE OF ITS OWN (inheritedStance), the way a history page
-// is: an inherited prompt never becomes the turn in flight, an inherited
-// terminal never ends the fork's turn, and the fork's own positional
-// attribution is untouched by it.
-//
-// IT IS NEVER PUSHED LIVE (withheldFromPush). A tail appends by arrival and an
-// inherited row sorts above the fork's own rows: appended, it would land below
-// them where nothing retracts it, and an inherited cut appended after the
-// fork's own prompt would truncate that prompt off the reader's screen. The
-// inherited past is served by pages, where the order is the resolver's.
+//   - They are drawn in the inherited PLANE, which orders them below everything
+//     the fork has of its own and keeps them off the live push: pages serve
+//     them, as a reader's "load more" asks for them.
+//   - Their agent is a segment's book rather than the fork's main agent, and it
+//     is a ROOT agent all the same: the parent's main agent's rows are the root
+//     feed's rows in the fork too (agentFeed, rootFeedAgent).
 
-// lineage is what this resolver has learned about one workspace's descent: the
-// facts are durable (a workspace is a fork from its creation; a turn is or is
-// not its own forever), so an answer, once read, is never read again.
-type lineage struct {
-	// known says the fork fact has been read.
-	known bool
-	// fork says the workspace carries a ported conversation, which is what a
-	// fork is.
-	fork bool
-	// owned answers, for each turn asked about, whether the workspace recorded
-	// it. A turn absent from the map has not been asked about, or its read
-	// failed and will be asked again.
-	owned map[ids.TurnID]bool
-	// failures are read failures not yet recorded: the reads run outside the
-	// resolver's mutex, and the workspace's logger is resolved under it.
-	failures []lineageFailure
+// LineageSegment is one generation of a fork's inherited past: a book, read up
+// to a bound, without the turns that were open when the fork was taken.
+type LineageSegment struct {
+	// Workspace is the workspace whose turns the book's entries are: the
+	// parent, whose durable turn records (closes) describe them.
+	Workspace ids.WorkspaceID
+	// Book is the agent the parent's history is filed under.
+	Book *conversationv1.AgentId
+	// ThroughMs is the inclusive upper bound, epoch ms, on the places of the
+	// book's inherited entries.
+	ThroughMs int64
+	// Uninherited are the parent's turns open at the fork: an entry of one of
+	// them is not the fork's, wherever it is placed.
+	Uninherited map[ids.TurnID]bool
 }
 
-// lineageFailure is one read the lineage could not answer.
-type lineageFailure struct {
-	operation string
-	message   string
-	context   dlog.Context
+// NoteLineage tells the resolver where WS's inherited past is read from,
+// nearest generation first; nil for a workspace that is no fork. The fleet
+// states it at every bring-up, before a reader can page past the workspace's
+// own book.
+func (r *resolver) NoteLineage(ws ids.WorkspaceID, segments []LineageSegment) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.state(ws)
+	s.lineage = segments
+	s.inheritedAgents = make(map[string]bool, len(segments))
+	books := make([]string, 0, len(segments))
+	for _, segment := range segments {
+		s.inheritedAgents[segment.Book.GetValue()] = true
+		books = append(books, segment.Book.GetValue())
+	}
+	r.logger(ws).Info("daemon.feed.lineage",
+		"the workspace's inherited past is read from these books below its own",
+		dlog.Context{"generations": len(segments), "books": books})
 }
 
-// lineages is the resolver's lineage cache, under a mutex of its own: it is
-// read and written OUTSIDE the resolver's mutex, where the database reads that
-// fill it belong.
-type lineages struct {
-	mu sync.Mutex
-	by map[ids.WorkspaceID]*lineage
+// rootFeedAgent reports whether ID's rows are the root feed's: the session's
+// main agent, or the book of a generation the workspace inherited from.
+func (s *wsState) rootFeedAgent(id string) bool {
+	return id != "" && (id == s.mainAgent || s.inheritedAgents[id])
 }
 
-// entry answers a workspace's lineage record, creating it on first sight.
-// Called with mu held.
-func (l *lineages) entry(ws ids.WorkspaceID) *lineage {
-	if l.by == nil {
-		l.by = map[ids.WorkspaceID]*lineage{}
+// agentFeed is the feed an agent's rows go on: the root for the main agent and
+// for every book the workspace inherited from, the agent's own sub-feed
+// otherwise (feedid.AgentFeed).
+func (s *wsState) agentFeed(id string) (feedid.Feed, error) {
+	if id != "" && s.inheritedAgents[id] {
+		return feedid.Feed{Root: true}, nil
 	}
-	got, ok := l.by[ws]
-	if !ok {
-		got = &lineage{owned: map[ids.TurnID]bool{}}
-		l.by[ws] = got
-	}
-	return got
+	return feedid.AgentFeed(id, s.mainAgent)
 }
 
-// learnLineage reads whatever the entries about to be drawn need to be
-// classified and the cache does not hold yet: the fork fact, once, and — on a
-// fork — the ownership of every turn not yet asked about. It runs BEFORE the
-// resolver's mutex is taken: no read of a database belongs inside it.
-//
-// A FAILED READ IS RECORDED, NEVER SWALLOWED (recordLineageFailures), and it is
-// not cached: the entry is drawn as the fork's own — what the feed did before
-// it could tell the two apart — and the next entry asks again.
-func (r *resolver) learnLineage(ws ids.WorkspaceID, turns ...ids.TurnID) {
-	r.lineage.mu.Lock()
-	l := r.lineage.entry(ws)
-	needFork := !l.known
-	r.lineage.mu.Unlock()
-
-	if needFork {
-		r.learnFork(ws)
+// entryTurn is the turn an entry belongs to: a prompt's own, or the entry's
+// stamp ("" when it carries none).
+func entryTurn(at *conversationv1.HistoryEntryAt) ids.TurnID {
+	if prompt := at.GetEntry().GetUserPrompt(); prompt != nil {
+		return ids.TurnID(prompt.GetId().GetValue())
 	}
+	return ids.TurnID(at.GetTurn().GetValue())
+}
 
-	r.lineage.mu.Lock()
-	l = r.lineage.entry(ws)
-	if !l.fork || r.deps.OwnedTurns == nil {
-		r.lineage.mu.Unlock()
-		return
+// inheritedEntries answers PAGE without the entries, and the turn heads, of
+// turns the fork did not inherit, and how many entries and heads it left out.
+// The page's boundary (`more`, `floor`) is kept as the store served it, so the
+// walk continues from the store's own pointer whatever was left out.
+func inheritedEntries(page *conversationv1.HistoryPage, uninherited map[ids.TurnID]bool) (*conversationv1.HistoryPage, int) {
+	if len(uninherited) == 0 {
+		return page, 0
 	}
-	var unasked []ids.TurnID
-	seen := map[ids.TurnID]bool{}
-	for _, turn := range turns {
-		if _, asked := l.owned[turn]; turn == "" || asked || seen[turn] {
-			continue
+	kept := make([]*conversationv1.HistoryEntryAt, 0, len(page.GetEntries()))
+	for _, at := range page.GetEntries() {
+		if !uninherited[entryTurn(at)] {
+			kept = append(kept, at)
 		}
-		seen[turn] = true
-		unasked = append(unasked, turn)
 	}
-	r.lineage.mu.Unlock()
-	if len(unasked) == 0 {
-		return
+	heads := make([]*conversationv1.HistoryTurnHead, 0, len(page.GetHeads()))
+	for _, head := range page.GetHeads() {
+		if !uninherited[entryTurn(head.GetEntry())] {
+			heads = append(heads, head)
+		}
 	}
-
-	owned, err := r.deps.OwnedTurns(context.Background(), ws, unasked)
-	r.lineage.mu.Lock()
-	defer r.lineage.mu.Unlock()
-	l = r.lineage.entry(ws)
-	if err != nil {
-		l.failures = append(l.failures, lineageFailure{
-			operation: "daemon.feed.turn_ownership_unreadable",
-			message:   "which turns a fork opened itself could not be read; their entries are drawn as the fork's own",
-			context:   dlog.Context{"turns": len(unasked), "cause": err.Error()},
-		})
-		return
+	dropped := len(page.GetEntries()) - len(kept) + len(page.GetHeads()) - len(heads)
+	if dropped == 0 {
+		return page, 0
 	}
-	for _, turn := range unasked {
-		l.owned[turn] = owned[turn]
-	}
+	return &conversationv1.HistoryPage{Entries: kept, Heads: heads, Boundary: page.GetBoundary()}, dropped
 }
 
-// learnFork reads whether a workspace is a fork: it carries a ported
-// conversation exactly when it was forked from one.
-func (r *resolver) learnFork(ws ids.WorkspaceID) {
-	if r.deps.PortedPrompts == nil {
-		r.lineage.mu.Lock()
-		l := r.lineage.entry(ws)
-		l.known, l.fork = true, false
-		r.lineage.mu.Unlock()
-		return
-	}
-	ported, err := r.deps.PortedPrompts(context.Background(), ws)
-	r.lineage.mu.Lock()
-	defer r.lineage.mu.Unlock()
-	l := r.lineage.entry(ws)
-	if err != nil {
-		l.failures = append(l.failures, lineageFailure{
-			operation: "daemon.feed.fork_unreadable",
-			message:   "whether the workspace is a fork could not be read; its entries are drawn as its own",
-			context:   dlog.Context{"cause": err.Error()},
-		})
-		return
-	}
-	l.known, l.fork = true, len(ported) > 0
-}
-
-// ownTurn records a turn the daemon just opened as the workspace's own, so an
-// entry of it is never asked about.
-func (r *resolver) ownTurn(ws ids.WorkspaceID, turn ids.TurnID) {
-	r.lineage.mu.Lock()
-	defer r.lineage.mu.Unlock()
-	r.lineage.entry(ws).owned[turn] = true
-}
-
-// recordLineageFailures writes the lineage reads that failed since the last
-// call to the workspace's own sink. Called with the resolver's mutex held.
-func (r *resolver) recordLineageFailures(s *wsState) {
-	r.lineage.mu.Lock()
-	l := r.lineage.entry(s.id)
-	failures := l.failures
-	l.failures = nil
-	r.lineage.mu.Unlock()
-	for _, failure := range failures {
-		r.logger(s.id).Error(failure.operation, failure.message, failure.context)
-	}
-}
-
-// inherits reports whether an entry of AGENT stamped with TURN ("" when
-// unstamped) is the fork's inherited past. Called with the resolver's mutex
-// held, after learnLineage.
-func (r *resolver) inherits(s *wsState, agent *conversationv1.AgentId, turn ids.TurnID) bool {
-	r.recordLineageFailures(s)
-	if s.mainAgent != "" && agent.GetValue() != s.mainAgent {
-		return false
-	}
-	r.lineage.mu.Lock()
-	defer r.lineage.mu.Unlock()
-	l := r.lineage.entry(s.id)
-	if !l.fork || r.deps.OwnedTurns == nil {
-		return false
-	}
-	if turn == "" {
-		return true
-	}
-	owned, asked := l.owned[turn]
-	return asked && !owned
-}
-
-// inheritedStance is the attribution the inherited past is drawn under,
-// carried from one inherited entry to the next the way a page's replay stance
-// is carried through its page.
-type inheritedStance struct {
-	turnInFlight      *ids.TurnID
-	turnStamp         *ids.TurnID
-	replayTurn        *ids.TurnID
-	replayPromptDrawn bool
-}
-
-// drawInherited draws one inherited entry in the inherited plane, under the
-// inherited stance, and restores everything it displaced — the plane and the
-// fork's own attribution — afterwards.
-func (r *resolver) drawInherited(s *wsState, draw func()) {
-	plane := s.plane
-	own := inheritedStance{
-		turnInFlight:      s.turnInFlight,
-		turnStamp:         s.turnStamp,
-		replayTurn:        s.replayTurn,
-		replayPromptDrawn: s.replayPromptDrawn,
-	}
-	atFloor, closes := s.replayAtFloor, s.replayCloses
-
-	s.plane = planeInherited
-	s.turnInFlight = s.inherited.turnInFlight
-	s.turnStamp = s.inherited.turnStamp
-	s.replayTurn = s.inherited.replayTurn
-	s.replayPromptDrawn = s.inherited.replayPromptDrawn
-	// The inherited past reaches no floor this feed can claim, and none of its
-	// turns has a recorded close in THIS workspace.
-	s.replayAtFloor, s.replayCloses = false, nil
-
-	draw()
-
-	s.inherited = inheritedStance{
-		turnInFlight:      s.turnInFlight,
-		turnStamp:         s.turnStamp,
-		replayTurn:        s.replayTurn,
-		replayPromptDrawn: s.replayPromptDrawn,
-	}
-	s.plane = plane
-	s.turnInFlight = own.turnInFlight
-	s.turnStamp = own.turnStamp
-	s.replayTurn = own.replayTurn
-	s.replayPromptDrawn = own.replayPromptDrawn
-	s.replayAtFloor, s.replayCloses = atFloor, closes
-}
-
-// entryTurns answers every turn a page's entries name — each entry's stamp and
-// each prompt's own turn — for learnLineage.
+// entryTurns names every turn a page's entries belong to, for the durable
+// records read before the page is drawn.
 func entryTurns(page *conversationv1.HistoryPage) []ids.TurnID {
 	var out []ids.TurnID
 	for _, at := range page.GetEntries() {
@@ -282,26 +131,4 @@ func entryTurns(page *conversationv1.HistoryPage) []ids.TurnID {
 		}
 	}
 	return out
-}
-
-// entryClass answers the agent and turn an entry is classified by: the
-// recipient and own turn of a prompt, the frame's own agent and stamp, the
-// recipient and stamp of a peer message.
-func entryClass(at *conversationv1.HistoryEntryAt, pageAgent *conversationv1.AgentId) (*conversationv1.AgentId, ids.TurnID) {
-	entry := at.GetEntry()
-	stamp := ids.TurnID(at.GetTurn().GetValue())
-	switch {
-	case entry.GetUserPrompt() != nil:
-		prompt := entry.GetUserPrompt()
-		agent := prompt.GetAgent()
-		if agent.GetValue() == "" {
-			agent = pageAgent
-		}
-		return agent, ids.TurnID(prompt.GetId().GetValue())
-	case entry.GetAgentFrame() != nil:
-		return entry.GetAgentFrame().GetAgentId(), stamp
-	case entry.GetPeerMessage() != nil:
-		return entry.GetPeerMessage().GetAgent(), stamp
-	}
-	return pageAgent, stamp
 }

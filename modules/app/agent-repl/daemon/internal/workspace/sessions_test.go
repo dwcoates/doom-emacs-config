@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"agent-repld/internal/clock"
+	"agent-repld/internal/sourcescan"
 	"context"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -105,8 +107,55 @@ type fakeClient struct {
 	startTurns []*shimv1.StartTurnRequest
 	// historyReads counts ReadHistory calls; history is the answer, a floor
 	// page of nothing when unset.
-	historyReads int
-	history      *shimv1.ReadHistoryResponse
+	historyReads    int
+	history         *shimv1.ReadHistoryResponse
+	historyRequests []*shimv1.ReadHistoryRequest
+
+	// forkPoint and forkPointErr answer GetForkPoint (a whole point when
+	// unset), forkSession and forkSessionErr answer ForkSession (a fork named
+	// "forked-1" of book "book-parent" when unset); the requests are recorded,
+	// and onFork runs at each of the two calls.
+	forkPoint        *shimv1.GetForkPointResponse
+	forkPointErr     error
+	forkPointCalls   int
+	forkSession      *shimv1.ForkSessionResponse
+	forkSessionErr   error
+	forkSessionAsked []*shimv1.ForkSessionRequest
+	onFork           func(verb string)
+}
+
+func (c *fakeClient) GetForkPoint(context.Context, *shimv1.GetForkPointRequest) (*shimv1.GetForkPointResponse, error) {
+	c.forkPointCalls++
+	if c.onFork != nil {
+		c.onFork("GetForkPoint")
+	}
+	if c.forkPointErr != nil {
+		return nil, c.forkPointErr
+	}
+	if c.forkPoint != nil {
+		return c.forkPoint, nil
+	}
+	return &shimv1.GetForkPointResponse{Result: &shimv1.GetForkPointResponse_Success{Success: &shimv1.GetForkPointSuccess{
+		Point:   &shimv1.ForkPoint{Extent: &shimv1.ForkPoint_Whole{Whole: &shimv1.ForkPointWhole{}}},
+		Through: &conversationv1.ConversationThrough{AtMs: 1},
+	}}}, nil
+}
+
+func (c *fakeClient) ForkSession(_ context.Context, req *shimv1.ForkSessionRequest) (*shimv1.ForkSessionResponse, error) {
+	c.forkSessionAsked = append(c.forkSessionAsked, req)
+	if c.onFork != nil {
+		c.onFork("ForkSession")
+	}
+	if c.forkSessionErr != nil {
+		return nil, c.forkSessionErr
+	}
+	if c.forkSession != nil {
+		return c.forkSession, nil
+	}
+	return &shimv1.ForkSessionResponse{Result: &shimv1.ForkSessionResponse_Success{Success: &shimv1.ForkSessionSuccess{
+		VendorSessionId: "forked-1",
+		ParentBook:      &conversationv1.AgentId{Value: "book-parent"},
+	}}}, nil
 }
 
 func (c *fakeClient) StartTurn(_ context.Context, req *shimv1.StartTurnRequest) (*shimv1.StartTurnResponse, error) {
@@ -515,6 +564,8 @@ func vendorRefusal(label *shimv1.StartSessionVendorStartFailed, detail string) *
 }
 
 type fleetFixture struct {
+	// deliveries is the fleet's delivery exclusion, recording each hold.
+	deliveries fakeDeliveries
 	// probeSequence, when set, is answered by the lock probe in order before
 	// probeState; probes counts every probe.
 	probeSequence []sessionlock.State
@@ -766,7 +817,8 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 			fired <- f.now
 			return fired
 		},
-		ShimAlive: func(pid int) bool { return f.shimAlive != nil && f.shimAlive(pid) },
+		ShimAlive:  func(pid int) bool { return f.shimAlive != nil && f.shimAlive(pid) },
+		Deliveries: &f.deliveries,
 		PublishHost: func(ws ids.WorkspaceID) {
 			f.hostPublished = append(f.hostPublished, ws)
 		},
@@ -5042,5 +5094,77 @@ func TestAHeldCountChangeWithNoGatePublishesNoRow(t *testing.T) {
 	// Assert.
 	if len(f.feed.synthesized) != 0 {
 		t.Fatalf("rows = %v, want none with no gate standing", f.feed.synthesized)
+	}
+}
+
+func TestReadRecordedSession(t *testing.T) {
+	cases := []struct {
+		name            string
+		session         *wsm.Session
+		hasConversation bool
+	}{
+		{name: "no session row", hasConversation: false},
+		{name: "a row with no vendor id", session: &wsm.Session{Workspace: "ws-1"}, hasConversation: false},
+		{name: "a row with a vendor id", session: &wsm.Session{Workspace: "ws-1", VendorSessionID: "v-1"}, hasConversation: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			db := newFakeDB()
+			if tc.session != nil {
+				db.sessions["ws-1"] = *tc.session
+			}
+
+			// Act
+			recorded, err := readRecordedSession(context.Background(), db, "ws-1")
+
+			// Assert
+			if err != nil {
+				t.Fatalf("readRecordedSession: %v", err)
+			}
+			if recorded.recorded != (tc.session != nil) {
+				t.Errorf("recorded = %v, want %v", recorded.recorded, tc.session != nil)
+			}
+			if got := recorded.hasConversation(); got != tc.hasConversation {
+				t.Errorf("hasConversation() = %v, want %v", got, tc.hasConversation)
+			}
+		})
+	}
+}
+
+func TestReadRecordedSessionSurfacesTheReadError(t *testing.T) {
+	// Arrange
+	db := newFakeDB()
+	db.sessionErr = errors.New("disk gone")
+
+	// Act
+	recorded, err := readRecordedSession(context.Background(), db, "ws-1")
+
+	// Assert
+	if !errors.Is(err, db.sessionErr) {
+		t.Fatalf("err = %v, want the read's error", err)
+	}
+	if recorded.hasConversation() {
+		t.Error("a failed read answered a conversation")
+	}
+}
+
+// TestHasConversationHasOneStatement fails when a site in the package checks a
+// session row and its vendor id by hand instead of through hasConversation.
+func TestHasConversationHasOneStatement(t *testing.T) {
+	// Arrange
+	handRolled := regexp.MustCompile(`!\w+ \|\| \w+\.VendorSessionID == ""`)
+
+	// Act
+	var found []string
+	for _, file := range sourcescan.Production(t) {
+		if handRolled.Match(file.Source) {
+			found = append(found, file.Name)
+		}
+	}
+
+	// Assert
+	if len(found) != 0 {
+		t.Errorf("hand-rolled conversation checks in %v; use readRecordedSession and hasConversation", found)
 	}
 }

@@ -10,6 +10,9 @@
  */
 export * from "../../../../proto/gen/ts/shim/v1/service_pb.js";
 export * from "../../../../proto/gen/ts/shim/v1/endpoint_detach_foreground_pb.js";
+export * from "../../../../proto/gen/ts/shim/v1/endpoint_fork_session_pb.js";
+export * from "../../../../proto/gen/ts/shim/v1/endpoint_get_fork_point_pb.js";
+export * from "../../../../proto/gen/ts/shim/v1/fork_point_pb.js";
 export * from "../../../../proto/gen/ts/shim/v1/endpoint_get_workflow_pb.js";
 export * from "../../../../proto/gen/ts/shim/v1/endpoint_hibernate_pb.js";
 export * from "../../../../proto/gen/ts/shim/v1/endpoint_kill_session_pb.js";

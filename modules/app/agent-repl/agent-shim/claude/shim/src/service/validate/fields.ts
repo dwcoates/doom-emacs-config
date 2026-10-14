@@ -18,7 +18,7 @@
  * says `start_turn.said.content.blocks[0]` rather than "invalid request".
  */
 import type { ConnectError } from "@connectrpc/connect";
-import { conversationv1 } from "../../proto.js";
+import { conversationv1, type shimv1 } from "../../proto.js";
 import { invalidArgument } from "../failures.js";
 
 /** The refusal every validator raises. Never returned — always thrown. */
@@ -221,3 +221,28 @@ export function validateSessionColdRemediation(
   }
 }
 
+
+/**
+ * `shim.v1.ForkPoint` — exactly one extent, and a cut names a record. The token
+ * is opaque to the daemon, but an empty one is no record at all.
+ */
+export function validateForkPoint(value: shimv1.ForkPoint | undefined, path: string): void {
+  if (value === undefined) throw unsetField(path);
+  switch (value.extent.case) {
+    case "whole":
+      return;
+    case "throughRecord":
+      validateForkRecordToken(value.extent.value.record, `${path}.through_record.record`);
+      return;
+    case "beforeRecord":
+      validateForkRecordToken(value.extent.value.record, `${path}.before_record.record`);
+      return;
+    default:
+      throw unsetOneof(`${path}.extent`);
+  }
+}
+
+function validateForkRecordToken(value: shimv1.ForkRecordToken | undefined, path: string): void {
+  if (value === undefined) throw unsetField(path);
+  if (value.value === "") throw emptyIdentity(`${path}.value`);
+}

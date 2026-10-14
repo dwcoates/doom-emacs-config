@@ -16,13 +16,11 @@ import {
   CACHE_TTL_1H_MS,
   CACHE_TTL_5M_MS,
   COLD_GATE_FLOOR_TOKENS,
-  cwdSlug,
   cacheRequestOf,
   judgeCold,
   readTranscriptFacts,
   sessionCold,
   TRANSCRIPT_OPENING_MAX_CHARS,
-  transcriptPath,
   type TranscriptFacts,
 } from "../../src/engine/cold.js";
 
@@ -49,26 +47,6 @@ function assistant(overrides: Record<string, unknown> = {}): Record<string, unkn
     ...overrides,
   };
 }
-
-describe("the project-directory slug", () => {
-  it("replaces every byte outside [A-Za-z0-9] with a dash", () => {
-    expect(cwdSlug("/Users/x/.config/y")).toBe("-Users-x--config-y");
-  });
-
-  it("replaces underscores too", () => {
-    expect(cwdSlug("/private/var/folders/_m/x")).toBe("-private-var-folders--m-x");
-  });
-
-  it("preserves case", () => {
-    expect(cwdSlug("/Work/MixedC")).toBe("-Work-MixedC");
-  });
-});
-
-describe("the transcript path", () => {
-  it("names the session file under the account's projects directory", () => {
-    expect(transcriptPath("/account", "/ws", "s-1")).toBe("/account/projects/-ws/s-1.jsonl");
-  });
-});
 
 describe("reading the transcript's facts", () => {
   it("answers absence when there is no transcript", () => {

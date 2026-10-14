@@ -301,6 +301,13 @@ func (c *Converter) Line(record map[string]any, at Attribution, next map[string]
 	// THE PLACE IS STATED ONCE PER RECORD TOO, over the whole set the record
 	// produced, so each entry's ordinal is its index in that set (place.go).
 	stampPlace(entries, parseInstant(str(record["timestamp"])))
+	if inheritedByFork(record) {
+		// IT ANNOUNCES NO ROW, so it carries no upsert_key: nothing was stored.
+		c.log.With(at.ctxFor("fork-inherited-skip")).LogVerbose(
+			"a record the vendor's fork copied from the parent is never stored in the fork's book; converted to %d entrie(s), stored none",
+			len(entries))
+		return nil
+	}
 	if !keepalive {
 		return entries
 	}

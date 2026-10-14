@@ -147,13 +147,20 @@ type fakeDB struct {
 	// hasTurnsErr makes the turns existence read fail, which the fake's own
 	// slice cannot.
 	hasTurnsErr error
-	// conversations is what ConversationPrompts answers per workspace, and
-	// portedPrompts is what PutPortedPrompts recorded.
-	conversations   map[ids.WorkspaceID][]wsm.PortedPrompt
+	// conversations is what RecentConversationPrompts answers per workspace.
+	conversations   map[ids.WorkspaceID][]wsm.ConversationPrompt
 	conversationErr error
-	portedPrompts   map[ids.WorkspaceID][]wsm.PortedPrompt
-	putPortedErr    error
-	closedFlags     map[ids.WorkspaceID]bool
+	// pendingForks and lineage are the fork records; the errors fail the
+	// write or the read that names them.
+	pendingForks     map[ids.WorkspaceID]wsm.PendingFork
+	putPendingErr    error
+	pendingForkErr   error
+	lineage          map[ids.WorkspaceID][]wsm.ForkLineage
+	lineageErr       error
+	resolveForkErr   error
+	resolvedForks    []resolvedFork
+	bindSessionCalls []wsm.Session
+	closedFlags      map[ids.WorkspaceID]bool
 	// setClosedErr makes the closed-flag write fail, which the map cannot.
 	setClosedErr error
 	priorities   map[ids.WorkspaceID]*wsm.Priority
@@ -624,21 +631,10 @@ func (d *fakeDB) HasTurns(_ context.Context, id ids.WorkspaceID) (bool, error) {
 	return false, nil
 }
 
-// ConversationPrompts answers what a fork of this workspace inherits. The
-// fixture holds it per workspace so a fork test states the parent's
-// conversation directly rather than driving turns through the fake.
-func (d *fakeDB) ConversationPrompts(_ context.Context, id ids.WorkspaceID) ([]wsm.PortedPrompt, error) {
-	if d.conversationErr != nil {
-		return nil, d.conversationErr
-	}
-	return d.conversations[id], nil
-}
-
-// RecentConversationPrompts is the bounded fixture form of
-// ConversationPrompts: the same scripted rows, truncated to the most recent
-// `limit`, ordinals renumbered from zero, so a naming test can assert the
-// call reads a tail rather than the whole scripted conversation.
-func (d *fakeDB) RecentConversationPrompts(_ context.Context, id ids.WorkspaceID, limit int) ([]wsm.PortedPrompt, error) {
+// RecentConversationPrompts answers the scripted rows, truncated to the most
+// recent `limit`, ordinals renumbered from zero, so a naming test can assert
+// the call reads a tail rather than the whole scripted conversation.
+func (d *fakeDB) RecentConversationPrompts(_ context.Context, id ids.WorkspaceID, limit int) ([]wsm.ConversationPrompt, error) {
 	if d.conversationErr != nil {
 		return nil, d.conversationErr
 	}
@@ -650,7 +646,7 @@ func (d *fakeDB) RecentConversationPrompts(_ context.Context, id ids.WorkspaceID
 	if len(tail) > limit {
 		tail = tail[len(tail)-limit:]
 	}
-	out := make([]wsm.PortedPrompt, len(tail))
+	out := make([]wsm.ConversationPrompt, len(tail))
 	for i, row := range tail {
 		row.Ordinal = int64(i)
 		out[i] = row
@@ -658,18 +654,20 @@ func (d *fakeDB) RecentConversationPrompts(_ context.Context, id ids.WorkspaceID
 	return out, nil
 }
 
-func (d *fakeDB) PortedPrompts(_ context.Context, id ids.WorkspaceID) ([]wsm.PortedPrompt, error) {
-	return d.portedPrompts[id], nil
+// resolvedFork is one ResolveFork the fake recorded.
+type resolvedFork struct {
+	vendorSessionID string
+	lineage         wsm.ForkLineage
 }
 
-func (d *fakeDB) PutPortedPrompts(_ context.Context, id ids.WorkspaceID, rows []wsm.PortedPrompt) error {
-	if d.putPortedErr != nil {
-		return d.putPortedErr
+func (d *fakeDB) PutPendingFork(_ context.Context, fork wsm.PendingFork) error {
+	if d.putPendingErr != nil {
+		return d.putPendingErr
 	}
-	if d.portedPrompts == nil {
-		d.portedPrompts = map[ids.WorkspaceID][]wsm.PortedPrompt{}
+	if d.pendingForks == nil {
+		d.pendingForks = map[ids.WorkspaceID]wsm.PendingFork{}
 	}
-	d.portedPrompts[id] = rows
+	d.pendingForks[fork.Workspace] = fork
 	return nil
 }
 
@@ -695,6 +693,48 @@ func (d *fakeDB) SetMergedAt(_ context.Context, id ids.WorkspaceID, at time.Time
 	ws.MergedAt = &at
 	d.with(ws)
 	return nil
+}
+
+func (d *fakeDB) PendingFork(_ context.Context, id ids.WorkspaceID) (wsm.PendingFork, bool, error) {
+	if d.pendingForkErr != nil {
+		return wsm.PendingFork{}, false, d.pendingForkErr
+	}
+	fork, ok := d.pendingForks[id]
+	return fork, ok, nil
+}
+
+// ResolveFork records the fork as the store does: the session's vendor id,
+// the lineage, and the pending fork retired, or nothing on a failure.
+func (d *fakeDB) ResolveFork(_ context.Context, vendorSessionID string, lineage wsm.ForkLineage) error {
+	if d.resolveForkErr != nil {
+		return d.resolveForkErr
+	}
+	d.resolvedForks = append(d.resolvedForks, resolvedFork{vendorSessionID: vendorSessionID, lineage: lineage})
+	delete(d.pendingForks, lineage.Workspace)
+	session := d.sessions[lineage.Workspace]
+	session.VendorSessionID = vendorSessionID
+	d.sessions[lineage.Workspace] = session
+	if d.lineage == nil {
+		d.lineage = map[ids.WorkspaceID][]wsm.ForkLineage{}
+	}
+	d.lineage[lineage.Workspace] = append([]wsm.ForkLineage{lineage}, d.lineage[lineage.Parent]...)
+	return nil
+}
+
+func (d *fakeDB) Lineage(_ context.Context, id ids.WorkspaceID) ([]wsm.ForkLineage, error) {
+	if d.lineageErr != nil {
+		return nil, d.lineageErr
+	}
+	return d.lineage[id], nil
+}
+
+// BindSession records the session and forgets the workspace's fork records,
+// as the store does in one transaction.
+func (d *fakeDB) BindSession(ctx context.Context, s wsm.Session) error {
+	d.bindSessionCalls = append(d.bindSessionCalls, s)
+	delete(d.pendingForks, s.Workspace)
+	delete(d.lineage, s.Workspace)
+	return d.PutSession(ctx, s)
 }
 
 func (d *fakeDB) HeldPrompts(_ context.Context, id ids.WorkspaceID) ([]wsm.HeldPrompt, error) {
@@ -929,11 +969,6 @@ type fakeAccounts struct {
 	// so a test can assert the recorded-session path never probes at all.
 	newestProbedDir string
 	newestProbed    bool
-	ported          []portedTranscript
-	portErr         error
-	// mint is the fork mapping PortTranscript answers with; nil takes a
-	// readable default so a test that does not care still gets one mapping.
-	mint account.RemintedID
 	// email is the signed-in address Read answers with; empty is logged out.
 	email string
 	// readErr makes Read fail, which registration must surface.
@@ -949,8 +984,6 @@ type fakeAccounts struct {
 }
 
 type movedTranscript struct{ Path, ToConfigDir, WorkspaceDir string }
-
-type portedTranscript struct{ Path, ConfigDir, WorkspaceDir, VendorSessionID string }
 
 func (a *fakeAccounts) ConfigDirFor(string) string { return a.configDir }
 
@@ -1003,17 +1036,6 @@ func (a *fakeAccounts) NewestTranscript(_ context.Context, workspaceDir string) 
 		return account.AdoptableTranscript{}, account.ErrNoTranscripts
 	}
 	return a.newest, nil
-}
-
-func (a *fakeAccounts) PortTranscript(_ context.Context, path, configDir, workspaceDir, vendorSessionID string) (account.RemintedID, error) {
-	if a.portErr != nil {
-		return nil, a.portErr
-	}
-	a.ported = append(a.ported, portedTranscript{path, configDir, workspaceDir, vendorSessionID})
-	if a.mint != nil {
-		return a.mint, nil
-	}
-	return func(old string) string { return "minted-" + old }, nil
 }
 
 // MoveTranscript records the account switch's port, which is what makes a
@@ -1310,6 +1332,8 @@ type fakeFeed struct {
 	retired []*frontendv1.FeedId
 	// resets is every workspace whose feed was emptied, in order.
 	resets []ids.WorkspaceID
+	// lineages is every lineage NoteLineage stated, per workspace, in order.
+	lineages map[ids.WorkspaceID][][]feed.LineageSegment
 	// onReset runs AT the reset, which is how a test reads the swap's own
 	// progress as it stood when the feed was emptied — the ordering assertion
 	// with nothing to wait on.
@@ -1332,6 +1356,14 @@ func (f *fakeFeed) OnMainAgent(_ ids.WorkspaceID, agent *conversationv1.AgentId)
 // NoteFreshBook records a workspace whose session comes up fresh.
 func (f *fakeFeed) NoteFreshBook(ws ids.WorkspaceID) {
 	f.freshBooks = append(f.freshBooks, ws)
+}
+
+// NoteLineage records each lineage the fleet stated, per workspace, newest last.
+func (f *fakeFeed) NoteLineage(ws ids.WorkspaceID, segments []feed.LineageSegment) {
+	if f.lineages == nil {
+		f.lineages = map[ids.WorkspaceID][][]feed.LineageSegment{}
+	}
+	f.lineages[ws] = append(f.lineages[ws], segments)
 }
 
 // SourceUp records that a history source came up.

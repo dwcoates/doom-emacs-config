@@ -42,10 +42,6 @@ type resolver struct {
 	tokenSeq uint64
 	// loggers caches each workspace's resolved durable logger.
 	loggers map[ids.WorkspaceID]dlog.Logger
-	// lineage is what each workspace's descent is known to be: whether it is a
-	// fork, and which turns are its own (lineage.go). It has a mutex of its
-	// own because the reads that fill it run outside mu.
-	lineage lineages
 	// loads serializes each workspace's page loads across the read they make
 	// off mu (book.go loadMu).
 	loads map[ids.WorkspaceID]*sync.Mutex
@@ -121,12 +117,14 @@ type wsState struct {
 
 	// plane is the ORDERING PLANE rows are currently being drawn into. It is
 	// planeLive except while a history page is being replayed, and it is what
-	// keeps a fork's ported conversation above the rows the fork draws for
-	// itself no matter which of the two arrives first.
+	// keeps a fork's inherited past below the rows the fork draws for itself
+	// no matter which of the two arrives first.
 	plane rowPlane
-	// portedDrawn records that this workspace's ported conversation has been
-	// drawn, so it is replayed once rather than on every agent's page.
-	portedDrawn bool
+	// lineage is where a fork's inherited past is read from, nearest
+	// generation first, and inheritedAgents its books: a row of one of them is
+	// a root-feed row (lineage.go). Both empty for a workspace that is no fork.
+	lineage         []LineageSegment
+	inheritedAgents map[string]bool
 	// holdingPushes is set while a history page is being replayed: every
 	// publication is held on its feed until the page is wholly placed
 	// (resolver.holdPushes).
@@ -306,11 +304,6 @@ type wsState struct {
 	replayPromptDrawn bool
 	replayAtFloor     bool
 	replayUnstamped   int
-	// inherited is the attribution a fork's inherited past is drawn under,
-	// carried from one inherited entry to the next (lineage.go). It is kept
-	// apart from the fork's own attribution so the copied conversation can
-	// never become the turn the fork is running.
-	inherited inheritedStance
 	// clearTurns is the set of turns the daemon opened as a `/clear`. A clear's
 	// visible outcome is the cleared divider it leaves, NOT a terminal row: the
 	// turn is interrupted to make the cut, and drawing that interrupt as a
@@ -440,14 +433,10 @@ type subFeedHead struct {
 type rowPlane uint8
 
 const (
-	// planePorted is a fork's ported parent conversation: older than anything
-	// this workspace has of its own, by construction.
-	planePorted rowPlane = iota
-	// planeInherited is the store's copy of the conversation a fork inherited
-	// — its book's entries of turns the fork never opened — whenever it
-	// arrives: on a page, or live while the copy is still being ingested
-	// (lineage.go). Older than anything the fork produced, by construction.
-	planeInherited
+	// planeInherited is the conversation a fork inherited, read from its
+	// parent's book on a page (lineage.go). Older than anything the fork
+	// produced, by construction.
+	planeInherited rowPlane = iota
 	// planeHistory is the store's own replayed history.
 	planeHistory
 	// planeLive is everything drawn as it happens.
@@ -462,18 +451,16 @@ func (p rowPlane) replayed() bool {
 }
 
 // inheritedPast reports whether rows drawn in this plane are the conversation
-// a fork inherited from its parent — its ported prompts or the store's copy —
-// and so precede everything the fork produced.
+// a fork inherited from its parent, and so precede everything the fork
+// produced.
 func (p rowPlane) inheritedPast() bool {
-	return p == planePorted || p == planeInherited
+	return p == planeInherited
 }
 
 // String names a plane for a log record. A row's plane is recorded beside its
 // order key, which is the whole story of where it landed (order.go).
 func (p rowPlane) String() string {
 	switch p {
-	case planePorted:
-		return "ported"
 	case planeInherited:
 		return "inherited"
 	case planeHistory:
@@ -850,7 +837,7 @@ func (r *resolver) recordRepublication(s *wsState, f *feedState, id string, rank
 	}
 	reason := "daemon_restated"
 	switch {
-	case s.plane.replayed() || s.plane == planePorted:
+	case s.plane.replayed():
 		reason = "history_replay"
 	case s.inEntry:
 		r.logger(s.id).Debug("daemon.feed.row_republished",
@@ -939,7 +926,7 @@ func (r *resolver) placeTurn(s *wsState, agent *conversationv1.AgentId, turn *id
 		return at, true
 	}
 	id := agent.GetValue()
-	feed, err := feedid.AgentFeed(id, s.mainAgent)
+	feed, err := s.agentFeed(id)
 	if err == nil && feed.Agent != nil {
 		if _, minted := s.agentFeeds[id]; !minted {
 			err = errAgentFeedUnminted

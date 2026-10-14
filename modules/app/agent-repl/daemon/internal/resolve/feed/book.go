@@ -51,6 +51,13 @@ type HistorySource interface {
 	// ErrNoHistorySource means no shim is up to read from (a session need not
 	// be: the shim serves the workspace's persisted book).
 	ReadHistory(ctx context.Context, ws ids.WorkspaceID, target *conversationv1.AgentId, after *conversationv1.HistoryPointer) (*conversationv1.HistoryPage, error)
+	// ReadInherited answers one page of BOOK — a generation of WS's inherited
+	// past (lineage.go) — read through WS's shim: the newest entries placed at
+	// or before THROUGHMS when AFTER is nil, and otherwise the page of entries
+	// placed strictly before the entry AFTER names. It states nothing to the
+	// session's views: an inherited page is the parent's past, not a fact of
+	// the session WS runs.
+	ReadInherited(ctx context.Context, ws ids.WorkspaceID, book *conversationv1.AgentId, after *conversationv1.HistoryPointer, throughMs int64) (*conversationv1.HistoryPage, error)
 }
 
 var (
@@ -82,8 +89,15 @@ type bookState struct {
 	// loaded page's `more.last_entry`. Nil before any page is loaded and once
 	// the start is reached.
 	after *conversationv1.HistoryPointer
-	// floor reports that a loaded page reached the conversation's start.
+	// floor reports that a loaded page reached the start of the book the walk
+	// is in: the conversation's start, unless the root feed of a fork has an
+	// inherited generation still below it.
 	floor bool
+	// segment is the book the walk is in: 0 the feed's own, and for a fork's
+	// root feed i > 0 the i-th generation of its inherited past
+	// (wsState.lineage[i-1]). The walk enters each in turn as the one above
+	// reaches its start.
+	segment int
 	// gapAfter and gapFloor describe the UNPAGED GAP a re-read newest page
 	// leaves: the rows between the old newest page's bound (gapFloor) and the
 	// new one were drawn live, so no store page bounds them. A walk that
@@ -153,6 +167,10 @@ type pageLoad struct {
 	outcomes entryOutcomes
 	// heads counts the turn heads whose prompts this load drew (heads.go).
 	heads int
+	// inherited is the generation of a fork's past the page was read from,
+	// nil for a page of the feed's own book: its rows are drawn in the
+	// inherited plane, and its turns' records are its ancestor's.
+	inherited *LineageSegment
 }
 
 // noteDrawn records one row a load drew in its feed, and reports whether it is
@@ -236,6 +254,10 @@ type loadPlan struct {
 	// pushAll publishes every row the load draws, quiet or not: a load no
 	// reader's page delivers (LoadOlder).
 	pushAll bool
+	// segment is the book read (bookState.segment), and inherited its
+	// generation when it is a fork's inherited past.
+	segment   int
+	inherited *LineageSegment
 }
 
 // planLoad decides the next page FEED's book would read: its newest page when
@@ -252,9 +274,21 @@ func (r *resolver) planLoad(s *wsState, f *feedState, newest bool) (loadPlan, bo
 		return loadPlan{addr: addr, state: s, target: target, newest: true}, true
 	}
 	if f.book.floor {
-		return loadPlan{}, false
+		// THE BOOK REACHED ITS START; a fork's root feed goes on into the next
+		// generation of its inherited past, from that generation's bound.
+		if !addr.Root || f.book.segment >= len(s.lineage) {
+			return loadPlan{}, false
+		}
+		next := f.book.segment + 1
+		segment := s.lineage[next-1]
+		return loadPlan{addr: addr, state: s, target: segment.Book, segment: next, inherited: &segment}, true
 	}
-	return loadPlan{addr: addr, state: s, target: target, after: f.book.after}, true
+	plan := loadPlan{addr: addr, state: s, target: target, after: f.book.after, segment: f.book.segment}
+	if f.book.segment > 0 {
+		segment := s.lineage[f.book.segment-1]
+		plan.target, plan.inherited = segment.Book, &segment
+	}
+	return plan, true
 }
 
 // planOpening decides the newest page an OPENING of FEED reads first: its own
@@ -302,7 +336,7 @@ type loaded struct {
 func (r *resolver) load(ctx context.Context, plan loadPlan) (loaded, error) {
 	ws, addr := plan.state.id, plan.addr
 	log := r.lockedLogger(ws)
-	page, err := r.deps.History.ReadHistory(ctx, ws, plan.target, plan.after)
+	page, err := r.readPlanned(ctx, plan)
 	if errors.Is(err, ErrNoHistorySource) {
 		log.Info("daemon.feed.history_load_no_source",
 			"a reader's page could not be loaded: no shim is up to read history from; the feed serves what it holds and loads the page when one comes up",
@@ -333,14 +367,24 @@ func (r *resolver) load(ctx context.Context, plan loadPlan) (loaded, error) {
 		return loaded{}, fmt.Errorf("%w: a page stated no boundary to read older history from", ErrHistoryUnavailable)
 	}
 
+	if plan.inherited != nil {
+		var dropped int
+		if page, dropped = inheritedEntries(page, plan.inherited.Uninherited); dropped > 0 {
+			log.Debug("daemon.feed.uninherited_entries_dropped",
+				"entries of turns that were open in the parent when the fork was taken are not the fork's; they were left out of its page",
+				dlog.Context{"book": plan.target.GetValue(), "dropped": dropped})
+		}
+	}
+
 	r.mu.Lock()
 	f := r.feed(plan.state, addr)
 	l := &pageLoad{
-		state:   plan.state,
-		feedKey: f.key,
-		book:    &f.book,
-		cutoff:  f.book.lowest(),
-		quiet:   map[string]bool{},
+		state:     plan.state,
+		feedKey:   f.key,
+		book:      &f.book,
+		cutoff:    f.book.lowest(),
+		quiet:     map[string]bool{},
+		inherited: plan.inherited,
 	}
 	if plan.pushAll {
 		l.cutoff = ""
@@ -365,7 +409,10 @@ func (r *resolver) load(ctx context.Context, plan loadPlan) (loaded, error) {
 	// empty until its first live row) is its FIRST load: it states where the
 	// next older page is read from and whether the start was reached.
 	reread := plan.newest && f.book.newestLoaded && len(f.book.bounds) > 0
-	reachedStart := !reread && page.GetFloor() != nil
+	// THE CONVERSATION'S START is the last book's: a fork's own book, or a
+	// generation above the last, reaching its start leaves older history below.
+	lastBook := !addr.Root || plan.segment >= len(plan.state.lineage)
+	reachedStart := !reread && page.GetFloor() != nil && lastBook
 	switch {
 	case plan.gap:
 		f.book.gapAfter = page.GetMore().GetLastEntry()
@@ -384,6 +431,7 @@ func (r *resolver) load(ctx context.Context, plan loadPlan) (loaded, error) {
 	default:
 		f.book.after = page.GetMore().GetLastEntry()
 		f.book.floor = page.GetFloor() != nil
+		f.book.segment = plan.segment
 	}
 	if plan.newest {
 		f.book.newestLoaded = true
@@ -409,6 +457,20 @@ func (r *resolver) load(ctx context.Context, plan loadPlan) (loaded, error) {
 			"outcomes": l.outcomes.String(),
 		})
 	return loaded{low: l.low, drew: l.drew}, nil
+}
+
+// readPlanned reads the page PLAN names: from the feed's own book, or — for a
+// generation of a fork's inherited past — from that generation's book, from
+// its bound when the walk has just entered it.
+func (r *resolver) readPlanned(ctx context.Context, plan loadPlan) (*conversationv1.HistoryPage, error) {
+	if plan.inherited == nil {
+		return r.deps.History.ReadHistory(ctx, plan.state.id, plan.target, plan.after)
+	}
+	var through int64
+	if plan.after == nil {
+		through = plan.inherited.ThroughMs
+	}
+	return r.deps.History.ReadInherited(ctx, plan.state.id, plan.inherited.Book, plan.after, through)
 }
 
 // mainAgentID answers the session's main agent as this feed knows it, nil
@@ -442,7 +504,7 @@ const historyKickBound = 10 * time.Second
 // watch of AGENT just opened, so its session is up now. Called with r.mu held.
 func (r *resolver) kickWaitingReaders(s *wsState, agent *conversationv1.AgentId) {
 	addr := feedid.Feed{Root: true}
-	if agent.GetValue() != "" && agent.GetValue() != s.mainAgent {
+	if agent.GetValue() != "" && !s.rootFeedAgent(agent.GetValue()) {
 		addr = feedid.Feed{Agent: agent}
 	}
 	f, ok := s.feeds[r.feedKey(s.id, addr)]

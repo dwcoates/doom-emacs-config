@@ -184,7 +184,8 @@ func TestCreateMergeWorkspaceForksInTheRequestersRepository(t *testing.T) {
 	origin := wsm.MergeOrigin{Requester: requester.ID, Request: "request-1"}
 
 	// Act
-	if _, err := f.verbs.CreateMergeWorkspace(context.Background(), requester, origin, "reconnect-fix", "ABC/sample"); err != nil {
+	created, err := f.verbs.CreateMergeWorkspace(context.Background(), requester, origin, "reconnect-fix", "ABC/sample")
+	if err != nil {
 		t.Fatalf("CreateMergeWorkspace: %v", err)
 	}
 
@@ -193,8 +194,11 @@ func TestCreateMergeWorkspaceForksInTheRequestersRepository(t *testing.T) {
 	// its fork head.
 	facts := f.db.registered[len(f.db.registered)-1]
 	want := wsm.MergeOrigin{Requester: requester.ID, Request: "request-1", ForkHead: "sha-of-refs/heads/ABC/sample"}
-	if facts.MergeOf == nil || *facts.MergeOf != want || len(f.account.ported) != 1 {
-		t.Fatalf("registered %+v with %d ported transcripts, want the requester's fork", facts, len(f.account.ported))
+	if facts.MergeOf == nil || *facts.MergeOf != want {
+		t.Fatalf("registered %+v, want the requester's merge workspace", facts)
+	}
+	if fork, owed := f.db.pendingForks[created.ID]; !owed || fork.Parent != requester.ID {
+		t.Fatalf("pending forks = %+v, want the requester's conversation owed", f.db.pendingForks)
 	}
 	if job := f.db.putJobs[len(f.db.putJobs)-1]; job.BaseRef != "ABC/sample" {
 		t.Fatalf("base = %q, want the requester's branch", job.BaseRef)

@@ -15,9 +15,10 @@ import { join } from "node:path";
 
 import { createFakeQuery } from "../../src/fake/index.js";
 import type { FakeQueryOpts } from "../../src/fake/index.js";
-import { cwdSlug } from "../../src/fake/vendor-files.js";
+
 import { testTempDir } from "../temp-dir.js";
 import type { CanUseToolLike, QueryLike, SdkMessage } from "../../src/sdk/types.js";
+import { cwdSlug, projectDir } from "../../src/engine/vendor-paths.js";
 
 /**
  * The harness's fixed clock, in epoch millis.
@@ -215,7 +216,7 @@ export async function driveScenario(
           .map((l) => JSON.parse(l) as Line)
       : [];
 
-  const projectDir = join(configDir, "projects", cwdSlug(cwd));
+  const project = projectDir(configDir, cwd);
   return {
     messages,
     ...(failure === undefined ? {} : { failure }),
@@ -223,11 +224,11 @@ export async function driveScenario(
     cwd,
     spoolRoot,
     sessionId,
-    transcript: (id = sessionId) => linesOf(join(projectDir, `${id}.jsonl`)),
+    transcript: (id = sessionId) => linesOf(join(project, `${id}.jsonl`)),
     subagent: (agentId, id = sessionId) =>
-      linesOf(join(projectDir, id, "subagents", `agent-${agentId}.jsonl`)),
+      linesOf(join(project, id, "subagents", `agent-${agentId}.jsonl`)),
     subagentMeta: (agentId, id = sessionId) =>
-      JSON.parse(readFileSync(join(projectDir, id, "subagents", `agent-${agentId}.meta.json`), "utf8")) as Line,
+      JSON.parse(readFileSync(join(project, id, "subagents", `agent-${agentId}.meta.json`), "utf8")) as Line,
     spool: (taskId, id = sessionId) => readSpool({ cwd, spoolRoot }, id, taskId),
     spoolIds: (id = sessionId) => {
       const dir = join(spoolRoot, cwdSlug(cwd), id, "tasks");

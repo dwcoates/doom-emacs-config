@@ -25,7 +25,9 @@ import { shimv1 } from "../proto.js";
 import { internalFromUnknown, unimplemented } from "./failures.js";
 import {
   validateDetachForegroundRequest,
+  validateForkSessionRequest,
   validateGatherTitleDigestRequest,
+  validateGetForkPointRequest,
   validateHibernateRequest,
   validateKillSessionRequest,
   validateKillTurnRequest,
@@ -322,6 +324,20 @@ export function shimRoutes(engine: Engine): (router: ConnectRouter) => void {
         entered("GatherTitleDigest");
         validateGatherTitleDigestRequest(request);
         return answering("GatherTitleDigest", () => engine.gatherTitleDigest(request));
+      },
+
+      // ---- Fork ----
+
+      async getForkPoint(request) {
+        entered("GetForkPoint");
+        validateGetForkPointRequest(request);
+        return answering("GetForkPoint", () => engine.getForkPoint(request));
+      },
+
+      async forkSession(request) {
+        entered("ForkSession");
+        validateForkSessionRequest(request);
+        return answering("ForkSession", () => engine.forkSession(request));
       },
     });
   };

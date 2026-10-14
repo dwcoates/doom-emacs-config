@@ -23,6 +23,8 @@ package e2e
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -146,35 +148,92 @@ func assertNoWarningInAnySystemLog(t *testing.T, w *World) {
 	}
 }
 
-// stopAfterTurnBound is how long the host's stop may take on a session whose
-// turn RAN AND ENDED, with its watches still standing — the shape every
-// playbook finishes in.
+// conclusionBudgetSpent is what the shim logs, at ERROR, when its teardown
+// waited a tail's whole conclusion budget (`WATCHER_CONCLUSION_BUDGET_MS`, 1s)
+// instead of ending it (agent-shim/claude/shim/src/engine/session.ts).
 //
-// IT IS A FAILURE BOUND FOR ONE SPECIFIC STALL. The shim's teardown concludes
-// every open `WatchAgent` tail through its book's head and waits for the tail
-// to serve it, bounded by `WATCHER_CONCLUSION_BUDGET_MS` (1s). A tail that can
-// never reach that head — the store streams an upsert of an old row at its
-// ORIGINAL pointer, so the newest pointer a tail has served walks BACKWARD —
-// spends the whole budget, and the daemon's stop is waiting inside it. That is
-// what this measures: a stop anywhere near a second has ridden that budget.
-//
-// MEASURED across a -count=8 run against the real quartet: 7.4ms at the best,
-// 9.7ms at the worst. 250ms is ~26x that worst case and a quarter of the budget
-// a stalled tail would burn, so nothing healthy can reach it and nothing
-// stalled can hide under it.
-const stopAfterTurnBound = 250 * time.Millisecond
+// THE STALL IS ASSERTED BY ITS OWN RECORD, NOT BY THE STOP'S WALL TIME. The
+// shim's teardown concludes every open `WatchAgent` tail through its book's
+// head and waits for the tail to serve it. A tail that can never reach that
+// head — the store streams an upsert of an old row at its ORIGINAL pointer, so
+// the newest pointer a tail has served walks BACKWARD — spends the whole
+// budget, and the daemon's stop waits inside it. The shim states exactly that
+// when it happens; a wall-clock bound on the stop stood in for the record and
+// failed on a saturated host whose healthy stop simply ran slow (292ms against
+// a 250ms bound, load average 54, 2026-10-13).
+const conclusionBudgetSpent = "did not end within its conclusion budget"
 
-// TestAStopAfterACompletedTurnLeavesOnTheStop pins the cost of the ordinary
-// stop against the WHOLE world: a real store, a real sidecar, a real daemon and
-// the real Node shim, with a turn driven to its terminal and every watch of the
-// session still standing.
+// conclusionBudgetRecords names every record in LOGSDIR's logs stating that a
+// teardown waited out a conclusion budget.
+func conclusionBudgetRecords(t *testing.T, logsDir string) []string {
+	t.Helper()
+	pattern := filepath.Join(logsDir, "*.log")
+	paths, err := filepath.Glob(pattern)
+	if err != nil {
+		t.Fatalf("glob %s: %v", pattern, err)
+	}
+	if len(paths) == 0 {
+		t.Fatalf("no log matches %s, so this assertion could pass reading nothing", pattern)
+	}
+	var found []string
+	for _, path := range paths {
+		for _, r := range harness.ReadLog(t, path) {
+			if strings.Contains(r.Message, conclusionBudgetSpent) {
+				found = append(found, fmt.Sprintf("%s: %s %s: %s", filepath.Base(path), r.Level, r.Operation, r.Message))
+			}
+		}
+	}
+	return found
+}
+
+// assertNoConclusionBudgetSpent fails when any of W's system logs records a
+// teardown that waited out a conclusion budget.
+func assertNoConclusionBudgetSpent(t *testing.T, w *World) {
+	t.Helper()
+	for _, record := range conclusionBudgetRecords(t, filepath.Join(w.StateDir, "logs")) {
+		t.Errorf("%s — the shim's teardown rode a conclusion budget rather than ending its tails", record)
+	}
+}
+
+func TestConclusionBudgetRecords(t *testing.T) {
+	cases := []struct {
+		name    string
+		message string
+		want    int
+	}{
+		{name: "a teardown that ended its tails", message: "the session's watches were concluded", want: 0},
+		{name: "a teardown that waited out a budget", message: "the WatchAgent tail on a-1 " + conclusionBudgetSpent, want: 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			dir := t.TempDir()
+			record := fmt.Sprintf(`{"timestamp":"2026-10-13T00:00:00Z","runtime":"shim","level":"error","operation":"shim.engine.session","message":%q}`+"\n", tc.message)
+			if err := os.WriteFile(filepath.Join(dir, "shim.log"), []byte(record), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			// Act
+			found := conclusionBudgetRecords(t, dir)
+
+			// Assert
+			if len(found) != tc.want {
+				t.Fatalf("found %v, want %d record(s)", found, tc.want)
+			}
+		})
+	}
+}
+
+// TestAStopAfterACompletedTurnLeavesOnTheStop pins that the ordinary stop ends
+// the shim's tails rather than waiting out their conclusion budget, against
+// the WHOLE world: a real store, a real sidecar, a real daemon and the real
+// Node shim, with a turn driven to its terminal and every watch of the session
+// still standing.
 //
 // It is the e2e half of daemon/integration's test of the same name, which
-// measures the same stop against the fake shim. Only this one exercises the
+// checks the same stop against the fake shim. Only this one exercises the
 // real shim's teardown, which is where the tail conclusion lives.
 func TestAStopAfterACompletedTurnLeavesOnTheStop(t *testing.T) {
-	// This assertion is a latency measurement. Run it outside the suite's
-	// parallel world burst so the interval stays attributable to the stop path.
 	// Arrange: a live session whose turn has run and ended.
 	w, ws := pmNewPermissionWorld(t)
 	// THE STOP IS THE DAEMON'S OWN ORDERED STAND-DOWN, so no system writes a
@@ -202,11 +261,9 @@ func TestAStopAfterACompletedTurnLeavesOnTheStop(t *testing.T) {
 	if err != nil || resp.Msg.GetSuccess() == nil {
 		t.Fatalf("UpdateShutdownSchedule{now} = (%v, %v), want a success", resp, err)
 	}
-	if stop > stopAfterTurnBound {
-		t.Errorf("the stop took %v, over the %v bound — the shim's teardown rode a conclusion budget rather than ending its tails", stop, stopAfterTurnBound)
-	}
 	w.AwaitExit()
 	t.Logf("the host's stop after a completed turn took %v", stop)
+	assertNoConclusionBudgetSpent(t, w)
 	assertNoWarningInAnySystemLog(t, w)
 }
 

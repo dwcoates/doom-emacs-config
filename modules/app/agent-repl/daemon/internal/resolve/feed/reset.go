@@ -63,11 +63,6 @@ const opWorkspaceReset = "daemon.feed.workspace_reset"
 //     close so the footer stops drawing a line about a turn of a conversation
 //     that is gone, and every armed stall window, stopped so no timer of the
 //     old conversation can raise a fault against the new one.
-//   - The fork's `portedDrawn` mark, so a forked workspace's ported parent
-//     conversation is REDRAWN above the newly bound conversation. The ported
-//     conversation belongs to the WORKSPACE's origin, not to the vendor
-//     conversation it happens to run, and a reset that kept the mark would
-//     drop it for good.
 //
 // WHAT IT DELIBERATELY KEEPS:
 //
