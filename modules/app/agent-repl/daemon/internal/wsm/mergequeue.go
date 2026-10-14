@@ -531,6 +531,48 @@ func (s *store) RemoveMergeQueueEntry(ctx context.Context, repo RepoKey, id Work
 	})
 }
 
+// DropAdmittedMerge takes an ADMITTED merge that has no run off its queue:
+// its queue entry, its merge lease and that lease's progress record go in ONE
+// transaction, recording the cause in the operation's log record. It is the
+// one way such a merge is dropped, because it keeps the invariant every
+// prompt held under a merge relies on (bindMergeHold): a merge lease stands
+// with exactly one queue entry. Removing the entry alone would leave the
+// lease standing over none, and every later prompt on the workspace would be
+// refused. An entry that is not admitted, or a lease that is not that
+// workspace's merge lease, is a refusal and changes nothing.
+func (s *store) DropAdmittedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, lease LeaseID, cause string) error {
+	const op = "daemon.wsm.drop_admitted_merge"
+	key, err := normalizeRepoKey(repo)
+	if err != nil {
+		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo), "workspace": string(id)}, err))
+		return err
+	}
+	fields := dlog.Context{"repo": string(key), "workspace": string(id), "lease": string(lease), "cause": cause}
+	err = s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `DELETE FROM merge_queue WHERE repo_key = ? AND workspace_id = ? AND state = ?`, key, id, int(MergeAdmitted))
+		if err != nil {
+			return err
+		}
+		if err := requireOneRow(res, fmt.Sprintf("wsm: admitted merge queue entry for workspace %s in repo %q", id, key)); err != nil {
+			return err
+		}
+		res, err = tx.ExecContext(ctx, `DELETE FROM leases WHERE id = ? AND workspace_id = ? AND holder = ?`, lease, id, int(HolderMerge))
+		if err != nil {
+			return err
+		}
+		if err := requireOneRow(res, fmt.Sprintf("wsm: merge lease %s of workspace %s", lease, id)); err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `DELETE FROM merge_progress WHERE lease_id = ?`, lease)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	s.disown(lease)
+	return nil
+}
+
 // MergeQueue loads one repository's queue in order, all-or-nothing.
 func (s *store) MergeQueue(ctx context.Context, repo RepoKey) ([]MergeQueueEntry, error) {
 	const op = "daemon.wsm.merge_queue"

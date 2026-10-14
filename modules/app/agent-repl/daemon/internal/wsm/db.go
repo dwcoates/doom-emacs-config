@@ -408,6 +408,9 @@ type DB interface {
 	AdmitMerge(ctx context.Context, repo RepoKey, id WorkspaceID) error
 	// RemoveMergeQueueEntry drops one entry with the cause it was dropped for.
 	RemoveMergeQueueEntry(ctx context.Context, repo RepoKey, id WorkspaceID, cause string) error
+	// DropAdmittedMerge drops an admitted merge with no run: its entry, its
+	// merge lease and that lease's progress record, in one transaction.
+	DropAdmittedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, lease LeaseID, cause string) error
 	// MergeQueue loads one repository's queue in order, all-or-nothing.
 	MergeQueue(ctx context.Context, repo RepoKey) ([]MergeQueueEntry, error)
 	// AllMergeQueues loads every repository's queue for the boot re-enqueue,
