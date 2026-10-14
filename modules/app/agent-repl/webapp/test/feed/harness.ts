@@ -311,9 +311,35 @@ export function harness(script: FeedScript = {}): Harness {
   return { ctx, calls, sink, channels };
 }
 
+/** The token the root feed's scripted open answers, and so the key its live tail is watched by. */
+export const ROOT_WATCH_TOKEN = "tok:root";
+
+/**
+ * A harness whose ROOT feed has a live tail: CHANNEL, registered under the
+ * token the root's open answers, so every frame a test pushes on it reaches
+ * the root feed's watch. SCRIPT scripts everything else.
+ */
+export function liveRootHarness(script: Omit<FeedScript, "channels"> = {}): { h: Harness; channel: Channel<WatchFeedResponse> } {
+  const channel = new Channel<WatchFeedResponse>();
+  const h = harness({ ...script, channels: new Map([[ROOT_WATCH_TOKEN, channel]]) });
+  return { h, channel };
+}
+
+/**
+ * The feed's scroll BOX holding the HOST the feed mounts into, made the
+ * document's whole body.
+ */
+export function scrollHost(): { scroll: HTMLDivElement; host: HTMLDivElement } {
+  const scroll = document.createElement("div");
+  const host = document.createElement("div");
+  scroll.append(host);
+  document.body.replaceChildren(scroll);
+  return { scroll, host };
+}
+
 /** The token a scripted open mints for the feed it was asked about. */
 export function tokenFor(req: OpenFeedRequest): string {
-  return `tok:${req.feed?.value ?? "root"}`;
+  return req.feed === undefined ? ROOT_WATCH_TOKEN : `tok:${req.feed.value}`;
 }
 
 /**
