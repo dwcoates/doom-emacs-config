@@ -248,7 +248,7 @@ func TestSelectSuitesMapsShimLockToItsSuiteAndTheShims(t *testing.T) {
 // can break any of the harnesses that test the module's scripts.
 func TestSelectSuitesABinScriptSelectsEveryHarness(t *testing.T) {
 	// Act.
-	got := SelectSuites([]string{"modules/app/agent-repl/bin/suite-slot.sh"})
+	got := SelectSuites([]string{"modules/app/agent-repl/bin/background.sh"})
 
 	// Assert.
 	if got.Full || strings.Join(got.Suites, ",") != strings.Join(roster.Harnesses(), ",") {

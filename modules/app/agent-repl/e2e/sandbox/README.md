@@ -114,8 +114,7 @@ buildkit cache and a build from a stale checkout re-tagged
 * **`build` takes an exclusive, host-wide lock.** It is a directory claimed
   with `mkdir` at `/tmp/agent-repl-sandbox-build.lock` (override with
   `AGENT_REPL_SANDBOX_BUILD_LOCK_DIR`), with the holder's pid recorded inside
-  and a dead holder's lock taken over — the same technique as
-  `bin/suite-slot.sh` and the run gate. A second build **waits**, out loud,
+  and a dead holder's lock taken over — the same technique as the run gate. A second build **waits**, out loud,
   and then does nothing at all if the tag already carries this checkout's
   sandbox sources. `--force` (or `--no-cache`) rebuilds anyway.
 

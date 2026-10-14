@@ -8,7 +8,7 @@
 #
 # Nothing here touches the owner's editor, the owner's state, or a real
 # deployment. realtest.sh is exercised as a COPY in a scratch directory beside
-# stub siblings — a stub readiness-report.sh, a stub suite-slot.sh, a stub
+# stub siblings — a stub readiness-report.sh, a stub background.sh, a stub
 # emacsclient — so `THIS_DIR` resolves to the scratch directory and every
 # external answer the script depends on is the test's to choose. That is the
 # only way to assert a refusal: the thing being asserted is that the script does
@@ -354,7 +354,7 @@ test_prune_returns_success_when_nothing_to_prune() {
 # resolves here and every external answer is the test's.
 #
 # The stubs answer READY and NOTHING RUNNING by default; each case overwrites
-# the one it is about. suite-slot.sh records that it was reached, which is how a
+# the one it is about. background.sh records that it was reached, which is how a
 # case distinguishes "declined" from "ran and failed".
 scratch_bin() {
     local dir="$SCRATCH/$1/bin"
@@ -368,13 +368,13 @@ scratch_bin() {
 cat "${STUB_READINESS_JSON:?the case must state a readiness document}"
 STUB
 
-    # THE SLOT STUB IS THE RUN LOG. It appends the test name of every `go test`
+    # THE BACKGROUND STUB IS THE RUN LOG. It appends the test name of every `go test`
     # invocation the script makes, which is how a sequencing case sees WHICH
     # realtests ran and in what order rather than only that one did.
     #
     # It also creates the alive flag, because every realtest leaves an editor
     # running and the next cold-start realtest in a sweep has to face one.
-    cat > "$dir/suite-slot.sh" <<'STUB'
+    cat > "$dir/background.sh" <<'STUB'
 #!/usr/bin/env bash
 name=""
 while [ "$#" -gt 0 ]; do
@@ -383,13 +383,13 @@ while [ "$#" -gt 0 ]; do
     esac
     shift
 done
-printf '%s\n' "$name" >> "${STUB_SLOT_MARKER:?the case must state a marker path}"
+printf '%s\n' "$name" >> "${STUB_RUN_MARKER:?the case must state a marker path}"
 held_name="${name#^}"
 held_name="${held_name%$}"
 printf '%s %s\n' "$held_name" "${AGENT_REPL_REALTEST_FOCUS_HELD:-unset}" \
     >> "${STUB_HELD_MARKER:?the case must state a focus-held marker path}"
 [ -n "${STUB_ALIVE_FLAG:-}" ] && : > "$STUB_ALIVE_FLAG"
-if [ -n "${STUB_SLOT_FAIL:-}" ] && grep -q -- "$STUB_SLOT_FAIL" <<<"$name"; then
+if [ -n "${STUB_RUN_FAIL:-}" ] && grep -q -- "$STUB_RUN_FAIL" <<<"$name"; then
     exit 1
 fi
 exit 0
@@ -397,7 +397,7 @@ STUB
 
     # THE EDITOR IS A FILE. It is answering exactly while STUB_ALIVE_FLAG
     # exists, so a quit really does end it and a later realtest really does
-    # bring one back (the slot stub recreates the flag) — which is the whole of
+    # bring one back (the background stub recreates the flag) — which is the whole of
     # what a sequencing case needs to see.
     cat > "$dir/emacsclient" <<'STUB'
 #!/usr/bin/env bash
@@ -431,7 +431,7 @@ STUB
 printf '%s guard=%s\n' "$*" "${AGENT_REPL_FORBID_VENDOR_CALLS:-unset}" \
     >> "${STUB_OPEN_MARKER:?the case must state an open marker path}"
 [ "${STUB_OPEN_FAIL:-}" = "1" ] && exit 1
-# The editor the launch brings up is answering, the same way the slot stub's is.
+# The editor the launch brings up is answering, the same way the background stub's is.
 [ -n "${STUB_ALIVE_FLAG:-}" ] && : > "$STUB_ALIVE_FLAG"
 exit 0
 STUB
@@ -484,7 +484,7 @@ STUB
 
     # THE SWEEP'S THREE HARNESS CHECKS ARE `go test` INVOCATIONS — the leftover
     # report at the start, the between-sweeps gap scan, the leftover clean and
-    # the mark at the end — and they do not go through suite-slot.sh, so this
+    # the mark at the end — and they do not go through background.sh, so this
     # is where a case sees them and decides what they answer.
     #
     # It records "<test name> <leftover mode> <gap scan>" per invocation, which
@@ -616,7 +616,7 @@ run_script() {
     PATH="$dir:$PATH" \
     STUB_PROCS="${STUB_PROCS:-$SCRATCH/procs}" \
     STUB_READINESS_JSON="$SCRATCH/readiness.json" \
-    STUB_SLOT_MARKER="$SCRATCH/slot-reached" \
+    STUB_RUN_MARKER="$SCRATCH/run-reached" \
     STUB_GO_MARKER="${STUB_GO_MARKER:-$SCRATCH/go-reached}" \
     STUB_ORDERLY_MARKER="${STUB_ORDERLY_MARKER:-$SCRATCH/orderly-reached}" \
     STUB_FOCUS_MARKER="${STUB_FOCUS_MARKER:-$SCRATCH/focus-reached}" \
@@ -637,7 +637,7 @@ run_script() {
 
 prepare_home() {
     SCRIPT_ARGS=()
-    rm -rf "${SCRATCH:?}/home" "${SCRATCH:?}/out" "${SCRATCH:?}/slot-reached" "${SCRATCH:?}/killed" \
+    rm -rf "${SCRATCH:?}/home" "${SCRATCH:?}/out" "${SCRATCH:?}/run-reached" "${SCRATCH:?}/killed" \
         "${SCRATCH:?}/alive" "${SCRATCH:?}/kill-log" "${SCRATCH:?}/go-reached" \
         "${SCRATCH:?}/focus-reached" "${SCRATCH:?}/focus-held" "${SCRATCH:?}/open-reached" \
         "${SCRATCH:?}/orderly-reached"
@@ -698,7 +698,7 @@ test_declines_when_a_system_is_not_deployed() {
         fail "$name" "the refusal does not name the stale system: $out"
         return
     fi
-    if [ -f "$SCRATCH/slot-reached" ]; then
+    if [ -f "$SCRATCH/run-reached" ]; then
         fail "$name" "the run was reached despite the refusal"
         return
     fi
@@ -726,7 +726,7 @@ test_declines_when_emacs_is_running_without_a_takeover() {
         fail "$name" "the owner's editor was quit without authorization"
         return
     fi
-    if [ -f "$SCRATCH/slot-reached" ]; then
+    if [ -f "$SCRATCH/run-reached" ]; then
         fail "$name" "the run was reached despite the refusal"
         return
     fi
@@ -778,7 +778,7 @@ test_runs_when_nothing_stands_in_the_way() {
         fail "$name" "exit was $status, want 0; output: $out"
         return
     fi
-    if [ ! -f "$SCRATCH/slot-reached" ]; then
+    if [ ! -f "$SCRATCH/run-reached" ]; then
         fail "$name" "the run was never reached; output: $out"
         return
     fi
@@ -809,7 +809,7 @@ test_declines_when_the_backup_copy_totally_fails() {
         fail "$name" "the refusal does not say the backup failed: $out"
         return
     fi
-    if [ -f "$SCRATCH/slot-reached" ]; then
+    if [ -f "$SCRATCH/run-reached" ]; then
         fail "$name" "the run was reached despite the backup failure"
         return
     fi
@@ -860,7 +860,7 @@ test_declines_when_a_listening_shim_lacks_the_guard() {
         fail "$name" "the refusal does not name the socket the shim is listening on: $out"
         return
     fi
-    if [ -f "$SCRATCH/slot-reached" ]; then
+    if [ -f "$SCRATCH/run-reached" ]; then
         fail "$name" "the run was reached despite the refusal"
         return
     fi
@@ -907,7 +907,7 @@ test_runs_when_every_listening_shim_carries_the_guard() {
         fail "$name" "exit was $status, want 0; output: $out"
         return
     fi
-    if [ ! -f "$SCRATCH/slot-reached" ]; then
+    if [ ! -f "$SCRATCH/run-reached" ]; then
         fail "$name" "the run was never reached; output: $out"
         return
     fi
@@ -931,7 +931,7 @@ test_ignores_a_shim_listening_under_another_state_directory() {
         fail "$name" "exit was $status, want 0; output: $out"
         return
     fi
-    if [ ! -f "$SCRATCH/slot-reached" ]; then
+    if [ ! -f "$SCRATCH/run-reached" ]; then
         fail "$name" "the run was never reached; output: $out"
         return
     fi
@@ -1038,7 +1038,7 @@ test_the_unguarded_daemon_is_stopped_under_the_consent() {
         fail "$name" "the run did not state that it stopped the owner's unguarded daemon: $out"
         return
     fi
-    if ! grep -q 'TestRealtestStartTheEditor' "$SCRATCH/slot-reached"; then
+    if ! grep -q 'TestRealtestStartTheEditor' "$SCRATCH/run-reached"; then
         fail "$name" "the realtest did not run once the unguarded daemon was stopped"
         return
     fi
@@ -1144,7 +1144,7 @@ test_the_unguarded_shims_are_stopped_under_the_consent() {
         fail "$name" "the run did not state the shim-lock it stopped: $out"
         return
     fi
-    if ! grep -q 'TestRealtestStartTheEditor' "$SCRATCH/slot-reached"; then
+    if ! grep -q 'TestRealtestStartTheEditor' "$SCRATCH/run-reached"; then
         fail "$name" "the realtest did not run once the unguarded shims were stopped"
         return
     fi
@@ -1248,8 +1248,8 @@ test_run_pattern_selects_one_realtest() {
         fail "$name" "exit was $status, want 0; output: $out"
         return
     fi
-    if [ "$(cat "$SCRATCH/slot-reached")" != '^TestRealtestPriorityCloseReopenKill$' ]; then
-        fail "$name" "the invocations were: $(cat "$SCRATCH/slot-reached")"
+    if [ "$(cat "$SCRATCH/run-reached")" != '^TestRealtestPriorityCloseReopenKill$' ]; then
+        fail "$name" "the invocations were: $(cat "$SCRATCH/run-reached")"
         return
     fi
     pass "$name"
@@ -1271,8 +1271,8 @@ test_a_sweep_runs_one_invocation_per_realtest_in_order() {
     local want='^TestRealtestCreateWorkDeleteAWorkspace$
 ^TestRealtestStartTheEditor$
 ^TestRealtestForkAWorkspace$'
-    if [ "$(cat "$SCRATCH/slot-reached")" != "$want" ]; then
-        fail "$name" "the invocations were: $(cat "$SCRATCH/slot-reached")"
+    if [ "$(cat "$SCRATCH/run-reached")" != "$want" ]; then
+        fail "$name" "the invocations were: $(cat "$SCRATCH/run-reached")"
         return
     fi
     pass "$name"
@@ -1344,7 +1344,7 @@ test_declines_a_sweep_that_would_quit_a_standing_editor() {
         fail "$name" "the refusal does not say how many quits the consent would authorize: $out"
         return
     fi
-    if [ -f "$SCRATCH/slot-reached" ]; then
+    if [ -f "$SCRATCH/run-reached" ]; then
         fail "$name" "a realtest ran despite the refusal"
         return
     fi
@@ -1373,12 +1373,12 @@ test_realtest_3_is_skipped_without_the_daemon_consent() {
         fail "$name" "the skip does not say what consent would let it run: $out"
         return
     fi
-    if grep -q 'TestRealtestStartWithTheDaemonDown' "$SCRATCH/slot-reached"; then
+    if grep -q 'TestRealtestStartWithTheDaemonDown' "$SCRATCH/run-reached"; then
         fail "$name" "realtest 3 was run into its own refusal instead of being skipped"
         return
     fi
-    if ! grep -q 'TestRealtestStartTheEditor' "$SCRATCH/slot-reached"; then
-        fail "$name" "the realtest that COULD run did not: $(cat "$SCRATCH/slot-reached")"
+    if ! grep -q 'TestRealtestStartTheEditor' "$SCRATCH/run-reached"; then
+        fail "$name" "the realtest that COULD run did not: $(cat "$SCRATCH/run-reached")"
         return
     fi
     if [ -f "$SCRATCH/kill-log" ] && [ -s "$SCRATCH/kill-log" ]; then
@@ -1414,7 +1414,7 @@ test_realtest_3_stops_the_daemon_under_its_own_consent() {
         fail "$name" "a daemon that answered its own door was signalled anyway: $(cat "$SCRATCH/kill-log")"
         return
     fi
-    if ! grep -q 'TestRealtestStartWithTheDaemonDown' "$SCRATCH/slot-reached"; then
+    if ! grep -q 'TestRealtestStartWithTheDaemonDown' "$SCRATCH/run-reached"; then
         fail "$name" "realtest 3 did not run once its world was established"
         return
     fi
@@ -1445,7 +1445,7 @@ test_a_daemon_that_ignores_sigterm_is_not_escalated() {
         fail "$name" "the owner's daemon was escalated to SIGKILL: $(cat "$SCRATCH/kill-log")"
         return
     fi
-    if [ -f "$SCRATCH/slot-reached" ]; then
+    if [ -f "$SCRATCH/run-reached" ]; then
         fail "$name" "realtest 3 ran with a daemon still up"
         return
     fi
@@ -1538,7 +1538,7 @@ test_realtest_2_is_skipped_when_no_daemon_is_serving() {
         fail "$name" "the skip does not say why realtest 2 could not run: $out"
         return
     fi
-    if [ -f "$SCRATCH/slot-reached" ]; then
+    if [ -f "$SCRATCH/run-reached" ]; then
         fail "$name" "realtest 2 ran into its own precondition instead of being skipped"
         return
     fi
@@ -1596,13 +1596,13 @@ test_a_failing_realtest_does_not_stop_the_sweep() {
     ready_json > "$SCRATCH/readiness.json"
     SCRIPT_ARGS=(1 5 6)
 
-    out="$(STUB_SLOT_FAIL=TestRealtestCreateWorkDeleteAWorkspace AGENT_REPL_REALTEST_TAKEOVER=1 \
+    out="$(STUB_RUN_FAIL=TestRealtestCreateWorkDeleteAWorkspace AGENT_REPL_REALTEST_TAKEOVER=1 \
         run_script "$dir")" || status=$?
     if [ "$status" -eq 0 ] || [ "$status" -eq "$EXIT_DECLINED" ] || [ "$status" -eq "$EXIT_INCOMPLETE" ]; then
         fail "$name" "exit was $status, want a realtest failure; output: $out"
         return
     fi
-    if ! grep -q 'TestRealtestRegisterAndReopen' "$SCRATCH/slot-reached"; then
+    if ! grep -q 'TestRealtestRegisterAndReopen' "$SCRATCH/run-reached"; then
         fail "$name" "the realtest after the failure never ran, so one run does not gather every finding"
         return
     fi
@@ -1622,8 +1622,8 @@ test_a_realtest_asked_for_twice_runs_once() {
         fail "$name" "exit was $status, want 0; output: $out"
         return
     fi
-    if [ "$(grep -c . "$SCRATCH/slot-reached")" -ne 1 ]; then
-        fail "$name" "the invocations were: $(cat "$SCRATCH/slot-reached")"
+    if [ "$(grep -c . "$SCRATCH/run-reached")" -ne 1 ]; then
+        fail "$name" "the invocations were: $(cat "$SCRATCH/run-reached")"
         return
     fi
     pass "$name"
@@ -1664,8 +1664,8 @@ test_every_world_table_row_names_a_real_test() {
 # ---- the sweep's edges: leftovers and the gap between sweeps --------------
 #
 # The three checks are `go test` invocations that do NOT go through
-# suite-slot.sh (they start no editor and hold no machine), so they are seen
-# through the `go` stub's own marker rather than the slot's.
+# background.sh (they start no editor and hold no machine), so they are seen
+# through the `go` stub's own marker rather than the background stub's.
 
 test_declines_when_a_previous_sweep_left_registry_rows() {
     local name="the sweep DECLINES when a previous sweep left workspace rows in the registry"
@@ -1683,8 +1683,8 @@ test_declines_when_a_previous_sweep_left_registry_rows() {
         fail "$name" "the refusal does not name the remedy; output: $out"
         return
     fi
-    if [ -s "$SCRATCH/slot-reached" ]; then
-        fail "$name" "a realtest ran anyway: $(cat "$SCRATCH/slot-reached")"
+    if [ -s "$SCRATCH/run-reached" ]; then
+        fail "$name" "a realtest ran anyway: $(cat "$SCRATCH/run-reached")"
         return
     fi
     pass "$name"
@@ -1738,7 +1738,7 @@ test_between_sweep_findings_fail_an_otherwise_green_sweep() {
         fail "$name" "exit was $status, want a failure; output: $out"
         return
     fi
-    if ! grep -q 'TestRealtestStartTheEditor' "$SCRATCH/slot-reached"; then
+    if ! grep -q 'TestRealtestStartTheEditor' "$SCRATCH/run-reached"; then
         fail "$name" "the sweep did not run its realtests; a between-sweeps finding reports, it does not block"
         return
     fi
@@ -1753,7 +1753,7 @@ test_the_sweep_cleans_its_own_rows_even_after_a_failure() {
     ready_json > "$SCRATCH/readiness.json"
     SCRIPT_ARGS=(5)
 
-    STUB_SLOT_FAIL=TestRealtestCreateWorkDeleteAWorkspace AGENT_REPL_REALTEST_TAKEOVER=1 \
+    STUB_RUN_FAIL=TestRealtestCreateWorkDeleteAWorkspace AGENT_REPL_REALTEST_TAKEOVER=1 \
         run_script "$dir" >/dev/null 2>&1 || status=$?
     if ! grep -q "^TestCleanRealtestLeftovers clean 0 $SCRATCH/out\$" "$SCRATCH/go-reached"; then
         fail "$name" "no clean was asked for over the run directory: $(cat "$SCRATCH/go-reached")"
@@ -1848,7 +1848,7 @@ test_focus_goes_back_after_a_failing_realtest() {
     ready_json > "$SCRATCH/readiness.json"
     SCRIPT_ARGS=(1)
 
-    STUB_SLOT_FAIL=TestRealtestStartTheEditor AGENT_REPL_REALTEST_TAKEOVER=1 \
+    STUB_RUN_FAIL=TestRealtestStartTheEditor AGENT_REPL_REALTEST_TAKEOVER=1 \
         run_script "$dir" >/dev/null 2>&1 || status=$?
     if ! grep -q '^give-back ' "$SCRATCH/focus-reached"; then
         fail "$name" "focus was never handed back, so the owner's desktop stays on Emacs: $(cat "$SCRATCH/focus-reached")"
@@ -1922,7 +1922,7 @@ test_a_take_that_failed_does_not_stop_the_sweep() {
     SCRIPT_ARGS=(1)
 
     out="$(STUB_FOCUS_TAKE_FAIL=1 AGENT_REPL_REALTEST_TAKEOVER=1 run_script "$dir")" || status=$?
-    if ! grep -q 'TestRealtestStartTheEditor' "$SCRATCH/slot-reached"; then
+    if ! grep -q 'TestRealtestStartTheEditor' "$SCRATCH/run-reached"; then
         fail "$name" "the sweep ran nothing; a desktop that would not cooperate must not cost the run its findings: $out"
         return
     fi
@@ -1950,8 +1950,8 @@ test_clean_leftovers_runs_no_realtest() {
         fail "$name" "the clean did not cover the realtest root: $(cat "$SCRATCH/go-reached")"
         return
     fi
-    if [ -s "$SCRATCH/slot-reached" ]; then
-        fail "$name" "a realtest ran: $(cat "$SCRATCH/slot-reached")"
+    if [ -s "$SCRATCH/run-reached" ]; then
+        fail "$name" "a realtest ran: $(cat "$SCRATCH/run-reached")"
         return
     fi
     pass "$name"
@@ -2216,7 +2216,7 @@ test_the_editor_handback_survives_a_failing_realtest() {
     guarded_emacs_line 7777 > "$SCRATCH/procs"
 
     SCRIPT_ARGS=(1)
-    out="$(STUB_EMACS_PID=7777 STUB_SLOT_FAIL=TestRealtestStartTheEditor run_script "$dir")" || status=$?
+    out="$(STUB_EMACS_PID=7777 STUB_RUN_FAIL=TestRealtestStartTheEditor run_script "$dir")" || status=$?
     if [ "$status" -eq 0 ]; then
         fail "$name" "a failing realtest reported success; output: $out"
         return

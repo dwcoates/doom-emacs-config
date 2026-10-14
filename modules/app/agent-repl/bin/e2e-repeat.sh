@@ -28,16 +28,11 @@
 # Defaults: 5 runs, root $TMPDIR/agent-repl-e2e-artifacts/<utc stamp>, and the
 # package's own default arguments (-count=1 -parallel 8 -v .).
 #
-# Each run is taken through bin/suite-slot.sh, the host concurrency gate, so a
-# repeat driver cannot overcommit the box the way concurrent agents did.
-#
-# THE SLOT IS THE ONLY GATE. This driver used to wait, on a 5-second poll, for
-# the 1-minute load average to fall below a bound before each run. AGENTS.md
-# forbids gating on the load average (bin/suite-slot.sh's header: it is a
-# decaying mean that lags the work, and every waiter reads the same number and
-# starts at once), and the slot already serializes every suite that could load
-# the box. The load a run started at is still RECORDED in its directory
-# (`start-load`), as evidence for a load-sensitive red, and never waited on.
+# Each run is at background priority (bin/background.sh), so it always yields
+# the CPU to the owner's live runtime. No host gate bounds concurrent runs
+# (owner ruling, 2026-10-14), and the load average is never waited on: it is a
+# decaying mean that lags the work. The load a run started at is RECORDED in
+# its directory (`start-load`), as evidence for a load-sensitive red.
 
 # Tests run only at background priority: re-exec once through bin/background.sh.
 [[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/background.sh" bash "${BASH_SOURCE[0]}" "$@"
@@ -93,7 +88,7 @@ for (( run = 1; run <= runs; run++ )); do
   log "run $run starting at 1-minute load ${started_load:-unavailable}"
   start=$(date -u +%s)
   AGENT_REPL_E2E_ARTIFACTS="$run_dir" \
-    "$module_root/bin/suite-slot.sh" \
+    "$module_root/bin/background.sh" \
     "$module_root/e2e/sandbox/bin/e2e-sandbox.sh" run --dir e2e \
     go test "${test_args[@]}" 2>&1 | tee "$run_dir/go-test.log"
   status=${PIPESTATUS[0]}
