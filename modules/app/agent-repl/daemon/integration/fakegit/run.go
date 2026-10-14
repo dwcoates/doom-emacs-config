@@ -135,6 +135,8 @@ func answer(s *State, cwd string, args []string) Result {
 		return fetch(repo, subject)
 	case "for-each-ref":
 		return forEachRef(repo, subject)
+	case "tag":
+		return tag(s, repo, wt, subject)
 	}
 	return Result{Stderr: fmt.Sprintf("fatal: fakegit has no fixture for `git %s`\n", strings.Join(subject, " ")), Exit: 128}
 }
@@ -1594,4 +1596,49 @@ func commitTree(s *State, repo *Repo, wt *Worktree, subject []string) Result {
 	}
 	c := s.AddCommit(repo, "", subject[5], []string{parent}, nil)
 	return Result{Stdout: c.SHA + "\n"}
+}
+
+// tag models the three forms the merge queue's versioning speaks:
+// `tag --list --merged <commit>` and `tag --list --points-at <commit>` list
+// the tags reachable from, or pointing at, the commit, sorted; `tag --annotate
+// --message <m> --end-of-options <name> <commit>` creates one, refusing a
+// name that is already a tag as git does without -f.
+func tag(s *State, repo *Repo, wt *Worktree, subject []string) Result {
+	switch {
+	case len(subject) == 4 && subject[1] == "--list" && (subject[2] == "--merged" || subject[2] == "--points-at"):
+		sha, ok := s.resolve(repo, wt, subject[3])
+		if !ok {
+			return Result{Stderr: fmt.Sprintf("error: malformed object name %s\n", subject[3]), Exit: 129}
+		}
+		reachable := map[string]bool{sha: true}
+		if subject[2] == "--merged" {
+			reachable = s.reachable(sha)
+		}
+		var names []string
+		for name, t := range repo.Tags {
+			if reachable[t.Commit] {
+				names = append(names, name)
+			}
+		}
+		sort.Strings(names)
+		if len(names) == 0 {
+			return Result{}
+		}
+		return Result{Stdout: strings.Join(names, "\n") + "\n"}
+	case len(subject) == 7 && subject[1] == "--annotate" && subject[2] == "--message" && subject[4] == "--end-of-options":
+		name, ref := subject[5], subject[6]
+		if _, exists := repo.Tags[name]; exists {
+			return Result{Stderr: fmt.Sprintf("fatal: tag '%s' already exists\n", name), Exit: 128}
+		}
+		sha, ok := s.resolve(repo, wt, ref)
+		if !ok {
+			return Result{Stderr: fmt.Sprintf("fatal: Failed to resolve '%s' as a valid ref.\n", ref), Exit: 128}
+		}
+		if repo.Tags == nil {
+			repo.Tags = map[string]*Tag{}
+		}
+		repo.Tags[name] = &Tag{Commit: sha, Message: subject[3]}
+		return Result{}
+	}
+	return Result{Stderr: fmt.Sprintf("fatal: fakegit has no fixture for `git %s`\n", strings.Join(subject, " ")), Exit: 128}
 }
