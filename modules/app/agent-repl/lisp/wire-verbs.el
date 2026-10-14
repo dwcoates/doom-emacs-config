@@ -3374,6 +3374,47 @@ required: an arm without one is incomplete and errors before send."
   "Encode UpdateMergeQueueEnableRacing.  Empty: the switch is daemon-wide."
   nil)
 
+(defun agent-repl-wire-encode-update-merge-queue-subscriber (ref)
+  "Encode the `subscriber' use site of UpdateMergeQueueSubscribe and
+UpdateMergeQueueUnsubscribe from REF."
+  (agent-repl-wire-encode-workspace-ref ref))
+
+(defun agent-repl-wire-encode-update-merge-queue-subscribe-detail (value)
+  "Encode UpdateMergeQueueSubscribeDetail from VALUE (:arm LEVEL :value nil).
+THE ARM IS THE LEVEL: `:every-change', `:advances' or `:depletes', each an
+empty message."
+  (list (agent-repl-wire-verbs--encode-oneof
+         "UpdateMergeQueueSubscribeDetail" "level" value
+         (list (list :every-change 'everyChange #'ignore)
+               (list :advances 'advances #'ignore)
+               (list :depletes 'depletes #'ignore)))))
+
+(defun agent-repl-wire-verbs--encode-merge-queue-scoped-subscriber (message value)
+  "Encode MESSAGE's `subscriber' and optional `repository' from plist VALUE
+\(:subscriber REF :repository REF).  The subscriber is required; an absent
+repository is every repository's queue and is omitted."
+  (let ((ref (plist-get value :repository)))
+    (append
+     (list (cons 'subscriber
+                 (agent-repl-wire-encode-update-merge-queue-subscriber
+                  (agent-repl-wire-verbs--require message "subscriber" (plist-get value :subscriber)))))
+     (when ref
+       (list (cons 'repository (agent-repl-wire-encode-repository-ref ref)))))))
+
+(defun agent-repl-wire-encode-update-merge-queue-subscribe (value)
+  "Encode UpdateMergeQueueSubscribe from plist VALUE (:subscriber REF
+:repository REF :detail (:arm LEVEL)).  The detail is required."
+  (append (agent-repl-wire-verbs--encode-merge-queue-scoped-subscriber "UpdateMergeQueueSubscribe" value)
+          (list (cons 'detail
+                      (agent-repl-wire-encode-update-merge-queue-subscribe-detail
+                       (agent-repl-wire-verbs--require "UpdateMergeQueueSubscribe" "detail"
+                                                        (plist-get value :detail)))))))
+
+(defun agent-repl-wire-encode-update-merge-queue-unsubscribe (value)
+  "Encode UpdateMergeQueueUnsubscribe from plist VALUE (:subscriber REF
+:repository REF)."
+  (agent-repl-wire-verbs--encode-merge-queue-scoped-subscriber "UpdateMergeQueueUnsubscribe" value))
+
 (defun agent-repl-wire-encode-update-merge-queue-request-pause (value)
   "Encode UpdateMergeQueueRequest's `pause' action arm from VALUE."
   (agent-repl-wire-encode-update-merge-queue-pause value))
@@ -3422,7 +3463,9 @@ required: an arm without one is incomplete and errors before send."
                (list :hold-rollouts 'holdRollouts #'agent-repl-wire-encode-update-merge-queue-request-hold-rollouts)
                (list :release-rollouts 'releaseRollouts #'agent-repl-wire-encode-update-merge-queue-request-release-rollouts)
                (list :disable-racing 'disableRacing #'agent-repl-wire-encode-update-merge-queue-request-disable-racing)
-               (list :enable-racing 'enableRacing #'agent-repl-wire-encode-update-merge-queue-request-enable-racing)))))
+               (list :enable-racing 'enableRacing #'agent-repl-wire-encode-update-merge-queue-request-enable-racing)
+               (list :subscribe 'subscribe #'agent-repl-wire-encode-update-merge-queue-subscribe)
+               (list :unsubscribe 'unsubscribe #'agent-repl-wire-encode-update-merge-queue-unsubscribe)))))
 
 (defun agent-repl-wire-decode-update-merge-queue-success (json)
   "Decode UpdateMergeQueueSuccess from JSON.  Empty: the bubbles reflect it."
@@ -3494,6 +3537,16 @@ already disabled."
 disabled."
   (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueRacingNotDisabled" json))
 
+(defun agent-repl-wire-decode-update-merge-queue-not-subscribed (json)
+  "Decode UpdateMergeQueueNotSubscribed from JSON.  Empty: the subscriber holds
+no subscription in the scope the unsubscribe named."
+  (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueNotSubscribed" json))
+
+(defun agent-repl-wire-decode-update-merge-queue-subscriber-closed (json)
+  "Decode UpdateMergeQueueSubscriberClosed from JSON.  Empty: a closed
+workspace cannot subscribe."
+  (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueSubscriberClosed" json))
+
 (defun agent-repl-wire-decode-update-merge-queue-error-unknown-workspace (json)
   "Decode UpdateMergeQueueError's `unknown_workspace' cause arm from JSON."
   (agent-repl-wire-decode-update-merge-queue-unknown-workspace json))
@@ -3547,7 +3600,7 @@ disabled."
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "UpdateMergeQueueError"))
-    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted alreadyPaused notPaused noSuchQueuedMerge unknownRepository rolloutsAlreadyHeld rolloutsNotHeld racingAlreadyDisabled racingNotDisabled))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted alreadyPaused notPaused noSuchQueuedMerge unknownRepository rolloutsAlreadyHeld rolloutsNotHeld racingAlreadyDisabled racingNotDisabled notSubscribed subscriberClosed))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -3562,7 +3615,9 @@ arm this codec does not know is refused as an unknown field."
          (list 'rolloutsAlreadyHeld :rollouts-already-held #'agent-repl-wire-decode-update-merge-queue-error-rollouts-already-held)
          (list 'rolloutsNotHeld :rollouts-not-held #'agent-repl-wire-decode-update-merge-queue-error-rollouts-not-held)
          (list 'racingAlreadyDisabled :racing-already-disabled #'agent-repl-wire-decode-update-merge-queue-error-racing-already-disabled)
-         (list 'racingNotDisabled :racing-not-disabled #'agent-repl-wire-decode-update-merge-queue-error-racing-not-disabled))))))
+         (list 'racingNotDisabled :racing-not-disabled #'agent-repl-wire-decode-update-merge-queue-error-racing-not-disabled)
+         (list 'notSubscribed :not-subscribed #'agent-repl-wire-decode-update-merge-queue-not-subscribed)
+         (list 'subscriberClosed :subscriber-closed #'agent-repl-wire-decode-update-merge-queue-subscriber-closed))))))
 
 (defun agent-repl-wire-decode-update-merge-queue-response-success (json)
   "Decode UpdateMergeQueueResponse's `success' arm from JSON."
