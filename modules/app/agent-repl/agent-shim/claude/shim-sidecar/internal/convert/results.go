@@ -702,10 +702,14 @@ func artifactSuccess(call openCall, result map[string]any) *conversationv1.Agent
 			Outcome: &conversationv1.AgentArtifactSuccess_Listed{Listed: &conversationv1.AgentArtifactListed{}},
 		}
 	}
+	// THE PUBLISH ANSWERED, restated through the start's own reader: the
+	// finished card's favicon and file are stated only by the call.
+	publish, _ := artifactAct(call.input)
 	return &conversationv1.AgentArtifactSuccess{
 		Outcome: &conversationv1.AgentArtifactSuccess_Published{Published: &conversationv1.AgentArtifactPublished{
-			Url:   str(result["url"]),
-			Title: optionalString(result["title"]),
+			Url:     str(result["url"]),
+			Title:   optionalString(result["title"]),
+			Publish: publish,
 		}},
 	}
 }
