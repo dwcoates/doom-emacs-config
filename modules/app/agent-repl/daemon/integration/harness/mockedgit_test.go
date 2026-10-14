@@ -2,6 +2,7 @@ package harness
 
 import (
 	"agentrepl/testrun/roster"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,16 +26,15 @@ func TestMockedGitLinkNamesTheGitclientSeam(t *testing.T) {
 // does not exist is silently ignored by the linker.
 func TestTheMockedGitLinkReachesTheSeam(t *testing.T) {
 	// Arrange: a throwaway main package inside the daemon module that prints
-	// the seam through the package's own test-only accessor.
+	// the seam through the package's own test-only accessor. IT EXISTS ONLY IN
+	// THE BUILD'S OVERLAY: a directory written into the module tree is walked
+	// by every source-scanning test running beside this one, which then failed
+	// on it vanishing (TestTurnCloseIsNamedOnlyByItsString, 2026-10-14).
 	module, err := moduleRoot()
 	if err != nil {
 		t.Fatalf("module root: %v", err)
 	}
-	prog, err := os.MkdirTemp(module, "seamprobe-")
-	if err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(prog) })
+	scratch := t.TempDir()
 	src := `package main
 
 import (
@@ -45,13 +45,22 @@ import (
 
 func main() { fmt.Print(gitclient.Binary()) }
 `
-	if err := os.WriteFile(filepath.Join(prog, "main.go"), []byte(src), 0o644); err != nil {
+	mainGo := filepath.Join(scratch, "main.go")
+	if err := os.WriteFile(mainGo, []byte(src), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	bin := filepath.Join(t.TempDir(), "probe")
+	overlay, err := json.Marshal(map[string]map[string]string{"Replace": {filepath.Join(module, "seamprobe", "main.go"): mainGo}})
+	if err != nil {
+		t.Fatalf("encode the overlay: %v", err)
+	}
+	overlayFile := filepath.Join(scratch, "overlay.json")
+	if err := os.WriteFile(overlayFile, overlay, 0o644); err != nil {
+		t.Fatalf("write the overlay: %v", err)
+	}
+	bin := filepath.Join(scratch, "probe")
 
 	// Act.
-	build := exec.Command("go", "build", "-buildvcs=false", "-ldflags="+MockedGitLink("/mocked/git"), "-o", bin, "./"+filepath.Base(prog))
+	build := exec.Command("go", "build", "-buildvcs=false", "-overlay="+overlayFile, "-ldflags="+MockedGitLink("/mocked/git"), "-o", bin, "./seamprobe")
 	build.Dir = module
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v\n%s", err, out)
