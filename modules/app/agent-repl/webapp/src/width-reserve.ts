@@ -41,5 +41,19 @@ export function fitsReserve(label: string, reserve: readonly string[]): boolean 
  * `content`: drawn `white-space: pre`, its box is as wide as the widest label.
  */
 export function reserveLabelsCss(reserve: readonly string[]): string {
-  return `"${reserve.join("\\A ")}"`;
+  return `"${reserve.map(cssStringBody).join("\\A ")}"`;
+}
+
+/**
+ * TEXT as one CSS string, for a ghost's `content`: quoted, with its
+ * backslashes and quotes escaped and a line break written `\A `, so any text
+ * reads back as exactly itself.
+ */
+export function cssString(text: string): string {
+  return `"${cssStringBody(text)}"`;
+}
+
+/** TEXT escaped for the inside of a CSS string. */
+function cssStringBody(text: string): string {
+  return text.replace(/[\\"]/g, "\\$&").replace(/\n/g, "\\A ");
 }

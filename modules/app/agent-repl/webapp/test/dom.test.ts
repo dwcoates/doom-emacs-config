@@ -1,8 +1,16 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { SVG_NS, ancestorMatching, computedPx, placeChildren, repaintMark, scrollbarWidthPx } from "../src/dom.js";
+import {
+  SVG_NS,
+  ancestorMatching,
+  computedPx,
+  pageResizeObserver,
+  placeChildren,
+  repaintMark,
+  scrollbarWidthPx,
+} from "../src/dom.js";
 import { codeOf } from "./source-text.js";
 
 describe("scrollbarWidthPx", () => {
@@ -300,5 +308,43 @@ describe("SVG_NS", () => {
       .map((path) => relative(src, path));
     // Assert
     expect(spelled).toEqual(["dom.ts"]);
+  });
+});
+
+describe("pageResizeObserver", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("answers the observer of the page the element lives in", () => {
+    // Arrange
+    const el = document.createElement("div");
+    // Act / Assert
+    expect(pageResizeObserver(el)).toBe(window.ResizeObserver);
+  });
+
+  it("answers null for an element of a page with no observer", () => {
+    // Arrange
+    vi.stubGlobal("ResizeObserver", undefined);
+    const el = document.createElement("div");
+    // Act / Assert
+    expect(pageResizeObserver(el)).toBeNull();
+  });
+
+  it("answers null for an element of a document with no window", () => {
+    // Arrange
+    const el = document.implementation.createHTMLDocument("detached").createElement("div");
+    // Act / Assert
+    expect(pageResizeObserver(el)).toBeNull();
+  });
+
+  it("is the one availability check every measurer asks", () => {
+    // Arrange: every source file under src.
+    const src = join(__dirname, "../src");
+    const files = readdirSync(src, { recursive: true, encoding: "utf8" }).filter((f) => f.endsWith(".ts"));
+    // Act: a hand-rolled check reads `typeof <x>.ResizeObserver`.
+    const rolled = files.filter((f) => /typeof [\w.?]+\.ResizeObserver/.test(readFileSync(join(src, f), "utf8")));
+    // Assert: only the helper's own module.
+    expect(rolled).toEqual(["dom.ts"]);
   });
 });

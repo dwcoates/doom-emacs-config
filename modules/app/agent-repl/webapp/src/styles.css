@@ -664,6 +664,10 @@ body::after {
      token and hands the inset it gave up to the CONTENT inside the scroll box,
      so the bar lands on the edge while the text keeps the margin it had. */
   --bubble-scroll-gap: 2px;
+  /* The right inset the content keeps from the bar: the 0.9rem the bubble's
+     right padding gave up, less the gap the bubble still keeps. The body and
+     the header strip both read it. */
+  --bubble-content-inset: calc(0.9rem - var(--bubble-scroll-gap));
   /* THE ONE BUBBLE WIDTH (owner ruling, 2026-09-23): every blue and purple
      bubble -- response, prompt, peer, held prompt, compaction summary,
      agentic card -- fits its text up to this cap, and a metaprompt tree in
@@ -1722,7 +1726,7 @@ pre {
    bubble's right padding gave up. A scrollbar is laid out between the scroll
    box's border and its padding, so this padding is the distance from the TEXT
    to the bar, never from the bar to the bubble. */
-.bubble-body { flex: 1; min-width: 0; padding-right: calc(0.9rem - var(--bubble-scroll-gap)); overflow-wrap: anywhere; }
+.bubble-body { flex: 1; min-width: 0; padding-right: var(--bubble-content-inset); overflow-wrap: anywhere; }
 /* THE TYPE-OUT HIDES WHAT IT HAS NOT REACHED (src/bubble/text-reveal.ts): an
    element none of whose text is revealed yet draws no box at all, so a bullet,
    a code block's frame or a table row never appears ahead of its text. */
@@ -1732,7 +1736,7 @@ pre {
    keeps the right inset the bubble's padding used to give it, so a label sits
    where it always sat while the bar below it runs to the edge. */
 .bubble > .bubble-strip {
-  padding-right: calc(0.9rem - var(--bubble-scroll-gap));
+  padding-right: var(--bubble-content-inset);
 }
 /* THE ROLE: the side and the background, and nothing else (owner ruling,
    2026-09-23). A prompt hugs the RIGHT rail in blue: its right margin is half
@@ -4733,11 +4737,6 @@ bubble-body.bubble-body { display: block; }
   /* THE ONE SIZE both figures read (owner ruling, 2026-09-15): set here and
      inherited, so the token, the duration and both reserves cannot differ. */
   font-size: var(--usage-font-size);
-  /* One phase of the reveal; the two phases together take 0.5s. */
-  --usage-phase: 0.25s;
-  /* The hover hit area's padding (owner ruling, 2026-09-14). */
-  --usage-hit-x: 1.25rem;
-  --usage-hit-y: 0.4rem;
   float: right;
   position: relative;
   display: flex;
@@ -4762,9 +4761,7 @@ bubble-body.bubble-body { display: block; }
      the bubble's right edge. `.bubble`'s own right padding contributes one
      `--bubble-scroll-gap` and the hit padding is cancelled, so the margin
      supplies the rest. */
-  margin-right: calc(
-    var(--usage-corner-gap-x) - var(--bubble-scroll-gap) - var(--usage-hit-x)
-  );
+  margin-right: var(--usage-corner-margin-right);
 }
 /* THE CORNER'S GEOMETRY TOKENS are declared once, below, for both of their
    readers: the corner, and the ghost's host paragraph (whose `::before` the
@@ -4773,7 +4770,17 @@ bubble-body.bubble-body { display: block; }
    the ghost's identical one on the ghost. */
 .usage-corner,
 .bubble[data-cap-lines="none"] .usage-corner + .bubble-body > .response-prose:first-child > p:first-child,
-.bubble[data-more="ellipsis"] > .bubble-scroll.expanded > .usage-corner + .bubble-body > .response-prose:first-child > p:first-child {
+.bubble[data-more="ellipsis"] > .bubble-scroll.expanded > .usage-corner + .bubble-body > .response-prose:first-child > p:first-child,
+.bubble.interim-response {
+  /* The hover hit area's padding (owner ruling, 2026-09-14). */
+  --usage-hit-x: 1.25rem;
+  --usage-hit-y: 0.4rem;
+  /* One phase of the reveal; the two phases together take 0.5s. */
+  --usage-phase: 0.25s;
+  /* AN INTERIM'S BUBBLE GROWS TWICE AS FAST AS ITS DURATION SLIDES (owner
+     request, 2026-10-13), so the duration is seen sliding in from the edge the
+     bubble has already opened. */
+  --usage-grow: calc(var(--usage-phase) / 2);
   /* The half-leading of the corner's line: the space between its line box's
      top and the figures' em box. It is part of the top gap as drawn, so the
      right gap carries it too. */
@@ -4790,8 +4797,22 @@ bubble-body.bubble-body { display: block; }
      response bubble's tighter vertical padding moves the corner up with the
      prose but never sideways (owner request, 2026-10-12). */
   --usage-corner-gap-x: calc(var(--bubble-pad-y-base) + var(--usage-half-leading));
+  /* The corner's right margin, read by the corner and by an open interim's
+     ghost, which must round exactly as the corner does (see "AN OPEN
+     INTERIM'S GHOST"). */
+  --usage-corner-margin-right: calc(var(--usage-corner-gap-x) - var(--bubble-scroll-gap) - var(--usage-hit-x));
+  /* An interim corner's left margin, read by the corner and its open ghost
+     for the same reason. */
+  --usage-interim-margin-left: calc(var(--usage-text-gap) - var(--bubble-content-inset) - var(--usage-hit-x));
+  /* How far an interim bubble opens on hover: the duration's drawn width
+     (set on the bubble, src/feed/cards/response.ts) and its gap. */
+  --usage-reveal-w: calc(var(--usage-pair-gap) + var(--usage-ago-w));
   /* The normal gap between the token and the duration, unchanged. */
   --usage-pair-gap: 0.35rem;
+  /* AN INTERIM'S GAP FROM ITS TEXT TO ITS TOKEN (owner request, 2026-10-13:
+     "a space or two"): the pair's own gap, so the line, the token and the
+     duration keep one rhythm. */
+  --usage-text-gap: var(--usage-pair-gap);
   /* THE FIGURES' ONE SIZE, read by the corner and by the ghost that measures
      its footprint, so the two cannot differ: a quarter smaller than the 0.85em
      it was (owner request, 2026-10-13). */
@@ -4927,6 +4948,112 @@ bubble-body.bubble-body { display: block; }
 @media (prefers-reduced-motion: reduce) {
   .usage-slider,
   .usage-ago {
+    transition: none;
+  }
+}
+/* AN INTERIM RESPONSE'S CORNER GROWS ITS BUBBLE TO THE RIGHT (owner request,
+   2026-10-13). Only the amber-bordered interim: a final answer and a thinking
+   bubble keep the reveal above.
+
+   AT REST the corner is the token alone, `--usage-text-gap` from the end of
+   the line, with no duration reserve and no fixed 6ch slot: the bubble fits
+   the line and its token. The figure is settled by then (a later row of the
+   turn proved the response interim), so a slot as wide as the token never
+   reflows anything.
+
+   ON HOVER the bubble opens to the right by exactly the duration and its gap,
+   `--usage-ago-w` (the duration's drawn width, which the corner measures and
+   sets on the bubble, src/feed/cards/response.ts `measureUsageAgo`) plus
+   `--usage-pair-gap`. Three things grow by that one width, on the one
+   `--usage-grow` transition, so the line beside the corner never moves:
+     - the slider's width, which widens the corner's float;
+     - the bubble's cap, so a line truncated at the cap keeps its width and
+       the bubble passes the cap rather than squeezing the line;
+     - an OPEN interim's body's right margin, since its float adds nothing to
+       the bubble's width (see "THE SIZING GHOST") and its later lines must keep
+       theirs.
+   The duration meanwhile slides in from the bubble's new right edge towards
+   the token over a whole `--usage-phase`, twice the opening's length, fading
+   in as it comes. The token never moves. Mouse-leave runs both back.
+
+   THE MARKUP is the corner's own, restyled: the slider is in flow after the
+   token's slot, so the token (anchored to the slider's left edge) sits on that
+   slot, and the duration hangs off the slider at its natural width. */
+/* The corner's left margin reaches back over the body's inset, so the text
+   ends `--usage-text-gap` from the token rather than the inset plus the gap. */
+.bubble.interim-response > .bubble-scroll > .usage-corner {
+  margin-left: var(--usage-interim-margin-left);
+}
+.bubble.interim-response > .bubble-scroll > .usage-corner::before {
+  width: auto;
+}
+.bubble.interim-response > .bubble-scroll > .usage-corner > .usage-reserve {
+  display: none;
+}
+.bubble.interim-response > .bubble-scroll > .usage-corner > .usage-slider {
+  position: relative;
+  top: auto;
+  right: auto;
+  width: 0;
+  transform: none;
+  transition: width var(--usage-grow) ease;
+}
+.bubble.interim-response > .bubble-scroll > .usage-corner .usage-ago {
+  width: max-content;
+  transform: translateX(calc(100% + var(--usage-corner-gap-x)));
+  transition:
+    transform var(--usage-phase) ease,
+    opacity var(--usage-phase) ease;
+}
+/* AN OPEN INTERIM'S GHOST IS THE RESTING CORNER: the token text (the response
+   draw sets `--usage-token-text` from the corner's own figure) in the corner's
+   own margins and padding, so the open bubble is as wide as the closed one and
+   its first line keeps every word the closed line showed.
+   THE SAME TERMS, NOT THE SAME SUM: the engine rounds each margin and padding
+   on its own, so a ghost summed from other terms than the corner's came out a
+   fraction of a pixel narrower, and a line that fit closed wrapped once
+   opened. The ghost sits inside the body's inset and the corner outside it,
+   and the inset is in both bubbles, so these terms are the whole difference. */
+.bubble.interim-response > .bubble-scroll.expanded > .usage-corner + .bubble-body > .response-prose:first-child > p:first-child::before {
+  content: var(--usage-token-text);
+  margin-left: var(--usage-interim-margin-left);
+  padding-left: var(--usage-hit-x);
+  padding-right: var(--usage-hit-x);
+  margin-right: var(--usage-corner-margin-right);
+}
+.bubble.interim-response > .bubble-scroll.expanded > .usage-corner + .bubble-body {
+  transition: margin-right var(--usage-grow) ease;
+}
+.bubble.interim-response {
+  transition: max-width var(--usage-grow) ease;
+}
+/* The reveal, under the one trigger every reveal reads: the bubble hovered or
+   holding focus (the corner's own triggers are inside it). An arriving corner
+   has no duration, so nothing opens for it. */
+.bubble.interim-response:hover:has(> .bubble-scroll > .usage-corner:not([data-arriving])),
+.bubble.interim-response:focus-within:has(> .bubble-scroll > .usage-corner:not([data-arriving])) {
+  max-width: calc(var(--bubble-max-width) + var(--usage-reveal-w));
+}
+.bubble.interim-response:hover > .bubble-scroll > .usage-corner:not([data-arriving]) > .usage-slider,
+.bubble.interim-response:focus-within > .bubble-scroll > .usage-corner:not([data-arriving]) > .usage-slider {
+  width: var(--usage-reveal-w);
+}
+.bubble.interim-response:hover > .bubble-scroll.expanded > .usage-corner:not([data-arriving]) + .bubble-body,
+.bubble.interim-response:focus-within > .bubble-scroll.expanded > .usage-corner:not([data-arriving]) + .bubble-body {
+  margin-right: var(--usage-reveal-w);
+}
+.bubble.interim-response:hover > .bubble-scroll > .usage-corner .usage-ago,
+.bubble.interim-response:focus-within > .bubble-scroll > .usage-corner .usage-ago {
+  opacity: 1;
+  transform: translateX(0);
+}
+@media (prefers-reduced-motion: reduce) {
+  .bubble.interim-response {
+    transition: none;
+  }
+  .bubble.interim-response > .bubble-scroll > .usage-corner > .usage-slider,
+  .bubble.interim-response > .bubble-scroll > .usage-corner .usage-ago,
+  .bubble.interim-response > .bubble-scroll.expanded > .usage-corner + .bubble-body {
     transition: none;
   }
 }
