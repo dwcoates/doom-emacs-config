@@ -93,22 +93,13 @@ func (o *orchestrator) checkVersion(ctx context.Context, requester wsm.Workspace
 // recorded at creation, another workspace's in that workspace's, and a named
 // branch run in place in the repository's main worktree.
 //
-// AN ASYNC REQUEST FROM A WORKSPACE THE DAEMON NEVER CREATED comes from the
-// main checkout, which records no merge geometry (checkAsync): its merge lands
-// in the repository's main worktree.
+// An async request lands where detachedTarget says.
 func (o *orchestrator) requestTarget(ctx context.Context, requester wsm.Workspace, req Request) (string, error) {
 	switch {
 	case req.Source.Kind == wsm.MergeSourceBranch && req.Detached == nil:
 		return o.deps.Git.MainWorktree(ctx, requester.Dir)
 	case req.Detached != nil:
-		job, found, err := o.deps.DB.CreationJob(ctx, requester.ID)
-		if err != nil {
-			return "", fmt.Errorf("merge: reading %s's creation job for where its async merge lands: %w", requester.ID, err)
-		}
-		if !found {
-			return o.deps.Git.MainWorktree(ctx, requester.Dir)
-		}
-		return job.Layout.TargetDir, nil
+		return o.detachedTarget(ctx, requester)
 	case req.Source.Kind == wsm.MergeSourceWorkspace:
 		job, err := o.layoutFor(ctx, req.Source.Workspace)
 		if err != nil {
@@ -119,6 +110,29 @@ func (o *orchestrator) requestTarget(ctx context.Context, requester wsm.Workspac
 	job, err := o.layoutFor(ctx, requester.ID)
 	if err != nil {
 		return "", err
+	}
+	return job.Layout.TargetDir, nil
+}
+
+// detachedTarget answers where an ASYNC request from REQUESTER lands: the
+// target its creation job recorded, which is where the requester's own merge
+// would land.
+//
+// AN ASYNC REQUEST FROM A WORKSPACE THE DAEMON NEVER CREATED comes from the
+// main checkout, which records no merge geometry (checkAsync): its merge lands
+// in the repository's main worktree.
+//
+// THIS IS THE ONE PLACE THE RULE IS DECIDED: the request's version check
+// (requestTarget) and the hand-off that forks the merge workspace
+// (handOffDetached) both ask it, so where a merge is checked to land and where
+// it lands cannot disagree.
+func (o *orchestrator) detachedTarget(ctx context.Context, requester wsm.Workspace) (string, error) {
+	job, found, err := o.deps.DB.CreationJob(ctx, requester.ID)
+	if err != nil {
+		return "", fmt.Errorf("merge: reading %s's creation job for where its async merge lands: %w", requester.ID, err)
+	}
+	if !found {
+		return o.deps.Git.MainWorktree(ctx, requester.Dir)
 	}
 	return job.Layout.TargetDir, nil
 }
