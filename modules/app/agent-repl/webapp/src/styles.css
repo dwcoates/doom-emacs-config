@@ -1834,12 +1834,15 @@ pre {
    - PROMPT AND RESPONSE BUBBLES SIT 30% TIGHTER (owner request, 2026-10-12).
    - A PROMPT BUBBLE (user, agent, peer, held) sits 30% tighter again ON EVERY
      SIDE (owner request, 2026-10-14): 0.7 of 0.7 vertically, and 0.7 of the
-     base horizontally. Its rung is the one that also sets `--bubble-pad-x`.
+     base horizontally. Its rung is one that also sets `--bubble-pad-x`.
+   - A USER PROMPT then sits 15% WIDER than that ON EVERY SIDE (owner request,
+     2026-10-14): 1.15 of the prompt's 0.49 vertically and 0.7 horizontally,
+     on a rung of its own that also sets `--bubble-pad-x`.
    - AN INTERIM RESPONSE, the amber-bordered one with no fill, sits 30% tighter
      again (owner request, 2026-10-13): 0.7 of 0.7. Its gap then shrinks ON EVERY SIDE by as much as its
      narrower text did (owner request, 2026-10-14): both tokens are multiplied
      by its `--bubble-font-rem` over the base, so the padding follows the text
-     size rather than copying its ratio. Its rung is the other one that sets
+     size rather than copying its ratio. Its rung is the last one that sets
      `--bubble-pad-x`.
    - THE GREEN ANSWER (`.final-response`) sits 25% WIDER than the response's
      0.7, top and bottom only (owner request, 2026-10-14): 1.25 of 0.7.
@@ -1850,12 +1853,15 @@ pre {
 .bubble[data-variant="response"] {
   --bubble-pad-y: calc(var(--bubble-pad-y-base) * 0.7);
 }
-.bubble[data-variant="user"],
 .bubble[data-variant="agent"],
 .bubble[data-variant="peer"],
 .bubble[data-variant="held"] {
   --bubble-pad-y: calc(var(--bubble-pad-y-base) * 0.49);
   --bubble-pad-x: calc(var(--bubble-pad-x-base) * 0.7);
+}
+.bubble[data-variant="user"] {
+  --bubble-pad-y: calc(var(--bubble-pad-y-base) * 0.49 * 1.15);
+  --bubble-pad-x: calc(var(--bubble-pad-x-base) * 0.7 * 1.15);
 }
 .bubble[data-variant="response"].interim-response {
   --bubble-pad-y: calc(var(--bubble-pad-y-base) * 0.49 * var(--bubble-font-rem) / var(--bubble-base-font-rem));
@@ -2692,14 +2698,16 @@ html[data-page-unshown] *::after {
    `BubbleCapLines` value (`BUBBLE_CAP_LINES`, src/bubble/draw.ts; styles.test.ts
    holds the two together). The uncapped mode (`data-cap-lines="none"`) has no
    entry and needs none: its box wears no `.bubble-scroll`, so no cap rule can
-   reach it. The shared feed cap for most capped bubbles, five lines for a user
-   or subagent prompt (`PROMPT_CAP_LINES`), one line for a held
+   reach it. The shared feed cap for most capped bubbles, five lines for a
+   subagent prompt (`AGENT_PROMPT_CAP_LINES`), three for a user prompt
+   (`USER_PROMPT_CAP_LINES`), one line for a held
    prompt, and NONE past the header strip for a
    peer message, whose label is the whole of its collapsed face. The cap rides
    the SCROLL BOX, so the strip above it never scrolls away from the text it
    labels, and it is counted in the one bubble leading. */
 .bubble[data-cap-lines="feed"] { --bubble-cap-lines: var(--feed-cap-lines); }
 .bubble[data-cap-lines="5"] { --bubble-cap-lines: 5; }
+.bubble[data-cap-lines="3"] { --bubble-cap-lines: 3; }
 .bubble[data-cap-lines="1"] { --bubble-cap-lines: 1; }
 .bubble[data-cap-lines="0"] { --bubble-cap-lines: 0; }
 .tool-read-output { --cap-lines: 10; --cap-extra: calc(0.35rem + 1px); }
