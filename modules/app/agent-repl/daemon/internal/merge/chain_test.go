@@ -834,6 +834,83 @@ func TestTheMergeBehindTheHeadStartsWhileTheHeadsRebaseStands(t *testing.T) {
 	}
 }
 
+func TestTheMergeBehindAPromotedHeadJoinsTheRaceAtOnce(t *testing.T) {
+	// Arrange: A holds in its gate; B races it from behind, its first gate on
+	// the old tip held (and cut when A lands), its gate at the head held too;
+	// C waits beyond the window.
+	c := newChain(t)
+	headGate, releaseHead := c.runner.hold(c.dirs[theWorkspace])
+	enqueue(t, c.h)
+	c.queue(t, "ws-b", "b1")
+	c.queue(t, "ws-c", "c1")
+	behindGate, _ := c.runner.hold(c.dirs["ws-b"])
+	_, releasePromoted := c.runner.hold(c.dirs["ws-b"])
+	thirdGate, releaseThird := c.runner.hold(c.dirs["ws-c"])
+	done := admitAsync(c.h, context.Background())
+	<-headGate
+	<-behindGate
+	close(releaseHead)
+	if err := <-done; err != nil {
+		t.Fatalf("the head's admission ended on: %v", err)
+	}
+
+	// Act: B is promoted; C reaches its gate while B's still holds.
+	promoted := admitAsync(c.h, context.Background())
+	bound := time.NewTimer(5 * time.Second)
+	defer bound.Stop()
+	select {
+	case <-thirdGate:
+	case <-bound.C:
+		t.Fatal("the merge behind the promoted head never reached its gate while that head ran")
+	}
+	close(releasePromoted)
+	close(releaseThird)
+	if err := <-promoted; err != nil {
+		t.Fatalf("the promoted head's run ended on: %v", err)
+	}
+	c.drain(t)
+
+	// Assert.
+	if tree := c.git.tree("master"); tree != "a1+b1+base+c1" {
+		t.Fatalf("master holds %s, want a1+b1+base+c1", tree)
+	}
+}
+
+func TestAChainWhoseHeadIsSuspendedTakesNoMergeUntilTheHeadIsBack(t *testing.T) {
+	// Arrange: A holds in its gate with B racing it; C waits beyond the
+	// window; then A alone is suspended, leaving B in the chain.
+	c := newChain(t)
+	headGate, _ := c.runner.hold(c.dirs[theWorkspace])
+	enqueue(t, c.h)
+	c.queue(t, "ws-b", "b1")
+	c.queue(t, "ws-c", "c1")
+	behindGate, releaseBehind := c.runner.hold(c.dirs["ws-b"])
+	done := admitAsync(c.h, context.Background())
+	<-headGate
+	<-behindGate
+	if err := c.h.o.suspendFor(context.Background(), theWorkspace, suspendPause); err != nil {
+		t.Fatalf("suspending the head: %v", err)
+	}
+	<-done
+
+	// Act.
+	c.h.o.extendChain(context.Background(), c.h.repoKey())
+
+	// Assert: C did not join, and the chain standing behind its suspended
+	// head is no defect.
+	if c.h.o.inChain(c.h.repoKey(), "ws-c") {
+		t.Fatal("a merge joined a chain whose head was suspended")
+	}
+	if c.recorded("error", "daemon.merge.chain", "does not stand at the front of its queue") {
+		t.Fatal("a chain standing behind its suspended head was recorded as a defect")
+	}
+	close(releaseBehind)
+	if err := c.h.o.AdoptWorkspace(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("taking the suspended head back: %v", err)
+	}
+	c.drain(t)
+}
+
 func TestTheRaceWinnerLandsTheTreeItTestedWithoutTestingAgain(t *testing.T) {
 	// Arrange: the head holds in its gate; the merge behind it passes.
 	c := newChain(t)
@@ -853,8 +930,12 @@ func TestTheRaceWinnerLandsTheTreeItTestedWithoutTestingAgain(t *testing.T) {
 }
 
 func TestAHeadThatLostTheRaceAndThenFailsLandsNothingOfItsOwn(t *testing.T) {
-	// Arrange: the head holds in its first gate and breaks in the next.
+	// Arrange: the head holds in its first gate and breaks in every one after:
+	// having lost, it races again behind the winner at once, and a gate of
+	// its that the winner's landing cuts gives no verdict.
 	c := newChain(t)
+	c.runner.script(c.dirs[theWorkspace], broken)
+	c.runner.script(c.dirs[theWorkspace], broken)
 	c.runner.script(c.dirs[theWorkspace], broken)
 	enqueue(t, c.h)
 	c.queue(t, "ws-b", "b1")
@@ -904,6 +985,8 @@ func TestASpeculativeGateWaitsForTheLoadToFallBelowTheBand(t *testing.T) {
 	c.h.load(0.2)
 	<-done
 	release()
+	// THE QUEUE IS DRAINED: whichever merge lost the race rejoins it at once
+	// behind the winner.
 	c.drain(t)
 
 	// Assert.
