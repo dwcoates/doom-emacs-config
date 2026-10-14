@@ -2,6 +2,11 @@ package merge
 
 import (
 	"agentrepl/testrun/roster"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -15,29 +20,24 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 		want  []string
 	}{
 		{
-			name:  "a webapp change selects the webapp suite and the build harness",
+			name:  "a webapp change selects the webapp suite, the build harness and the end-to-end suites",
 			paths: []string{"modules/app/agent-repl/webapp/src/App.tsx"},
-			want:  []string{"build-frontend-harness", "webapp"},
+			want:  []string{"build-frontend-harness", "webapp", "e2e", "e2e-emacs"},
 		},
 		{
-			name:  "a brief change selects the daemon suite that composes and pins it",
+			name:  "a brief change selects the daemon suite that composes and pins it, and the end-to-end suites",
 			paths: []string{"modules/app/agent-repl/prompts/merge-test-failure-resolve.md"},
-			want:  []string{"daemon"},
+			want:  []string{"daemon", "e2e", "e2e-emacs"},
 		},
 		{
-			name:  "a daemon change selects only the daemon suite",
+			name:  "a daemon change selects the daemon suite and the end-to-end suites",
 			paths: []string{"modules/app/agent-repl/daemon/internal/merge/run.go"},
-			want:  []string{"daemon"},
-		},
-		{
-			name:  "a proto change selects every generated consumer and the cross-system suite",
-			paths: []string{"modules/app/agent-repl/proto/src/frontend/v1/feed.proto"},
-			want:  []string{"daemon", "webapp", "shim", "proto", "e2e"},
+			want:  []string{"daemon", "e2e", "e2e-emacs"},
 		},
 		{
 			name:  "the shared logging module selects its consumers and the cross-system suite",
 			paths: []string{"modules/app/agent-repl/agent-shim/logging/go/log.go"},
-			want:  []string{"daemon", "sidecar", "store", "logging", "logging-density", "e2e"},
+			want:  []string{"daemon", "sidecar", "store", "lock", "shim", "webapp", "build-frontend-harness", "logging", "logging-density", "e2e", "e2e-emacs"},
 		},
 		{
 			name:  "an ordinary bin script selects the script harnesses",
@@ -45,19 +45,19 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 			want:  scriptHarnessSuites,
 		},
 		{
-			name:  "module-root elisp selects only ert",
+			name:  "module-root elisp selects ert and the Emacs layer",
 			paths: []string{"modules/app/agent-repl/config.el"},
-			want:  []string{"ert"},
+			want:  []string{"ert", "e2e-emacs"},
 		},
 		{
-			name:  "lisp/ selects only ert",
+			name:  "lisp/ selects ert and the Emacs layer",
 			paths: []string{"modules/app/agent-repl/lisp/core.el"},
-			want:  []string{"ert"},
+			want:  []string{"ert", "e2e-emacs"},
 		},
 		{
 			name:  "several regions union their selections",
 			paths: []string{"modules/app/agent-repl/webapp/src/App.tsx", "modules/app/agent-repl/daemon/main.go"},
-			want:  []string{"build-frontend-harness", "daemon", "webapp"},
+			want:  []string{"build-frontend-harness", "daemon", "webapp", "e2e", "e2e-emacs"},
 		},
 		{
 			name:  "the sandbox image selects only the Emacs client layer",
@@ -70,34 +70,34 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 			want:  []string{"e2e", "e2e-emacs"},
 		},
 		{
-			name:  "a shim change selects only the shim suite",
+			name:  "a shim change selects the shim suite and the end-to-end suites",
 			paths: []string{"modules/app/agent-repl/agent-shim/claude/shim/src/main.ts"},
-			want:  []string{"shim"},
+			want:  []string{"shim", "e2e", "e2e-emacs"},
 		},
 		{
-			name:  "a sidecar change selects only the sidecar suite",
+			name:  "a sidecar change selects the sidecar suite and the end-to-end suites",
 			paths: []string{"modules/app/agent-repl/agent-shim/claude/shim-sidecar/main.go"},
-			want:  []string{"sidecar"},
+			want:  []string{"sidecar", "e2e", "e2e-emacs"},
 		},
 		{
-			name:  "a store change selects only the store suite",
+			name:  "a store change selects the store suite and the end-to-end suites",
 			paths: []string{"modules/app/agent-repl/agent-shim/shim-store/main.go"},
-			want:  []string{"store"},
+			want:  []string{"store", "e2e", "e2e-emacs"},
 		},
 		{
-			name:  "the committed metaprompt selects the shim suite that reads it back",
+			name:  "the committed metaprompt selects the shim suite that reads it back, and the end-to-end suites",
 			paths: []string{"modules/app/agent-repl/metaprompt.md"},
-			want:  []string{"shim"},
+			want:  []string{"shim", "e2e", "e2e-emacs"},
 		},
 		{
-			name:  "documentation beside a daemon change selects only the daemon suite",
+			name:  "documentation beside a daemon change adds nothing to the daemon's selection",
 			paths: []string{"modules/app/agent-repl/docs/USER-GUIDE.md", "modules/app/agent-repl/daemon/main.go"},
-			want:  []string{"daemon"},
+			want:  []string{"daemon", "e2e", "e2e-emacs"},
 		},
 		{
-			name:  "the owner's configuration beside a daemon change selects only the daemon suite",
+			name:  "the owner's configuration beside a daemon change adds nothing to the daemon's selection",
 			paths: []string{"config.el", "modules/app/agent-repl/daemon/main.go"},
-			want:  []string{"daemon"},
+			want:  []string{"daemon", "e2e", "e2e-emacs"},
 		},
 		{
 			name:  "the pre-commit hook selects its harness, the installer's and the background scan",
@@ -214,6 +214,8 @@ func TestSelectSuitesRunnerScriptSelectsEverything(t *testing.T) {
 		"modules/app/agent-repl/testrun/roster/roster.go",
 		"modules/app/agent-repl/bin/report-nonlisp-coverage.sh",
 		"modules/app/agent-repl/bin/report-logging-density.sh",
+		"modules/app/agent-repl/proto/src/frontend/v1/feed.proto",
+		"modules/app/agent-repl/proto/helpers/go/rosterwalk/rosterwalk.go",
 	}
 	for _, path := range tests {
 		t.Run(path, func(t *testing.T) {
@@ -233,14 +235,15 @@ func TestSelectSuitesRunnerScriptSelectsEverything(t *testing.T) {
 
 // TestSelectSuitesMapsShimLockToItsSuiteAndTheShims covers the shim-lock
 // module: its own suite, plus the shim's, whose integration files spawn the
-// real lock helper.
+// real lock helper, and the end-to-end suites.
 func TestSelectSuitesMapsShimLockToItsSuiteAndTheShims(t *testing.T) {
 	// Act.
 	got := SelectSuites([]string{"modules/app/agent-repl/agent-shim/shim-lock/main.go"})
 
 	// Assert.
-	if got.Full || strings.Join(got.Suites, ",") != "lock,shim" {
-		t.Fatalf("shim-lock selected %v (full=%v), want lock and shim", got.Suites, got.Full)
+	want := strings.Join(inRosterOrder(setOf([]string{"lock", "shim", "e2e", "e2e-emacs"})), ",")
+	if got.Full || strings.Join(got.Suites, ",") != want {
+		t.Fatalf("shim-lock selected %v (full=%v), want %s", got.Suites, got.Full, want)
 	}
 }
 
@@ -320,7 +323,7 @@ func TestFullSelectionIsTheWholeRoster(t *testing.T) {
 func TestSelectSuitesReportsInRosterOrder(t *testing.T) {
 	// Arrange: paths given in the reverse of the roster's order.
 	paths := []string{
-		"modules/app/agent-repl/proto/src/frontend/v1/feed.proto",
+		"modules/app/agent-repl/webapp/src/App.tsx",
 		"modules/app/agent-repl/lisp/core.el",
 	}
 
@@ -328,7 +331,7 @@ func TestSelectSuitesReportsInRosterOrder(t *testing.T) {
 	got := SelectSuites(paths)
 
 	// Assert.
-	if strings.Join(got.Suites, ",") != "ert,daemon,webapp,shim,proto,e2e" {
+	if strings.Join(got.Suites, ",") != "build-frontend-harness,ert,webapp,e2e,e2e-emacs" {
 		t.Fatalf("selection order is %v, want the roster's own order", got.Suites)
 	}
 }
@@ -389,4 +392,113 @@ func setOf(suites []string) map[string]bool {
 		out[s] = true
 	}
 	return out
+}
+
+// TestEveryGoSuiteIsSelectedByEveryLocalModuleItReplaces derives each Go
+// suite's local dependencies from its own go.mod (`replace ... => ../...`) and
+// checks a change in any of them selects the suite, so a new cross-module
+// import can never leave a merge's gate blind to it.
+func TestEveryGoSuiteIsSelectedByEveryLocalModuleItReplaces(t *testing.T) {
+	// Arrange: the module root on disk, four directories up.
+	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	if err != nil {
+		t.Fatalf("resolve the module root: %v", err)
+	}
+	replace := regexp.MustCompile(`=>\s*(\.\.?/\S*)`)
+	checked := 0
+	for _, suite := range roster.Suites {
+		if suite.Kind != roster.GoModule && suite.Kind != roster.E2E {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(root, suite.Path, "go.mod"))
+		if err != nil {
+			t.Fatalf("read %s's go.mod: %v", suite.Name, err)
+		}
+		for _, m := range replace.FindAllStringSubmatch(string(body), -1) {
+			dep, err := filepath.Rel(root, filepath.Join(root, suite.Path, m[1]))
+			if err != nil || strings.HasPrefix(dep, "..") {
+				t.Fatalf("%s replaces %s outside the module: %v", suite.Name, m[1], err)
+			}
+			path := moduleRoot + filepath.ToSlash(dep) + "/x.go"
+			checked++
+
+			// Act.
+			got := SelectSuites([]string{path})
+
+			// Assert.
+			if !got.Full && !slices.Contains(got.Suites, suite.Name) {
+				t.Errorf("a change at %s (a module %s replaces) selects %v, which leaves out %s", path, suite.Name, got.Suites, suite.Name)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no go.mod replaced any local module; the walk read nothing")
+	}
+}
+
+// TestEveryVitestSuiteIsSelectedByEveryTreeItImports walks each Vitest
+// suite's sources and checks that every relative import reaching OUTSIDE the
+// suite's own directory (the generated TS bindings, the shared logging
+// module) selects the suite.
+func TestEveryVitestSuiteIsSelectedByEveryTreeItImports(t *testing.T) {
+	// Arrange: the module root on disk, four directories up.
+	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	if err != nil {
+		t.Fatalf("resolve the module root: %v", err)
+	}
+	importRe := regexp.MustCompile(`(?:from|import)\s*\(?\s*['"](\.\.?/[^'"]+)['"]`)
+	checked := map[string]bool{}
+	for _, suite := range roster.Suites {
+		if suite.Kind != roster.Vitest {
+			continue
+		}
+		suiteDir := filepath.Join(root, suite.Path)
+		for _, sub := range []string{"src", "test"} {
+			err := filepath.WalkDir(filepath.Join(suiteDir, sub), func(path string, d os.DirEntry, err error) error {
+				if err != nil {
+					return err
+				}
+				if d.IsDir() && d.Name() == "node_modules" {
+					return filepath.SkipDir
+				}
+				if d.IsDir() || !strings.HasSuffix(path, ".ts") {
+					return nil
+				}
+				body, err := os.ReadFile(path)
+				if err != nil {
+					return err
+				}
+				for _, m := range importRe.FindAllStringSubmatch(string(body), -1) {
+					target := filepath.Join(filepath.Dir(path), m[1])
+					if rel, _ := filepath.Rel(suiteDir, target); !strings.HasPrefix(rel, "..") {
+						continue
+					}
+					dep, err := filepath.Rel(root, target)
+					if err != nil || strings.HasPrefix(dep, "..") {
+						return fmt.Errorf("%s imports %s outside the module", path, m[1])
+					}
+					changed := moduleRoot + filepath.ToSlash(dep) + ".ts"
+					if checked[suite.Name+" "+changed] {
+						continue
+					}
+					checked[suite.Name+" "+changed] = true
+
+					// Act.
+					got := SelectSuites([]string{changed})
+
+					// Assert.
+					if !got.Full && !slices.Contains(got.Suites, suite.Name) {
+						t.Errorf("a change at %s (imported by %s) selects %v, which leaves out %s", changed, suite.Name, got.Suites, suite.Name)
+					}
+				}
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("walk %s/%s: %v", suite.Name, sub, err)
+			}
+		}
+	}
+	if len(checked) == 0 {
+		t.Fatal("no Vitest suite imports anything outside itself; the walk read nothing")
+	}
 }
