@@ -1,6 +1,8 @@
 package feed
 
 import (
+	"os"
+	"strings"
 	"testing"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -305,9 +307,9 @@ func TestAMergeHeadFoldOnANewDaemon(t *testing.T) {
 	}
 }
 
-// recordLegacyFold rewrites the recorded head as a row recorded before the
-// fold said who decided it: FOLDED, with no decider.
-func recordLegacyFold(t *testing.T, store *fakeDurableRows, folded bool) {
+// rewriteRecordedHead rewrites the head STORE recorded, through EDIT, as a row
+// recorded by an older daemon would read.
+func rewriteRecordedHead(t *testing.T, store *fakeDurableRows, edit func(head *frontendv1.FeedMergeHead)) {
 	t.Helper()
 	id := stateHead(stateRunning).GetId().GetValue()
 	recorded, ok := store.recorded(testWorkspace, id)
@@ -318,13 +320,22 @@ func recordLegacyFold(t *testing.T, store *fakeDurableRows, folded bool) {
 	if err := proto.Unmarshal(recorded.Row, row); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	row.GetActivity().GetMerge().GetHead().Fold = &frontendv1.FeedMergeFold{Folded: folded}
+	edit(row.GetActivity().GetMerge().GetHead())
 	encoded, err := proto.Marshal(row)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 	recorded.Row = encoded
 	store.rows[testWorkspace][id] = recorded
+}
+
+// recordLegacyFold rewrites the recorded head as a row recorded before the
+// fold said who decided it: FOLDED, with no decider.
+func recordLegacyFold(t *testing.T, store *fakeDurableRows, folded bool) {
+	t.Helper()
+	rewriteRecordedHead(t, store, func(head *frontendv1.FeedMergeHead) {
+		head.Fold = &frontendv1.FeedMergeFold{Folded: folded}
+	})
 }
 
 func TestALegacyRecordedFoldIsRepaintedWithTheDefault(t *testing.T) {
@@ -370,22 +381,49 @@ func TestALegacyRecordedFoldIsRepaintedWithTheDefault(t *testing.T) {
 // carried their mode.
 func recordWithoutMode(t *testing.T, store *fakeDurableRows) {
 	t.Helper()
-	id := stateHead(stateRunning).GetId().GetValue()
-	recorded, ok := store.recorded(testWorkspace, id)
-	if !ok {
-		t.Fatal("the head was never recorded")
-	}
+	rewriteRecordedHead(t, store, func(head *frontendv1.FeedMergeHead) { head.Mode = nil })
+}
+
+func TestRewriteRecordedHeadRestatesTheStoredRowOnly(t *testing.T) {
+	// Arrange
+	store := newFakeDurableRows()
+	r, _ := daemonOver(t, store)
+	push(r, stateRunning)
+
+	// Act
+	rewriteRecordedHead(t, store, func(head *frontendv1.FeedMergeHead) {
+		head.Label = &frontendv1.FeedMergeLabel{Text: "rewritten"}
+	})
+
+	// Assert
+	recorded, _ := store.recorded(testWorkspace, stateHead(stateRunning).GetId().GetValue())
 	row := &frontendv1.FeedRow{}
 	if err := proto.Unmarshal(recorded.Row, row); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	row.GetActivity().GetMerge().GetHead().Mode = nil
-	encoded, err := proto.Marshal(row)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
+	drawn := feedRows(r, rootFeed())[0].GetActivity().GetMerge().GetHead().GetLabel().GetText()
+	if got := row.GetActivity().GetMerge().GetHead().GetLabel().GetText(); got != "rewritten" || drawn == "rewritten" {
+		t.Fatalf("recorded label = %q, drawn label = %q; want only the record rewritten", got, drawn)
 	}
-	recorded.Row = encoded
-	store.rows[testWorkspace][id] = recorded
+}
+
+func TestEveryRecordedHeadRewriteGoesThroughOneHelper(t *testing.T) {
+	// Arrange
+	source, err := os.ReadFile("mergefold_test.go")
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+
+	// The needle is assembled so this test's own source never matches it.
+	needle := "encoded, err := proto." + "Marshal(row)"
+
+	// Act
+	marshals := strings.Count(string(source), needle)
+
+	// Assert
+	if marshals != 1 {
+		t.Fatalf("a recorded head is re-marshalled at %d sites in mergefold_test.go, want one, in rewriteRecordedHead", marshals)
+	}
 }
 
 func TestARestoredHeadWithNoModeTakesTheSyncDefault(t *testing.T) {
