@@ -67,7 +67,7 @@ const (
 //     evidence of what was being built rather than an unexplained worktree;
 //  4. materialize the worktree through git;
 //  5. REGISTER only once the worktree exists;
-//  6. bring the session up — for a fork, first recording the fork it owes, which
+//  6. bring the session up — for a fork, recording first the fork it owes, which
 //     the bring-up makes through the vendor before the session resumes;
 //  7. submit the initial prompt through the QUEUE, with origin
 //     WORKSPACE_CREATED, only after the session is up.
