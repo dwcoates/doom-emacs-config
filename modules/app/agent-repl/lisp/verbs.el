@@ -75,6 +75,7 @@
 (declare-function agent-repl--ws-current-name "agent-repl-workspace" ())
 (declare-function agent-repl--ws-current-log-name "agent-repl-workspace" ())
 (declare-function agent-repl--ws-require-known "agent-repl-workspace" (ws context))
+(declare-function agent-repl--main-worktree-for-dir "agent-repl-workspace" (dir))
 (declare-function agent-repl--live-ws-names "agent-repl-workspace" ())
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
 (declare-function agent-repl--ws-by-ref-id "agent-repl-workspace" (id))
