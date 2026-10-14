@@ -211,87 +211,12 @@ md.renderer.rules.fence = (tokens, idx, _options, env): string => {
 };
 
 /**
- * What a single newline inside a paragraph draws as.
- *
- * `break` is markdown's own reading under `breaks: true`: a `<br>`, the next
- * line set flush under the last. That suits prose a model writes, which puts a
- * blank line between its paragraphs. `paragraph` is for text a PERSON typed (a
- * prompt): pressing Enter once is how a person starts a new thought, so each
- * typed line becomes its own paragraph and is spaced exactly as a response's
- * paragraphs are (owner request, 2026-10-13: a prompt's newlines should look
- * like a response's).
- */
-export type NewlineRendering = "break" | "paragraph";
-
-/** The render env every rule here reads. */
-interface RenderEnv {
-  treeCols?: TreeCols;
-  newlines: NewlineRendering;
-}
-
-/**
- * NEWLINES AS PARAGRAPHS, for text rendered with `newlines: "paragraph"`: every
- * shown paragraph is split at its soft breaks into one paragraph per line. A
- * HIDDEN paragraph (an item of a tight list) is left alone, since it draws no
- * `<p>` to split and its lines keep their `<br>`; a hard break (a line ending in
- * two spaces or a backslash) is markdown's explicit `<br>` and is kept too, as
- * is a soft break inside an open inline span.
- */
-md.core.ruler.push("newline-paragraphs", (state) => {
-  if ((state.env as RenderEnv).newlines !== "paragraph") return true;
-  const out: typeof state.tokens = [];
-  const tokens = state.tokens;
-  for (let i = 0; i < tokens.length; i++) {
-    const open = tokens[i];
-    const inlineToken = tokens[i + 1];
-    const close = tokens[i + 2];
-    const splittable =
-      open.type === "paragraph_open" && !open.hidden && inlineToken?.type === "inline" && close?.type === "paragraph_close";
-    if (!splittable) {
-      out.push(open);
-      continue;
-    }
-    // A soft break inside an open inline span (a link's text, an emphasis
-    // that runs across lines) cannot end a paragraph without tearing the span
-    // in two, so it keeps its `<br>`.
-    const lines: (typeof state.tokens)[] = [[]];
-    let depth = 0;
-    for (const child of inlineToken.children ?? []) {
-      if (child.type === "softbreak" && depth === 0) {
-        lines.push([]);
-        continue;
-      }
-      depth += child.nesting;
-      lines[lines.length - 1].push(child);
-    }
-    for (const children of lines) {
-      const lineOpen = new state.Token("paragraph_open", "p", 1);
-      lineOpen.block = true;
-      lineOpen.level = open.level;
-      const line = new state.Token("inline", "", 0);
-      line.level = inlineToken.level;
-      line.children = children;
-      line.content = children.map((child) => child.content).join("");
-      const lineClose = new state.Token("paragraph_close", "p", -1);
-      lineClose.block = true;
-      lineClose.level = close.level;
-      out.push(lineOpen, line, lineClose);
-    }
-    i += 2;
-  }
-  state.tokens = out;
-  return true;
-});
-
-/**
  * Render markdown to HTML. TREECOLS, when given, is the measured column budget a
  * fenced metaprompt tree wraps to, threaded to the fence rule through the render
  * env; without it a fenced tree is drawn as the ordinary code block it is.
- * NEWLINES says what a single newline draws as (see `NewlineRendering`).
  */
-export function renderMarkdown(src: string, treeCols?: TreeCols, newlines: NewlineRendering = "break"): string {
-  const env: RenderEnv = { treeCols, newlines };
-  return md.render(src, env);
+export function renderMarkdown(src: string, treeCols?: TreeCols): string {
+  return md.render(src, { treeCols });
 }
 
 /** Whether SRC holds a fenced metaprompt tree, which only a measured width can draw. */

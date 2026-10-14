@@ -18,7 +18,6 @@ import {
   proseNeedsWidth,
   revealSlot,
   slotText,
-  typedTextSlot,
   whenSlotPainted,
   type BubbleBody,
 } from "../../src/bubble/body.js";
@@ -383,34 +382,6 @@ describe("markdown slots", () => {
     expect(nested.querySelector("em")?.textContent).toBe("deep");
   });
 
-  it("paints a single newline as a <br>", () => {
-    // Arrange
-    const slot = markdownSlot("prose", "one\ntwo");
-    // Act
-    paintBody(createBubbleBody(), [slot]);
-    // Assert
-    expect(slot.querySelectorAll("p")).toHaveLength(1);
-  });
-
-  it("paints a slot asked for paragraph newlines one paragraph per line", () => {
-    // Arrange
-    const slot = markdownSlot("prose", "one\ntwo", "paragraph");
-    // Act
-    paintBody(createBubbleBody(), [slot]);
-    // Assert
-    expect([...slot.querySelectorAll("p")].map((p) => p.textContent)).toEqual(["one", "two"]);
-  });
-
-  it("keeps a repainted slot's newline rendering from the new content", () => {
-    // Arrange
-    const body = createBubbleBody();
-    paintBody(body, [markdownSlot("prose", "one\ntwo")]);
-    // Act
-    const [slot] = paintBody(body, [markdownSlot("prose", "one\ntwo", "paragraph")]);
-    // Assert
-    expect((slot as HTMLElement).querySelectorAll("p")).toHaveLength(2);
-  });
-
   it("places the content's other nodes untouched, in order", () => {
     // Arrange
     const body = createBubbleBody();
@@ -701,23 +672,5 @@ describe("isBubbleBody", () => {
 
   it("refuses any other element", () => {
     expect(isBubbleBody(document.createElement("div"))).toBe(false);
-  });
-});
-
-describe("typedTextSlot", () => {
-  it("is a markdown slot of the given class", () => {
-    // Arrange / Act
-    const slot = typedTextSlot("words", "hi");
-    // Assert
-    expect([slot.className, slot.hasAttribute(MARKDOWN_SLOT_ATTRIBUTE)]).toEqual(["words", true]);
-  });
-
-  it("paints each typed line as its own paragraph", () => {
-    // Arrange
-    const slot = typedTextSlot("words", "one\ntwo");
-    // Act
-    paintBody(createBubbleBody(), [slot]);
-    // Assert
-    expect([...slot.querySelectorAll("p")].map((p) => p.textContent)).toEqual(["one", "two"]);
   });
 });
