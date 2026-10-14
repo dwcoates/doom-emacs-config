@@ -822,14 +822,14 @@ func (g *recordingGate) AwaitWritesQuiet(time.Duration) bool {
 	return true
 }
 
-func (g *recordingGate) EndStreams(end func()) {
+func (g *recordingGate) EndStreams(_ time.Time, end func()) {
 	g.mu.Lock()
 	g.calls = append(g.calls, "EndStreams")
 	g.mu.Unlock()
 	end()
 }
 
-func (g *recordingGate) AwaitStreamsEnded(time.Duration) int {
+func (g *recordingGate) AwaitStreamsEnded(time.Time) int {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.calls = append(g.calls, "AwaitStreamsEnded")
