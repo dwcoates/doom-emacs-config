@@ -2155,13 +2155,14 @@ func TestStartRefusesAnUndecidedOpening(t *testing.T) {
 	rec := newRecorder()
 	log := newTestLogger()
 	sinks := Sinks{
-		Feed:      &feedSink{rec: rec},
-		Footer:    &footerSink{rec: rec},
-		Topbar:    &topbarSink{rec: rec},
-		Sidebar:   &sidebarSink{rec: rec},
-		Lifecycle: &lifecycleSink{rec: rec},
-		Commands:  &commandSink{rec: rec},
-		Clock:     newManualClock(),
+		Feed:       &feedSink{rec: rec},
+		Footer:     &footerSink{rec: rec},
+		Topbar:     &topbarSink{rec: rec},
+		Sidebar:    &sidebarSink{rec: rec},
+		Lifecycle:  &lifecycleSink{rec: rec},
+		Commands:   &commandSink{rec: rec},
+		CacheLapse: &cacheLapseSink{rec: rec},
+		Clock:      newManualClock(),
 	}
 
 	// Act.

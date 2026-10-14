@@ -158,6 +158,15 @@ func (w *watcher) routeSessionUpdateLocked(update *conversationv1.SessionUpdate)
 		})
 		w.sinks.Commands.OnCommandCatalog(w.ws, u.CommandCatalog)
 
+	case *conversationv1.SessionUpdate_CacheLapse:
+		// A HIDDEN WORKSPACE'S PROJECTED LAPSE, and no view's: the keeper
+		// records it on the workspace's row, which the roster then draws.
+		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the cache keeper", dlog.Context{
+			"arm":          sessionArm(update),
+			"lapses_at_ms": u.CacheLapse.GetLapsesAtMs(),
+		})
+		w.sinks.CacheLapse.OnCacheLapse(w.ws, u.CacheLapse)
+
 	case *conversationv1.SessionUpdate_QueryDied:
 		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeSessionUpdateLocked", "branch": "case *conversationv1.SessionUpdate_QueryDied"})
 		w.routeQueryDiedLocked(update)
@@ -265,6 +274,8 @@ func sessionArm(update *conversationv1.SessionUpdate) string {
 		return "effort_changed"
 	case *conversationv1.SessionUpdate_CommandCatalog:
 		return "command_catalog"
+	case *conversationv1.SessionUpdate_CacheLapse:
+		return "cache_lapse"
 	default:
 		return "unset"
 	}
