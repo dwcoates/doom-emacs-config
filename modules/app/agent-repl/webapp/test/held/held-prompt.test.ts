@@ -47,7 +47,7 @@ import {
   FOLD_ABOVE_LABEL,
   NO_RELEASE_TITLES,
   SEND_NOW_LABEL,
-  HELD_BADGE_DETAIL_CLASS,
+  HELD_REASON_CLASS,
   HELD_STATUS_BADGES,
   HELD_NOTE_CLASS,
   drawHeldPrompt,
@@ -64,6 +64,7 @@ import { testHeldContext } from "./held-context.js";
 import {
   BUBBLE_CAP_ATTRIBUTE,
   BUBBLE_EXPAND_ONLY_CLASS,
+  BUBBLE_FOOTER_CLASS,
   BUBBLE_MORE_ATTRIBUTE,
   BUBBLE_MORE_ELLIPSIS,
   BUBBLE_ROLE_ATTRIBUTE,
@@ -375,7 +376,7 @@ describe("drawHeldPrompt classification arms", () => {
       }),
       tc,
     );
-    expect(card.querySelector(".queued-reason")?.textContent).toBe("urgent");
+    expect(card.querySelector(`.${HELD_REASON_CLASS}`)?.textContent).toBe("urgent");
   });
 
   it("draws the classifier's rationale on a prompt joining the running turn", () => {
@@ -389,7 +390,7 @@ describe("drawHeldPrompt classification arms", () => {
       }),
       tc,
     );
-    expect(card.querySelector(".queued-reason")?.textContent).toBe(
+    expect(card.querySelector(`.${HELD_REASON_CLASS}`)?.textContent).toBe(
       "it adds to it",
     );
   });
@@ -402,7 +403,7 @@ describe("drawHeldPrompt classification arms", () => {
       }),
       tc,
     );
-    expect(card.querySelector(".queued-reason")).toBeNull();
+    expect(card.querySelector(`.${HELD_REASON_CLASS}`)).toBeNull();
   });
 
   it("draws the failure detail on classification_error", () => {
@@ -1415,7 +1416,7 @@ describe("the daemon's badge words", () => {
   );
 
   it.each(byStatus)(
-    "draws the %s detail verbatim in the expand-only details",
+    "titles the %s badge with its detail verbatim",
     (status, prompt) => {
       // Arrange
       const { tc } = trayContext();
@@ -1423,14 +1424,12 @@ describe("the daemon's badge words", () => {
       const card = drawHeldPrompt(prompt(), tc);
       // Assert
       expect(
-        card.querySelector(
-          `.queued-details > .${HELD_BADGE_DETAIL_CLASS}[data-held-status="${status}"]`,
-        )?.textContent,
+        card.querySelector<HTMLElement>(`.queued-head > .held-badge[data-held-status="${status}"]`)?.title,
       ).toBe(wireDetail(status));
     },
   );
 
-  it("draws no detail element for a badge the daemon gave none", () => {
+  it("titles a badge the daemon gave no detail with nothing", () => {
     // Arrange
     const { tc } = trayContext();
     const prompt = heldPrompt({
@@ -1440,7 +1439,7 @@ describe("the daemon's badge words", () => {
     // Act
     const card = drawHeldPrompt(prompt, tc);
     // Assert
-    expect(card.querySelector(`.${HELD_BADGE_DETAIL_CLASS}`)).toBeNull();
+    expect(card.querySelector<HTMLElement>(".held-badge")?.title).toBe("");
   });
 
   it("refuses a badge with an empty label", () => {
@@ -1500,7 +1499,7 @@ describe("the daemon's badge words", () => {
     const card = drawHeldPrompt(prompt, tc);
     // Assert
     expect(
-      [...card.querySelectorAll(`.queued-details > .${HELD_NOTE_CLASS}`)].map((n) => n.textContent),
+      [...card.querySelectorAll(`.queued-head > .${HELD_NOTE_CLASS}`)].map((n) => n.textContent),
     ).toEqual([wireDetail("holdForTurnEnd")]);
   });
 
@@ -1761,8 +1760,8 @@ const HIDDEN_WHILE_COLLAPSED = selectorOf(
   "hidden expand-only region",
 );
 
-describe("a held prompt collapsed and expanded", () => {
-  /** A held prompt carrying every expand-only part, mounted under the one toggle. */
+describe("a held prompt collapsed", () => {
+  /** A held prompt carrying every part a card draws, mounted under the one toggle. */
   function mountedFull(): HTMLElement {
     const { tc } = trayContext();
     const card = drawHeldPrompt(
@@ -1782,79 +1781,71 @@ describe("a held prompt collapsed and expanded", () => {
     return card;
   }
 
-  const EXPAND_ONLY: Array<[string, string]> = [
+  const ALWAYS_SHOWN: Array<[string, string]> = [
+    ["the status badge", ".held-badge"],
+    ["a further fact's note", `.${HELD_NOTE_CLASS}`],
     ["the queued age", "[data-queued]"],
-    ["the rationale", ".queued-reason"],
+    ["the reason", `.${HELD_REASON_CLASS}`],
     ["the Send now button", '[data-held-action="release"]'],
+    ["the Meta button", '[data-held-action="update-classifier"]'],
     ["the Cancel button", '[data-held-action="drop"]'],
   ];
 
-  it("holds nothing but badges in its collapsed strip", () => {
+  it.each(ALWAYS_SHOWN)("shows %s while collapsed", (_name, selector) => {
+    // Arrange / Act
+    const part = mountedFull().querySelector(selector);
+    // Assert
+    expect([part === null, part?.closest(HIDDEN_WHILE_COLLAPSED) ?? null]).toEqual([false, null]);
+  });
+
+  it("keeps nothing expand-only, so expanding reveals only more words", () => {
+    // Arrange / Act
+    const card = mountedFull();
+    // Assert
+    expect(card.querySelector(`.${BUBBLE_EXPAND_ONLY_CLASS}`)).toBeNull();
+  });
+
+  it("strips the badge, then the notes, then the queued age", () => {
     // Arrange / Act
     const head = mountedFull().querySelector(".queued-head");
     // Assert
     expect(
       [...(head?.children ?? [])].map((child) =>
-        child.classList.contains("held-badge"),
+        child.classList.contains("held-badge")
+          ? "badge"
+          : child.classList.contains(HELD_NOTE_CLASS)
+            ? "note"
+            : child.hasAttribute("data-queued")
+              ? "age"
+              : child.className,
       ),
-    ).toEqual([true]);
+    ).toEqual(["badge", "note", "age"]);
   });
 
-  it("keeps its badges visible while collapsed", () => {
+  it("floats the reason into the scroll box's corner, ahead of the words", () => {
     // Arrange / Act
-    const badges = [...mountedFull().querySelectorAll(".held-badge")];
+    const scroll = mountedFull().querySelector(".bubble-scroll");
     // Assert
-    expect(
-      badges.map((badge) => badge.closest(HIDDEN_WHILE_COLLAPSED)),
-    ).toEqual([null]);
+    expect(scroll?.firstElementChild?.classList.contains(HELD_REASON_CLASS)).toBe(true);
   });
 
-  it("puts the details in the bubble's one expand-only region", () => {
+  it("titles the reason with its whole words, since the pill may cut them short", () => {
+    // Arrange / Act
+    const reason = mountedFull().querySelector<HTMLElement>(`.${HELD_REASON_CLASS}`);
+    // Assert
+    expect(reason?.title).toBe("it can wait");
+  });
+
+  it("draws the controls in the bubble's footer", () => {
     // Arrange / Act
     const card = mountedFull();
     // Assert
     expect(
-      card
-        .querySelector(`:scope > .${BUBBLE_EXPAND_ONLY_CLASS}`)
-        ?.classList.contains("queued-details"),
+      card.querySelector(".queued-actions")?.closest(`.${BUBBLE_FOOTER_CLASS}`)?.classList.contains("queued-controls"),
     ).toBe(true);
   });
 
-  it.each(EXPAND_ONLY)("hides %s while collapsed", (_name, selector) => {
-    // Arrange / Act
-    const part = mountedFull().querySelector(selector);
-    // Assert
-    expect(part?.closest(HIDDEN_WHILE_COLLAPSED)).not.toBeNull();
-  });
-
-  it.each(EXPAND_ONLY)(
-    "shows %s once the bubble is expanded",
-    (_name, selector) => {
-      // Arrange
-      const card = mountedFull();
-      // Act
-      card.querySelector<HTMLElement>(".queued-head")?.click();
-      // Assert
-      expect(
-        card.querySelector(selector)?.closest(HIDDEN_WHILE_COLLAPSED),
-      ).toBeNull();
-    },
-  );
-
-  it("hides the details again once the bubble is collapsed", () => {
-    // Arrange
-    const card = mountedFull();
-    const head = card.querySelector<HTMLElement>(".queued-head");
-    head?.click();
-    // Act
-    head?.click();
-    // Assert
-    expect(
-      card.querySelector(".queued-details")?.closest(HIDDEN_WHILE_COLLAPSED),
-    ).not.toBeNull();
-  });
-
-  it("draws a refused action's sentence inside the expand-only region", async () => {
+  it("draws a refused action's sentence inside the footer", async () => {
     // Arrange
     const { tc } = trayContext(errorResponse);
     const card = drawHeldPrompt(heldPrompt(), tc);
@@ -1862,11 +1853,7 @@ describe("a held prompt collapsed and expanded", () => {
     card.querySelector<Control>('[data-held-action="release"]')?.click();
     await settle();
     // Assert
-    expect(
-      card
-        .querySelector(".queued-refusal")
-        ?.parentElement?.classList.contains("queued-details"),
-    ).toBe(true);
+    expect(card.querySelector(".queued-refusal")?.parentElement?.classList.contains("queued-controls")).toBe(true);
   });
 });
 
@@ -2690,14 +2677,14 @@ describe("the update classifier control", () => {
     expect(card.querySelector('[data-held-action="update-classifier"]')).toBeNull();
   });
 
-  it("draws the turn's form, hidden, in the card's expand-only region", () => {
+  it("draws the turn's form, hidden, in the card's footer", () => {
     // Arrange
     const { tc } = trayContext();
     // Act
     const card = drawHeldPrompt(classifiedAs("holdForTurnEnd"), tc);
     // Assert
     const form = card.querySelector<HTMLElement>(".classifier-update");
-    expect([form?.hidden, form?.classList.contains(BUBBLE_EXPAND_ONLY_CLASS)]).toEqual([true, true]);
+    expect([form?.hidden, form?.classList.contains(BUBBLE_FOOTER_CLASS)]).toEqual([true, true]);
   });
 
   it("reveals the form when clicked", () => {

@@ -170,11 +170,11 @@ describe("hold reasons draw distinctly", () => {
     expect([new Set(rendered).size, rendered.includes("")]).toEqual([HOLD_ARMS.length, false]);
   });
 
-  it("draws the shutdown hold's own schedule id", async () => {
+  it("titles the shutdown hold's badge with its own schedule id", async () => {
     // Arrange / Act
     await withTray({ items: [heldPromptItem({ hold: "shutdown" })] });
-    // Assert
-    expect(harness.$(`[data-held-turn="${HELD_TURN_ID}"]`)?.textContent).toContain("sched-1");
+    // Assert — the badge's detail sentence is its hover title.
+    expect(harness.$(`[data-held-turn="${HELD_TURN_ID}"] .held-badge`)?.title).toContain("sched-1");
   }, 1_500);
 });
 
