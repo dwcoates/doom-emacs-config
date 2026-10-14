@@ -1505,7 +1505,7 @@ describe("the open Recently Merged band's today count", () => {
   });
 
   it("refuses a merged row whose when-column is on another arm than merged", () => {
-    const bad = row({ id: "ws-1", closed: true, when: { case: "turnEnded", value: { atMs: BigInt(NOW) } } });
+    const bad = row({ id: "ws-1", closed: true, when: { case: "turnRunning", value: { startedAtMs: BigInt(NOW) } } });
     expect(() => drawBand([bad])).toThrow(MalformedView);
   });
 

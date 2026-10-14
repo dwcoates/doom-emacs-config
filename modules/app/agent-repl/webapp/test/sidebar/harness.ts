@@ -192,7 +192,7 @@ export function row(init: {
   /** The durable last-selected instant, epoch ms; omitted = never selected. */
   lastSelectedAtMs?: bigint;
   priority?: string;
-  /** The when-column's ARM; omitted leaves the column empty. */
+  /** The when-column's ARM; omitted = no turn running, as a live row with no turn draws. */
   when?: MessageInitShape<typeof RosterRowWhenSchema>["shown"];
   detail?: MessageInitShape<typeof RosterRowDetailSchema>;
   children?: RosterRow[];
@@ -203,7 +203,7 @@ export function row(init: {
     status: init.status ?? { case: "ready", value: {} },
     current: { current: init.current ?? false },
     closed: { closed: init.closed ?? false },
-    when: { shown: init.when },
+    when: { shown: init.when ?? { case: "noTurnRunning", value: {} } },
     detail: init.detail ?? {},
     children: init.children ?? [],
     ...(init.attention === true ? { attention: {} } : {}),
@@ -300,13 +300,13 @@ export function mergedBand(
 
 /**
  * One repository's group inside the recently-merged band, SHOWN unless its
- * repository is said to be collapsed. A row whose `when` names no arm is
- * stamped on the merged arm, as the daemon stamps every merged row, a minute apart and most
- * recent first.
+ * repository is said to be collapsed. A row left on `row`'s default when arm
+ * (no turn running) is stamped on the merged arm, as the daemon stamps every
+ * merged row, a minute apart and most recent first.
  */
 export function mergedGroup(init: { id: string; label?: string; rows?: RosterRow[]; repositoryCollapsed?: boolean }): RosterMergedRepoGroup {
   const rows = (init.rows ?? []).map((r, i) => {
-    if (r.when === undefined || r.when.shown.case !== undefined) return r;
+    if (r.when === undefined || r.when.shown.case !== "noTurnRunning") return r;
     const stamped = clone(RosterRowSchema, r);
     stamped.when = create(RosterRowWhenSchema, { shown: { case: "merged", value: { atMs: BigInt(1_000_000_000 - i * 60_000) } } });
     return stamped;
