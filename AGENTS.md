@@ -211,11 +211,18 @@ The ERT safety wrapper remains available for a focused selector:
 ```
 
 The wrapper drops a checkpoint tag at `HEAD` before invoking ert, then diffs
-the pre/post git state (HEAD, all refs/heads, all refs/tags, working-tree
-status). On any drift the checkpoint tag is **preserved** and the script
-prints the exact `git reset --hard <tag>` command to roll back; on a clean run
-the tag is auto-removed. Exit codes: `0` clean, `1` test failures, `2` drift
-detected, `3` environment error.
+this checkout's pre/post git state (HEAD, its branch, working-tree status) and
+reads the refs the run's OWN git processes moved anywhere in the repository.
+Those come from `.githooks/reference-transaction`, which journals a ref for a
+registered run only when the moving git carries the run's
+`AGENT_REPL_SAFE_TEST_RUN` marker or descends from the wrapper. Another
+session's commits, rebases and new branches are never the run's, so they can
+never fail it; the shared refs are never snapshotted. The wrapper proves the
+journal is live with a canary ref before the suite starts, and a missing hook
+is an environment error. On any drift the checkpoint tag is **preserved** and
+the script prints the exact `git reset --hard <tag>` command to roll back, plus
+an `update-ref` per moved ref; on a clean run the tag is auto-removed. Exit
+codes: `0` clean, `1` test failures, `2` drift detected, `3` environment error.
 
 ### Canonical test timing history
 
