@@ -158,11 +158,12 @@ const coldGateChainTimeout = HandoverChainTimeout
 // exact figure is what proves the number crossed the whole stack from the
 // vendor's transcript line rather than being composed by the daemon.
 //
-// THE SCENARIO STATES 90,000 BECAUSE THE GATE HAS A FLOOR. The owner ruled on
-// 2026-09-13 that a cold read under 70,000 tokens is not gated at all, so the
+// THE SCENARIO STATES 150,000 BECAUSE THE GATE HAS A FLOOR. The owner ruled on
+// 2026-09-13 (raised 2026-10-14) that a cold read at or under 120,000 tokens is
+// not gated at all, so the
 // mock's ordinary ~25,000-token usage would resume warm and this whole area
 // would test nothing.
-const coldSeedContextTokens = 90_000
+const coldSeedContextTokens = 150_000
 
 // coldGateWarnings are the daemon warning records this area's arrangement
 // legitimately produces: the graceful stand-down and the shim exit it causes, the

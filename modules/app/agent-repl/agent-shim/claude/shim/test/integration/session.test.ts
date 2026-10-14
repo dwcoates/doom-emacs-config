@@ -2020,7 +2020,7 @@ describe("SetSessionModel's cold gate", () => {
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
     // A turn so the transcript has context to lose -- AND ABOVE THE COLD-GATE
-    // FLOOR. The gate does not ask below 70,000 tokens (owner ruling), and an
+    // FLOOR. The gate does not ask at or under 120,000 tokens (owner ruling), and an
     // ordinary turn reports far less than that, so `!cold-seed` is the seed
     // that puts a real cost on the switch.
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!cold-seed" }));
