@@ -373,34 +373,33 @@ func TestAGatesStartIsRecordedWithItsSelection(t *testing.T) {
 	}
 }
 
-func TestAGatesSuiteSlotIsRecordedWithItsWait(t *testing.T) {
-	// Act.
-	h := gateRuns(t, "suite-slot: slot 2 acquired after 294s\n[agent-repl-tests] daemon: passed in 3s\n", 0)
-
-	// Assert.
-	got := gateRecord(t, h, "took the host's suite slot")
-	if got["wait_seconds"] != 294 || got["slot"] != "2" {
-		t.Fatalf("slot = %v, want slot 2 after 294s", got)
-	}
-}
-
-func TestAGateThatWaitedForNoSlotRecordsNoWait(t *testing.T) {
+func TestAGatesRunnerStartIsRecorded(t *testing.T) {
 	// Act.
 	h := gateRuns(t, "[agent-repl-tests] daemon: passed in 3s\n", 0)
 
 	// Assert.
-	if got := gateRecord(t, h, "took the host's suite slot"); got["wait_seconds"] != 0 {
-		t.Fatalf("slot = %v, want no wait", got)
+	if got := gateRecord(t, h, "the merge's test runner began"); got["round"] == nil {
+		t.Fatalf("runner start = %v, want it to name the round", got)
 	}
 }
 
-func TestAGatesSuiteSlotIsRecordedOnce(t *testing.T) {
+func TestAGatesRunnerStartIsRecordedOnce(t *testing.T) {
 	// Act.
-	h := gateRuns(t, "suite-slot: slot 1 acquired after 3s\n[agent-repl-tests] daemon: starting\n[agent-repl-tests] daemon: passed in 3s\n", 0)
+	h := gateRuns(t, "[agent-repl-tests] daemon: starting\n[agent-repl-tests] daemon: passed in 3s\n", 0)
 
 	// Assert.
-	if got := gateRecords(h, "took the host's suite slot"); got != 1 {
-		t.Fatalf("slot records = %d, want one", got)
+	if got := gateRecords(h, "the merge's test runner began"); got != 1 {
+		t.Fatalf("runner start records = %d, want one", got)
+	}
+}
+
+func TestALineBeforeTheRunnerRecordsNoRunnerStart(t *testing.T) {
+	// Act.
+	h := gateRuns(t, "[safe-test-run] checkpoint taken\n", 0)
+
+	// Assert.
+	if got := gateRecords(h, "the merge's test runner began"); got != 0 {
+		t.Fatalf("runner start records = %d, want none before the runner's first line", got)
 	}
 }
 

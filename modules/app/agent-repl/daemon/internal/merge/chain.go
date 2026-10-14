@@ -717,14 +717,9 @@ func speculativeArgv(argv []string) []string {
 // head's.
 const SpeculativeNice = 12
 
-// gateArgv is every gate's command line. Every gate queues at
-// bin/suite-slot.sh's merge priority, ahead of every ad-hoc run, and a
-// speculative gate (one behind the head) runs niced so the head's own run is
-// never slowed by it.
+// gateArgv is every gate's command line. A speculative gate (one behind the
+// head) runs niced so the head's own run is never slowed by it.
 func gateArgv(argv []string, speculative bool) []string {
-	// Every merge-queue gate, the head's and a speculative one alike, queues
-	// at bin/suite-slot.sh's merge priority; the speculative one is niced.
-	argv = append([]string{"env", "AGENT_REPL_SUITE_PRIORITY=merge"}, argv...)
 	if speculative {
 		argv = speculativeArgv(argv)
 	}

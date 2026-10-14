@@ -320,13 +320,9 @@ readonly REALTEST_ROOT="$OWNER_STATE_DIR/realtest"
 # run_harness_check NAME ENV... — one non-realtest check in the realtest
 # package.
 #
-# NOT UNDER bin/suite-slot.sh, and that is deliberate rather than an omission.
-# The slot exists because every SUITE here is sized to fill the machine; these
-# are single-process reads — a snapshot of wsm.db, a walk of the log files, two
-# read-only emacsclient probes — that start no editor, spawn no daemon and run
-# nothing in parallel. Holding a machine-wide slot for one would make a sweep
-# wait on somebody else's vitest run to find out whether the owner's registry
-# is clean.
+# These are single-process reads (a snapshot of wsm.db, a walk of the log
+# files, two read-only emacsclient probes) that start no editor, spawn no
+# daemon and run nothing in parallel.
 run_harness_check() {
     local name="$1"
     shift
@@ -1376,16 +1372,16 @@ trap sweep_end EXIT
 
 # ---- the run --------------------------------------------------------------
 #
-# THE SUITE SLOT. Every suite here is sized to fill the machine, and a realtest
-# is worse than most: it measures a startup, so another suite's load turns a
-# healthy phase into a reported breach. bin/suite-slot.sh nests, so wrapping
-# here is safe even under an outer holder.
+# BACKGROUND PRIORITY. Every realtest runs through bin/background.sh like every
+# other test. No host gate keeps other test runs off the machine (owner
+# ruling, 2026-10-14), so a breach measured while another run was loading the
+# host is read with that load in mind.
 
 note "the vendor is forbidden for this run: $VENDOR_GUARD_ENV=1 on Emacs and everything it spawns"
 note "no picture is taken; Emacs is brought frontmost ONCE for the whole sweep and focus goes back at the end"
 note "this run holds $PLAN_COUNT realtest(s), each in its own go test invocation"
 
-# run_one NAME — one realtest, in its own `go test`, under its own suite slot.
+# run_one NAME — one realtest, in its own `go test`, at background priority.
 # Prints nothing itself; the status is the realtest's.
 run_one() {
     local name="$1"
@@ -1403,7 +1399,7 @@ run_one() {
     AGENT_REPL_REALTEST_OUT="$RUN_DIR" \
     AGENT_REPL_REALTEST_EMACS_SOCKET="$EMACS_SOCKET" \
     AGENT_REPL_REALTEST_EMACSCLIENT="$EMACSCLIENT" \
-    "$THIS_DIR/suite-slot.sh" \
+    "$THIS_DIR/background.sh" \
         go -C "$MODULE_ROOT/e2e" test -tags realtest ./realtest/ \
         -run "^${name}\$" -count=1 -v -timeout 60m ${GO_ARGS[@]+"${GO_ARGS[@]}"}
     local status=$?

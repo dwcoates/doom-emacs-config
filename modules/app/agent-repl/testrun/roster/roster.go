@@ -83,7 +83,6 @@ var Suites = []Suite{
 	{Name: "coverage-harness", Kind: Script, Path: "bin/test-report-nonlisp-coverage.sh", Harness: true},
 	{Name: "logging-density-harness", Kind: Script, Path: "bin/test-report-logging-density.sh", Harness: true},
 	{Name: "build-frontend-harness", Kind: SplitScript, Path: "bin/test-build-frontend.sh", Harness: true},
-	{Name: "suite-slot-harness", Kind: Script, Path: "bin/test-suite-slot.sh", Harness: true},
 	{Name: "background-harness", Kind: Script, Path: "bin/test-background.sh", Harness: true},
 	{Name: "cpu-load-harness", Kind: Script, Path: "bin/test-with-cpu-load.sh", Harness: true},
 	{Name: "store-reset-harness", Kind: Script, Path: "bin/test-store-reset.sh", Harness: true},

@@ -234,14 +234,14 @@ a workspace after its merge lands), ONE rule decides what Emacs selects:
 
 ## Verification
 
-Run from `modules/app/agent-repl/`, always through the host suite slot, which
-also puts the run at background priority (`bin/background.sh`; a bare
-`emacs -batch` load of `test-helpers.el` refuses to start):
+Run from `modules/app/agent-repl/`, always at background priority
+(`bin/background.sh`; a bare `emacs -batch` load of `test-helpers.el` refuses
+to start):
 
 ```bash
-bin/suite-slot.sh emacs -batch -Q -l ert -l lisp/test-<source>.el -f ert-run-tests-batch-and-exit
-bin/suite-slot.sh emacs -batch -Q -l ert -l lisp/test-agent-repl.el -f ert-run-tests-batch-and-exit
-bin/suite-slot.sh bin/byte-compile.sh
+bin/background.sh emacs -batch -Q -l ert -l lisp/test-<source>.el -f ert-run-tests-batch-and-exit
+bin/background.sh emacs -batch -Q -l ert -l lisp/test-agent-repl.el -f ert-run-tests-batch-and-exit
+bin/background.sh bin/byte-compile.sh
 ```
 
 Every changed source has its matching `test-<source>.el` suite. Tests are

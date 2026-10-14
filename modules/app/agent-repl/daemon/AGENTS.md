@@ -1382,7 +1382,6 @@ Owner rulings, 2026-10-11 (`internal/merge/chain.go`, `internal/cpugov`).
     `daemon.merge.test_turn` records at INFO the join, the grant (with
     `waited_seconds`), the give-back (with how the run `ended` and the
     `next` holder), and a stopped run leaving the line.
-  - The host's suite slot (`bin/suite-slot.sh`) is machine-wide and separate.
   - Tests order two merges' gates through the TEST-ONLY seams
     `onTestTurnAsk` (hold a gate before it asks) and `onTestTurnLine`.
 - **SPECULATIVE GATES.** A member whose rebase settled runs its gate (and its

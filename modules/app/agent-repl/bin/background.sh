@@ -8,8 +8,9 @@
 # booting a daemon per test, and vitest pools of about ten workers each -- and
 # the machine reached a load average of 281. The OWNER'S live runtime paid for
 # it: the shim fell four minutes behind reading Claude's output, and one store
-# write took 163s. bin/suite-slot.sh bounds how many suites run at once; this
-# bounds what any one of them may take from the processes the owner is using.
+# write took 163s. This bounds what any test may take from the processes the
+# owner is using; nothing bounds how many test runs overlap (owner ruling,
+# 2026-10-14).
 # Owner ruling: tests run at background priority, for sure.
 #
 # WHAT IT DOES, per platform. There is no silent path: every platform either
@@ -65,7 +66,7 @@ set -uo pipefail
 log() { printf 'background: %s\n' "$*" >&2; }
 
 # EX_CONFIG: this host cannot run a test at background priority. Distinct from
-# a failing suite (1), from suite-slot's usage error (2) and from test-all's
+# a failing suite (1), from a usage error (2) and from test-all's
 # precondition decline (77), which would read as "skipped" rather than "wrong".
 readonly EXIT_REFUSED=78
 
