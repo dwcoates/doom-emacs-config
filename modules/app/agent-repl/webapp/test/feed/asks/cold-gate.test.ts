@@ -4,6 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { Code } from "@connectrpc/connect";
 import {
+  SetWorkspaceHiddenErrorSchema,
+  SetWorkspaceHiddenResponseSchema,
+} from "../../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
+import {
   AnswerColdGateErrorSchema,
   AnswerColdGateResponseSchema,
   type AnswerColdGateResponse,
@@ -125,6 +129,22 @@ afterEach(() => {
 /** The gate's progress slot, as the card built it. */
 function progressSlot(el: HTMLElement): HTMLElement | null {
   return el.querySelector<HTMLElement>("[data-cold-gate-progress]");
+}
+
+/** A standing digest host with its close control, counting the clicks. */
+function standingDigest(hidden = false): { clicks: () => number; remove: () => void } {
+  const host = document.createElement("div");
+  host.setAttribute("data-component", "news-digest");
+  host.hidden = hidden;
+  const close = document.createElement("button");
+  close.setAttribute("data-news-digest-close", "");
+  let n = 0;
+  close.addEventListener("click", () => {
+    n += 1;
+  });
+  host.append(close);
+  document.body.append(host);
+  return { clicks: () => n, remove: () => host.remove() };
 }
 
 describe("scopeName", () => {
@@ -273,6 +293,7 @@ describe("the standing gate", () => {
       COLD_GATE_COPY.compact.hint,
       COLD_GATE_COPY.clear.hint,
       COLD_GATE_COPY.pay.hint,
+      COLD_GATE_COPY.hide.hint,
     ]);
   });
 
@@ -287,6 +308,7 @@ describe("the standing gate", () => {
       COLD_GATE_COPY.compact.label,
       COLD_GATE_COPY.clear.label,
       COLD_GATE_COPY.pay.label,
+      COLD_GATE_COPY.hide.label,
     ]);
   });
 
@@ -425,22 +447,6 @@ describe("the standing gate", () => {
 });
 
 describe("answering the gate", () => {
-  /** A standing digest host with its close control, counting the clicks. */
-  function standingDigest(hidden = false): { clicks: () => number; remove: () => void } {
-    const host = document.createElement("div");
-    host.setAttribute("data-component", "news-digest");
-    host.hidden = hidden;
-    const close = document.createElement("button");
-    close.setAttribute("data-news-digest-close", "");
-    let n = 0;
-    close.addEventListener("click", () => {
-      n += 1;
-    });
-    host.append(close);
-    document.body.append(host);
-    return { clicks: () => n, remove: () => host.remove() };
-  }
-
   it("closes a standing news digest when the gate is answered", async () => {
     // Arrange
     const digest = standingDigest();
@@ -1114,6 +1120,7 @@ describe("the compact-and-resume button", () => {
       COLD_GATE_COPY.compactAndResume.label,
       COLD_GATE_COPY.clear.label,
       COLD_GATE_COPY.pay.label,
+      COLD_GATE_COPY.hide.label,
     ]);
   });
 
@@ -1195,6 +1202,171 @@ describe("the compact-and-resume button", () => {
     const el = drawFeedColdGate(gate(standing({ heldPrompts: 1 })), askHarness().rc);
     openSubmenu(el);
     expect(submenuSend(el)?.textContent).toBe(COLD_GATE_COPY.submenu.send.compact);
+  });
+});
+
+describe("the hide workspace button", () => {
+  /** The hide button, as the card drew it. */
+  function hideButton(el: HTMLElement): Control | null {
+    return el.querySelector<Control>("[data-cold-gate-hide]");
+  }
+
+  /** A refused hide carrying CAUSE. */
+  function refusedHide(cause: MessageInitShape<typeof SetWorkspaceHiddenErrorSchema>["cause"]) {
+    return create(SetWorkspaceHiddenResponseSchema, { result: { case: "error", value: { cause } } });
+  }
+
+  it("ends the row, past pay", () => {
+    const el = drawFeedColdGate(gate(standing()), askHarness().rc);
+    expect(el.querySelector(".cold-gate-buttons > :last-child")).toBe(hideButton(el));
+  });
+
+  it("ends the row on a gate that offers no compaction", () => {
+    const el = drawFeedColdGate(gate(standing({ noCompact: true })), askHarness().rc);
+    expect(el.querySelector(".cold-gate-buttons > :last-child")).toBe(hideButton(el));
+  });
+
+  it("is labelled \"hide workspace\"", () => {
+    const el = drawFeedColdGate(gate(standing()), askHarness().rc);
+    expect(hideButton(el)?.textContent).toBe("hide workspace");
+  });
+
+  it("is drawn grey", async () => {
+    const css = (await import("../../../src/styles.css?raw")).default;
+    expect(
+      css.includes(".cold-gate-buttons > ar-button.cold-gate-hide { color: var(--muted); border-color: var(--muted); }"),
+    ).toBe(true);
+  });
+
+  it("is not a remediation the gate answers with", () => {
+    const el = drawFeedColdGate(gate(standing()), askHarness().rc);
+    expect(hideButton(el)?.hasAttribute("data-cold-gate")).toBe(false);
+  });
+
+  it("hides the gate's own workspace", async () => {
+    const h = askHarness();
+    const el = drawFeedColdGate(gate(standing()), h.rc);
+    hideButton(el)?.click();
+    await settle();
+    expect(h.calls.hide.map((r) => [r.workspace?.id, r.visibility.case])).toEqual([[WORKSPACE.id, "hide"]]);
+  });
+
+  it("answers nothing about the gate", async () => {
+    const h = askHarness();
+    const el = drawFeedColdGate(gate(standing()), h.rc);
+    hideButton(el)?.click();
+    await settle();
+    expect(h.calls.coldGate).toEqual([]);
+  });
+
+  it("leaves a standing news digest standing", async () => {
+    // Arrange
+    const digest = standingDigest();
+    const el = drawFeedColdGate(gate(standing()), askHarness().rc);
+    // Act
+    hideButton(el)?.click();
+    await settle();
+    // Assert
+    expect(digest.clicks()).toBe(0);
+    digest.remove();
+  });
+
+  it("latches every button inert while the hide is in flight", () => {
+    const el = drawFeedColdGate(gate(standing({ heldPrompts: 1 })), askHarness().rc);
+    hideButton(el)?.click();
+    expect([...el.querySelectorAll<Control>("ar-button")].every((b) => b.disabled)).toBe(true);
+  });
+
+  it("latches inert with every other button while a gate answer is in flight", () => {
+    const el = drawFeedColdGate(gate(standing()), askHarness().rc);
+    el.querySelector<Control>('[data-cold-gate="pay"]')?.click();
+    expect(hideButton(el)?.disabled).toBe(true);
+  });
+
+  it("follows no compaction line while the hide is in flight", () => {
+    const el = drawFeedColdGate(gate(standing()), askHarness().rc);
+    hideButton(el)?.click();
+    publishCompactionProgress("compacting · summarizing 412 messages");
+    expect(progressSlot(el)?.textContent).toBe("");
+  });
+
+  it("draws nothing on success and keeps the buttons latched while the workspace leaves", async () => {
+    const el = drawFeedColdGate(gate(standing()), askHarness().rc);
+    hideButton(el)?.click();
+    await settle();
+    expect([el.querySelector(".refusal"), hideButton(el)?.disabled]).toEqual([null, true]);
+  });
+
+  it("words a refused hide as every other control does, at the buttons", async () => {
+    const h = askHarness({ hide: refusedHide({ case: "unknownWorkspace", value: {} }) });
+    const el = drawFeedColdGate(gate(standing()), h.rc);
+    hideButton(el)?.click();
+    await settle();
+    const drawn = el.querySelector(".hibernation-actions .refusal");
+    expect([drawn?.getAttribute("data-arm"), drawn?.textContent]).toEqual([
+      "unknownWorkspace",
+      "the daemon does not know this workspace",
+    ]);
+  });
+
+  it("gives the buttons back after a refused hide", async () => {
+    const h = askHarness({ hide: refusedHide({ case: "notYetAdopted", value: {} }) });
+    const el = drawFeedColdGate(gate(standing()), h.rc);
+    hideButton(el)?.click();
+    await settle();
+    expect([...el.querySelectorAll<Control>("ar-button")].every((b) => !b.disabled)).toBe(true);
+  });
+
+  it("draws a transport failure at the buttons when the daemon was not reached", async () => {
+    const h = askHarness({ fail: true, failCode: Code.Unavailable });
+    const el = drawFeedColdGate(gate(standing()), h.rc);
+    hideButton(el)?.click();
+    await settle();
+    expect(el.querySelector(".hibernation-actions .refusal")?.getAttribute("data-arm")).toBe("transport");
+  });
+
+  it("gives the buttons back after a hide that threw", async () => {
+    const h = askHarness({ fail: true });
+    const el = drawFeedColdGate(gate(standing()), h.rc);
+    hideButton(el)?.click();
+    await settle();
+    expect([...el.querySelectorAll<Control>("ar-button")].every((b) => !b.disabled)).toBe(true);
+  });
+
+  it("clears a previous refusal before hiding again", async () => {
+    const h = askHarness({ hide: refusedHide({ case: "notYetAdopted", value: {} }) });
+    const el = drawFeedColdGate(gate(standing()), h.rc);
+    hideButton(el)?.click();
+    await settle();
+    hideButton(el)?.click();
+    await settle();
+    expect(el.querySelectorAll(".hibernation-actions .refusal").length).toBe(1);
+  });
+
+  it("states an unset cause as unreadable rather than as a cause", async () => {
+    const h = askHarness({
+      hide: create(SetWorkspaceHiddenResponseSchema, { result: { case: "error", value: {} } }),
+    });
+    const el = drawFeedColdGate(gate(standing()), h.rc);
+    hideButton(el)?.click();
+    await settle();
+    expect(el.querySelector(".hibernation-actions .refusal")).toBeNull();
+  });
+
+  it("logs the hide with the workspace it hides", async () => {
+    // Arrange
+    const { log } = await import("../../../src/log.js");
+    const info = vi.spyOn(log, "info");
+    const el = drawFeedColdGate(gate(standing()), askHarness().rc);
+    // Act
+    hideButton(el)?.click();
+    await settle();
+    // Assert
+    expect(info).toHaveBeenCalledWith("hiding the workspace from a cold gate", {
+      operation: "feed.asks.cold-gate.hide",
+      context: { workspace: WORKSPACE.id },
+    });
+    info.mockRestore();
   });
 });
 
