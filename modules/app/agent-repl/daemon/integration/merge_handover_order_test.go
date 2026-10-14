@@ -70,9 +70,7 @@ func TestAHeadHandedOverAfterTheMergeBehindItResumesAsTheHeadAndAMergeTakenBackI
 	resp, err := successor.UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
 		Action: &agentreplv1.UpdateMergeQueueRequest_Evict{Evict: &agentreplv1.UpdateMergeQueueEvict{Workspace: b.ws}},
 	}))
-	if err != nil || resp.Msg.GetError() != nil {
-		t.Fatalf("UpdateMergeQueue(evict beta) = %v, %v; want a success", resp.Msg, err)
-	}
+	requireRPCSuccess(t, "UpdateMergeQueue(evict beta)", resp, err)
 
 	// Assert (Bug 2): B's merge lease went with its entry, and B takes a prompt.
 	d.WithDB(func(db *sql.DB) {
@@ -91,8 +89,9 @@ func TestAHeadHandedOverAfterTheMergeBehindItResumesAsTheHeadAndAMergeTakenBackI
 	prompt, err := successor.SubmitPrompt(d.Ctx(), connect.NewRequest(&agentreplv1.SubmitPromptRequest{
 		Workspace: b.ws, Said: said("after the evict"), IdempotencyKey: "beta-after-evict", Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT,
 	}))
-	if err != nil || prompt.Msg.GetError() != nil {
-		t.Fatalf("SubmitPrompt(beta) after the evict = %v, %v; want the prompt accepted", prompt.Msg, err)
+	requireRPCAnswered(t, "SubmitPrompt(beta) after the evict", prompt, err)
+	if prompt.Msg.GetError() != nil {
+		t.Fatalf("SubmitPrompt(beta) after the evict = %v; want the prompt accepted", prompt.Msg)
 	}
 
 	// Act (Bug 1): A is taken back, resumes as the head, and lands.

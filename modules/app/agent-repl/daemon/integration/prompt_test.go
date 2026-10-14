@@ -926,17 +926,16 @@ func TestUpdateMergeQueueEvictWhileTheQuestionStandsClearsIt(t *testing.T) {
 	resp, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
 		Action: &agentreplv1.UpdateMergeQueueRequest_Evict{Evict: &agentreplv1.UpdateMergeQueueEvict{Workspace: behind.ws}},
 	}))
-	if err != nil || resp.Msg.GetError() != nil {
-		t.Fatalf("UpdateMergeQueue{evict} while the question stands = %v, %v, want a success", resp.Msg, err)
-	}
+	requireRPCSuccess(t, "UpdateMergeQueue{evict} while the question stands", resp, err)
 
 	// Assert: the question is gone.
 	answer, err := d.Client().AnswerMergeQueueOffer(d.Ctx(), connect.NewRequest(&agentreplv1.AnswerMergeQueueOfferRequest{
 		Workspace: behind.ws,
 		Decision:  &agentreplv1.AnswerMergeQueueOfferRequest_Cancel{Cancel: &agentreplv1.AnswerMergeQueueOfferCancel{}},
 	}))
-	if err != nil || answer.Msg.GetError().GetNoOfferStanding() == nil {
-		t.Fatalf("an answer after the evict = %v, %v, want error.no_offer_standing", answer.Msg, err)
+	requireRPCAnswered(t, "an answer after the evict", answer, err)
+	if answer.Msg.GetError().GetNoOfferStanding() == nil {
+		t.Fatalf("an answer after the evict = %v, want error.no_offer_standing", answer.Msg)
 	}
 }
 
@@ -1503,8 +1502,9 @@ func TestResendingInterruptWithConfirmAgentsStopsThem(t *testing.T) {
 		Workspace: f.ws,
 		Target:    &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},
 	}))
-	if err != nil || first.Msg.GetError().GetConfirmRequired() == nil {
-		t.Fatalf("the first Interrupt{turn} = (%v, %v), want confirm_required to set up the challenge", first.Msg, err)
+	requireRPCAnswered(t, "the first Interrupt{turn}", first, err)
+	if first.Msg.GetError().GetConfirmRequired() == nil {
+		t.Fatalf("the first Interrupt{turn} = (%v), want confirm_required to set up the challenge", first.Msg)
 	}
 	f.d.ExpectWarnings("daemon.workspace.interrupt")
 
