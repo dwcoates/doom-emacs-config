@@ -22,7 +22,8 @@
 import { readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { bindLog } from "../log.js";
-import { cwdSlug, readTranscriptFacts, type TranscriptFacts } from "./cold.js";
+import { readTranscriptFacts, type TranscriptFacts } from "./cold.js";
+import { projectDir } from "./vendor-paths.js";
 
 const LOGGER = bindLog({
   component: "shim-engine-transcripts",
@@ -79,11 +80,6 @@ export type TranscriptsRead =
       readonly searchedPath: string;
       readonly detail: string;
     };
-
-/** The vendor's project directory for one working directory. */
-function projectDir(configDir: string, cwd: string): string {
-  return path.join(configDir, "projects", cwdSlug(cwd));
-}
 
 /**
  * Every conversation filed under `cwd`, newest activity first.

@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -769,5 +772,89 @@ func TestReadHistoryServesTheSeededBookBeforeAnyStartSession(t *testing.T) {
 	// Assert
 	if err != nil || len(resp.Msg.GetSuccess().GetPage().GetEntries()) != 1 {
 		t.Fatalf("ReadHistory = %v, %v; want the seeded entry before any StartSession", resp, err)
+	}
+}
+
+func TestAppendTranscriptLine(t *testing.T) {
+	cases := []struct {
+		name      string
+		configDir bool
+		lines     []string
+		want      string
+	}{
+		{name: "creates the file and its directory", configDir: true, lines: []string{`{"a":1}`}, want: "{\"a\":1}\n"},
+		{name: "appends to an existing transcript", configDir: true, lines: []string{`{"a":1}`, `{"b":2}`}, want: "{\"a\":1}\n{\"b\":2}\n"},
+		{name: "writes nothing without a config dir", configDir: false, lines: []string{`{"a":1}`}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			configDir := t.TempDir()
+			if tc.configDir {
+				t.Setenv("CLAUDE_CONFIG_DIR", configDir)
+			} else {
+				t.Setenv("CLAUDE_CONFIG_DIR", "")
+			}
+			t.Chdir(t.TempDir())
+
+			// Act
+			for _, line := range tc.lines {
+				if err := appendTranscriptLine("v-1", line); err != nil {
+					t.Fatalf("appendTranscriptLine: %v", err)
+				}
+			}
+
+			// Assert
+			if !tc.configDir {
+				entries, err := os.ReadDir(configDir)
+				if err != nil || len(entries) != 0 {
+					t.Fatalf("config dir holds %v (err %v), want nothing", entries, err)
+				}
+				return
+			}
+			got, err := os.ReadFile(transcriptPath("v-1"))
+			if err != nil {
+				t.Fatalf("read the transcript: %v", err)
+			}
+			if string(got) != tc.want {
+				t.Errorf("transcript = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAppendTranscriptLineSurfacesAnUnwritableDirectory(t *testing.T) {
+	// Arrange
+	configDir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", configDir)
+	t.Chdir(t.TempDir())
+	if err := os.WriteFile(filepath.Join(configDir, "projects"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	err := appendTranscriptLine("v-1", `{"a":1}`)
+
+	// Assert
+	if err == nil {
+		t.Fatal("appendTranscriptLine wrote under a file posing as the projects directory")
+	}
+}
+
+// TestFakeTranscriptWritesShareOneHelper fails when a fake RPC writes a
+// transcript line by hand instead of through appendTranscriptLine.
+func TestFakeTranscriptWritesShareOneHelper(t *testing.T) {
+	// Arrange
+	source, err := os.ReadFile("server.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	writes := strings.Count(string(source), "os.WriteFile(path") + strings.Count(string(source), "os.OpenFile(path")
+
+	// Assert
+	if writes != 1 {
+		t.Errorf("server.go opens or writes a transcript path %d times, want once, in appendTranscriptLine", writes)
 	}
 }

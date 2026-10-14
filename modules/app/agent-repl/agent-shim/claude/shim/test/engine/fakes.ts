@@ -825,3 +825,11 @@ function emptyAccountUsage(): AccountUsageLike {
     behaviors: null,
   };
 }
+
+/**
+ * The vendor fork a suite installs when nothing it drives should fork: reaching
+ * it is a defect in the code under test, so it fails the call loudly.
+ */
+export function unexpectedVendorFork(): Promise<string> {
+  return Promise.reject(new Error("a vendor fork was asked for by a test that installed none"));
+}

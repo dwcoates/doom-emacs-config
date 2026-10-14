@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"slices"
 	"sync"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
@@ -671,19 +672,27 @@ var nonAlphanumeric = regexp.MustCompile(`[^A-Za-z0-9]`)
 // resume guard refuses a resume whose transcript is gone, so a fake that starts
 // sessions without laying one down makes every re-open unresumable.
 func (s *server) writeTranscript(vendorSessionID string) {
+	_ = appendTranscriptLine(vendorSessionID, `{"type":"session_started","sessionId":"`+vendorSessionID+`"}`)
+}
+
+// appendTranscriptLine appends LINE to the conversation's transcript where the
+// vendor CLI files it, creating the file and its directory. Nothing is written
+// when no config dir is set, as for every fake transcript.
+func appendTranscriptLine(vendorSessionID, line string) error {
 	path := transcriptPath(vendorSessionID)
 	if path == "" {
-		return
+		return nil
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return
+		return err
 	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
-		return
+		return err
 	}
 	defer f.Close()
-	_, _ = f.WriteString(`{"type":"session_started","sessionId":"` + vendorSessionID + `"}` + "\n")
+	_, err = f.WriteString(line + "\n")
+	return err
 }
 
 // transcriptPath renders where the vendor CLI files one conversation, empty
@@ -1178,6 +1187,13 @@ func (s *server) ReadHistory(ctx context.Context, req *connect.Request[shimv1.Re
 	if resp, done, err := scripted[shimv1.ReadHistoryResponse, *shimv1.ReadHistoryResponse](s, RPCReadHistory); done {
 		return resp, err
 	}
+	if through := req.Msg.GetThrough(); through != nil {
+		return connect.NewResponse(&shimv1.ReadHistoryResponse{
+			Result: &shimv1.ReadHistoryResponse_Success{Success: &shimv1.ReadHistorySuccess{
+				Page: s.book.pageThrough(req.Msg.GetTarget().GetValue(), through.GetAtMs(), s.historyPageSize()),
+			}},
+		}), nil
+	}
 	after := req.Msg.GetAfter()
 	page, served := s.book.page(req.Msg.GetTarget().GetValue(), after, s.historyPageSize())
 	if !served {
@@ -1208,6 +1224,48 @@ func (s *server) GatherTitleDigest(ctx context.Context, req *connect.Request[shi
 		Result: &shimv1.GatherTitleDigestResponse_Success{
 			Success: &shimv1.GatherTitleDigestSuccess{Boundary: shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_NONE},
 		},
+	}), nil
+}
+
+// GetForkPoint answers the WHOLE transcript by default, bounded at the
+// fake's clock and with no turn in flight: the answer a parent shim gives when
+// it is idle and has concluded nothing it can name. A test that needs a cut
+// scripts one.
+func (s *server) GetForkPoint(ctx context.Context, req *connect.Request[shimv1.GetForkPointRequest]) (*connect.Response[shimv1.GetForkPointResponse], error) {
+	if err := s.enter(ctx, RPCGetForkPoint, req.Msg); err != nil {
+		return nil, err
+	}
+	if resp, done, err := scripted[shimv1.GetForkPointResponse, *shimv1.GetForkPointResponse](s, RPCGetForkPoint); done {
+		return resp, err
+	}
+	return connect.NewResponse(&shimv1.GetForkPointResponse{
+		Result: &shimv1.GetForkPointResponse_Success{Success: &shimv1.GetForkPointSuccess{
+			Point:   &shimv1.ForkPoint{Extent: &shimv1.ForkPoint_Whole{Whole: &shimv1.ForkPointWhole{}}},
+			Through: &conversationv1.ConversationThrough{AtMs: time.Now().UnixMilli()},
+		}},
+	}), nil
+}
+
+// ForkSession answers a fork by default: a fresh vendor session id, filed as a
+// transcript under this shim's working directory as the real shim files the
+// vendor's fork, and the parent's book named after the parent's vendor
+// session. A test that needs a refusal, or particular ids, scripts one.
+func (s *server) ForkSession(ctx context.Context, req *connect.Request[shimv1.ForkSessionRequest]) (*connect.Response[shimv1.ForkSessionResponse], error) {
+	if err := s.enter(ctx, RPCForkSession, req.Msg); err != nil {
+		return nil, err
+	}
+	if resp, done, err := scripted[shimv1.ForkSessionResponse, *shimv1.ForkSessionResponse](s, RPCForkSession); done {
+		return resp, err
+	}
+	forked := "fork-of-" + req.Msg.GetParentVendorSessionId()
+	if err := appendTranscriptLine(forked, `{"type":"custom-title","customTitle":"fork"}`); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	return connect.NewResponse(&shimv1.ForkSessionResponse{
+		Result: &shimv1.ForkSessionResponse_Success{Success: &shimv1.ForkSessionSuccess{
+			VendorSessionId: forked,
+			ParentBook:      &conversationv1.AgentId{Value: req.Msg.GetParentVendorSessionId()},
+		}},
 	}), nil
 }
 

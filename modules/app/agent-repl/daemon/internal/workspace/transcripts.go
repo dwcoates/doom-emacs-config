@@ -161,13 +161,14 @@ func (v *verbs) transcriptHolders(ctx context.Context, ws ids.WorkspaceID) (map[
 		if record.ID == ws {
 			continue
 		}
-		session, found, err := v.deps.DB.Session(ctx, record.ID)
+		recorded, err := readRecordedSession(ctx, v.deps.DB, record.ID)
 		if err != nil {
 			return nil, fmt.Errorf("read workspace %q's session record: %w", record.ID, err)
 		}
-		if !found || session.VendorSessionID == "" {
+		if !recorded.hasConversation() {
 			continue
 		}
+		session := recorded.session
 		holders[session.VendorSessionID] = &workspacev1.WorkspaceRef{
 			Id:  string(record.ID),
 			Dir: record.Dir,
@@ -359,7 +360,9 @@ func (v *verbs) recordBinding(ctx context.Context, log dlog.Logger, ws ids.Works
 	}
 	session.Workspace = ws
 	session.VendorSessionID = vendorSessionID
-	if err := v.deps.DB.PutSession(ctx, session); err != nil {
+	// THE BINDING FORGETS THE FORK: a workspace bound to another conversation
+	// no longer continues the one its lineage describes.
+	if err := v.deps.DB.BindSession(ctx, session); err != nil {
 		log.Error(opBindSession, "could not record the new binding", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("bind %q: record the binding: %w", ws, err)
 	}

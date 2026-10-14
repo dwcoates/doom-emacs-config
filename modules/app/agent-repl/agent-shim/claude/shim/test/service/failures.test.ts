@@ -856,3 +856,77 @@ describe("transcriptsRefused", () => {
     ]);
   });
 });
+
+describe("forkPointAnswered", () => {
+  it.each([
+    { kind: "whole" as const, arm: "whole", record: undefined },
+    { kind: "through_record" as const, arm: "throughRecord", record: "u9" },
+    { kind: "before_record" as const, arm: "beforeRecord", record: "u9" },
+  ])("answers $kind as the $arm extent with its bound and uninherited turns", ({ kind, arm, record }) => {
+    // Arrange.
+    const answer =
+      kind === "whole"
+        ? { kind, throughMs: 42, uninherited: ["t2"] }
+        : { kind, recordUuid: record ?? "", throughMs: 42, uninherited: ["t2"] };
+
+    // Act.
+    const response = failures.forkPointAnswered(answer);
+
+    // Assert.
+    expect(response.result.case).toBe("success");
+    const success = response.result.case === "success" ? response.result.value : undefined;
+    expect(success?.point?.extent.case).toBe(arm);
+    if (record !== undefined) {
+      expect((success?.point?.extent.value as { record?: { value: string } } | undefined)?.record?.value).toBe(record);
+    }
+    expect(success?.through?.atMs).toBe(42n);
+    expect(success?.uninheritedTurns.map((turn) => turn.value)).toEqual(["t2"]);
+  });
+
+  it("answers unresolved as the failure arm with its detail", () => {
+    // Act.
+    const response = failures.forkPointAnswered({ kind: "unresolved", detail: "why" });
+
+    // Assert.
+    expect(response.result.case).toBe("failure");
+    const failure = response.result.case === "failure" ? response.result.value : undefined;
+    expect(failure?.cause.case).toBe("unresolved");
+    expect(failure?.detail).toBe("why");
+  });
+});
+
+describe("forkSessionAnswered", () => {
+  it("answers a fork with its vendor id and the parent's book as an agent", () => {
+    // Act.
+    const response = failures.forkSessionAnswered({ kind: "forked", vendorSessionId: "v1", parentBook: "book" });
+
+    // Assert.
+    expect(response.result.case).toBe("success");
+    const success = response.result.case === "success" ? response.result.value : undefined;
+    expect(success?.vendorSessionId).toBe("v1");
+    expect(success?.parentBook?.value).toBe("book");
+  });
+
+  it.each([
+    { kind: "unknown_session" as const, arm: "unknownSession" },
+    { kind: "record_absent" as const, arm: "recordAbsent" },
+    { kind: "parent_book_unknown" as const, arm: "parentBookUnknown" },
+    { kind: "vendor_failed" as const, arm: "vendorFailed" },
+  ])("answers $kind as the $arm failure", ({ kind, arm }) => {
+    // Act.
+    const response = failures.forkSessionAnswered({ kind, detail: "d" });
+
+    // Assert.
+    const failure = response.result.case === "failure" ? response.result.value : undefined;
+    expect(failure?.cause.case).toBe(arm);
+    expect(failure?.detail).toBe("d");
+  });
+
+  it("refuses already_started as its own arm", () => {
+    // Act.
+    const response = failures.forkSessionRefused("already_started", "d");
+
+    // Assert.
+    expect(response.result.case === "failure" ? response.result.value.cause.case : "").toBe("alreadyStarted");
+  });
+});

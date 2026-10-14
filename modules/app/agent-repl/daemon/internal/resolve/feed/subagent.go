@@ -819,7 +819,7 @@ func (r *resolver) ownerPlacement(s *wsState, owner string) (placement, error) {
 	if at, addressed := r.addressedPlacement(s, s.rowTurn()); addressed {
 		return at, nil
 	}
-	feed, err := feedid.AgentFeed(owner, s.mainAgent)
+	feed, err := s.agentFeed(owner)
 	if err != nil {
 		return placement{}, err
 	}

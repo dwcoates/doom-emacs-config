@@ -900,7 +900,6 @@ func TestBoundHides(t *testing.T) {
 	inherited := func(atMs int64) string {
 		return entryBase('1', &conversationv1.ConversationPlace{AtMs: atMs}) + "00000000"
 	}
-	ported := "0.00000001"
 	tests := []struct {
 		name  string
 		row   rowRank
@@ -930,14 +929,6 @@ func TestBoundHides(t *testing.T) {
 		{
 			name: "a fork's inherited row precedes the fork's own cut whatever its place, hidden",
 			row:  rowRank{plane: planeInherited, key: inherited(9)}, bound: rowRank{plane: planeLive, key: own(5)}, want: true,
-		},
-		{
-			name: "a fork's ported row precedes the fork's own cut, hidden",
-			row:  rowRank{plane: planePorted, key: ported}, bound: rowRank{plane: planeHistory, key: own(5)}, want: true,
-		},
-		{
-			name: "a ported row is never hidden by an inherited cut",
-			row:  rowRank{plane: planePorted, key: ported}, bound: rowRank{plane: planeInherited, key: inherited(5)}, want: false,
 		},
 		{
 			name: "the fork's own row is never hidden by an inherited cut",

@@ -84,6 +84,9 @@ import type {
   ModelInfoLike,
 } from "../sdk/types.js";
 import {
+  forkPointAnswered,
+  forkSessionAnswered,
+  forkSessionRefused,
   hibernateAcked,
   hibernateRefused,
   killSessionClosed,
@@ -128,7 +131,6 @@ import {
   judgeCold,
   readTranscriptFacts,
   sessionCold,
-  transcriptPath,
   underColdGateFloor,
   type TranscriptFacts,
   type TranscriptLine,
@@ -144,7 +146,10 @@ import {
   SessionIdentity,
   type AgentIdentityStore,
 } from "./identity.js";
+import { ForkPointTracker, type OpenForkTurn } from "./fork-point.js";
+import { forkSession as forkVendorConversation, type ForkVendorSession } from "./fork-session.js";
 import {
+  conversationRecordUuid,
   KeepaliveCadence,
   KeepaliveRewind,
   KeepaliveScope,
@@ -178,6 +183,7 @@ import {
   type OpenTurn,
   type SessionContext,
 } from "./turn.js";
+import { transcriptPath } from "./vendor-paths.js";
 
 const LOGGER = bindLog({ component: "shim-engine-session", operation: "shim.engine.session" });
 
@@ -246,6 +252,8 @@ interface EngineDeps {
   readonly persistence: Persistence;
   readonly fold: EngineFold;
   readonly createQuery: CreateQuery;
+  /** The vendor's session fork, real or mocked; `--fake` swaps it with the query. */
+  readonly forkVendorSession: ForkVendorSession;
   readonly runtime: { shimBuildSha: string; sdkVersion: string };
   readonly env: {
     readonly stateDir: string;
@@ -688,6 +696,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   const shellRunStarts = new ShellRunStarts();
   const foreground = new ForegroundUnitTable();
   const rewind = new KeepaliveRewind();
+  /** Where a fork of this conversation would end (engine/fork-point.ts). */
+  const forkPoints = new ForkPointTracker();
   /**
    * WHICH VENDOR MESSAGES THE KEEP-ALIVE PRODUCED. Asked once per message in
    * {@link onSdkMessage}; its answer is the tag every row and push of that
@@ -1600,6 +1610,82 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   }
 
   /**
+   * WHERE A FORK OF THIS CONVERSATION WOULD END, asked of the PARENT's shim
+   * under the parent's delivery lock (endpoint_get_fork_point.proto).
+   *
+   * A shim with no session has nothing in flight, so the whole transcript is
+   * the fork; otherwise the tracker names the final record of the newest turn
+   * this process concluded, or the opener of the turn in flight when it has
+   * concluded none. A keep-alive is never a turn of the conversation, so it is
+   * neither open nor uninherited here.
+   */
+  function getForkPoint(): shimv1.GetForkPointResponse {
+    const now = deps.nowMs();
+    if (identity === undefined) {
+      LOGGER.info({ through_ms: now }, "named the fork point: no session, the whole transcript");
+      return forkPointAnswered({ kind: "whole", throughMs: now, uninherited: [] });
+    }
+    const openTurns: OpenForkTurn[] = [];
+    for (const turn of [open, adopted]) {
+      if (turn === undefined || turn.keepalive) continue;
+      const turnId = turn.id.value;
+      openTurns.push({
+        turnId,
+        startedAtMs: turn.startedAtMs,
+        openerUuid: forkPoints.firstRecord(turnId) ?? (turn.adopted === true ? undefined : promptUuid(turnId)),
+      });
+    }
+    const answer = forkPoints.point(openTurns, now);
+    if (answer.kind === "unresolved") {
+      LOGGER.error({ open_turns: openTurns.map((turn) => turn.turnId), cause: answer.detail }, "no fork point could be named");
+    } else {
+      LOGGER.info(
+        {
+          extent: answer.kind,
+          record: answer.kind === "whole" ? "" : answer.recordUuid,
+          through_ms: answer.throughMs,
+          uninherited_turns: answer.uninherited,
+        },
+        "named the fork point",
+      );
+    }
+    return forkPointAnswered(answer);
+  }
+
+  /**
+   * MAKE THIS SHIM'S CONVERSATION A FORK, before any session starts
+   * (endpoint_fork_session.proto). The daemon persists the answered id and
+   * resumes it with StartSession, so a fork is made once whatever the start
+   * that follows does.
+   */
+  async function forkSession(request: shimv1.ForkSessionRequest): Promise<shimv1.ForkSessionResponse> {
+    if (started) {
+      const detail = "this shim already started its session; a fork is made only before one starts";
+      LOGGER.error({ parent_vendor_session_id: request.parentVendorSessionId, detail }, "a fork was asked of a shim whose session already started");
+      return forkSessionRefused("already_started", detail);
+    }
+    if (request.point === undefined) {
+      // The validator refuses an unset point before the engine is reached.
+      throw new Error("shim session: ForkSession reached the engine with no point");
+    }
+    return forkSessionAnswered(
+      await forkVendorConversation(
+        {
+          configDir: deps.env.configDir,
+          stateDir: deps.env.stateDir,
+          cwd: deps.env.cwd,
+          forkVendorSession: deps.forkVendorSession,
+        },
+        {
+          parentVendorSessionId: request.parentVendorSessionId,
+          parentWorkspaceDir: request.parentWorkspaceDir,
+          point: request.point,
+        },
+      ),
+    );
+  }
+
+  /**
    * The title digest: the material the daemon summarizes into a workspace
    * title of its own when the vendor has stated no ai-title.
    *
@@ -2187,7 +2273,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // THE ANCHOR, AND ONLY FROM WHAT MAY BE ONE. The whole message goes in; the
     // rewind itself refuses everything that is not an assistant record of the
     // open real turn (see engine/keepalive.ts).
-    rewind.noteRecord(message, recordTurn(attribution, verdict.turn));
+    noteConversationRecord(message, recordTurn(attribution, verdict.turn));
     if (output.turnEnded === undefined) return;
     // THE TURN IS THE UNIT OF RECOVERY. A defective turn is degraded for its
     // WHOLE length: the messages that follow the refused one are the same
@@ -2234,6 +2320,27 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       { vendor_turn: running.kind, send_turn: running.kind === "send" ? running.send.turnId : "" },
       "a vendor turn ended that closes no open turn",
     );
+  }
+
+  /**
+   * ONE VENDOR RECORD, BOOKED WHEREVER RECORDS ARE COUNTED: the keep-alive
+   * rewind's anchor and span, and the fork point. Both take a record by the
+   * same test (`conversationRecordUuid`), so they can never disagree about
+   * which messages are records of the conversation.
+   */
+  function noteConversationRecord(message: SdkMessage, turn: RecordTurn | undefined): void {
+    rewind.noteRecord(message, turn);
+    const uuid = conversationRecordUuid(message);
+    if (uuid !== undefined && turn !== undefined && !turn.keepalive) forkPoints.noteRecord(turn.turnId, uuid);
+  }
+
+  /**
+   * ONE SEND, BOOKED AS A RECORD: the vendor files it as a `user` record under
+   * its client uuid, so the rewind's span and the fork point both count it.
+   */
+  function noteSendRecord(uuid: string, turn: RecordTurn): void {
+    rewind.noteSend(uuid, turn);
+    if (!turn.keepalive) forkPoints.noteRecord(turn.turnId, uuid);
   }
 
   /**
@@ -2788,6 +2895,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     const current = identity;
     if (current === undefined || current.vendorSessionId === newVendorSessionId) return;
     const previous = current.vendorSessionId;
+    forkPoints.reset(`the conversation rotated from ${previous} to ${newVendorSessionId}`);
     pushes.push(await current.rotate(newVendorSessionId));
     setClaudeSessionId(newVendorSessionId);
     backupTranscript({
@@ -2965,7 +3073,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (behind.length > 0) sends.batched(waiting.turn.id.value, behind.map((join) => join.turn.id.value));
     // The join runs after the turn it waited on, so its record lies past that
     // turn's every anchor: it is in the span until its own reply anchors.
-    rewind.noteSend(promptUuid(waiting.turn.id.value), { turnId: waiting.turn.id.value, keepalive: false });
+    noteSendRecord(promptUuid(waiting.turn.id.value), { turnId: waiting.turn.id.value, keepalive: false });
     const agentId = requireIdentity().agentId;
     deps.persistence.write([promptEntry(waiting.prompt, agentId, false)]);
     LOGGER.info(
@@ -2995,7 +3103,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     joins = joins.filter((join) => join !== waiting);
     // Folded into the running turn: its record is that turn's, ahead of the
     // turn's next anchor, which takes it out of the span again.
-    rewind.noteSend(promptUuid(waiting.turn.id.value), { turnId: into.value, keepalive: false });
+    noteSendRecord(promptUuid(waiting.turn.id.value), { turnId: into.value, keepalive: false });
     const agentId = requireIdentity().agentId;
     const prompt = create(conversationv1.AgentPromptSchema, {
       id: waiting.prompt.id,
@@ -3091,6 +3199,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // yield obligation must already see the keep-alive it has to rewind past;
     // counted after an await, that prompt would build on keep-alive context.
     if (ended.keepalive) rewind.noteKeepaliveTurn();
+    else forkPoints.noteConcluded(ended.id.value, deps.nowMs());
     await applyPendingModel();
     // AFTER THE MODEL: the level is judged by the vendor against the model the
     // next turn runs on, so a model and an effort change queued behind one
@@ -3495,7 +3604,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // vendor places it ({@link noteJoinFolded}, {@link openJoinAsOwnTurn}):
     // pushed into a running turn, it may land before or after that turn's
     // next anchor, and only the vendor's decision says which.
-    if (!join) rewind.noteSend(send.uuid, { turnId: send.turnId, keepalive: send.keepalive });
+    if (!join) noteSendRecord(send.uuid, { turnId: send.turnId, keepalive: send.keepalive });
   }
 
   /**
@@ -6826,6 +6935,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     readHistory: (request) => turns.readHistory(request),
     readTranscripts: () => Promise.resolve(readTranscriptsHere()),
     gatherTitleDigest: () => Promise.resolve(gatherTitleDigest()),
+    getForkPoint: () => Promise.resolve(getForkPoint()),
+    forkSession,
     resetKeepalives,
     standDown: async (reason: string) => {
       await teardown(reason);

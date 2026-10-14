@@ -9,7 +9,9 @@ syntax = "proto3";
 package shim.v1;
 
 import "shim/v1/endpoint_detach_foreground.proto";
+import "shim/v1/endpoint_fork_session.proto";
 import "shim/v1/endpoint_gather_title_digest.proto";
+import "shim/v1/endpoint_get_fork_point.proto";
 import "shim/v1/endpoint_hibernate.proto";
 import "shim/v1/endpoint_kill_session.proto";
 import "shim/v1/endpoint_kill_turn.proto";
@@ -138,4 +140,16 @@ service Shim {
   // no ai-title. Reads the transcript the shim owns; produces nothing and ends
   // nothing.
   rpc GatherTitleDigest(GatherTitleDigestRequest) returns (GatherTitleDigestResponse);
+
+  // ---- Fork: one conversation continued in another workspace ----
+
+  // Where a fork of this shim's conversation would end if taken now, and which
+  // of its stored rows the fork carries. Asked of the PARENT's shim under the
+  // parent's delivery lock; spends nothing. See endpoint_get_fork_point.proto.
+  rpc GetForkPoint(GetForkPointRequest) returns (GetForkPointResponse);
+
+  // Make this shim's conversation a vendor fork of another, cut at a fork
+  // point, before any session starts. Asked of the CHILD's shim. See
+  // endpoint_fork_session.proto.
+  rpc ForkSession(ForkSessionRequest) returns (ForkSessionResponse);
 }

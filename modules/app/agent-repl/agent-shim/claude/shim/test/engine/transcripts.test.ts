@@ -13,12 +13,13 @@ import { chmodSync, mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "no
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
-import { cwdSlug } from "../../src/engine/cold.js";
+
 import {
   TRANSCRIPT_QUIET_AFTER_MS,
   readTranscripts,
   type TranscriptSummary,
 } from "../../src/engine/transcripts.js";
+import { projectDir, transcriptPath } from "../../src/engine/vendor-paths.js";
 
 /** A pretend vendor config dir, and the working directory it files under. */
 const CWD = "/Users/someone/workspace/thing";
@@ -29,7 +30,7 @@ const NOW_MS = 1_700_000_000_000;
 /** A fresh config dir with the project directory for {@link CWD} created. */
 function configDirWithProject(): string {
   const configDir = mkdtempSync(path.join(os.tmpdir(), "shim-transcripts-"));
-  mkdirSync(path.join(configDir, "projects", cwdSlug(CWD)), { recursive: true });
+  mkdirSync(projectDir(configDir, CWD), { recursive: true });
   return configDir;
 }
 
@@ -68,7 +69,7 @@ function transcript(
   contents: string,
   mtimeMs: number,
 ): string {
-  const file = path.join(configDir, "projects", cwdSlug(CWD), `${vendorSessionId}.jsonl`);
+  const file = transcriptPath(configDir, CWD, vendorSessionId);
   writeFileSync(file, contents, "utf8");
   utimesSync(file, mtimeMs / 1000, mtimeMs / 1000);
   return file;
@@ -113,7 +114,7 @@ describe("readTranscripts", () => {
 
     // Assert.
     expect(read.kind === "no_project_dir" ? read.searchedPath : undefined).toBe(
-      path.join(configDir, "projects", cwdSlug(CWD)),
+      projectDir(configDir, CWD),
     );
   });
 
@@ -131,7 +132,7 @@ describe("readTranscripts", () => {
   it("reports unreadable when the directory exists and cannot be listed", () => {
     // Arrange: strip every permission from the project directory.
     const configDir = configDirWithProject();
-    const project = path.join(configDir, "projects", cwdSlug(CWD));
+    const project = projectDir(configDir, CWD);
     chmodSync(project, 0o000);
     // Given back afterwards: a directory nobody can list cannot be removed,
     // and the run's temp root (test/run-tmp-root.ts) fails its teardown on it.
@@ -161,7 +162,7 @@ describe("readTranscripts", () => {
     // Arrange: the vendor drops non-transcript files in the same directory.
     const configDir = configDirWithProject();
     transcript(configDir, "aaa", prompt("first"), QUIET_MS);
-    writeFileSync(path.join(configDir, "projects", cwdSlug(CWD), "notes.md"), "hi", "utf8");
+    writeFileSync(path.join(projectDir(configDir, CWD), "notes.md"), "hi", "utf8");
 
     // Act.
     const transcripts = ok(configDir);

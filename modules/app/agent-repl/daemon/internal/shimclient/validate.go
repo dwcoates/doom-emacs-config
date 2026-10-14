@@ -483,6 +483,50 @@ func validateGatherTitleDigestRequest(req *shimv1.GatherTitleDigestRequest) erro
 	return nil
 }
 
+// validateGetForkPointRequest is GetForkPointRequest's base function.
+func validateGetForkPointRequest(req *shimv1.GetForkPointRequest) error {
+	const m = "GetForkPointRequest"
+	if req == nil {
+		return invalid(m, m, "request is nil")
+	}
+	return nil
+}
+
+// validateForkSessionRequest is ForkSessionRequest's base function: a parent,
+// where it lives, and a point with exactly one extent.
+func validateForkSessionRequest(req *shimv1.ForkSessionRequest) error {
+	const m = "ForkSessionRequest"
+	if req == nil {
+		return invalid(m, m, "request is nil")
+	}
+	if req.GetParentVendorSessionId() == "" {
+		return invalid(m, m+".parent_vendor_session_id", "is empty")
+	}
+	if req.GetParentWorkspaceDir() == "" {
+		return invalid(m, m+".parent_workspace_dir", "is empty")
+	}
+	point := req.GetPoint()
+	if point == nil {
+		return invalid(m, m+".point", "is unset")
+	}
+	switch extent := point.GetExtent().(type) {
+	case *shimv1.ForkPoint_Whole:
+		return nil
+	case *shimv1.ForkPoint_ThroughRecord:
+		if extent.ThroughRecord.GetRecord().GetValue() == "" {
+			return invalid(m, m+".point.through_record.record", "names no record")
+		}
+		return nil
+	case *shimv1.ForkPoint_BeforeRecord:
+		if extent.BeforeRecord.GetRecord().GetValue() == "" {
+			return invalid(m, m+".point.before_record.record", "names no record")
+		}
+		return nil
+	default:
+		return invalid(m, m+".point.extent", "has no arm set")
+	}
+}
+
 // validateReadHistoryRequest is ReadHistoryRequest's base function.
 func validateReadHistoryRequest(req *shimv1.ReadHistoryRequest) error {
 	const m = "ReadHistoryRequest"
@@ -502,6 +546,14 @@ func validateReadHistoryRequest(req *shimv1.ReadHistoryRequest) error {
 		return nil
 	case *shimv1.ReadHistoryRequest_After:
 		return validateHistoryPointer(m+".after", position.After)
+	case *shimv1.ReadHistoryRequest_Through:
+		// A BOUNDED READ, a fork's inherited past from its fork point: the
+		// bound is a positive instant, or the book as it stood before anything
+		// was said, which is a malformed request rather than an empty page.
+		if position.Through.GetAtMs() <= 0 {
+			return invalid(m, m+".through.at_ms", "is not a positive instant")
+		}
+		return nil
 	default:
 		return invalid(m, m+".position", "oneof is unset")
 	}

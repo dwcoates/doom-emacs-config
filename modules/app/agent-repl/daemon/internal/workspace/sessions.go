@@ -48,6 +48,30 @@ type ProbeFunc func(runDir, workspaceDir string) (sessionlock.State, error)
 // owned, and only the socket says the owner is reachable.
 type SocketProbeFunc func(socketPath string) (shimsocket.State, error)
 
+// recordedSession is a workspace's session as recorded.
+type recordedSession struct {
+	session wsm.Session
+	// recorded is whether the workspace has a session row at all.
+	recorded bool
+}
+
+// hasConversation is the ONE statement of "this workspace holds a
+// conversation": a recorded session with a vendor id. A fork's parent must
+// have one, and only a workspace with one has transcripts to watch, revive or
+// claim.
+func (r recordedSession) hasConversation() bool {
+	return r.recorded && r.session.VendorSessionID != ""
+}
+
+// readRecordedSession reads WS's session for hasConversation.
+func readRecordedSession(ctx context.Context, db wsm.DB, ws ids.WorkspaceID) (recordedSession, error) {
+	session, recorded, err := db.Session(ctx, ws)
+	if err != nil {
+		return recordedSession{}, err
+	}
+	return recordedSession{session: session, recorded: recorded}, nil
+}
+
 // probeShimSocket builds the production socket probe over log.
 func probeShimSocket(log dlog.Logger) SocketProbeFunc {
 	log = log.With(dlog.Context{"component": "daemon.workspace.probe_shim_socket"})
@@ -144,6 +168,9 @@ type FleetDeps struct {
 	LockDir string
 	// Probe probes the workspace lock; nil means sessionlock.Probe.
 	Probe ProbeFunc
+	// Deliveries holds a fork's PARENT's turn sequence while the fork is made
+	// (forking.go): the prompt queue's Exclusively.
+	Deliveries DeliveryExclusion
 	// SocketProbe probes a workspace's shim socket for a listener; nil means
 	// shimsocket.Probe. It is injected for the same reason Probe is.
 	SocketProbe SocketProbeFunc
@@ -781,6 +808,10 @@ type source struct {
 	// conversation it is already on, and marking those would let a rotated
 	// resume handle orphan the records filed before the rotation.
 	Rebind bool
+	// Fork is the fork this bring-up owes: the conversation is made, as the
+	// vendor's fork of the parent's, on the spawned shim before it is resumed
+	// (forking.go). Nil for every bring-up but a fork's first.
+	Fork *wsm.PendingFork
 }
 
 // classifySource makes the FRESH-CONVERSATION decision, and it is the ONE
@@ -832,6 +863,17 @@ func (f *Fleet) classifySource(ctx context.Context, log dlog.Logger, ws ids.Work
 		return source{}, fmt.Errorf("the session was deleted: %s", session.Terminal.Detail)
 	}
 	if session.VendorSessionID == "" {
+		// A FORK NOT MADE YET is no fresh conversation: it continues its
+		// parent's, and the bring-up makes it before the session resumes.
+		pending, owed, err := f.deps.DB.PendingFork(ctx, ws)
+		if err != nil {
+			log.Error(opBringUp, "whether the workspace owes a fork could not be read", dlog.Context{"cause": err.Error()})
+			return source{}, fmt.Errorf("read the workspace's pending fork: %w", err)
+		}
+		if owed {
+			log.Debug(opBringUp, "the workspace owes a fork of its parent; the bring-up makes it", dlog.Context{"parent": string(pending.Parent)})
+			return source{Fork: &pending}, nil
+		}
 		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "session.VendorSessionID == \"\""})
 		return source{Fresh: true}, nil
 	}
@@ -1207,6 +1249,11 @@ func (f *Fleet) startUp(ctx context.Context, ws ids.WorkspaceID, rebind bool) er
 	if err != nil {
 		return refuse(log, "OpenWorkspace", ArmSessionDeleted, err.Error(), false)
 	}
+	// THE FEED IS TOLD WHERE A FORK'S PAST IS READ FROM at every bring-up, so a
+	// restarted daemon pages a fork's inherited past as the first one did.
+	if err := f.noteLineage(ctx, log, ws); err != nil {
+		return err
+	}
 	// THE REBIND RIDES THE SOURCE, decided by the CALLER rather than the
 	// classifier: the classifier reads the durable record, which says which
 	// conversation the workspace is on and not whether the user has just
@@ -1310,6 +1357,25 @@ func (f *Fleet) startUp(ctx context.Context, ws ids.WorkspaceID, rebind bool) er
 		f.deps.SessionsUp(ws)
 		f.deps.Steps(ws, opentabs.Step{Kind: opentabs.StepUp})
 		return nil
+	}
+
+	// A FORK IS MADE BEFORE ITS SESSION RESUMES, on the shim just held, and
+	// recorded, so everything below is the plain resume of a conversation that
+	// exists. A failure leaves the shim held and the fork owed: the next
+	// bring-up makes it.
+	if src.Fork != nil {
+		forked, err := f.makeFork(ctx, log, ws, client, *src.Fork)
+		if err != nil {
+			return err
+		}
+		src = source{VendorSessionID: forked}
+		session.VendorSessionID = forked
+		if err := f.noteLineage(ctx, log, ws); err != nil {
+			return err
+		}
+		// THE FORK'S OWN BOOK IS NEW, AND EMPTY UNTIL ITS FIRST TURN: the
+		// feed reads the inherited past from the parent's book below it.
+		f.deps.Feed.NoteFreshBook(ws)
 	}
 
 	// THE VENDOR-START RUN IS CANCELLABLE BY A RESTART until this start has

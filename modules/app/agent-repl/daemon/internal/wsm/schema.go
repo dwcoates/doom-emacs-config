@@ -184,7 +184,7 @@ CREATE TABLE turns (
 
 CREATE INDEX turns_by_workspace ON turns(workspace_id);
 
-` + portedPromptsDDL + `
+` + portedPromptsDDL + forkLineageDDL + `
 CREATE TABLE idempotency_keys (
   workspace_id    TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   idempotency_key TEXT NOT NULL,
@@ -257,7 +257,7 @@ CREATE TABLE drain_schedule (
 // rows a NEW DAEMON must draw again (a merge's bubble), each with the order key
 // it was first drawn at, so a restart or a handover draws it where it stood.
 // The row is the encoded frontend.v1.FeedRow as last published. Kept apart for
-// the reason portedPromptsDDL is: a fresh file and a migrated one share one
+// the reason forkLineageDDL is: a fresh file and a migrated one share one
 // text.
 const durableFeedRowsDDL = `
 CREATE TABLE durable_feed_rows (
@@ -274,7 +274,7 @@ CREATE TABLE durable_feed_rows (
 // text zoom (frontend.v1.FeedTextScale), persisted so the zoom survives a
 // daemon restart. It is a SINGLETON like drain_schedule: the CHECK (id = 1)
 // makes "one preference" structural rather than conventional. Kept apart from
-// the rest of the schema for the reason portedPromptsDDL is: TWO paths write it
+// the rest of the schema for the reason forkLineageDDL is: TWO paths write it
 // — a fresh file gets it as part of schemaDDL, a layout-9 file gets it from the
 // 9 -> 10 migration — so one text keeps a migrated file and a created one from
 // drifting into two shapes. An absent row reads as the default scale (1.0).
@@ -300,10 +300,12 @@ CREATE TABLE merge_rollout_hold (
 );
 `
 
-// portedPromptsDDL is the layout-4 addition, kept apart from the rest of the
-// schema because TWO paths write it: a fresh file gets it as part of schemaDDL
-// above, and a layout-3 file gets it from the 3 -> 4 migration. One text, so a
-// migrated file and a created one cannot drift into two different shapes.
+// portedPromptsDDL is the layout-4 addition. NOTHING READS OR WRITES THE TABLE
+// ANY MORE: a fork reads its inherited past from its parent's book
+// (forkLineageDDL). It stays in the layout until a breaking step drops it,
+// which by the migration contract (migrate.go) follows once no running build
+// reads it. Two paths write it: a fresh file as part of schemaDDL, and a
+// layout-3 file from the 3 -> 4 migration.
 const portedPromptsDDL = `
 CREATE TABLE ported_prompts (
   workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,

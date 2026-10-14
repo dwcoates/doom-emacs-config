@@ -67,15 +67,9 @@ type hooks struct {
 	Graph func(ctx context.Context, p process) (*graph, error)
 	// Server builds the Connect surface.
 	Server func(server.Deps) (server.Server, error)
-	// Serve runs the http server until ctx ends. onShuttingDown is invoked
-	// once, at the very start of the shutdown sequence, while the listener is
-	// still accepting — it is where the advertisement is withdrawn so a client
-	// forwarding during shutdown finds no address rather than a present address
-	// backed by a listener that has stopped accepting. endStreams ends every
-	// standing stream the surface serves (the server's Close); the shutdown
-	// runs it once the answers owed have left, and waits for every stream's
-	// end frame before the process can exit.
-	Serve func(ctx context.Context, l net.Listener, h http.Handler, onShuttingDown, endStreams func(), mark func(step string, start time.Time)) error
+	// Serve runs the http server until ctx ends, then performs the exit the
+	// serveExit describes.
+	Serve func(ctx context.Context, l net.Listener, h http.Handler, exit serveExit) error
 	// BootStall bounds the whole boot reconciliation; zero means
 	// bootStallBound. It is a seam because the behavior under test is a
 	// reconciliation that never finishes, and a test must not wait out a
@@ -584,7 +578,12 @@ func run(ctx context.Context, opts options, h hooks) error {
 			})
 		}
 	}
-	serveErr := h.Serve(serving, server.RetryAccept(claim.Listener(), log), server.H2C(srv, log), withdrawal.begin, endStreams, teardown.mark)
+	serveErr := h.Serve(serving, server.RetryAccept(claim.Listener(), log), server.H2C(srv, log), serveExit{
+		OnShuttingDown: withdrawal.begin,
+		EndStreams:     endStreams,
+		Mark:           teardown.mark,
+		Log:            log,
+	})
 	teardown.markSinceBegin("serve_stop")
 	if err := serveErr; err != nil {
 		log.Error("daemon.cmd.serve", "the daemon stopped serving its listener", dlog.Context{
@@ -705,15 +704,50 @@ func workspaceIDLookup(ctx context.Context, db wsm.DB) dlog.WorkspaceIDLookup {
 	}
 }
 
+// serveExit is what serve's shutdown runs, and what it reports through.
+type serveExit struct {
+	// OnShuttingDown, when non-nil, is invoked once, at the very start of the
+	// shutdown sequence, while the listener is still accepting — it is where
+	// the advertisement is withdrawn so a client forwarding during shutdown
+	// finds no address rather than a present address backed by a listener
+	// that has stopped accepting.
+	OnShuttingDown func()
+	// EndStreams, when non-nil, ends every standing stream the surface serves
+	// (the server's Close); the shutdown runs it once the answers owed have
+	// left, and waits for every stream's end frame before the process can
+	// exit.
+	EndStreams func()
+	// Mark, when non-nil, is told each step of the shutdown and when it began,
+	// so the teardown record (teardownClock) names which step an exit spent
+	// its time in.
+	Mark func(step string, start time.Time)
+	// Grace bounds the in-flight requests `Server.Shutdown` waits for; zero
+	// means shutdownGrace. It is a seam because the behavior under test is a
+	// grace running out, and a test must not wait out the production bound
+	// to observe it.
+	Grace time.Duration
+	// Log is where the shutdown reports a grace it ran out. Required.
+	Log dlog.Logger
+}
+
 // serve runs the http server on the claimed listener until ctx ends, then shuts
 // it down gracefully.
 //
-// MARK, when non-nil, is told each step of the shutdown and when it began, so
-// the teardown record (teardownClock) names which step an exit spent its time
-// in.
-func serve(ctx context.Context, l net.Listener, h http.Handler, onShuttingDown, endStreams func(), mark func(step string, start time.Time)) error {
+// EVERY BOUND THE SHUTDOWN CAN RIDE IS REPORTED AT WARN OR WORSE, so an exit
+// that waited a bound out says so in the log rather than only in its timing:
+// the gate's own waits report theirs, and the http shutdown's grace is
+// reported here.
+func serve(ctx context.Context, l net.Listener, h http.Handler, exit serveExit) error {
+	if exit.Log == nil {
+		panic("agent-repld: serve was given no logger; the exit could not report a grace it ran out")
+	}
+	mark := exit.Mark
 	if mark == nil {
 		mark = func(string, time.Time) {}
+	}
+	grace := exit.Grace
+	if grace == 0 {
+		grace = shutdownGrace
 	}
 	// THE GRACE HAS TO BE OURS, so the handler must carry the gate that counts
 	// the calls being answered. `Server.Shutdown` cannot do it: every client
@@ -762,8 +796,8 @@ func serve(ctx context.Context, l net.Listener, h http.Handler, onShuttingDown, 
 		// real connection-refused WARN. With the address gone first, a forward
 		// during shutdown finds no address and is the vanished-address
 		// transient the sidecar already treats as gone.
-		if onShuttingDown != nil {
-			onShuttingDown()
+		if exit.OnShuttingDown != nil {
+			exit.OnShuttingDown()
 		}
 		// THE CALLS BEING ANSWERED GO FIRST, and this is the wait that
 		// actually happens. `UpdateShutdownSchedule{now}` ends the serving
@@ -775,7 +809,7 @@ func serve(ctx context.Context, l net.Listener, h http.Handler, onShuttingDown, 
 		// the daemon had performed. AwaitQuiet says so loudly when its own
 		// bound expires; nothing is swallowed.
 		start := time.Now()
-		gate.AwaitQuiet(shutdownGrace)
+		gate.AwaitQuiet(grace)
 		mark("serve_await_quiet", start)
 		// AND THEN THE STANDING STREAMS' OWN LAST WORDS. The gate counts
 		// unary calls only — a Watch* handler does not return until its
@@ -807,9 +841,9 @@ func serve(ctx context.Context, l net.Listener, h http.Handler, onShuttingDown, 
 		// one's end frame to reach the socket. This holds on EVERY exit path:
 		// a handover's last transfer, a restart's stand-down, a drain, a
 		// signal, a state-root loss.
-		if endStreams != nil {
+		if exit.EndStreams != nil {
 			start = time.Now()
-			gate.EndStreams(endStreams)
+			gate.EndStreams(exit.EndStreams)
 			gate.AwaitStreamsEnded(streamsEndBound)
 			mark("serve_end_streams", start)
 		}
@@ -819,13 +853,19 @@ func serve(ctx context.Context, l net.Listener, h http.Handler, onShuttingDown, 
 		// daemon that never exits whenever anything is watching it, which is
 		// every handover. In-flight unary calls get the grace; whatever is
 		// still open when it expires is closed.
-		shutdown, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+		shutdown, cancel := context.WithTimeout(context.Background(), grace)
 		defer cancel()
 		start = time.Now()
 		held := conns.summary()
 		err := srv.Shutdown(shutdown)
-		mark("serve_http_shutdown(held "+held+"; after "+conns.summary()+")", start)
+		after := conns.summary()
+		mark("serve_http_shutdown(held "+held+"; after "+after+")", start)
 		if errors.Is(err, context.DeadlineExceeded) {
+			exit.Log.Warn("daemon.cmd.serve", "the exit's http shutdown grace expired with connections still held; closing them under their requests", dlog.Context{
+				"grace_ms": grace.Milliseconds(),
+				"held":     held,
+				"after":    after,
+			})
 			return srv.Close()
 		}
 		return err

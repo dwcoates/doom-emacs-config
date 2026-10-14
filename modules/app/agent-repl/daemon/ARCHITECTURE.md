@@ -545,8 +545,11 @@ already held it; it republishes the roster so the new repository's EMPTY
 section draws), `Create` (standard + one-shot; slug from the
 initial prompt via the naming rule; branch; worktree; layout facts recorded;
 registration only after materialization; consent check for ungated modes;
-fork = the daemon ports the parent's transcript into the child's config
-root project dir before StartSession(resume)), `Open` (spawn on mount
+fork = the create records a pending fork; the bring-up asks the parent's shim
+for the fork point (GetForkPoint) and the child's shim for the vendor's fork
+(ForkSession) while the parent's deliveries are held, records the fork's
+vendor id and lineage, then StartSession(resume); the fork's feed reads its
+inherited past from the parent's book), `Open` (spawn on mount
 semantics), `Close` (requires quiet: no turn, no live work, no held prompts,
 no queued merge; refusal manifests in the footer), `Kill`, `Nuke`, `Forget`
 (registration's undo: the record goes, and its repository's record with it when

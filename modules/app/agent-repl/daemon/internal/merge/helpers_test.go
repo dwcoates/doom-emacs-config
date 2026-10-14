@@ -1428,6 +1428,10 @@ func (q *fakeQueue) RollBack(context.Context, ids.WorkspaceID, time.Time, []ids.
 	return errors.New("fakeQueue: the merge orchestrator never rolls back")
 }
 
+func (q *fakeQueue) Exclusively(context.Context, ids.WorkspaceID, string, func(context.Context) error) error {
+	return errors.New("fakeQueue: the merge orchestrator never forks")
+}
+
 // ClaimDisplacedTurn is the queue's door claim, taken on the harness's store
 // exactly as the real queue takes it on the durable one.
 func (q *fakeQueue) ClaimDisplacedTurn(ctx context.Context, _ ids.WorkspaceID, turn ids.TurnID) (bool, error) {

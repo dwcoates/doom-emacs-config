@@ -262,6 +262,13 @@ func TestValidateReadHistoryRequest(t *testing.T) {
 			},
 			field: "ReadHistoryRequest.after.value",
 		},
+		{
+			name: "a bound that names no instant",
+			req: &shimv1.ReadHistoryRequest{
+				Position: &shimv1.ReadHistoryRequest_Through{Through: &conversationv1.ConversationThrough{}},
+			},
+			field: "ReadHistoryRequest.through.at_ms",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -271,6 +278,24 @@ func TestValidateReadHistoryRequest(t *testing.T) {
 			// Assert.
 			assertInvalidField(t, err, tc.field)
 		})
+	}
+}
+
+// TestValidateReadHistoryRequestAcceptsABoundedRead pins the read a fork's
+// inherited past is paged by.
+func TestValidateReadHistoryRequestAcceptsABoundedRead(t *testing.T) {
+	// Arrange.
+	req := &shimv1.ReadHistoryRequest{
+		Target:   &conversationv1.AgentId{Value: "book-parent"},
+		Position: &shimv1.ReadHistoryRequest_Through{Through: &conversationv1.ConversationThrough{AtMs: 42}},
+	}
+
+	// Act.
+	err := validateReadHistoryRequest(req)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("validateReadHistoryRequest = %v, want a bounded read accepted", err)
 	}
 }
 
@@ -454,4 +479,60 @@ func TestValidateStartTurnRequestAcceptsEachOpening(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestValidateForkSessionRequest covers the fork's illegal shapes.
+func TestValidateForkSessionRequest(t *testing.T) {
+	whole := &shimv1.ForkPoint{Extent: &shimv1.ForkPoint_Whole{Whole: &shimv1.ForkPointWhole{}}}
+	tests := []struct {
+		name  string
+		req   *shimv1.ForkSessionRequest
+		field string
+	}{
+		{name: "nil", req: nil, field: "ForkSessionRequest"},
+		{name: "no parent session", req: &shimv1.ForkSessionRequest{ParentWorkspaceDir: "/p", Point: whole}, field: "ForkSessionRequest.parent_vendor_session_id"},
+		{name: "no parent dir", req: &shimv1.ForkSessionRequest{ParentVendorSessionId: "v", Point: whole}, field: "ForkSessionRequest.parent_workspace_dir"},
+		{name: "no point", req: &shimv1.ForkSessionRequest{ParentVendorSessionId: "v", ParentWorkspaceDir: "/p"}, field: "ForkSessionRequest.point"},
+		{name: "no extent", req: &shimv1.ForkSessionRequest{ParentVendorSessionId: "v", ParentWorkspaceDir: "/p", Point: &shimv1.ForkPoint{}}, field: "ForkSessionRequest.point.extent"},
+		{
+			name: "a cut naming no record",
+			req: &shimv1.ForkSessionRequest{ParentVendorSessionId: "v", ParentWorkspaceDir: "/p", Point: &shimv1.ForkPoint{
+				Extent: &shimv1.ForkPoint_ThroughRecord{ThroughRecord: &shimv1.ForkPointThroughRecord{}},
+			}},
+			field: "ForkSessionRequest.point.through_record.record",
+		},
+		{
+			name: "a cut before no record",
+			req: &shimv1.ForkSessionRequest{ParentVendorSessionId: "v", ParentWorkspaceDir: "/p", Point: &shimv1.ForkPoint{
+				Extent: &shimv1.ForkPoint_BeforeRecord{BeforeRecord: &shimv1.ForkPointBeforeRecord{Record: &shimv1.ForkRecordToken{}}},
+			}},
+			field: "ForkSessionRequest.point.before_record.record",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange, Act.
+			err := validateForkSessionRequest(tc.req)
+
+			// Assert.
+			assertInvalidField(t, err, tc.field)
+		})
+	}
+}
+
+// TestValidateForkRequestsAcceptLegalShapes pins the shapes a fork sends.
+func TestValidateForkRequestsAcceptLegalShapes(t *testing.T) {
+	// Arrange.
+	fork := &shimv1.ForkSessionRequest{ParentVendorSessionId: "v", ParentWorkspaceDir: "/p", Point: &shimv1.ForkPoint{
+		Extent: &shimv1.ForkPoint_ThroughRecord{ThroughRecord: &shimv1.ForkPointThroughRecord{Record: &shimv1.ForkRecordToken{Value: "r"}}},
+	}}
+
+	// Act, Assert.
+	if err := validateForkSessionRequest(fork); err != nil {
+		t.Fatalf("validateForkSessionRequest = %v, want accepted", err)
+	}
+	if err := validateGetForkPointRequest(&shimv1.GetForkPointRequest{}); err != nil {
+		t.Fatalf("validateGetForkPointRequest = %v, want accepted", err)
+	}
+	assertInvalidField(t, validateGetForkPointRequest(nil), "GetForkPointRequest")
 }

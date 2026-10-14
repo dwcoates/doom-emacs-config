@@ -183,6 +183,12 @@ type Client interface {
 	// GatherTitleDigest reads the transcript for the material the daemon
 	// synthesizes a workspace title from when the vendor wrote no ai-title.
 	GatherTitleDigest(ctx context.Context, req *shimv1.GatherTitleDigestRequest) (*shimv1.GatherTitleDigestResponse, error)
+	// GetForkPoint asks a PARENT's shim where a fork of its conversation would
+	// end if taken now, and how the parent's stored rows are bounded to it.
+	GetForkPoint(ctx context.Context, req *shimv1.GetForkPointRequest) (*shimv1.GetForkPointResponse, error)
+	// ForkSession makes a CHILD's shim's conversation a vendor fork of its
+	// parent's, before any session starts on it.
+	ForkSession(ctx context.Context, req *shimv1.ForkSessionRequest) (*shimv1.ForkSessionResponse, error)
 
 	// Occupy takes the in-memory occupancy guard that backs WSM's lease row,
 	// returning the release function. It refuses while another holder has it.
