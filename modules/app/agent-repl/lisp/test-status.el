@@ -4884,6 +4884,66 @@ extent's color — and gains the underline besides."
     (should (eq t (plist-get sel :underline)))
     (should-not (plist-get unsel :underline))))
 
+;;;; ---- The sidebar's mark, drawn outside the tab bar ----
+
+(ert-deftest agent-repl-test-status-roster-mark-color-is-the-shared-assignment ()
+  "An arm with no ink takes its color from the SHARED assignment."
+  ;; Act / Assert
+  (should (equal (agent-repl-status-roster-mark-color :ready)
+                 (cdr (assoc (alist-get :ready agent-repl-status-color-table)
+                             agent-repl--color-by-name)))))
+
+(ert-deftest agent-repl-test-status-roster-mark-color-prefers-the-ink ()
+  "An inked arm takes its ink: a failed merge is marked red."
+  ;; Act / Assert
+  (should (equal (agent-repl-status-roster-mark-color :merge-failed)
+                 agent-repl--color-thinking-red)))
+
+(ert-deftest agent-repl-test-status-roster-mark-color-of-a-grey-arm-is-none ()
+  "An arm whose color is `none' answers nil: the sidebar draws it grey."
+  ;; Act / Assert
+  (should (null (agent-repl-status-roster-mark-color :inactive))))
+
+(ert-deftest agent-repl-test-status-roster-mark-color-of-an-unknown-arm-fails-hard ()
+  "An arm missing from the shared assignment is logged and signalled."
+  ;; Arrange
+  (let (logged)
+    (cl-letf (((symbol-function 'agent-repl--error)
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+      ;; Act / Assert
+      (should-error (agent-repl-status-roster-mark-color :no-such-arm))
+      (should (string-match-p "arm :no-such-arm has no color" (car logged))))))
+
+(ert-deftest agent-repl-test-status-roster-mark-is-the-dot-for-a-lifecycle-arm ()
+  "A lifecycle arm draws the dot in its color."
+  ;; Act
+  (let ((mark (agent-repl-status-roster-mark :thinking)))
+    ;; Assert
+    (should (equal mark (agent-repl-status--glyph-char agent-repl-status-dot-glyph)))
+    (should (equal (get-text-property 0 'face mark)
+                   (list :foreground (agent-repl-status-roster-mark-color :thinking))))))
+
+(ert-deftest agent-repl-test-status-roster-mark-is-the-merge-glyph-for-a-merge-arm ()
+  "Every merge arm draws the one merge glyph in place of the dot."
+  ;; Act / Assert
+  (dolist (arm (mapcar #'car agent-repl-status-merge-glyphs))
+    (should (equal (agent-repl-status-roster-mark arm)
+                   (agent-repl-status--glyph-char (alist-get arm agent-repl-status-merge-glyphs))))))
+
+(ert-deftest agent-repl-test-status-roster-mark-of-a-grey-arm-is-shadowed ()
+  "A grey arm's mark takes the `shadow' face."
+  ;; Act / Assert
+  (should (eq (get-text-property 0 'face (agent-repl-status-roster-mark :none)) 'shadow)))
+
+(ert-deftest agent-repl-test-status-roster-mark-draws-a-given-glyph-in-the-arms-color ()
+  "A given glyph replaces the character and keeps the arm's color."
+  ;; Act
+  (let ((mark (agent-repl-status-roster-mark :done "◌")))
+    ;; Assert
+    (should (equal mark "◌"))
+    (should (equal (get-text-property 0 'face mark)
+                   (list :foreground (agent-repl-status-roster-mark-color :done))))))
+
 (provide 'test-status)
 
 ;;; test-status.el ends here
