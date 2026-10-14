@@ -135,7 +135,7 @@ func (c *controller) abandonHandover(ctx context.Context, slot *handoverSlot, fi
 	if slot.successor != nil {
 		if err := slot.successor.Stop(ctx); err != nil {
 			c.log.Error(opHandover, "the abandoned handover's successor could not be stopped; the handover stays in flight so no second successor is spawned beside it",
-				withCause(merge(fields, dlog.Context{"abandoned_because": cause.Error()}), err))
+				dlog.WithCause(dlog.Merge(fields, dlog.Context{"abandoned_because": cause.Error()}), err))
 			return
 		}
 		c.log.Info(opHandover, "stopped the abandoned handover's successor", fields)
@@ -168,7 +168,7 @@ func (c *controller) beginHandover(ctx context.Context, force bool) (*handoverPl
 		// INFO, NOT WARN: the refusal is the contract's own answer to a caller
 		// that asked twice, and nothing about it is wrong with this daemon.
 		c.log.Info(opHandover, "refused a handover while one is already in flight",
-			withCause(dlog.Context{"self_address": c.deps.SelfAddress}, err))
+			dlog.WithCause(dlog.Context{"self_address": c.deps.SelfAddress}, err))
 		return nil, err
 	}
 	fields := dlog.Context{"self_address": c.deps.SelfAddress, "forced": force}
@@ -182,13 +182,13 @@ func (c *controller) beginHandover(ctx context.Context, force bool) (*handoverPl
 	}
 	if err != nil {
 		c.log.Error(opHandover, "the successor did not come up; nothing was announced",
-			withCause(merge(fields, dlog.Context{"successor_started": successor != nil}), err))
+			dlog.WithCause(dlog.Merge(fields, dlog.Context{"successor_started": successor != nil}), err))
 		c.openSuccessorFault(ctx, err, fields)
 		c.abandonHandover(ctx, slot, fields, err)
 		return nil, fmt.Errorf("rollout: handover: spawn the successor: %w", err)
 	}
 	address := successor.Address()
-	fields = merge(fields, dlog.Context{"successor": address, "successor_pid": successor.PID()})
+	fields = dlog.Merge(fields, dlog.Context{"successor": address, "successor_pid": successor.PID()})
 	// NOTHING IS ANNOUNCED, QUIESCED OR TRANSFERRED TO A SUCCESSOR THAT HAS
 	// NOT ANSWERED. Its address report only says its listener is bound; the
 	// 2026-09-27 successor bound, reported, and died 3ms later on a state
@@ -201,7 +201,7 @@ func (c *controller) beginHandover(ctx context.Context, force bool) (*handoverPl
 	cancelReady()
 	if err != nil {
 		c.log.Error(opHandover, "the successor never proved it was serving; the handover is abandoned before any workspace was quiesced or announced, and this daemon keeps serving",
-			withCause(merge(fields, dlog.Context{"ready_bound": c.deps.ReadyBound.String()}), err))
+			dlog.WithCause(dlog.Merge(fields, dlog.Context{"ready_bound": c.deps.ReadyBound.String()}), err))
 		c.openSuccessorFault(ctx, err, fields)
 		c.abandonHandover(ctx, slot, fields, err)
 		return nil, fmt.Errorf("rollout: handover: the successor never proved it was serving: %w", err)
@@ -212,7 +212,7 @@ func (c *controller) beginHandover(ctx context.Context, force bool) (*handoverPl
 	workspaces, untransferable, err := c.served(ctx)
 	if err != nil {
 		c.log.Error(opHandover, "could not list what this daemon serves; the handover is abandoned before anything was announced",
-			withCause(fields, err))
+			dlog.WithCause(fields, err))
 		c.abandonHandover(ctx, slot, fields, err)
 		return nil, err
 	}
@@ -248,7 +248,7 @@ func (c *controller) beginHandover(ctx context.Context, force bool) (*handoverPl
 		})
 	}
 	c.log.Info(opHandover, "announced the stand-down and snapshotted the expected participants",
-		merge(fields, dlog.Context{"workspaces": len(workspaces)}))
+		dlog.Merge(fields, dlog.Context{"workspaces": len(workspaces)}))
 
 	manifest := c.manifest(ctx, address, workspaces, snapshot)
 	manifest.Forced = force
@@ -259,7 +259,7 @@ func (c *controller) beginHandover(ctx context.Context, force bool) (*handoverPl
 		// served here, where nothing was quiesced or released. What must not
 		// happen is the successor waiting forever for this manifest.
 		c.log.Error(opHandover, "the intent manifest could not be written after the announcement; the handover is abandoned and its successor stopped",
-			withCause(merge(fields, dlog.Context{"workspaces": len(workspaces)}), err))
+			dlog.WithCause(dlog.Merge(fields, dlog.Context{"workspaces": len(workspaces)}), err))
 		c.abandonHandover(ctx, slot, fields, err)
 		return nil, err
 	}
@@ -315,11 +315,11 @@ func (c *controller) completeHandover(ctx context.Context, plan *handoverPlan) {
 		decision, err := c.deps.Bounces.RequestBounce(ctx, ws.ID, req)
 		if err != nil {
 			c.log.Error(opTransfer, "the bounce registry refused the workspace's transfer; the handover cannot finish while this daemon still serves it",
-				withCause(merge(fields, dlog.Context{"workspace": string(ws.ID)}), err))
+				dlog.WithCause(dlog.Merge(fields, dlog.Context{"workspace": string(ws.ID)}), err))
 			continue
 		}
 		requested++
-		c.log.Info(opTransfer, "asked the bounce registry to transfer the workspace", merge(fields, dlog.Context{
+		c.log.Info(opTransfer, "asked the bounce registry to transfer the workspace", dlog.Merge(fields, dlog.Context{
 			"workspace":      string(ws.ID),
 			"now":            decision.Now,
 			"forced":         decision.Forced,
@@ -359,17 +359,17 @@ func (c *controller) followHandover(ctx context.Context, plan *handoverPlan, out
 		select {
 		case <-ctx.Done():
 			c.log.Debug(opHandover, "the daemon's lifetime ended while transfers were still pending",
-				merge(fields, dlog.Context{"pending": len(pending)}))
+				dlog.Merge(fields, dlog.Context{"pending": len(pending)}))
 			return
 		case out := <-outcomes:
 			requested--
 			delete(pending, out.ws)
 			c.log.Debug(opTransfer, transferFinishedMessage,
-				merge(fields, dlog.Context{"workspace": string(out.ws), "pending": requested}))
+				dlog.Merge(fields, dlog.Context{"workspace": string(out.ws), "pending": requested}))
 			if out.err != nil {
 				failed++
 				c.log.Error(opTransfer, "a workspace's transfer failed; it stays served by this daemon",
-					withCause(merge(fields, dlog.Context{"workspace": string(out.ws)}), out.err))
+					dlog.WithCause(dlog.Merge(fields, dlog.Context{"workspace": string(out.ws)}), out.err))
 			}
 		case <-c.deps.Clock.After(c.deps.HoldoutWarnEvery):
 			warnings++
@@ -379,7 +379,7 @@ func (c *controller) followHandover(ctx context.Context, plan *handoverPlan, out
 			}
 			sort.Strings(holdouts)
 			c.log.Warn(opHandover, "still waiting for workspaces to fall free; nothing will be interrupted to hurry them",
-				merge(fields, dlog.Context{
+				dlog.Merge(fields, dlog.Context{
 					"holdouts": holdouts,
 					"warnings": warnings,
 					"cadence":  c.deps.HoldoutWarnEvery.String(),
@@ -400,7 +400,7 @@ func (c *controller) followHandover(ctx context.Context, plan *handoverPlan, out
 		// THE RECLAIMED ARE SERVED HERE AGAIN, so exiting would abandon them
 		// exactly as a failed transfer would.
 		c.log.Error(opHandover, "the handover cannot finish: workspaces whose adoption never landed were reclaimed and are served here again; not exiting",
-			merge(fields, dlog.Context{"reclaimed": reclaimed, "untransferred": failed}))
+			dlog.Merge(fields, dlog.Context{"reclaimed": reclaimed, "untransferred": failed}))
 		c.clearDeployLine("workspaces were reclaimed", fields)
 		return
 	}
@@ -409,7 +409,7 @@ func (c *controller) followHandover(ctx context.Context, plan *handoverPlan, out
 		// leave it with no daemon at all; staying leaves the two-daemon steady
 		// state the ruling accepts, loudly.
 		c.log.Error(opHandover, "the handover cannot finish: workspaces that did not transfer are still served here; not exiting",
-			merge(fields, dlog.Context{"untransferred": failed}))
+			dlog.Merge(fields, dlog.Context{"untransferred": failed}))
 		c.clearDeployLine("workspaces did not transfer", fields)
 		return
 	}
@@ -421,7 +421,7 @@ func (c *controller) followHandover(ctx context.Context, plan *handoverPlan, out
 
 	c.log.Info(opHandover, "every workspace is transferred; exiting", fields)
 	if err := c.deps.Exit(ctx); err != nil {
-		c.log.Error(opHandover, "the orderly exit could not be started", withCause(fields, err))
+		c.log.Error(opHandover, "the orderly exit could not be started", dlog.WithCause(fields, err))
 	}
 }
 
@@ -443,7 +443,7 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, plan *hando
 	wsLog := c.deps.Log.WorkspaceOrCentral(ws.Dir)
 	if !plan.restart {
 		wsLog.Info(opTransfer, "a deploy found this daemon's build older, so it is handing the workspace to its successor; both daemons write for the workspace until the transfer lands",
-			merge(plan.fields, fields))
+			dlog.Merge(plan.fields, fields))
 	}
 
 	// QUIESCE FIRST. From here on this daemon does NO work for the workspace:
@@ -451,7 +451,7 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, plan *hando
 	// about to own is still moving under it.
 	lease, err := c.deps.Quiesce(ctx, ws.ID)
 	if err != nil {
-		c.log.Error(opTransfer, "could not quiesce the workspace's intake", withCause(fields, err))
+		c.log.Error(opTransfer, "could not quiesce the workspace's intake", dlog.WithCause(fields, err))
 		return fmt.Errorf("rollout: transfer %q: quiesce: %w", ws.ID, err)
 	}
 	fields["lease"] = string(lease)
@@ -463,7 +463,7 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, plan *hando
 	// while the shim is still this daemon's, and the adopting daemon resumes
 	// it at its recorded step (merge/transfer.go).
 	if err := c.deps.Merges.SuspendForTransfer(ctx, ws.ID); err != nil {
-		c.log.Error(opTransfer, "could not suspend the workspace's merge for its transfer; taking the workspace back", withCause(fields, err))
+		c.log.Error(opTransfer, "could not suspend the workspace's merge for its transfer; taking the workspace back", dlog.WithCause(fields, err))
 		return errors.Join(fmt.Errorf("rollout: transfer %q: suspend the merge: %w", ws.ID, err),
 			c.takeBack(ctx, ws.ID, lease, hadShim, nil, fields))
 	}
@@ -488,7 +488,7 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, plan *hando
 	handed, err := c.deps.Shims.HandOver(ws.ID)
 	switch {
 	case err != nil:
-		c.log.Error(opTransfer, "could not hand the workspace's shim over; taking the workspace back", withCause(fields, err))
+		c.log.Error(opTransfer, "could not hand the workspace's shim over; taking the workspace back", dlog.WithCause(fields, err))
 		return errors.Join(fmt.Errorf("rollout: transfer %q: hand over the shim: %w", ws.ID, err),
 			c.takeBack(ctx, ws.ID, lease, hadShim, move, fields))
 	case handed:
@@ -517,9 +517,9 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, plan *hando
 	c.recordTransfer(ws.ID, successor)
 	c.deps.Pusher.PushTransferred(ws.ID, successor)
 	c.log.Info(opTransfer, "pushed the transfer notice on the workspace's host and web streams",
-		merge(fields, dlog.Context{"expected_host": move.participants.Host, "expected_web": move.participants.Web}))
+		dlog.Merge(fields, dlog.Context{"expected_host": move.participants.Host, "expected_web": move.participants.Web}))
 	wsLog.Info(opTransfer, "the workspace is the successor's now; any later record from this daemon about it is the predecessor winding down, not the workspace's status",
-		merge(plan.fields, fields))
+		dlog.Merge(plan.fields, fields))
 
 	// THE HOLD THE SUCCESSOR DRAINS is the one this transfer took, unless the
 	// row had already moved before this release: then the successor claimed
@@ -581,12 +581,12 @@ func (c *controller) reclaim(ctx context.Context, ws ids.WorkspaceID, lease ids.
 	claimed, holder, err := c.deps.DB.ClaimUnownedServing(ctx, ws, c.deps.Instance)
 	if err != nil {
 		c.log.Error(opTransfer, "could not take the workspace back: its serving ownership could not be claimed; its hold stays until this daemon's state handle closes",
-			withCause(fields, err))
+			dlog.WithCause(fields, err))
 		return false, fmt.Errorf("rollout: reclaim %q: claim serving: %w", ws, err)
 	}
 	if !claimed {
 		c.log.Info(opTransfer, "the successor already owns the workspace; nothing to take back",
-			merge(fields, dlog.Context{"owner": string(holder)}))
+			dlog.Merge(fields, dlog.Context{"owner": string(holder)}))
 		return false, nil
 	}
 	// THE NOTICE THAT IT MOVED IS WITHDRAWN with the move, when one went
@@ -601,7 +601,7 @@ func (c *controller) reclaim(ctx context.Context, ws ids.WorkspaceID, lease ids.
 	if _, live := c.deps.Shims.Client(ws); reattach && !live {
 		if _, err := c.deps.Shims.Adopt(ctx, ws); err != nil {
 			c.log.Error(opTransfer, "the taken-back workspace's running shim could not be re-attached; it is served without a session until its next prompt revives one",
-				withCause(fields, err))
+				dlog.WithCause(fields, err))
 			failures = append(failures, fmt.Errorf("rollout: reclaim %q: re-attach the shim: %w", ws, err))
 		} else if err := c.awaitReattachedFacts(ctx, ws, fields); err != nil {
 			failures = append(failures, err)
@@ -622,12 +622,12 @@ func (c *controller) reclaim(ctx context.Context, ws ids.WorkspaceID, lease ids.
 	// THE MERGE A TRANSFER SUSPENDED RESUMES HERE, the workspace being this
 	// daemon's again.
 	if err := c.deps.Merges.AdoptWorkspace(ctx, ws); err != nil {
-		c.log.Error(opTransfer, "the taken-back workspace's merges could not be taken back", withCause(fields, err))
+		c.log.Error(opTransfer, "the taken-back workspace's merges could not be taken back", dlog.WithCause(fields, err))
 		failures = append(failures, fmt.Errorf("rollout: reclaim %q: take its merges back: %w", ws, err))
 	}
 	if c.deps.PublishViews != nil {
 		if err := c.deps.PublishViews(ctx, ws); err != nil {
-			c.log.Error(opTransfer, "the taken-back workspace's views could not be republished", withCause(fields, err))
+			c.log.Error(opTransfer, "the taken-back workspace's views could not be republished", dlog.WithCause(fields, err))
 			failures = append(failures, fmt.Errorf("rollout: reclaim %q: publish views: %w", ws, err))
 		}
 	}
@@ -650,7 +650,7 @@ func (c *controller) awaitReattachedFacts(ctx context.Context, ws ids.WorkspaceI
 	defer cancel()
 	if err := c.deps.Shims.AwaitFacts(facts, ws); err != nil {
 		c.log.Error(opTransfer, "the re-attached shim never re-announced its session facts; this daemon cannot see its turn in flight, and the workspace is drawn degraded until it does",
-			withCause(merge(fields, dlog.Context{"facts_bound": c.deps.FactsBound.String()}), err))
+			dlog.WithCause(dlog.Merge(fields, dlog.Context{"facts_bound": c.deps.FactsBound.String()}), err))
 		// THE WORKSPACE STAYS USABLE (owner ruling, 2026-09-28): prompts are
 		// still delivered and matched to their replies by id, so the take-back
 		// goes on; every status surface draws the degraded rung until the
@@ -676,7 +676,7 @@ func (c *controller) releaseHold(ctx context.Context, ws ids.WorkspaceID, lease 
 	}
 	if err := c.deps.DB.ReleaseLease(ctx, lease); err != nil {
 		c.log.Error(opTransfer, "could not release the transfer's hold; it stays until this daemon's state handle closes",
-			withCause(fields, err))
+			dlog.WithCause(fields, err))
 		return fmt.Errorf("rollout: release the hold %s of %q: %w", lease, ws, err)
 	}
 	c.deps.LeaseChanged(ws)
@@ -693,7 +693,7 @@ func (c *controller) releaseHold(ctx context.Context, ws ids.WorkspaceID, lease 
 func (c *controller) releaseServing(ctx context.Context, ws ids.WorkspaceID, fields dlog.Context) (moved bool, err error) {
 	owner, err := c.deps.DB.Serving(ctx, ws)
 	if err != nil {
-		c.log.Error(opTransfer, "could not read serving ownership before releasing it", withCause(fields, err))
+		c.log.Error(opTransfer, "could not read serving ownership before releasing it", dlog.WithCause(fields, err))
 		return false, err
 	}
 	if owner == nil {
@@ -701,13 +701,13 @@ func (c *controller) releaseServing(ctx context.Context, ws ids.WorkspaceID, fie
 		return false, nil
 	}
 	if *owner != c.deps.Instance {
-		c.log.Info(opTransfer, "the successor already owns the workspace", merge(fields, dlog.Context{
+		c.log.Info(opTransfer, "the successor already owns the workspace", dlog.Merge(fields, dlog.Context{
 			"owner": string(*owner),
 		}))
 		return true, nil
 	}
 	if err := c.deps.DB.ReleaseServing(ctx, ws, c.deps.Instance); err != nil {
-		c.log.Error(opTransfer, "could not release serving ownership", withCause(fields, err))
+		c.log.Error(opTransfer, "could not release serving ownership", dlog.WithCause(fields, err))
 		return false, err
 	}
 	c.log.Debug(opTransfer, "released serving ownership", fields)
@@ -784,7 +784,7 @@ func (c *controller) reoffer(ctx context.Context, ws wsm.Workspace, plan *handov
 		delay = c.deps.HoldoutWarnEvery
 	}
 	c.log.Info(opHandover, "the workspace was taken back after its adoption window expired; it is offered to the successor again",
-		merge(fields, dlog.Context{"attempt": attempt, "delay": delay.String()}))
+		dlog.Merge(fields, dlog.Context{"attempt": attempt, "delay": delay.String()}))
 	select {
 	case <-ctx.Done():
 		c.log.Debug(opHandover, "the daemon's lifetime ended before the workspace was offered again", fields)
@@ -839,7 +839,7 @@ func (c *controller) carryConsumed(ws ids.WorkspaceID, move *sealedMove, fields 
 	case errors.Is(err, os.ErrNotExist):
 		return true
 	case err != nil:
-		c.log.Error(opAdoption, "could not read whether the successor consumed the carry; the adoption window bounds the wait", withCause(fields, err))
+		c.log.Error(opAdoption, "could not read whether the successor consumed the carry; the adoption window bounds the wait", dlog.WithCause(fields, err))
 	}
 	return false
 }
@@ -907,7 +907,7 @@ func (c *controller) awaitAdoption(ctx context.Context, ws ids.WorkspaceID, leas
 		}
 	}
 	window := dlog.Context{"adoption_window": c.deps.AdoptionWindow.String()}
-	reclaimed, err := c.reclaim(ctx, ws, lease, detached, true, move, merge(fields, window))
+	reclaimed, err := c.reclaim(ctx, ws, lease, detached, true, move, dlog.Merge(fields, window))
 	if !reclaimed {
 		if err == nil {
 			// The arbitration answered for the successor: it adopted in the
@@ -915,7 +915,7 @@ func (c *controller) awaitAdoption(ctx context.Context, ws ids.WorkspaceID, leas
 			return adoptionLanded
 		}
 		c.log.Error(opAdoption, "the adoption window expired and the workspace could not be taken back",
-			withCause(merge(fields, window), err))
+			dlog.WithCause(dlog.Merge(fields, window), err))
 		return adoptionAbandoned
 	}
 	workspace := ws
@@ -927,15 +927,15 @@ func (c *controller) awaitAdoption(ctx context.Context, ws ids.WorkspaceID, leas
 		Evidence: map[string]string{"adoption_window": c.deps.AdoptionWindow.String()},
 		OpenedAt: c.deps.Clock.Now(),
 	}); faultErr != nil {
-		c.log.Error(opAdoption, "could not record the expired adoption window", withCause(fields, faultErr))
+		c.log.Error(opAdoption, "could not record the expired adoption window", dlog.WithCause(fields, faultErr))
 	}
 	if err != nil {
 		c.log.Error(opAdoption, "the adoption window expired; the workspace was taken back, but not cleanly",
-			withCause(merge(fields, window), err))
+			dlog.WithCause(dlog.Merge(fields, window), err))
 		return adoptionTakenBack
 	}
 	c.log.Error(opAdoption, "the adoption window expired; the successor never adopted the workspace, so this daemon took it back and serves it again",
-		merge(fields, window))
+		dlog.Merge(fields, window))
 	return adoptionExpired
 }
 
@@ -950,12 +950,12 @@ func (c *controller) takeBackRefused(ctx context.Context, ws ids.WorkspaceID, le
 		// The arbitration answered for the successor after all.
 		return adoptionLanded
 	case !reclaimed:
-		c.log.Error(opAdoption, "the successor refused the mid-work adoption and the workspace could not be taken back", withCause(fields, err))
+		c.log.Error(opAdoption, "the successor refused the mid-work adoption and the workspace could not be taken back", dlog.WithCause(fields, err))
 		return adoptionAbandoned
 	case err != nil:
 		// TAKEN BACK, NOT CLEANLY: it is served here, and a second transfer
 		// over a take-back that did not finish would move what is not whole.
-		c.log.Error(opAdoption, "the refused workspace was taken back, but not cleanly; it is not transferred again", withCause(fields, err))
+		c.log.Error(opAdoption, "the refused workspace was taken back, but not cleanly; it is not transferred again", dlog.WithCause(fields, err))
 		return adoptionTakenBack
 	}
 	return adoptionRefused
@@ -979,10 +979,10 @@ func (c *controller) fallBackToFreeness(ctx context.Context, ws wsm.Workspace, p
 		Done: func(err error) { outcome <- err },
 	})
 	if err != nil {
-		c.log.Error(opTransfer, "the bounce registry refused the transfer at freeness; the workspace stays served here", withCause(fields, err))
+		c.log.Error(opTransfer, "the bounce registry refused the transfer at freeness; the workspace stays served here", dlog.WithCause(fields, err))
 		return true
 	}
-	c.log.Info(opTransfer, "asked the bounce registry to transfer the workspace again at its freeness", merge(fields, dlog.Context{
+	c.log.Info(opTransfer, "asked the bounce registry to transfer the workspace again at its freeness", dlog.Merge(fields, dlog.Context{
 		"now": decision.Now, "turn_in_flight": decision.TurnInFlight, "detached_work": decision.DetachedWork,
 	}))
 	for warnings := 0; ; {
@@ -992,7 +992,7 @@ func (c *controller) fallBackToFreeness(ctx context.Context, ws wsm.Workspace, p
 			return false
 		case err := <-outcome:
 			if err != nil {
-				c.log.Error(opTransfer, "the transfer at freeness failed; the workspace stays served here", withCause(fields, err))
+				c.log.Error(opTransfer, "the transfer at freeness failed; the workspace stays served here", dlog.WithCause(fields, err))
 				return true
 			}
 			// Its own adoption window, already counted in windows, decides
@@ -1001,7 +1001,7 @@ func (c *controller) fallBackToFreeness(ctx context.Context, ws wsm.Workspace, p
 		case <-c.deps.Clock.After(c.deps.HoldoutWarnEvery):
 			warnings++
 			c.log.Warn(opHandover, "still waiting for workspaces to fall free; nothing will be interrupted to hurry them",
-				merge(plan.fields, dlog.Context{
+				dlog.Merge(plan.fields, dlog.Context{
 					"holdouts": []string{string(ws.ID)},
 					"warnings": warnings,
 					"cadence":  c.deps.HoldoutWarnEvery.String(),
@@ -1062,17 +1062,17 @@ func (c *controller) adopted(ctx context.Context, ws ids.WorkspaceID, lease ids.
 func (c *controller) adoptionState(ctx context.Context, ws ids.WorkspaceID, lease ids.LeaseID, fields dlog.Context) (done, draining bool) {
 	owner, err := c.deps.DB.Serving(ctx, ws)
 	if err != nil {
-		c.log.Error(opAdoption, "could not read serving ownership", withCause(fields, err))
+		c.log.Error(opAdoption, "could not read serving ownership", dlog.WithCause(fields, err))
 		return false, false
 	}
 	if owner == nil || *owner == c.deps.Instance {
 		return false, false
 	}
-	fields = merge(fields, dlog.Context{"owner": string(*owner)})
+	fields = dlog.Merge(fields, dlog.Context{"owner": string(*owner)})
 	if lease != "" {
 		standing, held, err := c.deps.DB.Lease(ctx, ws)
 		if err != nil {
-			c.log.Error(opAdoption, "could not read whether the successor drained the handover hold", withCause(fields, err))
+			c.log.Error(opAdoption, "could not read whether the successor drained the handover hold", dlog.WithCause(fields, err))
 			return false, false
 		}
 		if held && standing.ID == lease {
@@ -1096,7 +1096,7 @@ func (c *controller) adoptionState(ctx context.Context, ws ids.WorkspaceID, leas
 func (c *controller) served(ctx context.Context) (transfer, untransferable []wsm.Workspace, err error) {
 	all, err := c.deps.DB.ListWorkspaces(ctx)
 	if err != nil {
-		c.log.Error(opHandover, "could not list the workspaces to hand over", withCause(nil, err))
+		c.log.Error(opHandover, "could not list the workspaces to hand over", dlog.WithCause(nil, err))
 		return nil, nil, fmt.Errorf("rollout: handover: %w", err)
 	}
 	out := make([]wsm.Workspace, 0, len(all))
@@ -1122,7 +1122,7 @@ func (c *controller) served(ctx context.Context) (transfer, untransferable []wsm
 		owner, err := c.deps.DB.Serving(ctx, ws.ID)
 		if err != nil {
 			c.log.Error(opHandover, "could not read a workspace's serving ownership",
-				withCause(dlog.Context{"workspace": string(ws.ID)}, err))
+				dlog.WithCause(dlog.Context{"workspace": string(ws.ID)}, err))
 			return nil, nil, fmt.Errorf("rollout: handover: %w", err)
 		}
 		if owner == nil || *owner != c.deps.Instance {
@@ -1181,7 +1181,7 @@ func (c *controller) reclaimLiveSession(ctx context.Context, ws ids.WorkspaceID,
 	fields := dlog.Context{"workspace": string(ws), "owner": ids.Optional(owner), "instance": string(c.deps.Instance)}
 	c.log.Error(opHandover, "this daemon holds a live session for a workspace whose serving row names another instance; the live session is the truth, so it is reclaimed and handed over", fields)
 	if err := c.deps.DB.ClaimServing(ctx, ws, c.deps.Instance); err != nil {
-		c.log.Error(opHandover, "could not reclaim serving ownership of a workspace this daemon holds a live session for", withCause(fields, err))
+		c.log.Error(opHandover, "could not reclaim serving ownership of a workspace this daemon holds a live session for", dlog.WithCause(fields, err))
 		return fmt.Errorf("rollout: handover: reclaim serving for %q: %w", ws, err)
 	}
 	return nil
@@ -1216,7 +1216,7 @@ func (c *controller) standDownTheUntransferred(ctx context.Context, workspaces [
 		}
 		if err := c.deps.Shims.StandDown(ctx, ws.ID); err != nil {
 			c.log.Error(opHandover, "an untransferred workspace's shim would not stand down; it will outlive this daemon and hold the workspace lock",
-				withCause(fields, err))
+				dlog.WithCause(fields, err))
 			continue
 		}
 		c.log.Info(opHandover, "stood down the shim of a workspace this handover does not transfer", fields)
@@ -1246,7 +1246,7 @@ func (c *controller) manifest(ctx context.Context, successor string, workspaces 
 		session, found, err := c.deps.DB.Session(ctx, ws.ID)
 		if err != nil {
 			c.log.Error(opManifest, "could not read a session for the intent manifest",
-				withCause(dlog.Context{"workspace": string(ws.ID)}, err))
+				dlog.WithCause(dlog.Context{"workspace": string(ws.ID)}, err))
 		} else if found {
 			record.VendorSessionID = session.VendorSessionID
 			if session.ShimPID != nil {

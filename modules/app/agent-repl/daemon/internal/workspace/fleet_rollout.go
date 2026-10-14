@@ -278,7 +278,7 @@ func (f *Fleet) oweCutTurn(ctx context.Context, ws ids.WorkspaceID) {
 	fields := dlog.Context{"workspace": string(ws), "turn": string(*inFlight)}
 	if err := f.deps.DB.OweResumption(ctx, ws, *inFlight, f.now()); err != nil {
 		f.deps.Log.Global().Error(opFleetRollout, "could not record the resumption the stand-down owes; the cut turn will not be resumed",
-			withCause(fields, err))
+			dlog.WithCause(fields, err))
 		return
 	}
 	f.deps.Log.Global().Info(opFleetRollout, "the daemon's own stand-down is ending a running turn; the next session that serves the workspace resumes it", fields)

@@ -85,7 +85,7 @@ func (q *queue) reholdFailedTry(ctx context.Context, d *delivery, turn ids.TurnI
 	}
 	if call, standing := q.standingCall(d.ws); standing {
 		log.Info(opTurnEnded, "the vendor blocked the tried prompt, but a shim call stands; it stays the failed turn it was",
-			merged(fields, dlog.Context{"call": call.what}))
+			dlog.Merge(fields, dlog.Context{"call": call.what}))
 		return
 	}
 	var err error
@@ -99,7 +99,7 @@ func (q *queue) reholdFailedTry(ctx context.Context, d *delivery, turn ids.TurnI
 		log.Info(opTurnEnded, "the vendor blocked the tried prompt before recording it; there is nothing to cut", fields)
 	default:
 		log.Warn(opTurnEnded, "the vendor blocked the tried prompt and it could not be cut out of the vendor conversation; it stays the failed turn it was, so it is never said twice",
-			merged(fields, dlog.Context{"cause": err.Error()}))
+			dlog.Merge(fields, dlog.Context{"cause": err.Error()}))
 		return
 	}
 	// THE FEED'S REMOVAL ALWAYS HAPPENS; an error means only that recording
@@ -115,10 +115,10 @@ func (q *queue) reholdFailedTry(ctx context.Context, d *delivery, turn ids.TurnI
 	again.Tombstone = nil
 	if err := q.deps.DB.PutHeldPrompt(ctx, again); err != nil {
 		log.Error(opTurnEnded, "could not put the blocked tried prompt back on the hold; it is lost from the queue",
-			merged(fields, dlog.Context{"cause": err.Error(), "held_turn": string(again.Turn)}))
+			dlog.Merge(fields, dlog.Context{"cause": err.Error(), "held_turn": string(again.Turn)}))
 		return
 	}
 	log.Info(opTurnEnded, "the vendor blocked the tried prompt; it is back on the after-reconnect hold in its place",
-		merged(fields, dlog.Context{"held_turn": string(again.Turn)}))
+		dlog.Merge(fields, dlog.Context{"held_turn": string(again.Turn)}))
 	_ = q.pushTray(ctx, d.ws, log)
 }

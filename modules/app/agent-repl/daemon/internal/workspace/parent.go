@@ -40,7 +40,7 @@ func (v *verbs) SetParent(ctx context.Context, ws ids.WorkspaceID, parent *ids.W
 			fmt.Sprintf("workspace %q was forgotten before its retarget was recorded", ws), true)
 	}
 	if err != nil {
-		log.Error(opSetParent, "could not record the workspace's new parent", withCause(fields, err))
+		log.Error(opSetParent, "could not record the workspace's new parent", dlog.WithCause(fields, err))
 		return wsm.ParentChange{}, fmt.Errorf("set parent of %q: %w", ws, err)
 	}
 	log.Info(opSetParent, "recorded the workspace's new parent and merge target", dlog.Context{
@@ -63,7 +63,7 @@ func (v *verbs) RestoreParent(ctx context.Context, change wsm.ParentChange) erro
 		"undone_parent": ids.Optional(change.After.Parent), "undone_target_dir": change.After.Dir}
 	stale, err := v.deps.DB.RestoreParent(ctx, change)
 	if err != nil {
-		log.Error(opSetParent, "could not undo a retarget whose notice was not queued", withCause(fields, err))
+		log.Error(opSetParent, "could not undo a retarget whose notice was not queued", dlog.WithCause(fields, err))
 		return fmt.Errorf("restore parent of %q: %w", change.Workspace, err)
 	}
 	if stale {

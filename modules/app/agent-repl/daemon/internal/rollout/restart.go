@@ -79,7 +79,7 @@ func (c *controller) Restart(ctx context.Context, force bool) (HandoverAcceptanc
 		Forced:     force,
 	}
 	c.log.Info(opRollOut, "accepted a restart across a state layout change: each workspace's serving stands down through the bounce registry, then a replacement boots on the fresh build",
-		merge(fields, dlog.Context{"workspaces": accepted.Workspaces, "busy": accepted.Busy}))
+		dlog.Merge(fields, dlog.Context{"workspaces": accepted.Workspaces, "busy": accepted.Busy}))
 	c.completeHandover(c.lifetime(ctx), plan)
 	return accepted, nil
 }
@@ -94,7 +94,7 @@ func (c *controller) beginRestart(ctx context.Context, force bool) (*handoverPla
 	slot, err := c.claimHandover()
 	if err != nil {
 		c.log.Info(opHandover, "refused a restart while a rollout is already in flight",
-			withCause(dlog.Context{"self_address": c.deps.SelfAddress}, err))
+			dlog.WithCause(dlog.Context{"self_address": c.deps.SelfAddress}, err))
 		return nil, err
 	}
 	fields := dlog.Context{"self_address": c.deps.SelfAddress, "forced": force, "restart": true}
@@ -105,7 +105,7 @@ func (c *controller) beginRestart(ctx context.Context, force bool) (*handoverPla
 	workspaces, untransferable, err := c.served(ctx)
 	if err != nil {
 		c.log.Error(opHandover, "could not list what this daemon serves; the restart is abandoned before anything was announced",
-			withCause(fields, err))
+			dlog.WithCause(fields, err))
 		c.abandonHandover(ctx, slot, fields, err)
 		return nil, err
 	}
@@ -115,7 +115,7 @@ func (c *controller) beginRestart(ctx context.Context, force bool) (*handoverPla
 	manifest.Deploy = true
 	if err := c.writeManifest(ctx, manifest); err != nil {
 		c.log.Error(opHandover, "the intent manifest could not be written; the restart is abandoned before anything was announced",
-			withCause(merge(fields, dlog.Context{"workspaces": len(workspaces)}), err))
+			dlog.WithCause(dlog.Merge(fields, dlog.Context{"workspaces": len(workspaces)}), err))
 		c.abandonHandover(ctx, slot, fields, err)
 		return nil, err
 	}
@@ -129,7 +129,7 @@ func (c *controller) beginRestart(ctx context.Context, force bool) (*handoverPla
 		MintedAtMs:       milliseconds(c.deps.Clock.Now()),
 	})
 	c.log.Info(opHandover, "announced a plain-bounce restart: no successor is listening until this daemon has gone",
-		merge(fields, dlog.Context{"workspaces": len(workspaces)}))
+		dlog.Merge(fields, dlog.Context{"workspaces": len(workspaces)}))
 	return &handoverPlan{
 		workspaces:     workspaces,
 		untransferable: untransferable,
@@ -175,9 +175,9 @@ func (c *controller) finishRestart(ctx context.Context, plan *handoverPlan, fail
 	}
 	plan.mu.Unlock()
 	c.log.Info(opHandover, "every workspace stood down and the replacement is waiting on the boot claim; exiting",
-		merge(fields, dlog.Context{"replacement_pid": pid}))
+		dlog.Merge(fields, dlog.Context{"replacement_pid": pid}))
 	if err := c.deps.Exit(ctx); err != nil {
-		c.log.Error(opHandover, "the orderly exit could not be started", withCause(fields, err))
+		c.log.Error(opHandover, "the orderly exit could not be started", dlog.WithCause(fields, err))
 	}
 }
 
@@ -194,13 +194,13 @@ func (c *controller) abandonRestart(ctx context.Context, plan *handoverPlan, cau
 	plan.mu.Unlock()
 	var failures []error
 	for ws, m := range moved {
-		wsFields := merge(fields, dlog.Context{"workspace": string(ws), "lease": string(m.lease)})
+		wsFields := dlog.Merge(fields, dlog.Context{"workspace": string(ws), "lease": string(m.lease)})
 		if _, err := c.reclaim(ctx, ws, m.lease, m.detached, true, m.move, wsFields); err != nil {
 			failures = append(failures, err)
 		}
 	}
 	c.log.Error(opHandover, "the restart cannot finish; every workspace it stood down was taken back and this daemon keeps serving",
-		withCause(merge(fields, dlog.Context{"taken_back": len(moved)}), errors.Join(append([]error{cause}, failures...)...)))
+		dlog.WithCause(dlog.Merge(fields, dlog.Context{"taken_back": len(moved)}), errors.Join(append([]error{cause}, failures...)...)))
 	c.clearDeployLine("the restart was abandoned", fields)
 	c.abandonHandover(ctx, plan.slot, fields, cause)
 }

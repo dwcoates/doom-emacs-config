@@ -137,7 +137,7 @@ func (d *Deployer) rollback(ctx context.Context, p *previous, nonce string, caus
 			err = restore()
 		}
 		if err != nil {
-			d.log.Error(opRollback, "could not restore a previous artifact", withCause(kFields, err))
+			d.log.Error(opRollback, "could not restore a previous artifact", dlog.WithCause(kFields, err))
 			fail(k.component, "restore "+k.live, err)
 		}
 	}
@@ -146,14 +146,14 @@ func (d *Deployer) rollback(ctx context.Context, p *previous, nonce string, caus
 		// A STORE RESTART ALWAYS RESTARTS THE SIDECAR, in the recorded safe
 		// order, so one restart puts both back onto the restored build.
 		if err := d.deps.Services.RestartStore(ctx); err != nil {
-			d.log.Error(opRollback, "could not restart the store and the sidecar onto the restored build", withCause(nil, err))
+			d.log.Error(opRollback, "could not restart the store and the sidecar onto the restored build", dlog.WithCause(nil, err))
 			fail(ComponentStore, "restart the store", err)
 		} else {
 			d.log.Info(opRollback, "restarted the store and the sidecar onto the restored build", nil)
 		}
 	case p.sidecar:
 		if err := d.deps.Services.RestartSidecar(ctx); err != nil {
-			d.log.Error(opRollback, "could not restart the sidecar onto the restored build", withCause(nil, err))
+			d.log.Error(opRollback, "could not restart the sidecar onto the restored build", dlog.WithCause(nil, err))
 			fail(ComponentSidecar, "restart the sidecar", err)
 		} else {
 			d.log.Info(opRollback, "restarted the sidecar onto the restored build", nil)
@@ -161,7 +161,7 @@ func (d *Deployer) rollback(ctx context.Context, p *previous, nonce string, caus
 	}
 	if len(failures) > 0 {
 		failed := &RollbackFailed{Component: first, Detail: strings.Join(failures, "; ")}
-		d.log.Error(opRollback, "the rollback did NOT restore the previous build", merge(fields, dlog.Context{
+		d.log.Error(opRollback, "the rollback did NOT restore the previous build", dlog.Merge(fields, dlog.Context{
 			"component": string(failed.Component), "detail": failed.Detail,
 		}))
 		return failed

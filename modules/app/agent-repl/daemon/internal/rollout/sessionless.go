@@ -44,12 +44,12 @@ func (c *controller) visibleOnly(ctx context.Context, pending []wsm.Workspace, f
 	run, withheld, err := bringup.OnlyVisible(ctx, c.deps.DB, pending)
 	if err != nil {
 		c.log.Error(opBringUp, "could not tell which session-less workspaces are visible; none of them is started",
-			withCause(merge(fields, dlog.Context{"workspaces": bringup.IDs(pending)}), err))
+			dlog.WithCause(dlog.Merge(fields, dlog.Context{"workspaces": bringup.IDs(pending)}), err))
 		return nil
 	}
 	if len(withheld) > 0 {
 		c.log.Info(opBringUp, "hidden or collapsed workspaces this daemon serves are not started; each starts when shown",
-			merge(fields, dlog.Context{"workspaces": bringup.IDs(withheld)}))
+			dlog.Merge(fields, dlog.Context{"workspaces": bringup.IDs(withheld)}))
 	}
 	return run
 }
@@ -78,7 +78,7 @@ func (c *controller) startSessionless(pending []wsm.Workspace, fields dlog.Conte
 		names[i] = string(ws.ID)
 	}
 	c.log.Info(opBringUp, "starting the sessions of open workspaces this daemon serves with no session behind them",
-		merge(fields, dlog.Context{"workspaces": names}))
+		dlog.Merge(fields, dlog.Context{"workspaces": names}))
 	lifetime := c.lifetime(context.Background())
 	c.bringUps.Add(1)
 	go func() {

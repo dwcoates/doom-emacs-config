@@ -550,7 +550,7 @@ func (q *queue) decideDeparture(ws ids.WorkspaceID, departed Watcher, departure 
 			// a bounce left registered here would wait on a shim that no longer
 			// exists: it is failed, loudly, so its requester hears it.
 			log.Error(opBounce, "the shim departed under a registered bounce and its workspace could not be read; the bounce is failed rather than left waiting",
-				merged(fields, dlog.Context{"cause": recordErr.Error()}))
+				dlog.Merge(fields, dlog.Context{"cause": recordErr.Error()}))
 			unregister = fmt.Errorf("bounce %q: read the workspace after its shim departed: %w", ws, recordErr)
 		case record.Closed:
 			fields["why"] = "the workspace is closed"

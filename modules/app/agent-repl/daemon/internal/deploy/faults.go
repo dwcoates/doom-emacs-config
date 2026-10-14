@@ -102,14 +102,14 @@ func (d *Deployer) recordFailure(ctx context.Context, err error, rollback rolled
 		d.openStepFault(ctx, failure, fmt.Sprintf("the deploy failed at its %s step; %s; the running build keeps serving: %v",
 			failure.Step, rollback.clause(), err), err)
 	} else {
-		d.log.Debug(opFault, "the deploy's failure is no build, install or service restart; it opens no step fault", withCause(nil, err))
+		d.log.Debug(opFault, "the deploy's failure is no build, install or service restart; it opens no step fault", dlog.WithCause(nil, err))
 	}
 	if rollback.err == nil {
 		return
 	}
 	failure, ok := failureOf(rollback.err)
 	if !ok {
-		d.log.Error(opFault, "the rollback's failure is not a RollbackFailed; it opens no fault", withCause(nil, rollback.err))
+		d.log.Error(opFault, "the rollback's failure is not a RollbackFailed; it opens no fault", dlog.WithCause(nil, rollback.err))
 		return
 	}
 	d.openStepFault(ctx, failure, fmt.Sprintf("the failed deploy's rollback did not restore the previous build: %v", rollback.err), rollback.err)
@@ -126,10 +126,10 @@ func (d *Deployer) openStepFault(ctx context.Context, failure health.DeployFailu
 		OpenedAt: d.deps.Clock.Now(),
 	})
 	if openErr != nil {
-		d.log.Error(opFault, "could not record the failed deploy as a fault", withCause(fields, openErr))
+		d.log.Error(opFault, "could not record the failed deploy as a fault", dlog.WithCause(fields, openErr))
 		return
 	}
-	d.log.Info(opFault, "recorded the failed deploy as a fault", merge(fields, dlog.Context{"fault": string(id), "cause": cause.Error()}))
+	d.log.Info(opFault, "recorded the failed deploy as a fault", dlog.Merge(fields, dlog.Context{"fault": string(id), "cause": cause.Error()}))
 }
 
 // stepSucceeded closes every standing fault of a step this deploy got

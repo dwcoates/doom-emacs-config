@@ -254,7 +254,7 @@ func (k *Keeper) record(ctx context.Context, ws ids.WorkspaceID, stated *convers
 		if leaving(ctx, log, opProjection, "recording the projected cache lapse", err) {
 			return
 		}
-		log.Error(opProjection, "could not record the hidden workspace's projected cache lapse", withCause(fields, err))
+		log.Error(opProjection, "could not record the hidden workspace's projected cache lapse", dlog.WithCause(fields, err))
 		return
 	}
 	if !recorded {
@@ -394,10 +394,10 @@ type shimFailure struct {
 func shimCallFailed(ctx context.Context, log dlog.Logger, op string, words shimFailure, fields dlog.Context, err error) {
 	switch {
 	case errors.Is(err, shimclient.ErrShimDied):
-		log.Info(op, words.died, withCause(fields, err))
+		log.Info(op, words.died, dlog.WithCause(fields, err))
 	case leaving(ctx, log, op, words.doing, err):
 	default:
-		log.Error(op, words.failed, withCause(fields, err))
+		log.Error(op, words.failed, dlog.WithCause(fields, err))
 	}
 }
 
@@ -428,12 +428,4 @@ func lapseFields(lapse wsm.CacheLapse) dlog.Context {
 		fields["gated_tokens"] = *lapse.GatedTokens
 	}
 	return fields
-}
-
-func withCause(fields dlog.Context, err error) dlog.Context {
-	out := dlog.Context{"cause": err.Error()}
-	for key, value := range fields {
-		out[key] = value
-	}
-	return out
 }

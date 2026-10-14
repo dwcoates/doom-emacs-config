@@ -684,18 +684,6 @@ func (c *Coordinator) markServed(out *sender, work *openWork, sl *slot) {
 	c.startRead(work, sl)
 }
 
-// merged answers A with B's fields added.
-func merged(a, b dlog.Context) dlog.Context {
-	out := dlog.Context{}
-	for k, v := range a {
-		out[k] = v
-	}
-	for k, v := range b {
-		out[k] = v
-	}
-	return out
-}
-
 // openWork is what one open's own work runs under: its lifetime, and the run
 // its results are posted to.
 type openWork struct {
@@ -785,7 +773,7 @@ func (c *Coordinator) applyResume(out *sender, sl *slot, resume Resume) {
 			sl.awaitResume = false
 		}
 	default:
-		c.deps.Log.Error(op, "a release's account of the owed cut turn is of no known kind; the open keeps waiting on the account it expects", merged(fields, dlog.Context{
+		c.deps.Log.Error(op, "a release's account of the owed cut turn is of no known kind; the open keeps waiting on the account it expects", dlog.Merge(fields, dlog.Context{
 			"invariant_violation": "every account is starting, started, failed or not now",
 		}))
 	}

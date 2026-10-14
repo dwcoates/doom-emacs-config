@@ -246,7 +246,7 @@ func (v *verbs) stopEveryDetached(ctx context.Context, log dlog.Logger, ws ids.W
 				}
 				return stopped, refuse(log, "Interrupt", refusal.Arm, refusal.Detail, false)
 			}
-			log.Error(opInterrupt, "could not stop a detached agent", withCause(fields, err))
+			log.Error(opInterrupt, "could not stop a detached agent", dlog.WithCause(fields, err))
 			return stopped, fmt.Errorf("interrupt %q: stop agent %q: %w", ws, agent.GetValue(), err)
 		}
 		log.Debug(opInterrupt, "stopped a detached agent", fields)
@@ -262,7 +262,7 @@ func (v *verbs) stopEveryDetached(ctx context.Context, log dlog.Logger, ws ids.W
 				}
 				return stopped, refuse(log, "Interrupt", refusal.Arm, refusal.Detail, false)
 			}
-			log.Error(opInterrupt, "could not stop a detached shell", withCause(fields, err))
+			log.Error(opInterrupt, "could not stop a detached shell", dlog.WithCause(fields, err))
 			return stopped, fmt.Errorf("interrupt %q: stop shell %q: %w", ws, shell.GetValue(), err)
 		}
 		log.Debug(opInterrupt, "stopped a detached shell", fields)
@@ -295,7 +295,7 @@ func (v *verbs) interruptDetached(ctx context.Context, log dlog.Logger, ws ids.W
 				log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "outcome, refusal, handled := v.shimOutcome(log, opInterrupt, \"Interrupt\", fields, err); handled"})
 				return outcome, refusal
 			}
-			log.Error(opInterrupt, "could not stop the detached agent", withCause(fields, err))
+			log.Error(opInterrupt, "could not stop the detached agent", dlog.WithCause(fields, err))
 			return InterruptOutcome{}, fmt.Errorf("interrupt %q: stop agent %q: %w", ws, ref.Row.ID, err)
 		}
 		log.Info(opInterrupt, "stopped a detached agent", fields)
@@ -311,7 +311,7 @@ func (v *verbs) interruptDetached(ctx context.Context, log dlog.Logger, ws ids.W
 				log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "outcome, refusal, handled := v.shimOutcome(log, opInterrupt, \"Interrupt\", fields, err); handled"})
 				return outcome, refusal
 			}
-			log.Error(opInterrupt, "could not stop the detached shell", withCause(fields, err))
+			log.Error(opInterrupt, "could not stop the detached shell", dlog.WithCause(fields, err))
 			return InterruptOutcome{}, fmt.Errorf("interrupt %q: stop shell %q: %w", ws, ref.Row.ID, err)
 		}
 		log.Info(opInterrupt, "stopped a detached shell", fields)
@@ -365,17 +365,6 @@ func subagentOf(row feedid.RowKey) string {
 		return row.Sub
 	}
 	return row.ID
-}
-
-// withCause adds a failure's cause to a record's context without mutating the
-// caller's map.
-func withCause(fields dlog.Context, err error) dlog.Context {
-	out := make(dlog.Context, len(fields)+1)
-	for k, val := range fields {
-		out[k] = val
-	}
-	out["cause"] = err.Error()
-	return out
 }
 
 // shimOutcome translates a single-target stop's error into an interrupt answer.

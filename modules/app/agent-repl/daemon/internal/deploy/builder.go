@@ -92,7 +92,7 @@ func (b *ScriptBuilder) Build(ctx context.Context, staging string) error {
 			fields["exit_code"] = code
 		}
 		b.archive(logPath, archive.String())
-		b.Log.Error(opBuild, "a build step failed; nothing is deployed", merge(fields, dlog.Context{"detail": detail}))
+		b.Log.Error(opBuild, "a build step failed; nothing is deployed", dlog.Merge(fields, dlog.Context{"detail": detail}))
 		return &BuildFailed{Step: step.name, Detail: detail, Log: logPath}
 	}
 	b.archive(logPath, archive.String())

@@ -67,14 +67,14 @@ func (c *controller) finishDeployStory(deferred map[ids.WorkspaceID][]deployprog
 		return
 	}
 	c.log.Info(opProgress, "took over from a deploy's handover; saying updated on every strip",
-		merge(fields, dlog.Context{"shims_when_idle": len(deferred)}))
+		dlog.Merge(fields, dlog.Context{"shims_when_idle": len(deferred)}))
 	c.deps.Progress.SetDeployProgress(&deployprogress.Progress{Phase: deployprogress.Updated, Notes: deferred})
 }
 
 // clearDeployLine takes the deploy's line down from an incumbent whose
 // rollout cannot finish.
 func (c *controller) clearDeployLine(why string, fields dlog.Context) {
-	c.log.Info(opProgress, "the rollout cannot finish; taking the deploy's line down", merge(fields, dlog.Context{"why": why}))
+	c.log.Info(opProgress, "the rollout cannot finish; taking the deploy's line down", dlog.Merge(fields, dlog.Context{"why": why}))
 	c.deps.Progress.SetDeployProgress(nil)
 }
 
@@ -94,10 +94,10 @@ func (c *controller) openSuccessorFault(ctx context.Context, cause error, fields
 		OpenedAt: c.deps.Clock.Now(),
 	})
 	if err != nil {
-		c.log.Error(opProgress, "could not record the successor that would not start as a fault", withCause(fields, err))
+		c.log.Error(opProgress, "could not record the successor that would not start as a fault", dlog.WithCause(fields, err))
 		return
 	}
-	c.log.Info(opProgress, "recorded the successor that would not start as a fault", withCause(fields, cause))
+	c.log.Info(opProgress, "recorded the successor that would not start as a fault", dlog.WithCause(fields, cause))
 }
 
 // closeSuccessorFaults fires the successor-serving recovery edge once a
