@@ -1825,12 +1825,13 @@ pre {
      SIDE (owner request, 2026-10-14): 0.7 of 0.7 vertically, and 0.7 of the
      base horizontally. Its rung is the one that also sets `--bubble-pad-x`.
    - AN INTERIM RESPONSE, the amber-bordered one with no fill, sits 30% tighter
-     again (owner request, 2026-10-13): 0.7 of 0.7. The green answer keeps the
-     response's 0.7. Its gap then shrinks ON EVERY SIDE by as much as its
+     again (owner request, 2026-10-13): 0.7 of 0.7. Its gap then shrinks ON EVERY SIDE by as much as its
      narrower text did (owner request, 2026-10-14): both tokens are multiplied
      by its `--bubble-font-rem` over the base, so the padding follows the text
      size rather than copying its ratio. Its rung is the other one that sets
      `--bubble-pad-x`.
+   - THE GREEN ANSWER (`.final-response`) sits 25% WIDER than the response's
+     0.7, top and bottom only (owner request, 2026-10-14): 1.25 of 0.7.
    - A THINKING BUBBLE has no fill, border or shadow, so its padding read only
      as empty feed around floating text; it keeps about a third of the base
      (owner request, 2026-10-13), which brings its visible gap to a neighbor to
@@ -1848,6 +1849,9 @@ pre {
 .bubble[data-variant="response"].interim-response {
   --bubble-pad-y: calc(var(--bubble-pad-y-base) * 0.49 * var(--bubble-font-rem) / var(--bubble-base-font-rem));
   --bubble-pad-x: calc(var(--bubble-pad-x-base) * var(--bubble-font-rem) / var(--bubble-base-font-rem));
+}
+.bubble[data-variant="response"].final-response {
+  --bubble-pad-y: calc(var(--bubble-pad-y-base) * 0.7 * 1.25);
 }
 .bubble[data-variant="thinking"] {
   --bubble-pad-y: calc(var(--bubble-pad-y-base) * 0.35);
