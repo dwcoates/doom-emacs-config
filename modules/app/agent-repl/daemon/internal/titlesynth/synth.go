@@ -2,6 +2,7 @@ package titlesynth
 
 import (
 	"context"
+	"fmt"
 	"hash/fnv"
 	"strconv"
 	"strings"
@@ -22,9 +23,9 @@ const opSynth = "daemon.titlesynth"
 
 // Synthesizer produces synthesized workspace titles, one workspace at a time.
 //
-// It is a sessionwatcher sink implemented structurally: OnSessionStarted and
-// OnTurnEnded are the synthesis triggers, OnVendorTitle stops synthesis, and
-// OnContextReset resets the digest hash. The heavy work — a shim call and a
+// It is a sessionwatcher sink implemented structurally: OnSessionStarted,
+// OnPrompt and OnTurnEnded are the synthesis triggers, and OnContextReset
+// resets the digest hash. The heavy work — a shim call and a
 // model call — runs on a goroutine so a trigger never blocks the watcher's
 // stream, and a per-workspace inflight/dirty guard collapses a burst of
 // triggers into at most one extra run.
@@ -40,9 +41,6 @@ type Synthesizer struct {
 
 // wsState is one workspace's synthesis bookkeeping.
 type wsState struct {
-	// vendorTitle reports that the vendor has stated an ai-title, after which
-	// this workspace is never synthesized again.
-	vendorTitle bool
 	// lastHash is the digest hash of the last synthesis. A trigger whose
 	// digest hashes to this makes no model call.
 	lastHash string
@@ -81,20 +79,17 @@ func New(deps Deps) *Synthesizer {
 // adopted conversation may already carry prompts with no vendor title.
 func (s *Synthesizer) OnSessionStarted(ws ids.WorkspaceID) { s.dispatch(ws) }
 
-// OnTurnEnded triggers synthesis after a turn: a new prompt changes the digest.
+// OnPrompt triggers synthesis at a main-agent prompt row: the prompt has been
+// made, so the first summary need not wait for the first turn to end.
+func (s *Synthesizer) OnPrompt(ws ids.WorkspaceID) { s.dispatch(ws) }
+
+// OnTurnEnded triggers synthesis after a turn: by then the vendor has recorded
+// the turn's prompt in the transcript the digest reads.
 func (s *Synthesizer) OnTurnEnded(ws ids.WorkspaceID) { s.dispatch(ws) }
 
-// OnVendorTitle stops synthesizing this workspace: the vendor now states its
-// own ai-title, which always wins.
-func (s *Synthesizer) OnVendorTitle(ws ids.WorkspaceID) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.stateFor(ws).vendorTitle = true
-}
-
 // OnContextReset resets the digest hash so the next trigger re-synthesizes. A
-// /clear or a completed /compact moves the boundary, so the last synthesis no
-// longer describes the conversation.
+// /clear moves the boundary, so the last synthesis no longer describes the
+// conversation.
 func (s *Synthesizer) OnContextReset(ws ids.WorkspaceID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -119,16 +114,11 @@ func (s *Synthesizer) stateFor(ws ids.WorkspaceID) *wsState {
 	return st
 }
 
-// dispatch runs a synthesis on a goroutine unless one is already in flight (in
-// which case it marks the workspace dirty so one more run follows) or the
-// vendor has stated a title (in which case there is nothing to synthesize).
+// dispatch runs a synthesis on a goroutine unless one is already in flight, in
+// which case it marks the workspace dirty so one more run follows.
 func (s *Synthesizer) dispatch(ws ids.WorkspaceID) {
 	s.mu.Lock()
 	st := s.stateFor(ws)
-	if st.vendorTitle {
-		s.mu.Unlock()
-		return
-	}
 	if st.inFlight {
 		st.dirty = true
 		s.mu.Unlock()
@@ -150,7 +140,7 @@ func (s *Synthesizer) run(ws ids.WorkspaceID) {
 
 		s.mu.Lock()
 		st := s.stateFor(ws)
-		if st.dirty && !st.vendorTitle {
+		if st.dirty {
 			st.dirty = false
 			s.mu.Unlock()
 			continue
@@ -163,29 +153,28 @@ func (s *Synthesizer) run(ws ids.WorkspaceID) {
 }
 
 // synthesizeOnce is the whole synthesis flow for one workspace, synchronous so
-// it is exercised directly: gather the digest, guard on the vendor title and
-// the digest hash, make the cheap model call under the workspace's account, and
-// install the result. Every failure is best-effort and leaves the workspace
-// name standing.
+// it is exercised directly: gather the digest, guard on the digest hash and the
+// cadence, make the cheap model call under the workspace's account, and install
+// the result. Every failure is best-effort and leaves the previous title
+// standing.
 func (s *Synthesizer) synthesizeOnce(ctx context.Context, ws ids.WorkspaceID) {
-	s.mu.Lock()
-	if s.stateFor(ws).vendorTitle {
-		s.mu.Unlock()
-		return
-	}
-	s.mu.Unlock()
-
 	digest, ok := s.gather(ctx, ws)
 	if !ok {
 		return
 	}
 
 	prompts := digest.GetPrompts()
-	summary := digest.GetLastCompactSummary()
+	said, err := UsersWords(prompts)
+	if err != nil {
+		s.deps.Log.Error(opSynth, "a prompt's injected meta spans could not be stripped; not distilling a summary", dlog.Context{
+			"workspace": string(ws), "prompts": len(prompts), "cause": err.Error(),
+		})
+		return
+	}
 
 	// A CLEARED CONVERSATION WITH NOTHING SAID retracts a stale title: the old
 	// summary described a conversation that is gone.
-	if len(prompts) == 0 && summary == "" {
+	if len(said) == 0 {
 		if digest.GetBoundary() == shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_CLEAR {
 			s.retract(ws)
 		}
@@ -211,7 +200,7 @@ func (s *Synthesizer) synthesizeOnce(ctx context.Context, ws ids.WorkspaceID) {
 	}
 	s.mu.Unlock()
 
-	title, ok := s.callModel(ctx, ws, summary, prompts)
+	title, ok := s.callModel(ctx, ws, said)
 	if !ok {
 		return
 	}
@@ -232,10 +221,10 @@ func (s *Synthesizer) synthesizeOnce(ctx context.Context, ws ids.WorkspaceID) {
 // cadenceDue reports whether a changed digest is due a model call, and why.
 // The caller holds s.mu.
 //
-// EVERY SynthesizeEvery PROMPTS, NOT EVERY PROMPT (owner ruling, 2026-10-02).
-// A context's FIRST title is due at once, so a workspace is never left on its
-// bare name waiting for its fifth prompt; after it, a new title is due only once
-// SynthesizeEvery more prompts have been made. A digest that is not the
+// THE FIRST PROMPT, THEN EVERY SynthesizeEvery PROMPTS (owner rulings,
+// 2026-10-02 and 2026-10-14). A context's FIRST title is due at once, so a
+// workspace is never left on its bare name waiting for its fifth prompt; after
+// it, a new title is due only once SynthesizeEvery more prompts have been made. A digest that is not the
 // continuation of the one last summarized -- another boundary, or fewer prompts
 // than before -- is a new context, and is due at once as well.
 func cadenceDue(st *wsState, digest *shimv1.GatherTitleDigestSuccess) (bool, string) {
@@ -255,7 +244,7 @@ func cadenceDue(st *wsState, digest *shimv1.GatherTitleDigestSuccess) (bool, str
 }
 
 // gather asks the shim for the digest, returning false on any failure (all of
-// which leave the workspace name standing and none of which is a fault).
+// which leave the previous title standing and none of which is a fault).
 func (s *Synthesizer) gather(ctx context.Context, ws ids.WorkspaceID) (*shimv1.GatherTitleDigestSuccess, bool) {
 	gctx, cancel := context.WithTimeout(ctx, s.deps.GatherTimeout)
 	defer cancel()
@@ -278,7 +267,7 @@ func (s *Synthesizer) gather(ctx context.Context, ws ids.WorkspaceID) (*shimv1.G
 
 // callModel composes the brief and makes the one cheap headless call under the
 // workspace's account, returning the cleaned title and false on any failure.
-func (s *Synthesizer) callModel(ctx context.Context, ws ids.WorkspaceID, summary string, prompts []string) (string, bool) {
+func (s *Synthesizer) callModel(ctx context.Context, ws ids.WorkspaceID, said []string) (string, bool) {
 	brief, err := loadBrief(s.deps.PromptsDir)
 	if err != nil {
 		s.deps.Log.Error(opSynth, "the synthesized-title brief could not be read", dlog.Context{
@@ -286,7 +275,7 @@ func (s *Synthesizer) callModel(ctx context.Context, ws ids.WorkspaceID, summary
 		})
 		return "", false
 	}
-	question, err := brief.Splice(map[string]string{"digest": TitleDigest(summary, prompts)})
+	question, err := brief.Splice(map[string]string{"digest": TitleDigest(said)})
 	if err != nil {
 		s.deps.Log.Error(opSynth, "the synthesized-title brief could not be spliced", dlog.Context{
 			"workspace": string(ws), "brief": BriefTitle, "cause": err.Error(),
@@ -352,34 +341,42 @@ func loadBrief(dir string) (prompts.Prompt, error) {
 	return prompts.Load(dir, BriefTitle)
 }
 
-// TitleDigest renders what the TOPBAR SUMMARY is synthesized from (owner
-// ruling, 2026-10-02): the user's prompts since the last /clear or /compact,
-// whole and untruncated, and no response. The newest RecentPrompts are set
-// apart as the ones the sentence weighs most. A compaction's summary leads only
-// when fewer than RecentPrompts prompts followed the compaction, because past
-// that the prompts alone say what the conversation is about now.
+// UsersWords reduces the digest's prompts to what the user said: each prompt
+// with agent-repl's injected meta spans stripped (prompts.StripSentinels), and
+// a prompt that was nothing but injected spans dropped. The spans are the
+// editor's decoration of a send (a one-shot's postprocessing directive, a
+// merge brief), not the user's request, so a summary distilled from them would
+// state the decoration as the task.
+//
+// An unbalanced span is the producer bug StripSentinels surfaces, and is
+// returned rather than guessed at.
+func UsersWords(all []string) ([]string, error) {
+	said := make([]string, 0, len(all))
+	for i, p := range all {
+		stripped, err := prompts.StripSentinels(p)
+		if err != nil {
+			return nil, fmt.Errorf("prompt %d: %w", i, err)
+		}
+		if stripped = strings.TrimSpace(stripped); stripped != "" {
+			said = append(said, stripped)
+		}
+	}
+	return said, nil
+}
+
+// TitleDigest renders what the TOPBAR SUMMARY is distilled from (owner
+// ruling, 2026-10-14): every prompt the user sent since the last /clear,
+// including those before a /compact, whole and untruncated, oldest first, and
+// no response. No prompt is weighed above another: the summary encapsulates
+// the whole session's task.
 //
 // It is the title's own composition, deliberately not ComposeDigest's: a fork's
 // naming call still reads the capped composition, which bounds a call that
 // names a workspace in three words.
-func TitleDigest(summary string, all []string) string {
+func TitleDigest(said []string) string {
 	var b strings.Builder
-	if summary = strings.TrimSpace(summary); summary != "" && len(all) < RecentPrompts {
-		b.WriteString("A summary of the conversation before the user's requests below:\n")
-		b.WriteString(summary)
-		b.WriteString("\n\n")
-	}
-	split := len(all) - RecentPrompts
-	if split < 0 {
-		split = 0
-	}
-	if split > 0 {
-		b.WriteString("The user's earlier requests, oldest first:\n")
-		writePrompts(&b, all[:split])
-		b.WriteString("\n")
-	}
-	b.WriteString("The user's most recent requests, oldest first. Weigh these most:\n")
-	writePrompts(&b, all[split:])
+	b.WriteString("Every request the user sent in this session, oldest first:\n")
+	writePrompts(&b, said)
 	return quoteTemplateBraces(b.String())
 }
 
@@ -497,15 +494,13 @@ func cleanTitle(text string) string {
 	return ""
 }
 
-// digestHash is the digest's fingerprint: the boundary, the summary and the
-// prompts, so any change to what a title would summarize changes the hash and
+// digestHash is the digest's fingerprint: the boundary and the prompts, so any change to what a title would summarize changes the hash and
 // any repeat leaves it unchanged. It writes to the hash directly rather than
 // through fmt, which production code does not use (the durable-logging bypass
 // guard). fnv's Write never errors, so its returns are discarded.
 func digestHash(d *shimv1.GatherTitleDigestSuccess) string {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte("b:" + strconv.Itoa(int(d.GetBoundary())) + "\n"))
-	_, _ = h.Write([]byte("s:" + d.GetLastCompactSummary() + "\n"))
 	for _, p := range d.GetPrompts() {
 		// The NUL separator cannot appear in a prompt, so no two prompt sets
 		// hash alike by concatenation.

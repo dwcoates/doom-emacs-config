@@ -250,19 +250,17 @@ func (r *resolver) render(s *wsState) (*frontendv1.TopbarView, error) {
 // is against the name as shown, after the session-title and naming fallbacks,
 // because what is doubled is what the reader sees.
 func (r *resolver) title(s *wsState) string {
-	// THE TITLE IS THE WORKSPACE SUMMARY when the vendor has one (owner
-	// ruling, 2026-09-13). The vendor writes its own one-line summary of the
-	// conversation into the transcript and the shim states it; it answers
-	// "which conversation is this" far better than a directory's name, so it
-	// takes the name's place. The BRANCH is unaffected — it is a different
-	// fact, and the rule about when it is worth showing is unchanged.
-	name := s.sessionTitle
+	// THE TITLE IS THE WORKSPACE SUMMARY the daemon distills from every
+	// prompt the user sent (owner ruling, 2026-10-14). It answers "what is
+	// this workspace's task" far better than a directory's name, so it takes
+	// the name's place. The BRANCH is unaffected — it is a different fact, and
+	// the rule about when it is worth showing is unchanged.
+	name := s.synthesizedTitle
 	if name == "" {
-		// THE DAEMON'S OWN SUMMARY is the fallback when the vendor wrote no
-		// ai-title (owner-requested feature). The vendor's title above always
-		// wins, so a future CLI that emits ai-title transparently supersedes
-		// ours; ours in turn always beats the bare workspace name below.
-		name = s.synthesizedTitle
+		// THE VENDOR'S OWN ai-title stands in until the first distillation
+		// lands (owner ruling, 2026-09-13, demoted 2026-10-14): it still beats
+		// the bare workspace name below.
+		name = s.sessionTitle
 	}
 	if name == "" {
 		name = s.naming.Title
@@ -548,10 +546,10 @@ func (r *resolver) SetNaming(ws ids.WorkspaceID, naming Naming) {
 }
 
 // SetSynthesizedTitle installs the daemon's OWN one-line summary of the
-// conversation. It is the middle precedence in the title: shown only while the
-// vendor has stated no ai-title, and always in preference to the workspace
-// name. An empty text retracts it (the title falls back to the name), which is
-// how the synthesizer drops a stale title after a /clear.
+// conversation. It is the first precedence in the title, ahead of the vendor's
+// ai-title and the workspace name. An empty text retracts it (the title falls
+// back to the vendor's ai-title, else the name), which is how the synthesizer
+// drops a stale title after a /clear.
 func (r *resolver) SetSynthesizedTitle(ws ids.WorkspaceID, title string) {
 	r.mutate(ws, "daemon.topbar.set_synthesized_title", "the topbar took a synthesized title",
 		dlog.Context{"present": title != ""},
