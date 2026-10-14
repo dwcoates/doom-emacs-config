@@ -152,9 +152,10 @@ func resolveLayout() (layout, error) {
 var (
 	repo       layout
 	sidecarBin string
-	// lockFromProgram reports that the lock helper is the run's program, so
-	// nothing here builds it.
-	lockFromProgram bool
+	// itestBinDir is where this process builds the programs a test run did
+	// not hand it, made on the first such build (itestBinDirOnce) and removed
+	// as the suite ends.
+	itestBinDir string
 
 	// The shim's lock holder, built LAZILY: only the mocked-vendor subjects
 	// spawn a real shim, and a real shim takes its kernel claims by spawning
@@ -166,6 +167,19 @@ var (
 
 func TestMain(m *testing.M) {
 	os.Exit(runSuite(m))
+}
+
+// itestBinDirOnce answers itestBinDir, making it on first use.
+func itestBinDirOnce() (string, error) {
+	if itestBinDir != "" {
+		return itestBinDir, nil
+	}
+	dir, err := os.MkdirTemp("", "agent-repl-itest-bin-")
+	if err != nil {
+		return "", fmt.Errorf("temp bin dir: %w", err)
+	}
+	itestBinDir = dir
+	return dir, nil
 }
 
 func runSuite(m *testing.M) int {
@@ -201,36 +215,30 @@ func runSuite(m *testing.M) int {
 	// A TEST RUN BUILDS THE PROGRAMS ONCE (testenv.Programs): the sidecar and
 	// the shim's lock helper come from its programs directory. Outside a run,
 	// this process builds the sidecar now and the lock helper on first use.
-	sidecar, sidecarFromRun, err := testenv.Program(os.Getenv, "shim-claude-sidecar")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "integration: %v\n", err)
-		return 1
-	}
-	lock, lockFromRun, err := testenv.Program(os.Getenv, "shim-lock")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "integration: %v\n", err)
-		return 1
-	}
-	if sidecarFromRun && lockFromRun {
-		sidecarBin, lockBinPath, lockFromProgram = sidecar, lock, true
-	} else {
-		binDir, err := os.MkdirTemp("", "agent-repl-itest-bin-")
+	defer func() {
+		if itestBinDir == "" {
+			return
+		}
+		if err := os.RemoveAll(itestBinDir); err != nil {
+			fmt.Fprintf(os.Stderr, "integration: removing temp bin dir %s: %v\n", itestBinDir, err)
+		}
+	}()
+	sidecar, err := testenv.ProgramOr(os.Getenv, "shim-claude-sidecar", func() (string, error) {
+		dir, err := itestBinDirOnce()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "integration: temp bin dir: %v\n", err)
-			return 1
+			return "", err
 		}
-		defer func() {
-			if err := os.RemoveAll(binDir); err != nil {
-				fmt.Fprintf(os.Stderr, "integration: removing temp bin dir %s: %v\n", binDir, err)
-			}
-		}()
-		sidecarBin = filepath.Join(binDir, "shim-claude-sidecar")
-		lockBinPath = filepath.Join(binDir, "shim-lock")
-		if err := goBuild(repo.sidecarDir, sidecarBin); err != nil {
-			fmt.Fprintf(os.Stderr, "integration: building the sidecar: %v\n", err)
-			return 1
+		out := filepath.Join(dir, "shim-claude-sidecar")
+		if err := goBuild(repo.sidecarDir, out); err != nil {
+			return "", fmt.Errorf("building the sidecar: %w", err)
 		}
+		return out, nil
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "integration: %v\n", err)
+		return 1
 	}
+	sidecarBin = sidecar
 
 	// Nothing here ever reaches a vendor; the guard is stated so a regression
 	// that tried would fail loudly rather than silently make a call.
@@ -1028,9 +1036,14 @@ func storeClientOver(hc *http.Client) storev1connect.ShimStoreClient {
 func lockBinary(t *testing.T) string {
 	t.Helper()
 	lockBinOnce.Do(func() {
-		if !lockFromProgram {
-			lockBinErr = goBuild(repo.lockDir, lockBinPath)
-		}
+		lockBinPath, lockBinErr = testenv.ProgramOr(os.Getenv, "shim-lock", func() (string, error) {
+			dir, err := itestBinDirOnce()
+			if err != nil {
+				return "", err
+			}
+			out := filepath.Join(dir, "shim-lock")
+			return out, goBuild(repo.lockDir, out)
+		})
 	})
 	if lockBinErr != nil {
 		t.Fatalf("the real shim takes its kernel claims with shim-lock, which does not build: %v", lockBinErr)
