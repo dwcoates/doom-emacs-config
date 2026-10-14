@@ -153,6 +153,7 @@ import { ForkPointTracker, type OpenForkTurn } from "./fork-point.js";
 import { forkSession as forkVendorConversation, type ForkVendorSession } from "./fork-session.js";
 import {
   conversationRecordUuid,
+  detachedWorkContext,
   KeepaliveCadence,
   KeepaliveRewind,
   KeepaliveScope,
@@ -694,7 +695,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   const pushes = new SessionPushes(deps.nowMs, deps.runtime.shimBuildSha);
   /** The compaction the live session is in (see CompactionTracker). */
   const liveCompaction = compactionTracker();
-  const live = new LiveWorkTable();
+  // THE CADENCE SPARES LIVE DETACHED WORK: every flip of the live set between
+  // empty and not re-arms it (engine/keepalive.ts, KeepaliveCadence).
+  const live = new LiveWorkTable(() => cadence?.detachedWorkChanged());
   /** Each detached shell run's start row, for `WatchBash`'s durability barrier. */
   const shellRunStarts = new ShellRunStarts();
   const foreground = new ForegroundUnitTable();
@@ -3645,6 +3648,26 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     owed: RewindObligation,
     current: SessionIdentity,
   ): Promise<{ ok: true } | { ok: false; detail: string }> {
+    // A REWIND NEVER MEETS LIVE DETACHED WORK (engine/keepalive.ts): the
+    // cadence sends no keep-alive while any is live, and a real turn rewinds
+    // before it starts any, so live work here is a violated invariant. ERROR,
+    // naming what the replaced query is about to kill; the rewind still runs,
+    // because the prompt riding on it is owed a context without keep-alives.
+    const doomed = live.all();
+    if (doomed.length > 0) {
+      LOGGER.error(
+        {
+          resume_session_at: owed.resumeSessionAt,
+          anchor_turn_id: owed.anchorTurnId,
+          discarded_keepalive_turns: owed.discardedKeepaliveTurns,
+          detached_work: doomed.map(detachedWorkContext),
+          detail: doomed
+            .map((item) => `${item.taskType ?? "task"} ${item.toolUseId ?? item.taskId}: ${item.description}`)
+            .join("; "),
+        },
+        "INVARIANT VIOLATED: a keep-alive rewind is about to replace the vendor query while detached work is live; the replaced process ends that work",
+      );
+    }
     try {
       await replaceQuery({
         binding: { kind: "resume", resumeSessionId: current.vendorSessionId },
@@ -4906,6 +4929,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
             update: { case: "cacheLapse", value: sessionCacheLapse(lapsesAtMs, contextTokens) },
           }),
         ),
+      () => live.all(),
       coldNowMs,
       deps.keepaliveIntervalMs,
       deps.scheduler ?? REAL_SCHEDULER,

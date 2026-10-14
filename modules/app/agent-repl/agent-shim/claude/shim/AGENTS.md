@@ -782,10 +782,27 @@ parked at the cold gate.
   buying.
 - **PAUSED WITH NO TIMER** while a turn holds the slot; the turn's end
   schedules from the anchor its own responses moved.
+- **NO BEAT WHILE DETACHED WORK IS LIVE** (owner ruling, 2026-10-14). A beat
+  owes the rewind (below), the rewind replaces the vendor's query, and every
+  background shell, background agent or other item in the shim's live set
+  (`LiveWorkTable`, shells included, unlike the level `levelEntries` pushes)
+  dies with the old process: on 2026-10-14 a watcher shell ended one
+  millisecond after a real prompt's rewind. The cadence reads the live set at
+  every schedule and at every beat, and the table tells it
+  (`detachedWorkChanged`) whenever the set goes between empty and not; the
+  last item ending schedules from the last request, exactly as a turn's end
+  does. Detached work starts only inside a real turn, and a real turn rewinds
+  before it starts anything, so no rewind can meet live work. One that is
+  about to anyway is a violated invariant: `collapseToAnchor` (`session.ts`)
+  logs `INVARIANT VIOLATED: a keep-alive rewind is about to replace the
+  vendor query while detached work is live` at ERROR with the items, then
+  proceeds. The accepted cost: a task outliving the cache's lifetime lets it
+  lapse, one cold read and never lost work.
 - **EVERY (RE)SCHEDULE IS INFO**: `keep-alive scheduled from the
   conversation's last request` with `anchor_at`, `cache_ttl_ms`,
   `next_beat_at` and the reason, or `no keep-alive is scheduled: <why>` with
-  `cache_expires_at`. An unchanged schedule is not restated.
+  `cache_expires_at` (or `detached_work` when live work is spared). An
+  unchanged schedule is not restated.
 
 ## The keep-alive rewind: what may anchor it, and what happens when it fails
 

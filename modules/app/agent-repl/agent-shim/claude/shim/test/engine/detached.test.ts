@@ -607,3 +607,176 @@ describe("ShellRunStarts", () => {
     ]);
   });
 });
+
+/**
+ * THE LIVENESS SIGNAL: the keep-alive cadence spares live detached work
+ * (engine/keepalive.ts), so every mutation that flips the live set between
+ * empty and not must tell it, and no other mutation may.
+ */
+describe("the liveness signal", () => {
+  /** A table counting how often it said its liveness flipped. */
+  function observed(): { readonly table: LiveWorkTable; readonly flips: () => number } {
+    let flips = 0;
+    const table = new LiveWorkTable(() => flips++);
+    return { table, flips: () => flips };
+  }
+
+  const notified = (taskId: string): SdkTaskNotificationMessage => ({
+    type: "system",
+    subtype: "task_notification",
+    task_id: taskId,
+    status: "completed",
+    output_file: "",
+    summary: "",
+    uuid: "00000000-0000-4000-8000-000000000006",
+    session_id: "s-1",
+  });
+
+  it("fires when a backgrounded task makes the set non-empty", () => {
+    // Arrange
+    const { table, flips } = observed();
+
+    // Act
+    table.onTaskStarted(started());
+
+    // Assert
+    expect(flips()).toBe(1);
+  });
+
+  it("does not fire for a task that started in the foreground", () => {
+    // Arrange
+    const { table, flips } = observed();
+
+    // Act
+    table.onTaskStarted(started({ is_backgrounded: false }));
+
+    // Assert
+    expect(flips()).toBe(0);
+  });
+
+  it("does not fire for a second task joining a non-empty set", () => {
+    // Arrange
+    const { table, flips } = observed();
+    table.onTaskStarted(started());
+
+    // Act
+    table.onTaskStarted(started({ task_id: "b02", tool_use_id: "toolu_2" }));
+
+    // Assert
+    expect(flips()).toBe(1);
+  });
+
+  it("fires when a patch moves foreground work to the background", () => {
+    // Arrange
+    const { table, flips } = observed();
+    table.onTaskStarted(started({ is_backgrounded: false }));
+
+    // Act
+    table.onTaskUpdated({
+      type: "system",
+      subtype: "task_updated",
+      task_id: "b01",
+      patch: { is_backgrounded: true },
+      uuid: "00000000-0000-4000-8000-000000000007",
+      session_id: "s-1",
+    });
+
+    // Assert
+    expect(flips()).toBe(1);
+  });
+
+  it("fires when a tool result moves foreground work to the background", () => {
+    // Arrange
+    const { table, flips } = observed();
+    table.onTaskStarted(started({ is_backgrounded: false }));
+
+    // Act
+    table.onToolResult({ stdout: "", backgroundTaskId: "b01", timedOutAfterMs: 120_000 });
+
+    // Assert
+    expect(flips()).toBe(1);
+  });
+
+  it("fires when the last item's notification empties the set", () => {
+    // Arrange
+    const { table, flips } = observed();
+    table.onTaskStarted(started());
+
+    // Act
+    table.onTaskNotification(notified("b01"));
+
+    // Assert
+    expect([flips(), table.empty]).toEqual([2, true]);
+  });
+
+  it("does not fire when a notification leaves another item live", () => {
+    // Arrange
+    const { table, flips } = observed();
+    table.onTaskStarted(started());
+    table.onTaskStarted(started({ task_id: "b02", tool_use_id: "toolu_2" }));
+
+    // Act
+    table.onTaskNotification(notified("b01"));
+
+    // Assert
+    expect(flips()).toBe(1);
+  });
+
+  it("fires when a level names work into an empty set", () => {
+    // Arrange
+    const { table, flips } = observed();
+
+    // Act
+    table.onLevel(level([{ task_id: "b01", task_type: "bash", description: "run" }]));
+
+    // Assert
+    expect(flips()).toBe(1);
+  });
+
+  it("fires when an empty level empties the set", () => {
+    // Arrange
+    const { table, flips } = observed();
+    table.onTaskStarted(started());
+
+    // Act
+    table.onLevel(level([]));
+
+    // Assert
+    expect(flips()).toBe(2);
+  });
+
+  it("does not fire for a level that replaces the set without emptying it", () => {
+    // Arrange: the replacement passes through an empty map, which must not leak out.
+    const { table, flips } = observed();
+    table.onTaskStarted(started());
+
+    // Act
+    table.onLevel(level([{ task_id: "b02", task_type: "bash", description: "run" }]));
+
+    // Assert
+    expect(flips()).toBe(1);
+  });
+
+  it("fires when the vendor process ends with work live", () => {
+    // Arrange
+    const { table, flips } = observed();
+    table.onTaskStarted(started());
+
+    // Act
+    table.clear("the vendor process ended");
+
+    // Assert
+    expect(flips()).toBe(2);
+  });
+
+  it("does not fire when the vendor process ends with nothing live", () => {
+    // Arrange
+    const { table, flips } = observed();
+
+    // Act
+    table.clear("the vendor process ended");
+
+    // Assert
+    expect(flips()).toBe(0);
+  });
+});

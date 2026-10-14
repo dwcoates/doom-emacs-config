@@ -20,6 +20,8 @@ import {
   keepalivePromptText,
   REAL_SCHEDULER,
   SPAN_UUIDS_PER_TURN,
+  detachedWorkContext,
+  type DetachedWorkItem,
   type KeepaliveAttribution,
 } from "../../src/engine/keepalive.js";
 import { SendLedger } from "../../src/engine/sends.js";
@@ -515,19 +517,23 @@ function cadenceAt(nowMs: number): {
   readonly clock: { now: number };
   readonly beats: () => number;
   readonly lapses: Array<{ readonly lapsesAtMs: number; readonly contextTokens: number }>;
+  /** The session's live detached work, as the cadence reads it: edit it, then tell the cadence. */
+  readonly detached: DetachedWorkItem[];
 } {
   const scheduler = new ManualScheduler();
+  const detached: DetachedWorkItem[] = [];
   const clock = { now: nowMs };
   let beats = 0;
   const lapses: Array<{ readonly lapsesAtMs: number; readonly contextTokens: number }> = [];
   const cadence = new KeepaliveCadence(
     () => beats++,
     (lapsesAtMs, contextTokens) => lapses.push({ lapsesAtMs, contextTokens }),
+    () => detached,
     () => clock.now,
     KEEPALIVE_INTERVAL_MS,
     scheduler,
   );
-  return { cadence, scheduler, clock, beats: () => beats, lapses };
+  return { cadence, scheduler, clock, beats: () => beats, lapses, detached };
 }
 
 /** The 1-hour cache the conversation's last request bought at {@link TURN_AT}. */
@@ -763,6 +769,218 @@ describe("the cadence, anchored to the conversation's last request", () => {
 
 /** The 1-hour cache, above the cold gate's floor. */
 const HELD_CACHE = { atMs: TURN_AT, ttlMs: CACHE_TTL_1H_MS, contextTokens: 120_000 };
+
+/** A background shell a real turn left running. */
+const WATCHER: DetachedWorkItem = {
+  taskId: "bwatch01",
+  toolUseId: "toolu_watch",
+  taskType: "local_bash",
+  description: "tail -f build.log",
+  turnId: "turn-1",
+};
+
+/** The INFO the cadence states when it spares live detached work. */
+const SPARED = "no keep-alive is scheduled: detached work is live, and the rewind a keep-alive owes would kill it";
+
+describe("the cadence spares live detached work", () => {
+  it("schedules no beat at a start while detached work is live", () => {
+    // Arrange
+    const { cadence, scheduler, detached } = cadenceAt(TURN_AT + 5 * MINUTE);
+    detached.push(WATCHER);
+
+    // Act
+    cadence.start(HOUR_CACHE, "restart");
+
+    // Assert
+    expect(scheduler.pendingTimeout()).toBeUndefined();
+  });
+
+  it("cancels the scheduled beat when detached work becomes live", () => {
+    // Arrange
+    const { cadence, scheduler, detached } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HOUR_CACHE, "restart");
+    detached.push(WATCHER);
+
+    // Act
+    cadence.detachedWorkChanged();
+
+    // Assert
+    expect(scheduler.pendingTimeout()).toBeUndefined();
+  });
+
+  it("schedules no beat when a turn ends with detached work live", () => {
+    // Arrange: the turn started the work, so it is live when the turn ends.
+    const { cadence, scheduler, detached } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HOUR_CACHE, "restart");
+    cadence.pause();
+    detached.push(WATCHER);
+    cadence.detachedWorkChanged();
+
+    // Act
+    cadence.resume();
+
+    // Assert
+    expect(scheduler.pendingTimeout()).toBeUndefined();
+  });
+
+  it("schedules no beat on a request answered while detached work is live", () => {
+    // Arrange
+    const { cadence, scheduler, detached } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HOUR_CACHE, "restart");
+    detached.push(WATCHER);
+    cadence.detachedWorkChanged();
+
+    // Act
+    cadence.noteRequest(CACHE_TTL_1H_MS, 0);
+
+    // Assert
+    expect(scheduler.pendingTimeout()).toBeUndefined();
+  });
+
+  it("skips a beat that comes due while detached work is live, even if no change was told", () => {
+    // Arrange: the work went live without the cadence being told, so its timer still stands.
+    const { cadence, scheduler, detached, beats } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HOUR_CACHE, "restart");
+    detached.push(WATCHER);
+
+    // Act
+    scheduler.fireTimeout();
+
+    // Assert
+    expect([beats(), scheduler.pendingTimeout()]).toEqual([0, undefined]);
+  });
+
+  it("schedules again from the last request when the last detached item ends", () => {
+    // Arrange
+    const { cadence, scheduler, clock, detached } = cadenceAt(TURN_AT + 5 * MINUTE);
+    detached.push(WATCHER);
+    cadence.start(HOUR_CACHE, "restart");
+    clock.now = TURN_AT + 20 * MINUTE;
+    detached.length = 0;
+
+    // Act
+    cadence.detachedWorkChanged();
+
+    // Assert
+    expect(scheduler.pendingTimeout()?.delayMs).toBe(32 * MINUTE);
+  });
+
+  it("beats at once when the last detached item ends past the beat's time with the cache still warm", () => {
+    // Arrange
+    const { cadence, scheduler, clock, detached } = cadenceAt(TURN_AT + 5 * MINUTE);
+    detached.push(WATCHER);
+    cadence.start(HOUR_CACHE, "restart");
+    clock.now = TURN_AT + 55 * MINUTE;
+    detached.length = 0;
+
+    // Act
+    cadence.detachedWorkChanged();
+
+    // Assert
+    expect(scheduler.pendingTimeout()?.delayMs).toBe(0);
+  });
+
+  it("schedules no beat when the last detached item ends after the cache lapsed", () => {
+    // THE ACCEPTED TRADE-OFF: a task outliving the cache costs one cold read.
+    const { cadence, scheduler, clock, detached } = cadenceAt(TURN_AT + 5 * MINUTE);
+    detached.push(WATCHER);
+    cadence.start(HOUR_CACHE, "restart");
+    clock.now = TURN_AT + 90 * MINUTE;
+    detached.length = 0;
+
+    // Act
+    cadence.detachedWorkChanged();
+
+    // Assert
+    expect(scheduler.pendingTimeout()).toBeUndefined();
+  });
+
+  it("stays spared while one of two detached items is still live", () => {
+    // Arrange
+    const { cadence, scheduler, detached } = cadenceAt(TURN_AT + 5 * MINUTE);
+    detached.push(WATCHER, { taskId: "agent01", description: "a background agent" });
+    cadence.start(HOUR_CACHE, "restart");
+    detached.splice(0, 1);
+
+    // Act
+    cadence.detachedWorkChanged();
+
+    // Assert
+    expect(scheduler.pendingTimeout()).toBeUndefined();
+  });
+
+  it("keeps a held cadence projecting the lapse while detached work is live", () => {
+    // Arrange
+    const { cadence, detached, lapses } = cadenceAt(TURN_AT + 5 * MINUTE);
+    detached.push(WATCHER);
+    cadence.start(HOUR_CACHE, "restart");
+
+    // Act
+    cadence.hold();
+
+    // Assert
+    expect(lapses).toEqual([{ lapsesAtMs: TURN_AT + CACHE_TTL_1H_MS, contextTokens: 0 }]);
+  });
+
+  it("states the spared items at INFO", () => {
+    // Arrange
+    const { cadence, detached } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HOUR_CACHE, "restart");
+    detached.push(WATCHER);
+    const mark = logSinkMark();
+
+    // Act
+    cadence.detachedWorkChanged();
+
+    // Assert
+    const record = logRecordsSince(mark).find((entry) => entry.message === SPARED);
+    expect([record?.level, record?.context.detached_work, record?.context.reason]).toEqual([
+      "info",
+      [detachedWorkContext(WATCHER)],
+      "detached work is live",
+    ]);
+  });
+
+  it("states an unchanged spare once, not at every request", () => {
+    // Arrange
+    const { cadence, detached } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HOUR_CACHE, "restart");
+    detached.push(WATCHER);
+    const mark = logSinkMark();
+
+    // Act
+    cadence.detachedWorkChanged();
+    cadence.noteRequest(CACHE_TTL_1H_MS, 0);
+    cadence.noteRequest(CACHE_TTL_1H_MS, 0);
+
+    // Assert
+    expect(logRecordsSince(mark).filter((entry) => entry.message === SPARED)).toHaveLength(1);
+  });
+});
+
+describe("detachedWorkContext", () => {
+  it("names every field of a fully stated item", () => {
+    // Act
+    const context = detachedWorkContext(WATCHER);
+
+    // Assert
+    expect(context).toEqual({
+      task_id: "bwatch01",
+      tool_use_id: "toolu_watch",
+      task_type: "local_bash",
+      description: "tail -f build.log",
+      turn_id: "turn-1",
+    });
+  });
+
+  it("states an unstated call, kind and turn as empty", () => {
+    // Act
+    const context = detachedWorkContext({ taskId: "t9", description: "ambient" });
+
+    // Assert
+    expect(context).toEqual({ task_id: "t9", tool_use_id: "", task_type: "", description: "ambient", turn_id: "" });
+  });
+});
 
 describe("the cadence held while the workspace is hidden", () => {
   it("cancels the scheduled beat on a hold", () => {
