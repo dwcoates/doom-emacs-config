@@ -1213,8 +1213,10 @@ Owner rulings, 2026-09-30 (`internal/merge`; the contract is
   with its area (conflicts, tests, other), turquoise on the roster, logged
   ERROR as `daemon.merge.abort`. A gate that failed to run (missing script,
   unstartable runner, exit 127 or 126), uncommitted changes, an escalation, a
-  repair that changes the merge machinery (`daemon/internal/merge/`,
-  `bin/test-all.sh`) and a failed pre prompt all fail the merge; a failed post
+  TEST repair that changes merge machinery (`daemon/internal/merge/`,
+  `testrun/`, `bin/test-all.sh`) the branch did not already change, and a
+  failed pre prompt all fail the merge (a CONFLICT resolution may edit the
+  machinery: it lands the branch's own change); a failed post
   prompt is logged and the merge still lands.
 - **ONE SLOT PER REPOSITORY.** The pump grants the slot to the queue front; the
   repository's kernel lock travels with it.

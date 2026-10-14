@@ -484,8 +484,10 @@ the merges behind it proceed; once its guidance turn has ended it waits for
 the slot again and makes its merge afresh on the new tip. Every end of a run
 -- landed, failed, abandoned, stopped -- goes through the one teardown, which
 releases the lease, the queue entry, the open ledger intervals, the tree and
-the slot. A repair that changes the merge machinery (`daemon/internal/merge/`,
-`bin/test-all.sh`) is refused and parks. Every brief and every guidance is
+the slot. A TEST repair that changes merge machinery (`daemon/internal/merge/`,
+`testrun/`, `bin/test-all.sh`) the branch did not already change fails the
+merge; a CONFLICT resolution may edit it, since it lands the branch's own
+change, and its edits count as the branch's for any later test repair. Every brief and every guidance is
 addressed to the merging workspace's own session.
 
 Tabs are FeedMergeTab rows on the merge bubble's sub-feed
