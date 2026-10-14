@@ -447,9 +447,9 @@ func (q mergeQueue) empty() bool {
 // newRosterState builds an empty roster accumulation.
 func newRosterState() *rosterState {
 	return &rosterState{
-		workspaces:  map[ids.WorkspaceID]*wsState{},
-		divergence:  map[ids.RepoID]repodivergence.Measure{},
-		queues:      map[wsm.RepoKey]mergeQueue{},
+		workspaces: map[ids.WorkspaceID]*wsState{},
+		divergence: map[ids.RepoID]repodivergence.Measure{},
+		queues:     map[wsm.RepoKey]mergeQueue{},
 	}
 }
 
