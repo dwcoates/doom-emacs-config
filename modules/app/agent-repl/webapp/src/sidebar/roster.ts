@@ -683,10 +683,11 @@ export function drawRosterSectionHeader(
   gesture: FoldGesture,
   path: string,
 ): HTMLElement {
-  const header = document.createElement("div");
-  header.className = "repo-head";
-  header.appendChild(drawFoldToggle(section, gesture));
-  header.appendChild(drawSectionLabel(requireMessage(u.label, `${path}.label`), `${path}.label`));
+  const header = drawFoldHeader(
+    drawSectionLabel(requireMessage(u.label, `${path}.label`), `${path}.label`),
+    section,
+    gesture,
+  );
   // THE FOLDED COUNT, "(N)", sits between the label and the add control the
   // repo section appends after this header. The daemon resolves N (the rows
   // the unfolded section shows, nested family rows included); the stylesheet
@@ -697,6 +698,19 @@ export function drawRosterSectionHeader(
   count.setAttribute("data-section-count", "");
   count.textContent = `(${drawRosterSectionCount(requireMessage(u.count, `${path}.count`), `${path}.count`)})`;
   header.appendChild(count);
+  return header;
+}
+
+/**
+ * THE ONE `repo-head` every folding section box draws: its fold triangle,
+ * then LABEL, with a click anywhere on it asking GESTURE for the other fold.
+ * Whatever a kind of section adds (a count, a control) is appended after.
+ */
+export function drawFoldHeader(label: HTMLElement, section: HTMLElement, gesture: FoldGesture): HTMLElement {
+  const header = document.createElement("div");
+  header.className = "repo-head";
+  header.appendChild(drawFoldToggle(section, gesture));
+  header.appendChild(label);
   header.addEventListener("click", () => gesture(section, header));
   return header;
 }
