@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"agentrepl/testrun/internal/command"
 )
 
 // InvestigationName is the investigation workspace's name: stable, so a run
@@ -266,15 +268,9 @@ func ScriptDispatch(script string, bound time.Duration) func(commands []byte) er
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), bound)
 		defer cancel()
-		cmd := boundedCommand(ctx, script, "--emit-commands")
+		cmd := command.Bounded(ctx, script, "--emit-commands")
 		cmd.Stdin = bytes.NewReader(commands)
 		out, err := cmd.CombinedOutput()
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return fmt.Errorf("%s --emit-commands did not answer within %s: %w", script, bound, ctx.Err())
-		}
-		if err != nil {
-			return fmt.Errorf("%s --emit-commands: %w: %s", script, err, strings.TrimSpace(string(out)))
-		}
-		return nil
+		return command.Outcome(ctx, bound, command.Line(script, []string{"--emit-commands"}), "", out, err)
 	}
 }

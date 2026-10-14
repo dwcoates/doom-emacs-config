@@ -1,15 +1,17 @@
 package reap
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
+
+	"agentrepl/testrun/internal/command"
 )
 
 // ListBound is how long one listing of the process table may take before it
@@ -44,19 +46,18 @@ func (OSTable) List() ([]Proc, error) {
 	return parsePS(out, Getsid)
 }
 
-// output runs name under LC_ALL=C and answers what it printed, failing once
-// bound passes without its answer.
+// output runs name under LC_ALL=C and answers what it printed to stdout,
+// failing once bound passes without its answer.
 func output(bound time.Duration, name string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), bound)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := command.Bounded(ctx, name, args...)
 	cmd.Env = append(os.Environ(), "LC_ALL=C")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return "", fmt.Errorf("%s did not answer within %s", name, bound)
-	}
-	if err != nil {
-		return "", fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
+	if err := command.Outcome(ctx, bound, command.Line(name, args), "", stderr.Bytes(), err); err != nil {
+		return "", err
 	}
 	return string(out), nil
 }
