@@ -99,19 +99,31 @@ read_niceness() {
 # signal it. An explicit setting is kept.
 export AGENT_REPL_PROFILE_ROOT="${AGENT_REPL_PROFILE_ROOT:-${TMPDIR:-/tmp}/agent-repl-test-profiles}"
 
+# THE TARGET NICENESS: 19, unless AGENT_REPL_TEST_NICENESS names another from
+# 1 to 19. Only the merge queue's gates name one (owner ruling 2026-10-14): the
+# queue's head runs at 10 and the merge behind it at 15, so under contention
+# the head's tests run before any other test run's, and every one of them
+# still yields to the owner's processes at 0. Nothing here ever raises a
+# priority: a run already at or past its target runs as it is.
+target=${AGENT_REPL_TEST_NICENESS:-19}
+if ! [[ $target =~ ^[0-9]+$ ]] || (( target < 1 || target > 19 )); then
+    refuse "AGENT_REPL_TEST_NICENESS='$target' is not a niceness from 1 to 19"
+fi
+
 case $os in
     Darwin|Linux)
         niceness=$(read_niceness) || refuse "could not read this process's niceness"
         [[ $niceness =~ ^-?[0-9]+$ ]] || refuse "the niceness read back is not a number: '$niceness'"
-        export AGENT_REPL_BACKGROUND_PRIORITY=nice-19
-        if (( niceness >= 19 )); then
+        if (( niceness >= target )); then
+            export AGENT_REPL_BACKGROUND_PRIORITY=nice-$niceness
             exec "$@"
         fi
-        # TO EXACTLY 19, FROM WHEREVER IT STANDS. nice(1) adds its increment to
-        # the current niceness, so `nice -n 19` from any niceness above 0
-        # overshoots to 20 (macOS's ceiling); the increment is the distance to
-        # 19 instead.
-        increment=$(( 19 - niceness ))
+        export AGENT_REPL_BACKGROUND_PRIORITY=nice-$target
+        # TO EXACTLY THE TARGET, FROM WHEREVER IT STANDS. nice(1) adds its
+        # increment to the current niceness, so `nice -n 19` from any niceness
+        # above 0 overshoots to 20 (macOS's ceiling); the increment is the
+        # distance to the target instead.
+        increment=$(( target - niceness ))
         # DISK, TOO, ON macOS (owner ruling 2026-10-06): the CPU demotion left a
         # run's disk I/O at normal priority, and a full run's hundreds of
         # SQLite files starved the live store (a 111-page checkpoint took 54 s,
