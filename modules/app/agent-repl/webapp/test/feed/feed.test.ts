@@ -45,6 +45,7 @@ import {
   responseRow,
   stubRenderers,
   subagentRow,
+  thinkingRow,
   tokenFor,
   toolCallRow,
   userPromptRow,
@@ -60,6 +61,7 @@ import { foldTitle } from "../../src/feed/title-fold.js";
 import { HAS_MORE_CLASS } from "../../src/feed/bubble-more.js";
 import { bubbleBox } from "../../src/feed/bubble-scroll.js";
 import { createBubbleBody } from "../../src/bubble/body.js";
+import { drawFeedResponse } from "../../src/feed/cards/response.js";
 import { resetLoggingForTests } from "../../src/log.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 
@@ -2909,6 +2911,164 @@ describe("mountFeed: the selected row leaving the viewport ends the selection", 
       m.scroll.scrollTop,
       m.row("r1").hasAttribute(SELECTED_ROW_ATTRIBUTE),
     ]).toEqual([37, false]);
+    m.feed.dispose();
+  });
+});
+
+describe("mountFeed: a click on a thinking bubble only expands it", () => {
+  /** A mounted root feed drawing the real thinking bubble k1 and a response r1. */
+  async function mounted() {
+    const channels = new Map<string, Channel<WatchFeedResponse>>();
+    const channel = new Channel<WatchFeedResponse>();
+    channels.set("tok:root", channel);
+    const h = harness({
+      channels,
+      openFeed: (req) =>
+        openSuccess(page([thinkingRow("k1"), responseRow("r1")]), tokenFor(req)),
+    });
+    const scroll = document.createElement("div");
+    const host = document.createElement("div");
+    scroll.append(host);
+    document.body.replaceChildren(scroll);
+    const feed = mountFeed(host, h.ctx, {
+      renderers: stubRenderers({ response: drawFeedResponse }),
+      scrollBox: scroll,
+    });
+    await settle();
+    const row = (id: string): HTMLElement => {
+      const el = host.querySelector<HTMLElement>(`[data-feed-row="${id}"]`);
+      if (el === null) throw new Error(`no row ${id}`);
+      return el;
+    };
+    const box = (): HTMLElement => {
+      const el = row("k1").querySelector<HTMLElement>(".bubble > .bubble-scroll");
+      if (el === null) throw new Error("the thinking bubble drew no capped box");
+      return el;
+    };
+    const click = async (): Promise<void> => {
+      box().querySelector<HTMLElement>(".bubble-body")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await settle();
+    };
+    return { feed, h, channel, row, box, click };
+  }
+
+  it("expands the thinking bubble", async () => {
+    // Arrange
+    const m = await mounted();
+    // Act
+    await m.click();
+    // Assert
+    expect(m.box().classList.contains("expanded")).toBe(true);
+    m.feed.dispose();
+  });
+
+  it("collapses the thinking bubble on a second click", async () => {
+    // Arrange
+    const m = await mounted();
+    await m.click();
+    // Act
+    await m.click();
+    // Assert
+    expect(m.box().classList.contains("expanded")).toBe(false);
+    m.feed.dispose();
+  });
+
+  it("asks the daemon to select nothing", async () => {
+    // Arrange
+    const m = await mounted();
+    // Act
+    await m.click();
+    // Assert
+    expect(m.h.calls.selectFeedRow).toEqual([]);
+    m.feed.dispose();
+  });
+
+  it("marks the thinking bubble neither selected nor as the selected entry", async () => {
+    // Arrange
+    const m = await mounted();
+    // Act
+    await m.click();
+    // Assert
+    const bubble = m.row("k1").querySelector(".bubble");
+    expect([
+      m.row("k1").hasAttribute(SELECTED_ROW_ATTRIBUTE),
+      bubble?.classList.contains(SELECTED_ENTRY_CLASS),
+    ]).toEqual([false, false]);
+    m.feed.dispose();
+  });
+
+  it("leaves the selection on the row it was on", async () => {
+    // Arrange
+    const m = await mounted();
+    m.channel.push(pushSelection({ response: "r1" }));
+    await settle();
+    // Act
+    await m.click();
+    // Assert
+    expect([
+      m.row("r1").getAttribute(SELECTED_ROW_ATTRIBUTE),
+      m.h.calls.selectFeedRow.length,
+    ]).toEqual(["response", 0]);
+    m.feed.dispose();
+  });
+
+  it("collapses the thinking bubble once it is scrolled wholly out of view", async () => {
+    // Arrange
+    const m = await mounted();
+    await m.click();
+    fireIntersection(m.row("k1"), true);
+    // Act
+    fireIntersection(m.row("k1"), false);
+    // Assert
+    expect(m.box().classList.contains("expanded")).toBe(false);
+    m.feed.dispose();
+  });
+
+  it("keeps the thinking bubble open while any part of it is in view", async () => {
+    // Arrange
+    const m = await mounted();
+    await m.click();
+    // Act
+    fireIntersection(m.row("k1"), true);
+    // Assert
+    expect(m.box().classList.contains("expanded")).toBe(true);
+    m.feed.dispose();
+  });
+
+  it("stops watching the thinking bubble once a click closes it", async () => {
+    // Arrange
+    const m = await mounted();
+    await m.click();
+    // Act
+    await m.click();
+    // Assert
+    expect(intersectionObservers().some((r) => r.targets.has(m.row("k1")))).toBe(false);
+    m.feed.dispose();
+  });
+
+  it("records the collapse under the thinkingClick cause", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const m = await mounted();
+    await m.click();
+    fireIntersection(m.row("k1"), true);
+    // Act
+    fireIntersection(m.row("k1"), false);
+    // Assert
+    const record = await forwardedRecord(capture, "feed.out-of-view-collapse");
+    expect([record.context?.row, record.context?.cause]).toEqual(["k1", "thinkingClick"]);
+    m.feed.dispose();
+  });
+
+  it("does not watch a response bubble's box, which the selection owns", async () => {
+    // Arrange
+    const m = await mounted();
+    const responseBody = m.row("r1").querySelector<HTMLElement>(".bubble-body");
+    // Act
+    responseBody?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await settle();
+    // Assert
+    expect(intersectionObservers().some((r) => r.targets.has(m.row("r1")))).toBe(false);
     m.feed.dispose();
   });
 });

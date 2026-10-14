@@ -2884,7 +2884,8 @@ describe("the warning chip as the one error surface", () => {
  */
 describe("the expanded response's eggshell border", () => {
   /** The one rule that paints it. */
-  const EGGSHELL_SELECTOR = '.bubble[data-role="response"]:not(.entry-selected):has(> .bubble-scroll.expanded)';
+  const EGGSHELL_SELECTOR =
+    '.bubble[data-role="response"]:not(.entry-selected):not([data-variant="thinking"]):has(> .bubble-scroll.expanded)';
 
   /** A bubble wearing ATTRS and HOOKS, its scroll box open when OPEN. */
   function bubbleOf(attrs: Readonly<Record<string, string>>, hooks: readonly string[], open: boolean): HTMLElement {
@@ -2915,7 +2916,6 @@ describe("the expanded response's eggshell border", () => {
 
   const RESPONSES = [
     ["a streaming response", { "data-role": "response", "data-variant": "response" }, []],
-    ["a thinking bubble (yellow)", { "data-role": "response", "data-variant": "thinking" }, []],
     ["an interim response (pear)", { "data-role": "response", "data-variant": "response", "data-state": "success" }, []],
     ["the turn's answer (green)", { "data-role": "response", "data-variant": "response", "data-state": "success" }, ["final-response"]],
     ["an agentic card", { "data-role": "response", "data-variant": "agentic" }, []],
@@ -2941,6 +2941,18 @@ describe("the expanded response's eggshell border", () => {
   it.each(PROMPTS)("never borders %s eggshell, open or not", (_label, attrs, hooks) => {
     // Arrange
     const el = bubbleOf(attrs, hooks, true);
+    // Act
+    const border = borderOf(el);
+    // Assert
+    expect(border).toBeNull();
+  });
+
+  // A CLICK ON A THINKING BUBBLE ONLY EXPANDS IT (owner specification,
+  // 2026-10-14): an open thinking bubble wears no highlight a closed one does
+  // not, so the eggshell never reaches it.
+  it("never borders an open thinking bubble eggshell", () => {
+    // Arrange
+    const el = bubbleOf({ "data-role": "response", "data-variant": "thinking" }, [], true);
     // Act
     const border = borderOf(el);
     // Assert

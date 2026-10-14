@@ -546,6 +546,23 @@ export function responseRow(
   });
 }
 
+/** A settled thinking bubble's row: a response the daemon flags `thinking`. */
+export function thinkingRow(id: string, markdown = "reasoning"): FeedRow {
+  return create(FeedRowSchema, {
+    id: feedId(id),
+    order: orderFor(id),
+    row: {
+      case: "activity",
+      value: {
+        unit: {
+          case: "response",
+          value: { thinking: true, result: { case: "success", value: { prose: { markdown } } } },
+        },
+      },
+    },
+  });
+}
+
 /**
  * A tool-call row: running with an observed beat (which ticks), or returned.
  *
