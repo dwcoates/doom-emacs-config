@@ -1137,10 +1137,10 @@ func (r *resolver) observeAccountUsage(ws ids.WorkspaceID, s *wsState, usage *co
 		account.seat = nil
 		moved := leftSeat
 		if five := outcome.Available.GetFiveHour(); five != nil {
-			moved = account.rate.session.observeSampledFigures(five.GetUtilizationPercent(), five.GetResetsAtMs(), at) || moved
+			moved = r.observeSampledWindow(ws, s, "session", &account.rate.session, five, at) || moved
 		}
 		if seven := outcome.Available.GetSevenDay(); seven != nil {
-			moved = account.rate.weekly.observeSampledFigures(seven.GetUtilizationPercent(), seven.GetResetsAtMs(), at) || moved
+			moved = r.observeSampledWindow(ws, s, "weekly", &account.rate.weekly, seven, at) || moved
 		}
 		if moved {
 			account.touch(r.opts.clock.Now())
@@ -1148,6 +1148,38 @@ func (r *resolver) observeAccountUsage(ws ids.WorkspaceID, s *wsState, usage *co
 	default:
 		r.logUnreadableSample(ws, s, usage)
 	}
+}
+
+// observeSampledWindow files one window of a subscription sample and records
+// what became of it: a figure that changes the drawn line at INFO, so every
+// move of the footer's usage is in the log with its source and stamp, and a
+// stale or unchanged sample at DEBUG. It reports whether the sample was filed.
+func (r *resolver) observeSampledWindow(ws ids.WorkspaceID, s *wsState, name string, w *allowanceWindow,
+	sample *conversationv1.SessionUsageWindow, at int64) bool {
+	before := *w
+	filed := w.observeSampledFigures(sample.GetUtilizationPercent(), sample.GetResetsAtMs(), at)
+	fields := dlog.Context{
+		"window":                 name,
+		"source":                 "account_usage_sample",
+		"utilization_percent":    sample.GetUtilizationPercent(),
+		"resets_at_ms":           sample.GetResetsAtMs(),
+		"observed_at_ms":         at,
+		"previous_figured":       before.figured,
+		"previous_utilization":   before.utilization,
+		"previous_sampled_at_ms": before.sampledAtMs,
+	}
+	switch {
+	case !filed:
+		r.logOf(ws, s).Debug("daemon.footer.account_usage_stale",
+			"refused a usage sample older than the newest one on hand; the drawn figure stands", fields)
+	case before.figured && before.utilization == w.utilization && before.resetsAtS == w.resetsAtS:
+		r.logOf(ws, s).Debug("daemon.footer.account_usage_figure",
+			"a usage sample restated the drawn figure", fields)
+	default:
+		r.logOf(ws, s).Info("daemon.footer.account_usage_figure",
+			"a usage sample moved the drawn figure", fields)
+	}
+	return filed
 }
 
 // observeSeatSpend files a per-seat sample: the seat's spend replaces
@@ -1238,11 +1270,11 @@ func unavailableReason(unavailable *conversationv1.SessionAccountUsageUnavailabl
 // window it is about: five_hour is the session allowance; seven_day and its
 // per-model and overage-included aliases are all the weekly one. The event is
 // the VERDICT's only source, so filing it is what lets an allowance's status
-// arm join. An event that carries a utilization also supplies the figure, and
-// as the newest sighting to arrive it is the one drawn — see `fileFigures`,
-// which states why arrival rather than a timestamp orders the two sources.
-// The overage window is its own allowance cell and files exactly like the
-// other two; a status naming no window is not filable at all.
+// arm join. ITS UTILIZATION IS NEVER DRAWN ON A SAMPLED WINDOW (session,
+// weekly): it carries no instant to order it against the samples, so the
+// newest sample's figure stands (see `allowanceWindow`). The overage window,
+// which no sample figures, takes the event's figure. A status naming no
+// window is not filable at all.
 func (r *resolver) observeRateLimitStatus(s *wsState, status *conversationv1.SessionRateLimitStatus) {
 	if status == nil {
 		return
@@ -1258,6 +1290,7 @@ func (r *resolver) observeRateLimitStatus(s *wsState, status *conversationv1.Ses
 		return
 	}
 	var window *allowanceWindow
+	sampled := true
 	switch status.GetRateLimitType().GetWindow().(type) {
 	case *conversationv1.SessionRateLimitType_FiveHour:
 		window = &account.rate.session
@@ -1268,12 +1301,27 @@ func (r *resolver) observeRateLimitStatus(s *wsState, status *conversationv1.Ses
 		window = &account.rate.weekly
 	case *conversationv1.SessionRateLimitType_Overage:
 		window = &account.rate.overage
+		sampled = false
 	default:
 		return
 	}
 	window.verdict = verdictOf(status)
 	if status.UtilizationPercent != nil {
-		window.observeEventFigures(status.GetUtilizationPercent(), status.GetResetsAtMs())
+		fields := dlog.Context{
+			"window":               rateWindowName(status),
+			"source":               "rate_limit_event",
+			"utilization_percent":  status.GetUtilizationPercent(),
+			"resets_at_ms":         status.GetResetsAtMs(),
+			"previous_utilization": window.utilization,
+		}
+		if sampled {
+			r.logOf(s.id, s).Debug("daemon.footer.account_usage_figure",
+				"a rate-limit event's utilization is not drawn on a sampled window; the newest sample's figure stands", fields)
+		} else {
+			window.observeEventFigures(status.GetUtilizationPercent(), status.GetResetsAtMs())
+			r.logOf(s.id, s).Info("daemon.footer.account_usage_figure",
+				"a rate-limit event figured the overage window", fields)
+		}
 	}
 	account.touch(r.opts.clock.Now())
 }

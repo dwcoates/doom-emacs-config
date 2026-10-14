@@ -6,6 +6,9 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 )
 
 // rateLimitStatus is one vendor rate-limit event for one window.
@@ -385,20 +388,154 @@ func TestAnUnreportedOverageWindowDrawsNoAllowance(t *testing.T) {
 	}
 }
 
-func TestAnEarlierSampleDoesNotOverwriteALaterEvent(t *testing.T) {
+// AN EVENT NEVER OVERWRITES THE SAMPLED FIGURE (owner ruling, 2026-10-13:
+// only the most recent figure is drawn). The event carries no instant, so it
+// cannot be shown to be newer than the sample on hand.
+func TestAnEventDoesNotOverwriteTheSampledFigure(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
 	h.r.OnSessionUpdate(testWS, usageSample(95, 90, instant.UnixMilli()))
 
-	// Act: the event arrives after the sample, so its figure is the newest
-	// sighting.
+	// Act
 	h.r.OnSessionUpdate(testWS, rateLimitStatus(fiveHourWindow(), 99, 5*time.Hour))
 
 	// Assert
 	got := enduringUsageOf(h).GetSession()
-	if got.GetUtilization() != 0.99 {
-		t.Fatalf("utilization = %v, want the event's figure, which arrived last", got.GetUtilization())
+	if got.GetUtilization() != 0.95 {
+		t.Fatalf("utilization = %v, want the sample's figure kept over the event's", got.GetUtilization())
+	}
+	if got.GetAllowed() == nil {
+		t.Fatalf("status = %+v, want the event's verdict joined to the sampled figure", got.GetStatus())
+	}
+}
+
+// THE SHAPE THE FOOTER GOT WRONG (2026-10-13): one workspace's session filed a
+// newer sample, then another workspace's session on the same account relayed
+// an event carrying an older, lower figure, and the drawn figure went down.
+func TestAnotherWorkspacesEventDoesNotLowerTheAccountsSampledFigure(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	bindOther(t, h)
+	h.r.SetAccount(testWS, personalRoot)
+	h.r.SetAccount(otherWS, personalRoot)
+	h.r.OnSessionUpdate(testWS, usageSample(98, 90, instant.UnixMilli()))
+
+	// Act
+	h.r.OnSessionUpdate(otherWS, rateLimitStatus(fiveHourWindow(), 97, 5*time.Hour))
+
+	// Assert
+	for _, ws := range []ids.WorkspaceID{testWS, otherWS} {
+		if got := enduringOfWS(t, h, ws).GetUsage().GetSession().GetUtilization(); got != 0.98 {
+			t.Fatalf("%s session utilization = %v, want the newest sample's 0.98", ws, got)
+		}
+	}
+}
+
+func TestAnEventAloneDoesNotFigureASampledWindow(t *testing.T) {
+	tests := []struct {
+		name   string
+		window *conversationv1.SessionRateLimitType
+		drawn  func(*frontendv1.FooterActivityEnduringUsage) *frontendv1.FooterAllowance
+	}{
+		{"five hour", fiveHourWindow(), (*frontendv1.FooterActivityEnduringUsage).GetSession},
+		{"seven day", sevenDayWindow(), (*frontendv1.FooterActivityEnduringUsage).GetWeekly},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+
+			// Act
+			h.r.OnSessionUpdate(testWS, rateLimitStatus(tc.window, 50, 5*time.Hour))
+
+			// Assert
+			if got := tc.drawn(enduringUsageOf(h)); got != nil {
+				t.Fatalf("allowance = %+v, want none until a sample figures the window", got)
+			}
+		})
+	}
+}
+
+func TestEveryFigureTheFooterReceivesIsRecorded(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(h *harness)
+		act     func(h *harness)
+		want    dlog.RecordQuery
+		source  string
+		percent float64
+	}{
+		{
+			name:    "a sample that moves the drawn figure",
+			arrange: func(h *harness) { h.r.OnSessionUpdate(testWS, usageSample(40, 20, instant.UnixMilli())) },
+			act: func(h *harness) {
+				h.r.OnSessionUpdate(testWS, usageSample(41, 20, instant.Add(time.Minute).UnixMilli()))
+			},
+			want:    dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "daemon.footer.account_usage_figure", Message: "a usage sample moved the drawn figure"},
+			source:  "account_usage_sample",
+			percent: 41,
+		},
+		{
+			name:    "a sample that restates the drawn figure",
+			arrange: func(h *harness) { h.r.OnSessionUpdate(testWS, usageSample(40, 20, instant.UnixMilli())) },
+			act: func(h *harness) {
+				h.r.OnSessionUpdate(testWS, usageSample(40, 20, instant.Add(time.Minute).UnixMilli()))
+			},
+			want:    dlog.RecordQuery{Level: dlog.LevelDebug, Operation: "daemon.footer.account_usage_figure", Message: "a usage sample restated the drawn figure"},
+			source:  "account_usage_sample",
+			percent: 40,
+		},
+		{
+			name:    "a sample older than the one on hand",
+			arrange: func(h *harness) { h.r.OnSessionUpdate(testWS, usageSample(40, 20, instant.UnixMilli())) },
+			act: func(h *harness) {
+				h.r.OnSessionUpdate(testWS, usageSample(39, 20, instant.Add(-time.Minute).UnixMilli()))
+			},
+			want:    dlog.RecordQuery{Level: dlog.LevelDebug, Operation: "daemon.footer.account_usage_stale"},
+			source:  "account_usage_sample",
+			percent: 39,
+		},
+		{
+			name:    "an event on a sampled window",
+			arrange: func(h *harness) { h.r.OnSessionUpdate(testWS, usageSample(40, 20, instant.UnixMilli())) },
+			act:     func(h *harness) { h.r.OnSessionUpdate(testWS, rateLimitStatus(fiveHourWindow(), 38, 5*time.Hour)) },
+			want:    dlog.RecordQuery{Level: dlog.LevelDebug, Operation: "daemon.footer.account_usage_figure", Message: "a rate-limit event's utilization is not drawn on a sampled window; the newest sample's figure stands"},
+			source:  "rate_limit_event",
+			percent: 38,
+		},
+		{
+			name:    "an event on the overage window",
+			arrange: func(*harness) {},
+			act:     func(h *harness) { h.r.OnSessionUpdate(testWS, rateLimitStatus(overageWindow(), 12, 3*time.Hour)) },
+			want:    dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "daemon.footer.account_usage_figure", Message: "a rate-limit event figured the overage window"},
+			source:  "rate_limit_event",
+			percent: 12,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			tc.arrange(h)
+
+			// Act
+			tc.act(h)
+
+			// Assert
+			for _, rec := range recordsOf(h.log.Records(), tc.want.Operation) {
+				if rec.Level != tc.want.Level || (tc.want.Message != "" && rec.Message != tc.want.Message) {
+					continue
+				}
+				if rec.Context["source"] == tc.source && rec.Context["utilization_percent"] == tc.percent {
+					return
+				}
+			}
+			t.Fatalf("no %s record of the %s figure %v in %+v", tc.want.Level, tc.source, tc.percent, h.log.Records())
+		})
 	}
 }
 
