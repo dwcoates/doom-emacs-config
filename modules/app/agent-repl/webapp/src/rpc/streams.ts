@@ -56,21 +56,7 @@ import type { AgentReplClient } from "./client.js";
 export type StreamEnd =
   | { kind: "cancelled" }
   | { kind: "transport_failure"; error: unknown }
-  | { kind: "producer_ended" }
-  // The stream's `standsWhile` condition went false: it stands down until it
-  // holds again, and reopens then.
-  | { kind: "stood_down" };
-
-/**
- * When a standing stream STANDS: it runs while `active()` holds and stands
- * down (its run aborted, nothing reopened, nothing filed) while it does not,
- * reopening at once when it holds again. `onChange` tells of every change and
- * answers the unsubscribe.
- */
-export interface StandCondition {
-  active(): boolean;
-  onChange(fn: () => void): () => void;
-}
+  | { kind: "producer_ended" };
 
 export interface StreamHandle {
   /** Abort the stream and stop reopening it. Idempotent. */
@@ -137,11 +123,6 @@ export interface WatchStreamOptions<Res extends Message> {
    * daemon is answering again, not when its own countdown says it should be.
    */
   onReconnected?: () => void;
-  /**
-   * The stream runs only while this holds (a page's standing views stand only
-   * while the page is warm: presence.ts). Omitted: the stream always stands.
-   */
-  standsWhile?: StandCondition;
   /** Injected by tests running on fake timers. */
   backoff?: BackoffOptions;
 }
@@ -307,69 +288,24 @@ export function watchStream<Res extends Message>(
       };
     });
 
-  // THE STREAM STANDS DOWN WHILE ITS CONDITION FAILS: the run is aborted and
-  // nothing reopens until it holds again, when the stream reopens at once and
-  // is handed a fresh snapshot. Not a failure: nothing is filed and the
-  // backoff is untouched.
-  const stands = opts.standsWhile;
-  let standingDown = false;
-  /** Resolves the wait for the condition to hold again. */
-  let wakeToStand: (() => void) | null = null;
-  const unsubscribeFromStand = stands?.onChange(() => {
-    if (cancelled) return;
-    if (stands.active()) {
-      wakeToStand?.();
-      return;
-    }
-    if (!standingDown) {
-      standingDown = true;
-      controller.abort();
-    }
-  });
-  const waitToStand = (): Promise<void> =>
-    new Promise<void>((resolve) => {
-      wakeToStand = () => {
-        wakeToStand = null;
-        resolve();
-      };
-    });
-
   const run = async (): Promise<void> => {
     while (!cancelled) {
-      if (stands !== undefined && !stands.active()) {
-        log.info(`the ${opts.name} stream stands down: its page is cold`, {
-          operation: "rpc.stream-stood-down",
-          context: { rpc: opts.name },
-        });
-        await waitToStand();
-        if (cancelled) return;
-        log.info(`the ${opts.name} stream stands again: its page is warm`, {
-          operation: "rpc.stream-stood-up",
-          context: { rpc: opts.name },
-        });
-      }
-      standingDown = false;
       controller = new AbortController();
       endingSeen = false;
       let end: StreamEnd;
       try {
         for await (const response of opts.open(ctx.client, controller.signal)) {
-          if (cancelled || standingDown) break;
+          if (cancelled) break;
           const began = performance.now();
           consume(response);
           ctx.noteStreamCost?.(opts.name, performance.now() - began);
         }
-        end = cancelled ? { kind: "cancelled" } : standingDown ? { kind: "stood_down" } : { kind: "producer_ended" };
+        end = cancelled ? { kind: "cancelled" } : { kind: "producer_ended" };
       } catch (err) {
-        end = cancelled
-          ? { kind: "cancelled" }
-          : standingDown
-            ? { kind: "stood_down" }
-            : { kind: "transport_failure", error: err };
+        end = cancelled ? { kind: "cancelled" } : { kind: "transport_failure", error: err };
       }
       opts.onEnd?.(end);
       if (cancelled) return;
-      if (end.kind === "stood_down") continue;
       // THE DAEMON SAID SO FIRST: a clean end after the planned-ending frame
       // is a stand-down, not a fault. Nothing is filed; the stream reopens at
       // once and finds whichever daemon serves now. An ERROR after the frame
@@ -401,10 +337,8 @@ export function watchStream<Res extends Message>(
         context: { rpc: opts.name },
       });
       unsubscribeFromQuiesce();
-      unsubscribeFromStand?.();
       controller.abort();
       wakeFromBackoff?.();
-      wakeToStand?.();
     },
   };
   cancelSelf = () => handle.cancel();

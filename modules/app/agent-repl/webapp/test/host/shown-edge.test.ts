@@ -53,8 +53,8 @@ describe("watchShownEdge", () => {
     const { p, counted } = watched();
     p.setShown(true);
 
-    // Act
-    p.setWarm(false);
+    // Act: the document's visibility changes while the webhost still shows it.
+    document.dispatchEvent(new Event("visibilitychange"));
 
     // Assert
     expect(counted.switches).toBe(1);
