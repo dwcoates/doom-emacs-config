@@ -29,6 +29,10 @@ message UpdateHeldPromptRequest {
     // Discard it, never delivered (the composer takes the text back).
     UpdateHeldPromptDrop drop = 4;
   }
+  // Tag 5 and the name `accept` are RETIRED: confirming a hold changed
+  // nothing about delivery, so a held prompt answers only release and drop.
+  reserved 5;
+  reserved "accept";
 }
 message UpdateHeldPromptRelease {}
 message UpdateHeldPromptDrop {}
@@ -73,6 +77,10 @@ message UpdateHeldPromptError {
     // call failed) back in the held section and open to this request again.
     UpdateHeldPromptBeingDelivered being_delivered = 9;
   }
+  // Tag 7 and the name `accept_not_applicable` are RETIRED with the accept
+  // action they refused.
+  reserved 7;
+  reserved "accept_not_applicable";
 }
 message UpdateHeldPromptUnknownWorkspace {}
 message UpdateHeldPromptWorkspaceRefMismatch {

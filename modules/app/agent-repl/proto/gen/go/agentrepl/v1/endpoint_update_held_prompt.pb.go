@@ -836,20 +836,20 @@ var File_agentrepl_v1_endpoint_update_held_prompt_proto protoreflect.FileDescrip
 
 const file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDesc = "" +
 	"\n" +
-	".agentrepl/v1/endpoint_update_held_prompt.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\x1a\x1aconversation/v1/turn.proto\"\x87\x02\n" +
+	".agentrepl/v1/endpoint_update_held_prompt.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\x1a\x1aconversation/v1/turn.proto\"\x95\x02\n" +
 	"\x17UpdateHeldPromptRequest\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12+\n" +
 	"\x04turn\x18\x02 \x01(\v2\x17.conversation.v1.TurnIdR\x04turn\x12A\n" +
 	"\arelease\x18\x03 \x01(\v2%.agentrepl.v1.UpdateHeldPromptReleaseH\x00R\arelease\x128\n" +
 	"\x04drop\x18\x04 \x01(\v2\".agentrepl.v1.UpdateHeldPromptDropH\x00R\x04dropB\b\n" +
-	"\x06action\"\x19\n" +
+	"\x06actionJ\x04\b\x05\x10\x06R\x06accept\"\x19\n" +
 	"\x17UpdateHeldPromptRelease\"\x16\n" +
 	"\x14UpdateHeldPromptDrop\"\xa4\x01\n" +
 	"\x18UpdateHeldPromptResponse\x12A\n" +
 	"\asuccess\x18\x01 \x01(\v2%.agentrepl.v1.UpdateHeldPromptSuccessH\x00R\asuccess\x12;\n" +
 	"\x05error\x18\x02 \x01(\v2#.agentrepl.v1.UpdateHeldPromptErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x19\n" +
-	"\x17UpdateHeldPromptSuccess\"\x80\x06\n" +
+	"\x17UpdateHeldPromptSuccess\"\x9d\x06\n" +
 	"\x15UpdateHeldPromptError\x12]\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2..agentrepl.v1.UpdateHeldPromptUnknownWorkspaceH\x00R\x10unknownWorkspace\x12j\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v22.agentrepl.v1.UpdateHeldPromptWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12]\n" +
@@ -860,7 +860,7 @@ const file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDesc = "" +
 	"\x11already_delivered\x18\x06 \x01(\v2..agentrepl.v1.UpdateHeldPromptAlreadyDeliveredH\x00R\x10alreadyDelivered\x12W\n" +
 	"\x0frelease_refused\x18\b \x01(\v2,.agentrepl.v1.UpdateHeldPromptReleaseRefusedH\x00R\x0ereleaseRefused\x12W\n" +
 	"\x0fbeing_delivered\x18\t \x01(\v2,.agentrepl.v1.UpdateHeldPromptBeingDeliveredH\x00R\x0ebeingDeliveredB\a\n" +
-	"\x05cause\"\"\n" +
+	"\x05causeJ\x04\b\a\x10\bR\x15accept_not_applicable\"\"\n" +
 	" UpdateHeldPromptUnknownWorkspace\"I\n" +
 	"$UpdateHeldPromptWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"<\n" +
