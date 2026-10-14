@@ -64,13 +64,14 @@ func TestMergeWorkspaceOnAWorkspaceWithoutLayoutFactsIsRefused(t *testing.T) {
 // a second workspace in the same repo queuing behind the first.
 // ---------------------------------------------------------------------------
 
-// mergeBlockedQueueFixture builds a self-repo with two child workspaces
-// targeting it: the first is admitted to the front and stops in a configured
-// before-merge prompt nobody answers, so its run HOLDS the repository's slot
-// and the second workspace stays genuinely, observably QUEUED for the test's
+// mergeBlockedQueueFixture builds a self-repo with three child workspaces
+// targeting it: the first is admitted to the front and the second races it
+// from right behind (internal/merge/race.go), each stopped in a configured
+// before-merge prompt nobody answers, so their runs HOLD the queue's window
+// and the third workspace stays genuinely, observably QUEUED for the test's
 // duration. (A PARKED front no longer pins the queue: a parked merge yields
 // its slot, owner ruling 2026-09-28.)
-func mergeBlockedQueueFixture(t *testing.T) (front, behind *fixture, repo *harness.Repo, d *harness.Daemon) {
+func mergeBlockedQueueFixture(t *testing.T) (front, racer, behind *fixture, repo *harness.Repo, d *harness.Daemon) {
 	t.Helper()
 	repo = harness.NewRepo(t)
 	d = harness.StartDaemon(t, harness.Opts{DurableState: true, SelfRepo: repo.Dir})
@@ -78,6 +79,8 @@ func mergeBlockedQueueFixture(t *testing.T) (front, behind *fixture, repo *harne
 
 	front = mergeCreateChild(t, d, repoRef, "front", "front work",
 		&agentreplv1.CreateWorkspaceMergeActions{BeforeWsMerge: said("hold the queue open")})
+	racer = mergeCreateChild(t, d, repoRef, "racer", "racer work",
+		&agentreplv1.CreateWorkspaceMergeActions{BeforeWsMerge: said("hold the race open")})
 	behind = mergeCreateChild(t, d, repoRef, "behind", "behind work", nil)
 
 	harness.CommitWork(t, front.ws.GetDir())
@@ -88,11 +91,20 @@ func mergeBlockedQueueFixture(t *testing.T) (front, behind *fixture, repo *harne
 	// holding the repository's slot.
 	front.shim.ExpectStartTurn()
 
+	// THE MERGE RIGHT BEHIND THE HEAD RACES IT (internal/merge/race.go), so it
+	// is held the same way, in its own pre-prompt: the merge behind it is the
+	// first that truly waits in line, beyond the queue's window.
+	harness.CommitWork(t, racer.ws.GetDir())
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(harness.MergeRequest(racer.ws, harness.OneShot()))); err != nil {
+		t.Fatalf("MergeWorkspace(racer) = error %v, want the merge enqueued", err)
+	}
+	racer.shim.ExpectStartTurn()
+
 	harness.CommitWork(t, behind.ws.GetDir())
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(harness.MergeRequest(behind.ws, harness.OneShot()))); err != nil {
 		t.Fatalf("MergeWorkspace(behind) = error %v, want the merge enqueued", err)
 	}
-	return front, behind, repo, d
+	return front, racer, behind, repo, d
 }
 
 // ---------------------------------------------------------------------------
@@ -102,7 +114,7 @@ func mergeBlockedQueueFixture(t *testing.T) (front, behind *fixture, repo *harne
 func TestUpdateMergeQueuePauseThenResumeToggleTheQueueStateAndRefuseNoOps(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	_, _, repo, d := mergeBlockedQueueFixture(t)
+	_, _, _, repo, d := mergeBlockedQueueFixture(t)
 	// The sweep covers every test; the declared records are evidence of a refusal the test provokes, the merge conflict the test stages.
 	d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab", "daemon.merge.pause", "daemon.merge.unpause")
 	repoRef := mergeRepositoryRef(t, d, repo)
@@ -151,7 +163,7 @@ func TestUpdateMergeQueuePauseThenResumeToggleTheQueueStateAndRefuseNoOps(t *tes
 func TestUpdateMergeQueueEvictRemovesOneWorkspacesQueuedMerge(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	_, behind, _, _ := mergeBlockedQueueFixture(t)
+	_, _, behind, _, _ := mergeBlockedQueueFixture(t)
 	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages, the queued merge the test abandons.
 	behind.d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.drop_queued", "daemon.merge.merge_tab")
 	roster := behind.d.WatchRoster()
@@ -206,7 +218,7 @@ func TestUpdateMergeQueueMoveSwapsTwoWaitingMerges(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			// Arrange: a held merge runs, and two more wait behind it.
-			front, behind, repo, d := mergeBlockedQueueFixture(t)
+			front, racer, behind, repo, d := mergeBlockedQueueFixture(t)
 			// The sweep covers every test; the declared records are evidence of the merge conflict the test stages.
 			d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab")
 			last := mergeCreateChild(t, d, mergeRepositoryRef(t, d, repo), "last", "last work", nil)
@@ -225,10 +237,10 @@ func TestUpdateMergeQueueMoveSwapsTwoWaitingMerges(t *testing.T) {
 				t.Fatalf("UpdateMergeQueue(move) = %v, %v, want a success", resp.Msg, err)
 			}
 
-			// Assert: the queue reads running, then the last merge, then the
-			// one it swapped with.
+			// Assert: the queue reads the two racing merges, then the last merge,
+			// then the one it swapped with.
 			order := durableQueueOrder(t, d)
-			want := []string{front.ws.GetId(), last.ws.GetId(), behind.ws.GetId()}
+			want := []string{front.ws.GetId(), racer.ws.GetId(), last.ws.GetId(), behind.ws.GetId()}
 			if !slices.Equal(order, want) {
 				t.Fatalf("queue = %v, want %v", order, want)
 			}
@@ -244,7 +256,7 @@ func TestUpdateMergeQueueMoveSwapsTwoWaitingMerges(t *testing.T) {
 func TestInterruptOnAQueuedWorkspaceRaisesTheMergeQueueQuestion(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	_, behind, _, _ := mergeBlockedQueueFixture(t)
+	_, _, behind, _, _ := mergeBlockedQueueFixture(t)
 	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages.
 	behind.d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab")
 	roster := behind.d.WatchRoster()
@@ -279,7 +291,7 @@ func TestInterruptOnAQueuedWorkspaceRaisesTheMergeQueueQuestion(t *testing.T) {
 func TestAnswerMergeQueueOfferEvictTakesTheQueuedMergeOff(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	_, behind, _, _ := mergeBlockedQueueFixture(t)
+	_, _, behind, _, _ := mergeBlockedQueueFixture(t)
 	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages, the queued merge the test abandons.
 	behind.d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.drop_queued", "daemon.merge.merge_tab")
 	raiseMergeQueueOffer(t, behind)
@@ -306,7 +318,7 @@ func TestAnswerMergeQueueOfferEvictTakesTheQueuedMergeOff(t *testing.T) {
 func TestAnswerMergeQueueOfferCancelKeepsTheQueuedMergeAndClearsTheQuestion(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	_, behind, _, _ := mergeBlockedQueueFixture(t)
+	_, _, behind, _, _ := mergeBlockedQueueFixture(t)
 	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages.
 	behind.d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab")
 	feed := raiseMergeQueueOffer(t, behind)
@@ -336,7 +348,7 @@ func TestAnswerMergeQueueOfferCancelKeepsTheQueuedMergeAndClearsTheQuestion(t *t
 func TestAnswerMergeQueueOfferPrioritizeRunsTheMergeNext(t *testing.T) {
 	t.Parallel()
 	// Arrange: a held merge runs, and two more wait behind it.
-	front, behind, repo, d := mergeBlockedQueueFixture(t)
+	front, racer, behind, repo, d := mergeBlockedQueueFixture(t)
 	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages.
 	d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab")
 	last := mergeCreateChild(t, d, mergeRepositoryRef(t, d, repo), "last", "last work", nil)
@@ -355,10 +367,10 @@ func TestAnswerMergeQueueOfferPrioritizeRunsTheMergeNext(t *testing.T) {
 		t.Fatalf("AnswerMergeQueueOffer(prioritize) = %v, %v, want a success", resp.Msg, err)
 	}
 
-	// Assert: the queue reads the running merge, then the prioritized one,
-	// then the one it passed.
+	// Assert: the queue reads the two racing merges, then the prioritized
+	// one, then the one it passed.
 	order := durableQueueOrder(t, d)
-	if want := []string{front.ws.GetId(), last.ws.GetId(), behind.ws.GetId()}; !slices.Equal(order, want) {
+	if want := []string{front.ws.GetId(), racer.ws.GetId(), last.ws.GetId(), behind.ws.GetId()}; !slices.Equal(order, want) {
 		t.Fatalf("queue = %v, want %v", order, want)
 	}
 }
@@ -438,7 +450,7 @@ func raiseMergeQueueOffer(t *testing.T, f *fixture) *harness.Stream[*frontendv1.
 func TestKillingAWorkspaceAbandonsItsQueuedMergeWithTheCloseAsTheCause(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	_, behind, _, _ := mergeBlockedQueueFixture(t)
+	_, _, behind, _, _ := mergeBlockedQueueFixture(t)
 	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages, the queued merge the kill abandons, a KillSession the fake shim answers by exiting, a session fault the kill opens, the shim death and severed link the kill drives.
 	//
 	// daemon.shimclient.redial belongs to that same kill: the fake answers
@@ -1614,7 +1626,7 @@ func TestAQueuedMergeWhoseSessionParksAtItsColdGateLeavesTheQueue(t *testing.T) 
 	t.Parallel()
 	// Arrange: behind waits in line; the daemon restarts, and behind's
 	// resume is scripted cold.
-	_, behind, _, d := mergeBlockedQueueFixture(t)
+	_, _, behind, _, d := mergeBlockedQueueFixture(t)
 	// The sweep covers every test; the declared records are evidence of the restart under test.
 	expectSessionKillRecords(d)
 	// PAUSED, so nothing the restart cuts can let behind run before its

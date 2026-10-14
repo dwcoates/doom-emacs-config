@@ -916,7 +916,7 @@ func TestUpdateMergeQueueEvictWhileTheQuestionStandsClearsIt(t *testing.T) {
 	t.Parallel()
 	// Arrange: a second workspace queued behind the first's blocked merge,
 	// then an interrupt raises the question.
-	_, behind, _, d := mergeBlockedQueueFixture(t)
+	_, _, behind, _, d := mergeBlockedQueueFixture(t)
 	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages, the queued merge the test abandons.
 	d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.drop_queued", "daemon.merge.merge_tab")
 	raiseMergeQueueOffer(t, behind)
