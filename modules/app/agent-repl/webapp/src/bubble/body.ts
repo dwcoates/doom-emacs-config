@@ -14,7 +14,7 @@
  */
 import { createConnectHookElement, type ConnectHookElement } from "../connect-hook.js";
 import { log } from "../log.js";
-import { inline, hasFencedTree, renderMarkdown, type NewlineRendering, type TreeCols } from "../markdown.js";
+import { inline, hasFencedTree, renderMarkdown, type TreeCols } from "../markdown.js";
 import { findTreeRegion, renderTreeHtml, type TreeIssue } from "../metaprompt-tree.js";
 import { computedPx, pageResizeObserver, placeChildren, scrollbarWidthPx } from "../dom.js";
 import { onDiscard, stopTicking } from "../feed/ticking.js";
@@ -36,11 +36,11 @@ const logTreeIssue: TreeIssue = (message, context) => {
  * the same COLS — so a model that wrapped the tree in a sentence still reads
  * correctly. COLS is asked for only when a tree is actually drawn.
  */
-export function proseHtml(markdown: string, cols: TreeCols, newlines: NewlineRendering = "break"): string {
+export function proseHtml(markdown: string, cols: TreeCols): string {
   const region = findTreeRegion(markdown);
-  if (region === null) return renderMarkdown(markdown, cols, newlines);
-  const before = region.before.trim() === "" ? "" : renderMarkdown(region.before, cols, newlines);
-  const after = region.after.trim() === "" ? "" : renderMarkdown(region.after, cols, newlines);
+  if (region === null) return renderMarkdown(markdown, cols);
+  const before = region.before.trim() === "" ? "" : renderMarkdown(region.before, cols);
+  const after = region.after.trim() === "" ? "" : renderMarkdown(region.after, cols);
   return `${before}<div class="mp-tree">${renderTreeHtml(region.tree, inline, cols(), logTreeIssue)}</div>${after}`;
 }
 
@@ -255,14 +255,8 @@ interface Painter {
 /** Every body's painter, armed once when the body is created. */
 const painters = new WeakMap<Element, Painter>();
 
-/** What a markdown slot paints: its markdown, and what a newline in it draws as. */
-interface SlotSource {
-  markdown: string;
-  newlines: NewlineRendering;
-}
-
 /** Every markdown slot's source, held beside the element it paints. */
-const slotSources = new WeakMap<Element, SlotSource>();
+const slotSources = new WeakMap<Element, string>();
 
 /** A fresh bubble body, the custom element defined on first use, its painter armed. */
 export function createBubbleBody(): BubbleBody {
@@ -279,26 +273,13 @@ export function createBubbleBody(): BubbleBody {
  * every tree in every bubble is wrapped by the metaprompt engine at the
  * bubble's own cap. A slot is an ordinary element (CLASSNAME is the kind's), so
  * a kind can nest it in whatever structure it draws around its prose.
- * NEWLINES is what a single newline draws as (see `NewlineRendering`): text a
- * person typed is a `typedTextSlot`, every other kind's prose keeps markdown's
- * `<br>`.
  */
-export function markdownSlot(className: string, markdown: string, newlines: NewlineRendering = "break"): HTMLElement {
+export function markdownSlot(className: string, markdown: string): HTMLElement {
   const slot = document.createElement("div");
   slot.className = className;
   slot.setAttribute(MARKDOWN_SLOT_ATTRIBUTE, "");
-  slotSources.set(slot, { markdown, newlines });
+  slotSources.set(slot, markdown);
   return slot;
-}
-
-/**
- * A markdown slot for text a PERSON typed — a prompt's words, in the feed or
- * held: each typed line is its own paragraph, so a prompt's newlines are
- * spaced exactly as a response's paragraphs are. Every prompt kind draws its
- * words through this one function, so the prompt bubbles cannot drift apart.
- */
-export function typedTextSlot(className: string, text: string): HTMLElement {
-  return markdownSlot(className, text, "paragraph");
 }
 
 /**
@@ -407,7 +388,7 @@ export function whenSlotPainted(slot: HTMLElement, fn: () => void): void {
 }
 
 /** The source SLOT paints, which every slot has from its making. */
-function sourceOf(slot: Element): SlotSource {
+function sourceOf(slot: Element): string {
   const source = slotSources.get(slot);
   if (source === undefined) {
     invariant("a markdown slot carries no source", { slot: slot.className });
@@ -469,8 +450,7 @@ function armPainter(body: BubbleBody): Painter {
   const draw = (targets: readonly HTMLElement[]): void => {
     for (const slot of targets) {
       const target = document.createElement("div");
-      const source = sourceOf(slot);
-      target.innerHTML = proseHtml(source.markdown, budget, source.newlines);
+      target.innerHTML = proseHtml(sourceOf(slot), budget);
       // The reconcile compares whole text with whole text, so a revealing slot
       // is restored first and cut again after (`revealSlot`).
       clearTextReveal(slot);
@@ -484,7 +464,7 @@ function armPainter(body: BubbleBody): Painter {
     }
   };
   const drawsTree = (): boolean => body.querySelector(".mp-tree") !== null;
-  const needsWidth = (): boolean => slots().some((slot) => proseNeedsWidth(sourceOf(slot).markdown));
+  const needsWidth = (): boolean => slots().some((slot) => proseNeedsWidth(sourceOf(slot)));
   const laidOut = (): boolean =>
     body.isConnected && requireBubble(body).getClientRects().length > 0;
   const watch = (): void => {
