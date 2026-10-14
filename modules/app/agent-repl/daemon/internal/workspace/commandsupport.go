@@ -35,33 +35,13 @@ func (v *verbs) RequestCommandSupport(ctx context.Context, ws ids.WorkspaceID, c
 			"no command was named", false)
 	}
 
-	brief, err := v.load(v.deps.PromptsDir, BriefAddSupport)
-	if err != nil {
-		log.Error(opCommandSupport, "could not read the add-support brief", dlog.Context{
-			"brief": BriefAddSupport, "cause": err.Error(),
-		})
-		v.raisePromptsFault(ctx, log, fmt.Sprintf("the %s brief is unreadable: %v", BriefAddSupport, err))
-		return wsm.Workspace{}, refuse(log, "RequestCommandSupport", ArmBriefMissing,
-			fmt.Sprintf("the %s brief is unreadable: %v", BriefAddSupport, err), false)
-	}
-	prompt, err := v.splice(brief, map[string]string{
+	prompt, err := v.composeBrief(ctx, log, opCommandSupport, BriefAddSupport, map[string]string{
 		"command":     command,
 		"config_root": v.deps.Accounts.ConfigDirFor(record.Dir),
 	})
 	if err != nil {
-		log.Error(opCommandSupport, "could not splice the add-support brief", dlog.Context{
-			"brief": BriefAddSupport, "cause": err.Error(),
-		})
-		v.raisePromptsFault(ctx, log, fmt.Sprintf("the %s brief will not splice: %v", BriefAddSupport, err))
-		return wsm.Workspace{}, refuse(log, "RequestCommandSupport", ArmBriefMissing,
-			fmt.Sprintf("the %s brief will not splice: %v", BriefAddSupport, err), false)
+		return wsm.Workspace{}, refuse(log, "RequestCommandSupport", ArmBriefMissing, err.Error(), false)
 	}
-
-	// THE FAULT CLOSES HERE. The brief just read and spliced, so the
-	// condition prompts_dir_missing records — this daemon's prompts directory
-	// cannot furnish a brief — no longer holds. A fault that only ever opens
-	// is not a record of a condition; it is a one-way trip.
-	v.clearPromptsFault(ctx, log)
 
 	repoDir, err := v.repoDirOf(ctx, record)
 	if err != nil {
