@@ -110,6 +110,21 @@ function declarationsOf(selector: string): string | undefined {
   return rulesOf(stylesheet).find((rule) => rule.selectors.includes(selector))?.declarations;
 }
 
+/** The declarations of the first rule whose selector list is SELECTOR alone. */
+function ownDeclarationsOf(selector: string): string | undefined {
+  return rulesOf(stylesheet).find((rule) => rule.selectors.length === 1 && rule.selectors[0] === selector)
+    ?.declarations;
+}
+
+/**
+ * The one-line clamp's shared shape (styles.css "THE ONE-LINE CLAMP'S SHAPE"):
+ * the selectors of the one rule both clamps' shape is declared in.
+ */
+const CLAMP_SHAPE_SELECTORS = [
+  ".title-fold",
+  '.bubble[data-more="ellipsis"] > .bubble-scroll:not(.expanded) > .bubble-body',
+];
+
 /**
  * The border declarations every non-base rule a bubble so marked matches sets,
  * in source order: the cascade asked as a bubble with those attributes and hook
@@ -741,7 +756,7 @@ describe("the ellipsis instead of the fade", () => {
 
   it("clamps it at the bubble's own line cap", () => {
     // Arrange / Act
-    const rule = declarationsOf(CLAMP) ?? "";
+    const rule = ownDeclarationsOf(CLAMP) ?? "";
     // Assert
     expect(rule).toMatch(/-webkit-line-clamp:\s*var\(--bubble-cap-lines\)\s*;/);
   });
@@ -2092,6 +2107,51 @@ describe("the card-level tool fold", () => {
  * (`.tool-fold:not(.expanded) > .bash-input` and its three siblings), which had
  * no fade; the input line is now one of the title fold's sites.
  */
+describe("the one-line clamp's shared shape", () => {
+  /** The one rule whose selector list is exactly CLAMP_SHAPE_SELECTORS. */
+  const shapeRule = (): string | undefined =>
+    rulesOf(stylesheet).find(
+      (r) => r.selectors.length === CLAMP_SHAPE_SELECTORS.length && CLAMP_SHAPE_SELECTORS.every((sel) => r.selectors.includes(sel)),
+    )?.declarations;
+
+  it("is one rule naming both clamps", () => {
+    // Arrange / Act
+    const rule = shapeRule();
+
+    // Assert
+    expect(rule).toBeDefined();
+  });
+
+  it("lays both clamps out as a vertical box", () => {
+    // Arrange / Act
+    const rule = shapeRule() ?? "";
+
+    // Assert
+    expect([/display:\s*-webkit-box\s*;/.test(rule), /-webkit-box-orient:\s*vertical\s*;/.test(rule)]).toEqual([true, true]);
+  });
+
+  it("hides what both clamps drop", () => {
+    // Arrange / Act
+    const rule = shapeRule() ?? "";
+
+    // Assert
+    expect(rule).toMatch(/overflow:\s*hidden\s*;/);
+  });
+
+  it("is the only rule stating the shape for either clamp", () => {
+    // Arrange / Act — any other rule re-declaring the box on one clamp alone.
+    const handRolled = rulesOf(stylesheet).filter(
+      (r) =>
+        r.selectors.length === 1 &&
+        CLAMP_SHAPE_SELECTORS.includes(r.selectors[0] ?? "") &&
+        /display:\s*-webkit-box|-webkit-box-orient/.test(r.declarations),
+    );
+
+    // Assert
+    expect(handRolled).toEqual([]);
+  });
+});
+
 describe("the title fold", () => {
   /** The title-level classes a card draws its title line with. */
   const TITLE_CLASSES = [
@@ -2106,11 +2166,11 @@ describe("the title fold", () => {
 
   it("caps a collapsed title at one text row", () => {
     // Arrange / Act
-    const rule = declarationsOf(".title-fold");
+    const rule = ownDeclarationsOf(".title-fold");
 
     // Assert
     expect(rule).toMatch(/-webkit-line-clamp:\s*1\s*;/);
-    expect(rule).toMatch(/overflow:\s*hidden/);
+    expect(declarationsOf(".title-fold")).toMatch(/overflow:\s*hidden/);
   });
 
   it("clamps as a vertical box, the shape that makes the engine write the ellipsis", () => {
@@ -2124,7 +2184,7 @@ describe("the title fold", () => {
 
   it("drops each title line's own preview cap so one row is the only limit", () => {
     // Arrange / Act
-    const rule = declarationsOf(".title-fold");
+    const rule = ownDeclarationsOf(".title-fold");
 
     // Assert
     expect(rule).toMatch(/max-height:\s*none/);
