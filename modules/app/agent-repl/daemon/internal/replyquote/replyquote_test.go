@@ -7,6 +7,8 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+
+	"agent-repld/internal/sourcescan"
 )
 
 // text is a text block.
@@ -53,6 +55,44 @@ func TestFence(t *testing.T) {
 				t.Fatalf("Fence(%q) = %q, want %q", tc.quoted, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestFenced(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want string
+	}{
+		{name: "plain text sits inside the shortest fence", text: "boom", want: "```\nboom\n```"},
+		{name: "a fence inside the text gets a longer one around it", text: "```go\nx\n```", want: "````\n```go\nx\n```\n````"},
+		{name: "empty text is still fenced", text: "", want: "```\n\n```"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the cases.
+
+			// Act
+			got := Fenced(tt.text)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("Fenced(%q) = %q, want %q", tt.text, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestEveryFenceInThePackageIsComposedByFenced pins that the package's quote
+// composes its fence through Fenced: a second hand-built fence-text-fence
+// would drift from it (another separator, a fence one short).
+func TestEveryFenceInThePackageIsComposedByFenced(t *testing.T) {
+	// Arrange / Act
+	calls := sourcescan.Count(t, "Fence(")
+
+	// Assert: Fence's own definition and Fenced's one call of it.
+	if calls != 2 {
+		t.Fatalf("Fence( occurs %d times in the package, want 2: its definition and Fenced's one call", calls)
 	}
 }
 
