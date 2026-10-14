@@ -3643,6 +3643,130 @@ describe("the keep-alive rewind between beats", () => {
 });
 
 /**
+ * A REWIND NEVER MEETS LIVE DETACHED WORK (owner ruling, 2026-10-14).
+ *
+ * A rewind replaces the vendor's query, and every background shell or agent
+ * the old process ran dies with it. So the cadence sends no keep-alive while
+ * any detached work is live, and a rewind that meets live work anyway is a
+ * violated invariant, logged at ERROR before it proceeds.
+ */
+describe("the keep-alive spares live detached work", () => {
+  /** The ERROR a rewind meeting live detached work is recorded under. */
+  const VIOLATED =
+    "INVARIANT VIOLATED: a keep-alive rewind is about to replace the vendor query while detached work is live; the replaced process ends that work";
+
+  /** A real turn that leaves a background shell running past its result. */
+  async function turnLeavingShell(h: Harness, turnId: string): Promise<void> {
+    await realPrompt(h, turnId);
+    await vendorRunsLive(h, "toolu_watch", "local_bash");
+    await h.engine.onSdkMessage(answering(h, assistantMessage(`${turnId}-reply`)));
+    await h.engine.onSdkMessage(answering(h, resultMessage(`${turnId}-result-uuid`)));
+  }
+
+  /** The vendor's level, stating nothing live: the last item ended. */
+  const nothingLive = (): SdkMessage =>
+    ({ type: "system", subtype: "background_tasks_changed", tasks: [], uuid: "level-empty", session_id: "s" }) as never;
+
+  it("schedules no keep-alive when a turn ends with its background shell still live", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+
+    // Act
+    await turnLeavingShell(h, "turn-0");
+
+    // Assert
+    expect(h.scheduler.pendingTimeout()).toBeUndefined();
+  });
+
+  it("schedules the keep-alive again once the last detached item ends", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await turnLeavingShell(h, "turn-0");
+
+    // Act
+    await h.engine.onSdkMessage(nothingLive());
+
+    // Assert
+    expect(h.scheduler.pendingTimeout()).toBeDefined();
+  });
+
+  it("replaces no query across what used to be a rewind while the shell is live", async () => {
+    // Arrange: a keep-alive has run since the anchor, so the next beat would owe a rewind.
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
+    await keepaliveTurn(h, []);
+    await turnLeavingShell(h, "turn-1");
+    const opened = h.queries.length;
+
+    // Act: the interval passes, with nothing scheduled to fire.
+    h.scheduler.fireTimeout();
+    await drainTurns();
+
+    // Assert
+    expect([h.queries.length, h.scheduler.pendingTimeout()]).toEqual([opened, undefined]);
+  });
+
+  it("logs an ERROR naming the live work when a rewind is about to run over it", async () => {
+    // Arrange: work the vendor reports live outside any real turn, the state
+    // the design makes impossible, with a keep-alive owed a rewind.
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
+    await keepaliveTurn(h, []);
+    await vendorRunsLive(h, "toolu_stray", "local_bash");
+    const mark = logSinkMark();
+
+    // Act
+    await realPrompt(h, "turn-1");
+
+    // Assert
+    const record = logRecordsSince(mark).find((entry) => entry.message === VIOLATED);
+    expect([
+      record?.level,
+      record?.context.resume_session_at,
+      (record?.context.detached_work as { tool_use_id: string }[] | undefined)?.map((item) => item.tool_use_id),
+    ]).toEqual(["error", "real-uuid", ["toolu_stray"]]);
+  });
+
+  it("still performs the rewind after logging the violated invariant", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
+    await keepaliveTurn(h, []);
+    await vendorRunsLive(h, "toolu_stray", "local_bash");
+    const opened = h.queries.length;
+
+    // Act
+    await realPrompt(h, "turn-1");
+
+    // Assert
+    expect([h.queries.length, h.queries.at(-1)?.spec.resumeSessionAt]).toEqual([opened + 1, "real-uuid"]);
+  });
+
+  it("logs no violation for a rewind with nothing live", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
+    await keepaliveTurn(h, []);
+    const mark = logSinkMark();
+
+    // Act
+    await realPrompt(h, "turn-1");
+
+    // Assert
+    expect([
+      logRecordsSince(mark).filter((entry) => entry.message === VIOLATED),
+      h.queries.at(-1)?.spec.resumeSessionAt,
+    ]).toEqual([[], "real-uuid"]);
+  });
+});
+
+/**
  * THE REWIND'S SPAN INVARIANT, end to end through the engine.
  *
  * Before any rewind discards anything, every turn between the anchor and now

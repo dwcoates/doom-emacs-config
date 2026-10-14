@@ -70,6 +70,20 @@ const RECLASSIFIED_SITES: readonly ExpectedSite[] = [
       "the prompt the refused rewind was carrying was RE-DELIVERED on a plain resume; it was not lost",
     level: "info",
   },
+  // A REWIND NEVER MEETS LIVE DETACHED WORK (2026-10-14): the cadence's spare
+  // is visible at INFO, and a rewind that meets live work anyway is a violated
+  // invariant at ERROR, since the replaced process ends that work.
+  {
+    file: "engine/keepalive.ts",
+    message: "no keep-alive is scheduled: detached work is live, and the rewind a keep-alive owes would kill it",
+    level: "info",
+  },
+  {
+    file: "engine/session.ts",
+    message:
+      "INVARIANT VIOLATED: a keep-alive rewind is about to replace the vendor query while detached work is live; the replaced process ends that work",
+    level: "error",
+  },
   {
     file: "engine/keepalive.ts",
     message:
