@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	storev1 "agentrepl/proto/store/v1"
 )
 
 // clearEnvelope is what the harness ACTUALLY writes for `/clear`. The literal
@@ -436,10 +438,10 @@ func TestASummaryBehindTheAttachmentChainInALaterBatchSupersedesThePlaceholder(t
 		chainedSummaryLine("a3", "the story so far"))
 
 	// Assert.
-	if got := frameOf(entryByKey(t, entries, SessionKey("context_cut", "b1"))).GetUpdate().GetContextCut().GetCompacted().GetSummary().GetMarkdown(); got != NoSummaryWritten {
+	if got := cutSummary(t, entries, "b1"); got != NoSummaryWritten {
 		t.Fatalf("first batch's cut = %q, want the placeholder", got)
 	}
-	if got := frameOf(entryByKey(t, later, SessionKey("context_cut", "b1"))).GetUpdate().GetContextCut().GetCompacted().GetSummary().GetMarkdown(); got != "the story so far" {
+	if got := cutSummary(t, later, "b1"); got != "the story so far" {
 		t.Fatalf("later batch's cut = %q, want the summary superseding the placeholder", got)
 	}
 }
@@ -458,7 +460,7 @@ func TestASummaryNotDescendingFromTheBoundaryIsNotItsSummary(t *testing.T) {
 		chainedSummaryLine("elsewhere", "someone else's history"))
 
 	// Assert.
-	if got := frameOf(entryByKey(t, entries, SessionKey("context_cut", "b1"))).GetUpdate().GetContextCut().GetCompacted().GetSummary().GetMarkdown(); got != NoSummaryWritten {
+	if got := cutSummary(t, entries, "b1"); got != NoSummaryWritten {
 		t.Fatalf("summary = %q, want the placeholder left standing", got)
 	}
 }
@@ -507,4 +509,11 @@ func TestAwaitsCompactSummaryNamesTheBoundaryTheBatchCannotSettle(t *testing.T) 
 			}
 		})
 	}
+}
+
+// cutSummary is the summary the compaction cut of boundary UUID carries in
+// ENTRIES.
+func cutSummary(t *testing.T, entries []*storev1.StoreEntry, uuid string) string {
+	t.Helper()
+	return frameOf(entryByKey(t, entries, SessionKey("context_cut", uuid))).GetUpdate().GetContextCut().GetCompacted().GetSummary().GetMarkdown()
 }

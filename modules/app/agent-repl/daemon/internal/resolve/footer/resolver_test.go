@@ -284,7 +284,7 @@ func TestAContextCutEndsItsActButNotItsTurn(t *testing.T) {
 		{
 			name:    "a /clear turn",
 			arrange: func(h *harness) { h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActClear}) },
-			cut:     &conversationv1.ContextCut{Cut: &conversationv1.ContextCut_Cleared{Cleared: &conversationv1.ContextCleared{}}},
+			cut:     clearedCut(),
 		},
 		{
 			name: "an auto-compaction inside a prompt's turn",
@@ -330,7 +330,7 @@ func TestADirectiveTurnEndsAtItsTerminalAfterItsCut(t *testing.T) {
 		cut  *conversationv1.ContextCut
 	}{
 		{name: "a /compact turn", act: ActCompact, cut: compactedCut()},
-		{name: "a /clear turn", act: ActClear, cut: &conversationv1.ContextCut{Cut: &conversationv1.ContextCut_Cleared{Cleared: &conversationv1.ContextCleared{}}}},
+		{name: "a /clear turn", act: ActClear, cut: clearedCut()},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -982,9 +982,7 @@ func TestTheActivityLineIsRecordedWhenItChanges(t *testing.T) {
 			name: "a line cleared",
 			act: func(h *harness) {
 				h.r.OnSessionUpdate(testWS, vendorCompacting())
-				h.r.OnContextCut(testWS, mainAgent, &conversationv1.ContextCut{
-					Cut: &conversationv1.ContextCut_Compacted{Compacted: &conversationv1.ContextCompacted{}},
-				})
+				h.r.OnContextCut(testWS, mainAgent, compactedCut())
 			},
 			want: map[string]any{
 				"arm": "working", "kind": "enduring", "text": "",

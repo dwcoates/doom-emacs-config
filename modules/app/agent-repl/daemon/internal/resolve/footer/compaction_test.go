@@ -316,6 +316,13 @@ func compactedCut() *conversationv1.ContextCut {
 	}
 }
 
+// clearedCut is the context cut a /clear leaves.
+func clearedCut() *conversationv1.ContextCut {
+	return &conversationv1.ContextCut{
+		Cut: &conversationv1.ContextCut_Cleared{Cleared: &conversationv1.ContextCleared{}},
+	}
+}
+
 // recordsOf answers every record of one operation.
 func recordsOf(records []dlog.Record, operation string) []dlog.Record {
 	return dlog.FilterRecords(records, dlog.RecordQuery{Operation: operation})

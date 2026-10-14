@@ -65,15 +65,7 @@ func decode(t *testing.T, line string) map[string]any {
 // the same converter first.
 func convertLines(t *testing.T, c *Converter, lines ...string) []*storev1.StoreEntry {
 	t.Helper()
-	records := make([]map[string]any, len(lines))
-	for i, line := range lines {
-		records[i] = decode(t, line)
-	}
-	var out []*storev1.StoreEntry
-	for i, record := range records {
-		out = append(out, c.Line(record, testAttribution(int64(i*1000)), records[i+1:])...)
-	}
-	return out
+	return convertLinesFrom(t, c, 0, lines...)
 }
 
 // convertLinesFrom is convertLines with the reader JOINING THE FILE at
