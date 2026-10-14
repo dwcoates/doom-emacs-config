@@ -492,6 +492,122 @@ func TestOpenTabMakesTheRoundTheActiveOne(t *testing.T) {
 	}
 }
 
+// tabFailureRecords answers the harness's records of OP above DEBUG: a tab
+// write's failure, never the DEBUG "opened a merge tab" beside it.
+func tabFailureRecords(h *harness, op string) []dlog.Record {
+	var out []dlog.Record
+	for _, rec := range h.logs.Records() {
+		if rec.Operation == op && rec.Level != "debug" {
+			out = append(out, rec)
+		}
+	}
+	return out
+}
+
+// TestATabRecordFailureIsLeveledByItsCause covers the one classification both
+// tab writes share: a write the run's context ended under is INFO, any other
+// failure ERROR, each naming the tab, its round and the cause.
+func TestATabRecordFailureIsLeveledByItsCause(t *testing.T) {
+	tests := []struct {
+		name      string
+		err       error
+		close     bool
+		wantOp    string
+		wantLevel string
+	}{
+		{name: "an open cut by the context's end", err: fmt.Errorf("wsm: begin transaction: %w", context.Canceled), wantOp: "daemon.merge.tab_open", wantLevel: "info"},
+		{name: "an open the store refused", err: errors.New("database is locked"), wantOp: "daemon.merge.tab_open", wantLevel: "error"},
+		{name: "a close cut by the context's end", err: fmt.Errorf("wsm: begin transaction: %w", context.Canceled), close: true, wantOp: "daemon.merge.tab_close", wantLevel: "info"},
+		{name: "a close the store refused", err: errors.New("database is locked"), close: true, wantOp: "daemon.merge.tab_close", wantLevel: "error"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			r := ledgeredRun(t, h)
+			var round tabRound
+			if tt.close {
+				round = r.openTab(context.Background(), TabTests)
+			}
+			h.db.tabErr = tt.err
+
+			// Act.
+			if tt.close {
+				r.closeTab(context.Background(), round, "failed")
+			} else {
+				round = r.openTab(context.Background(), TabTests)
+			}
+
+			// Assert.
+			recs := tabFailureRecords(h, tt.wantOp)
+			if len(recs) != 1 {
+				t.Fatalf("records of %s = %+v, want exactly one", tt.wantOp, recs)
+			}
+			rec := recs[0]
+			if rec.Level != tt.wantLevel || rec.Context["tab"] != TabTests || rec.Context["round"] != round.n || rec.Context["error"] != tt.err.Error() {
+				t.Fatalf("record = %+v, want %s naming tab %s round %d and the cause", rec, tt.wantLevel, TabTests, round.n)
+			}
+		})
+	}
+}
+
+// TestACloseThatFailedToRecordLeavesTheRoundOpen covers the invariant
+// openRounds states: a round whose end was not recorded is still open.
+func TestACloseThatFailedToRecordLeavesTheRoundOpen(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	r := ledgeredRun(t, h)
+	round := r.openTab(context.Background(), TabTests)
+	h.db.tabErr = context.Canceled
+
+	// Act.
+	r.closeTab(context.Background(), round, "failed")
+
+	// Assert.
+	if _, open := r.openRounds[round.key()]; !open {
+		t.Fatalf("open rounds = %+v, want %s still open", r.openRounds, round.key())
+	}
+}
+
+// TestAnAbandonClosesARoundWhoseCloseWasCut covers the ledger gap the
+// invariant closes: an abandon that cut a close short still ends its interval.
+func TestAnAbandonClosesARoundWhoseCloseWasCut(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	r := ledgeredRun(t, h)
+	round := r.openTab(context.Background(), TabTests)
+	h.db.tabErr = context.Canceled
+	r.closeTab(context.Background(), round, "failed")
+	h.db.tabErr = nil
+
+	// Act.
+	r.closeOpenRounds(context.Background(), "abandoned")
+
+	// Assert.
+	intervals := ledgerIntervals(h)
+	closed := intervals[len(intervals)-1]
+	if closed.EndedAt == nil || closed.Outcome != "abandoned" || closed.Round != round.n {
+		t.Fatalf("the last interval is %+v, want round %d ended as abandoned", closed, round.n)
+	}
+}
+
+// TestARecordedCloseLeavesTheOpenRounds covers the other half: a close that
+// recorded its end takes the round out, so nothing closes it twice.
+func TestARecordedCloseLeavesTheOpenRounds(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	r := ledgeredRun(t, h)
+	round := r.openTab(context.Background(), TabTests)
+
+	// Act.
+	r.closeTab(context.Background(), round, "succeeded")
+
+	// Assert.
+	if _, open := r.openRounds[round.key()]; open {
+		t.Fatalf("open rounds = %+v, want %s closed", r.openRounds, round.key())
+	}
+}
+
 // TestCloseTabRecordsTheRoundsOwnStart covers the interval's close: it keeps
 // the start the round opened with, so the ledger's span and the tab's drawn
 // run time agree.
