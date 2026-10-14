@@ -73,13 +73,7 @@ func TestAnInPlaceHandbackWhoseWorkspaceCannotBeReadIsAnError(t *testing.T) {
 	if sent := h.detached.sent(); len(sent) != 0 {
 		t.Fatalf("handbacks = %+v, want none", sent)
 	}
-	found := false
-	for _, r := range h.logs.Records() {
-		if r.Level == "error" && r.Operation == "daemon.merge.handback" {
-			found = true
-		}
-	}
-	if !found {
+	if !loggedLike(h, logLike{level: "error", op: "daemon.merge.handback"}) {
 		t.Fatal("the unreadable workspace was not recorded at ERROR")
 	}
 }
