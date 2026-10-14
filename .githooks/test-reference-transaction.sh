@@ -342,7 +342,7 @@ test_committed_by_a_descendant_without_the_marker_is_journaled() {
   register "$repo" run-a "$$"
   attempt "$repo" commit_on_feature_tx committed
 
-  if [ "$RUN_RC" -eq 0 ] && journal_of "$repo" "$REGISTERED" | grep -q "^$BASE $NEXT refs/heads/feature pid=[0-9]* by=ancestry cwd=$repo\$"; then
+  if [ "$RUN_RC" -eq 0 ] && grep_in "$(journal_of "$repo" "$REGISTERED")" -q "^$BASE $NEXT refs/heads/feature pid=[0-9]* by=ancestry cwd=$repo\$"; then
     pass "a git descending from a run's root is journaled by ancestry, with no marker"
   else
     fail "a git descending from a run's root is journaled by ancestry, with no marker" "exit=$RUN_RC" "$RUN_OUT" "$(journal_of "$repo" "$REGISTERED")"
@@ -422,7 +422,7 @@ test_a_tag_through_git_lands_in_the_journal() {
   register "$repo" run-a "$NOT_AN_ANCESTOR"
   AGENT_REPL_SAFE_TEST_RUN="$REGISTERED" git -C "$repo" tag v1 "$head"
 
-  if journal_of "$repo" "$REGISTERED" | grep -q "^0000000000000000000000000000000000000000 $head refs/tags/v1 pid=[0-9]* by=marker " &&
+  if grep_in "$(journal_of "$repo" "$REGISTERED")" -q "^0000000000000000000000000000000000000000 $head refs/tags/v1 pid=[0-9]* by=marker " &&
     grep -q "^refs/tags/v1 $head\$" "$repo/.fakegit/refs"; then
     pass "a tag a run's git makes lands, and its committed transaction is journaled"
   else
