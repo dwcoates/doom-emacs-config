@@ -3,9 +3,13 @@
 package integration
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/integration/harness"
@@ -51,4 +55,55 @@ func mergeBlockedRepoOn(t *testing.T, d *harness.Daemon, namePrefix string) (fro
 		t.Fatalf("MergeWorkspace(%s behind) = error %v, want the merge enqueued", namePrefix, err)
 	}
 	return front, behind, repo, repoRef
+}
+
+// isMergeTerminal reports whether a feed row is a merge bubble's terminal:
+// its head landed (success) or ended in error. It is the one predicate every
+// test awaiting a merge's end reads.
+func isMergeTerminal(row *frontendv1.FeedRow) bool {
+	m := row.GetActivity().GetMerge()
+	return m.GetSuccess() != nil || m.GetError() != nil
+}
+
+func TestIsMergeTerminalReadsALandingOrAnErrorAndNothingElse(t *testing.T) {
+	tests := []struct {
+		name string
+		row  *frontendv1.FeedRow
+		want bool
+	}{
+		{name: "landed", row: &frontendv1.FeedRow{Row: &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{
+			Unit: &frontendv1.FeedTurnActivity_Merge{Merge: &frontendv1.FeedMerge{Result: &frontendv1.FeedMerge_Success{Success: &frontendv1.FeedMergeSuccess{}}}}}}}, want: true},
+		{name: "errored", row: &frontendv1.FeedRow{Row: &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{
+			Unit: &frontendv1.FeedTurnActivity_Merge{Merge: &frontendv1.FeedMerge{Result: &frontendv1.FeedMerge_Error{Error: &frontendv1.FeedMergeError{}}}}}}}, want: true},
+		{name: "running", row: &frontendv1.FeedRow{Row: &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{
+			Unit: &frontendv1.FeedTurnActivity_Merge{Merge: &frontendv1.FeedMerge{}}}}}, want: false},
+		{name: "no merge", row: &frontendv1.FeedRow{}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act / Assert.
+			if got := isMergeTerminal(tt.row); got != tt.want {
+				t.Fatalf("isMergeTerminal = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEveryAwaitOfAMergesEndReadsIsMergeTerminal(t *testing.T) {
+	// Arrange.
+	files, err := filepath.Glob("*_test.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range files {
+		body, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("reading %s: %v", file, err)
+		}
+
+		// Act / Assert: the predicate is spelled once, in isMergeTerminal.
+		if n := strings.Count(string(body), "GetSuccess() != nil || m.GetError() != nil") + strings.Count(string(body), "GetMerge().GetSuccess() != nil || row.GetActivity().GetMerge().GetError() != nil"); n > 0 && file != "support_merge_test.go" {
+			t.Fatalf("%s spells a merge's end by hand %d times instead of isMergeTerminal", file, n)
+		}
+	}
 }

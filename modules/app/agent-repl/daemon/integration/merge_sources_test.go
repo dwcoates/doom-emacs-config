@@ -57,10 +57,7 @@ func (s *sourcedRepo) mergeAs(t *testing.T, mode harness.MergeMode) {
 // awaitConcluded waits for the fixture bubble's terminal and answers it.
 func (s *sourcedRepo) awaitConcluded(t *testing.T, root *harness.Stream[*frontendv1.FeedRow]) *frontendv1.FeedMerge {
 	t.Helper()
-	row := awaitRow(t, s.f, root, "the merge's terminal", func(row *frontendv1.FeedRow) bool {
-		m := row.GetActivity().GetMerge()
-		return m.GetSuccess() != nil || m.GetError() != nil
-	})
+	row := awaitRow(t, s.f, root, "the merge's terminal", isMergeTerminal)
 	return row.GetActivity().GetMerge()
 }
 
@@ -325,10 +322,7 @@ func TestATargetThatMovedBeforeCommittingStartsTheMergeOver(t *testing.T) {
 	s.script.SetExitCode(0)
 	s.script.SetStdout("daemon: starting\ndaemon: passed in 1s\n")
 	pushConcludedTurn(s.f.shim, mainAgent, "fixed")
-	row := awaitRow(t, s.f, root, "the merge's terminal", func(row *frontendv1.FeedRow) bool {
-		m := row.GetActivity().GetMerge()
-		return m.GetSuccess() != nil || m.GetError() != nil
-	})
+	row := awaitRow(t, s.f, root, "the merge's terminal", isMergeTerminal)
 	merge := row.GetActivity().GetMerge()
 	s.d.AwaitLandingDeployed()
 
