@@ -39,5 +39,12 @@ nothing already means accepting the wait, and asked for it to be removed.
     there is none to reset.
   - The UpdateHeldPrompt dispatch now has two actions, release and drop.
   - Field numbers 5 (request arm), 7 (error arm) and 2 (verdict field) are
-    freed without `reserved`, following the repository's convention of
-    never reserving: every producer and consumer ships from this one tree.
+    `reserved`, together with their names, following the repository's
+    convention for retired fields (`frontend.v1.FeedHeldItem` reserves its
+    retired `merge` and `offer` arms the same way).
+  - CORRECTION (2026-10-14): this entry first said the repository never
+    reserves retired fields, and the first landing freed the three numbers
+    without `reserved`. That was wrong. The root cause was a search for
+    `reserved` that a shell glob error made return nothing, which was then
+    read as "no matches" instead of being rerun. The numbers and names are
+    now reserved.

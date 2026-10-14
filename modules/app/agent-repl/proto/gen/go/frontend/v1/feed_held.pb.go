@@ -2678,9 +2678,9 @@ const file_frontend_v1_feed_held_proto_rawDesc = "" +
 	"\x13HeldPromptInterject\x12\x1c\n" +
 	"\trationale\x18\x01 \x01(\tR\trationale\"7\n" +
 	"\x17HeldPromptAfterToolCall\x12\x1c\n" +
-	"\trationale\x18\x01 \x01(\tR\trationale\"8\n" +
+	"\trationale\x18\x01 \x01(\tR\trationale\"H\n" +
 	"\x18HeldPromptHoldForTurnEnd\x12\x1c\n" +
-	"\trationale\x18\x01 \x01(\tR\trationale\"Z\n" +
+	"\trationale\x18\x01 \x01(\tR\trationaleJ\x04\b\x02\x10\x03R\baccepted\"Z\n" +
 	"\x1dHeldPromptUninterruptibleTurn\x129\n" +
 	"\acommand\x18\x01 \x01(\x0e2\x1f.conversation.v1.SessionCommandR\acommand\"7\n" +
 	"\x1dHeldPromptClassificationError\x12\x16\n" +

@@ -386,6 +386,10 @@ message HeldPromptAfterToolCall {
 message HeldPromptHoldForTurnEnd {
   // The classifier's stated reason. Free text for display; never parsed.
   string rationale = 1;
+  // Tag 2 and the name `accepted` are RETIRED: a hold carries no
+  // confirmation, because confirming one changed nothing about delivery.
+  reserved 2;
+  reserved "accepted";
 }
 
 // NOTHING CLASSIFIED THIS ENTRY, because the turn in front of it is a CONTEXT
