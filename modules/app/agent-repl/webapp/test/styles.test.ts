@@ -4379,12 +4379,12 @@ describe("the rail's marks", () => {
     expect(keyframes).not.toMatch(/transform|scale|width|height|font-size/);
   });
 
-  it("fades a breathing name to 35% opacity at mid-breath", () => {
+  it("fades a breathing name to 58% opacity at mid-breath, 35% shallower than the 0.35 it once reached", () => {
     // Arrange / Act
     const keyframes = /@keyframes ws-pulse \{([^}]*\}[^}]*\})/.exec(stylesheet)?.[1] ?? "";
 
     // Assert
-    expect(keyframes).toMatch(/50%\s*\{[^}]*opacity:\s*0\.35/);
+    expect(keyframes).toMatch(/50%\s*\{[^}]*opacity:\s*0\.58\s*;/);
   });
 
   it("breathes once every 2s, 30% slower than the 1.4s it once took", () => {
