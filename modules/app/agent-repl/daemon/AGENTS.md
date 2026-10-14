@@ -2022,8 +2022,13 @@ never a bring-up in a directory that is not there.
 
 A create with no supplied name is named by ONE headless Haiku call
 (`mintName`, brief `prompts/workspace-name-from-prompt.md`), validated by
-`ValidateSlug` and never repaired: an answer that is not a name is retried
-once and then REFUSED on `naming_failed`; no generic name is ever
+`ValidateSlug` and never repaired. A rejected answer is handed back to the
+model ONCE to rewrite (brief `prompts/workspace-name-shorten.md`), not asked
+the naming question again; a call that did not answer at all is asked the
+question again. Once that retry is spent, the last answer with the slug's
+shape (`ValidateSlugShape`) is taken even over the word or length limits
+(owner ruling, 2026-10-14). Only when no attempt produced a well-shaped
+answer is the create REFUSED on `naming_failed`; no generic name is ever
 substituted. A FORK is named by that same call, handed its prompt (possibly
 blank) PLUS the conversation it continues as the brief's `{{conversation}}`
 (owner ruling, 2026-09-27). The conversation is the daemon's own record of

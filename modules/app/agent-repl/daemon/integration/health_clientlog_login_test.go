@@ -307,8 +307,9 @@ func TestSessionHealthReturnsToHealthyAfterAHealthyDiagnosticsPush(t *testing.T)
 		return len(v.GetWarnings().GetWarnings()) > 0
 	})
 	pre, err := f.d.Client().SessionHealth(f.d.Ctx(), connect.NewRequest(&agentreplv1.SessionHealthRequest{Workspace: f.ws}))
-	if err != nil || pre.Msg.GetSuccess().GetUnhealthy() == nil {
-		t.Fatalf("SessionHealth before the retraction = %v (err %v), want success{unhealthy}", pre.Msg, err)
+	requireRPCAnswered(t, "SessionHealth before the retraction", pre, err)
+	if pre.Msg.GetSuccess().GetUnhealthy() == nil {
+		t.Fatalf("SessionHealth before the retraction = %v, want success{unhealthy}", pre.Msg)
 	}
 
 	// Act: the shim retracts by pushing a healthy diagnostics verdict.

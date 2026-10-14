@@ -295,8 +295,9 @@ func TestGetFeedPageWalkOnASubagentBubbleFeedIdPagesTheSubFeedNotTheRoot(t *test
 		Workspace: f.ws, Feed: bubble.GetId(),
 		Page: &agentreplv1.GetFeedPageRequest_First{First: &agentreplv1.GetFeedPageFirst{}},
 	}))
-	if err != nil || first.Msg.GetSuccess().GetError() != nil {
-		t.Fatalf("GetFeedPage{first} on the subagent's FeedId = %v, %v, want the sub-feed's newest page", first.Msg, err)
+	requireRPCAnswered(t, "GetFeedPage{first} on the subagent's FeedId", first, err)
+	if first.Msg.GetSuccess().GetError() != nil {
+		t.Fatalf("GetFeedPage{first} on the subagent's FeedId = %v, want the sub-feed's newest page", first.Msg)
 	}
 	if findRow(first.Msg.GetSuccess(), isRootLeak) != nil {
 		t.Fatalf("a walk on the subagent's FeedId served the ROOT feed's row: %v", first.Msg)
@@ -310,8 +311,9 @@ func TestGetFeedPageWalkOnASubagentBubbleFeedIdPagesTheSubFeedNotTheRoot(t *test
 		Workspace: f.ws, Feed: bubble.GetId(),
 		Page: nextAfter(first.Msg.GetSuccess()),
 	}))
-	if err != nil || next.Msg.GetSuccess().GetError() != nil {
-		t.Fatalf("GetFeedPage{next} on the subagent's FeedId = %v, %v, want the sub-feed's older page", next.Msg, err)
+	requireRPCAnswered(t, "GetFeedPage{next} on the subagent's FeedId", next, err)
+	if next.Msg.GetSuccess().GetError() != nil {
+		t.Fatalf("GetFeedPage{next} on the subagent's FeedId = %v, want the sub-feed's older page", next.Msg)
 	}
 	if findRow(next.Msg.GetSuccess(), isRootLeak) != nil {
 		t.Fatalf("GetFeedPage{next} on the subagent's FeedId served the ROOT feed's row: %v", next.Msg)
@@ -398,8 +400,9 @@ func TestGetFeedPageAtStartAndAFurtherNextRepeatsTheWholeFeed(t *testing.T) {
 	first, err := f.d.Client().GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
 		Workspace: f.ws, Page: &agentreplv1.GetFeedPageRequest_First{First: &agentreplv1.GetFeedPageFirst{}},
 	}))
-	if err != nil || first.Msg.GetSuccess().GetError() != nil {
-		t.Fatalf("GetFeedPage{first} = %v, %v, want the newest page", first.Msg, err)
+	requireRPCAnswered(t, "GetFeedPage{first}", first, err)
+	if first.Msg.GetSuccess().GetError() != nil {
+		t.Fatalf("GetFeedPage{first} = %v, want the newest page", first.Msg)
 	}
 	current := first.Msg
 	// The walk the first page named; an at-start page names none, so the
@@ -488,8 +491,9 @@ func TestGetFeedPageFirstAfterNextReservesTheNewestPage(t *testing.T) {
 	first, err := f.d.Client().GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
 		Workspace: f.ws, Page: &agentreplv1.GetFeedPageRequest_First{First: &agentreplv1.GetFeedPageFirst{}},
 	}))
-	if err != nil || first.Msg.GetSuccess().GetError() != nil {
-		t.Fatalf("GetFeedPage{first} = %v, %v, want the newest page", first.Msg, err)
+	requireRPCAnswered(t, "GetFeedPage{first}", first, err)
+	if first.Msg.GetSuccess().GetError() != nil {
+		t.Fatalf("GetFeedPage{first} = %v, want the newest page", first.Msg)
 	}
 	if _, err := f.d.Client().GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
 		Workspace: f.ws, Page: nextAfter(first.Msg.GetSuccess()),
@@ -531,8 +535,9 @@ func TestAWalkContinuesOnAnyConnection(t *testing.T) {
 	first, err := f.d.Client().GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
 		Workspace: f.ws, Page: &agentreplv1.GetFeedPageRequest_First{First: &agentreplv1.GetFeedPageFirst{}},
 	}))
-	if err != nil || first.Msg.GetSuccess().GetSuccess().GetHasMore().GetWalk().GetValue() == "" {
-		t.Fatalf("GetFeedPage{first} = %v, %v, want a page naming its walk", first.Msg, err)
+	requireRPCAnswered(t, "GetFeedPage{first}", first, err)
+	if first.Msg.GetSuccess().GetSuccess().GetHasMore().GetWalk().GetValue() == "" {
+		t.Fatalf("GetFeedPage{first} = %v, want a page naming its walk", first.Msg)
 	}
 
 	// Act: {next} naming that walk, on a second, independent connection.
@@ -541,8 +546,9 @@ func TestAWalkContinuesOnAnyConnection(t *testing.T) {
 	}))
 
 	// Assert: the older page, served on whichever connection asked.
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("GetFeedPage{next} on another connection = %v, %v, want the walk's older page", resp.Msg, err)
+	requireRPCAnswered(t, "GetFeedPage{next} on another connection", resp, err)
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("GetFeedPage{next} on another connection = %v, want the walk's older page", resp.Msg)
 	}
 }
 
@@ -563,8 +569,9 @@ func TestTwoOpeningsWalkIndependently(t *testing.T) {
 		resp, err := f.d.Client().GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
 			Workspace: f.ws, Page: &agentreplv1.GetFeedPageRequest_First{First: &agentreplv1.GetFeedPageFirst{}},
 		}))
-		if err != nil || resp.Msg.GetSuccess() == nil {
-			t.Fatalf("GetFeedPage{first} = %v, %v", resp.Msg, err)
+		requireRPCAnswered(t, "GetFeedPage{first}", resp, err)
+		if resp.Msg.GetSuccess() == nil {
+			t.Fatalf("GetFeedPage{first} = %v", resp.Msg)
 		}
 		return resp.Msg.GetSuccess()
 	}
@@ -573,8 +580,9 @@ func TestTwoOpeningsWalkIndependently(t *testing.T) {
 		resp, err := f.d.Client().GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
 			Workspace: f.ws, Page: nextAfter(page),
 		}))
-		if err != nil || resp.Msg.GetSuccess() == nil {
-			t.Fatalf("GetFeedPage{next} = %v, %v", resp.Msg, err)
+		requireRPCAnswered(t, "GetFeedPage{next}", resp, err)
+		if resp.Msg.GetSuccess() == nil {
+			t.Fatalf("GetFeedPage{next} = %v", resp.Msg)
 		}
 		return resp.Msg.GetSuccess()
 	}
@@ -610,8 +618,9 @@ func TestANextNamingAWalkNeverMintedIsRefused(t *testing.T) {
 	}))
 
 	// Assert
-	if err != nil || resp.Msg.GetError().GetNoWalkStanding() == nil {
-		t.Fatalf("GetFeedPage{next} naming an unknown walk = %v, %v, want error.no_walk_standing", resp.Msg, err)
+	requireRPCAnswered(t, "GetFeedPage{next} naming an unknown walk", resp, err)
+	if resp.Msg.GetError().GetNoWalkStanding() == nil {
+		t.Fatalf("GetFeedPage{next} naming an unknown walk = %v, want error.no_walk_standing", resp.Msg)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -624,6 +625,137 @@ func TestReadRecordsACancelledCallerWithoutAnError(t *testing.T) {
 			}
 			if !found {
 				t.Fatalf("no record for the read: %v", log.Records())
+			}
+		})
+	}
+}
+
+// TestWriteRecordsACancelledCallerWithoutAnError pins the write helper's
+// cancellation arm at each step it can strike — begin, the body and the
+// commit — and that a write failing for any other reason still records ERROR.
+// Every case renames the workspace and must leave the name untouched.
+func TestWriteRecordsACancelledCallerWithoutAnError(t *testing.T) {
+	rename := func(ctx context.Context, tx *sql.Tx, id WorkspaceID) error {
+		_, err := tx.ExecContext(ctx, `UPDATE workspaces SET name = 'renamed' WHERE id = ?`, string(id))
+		return err
+	}
+	tests := []struct {
+		name      string
+		write     func(s *store, id WorkspaceID) error
+		wantLevel string
+		wantMsg   string
+	}{
+		{
+			name: "cancelled before the transaction begins",
+			write: func(s *store, id WorkspaceID) error {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				return s.write(ctx, "daemon.wsm.test_write", dlog.Context{}, func(ctx context.Context, tx *sql.Tx) error {
+					return rename(ctx, tx, id)
+				})
+			},
+			wantLevel: "info",
+			wantMsg:   writeCancelledMessage,
+		},
+		{
+			name: "cancelled inside the body",
+			write: func(s *store, id WorkspaceID) error {
+				ctx, cancel := context.WithCancel(context.Background())
+				return s.write(ctx, "daemon.wsm.test_write", dlog.Context{}, func(ctx context.Context, tx *sql.Tx) error {
+					if err := rename(ctx, tx, id); err != nil {
+						return err
+					}
+					cancel()
+					return rename(ctx, tx, id)
+				})
+			},
+			wantLevel: "info",
+			wantMsg:   writeCancelledMessage,
+		},
+		{
+			name: "cancelled before the commit",
+			write: func(s *store, id WorkspaceID) error {
+				ctx, cancel := context.WithCancel(context.Background())
+				return s.write(ctx, "daemon.wsm.test_write", dlog.Context{}, func(ctx context.Context, tx *sql.Tx) error {
+					err := rename(ctx, tx, id)
+					cancel()
+					return err
+				})
+			},
+			wantLevel: "info",
+			wantMsg:   writeCancelledMessage,
+		},
+		{
+			name: "a genuine write failure",
+			write: func(s *store, id WorkspaceID) error {
+				return s.write(context.Background(), "daemon.wsm.test_write", dlog.Context{}, func(ctx context.Context, tx *sql.Tx) error {
+					if err := rename(ctx, tx, id); err != nil {
+						return err
+					}
+					_, err := tx.ExecContext(ctx, `UPDATE workspaces SET no_such_column = 1`)
+					return err
+				})
+			},
+			wantLevel: "error",
+			wantMsg:   "refused the write",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			s, log := testStore(t)
+			ws := testWorkspace(t, s)
+
+			// Act.
+			err := tc.write(s, ws.ID)
+
+			// Assert.
+			if err == nil {
+				t.Fatalf("the write reported success; want a failure")
+			}
+			var found bool
+			for _, rec := range log.Records() {
+				if rec.Operation != "daemon.wsm.test_write" {
+					continue
+				}
+				if rec.Level != tc.wantLevel || rec.Message != tc.wantMsg {
+					t.Fatalf("recorded %s %q, want %s %q", rec.Level, rec.Message, tc.wantLevel, tc.wantMsg)
+				}
+				found = true
+			}
+			if !found {
+				t.Fatalf("no record for the write: %v", log.Records())
+			}
+			got, err := s.Workspace(context.Background(), ws.ID)
+			if err != nil {
+				t.Fatalf("Workspace: %v", err)
+			}
+			if got.Name != ws.Name {
+				t.Fatalf("name = %q, want %q: an abandoned write must leave nothing behind", got.Name, ws.Name)
+			}
+		})
+	}
+}
+
+func TestCallerCancelledNamesOnlyTheCallersEnd(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "cancelled", err: context.Canceled, want: true},
+		{name: "deadline exceeded", err: context.DeadlineExceeded, want: true},
+		{name: "wrapped cancellation", err: fmt.Errorf("wsm: commit transaction: %w", context.Canceled), want: true},
+		{name: "a store failure", err: errors.New("database is locked"), want: false},
+		{name: "not found", err: ErrNotFound, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange in the table. Act.
+			got := callerCancelled(tt.err)
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("callerCancelled(%v) = %v, want %v", tt.err, got, tt.want)
 			}
 		})
 	}

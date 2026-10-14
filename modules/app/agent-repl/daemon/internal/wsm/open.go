@@ -518,10 +518,19 @@ func (s *store) Promote(ctx context.Context) error {
 	return nil
 }
 
+// writeCancelledMessage is the one record of a write its caller abandoned.
+const writeCancelledMessage = "the write ended when its caller's context was cancelled; nothing was written"
+
 // write runs fn inside one immediate transaction and logs the operation
 // exactly once: DEBUG when it commits, ERROR when it refuses or fails.
 // EVERY write in this package goes through it, so no mutation can escape the
 // transaction discipline or the log.
+//
+// A CANCELLED CALLER IS NOT A BROKEN WRITE, exactly as it is not a broken read:
+// the transaction rolls back whole, so nothing was written, and the daemon
+// exiting in an orderly way under an in-flight merge ends its writes this way.
+// It is recorded at INFO at whichever step it struck; the error is still
+// returned unchanged.
 func (s *store) write(ctx context.Context, op string, fields dlog.Context, fn func(context.Context, *sql.Tx) error) error {
 	// ONE LOAD: the flag and the handle it is checked against are the same
 	// publication, never one of each side of a promotion.
@@ -533,6 +542,10 @@ func (s *store) write(ctx context.Context, op string, fields dlog.Context, fn fu
 	tx, err := current.db.BeginTx(ctx, nil)
 	if err != nil {
 		wrapped := fmt.Errorf("wsm: begin transaction: %w", err)
+		if callerCancelled(err) {
+			s.log.Info(op, writeCancelledMessage, withError(fields, wrapped))
+			return wrapped
+		}
 		s.log.Error(op, "could not begin the transaction", withError(fields, wrapped))
 		return wrapped
 	}
@@ -582,11 +595,19 @@ func (s *store) write(ctx context.Context, op string, fields dlog.Context, fn fu
 			s.log.Debug(op, "the retarget was refused; nothing was written", withError(fields, err))
 			return err
 		}
+		if callerCancelled(err) {
+			s.log.Info(op, writeCancelledMessage, withError(fields, err))
+			return err
+		}
 		s.log.Error(op, "refused the write", withError(fields, err))
 		return err
 	}
 	if err := tx.Commit(); err != nil {
 		wrapped := fmt.Errorf("wsm: commit transaction: %w", err)
+		if callerCancelled(err) {
+			s.log.Info(op, writeCancelledMessage, withError(fields, wrapped))
+			return wrapped
+		}
 		s.log.Error(op, "could not commit the transaction", withError(fields, wrapped))
 		return wrapped
 	}
@@ -614,7 +635,7 @@ func (s *store) read(ctx context.Context, op string, fields dlog.Context, fn fun
 			s.log.Debug(op, "the read found no such record", withError(fields, err))
 			return err
 		}
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		if callerCancelled(err) {
 			s.log.Info(op, "the read ended when its caller's context was cancelled",
 				withError(fields, err))
 			return err
@@ -624,6 +645,15 @@ func (s *store) read(ctx context.Context, op string, fields dlog.Context, fn fun
 	}
 	s.log.Debug(op, "read durable state", fields)
 	return nil
+}
+
+// callerCancelled reports whether err is the CALLER going away — its context
+// cancelled or past its deadline — rather than the store failing. Every store
+// call runs under its caller's context, and that context ends whenever a
+// client leaves or the daemon exits in an orderly way, so this is the one
+// test every logging path here uses to keep such an end off the ERROR level.
+func callerCancelled(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 // endTx is the one way a transaction in this package ends without a Commit:
