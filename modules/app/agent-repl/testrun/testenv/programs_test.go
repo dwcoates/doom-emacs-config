@@ -1,6 +1,7 @@
 package testenv
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,5 +57,99 @@ func TestProgram(t *testing.T) {
 				t.Fatalf("Program path = %q, want the program %s", got, tt.program)
 			}
 		})
+	}
+}
+
+func TestProgramOr(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "shim-store"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name      string
+		env       string
+		buildErr  error
+		wantBuilt bool
+		wantPath  string
+		wantErr   string
+	}{
+		{name: "outside a run the program is built here", env: "", wantBuilt: true, wantPath: "/built/shim-store"},
+		{name: "a build that fails is answered", env: "", buildErr: errors.New("no compiler"), wantBuilt: true, wantErr: "no compiler"},
+		{name: "a run's program is used and nothing is built", env: dir, wantPath: "shim-store"},
+		{name: "a run without the program is refused before any build", env: t.TempDir(), wantErr: "holds no program shim-store"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			getenv := func(k string) string {
+				if k == Programs {
+					return tc.env
+				}
+				return ""
+			}
+			built := false
+			build := func() (string, error) {
+				built = true
+				if tc.buildErr != nil {
+					return "", tc.buildErr
+				}
+				return "/built/shim-store", nil
+			}
+
+			// Act
+			got, err := ProgramOr(getenv, "shim-store", build)
+
+			// Assert
+			if built != tc.wantBuilt {
+				t.Fatalf("built = %v, want %v", built, tc.wantBuilt)
+			}
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("ProgramOr error = %v, want one containing %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil || !strings.HasSuffix(got, tc.wantPath) {
+				t.Fatalf("ProgramOr = %q, %v; want a path ending %q", got, err, tc.wantPath)
+			}
+		})
+	}
+}
+
+// TestEverySuiteComesByAProgramThroughProgramOr pins that no suite reads a
+// run's program with Program and builds its own beside it by hand: every one
+// goes through ProgramOr.
+func TestEverySuiteComesByAProgramThroughProgramOr(t *testing.T) {
+	// Arrange
+	module := filepath.Join("..", "..")
+	var offenders []string
+
+	// Act
+	err := filepath.WalkDir(module, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() && (d.Name() == "node_modules" || d.Name() == "testenv") {
+			return filepath.SkipDir
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+		src, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(src), "testenv."+"Program(") {
+			offenders = append(offenders, path)
+		}
+		return nil
+	})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("walk the module: %v", err)
+	}
+	if len(offenders) > 0 {
+		t.Fatalf("%v read a run's program with testenv.Program instead of testenv.ProgramOr", offenders)
 	}
 }

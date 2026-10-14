@@ -121,3 +121,16 @@ func Program(getenv func(string) string, name string) (string, bool, error) {
 	}
 	return real, true, nil
 }
+
+// ProgramOr answers the run's built program name (Program) when this process
+// runs inside a test run that built it, and otherwise whatever build answers:
+// the one way a suite comes by a program another suite runs too. build is
+// called only outside such a run, and a run that names its programs directory
+// without the program is refused before it is.
+func ProgramOr(getenv func(string) string, name string, build func() (string, error)) (string, error) {
+	path, fromRun, err := Program(getenv, name)
+	if err != nil || fromRun {
+		return path, err
+	}
+	return build()
+}
