@@ -36,6 +36,8 @@ type verbCall struct {
 	Spec workspace.CreateSpec
 	Task ids.TaskID
 	Text string
+	// CloseBy is the cause a close was asked with.
+	CloseBy wsm.CloseCause
 }
 
 // fakeVerbs records every verb the ingress drove.
@@ -74,8 +76,8 @@ func (v *fakeVerbs) Create(_ context.Context, spec workspace.CreateSpec) (wsm.Wo
 	return v.created, nil
 }
 
-func (v *fakeVerbs) Close(_ context.Context, ws ids.WorkspaceID) error {
-	v.calls = append(v.calls, verbCall{Verb: "close", WS: ws})
+func (v *fakeVerbs) Close(_ context.Context, ws ids.WorkspaceID, by wsm.CloseCause) error {
+	v.calls = append(v.calls, verbCall{Verb: "close", WS: ws, CloseBy: by})
 	return v.err
 }
 

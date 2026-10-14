@@ -477,6 +477,9 @@ func TestPublishRegistryClosesAWorkspaceWhoseDirectoryIsGone(t *testing.T) {
 	if !f.db.closedFlags[record.ID] {
 		t.Fatalf("workspace %v is still open; a directory that is gone must close the row", record.ID)
 	}
+	if closures := f.db.closures[record.ID]; len(closures) != 1 || closures[0].By != wsm.CloseByDaemon {
+		t.Fatalf("close records = %+v, want one by the daemon", closures)
+	}
 }
 
 // TestPublishRegistryPushesTheMissingDirectoryRowAsClosed is the frontend's

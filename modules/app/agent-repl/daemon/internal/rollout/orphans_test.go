@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"testing"
+	"time"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -98,8 +99,8 @@ func TestTheTakeoverLeavesAClosedWorkspaceAlone(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws := orphan(t, h)
-	if err := h.db.SetClosed(context.Background(), ws, true); err != nil {
-		t.Fatalf("SetClosed: %v", err)
+	if err := h.db.MarkClosed(context.Background(), ws, wsm.Closure{At: time.Now(), By: wsm.CloseByUser}); err != nil {
+		t.Fatalf("MarkClosed: %v", err)
 	}
 
 	// Act
@@ -281,8 +282,8 @@ func TestTheTakeoverStartsNoSessionForAClosedWorkspace(t *testing.T) {
 	h.mu.Lock()
 	h.lockStates[record.Dir] = sessionlock.StateFree
 	h.mu.Unlock()
-	if err := h.db.SetClosed(context.Background(), ws, true); err != nil {
-		t.Fatalf("SetClosed: %v", err)
+	if err := h.db.MarkClosed(context.Background(), ws, wsm.Closure{At: time.Now(), By: wsm.CloseByUser}); err != nil {
+		t.Fatalf("MarkClosed: %v", err)
 	}
 
 	// Act

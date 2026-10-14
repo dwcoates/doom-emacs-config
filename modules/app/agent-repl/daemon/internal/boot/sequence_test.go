@@ -258,8 +258,8 @@ func TestAClosedWorkspaceIsSkipped(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	ws := h.register(t, t.TempDir(), sessionlock.StateHeld)
-	if err := h.db.SetClosed(context.Background(), ws.ID, true); err != nil {
-		t.Fatalf("SetClosed: %v", err)
+	if err := h.db.MarkClosed(context.Background(), ws.ID, wsm.Closure{At: time.Now(), By: wsm.CloseByUser}); err != nil {
+		t.Fatalf("MarkClosed: %v", err)
 	}
 
 	// Act.
@@ -295,8 +295,8 @@ func TestBootReleasesAClosedWorkspacesServing(t *testing.T) {
 			h := newHarness(t)
 			ws := h.register(t, t.TempDir(), sessionlock.StateHeld)
 			if tt.closed {
-				if err := h.db.SetClosed(ctx, ws.ID, true); err != nil {
-					t.Fatalf("SetClosed: %v", err)
+				if err := h.db.MarkClosed(ctx, ws.ID, wsm.Closure{At: time.Now(), By: wsm.CloseByUser}); err != nil {
+					t.Fatalf("MarkClosed: %v", err)
 				}
 			}
 			// The stale claim a leaked close path left behind.
@@ -1096,6 +1096,13 @@ func TestAWorkspaceWhoseRestoreFailsIsClosedAndTheBootCompletes(t *testing.T) {
 	if len(report.MissingDirClosed) != 1 || report.MissingDirClosed[0] != ws.ID {
 		t.Fatalf("report.MissingDirClosed = %v, want [%v]", report.MissingDirClosed, ws.ID)
 	}
+	record, err := h.db.Workspace(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("Workspace(%v): %v", ws.ID, err)
+	}
+	if record.Closure == nil || record.Closure.By != wsm.CloseByDaemon {
+		t.Fatalf("close record = %v, want the daemon's own close", record.Closure)
+	}
 }
 
 func TestAnAlreadyClosedMissingDirectoryIsNeverRecreated(t *testing.T) {
@@ -1104,8 +1111,8 @@ func TestAnAlreadyClosedMissingDirectoryIsNeverRecreated(t *testing.T) {
 	h := newHarness(t)
 	dir := t.TempDir()
 	ws := h.register(t, dir, sessionlock.StateFree)
-	if err := h.db.SetClosed(context.Background(), ws.ID, true); err != nil {
-		t.Fatalf("SetClosed: %v", err)
+	if err := h.db.MarkClosed(context.Background(), ws.ID, wsm.Closure{At: time.Now(), By: wsm.CloseByUser}); err != nil {
+		t.Fatalf("MarkClosed: %v", err)
 	}
 	if err := os.RemoveAll(dir); err != nil {
 		t.Fatalf("remove the workspace directory: %v", err)
@@ -1174,8 +1181,8 @@ func TestAnAlreadyClosedMissingDirectoryIsNotReClosed(t *testing.T) {
 	h := newHarness(t)
 	dir := t.TempDir()
 	ws := h.register(t, dir, sessionlock.StateFree)
-	if err := h.db.SetClosed(context.Background(), ws.ID, true); err != nil {
-		t.Fatalf("SetClosed: %v", err)
+	if err := h.db.MarkClosed(context.Background(), ws.ID, wsm.Closure{At: time.Now(), By: wsm.CloseByUser}); err != nil {
+		t.Fatalf("MarkClosed: %v", err)
 	}
 	if err := os.RemoveAll(dir); err != nil {
 		t.Fatalf("remove the workspace directory: %v", err)
@@ -1656,8 +1663,8 @@ func TestABootStartsNoSessionForAClosedRow(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
-	if err := h.db.SetClosed(context.Background(), ws.ID, true); err != nil {
-		t.Fatalf("SetClosed: %v", err)
+	if err := h.db.MarkClosed(context.Background(), ws.ID, wsm.Closure{At: time.Now(), By: wsm.CloseByUser}); err != nil {
+		t.Fatalf("MarkClosed: %v", err)
 	}
 
 	// Act.

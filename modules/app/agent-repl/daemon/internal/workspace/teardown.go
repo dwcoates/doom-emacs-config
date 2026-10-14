@@ -58,7 +58,7 @@ func (v *verbs) BeginKill(ctx context.Context, ws ids.WorkspaceID) (Teardown, er
 // would stand the tab again. A shim dying under the teardown is not revived
 // either, since a closed workspace's session is never brought back.
 func (v *verbs) markClosedFirst(ctx context.Context, log dlog.Logger, op string, ws ids.WorkspaceID) error {
-	if err := v.deps.DB.SetClosed(ctx, ws, true); err != nil {
+	if err := v.deps.DB.MarkClosed(ctx, ws, wsm.Closure{At: v.now(), By: wsm.CloseByUser}); err != nil {
 		log.Error(op, "could not record the close ahead of the teardown", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("record closed: %w", err)
 	}
@@ -127,7 +127,7 @@ func (v *verbs) kill(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) e
 
 	// A killed workspace's roster row carries closed = true: Emacs derives its
 	// tab set from that flag, and a killed workspace has no editor state left.
-	if err := v.deps.DB.SetClosed(ctx, ws, true); err != nil {
+	if err := v.deps.DB.MarkClosed(ctx, ws, wsm.Closure{At: v.now(), By: wsm.CloseByUser}); err != nil {
 		log.Error(opKill, "could not record the close", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("kill %q: record closed: %w", ws, err)
 	}

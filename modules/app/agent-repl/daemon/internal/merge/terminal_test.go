@@ -180,6 +180,9 @@ func TestMergedWorkspaceIsClosedAndStamped(t *testing.T) {
 	if h.db.mergedAt[theWorkspace].IsZero() {
 		t.Fatal("the merged workspace was not stamped with when it landed")
 	}
+	if closure := h.db.closures[theWorkspace]; closure.By != wsm.CloseByMerge || closure.At.IsZero() {
+		t.Fatalf("close record = %+v, want the merge's with its instant", closure)
+	}
 }
 
 // TestSelfReloadFiresOnlyAfterTheLeaseIsReleased covers the trigger's ordering:

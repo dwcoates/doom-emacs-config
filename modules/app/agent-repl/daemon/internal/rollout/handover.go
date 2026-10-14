@@ -1080,7 +1080,7 @@ func (c *controller) served(ctx context.Context) (transfer, untransferable []wsm
 	var left []wsm.Workspace
 	for _, ws := range all {
 		// A CLOSED WORKSPACE IS NEVER TRANSFERRED, whatever its serving row
-		// says. Every close releases serving (wsm.SetClosed), so a closed row
+		// says. Every close releases serving (wsm.MarkClosed), so a closed row
 		// still naming an instance is a stale record, and transferring it made
 		// every later deploy hand over a workspace the owner had killed
 		// (2026-09-27, 498b3b658c074bf4). A live shim for one still leaves

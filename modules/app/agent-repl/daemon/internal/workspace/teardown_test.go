@@ -77,6 +77,28 @@ func TestKillMarksTheRosterRowClosed(t *testing.T) {
 	}
 }
 
+func TestKillRecordsTheUsersClose(t *testing.T) {
+	// Arrange: KillWorkspace is the user's own gesture.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	if err := f.verbs.Kill(context.Background(), "w1"); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+
+	// Assert: both of the kill's close writes name the user.
+	closures := f.db.closures["w1"]
+	if len(closures) != 2 {
+		t.Fatalf("close records = %+v, want the fast half's and the teardown's", closures)
+	}
+	for _, closure := range closures {
+		if closure.By != wsm.CloseByUser || closure.At.IsZero() {
+			t.Fatalf("close record = %+v, want the user's with its instant", closure)
+		}
+	}
+}
+
 func TestKillLeavesTheWorkspaceRecordInPlace(t *testing.T) {
 	// Arrange: Kill destroys no data.
 	f := newFixture(t)

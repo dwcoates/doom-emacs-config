@@ -18,13 +18,41 @@ func TestCloseSucceedsOnAQuietWorkspace(t *testing.T) {
 	f.workspace("w1", t.TempDir())
 
 	// Act.
-	if err := f.verbs.Close(context.Background(), "w1"); err != nil {
+	if err := f.verbs.Close(context.Background(), "w1", wsm.CloseByUser); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
 
 	// Assert.
 	if !f.db.closedFlags["w1"] {
 		t.Fatal("Close() did not record the workspace as closed")
+	}
+}
+
+func TestCloseRecordsWhoAskedForIt(t *testing.T) {
+	tests := []struct {
+		name string
+		by   wsm.CloseCause
+	}{
+		{name: "the user's close", by: wsm.CloseByUser},
+		{name: "an agent's close", by: wsm.CloseByAgent},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+
+			// Act.
+			if err := f.verbs.Close(context.Background(), "w1", tt.by); err != nil {
+				t.Fatalf("Close: %v", err)
+			}
+
+			// Assert.
+			closures := f.db.closures["w1"]
+			if len(closures) != 1 || closures[0].By != tt.by || closures[0].At.IsZero() {
+				t.Fatalf("close records = %+v, want one by %s with its instant", closures, tt.by)
+			}
+		})
 	}
 }
 
@@ -36,7 +64,7 @@ func TestCloseRefusesATurnInFlight(t *testing.T) {
 	f.running.Turn = &turn
 
 	// Act.
-	err := f.verbs.Close(context.Background(), "w1")
+	err := f.verbs.Close(context.Background(), "w1", wsm.CloseByUser)
 
 	// Assert.
 	asRefusal(t, err, "blocked")
@@ -51,7 +79,7 @@ func TestCloseRefusesLiveDetachedWork(t *testing.T) {
 	}
 
 	// Act.
-	err := f.verbs.Close(context.Background(), "w1")
+	err := f.verbs.Close(context.Background(), "w1", wsm.CloseByUser)
 
 	// Assert.
 	asRefusal(t, err, "blocked")
@@ -67,7 +95,7 @@ func TestCloseRefusesHeldPrompts(t *testing.T) {
 	f.db.held["w1"] = []wsm.HeldPrompt{{Workspace: "w1", Turn: "t1"}}
 
 	// Act.
-	err := f.verbs.Close(context.Background(), "w1")
+	err := f.verbs.Close(context.Background(), "w1", wsm.CloseByUser)
 
 	// Assert.
 	asRefusal(t, err, "blocked")
@@ -84,7 +112,7 @@ func TestCloseIsAllowedWithAStandingColdGate(t *testing.T) {
 	f.footer.coldGates["w1"] = footer.ColdGate{Standing: true}
 
 	// Act.
-	err := f.verbs.Close(context.Background(), "w1")
+	err := f.verbs.Close(context.Background(), "w1", wsm.CloseByUser)
 
 	// Assert.
 	if err != nil {
@@ -99,7 +127,7 @@ func TestCloseIsAllowedWithAFinishedMerge(t *testing.T) {
 	f.merge.facts["w1"] = footer.MergeFacts{State: "merged"}
 
 	// Act.
-	err := f.verbs.Close(context.Background(), "w1")
+	err := f.verbs.Close(context.Background(), "w1", wsm.CloseByUser)
 
 	// Assert.
 	if err != nil {
@@ -114,7 +142,7 @@ func TestCloseIsAllowedWithNoLiveSession(t *testing.T) {
 	f.hasSession = false
 
 	// Act.
-	err := f.verbs.Close(context.Background(), "w1")
+	err := f.verbs.Close(context.Background(), "w1", wsm.CloseByUser)
 
 	// Assert.
 	if err != nil {
@@ -130,7 +158,7 @@ func TestCloseManifestsTheRefusalInTheFooter(t *testing.T) {
 	f.running.Turn = &turn
 
 	// Act.
-	_ = f.verbs.Close(context.Background(), "w1")
+	_ = f.verbs.Close(context.Background(), "w1", wsm.CloseByUser)
 
 	// Assert.
 	blocked := f.footer.closing["w1"]
@@ -145,7 +173,7 @@ func TestCloseRetiresTheFooterRefusalOnSuccess(t *testing.T) {
 	f.workspace("w1", t.TempDir())
 
 	// Act.
-	if err := f.verbs.Close(context.Background(), "w1"); err != nil {
+	if err := f.verbs.Close(context.Background(), "w1", wsm.CloseByUser); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
 
@@ -161,7 +189,7 @@ func TestCloseEvictsTheWorkspaceLogSink(t *testing.T) {
 	ws := f.workspace("w1", t.TempDir())
 
 	// Act.
-	if err := f.verbs.Close(context.Background(), "w1"); err != nil {
+	if err := f.verbs.Close(context.Background(), "w1", wsm.CloseByUser); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
 
@@ -178,7 +206,7 @@ func TestCloseLeavesTheSessionAlone(t *testing.T) {
 	f.fleet.live["w1"] = true
 
 	// Act.
-	if err := f.verbs.Close(context.Background(), "w1"); err != nil {
+	if err := f.verbs.Close(context.Background(), "w1", wsm.CloseByUser); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
 
@@ -196,7 +224,7 @@ func TestCloseSucceedsWhenTheSinkEvictionFails(t *testing.T) {
 	f.log.evictErr = errors.New("the sink is already closed")
 
 	// Act.
-	err := f.verbs.Close(context.Background(), "w1")
+	err := f.verbs.Close(context.Background(), "w1", wsm.CloseByUser)
 
 	// Assert.
 	if err != nil {
@@ -216,7 +244,7 @@ func TestCloseRefusalIsNotLoggedAsAWarning(t *testing.T) {
 	f.running.Turn = &turn
 
 	// Act.
-	_ = f.verbs.Close(context.Background(), "w1")
+	_ = f.verbs.Close(context.Background(), "w1", wsm.CloseByUser)
 
 	// Assert.
 	for _, record := range f.log.logger.Records() {
@@ -233,7 +261,7 @@ func TestCloseRefusesAMergeWaitingInLine(t *testing.T) {
 	f.merge.facts["w1"] = footer.MergeFacts{State: "queued", Step: footer.StepEnqueued, QueuePlace: 2, QueueWaiting: 2}
 
 	// Act.
-	err := f.verbs.Close(context.Background(), "w1")
+	err := f.verbs.Close(context.Background(), "w1", wsm.CloseByUser)
 
 	// Assert.
 	asRefusal(t, err, "blocked")

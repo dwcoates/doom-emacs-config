@@ -254,6 +254,49 @@ restart.  Emacs orders by it and never draws it
 \(`agent-repl-roster-last-finished-name')."
   (agent-repl-wire-roster--decode-instant "RosterRowLastTurnEnded" value))
 
+;;;; ---- The close record ----
+
+(defun agent-repl-wire-decode-roster-row-closure-by-user (value)
+  "Decode VALUE as the empty `RosterRowClosureByUser': the user closed it."
+  (agent-repl-wire--decode-empty "RosterRowClosureByUser" value))
+
+(defun agent-repl-wire-decode-roster-row-closure-by-agent (value)
+  "Decode VALUE as the empty `RosterRowClosureByAgent': an agent closed it."
+  (agent-repl-wire--decode-empty "RosterRowClosureByAgent" value))
+
+(defun agent-repl-wire-decode-roster-row-closure-by-merge (value)
+  "Decode VALUE as the empty `RosterRowClosureByMerge': its merge closed it."
+  (agent-repl-wire--decode-empty "RosterRowClosureByMerge" value))
+
+(defun agent-repl-wire-decode-roster-row-closure-by-daemon (value)
+  "Decode VALUE as the empty `RosterRowClosureByDaemon': the daemon closed it."
+  (agent-repl-wire--decode-empty "RosterRowClosureByDaemon" value))
+
+(defconst agent-repl-wire-roster-row-closure-by-arms
+  '((user :user agent-repl-wire-decode-roster-row-closure-by-user)
+    (agent :agent agent-repl-wire-decode-roster-row-closure-by-agent)
+    (merge :merge agent-repl-wire-decode-roster-row-closure-by-merge)
+    (daemon :daemon agent-repl-wire-decode-roster-row-closure-by-daemon))
+  "`RosterRowClosure.by''s arm table: (WIRE-KEY ARM-KEYWORD DECODER).")
+
+(defun agent-repl-wire-decode-roster-row-closure (value)
+  "Decode VALUE as `RosterRowClosure', a plist `(:at-ms MS :by ONEOF)'.
+The DURABLE instant the workspace was closed, epoch MILLISECONDS, and who
+closed it, read from the daemon's record so it survives an Emacs restart.
+Emacs filters and orders by it and never draws it (the `SPC p p'
+switcher offers the workspaces the user most recently closed).  AN UNSET
+`by' IS INVALID and is rejected loudly."
+  (let ((object (agent-repl-wire--object "RosterRowClosure" value)))
+    (agent-repl-wire--check-keys
+     "RosterRowClosure" object
+     (cons 'atMs (mapcar #'car agent-repl-wire-roster-row-closure-by-arms)))
+    (agent-repl-wire--decoded
+     "RosterRowClosure"
+     (list :at-ms (agent-repl-wire--decode-int64 "RosterRowClosure" 'atMs object)
+           :by (agent-repl-wire--decode-oneof
+                "RosterRowClosure" 'by object
+                agent-repl-wire-roster-row-closure-by-arms)))))
+
 ;;;; ---- The when column ----
 ;;
 ;; REGRESSION WATCH (2026-09-15): this strict decoder rejects the whole
@@ -627,7 +670,7 @@ Nested workspaces — a spawned family under its parent — in render order."
   (agent-repl-wire-decode-roster-row value))
 
 (defconst agent-repl-wire--roster-row-keys
-  (append '(workspace attention priority viewed reviving detachedLive oneShot opening asyncMerging lastSelected lastTurnEnded availability name current children when detail closed)
+  (append '(workspace attention priority viewed reviving detachedLive oneShot opening asyncMerging lastSelected lastTurnEnded closure availability name current children when detail closed)
           (mapcar #'car agent-repl-wire-roster-row-status-arms))
   "Every key `RosterRow' may carry: its own fields plus the 22 status arms.")
 
@@ -635,7 +678,7 @@ Nested workspaces — a spawned family under its parent — in render order."
   "Decode VALUE as `RosterRow'.
 Returns `(:workspace W :attention A :priority P :viewed V :reviving R
 :detached-live DL :one-shot OS :opening O :async-merging AM
-:last-selected L :last-turn-ended LT :availability AV
+:last-selected L :last-turn-ended LT :closure CL :availability AV
 :name N :status
 S :current C :children ROWS :when WHEN :detail D :closed CLOSED)', with
 the message tree preserved as the contract spells it."
@@ -676,6 +719,9 @@ the message tree preserved as the contract spells it."
            :last-turn-ended (agent-repl-wire--decode-optional-message
                              "RosterRow" 'lastTurnEnded object
                              #'agent-repl-wire-decode-roster-row-last-turn-ended)
+           :closure (agent-repl-wire--decode-optional-message
+                     "RosterRow" 'closure object
+                     #'agent-repl-wire-decode-roster-row-closure)
            :availability (agent-repl-wire--decode-message
                           "RosterRow" 'availability object
                           #'agent-repl-wire-decode-roster-row-availability)

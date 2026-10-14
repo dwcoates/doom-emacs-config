@@ -200,7 +200,7 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 
 // releaseClosedServing heals every CLOSED workspace whose row still names a
 // serving instance or a spawned shim pid. A closed workspace is served by no
-// daemon, and every close releases both in the same write (wsm.SetClosed), so
+// daemon, and every close releases both in the same write (wsm.MarkClosed), so
 // such a row is an invariant violation a leaked close path left behind — it is
 // repaired through that same helper and stated at ERROR. Left alone, every
 // later handover transferred it (2026-09-27, 498b3b658c074bf4).
@@ -228,7 +228,7 @@ func (s *sequence) releaseClosedServing(ctx context.Context, log dlog.Logger, wo
 			fields["spawned_shim_pid"] = *ws.SpawnedShimPID
 		}
 		log.Error(op, "a closed workspace was still recorded as served; its serving ownership is released", fields)
-		if err := s.deps.DB.SetClosed(ctx, ws.ID, true); err != nil {
+		if err := s.deps.DB.MarkClosed(ctx, ws.ID, wsm.Closure{At: s.now(), By: wsm.CloseByDaemon}); err != nil {
 			fields["error"] = err.Error()
 			log.Error(op, "could not release a closed workspace's serving ownership", fields)
 			return fmt.Errorf("boot: release the serving ownership of closed workspace %s: %w", ws.ID, err)
@@ -298,7 +298,7 @@ func (s *sequence) closeMissingDirs(ctx context.Context, log dlog.Logger, worksp
 		if err != nil {
 			context["restore_error"] = err.Error()
 		}
-		if err := s.deps.DB.SetClosed(ctx, ws.ID, true); err != nil {
+		if err := s.deps.DB.MarkClosed(ctx, ws.ID, wsm.Closure{At: s.now(), By: wsm.CloseByDaemon}); err != nil {
 			context["error"] = err.Error()
 			log.Error("daemon.boot.close_missing_dir", "a workspace whose directory is gone could not be closed", context)
 			return fmt.Errorf("boot: close the missing-directory workspace %s: %w", ws.ID, err)

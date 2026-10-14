@@ -225,7 +225,7 @@ func (r *run) stampClosed(ctx context.Context, log dlog.Logger, op string, lande
 		if err := r.o.deps.DB.SetMergedAt(ctx, closes, r.o.deps.Now(), landed); err != nil {
 			log.Error(op, "could not stamp the merge's landing", dlog.Context{"workspace": string(closes), "error": err.Error()})
 		}
-		if err := r.o.deps.DB.SetClosed(ctx, closes, true); err != nil {
+		if err := r.o.deps.DB.MarkClosed(ctx, closes, wsm.Closure{At: r.o.deps.Now(), By: wsm.CloseByMerge}); err != nil {
 			log.Error(op, "could not close the merged workspace", dlog.Context{"workspace": string(closes), "error": err.Error()})
 		}
 	}

@@ -42,6 +42,7 @@
 ;; declarations below exist for the byte-compiler alone.
 (declare-function agent-repl--info "core")
 (declare-function agent-repl--warn "core")
+(declare-function agent-repl-format-age "core" (at-ms now-ms))
 (declare-function agent-repl--ws-current-name "workspace")
 (declare-function agent-repl-verbs--ref "verbs" (ws))
 (declare-function agent-repl-verbs--conn "verbs" (&optional ws))
@@ -71,12 +72,7 @@ all, which is `never' rather than a zero: a conversation that never
 reached the model is not one from 1970."
   (if (null at-ms)
       "never"
-    (let ((seconds (max 0 (/ (- now-ms at-ms) 1000))))
-      (cond
-       ((< seconds 60) (format "%ds ago" seconds))
-       ((< seconds 3600) (format "%dm ago" (/ seconds 60)))
-       ((< seconds 86400) (format "%dh ago" (/ seconds 3600)))
-       (t (format "%dd ago" (/ seconds 86400)))))))
+    (agent-repl-format-age at-ms now-ms)))
 
 (defun agent-repl-conversations--size (transcript)
   "Render TRANSCRIPT's size: what resuming it would re-read.
