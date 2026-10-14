@@ -253,6 +253,12 @@ func TestRunComposesTheExactArgv(t *testing.T) {
 			out:  `{"result":"x"}`,
 			want: "-p --output-format json --model " + ModelSonnet + " --tools WebSearch,WebFetch --allowedTools WebSearch,WebFetch " + wantPinned,
 		},
+		{
+			name: "a plain run has no tools and an empty system prompt",
+			req:  Request{Site: "turn_summary", Model: ModelHaiku, Prompt: "q", Plain: true},
+			out:  "ok",
+			want: "-p --output-format text --model " + ModelHaiku + " --tools  --system-prompt  " + wantPinned,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -285,6 +291,7 @@ func TestRunPinsItsSettingsWhateverTheRequestSays(t *testing.T) {
 		{name: "a config dir", req: Request{Site: "workspace_naming", ConfigDir: "/roots/multi", Prompt: "q"}},
 		{name: "a timeout", req: Request{Site: "title_synth", Timeout: time.Minute, Prompt: "q"}},
 		{name: "tools", req: Request{Site: "news_digest_ipo", Tools: []string{"WebSearch"}, Prompt: "q"}},
+		{name: "plain", req: Request{Site: "turn_summary", Plain: true, Prompt: "q"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -301,6 +308,29 @@ func TestRunPinsItsSettingsWhateverTheRequestSays(t *testing.T) {
 				t.Fatalf("argv = %q, want it to end with the pinned %q", got, wantPinned)
 			}
 		})
+	}
+}
+
+// TestRunPanicsOnAPlainRunNamingTools pins the invariant that bare inference
+// and a tool set are exclusive: a caller asking for both is a bug.
+func TestRunPanicsOnAPlainRunNamingTools(t *testing.T) {
+	// Arrange.
+	c, seen := scripted(t, permissiveGuard(t), "fake-claude", "ok", nil)
+	req := Request{Site: "turn_summary", Plain: true, Tools: []string{"WebSearch"}, Prompt: "q"}
+
+	// Act.
+	var recovered any
+	func() {
+		defer func() { recovered = recover() }()
+		_, _ = c.Run(context.Background(), req)
+	}()
+
+	// Assert.
+	if recovered == nil {
+		t.Fatal("Run() did not panic on a Plain run naming tools")
+	}
+	if seen.Args != nil {
+		t.Fatalf("argv = %q, want no spawn", seen.Args)
 	}
 }
 
