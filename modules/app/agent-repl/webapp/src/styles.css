@@ -1255,10 +1255,12 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 #ws-sidebar .detail .summary { font-style: italic; color: var(--muted); margin: 0.35rem 0 0; }
 
 /* THE BREATH ONLY FADES (owner ruling, 2026-10-14): a breathing name goes
-   light to dark and back, and never changes size. */
+   light to dark and back, and never changes size. The fade is 35% shallower
+   than the 0.35 trough it once had (owner request, 2026-10-14): a busy name
+   dims by 0.65 x 0.65 = 0.42 of its ink, so it bottoms out at 0.58. */
 @keyframes ws-pulse {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
+  50% { opacity: 0.58; }
 }
 
 #topbar {
