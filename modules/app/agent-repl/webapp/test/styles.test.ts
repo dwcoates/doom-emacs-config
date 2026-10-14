@@ -296,7 +296,7 @@ describe("the bubble geometry: the scrollbar on the inner edge", () => {
     const body = declarationsOf(".bubble-body");
 
     // Assert
-    expect(body).toMatch(/padding-right:\s*calc\(0\.9rem - var\(--bubble-scroll-gap\)\)/);
+    expect(body).toMatch(/padding-right:\s*var\(--bubble-content-inset\)/);
   });
 
   it("steps a tool card's scroll boxes out of the card's own inset", () => {
@@ -4589,5 +4589,31 @@ describe("the merge queue's header", () => {
 
   it("keeps the rows' own delimiter between the rows", () => {
     expect(inQueue(({ second }) => cascadedValue(second, "border-top-width"))).not.toBe("2px");
+  });
+});
+
+describe("the bubble content's right inset", () => {
+  it("is declared once, as the 0.9rem the bubble gave up less the gap it keeps", () => {
+    // Arrange / Act
+    const declared = stylesheet.match(/--bubble-content-inset:\s*([^;]+);/g) ?? [];
+
+    // Assert
+    expect(declared).toEqual(["--bubble-content-inset: calc(0.9rem - var(--bubble-scroll-gap));"]);
+  });
+
+  it.each([".bubble > .bubble-strip"])("is the right padding %s reads", (selector) => {
+    // Arrange / Act
+    const declarations = declarationsOf(selector) ?? "";
+
+    // Assert
+    expect(declarations).toMatch(/padding-right:\s*var\(--bubble-content-inset\)/);
+  });
+
+  it("is never hand-rolled outside its token", () => {
+    // Arrange / Act
+    const rolled = (withoutBlockComments(stylesheet).match(/calc\(0\.9rem - var\(--bubble-scroll-gap\)\)/g) ?? []).length;
+
+    // Assert: the one occurrence is the token's own declaration.
+    expect(rolled).toBe(1);
   });
 });
