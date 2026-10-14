@@ -7,7 +7,6 @@ import (
 	"time"
 
 	storev1 "agentrepl/proto/store/v1"
-	"agentrepl/proto/store/v1/storev1connect"
 )
 
 // SUBJECT — the facts the SIDECAR IS THE ONLY PRODUCER OF.
@@ -28,7 +27,7 @@ func TestInjectedContextReachesTheAgentsBook(t *testing.T) {
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
-	store := startRealStore(t)
+	store := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
 	cwd := "/work/injected-context-probe"
@@ -46,7 +45,7 @@ func TestInjectedContextReachesTheAgentsBook(t *testing.T) {
 	g.AppendLine(encodeRecord(t, memory))
 
 	// Assert.
-	line := awaitBookLine(ctx, t, store.Client, session, func(line *storev1.StorePageLine) bool {
+	line := awaitBookLine(ctx, t, store, session, func(line *storev1.StorePageLine) bool {
 		return activityOf(line).GetContextInjected().GetMemory() != nil
 	})
 	if activityOf(line).GetContextInjected().GetMemory().GetPath() == "" {
@@ -128,15 +127,15 @@ func TestABashRunsHandleIsItsSpawningCall(t *testing.T) {
 }
 
 // awaitBookLine re-reads one book until a line satisfies match.
-func awaitBookLine(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, agent string, match func(*storev1.StorePageLine) bool) *storev1.StorePageLine {
+func awaitBookLine(ctx context.Context, t *testing.T, store *fakeStore, agent string, match func(*storev1.StorePageLine) bool) *storev1.StorePageLine {
 	t.Helper()
 	tick := time.NewTicker(pollTick)
 	defer tick.Stop()
 	for {
-		held, _ := bookLinesIfKnown(ctx, t, c, agent)
+		held := store.Book(agent)
 		for _, at := range held {
-			if match(at.GetLine()) {
-				return at.GetLine()
+			if match(at) {
+				return at
 			}
 		}
 		select {
