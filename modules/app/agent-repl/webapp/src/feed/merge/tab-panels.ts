@@ -17,7 +17,8 @@
  * that followed a failed run (the run's one child row). The run shows its
  * tests until a fixing attempt exists, and that attempt from then on; clicking
  * the run's already selected badge opens a dropdown that switches between the
- * two, and the reader's choice then stands (`runPanel`).
+ * two, and the reader's choice then stands (`runPanel`). The run's tally rides
+ * at the right end of the run strip, whichever view is shown.
  *
  * AN AGENT STREAM IS THE SAME FOR EVERY MERGE: this workspace's own turns for a
  * sync merge, or the hidden merge workspace's turns the daemon mirrors here for
@@ -42,7 +43,12 @@ import { stopTicking } from "../ticking.js";
 import { AGENTIC_KINDS, childTabsOf, drawTabDuration, drawTabStateGlyph, type MergeTab } from "./tab-strip.js";
 import { createTabSet, drawSummary, type TabPanel } from "./tab-set.js";
 import { drawFeedMergeQueue } from "./queue.js";
-import { drawFeedMergeTestsRunOutput, updateFeedMergeTestsRunOutput } from "./tests-tab.js";
+import {
+  drawFeedMergeTestsRunOutput,
+  drawFeedMergeTestsRunTally,
+  updateFeedMergeTestsRunOutput,
+  updateFeedMergeTestsRunTally,
+} from "./tests-tab.js";
 import {
   drawFeedMergeConflictFiles,
   drawFeedMergeTabCommitting,
@@ -325,8 +331,8 @@ export function fixingOf(run: MergeTab, view: SubfeedView): MergeTab | undefined
 }
 
 /**
- * A run's panel: its TESTS view (the suites and the log, updated where they
- * stand) and, once a fixing attempt followed the run, its REMEDIATION view (the
+ * A run's panel: its tally for the run strip (`accessory`), its TESTS view
+ * (the suites and the log, updated where they stand) and, once a fixing attempt followed the run, its REMEDIATION view (the
  * attempt's agent stream under its heading). BOTH VIEWS STAY DRAWN and only
  * the one shown is unhidden, so switching views neither redraws a row nor
  * restarts a clock. `reselect` (the reader clicked the run's badge again)
@@ -349,6 +355,7 @@ function runPanel(tab: MergeTab, view: SubfeedView, rc: RowContext): TabPanel {
   remediation.className = "merge-run-remediation merge-run-view";
   remediation.setAttribute(RUN_VIEW_ATTRIBUTE, "remediation");
   host.append(tests, remediation);
+  const tally = drawFeedMergeTestsRunTally(shownOutput.suites);
 
   let fixing: { tab: MergeTab; panel: TabPanel } | null = null;
   const menu = createRunViewMenu(host, (picked) => {
@@ -383,9 +390,11 @@ function runPanel(tab: MergeTab, view: SubfeedView, rc: RowContext): TabPanel {
   show();
   return {
     nodes: [host],
+    accessory: tally,
     update(next: MergeTab): boolean {
       const output = outputOf(next);
       updateFeedMergeTestsRunOutput(tests, output, shownOutput, rc.ctx, path);
+      updateFeedMergeTestsRunTally(tally, output.suites);
       shownOutput = output;
       placeFixing(fixingOf(next, view));
       show();

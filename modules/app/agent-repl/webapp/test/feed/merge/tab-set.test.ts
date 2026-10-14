@@ -49,6 +49,32 @@ function mounted(depth: "top" | "nested" = "top", accept = true) {
 const tabs = (...rows: Parameters<typeof tabRow>[]) => childTabsOf(rows.map((r) => tabRow(...r)), undefined);
 
 describe("createTabSet", () => {
+  it("draws the shown panel's accessory at its strip's right end", () => {
+    // Arrange
+    const host = document.createElement("div");
+    const accessory = document.createElement("span");
+    const set = createTabSet(host, createTicker(1000), "nested", (tab) => ({ ...recordingPanel(tab, []), accessory }));
+    // Act
+    set.draw(tabs(["a", { kind: "committing", state: "live" }]));
+    // Assert
+    expect(host.querySelector(".merge-strip")?.lastElementChild).toBe(accessory);
+  });
+
+  it("drops the accessory when a panel without one is shown", () => {
+    // Arrange
+    const host = document.createElement("div");
+    const accessory = document.createElement("span");
+    accessory.className = "accessory";
+    const set = createTabSet(host, createTicker(1000), "nested", (tab) =>
+      tab.id === "b" ? { ...recordingPanel(tab, []), accessory } : recordingPanel(tab, []),
+    );
+    set.draw(tabs(["a", { kind: "queue", state: "settled", outcome: "succeeded" }], ["b", { kind: "committing", state: "live" }]));
+    // Act
+    host.querySelector<HTMLElement>('[data-merge-tab="queue"]')?.click();
+    // Assert
+    expect(host.querySelector(".merge-strip .accessory")).toBeNull();
+  });
+
   it("hands a click on the shown tab's badge to its panel", () => {
     const host = document.createElement("div");
     const log: string[] = [];

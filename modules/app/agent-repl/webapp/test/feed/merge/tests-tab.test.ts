@@ -13,14 +13,18 @@ import { harness } from "../harness.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import { PAINT_CLASS_NAMES } from "../../../src/vocab.js";
 import {
+  drawFeedMergeTestCounts,
   drawFeedMergeTestsRunOutput,
+  drawFeedMergeTestsRunTally,
   drawFeedMergeTestLog,
   drawFeedMergeTestSpan,
   drawFeedMergeTestSuite,
   drawTestSuites,
   placeFeedMergeTestCounts,
   suitesInListOrder,
+  sumFeedMergeTestCounts,
   updateFeedMergeTestsRunOutput,
+  updateFeedMergeTestsRunTally,
   updateTestSuites,
 } from "../../../src/feed/merge/tests-tab.js";
 import TESTS_TAB from "../../../src/feed/merge/tests-tab.ts?raw";
@@ -479,6 +483,11 @@ function counts(passed: number, failed: number, total: number) {
   return create(FeedMergeTestCountsSchema, { passed, failed, total });
 }
 
+/** A passed suite NAME carrying COUNTS, or none. */
+function withCounts(name: string, c?: ReturnType<typeof counts>): FeedMergeTestSuite {
+  return create(FeedMergeTestSuiteSchema, { name, state: { case: "passed", value: {} }, counts: c });
+}
+
 describe("placeFeedMergeTestCounts", () => {
   it("draws the counts once known", () => {
     const host = document.createElement("span");
@@ -513,5 +522,50 @@ describe("placeFeedMergeTestCounts", () => {
 
   it("is the one placement of counts in tests-tab", () => {
     expect(TESTS_TAB.match(/:scope > \.merge-suite-counts/g)).toHaveLength(1);
+  });
+});
+
+describe("sumFeedMergeTestCounts", () => {
+  it("sums every counted suite figure by figure", () => {
+    const sum = sumFeedMergeTestCounts([withCounts("a", counts(3, 1, 12)), withCounts("b", counts(2, 0, 5))]);
+    expect([sum?.passed, sum?.failed, sum?.total]).toEqual([5, 1, 17]);
+  });
+
+  it("leaves out a suite that carries no counts", () => {
+    const sum = sumFeedMergeTestCounts([withCounts("a", counts(3, 1, 12)), withCounts("b")]);
+    expect([sum?.passed, sum?.failed, sum?.total]).toEqual([3, 1, 12]);
+  });
+
+  it("knows no sum while no suite carries counts", () => {
+    expect(sumFeedMergeTestCounts([withCounts("a")])).toBeUndefined();
+  });
+});
+
+describe("drawFeedMergeTestsRunTally", () => {
+  it("draws every suite's counts summed", () => {
+    const el = drawFeedMergeTestsRunTally([withCounts("a", counts(3, 1, 12)), withCounts("b", counts(2, 0, 5))]);
+    expect(el.textContent).toBe("5/1/17");
+  });
+
+  it("draws the sum exactly as a suite's own counts are drawn", () => {
+    const el = drawFeedMergeTestsRunTally([withCounts("a", counts(3, 1, 12))]);
+    expect(el.firstElementChild?.isEqualNode(drawFeedMergeTestCounts(counts(3, 1, 12)))).toBe(true);
+  });
+
+  it("is empty while no suite carries counts", () => {
+    expect(drawFeedMergeTestsRunTally([withCounts("a")]).childElementCount).toBe(0);
+  });
+
+  it("moves its figures on update", () => {
+    const el = drawFeedMergeTestsRunTally([withCounts("a", counts(1, 0, 4))]);
+    updateFeedMergeTestsRunTally(el, [withCounts("a", counts(2, 1, 4))]);
+    expect(el.textContent).toBe("2/1/4");
+  });
+});
+
+describe("the stylesheet's run tally", () => {
+  it("draws the tally at the run strip's right end", () => {
+    const rules = rulesOf(STYLESHEET).filter((rule) => rule.selectors.includes(".merge-strip > .merge-run-tally"));
+    expect(rules.map((rule) => rule.declarations).join(";")).toContain("margin-left: auto");
   });
 });

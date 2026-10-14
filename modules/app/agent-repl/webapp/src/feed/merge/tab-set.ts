@@ -24,6 +24,10 @@
  * EVERYTHING IS DRAWN BEFORE THE OLD CONTENT COMES DOWN, and the swap is one
  * DOM operation (owner ruling, 2026-10-08: a merge bubble's update never moves
  * a scroll).
+ *
+ * THE SHOWN PANEL MAY ADD TO ITS STRIP (owner request, 2026-10-14): its
+ * `accessory`, drawn after the tabs at the strip's right end, comes and goes
+ * with the panel.
  */
 import { equals } from "@bufbuild/protobuf";
 import { log } from "../../log.js";
@@ -54,6 +58,12 @@ export interface TabPanel {
    * here; a panel without leaves it unset, and the click only pins the tab.
    */
   reselect?(badge: HTMLElement): void;
+  /**
+   * What the panel adds to its strip's right end while it is shown (a run's
+   * tally), kept current by the panel's own `update`; a panel without leaves
+   * it unset.
+   */
+  readonly accessory?: HTMLElement;
 }
 
 /** Builds the panel of one tab. */
@@ -105,9 +115,9 @@ export function createTabSet(
       operation: "merge.draw-strip",
       context: { depth, tabs: tabs.length, active: active?.kind ?? "none", picked: picked ?? "auto" },
     });
+    drawPanel(active);
     drawStrip(tabs, active);
     drawSummary(summary, active);
-    drawPanel(active);
   };
 
   function drawStrip(tabs: readonly MergeTab[], active: MergeTab | undefined): void {
@@ -140,7 +150,8 @@ export function createTabSet(
       stopTicking(drawn.el);
       drawnTabs.delete(id);
     }
-    placeChildren(strip, els);
+    const accessory = shown?.panel.accessory;
+    placeChildren(strip, accessory === undefined ? els : [...els, accessory]);
   }
 
   function drawPanel(active: MergeTab | undefined): void {
