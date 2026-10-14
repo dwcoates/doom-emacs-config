@@ -10,13 +10,17 @@
 #   0  ready
 #   10 no container runtime (no docker, no podman)
 #   11 a runtime binary exists but its daemon is not reachable
-#   12 the image is not built
+#   12 this checkout's image (tagged by its sandbox stamp) is not built
 #   13 not enough free disk
 #   14 the runtime did not answer within the bound; its engine is wedged
 set -euo pipefail
 
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-IMAGE=${AGENT_REPL_SANDBOX_IMAGE:-agent-repl-e2e-sandbox:latest}
+# The image is this checkout's own, by its sandbox stamp: the same name
+# e2e-sandbox.sh runs and builds (sandbox-image.sh).
+# shellcheck source=sandbox-image.sh
+. "$here/sandbox-image.sh"
+IMAGE=$(sandbox_image)
 # The image carries Emacs, Doom's package set, two node_modules trees and a
 # primed Go module cache; the working copy and build outputs add to that.
 MIN_FREE_GB=${AGENT_REPL_SANDBOX_MIN_FREE_GB:-12}
