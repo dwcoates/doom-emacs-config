@@ -331,3 +331,21 @@ func TestAFreshBootThatCannotListItsWorkspacesStillPaysTheReports(t *testing.T) 
 		t.Fatalf("records = %+v, want the failed listing at ERROR", h.log.Records())
 	}
 }
+
+func TestAFreshBootThatStandsDownBeforeJudgingSaysSoAtInfo(t *testing.T) {
+	// Arrange: the daemon is standing down as the boot settles.
+	h := newHarness(t)
+	h.workspace(t)
+	h.endLifetime()
+
+	// Act
+	h.c.SettleBoot(context.Background())
+
+	// Assert
+	if !hasRecord(h, opStaleness, "info", "the daemon stood down before the shims were judged against the installed build") {
+		t.Fatalf("records = %+v, want the stand-down at INFO", h.log.Records())
+	}
+	if hasRecord(h, opStaleness, "error", "could not list the workspaces to check for stale shims") {
+		t.Fatal("a stand-down was recorded as a failed listing at ERROR")
+	}
+}

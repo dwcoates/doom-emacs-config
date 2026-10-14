@@ -1092,8 +1092,11 @@ type harness struct {
 	c *controller
 	// merges records the merge mover's calls, in order, as "suspend <ws>" and
 	// "adopt <ws>"; suspendErr and adoptErr fail them.
-	merges       *fakeMerges
-	reports      *fakeReports
+	merges  *fakeMerges
+	reports *fakeReports
+	// endLifetime ends the controller's lifetime, as the daemon's stand-down
+	// does.
+	endLifetime  func()
 	progress     *fakeProgress
 	db           wsm.DB
 	clock        *fakeClock
@@ -1219,6 +1222,7 @@ func newHarnessOn(t *testing.T, onFile bool, adjust ...func(*Deps)) *harness {
 	order := &steps{}
 	freeness := newFakeFreeness()
 	h := &harness{
+		endLifetime:  endLifetime,
 		db:           db,
 		clock:        newFakeClock(instant),
 		spawner:      &fakeSpawner{address: "127.0.0.1:7788"},

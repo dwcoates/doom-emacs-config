@@ -208,7 +208,7 @@ func (s *Service) submit(ctx context.Context, requester ids.WorkspaceID, label, 
 	outcome, err := s.deps.Prompts.Submit(ctx, requester, feed.SaidText(text), key,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK, wsm.DeliveryDeferred, nil)
 	if err != nil {
-		log.Error(op, "could not submit a detached merge's handback to its requester", withCause(fields, err))
+		failedUnlessStoodDown(ctx, log, log.Error, "handback", "could not submit a detached merge's handback to its requester", fields, err)
 		return err
 	}
 	fields["turn"] = string(outcome.Turn)
@@ -249,7 +249,7 @@ func (s *Service) PayOwed(ctx context.Context, coveredOnly bool, deployErr error
 	log := s.deps.Log.Global()
 	owed, err := s.deps.DB.OwedHandBacks(ctx, coveredOnly)
 	if err != nil {
-		log.Error(op, "could not read the owed landing reports; they stay owed", withCause(dlog.Context{"covered_only": coveredOnly}, err))
+		failedUnlessStoodDown(ctx, log, log.Error, "payment", "could not read the owed landing reports; they stay owed", dlog.Context{"covered_only": coveredOnly}, err)
 		return
 	}
 	for _, report := range owed {
@@ -260,7 +260,7 @@ func (s *Service) PayOwed(ctx context.Context, coveredOnly bool, deployErr error
 			continue
 		}
 		if _, err := s.deps.DB.PayHandBack(ctx, report.MergeWorkspace); err != nil {
-			log.Error(op, "handed a landed merge's report back but could not mark it paid; the next payment hands it back again under the same key", withCause(fields, err))
+			failedUnlessStoodDown(ctx, log, log.Error, "payment", "handed a landed merge's report back but could not mark it paid; the next payment hands it back again under the same key", fields, err)
 		}
 	}
 }
@@ -559,15 +559,20 @@ func lastActive(ws wsm.Workspace) time.Time {
 	return last
 }
 
-// sweepFailed records a sweep step that failed with err at level, unless the
-// daemon was standing down: the sweep runs on the daemon's lifetime, so a step
-// its end cut short is the orderly exit it is, recorded at INFO with what it
-// left undone.
+// sweepFailed records a sweep step that failed (failedUnlessStoodDown).
 func sweepFailed(ctx context.Context, log dlog.Logger, level func(operation, message string, ctx dlog.Context), message string, fields dlog.Context, err error) {
+	failedUnlessStoodDown(ctx, log, level, "sweep", message, fields, err)
+}
+
+// failedUnlessStoodDown records a step of DURING (a sweep, a payment) that
+// failed with err at level, unless the daemon was standing down: the step runs
+// on the daemon's lifetime, so a step its end cut short is the orderly exit it
+// is, recorded at INFO with what it left undone.
+func failedUnlessStoodDown(ctx context.Context, log dlog.Logger, level func(operation, message string, ctx dlog.Context), during, message string, fields dlog.Context, err error) {
 	if standdown.CutShort(ctx, err) {
 		stood := withCause(fields, err)
 		stood["left_undone"] = message
-		log.Info(op, "the daemon stood down mid-sweep", stood)
+		log.Info(op, "the daemon stood down mid-"+during, stood)
 		return
 	}
 	level(op, message, withCause(fields, err))

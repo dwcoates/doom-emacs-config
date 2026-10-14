@@ -1426,3 +1426,42 @@ func TestPayOwedThatCannotMarkAReportPaidRecordsIt(t *testing.T) {
 		t.Fatalf("the unpaid mark was not recorded at ERROR with its cause: %+v", f.logs.Records())
 	}
 }
+
+func TestPayOwedCutShortByAStandDownSaysSoAtInfo(t *testing.T) {
+	// Arrange: the read fails because the daemon's lifetime ended.
+	f := newFixture(t)
+	f.withDB(failingDB{DB: f.db, owedErr: context.Canceled})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act
+	f.svc.PayOwed(ctx, true, nil)
+
+	// Assert
+	if r, ok := f.recordWith(dlog.LevelInfo, "the daemon stood down mid-payment"); !ok || r.Context["left_undone"] != "could not read the owed landing reports; they stay owed" {
+		t.Fatalf("records = %+v, want the cut-short payment at INFO with what it left undone", f.logs.Records())
+	}
+	if _, ok := f.recordWith(dlog.LevelError, "could not read the owed landing reports; they stay owed"); ok {
+		t.Fatal("a stand-down was recorded as a failed read at ERROR")
+	}
+}
+
+func TestAHandBackCutShortByAStandDownSaysSoAtInfo(t *testing.T) {
+	// Arrange: the submission fails because the daemon's lifetime ended.
+	f := newFixture(t)
+	f.prompts.err = context.Canceled
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act
+	err := f.svc.HandBack(ctx, "ws-requester", wsm.Workspace{ID: "ws-merge", Name: "sample-merge"},
+		merge.DetachedOutcome{Kind: merge.DetachedFailed, Summary: "tests failed", Branch: "sample"})
+
+	// Assert
+	if err == nil {
+		t.Fatal("HandBack = nil, want the cut-short submission's error")
+	}
+	if _, ok := f.recordWith(dlog.LevelInfo, "the daemon stood down mid-handback"); !ok {
+		t.Fatalf("records = %+v, want the cut-short handback at INFO", f.logs.Records())
+	}
+}

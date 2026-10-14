@@ -14,6 +14,7 @@ import (
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/sessionlock"
+	"agent-repld/internal/standdown"
 	"agent-repld/internal/wsm"
 )
 
@@ -1219,6 +1220,10 @@ func (c *controller) SettleBoot(ctx context.Context) {
 func (c *controller) judgeLiveShims(fields dlog.Context) (map[ids.WorkspaceID][]deployprogress.Note, bool) {
 	lifetime := c.lifetime(context.Background())
 	workspaces, err := c.deps.DB.ListWorkspaces(lifetime)
+	if standdown.CutShort(lifetime, err) {
+		c.log.Info(opStaleness, "the daemon stood down before the shims were judged against the installed build", withCause(fields, err))
+		return nil, false
+	}
 	if err != nil {
 		c.log.Error(opStaleness, "could not list the workspaces to check for stale shims", withCause(fields, err))
 		return nil, false
