@@ -2,6 +2,7 @@ package procgroup
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -30,4 +31,28 @@ func ParseStat(stat string) (StatLine, error) {
 		return StatLine{}, fmt.Errorf("the stat line has no state after its command name: %q", stat)
 	}
 	return StatLine{Comm: stat[start+1 : end], Fields: fields}, nil
+}
+
+// linuxPFExiting is PF_EXITING (include/linux/sched.h), set as do_exit
+// begins, before the process's descriptors close.
+const linuxPFExiting = 0x4
+
+// parseStatExiting reads the state (field 3) and flags (field 9) of one
+// /proc/<pid>/stat line: exiting when PF_EXITING is set or the state is a
+// zombie or dead one.
+func parseStatExiting(stat string) (bool, error) {
+	line, err := ParseStat(stat)
+	if err != nil {
+		return false, err
+	}
+	fields := line.Fields
+	if len(fields) < 7 {
+		return false, fmt.Errorf("/proc stat line is short: %q", stat)
+	}
+	state := fields[0]
+	flags, err := strconv.ParseUint(fields[6], 10, 64)
+	if err != nil {
+		return false, fmt.Errorf("/proc stat flags %q: %w", fields[6], err)
+	}
+	return state == "Z" || state == "X" || flags&linuxPFExiting != 0, nil
 }
