@@ -143,6 +143,7 @@ const (
 	RPCSetSessionPermissionMode = "SetSessionPermissionMode"
 	RPCSetSessionEffort         = "SetSessionEffort"
 	RPCHibernate                = "Hibernate"
+	RPCSetKeepalive             = "SetKeepalive"
 	RPCKillSession              = "KillSession"
 	RPCStartTurn                = "StartTurn"
 	RPCWatchAgent               = "WatchAgent"
