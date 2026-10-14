@@ -3988,10 +3988,33 @@ describe("the expanded-item ceiling", () => {
     expect(declarationsOf(selector)).toMatch(/max-height:\s*var\(--feed-item-max-h\)/);
   });
 
-  it("caps an expanded merge bubble a quarter short of the ceiling", () => {
+  it("caps an expanded merge bubble at 45% of the ceiling", () => {
     expect(declarationsOf('.tool-card.bubble-fold[data-merge-bubble][data-expanded="true"]')).toMatch(
-      /max-height:\s*calc\(var\(--feed-item-max-h\) \* 0\.75\)/,
+      /max-height:\s*calc\(var\(--feed-item-max-h\) \* 0\.45\)/,
     );
+  });
+
+  it("keeps an expanded bubble's head at its full height under the cap", () => {
+    expect(declarationsOf('.bubble-fold[data-expanded="true"] > .bubble-head')).toMatch(/flex:\s*0 0 auto/);
+  });
+
+  it("lets only an expanded bubble's sub-feed shrink and scroll under the cap", () => {
+    // Arrange
+    const rule = declarationsOf('.bubble-fold[data-expanded="true"] > .bubble-subfeed');
+
+    // Assert
+    expect(rule).toMatch(/flex:\s*0 1 auto/);
+    expect(rule).toMatch(/min-height:\s*0/);
+    expect(rule).toMatch(/overflow-y:\s*auto/);
+  });
+
+  it("pins the merge bubble's tab strip so the cut comes out of the tab content", () => {
+    // Arrange
+    const rule = declarationsOf(".merge-strip");
+
+    // Assert
+    expect(rule).toMatch(/position:\s*sticky/);
+    expect(rule).toMatch(/top:\s*0/);
   });
 
   it("never caps a response or prompt bubble's scroll box at the item ceiling", () => {
