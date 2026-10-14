@@ -114,9 +114,7 @@ func TestAnAsyncMergeThatCleansUpRemovesTheBranchsWorktreeOnceItLands(t *testing
 	if merge.GetSuccess() == nil {
 		t.Fatalf("the merge ended %v, want landed", merge.GetResult())
 	}
-	s.d.AwaitLogRecord(s.d.RunLogPath(), "the cleanup's removal", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.merge.teardown" && r.Message == "removed the worktree an async merge asked to clean up"
-	})
+	s.d.AwaitFileGone(branchDir)
 	if s.repo.HasWorktree(branchDir) {
 		t.Fatal("the branch's worktree is still registered after the cleanup")
 	}
@@ -388,7 +386,7 @@ func TestNoMergeFactReachesAnyClientBeforeTheRequestingTurnEnds(t *testing.T) {
 
 	// Act: the agent's command file is applied while its turn runs.
 	path := commandfileWrite(t, s.d, "workspace_commands_ask.json",
-		`[{"type":"merge","project_dir":"`+s.f.ws.GetDir()+`"}]`)
+		`[{"type":"merge","project_dir":"`+s.f.ws.GetDir()+`","one_shot":true}]`)
 	applied := filepath.Join(filepath.Dir(path), "applied", filepath.Base(path))
 	s.d.AwaitFileExists(applied)
 
@@ -576,23 +574,37 @@ func TestALandedMergesLedgerRecordsEachStepsInterval(t *testing.T) {
 // carries the address it ran at.
 func TestARelaunchedDaemonReplaysARepairTurnInItsTabAlone(t *testing.T) {
 	t.Parallel()
-	// Arrange: a conflict the requester's own session resolves, kept open.
+	// Arrange: a one-shot whose first conflicted commit the requester's own
+	// session resolves (the repair turn under test), and whose second it gives
+	// up on, so the merge FAILS and the requester stays open and served.
 	s := newSourcedRepo(t)
 
 	root := s.f.watchRootFeed()
-	harness.CommitWork(t, s.f.ws.GetDir())
+	harness.CommitWork(t, s.f.ws.GetDir(), "work.txt")
+	harness.CommitWork(t, s.f.ws.GetDir(), "more.txt")
 	s.repo.CommitIn(s.repo.Dir, "main.txt", "moved\n")
-	s.repo.ScriptRebaseConflict(mergeBranchOf(t, s.f.ws), 1, "work.txt")
+	branch := mergeBranchOf(t, s.f.ws)
+	s.repo.ScriptRebaseConflict(branch, 1, "work.txt")
+	s.repo.ScriptRebaseConflict(branch, 2, "more.txt")
+	s.d.ExpectWarnings("daemon.gitclient.merge_no_ff")
 	s.mergeAs(t, harness.OneShot())
 	req := s.f.shim.ExpectStartTurn()
 	s.d.AwaitWorkspaceLogOperationCount(s.f.ws.GetDir(), harness.OpTurnOpened, 2)
 	repair := req.GetTurn().GetValue()
 	s.repo.ResolveConflicts(s.f.ws.GetDir())
 	pushConcludedTurn(s.f.shim, mainAgent, "resolved")
-	head := awaitRow(t, s.f, root, "the merge's landed terminal", func(row *frontendv1.FeedRow) bool {
-		return row.GetActivity().GetMerge().GetSuccess() != nil
+	for attempt := 1; attempt <= merge.MaxConflictAttempts; attempt++ {
+		s.f.shim.ExpectStartTurn()
+		s.d.AwaitWorkspaceLogOperationCount(s.f.ws.GetDir(), harness.OpTurnOpened, 2+attempt)
+		pushConcludedTurn(s.f.shim, mainAgent, "gave-up")
+	}
+	head := awaitRow(t, s.f, root, "the merge's failed terminal", func(row *frontendv1.FeedRow) bool {
+		return row.GetActivity().GetMerge().GetError() != nil
 	})
-	s.d.AwaitLandingDeployed()
+	// The failure is handed back to the requester as a turn of its own.
+	s.f.shim.ExpectStartTurn()
+	s.d.AwaitWorkspaceLogOperationCount(s.f.ws.GetDir(), harness.OpTurnOpened, 3+merge.MaxConflictAttempts)
+	pushConcludedTurn(s.f.shim, mainAgent, "noted")
 	liveTab := s.f.awaitRowInFeed(head.GetId(), "the repair prompt in its tab", func(row *frontendv1.FeedRow) bool {
 		return row.GetUserPrompt() != nil && row.GetTurn().GetValue() == repair
 	})
@@ -649,11 +661,12 @@ func TestARelaunchedDaemonReplaysARepairTurnInItsTabAlone(t *testing.T) {
 // reader saw.
 func TestARelaunchedDaemonDrawsTheLandedMergesBubbleAgain(t *testing.T) {
 	t.Parallel()
-	// Arrange: a landed merge, kept open so the workspace is still served.
+	// Arrange: a landed ASYNC merge, which leaves the requester open and
+	// served, its bubble in the requester's feed.
 	s := newSourcedRepo(t)
 	root := s.f.watchRootFeed()
-	harness.CommitWork(t, s.f.ws.GetDir())
-	s.mergeAs(t, harness.OneShot())
+	s.repo.AddBranch("agent-fix")
+	s.mergeAs(t, harness.Async("fix-merge", "agent-fix"))
 	head := awaitRow(t, s.f, root, "the merge's landed terminal", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge().GetSuccess() != nil
 	})
