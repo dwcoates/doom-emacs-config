@@ -11,6 +11,7 @@ import (
 	"agent-repld/internal/bounce"
 	"agent-repld/internal/bringup"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/replyquote"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
@@ -114,7 +115,7 @@ func (v *verbs) deliverCreateFailure(ctx context.Context, log dlog.Logger, spec 
 	request, err := v.composeBrief(ctx, log, opCreateFailedReport, BriefCreateFailed, map[string]string{
 		"repository":     main,
 		"request":        describeCreateRequest(spec),
-		"cause":          quoteLines(cause.Error()),
+		"cause":          replyquote.Fenced(cause.Error()),
 		"agent_repl_dir": v.deps.CheckoutRoot,
 	})
 	if err != nil {
@@ -166,19 +167,9 @@ func describeCreateRequest(spec CreateSpec) string {
 	add("model", spec.Model)
 	add("permission mode", spec.PermissionMode)
 	if prompt := strings.TrimSpace(spec.InitialPrompt); prompt != "" {
-		lines = append(lines, "- initial prompt:", "", quoteLines(prompt))
+		lines = append(lines, "- initial prompt:", "", replyquote.Fenced(prompt))
 	} else {
 		lines = append(lines, "- initial prompt: none")
 	}
 	return strings.Join(lines, "\n")
-}
-
-// quoteLines renders TEXT as a markdown block quote, line by line, so a prompt
-// carrying its own fences or headings cannot break out of the request.
-func quoteLines(text string) string {
-	quoted := strings.Split(text, "\n")
-	for i, line := range quoted {
-		quoted[i] = strings.TrimRight("> "+line, " ")
-	}
-	return strings.Join(quoted, "\n")
 }
