@@ -321,21 +321,47 @@ function tabGlyphOf(tab: MergeTab): [string | null, string] {
 }
 
 /**
- * Which tab the bubble shows when the reader has not chosen one.
+ * Which tab the bubble shows when the reader has not chosen one: the MOST
+ * RELEVANT tab, which is the one whose state changed last (owner request,
+ * 2026-10-13).
  *
- * THE LAST TAB THAT IS STILL RUNNING, because that is where the merge actually
- * is; failing that the last tab, which on a settled
- * run is where it ended. Never a "most interesting" heuristic — the strip is
- * chronological and the rule is positional.
+ * A TAB'S LAST CHANGE IS ITS LAST INSTANT: when it settled, else when its work
+ * began. Those are the daemon's own instants, so the choice is the same whether
+ * the strip followed every push or was first drawn just now (a lazily opened
+ * bubble, a reloaded page), and a re-push that only moved a clock or redrew a
+ * live tab's content moves nothing.
+ *
+ * A CONCLUSION HANDS THE VIEW BACK TO WHAT IS STILL RUNNING: when the last
+ * change was a tab settling, the tab still running is where the merge is (the
+ * queue tab of a merge that went back to waiting after rebasing in line), the
+ * most recently started one if several are. With nothing running the
+ * concluded tab stays shown, since on a settled run that is where it ended.
+ *
+ * Equal instants go to the later tab, because the strip is chronological: a
+ * step that settles as the next begins hands over to the next. A strip with no
+ * instant at all (only commits the replay has not reached) shows its last tab.
  */
 export function autoSelectedTab(tabs: readonly MergeTab[]): MergeTab | undefined {
-  for (let i = tabs.length - 1; i >= 0; i -= 1) {
-    const tab = tabs[i];
-    // A tab waiting on the user, or a run waiting for its test turn, is still
-    // under way: the merge is there.
-    if (isUnderWay(tab)) return tab;
+  const latest = latestBy(tabs, (tab) => tab.endedMs ?? tab.startedMs);
+  if (latest === undefined) return tabs[tabs.length - 1];
+  if (latest.state !== "settled") return latest;
+  // A tab waiting on the user, or a run waiting for its test turn, is still
+  // under way: the merge is there.
+  const running = tabs.filter(isUnderWay);
+  return latestBy(running, (tab) => tab.startedMs) ?? latest;
+}
+
+/** The tab with the greatest INSTANT, the later one on a tie; tabs without one never win. */
+function latestBy(tabs: readonly MergeTab[], instant: (tab: MergeTab) => number | undefined): MergeTab | undefined {
+  let latest: MergeTab | undefined;
+  let latestMs = -Infinity;
+  for (const tab of tabs) {
+    const ms = instant(tab);
+    if (ms === undefined || ms < latestMs) continue;
+    latest = tab;
+    latestMs = ms;
   }
-  return tabs[tabs.length - 1];
+  return latest;
 }
 
 /** Whether TAB's work is under way: running, held on the user, or in line for its test turn. */
