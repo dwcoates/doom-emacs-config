@@ -45,7 +45,7 @@ func (OSTable) List() ([]Proc, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ps %s: %w", strings.Join(psArgs, " "), err)
 	}
-	return parsePS(string(out), getsid)
+	return parsePS(string(out), Getsid)
 }
 
 // parsePS reads `ps -o pid=,stat=,lstart=,args=` into processes, asking getsid
