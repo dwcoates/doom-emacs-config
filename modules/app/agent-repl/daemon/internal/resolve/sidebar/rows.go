@@ -35,7 +35,7 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 				"end": s.restoredEnd, "result": s.result.String(),
 			})
 	}
-	armName := statusArm(s, rec, session, r.footer.Status(rec.ID), rowLog)
+	armName := statusArm(s, rec, session, r.footer.Status(rec.ID), r.now(), rowLog)
 	r.noteResult(rec.ID, s, rowLog)
 	// THE MARKER IS DERIVED FROM THE READ FACT, in the same breath as the
 	// status, so the row's display mode cannot lag its status by a push and a
@@ -211,8 +211,13 @@ func when(rec wsm.Workspace, clock *frontendv1.FooterClock) *frontendv1.RosterRo
 		out.Shown = &frontendv1.RosterRowWhen_Merged{
 			Merged: &frontendv1.RosterRowWhenMerged{AtMs: rec.MergedAt.UnixMilli()}}
 	case rec.HiddenAt != nil:
-		out.Shown = &frontendv1.RosterRowWhen_Hidden{
-			Hidden: &frontendv1.RosterRowWhenHidden{AtMs: rec.HiddenAt.UnixMilli()}}
+		hidden := &frontendv1.RosterRowWhenHidden{AtMs: rec.HiddenAt.UnixMilli()}
+		// THE COLUMN COUNTS DOWN TO THE LAPSE once the daemon knows it
+		// (cachelapse.Keeper), and up from the hide until then.
+		if rec.CacheLapse != nil {
+			hidden.Cache = &frontendv1.RosterRowWhenHiddenCache{LapsesAtMs: rec.CacheLapse.LapsesAt.UnixMilli()}
+		}
+		out.Shown = &frontendv1.RosterRowWhen_Hidden{Hidden: hidden}
 	case clock.TurnStartedAtMs != nil && clock.TurnEndedAtMs == nil:
 		out.Shown = &frontendv1.RosterRowWhen_TurnRunning{
 			TurnRunning: &frontendv1.RosterRowWhenTurnRunning{StartedAtMs: *clock.TurnStartedAtMs}}
