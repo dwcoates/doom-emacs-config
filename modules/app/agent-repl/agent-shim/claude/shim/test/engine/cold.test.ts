@@ -283,11 +283,11 @@ describe("reading the transcript's facts", () => {
   });
 });
 
-// ABOVE THE COLD-GATE FLOOR ON PURPOSE. The gate does not ask below 70,000
-// tokens, so a fixture under it would make every judging case below read
+// ABOVE THE COLD-GATE FLOOR ON PURPOSE. The gate does not ask at or under
+// 120,000 tokens, so a fixture under it would make every judging case below read
 // "warm" for the floor's reason rather than the one it is testing.
 const FACTS: TranscriptFacts = {
-  contextTokens: 100_000,
+  contextTokens: 150_000,
   sawUsage: true,
   lastRequestAtMs: 1_000_000,
   cacheTtlMs: CACHE_TTL_5M_MS,
@@ -373,11 +373,11 @@ function floorRecord(before: number): { level: string; context: Record<string, u
 
 describe("the cold-gate floor", () => {
   // OWNER RULING, 2026-09-13: no cold gate when the context a cold read would
-  // re-read is under 70,000 tokens; at or above 70,000 the gate asks as
-  // before. The floor is stated once here so a change to the constant has to
+  // re-read is at or under 120,000 tokens (raised from 70,000 on
+  // 2026-10-14); above 120,000 the gate asks. The floor is stated once here so a change to the constant has to
   // be a deliberate change to this table too.
-  it("stands at the 70,000 tokens the owner ruled", () => {
-    expect(COLD_GATE_FLOOR_TOKENS).toBe(70_000);
+  it("stands at the 120,000 tokens the owner ruled", () => {
+    expect(COLD_GATE_FLOOR_TOKENS).toBe(120_000);
   });
 
   const LAPSED_AT = 1_000_000 + CACHE_TTL_5M_MS + 1;
@@ -390,15 +390,15 @@ describe("the cold-gate floor", () => {
     readonly expected: string | undefined;
   }> = [
     {
-      name: "a lapse holding 69,999 tokens continues WARM, one token under the floor",
-      facts: { ...FACTS, contextTokens: 69_999 },
+      name: "a lapse holding exactly 120,000 tokens continues WARM: the gate asks only above the floor",
+      facts: { ...FACTS, contextTokens: 120_000 },
       nowMs: LAPSED_AT,
       requestedModel: "claude-opus-5",
       expected: undefined,
     },
     {
-      name: "a lapse holding exactly 70,000 tokens GATES: the floor is a floor, not a ceiling",
-      facts: { ...FACTS, contextTokens: 70_000 },
+      name: "a lapse holding 120,001 tokens GATES, one token above the floor",
+      facts: { ...FACTS, contextTokens: 120_001 },
       nowMs: LAPSED_AT,
       requestedModel: "claude-opus-5",
       expected: "lapsed",
@@ -435,18 +435,18 @@ describe("the cold-gate floor", () => {
   }
 
   it("records ONE info line naming the context, the lapse and the rule when it lets a lapse through", () => {
-    // Arrange: a lapsed conversation one token under the floor.
+    // Arrange: a lapsed conversation exactly at the floor.
     const before = logSinkMark();
 
     // Act.
-    judgeCold({ ...FACTS, contextTokens: 69_999 }, LAPSED_AT, "claude-opus-5");
+    judgeCold({ ...FACTS, contextTokens: 120_000 }, LAPSED_AT, "claude-opus-5");
 
     // Assert: the log can answer "why was I not asked".
     const record = floorRecord(before);
     expect([record?.level, record?.context.context_tokens, record?.context.floor_tokens, record?.context.lapse_ms, record?.context.reason]).toEqual([
       "info",
-      69_999,
-      70_000,
+      120_000,
+      120_000,
       CACHE_TTL_5M_MS + 1,
       "lapsed",
     ]);
@@ -474,7 +474,7 @@ describe("the refusal message", () => {
       reason: cold.reason.case,
       ttl: cold.reason.case === "lapsed" ? cold.reason.value.cacheTtlMs : undefined,
     }).toEqual({
-      contextTokens: 100_000n,
+      contextTokens: 150_000n,
       lastRequestAtMs: 1_000_000n,
       reason: "lapsed",
       ttl: BigInt(CACHE_TTL_5M_MS),
@@ -522,7 +522,7 @@ describe("reading facts off a transcript that cannot be read", () => {
 
 describe("the held cache's projected lapse", () => {
   it.each([
-    ["at the floor", COLD_GATE_FLOOR_TOKENS, "gated"],
+    ["at the floor", COLD_GATE_FLOOR_TOKENS, "ungated"],
     ["above the floor", COLD_GATE_FLOOR_TOKENS + 1, "gated"],
     ["under the floor", COLD_GATE_FLOOR_TOKENS - 1, "ungated"],
     ["with no context", 0, "ungated"],
@@ -544,9 +544,9 @@ describe("the held cache's projected lapse", () => {
 
   it("states the context a gated resume re-reads", () => {
     // Act
-    const lapse = sessionCacheLapse(1_000, 90_000);
+    const lapse = sessionCacheLapse(1_000, 150_000);
 
     // Assert
-    expect(lapse.afterLapse.case === "gated" ? lapse.afterLapse.value.contextTokens : undefined).toBe(90_000n);
+    expect(lapse.afterLapse.case === "gated" ? lapse.afterLapse.value.contextTokens : undefined).toBe(150_000n);
   });
 });
