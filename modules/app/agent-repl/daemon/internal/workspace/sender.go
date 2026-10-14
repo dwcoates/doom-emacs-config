@@ -27,8 +27,17 @@ import (
 // on demand, 2026-10-02). The main agent's standing watch serves everything
 // the turn writes live, so the page owes the views nothing: StartTurn opens
 // tail_only when the daemon holds nothing of the main agent, and otherwise
-// catches up from the newest pointer it holds (see sender.known). The page's
-// size is the store's; the daemon states none.
+// catches up from the newest pointer it holds (see sender.opening). The
+// page's size is the store's; the daemon states none.
+//
+// SO NO TURN STARTS BEFORE THAT WATCH STANDS (2026-10-13). The watch opens in
+// the background when the session starts, and a turn sent before it was
+// subscribed wrote frames nothing received: the turn's page was tail_only (no
+// pointer yet) and so was the watch, so neither carried them, and a subagent
+// spawned in that window was never live work. StartTurn waits for the main
+// watch's opening page (sessionwatcher.Watcher.AwaitMainWatching); the shim
+// opens that page and the watch's tail together, so every frame after it
+// arrives, whichever way the turn is started.
 
 // coldThresholdPolicy is the context size, in tokens, above which a MODEL
 // CHANGE is refused as an unasked cold-cache cost rather than paid. It is
@@ -53,14 +62,11 @@ func (f *Fleet) Sender(ws ids.WorkspaceID) (promptqueue.Sender, bool) {
 	if !f.Live(ws) {
 		return nil, false
 	}
-	return &sender{client: client, known: func() *conversationv1.HistoryPointer {
+	return &sender{client: client, watcher: func() (mainWatch, bool) {
 		// Read AT THE CALL, not here: the queue may hold this sender across a
-		// wait, and the pointer the turn must be bounded by is the newest one
-		// the main watch has been served when the turn is handed over.
-		if watcher, ok := f.sessionWatcher(ws); ok {
-			return watcher.MainKnownThrough()
-		}
-		return nil
+		// wait, and the watcher a turn is bounded by is the one standing when
+		// the turn is handed over.
+		return f.sessionWatcher(ws)
 	}}, true
 }
 
@@ -93,10 +99,16 @@ func (f *Fleet) sessionWatcher(ws ids.WorkspaceID) (sessionwatcher.Watcher, bool
 // sender narrows a shim client to the queue's delivery surface.
 type sender struct {
 	client shimclientSender
-	// known answers the main agent's watch's newest served pointer, nil when
-	// it was served none (or no watcher is up). StartTurn states it as
-	// known_through.
-	known func() *conversationv1.HistoryPointer
+	// watcher answers the session's watcher at the call, false when none is
+	// up. StartTurn waits for its main watch and states the newest pointer
+	// that watch was served as known_through.
+	watcher func() (mainWatch, bool)
+}
+
+// mainWatch is the slice of the session watcher StartTurn is bounded by.
+type mainWatch interface {
+	AwaitMainWatching(ctx context.Context) error
+	MainKnownThrough() *conversationv1.HistoryPointer
 }
 
 // shimclientSender is the slice of the shim client the delivery surface uses.
@@ -148,7 +160,11 @@ func (s *sender) startTurn(ctx context.Context, turn ids.TurnID, said *conversat
 		Origin:          origin,
 		JoinRunningTurn: how.join,
 	}
-	if held := s.knownThrough(); held != nil {
+	held, err := s.opening(ctx, turn)
+	if err != nil {
+		return nil, err
+	}
+	if held != nil {
 		req.Opening = &shimv1.StartTurnRequest_KnownThrough{KnownThrough: held}
 	} else {
 		req.Opening = &shimv1.StartTurnRequest_TailOnly{TailOnly: &shimv1.StartTurnTailOnly{}}
@@ -178,12 +194,20 @@ func (s *sender) startTurn(ctx context.Context, turn ids.TurnID, said *conversat
 	return success, nil
 }
 
-// knownThrough is the pointer StartTurn is bounded by, nil when there is none.
-func (s *sender) knownThrough() *conversationv1.HistoryPointer {
-	if s.known == nil {
-		return nil
+// opening waits for the session's main watch to stand, and answers the
+// pointer StartTurn is bounded by, nil when the watch was served none.
+func (s *sender) opening(ctx context.Context, turn ids.TurnID) (*conversationv1.HistoryPointer, error) {
+	watcher, ok := s.watcher()
+	if !ok {
+		return nil, fmt.Errorf("%w: no watcher stands for turn %q", promptqueue.ErrSessionNotWatched, turn)
 	}
-	return s.known()
+	if err := watcher.AwaitMainWatching(ctx); err != nil {
+		if errors.Is(err, sessionwatcher.ErrWatcherClosed) {
+			return nil, fmt.Errorf("%w: turn %q: %w", promptqueue.ErrSessionNotWatched, turn, err)
+		}
+		return nil, fmt.Errorf("wait for the main watch before turn %q: %w", turn, err)
+	}
+	return watcher.MainKnownThrough(), nil
 }
 
 // PromptAgent delivers a bubble-composer prompt to one agent, through the same

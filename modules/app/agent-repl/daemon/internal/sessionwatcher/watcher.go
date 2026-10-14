@@ -285,7 +285,17 @@ type watcher struct {
 	// factsIn closes the first time the session facts are taken up, which is
 	// what AwaitSessionFacts waits on.
 	factsIn chan struct{}
-	main    *agentWatch
+	// mainWatching closes the first time the main agent's watch serves its
+	// opening page, which is what AwaitMainWatching waits on. The shim opens
+	// that page and the watch's live tail together, so from then on nothing
+	// the main agent writes is missed, and a turn started after it loses no
+	// frame.
+	mainWatching chan struct{}
+	mainWatched  bool
+	// openedAt is when this watcher began, for the record of how long the
+	// main watch took to serve.
+	openedAt time.Time
+	main     *agentWatch
 
 	// agents is one entry per LIVE DETACHED SUBAGENT, keyed by AgentId.value.
 	// The main watch is not in it: the open set here IS the live subagent set.
@@ -467,6 +477,8 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 
 		openAtAttach: session.OpenAtAttach,
 		factsIn:      make(chan struct{}),
+		mainWatching: make(chan struct{}),
+		openedAt:     sinks.Clock.Now(),
 		// A PURE ATTACH STARTS NOT FREE (freeLocked), so its facts arriving
 		// with nothing in flight is a true-to-false edge the bounce registry
 		// hears.
