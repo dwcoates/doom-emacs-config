@@ -2848,19 +2848,55 @@ message FeedMergeHead {
   FeedMergeLabel label = 2;
   FeedMergeRuntime runtime = 3;
   FeedMergeFold fold = 4;
-  // The control that switches to the merge workspace an ASYNC merge runs in.
-  // PRESENT once that workspace is VISIBLE — revealed (its merge failed, its
-  // agent asked the user something, the user interrupted it, or the user
-  // selected it) or landed (a landed merge workspace is an ordinary closed
-  // workspace) — and from then on for the bubble's whole life. UNSET while the
-  // merge workspace is hidden, since there is nothing to switch to, and on
-  // every sync merge, which has no other workspace.
-  optional FeedMergeWorkspaceSwitch workspace_switch = 5;
+  // Tag 5 RETIRED (optional FeedMergeWorkspaceSwitch workspace_switch): the
+  // switch exists only for an async merge, so it rides the async arm of
+  // `mode`.
+  reserved 5;
   // The agent-repl version this merge landed as. PRESENT once a merge onto
   // agent-repl's own master that carried a version increment has landed and
   // its version tag exists, and from then on for the bubble's whole life,
   // folded or not; UNSET on every other merge, and while the merge runs.
   optional FeedMergeVersion version = 6;
+  // HOW THE MERGE RUNS: in place in the requesting workspace (sync), or in a
+  // hidden merge workspace forked from it (async). Set by the daemon on every
+  // head it publishes, and fixed for the bubble's whole life. The daemon's
+  // default fold reads it (frontend.v1.FeedMergeFold): an async bubble starts
+  // and stays folded until the reader opens it. UNSET only on a durable row
+  // recorded before the head carried its mode; such a row is drawn with the
+  // sync defaults and no switch.
+  optional FeedMergeMode mode = 7;
+}
+
+// How a merge runs. THE ARM IS THE MODE, and what only one mode has rides
+// that mode's arm.
+message FeedMergeMode {
+  // In place, or detached. Exactly one is set on every head the daemon
+  // publishes.
+  oneof mode {
+    // The one-shot, in-place merge of the requesting workspace's own branch.
+    FeedMergeModeSync sync = 1;
+    // The detached merge run in a hidden merge workspace.
+    FeedMergeModeAsync async = 2;
+  }
+}
+
+// A SYNC merge: it runs in the workspace whose feed holds the bubble, its
+// head is pinned to the feed's bottom while it is in flight, and its bubble
+// is open by default. It has no other workspace, so no switch.
+message FeedMergeModeSync {}
+
+// An ASYNC merge: it runs in a hidden merge workspace forked from the
+// requester, its head is placed where it was first drawn, and its bubble is
+// folded by default, at every state and on every redraw, until the reader
+// opens it.
+message FeedMergeModeAsync {
+  // The control that switches to the merge workspace. PRESENT once that
+  // workspace is VISIBLE — revealed (its merge failed, its agent asked the
+  // user something, the user interrupted it, or the user selected it) or
+  // landed (a landed merge workspace is an ordinary closed workspace) — and
+  // from then on for the bubble's whole life. UNSET while the merge workspace
+  // is hidden, since there is nothing to switch to.
+  optional FeedMergeWorkspaceSwitch workspace_switch = 1;
 }
 
 // The version a landed merge produced ("0.4.0"), split into three runs so
@@ -3020,8 +3056,9 @@ message FeedMergeFold {
   bool folded = 1;
   // WHO DECIDED `folded`. Unset is a malformed row.
   oneof decided_by {
-    // The daemon's default for the merge's state: folded for a success, open
-    // for everything else.
+    // The daemon's default for the merge: folded for every async merge
+    // (frontend.v1.FeedMergeHead.mode), and for a sync merge folded for a
+    // success, open for everything else.
     FeedMergeFoldByDaemon daemon = 2;
     // The reader's explicit fold or unfold, recorded through
     // agentrepl.v1.FoldMergeBubble; it outranks every default.

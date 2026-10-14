@@ -1,7 +1,7 @@
 /**
  * workspace-switch — the button on an async merge bubble's head that takes the
  * reader to the MERGE WORKSPACE the merge runs in
- * (`FeedMergeHead.workspace_switch`). The daemon sets it once that workspace is
+ * (`FeedMergeModeAsync.workspace_switch`). The daemon sets it once that workspace is
  * visible (revealed, or landed) and leaves it unset while the workspace is
  * hidden; the agentic tabs stream the merge workspace's turns, so they carry no
  * switch of their own. It draws two facts: the label the daemon composed, and
