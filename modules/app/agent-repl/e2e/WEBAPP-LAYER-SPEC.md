@@ -233,7 +233,8 @@ Every bound below is either REUSED from an already-measured constant or set at
 
 | bound | value | basis |
 |---|---|---|
-| `WebappLayerTimeout` (Go, per area) | 10 s | MEASURED: two full nine-area runs, child durations 1.21-3.16 s (slowest: feed families, 22 real turns in one child); 3x the max. Bounds a HANG only. |
+| `WebappLayerTimeout` (Go, per area) | 10 s | MEASURED: two full nine-area runs, child durations 1.21-3.16 s (slowest: feed families, 22 real turns in one child); 3x the max. Bounds a HANG only. Since raised to 45 s on re-measurement; see the constant's comment. |
+| `WebappLayerSilence` (Go, per area on the warm driver) | 20 s | MEASURED 2026-10-14: the longest silence between two finished tests of an area, 1.0-8.2 s across the layer alone, a full run and a full coverage run; just over 2x the max. Every finished test restarts it, so a loaded host stretching a whole area does not trip it; an area that stops finishing tests does. |
 | `BOOT_BUDGET_MS` (vitest) | 5 s | REUSED: the Go suite's `harness.DefaultTimeout`, minus the shim spawn boot does not pay. |
 | `TURN_BUDGET_MS` (vitest) | 5 s | REUSED: the same measured 5 s, for exactly the shape it was measured on (a real shim spawn plus a turn through a real store). |
 | `COMPOSER_READY_BUDGET_MS` (vitest) | 5 s | REUSED: `TURN_BUDGET_MS`. What it waits out is the TAIL OF THE PREVIOUS SUBMISSION — `composer.ts` keeps Send disabled for the whole of its `SubmitPrompt` unary — which is strictly less than the turn that budget already bounds. Zero rounds on a healthy chain. |

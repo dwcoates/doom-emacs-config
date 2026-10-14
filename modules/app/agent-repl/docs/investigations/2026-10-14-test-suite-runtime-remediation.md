@@ -11,6 +11,9 @@ green every run, with no host-wide test locks (owner ruling 2026-10-14).
 | locks removed | 13 | utility | e2e,daemon (4 runs) | 124-132s | 1605-1658 | 723-735 | 2-6 per run |
 | locks removed | 13 | default | e2e,daemon (3 runs) | 51-55s | 659-707 | 484-500 | 1 per run |
 | locks removed | 13 | default | full, e2e-emacs RAN | 152s | 1834 | 1115 | 0 (bar the tier pin) |
+| R1-R8 landed, empty history | 13 | default | full | 267s | | | 1 (fake-store bounce) |
+| R1-R8 landed | 13 | default | full | 157-291s at host load 25-74 | | | green x2 consecutive after fixes |
+| R1-R8 landed | 13 | default | full --coverage | 287s | | | green after fixes |
 
 - The e2e prebuild alone, idle host: 4.7s at the default tier, 11.8s at
   `throttle` (bin/background.sh), 23.0s at `utility` (testrun units). The
@@ -125,6 +128,36 @@ Throttled-I/O artifacts (absent in all default-tier runs; verify after R1):
   the sweep (see Questions).
 - R9 Shared e2e worlds: dropped (owner, 2026-10-14) on the measurement
   (~17s of 219 unit-seconds); per-test worlds stay isolated.
+
+## Outcome (2026-10-14, end of day)
+
+- R1-R8 landed; R9 dropped. Two consecutive green full runs (4:08 and 3:14
+  with other sessions holding the host load between 40 and 74), and a green
+  full coverage run.
+- P3 diagnosed and fixed: a finished run's teardown removed its queue entry
+  long before releaseSlot took it out of its chain, so a chain extension in
+  between read the chain as off its queue's front. The run now leaves its
+  line (run.leftLine) before its entry goes, and extendOnce's check leaves
+  such runs out of both sides (standingFront). The one recorded occurrence
+  (entries=2) is not fully explained by that window; the refusal now names
+  the whole chain and line, so the next one is diagnosable from the log.
+- New failures found in the R3 runs, each fixed at its source:
+  - a stray's SIGSTOP whose last thread awaited the CPU (a shim's FSEvents
+    dispatch thread at background QoS, host load 81) was reported as a stuck
+    stop; the report now reads the kernel: starved stops are logged, stuck
+    ones still fail;
+  - the fake store's own client rode a pooled connection across a bounce;
+  - a shimclient test asserted a pid gone before its own reap;
+  - a probe build wrote a package into the daemon tree another test walked;
+  - five chain tests let the scheduler decide which merge took the test
+    turn first;
+  - the webapp-layer bound covered an area's whole run, so a starved area
+    failed while passing; it now bounds the silence between finished tests
+    (WebappLayerSilence), and the warm-up pre-transforms every area file.
+- Coverage against the 2026-10-14 baseline: daemon 85.4 to 85.5, lock 88.0,
+  sidecar 91.3, protohelpers 100, logging 79.8, store 88.3, shim 96.87,
+  webapp 53.01 (all unchanged or up); testrun 86.0 to 88.2 once main.go's
+  glue stopped being pulled into the total by a test file in package main.
 
 ## Owner rulings (2026-10-14)
 
