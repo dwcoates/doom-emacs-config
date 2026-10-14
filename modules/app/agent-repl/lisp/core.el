@@ -3180,6 +3180,23 @@ raising it here."
      "deferred-quit: the quit deferred out of %s was honoured before the audit ran"
      context)))
 
+;;;; ---- User-facing copy: how long ago ----
+
+(defun agent-repl-format-age (at-ms now-ms)
+  "Render the span from AT-MS to NOW-MS, both epoch milliseconds, as a short age.
+One coarse unit and the word `ago': seconds under a minute, then minutes,
+hours and days (\"30s ago\", \"10m ago\", \"2h ago\", \"3d ago\").  An
+instant after NOW-MS -- two clocks a moment apart -- reads as no time at
+all rather than a negative age.  THE ONE AGE FORMAT every completion line
+showing how long ago something happened draws with, so two lists side by
+side never spell the same span two ways."
+  (let ((seconds (max 0 (/ (- now-ms at-ms) 1000))))
+    (cond
+     ((< seconds 60) (format "%ds ago" seconds))
+     ((< seconds 3600) (format "%dm ago" (/ seconds 60)))
+     ((< seconds 86400) (format "%dh ago" (/ seconds 3600)))
+     (t (format "%dd ago" (/ seconds 86400))))))
+
 ;;;; ---- User-facing copy: the one thing the minibuffer is allowed to say ----
 ;;
 ;; THE MINIBUFFER CARRIES USER COPY, NEVER EVIDENCE.  A wrapped Go error

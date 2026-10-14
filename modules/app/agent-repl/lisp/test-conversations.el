@@ -104,6 +104,14 @@ abandoned one at a glance."
   (should (equal (agent-repl-conversations--age nil agent-repl-test-conversations--now)
                  "never")))
 
+(ert-deftest agent-repl-test-conversations-age-is-the-shared-age-format ()
+  "A stated instant is drawn by the ONE age helper, `agent-repl-format-age',
+for every span it can state: the picker never grows a format of its own."
+  (dolist (span (list 0 59000 60000 3599000 3600000 86399000 86400000 (* 86400000 40)))
+    ;; Arrange, Act, Assert.
+    (should (equal (agent-repl-conversations--age 0 span)
+                   (agent-repl-format-age 0 span)))))
+
 ;;;; ---- Rendering: the size ----
 
 (ert-deftest agent-repl-test-conversations-size-reads-thousands-of-tokens ()
