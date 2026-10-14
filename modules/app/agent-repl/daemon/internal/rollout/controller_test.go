@@ -171,3 +171,18 @@ func TestNewRefusesADaemonAddrWriterWithNoBootClaimWait(t *testing.T) {
 		t.Fatalf("New = %v, want the missing boot-claim wait refused", err)
 	}
 }
+
+func TestNewRefusesWithoutTheOwedLandingReports(t *testing.T) {
+	// Arrange: every other dependency in place.
+	h := newHarness(t)
+	deps := h.c.deps
+	deps.Reports = nil
+
+	// Act
+	_, err := New(deps)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "the owed landing reports are required") {
+		t.Fatalf("New = %v, want the missing reports refused", err)
+	}
+}

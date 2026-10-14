@@ -482,6 +482,27 @@ func (f *detachedForwarder) Reveal(ctx context.Context, mergeWS ids.WorkspaceID)
 	return target.Reveal(ctx, mergeWS)
 }
 
+// CoverOwed reaches the detached-merge service, which records its own
+// failures; a deploy before that service exists is answered with the error.
+func (f *detachedForwarder) CoverOwed(ctx context.Context) error {
+	target, err := f.service()
+	if err != nil {
+		return err
+	}
+	return target.CoverOwed(ctx)
+}
+
+// PayOwed reaches the detached-merge service. A deploy or a takeover cannot
+// end before the graph that built the service has, so a payment that finds
+// none is a defect in the graph's order, and panics.
+func (f *detachedForwarder) PayOwed(ctx context.Context, coveredOnly bool, deployErr error) {
+	target, err := f.service()
+	if err != nil {
+		panic(err)
+	}
+	target.PayOwed(ctx, coveredOnly, deployErr)
+}
+
 func (f *detachedForwarder) HandBack(ctx context.Context, requester ids.WorkspaceID, mergeWS wsm.Workspace, out merge.DetachedOutcome) error {
 	target, err := f.service()
 	if err != nil {
