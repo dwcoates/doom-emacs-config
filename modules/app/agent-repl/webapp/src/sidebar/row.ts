@@ -642,12 +642,10 @@ export function drawStatusMark(arm: RosterStatusCase, path: string, markers: Row
  * 2026-10-14, which retired the name as the trigger after 2026-10-13 had
  * retired the status dot). Hovering the rest of the row, the name and the dot
  * included, opens nothing, and the pointer leaving the duration for the row
- * closes the panel as it does for anywhere else. The intent delay is three
- * seconds (owner request, 2026-10-13), so the panel opens only on a pointer
- * that has settled on the duration.
+ * closes the panel as it does for anywhere else. The panel opens the moment
+ * the pointer reaches the duration (owner request, 2026-10-14).
  *
- * The keyboard gets the same panel through `focusin`/`focusout`, without the
- * intent delay — a focus move is deliberate in a way a pointer's path is not.
+ * The keyboard gets the same panel through `focusin`/`focusout`.
  */
 function installHoverPanel(
   ws: HTMLElement,
