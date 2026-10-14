@@ -3,6 +3,7 @@ package cachelapse
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"agent-repld/internal/clock/clocktest"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
 )
 
@@ -361,6 +363,7 @@ func TestReconcileAnswersAShimFailure(t *testing.T) {
 		level string
 	}{
 		{name: "a shim with no session yet", err: ErrNoSession, level: "debug"},
+		{name: "a shim that died under the call", err: fmt.Errorf("%w: unavailable: unexpected EOF", shimclient.ErrShimDied), level: "info"},
 		{name: "a shim that cannot be reached", err: errors.New("connection refused"), level: "error"},
 	}
 	for _, tt := range tests {
