@@ -278,7 +278,73 @@ func (o *orchestrator) dequeue(ctx context.Context, ws ids.WorkspaceID, cause Ab
 	if r, running := o.runFor(ws); running {
 		return o.abandonRunning(ctx, r, cause)
 	}
+	// A MERGE A RESTART TOOK BACK BUT HAS NOT RESUMED is admitted, holds its
+	// merge lease and has no run: it ends as an admitted merge, never as a
+	// waiting one, or its lease would outlive its entry (dropPendingResume).
+	o.mu.Lock()
+	doc, pending := o.resumes[ws]
+	delete(o.resumes, ws)
+	o.mu.Unlock()
+	if pending {
+		return o.dropPendingResume(ctx, ws, doc, cause)
+	}
 	return o.dropQueued(ctx, ws, cause)
+}
+
+// dropPendingResume ends a merge the boot recovery or a handover took back
+// and that has not resumed yet, the caller having taken it out of o.resumes:
+// its queue entry, its merge lease and its progress record go in one store
+// transaction (wsm.DropAdmittedMerge, the owner of "a merge lease stands
+// with exactly one queue entry"), its scratch trees are swept, and its bubble
+// ends on the abandoned terminal a running merge reads. A drop that fails
+// changed nothing: the merge is put back to resume as it was.
+func (o *orchestrator) dropPendingResume(ctx context.Context, ws ids.WorkspaceID, doc progressDoc, cause AbandonCause) error {
+	const op = "daemon.merge.drop_pending_resume"
+	log := o.log(ctx, ws)
+	repo := wsm.RepoKey(doc.Repo)
+	o.mu.Lock()
+	lease, known := o.ledgerOf[ws]
+	o.mu.Unlock()
+	if !known {
+		panic(fmt.Sprintf("merge: the merge of %s was taken back for its resume with no lease recorded", ws))
+	}
+	fields := dlog.Context{"workspace": string(ws), "repo": string(repo), "lease": string(lease), "cause": string(cause), "step": doc.Step}
+	putBack := func() {
+		o.mu.Lock()
+		o.resumes[ws] = doc
+		o.mu.Unlock()
+	}
+	entry, err := o.entryOf(ctx, repo, ws)
+	if err != nil {
+		putBack()
+		log.Error(op, "could not read the queue entry of a merge taken back for its resume; it is left to resume", withField(fields, "error", err.Error()))
+		return err
+	}
+	if err := o.deps.DB.DropAdmittedMerge(ctx, repo, ws, lease, string(cause)); err != nil {
+		putBack()
+		log.Error(op, "could not drop a merge taken back for its resume; it is left to resume", withField(fields, "error", err.Error()))
+		return err
+	}
+	o.deps.Queue.OnLeaseChanged(ws)
+	o.sweepTrees(ctx, ws, doc.Subject.TargetDir, lease, true)
+	o.mu.Lock()
+	delete(o.repoOf, ws)
+	delete(o.ledgerOf, ws)
+	o.mu.Unlock()
+	summary, declared := cause.summaryRunning()
+	if !declared {
+		summary = fmt.Sprintf("this merge was abandoned while it was running (%s)", cause)
+		o.deps.Log.Global().Error("daemon.merge.abandoned", "a merge was abandoned under a cause with no declared summary",
+			dlog.Context{"workspace": string(ws), "cause": string(cause)})
+	}
+	log.Info(op, "dropped a merge a restart took back before it resumed: its entry, its lease and its progress record together", fields)
+	o.publishAbandonedWith(ctx, ws, lease, entry, cause, summary)
+	o.clearOffer(ws)
+	if err := o.republishQueue(ctx, repo); err != nil {
+		return err
+	}
+	o.kick(repo)
+	return nil
 }
 
 // OnWorkspaceClosed abandons a workspace's WAITING merge when the workspace
@@ -307,7 +373,7 @@ func (o *orchestrator) OnWorkspaceClosed(ctx context.Context, ws ids.WorkspaceID
 		}
 		return
 	}
-	if err := o.dropQueued(ctx, ws, CauseWorkspaceClosed); err != nil {
+	if err := o.dequeue(ctx, ws, CauseWorkspaceClosed); err != nil {
 		o.log(ctx, ws).Error(op, "could not abandon the queued merge of a torn-down workspace",
 			dlog.Context{"workspace": string(ws), "error": err.Error()})
 	}
@@ -328,6 +394,16 @@ func (o *orchestrator) dropQueued(ctx context.Context, ws ids.WorkspaceID, cause
 	entry, err := o.entryOf(ctx, repo, ws)
 	if err != nil {
 		log.Error(op, "could not read a queued merge's queue entry", dlog.Context{"workspace": string(ws), "repo": string(repo), "error": err.Error()})
+		return err
+	}
+	// AN ADMITTED MERGE WITH NO RUN AND NO RESUME HERE is not a waiting one:
+	// another daemon drives it, a handover is moving it, or its run is
+	// starting. Dropping only its entry would leave its lease over none, so
+	// it is refused, loudly.
+	if entry.State == wsm.MergeAdmitted {
+		err := fmt.Errorf("merge: the merge of %s is admitted with no run in this daemon; it is taken off where it runs", ws)
+		log.Error(op, "refused to drop an admitted merge as a waiting one", dlog.Context{
+			"workspace": string(ws), "repo": string(repo), "cause": string(cause), "error": err.Error()})
 		return err
 	}
 	if ledger, ok := o.leaseOf(ws); ok {
