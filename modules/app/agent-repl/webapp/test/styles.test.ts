@@ -1289,7 +1289,7 @@ describe("the cost corner", () => {
 
     it("keeps the hit area's size", () => {
       // Arrange / Act
-      const corner = declarationsOf(".usage-corner") ?? "";
+      const corner = cornerTokens();
 
       // Assert
       expect([
@@ -1358,9 +1358,12 @@ describe("the cost corner", () => {
         .filter((rule) => rule.selectors.some((selector) => /usage-(?:slider|ago|stamp)/.test(selector)))
         .flatMap((rule) => rule.declarations.match(/translateX\([^)]*\)+/g) ?? []);
 
-      // Assert: a percentage, zero, or the gap token, never a length.
+      // Assert: a percentage, zero, the gap token, or a percentage past the
+      // gap token, never a length.
       for (const transform of transforms) {
-        expect(transform).toMatch(/^translateX\((?:100%|0|var\(--usage-corner-gap-x\))\)$/);
+        expect(transform).toMatch(
+          /^translateX\((?:100%|0|var\(--usage-corner-gap-x\)|calc\(100% \+ var\(--usage-corner-gap-x\)\))\)$/,
+        );
       }
     });
   });
@@ -1421,7 +1424,7 @@ describe("the cost corner", () => {
 
     it("splits the half-second reveal into two quarter-second phases", () => {
       // Arrange / Act
-      const corner = declarationsOf(".usage-corner") ?? "";
+      const corner = cornerTokens();
 
       // Assert
       expect(corner).toMatch(/--usage-phase:\s*0\.25s/);
@@ -2227,8 +2230,10 @@ describe("regression: the response/prompt bubble collapse model", () => {
     // Assert — none of them collapses an assistant/user bubble's scroll box, so
     // the response/prompt bubble keeps its capped-preview model, not the tool
     // cards' hidden-section one.
+    // An interim's corner dropping its duration reserve (owner request,
+    // 2026-10-13) hides chrome inside the box, never the box or its body.
     for (const rule of hiders) {
-      for (const sel of rule.selectors) {
+      for (const sel of rule.selectors.filter((one) => !/\.usage-corner\b/.test(one))) {
         expect(/^\.bubble\S*\s*>\s*\.bubble-scroll(?!\S*::)/.test(sel)).toBe(false);
       }
     }
@@ -3111,7 +3116,13 @@ describe("the one bubble rule set", () => {
             // selectors also turn off the base rule's box-shadow, the one
             // remaining visible highlight once their fill is already the
             // page's own --bg; its own suite below pins it.
-            !(prop === "box-shadow" && rule.selectors.every((sel) => DIMMED_TEXT_SELECTORS.includes(sel))),
+            !(prop === "box-shadow" && rule.selectors.every((sel) => DIMMED_TEXT_SELECTORS.includes(sel))) &&
+            // AN INTERIM GROWS TO THE RIGHT ON HOVER (owner request,
+            // 2026-10-13): its bubble transitions its cap, and reads the
+            // corner's geometry tokens from the one shared token rule. Its own
+            // suite pins both.
+            !(prop === "transition" && rule.selectors.length === 1 && rule.selectors[0] === ".bubble.interim-response") &&
+            !(prop.startsWith("--usage-") && rule.selectors.includes(".usage-corner")),
         ),
     );
     // Assert — the working wave's own animation is the one other thing a
