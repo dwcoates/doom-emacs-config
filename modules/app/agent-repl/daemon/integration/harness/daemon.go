@@ -1933,10 +1933,10 @@ func (d *Daemon) freezeStrays() ([]int, error) {
 		if err != nil {
 			return d.settleFrozen(stopped, nil), err
 		}
-		var fresh []int
+		var fresh []stray
 		for _, s := range strays {
 			if !stopped[s.pid] {
-				fresh = append(fresh, s.pid)
+				fresh = append(fresh, s)
 			}
 		}
 		if len(fresh) == 0 {
@@ -1949,16 +1949,27 @@ func (d *Daemon) freezeStrays() ([]int, error) {
 			}
 			return d.settleFrozen(stopped, listed), nil
 		}
-		for _, pid := range fresh {
-			err := stopFrozen(pid, freezeBound, syscall.Kill)
+		for _, s := range fresh {
+			err := stopFrozen(s.pid, stopFrozenReportAfter, syscall.Kill, d.strayStopStalled(s))
 			if errors.Is(err, syscall.ESRCH) {
 				continue
 			}
-			stopped[pid] = true
+			stopped[s.pid] = true
 			if err != nil {
-				return d.settleFrozen(stopped, nil), fmt.Errorf("stop stray %d: %w", pid, err)
+				return d.settleFrozen(stopped, nil), fmt.Errorf("stop stray %d (%s): %w", s.pid, s.args, err)
 			}
 		}
+	}
+}
+
+// strayStopStalled reports a stray whose stop has not held after waited, with
+// the kernel's view of the process: the evidence a stuck stop leaves nowhere
+// else. The sweep goes on waiting.
+func (d *Daemon) strayStopStalled(s stray) func(pid int, state string, waited time.Duration) {
+	return func(pid int, state string, waited time.Duration) {
+		d.t.Helper()
+		out, err := exec.Command("ps", "-M", "-o", "pid,stat,wchan,flags,time,command", "-p", strconv.Itoa(pid)).CombinedOutput()
+		d.t.Errorf("harness: stray %d (%s) is still %s %s after its SIGSTOP; still waiting. The kernel's view (ps err %v):\n%s", pid, s.args, state, waited, err, out)
 	}
 }
 
