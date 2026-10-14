@@ -896,3 +896,35 @@ func TestParseCoverArgs(t *testing.T) {
 		})
 	}
 }
+
+func TestParseWardenArgs(t *testing.T) {
+	tests := []struct {
+		name    string
+		argv    []string
+		wantErr string
+	}{
+		{name: "every one given", argv: []string{"--runner", "77", "--since", "1760400000", "--sentinel", "76"}},
+		{name: "no runner", argv: []string{"--since", "1760400000", "--sentinel", "76"}, wantErr: "warden needs --runner, --since and --sentinel"},
+		{name: "no since", argv: []string{"--runner", "77", "--sentinel", "76"}, wantErr: "warden needs --runner, --since and --sentinel"},
+		{name: "no sentinel", argv: []string{"--runner", "77", "--since", "1760400000"}, wantErr: "warden needs --runner, --since and --sentinel"},
+		{name: "an unknown flag", argv: []string{"--runner", "77", "--x"}, wantErr: "warden: flag provided but not defined: -x"},
+		{name: "a stray argument", argv: []string{"--runner", "77", "--since", "1", "--sentinel", "76", "x"}, wantErr: "warden: unexpected arguments [x]"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			got, err := ParseWardenArgs(tt.argv)
+
+			// Assert.
+			if tt.wantErr != "" {
+				if err == nil || err.Error() != tt.wantErr {
+					t.Fatalf("ParseWardenArgs() error = %v, want %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || got.Runner != 77 || got.Sentinel != 76 || got.Since.Unix() != 1760400000 {
+				t.Fatalf("ParseWardenArgs() = %+v, %v", got, err)
+			}
+		})
+	}
+}
