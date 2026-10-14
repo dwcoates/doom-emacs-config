@@ -3,6 +3,7 @@ package wsm
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"agent-repld/internal/semver"
 )
@@ -20,6 +21,20 @@ type VersionIncrement struct {
 	Part semver.Part
 	// ChangelogLine is the tag's annotation: one non-blank line.
 	ChangelogLine string
+}
+
+// Validate refuses an increment that moves no declared part or whose
+// changelog line is not exactly one non-blank line. It is the one rule every
+// path that builds an increment (the rpc, the command file, the queue row)
+// holds it to.
+func (v VersionIncrement) Validate() error {
+	if !v.Part.Valid() {
+		return fmt.Errorf("a version increment moves minor or patch, not %s", v.Part)
+	}
+	if strings.TrimSpace(v.ChangelogLine) == "" || strings.ContainsAny(v.ChangelogLine, "\r\n") {
+		return fmt.Errorf("a version increment carries one non-blank changelog line, not %q", v.ChangelogLine)
+	}
+	return nil
 }
 
 // versionIncrementDDL is the layout-49 addition. It adds:

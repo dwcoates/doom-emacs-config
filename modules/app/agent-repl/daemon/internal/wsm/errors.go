@@ -380,8 +380,8 @@ func (m MergeSource) validate() error {
 	// A VERSION INCREMENT moves a declared part and carries its changelog
 	// line, and a branch already merged upstream lands nothing to version.
 	if v := m.Version; v != nil {
-		if !v.Part.Valid() || v.ChangelogLine == "" {
-			return fmt.Errorf("a version increment moves minor or patch and carries a changelog line, not %s with line %q", v.Part, v.ChangelogLine)
+		if err := v.Validate(); err != nil {
+			return err
 		}
 		if m.Kind == MergeSourceMergedUpstream {
 			return fmt.Errorf("a %s source lands nothing, so it carries no version increment", m.Kind)
