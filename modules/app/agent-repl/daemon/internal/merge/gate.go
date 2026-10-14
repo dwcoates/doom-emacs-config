@@ -46,12 +46,18 @@ type gateVerdict struct {
 // the tests round the caller opened (or, on a resume, the round the restart
 // left live: the gate runs again from its start in it).
 //
-// THE GOVERNOR COUNTS EVERY GATE. A speculative gate comes with the permit
-// the governor admitted it under; a head's gate (permit nil) takes its permit
-// here, at once. The permit is released when the gate's script ends, with the
-// run's measured cost, which the governor learns from.
-func (r *run) gate(ctx context.Context, round tabRound, tip, head string, permit *cpugov.Permit) (gateVerdict, error) {
+// ONE GATE OF A REPOSITORY RUNS AT A TIME (testturn.go). A gate that runs
+// anything first takes its repository's test turn, waiting in line for it,
+// and gives it back on every way out of here.
+//
+// THE GOVERNOR COUNTS EVERY GATE, and admits it only once it holds the turn.
+// A gate behind the head (adm set) is governed; one whose merge was promoted
+// before the governor admitted it answers errPromoted, its round settled, and
+// runs again as the head's. The permit is released when the gate's script
+// ends, with the run's measured cost, which the governor learns from.
+func (r *run) gate(ctx context.Context, round tabRound, tip, head string, adm *gateAdmission) (verdict gateVerdict, err error) {
 	const op = "daemon.merge.tests"
+	var permit *cpugov.Permit
 	released := false
 	release := func(cores float64, wall time.Duration, measured bool) {
 		if !released && permit != nil {
@@ -81,6 +87,27 @@ func (r *run) gate(ctx context.Context, round tabRound, tip, head string, permit
 	if selection.Empty() {
 		return r.gateNothing(ctx, round, paths, selection, begun)
 	}
+	g := &gateRun{r: r, round: round, log: r.o.testLog(r.lease.ID, round.n),
+		states: map[string]suiteState{}, counts: newSuiteCounts(), release: release, begun: begun}
+	r.setStep(ctx, footer.StepTesting, nil)
+	// THE RUN IS A SUBTAB OF THE ONE TESTS TAB, which stands live again for it.
+	r.openTesting(round)
+	defer func() { r.o.releaseTestTurn(context.WithoutCancel(ctx), r, gateEnded(ctx, verdict, err)) }()
+	for permit == nil {
+		if err := r.awaitTestTurn(ctx, round); err != nil {
+			return gateVerdict{}, g.unrun(ctx, err)
+		}
+		permit, err = r.admitGate(ctx, adm)
+		if errors.Is(err, errTurnToHead) {
+			r.o.log(ctx, r.ws).Info(op, "the merge gives its test turn to its head, which stands in line: the governor has not admitted its gate yet", dlog.Context{
+				"workspace": string(r.ws), "repo": string(r.repo), "round": round.n})
+			r.o.releaseTestTurn(context.WithoutCancel(ctx), r, "gave the turn to its head before the governor admitted its gate")
+			continue
+		}
+		if err != nil {
+			return gateVerdict{}, g.unrun(ctx, err)
+		}
+	}
 	// EVERY EDGE OF A GATE IS RECORDED AT INFO, timed: its start, the host's
 	// suite slot taken, the runner's end, the verdict, and a cut. A tests tab
 	// that ran long is explained from these, its interval included when it
@@ -88,19 +115,8 @@ func (r *run) gate(ctx context.Context, round tabRound, tip, head string, permit
 	speculative := r.isSpeculative()
 	r.o.log(ctx, r.ws).Info(op, "the merge's test gate started", dlog.Context{
 		"workspace": string(r.ws), "round": round.n, "suites": strings.Join(selection.Suites, ","),
-		"full": selection.Full, "reason": selection.Reason, "speculative": speculative})
-	if permit == nil {
-		permit, err = r.o.deps.Governor.Acquire(ctx, cpugov.Request{Workspace: r.ws, Repo: string(r.repo), Head: true})
-		if err != nil {
-			return gateVerdict{}, fmt.Errorf("merge: admitting the head's gate: %w", err)
-		}
-	}
-
-	g := &gateRun{r: r, round: round, log: r.o.testLog(r.lease.ID, round.n),
-		states: map[string]suiteState{}, counts: newSuiteCounts(), release: release, begun: begun}
-	r.setStep(ctx, footer.StepTesting, nil)
-	// THE RUN IS A SUBTAB OF THE ONE TESTS TAB, which stands live again for it.
-	r.openTesting(round)
+		"full": selection.Full, "reason": selection.Reason, "speculative": speculative,
+		"since_gate_start_seconds": g.since()})
 	r.publishRun(round, round.live(), nil, nil)
 
 	argv := r.o.deps.TestCommand(dir)
@@ -134,24 +150,7 @@ func (r *run) gate(ctx context.Context, round tabRound, tip, head string, permit
 		if errors.As(err, &unstarted) && ctx.Err() == nil && !r.o.isDraining() {
 			return g.brokenGate(ctx, GateResult{}, fmt.Sprintf("it could not be started (%v)", unstarted.err)), nil
 		}
-		// A SPECULATIVE GATE WHOSE BASE MOVED was cut on purpose: it runs
-		// again on the new base, and says so.
-		if errors.Is(context.Cause(ctx), errBaseMoved) {
-			g.cut(ctx, "the merge ahead moved")
-			const moved = "the merge ahead moved; the tests run again on its new tip"
-			r.publishRun(round, round.settled(r.o.nowMS(), moved), nil, g.link())
-			r.settleTesting(moved)
-			r.closeTab(ctx, round, "restarted")
-			return gateVerdict{}, err
-		}
-		if ctx.Err() != nil || r.o.isDraining() {
-			g.cut(ctx, "the daemon's exit, a restart or a transfer")
-		}
-		const unrun = "the test gate could not run"
-		r.publishRun(round, round.settled(r.o.nowMS(), unrun), nil, g.link())
-		r.settleTesting(unrun)
-		r.closeTab(ctx, round, "failed")
-		return gateVerdict{}, err
+		return gateVerdict{}, g.unrun(ctx, err)
 	}
 	if why, broken := gateDidNotRun(result.ExitCode); broken {
 		return g.brokenGate(ctx, result, fmt.Sprintf("%s; the whole run is archived at %s", why, result.ArchivePath)), nil
@@ -174,6 +173,79 @@ func (r *run) gate(ctx context.Context, round tabRound, tip, head string, permit
 		"workspace": string(r.ws), "round": round.n, "exit_code": result.ExitCode, "archive": result.ArchivePath,
 		"verdict": "failed", "total_seconds": g.since()})
 	return gateVerdict{result: result, round: round.n}, nil
+}
+
+// gateAdmission is how a gate behind its chain's head asks the governor to
+// admit it: under ctx, which a promotion cuts with errPromoted, at its rank.
+type gateAdmission struct {
+	ctx  context.Context
+	rank int
+}
+
+// admitGate takes the governor's permit for the gate, holding its
+// repository's test turn: a head's at once, a governed one behind the head
+// once the governor admits it. A governed wait the head's place in line cut
+// answers errTurnToHead; a merge behind the head promoted before it was
+// admitted answers errPromoted, and its gate runs as the head's instead,
+// from the head's own steps.
+func (r *run) admitGate(ctx context.Context, adm *gateAdmission) (*cpugov.Permit, error) {
+	if adm != nil {
+		if !r.isSpeculative() {
+			return nil, errPromoted
+		}
+		actx, cut := context.WithCancelCause(adm.ctx)
+		stop := r.o.watchHeadInLine(actx, r, cut)
+		permit, err := r.o.deps.Governor.Acquire(actx, cpugov.Request{Workspace: r.ws, Repo: string(r.repo), Rank: adm.rank})
+		turnToHead := errors.Is(context.Cause(actx), errTurnToHead)
+		stop()
+		switch {
+		case err == nil:
+			return permit, nil
+		case turnToHead && ctx.Err() == nil:
+			return nil, errTurnToHead
+		case errors.Is(context.Cause(adm.ctx), errPromoted) && ctx.Err() == nil:
+			return nil, errPromoted
+		}
+		return nil, fmt.Errorf("merge: admitting the gate behind the head: %w", err)
+	}
+	permit, err := r.o.deps.Governor.Acquire(ctx, cpugov.Request{Workspace: r.ws, Repo: string(r.repo), Head: true})
+	if err != nil {
+		return nil, fmt.Errorf("merge: admitting the head's gate: %w", err)
+	}
+	return permit, nil
+}
+
+// unrun settles a gate that ended with ERR before its verdict -- cut while it
+// waited for its turn, for the governor, or while it ran -- and answers ERR. A
+// gate whose base moved was cut on purpose and runs again on the new base; a
+// gate the daemon's exit, a restart or a transfer stopped runs again from its
+// start on resume; any other could not run.
+func (g *gateRun) unrun(ctx context.Context, err error) error {
+	r, round := g.r, g.round
+	if errors.Is(err, errPromoted) {
+		g.cut(ctx, "the merge's promotion to its queue's head")
+		const promoted = "the merge reached its queue's head; its tests run there"
+		r.publishRun(round, round.settled(r.o.nowMS(), promoted), nil, g.link())
+		r.settleTesting(promoted)
+		r.closeTab(ctx, round, "restarted")
+		return err
+	}
+	if errors.Is(context.Cause(ctx), errBaseMoved) {
+		g.cut(ctx, "the merge ahead moved")
+		const moved = "the merge ahead moved; the tests run again on its new tip"
+		r.publishRun(round, round.settled(r.o.nowMS(), moved), nil, g.link())
+		r.settleTesting(moved)
+		r.closeTab(ctx, round, "restarted")
+		return err
+	}
+	if ctx.Err() != nil || r.o.isDraining() || errors.Is(err, errMergeStopping) {
+		g.cut(ctx, "the daemon's exit, a restart or a transfer")
+	}
+	const unrun = "the test gate could not run"
+	r.publishRun(round, round.settled(r.o.nowMS(), unrun), nil, g.link())
+	r.settleTesting(unrun)
+	r.closeTab(ctx, round, "failed")
+	return err
 }
 
 // gateDidNotRun reads the exit statuses that mean the gate's command never

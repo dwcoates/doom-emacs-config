@@ -301,7 +301,10 @@ func (v *testsView) testsTab(waiting bool) *frontendv1.FeedMergeTab {
 // runTab builds run n's subtab: the run's own badge and its output.
 func runTab(n int, st tabState, suites []*frontendv1.FeedMergeTestSuite, log *frontendv1.FeedMergeTestLog) *frontendv1.FeedMergeTab {
 	inner := &frontendv1.FeedMergeTabTestsRun{Output: &frontendv1.FeedMergeTestsRunOutput{Suites: suites, Log: log}}
-	if live, settled := st.badge(); live != nil {
+	if !st.settled && st.turnHolder != "" {
+		inner.State = &frontendv1.FeedMergeTabTestsRun_WaitingForTurn{WaitingForTurn: &frontendv1.FeedMergeTabTestsRunWaitingForTurn{
+			StartedAtMs: st.startedMS, Holder: &frontendv1.FeedMergeTestTurnHolder{WorkspaceName: st.turnHolder}}}
+	} else if live, settled := st.badge(); live != nil {
 		inner.State = &frontendv1.FeedMergeTabTestsRun_Live{Live: live}
 	} else {
 		inner.State = &frontendv1.FeedMergeTabTestsRun_Settled{Settled: settled}
