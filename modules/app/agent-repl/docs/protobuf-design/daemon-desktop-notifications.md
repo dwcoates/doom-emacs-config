@@ -50,9 +50,10 @@ workspace's tab) and the tab blink.
   notification is raised from the same daemon code path that tells clients a
   turn completed, not from a second derivation of the same fact.
 - **Banner content.** A turn that ended normally:
-  `✅ <workspace title> turn completed <timestamp>` over a one-to-three-line
-  Sonnet summary of the turn's final response message (the content of the
-  green-bordered response bubble the webapp shows). A turn that ended in
+  `✅ <workspace title> turn completed <timestamp>` over a one-sentence
+  declarative Haiku summary of the turn's final response message (the content
+  of the green-bordered response bubble the webapp shows), asked as bare
+  inference with no tools and no system prompt. A turn that ended in
   failure: `❌ <workspace title> turn errored <timestamp>` over the daemon's
   error message for why the turn failed.
 - **The banner follows the roster status the turn end resolves to.** A turn

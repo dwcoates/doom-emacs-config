@@ -65,37 +65,38 @@ func newSummarizer(t *testing.T, h *fakeHeadless, dirs fakeConfigDirs, prompts s
 	return Summarizer{Headless: h, ConfigDirs: dirs, PromptsDir: prompts, Log: log}, log
 }
 
-func TestSummarizeAsksSonnetUnderTheWorkspacesAccount(t *testing.T) {
+func TestSummarizeAsksHaikuAsPlainInferenceUnderTheWorkspacesAccount(t *testing.T) {
 	// Arrange
-	h := &fakeHeadless{text: "Fixed the flaky test.\nAdded a regression test."}
+	h := &fakeHeadless{text: "Fixed the flaky test."}
 	s, _ := newSummarizer(t, h, fakeConfigDirs{dir: "/acct", ok: true}, briefDir(t, validBrief))
 
 	// Act
 	got := s.Summarize(context.Background(), "ws1", "a long answer")
 
 	// Assert
-	if got != "Fixed the flaky test.\nAdded a regression test." {
+	if got != "Fixed the flaky test." {
 		t.Fatalf("summary = %q", got)
 	}
-	if h.req.Model != headless.ModelSonnet || h.req.Site != SummarySite || h.req.ConfigDir != "/acct" {
-		t.Fatalf("request = %+v, want sonnet under turn_summary on /acct", *h.req)
+	if h.req.Model != headless.ModelHaiku || !h.req.Plain || len(h.req.Tools) != 0 ||
+		h.req.Site != SummarySite || h.req.ConfigDir != "/acct" {
+		t.Fatalf("request = %+v, want plain haiku with no tools under turn_summary on /acct", *h.req)
 	}
 	if !strings.Contains(h.req.Prompt, "a long answer") {
 		t.Fatalf("prompt %q does not carry the answer", h.req.Prompt)
 	}
 }
 
-func TestSummarizeKeepsAtMostThreeLines(t *testing.T) {
+func TestSummarizeKeepsOnlyTheFirstNonBlankLine(t *testing.T) {
 	// Arrange
-	h := &fakeHeadless{text: "one\n\ntwo\nthree\nfour\n"}
+	h := &fakeHeadless{text: "\n  Changes made to the footer.  \nA second line.\n"}
 	s, _ := newSummarizer(t, h, fakeConfigDirs{dir: "/acct", ok: true}, briefDir(t, validBrief))
 
 	// Act
 	got := s.Summarize(context.Background(), "ws1", "answer")
 
 	// Assert
-	if got != "one\ntwo\nthree" {
-		t.Fatalf("summary = %q, want the first three non-blank lines", got)
+	if got != "Changes made to the footer." {
+		t.Fatalf("summary = %q, want the first non-blank line, trimmed", got)
 	}
 }
 
@@ -270,5 +271,39 @@ func TestSummarizeOfAWorkspaceReadAsTheDaemonStandsDownIsRecordedAtInfo(t *testi
 	// Assert
 	if _, ok := hasRecord(log, "info", "the daemon stood down while the workspace's account was read"); !ok {
 		t.Fatal("the stand-down during the account read left no INFO record")
+	}
+}
+
+func TestSummarizeRecordsTheModelItAsked(t *testing.T) {
+	// Arrange
+	h := &fakeHeadless{text: "Plan proposed for the merge queue."}
+	s, log := newSummarizer(t, h, fakeConfigDirs{dir: "/acct", ok: true}, briefDir(t, validBrief))
+
+	// Act
+	s.Summarize(context.Background(), "ws1", "answer")
+
+	// Assert
+	r, ok := hasRecord(log, "info", "summarized the turn's final answer")
+	if !ok || r.Context["model"] != headless.ModelHaiku || r.Context["workspace"] != "ws1" {
+		t.Fatalf("record = %+v (found %v), want haiku and the workspace", r, ok)
+	}
+}
+
+// TestTheShippedBriefAsksForOneDeclarativeSentence pins the shipped brief to
+// the banner's contract: it splices the answer and asks for one sentence with
+// no clause-packing punctuation.
+func TestTheShippedBriefAsksForOneDeclarativeSentence(t *testing.T) {
+	// Arrange
+	h := &fakeHeadless{text: "ok"}
+	s, _ := newSummarizer(t, h, fakeConfigDirs{dir: "/acct", ok: true}, filepath.Join("..", "..", "..", "prompts"))
+
+	// Act
+	s.Summarize(context.Background(), "ws1", "THE-ANSWER")
+
+	// Assert
+	for _, want := range []string{"THE-ANSWER", "ONE SHORT SENTENCE", "declarative", "em dashes", "commas", "semicolons"} {
+		if !strings.Contains(h.req.Prompt, want) {
+			t.Fatalf("the shipped brief's prompt lacks %q", want)
+		}
 	}
 }

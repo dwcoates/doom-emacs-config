@@ -46,7 +46,7 @@ const (
 const ModelHaiku = "haiku"
 
 // ModelSonnet is the stronger model the daemon asks for prose a person reads
-// closely: the desktop banner's summary of a turn's final answer.
+// closely: the news digest's condensing.
 const ModelSonnet = "sonnet"
 
 // The causes a failed run reports. They are a CLOSED set of tokens, because
@@ -90,6 +90,10 @@ type Request struct {
 	// neither flag, so the run keeps the CLI's own tool set, every gated tool
 	// refused.
 	Tools []string
+	// Plain makes the run bare inference: no tools at all (`--tools ""`) and
+	// an empty system prompt (`--system-prompt ""`), so the model sees only
+	// Prompt. A Plain request naming Tools is a caller bug, and Run panics.
+	Plain bool
 }
 
 // Response is one headless answer.

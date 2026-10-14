@@ -11,6 +11,7 @@ import (
 	"agent-repld/internal/prompts"
 	"agent-repld/internal/runecap"
 	"agent-repld/internal/standdown"
+	"agent-repld/internal/textline"
 )
 
 // opSummary is the operation the turn summary's records carry.
@@ -22,15 +23,17 @@ const (
 	BriefSummary = "turn-summary-from-answer"
 	// SummarySite is the vendor-guard site the summary call asks under.
 	SummarySite = "turn_summary"
-	// DefaultSummaryTimeout bounds one summary call: a few lines from Sonnet
-	// over one answer.
-	DefaultSummaryTimeout = 30 * time.Second
+	// SummaryModel is the model the summary is asked of: one short sentence
+	// is a job for the fast model, and the banner should not wait on more.
+	SummaryModel = headless.ModelHaiku
+	// DefaultSummaryTimeout bounds one summary call: one sentence from Haiku
+	// over one answer. MEASURED 2026-10-14: 1.9-4.0s end to end, a
+	// MaxAnswerRunes answer included, so the bound is just over twice that.
+	DefaultSummaryTimeout = 10 * time.Second
 	// MaxAnswerRunes caps the answer the call is handed, so one enormous
 	// answer cannot grow the call without bound. The head of an answer is
 	// where its conclusion is stated.
 	MaxAnswerRunes = 12000
-	// MaxSummaryLines is the banner body's line budget.
-	MaxSummaryLines = 3
 )
 
 // StoodDownCause names a summary the daemon's stand-down cut short.
@@ -45,8 +48,9 @@ type ConfigDirs interface {
 	ConfigDirFor(ctx context.Context, ws ids.WorkspaceID) (string, error)
 }
 
-// Summarizer writes the completed-turn banner's body: a Sonnet summary of the
-// turn's final answer.
+// Summarizer writes the completed-turn banner's body: a one-sentence Haiku
+// summary of the turn's final answer, asked as bare inference (no tools, no
+// system prompt), so the brief and the answer are all the model sees.
 type Summarizer struct {
 	// Headless runs the model call.
 	Headless headless.Runner
@@ -113,8 +117,9 @@ func (s Summarizer) summarize(ctx context.Context, ws ids.WorkspaceID, answer st
 	}
 	resp, err := s.Headless.Run(ctx, headless.Request{
 		Site:      SummarySite,
-		Model:     headless.ModelSonnet,
+		Model:     SummaryModel,
 		Format:    headless.FormatText,
+		Plain:     true,
 		ConfigDir: configDir,
 		Prompt:    question,
 		Timeout:   timeout,
@@ -123,40 +128,24 @@ func (s Summarizer) summarize(ctx context.Context, ws ids.WorkspaceID, answer st
 		// ctx is the notifier's lifetime: the daemon stood down mid-call and
 		// killed the child, which is the stand-down working, not a failure.
 		log.Info(opSummary, "the daemon stood down during the turn-summary call", dlog.Context{
-			"model": headless.ModelSonnet, "cause": ctx.Err().Error(), "detail": err.Error(),
+			"model": SummaryModel, "cause": ctx.Err().Error(), "detail": err.Error(),
 		})
 		return "", StoodDownCause
 	}
 	if err != nil {
 		cause := headless.CauseOf(err)
 		log.Error(opSummary, "the turn-summary model call failed", dlog.Context{
-			"model": headless.ModelSonnet, "cause": cause, "detail": err.Error(),
+			"model": SummaryModel, "cause": cause, "detail": err.Error(),
 		})
 		return "", cause
 	}
-	summary := firstLines(resp.Text, MaxSummaryLines)
+	summary := textline.FirstNonBlank(resp.Text)
 	if summary == "" {
-		log.Error(opSummary, "the turn-summary model call answered empty", dlog.Context{"model": headless.ModelSonnet})
+		log.Error(opSummary, "the turn-summary model call answered empty", dlog.Context{"model": SummaryModel})
 		return "", "the model answered empty"
 	}
 	log.Info(opSummary, "summarized the turn's final answer", dlog.Context{
-		"model": headless.ModelSonnet, "duration_ms": resp.Duration.Milliseconds(),
+		"model": SummaryModel, "duration_ms": resp.Duration.Milliseconds(),
 	})
 	return summary, ""
-}
-
-// firstLines keeps the first n non-blank lines of text, trimmed.
-func firstLines(text string, n int) string {
-	var kept []string
-	for _, line := range strings.Split(text, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		kept = append(kept, line)
-		if len(kept) == n {
-			break
-		}
-	}
-	return strings.Join(kept, "\n")
 }
