@@ -94,6 +94,17 @@ func TestAHandoverWithANewerShimBuildBouncesTheAdoptedShimCleanly(t *testing.T) 
 			r.Context["workspace"] == f.ws.GetId()
 	})
 
+	// AND ITS BOOT SWEEP HAS JUDGED IT TOO. The fresh boot judges every shim
+	// against the installed build once its bring-up is done, on its own
+	// schedule; one landing after the install below bounces the incumbent's
+	// own shim exactly as a late report would (test run 2026-10-14: the
+	// fresh_boot sweep bounced it 51ms after the report's judgement, and the
+	// successor's stale-build bounce never came).
+	cold.AwaitLogRecord(cold.RunLogPath(), "the incumbent's boot sweep of its shims' builds", func(r harness.LogRecord) bool {
+		return r.PID == cold.PID() && r.Operation == "daemon.rollout.staleness" &&
+			r.Message == "judged every adopted shim against the installed build" && r.Context["why"] == "fresh_boot"
+	})
+
 	// Arrange: a newer shim build is installed. The running shim still
 	// reports the one it was spawned from.
 	if err := os.WriteFile(shimMain, []byte("// a newer shim build\n"), 0o644); err != nil {
