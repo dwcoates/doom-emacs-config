@@ -202,7 +202,6 @@ const wireLabel = (status: HeldStatus): string => `wire ${status}`;
 const wireDetail = (status: HeldStatus): string =>
   `the daemon's whole sentence for ${status}`;
 /** The note the test daemon sends for the verdict's confirmation. */
-const CONFIRMED_NOTE = "wire note confirmed";
 /** The note the test daemon sends for a coalescence. */
 const COALESCED_NOTE = "wire note coalesced";
 
@@ -227,9 +226,6 @@ function serveStatus(prompt: HeldPrompt): void {
     standsFor: { case: top, value: {} } as never,
   });
   const notes = rest.map((status) => wireDetail(status));
-  const classification = prompt.classification;
-  if (classification.case === "holdForTurnEnd" && classification.value.accepted?.accepted === true)
-    notes.push(CONFIRMED_NOTE);
   if (prompt.coalesced !== undefined) notes.push(COALESCED_NOTE);
   prompt.notes = notes.map((sentence) => create(HeldPromptStatusNoteSchema, { sentence }));
 }
@@ -398,17 +394,6 @@ describe("drawHeldPrompt classification arms", () => {
     );
   });
 
-  it("offers no accept on a prompt joining the running turn", () => {
-    const { tc } = trayContext();
-    const card = drawHeldPrompt(
-      heldPrompt({
-        classification: { case: "afterToolCall", value: { rationale: "" } },
-      }),
-      tc,
-    );
-    expect(card.querySelector("[data-held-action='accept']")).toBeNull();
-  });
-
   it("draws no rationale element when the classifier gave none", () => {
     const { tc } = trayContext();
     const card = drawHeldPrompt(
@@ -444,68 +429,6 @@ describe("drawHeldPrompt classification arms", () => {
       queuedAt: { atMs: BigInt(NOW) },
     });
     expect(() => drawHeldPrompt(prompt, tc)).toThrow(MalformedView);
-  });
-});
-
-describe("drawHeldPrompt accept", () => {
-  it("offers accept on hold_for_turn_end", () => {
-    const { tc } = trayContext();
-    const card = drawHeldPrompt(
-      heldPrompt({
-        classification: {
-          case: "holdForTurnEnd",
-          value: { rationale: "later" },
-        },
-      }),
-      tc,
-    );
-    expect(card.querySelector('[data-held-action="accept"]')).not.toBeNull();
-  });
-
-  it("offers accept on no other classification arm", () => {
-    const { tc } = trayContext();
-    const card = drawHeldPrompt(
-      heldPrompt({
-        classification: { case: "interject", value: { rationale: "now" } },
-      }),
-      tc,
-    );
-    expect(card.querySelector('[data-held-action="accept"]')).toBeNull();
-  });
-
-  it("replaces the accept button with the confirmed marker once accepted", () => {
-    const { tc } = trayContext();
-    const card = drawHeldPrompt(
-      heldPrompt({
-        classification: {
-          case: "holdForTurnEnd",
-          value: { rationale: "later", accepted: { accepted: true } },
-        },
-      }),
-      tc,
-    );
-    expect(card.querySelector('[data-held-action="accept"]')).toBeNull();
-    expect(card.querySelector(`.${HELD_NOTE_CLASS}`)?.textContent).toBe(
-      CONFIRMED_NOTE,
-    );
-  });
-
-  it("echoes the TurnId on the accept request", async () => {
-    const seen: UpdateHeldPromptRequest[] = [];
-    const { tc } = trayContext(successResponse, seen);
-    const card = drawHeldPrompt(
-      heldPrompt({
-        classification: {
-          case: "holdForTurnEnd",
-          value: { rationale: "later" },
-        },
-      }),
-      tc,
-    );
-    card.querySelector<Control>('[data-held-action="accept"]')?.click();
-    await settle();
-    expect(seen[0]?.action.case).toBe("accept");
-    expect(seen[0]?.turn?.value).toBe("turn-1");
   });
 });
 
@@ -861,16 +784,6 @@ describe("drawHeldPrompt actions", () => {
     // Assert
     expect(card.querySelector(".queued-refusal")?.textContent).toContain(
       BEING_DELIVERED,
-    );
-  });
-
-  it("says accept applies only to a turn-end hold", async () => {
-    const { tc } = trayContext(refusalResponse("acceptNotApplicable"));
-    const card = drawHeldPrompt(heldPrompt(), tc);
-    card.querySelector<Control>('[data-held-action="drop"]')?.click();
-    await settle();
-    expect(card.querySelector(".queued-refusal")?.textContent).toContain(
-      "the turn's end",
     );
   });
 
@@ -1283,24 +1196,6 @@ describe("a held prompt's redraw", () => {
     ]);
   });
 
-  it("drops the acceptance mark when the new arm has none", () => {
-    // Arrange
-    const { tc } = trayContext();
-    const first = drawHeldPrompt(
-      heldPrompt({
-        classification: { case: "holdForTurnEnd", value: { rationale: "r" } },
-      }),
-      tc,
-    );
-    // Act
-    drawHeldPrompt(
-      heldPrompt({ classification: { case: "classifying", value: {} } }),
-      tc,
-      first,
-    );
-    // Assert
-    expect(first.hasAttribute("data-accepted")).toBe(false);
-  });
 });
 
 describe("the Cancel control", () => {
@@ -1598,7 +1493,7 @@ describe("the daemon's badge words", () => {
     // Arrange
     const { tc } = trayContext();
     const prompt = heldPrompt({
-      classification: { case: "holdForTurnEnd", value: { accepted: { accepted: true } } },
+      classification: { case: "holdForTurnEnd", value: {} },
       hold: { case: "merge", value: {} },
     });
     // Act
@@ -1606,7 +1501,7 @@ describe("the daemon's badge words", () => {
     // Assert
     expect(
       [...card.querySelectorAll(`.queued-details > .${HELD_NOTE_CLASS}`)].map((n) => n.textContent),
-    ).toEqual([wireDetail("holdForTurnEnd"), CONFIRMED_NOTE]);
+    ).toEqual([wireDetail("holdForTurnEnd")]);
   });
 
   it("draws a coalescence as a note, never a badge", () => {
@@ -1858,19 +1753,6 @@ describe("every status a held card shows is a badge in the table's tone", () => 
     },
   );
 
-  it("draws no acceptance badge on a hold the user has not confirmed", () => {
-    // Arrange
-    const { tc } = trayContext();
-    // Act
-    const card = drawHeldPrompt(
-      heldPrompt({
-        classification: { case: "holdForTurnEnd", value: { rationale: "r" } },
-      }),
-      tc,
-    );
-    // Assert
-    expect(card.querySelector('[data-held-status="accepted"]')).toBeNull();
-  });
 });
 
 /** The stylesheet's selector for an expand-only element the toggle has not opened. */
@@ -1905,7 +1787,6 @@ describe("a held prompt collapsed and expanded", () => {
     ["the rationale", ".queued-reason"],
     ["the Send now button", '[data-held-action="release"]'],
     ["the Cancel button", '[data-held-action="drop"]'],
-    ["the Accept button", '[data-held-action="accept"]'],
   ];
 
   it("holds nothing but badges in its collapsed strip", () => {
@@ -2048,6 +1929,18 @@ describe("the Cancel control", () => {
     const card = drawHeldPrompt(heldPrompt(), tc);
     // Assert
     expect(order(card)).toEqual(["release", "edit", "drop"]);
+  });
+
+  it("is the last control on a hold-for-turn-end card, which offers no Accept", () => {
+    // Arrange
+    const { tc } = editContext();
+    // Act
+    const card = drawHeldPrompt(
+      heldPrompt({ classification: { case: "holdForTurnEnd", value: { rationale: "later" } } }),
+      tc,
+    );
+    // Assert
+    expect(order(card)).toEqual(["release", "edit", "update-classifier", "drop"]);
   });
 
   it("is the last control on a card that also offers a fold and Meta", () => {
