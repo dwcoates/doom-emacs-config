@@ -315,7 +315,7 @@ func Queue(queue merge.QueueSnapshot) string {
 		return fmt.Sprintf("The queue of `%s` is now empty (%s).", repositoryDir(queue.Repo), state)
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "The queue of `%s` now (%s), front first:", repositoryDir(queue.Repo), state)
+	b.WriteString(fmt.Sprintf("The queue of `%s` now (%s), front first:", repositoryDir(queue.Repo), state))
 	for i, member := range queue.Members {
 		standing := "waiting"
 		switch {
@@ -324,7 +324,7 @@ func Queue(queue merge.QueueSnapshot) string {
 		case member.Started:
 			standing = "started"
 		}
-		fmt.Fprintf(&b, "\n%d. `%s`: branch `%s`, %s, %s", i+1, member.Name, member.Branch, member.Mode, standing)
+		b.WriteString(fmt.Sprintf("\n%d. `%s`: branch `%s`, %s, %s", i+1, member.Name, member.Branch, member.Mode, standing))
 	}
 	return b.String()
 }
