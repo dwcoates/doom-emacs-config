@@ -245,7 +245,7 @@ describe("the bubble geometry: the scrollbar on the inner edge", () => {
     const bubble = declarationsOf(".bubble");
 
     // Assert
-    expect(bubble).toMatch(/padding:\s*var\(--bubble-pad-y\)\s+var\(--bubble-scroll-gap\)\s+var\(--bubble-pad-y\)\s+0\.9rem/);
+    expect(bubble).toMatch(/padding:\s*var\(--bubble-pad-y\)\s+var\(--bubble-scroll-gap\)\s+var\(--bubble-pad-y\)\s+var\(--bubble-pad-x\)/);
   });
 
   it("states every bubble's unshrunk vertical padding once, as the base the padding reads", () => {
@@ -256,6 +256,17 @@ describe("the bubble geometry: the scrollbar on the inner edge", () => {
     expect([
       /--bubble-pad-y-base:\s*0\.6rem/.test(bubble ?? ""),
       /--bubble-pad-y:\s*var\(--bubble-pad-y-base\)/.test(bubble ?? ""),
+    ]).toEqual([true, true]);
+  });
+
+  it("states every bubble's unshrunk horizontal padding once, as the base the padding reads", () => {
+    // Arrange / Act
+    const bubble = declarationsOf(".bubble");
+
+    // Assert
+    expect([
+      /--bubble-pad-x-base:\s*0\.9rem/.test(bubble ?? ""),
+      /--bubble-pad-x:\s*var\(--bubble-pad-x-base\)/.test(bubble ?? ""),
     ]).toEqual([true, true]);
   });
 
@@ -3188,7 +3199,7 @@ describe("the one bubble rule set", () => {
             // The vertical padding ladder (owner requests, 2026-10-12 and
             // 2026-10-13) is the one padding token a variant sets; its own
             // suite pins it.
-            !(prop === "--bubble-pad-y" && rule.selectors.every((sel) => TIGHTER_PAD_SELECTORS.includes(sel))) &&
+            !(PAD_TOKENS.includes(prop) && rule.selectors.every((sel) => TIGHTER_PAD_SELECTORS.includes(sel))) &&
             // The dimmed prose of a thinking or interim bubble (owner request,
             // 2026-10-08) is the one text color a variant sets, and the
             // thinking prose's italic (owner request, 2026-10-14) the one font
@@ -3981,18 +3992,21 @@ describe("the tool card's command grey", () => {
  * background is not there in either theme; every other response keeps the
  * purple, and the interim keeps its pear border.
  */
-/**
- * The vertical padding ladder: each rule that sets `--bubble-pad-y`, by its
- * selectors, and the share of the base it sets (owner requests, 2026-10-12 and
- * 2026-10-13).
- */
 /** A bubble variant's selector. */
 const variantSelector = (variant: string): string => `.bubble[data-variant="${variant}"]`;
-const PAD_LADDER: readonly { selectors: readonly string[]; value: string }[] = [
-  { selectors: ["response", "user", "agent", "peer", "held"].map(variantSelector), value: "calc(var(--bubble-pad-y-base)*0.7)" },
-  { selectors: [`${variantSelector("response")}.interim-response`], value: "calc(var(--bubble-pad-y-base)*0.49)" },
-  { selectors: [variantSelector("thinking")], value: "calc(var(--bubble-pad-y-base)*0.35)" },
+/**
+ * The padding ladder: each rule that sets a padding token, by its selectors,
+ * and the tokens it sets (owner requests, 2026-10-12, 2026-10-13 and
+ * 2026-10-14). The shares themselves are pinned by "the padding ladder" suite.
+ */
+const PAD_LADDER: readonly { selectors: readonly string[]; props: readonly string[] }[] = [
+  { selectors: [variantSelector("response")], props: ["--bubble-pad-y"] },
+  { selectors: ["user", "agent", "peer", "held"].map(variantSelector), props: ["--bubble-pad-y", "--bubble-pad-x"] },
+  { selectors: [`${variantSelector("response")}.interim-response`], props: ["--bubble-pad-y"] },
+  { selectors: [variantSelector("thinking")], props: ["--bubble-pad-y"] },
 ];
+/** The two padding tokens a ladder rung may set. */
+const PAD_TOKENS: readonly string[] = ["--bubble-pad-y", "--bubble-pad-x"];
 /** Every variant selector the ladder pads. */
 const TIGHTER_PAD_SELECTORS: readonly string[] = PAD_LADDER.flatMap((rung) => rung.selectors);
 /** The thinking bubble's own selector. */
@@ -4604,37 +4618,40 @@ describe("the stylesheet's real-height contract", () => {
 });
 
 /**
- * THE VERTICAL PADDING LADDER: prompt and response bubbles sit 30% tighter top
- * and bottom (owner request, 2026-10-12), an interim response 30% tighter again
- * and thinking bubbles at about a third of the base (owner requests,
- * 2026-10-13), while the
- * agentic tool and monitor cards and the compaction summary keep the base. The
- * horizontal padding never reads the vertical token, so it cannot move with it.
+ * THE PADDING LADDER: response bubbles sit 30% tighter top and bottom (owner
+ * request, 2026-10-12), an interim response 30% tighter again and thinking
+ * bubbles at about a third of the base (owner requests, 2026-10-13), and a
+ * prompt bubble 30% tighter again than a response ON EVERY SIDE (owner
+ * request, 2026-10-14), while the agentic tool and monitor cards and the
+ * compaction summary keep the base. Only a prompt's rung moves the horizontal
+ * token, so no other bubble's sides move with the vertical ladder.
  */
-describe("the vertical padding ladder", () => {
-  const PROMPT = "calc(var(--bubble-pad-y-base)*0.7)";
-  const INTERIM = "calc(var(--bubble-pad-y-base)*0.49)";
+describe("the padding ladder", () => {
+  const RESPONSE = "calc(var(--bubble-pad-y-base)*0.7)";
+  const TIGHT = "calc(var(--bubble-pad-y-base)*0.49)";
   const THINKING = "calc(var(--bubble-pad-y-base)*0.35)";
   const BASE = "var(--bubble-pad-y-base)";
+  const PROMPT_X = "calc(var(--bubble-pad-x-base)*0.7)";
+  const BASE_X = "var(--bubble-pad-x-base)";
 
-  /** The `--bubble-pad-y` the cascade hands a bubble of VARIANT, wearing CLASSES. */
-  function padOf(variant: string, classes: readonly string[] = []): string {
+  /** The PROPERTY the cascade hands a bubble of VARIANT, wearing CLASSES. */
+  function tokenOf(property: string, variant: string, classes: readonly string[] = []): string {
     const el = document.createElement("div");
     el.classList.add("bubble", ...classes);
     el.setAttribute("data-role", BUBBLE_VARIANTS[variant as keyof typeof BUBBLE_VARIANTS]);
     el.setAttribute("data-variant", variant);
-    return inDocument(el, () => cascadedValue(el, "--bubble-pad-y"));
+    return inDocument(el, () => cascadedValue(el, property));
   }
 
-  const cases: readonly { variant: keyof typeof BUBBLE_VARIANTS; want: string }[] = [
-    { variant: "response", want: PROMPT },
-    { variant: "user", want: PROMPT },
-    { variant: "agent", want: PROMPT },
-    { variant: "peer", want: PROMPT },
-    { variant: "held", want: PROMPT },
-    { variant: "thinking", want: THINKING },
-    { variant: "agentic", want: BASE },
-    { variant: "compaction", want: BASE },
+  const cases: readonly { variant: keyof typeof BUBBLE_VARIANTS; y: string; x: string }[] = [
+    { variant: "response", y: RESPONSE, x: BASE_X },
+    { variant: "user", y: TIGHT, x: PROMPT_X },
+    { variant: "agent", y: TIGHT, x: PROMPT_X },
+    { variant: "peer", y: TIGHT, x: PROMPT_X },
+    { variant: "held", y: TIGHT, x: PROMPT_X },
+    { variant: "thinking", y: THINKING, x: BASE_X },
+    { variant: "agentic", y: BASE, x: BASE_X },
+    { variant: "compaction", y: BASE, x: BASE_X },
   ];
 
   it("states an expectation for every bubble variant", () => {
@@ -4647,39 +4664,55 @@ describe("the vertical padding ladder", () => {
 
   it("gives an interim response 30% less than the green answer it is not", () => {
     // Arrange / Act
-    const got = [padOf("response", ["interim-response"]), padOf("response", ["final-response"])];
+    const got = [tokenOf("--bubble-pad-y", "response", ["interim-response"]), tokenOf("--bubble-pad-y", "response", ["final-response"])];
 
     // Assert
-    expect(got).toEqual([INTERIM, PROMPT]);
+    expect(got).toEqual([TIGHT, RESPONSE]);
   });
 
-  it.each(cases)("gives a $variant bubble the expected vertical padding", ({ variant, want }) => {
+  it.each(cases)("gives a $variant bubble the expected vertical padding", ({ variant, y }) => {
     // Arrange / Act
-    const got = padOf(variant);
+    const got = tokenOf("--bubble-pad-y", variant);
 
     // Assert
-    expect(got).toBe(want);
+    expect(got).toBe(y);
+  });
+
+  it.each(cases)("gives a $variant bubble the expected horizontal padding", ({ variant, x }) => {
+    // Arrange / Act
+    const got = tokenOf("--bubble-pad-x", variant);
+
+    // Assert
+    expect(got).toBe(x);
+  });
+
+  it("re-derives the content's right inset on the bubble itself, so a prompt's tighter sides reach its text", () => {
+    // Arrange / Act
+    const got = tokenOf("--bubble-content-inset", "user");
+
+    // Assert
+    expect(got).toBe("calc(var(--bubble-pad-x) - var(--bubble-scroll-gap))");
   });
 
   it("keys each rung of the ladder on exactly its variants, and no other rule pads a variant", () => {
     // Arrange / Act
     const rungs = rulesOf(stylesheet)
-      .filter((r) => /--bubble-pad-y\s*:/.test(r.declarations) && r.selectors[0] !== ".bubble")
+      .filter((r) => /--bubble-pad-[xy]\s*:/.test(r.declarations) && r.selectors[0] !== ".bubble")
       .map((r) => r.selectors);
 
     // Assert
     expect(rungs).toEqual(PAD_LADDER.map((rung) => rung.selectors));
   });
 
-  it.each(PAD_LADDER)("sets nothing but the vertical token on the $selectors rung", ({ selectors }) => {
+  it.each(PAD_LADDER)("sets nothing but its padding tokens on the $selectors rung", ({ selectors, props }) => {
     // Arrange / Act
-    const props = (rulesOf(stylesheet).find((r) => r.selectors.join(",") === selectors.join(","))?.declarations ?? "")
+    const got = (rulesOf(stylesheet).find((r) => r.selectors.join(",") === selectors.join(","))?.declarations ?? "")
       .split(";")
       .map((decl) => decl.split(":")[0]?.trim() ?? "")
       .filter((prop) => prop !== "");
 
     // Assert
-    expect(props).toEqual(["--bubble-pad-y"]);
+    expect(got).toEqual(props);
   });
 });
 
@@ -4743,12 +4776,15 @@ describe("the merge queue's header", () => {
 });
 
 describe("the bubble content's right inset", () => {
-  it("is declared once, as the 0.9rem the bubble gave up less the gap it keeps", () => {
+  it("is declared once, on the bubble, as the horizontal padding less the gap it keeps", () => {
     // Arrange / Act
     const declared = stylesheet.match(/--bubble-content-inset:\s*([^;]+);/g) ?? [];
 
     // Assert
-    expect(declared).toEqual(["--bubble-content-inset: calc(0.9rem - var(--bubble-scroll-gap));"]);
+    expect([declared, /--bubble-content-inset:/.test(declarationsOf(".bubble") ?? "")]).toEqual([
+      ["--bubble-content-inset: calc(var(--bubble-pad-x) - var(--bubble-scroll-gap));"],
+      true,
+    ]);
   });
 
   it.each([".bubble > .bubble-strip"])("is the right padding %s reads", (selector) => {
@@ -4761,7 +4797,7 @@ describe("the bubble content's right inset", () => {
 
   it("is never hand-rolled outside its token", () => {
     // Arrange / Act
-    const rolled = (withoutBlockComments(stylesheet).match(/calc\(0\.9rem - var\(--bubble-scroll-gap\)\)/g) ?? []).length;
+    const rolled = (withoutBlockComments(stylesheet).match(/calc\(var\(--bubble-pad-x\) - var\(--bubble-scroll-gap\)\)/g) ?? []).length;
 
     // Assert: the one occurrence is the token's own declaration.
     expect(rolled).toBe(1);
