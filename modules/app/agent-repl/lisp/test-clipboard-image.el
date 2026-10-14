@@ -367,9 +367,25 @@ TARGETS is derived from the types, as a vector, the way Emacs answers it."
   (agent-repl-test-image--with
     (should (memq #'agent-repl--image-decorate jit-lock-functions))))
 
-(ert-deftest agent-repl-image-thumbnail-height-is-120 ()
-  "Images are drawn 120 pixels tall, the feed's thumbnail height (owner ruling)."
-  (should (equal (default-value 'agent-repl-image-thumbnail-height) 120)))
+(defconst agent-repl-test-image--vocab
+  (let* ((dir (file-name-directory (or load-file-name buffer-file-name)))
+         (path (expand-file-name "../proto/vocab/image-thumbnail.json" dir)))
+    (with-temp-buffer
+      (insert-file-contents path)
+      (let ((json-object-type 'alist)
+            (json-key-type 'string))
+        (json-read))))
+  "The checked-in cross-language look of an image, decoded.")
+
+(ert-deftest agent-repl-image-thumbnail-height-is-the-shared-height ()
+  "Images are drawn at the feed's thumbnail height (image-thumbnail.json)."
+  (should (equal (default-value 'agent-repl-image-thumbnail-height)
+                 (cdr (assoc "height_px" agent-repl-test-image--vocab)))))
+
+(ert-deftest agent-repl-image-missing-display-says-the-shared-words ()
+  "A lost image says what the feed says (image-thumbnail.json), bracketed."
+  (should (equal agent-repl--image-missing-display
+                 (format "[%s]" (cdr (assoc "missing_text" agent-repl-test-image--vocab))))))
 
 (ert-deftest agent-repl-image-is-drawn-again-after-kill-and-yank ()
   "A killed and yanked image keeps its record, and drawing gives it back its click."

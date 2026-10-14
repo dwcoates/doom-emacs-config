@@ -64,8 +64,9 @@
 
 (defcustom agent-repl-image-thumbnail-height 120
   "Pixel height every image in the composer is drawn at, large or small.
-The same height the feed draws images at (`.prompt-block-image' in the
-webapp's stylesheet), so an image is one size wherever it is shown.
+The same height the feed draws images at: both sides are asserted against
+proto/vocab/image-thumbnail.json, so an image is one size wherever it is
+shown.
 Affects display only; the agent is sent the image file itself."
   :type 'integer
   :group 'agent-repl)
@@ -93,8 +94,8 @@ is said by its `display'.")
 
 (defconst agent-repl--image-missing-display "[Image no longer available]"
   "What an image whose file is gone is drawn as (its worktree was deleted).
-The feed says the same thing in the same place (the webapp's
-`IMAGE_MISSING_TEXT').")
+The feed says the same words in the same place: both sides are asserted
+against proto/vocab/image-thumbnail.json.")
 
 ;;;; ---- External boundary ----------------------------------------------------
 

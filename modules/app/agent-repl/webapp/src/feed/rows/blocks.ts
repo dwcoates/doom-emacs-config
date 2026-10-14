@@ -54,7 +54,11 @@ export function drawFeedTextBlock(block: FeedTextBlock, mark?: SlotMark): HTMLEl
   return markdownSlot("prompt-block prompt-block-text", block.text, mark);
 }
 
-/** What an image the webview cannot load is drawn as, in its place. */
+/**
+ * What an image the webview cannot load is drawn as, in its place. Emacs's
+ * composer says the same words: both are asserted against
+ * proto/vocab/image-thumbnail.json.
+ */
 export const IMAGE_MISSING_TEXT = "Image no longer available";
 
 /**

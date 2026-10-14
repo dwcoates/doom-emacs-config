@@ -25,6 +25,7 @@ import {
 } from "../../../src/feed/rows/blocks.js";
 import { boundCopyText, COPY_CONTROL_CLASS, COPY_KIND_ATTRIBUTE } from "../../../src/copy-control.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
+import imageThumbnail from "../../../../proto/vocab/image-thumbnail.json";
 import { BUBBLE_QUOTE_CLASS, QUOTE_MARKER_CLASS, QUOTE_PARTS_CLASS } from "../../../src/bubble/quote.js";
 import { MARKDOWN_SLOT_ATTRIBUTE, createBubbleBody, paintBody } from "../../../src/bubble/body.js";
 
@@ -130,7 +131,7 @@ describe("the attached image's own rule in the stylesheet", () => {
   });
 
   it.each([
-    ["draws every image at the one thumbnail height, large or small", "height: 120px"],
+    ["draws every image at the shared thumbnail height, large or small", `height: ${imageThumbnail.height_px}px`],
     ["keeps the aspect ratio when the width cap bites", "object-fit: contain"],
   ])("%s", (_name, declaration) => {
     // Arrange.
@@ -150,6 +151,10 @@ describe("drawFeedImageBlock", () => {
   it("keeps an empty alt empty, that being a legitimate resolution", () => {
     const el = drawFeedImageBlock(create(FeedImageBlockSchema, { src: "/x.png", alt: "" }));
     expect(el.getAttribute("alt")).toBe("");
+  });
+
+  it("says the shared words for a lost image", () => {
+    expect(IMAGE_MISSING_TEXT).toBe(imageThumbnail.missing_text);
   });
 
   it("says the image is no longer available, in its place, when it cannot be loaded", () => {
