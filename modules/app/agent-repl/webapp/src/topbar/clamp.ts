@@ -54,16 +54,17 @@ export interface RevealPlacement {
 export const REVEAL_MARGIN_PX = 8;
 
 /**
- * The left edge nearest PREFERRED that keeps a WIDTH-wide box inside VIEWPORT.
+ * The leading edge nearest PREFERRED that keeps a SIZE-long box inside an
+ * EXTENT-long viewport axis, either axis alike.
  *
- * It slides left only as far as the right edge demands. A box WIDER than the
- * viewport would make the rightmost fitting edge smaller than the margin, so
- * the lower bound is applied second and wins: overflowing right is better than
- * overflowing left, where the reader's line of text begins.
+ * It slides back only as far as the far edge demands. A box LONGER than the
+ * axis would make the furthest fitting edge smaller than the margin, so the
+ * lower bound is applied second and wins: overflowing the far edge is better
+ * than overflowing the near one, where the reader's text begins.
  */
-export function clampLeft(preferred: number, width: number, viewport: Viewport): number {
-  const rightmost = viewport.width - REVEAL_MARGIN_PX - width;
-  return Math.max(REVEAL_MARGIN_PX, Math.min(preferred, rightmost));
+export function clampEdge(preferred: number, size: number, extent: number): number {
+  const furthest = extent - REVEAL_MARGIN_PX - size;
+  return Math.max(REVEAL_MARGIN_PX, Math.min(preferred, furthest));
 }
 
 /**
@@ -84,7 +85,7 @@ export function heightBelow(top: number, viewport: Viewport): number {
 export function clampReveal(anchor: Rect, reveal: Rect, viewport: Viewport): RevealPlacement {
   const top = anchor.bottom;
   return {
-    left: clampLeft(anchor.left, reveal.width, viewport),
+    left: clampEdge(anchor.left, reveal.width, viewport.width),
     top,
     maxHeight: heightBelow(top, viewport),
   };
@@ -101,10 +102,9 @@ export function clampReveal(anchor: Rect, reveal: Rect, viewport: Viewport): Rev
  * still does not fit scrolls inside itself.
  */
 export function clampBeside(anchor: Rect, reveal: Rect, viewport: Viewport): RevealPlacement {
-  const lowest = viewport.height - REVEAL_MARGIN_PX - reveal.height;
-  const top = Math.max(REVEAL_MARGIN_PX, Math.min(anchor.top, lowest));
+  const top = clampEdge(anchor.top, reveal.height, viewport.height);
   return {
-    left: clampLeft(anchor.right, reveal.width, viewport),
+    left: clampEdge(anchor.right, reveal.width, viewport.width),
     top,
     maxHeight: heightBelow(top, viewport),
   };
