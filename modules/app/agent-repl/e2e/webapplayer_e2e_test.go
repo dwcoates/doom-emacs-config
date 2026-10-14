@@ -44,7 +44,6 @@ import (
 	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
-	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"connectrpc.com/connect"
@@ -489,8 +488,10 @@ func TestWebappLayerMergeTabs(t *testing.T) {
 		SelfRepo: repo.Dir,
 		ExtraEnv: []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path},
 	}})
-	repoRef := wlRepositoryRef(t, w, repo)
-	ws := wlCreateChild(t, w, repoRef, "wl-merge")
+	// THE CHILD RUNS ITS INITIAL TURN FIRST: an async merge forks its merge
+	// workspace from the requester's transcript, and a workspace that never ran
+	// a turn has none, so the fork is refused and the bubble never drawn.
+	ws := adCreateAndFinishChild(t, w, adRepositoryRef(t, w, repo), "wl-merge")
 
 	// THE PAGE MERGES THE DEFAULT BRANCH ASYNC (the request in
 	// merge-tabs.layer.test.ts): an async merge never closes its requester, so
@@ -694,55 +695,6 @@ func TestWebappLayerRestartHandover(t *testing.T) {
 	if accepted == 0 {
 		t.Fatal("no AdoptHostWorkspace call on the successor was ever accepted, so the page's own recovery adopt had no partner in the rendezvous")
 	}
-}
-
-// wlRepositoryRef registers a repository's main worktree and reads the
-// daemon-minted RepositoryRef back off the roster stream.
-func wlRepositoryRef(t *testing.T, w *World, repo *harness.Repo) *workspacev1.RepositoryRef {
-	t.Helper()
-	harness.Register(t, w.Daemon, repo.Dir)
-	roster := w.WatchRoster()
-	defer roster.Close()
-	got := harness.AwaitView(t, w.Ctx(), roster, "the repository's roster section",
-		func(r *frontendv1.WorkspaceRoster) bool { return wlFindRepo(r, repo.Dir) != nil })
-	ref := wlFindRepo(got, repo.Dir)
-	if ref == nil {
-		t.Fatalf("e2e/webapp-layer: no roster repository section for %s", repo.Dir)
-	}
-	return ref
-}
-
-// wlFindRepo finds a repository section by its worktree dir. A repository is
-// keyed by its COMMON DIR, which for an ordinary checkout is
-// `<worktree>/.git`, so both spellings are accepted.
-func wlFindRepo(r *frontendv1.WorkspaceRoster, dir string) *workspacev1.RepositoryRef {
-	for _, section := range r.GetRepository().GetSections() {
-		switch section.GetKey().GetRepository().GetDir() {
-		case dir, filepath.Join(dir, ".git"):
-			return section.GetKey().GetRepository()
-		}
-	}
-	return nil
-}
-
-// wlCreateChild creates a top-level child workspace of a repository, which is
-// what a merge merges.
-func wlCreateChild(t *testing.T, w *World, repoRef *workspacev1.RepositoryRef, name string) *workspacev1.WorkspaceRef {
-	t.Helper()
-	resp, err := w.Client().CreateWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Repository: repoRef,
-		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
-			Name: &name,
-		}},
-	}))
-	if err != nil {
-		t.Fatalf("CreateWorkspace(%s) = error %v, want a success", name, err)
-	}
-	ws := resp.Msg.GetSuccess().GetWorkspace()
-	if ws.GetId() == "" {
-		t.Fatalf("CreateWorkspace(%s) = %v, want a success carrying a workspace ref", name, resp.Msg)
-	}
-	return ws
 }
 
 // wlDriveArea builds one world and drives one of the layer's vitest files
