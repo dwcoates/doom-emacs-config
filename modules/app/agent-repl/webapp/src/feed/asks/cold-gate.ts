@@ -35,6 +35,13 @@
  * of its own, and a moment the footer carries no compaction line is a moment
  * the slot is empty rather than one this end fills with a placeholder.
  *
+ * HIDING THE WORKSPACE IS NOT A REMEDIATION (owner request, 2026-10-13). The
+ * grey "hide workspace" button at the end of the row sends `SetWorkspaceHidden`
+ * — the same hide `SPC TAB h` sends, which moves the workspace into the
+ * sidebar's hidden section and lands the user elsewhere — and answers nothing
+ * about the gate: the gate keeps standing for whenever the workspace is shown
+ * again.
+ *
  * EVERY COMPACT VALUE IS ECHOED FROM THE MENU. The summarizer is the served
  * `AgentModel` handed back whole; the scope is one of the served enum values.
  * UNSPECIFIED is never offered and never sent, and a resolved trace carrying it
@@ -52,6 +59,7 @@ import {
   AnswerColdGateResponseSchema,
   type AnswerColdGateReopenFailed,
 } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_answer_cold_gate_pb";
+import { SetWorkspaceHiddenResponseSchema } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
 import type { AgentModel } from "../../../../proto/gen/ts/conversation/v1/api_pb";
 import { SessionCompactScope } from "../../../../proto/gen/ts/conversation/v1/session_pb";
 import type {
@@ -77,6 +85,7 @@ import {
   whileInFlight,
 } from "../cards/controls.js";
 import { callFailure, refusalOf, type Cause, type SentenceTable } from "../../rpc/refuse.js";
+import { buildSetWorkspaceHiddenRequest } from "../../sidebar/verbs.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
 import { tickWhileShown } from "../ticking.js";
@@ -110,6 +119,10 @@ export const COLD_GATE_COPY = {
   compact: {
     label: "compact first",
     hint: "summarize, then resume from the summary; held prompts stay held for you to send",
+  },
+  hide: {
+    label: "hide workspace",
+    hint: "move this workspace to the sidebar's hidden section; the gate stands until it is shown again",
   },
   /** {held} is the served count of prompts held at the gate, worded by heldPromptsPhrase. */
   compactAndResume: {
@@ -411,15 +424,21 @@ function drawActions(
   const buttons: Control[] = [];
   const pay = actionButton("pay", COLD_GATE_COPY.pay, buttons);
   const clear = actionButton("clear", COLD_GATE_COPY.clear, buttons);
-  // PAY GOES LAST, furthest right, in red (owner request, 2026-10-06): it is
-  // the weightiest choice on the gate, so it takes the end of the row and the
-  // red border; clear takes the place and the border pay had.
-  row.append(clear, pay);
+  // PAY GOES LAST OF THE REMEDIATIONS, in red (owner request, 2026-10-06): it
+  // is the weightiest choice on the gate, so it takes the end of their run and
+  // the red border; clear takes the place and the border pay had.
+  // HIDE WORKSPACE ENDS THE ROW, in grey (owner request, 2026-10-13): it is
+  // not a remediation, so it sits past pay, the last of them.
+  const hide = gateButton("cold-gate-hide", ["data-cold-gate-hide", ""], COLD_GATE_COPY.hide, buttons);
+  row.append(clear, pay, hide);
   pay.addEventListener("click", () => {
     void answer(rc, actions, buttons, progress, { kind: "pay" });
   });
   clear.addEventListener("click", () => {
     void answer(rc, actions, buttons, progress, { kind: "clear" });
+  });
+  hide.addEventListener("click", () => {
+    void hideWorkspace(rc, actions, buttons);
   });
   if (menu === undefined) {
     actions.append(progress);
@@ -641,6 +660,30 @@ async function answer(
   });
 }
 
+/**
+ * Hide the workspace, and nothing else: the gate is not answered, so it stands
+ * again when the workspace is shown. The landing elsewhere is the daemon's, as
+ * for every hide.
+ */
+async function hideWorkspace(
+  rc: RowContext,
+  actions: HTMLElement,
+  buttons: readonly Control[],
+): Promise<void> {
+  log.info("hiding the workspace from a cold gate", {
+    operation: "feed.asks.cold-gate.hide",
+    context: { workspace: rc.ctx.workspace.id },
+  });
+  await callFromGate(rc, actions, buttons, {
+    rpc: "SetWorkspaceHidden",
+    call: (client) => client.setWorkspaceHidden(buildSetWorkspaceHiddenRequest(rc.ctx.workspace, true)),
+    schema: SetWorkspaceHiddenResponseSchema,
+    // SetWorkspaceHidden answers only the cross-cutting four.
+    own: {},
+    malformedOperation: "feed.asks.cold-gate.hide.malformed-refusal",
+  });
+}
+
 /** A response whose result is the `success` or `error` arm every gate call answers. */
 type GateResponse = Message & {
   result:
@@ -653,9 +696,9 @@ type GateResponse = Message & {
  * ONE CALL FROM THE GATE'S ROW, whichever button made it: every button latched
  * inert while it is in flight, and what came back drawn at the buttons.
  *
- * Success draws nothing (the daemon's push redraws the row) and keeps the
- * buttons latched. A refusal is worded from OWN plus the cross-cutting four and
- * gives the buttons back. A call that threw is
+ * Success draws nothing (the daemon's push redraws the row, or the workspace
+ * leaves the tab bar) and keeps the buttons latched. A refusal is worded from OWN
+ * plus the cross-cutting four and gives the buttons back. A call that threw is
  * drawn as what actually happened (`callUnary` already logged it, as its
  * owner), and an answer this build cannot read is reported once rather than
  * becoming an unhandled rejection inside a click handler.
