@@ -152,6 +152,10 @@ type client struct {
 	release     func()
 	releaseOnce sync.Once
 
+	// conns are the connections rpc's transport dialed: KillSession hangs
+	// them up once the shim's answer is read.
+	conns *dialedConns
+
 	link *linkFeed
 	exit chan ExitInfo
 	dead chan struct{}
@@ -235,12 +239,14 @@ type client struct {
 // reader is a client built outside a supervisor, which orders nothing.
 func newClient(log dlog.Logger, ws ids.WorkspaceID, udsPath string, back backoff, probe func(ids.WorkspaceID) (bool, error), daemonStandDown func() bool) *client {
 	ctx, cancel := context.WithCancel(context.Background())
+	conns := newDialedConns()
 	return &client{
 		daemonStandDown: daemonStandDown,
 		log:             log,
 		ws:              ws,
 		udsPath:         udsPath,
-		rpc:             shimv1connect.NewShimClient(newUDSClient(udsPath), udsBaseURL),
+		rpc:             shimv1connect.NewShimClient(newUDSClient(udsPath, conns), udsBaseURL),
+		conns:           conns,
 		back:            back,
 		grace:           DefaultKillGrace,
 		lockProbe:       probe,
@@ -1558,9 +1564,31 @@ func (c *client) SetKeepalive(ctx context.Context, req *shimv1.SetKeepaliveReque
 // The stand-down is latched BEFORE the verb goes, not after it answers: the
 // shim ends its process as it answers, so a monitor told only afterwards has
 // already read the break as a fault.
+//
+// AN ENDED SESSION IS HUNG UP ON once its answer is read. The shim exits on
+// that hang-up, not on its answer leaving: a shim gone before the daemon read
+// the answer let this transport's next write to it fail, and http2 aborted the
+// unread KillSession with the whole connection. Every caller that then waits
+// for the process to exit (Fleet.Stop, the drain's sweep, the relaunch
+// engine's stand-down) gets the hang-up from here. A refused kill leaves the
+// shim serving, so nothing is hung up.
 func (c *client) KillSession(ctx context.Context, req *shimv1.KillSessionRequest) (*shimv1.KillSessionResponse, error) {
 	c.standDown.Store(true)
-	return unary(ctx, c, "kill_session", req, validateKillSessionRequest, c.rpc.KillSession)
+	resp, err := unary(ctx, c, "kill_session", req, validateKillSessionRequest, c.rpc.KillSession)
+	if err != nil || resp.GetSuccess() == nil {
+		return resp, err
+	}
+	closed, hangUpErr := c.conns.hangUp()
+	fields := dlog.Context{"workspace_id": string(c.ws), "connections": closed}
+	if hangUpErr != nil {
+		// The shim then waits for a hang-up that never comes; the caller's
+		// stop escalation is what ends it, and this record says why.
+		fields["error"] = hangUpErr.Error()
+		c.log.Error("daemon.shimclient.kill_session", "could not hang up on the shim after reading its KillSession answer; the shim exits only on the stop escalation", fields)
+		return resp, nil
+	}
+	c.log.Debug("daemon.shimclient.kill_session", "hung up on the shim after reading its KillSession answer; the shim exits on the hang-up", fields)
+	return resp, nil
 }
 
 // StartTurn opens a turn with the daemon's minted TurnId and its origin.

@@ -17,6 +17,8 @@ import (
 	"connectrpc.com/connect"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
+
+	"agent-repld/internal/hangup"
 )
 
 // fakeShim is an in-process shim.v1 server on a unix socket: the test double
@@ -40,6 +42,11 @@ type fakeShim struct {
 	watchAgentFrames    []*shimv1.WatchAgentResponse
 	watchBashRefusal    error
 	watchSessionRefuse  error
+	killSessionResp     *shimv1.KillSessionResponse
+
+	// killHungUp receives, per KillSession, the channel closed when the
+	// client hangs up the connection that KillSession came in on.
+	killHungUp chan (<-chan struct{})
 
 	// shutdown stops the server; a test calls it through stop.
 	shutdown func()
@@ -72,8 +79,9 @@ func startFakeShim(t *testing.T, dir string) (*fakeShim, string) {
 	t.Helper()
 
 	f := &fakeShim{
-		received: map[string]int{},
-		opened:   make(chan struct{}, 64),
+		received:   map[string]int{},
+		opened:     make(chan struct{}, 64),
+		killHungUp: make(chan (<-chan struct{}), 8),
 	}
 	udsPath := filepath.Join(dir, "shim.sock")
 	f.serve(t, udsPath)
@@ -96,7 +104,8 @@ func (f *fakeShim) serve(t *testing.T, udsPath string) {
 	f.mu.Unlock()
 
 	srv := &http.Server{
-		Handler: h2c.NewHandler(mux, &http2.Server{}),
+		Handler:     h2c.NewHandler(mux, &http2.Server{}),
+		ConnContext: hangup.ConnContext,
 		ConnState: func(conn net.Conn, state http.ConnState) {
 			f.mu.Lock()
 			defer f.mu.Unlock()
@@ -112,7 +121,7 @@ func (f *fakeShim) serve(t *testing.T, udsPath string) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_ = srv.Serve(ln)
+		_ = srv.Serve(hangup.Listener(ln))
 	}()
 	var once sync.Once
 	shutdown := func() {
@@ -278,9 +287,16 @@ func (f *fakeShim) Hibernate(_ context.Context, _ *connect.Request[shimv1.Hibern
 	return connect.NewResponse(&shimv1.HibernateResponse{}), nil
 }
 
-func (f *fakeShim) KillSession(_ context.Context, _ *connect.Request[shimv1.KillSessionRequest]) (*connect.Response[shimv1.KillSessionResponse], error) {
+func (f *fakeShim) KillSession(ctx context.Context, _ *connect.Request[shimv1.KillSessionRequest]) (*connect.Response[shimv1.KillSessionResponse], error) {
 	f.record("KillSession")
-	return connect.NewResponse(&shimv1.KillSessionResponse{}), nil
+	f.killHungUp <- hangup.Of(ctx)
+	f.mu.Lock()
+	resp := f.killSessionResp
+	f.mu.Unlock()
+	if resp == nil {
+		resp = &shimv1.KillSessionResponse{}
+	}
+	return connect.NewResponse(resp), nil
 }
 
 func (f *fakeShim) StartTurn(_ context.Context, _ *connect.Request[shimv1.StartTurnRequest]) (*connect.Response[shimv1.StartTurnResponse], error) {
