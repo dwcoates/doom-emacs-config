@@ -418,3 +418,37 @@ func TestHeadVersionIsAbsentWithoutALandedVersion(t *testing.T) {
 		t.Fatalf("headVersion(nil) = %+v, want nil", got)
 	}
 }
+
+func TestAnAsyncMergeFromTheMainCheckoutOntoAgentReplsMasterNeedsAnIncrement(t *testing.T) {
+	tests := []struct {
+		name    string
+		version *wsm.VersionIncrement
+		refused bool
+	}{
+		{name: "without one", refused: true},
+		{name: "with one", version: aPatch()},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the main checkout, which the daemon never created.
+			h := newHarness(t)
+			h.emacsRepo()
+			h.db.mu.Lock()
+			delete(h.db.jobs, theWorkspace)
+			h.db.mu.Unlock()
+			h.inFlight = "turn-asking"
+			source := asyncSource
+			source.Version = tt.version
+
+			// Act
+			err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: source, By: RequestedByAgent,
+				Detached: &DetachedRun{Name: "n"}})
+
+			// Assert
+			refusal, refused := Refused(err)
+			if refused != tt.refused || (refused && refusal.Arm != ArmVersionIncrementRequired) || (!tt.refused && err != nil) {
+				t.Fatalf("Enqueue = %v, want refused %v", err, tt.refused)
+			}
+		})
+	}
+}
