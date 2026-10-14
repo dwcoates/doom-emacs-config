@@ -328,31 +328,18 @@ func (v *verbs) unresolvedLink(ctx context.Context, log dlog.Logger, record wsm.
 // beside the daemon-scoped prompts fault, never a `link_unresolved` that would
 // claim a question was sent.
 func (v *verbs) linkQuestion(ctx context.Context, log dlog.Logger, href string, candidates []string) (string, error) {
-	brief, err := v.load(v.deps.PromptsDir, BriefLinkUnresolved)
-	if err != nil {
-		log.Error(opOpenInEditor, "could not read the unresolved-link brief", dlog.Context{
-			"brief": BriefLinkUnresolved, "cause": err.Error(),
-		})
-		v.raisePromptsFault(ctx, log, fmt.Sprintf("the %s brief is unreadable: %v", BriefLinkUnresolved, err))
-		return "", fmt.Errorf("open feed link %q: the %s brief is unreadable: %w", href, BriefLinkUnresolved, err)
-	}
 	looked := make([]string, 0, len(candidates))
 	for i, candidate := range candidates {
 		looked = append(looked, fmt.Sprintf("%d. `%s`", i+1, candidate))
 	}
-	question, err := v.splice(brief, map[string]string{
+	question, err := v.composeBrief(ctx, log, opOpenInEditor, BriefLinkUnresolved, map[string]string{
 		"href":           href,
 		"candidates":     strings.Join(looked, "\n"),
 		"resolver":       filepath.Join(v.deps.CheckoutRoot, feedLinkResolverSite),
 		"agent_repl_dir": v.deps.CheckoutRoot,
 	})
 	if err != nil {
-		log.Error(opOpenInEditor, "could not splice the unresolved-link brief", dlog.Context{
-			"brief": BriefLinkUnresolved, "cause": err.Error(),
-		})
-		v.raisePromptsFault(ctx, log, fmt.Sprintf("the %s brief will not splice: %v", BriefLinkUnresolved, err))
-		return "", fmt.Errorf("open feed link %q: the %s brief will not splice: %w", href, BriefLinkUnresolved, err)
+		return "", fmt.Errorf("open feed link %q: %w", href, err)
 	}
-	v.clearPromptsFault(ctx, log)
 	return question, nil
 }
