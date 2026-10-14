@@ -101,13 +101,13 @@ selection round; each decision below records the reasoning a reviewer needs.
 
 ## Non-contract decisions recorded for the implementation
 
-- **Persistence model.** Subscriptions are durable (wsm layout 52,
+- **Persistence model.** Subscriptions are durable (wsm layout 53,
   `merge_queue_subscriptions`, keyed by subscriber and repository key; the
   every-repository scope is stored as the empty key). Why durable: a landing
   in the daemon's own checkout redeploys and restarts the daemon, so a
   restart-scoped subscription would end at the very change it exists to
   report. The rollout hold is durable for the same reason.
-- **Close ends it structurally.** `wsm.SetClosed(ws, true)` deletes the
+- **Close ends it structurally.** `wsm.MarkClosed` deletes the
   workspace's subscriptions in the same transaction that marks it closed, and
   the table's foreign key cascades on `Forget` (nuke). Every close path —
   `CloseWorkspace`, kill, nuke, a one-shot's landing close, the boot's
