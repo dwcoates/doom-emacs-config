@@ -32,7 +32,7 @@ func TestAHeldBoundaryIsConvertedOnceAfterARestart(t *testing.T) {
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
-	store := startRealStore(t)
+	store := startFakeStore(t)
 	// THE HOLD IS BOUNDED TO ONE REDELIVERY, and the redelivery is the NEXT
 	// poll of this file — so the subject has to cut the reader off between the
 	// two, and at the production poll interval that is one 50ms window. It used
@@ -58,7 +58,7 @@ func TestAHeldBoundaryIsConvertedOnceAfterARestart(t *testing.T) {
 	gate := proxy.gateOnBatch(t, cursorParkedAt(fx.File.Path(), fx.BoundaryOffset))
 	first := startSidecar(t, opts)
 	gate.await(ctx, t, "the batch parking the cursor at the held boundary")
-	awaitBookLines(ctx, t, store.Client, fx.Session, 1)
+	store.awaitBookLines(ctx, t, fx.Session, 1)
 	cs := awaitCursorAtLeast(ctx, t, store.Client, fx.File.Path(), 1)
 	if cs.GetOffset() > fx.BoundaryOffset {
 		t.Fatalf("the cursor stood at %d, past the held boundary at %d, before the restart even happened",
@@ -81,13 +81,13 @@ func TestAHeldBoundaryIsConvertedOnceAfterARestart(t *testing.T) {
 	// parked short of it has been written. A wait for "at least two lines"
 	// would be satisfied by any second line at all.
 	awaitCursorAtLeast(ctx, t, store.Client, fx.File.Path(), fx.BoundaryOffset+1)
-	lines := bookLines(ctx, t, store.Client, fx.Session)
+	lines := store.Book(fx.Session)
 
 	// Assert: exactly one context cut, carrying the summary that settled it.
 	var cuts []*storev1.StorePageLine
 	for _, at := range lines {
-		if contextCutOf(at.GetLine()) != nil {
-			cuts = append(cuts, at.GetLine())
+		if contextCutOf(at) != nil {
+			cuts = append(cuts, at)
 		}
 	}
 	if len(cuts) != 1 {

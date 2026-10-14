@@ -24,7 +24,7 @@ import (
 // restartProbe is one subject's arrangement: a file, a real store behind a
 // recording proxy, and the captured lines re-pointed at the subject's session.
 type restartProbe struct {
-	store    *realStore
+	store    *fakeStore
 	proxy    *proxyStore
 	opts     sidecarOptions
 	g        *growingFile
@@ -35,7 +35,7 @@ type restartProbe struct {
 
 func newRestartProbe(t *testing.T, cwd, session string) *restartProbe {
 	t.Helper()
-	store := startRealStore(t)
+	store := startFakeStore(t)
 	proxy := startProxyStore(t, store.Socket)
 	tree := newVendorTree(t)
 	return &restartProbe{

@@ -30,7 +30,7 @@ func TestABackgroundedAgentSeenAsSpoolAndSidechainIsOneBookWithOneTopLevel(t *te
 	// sidechain's meta.json already names, launched async.
 	ctx, cancel := testContext(t)
 	defer cancel()
-	store := startRealStore(t)
+	store := startFakeStore(t)
 	proxy := startProxyStore(t, store.Socket)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
@@ -94,8 +94,8 @@ func TestABackgroundedAgentSeenAsSpoolAndSidechainIsOneBookWithOneTopLevel(t *te
 
 	// And the store holds ONE row per key however many planes wrote it.
 	seen := map[string]int{}
-	for _, at := range bookLines(ctx, t, store.Client, corpusSubagentAgentID) {
-		if a := activityOf(at.GetLine()); a != nil {
+	for _, at := range store.Book(corpusSubagentAgentID) {
+		if a := activityOf(at); a != nil {
 			seen[a.GetActivityId().GetValue()]++
 		}
 	}
