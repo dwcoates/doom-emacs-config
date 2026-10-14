@@ -499,7 +499,7 @@ func mergeCleanRepo(t *testing.T) (f *fixture, d *harness.Daemon, repo *harness.
 	repo = harness.NewRepo(t)
 	script = harness.NewTestAllScript(t, repo.Dir)
 	// A merge-spanning wait chains dozens of subprocesses; see harness.MergeChainTimeout.
-	d = harness.StartDaemon(t, harness.Opts{DurableState: true, SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout, ExtraEnv: []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path}})
+	d = harness.StartDaemon(t, harness.Opts{DurableState: true, SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout, ExtraEnv: []string{harness.TestAllScriptEnv(script.Path)}})
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f = mergeCreateChild(t, d, repoRef, "clean", "do the clean thing", nil)
 	return f, d, repo, script
@@ -744,7 +744,7 @@ func TestAHoldTakenBeforeARestartKeepsTheSuccessorsLandingFromDeploying(t *testi
 	script := harness.NewTestAllScript(t, repo.Dir)
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
-	env := []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path}
+	env := []string{harness.TestAllScriptEnv(script.Path)}
 	d1 := harness.StartDaemon(t, harness.Opts{DurableState: true, SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout, ExtraEnv: env})
 	if resp := holdRollouts(t, d1, false); resp.GetSuccess() == nil {
 		t.Fatalf("hold_rollouts = %v, want a success", resp)
@@ -834,7 +834,7 @@ func TestASiblingWorktreeOfTheSelfRepoRunsTheEmacsMethodButNeverTriggersTheDeplo
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
 	// A merge-spanning wait chains dozens of subprocesses; see harness.MergeChainTimeout.
-	d := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout, ExtraEnv: []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path}})
+	d := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout, ExtraEnv: []string{harness.TestAllScriptEnv(script.Path)}})
 	repoRef := mergeRepositoryRef(t, d, repo)
 	parent := mergeCreateChild(t, d, repoRef, "sibling7a-parent", "the parent work", nil)
 
@@ -967,7 +967,7 @@ func TestPrePromptTabRunsUnderTheLeaseAndParentsItsRowsToItsTabNotTheRoot(t *tes
 	script := harness.NewTestAllScript(t, repo.Dir)
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
-	d := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout, ExtraEnv: []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path}})
+	d := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout, ExtraEnv: []string{harness.TestAllScriptEnv(script.Path)}})
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f := mergeCreateChild(t, d, repoRef, "prepromptrepo", "do the feature", &agentreplv1.CreateWorkspaceMergeActions{
 		BeforeWsMerge: said("run the setup script"),
@@ -1039,7 +1039,7 @@ func TestAFailingPostPromptNeverFailsTheRunAndRidesTheTerminalSuccess(t *testing
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
 	// A merge-spanning wait chains dozens of subprocesses; see harness.MergeChainTimeout.
-	d := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout, ExtraEnv: []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path}})
+	d := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout, ExtraEnv: []string{harness.TestAllScriptEnv(script.Path)}})
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f := mergeCreateChild(t, d, repoRef, "postpromptfail", "do the clean thing", &agentreplv1.CreateWorkspaceMergeActions{
 		PostprocessingPrompt: said("clean up after landing"),
@@ -1214,7 +1214,7 @@ func displacedTurnAcrossABounce(t *testing.T) (*fixture, *harness.Daemon, *shimv
 	rendezvous := filepath.Join(t.TempDir(), "capture.rendezvous")
 	// A merge-spanning wait chains dozens of subprocesses; see harness.MergeChainTimeout.
 	d := harness.StartDaemon(t, harness.Opts{DurableState: true, SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout, ExtraEnv: []string{
-		"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path,
+		harness.TestAllScriptEnv(script.Path),
 		"AGENT_REPL_MERGE_PAUSE_AFTER_CAPTURE=" + rendezvous,
 	}})
 	// The sweep covers every test; these declared records are evidence of the
@@ -1239,7 +1239,7 @@ func displacedTurnAcrossABounce(t *testing.T) (*fixture, *harness.Daemon, *shimv
 
 	// A merge-spanning wait chains dozens of subprocesses; see harness.MergeChainTimeout.
 	d2 := harness.StartDaemon(t, harness.Opts{StateDir: d.StateDir, SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout, ExtraEnv: []string{
-		"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path,
+		harness.TestAllScriptEnv(script.Path),
 		"AGENT_REPL_LOCK_DIR=" + d.LockDir,
 	}})
 	displacedBounceWarnings(d2)
@@ -1609,7 +1609,7 @@ func mergeBrokenGateRepo(t *testing.T) (first, second *fixture, d *harness.Daemo
 	script.SetExitCode(127)
 	script.SetStdout("bash: modules/app/agent-repl/bin/test-all.sh: No such file or directory\n")
 	// A merge-spanning wait chains dozens of subprocesses; see harness.MergeChainTimeout.
-	d = harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout, ExtraEnv: []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path}})
+	d = harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout, ExtraEnv: []string{harness.TestAllScriptEnv(script.Path)}})
 	// The sweep covers every test; the declared records are evidence of the
 	// broken gate the test stages.
 	d.ExpectWarnings("daemon.merge.tests", "daemon.scriptrunner.run")

@@ -3,17 +3,19 @@ package workspace
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 
 	"agent-repld/internal/account"
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
 
 // mergeRequester arranges a requester a merge workspace can be forked from: a
 // registered workspace on branch "ABC/sample", landing on "master" in
-// targetDir, with a conversation to fork and a creation job carrying its
-// merge actions.
+// targetDir, with a conversation to fork and a creation job carrying merge
+// actions of ITS OWN, which no merge workspace of it may inherit.
 func mergeRequester(t *testing.T, f *fixture) (wsm.Workspace, string) {
 	t.Helper()
 	requester := f.workspace("requester", t.TempDir())
@@ -25,20 +27,36 @@ func mergeRequester(t *testing.T, f *fixture) (wsm.Workspace, string) {
 	f.db.jobs[requester.ID] = wsm.CreationJob{
 		Workspace: requester.ID,
 		Layout:    wsm.MergeLayout{SourceBranch: requester.Branch, SourceDir: requester.Dir, TargetDir: targetDir},
-		Actions:   wsm.MergeActions{Before: []string{"before the merge"}},
+		Actions:   wsm.MergeActions{Before: []string{"the requester's own before"}},
 	}
 	return requester, targetDir
 }
 
+// theLanding is the landing the merge queue decided at hand-off, distinct
+// from everything the requester records, so a create that read the requester
+// instead is caught.
+var theLanding = wsm.MergeOrigin{TargetDir: "/decided/target", ParentBranch: "decided-parent",
+	Actions: wsm.MergeActions{Before: []string{"the request's before"}, After: []string{"the request's after"}}}
+
+// landedOrigin is the hand-off's origin for REQUESTER's request-1, carrying
+// theLanding.
+func landedOrigin(requester ids.WorkspaceID) wsm.MergeOrigin {
+	origin := theLanding
+	origin.Requester, origin.Request = requester, "request-1"
+	return origin
+}
+
 // mergeWorkspaceSpec is the spec an async merge asks Create for, named
-// "reconnect-fix".
+// "reconnect-fix", landing by theLanding.
 func mergeWorkspaceSpec(t *testing.T, f *fixture, requester ids.WorkspaceID) CreateSpec {
 	t.Helper()
+	origin := landedOrigin(requester)
+	origin.ForkHead = "fork-head"
 	return CreateSpec{
 		RepoDir:   mainWorktree(t, f),
 		BaseRef:   "ABC/sample",
 		ForkFrom:  &requester,
-		MergeOf:   &wsm.MergeOrigin{Requester: requester, Request: "request-1", ForkHead: "fork-head"},
+		MergeOf:   &origin,
 		MergeName: "reconnect-fix",
 	}
 }
@@ -100,26 +118,81 @@ func TestCreateFailsAMergeWorkspaceWithNoNameWithNothingBuilt(t *testing.T) {
 	}
 }
 
-func TestCreateLandsAMergeWorkspaceWhereItsRequesterWould(t *testing.T) {
+func TestCreateLandsAMergeWorkspaceByItsOriginsLanding(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
-	requester, targetDir := mergeRequester(t, f)
+	requester, _ := mergeRequester(t, f)
+	spec := mergeWorkspaceSpec(t, f, requester.ID)
 
 	// Act
-	if _, err := f.verbs.Create(context.Background(), mergeWorkspaceSpec(t, f, requester.ID)); err != nil {
+	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
-	// Assert: the requester's target and actions on the job, its branch base
-	// and parent branch on the registration, and the merge origin recorded.
+	// Assert: the origin's target and actions on the merge workspace's own
+	// job, the requester's branch as its base, the origin's parent branch on
+	// the registration, and the merge origin recorded.
 	job := f.db.putJobs[len(f.db.putJobs)-1]
-	if job.Layout.TargetDir != targetDir || len(job.Actions.Before) != 1 || job.Actions.Before[0] != "before the merge" || job.BaseRef != "ABC/sample" {
-		t.Fatalf("job = %+v, want the requester's target, actions and branch as base", job)
+	if job.Layout.TargetDir != theLanding.TargetDir || !reflect.DeepEqual(job.Actions, theLanding.Actions) || job.BaseRef != "ABC/sample" {
+		t.Fatalf("job = %+v, want the origin's target and actions and the requester's branch as base", job)
 	}
 	facts := f.db.registered[len(f.db.registered)-1]
-	want := wsm.MergeOrigin{Requester: requester.ID, Request: "request-1", ForkHead: "fork-head"}
-	if facts.ParentBranch != "master" || facts.Parent == nil || *facts.Parent != requester.ID || facts.MergeOf == nil || *facts.MergeOf != want {
-		t.Fatalf("registered = %+v, want parent branch master, parent and merge origin the requester's", facts)
+	if facts.ParentBranch != theLanding.ParentBranch || facts.Parent == nil || *facts.Parent != requester.ID || facts.MergeOf == nil || !reflect.DeepEqual(*facts.MergeOf, *spec.MergeOf) {
+		t.Fatalf("registered = %+v, want the origin's parent branch, the requester as parent and the merge origin", facts)
+	}
+}
+
+func TestCreateGivesAMergeWorkspaceNoActionWhenItsRequestNamedNone(t *testing.T) {
+	// Arrange: the requester's creation job carries actions of its own.
+	f := newFixture(t)
+	requester, _ := mergeRequester(t, f)
+	spec := mergeWorkspaceSpec(t, f, requester.ID)
+	spec.MergeOf.Actions = wsm.MergeActions{}
+
+	// Act
+	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert
+	if job := f.db.putJobs[len(f.db.putJobs)-1]; !reflect.DeepEqual(job.Actions, wsm.MergeActions{}) {
+		t.Fatalf("job actions = %+v, want none: a merge workspace never inherits its requester's", job.Actions)
+	}
+}
+
+func TestCreateFailsAMergeWorkspaceWhoseOriginCarriesNoLandingWithNothingBuilt(t *testing.T) {
+	tests := []struct {
+		name  string
+		alter func(origin *wsm.MergeOrigin)
+		field string
+	}{
+		{name: "no target", alter: func(origin *wsm.MergeOrigin) { origin.TargetDir = "" }, field: "target_dir"},
+		{name: "no parent branch", alter: func(origin *wsm.MergeOrigin) { origin.ParentBranch = "" }, field: "parent_branch"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			requester, _ := mergeRequester(t, f)
+			spec := mergeWorkspaceSpec(t, f, requester.ID)
+			tt.alter(spec.MergeOf)
+
+			// Act
+			_, err := f.verbs.Create(context.Background(), spec)
+
+			// Assert
+			if err == nil || len(f.git.created) != 0 || len(f.db.putJobs) != 0 || len(f.db.registered) != 0 {
+				t.Fatalf("Create = %v with %d worktrees, %d jobs and %d registrations, want an error with nothing built",
+					err, len(f.git.created), len(f.db.putJobs), len(f.db.registered))
+			}
+			record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opCreate, Message: "a merge workspace's origin carries no landing"})
+			if !ok {
+				t.Fatal("the landingless origin was not recorded at ERROR")
+			}
+			if record.Context["requester"] != string(requester.ID) || record.Context["request"] != "request-1" || record.Context[tt.field] != "" {
+				t.Fatalf("record context = %+v, want the requester, the request and the empty %s", record.Context, tt.field)
+			}
+		})
 	}
 }
 
@@ -156,8 +229,8 @@ func TestCreateRefusesAContradictoryMergeWorkspaceSpecWithNothingBuilt(t *testin
 	}
 }
 
-func TestCreateFailsAMergeWorkspaceWhoseRequesterHasNoCreationJob(t *testing.T) {
-	// Arrange
+func TestCreateForksAMergeWorkspaceFromARequesterWithNoCreationJob(t *testing.T) {
+	// Arrange: the main checkout, registered and never created.
 	f := newFixture(t)
 	requester, _ := mergeRequester(t, f)
 	delete(f.db.jobs, requester.ID)
@@ -166,11 +239,11 @@ func TestCreateFailsAMergeWorkspaceWhoseRequesterHasNoCreationJob(t *testing.T) 
 	_, err := f.verbs.Create(context.Background(), mergeWorkspaceSpec(t, f, requester.ID))
 
 	// Assert
-	if err == nil || len(f.git.created) != 0 {
-		t.Fatalf("Create = %v with %d worktrees, want an error with nothing built", err, len(f.git.created))
+	if err != nil || len(f.git.created) != 1 {
+		t.Fatalf("Create = %v with %d worktrees, want the merge workspace forked", err, len(f.git.created))
 	}
-	if !loggedAtError(f, opCreate) {
-		t.Fatal("the missing creation job was not recorded at ERROR")
+	if job := f.db.putJobs[len(f.db.putJobs)-1]; job.Layout.TargetDir != theLanding.TargetDir {
+		t.Fatalf("job target = %q, want the origin's %q", job.Layout.TargetDir, theLanding.TargetDir)
 	}
 }
 
@@ -181,7 +254,7 @@ func TestCreateMergeWorkspaceForksInTheRequestersRepository(t *testing.T) {
 	repoDir := mainWorktree(t, f)
 	requester.Repo = f.db.repositories[len(f.db.repositories)-1].ID
 	f.db.with(requester)
-	origin := wsm.MergeOrigin{Requester: requester.ID, Request: "request-1"}
+	origin := landedOrigin(requester.ID)
 
 	// Act
 	created, err := f.verbs.CreateMergeWorkspace(context.Background(), requester, origin, "reconnect-fix", "ABC/sample")
@@ -193,8 +266,9 @@ func TestCreateMergeWorkspaceForksInTheRequestersRepository(t *testing.T) {
 	// cut at its branch's tip, recorded as its merge workspace with that tip as
 	// its fork head.
 	facts := f.db.registered[len(f.db.registered)-1]
-	want := wsm.MergeOrigin{Requester: requester.ID, Request: "request-1", ForkHead: "sha-of-refs/heads/ABC/sample"}
-	if facts.MergeOf == nil || *facts.MergeOf != want {
+	want := landedOrigin(requester.ID)
+	want.ForkHead = "sha-of-refs/heads/ABC/sample"
+	if facts.MergeOf == nil || !reflect.DeepEqual(*facts.MergeOf, want) {
 		t.Fatalf("registered %+v, want the requester's merge workspace", facts)
 	}
 	if fork, owed := f.db.pendingForks[created.ID]; !owed || fork.Parent != requester.ID {
@@ -237,7 +311,7 @@ func TestCreateMergeWorkspaceFailsLoudlyWhenTheBranchDoesNotResolve(t *testing.T
 	f.git.resolveErr = errors.New("fatal: not a valid ref")
 
 	// Act
-	_, err := f.verbs.CreateMergeWorkspace(context.Background(), requester, wsm.MergeOrigin{Requester: requester.ID, Request: "request-1"}, "reconnect-fix", "ABC/sample")
+	_, err := f.verbs.CreateMergeWorkspace(context.Background(), requester, landedOrigin(requester.ID), "reconnect-fix", "ABC/sample")
 
 	// Assert
 	if err == nil || len(f.git.created) != 0 || len(f.db.putJobs) != 0 {
@@ -255,7 +329,7 @@ func TestCreateMergeWorkspaceFailsLoudlyForARequesterWithNoRepository(t *testing
 	requester.Repo = "repo-unregistered"
 
 	// Act
-	_, err := f.verbs.CreateMergeWorkspace(context.Background(), requester, wsm.MergeOrigin{Requester: requester.ID, Request: "request-1"}, "reconnect-fix", "ABC/sample")
+	_, err := f.verbs.CreateMergeWorkspace(context.Background(), requester, landedOrigin(requester.ID), "reconnect-fix", "ABC/sample")
 
 	// Assert
 	if err == nil || len(f.git.created) != 0 {

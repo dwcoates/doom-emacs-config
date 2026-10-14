@@ -24,7 +24,8 @@
 #                                branch is updated and this workspace closed.
 #                                Refused in the repository's main worktree.
 #   --async <name> <branch> [--instruction <text>] [--close <dir>]
-#           [--cleanup] [--compact-after]
+#           [--cleanup] [--compact-after] [--before-merge <prompt>]
+#           [--after-merge <prompt>]
 #                                Merge <branch> ASYNC, in a hidden merge
 #                                workspace named <name> forked from this
 #                                workspace, which stays free. --instruction
@@ -33,7 +34,12 @@
 #                                its worktree, to close once it lands;
 #                                --cleanup removes the worktree that has the
 #                                branch checked out once it lands;
-#                                --compact-after compacts this workspace then.
+#                                --compact-after compacts this workspace then;
+#                                --before-merge and --after-merge are the
+#                                prompts the merge workspace runs before the
+#                                landing (failing the merge if it fails) and
+#                                after it lands, and the only merge actions it
+#                                runs.
 #   --dequeue-own                Take this workspace's own merge off the queue.
 #   --dequeue-workspace <dir>    Take ANOTHER workspace's merge off the queue,
 #                                named by its worktree.
@@ -214,7 +220,15 @@ case "${1:-}" in
         --compact-after)
           mode+=(-compact-after)
           shift ;;
-        *) die "--async <name> <branch> takes only --instruction <text>, --close <dir>, --cleanup and --compact-after, not $1; quote an instruction as one argument" ;;
+        --before-merge)
+          [ -n "${2:-}" ] || die "--before-merge needs the prompt the merge workspace runs before the landing"
+          mode+=(-before-merge "$2")
+          shift 2 ;;
+        --after-merge)
+          [ -n "${2:-}" ] || die "--after-merge needs the prompt the merge workspace runs after the landing"
+          mode+=(-after-merge "$2")
+          shift 2 ;;
+        *) die "--async <name> <branch> takes only --instruction <text>, --close <dir>, --cleanup, --compact-after, --before-merge <prompt> and --after-merge <prompt>, not $1; quote an instruction or a prompt as one argument" ;;
       esac
     done
     run_verb "${mode[@]}"
@@ -260,7 +274,7 @@ case "${1:-}" in
     run_verb "$control"
     ;;
   *)
-    printf 'usage: run.sh --one-shot [--pr-merged] | --async <name> <branch> [--instruction <text>] [--close <dir>] [--cleanup] [--compact-after] | --dequeue-own | --dequeue-workspace <dir> | --move-up-own | --move-up-workspace <dir> | --move-down-own | --move-down-workspace <dir> | --pause-queue [<repo-dir>] | --resume-queue [<repo-dir>] | --hold-rollouts | --release-rollouts  (any merge verb also takes --front, and --minor <line> or --patch <line>)\n' >&2
+    printf 'usage: run.sh --one-shot [--pr-merged] | --async <name> <branch> [--instruction <text>] [--close <dir>] [--cleanup] [--compact-after] [--before-merge <prompt>] [--after-merge <prompt>] | --dequeue-own | --dequeue-workspace <dir> | --move-up-own | --move-up-workspace <dir> | --move-down-own | --move-down-workspace <dir> | --pause-queue [<repo-dir>] | --resume-queue [<repo-dir>] | --hold-rollouts | --release-rollouts  (any merge verb also takes --front, and --minor <line> or --patch <line>)\n' >&2
     exit 1
     ;;
 esac

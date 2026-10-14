@@ -1445,8 +1445,11 @@ Owner rulings, 2026-10-11 (`internal/merge/chain.go`, `internal/cpugov`).
   (`merge.RequestedByAgent`) exactly as a skill-written file is.
 - Exactly one mode: `-one-shot [-pr-merged]` (the requester's own branch,
   sync, closing it once it lands) or `-async -name NAME -branch BRANCH`
-  with `-instruction TEXT`, `-close-dir WORKTREE`, `-cleanup-worktree` and
-  `-compact-after` (the named branch, in a merge workspace).
+  with `-instruction TEXT`, `-close-dir WORKTREE`, `-cleanup-worktree`,
+  `-compact-after`, `-before-merge TEXT` and `-after-merge TEXT` (the named
+  branch, in a merge workspace; the last two are the merge workspace's own
+  merge actions, written as the entry's `before_ws_merge` and
+  `postprocessing_prompt`).
 - `-one-shot` ANNOUNCES a one-shot merge from inside the turn it
   follows: the command file's merge carries `one_shot`, the request
   (`merge.Request.OneShot`) runs in place once the turn ends and closes the
@@ -2791,6 +2794,40 @@ snapshot) once per sweep, and everything else is its own git children. Those
 children are NOT niced: the daemon has no idiom for lowering a child's
 priority (`bin/background.sh` is the test suites'), and git inherits the
 daemon's own.
+
+## An async merge lands where the queue decided, once, at hand-off (`internal/merge`, `internal/workspace`)
+
+THE LANDING IS DECIDED IN ONE PLACE. `merge.orchestrator.detachedTarget()` is
+the one rule for where an async request lands: the requester's creation-job
+target, or, for a requester with NO creation job, its repository's main
+worktree. Only a main checkout lacks a creation job (it is registered, never
+created), so a jobless requester whose directory is not its main worktree is a
+defect: refused, recorded at ERROR as `daemon.merge.detached_target` with the
+requester, its directory and the resolved main worktree. Both the request's
+version check (`requestTarget()`) and the hand-off (`handOffDetached()`) ask
+it, and `TestBothAsyncLandingSitesDecideByTheOneRule` pins that they do.
+
+- `handOffDetached()` puts the whole landing on the `wsm.MergeOrigin` it forks
+  with: `TargetDir`, the requester's `ParentBranch`, and `Actions`. A landing
+  that cannot be decided drops the request and hands the failure back, as a
+  failed fork does.
+- `workspace.verbs.Create()` lands a merge workspace by those fields and reads
+  nothing off the requester (no requester creation job is read). An origin with
+  an empty `TargetDir` or `ParentBranch` is an invariant violation, refused at
+  ERROR before anything is minted.
+- The three fields are TRANSPORT-ONLY on the origin. The merge workspace's own
+  creation job holds its target and actions durably and its registry row its
+  parent branch, so the stored origin (`workspaces.merge_*`) never carries them.
+
+A MERGE WORKSPACE NEVER INHERITS ITS REQUESTER'S MERGE ACTIONS (owner ruling,
+2026-10-14). It runs exactly the actions its async request named
+(`agentrepl.v1.MergeWorkspaceAsync.merge_actions`, or the command-file entry's
+`before_ws_merge` / `postprocessing_prompt`), and none when it named none. The
+actions ride the requester's queue row (`merge_queue.source_actions_before`,
+`source_actions_after`, layout 51) until the hand-off, so a restart in between
+keeps them; only a detached request may carry them, and the merge workspace's
+own row never does. One-shot merges and a workspace's own merges keep the
+actions configured at its creation.
 
 ## A landing is reported only once its deploy has run (`internal/mergeworkspace`, `internal/deploy`, `internal/rollout`)
 

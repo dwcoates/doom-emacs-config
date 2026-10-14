@@ -157,10 +157,13 @@ type Entry struct {
 	// Priority is the roster priority: p05, p1, p2 or p3.
 	Priority string `json:"priority,omitempty"`
 	// BeforeWSMerge is prompt text run in the workspace before its merge
-	// (CreateWorkspaceMergeActions.before_ws_merge).
+	// (CreateWorkspaceMergeActions.before_ws_merge). A create configures it
+	// for every merge of the workspace; an ASYNC merge names it for its merge
+	// workspace alone (async.merge_actions). Nothing else reads it.
 	BeforeWSMerge string `json:"before_ws_merge,omitempty"`
 	// PostprocessingPrompt is prompt text run after the merge lands
-	// (CreateWorkspaceMergeActions.postprocessing_prompt).
+	// (CreateWorkspaceMergeActions.postprocessing_prompt), on the same terms
+	// as BeforeWSMerge.
 	PostprocessingPrompt string `json:"postprocessing_prompt,omitempty"`
 
 	// THE MERGE'S MODE (agentrepl.v1.MergeWorkspaceRequest.mode). A merge
@@ -302,6 +305,11 @@ func (e Entry) Validate() error {
 			return fmt.Errorf("%s: %s is a merge's field, and no %s reads it", e.Type, field, e.Type)
 		}
 	}
+	if e.Type != TypeCreate && e.Type != TypeMerge && e.Type != "" {
+		if field := e.mergeActionField(); field != "" {
+			return fmt.Errorf("%s: %s is a create's or an async merge's field, and no %s reads it", e.Type, field, e.Type)
+		}
+	}
 	if e.Type != TypeCreate && e.Type != TypeMerge && e.OneShot && e.Type != "" {
 		return fmt.Errorf("%s: one_shot is a %s's or a %s's field, and no %s reads it", e.Type, TypeCreate, TypeMerge, e.Type)
 	}
@@ -414,8 +422,6 @@ func (e Entry) createOnly() string {
 		{"fork_from", e.ForkFrom != ""},
 		{"model", e.Model != ""},
 		{"priority", e.Priority != ""},
-		{"before_ws_merge", e.BeforeWSMerge != ""},
-		{"postprocessing_prompt", e.PostprocessingPrompt != ""},
 	}
 	for _, field := range fields {
 		if field.set {
@@ -423,6 +429,33 @@ func (e Entry) createOnly() string {
 		}
 	}
 	return ""
+}
+
+// mergeActionField names the first merge-action field the entry carries, empty
+// for none: the fields only a create and an async merge read.
+func (e Entry) mergeActionField() string {
+	switch {
+	case e.BeforeWSMerge != "":
+		return "before_ws_merge"
+	case e.PostprocessingPrompt != "":
+		return "postprocessing_prompt"
+	}
+	return ""
+}
+
+// MergeActions are the merge actions the entry names, as prompt text: the
+// workspace's configured actions on a create, the merge workspace's own on an
+// async merge. It is the one reading of the two fields, so the two verbs
+// cannot read them apart.
+func (e Entry) MergeActions() wsm.MergeActions {
+	var out wsm.MergeActions
+	if e.BeforeWSMerge != "" {
+		out.Before = []string{e.BeforeWSMerge}
+	}
+	if e.PostprocessingPrompt != "" {
+		out.After = []string{e.PostprocessingPrompt}
+	}
+	return out
 }
 
 // mergeOnly names the first merge-only field a non-merge entry carries, empty
@@ -470,6 +503,9 @@ func (e Entry) validateMergeSource() error {
 		return fmt.Errorf("%s: branch, instruction, close_dir, cleanup_worktree and compact_after belong to an async merge", TypeMerge)
 	case e.Instruction != "" && strings.TrimSpace(e.Instruction) == "":
 		return fmt.Errorf("%s: an instruction says how to prepare the branch", TypeMerge)
+	case e.OneShot && e.mergeActionField() != "":
+		// A one-shot runs the actions its workspace was created with.
+		return fmt.Errorf("%s: %s belongs to an async merge; a one_shot runs the actions its workspace was created with", TypeMerge, e.mergeActionField())
 	}
 	if _, err := e.VersionIncrement(); err != nil {
 		return err

@@ -172,6 +172,15 @@ func NewTestAllScript(t *testing.T, repoDir string) *Recorder {
 	return NewRecorderExecutable(t, filepath.Join(repoDir, "bin"), "test-all.sh")
 }
 
+// TestAllScriptEnv is the daemon environment entry that points the merge
+// orchestrator's tests tab at the test-all script at PATH (a NewTestAllScript
+// recorder's Path, or any stand-in). It is the one spelling of the variable,
+// so no integration test can point the daemon at its script under a name the
+// daemon does not read.
+func TestAllScriptEnv(path string) string {
+	return "AGENT_REPL_TEST_ALL_SCRIPT=" + path
+}
+
 // FakeClaudeLoginMarker is printed by the fake `claude` binary the login pty
 // runs, so a test can recognize the terminal it attached to.
 const FakeClaudeLoginMarker = "FAKE-CLAUDE-LOGIN-READY"
