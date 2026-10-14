@@ -2372,7 +2372,7 @@ describe("the reviving shimmer's stylesheet contract", () => {
     const [base] = shimmerRules();
 
     // Assert
-    expect(base).toContain("ws-revive-shimmer 2.4s ease-in-out infinite");
+    expect(base).toContain("ws-revive-shimmer var(--ws-revive-cycle) ease-in-out infinite");
   });
 
   it("pans only between 0% and 100%, so the gradient always covers the text", () => {
@@ -4324,7 +4324,7 @@ describe("the rail's marks", () => {
 
     // Assert
     expect(rule).toMatch(
-      /animation:\s*ws-revive-shimmer 2\.4s ease-in-out infinite,\s*ws-pulse var\(--ws-mark-cycle\) ease-in-out infinite/,
+      /animation:\s*ws-revive-shimmer var\(--ws-revive-cycle\) ease-in-out infinite,\s*ws-pulse var\(--ws-mark-cycle\) ease-in-out infinite/,
     );
   });
 
@@ -4361,6 +4361,24 @@ describe("the rail's marks", () => {
     // Assert
     expect(rule?.selectors).toEqual(["#ws-sidebar"]);
     expect(rule?.declarations).toMatch(/(?:^|;)\s*--ws-mark-cycle:\s*2s\s*;/);
+  });
+
+  it("shimmers a reviving name once every 2.4s, stated once", () => {
+    // Arrange / Act
+    const defs = stylesheet.match(/--ws-revive-cycle\s*:/g) ?? [];
+
+    // Assert
+    expect(defs).toHaveLength(1);
+    expect(stylesheet).toMatch(/--ws-revive-cycle:\s*2\.4s\s*;/);
+  });
+
+  it("shares the one shimmer period between the reviving rules", () => {
+    // Arrange / Act
+    const shimmers = rulesOf(stylesheet).filter((r) => /ws-revive-shimmer\s/.test(r.declarations));
+
+    // Assert
+    expect(shimmers.length).toBeGreaterThan(1);
+    for (const r of shimmers) expect(r.declarations).toMatch(/ws-revive-shimmer var\(--ws-revive-cycle\)/);
   });
 
   it("sizes a glyph's box at the dot's size", () => {
