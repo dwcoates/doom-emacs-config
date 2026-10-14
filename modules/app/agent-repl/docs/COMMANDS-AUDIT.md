@@ -170,7 +170,7 @@ Scope keys, shared by every generated diff family: `w` worktree, `s` staged,
 | Command | Does | Evil key | Context | Emacs mode |
 | --- | --- | --- | --- | --- |
 | `agent-repl-magit-status-workspace` | Open `magit-status` for the workspace in the selected window. | `SPC g g` | leader | leader |
-| `magit-status` (stock) | Plain `magit-status`. | `SPC g G` | leader | leader |
+| `agent-repl-magit-status-main-worktree` | Open `magit-status` for the repository's main worktree in the selected window. | `SPC g G` | leader | leader |
 | `agent-repl-magit-open-commit-in-github` | Open the commit at point on GitHub. | `SPC g O`, `g C` | leader, magit status | leader, works |
 | `agent-repl-magit-copy-commit-link` | Copy the GitHub link of the commit at point. | `g c` | magit status | works |
 | `agent-repl-magit-toggle-tags-in-log` | Toggle tag refs in magit commit listings. | `g T` | magit status | works |
