@@ -89,6 +89,7 @@ var Suites = []Suite{
 	{Name: "store-reset-harness", Kind: Script, Path: "bin/test-store-reset.sh", Harness: true},
 	{Name: "requirements-harness", Kind: Script, Path: "bin/test-requirements.sh", Harness: true},
 	{Name: "worktrees-lib-harness", Kind: Script, Path: "bin/test-lib-worktrees.sh", Harness: true},
+	{Name: "fake-git-fixture-lib-harness", Kind: Script, Path: "bin/test-lib-fake-git-fixture.sh", Harness: true},
 	{Name: "emit-commands-harness", Kind: Script, Path: "bin/test-emit-workspace-commands.sh", Harness: true},
 	{Name: "runtime-harness", Kind: Script, Path: "bin/test-agent-repl-runtime.sh", Harness: true},
 	{Name: "contract-check-harness", Kind: Script, Path: "bin/test-daemon-contract-current.sh", Harness: true},

@@ -85,7 +85,6 @@ test_every_function_fails_outside_a_repository() {
 # list's BRANCH lines instead (which worktree holds which branch), a different
 # question the library does not answer, with its reason.
 ALLOWED=(
-  ".claude/safe-test-run.sh|lists the branches checked out in other worktrees"
   ".claude/skills/merge-queue/run.sh|finds the worktree a branch is checked out in (--remove-branch)"
 )
 
