@@ -1470,11 +1470,12 @@ Owner rulings, 2026-10-11 (`internal/merge/chain.go`, `internal/cpugov`).
   daemon's own checkout does not tell the deploy), `-disable-racing` /
   `-enable-racing` (merge_disable_racing, merge_enable_racing: daemon-wide,
   durable; while disabled every queue works its head alone, whatever the
-  power source). A control is answered at
+  power source), `-subscribe DETAIL` / `-unsubscribe` with an optional
+  `-repository-dir DIR` (merge_subscribe, merge_unsubscribe). A control is answered at
   once, so `-wait` is refused with one; the verb waits
   at most `-answer-timeout` (15s) for the file's fate and prints the answer
   the ingress keyed by the file's path in the run log (or its `.1`
-  generation): `merge-queue: outcome: <evicted|not_queued|paused|resumed|held|released|racing_disabled|racing_enabled>`
+  generation): `merge-queue: outcome: <evicted|not_queued|paused|resumed|held|released|racing_disabled|racing_enabled|subscribed|resubscribed|unsubscribed|not_subscribed>`
   when applied, the refusal's `cause` when quarantined. An answer the run log
   does not carry is printed `unread` on stderr; the fate still decides the
   exit.
@@ -1485,13 +1486,16 @@ Owner rulings, 2026-10-11 (`internal/merge/chain.go`, `internal/cpugov`).
 ## An agent controls the merge queue through command files
 
 `merge_evict`, `merge_pause`, `merge_resume`, `merge_hold_rollouts`,
-`merge_release_rollouts`, `merge_disable_racing` and `merge_enable_racing` entries (`internal/commandfile`, ARCHITECTURE.md "The
+`merge_release_rollouts`, `merge_disable_racing`, `merge_enable_racing`, `merge_subscribe`
+and `merge_unsubscribe` entries (`internal/commandfile`, ARCHITECTURE.md "The
 merge queue's controls") are `UpdateMergeQueue`'s evict, pause, resume,
-hold_rollouts, release_rollouts, disable_racing and enable_racing for an agent: the same
+hold_rollouts, release_rollouts, disable_racing, enable_racing, subscribe and
+unsubscribe for an agent: the same
 orchestrator calls, the requester named by `project_dir`. The answer is the
 file's fate (`applied/` or `quarantine/`) and the record keyed by its path:
 INFO `daemon.commandfile.merge_queue` (`outcome` `evicted`, `not_queued`,
-`paused`, `resumed`, `held`, `released`, `racing_disabled`, `racing_enabled`) or WARN `daemon.commandfile.entry` (the refusal in
+`paused`, `resumed`, `held`, `released`, `racing_disabled`, `racing_enabled`, `subscribed`, `resubscribed`,
+`unsubscribed`, `not_subscribed`) or WARN `daemon.commandfile.entry` (the refusal in
 `cause`). Evicting what is not queued is `not_queued`, never a refusal.
 
 ## A retarget always tells the workspace
@@ -3131,3 +3135,18 @@ and its commit (or the open item). Test-performance lessons also go into the
 - The idle sweep could hibernate the shim an open was bringing up (it read the previous engagement before the start recorded the new one): only the sweep skips a start in flight (Fleet.StartUnderWay, dcec14621). Fixing it by changing Serving instead blocked held prompts on session-up; keep predicates narrow.
 - The merge pump read a run's lease and chain base from its own goroutine while the run wrote them (a data race the race detector caught 2 in 6 runs); they are read under the run's lock (db277cff6).
 - Tests: fake git hard-linked, not copied (~3GB per daemon suite, da3219969); test logs stay in files: the log pipe (49cfaafc6) was reverted (4e5d4c563) because one collector in the test process became the bottleneck under load, even with non-blocking daemon writes (see /write-tests pitfall 2); test state in memory unless a test restarts on the same root (DurableState); isZombie reads the kernel in process instead of spawning ps (409602c36).
+
+## A merge queue subscription tells the agent, under the hood
+
+`UpdateMergeQueue.subscribe` (the `/merge-queue subscribe` verb) records a
+DURABLE subscription (wsm `merge_queue_subscriptions`): a restart or a
+handover keeps it, because a landing's own deploy restarts the daemon. It
+ends on unsubscribe and on the workspace's close, in the close's own
+transaction. Every queue change the orchestrator reports reaches
+`internal/mergenotice`, which tells each subscriber whose detail admits it
+ONCE, through the prompt handler as a deferred prompt of origin
+`PROMPT_ORIGIN_MERGE_QUEUE_NOTICE` (the handback's path); the feed draws no
+row and the tray no card for it (`internal/promptorigin`). Every notice told
+is an INFO `daemon.mergenotice` record; every notice not told (unreadable
+subscriptions, an uncomposable brief, a failed submit, a stand-down) is an
+ERROR there naming the change and the subscriber.
