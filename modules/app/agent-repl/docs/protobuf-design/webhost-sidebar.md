@@ -58,3 +58,17 @@ view Emacs shows that holds every workspace page as an iframe.
     (lisp/webhost.el); every page of a handover reloads anyway.
   - Cold pages still stand their topbar and footer down; their staleness on a
     switch is the owner's to revisit with switching and page caching.
+
+### Every page stays warm (2026-10-13; no proto change)
+
+- WHAT: the webhost no longer tells pages warm or cold (`WARM_RECENT`,
+  `WARM_WINDOW_MS` and the presence message's `warm` are gone), and no stream
+  stands down with its page (`watchStream`'s `standsWhile` is gone).
+- WHY: with the sidebar drawn once, a cold page stood down only its topbar and
+  footer, about 4% of the measured stream work and about 0.3% of the webhost's
+  CPU (docs/investigations/2026-10-13-page-cost-by-component.md), while every
+  switch to a cold page showed a stale topbar and footer that then redrew. The
+  owner chose fast switching over that saving (2026-10-13).
+- CONSEQUENCES: a page's topbar and footer are current whenever it is shown.
+  The per-page stream meter (`page.stream-cost`) still reports each stream's
+  work, so a page count that makes this costly shows there first.
