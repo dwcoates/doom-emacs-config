@@ -3,6 +3,7 @@ package harness
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -179,7 +180,7 @@ func TestStopFrozenStopsARunningProcess(t *testing.T) {
 	cmd := startIdle(t)
 
 	// Act
-	err := stopFrozen(cmd.Process.Pid, DefaultTimeout, syscall.Kill)
+	err := stopFrozen(cmd.Process.Pid, DefaultTimeout, syscall.Kill, failOnStall(t))
 
 	// Assert
 	if err != nil {
@@ -210,7 +211,7 @@ func TestStopFrozenResendsAStopTheProcessDiscarded(t *testing.T) {
 	}
 
 	// Act
-	err := stopFrozen(cmd.Process.Pid, DefaultTimeout, discardFirst)
+	err := stopFrozen(cmd.Process.Pid, DefaultTimeout, discardFirst, failOnStall(t))
 
 	// Assert
 	if err != nil {
@@ -218,6 +219,41 @@ func TestStopFrozenResendsAStopTheProcessDiscarded(t *testing.T) {
 	}
 	if sends < 2 {
 		t.Fatalf("stopFrozen sent %d stop(s), want the discarded one re-sent", sends)
+	}
+}
+
+// failOnStall is a stopFrozen stall report that fails the test: a stop these
+// tests send to an idle child holds at once.
+func failOnStall(t *testing.T) func(int, string, time.Duration) {
+	return func(pid int, state string, waited time.Duration) {
+		t.Errorf("stopFrozen reported pid %d still %s after %s", pid, state, waited)
+	}
+}
+
+// TestStopFrozenReportsAStallOnceAndGoesOnWaiting stands in for a stop the
+// host is too loaded to schedule: no send reaches the process until the stall
+// report, which stopFrozen makes exactly once and then keeps waiting through.
+func TestStopFrozenReportsAStallOnceAndGoesOnWaiting(t *testing.T) {
+	// Arrange: the sends are swallowed; the stall report delivers the stop.
+	cmd := startIdle(t)
+	swallow := func(int, syscall.Signal) error { return nil }
+	var reports []string
+	stalled := func(pid int, state string, waited time.Duration) {
+		reports = append(reports, fmt.Sprintf("%d %s %s", pid, state, waited))
+		if err := syscall.Kill(pid, syscall.SIGSTOP); err != nil {
+			t.Errorf("SIGSTOP from the stall report: %v", err)
+		}
+	}
+
+	// Act
+	err := stopFrozen(cmd.Process.Pid, 20*time.Millisecond, swallow, stalled)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("stopFrozen = %v, want the wait to outlast the stall and see the stop hold", err)
+	}
+	if len(reports) != 1 || !strings.HasPrefix(reports[0], fmt.Sprintf("%d ", cmd.Process.Pid)) || !strings.HasSuffix(reports[0], " 20ms") {
+		t.Fatalf("stall reports = %q, want exactly one naming the pid and the 20ms waited", reports)
 	}
 }
 
@@ -229,7 +265,7 @@ func TestStopFrozenAnswersTheSendErrorForAGoneProcess(t *testing.T) {
 	}
 
 	// Act
-	err := stopFrozen(cmd.Process.Pid, DefaultTimeout, syscall.Kill)
+	err := stopFrozen(cmd.Process.Pid, DefaultTimeout, syscall.Kill, failOnStall(t))
 
 	// Assert
 	if !errors.Is(err, syscall.ESRCH) {
@@ -279,7 +315,7 @@ func TestIsZombie(t *testing.T) {
 func TestHeldStateOfAStoppedProcessIsFrozenOnceTheStopHolds(t *testing.T) {
 	// Arrange
 	cmd := startIdle(t)
-	if err := stopFrozen(cmd.Process.Pid, freezeBound, syscall.Kill); err != nil {
+	if err := stopFrozen(cmd.Process.Pid, stopFrozenReportAfter, syscall.Kill, failOnStall(t)); err != nil {
 		t.Fatalf("stopFrozen: %v", err)
 	}
 
