@@ -11,6 +11,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/protoarm"
+	"agent-repld/internal/textline"
 )
 
 // THE TRANSIENT TIER (owner rulings, 2026-09-28 and 2026-09-30; footer.proto
@@ -218,7 +219,7 @@ func mcpServerText(server *conversationv1.SessionMcpServer) string {
 		return lead + " connected"
 	case *conversationv1.SessionMcpServer_Failed:
 		if why := health.Failed.GetError(); why != "" {
-			return truncate(lead+" failed — "+firstLine(why), DefaultWarningRowWidth)
+			return truncate(lead+" failed — "+textline.FirstNonBlank(why), DefaultWarningRowWidth)
 		}
 		return lead + " failed"
 	case *conversationv1.SessionMcpServer_NeedsAuth:
@@ -235,14 +236,4 @@ func mcpServerText(server *conversationv1.SessionMcpServer) string {
 // armWords renders an arm name lowercase with spaces, never underscores.
 func armWords(name protoreflect.Name) string {
 	return strings.ReplaceAll(string(name), "_", " ")
-}
-
-// firstLine is the first non-blank line of text, trimmed.
-func firstLine(text string) string {
-	for _, line := range strings.Split(text, "\n") {
-		if trimmed := strings.TrimSpace(line); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
 }
