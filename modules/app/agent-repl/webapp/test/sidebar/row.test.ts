@@ -1759,7 +1759,28 @@ describe("the hidden section's rows", () => {
       const drawn = drawRosterRow(row({ id: "ws-1", closed }), sidebarContext(), "R", place);
       return inRail(drawn, () => cascadedValue(drawn.querySelector(":scope > .row") as HTMLElement, "opacity"));
     };
-    expect([opacityOf("hidden", false), opacityOf("merged", true)]).toEqual(["0.55", "0.55"]);
+    expect([opacityOf("hidden", false), opacityOf("merged", true)]).toEqual(["var(--receded-opacity)", "var(--receded-opacity)"]);
+  });
+
+  it("recedes at 0.55", () => {
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
+    expect(inRail(drawn, (rail) => cascadedValue(rail, "--receded-opacity"))).toBe("0.55");
+  });
+
+  it.each([
+    { name: "an open grouping row", place: "grouping", closed: false, row: "1", when: "var(--receded-opacity)" },
+    { name: "a hidden row", place: "hidden", closed: false, row: "var(--receded-opacity)", when: "1" },
+    { name: "a merged row", place: "merged", closed: true, row: "var(--receded-opacity)", when: "1" },
+  ] as const)("draws $name's when-column at the one receded grey", ({ place, closed, row: rowOpacity, when }) => {
+    // Arrange
+    const drawn = drawRosterRow(row({ id: "ws-1", closed }), sidebarContext(), "R", place);
+    // Act
+    const opacities = inRail(drawn, () => [
+      cascadedValue(drawn.querySelector(":scope > .row") as HTMLElement, "opacity") || "1",
+      cascadedValue(drawn.querySelector(":scope > .row > .when") as HTMLElement, "opacity") || "1",
+    ]);
+    // Assert: the row's and the column's opacities compound to the receded one exactly once.
+    expect(opacities).toEqual([rowOpacity, when]);
   });
 
   it("strikes a hidden row's name through at a cold gate", () => {
