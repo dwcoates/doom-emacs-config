@@ -96,8 +96,10 @@ daemon and the shim; one the daemon could not take is held on disk
         (agent-repl--info ws "elisp.prompt-queue.deferred ws=%s origin=%S delivery=%S"
                           ws agent-repl--prompt-queue-drain-origin
                           agent-repl--prompt-queue-delivery)
+        ;; FROM-BUFFER: the words WERE the composer's, cleared and recorded
+        ;; above, so the accept must not record them a second time.
         (prog1 (agent-repl--input-submit ws said agent-repl--prompt-queue-drain-origin raw
-                                         nil nil nil agent-repl--prompt-queue-delivery)
+                                         nil t nil agent-repl--prompt-queue-delivery)
           (message "agent-repl: deferred the prompt for %s (it runs as its own turn once the current one ends)"
                    ws))))))
 

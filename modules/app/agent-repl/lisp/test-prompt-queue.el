@@ -110,6 +110,14 @@
     ;; Assert
     (should (equal (with-current-buffer buf (buffer-string)) ""))))
 
+(ert-deftest agent-repl-pq-defer-is-a-from-buffer-submission ()
+  "The deferral already cleared and recorded the composer, so the accept records nothing."
+  (agent-repl-test-pq--with-composer "later please"
+    ;; Act
+    (agent-repl-queue-deferred-prompt)
+    ;; Assert
+    (should (eq (plist-get (car agent-repl-test-pq--submitted) :from-buffer) t))))
+
 (ert-deftest agent-repl-pq-defer-on-empty-input-submits-nothing ()
   "There is nothing to defer when nothing was written."
   (agent-repl-test-pq--with-composer ""
