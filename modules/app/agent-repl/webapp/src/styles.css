@@ -4761,9 +4761,7 @@ bubble-body.bubble-body { display: block; }
      the bubble's right edge. `.bubble`'s own right padding contributes one
      `--bubble-scroll-gap` and the hit padding is cancelled, so the margin
      supplies the rest. */
-  margin-right: calc(
-    var(--usage-corner-gap-x) - var(--bubble-scroll-gap) - var(--usage-hit-x)
-  );
+  margin-right: var(--usage-corner-margin-right);
 }
 /* THE CORNER'S GEOMETRY TOKENS are declared once, below, for both of their
    readers: the corner, and the ghost's host paragraph (whose `::before` the
@@ -4799,6 +4797,16 @@ bubble-body.bubble-body { display: block; }
      response bubble's tighter vertical padding moves the corner up with the
      prose but never sideways (owner request, 2026-10-12). */
   --usage-corner-gap-x: calc(var(--bubble-pad-y-base) + var(--usage-half-leading));
+  /* The corner's right margin, read by the corner and by an open interim's
+     ghost, which must round exactly as the corner does (see "AN OPEN
+     INTERIM'S GHOST"). */
+  --usage-corner-margin-right: calc(var(--usage-corner-gap-x) - var(--bubble-scroll-gap) - var(--usage-hit-x));
+  /* An interim corner's left margin, read by the corner and its open ghost
+     for the same reason. */
+  --usage-interim-margin-left: calc(var(--usage-text-gap) - var(--bubble-content-inset) - var(--usage-hit-x));
+  /* How far an interim bubble opens on hover: the duration's drawn width
+     (set on the bubble, src/feed/cards/response.ts) and its gap. */
+  --usage-reveal-w: calc(var(--usage-pair-gap) + var(--usage-ago-w));
   /* The normal gap between the token and the duration, unchanged. */
   --usage-pair-gap: 0.35rem;
   /* AN INTERIM'S GAP FROM ITS TEXT TO ITS TOKEN (owner request, 2026-10-13:
@@ -4974,7 +4982,7 @@ bubble-body.bubble-body { display: block; }
 /* The corner's left margin reaches back over the body's inset, so the text
    ends `--usage-text-gap` from the token rather than the inset plus the gap. */
 .bubble.interim-response > .bubble-scroll > .usage-corner {
-  margin-left: calc(var(--usage-text-gap) - var(--bubble-content-inset) - var(--usage-hit-x));
+  margin-left: var(--usage-interim-margin-left);
 }
 .bubble.interim-response > .bubble-scroll > .usage-corner::before {
   width: auto;
@@ -5008,10 +5016,10 @@ bubble-body.bubble-body { display: block; }
    and the inset is in both bubbles, so these terms are the whole difference. */
 .bubble.interim-response > .bubble-scroll.expanded > .usage-corner + .bubble-body > .response-prose:first-child > p:first-child::before {
   content: var(--usage-token-text);
-  margin-left: calc(var(--usage-text-gap) - var(--bubble-content-inset) - var(--usage-hit-x));
+  margin-left: var(--usage-interim-margin-left);
   padding-left: var(--usage-hit-x);
   padding-right: var(--usage-hit-x);
-  margin-right: calc(var(--usage-corner-gap-x) - var(--bubble-scroll-gap) - var(--usage-hit-x));
+  margin-right: var(--usage-corner-margin-right);
 }
 .bubble.interim-response > .bubble-scroll.expanded > .usage-corner + .bubble-body {
   transition: margin-right var(--usage-grow) ease;
@@ -5024,15 +5032,15 @@ bubble-body.bubble-body { display: block; }
    has no duration, so nothing opens for it. */
 .bubble.interim-response:hover:has(> .bubble-scroll > .usage-corner:not([data-arriving])),
 .bubble.interim-response:focus-within:has(> .bubble-scroll > .usage-corner:not([data-arriving])) {
-  max-width: calc(var(--bubble-max-width) + var(--usage-pair-gap) + var(--usage-ago-w));
+  max-width: calc(var(--bubble-max-width) + var(--usage-reveal-w));
 }
 .bubble.interim-response:hover > .bubble-scroll > .usage-corner:not([data-arriving]) > .usage-slider,
 .bubble.interim-response:focus-within > .bubble-scroll > .usage-corner:not([data-arriving]) > .usage-slider {
-  width: calc(var(--usage-pair-gap) + var(--usage-ago-w));
+  width: var(--usage-reveal-w);
 }
 .bubble.interim-response:hover > .bubble-scroll.expanded > .usage-corner:not([data-arriving]) + .bubble-body,
 .bubble.interim-response:focus-within > .bubble-scroll.expanded > .usage-corner:not([data-arriving]) + .bubble-body {
-  margin-right: calc(var(--usage-pair-gap) + var(--usage-ago-w));
+  margin-right: var(--usage-reveal-w);
 }
 .bubble.interim-response:hover > .bubble-scroll > .usage-corner .usage-ago,
 .bubble.interim-response:focus-within > .bubble-scroll > .usage-corner .usage-ago {
