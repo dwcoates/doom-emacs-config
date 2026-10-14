@@ -101,12 +101,6 @@ func Main(m *testing.M) int {
 // it resolves its own relative path to daemon/ and calls this instead of
 // Main.
 func MainAt(m *testing.M, module string) int {
-	host, err := holdHost(HostSuiteLockPath, os.Stderr)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	defer host.Close()
 	if err := useDefaultArtifacts(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
