@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync, readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { FooterStatusSchema } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import { RosterRowSchema } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { InterruptErrorSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_interrupt_pb";
@@ -72,22 +75,17 @@ describe("the arm lists that read off a schema", () => {
 });
 
 describe("the source reads a oneof's arms in one place", () => {
-  it("finds no oneof lookup outside the reader", async () => {
-    // Arrange
-    const { readdir, readFile } = await import("node:fs/promises");
-    const path = await import("node:path");
-    const { fileURLToPath } = await import("node:url");
-    const src = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../src");
-    const files = (await readdir(src, { recursive: true }))
-      .filter((f) => f.endsWith(".ts") && path.basename(f) !== "oneof.ts");
+  it("finds no oneof lookup outside the reader", () => {
+    // Arrange: every source file under src, read synchronously. Awaiting each
+    // of some two hundred reads in turn queued every one behind the busy gate
+    // run's thread pool and outran the suite's timeout.
+    const src = join(dirname(fileURLToPath(import.meta.url)), "../../src");
+    const files = readdirSync(src, { recursive: true, encoding: "utf8" }).filter((f) => f.endsWith(".ts"));
 
     // Act
-    const lookups: string[] = [];
-    for (const file of files) {
-      if ((await readFile(path.join(src, file), "utf8")).includes(".oneofs.find(")) lookups.push(file);
-    }
+    const lookups = files.filter((f) => readFileSync(join(src, f), "utf8").includes(".oneofs.find("));
 
-    // Assert
-    expect(lookups).toEqual([]);
+    // Assert: only the reader's own module.
+    expect(lookups).toEqual(["rpc/oneof.ts"]);
   });
 });
