@@ -13,6 +13,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
 
@@ -1323,5 +1324,126 @@ func TestAKickOfASynchronousOrchestratorReachesItsKickSeam(t *testing.T) {
 	// Assert
 	if len(kicked) != 1 || kicked[0] != h.repoKey() {
 		t.Fatalf("kicks seen = %v, want the one kick of %s", kicked, h.repoKey())
+	}
+}
+
+// resumeWorld is a repository's queue after a restart: its entries as stored,
+// and the merges the recovery has taken back so far.
+func resumeWorld(t *testing.T, entries []wsm.MergeQueueEntry, resumed ...ids.WorkspaceID) *harness {
+	t.Helper()
+	h := newHarness(t)
+	h.db.mu.Lock()
+	h.db.queues[h.repoKey()] = entries
+	h.db.mu.Unlock()
+	h.o.mu.Lock()
+	for _, ws := range resumed {
+		h.o.resumes[ws] = progressDoc{Repo: string(h.repoKey()), Step: TabTests}
+	}
+	h.o.mu.Unlock()
+	return h
+}
+
+func admittedEntry(ws ids.WorkspaceID) wsm.MergeQueueEntry {
+	return wsm.MergeQueueEntry{Workspace: ws, State: wsm.MergeAdmitted}
+}
+
+func TestAfterARestartTheFirstAdmittedMergeInQueueOrderResumesAsTheHead(t *testing.T) {
+	// Arrange: both admitted merges taken back, the second one first.
+	h := resumeWorld(t, []wsm.MergeQueueEntry{admittedEntry("ws-head"), admittedEntry("ws-behind")}, "ws-behind", "ws-head")
+
+	// Act.
+	ws, resuming, err := h.o.resumeIn(context.Background(), h.repoKey())
+
+	// Assert.
+	if err != nil || !resuming || ws != "ws-head" {
+		t.Fatalf("resumeIn = (%s, %v, %v), want ws-head resumed as the head", ws, resuming, err)
+	}
+}
+
+func TestAfterARestartNothingResumesAheadOfAHeadNotTakenBackYet(t *testing.T) {
+	// Arrange: the head is mid-handover; only the merge behind it is back.
+	h := resumeWorld(t, []wsm.MergeQueueEntry{admittedEntry("ws-head"), admittedEntry("ws-behind")}, "ws-behind")
+
+	// Act.
+	ws, resuming, err := h.o.resumeIn(context.Background(), h.repoKey())
+
+	// Assert.
+	if err != nil || resuming {
+		t.Fatalf("resumeIn = (%s, %v, %v), want nothing resumed ahead of the head", ws, resuming, err)
+	}
+	found := false
+	for _, r := range h.logs.Records() {
+		if r.Level == "info" && r.Operation == "daemon.merge.resume" && strings.Contains(r.Message, "not taken back yet") &&
+			r.Context["head"] == "ws-head" && r.Context["waiting"] == "ws-behind" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("the wait for the head's adoption was not recorded with the head and the merge waiting")
+	}
+}
+
+func TestAfterARestartAHeadThatTheChainHoldsLeavesTheResumesBehindIt(t *testing.T) {
+	// Arrange: the head already runs here in its chain.
+	h := resumeWorld(t, []wsm.MergeQueueEntry{admittedEntry("ws-head"), admittedEntry("ws-behind")}, "ws-behind")
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+	h.o.mu.Lock()
+	h.o.chains[h.repoKey()] = []*run{h.o.newRun(ctx, cancel, h.repoKey(), "ws-head")}
+	h.o.mu.Unlock()
+
+	// Act.
+	_, resuming, err := h.o.resumeIn(context.Background(), h.repoKey())
+
+	// Assert.
+	if err != nil || resuming {
+		t.Fatalf("resumeIn = (%v, %v), want nothing resumed: the head runs in its chain", resuming, err)
+	}
+	for _, r := range h.logs.Records() {
+		if strings.Contains(r.Message, "not taken back yet") {
+			t.Fatal("a head running here was recorded as not taken back")
+		}
+	}
+}
+
+func TestAfterARestartAMergeStillWaitingInLineIsNoHead(t *testing.T) {
+	// Arrange: a merge waiting in line stands ahead of the admitted one.
+	h := resumeWorld(t, []wsm.MergeQueueEntry{{Workspace: "ws-queued", State: wsm.MergeQueued}, admittedEntry("ws-head")}, "ws-head")
+
+	// Act.
+	ws, resuming, err := h.o.resumeIn(context.Background(), h.repoKey())
+
+	// Assert.
+	if err != nil || !resuming || ws != "ws-head" {
+		t.Fatalf("resumeIn = (%s, %v, %v), want ws-head: a waiting merge is nobody's head", ws, resuming, err)
+	}
+}
+
+func TestAfterARestartAResumeWithNoAdmittedEntryIsStillHandedToItsRun(t *testing.T) {
+	// Arrange: the resumed merge's entry is gone.
+	h := resumeWorld(t, nil, "ws-gone")
+
+	// Act.
+	ws, resuming, err := h.o.resumeIn(context.Background(), h.repoKey())
+
+	// Assert: its run reads the missing entry and ends on it, loudly.
+	if err != nil || !resuming || ws != "ws-gone" {
+		t.Fatalf("resumeIn = (%s, %v, %v), want ws-gone handed to its run", ws, resuming, err)
+	}
+}
+
+func TestAfterARestartAQueueThatCannotBeReadResumesNothing(t *testing.T) {
+	// Arrange.
+	h := resumeWorld(t, []wsm.MergeQueueEntry{admittedEntry("ws-head")}, "ws-head")
+	h.db.mu.Lock()
+	h.db.queueReadErr = errors.New("the store is gone")
+	h.db.mu.Unlock()
+
+	// Act.
+	_, resuming, err := h.o.resumeIn(context.Background(), h.repoKey())
+
+	// Assert.
+	if err == nil || resuming {
+		t.Fatalf("resumeIn = (%v, %v), want the read's failure surfaced and nothing resumed", resuming, err)
 	}
 }
