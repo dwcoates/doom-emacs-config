@@ -845,6 +845,67 @@ func TestAdmitMergeMarksTheRunningEntry(t *testing.T) {
 	}
 }
 
+func TestYieldMergeHeadPutsTheWinnerFirstAndKeepsTheLoserAdmitted(t *testing.T) {
+	// Arrange: the head and the merge behind it are admitted; a third waits.
+	s, _ := testStore(t)
+	ctx := context.Background()
+	repo := RepoKey(t.TempDir())
+	loser, winner, waiting := testWorkspace(t, s), testWorkspace(t, s), testWorkspace(t, s)
+	queued(t, s, repo, loser.ID, instant)
+	queued(t, s, repo, winner.ID, instant.Add(time.Minute))
+	queued(t, s, repo, waiting.ID, instant.Add(2*time.Minute))
+	for _, id := range []WorkspaceID{loser.ID, winner.ID} {
+		if err := s.AdmitMerge(ctx, repo, id); err != nil {
+			t.Fatalf("AdmitMerge: %v", err)
+		}
+	}
+
+	// Act
+	if err := s.YieldMergeHead(ctx, repo, loser.ID, winner.ID); err != nil {
+		t.Fatalf("YieldMergeHead: %v", err)
+	}
+
+	// Assert
+	got, err := s.MergeQueue(ctx, repo)
+	if err != nil {
+		t.Fatalf("MergeQueue: %v", err)
+	}
+	if len(got) != 3 || got[0].Workspace != winner.ID || got[1].Workspace != loser.ID || got[2].Workspace != waiting.ID {
+		t.Fatalf("queue = %+v, want winner, loser, waiting", got)
+	}
+	if got[0].State != MergeAdmitted || got[1].State != MergeAdmitted || got[2].State != MergeQueued {
+		t.Fatalf("states = %v %v %v, want the winner and the suspended loser admitted, the third queued", got[0].State, got[1].State, got[2].State)
+	}
+}
+
+func TestYieldMergeHeadRefusesAWinnerNotAdmitted(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ctx := context.Background()
+	repo := RepoKey(t.TempDir())
+	loser, winner := testWorkspace(t, s), testWorkspace(t, s)
+	queued(t, s, repo, loser.ID, instant)
+	queued(t, s, repo, winner.ID, instant.Add(time.Minute))
+	if err := s.AdmitMerge(ctx, repo, loser.ID); err != nil {
+		t.Fatalf("AdmitMerge: %v", err)
+	}
+
+	// Act
+	err := s.YieldMergeHead(ctx, repo, loser.ID, winner.ID)
+
+	// Assert
+	if err == nil {
+		t.Fatal("YieldMergeHead let a merge that was never admitted overtake the head")
+	}
+	got, readErr := s.MergeQueue(ctx, repo)
+	if readErr != nil {
+		t.Fatalf("MergeQueue: %v", readErr)
+	}
+	if got[0].Workspace != loser.ID || got[1].Workspace != winner.ID {
+		t.Fatalf("queue = %+v, want it unchanged by the refused yield", got)
+	}
+}
+
 func TestRemoveMergeQueueEntryRenumbersTheRest(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)

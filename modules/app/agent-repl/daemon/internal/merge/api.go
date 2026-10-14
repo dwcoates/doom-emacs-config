@@ -498,9 +498,9 @@ type Deps struct {
 	// a scripted script rather than the repository's real suite: GIT IS NEVER
 	// CALLED DURING TESTING and neither is the real roster.
 	TestRunner ScriptRunner
-	// Governor admits the test gates: the head's at once, a speculative one
-	// (a merge behind the head, tested against its chained base) by the
-	// host's processor load and the queue window (cpugov).
+	// Governor counts the test gates -- the head's at once, one behind the
+	// head while the bound has room -- and decides the queue's window by the
+	// host's power source, telling every change (cpugov, power.go).
 	Governor *cpugov.Governor
 	// Painter turns the gate's ANSI output into paint spans. The client never
 	// parses an escape.

@@ -3,60 +3,30 @@ package cpugov
 import (
 	"context"
 	"errors"
-	"math"
+	"slices"
 	"sync"
 	"testing"
-	"time"
 
 	"agent-repld/internal/dlog"
 )
 
-// fakeSampler answers scripted ticks or a failure.
-type fakeSampler struct {
+// fakeSource answers a scripted power source, or its failure.
+type fakeSource struct {
 	mu    sync.Mutex
-	ticks Ticks
+	power Power
 	err   error
 }
 
-func (f *fakeSampler) Ticks() (Ticks, error) {
+func (f *fakeSource) Power() (Power, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.ticks, f.err
-}
-
-// tick advances the scripted counters by an interval busy for fraction of its
-// ticks.
-func (f *fakeSampler) tick(fraction float64) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.ticks.Busy += uint64(fraction * 1000)
-	f.ticks.Total += 1000
-	f.ticks.CPUs = 16
-}
-
-// fakeClock is a settable clock.
-type fakeClock struct {
-	mu  sync.Mutex
-	now time.Time
-}
-
-func (c *fakeClock) Now() time.Time {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.now
-}
-
-func (c *fakeClock) advance(d time.Duration) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.now = c.now.Add(d)
+	return f.power, f.err
 }
 
 type rig struct {
-	g       *Governor
-	sampler *fakeSampler
-	clock   *fakeClock
-	log     *dlog.TestLogger
+	g      *Governor
+	source *fakeSource
+	log    *dlog.TestLogger
 }
 
 func newRig(t *testing.T) *rig {
@@ -64,13 +34,10 @@ func newRig(t *testing.T) *rig {
 	return newRigWith(t, DefaultConfig())
 }
 
-// newRigWith is newRig under cfg, for a test whose subject is not the
-// default bounds (a share-accounting test needs room for more gates than the
-// queue window holds).
 func newRigWith(t *testing.T, cfg Config) *rig {
 	t.Helper()
-	r := &rig{sampler: &fakeSampler{}, clock: &fakeClock{now: time.Unix(1700000000, 0)}, log: dlog.NewTestLogger()}
-	g, err := New(cfg, r.sampler, r.clock.Now, r.log)
+	r := &rig{source: &fakeSource{}, log: dlog.NewTestLogger()}
+	g, err := New(cfg, r.source, r.log)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -78,14 +45,10 @@ func newRigWith(t *testing.T, cfg Config) *rig {
 	return r
 }
 
-// at is a 16-processor host at a fraction of its processors.
-func at(fraction float64) Sample { return Sample{Utilization: fraction, CPUs: 16} }
-
-// roomFor is the default config with room for n concurrent gates.
-func roomFor(n int) Config {
-	cfg := DefaultConfig()
-	cfg.MaxGates = n
-	return cfg
+// recordsAt answers every record the governor logged at level under op, in
+// order.
+func (r *rig) recordsAt(level, op string) []dlog.Record {
+	return dlog.FilterRecords(r.log.Records(), dlog.RecordQuery{Level: level, Operation: op})
 }
 
 func ready(w *waiter) bool {
@@ -97,140 +60,147 @@ func ready(w *waiter) bool {
 	}
 }
 
-func speculative(rank int) Request { return Request{Workspace: "ws", Repo: "/repo/.git", Rank: rank} }
+func behind(rank int) Request { return Request{Workspace: "ws", Repo: "/repo/.git", Rank: rank} }
 
-func (r *rig) recordAt(level, op string) (dlog.Record, bool) {
-	return dlog.FindRecord(r.log.Records(), dlog.RecordQuery{Level: level, Operation: op})
-}
+func head() Request { return Request{Workspace: "head", Repo: "/repo/.git", Head: true} }
 
-func lastDecision(log *dlog.TestLogger) (string, string) {
-	records := log.Records()
-	for i := len(records) - 1; i >= 0; i-- {
-		if records[i].Operation == "daemon.cpugov.admit" {
-			return records[i].Context["decision"].(string), records[i].Context["reason"].(string)
-		}
-	}
-	return "", ""
-}
-
-func TestASpeculativeGateIsDecidedByTheBand(t *testing.T) {
+func TestNewRefusesAMissingCollaboratorOrBound(t *testing.T) {
 	tests := []struct {
-		name         string
-		utilization  float64
-		wantAdmitted bool
-		wantReason   string
+		name   string
+		cfg    Config
+		source PowerSource
+		log    dlog.Logger
 	}{
-		{name: "below the band", utilization: 0.20, wantAdmitted: true, wantReason: "below_band"},
-		{name: "inside the band", utilization: 0.60, wantAdmitted: false, wantReason: "load_in_or_above_band"},
-		{name: "above the band", utilization: 0.80, wantAdmitted: false, wantReason: "load_in_or_above_band"},
+		{name: "no power source", cfg: DefaultConfig(), log: dlog.NewTestLogger()},
+		{name: "no logger", cfg: DefaultConfig(), source: &fakeSource{}},
+		{name: "no gate bound", cfg: Config{}, source: &fakeSource{}, log: dlog.NewTestLogger()},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Arrange.
-			r := newRig(t)
-			r.g.Observe(at(tt.utilization))
-
 			// Act.
-			w := r.g.enqueue(speculative(1))
+			_, err := New(tt.cfg, tt.source, tt.log)
 
 			// Assert.
-			if ready(w) != tt.wantAdmitted {
-				t.Fatalf("admitted = %v, want %v", ready(w), tt.wantAdmitted)
-			}
-			if _, reason := lastDecision(r.log); reason != tt.wantReason {
-				t.Fatalf("decision reason = %q, want %q", reason, tt.wantReason)
+			if err == nil {
+				t.Fatal("New accepted it")
 			}
 		})
 	}
 }
 
-func TestAGateWhoseCostWouldPassTheCeilingIsDeferredBelowTheBand(t *testing.T) {
-	// Arrange: a gate learned to cost four processors, a quarter of the host.
+func TestTheWindowFollowsThePowerSource(t *testing.T) {
+	tests := []struct {
+		name  string
+		power Power
+		want  int
+	}{
+		{name: "on AC power the top two race", power: PowerAC, want: QueueWindow},
+		{name: "on battery the head alone", power: PowerBattery, want: BatteryWindow},
+		{name: "unread, the head alone", power: PowerUnknown, want: BatteryWindow},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			r := newRig(t)
+
+			// Act.
+			r.g.ObservePower(tt.power)
+
+			// Assert.
+			if got := r.g.Window(); got != tt.want {
+				t.Fatalf("Window = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAPowerChangeTellsEverySubscriberInOrder(t *testing.T) {
+	// Arrange.
 	r := newRig(t)
-	r.g.mean = 4
-	r.g.Observe(at(0.47))
+	var told []string
+	r.g.OnPowerChange(func(p Power) { told = append(told, "first:"+p.String()) })
+	r.g.OnPowerChange(func(p Power) { told = append(told, "second:"+p.String()) })
 
 	// Act.
-	w := r.g.enqueue(speculative(1))
+	r.g.ObservePower(PowerAC)
 
 	// Assert.
-	if ready(w) {
-		t.Fatal("a gate whose cost passes the ceiling was admitted")
+	if want := []string{"first:ac", "second:ac"}; !slices.Equal(told, want) {
+		t.Fatalf("told = %v, want %v", told, want)
 	}
-	if _, reason := lastDecision(r.log); reason != "projected_above_ceiling" {
-		t.Fatalf("decision reason = %q, want projected_above_ceiling", reason)
+	if len(r.recordsAt("info", "daemon.cpugov.power")) != 1 {
+		t.Fatal("the change was not recorded at INFO")
 	}
 }
 
-func TestAJustStartedGatesShareIsCountedBeforeTheLoadShowsIt(t *testing.T) {
-	// Arrange: two head gates just started, not yet in the load average.
-	r := newRigWith(t, roomFor(3))
-	r.g.Observe(at(0.35))
-	for i := 0; i < 2; i++ {
-		r.g.enqueue(Request{Workspace: "head", Rank: 0, Head: true})
-	}
-
-	// Act.
-	w := r.g.enqueue(speculative(1))
-
-	// Assert.
-	if ready(w) {
-		t.Fatal("a gate was admitted on a load that does not show the gates just started")
-	}
-	if _, reason := lastDecision(r.log); reason != "load_in_or_above_band" {
-		t.Fatalf("decision reason = %q, want load_in_or_above_band", reason)
-	}
-}
-
-func TestASettledGatesShareIsReadOutOfTheSample(t *testing.T) {
-	// Arrange: the same two gates, long enough ago that the load average
-	// holds their whole share.
-	r := newRigWith(t, roomFor(3))
-	for i := 0; i < 2; i++ {
-		r.g.enqueue(Request{Workspace: "head", Rank: 0, Head: true})
-	}
-	r.clock.advance(10 * time.Minute)
-	r.g.Observe(at(0.35))
-
-	// Act.
-	w := r.g.enqueue(speculative(1))
-
-	// Assert.
-	if !ready(w) {
-		_, reason := lastDecision(r.log)
-		t.Fatalf("deferred (%s); want the settled gates' share read out of the sample, not counted twice", reason)
-	}
-}
-
-func TestNoGateIsAdmittedPastTheConcurrentGateBound(t *testing.T) {
-	// Arrange: an idle host already running the bound's worth of gates,
-	// long enough ago that the load holds them.
+func TestAnUnchangedPowerSourceTellsNoSubscriber(t *testing.T) {
+	// Arrange.
 	r := newRig(t)
-	for i := 0; i < QueueWindow; i++ {
-		r.g.enqueue(Request{Workspace: "head", Head: true})
-	}
-	r.clock.advance(10 * time.Minute)
-	r.g.Observe(at(0))
+	r.g.ObservePower(PowerBattery)
+	told := 0
+	r.g.OnPowerChange(func(Power) { told++ })
 
 	// Act.
-	w := r.g.enqueue(speculative(1))
+	r.g.ObservePower(PowerBattery)
 
 	// Assert.
-	if ready(w) {
-		t.Fatal("a gate was admitted past the concurrent gate bound")
+	if told != 0 {
+		t.Fatalf("told %d times, want none for an unchanged source", told)
 	}
-	if _, reason := lastDecision(r.log); reason != "gate_limit" {
-		t.Fatalf("decision reason = %q, want gate_limit", reason)
+}
+
+func TestTheReadingLoopReadsThePowerSource(t *testing.T) {
+	// Arrange.
+	r := newRig(t)
+	r.source.power = PowerAC
+
+	// Act.
+	r.g.observe()
+
+	// Assert.
+	if got := r.g.Power(); got != PowerAC {
+		t.Fatalf("Power = %v, want ac", got)
+	}
+}
+
+func TestAnUnreadablePowerSourceWorksTheHeadAloneAndIsRecordedOnce(t *testing.T) {
+	// Arrange: the host was on AC power.
+	r := newRig(t)
+	r.source.power = PowerAC
+	r.g.observe()
+	var told []Power
+	r.g.OnPowerChange(func(p Power) { told = append(told, p) })
+	r.source.err = errors.New("IOPSCopyPowerSourcesInfo answered nothing")
+
+	// Act.
+	r.g.observe()
+	r.g.observe()
+
+	// Assert.
+	if got := r.g.Window(); got != BatteryWindow {
+		t.Fatalf("Window = %d, want the head alone", got)
+	}
+	if !slices.Equal(told, []Power{PowerUnknown}) {
+		t.Fatalf("told = %v, want one change to unknown", told)
+	}
+	errs := r.recordsAt("error", "daemon.cpugov.power")
+	if len(errs) != 1 {
+		t.Fatalf("error records = %d, want one for one standing cause", len(errs))
+	}
+	if errs[0].Context["error"] != "IOPSCopyPowerSourcesInfo answered nothing" || errs[0].Context["was"] != "ac" {
+		t.Fatalf("error context = %v, want the cause and the source it was on", errs[0].Context)
 	}
 }
 
 func TestTheHeadsGateIsNeverGoverned(t *testing.T) {
-	// Arrange: the host is saturated.
+	// Arrange: the bound is already full.
 	r := newRig(t)
-	r.g.Observe(at(1))
+	for i := 0; i < QueueWindow; i++ {
+		r.g.enqueue(head())
+	}
 
 	// Act.
-	w := r.g.enqueue(Request{Workspace: "head", Rank: 0, Head: true})
+	w := r.g.enqueue(head())
 
 	// Assert.
 	if !ready(w) {
@@ -238,15 +208,71 @@ func TestTheHeadsGateIsNeverGoverned(t *testing.T) {
 	}
 }
 
-func TestTheGateClosestToItsHeadIsAdmittedFirst(t *testing.T) {
-	// Arrange: rank 2 asks first, then rank 1, before any sample; the band
-	// then has room for exactly one.
+func TestAGateBehindItsHeadIsAdmittedWhileTheBoundHasRoom(t *testing.T) {
+	// Arrange.
 	r := newRig(t)
-	far := r.g.enqueue(speculative(2))
-	near := r.g.enqueue(speculative(1))
+	r.g.enqueue(head())
 
 	// Act.
-	r.g.Observe(at(0.42))
+	w := r.g.enqueue(behind(1))
+
+	// Assert.
+	if !ready(w) {
+		t.Fatal("a gate the bound had room for waited")
+	}
+}
+
+func TestNoGateIsAdmittedPastTheConcurrentGateBound(t *testing.T) {
+	// Arrange.
+	r := newRig(t)
+	for i := 0; i < QueueWindow; i++ {
+		r.g.enqueue(head())
+	}
+
+	// Act.
+	w := r.g.enqueue(behind(1))
+
+	// Assert.
+	if ready(w) {
+		t.Fatal("a gate was admitted past the concurrent gate bound")
+	}
+	if got := r.recordsAt("info", "daemon.cpugov.admit"); got[len(got)-1].Context["reason"] != "gate_limit" {
+		t.Fatalf("last decision = %v, want a gate_limit deferral", got[len(got)-1].Context)
+	}
+}
+
+func TestAnUnchangedDeferralIsRecordedOnce(t *testing.T) {
+	// Arrange.
+	r := newRig(t)
+	for i := 0; i < QueueWindow; i++ {
+		r.g.enqueue(head())
+	}
+	r.g.enqueue(behind(1))
+
+	// Act.
+	r.g.enqueue(behind(2))
+
+	// Assert.
+	deferrals := 0
+	for _, rec := range r.recordsAt("info", "daemon.cpugov.admit") {
+		if rec.Context["decision"] == "defer" {
+			deferrals++
+		}
+	}
+	if deferrals != 1 {
+		t.Fatalf("deferral records = %d, want 1 for the one gate at the front of the line", deferrals)
+	}
+}
+
+func TestTheGateClosestToItsHeadIsAdmittedFirst(t *testing.T) {
+	// Arrange: the bound is full; rank 2 asks first, then rank 1.
+	r := newRigWith(t, Config{MaxGates: 1})
+	first := r.g.enqueue(head())
+	far := r.g.enqueue(behind(2))
+	near := r.g.enqueue(behind(1))
+
+	// Act.
+	first.permit.Release()
 
 	// Assert.
 	if !ready(near) || ready(far) {
@@ -254,86 +280,32 @@ func TestTheGateClosestToItsHeadIsAdmittedFirst(t *testing.T) {
 	}
 }
 
-func TestNoGateIsAdmittedBeforeTheHostIsSampled(t *testing.T) {
-	// Arrange.
-	r := newRig(t)
-
-	// Act.
-	w := r.g.enqueue(speculative(1))
-
-	// Assert.
-	if ready(w) {
-		t.Fatal("a gate was admitted with no sample of the host")
-	}
-	if _, reason := lastDecision(r.log); reason != "no_sample" {
-		t.Fatalf("decision reason = %q, want no_sample", reason)
-	}
-}
-
-func TestAnUnchangedDeferralIsRecordedOnce(t *testing.T) {
-	// Arrange.
-	r := newRig(t)
-	r.g.Observe(at(0.6))
-	r.g.enqueue(speculative(1))
-
-	// Act.
-	r.g.Observe(at(0.62))
-
-	// Assert.
-	deferrals := 0
-	for _, rec := range r.log.Records() {
-		if rec.Operation == "daemon.cpugov.admit" && rec.Context["decision"] == "defer" {
-			deferrals++
-		}
-	}
-	if deferrals != 1 {
-		t.Fatalf("deferral records = %d, want 1 for one standing decision", deferrals)
-	}
-}
-
-func TestAWaitingGateIsAdmittedWhenTheLoadFalls(t *testing.T) {
-	// Arrange.
-	r := newRig(t)
-	r.g.Observe(at(0.6))
-	w := r.g.enqueue(speculative(1))
-
-	// Act.
-	r.g.Observe(at(0.2))
-
-	// Assert.
-	if !ready(w) {
-		t.Fatal("the gate was not admitted once the load fell below the band")
-	}
-}
-
 func TestAReleasedGateMakesRoomForTheNext(t *testing.T) {
-	// Arrange: two head gates leave no room.
-	r := newRig(t)
-	r.g.Observe(at(0.35))
-	var heads []*waiter
-	for i := 0; i < 2; i++ {
-		heads = append(heads, r.g.enqueue(Request{Workspace: "head", Head: true}))
-	}
-	w := r.g.enqueue(speculative(1))
+	// Arrange.
+	r := newRigWith(t, Config{MaxGates: 1})
+	first := r.g.enqueue(head())
+	next := r.g.enqueue(behind(1))
 
 	// Act.
-	heads[0].permit.Release(0, 0, false)
+	first.permit.Release()
+	first.permit.Release()
 
 	// Assert.
-	if !ready(w) {
-		t.Fatal("the gate was not admitted once a running gate ended")
+	if !ready(next) || len(r.g.active) != 1 {
+		t.Fatalf("admitted=%v active=%d, want the next gate admitted and one released once", ready(next), len(r.g.active))
 	}
 }
 
 func TestAcquireWithdrawsAWaiterWhoseContextEnds(t *testing.T) {
-	// Arrange.
-	r := newRig(t)
+	// Arrange: the bound is full, so the gate waits.
+	r := newRigWith(t, Config{MaxGates: 1})
+	r.g.enqueue(head())
 	ctx, cancel := context.WithCancelCause(context.Background())
 	cause := errors.New("the base moved")
 	cancel(cause)
 
 	// Act.
-	_, err := r.g.Acquire(ctx, speculative(1))
+	_, err := r.g.Acquire(ctx, behind(1))
 
 	// Assert.
 	if !errors.Is(err, cause) {
@@ -344,125 +316,58 @@ func TestAcquireWithdrawsAWaiterWhoseContextEnds(t *testing.T) {
 	}
 }
 
-func TestReleaseLearnsTheMeanCost(t *testing.T) {
+func TestHostPowerSourceReadsTheFixedOverride(t *testing.T) {
 	tests := []struct {
-		name     string
-		cores    float64
-		wall     time.Duration
-		measured bool
-		want     float64
+		fixed string
+		want  PowerSource
 	}{
-		{name: "a finished run", cores: 3, wall: time.Minute, measured: true, want: 0.7*DefaultMeanCores + 0.3*3},
-		{name: "a cut run", cores: 3, wall: time.Minute, measured: false, want: DefaultMeanCores},
-		{name: "a run too short to say", cores: 3, wall: time.Second, measured: true, want: DefaultMeanCores},
+		{fixed: "", want: &Host{}},
+		{fixed: "ac", want: Fixed{Source: PowerAC}},
+		{fixed: "battery", want: Fixed{Source: PowerBattery}},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange.
-			r := newRig(t)
-			w := r.g.enqueue(Request{Workspace: "head", Head: true})
-
+		t.Run(tt.fixed, func(t *testing.T) {
 			// Act.
-			w.permit.Release(tt.cores, tt.wall, tt.measured)
+			got, err := HostPowerSource(tt.fixed)
 
 			// Assert.
-			if math.Abs(r.g.mean-tt.want) > 1e-9 {
-				t.Fatalf("mean = %v, want %v", r.g.mean, tt.want)
+			if err != nil {
+				t.Fatalf("HostPowerSource(%q): %v", tt.fixed, err)
+			}
+			switch want := tt.want.(type) {
+			case *Host:
+				if _, ok := got.(*Host); !ok {
+					t.Fatalf("HostPowerSource(%q) = %T, want the host's own", tt.fixed, got)
+				}
+			case Fixed:
+				if got != want {
+					t.Fatalf("HostPowerSource(%q) = %v, want %v", tt.fixed, got, want)
+				}
 			}
 		})
 	}
 }
 
-func TestASamplerFailureAdmitsNothingAndIsRecordedOnce(t *testing.T) {
-	// Arrange.
-	r := newRig(t)
-	r.sampler.err = errors.New("sysctl refused")
-	w := r.g.enqueue(speculative(1))
-
-	// Act.
-	r.g.observe()
-	r.g.observe()
-
-	// Assert.
-	if ready(w) {
-		t.Fatal("a gate was admitted with the host's load unread")
-	}
-	errorsSeen := 0
-	for _, rec := range r.log.Records() {
-		if rec.Level == "error" && rec.Operation == "daemon.cpugov.sample" {
-			errorsSeen++
-		}
-	}
-	if errorsSeen != 1 {
-		t.Fatalf("error records = %d, want one for one standing cause", errorsSeen)
-	}
-}
-
-func TestTheLoadIsTheSmoothedBusyShareOfTheHostsTicks(t *testing.T) {
-	tests := []struct {
-		name      string
-		intervals []float64
-		want      float64
-	}{
-		{name: "the first interval stands whole", intervals: []float64{0.4}, want: 0.4},
-		{name: "a later interval moves it by its weight", intervals: []float64{0.4, 1.0}, want: 0.4 + (1-math.Exp(-5.0/30))*0.6},
-		{name: "no interval yet reads nothing", intervals: nil, want: 0},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange: the first reading primes.
-			r := newRig(t)
-			r.sampler.tick(0)
-			r.g.observe()
-
+func TestHostPowerSourceRefusesAnUnknownOverride(t *testing.T) {
+	for _, fixed := range []string{"AC", "plugged", "1"} {
+		t.Run(fixed, func(t *testing.T) {
 			// Act.
-			for _, fraction := range tt.intervals {
-				r.clock.advance(5 * time.Second)
-				r.sampler.tick(fraction)
-				r.g.observe()
-			}
+			got, err := HostPowerSource(fixed)
 
 			// Assert.
-			if got := r.g.sample.Utilization; math.Abs(got-tt.want) > 1e-9 {
-				t.Fatalf("smoothed load = %v, want %v", got, tt.want)
+			if err == nil || got != nil {
+				t.Fatalf("HostPowerSource(%q) = %v, %v; want the refusal", fixed, got, err)
 			}
 		})
 	}
 }
 
-func TestTicksThatGoBackwardsAdmitNothing(t *testing.T) {
-	// Arrange: a primed governor whose host reports fewer ticks than before.
-	r := newRig(t)
-	r.sampler.tick(0)
-	r.g.observe()
-	r.sampler.tick(0.1)
-	r.g.observe()
-	r.sampler.ticks.Total = 500
-
+func TestAFixedSourceAlwaysAnswersItsSource(t *testing.T) {
 	// Act.
-	r.g.observe()
-	r.g.observe()
-	w := r.g.enqueue(speculative(1))
+	got, err := Fixed{Source: PowerBattery}.Power()
 
 	// Assert.
-	if r.g.sampled {
-		t.Fatal("the governor kept a load across ticks that went backwards")
-	}
-	if _, found := r.recordAt("error", "daemon.cpugov.sample"); !found || ready(w) {
-		t.Fatalf("recorded=%v admitted=%v, want an error and no admission", found, ready(w))
-	}
-}
-
-func TestNewRefusesAConfigurationThatIsNoBand(t *testing.T) {
-	// Arrange.
-	cfg := DefaultConfig()
-	cfg.Low, cfg.High = 0.8, 0.7
-
-	// Act.
-	_, err := New(cfg, &fakeSampler{}, time.Now, dlog.NewTestLogger())
-
-	// Assert.
-	if err == nil {
-		t.Fatal("New accepted a floor above its ceiling")
+	if err != nil || got != PowerBattery {
+		t.Fatalf("Power = %v, %v; want battery", got, err)
 	}
 }

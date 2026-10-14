@@ -45,8 +45,10 @@ type fakeDB struct {
 
 	mu sync.Mutex
 
-	// engagements counts the delivery-time engagement stamps.
-	engagements int
+	// engagements counts the delivery-time engagement stamps, and
+	// engagementCtxErr is the context error the last one was written under.
+	engagements      int
+	engagementCtxErr error
 
 	workspaces map[ids.WorkspaceID]wsm.Workspace
 	leases     map[ids.WorkspaceID]wsm.Lease
@@ -122,10 +124,11 @@ func newFakeDB() *fakeDB {
 }
 
 // TouchEngagement records the engagement stamp every delivery writes.
-func (d *fakeDB) TouchEngagement(_ context.Context, _ ids.WorkspaceID, _ time.Time) error {
+func (d *fakeDB) TouchEngagement(ctx context.Context, _ ids.WorkspaceID, _ time.Time) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.engagements++
+	d.engagementCtxErr = ctx.Err()
 	return nil
 }
 

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"agent-repld/internal/cpugov"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/footer"
@@ -17,22 +16,18 @@ import (
 // 2026-10-11).
 //
 // THE WINDOW. The chain is the head and the merges right behind it, at most
-// cpugov.QueueWindow in all; an entry beyond the window waits untouched until
-// a merge ahead of it lands or drops out and it moves in.
+// the window in all, which the host's power source decides (power.go): the
+// head and the merge behind it on AC power, the head alone on battery. An
+// entry beyond the window waits untouched until a merge ahead of it lands or
+// drops out, or the window grows, and it moves in.
 //
-// CHAINED REBASING. The head rebases onto the target's tip. The moment its
-// rebase settles -- replayed, its conflicts resolved -- it publishes its tip,
-// and the merge behind it rebases onto that tip, its conflicts resolved by
-// its OWN session through the same prompts the head's get; then the next
-// onto that one, to the window's end.
-//
-// RESTACKING. A run that publishes a new tip -- a fixing commit, a rebase onto
-// a target that moved -- tells its chain, and the merge behind it rebases its
-// own commits onto the new tip. A run that leaves its chain without landing
-// (failed, dequeued, evicted) leaves its successor behind the run ahead of it
-// (or at the head), which rebases onto that. Every queue rebase reuses
-// recorded resolutions (gitclient's rerere), so a restack whose conflicts were
-// resolved before prompts nothing.
+// EVERY MEMBER STANDS ON THE TARGET (race.go). The head and the merges behind
+// it each rebase onto the target's tip, their conflicts resolved by their OWN
+// sessions through the same prompts, and none waits on the progress of the
+// merge ahead of it: an entry joins the chain the moment the window has room
+// for it. A target that moves rebases every member onto its new tip. Every
+// queue rebase reuses recorded resolutions (gitclient's rerere), so a rebase
+// whose conflicts were resolved before prompts nothing.
 //
 // A MERGE ONLY EVER CARRIES ITS OWN COMMITS. A rebase replays exactly the
 // commits between the branch's chain base -- the tip its last rebase replayed
@@ -41,9 +36,9 @@ import (
 // onto the target's tip as it stands after the merge ahead landed, and lands
 // as exactly that tip plus its own commits.
 //
-// SPECULATIVE GATES. A merge whose chained rebase settled runs its test gate
-// (and its fixing attempts) ahead of its turn against its chained base, when
-// the processor governor admits it (cpugov), niced below the head. The pass
+// SPECULATIVE GATES. A merge whose rebase settled runs its test gate (and its
+// fixing attempts) ahead of its turn against its base, when the processor
+// governor admits it (cpugov), niced below the head. The pass
 // is valid only for the tree it tested: at the head, a branch whose rebased
 // tree is that tree lands without testing again; any other tree is tested
 // again, and the invalidation is recorded.
@@ -130,25 +125,6 @@ func (o *orchestrator) chainPosition(r *run) chainPlace {
 	return place
 }
 
-// publishTip records the branch's tip as the run settled it in its chain, and
-// tells the merge behind it, which rebases onto it -- or, when none stands
-// there yet, offers the next entry in line a place in the chain.
-func (r *run) publishTip(ctx context.Context, tip string) {
-	o := r.o
-	o.mu.Lock()
-	if r.tip == tip {
-		o.mu.Unlock()
-		return
-	}
-	previous := r.tip
-	r.tip = tip
-	o.signalChainLocked(r.repo)
-	o.mu.Unlock()
-	o.log(ctx, r.ws).Info("daemon.merge.chain", "the merge settled its branch's tip in its chain; the merge behind it rebases onto it", dlog.Context{
-		"workspace": string(r.ws), "repo": string(r.repo), "tip": tip, "previous": previous, "chain_base": r.chainBase})
-	o.extendChain(context.WithoutCancel(ctx), r.repo)
-}
-
 // extendChainAsync offers the repository's chain its next member on its own
 // goroutine: the pump's kick, in production.
 func (o *orchestrator) extendChainAsync(repo wsm.RepoKey) {
@@ -164,17 +140,18 @@ func (o *orchestrator) extendChainAsync(repo wsm.RepoKey) {
 
 // extendChain starts the next merge of the repository's chain, as ONE
 // admission step the shutdown drain waits for: the entry right behind the
-// chain's last run, when the window has room, that run's tip is settled and
-// the entry is waiting in line -- or, whatever the tail's tip, an entry the
-// boot recovery handed back to resume there. It repeats while it starts
-// resumed runs, which need no tip ahead of them to go on.
+// chain's last run, when the window has room and the entry is waiting in line
+// -- or an entry the boot recovery handed back to resume there. It repeats
+// while it starts resumed runs.
 func (o *orchestrator) extendChain(ctx context.Context, repo wsm.RepoKey) {
 	for o.extendOnce(ctx, repo) {
 	}
 }
 
 // extendOnce makes at most one chain start, and reports whether it started a
-// resumed run (after which the chain may grow again at once).
+// resumed run (after which the chain may grow again at once). It never waits
+// on the progress of the run ahead (race.go): every member stands on the
+// target, not on the merge ahead of it.
 func (o *orchestrator) extendOnce(ctx context.Context, repo wsm.RepoKey) bool {
 	const op = "daemon.merge.chain"
 	o.mu.Lock()
@@ -201,6 +178,15 @@ func (o *orchestrator) extendOnce(ctx context.Context, repo wsm.RepoKey) bool {
 		o.mu.Unlock()
 		return false
 	}
+	// THE CHAIN EXTENDS ONLY BEHIND ITS RUNNING HEAD. A head a pause, a
+	// restart or a transfer suspended leaves the merges behind it in the chain
+	// until it registers again at the chain's front (register), and the pump
+	// promotes the merge behind a head that ended: until then the chain stands
+	// behind an entry it holds no run for, and nothing joins it.
+	if head := o.running[repo]; head == nil || chain[0] != head {
+		o.mu.Unlock()
+		return false
+	}
 	// THE CHAIN IS THE QUEUE'S FRONT, IN ORDER. Every member stands where its
 	// entry stands; anything else is a defect, said once here and never
 	// extended past.
@@ -219,11 +205,16 @@ func (o *orchestrator) extendOnce(ctx context.Context, repo wsm.RepoKey) bool {
 	tail, next := chain[len(chain)-1], entries[len(chain)]
 	doc, resuming := o.resumes[next.Workspace]
 	switch {
+	case resuming && !doc.Speculative:
+		// A MERGE SUSPENDED AS THE HEAD -- the loser of a race to land
+		// (race.go) -- resumes only at the head, once the winner is done.
+		o.mu.Unlock()
+		return false
 	case resuming:
 	case o.runsByWorkspace[next.Workspace] != nil, o.transferred[next.Workspace], o.inChainLocked(repo, next.Workspace):
 		o.mu.Unlock()
 		return false
-	case tail.tip == "" || paused || next.State != wsm.MergeQueued || next.Source.Kind == wsm.MergeSourceMergedUpstream:
+	case paused || next.State != wsm.MergeQueued || next.Source.Kind == wsm.MergeSourceMergedUpstream:
 		o.mu.Unlock()
 		return false
 	}
@@ -420,14 +411,6 @@ func (r *run) speculate(ctx context.Context) (*outcome, error) {
 		}
 	}
 	r.doneResumingAt(TabPrePrompt)
-	if r.chainBase != "" {
-		// A RESUMED MERGE'S TIP IS TOLD AGAIN: the merge behind it rebases on it.
-		head, err := r.git.ResolveRef(ctx, r.subject.dir, r.subject.branch)
-		if err != nil {
-			return nil, fmt.Errorf("merge: resolving %s: %w", r.subject.branch, err)
-		}
-		r.publishTip(ctx, head)
-	}
 	for {
 		if err := stillWanted(ctx); err != nil {
 			return nil, err
@@ -442,7 +425,7 @@ func (r *run) speculate(ctx context.Context) (*outcome, error) {
 				"workspace": string(r.ws), "repo": string(r.repo)})
 			return nil, err
 		case place.base == "":
-			// The merge ahead has not settled its tip, or this merge stands
+			// No run has read the target's tip yet, or this merge stands
 			// first and waits for the pump to promote it.
 		case place.base != r.chainBase:
 			if gaveUp, err := r.chainRebase(ctx, place, targetBranch); err != nil || gaveUp != nil {
@@ -491,10 +474,10 @@ func (r *run) idle(ctx context.Context, changed <-chan struct{}) error {
 	}
 }
 
-// chainRebase rebases the branch's own commits onto the tip of the merge ahead
-// of it: the chained rebase, or a restack when that tip moved.
+// chainRebase rebases the branch's own commits onto the target's tip behind
+// the head: its first rebase, or a restack when the target moved.
 func (r *run) chainRebase(ctx context.Context, place chainPlace, targetBranch string) (*outcome, error) {
-	r.o.log(ctx, r.ws).Info("daemon.merge.chain", "the merge rebases its own commits onto the merge ahead of it", dlog.Context{
+	r.o.log(ctx, r.ws).Info("daemon.merge.chain", "the merge behind the head rebases its own commits onto the target's tip", dlog.Context{
 		"workspace": string(r.ws), "ahead": string(place.ahead), "onto": place.base, "chain_base": r.chainBase, "rank": place.rank,
 		"restack": r.chainBase != ""})
 	r.briefAhead = place.ahead
@@ -502,21 +485,16 @@ func (r *run) chainRebase(ctx context.Context, place chainPlace, targetBranch st
 	if err != nil || gaveUp != nil {
 		return gaveUp, err
 	}
-	return nil, r.settledOn(ctx, place.base)
+	r.settledOn(place.base)
+	return nil, nil
 }
 
 // settledOn records the branch's own commits as standing on onto, once a
-// rebase onto it settled, and publishes the branch's tip to its chain.
-func (r *run) settledOn(ctx context.Context, onto string) error {
+// rebase onto it settled.
+func (r *run) settledOn(onto string) {
 	r.mu.Lock()
 	r.chainBase = onto
 	r.mu.Unlock()
-	head, err := r.git.ResolveRef(ctx, r.subject.dir, r.subject.branch)
-	if err != nil {
-		return fmt.Errorf("merge: resolving %s after its rebase: %w", r.subject.branch, err)
-	}
-	r.publishTip(ctx, head)
-	return nil
 }
 
 // ownBase is the commit a rebase onto tip replays the branch's own commits
@@ -549,7 +527,6 @@ func (r *run) speculativeGate(ctx context.Context, place chainPlace, targetBranc
 	if err != nil {
 		return nil, fmt.Errorf("merge: resolving %s: %w", r.subject.branch, err)
 	}
-	r.publishTip(ctx, head)
 	round := r.openTab(ctx, TabTests)
 	if err := r.checkpoint(ctx, TabTests, func(d *progressDoc) {
 		d.TargetBranch, d.Tip = targetBranch, place.base
@@ -666,12 +643,14 @@ func (r *run) resumeSpeculative(ctx context.Context, res *progressDoc, targetBra
 		if gaveUp, err := r.resumeRebase(ctx, p, res.Tip, targetBranch, res.BranchHead); err != nil || gaveUp != nil {
 			return gaveUp, err
 		}
-		return nil, r.settledOn(ctx, res.Tip)
+		r.settledOn(res.Tip)
+		return nil, nil
 	case TabConflicts:
 		if gaveUp, err := r.resumeConflict(ctx, p, res.Tip, targetBranch, res); err != nil || gaveUp != nil {
 			return gaveUp, err
 		}
-		return nil, r.settledOn(ctx, res.Tip)
+		r.settledOn(res.Tip)
+		return nil, nil
 	case TabTests:
 		// THE GATE THE RESTART CUT runs again, in a round of its own, once the
 		// governor admits it: its round is settled as cut.
@@ -753,10 +732,10 @@ func gateArgv(argv []string, speculative bool) []string {
 }
 
 // queueWindow is the window in force: the test override when one is set, else
-// cpugov.QueueWindow.
+// the governor's, which the host's power source decides (power.go).
 func (o *orchestrator) queueWindow() int {
 	if o.window > 0 {
 		return o.window
 	}
-	return cpugov.QueueWindow
+	return o.deps.Governor.Window()
 }
