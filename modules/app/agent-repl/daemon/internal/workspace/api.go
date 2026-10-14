@@ -95,10 +95,12 @@ type CreateSpec struct {
 	// MergeOf.Requester made to carry that workspace's async merge. The spec
 	// must then fork from the requester (ForkFrom) and name nothing else the
 	// daemon derives here: the name is MergeName, which the request reserved;
-	// the merge target, the branch it lands on and the configured merge
-	// actions are the REQUESTER's own, so the merge workspace lands where the
-	// requester would have; and the roster nests it under the requester once
-	// it is revealed.
+	// the merge target, the branch it lands on and the merge actions are the
+	// ones the merge queue decided at hand-off (MergeOf.TargetDir,
+	// .ParentBranch, .Actions), read off nothing else, so a requester with no
+	// creation job (the main checkout) is forked from like any other and the
+	// merge workspace runs only the actions its request named; and the roster
+	// nests it under the requester once it is revealed.
 	MergeOf *wsm.MergeOrigin
 	// MergeName is a merge workspace's name as its requesting agent chose it,
 	// unprefixed, set exactly when MergeOf is. It was checked and reserved when
