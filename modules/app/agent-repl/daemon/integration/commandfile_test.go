@@ -412,16 +412,26 @@ func TestIngestionIsAtomicAHalfWrittenFileIsNotClaimedUntilComplete(t *testing.T
 	// Arrange
 	d := harness.StartDaemon(t, harness.Opts{})
 	partial := `[{"type":"task-cre`
-	path := commandfileWrite(t, d, "workspace_commands_atomic.json", partial)
 	// THE FILE'S YOUTH IS PINNED, NOT RACED. The ingress claims a file once it
 	// is one poll interval old whether or not it parses, so a wall-clock probe
 	// shorter than that interval raced the sweep: under a loaded run the
 	// completing write landed after the partial had aged out and was
 	// quarantined. A future mtime keeps the partial young for every sweep this
 	// test can see, which is exactly the condition under test.
+	//
+	// THE PIN IS IN PLACE BEFORE THE SWEEP CAN SEE THE FILE: the partial is
+	// written and pinned under a name the glob does not match, then renamed
+	// into place (a rename keeps the mtime). Pinning it after writing it in
+	// place raced the sweep the same way: a sweep between the write and the
+	// pin claimed it by age and quarantined it, and the pin then found it gone.
+	staging := commandfileWrite(t, d, ".workspace_commands_atomic.partial.json", partial)
 	future := time.Now().Add(time.Hour)
-	if err := os.Chtimes(path, future, future); err != nil {
+	if err := os.Chtimes(staging, future, future); err != nil {
 		t.Fatalf("pin the partial command file's youth: %v", err)
+	}
+	path := filepath.Join(filepath.Dir(staging), "workspace_commands_atomic.json")
+	if err := os.Rename(staging, path); err != nil {
+		t.Fatalf("place the pinned partial command file: %v", err)
 	}
 
 	// Act / Assert: a sweep judges the half-written file and leaves it alone —
