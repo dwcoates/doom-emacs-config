@@ -13,8 +13,6 @@
 package sidebar
 
 import (
-	"time"
-
 	"strconv"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -162,13 +160,6 @@ type Resolver interface {
 	// a last turn that failed on an account cause a sign-in cures is answered,
 	// and the row draws `ready` until the next turn.
 	OnSignedIn(ws ids.WorkspaceID)
-	// SetTurnClosedAt installs the instant one of the workspace's turns
-	// closed, which the when-column counts from. The prompt queue's turn-close
-	// door tells it on EVERY close — completed, interrupted, failed, orphaned
-	// or displaced — with the very instant it records on the turn's row, so the
-	// live instant and the durable one (wsm.Workspace.LastTurnEndedAt) are the
-	// same value. An instant older than the one held is kept out.
-	SetTurnClosedAt(ws ids.WorkspaceID, at time.Time)
 	// SetSummary installs the row detail's summary line — the workspace's last
 	// prompt, first line only. Empty omits the line rather than drawing it
 	// blank.
@@ -184,10 +175,13 @@ type Resolver interface {
 	Topic() *publish.Topic[*frontendv1.WorkspaceRoster]
 }
 
-// FooterStatus is the footer resolver's answer to what a workspace's strip
-// shows (footer.Resolver.Status): the status every roster row projects.
+// FooterStatus is the footer resolver's answers to what a workspace's strip
+// shows: the status every roster row projects (footer.Resolver.Status), and
+// the turn clock the open workspaces section's when-column counts from
+// (footer.Resolver.TurnClock).
 type FooterStatus interface {
 	Status(ws ids.WorkspaceID) *frontendv1.FooterStatus
+	TurnClock(ws ids.WorkspaceID) *frontendv1.FooterClock
 }
 
 // New builds the roster resolver. colors supplies the roster_status and

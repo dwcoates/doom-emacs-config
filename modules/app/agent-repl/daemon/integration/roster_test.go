@@ -1118,41 +1118,38 @@ func TestRosterBringUpWalkIsMonotoneFromAColdSubmit(t *testing.T) {
 	}
 }
 
-// THE WHEN-COLUMN COUNTS FROM THE LAST TURN END: a running first turn has no
-// end yet and shows the creation instant, the close moves the column to
-// `turn_ended`, and the NEXT turn's start leaves that instant where it stood.
-func TestRosterWhenColumnCountsFromTheLastTurnEnd(t *testing.T) {
+// THE WHEN-COLUMN IS THE TURN CLOCK: before any turn the row reads
+// no_turn_running, a running turn counts from the very instant the footer
+// strip's clock counts from, and the turn's end returns it to no_turn_running.
+func TestRosterWhenColumnIsTheFootersTurnClock(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	roster := f.d.WatchRoster()
+	footer := f.d.WatchFooter(f.ws)
 	rowWhere := func(pred func(*frontendv1.RosterRow) bool) func(*frontendv1.WorkspaceRoster) bool {
 		return func(r *frontendv1.WorkspaceRoster) bool {
 			row := rosterRow(r, f.ws.GetId())
 			return row != nil && pred(row)
 		}
 	}
-	awaitRoster(t, f.d, roster, "ready after readiness", rowWhere(func(row *frontendv1.RosterRow) bool { return row.GetReady() != nil }))
+	ready := awaitRoster(t, f.d, roster, "ready after readiness", rowWhere(func(row *frontendv1.RosterRow) bool { return row.GetReady() != nil }))
+	if when := rosterRow(ready, f.ws.GetId()).GetWhen(); when.GetNoTurnRunning() == nil {
+		t.Fatalf("when before any turn = %v, want no_turn_running", when)
+	}
 
-	// Act / Assert: the first turn runs, and nothing has ended yet.
+	// Act / Assert: the turn runs, counting from the strip clock's start.
 	f.submit("first", "k-when-first", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	running := awaitRoster(t, f.d, roster, "thinking during the first turn", rowWhere(func(row *frontendv1.RosterRow) bool { return row.GetThinking() != nil }))
-	if when := rosterRow(running, f.ws.GetId()).GetWhen(); when.GetCreated() == nil {
-		t.Fatalf("when during the first turn = %v, want the creation instant", when)
-	}
+	strip := awaitFooter(t, f, footer, "the strip clock running", func(v *frontendv1.FooterView) bool {
+		clock := v.GetStrip().GetClock()
+		return clock.TurnStartedAtMs != nil && clock.TurnEndedAtMs == nil
+	})
+	started := strip.GetStrip().GetClock().GetTurnStartedAtMs()
+	awaitRoster(t, f.d, roster, "the when-column counting from the strip clock's start", rowWhere(func(row *frontendv1.RosterRow) bool {
+		return row.GetWhen().GetTurnRunning().GetStartedAtMs() == started
+	}))
 
-	// Act / Assert: the first turn ends.
+	// Act / Assert: the turn ends.
 	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
-	ended := awaitRoster(t, f.d, roster, "the when-column on the first turn's end", rowWhere(func(row *frontendv1.RosterRow) bool { return row.GetWhen().GetTurnEnded() != nil }))
-	endedAt := rosterRow(ended, f.ws.GetId()).GetWhen().GetTurnEnded().GetAtMs()
-	if endedAt == 0 {
-		t.Fatalf("when.turn_ended = %v, want the close instant", rosterRow(ended, f.ws.GetId()).GetWhen())
-	}
-
-	// Act / Assert: the second turn's start does not move the column.
-	f.submit("second", "k-when-second", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	second := awaitRoster(t, f.d, roster, "thinking during the second turn", rowWhere(func(row *frontendv1.RosterRow) bool { return row.GetThinking() != nil }))
-	if got := rosterRow(second, f.ws.GetId()).GetWhen().GetTurnEnded().GetAtMs(); got != endedAt {
-		t.Fatalf("when.turn_ended during the second turn = %d, want the first turn's end %d", got, endedAt)
-	}
+	awaitRoster(t, f.d, roster, "no_turn_running once the turn ended", rowWhere(func(row *frontendv1.RosterRow) bool { return row.GetWhen().GetNoTurnRunning() != nil }))
 }
