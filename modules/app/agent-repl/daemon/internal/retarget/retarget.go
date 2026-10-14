@@ -18,7 +18,6 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/prompthandler"
@@ -47,9 +46,7 @@ type Verbs interface {
 
 // Prompts is the submission path every prompt takes: SubmitPrompt's own
 // body, the one the command file's `prompt` entry calls.
-type Prompts interface {
-	Submit(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, idempotencyKey string, origin conversationv1.PromptOrigin, delivery wsm.Delivery, target *feedid.Ref) (prompthandler.Outcome, error)
-}
+type Prompts = prompthandler.Submitter
 
 // Retargeter is the one operation both surfaces call.
 type Retargeter interface {

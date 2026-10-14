@@ -131,8 +131,13 @@ type Outcome struct {
 	Disposition promptqueue.Disposition
 }
 
-// Handler is SubmitPrompt's body.
-type Handler interface {
+// Submitter is the ONE submission path into a workspace's session, as every
+// package that submits on the daemon's own behalf holds it: a detached
+// merge's handback, a retarget's notice, a merge queue subscription's notice.
+// Each holds this interface rather than declaring its own copy of the
+// signature, so no producer can drift from the handler it is handed
+// (daemon/submitter_shape_test.go fails on a hand-rolled copy).
+type Submitter interface {
 	// Submit runs one submission: recognize it, mirror what it produced into
 	// the root feed, and forward an ordinary prompt to the queue. origin is
 	// REQUIRED — an UNSPECIFIED origin is refused here, before anything is
@@ -142,6 +147,11 @@ type Handler interface {
 	// when set, addresses a subagent bubble's composer; recognition is
 	// unchanged either way.
 	Submit(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, idempotencyKey string, origin conversationv1.PromptOrigin, delivery wsm.Delivery, target *feedid.Ref) (Outcome, error)
+}
+
+// Handler is SubmitPrompt's body.
+type Handler interface {
+	Submitter
 	// Recognize reports what the daemon makes of a submission's text without
 	// acting on it. It is exported so the recognition table has one home and
 	// one test surface.

@@ -18,7 +18,6 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/feedid"
 	"agent-repld/internal/flock"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
@@ -66,9 +65,7 @@ const CompactCommand = "/compact"
 
 // Prompts submits the handback, and a compaction asked for after a landing, to
 // the requester's session.
-type Prompts interface {
-	Submit(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, idempotencyKey string, origin conversationv1.PromptOrigin, delivery wsm.Delivery, target *feedid.Ref) (prompthandler.Outcome, error)
-}
+type Prompts = prompthandler.Submitter
 
 // Feed restates a removed merge workspace's switches in its requester's feed.
 type Feed interface {
