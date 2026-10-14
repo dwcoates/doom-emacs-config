@@ -1,13 +1,13 @@
 /**
- * The material a synthesized workspace title is made of, computed from a
- * transcript's records.
+ * The material the workspace summary is made of, computed from a transcript's
+ * records.
  *
  * WHAT THIS GUARDS: that the digest is measured from the RIGHT boundary (no
- * cut, a /clear, or the most recent /compact) and that only the person's own
+ * cut, or the last /clear, and never a /compact) and that only the person's own
  * prompts count — never a tool result the SDK wrote as a user record, never a
  * slash-command envelope, never a compaction summary, never a subagent's
- * sidechain prompt. The failure modes excluded are a title synthesized from the
- * whole history after a compaction, and a title synthesized from machine noise.
+ * sidechain prompt. The failure modes excluded are a summary that forgets the
+ * prompts sent before a compaction, and a summary made from machine noise.
  */
 import { describe, expect, it } from "vitest";
 import { computeTitleDigest, promptText, userRecordText, type TitleDigestRecord } from "../../src/convert/title-digest.js";
@@ -66,7 +66,7 @@ describe("computeTitleDigest boundary", () => {
     expect(digest).toEqual({ boundary: "clear", prompts: ["after the clear"] });
   });
 
-  it("is COMPACT with the summary and only the prompts after it", () => {
+  it("keeps the prompts sent before a compaction", () => {
     // Arrange — a /compact appends a boundary, its summary, then the command echo.
     const records = [
       prompt("before"),
@@ -81,16 +81,13 @@ describe("computeTitleDigest boundary", () => {
     const digest = computeTitleDigest(records);
 
     // Assert.
-    expect(digest).toEqual({
-      boundary: "compact",
-      lastCompactSummary: "This session is being continued. Summary: …",
-      prompts: ["after the compaction"],
-    });
+    expect(digest).toEqual({ boundary: "none", prompts: ["before", "after the compaction"] });
   });
 
-  it("measures from the MOST RECENT compaction when there were two", () => {
+  it("keeps the prompts across two compactions", () => {
     // Arrange.
     const records = [
+      prompt("first"),
       compactBoundary(),
       compactSummary("first summary"),
       prompt("between"),
@@ -103,11 +100,36 @@ describe("computeTitleDigest boundary", () => {
     const digest = computeTitleDigest(records);
 
     // Assert.
-    expect(digest).toEqual({
-      boundary: "compact",
-      lastCompactSummary: "second summary",
-      prompts: ["after second"],
-    });
+    expect(digest).toEqual({ boundary: "none", prompts: ["first", "between", "after second"] });
+  });
+
+  it("measures from the clear when a compaction followed it", () => {
+    // Arrange.
+    const records = [
+      prompt("before the clear"),
+      commandEnvelope("/clear"),
+      prompt("after the clear"),
+      compactBoundary(),
+      compactSummary("summary"),
+      prompt("after the compaction"),
+    ];
+
+    // Act.
+    const digest = computeTitleDigest(records);
+
+    // Assert.
+    expect(digest).toEqual({ boundary: "clear", prompts: ["after the clear", "after the compaction"] });
+  });
+
+  it("measures from the MOST RECENT clear when there were two", () => {
+    // Arrange.
+    const records = [commandEnvelope("/clear"), prompt("between"), commandEnvelope("/clear"), prompt("after second")];
+
+    // Act.
+    const digest = computeTitleDigest(records);
+
+    // Assert.
+    expect(digest).toEqual({ boundary: "clear", prompts: ["after second"] });
   });
 });
 

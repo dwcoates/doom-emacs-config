@@ -197,7 +197,7 @@ func TestVendorServesForwarderWithNoQueueIsAWiringDefectAtError(t *testing.T) {
 
 func TestAnUnboundMergeMoverRefusesTheMove(t *testing.T) {
 	// Arrange.
-	f := &mergeMoverForwarder{}
+	f := &mergeForwarder{}
 
 	// Act.
 	err := f.SuspendForTransfer(context.Background(), "ws-1")
@@ -221,9 +221,13 @@ func (m *recordingMover) AdoptWorkspace(_ context.Context, ws ids.WorkspaceID) e
 	return nil
 }
 
+func (m *recordingMover) Drain(context.Context) {
+	m.calls = append(m.calls, "drain")
+}
+
 func TestABoundMergeMoverCarriesBothMoves(t *testing.T) {
 	// Arrange.
-	f := &mergeMoverForwarder{}
+	f := &mergeForwarder{}
 	target := &recordingMover{}
 	f.bind(target)
 
@@ -234,6 +238,37 @@ func TestABoundMergeMoverCarriesBothMoves(t *testing.T) {
 	if errs != nil || len(target.calls) != 2 || target.calls[0] != "suspend ws-1" || target.calls[1] != "adopt ws-1" {
 		t.Fatalf("calls = %v (%v), want both moves carried", target.calls, errs)
 	}
+}
+
+func TestABoundMergeForwarderCarriesTheDrain(t *testing.T) {
+	// Arrange.
+	f := &mergeForwarder{}
+	target := &recordingMover{}
+	f.bind(target)
+
+	// Act.
+	f.Drain(context.Background())
+
+	// Assert.
+	if len(target.calls) != 1 || target.calls[0] != "drain" {
+		t.Fatalf("calls = %v, want the drain carried", target.calls)
+	}
+}
+
+func TestAnUnboundMergeForwarderPanicsOnTheDrain(t *testing.T) {
+	// Arrange.
+	f := &mergeForwarder{}
+	defer func() {
+		// Assert.
+		got := recover()
+		err, ok := got.(error)
+		if !ok || !errors.Is(err, errMergeMoverUnbound) {
+			t.Fatalf("recovered %v, want a panic carrying errMergeMoverUnbound", got)
+		}
+	}()
+
+	// Act.
+	f.Drain(context.Background())
 }
 
 // publishingVerbs is a workspace.Verbs whose only live method is the roster

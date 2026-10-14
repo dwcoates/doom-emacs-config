@@ -1226,7 +1226,7 @@ func TestASummaryTheVendorRestatesReplacesTheOneBeforeIt(t *testing.T) {
 	}
 }
 
-func TestTheTitleIsTheDaemonsSynthesisWhenTheVendorHasStatedNone(t *testing.T) {
+func TestTheTitleIsTheDaemonsSynthesis(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.ready(t)
@@ -1240,16 +1240,47 @@ func TestTheTitleIsTheDaemonsSynthesisWhenTheVendorHasStatedNone(t *testing.T) {
 	}
 }
 
-func TestTheVendorsSummaryOutranksTheDaemonsSynthesis(t *testing.T) {
-	// Arrange: both are present.
+func TestTheDaemonsSynthesisOutranksTheVendorsSummary(t *testing.T) {
+	// Arrange: the vendor stated its ai-title first.
 	h := newHarness(t)
 	h.ready(t)
-	h.r.SetSynthesizedTitle(testWS, "the daemon's guess")
+	h.r.OnSessionUpdate(testWS, sessionTitle("the vendor's own summary"))
+
+	// Act
+	h.r.SetSynthesizedTitle(testWS, "Distill the prompts into a summary")
+
+	// Assert: the distillation of the user's prompts is the workspace summary.
+	if got, want := h.view(t).GetTitle().GetText(), "Distill the prompts into a summary"; got != want {
+		t.Fatalf("title = %q, want %q", got, want)
+	}
+}
+
+func TestALaterVendorSummaryDoesNotDisplaceTheDaemonsSynthesis(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+	h.r.SetSynthesizedTitle(testWS, "Distill the prompts into a summary")
 
 	// Act
 	h.r.OnSessionUpdate(testWS, sessionTitle("the vendor's own summary"))
 
-	// Assert: a future CLI that emits ai-title must transparently supersede ours.
+	// Assert
+	if got, want := h.view(t).GetTitle().GetText(), "Distill the prompts into a summary"; got != want {
+		t.Fatalf("title = %q, want %q", got, want)
+	}
+}
+
+func TestAnEmptySynthesizedTitleFallsBackToTheVendorsSummary(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+	h.r.OnSessionUpdate(testWS, sessionTitle("the vendor's own summary"))
+	h.r.SetSynthesizedTitle(testWS, "a title to be retracted")
+
+	// Act: retract it, as the synthesizer does after a /clear.
+	h.r.SetSynthesizedTitle(testWS, "")
+
+	// Assert
 	if got, want := h.view(t).GetTitle().GetText(), "the vendor's own summary"; got != want {
 		t.Fatalf("title = %q, want %q", got, want)
 	}

@@ -1,21 +1,20 @@
 // endpoint_gather_title_digest.proto — GatherTitleDigest: the material the
-// daemon summarizes into a workspace title of its OWN when the vendor has not
-// written one.
+// daemon distills into the workspace summary the topbar draws.
 //
 // WHY IT LIVES ON THE SHIM. The shim owns the transcript, and the digest is a
-// fact ABOUT the transcript: the user's prompts since the last context
-// boundary, plus — when the last boundary was a compaction — the compaction
-// summary the vendor already wrote. The daemon cannot read the transcript
-// itself (it does not know the file, and a compaction rewrites it), so it asks
-// the one process that does.
+// fact ABOUT the transcript: every prompt the user sent since the last /clear.
+// The daemon cannot read the transcript itself (it does not know the file), so
+// it asks the one process that does.
 //
-// THE BOUNDARY IS THE MOST RECENT CUT IN THE CURRENT TRANSCRIPT. A /clear
-// rotates to a NEW transcript file, so "the prompts in the current transcript"
-// is the same statement as "the prompts since the last /clear"; a /compact
-// stays in the SAME file and appends a `compact_boundary` plus the summary, so
-// the compaction is found by scanning that file. The digest reports which
-// boundary it found so the daemon can key its reset and its cost control on the
-// same fact the shim keyed the digest on.
+// ONLY A /clear CUTS THE DIGEST. A /clear rotates to a NEW transcript file, so
+// "the prompts in the current transcript" is the same statement as "the
+// prompts since the last /clear". A /compact stays in the SAME file and
+// discards nothing the user sent from it, so the prompts before a compaction
+// are still the user's prompts in this session and the digest carries them
+// (owner ruling, 2026-10-14: the summary distills every prompt of the session,
+// including pre-compaction, but not pre-clear). The digest reports whether it
+// found a clear so the daemon can key its reset on the same fact the shim keyed
+// the digest on.
 //
 // NO PAINT ATTESTATION: this answers what the transcript states, never that
 // anything was drawn from it.
@@ -32,7 +31,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_gather_title_digest.proto.
  */
 export const file_shim_v1_endpoint_gather_title_digest: GenFile = /*@__PURE__*/
-  fileDesc("CipzaGltL3YxL2VuZHBvaW50X2dhdGhlcl90aXRsZV9kaWdlc3QucHJvdG8SB3NoaW0udjEiGgoYR2F0aGVyVGl0bGVEaWdlc3RSZXF1ZXN0IpEBChlHYXRoZXJUaXRsZURpZ2VzdFJlc3BvbnNlEjQKB3N1Y2Nlc3MYASABKAsyIS5zaGltLnYxLkdhdGhlclRpdGxlRGlnZXN0U3VjY2Vzc0gAEjQKB2ZhaWx1cmUYAiABKAsyIS5zaGltLnYxLkdhdGhlclRpdGxlRGlnZXN0RmFpbHVyZUgAQggKBnJlc3VsdCKXAQoYR2F0aGVyVGl0bGVEaWdlc3RTdWNjZXNzEi4KCGJvdW5kYXJ5GAEgASgOMhwuc2hpbS52MS5UaXRsZURpZ2VzdEJvdW5kYXJ5EiEKFGxhc3RfY29tcGFjdF9zdW1tYXJ5GAIgASgJSACIAQESDwoHcHJvbXB0cxgDIAMoCUIXChVfbGFzdF9jb21wYWN0X3N1bW1hcnkirwEKGEdhdGhlclRpdGxlRGlnZXN0RmFpbHVyZRIOCgZkZXRhaWwYASABKAkSPwoNbm9fdHJhbnNjcmlwdBgCIAEoCzImLnNoaW0udjEuR2F0aGVyVGl0bGVEaWdlc3ROb1RyYW5zY3JpcHRIABI6Cgp1bnJlYWRhYmxlGAMgASgLMiQuc2hpbS52MS5HYXRoZXJUaXRsZURpZ2VzdFVucmVhZGFibGVIAEIGCgRraW5kIh8KHUdhdGhlclRpdGxlRGlnZXN0Tm9UcmFuc2NyaXB0Ih0KG0dhdGhlclRpdGxlRGlnZXN0VW5yZWFkYWJsZSqgAQoTVGl0bGVEaWdlc3RCb3VuZGFyeRIlCiFUSVRMRV9ESUdFU1RfQk9VTkRBUllfVU5TUEVDSUZJRUQQABIeChpUSVRMRV9ESUdFU1RfQk9VTkRBUllfTk9ORRABEh8KG1RJVExFX0RJR0VTVF9CT1VOREFSWV9DTEVBUhACEiEKHVRJVExFX0RJR0VTVF9CT1VOREFSWV9DT01QQUNUEANCIFoeYWdlbnRyZXBsL3Byb3RvL3NoaW0vdjE7c2hpbXYxYgZwcm90bzM");
+  fileDesc("CipzaGltL3YxL2VuZHBvaW50X2dhdGhlcl90aXRsZV9kaWdlc3QucHJvdG8SB3NoaW0udjEiGgoYR2F0aGVyVGl0bGVEaWdlc3RSZXF1ZXN0IpEBChlHYXRoZXJUaXRsZURpZ2VzdFJlc3BvbnNlEjQKB3N1Y2Nlc3MYASABKAsyIS5zaGltLnYxLkdhdGhlclRpdGxlRGlnZXN0U3VjY2Vzc0gAEjQKB2ZhaWx1cmUYAiABKAsyIS5zaGltLnYxLkdhdGhlclRpdGxlRGlnZXN0RmFpbHVyZUgAQggKBnJlc3VsdCJ3ChhHYXRoZXJUaXRsZURpZ2VzdFN1Y2Nlc3MSLgoIYm91bmRhcnkYASABKA4yHC5zaGltLnYxLlRpdGxlRGlnZXN0Qm91bmRhcnkSDwoHcHJvbXB0cxgDIAMoCUoECAIQA1IUbGFzdF9jb21wYWN0X3N1bW1hcnkirwEKGEdhdGhlclRpdGxlRGlnZXN0RmFpbHVyZRIOCgZkZXRhaWwYASABKAkSPwoNbm9fdHJhbnNjcmlwdBgCIAEoCzImLnNoaW0udjEuR2F0aGVyVGl0bGVEaWdlc3ROb1RyYW5zY3JpcHRIABI6Cgp1bnJlYWRhYmxlGAMgASgLMiQuc2hpbS52MS5HYXRoZXJUaXRsZURpZ2VzdFVucmVhZGFibGVIAEIGCgRraW5kIh8KHUdhdGhlclRpdGxlRGlnZXN0Tm9UcmFuc2NyaXB0Ih0KG0dhdGhlclRpdGxlRGlnZXN0VW5yZWFkYWJsZSqiAQoTVGl0bGVEaWdlc3RCb3VuZGFyeRIlCiFUSVRMRV9ESUdFU1RfQk9VTkRBUllfVU5TUEVDSUZJRUQQABIeChpUSVRMRV9ESUdFU1RfQk9VTkRBUllfTk9ORRABEh8KG1RJVExFX0RJR0VTVF9CT1VOREFSWV9DTEVBUhACIgQIAxADKh1USVRMRV9ESUdFU1RfQk9VTkRBUllfQ09NUEFDVEIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw");
 
 /**
  * Ask for the current title digest of the session's own conversation. The
@@ -96,21 +95,11 @@ export type GatherTitleDigestSuccess = Message<"shim.v1.GatherTitleDigestSuccess
   boundary: TitleDigestBoundary;
 
   /**
-   * The compaction summary the most recent /compact wrote, verbatim. SET ONLY
-   * when `boundary` is COMPACT; a summary is the vendor's own compression of
-   * the discarded history, so it belongs in the digest beside the prompts that
-   * followed it. Absent for every other boundary.
-   *
-   * @generated from field: optional string last_compact_summary = 2;
-   */
-  lastCompactSummary?: string | undefined;
-
-  /**
-   * The user's prompts since the boundary, oldest first — the slash-command
-   * envelopes, tool-result echoes, compaction artifacts and subagent prompts
-   * the transcript also carries are NOT prompts and are excluded. An empty
-   * list is a legitimate answer for a fresh conversation nobody has prompted
-   * yet.
+   * The user's prompts since the last /clear, oldest first, including every
+   * prompt sent before a /compact — the slash-command envelopes, tool-result
+   * echoes, compaction artifacts and subagent prompts the transcript also
+   * carries are NOT prompts and are excluded. An empty list is a legitimate
+   * answer for a fresh conversation nobody has prompted yet.
    *
    * @generated from field: repeated string prompts = 3;
    */
@@ -199,7 +188,7 @@ export const GatherTitleDigestUnreadableSchema: GenMessage<GatherTitleDigestUnre
  * no distinction between NONE and CLEAR for the prompt set — both are "every
  * prompt in the current transcript" — but the two are reported apart because a
  * clear is a deliberate reset the daemon keys its own reset on, while NONE is
- * simply a conversation that has never been cut.
+ * simply a conversation that has never been cleared.
  *
  * @generated from enum shim.v1.TitleDigestBoundary
  */
@@ -212,8 +201,8 @@ export enum TitleDigestBoundary {
   UNSPECIFIED = 0,
 
   /**
-   * No cut anywhere in the current transcript: the prompts are the whole
-   * conversation.
+   * No clear anywhere in the current transcript: the prompts are the whole
+   * conversation, across every compaction.
    *
    * @generated from enum value: TITLE_DIGEST_BOUNDARY_NONE = 1;
    */
@@ -221,20 +210,12 @@ export enum TitleDigestBoundary {
 
   /**
    * The current transcript opened at a /clear: the prompts are everything
-   * since that clear (which is everything in this transcript file).
+   * since that clear (which is everything in this transcript file), across
+   * every compaction.
    *
    * @generated from enum value: TITLE_DIGEST_BOUNDARY_CLEAR = 2;
    */
   CLEAR = 2,
-
-  /**
-   * The most recent cut was a /compact: `last_compact_summary` carries the
-   * summary the compaction wrote, and `prompts` are the prompts that followed
-   * it.
-   *
-   * @generated from enum value: TITLE_DIGEST_BOUNDARY_COMPACT = 3;
-   */
-  COMPACT = 3,
 }
 
 /**
