@@ -21,12 +21,17 @@ question answered, or work blocked, and name its concrete subject. Leave out
 secondary details, test results that merely passed, pleasantries, and anything
 the reader would have to open the conversation to understand.
 
+Never name a commit SHA, hash, or any other opaque identifier. Say what
+happened to the work in plain words instead: "merged to master", never
+"landed on master as 8c2b490".
+
 Keep the sentence short by choosing what matters, never by packing clauses
 together. Use no em dashes, en dashes, commas, semicolons, colons, or
 parentheses, and do not join two outcomes with "and" or "but".
 
 Good summaries look like these:
 Changes made to summarize turn notifications with Haiku.
+Footer activity tiers merged to master.
 Plan proposed for restructuring the merge queue.
 Three issues found in the footer's activity tiers.
 Question answered about how workspace forks share history.
