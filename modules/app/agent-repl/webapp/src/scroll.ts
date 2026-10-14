@@ -90,6 +90,8 @@ export interface ScrollPosition {
  *   request, 2026-09-30, widening the bubble-only ruling of 2026-09-29),
  *   clamped at the feed's edges, however tall the item is
  *   (`expandCenterDelta`).
+ *   A standing follow is kept instead (owner ruling, 2026-10-14): the feed
+ *   stays at its tail and goes on following until the reader scrolls away.
  * - `initialPlacement`: a feed's FIRST paint lands at its tail. Placement, not
  *   a scroll change.
  * - `replaceRestore`: a page REPLACE (re-open after reconnect or handover)
@@ -497,10 +499,22 @@ export class TailFollow {
   }
 
   /**
-   * The reader expanded a feed item: stop following, and put the item's
-   * vertical middle on the viewport's (`expandCenterDelta`).
+   * The reader expanded a feed item. A standing follow is KEPT (owner ruling,
+   * 2026-10-14): expanding is not scrolling away, so only the reader's own
+   * scroll up ends the follow, and the follow keeps the tail in view as the
+   * expanded item and later content take height. Without a follow, put the
+   * item's vertical middle on the viewport's (`expandCenterDelta`).
    */
   itemExpanded(geometry: RevealGeometry): void {
+    this.sync();
+    if (this.following && this.cause !== null) {
+      log.debug("an item expanded under a standing follow; the follow keeps the tail", {
+        operation: "scroll.expand-kept-follow",
+        context: { cause: this.cause, at: this.box.scrollTop },
+      });
+      this.park(this.cause);
+      return;
+    }
     this.centerReveal("itemExpanded", expandCenterDelta(geometry, this.box));
   }
 
