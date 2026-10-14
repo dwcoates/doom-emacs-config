@@ -15,3 +15,8 @@ type Host struct{}
 func (*Host) Ticks() (Ticks, error) {
 	return Ticks{}, fmt.Errorf("cpugov: no host processor tick reader on %s", runtime.GOOS)
 }
+
+// Power refuses: the band decides every speculative gate.
+func (*Host) Power() (Power, error) {
+	return PowerUnknown, fmt.Errorf("cpugov: no host power source reader on %s", runtime.GOOS)
+}

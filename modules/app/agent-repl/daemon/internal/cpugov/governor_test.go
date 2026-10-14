@@ -11,17 +11,26 @@ import (
 	"agent-repld/internal/dlog"
 )
 
-// fakeSampler answers scripted ticks or a failure.
+// fakeSampler answers scripted ticks and a scripted power source, or their
+// failures.
 type fakeSampler struct {
-	mu    sync.Mutex
-	ticks Ticks
-	err   error
+	mu       sync.Mutex
+	ticks    Ticks
+	err      error
+	power    Power
+	powerErr error
 }
 
 func (f *fakeSampler) Ticks() (Ticks, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.ticks, f.err
+}
+
+func (f *fakeSampler) Power() (Power, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.power, f.powerErr
 }
 
 // tick advances the scripted counters by an interval busy for fraction of its
@@ -70,7 +79,7 @@ func newRig(t *testing.T) *rig {
 func newRigWith(t *testing.T, cfg Config) *rig {
 	t.Helper()
 	r := &rig{sampler: &fakeSampler{}, clock: &fakeClock{now: time.Unix(1700000000, 0)}, log: dlog.NewTestLogger()}
-	g, err := New(cfg, r.sampler, r.clock.Now, r.log)
+	g, err := New(cfg, r.sampler, r.sampler, r.clock.Now, r.log)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -459,10 +468,181 @@ func TestNewRefusesAConfigurationThatIsNoBand(t *testing.T) {
 	cfg.Low, cfg.High = 0.8, 0.7
 
 	// Act.
-	_, err := New(cfg, &fakeSampler{}, time.Now, dlog.NewTestLogger())
+	_, err := New(cfg, &fakeSampler{}, &fakeSampler{}, time.Now, dlog.NewTestLogger())
 
 	// Assert.
 	if err == nil {
 		t.Fatal("New accepted a floor above its ceiling")
+	}
+}
+
+func TestNewRefusesAMissingPowerSource(t *testing.T) {
+	// Act.
+	_, err := New(DefaultConfig(), &fakeSampler{}, nil, time.Now, dlog.NewTestLogger())
+
+	// Assert.
+	if err == nil {
+		t.Fatal("New accepted no power source")
+	}
+}
+
+func TestTheBandDecidesUnlessTheHostIsOnACPower(t *testing.T) {
+	tests := []struct {
+		name         string
+		power        Power
+		wantAdmitted bool
+		wantReason   string
+	}{
+		{name: "on AC power", power: PowerAC, wantAdmitted: true, wantReason: "on_ac_power"},
+		{name: "on battery", power: PowerBattery, wantAdmitted: false, wantReason: "load_in_or_above_band"},
+		{name: "power unread", power: PowerUnknown, wantAdmitted: false, wantReason: "load_in_or_above_band"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the host is saturated.
+			r := newRig(t)
+			r.g.Observe(at(1))
+			r.g.ObservePower(tt.power)
+
+			// Act.
+			w := r.g.enqueue(speculative(1))
+
+			// Assert.
+			if ready(w) != tt.wantAdmitted {
+				t.Fatalf("admitted = %v, want %v", ready(w), tt.wantAdmitted)
+			}
+			if _, reason := lastDecision(r.log); reason != tt.wantReason {
+				t.Fatalf("decision reason = %q, want %q", reason, tt.wantReason)
+			}
+		})
+	}
+}
+
+func TestOnACPowerAGateIsAdmittedBeforeTheHostIsSampled(t *testing.T) {
+	// Arrange.
+	r := newRig(t)
+	r.g.ObservePower(PowerAC)
+
+	// Act.
+	w := r.g.enqueue(speculative(1))
+
+	// Assert.
+	if !ready(w) {
+		t.Fatal("a gate on AC power waited for a sample of the host's load")
+	}
+}
+
+func TestOnACPowerTheConcurrentGateBoundStillHolds(t *testing.T) {
+	// Arrange: the bound's worth of gates already runs.
+	r := newRig(t)
+	r.g.ObservePower(PowerAC)
+	for i := 0; i < QueueWindow; i++ {
+		r.g.enqueue(Request{Workspace: "head", Head: true})
+	}
+
+	// Act.
+	w := r.g.enqueue(speculative(1))
+
+	// Assert.
+	if ready(w) {
+		t.Fatal("a gate on AC power was admitted past the concurrent gate bound")
+	}
+	if _, reason := lastDecision(r.log); reason != "gate_limit" {
+		t.Fatalf("decision reason = %q, want gate_limit", reason)
+	}
+}
+
+func TestPluggingInAdmitsAGateTheBandDeferred(t *testing.T) {
+	// Arrange: on battery, a saturated host defers the gate.
+	r := newRig(t)
+	r.g.Observe(at(1))
+	r.g.ObservePower(PowerBattery)
+	w := r.g.enqueue(speculative(1))
+
+	// Act.
+	r.g.ObservePower(PowerAC)
+
+	// Assert.
+	if !ready(w) {
+		t.Fatal("the deferred gate was not admitted once the host ran on AC power")
+	}
+	found := false
+	for _, rec := range r.log.Records() {
+		if rec.Level == "info" && rec.Operation == "daemon.cpugov.power" && rec.Context["was"] == "battery" && rec.Context["power"] == "ac" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("the change from battery to AC power was not recorded at INFO")
+	}
+}
+
+func TestUnpluggingReturnsTheNextGateToTheBand(t *testing.T) {
+	// Arrange: on AC power the first gate runs; then the host is unplugged.
+	r := newRig(t)
+	r.g.Observe(at(1))
+	r.g.ObservePower(PowerAC)
+	first := r.g.enqueue(speculative(1))
+
+	// Act.
+	r.g.ObservePower(PowerBattery)
+	first.permit.Release(0, 0, false)
+	next := r.g.enqueue(speculative(1))
+
+	// Assert.
+	if !ready(first) || ready(next) {
+		t.Fatalf("admitted first=%v next=%v, want only the gate asked on AC power", ready(first), ready(next))
+	}
+}
+
+func TestTheSamplingLoopReadsThePowerSource(t *testing.T) {
+	// Arrange: the host runs on AC power and its ticks have not primed.
+	r := newRig(t)
+	r.sampler.power = PowerAC
+	r.sampler.tick(1)
+	w := r.g.enqueue(speculative(1))
+
+	// Act.
+	r.g.observe()
+
+	// Assert.
+	if !ready(w) {
+		t.Fatal("the sampling loop did not lift the band on AC power")
+	}
+}
+
+func TestAPowerReadFailureLeavesTheBandDecidingAndIsRecordedOnce(t *testing.T) {
+	// Arrange: the host was on AC power, its load saturated; the power
+	// source then cannot be read.
+	r := newRig(t)
+	r.sampler.power = PowerAC
+	r.sampler.tick(1)
+	r.g.observe()
+	r.sampler.tick(1)
+	r.g.observe()
+	r.sampler.powerErr = errors.New("IOPSCopyPowerSourcesInfo answered nothing")
+
+	// Act.
+	r.sampler.tick(1)
+	r.g.observe()
+	r.sampler.tick(1)
+	r.g.observe()
+	w := r.g.enqueue(speculative(1))
+
+	// Assert.
+	if ready(w) {
+		t.Fatal("a gate was admitted past the band with the power source unread")
+	}
+	errorsSeen := 0
+	for _, rec := range r.log.Records() {
+		if rec.Level == "error" && rec.Operation == "daemon.cpugov.power" {
+			errorsSeen++
+			if rec.Context["error"] != "IOPSCopyPowerSourcesInfo answered nothing" || rec.Context["was"] != "ac" {
+				t.Fatalf("error context = %v, want the cause and the source it was on", rec.Context)
+			}
+		}
+	}
+	if errorsSeen != 1 {
+		t.Fatalf("error records = %d, want one for one standing cause", errorsSeen)
 	}
 }

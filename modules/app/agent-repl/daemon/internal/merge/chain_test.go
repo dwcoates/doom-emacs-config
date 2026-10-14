@@ -608,7 +608,7 @@ func newChainOfWidth(t *testing.T, width int) *chain {
 	if width > 0 {
 		cfg.MaxGates = width
 	}
-	gov, err := cpugov.New(cfg, h.sampler, h.clock, &decisionLog{Logger: h.logs.Global(), decisions: c.decisions})
+	gov, err := cpugov.New(cfg, h.sampler, h.sampler, h.clock, &decisionLog{Logger: h.logs.Global(), decisions: c.decisions})
 	if err != nil {
 		t.Fatalf("building the governor: %v", err)
 	}
@@ -940,6 +940,33 @@ func TestASpeculativeGateIsNeverAdmittedAboveTheBand(t *testing.T) {
 	}
 	if !c.recorded("info", "daemon.merge.tests", "gives its test turn to its head") {
 		t.Fatal("B holding the turn unadmitted did not record giving it to its head")
+	}
+}
+
+func TestOnACPowerTheMergeBehindTheHeadGatesBesideItOnASaturatedHost(t *testing.T) {
+	// Arrange: the host is saturated but on AC power; the head holds in its
+	// gate.
+	c := newChain(t)
+	c.h.load(1)
+	c.h.power(cpugov.PowerAC)
+	inGate, releaseHead := c.runner.hold(c.dirs[theWorkspace])
+	enqueue(t, c.h)
+	c.queue(t, "ws-b", "b1")
+	behindGate, releaseBehind := c.runner.hold(c.dirs["ws-b"])
+	done := admitAsync(c.h, context.Background())
+	<-inGate
+
+	// Act: the merge behind reaches its gate while the head's still runs.
+	admitted := c.awaitDecision(t, "ws-b", "admit")
+	<-behindGate
+	close(releaseHead)
+	close(releaseBehind)
+	<-done
+	c.drain(t)
+
+	// Assert.
+	if admitted["reason"] != "on_ac_power" {
+		t.Fatalf("admitted for %v, want on_ac_power", admitted["reason"])
 	}
 }
 
