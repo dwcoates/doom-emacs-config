@@ -2506,12 +2506,15 @@ html[data-page-unshown] *::after {
 .tool-card.bubble-fold[data-expanded="true"] {
   max-height: var(--feed-item-max-h);
 }
-/* AN EXPANDED MERGE BUBBLE STOPS A QUARTER SHORT OF THAT CEILING (owner
-   ruling, 2026-10-11): 75% of `--feed-item-max-h`, so it tracks every resize
-   the ceiling does. Only the merge bubble; subagent bubbles keep the full
+/* AN EXPANDED MERGE BUBBLE STOPS AT 45% OF THAT CEILING (owner ruling,
+   2026-10-11, cut to 60% of its 75% by owner request, 2026-10-14): 45% of
+   `--feed-item-max-h`, so it tracks every resize the ceiling does. The whole
+   cut comes out of the tab content: the head keeps its height and the tab
+   strip is pinned at the sub-feed's top, so only the content beneath the strip
+   scrolls shorter. Only the merge bubble; subagent bubbles keep the full
    ceiling. */
 .tool-card.bubble-fold[data-merge-bubble][data-expanded="true"] {
-  max-height: calc(var(--feed-item-max-h) * 0.75);
+  max-height: calc(var(--feed-item-max-h) * 0.45);
 }
 .bubble-fold[data-expanded="true"] > .bubble-head { flex: 0 0 auto; }
 .bubble-fold[data-expanded="true"] > .bubble-subfeed {
@@ -7685,6 +7688,30 @@ ar-button.outcome-marker-pill {
   position: static;
   z-index: auto;
   background: none;
+}
+/* THE TESTS TAB'S RUN STRIP STAYS PUT; ONLY THE RUN'S VIEW SCROLLS (owner
+   request, 2026-10-14). While the tests tab is shown, the scroll box moves
+   from the sub-feed down to the run's tests or remediation view: every box
+   between them is a shrinkable flex column (`min-height: 0`), so the bubble's
+   cap squeezes the view and nothing above it. The strips are never scrolled
+   at all, so no sticky offset has to track the top strip's wrapped height,
+   and the run's view dropdown, positioned at the top of `.merge-run`, stays
+   under the run's badge however far the view has scrolled. */
+.bubble-fold[data-merge-bubble][data-expanded="true"] .feed-body:has(> .merge-tabs > .merge-tab-panel[data-merge-tab-body="tests"]) {
+  min-height: 0;
+}
+.merge-tabs:has(> .merge-tab-panel[data-merge-tab-body="tests"]),
+.merge-tab-panel[data-merge-tab-body="tests"],
+.merge-tab-panel[data-merge-tab-body="tests"] > .merge-substrip,
+.merge-tab-panel[data-merge-tab-body="tests"] > .merge-substrip > .merge-tab-panel,
+.merge-tab-panel[data-merge-tab-body="tests"] .merge-run {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.merge-tab-panel[data-merge-tab-body="tests"] .merge-run > .merge-run-view {
+  min-height: 0;
+  overflow-y: auto;
 }
 /* A RUN'S BADGE IS ABOUT HALF A TAB (owner request, 2026-10-13): a run is a
    view switch inside the tests tab, not a phase of the merge, and reads as the
