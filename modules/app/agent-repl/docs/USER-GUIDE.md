@@ -294,12 +294,30 @@ The top bar's effort selector sits between the model selector and the permission
   - It is saved on each step, so it holds after Emacs or the daemon restarts.
   - The size stops at a smallest and a largest step.
 
+## The sidebar's sections
+
+- **The sidebar lists workspaces in three sections, top to bottom.**
+  - The open workspaces section, headed "OPEN", holds the grouping you picked (repositories, tasks or stages).
+  - "HIDDEN" holds the workspaces you hid.
+  - "RECENTLY MERGED" holds the merges of the last week.
+- **Each heading folds its section with the chevron beside it.**
+  - Every workspace's page shows the same folds.
+- **"OPEN" shows how many workspaces it lists, folded or not.**
+  - The number counts every row, children of other workspaces included, and the rows of a folded repository too.
+- **The time at the right of an open workspace's row is its running turn's duration.**
+  - It reads the same number as the footer's turn clock.
+  - A workspace with no turn running reads `0s`.
+  - A hidden row counts from its hide, and a merged row from its merge.
+- **Resting the pointer on a workspace's name for three seconds shows its branch panel.**
+  - The panel lists the branch, the branch it was cut from, its commit count and its last prompt.
+  - This works in all three sections; the status dot does not open it.
+
 ## Searching the sidebar
 
 - **The magnifier left of "Workspaces" opens a search bar under the sidebar's header.**
   - The bar slides down over the top of the list rather than pushing it down.
 - **Typing narrows every section to the workspaces whose names match.**
-  - The repository, task and stage groupings, Hidden Workspaces and Recently Merged are all narrowed.
+  - The open workspaces section (under every grouping), Hidden Workspaces and Recently Merged are all narrowed.
   - A space matches anything, so `fix side` finds `fix-the-sidebar`.
   - The words must appear in the order typed, and case does not matter.
   - A section left with no match is hidden until the search changes.
