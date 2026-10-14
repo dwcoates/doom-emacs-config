@@ -301,7 +301,7 @@ func TestReapFailures(t *testing.T) {
 		{name: "a stop fails", arrange: func(t *fakeTable) { t.stopErr[501] = syscall.EPERM }, want: "stop pid 501 (a): operation not permitted", killed: true},
 		{name: "a kill fails", arrange: func(t *fakeTable) { t.killErr[501] = syscall.EPERM }, want: "kill pid 501 (a): operation not permitted"},
 		{name: "waiting for the exits fails", arrange: func(t *fakeTable) { t.awaitErr = boom }, want: "wait for the 1 killed member(s) to exit: boom", killed: true},
-		{name: "a member does not exit", arrange: func(t *fakeTable) { t.unkillable[501] = true }, want: "1 killed member(s) had not exited within 10s: pids [501]"},
+		{name: "a member does not exit", arrange: func(t *fakeTable) { t.unkillable[501] = true }, want: "1 killed member(s) had not exited within 1s: pids [501]"},
 		{name: "the confirming listing fails", arrange: func(t *fakeTable) { t.listErr = []error{nil, nil, boom} }, want: "list the processes to confirm no member remains: boom", killed: true},
 	}
 	for _, tt := range tests {
