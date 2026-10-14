@@ -39,6 +39,37 @@ func TestOSTableListsThisProcessInItsSession(t *testing.T) {
 	t.Fatal("this process is not in the listing")
 }
 
+func TestOutput(t *testing.T) {
+	tests := []struct {
+		name    string
+		bound   time.Duration
+		command []string
+		want    string
+		wantErr string
+	}{
+		{name: "answers what the command printed", bound: exitWait, command: []string{"/bin/sh", "-c", "echo $LC_ALL"}, want: "C\n"},
+		{name: "fails a command that fails", bound: exitWait, command: []string{"/usr/bin/false"}, wantErr: "/usr/bin/false : exit status 1"},
+		{name: "fails a command that does not answer within its bound", bound: 50 * time.Millisecond, command: []string{"/bin/sleep", "300"}, wantErr: "/bin/sleep did not answer within 50ms"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			got, err := output(tt.bound, tt.command[0], tt.command[1:]...)
+
+			// Assert.
+			if tt.wantErr != "" {
+				if err == nil || err.Error() != tt.wantErr || got != "" {
+					t.Fatalf("output() = %q, %v, want error %q", got, err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || got != tt.want {
+				t.Fatalf("output() = %q, %v, want %q", got, err, tt.want)
+			}
+		})
+	}
+}
+
 // TestReapLeavesNoChildOfAForkingLoop is the leak itself: a parent forking
 // children as fast as it can, as the build-frontend harness's shells did. One
 // snapshot and one kill pass left hundreds alive; Reap leaves none.
