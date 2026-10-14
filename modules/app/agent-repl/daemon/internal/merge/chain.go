@@ -605,28 +605,42 @@ func (r *run) speculativeGate(ctx context.Context, place chainPlace, targetBranc
 // admission with errPromoted the moment it heads its chain. It answers its
 // stop, which waits for the watch to end.
 func (r *run) watchBase(ctx context.Context, base string, cancel, promoted context.CancelCauseFunc) func() {
-	done := make(chan struct{})
-	r.o.live.Add(1)
-	go func() {
-		defer r.o.live.Done()
-		defer close(done)
-		for {
-			place := r.o.chainPosition(r)
-			if place.head {
-				promoted(errPromoted)
-				// A GATE ON A TIP THE TARGET LEFT IS CUT AT THE HEAD TOO
-				// (race.go): every merge stands on the target, so a pass on
-				// the old tip could only be run again.
-				if tip := r.o.targetTip(r.repo); tip != "" && tip != base {
-					cancel(errBaseMoved)
-					return
-				}
-			} else if place.base != base {
+	return r.o.watch(ctx, cancel, func() (bool, <-chan struct{}) {
+		place := r.o.chainPosition(r)
+		if place.head {
+			promoted(errPromoted)
+			// A GATE ON A TIP THE TARGET LEFT IS CUT AT THE HEAD TOO
+			// (race.go): every merge stands on the target, so a pass on the
+			// old tip could only be run again.
+			if tip := r.o.targetTip(r.repo); tip != "" && tip != base {
 				cancel(errBaseMoved)
+				return true, nil
+			}
+		} else if place.base != base {
+			cancel(errBaseMoved)
+			return true, nil
+		}
+		return false, place.changed
+	})
+}
+
+// watch runs LOOK on its own goroutine each time the signal it last answered
+// closes, until it reports done or ctx is done: a watch over orchestrator
+// state read under its lock, which cuts work through CANCEL. It answers its
+// stop, which cancels ctx through CANCEL and waits for the watch to end.
+func (o *orchestrator) watch(ctx context.Context, cancel context.CancelCauseFunc, look func() (done bool, changed <-chan struct{})) func() {
+	ended := make(chan struct{})
+	o.live.Add(1)
+	go func() {
+		defer o.live.Done()
+		defer close(ended)
+		for {
+			done, changed := look()
+			if done {
 				return
 			}
 			select {
-			case <-place.changed:
+			case <-changed:
 			case <-ctx.Done():
 				return
 			}
@@ -634,7 +648,7 @@ func (r *run) watchBase(ctx context.Context, base string, cancel, promoted conte
 	}()
 	return func() {
 		cancel(nil)
-		<-done
+		<-ended
 	}
 }
 
