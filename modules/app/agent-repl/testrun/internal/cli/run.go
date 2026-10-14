@@ -40,27 +40,34 @@ type Deps struct {
 	Pid int
 }
 
-// SlotsForHost is the core budget: HALF the host's cores (owner ruling,
-// 2026-10-06), so a run never takes the machine from the owner's live runtime,
-// input handling and apps. A host with too few cores is refused by the planner
-// rather than silently changing that contract.
+// HostReserve is how many of the host's cores a run leaves unclaimed for the
+// owner's live runtime, input handling and apps (owner ruling, 2026-10-14).
+// The run itself is at nice 19 (bin/background.sh), so it always yields the
+// CPU to them as well.
+const HostReserve = 3
+
+// SlotsForHost is the core budget: every core but HostReserve. A host with no
+// core left over is answered with a non-positive count, which Slots refuses.
 func SlotsForHost(numCPU int) int {
-	return numCPU / 2
+	return numCPU - HostReserve
 }
 
-// CPUBudgetEnv names the core budget bin/suite-slot.sh hands a run: the
-// processors that run claimed from the host-wide budget. Several merge gates
-// share one host, so a run that was handed a budget sizes itself to it rather
-// than assuming it owns half the machine.
+// CPUBudgetEnv names a core budget a caller may hand a run, so several runs
+// that share one host can each be sized to their share rather than assuming
+// they own the machine.
 const CPUBudgetEnv = "AGENT_REPL_TEST_CPU_BUDGET"
 
 // Slots is the run's core budget: the claimed budget when one was handed in
 // (budget non-empty), else SlotsForHost. A budget that is not a positive
-// integer is refused, never ignored: a run that silently fell back to half
-// the host would stack on top of the runs it was meant to share with.
+// integer, and a host too small to leave HostReserve cores free, are refused,
+// never adjusted.
 func Slots(numCPU int, budget string) (int, error) {
 	if budget == "" {
-		return SlotsForHost(numCPU), nil
+		n := SlotsForHost(numCPU)
+		if n < 1 {
+			return 0, fmt.Errorf("this host has %d cores; a run reserves %d for the live runtime and needs at least one more", numCPU, HostReserve)
+		}
+		return n, nil
 	}
 	n, err := strconv.Atoi(budget)
 	if err != nil || n < 1 {
