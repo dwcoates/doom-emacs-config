@@ -150,3 +150,22 @@ func TestTheSchemaTemplateSurvivesItsPoolReplacingItsConnection(t *testing.T) {
 		t.Fatalf("a handle copied after the replacement is at layout %d, want %d", version, LayoutVersion)
 	}
 }
+
+func TestAnInMemoryStoreClosedTwiceAnswersNilTheSecondTime(t *testing.T) {
+	// Arrange
+	db, err := OpenInMemory(context.Background())
+	if err != nil {
+		t.Fatalf("OpenInMemory: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("the first Close: %v", err)
+	}
+
+	// Act
+	err = db.Close()
+
+	// Assert
+	if err != nil {
+		t.Fatalf("the second Close = %v, want nil as *sql.DB's", err)
+	}
+}
