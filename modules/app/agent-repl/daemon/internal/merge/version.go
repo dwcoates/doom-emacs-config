@@ -90,8 +90,9 @@ func (o *orchestrator) checkVersion(ctx context.Context, requester wsm.Workspace
 // requestTarget answers where a request's merge will land, by the rule the
 // run resolves its subject by (resolveSubject): a workspace's own branch and
 // an async request (which lands by its requester's geometry) in the target
-// recorded at creation, another workspace's in that workspace's, and a named
-// branch run in place in the repository's main worktree.
+// recorded at creation (the main worktree for the main checkout, which has no
+// creation), another workspace's in that workspace's, and a named branch run
+// in place in the repository's main worktree.
 //
 // An async request lands where detachedTarget says.
 func (o *orchestrator) requestTarget(ctx context.Context, requester wsm.Workspace, req Request) (string, error) {
