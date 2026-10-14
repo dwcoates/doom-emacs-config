@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"agentrepl/testrun/internal/run"
+	"agentrepl/testrun/roster"
 	"agentrepl/testrun/testenv"
 )
 
@@ -41,6 +42,23 @@ func goVet(suite, dir string) run.Spec {
 	return spec(suite+":vet", suite, dir, append(append([]string{"go", "vet"}, goTestVetFlags...), "./..."))
 }
 
+// goVetTagged is a vet unit over pattern under one build tag, exactly the
+// analyzers goVet runs.
+func goVetTagged(suite, dir, tag, pattern string) run.Spec {
+	return spec(suite+":vet["+tag+"]", suite, dir,
+		append(append([]string{"go", "vet", "-tags", tag}, goTestVetFlags...), pattern))
+}
+
+// goVets is a Go suite's vet units: the module's own, and one per VetTags tag
+// over the whole module.
+func goVets(s roster.Suite, dir string) []run.Spec {
+	vets := []run.Spec{goVet(s.Name, dir)}
+	for _, tag := range s.VetTags {
+		vets = append(vets, goVetTagged(s.Name, dir, tag, "./..."))
+	}
+	return vets
+}
+
 // goPkg is one Go package's units.
 type goPkg struct {
 	Suite string
@@ -63,6 +81,12 @@ type goPkg struct {
 	// Parallel is how many of its top-level tests a chunk overlaps
 	// (roster.Suite.TestParallel); zero is one at a time.
 	Parallel int
+	// Programs are the shared programs this package's tests run
+	// (roster.Suite.Programs): every chunk waits for their builds and is told
+	// the run's programs directory.
+	Programs []string
+	// ProgramsDir is the run's programs directory (Layout.ProgramsDir).
+	ProgramsDir string
 }
 
 // sharePrebuilt makes this package's build process compile its test binary,
@@ -123,6 +147,9 @@ func (p goPkg) units() (run.Spec, *Split, error) {
 	if timeout == "" {
 		timeout = "10m"
 	}
+	if len(p.Programs) > 0 {
+		p.ChunkEnv = append(p.ChunkEnv, testenv.Programs+"="+p.ProgramsDir)
+	}
 	chunk := func(id string, items []string) run.Spec {
 		argv := []string{p.Bin, "-test.count=1", "-test.v", "-test.parallel=" + strconv.Itoa(max(p.Parallel, 1)),
 			"-test.timeout=" + timeout, "-test.run=" + runPattern(items)}
@@ -135,8 +162,12 @@ func (p goPkg) units() (run.Spec, *Split, error) {
 		sp.Display = QuietGoTestOutput
 		return sp
 	}
+	deps := []string{buildUnit.ID}
+	for _, name := range p.Programs {
+		deps = append(deps, ProgramUnitID(name))
+	}
 	return buildUnit, &Split{
-		Group: p.group(), Suite: p.Suite, Items: tests, Deps: []string{buildUnit.ID},
+		Group: p.group(), Suite: p.Suite, Items: tests, Deps: deps,
 		// Test binaries and every expensive integration binary are already
 		// compiled by the dependency unit. Go's -v timings omit time that
 		// parallel subtests spend paused, so wall-minus-items can otherwise

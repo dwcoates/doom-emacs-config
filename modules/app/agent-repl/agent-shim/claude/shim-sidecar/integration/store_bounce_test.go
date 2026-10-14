@@ -1,8 +1,10 @@
 package integration
 
 import (
-	"path/filepath"
+	storev1 "agentrepl/proto/store/v1"
 	"testing"
+
+	"google.golang.org/protobuf/proto"
 )
 
 // CRITIQUE 3 — a REAL store bounce in the middle of an ingest.
@@ -22,17 +24,18 @@ import (
 // than storing them twice.
 
 // TestAStoreBounceMidIngestLeavesNoGapAndNoRepeat stops the store while the
-// vendor keeps writing, starts it again over the same database, and asserts the
-// book holds every unit of the file exactly once.
+// vendor keeps writing, brings it back with everything it had made durable, and
+// asserts the book holds every unit of the file exactly once, each re-sent row
+// under the write_id it was first sent with (the store absorbs a replay by its
+// write_id; that absorption is tested in the store's own suite).
 func TestAStoreBounceMidIngestLeavesNoGapAndNoRepeat(t *testing.T) {
 	t.Parallel()
-	// Arrange: a store whose socket and database outlive the process holding
-	// them, so the second one is genuinely the same store.
+	// Arrange: one store, taken down and brought back on the same socket with
+	// its durable state, so the second one is genuinely the same store.
 	ctx, cancel := testContext(t)
 	defer cancel()
 	socket := shortSocketPath(t, "bounce")
-	dbPath := filepath.Join(t.TempDir(), "store.db")
-	store := startRealStoreAt(t, socket, dbPath)
+	store := startFakeStoreAt(t, socket)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
 	opts := defaultSidecarOptions(t, socket, tree)
@@ -50,15 +53,36 @@ func TestAStoreBounceMidIngestLeavesNoGapAndNoRepeat(t *testing.T) {
 	for _, line := range captured.Lines[cut:] {
 		g.AppendLine(line)
 	}
-	recovered := startRealStoreAt(t, socket, dbPath)
-	lines := awaitBookUnits(ctx, t, recovered.Client, captured.Session,
+	store.Resume()
+	lines := store.awaitBookUnits(ctx, t, captured.Session,
 		capturedThinking1, capturedBashCall1, capturedThinking2, capturedBashCall2)
 
 	// Assert: every unit is present, and none of them twice.
 	seen := map[string]int{}
-	for _, at := range lines {
-		if a := activityOf(at.GetLine()); a != nil {
+	for _, line := range lines {
+		if a := activityOf(line); a != nil {
 			seen[a.GetActivityId().GetValue()]++
+		}
+	}
+	// And every row the replay re-sent kept its write_id: the same row (its
+	// key and content alike) is never sent under two. A start and its settle
+	// share a key but are different rows, each with its own write_id.
+	writeIDs := map[string]map[string]bool{}
+	for _, e := range entriesOf(store.Batches()) {
+		content := proto.Clone(e).(*storev1.StoreEntry)
+		content.WriteId = ""
+		raw, err := proto.MarshalOptions{Deterministic: true}.Marshal(content)
+		if err != nil {
+			t.Fatalf("marshal a written entry: %v", err)
+		}
+		if writeIDs[string(raw)] == nil {
+			writeIDs[string(raw)] = map[string]bool{}
+		}
+		writeIDs[string(raw)][e.GetWriteId()] = true
+	}
+	for _, ids := range writeIDs {
+		if len(ids) != 1 {
+			t.Errorf("one row was sent under %d write_ids across the bounce, %v; a replay must re-mint the same one", len(ids), sortedStrings(keysOf(ids)))
 		}
 	}
 	for id, n := range seen {
@@ -83,8 +107,7 @@ func TestAStoreBounceLeavesOneCursorRowAtTheFilesFullLength(t *testing.T) {
 	ctx, cancel := testContext(t)
 	defer cancel()
 	socket := shortSocketPath(t, "bounce-cursor")
-	dbPath := filepath.Join(t.TempDir(), "store.db")
-	store := startRealStoreAt(t, socket, dbPath)
+	store := startFakeStoreAt(t, socket)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
 	opts := defaultSidecarOptions(t, socket, tree)
@@ -102,11 +125,11 @@ func TestAStoreBounceLeavesOneCursorRowAtTheFilesFullLength(t *testing.T) {
 	for _, line := range captured.Lines[cut:] {
 		g.AppendLine(line)
 	}
-	recovered := startRealStoreAt(t, socket, dbPath)
-	awaitCursorAtLeast(ctx, t, recovered.Client, g.Path(), g.Offset())
+	store.Resume()
+	awaitCursorAtLeast(ctx, t, store.Client, g.Path(), g.Offset())
 
 	// Assert.
-	rows := cursorsForPath(ctx, t, recovered.Client, g.Path())
+	rows := cursorsForPath(ctx, t, store.Client, g.Path())
 	if len(rows) != 1 {
 		t.Fatalf("the store holds %d cursor rows for one file after a bounce: %v", len(rows), describeCursors(rows))
 	}

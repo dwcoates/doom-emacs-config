@@ -41,7 +41,7 @@ type OSExec struct {
 	TmpParent string
 	// Prefix, when set, is prepended to every unit's command line: a run
 	// whose root is on a RAM disk starts each unit under
-	// `taskpolicy -d utility` (see ramdisk.UnitPrefix).
+	// `taskpolicy -d default` (see ramdisk.UnitPrefix).
 	Prefix []string
 }
 

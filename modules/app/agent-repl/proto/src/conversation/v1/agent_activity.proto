@@ -215,6 +215,12 @@ enum AgentActivityContract {
   // the start instant it closes, so a settled frame alone draws its card, its
   // sub-feed and its runtime.
   AGENT_ACTIVITY_CONTRACT_SETTLES_STAND_ALONE = 1;
+  // A published artifact's success restates the publish it answered
+  // (AgentArtifactPublished.publish), so the finished card's favicon, title
+  // and file are drawn from the settle alone. Under SETTLES_STAND_ALONE alone
+  // the success arm had no place to carry that act, so a row stamped 1 and
+  // not 2 lacks it as expected old data.
+  AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH = 2;
 }
 
 // What a unit of work is attributable to beyond its agent.
@@ -3376,6 +3382,15 @@ message AgentArtifactPublished {
   // The page's resolved title, as the result reports it. UNSET when the
   // result names none; the bubble then draws the call's title or filename.
   optional string title = 2;
+  // THE PUBLISH THIS ANSWERS, restated whole from the call, so the finished
+  // card stands alone: a call's start and its settle upsert ONE unit, so a
+  // consumer that never saw the start (a replay, or a live intake that served
+  // the settle first) still draws the card's favicon, title and file, which
+  // only the call states. `title` above, when set, wins over the restated
+  // title; the favicon and the file come only from here. UNSET only on a row
+  // written before AgentActivityContract
+  // ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH.
+  optional AgentArtifactPublish publish = 3;
 }
 
 // The listing answered. Empty ON PURPOSE even though the vendor's

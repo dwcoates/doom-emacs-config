@@ -225,9 +225,9 @@ func TestStopFrozenResendsAStopTheProcessDiscarded(t *testing.T) {
 
 // failOnStall is a stopFrozen stall report that fails the test: a stop these
 // tests send to an idle child holds at once.
-func failOnStall(t *testing.T) func(int, string, time.Duration) {
-	return func(pid int, state string, waited time.Duration) {
-		t.Errorf("stopFrozen reported pid %d still %s after %s", pid, state, waited)
+func failOnStall(t *testing.T) func(int, processState, time.Duration) {
+	return func(pid int, state processState, waited time.Duration) {
+		t.Errorf("stopFrozen reported pid %d still %s after %s", pid, state.name, waited)
 	}
 }
 
@@ -239,8 +239,8 @@ func TestStopFrozenReportsAStallOnceAndGoesOnWaiting(t *testing.T) {
 	cmd := startIdle(t)
 	swallow := func(int, syscall.Signal) error { return nil }
 	var reports []string
-	stalled := func(pid int, state string, waited time.Duration) {
-		reports = append(reports, fmt.Sprintf("%d %s %s", pid, state, waited))
+	stalled := func(pid int, state processState, waited time.Duration) {
+		reports = append(reports, fmt.Sprintf("%d %s %s", pid, state.name, waited))
 		if err := syscall.Kill(pid, syscall.SIGSTOP); err != nil {
 			t.Errorf("SIGSTOP from the stall report: %v", err)
 		}
@@ -341,5 +341,21 @@ func TestHeldStateOfARunningProcessIsNotFrozen(t *testing.T) {
 	// Assert
 	if err != nil || state.frozen {
 		t.Fatalf("heldState = %+v, %v; want not frozen", state, err)
+	}
+}
+
+// TestHeldStateOfAnUnstoppedProcessDoesNotAwaitTheCPU pins that a process
+// whose stop the kernel has not posted is never read as a decided stop: only
+// a posted stop with runnable threads left is starved rather than stuck.
+func TestHeldStateOfAnUnstoppedProcessDoesNotAwaitTheCPU(t *testing.T) {
+	// Arrange
+	cmd := startIdle(t)
+
+	// Act
+	state, err := heldState(cmd.Process.Pid)
+
+	// Assert
+	if err != nil || state.frozen || state.awaitingCPU {
+		t.Fatalf("heldState = %+v, %v; want neither frozen nor awaiting the CPU", state, err)
 	}
 }

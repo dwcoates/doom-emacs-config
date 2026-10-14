@@ -1478,3 +1478,32 @@ func TestBootRecordsHowLongItWaitedForTheClaim(t *testing.T) {
 		t.Fatalf("the claim record %+v carries no waited_ms", record.Context)
 	}
 }
+
+func TestATestDaemonRunsTheMockedGitItWasLinkedTo(t *testing.T) {
+	t.Parallel()
+	// Arrange, Act.
+	d := newDaemon(t, harness.Opts{})
+
+	// Assert: the boot record names the mocked git, never the host's.
+	boot := d.AwaitLogRecord(d.RunLogPath(), "the boot record", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.cmd.boot" && r.Message == "the daemon boot started"
+	})
+	// The same file, not the same spelling: the run's programs directory is
+	// named /tmp/artr-<pid>/... at link time and /private/tmp/... once resolved.
+	got, ok := boot.Context["git_binary"].(string)
+	if !ok {
+		t.Fatalf("git_binary = %#v, want a path", boot.Context["git_binary"])
+	}
+	want := harness.MockedGitBinary(t)
+	gotInfo, err := os.Stat(got)
+	if err != nil {
+		t.Fatalf("git_binary = %s, which does not exist: %v", got, err)
+	}
+	wantInfo, err := os.Stat(want)
+	if err != nil {
+		t.Fatalf("the mocked git %s does not exist: %v", want, err)
+	}
+	if !os.SameFile(gotInfo, wantInfo) {
+		t.Fatalf("git_binary = %s, want the mocked git %s", got, want)
+	}
+}

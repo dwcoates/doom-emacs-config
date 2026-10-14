@@ -87,3 +87,13 @@ func LiveMembers(pgid int) ([]Member, error) {
 	}
 	return live, nil
 }
+
+// Exiting answers whether pid's process has begun exiting: its exit under way
+// (P_WEXIT), a zombie, or gone -- ReadState's Exited.
+func Exiting(pid int) (bool, error) {
+	st, err := ReadState(pid)
+	if err != nil {
+		return false, fmt.Errorf("sysctl kern.proc.pid %d: %w", pid, err)
+	}
+	return st.Exited, nil
+}

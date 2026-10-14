@@ -166,7 +166,7 @@ load_pins() {
 #   * BUILD IS EXCLUSIVE, host-wide. The lock is a directory claimed with
 #     `mkdir` -- the one filesystem operation that is atomic and fails if the
 #     name exists -- with the holder's pid recorded inside, exactly the
-#     technique bin/suite-slot.sh and the run gate above use. A second build
+#     technique the run gate above uses. A second build
 #     WAITS out loud; a lock whose holder is gone is taken over.
 #
 #   * THE IMAGE CARRIES ITS SOURCE. The git tree hash of e2e/sandbox is

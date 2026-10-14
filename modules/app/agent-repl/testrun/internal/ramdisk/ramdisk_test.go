@@ -186,6 +186,7 @@ func newManager(t *testing.T, h *fakeHost) Manager {
 		Log:       &fakeLog{logged: make(chan struct{}, 1)},
 		Now:       tickingClock(),
 		LockBound: 10 * time.Second,
+		Memory:    func() (uint64, error) { return 64 << 30, nil },
 	}
 }
 
@@ -710,12 +711,12 @@ func TestIsAttachedRAMDisk(t *testing.T) {
 	}
 }
 
-func TestUnitPrefixRunsUnitsAtTheUtilityTier(t *testing.T) {
+func TestUnitPrefixRunsUnitsAtTheDefaultTier(t *testing.T) {
 	// Act
 	got := strings.Join(UnitPrefix(), " ")
 
 	// Assert
-	if got != "/usr/sbin/taskpolicy -d utility" {
+	if got != "/usr/sbin/taskpolicy -d default" {
 		t.Fatalf("UnitPrefix = %q", got)
 	}
 }
@@ -889,6 +890,7 @@ func TestAcquireLogsItsEdgesWithTimings(t *testing.T) {
 	t.Cleanup(func() { v.Release() })
 	want := []string{
 		"INFO RAM disk acquire: begin at 2026-10-12T00:00:01.000Z, 16 MiB",
+		"INFO RAM disk seat: took seat 0 of 2048",
 		"INFO RAM disk acquire: /dev/disk9 mounted at " + h.mount + " in 3s (attach 1s, format 1s, mount 1s)",
 	}
 	if strings.Join(log.lines, "\n") != strings.Join(want, "\n") {

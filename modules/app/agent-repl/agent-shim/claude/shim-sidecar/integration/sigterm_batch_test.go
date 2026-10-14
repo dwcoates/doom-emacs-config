@@ -89,7 +89,7 @@ var capturedUnitLines = map[string]int{
 // and both reads see it however they are ordered.
 func terminateMidIngest(ctx context.Context, t *testing.T, tag string, read readOrder) terminatedIngest {
 	t.Helper()
-	store := startRealStore(t)
+	store := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
 	opts := defaultSidecarOptions(t, store.Socket, tree)
@@ -116,7 +116,7 @@ func terminateMidIngest(ctx context.Context, t *testing.T, tag string, read read
 		}
 		out.CursorOffset = cs.GetOffset()
 	}
-	readBook := func() { out.InBook = unitsInBook(ctx, t, store.Client, captured.Session) }
+	readBook := func() { out.InBook = unitsInBook(store, captured.Session) }
 	if read == cursorFirst {
 		readCursor()
 		readBook()

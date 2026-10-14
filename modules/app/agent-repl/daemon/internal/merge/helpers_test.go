@@ -124,6 +124,9 @@ type fakeDB struct {
 	beforeRelease func(f *fakeDB)
 	// queueReadErr, when set, fails every MergeQueue read.
 	queueReadErr error
+	// beforeRemove, when set, runs under the fake's lock as a queue entry's
+	// removal begins.
+	beforeRemove func(id ids.WorkspaceID)
 	// progress is each workspace's merge progress record, and progressSteps
 	// every step a record was written at, in order. adopted records the merge
 	// leases adopted for a resume; held stands for the prompt queue's held
@@ -689,6 +692,9 @@ func (f *fakeDB) RemoveMergeQueueEntry(_ context.Context, repo wsm.RepoKey, id i
 	defer f.mu.Unlock()
 	if f.shut {
 		return errStateClientClosed
+	}
+	if f.beforeRemove != nil {
+		f.beforeRemove(id)
 	}
 	for i, entry := range f.queues[repo] {
 		if entry.Workspace == id {

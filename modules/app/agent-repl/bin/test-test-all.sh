@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
 # Hermetic tests for test-all.sh, the entry point that builds the test runner
-# (../testrun) and runs it under the host suite slot and the git-state net.
+# (../testrun) and runs it under the git-state net.
 #
 # Everything test-all.sh used to do itself -- the roster, --suites, --record,
 # the summaries, the regression report -- now lives in testrun and is tested
 # there (testrun/internal/cli). What remains here is the wrapper's own
 # contract, exercised against stubs: a fake `go` that "builds" a recording
-# testrun, and recording stand-ins for suite-slot.sh and safe-test-run.sh.
+# testrun, and a recording stand-in for safe-test-run.sh.
 
 # Tests run only at background priority: re-exec once through bin/background.sh.
 [[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/background.sh" bash "${BASH_SOURCE[0]}" "$@"
@@ -43,11 +43,6 @@ make_tree() {
     mkdir -p "$module/bin" "$module/testrun" "$tree/.claude" "$tree/stubs"
     cp "$SCRIPT_SRC" "$module/bin/test-all.sh"
 
-    cat >"$module/bin/suite-slot.sh" <<'EOF'
-#!/usr/bin/env bash
-printf 'slot\n' >>"$STUB_LOG"
-exec "$@"
-EOF
     cat >"$tree/.claude/safe-test-run.sh" <<'EOF'
 #!/usr/bin/env bash
 printf 'safe %s\n' "$1" >>"$STUB_LOG"
@@ -70,7 +65,7 @@ exit "${STUB_TESTRUN_EXIT:-0}"
 INNER
 chmod +x "$3"
 EOF
-    chmod +x "$module/bin/test-all.sh" "$module/bin/suite-slot.sh" \
+    chmod +x "$module/bin/test-all.sh" \
         "$tree/.claude/safe-test-run.sh" "$tree/stubs/go"
 }
 
@@ -118,11 +113,6 @@ make_real_net_tree() {
     : >"$module/lisp/test-agent-repl.el"
     printf '%s\n' "$CSVHeader" >"$module/test_time.csv"
 
-    cat >"$module/bin/suite-slot.sh" <<'EOF'
-#!/usr/bin/env bash
-exec "$@"
-EOF
-
     # The checkout is a bin/fake-git.sh repository with the real
     # reference-transaction hook installed, as .claude/test-safe-test-run.sh's
     # are: the net journals the run's refs through the hook itself.
@@ -167,7 +157,7 @@ esac
 INNER
 chmod +x "$3"
 EOF
-    chmod +x "$module/bin/test-all.sh" "$module/bin/suite-slot.sh" \
+    chmod +x "$module/bin/test-all.sh" \
         "$repo/.claude/safe-test-run.sh" "$tree/stubs/go"
 }
 
@@ -259,16 +249,16 @@ test_integration_moved_commit_during_record_run_records_nothing() {
     rm -rf "$tree"
 }
 
-test_runs_testrun_inside_the_slot_and_the_git_net() {
+test_runs_testrun_inside_the_git_net() {
     local tree
     tree="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$tree"
     run_test_all "$tree" "$(stub_path "$tree")" --suites ert,daemon
     local module want
     module="$(cd "$tree/modules/app/agent-repl" && pwd)"
-    want="$(printf 'slot\nsafe --\ntestrun run --module %s --suites ert,daemon' "$module")"
+    want="$(printf 'safe --\ntestrun run --module %s --suites ert,daemon' "$module")"
     if [ "$RUN_RC" -eq 0 ] && [ "$(grep -v -e '^go ' -e '^marker=' -e '^runlog=' "$STUB_LOG")" = "$want" ]; then
-        pass "testrun runs under the suite slot, then the git net, with every argument"
+        pass "testrun runs under the git net, with every argument"
     else
         fail "wrapper order or arguments (rc=$RUN_RC): $(cat "$STUB_LOG")"
     fi
@@ -347,7 +337,7 @@ test_a_failed_build_fails_before_anything_runs() {
     STUB_GO_FAIL=1 run_test_all "$tree" "$(stub_path "$tree")"
     if [ "$RUN_RC" -eq 1 ] &&
         grep -q 'ERROR: building the test runner in .*/testrun failed' "$tree/stdout" &&
-        ! grep -qE '^(slot|safe|testrun)' "$STUB_LOG"; then
+        ! grep -qE '^(safe|testrun)' "$STUB_LOG"; then
         pass "a runner that does not build fails the run before any suite"
     else
         fail "build failure (rc=$RUN_RC): $(cat "$tree/stdout") / $(cat "$STUB_LOG")"
@@ -492,7 +482,7 @@ test_the_runner_is_told_its_log() {
     rm -rf "$tree"
 }
 
-test_runs_testrun_inside_the_slot_and_the_git_net
+test_runs_testrun_inside_the_git_net
 test_record_stages_inside_the_net_then_finishes_outside_it
 test_a_failed_record_run_never_finishes
 test_builds_the_runner_from_its_own_tree

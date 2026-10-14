@@ -1,28 +1,27 @@
 package integration
 
 import (
-	"context"
 	"testing"
 )
 
-// CRITIQUE 11 — a batch the REAL store refuses as invalid_request parks the file.
+// A batch the store refuses as invalid_request parks the file.
 //
-// Ruling R-S2's two failure arms drive opposite reactions, and the parking half
-// has only ever been driven by the fake store's scripted refusal. The real store
-// refuses a batch as invalid_request on its own account when an upsert would
-// change a row's IDENTITY: `upsert_key` names ONE thing, so a write that would
-// move a row into another book, or turn a served page line into an unservable
-// residue row, is a different thing wearing the same key.
+// Ruling R-S2's two failure arms drive opposite reactions. The store refuses a
+// batch as invalid_request on its own account when an upsert would change a
+// row's IDENTITY: `upsert_key` names ONE thing, so a write that would turn a
+// served page line into an unservable residue row is a different thing wearing
+// the same key. That refusal is the store's, tested in its own suite
+// (internal/db/identity_test.go).
 //
-// So the subject CLAIMS the key first. A row is seeded on the sidecar's own
-// upsert key — as the other plane's producer, and as an unserved residue row —
-// and the batch carrying that key is then a genuine producer defect that this
-// store can never accept, however many times it is offered.
+// So the subject CONTESTS the key first: the fake store refuses every batch
+// carrying the sidecar's own upsert key for its first unit exactly as the store
+// refuses that identity change, and the batch is then a genuine producer
+// defect no retry can fix.
 
-// parkingFixture is a real store already holding a row on the key the sidecar's
-// first batch for its transcript will carry.
+// parkingFixture is a store refusing the key the sidecar's first batch for its
+// transcript will carry.
 type parkingFixture struct {
-	Store   *realStore
+	Store   *fakeStore
 	Tree    *vendorTree
 	Opts    sidecarOptions
 	Session string
@@ -30,17 +29,16 @@ type parkingFixture struct {
 	File    *growingFile
 }
 
-// seedContestedUpsertKey claims `activity:<unit>` for an unservable row, then
-// writes the transcript lines that mint that same unit.
-func seedContestedUpsertKey(ctx context.Context, t *testing.T, cwd, session string) parkingFixture {
+// seedContestedUpsertKey contests `activity:<unit>`, then writes the
+// transcript lines that mint that same unit.
+func seedContestedUpsertKey(t *testing.T, cwd, session string) parkingFixture {
 	t.Helper()
-	store := startRealStore(t)
+	store := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
 	slug := cwdSlug(cwd)
 
-	seedDecoyRow(ctx, t, store.Client, "claude-shim:"+session,
-		decoyEntry("activity:"+capturedThinking1, "decoy-"+capturedThinking1, "seeded-by-the-suite"))
+	store.ContestUpsertKey("activity:" + capturedThinking1)
 
 	g := newGrowingFile(t, tree.sessionPath(slug, session))
 	g.AppendLine(encodeRecord(t, retargetSession(t, decodeRecord(t, captured.Lines[7]), session, cwd)))
@@ -50,15 +48,15 @@ func seedContestedUpsertKey(ctx context.Context, t *testing.T, cwd, session stri
 	}
 }
 
-// TestAnInvalidRequestFromTheRealStoreParksTheFileAndStatesTheDefect asserts the
+// TestAnInvalidRequestParksTheFileAndStatesTheDefect asserts the
 // ONE error record the parking owes: the store's field, the write ids of the
 // whole refused batch, and the file position they were read at.
-func TestAnInvalidRequestFromTheRealStoreParksTheFileAndStatesTheDefect(t *testing.T) {
+func TestAnInvalidRequestParksTheFileAndStatesTheDefect(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
-	fx := seedContestedUpsertKey(ctx, t, "/work/park-defect-probe",
+	fx := seedContestedUpsertKey(t, "/work/park-defect-probe",
 		"e1e1e1e1-e1e1-4e1e-8e1e-e1e1e1e1e1e1")
 
 	// Act.
@@ -90,7 +88,7 @@ func TestAParkedFileIsStatedOnceAndReadNoFurther(t *testing.T) {
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
-	fx := seedContestedUpsertKey(ctx, t, "/work/park-once-probe",
+	fx := seedContestedUpsertKey(t, "/work/park-once-probe",
 		"e2e2e2e2-e2e2-4e2e-8e2e-e2e2e2e2e2e2")
 	captured := loadCapturedSession(t)
 
@@ -106,7 +104,7 @@ func TestAParkedFileIsStatedOnceAndReadNoFurther(t *testing.T) {
 	otherCwd := "/work/park-once-other-probe"
 	otherSession := "e3e3e3e3-e3e3-4e3e-8e3e-e3e3e3e3e3e3"
 	// Its line is the SECOND response's, not the first's: the first's unit is the
-	// key the decoy row claims, so seeding it here would park this file too and
+	// contested key, so seeding it here would park this file too and
 	// the subject would prove nothing about the files that keep being read.
 	other := newGrowingFile(t, fx.Tree.sessionPath(cwdSlug(otherCwd), otherSession))
 	other.AppendLine(encodeRecord(t, retargetSession(t, decodeRecord(t, captured.Lines[12]), otherSession, otherCwd)))
@@ -137,7 +135,7 @@ func TestAnInvalidRequestDoesNotSuspendTheOtherFiles(t *testing.T) {
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
-	fx := seedContestedUpsertKey(ctx, t, "/work/park-other-file-probe",
+	fx := seedContestedUpsertKey(t, "/work/park-other-file-probe",
 		"e4e4e4e4-e4e4-4e4e-8e4e-e4e4e4e4e4e4")
 	captured := loadCapturedSession(t)
 	otherCwd := "/work/park-other-file-second-probe"
@@ -153,7 +151,7 @@ func TestAnInvalidRequestDoesNotSuspendTheOtherFiles(t *testing.T) {
 
 	// Assert: it was ingested, and its unit reached its book.
 	awaitCursorAtLeast(ctx, t, fx.Store.Client, other.Path(), other.Offset())
-	lines := awaitBookUnits(ctx, t, fx.Store.Client, otherSession, capturedThinking2)
+	lines := fx.Store.awaitBookUnits(ctx, t, otherSession, capturedThinking2)
 	if len(lines) == 0 {
 		t.Fatalf("the second file produced no page line; a producer defect in one file must not suspend the others")
 	}

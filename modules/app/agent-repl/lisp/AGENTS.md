@@ -234,14 +234,14 @@ a workspace after its merge lands), ONE rule decides what Emacs selects:
 
 ## Verification
 
-Run from `modules/app/agent-repl/`, always through the host suite slot, which
-also puts the run at background priority (`bin/background.sh`; a bare
-`emacs -batch` load of `test-helpers.el` refuses to start):
+Run from `modules/app/agent-repl/`, always at background priority
+(`bin/background.sh`; a bare `emacs -batch` load of `test-helpers.el` refuses
+to start):
 
 ```bash
-bin/suite-slot.sh emacs -batch -Q -l ert -l lisp/test-<source>.el -f ert-run-tests-batch-and-exit
-bin/suite-slot.sh emacs -batch -Q -l ert -l lisp/test-agent-repl.el -f ert-run-tests-batch-and-exit
-bin/suite-slot.sh bin/byte-compile.sh
+bin/background.sh emacs -batch -Q -l ert -l lisp/test-<source>.el -f ert-run-tests-batch-and-exit
+bin/background.sh emacs -batch -Q -l ert -l lisp/test-agent-repl.el -f ert-run-tests-batch-and-exit
+bin/background.sh bin/byte-compile.sh
 ```
 
 Every changed source has its matching `test-<source>.el` suite. Tests are
@@ -249,6 +249,15 @@ table-driven where cases share a contract, use Arrange/Act/Assert structure,
 and keep one edge case per test. Tests never launch external processes or
 mutate state outside `temporary-file-directory`; use the repository fakes and
 single-purpose boundary stubs.
+
+### What is real and what is a mock in the ERT suites
+
+Two module-wide rules govern every `test-*.el` suite (`modules/app/agent-repl/AGENTS.md`): "Tests NEVER run real git or a real vendor" and "A system's integration tests run that system alone; every other system is a mock".
+
+- Real: the elisp, the one system under test.
+- Daemon: the fake daemon (`lisp/testsupport/fakedaemon`) in the `test-integration-*.el` suites, and stubs everywhere else. No real `agent-repld` is started by any ERT suite.
+- Git: stubbed at the process boundary (as `test-core.el` does around `agent-repl--capture-process-output`), or the fake git executable (`bin/fake-git.sh`). Never the host's `git`.
+- Emacs against the real daemon runs only in `e2e-emacs`.
 
 ## Performance lessons (living document)
 

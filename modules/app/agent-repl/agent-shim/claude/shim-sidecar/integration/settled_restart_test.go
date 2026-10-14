@@ -32,7 +32,7 @@ func TestARestartedSidecarNeverTracksOrLosesARunThatSettledBeforeIt(t *testing.T
 	// Arrange: the first process reads the run's own EXIT marker and settles it.
 	ctx, cancel := testContext(t)
 	defer cancel()
-	store := startRealStore(t)
+	store := startFakeStore(t)
 	tree := newVendorTree(t)
 	fx := seedDetachedShell(t, tree, "/work/settled-restart-probe", "e7e7e7e7-e7e7-4e7e-8e7e-e7e7e7e7e7e7")
 	opts := lostOptions(t, store.Socket, tree)

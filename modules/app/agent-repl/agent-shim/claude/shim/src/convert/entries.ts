@@ -121,7 +121,7 @@ interface ActivityEnvelope {
  * stamped, so a consumer grades its bare settle a defect rather than old data.
  */
 export const ACTIVITY_CONTRACT =
-  conversationv1.AgentActivityContract.SETTLES_STAND_ALONE;
+  conversationv1.AgentActivityContract.ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH;
 
 /** One unit of work at whatever state it has reached. */
 export function agentActivity(

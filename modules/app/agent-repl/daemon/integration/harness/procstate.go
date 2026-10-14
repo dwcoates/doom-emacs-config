@@ -19,6 +19,11 @@ type processState struct {
 	exited bool
 	// name is the kernel's state, for the report when it is not frozen.
 	name string
+	// awaitingCPU is true when the kernel has posted the process's stop and
+	// every thread still to take it is runnable: the stop is decided, and
+	// only the scheduler is left to hand those threads the CPU on which they
+	// take it. A thread asleep or blocked in a suspended task is held already.
+	awaitingCPU bool
 }
 
 // freezeBound bounds the wait for the kernel to report a SIGSTOPped process
@@ -75,12 +80,12 @@ func heldState(pid int) (processState, error) {
 	if !state.frozen || state.exited {
 		return state, nil
 	}
-	halted, name, err := threadsHalted(pid)
+	halted, awaitingCPU, name, err := threadsHalted(pid)
 	if err != nil {
 		return processState{}, err
 	}
 	if !halted {
-		return processState{name: name}, nil
+		return processState{name: name, awaitingCPU: awaitingCPU}, nil
 	}
 	return state, nil
 }
@@ -96,9 +101,9 @@ const stopResendEvery = 5 * time.Millisecond
 // on a loaded host a shim's runnable thread waited past reapGrace for the CPU
 // it needed to take its stop (2026-10-14: TestBashDetachedStartAndComplete and
 // TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce, both at the same
-// instant, each a shim with "1 thread(s) still running" 2s after SIGSTOP). As
-// leaderExitReportAfter, it is fifteen times reapGrace, so it reports a stuck
-// stop, never a starved one. It does NOT end the wait.
+// instant, each a shim with "1 thread(s) still running" 2s after SIGSTOP).
+// It is fifteen times reapGrace. It does NOT end the wait, and WHAT the
+// report says is the kernel's state, not this duration: see reportStrayStall.
 const stopFrozenReportAfter = 15 * reapGrace
 
 // stopFrozen SIGSTOPs pid and returns once the kernel reports it unable to
@@ -115,7 +120,7 @@ const stopFrozenReportAfter = 15 * reapGrace
 // so re-sending it every stopResendEvery until the kernel reports the
 // process frozen is safe, and the first send after the exec completes holds.
 // signal is the send, a seam for the test that drops the first stop.
-func stopFrozen(pid int, reportAfter time.Duration, signal func(int, syscall.Signal) error, stalled func(pid int, state string, waited time.Duration)) error {
+func stopFrozen(pid int, reportAfter time.Duration, signal func(int, syscall.Signal) error, stalled func(pid int, state processState, waited time.Duration)) error {
 	if err := signal(pid, syscall.SIGSTOP); err != nil {
 		return err
 	}
@@ -140,7 +145,7 @@ func stopFrozen(pid int, reportAfter time.Duration, signal func(int, syscall.Sig
 		}
 		select {
 		case <-report.C:
-			stalled(pid, state.name, reportAfter)
+			stalled(pid, state, reportAfter)
 		case <-poll.C:
 		}
 	}

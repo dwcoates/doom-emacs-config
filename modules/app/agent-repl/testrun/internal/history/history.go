@@ -21,6 +21,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 )
 
@@ -48,12 +49,23 @@ type Store struct {
 	entries map[string]Entry
 }
 
-// DefaultPath is where the host's history lives: $AGENT_REPL_TEST_HISTORY
-// when set, else ~/.cache/agent-repl/test-history.json -- the module's one
-// host cache directory on every platform (the daemon's binaries, locks and
-// sockets live there too), never the platform's own cache directory, which on
-// macOS is ~/Library/Caches.
-func DefaultPath() (string, error) {
+// DefaultPath is where the host's history of runs under conditions lives:
+// $AGENT_REPL_TEST_HISTORY when set, else
+// ~/.cache/agent-repl/test-history.<conditions>.json -- the module's one host
+// cache directory on every platform (the daemon's binaries, locks and sockets
+// live there too), never the platform's own cache directory, which on macOS
+// is ~/Library/Caches.
+//
+// EACH SET OF RUN CONDITIONS KEEPS ITS OWN HISTORY. A unit's cost is a
+// property of the machine AND of what it ran under: the same daemon suite
+// took 124-132s with its units at the utility I/O tier and 51-55s at the
+// default one (2026-10-14), so one estimate fed by both plans neither well.
+// conditions names them (the run's root and its units' I/O tier), and is a
+// single file-name component.
+func DefaultPath(conditions string) (string, error) {
+	if conditions == "" || strings.ContainsRune(conditions, filepath.Separator) {
+		return "", fmt.Errorf("history: the run conditions %q are not one file-name component", conditions)
+	}
 	if p := os.Getenv("AGENT_REPL_TEST_HISTORY"); p != "" {
 		return p, nil
 	}
@@ -61,7 +73,7 @@ func DefaultPath() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("history: resolve the home directory: %w", err)
 	}
-	return filepath.Join(home, ".cache", "agent-repl", "test-history.json"), nil
+	return filepath.Join(home, ".cache", "agent-repl", "test-history."+conditions+".json"), nil
 }
 
 // Load reads the history at path. A missing file is an empty history: the

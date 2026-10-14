@@ -40,8 +40,7 @@ export default defineConfig({
     // 2-5 GiB. That is fine when a suite runs alone and ruinous when several
     // do -- four concurrent runs took this box to a load average of 253 and
     // made an Emacs layer run fail 37 of 45 scenarios on boot alone.
-    // `bin/suite-slot.sh` is the gate that stops suites overlapping; this cap
-    // is the second half of the same promise, for the runs that slip past it.
+    // This cap keeps one run's vitest from claiming the machine.
     // Half the CPUs measured at 5.3s against 5.2s for all sixteen: the suite
     // is not CPU-bound at this size, so the cap costs nothing to buy back.
     // minWorkers travels with it: vitest refuses a max below the default min.

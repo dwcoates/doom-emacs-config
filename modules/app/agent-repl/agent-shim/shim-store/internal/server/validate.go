@@ -3,6 +3,8 @@ package server
 import (
 	"fmt"
 
+	"agentrepl/protohelpers/storewrite"
+
 	"agentrepl/shim-store/internal/db"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -18,24 +20,24 @@ import (
 // below is one field that must be there and is not, or one identity the store
 // does not recognize.
 const (
-	SiteProducerEmpty          = "producer_empty"
-	SiteBatchMissing           = "batch_missing"
-	SiteBatchEmpty             = "batch_empty"
-	SiteEntryPlaneUnset        = "entry_plane_unset"
-	SiteEntryWriteIDEmpty      = "entry_write_id_empty"
-	SiteEntryUpsertKeyEmpty    = "entry_upsert_key_empty"
-	SiteEntryArmUnset          = "entry_arm_unset"
-	SiteCursorFileIDEmpty      = "cursor_file_id_empty"
+	SiteProducerEmpty          = storewrite.SiteProducerEmpty
+	SiteBatchMissing           = storewrite.SiteBatchMissing
+	SiteBatchEmpty             = storewrite.SiteBatchEmpty
+	SiteEntryPlaneUnset        = storewrite.SiteEntryPlaneUnset
+	SiteEntryWriteIDEmpty      = storewrite.SiteEntryWriteIDEmpty
+	SiteEntryUpsertKeyEmpty    = storewrite.SiteEntryUpsertKeyEmpty
+	SiteEntryArmUnset          = storewrite.SiteEntryArmUnset
+	SiteCursorFileIDEmpty      = storewrite.SiteCursorFileIDEmpty
 	SiteAgentIDEmpty           = "agent_id_empty"
 	SitePointerEmpty           = "pointer_empty"
 	SiteTokenEmpty             = "token_empty"
 	SiteUnknownWatchToken      = "unknown_watch_token"
 	SiteFileIDEmpty            = "file_id_empty"
-	SiteShapeHashEmpty         = "shape_hash_empty"
-	SiteShapeKindEmpty         = "shape_kind_empty"
-	SiteShapeStructureEmpty    = "shape_structure_empty"
-	SiteShapeSeenMsUnset       = "shape_seen_ms_unset"
-	SiteShapeUnset             = "shape_unset"
+	SiteShapeHashEmpty         = storewrite.SiteShapeHashEmpty
+	SiteShapeKindEmpty         = storewrite.SiteShapeKindEmpty
+	SiteShapeStructureEmpty    = storewrite.SiteShapeStructureEmpty
+	SiteShapeSeenMsUnset       = storewrite.SiteShapeSeenMsUnset
+	SiteShapeUnset             = storewrite.SiteShapeUnset
 	SiteShapeKindFilterEmpty   = "shape_kind_filter_empty"
 	SiteDatabaseFailure        = "database_failure"
 	SiteWorkflowNotImplemented = "workflow_not_implemented"
@@ -261,128 +263,47 @@ func validateAgentSessionToken(t *storev1.AgentSessionToken) *refusal {
 	return nil
 }
 
-// validatePlane is the base validation of store.v1.Plane: the oneof arm must
-// be set. An unset oneof is an error — the store never guesses a producer.
+// validatePlane is storewrite.ValidatePlane (the one copy of the rule).
 func validatePlane(p *storev1.Plane, what string) *refusal {
-	if p == nil || p.GetPlane() == nil {
-		return refuse(SiteEntryPlaneUnset, what+".plane", "%s: plane names neither stream nor file", what)
-	}
-	return nil
+	return fromStorewrite(storewrite.ValidatePlane(p, what))
 }
 
-// validateCursorState is the base validation of store.v1.CursorState. The
-// file's stable identity is the row key, so an empty one is unset; `path`,
-// `offset` and `carry` are the cursor's payload and carry no presence rule
-// (offset zero is a legitimate start-of-file position).
+// validateCursorState is storewrite.ValidateCursorState.
 func validateCursorState(c *storev1.CursorState, what string) *refusal {
-	if c.GetFileId() == "" {
-		return refuse(SiteCursorFileIDEmpty, what+".file_id", "%s: a CursorState with no file_id keys no row", what)
-	}
-	return nil
+	return fromStorewrite(storewrite.ValidateCursorState(c, what))
 }
 
-// validateStoreEntry is the base validation of one write's ENVELOPE — the only
-// part of a StoreEntry this layer opens. The frame inside is opaque here; the
-// storage layer routes it by arm.
+// validateStoreEntry is storewrite.ValidateStoreEntry.
 func validateStoreEntry(e *storev1.StoreEntry, index int) *refusal {
-	what := fmt.Sprintf("entries[%d]", index)
-	if e == nil {
-		return refuse(SiteEntryArmUnset, what, "%s: no entry", what)
-	}
-	if ref := validatePlane(e.GetPlane(), what); ref != nil {
-		return ref
-	}
-	if e.GetWriteId() == "" {
-		return refuse(SiteEntryWriteIDEmpty, what+".write_id", "%s: write_id is empty, so the write cannot be deduped on replay", what)
-	}
-	if e.GetUpsertKey() == "" {
-		return refuse(SiteEntryUpsertKeyEmpty, what+".upsert_key", "%s (write_id %s): upsert_key is empty, so the write identifies no row", what, e.GetWriteId())
-	}
-	if e.GetEntry() == nil {
-		return refuse(SiteEntryArmUnset, what+".entry", "%s (write_id %s): the entry oneof names neither agent_update nor session_update", what, e.GetWriteId())
-	}
-	return nil
+	return fromStorewrite(storewrite.ValidateStoreEntry(e, index))
 }
 
-// validateEntryBatch is the base validation of store.v1.EntryBatch: every
-// entry's envelope well-formed, a cursor advance (when the producer sent one)
-// that names a file, and AT LEAST ONE OF THE TWO.
-//
-// A CURSOR-ONLY BATCH IS LEGAL. A sidecar that read bytes yielding no entries —
-// a partial line, a block of records it had already absorbed — must still make
-// its file position durable, and refusing it would leave the reader re-reading
-// the same bytes forever. What is empty is a batch carrying NEITHER entries nor
-// a cursor advance: that states nothing at all, which is a defect the store
-// names rather than acknowledging as durable.
+// validateEntryBatch is storewrite.ValidateEntryBatch.
 func validateEntryBatch(b *storev1.EntryBatch, carriesShapes bool) *refusal {
-	if b == nil {
-		return refuse(SiteBatchMissing, "batch", "batch: the request carries no EntryBatch")
-	}
-	if len(b.GetEntries()) == 0 && b.GetCursorAdvance() == nil && len(b.GetAgentLocators()) == 0 && len(b.GetShellRunClaims()) == 0 && !carriesShapes {
-		return refuse(SiteBatchEmpty, "batch", "batch: the EntryBatch carries neither entries nor a cursor advance nor an agent locator nor a shell run claim, and the request carries no shape observation either")
-	}
-	for i, entry := range b.GetEntries() {
-		if ref := validateStoreEntry(entry, i); ref != nil {
-			return ref
-		}
-	}
-	if b.GetCursorAdvance() != nil {
-		if ref := validateCursorState(b.GetCursorAdvance(), "cursor_advance"); ref != nil {
-			return ref
-		}
-	}
-	return nil
+	return fromStorewrite(storewrite.ValidateEntryBatch(b, carriesShapes))
 }
 
 // ---- use sites: one per request, each delegating to the child's base ----
 
+// validateWriteBatchRequest is storewrite.ValidateWriteBatchRequest: the rules
+// live in agentrepl/protohelpers/storewrite, once, so every fake store a
+// producer's suite runs against validates exactly as this server does.
 func validateWriteBatchRequest(req *storev1.WriteBatchRequest) *refusal {
-	if req.GetProducer() == "" {
-		return refuse(SiteProducerEmpty, "producer", "producer: the write names no producer, so nothing can be attributed")
-	}
-	// THE CLASS IS REQUIRED AND NEVER DEFAULTED. It decides which queue the
-	// write takes into the one writer, and a guessed class is how a bulk copy
-	// ends up ahead of a live turn.
-	if req.GetWriteClass().GetWriteClass() == nil {
-		return refuse(SiteWriteClassUnset, "write_class", "write_class: the write states neither interactive nor bulk, and the store never guesses which queue a write belongs in")
-	}
-	if ref := validateEntryBatch(req.GetBatch(), len(req.GetShapes()) > 0); ref != nil {
-		return ref
-	}
-	// THE CATALOG IS PART OF THE WRITE, so a malformed observation refuses the
-	// whole request here rather than reaching a transaction the records share.
-	for i, shape := range req.GetShapes() {
-		if ref := validateShapeObservation(shape, i); ref != nil {
-			return ref
-		}
-	}
-	return nil
+	return fromStorewrite(storewrite.ValidateWriteBatchRequest(req))
 }
 
-// validateShapeObservation refuses a catalog observation that names no shape.
-//
-// EVERY FIELD BUT THE EXAMPLE IS REQUIRED. The example alone is optional
-// because a line can legitimately be empty bytes; a hash, a kind, a rendering
-// and an observation instant are what make a row matchable, filterable,
-// readable and orderable, and a row missing any of them is one nobody can use.
-func validateShapeObservation(s *storev1.ShapeObservation, index int) *refusal {
-	what := fmt.Sprintf("shapes[%d]", index)
-	if s == nil {
-		return refuse(SiteShapeUnset, what, "%s: the shape observation is unset", what)
+// fromStorewrite is a shared validation refusal as this server's own: always
+// the invalid-request class.
+func fromStorewrite(r *storewrite.Refusal) *refusal {
+	if r == nil {
+		return nil
 	}
-	if s.GetShapeHash() == "" {
-		return refuse(SiteShapeHashEmpty, what+".shape_hash", "%s: shape_hash is empty, and it is the catalog's primary key", what)
-	}
-	if s.GetKind() == "" {
-		return refuse(SiteShapeKindEmpty, what+".kind", "%s (shape %s): kind is empty, so the observation names no residue kind", what, s.GetShapeHash())
-	}
-	if s.GetKeyStructure() == "" {
-		return refuse(SiteShapeStructureEmpty, what+".key_structure", "%s (shape %s): key_structure is empty, so nothing says what was hashed", what, s.GetShapeHash())
-	}
-	if s.GetSeenMs() <= 0 {
-		return refuse(SiteShapeSeenMsUnset, what+".seen_ms", "%s (shape %s): seen_ms is %d, not a positive unix millis; first_seen and last_seen come from the observer's clock", what, s.GetShapeHash(), s.GetSeenMs())
-	}
-	return nil
+	return &refusal{site: r.Site, field: r.Field, detail: r.Detail, class: classInvalid}
+}
+
+// validateShapeObservation is storewrite.ValidateShapeObservation.
+func validateShapeObservation(sh *storev1.ShapeObservation, index int) *refusal {
+	return fromStorewrite(storewrite.ValidateShapeObservation(sh, index))
 }
 
 // validateListResidueShapesRequest refuses a catalog listing whose kind filter
