@@ -913,6 +913,14 @@ func validateMergeWorkspaceRequest(req *agentreplv1.MergeWorkspaceRequest) *conn
 	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
 		return err
 	}
+	if v := req.GetVersionIncrement(); v != nil {
+		if v.GetIncrement() == nil {
+			return invalid("version_increment.increment", "an increment arm (minor or patch) is required")
+		}
+		if err := versionIncrement(v).Validate(); err != nil {
+			return invalid("version_increment.changelog_line", err.Error())
+		}
+	}
 	switch mode := req.GetMode().(type) {
 	case *agentreplv1.MergeWorkspaceRequest_OneShot:
 		if mode.OneShot.GetLanding() == nil {

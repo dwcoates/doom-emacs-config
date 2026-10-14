@@ -171,6 +171,12 @@ func (q *queue) runningCut(ws ids.WorkspaceID) (runningCut, bool) {
 type queue struct {
 	deps Deps
 
+	// onDrainWait, when set, is called each time an exclusive call starts
+	// waiting out a draining bounce, with the delivery lock released. It is
+	// how a test observes the wait without timing it; production leaves it
+	// nil.
+	onDrainWait func()
+
 	mu     lockwatch.Mutex
 	states map[ids.WorkspaceID]*wsState
 

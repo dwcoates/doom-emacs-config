@@ -440,6 +440,25 @@ test_front_rides_an_async_merge() {
   expect_args "--async --front asks for the front of the queue" "merge-queue -async -name fix-merge -branch feat/x -front"
 }
 
+test_minor_rides_a_one_shot() {
+  mkfixture
+  invoke --one-shot --minor "Merges record a version"
+  expect_args "--one-shot --minor moves the version's minor with its changelog line" "merge-queue -one-shot -version-part minor -changelog-line Merges record a version"
+}
+
+test_patch_rides_an_async_merge_beside_front() {
+  mkfixture
+  invoke --patch "Fix the footer" --async fix-merge feat/x --front
+  expect_args "--patch before the verb rides --async beside --front" "merge-queue -async -name fix-merge -branch feat/x -front -version-part patch -changelog-line Fix the footer"
+}
+
+test_version_modifiers_refuse_malformed_forms() {
+  expect_refused "--minor refuses a missing changelog line" --one-shot --minor
+  expect_refused "--patch refuses an option as its changelog line" --one-shot --patch --front
+  expect_refused "--minor and --patch together are refused" --one-shot --minor a --patch b
+  expect_refused "--patch is refused on a queue control" --pause-queue --patch "Fix the footer"
+}
+
 test_removed_merge_verbs_print_usage() {
   local verb ok=1
   for verb in --enqueue-own --announce-one-shot --land-workspace --land-branch --land-commits --pr-merged --remove-branch; do
@@ -487,6 +506,9 @@ test_async_runs_from_the_main_worktree
 test_merge_verbs_refuse_malformed_forms
 test_front_rides_a_one_shot
 test_front_rides_an_async_merge
+test_minor_rides_a_one_shot
+test_patch_rides_an_async_merge_beside_front
+test_version_modifiers_refuse_malformed_forms
 test_removed_merge_verbs_print_usage
 
 printf 'Passed: %d  Failed: %d\n' "$PASS" "$FAIL"

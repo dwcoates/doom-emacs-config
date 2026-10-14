@@ -317,6 +317,10 @@ func (i *ingress) apply(ctx context.Context, log dlog.Logger, file string, index
 		if err != nil {
 			return err
 		}
+		// Validate already refused a malformed increment, so this reads it.
+		if source.Version, err = entry.VersionIncrement(); err != nil {
+			return err
+		}
 		// A COMMAND-FILE MERGE IS AN AGENT'S ASK, made from inside its own
 		// turn: it is put in line once that turn ends, and never displaces
 		// the turn in flight (merge.Requester).

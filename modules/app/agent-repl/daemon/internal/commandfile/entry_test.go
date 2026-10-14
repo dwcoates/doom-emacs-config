@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"agent-repld/internal/semver"
+	"agent-repld/internal/wsm"
 )
 
 func TestValidateAcceptsEveryAcceptedShape(t *testing.T) {
@@ -610,6 +613,60 @@ func TestParentRoundTripsThroughWrite(t *testing.T) {
 			}
 			if entries[0].Parent != tt.parent {
 				t.Fatalf("parent = %+v after %s, want %+v", entries[0].Parent, data, tt.parent)
+			}
+		})
+	}
+}
+
+func TestAMergeEntryCarriesItsVersionIncrement(t *testing.T) {
+	tests := []struct {
+		name  string
+		entry Entry
+		want  *wsm.VersionIncrement
+	}{
+		{name: "a minor", entry: Entry{Type: TypeMerge, Workspace: "w1", OneShot: true, VersionPart: "minor", ChangelogLine: "Merges record a version"},
+			want: &wsm.VersionIncrement{Part: semver.Minor, ChangelogLine: "Merges record a version"}},
+		{name: "a patch on an async merge", entry: Entry{Type: TypeMerge, Workspace: "w1", AsyncName: "fix", Branch: "b", VersionPart: "patch", ChangelogLine: "Fix the footer"},
+			want: &wsm.VersionIncrement{Part: semver.Patch, ChangelogLine: "Fix the footer"}},
+		{name: "none", entry: Entry{Type: TypeMerge, Workspace: "w1", OneShot: true}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			validateErr := tt.entry.Validate()
+			got, err := tt.entry.VersionIncrement()
+
+			// Assert
+			if validateErr != nil || err != nil {
+				t.Fatalf("Validate = %v, VersionIncrement = %v; want accepted", validateErr, err)
+			}
+			if (got == nil) != (tt.want == nil) || (got != nil && *got != *tt.want) {
+				t.Fatalf("VersionIncrement = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAMalformedVersionIncrementIsRefused(t *testing.T) {
+	tests := []struct {
+		name    string
+		entry   Entry
+		wantErr string
+	}{
+		{name: "a part without a line", entry: Entry{Type: TypeMerge, Workspace: "w1", OneShot: true, VersionPart: "patch"}, wantErr: "given together"},
+		{name: "a line without a part", entry: Entry{Type: TypeMerge, Workspace: "w1", OneShot: true, ChangelogLine: "x"}, wantErr: "given together"},
+		{name: "a major increment", entry: Entry{Type: TypeMerge, Workspace: "w1", OneShot: true, VersionPart: "major", ChangelogLine: "x"}, wantErr: "is not a version part"},
+		{name: "a two-line changelog", entry: Entry{Type: TypeMerge, Workspace: "w1", OneShot: true, VersionPart: "patch", ChangelogLine: "a\nb"}, wantErr: "one non-blank changelog line"},
+		{name: "an increment on another entry", entry: Entry{Type: TypeClose, Workspace: "w1", VersionPart: "patch"}, wantErr: "version_part is a merge's field"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			err := tt.entry.Validate()
+
+			// Assert
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Validate() = %v, want an error containing %q", err, tt.wantErr)
 			}
 		})
 	}

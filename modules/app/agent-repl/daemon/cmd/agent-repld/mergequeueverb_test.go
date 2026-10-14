@@ -273,6 +273,18 @@ func TestTheMergeQueueVerbNamesEachMode(t *testing.T) {
 			return []string{"-async", "-name", "reconnect-fix", "-branch", "agent-1/fix", "-close-dir", f.other}
 		},
 			check: func(f *mergeFixture, e commandfile.Entry) bool { return e.CloseDir == f.other }},
+		{name: "a one-shot moving the version's patch", args: func(*mergeFixture) []string {
+			return []string{"-one-shot", "-version-part", "patch", "-changelog-line", "Fix the footer"}
+		},
+			check: func(_ *mergeFixture, e commandfile.Entry) bool {
+				return e.OneShot && e.VersionPart == "patch" && e.ChangelogLine == "Fix the footer"
+			}},
+		{name: "an async merge moving the version's minor", args: func(*mergeFixture) []string {
+			return []string{"-async", "-name", "reconnect-fix", "-branch", "agent-1/fix", "-version-part", "minor", "-changelog-line", "Merges record a version"}
+		},
+			check: func(_ *mergeFixture, e commandfile.Entry) bool {
+				return e.AsyncName == "reconnect-fix" && e.VersionPart == "minor" && e.ChangelogLine == "Merges record a version"
+			}},
 		{name: "an async merge cleaning up and compacting after", args: func(*mergeFixture) []string {
 			return []string{"-async", "-name", "reconnect-fix", "-branch", "agent-1/fix", "-cleanup-worktree", "-compact-after"}
 		},
@@ -329,6 +341,10 @@ func TestTheMergeQueueVerbRefusesAMalformedRequest(t *testing.T) {
 		{name: "a blank instruction", args: []string{"-async", "-name", "n", "-branch", "b", "-instruction", " "}},
 		{name: "a close-dir that is not there", args: []string{"-async", "-name", "n", "-branch", "b", "-close-dir", "/no/such/worktree"}},
 		{name: "a one-shot async", args: []string{"-one-shot", "-pr-merged", "-async", "-name", "n", "-branch", "b"}},
+		{name: "a version part with no changelog line", args: []string{"-one-shot", "-version-part", "patch"}},
+		{name: "a changelog line with no version part", args: []string{"-one-shot", "-changelog-line", "x"}},
+		{name: "a major version part", args: []string{"-one-shot", "-version-part", "major", "-changelog-line", "x"}},
+		{name: "a blank changelog line", args: []string{"-one-shot", "-version-part", "patch", "-changelog-line", " "}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1098,6 +1114,9 @@ func TestTheMergeQueueVerbRefusesAMalformedControl(t *testing.T) {
 		{name: "a move-dir that is not there", args: func(*mergeFixture) []string { return []string{"-move-up", "-move-dir", "/no/such/worktree"} }},
 		{name: "a move that waits", args: func(*mergeFixture) []string { return []string{"-move-down", "-wait"} }},
 		{name: "a move to the front", args: func(*mergeFixture) []string { return []string{"-move-up", "-front"} }},
+		{name: "a control moving the version", args: func(*mergeFixture) []string {
+			return []string{"-pause", "-version-part", "patch", "-changelog-line", "x"}
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

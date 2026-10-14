@@ -827,6 +827,9 @@ type outcome struct {
 	// alreadyOn names the target branch a source branch was ALREADY
 	// contained in: the merge concludes as merged with nothing to land.
 	alreadyOn string
+	// version is the version tag the landing created, nil when the merge
+	// carried no increment or its tag could not be made.
+	version *landedVersion
 }
 
 // failedIn is the outcome of a merge that gave up in one area.
@@ -845,7 +848,10 @@ func (r *run) method(ctx context.Context) (outcome, error) {
 		// prompts. There is nothing to prepare, rebase or gate.
 		var out outcome
 		if r.resumingPast(TabUpdatingMain) {
-			out = r.resume.Outcome.outcome()
+			var err error
+			if out, err = r.resume.Outcome.outcome(); err != nil {
+				return outcome{}, err
+			}
 		} else {
 			var err error
 			out, err = r.updateMain(ctx)
@@ -873,7 +879,10 @@ func (r *run) method(ctx context.Context) (outcome, error) {
 	}
 	var out outcome
 	if r.resumingPast(TabCommitting) {
-		out = r.resume.Outcome.outcome()
+		var err error
+		if out, err = r.resume.Outcome.outcome(); err != nil {
+			return outcome{}, err
+		}
 	} else {
 		var err error
 		out, err = r.process(ctx)

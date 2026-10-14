@@ -2360,6 +2360,48 @@ carries."
                     (agent-repl-test-wire-verbs--parse "{\"unknownBranch\":{}}"))
                    '(:cause (:arm :unknown-branch :value nil))))))
 
+(ert-deftest agent-repl-test-wire-verbs-merge-error-version-increment-required-arm ()
+  "MergeWorkspaceError's `version_increment_required' arm decodes."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-merge-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"versionIncrementRequired\":{}}"))
+                   '(:cause (:arm :version-increment-required :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-error-version-increment-unexpected-foreign-repository ()
+  "MergeWorkspaceError's `version_increment_unexpected' arm decodes its
+foreign-repository reason."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-merge-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"versionIncrementUnexpected\":{\"foreignRepository\":{}}}"))
+                   '(:cause (:arm :version-increment-unexpected
+                             :value (:reason (:arm :foreign-repository :value nil))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-error-version-increment-unexpected-not-default-branch ()
+  "MergeWorkspaceError's `version_increment_unexpected' arm decodes its
+not-default-branch reason."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-merge-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"versionIncrementUnexpected\":{\"notDefaultBranch\":{}}}"))
+                   '(:cause (:arm :version-increment-unexpected
+                             :value (:reason (:arm :not-default-branch :value nil))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-error-version-increment-unexpected-merged-upstream ()
+  "MergeWorkspaceError's `version_increment_unexpected' arm decodes its
+merged-upstream reason."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-merge-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"versionIncrementUnexpected\":{\"mergedUpstream\":{}}}"))
+                   '(:cause (:arm :version-increment-unexpected
+                             :value (:reason (:arm :merged-upstream :value nil))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-error-version-increment-unexpected-reason-arms-pinned ()
+  "MergeWorkspaceVersionIncrementUnexpected's reason arm set is exactly what
+the frozen schema declares."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_merge_workspace.pb.go" "MergeWorkspaceVersionIncrementUnexpected")
+                       #'string<)
+                 (sort (list "foreignRepository" "notDefaultBranch" "mergedUpstream") #'string<))))
+
 (ert-deftest agent-repl-test-wire-verbs-merge-error-unset-cause-is-a-breach ()
   "MergeWorkspaceError with no arm set says nothing actionable, so it is a
 breach."
@@ -2380,7 +2422,7 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_merge_workspace.pb.go" "MergeWorkspaceError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "noLayoutFacts" "sessionDeleted" "alreadyQueued" "alreadyMerging" "unknownOneShotWorkspace" "unknownBranch" "nameTaken" "branchCheckedOutInRequester")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "noLayoutFacts" "sessionDeleted" "alreadyQueued" "alreadyMerging" "unknownOneShotWorkspace" "unknownBranch" "nameTaken" "branchCheckedOutInRequester" "versionIncrementRequired" "versionIncrementUnexpected")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-mode-arms-pinned ()

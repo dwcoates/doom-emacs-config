@@ -372,15 +372,17 @@ func TestNoMergeFactReachesAnyClientBeforeTheRequestingTurnEnds(t *testing.T) {
 	t.Parallel()
 	// Arrange: the workspace's turn is in flight when its agent asks.
 	s := newSourcedRepo(t)
+	s.repo.Tag("0.0.1")
 	harness.CommitWork(t, s.f.ws.GetDir())
 	s.f.submit("finish up and merge", "k-asking", origin)
 	s.awaitStartTurn(t, 2)
 	roster := s.d.WatchRoster()
 	root := s.f.watchRootFeed()
 
-	// Act: the agent's command file is applied while its turn runs.
+	// Act: the agent's command file is applied while its turn runs. A merge
+	// onto agent-repl's own master names its version increment.
 	path := commandfileWrite(t, s.d, "workspace_commands_ask.json",
-		`[{"type":"merge","project_dir":"`+s.f.ws.GetDir()+`","one_shot":true}]`)
+		`[{"type":"merge","project_dir":"`+s.f.ws.GetDir()+`","one_shot":true,"version_part":"patch","changelog_line":"Fix the footer"}]`)
 	applied := filepath.Join(filepath.Dir(path), "applied", filepath.Base(path))
 	s.d.AwaitFileExists(applied)
 
