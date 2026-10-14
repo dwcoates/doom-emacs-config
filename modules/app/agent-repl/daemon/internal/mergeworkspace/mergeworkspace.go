@@ -238,14 +238,31 @@ func (s *Service) stampLanding(ctx context.Context, requester ids.WorkspaceID, m
 }
 
 // handbackText composes the badge label and the report for one outcome.
+// inPlaceHandbackText composes the badge label and the report for a SYNC
+// merge that did not land: it ran in this very workspace, which stays open.
+func inPlaceHandbackText(out merge.DetachedOutcome) (string, string, error) {
+	switch out.Kind {
+	case merge.DetachedFailed:
+		return fmt.Sprintf("one-shot merge of %s failed", out.Branch),
+			fmt.Sprintf("It ran in place, in this workspace. It failed: %s. This workspace stays open; the merge's own record is its bubble in this feed.", out.Summary), nil
+	case merge.DetachedAbandoned:
+		return fmt.Sprintf("one-shot merge of %s did not run", out.Branch),
+			fmt.Sprintf("It did not run: %s. This workspace stays open.", out.Summary), nil
+	}
+	return "", "", fmt.Errorf("mergeworkspace: an in-place merge is handed back only when it did not land, not %s", out.Kind)
+}
+
 func handbackText(mergeWS wsm.Workspace, out merge.DetachedOutcome) (string, string, error) {
+	if out.InPlace {
+		return inPlaceHandbackText(out)
+	}
 	switch out.Kind {
 	case merge.DetachedLanded:
 		return fmt.Sprintf("merge of %s landed", out.Branch),
-			fmt.Sprintf("%s. Its merge workspace `%s` is closed now and listed under Recently Merged; the user can still open it to read the merge's own conversation.", out.Summary, mergeWS.Name), nil
+			fmt.Sprintf("It ran detached, in a merge workspace forked from this conversation. %s. Its merge workspace `%s` is closed now and listed under Recently Merged; the user can still open it to read the merge's own conversation.", out.Summary, mergeWS.Name), nil
 	case merge.DetachedFailed:
 		return fmt.Sprintf("merge of %s failed", out.Branch),
-			fmt.Sprintf("It failed: %s. Its merge workspace `%s` is now shown in the tab bar and the sidebar, at %s, exactly where the merge stopped; the user can switch to it to finish the merge.", out.Summary, mergeWS.Name, mergeWS.Dir), nil
+			fmt.Sprintf("It ran detached, in a merge workspace forked from this conversation. It failed: %s. Its merge workspace `%s` is now shown in the tab bar and the sidebar, at %s, exactly where the merge stopped; the user can switch to it to finish the merge.", out.Summary, mergeWS.Name, mergeWS.Dir), nil
 	case merge.DetachedAbandoned:
 		return fmt.Sprintf("merge of %s did not run", out.Branch),
 			fmt.Sprintf("It did not run: %s.", out.Summary), nil

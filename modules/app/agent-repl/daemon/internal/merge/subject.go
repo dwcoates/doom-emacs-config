@@ -40,6 +40,12 @@ type subject struct {
 	// closes is the workspace that closes once the branch lands, empty when
 	// none does.
 	closes ids.WorkspaceID
+	// closesAlso is ANOTHER workspace an async merge closes once it lands
+	// (wsm.MergeOrigin.CloseOnLanding), empty when it closes none.
+	closesAlso ids.WorkspaceID
+	// cleanupDir is the worktree an async merge removes once it lands
+	// (wsm.MergeOrigin.CleanupDir), empty when it removes none.
+	cleanupDir string
 	// other is another workspace whose worktree the merge works in, empty when
 	// it works in none but the requester's.
 	other ids.WorkspaceID
@@ -75,6 +81,17 @@ func (o *orchestrator) resolveSubject(ctx context.Context, r *run) (subject, err
 		s := subject{branch: branch, dir: job.Layout.SourceDir, targetDir: job.Layout.TargetDir}
 		if !r.source.KeepOpen {
 			s.closes = r.ws
+		}
+		// A MERGE WORKSPACE CARRIES ITS ASYNC REQUEST'S LANDING EFFECTS.
+		record, err := o.deps.DB.Workspace(ctx, r.ws)
+		if err != nil {
+			return subject{}, fmt.Errorf("merge: reading workspace %s for its landing effects: %w", r.ws, err)
+		}
+		if origin := record.MergeOf; origin != nil {
+			s.closesAlso = origin.CloseOnLanding
+			if origin.CleanupWorktree {
+				s.cleanupDir = origin.CleanupDir
+			}
 		}
 		return s, nil
 	case wsm.MergeSourceWorkspace:

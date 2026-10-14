@@ -1252,8 +1252,8 @@ foreground (owner ruling, 2026-10-01), for every state."
     (should (eq (get-text-property gap-pos 'face result) '+workspace-tab-face))))
 
 (ert-deftest agent-repl-test-render-tab-bracket-gap-with-a-badge ()
-  "With :bracket-gap and a badge, the space after [N] is the bracket\='s and the
-space before the name stays the name\='s."
+  "With :bracket-gap and a badge, the one space after [N] is still the
+bracket\='s: the badge is drawn before [N] and splits nothing after it."
   ;; Arrange
   (let* ((spec '(:bg "#22c55e" :fg "black" :bracket-bg "#a21caf" :bracket-fg "white"
                  :bracket-gap t :weight bold))
@@ -1264,7 +1264,7 @@ space before the name stays the name\='s."
     ;; Assert
     (should (equal (plist-get (get-text-property gap-pos 'face result) :background)
                    "#a21caf"))
-    (should (eq (get-text-property (1- name-pos) 'face result) '+workspace-tab-face))))
+    (should (= name-pos (1+ gap-pos)))))
 
 (ert-deftest agent-repl-test-render-tab-bracket-bg-falls-back-to-bg ()
   "render-tab should fall back to :bg for bracket background when :bracket-bg is absent."
@@ -1283,17 +1283,23 @@ space before the name stays the name\='s."
     (should (string-match-p "IMG" result))
     (should (string-match-p "ws1" result))))
 
-(ert-deftest agent-repl-test-render-tab-img-str-one-space-before-the-name ()
-  "render-tab places EXACTLY ONE space between the badge run and the name.
-The badge run used to be wrapped in a space on each side and then met the
-name padding\='s own leading space, so a badged tab drew two."
+(ert-deftest agent-repl-test-render-tab-draws-the-badge-before-the-bracket ()
+  "render-tab draws `<badge> [N] <name>\=': the badge run comes before [N],
+one space from it, and [N] is one space from the name (owner request,
+2026-10-13)."
   (let* ((spec '(:bg "#c0c0c0" :fg "black" :bracket-fg "blue" :weight bold))
+         (result (agent-repl--render-tab "ws1" spec "1" '+workspace-tab-face "IMG")))
+    (should (string-match-p (regexp-quote " IMG [1] ws1") result))))
+
+(ert-deftest agent-repl-test-render-tab-paints-nothing-between-the-badge-and-the-bracket ()
+  "The space between the badge run and [N] carries no background, so the
+entry\='s paint starts at [N]."
+  (let* ((spec '(:bg "#c0c0c0" :fg "black" :bracket-bg "#a21caf" :bracket-fg "blue" :weight bold))
          (result (agent-repl--render-tab "ws1" spec "1" '+workspace-tab-face "IMG"))
-         (img-pos (string-match "IMG" result))
-         (name-pos (string-match "ws1" result)))
-    (should img-pos)
-    (should (= name-pos (+ img-pos 4)))
-    (should (equal (substring result (+ img-pos 3) name-pos) " "))))
+         (space-pos (+ (string-match "IMG" result) 3)))
+    (should (equal (substring result space-pos (1+ space-pos)) " "))
+    (should (eq (plist-get (get-text-property space-pos 'face result) :background) 'unspecified))
+    (should (equal (plist-get (get-text-property (1+ space-pos) 'face result) :background) "#a21caf"))))
 
 (ert-deftest agent-repl-test-render-tab-empty-name ()
   "render-tab should handle an empty name string."
@@ -4614,7 +4620,7 @@ space between, the trailing fill and the terminator — is un-underlined."
     (should-not (and (listp face) (member '(:underline t) face)))))
 
 (ert-deftest agent-repl-test-render-tab-selected-does-not-underline-the-badge ()
-  "The badge run between [N] and the name carries no underline."
+  "The badge run before [N] carries no underline."
   ;; Arrange
   (let* ((spec '(:bg "#1a7a1a" :fg "white" :bracket-fg "white" :underline t :weight bold))
          (result (agent-repl--render-tab "ws1" spec "1" 'agent-repl-tab-ready "IMG"))

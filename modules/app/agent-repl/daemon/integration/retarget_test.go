@@ -105,14 +105,14 @@ func TestSetWorkspaceParentToTopLevelUnnestsTellsTheSessionAndMergesToTheMainChe
 	}
 	awaitRoster(t, f.d, f.roster, "the child at the top level", f.topLevel)
 	notice := f.expectNotice(t)
-	if !strings.Contains(notice, "main checkout at `"+repo.Dir+"`") || !strings.Contains(notice, "`/merge-queue own`") {
-		t.Fatalf("notice = %q, want the main checkout named and /merge-queue own", notice)
+	if !strings.Contains(notice, "main checkout at `"+repo.Dir+"`") || !strings.Contains(notice, "`/merge-queue one-shot`") {
+		t.Fatalf("notice = %q, want the main checkout named and /merge-queue one-shot", notice)
 	}
 	pushConcludedTurn(f.d.Shim(f.child), mainAgent, "notice-read")
 
 	// Assert: the child's own-branch merge now lands in the main checkout.
 	harness.CommitWork(t, f.child.GetDir())
-	if _, err := f.d.Client().MergeWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.child, Source: harness.OwnBranch(false)})); err != nil {
+	if _, err := f.d.Client().MergeWorkspace(f.d.Ctx(), connect.NewRequest(harness.MergeRequest(f.child, harness.OneShot()))); err != nil {
 		t.Fatalf("MergeWorkspace(child) = error %v, want the merge enqueued", err)
 	}
 	awaitRoster(t, f.d, f.roster, "the child's merge landed", func(r *frontendv1.WorkspaceRoster) bool {

@@ -76,7 +76,7 @@ export function mergeTabPanel(tab: MergeTab, view: SubfeedView, rc: RowContext):
       return rowPanel(tab, () => drawFeedMergeTabCommitting(armOf(tab, "committing"), `${PATH}.committing`));
     case "updatingMain":
       return rowPanel(tab, () => drawFeedMergeTabUpdatingMain(armOf(tab, "updatingMain"), `${PATH}.updating_main`));
-    case "pick":
+    case "resolving":
     case "prePrompt":
     case "postPrompt":
       return agenticPanel(tab, view, rc, () => null);

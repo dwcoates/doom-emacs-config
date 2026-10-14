@@ -1,27 +1,43 @@
 package harness
 
-import "testing"
+import (
+	"testing"
 
-func TestOwnBranchNamesTheRequestersBranchAndItsKeepOpen(t *testing.T) {
-	for _, keepOpen := range []bool{false, true} {
-		// Act
-		source := OwnBranch(keepOpen)
+	workspacev1 "agentrepl/proto/workspace/v1"
+)
 
-		// Assert
-		own := source.GetOwnBranch()
-		if own == nil || own.GetInPlace() == nil || own.GetInPlace().GetKeepOpen() != keepOpen {
-			t.Fatalf("OwnBranch(%v) = %v, want the own-branch arm with keep_open %v", keepOpen, source, keepOpen)
-		}
+func TestOneShotMergesTheRequestersOwnBranch(t *testing.T) {
+	// Act
+	req := MergeRequest(&workspacev1.WorkspaceRef{Id: "ws"}, OneShot())
+
+	// Assert
+	if req.GetWorkspace().GetId() != "ws" || req.GetOneShot().GetOwnBranch() == nil {
+		t.Fatalf("MergeRequest(OneShot) = %v, want the one-shot own-branch arm for ws", req)
 	}
 }
 
-func TestBranchSourceNamesTheBranch(t *testing.T) {
+func TestOneShotMergedUpstreamNamesTheUpstreamLanding(t *testing.T) {
 	// Act
-	source := BranchSource("agent-fix")
+	req := MergeRequest(&workspacev1.WorkspaceRef{Id: "ws"}, OneShotMergedUpstream())
 
 	// Assert
-	if source.GetBranch().GetName() != "agent-fix" {
-		t.Fatalf("BranchSource = %v, want the branch arm naming agent-fix", source)
+	if req.GetOneShot().GetMergedUpstream() == nil {
+		t.Fatalf("MergeRequest(OneShotMergedUpstream) = %v, want the merged-upstream landing", req)
+	}
+}
+
+func TestAsyncNamesItsBranchAndCarriesItsEdits(t *testing.T) {
+	// Arrange
+	child := &workspacev1.WorkspaceRef{Id: "child"}
+
+	// Act
+	req := MergeRequest(&workspacev1.WorkspaceRef{Id: "ws"}, Async("fix", "agent-fix", WithInstruction("rebase it"), ClosingOnLanding(child), CleaningUp()))
+
+	// Assert
+	async := req.GetAsync()
+	if async.GetName() != "fix" || async.GetBranch() != "agent-fix" || async.GetInstruction() != "rebase it" ||
+		async.GetOneShot().GetWorkspace().GetId() != "child" || !async.GetCleanupWorktree() {
+		t.Fatalf("MergeRequest(Async) = %v, want every edit applied", req)
 	}
 }
 

@@ -510,23 +510,31 @@ func TestEachRequestValidatorNamesTheFieldItRefusesWithTargetsAndSources(t *test
 			check: func() *connect.Error {
 				return validateMergeWorkspaceRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ref()})
 			},
-			field: "source",
+			field: "mode",
 		},
 		{
-			name: "merge of a branch with no name",
+			name: "merge of a one-shot with no landing",
 			check: func() *connect.Error {
 				return validateMergeWorkspaceRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ref(),
-					Source: &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_Branch{Branch: &agentreplv1.MergeWorkspaceSourceBranch{}}}})
+					Mode: &agentreplv1.MergeWorkspaceRequest_OneShot{OneShot: &agentreplv1.MergeWorkspaceOneShot{}}})
 			},
-			field: "source.branch.name",
+			field: "one_shot.landing",
 		},
 		{
-			name: "merge of another workspace with no ref",
+			name: "merge async with no branch",
 			check: func() *connect.Error {
 				return validateMergeWorkspaceRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ref(),
-					Source: &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_Workspace{Workspace: &agentreplv1.MergeWorkspaceSourceWorkspace{}}}})
+					Mode: &agentreplv1.MergeWorkspaceRequest_Async{Async: &agentreplv1.MergeWorkspaceAsync{Name: "fix"}}})
 			},
-			field: "source.workspace.ref",
+			field: "async.branch",
+		},
+		{
+			name: "merge async closing a workspace with no ref",
+			check: func() *connect.Error {
+				return validateMergeWorkspaceRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ref(),
+					Mode: &agentreplv1.MergeWorkspaceRequest_Async{Async: &agentreplv1.MergeWorkspaceAsync{Name: "fix", Branch: "b", OneShot: &agentreplv1.MergeWorkspaceAsyncOneShot{}}}})
+			},
+			field: "async.one_shot.workspace",
 		},
 	}
 	for _, tc := range tests {
@@ -628,10 +636,17 @@ func TestEachRequestValidatorAcceptsAWellFormedRequestWithTargetsAndSources(t *t
 			},
 		},
 		{
-			name: "merge of the own branch",
+			name: "merge as a one-shot",
 			check: func() *connect.Error {
 				return validateMergeWorkspaceRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ref(),
-					Source: &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_OwnBranch{OwnBranch: &agentreplv1.MergeWorkspaceSourceOwnBranch{Run: &agentreplv1.MergeWorkspaceSourceOwnBranch_InPlace{InPlace: &agentreplv1.MergeWorkspaceSourceOwnBranchInPlace{}}}}}})
+					Mode: &agentreplv1.MergeWorkspaceRequest_OneShot{OneShot: &agentreplv1.MergeWorkspaceOneShot{Landing: &agentreplv1.MergeWorkspaceOneShot_OwnBranch{OwnBranch: &agentreplv1.MergeWorkspaceOneShotOwnBranch{}}}}})
+			},
+		},
+		{
+			name: "merge async",
+			check: func() *connect.Error {
+				return validateMergeWorkspaceRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ref(),
+					Mode: &agentreplv1.MergeWorkspaceRequest_Async{Async: &agentreplv1.MergeWorkspaceAsync{Name: "fix", Branch: "b"}}})
 			},
 		},
 	}

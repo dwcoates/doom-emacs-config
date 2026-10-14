@@ -44,7 +44,10 @@ import (
 
 // run is one merge in flight.
 type run struct {
-	o *orchestrator
+	// closed is the workspaces this run's landing closes, read once
+	// (run.closings) so the stamp and the teardown close the same ones.
+	closed *[]ids.WorkspaceID
+	o      *orchestrator
 	// ws is the REQUESTING workspace, which the merge runs in.
 	ws ids.WorkspaceID
 	// source is what the request asked to merge; subject is what it resolved
