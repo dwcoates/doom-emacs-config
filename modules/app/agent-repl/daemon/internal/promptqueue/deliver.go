@@ -282,8 +282,12 @@ func causedByMergeQueue(origin string) bool {
 // A failure to record it is a warning, never the submission's failure: the
 // prompt was delivered, and the worst a lost stamp costs is one early
 // hibernation.
+//
+// THE STAMP OUTLIVES ITS CALLER. It follows a delivery that already happened,
+// so a submitter that leaves now (a merge suspended mid-step, its run's
+// context cut) does not take the stamp with it.
 func (q *queue) touchEngagement(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) {
-	if err := q.deps.DB.TouchEngagement(ctx, ws, q.deps.Now()); err != nil {
+	if err := q.deps.DB.TouchEngagement(context.WithoutCancel(ctx), ws, q.deps.Now()); err != nil {
 		log.Warn(opDeliver, "could not record the session's engagement",
 			dlog.Context{"cause": err.Error()})
 	}
