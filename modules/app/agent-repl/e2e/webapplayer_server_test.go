@@ -186,8 +186,7 @@ func (s *wlServer) awaitReady(t *testing.T) error {
 				tail = tail[len(tail)-wlTailLines:]
 			}
 		case <-deadline.C:
-			_ = syscall.Kill(-s.cmd.Process.Pid, syscall.SIGKILL)
-			return fmt.Errorf("the layer driver did not warm up within %s; last output:\n%s", wlWarmupBound, strings.Join(tail, "\n"))
+			return errors.Join(fmt.Errorf("the layer driver did not warm up within %s; last output:\n%s", wlWarmupBound, strings.Join(tail, "\n")), s.killGroup())
 		}
 	}
 }
@@ -213,7 +212,9 @@ func wlStopLayerServer() {
 		}
 	case <-time.After(wlServerStopBound):
 		fmt.Fprintf(os.Stderr, "e2e/webapp-layer: the layer driver outlived its stdin by %s; killing its group\n", wlServerStopBound)
-		_ = syscall.Kill(-s.cmd.Process.Pid, syscall.SIGKILL)
+		if err := s.killGroup(); err != nil {
+			fmt.Fprintf(os.Stderr, "e2e/webapp-layer: %v\n", err)
+		}
 		<-done
 	}
 	if err := os.RemoveAll(s.tmp); err != nil {
@@ -274,8 +275,7 @@ func (s *wlServer) Run(t *testing.T, file string, world wlWorld) error {
 				tail = tail[len(tail)-wlTailLines:]
 			}
 		case <-deadline.C:
-			s.broken = fmt.Errorf("%s did not finish within %s; last output:\n%s", file, WebappLayerTimeout, strings.Join(tail, "\n"))
-			_ = syscall.Kill(-s.cmd.Process.Pid, syscall.SIGKILL)
+			s.broken = errors.Join(fmt.Errorf("%s did not finish within %s; last output:\n%s", file, WebappLayerTimeout, strings.Join(tail, "\n")), s.killGroup())
 			return s.broken
 		}
 	}
@@ -298,4 +298,24 @@ func wlRunLayerFile(t *testing.T, npm, webappDir, file string, w *World, ws *wor
 		WorkspaceDir: ws.GetDir(),
 		WebappBuild:  harness.FakeWebappEntry,
 	})
+}
+
+// killGroup SIGKILLs the driver's whole process group. A group already gone
+// is no failure; any other refusal is answered, never dropped, since a
+// driver left running holds its vitest workers.
+func (s *wlServer) killGroup() error {
+	return killProcessGroup(s.cmd.Process.Pid)
+}
+
+// killProcessGroup SIGKILLs process group pgid, answering nil when the group
+// is already gone.
+func killProcessGroup(pgid int) error {
+	err := syscall.Kill(-pgid, syscall.SIGKILL)
+	if errors.Is(err, syscall.ESRCH) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("kill the layer driver's process group %d: %w", pgid, err)
+	}
+	return nil
 }
