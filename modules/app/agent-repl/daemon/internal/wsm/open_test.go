@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -624,6 +625,30 @@ func TestReadRecordsACancelledCallerWithoutAnError(t *testing.T) {
 			}
 			if !found {
 				t.Fatalf("no record for the read: %v", log.Records())
+			}
+		})
+	}
+}
+
+func TestCallerCancelledNamesOnlyTheCallersEnd(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "cancelled", err: context.Canceled, want: true},
+		{name: "deadline exceeded", err: context.DeadlineExceeded, want: true},
+		{name: "wrapped cancellation", err: fmt.Errorf("wsm: commit transaction: %w", context.Canceled), want: true},
+		{name: "a store failure", err: errors.New("database is locked"), want: false},
+		{name: "not found", err: ErrNotFound, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange in the table. Act.
+			got := callerCancelled(tt.err)
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("callerCancelled(%v) = %v, want %v", tt.err, got, tt.want)
 			}
 		})
 	}
