@@ -61,7 +61,6 @@ import { BUBBLE_QUOTE_CLASS } from "../../src/bubble/quote.js";
 import * as heldPromptModule from "../../src/held/held-prompt.js";
 import type { HeldContext } from "../../src/held/context.js";
 import { testHeldContext } from "./held-context.js";
-import { UPDATE_CLASSIFIER_LABEL } from "../../src/held/classifier-update.js";
 import {
   BUBBLE_CAP_ATTRIBUTE,
   BUBBLE_EXPAND_ONLY_CLASS,
@@ -2739,16 +2738,14 @@ describe("the update classifier control", () => {
     heldPrompt({ classification: { case: arm, value: {} } as never });
 
   it.each(["interject", "afterToolCall", "holdForTurnEnd"])(
-    "is drawn, labelled Update classifier, on a %s card",
+    "is drawn, labelled Meta, on a %s card",
     (arm) => {
       // Arrange
       const { tc } = trayContext();
       // Act
       const card = drawHeldPrompt(classifiedAs(arm), tc);
       // Assert
-      expect(card.querySelector('[data-held-action="update-classifier"]')?.textContent).toBe(
-        UPDATE_CLASSIFIER_LABEL,
-      );
+      expect(card.querySelector('[data-held-action="update-classifier"]')?.textContent).toBe("Meta");
     },
   );
 
