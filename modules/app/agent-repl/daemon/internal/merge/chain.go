@@ -768,26 +768,34 @@ func (r *run) reuseTested(ctx context.Context, tip, head string) (bool, error) {
 	return false, nil
 }
 
-// speculativeArgv is the gate's command line for a merge behind the head: the
-// whole tree niced below the head's (owner ruling, 2026-10-11), so a gate run
-// ahead of its turn always yields the processor to the head's gate and to the
-// live runtime. Niceness is applied at the spawn, by exec'ing through nice, so
-// every descendant inherits it; no core cap and no I/O throttle is added.
-func speculativeArgv(argv []string) []string {
-	return append([]string{"/usr/bin/nice", "-n", fmt.Sprint(SpeculativeNice)}, argv...)
-}
+// THE HEAD'S GATE HAS THE PROCESSOR FIRST (owner ruling, 2026-10-14). Every
+// test run is demoted by bin/background.sh to the niceness
+// AGENT_REPL_TEST_NICENESS names, 19 by default; a gate names a better one, so
+// under contention the queue's head yields only to the owner's live runtime,
+// the merge behind it yields to the head as well (owner ruling, 2026-10-11),
+// and every ad-hoc run yields to both. No processor is reserved and no run
+// waits for another: priority only orders who runs first when the processors
+// are contended.
 
-// SpeculativeNice is the niceness a speculative gate's tree runs at, above the
-// head's.
-const SpeculativeNice = 12
+// testNicenessEnv names the niceness bin/background.sh demotes a test run to.
+const testNicenessEnv = "AGENT_REPL_TEST_NICENESS"
 
-// gateArgv is every gate's command line. A speculative gate (one behind the
-// head) runs niced so the head's own run is never slowed by it.
+// HeadNice is the niceness the head's gate runs at: ahead of every other test
+// run, behind the owner's processes.
+const HeadNice = 10
+
+// SpeculativeNice is the niceness a speculative gate (one behind the head)
+// runs at: behind the head's, ahead of an ad-hoc run's 19.
+const SpeculativeNice = 15
+
+// gateArgv is every gate's command line: the script, told the niceness its
+// whole tree runs at (HeadNice, or SpeculativeNice behind the head).
 func gateArgv(argv []string, speculative bool) []string {
+	nice := HeadNice
 	if speculative {
-		argv = speculativeArgv(argv)
+		nice = SpeculativeNice
 	}
-	return argv
+	return append([]string{"env", fmt.Sprintf("%s=%d", testNicenessEnv, nice)}, argv...)
 }
 
 // queueWindow is the window in force: the test override when one is set, else
