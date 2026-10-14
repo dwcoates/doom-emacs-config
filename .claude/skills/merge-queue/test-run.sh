@@ -399,6 +399,13 @@ test_async_carries_every_option() {
     "merge-queue -async -name fix-merge -branch feat/x -instruction rebase it onto master -close-dir $FX/other -cleanup-worktree -compact-after"
 }
 
+test_async_carries_its_own_merge_actions() {
+  mkfixture
+  invoke --async fix-merge feat/x --before-merge "run the linters" --after-merge "post the summary"
+  expect_args "--async carries the merge workspace's own before and after merge prompts" \
+    "merge-queue -async -name fix-merge -branch feat/x -before-merge run the linters -after-merge post the summary"
+}
+
 test_async_runs_from_the_main_worktree() {
   mkfixture
   TOP="$FX/main" invoke --async fix-merge feat/x
@@ -426,6 +433,9 @@ test_merge_verbs_refuse_malformed_forms() {
   expect_refused "--async refuses a missing instruction" --async fix-merge feat/x --instruction
   expect_refused "--async refuses a missing --close directory" --async fix-merge feat/x --close
   expect_refused "--async refuses an unknown option" --async fix-merge feat/x --keep-open
+  expect_refused "--async refuses a missing --before-merge prompt" --async fix-merge feat/x --before-merge
+  expect_refused "--async refuses a missing --after-merge prompt" --async fix-merge feat/x --after-merge
+  expect_refused "--one-shot refuses --before-merge" --one-shot --before-merge "run the linters"
 }
 
 test_front_rides_a_one_shot() {
@@ -502,6 +512,7 @@ test_one_shot_refuses_the_main_worktree
 test_one_shot_refusal_is_exit_5
 test_async_names_its_merge_workspace_and_branch
 test_async_carries_every_option
+test_async_carries_its_own_merge_actions
 test_async_runs_from_the_main_worktree
 test_merge_verbs_refuse_malformed_forms
 test_front_rides_a_one_shot
