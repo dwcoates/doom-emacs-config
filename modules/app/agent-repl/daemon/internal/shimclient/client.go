@@ -746,12 +746,8 @@ func (c *client) awaitAdoptedGone(ctx context.Context, pgid int, bound time.Dura
 	deadline := time.Now().Add(bound)
 	poll := time.NewTicker(adoptedGonePoll)
 	defer poll.Stop()
-	probe := c.groupGone
-	if probe == nil {
-		probe = procgroup.Gone
-	}
 	for {
-		gone, err := probe(pgid)
+		gone, err := c.adoptedGroupGone(pgid)
 		if err != nil {
 			c.log.Error("daemon.shimclient.kill", "could not read whether the adopted shim's process group is gone", dlog.Context{
 				"workspace_id": string(c.ws), "pgid": pgid, "error": err.Error(),
@@ -770,6 +766,16 @@ func (c *client) awaitAdoptedGone(ctx context.Context, pgid int, bound time.Dura
 			return false
 		}
 	}
+}
+
+// adoptedGroupGone is the one reading of whether an adopted shim's process
+// group holds no live process (procgroup.Gone): gone from the kernel, or left
+// with only exited members, whose reap is init's.
+func (c *client) adoptedGroupGone(pgid int) (bool, error) {
+	if c.groupGone != nil {
+		return c.groupGone(pgid)
+	}
+	return procgroup.Gone(pgid)
 }
 
 // processGone reports whether the kernel holds no process for target: a pid,
@@ -1405,7 +1411,17 @@ func (c *client) awaitAdoptedExit(ctx context.Context) {
 	poll := time.NewTicker(adoptedGonePoll)
 	defer poll.Stop()
 	for {
-		if processGone(target) {
+		gone := processGone(target)
+		if target < 0 {
+			var err error
+			if gone, err = c.adoptedGroupGone(pid); err != nil {
+				c.log.Error("daemon.shimclient.exit", "could not read whether the adopted shim's process group is gone; its exit is left to the socket or a kill", dlog.Context{
+					"workspace_id": string(c.ws), "pid": pid, "error": err.Error(),
+				})
+				return
+			}
+		}
+		if gone {
 			c.log.Debug("daemon.shimclient.exit", "the adopted shim's process is gone after the stand-down it was asked for", dlog.Context{
 				"workspace_id": string(c.ws), "pid": pid, "group": target < 0,
 			})
