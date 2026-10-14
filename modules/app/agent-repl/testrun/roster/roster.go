@@ -46,6 +46,10 @@ type Suite struct {
 	// build-tagged integration package to the suite: its tests compile only
 	// under these tags, so the module's ordinary pass never sees them.
 	IntegrationTags string
+	// VetTags names build tags whose files no unit of the suite compiles
+	// otherwise (a perf phase, the realtests); each gets its own vet unit, so a
+	// tagged file that stopped compiling fails the run instead of rotting.
+	VetTags []string
 	// IntegrationPackages is the `go list` pattern (relative to Path) the
 	// integration pass covers.
 	IntegrationPackages string
@@ -135,7 +139,7 @@ var Suites = []Suite{
 		IntegrationBuild: []string{"npm", "run", "pretest:integration"}},
 	{Name: "proto", Kind: Script, Path: "bin/report-nonlisp-coverage.sh", Args: []string{"proto"}},
 	{Name: "logging-density", Kind: Script, Path: "bin/report-logging-density.sh"},
-	{Name: "e2e", Kind: E2E, Path: "e2e", TestParallel: map[string]int{".": 8}},
+	{Name: "e2e", Kind: E2E, Path: "e2e", TestParallel: map[string]int{".": 8}, VetTags: []string{"perf", "realtest"}},
 	// Two slots: the sandbox container is capped to the width it is given
 	// (docker --cpus, GOMAXPROCS), and the layer runs its two Emacsen
 	// (e2e/EMACS-LAYER-SPEC.md, "The parallelism bound, measured") on two
