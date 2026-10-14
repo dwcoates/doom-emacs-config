@@ -3274,3 +3274,25 @@ Each element is (WS LINE)."
                          "repo" (list (agent-repl-test-roster--row "a" "one" :ready))))))
       ;; Assert
       (should (equal (car (car drawn)) "one")))))
+
+;;;; ---- The one durable-instant reader ----
+
+(ert-deftest agent-repl-test-roster-row-instant-ms-reads-a-durable-instant ()
+  "The one instant reader answers a row's `:at-ms', nil without the field."
+  (should (equal (agent-repl-roster-row-instant-ms '(:last-turn-ended (:at-ms 9)) :last-turn-ended) 9))
+  (should-not (agent-repl-roster-row-instant-ms '(:last-turn-ended nil) :last-turn-ended))
+  (should-not (agent-repl-roster-row-instant-ms nil :last-selected)))
+
+(ert-deftest agent-repl-test-roster-workspace-instants-go-through-the-row-reader ()
+  "Every per-workspace instant accessor reads through the one row reader."
+  ;; Arrange
+  (let ((row '(:last-selected (:at-ms 11) :last-turn-ended (:at-ms 22)))
+        (read nil))
+    (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws) (lambda (_ws) row))
+              ((symbol-function 'agent-repl-roster-row-instant-ms)
+               (lambda (r field) (push field read) (plist-get (plist-get r field) :at-ms))))
+      ;; Act
+      (agent-repl-roster-last-selected-ms "w")
+      (agent-repl-roster-last-turn-ended-ms "w")
+      ;; Assert
+      (should (equal read '(:last-turn-ended :last-selected))))))
