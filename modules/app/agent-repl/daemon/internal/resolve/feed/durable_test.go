@@ -106,7 +106,10 @@ func mergeHeadRow(label string) *frontendv1.FeedRow {
 		Id: testEncode(feedid.Ref{WS: testWorkspace, Feed: rootFeed(), Row: feedid.RowKey{Kind: feedid.KindMergeTab, ID: "lease-7", Sub: "head"}}),
 		Row: &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{
 			Unit: &frontendv1.FeedTurnActivity_Merge{Merge: &frontendv1.FeedMerge{
-				Head: &frontendv1.FeedMergeHead{Label: &frontendv1.FeedMergeLabel{Text: label}},
+				Head: &frontendv1.FeedMergeHead{
+					Label: &frontendv1.FeedMergeLabel{Text: label},
+					Mode:  &frontendv1.FeedMergeMode{Mode: &frontendv1.FeedMergeMode_Sync{Sync: &frontendv1.FeedMergeModeSync{}}},
+				},
 			}},
 		}},
 	}

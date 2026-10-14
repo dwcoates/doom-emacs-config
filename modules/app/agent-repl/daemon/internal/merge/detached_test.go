@@ -500,8 +500,8 @@ func TestASyncMergesLiveHeadIsPinnedInItsOwnFeed(t *testing.T) {
 	h.feed.mu.Lock()
 	defer h.feed.mu.Unlock()
 	if len(h.feed.rows) != 1 || h.feed.rows[0].WS != theWorkspace || !h.feed.rows[0].Pinned ||
-		h.feed.rows[0].Row.GetActivity().GetMerge().GetHead().GetWorkspaceSwitch() != nil {
-		t.Fatalf("rows = %+v, want one pinned head on the workspace's own feed with no switch", h.feed.rows)
+		h.feed.rows[0].Row.GetActivity().GetMerge().GetHead().GetMode().GetSync() == nil {
+		t.Fatalf("rows = %+v, want one pinned sync head on the workspace's own feed", h.feed.rows)
 	}
 }
 
@@ -515,8 +515,9 @@ func TestAnAsyncHeadCarriesNoSwitchWhileItsWorkspaceIsHidden(t *testing.T) {
 
 	// Assert
 	heads := h.feed.headsOn(theWorkspace)
-	if len(heads) != 1 || heads[0].GetHead().GetWorkspaceSwitch() != nil {
-		t.Fatalf("heads = %+v, want one with no switch to a hidden workspace", heads)
+	if len(heads) != 1 || heads[0].GetHead().GetMode().GetAsync() == nil ||
+		heads[0].GetHead().GetMode().GetAsync().GetWorkspaceSwitch() != nil {
+		t.Fatalf("heads = %+v, want one async head with no switch to a hidden workspace", heads)
 	}
 }
 
@@ -533,9 +534,63 @@ func TestARevealRestatesTheAsyncHeadWithTheSwitch(t *testing.T) {
 
 	// Assert
 	heads := h.feed.headsOn(theWorkspace)
-	target := heads[len(heads)-1].GetHead().GetWorkspaceSwitch().GetAvailable().GetTarget()
+	target := heads[len(heads)-1].GetHead().GetMode().GetAsync().GetWorkspaceSwitch().GetAvailable().GetTarget()
 	if len(heads) != 2 || target.GetId() != string(theMergeWorkspace) || target.GetDir() == "" {
 		t.Fatalf("heads = %+v, want the head restated with the switch to the merge workspace", heads)
+	}
+}
+
+func TestEveryHeadAnAsyncMergePublishesIsAsync(t *testing.T) {
+	tests := []struct {
+		name   string
+		result any
+	}{
+		{"queued or running", nil},
+		{"landed", &frontendv1.FeedMergeSuccess{}},
+		{"failed", &frontendv1.FeedMergeError{Reason: &frontendv1.FeedMergeError_Failed{Failed: &frontendv1.FeedMergeFailed{}}}},
+		{"did not run", &frontendv1.FeedMergeError{Reason: &frontendv1.FeedMergeError_Abandoned{Abandoned: &frontendv1.FeedMergeAbandoned{}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.registerMergeWorkspace(theWorkspace, "request-1", "feature")
+
+			// Act
+			h.o.publishHead(theMergeWorkspace, "lease-1", "reconnect-fix → master", 1, tt.result)
+
+			// Assert
+			heads := h.feed.headsOn(theWorkspace)
+			if len(heads) != 1 || heads[0].GetHead().GetMode().GetAsync() == nil {
+				t.Fatalf("heads = %+v, want one async head", heads)
+			}
+		})
+	}
+}
+
+func TestEveryHeadASyncMergePublishesIsSync(t *testing.T) {
+	tests := []struct {
+		name   string
+		result any
+	}{
+		{"queued or running", nil},
+		{"landed", &frontendv1.FeedMergeSuccess{}},
+		{"failed", &frontendv1.FeedMergeError{Reason: &frontendv1.FeedMergeError_Failed{Failed: &frontendv1.FeedMergeFailed{}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act
+			h.o.publishHead(theWorkspace, "lease-1", "feature → master", 1, tt.result)
+
+			// Assert
+			heads := h.feed.headsOn(theWorkspace)
+			if len(heads) != 1 || heads[0].GetHead().GetMode().GetSync() == nil {
+				t.Fatalf("heads = %+v, want one sync head", heads)
+			}
+		})
 	}
 }
 
