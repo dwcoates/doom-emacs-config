@@ -1,7 +1,8 @@
 // Package integration holds the shim-claude-sidecar's BLACK-BOX suite: the real
-// sidecar binary runs as a subprocess against either the real shim-store binary
-// on a private socket, or an in-process fake store that records what the sidecar
-// wrote and answers scripted results.
+// sidecar binary runs as a subprocess against an in-process fake store that
+// keeps what the store's contract makes durable, records what the sidecar
+// wrote, and answers scripted results. The real shim-store is never started
+// here (AGENTS.md, "A system's integration tests run that system alone").
 //
 // NOTHING HERE REACHES INSIDE THE SIDECAR. Every assertion is made on what
 // crossed the wire (store.v1 envelopes around conversation.v1 facts, read back
@@ -105,15 +106,14 @@ const (
 // ---------------------------------------------------------------------------
 // Repository layout, resolved from this file's own location.
 //
-// The paths are derived rather than written as "../../shim-store" so the suite
-// is correct wherever the worktree lives and whatever the test's cwd is.
+// The paths are derived rather than written relative to the test's cwd, so
+// the suite is correct wherever the worktree lives.
 // ---------------------------------------------------------------------------
 
 type layout struct {
 	integrationDir string // .../agent-shim/claude/shim-sidecar/integration
 	sidecarDir     string // .../agent-shim/claude/shim-sidecar
 	agentShimDir   string // .../agent-shim
-	storeDir       string // .../agent-shim/shim-store
 	lockDir        string // .../agent-shim/shim-lock
 	moduleRoot     string // .../modules/app/agent-repl
 	corpusDir      string // .../modules/app/agent-repl/testdata/corpus
@@ -128,14 +128,12 @@ func resolveLayout() (layout, error) {
 	l := layout{integrationDir: filepath.Dir(self)}
 	l.sidecarDir = filepath.Dir(l.integrationDir)
 	l.agentShimDir = filepath.Dir(filepath.Dir(l.sidecarDir)) // shim-sidecar -> claude -> agent-shim
-	l.storeDir = filepath.Join(l.agentShimDir, "shim-store")
 	l.lockDir = filepath.Join(l.agentShimDir, "shim-lock")
 	l.moduleRoot = filepath.Dir(l.agentShimDir)
 	l.corpusDir = filepath.Join(l.moduleRoot, "testdata", "corpus")
 	l.projectsDir = filepath.Join(l.moduleRoot, "testdata", "projects")
 	for name, dir := range map[string]string{
 		"sidecar module":         l.sidecarDir,
-		"store module":           l.storeDir,
 		"golden corpus":          l.corpusDir,
 		"captured projects tree": l.projectsDir,
 	} {
@@ -147,8 +145,8 @@ func resolveLayout() (layout, error) {
 }
 
 // ---------------------------------------------------------------------------
-// TestMain: build BOTH binaries once. Both are this team's own systems, so
-// composing them in one suite is sanctioned.
+// TestMain: build the sidecar once, and the shim's lock helper the mocked
+// vendor spawns.
 // ---------------------------------------------------------------------------
 
 var (
@@ -156,19 +154,9 @@ var (
 	sidecarBin     string
 	testBinaryMode testenv.BuildMode
 
-	// The store binary is built LAZILY, on the first test that needs it.
-	//
-	// Most subjects run against the in-process fake store and never touch the
-	// real one, so a store module that does not compile must fail only the tests
-	// that actually compose the two systems — not the whole suite, and not the
-	// harness's own self-tests.
-	storeBinOnce sync.Once
-	storeBinPath string
-	storeBinErr  error
-
-	// The shim's lock holder, built for the same reason and on the same
-	// lazy terms: only the mocked-vendor subjects spawn a real shim, and a
-	// real shim takes its kernel claims by spawning this binary.
+	// The shim's lock holder, built LAZILY: only the mocked-vendor subjects
+	// spawn a real shim, and a real shim takes its kernel claims by spawning
+	// this binary.
 	lockBinOnce sync.Once
 	lockBinPath string
 	lockBinErr  error
@@ -238,7 +226,6 @@ func runSuite(m *testing.M) int {
 	}
 
 	sidecarBin = filepath.Join(binDir, "shim-claude-sidecar")
-	storeBinPath = filepath.Join(binDir, "shim-store")
 	lockBinPath = filepath.Join(binDir, "shim-lock")
 	if mode == testenv.UsePrebuilt {
 		for _, binary := range []struct {
@@ -246,7 +233,6 @@ func runSuite(m *testing.M) int {
 			dst  *string
 		}{
 			{name: "shim-claude-sidecar", dst: &sidecarBin},
-			{name: "shim-store", dst: &storeBinPath},
 			{name: "shim-lock", dst: &lockBinPath},
 		} {
 			path, err := testenv.SharedBinary(shared, sidecarIntegrationSharedSub, binary.name)
@@ -264,7 +250,6 @@ func runSuite(m *testing.M) int {
 	}
 	if mode == testenv.BuildInto {
 		for _, binary := range []struct{ name, dir string }{
-			{name: "shim-store", dir: repo.storeDir},
 			{name: "shim-lock", dir: repo.lockDir},
 		} {
 			if err := goBuild(binary.dir, filepath.Join(binDir, binary.name)); err != nil {
