@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
@@ -715,4 +716,21 @@ func TestAMergeWaitingForItsWorkspaceNamesWhatItWaitsOn(t *testing.T) {
 		}
 	}
 	t.Fatal("no record of the merge's wait")
+}
+
+func TestAMergePromptIsHandedToTheQueueWholeAfterItsRunWasCut(t *testing.T) {
+	// Arrange: the run's context is cut before the hand-off.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act
+	_, _ = h.o.submit(ctx, theWorkspace, "turn-1", "resolve the conflict", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR)
+
+	// Assert
+	h.queue.mu.Lock()
+	defer h.queue.mu.Unlock()
+	if len(h.queue.submitCtxErrs) != 1 || h.queue.submitCtxErrs[0] != nil {
+		t.Fatalf("submissions made under %v, want one under a live context", h.queue.submitCtxErrs)
+	}
 }
