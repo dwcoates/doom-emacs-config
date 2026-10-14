@@ -331,12 +331,7 @@ func (o *orchestrator) dropPendingResume(ctx context.Context, ws ids.WorkspaceID
 	delete(o.repoOf, ws)
 	delete(o.ledgerOf, ws)
 	o.mu.Unlock()
-	summary, declared := cause.summaryRunning()
-	if !declared {
-		summary = fmt.Sprintf("this merge was abandoned while it was running (%s)", cause)
-		o.deps.Log.Global().Error("daemon.merge.abandoned", "a merge was abandoned under a cause with no declared summary",
-			dlog.Context{"workspace": string(ws), "cause": string(cause)})
-	}
+	summary := o.abandonedSentence(ws, cause, true)
 	log.Info(op, "dropped a merge a restart took back before it resumed: its entry, its lease and its progress record together", fields)
 	o.publishAbandonedWith(ctx, ws, lease, entry, cause, summary)
 	o.clearOffer(ws)
