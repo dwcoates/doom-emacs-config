@@ -18,7 +18,6 @@ import { ConnectError, Code } from "@connectrpc/connect";
 import { withOrder } from "../feed-order.js";
 import { OpenFeedResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_feed_pb";
 import { FoldMergeBubbleResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_fold_merge_bubble_pb";
-import type { WatchFeedResponse } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_feed_pb";
 import {
   clearClientFailures,
   onClientVerdict,
@@ -42,8 +41,10 @@ import {
   push,
   pushHeld,
   pushSelection,
+  liveRootHarness,
   responseRow,
   stubRenderers,
+  scrollHost,
   subagentRow,
   thinkingRow,
   tokenFor,
@@ -78,10 +79,7 @@ async function settle(): Promise<void> {
 
 /** Mount the feed into a fresh host inside a scroll box. */
 function mount(h: Harness = harness()) {
-  const scroll = document.createElement("div");
-  const host = document.createElement("div");
-  scroll.append(host);
-  document.body.replaceChildren(scroll);
+  const { scroll, host } = scrollHost();
   const feed = mountFeed(host, h.ctx, {
     renderers: stubRenderers(),
     scrollBox: scroll,
@@ -152,10 +150,7 @@ describe("mountFeed: opening the root feed", () => {
   });
 
   it("upserts what the tail pushes", async () => {
-    const channels = new Map<string, Channel<WatchFeedResponse>>();
-    const channel = new Channel<WatchFeedResponse>();
-    channels.set("tok:root", channel);
-    const h = harness({ channels });
+    const { h, channel } = liveRootHarness();
     const { host } = mount(h);
     await settle();
     channel.push(push(responseRow("r1")));
@@ -165,10 +160,7 @@ describe("mountFeed: opening the root feed", () => {
 
   it("routes a selection frame to the feed rather than reading it as a row", async () => {
     // Arrange — a live tail carrying a drawn response.
-    const channels = new Map<string, Channel<WatchFeedResponse>>();
-    const channel = new Channel<WatchFeedResponse>();
-    channels.set("tok:root", channel);
-    const h = harness({ channels });
+    const { h, channel } = liveRootHarness();
     const { host } = mount(h);
     await settle();
     channel.push(push(responseRow("r1")));
@@ -187,10 +179,7 @@ describe("mountFeed: opening the root feed", () => {
 
   it("clears the selection mark when a clear frame arrives", async () => {
     // Arrange — a row selected on the live tail.
-    const channels = new Map<string, Channel<WatchFeedResponse>>();
-    const channel = new Channel<WatchFeedResponse>();
-    channels.set("tok:root", channel);
-    const h = harness({ channels });
+    const { h, channel } = liveRootHarness();
     const { host } = mount(h);
     await settle();
     channel.push(push(responseRow("r1")));
@@ -312,12 +301,8 @@ describe("mountFeed: re-opening the tail", () => {
    * channel the test can close to kill the stream.
    */
   function reopening(pages: FeedRow[][]) {
-    const channels = new Map<string, Channel<WatchFeedResponse>>();
-    const channel = new Channel<WatchFeedResponse>();
-    channels.set("tok:root", channel);
     let served = 0;
-    const h = harness({
-      channels,
+    const { h, channel } = liveRootHarness({
       openFeed: (req) => {
         const rows = pages[Math.min(served, pages.length - 1)];
         served += 1;
@@ -434,10 +419,7 @@ describe("mountFeed: the bubble kinds", () => {
 
   it("opens a folded merge bubble when a push ships its fold open (the merge failed)", async () => {
     // Arrange
-    const channels = new Map<string, Channel<WatchFeedResponse>>();
-    const channel = new Channel<WatchFeedResponse>();
-    channels.set("tok:root", channel);
-    const h = harness({ channels });
+    const { h, channel } = liveRootHarness();
     mount(h);
     await settle();
     channel.push(push(mergeRow("m1", true)));
@@ -451,10 +433,7 @@ describe("mountFeed: the bubble kinds", () => {
 
   it("folds an open merge bubble when a push ships the daemon's success default folded", async () => {
     // Arrange
-    const channels = new Map<string, Channel<WatchFeedResponse>>();
-    const channel = new Channel<WatchFeedResponse>();
-    channels.set("tok:root", channel);
-    const h = harness({ channels });
+    const { h, channel } = liveRootHarness();
     const { host } = mount(h);
     await settle();
     channel.push(push(mergeRow("m1", false)));
@@ -483,10 +462,7 @@ describe("mountFeed: the bubble kinds", () => {
     const fold = row.row.value.unit.value.head?.fold;
     if (fold === undefined) throw new Error("no fold");
     fold.decidedBy = { case: undefined };
-    const channels = new Map<string, Channel<WatchFeedResponse>>();
-    const channel = new Channel<WatchFeedResponse>();
-    channels.set("tok:root", channel);
-    const h = harness({ channels });
+    const { h, channel } = liveRootHarness();
     mount(h);
     await settle();
     // Act
@@ -515,17 +491,10 @@ describe("mountFeed: the bubble kinds", () => {
 describe("mountFeed: a row growing above a scrolled-away reader", () => {
   /** A mounted root feed whose rows are laid out from HEIGHTS by row id. */
   async function laidOut(rows: FeedRow[], heights: Record<string, number>) {
-    const channels = new Map<string, Channel<WatchFeedResponse>>();
-    const channel = new Channel<WatchFeedResponse>();
-    channels.set("tok:root", channel);
-    const h = harness({
-      channels,
+    const { h, channel } = liveRootHarness({
       openFeed: (req) => openSuccess(page(req.feed === undefined ? rows : []), tokenFor(req)),
     });
-    const scroll = document.createElement("div");
-    const host = document.createElement("div");
-    scroll.append(host);
-    document.body.replaceChildren(scroll);
+    const { scroll, host } = scrollHost();
     let top = 0;
     const total = (): number => Object.values(heights).reduce((sum, x) => sum + x, 0);
     Object.defineProperties(scroll, {
@@ -707,10 +676,7 @@ describe("mountFeed: a held prompt's first draw", () => {
 describe("mountFeed: the held section", () => {
   /** A root feed with a held host, tailing a channel the test drives. */
   async function mountedSection(held = heldSection([])) {
-    const channels = new Map<string, Channel<WatchFeedResponse>>();
-    const channel = new Channel<WatchFeedResponse>();
-    channels.set("tok:root", channel);
-    const h = harness({ channels, openFeed: (req) => openSuccess(page([responseRow("r1")]), tokenFor(req), held) });
+    const { h, channel } = liveRootHarness({ openFeed: (req) => openSuccess(page([responseRow("r1")]), tokenFor(req), held) });
     const scroll = document.createElement("div");
     const host = document.createElement("div");
     const heldHost = document.createElement("section");
@@ -773,10 +739,7 @@ describe("mountFeed: the held section", () => {
           result: { case: "success", value: { page: page([]), watch: { value: tokenFor(req) } } },
         }),
     });
-    const scroll = document.createElement("div");
-    const host = document.createElement("div");
-    scroll.append(host);
-    document.body.replaceChildren(scroll);
+    const { scroll, host } = scrollHost();
     // Act
     mountFeed(host, h.ctx, { renderers: stubRenderers(), scrollBox: scroll });
     await settle();
@@ -954,9 +917,7 @@ describe("mountFeed: selectDetachedWork", () => {
   });
 
   it("walks the breadcrumbs top-down, expanding each container", async () => {
-    const channels = new Map<string, Channel<WatchFeedResponse>>();
     const h = harness({
-      channels,
       openFeed: (req) => {
         if (req.feed === undefined)
           return openSuccess(page([subagentRow("b1")]), tokenFor(req));
@@ -979,9 +940,7 @@ describe("mountFeed: selectDetachedWork", () => {
   it("opens the containers selecting a nested head requires, then the head itself as the jump's entry", async () => {
     // Arrange: a subagent (inner) spawned by a subagent (b1); the probe of the
     // inner HEAD answers its own feed's crumbs, the head itself last.
-    const channels = new Map<string, Channel<WatchFeedResponse>>();
     const h = harness({
-      channels,
       openFeed: (req) => {
         if (req.feed === undefined)
           return openSuccess(page([subagentRow("b1")]), tokenFor(req));
@@ -1303,10 +1262,7 @@ describe("mountFeed: a jump expands its entry and closes it once wholly out of v
     });
     let revealRow:
       ((id: ReturnType<typeof feedId>) => Promise<boolean>) | undefined;
-    const scroll = document.createElement("div");
-    const host = document.createElement("div");
-    scroll.append(host);
-    document.body.replaceChildren(scroll);
+    const { scroll, host } = scrollHost();
     scriptFeedBox(scroll);
     const feed = mountFeed(host, h.ctx, {
       renderers: stubRenderers({
@@ -1647,10 +1603,7 @@ describe("mountFeed: returning to the tail closes every expanded entry", () => {
           ? openSuccess(page(rows), tokenFor(req))
           : openSuccess(page([]), tokenFor(req)),
     });
-    const scroll = document.createElement("div");
-    const host = document.createElement("div");
-    scroll.append(host);
-    document.body.replaceChildren(scroll);
+    const { scroll, host } = scrollHost();
     scriptFeedBox(scroll);
     const feed = mountFeed(host, h.ctx, {
       renderers: stubRenderers({
@@ -1801,10 +1754,7 @@ describe("mountFeed: disposal", () => {
   });
 
   it("stops upserting once disposed", async () => {
-    const channels = new Map<string, Channel<WatchFeedResponse>>();
-    const channel = new Channel<WatchFeedResponse>();
-    channels.set("tok:root", channel);
-    const h = harness({ channels });
+    const { h, channel } = liveRootHarness();
     const { feed, host } = mount(h);
     await settle();
     feed.dispose();
@@ -1834,10 +1784,7 @@ describe("mountFeed: the scroll box", () => {
 
   it("takes the host's own parent as the scroll box when none is named", async () => {
     // Arrange
-    const scroll = document.createElement("div");
-    const host = document.createElement("div");
-    scroll.append(host);
-    document.body.replaceChildren(scroll);
+    const { host } = scrollHost();
     const h = harness({
       openFeed: (req) =>
         openSuccess(page([userPromptRow("p1", "hello")]), tokenFor(req)),
@@ -1885,10 +1832,7 @@ describe("mountFeed: the scroll box", () => {
     // Arrange — THE OCCLUSION. The mount must subscribe the scroll box's own
     // size, or a footer settling after the tail render leaves the last bubble
     // below the fold, clipped by the strip.
-    const scroll = document.createElement("div");
-    const host = document.createElement("div");
-    scroll.append(host);
-    document.body.replaceChildren(scroll);
+    const { scroll, host } = scrollHost();
     const geometry = withGeometry(scroll, {
       scrollHeight: 1000,
       clientHeight: 300,
@@ -1913,10 +1857,7 @@ describe("mountFeed: the scroll box", () => {
 
   it("stops observing the scroll box's size when the feed is disposed", async () => {
     // Arrange
-    const scroll = document.createElement("div");
-    const host = document.createElement("div");
-    scroll.append(host);
-    document.body.replaceChildren(scroll);
+    const { scroll, host } = scrollHost();
     const h = harness();
     const feed = mountFeed(host, h.ctx, {
       renderers: stubRenderers(),
@@ -1934,11 +1875,7 @@ describe("mountFeed: the scroll box", () => {
 describe("mountFeed: a bubble row re-pushed as another kind", () => {
   /** A root feed holding ROW, with a tail the test pushes on. */
   function withTail(row: FeedRow) {
-    const channels = new Map<string, Channel<WatchFeedResponse>>();
-    const channel = new Channel<WatchFeedResponse>();
-    channels.set("tok:root", channel);
-    const h = harness({
-      channels,
+    const { h, channel } = liveRootHarness({
       openFeed: (req) =>
         openSuccess(page(req.feed === undefined ? [row] : []), tokenFor(req)),
     });
@@ -2131,10 +2068,7 @@ describe("mountFeed: the root open's harder answers", () => {
         return openSuccess(page([userPromptRow("p1", "hello")]), tokenFor(req));
       },
     });
-    const scroll = document.createElement("div");
-    const host = document.createElement("div");
-    scroll.append(host);
-    document.body.replaceChildren(scroll);
+    const { scroll, host } = scrollHost();
     // Act
     feed = mountFeed(host, h.ctx, {
       renderers: stubRenderers(),
@@ -2198,10 +2132,7 @@ describe("mountFeed: a walk whose container will not open", () => {
 describe("mountFeed: disposal is once", () => {
   it("cancels the root watch exactly once, however often dispose is called", async () => {
     // Arrange
-    const channels = new Map<string, Channel<WatchFeedResponse>>();
-    const channel = new Channel<WatchFeedResponse>();
-    channels.set("tok:root", channel);
-    const h = harness({ channels });
+    const { h, channel } = liveRootHarness();
     const { feed, host } = mount(h);
     await settle();
     // Act
@@ -2616,11 +2547,7 @@ describe("mountFeed: the latest-visible latch", () => {
    * follow, with nothing yet laid out where they land.
    */
   async function mounted(held: number) {
-    const channels = new Map<string, Channel<WatchFeedResponse>>();
-    const channel = new Channel<WatchFeedResponse>();
-    channels.set("tok:root", channel);
-    const h = harness({
-      channels,
+    const { h, channel } = liveRootHarness({
       openFeed: (req) => openSuccess(page([responseRow("r1")]), tokenFor(req)),
     });
     const scroll = document.createElement("div");
@@ -2716,17 +2643,10 @@ describe("mountFeed: a click on the feed background ends the selection", () => {
    * tail — the reply selection holding the follow off.
    */
   async function selected() {
-    const channels = new Map<string, Channel<WatchFeedResponse>>();
-    const channel = new Channel<WatchFeedResponse>();
-    channels.set("tok:root", channel);
-    const h = harness({
-      channels,
+    const { h, channel } = liveRootHarness({
       openFeed: (req) => openSuccess(page([responseRow("r1")]), tokenFor(req)),
     });
-    const scroll = document.createElement("div");
-    const host = document.createElement("div");
-    scroll.append(host);
-    document.body.replaceChildren(scroll);
+    const { scroll, host } = scrollHost();
     const geometry = { top: 100, height: 2000 };
     Object.defineProperties(scroll, {
       scrollHeight: { get: () => geometry.height },
@@ -2840,21 +2760,14 @@ describe("mountFeed: a click on the feed background ends the selection", () => {
 describe("mountFeed: the selected row leaving the viewport ends the selection", () => {
   /** A mounted root feed with r1 and r2 drawn on a live tail. */
   async function mounted() {
-    const channels = new Map<string, Channel<WatchFeedResponse>>();
-    const channel = new Channel<WatchFeedResponse>();
-    channels.set("tok:root", channel);
-    const h = harness({
-      channels,
+    const { h, channel } = liveRootHarness({
       openFeed: (req) =>
         openSuccess(
           page([responseRow("r1"), responseRow("r2")]),
           tokenFor(req),
         ),
     });
-    const scroll = document.createElement("div");
-    const host = document.createElement("div");
-    scroll.append(host);
-    document.body.replaceChildren(scroll);
+    const { scroll, host } = scrollHost();
     const geometry = { top: 0 };
     Object.defineProperties(scroll, {
       scrollHeight: { get: () => 2000 },
@@ -2918,18 +2831,11 @@ describe("mountFeed: the selected row leaving the viewport ends the selection", 
 describe("mountFeed: a click on a thinking bubble only expands it", () => {
   /** A mounted root feed drawing the real thinking bubble k1 and a response r1. */
   async function mounted() {
-    const channels = new Map<string, Channel<WatchFeedResponse>>();
-    const channel = new Channel<WatchFeedResponse>();
-    channels.set("tok:root", channel);
-    const h = harness({
-      channels,
+    const { h, channel } = liveRootHarness({
       openFeed: (req) =>
         openSuccess(page([thinkingRow("k1"), responseRow("r1")]), tokenFor(req)),
     });
-    const scroll = document.createElement("div");
-    const host = document.createElement("div");
-    scroll.append(host);
-    document.body.replaceChildren(scroll);
+    const { scroll, host } = scrollHost();
     const feed = mountFeed(host, h.ctx, {
       renderers: stubRenderers({ response: drawFeedResponse }),
       scrollBox: scroll,
