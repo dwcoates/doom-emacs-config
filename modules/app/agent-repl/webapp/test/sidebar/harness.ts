@@ -43,6 +43,7 @@ import { AttentionRegistry, type BlinkTimers } from "../../src/sidebar/attention
 import type { Grouping, MaturityStageName, SidebarContext } from "../../src/sidebar/context.js";
 import { createSidebarView, type SidebarView } from "../../src/sidebar/view.js";
 import { createDropdowns } from "../../src/sidebar/dropdowns.js";
+import { createRowHover } from "../../src/sidebar/row-hover.js";
 
 /** The webview's own workspace. */
 export const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-self", dir: "/w/self" });
@@ -140,13 +141,15 @@ export function sidebarContext(
   openDetails: Set<string> = new Set(),
 ): SidebarContext & { disposers: Array<() => void> } {
   const disposers: Array<() => void> = [];
+  const dropdowns = createDropdowns();
   return {
     ctx,
     parentWorkspace: () => ctx.workspace,
     view,
     openDetails,
     drawnStatus: createDrawnStatusLog("sidebar row", "sidebar.drawn-status"),
-    dropdowns: createDropdowns(),
+    dropdowns,
+    rowHover: createRowHover(dropdowns, openDetails),
     attention: new AttentionRegistry(timers),
     tasks: [],
     disposers,

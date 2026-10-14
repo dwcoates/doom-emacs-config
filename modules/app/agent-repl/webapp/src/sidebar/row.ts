@@ -298,12 +298,11 @@ export function drawRosterRow(
   // than the contract describes; the reveal is now visibility alone.
   ws.appendChild(drawRowMenu(target));
 
-  ws.appendChild(
-    drawRosterRowDetail(requireMessage(u.detail, `${path}.detail`), `${path}.detail`),
-  );
-  // AFTER the panel is in the tree: the hover wiring listens on the panel too,
-  // so the pointer can travel from the row into it without it closing.
-  installHoverPanel(ws, line, duration, sc, workspace.id);
+  const detail = drawRosterRowDetail(requireMessage(u.detail, `${path}.detail`), `${path}.detail`);
+  ws.appendChild(detail);
+  // The hover wiring listens on the panel too, so the pointer can travel from
+  // the row into it without it closing.
+  installHoverPanel(ws, line, duration, detail, sc, workspace.id);
 
   const visibleChildren = expandVisibleRows(u.children, `${path}.children`);
   if (visibleChildren.length > 0) {
@@ -628,18 +627,9 @@ export function drawStatusMark(arm: RosterStatusCase, path: string, markers: Row
 }
 
 /**
- * The detail panel opens on HOVER. There is no chevron (owner ruling,
- * 2026-09-14): "in the sidebar, when you hover a workspace, the chevron
- * appears. There should be no chevron. Hovering the workspace should have the
- * same effect as opening the chevron currently does."
- *
- * Two delays, and they are the whole mechanism. `HOVER_OPEN_DELAY_MS` is
- * intent: a pointer crossing the rail on its way somewhere else passes over
- * several rows in a few milliseconds, and opening on the bare `mouseenter`
- * flickers a panel under each of them. `HOVER_CLOSE_GRACE_MS` is travel: the
- * panel hangs BELOW the row rather than touching it, so the pointer is
- * briefly over neither on its way in, and a close on the bare `mouseleave`
- * would snatch the panel away as it is being reached for.
+ * Wire a drawn row's duration field, panel and line to the page's hover gesture
+ * (`row-hover.ts`), which owns the timers and the openness so a redraw can
+ * neither drop a gesture in flight nor leave a thrown-away row acting.
  *
  * Openness is the row's `.open` class, remembered by THIS page
  * (`SidebarContext.openDetails`), so a redraw arriving while the pointer rests
@@ -659,117 +649,33 @@ export function drawStatusMark(arm: RosterStatusCase, path: string, markers: Row
  * The keyboard gets the same panel through `focusin`/`focusout`, without the
  * intent delay — a focus move is deliberate in a way a pointer's path is not.
  */
-export const HOVER_OPEN_DELAY_MS = 3000;
-export const HOVER_CLOSE_GRACE_MS = 120;
-
 function installHoverPanel(
   ws: HTMLElement,
   line: HTMLElement,
   trigger: HTMLElement,
+  detail: HTMLElement,
   sc: SidebarContext,
   workspaceId: string,
 ): void {
-  const detail = ws.querySelector<HTMLElement>(":scope > .detail");
-  let pointerOverRow = false;
-  let pointerOverPanel = false;
-  let focusWithin = false;
-  let openTimer: ReturnType<typeof setTimeout> | undefined;
-  let closeTimer: ReturnType<typeof setTimeout> | undefined;
-
-  const cancelTimers = (): void => {
-    if (openTimer !== undefined) {
-      clearTimeout(openTimer);
-      openTimer = undefined;
-    }
-    if (closeTimer !== undefined) {
-      clearTimeout(closeTimer);
-      closeTimer = undefined;
-    }
-  };
-
-  const setOpen = (open: boolean, via: string): void => {
-    if (ws.classList.contains("open") === open) return;
-    log.debug("toggling a row's detail panel", {
-      operation: "sidebar.row.detail-toggle",
-      context: { workspace: workspaceId, open, via },
-    });
-    if (open) sc.openDetails.add(workspaceId);
-    else sc.openDetails.delete(workspaceId);
-    paintRowDetail(ws, open);
-    if (open) registerDetail();
-    else if (detail !== null) sc.dropdowns.released(detail);
-  };
-
-  // THE POPOVER IS A DROPDOWN: a click in the rail outside it (and outside its
-  // row's line, which opens it on focus) closes it, and opening another
-  // dropdown closes it.
-  const registerDetail = (): void => {
-    if (detail === null) return;
-    sc.dropdowns.opened({
-      kind: "row-detail",
-      key: `row-detail:${workspaceId}`,
-      element: detail,
-      openers: [line],
-      close: () => {
-        cancelTimers();
-        sc.openDetails.delete(workspaceId);
-        paintRowDetail(ws, false);
-      },
-    });
-  };
-
-  const scheduleOpen = (): void => {
-    cancelTimers();
-    openTimer = setTimeout(() => {
-      openTimer = undefined;
-      setOpen(true, "hover");
-    }, HOVER_OPEN_DELAY_MS);
-  };
-
-  const scheduleClose = (): void => {
-    cancelTimers();
-    closeTimer = setTimeout(() => {
-      closeTimer = undefined;
-      if (pointerOverRow || pointerOverPanel || focusWithin) return;
-      setOpen(false, "leave");
-    }, HOVER_CLOSE_GRACE_MS);
-  };
-
+  const hover = sc.rowHover;
+  hover.drawn(workspaceId, { ws, line, trigger, detail });
   trigger.addEventListener("mouseenter", () => {
-    pointerOverRow = true;
-    if (ws.classList.contains("open")) cancelTimers();
-    else scheduleOpen();
+    hover.enter(workspaceId, "trigger");
   });
   trigger.addEventListener("mouseleave", () => {
-    pointerOverRow = false;
-    scheduleClose();
+    hover.leave(workspaceId, "trigger");
   });
-
-  if (detail !== null) {
-    detail.addEventListener("mouseenter", () => {
-      pointerOverPanel = true;
-      cancelTimers();
-    });
-    detail.addEventListener("mouseleave", () => {
-      pointerOverPanel = false;
-      scheduleClose();
-    });
-  }
-
-  // A row a redraw drew open is still the page's open dropdown.
-  if (ws.classList.contains("open")) registerDetail();
-
+  detail.addEventListener("mouseenter", () => {
+    hover.enter(workspaceId, "panel");
+  });
+  detail.addEventListener("mouseleave", () => {
+    hover.leave(workspaceId, "panel");
+  });
   line.addEventListener("focusin", () => {
-    focusWithin = true;
-    cancelTimers();
-    setOpen(true, "focus");
+    hover.focusIn(workspaceId);
   });
-  // `focusout` fires BEFORE the next element takes focus, so `activeElement`
-  // is not yet the answer; the event's own `relatedTarget` is.
   line.addEventListener("focusout", (event) => {
-    const next = event.relatedTarget;
-    focusWithin = next instanceof Node && line.contains(next);
-    if (!focusWithin) scheduleClose();
+    hover.focusOut(workspaceId, event.relatedTarget);
   });
 }
 

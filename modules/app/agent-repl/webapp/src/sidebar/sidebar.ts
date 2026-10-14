@@ -29,6 +29,7 @@ import { requireCase, requireMessage, unreachablePushArm } from "../rpc/strict.j
 import { watchStream } from "../rpc/streams.js";
 import { AttentionRegistry, type BlinkTimers } from "./attention.js";
 import { createDropdowns } from "./dropdowns.js";
+import { createRowHover } from "./row-hover.js";
 import { changeView } from "./view-change.js";
 import { createSidebarView, GROUPING_VIEW_KEY } from "./view.js";
 import { GROUPINGS, type Grouping, type SidebarContext } from "./context.js";
@@ -179,13 +180,16 @@ function mountSidebarIn(
     disposers = [];
   };
 
+  const openDetails = new Set<string>();
+  const dropdowns = createDropdowns();
   const sc: SidebarContext = {
     ctx,
     parentWorkspace: () => (placement.case === "page" ? placement.ctx.workspace : current),
     view,
-    openDetails: new Set<string>(),
+    openDetails,
     drawnStatus: createDrawnStatusLog("sidebar row", "sidebar.drawn-status"),
-    dropdowns: createDropdowns(),
+    dropdowns,
+    rowHover: createRowHover(dropdowns, openDetails),
     attention,
     tasks: [],
     onDispose: (fn) => {
@@ -231,6 +235,17 @@ function mountSidebarIn(
     sc.dropdowns.dismissOutside(event.target);
   };
   host.addEventListener("click", dismiss);
+  // THE RAIL SAYS WHERE THE POINTER IS (row-hover.ts): a row drawn under a
+  // resting pointer never sees it leave, but the host, which no draw
+  // replaces, sees every move and the pointer leaving the rail.
+  const pointerMoved = (event: MouseEvent): void => {
+    sc.rowHover.pointerAt(event.target);
+  };
+  const pointerLeft = (): void => {
+    sc.rowHover.pointerAt(null);
+  };
+  host.addEventListener("mousemove", pointerMoved);
+  host.addEventListener("mouseleave", pointerLeft);
 
   // ONLY A PAGE'S OWN SIDEBAR IS GATED: the webhost's is the one on screen.
   const unseen =
@@ -307,6 +322,9 @@ function mountSidebarIn(
       window.removeEventListener("resize", replace);
       window.removeEventListener("scroll", replace, true);
       host.removeEventListener("click", dismiss);
+      host.removeEventListener("mousemove", pointerMoved);
+      host.removeEventListener("mouseleave", pointerLeft);
+      sc.rowHover.dispose();
       clear();
       attention.dispose();
       host.replaceChildren();
