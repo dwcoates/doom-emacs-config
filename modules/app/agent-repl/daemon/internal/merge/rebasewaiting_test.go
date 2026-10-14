@@ -30,15 +30,13 @@ func newWaitingWorld(t *testing.T, waiting ...ids.WorkspaceID) *waitingWorld {
 	w := &waitingWorld{chain: c, rebased: make(chan ids.WorkspaceID, 16), passes: make(chan wsm.RepoKey, 16)}
 	c.h.o.onWaitingRebased = func(ws ids.WorkspaceID) { w.rebased <- ws }
 	c.h.o.onWaitingPass = func(repo wsm.RepoKey) { w.passes <- repo }
-	_, w.releaseHead = c.runner.hold(c.dirs[theWorkspace])
 	enqueue(t, c.h)
 	c.queue(t, "ws-b", "b1")
 	c.queue(t, "ws-in", "in1")
 	for i, ws := range waiting {
 		c.queue(t, ws, "w"+string(rune('1'+i)))
 	}
-	w.done = admitAsync(c.h, context.Background())
-	c.awaitLined(t, "ws-b")
+	w.releaseHead, w.done = c.headHoldsTheTurn(t, "ws-b")
 	return w
 }
 

@@ -24,6 +24,7 @@ import (
 
 	"agent-repld/integration/fakegit"
 	"agent-repld/internal/chessboard"
+	"agent-repld/internal/cpugov"
 	"agent-repld/internal/daemonaddr"
 	"agent-repld/internal/procgroup"
 	"agent-repld/internal/stateroot"
@@ -224,6 +225,16 @@ func HostNeutralNamingEnv() []string {
 // board resolves to "no checkout" deterministically.
 func HostNeutralCheckoutEnv() []string {
 	return statedEmpty(chessboard.EngineDirEnv)
+}
+
+// HostNeutralPowerEnv pins the power source a test daemon's gate governor
+// reads to AC (cpugov.FixedPowerEnv). The power source decides how many merges
+// at the front of a queue are worked on -- the top two on AC, the head alone
+// on battery -- and a suite must not inherit whether its machine happens to
+// be plugged in. A test of the battery window sets it through ExtraEnv, which
+// StartDaemon appends after this.
+func HostNeutralPowerEnv() []string {
+	return []string{cpugov.FixedPowerEnv + "=" + cpugov.PowerAC.String()}
 }
 
 // statedEmpty answers each key stated EMPTY, the one form every host-neutral
@@ -800,6 +811,7 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 	env = append(env, BuildIdentityEnv(PinnedCheckout(t))...)
 	env = append(env, HostNeutralNamingEnv()...)
 	env = append(env, HostNeutralCheckoutEnv()...)
+	env = append(env, HostNeutralPowerEnv()...)
 	env = append(env, TemporaryRegistrationEnv(t)...)
 	// The daemon's OWN checkout identity is always overridden, whether or not
 	// a test cares which repository it is. The merge orchestrator's two
