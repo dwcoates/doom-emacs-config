@@ -746,12 +746,7 @@ func (c *chain) prompts(ws ids.WorkspaceID, origin conversationv1.PromptOrigin) 
 }
 
 func (c *chain) recorded(level, op, message string) bool {
-	for _, r := range c.h.logs.Records() {
-		if r.Level == level && r.Operation == op && strings.Contains(r.Message, message) {
-			return true
-		}
-	}
-	return false
+	return loggedLike(c.h, logLike{level: level, op: op, text: message})
 }
 
 // broken scripts a gate whose command was not found.

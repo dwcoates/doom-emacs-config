@@ -1371,14 +1371,8 @@ func TestAfterARestartNothingResumesAheadOfAHeadNotTakenBackYet(t *testing.T) {
 	if err != nil || resuming {
 		t.Fatalf("resumeIn = (%s, %v, %v), want nothing resumed ahead of the head", ws, resuming, err)
 	}
-	found := false
-	for _, r := range h.logs.Records() {
-		if r.Level == "info" && r.Operation == "daemon.merge.resume" && strings.Contains(r.Message, "not taken back yet") &&
-			r.Context["head"] == "ws-head" && r.Context["waiting"] == "ws-behind" {
-			found = true
-		}
-	}
-	if !found {
+	if !loggedLike(h, logLike{level: "info", op: "daemon.merge.resume", text: "not taken back yet",
+		context: map[string]string{"head": "ws-head", "waiting": "ws-behind"}}) {
 		t.Fatal("the wait for the head's adoption was not recorded with the head and the merge waiting")
 	}
 }
@@ -1399,10 +1393,8 @@ func TestAfterARestartAHeadThatTheChainHoldsLeavesTheResumesBehindIt(t *testing.
 	if err != nil || resuming {
 		t.Fatalf("resumeIn = (%v, %v), want nothing resumed: the head runs in its chain", resuming, err)
 	}
-	for _, r := range h.logs.Records() {
-		if strings.Contains(r.Message, "not taken back yet") {
-			t.Fatal("a head running here was recorded as not taken back")
-		}
+	if loggedLike(h, logLike{text: "not taken back yet"}) {
+		t.Fatal("a head running here was recorded as not taken back")
 	}
 }
 
