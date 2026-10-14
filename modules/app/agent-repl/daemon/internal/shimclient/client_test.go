@@ -3,10 +3,12 @@ package shimclient
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -1917,5 +1919,197 @@ func TestAnAdoptedShimsWitnessedDeathIsOneError(t *testing.T) {
 	}
 	if errorsRecorded != 1 {
 		t.Fatalf("the death wrote %d error records, want 1: %+v", errorsRecorded, log.Records())
+	}
+}
+
+// killAnswered is a KillSession answer whose session ended.
+func killAnswered() *shimv1.KillSessionResponse {
+	return &shimv1.KillSessionResponse{Result: &shimv1.KillSessionResponse_Success{Success: &shimv1.KillSessionSuccess{}}}
+}
+
+// killRefused is a KillSession answer whose session did not end.
+func killRefused() *shimv1.KillSessionResponse {
+	return &shimv1.KillSessionResponse{Result: &shimv1.KillSessionResponse_Failure{Failure: &shimv1.KillSessionFailure{
+		Cause: &shimv1.KillSessionFailure_QueryRefusedToEnd{QueryRefusedToEnd: &shimv1.KillSessionQueryRefusedToEnd{}},
+	}}}
+}
+
+// killHangUpWait bounds a wait the test expects to end at once.
+const killHangUpWait = 5 * time.Second
+
+// TestKillSessionHangsUpAfterReadingAnEndedSessionsAnswer pins the stand-down
+// order: the answer is read, then the connection it came on is hung up, and
+// only then does KillSession return to a caller that waits for the exit. The
+// shim exits on that hang-up, so it cannot leave before its answer is read.
+func TestKillSessionHangsUpAfterReadingAnEndedSessionsAnswer(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	f.killSessionResp = killAnswered()
+	c := newClient(dlog.NewTestLogger(), ids.WorkspaceID("ws-1"), uds, defaultBackoff, nil, nil)
+
+	// Act.
+	resp, err := c.KillSession(context.Background(), &shimv1.KillSessionRequest{})
+
+	// Assert.
+	if err != nil || resp.GetSuccess() == nil {
+		t.Fatalf("KillSession() = %v, %v, want the ended session's answer", resp, err)
+	}
+	if n := openConns(c.conns); n != 0 {
+		t.Fatalf("%d connection(s) to the shim still open when KillSession returned", n)
+	}
+	select {
+	case <-<-f.killHungUp:
+	case <-time.After(killHangUpWait):
+		t.Fatal("the shim never saw the hang-up")
+	}
+}
+
+// TestKillSessionKeepsTheConnectionOfARefusedKill covers a kill the shim
+// refused: the shim goes on serving, so nothing is hung up on it.
+func TestKillSessionKeepsTheConnectionOfARefusedKill(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	f.killSessionResp = killRefused()
+	c := newClient(dlog.NewTestLogger(), ids.WorkspaceID("ws-1"), uds, defaultBackoff, nil, nil)
+
+	// Act.
+	resp, err := c.KillSession(context.Background(), &shimv1.KillSessionRequest{})
+
+	// Assert.
+	if err != nil || resp.GetFailure() == nil {
+		t.Fatalf("KillSession() = %v, %v, want the refusal", resp, err)
+	}
+	if n := openConns(c.conns); n != 1 {
+		t.Fatalf("%d connection(s) to the shim open after a refused kill, want 1", n)
+	}
+}
+
+// TestKillSessionRecordsAHangUpThatFailed covers a hang-up whose close fails:
+// the answer still goes to the caller, whose stop escalation ends the shim,
+// and the failure is recorded once at ERROR with the workspace and the cause.
+func TestKillSessionRecordsAHangUpThatFailed(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	f.killSessionResp = killAnswered()
+	log := dlog.NewTestLogger()
+	c := newClient(log, ids.WorkspaceID("ws-1"), uds, defaultBackoff, nil, nil)
+	c.conns.track(&closeConn{err: errors.New("close refused")})
+
+	// Act.
+	resp, err := c.KillSession(context.Background(), &shimv1.KillSessionRequest{})
+
+	// Assert.
+	if err != nil || resp.GetSuccess() == nil {
+		t.Fatalf("KillSession() = %v, %v, want the ended session's answer", resp, err)
+	}
+	rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.shimclient.kill_session"})
+	if !ok {
+		t.Fatalf("no error record of the failed hang-up: %+v", log.Records())
+	}
+	if rec.Context["workspace_id"] != "ws-1" || !strings.Contains(fmt.Sprint(rec.Context["error"]), "close refused") {
+		t.Fatalf("the failed hang-up's record = %+v, want the workspace and the cause", rec.Context)
+	}
+}
+
+// TestCallerAbandoned pins the one reading of a request its own caller
+// withdrew: an ended caller context is recorded at INFO with its cause, and a
+// live one records nothing and is not an abandonment.
+func TestCallerAbandoned(t *testing.T) {
+	tests := []struct {
+		name      string
+		cancelled bool
+		want      bool
+	}{
+		{name: "the caller's context ended", cancelled: true, want: true},
+		{name: "the caller's context is live", cancelled: false, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			log := dlog.NewTestLogger()
+			c := newClient(log, ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff, nil, nil)
+			ctx, cancel := context.WithCancel(context.Background())
+			if tt.cancelled {
+				cancel()
+			} else {
+				defer cancel()
+			}
+
+			// Act.
+			got := c.callerAbandoned(ctx, "daemon.shimclient.verb", "the request", dlog.Context{"workspace_id": "ws-1"})
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("callerAbandoned() = %v, want %v", got, tt.want)
+			}
+			if !tt.want {
+				if len(log.Records()) != 0 {
+					t.Fatalf("a live caller's request was recorded: %+v", log.Records())
+				}
+				return
+			}
+			if !hasRecordSaying(log, "info", "daemon.shimclient.verb", "the request was abandoned: its caller's context ended before the shim answered") {
+				t.Fatalf("no info record of the abandonment: %+v", log.Records())
+			}
+			if got := recordFields(t, log, "daemon.shimclient.verb")["cause"]; got != context.Canceled.Error() {
+				t.Fatalf("cause = %v, want %q", got, context.Canceled.Error())
+			}
+		})
+	}
+}
+
+// TestARequestItsCallerAbandonedIsRecordedAtInfo pins that a unary call and a
+// stream open whose own caller's context ended first are both read by
+// callerAbandoned: recorded at INFO with the cause, never at ERROR, and the
+// error still returned. A site that hand-rolled its own reading would fail
+// the shared message.
+func TestARequestItsCallerAbandonedIsRecordedAtInfo(t *testing.T) {
+	tests := []struct {
+		name      string
+		operation string
+		what      string
+		call      func(ctx context.Context, c *client) error
+	}{
+		{
+			name: "a unary call", operation: "daemon.shimclient.set_keepalive", what: "the shim call",
+			call: func(ctx context.Context, c *client) error {
+				_, err := c.SetKeepalive(ctx, &shimv1.SetKeepaliveRequest{Cadence: &shimv1.SetKeepaliveRequest_Run{Run: &shimv1.SetKeepaliveRun{}}})
+				return err
+			},
+		},
+		{
+			name: "a stream open", operation: "daemon.shimclient.watch_bash", what: "the stream open",
+			call: func(ctx context.Context, c *client) error {
+				_, err := c.WatchBash(ctx, &conversationv1.DetachedWorkId{Value: "toolu_1"})
+				return err
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			_, uds := startFakeShim(t, shortDir(t))
+			log := dlog.NewTestLogger()
+			c := newClient(log, ids.WorkspaceID("ws-1"), uds, defaultBackoff, nil, nil)
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+
+			// Act.
+			err := tt.call(ctx, c)
+
+			// Assert.
+			if err == nil {
+				t.Fatal("the abandoned request answered no error")
+			}
+			if hasRecordAt(log, "error", tt.operation) {
+				t.Fatalf("the abandoned request was recorded at error: %+v", log.Records())
+			}
+			if !hasRecordSaying(log, "info", tt.operation, tt.what+" was abandoned: its caller's context ended before the shim answered") {
+				t.Fatalf("no info record of the abandonment: %+v", log.Records())
+			}
+		})
 	}
 }

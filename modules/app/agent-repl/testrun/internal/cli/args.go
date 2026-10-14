@@ -7,6 +7,7 @@ import (
 	"io"
 	"slices"
 	"strings"
+	"time"
 
 	"agentrepl/testrun/roster"
 )
@@ -180,4 +181,34 @@ func ParseCoverArgs(argv []string) (CoverArgs, error) {
 		return CoverArgs{}, errors.New("cover-report needs -name, -module and -covdirs")
 	}
 	return a, nil
+}
+
+// WardenArgs is a parsed `testrun warden` command line (internal/life).
+type WardenArgs struct {
+	// Runner is the runner the warden watches, and its session id.
+	Runner int
+	// Since is when the runner started.
+	Since time.Time
+	// Sentinel is the runner's sentinel.
+	Sentinel int
+}
+
+// ParseWardenArgs reads `--runner PID --since UNIX --sentinel PID`, every one
+// required.
+func ParseWardenArgs(argv []string) (WardenArgs, error) {
+	fs := flag.NewFlagSet("warden", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	runner := fs.Int("runner", 0, "the runner's pid, its session id")
+	since := fs.Int64("since", 0, "when the runner started, in Unix seconds")
+	sentinel := fs.Int("sentinel", 0, "the runner's sentinel's pid")
+	if err := fs.Parse(argv); err != nil {
+		return WardenArgs{}, fmt.Errorf("warden: %w", err)
+	}
+	if fs.NArg() > 0 {
+		return WardenArgs{}, fmt.Errorf("warden: unexpected arguments %v", fs.Args())
+	}
+	if *runner <= 0 || *since <= 0 || *sentinel <= 0 {
+		return WardenArgs{}, errors.New("warden needs --runner, --since and --sentinel")
+	}
+	return WardenArgs{Runner: *runner, Since: time.Unix(*since, 0), Sentinel: *sentinel}, nil
 }

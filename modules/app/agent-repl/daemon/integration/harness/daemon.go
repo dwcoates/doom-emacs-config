@@ -25,6 +25,7 @@ import (
 	"agent-repld/integration/fakegit"
 	"agent-repld/internal/chessboard"
 	"agent-repld/internal/daemonaddr"
+	"agent-repld/internal/procgroup"
 	"agent-repld/internal/stateroot"
 	"agent-repld/internal/tempdirs"
 	"agent-repld/internal/workspace"
@@ -1500,40 +1501,11 @@ func (d *Daemon) Freeze() {
 // reported with the member it names, and each ends the kill.
 func (d *Daemon) signalGroup(pgid int, sig syscall.Signal) bool {
 	d.t.Helper()
-	if err := signalGroupMembers(pgid, sig, syscall.Kill, liveGroupMembers); err != nil {
+	if err := procgroup.Signal(pgid, sig); err != nil {
 		d.t.Errorf("harness: %v", err)
 		return false
 	}
 	return true
-}
-
-// signalGroupMembers sends sig to process group pgid through kill, and on
-// EPERM to each member live lists, by pid. It answers nil once every live
-// member was signalled or was already gone.
-func signalGroupMembers(pgid int, sig syscall.Signal, kill func(int, syscall.Signal) error,
-	live func(int) ([]groupMember, error)) error {
-	err := kill(-pgid, sig)
-	if err == nil || errors.Is(err, syscall.ESRCH) {
-		return nil
-	}
-	if !errors.Is(err, syscall.EPERM) {
-		return fmt.Errorf("%v process group %d: %w", sig, pgid, err)
-	}
-	members, listErr := live(pgid)
-	if listErr != nil {
-		return fmt.Errorf("%v process group %d: %w, and its members could not be read: %v", sig, pgid, err, listErr)
-	}
-	var refused []error
-	for _, m := range members {
-		if kerr := kill(m.pid, sig); kerr != nil && !errors.Is(kerr, syscall.ESRCH) {
-			refused = append(refused, fmt.Errorf("member %d (%s, %s): %w", m.pid, m.comm, m.state, kerr))
-		}
-	}
-	if len(refused) > 0 {
-		return fmt.Errorf("%v process group %d: %w, and signalling its live members one by one failed: %w",
-			sig, pgid, err, errors.Join(refused...))
-	}
-	return nil
 }
 
 // killLeader SIGKILLs the daemon's own process, and only it, continues it out

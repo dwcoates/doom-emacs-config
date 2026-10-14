@@ -255,9 +255,14 @@ type Manager struct {
 	MountParent string
 	// Pid is this run's pid: it names the record, the volume and the mount.
 	Pid int
-	// KillUnder SIGKILLs every process whose command line names a path under
-	// dir, answering how many it killed.
-	KillUnder func(dir string) (int, error)
+	// Reap is the one reap (reap.Reap): it freezes, kills and confirms gone
+	// every member it is given.
+	Reap func(reap.Members) (reap.Result, error)
+	// Own names this run's processes for its own release: its session, when
+	// its leader started, and who is never reaped. The mount is added as the
+	// directory net, and the session is written into the record so a reclaim
+	// of this run's disk takes the same members.
+	Own reap.Members
 	// Probe runs the short-bounded reads of the disk manager and the host
 	// (`hdiutil info`, `sysctl`, `ps`, `lsof`).
 	Probe BoundedRunner
@@ -291,7 +296,8 @@ type Volume struct {
 func Default(log Logger) Manager {
 	return Manager{
 		Run: ExecRunner, Registry: DefaultRegistry, MountParent: DefaultMountParent, Pid: os.Getpid(),
-		KillUnder: reap.Under, Probe: RunBounded, Watch: RunWatched, Alive: ProcessAlive, Mounted: IsMountPoint, Log: log, Now: time.Now,
+		Reap:  reap.OSReap(log),
+		Probe: RunBounded, Watch: RunWatched, Alive: ProcessAlive, Mounted: IsMountPoint, Log: log, Now: time.Now,
 		LockBound: LockBound,
 	}
 }
@@ -429,7 +435,7 @@ func (m Manager) attach(sizeMiB int) (_ *Volume, err error) {
 	v.Device = fields[0]
 	// THE RECORD IS WRITTEN BEFORE ANYTHING ELSE CAN FAIL, so a run killed
 	// from here on leaves a device the next run can find.
-	if err := writeRecord(lock, v.Device, v.Mount); err != nil {
+	if err := writeRecord(lock, record{Device: v.Device, Mount: v.Mount, Session: m.Own.Session, Since: m.Own.Since}); err != nil {
 		return v, err
 	}
 	return v, nil
@@ -482,15 +488,13 @@ func (v *Volume) Release() error {
 		// leaves children in process groups of their own (a test daemon, its
 		// fake shim, fake git); a detach forced under them revoked their
 		// executable and left them spinning, orphaned, for 13 hours at about
-		// half a core each (artr-43519, 2026-10-13). Every process running
-		// out of the volume is killed first, as Reclaim does; a kill that
-		// fails keeps the disk and its record for the next run's Reclaim.
-		killed, err := v.m.KillUnder(v.Mount)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("kill what still runs out of %s before detaching %s: %w", v.Mount, v.Device, err))
+		// half a core each (artr-43519, 2026-10-13). Every member of the run
+		// (its session, and what runs out of the volume) is reaped first; a
+		// reap that fails keeps the disk and its record for the next run's
+		// Reclaim.
+		if _, err := v.m.reapMembers(v.m.Own, v.Mount); err != nil {
+			errs = append(errs, fmt.Errorf("reap what still runs out of %s before detaching %s: %w", v.Mount, v.Device, err))
 			detached = false
-		} else if killed > 0 {
-			v.m.Log.Infof("RAM disk release: killed %d process(es) still running out of %s before detaching %s", killed, v.Mount, v.Device)
 		}
 	}
 	if v.Device != "" && detached {
@@ -706,7 +710,8 @@ func (m Manager) takeStray(dir string, pid int) (killed int, taken bool, err err
 	if mounted {
 		return 0, false, nil
 	}
-	killed, err = m.KillUnder(dir)
+	res, err := m.reapMembers(reap.Members{What: "the dead run's mount point " + dir, Except: []int{m.Pid}}, dir)
+	killed = len(res.Killed)
 	if err != nil {
 		return killed, false, fmt.Errorf("kill what still runs out of the dead run's mount point %s: %w", dir, err)
 	}
@@ -734,6 +739,36 @@ func IsMountPoint(dir string) (bool, error) {
 	return devices[0] != devices[1], nil
 }
 
+// logReclaimed records one dead run's reclaimed disk or mount point.
+func (m Manager) logReclaimed(r Reclaimed) {
+	if r.Stray {
+		m.Log.Infof("removed the mount point %s left by dead run pid %d, which no record named (killed %d leftover processes)", r.Mount, r.Pid, r.Killed)
+		return
+	}
+	m.Log.Infof("reclaimed the RAM disk %s at %s left by dead run pid %d (attached %v, killed %d leftover processes)", r.Device, r.Mount, r.Pid, r.Attached, r.Killed)
+}
+
+// ReclaimRun reclaims the RAM disk of the run of pid, which has died: the
+// warden's release of a runner killed before its own (cmd testrun's warden).
+// It is Reclaim for that one record, under the record's own flock, so the
+// next run's Reclaim never takes the same disk at once. A run with no record
+// left (it released its disk, or ran on the disk) answers false.
+func (m Manager) ReclaimRun(pid int) (bool, error) {
+	if _, err := os.Stat(m.recordPath(pid)); errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	r, ok, err := m.reclaimOne(m.recordPath(pid))
+	if err != nil {
+		err = fmt.Errorf("reclaim the RAM disk of dead run pid %d: %w", pid, err)
+		m.Log.Errorf("%v", err)
+		return false, err
+	}
+	if ok {
+		m.logReclaimed(r)
+	}
+	return ok, nil
+}
+
 func (m Manager) reclaimOne(path string) (Reclaimed, bool, error) {
 	pid, err := strconv.Atoi(strings.TrimSuffix(filepath.Base(path), ".lock"))
 	if err != nil {
@@ -751,7 +786,8 @@ func (m Manager) reclaimOne(path string) (Reclaimed, bool, error) {
 	if err != nil {
 		return Reclaimed{}, false, fmt.Errorf("read the RAM disk record %s: %w", path, err)
 	}
-	device, mount := parseRecord(string(raw))
+	rec := parseRecord(string(raw))
+	device, mount := rec.Device, rec.Mount
 	r := Reclaimed{Pid: pid, Device: device, Mount: mount}
 	if device != "" {
 		info, err := m.listImages()
@@ -762,8 +798,8 @@ func (m Manager) reclaimOne(path string) (Reclaimed, bool, error) {
 	}
 	if r.Attached {
 		if mount != "" {
-			killed, err := m.KillUnder(mount)
-			r.Killed = killed
+			res, err := m.reapMembers(reap.Members{What: fmt.Sprintf("dead run pid %d", pid), Session: rec.Session, Since: rec.Since, Except: []int{m.Pid}}, mount)
+			r.Killed = len(res.Killed)
 			if err != nil {
 				return r, false, fmt.Errorf("kill what still runs out of %s: %w", mount, err)
 			}
@@ -973,8 +1009,19 @@ func (m Manager) recordPath(pid int) string {
 	return filepath.Join(m.Registry, fmt.Sprintf("%d.lock", pid))
 }
 
-func writeRecord(f *os.File, device, mount string) error {
-	if _, err := f.WriteAt([]byte("device="+device+"\nmount="+mount+"\n"), 0); err != nil {
+// record is what a run's lock record names: its RAM disk, where it is
+// mounted, and the run's session (reap.Members.Session and Since), so a
+// reclaim of a dead run reaps the same members its own release would have.
+type record struct {
+	Device  string
+	Mount   string
+	Session int
+	Since   time.Time
+}
+
+func writeRecord(f *os.File, r record) error {
+	body := fmt.Sprintf("device=%s\nmount=%s\nsession=%d\nsince=%d\n", r.Device, r.Mount, r.Session, r.Since.Unix())
+	if _, err := f.WriteAt([]byte(body), 0); err != nil {
 		return fmt.Errorf("write the RAM disk record %s: %w", f.Name(), err)
 	}
 	if err := f.Sync(); err != nil {
@@ -983,16 +1030,39 @@ func writeRecord(f *os.File, device, mount string) error {
 	return nil
 }
 
-func parseRecord(raw string) (device, mount string) {
-	for _, line := range strings.Split(raw, "\n") {
-		if v, ok := strings.CutPrefix(line, "device="); ok {
-			device = v
-		}
-		if v, ok := strings.CutPrefix(line, "mount="); ok {
-			mount = v
+// parseRecord reads a record. A record that names no session (one written
+// before the session was recorded) is reclaimed by its mount alone.
+func parseRecord(raw string) record {
+	var r record
+	for line := range strings.SplitSeq(raw, "\n") {
+		key, v, _ := strings.Cut(line, "=")
+		switch key {
+		case "device":
+			r.Device = v
+		case "mount":
+			r.Mount = v
+		case "session":
+			r.Session, _ = strconv.Atoi(v)
+		case "since":
+			if secs, err := strconv.ParseInt(v, 10, 64); err == nil {
+				r.Since = time.Unix(secs, 0)
+			}
 		}
 	}
-	return device, mount
+	return r
+}
+
+// reapMembers reaps ms with dir's spellings as its directory net.
+func (m Manager) reapMembers(ms reap.Members, dir string) (reap.Result, error) {
+	dirs, err := reap.Spellings(dir)
+	if err != nil {
+		return reap.Result{}, err
+	}
+	ms.Dirs = append(slices.Clone(ms.Dirs), dirs...)
+	if ms.What == "" {
+		ms.What = "the run on " + dir
+	}
+	return m.Reap(ms)
 }
 
 // deviceIdentifier reads "Device Identifier:" out of `diskutil info`.
