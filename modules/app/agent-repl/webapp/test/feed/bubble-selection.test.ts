@@ -15,6 +15,7 @@ import {
   SELECTION_GOVERNED_ATTRIBUTE,
   SELECT_REQUEST,
   bubbleClick,
+  expandsOnOwnClick,
   governedRowAt,
   installBubbleSelect,
   isSelectionGoverned,
@@ -46,6 +47,33 @@ function rowOf(arm: MessageInitShape<typeof FeedRowSchema>["row"], selectable = 
 const RESPONSE = { case: "activity", value: { unit: { case: "response", value: {} } } } as const;
 const TOOL = { case: "activity", value: { unit: { case: "simpleToolCall", value: {} } } } as const;
 const THINKING = { case: "activity", value: { unit: { case: "response", value: { thinking: true } } } } as const;
+const INTERIM = {
+  case: "activity",
+  value: { unit: { case: "response", value: { interim: true, result: { case: "success", value: {} } } } },
+} as const;
+
+describe("expandsOnOwnClick", () => {
+  it.each([
+    ["a thinking bubble", THINKING, true],
+    ["an interim response", INTERIM, true],
+    ["a response that is its turn's latest row", RESPONSE, false],
+    [
+      "the turn's answer",
+      { case: "activity", value: { unit: { case: "response", value: { interim: true, finalAnswer: true } } } },
+      false,
+    ],
+    [
+      "a cut-short response",
+      { case: "activity", value: { unit: { case: "response", value: { interim: true, result: { case: "error", value: {} } } } } },
+      false,
+    ],
+    ["a user prompt", { case: "userPrompt", value: {} }, false],
+    ["a tool call", TOOL, false],
+  ] as const)("answers %s: %s", (_name, arm, want) => {
+    // Arrange / Act / Assert
+    expect(expandsOnOwnClick(rowOf(arm))).toBe(want);
+  });
+});
 
 describe("isSelectionGoverned", () => {
   it.each([
@@ -53,6 +81,7 @@ describe("isSelectionGoverned", () => {
     ["an agent prompt", { case: "agentPrompt", value: {} }, true],
     ["a response bubble", RESPONSE, true],
     ["a thinking bubble", THINKING, false],
+    ["an interim response", INTERIM, false],
     ["a tool call", TOOL, false],
     ["a separation", { case: "separation", value: {} }, false],
   ] as const)("answers %s: %s", (_name, arm, want) => {
@@ -79,6 +108,8 @@ describe("stampSelection", () => {
   it.each([
     ["a root thinking bubble", THINKING, true, [false, false, true]],
     ["a sub-feed thinking bubble", THINKING, false, [false, false, false]],
+    ["a root interim response", INTERIM, true, [false, false, true]],
+    ["a sub-feed interim response", INTERIM, false, [false, false, false]],
     ["a root response bubble", RESPONSE, true, [true, false, false]],
   ] as const)("stamps the out-of-view collapse on %s", (_name, arm, root, want) => {
     // Arrange

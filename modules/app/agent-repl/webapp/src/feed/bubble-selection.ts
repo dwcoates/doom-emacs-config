@@ -19,10 +19,11 @@
  *   - the click's requests, sent through the one `SelectFeedRow` call the
  *     webapp makes (`selectFeedRow`, select-feed-row.ts).
  *
- * A THINKING BUBBLE IS NOT GOVERNED (owner specification, 2026-10-14): a click
- * on one only EXPANDS it, through the feed's ordinary click-to-expand, with no
+ * A THINKING BUBBLE AND AN INTERIM RESPONSE ARE NOT GOVERNED (owner
+ * specification, 2026-10-14, extended to the interim the same day): a click on
+ * either only EXPANDS it, through the feed's ordinary click-to-expand, with no
  * selection, no selection mark and nothing a selection triggers. The daemon
- * never stamps one selectable either. Its row instead wears
+ * never stamps either selectable. Its row instead wears
  * `OUT_OF_VIEW_COLLAPSE_ATTRIBUTE`, so the expansion closes again once the
  * bubble is scrolled wholly out of view, as the selection's did.
  *
@@ -34,6 +35,7 @@
  */
 import type { FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { CLICK_THROUGH_SELECTOR } from "../expand.js";
+import { isInterimResponse } from "./cards/response.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { guardMalformed } from "../rpc/guard.js";
@@ -48,24 +50,32 @@ export const SELECTION_GOVERNED_ATTRIBUTE = "data-selection-governed";
 export const SELECTABLE_ATTRIBUTE = "data-selectable";
 
 /**
- * The attribute a root-feed THINKING row wears: a click expands its bubble, and
- * the expansion closes once the bubble is wholly out of view (feed.ts,
- * out-of-view-collapse.ts).
+ * The attribute a root-feed row whose bubble EXPANDS ON ITS OWN CLICK wears: a
+ * click expands its bubble, and the expansion closes once the bubble is wholly
+ * out of view (feed.ts, out-of-view-collapse.ts).
  */
 export const OUT_OF_VIEW_COLLAPSE_ATTRIBUTE = "data-collapses-out-of-view";
 
-/** Whether ROW is a thinking bubble: a response the daemon flags `thinking`. */
-function isThinking(row: FeedRow): boolean {
-  return row.row.case === "activity" && row.row.value.unit.case === "response" && row.row.value.unit.value.thinking;
+/**
+ * Whether ROW's bubble expands on a click of its own instead of being
+ * selected: a thinking bubble (a response the daemon flags `thinking`) or an
+ * interim response (`isInterimResponse`, the predicate its one-line cap and
+ * its fill are drawn by).
+ */
+export function expandsOnOwnClick(row: FeedRow): boolean {
+  if (row.row.case !== "activity" || row.row.value.unit.case !== "response") return false;
+  const response = row.row.value.unit.value;
+  return response.thinking || isInterimResponse(response);
 }
 
 /**
  * Whether ROW's bubble is one the selection governs on the root feed: a user
- * prompt, an agent prompt, or a response bubble that is not a thinking bubble,
- * whatever its state. The daemon's `selectable` stamp says which of them can be
- * selected NOW; this says which never expand on a click of their own, so a
- * response still arriving is not expandable either. A thinking bubble expands
- * on a click of its own and is never selected.
+ * prompt, an agent prompt, or a response bubble that does not expand on its
+ * own click (`expandsOnOwnClick`), whatever its state. The daemon's
+ * `selectable` stamp says which of them can be selected NOW; this says which
+ * never expand on a click of their own, so a response still arriving is not
+ * expandable either. A thinking bubble or an interim response expands on a
+ * click of its own and is never selected.
  */
 export function isSelectionGoverned(row: FeedRow): boolean {
   switch (row.row.case) {
@@ -73,7 +83,7 @@ export function isSelectionGoverned(row: FeedRow): boolean {
     case "agentPrompt":
       return true;
     case "activity":
-      return row.row.value.unit.case === "response" && !isThinking(row);
+      return row.row.value.unit.case === "response" && !expandsOnOwnClick(row);
     default:
       return false;
   }
@@ -81,15 +91,16 @@ export function isSelectionGoverned(row: FeedRow): boolean {
 
 /**
  * State the selection attributes on a ROOT-feed row's element: governed by
- * kind, selectable by the daemon's stamp, and the out-of-view collapse a root
- * thinking bubble's click expansion takes instead. A row of any other feed
+ * kind, selectable by the daemon's stamp, and the out-of-view collapse the
+ * click expansion of a root bubble that expands on its own click takes
+ * instead. A row of any other feed
  * carries none of them, because only the root feed's bubbles can be selected.
  */
 export function stampSelection(el: HTMLElement, row: FeedRow, root: boolean): void {
   const governed = root && isSelectionGoverned(row);
   el.toggleAttribute(SELECTION_GOVERNED_ATTRIBUTE, governed);
   el.toggleAttribute(SELECTABLE_ATTRIBUTE, governed && row.selectable !== undefined);
-  el.toggleAttribute(OUT_OF_VIEW_COLLAPSE_ATTRIBUTE, root && isThinking(row));
+  el.toggleAttribute(OUT_OF_VIEW_COLLAPSE_ATTRIBUTE, root && expandsOnOwnClick(row));
 }
 
 /**

@@ -1,15 +1,17 @@
 /**
- * AN OPEN THINKING BUBBLE PAINTS EXACTLY WHAT A CLOSED ONE DOES, IN WEBKIT
- * (owner specification, 2026-10-14).
+ * AN OPEN THINKING BUBBLE OR INTERIM RESPONSE PAINTS EXACTLY WHAT A CLOSED ONE
+ * DOES, IN WEBKIT (owner specification, 2026-10-14, extended to the interim the
+ * same day).
  *
- * A click on a root-feed thinking bubble only expands it: its scroll box takes
+ * A click on a root-feed thinking bubble or interim response only expands it:
+ * its scroll box takes
  * `.expanded`, its row takes no selection, and so its card never wears
  * `.entry-selected`. Nothing the stylesheet keys on the open box may then draw
  * a background, a border color, a shadow or an outline the closed bubble does
  * not wear. jsdom resolves no cascade, so this reads the computed paint in
- * real headless WebKit over the real stylesheet, against an interim response
- * whose open box DOES take the eggshell border, so the probe is shown to see
- * the rule it guards.
+ * real headless WebKit over the real stylesheet, against a capped response
+ * that is neither (an agentic card) whose open box DOES take the eggshell
+ * border, so the probe is shown to see the rule it guards.
  */
 import type { Browser, Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -49,7 +51,7 @@ async function paintOf(page: Page, html: string): Promise<Paint> {
   }, html);
 }
 
-describe("an expanded thinking bubble in WebKit", () => {
+describe("an expanded thinking bubble or interim response in WebKit", () => {
   let browser: Browser;
   let page: Page;
 
@@ -61,20 +63,23 @@ describe("an expanded thinking bubble in WebKit", () => {
     await browser.close();
   });
 
-  it("paints the same background, border, shadow and outline open as closed", async () => {
+  it.each([
+    ["a thinking bubble", "thinking", ""],
+    ["an interim response", "response", "interim-response"],
+  ] as const)("paints %s the same background, border, shadow and outline open as closed", async (_kind, variant, classes) => {
     // Arrange
-    const closed = await paintOf(page, bubbleHtml("thinking", "", false));
+    const closed = await paintOf(page, bubbleHtml(variant, classes, false));
     // Act
-    const open = await paintOf(page, bubbleHtml("thinking", "", true));
+    const open = await paintOf(page, bubbleHtml(variant, classes, true));
     // Assert
     expect(open).toEqual(closed);
   });
 
-  it("is probed by a paint that does change: an interim response's open box takes the eggshell border", async () => {
+  it("is probed by a paint that does change: an agentic card's open box takes the eggshell border", async () => {
     // Arrange
-    const closed = await paintOf(page, bubbleHtml("response", "interim-response", false));
+    const closed = await paintOf(page, bubbleHtml("agentic", "", false));
     // Act
-    const open = await paintOf(page, bubbleHtml("response", "interim-response", true));
+    const open = await paintOf(page, bubbleHtml("agentic", "", true));
     // Assert
     expect(open.border).not.toBe(closed.border);
   });

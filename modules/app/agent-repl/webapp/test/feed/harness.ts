@@ -589,6 +589,23 @@ export function thinkingRow(id: string, markdown = "reasoning"): FeedRow {
   });
 }
 
+/** A settled INTERIM response row: the daemon proved a later row of its turn landed. */
+export function interimRow(id: string, markdown = "meanwhile"): FeedRow {
+  return create(FeedRowSchema, {
+    id: feedId(id),
+    order: orderFor(id),
+    row: {
+      case: "activity",
+      value: {
+        unit: {
+          case: "response",
+          value: { interim: true, result: { case: "success", value: { prose: { markdown } } } },
+        },
+      },
+    },
+  });
+}
+
 /**
  * A tool-call row: running with an observed beat (which ticks), or returned.
  *
