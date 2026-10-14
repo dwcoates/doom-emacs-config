@@ -38,6 +38,11 @@ type world struct {
 	mu      sync.Mutex
 	live    map[ids.WorkspaceID]bool
 	opening []string
+	// leaveDuringOwed makes the owed read the moment the client goes away:
+	// it cancels the open and fails the read with the cancellation.
+	leaveDuringOwed bool
+	// cancel ends the running open (startEmitting sets it).
+	cancel context.CancelFunc
 	// owed are the workspaces owed a cut turn; owedErr fails the read.
 	owed    map[ids.WorkspaceID]bool
 	owedErr error
@@ -94,6 +99,10 @@ func newWorld(t *testing.T) *world {
 			w.mu.Lock()
 			defer w.mu.Unlock()
 			w.owedReads++
+			if w.leaveDuringOwed {
+				w.cancel()
+				return false, context.Canceled
+			}
 			return w.owed[ws], w.owedErr
 		},
 		Row: func(ws ids.WorkspaceID) (*frontendv1.RosterRow, uint64, bool) {
@@ -145,6 +154,9 @@ func (w *world) start(workspaces ...Workspace) (context.CancelFunc, <-chan struc
 
 func (w *world) startEmitting(emit Emit, workspaces ...Workspace) (context.CancelFunc, <-chan struct{}) {
 	ctx, cancel := context.WithCancel(context.Background())
+	w.mu.Lock()
+	w.cancel = cancel
+	w.mu.Unlock()
 	returned := make(chan struct{})
 	go func() {
 		defer close(returned)
@@ -954,6 +966,33 @@ func TestAnOwedReadThatFailsOpensFailed(t *testing.T) {
 
 	// Assert
 	w.expect(t, "a failed whether a turn the restart cut is owed could not be read: database is locked")
+}
+
+func TestAnOwedReadTheClientLeftIsNoFailure(t *testing.T) {
+	// Arrange: the client goes away while the owed read is in flight.
+	w := newWorld(t)
+	w.leaveDuringOwed = true
+
+	// Act
+	_, returned := w.start(none("a"))
+	awaitReturned(t, returned)
+
+	// Assert: recorded at INFO with its cause, and no ERROR at all.
+	for _, r := range w.log.Records() {
+		if r.Level == dlog.LevelError {
+			t.Fatalf("records = %+v, want no error for a client that left", w.log.Records())
+		}
+	}
+	found := false
+	for _, r := range w.log.Records() {
+		if r.Level == dlog.LevelInfo && r.Context[dlog.KeyWorkspaceID] == "a" && r.Context["cause"] == context.Canceled.Error() &&
+			strings.Contains(r.Message, "went away while whether the workspace is owed a cut turn was read") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("records = %+v, want the INFO naming the workspace and the cancellation", w.log.Records())
+	}
 }
 
 func TestAHiddenWorkspacesCutTurnIsKeptAndPaidWhenItIsOpened(t *testing.T) {
