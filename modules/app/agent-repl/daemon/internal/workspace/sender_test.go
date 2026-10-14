@@ -77,7 +77,7 @@ func TestSenderStartTurnCarriesTheDaemonsMintedTurn(t *testing.T) {
 	client := &fakeSenderClient{startTurn: &shimv1.StartTurnResponse{
 		Result: &shimv1.StartTurnResponse_Success{Success: &shimv1.StartTurnSuccess{}},
 	}}
-	s := &sender{client: client}
+	s := newTestSender(client)
 
 	// Act
 	if _, err := s.StartTurn(context.Background(), ids.TurnID("turn-1"), nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
@@ -96,22 +96,17 @@ func TestSenderStartTurnCarriesTheDaemonsMintedTurn(t *testing.T) {
 func TestSenderStartTurnNeverAsksForHistory(t *testing.T) {
 	tests := []struct {
 		name      string
-		known     func() *conversationv1.HistoryPointer
+		known     *conversationv1.HistoryPointer
 		wantKnown string
 		wantTail  bool
 	}{
 		{
 			name:      "the main watch's pointer bounds the page",
-			known:     func() *conversationv1.HistoryPointer { return &conversationv1.HistoryPointer{Value: "ptr-41"} },
+			known:     &conversationv1.HistoryPointer{Value: "ptr-41"},
 			wantKnown: "ptr-41",
 		},
 		{
 			name:     "a main watch served nothing opens tail only",
-			known:    func() *conversationv1.HistoryPointer { return nil },
-			wantTail: true,
-		},
-		{
-			name:     "a sender with no watcher opens tail only",
 			wantTail: true,
 		},
 	}
@@ -122,7 +117,7 @@ func TestSenderStartTurnNeverAsksForHistory(t *testing.T) {
 			client := &fakeSenderClient{startTurn: &shimv1.StartTurnResponse{
 				Result: &shimv1.StartTurnResponse_Success{Success: &shimv1.StartTurnSuccess{}},
 			}}
-			s := &sender{client: client, known: tt.known}
+			s := &sender{client: client, watcher: watching(&fakeMainWatch{known: tt.known})}
 
 			// Act.
 			if _, err := s.StartTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
@@ -147,9 +142,9 @@ func TestSenderStartTurnReturnsTheSuccessWhole(t *testing.T) {
 	want := &shimv1.StartTurnSuccess{
 		Prompt: &conversationv1.AgentPrompt{Agent: &conversationv1.AgentId{Value: "main-1"}},
 	}
-	s := &sender{client: &fakeSenderClient{startTurn: &shimv1.StartTurnResponse{
+	s := newTestSender(&fakeSenderClient{startTurn: &shimv1.StartTurnResponse{
 		Result: &shimv1.StartTurnResponse_Success{Success: want},
-	}}}
+	}})
 
 	// Act
 	got, err := s.StartTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
@@ -167,12 +162,12 @@ func TestSenderStartTurnReturnsTheSuccessWhole(t *testing.T) {
 // learns WHICH refusal it was rather than a sentence.
 func TestSenderStartTurnCarriesTheRefusalArm(t *testing.T) {
 	// Arrange
-	s := &sender{client: &fakeSenderClient{startTurn: &shimv1.StartTurnResponse{
+	s := newTestSender(&fakeSenderClient{startTurn: &shimv1.StartTurnResponse{
 		Result: &shimv1.StartTurnResponse_Failure{Failure: &shimv1.StartTurnFailure{
 			Detail: "the query is gone",
 			Kind:   &shimv1.StartTurnFailure_QueryDead{QueryDead: &shimv1.StartTurnQueryDead{}},
 		}},
-	}}}
+	}})
 
 	// Act
 	_, err := s.StartTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
@@ -190,7 +185,7 @@ func TestSenderStartTurnCarriesTheRefusalArm(t *testing.T) {
 func TestSenderStartTurnMarksAShimThatDiedUnderTheCallForTheQueue(t *testing.T) {
 	// Arrange
 	died := fmt.Errorf("%w: unavailable: dial unix /s.sock: connect: connection refused", shimclient.ErrShimDied)
-	s := &sender{client: &fakeSenderClient{startTurnErr: died}}
+	s := newTestSender(&fakeSenderClient{startTurnErr: died})
 
 	// Act
 	_, err := s.StartTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
@@ -206,14 +201,14 @@ func TestSenderStartTurnMarksAShimThatDiedUnderTheCallForTheQueue(t *testing.T) 
 // its typed arm rather than retried.
 func TestSenderStartTurnLeavesADaemonDoubleSubmitTerminal(t *testing.T) {
 	// Arrange
-	s := &sender{client: &fakeSenderClient{startTurn: &shimv1.StartTurnResponse{
+	s := newTestSender(&fakeSenderClient{startTurn: &shimv1.StartTurnResponse{
 		Result: &shimv1.StartTurnResponse_Failure{Failure: &shimv1.StartTurnFailure{
 			Detail: "turn t-9 is already in flight",
 			Kind: &shimv1.StartTurnFailure_TurnAlreadyOpen{
 				TurnAlreadyOpen: &shimv1.StartTurnTurnAlreadyOpen{},
 			},
 		}},
-	}}}
+	}})
 
 	// Act
 	_, err := s.StartTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
@@ -232,7 +227,7 @@ func TestSenderStartTurnLeavesADaemonDoubleSubmitTerminal(t *testing.T) {
 // neither arm, which is illegal and is surfaced rather than read as success.
 func TestSenderStartTurnRefusesAnEmptyResponse(t *testing.T) {
 	// Arrange
-	s := &sender{client: &fakeSenderClient{startTurn: &shimv1.StartTurnResponse{}}}
+	s := newTestSender(&fakeSenderClient{startTurn: &shimv1.StartTurnResponse{}})
 
 	// Act
 	_, err := s.StartTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
@@ -250,7 +245,7 @@ func TestSenderPromptAgentAddressesTheAgent(t *testing.T) {
 	client := &fakeSenderClient{updateAgent: &shimv1.UpdateAgentResponse{
 		Result: &shimv1.UpdateAgentResponse_Success{Success: &shimv1.UpdateAgentSuccess{}},
 	}}
-	s := &sender{client: client}
+	s := newTestSender(client)
 
 	// Act
 	if err := s.PromptAgent(context.Background(), &conversationv1.AgentId{Value: "sub-1"}, nil); err != nil {
@@ -267,12 +262,12 @@ func TestSenderPromptAgentAddressesTheAgent(t *testing.T) {
 // against an unserved option produces.
 func TestSenderSetModelCarriesTheCatalogRefusal(t *testing.T) {
 	// Arrange
-	s := &sender{client: &fakeSenderClient{setModel: &shimv1.SetSessionModelResponse{
+	s := newTestSender(&fakeSenderClient{setModel: &shimv1.SetSessionModelResponse{
 		Result: &shimv1.SetSessionModelResponse_Failure{Failure: &shimv1.SetSessionModelFailure{
 			Detail: "not served",
 			Cause:  &shimv1.SetSessionModelFailure_ModelNotInCatalog{ModelNotInCatalog: &shimv1.SetSessionModelNotInCatalog{}},
 		}},
-	}}}
+	}})
 
 	// Act
 	err := s.SetModel(context.Background(), "invented")
@@ -288,12 +283,12 @@ func TestSenderSetModelCarriesTheCatalogRefusal(t *testing.T) {
 // against a session that is not up.
 func TestSenderSetPermissionModeCarriesTheNoSessionRefusal(t *testing.T) {
 	// Arrange
-	s := &sender{client: &fakeSenderClient{setMode: &shimv1.SetSessionPermissionModeResponse{
+	s := newTestSender(&fakeSenderClient{setMode: &shimv1.SetSessionPermissionModeResponse{
 		Result: &shimv1.SetSessionPermissionModeResponse_Failure{Failure: &shimv1.SetSessionPermissionModeFailure{
 			Detail: "no session",
 			Kind:   &shimv1.SetSessionPermissionModeFailure_NoSession{NoSession: &shimv1.SetSessionPermissionModeNoSession{}},
 		}},
-	}}}
+	}})
 
 	// Act
 	err := s.SetPermissionMode(context.Background(), "plan")
@@ -309,12 +304,12 @@ func TestSenderSetPermissionModeCarriesTheNoSessionRefusal(t *testing.T) {
 // naming a turn that is not the open one.
 func TestSenderKillTurnCarriesTheNotTheOpenTurnRefusal(t *testing.T) {
 	// Arrange
-	s := &sender{client: &fakeSenderClient{killTurn: &shimv1.KillTurnResponse{
+	s := newTestSender(&fakeSenderClient{killTurn: &shimv1.KillTurnResponse{
 		Result: &shimv1.KillTurnResponse_Failure{Failure: &shimv1.KillTurnFailure{
 			Detail: "another turn is open",
 			Cause:  &shimv1.KillTurnFailure_NotTheOpenTurn{NotTheOpenTurn: &shimv1.KillTurnNotTheOpenTurn{}},
 		}},
-	}}}
+	}})
 
 	// Act
 	err := s.KillTurn(context.Background(), "turn-1", false, nil)
@@ -335,7 +330,7 @@ func TestSenderSetModelStatesTheColdThresholdPolicy(t *testing.T) {
 	client := &fakeSenderClient{setModel: &shimv1.SetSessionModelResponse{
 		Result: &shimv1.SetSessionModelResponse_Success{Success: &shimv1.SetSessionModelSuccess{}},
 	}}
-	s := &sender{client: client}
+	s := newTestSender(client)
 
 	// Act
 	if err := s.SetModel(context.Background(), "sonnet"); err != nil {
@@ -354,14 +349,14 @@ func TestSenderSetModelStatesTheColdThresholdPolicy(t *testing.T) {
 // rather than collapsed into a bare sentence.
 func TestSenderSetModelCarriesTheColdRefusal(t *testing.T) {
 	// Arrange
-	s := &sender{client: &fakeSenderClient{setModel: &shimv1.SetSessionModelResponse{
+	s := newTestSender(&fakeSenderClient{setModel: &shimv1.SetSessionModelResponse{
 		Result: &shimv1.SetSessionModelResponse_Failure{Failure: &shimv1.SetSessionModelFailure{
 			Detail: "switching discards a warm cache",
 			Cause: &shimv1.SetSessionModelFailure_Cold{
 				Cold: &conversationv1.SessionCold{ContextTokens: 42},
 			},
 		}},
-	}}}
+	}})
 
 	// Act
 	err := s.SetModel(context.Background(), "sonnet")
@@ -393,9 +388,12 @@ func TestFleetSenderStatesTheMainWatchsNewestPointer(t *testing.T) {
 	f.watcher.pointers = sessionwatcher.Pointers{Main: senderPointer}
 
 	// Act.
-	known := got.(*sender).knownThrough()
+	known, err := got.(*sender).opening(context.Background(), "turn-1")
 
 	// Assert.
+	if err != nil {
+		t.Fatalf("opening = %v, want the standing watch's pointer", err)
+	}
 	if known.GetValue() != senderPointer.GetValue() {
 		t.Fatalf("known_through = %q, want the main watch's newest %q", known.GetValue(), senderPointer.GetValue())
 	}
@@ -495,7 +493,7 @@ func TestBothKillTurnCallersSendTheSharedRequest(t *testing.T) {
 		{
 			name: "the queue's sender",
 			kill: func(client *fakeClient) error {
-				return (&sender{client: client}).KillTurn(context.Background(), "turn-1", true, directCommand())
+				return (newTestSender(client)).KillTurn(context.Background(), "turn-1", true, directCommand())
 			},
 		},
 		{
@@ -547,7 +545,7 @@ func TestSenderJoinsOrStartsTheTurnAsItsVerbSays(t *testing.T) {
 			client := &fakeSenderClient{startTurn: &shimv1.StartTurnResponse{
 				Result: &shimv1.StartTurnResponse_Success{Success: &shimv1.StartTurnSuccess{}},
 			}}
-			s := &sender{client: client}
+			s := newTestSender(client)
 
 			// Act
 			if _, err := tt.call(s); err != nil {
@@ -566,14 +564,14 @@ func TestSenderJoinsOrStartsTheTurnAsItsVerbSays(t *testing.T) {
 // refused: the caller learns which refusal, as it does for StartTurn.
 func TestSenderJoinRunningTurnCarriesTheRefusalArm(t *testing.T) {
 	// Arrange
-	s := &sender{client: &fakeSenderClient{startTurn: &shimv1.StartTurnResponse{
+	s := newTestSender(&fakeSenderClient{startTurn: &shimv1.StartTurnResponse{
 		Result: &shimv1.StartTurnResponse_Failure{Failure: &shimv1.StartTurnFailure{
 			Detail: "turn t-2 already waits to join turn t-1",
 			Kind: &shimv1.StartTurnFailure_TurnAlreadyOpen{
 				TurnAlreadyOpen: &shimv1.StartTurnTurnAlreadyOpen{},
 			},
 		}},
-	}}}
+	}})
 
 	// Act
 	_, err := s.JoinRunningTurn(context.Background(), "turn-3", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
@@ -607,7 +605,7 @@ func TestSenderStartsAnInterjectionWithItsVendorNote(t *testing.T) {
 			client := &fakeSenderClient{startTurn: &shimv1.StartTurnResponse{
 				Result: &shimv1.StartTurnResponse_Success{Success: &shimv1.StartTurnSuccess{}},
 			}}
-			s := &sender{client: client}
+			s := newTestSender(client)
 
 			// Act
 			if _, err := tt.call(s); err != nil {
@@ -627,7 +625,7 @@ func TestSenderRollBackTurnCutsTheOneTurnFilesKept(t *testing.T) {
 	// Arrange
 	client := &fakeSenderClient{rollBack: &shimv1.RollBackSessionResponse{
 		Result: &shimv1.RollBackSessionResponse_Success{Success: &shimv1.RollBackSessionSuccess{}}}}
-	s := &sender{client: client}
+	s := newTestSender(client)
 
 	// Act
 	err := s.RollBackTurn(context.Background(), "turn-1")
@@ -644,7 +642,7 @@ func TestSenderRollBackTurnAnswersAPromptNeverRecorded(t *testing.T) {
 	client := &fakeSenderClient{rollBack: &shimv1.RollBackSessionResponse{
 		Result: &shimv1.RollBackSessionResponse_Failure{Failure: &shimv1.RollBackSessionFailure{
 			Cause: &shimv1.RollBackSessionFailure_PromptNotRecorded{PromptNotRecorded: &shimv1.RollBackSessionPromptNotRecorded{}}}}}}
-	s := &sender{client: client}
+	s := newTestSender(client)
 
 	// Act
 	err := s.RollBackTurn(context.Background(), "turn-1")
@@ -660,7 +658,7 @@ func TestSenderRollBackTurnAnswersAnyOtherRefusalAsTheShimsRefusal(t *testing.T)
 	client := &fakeSenderClient{rollBack: &shimv1.RollBackSessionResponse{
 		Result: &shimv1.RollBackSessionResponse_Failure{Failure: &shimv1.RollBackSessionFailure{
 			Cause: &shimv1.RollBackSessionFailure_FirstPrompt{FirstPrompt: &shimv1.RollBackSessionFirstPrompt{}}}}}}
-	s := &sender{client: client}
+	s := newTestSender(client)
 
 	// Act
 	err := s.RollBackTurn(context.Background(), "turn-1")
@@ -669,5 +667,134 @@ func TestSenderRollBackTurnAnswersAnyOtherRefusalAsTheShimsRefusal(t *testing.T)
 	refusal, ok := AsShimRefusal(err)
 	if !ok || refusal.Arm != ArmShimFirstPrompt || errors.Is(err, promptqueue.ErrPromptNotRecorded) {
 		t.Fatalf("RollBackTurn = %v, want the first_prompt refusal and not ErrPromptNotRecorded", err)
+	}
+}
+
+// fakeMainWatch is a session watcher's main watch as StartTurn reads it. A nil
+// release means the watch already stands; otherwise AwaitMainWatching reports
+// on waiting and blocks until release closes, then answers err.
+type fakeMainWatch struct {
+	known   *conversationv1.HistoryPointer
+	err     error
+	waiting chan struct{}
+	release chan struct{}
+}
+
+func (w *fakeMainWatch) AwaitMainWatching(ctx context.Context) error {
+	if w.release == nil {
+		return w.err
+	}
+	close(w.waiting)
+	select {
+	case <-w.release:
+		return w.err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (w *fakeMainWatch) MainKnownThrough() *conversationv1.HistoryPointer { return w.known }
+
+// watching answers W as the session's watcher.
+func watching(w mainWatch) func() (mainWatch, bool) {
+	return func() (mainWatch, bool) { return w, true }
+}
+
+// newTestSender is a sender over CLIENT whose session's main watch already
+// stands and was served nothing.
+func newTestSender(client shimclientSender) *sender {
+	return &sender{client: client, watcher: watching(&fakeMainWatch{})}
+}
+
+// TestSenderStartTurnWaitsForTheMainWatch covers the latch: no StartTurn is
+// sent while the main watch has not served its opening page, and the pointer
+// it states is the one the watch holds once it stands.
+func TestSenderStartTurnWaitsForTheMainWatch(t *testing.T) {
+	// Arrange
+	client := &fakeSenderClient{startTurn: &shimv1.StartTurnResponse{
+		Result: &shimv1.StartTurnResponse_Success{Success: &shimv1.StartTurnSuccess{}},
+	}}
+	watch := &fakeMainWatch{waiting: make(chan struct{}), release: make(chan struct{})}
+	s := &sender{client: client, watcher: watching(watch)}
+	done := make(chan error, 1)
+
+	// Act
+	go func() {
+		_, err := s.StartTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+		done <- err
+	}()
+	<-watch.waiting
+	sentEarly := client.startTurnReq != nil
+	watch.known = &conversationv1.HistoryPointer{Value: "ptr-7"}
+	close(watch.release)
+	err := <-done
+
+	// Assert
+	if err != nil || sentEarly {
+		t.Fatalf("StartTurn = %v, sent before the watch stood = %v; want a StartTurn sent only after it", err, sentEarly)
+	}
+	if got := client.startTurnReq.GetKnownThrough().GetValue(); got != "ptr-7" {
+		t.Fatalf("known_through = %q, want the pointer the standing watch holds, ptr-7", got)
+	}
+}
+
+// TestSenderStartTurnSendsNothingUnwatched covers the two ways no watch
+// stands to see the turn: the queue holds the prompt for the session's next
+// coming up, and nothing reaches the shim.
+func TestSenderStartTurnSendsNothingUnwatched(t *testing.T) {
+	tests := []struct {
+		name    string
+		watcher func() (mainWatch, bool)
+	}{
+		{
+			name:    "no watcher stands",
+			watcher: func() (mainWatch, bool) { return nil, false },
+		},
+		{
+			name:    "the watcher closed while the turn waited",
+			watcher: watching(&fakeMainWatch{err: sessionwatcher.ErrWatcherClosed}),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			client := &fakeSenderClient{}
+			s := &sender{client: client, watcher: tt.watcher}
+
+			// Act
+			_, err := s.StartTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+
+			// Assert
+			if !errors.Is(err, promptqueue.ErrSessionNotWatched) || client.startTurnReq != nil {
+				t.Fatalf("StartTurn = %v, sent %v; want the queue's not-watched error and nothing sent", err, client.startTurnReq)
+			}
+		})
+	}
+}
+
+// TestSenderStartTurnGivesUpWithItsCaller covers a caller that stops waiting:
+// its own error comes back, never mistaken for an unwatched session, and
+// nothing is sent.
+func TestSenderStartTurnGivesUpWithItsCaller(t *testing.T) {
+	// Arrange
+	client := &fakeSenderClient{}
+	watch := &fakeMainWatch{waiting: make(chan struct{}), release: make(chan struct{})}
+	s := &sender{client: client, watcher: watching(watch)}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+
+	// Act
+	go func() {
+		_, err := s.StartTurn(ctx, "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+		done <- err
+	}()
+	<-watch.waiting
+	cancel()
+	err := <-done
+
+	// Assert
+	if !errors.Is(err, context.Canceled) || errors.Is(err, promptqueue.ErrSessionNotWatched) || client.startTurnReq != nil {
+		t.Fatalf("StartTurn = %v, sent %v; want the caller's cancellation and nothing sent", err, client.startTurnReq)
 	}
 }

@@ -100,7 +100,7 @@ func (q *queue) deliver(ctx context.Context, d *delivery, sub Submission, sender
 		// turn so no workspace is left showing a `submitting` phase for a turn
 		// that never ran.
 		q.retireOpenedTurn(sub, watcher)
-		if errors.Is(err, ErrShimHasNoSession) || errors.Is(err, ErrShimDied) {
+		if errors.Is(err, ErrShimHasNoSession) || errors.Is(err, ErrShimDied) || errors.Is(err, ErrSessionNotWatched) {
 			return q.holdForReconnect(ctx, sub, err, log)
 		}
 		log.Error(opDeliver, "the shim refused the turn", dlog.Context{"cause": err.Error()})
@@ -341,8 +341,11 @@ func (q *queue) startTurn(ctx context.Context, sender Sender, sub Submission, lo
 func (q *queue) holdForReconnect(ctx context.Context, sub Submission, cause error, log dlog.Logger) (Disposition, error) {
 	q.deps.Feed.OnPromptRetired(sub.WS, &conversationv1.AgentPrompt{Id: &conversationv1.TurnId{Value: string(sub.Turn)}})
 	why := "the shim holds no session; the prompt is held until the session reconnects"
-	if errors.Is(cause, ErrShimDied) {
+	switch {
+	case errors.Is(cause, ErrShimDied):
 		why = "the shim died under the delivery; the prompt is held until the revived session comes up"
+	case errors.Is(cause, ErrSessionNotWatched):
+		why = "no watch stood to see the turn; the prompt is held until the session comes up again"
 	}
 	log.Info(opDeliver, why, dlog.Context{"cause": cause.Error()})
 	if !sub.fromHold {

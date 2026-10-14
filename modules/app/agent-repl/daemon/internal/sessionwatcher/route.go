@@ -277,6 +277,9 @@ func sessionArm(update *conversationv1.SessionUpdate) string {
 func (w *watcher) routeAgentResponseLocked(a *agentWatch, resp *shimv1.WatchAgentResponse) {
 	if page := resp.GetPage(); page != nil {
 		w.routeOpeningPageLocked(a, page, pageWatchOpened)
+		if a == w.main {
+			w.markMainWatchingLocked()
+		}
 		return
 	}
 	if at := resp.GetEntry(); at != nil {
