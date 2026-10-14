@@ -861,9 +861,9 @@ type fakeGit struct {
 	commonDirs    map[string]string
 	// commonDirErr, when set, fails every CommonDir.
 	commonDirErr error
-	sameRepo      bool
-	sameRepoErr   error
-	refs          map[string]string
+	sameRepo     bool
+	sameRepoErr  error
+	refs         map[string]string
 	// refSeqs are ResolveRef answers scripted per ref, consumed in order with
 	// the last one standing.
 	refSeqs map[string][]string
