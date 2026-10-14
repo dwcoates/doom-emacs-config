@@ -868,6 +868,9 @@ type fakeGit struct {
 	// rebaseResolved names the replays (1-based) whose conflict rerere resolved
 	// from a recorded resolution, answered once.
 	rebaseResolved map[int][]string
+	// rebaseStuck names the replays (1-based) whose rerere-resolved stop
+	// every command answers again: a continue git refuses, moving nothing.
+	rebaseStuck    map[int][]string
 	rebaseMet      map[int]bool
 	rebaseErr      error
 	rebaseCommands []string
@@ -912,6 +915,7 @@ func newFakeGit(seq func() int) *fakeGit {
 		branches:        map[string]string{},
 		rebaseConflicts: map[int][]string{},
 		rebaseResolved:  map[int][]string{},
+		rebaseStuck:     map[int][]string{},
 		rebaseMet:       map[int]bool{},
 	}
 }
@@ -1250,6 +1254,9 @@ func (g *fakeGit) replayLocked() (gitclient.RebaseStep, error) {
 	}
 	if files, scripted := g.rebaseResolved[k]; scripted && !g.rebaseMet[-k] {
 		g.rebaseMet[-k] = true
+		return gitclient.RebaseStep{Resolved: files}, nil
+	}
+	if files, scripted := g.rebaseStuck[k]; scripted {
 		return gitclient.RebaseStep{Resolved: files}, nil
 	}
 	g.rebaseReplayed = k

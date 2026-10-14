@@ -1264,6 +1264,56 @@ func TestAConflictRerereResolvedPromptsNothingAndTheRebaseContinues(t *testing.T
 	}
 }
 
+func TestARerereResolutionGitRefusesToCommitFailsTheMerge(t *testing.T) {
+	// Arrange: every continue of the second commit leaves it stopped with
+	// rerere's resolution staged, as when git refuses the commit.
+	h := newHarness(t)
+	landing(h, 2)
+	h.git.rebaseStuck[2] = []string{"a.go"}
+
+	// Act.
+	admitted(t, h)
+
+	// Assert.
+	if got := h.footer.last(); got.State != StateFailed || got.FailedArea != "other" {
+		t.Fatalf("facts = %+v, want merge failed in other", got)
+	}
+}
+
+func TestARerereResolutionGitRefusesToCommitIsContinuedOnce(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	landing(h, 2)
+	h.git.rebaseStuck[2] = []string{"a.go"}
+
+	// Act.
+	admitted(t, h)
+
+	// Assert: the start replays commit 1, one continue stops on commit 2, and
+	// the one continue of that stop is the last command.
+	h.git.mu.Lock()
+	commands := append([]string(nil), h.git.rebaseCommands...)
+	h.git.mu.Unlock()
+	if len(commands) != 3 || commands[1] != "continue" || commands[2] != "continue" {
+		t.Fatalf("rebase commands = %v, want the start and two continues", commands)
+	}
+}
+
+func TestARerereResolutionGitRefusesToCommitIsRecordedAsAnError(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	landing(h, 2)
+	h.git.rebaseStuck[2] = []string{"a.go"}
+
+	// Act.
+	admitted(t, h)
+
+	// Assert.
+	if _, found := h.recordFor("error", "daemon.merge.rerere"); !found {
+		t.Fatal("the refused continue was not recorded as an error")
+	}
+}
+
 func TestTheConflictResolutionsLineNamesTheCommitAndTheFileCount(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)

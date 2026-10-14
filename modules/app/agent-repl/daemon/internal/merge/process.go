@@ -360,6 +360,9 @@ func shasOf(commits []gitclient.Commit) []string {
 // replayed commit recorded, each conflict handed to the requester's session.
 func (r *run) replayLoop(ctx context.Context, p *replay, step gitclient.RebaseStep, err error, tip, targetBranch string) (*outcome, error) {
 	dir, branch := r.subject.dir, r.subject.branch
+	// resolvedAt is the commit the last step stopped on with rerere's
+	// resolution staged, -1 when the last step was no such stop.
+	resolvedAt := -1
 	for {
 		if err != nil {
 			if errors.Is(err, errMergeStopping) {
@@ -369,6 +372,7 @@ func (r *run) replayLoop(ctx context.Context, p *replay, step gitclient.RebaseSt
 			return nil, fmt.Errorf("merge: rebasing %s onto %s: %w", branch, short(tip), err)
 		}
 		if len(step.Conflicted) > 0 {
+			resolvedAt = -1
 			gaveUp, err := r.conflict(ctx, p, step.Conflicted, targetBranch)
 			if err != nil || gaveUp != nil {
 				return gaveUp, err
@@ -382,6 +386,17 @@ func (r *run) replayLoop(ctx context.Context, p *replay, step gitclient.RebaseSt
 			// conflict, and the rebase only waits to be continued.
 			i := p.commitAt()
 			commit := p.commits[i]
+			// A CONTINUE THAT LEAVES THE REBASE STOPPED ON THE SAME RESOLVED
+			// COMMIT MOVED NOTHING: git refused to commit the staged
+			// resolution, and continuing again would only be refused again.
+			if resolvedAt == i {
+				err = fmt.Errorf("the rebase stayed stopped on %s after it was continued: git did not commit the resolution rerere staged in %s",
+					short(commit.SHA), strings.Join(step.Resolved, ", "))
+				r.o.log(ctx, r.ws).Error("daemon.merge.rerere", "continuing a rerere-resolved commit left the rebase where it stood", dlog.Context{
+					"workspace": string(r.ws), "commit": commit.SHA, "files": strings.Join(step.Resolved, ", "), "worktree": dir})
+				continue
+			}
+			resolvedAt = i
 			r.rebasing.Commits[i].Lines = append(r.rebasing.Commits[i].Lines, fmt.Sprintf("conflicted in %d file(s), resolved as before", len(step.Resolved)))
 			r.publishCommit(i, false)
 			r.o.log(ctx, r.ws).Info("daemon.merge.rerere", "a replayed commit conflicted as before; the recorded resolution was reused and nothing is prompted", dlog.Context{
@@ -389,6 +404,7 @@ func (r *run) replayLoop(ctx context.Context, p *replay, step gitclient.RebaseSt
 			step, err = r.git.ContinueRebase(ctx, dir)
 			continue
 		}
+		resolvedAt = -1
 		r.replayed(ctx, p, step.Done)
 		if step.Done {
 			return nil, nil
