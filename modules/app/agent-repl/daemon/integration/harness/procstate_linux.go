@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"os"
 	"strconv"
-	"strings"
 )
 
 // readProcessState reads pid's state from /proc (procgroup.ReadState).
@@ -36,13 +35,11 @@ func threadsHalted(pid int) (halted, awaitingCPU bool, name string, err error) {
 		if err != nil {
 			return false, false, "", err
 		}
-		stat := string(raw)
-		end := strings.LastIndexByte(stat, ')')
-		fields := strings.Fields(stat[end+1:])
-		if end < 0 || len(fields) == 0 {
-			return false, false, "", fmt.Errorf("unparseable /proc/%d/task/%s/stat %q", pid, task.Name(), stat)
+		line, err := procgroup.ParseStat(string(raw))
+		if err != nil {
+			return false, false, "", fmt.Errorf("unparseable /proc/%d/task/%s/stat: %w", pid, task.Name(), err)
 		}
-		threads = append(threads, linuxThread{task: task.Name(), state: fields[0]})
+		threads = append(threads, linuxThread{task: task.Name(), state: line.Fields[0]})
 	}
 	halted, awaitingCPU, name = linuxThreadsHeld(threads)
 	return halted, awaitingCPU, name, nil

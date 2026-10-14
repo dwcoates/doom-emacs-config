@@ -3,7 +3,8 @@ package shimclient
 import (
 	"fmt"
 	"strconv"
-	"strings"
+
+	"agent-repld/internal/procgroup"
 )
 
 // linuxPFExiting is PF_EXITING (include/linux/sched.h), set as do_exit
@@ -11,14 +12,13 @@ import (
 const linuxPFExiting = 0x4
 
 // parseProcStatExiting reads the state (field 3) and flags (field 9) of one
-// /proc/<pid>/stat line. The command name (field 2) is parenthesized and may
-// itself hold spaces or parentheses, so fields are counted after its last ')'.
+// /proc/<pid>/stat line (procgroup.ParseStat).
 func parseProcStatExiting(stat string) (bool, error) {
-	end := strings.LastIndexByte(stat, ')')
-	if end < 0 {
-		return false, fmt.Errorf("/proc stat line has no command name: %q", stat)
+	line, err := procgroup.ParseStat(stat)
+	if err != nil {
+		return false, err
 	}
-	fields := strings.Fields(stat[end+1:])
+	fields := line.Fields
 	if len(fields) < 7 {
 		return false, fmt.Errorf("/proc stat line is short: %q", stat)
 	}
