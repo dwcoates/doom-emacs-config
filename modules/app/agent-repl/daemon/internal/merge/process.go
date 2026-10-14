@@ -1091,15 +1091,24 @@ func (r *run) commitIn(ctx context.Context, round tabRound, tip, head, targetBra
 	settle("")
 	r.o.log(ctx, r.ws).Info(op, "the target was fast-forwarded to the merge commit of the gated branch", dlog.Context{
 		"workspace": string(r.ws), "target": targetBranch, "commit": commit, "gated": head})
-	return r.landed(ctx, commit), false, nil
+	out, err := r.landed(ctx, commit, tip)
+	return out, false, err
 }
 
-// landed reads what a merge commit the target now carries brought in.
-func (r *run) landed(ctx context.Context, commit string) outcome {
+// landed reads what a merge commit the target now carries brought in, and
+// tags it with the merge's version, counted from base, the tip it landed on.
+//
+// It answers an error only for the daemon's exit while tagging, which stops
+// the step before its landing is recorded (tagVersion).
+func (r *run) landed(ctx context.Context, commit, base string) (outcome, error) {
 	r.o.noteTargetTip(r.repo, commit)
+	version, err := r.tagVersion(ctx, commit, base)
+	if err != nil {
+		return outcome{}, err
+	}
 	commits, err := r.git.LandedRange(ctx, r.subject.targetDir, commit)
 	if err != nil && r.stopping(err) {
-		return outcome{landed: commit}
+		return outcome{landed: commit, version: version}, nil
 	}
 	if err != nil {
 		// THE LANDING HAS HAPPENED. A range that will not read is a fault in
@@ -1109,7 +1118,7 @@ func (r *run) landed(ctx context.Context, commit string) outcome {
 			"workspace": string(r.ws), "commit": commit, "error": err.Error()})
 		commits = nil
 	}
-	return outcome{landed: commit, commits: commits}
+	return outcome{landed: commit, commits: commits, version: version}, nil
 }
 
 // resumeCommit goes on with a committing step a restart interrupted. What the
@@ -1132,7 +1141,8 @@ func (r *run) resumeCommit(ctx context.Context, res *progressDoc) (outcome, bool
 			"workspace": string(r.ws), "target": res.TargetBranch, "commit": res.MergeCommit})
 		r.upsert(round, committingTab(round.settled(r.o.nowMS(), ""), message))
 		r.closeTab(ctx, round, "succeeded")
-		return r.landed(ctx, res.MergeCommit), false, nil
+		out, err := r.landed(ctx, res.MergeCommit, res.Tip)
+		return out, false, err
 	}
 	head, err := r.git.ResolveRef(ctx, r.subject.dir, branch)
 	if err != nil {
