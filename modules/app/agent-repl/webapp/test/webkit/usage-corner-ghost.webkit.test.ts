@@ -11,10 +11,7 @@
  * WebKit over the real stylesheet and measures them with the ghost and with
  * the ghost suppressed (`content: none`), which is the layout before the fix.
  */
-import path from "node:path";
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
-import { webkit, type Browser, type Page } from "playwright-core";
+import type { Browser, Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   USAGE_AGE_RESERVE_LABELS,
@@ -23,8 +20,7 @@ import {
   USAGE_TOKEN_TEXT_PROPERTY,
   usageReserveLabelsCss,
 } from "../../src/feed/cards/response.js";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
+import { openFeedPage, type FeedPage } from "./feed-page";
 
 /** Suppresses the ghost: the layout the feed drew before it existed. */
 const NO_GHOST = `.response-prose p::before { content: none !important; }`;
@@ -149,18 +145,8 @@ async function draw(
 }
 
 /** A headless WebKit page holding an empty feed over the real stylesheet, transitions off, with the ghost switch. */
-async function openFeed(): Promise<{ browser: Browser; page: Page }> {
-  const css = await readFile(path.join(here, "../../src/styles.css"), "utf8");
-  const browser = await webkit.launch();
-  const page = await browser.newPage({ viewport: { width: 1100, height: 900 } });
-  await page.setContent(`<!doctype html><html><head></head><body>
-    <div id="main-col">
-      <div id="feed-scroll" class="scroll-zone">
-        <main id="feed" data-feed="root"></main>
-      </div>
-    </div></body></html>`);
-  await page.addStyleTag({ content: css });
-  await page.addStyleTag({ content: NO_TRANSITIONS });
+async function openFeed(): Promise<FeedPage> {
+  const { browser, page } = await openFeedPage({ width: 1100, height: 900, styles: [NO_TRANSITIONS] });
   await page.evaluate(() => {
     const sw = document.createElement("style");
     sw.id = "ghost-switch";
