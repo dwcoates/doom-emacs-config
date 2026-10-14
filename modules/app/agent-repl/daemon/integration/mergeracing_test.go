@@ -5,8 +5,6 @@ package integration
 import (
 	"testing"
 
-	"connectrpc.com/connect"
-
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"agent-repld/integration/harness"
@@ -21,11 +19,7 @@ func switchRacing(t *testing.T, d *harness.Daemon, enable bool) *agentreplv1.Upd
 	if enable {
 		req.Action = &agentreplv1.UpdateMergeQueueRequest_EnableRacing{EnableRacing: &agentreplv1.UpdateMergeQueueEnableRacing{}}
 	}
-	resp, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(req))
-	if err != nil {
-		t.Fatalf("UpdateMergeQueue(enable=%v) = error %v, want an answer", enable, err)
-	}
-	return resp.Msg
+	return askMergeQueue(t, d, req)
 }
 
 // TestRacingDisabledBeforeARestartStaysDisabledInTheSuccessor covers the
