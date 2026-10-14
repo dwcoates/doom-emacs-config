@@ -92,10 +92,23 @@ func (o *orchestrator) checkVersion(ctx context.Context, requester wsm.Workspace
 // an async request (which lands by its requester's geometry) in the target
 // recorded at creation, another workspace's in that workspace's, and a named
 // branch run in place in the repository's main worktree.
+//
+// AN ASYNC REQUEST FROM A WORKSPACE THE DAEMON NEVER CREATED comes from the
+// main checkout, which records no merge geometry (checkAsync): its merge lands
+// in the repository's main worktree.
 func (o *orchestrator) requestTarget(ctx context.Context, requester wsm.Workspace, req Request) (string, error) {
 	switch {
 	case req.Source.Kind == wsm.MergeSourceBranch && req.Detached == nil:
 		return o.deps.Git.MainWorktree(ctx, requester.Dir)
+	case req.Detached != nil:
+		job, found, err := o.deps.DB.CreationJob(ctx, requester.ID)
+		if err != nil {
+			return "", fmt.Errorf("merge: reading %s's creation job for where its async merge lands: %w", requester.ID, err)
+		}
+		if !found {
+			return o.deps.Git.MainWorktree(ctx, requester.Dir)
+		}
+		return job.Layout.TargetDir, nil
 	case req.Source.Kind == wsm.MergeSourceWorkspace:
 		job, err := o.layoutFor(ctx, req.Source.Workspace)
 		if err != nil {
