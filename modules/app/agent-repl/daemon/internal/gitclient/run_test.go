@@ -731,9 +731,9 @@ func TestInvokeClassifiesEveryOutcome(t *testing.T) {
 			name: "a git that never ran is a failure",
 			arrange: func(t *testing.T) context.Context {
 				newFakeGit(t, ok("main\n"))
-				// No git on PATH at all: the spawn itself fails, so there is
-				// no exit status and -1 marks its absence.
-				t.Setenv("PATH", t.TempDir())
+				// The git binary is not there at all: the spawn itself fails,
+				// so there is no exit status and -1 marks its absence.
+				gitBinary = filepath.Join(t.TempDir(), "no-such-git")
 				return context.Background()
 			},
 			wantExitCode: -1,
@@ -939,5 +939,12 @@ func TestTheHookSpellsTheMarkers(t *testing.T) {
 				t.Fatalf("the hook does not bind %s; the daemon and the hook must spell it the same", marker)
 			}
 		})
+	}
+}
+
+func TestTheGitBinaryIsGitOnPathUnlessTheBuildNamesAnother(t *testing.T) {
+	// Assert: a build that links nothing in runs the host's git by name.
+	if gitBinary != "git" {
+		t.Fatalf("gitBinary = %q, want \"git\" in a build that names no other", gitBinary)
 	}
 }
