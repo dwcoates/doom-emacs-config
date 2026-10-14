@@ -191,7 +191,7 @@ func firstRunHoldsGate(t *testing.T) (env []string, started string) {
 	if err := os.WriteFile(gate, []byte(body), 0o755); err != nil {
 		t.Fatalf("writing the gate: %v", err)
 	}
-	return []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + gate}, started
+	return []string{harness.TestAllScriptEnv(gate)}, started
 }
 
 // releaseHold gives a reader blocked on the pipe at path its EOF, and does

@@ -2,7 +2,10 @@ package harness
 
 import (
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -105,5 +108,40 @@ func TestRecorderRecordsEveryArgumentVerbatim(t *testing.T) {
 				t.Fatalf("recorded %+v, want one invocation whose second argument is %q", got, c.arg)
 			}
 		})
+	}
+}
+
+func TestTestAllScriptEnvNamesTheVariableTheMergeOrchestratorReads(t *testing.T) {
+	// Act
+	got := TestAllScriptEnv("/repo/bin/test-all.sh")
+
+	// Assert
+	if got != "AGENT_REPL_TEST_ALL_SCRIPT=/repo/bin/test-all.sh" {
+		t.Fatalf("TestAllScriptEnv = %q, want the daemon's AGENT_REPL_TEST_ALL_SCRIPT entry", got)
+	}
+}
+
+func TestNoIntegrationTestSpellsTheTestAllVariableByHand(t *testing.T) {
+	// Arrange
+	files, err := filepath.Glob(filepath.Join("..", "*.go"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("list the integration suite's files: %v (%d files)", err, len(files))
+	}
+
+	// Act
+	var offenders []string
+	for _, file := range files {
+		body, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("read %s: %v", file, err)
+		}
+		if strings.Contains(string(body), "AGENT_REPL_TEST_ALL_SCRIPT=") {
+			offenders = append(offenders, file)
+		}
+	}
+
+	// Assert
+	if len(offenders) != 0 {
+		t.Fatalf("%v spell the test-all variable by hand; use TestAllScriptEnv", offenders)
 	}
 }
