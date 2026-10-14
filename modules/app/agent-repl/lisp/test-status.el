@@ -3757,7 +3757,7 @@ arm: it paints only the tab's [N] run."
 (ert-deftest agent-repl-test-status-every-merge-arm-draws-the-one-merge-glyph ()
   "Every merge arm maps to the one merge glyph (owner ruling, 2026-10-13)."
   (dolist (row agent-repl-status-merge-glyphs)
-    (should (equal (cdr row) "≡"))))
+    (should (equal (cdr row) "merge"))))
 
 (ert-deftest agent-repl-test-status-red-is-the-agent-holding-the-turn ()
   "Red is a turn in flight."
@@ -3824,43 +3824,37 @@ purple already says a merge is in flight, and a landed merge shows nothing
   ;; Arrange
   (agent-repl-test--with-clean-state
     ;; Act / Assert
-    (should (equal (agent-repl-status-tab-glyph "alpha" :merge-failed) "≡"))))
+    (should (equal (agent-repl-status-tab-glyph "alpha" :merge-failed) "merge"))))
 
 (ert-deftest agent-repl-test-status-a-merge-failed-glyph-is-inked-red ()
   "A failed merge\='s glyph is red on its green tab (owner ruling, 2026-10-13)."
-  ;; Arrange
-  (cl-letf (((symbol-function 'agent-repl-status-glyph-height) (lambda (&rest _) 1.0)))
-    ;; Act / Assert
-    (should (equal (plist-get (agent-repl-status-tab-glyph-face :merge-failed "≡") :foreground)
-                   agent-repl--color-thinking-red))))
+  ;; Act / Assert
+  (should (equal (agent-repl-status--glyph-ink-color :merge-failed)
+                 agent-repl--color-thinking-red)))
 
 (ert-deftest agent-repl-test-status-a-compacting-tab-draws-an-orange-dot ()
   "A compacting turn draws the dot inked orange on its red tab."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl-status-glyph-height) (lambda (&rest _) 1.0)))
-      ;; Act / Assert
-      (should (equal (list (agent-repl-status-tab-glyph "alpha" :compacting)
-                           (plist-get (agent-repl-status-tab-glyph-face :compacting "●") :foreground))
-                     (list agent-repl-status-dot-glyph agent-repl--color-compaction-orange))))))
+    ;; Act / Assert
+    (should (equal (list (agent-repl-status-tab-glyph "alpha" :compacting)
+                         (agent-repl-status--glyph-ink-color :compacting))
+                   (list agent-repl-status-dot-glyph agent-repl--color-compaction-orange)))))
 
 (ert-deftest agent-repl-test-status-an-uninked-glyph-takes-no-foreground ()
   "A glyph on an arm with no ink keeps the tab\='s foreground."
-  ;; Arrange
-  (cl-letf (((symbol-function 'agent-repl-status-glyph-height) (lambda (&rest _) 1.0)))
-    ;; Act / Assert
-    (should-not (plist-member (agent-repl-status-tab-glyph-face :permission "❗") :foreground))))
+  ;; Act / Assert
+  (should (null (agent-repl-status--glyph-ink-color :permission))))
 
 (ert-deftest agent-repl-test-status-an-ink-with-no-color-fails-loudly ()
   "An ink this renderer has no color for is logged and signalled."
   ;; Arrange
   (let (logged)
-    (cl-letf (((symbol-function 'agent-repl-status-glyph-height) (lambda (&rest _) 1.0))
-              ((symbol-function 'agent-repl--error)
+    (cl-letf (((symbol-function 'agent-repl--error)
                (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
       (let ((agent-repl-status-glyph-inks '((:thinking . "chartreuse"))))
         ;; Act / Assert
-        (should-error (agent-repl-status-tab-glyph-face :thinking "●"))
+        (should-error (agent-repl-status--glyph-ink-color :thinking))
         (should (string-match-p "ink \"chartreuse\" of arm :thinking has no color" (car logged)))))))
 
 (ert-deftest agent-repl-test-status-every-drawn-merge-arm-has-a-glyph ()
@@ -3878,7 +3872,7 @@ merge glyph table, so a drawn arm cannot carry a hand-rolled character."
      ,@body))
 
 (ert-deftest agent-repl-test-status-a-working-one-shot-draws-the-target ()
-  "A one-shot draws 🎯 while it works: submitting, thinking or clearing."
+  "A one-shot draws its target while it works: submitting, thinking or clearing."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (agent-repl-test-status--with-one-shot t
@@ -3893,13 +3887,12 @@ merge glyph table, so a drawn arm cannot carry a hand-rolled character."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (agent-repl-test-status--with-one-shot t
-      (cl-letf (((symbol-function 'agent-repl-status-glyph-height) (lambda (&rest _) 1.0)))
-        (dolist (arm '(:compacting :done :idle-async :permission :cold-gate
-                       :merge-queued :merging :merge-failed))
-          ;; Act
-          (let ((drawn (agent-repl-status-tab-glyph "alpha" arm)))
-            ;; Assert
-            (should-not (equal drawn agent-repl-status-one-shot-glyph))))))))
+      (dolist (arm '(:compacting :done :idle-async :permission :cold-gate
+                     :merge-queued :merging :merge-failed))
+        ;; Act
+        (let ((drawn (agent-repl-status-tab-glyph "alpha" arm)))
+          ;; Assert
+          (should-not (equal drawn agent-repl-status-one-shot-glyph)))))))
 
 (ert-deftest agent-repl-test-status-the-working-one-shot-outranks-the-attention-marker ()
   "A working one-shot with an unseen notification draws its mark."
@@ -3921,38 +3914,38 @@ merge glyph table, so a drawn arm cannot carry a hand-rolled character."
       (should (null (agent-repl-status-tab-one-shot-glyph "alpha" :thinking))))))
 
 (ert-deftest agent-repl-test-status-a-cold-gate-tab-draws-a-snowflake ()
-  "A `:cold-gate\=' tab draws ❄️ between `[N]\=' and its name: the session
+  "A `:cold-gate\=' tab draws the snowflake between `[N]\=' and its name: the session
 has gone cold (owner ruling, 2026-10-13)."
   ;; Arrange
   (agent-repl-test--with-clean-state
     ;; Act / Assert
-    (should (equal (agent-repl-status-tab-glyph "alpha" :cold-gate) "❄️"))))
+    (should (equal (agent-repl-status-tab-glyph "alpha" :cold-gate) "snowflake"))))
 
 (ert-deftest agent-repl-test-status-a-permission-tab-draws-an-exclamation-emoji ()
-  "A `:permission\=' tab draws ❗ between `[N]\=' and its name."
+  "A `:permission\=' tab draws the exclamation mark between `[N]\=' and its name."
   ;; Arrange
   (agent-repl-test--with-clean-state
     ;; Act / Assert
-    (should (equal (agent-repl-status-tab-glyph "alpha" :permission) "❗"))))
+    (should (equal (agent-repl-status-tab-glyph "alpha" :permission) "exclaim"))))
 
 (ert-deftest agent-repl-test-status-a-question-tab-draws-a-question-emoji ()
-  "A `:question\=' tab draws ❓ between `[N]\=' and its name."
+  "A `:question\=' tab draws the question mark between `[N]\=' and its name."
   ;; Arrange
   (agent-repl-test--with-clean-state
     ;; Act / Assert
-    (should (equal (agent-repl-status-tab-glyph "alpha" :question) "❓"))))
+    (should (equal (agent-repl-status-tab-glyph "alpha" :question) "ask"))))
 
 (ert-deftest agent-repl-test-status-a-gate-glyph-outranks-the-attention-marker ()
-  "A gate with an unseen notification draws its emoji, not the marker."
+  "A gate with an unseen notification draws its glyph, not the marker."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (let ((agent-repl-status--marker-on (make-hash-table :test 'equal)))
       (puthash "alpha" t agent-repl-status--marker-on)
       ;; Act / Assert
-      (should (equal (agent-repl-status-tab-glyph "alpha" :permission) "❗")))))
+      (should (equal (agent-repl-status-tab-glyph "alpha" :permission) "exclaim")))))
 
 (ert-deftest agent-repl-test-status-a-waiting-tab-draws-no-gate-glyph ()
-  "`:waiting\=' is not a gate's card, so it draws no gate emoji."
+  "`:waiting\=' is not a gate's card, so it draws no gate glyph."
   ;; Arrange
   (agent-repl-test--with-clean-state
     ;; Act / Assert
@@ -3984,125 +3977,196 @@ are grey, with nothing to report (owner ruling, 2026-10-13)."
       (should (equal (agent-repl-status-tab-glyph "alpha" :thinking)
                      agent-repl-status-attention-glyph)))))
 
-;;;; ---- The glyph's height: never a taller row than the text's --------------
+;;;; ---- The glyph's image: one shared height, never a taller row ------------
 
-(defun agent-repl-test-status--rows (table)
-  "Return a row-height function answering TABLE's (PX . ROW-HEIGHT)."
-  (lambda (px) (cdr (assq px table))))
+(defmacro agent-repl-test-status--on-graphic-frame (row scale &rest body)
+  "Run BODY as on a graphic frame whose tab bar\='s text row is ROW pixels.
+The frame\='s backing scale is SCALE and its text font Menlo-13.  Every
+row measured answers ROW, as a row holding an image no taller than the
+text\='s does."
+  (declare (indent 2))
+  `(let ((agent-repl-status--glyph-image-heights (make-hash-table :test 'equal)))
+     (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) t))
+               ((symbol-function 'face-font) (lambda (&rest _) "Menlo-13"))
+               ((symbol-function 'frame-scale-factor) (lambda (&rest _) ,scale))
+               ((symbol-function 'agent-repl--log) #'ignore)
+               ((symbol-function 'agent-repl-status--row-height) (lambda (_frame _text) ,row)))
+       ,@body)))
 
-(ert-deftest agent-repl-test-status-glyph-fit-size-cases ()
-  "The fit is the largest size whose row is no taller than the text's."
+(ert-deftest agent-repl-test-status-glyph-image-height-is-the-text-row ()
+  "Every glyph image draws exactly as tall as the measured text row."
+  ;; Arrange
+  (agent-repl-test-status--on-graphic-frame 15 2.0
+    ;; Act / Assert
+    (should (= (agent-repl-status-glyph-image-height) 15))))
+
+(ert-deftest agent-repl-test-status-glyph-image-height-measures-the-image-row ()
+  "The row holding an image of the text row\='s height is measured beside it."
+  ;; Arrange
+  (let (measured)
+    (agent-repl-test-status--on-graphic-frame 15 2.0
+      (cl-letf (((symbol-function 'agent-repl-status--row-height)
+                 (lambda (_frame text) (push text measured) 15)))
+        ;; Act
+        (agent-repl-status-glyph-image-height)
+        ;; Assert
+        (should (equal (image-property (get-text-property 1 'display (car measured)) :height)
+                       30))))))
+
+(ert-deftest agent-repl-test-status-glyph-image-height-with-a-grown-row-fails-loudly ()
+  "An image the text row\='s height growing the row is an invariant
+violation: logged with its measurements, then signalled, and nothing cached."
+  ;; Arrange
+  (let (logged)
+    (agent-repl-test-status--on-graphic-frame 15 2.0
+      (cl-letf (((symbol-function 'agent-repl-status--row-height)
+                 (lambda (_frame text) (if (= (length text) 1) 15 16)))
+                ((symbol-function 'agent-repl--error)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+        ;; Act / Assert
+        (should-error (agent-repl-status-glyph-image-height))
+        (should (string-match-p "glyph-image-height: text-font=Menlo-13 text-row=15 image-row=16"
+                                (car logged)))
+        (should (= (hash-table-count agent-repl-status--glyph-image-heights) 0))))))
+
+(ert-deftest agent-repl-test-status-glyph-image-height-is-measured-once-per-text-font ()
+  "A second ask with the same text font answers from the cache."
+  ;; Arrange
+  (let ((measures 0))
+    (agent-repl-test-status--on-graphic-frame 15 2.0
+      (cl-letf (((symbol-function 'agent-repl-status--row-height)
+                 (lambda (_frame _text) (cl-incf measures) 15)))
+        (agent-repl-status-glyph-image-height)
+        (let ((first measures))
+          ;; Act
+          (agent-repl-status-glyph-image-height)
+          ;; Assert
+          (should (= measures first)))))))
+
+(ert-deftest agent-repl-test-status-glyph-image-cases ()
+  "A glyph image is its picture, rasterized at the backing scale, drawn
+centered at its logical height, filled with the ink when there is one."
   (dolist (case
-           ;; The owner's frame, measured 2026-10-13: a Menlo 13px row is 15px;
-           ;; an Apple Color Emoji row at 13..7px is as listed.
-           `(("the emoji fits at 8px"
-              15 13 ((13 . 21) (12 . 20) (11 . 18) (10 . 17) (9 . 16) (8 . 15) (7 . 15))
-              8)
-             ("a glyph that already fits keeps the text's size"
-              15 13 ((13 . 15))
-              13)
-             ("a row one pixel too tall shrinks it one size"
-              15 13 ((13 . 16) (12 . 15))
-              12)))
-    (pcase-let ((`(,name ,text-height ,size ,table ,want) case))
-      ;; Act / Assert
-      (should (equal (cons name (agent-repl-status-glyph-fit-size
-                                 text-height size (agent-repl-test-status--rows table)))
-                     (cons name want))))))
+           ;; (NAME HEIGHT COLOR SCALE) -> (:height :scale :ascent :foreground)
+           `(("a Retina frame rasterizes at twice the height"
+              ("dot" 15 nil 2.0) (30 0.5 center nil))
+             ("a 1x frame rasterizes at the height"
+              ("dot" 15 nil 1.0) (15 1.0 center nil))
+             ("an ink fills the picture's currentColor"
+              ("merge" 15 "#ff0000" 2.0) (30 0.5 center "#ff0000"))))
+    (pcase-let ((`(,label (,name ,height ,color ,scale) ,want) case))
+      (cl-letf (((symbol-function 'frame-scale-factor) (lambda (&rest _) scale)))
+        ;; Act
+        (let ((image (agent-repl-status--glyph-image name height color nil)))
+          ;; Assert
+          (should (equal (cons label (mapcar (lambda (prop) (image-property image prop))
+                                             '(:height :scale :ascent :foreground)))
+                         (cons label want))))))))
 
-(ert-deftest agent-repl-test-status-glyph-fit-size-with-no-fit-fails-loudly ()
-  "No size fitting the text is an invariant violation: logged, then signalled."
+(ert-deftest agent-repl-test-status-glyph-image-draws-the-named-picture ()
+  "A glyph image is NAME\='s SVG from images/glyphs/."
+  ;; Arrange
+  (cl-letf (((symbol-function 'frame-scale-factor) (lambda (&rest _) 1.0)))
+    ;; Act
+    (let ((image (agent-repl-status--glyph-image "snowflake" 15 nil nil)))
+      ;; Assert
+      (should (equal (list (image-property image :type)
+                           (file-name-nondirectory (image-property image :file)))
+                     '(svg "snowflake.svg"))))))
+
+(ert-deftest agent-repl-test-status-every-glyph-name-has-a-character-and-a-picture ()
+  "Every glyph name a tab can draw resolves through the one shared shape:
+a character in `agent-repl-status-glyph-chars' and a picture in
+images/glyphs/.  A table naming a glyph drawn some other way fails here."
+  ;; Arrange
+  (let ((names (delete-dups
+                (append (mapcar #'cdr agent-repl-status-gate-glyphs)
+                        (mapcar #'cdr agent-repl-status-merge-glyphs)
+                        (list agent-repl-status-one-shot-glyph
+                              agent-repl-status-dot-glyph
+                              agent-repl-status-attention-glyph)))))
+    (dolist (name names)
+      ;; Act / Assert
+      (should (stringp (agent-repl-status--glyph-char name)))
+      (should (file-exists-p (agent-repl-status--glyph-file name))))))
+
+(ert-deftest agent-repl-test-status-every-picture-is-cropped-to-its-full-height ()
+  "Every glyph picture\='s viewBox is 16 units tall, as its picture is: drawn
+at one height, every glyph is that tall on screen."
+  (dolist (row agent-repl-status-glyph-chars)
+    ;; Arrange
+    (let ((svg (with-temp-buffer
+                 (insert-file-contents (agent-repl-status--glyph-file (car row)))
+                 (buffer-string))))
+      ;; Act / Assert
+      (should (equal (cons (car row) (and (string-match "viewBox=\"0 0 [0-9.]+ \\([0-9.]+\\)\"" svg)
+                                          (match-string 1 svg)))
+                     (cons (car row) "16"))))))
+
+(ert-deftest agent-repl-test-status-glyph-file-with-no-picture-fails-loudly ()
+  "A glyph name with no picture is a broken checkout: logged, then signalled."
   ;; Arrange
   (let (logged)
     (cl-letf (((symbol-function 'agent-repl--error)
                (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
       ;; Act / Assert
-      (should-error (agent-repl-status-glyph-fit-size
-                     3 2 (agent-repl-test-status--rows '((2 . 9) (1 . 9)))))
-      (should (string-match-p "glyph-fit-size: no size up to 2 fits a row of 3px"
+      (should-error (agent-repl-status--glyph-file "no-such-glyph"))
+      (should (string-match-p "glyph-file: glyph \"no-such-glyph\" has no picture at .*no-such-glyph\\.svg"
                               (car logged))))))
 
-(defmacro agent-repl-test-status--measuring (rows measured &rest body)
-  "Run BODY on a graphic frame whose rows measure per ROWS, recording onto MEASURED.
-ROWS maps the glyph's absolute `:height' (nil for the text alone) to the
-row's pixel height; the text font is 13px.  Each measured string is
-pushed onto MEASURED."
-  (declare (indent 2))
-  `(let ((agent-repl-status--glyph-heights (make-hash-table :test 'equal)))
-     (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) t))
-               ((symbol-function 'face-font) (lambda (&rest _) "Menlo-13"))
-               ((symbol-function 'agent-repl-status--font-size) (lambda (&rest _) 13))
-               ((symbol-function 'agent-repl--log) #'ignore)
-               ((symbol-function 'agent-repl-status--row-height)
-                (lambda (_frame text)
-                  (push text ,measured)
-                  (let ((glyph-height (and (> (length text) 1)
-                                           (plist-get (get-text-property 1 'face text) :height))))
-                    (cdr (assoc glyph-height ,rows))))))
-       ,@body)))
-
-(ert-deftest agent-repl-test-status-glyph-height-is-the-largest-fitting-absolute-height ()
-  "A glyph whose row grows draws at the largest fitting size, as an absolute height."
-  ;; Arrange
-  (let (measured)
-    (agent-repl-test-status--measuring
-        '((nil . 15) (130 . 21) (120 . 20) (110 . 18) (100 . 17) (90 . 16) (80 . 15))
-        measured
-      ;; Act / Assert
-      (should (equal (agent-repl-status-glyph-height "🎯") 80)))))
-
-(ert-deftest agent-repl-test-status-glyph-height-is-whole-when-the-row-keeps-its-height ()
-  "A glyph that leaves the text's row unchanged at full size draws unscaled."
-  ;; Arrange
-  (let (measured)
-    (agent-repl-test-status--measuring '((nil . 15) (130 . 15)) measured
-      ;; Act / Assert
-      (should (equal (agent-repl-status-glyph-height "●") 1.0)))))
-
-(ert-deftest agent-repl-test-status-glyph-height-measures-the-whole-emoji-sequence ()
-  "The cold gate's snowflake is measured as the whole U+2744 U+FE0F sequence.
-`font-at' answered the text font for its first code point and left it at
-full size (2026-10-13); the measured row is what sizes it now."
-  ;; Arrange
-  (let (measured)
-    (agent-repl-test-status--measuring
-        '((nil . 15) (130 . 21) (120 . 20) (110 . 18) (100 . 17) (90 . 16) (80 . 15))
-        measured
-      ;; Act
-      (let ((height (agent-repl-status-glyph-height "❄️")))
-        ;; Assert
-        (should (equal height 80))
-        (should (cl-some (lambda (text) (string-suffix-p "❄️" text)) measured))))))
-
-(ert-deftest agent-repl-test-status-glyph-height-is-measured-once-per-text-font ()
-  "A second ask for the same glyph and text font answers from the cache."
-  ;; Arrange
-  (let (measured)
-    (agent-repl-test-status--measuring '((nil . 15) (130 . 15)) measured
-      (agent-repl-status-glyph-height "●")
-      (let ((first (length measured)))
-        ;; Act
-        (agent-repl-status-glyph-height "●")
-        ;; Assert
-        (should (= (length measured) first))))))
-
-(ert-deftest agent-repl-test-status-font-size-with-no-font-info-fails-loudly ()
-  "A text font with no font info is an invariant violation: logged, then signalled."
+(ert-deftest agent-repl-test-status-glyph-char-with-no-row-fails-loudly ()
+  "A glyph name with no character is an inconsistent table: logged, then signalled."
   ;; Arrange
   (let (logged)
-    (cl-letf (((symbol-function 'font-info) (lambda (&rest _) nil))
-              ((symbol-function 'agent-repl--error)
+    (cl-letf (((symbol-function 'agent-repl--error)
                (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
       ;; Act / Assert
-      (should-error (agent-repl-status--font-size "Menlo-13" nil))
-      (should (string-match-p "font-size: no font info for \"Menlo-13\"" (car logged))))))
+      (should-error (agent-repl-status--glyph-char "no-such-glyph"))
+      (should (string-match-p "glyph-char: glyph \"no-such-glyph\" has no character"
+                              (car logged))))))
 
-(ert-deftest agent-repl-test-status-glyph-height-is-whole-on-a-text-frame ()
-  "A frame that is not graphic draws every glyph in one cell, unscaled."
+(ert-deftest agent-repl-test-status-tab-glyph-run-on-a-graphic-frame-is-the-image ()
+  "On a graphic frame the run is the glyph\='s character displayed as its
+image, at the text row\='s height."
+  ;; Arrange
+  (agent-repl-test-status--on-graphic-frame 15 1.0
+    ;; Act
+    (let* ((run (agent-repl-status-tab-glyph-run :permission "exclaim"))
+           (image (get-text-property 0 'display run)))
+      ;; Assert
+      (should (equal (list (substring-no-properties run)
+                           (file-name-nondirectory (image-property image :file))
+                           (image-property image :height))
+                     '("❗" "exclaim.svg" 15))))))
+
+(ert-deftest agent-repl-test-status-tab-glyph-run-on-a-graphic-frame-carries-the-ink ()
+  "An inked arm\='s image is filled with the ink."
+  ;; Arrange
+  (agent-repl-test-status--on-graphic-frame 15 1.0
+    ;; Act
+    (let ((run (agent-repl-status-tab-glyph-run :merge-failed "merge")))
+      ;; Assert
+      (should (equal (image-property (get-text-property 0 'display run) :foreground)
+                     agent-repl--color-thinking-red)))))
+
+(ert-deftest agent-repl-test-status-tab-glyph-run-on-a-text-frame-is-the-inked-character ()
+  "A text frame cannot draw an image: the run is the character, in the ink."
   ;; Arrange
   (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) nil)))
-    ;; Act / Assert
-    (should (equal (agent-repl-status-glyph-height "🎯") 1.0))))
+    ;; Act
+    (let ((run (agent-repl-status-tab-glyph-run :compacting "dot")))
+      ;; Assert
+      (should (equal (list run (get-text-property 0 'face run))
+                     (list "●" (list :foreground agent-repl--color-compaction-orange)))))))
+
+(ert-deftest agent-repl-test-status-tab-glyph-run-on-a-text-frame-without-ink-is-plain ()
+  "An uninked glyph on a text frame is its character with no face."
+  ;; Arrange
+  (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) nil)))
+    ;; Act
+    (let ((run (agent-repl-status-tab-glyph-run :question "ask")))
+      ;; Assert
+      (should (equal (list run (get-text-property 0 'face run)) '("❓" nil))))))
 
 ;;;; ---- The blink cadence (frontend.v1 RosterRowAttention) --------------
 
@@ -4352,21 +4416,20 @@ bracket-only paint, which is the blessed treatment."
               ((symbol-function 'agent-repl-roster-row-priority-label)
                (lambda (row) (plist-get (plist-get row :priority) :label))))
       ;; Act / Assert
-      (cl-letf (((symbol-function 'agent-repl-status-glyph-height) (lambda (&rest _) 1.0)))
-        (should (equal (substring-no-properties (agent-repl--tab-badge-str "alpha" :merge-failed))
-                       "P1 ≡"))))))
+      (should (equal (substring-no-properties (agent-repl--tab-badge-str "alpha" :merge-failed))
+                     "P1 ≡")))))
 
-(ert-deftest agent-repl-test-status-the-badge-run-draws-the-glyph-in-its-face ()
-  "The glyph in the badge run carries its ink and its fitted height."
+(ert-deftest agent-repl-test-status-the-badge-run-draws-the-glyph-as-its-image ()
+  "On a graphic frame the badge run\='s glyph is the glyph\='s image."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws) (lambda (_ws) nil))
-              ((symbol-function 'agent-repl-status-glyph-height) (lambda (&rest _) 0.5)))
-      ;; Act
-      (let ((run (agent-repl--tab-badge-str "alpha" :merge-failed)))
-        ;; Assert
-        (should (equal (get-text-property 0 'face run)
-                       (list :height 0.5 :foreground agent-repl--color-thinking-red)))))))
+    (agent-repl-test-status--on-graphic-frame 15 2.0
+      (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws) (lambda (_ws) nil)))
+        ;; Act
+        (let ((run (agent-repl--tab-badge-str "alpha" :merge-failed)))
+          ;; Assert
+          (should (equal (image-property (get-text-property 0 'display run) :file)
+                         (agent-repl-status--glyph-file "merge"))))))))
 
 (ert-deftest agent-repl-test-status-an-unprioritized-plain-row-draws-no-badge ()
   "The ordinary case is name and bracket alone."
