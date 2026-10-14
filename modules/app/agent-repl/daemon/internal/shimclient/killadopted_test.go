@@ -697,3 +697,44 @@ func TestKillOfAnAdoptedShimWhoseGroupCannotBeProbedIsAnError(t *testing.T) {
 		t.Fatalf("no ERROR record of the failed probe: %+v", c.log.(*dlog.TestLogger).Records())
 	}
 }
+
+// TestAwaitAdoptedExitPublishesAGroupLeftWithOnlyItsZombie pins that the
+// exit watch reads a group the way the kill does (adoptedGroupGone): a group
+// holding only exited members is gone, without waiting on init's reap.
+func TestAwaitAdoptedExitPublishesAGroupLeftWithOnlyItsZombie(t *testing.T) {
+	// Arrange.
+	p := startPeer(t, 0)
+	c := standingDownAdopted(p)
+	c.groupGone = func(pgid int) (bool, error) { return pgid == p.pid, nil }
+
+	// Act.
+	go c.awaitAdoptedExit(context.Background())
+
+	// Assert.
+	info := awaitExitInfo(t, c, 5*time.Second)
+	if info.PID != p.pid || !info.Inferred {
+		t.Fatalf("exit = %+v, want the adopted peer's pid %d, inferred", info, p.pid)
+	}
+}
+
+// TestAwaitAdoptedExitRecordsAGroupItCannotRead covers a probe of the group
+// that fails: recorded at ERROR, and no exit is published on a guess.
+func TestAwaitAdoptedExitRecordsAGroupItCannotRead(t *testing.T) {
+	// Arrange.
+	p := startPeer(t, 0)
+	c := standingDownAdopted(p)
+	c.groupGone = func(int) (bool, error) { return false, errors.New("sysctl refused") }
+
+	// Act.
+	c.awaitAdoptedExit(context.Background())
+
+	// Assert.
+	if !hasRecordSaying(c.log.(*dlog.TestLogger), "error", "daemon.shimclient.exit", "could not read whether the adopted shim's process group is gone; its exit is left to the socket or a kill") {
+		t.Fatalf("no ERROR record: %+v", c.log.(*dlog.TestLogger).Records())
+	}
+	select {
+	case info := <-c.Exited():
+		t.Fatalf("an exit %+v was published on a failed read", info)
+	default:
+	}
+}
