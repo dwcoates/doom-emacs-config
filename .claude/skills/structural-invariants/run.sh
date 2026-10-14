@@ -306,6 +306,10 @@ check_absent() {
 
 cmd_self_test() {
   local sandbox
+  # An inherited repository pointer (e.g. from a git hook) would aim every
+  # git call below at the enclosing repository, and a persisted identity
+  # would then author its commits, so the self-test drops both.
+  unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_COMMON_DIR
   sandbox="$(mktemp -d "${TMPDIR:-/tmp}/structural-invariants-selftest.XXXXXX")" \
     || die "cannot create sandbox"
   # shellcheck disable=SC2064
@@ -319,15 +323,14 @@ cmd_self_test() {
 
   (
     cd "$sandbox" || exit 2
+    local -a ident=(-c user.email=selftest@example.com -c user.name=selftest)
     git init --quiet -b master .
-    git config user.email selftest@example.com
-    git config user.name selftest
     printf 'package main\n\nfunc boot() {\n\ttime.Sleep(2 * time.Second) // wait for the daemon\n}\n' >boot.go
     git add boot.go
-    git commit --quiet -m "base"
+    git "${ident[@]}" commit --quiet -m "base"
     printf 'package main\n\nfunc join() {\n\t<-ready // structural rendezvous\n\tpanic("unreachable")\n}\n' >join.go
     git add join.go
-    git commit --quiet -m "second"
+    git "${ident[@]}" commit --quiet -m "second"
   ) || die "sandbox setup failed"
 
   local out rc
