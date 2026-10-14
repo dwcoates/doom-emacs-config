@@ -3,7 +3,7 @@
 The owner wants a workspace whose own branch merges async (in a hidden merge
 workspace) to keep showing its real status: the sidebar row's name in its
 status color with only the status dot purple, and the Emacs tab with only its
-`[N] ` run purple. Sync merges stay exactly as they are.
+`[N]` bracket purple. Sync merges stay exactly as they are.
 
 ## Landed changes
 
@@ -18,7 +18,7 @@ status color with only the status dot purple, and the Emacs tab with only its
   asserted by the webapp and ERT suites.
 - WHY: the arm replaced the workspace's own status, so neither surface could
   draw the name in its status color. The owner asked for the merge to show
-  only in the dot (sidebar) and the `[N] ` run (tab bar). Both renderers must
+  only in the dot (sidebar) and the `[N]` bracket (tab bar). Both renderers must
   read one wire fact, so the fact is a marker the daemon sets, never a
   renderer inference.
 - PRECEDENCE: the sidebar applies the async-merge ink only to a PLAIN dot
