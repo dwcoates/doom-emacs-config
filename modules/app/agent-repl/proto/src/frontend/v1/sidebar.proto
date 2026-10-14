@@ -1063,39 +1063,40 @@ message RosterRowCurrent {
   bool current = 1;
 }
 
-// The when-column: ONE value, chosen by the daemon. The column reflects when
-// the workspace's LAST TURN ENDED — how long it has sat since it last
-// finished work — never when it was last VIEWED, so it is STABLE across mere
-// selection and navigation, and it does not reset when a new turn starts. The
-// daemon's precedence is: MERGED wins ("the workspace is done" is the more
-// interesting fact); else HIDDEN (a workspace in the hidden section counts from
-// when it was hidden, owner request 2026-10-13); else TURN_ENDED (the last
-// turn close); else CREATED (a
-// registered workspace always has a creation time, and a workspace whose
-// first turn is still running has no turn end yet). The client renders
-// whichever arm arrives and applies no precedence of its own.
+// The when-column: ONE value, chosen by the daemon. The daemon's precedence
+// is: MERGED wins ("the workspace is done" is the more interesting fact);
+// else HIDDEN (a workspace in the hidden section counts from when it was
+// hidden, owner request 2026-10-13); else, for every row of the open
+// workspaces section, the TURN CLOCK (owner request, 2026-10-13): TURN_RUNNING
+// while a turn runs, counting from the very instant the footer's turn clock
+// counts from (frontend.v1.FooterClock.turn_started_at_ms), so the two read
+// the same number; NO_TURN_RUNNING otherwise, drawn "0s". The client renders
+// whichever arm arrives and applies no precedence of its own. Never unset.
+//
+// `turn_ended` (field 5) and `created` (field 4) are RETIRED and reserved:
+// the open workspaces section counted the time since the last turn ended, or
+// since the workspace was created before its first turn ended; it now shows
+// the running turn's duration (2026-10-13).
 //
 // `active` (field 3) is RETIRED and reserved: it carried the most recent turn
 // START or close, so the age reset to zero the moment a turn began and read
 // as time-since-work-began rather than time-since-work-ended (2026-10-11).
 //
-// `last_selected` (field 1) is RETIRED and reserved: the column no longer
-// shows viewing-recency, because it reset on every SelectWorkspace and read
-// as a broken clock (2026-09-14), and nothing has produced it since. The
-// selection instant the roster orders by is RosterRow.last_selected. An UNSET
-// oneof draws an empty column; the daemon leaves it unset only when there is
-// genuinely no instant to show.
+// `last_selected` (field 1) is RETIRED and reserved: the column showed
+// viewing-recency, which reset on every SelectWorkspace and read as a broken
+// clock (2026-09-14). The selection instant the roster orders by is
+// RosterRow.last_selected.
 //
 // `viewed` (field 6) is RETIRED and reserved: the retired viewed band's
 // time-since-last-viewed arm (2026-10-12).
 message RosterRowWhen {
-  reserved 1, 3, 6;
-  reserved "last_selected", "active", "viewed";
+  reserved 1, 3, 4, 5, 6;
+  reserved "last_selected", "active", "created", "turn_ended", "viewed";
   oneof shown {
     RosterRowWhenMerged merged = 2;
-    RosterRowWhenCreated created = 4;
-    RosterRowWhenTurnEnded turn_ended = 5;
     RosterRowWhenHidden hidden = 7;
+    RosterRowWhenTurnRunning turn_running = 8;
+    RosterRowWhenNoTurnRunning no_turn_running = 9;
   }
 }
 
@@ -1110,19 +1111,17 @@ message RosterRowWhenMerged {
   int64 at_ms = 1;
 }
 
-// When the workspace's LAST TURN ENDED, in epoch MILLISECONDS — the most
-// recent turn close the daemon recorded, of any close kind, NOT the compose
-// time and NOT a turn start. Renders as relative age ("3m", "2h").
-message RosterRowWhenTurnEnded {
-  int64 at_ms = 1;
+// A turn is running: when it started, in epoch MILLISECONDS on the daemon's
+// clock, exactly the workspace's frontend.v1.FooterClock.turn_started_at_ms.
+// The client ticks the elapsed time from it with the footer clock's own
+// formatter, so the row and the strip read the same duration.
+message RosterRowWhenTurnRunning {
+  int64 started_at_ms = 1;
 }
 
-// When the workspace was CREATED, in epoch MILLISECONDS — the when-column's
-// fallback for a workspace that has never ended a turn, so the column is never
-// left empty for a workspace that genuinely has a time to show.
-message RosterRowWhenCreated {
-  int64 at_ms = 1;
-}
+// No turn is running: the open workspaces section draws "0s". DELIBERATELY
+// EMPTY: the arm is the fact.
+message RosterRowWhenNoTurnRunning {}
 
 // The expanded detail panel: three lines, each its own sub-element, each
 // PRESENT or ABSENT by message presence rather than by an empty string. An
