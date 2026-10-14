@@ -3104,7 +3104,8 @@ describe("a card head's clock holds a fixed footprint", () => {
  * src/bubble/draw.ts and styled by the rules on `.bubble`: the role sets the
  * side and the fill, and a prompt's role also sets its lines a tree line apart;
  * a variant or state sets only the border, `data-cap-lines` sets the collapsed
- * limit, and one size serves every kind.
+ * limit, and one size rule serves every kind (a thinking bubble narrows only
+ * the `--bubble-font-rem` token it reads, 2026-10-14).
  */
 describe("the one bubble rule set", () => {
   /** Whether SELECTOR styles a bubble ITSELF (not its strip, box or content). */
@@ -3202,10 +3203,15 @@ describe("the one bubble rule set", () => {
             !(PAD_TOKENS.includes(prop) && rule.selectors.every((sel) => TIGHTER_PAD_SELECTORS.includes(sel))) &&
             // The dimmed prose of a thinking or interim bubble (owner request,
             // 2026-10-08) is the one text color a variant sets, and the
-            // thinking prose's italic (owner request, 2026-10-14) the one font
-            // style; their own suite pins both.
+            // thinking prose's italic and narrower `--bubble-font-rem` (owner
+            // requests, 2026-10-14) the one font style and size; their own
+            // suite pins all three.
             !(prop === "color" && rule.selectors.every((sel) => DIMMED_TEXT_SELECTORS.includes(sel))) &&
-            !(prop === "font-style" && rule.selectors.length === 1 && rule.selectors[0] === THINKING_SELECTOR) &&
+            !(
+              (prop === "font-style" || prop === "--bubble-font-rem") &&
+              rule.selectors.length === 1 &&
+              rule.selectors[0] === THINKING_SELECTOR
+            ) &&
             // NO BUBBLE AT ALL (owner ruling, 2026-10-08): the same two
             // selectors also turn off the base rule's box-shadow, the one
             // remaining visible highlight once their fill is already the
@@ -4378,6 +4384,30 @@ describe("the dimmed prose of a thinking or interim bubble", () => {
 
     // Assert
     expect(got).toBe("italic");
+  });
+
+  it("sets a thinking bubble's prose a touch smaller than every other bubble's", () => {
+    // Arrange / Act
+    const got = Number(cascadedOnResponse("thinking", ["assistant", "thinking-bubble"], "--bubble-font-rem"));
+
+    // Assert
+    expect(got).toBe(0.8);
+  });
+
+  it("leaves an interim response's prose at every bubble's size", () => {
+    // Arrange / Act
+    const got = cascadedOnResponse("response", ["assistant", "interim-response"], "--bubble-font-rem");
+
+    // Assert
+    expect(got).toBe(rootToken("--bubble-font-rem"));
+  });
+
+  it("leaves the turn's answer at every bubble's size", () => {
+    // Arrange / Act
+    const got = cascadedOnResponse("response", ["assistant", "final-response"], "--bubble-font-rem");
+
+    // Assert
+    expect(got).toBe(rootToken("--bubble-font-rem"));
   });
 
   it("leaves an interim response's prose upright", () => {
