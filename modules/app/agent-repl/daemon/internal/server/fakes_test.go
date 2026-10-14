@@ -731,8 +731,12 @@ type fakeMerge struct {
 	holdErr           error
 	releaseErr        error
 	// holds and releases count the rollout-hold verbs.
-	holds, releases int
-	moveErr         error
+	holds, releases  int
+	disableRacingErr error
+	enableRacingErr  error
+	// disables and enables count the racing-switch verbs.
+	disables, enables int
+	moveErr           error
 	// evicted records every workspace Evict was asked to take off the queue.
 	evicted []ids.WorkspaceID
 	// moves records every move Move was asked for.
@@ -824,6 +828,16 @@ func (f *fakeMerge) HoldRollouts(context.Context) error {
 func (f *fakeMerge) ReleaseRollouts(context.Context) error {
 	f.releases++
 	return f.releaseErr
+}
+
+func (f *fakeMerge) DisableRacing(context.Context) error {
+	f.disables++
+	return f.disableRacingErr
+}
+
+func (f *fakeMerge) EnableRacing(context.Context) error {
+	f.enables++
+	return f.enableRacingErr
 }
 
 func (f *fakeMerge) Pause(_ context.Context, scope *merge.RepositoryScope) error {
