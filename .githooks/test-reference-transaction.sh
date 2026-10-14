@@ -25,7 +25,7 @@ set -euo pipefail
 # the caller's live Git bindings, and the hook's own markers, before any
 # fixture command runs.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_COMMON_DIR
-unset AGENT_REPL_MERGE_QUEUE AGENT_REPL_OWNER_OVERRIDE
+unset AGENT_REPL_MERGE_QUEUE AGENT_REPL_OWNER_OVERRIDE AGENT_REPL_SAFE_TEST_RUN
 
 THIS_DIR="$(cd "$(dirname "$0")" && pwd)"
 HOOK_SRC="$THIS_DIR/reference-transaction"
@@ -68,7 +68,8 @@ mkrepo() {
   mkdir -p "$repo/.fakegit/hooks"
   cp "$HOOK_SRC" "$repo/.fakegit/hooks/reference-transaction"
   chmod +x "$repo/.fakegit/hooks/reference-transaction"
-  printf '%s\n' "$repo"
+  # The directory as the hook's $PWD names it ($TMPDIR may end in a slash).
+  (cd "$repo" && pwd)
 }
 
 enforce() {
@@ -261,21 +262,187 @@ test_unreadable_switch_is_refused() {
   fi
 }
 
-test_enforced_report_phases_never_refuse() {
-  # Only `prepared` can abort a transaction; `committed` and `aborted` are
-  # reports of one already decided, and the hook reads nothing for them.
-  local repo phase ok=1
+test_enforced_aborted_report_never_refuses() {
+  # Only `prepared` can abort a transaction; `aborted` reports one already
+  # decided, and the hook reads nothing for it.
+  local repo
   repo="$(mkrepo)"
   enforce "$repo" true
-  for phase in committed aborted; do
-    attempt "$repo" commit_on_master_tx "$phase"
-    if [ "$RUN_RC" -ne 0 ] || [ -n "$RUN_OUT" ] || [ -n "$GIT_CALLS" ]; then ok=0; fi
-  done
+  attempt "$repo" commit_on_master_tx aborted
 
-  if [ "$ok" -eq 1 ]; then
-    pass "enforcement on: the committed and aborted reports pass silently and read nothing"
+  if [ "$RUN_RC" -eq 0 ] && [ -z "$RUN_OUT" ] && [ -z "$GIT_CALLS" ]; then
+    pass "enforcement on: the aborted report passes silently and reads nothing"
   else
-    fail "enforcement on: the committed and aborted reports pass silently and read nothing" "exit=$RUN_RC" "$RUN_OUT"
+    fail "enforcement on: the aborted report passes silently and reads nothing" "exit=$RUN_RC" "$RUN_OUT" "$GIT_CALLS"
+  fi
+}
+
+test_enforced_committed_report_never_refuses() {
+  local repo
+  repo="$(mkrepo)"
+  enforce "$repo" true
+  attempt "$repo" commit_on_master_tx committed
+
+  if [ "$RUN_RC" -eq 0 ] && [ -z "$RUN_OUT" ] && [ "$GIT_CALLS" = "$COMMON_DIR_CALL" ]; then
+    pass "enforcement on: the committed report passes silently, asking only where the run registry is"
+  else
+    fail "enforcement on: the committed report passes silently, asking only where the run registry is" "exit=$RUN_RC" "$RUN_OUT" "$GIT_CALLS"
+  fi
+}
+
+# ---- the safe-test-run journal (committed phase) ---------------------------
+
+# The one git call the journal makes: where the run registry lives.
+readonly COMMON_DIR_CALL="git rev-parse --path-format=absolute --git-common-dir"
+
+# register REPO NAME ROOT_PID — a registered safe-test-run, as the net leaves
+# one: a directory named NAME-ROOT_PID. REGISTERED is set to its id.
+register() {
+  REGISTERED="$2-$3"
+  mkdir -p "$1/.fakegit/agent-repl-safe-test-runs/$REGISTERED"
+}
+
+journal_of() { cat "$1/.fakegit/agent-repl-safe-test-runs/$2/journal" 2>/dev/null || true; }
+
+# A pid that is never an ancestor: the walk stops before pid 1.
+readonly NOT_AN_ANCESTOR=1
+
+test_committed_with_no_run_registered_journals_nothing() {
+  local repo
+  repo="$(mkrepo)"
+  attempt "$repo" commit_on_feature_tx committed
+
+  if [ "$RUN_RC" -eq 0 ] && [ -z "$RUN_OUT" ] && [ ! -e "$repo/.fakegit/agent-repl-safe-test-runs" ]; then
+    pass "committed with no run registered writes nothing"
+  else
+    fail "committed with no run registered writes nothing" "exit=$RUN_RC" "$RUN_OUT"
+  fi
+}
+
+test_committed_by_a_marked_git_is_journaled() {
+  local repo want
+  repo="$(mkrepo)"
+  register "$repo" run-a "$NOT_AN_ANCESTOR"
+  attempt "$repo" commit_on_feature_tx committed AGENT_REPL_SAFE_TEST_RUN="$REGISTERED"
+  want="$BASE $NEXT HEAD pid=$$ by=marker cwd=$repo
+$BASE $NEXT refs/heads/feature pid=$$ by=marker cwd=$repo"
+
+  if [ "$RUN_RC" -eq 0 ] && [ "$(journal_of "$repo" "$REGISTERED" | sed 's/pid=[0-9]*/pid='"$$"'/')" = "$want" ]; then
+    pass "a git carrying a run's marker has every ref it moved journaled, with its pid, cwd and the marker as evidence"
+  else
+    fail "a git carrying a run's marker has every ref it moved journaled, with its pid, cwd and the marker as evidence" "exit=$RUN_RC" "$RUN_OUT" "$(journal_of "$repo" "$REGISTERED")"
+  fi
+}
+
+test_committed_by_a_descendant_without_the_marker_is_journaled() {
+  # The run's root is this harness: the hook descends from it, as a git a
+  # unit spawned with a scrubbed environment still descends from the run.
+  local repo
+  repo="$(mkrepo)"
+  register "$repo" run-a "$$"
+  attempt "$repo" commit_on_feature_tx committed
+
+  if [ "$RUN_RC" -eq 0 ] && journal_of "$repo" "$REGISTERED" | grep -q "^$BASE $NEXT refs/heads/feature pid=[0-9]* by=ancestry cwd=$repo\$"; then
+    pass "a git descending from a run's root is journaled by ancestry, with no marker"
+  else
+    fail "a git descending from a run's root is journaled by ancestry, with no marker" "exit=$RUN_RC" "$RUN_OUT" "$(journal_of "$repo" "$REGISTERED")"
+  fi
+}
+
+test_committed_by_a_foreign_git_is_not_journaled() {
+  local repo
+  repo="$(mkrepo)"
+  register "$repo" run-a "$NOT_AN_ANCESTOR"
+  attempt "$repo" commit_on_feature_tx committed
+
+  if [ "$RUN_RC" -eq 0 ] && [ -z "$RUN_OUT" ] && [ -z "$(journal_of "$repo" "$REGISTERED")" ]; then
+    pass "a git with neither the marker nor the run's root as an ancestor is never journaled"
+  else
+    fail "a git with neither the marker nor the run's root as an ancestor is never journaled" "exit=$RUN_RC" "$RUN_OUT" "$(journal_of "$repo" "$REGISTERED")"
+  fi
+}
+
+test_another_runs_marker_journals_only_that_run() {
+  local repo
+  repo="$(mkrepo)"
+  register "$repo" run-a "$NOT_AN_ANCESTOR"
+  register "$repo" run-b "$NOT_AN_ANCESTOR"
+  attempt "$repo" commit_on_feature_tx committed AGENT_REPL_SAFE_TEST_RUN="$REGISTERED"
+
+  if [ -z "$(journal_of "$repo" run-a-1)" ] && [ -n "$(journal_of "$repo" run-b-1)" ]; then
+    pass "a marked git is journaled in its own run only, never in a concurrent one"
+  else
+    fail "a marked git is journaled in its own run only, never in a concurrent one" "a=$(journal_of "$repo" run-a-1)" "b=$(journal_of "$repo" run-b-1)"
+  fi
+}
+
+test_prepared_never_journals() {
+  local repo
+  repo="$(mkrepo)"
+  register "$repo" run-a "$$"
+  attempt "$repo" commit_on_feature_tx prepared AGENT_REPL_SAFE_TEST_RUN="$REGISTERED"
+
+  if [ "$RUN_RC" -eq 0 ] && [ -z "$(journal_of "$repo" "$REGISTERED")" ]; then
+    pass "the prepared phase journals nothing: only a committed move happened"
+  else
+    fail "the prepared phase journals nothing: only a committed move happened" "exit=$RUN_RC" "$(journal_of "$repo" "$REGISTERED")"
+  fi
+}
+
+test_a_run_not_ending_in_a_pid_fails_loudly() {
+  local repo
+  repo="$(mkrepo)"
+  mkdir -p "$repo/.fakegit/agent-repl-safe-test-runs/broken"
+  attempt "$repo" commit_on_feature_tx committed
+
+  if [ "$RUN_RC" -ne 0 ] && grep_in "$RUN_OUT" -qF "the registered run $repo/.fakegit/agent-repl-safe-test-runs/broken does not end in -<pid>" &&
+    grep_in "$RUN_OUT" -q "refs/heads/feature"; then
+    pass "a registered run whose name carries no root pid fails the hook loudly, naming the run and the unjudged refs"
+  else
+    fail "a registered run whose name carries no root pid fails the hook loudly, naming the run and the unjudged refs" "exit=$RUN_RC" "$RUN_OUT"
+  fi
+}
+
+# ---- through the fake git: a whole transaction --------------------------------
+
+# committed_repo — a fake repository with one commit, so refs have a target.
+committed_repo() {
+  local repo
+  repo="$(mkrepo)"
+  echo x >"$repo/file"
+  git -C "$repo" add -A
+  git -C "$repo" commit -m one
+  printf '%s\n' "$repo"
+}
+
+test_a_tag_through_git_lands_in_the_journal() {
+  local repo head
+  repo="$(committed_repo)"
+  head="$(git -C "$repo" rev-parse HEAD)"
+  register "$repo" run-a "$NOT_AN_ANCESTOR"
+  AGENT_REPL_SAFE_TEST_RUN="$REGISTERED" git -C "$repo" tag v1 "$head"
+
+  if journal_of "$repo" "$REGISTERED" | grep -q "^0000000000000000000000000000000000000000 $head refs/tags/v1 pid=[0-9]* by=marker " &&
+    grep -q "^refs/tags/v1 $head\$" "$repo/.fakegit/refs"; then
+    pass "a tag a run's git makes lands, and its committed transaction is journaled"
+  else
+    fail "a tag a run's git makes lands, and its committed transaction is journaled" "$(journal_of "$repo" "$REGISTERED")" "$(cat "$repo/.fakegit/refs" 2>/dev/null)"
+  fi
+}
+
+test_a_refused_transaction_through_git_moves_nothing_and_journals_nothing() {
+  local repo head rc=0 out
+  repo="$(committed_repo)"
+  head="$(git -C "$repo" rev-parse HEAD)"
+  enforce "$repo" true
+  register "$repo" run-a "$NOT_AN_ANCESTOR"
+  out="$(AGENT_REPL_SAFE_TEST_RUN="$REGISTERED" git -C "$repo" update-ref refs/heads/master "$head" 2>&1)" || rc=$?
+
+  if [ "$rc" -ne 0 ] && grep_in "$out" -q "REFUSED" && ! grep -q "refs/heads/master" "$repo/.fakegit/refs" 2>/dev/null &&
+    [ -z "$(journal_of "$repo" "$REGISTERED")" ]; then
+    pass "a transaction the guard refuses moves no ref and journals nothing"
+  else
+    fail "a transaction the guard refuses moves no ref and journals nothing" "rc=$rc" "$out" "$(journal_of "$repo" "$REGISTERED")"
   fi
 }
 
@@ -290,7 +457,17 @@ test_enforced_marker_other_than_one_is_refused
 test_enforced_owner_override_lands_and_says_so
 test_enforced_other_branch_is_untouched
 test_unreadable_switch_is_refused
-test_enforced_report_phases_never_refuse
+test_enforced_aborted_report_never_refuses
+test_enforced_committed_report_never_refuses
+test_committed_with_no_run_registered_journals_nothing
+test_committed_by_a_marked_git_is_journaled
+test_committed_by_a_descendant_without_the_marker_is_journaled
+test_committed_by_a_foreign_git_is_not_journaled
+test_another_runs_marker_journals_only_that_run
+test_prepared_never_journals
+test_a_run_not_ending_in_a_pid_fails_loudly
+test_a_tag_through_git_lands_in_the_journal
+test_a_refused_transaction_through_git_moves_nothing_and_journals_nothing
 
 printf 'Passed: %d  Failed: %d\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
