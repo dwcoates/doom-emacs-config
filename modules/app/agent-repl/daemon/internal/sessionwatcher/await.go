@@ -57,13 +57,20 @@ func (w *watcher) AwaitSessionFacts(ctx context.Context) error {
 	if closed {
 		return ErrWatcherClosed
 	}
+	return w.awaitLatch(ctx, w.factsIn)
+}
+
+// awaitLatch blocks until LATCH closes, or until ctx ends. The watcher closing
+// first answers ErrWatcherClosed, unless the latch had closed too: a latch is
+// a fact that was established, and a close does not take it back.
+func (w *watcher) awaitLatch(ctx context.Context, latch <-chan struct{}) error {
 	select {
-	case <-w.factsIn:
+	case <-latch:
 		return nil
 	case <-w.ctx.Done():
 		// The watcher's own context ends with its Close.
 		select {
-		case <-w.factsIn:
+		case <-latch:
 			return nil
 		default:
 			return ErrWatcherClosed
@@ -110,23 +117,13 @@ func (w *watcher) AwaitMainWatching(ctx context.Context) error {
 // yet serving: every answer through it was a turn held back, and is recorded.
 func (w *watcher) waitMainWatching(ctx context.Context) error {
 	began := w.clock.Now()
-	select {
-	case <-w.mainWatching:
-		w.log.Info("daemon.sessionwatcher.main_watching_waited", "a turn waited for the main agent's watch to serve", dlog.Context{
-			"waited_ms": w.clock.Now().Sub(began).Milliseconds(),
-		})
-		return nil
-	case <-w.ctx.Done():
-		// The watcher's own context ends with its Close.
-		select {
-		case <-w.mainWatching:
-			return nil
-		default:
-			return ErrWatcherClosed
-		}
-	case <-ctx.Done():
-		return ctx.Err()
+	if err := w.awaitLatch(ctx, w.mainWatching); err != nil {
+		return err
 	}
+	w.log.Info("daemon.sessionwatcher.main_watching_waited", "a turn waited for the main agent's watch to serve", dlog.Context{
+		"waited_ms": w.clock.Now().Sub(began).Milliseconds(),
+	})
+	return nil
 }
 
 // SessionFactsIn reports whether the session facts have been taken up, the
