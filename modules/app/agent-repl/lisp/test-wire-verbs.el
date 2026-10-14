@@ -1325,6 +1325,31 @@ never sent as an empty ref, because unset is what means every queue."
                                     '(:action (:arm :release-rollouts :value nil))))
                    "{\"releaseRollouts\":{}}"))))
 
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-workspace-arm-encodes-the-ref ()
+  "The shared workspace-arm encoder hands the required ref to its use site."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-verbs--encode-merge-queue-workspace-arm
+                    "UpdateMergeQueueMoveUp" '(:workspace ref-1)
+                    (lambda (ref) (list :encoded ref)))
+                   '((workspace :encoded ref-1))))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-workspace-arm-requires-the-ref ()
+  "The shared workspace-arm encoder refuses an arm with no workspace."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-verbs--encode-merge-queue-workspace-arm
+                   "UpdateMergeQueueMoveUp" nil #'identity)
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-workspace-arms-share-one-encoder ()
+  "Every UpdateMergeQueue arm naming one workspace encodes through the shared
+helper, so a hand-rolled arm cannot drift from the others."
+  (dolist (fn '(agent-repl-wire-encode-update-merge-queue-evict
+                agent-repl-wire-encode-update-merge-queue-move-up
+                agent-repl-wire-encode-update-merge-queue-move-down))
+    (should (string-match-p
+             "agent-repl-wire-verbs--encode-merge-queue-workspace-arm"
+             (prin1-to-string (symbol-function fn))))))
+
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-action-unset ()
   "The arm IS the action, so a request without one is refused."
   (agent-repl-test-wire-verbs--with-common
