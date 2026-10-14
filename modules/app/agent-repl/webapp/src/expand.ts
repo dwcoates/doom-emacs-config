@@ -438,7 +438,7 @@ export function expandedSectionsOf(host: HTMLElement): HTMLElement[] {
  * 2026-10-01, replacing the wheel-armed `scrollOutside` close of 2026-09-30):
  * a section the reader opened by hand stays open however far they scroll from
  * it, until they return to the tail. Only an entry a JUMP expanded closes on
- * leaving the view, and that is the feed's jump watch (feed/jump-collapse.ts),
+ * leaving the view, and that is the feed's jump watch (feed/out-of-view-collapse.ts),
  * not this owner.
  */
 export class AutoCollapse {

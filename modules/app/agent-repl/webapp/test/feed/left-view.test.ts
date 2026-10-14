@@ -170,7 +170,7 @@ describe("left-view's call sites", () => {
   /** The source of the src module at PATH. */
   const source = (path: string): string => readFileSync(join(process.cwd(), path), "utf8");
 
-  it.each([["src/feed/selection-visibility.ts"], ["src/feed/jump-collapse.ts"]])(
+  it.each([["src/feed/selection-visibility.ts"], ["src/feed/out-of-view-collapse.ts"]])(
     "%s detects departures through createLeftViewWatch and no observer of its own",
     (path) => {
       // Arrange

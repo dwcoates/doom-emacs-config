@@ -423,7 +423,7 @@ hand any more:
   breadcrumb, a hook's gated-call link: `reveal` in `src/feed/feed.ts`)
   EXPANDS the entry (its sub-feed bubble, else every capped section its row
   owns), then CENTERS it on the expanded layout, then marks it. An entry the
-  jump expanded is watched (`src/feed/jump-collapse.ts`) and collapsed once NO
+  jump expanded is watched (`src/feed/out-of-view-collapse.ts`) and collapsed once NO
   PART of it is visible; one already open when the jump landed, or one the
   reader toggles by hand afterwards, is the reader's and is never watched. An
   entry the READER expanded does NOT close when scrolled out of view: it
