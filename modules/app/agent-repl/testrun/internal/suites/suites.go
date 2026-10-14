@@ -67,6 +67,9 @@ type Split struct {
 type Units struct {
 	Atomic []run.Spec
 	Splits []Split
+	// Programs are the shared programs (roster.Programs) the suite's units
+	// run; the run builds each once (ProgramUnits).
+	Programs []string
 }
 
 // Build turns one suite into units.

@@ -150,9 +150,11 @@ func resolveLayout() (layout, error) {
 // ---------------------------------------------------------------------------
 
 var (
-	repo           layout
-	sidecarBin     string
-	testBinaryMode testenv.BuildMode
+	repo       layout
+	sidecarBin string
+	// lockFromProgram reports that the lock helper is the run's program, so
+	// nothing here builds it.
+	lockFromProgram bool
 
 	// The shim's lock holder, built LAZILY: only the mocked-vendor subjects
 	// spawn a real shim, and a real shim takes its kernel claims by spawning
@@ -196,16 +198,23 @@ func runSuite(m *testing.M) int {
 		}
 	}
 
-	mode, shared, err := testenv.BinaryMode(os.Getenv)
+	// A TEST RUN BUILDS THE PROGRAMS ONCE (testenv.Programs): the sidecar and
+	// the shim's lock helper come from its programs directory. Outside a run,
+	// this process builds the sidecar now and the lock helper on first use.
+	sidecar, sidecarFromRun, err := testenv.Program(os.Getenv, "shim-claude-sidecar")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "integration: binary mode: %v\n", err)
+		fmt.Fprintf(os.Stderr, "integration: %v\n", err)
 		return 1
 	}
-	testBinaryMode = mode
-
-	var binDir string
-	if mode == testenv.BuildHere {
-		binDir, err = os.MkdirTemp("", "agent-repl-itest-bin-")
+	lock, lockFromRun, err := testenv.Program(os.Getenv, "shim-lock")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "integration: %v\n", err)
+		return 1
+	}
+	if sidecarFromRun && lockFromRun {
+		sidecarBin, lockBinPath, lockFromProgram = sidecar, lock, true
+	} else {
+		binDir, err := os.MkdirTemp("", "agent-repl-itest-bin-")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "integration: temp bin dir: %v\n", err)
 			return 1
@@ -215,49 +224,12 @@ func runSuite(m *testing.M) int {
 				fmt.Fprintf(os.Stderr, "integration: removing temp bin dir %s: %v\n", binDir, err)
 			}
 		}()
-	} else if mode == testenv.BuildInto {
-		binDir, err = testenv.PrebuildDir(shared, sidecarIntegrationSharedSub)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "integration: %v\n", err)
-			return 1
-		}
-	} else {
-		binDir = filepath.Join(shared, sidecarIntegrationSharedSub)
-	}
-
-	sidecarBin = filepath.Join(binDir, "shim-claude-sidecar")
-	lockBinPath = filepath.Join(binDir, "shim-lock")
-	if mode == testenv.UsePrebuilt {
-		for _, binary := range []struct {
-			name string
-			dst  *string
-		}{
-			{name: "shim-claude-sidecar", dst: &sidecarBin},
-			{name: "shim-lock", dst: &lockBinPath},
-		} {
-			path, err := testenv.SharedBinary(shared, sidecarIntegrationSharedSub, binary.name)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "integration: resolve prebuilt %s: %v\n", binary.name, err)
-				return 1
-			}
-			*binary.dst = path
-		}
-	} else {
+		sidecarBin = filepath.Join(binDir, "shim-claude-sidecar")
+		lockBinPath = filepath.Join(binDir, "shim-lock")
 		if err := goBuild(repo.sidecarDir, sidecarBin); err != nil {
 			fmt.Fprintf(os.Stderr, "integration: building the sidecar: %v\n", err)
 			return 1
 		}
-	}
-	if mode == testenv.BuildInto {
-		for _, binary := range []struct{ name, dir string }{
-			{name: "shim-lock", dir: repo.lockDir},
-		} {
-			if err := goBuild(binary.dir, filepath.Join(binDir, binary.name)); err != nil {
-				fmt.Fprintf(os.Stderr, "integration: prebuilding %s: %v\n", binary.name, err)
-				return 1
-			}
-		}
-		return 0
 	}
 
 	// Nothing here ever reaches a vendor; the guard is stated so a regression
@@ -273,8 +245,6 @@ func runSuite(m *testing.M) int {
 	defer removeMockShimRoot()
 	return m.Run()
 }
-
-const sidecarIntegrationSharedSub = "sidecar-integration-bin"
 
 func goBuild(moduleDir, out string) error {
 	// -buildvcs=false: a test build never asks git to stamp the binary (no
@@ -1053,12 +1023,8 @@ func storeClient(socket string) storev1connect.ShimStoreClient {
 func lockBinary(t *testing.T) string {
 	t.Helper()
 	lockBinOnce.Do(func() {
-		switch testBinaryMode {
-		case testenv.BuildHere:
+		if !lockFromProgram {
 			lockBinErr = goBuild(repo.lockDir, lockBinPath)
-		case testenv.UsePrebuilt:
-		case testenv.BuildInto:
-			lockBinErr = fmt.Errorf("integration: lock binary requested while TestMain is only prebuilding")
 		}
 	})
 	if lockBinErr != nil {

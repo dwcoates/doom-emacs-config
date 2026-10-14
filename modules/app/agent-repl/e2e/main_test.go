@@ -70,7 +70,7 @@ func runSuite(m *testing.M) int {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
 		}
-		return harness.MainAt(m, l.daemonDir)
+		return 0
 	}
 
 	// The warm webapp-layer driver keeps its temp files OUTSIDE the run root
@@ -372,7 +372,7 @@ var (
 func requireStoreBinary(t *testing.T) string {
 	t.Helper()
 	storeOnce.Do(func() {
-		storePath, storeErr = sharedOr("shim-store", func() (string, error) {
+		storePath, storeErr = programOr("shim-store", func() (string, error) {
 			return goBuildCovered(repo.storeDir, filepath.Join(e2eBinDir(), "shim-store"))
 		})
 	})
@@ -392,7 +392,7 @@ var (
 func requireSidecarBinary(t *testing.T) string {
 	t.Helper()
 	sidecarOnce.Do(func() {
-		sidecarPath, sidecarErr = sharedOr("shim-claude-sidecar", func() (string, error) {
+		sidecarPath, sidecarErr = programOr("shim-claude-sidecar", func() (string, error) {
 			return goBuildCovered(repo.sidecarDir, filepath.Join(e2eBinDir(), "shim-claude-sidecar"))
 		})
 	})
@@ -418,7 +418,7 @@ var (
 func requireLockBinary(t *testing.T) string {
 	t.Helper()
 	lockOnce.Do(func() {
-		lockPath, lockErr = sharedOr("shim-lock", func() (string, error) {
+		lockPath, lockErr = programOr("shim-lock", func() (string, error) {
 			return goBuildOnce(repo.lockDir, filepath.Join(e2eBinDir(), "shim-lock"))
 		})
 	})
@@ -435,6 +435,17 @@ const e2eSharedSub = "e2e-bin"
 
 // shimBundleName is the staged shim bundle's path under e2eBinDir.
 const shimBundleName = "shim-dist/main.js"
+
+// programOr answers a program the test run built once for every suite
+// (testenv.Programs), and builds it here when this process runs outside such
+// a run.
+func programOr(name string, build func() (string, error)) (string, error) {
+	path, fromRun, err := testenv.Program(os.Getenv, name)
+	if err != nil || fromRun {
+		return path, err
+	}
+	return build()
+}
 
 // sharedOr answers a binary from the shared prebuilt directory when this
 // process was told to read one, and builds it otherwise.
@@ -462,18 +473,6 @@ func prebuildE2E() error {
 	}
 	if _, err := harness.TimedStep(os.Stderr, "e2e", "prebuild the shim bundle", func() (string, error) { return buildShimBundle(node) }); err != nil {
 		return fmt.Errorf("e2e: prebuild the shim bundle: %w", err)
-	}
-	for _, b := range []struct {
-		dir, name string
-		build     func(string, string) (string, error)
-	}{
-		{repo.storeDir, "shim-store", goBuildCovered},
-		{repo.sidecarDir, "shim-claude-sidecar", goBuildCovered},
-		{repo.lockDir, "shim-lock", goBuildOnce},
-	} {
-		if _, err := harness.TimedStep(os.Stderr, "e2e", "prebuild "+b.name, func() (string, error) { return b.build(b.dir, filepath.Join(e2eBinDir(), b.name)) }); err != nil {
-			return fmt.Errorf("e2e: prebuild %s: %w", b.name, err)
-		}
 	}
 	return nil
 }
