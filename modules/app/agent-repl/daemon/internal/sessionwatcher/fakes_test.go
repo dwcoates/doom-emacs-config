@@ -858,6 +858,10 @@ func (s *footerSink) OnContextCut(_ ids.WorkspaceID, agent *conversationv1.Agent
 	s.rec.emit(event{sink: "footer", method: "OnContextCut", agent: agent.GetValue()})
 }
 
+func (s *footerSink) OnContextCutRestated(_ ids.WorkspaceID, cut *conversationv1.ContextCut) {
+	s.rec.emit(event{sink: "footer", method: "OnContextCutRestated", detail: cut.GetCompacted().GetCompaction().GetValue()})
+}
+
 func (s *footerSink) OnHistoryPage(_ ids.WorkspaceID, agent *conversationv1.AgentId, page *conversationv1.HistoryPage) {
 	s.rec.emit(event{sink: "footer", method: "OnHistoryPage", agent: agent.GetValue(), detail: strconv.Itoa(len(page.GetEntries()))})
 }
