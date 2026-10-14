@@ -1671,16 +1671,26 @@ The workspace an async merge closes once it lands; its ref is required."
                (agent-repl-wire-verbs--require "MergeWorkspaceAsyncOneShot" "workspace"
                                                 (plist-get value :workspace))))))
 
+(defun agent-repl-wire-encode-merge-workspace-async-merge-actions (value)
+  "Encode MergeWorkspaceAsync's `merge_actions' use site from VALUE.
+The same CreateWorkspaceMergeActions a create configures, encoded by the
+create's own encoder, so the two use sites cannot spell it apart."
+  (agent-repl-wire-encode-create-workspace-merge-actions value))
+
 (defun agent-repl-wire-encode-merge-workspace-async (value)
   "Encode MergeWorkspaceAsync from plist VALUE (:name STRING :branch STRING
 :instruction STRING :one-shot ONE-SHOT :cleanup-worktree BOOL
-:compact-after BOOL).  An ASYNC merge of BRANCH in a hidden merge
-workspace named NAME, both required and non-blank.  INSTRUCTION, when
-given, must be non-blank; ONE-SHOT (:workspace REF) names another
-workspace to close once the merge lands."
+:compact-after BOOL :merge-actions ACTIONS).  An ASYNC merge of BRANCH in
+a hidden merge workspace named NAME, both required and non-blank.
+INSTRUCTION, when given, must be non-blank; ONE-SHOT (:workspace REF)
+names another workspace to close once the merge lands.  ACTIONS
+\(:before-ws-merge SAID :postprocessing-prompt SAID) are the merge
+actions the MERGE WORKSPACE runs, and the only ones: it never inherits
+the requester\='s."
   (let* ((message "MergeWorkspaceAsync")
          (instruction (plist-get value :instruction))
-         (one-shot (plist-get value :one-shot)))
+         (one-shot (plist-get value :one-shot))
+         (merge-actions (plist-get value :merge-actions)))
     (append
      (list (cons 'name (agent-repl-wire-verbs--require-string message "name" (plist-get value :name)))
            (cons 'branch (agent-repl-wire-verbs--require-string message "branch" (plist-get value :branch))))
@@ -1691,7 +1701,10 @@ workspace to close once the merge lands."
      (when (plist-get value :cleanup-worktree)
        (list (cons 'cleanupWorktree t)))
      (when (plist-get value :compact-after)
-       (list (cons 'compactAfter t))))))
+       (list (cons 'compactAfter t)))
+     (when merge-actions
+       (list (cons 'mergeActions
+                   (agent-repl-wire-encode-merge-workspace-async-merge-actions merge-actions)))))))
 
 (defun agent-repl-wire-encode-merge-workspace-request (request)
   "Encode MergeWorkspaceRequest from plist REQUEST (:workspace REF :mode MODE).

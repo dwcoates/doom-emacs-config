@@ -2224,6 +2224,25 @@ and its compaction when given."
                            "\"oneShot\":{\"workspace\":{\"id\":\"ws-2\",\"dir\":\"/w/two\"}},"
                            "\"cleanupWorktree\":true,\"compactAfter\":true}}")))))
 
+(ert-deftest agent-repl-test-wire-verbs-merge-request-async-with-merge-actions ()
+  "An async merge spells its own merge actions as `mergeActions'."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-test-wire-verbs--merge-json
+                    '(:arm :async :value (:name "reconnect-fix" :branch "agent-1/fix"
+                                          :merge-actions (:before-ws-merge (:text "lint")
+                                                          :postprocessing-prompt (:text "tidy")))))
+                   (concat "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},"
+                           "\"async\":{\"name\":\"reconnect-fix\",\"branch\":\"agent-1/fix\","
+                           "\"mergeActions\":{\"beforeWsMerge\":{\"said\":\"lint\"},"
+                           "\"postprocessingPrompt\":{\"said\":\"tidy\"}}}}")))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-request-async-merge-actions-share-the-create-encoder ()
+  "The async use site encodes merge actions exactly as the create's does."
+  (agent-repl-test-wire-verbs--with-common
+    (let ((actions '(:before-ws-merge (:text "lint"))))
+      (should (equal (agent-repl-wire-encode-merge-workspace-async-merge-actions actions)
+                     (agent-repl-wire-encode-create-workspace-standard-merge-actions actions))))))
+
 (ert-deftest agent-repl-test-wire-verbs-merge-request-async-refuses-what-it-lacks ()
   "An async merge missing its name or its branch, or with a blank
 instruction, or a one-shot naming no workspace, is refused before it is sent."
