@@ -1127,6 +1127,11 @@ html.webhost-sidebar #ws-sidebar[hidden] {
   flex: 0 0 auto;
   font-variant-numeric: tabular-nums;
 }
+/* EVERY WHEN-COLUMN READS IN ONE GREY (owner request, 2026-10-13): a Hidden
+   or Recently Merged row's when-column is the muted grey under its row's
+   receded opacity, so an unreceded row's takes that same opacity on the
+   column alone, and the two composite to the same colour. */
+#ws-sidebar .ws:not(.receded) > .row > .when { opacity: var(--receded-opacity); }
 /* THERE IS NO CHEVRON (owner ruling, 2026-09-14): "Hovering the workspace
    should have the same effect as opening the chevron currently does. No need
    for a chevron to show the dropdown on hover." The row opens its own panel
@@ -1147,7 +1152,8 @@ html.webhost-sidebar #ws-sidebar[hidden] {
    workspace, and a hidden one (owner request, 2026-10-13: a Hidden row reads
    in exactly the grey a Recently Merged row does, which is the band name
    colour at this opacity). */
-#ws-sidebar .ws.receded > .row { opacity: 0.55; }
+#ws-sidebar { --receded-opacity: 0.55; }
+#ws-sidebar .ws.receded > .row { opacity: var(--receded-opacity); }
 
 /* The current row's merge (sidebar.ts `mergeRowHtml`). The rail LEADS on
    merges, and the merge glyph beside the name says only that one is
