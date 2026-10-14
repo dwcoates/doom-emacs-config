@@ -53,7 +53,10 @@ workspace's tab) and the tab blink.
   `✅ <workspace title> turn completed <timestamp>` over a one-sentence
   declarative Haiku summary of the turn's final response message (the content
   of the green-bordered response bubble the webapp shows), asked as bare
-  inference with no tools and no system prompt. A turn that ended in
+  inference with no tools and no system prompt. The summary is set in
+  italics (Unicode sans-serif italic letters, since a banner carries no
+  markup) and names no commit SHA ("merged to master", never which commit).
+  A turn that ended in
   failure: `❌ <workspace title> turn errored <timestamp>` over the daemon's
   error message for why the turn failed.
 - **The banner follows the roster status the turn end resolves to.** A turn
