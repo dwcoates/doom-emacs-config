@@ -273,33 +273,19 @@ var errTurnToHead = errors.New("merge: the head stands in line for the test turn
 // repository's turn, finds its head in line for it. It answers its stop,
 // which waits for the watch to end.
 func (o *orchestrator) watchHeadInLine(ctx context.Context, r *run, cut context.CancelCauseFunc) func() {
-	done := make(chan struct{})
-	o.live.Add(1)
-	go func() {
-		defer o.live.Done()
-		defer close(done)
-		for {
-			o.mu.Lock()
-			line := o.testTurns[r.repo]
-			if line == nil || line.holder != r {
-				o.mu.Unlock()
-				panic("merge: a gate waits for the governor without holding its repository's test turn")
-			}
-			head, changed := line.headWaitingLocked(), line.changed
+	return o.watch(ctx, cut, func() (bool, <-chan struct{}) {
+		o.mu.Lock()
+		line := o.testTurns[r.repo]
+		if line == nil || line.holder != r {
 			o.mu.Unlock()
-			if head {
-				cut(errTurnToHead)
-				return
-			}
-			select {
-			case <-changed:
-			case <-ctx.Done():
-				return
-			}
+			panic("merge: a gate waits for the governor without holding its repository's test turn")
 		}
-	}()
-	return func() {
-		cut(nil)
-		<-done
-	}
+		head, changed := line.headWaitingLocked(), line.changed
+		o.mu.Unlock()
+		if head {
+			cut(errTurnToHead)
+			return true, nil
+		}
+		return false, changed
+	})
 }
