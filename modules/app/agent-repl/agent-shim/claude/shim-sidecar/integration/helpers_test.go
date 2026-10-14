@@ -48,6 +48,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/proto/store/v1/storev1connect"
+	"agentrepl/protohelpers/storewrite"
 	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/recorded"
 	"agentrepl/shim-claude-sidecar/internal/testclose"
@@ -1466,6 +1467,8 @@ func resolved(p string) string {
 type fakeStore struct {
 	t      *testing.T
 	Socket string
+	// Client reads the fake over its socket, exactly as a store client would.
+	Client storev1connect.ShimStoreClient
 
 	mu      sync.Mutex
 	calls   []string
@@ -1528,6 +1531,7 @@ func startFakeStoreAt(t *testing.T, socket string) *fakeStore {
 	f := &fakeStore{
 		t:           t,
 		Socket:      socket,
+		Client:      storeClient(socket),
 		batchC:      make(chan *storev1.WriteBatchRequest, 4096),
 		callC:       make(chan string, 4096),
 		done:        make(chan struct{}),
@@ -1565,6 +1569,137 @@ func (f *fakeStore) Stop() {
 	_ = f.srv.Shutdown(ctx)
 	<-f.done
 	testclose.RemoveOrFail(f.t, f.Socket)
+}
+
+// Resume serves again on the same socket after a Stop, with everything the
+// fake made durable before it went down: a store bounce, as the sidecar sees
+// one. What a bounce does to the store's own database is the store's suite's.
+func (f *fakeStore) Resume() {
+	f.t.Helper()
+	f.mu.Lock()
+	if !f.stopped {
+		f.mu.Unlock()
+		f.t.Fatal("fakeStore.Resume: the fake is still serving")
+	}
+	f.stopped = false
+	f.done = make(chan struct{})
+	f.mu.Unlock()
+	mux := http.NewServeMux()
+	path, handler := storev1connect.NewShimStoreHandler(f)
+	mux.Handle(path, handler)
+	ln, err := net.Listen("unix", f.Socket)
+	if err != nil {
+		f.t.Fatalf("listen again on %s: %v", f.Socket, err)
+	}
+	f.ln = ln
+	f.srv = &http.Server{Handler: h2c.NewHandler(mux, &http2.Server{})}
+	done := f.done
+	go func() {
+		defer close(done)
+		_ = f.srv.Serve(ln)
+	}()
+}
+
+// recordCursorAdvance makes a batch's cursor durable WITH the batch, as the
+// store commits them (store.v1 EntryBatch.cursor_advance): the file's one
+// cursor is replaced, keyed by its file id. Called under f.mu.
+func (f *fakeStore) recordCursorAdvance(req *storev1.WriteBatchRequest) {
+	advance := req.GetBatch().GetCursorAdvance()
+	if advance == nil {
+		return
+	}
+	held := proto.Clone(advance).(*storev1.CursorState)
+	for i, cs := range f.cursors {
+		if cs.GetFileId() == held.GetFileId() {
+			f.cursors[i] = held
+			return
+		}
+	}
+	f.cursors = append(f.cursors, held)
+}
+
+// Book answers the page lines the sidecar wrote into agent's book, as the
+// store keeps them: one line per upsert key, the latest write winning at the
+// place of its first, and none for a key a later batch retired. A line whose
+// owner the sidecar did not know names no book; resolving it is the store's
+// own logic, tested in shim-store's suite.
+func (f *fakeStore) Book(agent string) []*storev1.StorePageLine {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var order []string
+	byKey := map[string]*storev1.StorePageLine{}
+	for _, b := range f.acked {
+		for _, e := range b.GetBatch().GetEntries() {
+			line := e.GetAgentUpdate().GetServeableFrame()
+			if line == nil || line.GetPageAgentId().GetValue() != agent {
+				continue
+			}
+			if _, seen := byKey[e.GetUpsertKey()]; !seen {
+				order = append(order, e.GetUpsertKey())
+			}
+			byKey[e.GetUpsertKey()] = line
+		}
+		for _, r := range b.GetBatch().GetRetirements() {
+			delete(byKey, r.GetUpsertKey())
+		}
+	}
+	var out []*storev1.StorePageLine
+	for _, key := range order {
+		if line, ok := byKey[key]; ok {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+// awaitBookLines waits until agent's book holds at least want lines.
+func (f *fakeStore) awaitBookLines(ctx context.Context, t *testing.T, agent string, want int) []*storev1.StorePageLine {
+	t.Helper()
+	tick := time.NewTicker(pollTick)
+	defer tick.Stop()
+	for {
+		lines := f.Book(agent)
+		if len(lines) >= want {
+			return lines
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("book %s held %d lines, wanted at least %d, within the deadline", agent, len(lines), want)
+		case <-tick.C:
+		}
+	}
+}
+
+// awaitBookUnits waits until agent's book holds a line for every unit named.
+func (f *fakeStore) awaitBookUnits(ctx context.Context, t *testing.T, agent string, want ...string) []*storev1.StorePageLine {
+	t.Helper()
+	tick := time.NewTicker(pollTick)
+	defer tick.Stop()
+	for {
+		lines := f.Book(agent)
+		held := map[string]bool{}
+		for _, line := range lines {
+			if a := activityOf(line); a != nil {
+				held[a.GetActivityId().GetValue()] = true
+			}
+		}
+		missing := false
+		for _, id := range want {
+			if !held[id] {
+				missing = true
+				break
+			}
+		}
+		if !missing {
+			return lines
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("book %s never held every unit %v within the deadline; it holds %v",
+				agent, want, sortedStrings(keysOf(held)))
+		case <-tick.C:
+		}
+	}
 }
 
 // FailWrites makes the next n WriteBatch calls answer the failure arm. Nothing
@@ -1635,45 +1770,14 @@ func (f *fakeStore) Rejections() []string {
 	return append([]string(nil), f.rejections...)
 }
 
-// validateWriteBatchEnvelope restates shim-store's validateWriteBatchRequest.
-// It answers the offending field and the store's account, or "" when the
-// request is well formed.
-//
-// IT IS THE ENVELOPE ONLY, exactly like the real store's: the frame inside a
-// StoreEntry is opaque to this layer and is routed by arm further down.
+// validateWriteBatchEnvelope is the store's own validation
+// (agentrepl/protohelpers/storewrite, which shim-store's server refuses with),
+// answering the offending field and the store's account, or "" when the
+// request is well formed. It is the ENVELOPE only, exactly like the real
+// store's: the frame inside a StoreEntry is routed by arm further down.
 func validateWriteBatchEnvelope(req *storev1.WriteBatchRequest) (string, string) {
-	if req.GetProducer() == "" {
-		return "producer", "producer: the write names no producer, so nothing can be attributed"
-	}
-	batch := req.GetBatch()
-	if batch == nil {
-		return "batch", "batch: the request carries no EntryBatch"
-	}
-	if len(batch.GetEntries()) == 0 && batch.GetCursorAdvance() == nil {
-		return "batch", "batch: the EntryBatch carries neither entries nor a cursor advance"
-	}
-	for i, e := range batch.GetEntries() {
-		what := fmt.Sprintf("batch.entries[%d]", i)
-		if e == nil {
-			return what, what + ": no entry"
-		}
-		if e.GetPlane() == nil || e.GetPlane().GetPlane() == nil {
-			return what + ".plane", what + ": plane names neither stream nor file"
-		}
-		if e.GetWriteId() == "" {
-			return what + ".write_id", what + ": write_id is empty, so the write cannot be deduped on replay"
-		}
-		if e.GetUpsertKey() == "" {
-			return what + ".upsert_key", what + ": upsert_key is empty, so the write identifies no row"
-		}
-		if e.GetEntry() == nil {
-			return what + ".entry", what + ": the entry oneof names neither agent_update nor session_update"
-		}
-	}
-	// A CURSOR-ONLY BATCH IS LEGAL: a reader that consumed bytes yielding no
-	// entries must still make its position durable.
-	if cs := batch.GetCursorAdvance(); cs != nil && cs.GetFileId() == "" {
-		return "batch.cursor_advance.file_id", "cursor_advance: a CursorState with no file_id keys no row"
+	if r := storewrite.ValidateWriteBatchRequest(req); r != nil {
+		return r.Field, r.Detail
 	}
 	return "", ""
 }
@@ -1783,6 +1887,8 @@ func (f *fakeStore) WriteBatch(_ context.Context, req *connect.Request[storev1.W
 	f.mu.Lock()
 	f.acked = append(f.acked, recorded)
 	f.recordBashRows(recorded)
+	f.recordCursorAdvance(recorded)
+	f.recordShellRunClaims(recorded)
 	gate := f.gate
 	f.mu.Unlock()
 	// The batch is DURABLE here and only the ANSWER is withheld, so a subject
@@ -2042,6 +2148,33 @@ func terminalRunOf(entry *storev1.StoreEntry) (string, bool) {
 		return activity.GetActivityId().GetValue(), true
 	}
 	return "", false
+}
+
+// recordShellRunClaims makes a batch's shell run claims durable, as the store
+// commits them, each owned by the book holding its run's launching call (the
+// store's GetShellRunClaims owner). A claim whose run no acknowledged line
+// names yet is held unowned until one does. Called under f.mu.
+func (f *fakeStore) recordShellRunClaims(req *storev1.WriteBatchRequest) {
+	for _, claim := range req.GetBatch().GetShellRunClaims() {
+		f.shellRunClaims = append(f.shellRunClaims, &storev1.ShellRunClaimed{
+			Claim: proto.Clone(claim).(*storev1.ShellRunClaim),
+			Owner: f.ownerOfUnitLocked(claim.GetRun().GetValue()),
+		})
+	}
+}
+
+// ownerOfUnitLocked answers the book holding the unit's line, or nil when no
+// acknowledged line names it. Called under f.mu.
+func (f *fakeStore) ownerOfUnitLocked(unit string) *conversationv1.AgentId {
+	for _, b := range f.acked {
+		for _, e := range b.GetBatch().GetEntries() {
+			line := e.GetAgentUpdate().GetServeableFrame()
+			if a := activityOf(line); a != nil && a.GetActivityId().GetValue() == unit && line.GetPageAgentId() != nil {
+				return proto.Clone(line.GetPageAgentId()).(*conversationv1.AgentId)
+			}
+		}
+	}
+	return nil
 }
 
 // claimShellRun records a claim the shim wrote, with the book holding its
