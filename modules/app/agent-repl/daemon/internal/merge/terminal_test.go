@@ -3,6 +3,7 @@ package merge
 import (
 	"context"
 	"errors"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -2087,5 +2088,77 @@ func TestAFailedMergesTerminalIsPublishedOnlyAfterItsLeaseIsReleased(t *testing.
 	// Assert
 	if len(heldAtFailure) != 1 || heldAtFailure[0] {
 		t.Fatalf("lease held as the failed terminal was pushed = %v, want one push after the release", heldAtFailure)
+	}
+}
+
+func TestAbandonedSentenceReadsTheCausesSentenceForWhetherTheMergeRan(t *testing.T) {
+	// Arrange.
+	tests := []struct {
+		name string
+		ran  bool
+		want string
+	}{
+		{name: "never ran", ran: false, want: abandonSummaries[CauseUserDrop]},
+		{name: "ran", ran: true, want: runningSummaries[CauseUserDrop]},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newHarness(t)
+
+			// Act.
+			got := h.o.abandonedSentence(theWorkspace, CauseUserDrop, tt.ran)
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("abandonedSentence = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAbandonedSentenceOfAnUndeclaredCauseNamesItAndRecordsTheGap(t *testing.T) {
+	// Arrange.
+	tests := []struct {
+		name string
+		ran  bool
+		want string
+	}{
+		{name: "never ran", ran: false, want: "this merge left the queue before it ran (no-such-cause)"},
+		{name: "ran", ran: true, want: "this merge was abandoned while it was running (no-such-cause)"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newHarness(t)
+
+			// Act.
+			got := h.o.abandonedSentence(theWorkspace, AbandonCause("no-such-cause"), tt.ran)
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("abandonedSentence = %q, want %q", got, tt.want)
+			}
+			rec, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.merge.abandoned"})
+			if !ok || rec.Context["cause"] != "no-such-cause" || rec.Context["workspace"] != string(theWorkspace) {
+				t.Fatalf("the undeclared cause was recorded as %+v, want an ERROR naming it and the workspace", rec)
+			}
+		})
+	}
+}
+
+func TestEveryAbandonedSentenceIsReadThroughAbandonedSentence(t *testing.T) {
+	// Arrange.
+	for _, file := range []string{"terminal.go", "queue.go"} {
+		body, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("reading %s: %v", file, err)
+		}
+
+		// Act.
+		uses := strings.Count(string(body), "cause.summary()") + strings.Count(string(body), "cause.summaryRunning()")
+
+		// Assert: only abandonedSentence (terminal.go) reads the sentences.
+		if want := map[string]int{"terminal.go": 2, "queue.go": 0}[file]; uses != want {
+			t.Fatalf("%s reads a cause's sentence %d times, want %d: every reading goes through abandonedSentence", file, uses, want)
+		}
 	}
 }
