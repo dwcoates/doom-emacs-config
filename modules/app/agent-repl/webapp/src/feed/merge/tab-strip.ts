@@ -56,7 +56,7 @@ export const RESOLVED_KINDS: readonly string[] = [
 
 /** The kinds whose content is the sub-feed rows parented to them. */
 export const AGENTIC_KINDS: readonly string[] = [
-  "pick",
+  "resolving",
   "prePrompt",
   "testsRunFixing",
   "postPrompt",
