@@ -91,33 +91,11 @@ func (o *orchestrator) setPaused(ctx context.Context, scope *RepositoryScope, pa
 // does not hold is REFUSED rather than silently pausing a key nobody owns.
 func (o *orchestrator) pauseScope(ctx context.Context, op string, scope *RepositoryScope, paused bool) ([]wsm.RepoKey, error) {
 	if scope != nil {
-		if scope.ID == "" && scope.Dir == "" {
-			o.deps.Log.Global().Warn(op, "refused a pause change scoped by an empty repository ref", dlog.Context{"arm": ArmUnknownRepository})
-			return nil, &RefusalError{Arm: ArmUnknownRepository, Reason: "the request's repository ref names neither an id nor a dir"}
-		}
-		repos, err := o.deps.DB.ListRepositories(ctx)
+		repo, err := o.queueKeyOf(ctx, op, "a pause change", *scope)
 		if err != nil {
 			return nil, err
 		}
-		for _, repo := range repos {
-			if scope.ID != "" && repo.ID != scope.ID {
-				continue
-			}
-			if scope.Dir != "" && repo.Dir != scope.Dir {
-				continue
-			}
-			// THE QUEUE IS KEYED BY THE COMMON DIR (repoKeyFor), never by the
-			// registry's worktree dir: keying a scoped pause by repo.Dir wrote
-			// and read a key no queue is ever stored under, so a scoped pause
-			// never saw what an unscoped one had done.
-			common, err := o.deps.Git.CommonDir(ctx, repo.Dir)
-			if err != nil {
-				return nil, fmt.Errorf("merge: resolving the repository of %s: %w", repo.Dir, err)
-			}
-			return []wsm.RepoKey{wsm.RepoKey(common)}, nil
-		}
-		o.deps.Log.Global().Warn(op, "refused a pause change for a repository the registry does not hold", dlog.Context{"arm": ArmUnknownRepository, "repository": string(scope.ID), "dir": scope.Dir})
-		return nil, &RefusalError{Arm: ArmUnknownRepository, Reason: "no registered repository matches the request's repository ref"}
+		return []wsm.RepoKey{repo}, nil
 	}
 	queues, err := o.deps.DB.AllMergeQueues(ctx)
 	if err != nil {
@@ -136,6 +114,42 @@ func (o *orchestrator) pauseScope(ctx context.Context, op string, scope *Reposit
 		return nil, &RefusalError{Arm: arm, Reason: reason}
 	}
 	return keys, nil
+}
+
+// queueKeyOf resolves the queue key of the ONE repository SCOPE names: the
+// registered repository its ref matches, keyed by its common dir as every
+// queue is. It is the one resolution every request scoped to a repository's
+// queue makes (a pause or a resume, a subscription), so they cannot key one
+// repository two ways. A ref naming nothing, or no registered repository, is
+// the unknown_repository refusal, recorded under OP as WHAT was refused.
+func (o *orchestrator) queueKeyOf(ctx context.Context, op, what string, scope RepositoryScope) (wsm.RepoKey, error) {
+	if scope.ID == "" && scope.Dir == "" {
+		o.deps.Log.Global().Warn(op, "refused "+what+" scoped by an empty repository ref", dlog.Context{"arm": ArmUnknownRepository})
+		return "", &RefusalError{Arm: ArmUnknownRepository, Reason: "the request's repository ref names neither an id nor a dir"}
+	}
+	repos, err := o.deps.DB.ListRepositories(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, repo := range repos {
+		if scope.ID != "" && repo.ID != scope.ID {
+			continue
+		}
+		if scope.Dir != "" && repo.Dir != scope.Dir {
+			continue
+		}
+		// THE QUEUE IS KEYED BY THE COMMON DIR (repoKeyFor), never by the
+		// registry's worktree dir: keying a scoped pause by repo.Dir wrote
+		// and read a key no queue is ever stored under, so a scoped pause
+		// never saw what an unscoped one had done.
+		common, err := o.deps.Git.CommonDir(ctx, repo.Dir)
+		if err != nil {
+			return "", fmt.Errorf("merge: resolving the repository of %s: %w", repo.Dir, err)
+		}
+		return wsm.RepoKey(common), nil
+	}
+	o.deps.Log.Global().Warn(op, "refused "+what+" for a repository the registry does not hold", dlog.Context{"arm": ArmUnknownRepository, "repository": string(scope.ID), "dir": scope.Dir})
+	return "", &RefusalError{Arm: ArmUnknownRepository, Reason: "no registered repository matches the request's repository ref"}
 }
 
 // AbandonCause names WHY a queued merge left its queue before it ever ran.

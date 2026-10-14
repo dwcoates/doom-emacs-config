@@ -859,6 +859,8 @@ type fakeGit struct {
 
 	defaultBranch string
 	commonDirs    map[string]string
+	// commonDirErr, when set, fails every CommonDir.
+	commonDirErr error
 	sameRepo      bool
 	sameRepoErr   error
 	refs          map[string]string
@@ -1133,6 +1135,9 @@ func (g *fakeGit) Nuke(context.Context, string, string, string) error {
 
 func (g *fakeGit) CommonDir(_ context.Context, dir string) (string, error) {
 	g.record("common_dir")
+	if g.commonDirErr != nil {
+		return "", g.commonDirErr
+	}
 	if common, ok := g.commonDirs[dir]; ok {
 		return common, nil
 	}
