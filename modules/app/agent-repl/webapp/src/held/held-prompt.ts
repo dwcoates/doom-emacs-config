@@ -7,10 +7,10 @@
  * (src/bubble/draw.ts, owner rulings 2026-09-23): a prompt-role bubble on the
  * prompt rail whose fill is only 5% of the held grey-blue tint over the feed
  * (owner ruling, 2026-09-27), so it barely lifts off the page — the reader
- * sees their words have NOT reached the agent — at HALF the one bubble
- * width, whose header strip is its status BADGES, whose content is what the
- * user said, painted by the one body pipeline, and which collapses to ONE line
- * ending in the one bubble's ellipsis when there is more, never a fade (owner
+ * sees their words have NOT reached the agent — at the one bubble width every
+ * prompt takes (owner request, 2026-10-13), whose header strip is its status
+ * BADGES, whose content is what the user said, painted by the one body
+ * pipeline, and which collapses to ONE line ending in the one bubble's ellipsis when there is more, never a fade (owner
  * ruling, 2026-09-27), opened by the one toggle (expand.ts, armed on the held section).
  *
  * COLLAPSED IT IS ONE LINE AND ITS BADGES (owner spec, 2026-09-23; one line,

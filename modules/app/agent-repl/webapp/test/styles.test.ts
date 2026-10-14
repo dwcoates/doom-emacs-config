@@ -3111,10 +3111,6 @@ describe("the one bubble rule set", () => {
         (sel) => onBubble(sel) && sel !== ".bubble" && !/^\.bubble\[data-(?:role|cap-lines)=/.test(sel) && !sel.includes("[hidden]"),
       ),
     );
-    // The held variant's HALVED cap (owner spec, 2026-09-23) is the one width a
-    // variant sets, and only as the one token halved: its own test below pins
-    // the value, so here it is the one sanctioned property beyond the border.
-    const held = '.bubble[data-variant="held"]';
     const beyondBorder = keyed.filter((rule) =>
       rule.declarations
         .split(";")
@@ -3124,7 +3120,6 @@ describe("the one bubble rule set", () => {
             prop !== "" &&
             !prop.startsWith("border") &&
             prop !== "--bubble-bg" &&
-            !(prop === "max-width" && rule.selectors.length === 1 && rule.selectors[0] === held) &&
             // The vertical padding ladder (owner requests, 2026-10-12 and
             // 2026-10-13) is the one padding token a variant sets; its own
             // suite pins it.
@@ -3416,11 +3411,14 @@ describe("the held prompt's fill: the response bubble's own token", () => {
     expect(assistant).toHaveLength(3);
   });
 
-  it("caps the held variant at half the one bubble width token", () => {
-    // Arrange / Act
-    const rule = declarationsOf('.bubble[data-variant="held"]') ?? "";
+  it("leaves the held variant at the one bubble width every prompt takes", () => {
+    // Arrange / Act — every rule keyed on the held variant (owner request,
+    // 2026-10-13, superseding 2026-09-23's halved cap).
+    const held = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.some((sel) => sel.includes('[data-variant="held"]')),
+    );
     // Assert
-    expect(rule).toMatch(/max-width:\s*calc\(var\(--bubble-max-width\) \/ 2\)\s*;/);
+    expect(held.filter((rule) => /(?:^|;)\s*(?:max-)?width\s*:/.test(rule.declarations))).toEqual([]);
   });
 });
 
