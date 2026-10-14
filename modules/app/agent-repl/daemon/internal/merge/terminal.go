@@ -83,7 +83,7 @@ func (r *run) concludedTerminal(ctx context.Context, log dlog.Logger, op string,
 		r.head(landedHead{success: &frontendv1.FeedMergeSuccess{EndedAtMs: endedMS, Commit: out.landed}, version: headVersion(out.version)})
 		r.concluded(MergeFacts{State: StateMerged})
 		r.stampClosed(ctx, log, op, landedCount(out))
-		r.o.ended(ctx, r.ws, DetachedOutcome{Kind: DetachedLanded, Summary: fmt.Sprintf("it landed as commit %s", out.landed)})
+		r.o.ended(ctx, r.ws, DetachedOutcome{Kind: DetachedLanded, Summary: fmt.Sprintf("it landed as commit %s", out.landed), Deploy: r.landingDeploy(ctx, out)})
 		fields := dlog.Context{
 			"workspace": string(r.ws), "lease": string(r.lease.ID), "commit": out.landed, "commits": len(out.commits),
 			"source": r.source.Kind.String(), "closes": string(r.subject.closes)}
@@ -931,28 +931,38 @@ func withField(fields dlog.Context, name string, value any) dlog.Context {
 	return out
 }
 
-// selfReload fires the daemon's own redeploy, and ONLY for a merge that landed
-// in the daemon's OWN CHECKOUT. A sibling worktree of the same repository is
-// excluded: it shares the common dir but is not the tree the running binary was
-// built from.
-func (r *run) selfReload(ctx context.Context, out outcome) {
+// landingDeploy decides, ONCE per run, what the landing does about deploying
+// itself, and answers the same decision to every later caller: the report
+// (ended) and the deploy (selfReload) read it, so a report never says the
+// landing is owed a deploy that was never told, nor the reverse.
+//
+// ONLY A LANDING IN THE DAEMON'S OWN CHECKOUT DEPLOYS. A sibling worktree of
+// the same repository is excluded: it shares the common dir but is not the
+// tree the running binary was built from.
+//
+// A HELD ROLLOUT IS READ AT THE LANDING, never cached, so the hold a
+// predecessor took is the one a successor answers (rollouthold.go). A hold
+// that cannot be read does not tell the deploy: a landing not deployed is
+// recovered by a deploy by hand, a hand-deployed build replaced is not.
+func (r *run) landingDeploy(ctx context.Context, out outcome) LandingDeploy {
+	if r.deploy != nil {
+		return *r.deploy
+	}
+	decided := r.decideLandingDeploy(ctx, out)
+	r.deploy = &decided
+	return decided
+}
+
+func (r *run) decideLandingDeploy(ctx context.Context, out outcome) LandingDeploy {
 	const op = "daemon.merge.self_reload"
 	if out.failed != "" || out.landed == "" || !r.selfCheckout || len(out.commits) == 0 {
-		return
+		return LandingNotDeployed
 	}
-	// A held landing is recorded GLOBALLY, beside the deploy's own records:
-	// the hold is daemon-wide, and the merged workspace's sink is torn down
-	// with its worktree.
-	//
-	// A HELD ROLLOUT IS READ AT THE LANDING, never cached, so the hold a
-	// predecessor took is the one a successor answers (rollouthold.go). A hold
-	// that cannot be read does not tell the deploy: a landing not deployed is
-	// recovered by a deploy by hand, a hand-deployed build replaced is not.
 	hold, err := r.o.deps.DB.MergeRolloutHold(ctx)
 	if err != nil {
 		r.o.deps.Log.Global().Info(op, "a merge landed in this daemon's own checkout, but the rollout hold could not be read; the deploy is not told",
 			dlog.Context{"workspace": string(r.ws), "commit": out.landed, "commits": len(out.commits), "cause": err.Error()})
-		return
+		return LandingHoldUnread
 	}
 	if hold.Held {
 		shas := make([]string, 0, len(out.commits))
@@ -961,6 +971,17 @@ func (r *run) selfReload(ctx context.Context, out outcome) {
 		}
 		r.o.deps.Log.Global().Info(op, "a merge landed in this daemon's own checkout while the rollouts are held; the deploy is not told",
 			dlog.Context{"workspace": string(r.ws), "commit": out.landed, "commits": shas, "held_since": hold.Since})
+		return LandingRolloutsHeld
+	}
+	return LandingDeployOwed
+}
+
+// selfReload fires the daemon's own redeploy for a landing whose decision
+// (landingDeploy) is to deploy. It runs after the landing's report was owed,
+// so the deploy it starts covers that report.
+func (r *run) selfReload(ctx context.Context, out outcome) {
+	const op = "daemon.merge.self_reload"
+	if r.landingDeploy(ctx, out) != LandingDeployOwed {
 		return
 	}
 	// ONE MERGE IS ONE LANDING, AND ONE DEPLOY: the deploy is told once with

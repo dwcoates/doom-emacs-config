@@ -123,6 +123,9 @@ type run struct {
 	// rather than a sibling worktree of it. Only the checkout itself triggers
 	// the self-reload.
 	selfCheckout bool
+	// deploy is what the landing does about deploying itself, decided once
+	// (run.landingDeploy) so its report and its deploy cannot disagree.
+	deploy *LandingDeploy
 	// policy is where the requester's repository states its merge policy.
 	policy prompts.Source
 	// agenticMu orders the agentic tab's redraws: the run's own settle and an

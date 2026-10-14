@@ -74,8 +74,11 @@ type fakeDB struct {
 	// rolloutHold is the rollout hold; rolloutHoldErr fails its read.
 	rolloutHold    wsm.RolloutHold
 	rolloutHoldErr error
-	repos          []wsm.Repository
-	seq            int
+	// rolloutHoldOnce, when set, is the hold every read AFTER the first
+	// answers: the first read answers rolloutHold, and the hold then changes.
+	rolloutHoldOnce *wsm.RolloutHold
+	repos           []wsm.Repository
+	seq             int
 	// onPausedRead, when set, runs at the start of every MergeQueuePaused
 	// read, outside the fake's lock, so a test can hold an admission step in
 	// flight; pausedReads counts those reads.
@@ -755,7 +758,11 @@ func (f *fakeDB) SetMergeRolloutHold(_ context.Context, held bool, at time.Time)
 func (f *fakeDB) MergeRolloutHold(context.Context) (wsm.RolloutHold, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.rolloutHold, f.rolloutHoldErr
+	hold := f.rolloutHold
+	if f.rolloutHoldOnce != nil {
+		f.rolloutHold, f.rolloutHoldOnce = *f.rolloutHoldOnce, nil
+	}
+	return hold, f.rolloutHoldErr
 }
 
 func (f *fakeDB) MergeQueuePaused(_ context.Context, repo wsm.RepoKey) (bool, error) {
@@ -2192,7 +2199,11 @@ type fakeRollout struct {
 	// leasesAtFire records how many leases had been released when it fired,
 	// which is how "only after release" is asserted.
 	leasesAtFire int
-	db           *fakeDB
+	// handbacksAtFire records how many reports had been handed back when it
+	// fired, which is how "the report is owed before the deploy" is asserted.
+	handbacksAtFire int
+	db              *fakeDB
+	detached        *fakeDetached
 }
 
 func (t *fakeRollout) Landed(_ context.Context, landed []gitclient.Commit) {
@@ -2202,6 +2213,9 @@ func (t *fakeRollout) Landed(_ context.Context, landed []gitclient.Commit) {
 	t.db.mu.Lock()
 	t.leasesAtFire = len(t.db.releasedLeases)
 	t.db.mu.Unlock()
+	if t.detached != nil {
+		t.handbacksAtFire = len(t.detached.sent())
+	}
 	t.mu.Unlock()
 }
 
@@ -2274,7 +2288,7 @@ func newHarness(t *testing.T) *harness {
 	h.queue = &fakeQueue{db: h.db}
 	h.git = newFakeGit(h.next)
 	h.feed = &fakeFeed{seq: h.next}
-	h.rollout = &fakeRollout{db: h.db}
+	h.rollout = &fakeRollout{db: h.db, detached: h.detached}
 	h.targetD = t.TempDir()
 	h.sourceD = t.TempDir()
 	h.briefs[BriefConflictResolve] = []string{"conflict_commit", "source_branch", "worktree_dir", "target_branch", "conflicted_files"}
