@@ -1918,7 +1918,10 @@ interim.
 
 ## Tab-bar vocabulary: full, partial, and the extent rule
 
-A workspace's tab is `[N] <workspace-name>`, and the status color reaches it
+A workspace's tab is `[N] <workspace-name>`, with any badge run (a priority
+label, a gate's or a one-shot's glyph) drawn BEFORE it as
+`<badge> [N] <workspace-name>` so nothing splits the entry, and the space
+before `[N]` unpainted (owner request, 2026-10-13). The status color reaches it
 with one of two EXTENTS. The words are the owner's (ruling 5, 2026-09-13); use
 them in code, comments, tests and prose.
 
