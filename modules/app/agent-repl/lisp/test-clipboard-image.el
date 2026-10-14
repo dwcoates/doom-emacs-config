@@ -40,6 +40,9 @@
 (defvar agent-repl-test-image--errors nil
   "Error records, oldest first, as formatted lines.")
 
+(defvar agent-repl-test-image--gone nil
+  "Image paths whose files the current test says are gone.")
+
 (defvar agent-repl-test-image--dir nil
   "The temporary workspace directory for the test.")
 
@@ -69,6 +72,7 @@ TARGETS is derived from the types, as a vector, the way Emacs answers it."
           (agent-repl-test-image--calls nil)
           (agent-repl-test-image--exit 0)
           (agent-repl-test-image--errors nil)
+          (agent-repl-test-image--gone nil)
           (system-type 'darwin)
           (agent-repl-test-image--dir (make-temp-file "agent-repl-image-test" t))
           (buf (generate-new-buffer " *agent-repl-test-composer*")))
@@ -92,6 +96,10 @@ TARGETS is derived from the types, as a vector, the way Emacs answers it."
                               (append agent-repl-test-image--errors
                                       (list (apply #'format fmt args))))))
                      ((symbol-function 'display-images-p) (lambda (&rest _) nil))
+                     ;; Images name files no test writes: each is present
+                     ;; unless a test says its file is gone.
+                     ((symbol-function 'agent-repl--input-image-present-p)
+                      (lambda (path) (not (member path agent-repl-test-image--gone))))
                      ((symbol-function 'message) (lambda (&rest _) nil)))
              (with-current-buffer buf ,@body)))
        (kill-buffer buf)
@@ -281,34 +289,95 @@ TARGETS is derived from the types, as a vector, the way Emacs answers it."
     (insert-and-inherit "x")
     (should (null (get-text-property (1- (point-max)) agent-repl--input-image-marker-property)))))
 
+(defun agent-repl-test-image--drawn ()
+  "Draw the whole composer as redisplay would, and return its first character's look."
+  (agent-repl--image-decorate (point-min) (point-max))
+  (list :display (get-text-property (point-min) 'display)
+        :keymap (get-text-property (point-min) 'keymap)
+        :help-echo (get-text-property (point-min) 'help-echo)))
+
+(ert-deftest agent-repl-image-carries-only-its-record-until-drawn ()
+  "The inserted character holds the record; how it looks is derived when drawn."
+  (agent-repl-test-image--with
+    (agent-repl-input-attach-image "/tmp/a.png" "image/png")
+    (should (null (get-text-property (point-min) 'display)))))
+
 (ert-deftest agent-repl-image-is-drawn-as-copied-image-without-graphics ()
   "A frame that cannot draw images shows the fallback text."
   (agent-repl-test-image--with
     (agent-repl-input-attach-image "/tmp/a.png" "image/png")
-    (should (equal (get-text-property (point-min) 'display) "[Copied Image]"))))
+    (should (equal (plist-get (agent-repl-test-image--drawn) :display) "[Copied Image]"))))
 
-(ert-deftest agent-repl-image-is-drawn-as-the-image-with-graphics ()
-  "A frame that draws images shows the image at the fixed height."
+(ert-deftest agent-repl-image-is-drawn-as-a-fixed-height-thumbnail-with-graphics ()
+  "A frame that draws images shows the image scaled to the thumbnail height, width capped."
   (agent-repl-test-image--with
+    (agent-repl-input-attach-image "/tmp/a.png" "image/png")
     (cl-letf (((symbol-function 'display-images-p) (lambda (&rest _) t))
               ((symbol-function 'create-image)
                (lambda (file &rest props) (append (list 'image :file file) (cddr props)))))
-      (agent-repl-input-attach-image "/tmp/a.png" "image/png"))
-    (should (equal (get-text-property (point-min) 'display)
-                   (list 'image :file "/tmp/a.png"
-                         :max-height agent-repl-image-thumbnail-max-height :ascent 'center)))))
+      (should (equal (plist-get (agent-repl-test-image--drawn) :display)
+                     (list 'image :file "/tmp/a.png"
+                           :height agent-repl-image-thumbnail-height
+                           :max-width agent-repl-image-thumbnail-max-width
+                           :ascent 'center))))))
+
+(ert-deftest agent-repl-image-a-present-image-opens-on-a-click ()
+  "An image whose file exists carries the click that opens it."
+  (agent-repl-test-image--with
+    (agent-repl-input-attach-image "/tmp/a.png" "image/png")
+    (should (eq (plist-get (agent-repl-test-image--drawn) :keymap) agent-repl--image-marker-map))))
+
+(ert-deftest agent-repl-image-a-missing-image-is-drawn-as-no-longer-available ()
+  "An image whose file is gone says so, and a click opens nothing."
+  (agent-repl-test-image--with
+    (agent-repl-input-attach-image "/tmp/gone.png" "image/png")
+    (setq agent-repl-test-image--gone '("/tmp/gone.png"))
+    (should (equal (agent-repl-test-image--drawn)
+                   '(:display "[Image no longer available]" :keymap nil
+                     :help-echo "/tmp/gone.png no longer exists")))))
+
+(ert-deftest agent-repl-image-an-image-whose-file-goes-is-redrawn-as-missing ()
+  "Drawing again after the file went replaces the image and its click."
+  (agent-repl-test-image--with
+    (agent-repl-input-attach-image "/tmp/a.png" "image/png")
+    (agent-repl-test-image--drawn)
+    (setq agent-repl-test-image--gone '("/tmp/a.png"))
+    (should (equal (plist-get (agent-repl-test-image--drawn) :keymap) nil))))
+
+(ert-deftest agent-repl-image-every-image-in-the-span-is-drawn ()
+  "Two images side by side are each drawn from their own record."
+  (agent-repl-test-image--with
+    (agent-repl-input-attach-image "/tmp/a.png" "image/png")
+    (agent-repl-input-attach-image "/tmp/gone.png" "image/png")
+    (setq agent-repl-test-image--gone '("/tmp/gone.png"))
+    (agent-repl--image-decorate (point-min) (point-max))
+    (should (equal (list (get-text-property 1 'display) (get-text-property 2 'display))
+                   '("[Copied Image]" "[Image no longer available]")))))
+
+(ert-deftest agent-repl-image-drawing-leaves-the-composer-unmodified ()
+  "Drawing is not editing: the buffer's modified flag is untouched."
+  (agent-repl-test-image--with
+    (agent-repl-input-attach-image "/tmp/a.png" "image/png")
+    (set-buffer-modified-p nil)
+    (agent-repl-test-image--drawn)
+    (should-not (buffer-modified-p))))
+
+(ert-deftest agent-repl-image-a-composer-draws-its-images-through-jit-lock ()
+  "Every composer registers the drawing, so redisplay derives each image's look."
+  (agent-repl-test-image--with
+    (should (memq #'agent-repl--image-decorate jit-lock-functions))))
 
 (ert-deftest agent-repl-image-thumbnail-height-is-120 ()
-  "The image is drawn at most 120 pixels tall (owner ruling)."
-  (should (equal (default-value 'agent-repl-image-thumbnail-max-height) 120)))
+  "Images are drawn 120 pixels tall, the feed's thumbnail height (owner ruling)."
+  (should (equal (default-value 'agent-repl-image-thumbnail-height) 120)))
 
-(ert-deftest agent-repl-image-keeps-its-click-through-kill-and-yank ()
-  "A killed and yanked image keeps its keymap: yanking would strip it."
+(ert-deftest agent-repl-image-is-drawn-again-after-kill-and-yank ()
+  "A killed and yanked image keeps its record, and drawing gives it back its click."
   (agent-repl-test-image--with
     (agent-repl-input-attach-image "/tmp/a.png" "image/png")
     (kill-region (point-min) (point-max))
     (insert-for-yank (current-kill 0))
-    (should (eq (get-text-property (point-min) 'keymap) agent-repl--image-marker-map))
+    (should (eq (plist-get (agent-repl-test-image--drawn) :keymap) agent-repl--image-marker-map))
     (should (equal (agent-repl-test-image--images)
                    '((:path "/tmp/a.png" :media-type "image/png"))))))
 
@@ -336,10 +405,10 @@ TARGETS is derived from the types, as a vector, the way Emacs answers it."
         (delete-file file)))))
 
 (ert-deftest agent-repl-image-open-refuses-a-missing-file ()
-  "A file that is gone is refused and recorded, and nothing is run."
+  "A file that is gone is refused, recorded below error, and nothing is run."
   (agent-repl-test-image--with
     (should-error (agent-repl--image-open "/nowhere/a.png" "ws-one") :type 'user-error)
-    (should (string-match-p "file missing path=/nowhere/a.png" (car agent-repl-test-image--errors)))
+    (should (null agent-repl-test-image--errors))
     (should (null agent-repl-test-image--calls))))
 
 (ert-deftest agent-repl-image-open-refuses-a-failing-opener ()

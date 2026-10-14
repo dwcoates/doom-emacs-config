@@ -48,6 +48,7 @@
 (declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--fatal "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--buffer-owner "agent-repl-core" (buf))
+(declare-function agent-repl--input-image-present-p "agent-repl-input" (path))
 (declare-function agent-repl--write-file-atomically "agent-repl-core" (file text &optional binary))
 (declare-function agent-repl-refill-keymap "agent-repl-core" (map fill))
 (declare-function agent-repl--ws-current-name "agent-repl-workspace" ())
@@ -61,9 +62,18 @@
 ;; property, from one declaration.
 (defvar agent-repl--input-image-marker-property)
 
-(defcustom agent-repl-image-thumbnail-max-height 120
-  "Max pixel height an image pasted into the composer is drawn at.
+(defcustom agent-repl-image-thumbnail-height 120
+  "Pixel height every image in the composer is drawn at, large or small.
+The same height the feed draws images at (`.prompt-block-image' in the
+webapp's stylesheet), so an image is one size wherever it is shown.
 Affects display only; the agent is sent the image file itself."
+  :type 'integer
+  :group 'agent-repl)
+
+(defcustom agent-repl-image-thumbnail-max-width 480
+  "Pixel width no image in the composer is drawn wider than.
+A very wide image is scaled down to it, keeping its aspect ratio, rather
+than drawn at the full thumbnail height."
   :type 'integer
   :group 'agent-repl)
 
@@ -80,6 +90,11 @@ is said by its `display'.")
 
 (defconst agent-repl--image-fallback-display "[Copied Image]"
   "What an image is drawn as in a frame that cannot draw images.")
+
+(defconst agent-repl--image-missing-display "[Image no longer available]"
+  "What an image whose file is gone is drawn as (its worktree was deleted).
+The feed says the same thing in the same place (the webapp's
+`IMAGE_MISSING_TEXT').")
 
 ;;;; ---- External boundary ----------------------------------------------------
 
@@ -220,13 +235,14 @@ could not tell from a successful one."
 
 (defun agent-repl--image-display (path &optional ws)
   "Return the `display' an image at PATH is drawn with in the composer.
-The image itself, at most `agent-repl-image-thumbnail-max-height' pixels
-tall, when this frame draws images; otherwise
-`agent-repl--image-fallback-display'."
+The image itself, scaled to `agent-repl-image-thumbnail-height' pixels
+tall (up or down) and no wider than `agent-repl-image-thumbnail-max-width',
+when this frame draws images; otherwise `agent-repl--image-fallback-display'."
   (let* ((drawable (display-images-p))
          (image (and drawable
                      (create-image path nil nil
-                                   :max-height agent-repl-image-thumbnail-max-height
+                                   :height agent-repl-image-thumbnail-height
+                                   :max-width agent-repl-image-thumbnail-max-width
                                    :ascent 'center))))
     (agent-repl--log ws "clipboard-image: display path=%s drawable=%s image=%s"
                      path drawable (and image t))
@@ -239,20 +255,62 @@ tall, when this frame draws images; otherwise
  agent-repl--image-marker-map
  (lambda (map) (define-key map [mouse-1] #'agent-repl-input-open-image-at-mouse)))
 
-(defun agent-repl--image-marker (path media-type &optional ws)
+(defun agent-repl--image-marker (path media-type)
   "Return the one-character composer string that stands for the image at PATH.
-See `agent-repl--image-marker-text'.  `rear-nonsticky' keeps the words
-typed after it the user's own, and the `yank-handler' keeps its click
-and highlight when it is killed and yanked back: yanking otherwise
-strips `keymap', `mouse-face' and `help-echo' (`yank-excluded-properties')."
+See `agent-repl--image-marker-text'.  It carries the image's record and
+nothing drawn: how it looks and what a click does are DERIVED from that
+record each time it is drawn (`agent-repl--image-decorate'), so an image
+recalled from history or yanked back is drawn from what is true now.
+`rear-nonsticky' keeps the words typed after it the user's own."
   (propertize agent-repl--image-marker-text
               agent-repl--input-image-marker-property (list :path path :media-type media-type)
-              'display (agent-repl--image-display path ws)
-              'keymap agent-repl--image-marker-map
-              'mouse-face 'highlight
-              'help-echo (format "mouse-1: open %s" path)
-              'rear-nonsticky t
-              'yank-handler '(nil nil t)))
+              'rear-nonsticky t))
+
+(defun agent-repl--image-decorate (start end)
+  "Draw every image character between START and END from its record.
+A `jit-lock' function, so it runs whenever that text is about to be
+drawn after a change -- an insertion, a yank, a history recall.  An
+image whose file exists is drawn as the image and opens on a click; one
+whose file is gone is drawn as `agent-repl--image-missing-display' and
+opens nothing."
+  (let ((ws (agent-repl--buffer-owner (current-buffer)))
+        (pos start))
+    (with-silent-modifications
+      (while (< pos end)
+        (let ((image (get-text-property pos agent-repl--input-image-marker-property))
+              (next (min end (next-single-property-change
+                              pos agent-repl--input-image-marker-property nil end))))
+          (when image
+            (dotimes (i (- next pos))
+              (let* ((at (+ pos i))
+                     (image (get-text-property at agent-repl--input-image-marker-property))
+                     (path (plist-get image :path)))
+                (if (agent-repl--input-image-present-p path)
+                    (add-text-properties
+                     at (1+ at)
+                     (list 'display (agent-repl--image-display path ws)
+                           'keymap agent-repl--image-marker-map
+                           'mouse-face 'highlight
+                           'help-echo (format "mouse-1: open %s" path)))
+                  (agent-repl--log ws "clipboard-image: drawn as no longer available path=%s" path)
+                  (remove-list-of-text-properties at (1+ at) '(keymap mouse-face))
+                  (add-text-properties
+                   at (1+ at)
+                   (list 'display agent-repl--image-missing-display
+                         'help-echo (format "%s no longer exists" path)))))))
+          (setq pos next))))))
+
+(defun agent-repl--image-enable-decoration ()
+  "Have this composer draw its images (`agent-repl--image-decorate')."
+  (jit-lock-register #'agent-repl--image-decorate))
+
+(add-hook 'agent-repl-input-mode-hook #'agent-repl--image-enable-decoration)
+;; A reload reaches composers that already exist, which the mode hook
+;; never will again.
+(dolist (buffer (buffer-list))
+  (with-current-buffer buffer
+    (when (derived-mode-p 'agent-repl-input-mode)
+      (agent-repl--image-enable-decoration))))
 
 ;;;###autoload
 (defun agent-repl-input-attach-image (path media-type)
@@ -270,17 +328,17 @@ payload."
                        (buffer-name) path))
   (let ((ws (agent-repl--buffer-owner (current-buffer)))
         (at (point)))
-    (insert (agent-repl--image-marker path media-type ws))
+    (insert (agent-repl--image-marker path media-type))
     (agent-repl--info ws "elisp.input.attached ws=%s path=%s media-type=%s at=%d"
                       ws path media-type at)
     at))
 
 (defun agent-repl--image-open (path &optional ws)
   "Open the image at PATH in the system's image viewer.
-A missing file and a viewer that fails are each recorded at error and
-signalled as a `user-error'."
+A missing file (its worktree was deleted) is recorded at info and a
+viewer that fails at error; each is signalled as a `user-error'."
   (unless (file-exists-p path)
-    (agent-repl--error ws "clipboard-image: open refused, file missing path=%s" path)
+    (agent-repl--info ws "clipboard-image: open refused, file missing path=%s" path)
     (user-error "agent-repl: the image %s no longer exists" path))
   (let* ((opener (if (eq system-type 'darwin) "open" "xdg-open"))
          (exit (agent-repl--image-call-process opener path)))

@@ -313,15 +313,19 @@ Copy an image, then paste it into the input window the way you paste words.
   - The image goes where the paste happened, so images and words can alternate.
   - When the clipboard holds text, those keys paste the text as usual. A file copied in Finder pastes its name, for example.
   - `C-c C-i` pastes the clipboard's image even when text comes with it.
-- **The image shows in the input window, at most 120 pixels tall.**
+- **The image shows in the input window as a 120-pixel-tall thumbnail.**
+  - Every image is scaled to that height, large or small, and the feed draws it the same size.
   - Click it to open the file in your system's image viewer.
   - It is one character: one `DEL` removes it, and killing and yanking moves it.
   - A terminal frame shows `[Copied Image]` in its place.
 - **The agent receives the image itself**, between your words, in the order you placed them.
+  - It is also told the image's file path, so it can copy, commit or edit the file. The path is not shown in your prompt bubble.
 - **The file is kept in the workspace at `.claude/emacs/images/`**, named after its contents.
   - Pasting the same image twice keeps one file.
   - A TIFF-only clipboard (from some macOS apps) is converted to PNG with `sips`, because Claude takes PNG, JPEG, GIF and WebP.
-- **Prompt history keeps the images.** Recalling an entry brings them back, as long as the files still exist.
+- **Prompt history keeps the images.** Recalling an entry brings them back.
+- **An image whose file is gone** (its worktree was deleted) **shows as "Image no longer available"**, in the feed and in the input window.
+  - A prompt holding one is not sent: the input window names it, and keeps your text so you can delete it and send again.
 
 ## Replying to a response
 

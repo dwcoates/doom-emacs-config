@@ -36,6 +36,7 @@
          (progn
            (with-current-buffer buf (agent-repl-input-mode) (insert ,text))
            (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws-one"))
+                     ((symbol-function 'agent-repl--input-image-present-p) (lambda (_path) t))
                      ((symbol-function 'agent-repl--ws-get)
                       (lambda (_ws key) (when (eq key :input-buffer) buf)))
                      ((symbol-function 'agent-repl--history-push) (lambda (&optional _t) nil))
@@ -146,6 +147,20 @@
     (agent-repl-queue-deferred-prompt)
     ;; Assert
     (should (eq (plist-get (car agent-repl-test-pq--submitted) :from-buffer) t))))
+
+(ert-deftest agent-repl-pq-defer-holding-a-missing-image-is-refused ()
+  "A deferral holding an image whose file is gone submits nothing and keeps the draft."
+  (agent-repl-test-pq--with-composer "see "
+    ;; Arrange
+    (with-current-buffer buf
+      (setq-local agent-repl--owning-workspace "ws-one")
+      (agent-repl-input-attach-image "/tmp/gone.png" "image/png"))
+    (cl-letf (((symbol-function 'agent-repl--input-image-present-p) (lambda (_path) nil)))
+      ;; Act
+      (should-error (agent-repl-queue-deferred-prompt) :type 'user-error))
+    ;; Assert
+    (should-not agent-repl-test-pq--submitted)
+    (should (equal (length (with-current-buffer buf (agent-repl-input-attachments))) 1))))
 
 (ert-deftest agent-repl-pq-defer-on-empty-input-submits-nothing ()
   "There is nothing to defer when nothing was written."

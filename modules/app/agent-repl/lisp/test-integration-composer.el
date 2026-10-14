@@ -138,6 +138,15 @@ the wait before this scenario's own push has actually been delivered."
                         (agent-repl-itest--body-field block 'image 'path 'path))
                       blocks))))
 
+(defun agent-repl-itest-composer--image (name)
+  "Write a pasted image NAME into the fixture workspace and return its path.
+A real file: the composer refuses to send an image whose file is gone."
+  (let ((path (expand-file-name (concat ".claude/emacs/images/" name)
+                                agent-repl-itest-composer--dir)))
+    (make-directory (file-name-directory path) t)
+    (with-temp-file path (insert "image-bytes"))
+    path))
+
 (defun agent-repl-itest-composer--make-buffer (ws text)
   "Create a live `agent-repl-input-mode' buffer for WS containing TEXT.
 Registers it as WS's `:input-buffer' and returns it; the caller kills it
@@ -550,7 +559,7 @@ holds each one as a character of its own text."
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
-      (let ((image (expand-file-name "pasted.png" agent-repl-itest-composer--dir))
+      (let ((image (agent-repl-itest-composer--image "pasted.png"))
             (buf (agent-repl-itest-composer--make-buffer
                   agent-repl-itest-composer--ws "look at this")))
         (unwind-protect
@@ -572,7 +581,7 @@ WHERE the bytes are, the media type says WHAT they are."
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
-      (let ((image (expand-file-name "pasted.png" agent-repl-itest-composer--dir))
+      (let ((image (agent-repl-itest-composer--image "pasted.png"))
             (buf (agent-repl-itest-composer--make-buffer
                   agent-repl-itest-composer--ws "look at this")))
         (unwind-protect
@@ -596,7 +605,7 @@ A second submit that still carried the first image would resend it twice."
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
-      (let ((image (expand-file-name "pasted.png" agent-repl-itest-composer--dir))
+      (let ((image (agent-repl-itest-composer--image "pasted.png"))
             (buf (agent-repl-itest-composer--make-buffer
                   agent-repl-itest-composer--ws "look at this")))
         (unwind-protect
@@ -630,7 +639,7 @@ A refused submission that dropped the image would silently lose it."
     (agent-repl-itest--script daemon "SubmitPrompt" '((error . ((merging . ())))))
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
-      (let ((image (expand-file-name "pasted.png" agent-repl-itest-composer--dir))
+      (let ((image (agent-repl-itest-composer--image "pasted.png"))
             (buf (agent-repl-itest-composer--make-buffer
                   agent-repl-itest-composer--ws "look at this")))
         (unwind-protect
@@ -653,8 +662,8 @@ in the order the person composed them -- attach order, not reverse."
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
-      (let* ((first (expand-file-name "first.png" agent-repl-itest-composer--dir))
-             (second (expand-file-name "second.jpg" agent-repl-itest-composer--dir))
+      (let* ((first (agent-repl-itest-composer--image "first.png"))
+             (second (agent-repl-itest-composer--image "second.jpg"))
              (buf (agent-repl-itest-composer--make-buffer
                    agent-repl-itest-composer--ws "compare these")))
         (unwind-protect
@@ -685,8 +694,8 @@ in the order the person composed them -- attach order, not reverse."
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
-      (let* ((first (expand-file-name "first.png" agent-repl-itest-composer--dir))
-             (second (expand-file-name "second.png" agent-repl-itest-composer--dir))
+      (let* ((first (agent-repl-itest-composer--image "first.png"))
+             (second (agent-repl-itest-composer--image "second.png"))
              (buf (agent-repl-itest-composer--make-buffer
                    agent-repl-itest-composer--ws "this ")))
         (unwind-protect
@@ -1221,7 +1230,7 @@ the arm is HANDLED now, and the record this waits on says so."
         (unwind-protect
             (progn
               (with-current-buffer buf
-                (agent-repl-input-attach-image "/tmp/itest-shot.png" "image/png"))
+                (agent-repl-input-attach-image (agent-repl-itest-composer--image "itest-shot.png") "image/png"))
               (setq agent-repl-send-posthooks
                     (list (cons "" (lambda (_ws _raw) (setq ran t)))))
               ;; Act.
@@ -1640,7 +1649,7 @@ send-empty, and must carry no TextBlock at all."
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
-      (let ((image (expand-file-name "pasted.png" agent-repl-itest-composer--dir))
+      (let ((image (agent-repl-itest-composer--image "pasted.png"))
             (buf (agent-repl-itest-composer--make-buffer agent-repl-itest-composer--ws "")))
         (unwind-protect
             (progn
@@ -1666,7 +1675,7 @@ daemon, not Emacs, holds it until the running turn ends (owner ruling,
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
-      (let ((image (expand-file-name "pasted.png" agent-repl-itest-composer--dir))
+      (let ((image (agent-repl-itest-composer--image "pasted.png"))
             (buf (agent-repl-itest-composer--make-buffer
                   agent-repl-itest-composer--ws "queue this for later")))
         (unwind-protect

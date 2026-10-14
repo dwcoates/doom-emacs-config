@@ -43,6 +43,7 @@
 (declare-function agent-repl--input-parts-images "agent-repl-input" (parts))
 (declare-function agent-repl--prepare-input-parts "agent-repl-input" (ws parts &optional force))
 (declare-function agent-repl--input-said "agent-repl-input" (parts))
+(declare-function agent-repl--input-refuse-missing-images "agent-repl-input" (ws parts))
 (declare-function agent-repl--input-submit "agent-repl-input"
                   (ws said origin raw &optional key from-buffer snapshot delivery))
 
@@ -84,6 +85,7 @@ daemon and the shim; one the daemon could not take is held on disk
         (progn
           (agent-repl--log ws "elisp.prompt-queue.defer-empty ws=%s -- nothing to queue" ws)
           (message "agent-repl: no input to queue"))
+      (agent-repl--input-refuse-missing-images ws parts)
       (let* ((said (agent-repl--input-said (agent-repl--prepare-input-parts ws parts)))
              (buf (agent-repl--input-buffer ws)))
         (when buf

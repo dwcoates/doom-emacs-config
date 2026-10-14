@@ -65,13 +65,17 @@
                         :value (list :arm :turn
                                      :value (list :turn (list :value (or id "turn-1")))))))
 
+(defvar agent-repl-test-input--gone nil
+  "Image paths whose files the current test says are gone.")
+
 (defmacro agent-repl-test-input--with (&rest body)
   "Run BODY against a live composer buffer with the wire stubbed.
 The buffer is a real `agent-repl-input-mode' buffer, because the
-attachment list and the mode-line notice are buffer-local state and a
+images in its text and the mode-line notice are buffer state and a
 fake would not exercise them."
   (declare (indent 0))
   `(let ((agent-repl-test-input--submitted nil)
+         (agent-repl-test-input--gone nil)
          (agent-repl-test-input--queued nil)
          (agent-repl-test-input--held-deliveries nil)
          (agent-repl-test-input--hold-error nil)
@@ -89,6 +93,10 @@ fake would not exercise them."
              (agent-repl-input-mode)
              (setq-local agent-repl--owning-workspace "ws-one"))
            (cl-letf* (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws-one"))
+                      ;; Images name files no test writes: each is present
+                      ;; unless a test says its file is gone.
+                      ((symbol-function 'agent-repl--input-image-present-p)
+                       (lambda (path) (not (member path agent-repl-test-input--gone))))
                       ((symbol-function 'agent-repl--ws-current-log-name) (lambda () "ws-one"))
                       ((symbol-function 'agent-repl--ws-get)
                        (lambda (_ws key)
@@ -1356,6 +1364,55 @@ ring (owner ruling overrides the old keep-the-text contract)."
         (should (equal (length pushed) 1))
         (should (equal (get-text-property 9 agent-repl--input-image-marker-property (car pushed))
                        '(:path "/tmp/a.png" :media-type "image/png")))))))
+
+(ert-deftest agent-repl-input-a-send-holding-a-missing-image-is-refused ()
+  "An image whose file is gone stops the send, naming it, and nothing is submitted."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--gone '("/tmp/gone.png"))
+    (agent-repl-test-input--compose "look " '("/tmp/gone.png"))
+    ;; Act
+    (let ((err (should-error (agent-repl--send :user-sent) :type 'user-error)))
+      ;; Assert
+      (should (string-match-p "this image is no longer available (gone.png); delete it to send"
+                              (cadr err))))
+    (should-not agent-repl-test-input--submitted)))
+
+(ert-deftest agent-repl-input-a-refused-missing-image-send-keeps-the-composer ()
+  "The refusal comes before the composer is cleared, so the draft stays whole."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--gone '("/tmp/gone.png"))
+    (agent-repl-test-input--compose "look " '("/tmp/gone.png"))
+    ;; Act
+    (ignore-errors (agent-repl--send :user-sent))
+    ;; Assert
+    (should (equal (with-current-buffer agent-repl-test-input--buffer (agent-repl--input-parts))
+                   '("look " (:path "/tmp/gone.png" :media-type "image/png"))))))
+
+(ert-deftest agent-repl-input-a-refused-missing-image-send-is-recorded ()
+  "The refusal is recorded at info with the missing paths."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--gone '("/tmp/gone.png"))
+    (agent-repl-test-input--compose '("/tmp/a.png") '("/tmp/gone.png"))
+    (let (recorded)
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) recorded))))
+        ;; Act
+        (ignore-errors (agent-repl--send :user-sent)))
+      ;; Assert
+      (should (member "elisp.input.send-refused-missing-images ws=ws-one paths=(\"/tmp/gone.png\")"
+                      recorded)))))
+
+(ert-deftest agent-repl-input-image-present-p-is-the-file-existing ()
+  "An image is present exactly when its file exists."
+  (let ((file (make-temp-file "agent-repl-present" nil ".png")))
+    (unwind-protect
+        (should (equal (list (agent-repl--input-image-present-p file)
+                             (progn (delete-file file) (agent-repl--input-image-present-p file)))
+                       '(t nil)))
+      (when (file-exists-p file) (delete-file file)))))
 
 (ert-deftest agent-repl-input-images-go-with-the-composer-after-a-turn ()
   "A from-buffer send clears the images with the words: the next send has none."

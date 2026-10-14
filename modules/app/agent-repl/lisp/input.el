@@ -545,6 +545,30 @@ copy of an image shares its original's)."
   "Return the images of PARTS, in order."
   (seq-remove #'stringp parts))
 
+(defun agent-repl--input-image-present-p (path)
+  "Return non-nil when the image file at PATH still exists.
+The ONE existence check an image in the composer is judged by -- how it
+is drawn (`agent-repl--image-decorate') and whether it may be sent
+\(`agent-repl--input-refuse-missing-images') -- so the two never disagree."
+  (file-exists-p path))
+
+(defun agent-repl--input-refuse-missing-images (ws parts)
+  "Refuse to send PARTS for WS when an image among them has no file any more.
+An image whose worktree was deleted is drawn as no longer available, and
+sending it would only have the vendor refuse the whole turn; so the send
+stops HERE, before the composer is touched, naming each missing file.
+Recorded at info -- a deleted worktree is the user's own act -- and
+signalled as a `user-error'."
+  (let ((missing (seq-remove #'agent-repl--input-image-present-p
+                             (mapcar (lambda (image) (plist-get image :path))
+                                     (agent-repl--input-parts-images parts)))))
+    (when missing
+      (agent-repl--info ws "elisp.input.send-refused-missing-images ws=%s paths=%S" ws missing)
+      (user-error "agent-repl: %s no longer available (%s); delete %s to send"
+                  (if (cdr missing) "these images are" "this image is")
+                  (mapconcat #'file-name-nondirectory missing ", ")
+                  (if (cdr missing) "them" "it")))))
+
 (defun agent-repl-input-attachments (&optional ws)
   "Return the images in a composer, in order.
 With WS, reads WS's composer; without it, THIS buffer.  Read from the
@@ -2105,6 +2129,7 @@ Returns the submission's idempotency key, or nil when nothing was sent."
             (when (null prompt)
               (agent-repl-verb-retry-vendor-error ws))
             nil)
+        (agent-repl--input-refuse-missing-images ws parts)
         (let* ((from-buffer (null prompt))
                (said (agent-repl--input-said
                       (agent-repl--prepare-input-parts ws parts force-metaprompt))))
