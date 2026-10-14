@@ -15,6 +15,7 @@ import (
 	"agent-repld/internal/daemonaddr"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/envc"
+	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/pprofsurface"
 	"agent-repld/internal/rollout"
@@ -146,6 +147,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 	log.Info("daemon.cmd.boot", "the daemon boot started", dlog.Context{
 		"joining":    joining,
 		"state_root": layout.Dir(),
+		"git_binary": gitclient.Binary(),
 	})
 	defer log.Info("daemon.cmd.exit", "the daemon process ended", dlog.Context{
 		"joining":    joining,
@@ -850,8 +852,14 @@ func serve(ctx context.Context, l net.Listener, h http.Handler, exit serveExit) 
 		// signal, a state-root loss.
 		if exit.EndStreams != nil {
 			start = time.Now()
-			gate.EndStreams(exit.EndStreams)
-			gate.AwaitStreamsEnded(streamsEndBound)
+			// ONE DEADLINE, THE EXIT'S GRACE. The streams end on their own
+			// events (each handler's return, each end frame's write); the
+			// deadline is only where a stream that never ends is given up on,
+			// so a loaded host spends more of the grace instead of tripping a
+			// bound sized for an idle one.
+			deadline := time.Now().Add(grace)
+			gate.EndStreams(deadline, exit.EndStreams)
+			gate.AwaitStreamsEnded(deadline)
 			mark("serve_end_streams", start)
 		}
 		// THE GRACE IS BOUNDED. Graceful shutdown waits for every in-flight
@@ -1011,16 +1019,6 @@ func (w *addrWithdrawal) finish() {
 		"address": w.claim.Address(),
 	})
 }
-
-// streamsEndBound is how long the exit gives the standing streams, once ended,
-// to have returned and written their end frames.
-//
-// IT NESTS server's per-stream answerWriteBound (250ms, one end frame's write
-// after its handler returns) with the same again for the handlers to leave:
-// each one selects on the lifetime Close cancels, so it returns within one
-// scheduling of the goroutine. It is a last resort well under shutdownGrace;
-// an overrun is ERROR naming how many streams were left open.
-const streamsEndBound = 500 * time.Millisecond
 
 // writesQuietBound is how long the exit gives the connections to stop writing
 // after every counted call has been answered.

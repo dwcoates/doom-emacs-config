@@ -1696,25 +1696,25 @@ func TestOnlyConnectedAnnouncesALink(t *testing.T) {
 type deathStaging int
 
 const (
-	// diedBefore: the exit was decided before the call failed.
+	// diedBefore: the exit was reaped before the call failed.
 	diedBefore deathStaging = iota
-	// diedWhileWaiting: the call failed first and the verdict landed while it
-	// waited, the order a SIGKILL's EOF and its reap race in.
-	diedWhileWaiting
-	// neverDied: no exit is decided; the link broke under a live shim.
+	// exitingUnreaped: the call failed while the process reads exiting and
+	// its reap has not landed, the order a SIGKILL's EOF and its reap race in.
+	exitingUnreaped
+	// neverDied: the process reads running; the link broke under a live shim.
 	neverDied
 )
 
-// stageDeath arranges c's death verdict per staging.
+// stageDeath arranges c's death per staging, through its process-state seam.
 func stageDeath(c *client, staging deathStaging) {
-	exit := ExitInfo{PID: 4242, Code: -1, Signal: "killed"}
+	c.pid = 4242
 	switch staging {
 	case diedBefore:
-		c.publishExit(exit)
-	case diedWhileWaiting:
-		c.awaitingDeathVerdict = func() { go c.publishExit(exit) }
+		c.publishExit(ExitInfo{PID: 4242, Code: -1, Signal: "killed"})
+	case exitingUnreaped:
+		c.processExiting = func(int) (bool, error) { return true, nil }
 	case neverDied:
-		c.deathVerdictBudget = time.Millisecond
+		c.processExiting = func(int) (bool, error) { return false, nil }
 	}
 }
 
@@ -1737,7 +1737,7 @@ func TestAStreamOpenTheShimsDeathCutIsNotARefusal(t *testing.T) {
 		wantDied  bool
 	}{
 		{name: "the death was decided before the open failed", staging: diedBefore, wantLevel: "info", wrongLvl: "error", wantDied: true},
-		{name: "the death was decided while the failed open waited", staging: diedWhileWaiting, wantLevel: "info", wrongLvl: "error", wantDied: true},
+		{name: "the process was exiting with its reap not yet in", staging: exitingUnreaped, wantLevel: "info", wrongLvl: "error", wantDied: true},
 		{name: "the shim is alive", staging: neverDied, wantLevel: "error", wrongLvl: "info", wantDied: false},
 	}
 	for _, tt := range tests {
@@ -1808,7 +1808,7 @@ func TestAUnaryCallTheShimsDeathCutIsNotAFault(t *testing.T) {
 		wantDied  bool
 	}{
 		{name: "the death was decided before the call failed", staging: diedBefore, wantLevel: "info", wrongLvl: "error", wantDied: true},
-		{name: "the death was decided while the failed call waited", staging: diedWhileWaiting, wantLevel: "info", wrongLvl: "error", wantDied: true},
+		{name: "the death was decided while the failed call waited", staging: exitingUnreaped, wantLevel: "info", wrongLvl: "error", wantDied: true},
 		{name: "the shim is alive", staging: neverDied, wantLevel: "error", wrongLvl: "info", wantDied: false},
 	}
 	for _, tt := range tests {
@@ -1838,18 +1838,18 @@ func TestAUnaryCallTheShimsDeathCutIsNotAFault(t *testing.T) {
 	}
 }
 
-// TestALivenessBreakOnASpawnedShimWaitsForTheDeathItMayBe pins the monitor's
+// TestALivenessBreakOnASpawnedShimIsReadAgainstItsProcess pins the monitor's
 // read of a broken liveness stream on a shim this daemon spawned: a SIGKILL's
-// EOF outruns the reap, so the reap is waited for, and a death that lands in
-// the wait is the break's cause -- INFO, no "link broke" WARN, no redial. A
-// shim still alive when the wait ends is a severed link, as loud as before.
-func TestALivenessBreakOnASpawnedShimWaitsForTheDeathItMayBe(t *testing.T) {
+// EOF outruns the reap but never the process reading exiting, so an exiting
+// process is the break's cause -- INFO, no "link broke" WARN, no redial. A
+// running process is a severed link, as loud as before.
+func TestALivenessBreakOnASpawnedShimIsReadAgainstItsProcess(t *testing.T) {
 	tests := []struct {
 		name     string
 		dies     bool
 		wantWarn bool
 	}{
-		{name: "the death lands while the break waits", dies: true, wantWarn: false},
+		{name: "the process reads exiting", dies: true, wantWarn: false},
 		{name: "the shim is alive", dies: false, wantWarn: true},
 	}
 	for _, tt := range tests {
@@ -1859,11 +1859,8 @@ func TestALivenessBreakOnASpawnedShimWaitsForTheDeathItMayBe(t *testing.T) {
 			c := newClient(log, ids.WorkspaceID("ws-1"), filepath.Join(shortDir(t), "absent.sock"),
 				backoff{Initial: time.Millisecond, Max: 2 * time.Millisecond, Factor: 1}, nil, nil)
 			c.cmd = &exec.Cmd{}
-			if tt.dies {
-				c.awaitingDeathVerdict = func() { go c.publishExit(ExitInfo{PID: 4242, Code: -1, Signal: "killed"}) }
-			} else {
-				c.deathVerdictBudget = time.Millisecond
-			}
+			c.pid = 4242
+			c.processExiting = func(int) (bool, error) { return tt.dies, nil }
 			frames := make(chan *shimv1.WatchSessionResponse)
 			errs := make(chan error, 1)
 			errs <- io.ErrUnexpectedEOF

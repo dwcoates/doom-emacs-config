@@ -727,6 +727,14 @@ func (c *Coordinator) readOwed(ctx context.Context, sl *slot) {
 	}
 	ws := sl.ws.Ref.GetId()
 	owed, err := c.deps.Owed(ctx, ids.WorkspaceID(ws))
+	if err != nil && ctx.Err() != nil {
+		// THE CLIENT LEFT, which is not a failed read: there is nobody to
+		// answer, and the run records the open abandoned on its next turn.
+		c.deps.Log.Info(op, "the open's client went away while whether the workspace is owed a cut turn was read; nothing is answered", dlog.Context{
+			dlog.KeyWorkspaceID: ws, "cause": err.Error(),
+		})
+		return
+	}
 	if err != nil {
 		c.deps.Log.Error(op, "whether the workspace is owed a cut turn could not be read; the open answers it failed", dlog.Context{
 			dlog.KeyWorkspaceID: ws, "cause": err.Error(),

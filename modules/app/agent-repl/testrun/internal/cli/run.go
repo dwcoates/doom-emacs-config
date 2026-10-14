@@ -7,13 +7,13 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"agentrepl/testrun/internal/history"
 	"agentrepl/testrun/internal/plan"
+	"agentrepl/testrun/internal/ramdisk"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/internal/suites"
 	"agentrepl/testrun/roster"
@@ -40,31 +40,39 @@ type Deps struct {
 	Pid int
 }
 
-// SlotsForHost is the core budget: HALF the host's cores (owner ruling,
-// 2026-10-06), so a run never takes the machine from the owner's live runtime,
-// input handling and apps. A host with too few cores is refused by the planner
-// rather than silently changing that contract.
-func SlotsForHost(numCPU int) int {
-	return numCPU / 2
+// HostReserve is how many of the host's cores a run leaves unclaimed for the
+// owner's live runtime, input handling and apps (owner ruling, 2026-10-14).
+// The run itself is at nice 19 (bin/background.sh), so it always yields the
+// CPU to them as well.
+const HostReserve = 3
+
+// RunConditions names what a run's units measure under, for the timing
+// history they plan from (history.DefaultPath): the RAM disk at
+// ramdisk.UnitIOTier when the run has its unit prefix, else the disk at the
+// tier the run inherited.
+func RunConditions(unitPrefix []string) string {
+	if unitPrefix == nil {
+		return "disk-io-inherited"
+	}
+	return "ramdisk-io-" + ramdisk.UnitIOTier
 }
 
-// CPUBudgetEnv names the core budget bin/suite-slot.sh hands a run: the
-// processors that run claimed from the host-wide budget. Several merge gates
-// share one host, so a run that was handed a budget sizes itself to it rather
-// than assuming it owns half the machine.
-const CPUBudgetEnv = "AGENT_REPL_TEST_CPU_BUDGET"
+// SlotsForHost is the core budget: every core but HostReserve. A host with no
+// core left over is answered with a non-positive count, which Slots refuses.
+func SlotsForHost(numCPU int) int {
+	return numCPU - HostReserve
+}
 
-// Slots is the run's core budget: the claimed budget when one was handed in
-// (budget non-empty), else SlotsForHost. A budget that is not a positive
-// integer is refused, never ignored: a run that silently fell back to half
-// the host would stack on top of the runs it was meant to share with.
-func Slots(numCPU int, budget string) (int, error) {
-	if budget == "" {
-		return SlotsForHost(numCPU), nil
-	}
-	n, err := strconv.Atoi(budget)
-	if err != nil || n < 1 {
-		return 0, fmt.Errorf("%s=%q is not a positive integer", CPUBudgetEnv, budget)
+// Slots is the run's core count, SlotsForHost. NO PROCESSOR IS HANDED OUT
+// BETWEEN RUNS (owner ruling, 2026-10-14): a run sizes itself to the host,
+// overlapping runs contend, nice orders them (the merge queue's head first),
+// and the one thing rationed between them is the memory their RAM disks wire
+// (ramdisk seats). A host too small to leave HostReserve cores free is
+// refused, never adjusted.
+func Slots(numCPU int) (int, error) {
+	n := SlotsForHost(numCPU)
+	if n < 1 {
+		return 0, fmt.Errorf("this host has %d cores; a run reserves %d for the live runtime and needs at least one more", numCPU, HostReserve)
 	}
 	return n, nil
 }
@@ -137,6 +145,14 @@ func Run(ctx context.Context, d Deps, a Args) int {
 			continue
 		}
 		planned = append(planned, built[i])
+	}
+	programs, err := programUnits(layout, a, selected, built, buildErrs)
+	if err != nil {
+		log.Errorf("planning the run's shared programs failed: %v", err)
+		return 1
+	}
+	if len(programs.Atomic) > 0 {
+		planned = append(planned, programs)
 	}
 
 	p, err := plan.Build(hist, planned, d.Slots)
@@ -414,4 +430,34 @@ func printClosing(log *run.Log, a Args, passed, declined []run.SuiteResult) {
 		skipped = []string{"none"}
 	}
 	log.Infof("not selected, NOT run: %s", strings.Join(skipped, " "))
+}
+
+// programUnits is the run's one build of every shared program a planned suite
+// runs (roster.Programs). A program is reported under its own system's suite
+// when that suite is selected, and otherwise under the first selected suite,
+// in roster order, that runs it.
+func programUnits(layout suites.Layout, a Args, selected []roster.Suite, built []suites.Units, buildErrs []error) (suites.Units, error) {
+	var needed []string
+	firstConsumer := map[string]string{}
+	for i, s := range selected {
+		if buildErrs[i] != nil {
+			continue
+		}
+		for _, name := range built[i].Programs {
+			needed = append(needed, name)
+			if _, ok := firstConsumer[name]; !ok {
+				firstConsumer[name] = s.Name
+			}
+		}
+	}
+	specs, err := suites.ProgramUnits(layout, needed, func(p roster.Program) string {
+		if a.Selects(p.Owner) {
+			return p.Owner
+		}
+		return firstConsumer[p.Name]
+	})
+	if err != nil {
+		return suites.Units{}, err
+	}
+	return suites.Units{Atomic: specs}, nil
 }

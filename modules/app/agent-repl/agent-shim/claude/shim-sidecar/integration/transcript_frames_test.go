@@ -57,14 +57,14 @@ func TestCapturedTranscriptMainAgentBookIsKeyedByTheFileSessionUuid(t *testing.T
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
-	store := startRealStore(t)
+	store := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
 
 	// Act.
 	startSidecar(t, defaultSidecarOptions(t, store.Socket, tree))
 	writeCapturedTranscript(t, tree, captured)
-	lines := awaitBookUnits(ctx, t, store.Client, captured.Session,
+	lines := store.awaitBookUnits(ctx, t, captured.Session,
 		// THE WAIT IS ON THE UNITS, NEVER ON A COUNT. The captured session
 		// writes more page lines than these four, so "at least four lines"
 		// is satisfied by a book that holds four of the OTHERS and none of
@@ -73,7 +73,7 @@ func TestCapturedTranscriptMainAgentBookIsKeyedByTheFileSessionUuid(t *testing.T
 
 	// Assert.
 	for _, at := range lines {
-		if got := at.GetLine().GetPageAgentId().GetValue(); got != captured.Session {
+		if got := at.GetPageAgentId().GetValue(); got != captured.Session {
 			t.Errorf("page line names book %q, wanted the file's session uuid %q", got, captured.Session)
 		}
 	}
@@ -87,14 +87,14 @@ func TestCapturedTranscriptGivesEveryAssistantBlockItsOwnUnit(t *testing.T) {
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
-	store := startRealStore(t)
+	store := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
 
 	// Act.
 	startSidecar(t, defaultSidecarOptions(t, store.Socket, tree))
 	writeCapturedTranscript(t, tree, captured)
-	lines := awaitBookUnits(ctx, t, store.Client, captured.Session,
+	lines := store.awaitBookUnits(ctx, t, captured.Session,
 		// THE WAIT IS ON THE UNITS, NEVER ON A COUNT. The captured session
 		// writes more page lines than these four, so "at least four lines"
 		// is satisfied by a book that holds four of the OTHERS and none of
@@ -104,7 +104,7 @@ func TestCapturedTranscriptGivesEveryAssistantBlockItsOwnUnit(t *testing.T) {
 	// Assert.
 	held := map[string]bool{}
 	for _, at := range lines {
-		if a := activityOf(at.GetLine()); a != nil {
+		if a := activityOf(at); a != nil {
 			held[a.GetActivityId().GetValue()] = true
 		}
 	}
@@ -115,37 +115,38 @@ func TestCapturedTranscriptGivesEveryAssistantBlockItsOwnUnit(t *testing.T) {
 	}
 }
 
-// TestCapturedTranscriptOrdersItsPageNewestFirst asserts the four units come
-// back in reverse file order — the store's page is newest first, ordered by
-// first insert.
-func TestCapturedTranscriptOrdersItsPageNewestFirst(t *testing.T) {
+// TestCapturedTranscriptWritesItsUnitsInFileOrder asserts the four units are
+// FIRST written in the order the file holds them: the store orders a page by
+// first insert (newest first, its own contract, tested in shim-store's suite),
+// so the order the sidecar first writes them in is the order a reader sees.
+func TestCapturedTranscriptWritesItsUnitsInFileOrder(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
-	store := startRealStore(t)
+	store := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
 
 	// Act.
 	startSidecar(t, defaultSidecarOptions(t, store.Socket, tree))
 	writeCapturedTranscript(t, tree, captured)
-	lines := awaitBookUnits(ctx, t, store.Client, captured.Session,
+	lines := store.awaitBookUnits(ctx, t, captured.Session,
 		// THE WAIT IS ON THE UNITS, NEVER ON A COUNT. The captured session
 		// writes more page lines than these four, so "at least four lines"
 		// is satisfied by a book that holds four of the OTHERS and none of
 		// the units every assertion below reads.
 		capturedThinking1, capturedBashCall1, capturedThinking2, capturedBashCall2)
 
-	// Assert.
-	want := []string{capturedBashCall2, capturedThinking2, capturedBashCall1, capturedThinking1}
+	// Assert: Book answers lines in first-write order.
+	want := []string{capturedThinking1, capturedBashCall1, capturedThinking2, capturedBashCall2}
 	var got []string
 	interesting := map[string]bool{}
 	for _, id := range want {
 		interesting[id] = true
 	}
 	for _, at := range lines {
-		a := activityOf(at.GetLine())
+		a := activityOf(at)
 		if a == nil {
 			continue
 		}
@@ -158,7 +159,7 @@ func TestCapturedTranscriptOrdersItsPageNewestFirst(t *testing.T) {
 	}
 	for i := range want {
 		if got[i] != want[i] {
-			t.Fatalf("page order was %v, wanted newest-first %v", got, want)
+			t.Fatalf("first-write order was %v, wanted file order %v", got, want)
 		}
 	}
 }
@@ -171,14 +172,14 @@ func TestCapturedTranscriptCarriesUsageOnOneUnitPerApiResponse(t *testing.T) {
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
-	store := startRealStore(t)
+	store := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
 
 	// Act.
 	startSidecar(t, defaultSidecarOptions(t, store.Socket, tree))
 	writeCapturedTranscript(t, tree, captured)
-	lines := awaitBookUnits(ctx, t, store.Client, captured.Session,
+	lines := store.awaitBookUnits(ctx, t, captured.Session,
 		// THE WAIT IS ON THE UNITS, NEVER ON A COUNT. The captured session
 		// writes more page lines than these four, so "at least four lines"
 		// is satisfied by a book that holds four of the OTHERS and none of
@@ -188,7 +189,7 @@ func TestCapturedTranscriptCarriesUsageOnOneUnitPerApiResponse(t *testing.T) {
 	// Assert.
 	carriers := map[string]bool{}
 	for _, at := range lines {
-		a := activityOf(at.GetLine())
+		a := activityOf(at)
 		if a != nil && a.GetUsage() != nil {
 			carriers[a.GetActivityId().GetValue()] = true
 		}
@@ -546,55 +547,40 @@ func keysOf(m map[string]bool) []string {
 	return out
 }
 
-// TestAPageLineReachesAWatcherAsItIsWritten asserts the store's standing tail
-// carries the sidecar's rows live — the stream frame IS the delivery signal a
-// consumer waits on, so the file plane's writes are watchable, not merely
-// pollable.
-func TestAPageLineReachesAWatcherAsItIsWritten(t *testing.T) {
+// TestAPageLineIsWrittenAsItsFileGrows asserts the sidecar writes a book's
+// rows live, as the file grows past what the book already holds, rather than
+// only on some later sweep. That the store then streams each row to a watcher
+// with its reconnect pointer is the store's own contract, tested in
+// shim-store's suite (internal/server/fanout_test.go).
+func TestAPageLineIsWrittenAsItsFileGrows(t *testing.T) {
 	t.Parallel()
-	// Arrange.
+	// Arrange: the book is open before the rest of the file exists.
 	ctx, cancel := testContext(t)
 	defer cancel()
-	store := startRealStore(t)
+	store := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
 
 	startSidecar(t, defaultSidecarOptions(t, store.Socket, tree))
 	g := newGrowingFile(t, tree.sessionPath(captured.Slug, captured.Session))
 	// THE PREFIX IS SIZED TO THE FIRST PAGE LINE, which the capture reaches at
-	// its `skill_listing` attachment (line 6). It used to be four lines, because
-	// the capture's line 2 is a hook attachment and that ONCE landed a page
-	// line; the 2026-09-04 plane-ownership ruling made hook attachments unserved
-	// items, so a four-line prefix now opens no book at all and the watch below
-	// would be opened against an agent the store has never heard of.
+	// its `skill_listing` attachment (line 6): a shorter prefix opens no book.
 	for _, line := range captured.Lines[:7] {
 		g.AppendLine(line)
 	}
-	awaitBookLines(ctx, t, store.Client, captured.Session, 1)
-	_, tail := watchBook(ctx, t, store.Client, captured.Session)
+	for _, line := range store.awaitBookLines(ctx, t, captured.Session, 1) {
+		if a := activityOf(line); a != nil && a.GetActivityId().GetValue() == capturedBashCall2 {
+			t.Fatalf("%q is in the book before its line was written", capturedBashCall2)
+		}
+	}
 
-	// Act: the rest of the file arrives after the watch was opened.
+	// Act: the rest of the file arrives after the book opened.
 	for _, line := range captured.Lines[7:] {
 		g.AppendLine(line)
 	}
 
-	// Assert: the last response's Bash call reaches the watcher.
-	for {
-		select {
-		case at, ok := <-tail:
-			if !ok {
-				t.Fatalf("the watch stream ended before %q arrived", capturedBashCall2)
-			}
-			if a := activityOf(at.GetLine()); a != nil && a.GetActivityId().GetValue() == capturedBashCall2 {
-				if at.GetAt().GetValue() == "" {
-					t.Errorf("a streamed line carries no pointer, so a caller has no reconnect mark")
-				}
-				return
-			}
-		case <-ctx.Done():
-			t.Fatalf("%q never reached the watcher within the deadline", capturedBashCall2)
-		}
-	}
+	// Assert: the last response's Bash call is written into the book.
+	store.awaitBookUnits(ctx, t, captured.Session, capturedBashCall2)
 }
 
 // TestBlockOrdinalsCountAcrossTheLinesOfOneMessage asserts the ordinal is the

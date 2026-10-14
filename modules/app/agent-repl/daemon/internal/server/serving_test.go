@@ -1,6 +1,7 @@
 package server
 
 import (
+	"agent-repld/internal/dlog"
 	"context"
 	"crypto/tls"
 	"io"
@@ -399,12 +400,18 @@ func TestAwaitWritesQuietSettlesOnceThePushHasLeft(t *testing.T) {
 // writes park once the handler has returned, until release is closed.
 func standingStreamServing(t *testing.T, ended <-chan struct{}, held *atomic.Bool, release chan struct{}) (*Serving, string) {
 	t.Helper()
+	return standingStreamServingLogged(t, ended, held, release, nil)
+}
+
+// standingStreamServingLogged is standingStreamServing recording into log.
+func standingStreamServingLogged(t *testing.T, ended <-chan struct{}, held *atomic.Bool, release chan struct{}, log dlog.Logger) (*Serving, string) {
+	t.Helper()
 	serving := H2C(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.(http.Flusher).Flush()
 		<-ended
 		held.Store(true)
-	}), nil)
+	}), log)
 	tcp, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
@@ -445,9 +452,9 @@ func TestAwaitStreamsEndedWaitsForTheEndFrameToLeave(t *testing.T) {
 	openStream(t, url)
 
 	// Act
-	serving.EndStreams(func() { close(ended) })
+	serving.EndStreams(time.Now().Add(time.Minute), func() { close(ended) })
 	gone := make(chan int, 1)
-	go func() { gone <- serving.AwaitStreamsEnded(time.Minute) }()
+	go func() { gone <- serving.AwaitStreamsEnded(time.Now().Add(time.Minute)) }()
 
 	// Assert
 	select {
@@ -473,12 +480,107 @@ func TestAwaitStreamsEndedReportsTheStreamsStillOpen(t *testing.T) {
 	openStream(t, url)
 
 	// Act
-	serving.EndStreams(func() {})
-	left := serving.AwaitStreamsEnded(20 * time.Millisecond)
+	deadline := time.Now().Add(20 * time.Millisecond)
+	serving.EndStreams(deadline, func() {})
+	left := serving.AwaitStreamsEnded(deadline)
 
 	// Assert
 	if left != 1 {
 		t.Fatalf("AwaitStreamsEnded = %d, want the one stream that never ended", left)
+	}
+}
+
+// TestAStreamStillOpenAtTheExitsDeadlineIsRecordedAtError pins the loud half
+// of the exit's one deadline: the record names how many streams were left
+// open and the deadline that passed.
+func TestAStreamStillOpenAtTheExitsDeadlineIsRecordedAtError(t *testing.T) {
+	// Arrange
+	var held atomic.Bool
+	ended, release := make(chan struct{}), make(chan struct{})
+	t.Cleanup(func() { close(ended); close(release) })
+	log := dlog.NewTestLogger()
+	serving, url := standingStreamServingLogged(t, ended, &held, release, log)
+	openStream(t, url)
+	deadline := time.Now().Add(20 * time.Millisecond)
+
+	// Act
+	serving.EndStreams(deadline, func() {})
+	left := serving.AwaitStreamsEnded(deadline)
+
+	// Assert
+	if left != 1 {
+		t.Fatalf("AwaitStreamsEnded = %d, want 1", left)
+	}
+	var got []dlog.Record
+	for _, r := range log.Records() {
+		if r.Operation == "daemon.server.await_streams_ended" {
+			got = append(got, r)
+		}
+	}
+	if len(got) != 1 || got[0].Level != dlog.LevelError || got[0].Context["open"] != 1 ||
+		got[0].Context["deadline"] != deadline.Format(time.RFC3339Nano) {
+		t.Fatalf("records = %+v, want one ERROR naming the one open stream and the deadline", got)
+	}
+}
+
+// TestAnEndFrameNotWrittenByTheExitsDeadlineIsRecordedAtError pins the
+// per-stream wait: a stream the exit ended whose end frame never reached the
+// socket is recorded once the exit's deadline passes, and is uncounted after.
+func TestAnEndFrameNotWrittenByTheExitsDeadlineIsRecordedAtError(t *testing.T) {
+	// Arrange
+	var held atomic.Bool
+	ended, release := make(chan struct{}), make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	log := dlog.NewTestLogger()
+	serving, url := standingStreamServingLogged(t, ended, &held, release, log)
+	openStream(t, url)
+	deadline := time.Now().Add(20 * time.Millisecond)
+
+	// Act: the handler returns, and its end frame stays parked past the deadline.
+	serving.EndStreams(deadline, func() { close(ended) })
+	serving.AwaitStreamsEnded(deadline)
+	// The per-stream wait records BEFORE it uncounts the stream, so a second
+	// wait settling at zero means the record is in.
+	if left := serving.AwaitStreamsEnded(time.Now().Add(time.Minute)); left != 0 {
+		t.Fatalf("the stream was never uncounted: %d left", left)
+	}
+
+	// Assert
+	var got []dlog.Record
+	for _, r := range log.Records() {
+		if r.Operation == "daemon.server.stream_end_unwritten" {
+			got = append(got, r)
+		}
+	}
+	if len(got) != 1 || got[0].Level != dlog.LevelError || got[0].Context["deadline"] != deadline.Format(time.RFC3339Nano) {
+		t.Fatalf("records = %+v, want one ERROR naming the deadline", got)
+	}
+}
+
+// TestAnEndFrameWrittenBeforeTheDeadlineRecordsNothing pins the quiet half:
+// an exit whose streams end within the deadline records no error.
+func TestAnEndFrameWrittenBeforeTheDeadlineRecordsNothing(t *testing.T) {
+	// Arrange
+	var held atomic.Bool
+	ended, release := make(chan struct{}), make(chan struct{})
+	log := dlog.NewTestLogger()
+	serving, url := standingStreamServingLogged(t, ended, &held, release, log)
+	openStream(t, url)
+	deadline := time.Now().Add(time.Minute)
+
+	// Act
+	serving.EndStreams(deadline, func() { close(ended) })
+	close(release)
+	left := serving.AwaitStreamsEnded(deadline)
+
+	// Assert
+	if left != 0 {
+		t.Fatalf("AwaitStreamsEnded = %d, want 0", left)
+	}
+	for _, r := range log.Records() {
+		if r.Level == dlog.LevelError {
+			t.Fatalf("records = %+v, want no error", log.Records())
+		}
 	}
 }
 
@@ -489,8 +591,8 @@ func TestAwaitStreamsEndedWithNoStreamSettlesAtOnce(t *testing.T) {
 	serving := H2C(http.NotFoundHandler(), nil)
 
 	// Act
-	serving.EndStreams(func() {})
-	left := serving.AwaitStreamsEnded(time.Minute)
+	serving.EndStreams(time.Now().Add(time.Minute), func() {})
+	left := serving.AwaitStreamsEnded(time.Now().Add(time.Minute))
 
 	// Assert
 	if left != 0 {
@@ -513,7 +615,7 @@ func TestAStreamItsClientEndedIsNotHeldForAnEndFrame(t *testing.T) {
 	// Act
 	close(ended)
 	gone := make(chan int, 1)
-	go func() { gone <- serving.AwaitStreamsEnded(time.Minute) }()
+	go func() { gone <- serving.AwaitStreamsEnded(time.Now().Add(time.Minute)) }()
 
 	// Assert
 	select {

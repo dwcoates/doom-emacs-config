@@ -187,6 +187,17 @@ func (in invocation) logContext() dlog.Context {
 	return fields
 }
 
+// gitBinary is the git executable every invocation runs: "git", found on PATH,
+// unless the build named another. Test builds of the daemon link the mocked git
+// in here (`-ldflags -X agent-repld/internal/gitclient.gitBinary=<path>`,
+// daemon/integration/harness), so a test daemon cannot reach the host's git
+// whatever its PATH holds.
+var gitBinary = "git"
+
+// Binary answers the git executable this build runs, for the daemon's boot
+// record and for the harness's check that a test build linked the mocked git.
+func Binary() string { return gitBinary }
+
 // invoke runs `git -C dir args...` with the scrubbed environment and reports
 // what happened. The returned error is non-nil only when git could not be run
 // at all — a git that ran and exited nonzero is reported through exitCode, and
@@ -196,7 +207,7 @@ func (in invocation) logContext() dlog.Context {
 // the method sets is the only one present.
 func (c *client) invoke(ctx context.Context, dir string, extra []string, args ...string) (invocation, error) {
 	full := append([]string{"-C", dir}, args...)
-	cmd := exec.CommandContext(ctx, "git", full...)
+	cmd := exec.CommandContext(ctx, gitBinary, full...)
 	cmd.Env = append(scrubEnv(os.Environ()), extra...)
 
 	var stdout, stderr strings.Builder

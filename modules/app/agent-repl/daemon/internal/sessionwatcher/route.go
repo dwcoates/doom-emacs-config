@@ -807,10 +807,14 @@ func (w *watcher) closingReplayedLocked(a *agentWatch, frame *conversationv1.Age
 	}
 	// A CUT IS ROUTED ONCE, for the same reason: re-served, it would end
 	// whatever compaction or turn the views are drawing NOW, and drop a
-	// context figure read after it.
+	// context figure read after it. Only the identity of the compaction it
+	// concludes goes on to the footer, which a second serving may be the
+	// first to state (FooterSink.OnContextCutRestated).
+	cut := frame.GetUpdate().GetContextCut()
 	w.log.Info("daemon.sessionwatcher.context_cut_replayed", "a cut row already served was served again; it is dropped", dlog.Context{
 		"agent_id": agent.GetValue(), "pointer": at.GetValue(), "turn_in_flight": ids.Optional(w.turn),
 	})
+	w.sinks.Footer.OnContextCutRestated(w.ws, cut)
 	return true
 }
 

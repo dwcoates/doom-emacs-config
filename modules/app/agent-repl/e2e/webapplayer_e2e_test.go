@@ -103,11 +103,29 @@ import (
 // budgets (BOOT_BUDGET_MS and TURN_BUDGET_MS in test/webapp-layer/drive.ts)
 // fail a stuck assertion long before this fires.
 //
+// THE WARM DRIVER DOES NOT USE IT: an area run there is bounded by
+// WebappLayerSilence, between finished tests.
+//
 // AN AREA WHOSE CHILD IS STRUCTURALLY LONGER THAN A FUNCTIONAL ONE STILL DOES
 // NOT RELAX THIS CONSTANT; it passes its own bound to wlChild.WaitFor. The
 // restart-handover area is the one such caller (WebappLayerHandoverTimeout),
 // and its child is two whole process lifecycles rather than a slow area.
 const WebappLayerTimeout = 45 * time.Second
+
+// WebappLayerSilence bounds how long an area on the warm driver may go without
+// finishing a test (wlServer.Run): every finished test restarts it.
+//
+// A BOUND ON THE WHOLE RUN FAILED AREAS THAT WERE STILL PASSING. A coverage run
+// at a host load near 70 (2026-10-14) stretched feed-families' 27 tests past
+// 45s with the area's world serving it throughout and no per-site budget
+// (drive.ts) tripping: it was starved, not hung. Only an area that stopped
+// finishing tests trips this, however long a loaded host makes the whole run.
+//
+// MEASURED 2026-10-14, the longest silence per area: 1.0-2.7s with the layer
+// alone, 1.7-7.9s in a full run, 3.9-8.2s in a full coverage run (host load
+// 40-50). 20s is just over twice the 8.2s maximum, and above every per-site
+// budget, so a stuck assertion still fails on its own budget first.
+const WebappLayerSilence = 20 * time.Second
 
 // WebappLayerHandoverTimeout bounds the RESTART-HANDOVER area's child, which
 // is structurally longer than a functional area's by two whole process

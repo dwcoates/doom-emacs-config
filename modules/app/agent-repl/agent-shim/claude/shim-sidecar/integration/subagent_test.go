@@ -120,7 +120,7 @@ func TestASubagentsFramesFormItsOwnBook(t *testing.T) {
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
-	store := startRealStore(t)
+	store := startFakeStore(t)
 	tree := newVendorTree(t)
 	cwd := "/work/subagent-book-probe"
 	slug := cwdSlug(cwd)
@@ -130,11 +130,11 @@ func TestASubagentsFramesFormItsOwnBook(t *testing.T) {
 	startSidecar(t, defaultSidecarOptions(t, store.Socket, tree))
 	writeSubagentTranscript(t, tree, slug, session, corpusSubagentID)
 	writeSubagentMeta(t, tree, slug, session, corpusSubagentID)
-	lines := awaitBookLines(ctx, t, store.Client, corpusSubagentAgentID, 1)
+	lines := store.awaitBookLines(ctx, t, corpusSubagentAgentID, 1)
 
 	// Assert.
 	for _, at := range lines {
-		if got := at.GetLine().GetPageAgentId().GetValue(); got != corpusSubagentAgentID {
+		if got := at.GetPageAgentId().GetValue(); got != corpusSubagentAgentID {
 			t.Errorf("a subagent's line names book %q, wanted its spawning call %q", got, corpusSubagentAgentID)
 		}
 	}

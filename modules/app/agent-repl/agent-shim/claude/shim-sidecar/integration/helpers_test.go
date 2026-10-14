@@ -1,7 +1,8 @@
 // Package integration holds the shim-claude-sidecar's BLACK-BOX suite: the real
-// sidecar binary runs as a subprocess against either the real shim-store binary
-// on a private socket, or an in-process fake store that records what the sidecar
-// wrote and answers scripted results.
+// sidecar binary runs as a subprocess against an in-process fake store that
+// keeps what the store's contract makes durable, records what the sidecar
+// wrote, and answers scripted results. The real shim-store is never started
+// here (AGENTS.md, "A system's integration tests run that system alone").
 //
 // NOTHING HERE REACHES INSIDE THE SIDECAR. Every assertion is made on what
 // crossed the wire (store.v1 envelopes around conversation.v1 facts, read back
@@ -48,6 +49,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/proto/store/v1/storev1connect"
+	"agentrepl/protohelpers/storewrite"
 	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/recorded"
 	"agentrepl/shim-claude-sidecar/internal/testclose"
@@ -104,15 +106,14 @@ const (
 // ---------------------------------------------------------------------------
 // Repository layout, resolved from this file's own location.
 //
-// The paths are derived rather than written as "../../shim-store" so the suite
-// is correct wherever the worktree lives and whatever the test's cwd is.
+// The paths are derived rather than written relative to the test's cwd, so
+// the suite is correct wherever the worktree lives.
 // ---------------------------------------------------------------------------
 
 type layout struct {
 	integrationDir string // .../agent-shim/claude/shim-sidecar/integration
 	sidecarDir     string // .../agent-shim/claude/shim-sidecar
 	agentShimDir   string // .../agent-shim
-	storeDir       string // .../agent-shim/shim-store
 	lockDir        string // .../agent-shim/shim-lock
 	moduleRoot     string // .../modules/app/agent-repl
 	corpusDir      string // .../modules/app/agent-repl/testdata/corpus
@@ -127,14 +128,12 @@ func resolveLayout() (layout, error) {
 	l := layout{integrationDir: filepath.Dir(self)}
 	l.sidecarDir = filepath.Dir(l.integrationDir)
 	l.agentShimDir = filepath.Dir(filepath.Dir(l.sidecarDir)) // shim-sidecar -> claude -> agent-shim
-	l.storeDir = filepath.Join(l.agentShimDir, "shim-store")
 	l.lockDir = filepath.Join(l.agentShimDir, "shim-lock")
 	l.moduleRoot = filepath.Dir(l.agentShimDir)
 	l.corpusDir = filepath.Join(l.moduleRoot, "testdata", "corpus")
 	l.projectsDir = filepath.Join(l.moduleRoot, "testdata", "projects")
 	for name, dir := range map[string]string{
 		"sidecar module":         l.sidecarDir,
-		"store module":           l.storeDir,
 		"golden corpus":          l.corpusDir,
 		"captured projects tree": l.projectsDir,
 	} {
@@ -146,28 +145,21 @@ func resolveLayout() (layout, error) {
 }
 
 // ---------------------------------------------------------------------------
-// TestMain: build BOTH binaries once. Both are this team's own systems, so
-// composing them in one suite is sanctioned.
+// TestMain: build the sidecar once, and the shim's lock helper the mocked
+// vendor spawns.
 // ---------------------------------------------------------------------------
 
 var (
-	repo           layout
-	sidecarBin     string
-	testBinaryMode testenv.BuildMode
+	repo       layout
+	sidecarBin string
+	// itestBinDir is where this process builds the programs a test run did
+	// not hand it, made on the first such build (itestBinDirOnce) and removed
+	// as the suite ends.
+	itestBinDir string
 
-	// The store binary is built LAZILY, on the first test that needs it.
-	//
-	// Most subjects run against the in-process fake store and never touch the
-	// real one, so a store module that does not compile must fail only the tests
-	// that actually compose the two systems — not the whole suite, and not the
-	// harness's own self-tests.
-	storeBinOnce sync.Once
-	storeBinPath string
-	storeBinErr  error
-
-	// The shim's lock holder, built for the same reason and on the same
-	// lazy terms: only the mocked-vendor subjects spawn a real shim, and a
-	// real shim takes its kernel claims by spawning this binary.
+	// The shim's lock holder, built LAZILY: only the mocked-vendor subjects
+	// spawn a real shim, and a real shim takes its kernel claims by spawning
+	// this binary.
 	lockBinOnce sync.Once
 	lockBinPath string
 	lockBinErr  error
@@ -175,6 +167,19 @@ var (
 
 func TestMain(m *testing.M) {
 	os.Exit(runSuite(m))
+}
+
+// itestBinDirOnce answers itestBinDir, making it on first use.
+func itestBinDirOnce() (string, error) {
+	if itestBinDir != "" {
+		return itestBinDir, nil
+	}
+	dir, err := os.MkdirTemp("", "agent-repl-itest-bin-")
+	if err != nil {
+		return "", fmt.Errorf("temp bin dir: %w", err)
+	}
+	itestBinDir = dir
+	return dir, nil
 }
 
 func runSuite(m *testing.M) int {
@@ -207,72 +212,33 @@ func runSuite(m *testing.M) int {
 		}
 	}
 
-	mode, shared, err := testenv.BinaryMode(os.Getenv)
+	// A TEST RUN BUILDS THE PROGRAMS ONCE (testenv.Programs): the sidecar and
+	// the shim's lock helper come from its programs directory. Outside a run,
+	// this process builds the sidecar now and the lock helper on first use.
+	defer func() {
+		if itestBinDir == "" {
+			return
+		}
+		if err := os.RemoveAll(itestBinDir); err != nil {
+			fmt.Fprintf(os.Stderr, "integration: removing temp bin dir %s: %v\n", itestBinDir, err)
+		}
+	}()
+	sidecar, err := testenv.ProgramOr(os.Getenv, "shim-claude-sidecar", func() (string, error) {
+		dir, err := itestBinDirOnce()
+		if err != nil {
+			return "", err
+		}
+		out := filepath.Join(dir, "shim-claude-sidecar")
+		if err := goBuild(repo.sidecarDir, out); err != nil {
+			return "", fmt.Errorf("building the sidecar: %w", err)
+		}
+		return out, nil
+	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "integration: binary mode: %v\n", err)
+		fmt.Fprintf(os.Stderr, "integration: %v\n", err)
 		return 1
 	}
-	testBinaryMode = mode
-
-	var binDir string
-	if mode == testenv.BuildHere {
-		binDir, err = os.MkdirTemp("", "agent-repl-itest-bin-")
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "integration: temp bin dir: %v\n", err)
-			return 1
-		}
-		defer func() {
-			if err := os.RemoveAll(binDir); err != nil {
-				fmt.Fprintf(os.Stderr, "integration: removing temp bin dir %s: %v\n", binDir, err)
-			}
-		}()
-	} else if mode == testenv.BuildInto {
-		binDir, err = testenv.PrebuildDir(shared, sidecarIntegrationSharedSub)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "integration: %v\n", err)
-			return 1
-		}
-	} else {
-		binDir = filepath.Join(shared, sidecarIntegrationSharedSub)
-	}
-
-	sidecarBin = filepath.Join(binDir, "shim-claude-sidecar")
-	storeBinPath = filepath.Join(binDir, "shim-store")
-	lockBinPath = filepath.Join(binDir, "shim-lock")
-	if mode == testenv.UsePrebuilt {
-		for _, binary := range []struct {
-			name string
-			dst  *string
-		}{
-			{name: "shim-claude-sidecar", dst: &sidecarBin},
-			{name: "shim-store", dst: &storeBinPath},
-			{name: "shim-lock", dst: &lockBinPath},
-		} {
-			path, err := testenv.SharedBinary(shared, sidecarIntegrationSharedSub, binary.name)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "integration: resolve prebuilt %s: %v\n", binary.name, err)
-				return 1
-			}
-			*binary.dst = path
-		}
-	} else {
-		if err := goBuild(repo.sidecarDir, sidecarBin); err != nil {
-			fmt.Fprintf(os.Stderr, "integration: building the sidecar: %v\n", err)
-			return 1
-		}
-	}
-	if mode == testenv.BuildInto {
-		for _, binary := range []struct{ name, dir string }{
-			{name: "shim-store", dir: repo.storeDir},
-			{name: "shim-lock", dir: repo.lockDir},
-		} {
-			if err := goBuild(binary.dir, filepath.Join(binDir, binary.name)); err != nil {
-				fmt.Fprintf(os.Stderr, "integration: prebuilding %s: %v\n", binary.name, err)
-				return 1
-			}
-		}
-		return 0
-	}
+	sidecarBin = sidecar
 
 	// Nothing here ever reaches a vendor; the guard is stated so a regression
 	// that tried would fail loudly rather than silently make a call.
@@ -287,8 +253,6 @@ func runSuite(m *testing.M) int {
 	defer removeMockShimRoot()
 	return m.Run()
 }
-
-const sidecarIntegrationSharedSub = "sidecar-integration-bin"
 
 func goBuild(moduleDir, out string) error {
 	// -buildvcs=false: a test build never asks git to stamp the binary (no
@@ -857,6 +821,16 @@ func (c *childOutput) Write(p []byte) (int, error) {
 	return c.buf.Write(p)
 }
 
+// String answers what the child wrote, saying how much was dropped past the cap.
+func (c *childOutput) String() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.overflow {
+		return fmt.Sprintf("%s\n(%d more bytes dropped past the cap)", c.buf.String(), c.dropped)
+	}
+	return c.buf.String()
+}
+
 // captureChild answers the writer a child's stdout and stderr are pointed at,
 // and registers the cleanup that prints it if the subject failed.
 func captureChild(t *testing.T, what string) *childOutput {
@@ -1042,53 +1016,17 @@ func udsHTTPClient(socket string) *http.Client {
 }
 
 func storeClient(socket string) storev1connect.ShimStoreClient {
-	return storev1connect.NewShimStoreClient(udsHTTPClient(socket), "http://store")
+	return storeClientOver(udsHTTPClient(socket))
+}
+
+// storeClientOver answers a store client riding hc.
+func storeClientOver(hc *http.Client) storev1connect.ShimStoreClient {
+	return storev1connect.NewShimStoreClient(hc, "http://store")
 }
 
 // ---------------------------------------------------------------------------
 // The REAL store, as a subprocess on a private socket.
 // ---------------------------------------------------------------------------
-
-type realStore struct {
-	t       *testing.T
-	Socket  string
-	DBPath  string
-	LogPath string
-	Client  storev1connect.ShimStoreClient
-	cmd     *exec.Cmd
-	done    chan error
-	stopped bool
-}
-
-// storeBinary builds the real store on first use and answers its path. A store
-// module that does not compile fails exactly the tests that compose the two
-// systems, and says why.
-func storeBinary(t *testing.T) string {
-	t.Helper()
-	path, err := storeBinaryPath()
-	if err != nil {
-		t.Fatalf("this subject runs against the REAL store, which does not build: %v", err)
-	}
-	return path
-}
-
-// storeBinaryPath is storeBinary without a *testing.T, for the fixtures whose
-// lifetime is the TEST BINARY's rather than one subject's.
-func storeBinaryPath() (string, error) {
-	storeBinOnce.Do(func() {
-		switch testBinaryMode {
-		case testenv.BuildHere:
-			storeBinErr = goBuild(repo.storeDir, storeBinPath)
-		case testenv.UsePrebuilt:
-		case testenv.BuildInto:
-			storeBinErr = fmt.Errorf("integration: store binary requested while TestMain is only prebuilding")
-		}
-	})
-	if storeBinErr != nil {
-		return "", storeBinErr
-	}
-	return storeBinPath, nil
-}
 
 // lockBinary builds the shim's lock holder on first use and answers its path.
 //
@@ -1098,106 +1036,19 @@ func storeBinaryPath() (string, error) {
 func lockBinary(t *testing.T) string {
 	t.Helper()
 	lockBinOnce.Do(func() {
-		switch testBinaryMode {
-		case testenv.BuildHere:
-			lockBinErr = goBuild(repo.lockDir, lockBinPath)
-		case testenv.UsePrebuilt:
-		case testenv.BuildInto:
-			lockBinErr = fmt.Errorf("integration: lock binary requested while TestMain is only prebuilding")
-		}
+		lockBinPath, lockBinErr = testenv.ProgramOr(os.Getenv, "shim-lock", func() (string, error) {
+			dir, err := itestBinDirOnce()
+			if err != nil {
+				return "", err
+			}
+			out := filepath.Join(dir, "shim-lock")
+			return out, goBuild(repo.lockDir, out)
+		})
 	})
 	if lockBinErr != nil {
 		t.Fatalf("the real shim takes its kernel claims with shim-lock, which does not build: %v", lockBinErr)
 	}
 	return lockBinPath
-}
-
-func startRealStore(t *testing.T) *realStore {
-	t.Helper()
-	return startRealStoreAt(t, shortSocketPath(t, "store"), filepath.Join(t.TempDir(), "store.db"))
-}
-
-// startRealStoreAt starts the store on a named socket and database, so a test
-// can stop it and start it again over the SAME durable state.
-func startRealStoreAt(t *testing.T, socket, dbPath string) *realStore {
-	t.Helper()
-	mustMkdirAll(t, filepath.Dir(dbPath))
-	logPath := filepath.Join(t.TempDir(), "store.log")
-	cmd := exec.Command(storeBinary(t),
-		"--socket", socket,
-		"--db", dbPath,
-		"--log", logPath,
-	)
-	cmd.Env = append(os.Environ(),
-		"AGENT_REPL_STORE_SOCKET="+socket,
-		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
-		// The store's database is thrown away with the test: no forced flushes.
-		"AGENT_REPL_TEST_SQLITE_UNSYNCED=1",
-		// A private lock dir keeps the boot's build-report write
-		// (agentrepl/logging/buildreport) out of the owner's real
-		// ~/.cache/agent-repl/run.
-		"AGENT_REPL_LOCK_DIR="+filepath.Join(t.TempDir(), "lock"),
-	)
-	captured := captureChild(t, "the real store (log: "+logPath+")")
-	cmd.Stdout = captured
-	cmd.Stderr = captured
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start store: %v", err)
-	}
-	s := &realStore{
-		t:       t,
-		Socket:  socket,
-		DBPath:  dbPath,
-		LogPath: logPath,
-		Client:  storeClient(socket),
-		cmd:     cmd,
-		done:    make(chan error, 1),
-	}
-	go func() { s.done <- cmd.Wait() }()
-	t.Cleanup(s.Stop)
-	s.awaitReady()
-	return s
-}
-
-// awaitReady blocks until a real rpc succeeds. The successful rpc IS the signal;
-// nothing waits on a duration.
-func (s *realStore) awaitReady() {
-	s.t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), waitBudget)
-	defer cancel()
-	tick := time.NewTicker(pollTick)
-	defer tick.Stop()
-	for {
-		_, err := s.Client.GetSidecarCursors(ctx, connect.NewRequest(&storev1.GetSidecarCursorsRequest{}))
-		if err == nil {
-			return
-		}
-		select {
-		case <-ctx.Done():
-			s.t.Fatalf("store never answered GetSidecarCursors within %s: %v", waitBudget, err)
-		case <-tick.C:
-		}
-	}
-}
-
-func (s *realStore) Stop() {
-	s.t.Helper()
-	if s.stopped {
-		return
-	}
-	s.stopped = true
-	if s.cmd.Process != nil {
-		_ = s.cmd.Process.Signal(syscall.SIGTERM)
-	}
-	select {
-	case <-s.done:
-	case <-time.After(waitBudget):
-		if s.cmd.Process != nil {
-			_ = s.cmd.Process.Kill()
-		}
-		<-s.done
-	}
-	testclose.RemoveOrFail(s.t, s.Socket)
 }
 
 // ---------------------------------------------------------------------------
@@ -1206,185 +1057,6 @@ func (s *realStore) Stop() {
 
 func agentID(value string) *conversationv1.AgentId {
 	return &conversationv1.AgentId{Value: value}
-}
-
-// openBook opens one agent's reading session and returns the opening page. The
-// agent MUST already name a book: a `unknown_agent` refusal fails the subject
-// here, because a one-shot read that names an unregistered agent is asserting
-// against a book that was never written.
-func openBook(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, agent string) *storev1.OpenAgentSessionSuccess {
-	t.Helper()
-	ok, known := openBookIfKnown(ctx, t, c, agent)
-	if !known {
-		t.Fatalf("OpenAgentSession(%s) refused: the agent names no book of this store", agent)
-	}
-	return ok
-}
-
-// openBookIfKnown opens one agent's reading session, reporting whether the
-// store has HEARD OF the agent at all.
-//
-// The store's agent register is filled by the sidecar's own page-line writes,
-// so between "the file was written" and "the sidecar's first batch committed"
-// the agent legitimately names no book and the store refuses with
-// `unknown_agent`. For a POLLING reader that refusal is indistinguishable from
-// "no lines yet" and is the state it is waiting out; every other failure arm is
-// a real defect and fails the subject.
-func openBookIfKnown(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, agent string) (*storev1.OpenAgentSessionSuccess, bool) {
-	t.Helper()
-	res, err := c.OpenAgentSession(ctx, connect.NewRequest(&storev1.OpenAgentSessionRequest{
-		Agent: agentID(agent),
-	}))
-	if err != nil {
-		t.Fatalf("OpenAgentSession(%s): %v", agent, err)
-	}
-	if f := res.Msg.GetFailure(); f != nil {
-		if f.GetUnknownAgent() != nil {
-			return nil, false
-		}
-		t.Fatalf("OpenAgentSession(%s) refused: %s", agent, f.GetDetail())
-	}
-	ok := res.Msg.GetSuccess()
-	if ok == nil {
-		t.Fatalf("OpenAgentSession(%s) answered neither arm", agent)
-	}
-	return ok, true
-}
-
-// bookLines walks a whole book, newest first, across as many ReadAgentPage
-// calls as the boundary arm demands.
-func bookLines(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, agent string) []*storev1.StoreLineAt {
-	t.Helper()
-	lines, _ := bookLinesIfKnown(ctx, t, c, agent)
-	return lines
-}
-
-// bookLinesIfKnown is bookLines for a POLLING reader: an agent the store has
-// never heard of yields no lines and known=false rather than failing, because
-// the register is written by the sidecar's first committed batch.
-func bookLinesIfKnown(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, agent string) ([]*storev1.StoreLineAt, bool) {
-	t.Helper()
-	opened, known := openBookIfKnown(ctx, t, c, agent)
-	if !known {
-		return nil, false
-	}
-	out := append([]*storev1.StoreLineAt(nil), opened.GetPage().GetLines()...)
-	more := opened.GetPage().GetMore()
-	for more != nil {
-		res, err := c.ReadAgentPage(ctx, connect.NewRequest(&storev1.ReadAgentPageRequest{
-			Book:     agentID(agent),
-			Position: &storev1.ReadAgentPageRequest_After{After: more.GetLastItem()},
-		}))
-		if err != nil {
-			t.Fatalf("ReadAgentPage(%s): %v", agent, err)
-		}
-		if f := res.Msg.GetFailure(); f != nil {
-			t.Fatalf("ReadAgentPage(%s) refused: %s", agent, f.GetDetail())
-		}
-		ok := res.Msg.GetSuccess()
-		// Landing 3: a page's lines each carry their own store-minted pointer, so
-		// they are appended as they arrive rather than re-wrapped without one —
-		// the pointer is what a caller reconnects and pages from.
-		out = append(out, ok.GetLines()...)
-		more = ok.GetMore()
-		if len(ok.GetLines()) == 0 {
-			break
-		}
-	}
-	return out, true
-}
-
-// awaitBookLines re-reads one book until it holds at least want lines, bounded
-// by the context. The store read is the signal; the ticker only paces it.
-func awaitBookLines(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, agent string, want int) []*storev1.StoreLineAt {
-	t.Helper()
-	tick := time.NewTicker(pollTick)
-	defer tick.Stop()
-	var last []*storev1.StoreLineAt
-	for {
-		last, _ = bookLinesIfKnown(ctx, t, c, agent)
-		if len(last) >= want {
-			return last
-		}
-		select {
-		case <-ctx.Done():
-			t.Fatalf("book %s held %d lines, wanted at least %d, within the deadline", agent, len(last), want)
-		case <-tick.C:
-		}
-	}
-}
-
-// awaitBookUnits re-reads one book until it holds EVERY named unit, and returns
-// its lines.
-//
-// IT WAITS ON THE UNITS RATHER THAN ON A COUNT, because a count is satisfied by
-// whatever happens to be in the book already: a subject that stops a sidecar
-// with four lines written and then waits for "at least four" is not waiting for
-// anything at all, and reads the book back before the restarted sidecar has
-// written a byte.
-func awaitBookUnits(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, agent string, want ...string) []*storev1.StoreLineAt {
-	t.Helper()
-	tick := time.NewTicker(pollTick)
-	defer tick.Stop()
-	for {
-		lines, _ := bookLinesIfKnown(ctx, t, c, agent)
-		held := map[string]bool{}
-		for _, at := range lines {
-			if a := activityOf(at.GetLine()); a != nil {
-				held[a.GetActivityId().GetValue()] = true
-			}
-		}
-		missing := false
-		for _, id := range want {
-			if !held[id] {
-				missing = true
-				break
-			}
-		}
-		if !missing {
-			return lines
-		}
-		select {
-		case <-ctx.Done():
-			t.Fatalf("book %s never held every unit %v within the deadline; it holds %v",
-				agent, want, sortedStrings(keysOf(held)))
-		case <-tick.C:
-		}
-	}
-}
-
-// watchBook opens a session and follows its tail. A delivered frame is a
-// legitimate synchronization primitive; the returned channel is closed when the
-// stream ends.
-func watchBook(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, agent string) (*storev1.OpenAgentSessionSuccess, <-chan *storev1.StoreLineAt) {
-	t.Helper()
-	opened := openBook(ctx, t, c, agent)
-	stream, err := c.WatchAgentSession(ctx, connect.NewRequest(&storev1.WatchAgentSessionRequest{
-		Watch: opened.GetWatch(),
-	}))
-	if err != nil {
-		t.Fatalf("WatchAgentSession(%s): %v", agent, err)
-	}
-	out := make(chan *storev1.StoreLineAt, 256)
-	go func() {
-		defer close(out)
-		// NOT testclose.OrFail: this goroutine is not joined by its caller
-		// (watchBook returns before it finishes, and several subjects return
-		// from their own test function without draining out to closure), so a
-		// t.Errorf here could fire after the test has already completed and
-		// panic ("Fail in goroutine after Test has completed") instead of
-		// reporting anything. A stream Close failure on this best-effort
-		// teardown path is discarded rather than risk that.
-		defer func() { _ = stream.Close() }()
-		for stream.Receive() {
-			select {
-			case out <- stream.Msg().GetLine():
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-	return opened, out
 }
 
 // cursorByPath reads the sidecar's persisted cursors and returns the one for a
@@ -1466,6 +1138,10 @@ func resolved(p string) string {
 type fakeStore struct {
 	t      *testing.T
 	Socket string
+	// Client reads the fake over its socket, exactly as a store client would,
+	// riding httpClient's connections.
+	Client     storev1connect.ShimStoreClient
+	httpClient *http.Client
 
 	mu      sync.Mutex
 	calls   []string
@@ -1501,6 +1177,11 @@ type fakeStore struct {
 	// rejections holds every batch the fake refused on its OWN validation, so a
 	// subject can state what the store objected to.
 	rejections []string
+	// contestedKeys are upsert keys another producer's row already holds under
+	// a different identity (ContestUpsertKey): every batch carrying one is
+	// refused invalid_request, as the store refuses an upsert that would change
+	// a row's identity.
+	contestedKeys map[string]bool
 	// gate, when armed, WITHHOLDS the response to the first batch that matches
 	// it. See writeGate.
 	gate *writeGate
@@ -1525,46 +1206,213 @@ func startFakeStore(t *testing.T) *fakeStore {
 // sidecar first and let the store appear afterwards.
 func startFakeStoreAt(t *testing.T, socket string) *fakeStore {
 	t.Helper()
-	f := &fakeStore{
-		t:           t,
-		Socket:      socket,
-		batchC:      make(chan *storev1.WriteBatchRequest, 4096),
-		callC:       make(chan string, 4096),
-		done:        make(chan struct{}),
-		bashRows:    map[string][]*storev1.StoreAgentBash{},
-		bashWaiters: map[string][]chan *storev1.StoreAgentBash{},
-	}
-	mux := http.NewServeMux()
-	path, handler := storev1connect.NewShimStoreHandler(f)
-	mux.Handle(path, handler)
-	ln, err := net.Listen("unix", socket)
+	f, err := serveFakeStore(socket)
 	if err != nil {
-		t.Fatalf("listen on %s: %v", socket, err)
+		t.Fatalf("%v", err)
 	}
-	f.ln = ln
-	f.srv = &http.Server{Handler: h2c.NewHandler(mux, &http2.Server{})}
-	go func() {
-		defer close(f.done)
-		_ = f.srv.Serve(ln)
-	}()
+	f.t = t
 	t.Cleanup(f.Stop)
 	return f
 }
 
-func (f *fakeStore) Stop() {
-	f.t.Helper()
+// serveFakeStore starts a fake on socket with no test to answer to: the core
+// startFakeStoreAt wraps, and the whole of the shared vendor store, whose
+// lifetime is the test binary's.
+func serveFakeStore(socket string) (*fakeStore, error) {
+	hc := udsHTTPClient(socket)
+	f := &fakeStore{
+		Socket:      socket,
+		Client:      storeClientOver(hc),
+		httpClient:  hc,
+		batchC:      make(chan *storev1.WriteBatchRequest, 4096),
+		callC:       make(chan string, 4096),
+		bashRows:    map[string][]*storev1.StoreAgentBash{},
+		bashWaiters: map[string][]chan *storev1.StoreAgentBash{},
+	}
+	if err := f.listen(); err != nil {
+		return nil, err
+	}
+	return f, nil
+}
+
+// listen serves the fake on its socket.
+func (f *fakeStore) listen() error {
+	mux := http.NewServeMux()
+	path, handler := storev1connect.NewShimStoreHandler(f)
+	mux.Handle(path, handler)
+	ln, err := net.Listen("unix", f.Socket)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", f.Socket, err)
+	}
+	done := make(chan struct{})
+	f.mu.Lock()
+	f.ln = ln
+	f.srv = &http.Server{Handler: h2c.NewHandler(mux, &http2.Server{})}
+	f.done = done
+	srv := f.srv
+	f.mu.Unlock()
+	go func() {
+		defer close(done)
+		_ = srv.Serve(ln)
+	}()
+	return nil
+}
+
+// shutdown stops serving and removes the socket, answering what went wrong.
+func (f *fakeStore) shutdown() error {
 	f.mu.Lock()
 	if f.stopped {
 		f.mu.Unlock()
-		return
+		return nil
 	}
 	f.stopped = true
+	srv, done := f.srv, f.done
 	f.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), waitBudget)
 	defer cancel()
-	_ = f.srv.Shutdown(ctx)
-	<-f.done
-	testclose.RemoveOrFail(f.t, f.Socket)
+	shutdownErr := srv.Shutdown(ctx)
+	<-done
+	// A BOUNCE ENDS EVERY CONNECTION TO THE FAKE, ITS OWN CLIENT'S INCLUDED.
+	// The server has closed them, but the client's pool notices a close only
+	// when its read loop runs, so a read right after Resume could ride a
+	// connection from before the bounce and fail with an unexpected EOF
+	// (TestAStoreBounceLeavesOneCursorRowAtTheFilesFullLength, 2026-10-14).
+	// Every request has finished by now, so every pooled connection is idle,
+	// and dropping them leaves the next read nothing to ride but a new one.
+	f.httpClient.CloseIdleConnections()
+	if shutdownErr != nil {
+		shutdownErr = fmt.Errorf("shut the fake store on %s down: %w", f.Socket, shutdownErr)
+	}
+	if err := os.Remove(f.Socket); err != nil && !os.IsNotExist(err) {
+		return errors.Join(shutdownErr, fmt.Errorf("remove the fake store's socket %s: %w", f.Socket, err))
+	}
+	return shutdownErr
+}
+
+func (f *fakeStore) Stop() {
+	f.t.Helper()
+	if err := f.shutdown(); err != nil {
+		f.t.Error(err)
+	}
+}
+
+// Resume serves again on the same socket after a Stop, with everything the
+// fake made durable before it went down: a store bounce, as the sidecar sees
+// one. What a bounce does to the store's own database is the store's suite's.
+func (f *fakeStore) Resume() {
+	f.t.Helper()
+	f.mu.Lock()
+	if !f.stopped {
+		f.mu.Unlock()
+		f.t.Fatal("fakeStore.Resume: the fake is still serving")
+	}
+	f.stopped = false
+	f.mu.Unlock()
+	if err := f.listen(); err != nil {
+		f.t.Fatalf("serve again: %v", err)
+	}
+}
+
+// recordCursorAdvance makes a batch's cursor durable WITH the batch, as the
+// store commits them (store.v1 EntryBatch.cursor_advance): the file's one
+// cursor is replaced, keyed by its file id. Called under f.mu.
+func (f *fakeStore) recordCursorAdvance(req *storev1.WriteBatchRequest) {
+	advance := req.GetBatch().GetCursorAdvance()
+	if advance == nil {
+		return
+	}
+	held := proto.Clone(advance).(*storev1.CursorState)
+	for i, cs := range f.cursors {
+		if cs.GetFileId() == held.GetFileId() {
+			f.cursors[i] = held
+			return
+		}
+	}
+	f.cursors = append(f.cursors, held)
+}
+
+// Book answers the page lines the sidecar wrote into agent's book, as the
+// store keeps them: one line per upsert key, the latest write winning at the
+// place of its first, and none for a key a later batch retired. A line whose
+// owner the sidecar did not know names no book; resolving it is the store's
+// own logic, tested in shim-store's suite.
+func (f *fakeStore) Book(agent string) []*storev1.StorePageLine {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var order []string
+	byKey := map[string]*storev1.StorePageLine{}
+	for _, b := range f.acked {
+		for _, e := range b.GetBatch().GetEntries() {
+			line := e.GetAgentUpdate().GetServeableFrame()
+			if line == nil || line.GetPageAgentId().GetValue() != agent {
+				continue
+			}
+			if _, seen := byKey[e.GetUpsertKey()]; !seen {
+				order = append(order, e.GetUpsertKey())
+			}
+			byKey[e.GetUpsertKey()] = line
+		}
+		for _, r := range b.GetBatch().GetRetirements() {
+			delete(byKey, r.GetUpsertKey())
+		}
+	}
+	var out []*storev1.StorePageLine
+	for _, key := range order {
+		if line, ok := byKey[key]; ok {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+// awaitBookLines waits until agent's book holds at least want lines.
+func (f *fakeStore) awaitBookLines(ctx context.Context, t *testing.T, agent string, want int) []*storev1.StorePageLine {
+	t.Helper()
+	tick := time.NewTicker(pollTick)
+	defer tick.Stop()
+	for {
+		lines := f.Book(agent)
+		if len(lines) >= want {
+			return lines
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("book %s held %d lines, wanted at least %d, within the deadline", agent, len(lines), want)
+		case <-tick.C:
+		}
+	}
+}
+
+// awaitBookUnits waits until agent's book holds a line for every unit named.
+func (f *fakeStore) awaitBookUnits(ctx context.Context, t *testing.T, agent string, want ...string) []*storev1.StorePageLine {
+	t.Helper()
+	tick := time.NewTicker(pollTick)
+	defer tick.Stop()
+	for {
+		lines := f.Book(agent)
+		held := map[string]bool{}
+		for _, line := range lines {
+			if a := activityOf(line); a != nil {
+				held[a.GetActivityId().GetValue()] = true
+			}
+		}
+		missing := false
+		for _, id := range want {
+			if !held[id] {
+				missing = true
+				break
+			}
+		}
+		if !missing {
+			return lines
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("book %s never held every unit %v within the deadline; it holds %v",
+				agent, want, sortedStrings(keysOf(held)))
+		case <-tick.C:
+		}
+	}
 }
 
 // FailWrites makes the next n WriteBatch calls answer the failure arm. Nothing
@@ -1590,6 +1438,33 @@ func (f *fakeStore) FailWritesInvalid(n int, field, detail string) {
 	f.writeDetail = detail
 	f.writeInvalidField = field
 	f.writeKindless = false
+}
+
+// ContestUpsertKey makes every batch carrying key answer the invalid_request
+// arm the store gives an upsert that would change a row's identity (shim-store
+// SiteUpsertChangesIdentity, field entries[i].agent_update): another
+// producer's row already holds the key as a different kind of thing, so no
+// retry can ever succeed. The store's own suite tests that refusal
+// (internal/db/identity_test.go); this scripts it by key, so whichever batch
+// carries the key is the one refused.
+func (f *fakeStore) ContestUpsertKey(key string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.contestedKeys == nil {
+		f.contestedKeys = map[string]bool{}
+	}
+	f.contestedKeys[key] = true
+}
+
+// contestedEntry answers the index of the first entry of req whose key is
+// contested, or -1. Called under f.mu.
+func (f *fakeStore) contestedEntry(req *storev1.WriteBatchRequest) int {
+	for i, e := range req.GetBatch().GetEntries() {
+		if f.contestedKeys[e.GetUpsertKey()] {
+			return i
+		}
+	}
+	return -1
 }
 
 // FailWritesWithoutAKind makes the next n WriteBatch calls answer a failure
@@ -1635,45 +1510,14 @@ func (f *fakeStore) Rejections() []string {
 	return append([]string(nil), f.rejections...)
 }
 
-// validateWriteBatchEnvelope restates shim-store's validateWriteBatchRequest.
-// It answers the offending field and the store's account, or "" when the
-// request is well formed.
-//
-// IT IS THE ENVELOPE ONLY, exactly like the real store's: the frame inside a
-// StoreEntry is opaque to this layer and is routed by arm further down.
+// validateWriteBatchEnvelope is the store's own validation
+// (agentrepl/protohelpers/storewrite, which shim-store's server refuses with),
+// answering the offending field and the store's account, or "" when the
+// request is well formed. It is the ENVELOPE only, exactly like the real
+// store's: the frame inside a StoreEntry is routed by arm further down.
 func validateWriteBatchEnvelope(req *storev1.WriteBatchRequest) (string, string) {
-	if req.GetProducer() == "" {
-		return "producer", "producer: the write names no producer, so nothing can be attributed"
-	}
-	batch := req.GetBatch()
-	if batch == nil {
-		return "batch", "batch: the request carries no EntryBatch"
-	}
-	if len(batch.GetEntries()) == 0 && batch.GetCursorAdvance() == nil {
-		return "batch", "batch: the EntryBatch carries neither entries nor a cursor advance"
-	}
-	for i, e := range batch.GetEntries() {
-		what := fmt.Sprintf("batch.entries[%d]", i)
-		if e == nil {
-			return what, what + ": no entry"
-		}
-		if e.GetPlane() == nil || e.GetPlane().GetPlane() == nil {
-			return what + ".plane", what + ": plane names neither stream nor file"
-		}
-		if e.GetWriteId() == "" {
-			return what + ".write_id", what + ": write_id is empty, so the write cannot be deduped on replay"
-		}
-		if e.GetUpsertKey() == "" {
-			return what + ".upsert_key", what + ": upsert_key is empty, so the write identifies no row"
-		}
-		if e.GetEntry() == nil {
-			return what + ".entry", what + ": the entry oneof names neither agent_update nor session_update"
-		}
-	}
-	// A CURSOR-ONLY BATCH IS LEGAL: a reader that consumed bytes yielding no
-	// entries must still make its position durable.
-	if cs := batch.GetCursorAdvance(); cs != nil && cs.GetFileId() == "" {
-		return "batch.cursor_advance.file_id", "cursor_advance: a CursorState with no file_id keys no row"
+	if r := storewrite.ValidateWriteBatchRequest(req); r != nil {
+		return r.Field, r.Detail
 	}
 	return "", ""
 }
@@ -1781,8 +1625,24 @@ func (f *fakeStore) WriteBatch(_ context.Context, req *connect.Request[storev1.W
 		}), nil
 	}
 	f.mu.Lock()
+	contested := f.contestedEntry(req.Msg)
+	f.mu.Unlock()
+	if contested >= 0 {
+		key := req.Msg.GetBatch().GetEntries()[contested].GetUpsertKey()
+		return connect.NewResponse(&storev1.WriteBatchResponse{
+			Result: &storev1.WriteBatchResponse_Failure{Failure: &storev1.WriteBatchFailure{
+				Detail: fmt.Sprintf("entries[%d] (upsert_key=%q) would change the row's kind — an upsert supersedes a row's content, never its identity", contested, key),
+				Kind: &storev1.WriteBatchFailure_InvalidRequest{InvalidRequest: &storev1.WriteBatchInvalidRequest{
+					Field: fmt.Sprintf("entries[%d].agent_update", contested),
+				}},
+			}},
+		}), nil
+	}
+	f.mu.Lock()
 	f.acked = append(f.acked, recorded)
 	f.recordBashRows(recorded)
+	f.recordCursorAdvance(recorded)
+	f.recordShellRunClaims(recorded)
 	gate := f.gate
 	f.mu.Unlock()
 	// The batch is DURABLE here and only the ANSWER is withheld, so a subject
@@ -2042,6 +1902,33 @@ func terminalRunOf(entry *storev1.StoreEntry) (string, bool) {
 		return activity.GetActivityId().GetValue(), true
 	}
 	return "", false
+}
+
+// recordShellRunClaims makes a batch's shell run claims durable, as the store
+// commits them, each owned by the book holding its run's launching call (the
+// store's GetShellRunClaims owner). A claim whose run no acknowledged line
+// names yet is held unowned until one does. Called under f.mu.
+func (f *fakeStore) recordShellRunClaims(req *storev1.WriteBatchRequest) {
+	for _, claim := range req.GetBatch().GetShellRunClaims() {
+		f.shellRunClaims = append(f.shellRunClaims, &storev1.ShellRunClaimed{
+			Claim: proto.Clone(claim).(*storev1.ShellRunClaim),
+			Owner: f.ownerOfUnitLocked(claim.GetRun().GetValue()),
+		})
+	}
+}
+
+// ownerOfUnitLocked answers the book holding the unit's line, or nil when no
+// acknowledged line names it. Called under f.mu.
+func (f *fakeStore) ownerOfUnitLocked(unit string) *conversationv1.AgentId {
+	for _, b := range f.acked {
+		for _, e := range b.GetBatch().GetEntries() {
+			line := e.GetAgentUpdate().GetServeableFrame()
+			if a := activityOf(line); a != nil && a.GetActivityId().GetValue() == unit && line.GetPageAgentId() != nil {
+				return proto.Clone(line.GetPageAgentId()).(*conversationv1.AgentId)
+			}
+		}
+	}
+	return nil
 }
 
 // claimShellRun records a claim the shim wrote, with the book holding its

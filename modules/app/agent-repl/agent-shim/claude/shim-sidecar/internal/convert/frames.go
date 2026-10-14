@@ -25,7 +25,7 @@ func updateFrame(agent string, update *conversationv1.AgentUpdate) *conversation
 
 // ActivityContract is the stands-alone contract revision this producer writes
 // every unit under.
-const ActivityContract = conversationv1.AgentActivityContract_AGENT_ACTIVITY_CONTRACT_SETTLES_STAND_ALONE
+const ActivityContract = conversationv1.AgentActivityContract_AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH
 
 // activityFrame wraps one unit of work as the agent's frame.
 //

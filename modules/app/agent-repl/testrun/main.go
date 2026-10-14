@@ -88,11 +88,6 @@ func runnerCmd(argv []string) int {
 		log.Errorf("resolve the testrun binary: %v", err)
 		return 1
 	}
-	histPath, err := history.DefaultPath()
-	if err != nil {
-		log.Errorf("%v", err)
-		return 1
-	}
 	runner, err := life.StartRunner(reap.OSTable{}, reap.OSReap(log), life.WardenCommand{Name: self, Args: []string{"warden"}}, log)
 	if err != nil {
 		log.Errorf("%v", err)
@@ -116,6 +111,11 @@ func runnerCmd(argv []string) int {
 		return 1
 	}
 	parent, prefix, release := runParent(log, module, runner)
+	histPath, err := history.DefaultPath(cli.RunConditions(prefix))
+	if err != nil {
+		log.Errorf("%v", err)
+		return runner.Finish(1, gone, release)
+	}
 	code := runRooted(ctx, log, args, self, histPath, parent, prefix, runner)
 	return runner.Finish(code, gone, release)
 }
@@ -259,12 +259,19 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 		log.Errorf("point TMPDIR at the run's temp root %s: %v", root, err)
 		return 1
 	}
+	for name, dir := range cli.RunArtifactsEnv(os.Getenv(ramdisk.EnvRunLog), os.Getenv) {
+		if err := os.Setenv(name, dir); err != nil {
+			log.Errorf("point %s at the run's artifacts %s: %v", name, dir, err)
+			return 1
+		}
+		log.Infof("a failing test's whole logs are kept under %s (%s)", dir, name)
+	}
 	work, err := os.MkdirTemp(root, "work-")
 	if err != nil {
 		log.Errorf("create the run's scratch directory: %v", err)
 		return 1
 	}
-	slots, err := cli.Slots(runtime.NumCPU(), os.Getenv(cli.CPUBudgetEnv))
+	slots, err := cli.Slots(runtime.NumCPU())
 	if err != nil {
 		log.Errorf("size the run: %v", err)
 		return 1

@@ -279,14 +279,24 @@ func (r *resolver) drawArtifact(s *wsState, at placement, act *conversationv1.Ag
 			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!ok"})
 			return nil, errNotARow
 		}
+		// THE SUCCESS STANDS ALONE: it restates the publish it answered, so
+		// the card's favicon, title and file come from this frame even when
+		// this process never drew the start. A success without it is graded by
+		// its producer's revision; it is drawn from the start this process
+		// held, as it was before the restatement existed.
+		if publish := published.Published.GetPublish(); publish != nil {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "drawArtifact", "condition": "the success restates its publish"})
+			u.artifactFavicon = publish.GetFavicon()
+			u.input = artifactHeading(u.artifactFavicon, publish.GetTitle(), publish.GetFilePath())
+		} else {
+			r.unrestatedUnder(s, act, "artifact", "published.publish", "the start this process held", artifactPublishedStandsAlone(act))
+		}
 		heading := u.input
 		if title := published.Published.GetTitle(); title != "" {
 			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "title := published.Published.GetTitle(); title != \"\""})
 			// The outcome's title WINS over the one the call announced, and the
-			// favicon still comes from the call: the publish is the only frame
-			// that carries one, so recomposing from the outcome alone dropped
-			// the glyph off the finished card (photographed by a headless
-			// sandbox run).
+			// favicon still comes from the call's publish, which only the call
+			// and its restatement carry.
 			heading = artifactHeading(u.artifactFavicon, title, "")
 		}
 		bubble.Heading = &frontendv1.FeedArtifactHeading{Text: heading}

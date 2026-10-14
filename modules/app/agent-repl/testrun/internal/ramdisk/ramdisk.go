@@ -71,15 +71,19 @@ const DefaultSizeMiB = 8192
 
 // UnitIOTier is the disk I/O tier every unit of a RAM-disk run runs at.
 //
-// NOT THE THROTTLE TIER bin/background.sh gives the whole run. Throttled I/O
-// to a RAM disk stalls for hundreds of milliseconds whenever anything of a
-// higher tier touches the same volume (the kernel's throttle window for a
-// device it does not know to be solid state), measured at a max 378-622ms
-// per fsync against 0.4ms on the SSD; a run under it took 320-347s against
-// 158s and missed its timing bounds. The utility tier measured a max 0.7ms on
-// the RAM disk and still yields to the live runtime's normal-tier I/O on the
-// SSD, where every unit's remaining traffic (build caches, sources) goes.
-const UnitIOTier = "utility"
+// THE DEFAULT TIER, not a throttled one (owner ruling 2026-10-14). A unit's
+// state lives on the RAM disk, a device of its own, so its I/O there contends
+// with nothing of the owner's; what reaches the SSD is reads of build caches,
+// sources, node_modules and binaries. Under a throttled tier those reads stall
+// whenever the owner's normal-tier I/O touches the SSD: MEASURED 2026-10-14,
+// the e2e prebuild took 4.7s at default, 11.8s at throttle and 23.0s at
+// utility, and `--suites e2e,daemon` took 51-55s with one failure a run at
+// default against 124-132s with two to six at utility, the failures being
+// timing bounds missed under starved I/O. The live store was unaffected at
+// default (no warn or error, WAL checkpoints 2-33ms). The run stays at nice 19
+// for CPU, and a run that fell back to /tmp keeps bin/background.sh's
+// throttle tier, because its state is then on the SSD.
+const UnitIOTier = "default"
 
 // UnitPrefix is the command line every unit of a RAM-disk run is started
 // under.
@@ -279,6 +283,9 @@ type Manager struct {
 	Now func() time.Time
 	// LockBound is how long the registry lock is waited for (LockBound).
 	LockBound time.Duration
+	// Memory answers the host's physical memory, which sizes the memory
+	// seats (seats.go).
+	Memory func() (uint64, error)
 }
 
 // Volume is one attached, mounted RAM disk owned by this run.
@@ -290,6 +297,8 @@ type Volume struct {
 
 	m    Manager
 	lock *os.File
+	// seat is the memory seat the disk holds until its release (seats.go).
+	seat *os.File
 }
 
 // Default is the Manager a real run uses.
@@ -298,7 +307,7 @@ func Default(log Logger) Manager {
 		Run: ExecRunner, Registry: DefaultRegistry, MountParent: DefaultMountParent, Pid: os.Getpid(),
 		Reap:  reap.OSReap(log),
 		Probe: RunBounded, Watch: RunWatched, Alive: ProcessAlive, Mounted: IsMountPoint, Log: log, Now: time.Now,
-		LockBound: LockBound,
+		LockBound: LockBound, Memory: HostMemory,
 	}
 }
 
@@ -346,7 +355,19 @@ func (m Manager) Acquire(sizeMiB int) (_ *Volume, err error) {
 	if err := os.MkdirAll(m.Registry, 0o755); err != nil {
 		return nil, fmt.Errorf("make the RAM disk registry %s: %w", m.Registry, err)
 	}
+	seat, err := m.seat(sizeMiB)
+	if err != nil {
+		return nil, err
+	}
 	v, err := m.attach(sizeMiB)
+	if v == nil {
+		// Nothing was attached, so the seat goes back now.
+		if closeErr := seat.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("give back the RAM disk seat: %w", closeErr))
+		}
+		return nil, err
+	}
+	v.seat = seat
 	if v != nil {
 		defer func() {
 			if err != nil {
@@ -525,6 +546,15 @@ func (v *Volume) Release() error {
 			errs = append(errs, fmt.Errorf("close the RAM disk record: %w", err))
 		}
 		v.lock = nil
+	}
+	if v.seat != nil {
+		// THE SEAT GOES BACK WITH THE DISK. A disk kept for the next run's
+		// reclaim gives its seat back with this run's exit all the same, and
+		// that reclaim runs before the next run takes a seat of its own.
+		if err := v.seat.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("give back the RAM disk seat: %w", err))
+		}
+		v.seat = nil
 	}
 	if len(errs) > 0 {
 		v.m.Log.Infof("RAM disk release: failed after %s", v.m.Now().Sub(start))

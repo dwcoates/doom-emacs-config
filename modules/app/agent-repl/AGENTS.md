@@ -13,6 +13,14 @@ of its surfaces shares.
 
 Owner rule, reaffirmed 2026-10-06: no test of any form — unit, integration, e2e, e2e-emacs, harness, hook test — runs real `git` or reaches a real vendor (the Claude API, the Agent SDK against Anthropic, any network vendor). Git is the fake git executable (`bin/fake-git.sh`, `daemon/integration/fakegit`); the vendor is the mocked SDK. A test that needs either and cannot use the fake is a gap to report, never an exception to take.
 
+## A system's integration tests run that system alone; every other system is a mock
+
+Owner rule, 2026-10-14. A system's unit and integration tests run exactly one real agent-repl system: the one under test. Every other system it talks to (daemon, shim, store, sidecar, webapp, Emacs), and every external dependency (git, the vendor), is a mock of that system. Only the e2e layers (`e2e/`, `e2e-emacs`) run several real systems together.
+
+- Why: a system's suite then depends only on that system's own source, its mocks and the shared contracts (`proto/`, the shared Go modules). A change confined to one system can be shown, from the paths it touches, to leave every other system's unit and integration suites unaffected, so a run may skip them. One real peer system inside an integration suite breaks that proof for the whole suite.
+- Each test directory's own `AGENTS.md` names the mocks it uses for each peer.
+- A test that needs a real peer to say anything useful belongs in `e2e/`, never in the system's integration suite.
+
 ## Elisp layout
 
 Every elisp source and every ERT suite lives in `lisp/`. Exactly three files
@@ -61,7 +69,7 @@ helper every test entry point goes through.
 
 How each kind of entry point routes through it:
 
-- Every bash test entry point (`test-*.sh`, `test-all.sh`, `suite-slot.sh`,
+- Every bash test entry point (`test-*.sh`, `test-all.sh`,
   the coverage and repeat runners, the `.claude/` test hooks) carries this
   prologue as its FIRST executable line:
   `[[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/background.sh" bash "${BASH_SOURCE[0]}" "$@"`
@@ -129,8 +137,7 @@ is how broad a run is at each moment.
     workspace-merge flow): the queue already runs the full suite as its gate,
     so an agent never runs it again (owner ruling, 2026-10-06).
 - Full runs go through `bin/test-all.sh`, never a hand-assembled set of
-  per-suite commands: the scheduler holds the machine's one suite slot, so two
-  agents' full runs never overlap.
+  per-suite commands: the scheduler sizes and orders the whole run.
 - A SYSTEM'S SUITE IS ITS UNIT AND INTEGRATION TESTS TOGETHER. The roster
   entry carries both (`testrun/roster/roster.go`), so `--suites daemon` runs
   the daemon's packages and its `-tags integration` package
@@ -163,15 +170,17 @@ the path as its FIRST line and again, with the exit status, as its LAST:
 - The run's stderr is merged into the same stream and the same file.
 - `bin/test-test-all.sh` (`orchestrator-harness`) holds the contract.
 
-### Two ad-hoc scheduled runs at a time: `bin/test-all.sh` and `bin/suite-slot.sh`
+### One scheduled run: `bin/test-all.sh`
 
 `bin/test-all.sh` builds `testrun`, which turns the whole roster into one DAG
-and schedules it across `runtime.NumCPU()/2` slots: HALF the machine's cores
-(owner ruling, 2026-10-06), so a run never takes the machine from the owner's
-live runtime, input handling and apps. There is no special case
-for smaller hosts. The planner chooses each suite's chunk count by simulating
+and schedules it across `runtime.NumCPU() - 3` slots: every core but three
+(`cli.HostReserve`, owner ruling 2026-10-14), and the whole run is at nice 19,
+so it always yields the CPU to the owner's live runtime, input handling and
+apps. A host with no core left past the reserve is refused. The planner chooses each suite's chunk count by simulating
 the run against EWMA unit timings in
-`~/.cache/agent-repl/test-history.json`, then assigns the longest remaining
+`~/.cache/agent-repl/test-history.<conditions>.json` (one history per set of
+run conditions, e.g. `ramdisk-io-default`, so timings taken at another I/O
+tier never feed this one's plan), then assigns the longest remaining
 dependency chain first. Parallelism belongs to this scheduler:
 
 - every Go package is compiled once and split by top-level test; the go
@@ -200,66 +209,27 @@ dependency chain first. Parallelism belongs to this scheduler:
 ordinary and merge-gate runs omit them. `--record` is reserved for the
 canonical post-merge timing run on master.
 
-The WHOLE scheduled run holds `bin/suite-slot.sh`, which allows two at once by
-default (`AGENT_REPL_SUITE_SLOTS`; owner ruling 2026-10-12, it was one). A run
-past that does not go faster: it competes with already machine-filling schedules
-and turns ordinary bounds into noise.
+OVERLAPPING RUNS SHARE THE HOST BY PRIORITY, AND RATION ONLY MEMORY (owner
+ruling, 2026-10-14, the hybrid):
 
-That is not hypothetical. Several agents each running their own suites at once
-took this box to a load average of 253, and the Emacs layer then failed 37 of
-45 scenarios on Doom's boot bound alone — a whole run's evidence thrown away,
-with nothing wrong with the product. So:
-
-```bash
-bin/suite-slot.sh npm test          # from the package dir; wraps, never relocates
-bin/suite-slot.sh go test ./... -count=1
-```
-
-`bin/suite-slot.sh` re-execs itself through `bin/background.sh`, so a command
-it runs is at background priority too.
-
-The gate counts what is actually running, claiming slots as directories via
-`mkdir` (atomic, fails if the name exists), and reclaims a slot whose recorded
-pid is gone. It is the same mechanism as the sandbox's container gate in
-`e2e/sandbox/bin/e2e-sandbox.sh`, for the same reason.
-
-**THE MERGE QUEUE'S GATES TAKE NO SLOT.** A gate runs with
-`AGENT_REPL_SUITE_PRIORITY=merge` and goes straight through, saying so: the two
-merges at the front of the queue race to land on AC power (on battery only
-the head is worked on), taking turns at the tests, and the merge queue's own
-test turn and governor order them. A machine slot on top serialized the two
-racers and once stood the queue's head behind the merge behind it (owner
-ruling, 2026-10-12).
-
-**WAITERS ARE SERVED IN ORDER.** Each waiter takes a ticket in
-`$SLOT_DIR.queue` named `<priority>-<epoch seconds>-<pid>` and claims a freed
-slot only when it is at the front of the line, first come, first served.
-Before this, a freed slot went to whichever 2-second poller woke first. A dead
-waiter's ticket is reaped by its pid, like a dead holder's slot.
-
-**IT NESTS.** A slot is held by a process TREE, so wrapping a script that
-wraps its own children is safe: the holder exports
-`AGENT_REPL_SUITE_SLOT_HELD`, and an inner invocation that sees it runs
-straight through with one line saying so. Without that, `bin/suite-slot.sh
-bin/e2e-repeat.sh ...` deadlocked — every per-run acquisition queued behind the
-outer holder that was waiting for those very runs to finish, 6000s of "still
-waiting" with nothing running.
-
-**ONE MACHINE-WIDE TEST BUDGET** (owner ruling, 2026-10-11). Every run behind the
-gate also claims, with the same atomic `mkdir`, PROCESSOR tokens
-(`core-N`, one per logical processor) and MEMORY tokens (`mem-N`, one GiB each,
-half the machine's memory in all) under the slot directory, and is handed the
-processors it got as `AGENT_REPL_TEST_CPU_BUDGET` -- the parallelism the runner
-sizes itself to, instead of assuming it owns half the machine. The first half
-of the processors, and one RAM disk's memory, are the merge queue HEAD's
-(`AGENT_REPL_SUITE_PRIORITY=head`): nothing else may claim them. A head run
-wants half the machine; every other run a quarter, from the rest, taking what the
-runs before it left. A run's memory is its whole RAM disk
-(`AGENT_REPL_TEST_RAMDISK_MIB`, 8 GiB) or nothing, so three runs never exhaust
-the machine. A run short of memory or of a single processor gives back what it
-claimed and waits; nothing is held while waiting. The merge queue's gates
-(`head`, `speculative`) take no run slot: the daemon bounds them to its queue
-window, and the budget is what they share with every other run.
+- NO PROCESSOR IS RESERVED AND NO RUN WAITS FOR ANOTHER'S CORES. Each run
+  sizes itself to the host (`cli.Slots`), and contention between overlapping
+  runs is accepted: it slows them, and it never reaches the owner's processes.
+  The host suite gate (`bin/suite-slot.sh`, with its run limit and processor
+  tokens) and the daemon-suite host flock were removed for that reason;
+  inside one run the flock had serialized the run's own integration and e2e
+  processes.
+- PRIORITY ORDERS THEM. `bin/background.sh` demotes every test run to the
+  niceness `AGENT_REPL_TEST_NICENESS` names, 19 by default; the merge queue's
+  head gate names 10 and the merge behind it 15 (`merge.HeadNice`,
+  `merge.SpeculativeNice`). So the head's tests run first, then the merge
+  behind it, then every ad-hoc run, and all of them yield to the owner's
+  processes at 0.
+- MEMORY IS SEATED, because `nice` does nothing for it and a RAM disk's memory
+  is wired. A run's RAM disk holds one of `ramdisk.MemorySeats` seats (half
+  the host's memory over the disk's size, at least one) from before it is
+  attached until it is released; a run that finds every seat held waits for
+  one on its flock and says so in the run log.
 
 Do NOT gate on the load average instead. It is a decaying mean, so it keeps
 climbing for a minute after the work stops, and every waiter reads the same
@@ -410,12 +380,15 @@ unreachable from a live process.
   - Sized `ramdisk.DefaultSizeMiB` (override `AGENT_REPL_TEST_RAMDISK_MIB`):
     the measured live peak of the run root is 1.5-1.8 GB for
     `daemon,store,sidecar`; a RAM disk holds at most its size in memory.
-  - ITS UNITS RUN AT THE UTILITY I/O TIER (`taskpolicy -d utility`), not the
-    throttle tier `bin/background.sh` gives the run: throttled I/O to a RAM
-    disk stalled up to 622ms per fsync (the kernel treats the volume as a
-    non-SSD device), and a whole run under it took twice as long and missed
-    timing bounds. Utility still yields to the live runtime's normal-tier I/O
-    on the SSD. A run that fell back to `/tmp` keeps the throttle tier.
+  - ITS UNITS RUN AT THE DEFAULT I/O TIER (`taskpolicy -d default`, owner
+    ruling 2026-10-14), not the throttle tier `bin/background.sh` gives the
+    run: a throttled tier stalls every read of build caches, sources and
+    binaries from the SSD whenever the live runtime touches it (the e2e
+    prebuild 4.7s at default, 11.8s at throttle, 23.0s at utility), and the
+    starved units miss their timing bounds. The units' own state is on the
+    RAM disk, which contends with nothing of the owner's, and the live store
+    measured unaffected. A run that fell back to `/tmp` keeps the throttle
+    tier.
   - MOUNTED NOBROWSE, which keeps Spotlight off it: mounted plainly, mds
     opened an index store on every run's volume and took part in its
     unmount (macOS 26.2); a `.metadata_never_index` did not stop it.
@@ -971,7 +944,8 @@ park, failure or refusal it reports and stops, and never merges by hand.
 
 ## The merge queue's test gate and remediation contract
 
-Owner rulings, 2026-10-12. THIS IS THE INTENDED DESIGN. Do not change any rule
+Owner rulings, 2026-10-12, amended 2026-10-14 (end-to-end suites ride along
+with the system they run). THIS IS THE INTENDED DESIGN. Do not change any rule
 below without a conversation with the owner first; a change that only looks
 like an improvement still needs that conversation. Code:
 `daemon/internal/merge/suiteselect.go`, `gate.go`, `failingtests.go`,
@@ -982,28 +956,40 @@ like an improvement still needs that conversation. Code:
   `<state>/merge-logs/<lease>-tests-<round>.log`. There is no flake re-run.
 - **Only relevant systems run.** The suites are chosen from the paths the
   rebased branch changes against the tip it stands on:
-  - a change to one system runs only that system's own suites, its unit and
-    integration tests, and never an end-to-end suite:
-    - Emacs elisp (`lisp/` and the module-root `.el` files): `ert`;
-    - `daemon/`: `daemon`;
-    - the shim, the sidecar and the store: `shim`, `sidecar` and `store`;
+  - a change to one system runs that system's own suites, its unit and
+    integration tests, plus the end-to-end suites that run it for real. A
+    system's own suites run every other system as a mock ("A system's
+    integration tests run that system alone"), so only the end-to-end suites
+    test the systems together:
+    - Emacs elisp (`lisp/` and the module-root `.el` files): `ert` and
+      `e2e-emacs`;
+    - `daemon/`: `daemon`, `e2e` and `e2e-emacs`;
+    - the shim, the sidecar and the store: `shim`, `sidecar` and `store`,
+      each with `e2e` and `e2e-emacs`, and the shim also `sidecar`, whose
+      mocked vendor is the shim's fake mode;
     - `agent-shim/shim-lock/`: `lock`, plus `shim`, whose integration tests
-      spawn the real lock helper;
-    - `webapp/`: `webapp` and `build-frontend-harness`;
+      spawn the real lock helper, and `e2e` and `e2e-emacs`;
+    - `webapp/`: `webapp`, `build-frontend-harness`, `e2e` and `e2e-emacs`;
     - the module's `bin/`: every `bin/` harness;
   - a change to something several systems share fans out to its consumers and
-    the cross-system suite:
-    - `proto/`: `proto`, `daemon`, `shim`, `webapp` and `e2e`;
-    - `agent-shim/logging/`: `logging`, `logging-density`, `daemon`, `store`,
-      `sidecar` and `e2e`;
+    the end-to-end suites:
+    - `proto/` (the contract and its Go helpers): every suite;
+    - `agent-shim/logging/`: `logging`, `logging-density`, and every consumer
+      of its Go half (`daemon`, `store`, `sidecar`, `lock`) and its TS half
+      (`shim`, `webapp`, `build-frontend-harness`), with `e2e` and
+      `e2e-emacs`;
     - `e2e/`: `e2e` and `e2e-emacs`, and `e2e/sandbox/` only `e2e-emacs`;
+  - two tests keep the map honest: every local module a Go suite's `go.mod`
+    replaces, and every tree a Vitest suite imports outside itself, must select
+    that suite (`daemon/internal/merge/suiteselect_test.go`);
   - the runner itself (`testrun/`, `bin/test-all.sh` and the two report
     scripts it delegates to) runs every suite;
-  - the briefs (`prompts/`) run `daemon`: the daemon composes every merge and
-    repair prompt from them and its suite pins their placeholders;
+  - the briefs (`prompts/`) run `daemon`, `e2e` and `e2e-emacs`: the daemon
+    composes every merge and repair prompt from them and its suite pins their
+    placeholders;
   - documentation runs nothing: the module's `docs/` and `plans/`, and every
     Markdown file at the module root, except `metaprompt.md`, which the shim's
-    own suite reads back and so runs `shim`;
+    own suite reads back and so runs `shim`, `e2e` and `e2e-emacs`;
   - outside the module, the paths a roster harness reads run exactly the
     suites that read them: the git hooks, the `.claude` scripts and the
     repository's `bin/` (each one's harness, plus `background-harness`,
@@ -1046,7 +1032,7 @@ like an improvement still needs that conversation. Code:
   queue it would show no longer holds it, and the queue tab's contract has no
   standing for a merge outside the line.
 - **Every gate edge is recorded at INFO with its timing** (`daemon.merge.tests`):
-  its start, the machine's suite slot taken with its wait, the runner's end, the
+  its start, the test runner's first line, the runner's end, the
   verdict with its total, and a cut.
 
 ## A finished branch lands on master at once, with no question asked
@@ -3151,6 +3137,6 @@ and its commit (or the open item). Test-performance lessons also go into the
 `/write-tests` skill; runtime profiling and the perf-sensitive list live in
 `/profile-agent-repl`.
 
-- The machine has ONE suite slot shared by every session's full runs and every merge gate. Gates waited 64-338s for it before any suite started; a load average of 25-95 turned timing-sensitive tests red across unrelated merges (docs/investigations/2026-10-12-merge-queue-latency.md). Run targeted tests while developing and one full run per complete change.
+- Test runs share the machine with no host gate (owner ruling, 2026-10-14); every run is at nice 19. Run targeted tests while developing and one full run per complete change.
 - Direct pushes to master outside the merge queue move the target under gates that already passed, and that work is thrown away; master that is red makes every gate inherit the failure (same report). Land only what was rebased onto master and tested there.
 - Startup: a boot used to hold every workspace's bring-up behind a stale sidecar's restart (29s). Since b438e783b bring-ups run beside it: at the 15:34 hard bounce the daemon served +0.9s, every workspace had its go-ahead +1.8s, all 26 sessions were up 14.6s after the Emacs relaunch (54s at 13:39).

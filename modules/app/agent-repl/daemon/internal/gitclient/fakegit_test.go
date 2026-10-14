@@ -160,8 +160,9 @@ type fakeGit struct {
 	dir string
 }
 
-// newFakeGit installs the fake as the only `git` on PATH and scripts it with
-// these fixtures. A call matching no fixture is a LOUD failure rather than a
+// newFakeGit installs the fake as the client's git binary (gitBinary, the
+// seam test builds of the daemon link the mocked git into), with a PATH that
+// holds no git at all, and scripts it with these fixtures. A call matching no fixture is a LOUD failure rather than a
 // silent success, so a test can never pass on a command it did not intend.
 func newFakeGit(t *testing.T, fixtures ...gitFixture) *fakeGit {
 	t.Helper()
@@ -188,7 +189,16 @@ func newFakeGit(t *testing.T, fixtures ...gitFixture) *fakeGit {
 		t.Fatalf("writing the fake git: %v", err)
 	}
 
-	t.Setenv("PATH", binDir)
+	// NO GIT ON PATH: the fake is reached through gitBinary alone, so every
+	// test here also proves the seam the daemon's test builds rely on.
+	emptyPath := filepath.Join(dir, "empty-path")
+	if err := os.MkdirAll(emptyPath, 0o755); err != nil {
+		t.Fatalf("making the empty PATH directory: %v", err)
+	}
+	t.Setenv("PATH", emptyPath)
+	previous := gitBinary
+	gitBinary = filepath.Join(binDir, "git")
+	t.Cleanup(func() { gitBinary = previous })
 	t.Setenv(fakeGitEnabled, "1")
 	t.Setenv(fakeGitStateDir, dir)
 	// THE FAKE IS THIS TEST BINARY, so under `go test -cover` it is

@@ -90,7 +90,7 @@ run_helper() {
     mkdir -p "$dir"
     : >"$dir/log"
     set +e
-    env -u AGENT_REPL_BACKGROUND_PRIORITY -u AGENT_REPL_PROFILE_ROOT \
+    env -u AGENT_REPL_BACKGROUND_PRIORITY -u AGENT_REPL_PROFILE_ROOT -u AGENT_REPL_TEST_NICENESS \
         PATH="$STUBS:/usr/bin:/bin" \
         STUB_LOG="$dir/log" \
         "${env_args[@]}" \
@@ -162,6 +162,36 @@ for platform in Darwin Linux; do
     else
         fail "$platform: a run at niceness 10 is demoted to exactly 19" "rc=$RC log: $(cat "$d/log")"
     fi
+
+    # --- 1f. a named target: the head's gate runs at 10 --------------------
+    d="$TMP/h1f-$platform"
+    run_helper "$d" STUB_UNAME="$platform" STUB_NICENESS=0 AGENT_REPL_TEST_NICENESS=10 -- "${MARKER_CMD[@]}"
+    if [ "$RC" -eq 0 ] && grep -q '^nice -n 10 bash -c' "$d/log" && [ "$(cat "$d/out")" = "marker=nice-10" ]; then
+        pass "$platform: a run naming niceness 10 is demoted to exactly 10, with the nice-10 marker"
+    else
+        fail "$platform: a run naming niceness 10 is demoted to exactly 10, with the nice-10 marker" "rc=$RC log: $(cat "$d/log") out: $(cat "$d/out") err: $(cat "$d/err")"
+    fi
+
+    # --- 1g. a run already past its named target runs as it is -------------
+    d="$TMP/h1g-$platform"
+    run_helper "$d" STUB_UNAME="$platform" STUB_NICENESS=19 AGENT_REPL_TEST_NICENESS=10 -- "${MARKER_CMD[@]}"
+    if [ "$RC" -eq 0 ] && [ ! -s "$d/log" ] && [ "$(cat "$d/out")" = "marker=nice-19" ]; then
+        pass "$platform: a run already past its named niceness is never raised, and its marker says where it stands"
+    else
+        fail "$platform: a run already past its named niceness is never raised, and its marker says where it stands" "rc=$RC log: $(cat "$d/log") out: $(cat "$d/out")"
+    fi
+
+    # --- 1h. a target outside 1..19 is refused, command not run -------------
+    for bad in 0 20 high; do
+        d="$TMP/h1h-$platform-$bad"
+        run_helper "$d" STUB_UNAME="$platform" STUB_NICENESS=0 AGENT_REPL_TEST_NICENESS="$bad" -- \
+            bash -c 'echo ran >"$0"' "$d/ran"
+        if [ "$RC" -eq 78 ] && [ ! -e "$d/ran" ] && grep -q "AGENT_REPL_TEST_NICENESS='$bad' is not a niceness from 1 to 19" "$d/err"; then
+            pass "$platform: AGENT_REPL_TEST_NICENESS=$bad refuses the run loudly (exit 78) and never runs it"
+        else
+            fail "$platform: AGENT_REPL_TEST_NICENESS=$bad refuses the run loudly (exit 78) and never runs it" "rc=$RC err: $(cat "$d/err")"
+        fi
+    done
 
     # --- 1e. the niceness cannot be read: refused, command not run -----------
     d="$TMP/h1e-$platform"
@@ -378,7 +408,7 @@ scan() {
         find "$root/bin" "$root/.githooks" "$root/.claude" -maxdepth 1 -name 'test-*.sh' 2>/dev/null
         find "$module" \( -name node_modules -o -name testdata \) -prune -o -name 'test-*.sh' -print
         local named
-        for named in bin/report-nonlisp-coverage.sh bin/e2e-coverage.sh bin/e2e-repeat.sh bin/suite-slot.sh; do
+        for named in bin/report-nonlisp-coverage.sh bin/e2e-coverage.sh bin/e2e-repeat.sh; do
             [ -e "$module/$named" ] && echo "$module/$named"
         done
         for named in .claude/safe-test-run.sh .claude/run-subproject-tests.sh; do

@@ -820,3 +820,94 @@ func TestACompactionTurnsCloseEndsTheCompactingStep(t *testing.T) {
 		t.Fatalf("status = %q, want idle: the compaction ended with its turn", got)
 	}
 }
+
+// TestARestatedCutNamesItsCompaction covers OnContextCutRestated: the same cut
+// row is written by the shim (naming its compaction) and by the sidecar
+// (which cannot), and whichever was served first was the one routed. The
+// identity a re-served cut brings ends the compaction whichever side of its
+// start signal it lands on.
+func TestARestatedCutNamesItsCompaction(t *testing.T) {
+	tests := []struct {
+		name string
+		// act drives the footer after an unnamed cut ended the turn.
+		act       func(h *harness)
+		wantLine  string
+		wantStale int
+	}{
+		{
+			name: "a restated cut ends the line its start signal stood for",
+			act: func(h *harness) {
+				h.r.OnSessionUpdate(testWS, namedCompacting("c-1"))
+				h.r.OnContextCutRestated(testWS, namedCompactedCut("c-1"))
+			},
+			wantLine: "",
+		},
+		{
+			name: "a restated cut ahead of its start signal leaves that signal standing nothing",
+			act: func(h *harness) {
+				h.r.OnContextCutRestated(testWS, namedCompactedCut("c-1"))
+				h.r.OnSessionUpdate(testWS, namedCompacting("c-1"))
+			},
+			wantLine:  "",
+			wantStale: 1,
+		},
+		{
+			name: "a restated cut naming another compaction leaves the line standing",
+			act: func(h *harness) {
+				h.r.OnSessionUpdate(testWS, namedCompacting("c-2"))
+				h.r.OnContextCutRestated(testWS, namedCompactedCut("c-1"))
+			},
+			wantLine: "compacting the context…",
+		},
+		{
+			name: "a restated cut naming no compaction changes nothing",
+			act: func(h *harness) {
+				h.r.OnSessionUpdate(testWS, namedCompacting("c-1"))
+				h.r.OnContextCutRestated(testWS, compactedCut())
+			},
+			wantLine: "compacting the context…",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the sidecar's version of the cut, naming nothing, came
+			// first and ended the turn.
+			h := newHarness(t)
+			connected(h)
+			h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+			h.r.OnContextCut(testWS, mainAgent, compactedCut())
+			h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+
+			// Act
+			tt.act(h)
+
+			// Assert
+			if got := compactionText(t, h); got != tt.wantLine {
+				t.Fatalf("activity = %q, want %q", got, tt.wantLine)
+			}
+			if got := len(recordsOf(h.log.Records(), "daemon.footer.compacting_after_its_cut")); got != tt.wantStale {
+				t.Fatalf("stale records = %d, want %d", got, tt.wantStale)
+			}
+		})
+	}
+}
+
+func TestARestatedCutLeavesNoViolationAtTheTerminal(t *testing.T) {
+	// Arrange: the unnamed cut first, then the start signal, then the shim's
+	// version of the cut naming the compaction.
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+	h.r.OnContextCut(testWS, mainAgent, compactedCut())
+	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+	h.r.OnSessionUpdate(testWS, namedCompacting("c-1"))
+	h.r.OnContextCutRestated(testWS, namedCompactedCut("c-1"))
+
+	// Act
+	endTurn(h, "turn-1")
+
+	// Assert
+	if errs := recordsOf(h.log.Records(), outlivedTurn); len(errs) != 0 {
+		t.Fatalf("records = %+v, want no violation: the restated cut ended the compaction", errs)
+	}
+}

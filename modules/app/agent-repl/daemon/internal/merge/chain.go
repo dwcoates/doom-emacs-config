@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -171,7 +172,6 @@ func (o *orchestrator) extendOnce(ctx context.Context, repo wsm.RepoKey) bool {
 		o.deps.Log.Global().Error(op, "could not read whether the queue is paused to extend its chain", dlog.Context{"repo": string(repo), "error": err.Error()})
 		return false
 	}
-	entries := inLine(stored)
 	o.mu.Lock()
 	chain := o.chains[repo]
 	if len(chain) == 0 || len(chain) >= o.queueWindow() || o.draining {
@@ -187,22 +187,27 @@ func (o *orchestrator) extendOnce(ctx context.Context, repo wsm.RepoKey) bool {
 		o.mu.Unlock()
 		return false
 	}
-	// THE CHAIN IS THE QUEUE'S FRONT, IN ORDER. Every member stands where its
-	// entry stands; anything else is a defect, said once here and never
-	// extended past.
-	for i, member := range chain {
+	front, entries := standingFront(chain, inLine(stored))
+	// THE CHAIN IS THE QUEUE'S FRONT, IN ORDER. Every member still in line
+	// stands where its entry stands; anything else is a defect, said once
+	// here and never extended past.
+	for i, member := range front {
 		if i >= len(entries) || entries[i].Workspace != member.ws {
+			seen := chainView(chain)
 			o.mu.Unlock()
 			o.deps.Log.Global().Error(op, "the chain does not stand at the front of its queue in queue order; it is not extended", dlog.Context{
-				"repo": string(repo), "member": string(member.ws), "place": i, "entries": len(entries)})
+				"repo": string(repo), "member": string(member.ws), "place": i, "entries": len(entries),
+				"chain": seen, "line": lineView(inLine(stored))})
 			return false
 		}
 	}
-	if len(chain) >= len(entries) {
+	// A CHAIN WHOSE EVERY MEMBER HAS LEFT THE LINE HAS NO TAIL to extend
+	// behind: the next entry is admitted as a head once they release.
+	if len(front) == 0 || len(front) >= len(entries) {
 		o.mu.Unlock()
 		return false
 	}
-	tail, next := chain[len(chain)-1], entries[len(chain)]
+	tail, next := front[len(front)-1], entries[len(front)]
 	doc, resuming := o.resumes[next.Workspace]
 	switch {
 	case resuming && !doc.Speculative:
@@ -327,6 +332,65 @@ func (o *orchestrator) unstart(ctx context.Context, r *run, err error) {
 		fields["error"] = err.Error()
 	}
 	o.deps.Log.Global().Info("daemon.merge.chain", "a merge that was starting behind the head let go before its lease; its entry waits in line as it was", fields)
+}
+
+// chainView names each member of a chain, in order, with how it stands: the
+// evidence a chain off its queue's front leaves nowhere else. Called with o.mu
+// held.
+func chainView(chain []*run) string {
+	parts := make([]string, 0, len(chain))
+	for _, member := range chain {
+		part := string(member.ws)
+		if member.speculative {
+			part += "(speculative)"
+		}
+		if member.leftLine {
+			part += "(left its line)"
+		}
+		parts = append(parts, part)
+	}
+	return strings.Join(parts, " ")
+}
+
+// lineView names each entry of a queue's line, in order, with its state.
+func lineView(line []wsm.MergeQueueEntry) string {
+	parts := make([]string, 0, len(line))
+	for _, entry := range line {
+		parts = append(parts, fmt.Sprintf("%s(%s)", entry.Workspace, entry.State))
+	}
+	return strings.Join(parts, " ")
+}
+
+// standingFront answers the chain's members still in line, and the queue's
+// line without the entries of the members that left it (run.leftLine).
+//
+// A RUN LEAVES ITS LINE BEFORE ITS CHAIN. Its teardown removes its queue
+// entry, then closes what it closes, and only then releases its slot; the
+// queue read the chain is checked against may fall on either side of that
+// removal. Leaving the run out of BOTH sides makes every such read agree with
+// the chain, because the mark precedes the removal: a read that still holds
+// the entry is answered without it, and a read that lacks it meets a chain
+// that no longer counts it. Called with o.mu held.
+func standingFront(chain []*run, line []wsm.MergeQueueEntry) ([]*run, []wsm.MergeQueueEntry) {
+	left := map[ids.WorkspaceID]bool{}
+	front := make([]*run, 0, len(chain))
+	for _, member := range chain {
+		if member.leftLine {
+			left[member.ws] = true
+			continue
+		}
+		front = append(front, member)
+	}
+	if len(left) == 0 {
+		return front, line
+	}
+	entries := make([]wsm.MergeQueueEntry, 0, len(line))
+	for _, entry := range line {
+		if !left[entry.Workspace] {
+			entries = append(entries, entry)
+		}
+	}
+	return front, entries
 }
 
 // inChainLocked reports whether ws has a run in the repository's chain.
@@ -704,31 +768,34 @@ func (r *run) reuseTested(ctx context.Context, tip, head string) (bool, error) {
 	return false, nil
 }
 
-// speculativeArgv is the gate's command line for a merge behind the head: the
-// whole tree niced below the head's (owner ruling, 2026-10-11), so a gate run
-// ahead of its turn always yields the processor to the head's gate and to the
-// live runtime. Niceness is applied at the spawn, by exec'ing through nice, so
-// every descendant inherits it; no core cap and no I/O throttle is added.
-func speculativeArgv(argv []string) []string {
-	return append([]string{"/usr/bin/nice", "-n", fmt.Sprint(SpeculativeNice)}, argv...)
-}
+// THE HEAD'S GATE HAS THE PROCESSOR FIRST (owner ruling, 2026-10-14). Every
+// test run is demoted by bin/background.sh to the niceness
+// AGENT_REPL_TEST_NICENESS names, 19 by default; a gate names a better one, so
+// under contention the queue's head yields only to the owner's live runtime,
+// the merge behind it yields to the head as well (owner ruling, 2026-10-11),
+// and every ad-hoc run yields to both. No processor is reserved and no run
+// waits for another: priority only orders who runs first when the processors
+// are contended.
 
-// SpeculativeNice is the niceness a speculative gate's tree runs at, above the
-// head's.
-const SpeculativeNice = 12
+// testNicenessEnv names the niceness bin/background.sh demotes a test run to.
+const testNicenessEnv = "AGENT_REPL_TEST_NICENESS"
 
-// gateArgv is every gate's command line. Every gate queues at
-// bin/suite-slot.sh's merge priority, ahead of every ad-hoc run, and a
-// speculative gate (one behind the head) runs niced so the head's own run is
-// never slowed by it.
+// HeadNice is the niceness the head's gate runs at: ahead of every other test
+// run, behind the owner's processes.
+const HeadNice = 10
+
+// SpeculativeNice is the niceness a speculative gate (one behind the head)
+// runs at: behind the head's, ahead of an ad-hoc run's 19.
+const SpeculativeNice = 15
+
+// gateArgv is every gate's command line: the script, told the niceness its
+// whole tree runs at (HeadNice, or SpeculativeNice behind the head).
 func gateArgv(argv []string, speculative bool) []string {
-	// Every merge-queue gate, the head's and a speculative one alike, queues
-	// at bin/suite-slot.sh's merge priority; the speculative one is niced.
-	argv = append([]string{"env", "AGENT_REPL_SUITE_PRIORITY=merge"}, argv...)
+	nice := HeadNice
 	if speculative {
-		argv = speculativeArgv(argv)
+		nice = SpeculativeNice
 	}
-	return argv
+	return append([]string{"env", fmt.Sprintf("%s=%d", testNicenessEnv, nice)}, argv...)
 }
 
 // queueWindow is the window in force: the test override when one is set, else

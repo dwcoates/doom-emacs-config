@@ -78,6 +78,7 @@ perf-only: $(SHIM_DEPS)
 # section I5 finding 17.
 perf-baseline: $(SHIM_DEPS)
 	TMPDIR=/tmp AGENT_REPL_E2E_PERF=1 AGENT_REPL_E2E_PERF_BASELINE=write \
+		AGENT_REPL_E2E_PERF_TIP="$$(git -C .. rev-parse --short HEAD)" \
 		$(BACKGROUND) go test ./... -tags perf -run 'TestPerf' -count=5 \
 		-timeout $(GOTEST_TIMEOUT) -parallel 1 -v
 
