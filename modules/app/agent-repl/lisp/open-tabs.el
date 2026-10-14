@@ -18,8 +18,8 @@
 ;;   - a HIDDEN workspace (hidden by the user, or in a collapsed repository
 ;;     section) is asked for too, and answered at once without starting
 ;;     anything; when it is shown again it is asked for again, and when an
-;;     open one is hidden its page is dropped (the daemon stands its session
-;;     down);
+;;     open one is hidden its page is dropped (the daemon leaves its cache
+;;     to lapse, then stands its session down);
 ;;   - A DAEMON-ONLY RESTART NEVER CLOSES A TAB.  What is open is this
 ;;     process's own record, so a daemon that restarts finds every open tab
 ;;     still standing; only an open still in flight when its stream ends is
@@ -280,7 +280,7 @@ Outside a walk the order is re-derived at once; a walk derives it itself."
     (agent-repl-roster-refresh-order)))
 
 (defun agent-repl-open-tabs--hide (row)
-  "Drop open ROW's page, now that it is hidden: it runs nothing."
+  "Drop open ROW's page, now that it is hidden: it shows nothing."
   (let* ((name (plist-get row :name))
          (buf (agent-repl--ws-get name :frontend-buffer)))
     (agent-repl-open-tabs--dormant (plist-get row :id))
@@ -357,7 +357,8 @@ once a daemon is serving."
          ;; Closed while it opened: the walk already forgot it.
          (agent-repl--info ws "elisp.open-tabs.opened-gone ws=%s id=%s" ws id))
         ((plist-get row :collapsed)
-         ;; Hidden while it opened: the daemon stands it down.
+         ;; Hidden while it opened: the daemon stands it down once its cache
+         ;; lapses.
          (agent-repl-open-tabs--hide row))
         (t
          ;; THE ROW RIDES THE ANSWER: indexed before the tab is drawn, so it

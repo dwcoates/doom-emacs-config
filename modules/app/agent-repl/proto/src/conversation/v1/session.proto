@@ -300,8 +300,55 @@ message SessionUpdate {
     // stated before the first read answers; a read that fails is a
     // SessionFault on the catalog's own component and states nothing.
     SessionCommandCatalog command_catalog = 35;
+    // THE PROJECTED LAPSE OF THE PROMPT CACHE, stated while the session's
+    // keep-alives are HELD (shim.v1.SetKeepalive). See SessionCacheLapse,
+    // which carries the arm's whole contract.
+    SessionCacheLapse cache_lapse = 36;
   }
 }
+
+// ---- The prompt cache's projected lapse, while keep-alives are held ----
+
+// When the prompt cache lapses, and what resuming after it will cost.
+//
+// A hidden workspace's keep-alives are held, so its cache lapses on its own
+// clock: a TTL after the conversation's last request, at the tier that request
+// bought (the cold gate's own reading). The consumer counts down to that
+// moment and stands the session down when it comes.
+//
+// PRODUCER OBLIGATIONS: the shim states it when keep-alives become held (a
+// hold, or a session born held), whenever the projection changes while held
+// (a request answered moves the lapse), and once on every WatchSession open
+// while held, after the opening re-announcement. NEVER stated while the
+// cadence runs: a running cadence keeps the cache warm, so no lapse is due,
+// and a consumer that ran the cadence again discards the last projection.
+message SessionCacheLapse {
+  // When the cache lapses, in unix millis. A conversation that has bought no
+  // cache, or one whose cache is already cold, states the instant it judged
+  // that at: the lapse is now.
+  int64 lapses_at_ms = 1;
+  // THE COLD GATE'S VERDICT ON A RESUME AFTER THE LAPSE. The set arm is the
+  // verdict: the gate asks above its context floor and lets the session
+  // continue on its own below it.
+  oneof after_lapse {
+    // The resume will be refused with SessionCold until a remediation is
+    // named.
+    SessionCacheLapseGated gated = 2;
+    // The context is under the gate's floor: the resume pays the cold read
+    // and continues without asking.
+    SessionCacheLapseUngated ungated = 3;
+  }
+}
+
+// The cold gate will ask.
+message SessionCacheLapseGated {
+  // Tokens the context held at the last request — what the cold read
+  // re-reads, as SessionCold.context_tokens will state it.
+  uint64 context_tokens = 1;
+}
+
+// The cold gate will not ask. DELIBERATELY EMPTY: the arm is the verdict.
+message SessionCacheLapseUngated {}
 
 // ---- Detached agents waiting to be resumed after a network outage ----
 //

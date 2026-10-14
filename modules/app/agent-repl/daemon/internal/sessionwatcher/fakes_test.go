@@ -505,6 +505,10 @@ func (c *fakeClient) SetSessionPermissionMode(context.Context, *shimv1.SetSessio
 	panic("sessionwatcher must not call SetSessionPermissionMode")
 }
 
+func (c *fakeClient) SetKeepalive(context.Context, *shimv1.SetKeepaliveRequest) (*shimv1.SetKeepaliveResponse, error) {
+	panic("sessionwatcher must not call SetKeepalive")
+}
+
 func (c *fakeClient) Hibernate(context.Context, *shimv1.HibernateRequest) (*shimv1.HibernateResponse, error) {
 	panic("sessionwatcher must not call Hibernate")
 }
@@ -994,6 +998,14 @@ func (s *commandSink) OnCommandCatalog(_ ids.WorkspaceID, catalog *conversationv
 	s.rec.emit(event{sink: "commands", method: "OnCommandCatalog", detail: strings.Join(names, ",")})
 }
 
+type cacheLapseSink struct {
+	rec *recorder
+}
+
+func (s *cacheLapseSink) OnCacheLapse(_ ids.WorkspaceID, lapse *conversationv1.SessionCacheLapse) {
+	s.rec.emit(event{sink: "cachelapse", method: "OnCacheLapse", detail: strconv.FormatInt(lapse.GetLapsesAtMs(), 10)})
+}
+
 type lifecycleSink struct {
 	rec *recorder
 	// onTurnEnded, when set, runs inside OnTurnEnded: what the queue would do
@@ -1200,15 +1212,16 @@ func startHarnessSinks(t *testing.T, session Session, prep func(*fakeClient), st
 	}
 
 	started, err := Start(context.Background(), ids.WorkspaceID("ws-1"), h.client, session, Sinks{
-		Feed:      &feedSink{rec: h.rec},
-		Footer:    &footerSink{rec: h.rec},
-		Topbar:    &topbarSink{rec: h.rec},
-		Sidebar:   &sidebarSink{rec: h.rec},
-		Lifecycle: h.lifecycle,
-		Commands:  &commandSink{rec: h.rec},
-		Merge:     mergeSinkOf(merge, h.rec),
-		Stalls:    stalls,
-		Clock:     h.clock,
+		Feed:       &feedSink{rec: h.rec},
+		Footer:     &footerSink{rec: h.rec},
+		Topbar:     &topbarSink{rec: h.rec},
+		Sidebar:    &sidebarSink{rec: h.rec},
+		Lifecycle:  h.lifecycle,
+		Commands:   &commandSink{rec: h.rec},
+		CacheLapse: &cacheLapseSink{rec: h.rec},
+		Merge:      mergeSinkOf(merge, h.rec),
+		Stalls:     stalls,
+		Clock:      h.clock,
 	}, h.log)
 	if err != nil {
 		t.Fatalf("Start: %v", err)

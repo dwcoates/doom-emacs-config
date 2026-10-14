@@ -35,7 +35,7 @@ func (w Withholding) String() string {
 // withhold it, exactly as its merged group follows that fold.
 func (ws Workspace) Withheld(repoFolded bool) Withholding {
 	switch {
-	case ws.MergedAt == nil && ws.Hidden:
+	case ws.InHiddenSection():
 		return WithheldHidden
 	case repoFolded:
 		return WithheldCollapsed
@@ -44,10 +44,18 @@ func (ws Workspace) Withheld(repoFolded bool) Withholding {
 	}
 }
 
+// InHiddenSection reports whether the workspace sits in the roster's hidden
+// section: the user hid it, and it has not merged, since a merged workspace
+// files under recently merged whatever its hidden flag.
+func (ws Workspace) InHiddenSection() bool {
+	return ws.Hidden && ws.MergedAt == nil
+}
+
 // Runs reports whether the daemon runs the workspace's session (owner
 // principle, docs/protobuf-design/open-tabs.md: ONLY OPEN AND VISIBLE
 // WORKSPACES RUN). A workspace the user hid, or whose repository section is
-// collapsed, runs nothing.
+// collapsed, is started by nothing; a hidden one already running is kept until
+// its cache lapses (cachelapse.Keeper).
 //
 // A HIDDEN MERGE WORKSPACE RUNS. It is withheld by its async merge, not by
 // the user, and its session is what carries that merge; it is drawn in no tab

@@ -561,10 +561,12 @@ type Deps struct {
 	// Ownership answers whether this daemon still serves a workspace, so a
 	// verb refuses an unowned workspace mid-handover rather than acting on it.
 	Ownership Ownership
-	// StandDowns stands down the session of a workspace the user hid or
-	// collapsed (drain.Controller.StandDownWithheld): ONLY VISIBLE
-	// WORKSPACES RUN.
+	// StandDowns stands down the session of a workspace whose repository
+	// section the user collapsed (drain.Controller.StandDownWithheld).
 	StandDowns StandDowns
+	// CacheLapses holds a hidden workspace's keep-alives and stands its
+	// session down once its cache lapses (cachelapse.Keeper).
+	CacheLapses CacheLapses
 	// Cards answers what the daemon SERVED for a permission ask, a question
 	// batch or a cold gate. Every answer verb echoes against it: an answer
 	// that does not match what was served is refused, never forwarded.
@@ -585,6 +587,12 @@ type Deps struct {
 	// Zero means DefaultRestartStopBound, where the sizing is stated; it is a
 	// field so the overrun is exercised without waiting the real bound out.
 	RestartStopBound time.Duration
+}
+
+// CacheLapses is the hidden workspaces' cache keeper (cachelapse.Keeper),
+// told of every hide and show once it is recorded.
+type CacheLapses interface {
+	VisibilityChanged(ws ids.WorkspaceID)
 }
 
 // StandDowns stands a withheld workspace's session down as the idle sweep
@@ -874,6 +882,8 @@ func New(deps Deps) (Verbs, error) {
 		return nil, missing("an ownership probe")
 	case deps.StandDowns == nil:
 		return nil, missing("a withheld workspace's stand-down")
+	case deps.CacheLapses == nil:
+		return nil, missing("the hidden workspaces' cache keeper")
 	case deps.Cards == nil:
 		return nil, missing("a served-card store")
 	case deps.PromptsDir == "":

@@ -251,7 +251,7 @@ CREATE TABLE drain_schedule (
   deadline INTEGER NOT NULL,
   set_at   INTEGER NOT NULL
 );
-` + feedTextScaleDDL + durableFeedRowsDDL + rolledBackTurnsDDL + newsDigestDDL + newsDigestRedisplayDDL + agentReplSessionDDL + newsDigestHistoryDDL + sidebarViewDDL + accountUsageDDL + accountUsageSeatDDL + revealGapsDDL + mergeProgressDDL + maturityFoldsDDL + revealBurstGapsDDL + revealBlockSpeedsDDL + hiddenWorkspacesDDL + mergeWorkspacesDDL + commitCountDDL + mergeQueueFrontDDL + mergeRolloutHoldDDL + owedResumptionsDDL + syncAsyncMergesDDL + viewedWorkspacesDDL + landedDDL + signedInTurnsDDL + hiddenAndDweltAtDDL + compactAfterDDL + asyncLandingDDL + openFoldedDDL
+` + feedTextScaleDDL + durableFeedRowsDDL + rolledBackTurnsDDL + newsDigestDDL + newsDigestRedisplayDDL + agentReplSessionDDL + newsDigestHistoryDDL + sidebarViewDDL + accountUsageDDL + accountUsageSeatDDL + revealGapsDDL + mergeProgressDDL + maturityFoldsDDL + revealBurstGapsDDL + revealBlockSpeedsDDL + hiddenWorkspacesDDL + mergeWorkspacesDDL + commitCountDDL + mergeQueueFrontDDL + mergeRolloutHoldDDL + owedResumptionsDDL + syncAsyncMergesDDL + viewedWorkspacesDDL + landedDDL + signedInTurnsDDL + hiddenAndDweltAtDDL + compactAfterDDL + asyncLandingDDL + openFoldedDDL + cacheLapseDDL
 
 // durableFeedRowsDDL is the layout-16 addition: the daemon-synthesized feed
 // rows a NEW DAEMON must draw again (a merge's bubble), each with the order key

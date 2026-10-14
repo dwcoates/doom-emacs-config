@@ -1057,6 +1057,9 @@ func TestSetHiddenSurfacesAFailedWriteAtError(t *testing.T) {
 	if len(f.sidebar.registries) != 0 {
 		t.Fatalf("roster republications = %d, want none for a failed write", len(f.sidebar.registries))
 	}
+	if len(f.visibilityEdges) != 0 {
+		t.Fatalf("visibility edges = %v, want none for a failed write", f.visibilityEdges)
+	}
 }
 
 func TestMoveMovesTheWorkspaceAndRepublishes(t *testing.T) {
@@ -1121,7 +1124,37 @@ func TestMoveSurfacesAStoreFailure(t *testing.T) {
 	}
 }
 
-func TestSetHiddenStandsTheSessionDown(t *testing.T) {
+func TestSetHiddenTellsTheCacheKeeper(t *testing.T) {
+	tests := []struct {
+		name   string
+		hidden bool
+	}{
+		{name: "a hide", hidden: true},
+		{name: "a show", hidden: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+
+			// Act
+			if err := f.verbs.SetHidden(context.Background(), "w1", tt.hidden); err != nil {
+				t.Fatalf("SetHidden: %v", err)
+			}
+
+			// Assert
+			if !slices.Equal(f.visibilityEdges, []ids.WorkspaceID{"w1"}) {
+				t.Fatalf("visibility edges = %v, want the workspace", f.visibilityEdges)
+			}
+		})
+	}
+}
+
+// TestHidingStandsNothingDownAtOnce pins the owner's request of 2026-10-13: a
+// hidden workspace's cache is left to lapse, and the cache keeper stands its
+// session down only when it does.
+func TestHidingStandsNothingDownAtOnce(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
@@ -1132,8 +1165,8 @@ func TestSetHiddenStandsTheSessionDown(t *testing.T) {
 	}
 
 	// Assert
-	if !slices.Equal(f.standDowns, []ids.WorkspaceID{"w1"}) {
-		t.Fatalf("stand-downs = %v, want the hidden workspace", f.standDowns)
+	if len(f.standDowns) != 0 {
+		t.Fatalf("stand-downs = %v, want none at the hide", f.standDowns)
 	}
 }
 

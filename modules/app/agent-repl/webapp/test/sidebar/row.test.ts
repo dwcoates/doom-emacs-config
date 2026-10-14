@@ -8,6 +8,7 @@ import { UpdateSidebarViewResponseSchema } from "../../../proto/gen/ts/agentrepl
 import { RosterRowSchema, type RosterRowWhenSchema } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { liveElapsedClock } from "../../src/elapsed-clock.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
+import { heatColor } from "../../src/heat.js";
 import {
   HOVER_CLOSE_GRACE_MS,
   HOVER_OPEN_DELAY_MS,
@@ -356,6 +357,63 @@ describe("the when-column", () => {
       "hidden",
       "2m",
     ]);
+  });
+
+  it("counts a hidden workspace down to its cache lapse", () => {
+    const drawn = drawRosterRow(
+      row({
+        id: "ws-1",
+        when: { case: "hidden", value: { atMs: BigInt(NOW - 120_000), cache: { lapsesAtMs: BigInt(NOW + 754_000) } } },
+      }),
+      sidebarContext(),
+      "R",
+      "hidden",
+    );
+    expect(drawn.querySelector(".when")?.textContent).toBe("12m 34s");
+  });
+
+  it("colors the countdown on the heat gradient", () => {
+    const drawn = drawRosterRow(
+      row({
+        id: "ws-1",
+        when: { case: "hidden", value: { atMs: BigInt(NOW), cache: { lapsesAtMs: BigInt(NOW + 30 * 60_000) } } },
+      }),
+      sidebarContext(),
+      "R",
+      "hidden",
+    );
+    expect((drawn.querySelector(".when") as HTMLElement).style.color).toBe(heatColor(0.5, "p"));
+  });
+
+  it("ticks the countdown to a cold cache off the SHARED clock", () => {
+    const ticker = fakeTicker();
+    const sc = sidebarContext(appContext({}, ticker));
+    const drawn = drawRosterRow(
+      row({
+        id: "ws-1",
+        when: { case: "hidden", value: { atMs: BigInt(NOW), cache: { lapsesAtMs: BigInt(NOW + 60_000) } } },
+      }),
+      sc,
+      "R",
+      "hidden",
+    );
+    ticker.tick(NOW + 60_000);
+    const when = drawn.querySelector(".when") as HTMLElement;
+    expect([when.textContent, when.hasAttribute("data-cache-cold")]).toEqual(["cold cache", true]);
+  });
+
+  it("marks a warm countdown as not yet cold", () => {
+    const drawn = drawRosterRow(
+      row({
+        id: "ws-1",
+        when: { case: "hidden", value: { atMs: BigInt(NOW), cache: { lapsesAtMs: BigInt(NOW + 60_000) } } },
+      }),
+      sidebarContext(),
+      "R",
+      "hidden",
+    );
+    const when = drawn.querySelector(".when") as HTMLElement;
+    expect([when.hasAttribute("data-cache"), when.hasAttribute("data-cache-cold")]).toEqual([true, false]);
   });
 
 });

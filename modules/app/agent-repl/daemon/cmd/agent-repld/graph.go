@@ -17,6 +17,7 @@ import (
 	"agent-repld/internal/branchcommits"
 	"agent-repld/internal/bringup"
 	"agent-repld/internal/buildid"
+	"agent-repld/internal/cachelapse"
 	"agent-repld/internal/checkout"
 	"agent-repld/internal/chessboard"
 	"agent-repld/internal/classifier"
@@ -626,6 +627,25 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// from them. Fed by the fleet's watchers and read by ListSlashCommands.
 	slashCommands := commandcatalog.New()
 
+	// THE HIDDEN WORKSPACES' CACHE KEEPER, fed by the fleet's watchers (a held
+	// shim's projected lapse), the lifecycle sink (a session coming up) and
+	// the verbs (a hide or a show). It is built before the fleet and the drain
+	// controller it drives, so it reaches both late-bound: every edge it takes
+	// is applied by its Run loop, which starts once the graph is built.
+	var drainController drain.Controller
+	cacheKeeper, err := cachelapse.New(cachelapse.Deps{
+		DB:              p.DB,
+		Shim:            func(ws ids.WorkspaceID) (cachelapse.Keepalives, bool) { return fleet.Keepalives(ws) },
+		StandDowns:      standDownsFunc(func(ws ids.WorkspaceID) { drainController.StandDownWithheld(ws) }),
+		PublishRegistry: verbsRef.publishRegistry("a hidden workspace's cache lapse moved"),
+		Clock:           clock.System{},
+		Log:             p.Surfaces,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("agent-repld: build the cache keeper: %w", err)
+	}
+	lifecycle.caches = cacheKeeper
+
 	fleet, err = workspace.NewFleet(workspace.FleetDeps{
 		PublishHost: relay.PublishHostWorkspace,
 		DB:          p.DB,
@@ -633,17 +653,18 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Accounts:    accounts,
 		Supervisor:  supervisor,
 		Sinks: sessionwatcher.Sinks{
-			Feed:      feedResolver,
-			Footer:    footerResolver,
-			Topbar:    topbarResolver,
-			Sidebar:   sidebarResolver,
-			Holds:     feedResolver,
-			Lifecycle: lifecycle,
-			Title:     titleSynth,
-			Merge:     mergeAsks,
-			Commands:  slashCommands,
-			Stalls:    stalls,
-			Clock:     clock.System{},
+			Feed:       feedResolver,
+			Footer:     footerResolver,
+			Topbar:     topbarResolver,
+			Sidebar:    sidebarResolver,
+			Holds:      feedResolver,
+			Lifecycle:  lifecycle,
+			Title:      titleSynth,
+			Merge:      mergeAsks,
+			Commands:   slashCommands,
+			CacheLapse: cacheKeeper,
+			Stalls:     stalls,
+			Clock:      clock.System{},
 		},
 		Feed:         feedResolver,
 		Footer:       footerResolver,
@@ -727,7 +748,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 
 	// ---- the prompt queue ----
 
-	var drainController drain.Controller
 	queue, err = promptqueue.New(promptqueue.Deps{
 		TurnBanners:    turnBanners,
 		Commits:        commitRecounter,
@@ -1064,6 +1084,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Freeness:     fleet.Running,
 		Ownership:    ownership,
 		StandDowns:   drainController,
+		CacheLapses:  cacheKeeper,
 		Cards:        workspace.NewCards(feedResolver, topbarResolver, fleet),
 		LoadPrompt:   prompts.Load,
 		SplicePrompt: func(prompt prompts.Prompt, values map[string]string) (string, error) { return prompt.Splice(values) },
@@ -1248,6 +1269,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		{Name: "lock_watchdog", Run: stalls.Run},
 		{Name: "persistent_wifi", Run: wifi.Run},
 		{Name: "branch_commits", Run: commitRecounter.Run},
+		{Name: "cache_lapse", Run: cacheKeeper.Run},
 		{Name: "news_digest", Run: digest.Run},
 		{Name: "chess_boards", Run: func(ctx context.Context) error {
 			chessBoards.Run(ctx, feedResolver.RefreshChessBoards)

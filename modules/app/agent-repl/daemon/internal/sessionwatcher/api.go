@@ -523,6 +523,10 @@ type Sinks struct {
 	// Emacs composer completes from. REQUIRED: it is not a view, and the
 	// catalog has no other reader.
 	Commands CommandCatalogSink
+	// CacheLapse keeps a hidden workspace's cache until it lapses
+	// (cachelapse.Keeper): every projected lapse a held shim states. REQUIRED:
+	// it is not a view, and the projection has no other reader.
+	CacheLapse CacheLapseSink
 	// Title is the synthesized-title trigger sink. OPTIONAL: nil disables title
 	// synthesis, which is what every test that does not exercise it leaves it.
 	// Production always wires it. Its calls are non-blocking (the synthesizer
@@ -554,6 +558,12 @@ type CommandCatalogSink interface {
 	// OnCommandCatalog installs the catalog the session just stated,
 	// replacing the one that stood.
 	OnCommandCatalog(ws ids.WorkspaceID, catalog *conversationv1.SessionCommandCatalog)
+}
+
+// CacheLapseSink is the hidden workspaces' cache keeper, seen from the
+// watcher: every projected lapse a held shim states, as stated.
+type CacheLapseSink interface {
+	OnCacheLapse(ws ids.WorkspaceID, lapse *conversationv1.SessionCacheLapse)
 }
 
 // MergeSink is the merge queue, seen from the watcher: every permission and

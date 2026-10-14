@@ -74,6 +74,9 @@ type DB interface {
 	// SetHidden records whether a workspace sits in the roster's hidden
 	// section; an unknown workspace is ErrNotFound.
 	SetHidden(ctx context.Context, id WorkspaceID, hidden bool, at time.Time) error
+	// SetCacheLapse records a hidden workspace's projected cache lapse, and
+	// answers whether it was recorded: a workspace not hidden takes none.
+	SetCacheLapse(ctx context.Context, id WorkspaceID, lapse CacheLapse) (bool, error)
 	// RevealMergeWorkspace records that a merge workspace has been revealed,
 	// answering whether this call revealed it; a workspace that is no merge
 	// workspace is refused, an unknown one is ErrNotFound.

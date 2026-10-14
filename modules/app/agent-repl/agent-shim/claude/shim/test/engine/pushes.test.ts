@@ -804,3 +804,66 @@ describe("the runtime's slash-command catalog", () => {
     expect(pushes.push(catalog("compact", "new-skill"))).toBe(true);
   });
 });
+
+describe("withdrawing a standing fact", () => {
+  function cacheLapse(atMs: bigint): conversationv1.SessionUpdate {
+    return create(conversationv1.SessionUpdateSchema, {
+      update: {
+        case: "cacheLapse",
+        value: create(conversationv1.SessionCacheLapseSchema, {
+          lapsesAtMs: atMs,
+          afterLapse: { case: "ungated", value: create(conversationv1.SessionCacheLapseUngatedSchema, {}) },
+        }),
+      },
+    });
+  }
+
+  it("restates the held cache's lapse to a consumer that opens later", async () => {
+    // Arrange
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
+    pushes.push(cacheLapse(5n));
+
+    // Act
+    const opening = await take(pushes.subscribe(), 2);
+
+    // Assert
+    expect(opening[1]).toEqual(cacheLapse(5n));
+  });
+
+  it("replays no withdrawn lapse to a consumer that opens later", async () => {
+    // Arrange
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
+    pushes.push(cacheLapse(5n));
+    pushes.withdraw("cacheLapse");
+    pushes.push(create(conversationv1.SessionUpdateSchema, {
+      update: { case: "title", value: create(conversationv1.SessionTitleSchema, { text: "t" }) },
+    }));
+
+    // Act
+    const opening = await take(pushes.subscribe(), 2);
+
+    // Assert
+    expect(opening[1]?.update.case).toBe("title");
+  });
+
+  it("states the same lapse again after a withdrawal", () => {
+    // Arrange
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
+    pushes.push(cacheLapse(5n));
+    pushes.withdraw("cacheLapse");
+
+    // Act
+    const changed = pushes.push(cacheLapse(5n));
+
+    // Assert
+    expect(changed).toBe(true);
+  });
+
+  it("refuses to withdraw an arm that is not replayed", () => {
+    // Arrange
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
+
+    // Act, Assert
+    expect(() => pushes.withdraw("compacting")).toThrow(/not a replayed arm/);
+  });
+});

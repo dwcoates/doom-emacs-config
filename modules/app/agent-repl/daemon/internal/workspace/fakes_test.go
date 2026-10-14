@@ -2284,6 +2284,9 @@ type fixture struct {
 	headless *fakeHeadless
 	// standDowns is every withheld workspace whose stand-down was asked for.
 	standDowns []ids.WorkspaceID
+	// visibilityEdges is every workspace whose hide or show the cache keeper
+	// was told of.
+	visibilityEdges []ids.WorkspaceID
 	// topbarParked is every park state the topbar seam was handed, in order.
 	topbarParked []bool
 	// topbarColdGates is every cold-gate state the topbar seam was handed, in
@@ -2373,6 +2376,9 @@ func newFixture(t *testing.T) *fixture {
 		Ownership: f.owner,
 		StandDowns: standDownsFunc(func(ws ids.WorkspaceID) {
 			f.standDowns = append(f.standDowns, ws)
+		}),
+		CacheLapses: visibilityFunc(func(ws ids.WorkspaceID) {
+			f.visibilityEdges = append(f.visibilityEdges, ws)
 		}),
 		Cards: f.cards,
 		ReadEffortSettings: func(configDir string) (claudesettings.Effort, error) {
@@ -2798,3 +2804,8 @@ func (f *fakeFeed) SetAccount(ids.WorkspaceID, string) {}
 type standDownsFunc func(ws ids.WorkspaceID)
 
 func (f standDownsFunc) StandDownWithheld(ws ids.WorkspaceID) { f(ws) }
+
+// visibilityFunc adapts a function to CacheLapses.
+type visibilityFunc func(ws ids.WorkspaceID)
+
+func (f visibilityFunc) VisibilityChanged(ws ids.WorkspaceID) { f(ws) }
