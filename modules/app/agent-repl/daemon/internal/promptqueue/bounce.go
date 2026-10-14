@@ -89,6 +89,36 @@ type pendingBounce struct {
 	// the run swallowed is not lost -- and a shim that says `live` while the
 	// watcher reads it free cannot spin the bounce in a loop.
 	freedWhileRunning bool
+	// drainEnded is closed the moment this bounce stops draining the
+	// workspace -- it finished, it was given back unperformed, or its move
+	// keeps the workspace drained for its new owner -- so work that must not
+	// run on a shim being stood down (Exclusively) waits on it rather than on
+	// a guess at how long a bounce takes. It is made each time the bounce
+	// starts draining (startDrainingLocked) and closed once
+	// (endDrainingLocked).
+	drainEnded chan struct{}
+}
+
+// startDrainingLocked marks the bounce DRAINING and arms the latch its end
+// closes. The caller holds q.mu.
+func (p *pendingBounce) startDrainingLocked() {
+	p.draining = true
+	p.drainEnded = make(chan struct{})
+}
+
+// endDrainingLocked releases every waiter on the bounce's drain. A kept
+// bounce stays draining -- the workspace is its new owner's -- but its run is
+// over, so its waiters are released too, and find it kept. The caller holds
+// q.mu.
+func (p *pendingBounce) endDrainingLocked(keep bool) {
+	if !keep {
+		p.draining = false
+	}
+	if p.drainEnded == nil {
+		panic("promptqueue: a bounce ended a drain it never started")
+	}
+	close(p.drainEnded)
+	p.drainEnded = nil
 }
 
 // quietMove reports whether the bounce's MOVE waits only for the delivery
@@ -718,7 +748,7 @@ func (q *queue) startBounceLocked(d *delivery, log dlog.Logger) {
 		panic(fmt.Sprintf("promptqueue: a bounce started on %s while a %s call stands", ws, call.what))
 	}
 	pending := state.bounce
-	pending.draining = true
+	pending.startDrainingLocked()
 	// Only an edge that arrives WHILE this run decides is one it can swallow.
 	pending.freedWhileRunning = false
 	reason := pending.reason()
@@ -755,7 +785,7 @@ func (q *queue) finishStage(ws ids.WorkspaceID, stage *bounceStage, runErr error
 		// stand down over live work, and keeps serving. The stage is
 		// registered again, its requesters kept for the rerun.
 		stage.started = false
-		pending.draining = false
+		pending.endDrainingLocked(false)
 		edge := pending.freedWhileRunning
 		pending.freedWhileRunning = false
 		q.mu.Unlock()
@@ -780,6 +810,7 @@ func (q *queue) finishStage(ws ids.WorkspaceID, stage *bounceStage, runErr error
 		if pending != nil {
 			unsealed = pending.across
 			pending.across = nil
+			pending.endDrainingLocked(keep)
 		}
 		if keep && pending != nil {
 			pending.kept = true
