@@ -31,6 +31,7 @@ import { FEED_MERGE_HEAD_GLYPH } from "../../vocab.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
 import { stopTicking } from "../ticking.js";
+import { drawFeedMergeVersion } from "./version.js";
 import { drawMergeWorkspaceSwitch, switchFacts } from "./workspace-switch.js";
 import type {
   FeedMerge,
@@ -82,6 +83,11 @@ export function drawFeedMerge(msg: FeedMerge, rc: RowContext): HTMLElement {
         badge("merged", "is-succeeded"),
         settledClock(runtime, msOf(result.value.endedAtMs, `${PATH}.success.ended_at_ms`)),
       );
+      // THE VERSION A MERGE ONTO AGENT-REPL'S MASTER LANDED AS, when the
+      // daemon resolved one (version.ts).
+      if (head.version !== undefined) {
+        el.append(drawFeedMergeVersion(head.version));
+      }
       const commit = document.createElement("span");
       commit.className = "merge-commit";
       commit.textContent = result.value.commit;

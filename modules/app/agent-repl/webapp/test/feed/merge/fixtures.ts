@@ -143,7 +143,12 @@ export function mergeHead(
     | { case: "success"; endedAtMs: bigint; commit: string }
     | { case: "failed"; endedAtMs: bigint; summary: string }
     | { case: "abandoned"; endedAtMs: bigint; summary: string },
-  opts: { icon?: string; startedAtMs?: bigint; label?: string } = {},
+  opts: {
+    icon?: string;
+    startedAtMs?: bigint;
+    label?: string;
+    version?: { leading: string; incremented: string; trailing?: string };
+  } = {},
 ): FeedMerge {
   const arm =
     result.case === "update"
@@ -174,6 +179,14 @@ export function mergeHead(
       label: { text: opts.label ?? "branch → master" },
       runtime: { startedAtMs: opts.startedAtMs ?? 0n },
       fold: { folded: true, decidedBy: { case: "daemon", value: {} } },
+      version:
+        opts.version === undefined
+          ? undefined
+          : {
+              leading: { text: opts.version.leading },
+              incremented: { text: opts.version.incremented },
+              trailing: opts.version.trailing === undefined ? undefined : { text: opts.version.trailing },
+            },
     },
     result: arm,
   } as never);
