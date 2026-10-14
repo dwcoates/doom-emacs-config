@@ -2424,6 +2424,39 @@ describe("workingPromptRules", () => {
 });
 
 /**
+ * THE INLINE-CODE CHIP'S WASH (owner ruling, 2026-10-14: inline code was
+ * "nearly imperceptible against the dark grey background" of a response
+ * bubble, a shade darker than it, so it should be lighter instead).
+ *
+ * `--code-bg` is a transparent wash laid over whatever bubble holds the chip,
+ * so which color it mixes in decides whether the chip sinks or lifts: black
+ * sinks it into the light theme's pale bubble, white lifts it off the dark
+ * theme's dark one.
+ */
+describe("the inline-code chip's wash", () => {
+  /** The mixed-in color and its percentage in a `--code-bg` color-mix. */
+  function codeWash(block: string): { color: string; percent: number } {
+    const declaration = /--code-bg:\s*color-mix\(in srgb,\s*(#[0-9a-f]{6})\s*([\d.]+)%,\s*transparent\)/.exec(block);
+    if (declaration === null) throw new Error("no --code-bg color-mix found");
+    return { color: declaration[1], percent: Number(declaration[2]) };
+  }
+
+  it.each([
+    ["light", "#000000", 13],
+    ["dark", "#ffffff", 12],
+  ] as const)("washes the %s theme's chip with %s at %d%%", (theme, color, percent) => {
+    // Arrange
+    const block = theme === "light" ? (declarationsOf(":root") ?? "") : withoutBlockComments(darkThemeBlock());
+
+    // Act
+    const wash = codeWash(block);
+
+    // Assert
+    expect(wash).toEqual({ color, percent });
+  });
+});
+
+/**
  * THE PROMPT GLIMMER'S INTENSITY (owner ruling, 2026-09-21: "make the
  * glimmering in the webapp response bubbles 50% more intense").
  *
