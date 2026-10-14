@@ -16,6 +16,7 @@
  */
 import { log } from "../log.js";
 import { prefersReducedMotion } from "../reduced-motion.js";
+import { nextFrame } from "../frame.js";
 
 /** How long the bubble takes to ease into its interim look. */
 export const COLLAPSE_MS = 220;
@@ -41,7 +42,7 @@ export interface CollapseMotionDeps {
 /** The page's own frame clock and reduced-motion setting. */
 function pageDeps(bubble: HTMLElement): CollapseMotionDeps {
   return {
-    nextFrame: (fn) => requestAnimationFrame(fn),
+    nextFrame,
     reducedMotion: () => prefersReducedMotion(bubble.ownerDocument),
   };
 }

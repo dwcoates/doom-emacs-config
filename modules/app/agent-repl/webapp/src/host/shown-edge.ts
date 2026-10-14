@@ -9,6 +9,7 @@
  */
 import { log } from "../log.js";
 import type { Presence } from "../presence.js";
+import { nextFrame } from "../frame.js";
 
 /** The clock and frame scheduler the shown frame is timed with. */
 export interface ShownEdgeTiming {
@@ -21,9 +22,7 @@ export interface ShownEdgeTiming {
 /** The page's own clock and frames. */
 const PAGE_TIMING: ShownEdgeTiming = {
   now: () => performance.now(),
-  frame: (fn) => {
-    requestAnimationFrame(() => fn());
-  },
+  frame: nextFrame,
 };
 
 /**
