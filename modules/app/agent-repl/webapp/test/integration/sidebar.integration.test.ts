@@ -63,6 +63,7 @@ describe("arm coverage", () => {
     assertCoversOneof(RosterRowWhenSchema, "shown", [
       "merged",
       "hidden",
+      "syncMerging",
       "turnRunning",
       "noTurnRunning",
     ]);
