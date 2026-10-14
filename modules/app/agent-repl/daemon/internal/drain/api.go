@@ -94,6 +94,11 @@ type Deps struct {
 	// controller has with a shim NOTHING has registered yet. Required: an
 	// immediate shutdown without it is the leak this exists to close.
 	Spawns SpawnSweep
+	// Merges is the merge orchestrator's drain. Required: an immediate
+	// shutdown suspends every merge BEFORE it stands any session down, and
+	// without it a merge waiting on a turn reads its session's stand-down as a
+	// fault.
+	Merges MergeSuspension
 	// StandBound is how long ONE of those shim round trips has to answer
 	// before the sweep gives that workspace up and moves on. Zero takes
 	// DefaultStandBound.
@@ -213,6 +218,21 @@ type SpawnSweep interface {
 	BeginStandDown() bool
 }
 
+// MergeSuspension is the merge orchestrator's drain, seen from the drain
+// controller. The immediate shutdown reaches it BEFORE it stands any session
+// down: a merge mid-step waits on its session's turn, and a stand-down that
+// lands first closes that wait under a merge that does not yet know the daemon
+// is exiting, which then fails the merge as a fault and hands a failure prompt
+// back to a session nothing may revive. Suspended first, the merge is cut with
+// the daemon's exit as its cause and left to the next boot to resume, exactly
+// as the orderly exit's own teardown leaves it.
+type MergeSuspension interface {
+	// Drain stops admitting merges, suspends every merge still mid-step, and
+	// waits, within its own bound, for every merge already at its terminal.
+	// It is idempotent: the teardown's own drain after it finds nothing left.
+	Drain(ctx context.Context)
+}
+
 // Freeness answers a workspace's freeness and lets a caller WAIT for it
 // without polling. It is the sessionwatcher's answer, injected because drain
 // sits beside the watcher rather than above it.
@@ -316,6 +336,9 @@ func New(deps Deps) (Controller, error) {
 	}
 	if deps.Spawns == nil {
 		return nil, errors.New("drain: a spawn sweep is required")
+	}
+	if deps.Merges == nil {
+		return nil, errors.New("drain: a merge suspension is required")
 	}
 	if deps.Freeness == nil {
 		return nil, errors.New("drain: a freeness answer is required")

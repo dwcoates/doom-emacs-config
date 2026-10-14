@@ -656,7 +656,9 @@ func (r *run) leaveTerminal() {
 // STOPPING POINT, and waits, WITHIN A BOUND, for every run that has already
 // reached its terminal to finish its durable stamps and teardown.
 //
-// It is the daemon's orderly exit calling, with the state client still open.
+// It is the daemon's exit calling, with the state client still open: the
+// immediate shutdown calls it before it stands any session down, and the
+// orderly exit's teardown calls it again, which then finds nothing left.
 //
 // A MID-STEP MERGE IS SUSPENDED, NEVER INTERRUPTED (owner ruling, 2026-10-06).
 // Its git gate is stopped -- no git starts after this -- and the command
