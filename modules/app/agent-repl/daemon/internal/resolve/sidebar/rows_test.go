@@ -1452,3 +1452,59 @@ func TestARevealedMergeWorkspaceHasATab(t *testing.T) {
 	}
 	t.Fatal("the revealed merge workspace has no tab")
 }
+
+func TestTheRowCarriesTheDurableLastTurnEndedInstant(t *testing.T) {
+	cases := []struct {
+		name   string
+		ended  *time.Time
+		closed bool
+		want   *int64
+	}{
+		{name: "a workspace whose turn closed carries the close instant", ended: at(2 * time.Hour), want: millis(at(2 * time.Hour))},
+		{name: "a workspace with no closed turn carries none", ended: nil, want: nil},
+		{name: "a closed workspace still carries its instant", ended: at(time.Hour), closed: true, want: millis(at(time.Hour))},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r, _ := newResolver(t)
+			ws := workspace("w1", "one")
+			ws.LastTurnEndedAt = tc.ended
+			ws.Closed = tc.closed
+
+			// Act.
+			r.SetRegistry(registry(ws))
+
+			// Assert.
+			got := onlyRow(t, r).GetLastTurnEnded()
+			switch {
+			case tc.want == nil && got != nil:
+				t.Fatalf("last_turn_ended = %v, want unset", got)
+			case tc.want != nil && got == nil:
+				t.Fatalf("last_turn_ended unset, want %d", *tc.want)
+			case tc.want != nil && got.GetAtMs() != *tc.want:
+				t.Fatalf("last_turn_ended = %d, want %d", got.GetAtMs(), *tc.want)
+			}
+		})
+	}
+}
+
+// TestTheLastTurnEndedInstantIsNotTheSelectionInstant pins that the two
+// durable instants are read from their own record fields: selecting a
+// workspace moves last_selected and leaves last_turn_ended where the close put
+// it.
+func TestTheLastTurnEndedInstantIsNotTheSelectionInstant(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+	ws := workspace("w1", "one")
+	ws.LastTurnEndedAt = at(time.Hour)
+	ws.LastSelectedAt = at(3 * time.Hour)
+
+	// Act.
+	r.SetRegistry(registry(ws))
+
+	// Assert.
+	if got := onlyRow(t, r).GetLastTurnEnded().GetAtMs(); got != epoch.Add(time.Hour).UnixMilli() {
+		t.Fatalf("last_turn_ended = %d, want the close instant, not the selection", got)
+	}
+}

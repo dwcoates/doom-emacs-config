@@ -128,6 +128,10 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	// editor's jump to the most recent workspace), and it survives a restart
 	// of every client because it is WSM's. Unset when never selected.
 	out.LastSelected = lastSelected(rec)
+	// THE DURABLE TURN-END INSTANT, for ordering only: the editor's jump to
+	// the workspace that most recently finished ranks by it. Unset when no
+	// turn of the workspace has closed.
+	out.LastTurnEnded = lastTurnEnded(rec)
 	for _, child := range rc.tree.children[rec.ID] {
 		out.Children = append(out.Children, r.row(child, rc, rowLog))
 	}
@@ -166,6 +170,16 @@ func lastSelected(rec wsm.Workspace) *frontendv1.RosterRowLastSelected {
 		return nil
 	}
 	return &frontendv1.RosterRowLastSelected{AtMs: rec.LastSelectedAt.UnixMilli()}
+}
+
+// lastTurnEnded resolves the row's durable turn-end instant, or nil for a
+// workspace none of whose turns has closed. Like lastSelected it is never
+// drawn: the when-column shows the running turn, not this.
+func lastTurnEnded(rec wsm.Workspace) *frontendv1.RosterRowLastTurnEnded {
+	if rec.LastTurnEndedAt == nil {
+		return nil
+	}
+	return &frontendv1.RosterRowLastTurnEnded{AtMs: rec.LastTurnEndedAt.UnixMilli()}
 }
 
 // attention reports whether the row draws the attention marker.
