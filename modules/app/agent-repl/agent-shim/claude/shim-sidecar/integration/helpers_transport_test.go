@@ -55,6 +55,23 @@ type ownedRequestBody struct {
 	next http.RoundTripper
 }
 
+// idleCloser is a transport that can drop its pooled connections.
+type idleCloser interface {
+	CloseIdleConnections()
+}
+
+// CloseIdleConnections drops the wrapped transport's pooled connections, so
+// http.Client.CloseIdleConnections reaches them through this wrapper. Every
+// transport this package wraps is an *http.Transport, which has them; one
+// without them is a defect in this package, and fails hard.
+func (t *ownedRequestBody) CloseIdleConnections() {
+	closer, ok := t.next.(idleCloser)
+	if !ok {
+		panic(fmt.Sprintf("ownedRequestBody wraps a %T, which cannot drop its idle connections", t.next))
+	}
+	closer.CloseIdleConnections()
+}
+
 // RoundTrip copies a declared-length body and delegates.
 //
 // A body of UNDECLARED length (`ContentLength < 0`, which is what connect-go
