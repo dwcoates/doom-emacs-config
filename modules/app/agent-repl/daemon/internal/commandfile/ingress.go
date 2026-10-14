@@ -340,7 +340,7 @@ func (i *ingress) apply(ctx context.Context, log dlog.Logger, file string, index
 	case TypeMergePause, TypeMergeResume:
 		return i.applyMergePause(ctx, log, entry)
 	case TypeMergeHoldRollouts, TypeMergeReleaseRollouts:
-		return i.applyRolloutHold(ctx, log, entry)
+		return i.applyDaemonWideSwitch(ctx, log, entry)
 	case TypeRetarget:
 		return i.applyRetarget(ctx, log, entry)
 	case TypeClose:
@@ -569,31 +569,40 @@ func (i *ingress) applyMergePause(ctx context.Context, log dlog.Logger, entry En
 	return nil
 }
 
-// applyRolloutHold maps a merge_hold_rollouts or merge_release_rollouts entry
-// onto the orchestrator's HoldRollouts or ReleaseRollouts, the entry points
-// UpdateMergeQueue's hold_rollouts and release_rollouts arms call. The hold
-// is daemon-wide, so the entry's workspace only names who asked. A refusal
-// (rollouts_already_held, rollouts_not_held) is the rpc's refusal, and
-// quarantines the file.
-func (i *ingress) applyRolloutHold(ctx context.Context, log dlog.Logger, entry Entry) error {
+// daemonWideSwitch is one daemon-wide merge-queue switch entry type: the
+// orchestrator verb its UpdateMergeQueue arm calls, the outcome the requesting
+// agent reads back, and the record that says so.
+type daemonWideSwitch struct {
+	apply   func(merge.Orchestrator, context.Context) error
+	outcome string
+	message string
+}
+
+// daemonWideSwitches maps each daemon-wide switch entry type onto its switch.
+var daemonWideSwitches = map[string]daemonWideSwitch{
+	TypeMergeHoldRollouts: {apply: merge.Orchestrator.HoldRollouts, outcome: "held",
+		message: "held the merge queue's rollouts: merges still land, but a landing no longer redeploys"},
+	TypeMergeReleaseRollouts: {apply: merge.Orchestrator.ReleaseRollouts, outcome: "released",
+		message: "released the merge queue's rollouts: the next landing redeploys"},
+}
+
+// applyDaemonWideSwitch maps a daemon-wide switch entry onto its orchestrator
+// verb, the entry point its UpdateMergeQueue arm calls. The switch is
+// daemon-wide, so the entry's workspace only names who asked. A refusal (the
+// flip changes nothing) is the rpc's refusal, and quarantines the file.
+func (i *ingress) applyDaemonWideSwitch(ctx context.Context, log dlog.Logger, entry Entry) error {
+	sw, ok := daemonWideSwitches[entry.Type]
+	if !ok {
+		panic(fmt.Sprintf("commandfile: %s is dispatched as a daemon-wide switch but names none", entry.Type))
+	}
 	requester, err := i.target(ctx, entry)
 	if err != nil {
 		return err
 	}
-	outcome := dlog.Context{"type": entry.Type, "requester": string(requester)}
-	if entry.Type == TypeMergeHoldRollouts {
-		if err := i.deps.Merge.HoldRollouts(ctx); err != nil {
-			return err
-		}
-		outcome["outcome"] = "held"
-		log.Info(opMergeQueue, "held the merge queue's rollouts: merges still land, but a landing no longer redeploys", outcome)
-		return nil
-	}
-	if err := i.deps.Merge.ReleaseRollouts(ctx); err != nil {
+	if err := sw.apply(i.deps.Merge, ctx); err != nil {
 		return err
 	}
-	outcome["outcome"] = "released"
-	log.Info(opMergeQueue, "released the merge queue's rollouts: the next landing redeploys", outcome)
+	log.Info(opMergeQueue, sw.message, dlog.Context{"type": entry.Type, "requester": string(requester), "outcome": sw.outcome})
 	return nil
 }
 

@@ -1586,3 +1586,43 @@ func TestApplyFileQuarantinesAMergeTheQueueRefusesForItsVersion(t *testing.T) {
 		t.Fatalf("ApplyFile = %v, want the file quarantined naming %s", err, merge.ArmVersionIncrementRequired)
 	}
 }
+
+// TestEveryDaemonWideSwitchTypeAppliesThroughItsTableEntry pins that every
+// entry type daemonWideSwitches names is dispatched to applyDaemonWideSwitch
+// and answers its table entry's outcome, so a type routed elsewhere fails.
+func TestEveryDaemonWideSwitchTypeAppliesThroughItsTableEntry(t *testing.T) {
+	for typ, sw := range daemonWideSwitches {
+		t.Run(typ, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", "/tree/w1")
+			path := f.write(t, "workspace_commands_switch.json", `[{"type":"`+typ+`","project_dir":"/tree/w1"}]`)
+
+			// Act.
+			err := f.ingress.ApplyFile(context.Background(), path)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("ApplyFile: %v", err)
+			}
+			record := f.record(t, opMergeQueue, "info")
+			if record.Context["outcome"] != sw.outcome || record.Context["type"] != typ || record.Message != sw.message {
+				t.Fatalf("record %v %q, want outcome=%s type=%s and the table's message", record.Context, record.Message, sw.outcome, typ)
+			}
+		})
+	}
+}
+
+func TestApplyDaemonWideSwitchPanicsOnATypeWithNoSwitch(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	defer func() {
+		// Assert.
+		if recover() == nil {
+			t.Fatal("a type with no switch was applied instead of failing hard")
+		}
+	}()
+
+	// Act.
+	_ = f.ingress.(*ingress).applyDaemonWideSwitch(context.Background(), dlog.NewTestLogger(), Entry{Type: TypeMergePause})
+}
