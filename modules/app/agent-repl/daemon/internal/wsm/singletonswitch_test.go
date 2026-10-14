@@ -23,6 +23,14 @@ var everySingletonSwitch = []struct {
 			return hold.Held, hold.Since, err
 		},
 	},
+	{
+		name: "the racing switch", sw: racingDisabledSwitch,
+		set: func(s *store, on bool, at time.Time) error { return s.SetMergeRacingDisabled(context.Background(), on, at) },
+		get: func(s *store) (bool, time.Time, error) {
+			racing, err := s.MergeRacing(context.Background())
+			return racing.Disabled, racing.Since, err
+		},
+	},
 }
 
 func TestASingletonSwitchIsOffOnAFreshFile(t *testing.T) {
