@@ -39,7 +39,48 @@ message MergeWorkspaceRequest {
     MergeWorkspaceOneShot one_shot = 2;
     MergeWorkspaceAsync async = 3;
   }
+  // How this merge moves agent-repl's version, and the changelog line it
+  // lands with. A merge that lands on the default branch of the daemon's own
+  // repository (agent-repl's master) and was asked for by an AGENT -- the
+  // merge queue's command-file path the merge-queue skill uses -- must carry
+  // it, and is refused as `version_increment_required` without it; a merge
+  // the user asks for over this rpc may carry it, and lands untagged without
+  // it. A request anywhere else WITH it -- another repository, a child
+  // workspace merging into its parent, or a one-shot whose branch already
+  // merged upstream -- is refused as `version_increment_unexpected`. The
+  // increment is applied when the merge LANDS, not when it is requested: the
+  // queue reads the highest `MAJOR.MINOR.PATCH` tag reachable from the
+  // target's tip as it was before the landing, so merges reordered in the
+  // queue still produce consecutive versions.
+  optional MergeWorkspaceVersionIncrement version_increment = 4;
 }
+
+// One merge's move of agent-repl's version. The queue creates the version's
+// annotated tag on the merge commit as part of the landing step itself, right
+// after the target moves to it; a restart that finds the target already on
+// the merge commit finishes that step, tag included, so a landed merge never
+// stays without the tag it asked for. The tag is bare `MAJOR.MINOR.PATCH`,
+// with no `v` prefix. A MAJOR increment is not offered: the major version
+// moves only by a human tagging master by hand, as a judgment of the
+// product's maturity rather than a marker of breaking change. A breaking
+// change landed through the queue is a minor increment.
+message MergeWorkspaceVersionIncrement {
+  // Which part of the version moves. REQUIRED: unset is refused as invalid.
+  oneof increment {
+    MergeWorkspaceVersionIncrementMinor minor = 1;
+    MergeWorkspaceVersionIncrementPatch patch = 2;
+  }
+  // One line for the changelog, in the voice of a release note ("Merges
+  // record a version tag"). It becomes the annotation message of the
+  // version's tag, which is where the changelog is read from. REQUIRED:
+  // blank, or containing a newline, is refused as invalid.
+  string changelog_line = 3;
+}
+// A new capability or a changed behavior, breaking or not: MINOR goes up by
+// one and PATCH resets to zero.
+message MergeWorkspaceVersionIncrementMinor {}
+// A fix or internal change with no new capability: PATCH goes up by one.
+message MergeWorkspaceVersionIncrementPatch {}
 
 // SYNC, IN PLACE: the requester's own branch, rebased, gated and landed in
 // its own worktree by its own session, its feed held and the bubble pinned
@@ -171,6 +212,14 @@ message MergeWorkspaceError {
     // worktree. Nothing was recorded; the caller names a branch the requester
     // is not working on.
     MergeWorkspaceBranchCheckedOutInRequester branch_checked_out_in_requester = 12;
+    // The merge lands on agent-repl's master, was asked for by an agent, and
+    // carries no version increment. Nothing was recorded; the caller
+    // re-sends with one.
+    MergeWorkspaceVersionIncrementRequired version_increment_required = 13;
+    // The merge carries a version increment but does not land on
+    // agent-repl's master. Nothing was recorded; the caller re-sends
+    // without one.
+    MergeWorkspaceVersionIncrementUnexpected version_increment_unexpected = 14;
   }
 }
 message MergeWorkspaceUnknownWorkspace {}
@@ -197,3 +246,24 @@ message MergeWorkspaceNameTaken {
   // The branch the name resolves to ("agent-1a2b/reconnect-fix").
   string branch = 1;
 }
+// The increment a merge onto agent-repl's master must carry is missing.
+message MergeWorkspaceVersionIncrementRequired {}
+// Why a supplied increment does not belong on this merge. Exactly one is set.
+message MergeWorkspaceVersionIncrementUnexpected {
+  oneof reason {
+    // The merge's target is another repository than the daemon's own.
+    MergeWorkspaceVersionIncrementUnexpectedForeignRepository foreign_repository = 1;
+    // The merge's target is a parent workspace's checkout, not the default
+    // branch.
+    MergeWorkspaceVersionIncrementUnexpectedNotDefaultBranch not_default_branch = 2;
+    // The one-shot's branch already merged upstream, so the queue lands
+    // nothing and tags nothing.
+    MergeWorkspaceVersionIncrementUnexpectedMergedUpstream merged_upstream = 3;
+  }
+}
+// The target repository is not agent-repl's.
+message MergeWorkspaceVersionIncrementUnexpectedForeignRepository {}
+// The target is a parent workspace's checkout.
+message MergeWorkspaceVersionIncrementUnexpectedNotDefaultBranch {}
+// Nothing lands, so nothing is versioned.
+message MergeWorkspaceVersionIncrementUnexpectedMergedUpstream {}

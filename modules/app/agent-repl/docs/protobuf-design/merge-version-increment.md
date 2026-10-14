@@ -49,3 +49,49 @@ and the queue creates the tag in the same step that lands the merge.
   the annotation message of the tag it creates, so there is no changelog file
   for a landing to edit (or conflict over). A `CHANGELOG.md` is generated
   from the annotations when one is wanted.
+
+### The request's increment and its two refusals (2026-10-13)
+- **What:** `agentrepl.v1.MergeWorkspaceRequest.version_increment`
+  (`MergeWorkspaceVersionIncrement`: a minor-or-patch oneof plus
+  `changelog_line`), and the error arms `version_increment_required` and
+  `version_increment_unexpected` (the latter's reason: foreign repository, a
+  target that is not the default branch, or a one-shot already merged
+  upstream). The owner's sketch named the message `VersionIncrement` with
+  arms `SemverMinor` and `SemverPatch`; the landed names carry the
+  endpoint's `MergeWorkspace` prefix, as every message in that file does.
+- **Why:** the owner wants the version always moved by the merge queue, with
+  a changelog line, and never by a forgotten step.
+- **Required only for an agent's ask (owner, 2026-10-13: "don't worry about
+  human merges ... version only increments on merge queue landings"):** a
+  merge onto agent-repl's master that the AGENT path asked for (the
+  command-file ingress the merge-queue skill writes, `merge.RequestedByAgent`)
+  is refused without an increment. A merge the user asks for over the rpc
+  (Emacs, the webapp) may carry one and otherwise lands untagged. The
+  "unexpected" refusal applies to both paths.
+- **Agent's ask travels as a command-file entry, not this rpc:** the
+  command-file `Entry` (daemon/internal/commandfile/entry.go) carries the same
+  two facts in JSON; the ingress maps it onto the same `merge.Request` the rpc
+  builds, so both paths share one validation site in `merge.Enqueue`.
+- **Consequences:**
+  - The increment is persisted with the queue row (`merge_queue`, layout 46)
+    and carried across the async hand-off to the merge workspace's own row,
+    because the version is computed when the merge LANDS.
+  - The tag is created right after the fast-forward, inside the committing
+    step; a restart that finds the target on the recorded merge commit
+    re-enters the "landed" path, which creates the tag if it is missing.
+    A tag already on the merge commit is the step having finished before the
+    restart. A tag of the computed name on any OTHER commit is a fault: the
+    landing stands (the target already moved), the fault is logged at ERROR,
+    and the bubble draws no version.
+  - The landed version rides `merge.outcome` and its persisted `outcomeDoc`,
+    so a restart between the landing and the bubble's terminal still draws
+    it.
+
+### The bubble head's version (2026-10-13)
+- **What:** `frontend.v1.FeedMergeHead.version` (`FeedMergeVersion`: leading
+  text, the incremented number, optional trailing text).
+- **Why (owner):** once a merge into agent-repl's master lands and its bubble
+  folds, the visible head shows the new version with the incremented number
+  colored green.
+- **Consequence:** the daemon splits the version; the webapp draws the three
+  runs verbatim and colors only the incremented one, deriving nothing.
