@@ -84,6 +84,21 @@
  * anchor, settled rewind or cleared anchor empties it, so it never holds more
  * than what lies between one anchor and now.
  *
+ * A REWIND NEVER MEETS LIVE DETACHED WORK (owner ruling, 2026-10-14). A rewind
+ * replaces the vendor's query, which restarts the vendor process, and every
+ * background shell, background agent and other detached item that process
+ * owns dies with it (2026-10-14: a watcher shell ended at 10:12:50.734, one
+ * millisecond after a real prompt's rewind). So the cadence sends NO beat while
+ * any detached work is live ({@link KeepaliveCadence}). Detached work starts
+ * only inside a real turn, and a real turn performs its rewind BEFORE it starts
+ * anything, so no keep-alive turn can stand while detached work is live and no
+ * rewind can meet it: the loss is impossible, not merely unlikely. A rewind
+ * that is about to run with detached work live is therefore a violated
+ * invariant, logged at ERROR with the live items before it proceeds
+ * (engine/session.ts, `collapseToAnchor`). The price the owner accepted: a
+ * background task running past the cache's lifetime may let the cache lapse,
+ * which costs one cold read and never loses work.
+ *
  * AND THE ANCHOR DOES NOT CROSS A BOUNDARY. A uuid from before a compaction, a
  * conversation reset, or a fresh query binding may no longer be resumable, so
  * every such event {@link KeepaliveRewind.clearAnchor}s it and the next real
@@ -843,6 +858,16 @@ export interface CacheAnchor {
  * nothing is known to be cached, so the lapse is the anchor itself. Running it
  * again schedules from the anchor exactly as a start does.
  *
+ * SPARED while detached work is live (owner ruling, 2026-10-14): a beat owes
+ * the yield obligation's rewind, the rewind replaces the vendor's query, and
+ * that kills every background shell and agent the old process ran. So while
+ * the session's live set holds ANY item (read through `detachedWork`, never
+ * copied, so the cadence cannot hold a stale view of it) no beat is
+ * scheduled, and a beat that comes due anyway is skipped. When the last item
+ * ends ({@link detachedWorkChanged}), the cadence schedules from the last
+ * request exactly as it does when a turn ends. A task outliving the cache
+ * costs one cold read, never lost work.
+ *
  * STARTED BEFORE `StartSession` RETURNS SUCCESS, so a session that is never
  * prompted still keeps its cache warm. PAUSED while a turn is in flight,
  * because a keep-alive submitted into an open turn would be a second submitter
@@ -861,6 +886,8 @@ export class KeepaliveCadence {
     private readonly beat: () => void,
     /** States the projected lapse while held: when the cache lapses, and the context it held. */
     private readonly project: (lapsesAtMs: number, contextTokens: number) => void,
+    /** The detached work live in the session right now: while any is, no beat goes out. */
+    private readonly detachedWork: () => readonly DetachedWorkItem[],
     private readonly nowMs: () => number,
     private readonly intervalMs: number = KEEPALIVE_INTERVAL_MS,
     private readonly scheduler: KeepaliveScheduler = REAL_SCHEDULER,
@@ -895,6 +922,14 @@ export class KeepaliveCadence {
   resume(): void {
     this.paused = false;
     this.arm("the session is idle again");
+  }
+
+  /**
+   * The session's live detached work changed between none and some: spare it
+   * while it runs, and beat again, from the last request, once it is gone.
+   */
+  detachedWorkChanged(): void {
+    this.arm(this.detachedWork().length === 0 ? "the last detached-work item ended" : "detached work is live");
   }
 
   /**
@@ -940,6 +975,7 @@ export class KeepaliveCadence {
       return;
     }
     if (this.paused) return;
+    if (this.spares(reason)) return;
     if (!this.keepable(anchor, reason)) return;
     const dueAtMs = anchor.atMs + this.intervalMs;
     this.schedule(dueAtMs, Math.max(0, dueAtMs - this.nowMs()), reason);
@@ -953,6 +989,24 @@ export class KeepaliveCadence {
       "projected the held cache's lapse",
     );
     this.project(lapsesAtMs, anchor.contextTokens);
+  }
+
+  /**
+   * Whether detached work is live, so no beat may go out: its rewind would
+   * kill that work. INFO, once per change, naming the items.
+   */
+  private spares(reason: string): boolean {
+    const work = this.detachedWork();
+    if (work.length === 0) return false;
+    const statement = `spared:${work.map((item) => item.taskId).join(" ")}`;
+    if (this.stated !== statement) {
+      this.stated = statement;
+      LOGGER.info(
+        { ...anchorContext(this.anchor), detached_work: work.map(detachedWorkContext), reason },
+        "no keep-alive is scheduled: detached work is live, and the rewind a keep-alive owes would kill it",
+      );
+    }
+    return true;
   }
 
   /** Whether a beat can still keep the anchored cache warm; INFO when it cannot. */
@@ -1002,6 +1056,9 @@ export class KeepaliveCadence {
       LOGGER.logVerbose({ outcome: "skipped_turn_in_flight" }, "keep-alive beat skipped: a turn is in flight");
       return;
     }
+    // DETACHED WORK IS RE-READ AT THE BEAT, so a beat can never go out over it
+    // even if the change that should have disarmed this timer was never told.
+    if (this.spares("the beat came due")) return;
     // THE CACHE IS RE-JUDGED AT THE BEAT: a timer that fires late (a sleeping
     // host) must not buy a cold read the schedule never meant to.
     if (!this.keepable(anchor, "the beat came due")) return;
@@ -1014,6 +1071,26 @@ export class KeepaliveCadence {
       this.schedule(dueAtMs, this.intervalMs, "the beat went out; the next falls one interval on unless its answer re-anchors");
     }
   }
+}
+
+/** One live detached-work item, as the cadence and the rewind's invariant name it. */
+export interface DetachedWorkItem {
+  readonly taskId: string;
+  readonly toolUseId?: string;
+  readonly taskType?: string;
+  readonly description: string;
+  readonly turnId?: string;
+}
+
+/** A live detached-work item as the log states it. */
+export function detachedWorkContext(item: DetachedWorkItem): Record<string, unknown> {
+  return {
+    task_id: item.taskId,
+    tool_use_id: item.toolUseId ?? "",
+    task_type: item.taskType ?? "",
+    description: item.description,
+    turn_id: item.turnId ?? "",
+  };
 }
 
 /** The anchor as the log states it. */
