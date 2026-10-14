@@ -253,7 +253,7 @@ func (o *orchestrator) recoverAdmitted(ctx context.Context, repo wsm.RepoKey, en
 		why := fmt.Sprintf("the workspace's merge geometry is gone: %v", jobErr)
 		log.Error(op, "failing a merge a restart left unfinished", dlog.Context{
 			"workspace": string(ws), "repo": string(repo), "reason": why})
-		if err := o.deps.DB.RemoveMergeQueueEntry(ctx, repo, ws, "restart_failed"); err != nil {
+		if err := o.deps.DB.RemoveMergeQueueEntry(ctx, repo, ws, causeRestartFailed); err != nil {
 			return err
 		}
 		o.mu.Lock()
@@ -287,7 +287,7 @@ func (o *orchestrator) recoverAdmitted(ctx context.Context, repo wsm.RepoKey, en
 	o.mu.Unlock()
 	// The entry goes back in line, with the source it was asked with, so the
 	// ordinary admission path runs it again under a lease of its own.
-	if err := o.deps.DB.RemoveMergeQueueEntry(ctx, repo, ws, "restart_resume"); err != nil {
+	if err := o.deps.DB.RemoveMergeQueueEntry(ctx, repo, ws, causeRestartResume); err != nil {
 		return err
 	}
 	if err := o.deps.DB.RequestMerge(ctx, repo, ws, entry.Source, o.deps.Now()); err != nil {

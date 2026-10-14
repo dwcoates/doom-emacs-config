@@ -176,6 +176,30 @@ const (
 	CauseDaemonShutdown AbandonCause = "daemon_shutdown"
 )
 
+// The causes a queue entry leaves its queue for that are NOT abandonments:
+// the durable drop reason RemoveMergeQueueEntry records for a merge that ran
+// to its end, a merge the boot recovery failed or put back in line, and an
+// async merge that could not be handed to its merge workspace or prepared
+// there. Each is spelled once here, so a reader of the cause (the reports of
+// a queue's changes) cannot disagree with the writer.
+const (
+	// causeMerged is a merge that landed.
+	causeMerged = "merged"
+	// causeFailed is a merge that ran and gave up.
+	causeFailed = "failed"
+	// causeRestartFailed is a merge a restart left unfinished that could not
+	// run again.
+	causeRestartFailed = "restart_failed"
+	// causeRestartResume is a merge a restart left unfinished, taken out of
+	// line only to be put straight back in it, at the back, to run again.
+	causeRestartResume = "restart_resume"
+	// causePickFailed is an async merge whose preparing pick failed.
+	causePickFailed = "pick_failed"
+	// causeDetachedForkFailed is an async request that could not be handed
+	// to a merge workspace.
+	causeDetachedForkFailed = "detached_fork_failed"
+)
+
 // abandonSummaries is the resolved sentence each cause draws as the bubble's
 // collapsed line, exactly as `FeedMergeFailed.summary` is drawn.
 var abandonSummaries = map[AbandonCause]string{

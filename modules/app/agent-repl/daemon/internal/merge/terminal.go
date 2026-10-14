@@ -878,9 +878,9 @@ func terminalCause(out outcome) string {
 	case out.abandoned != "":
 		return string(out.abandoned)
 	case out.failed != "":
-		return "failed"
+		return causeFailed
 	}
-	return "merged"
+	return causeMerged
 }
 
 // resubmitDisplaced puts back the user turn the merge displaced, EXACTLY ONCE.
