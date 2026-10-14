@@ -209,10 +209,17 @@ func TestMcpCatalogNarrowedToHealthyKeepsTheOmittedRows(t *testing.T) {
 // resetting in an hour).
 //
 // THE EVENT FEEDS THE ENDURING USAGE LINE (owner ruling, 2026-10-01): the
-// SESSION allowance carries the event's `allowed_warning` verdict and the
-// daemon's percent→fraction and milliseconds→seconds conversions (footer
-// resolver.go observeRateLimitStatus), and no salient line stands — the
-// awaited view is the unpinned tier, which a salient line would replace.
+// SESSION allowance carries the event's `allowed_warning` verdict, and no
+// salient line stands — the awaited view is the unpinned tier, which a
+// salient line would replace.
+//
+// ON A SAMPLED WINDOW THE EVENT SUPPLIES THE VERDICT AND THE SAMPLE THE
+// FIGURE (footer resolver.go observeRateLimitStatus): an event carries no
+// instant, so its utilization never overwrites the newest sample's. The
+// figure the line draws is therefore the account-usage sample that follows
+// the event, which the fake reports at the event's own figure (one account,
+// one figure per window: shim fake/catalogs.ts noteAnnouncedWindow), so the
+// awaited view is the one carrying BOTH (`sfAwaitSampledAllowance`).
 // ===========================================================================
 
 func TestRateLimitFiveHourWindowFeedsTheSessionAllowance(t *testing.T) {
@@ -228,9 +235,7 @@ func TestRateLimitFiveHourWindowFeedsTheSessionAllowance(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
 	defer cancel()
-	view := harness.AwaitView(t, ctx, footer.Stream, "the session allowance's warning on the enduring usage line", func(v *frontendv1.FooterView) bool {
-		return footerEnduringUsage(v).GetSession().GetAllowedWarning() != nil
-	})
+	view := sfAwaitSampledAllowance(t, ctx, footer.Stream, "the session allowance", (*frontendv1.FooterActivityEnduringUsage).GetSession, 0.82)
 
 	// Assert
 	sfAssertEventFeedsAllowance(t, view, footerEnduringUsage(view).GetSession(), 0.82)
@@ -240,7 +245,9 @@ func TestRateLimitFiveHourWindowFeedsTheSessionAllowance(t *testing.T) {
 // The seven-day rate-limit window — `!rate-limit-seven-day` (the same
 // scenario factory naming the `seven_day` window at utilization 0.91).
 //
-// The event feeds the WEEKLY allowance. Both hops are asserted — the drawn
+// The event feeds the WEEKLY allowance, its verdict directly and its figure
+// through the sample that follows it, as the five-hour window's does. Both
+// hops are asserted — the drawn
 // allowance and the session-arm record behind it — because the allowance
 // alone would not say the event's own window reached the store.
 // ===========================================================================
@@ -259,9 +266,7 @@ func TestRateLimitSevenDayWindowFeedsTheWeeklyAllowance(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
 	defer cancel()
-	view := harness.AwaitView(t, ctx, footer.Stream, "the weekly allowance's warning on the enduring usage line", func(v *frontendv1.FooterView) bool {
-		return footerEnduringUsage(v).GetWeekly().GetAllowedWarning() != nil
-	})
+	view := sfAwaitSampledAllowance(t, ctx, footer.Stream, "the weekly allowance", (*frontendv1.FooterActivityEnduringUsage).GetWeekly, 0.91)
 
 	// Assert
 	sfAssertEventFeedsAllowance(t, view, footerEnduringUsage(view).GetWeekly(), 0.91)
@@ -298,6 +303,22 @@ func TestRateLimitOverageWindowFeedsTheOverageAllowance(t *testing.T) {
 		return footerEnduringUsage(v).GetOverage().GetAllowedWarning() != nil
 	})
 	sfAssertEventFeedsAllowance(t, view, footerEnduringUsage(view).GetOverage(), 0.79)
+}
+
+// sfAwaitSampledAllowance awaits the footer view whose enduring usage line
+// draws the SAMPLED allowance PICK with a rate-limit event's `allowed_warning`
+// verdict AND the account's figure WANT, within half a point. On a sampled
+// window the two arrive on different facts — the verdict on the event, the
+// figure on the sample after it — so the view carrying only the verdict is
+// not yet the event's whole effect. Awaiting on the verdict alone raced the
+// sample: the first such view still drew the figure sampled BEFORE the event.
+func sfAwaitSampledAllowance(t *testing.T, ctx context.Context, footer *harness.Stream[*frontendv1.FooterView], what string, pick func(*frontendv1.FooterActivityEnduringUsage) *frontendv1.FooterAllowance, want float64) *frontendv1.FooterView {
+	t.Helper()
+	return harness.AwaitView(t, ctx, footer, what+"'s warning at the account's figure on the enduring usage line", func(v *frontendv1.FooterView) bool {
+		allowance := pick(footerEnduringUsage(v))
+		got := allowance.GetUtilization()
+		return allowance.GetAllowedWarning() != nil && got >= want-0.005 && got <= want+0.005
+	})
 }
 
 // sfAssertEventFeedsAllowance asserts one rate-limit event's figures landed on
