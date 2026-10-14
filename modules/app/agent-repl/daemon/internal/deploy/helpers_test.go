@@ -370,6 +370,46 @@ type harness struct {
 	migrationAsked []int
 	progress       *fakeProgress
 	faults         *fakeFaults
+	reports        *fakeReports
+}
+
+// fakeReports records every cover and payment of the owed landing reports, in
+// order, with how many builds had started at each.
+type fakeReports struct {
+	mu      sync.Mutex
+	builder *fakeBuilder
+	calls   []string
+	// buildsAtCover is how many builds had started when the reports were
+	// covered.
+	buildsAtCover int
+}
+
+func (r *fakeReports) CoverOwed(context.Context) error {
+	r.builder.mu.Lock()
+	builds := r.builder.builds
+	r.builder.mu.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, "cover")
+	r.buildsAtCover = builds
+	return nil
+}
+
+func (r *fakeReports) PayOwed(_ context.Context, coveredOnly bool, deployErr error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	call := fmt.Sprintf("pay covered_only=%v", coveredOnly)
+	if deployErr != nil {
+		call += " failed"
+	}
+	r.calls = append(r.calls, call)
+}
+
+// made answers every call, in order.
+func (r *fakeReports) made() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.calls...)
 }
 
 // fakeFaults is the state client's fault table: every fault ever opened, in
@@ -517,6 +557,7 @@ func newHarness(t *testing.T) *harness {
 		progress:      &fakeProgress{},
 		faults:        newFakeFaults(),
 	}
+	h.reports = &fakeReports{builder: h.builder}
 	// Both services run the FRESH build unless a test says otherwise.
 	h.report(t, buildreport.ServiceStore, 101, hashOf(t, theFresh.store))
 	h.report(t, buildreport.ServiceSidecar, 102, hashOf(t, theFresh.sidecar))
@@ -527,6 +568,7 @@ func newHarness(t *testing.T) *harness {
 		Bundle:      buildid.NewShimBundle(live.ShimMain(), ""),
 		DaemonBuild: hashOf(t, theFresh.daemon),
 		Rollout:     h.rollout,
+		Reports:     h.reports,
 		Workspaces: func(context.Context) ([]ids.WorkspaceID, error) {
 			return []ids.WorkspaceID{"ws-a", "ws-b"}, nil
 		},
