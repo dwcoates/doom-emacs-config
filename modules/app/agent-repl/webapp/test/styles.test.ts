@@ -1545,6 +1545,17 @@ describe("the cost corner", () => {
       ]);
     });
 
+    it.each([
+      ".usage-corner",
+      '.bubble[data-cap-lines="none"] .usage-corner + .bubble-body > .response-prose:first-child > p:first-child::before',
+    ])("sets the one font weight on %s, so a bold prose cannot widen the ghost", (selector) => {
+      // Arrange / Act
+      const declarations = declarationsOf(selector) ?? "";
+
+      // Assert
+      expect([/(?:^|[\s;])font-weight:\s*var\(--usage-font-weight\)\s*;/.test(declarations), cornerTokens().includes("--usage-font-weight: normal;")]).toEqual([true, true]);
+    });
+
     it.each([".usage-stamp", ".usage-ago", ".usage-slider", ".usage-reserve", ".usage-corner::before"])(
       "lets %s inherit the corner's size and leading",
       (selector) => {

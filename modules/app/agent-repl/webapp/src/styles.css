@@ -4884,6 +4884,7 @@ bubble-body.bubble-body { display: block; }
   /* THE ONE SIZE both figures read (owner ruling, 2026-09-15): set here and
      inherited, so the token, the duration and both reserves cannot differ. */
   font-size: var(--usage-font-size);
+  font-weight: var(--usage-font-weight);
   float: right;
   position: relative;
   display: flex;
@@ -4964,6 +4965,10 @@ bubble-body.bubble-body { display: block; }
      its footprint, so the two cannot differ: a quarter smaller than the 0.85em
      it was (owner request, 2026-10-13). */
   --usage-font-size: calc(0.85em * 0.75);
+  /* THE FIGURES' ONE WEIGHT, read by the corner and its ghost alike: the ghost
+     sits inside the prose, which an interim sets bold, and a bold ghost
+     measured wider than the regular corner it stands for. */
+  --usage-font-weight: normal;
 }
 /* THE GHOST (see "THE SIZING GHOST" above): an invisible, zero-height float
    exactly the corner's footprint wide. That footprint is the corner's in-flow
@@ -4987,6 +4992,7 @@ bubble-body.bubble-body { display: block; }
   visibility: hidden;
   white-space: pre;
   font-size: var(--usage-font-size);
+  font-weight: var(--usage-font-weight);
   font-variant-numeric: tabular-nums;
   padding-left: calc(6ch + var(--usage-pair-gap));
   padding-right: calc(var(--usage-corner-gap-x) - var(--bubble-scroll-gap));
