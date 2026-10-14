@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { type Control } from "../../src/control.js";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
@@ -85,6 +85,7 @@ import { selectorOf } from "../stylesheet.js";
 import { codeOf } from "../source-text.js";
 import heldPromptSource from "../../src/held/held-prompt.ts?raw";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
+import { filesUnder } from "../files-under.js";
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
 const NOW = 1_700_000_000_000;
@@ -2136,14 +2137,6 @@ describe("the editing badge", () => {
 });
 
 describe("the retired Release label", () => {
-  /** Every file under DIR whose name ends with SUFFIX, recursively. */
-  function filesUnder(dir: string, suffix: string): string[] {
-    return readdirSync(dir).flatMap((name) => {
-      const path = join(dir, name);
-      if (statSync(path).isDirectory()) return filesUnder(path, suffix);
-      return path.endsWith(suffix) ? [path] : [];
-    });
-  }
 
   /** The files among PATHS holding a string literal that is exactly "Release". */
   function holdingTheLabel(paths: string[]): string[] {
@@ -2154,7 +2147,7 @@ describe("the retired Release label", () => {
 
   it("is drawn by no webapp source", () => {
     // Arrange
-    const sources = filesUnder(join(process.cwd(), "src"), ".ts");
+    const sources = filesUnder(join(process.cwd(), "src"));
     // Act, Assert
     expect(holdingTheLabel(sources)).toEqual([]);
   });

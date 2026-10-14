@@ -6,13 +6,14 @@
  * `rulesOf` or `selectorOf`, so a comment that names a selector can never be
  * credited to the rule after it. `source-text.test.ts` pins that sharing.
  */
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { cascadedValue, inDocument, inRail, rulesOf, selectorOf } from "./stylesheet.js";
 import STYLES_TEST from "./styles.test.ts?raw";
 import STYLESHEET from "./stylesheet.ts?raw";
+import { filesUnder } from "./files-under.js";
 
 describe("rulesOf", () => {
   it.each([
@@ -165,15 +166,9 @@ describe("inRail", () => {
     const here = path.dirname(fileURLToPath(import.meta.url));
     const shape = 'rail.id = "ws-sidebar"';
     const owners = new Set([path.join(here, "stylesheet.ts"), fileURLToPath(import.meta.url)]);
-    const files = (dir: string): string[] =>
-      readdirSync(dir).flatMap((name) => {
-        const full = path.join(dir, name);
-        if (statSync(full).isDirectory()) return files(full);
-        return full.endsWith(".ts") ? [full] : [];
-      });
 
     // Act
-    const handRolled = files(here).filter((file) => !owners.has(file) && readFileSync(file, "utf8").includes(shape));
+    const handRolled = filesUnder(here).filter((file) => !owners.has(file) && readFileSync(file, "utf8").includes(shape));
 
     // Assert
     expect(handRolled.map((file) => path.relative(here, file))).toEqual([]);

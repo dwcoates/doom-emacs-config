@@ -1,24 +1,17 @@
 // The one way a page module waits for the next animation frame. See
 // src/frame.ts.
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { nextFrame } from "../src/frame.js";
 import { codeOf } from "./source-text.js";
+import { filesUnder } from "./files-under.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(here, "../src");
 
-/** Every TypeScript module under DIR, recursively. */
-function modules(dir: string): string[] {
-  return readdirSync(dir).flatMap((name) => {
-    const full = path.join(dir, name);
-    if (statSync(full).isDirectory()) return modules(full);
-    return full.endsWith(".ts") ? [full] : [];
-  });
-}
 
 /** Stub the page's frame scheduler; answers the callbacks it was handed. */
 function stubFrames(): FrameRequestCallback[] {
@@ -86,7 +79,7 @@ describe("who waits for a frame", () => {
     const ownView = new Set(["frame.ts", "type-out.ts", path.join("bubble", "body.ts")]);
 
     // Act
-    const rolled = modules(SRC)
+    const rolled = filesUnder(SRC)
       .filter((file) => !ownView.has(path.relative(SRC, file)))
       .filter((file) => /requestAnimationFrame/.test(codeOf(readFileSync(file, "utf8"))))
       .map((file) => path.relative(SRC, file));

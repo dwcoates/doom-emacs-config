@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 /** The one control, and the proof nothing in src builds a `<button>` itself. */
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { CONTROL_SELECTOR, armButtonRole, createControl, isControl, labelledControl, setControlsDisabled } from "../src/control.js";
 import { captureLogRecords, forwardedRecord } from "./log-capture.js";
 import { codeOf, withoutBlockComments } from "./source-text.js";
+import { filesUnder } from "./files-under.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(here, "../src");
@@ -15,14 +16,6 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-/** Every source file under DIR with one of EXTENSIONS, recursively. */
-function sources(dir: string, extensions: readonly string[]): string[] {
-  return readdirSync(dir).flatMap((name) => {
-    const full = path.join(dir, name);
-    if (statSync(full).isDirectory()) return sources(full, extensions);
-    return extensions.some((ext) => full.endsWith(ext)) ? [full] : [];
-  });
-}
 
 /** A mounted control, counting the clicks that reach its own handler. */
 function mounted(): { control: ReturnType<typeof createControl>; clicks: () => number } {
@@ -281,7 +274,7 @@ describe("the one control", () => {
 
   it("is the only way src builds a clickable control: no module creates a <button>", () => {
     // Arrange
-    const files = sources(SRC, [".ts", ".html"]).concat([path.join(here, "../index.html")]);
+    const files = filesUnder(SRC, [".ts", ".html"]).concat([path.join(here, "../index.html")]);
     // Act
     const handRolled = files
       .filter((file) => {
@@ -295,7 +288,7 @@ describe("the one control", () => {
 
   it("is the only way src gives an element the button role", () => {
     // Arrange
-    const files = sources(SRC, [".ts"]).filter((file) => !file.endsWith(`${path.sep}control.ts`));
+    const files = filesUnder(SRC, [".ts"]).filter((file) => !file.endsWith(`${path.sep}control.ts`));
     // Act
     const handRolled = files
       .filter((file) => /setAttribute\(\s*["'`]role["'`]\s*,\s*["'`]button["'`]\s*\)/.test(codeOf(readFileSync(file, "utf8"))))

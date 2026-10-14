@@ -1,8 +1,9 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createDrawnStatusLog } from "../src/drawn-status.js";
 import { captureLogRecords, type LogCapture } from "./log-capture.js";
+import { filesUnder } from "./files-under.js";
 
 const OPERATION = "test.drawn-status";
 
@@ -100,15 +101,7 @@ describe("the drawn-status records' one shape", () => {
   it("is written only through createDrawnStatusLog", () => {
     // Arrange: every source file that names a drawn-status operation.
     const root = join(__dirname, "..", "src");
-    const files: string[] = [];
-    const walk = (dir: string): void => {
-      for (const entry of readdirSync(dir, { withFileTypes: true })) {
-        const path = join(dir, entry.name);
-        if (entry.isDirectory()) walk(path);
-        else if (entry.name.endsWith(".ts")) files.push(path);
-      }
-    };
-    walk(root);
+    const files = filesUnder(root);
     // Act
     const handRolled = files.filter((file) => {
       const source = readFileSync(file, "utf8");

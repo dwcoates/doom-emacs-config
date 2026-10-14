@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
+import { join, relative } from "node:path";
 import { type Control } from "../../src/control.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
@@ -34,6 +34,7 @@ import { createTicker } from "../../src/clock.js";
 import { tick } from "../../src/feed/ticking.js";
 import type { RowRenderers } from "../../src/feed/renderers.js";
 import { orderFor } from "../feed-order.js";
+import { filesUnder } from "../files-under.js";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -648,11 +649,11 @@ describe("the row context", () => {
   it("is declared once, in cards/context.ts, and only re-exported elsewhere", () => {
     // Arrange: every webapp source.
     const root = join(process.cwd(), "src");
-    const sources = (readdirSync(root, { recursive: true }) as string[]).filter((path) => path.endsWith(".ts"));
+    const sources = filesUnder(root);
     // Act
-    const declaring = sources.filter((path) =>
-      /\binterface RowContext\b/.test(readFileSync(join(root, path), "utf8")),
-    );
+    const declaring = sources
+      .filter((path) => /\binterface RowContext\b/.test(readFileSync(path, "utf8")))
+      .map((path) => relative(root, path));
     // Assert
     expect(declaring).toEqual(["feed/cards/context.ts"]);
   });

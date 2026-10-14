@@ -10,7 +10,7 @@
  * has to be asserted rather than the symptom.
  */
 import { fakePageSeen } from "../page-seen-fake.js";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -41,6 +41,7 @@ import {
   standingClientFailure,
 } from "../../src/rpc/link.js";
 import { startPageStreams, type PageStreamsHandle } from "../../src/rpc/page-streams.js";
+import { filesUnder } from "../files-under.js";
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
 
@@ -996,16 +997,6 @@ const STREAMING_RPCS: readonly string[] = Object.entries(AgentRepl.method)
   )
   .map(([name]) => name);
 
-/** Every .ts file under src/, recursively. */
-function sourceFiles(dir: string): string[] {
-  const out: string[] = [];
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const path = join(dir, entry.name);
-    if (entry.isDirectory()) out.push(...sourceFiles(path));
-    else if (entry.name.endsWith(".ts")) out.push(path);
-  }
-  return out;
-}
 
 describe("the page's connection budget", () => {
   it("opens a standing stream from nowhere but the page mux", () => {
@@ -1015,7 +1006,7 @@ describe("the page's connection budget", () => {
 
     // Act.
     const offenders: string[] = [];
-    for (const file of sourceFiles(srcRoot)) {
+    for (const file of filesUnder(srcRoot)) {
       if (file === mux) continue;
       const body = readFileSync(file, "utf8");
       for (const rpc of STREAMING_RPCS) {
