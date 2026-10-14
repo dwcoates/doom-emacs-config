@@ -17,6 +17,8 @@
 //   {"file": "<name>.layer.test.ts", "world": {daemonUrl, workspaceId, workspaceDir, webappBuild}}
 // Each answer is ONE stdout line prefixed RESULT_PREFIX, carrying
 //   {"file", "ok", "tests", "failures": [...]}
+// and every test that finishes on the way prints one PROGRESS_PREFIX line, so
+// the Go side bounds the silence between tests, not an area's whole run.
 // Everything else vitest prints is ordinary output for the requesting area's
 // log. Runs are strictly one at a time: a request is read only after the
 // previous answer is written.
@@ -25,6 +27,7 @@
 // so a binary that exits for any reason -- or dies -- takes this driver with
 // it, and no warm vitest can outlive its run.
 
+import { readdir } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { resolve } from "node:path";
 import { createVitest } from "vitest/node";
@@ -33,12 +36,29 @@ const RESULT_PREFIX = "WEBAPP-LAYER-RESULT ";
 // READY_PREFIX marks the one line the driver prints once its warm-up ran:
 // {"ok", "warmMs", "failures"}. No area is sent before it.
 const READY_PREFIX = "WEBAPP-LAYER-READY ";
+// PROGRESS_PREFIX marks one line per finished test. A loaded host stretches an
+// area's whole run (24 turns in feed-families) without anything hanging, so a
+// bound on the whole run fails areas that are still passing; a bound on the
+// silence between finished tests fails only one that stopped.
+const PROGRESS_PREFIX = "WEBAPP-LAYER-PROGRESS ";
 const LAYER_DIR = resolve("test/webapp-layer");
+
+/** The reporter that prints PROGRESS_PREFIX for every finished test. */
+const progressReporter = {
+  onTaskUpdate(packs) {
+    for (const [, result] of packs) {
+      if (result?.state === "pass" || result?.state === "fail") {
+        process.stdout.write(PROGRESS_PREFIX + result.state + "\n");
+      }
+    }
+  },
+};
 
 const vitest = await createVitest("test", {
   config: "vitest.webapp-layer.config.ts",
   watch: false,
   run: true,
+  reporters: ["default", progressReporter],
 });
 const project = vitest.getCoreWorkspaceProject();
 
@@ -65,6 +85,16 @@ function testsOf(task) {
 const warmStarted = Date.now();
 const warmupPath = resolve(LAYER_DIR, "warmup.layer.test.ts");
 await vitest.start([warmupPath]);
+// EVERY AREA'S OWN FILE IS TRANSFORMED HERE TOO: the shared graph is warm once
+// the warm-up ran, but each area file's own transform otherwise lands in its
+// first test, inside the silence the Go side bounds (roster: 13.0s before its
+// first test finished, the layer alone, 2026-10-14). The layer runs in jsdom,
+// vite-node's "web" mode.
+const areaFiles = (await readdir(LAYER_DIR)).filter((name) => name.endsWith(".layer.test.ts"));
+await Promise.all(areaFiles.map((name) => {
+  const path = resolve(LAYER_DIR, name);
+  return vitest.vitenode.transformRequest(path, path, "web");
+}));
 const warmed = vitest.state.getFiles([warmupPath])[0];
 const warmFailures = warmed === undefined ? ["vitest ran no warm-up file"] : failuresOf(warmed);
 const warmOk = warmed?.result?.state === "pass" && warmFailures.length === 0;
