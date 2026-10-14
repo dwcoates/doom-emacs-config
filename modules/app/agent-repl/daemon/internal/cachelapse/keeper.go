@@ -38,6 +38,7 @@ import (
 	"agent-repld/internal/clock"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
 )
 
@@ -295,6 +296,14 @@ func (k *Keeper) reconcile(ctx context.Context, ws ids.WorkspaceID, why string) 
 	if err := set(ctx); err != nil {
 		if errors.Is(err, ErrNoSession) {
 			log.Debug(opCadence, "the shim holds no session yet; the session's coming up sets its cadence", fields)
+			return
+		}
+		// A SHIM THAT DIED UNDER THE CALL is not this keeper's failure: the
+		// death is recorded once, by daemon.shimclient.exit, and the session
+		// it served is gone with it. The next session's coming up sets the
+		// cadence again.
+		if errors.Is(err, shimclient.ErrShimDied) {
+			log.Info(opCadence, "the shim died under the cadence call; the death is recorded by daemon.shimclient.exit, and the next session's coming up sets its cadence", withCause(fields, err))
 			return
 		}
 		if leaving(ctx, log, opCadence, "setting the shim's keep-alive cadence", err) {

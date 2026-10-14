@@ -287,6 +287,20 @@ The one-shot commission prompt (`SPC TAB o`) saves what you type to its history 
 - The text also stays in the history when you press `C-g`.
 - The history is shared by every workspace, in `~/.claude-emacs/oneshot-commission-history.el`.
 
+## When creating a workspace fails
+
+A workspace that fails to be created is reported in two places.
+
+- Emacs says "workspace creation FAILED:" in the minibuffer, with the reason.
+- The repository's main-worktree workspace is asked to find out why.
+  - It is opened first if it was closed.
+  - The request names what the create asked for and the failure, and asks the agent to analyze it without changing anything until you answer.
+  - It waits behind a turn the main worktree is already running, and never interrupts it.
+- This holds however the workspace was asked for: an Emacs key, an agent's `/create-or-update-workspace`, or a support workspace.
+- Nothing is reported for a create handed to a new daemon during a restart, or for the hidden workspace an async merge runs in.
+  - The merge queue reports that one's failure back to the workspace that asked for the merge.
+- The request's wording is `prompts/workspace-create-failed.md`.
+
 ## Changing the reasoning effort
 
 The top bar's effort selector sits between the model selector and the permission-mode picker.
