@@ -725,12 +725,14 @@ export function mergeWorkspaceRefusal(cause: CauseOf<MergeWorkspaceError>): stri
       return "this workspace is already in the merge queue";
     case "alreadyMerging":
       return "this workspace is already merging";
-    case "unknownSourceWorkspace":
-      return "the workspace to merge is not open in this repository";
+    case "unknownOneShotWorkspace":
+      return "the workspace to close once the merge lands is not open in this repository";
     case "unknownBranch":
       return "that branch does not exist in this repository";
     case "nameTaken":
       return `the merge workspace name ${cause.value.branch} is already taken`;
+    case "branchCheckedOutInRequester":
+      return "that branch is checked out in this workspace";
     default:
       return unreachableArm("MergeWorkspaceError.cause", cause.case);
   }
@@ -833,21 +835,15 @@ export function buildNukeWorkspaceRequest(workspace: WorkspaceRef): NukeWorkspac
 /**
  * MergeWorkspace: enqueue; the merge's life thereafter is the feed's.
  *
- * The rail's Merge verb is "merge this workspace": the row's workspace asks to
- * merge ITS OWN branch IN PLACE, and is closed once it lands (`keep_open`
- * false), which is what the verb has always done. The other sources are for
- * callers that name another workspace or a branch; the rail has no such
+ * The rail's Merge verb is "merge this workspace": a ONE-SHOT of the row's
+ * own branch, run in place and closing the workspace once it lands. An async
+ * merge names a branch and is an agent's to ask for; the rail has no such
  * affordance.
  */
 export function buildMergeWorkspaceRequest(workspace: WorkspaceRef): MergeWorkspaceRequest {
   return create(MergeWorkspaceRequestSchema, {
     workspace,
-    source: {
-      source: {
-        case: "ownBranch",
-        value: { run: { case: "inPlace", value: { keepOpen: false } } },
-      },
-    },
+    mode: { case: "oneShot", value: { landing: { case: "ownBranch", value: {} } } },
   });
 }
 

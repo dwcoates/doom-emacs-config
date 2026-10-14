@@ -18923,7 +18923,7 @@ func (*FeedMergeFoldByReader) Descriptor() ([]byte, []int) {
 // (its runs keep counting), and each is drawn live again while it works.
 //
 // The Emacs-repo run is queue | pre-prompt | rebasing | tests | committing |
-// post-prompt, an async pick merge opening with its pick tab; a branch already merged upstream is queue | updating main |
+// post-prompt, an async merge with an instruction opening with its resolving tab; a branch already merged upstream is queue | updating main |
 // post-prompt; every other repo's run is queue | pre-prompt | post-prompt.
 //
 // NOTHING PARKS. A conflict resolution or a fixing loop that gives up FAILS
@@ -18953,7 +18953,7 @@ type FeedMergeTab struct {
 	//	*FeedMergeTab_Committing
 	//	*FeedMergeTab_UpdatingMain
 	//	*FeedMergeTab_PostPrompt
-	//	*FeedMergeTab_Pick
+	//	*FeedMergeTab_Resolving
 	Kind          isFeedMergeTab_Kind `protobuf_oneof:"kind"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -19093,10 +19093,10 @@ func (x *FeedMergeTab) GetPostPrompt() *FeedMergeTabPostPrompt {
 	return nil
 }
 
-func (x *FeedMergeTab) GetPick() *FeedMergeTabPick {
+func (x *FeedMergeTab) GetResolving() *FeedMergeTabResolving {
 	if x != nil {
-		if x, ok := x.Kind.(*FeedMergeTab_Pick); ok {
-			return x.Pick
+		if x, ok := x.Kind.(*FeedMergeTab_Resolving); ok {
+			return x.Resolving
 		}
 	}
 	return nil
@@ -19146,8 +19146,8 @@ type FeedMergeTab_PostPrompt struct {
 	PostPrompt *FeedMergeTabPostPrompt `protobuf:"bytes,8,opt,name=post_prompt,json=postPrompt,proto3,oneof"`
 }
 
-type FeedMergeTab_Pick struct {
-	Pick *FeedMergeTabPick `protobuf:"bytes,12,opt,name=pick,proto3,oneof"`
+type FeedMergeTab_Resolving struct {
+	Resolving *FeedMergeTabResolving `protobuf:"bytes,12,opt,name=resolving,proto3,oneof"`
 }
 
 func (*FeedMergeTab_Queue) isFeedMergeTab_Kind() {}
@@ -19170,7 +19170,7 @@ func (*FeedMergeTab_UpdatingMain) isFeedMergeTab_Kind() {}
 
 func (*FeedMergeTab_PostPrompt) isFeedMergeTab_Kind() {}
 
-func (*FeedMergeTab_Pick) isFeedMergeTab_Kind() {}
+func (*FeedMergeTab_Resolving) isFeedMergeTab_Kind() {}
 
 // The tab's drawn label, resolved by the daemon.
 type FeedMergeTabLabel struct {
@@ -19609,42 +19609,42 @@ func (*FeedMergeTabQueue_Live) isFeedMergeTabQueue_State() {}
 
 func (*FeedMergeTabQueue_Settled) isFeedMergeTabQueue_State() {}
 
-// AGENTIC: an async merge's pick — the first turn of a merge workspace forked
-// to land only some changes of its requester's branch
-// (agentrepl.v1.MergeWorkspaceSourceOwnBranchDetachedPick), its agent
-// cherry-picking those changes onto the target branch and resolving whatever
-// does not apply on its own. Present only on such a merge, as its first tab.
-// Live while the turn runs; settled succeeded when the turn ended with at
-// least one commit ahead of the target and a clean worktree, failed otherwise
-// (which FAILS the merge and reveals the merge workspace). The merge joins
-// the queue once this tab settles succeeded. Content: sub-feed rows parented
-// to this row, mirrored from the merge workspace's feed.
-type FeedMergeTabPick struct {
+// AGENTIC: an async merge's resolving turn -- the first turn of its merge
+// workspace, carrying out the requester's instruction
+// (agentrepl.v1.MergeWorkspaceAsync.instruction) on the merge's branch and
+// resolving whatever does not apply on its own. Present only on a merge that
+// carries an instruction, as its first tab, left of queue. Live while the
+// turn runs; settled succeeded when the turn ended with at least one commit
+// ahead of the target and a clean worktree, failed otherwise (which FAILS the
+// merge and reveals the merge workspace). The merge joins the queue once this
+// tab settles succeeded. Content: sub-feed rows parented to this row,
+// mirrored from the merge workspace's feed.
+type FeedMergeTabResolving struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to State:
 	//
-	//	*FeedMergeTabPick_Live
-	//	*FeedMergeTabPick_Settled
-	//	*FeedMergeTabPick_WaitingOnUser
-	State         isFeedMergeTabPick_State `protobuf_oneof:"state"`
+	//	*FeedMergeTabResolving_Live
+	//	*FeedMergeTabResolving_Settled
+	//	*FeedMergeTabResolving_WaitingOnUser
+	State         isFeedMergeTabResolving_State `protobuf_oneof:"state"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FeedMergeTabPick) Reset() {
-	*x = FeedMergeTabPick{}
+func (x *FeedMergeTabResolving) Reset() {
+	*x = FeedMergeTabResolving{}
 	mi := &file_frontend_v1_feed_proto_msgTypes[310]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FeedMergeTabPick) String() string {
+func (x *FeedMergeTabResolving) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FeedMergeTabPick) ProtoMessage() {}
+func (*FeedMergeTabResolving) ProtoMessage() {}
 
-func (x *FeedMergeTabPick) ProtoReflect() protoreflect.Message {
+func (x *FeedMergeTabResolving) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_feed_proto_msgTypes[310]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -19656,69 +19656,69 @@ func (x *FeedMergeTabPick) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FeedMergeTabPick.ProtoReflect.Descriptor instead.
-func (*FeedMergeTabPick) Descriptor() ([]byte, []int) {
+// Deprecated: Use FeedMergeTabResolving.ProtoReflect.Descriptor instead.
+func (*FeedMergeTabResolving) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{310}
 }
 
-func (x *FeedMergeTabPick) GetState() isFeedMergeTabPick_State {
+func (x *FeedMergeTabResolving) GetState() isFeedMergeTabResolving_State {
 	if x != nil {
 		return x.State
 	}
 	return nil
 }
 
-func (x *FeedMergeTabPick) GetLive() *FeedMergeTabLive {
+func (x *FeedMergeTabResolving) GetLive() *FeedMergeTabLive {
 	if x != nil {
-		if x, ok := x.State.(*FeedMergeTabPick_Live); ok {
+		if x, ok := x.State.(*FeedMergeTabResolving_Live); ok {
 			return x.Live
 		}
 	}
 	return nil
 }
 
-func (x *FeedMergeTabPick) GetSettled() *FeedMergeTabSettled {
+func (x *FeedMergeTabResolving) GetSettled() *FeedMergeTabSettled {
 	if x != nil {
-		if x, ok := x.State.(*FeedMergeTabPick_Settled); ok {
+		if x, ok := x.State.(*FeedMergeTabResolving_Settled); ok {
 			return x.Settled
 		}
 	}
 	return nil
 }
 
-func (x *FeedMergeTabPick) GetWaitingOnUser() *FeedMergeTabWaitingOnUser {
+func (x *FeedMergeTabResolving) GetWaitingOnUser() *FeedMergeTabWaitingOnUser {
 	if x != nil {
-		if x, ok := x.State.(*FeedMergeTabPick_WaitingOnUser); ok {
+		if x, ok := x.State.(*FeedMergeTabResolving_WaitingOnUser); ok {
 			return x.WaitingOnUser
 		}
 	}
 	return nil
 }
 
-type isFeedMergeTabPick_State interface {
-	isFeedMergeTabPick_State()
+type isFeedMergeTabResolving_State interface {
+	isFeedMergeTabResolving_State()
 }
 
-type FeedMergeTabPick_Live struct {
+type FeedMergeTabResolving_Live struct {
 	Live *FeedMergeTabLive `protobuf:"bytes,1,opt,name=live,proto3,oneof"`
 }
 
-type FeedMergeTabPick_Settled struct {
+type FeedMergeTabResolving_Settled struct {
 	Settled *FeedMergeTabSettled `protobuf:"bytes,2,opt,name=settled,proto3,oneof"`
 }
 
-type FeedMergeTabPick_WaitingOnUser struct {
-	// The pick is held on the user: the merge workspace's session has a
-	// permission ask or a question batch open, which also reveals that
+type FeedMergeTabResolving_WaitingOnUser struct {
+	// The resolving turn is held on the user: the merge workspace's session
+	// has a permission ask or a question batch open, which also reveals that
 	// workspace.
 	WaitingOnUser *FeedMergeTabWaitingOnUser `protobuf:"bytes,3,opt,name=waiting_on_user,json=waitingOnUser,proto3,oneof"`
 }
 
-func (*FeedMergeTabPick_Live) isFeedMergeTabPick_State() {}
+func (*FeedMergeTabResolving_Live) isFeedMergeTabResolving_State() {}
 
-func (*FeedMergeTabPick_Settled) isFeedMergeTabPick_State() {}
+func (*FeedMergeTabResolving_Settled) isFeedMergeTabResolving_State() {}
 
-func (*FeedMergeTabPick_WaitingOnUser) isFeedMergeTabPick_State() {}
+func (*FeedMergeTabResolving_WaitingOnUser) isFeedMergeTabResolving_State() {}
 
 // AGENTIC: the configured --before-ws-merge prompt running the
 // workspace's session under the lease. Absent unless configured; its
@@ -23430,7 +23430,7 @@ const file_frontend_v1_feed_proto_rawDesc = "" +
 	"\n" +
 	"decided_by\"\x17\n" +
 	"\x15FeedMergeFoldByDaemon\"\x17\n" +
-	"\x15FeedMergeFoldByReader\"\xe4\x06\n" +
+	"\x15FeedMergeFoldByReader\"\xf3\x06\n" +
 	"\fFeedMergeTab\x124\n" +
 	"\x05label\x18\x01 \x01(\v2\x1e.frontend.v1.FeedMergeTabLabelR\x05label\x126\n" +
 	"\x05queue\x18\x02 \x01(\v2\x1e.frontend.v1.FeedMergeTabQueueH\x00R\x05queue\x12C\n" +
@@ -23447,8 +23447,8 @@ const file_frontend_v1_feed_proto_rawDesc = "" +
 	"committing\x12L\n" +
 	"\rupdating_main\x18\v \x01(\v2%.frontend.v1.FeedMergeTabUpdatingMainH\x00R\fupdatingMain\x12F\n" +
 	"\vpost_prompt\x18\b \x01(\v2#.frontend.v1.FeedMergeTabPostPromptH\x00R\n" +
-	"postPrompt\x123\n" +
-	"\x04pick\x18\f \x01(\v2\x1d.frontend.v1.FeedMergeTabPickH\x00R\x04pickB\x06\n" +
+	"postPrompt\x12B\n" +
+	"\tresolving\x18\f \x01(\v2\".frontend.v1.FeedMergeTabResolvingH\x00R\tresolvingB\x06\n" +
 	"\x04kindJ\x04\b\x04\x10\x05J\x04\b\x05\x10\x06J\x04\b\a\x10\bR\x05mergeR\tconflictsR\x05fixes\"=\n" +
 	"\x11FeedMergeTabLabel\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\x12\x14\n" +
@@ -23470,8 +23470,8 @@ const file_frontend_v1_feed_proto_rawDesc = "" +
 	"\x04live\x18\x01 \x01(\v2\x1d.frontend.v1.FeedMergeTabLiveH\x00R\x04live\x12<\n" +
 	"\asettled\x18\x02 \x01(\v2 .frontend.v1.FeedMergeTabSettledH\x00R\asettled\x121\n" +
 	"\x05queue\x18\x03 \x01(\v2\x1b.frontend.v1.FeedMergeQueueR\x05queueB\a\n" +
-	"\x05state\"\xe0\x01\n" +
-	"\x10FeedMergeTabPick\x123\n" +
+	"\x05state\"\xe5\x01\n" +
+	"\x15FeedMergeTabResolving\x123\n" +
 	"\x04live\x18\x01 \x01(\v2\x1d.frontend.v1.FeedMergeTabLiveH\x00R\x04live\x12<\n" +
 	"\asettled\x18\x02 \x01(\v2 .frontend.v1.FeedMergeTabSettledH\x00R\asettled\x12P\n" +
 	"\x0fwaiting_on_user\x18\x03 \x01(\v2&.frontend.v1.FeedMergeTabWaitingOnUserH\x00R\rwaitingOnUserB\a\n" +
@@ -23940,7 +23940,7 @@ var file_frontend_v1_feed_proto_goTypes = []any{
 	(*FeedMergeTabWaitingOnUser)(nil),            // 307: frontend.v1.FeedMergeTabWaitingOnUser
 	(*FeedMergeTabFailed)(nil),                   // 308: frontend.v1.FeedMergeTabFailed
 	(*FeedMergeTabQueue)(nil),                    // 309: frontend.v1.FeedMergeTabQueue
-	(*FeedMergeTabPick)(nil),                     // 310: frontend.v1.FeedMergeTabPick
+	(*FeedMergeTabResolving)(nil),                // 310: frontend.v1.FeedMergeTabResolving
 	(*FeedMergeTabPrePrompt)(nil),                // 311: frontend.v1.FeedMergeTabPrePrompt
 	(*FeedMergeTabRebasing)(nil),                 // 312: frontend.v1.FeedMergeTabRebasing
 	(*FeedMergeRebaseProgress)(nil),              // 313: frontend.v1.FeedMergeRebaseProgress
@@ -24367,15 +24367,15 @@ var file_frontend_v1_feed_proto_depIdxs = []int32{
 	337, // 365: frontend.v1.FeedMergeTab.committing:type_name -> frontend.v1.FeedMergeTabCommitting
 	339, // 366: frontend.v1.FeedMergeTab.updating_main:type_name -> frontend.v1.FeedMergeTabUpdatingMain
 	343, // 367: frontend.v1.FeedMergeTab.post_prompt:type_name -> frontend.v1.FeedMergeTabPostPrompt
-	310, // 368: frontend.v1.FeedMergeTab.pick:type_name -> frontend.v1.FeedMergeTabPick
+	310, // 368: frontend.v1.FeedMergeTab.resolving:type_name -> frontend.v1.FeedMergeTabResolving
 	306, // 369: frontend.v1.FeedMergeTabSettled.succeeded:type_name -> frontend.v1.FeedMergeTabSucceeded
 	308, // 370: frontend.v1.FeedMergeTabSettled.failed:type_name -> frontend.v1.FeedMergeTabFailed
 	304, // 371: frontend.v1.FeedMergeTabQueue.live:type_name -> frontend.v1.FeedMergeTabLive
 	305, // 372: frontend.v1.FeedMergeTabQueue.settled:type_name -> frontend.v1.FeedMergeTabSettled
 	344, // 373: frontend.v1.FeedMergeTabQueue.queue:type_name -> frontend.v1.FeedMergeQueue
-	304, // 374: frontend.v1.FeedMergeTabPick.live:type_name -> frontend.v1.FeedMergeTabLive
-	305, // 375: frontend.v1.FeedMergeTabPick.settled:type_name -> frontend.v1.FeedMergeTabSettled
-	307, // 376: frontend.v1.FeedMergeTabPick.waiting_on_user:type_name -> frontend.v1.FeedMergeTabWaitingOnUser
+	304, // 374: frontend.v1.FeedMergeTabResolving.live:type_name -> frontend.v1.FeedMergeTabLive
+	305, // 375: frontend.v1.FeedMergeTabResolving.settled:type_name -> frontend.v1.FeedMergeTabSettled
+	307, // 376: frontend.v1.FeedMergeTabResolving.waiting_on_user:type_name -> frontend.v1.FeedMergeTabWaitingOnUser
 	304, // 377: frontend.v1.FeedMergeTabPrePrompt.live:type_name -> frontend.v1.FeedMergeTabLive
 	305, // 378: frontend.v1.FeedMergeTabPrePrompt.settled:type_name -> frontend.v1.FeedMergeTabSettled
 	304, // 379: frontend.v1.FeedMergeTabRebasing.live:type_name -> frontend.v1.FeedMergeTabLive
@@ -24788,7 +24788,7 @@ func file_frontend_v1_feed_proto_init() {
 		(*FeedMergeTab_Committing)(nil),
 		(*FeedMergeTab_UpdatingMain)(nil),
 		(*FeedMergeTab_PostPrompt)(nil),
-		(*FeedMergeTab_Pick)(nil),
+		(*FeedMergeTab_Resolving)(nil),
 	}
 	file_frontend_v1_feed_proto_msgTypes[305].OneofWrappers = []any{
 		(*FeedMergeTabSettled_Succeeded)(nil),
@@ -24799,9 +24799,9 @@ func file_frontend_v1_feed_proto_init() {
 		(*FeedMergeTabQueue_Settled)(nil),
 	}
 	file_frontend_v1_feed_proto_msgTypes[310].OneofWrappers = []any{
-		(*FeedMergeTabPick_Live)(nil),
-		(*FeedMergeTabPick_Settled)(nil),
-		(*FeedMergeTabPick_WaitingOnUser)(nil),
+		(*FeedMergeTabResolving_Live)(nil),
+		(*FeedMergeTabResolving_Settled)(nil),
+		(*FeedMergeTabResolving_WaitingOnUser)(nil),
 	}
 	file_frontend_v1_feed_proto_msgTypes[311].OneofWrappers = []any{
 		(*FeedMergeTabPrePrompt_Live)(nil),

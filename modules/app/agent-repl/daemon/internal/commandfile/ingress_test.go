@@ -62,7 +62,7 @@ func TestApplyFileClaimsByRename(t *testing.T) {
 	// Arrange: the rename IS the claim, so nothing else marks a file as taken.
 	f := newFixture(t)
 	f.workspace("w1", "/tree/w1")
-	path := f.write(t, "workspace_commands_a.json", `[{"type":"merge","workspace":"w1"}]`)
+	path := f.write(t, "workspace_commands_a.json", `[{"type":"merge","workspace":"w1","one_shot":true}]`)
 
 	// Act.
 	if err := f.ingress.ApplyFile(context.Background(), path); err != nil {
@@ -82,7 +82,7 @@ func TestApplyFileLeavesNothingClaimedOnceApplied(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", "/tree/w1")
-	path := f.write(t, "workspace_commands_r.json", `[{"type":"merge","workspace":"w1"}]`)
+	path := f.write(t, "workspace_commands_r.json", `[{"type":"merge","workspace":"w1","one_shot":true}]`)
 
 	// Act.
 	if err := f.ingress.ApplyFile(context.Background(), path); err != nil {
@@ -117,7 +117,7 @@ func TestApplyFileAppliesNothingFromAMalformedFile(t *testing.T) {
 	f := newFixture(t)
 	f.workspace("w1", "/tree/w1")
 	path := f.write(t, "workspace_commands_mixed.json",
-		`[{"type":"merge","workspace":"w1"},{"type":"merge"}]`)
+		`[{"type":"merge","workspace":"w1","one_shot":true},{"type":"merge"}]`)
 
 	// Act.
 	_ = f.ingress.ApplyFile(context.Background(), path)
@@ -135,7 +135,7 @@ func TestApplyFileEnqueuesAMergeAsTheAgentsAsk(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", "/tree/w1")
-	path := f.write(t, "workspace_commands_merge.json", `[{"type":"merge","workspace":"w1"}]`)
+	path := f.write(t, "workspace_commands_merge.json", `[{"type":"merge","workspace":"w1","one_shot":true}]`)
 
 	// Act.
 	if err := f.ingress.ApplyFile(context.Background(), path); err != nil {
@@ -350,7 +350,7 @@ func TestApplyFileMapsMergeOntoTheOrchestrator(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", "/tree/w1")
-	path := f.write(t, "workspace_commands_m.json", `[{"type":"merge","workspace":"w1"}]`)
+	path := f.write(t, "workspace_commands_m.json", `[{"type":"merge","workspace":"w1","one_shot":true}]`)
 
 	// Act.
 	if err := f.ingress.ApplyFile(context.Background(), path); err != nil {
@@ -389,7 +389,7 @@ func TestApplyFileResolvesTheSkillsMergeByItsProjectDir(t *testing.T) {
 	f := newFixture(t)
 	f.workspace("db6c528bba4043b4", "/worktrees/glimmer-intensity-boost")
 	path := f.write(t, "workspace_commands_skill.json",
-		`[{"type":"merge","workspace":"glimmer-intensity-boost","project_dir":"/worktrees/glimmer-intensity-boost"}]`)
+		`[{"type":"merge","workspace":"glimmer-intensity-boost","project_dir":"/worktrees/glimmer-intensity-boost","one_shot":true}]`)
 
 	// Act.
 	if err := f.ingress.ApplyFile(context.Background(), path); err != nil {
@@ -504,7 +504,7 @@ func TestApplyFileAppliesEveryEntryEvenWhenOneFails(t *testing.T) {
 	f.workspace("w1", "/tree/w1")
 	f.merge.err = errors.New("no layout facts")
 	path := f.write(t, "workspace_commands_e.json",
-		`[{"type":"merge","workspace":"w1"},{"type":"close","workspace":"w1"}]`)
+		`[{"type":"merge","workspace":"w1","one_shot":true},{"type":"close","workspace":"w1"}]`)
 
 	// Act.
 	err := f.ingress.ApplyFile(context.Background(), path)
@@ -565,7 +565,7 @@ func TestASweepAppliesTheIntakeOnlyWhileThisDaemonServes(t *testing.T) {
 			f := newFixture(t)
 			f.serves = tt.serves
 			f.workspace("w1", "/tree/w1")
-			path := f.write(t, "workspace_commands_r.json", `[{"type":"merge","workspace":"w1"}]`)
+			path := f.write(t, "workspace_commands_r.json", `[{"type":"merge","workspace":"w1","one_shot":true}]`)
 			ctx, cancel := context.WithCancel(context.Background())
 
 			// Act: the first sweep runs before the loop selects on the ticker.
@@ -654,7 +654,7 @@ func TestRunAppliesAFileAndStops(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", "/tree/w1")
-	f.write(t, "workspace_commands_r.json", `[{"type":"merge","workspace":"w1"}]`)
+	f.write(t, "workspace_commands_r.json", `[{"type":"merge","workspace":"w1","one_shot":true}]`)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Act: the first sweep runs before the loop ever selects on the ticker, so
@@ -676,7 +676,7 @@ func TestRunIgnoresAFileTheGlobDoesNotMatch(t *testing.T) {
 	// claim, then rename into place.
 	f := newFixture(t)
 	f.workspace("w1", "/tree/w1")
-	f.write(t, ".workspace_commands_tmp.json", `[{"type":"merge","workspace":"w1"}]`)
+	f.write(t, ".workspace_commands_tmp.json", `[{"type":"merge","workspace":"w1","one_shot":true}]`)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Act.
@@ -710,7 +710,7 @@ func TestAnEntryRefusedAtApplyTimeQuarantinesTheFile(t *testing.T) {
 	f.workspace("w1", "/tree/w1")
 	f.merge.err = errors.New("no layout facts")
 	path := f.write(t, "workspace_commands_refused.json",
-		`[{"type":"merge","workspace":"w1"}]`)
+		`[{"type":"merge","workspace":"w1","one_shot":true}]`)
 
 	// Act.
 	err := f.ingress.ApplyFile(context.Background(), path)
@@ -752,7 +752,7 @@ func TestApplyFileResolvesATildeProjectDir(t *testing.T) {
 	f := newFixture(t)
 	f.workspace("w1", fixtureHome+"/tree/w1")
 	path := f.write(t, "workspace_commands_tilde_merge.json",
-		`[{"type":"merge","workspace":"w1-name","project_dir":"~/tree/w1"}]`)
+		`[{"type":"merge","workspace":"w1-name","project_dir":"~/tree/w1","one_shot":true}]`)
 
 	// Act.
 	if err := f.ingress.ApplyFile(context.Background(), path); err != nil {
@@ -773,7 +773,7 @@ func TestApplyFileQuarantinesARelativeDirectory(t *testing.T) {
 	f := newFixture(t)
 	f.workspace("w1", "/tree/w1")
 	path := f.write(t, "workspace_commands_relative.json",
-		`[{"type":"merge","project_dir":"/tree/w1"},{"type":"create","name":"x","git_root":".config/doom"}]`)
+		`[{"type":"merge","project_dir":"/tree/w1","one_shot":true},{"type":"create","name":"x","git_root":".config/doom"}]`)
 
 	// Act.
 	err := f.ingress.ApplyFile(context.Background(), path)
@@ -809,20 +809,19 @@ func TestApplyFileMapsEachMergeSourceOntoTheRequest(t *testing.T) {
 		// oneShot is whether the request announces a one-shot merge.
 		oneShot bool
 	}{
-		{name: "own branch", body: `[{"type":"merge","workspace":"w1"}]`, want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}},
-		{name: "own branch async", body: `[{"type":"merge","workspace":"w1","detached":true,"detached_name":"reconnect-fix"}]`,
-			want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, detached: &merge.DetachedRun{Name: "reconnect-fix"}},
-		{name: "own branch async pick", body: `[{"type":"merge","workspace":"w1","detached":true,"detached_name":"reconnect-fix","pick":" the reconnect fix "}]`,
-			want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, detached: &merge.DetachedRun{Name: "reconnect-fix", Pick: "the reconnect fix"}},
-		{name: "own branch async compact after", body: `[{"type":"merge","workspace":"w1","detached":true,"detached_name":"reconnect-fix","compact_after":true}]`,
-			want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, detached: &merge.DetachedRun{Name: "reconnect-fix", CompactAfter: true}},
-		{name: "own branch one-shot", body: `[{"type":"merge","workspace":"w1","one_shot":true}]`, want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, oneShot: true},
-		{name: "own branch kept open", body: `[{"type":"merge","workspace":"w1","keep_open":true}]`, want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, KeepOpen: true}},
-		{name: "a branch", body: `[{"type":"merge","workspace":"w1","branch":"agent-1/fix"}]`, want: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix"}},
-		{name: "another workspace", body: `[{"type":"merge","workspace":"w1","source_dir":"/tree/w2"}]`, want: wsm.MergeSource{Kind: wsm.MergeSourceWorkspace, Workspace: "w2"}},
-		{name: "merged upstream", body: `[{"type":"merge","workspace":"w1","pr_was_merged":true}]`, want: wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}},
-		{name: "own branch to the front", body: `[{"type":"merge","workspace":"w1","front":true}]`, want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, Front: true}},
-		{name: "a branch to the front", body: `[{"type":"merge","workspace":"w1","branch":"agent-1/fix","front":true}]`, want: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix", Front: true}},
+		{name: "a one-shot", body: `[{"type":"merge","workspace":"w1","one_shot":true}]`, want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, oneShot: true},
+		{name: "a one-shot already merged upstream", body: `[{"type":"merge","workspace":"w1","one_shot":true,"pr_was_merged":true}]`, want: wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}, oneShot: true},
+		{name: "a one-shot to the front", body: `[{"type":"merge","workspace":"w1","one_shot":true,"front":true}]`, want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, Front: true}, oneShot: true},
+		{name: "an async merge", body: `[{"type":"merge","workspace":"w1","async_name":"reconnect-fix","branch":" agent-1/fix "}]`,
+			want: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix"}, detached: &merge.DetachedRun{Name: "reconnect-fix"}},
+		{name: "an async merge with an instruction", body: `[{"type":"merge","workspace":"w1","async_name":"reconnect-fix","branch":"agent-1/fix","instruction":" the reconnect fix "}]`,
+			want: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix"}, detached: &merge.DetachedRun{Name: "reconnect-fix", Pick: "the reconnect fix"}},
+		{name: "an async merge compacting after", body: `[{"type":"merge","workspace":"w1","async_name":"reconnect-fix","branch":"agent-1/fix","compact_after":true}]`,
+			want: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix"}, detached: &merge.DetachedRun{Name: "reconnect-fix", CompactAfter: true}},
+		{name: "an async one-shot closing another workspace and cleaning up", body: `[{"type":"merge","workspace":"w1","async_name":"reconnect-fix","branch":"agent-1/fix","close_dir":"/tree/w2","cleanup_worktree":true}]`,
+			want: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix"}, detached: &merge.DetachedRun{Name: "reconnect-fix", CloseOnLanding: "w2", CleanupWorktree: true}},
+		{name: "an async merge to the front", body: `[{"type":"merge","workspace":"w1","async_name":"reconnect-fix","branch":"agent-1/fix","front":true}]`,
+			want: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix", Front: true}, detached: &merge.DetachedRun{Name: "reconnect-fix"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -849,18 +848,18 @@ func TestApplyFileMapsEachMergeSourceOntoTheRequest(t *testing.T) {
 	}
 }
 
-func TestApplyFileRefusesASourceDirNoWorkspaceIsAt(t *testing.T) {
+func TestApplyFileRefusesACloseDirNoWorkspaceIsAt(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", "/tree/w1")
-	path := f.write(t, "workspace_commands_u.json", `[{"type":"merge","workspace":"w1","source_dir":"/tree/none"}]`)
+	path := f.write(t, "workspace_commands_u.json", `[{"type":"merge","workspace":"w1","async_name":"fix","branch":"b","close_dir":"/tree/none"}]`)
 
 	// Act.
 	err := f.ingress.ApplyFile(context.Background(), path)
 
 	// Assert.
-	if !errors.Is(err, ErrQuarantined) || !strings.Contains(err.Error(), "unknown_source_workspace") {
-		t.Fatalf("ApplyFile = %v, want the file quarantined as unknown_source_workspace", err)
+	if !errors.Is(err, ErrQuarantined) || !strings.Contains(err.Error(), "unknown_one_shot_workspace") {
+		t.Fatalf("ApplyFile = %v, want the file quarantined as unknown_one_shot_workspace", err)
 	}
 	if len(f.merge.enqueued) != 0 {
 		t.Fatalf("enqueued %v, want nothing", f.merge.enqueued)

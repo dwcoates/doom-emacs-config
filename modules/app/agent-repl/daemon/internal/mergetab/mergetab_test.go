@@ -27,7 +27,7 @@ func tabsOfEveryArm() map[protoreflect.Name]*frontendv1.FeedMergeTab {
 // arm is classified the moment it lands.
 var classified = map[protoreflect.Name]bool{
 	"queue":            false,
-	"pick":             true,
+	"resolving":        true,
 	"pre_prompt":       true,
 	"rebasing":         false,
 	"rebase_commit":    false,

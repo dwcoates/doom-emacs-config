@@ -111,11 +111,13 @@ func TestAUsersRequestIsPutInLineAtOnce(t *testing.T) {
 func TestARequestRecordsItsSource(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	h.registerOther(otherWorkspace, "ws-two", "other-branch")
-	source := wsm.MergeSource{Kind: wsm.MergeSourceWorkspace, Workspace: otherWorkspace}
-	// The request is recorded with the branch checked out in the other worktree.
+	h.git.mu.Lock()
+	h.git.branches[h.sourceD] = "checked-out"
+	h.git.mu.Unlock()
+	source := wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}
+	// The request is recorded with the branch checked out in its worktree.
 	recorded := source
-	recorded.Branch = "other-branch"
+	recorded.Branch = "checked-out"
 
 	// Act.
 	if err := h.request(t, source, RequestedByAgent); err != nil {
@@ -212,7 +214,6 @@ func TestEveryWorkspaceSourceRecordsTheBranchCheckedOut(t *testing.T) {
 	}{
 		{name: "own branch", source: ownBranch},
 		{name: "merged upstream", source: wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}},
-		{name: "another workspace", source: wsm.MergeSource{Kind: wsm.MergeSourceWorkspace, Workspace: otherWorkspace}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -245,24 +246,6 @@ func TestARequestIsRefusedWhenItsSourceCannotBeMerged(t *testing.T) {
 		source  wsm.MergeSource
 		arm     string
 	}{
-		{name: "the requester itself as the other workspace", source: wsm.MergeSource{Kind: wsm.MergeSourceWorkspace, Workspace: theWorkspace}, arm: ArmUnknownSourceWorkspace},
-		{name: "an unregistered workspace", source: wsm.MergeSource{Kind: wsm.MergeSourceWorkspace, Workspace: "ws-9"}, arm: ArmUnknownSourceWorkspace},
-		{name: "a closed workspace", arrange: func(h *harness) {
-			h.registerOther(otherWorkspace, "ws-two", "b")
-			h.db.mu.Lock()
-			w := h.db.workspaces[otherWorkspace]
-			w.Closed = true
-			h.db.workspaces[otherWorkspace] = w
-			h.db.mu.Unlock()
-		}, source: wsm.MergeSource{Kind: wsm.MergeSourceWorkspace, Workspace: otherWorkspace}, arm: ArmUnknownSourceWorkspace},
-		{name: "a workspace of another repository", arrange: func(h *harness) {
-			h.registerOther(otherWorkspace, "ws-two", "b")
-			h.db.mu.Lock()
-			w := h.db.workspaces[otherWorkspace]
-			w.Repo = "repo-9"
-			h.db.workspaces[otherWorkspace] = w
-			h.db.mu.Unlock()
-		}, source: wsm.MergeSource{Kind: wsm.MergeSourceWorkspace, Workspace: otherWorkspace}, arm: ArmUnknownSourceWorkspace},
 		{name: "a branch that does not exist", source: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "no-such"}, arm: ArmUnknownBranch},
 		{name: "an own branch with no recorded geometry", arrange: func(h *harness) {
 			h.db.mu.Lock()
@@ -274,15 +257,6 @@ func TestARequestIsRefusedWhenItsSourceCannotBeMerged(t *testing.T) {
 			h.git.branches[h.sourceD] = ""
 			h.git.mu.Unlock()
 		}, source: ownBranch, arm: ArmUnknownBranch},
-		{name: "another workspace whose worktree has a detached HEAD", arrange: func(h *harness) {
-			h.registerOther(otherWorkspace, "ws-two", "b")
-			h.db.mu.Lock()
-			dir := h.db.jobs[otherWorkspace].Layout.SourceDir
-			h.db.mu.Unlock()
-			h.git.mu.Lock()
-			h.git.branches[dir] = ""
-			h.git.mu.Unlock()
-		}, source: wsm.MergeSource{Kind: wsm.MergeSourceWorkspace, Workspace: otherWorkspace}, arm: ArmUnknownBranch},
 		{name: "merged upstream whose worktree has a detached HEAD", arrange: func(h *harness) {
 			h.git.mu.Lock()
 			h.git.branches[h.sourceD] = ""
@@ -453,7 +427,7 @@ func TestOnlyAnAgentsInPlaceRequestFlushesTheHeldPrompts(t *testing.T) {
 	}{
 		{name: "an agent's in-place request", req: Request{Workspace: theWorkspace, Source: ownBranch, By: RequestedByAgent}, want: []ids.WorkspaceID{theWorkspace}},
 		{name: "an agent's one-shot", req: Request{Workspace: theWorkspace, Source: ownBranch, By: RequestedByAgent, OneShot: true}, want: []ids.WorkspaceID{theWorkspace}},
-		{name: "an agent's async request", req: Request{Workspace: theWorkspace, Source: ownBranch, By: RequestedByAgent, Detached: &DetachedRun{Name: "flush-async"}}, want: nil},
+		{name: "an agent's async request", req: Request{Workspace: theWorkspace, Source: asyncSource, By: RequestedByAgent, Detached: &DetachedRun{Name: "flush-async"}}, want: nil},
 		{name: "the user's request", req: Request{Workspace: theWorkspace, Source: ownBranch, By: RequestedByUser}, want: nil},
 	}
 	for _, tt := range tests {
@@ -493,22 +467,26 @@ func TestARequestWhoseFlushFailsIsRefusedWithNothingRecorded(t *testing.T) {
 	}
 }
 
-func TestNewDetachedRunTrimsTheNameAndThePickAndKeepsTheAsk(t *testing.T) {
+func TestNewDetachedRunTrimsTheNameAndTheInstructionAndKeepsTheAsks(t *testing.T) {
 	tests := []struct {
-		name         string
-		inName, pick string
-		compactAfter bool
-		want         DetachedRun
+		name             string
+		inName, instruct string
+		compactAfter     bool
+		closeOnLanding   ids.WorkspaceID
+		cleanupWorktree  bool
+		want             DetachedRun
 	}{
-		{name: "a whole branch", inName: " reconnect-fix ", want: DetachedRun{Name: "reconnect-fix"}},
-		{name: "a pick", inName: "reconnect-fix", pick: "\tthe fix \n", want: DetachedRun{Name: "reconnect-fix", Pick: "the fix"}},
-		{name: "a blank pick", inName: "reconnect-fix", pick: "   ", want: DetachedRun{Name: "reconnect-fix"}},
+		{name: "a branch as it is", inName: " reconnect-fix ", want: DetachedRun{Name: "reconnect-fix"}},
+		{name: "an instruction", inName: "reconnect-fix", instruct: "\tthe fix \n", want: DetachedRun{Name: "reconnect-fix", Pick: "the fix"}},
+		{name: "a blank instruction", inName: "reconnect-fix", instruct: "   ", want: DetachedRun{Name: "reconnect-fix"}},
 		{name: "compacting after", inName: "reconnect-fix", compactAfter: true, want: DetachedRun{Name: "reconnect-fix", CompactAfter: true}},
+		{name: "closing another workspace", inName: "reconnect-fix", closeOnLanding: "child", want: DetachedRun{Name: "reconnect-fix", CloseOnLanding: "child"}},
+		{name: "cleaning up", inName: "reconnect-fix", cleanupWorktree: true, want: DetachedRun{Name: "reconnect-fix", CleanupWorktree: true}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			got := NewDetachedRun(tt.inName, tt.pick, tt.compactAfter)
+			got := NewDetachedRun(tt.inName, tt.instruct, tt.compactAfter, tt.closeOnLanding, tt.cleanupWorktree)
 
 			// Assert
 			if got == nil || *got != tt.want {

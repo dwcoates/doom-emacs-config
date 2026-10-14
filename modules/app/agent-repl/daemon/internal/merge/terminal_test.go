@@ -1816,51 +1816,142 @@ func TestTheMergeRestampsTheHoldsWhenItTakesItsLease(t *testing.T) {
 	}
 }
 
-func TestAnotherWorkspacesBranchLandingClosesThatWorkspace(t *testing.T) {
+// teardownRecorded reports whether the teardown recorded MESSAGE at LEVEL.
+func teardownRecorded(h *harness, level, message string) bool {
+	for _, r := range h.logs.Records() {
+		if r.Level == level && r.Operation == "daemon.merge.teardown" && r.Message == message {
+			return true
+		}
+	}
+	return false
+}
+
+// landAsync hands the harness workspace's async request, as RUN asks, to its
+// merge workspace and lands it.
+func landAsync(t *testing.T, h *harness, run *DetachedRun) {
+	t.Helper()
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	if err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource, By: RequestedByUser, Detached: run}); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+}
+
+func TestAnAsyncOneShotLandingClosesTheWorkspaceItNames(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	dir := h.registerOther(otherWorkspace, "ws-two", "other-branch")
 
 	// Act.
-	landedAs(t, h, wsm.MergeSource{Kind: wsm.MergeSourceWorkspace, Workspace: otherWorkspace})
+	landAsync(t, h, &DetachedRun{Name: "reconnect-fix", CloseOnLanding: otherWorkspace})
 
-	// Assert.
+	// Assert: the named workspace is stamped merged and closed and its
+	// worktree removed, as the merge workspace's own is; the requester stays.
 	if !h.db.closed[otherWorkspace] || h.db.mergedAt[otherWorkspace].IsZero() {
-		t.Fatal("the other workspace was not stamped merged and closed")
+		t.Fatal("the one-shot workspace was not stamped merged and closed")
 	}
-	if len(h.git.removedWorktrees) != 1 || h.git.removedWorktrees[0] != dir {
-		t.Fatalf("removed worktrees = %v, want the other workspace's %s", h.git.removedWorktrees, dir)
+	if !slices.Contains(h.git.removedWorktrees, dir) {
+		t.Fatalf("removed worktrees = %v, want the one-shot workspace's %s", h.git.removedWorktrees, dir)
 	}
-}
-
-func TestAnotherWorkspacesBranchLandingNeverClosesTheRequester(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	h.registerOther(otherWorkspace, "ws-two", "other-branch")
-
-	// Act.
-	landedAs(t, h, wsm.MergeSource{Kind: wsm.MergeSourceWorkspace, Workspace: otherWorkspace})
-
-	// Assert.
 	if h.db.closed[theWorkspace] {
-		t.Fatal("the requester was closed by a merge of another workspace's branch")
+		t.Fatal("the requester was closed by its own async merge")
 	}
 }
 
-func TestTheRepairsOfAnotherWorkspacesBranchAreTheRequestersOwn(t *testing.T) {
-	// Arrange.
+func TestAnAsyncOneShotWhoseWorkspaceClosedMeanwhileClosesNothingMore(t *testing.T) {
+	// Arrange: the named workspace is registered, then closed before landing.
 	h := newHarness(t)
-	h.registerOther(otherWorkspace, "ws-two", "other-branch")
-	h.git.rebaseConflicts[1] = []string{"a.go"}
+	dir := h.registerOther(otherWorkspace, "ws-two", "other-branch")
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	if err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource, By: RequestedByUser,
+		Detached: &DetachedRun{Name: "reconnect-fix", CloseOnLanding: otherWorkspace}}); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	h.db.mu.Lock()
+	w := h.db.workspaces[otherWorkspace]
+	w.Closed = true
+	h.db.workspaces[otherWorkspace] = w
+	h.db.mu.Unlock()
 
 	// Act.
-	landedAs(t, h, wsm.MergeSource{Kind: wsm.MergeSourceWorkspace, Workspace: otherWorkspace})
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
 
 	// Assert.
-	for _, sub := range h.queue.submissions {
-		if sub.WS != theWorkspace {
-			t.Fatalf("a merge prompt went to %s, want the requester's own session", sub.WS)
-		}
+	if slices.Contains(h.git.removedWorktrees, dir) {
+		t.Fatalf("removed worktrees = %v, want the already-closed workspace's left alone", h.git.removedWorktrees)
+	}
+	if !teardownRecorded(h, "info", "the workspace an async merge's one-shot closes is already closed") {
+		t.Fatal("the pass-over was not recorded")
+	}
+}
+
+func TestAnAsyncCleanupRemovesItsRecordedWorktreeOnceItLands(t *testing.T) {
+	// Arrange: the branch is checked out in a worktree no workspace owns.
+	h := newHarness(t)
+	h.git.mu.Lock()
+	h.git.worktrees = append(h.git.worktrees, gitclient.Worktree{Dir: "/wt/agent-fix", Branch: asyncBranch})
+	h.git.clean = true
+	h.git.mu.Unlock()
+
+	// Act.
+	landAsync(t, h, &DetachedRun{Name: "reconnect-fix", CleanupWorktree: true})
+
+	// Assert.
+	if len(h.git.cleanedWorktrees) != 1 || h.git.cleanedWorktrees[0] != "/wt/agent-fix" {
+		t.Fatalf("cleaned worktrees = %v, want the branch's /wt/agent-fix", h.git.cleanedWorktrees)
+	}
+}
+
+func TestAnAsyncCleanupKeepsAWorktreeWithUncommittedChanges(t *testing.T) {
+	// Arrange: the branch's worktree holds uncommitted changes.
+	h := newHarness(t)
+	h.git.mu.Lock()
+	h.git.worktrees = append(h.git.worktrees, gitclient.Worktree{Dir: "/wt/agent-fix", Branch: asyncBranch})
+	h.git.clean = true
+	h.git.cleanByDir = map[string]bool{"/wt/agent-fix": false}
+	h.git.mu.Unlock()
+
+	// Act.
+	landAsync(t, h, &DetachedRun{Name: "reconnect-fix", CleanupWorktree: true})
+
+	// Assert.
+	if len(h.git.cleanedWorktrees) != 0 {
+		t.Fatalf("cleaned worktrees = %v, want the dirty one kept", h.git.cleanedWorktrees)
+	}
+	if !teardownRecorded(h, "info", "kept the worktree an async merge asked to clean up: it holds uncommitted changes") {
+		t.Fatal("the kept worktree was not recorded")
+	}
+}
+
+func TestAnAsyncCleanupThatGitRefusesIsLoggedAndTheMergeStillLands(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.git.mu.Lock()
+	h.git.worktrees = append(h.git.worktrees, gitclient.Worktree{Dir: "/wt/agent-fix", Branch: asyncBranch})
+	h.git.clean = true
+	h.git.cleanRemoveErr = errors.New("locked")
+	h.git.mu.Unlock()
+
+	// Act.
+	landAsync(t, h, &DetachedRun{Name: "reconnect-fix", CleanupWorktree: true})
+
+	// Assert.
+	if !teardownRecorded(h, "error", "could not remove the worktree an async merge asked to clean up") {
+		t.Fatal("the refused cleanup was not recorded at ERROR")
+	}
+	sent := h.detached.sent()
+	if len(sent) != 1 || sent[0].outcome.Kind != DetachedLanded {
+		t.Fatalf("handbacks = %+v, want the landing handed back", sent)
 	}
 }
 

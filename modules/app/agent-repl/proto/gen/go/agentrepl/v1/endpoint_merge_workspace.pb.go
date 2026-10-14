@@ -3,18 +3,18 @@
 // requesting workspace's feed either way; WHERE its agentic work runs depends
 // on the request:
 //
-//   - SYNC, the IN PLACE run (every source but a detached own-branch merge):
-//     the merge's whole life is the requesting workspace's own — its footer's
-//     merging status, its session doing any conflict resolution and test
-//     fixing, and every prompt the user sends held until the merge ends. One
-//     workspace and one session are involved.
-//   - ASYNC, the DETACHED run (an own-branch merge with the `detached` run):
-//     the daemon forks the requesting workspace into a HIDDEN MERGE WORKSPACE
-//     when the requesting turn ends — the conversation forked, a worktree of
-//     its own — and the merge runs there. The requesting workspace is never
-//     held and never closed by it; the merge workspace's turns stream into the
-//     bubble's agentic tabs in the requester's feed; and the merge's outcome
-//     comes back into the requester's conversation as a handback.
+//   - SYNC, the ONE-SHOT (`one_shot`): the merge's whole life is the
+//     requesting workspace's own — its footer's merging status, its session
+//     doing any conflict resolution and test fixing, and every prompt the
+//     user sends held until the merge ends — and the workspace closes once
+//     its branch lands. One workspace and one session are involved.
+//   - ASYNC (`async`): the daemon forks the requesting workspace into a
+//     HIDDEN MERGE WORKSPACE when the requesting turn ends — the conversation
+//     forked, a worktree of its own on the named branch — and the merge runs
+//     there. The requesting workspace is never held and never closed by it;
+//     the merge workspace's turns stream into the bubble's agentic tabs in
+//     the requester's feed; and the merge's outcome comes back into the
+//     requester's conversation as a handback.
 //
 // The merge targets the merged branch's parent by definition, and the daemon
 // decides everything else.
@@ -45,12 +45,19 @@ const (
 
 type MergeWorkspaceRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The REQUESTING workspace: the one the merge runs in, whose feed, footer
-	// and session carry it from the queue to its end.
+	// The REQUESTING workspace: the one whose feed carries the merge's bubble
+	// and whose conversation is told how the merge ended.
 	Workspace *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	// WHAT the requesting workspace merges. REQUIRED: a request with no arm
-	// set is refused as invalid.
-	Source        *MergeWorkspaceSource `protobuf:"bytes,2,opt,name=source,proto3" json:"source,omitempty"`
+	// The merge's mode. REQUIRED: a request with no arm set is refused as
+	// invalid. A sync merge exists only as a one-shot, because the only reason
+	// to hold the requester's feed is to conclude the workspace once its branch
+	// lands; every merge that leaves the requester working is async.
+	//
+	// Types that are valid to be assigned to Mode:
+	//
+	//	*MergeWorkspaceRequest_OneShot
+	//	*MergeWorkspaceRequest_Async
+	Mode          isMergeWorkspaceRequest_Mode `protobuf_oneof:"mode"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -92,44 +99,80 @@ func (x *MergeWorkspaceRequest) GetWorkspace() *v1.WorkspaceRef {
 	return nil
 }
 
-func (x *MergeWorkspaceRequest) GetSource() *MergeWorkspaceSource {
+func (x *MergeWorkspaceRequest) GetMode() isMergeWorkspaceRequest_Mode {
 	if x != nil {
-		return x.Source
+		return x.Mode
 	}
 	return nil
 }
 
-// What a merge lands. THE ARM IS THE SOURCE, and each arm decides where the
-// rebase runs and what closes once the branch lands.
-type MergeWorkspaceSource struct {
+func (x *MergeWorkspaceRequest) GetOneShot() *MergeWorkspaceOneShot {
+	if x != nil {
+		if x, ok := x.Mode.(*MergeWorkspaceRequest_OneShot); ok {
+			return x.OneShot
+		}
+	}
+	return nil
+}
+
+func (x *MergeWorkspaceRequest) GetAsync() *MergeWorkspaceAsync {
+	if x != nil {
+		if x, ok := x.Mode.(*MergeWorkspaceRequest_Async); ok {
+			return x.Async
+		}
+	}
+	return nil
+}
+
+type isMergeWorkspaceRequest_Mode interface {
+	isMergeWorkspaceRequest_Mode()
+}
+
+type MergeWorkspaceRequest_OneShot struct {
+	OneShot *MergeWorkspaceOneShot `protobuf:"bytes,2,opt,name=one_shot,json=oneShot,proto3,oneof"`
+}
+
+type MergeWorkspaceRequest_Async struct {
+	Async *MergeWorkspaceAsync `protobuf:"bytes,3,opt,name=async,proto3,oneof"`
+}
+
+func (*MergeWorkspaceRequest_OneShot) isMergeWorkspaceRequest_Mode() {}
+
+func (*MergeWorkspaceRequest_Async) isMergeWorkspaceRequest_Mode() {}
+
+// SYNC, IN PLACE: the requester's own branch, rebased, gated and landed in
+// its own worktree by its own session, its feed held and the bubble pinned
+// until the merge ends. The requester CLOSES once the branch lands. A merge
+// that fails never closes it: the feed is released and the failure is
+// handed back to the requester's conversation
+// (conversation.v1.PromptOrigin.PROMPT_ORIGIN_MERGE_HANDBACK).
+type MergeWorkspaceOneShot struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Exactly one is set.
+	// What concludes the workspace. Exactly one is set.
 	//
-	// Types that are valid to be assigned to Source:
+	// Types that are valid to be assigned to Landing:
 	//
-	//	*MergeWorkspaceSource_OwnBranch
-	//	*MergeWorkspaceSource_Workspace
-	//	*MergeWorkspaceSource_Branch
-	//	*MergeWorkspaceSource_MergedUpstream
-	Source        isMergeWorkspaceSource_Source `protobuf_oneof:"source"`
+	//	*MergeWorkspaceOneShot_OwnBranch
+	//	*MergeWorkspaceOneShot_MergedUpstream
+	Landing       isMergeWorkspaceOneShot_Landing `protobuf_oneof:"landing"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *MergeWorkspaceSource) Reset() {
-	*x = MergeWorkspaceSource{}
+func (x *MergeWorkspaceOneShot) Reset() {
+	*x = MergeWorkspaceOneShot{}
 	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *MergeWorkspaceSource) String() string {
+func (x *MergeWorkspaceOneShot) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*MergeWorkspaceSource) ProtoMessage() {}
+func (*MergeWorkspaceOneShot) ProtoMessage() {}
 
-func (x *MergeWorkspaceSource) ProtoReflect() protoreflect.Message {
+func (x *MergeWorkspaceOneShot) ProtoReflect() protoreflect.Message {
 	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -141,126 +184,80 @@ func (x *MergeWorkspaceSource) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use MergeWorkspaceSource.ProtoReflect.Descriptor instead.
-func (*MergeWorkspaceSource) Descriptor() ([]byte, []int) {
+// Deprecated: Use MergeWorkspaceOneShot.ProtoReflect.Descriptor instead.
+func (*MergeWorkspaceOneShot) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *MergeWorkspaceSource) GetSource() isMergeWorkspaceSource_Source {
+func (x *MergeWorkspaceOneShot) GetLanding() isMergeWorkspaceOneShot_Landing {
 	if x != nil {
-		return x.Source
+		return x.Landing
 	}
 	return nil
 }
 
-func (x *MergeWorkspaceSource) GetOwnBranch() *MergeWorkspaceSourceOwnBranch {
+func (x *MergeWorkspaceOneShot) GetOwnBranch() *MergeWorkspaceOneShotOwnBranch {
 	if x != nil {
-		if x, ok := x.Source.(*MergeWorkspaceSource_OwnBranch); ok {
+		if x, ok := x.Landing.(*MergeWorkspaceOneShot_OwnBranch); ok {
 			return x.OwnBranch
 		}
 	}
 	return nil
 }
 
-func (x *MergeWorkspaceSource) GetWorkspace() *MergeWorkspaceSourceWorkspace {
+func (x *MergeWorkspaceOneShot) GetMergedUpstream() *MergeWorkspaceOneShotMergedUpstream {
 	if x != nil {
-		if x, ok := x.Source.(*MergeWorkspaceSource_Workspace); ok {
-			return x.Workspace
-		}
-	}
-	return nil
-}
-
-func (x *MergeWorkspaceSource) GetBranch() *MergeWorkspaceSourceBranch {
-	if x != nil {
-		if x, ok := x.Source.(*MergeWorkspaceSource_Branch); ok {
-			return x.Branch
-		}
-	}
-	return nil
-}
-
-func (x *MergeWorkspaceSource) GetMergedUpstream() *MergeWorkspaceSourceMergedUpstream {
-	if x != nil {
-		if x, ok := x.Source.(*MergeWorkspaceSource_MergedUpstream); ok {
+		if x, ok := x.Landing.(*MergeWorkspaceOneShot_MergedUpstream); ok {
 			return x.MergedUpstream
 		}
 	}
 	return nil
 }
 
-type isMergeWorkspaceSource_Source interface {
-	isMergeWorkspaceSource_Source()
+type isMergeWorkspaceOneShot_Landing interface {
+	isMergeWorkspaceOneShot_Landing()
 }
 
-type MergeWorkspaceSource_OwnBranch struct {
-	// The requesting workspace's own branch, rebased and gated in its own
-	// worktree.
-	OwnBranch *MergeWorkspaceSourceOwnBranch `protobuf:"bytes,1,opt,name=own_branch,json=ownBranch,proto3,oneof"`
+type MergeWorkspaceOneShot_OwnBranch struct {
+	// The requester's own branch, merged by the queue.
+	OwnBranch *MergeWorkspaceOneShotOwnBranch `protobuf:"bytes,1,opt,name=own_branch,json=ownBranch,proto3,oneof"`
 }
 
-type MergeWorkspaceSource_Workspace struct {
-	// Another open workspace's branch, rebased in THAT workspace's worktree
-	// by the REQUESTING workspace's session. The other workspace is closed
-	// once its branch lands; the requester is never closed by it.
-	Workspace *MergeWorkspaceSourceWorkspace `protobuf:"bytes,2,opt,name=workspace,proto3,oneof"`
+type MergeWorkspaceOneShot_MergedUpstream struct {
+	// The requester's own branch, ALREADY MERGED UPSTREAM through its pull
+	// request: the daemon updates the repository's default branch in its
+	// main worktree from upstream and closes the workspace, merging nothing
+	// itself. The caller asserts the upstream merge; the daemon does not
+	// re-check it.
+	MergedUpstream *MergeWorkspaceOneShotMergedUpstream `protobuf:"bytes,2,opt,name=merged_upstream,json=mergedUpstream,proto3,oneof"`
 }
 
-type MergeWorkspaceSource_Branch struct {
-	// A branch that is no workspace (a subagent's branch), rebased in the
-	// branch's own worktree when one exists, else in a worktree the daemon
-	// makes for it and removes afterwards. The requester is never closed by
-	// it.
-	Branch *MergeWorkspaceSourceBranch `protobuf:"bytes,3,opt,name=branch,proto3,oneof"`
-}
+func (*MergeWorkspaceOneShot_OwnBranch) isMergeWorkspaceOneShot_Landing() {}
 
-type MergeWorkspaceSource_MergedUpstream struct {
-	// The requesting workspace's own branch, ALREADY MERGED UPSTREAM through
-	// its pull request: the daemon updates the repository's default branch
-	// in its main worktree from upstream and closes the workspace, merging
-	// nothing itself. The caller asserts the upstream merge; the daemon does
-	// not re-check it.
-	MergedUpstream *MergeWorkspaceSourceMergedUpstream `protobuf:"bytes,4,opt,name=merged_upstream,json=mergedUpstream,proto3,oneof"`
-}
+func (*MergeWorkspaceOneShot_MergedUpstream) isMergeWorkspaceOneShot_Landing() {}
 
-func (*MergeWorkspaceSource_OwnBranch) isMergeWorkspaceSource_Source() {}
-
-func (*MergeWorkspaceSource_Workspace) isMergeWorkspaceSource_Source() {}
-
-func (*MergeWorkspaceSource_Branch) isMergeWorkspaceSource_Source() {}
-
-func (*MergeWorkspaceSource_MergedUpstream) isMergeWorkspaceSource_Source() {}
-
-// The requesting workspace's own branch.
-type MergeWorkspaceSourceOwnBranch struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// WHERE the merge's agentic work runs. Exactly one is set: a request with
-	// neither is refused as invalid. The two differ in whether the requesting
-	// workspace is held while the merge runs, so the choice is the caller's.
-	//
-	// Types that are valid to be assigned to Run:
-	//
-	//	*MergeWorkspaceSourceOwnBranch_InPlace
-	//	*MergeWorkspaceSourceOwnBranch_Detached
-	Run           isMergeWorkspaceSourceOwnBranch_Run `protobuf_oneof:"run"`
+// The requester's own branch is merged. No fields: the branch is the
+// requester's own.
+type MergeWorkspaceOneShotOwnBranch struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *MergeWorkspaceSourceOwnBranch) Reset() {
-	*x = MergeWorkspaceSourceOwnBranch{}
+func (x *MergeWorkspaceOneShotOwnBranch) Reset() {
+	*x = MergeWorkspaceOneShotOwnBranch{}
 	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *MergeWorkspaceSourceOwnBranch) String() string {
+func (x *MergeWorkspaceOneShotOwnBranch) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*MergeWorkspaceSourceOwnBranch) ProtoMessage() {}
+func (*MergeWorkspaceOneShotOwnBranch) ProtoMessage() {}
 
-func (x *MergeWorkspaceSourceOwnBranch) ProtoReflect() protoreflect.Message {
+func (x *MergeWorkspaceOneShotOwnBranch) ProtoReflect() protoreflect.Message {
 	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -272,81 +269,32 @@ func (x *MergeWorkspaceSourceOwnBranch) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use MergeWorkspaceSourceOwnBranch.ProtoReflect.Descriptor instead.
-func (*MergeWorkspaceSourceOwnBranch) Descriptor() ([]byte, []int) {
+// Deprecated: Use MergeWorkspaceOneShotOwnBranch.ProtoReflect.Descriptor instead.
+func (*MergeWorkspaceOneShotOwnBranch) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *MergeWorkspaceSourceOwnBranch) GetRun() isMergeWorkspaceSourceOwnBranch_Run {
-	if x != nil {
-		return x.Run
-	}
-	return nil
-}
-
-func (x *MergeWorkspaceSourceOwnBranch) GetInPlace() *MergeWorkspaceSourceOwnBranchInPlace {
-	if x != nil {
-		if x, ok := x.Run.(*MergeWorkspaceSourceOwnBranch_InPlace); ok {
-			return x.InPlace
-		}
-	}
-	return nil
-}
-
-func (x *MergeWorkspaceSourceOwnBranch) GetDetached() *MergeWorkspaceSourceOwnBranchDetached {
-	if x != nil {
-		if x, ok := x.Run.(*MergeWorkspaceSourceOwnBranch_Detached); ok {
-			return x.Detached
-		}
-	}
-	return nil
-}
-
-type isMergeWorkspaceSourceOwnBranch_Run interface {
-	isMergeWorkspaceSourceOwnBranch_Run()
-}
-
-type MergeWorkspaceSourceOwnBranch_InPlace struct {
-	// SYNC: in the requesting workspace, by its own session, holding its
-	// prompts until the merge ends.
-	InPlace *MergeWorkspaceSourceOwnBranchInPlace `protobuf:"bytes,2,opt,name=in_place,json=inPlace,proto3,oneof"`
-}
-
-type MergeWorkspaceSourceOwnBranch_Detached struct {
-	// ASYNC: in a hidden merge workspace forked from the requester, leaving
-	// the requester free.
-	Detached *MergeWorkspaceSourceOwnBranchDetached `protobuf:"bytes,3,opt,name=detached,proto3,oneof"`
-}
-
-func (*MergeWorkspaceSourceOwnBranch_InPlace) isMergeWorkspaceSourceOwnBranch_Run() {}
-
-func (*MergeWorkspaceSourceOwnBranch_Detached) isMergeWorkspaceSourceOwnBranch_Run() {}
-
-// The merge runs in the requesting workspace.
-type MergeWorkspaceSourceOwnBranchInPlace struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// TRUE keeps the requesting workspace open once its branch lands, so it
-	// can go on to further work and further merges; FALSE closes it on
-	// landing. A failed merge never closes it either way.
-	KeepOpen      bool `protobuf:"varint,1,opt,name=keep_open,json=keepOpen,proto3" json:"keep_open,omitempty"`
+// The requester's own branch already landed upstream. No fields.
+type MergeWorkspaceOneShotMergedUpstream struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *MergeWorkspaceSourceOwnBranchInPlace) Reset() {
-	*x = MergeWorkspaceSourceOwnBranchInPlace{}
+func (x *MergeWorkspaceOneShotMergedUpstream) Reset() {
+	*x = MergeWorkspaceOneShotMergedUpstream{}
 	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *MergeWorkspaceSourceOwnBranchInPlace) String() string {
+func (x *MergeWorkspaceOneShotMergedUpstream) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*MergeWorkspaceSourceOwnBranchInPlace) ProtoMessage() {}
+func (*MergeWorkspaceOneShotMergedUpstream) ProtoMessage() {}
 
-func (x *MergeWorkspaceSourceOwnBranchInPlace) ProtoReflect() protoreflect.Message {
+func (x *MergeWorkspaceOneShotMergedUpstream) ProtoReflect() protoreflect.Message {
 	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -358,85 +306,82 @@ func (x *MergeWorkspaceSourceOwnBranchInPlace) ProtoReflect() protoreflect.Messa
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use MergeWorkspaceSourceOwnBranchInPlace.ProtoReflect.Descriptor instead.
-func (*MergeWorkspaceSourceOwnBranchInPlace) Descriptor() ([]byte, []int) {
+// Deprecated: Use MergeWorkspaceOneShotMergedUpstream.ProtoReflect.Descriptor instead.
+func (*MergeWorkspaceOneShotMergedUpstream) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *MergeWorkspaceSourceOwnBranchInPlace) GetKeepOpen() bool {
-	if x != nil {
-		return x.KeepOpen
-	}
-	return false
-}
-
-// The merge runs ASYNC, in a MERGE WORKSPACE: a forked workspace the daemon
-// creates when the requesting turn ends, so the fork holds that whole turn. Its
-// conversation is a fork of the requester's, so its agent knows the work.
-//
-// THE MERGE WORKSPACE IS HIDDEN until it needs the user: it is in no tab bar
-// and no sidebar section while it runs, and it is revealed — drawn like any
-// workspace from then on — when its merge fails, when its agent asks for
-// permission or asks a question, when the user interrupts its agent from the
-// bubble (agentrepl.v1.InterruptRequest.merge_tab), or when the user selects
-// it. Its feed is its own ordinary feed with no merge bubble; its turns are
-// also streamed into the bubble's agentic tabs in the requester's feed, which
-// is the only place the bubble is drawn, PLACED rather than pinned. It lands
-// on the requester's own target branch and is closed (its worktree and
-// conversation kept, drawn under Recently Merged) once its branch lands; a
-// failed merge leaves it open and revealed for the user to finish. Either way
-// the daemon hands the outcome back to the requester's conversation
-// (conversation.v1.PromptOrigin.PROMPT_ORIGIN_MERGE_HANDBACK). A merge
-// workspace idle for 15 calendar days is removed. The repository and the
-// target are the requester's own.
-type MergeWorkspaceSourceOwnBranchDetached struct {
+// ASYNC: the merge runs in a hidden MERGE WORKSPACE the daemon forks from
+// the requester's conversation when the requesting turn ends, so its agent
+// knows the work. The requester is never held and never closed; the bubble
+// is PLACED in its feed rather than pinned, the merge workspace's turns
+// stream into the bubble's agentic tabs, and how the merge ended -- landed
+// or failed -- is handed back to the requester's conversation
+// (conversation.v1.PromptOrigin.PROMPT_ORIGIN_MERGE_HANDBACK). The merge
+// workspace stays hidden until it needs the user: revealed when its merge
+// fails, when its agent asks a permission or a question, when the user
+// interrupts it from the bubble, or when the user selects it.
+type MergeWorkspaceAsync struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The merge workspace's name, chosen by the calling agent: a short slug
-	// naming what is being merged ("reconnect-fix"), with no decoration. It is
-	// prefixed and validated exactly as a supplied workspace name is, and it is
-	// RESERVED from the moment the request is accepted until the merge
-	// workspace exists, so nothing else can take it in between. A name that is
-	// already a workspace, a branch, or another pending merge's reservation is
-	// refused as `name_taken`, while the calling agent's turn still runs, so it
-	// can retry with another. REQUIRED: a blank name is refused as invalid.
+	// naming what is merged ("reconnect-fix"). Prefixed and validated as a
+	// supplied workspace name is, and RESERVED from acceptance until the
+	// merge workspace exists; a taken name is refused as `name_taken` while
+	// the calling turn still runs. REQUIRED: blank is refused as invalid.
 	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	// WHAT the merge workspace lands. REQUIRED: a request with neither is
-	// refused as invalid.
-	//
-	// Types that are valid to be assigned to Content:
-	//
-	//	*MergeWorkspaceSourceOwnBranchDetached_WholeBranch
-	//	*MergeWorkspaceSourceOwnBranchDetached_Pick
-	Content isMergeWorkspaceSourceOwnBranchDetached_Content `protobuf_oneof:"content"`
-	// TRUE compacts the REQUESTER's conversation once its branch lands: right
-	// after the landed handback, the daemon sends `/compact` to the requester's
-	// session through the prompt queue
-	// (conversation.v1.PromptOrigin.PROMPT_ORIGIN_MERGE_COMPACT_AFTER), so it
-	// runs behind the handback's turn and draws exactly as any compaction does
-	// (the footer's compacting status, the feed's compaction separator) with no
-	// prompt bubble for the command. A merge that fails or does not run
-	// compacts nothing. It lives on the detached run alone because only an
-	// async merge leaves its requester open and free to compact; the in-place
-	// run has no way to ask for it.
-	CompactAfter  bool `protobuf:"varint,4,opt,name=compact_after,json=compactAfter,proto3" json:"compact_after,omitempty"`
+	// The branch this merge lands, as git spells it in the requester's
+	// repository. The merge workspace's worktree starts at its tip. REQUIRED:
+	// blank is refused as invalid; a branch that does not exist is refused as
+	// `unknown_branch`; a branch checked out in the requester's own worktree is
+	// refused as `branch_checked_out_in_requester`, because the requester keeps
+	// working on it while the merge rebases it. It names the merge, so several
+	// async merges a requester sends in quick succession stay apart.
+	Branch string `protobuf:"bytes,2,opt,name=branch,proto3" json:"branch,omitempty"`
+	// How the merge workspace prepares `branch` before it joins the queue, in
+	// free text written by the requesting agent: anything from "rebase onto the
+	// target, dropping every commit the requester's branch shares with it" to
+	// "fail the merge if you cannot tell which commits are the fix". The daemon
+	// hands it to the merge workspace as its first turn, drawn as the bubble's
+	// resolving tab (frontend.v1.FeedMergeTabResolving); the merge joins the
+	// queue once that turn settles succeeded, and a failed turn fails the
+	// merge. UNSET: `branch` lands as it is, with no resolving turn.
+	Instruction *string `protobuf:"bytes,3,opt,name=instruction,proto3,oneof" json:"instruction,omitempty"`
+	// Another workspace to CLOSE once this merge lands -- typically the
+	// workspace a child or subagent did the work in. An async merge never
+	// closes its requester, which is still working. A merge that fails closes
+	// nothing. UNSET: no workspace is closed.
+	OneShot *MergeWorkspaceAsyncOneShot `protobuf:"bytes,4,opt,name=one_shot,json=oneShot,proto3,oneof" json:"one_shot,omitempty"`
+	// TRUE removes worktrees once the merge lands, to keep disk use bounded:
+	// the merge workspace's own worktree, and the worktree that had `branch`
+	// checked out when the request was accepted. Never removed: the requester's
+	// worktree, the repository's main worktree, any registered workspace's
+	// worktree, or a worktree with uncommitted changes (git's own refusal
+	// stands and is logged). Branches are never deleted. A merge that fails
+	// removes nothing.
+	CleanupWorktree bool `protobuf:"varint,5,opt,name=cleanup_worktree,json=cleanupWorktree,proto3" json:"cleanup_worktree,omitempty"`
+	// TRUE compacts the REQUESTER's conversation once the branch lands, right
+	// after the landed handback, through the prompt queue
+	// (conversation.v1.PromptOrigin.PROMPT_ORIGIN_MERGE_COMPACT_AFTER). A merge
+	// that fails compacts nothing.
+	CompactAfter  bool `protobuf:"varint,6,opt,name=compact_after,json=compactAfter,proto3" json:"compact_after,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *MergeWorkspaceSourceOwnBranchDetached) Reset() {
-	*x = MergeWorkspaceSourceOwnBranchDetached{}
+func (x *MergeWorkspaceAsync) Reset() {
+	*x = MergeWorkspaceAsync{}
 	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *MergeWorkspaceSourceOwnBranchDetached) String() string {
+func (x *MergeWorkspaceAsync) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*MergeWorkspaceSourceOwnBranchDetached) ProtoMessage() {}
+func (*MergeWorkspaceAsync) ProtoMessage() {}
 
-func (x *MergeWorkspaceSourceOwnBranchDetached) ProtoReflect() protoreflect.Message {
+func (x *MergeWorkspaceAsync) ProtoReflect() protoreflect.Message {
 	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -448,99 +393,78 @@ func (x *MergeWorkspaceSourceOwnBranchDetached) ProtoReflect() protoreflect.Mess
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use MergeWorkspaceSourceOwnBranchDetached.ProtoReflect.Descriptor instead.
-func (*MergeWorkspaceSourceOwnBranchDetached) Descriptor() ([]byte, []int) {
+// Deprecated: Use MergeWorkspaceAsync.ProtoReflect.Descriptor instead.
+func (*MergeWorkspaceAsync) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{4}
 }
 
-func (x *MergeWorkspaceSourceOwnBranchDetached) GetName() string {
+func (x *MergeWorkspaceAsync) GetName() string {
 	if x != nil {
 		return x.Name
 	}
 	return ""
 }
 
-func (x *MergeWorkspaceSourceOwnBranchDetached) GetContent() isMergeWorkspaceSourceOwnBranchDetached_Content {
+func (x *MergeWorkspaceAsync) GetBranch() string {
 	if x != nil {
-		return x.Content
+		return x.Branch
+	}
+	return ""
+}
+
+func (x *MergeWorkspaceAsync) GetInstruction() string {
+	if x != nil && x.Instruction != nil {
+		return *x.Instruction
+	}
+	return ""
+}
+
+func (x *MergeWorkspaceAsync) GetOneShot() *MergeWorkspaceAsyncOneShot {
+	if x != nil {
+		return x.OneShot
 	}
 	return nil
 }
 
-func (x *MergeWorkspaceSourceOwnBranchDetached) GetWholeBranch() *MergeWorkspaceSourceOwnBranchDetachedWholeBranch {
+func (x *MergeWorkspaceAsync) GetCleanupWorktree() bool {
 	if x != nil {
-		if x, ok := x.Content.(*MergeWorkspaceSourceOwnBranchDetached_WholeBranch); ok {
-			return x.WholeBranch
-		}
+		return x.CleanupWorktree
 	}
-	return nil
+	return false
 }
 
-func (x *MergeWorkspaceSourceOwnBranchDetached) GetPick() *MergeWorkspaceSourceOwnBranchDetachedPick {
-	if x != nil {
-		if x, ok := x.Content.(*MergeWorkspaceSourceOwnBranchDetached_Pick); ok {
-			return x.Pick
-		}
-	}
-	return nil
-}
-
-func (x *MergeWorkspaceSourceOwnBranchDetached) GetCompactAfter() bool {
+func (x *MergeWorkspaceAsync) GetCompactAfter() bool {
 	if x != nil {
 		return x.CompactAfter
 	}
 	return false
 }
 
-type isMergeWorkspaceSourceOwnBranchDetached_Content interface {
-	isMergeWorkspaceSourceOwnBranchDetached_Content()
-}
-
-type MergeWorkspaceSourceOwnBranchDetached_WholeBranch struct {
-	// The requester's whole branch, as its tip stands when the requesting
-	// turn ends: the merge workspace's worktree is checked out there, so the
-	// requester's later commits are not part of this merge and the rebase
-	// never touches files the requester is editing.
-	WholeBranch *MergeWorkspaceSourceOwnBranchDetachedWholeBranch `protobuf:"bytes,2,opt,name=whole_branch,json=wholeBranch,proto3,oneof"`
-}
-
-type MergeWorkspaceSourceOwnBranchDetached_Pick struct {
-	// Only the changes the instruction names: the merge workspace's worktree
-	// starts on the target branch's tip, and its first turn is the merge
-	// agent cherry-picking those changes from the requester's branch, drawn
-	// as the bubble's pick tab (frontend.v1.FeedMergeTabPick). The merge
-	// joins the queue only once that turn ends.
-	Pick *MergeWorkspaceSourceOwnBranchDetachedPick `protobuf:"bytes,3,opt,name=pick,proto3,oneof"`
-}
-
-func (*MergeWorkspaceSourceOwnBranchDetached_WholeBranch) isMergeWorkspaceSourceOwnBranchDetached_Content() {
-}
-
-func (*MergeWorkspaceSourceOwnBranchDetached_Pick) isMergeWorkspaceSourceOwnBranchDetached_Content() {
-}
-
-// The whole requester branch is merged. No fields: the branch is the
-// requester's own.
-type MergeWorkspaceSourceOwnBranchDetachedWholeBranch struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+// The workspace an async merge closes once it lands. It must be open, in the
+// requester's repository, and not the requester itself; otherwise the request
+// is refused as `unknown_one_shot_workspace`.
+type MergeWorkspaceAsyncOneShot struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The workspace to close.
+	Workspace     *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *MergeWorkspaceSourceOwnBranchDetachedWholeBranch) Reset() {
-	*x = MergeWorkspaceSourceOwnBranchDetachedWholeBranch{}
+func (x *MergeWorkspaceAsyncOneShot) Reset() {
+	*x = MergeWorkspaceAsyncOneShot{}
 	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *MergeWorkspaceSourceOwnBranchDetachedWholeBranch) String() string {
+func (x *MergeWorkspaceAsyncOneShot) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*MergeWorkspaceSourceOwnBranchDetachedWholeBranch) ProtoMessage() {}
+func (*MergeWorkspaceAsyncOneShot) ProtoMessage() {}
 
-func (x *MergeWorkspaceSourceOwnBranchDetachedWholeBranch) ProtoReflect() protoreflect.Message {
+func (x *MergeWorkspaceAsyncOneShot) ProtoReflect() protoreflect.Message {
 	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -552,194 +476,16 @@ func (x *MergeWorkspaceSourceOwnBranchDetachedWholeBranch) ProtoReflect() protor
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use MergeWorkspaceSourceOwnBranchDetachedWholeBranch.ProtoReflect.Descriptor instead.
-func (*MergeWorkspaceSourceOwnBranchDetachedWholeBranch) Descriptor() ([]byte, []int) {
+// Deprecated: Use MergeWorkspaceAsyncOneShot.ProtoReflect.Descriptor instead.
+func (*MergeWorkspaceAsyncOneShot) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{5}
 }
 
-// Only some changes of the requester's branch are merged.
-type MergeWorkspaceSourceOwnBranchDetachedPick struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The calling agent's instruction to the merge agent, in free text: which
-	// changes to take ("the reconnect fix: commits a1b2 and c3d4, plus the test
-	// hunk in e5f6"). Free text rather than a commit list, because the merge
-	// agent may take only some hunks of a commit. The daemon wraps it in its
-	// pick brief, which tells the merge agent its worktree is on the target
-	// branch, names the requester's branch, has it cherry-pick and commit, and
-	// forbids the rebase the queue does itself. REQUIRED: a blank instruction
-	// is refused as invalid.
-	Instruction   string `protobuf:"bytes,1,opt,name=instruction,proto3" json:"instruction,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *MergeWorkspaceSourceOwnBranchDetachedPick) Reset() {
-	*x = MergeWorkspaceSourceOwnBranchDetachedPick{}
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[6]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *MergeWorkspaceSourceOwnBranchDetachedPick) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*MergeWorkspaceSourceOwnBranchDetachedPick) ProtoMessage() {}
-
-func (x *MergeWorkspaceSourceOwnBranchDetachedPick) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[6]
+func (x *MergeWorkspaceAsyncOneShot) GetWorkspace() *v1.WorkspaceRef {
 	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use MergeWorkspaceSourceOwnBranchDetachedPick.ProtoReflect.Descriptor instead.
-func (*MergeWorkspaceSourceOwnBranchDetachedPick) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{6}
-}
-
-func (x *MergeWorkspaceSourceOwnBranchDetachedPick) GetInstruction() string {
-	if x != nil {
-		return x.Instruction
-	}
-	return ""
-}
-
-// Another open workspace, named by its ref.
-type MergeWorkspaceSourceWorkspace struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The workspace whose branch is merged. It must be open, in the same
-	// repository as the requester, and not the requester itself.
-	Ref           *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=ref,proto3" json:"ref,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *MergeWorkspaceSourceWorkspace) Reset() {
-	*x = MergeWorkspaceSourceWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[7]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *MergeWorkspaceSourceWorkspace) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*MergeWorkspaceSourceWorkspace) ProtoMessage() {}
-
-func (x *MergeWorkspaceSourceWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[7]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use MergeWorkspaceSourceWorkspace.ProtoReflect.Descriptor instead.
-func (*MergeWorkspaceSourceWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{7}
-}
-
-func (x *MergeWorkspaceSourceWorkspace) GetRef() *v1.WorkspaceRef {
-	if x != nil {
-		return x.Ref
+		return x.Workspace
 	}
 	return nil
-}
-
-// A branch that is no workspace.
-type MergeWorkspaceSourceBranch struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The branch's name in the requesting workspace's repository, as git
-	// spells it ("agent-1a2b/fix-reconnect").
-	Name          string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *MergeWorkspaceSourceBranch) Reset() {
-	*x = MergeWorkspaceSourceBranch{}
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[8]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *MergeWorkspaceSourceBranch) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*MergeWorkspaceSourceBranch) ProtoMessage() {}
-
-func (x *MergeWorkspaceSourceBranch) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[8]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use MergeWorkspaceSourceBranch.ProtoReflect.Descriptor instead.
-func (*MergeWorkspaceSourceBranch) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{8}
-}
-
-func (x *MergeWorkspaceSourceBranch) GetName() string {
-	if x != nil {
-		return x.Name
-	}
-	return ""
-}
-
-// The requesting workspace's own branch, already merged upstream. No
-// fields: the branch and the repository are the requester's own.
-type MergeWorkspaceSourceMergedUpstream struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *MergeWorkspaceSourceMergedUpstream) Reset() {
-	*x = MergeWorkspaceSourceMergedUpstream{}
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[9]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *MergeWorkspaceSourceMergedUpstream) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*MergeWorkspaceSourceMergedUpstream) ProtoMessage() {}
-
-func (x *MergeWorkspaceSourceMergedUpstream) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[9]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use MergeWorkspaceSourceMergedUpstream.ProtoReflect.Descriptor instead.
-func (*MergeWorkspaceSourceMergedUpstream) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{9}
 }
 
 // THE ARM IS THE OUTCOME.
@@ -756,7 +502,7 @@ type MergeWorkspaceResponse struct {
 
 func (x *MergeWorkspaceResponse) Reset() {
 	*x = MergeWorkspaceResponse{}
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -768,7 +514,7 @@ func (x *MergeWorkspaceResponse) String() string {
 func (*MergeWorkspaceResponse) ProtoMessage() {}
 
 func (x *MergeWorkspaceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -781,7 +527,7 @@ func (x *MergeWorkspaceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeWorkspaceResponse.ProtoReflect.Descriptor instead.
 func (*MergeWorkspaceResponse) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{10}
+	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *MergeWorkspaceResponse) GetResult() isMergeWorkspaceResponse_Result {
@@ -834,7 +580,7 @@ type MergeWorkspaceSuccess struct {
 
 func (x *MergeWorkspaceSuccess) Reset() {
 	*x = MergeWorkspaceSuccess{}
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -846,7 +592,7 @@ func (x *MergeWorkspaceSuccess) String() string {
 func (*MergeWorkspaceSuccess) ProtoMessage() {}
 
 func (x *MergeWorkspaceSuccess) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -859,7 +605,7 @@ func (x *MergeWorkspaceSuccess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeWorkspaceSuccess.ProtoReflect.Descriptor instead.
 func (*MergeWorkspaceSuccess) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{11}
+	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{7}
 }
 
 // Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
@@ -876,9 +622,10 @@ type MergeWorkspaceError struct {
 	//	*MergeWorkspaceError_SessionDeleted
 	//	*MergeWorkspaceError_AlreadyQueued
 	//	*MergeWorkspaceError_AlreadyMerging
-	//	*MergeWorkspaceError_UnknownSourceWorkspace
+	//	*MergeWorkspaceError_UnknownOneShotWorkspace
 	//	*MergeWorkspaceError_UnknownBranch
 	//	*MergeWorkspaceError_NameTaken
+	//	*MergeWorkspaceError_BranchCheckedOutInRequester
 	Cause         isMergeWorkspaceError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -886,7 +633,7 @@ type MergeWorkspaceError struct {
 
 func (x *MergeWorkspaceError) Reset() {
 	*x = MergeWorkspaceError{}
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -898,7 +645,7 @@ func (x *MergeWorkspaceError) String() string {
 func (*MergeWorkspaceError) ProtoMessage() {}
 
 func (x *MergeWorkspaceError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -911,7 +658,7 @@ func (x *MergeWorkspaceError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeWorkspaceError.ProtoReflect.Descriptor instead.
 func (*MergeWorkspaceError) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{12}
+	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *MergeWorkspaceError) GetCause() isMergeWorkspaceError_Cause {
@@ -993,10 +740,10 @@ func (x *MergeWorkspaceError) GetAlreadyMerging() *MergeWorkspaceAlreadyMerging 
 	return nil
 }
 
-func (x *MergeWorkspaceError) GetUnknownSourceWorkspace() *MergeWorkspaceUnknownSourceWorkspace {
+func (x *MergeWorkspaceError) GetUnknownOneShotWorkspace() *MergeWorkspaceUnknownOneShotWorkspace {
 	if x != nil {
-		if x, ok := x.Cause.(*MergeWorkspaceError_UnknownSourceWorkspace); ok {
-			return x.UnknownSourceWorkspace
+		if x, ok := x.Cause.(*MergeWorkspaceError_UnknownOneShotWorkspace); ok {
+			return x.UnknownOneShotWorkspace
 		}
 	}
 	return nil
@@ -1015,6 +762,15 @@ func (x *MergeWorkspaceError) GetNameTaken() *MergeWorkspaceNameTaken {
 	if x != nil {
 		if x, ok := x.Cause.(*MergeWorkspaceError_NameTaken); ok {
 			return x.NameTaken
+		}
+	}
+	return nil
+}
+
+func (x *MergeWorkspaceError) GetBranchCheckedOutInRequester() *MergeWorkspaceBranchCheckedOutInRequester {
+	if x != nil {
+		if x, ok := x.Cause.(*MergeWorkspaceError_BranchCheckedOutInRequester); ok {
+			return x.BranchCheckedOutInRequester
 		}
 	}
 	return nil
@@ -1064,10 +820,10 @@ type MergeWorkspaceError_AlreadyMerging struct {
 	AlreadyMerging *MergeWorkspaceAlreadyMerging `protobuf:"bytes,8,opt,name=already_merging,json=alreadyMerging,proto3,oneof"`
 }
 
-type MergeWorkspaceError_UnknownSourceWorkspace struct {
-	// The source workspace is not open, is in another repository, or is the
-	// requester itself.
-	UnknownSourceWorkspace *MergeWorkspaceUnknownSourceWorkspace `protobuf:"bytes,9,opt,name=unknown_source_workspace,json=unknownSourceWorkspace,proto3,oneof"`
+type MergeWorkspaceError_UnknownOneShotWorkspace struct {
+	// The async one-shot's workspace is not open, is in another repository,
+	// or is the requester itself.
+	UnknownOneShotWorkspace *MergeWorkspaceUnknownOneShotWorkspace `protobuf:"bytes,9,opt,name=unknown_one_shot_workspace,json=unknownOneShotWorkspace,proto3,oneof"`
 }
 
 type MergeWorkspaceError_UnknownBranch struct {
@@ -1080,6 +836,13 @@ type MergeWorkspaceError_NameTaken struct {
 	// pending async merge's reservation. Nothing was recorded; the caller
 	// retries with another name.
 	NameTaken *MergeWorkspaceNameTaken `protobuf:"bytes,11,opt,name=name_taken,json=nameTaken,proto3,oneof"`
+}
+
+type MergeWorkspaceError_BranchCheckedOutInRequester struct {
+	// The async merge's branch is checked out in the requester's own
+	// worktree. Nothing was recorded; the caller names a branch the requester
+	// is not working on.
+	BranchCheckedOutInRequester *MergeWorkspaceBranchCheckedOutInRequester `protobuf:"bytes,12,opt,name=branch_checked_out_in_requester,json=branchCheckedOutInRequester,proto3,oneof"`
 }
 
 func (*MergeWorkspaceError_UnknownWorkspace) isMergeWorkspaceError_Cause() {}
@@ -1098,11 +861,13 @@ func (*MergeWorkspaceError_AlreadyQueued) isMergeWorkspaceError_Cause() {}
 
 func (*MergeWorkspaceError_AlreadyMerging) isMergeWorkspaceError_Cause() {}
 
-func (*MergeWorkspaceError_UnknownSourceWorkspace) isMergeWorkspaceError_Cause() {}
+func (*MergeWorkspaceError_UnknownOneShotWorkspace) isMergeWorkspaceError_Cause() {}
 
 func (*MergeWorkspaceError_UnknownBranch) isMergeWorkspaceError_Cause() {}
 
 func (*MergeWorkspaceError_NameTaken) isMergeWorkspaceError_Cause() {}
+
+func (*MergeWorkspaceError_BranchCheckedOutInRequester) isMergeWorkspaceError_Cause() {}
 
 type MergeWorkspaceUnknownWorkspace struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1112,7 +877,7 @@ type MergeWorkspaceUnknownWorkspace struct {
 
 func (x *MergeWorkspaceUnknownWorkspace) Reset() {
 	*x = MergeWorkspaceUnknownWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1124,7 +889,7 @@ func (x *MergeWorkspaceUnknownWorkspace) String() string {
 func (*MergeWorkspaceUnknownWorkspace) ProtoMessage() {}
 
 func (x *MergeWorkspaceUnknownWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1137,7 +902,7 @@ func (x *MergeWorkspaceUnknownWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeWorkspaceUnknownWorkspace.ProtoReflect.Descriptor instead.
 func (*MergeWorkspaceUnknownWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{13}
+	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{9}
 }
 
 type MergeWorkspaceWorkspaceRefMismatch struct {
@@ -1150,7 +915,7 @@ type MergeWorkspaceWorkspaceRefMismatch struct {
 
 func (x *MergeWorkspaceWorkspaceRefMismatch) Reset() {
 	*x = MergeWorkspaceWorkspaceRefMismatch{}
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1162,7 +927,7 @@ func (x *MergeWorkspaceWorkspaceRefMismatch) String() string {
 func (*MergeWorkspaceWorkspaceRefMismatch) ProtoMessage() {}
 
 func (x *MergeWorkspaceWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1175,7 +940,7 @@ func (x *MergeWorkspaceWorkspaceRefMismatch) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use MergeWorkspaceWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
 func (*MergeWorkspaceWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{14}
+	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *MergeWorkspaceWorkspaceRefMismatch) GetRegistryDir() string {
@@ -1195,7 +960,7 @@ type MergeWorkspaceTransferringAway struct {
 
 func (x *MergeWorkspaceTransferringAway) Reset() {
 	*x = MergeWorkspaceTransferringAway{}
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1207,7 +972,7 @@ func (x *MergeWorkspaceTransferringAway) String() string {
 func (*MergeWorkspaceTransferringAway) ProtoMessage() {}
 
 func (x *MergeWorkspaceTransferringAway) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1220,7 +985,7 @@ func (x *MergeWorkspaceTransferringAway) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeWorkspaceTransferringAway.ProtoReflect.Descriptor instead.
 func (*MergeWorkspaceTransferringAway) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{15}
+	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *MergeWorkspaceTransferringAway) GetAddress() string {
@@ -1238,7 +1003,7 @@ type MergeWorkspaceNotYetAdopted struct {
 
 func (x *MergeWorkspaceNotYetAdopted) Reset() {
 	*x = MergeWorkspaceNotYetAdopted{}
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1250,7 +1015,7 @@ func (x *MergeWorkspaceNotYetAdopted) String() string {
 func (*MergeWorkspaceNotYetAdopted) ProtoMessage() {}
 
 func (x *MergeWorkspaceNotYetAdopted) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1263,7 +1028,7 @@ func (x *MergeWorkspaceNotYetAdopted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeWorkspaceNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*MergeWorkspaceNotYetAdopted) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{16}
+	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{12}
 }
 
 type MergeWorkspaceNoLayoutFacts struct {
@@ -1274,7 +1039,7 @@ type MergeWorkspaceNoLayoutFacts struct {
 
 func (x *MergeWorkspaceNoLayoutFacts) Reset() {
 	*x = MergeWorkspaceNoLayoutFacts{}
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1286,7 +1051,7 @@ func (x *MergeWorkspaceNoLayoutFacts) String() string {
 func (*MergeWorkspaceNoLayoutFacts) ProtoMessage() {}
 
 func (x *MergeWorkspaceNoLayoutFacts) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1299,7 +1064,7 @@ func (x *MergeWorkspaceNoLayoutFacts) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeWorkspaceNoLayoutFacts.ProtoReflect.Descriptor instead.
 func (*MergeWorkspaceNoLayoutFacts) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{17}
+	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{13}
 }
 
 type MergeWorkspaceSessionDeleted struct {
@@ -1310,7 +1075,7 @@ type MergeWorkspaceSessionDeleted struct {
 
 func (x *MergeWorkspaceSessionDeleted) Reset() {
 	*x = MergeWorkspaceSessionDeleted{}
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[18]
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1322,7 +1087,7 @@ func (x *MergeWorkspaceSessionDeleted) String() string {
 func (*MergeWorkspaceSessionDeleted) ProtoMessage() {}
 
 func (x *MergeWorkspaceSessionDeleted) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[18]
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1335,7 +1100,7 @@ func (x *MergeWorkspaceSessionDeleted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeWorkspaceSessionDeleted.ProtoReflect.Descriptor instead.
 func (*MergeWorkspaceSessionDeleted) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{18}
+	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{14}
 }
 
 type MergeWorkspaceAlreadyQueued struct {
@@ -1346,7 +1111,7 @@ type MergeWorkspaceAlreadyQueued struct {
 
 func (x *MergeWorkspaceAlreadyQueued) Reset() {
 	*x = MergeWorkspaceAlreadyQueued{}
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[19]
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1358,7 +1123,7 @@ func (x *MergeWorkspaceAlreadyQueued) String() string {
 func (*MergeWorkspaceAlreadyQueued) ProtoMessage() {}
 
 func (x *MergeWorkspaceAlreadyQueued) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[19]
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1371,7 +1136,7 @@ func (x *MergeWorkspaceAlreadyQueued) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeWorkspaceAlreadyQueued.ProtoReflect.Descriptor instead.
 func (*MergeWorkspaceAlreadyQueued) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{19}
+	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{15}
 }
 
 type MergeWorkspaceAlreadyMerging struct {
@@ -1382,7 +1147,7 @@ type MergeWorkspaceAlreadyMerging struct {
 
 func (x *MergeWorkspaceAlreadyMerging) Reset() {
 	*x = MergeWorkspaceAlreadyMerging{}
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[20]
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1394,7 +1159,7 @@ func (x *MergeWorkspaceAlreadyMerging) String() string {
 func (*MergeWorkspaceAlreadyMerging) ProtoMessage() {}
 
 func (x *MergeWorkspaceAlreadyMerging) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[20]
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1407,30 +1172,31 @@ func (x *MergeWorkspaceAlreadyMerging) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeWorkspaceAlreadyMerging.ProtoReflect.Descriptor instead.
 func (*MergeWorkspaceAlreadyMerging) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{20}
+	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{16}
 }
 
-type MergeWorkspaceUnknownSourceWorkspace struct {
+// The async one-shot's workspace cannot be closed by this merge.
+type MergeWorkspaceUnknownOneShotWorkspace struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *MergeWorkspaceUnknownSourceWorkspace) Reset() {
-	*x = MergeWorkspaceUnknownSourceWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[21]
+func (x *MergeWorkspaceUnknownOneShotWorkspace) Reset() {
+	*x = MergeWorkspaceUnknownOneShotWorkspace{}
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *MergeWorkspaceUnknownSourceWorkspace) String() string {
+func (x *MergeWorkspaceUnknownOneShotWorkspace) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*MergeWorkspaceUnknownSourceWorkspace) ProtoMessage() {}
+func (*MergeWorkspaceUnknownOneShotWorkspace) ProtoMessage() {}
 
-func (x *MergeWorkspaceUnknownSourceWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[21]
+func (x *MergeWorkspaceUnknownOneShotWorkspace) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1441,9 +1207,46 @@ func (x *MergeWorkspaceUnknownSourceWorkspace) ProtoReflect() protoreflect.Messa
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use MergeWorkspaceUnknownSourceWorkspace.ProtoReflect.Descriptor instead.
-func (*MergeWorkspaceUnknownSourceWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{21}
+// Deprecated: Use MergeWorkspaceUnknownOneShotWorkspace.ProtoReflect.Descriptor instead.
+func (*MergeWorkspaceUnknownOneShotWorkspace) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{17}
+}
+
+// The async merge's branch is the one the requester has checked out.
+type MergeWorkspaceBranchCheckedOutInRequester struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MergeWorkspaceBranchCheckedOutInRequester) Reset() {
+	*x = MergeWorkspaceBranchCheckedOutInRequester{}
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MergeWorkspaceBranchCheckedOutInRequester) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MergeWorkspaceBranchCheckedOutInRequester) ProtoMessage() {}
+
+func (x *MergeWorkspaceBranchCheckedOutInRequester) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MergeWorkspaceBranchCheckedOutInRequester.ProtoReflect.Descriptor instead.
+func (*MergeWorkspaceBranchCheckedOutInRequester) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{18}
 }
 
 type MergeWorkspaceUnknownBranch struct {
@@ -1454,7 +1257,7 @@ type MergeWorkspaceUnknownBranch struct {
 
 func (x *MergeWorkspaceUnknownBranch) Reset() {
 	*x = MergeWorkspaceUnknownBranch{}
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[22]
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1466,7 +1269,7 @@ func (x *MergeWorkspaceUnknownBranch) String() string {
 func (*MergeWorkspaceUnknownBranch) ProtoMessage() {}
 
 func (x *MergeWorkspaceUnknownBranch) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[22]
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1479,7 +1282,7 @@ func (x *MergeWorkspaceUnknownBranch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeWorkspaceUnknownBranch.ProtoReflect.Descriptor instead.
 func (*MergeWorkspaceUnknownBranch) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{22}
+	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{19}
 }
 
 // The refused name, as the branch it resolves to once prefixed.
@@ -1493,7 +1296,7 @@ type MergeWorkspaceNameTaken struct {
 
 func (x *MergeWorkspaceNameTaken) Reset() {
 	*x = MergeWorkspaceNameTaken{}
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[23]
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1505,7 +1308,7 @@ func (x *MergeWorkspaceNameTaken) String() string {
 func (*MergeWorkspaceNameTaken) ProtoMessage() {}
 
 func (x *MergeWorkspaceNameTaken) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[23]
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1518,7 +1321,7 @@ func (x *MergeWorkspaceNameTaken) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeWorkspaceNameTaken.ProtoReflect.Descriptor instead.
 func (*MergeWorkspaceNameTaken) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{23}
+	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *MergeWorkspaceNameTaken) GetBranch() string {
@@ -1532,42 +1335,35 @@ var File_agentrepl_v1_endpoint_merge_workspace_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_merge_workspace_proto_rawDesc = "" +
 	"\n" +
-	"+agentrepl/v1/endpoint_merge_workspace.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\"\x8d\x01\n" +
+	"+agentrepl/v1/endpoint_merge_workspace.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\"\xd6\x01\n" +
 	"\x15MergeWorkspaceRequest\x128\n" +
-	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12:\n" +
-	"\x06source\x18\x02 \x01(\v2\".agentrepl.v1.MergeWorkspaceSourceR\x06source\"\xdc\x02\n" +
-	"\x14MergeWorkspaceSource\x12L\n" +
+	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12@\n" +
+	"\bone_shot\x18\x02 \x01(\v2#.agentrepl.v1.MergeWorkspaceOneShotH\x00R\aoneShot\x129\n" +
+	"\x05async\x18\x03 \x01(\v2!.agentrepl.v1.MergeWorkspaceAsyncH\x00R\x05asyncB\x06\n" +
+	"\x04mode\"\xcf\x01\n" +
+	"\x15MergeWorkspaceOneShot\x12M\n" +
 	"\n" +
-	"own_branch\x18\x01 \x01(\v2+.agentrepl.v1.MergeWorkspaceSourceOwnBranchH\x00R\townBranch\x12K\n" +
-	"\tworkspace\x18\x02 \x01(\v2+.agentrepl.v1.MergeWorkspaceSourceWorkspaceH\x00R\tworkspace\x12B\n" +
-	"\x06branch\x18\x03 \x01(\v2(.agentrepl.v1.MergeWorkspaceSourceBranchH\x00R\x06branch\x12[\n" +
-	"\x0fmerged_upstream\x18\x04 \x01(\v20.agentrepl.v1.MergeWorkspaceSourceMergedUpstreamH\x00R\x0emergedUpstreamB\b\n" +
-	"\x06source\"\xdb\x01\n" +
-	"\x1dMergeWorkspaceSourceOwnBranch\x12O\n" +
-	"\bin_place\x18\x02 \x01(\v22.agentrepl.v1.MergeWorkspaceSourceOwnBranchInPlaceH\x00R\ainPlace\x12Q\n" +
-	"\bdetached\x18\x03 \x01(\v23.agentrepl.v1.MergeWorkspaceSourceOwnBranchDetachedH\x00R\bdetachedB\x05\n" +
-	"\x03runJ\x04\b\x01\x10\x02R\tkeep_open\"C\n" +
-	"$MergeWorkspaceSourceOwnBranchInPlace\x12\x1b\n" +
-	"\tkeep_open\x18\x01 \x01(\bR\bkeepOpen\"\x9f\x02\n" +
-	"%MergeWorkspaceSourceOwnBranchDetached\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12c\n" +
-	"\fwhole_branch\x18\x02 \x01(\v2>.agentrepl.v1.MergeWorkspaceSourceOwnBranchDetachedWholeBranchH\x00R\vwholeBranch\x12M\n" +
-	"\x04pick\x18\x03 \x01(\v27.agentrepl.v1.MergeWorkspaceSourceOwnBranchDetachedPickH\x00R\x04pick\x12#\n" +
-	"\rcompact_after\x18\x04 \x01(\bR\fcompactAfterB\t\n" +
-	"\acontent\"2\n" +
-	"0MergeWorkspaceSourceOwnBranchDetachedWholeBranch\"M\n" +
-	")MergeWorkspaceSourceOwnBranchDetachedPick\x12 \n" +
-	"\vinstruction\x18\x01 \x01(\tR\vinstruction\"M\n" +
-	"\x1dMergeWorkspaceSourceWorkspace\x12,\n" +
-	"\x03ref\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\x03ref\"0\n" +
-	"\x1aMergeWorkspaceSourceBranch\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\"$\n" +
-	"\"MergeWorkspaceSourceMergedUpstream\"\x9e\x01\n" +
+	"own_branch\x18\x01 \x01(\v2,.agentrepl.v1.MergeWorkspaceOneShotOwnBranchH\x00R\townBranch\x12\\\n" +
+	"\x0fmerged_upstream\x18\x02 \x01(\v21.agentrepl.v1.MergeWorkspaceOneShotMergedUpstreamH\x00R\x0emergedUpstreamB\t\n" +
+	"\alanding\" \n" +
+	"\x1eMergeWorkspaceOneShotOwnBranch\"%\n" +
+	"#MergeWorkspaceOneShotMergedUpstream\"\x9f\x02\n" +
+	"\x13MergeWorkspaceAsync\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
+	"\x06branch\x18\x02 \x01(\tR\x06branch\x12%\n" +
+	"\vinstruction\x18\x03 \x01(\tH\x00R\vinstruction\x88\x01\x01\x12H\n" +
+	"\bone_shot\x18\x04 \x01(\v2(.agentrepl.v1.MergeWorkspaceAsyncOneShotH\x01R\aoneShot\x88\x01\x01\x12)\n" +
+	"\x10cleanup_worktree\x18\x05 \x01(\bR\x0fcleanupWorktree\x12#\n" +
+	"\rcompact_after\x18\x06 \x01(\bR\fcompactAfterB\x0e\n" +
+	"\f_instructionB\v\n" +
+	"\t_one_shot\"V\n" +
+	"\x1aMergeWorkspaceAsyncOneShot\x128\n" +
+	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\x9e\x01\n" +
 	"\x16MergeWorkspaceResponse\x12?\n" +
 	"\asuccess\x18\x01 \x01(\v2#.agentrepl.v1.MergeWorkspaceSuccessH\x00R\asuccess\x129\n" +
 	"\x05error\x18\x02 \x01(\v2!.agentrepl.v1.MergeWorkspaceErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x17\n" +
-	"\x15MergeWorkspaceSuccess\"\xfa\a\n" +
+	"\x15MergeWorkspaceSuccess\"\xff\b\n" +
 	"\x13MergeWorkspaceError\x12[\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2,.agentrepl.v1.MergeWorkspaceUnknownWorkspaceH\x00R\x10unknownWorkspace\x12h\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v20.agentrepl.v1.MergeWorkspaceWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12[\n" +
@@ -1576,12 +1372,13 @@ const file_agentrepl_v1_endpoint_merge_workspace_proto_rawDesc = "" +
 	"\x0fno_layout_facts\x18\x05 \x01(\v2).agentrepl.v1.MergeWorkspaceNoLayoutFactsH\x00R\rnoLayoutFacts\x12U\n" +
 	"\x0fsession_deleted\x18\x06 \x01(\v2*.agentrepl.v1.MergeWorkspaceSessionDeletedH\x00R\x0esessionDeleted\x12R\n" +
 	"\x0ealready_queued\x18\a \x01(\v2).agentrepl.v1.MergeWorkspaceAlreadyQueuedH\x00R\ralreadyQueued\x12U\n" +
-	"\x0falready_merging\x18\b \x01(\v2*.agentrepl.v1.MergeWorkspaceAlreadyMergingH\x00R\x0ealreadyMerging\x12n\n" +
-	"\x18unknown_source_workspace\x18\t \x01(\v22.agentrepl.v1.MergeWorkspaceUnknownSourceWorkspaceH\x00R\x16unknownSourceWorkspace\x12R\n" +
+	"\x0falready_merging\x18\b \x01(\v2*.agentrepl.v1.MergeWorkspaceAlreadyMergingH\x00R\x0ealreadyMerging\x12r\n" +
+	"\x1aunknown_one_shot_workspace\x18\t \x01(\v23.agentrepl.v1.MergeWorkspaceUnknownOneShotWorkspaceH\x00R\x17unknownOneShotWorkspace\x12R\n" +
 	"\x0eunknown_branch\x18\n" +
 	" \x01(\v2).agentrepl.v1.MergeWorkspaceUnknownBranchH\x00R\runknownBranch\x12F\n" +
 	"\n" +
-	"name_taken\x18\v \x01(\v2%.agentrepl.v1.MergeWorkspaceNameTakenH\x00R\tnameTakenB\a\n" +
+	"name_taken\x18\v \x01(\v2%.agentrepl.v1.MergeWorkspaceNameTakenH\x00R\tnameTaken\x12\x7f\n" +
+	"\x1fbranch_checked_out_in_requester\x18\f \x01(\v27.agentrepl.v1.MergeWorkspaceBranchCheckedOutInRequesterH\x00R\x1bbranchCheckedOutInRequesterB\a\n" +
 	"\x05cause\" \n" +
 	"\x1eMergeWorkspaceUnknownWorkspace\"G\n" +
 	"\"MergeWorkspaceWorkspaceRefMismatch\x12!\n" +
@@ -1592,8 +1389,9 @@ const file_agentrepl_v1_endpoint_merge_workspace_proto_rawDesc = "" +
 	"\x1bMergeWorkspaceNoLayoutFacts\"\x1e\n" +
 	"\x1cMergeWorkspaceSessionDeleted\"\x1d\n" +
 	"\x1bMergeWorkspaceAlreadyQueued\"\x1e\n" +
-	"\x1cMergeWorkspaceAlreadyMerging\"&\n" +
-	"$MergeWorkspaceUnknownSourceWorkspace\"\x1d\n" +
+	"\x1cMergeWorkspaceAlreadyMerging\"'\n" +
+	"%MergeWorkspaceUnknownOneShotWorkspace\"+\n" +
+	")MergeWorkspaceBranchCheckedOutInRequester\"\x1d\n" +
 	"\x1bMergeWorkspaceUnknownBranch\"1\n" +
 	"\x17MergeWorkspaceNameTaken\x12\x16\n" +
 	"\x06branch\x18\x01 \x01(\tR\x06branchB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
@@ -1610,64 +1408,58 @@ func file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
+var file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
 var file_agentrepl_v1_endpoint_merge_workspace_proto_goTypes = []any{
-	(*MergeWorkspaceRequest)(nil),                            // 0: agentrepl.v1.MergeWorkspaceRequest
-	(*MergeWorkspaceSource)(nil),                             // 1: agentrepl.v1.MergeWorkspaceSource
-	(*MergeWorkspaceSourceOwnBranch)(nil),                    // 2: agentrepl.v1.MergeWorkspaceSourceOwnBranch
-	(*MergeWorkspaceSourceOwnBranchInPlace)(nil),             // 3: agentrepl.v1.MergeWorkspaceSourceOwnBranchInPlace
-	(*MergeWorkspaceSourceOwnBranchDetached)(nil),            // 4: agentrepl.v1.MergeWorkspaceSourceOwnBranchDetached
-	(*MergeWorkspaceSourceOwnBranchDetachedWholeBranch)(nil), // 5: agentrepl.v1.MergeWorkspaceSourceOwnBranchDetachedWholeBranch
-	(*MergeWorkspaceSourceOwnBranchDetachedPick)(nil),        // 6: agentrepl.v1.MergeWorkspaceSourceOwnBranchDetachedPick
-	(*MergeWorkspaceSourceWorkspace)(nil),                    // 7: agentrepl.v1.MergeWorkspaceSourceWorkspace
-	(*MergeWorkspaceSourceBranch)(nil),                       // 8: agentrepl.v1.MergeWorkspaceSourceBranch
-	(*MergeWorkspaceSourceMergedUpstream)(nil),               // 9: agentrepl.v1.MergeWorkspaceSourceMergedUpstream
-	(*MergeWorkspaceResponse)(nil),                           // 10: agentrepl.v1.MergeWorkspaceResponse
-	(*MergeWorkspaceSuccess)(nil),                            // 11: agentrepl.v1.MergeWorkspaceSuccess
-	(*MergeWorkspaceError)(nil),                              // 12: agentrepl.v1.MergeWorkspaceError
-	(*MergeWorkspaceUnknownWorkspace)(nil),                   // 13: agentrepl.v1.MergeWorkspaceUnknownWorkspace
-	(*MergeWorkspaceWorkspaceRefMismatch)(nil),               // 14: agentrepl.v1.MergeWorkspaceWorkspaceRefMismatch
-	(*MergeWorkspaceTransferringAway)(nil),                   // 15: agentrepl.v1.MergeWorkspaceTransferringAway
-	(*MergeWorkspaceNotYetAdopted)(nil),                      // 16: agentrepl.v1.MergeWorkspaceNotYetAdopted
-	(*MergeWorkspaceNoLayoutFacts)(nil),                      // 17: agentrepl.v1.MergeWorkspaceNoLayoutFacts
-	(*MergeWorkspaceSessionDeleted)(nil),                     // 18: agentrepl.v1.MergeWorkspaceSessionDeleted
-	(*MergeWorkspaceAlreadyQueued)(nil),                      // 19: agentrepl.v1.MergeWorkspaceAlreadyQueued
-	(*MergeWorkspaceAlreadyMerging)(nil),                     // 20: agentrepl.v1.MergeWorkspaceAlreadyMerging
-	(*MergeWorkspaceUnknownSourceWorkspace)(nil),             // 21: agentrepl.v1.MergeWorkspaceUnknownSourceWorkspace
-	(*MergeWorkspaceUnknownBranch)(nil),                      // 22: agentrepl.v1.MergeWorkspaceUnknownBranch
-	(*MergeWorkspaceNameTaken)(nil),                          // 23: agentrepl.v1.MergeWorkspaceNameTaken
-	(*v1.WorkspaceRef)(nil),                                  // 24: workspace.v1.WorkspaceRef
+	(*MergeWorkspaceRequest)(nil),                     // 0: agentrepl.v1.MergeWorkspaceRequest
+	(*MergeWorkspaceOneShot)(nil),                     // 1: agentrepl.v1.MergeWorkspaceOneShot
+	(*MergeWorkspaceOneShotOwnBranch)(nil),            // 2: agentrepl.v1.MergeWorkspaceOneShotOwnBranch
+	(*MergeWorkspaceOneShotMergedUpstream)(nil),       // 3: agentrepl.v1.MergeWorkspaceOneShotMergedUpstream
+	(*MergeWorkspaceAsync)(nil),                       // 4: agentrepl.v1.MergeWorkspaceAsync
+	(*MergeWorkspaceAsyncOneShot)(nil),                // 5: agentrepl.v1.MergeWorkspaceAsyncOneShot
+	(*MergeWorkspaceResponse)(nil),                    // 6: agentrepl.v1.MergeWorkspaceResponse
+	(*MergeWorkspaceSuccess)(nil),                     // 7: agentrepl.v1.MergeWorkspaceSuccess
+	(*MergeWorkspaceError)(nil),                       // 8: agentrepl.v1.MergeWorkspaceError
+	(*MergeWorkspaceUnknownWorkspace)(nil),            // 9: agentrepl.v1.MergeWorkspaceUnknownWorkspace
+	(*MergeWorkspaceWorkspaceRefMismatch)(nil),        // 10: agentrepl.v1.MergeWorkspaceWorkspaceRefMismatch
+	(*MergeWorkspaceTransferringAway)(nil),            // 11: agentrepl.v1.MergeWorkspaceTransferringAway
+	(*MergeWorkspaceNotYetAdopted)(nil),               // 12: agentrepl.v1.MergeWorkspaceNotYetAdopted
+	(*MergeWorkspaceNoLayoutFacts)(nil),               // 13: agentrepl.v1.MergeWorkspaceNoLayoutFacts
+	(*MergeWorkspaceSessionDeleted)(nil),              // 14: agentrepl.v1.MergeWorkspaceSessionDeleted
+	(*MergeWorkspaceAlreadyQueued)(nil),               // 15: agentrepl.v1.MergeWorkspaceAlreadyQueued
+	(*MergeWorkspaceAlreadyMerging)(nil),              // 16: agentrepl.v1.MergeWorkspaceAlreadyMerging
+	(*MergeWorkspaceUnknownOneShotWorkspace)(nil),     // 17: agentrepl.v1.MergeWorkspaceUnknownOneShotWorkspace
+	(*MergeWorkspaceBranchCheckedOutInRequester)(nil), // 18: agentrepl.v1.MergeWorkspaceBranchCheckedOutInRequester
+	(*MergeWorkspaceUnknownBranch)(nil),               // 19: agentrepl.v1.MergeWorkspaceUnknownBranch
+	(*MergeWorkspaceNameTaken)(nil),                   // 20: agentrepl.v1.MergeWorkspaceNameTaken
+	(*v1.WorkspaceRef)(nil),                           // 21: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_merge_workspace_proto_depIdxs = []int32{
-	24, // 0: agentrepl.v1.MergeWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	1,  // 1: agentrepl.v1.MergeWorkspaceRequest.source:type_name -> agentrepl.v1.MergeWorkspaceSource
-	2,  // 2: agentrepl.v1.MergeWorkspaceSource.own_branch:type_name -> agentrepl.v1.MergeWorkspaceSourceOwnBranch
-	7,  // 3: agentrepl.v1.MergeWorkspaceSource.workspace:type_name -> agentrepl.v1.MergeWorkspaceSourceWorkspace
-	8,  // 4: agentrepl.v1.MergeWorkspaceSource.branch:type_name -> agentrepl.v1.MergeWorkspaceSourceBranch
-	9,  // 5: agentrepl.v1.MergeWorkspaceSource.merged_upstream:type_name -> agentrepl.v1.MergeWorkspaceSourceMergedUpstream
-	3,  // 6: agentrepl.v1.MergeWorkspaceSourceOwnBranch.in_place:type_name -> agentrepl.v1.MergeWorkspaceSourceOwnBranchInPlace
-	4,  // 7: agentrepl.v1.MergeWorkspaceSourceOwnBranch.detached:type_name -> agentrepl.v1.MergeWorkspaceSourceOwnBranchDetached
-	5,  // 8: agentrepl.v1.MergeWorkspaceSourceOwnBranchDetached.whole_branch:type_name -> agentrepl.v1.MergeWorkspaceSourceOwnBranchDetachedWholeBranch
-	6,  // 9: agentrepl.v1.MergeWorkspaceSourceOwnBranchDetached.pick:type_name -> agentrepl.v1.MergeWorkspaceSourceOwnBranchDetachedPick
-	24, // 10: agentrepl.v1.MergeWorkspaceSourceWorkspace.ref:type_name -> workspace.v1.WorkspaceRef
-	11, // 11: agentrepl.v1.MergeWorkspaceResponse.success:type_name -> agentrepl.v1.MergeWorkspaceSuccess
-	12, // 12: agentrepl.v1.MergeWorkspaceResponse.error:type_name -> agentrepl.v1.MergeWorkspaceError
-	13, // 13: agentrepl.v1.MergeWorkspaceError.unknown_workspace:type_name -> agentrepl.v1.MergeWorkspaceUnknownWorkspace
-	14, // 14: agentrepl.v1.MergeWorkspaceError.workspace_ref_mismatch:type_name -> agentrepl.v1.MergeWorkspaceWorkspaceRefMismatch
-	15, // 15: agentrepl.v1.MergeWorkspaceError.transferring_away:type_name -> agentrepl.v1.MergeWorkspaceTransferringAway
-	16, // 16: agentrepl.v1.MergeWorkspaceError.not_yet_adopted:type_name -> agentrepl.v1.MergeWorkspaceNotYetAdopted
-	17, // 17: agentrepl.v1.MergeWorkspaceError.no_layout_facts:type_name -> agentrepl.v1.MergeWorkspaceNoLayoutFacts
-	18, // 18: agentrepl.v1.MergeWorkspaceError.session_deleted:type_name -> agentrepl.v1.MergeWorkspaceSessionDeleted
-	19, // 19: agentrepl.v1.MergeWorkspaceError.already_queued:type_name -> agentrepl.v1.MergeWorkspaceAlreadyQueued
-	20, // 20: agentrepl.v1.MergeWorkspaceError.already_merging:type_name -> agentrepl.v1.MergeWorkspaceAlreadyMerging
-	21, // 21: agentrepl.v1.MergeWorkspaceError.unknown_source_workspace:type_name -> agentrepl.v1.MergeWorkspaceUnknownSourceWorkspace
-	22, // 22: agentrepl.v1.MergeWorkspaceError.unknown_branch:type_name -> agentrepl.v1.MergeWorkspaceUnknownBranch
-	23, // 23: agentrepl.v1.MergeWorkspaceError.name_taken:type_name -> agentrepl.v1.MergeWorkspaceNameTaken
-	24, // [24:24] is the sub-list for method output_type
-	24, // [24:24] is the sub-list for method input_type
-	24, // [24:24] is the sub-list for extension type_name
-	24, // [24:24] is the sub-list for extension extendee
-	0,  // [0:24] is the sub-list for field type_name
+	21, // 0: agentrepl.v1.MergeWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	1,  // 1: agentrepl.v1.MergeWorkspaceRequest.one_shot:type_name -> agentrepl.v1.MergeWorkspaceOneShot
+	4,  // 2: agentrepl.v1.MergeWorkspaceRequest.async:type_name -> agentrepl.v1.MergeWorkspaceAsync
+	2,  // 3: agentrepl.v1.MergeWorkspaceOneShot.own_branch:type_name -> agentrepl.v1.MergeWorkspaceOneShotOwnBranch
+	3,  // 4: agentrepl.v1.MergeWorkspaceOneShot.merged_upstream:type_name -> agentrepl.v1.MergeWorkspaceOneShotMergedUpstream
+	5,  // 5: agentrepl.v1.MergeWorkspaceAsync.one_shot:type_name -> agentrepl.v1.MergeWorkspaceAsyncOneShot
+	21, // 6: agentrepl.v1.MergeWorkspaceAsyncOneShot.workspace:type_name -> workspace.v1.WorkspaceRef
+	7,  // 7: agentrepl.v1.MergeWorkspaceResponse.success:type_name -> agentrepl.v1.MergeWorkspaceSuccess
+	8,  // 8: agentrepl.v1.MergeWorkspaceResponse.error:type_name -> agentrepl.v1.MergeWorkspaceError
+	9,  // 9: agentrepl.v1.MergeWorkspaceError.unknown_workspace:type_name -> agentrepl.v1.MergeWorkspaceUnknownWorkspace
+	10, // 10: agentrepl.v1.MergeWorkspaceError.workspace_ref_mismatch:type_name -> agentrepl.v1.MergeWorkspaceWorkspaceRefMismatch
+	11, // 11: agentrepl.v1.MergeWorkspaceError.transferring_away:type_name -> agentrepl.v1.MergeWorkspaceTransferringAway
+	12, // 12: agentrepl.v1.MergeWorkspaceError.not_yet_adopted:type_name -> agentrepl.v1.MergeWorkspaceNotYetAdopted
+	13, // 13: agentrepl.v1.MergeWorkspaceError.no_layout_facts:type_name -> agentrepl.v1.MergeWorkspaceNoLayoutFacts
+	14, // 14: agentrepl.v1.MergeWorkspaceError.session_deleted:type_name -> agentrepl.v1.MergeWorkspaceSessionDeleted
+	15, // 15: agentrepl.v1.MergeWorkspaceError.already_queued:type_name -> agentrepl.v1.MergeWorkspaceAlreadyQueued
+	16, // 16: agentrepl.v1.MergeWorkspaceError.already_merging:type_name -> agentrepl.v1.MergeWorkspaceAlreadyMerging
+	17, // 17: agentrepl.v1.MergeWorkspaceError.unknown_one_shot_workspace:type_name -> agentrepl.v1.MergeWorkspaceUnknownOneShotWorkspace
+	19, // 18: agentrepl.v1.MergeWorkspaceError.unknown_branch:type_name -> agentrepl.v1.MergeWorkspaceUnknownBranch
+	20, // 19: agentrepl.v1.MergeWorkspaceError.name_taken:type_name -> agentrepl.v1.MergeWorkspaceNameTaken
+	18, // 20: agentrepl.v1.MergeWorkspaceError.branch_checked_out_in_requester:type_name -> agentrepl.v1.MergeWorkspaceBranchCheckedOutInRequester
+	21, // [21:21] is the sub-list for method output_type
+	21, // [21:21] is the sub-list for method input_type
+	21, // [21:21] is the sub-list for extension type_name
+	21, // [21:21] is the sub-list for extension extendee
+	0,  // [0:21] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_merge_workspace_proto_init() }
@@ -1675,25 +1467,20 @@ func file_agentrepl_v1_endpoint_merge_workspace_proto_init() {
 	if File_agentrepl_v1_endpoint_merge_workspace_proto != nil {
 		return
 	}
+	file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[0].OneofWrappers = []any{
+		(*MergeWorkspaceRequest_OneShot)(nil),
+		(*MergeWorkspaceRequest_Async)(nil),
+	}
 	file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[1].OneofWrappers = []any{
-		(*MergeWorkspaceSource_OwnBranch)(nil),
-		(*MergeWorkspaceSource_Workspace)(nil),
-		(*MergeWorkspaceSource_Branch)(nil),
-		(*MergeWorkspaceSource_MergedUpstream)(nil),
+		(*MergeWorkspaceOneShot_OwnBranch)(nil),
+		(*MergeWorkspaceOneShot_MergedUpstream)(nil),
 	}
-	file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[2].OneofWrappers = []any{
-		(*MergeWorkspaceSourceOwnBranch_InPlace)(nil),
-		(*MergeWorkspaceSourceOwnBranch_Detached)(nil),
-	}
-	file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[4].OneofWrappers = []any{
-		(*MergeWorkspaceSourceOwnBranchDetached_WholeBranch)(nil),
-		(*MergeWorkspaceSourceOwnBranchDetached_Pick)(nil),
-	}
-	file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[10].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[4].OneofWrappers = []any{}
+	file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[6].OneofWrappers = []any{
 		(*MergeWorkspaceResponse_Success)(nil),
 		(*MergeWorkspaceResponse_Error)(nil),
 	}
-	file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[12].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[8].OneofWrappers = []any{
 		(*MergeWorkspaceError_UnknownWorkspace)(nil),
 		(*MergeWorkspaceError_WorkspaceRefMismatch)(nil),
 		(*MergeWorkspaceError_TransferringAway)(nil),
@@ -1702,9 +1489,10 @@ func file_agentrepl_v1_endpoint_merge_workspace_proto_init() {
 		(*MergeWorkspaceError_SessionDeleted)(nil),
 		(*MergeWorkspaceError_AlreadyQueued)(nil),
 		(*MergeWorkspaceError_AlreadyMerging)(nil),
-		(*MergeWorkspaceError_UnknownSourceWorkspace)(nil),
+		(*MergeWorkspaceError_UnknownOneShotWorkspace)(nil),
 		(*MergeWorkspaceError_UnknownBranch)(nil),
 		(*MergeWorkspaceError_NameTaken)(nil),
+		(*MergeWorkspaceError_BranchCheckedOutInRequester)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1712,7 +1500,7 @@ func file_agentrepl_v1_endpoint_merge_workspace_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_merge_workspace_proto_rawDesc), len(file_agentrepl_v1_endpoint_merge_workspace_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   24,
+			NumMessages:   21,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

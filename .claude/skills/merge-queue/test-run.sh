@@ -122,218 +122,7 @@ expect_args() {
   fi
 }
 
-test_enqueue_own_requests_the_own_branch() {
-  mkfixture
-  invoke --enqueue-own
-  expect_args "--enqueue-own requests this workspace's own branch without waiting" "merge-queue -own"
-}
-
-test_enqueue_own_keep_open_keeps_the_workspace() {
-  mkfixture
-  invoke --enqueue-own --keep-open
-  expect_args "--enqueue-own --keep-open asks to keep this workspace open" "merge-queue -own -keep-open"
-}
-
-test_enqueue_own_in_place_runs_in_this_workspace() {
-  mkfixture
-  invoke --enqueue-own --in-place
-  expect_args "--enqueue-own --in-place asks for the merge to run in this workspace" "merge-queue -own -in-place"
-}
-
-test_enqueue_own_sync_is_in_place() {
-  mkfixture
-  invoke --enqueue-own --sync
-  expect_args "--enqueue-own --sync asks for the merge to run in this workspace" "merge-queue -own -in-place"
-}
-
-test_enqueue_own_async_names_its_merge_workspace() {
-  mkfixture
-  invoke --enqueue-own --async reconnect-fix
-  expect_args "--enqueue-own --async asks for an async merge under its name" "merge-queue -own -async -name reconnect-fix"
-}
-
-test_enqueue_own_async_pick_carries_the_instruction() {
-  mkfixture
-  invoke --enqueue-own --async reconnect-fix --pick "the reconnect fix"
-  expect_args "--enqueue-own --async --pick carries the pick instruction" "merge-queue -own -async -name reconnect-fix -pick the reconnect fix"
-}
-
-test_enqueue_own_async_compact_after_asks_for_the_compaction() {
-  mkfixture
-  invoke --enqueue-own --async reconnect-fix --compact-after
-  expect_args "--enqueue-own --async --compact-after asks for the compaction" "merge-queue -own -async -name reconnect-fix -compact-after"
-}
-
-test_enqueue_own_async_pick_compact_after_carries_both() {
-  mkfixture
-  invoke --enqueue-own --async reconnect-fix --compact-after --pick "the reconnect fix"
-  expect_args "--enqueue-own --async --compact-after --pick carries both" "merge-queue -own -async -name reconnect-fix -compact-after -pick the reconnect fix"
-}
-
 # expect_refused NAME ARGS... — the run exits 2 and requests nothing.
-expect_refused() {
-  local name="$1"
-  shift
-  mkfixture
-  invoke "$@"
-  if [ "$RUN_RC" -eq 2 ] && [ -z "$(daemon_args)" ]; then
-    pass "$name"
-  else
-    fail "$name" "exit=$RUN_RC args=$(daemon_args)" "$RUN_OUT"
-  fi
-}
-
-test_enqueue_own_refuses_malformed_forms() {
-  expect_refused "--enqueue-own --async refuses a missing name" --enqueue-own --async
-  expect_refused "--enqueue-own --async refuses a missing pick instruction" --enqueue-own --async n --pick
-  expect_refused "--enqueue-own --async refuses an option other than --pick" --enqueue-own --async n --keep-open
-  expect_refused "--enqueue-own --pick refuses more than one instruction" --enqueue-own --async n --pick a b
-  expect_refused "--enqueue-own --keep-open refuses anything after it" --enqueue-own --keep-open --async n
-  expect_refused "--enqueue-own --sync refuses anything after it" --enqueue-own --sync --keep-open
-}
-
-test_compact_after_is_refused_on_every_form_but_async() {
-  expect_refused "--compact-after is refused on a plain own merge" --enqueue-own --compact-after
-  expect_refused "--compact-after is refused in place" --enqueue-own --in-place --compact-after
-  expect_refused "--compact-after is refused sync" --enqueue-own --sync --compact-after
-  expect_refused "--compact-after is refused kept open" --enqueue-own --keep-open --compact-after
-  expect_refused "--compact-after is refused as the async name" --enqueue-own --async --compact-after
-  expect_refused "--compact-after is refused given twice" --enqueue-own --async n --compact-after --compact-after
-  expect_refused "--compact-after is refused on a one-shot" --announce-one-shot --compact-after
-  expect_refused "--compact-after is refused on another workspace" --land-workspace /tmp --compact-after
-  expect_refused "--compact-after is refused on a branch" --land-branch b --compact-after
-  expect_refused "--compact-after is refused on commits" --land-commits c1 --compact-after
-  expect_refused "--compact-after is refused on pr-merged" --pr-merged --compact-after
-  expect_refused "--compact-after is refused on a queue control" --dequeue-own --compact-after
-}
-
-test_enqueue_own_refuses_an_unknown_option() {
-  mkfixture
-  invoke --enqueue-own --bogus
-  if [ "$RUN_RC" -eq 2 ] && [ -z "$(daemon_args)" ]; then
-    pass "--enqueue-own refuses an option it does not take"
-  else
-    fail "--enqueue-own refuses an option it does not take" "exit=$RUN_RC" "$RUN_OUT"
-  fi
-}
-
-test_enqueue_own_refuses_uncommitted_work() {
-  mkfixture
-  DIRTY=" M file.el" invoke --enqueue-own
-  if [ "$RUN_RC" -eq 6 ] && [ -z "$(daemon_args)" ]; then
-    pass "--enqueue-own refuses uncommitted work and requests nothing"
-  else
-    fail "--enqueue-own refuses uncommitted work and requests nothing" "exit=$RUN_RC" "$RUN_OUT"
-  fi
-}
-
-test_enqueue_own_refuses_the_main_worktree() {
-  mkfixture
-  TOP="$FX/main" invoke --enqueue-own
-  if [ "$RUN_RC" -eq 2 ] && grep_in "$RUN_OUT" -q "main worktree"; then
-    pass "--enqueue-own refuses the repository's main worktree"
-  else
-    fail "--enqueue-own refuses the repository's main worktree" "exit=$RUN_RC" "$RUN_OUT"
-  fi
-}
-
-test_announce_one_shot_requests_the_one_shot_merge() {
-  mkfixture
-  invoke --announce-one-shot
-  expect_args "--announce-one-shot announces this workspace's own branch a one-shot" "merge-queue -own -one-shot"
-}
-
-test_announce_one_shot_front_goes_to_the_front() {
-  mkfixture
-  invoke --announce-one-shot --front
-  expect_args "--announce-one-shot --front announces the one-shot at the front of the queue" "merge-queue -own -one-shot -front"
-}
-
-test_announce_one_shot_allows_uncommitted_work() {
-  mkfixture
-  DIRTY=" M file.el" invoke --announce-one-shot
-  expect_args "--announce-one-shot announces with work still uncommitted" "merge-queue -own -one-shot"
-}
-
-test_announce_one_shot_refuses_an_argument() {
-  mkfixture
-  invoke --announce-one-shot --keep-open
-  if [ "$RUN_RC" -eq 2 ] && [ -z "$(daemon_args)" ]; then
-    pass "--announce-one-shot refuses an argument and requests nothing"
-  else
-    fail "--announce-one-shot refuses an argument and requests nothing" "exit=$RUN_RC" "$RUN_OUT"
-  fi
-}
-
-test_announce_one_shot_refusal_is_exit_5() {
-  mkfixture
-  DAEMON_EXIT=6 invoke --announce-one-shot
-  if [ "$RUN_RC" -eq 5 ]; then
-    pass "a refused one-shot announcement exits 5"
-  else
-    fail "a refused one-shot announcement exits 5" "exit=$RUN_RC" "$RUN_OUT"
-  fi
-}
-
-test_land_workspace_requests_without_waiting() {
-  mkfixture
-  invoke --land-workspace "$FX/other"
-  expect_args "--land-workspace requests another workspace's branch without waiting" "merge-queue -dir $FX/other"
-}
-
-test_land_workspace_refuses_its_own() {
-  mkfixture
-  invoke --land-workspace "$FX/ws"
-  if [ "$RUN_RC" -eq 7 ] && [ -z "$(daemon_args)" ]; then
-    pass "--land-workspace refuses this shell's own workspace"
-  else
-    fail "--land-workspace refuses this shell's own workspace" "exit=$RUN_RC" "$RUN_OUT"
-  fi
-}
-
-test_land_branch_requests_the_branch() {
-  mkfixture
-  invoke --land-branch feat/x
-  expect_args "--land-branch requests the branch without waiting" "merge-queue -branch feat/x"
-}
-
-test_pr_merged_requests_the_upstream_update() {
-  mkfixture
-  invoke --pr-merged
-  expect_args "--pr-merged requests the merged-upstream update" "merge-queue -pr-merged"
-}
-
-test_remove_branch_removes_its_worktree_and_branch() {
-  mkfixture
-  BRANCH_TREE="$FX/sub-tree" invoke --remove-branch feat/x
-  if [ "$RUN_RC" -eq 0 ] && grep -qx -- "-C $FX/main worktree remove $FX/sub-tree" "$FX/git-log" &&
-    grep -qx -- "-C $FX/main branch -d feat/x" "$FX/git-log"; then
-    pass "--remove-branch removes the branch's worktree, then the branch"
-  else
-    fail "--remove-branch removes the branch's worktree, then the branch" "exit=$RUN_RC" "$RUN_OUT" "$(cat "$FX/git-log")"
-  fi
-}
-
-test_remove_branch_without_a_worktree_deletes_the_branch() {
-  mkfixture
-  invoke --remove-branch feat/x
-  if [ "$RUN_RC" -eq 0 ] && ! grep -q "worktree remove" "$FX/git-log" &&
-    grep -qx -- "-C $FX/main branch -d feat/x" "$FX/git-log"; then
-    pass "--remove-branch with no worktree only deletes the branch"
-  else
-    fail "--remove-branch with no worktree only deletes the branch" "exit=$RUN_RC" "$RUN_OUT" "$(cat "$FX/git-log")"
-  fi
-}
-
-test_remove_branch_refuses_an_unlanded_branch() {
-  mkfixture
-  BRANCH_D_EXIT=1 invoke --remove-branch feat/x
-  if [ "$RUN_RC" -eq 2 ] && grep_in "$RUN_OUT" -q "may not have landed"; then
-    pass "--remove-branch fails on a branch master lacks"
-  else
-    fail "--remove-branch fails on a branch master lacks" "exit=$RUN_RC" "$RUN_OUT"
-  fi
-}
 
 test_each_outcome_maps_to_its_exit() {
   local verb_exit want
@@ -341,7 +130,7 @@ test_each_outcome_maps_to_its_exit() {
     verb_exit="${pair%%:*}"
     want="${pair##*:}"
     mkfixture
-    DAEMON_EXIT="$verb_exit" invoke --land-branch feat/x
+    DAEMON_EXIT="$verb_exit" invoke --async fix-merge feat/x
     if [ "$RUN_RC" -eq "$want" ]; then
       pass "the verb's exit $verb_exit is the skill's exit $want"
     else
@@ -352,7 +141,7 @@ test_each_outcome_maps_to_its_exit() {
 
 test_passes_the_verbs_output_through() {
   mkfixture
-  invoke --enqueue-own
+  invoke --one-shot
   if grep_in "$RUN_OUT" -q "merge-queue: ws asked to merge x"; then
     pass "the verb's own lines reach the caller"
   else
@@ -363,7 +152,7 @@ test_passes_the_verbs_output_through() {
 test_missing_daemon_binary_is_an_error() {
   mkfixture
   rm "$FX/daemon"
-  invoke --enqueue-own
+  invoke --one-shot
   if [ "$RUN_RC" -eq 2 ] && grep_in "$RUN_OUT" -q "missing or not executable"; then
     pass "a missing daemon binary is an error"
   else
@@ -537,69 +326,6 @@ built_nothing() {
   ! grep -q "worktree add" "$FX/git-log" 2>/dev/null && [ -z "$(daemon_args)" ]
 }
 
-test_land_commits_builds_the_named_commits_in_branch_order() {
-  mkfixture
-  invoke --land-commits c3 c1
-  if [ "$RUN_RC" -eq 0 ] &&
-    git_logged "-C $FX/main worktree add -b feat/big-partial-full-c3 $FX/feat-big-partial-full-c3 master" &&
-    git_logged "-C $FX/feat-big-partial-full-c3 cherry-pick full-c1 full-c3" &&
-    [ "$(daemon_args)" = "merge-queue -branch feat/big-partial-full-c3" ]; then
-    pass "--land-commits cherry-picks the named commits in branch order onto master and requests that branch"
-  else
-    fail "--land-commits cherry-picks the named commits in branch order onto master and requests that branch" "exit=$RUN_RC args=$(daemon_args)" "$RUN_OUT" "$(cat "$FX/git-log")"
-  fi
-}
-
-test_land_commits_needs_a_commit() {
-  mkfixture
-  invoke --land-commits
-  if [ "$RUN_RC" -eq 2 ] && built_nothing; then
-    pass "--land-commits with no commit is an error and builds nothing"
-  else
-    fail "--land-commits with no commit is an error and builds nothing" "exit=$RUN_RC" "$RUN_OUT"
-  fi
-}
-
-test_land_commits_refuses_the_main_worktree() {
-  mkfixture
-  TOP="$FX/main" invoke --land-commits c1
-  if [ "$RUN_RC" -eq 2 ] && built_nothing && grep_in "$RUN_OUT" -q "main worktree"; then
-    pass "--land-commits refuses the repository's main worktree"
-  else
-    fail "--land-commits refuses the repository's main worktree" "exit=$RUN_RC" "$RUN_OUT"
-  fi
-}
-
-test_land_commits_refuses_an_unknown_commit() {
-  mkfixture
-  UNKNOWN=c9 invoke --land-commits c1 c9
-  if [ "$RUN_RC" -eq 2 ] && built_nothing && grep_in "$RUN_OUT" -q "c9 names no commit"; then
-    pass "--land-commits refuses a name that is no commit and builds nothing"
-  else
-    fail "--land-commits refuses a name that is no commit and builds nothing" "exit=$RUN_RC" "$RUN_OUT"
-  fi
-}
-
-test_land_commits_refuses_a_commit_off_the_branch() {
-  mkfixture
-  OFF_BRANCH=c2 invoke --land-commits c2
-  if [ "$RUN_RC" -eq 2 ] && built_nothing && grep_in "$RUN_OUT" -q "not on this workspace's branch"; then
-    pass "--land-commits refuses a commit that is not on this workspace's branch"
-  else
-    fail "--land-commits refuses a commit that is not on this workspace's branch" "exit=$RUN_RC" "$RUN_OUT"
-  fi
-}
-
-test_land_commits_refuses_a_commit_already_on_master() {
-  mkfixture
-  ON_TARGET=c1 invoke --land-commits c1
-  if [ "$RUN_RC" -eq 2 ] && built_nothing && grep_in "$RUN_OUT" -q "already on master"; then
-    pass "--land-commits refuses a commit master already has"
-  else
-    fail "--land-commits refuses a commit master already has" "exit=$RUN_RC" "$RUN_OUT"
-  fi
-}
-
 # THE SKILL CALLS THE INSTALLED SCRIPT ONLY: a worktree's own copy is as old as
 # its branch's base, and once refused a form master's script accepts.
 test_the_skill_calls_only_the_installed_script() {
@@ -609,100 +335,6 @@ test_the_skill_calls_only_the_installed_script() {
     fail "SKILL.md names a worktree's own run.sh; it must call ~/.claude/skills/merge-queue/run.sh"
   else
     pass "SKILL.md calls only the installed ~/.claude/skills/merge-queue/run.sh"
-  fi
-}
-
-test_land_commits_conflict_leaves_nothing_built() {
-  mkfixture
-  PICK_EXIT=1 invoke --land-commits c2
-  if [ "$RUN_RC" -eq 9 ] && [ -z "$(daemon_args)" ] &&
-    git_logged "-C $FX/feat-big-partial-full-c2 cherry-pick --abort" &&
-    git_logged "-C $FX/main worktree remove --force $FX/feat-big-partial-full-c2" &&
-    git_logged "-C $FX/main branch -D feat/big-partial-full-c2"; then
-    pass "--land-commits on a conflict aborts, removes what it built and requests nothing"
-  else
-    fail "--land-commits on a conflict aborts, removes what it built and requests nothing" "exit=$RUN_RC" "$RUN_OUT" "$(cat "$FX/git-log")"
-  fi
-}
-
-test_land_commits_refusal_leaves_nothing_built() {
-  mkfixture
-  DAEMON_EXIT=6 invoke --land-commits c2
-  if [ "$RUN_RC" -eq 5 ] &&
-    git_logged "-C $FX/main worktree remove --force $FX/feat-big-partial-full-c2" &&
-    git_logged "-C $FX/main branch -D feat/big-partial-full-c2"; then
-    pass "--land-commits refused by the queue removes the branch it built"
-  else
-    fail "--land-commits refused by the queue removes the branch it built" "exit=$RUN_RC" "$RUN_OUT" "$(cat "$FX/git-log")"
-  fi
-}
-
-test_land_commits_flattens_a_prefixed_branch_into_one_directory() {
-  mkfixture
-  OWN_BRANCH=JB/big invoke --land-commits c1
-  if [ "$RUN_RC" -eq 0 ] &&
-    git_logged "-C $FX/main worktree add -b JB/big-partial-full-c1 $FX/JB-big-partial-full-c1 master"; then
-    pass "--land-commits names one directory for a prefixed branch"
-  else
-    fail "--land-commits names one directory for a prefixed branch" "exit=$RUN_RC" "$RUN_OUT" "$(cat "$FX/git-log")"
-  fi
-}
-
-test_workspace_verbs_share_one_main_worktree_refusal() {
-  local own commits oneshot
-  mkfixture
-  TOP="$FX/main" invoke --enqueue-own
-  own="$RUN_RC|$RUN_OUT"
-  TOP="$FX/main" invoke --land-commits c1
-  commits="$RUN_RC|$RUN_OUT"
-  TOP="$FX/main" invoke --announce-one-shot
-  oneshot="$RUN_RC|$RUN_OUT"
-  # shellcheck disable=SC2016 # the literal call-site text is what is counted
-  if [ "$own" = "$commits" ] && [ "$own" = "$oneshot" ] && [ "${own%%|*}" -eq 2 ] && [ "$(grep -c 'top="$(workspace_top)"' "$RUN")" -eq 3 ]; then
-    pass "--enqueue-own, --land-commits and --announce-one-shot refuse the main worktree through the one shared check"
-  else
-    fail "--enqueue-own, --land-commits and --announce-one-shot refuse the main worktree through the one shared check" "own=$own" "commits=$commits" "one-shot=$oneshot"
-  fi
-}
-
-test_front_rides_the_own_branch_request() {
-  mkfixture
-  invoke --enqueue-own --front
-  expect_args "--enqueue-own --front asks for the front of the queue" "merge-queue -own -front"
-}
-
-test_front_rides_an_in_place_request_wherever_it_is_given() {
-  mkfixture
-  invoke --front --enqueue-own --in-place
-  expect_args "--front before the verb still rides --enqueue-own --in-place" "merge-queue -own -in-place -front"
-}
-
-test_front_rides_a_branch_request() {
-  mkfixture
-  invoke --land-branch feat/x --front
-  expect_args "--land-branch --front asks for the front of the queue" "merge-queue -branch feat/x -front"
-}
-
-test_front_rides_a_workspace_request() {
-  mkfixture
-  invoke --land-workspace "$FX/other" --front
-  expect_args "--land-workspace --front asks for the front of the queue" "merge-queue -dir $FX/other -front"
-}
-
-test_front_rides_the_upstream_update() {
-  mkfixture
-  invoke --pr-merged --front
-  expect_args "--pr-merged --front asks for the front of the queue" "merge-queue -pr-merged -front"
-}
-
-test_front_rides_a_commits_request() {
-  mkfixture
-  invoke --land-commits c1 --front
-  if [ "$RUN_RC" -eq 0 ] && [ "$(daemon_args)" = "merge-queue -branch feat/big-partial-full-c1 -front" ] &&
-    git_logged "-C $FX/feat-big-partial-full-c1 cherry-pick full-c1"; then
-    pass "--land-commits --front builds only the named commits and asks for the front of the queue"
-  else
-    fail "--land-commits --front builds only the named commits and asks for the front of the queue" "exit=$RUN_RC args=$(daemon_args)" "$RUN_OUT"
   fi
 }
 
@@ -716,41 +348,111 @@ test_front_is_refused_on_a_queue_control() {
   fi
 }
 
-test_front_is_refused_on_remove_branch() {
+test_one_shot_announces_the_own_branch() {
   mkfixture
-  invoke --remove-branch feat/x --front
-  if [ "$RUN_RC" -eq 2 ] && [ ! -s "$FX/git-log" ]; then
-    pass "--front is refused on --remove-branch before anything is removed"
+  invoke --one-shot
+  expect_args "--one-shot announces this workspace's own branch a one-shot" "merge-queue -one-shot"
+}
+
+test_one_shot_pr_merged_names_the_upstream_landing() {
+  mkfixture
+  invoke --one-shot --pr-merged
+  expect_args "--one-shot --pr-merged asks for the upstream update" "merge-queue -one-shot -pr-merged"
+}
+
+test_one_shot_allows_uncommitted_work() {
+  mkfixture
+  DIRTY=" M file.el" invoke --one-shot
+  expect_args "--one-shot announces with work still uncommitted" "merge-queue -one-shot"
+}
+
+test_one_shot_refuses_the_main_worktree() {
+  mkfixture
+  TOP="$FX/main" invoke --one-shot
+  if [ "$RUN_RC" -eq 2 ] && [ -z "$(daemon_args)" ] && grep_in "$RUN_OUT" -q "never one-shots"; then
+    pass "--one-shot refuses the repository's main worktree and asks nothing"
   else
-    fail "--front is refused on --remove-branch before anything is removed" "exit=$RUN_RC" "$RUN_OUT"
+    fail "--one-shot refuses the repository's main worktree and asks nothing" "exit=$RUN_RC args=$(daemon_args)" "$RUN_OUT"
   fi
 }
 
-test_enqueue_own_requests_the_own_branch
-test_enqueue_own_keep_open_keeps_the_workspace
-test_enqueue_own_in_place_runs_in_this_workspace
-test_enqueue_own_refuses_an_unknown_option
-test_enqueue_own_refuses_uncommitted_work
-test_enqueue_own_refuses_the_main_worktree
-test_announce_one_shot_requests_the_one_shot_merge
-test_announce_one_shot_front_goes_to_the_front
-test_announce_one_shot_allows_uncommitted_work
-test_announce_one_shot_refuses_an_argument
-test_announce_one_shot_refusal_is_exit_5
-test_enqueue_own_sync_is_in_place
-test_enqueue_own_async_names_its_merge_workspace
-test_enqueue_own_async_pick_carries_the_instruction
-test_enqueue_own_refuses_malformed_forms
-test_enqueue_own_async_compact_after_asks_for_the_compaction
-test_enqueue_own_async_pick_compact_after_carries_both
-test_compact_after_is_refused_on_every_form_but_async
-test_land_workspace_requests_without_waiting
-test_land_workspace_refuses_its_own
-test_land_branch_requests_the_branch
-test_pr_merged_requests_the_upstream_update
-test_remove_branch_removes_its_worktree_and_branch
-test_remove_branch_without_a_worktree_deletes_the_branch
-test_remove_branch_refuses_an_unlanded_branch
+test_one_shot_refusal_is_exit_5() {
+  mkfixture
+  DAEMON_EXIT=6 invoke --one-shot
+  if [ "$RUN_RC" -eq 5 ]; then
+    pass "a refused one-shot is exit 5"
+  else
+    fail "a refused one-shot is exit 5" "exit=$RUN_RC" "$RUN_OUT"
+  fi
+}
+
+test_async_names_its_merge_workspace_and_branch() {
+  mkfixture
+  invoke --async fix-merge feat/x
+  expect_args "--async asks for the branch under its merge workspace's name" "merge-queue -async -name fix-merge -branch feat/x"
+}
+
+test_async_carries_every_option() {
+  mkfixture
+  invoke --async fix-merge feat/x --instruction "rebase it onto master" --close "$FX/other" --cleanup --compact-after
+  expect_args "--async carries its instruction, its one-shot workspace, its cleanup and its compaction" \
+    "merge-queue -async -name fix-merge -branch feat/x -instruction rebase it onto master -close-dir $FX/other -cleanup-worktree -compact-after"
+}
+
+test_async_runs_from_the_main_worktree() {
+  mkfixture
+  TOP="$FX/main" invoke --async fix-merge feat/x
+  expect_args "--async runs from the repository's main worktree" "merge-queue -async -name fix-merge -branch feat/x"
+}
+
+expect_refused() {
+  local name="$1"
+  shift
+  mkfixture
+  invoke "$@"
+  if [ "$RUN_RC" -eq 2 ] && [ -z "$(daemon_args)" ]; then
+    pass "$name"
+  else
+    fail "$name" "exit=$RUN_RC args=$(daemon_args)" "$RUN_OUT"
+  fi
+}
+
+test_merge_verbs_refuse_malformed_forms() {
+  expect_refused "--one-shot refuses an option other than --pr-merged" --one-shot --cleanup
+  expect_refused "--one-shot --pr-merged refuses anything after it" --one-shot --pr-merged --compact-after
+  expect_refused "--async refuses a missing name" --async
+  expect_refused "--async refuses a missing branch" --async fix-merge
+  expect_refused "--async refuses an option as its name" --async --cleanup feat/x
+  expect_refused "--async refuses a missing instruction" --async fix-merge feat/x --instruction
+  expect_refused "--async refuses a missing --close directory" --async fix-merge feat/x --close
+  expect_refused "--async refuses an unknown option" --async fix-merge feat/x --keep-open
+}
+
+test_front_rides_a_one_shot() {
+  mkfixture
+  invoke --front --one-shot
+  expect_args "--front before the verb still rides --one-shot" "merge-queue -one-shot -front"
+}
+
+test_front_rides_an_async_merge() {
+  mkfixture
+  invoke --async fix-merge feat/x --front
+  expect_args "--async --front asks for the front of the queue" "merge-queue -async -name fix-merge -branch feat/x -front"
+}
+
+test_removed_merge_verbs_print_usage() {
+  local verb ok=1
+  for verb in --enqueue-own --announce-one-shot --land-workspace --land-branch --land-commits --pr-merged --remove-branch; do
+    mkfixture
+    invoke "$verb"
+    if [ "$RUN_RC" -ne 1 ] || [ -n "$(daemon_args)" ]; then
+      ok=0
+      fail "$verb is no verb any more" "exit=$RUN_RC" "$RUN_OUT"
+    fi
+  done
+  [ "$ok" -eq 0 ] || pass "every removed merge verb prints usage and asks nothing"
+}
+
 test_each_outcome_maps_to_its_exit
 test_passes_the_verbs_output_through
 test_missing_daemon_binary_is_an_error
@@ -772,25 +474,20 @@ test_hold_rollouts_holds_the_rollouts
 test_release_rollouts_releases_the_rollouts
 test_hold_rollouts_refuses_an_argument
 test_hold_rollouts_refuses_front
-test_land_commits_builds_the_named_commits_in_branch_order
-test_land_commits_needs_a_commit
-test_land_commits_refuses_the_main_worktree
-test_land_commits_refuses_an_unknown_commit
-test_land_commits_refuses_a_commit_off_the_branch
-test_land_commits_refuses_a_commit_already_on_master
 test_the_skill_calls_only_the_installed_script
-test_land_commits_conflict_leaves_nothing_built
-test_land_commits_refusal_leaves_nothing_built
-test_land_commits_flattens_a_prefixed_branch_into_one_directory
-test_workspace_verbs_share_one_main_worktree_refusal
-test_front_rides_the_own_branch_request
-test_front_rides_an_in_place_request_wherever_it_is_given
-test_front_rides_a_branch_request
-test_front_rides_a_workspace_request
-test_front_rides_the_upstream_update
-test_front_rides_a_commits_request
 test_front_is_refused_on_a_queue_control
-test_front_is_refused_on_remove_branch
+test_one_shot_announces_the_own_branch
+test_one_shot_pr_merged_names_the_upstream_landing
+test_one_shot_allows_uncommitted_work
+test_one_shot_refuses_the_main_worktree
+test_one_shot_refusal_is_exit_5
+test_async_names_its_merge_workspace_and_branch
+test_async_carries_every_option
+test_async_runs_from_the_main_worktree
+test_merge_verbs_refuse_malformed_forms
+test_front_rides_a_one_shot
+test_front_rides_an_async_merge
+test_removed_merge_verbs_print_usage
 
 printf 'Passed: %d  Failed: %d\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

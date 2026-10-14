@@ -21,7 +21,7 @@ import (
 func pickHarness(t *testing.T) *harness {
 	t.Helper()
 	h := newHarness(t)
-	h.briefs[BriefPick] = []string{"pick_instruction", "source_branch", "target_branch", "worktree_dir"}
+	h.briefs[BriefPick] = []string{"pick_instruction", "fork_head", "target_branch", "worktree_dir"}
 	h.git.mu.Lock()
 	h.git.clean = true
 	h.git.ahead = 1
@@ -34,7 +34,7 @@ func pickHarness(t *testing.T) *harness {
 func requestPick(t *testing.T, h *harness) {
 	t.Helper()
 	err := h.o.Enqueue(context.Background(), Request{
-		Workspace: theWorkspace, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, By: RequestedByUser,
+		Workspace: theWorkspace, Source: asyncSource, By: RequestedByUser,
 		Detached: &DetachedRun{Name: "reconnect-fix", Pick: "the reconnect fix"},
 	})
 	if err != nil {
@@ -55,17 +55,17 @@ func runThePick(t *testing.T, h *harness, ctx context.Context, resumed bool) {
 }
 
 // pickTabs answers every pick tab drawn in the requester's feed, in order.
-func pickTabs(h *harness) []*frontendv1.FeedMergeTabPick {
-	var out []*frontendv1.FeedMergeTabPick
+func pickTabs(h *harness) []*frontendv1.FeedMergeTabResolving {
+	var out []*frontendv1.FeedMergeTabResolving
 	for _, tab := range h.feed.tabsOn(theWorkspace) {
-		if pick := tab.GetPick(); pick != nil {
+		if pick := tab.GetResolving(); pick != nil {
 			out = append(out, pick)
 		}
 	}
 	return out
 }
 
-func TestAnAsyncPickForksOntoTheTargetBranch(t *testing.T) {
+func TestAnAsyncInstructionForksOntoTheRequestsBranch(t *testing.T) {
 	// Arrange
 	h := pickHarness(t)
 
@@ -73,8 +73,22 @@ func TestAnAsyncPickForksOntoTheTargetBranch(t *testing.T) {
 	requestPick(t, h)
 
 	// Assert
-	if forks := h.detached.forks; len(forks) != 1 || forks[0] != string(theWorkspace)+":reconnect-fix:master" {
-		t.Fatalf("forks = %v, want one named reconnect-fix onto the target branch", forks)
+	if forks := h.detached.forks; len(forks) != 1 || forks[0] != string(theWorkspace)+":reconnect-fix:"+asyncBranch {
+		t.Fatalf("forks = %v, want one named reconnect-fix onto the request's branch", forks)
+	}
+}
+
+func TestTheResolvingBriefNamesTheCommitTheMergeWorkspaceWasCutAt(t *testing.T) {
+	// Arrange
+	h := pickHarness(t)
+
+	// Act
+	requestPick(t, h)
+	values := h.o.pickBriefValues(context.Background(), h.o.picks[theMergeWorkspace])
+
+	// Assert
+	if values["fork_head"] != "f0rkhead" || values["pick_instruction"] != "the reconnect fix" {
+		t.Fatalf("brief values = %v, want the fork head and the instruction", values)
 	}
 }
 

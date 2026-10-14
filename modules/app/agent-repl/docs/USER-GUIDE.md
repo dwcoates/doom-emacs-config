@@ -126,28 +126,29 @@ These clicks jump to an entry in the feed:
 
 ## Sync and async merges
 
-- **A merge is SYNC or ASYNC.**
-  - A sync merge runs in your workspace: your agent resolves its conflicts and fixes its tests in the bubble's tabs, and your prompts are held until it ends.
+- **A merge is a ONE-SHOT or ASYNC.**
+  - A one-shot is the only sync merge: it runs in your workspace, your agent resolves its conflicts and fixes its tests in the bubble's tabs, your prompts are held until it ends, and your workspace closes once it lands.
     - The prompts you queued before the agent asked for it are sent to the agent at once, in order, without interrupting it, so it answers them before the merge starts.
     - Prompts you send once the merge is running wait for it to end.
-  - An async merge runs in a hidden merge workspace forked from yours, and your workspace stays free.
+    - A one-shot that fails leaves your workspace open, and the agent is told why.
+  - An async merge lands a named branch in a hidden merge workspace forked from yours, and your workspace stays free; the agent is told how it ended.
   - "Sync" and "in place" mean the same thing, and so do "async" and "detached".
-- **An agent's `/merge-queue own` merges sync, and your workspace closes once it lands.**
-  - `/merge-queue own keep-open` merges sync and keeps your workspace open.
-  - Agents merge async only for work that is genuinely beside the point of what remains, or when you ask for it.
-- **`/merge-queue own async <name>` forks a merge workspace named `<name>` when the turn that asked for it ends.**
-  - The agent names it; a name that is already a workspace, a branch or another merge's reservation is refused, and the agent asks again with another.
-  - Commits you make after the merge was asked for are not part of it; they go through your next merge.
-- **An agent can announce a one-shot merge before its turn is over, with `/merge-queue one-shot`.**
+- **An agent uses `/merge-queue one-shot` only when your workspace is done once the merge lands.**
   - The workspace is marked a one-shot at once, so its tab and its sidebar row show the one-shot mark (🎯) while the agent keeps working.
   - When the turn ends, the workspace's branch merges in place, and the workspace closes once the merge lands.
   - Work left uncommitted when the turn ends fails the merge, and the workspace stays open.
-- **`/merge-queue own async <name> pick <instruction>` lands only the changes the instruction names.**
-  - The merge workspace starts on the target branch, and its agent cherry-picks those changes from your branch, resolving what it can without you.
-  - That work is the bubble's first tab, `pick`; the merge joins the queue once it ends.
+  - `SPC TAB M` and the sidebar's Merge are the same one-shot.
+  - The main workspace (the repository's own checkout) never one-shots.
+- **Every other merge is `/merge-queue async <name> <branch>`.**
+  - It is for a fix beside the point of what remains, an attempt landed so you can test it on master, or the main workspace landing its subagents' branches.
+  - The agent names the merge workspace; a name that is already a workspace, a branch or another merge's reservation is refused, and the agent asks again with another.
+  - The branch is never the one checked out in the asking workspace; the daemon refuses it.
+  - `instruction <text>` has the merge workspace prepare the branch first, for example rebasing it onto master or combining branches; that work is the bubble's first tab, `resolving`, and the merge joins the queue once it ends.
+  - `close <worktree-dir>` closes another workspace once the merge lands, such as the subagent workspace the work came from.
+  - `cleanup` removes the worktree that had the branch checked out once the merge lands; branches are kept.
 - **An async merge workspace is hidden from the tab bar and the sidebar's open rows.**
   - It is listed among the closed workspaces, and under Recently Merged once it lands.
-  - The bubble is drawn only in your feed, placed where it was asked for rather than pinned, and its pick, conflicts and fixes tabs stream the merge workspace's agent.
+  - The bubble is drawn only in your feed, placed where it was asked for rather than pinned, and its resolving, conflicts and fixes tabs stream the merge workspace's agent.
 - **The merge workspace is revealed, and stays visible, when:**
   - the merge fails;
   - its agent asks a question or for a permission;

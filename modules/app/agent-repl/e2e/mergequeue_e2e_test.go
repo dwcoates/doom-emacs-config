@@ -143,11 +143,11 @@ func mqBranchOf(ws *workspacev1.WorkspaceRef) string {
 
 func mqStrPtr(s string) *string { return &s }
 
-// mqMerge asks for one workspace's merge of a source and fails the test unless
+// mqMerge asks for one workspace's merge in one mode and fails the test unless
 // it is enqueued.
-func mqMerge(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, source *agentreplv1.MergeWorkspaceSource) {
+func mqMerge(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, mode harness.MergeMode) {
 	t.Helper()
-	resp, err := w.Client().MergeWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ws, Source: source}))
+	resp, err := w.Client().MergeWorkspace(w.Ctx(), connect.NewRequest(harness.MergeRequest(ws, mode)))
 	if err != nil || resp.Msg.GetSuccess() == nil {
 		t.Fatalf("MergeWorkspace = (%v, %v), want the merge enqueued", resp.Msg.GetResult(), err)
 	}
@@ -305,7 +305,7 @@ func TestMergeLeaseHoldsSubmitAndKeepsTheWorkspaceOpen(t *testing.T) {
 	})
 	root := mqOpenFeedWatch(t, w, child, nil)
 	defer root.Close()
-	mqMerge(t, w, child, harness.OwnBranch(false))
+	mqMerge(t, w, child, harness.OneShot())
 	w.AwaitWorkspaceLogOperationCount(child.GetDir(), harness.OpTurnOpened, 1)
 
 	// Act: submit a fresh prompt to the SAME workspace while the merge runs,
@@ -403,7 +403,7 @@ func TestMergeBubbleCoalescesIntoOneFeedRow(t *testing.T) {
 
 			// Act: a clean merge (no conflict, a passing test gate) lands.
 			harness.CommitWork(t, child.GetDir())
-			mqMerge(t, w, child, harness.OwnBranch(false))
+			mqMerge(t, w, child, harness.OneShot())
 			mergeRow := root.AwaitRow("the merge bubble's landed terminal", func(row *frontendv1.FeedRow) bool {
 				return row.GetActivity().GetMerge().GetSuccess() != nil
 			})
@@ -481,7 +481,7 @@ func mqStartConflictedMerge(t *testing.T, name string) *mqConflictedMerge {
 	repo.ScriptRebaseConflict(mqBranchOf(child), 1, "work.txt")
 	root := mqOpenFeedWatch(t, w, child, nil)
 	t.Cleanup(root.Close)
-	mqMerge(t, w, child, harness.OwnBranch(false))
+	mqMerge(t, w, child, harness.OneShot())
 	return &mqConflictedMerge{w: w, repo: repo, child: child, root: root}
 }
 
@@ -671,7 +671,7 @@ func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	turn := SubmitPrompt(t, w, child, displacedText)
 	w.AwaitWorkspaceLogOperationCount(child.GetDir(), harness.OpTurnOpened, 1)
 	harness.CommitWork(t, child.GetDir())
-	mqMerge(t, w, child, harness.OwnBranch(false))
+	mqMerge(t, w, child, harness.OneShot())
 
 	// Assert: the displaced turn is CAPTURED then ENDED — its own terminal
 	// arrives on the feed.
@@ -1027,7 +1027,7 @@ func TestFailMarkerFailsABeforeActionRunAndRidesAnAfterActionTerminal(t *testing
 
 		// Act
 		harness.CommitWork(t, child.GetDir())
-		mqMerge(t, w, child, harness.OwnBranch(false))
+		mqMerge(t, w, child, harness.OneShot())
 		head := root.AwaitRow("the merge bubble's head", func(row *frontendv1.FeedRow) bool {
 			return row.GetActivity().GetMerge() != nil
 		})
@@ -1141,7 +1141,7 @@ func TestFailMarkerFailsABeforeActionRunAndRidesAnAfterActionTerminal(t *testing
 
 			// Act
 			harness.CommitWork(t, child.GetDir())
-			mqMerge(t, w, child, harness.OwnBranch(false))
+			mqMerge(t, w, child, harness.OneShot())
 			head := root.AwaitRow("the merge bubble's head", func(row *frontendv1.FeedRow) bool {
 				return row.GetActivity().GetMerge() != nil
 			})
@@ -1211,7 +1211,7 @@ func mqLandedOwnBranch(t *testing.T, name string) (*World, *workspacev1.Workspac
 	repo.CommitIn(repo.Dir, "main.txt", "moved\n")
 	root := mqOpenFeedWatch(t, w, child, nil)
 	t.Cleanup(root.Close)
-	mqMerge(t, w, child, harness.OwnBranch(true))
+	mqMerge(t, w, child, harness.OneShot())
 	head := root.AwaitRow("the merge bubble's terminal", mqConcluded)
 	w.AwaitLandingDeployed()
 	if head.GetActivity().GetMerge().GetSuccess() == nil {
@@ -1242,22 +1242,6 @@ func TestALandedMergesBubbleCarriesItsCommittingTab(t *testing.T) {
 	}
 }
 
-func TestAKeptOpenMergeLeavesTheWorkspaceOpen(t *testing.T) {
-	t.Parallel()
-	// Arrange, Act
-	w, child, _ := mqLandedOwnBranch(t, "mq-keep-open")
-
-	// Assert: its worktree stands and the roster still lists it in its
-	// repository, not among the recently merged.
-	if _, err := os.Stat(child.GetDir()); err != nil {
-		t.Fatalf("the kept-open workspace's worktree is gone: %v", err)
-	}
-	roster := w.WatchRoster()
-	harness.AwaitView(t, w.Ctx(), roster, "the kept-open workspace's roster row", func(r *frontendv1.WorkspaceRoster) bool {
-		return mqRosterRow(r, child.GetId()) != nil
-	})
-}
-
 func TestAMergedUpstreamSourceCarriesTheUpdatingMainTab(t *testing.T) {
 	t.Parallel()
 	// Arrange: the workspace's pull request merged upstream.
@@ -1270,8 +1254,7 @@ func TestAMergedUpstreamSourceCarriesTheUpdatingMainTab(t *testing.T) {
 	defer root.Close()
 
 	// Act
-	mqMerge(t, w, child, &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_MergedUpstream{
-		MergedUpstream: &agentreplv1.MergeWorkspaceSourceMergedUpstream{}}})
+	mqMerge(t, w, child, harness.OneShotMergedUpstream())
 	head := root.AwaitRow("the merge bubble's terminal", mqConcluded)
 	w.AwaitLandingDeployed()
 
@@ -1288,20 +1271,20 @@ func TestAMergedUpstreamSourceCarriesTheUpdatingMainTab(t *testing.T) {
 	}
 }
 
-func TestAMergeRequestThatNamesNoSourceIsRefused(t *testing.T) {
+func TestAMergeRequestThatNamesNoModeIsRefused(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	repo := harness.NewRepo(t)
 	w := NewWorld(t, WorldOpts{})
 	repoRef := mqRepositoryRef(t, w, repo)
-	child := mqCreateTopLevelChild(t, w, repoRef, "mq-no-source")
+	child := mqCreateTopLevelChild(t, w, repoRef, "mq-no-mode")
 
 	// Act
 	_, err := w.Client().MergeWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: child}))
 
 	// Assert
 	if connect.CodeOf(err) != connect.CodeInvalidArgument {
-		t.Fatalf("MergeWorkspace with no source = %v, want invalid_argument: a merge request names what it merges", err)
+		t.Fatalf("MergeWorkspace with no mode = %v, want invalid_argument: a merge request names its mode", err)
 	}
 }
 
@@ -1316,10 +1299,7 @@ func TestAMergeOfABranchThatDoesNotExistIsRefused(t *testing.T) {
 	child := mqCreateTopLevelChild(t, w, repoRef, "mq-unknown-branch")
 
 	// Act
-	resp, err := w.Client().MergeWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{
-		Workspace: child,
-		Source:    harness.BranchSource("no-such-branch"),
-	}))
+	resp, err := w.Client().MergeWorkspace(w.Ctx(), connect.NewRequest(harness.MergeRequest(child, harness.Async("no-such-merge", "no-such-branch"))))
 
 	// Assert
 	if err != nil || resp.Msg.GetError().GetUnknownBranch() == nil {

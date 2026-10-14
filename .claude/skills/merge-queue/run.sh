@@ -4,9 +4,9 @@
 # Every merge verb asks for a merge FROM the workspace this shell is inside.
 # The merge is put in line once the caller's current turn ends and reports its
 # outcome into that workspace's session; no merge verb waits for the outcome.
-# A merge is SYNC (it runs in the requesting workspace itself) unless asked
-# ASYNC (it runs in a hidden merge workspace forked from it, named by the
-# caller, and the requesting workspace stays free).
+# A merge is a ONE-SHOT (SYNC: this workspace's own branch, run in this
+# workspace, which closes once it lands) or ASYNC (a named branch, run in a
+# hidden merge workspace forked from this one, which stays free).
 #
 # The queue-control verbs (--dequeue-*, --move-*, --pause-queue,
 # --resume-queue, --hold-rollouts, --release-rollouts) ask,
@@ -15,47 +15,25 @@
 # refusal's cause when refused.
 #
 # Verbs:
-#   --enqueue-own [--in-place | --sync | --keep-open |
-#                  --async <name> [--pick <instruction>] [--compact-after]]
-#                                Merge this workspace's own branch. By
-#                                default it runs SYNC, in this workspace,
-#                                which closes once it lands; --in-place and
-#                                --sync say the same explicitly. --keep-open
-#                                runs it sync and keeps this workspace open.
-#                                --async <name> runs it ASYNC, in a hidden
-#                                merge workspace named <name>, leaving this
-#                                workspace free; with --pick <instruction>
-#                                only the changes the instruction names land,
-#                                cherry-picked onto the target by the merge
-#                                workspace's agent; with --compact-after this
-#                                workspace's conversation is compacted once
-#                                the merge lands. --compact-after goes with
-#                                --async alone and is refused on every other
-#                                form.
-#   --announce-one-shot          Announce, from inside the current turn, that
+#   --one-shot [--pr-merged]     Announce, from inside the current turn, that
 #                                this workspace one-shot merges once the turn
 #                                ends: its own branch in place, this workspace
 #                                closed once it lands, and this workspace
-#                                marked a one-shot now. Uncommitted work is not
-#                                refused here: the turn goes on, and the merge
-#                                itself refuses a dirty tree when it starts.
-#   --land-workspace <dir>       Merge ANOTHER workspace's branch, named by its
-#                                worktree. That workspace closes once it lands.
-#   --land-branch <branch>       Merge a branch that is no workspace (a
-#                                subagent's).
-#   --land-commits <commit>...   Merge ONLY the named commits of this
-#                                workspace's branch: they are cherry-picked, in
-#                                branch order, onto a new branch off the main
-#                                worktree's branch (in a worktree of its own
-#                                beside this one), which is then requested as
-#                                --land-branch requests a branch. On a conflict
-#                                or a refusal nothing built is left behind.
-#   --pr-merged                  This workspace's branch already merged
-#                                upstream: update the default branch and close
-#                                this workspace.
-#   --remove-branch <branch>     After a --land-branch merge LANDED: remove the
-#                                branch's worktree (when it has one) and the
-#                                branch, refusing a branch master lacks.
+#                                marked a one-shot now. With --pr-merged its
+#                                branch already merged upstream: the default
+#                                branch is updated and this workspace closed.
+#                                Refused in the repository's main worktree.
+#   --async <name> <branch> [--instruction <text>] [--close <dir>]
+#           [--cleanup] [--compact-after]
+#                                Merge <branch> ASYNC, in a hidden merge
+#                                workspace named <name> forked from this
+#                                workspace, which stays free. --instruction
+#                                has the merge workspace prepare the branch
+#                                first; --close names ANOTHER workspace, by
+#                                its worktree, to close once it lands;
+#                                --cleanup removes the worktree that has the
+#                                branch checked out once it lands;
+#                                --compact-after compacts this workspace then.
 #   --dequeue-own                Take this workspace's own merge off the queue.
 #   --dequeue-workspace <dir>    Take ANOTHER workspace's merge off the queue,
 #                                named by its worktree.
@@ -78,9 +56,7 @@
 #   --release-rollouts           End the hold; the next landing redeploys.
 #
 # Modifier:
-#   --front                      With any merge verb (--enqueue-own,
-#                                --announce-one-shot, --land-workspace,
-#                                --land-branch, --land-commits, --pr-merged),
+#   --front                      With a merge verb (--one-shot, --async),
 #                                anywhere among
 #                                its arguments: the merge goes to the FRONT of
 #                                its queue once it is put in line, ahead of
@@ -88,18 +64,14 @@
 #                                the one running. Refused on any other verb.
 #
 # Exit codes (every verb):
-#   0  requested (end the turn; the outcome reports into this session),
-#      announced (--announce-one-shot; the turn goes on),
-#      removed (--remove-branch), or applied (queue-control verbs; the printed
-#      outcome line is evicted, moved_up, moved_down, unmoved, not_queued,
-#      paused, resumed, held or released, or unread)
+#   0  requested (--async; the outcome reports into this session), announced
+#      (--one-shot; the turn goes on), or applied (queue-control verbs; the
+#      printed outcome line is evicted, moved_up, moved_down, unmoved,
+#      not_queued, paused, resumed, held or released, or unread)
 #   2  script/usage error, or the merge or control could not be requested
 #   5  refused by the daemon; why (or how to read why) is printed (an async
-#      merge's name already taken is refused here: pick another name)
-#   6  the workspace has uncommitted work (--enqueue-own)
-#   7  --land-workspace named this shell's own workspace
-#   9  a named commit did not apply cleanly onto the main worktree's branch
-#      (--land-commits); nothing was built or requested
+#      merge's name already taken, its branch checked out in this workspace,
+#      or a --close workspace that is not open here, is refused here)
 #   8  the daemon did not answer a queue-control request in time; the request
 #      stays pending (queue-control verbs)
 
@@ -111,10 +83,6 @@ set -uo pipefail
 die() {
   printf 'merge-queue: %s\n' "$*" >&2
   exit 2
-}
-
-log() {
-  printf 'merge-queue: %s\n' "$*"
 }
 
 # repo_main_worktree answers the repository's main worktree: the first entry
@@ -129,7 +97,7 @@ workspace_top() {
   local top main
   top="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a git worktree"
   main="$(repo_main_worktree)" || die "not inside a git repository"
-  [ "$top" != "$main" ] || die "$top is the repository's main worktree, not a workspace; use --land-branch for a branch"
+  [ "$top" != "$main" ] || die "$top is the repository's main worktree, which never one-shots; land a branch with --async"
   printf '%s\n' "$top"
 }
 
@@ -160,14 +128,6 @@ for arg in "$@"; do
 done
 set -- "${ARGS[@]+"${ARGS[@]}"}"
 
-# --compact-after rides an async own-branch merge alone: every other verb
-# refuses it here, and --enqueue-own refuses it on every form but --async.
-if [ "${1:-}" != --enqueue-own ]; then
-  for arg in "$@"; do
-    [ "$arg" != --compact-after ] || die "--compact-after goes with --enqueue-own --async <name> alone, not ${1:-no verb}"
-  done
-fi
-
 # no_front refuses --front on a verb that requests no merge.
 no_front() {
   [ "${#FRONT[@]}" -eq 0 ] || die "--front goes with a merge verb; $1 requests no merge"
@@ -195,134 +155,45 @@ run_verb() {
   exit $?
 }
 
-# drop_built removes a --land-commits branch and its worktree, so a conflict or
-# a refusal leaves nothing behind.
-drop_built() {
-  git -C "$1" worktree remove --force "$2" || die "could not remove the built worktree $2"
-  git -C "$1" branch -D "$3" || die "could not delete the built branch $3"
-}
-
 case "${1:-}" in
-  --enqueue-own)
+  --one-shot)
     shift
-    mode=()
-    for arg in "$@"; do
-      [ "$arg" != --compact-after ] || [ "${1:-}" = --async ] ||
-        die "--compact-after goes with --async <name> alone: only an async merge leaves this workspace free to compact once it lands"
-    done
+    mode=(-one-shot)
     case "${1:-}" in
       "") ;;
-      --keep-open)
-        [ "$#" -eq 1 ] || die "--enqueue-own --keep-open takes nothing after it, not ${2}"
-        mode=(-keep-open) ;;
-      --in-place | --sync)
-        [ "$#" -eq 1 ] || die "--enqueue-own $1 takes nothing after it, not ${2}"
-        mode=(-in-place) ;;
-      --async)
-        [ -n "${2:-}" ] && [ "$2" != --compact-after ] && [ "$2" != --pick ] || die "--enqueue-own --async needs the merge workspace's name"
-        mode=(-async -name "$2")
-        shift 2
-        picked=0 compact=0
-        while [ "$#" -gt 0 ]; do
-          case "$1" in
-            --pick)
-              [ "$picked" -eq 0 ] || die "--pick is given once"
-              [ -n "${2:-}" ] && [ "$2" != --compact-after ] || die "--pick needs the instruction naming the changes to land"
-              mode+=(-pick "$2")
-              picked=1
-              shift 2 ;;
-            --compact-after)
-              [ "$compact" -eq 0 ] || die "--compact-after is given once"
-              mode+=(-compact-after)
-              compact=1
-              shift ;;
-            *) die "--enqueue-own --async <name> takes only --pick <instruction> and --compact-after, not $1; quote a pick's instruction as one argument" ;;
-          esac
-        done ;;
-      *) die "--enqueue-own takes only --in-place, --sync, --keep-open or --async <name> [--pick <instruction>] [--compact-after], not $1" ;;
+      --pr-merged)
+        [ "$#" -eq 1 ] || die "--one-shot --pr-merged takes nothing after it, not ${2}"
+        mode+=(-pr-merged) ;;
+      *) die "--one-shot takes only --pr-merged, not $1" ;;
     esac
-    top="$(workspace_top)" || exit 2
-    if [ -n "$(git -C "$top" status --porcelain 2>/dev/null)" ]; then
-      log "$top has uncommitted work; commit it before enqueueing"
-      exit 6
-    fi
-    run_verb -own "${mode[@]+"${mode[@]}"}"
+    workspace_top >/dev/null || exit 2
+    run_verb "${mode[@]}"
     ;;
-  --announce-one-shot)
-    [ -z "${2:-}" ] || die "--announce-one-shot takes no argument, not $2"
-    top="$(workspace_top)" || exit 2
-    run_verb -own -one-shot
-    ;;
-  --land-workspace)
-    [ -n "${2:-}" ] || die "--land-workspace needs the workspace's worktree directory"
-    top="$(git rev-parse --show-toplevel 2>/dev/null || true)"
-    if [ -n "$top" ] && [ "$(cd "$2" 2>/dev/null && pwd -P)" = "$(cd "$top" && pwd -P)" ]; then
-      log "$2 is this shell's own workspace; enqueue it with --enqueue-own and end the turn"
-      exit 7
-    fi
-    run_verb -dir "$2"
-    ;;
-  --land-branch)
-    [ -n "${2:-}" ] || die "--land-branch needs a branch name"
-    run_verb -branch "$2"
-    ;;
-  --land-commits)
-    shift
-    [ "$#" -gt 0 ] || die "--land-commits needs at least one commit"
-    top="$(workspace_top)" || exit 2
-    main="$(repo_main_worktree)" || die "not inside a git repository"
-    target="$(git -C "$main" rev-parse --abbrev-ref HEAD)" || die "could not read the main worktree's branch"
-    own="$(git -C "$top" rev-parse --abbrev-ref HEAD)" || die "could not read this workspace's branch"
-    wanted=()
-    for commit in "$@"; do
-      full="$(git -C "$top" rev-parse --verify "$commit^{commit}")" || die "$commit names no commit"
-      git -C "$top" merge-base --is-ancestor "$full" HEAD || die "$commit is not on this workspace's branch $own"
-      if git -C "$top" merge-base --is-ancestor "$full" "$target"; then
-        die "$commit is already on $target"
-      fi
-      wanted+=("$full")
+  --async)
+    [ -n "${2:-}" ] && [ "${2#--}" = "$2" ] || die "--async needs the merge workspace's name"
+    [ -n "${3:-}" ] && [ "${3#--}" = "$3" ] || die "--async <name> needs the branch to land"
+    mode=(-async -name "$2" -branch "$3")
+    shift 3
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --instruction)
+          [ -n "${2:-}" ] || die "--instruction needs the text saying how to prepare the branch"
+          mode+=(-instruction "$2")
+          shift 2 ;;
+        --close)
+          [ -n "${2:-}" ] || die "--close needs the worktree directory of the workspace to close"
+          mode+=(-close-dir "$2")
+          shift 2 ;;
+        --cleanup)
+          mode+=(-cleanup-worktree)
+          shift ;;
+        --compact-after)
+          mode+=(-compact-after)
+          shift ;;
+        *) die "--async <name> <branch> takes only --instruction <text>, --close <dir>, --cleanup and --compact-after, not $1; quote an instruction as one argument" ;;
+      esac
     done
-    ordered=()
-    while IFS= read -r full; do
-      for w in "${wanted[@]}"; do
-        if [ "$w" = "$full" ]; then
-          ordered+=("$full")
-          break
-        fi
-      done
-    done < <(git -C "$top" rev-list --reverse "$target..HEAD")
-    [ "${#ordered[@]}" -eq "${#wanted[@]}" ] || die "could not order the named commits along $own"
-    last="${ordered[${#ordered[@]}-1]}"
-    branch="$own-partial-${last:0:9}"
-    dir="$(dirname "$top")/${branch//\//-}"
-    git -C "$main" worktree add -b "$branch" "$dir" "$target" || die "could not create $branch in $dir"
-    if ! git -C "$dir" cherry-pick "${ordered[@]}"; then
-      git -C "$dir" cherry-pick --abort || die "could not abort the cherry-pick in $dir"
-      drop_built "$main" "$dir" "$branch"
-      log "the named commits did not apply cleanly onto $target; nothing was requested"
-      exit 9
-    fi
-    log "built $branch in $dir from ${#ordered[@]} commit(s) of $own"
-    verb_status -branch "$branch"
-    rc=$?
-    [ "$rc" -eq 0 ] || drop_built "$main" "$dir" "$branch"
-    exit "$rc"
-    ;;
-  --pr-merged)
-    run_verb -pr-merged
-    ;;
-  --remove-branch)
-    no_front "$1"
-    [ -n "${2:-}" ] || die "--remove-branch needs a branch name"
-    main="$(repo_main_worktree)" || die "not inside a git repository"
-    wt="$(git -C "$main" worktree list --porcelain 2>/dev/null |
-      awk -v want="branch refs/heads/$2" '/^worktree /{dir=substr($0,10)} $0==want{print dir}')"
-    if [ -n "$wt" ]; then
-      git -C "$main" worktree remove "$wt" || die "could not remove $2's worktree $wt"
-      log "removed $2's worktree $wt"
-    fi
-    git -C "$main" branch -d "$2" || die "could not delete $2; it may not have landed on master"
-    log "deleted the branch $2"
+    run_verb "${mode[@]}"
     ;;
   --dequeue-own)
     no_front "$1"
@@ -365,7 +236,7 @@ case "${1:-}" in
     run_verb "$control"
     ;;
   *)
-    printf 'usage: run.sh --enqueue-own [--in-place | --sync | --keep-open | --async <name> [--pick <instruction>] [--compact-after]] | --announce-one-shot | --land-workspace <dir> | --land-branch <branch> | --land-commits <commit>... | --pr-merged | --remove-branch <branch> | --dequeue-own | --dequeue-workspace <dir> | --move-up-own | --move-up-workspace <dir> | --move-down-own | --move-down-workspace <dir> | --pause-queue [<repo-dir>] | --resume-queue [<repo-dir>] | --hold-rollouts | --release-rollouts  (any merge verb also takes --front)\n' >&2
+    printf 'usage: run.sh --one-shot [--pr-merged] | --async <name> <branch> [--instruction <text>] [--close <dir>] [--cleanup] [--compact-after] | --dequeue-own | --dequeue-workspace <dir> | --move-up-own | --move-up-workspace <dir> | --move-down-own | --move-down-workspace <dir> | --pause-queue [<repo-dir>] | --resume-queue [<repo-dir>] | --hold-rollouts | --release-rollouts  (any merge verb also takes --front)\n' >&2
     exit 1
     ;;
 esac

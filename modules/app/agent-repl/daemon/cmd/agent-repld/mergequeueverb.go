@@ -30,11 +30,8 @@ import (
 
 // THE `merge-queue` VERB:
 //
-//	agent-repld merge-queue -own [-keep-open | -one-shot] [-front] [-wait] [-state-dir DIR]
-//	agent-repld merge-queue -own -async -name NAME [-pick INSTRUCTION] [-compact-after] [-front] [-state-dir DIR]
-//	agent-repld merge-queue -dir WORKTREE [-front] [-wait] [-state-dir DIR]
-//	agent-repld merge-queue -branch BRANCH [-front] [-wait] [-state-dir DIR]
-//	agent-repld merge-queue -pr-merged [-front] [-wait] [-state-dir DIR]
+//	agent-repld merge-queue -one-shot [-pr-merged] [-front] [-wait] [-state-dir DIR]
+//	agent-repld merge-queue -async -name NAME -branch BRANCH [-instruction TEXT] [-close-dir WORKTREE] [-cleanup-worktree] [-compact-after] [-front] [-state-dir DIR]
 //	agent-repld merge-queue -evict | -evict-dir WORKTREE [-answer-timeout D] [-state-dir DIR]
 //	agent-repld merge-queue -move-up | -move-down [-move-dir WORKTREE] [-answer-timeout D] [-state-dir DIR]
 //	agent-repld merge-queue -pause | -resume [-repository-dir DIR] [-answer-timeout D] [-state-dir DIR]
@@ -47,18 +44,18 @@ import (
 // (merge.RequestedByAgent) the merge-queue skill's agents use -- naming what
 // the calling workspace merges:
 //
-//   - `-own` its own branch, SYNC by default: in the calling workspace, closed
-//     once it lands unless `-keep-open`; with `-async -name NAME` ASYNC
-//     instead, in a hidden merge workspace named NAME, and with `-pick
-//     INSTRUCTION` only the changes the instruction names; `-one-shot`
-//     ANNOUNCES it a one-shot: merged in place once the turn ends and closed
-//     once it lands, and marked a one-shot from the moment the daemon applies
-//     the request, so its tab draws the one-shot mark while the announcing
-//     turn still runs;
-//   - `-dir` another workspace's branch, by that workspace's worktree, which
-//     closes once it lands;
-//   - `-branch` a branch that is no workspace (a subagent's);
-//   - `-pr-merged` its own branch, already merged upstream.
+//   - `-one-shot` its own branch, SYNC: merged in place once the turn ends,
+//     closing the calling workspace once it lands, and marked a one-shot
+//     from the moment the daemon applies the request; with `-pr-merged` its
+//     own branch already merged upstream, which updates the default branch
+//     and closes it;
+//   - `-async -name NAME -branch BRANCH` the named branch, ASYNC: in a hidden
+//     merge workspace named NAME, forked from the calling workspace's
+//     conversation onto BRANCH's tip, leaving the calling workspace free.
+//     `-instruction TEXT` has the merge workspace prepare the branch first;
+//     `-close-dir WORKTREE` names another workspace to close once it lands;
+//     `-cleanup-worktree` removes the worktree that has BRANCH checked out
+//     once it lands; `-compact-after` compacts the calling workspace then.
 //
 // `-front` puts any of them at the FRONT of its queue once it is put in line:
 // ahead of every ordinary merge still waiting, never ahead of the one running.
@@ -241,18 +238,15 @@ func runMergeQueueVerb(ctx context.Context, args []string, dial mergeQueueDialer
 	}
 	fs := flag.NewFlagSet(mergeQueueVerb, flag.ContinueOnError)
 	fs.SetOutput(errOut)
-	own := fs.Bool("own", false, "merge the calling workspace's own branch")
-	keepOpen := fs.Bool("keep-open", false, "with -own: merge in place and keep the calling workspace open once its branch lands")
-	oneShot := fs.Bool("one-shot", false, "with -own: announce a one-shot merge -- in place once the calling turn ends, closing the calling workspace once it lands, and marking it a one-shot now")
-	inPlace := fs.Bool("in-place", false, "with -own: merge sync, in the calling workspace itself, holding its prompts until the merge ends (the default; also spelled -sync)")
-	syncRun := fs.Bool("sync", false, "with -own: the same as -in-place")
-	async := fs.Bool("async", false, "with -own and -name: merge async, in a hidden merge workspace forked from the calling workspace, which stays free")
+	oneShot := fs.Bool("one-shot", false, "merge the calling workspace's own branch SYNC, in place once the calling turn ends, closing the calling workspace once it lands")
+	prMerged := fs.Bool("pr-merged", false, "with -one-shot: the calling workspace's branch already merged upstream: update the default branch and close it")
+	async := fs.Bool("async", false, "with -name and -branch: merge the branch ASYNC, in a hidden merge workspace forked from the calling workspace, which stays free")
 	name := fs.String("name", "", "with -async: the merge workspace's name, a short slug naming what is merged")
-	pick := fs.String("pick", "", "with -async: land only the changes this instruction names, which the merge agent cherry-picks onto the target branch")
-	compactAfter := fs.Bool("compact-after", false, "with -async: compact the calling workspace's conversation once its branch lands")
-	dir := fs.String("dir", "", "merge another workspace's branch, by its worktree; it closes once it lands")
-	branch := fs.String("branch", "", "merge a branch that is no workspace (a subagent's)")
-	prMerged := fs.Bool("pr-merged", false, "the calling workspace's branch already merged upstream: update the default branch and close it")
+	branch := fs.String("branch", "", "with -async: the branch to land")
+	instruction := fs.String("instruction", "", "with -async: how the merge workspace prepares the branch before it joins the queue")
+	closeDir := fs.String("close-dir", "", "with -async: another workspace, by its worktree, to close once the merge lands")
+	cleanupWorktree := fs.Bool("cleanup-worktree", false, "with -async: remove the worktree that has the branch checked out once the merge lands")
+	compactAfter := fs.Bool("compact-after", false, "with -async: compact the calling workspace's conversation once the branch lands")
 	front := fs.Bool("front", false, "with a merge: put it at the front of its queue, ahead of every ordinary merge waiting, never ahead of the one running")
 	evict := fs.Bool("evict", false, "take the calling workspace's merge off the queue")
 	evictDir := fs.String("evict-dir", "", "take another workspace's merge off the queue, by its worktree")
@@ -274,8 +268,8 @@ func runMergeQueueVerb(ctx context.Context, args []string, dial mergeQueueDialer
 		return fail("unexpected arguments: %s", strings.Join(fs.Args(), " "))
 	}
 	source, err := resolveMergeQueueSource(mergeQueueFlags{
-		own: *own, keepOpen: *keepOpen, oneShot: *oneShot, inPlace: *inPlace || *syncRun, async: *async, name: *name, pick: *pick, compactAfter: *compactAfter,
-		wait: *wait, dir: *dir, branch: *branch, prMerged: *prMerged, front: *front,
+		oneShot: *oneShot, prMerged: *prMerged, async: *async, name: *name, branch: *branch, instruction: *instruction,
+		closeDir: *closeDir, cleanupWorktree: *cleanupWorktree, compactAfter: *compactAfter, wait: *wait, front: *front,
 		evict: *evict, evictDir: *evictDir, moveUp: *moveUp, moveDown: *moveDown, moveDir: *moveDir,
 		pause: *pause, resume: *resume, repositoryDir: *repositoryDir,
 		holdRollouts: *holdRollouts, releaseRollouts: *releaseRollouts,
@@ -304,23 +298,19 @@ func runMergeQueueVerb(ctx context.Context, args []string, dial mergeQueueDialer
 
 // mergeQueueFlags are the flags that name what one invocation asks for.
 type mergeQueueFlags struct {
-	own, keepOpen bool
-	// inPlace asks for an own-branch merge SYNC, in the calling workspace,
-	// which is also what an own-branch merge does when async is not asked.
-	inPlace, wait bool
-	// oneShot announces an own-branch merge a one-shot: in place, closing the
-	// calling workspace once it lands, and marking it a one-shot at once.
-	oneShot bool
-	// async asks for an own-branch merge ASYNC, in a hidden merge workspace
-	// named name; pick, when set, lands only the changes it names.
-	async      bool
-	name, pick string
-	// compactAfter asks, with async, that the calling workspace's
-	// conversation be compacted once its branch lands. A sync merge cannot
-	// ask it.
-	compactAfter bool
-	dir, branch  string
-	prMerged     bool
+	// oneShot asks for the calling workspace's own branch SYNC, in place,
+	// closing it once it lands; prMerged says that branch already merged
+	// upstream.
+	oneShot, prMerged, wait bool
+	// async asks for BRANCH ASYNC, in a hidden merge workspace named name;
+	// instruction prepares the branch first, closeDir names a workspace to
+	// close once it lands, cleanupWorktree removes the branch's worktree
+	// then, and compactAfter compacts the calling workspace then.
+	async                 bool
+	name, branch          string
+	instruction, closeDir string
+	cleanupWorktree       bool
+	compactAfter          bool
 	// front puts the merge at the front of its queue (commandfile.Entry.Front).
 	front    bool
 	evict    bool
@@ -354,54 +344,34 @@ func resolveMergeQueueSource(f mergeQueueFlags) (mergeQueueSource, error) {
 // name.
 func resolveMergeQueueRequest(f mergeQueueFlags) (mergeQueueSource, error) {
 	named := 0
-	for _, set := range []bool{f.own, f.dir != "", f.branch != "", f.prMerged, f.evict, f.evictDir != "", f.moveUp, f.moveDown, f.pause, f.resume, f.holdRollouts, f.releaseRollouts} {
+	for _, set := range []bool{f.oneShot, f.async, f.evict, f.evictDir != "", f.moveUp, f.moveDown, f.pause, f.resume, f.holdRollouts, f.releaseRollouts} {
 		if set {
 			named++
 		}
 	}
 	switch {
 	case named == 0:
-		return mergeQueueSource{}, errors.New("name the merge or control: -own, -dir WORKTREE, -branch BRANCH, -pr-merged, -evict, -evict-dir WORKTREE, -move-up, -move-down, -pause, -resume, -hold-rollouts or -release-rollouts")
+		return mergeQueueSource{}, errors.New("name the merge or control: -one-shot, -async, -evict, -evict-dir WORKTREE, -move-up, -move-down, -pause, -resume, -hold-rollouts or -release-rollouts")
 	case named > 1:
-		return mergeQueueSource{}, errors.New("-own, -dir, -branch, -pr-merged, -evict, -evict-dir, -move-up, -move-down, -pause, -resume, -hold-rollouts and -release-rollouts each name a different request; give one")
-	case f.keepOpen && !f.own:
-		return mergeQueueSource{}, errors.New("-keep-open goes with -own: only the calling workspace's own branch can keep it open")
-	case f.inPlace && !f.own:
-		return mergeQueueSource{}, errors.New("-in-place goes with -own: only the calling workspace's own branch can run sync or async")
-	case f.oneShot && !f.own:
-		return mergeQueueSource{}, errors.New("-one-shot goes with -own: only the calling workspace's own branch is announced a one-shot")
-	case f.oneShot && (f.keepOpen || f.inPlace || f.async || f.wait):
-		return mergeQueueSource{}, errors.New("-one-shot is its own in-place merge that closes the calling workspace, announced from inside the turn it waits on: it takes none of -keep-open, -in-place, -async or -wait")
-	case f.async && !f.own:
-		return mergeQueueSource{}, errors.New("-async goes with -own: only the calling workspace's own branch can run async")
-	case f.async && (f.inPlace || f.keepOpen):
-		return mergeQueueSource{}, errors.New("-async runs the merge in a merge workspace; -in-place and -keep-open are a sync merge's")
+		return mergeQueueSource{}, errors.New("-one-shot, -async, -evict, -evict-dir, -move-up, -move-down, -pause, -resume, -hold-rollouts and -release-rollouts each name a different request; give one")
+	case f.prMerged && !f.oneShot:
+		return mergeQueueSource{}, errors.New("-pr-merged goes with -one-shot: it closes the calling workspace")
+	case !f.async && (f.name != "" || f.branch != "" || f.instruction != "" || f.closeDir != "" || f.cleanupWorktree || f.compactAfter):
+		return mergeQueueSource{}, errors.New("-name, -branch, -instruction, -close-dir, -cleanup-worktree and -compact-after go with -async")
 	case f.async && f.wait:
 		return mergeQueueSource{}, errors.New("-wait waits on a merge in the calling workspace; an async merge reports back to its conversation instead")
 	case f.async && strings.TrimSpace(f.name) == "":
 		return mergeQueueSource{}, errors.New("-async names its merge workspace: give -name NAME")
-	case !f.async && (f.name != "" || f.pick != ""):
-		return mergeQueueSource{}, errors.New("-name and -pick go with -async")
-	case f.pick != "" && strings.TrimSpace(f.pick) == "":
-		return mergeQueueSource{}, errors.New("-pick names the changes it lands")
-	case f.compactAfter && !f.async:
-		return mergeQueueSource{}, errors.New("-compact-after goes with -async: only an async merge leaves the calling workspace free to compact once it lands")
+	case f.async && strings.TrimSpace(f.branch) == "":
+		return mergeQueueSource{}, errors.New("-async names the branch it lands: give -branch BRANCH")
+	case f.instruction != "" && strings.TrimSpace(f.instruction) == "":
+		return mergeQueueSource{}, errors.New("-instruction says how to prepare the branch")
 	case f.moveDir != "" && !f.moveUp && !f.moveDown:
 		return mergeQueueSource{}, errors.New("-move-dir goes with -move-up or -move-down: it names the workspace whose merge they move")
 	case f.repositoryDir != "" && !f.pause && !f.resume:
 		return mergeQueueSource{}, errors.New("-repository-dir goes with -pause or -resume: it names the repository whose queue they address")
 	}
 	switch {
-	case f.dir != "":
-		abs, err := existingDir("-dir", f.dir)
-		if err != nil {
-			return mergeQueueSource{}, err
-		}
-		return mergeQueueSource{label: filepath.Base(abs), entry: commandfile.Entry{Type: commandfile.TypeMerge, SourceDir: abs}}, nil
-	case f.branch != "":
-		return mergeQueueSource{label: f.branch, entry: commandfile.Entry{Type: commandfile.TypeMerge, Branch: f.branch}}, nil
-	case f.prMerged:
-		return mergeQueueSource{label: "its own branch, already merged upstream", entry: commandfile.Entry{Type: commandfile.TypeMerge, PRWasMerged: true}}, nil
 	case f.evict:
 		return mergeQueueSource{label: "its own merge off the queue", control: true, entry: commandfile.Entry{Type: commandfile.TypeMergeEvict}}, nil
 	case f.evictDir != "":
@@ -445,26 +415,38 @@ func resolveMergeQueueRequest(f mergeQueueFlags) (mergeQueueSource, error) {
 		}
 		return mergeQueueSource{label: label, control: true, entry: commandfile.Entry{Type: typ, RepositoryDir: repo}}, nil
 	}
-	// AN OWN-BRANCH MERGE RUNS SYNC BY DEFAULT (owner ruling, 2026-10-11): in
-	// the calling workspace, which closes once it lands unless -keep-open.
-	// -async runs it in a hidden merge workspace named -name instead.
 	// A ONE-SHOT is announced from inside the turn it follows: it runs in
 	// place and closes the calling workspace once it lands.
 	if f.oneShot {
+		if f.prMerged {
+			return mergeQueueSource{label: "its own branch, already merged upstream, as a one-shot",
+				entry: commandfile.Entry{Type: commandfile.TypeMerge, OneShot: true, PRWasMerged: true}}, nil
+		}
 		return mergeQueueSource{label: "its own branch, as a one-shot", entry: commandfile.Entry{Type: commandfile.TypeMerge, OneShot: true}}, nil
 	}
-	if f.async {
-		name, pick := strings.TrimSpace(f.name), strings.TrimSpace(f.pick)
-		label := "its own branch, async, in merge workspace " + name
-		if pick != "" {
-			label = "a pick of its own branch, async, in merge workspace " + name
-		}
-		if f.compactAfter {
-			label += ", compacting this workspace once it lands"
-		}
-		return mergeQueueSource{label: label, entry: commandfile.Entry{Type: commandfile.TypeMerge, Detached: true, DetachedName: name, Pick: pick, CompactAfter: f.compactAfter}}, nil
+	// AN ASYNC MERGE lands the named branch in a hidden merge workspace.
+	name, branch, instruction := strings.TrimSpace(f.name), strings.TrimSpace(f.branch), strings.TrimSpace(f.instruction)
+	entry := commandfile.Entry{Type: commandfile.TypeMerge, AsyncName: name, Branch: branch, Instruction: instruction,
+		CleanupWorktree: f.cleanupWorktree, CompactAfter: f.compactAfter}
+	label := branch + ", async, in merge workspace " + name
+	if instruction != "" {
+		label += ", prepared as instructed"
 	}
-	return mergeQueueSource{label: "its own branch, in place", entry: commandfile.Entry{Type: commandfile.TypeMerge, KeepOpen: f.keepOpen}}, nil
+	if f.closeDir != "" {
+		abs, err := existingDir("-close-dir", f.closeDir)
+		if err != nil {
+			return mergeQueueSource{}, err
+		}
+		entry.CloseDir = abs
+		label += ", closing " + filepath.Base(abs) + " once it lands"
+	}
+	if f.cleanupWorktree {
+		label += ", removing the branch's worktree once it lands"
+	}
+	if f.compactAfter {
+		label += ", compacting this workspace once it lands"
+	}
+	return mergeQueueSource{label: label, entry: entry}, nil
 }
 
 // existingDir resolves a flag's directory to an absolute path that is a

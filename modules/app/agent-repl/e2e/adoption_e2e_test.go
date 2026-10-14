@@ -420,10 +420,7 @@ func adTriggerDeploy(t *testing.T, w *World, selfRepo *harness.Repo, build harne
 	trigger := adCreateAndFinishChild(t, w, repoRef, "trigger")
 	sha := selfRepo.CommitIn(trigger.GetDir(), path, "trigger\n")
 	selfRepo.SetPaths(sha, path)
-	if _, err := w.Client().MergeWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{
-		Workspace: trigger,
-		Source:    harness.OwnBranch(false),
-	})); err != nil {
+	if _, err := w.Client().MergeWorkspace(w.Ctx(), connect.NewRequest(harness.MergeRequest(trigger, harness.OneShot()))); err != nil {
 		t.Fatalf("MergeWorkspace(trigger) = error %v, want the merge enqueued and landed", err)
 	}
 }

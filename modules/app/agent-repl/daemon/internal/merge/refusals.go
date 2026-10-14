@@ -56,10 +56,14 @@ const (
 	// ArmRolloutsNotHeld refuses a release of rollouts that are not held
 	// (UpdateMergeQueueError.rollouts_not_held).
 	ArmRolloutsNotHeld = "rollouts_not_held"
-	// ArmUnknownSourceWorkspace refuses a request whose source workspace is
-	// not open, is in another repository, or is the requester itself
-	// (MergeWorkspaceError.unknown_source_workspace).
-	ArmUnknownSourceWorkspace = "unknown_source_workspace"
+	// ArmUnknownOneShotWorkspace refuses an async request whose one-shot
+	// workspace is not open, is in another repository, or is the requester
+	// itself (MergeWorkspaceError.unknown_one_shot_workspace).
+	ArmUnknownOneShotWorkspace = "unknown_one_shot_workspace"
+	// ArmBranchCheckedOutInRequester refuses an async request whose branch is
+	// the one checked out in the requester's own worktree
+	// (MergeWorkspaceError.branch_checked_out_in_requester).
+	ArmBranchCheckedOutInRequester = "branch_checked_out_in_requester"
 	// ArmUnknownBranch refuses a request whose source branch does not exist
 	// (MergeWorkspaceError.unknown_branch).
 	ArmUnknownBranch = "unknown_branch"

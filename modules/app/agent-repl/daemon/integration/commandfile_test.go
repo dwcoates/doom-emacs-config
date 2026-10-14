@@ -374,7 +374,7 @@ func TestAFileRouteMergeOnAnUnmergeableWorkspaceIsQuarantined(t *testing.T) {
 
 	// Act
 	path := commandfileWrite(t, f.d, "workspace_commands_unmergeable.json",
-		`[{"type":"merge","workspace":"`+f.ws.GetId()+`"}]`)
+		`[{"type":"merge","workspace":"`+f.ws.GetId()+`","one_shot":true}]`)
 
 	// Assert
 	f.d.AwaitFileGone(path)
