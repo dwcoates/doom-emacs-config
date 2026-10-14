@@ -1720,6 +1720,23 @@ describe("the hidden section's rows", () => {
     );
   });
 
+  it.each([
+    { name: "a hidden row recedes", place: "hidden", closed: false, want: true },
+    { name: "a closed row recedes", place: "grouping", closed: true, want: true },
+    { name: "an open grouping row does not recede", place: "grouping", closed: false, want: false },
+  ] as const)("$name", ({ place, closed, want }) => {
+    const drawn = drawRosterRow(row({ id: "ws-1", closed }), sidebarContext(), "R", place);
+    expect(drawn.classList.contains("receded")).toBe(want);
+  });
+
+  it("draws a hidden row at the receded opacity a merged row wears", () => {
+    const opacityOf = (place: "hidden" | "merged", closed: boolean): string => {
+      const drawn = drawRosterRow(row({ id: "ws-1", closed }), sidebarContext(), "R", place);
+      return inRail(drawn, () => cascadedValue(drawn.querySelector(":scope > .row") as HTMLElement, "opacity"));
+    };
+    expect([opacityOf("hidden", false), opacityOf("merged", true)]).toEqual(["0.55", "0.55"]);
+  });
+
   it("strikes a hidden row's name through at a cold gate", () => {
     const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "coldGate", value: {} } }), sidebarContext(), "R", "hidden");
     expect(inRail(drawn, () => cascadedValue(drawn.querySelector(":scope > .row > .name") as HTMLElement, "text-decoration"))).toBe(
