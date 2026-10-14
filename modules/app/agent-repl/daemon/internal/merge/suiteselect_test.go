@@ -70,9 +70,9 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 			want:  []string{"e2e", "e2e-emacs"},
 		},
 		{
-			name:  "a shim change selects the shim suite and the end-to-end suites",
+			name:  "a shim change selects the shim suite, the sidecar's mocked vendor and the end-to-end suites",
 			paths: []string{"modules/app/agent-repl/agent-shim/claude/shim/src/main.ts"},
-			want:  []string{"shim", "e2e", "e2e-emacs"},
+			want:  []string{"shim", "sidecar", "e2e", "e2e-emacs"},
 		},
 		{
 			name:  "a sidecar change selects the sidecar suite and the end-to-end suites",
@@ -87,7 +87,7 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 		{
 			name:  "the committed metaprompt selects the shim suite that reads it back, and the end-to-end suites",
 			paths: []string{"modules/app/agent-repl/metaprompt.md"},
-			want:  []string{"shim", "e2e", "e2e-emacs"},
+			want:  []string{"shim", "sidecar", "e2e", "e2e-emacs"},
 		},
 		{
 			name:  "documentation beside a daemon change adds nothing to the daemon's selection",
@@ -241,7 +241,7 @@ func TestSelectSuitesMapsShimLockToItsSuiteAndTheShims(t *testing.T) {
 	got := SelectSuites([]string{"modules/app/agent-repl/agent-shim/shim-lock/main.go"})
 
 	// Assert.
-	want := strings.Join(inRosterOrder(setOf([]string{"lock", "shim", "e2e", "e2e-emacs"})), ",")
+	want := strings.Join(inRosterOrder(setOf([]string{"lock", "shim", "sidecar", "e2e", "e2e-emacs"})), ",")
 	if got.Full || strings.Join(got.Suites, ",") != want {
 		t.Fatalf("shim-lock selected %v (full=%v), want %s", got.Suites, got.Full, want)
 	}
@@ -500,5 +500,73 @@ func TestEveryVitestSuiteIsSelectedByEveryTreeItImports(t *testing.T) {
 	}
 	if len(checked) == 0 {
 		t.Fatal("no Vitest suite imports anything outside itself; the walk read nothing")
+	}
+}
+
+// TestNoSystemsIntegrationSuiteRunsAnotherSystem pins the rule the selection
+// rests on (AGENTS.md, "A system's integration tests run that system alone"):
+// no system's integration sources build, locate or start another system's
+// real binary. Each entry names what running that other system would require
+// a source to say; a line that is only a comment is not read.
+func TestNoSystemsIntegrationSuiteRunsAnotherSystem(t *testing.T) {
+	// Arrange: the module root on disk, four directories up.
+	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	if err != nil {
+		t.Fatalf("resolve the module root: %v", err)
+	}
+	tests := []struct {
+		dir string
+		// skip is a subdirectory that is not this system's own suite: the
+		// daemon's integration harness is also the end-to-end suite's, and
+		// stages real services for it.
+		skip      string
+		forbidden []*regexp.Regexp
+	}{
+		{dir: "daemon/integration", skip: "harness", forbidden: []*regexp.Regexp{
+			regexp.MustCompile(`ServiceBinaries\s*:`), regexp.MustCompile(`shim-store"`), regexp.MustCompile(`shim-sidecar"`)}},
+		{dir: "agent-shim/claude/shim-sidecar/integration", forbidden: []*regexp.Regexp{
+			regexp.MustCompile(`"shim-store"`), regexp.MustCompile(`"agent-repld"`), regexp.MustCompile(`storeBinary`)}},
+		{dir: "agent-shim/shim-store/integration", forbidden: []*regexp.Regexp{
+			regexp.MustCompile(`"shim-claude-sidecar"\)`), regexp.MustCompile(`shim-sidecar"`), regexp.MustCompile(`"agent-repld"`), regexp.MustCompile(`dist/main\.js`)}},
+		{dir: "agent-shim/claude/shim/test/integration", forbidden: []*regexp.Regexp{
+			regexp.MustCompile(`shim-store`), regexp.MustCompile(`shim-sidecar`), regexp.MustCompile(`agent-repld"`)}},
+		{dir: "webapp/test/integration", forbidden: []*regexp.Regexp{
+			regexp.MustCompile(`daemon/bin`), regexp.MustCompile(`cmd/agent-repld`), regexp.MustCompile(`shim-store`)}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.dir, func(t *testing.T) {
+			// Act.
+			err := filepath.WalkDir(filepath.Join(root, tt.dir), func(path string, d os.DirEntry, err error) error {
+				if err != nil {
+					return err
+				}
+				if d.IsDir() && tt.skip != "" && d.Name() == tt.skip {
+					return filepath.SkipDir
+				}
+				if d.IsDir() || !(strings.HasSuffix(path, ".go") || strings.HasSuffix(path, ".ts")) {
+					return nil
+				}
+				body, err := os.ReadFile(path)
+				if err != nil {
+					return err
+				}
+				for i, line := range strings.Split(string(body), "\n") {
+					trimmed := strings.TrimSpace(line)
+					if strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "*") || strings.HasPrefix(trimmed, "/*") {
+						continue
+					}
+					// Assert.
+					for _, re := range tt.forbidden {
+						if re.MatchString(line) {
+							t.Errorf("%s:%d runs another system for real (%s): %s", path, i+1, re, trimmed)
+						}
+					}
+				}
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("walk %s: %v", tt.dir, err)
+			}
+		})
 	}
 }
