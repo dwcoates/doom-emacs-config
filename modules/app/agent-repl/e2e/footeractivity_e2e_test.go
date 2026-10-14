@@ -9,6 +9,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
+	"agentrepl/protohelpers/oneofarm"
 )
 
 // THE FOOTER'S ACTIVITY CELL, READ WHICHEVER STATUS ARM STANDS. Every status
@@ -22,7 +23,7 @@ import (
 // footerActivity answers the standing status arm's activity cell, or nil.
 func footerActivity(v *frontendv1.FooterView) protoreflect.Message {
 	status := v.GetStrip().GetStatus().ProtoReflect()
-	armField := status.WhichOneof(status.Descriptor().Oneofs().ByName("status"))
+	armField := oneofarm.Field(status, "status")
 	if armField == nil {
 		return nil
 	}
@@ -42,8 +43,8 @@ func footerTier(v *frontendv1.FooterView, tier protoreflect.Name) protoreflect.M
 	if cell == nil {
 		return nil
 	}
-	if oneof := cell.Descriptor().Oneofs().ByName("tier"); oneof != nil {
-		field := cell.WhichOneof(oneof)
+	if cell.Descriptor().Oneofs().ByName("tier") != nil {
+		field := oneofarm.Field(cell, "tier")
 		if field == nil || field.Name() != tier {
 			return nil
 		}
@@ -62,7 +63,7 @@ func footerSalientKind(v *frontendv1.FooterView, kind protoreflect.Name) protore
 	if salient == nil {
 		return nil
 	}
-	field := salient.WhichOneof(salient.Descriptor().Oneofs().ByName("kind"))
+	field := oneofarm.Field(salient, "kind")
 	if field == nil || field.Name() != kind {
 		return nil
 	}
