@@ -23,8 +23,10 @@ import {
   RESPONSE_PROSE_CLASS,
   THINKING_BUBBLE_CLASS,
   USAGE_AGE_RESERVE_LABELS,
+  USAGE_AGO_WIDTH_PROPERTY,
   USAGE_RESERVE_LABELS_PROPERTY,
   USAGE_REVEALED_CLASS,
+  USAGE_TOKEN_TEXT_PROPERTY,
   INTERIM_RESPONSE_CLASS,
   drawFeedResponse,
   isInterimResponse,
@@ -55,6 +57,7 @@ import {
   BUBBLE_MORE_ATTRIBUTE,
   BUBBLE_MORE_ELLIPSIS,
   BUBBLE_UNCAPPED,
+  SAYS_ATTRIBUTE,
 } from "../../../src/bubble/draw.js";
 import { BUBBLE_BOX_CLASS, BUBBLE_SCROLL_CLASS } from "../../../src/feed/bubble-scroll.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
@@ -3172,5 +3175,151 @@ describe("the interim response's hook class", () => {
     );
     // Assert
     expect(after.classList.contains(INTERIM_RESPONSE_CLASS)).toBe(false);
+  });
+});
+
+describe("an interim response's usage corner", () => {
+  /** A settled response, INTERIM or not, whose corner carries a token figure and a settle instant. */
+  function settledResponse(interim: boolean, usage = true) {
+    return response({
+      interim,
+      ...(usage ? { usage: { text: "2.1k", atMs: 1_000n, heat: { position: 0.5 } } } : {}),
+      result: { case: "success", value: { prose: { markdown: "done" } } },
+    });
+  }
+
+  /** The drawn duration of EL, reporting WIDTH as its drawn width. */
+  function agoOf(el: HTMLElement, width: number): HTMLElement {
+    const ago = el.querySelector(".usage-ago") as HTMLElement;
+    vi.spyOn(ago, "getBoundingClientRect").mockReturnValue({ width } as DOMRect);
+    return ago;
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("sets the duration's drawn width on its bubble once the duration is sized", () => {
+    // Arrange
+    const el = drawFeedResponse(settledResponse(true), rowContext());
+    const ago = agoOf(el, 52.5);
+    // Act
+    fireResize(ago);
+    // Assert
+    expect(el.style.getPropertyValue(USAGE_AGO_WIDTH_PROPERTY)).toBe("52.5px");
+  });
+
+  it("follows the duration when a tick changes its width", () => {
+    // Arrange: sized once, then the label changes shape.
+    const el = drawFeedResponse(settledResponse(true), rowContext());
+    fireResize(agoOf(el, 52.5));
+    const ago = agoOf(el, 40);
+    // Act
+    fireResize(ago);
+    // Assert
+    expect(el.style.getPropertyValue(USAGE_AGO_WIDTH_PROPERTY)).toBe("40px");
+  });
+
+  it("measures no duration of a response that is not interim", () => {
+    // Arrange
+    const el = drawFeedResponse(settledResponse(false), rowContext());
+    const ago = agoOf(el, 52.5);
+    // Act / Assert: nothing watches it.
+    expect(() => fireResize(ago)).toThrow(/no ResizeObserver is watching/);
+  });
+
+  it("stops measuring once its bubble is discarded", () => {
+    // Arrange
+    const el = drawFeedResponse(settledResponse(true), rowContext());
+    const ago = agoOf(el, 52.5);
+    // Act
+    stopTicking(el);
+    // Assert
+    expect(() => fireResize(ago)).toThrow(/no ResizeObserver is watching/);
+  });
+
+  it("logs at ERROR, naming the corner, when the page has no ResizeObserver", async () => {
+    // Arrange
+    vi.stubGlobal("ResizeObserver", undefined);
+    const capture = captureLogRecords();
+    // Act
+    drawFeedResponse(settledResponse(true), rowContext());
+    // Assert
+    const record = await forwardedRecord(capture, "feed.cards.response.usage-ago-unmeasured");
+    expect([record.level.case, record.context?.path]).toEqual(["error", "FeedResponse.usage"]);
+  });
+
+  it("still draws the duration when the page has no ResizeObserver", () => {
+    // Arrange
+    vi.stubGlobal("ResizeObserver", undefined);
+    // Act
+    const el = drawFeedResponse(settledResponse(true), rowContext());
+    // Assert
+    expect(el.querySelector(".usage-ago")?.textContent).not.toBe("");
+  });
+
+  it("throws when a measured duration hangs in no bubble, setting nothing", () => {
+    // Arrange: the corner taken out of its bubble without being discarded.
+    const el = drawFeedResponse(settledResponse(true), rowContext());
+    const ago = agoOf(el, 52.5);
+    el.querySelector(".usage-corner")?.remove();
+    // Act
+    let thrown: unknown;
+    try {
+      fireResize(ago);
+    } catch (error) {
+      thrown = error;
+    }
+    // Assert
+    expect([String(thrown), el.style.getPropertyValue(USAGE_AGO_WIDTH_PROPERTY)]).toEqual([
+      expect.stringMatching(/hangs in no bubble/),
+      "",
+    ]);
+  });
+
+  it("logs at ERROR, naming the corner, when a measured duration hangs in no bubble", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const el = drawFeedResponse(settledResponse(true), rowContext());
+    const ago = agoOf(el, 52.5);
+    el.querySelector(".usage-corner")?.remove();
+    // Act
+    expect(() => fireResize(ago)).toThrow();
+    // Assert
+    const record = await forwardedRecord(capture, "feed.cards.response.usage-ago-orphaned");
+    expect([record.level.case, record.context?.path]).toEqual(["error", "FeedResponse.usage"]);
+  });
+
+  it("hands an interim's ghost its token text, as a CSS string", () => {
+    // Arrange / Act
+    const el = drawFeedResponse(settledResponse(true), rowContext());
+    // Assert
+    expect(el.style.getPropertyValue(USAGE_TOKEN_TEXT_PROPERTY)).toBe('"2.1k"');
+  });
+
+  it("hands a response that is not interim no token text", () => {
+    // Arrange / Act
+    const el = drawFeedResponse(settledResponse(false), rowContext());
+    // Assert
+    expect(el.style.getPropertyValue(USAGE_TOKEN_TEXT_PROPERTY)).toBe("");
+  });
+
+  it("drops the token text when a redraw of the interim draws no corner", () => {
+    // Arrange
+    const first = drawFeedResponse(settledResponse(true), rowContext());
+    // Act
+    const again = drawFeedResponse(settledResponse(true, false), rowContext(first));
+    // Assert
+    expect([again === first, again.style.getPropertyValue(USAGE_TOKEN_TEXT_PROPERTY)]).toEqual([true, ""]);
+  });
+
+  it.each([
+    [true, "interim"],
+    [false, "whole"],
+  ])("states whether it measures (interim: %s), so a redraw never keeps the other kind", (interim, kind) => {
+    // Arrange / Act
+    const el = drawFeedResponse(settledResponse(interim), rowContext());
+    // Assert
+    expect(el.querySelector(".usage-corner")?.getAttribute(SAYS_ATTRIBUTE)).toBe(`2.1k|1000|${kind}`);
   });
 });
