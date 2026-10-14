@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/feed"
+	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
 )
 
@@ -111,6 +113,9 @@ func TestReadHistoryAnswerWithNoArmIsAnError(t *testing.T) {
 func (c *fakeClient) ReadHistory(_ context.Context, req *shimv1.ReadHistoryRequest) (*shimv1.ReadHistoryResponse, error) {
 	c.historyReads++
 	c.historyRequests = append(c.historyRequests, req)
+	if c.historyErr != nil {
+		return nil, c.historyErr
+	}
 	if c.history != nil {
 		return c.history, nil
 	}
@@ -512,5 +517,72 @@ func TestAResumeTellsTheFeedNoNewBook(t *testing.T) {
 	// Assert.
 	if len(f.feed.freshBooks) != 0 {
 		t.Fatalf("fresh books = %v, want none for a resume", f.feed.freshBooks)
+	}
+}
+
+// standDownErr is a history read a stand-down this daemon ordered cut short,
+// shaped as the shim client wraps it.
+var standDownErr = fmt.Errorf("%w: unavailable: use of closed network connection", shimclient.ErrStandDownOrdered)
+
+func TestFleetReadHistoryCutShortByAnOrderedStandDownIsNoSource(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := parkAtColdGate(t, f)
+	f.client.historyErr = standDownErr
+
+	// Act.
+	_, err := f.fleet.ReadHistory(context.Background(), ws, nil, nil)
+
+	// Assert.
+	if !errors.Is(err, feed.ErrNoHistorySource) || !errors.Is(err, shimclient.ErrStandDownOrdered) {
+		t.Fatalf("err = %v, want ErrNoHistorySource carrying the stand-down", err)
+	}
+}
+
+func TestFleetReadHistoryCutShortByAnOrderedStandDownIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := parkAtColdGate(t, f)
+	f.client.historyErr = standDownErr
+
+	// Act.
+	_, _ = f.fleet.ReadHistory(context.Background(), ws, nil, nil)
+
+	// Assert.
+	if got := recordsAt(f.log, "daemon.workspace.history_stood_down", "info"); len(got) != 1 {
+		t.Fatalf("history_stood_down records = %v, want one INFO", got)
+	}
+}
+
+func TestFleetReadHistoryOfAnyOtherFailureStaysAFailure(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := parkAtColdGate(t, f)
+	f.client.historyErr = errors.New("unavailable: connection reset")
+
+	// Act.
+	_, err := f.fleet.ReadHistory(context.Background(), ws, nil, nil)
+
+	// Assert.
+	if err == nil || errors.Is(err, feed.ErrNoHistorySource) {
+		t.Fatalf("err = %v, want the failure itself, not no-source", err)
+	}
+}
+
+func TestFleetReadInheritedCutShortByAnOrderedStandDownIsNoSource(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := parkAtColdGate(t, f)
+	f.client.historyErr = standDownErr
+
+	// Act.
+	_, err := f.fleet.ReadInherited(context.Background(), ws, &conversationv1.AgentId{Value: "parent-book"}, nil, 1)
+
+	// Assert.
+	if !errors.Is(err, feed.ErrNoHistorySource) {
+		t.Fatalf("err = %v, want ErrNoHistorySource", err)
+	}
+	if got := recordsAt(f.log, "daemon.workspace.history_stood_down", "info"); len(got) != 1 {
+		t.Fatalf("history_stood_down records = %v, want one INFO", got)
 	}
 }
