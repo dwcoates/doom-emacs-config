@@ -141,6 +141,19 @@ test_every_system_with_a_manifest_is_included() {
   if [ -z "$missing" ]; then pass "every system manifest is included by the root"; else fail "manifests the root does not include:$missing"; fi
 }
 
+# Every hook checked in under .githooks is installed by a git_hook entry, so a
+# machine whose hooks directory holds copies (no core.hooksPath) has them all.
+test_every_checked_in_hook_has_a_git_hook_entry() {
+  local missing="" hook name
+  for hook in "$MODULE/../../../.githooks"/*; do
+    name="${hook##*/}"
+    case "$name" in test-*) continue ;; esac
+    jq -e --arg h "$name" '[.requirements[]? | select(.kind == "git_hook" and .hook == $h)] | length == 1' \
+      "$MODULE/requirements.json" >/dev/null || missing="$missing $name"
+  done
+  if [ -z "$missing" ]; then pass "every checked-in hook has exactly one git_hook entry"; else fail "checked-in hooks without a git_hook entry:$missing"; fi
+}
+
 # ---------------------------------------------------------------------------
 # The manifest contract.
 # ---------------------------------------------------------------------------

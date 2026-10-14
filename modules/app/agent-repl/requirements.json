@@ -283,6 +283,17 @@
       ]
     },
     {
+      "id": "reference-transaction-hook",
+      "kind": "git_hook",
+      "why": "keeps master to the merge queue, and journals the refs a test run's own git moves for safe-test-run.sh's drift check",
+      "profile": "dev",
+      "hook": "reference-transaction",
+      "source": ".githooks/reference-transaction",
+      "markers": [
+        "AGENT_REPL_MANAGED_HOOK: agent-repl-merge-queue-guard"
+      ]
+    },
+    {
       "id": "shellcheck",
       "kind": "program",
       "why": "lints every bin/ and scripts/ shell script in the shell suites",
