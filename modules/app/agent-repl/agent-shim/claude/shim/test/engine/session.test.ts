@@ -92,14 +92,14 @@ function writeTranscript(configDir: string, cwd: string, sessionId: string, line
   );
 }
 
-/** The context this fixture reports, ABOVE the cold gate's 70,000-token floor. */
-const FIXTURE_CONTEXT_TOKENS = 100_000;
+/** The context this fixture reports, ABOVE the cold gate's 120,000-token floor. */
+const FIXTURE_CONTEXT_TOKENS = 150_000;
 
 /**
  * One assistant line, reporting a context the cold gate WILL ask about.
  *
- * The floor (owner ruling, `engine/cold.ts`) means a fixture under 70,000
- * tokens resumes warm no matter how long the lapse, so a cold-gate test built
+ * The floor (owner ruling, `engine/cold.ts`) means a fixture at or under
+ * 120,000 tokens resumes warm no matter how long the lapse, so a cold-gate test built
  * on one would pass for the wrong reason. `smallAssistantLine` is the
  * deliberately-under-the-floor counterpart.
  */
@@ -1194,7 +1194,7 @@ describe("StartSession, resume", () => {
   });
 
   it("CONTINUES a lapsed resume whose context is under the cold-gate floor, without asking", async () => {
-    // OWNER RULING, 2026-09-13: under 70,000 tokens the cold read is not worth
+    // OWNER RULING, 2026-09-13 (raised 2026-10-14): at or under 120,000 tokens the cold read is not worth
     // a gate, so the session continues automatically however long the lapse.
     const h = harness({ nowMs: 1_000_000 + 10 * 60 * 1000 });
     writeTranscript(h.configDir, h.cwd, "resume-1", [smallAssistantLine()]);
@@ -4579,7 +4579,7 @@ describe("SetSessionModel", () => {
 
   it("ALLOWS a switch under the cold-gate floor, even at a threshold of zero", async () => {
     // The floor is the owner's, not the caller's: a threshold of 0 asks for a
-    // gate on every switch, and below 70,000 tokens there is no gate to give.
+    // gate on every switch, and at or under 120,000 tokens there is no gate to give.
     const h = harness({ nowMs: 1_000_100 });
     writeTranscript(h.configDir, h.cwd, "resume-1", [smallAssistantLine()]);
     const pending = h.engine.startSession(resumeRequest("resume-1"));

@@ -558,7 +558,7 @@ describe("cold-context seeding", () => {
     const facts = readTranscriptFacts(transcriptPath(driven.configDir, driven.cwd, driven.sessionId));
 
     // Assert
-    expect(facts?.contextTokens).toBeGreaterThanOrEqual(COLD_GATE_FLOOR_TOKENS);
+    expect(facts?.contextTokens).toBeGreaterThan(COLD_GATE_FLOOR_TOKENS);
   });
 
   it("still ends the turn successfully, so the seeding is invisible to the turn", async () => {
