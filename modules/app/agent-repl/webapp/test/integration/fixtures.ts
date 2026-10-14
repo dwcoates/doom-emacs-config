@@ -65,6 +65,7 @@ import {
   type RosterRow,
   type WorkspaceRoster,
   RosterRepoSectionSchema,
+  type RosterRowWhenSchema,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import {
   FeedHeldSchema,
@@ -2445,10 +2446,23 @@ type RosterRowInit = {
   current?: boolean;
   closed?: boolean;
   detail?: boolean;
-  when?: "merged" | "turnEnded" | "created";
+  /** The when-column's arm; omitted = no turn running. `whenAtMs` is the merged instant or the turn's start. */
+  when?: "merged" | "turnRunning" | "noTurnRunning";
   whenAtMs?: bigint;
   children?: RosterRow[];
 };
+
+/** A when-column arm, its instant AT_MS wherever the arm carries one. */
+function rosterRowWhen(arm: "merged" | "turnRunning" | "noTurnRunning", atMs: bigint): MessageInitShape<typeof RosterRowWhenSchema>["shown"] {
+  switch (arm) {
+    case "merged":
+      return { case: "merged", value: { atMs } };
+    case "turnRunning":
+      return { case: "turnRunning", value: { startedAtMs: atMs } };
+    case "noTurnRunning":
+      return { case: "noTurnRunning", value: {} };
+  }
+}
 
 export function rosterRow(init?: RosterRowInit): RosterRow {
   return create(RosterRowSchema, {
@@ -2459,7 +2473,7 @@ export function rosterRow(init?: RosterRowInit): RosterRow {
     status: { case: init?.status ?? "ready", value: {} } as RosterRow["status"],
     current: { current: init?.current ?? false },
     children: init?.children ?? [],
-    when: { shown: { case: init?.when ?? "turnEnded", value: { atMs: init?.whenAtMs ?? 1_000n } } },
+    when: { shown: rosterRowWhen(init?.when ?? "noTurnRunning", init?.whenAtMs ?? 1_000n) },
     detail:
       init?.detail === false
         ? undefined

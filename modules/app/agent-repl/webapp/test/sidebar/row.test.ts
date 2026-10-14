@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { captureLogRecords, forwardedRecord, type LogCapture } from "../log-capture.js";
-import { create } from "@bufbuild/protobuf";
+import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { SelectWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
 import { SetWorkspaceHiddenResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
 import { UpdateSidebarViewResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
-import { RosterRowSchema } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import { RosterRowSchema, type RosterRowWhenSchema } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import { liveElapsedClock } from "../../src/elapsed-clock.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import {
   HOVER_CLOSE_GRACE_MS,
@@ -268,70 +269,71 @@ describe("the priority badge", () => {
 });
 
 describe("the when-column", () => {
-  it("is empty when the daemon has nothing to show", () => {
+  const running = (startedMs: number): MessageInitShape<typeof RosterRowWhenSchema>["shown"] => ({
+    case: "turnRunning",
+    value: { startedAtMs: BigInt(startedMs) },
+  });
+
+  it("reads 0s with no turn running", () => {
     const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
-    expect(drawn.querySelector(".when")?.textContent).toBe("");
+    expect([drawn.querySelector(".when")?.getAttribute("data-when"), drawn.querySelector(".when")?.textContent]).toEqual([
+      "noTurnRunning",
+      "0s",
+    ]);
   });
 
-  it("reads the nearest second when a turn-end age is sampled just short of one", () => {
-    // Arrange + Act: the stamp does not share the shared ticker's phase.
-    const drawn = drawRosterRow(
-      row({ id: "ws-1", when: { case: "turnEnded", value: { atMs: BigInt(NOW - 4920) } } }),
-      sidebarContext(),
-      "R",
-    );
-    // Assert: five real seconds ago reads 5s, not the lagging 4s.
-    expect(drawn.querySelector(".when")?.textContent).toBe("5s");
-  });
-
-  it("ticks a turn-end age off the SHARED clock", () => {
+  it("never ticks with no turn running", () => {
+    // Arrange
     const ticker = fakeTicker();
     const sc = sidebarContext(appContext({}, ticker));
-    const drawn = drawRosterRow(
-      row({ id: "ws-1", when: { case: "turnEnded", value: { atMs: BigInt(NOW - 60_000) } } }),
-      sc,
-      "R",
-    );
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sc, "R");
+    // Act
     ticker.tick(NOW + 120_000);
+    // Assert
+    expect([drawn.querySelector(".when")?.textContent, sc.disposers.length]).toEqual(["0s", 0]);
+  });
+
+  it("counts a running turn's elapsed time", () => {
+    const drawn = drawRosterRow(row({ id: "ws-1", when: running(NOW - 65_000) }), sidebarContext(), "R");
+    expect([drawn.querySelector(".when")?.getAttribute("data-when"), drawn.querySelector(".when")?.textContent]).toEqual([
+      "turnRunning",
+      "1m 5s",
+    ]);
+  });
+
+  it("ticks a running turn off the SHARED clock", () => {
+    // Arrange
+    const ticker = fakeTicker();
+    const sc = sidebarContext(appContext({}, ticker));
+    const drawn = drawRosterRow(row({ id: "ws-1", when: running(NOW - 60_000) }), sc, "R");
+    // Act
+    ticker.tick(NOW + 120_000);
+    // Assert
     expect(drawn.querySelector(".when")?.textContent).toBe("3m");
   });
 
-  it("registers a turn-end age's tick as a teardown the next push runs", () => {
-    const ticker = fakeTicker();
-    const sc = sidebarContext(appContext({}, ticker));
-    drawRosterRow(
-      row({ id: "ws-1", when: { case: "turnEnded", value: { atMs: BigInt(NOW) } } }),
-      sc,
-      "R",
-    );
+  it("registers a running turn's tick as a teardown the next push runs", () => {
+    const sc = sidebarContext(appContext({}, fakeTicker()));
+    drawRosterRow(row({ id: "ws-1", when: running(NOW) }), sc, "R");
     expect(sc.disposers.length).toBe(1);
   });
 
-  it("states the arm the daemon chose for the last turn end", () => {
-    const drawn = drawRosterRow(
-      row({ id: "ws-1", when: { case: "turnEnded", value: { atMs: BigInt(NOW - 180_000) } } }),
-      sidebarContext(),
-      "R",
-    );
-    expect(drawn.querySelector(".when")?.getAttribute("data-when")).toBe("turnEnded");
+  it.each([0, 4_920, 65_432, 3_725_000])("reads exactly what the footer's turn clock reads %sms into the turn", (elapsed) => {
+    // Arrange: the strip's clock is a live elapsed clock from the same start.
+    const ticker = fakeTicker();
+    const started = NOW - elapsed;
+    const strip = liveElapsedClock(ticker, "info-time", started);
+    // Act
+    const drawn = drawRosterRow(row({ id: "ws-1", when: running(started) }), sidebarContext(appContext({}, ticker)), "R");
+    ticker.tick(NOW + 7_300);
+    // Assert
+    expect(drawn.querySelector(".when")?.textContent).toBe(strip.textContent);
   });
 
-  it("draws the last turn end as a relative age", () => {
-    const drawn = drawRosterRow(
-      row({ id: "ws-1", when: { case: "turnEnded", value: { atMs: BigInt(NOW - 180_000) } } }),
-      sidebarContext(),
-      "R",
-    );
-    expect(drawn.querySelector(".when")?.textContent).toBe("3m");
-  });
-
-  it("draws a never-active workspace's creation time as a bare relative age", () => {
-    const drawn = drawRosterRow(
-      row({ id: "ws-1", when: { case: "created", value: { atMs: BigInt(NOW - 3_600_000) } } }),
-      sidebarContext(),
-      "R",
-    );
-    expect(drawn.querySelector(".when")?.textContent).toBe("1h");
+  it("refuses an unset when-column as a malformed view", () => {
+    const bad = row({ id: "ws-1" });
+    bad.when!.shown = { case: undefined };
+    expect(() => drawRosterRow(bad, sidebarContext(), "R")).toThrow(MalformedView);
   });
 
   it("draws a settled merge as a bare relative age", () => {

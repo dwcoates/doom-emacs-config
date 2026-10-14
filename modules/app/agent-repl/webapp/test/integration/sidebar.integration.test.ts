@@ -61,10 +61,10 @@ describe("arm coverage", () => {
 
   it("covers every when-column arm", () => {
     assertCoversOneof(RosterRowWhenSchema, "shown", [
-      "created",
       "merged",
-      "turnEnded",
       "hidden",
+      "turnRunning",
+      "noTurnRunning",
     ]);
   });
 
@@ -515,59 +515,37 @@ describe("row decoration", () => {
 });
 
 describe("the when column", () => {
-  it("draws a relative age from the turn_ended arm", async () => {
-    // Arrange / Act: `turn_ended` is what this build's daemon sends — when the
-    // workspace's LAST TURN ENDED, not when it was last looked at.
-    await withRoster({ rows: [rosterRow({ when: "turnEnded", whenAtMs: 0n })] });
-    // Assert
-    expect(harness.$(`[data-roster-row="${WORKSPACE_ID}"] [data-when]`)?.dataset.when).toBe(
-      "turnEnded",
-    );
-  });
+  const whenOf = (): HTMLElement | null => harness.$(`[data-roster-row="${WORKSPACE_ID}"] [data-when]`);
 
-  it("draws the turn_ended arm as a bare age, with no prefix", async () => {
+  it("draws 0s from the no_turn_running arm", async () => {
     // Arrange / Act
-    await withRoster({ rows: [rosterRow({ when: "turnEnded", whenAtMs: 0n })] });
-    // Assert: only `merged` earns a word in front of its age.
-    expect(
-      harness.$(`[data-roster-row="${WORKSPACE_ID}"] [data-when]`)?.textContent,
-    ).not.toContain("merged");
-  });
-
-  it("draws a relative age from the created arm", async () => {
-    // Arrange / Act: the fallback for a workspace that has never ended a turn,
-    // so the column is never blank for one that genuinely has a time to show.
-    await withRoster({ rows: [rosterRow({ when: "created", whenAtMs: 0n })] });
+    await withRoster({ rows: [rosterRow({ when: "noTurnRunning" })] });
     // Assert
-    expect(harness.$(`[data-roster-row="${WORKSPACE_ID}"] [data-when]`)?.dataset.when).toBe(
-      "created",
-    );
+    expect([whenOf()?.dataset.when, whenOf()?.textContent]).toEqual(["noTurnRunning", "0s"]);
   });
 
-  it("draws the created arm as a bare age, with no prefix", async () => {
+  it("draws the running turn's elapsed time from the turn_running arm", async () => {
     // Arrange / Act
-    await withRoster({ rows: [rosterRow({ when: "created", whenAtMs: 0n })] });
+    await withRoster({ rows: [rosterRow({ when: "turnRunning", whenAtMs: 0n })] });
     // Assert
-    expect(
-      harness.$(`[data-roster-row="${WORKSPACE_ID}"] [data-when]`)?.textContent,
-    ).not.toContain("created");
+    expect(whenOf()?.dataset.when).toBe("turnRunning");
   });
 
   it("draws a relative age from the merged arm", async () => {
     // Arrange / Act
     await withRoster({ rows: [rosterRow({ when: "merged", whenAtMs: 0n })] });
     // Assert
-    expect(harness.$(`[data-roster-row="${WORKSPACE_ID}"] [data-when]`)?.dataset.when).toBe("merged");
+    expect(whenOf()?.dataset.when).toBe("merged");
   });
 
-  it("ages a turn-end figure as time passes", async () => {
+  it("counts a running turn up as time passes", async () => {
     // Arrange
-    await withRoster({ rows: [rosterRow({ when: "turnEnded", whenAtMs: 0n })] });
-    const before = harness.$(`[data-roster-row="${WORKSPACE_ID}"] [data-when]`)?.textContent;
+    await withRoster({ rows: [rosterRow({ when: "turnRunning", whenAtMs: 0n })] });
+    const before = whenOf()?.textContent;
     // Act
     await harness.tick(120_000);
     // Assert
-    expect(harness.$(`[data-roster-row="${WORKSPACE_ID}"] [data-when]`)?.textContent).not.toBe(before);
+    expect(whenOf()?.textContent).not.toBe(before);
   });
 });
 
