@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 
 	"agent-repld/internal/account"
@@ -118,7 +119,7 @@ func TestCreateLandsAMergeWorkspaceWhereItsRequesterWould(t *testing.T) {
 	}
 	facts := f.db.registered[len(f.db.registered)-1]
 	want := wsm.MergeOrigin{Requester: requester.ID, Request: "request-1", ForkHead: "fork-head"}
-	if facts.ParentBranch != "master" || facts.Parent == nil || *facts.Parent != requester.ID || facts.MergeOf == nil || *facts.MergeOf != want {
+	if facts.ParentBranch != "master" || facts.Parent == nil || *facts.Parent != requester.ID || facts.MergeOf == nil || !reflect.DeepEqual(*facts.MergeOf, want) {
 		t.Fatalf("registered = %+v, want parent branch master, parent and merge origin the requester's", facts)
 	}
 }
@@ -194,7 +195,7 @@ func TestCreateMergeWorkspaceForksInTheRequestersRepository(t *testing.T) {
 	// its fork head.
 	facts := f.db.registered[len(f.db.registered)-1]
 	want := wsm.MergeOrigin{Requester: requester.ID, Request: "request-1", ForkHead: "sha-of-refs/heads/ABC/sample"}
-	if facts.MergeOf == nil || *facts.MergeOf != want {
+	if facts.MergeOf == nil || !reflect.DeepEqual(*facts.MergeOf, want) {
 		t.Fatalf("registered %+v, want the requester's merge workspace", facts)
 	}
 	if fork, owed := f.db.pendingForks[created.ID]; !owed || fork.Parent != requester.ID {
