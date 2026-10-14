@@ -142,8 +142,10 @@ Throttled-I/O artifacts (absent in all default-tier runs; verify after R1):
   (entries=2) was the second path, which the refusal's new fields named on
   its next appearance: a handover transfers the head (suspendFor marks it)
   and its run leaves this daemon's chain while its entry stays in line for
-  the adopter. standingFront leaves every transferred workspace out of both
-  sides until it is adopted back.
+  the adopter. Master's own guard (the chain extends only behind its running
+  head, 6b6614527) already refuses that case, so on the rebase this branch's
+  transferred-workspace filter was dropped as redundant; the teardown window,
+  where the finished head still runs, is the leftLine fix's alone.
 - New failures found in the R3 runs, each fixed at its source:
   - a stray's SIGSTOP whose last thread awaited the CPU (a shim's FSEvents
     dispatch thread at background QoS, host load 81) was reported as a stuck
@@ -161,6 +163,21 @@ Throttled-I/O artifacts (absent in all default-tier runs; verify after R1):
   sidecar 91.3, protohelpers 100, logging 79.8, store 88.3, shim 96.87,
   webapp 53.01 (all unchanged or up); testrun 86.0 to 88.2 once main.go's
   glue stopped being pulled into the total by a test file in package main.
+
+## Rebase onto master and the hybrid (2026-10-14)
+
+- The one-shot's rebase onto master (120 commits ahead) dropped three of this
+  branch's commits as already landed or subsumed there: the cachelapse INFO
+  record (master f90862e7e), the chain tests' head-first helper (master's
+  chain.headHoldsTheTurn, d06d4aae9), and the transferred-head filter (see P3
+  above).
+- The host test gate is the hybrid (owner ruling 2026-10-14, chosen over both
+  master's machine-wide budget and this branch's no-gate ruling): no
+  processor is reserved and no run limit stands; the queue's head gate runs at
+  niceness 10 and the merge behind it at 15 (bin/background.sh's
+  AGENT_REPL_TEST_NICENESS), ad-hoc runs at 19; and every RAM disk holds a
+  memory seat, so overlapping runs never wire more than half the host's
+  memory.
 
 ## Decisions at the close (2026-10-14)
 
