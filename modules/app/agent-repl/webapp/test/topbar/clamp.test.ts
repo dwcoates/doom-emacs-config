@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { REVEAL_MARGIN_PX, clampLeft, clampReveal, heightBelow, type Rect } from "../../src/topbar/clamp.js";
+import {
+  REVEAL_MARGIN_PX,
+  clampBeside,
+  clampLeft,
+  clampReveal,
+  heightBelow,
+  type Rect,
+} from "../../src/topbar/clamp.js";
 
 const rect = (left: number, top: number, width: number, height: number): Rect => ({
   left,
@@ -93,6 +100,56 @@ describe("clampReveal shares the clamp arithmetic", () => {
       left: clampLeft(anchor.left, reveal.width, VIEWPORT),
       top: anchor.bottom,
       maxHeight: heightBelow(anchor.bottom, VIEWPORT),
+    });
+  });
+});
+
+describe("clampBeside", () => {
+  /** A rail row: 190 wide from the window's left, 24 tall. */
+  const rowAt = (top: number): Rect => rect(8, top, 190, 24);
+
+  it("starts at the anchor's right edge, so it covers nothing to the anchor's left", () => {
+    expect(clampBeside(rowAt(100), rect(0, 0, 300, 200), VIEWPORT).left).toBe(198);
+  });
+
+  it("starts on the anchor's own line", () => {
+    expect(clampBeside(rowAt(100), rect(0, 0, 300, 200), VIEWPORT).top).toBe(100);
+  });
+
+  it("slides up only as far as the bottom edge demands", () => {
+    // ARRANGE: a 200-tall reveal beside a row at 700 would end at 900.
+    const placement = clampBeside(rowAt(700), rect(0, 0, 300, 200), VIEWPORT);
+    // ASSERT: held one margin clear of the bottom edge.
+    expect(placement.top).toBe(800 - REVEAL_MARGIN_PX - 200);
+  });
+
+  it("holds a reveal taller than the window one margin clear of the top edge", () => {
+    expect(clampBeside(rowAt(400), rect(0, 0, 300, 2000), VIEWPORT).top).toBe(REVEAL_MARGIN_PX);
+  });
+
+  it("caps the height at what is left below its top, so it scrolls instead of overflowing", () => {
+    expect(clampBeside(rowAt(400), rect(0, 0, 300, 2000), VIEWPORT).maxHeight).toBe(
+      800 - 2 * REVEAL_MARGIN_PX,
+    );
+  });
+
+  it("slides left when the reveal would overflow the right edge", () => {
+    expect(clampBeside(rect(700, 100, 190, 24), rect(0, 0, 300, 200), VIEWPORT).left).toBe(
+      1000 - REVEAL_MARGIN_PX - 300,
+    );
+  });
+
+  it("answers clampLeft over the anchor's right and heightBelow under its own top", () => {
+    // ARRANGE
+    const anchor = rect(700, 100, 190, 24);
+    const reveal = rect(0, 0, 300, 200);
+    // ACT
+    const placement = clampBeside(anchor, reveal, VIEWPORT);
+    // ASSERT
+    expect(placement).toEqual({
+      left: clampLeft(anchor.right, reveal.width, VIEWPORT),
+      top: anchor.top,
+      maxHeight: heightBelow(anchor.top, VIEWPORT),
     });
   });
 });
