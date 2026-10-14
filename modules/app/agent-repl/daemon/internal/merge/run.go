@@ -799,10 +799,6 @@ func (r *run) end(ctx context.Context, err error) {
 		r.suspend(settle, err)
 		return
 	}
-	if winner, lost := raceLostOf(ctx); lost {
-		r.yieldTerminal(settle, winner)
-		return
-	}
 	if cause, abandoned := abandonCauseOf(ctx); abandoned {
 		r.abandonTerminal(settle, cause)
 		return

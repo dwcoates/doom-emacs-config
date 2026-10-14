@@ -1334,6 +1334,16 @@ Owner rulings, 2026-10-11 (`internal/merge/chain.go`, `internal/cpugov`).
   head; only the pump promotes it into the slot, once its entry stands first
   in line, or once its gate passed first and it took the head's place
   (`YieldMergeHead`).
+- **THE LOSER IS SUSPENDED, NEVER TORN DOWN** (owner ruling, 2026-10-13). A
+  head the merge behind it overtook is brought to a stopping point exactly as
+  a pause brings a merge (`suspendFor`), keeps its lease and its progress
+  record, and is taken straight back (`AdoptWorkspace`), still admitted right
+  behind the winner. An agent turn it was on lives on in the session. It
+  resumes only once it heads the queue (`resumeIn` never jumps a chain member;
+  `extendOnce` never resumes a non-speculative record behind the head),
+  finishes the step it was on -- reattaching to that turn -- and only then
+  rebases onto the target's new tip (`goOnAfterResumedStep`). A merge's
+  prompt hand-off to the prompt queue is never cut by its run's cancellation.
 - **RESTACKS.** A target that moves (`noteTargetTip`) closes the repository's
   chain signal; the merge behind rebases onto the new tip. Every queue rebase
   runs with rerere on (`gitclient`), and a stop rerere resolved

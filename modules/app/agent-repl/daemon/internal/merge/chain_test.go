@@ -61,15 +61,17 @@ type chainGit struct {
 	trees     map[string]string
 	n         int
 	landings  []string
-	// rebaseHolds parks the next rebase started in a worktree.
+	// rebaseHolds parks the next rebase started in a worktree; a stubborn
+	// one ignores its caller's cancellation, as a git command mid-flight does.
 	rebaseHolds map[string]chainHold
+	stubborn    map[string]bool
 }
 
 func newChainGit(inner *fakeGit) *chainGit {
 	g := &chainGit{
 		fakeGit: inner, commits: map[string]*chainCommit{}, refs: map[string]string{},
 		rebases: map[string]*chainRebase{}, conflicts: map[[2]string][]string{}, recorded: map[[2]string]bool{},
-		trees: map[string]string{}, rebaseHolds: map[string]chainHold{},
+		trees: map[string]string{}, rebaseHolds: map[string]chainHold{}, stubborn: map[string]bool{},
 	}
 	root := g.mintLocked(nil, "base")
 	g.refs["master"] = root
@@ -266,12 +268,27 @@ func (g *chainGit) holdRebase(dir string) (entered, release chan struct{}) {
 	return h.entered, h.release
 }
 
+// holdRebaseStubbornly is holdRebase for a rebase that ignores its caller's
+// cancellation until release closes.
+func (g *chainGit) holdRebaseStubbornly(dir string) (entered, release chan struct{}) {
+	entered, release = g.holdRebase(dir)
+	g.cmu.Lock()
+	g.stubborn[dir] = true
+	g.cmu.Unlock()
+	return entered, release
+}
+
 func (g *chainGit) StartRebase(ctx context.Context, dir, onto string, commits []string) (gitclient.RebaseStep, error) {
 	g.cmu.Lock()
 	hold, held := g.rebaseHolds[dir]
+	stubborn := g.stubborn[dir]
 	delete(g.rebaseHolds, dir)
+	delete(g.stubborn, dir)
 	g.cmu.Unlock()
-	if held {
+	if held && stubborn {
+		close(hold.entered)
+		<-hold.release
+	} else if held {
 		close(hold.entered)
 		select {
 		case <-hold.release:

@@ -71,6 +71,9 @@ type fakeDB struct {
 	ledger        map[ids.WorkspaceID][]wsm.MergeLedgerEntry
 	queues        map[wsm.RepoKey][]wsm.MergeQueueEntry
 	paused        map[wsm.RepoKey]bool
+	// allQueuesErr fails AllMergeQueues, the read a workspace's take-back
+	// (AdoptWorkspace) starts from.
+	allQueuesErr error
 	// rolloutHold is the rollout hold; rolloutHoldErr fails its read.
 	rolloutHold    wsm.RolloutHold
 	rolloutHoldErr error
@@ -615,7 +618,6 @@ func (f *fakeDB) YieldMergeHead(_ context.Context, repo wsm.RepoKey, loser, winn
 	if li < 0 || wi < 0 || li >= wi || queue[li].State != wsm.MergeAdmitted || queue[wi].State != wsm.MergeAdmitted {
 		return fmt.Errorf("yield %s to %s: not two admitted entries in that order", loser, winner)
 	}
-	queue[li].State = wsm.MergeQueued
 	moving := queue[wi]
 	copy(queue[li+1:wi+1], queue[li:wi])
 	queue[li] = moving
@@ -728,6 +730,9 @@ func (f *fakeDB) MergeQueue(_ context.Context, repo wsm.RepoKey) ([]wsm.MergeQue
 func (f *fakeDB) AllMergeQueues(_ context.Context) (map[wsm.RepoKey][]wsm.MergeQueueEntry, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.allQueuesErr != nil {
+		return nil, f.allQueuesErr
+	}
 	out := map[wsm.RepoKey][]wsm.MergeQueueEntry{}
 	for repo, entries := range f.queues {
 		out[repo] = append([]wsm.MergeQueueEntry(nil), entries...)

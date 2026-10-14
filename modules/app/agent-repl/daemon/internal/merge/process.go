@@ -125,11 +125,28 @@ func (r *run) targetTip(ctx context.Context) (string, error) {
 	return now, nil
 }
 
+// goOnAfterResumedStep takes a resumed merge on once the step it resumed at
+// finished on tip: a target that moved while the merge was suspended sends it
+// back to the rebase step on the new tip first, since a gate on a tip the
+// target left can never land (owner ruling, 2026-10-12); otherwise the gate
+// runs on tip, from fixing attempt fromAttempt.
+func (r *run) goOnAfterResumedStep(ctx context.Context, tip, targetBranch string, fromAttempt int) (outcome, bool, error) {
+	now, err := r.targetTip(ctx)
+	if err != nil {
+		return outcome{}, false, err
+	}
+	if now != tip {
+		return r.rebaseOntoMoved(ctx, tip, now, targetBranch, fromAttempt)
+	}
+	return r.afterRebase(ctx, tip, targetBranch, fromAttempt, false)
+}
+
 // rebaseOntoMoved takes a merge resumed after its rebase step, whose target
-// moved from tip to now while the daemon was down, back to the rebase step on
-// now; the gate then runs on the new tip, keeping its fixing attempts.
+// moved from tip to now while it was suspended (a restart, a pause, a race to
+// land it lost), back to the rebase step on now; the gate then runs on the new
+// tip, keeping its fixing attempts.
 func (r *run) rebaseOntoMoved(ctx context.Context, tip, now, targetBranch string, fromAttempt int) (outcome, bool, error) {
-	r.o.log(ctx, r.ws).Info("daemon.merge.resume", "the target moved while the daemon was down; the merge rebases onto its new tip before it goes on", dlog.Context{
+	r.o.log(ctx, r.ws).Info("daemon.merge.resume", "the target moved while the merge was suspended; it rebases onto the new tip before it goes on", dlog.Context{
 		"workspace": string(r.ws), "lease": string(r.lease.ID), "target": targetBranch, "rebased_on": tip, "tip": now})
 	if gaveUp, err := r.rebase(ctx, now, targetBranch); err != nil || gaveUp != nil {
 		if gaveUp != nil {
@@ -179,13 +196,13 @@ func (r *run) resumeAttempt(ctx context.Context, res *progressDoc) (outcome, boo
 			return out, again, err
 		}
 		r.settledOn(tip)
-		return r.afterRebase(ctx, tip, targetBranch, r.fixesUsed, false)
+		return r.goOnAfterResumedStep(ctx, tip, targetBranch, r.fixesUsed)
 	case TabConflicts:
 		if out, again, err, done := finish(r.resumeConflict(ctx, p, tip, targetBranch, res)); done {
 			return out, again, err
 		}
 		r.settledOn(tip)
-		return r.afterRebase(ctx, tip, targetBranch, r.fixesUsed, false)
+		return r.goOnAfterResumedStep(ctx, tip, targetBranch, r.fixesUsed)
 	case TabTests:
 		if gaveUp, err := r.rebaseSettled(ctx, tip, targetBranch); err != nil || gaveUp != nil {
 			out, again, err, _ := finish(gaveUp, err)
@@ -211,14 +228,7 @@ func (r *run) resumeAttempt(ctx context.Context, res *progressDoc) (outcome, boo
 			out, again, err, _ := finish(gaveUp, err)
 			return out, again, err
 		}
-		now, err := r.targetTip(ctx)
-		if err != nil {
-			return outcome{}, false, err
-		}
-		if now != tip {
-			return r.rebaseOntoMoved(ctx, tip, now, targetBranch, res.FixAttempt)
-		}
-		return r.afterRebase(ctx, tip, targetBranch, res.FixAttempt, false)
+		return r.goOnAfterResumedStep(ctx, tip, targetBranch, res.FixAttempt)
 	default:
 		return r.resumeCommit(ctx, res)
 	}

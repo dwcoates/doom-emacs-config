@@ -204,6 +204,11 @@ func (o *orchestrator) extendOnce(ctx context.Context, repo wsm.RepoKey) bool {
 	tail, next := chain[len(chain)-1], entries[len(chain)]
 	doc, resuming := o.resumes[next.Workspace]
 	switch {
+	case resuming && !doc.Speculative:
+		// A MERGE SUSPENDED AS THE HEAD -- the loser of a race to land
+		// (race.go) -- resumes only at the head, once the winner is done.
+		o.mu.Unlock()
+		return false
 	case resuming:
 	case o.runsByWorkspace[next.Workspace] != nil, o.transferred[next.Workspace], o.inChainLocked(repo, next.Workspace):
 		o.mu.Unlock()
