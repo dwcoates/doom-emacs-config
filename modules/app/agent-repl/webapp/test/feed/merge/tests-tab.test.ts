@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
+  FeedMergeTestCountsSchema,
   FeedMergeTestsRunOutputSchema,
   FeedMergeTestLogSchema,
   FeedMergeTestSuiteRunningSchema,
@@ -17,9 +18,11 @@ import {
   drawFeedMergeTestSpan,
   drawFeedMergeTestSuite,
   drawTestSuites,
+  placeFeedMergeTestCounts,
   updateFeedMergeTestsRunOutput,
   updateTestSuites,
 } from "../../../src/feed/merge/tests-tab.js";
+import TESTS_TAB from "../../../src/feed/merge/tests-tab.ts?raw";
 import { oneofArms } from "../../arms.js";
 import STYLESHEET from "../../../src/styles.css?raw";
 import { rulesOf } from "../../stylesheet.js";
@@ -416,5 +419,47 @@ describe("updateFeedMergeTestsRunOutput", () => {
     updateFeedMergeTestsRunOutput(host, next, tab, ctx, "p");
     // Assert
     expect(host.querySelector(".merge-test-log")).not.toBeNull();
+  });
+});
+
+/** Counts of PASSED, FAILED and TOTAL. */
+function counts(passed: number, failed: number, total: number) {
+  return create(FeedMergeTestCountsSchema, { passed, failed, total });
+}
+
+describe("placeFeedMergeTestCounts", () => {
+  it("draws the counts once known", () => {
+    const host = document.createElement("span");
+    placeFeedMergeTestCounts(host, counts(1, 0, 2));
+    expect(host.querySelector(".merge-suite-counts")?.textContent).toBe("1/2");
+  });
+
+  it("keeps the drawn counts while no figure moved", () => {
+    // Arrange
+    const host = document.createElement("span");
+    placeFeedMergeTestCounts(host, counts(1, 0, 2));
+    const drawn = host.querySelector(".merge-suite-counts");
+    // Act
+    placeFeedMergeTestCounts(host, counts(1, 0, 2));
+    // Assert
+    expect(host.querySelector(".merge-suite-counts")).toBe(drawn);
+  });
+
+  it("redraws the counts in their place when a figure moved", () => {
+    const host = document.createElement("span");
+    placeFeedMergeTestCounts(host, counts(1, 0, 2));
+    placeFeedMergeTestCounts(host, counts(1, 1, 2));
+    expect([host.children.length, host.textContent]).toEqual([1, "1/1/2"]);
+  });
+
+  it("drops the counts once none are known", () => {
+    const host = document.createElement("span");
+    placeFeedMergeTestCounts(host, counts(1, 0, 2));
+    placeFeedMergeTestCounts(host, undefined);
+    expect(host.querySelector(".merge-suite-counts")).toBeNull();
+  });
+
+  it("is the one placement of counts in tests-tab", () => {
+    expect(TESTS_TAB.match(/:scope > \.merge-suite-counts/g)).toHaveLength(1);
   });
 });

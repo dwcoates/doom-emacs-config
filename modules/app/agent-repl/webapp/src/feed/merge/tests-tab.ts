@@ -198,12 +198,7 @@ function paintSuite(el: HTMLElement, suite: FeedMergeTestSuite): void {
       unreachableArm(`${PATH}.state`, armName(state));
   }
 
-  const head = glyph.parentElement as HTMLElement;
-  const counts = head.querySelector(":scope > .merge-suite-counts");
-  const nextCounts = suite.counts === undefined ? null : drawFeedMergeTestCounts(suite.counts);
-  if (nextCounts === null) counts?.remove();
-  else if (counts === null) head.append(nextCounts);
-  else if (counts.textContent !== nextCounts.textContent) counts.replaceWith(nextCounts);
+  placeFeedMergeTestCounts(glyph.parentElement as HTMLElement, suite.counts);
 
   let pre = el.querySelector<HTMLElement>(":scope > .merge-suite-output");
   if (suite.output.length === 0) {
@@ -248,6 +243,20 @@ export function drawFeedMergeTestCounts(counts: FeedMergeTestCounts): HTMLElemen
   }
   el.append(String(counts.total));
   return el;
+}
+
+/**
+ * Bring HOST's counts (`drawFeedMergeTestCounts`, its last child) to COUNTS:
+ * drawn once known, redrawn only when a figure moved, and dropped while
+ * nothing is known. The one placement of counts, for a suite's head line
+ * and every other site that draws them.
+ */
+export function placeFeedMergeTestCounts(host: HTMLElement, counts: FeedMergeTestCounts | undefined): void {
+  const drawn = host.querySelector(":scope > .merge-suite-counts");
+  const next = counts === undefined ? null : drawFeedMergeTestCounts(counts);
+  if (next === null) drawn?.remove();
+  else if (drawn === null) host.append(next);
+  else if (drawn.textContent !== next.textContent) drawn.replaceWith(next);
 }
 
 /** One painted span of a suite's output. */
