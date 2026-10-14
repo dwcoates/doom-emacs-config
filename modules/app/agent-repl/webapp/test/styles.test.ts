@@ -3104,8 +3104,8 @@ describe("a card head's clock holds a fixed footprint", () => {
  * src/bubble/draw.ts and styled by the rules on `.bubble`: the role sets the
  * side and the fill, and a prompt's role also sets its lines a tree line apart;
  * a variant or state sets only the border, `data-cap-lines` sets the collapsed
- * limit, and one size rule serves every kind (a thinking bubble narrows only
- * the `--bubble-font-rem` token it reads, 2026-10-14).
+ * limit, and one size rule serves every kind (a thinking bubble and an interim
+ * response narrow only the `--bubble-font-rem` token it reads, 2026-10-14).
  */
 describe("the one bubble rule set", () => {
   /** Whether SELECTOR styles a bubble ITSELF (not its strip, box or content). */
@@ -3202,16 +3202,15 @@ describe("the one bubble rule set", () => {
             // suite pins it.
             !(PAD_TOKENS.includes(prop) && rule.selectors.every((sel) => TIGHTER_PAD_SELECTORS.includes(sel))) &&
             // The dimmed prose of a thinking or interim bubble (owner request,
-            // 2026-10-08) is the one text color a variant sets, and the
-            // thinking prose's italic and narrower `--bubble-font-rem` (owner
-            // requests, 2026-10-14) the one font style and size; their own
-            // suite pins all three.
-            !(prop === "color" && rule.selectors.every((sel) => DIMMED_TEXT_SELECTORS.includes(sel))) &&
+            // 2026-10-08) is the one text color a variant sets, their narrower
+            // `--bubble-font-rem` the one size, and the thinking prose's italic
+            // (owner requests, 2026-10-14) the one font style; their own suite
+            // pins all three.
             !(
-              (prop === "font-style" || prop === "--bubble-font-rem") &&
-              rule.selectors.length === 1 &&
-              rule.selectors[0] === THINKING_SELECTOR
+              (prop === "color" || prop === "--bubble-font-rem") &&
+              rule.selectors.every((sel) => DIMMED_TEXT_SELECTORS.includes(sel))
             ) &&
+            !(prop === "font-style" && rule.selectors.length === 1 && rule.selectors[0] === THINKING_SELECTOR) &&
             // NO BUBBLE AT ALL (owner ruling, 2026-10-08): the same two
             // selectors also turn off the base rule's box-shadow, the one
             // remaining visible highlight once their fill is already the
@@ -4008,7 +4007,7 @@ const variantSelector = (variant: string): string => `.bubble[data-variant="${va
 const PAD_LADDER: readonly { selectors: readonly string[]; props: readonly string[] }[] = [
   { selectors: [variantSelector("response")], props: ["--bubble-pad-y"] },
   { selectors: ["user", "agent", "peer", "held"].map(variantSelector), props: ["--bubble-pad-y", "--bubble-pad-x"] },
-  { selectors: [`${variantSelector("response")}.interim-response`], props: ["--bubble-pad-y"] },
+  { selectors: [`${variantSelector("response")}.interim-response`], props: ["--bubble-pad-y", "--bubble-pad-x"] },
   { selectors: [variantSelector("thinking")], props: ["--bubble-pad-y"] },
 ];
 /** The two padding tokens a ladder rung may set. */
@@ -4350,18 +4349,33 @@ describe("the repository header's add control", () => {
  * same two tokens a touch nearer the grey, and is italic.
  */
 describe("the dimmed prose of a thinking or interim bubble", () => {
-  /** The PROPERTY the cascade hands a settled response bubble with HOOKS and VARIANT. */
-  function cascadedOnResponse(variant: string, hooks: readonly string[], property: string): string {
+  /** A settled response bubble with HOOKS and VARIANT. */
+  function responseBubble(variant: string, hooks: readonly string[]): HTMLElement {
     const el = document.createElement("div");
     el.className = ["bubble", "md", ...hooks].join(" ");
     el.setAttribute("data-role", "response");
     el.setAttribute("data-variant", variant);
     el.setAttribute("data-state", "success");
+    return el;
+  }
+
+  /** The PROPERTY the cascade hands a settled response bubble with HOOKS and VARIANT. */
+  function cascadedOnResponse(variant: string, hooks: readonly string[], property: string): string {
+    const el = responseBubble(variant, hooks);
     return inDocument(el, () => cascadedValue(el, property));
   }
 
   /** The `color` the cascade hands a response bubble with HOOKS and VARIANT. */
   const textOf = (variant: string, hooks: readonly string[]): string => cascadedOnResponse(variant, hooks, "color");
+
+  /** The `font-weight` the cascade hands the body of a response bubble with HOOKS and VARIANT. */
+  function bodyWeightOf(variant: string, hooks: readonly string[]): string {
+    const bubble = responseBubble(variant, hooks);
+    const body = document.createElement("div");
+    body.className = "bubble-body";
+    bubble.append(body);
+    return inDocument(bubble, () => cascadedValue(body, "font-weight"));
+  }
 
   /** The `font-style` the cascade hands a response bubble with HOOKS and VARIANT. */
   const fontStyleOf = (variant: string, hooks: readonly string[]): string => cascadedOnResponse(variant, hooks, "font-style");
@@ -4394,12 +4408,57 @@ describe("the dimmed prose of a thinking or interim bubble", () => {
     expect(got).toBe(0.8);
   });
 
-  it("leaves an interim response's prose at every bubble's size", () => {
+  it("sets an interim response's prose at the thinking bubble's smaller size", () => {
     // Arrange / Act
-    const got = cascadedOnResponse("response", ["assistant", "interim-response"], "--bubble-font-rem");
+    const got = [
+      cascadedOnResponse("response", ["assistant", "interim-response"], "--bubble-font-rem"),
+      cascadedOnResponse("thinking", ["assistant", "thinking-bubble"], "--bubble-font-rem"),
+    ];
 
     // Assert
-    expect(got).toBe(rootToken("--bubble-font-rem"));
+    expect(got[0]).toBe(got[1]);
+  });
+
+  it("declares the smaller size once, on the rule both kinds share", () => {
+    // Arrange / Act
+    const declaring = rulesOf(stylesheet)
+      .filter((rule) => /(?:^|;)\s*--bubble-font-rem\s*:/.test(rule.declarations) && rule.selectors.some((sel) => sel !== ":root"))
+      .map((rule) => rule.selectors);
+
+    // Assert
+    expect(declaring).toEqual([[...DIMMED_TEXT_SELECTORS]]);
+  });
+
+  it("sets an interim response's prose in bold", () => {
+    // Arrange / Act
+    const got = bodyWeightOf("response", ["assistant", "interim-response"]);
+
+    // Assert
+    expect(got).toBe("bold");
+  });
+
+  it("bolds an interim's body alone, so its usage corner keeps its own weight", () => {
+    // Arrange / Act
+    const got = cascadedOnResponse("response", ["assistant", "interim-response"], "font-weight");
+
+    // Assert
+    expect(got).not.toBe("bold");
+  });
+
+  it("leaves a thinking bubble's prose at its own weight", () => {
+    // Arrange / Act
+    const got = bodyWeightOf("thinking", ["assistant", "thinking-bubble"]);
+
+    // Assert
+    expect(got).not.toBe("bold");
+  });
+
+  it("declares the base size on the root as the one value every bubble starts from", () => {
+    // Arrange / Act
+    const got = [rootToken("--bubble-base-font-rem"), rootToken("--bubble-font-rem")];
+
+    // Assert
+    expect(got).toEqual(["0.9", "var(--bubble-base-font-rem)"]);
   });
 
   it("leaves the turn's answer at every bubble's size", () => {
@@ -4653,8 +4712,10 @@ describe("the stylesheet's real-height contract", () => {
  * bubbles at about a third of the base (owner requests, 2026-10-13), and a
  * prompt bubble 30% tighter again than a response ON EVERY SIDE (owner
  * request, 2026-10-14), while the agentic tool and monitor cards and the
- * compaction summary keep the base. Only a prompt's rung moves the horizontal
- * token, so no other bubble's sides move with the vertical ladder.
+ * compaction summary keep the base. An interim's gap then shrinks on every side
+ * by as much as its narrower text did (owner request, 2026-10-14). Only a
+ * prompt's and an interim's rungs move the horizontal token, so no other
+ * bubble's sides move with the vertical ladder.
  */
 describe("the padding ladder", () => {
   const RESPONSE = "calc(var(--bubble-pad-y-base)*0.7)";
@@ -4662,6 +4723,8 @@ describe("the padding ladder", () => {
   const THINKING = "calc(var(--bubble-pad-y-base)*0.35)";
   const BASE = "var(--bubble-pad-y-base)";
   const PROMPT_X = "calc(var(--bubble-pad-x-base)*0.7)";
+  const INTERIM_Y = "calc(var(--bubble-pad-y-base)*0.49*var(--bubble-font-rem)/var(--bubble-base-font-rem))";
+  const INTERIM_X = "calc(var(--bubble-pad-x-base)*var(--bubble-font-rem)/var(--bubble-base-font-rem))";
   const BASE_X = "var(--bubble-pad-x-base)";
 
   /** The PROPERTY the cascade hands a bubble of VARIANT, wearing CLASSES. */
@@ -4692,12 +4755,28 @@ describe("the padding ladder", () => {
     expect(stated).toEqual(Object.keys(BUBBLE_VARIANTS).sort());
   });
 
-  it("gives an interim response 30% less than the green answer it is not", () => {
+  it("gives an interim response 30% less than the green answer it is not, shrunk with its text", () => {
     // Arrange / Act
     const got = [tokenOf("--bubble-pad-y", "response", ["interim-response"]), tokenOf("--bubble-pad-y", "response", ["final-response"])];
 
     // Assert
-    expect(got).toEqual([TIGHT, RESPONSE]);
+    expect(got).toEqual([INTERIM_Y, RESPONSE]);
+  });
+
+  it("shrinks an interim response's sides with its text, where the green answer keeps the base", () => {
+    // Arrange / Act
+    const got = [tokenOf("--bubble-pad-x", "response", ["interim-response"]), tokenOf("--bubble-pad-x", "response", ["final-response"])];
+
+    // Assert
+    expect(got).toEqual([INTERIM_X, BASE_X]);
+  });
+
+  it("leaves a thinking bubble's padding unscaled by its smaller text", () => {
+    // Arrange / Act
+    const got = [tokenOf("--bubble-pad-y", "thinking"), tokenOf("--bubble-pad-x", "thinking")];
+
+    // Assert
+    expect(got).toEqual([THINKING, BASE_X]);
   });
 
   it.each(cases)("gives a $variant bubble the expected vertical padding", ({ variant, y }) => {
