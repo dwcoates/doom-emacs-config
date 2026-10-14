@@ -49,8 +49,9 @@ func newSourcedRepo(t *testing.T) *sourcedRepo {
 func (s *sourcedRepo) mergeAs(t *testing.T, mode harness.MergeMode) {
 	t.Helper()
 	resp, err := s.d.Client().MergeWorkspace(s.d.Ctx(), connect.NewRequest(harness.MergeRequest(s.f.ws, mode)))
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("MergeWorkspace = (%v, %v), want the merge enqueued", resp.Msg.GetResult(), err)
+	requireRPCAnswered(t, "MergeWorkspace", resp, err)
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("MergeWorkspace = (%v), want the merge enqueued", resp.Msg.GetResult())
 	}
 }
 
@@ -427,8 +428,9 @@ func TestTheTestLogOpensThroughOpenInEditorByItsToken(t *testing.T) {
 	}))
 
 	// Assert: relayed to Emacs as the log's path.
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("OpenInEditor = (%v, %v), want success", resp.Msg.GetResult(), err)
+	requireRPCAnswered(t, "OpenInEditor", resp, err)
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("OpenInEditor = (%v), want success", resp.Msg.GetResult())
 	}
 	push := awaitView(t, s.f, s.f.host, "the open_in_editor push", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
 		return r.GetOpenInEditor() != nil
@@ -455,8 +457,9 @@ func TestAnUnknownTestLogTokenIsRefused(t *testing.T) {
 	}))
 
 	// Assert.
-	if err != nil || resp.Msg.GetError().GetUnknownMergeTestLog() == nil {
-		t.Fatalf("OpenInEditor = (%v, %v), want unknown_merge_test_log", resp.Msg.GetResult(), err)
+	requireRPCAnswered(t, "OpenInEditor", resp, err)
+	if resp.Msg.GetError().GetUnknownMergeTestLog() == nil {
+		t.Fatalf("OpenInEditor = (%v), want unknown_merge_test_log", resp.Msg.GetResult())
 	}
 }
 
@@ -473,8 +476,9 @@ func TestOpenInEditorRelaysAWorkspaceFileOntoTheHostStream(t *testing.T) {
 	}))
 
 	// Assert.
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("OpenInEditor = (%v, %v), want success", resp.Msg.GetResult(), err)
+	requireRPCAnswered(t, "OpenInEditor", resp, err)
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("OpenInEditor = (%v), want success", resp.Msg.GetResult())
 	}
 	push := awaitView(t, f, f.host, "the open_in_editor push", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
 		return r.GetOpenInEditor() != nil
@@ -497,8 +501,9 @@ func TestOpenInEditorRefusesAWorkspaceFileEscapingTheWorkspace(t *testing.T) {
 	}))
 
 	// Assert.
-	if err != nil || resp.Msg.GetError().GetPathEscapesWorkspace() == nil {
-		t.Fatalf("OpenInEditor = (%v, %v), want path_escapes_workspace", resp.Msg.GetResult(), err)
+	requireRPCAnswered(t, "OpenInEditor", resp, err)
+	if resp.Msg.GetError().GetPathEscapesWorkspace() == nil {
+		t.Fatalf("OpenInEditor = (%v), want path_escapes_workspace", resp.Msg.GetResult())
 	}
 }
 
