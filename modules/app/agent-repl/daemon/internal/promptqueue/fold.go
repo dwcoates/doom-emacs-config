@@ -22,7 +22,7 @@ import (
 // wsm.CoalesceHeldPrompts, the one transaction that merges the entry ahead and
 // retires the folded one together, and both retire it as `coalesced`. What a
 // fold adds is what an edit's commit does to the entry whose words changed:
-// its verdict and acceptance are discarded in that same transaction, the
+// its verdict is discarded in that same transaction, the
 // content epoch of both turns is bumped under the verdict lock so a verdict
 // still being reached about either one's old words is discarded when it lands,
 // a queue jump either had earned is dropped, and the merged entry is
@@ -101,7 +101,6 @@ func (q *queue) Fold(ctx context.Context, ws ids.WorkspaceID, turn, above ids.Tu
 	ahead.Said = merged
 	ahead.Coalesced = true
 	ahead.Classification = nil
-	ahead.Accepted = false
 	q.reclassify(ctx, d, ahead, log, opFold)
 	return nil
 }

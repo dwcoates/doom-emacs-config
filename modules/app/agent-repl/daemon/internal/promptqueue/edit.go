@@ -184,7 +184,6 @@ func (q *queue) CommitEdit(ctx context.Context, ws ids.WorkspaceID, turn ids.Tur
 
 	held.Said = said
 	held.Classification = nil
-	held.Accepted = false
 	q.reclassify(ctx, d, held, log, opEditCommit)
 	return nil
 }

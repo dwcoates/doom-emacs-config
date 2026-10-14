@@ -163,13 +163,9 @@ func setClassification(out *frontendv1.HeldPrompt, h wsm.HeldPrompt, log dlog.Lo
 			AfterToolCall: &frontendv1.HeldPromptAfterToolCall{Rationale: h.Classification.Reason}}
 	case wsm.ArmHoldForTurnEnd:
 		ctx["arm"] = "hold_for_turn_end"
-		ctx["accepted"] = h.Accepted
 		log.Debug("daemon.holds.classification", "the hold waits for the turn's end", ctx)
 		out.Classification = &frontendv1.HeldPrompt_HoldForTurnEnd{
-			HoldForTurnEnd: &frontendv1.HeldPromptHoldForTurnEnd{
-				Rationale: h.Classification.Reason,
-				Accepted:  &frontendv1.HeldPromptAccepted{Accepted: h.Accepted},
-			}}
+			HoldForTurnEnd: &frontendv1.HeldPromptHoldForTurnEnd{Rationale: h.Classification.Reason}}
 	case wsm.ArmUninterruptibleTurn:
 		ctx["arm"] = "uninterruptible_turn"
 		ctx["command"] = h.Classification.Command.String()
@@ -281,9 +277,6 @@ func heldStatus(p *frontendv1.HeldPrompt, log dlog.Logger) (*frontendv1.HeldProm
 	var notes []*frontendv1.HeldPromptStatusNote
 	for _, lost := range ranked[min(1, len(ranked)):] {
 		notes = append(notes, note(lost.GetDetail(), lost.GetLabel()))
-	}
-	if p.GetHoldForTurnEnd().GetAccepted().GetAccepted() {
-		notes = append(notes, note("", "confirmed"))
 	}
 	if p.GetCoalesced() != nil {
 		notes = append(notes, note("", "later prompts were folded into this one"))
