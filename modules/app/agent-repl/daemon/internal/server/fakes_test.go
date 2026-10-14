@@ -599,8 +599,8 @@ type fakeQueue struct {
 	promptqueue.Queue
 	releaseErr error
 	dropErr    error
-	acceptErr  error
 	released   []ids.TurnID
+	dropped    []ids.TurnID
 
 	// beginErr, commitErr and cancelErr answer the edit's three steps.
 	beginErr  error
@@ -689,9 +689,10 @@ func (f *fakeQueue) Release(_ context.Context, _ ids.WorkspaceID, turn ids.TurnI
 	return f.releaseErr
 }
 
-func (f *fakeQueue) Drop(context.Context, ids.WorkspaceID, ids.TurnID) error { return f.dropErr }
-
-func (f *fakeQueue) Accept(context.Context, ids.WorkspaceID, ids.TurnID) error { return f.acceptErr }
+func (f *fakeQueue) Drop(_ context.Context, _ ids.WorkspaceID, turn ids.TurnID) error {
+	f.dropped = append(f.dropped, turn)
+	return f.dropErr
+}
 
 // HeldSince records the asked `since` and answers the seeded held turns.
 func (f *fakeQueue) HeldSince(_ context.Context, _ ids.WorkspaceID, since time.Time) ([]ids.TurnID, error) {

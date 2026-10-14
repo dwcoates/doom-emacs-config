@@ -1790,13 +1790,12 @@ pre {
    the agent's settled answer. It feeds `--bubble-bg`, so anything painted
    from it matches in both themes. The retired `--held-prompt-bg` tint token
    is gone with it; nothing else read it. */
-/* A HELD prompt is also HALF the one bubble width (owner spec, 2026-09-23),
-   derived from the same token rather than a copied number. The body measures
-   a tree's column budget off this resolved `max-width` (src/bubble/body.ts), so
-   a tree in a held prompt wraps at the halved cap. */
+/* A HELD prompt takes the one bubble width every prompt does (owner request,
+   2026-10-13, superseding 2026-09-23's halved cap), so it sets no `max-width`
+   of its own. What keeps it short is its one-line collapsed cap
+   (`ELLIPSIS_CAP_LINES`, src/bubble/draw.ts), not its width. */
 .bubble[data-variant="held"] {
   --bubble-bg: var(--assistant);
-  max-width: calc(var(--bubble-max-width) / 2);
 }
 /* THE VERTICAL PADDING LADDER: the gap between a bubble's top and bottom edge
    and its content, as a share of the base. Vertical only: the left and right
@@ -3131,11 +3130,42 @@ html[data-page-unshown] *::after {
    frame and the lease hold's amber are gone; the hold's badge alone says what
    holds it. */
 .queued-head { display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; margin-bottom: 0.3rem; }
-/* The classifier's one-line reason reads as an aside: muted and italic. */
-.queued-reason { margin-top: 0.3rem; font-size: calc(0.8rem * var(--feed-text-scale)); font-style: italic; }
-/* A held badge's full sentence, the daemon's words, in the expand-only details. */
-.queued-status-detail, .queued-status-note { margin-top: 0.3rem; font-size: calc(0.8rem * var(--feed-text-scale)); }
-.queued-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+/* A standing fact the one badge does not show: the same pill, quiet. */
+.badge.queued-status-note { color: var(--muted); }
+/* THE REASON ENDS THE FIRST LINE (owner request, 2026-10-13): the classifier's
+   words as a quiet pill floated into the scroll box's corner. A collapsed body
+   is clamped as its own box (the ellipsis rule), so it sits BESIDE the float
+   and its `…` falls before the reason, never under it. The pill keeps to its
+   share of the line and cuts its own words short; expanded, the body wraps
+   around it and the pill opens to every word. */
+.held-reason {
+  float: right;
+  max-width: 40%;
+  margin-left: 0.6rem;
+  font-style: italic;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bubble-scroll.expanded > .held-reason {
+  white-space: normal;
+  border-radius: 8px;
+}
+/* An unclassified prompt's reason is the failure itself, said plainly. */
+.held-reason.queued-unclassified { font-style: normal; }
+/* THE ROW IS COMPACT AND EVEN (owner request, 2026-10-13): every control is
+   one width, the widest label's, because a grid's `1fr` columns sized at the
+   row's own max-content all resolve to the largest column. */
+.queued-actions {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  width: max-content;
+  max-width: 100%;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+}
 .queued-actions ar-button { cursor: pointer; font: inherit; }
 /* A release the holding arm is likely to refuse: offered, because the daemon
    is the one that answers, but drawn back so it does not read as the ordinary
@@ -5411,8 +5441,8 @@ ar-button.outcome-marker-pill {
   gap: 0.5rem;
 }
 
-/* The ticking queued-at age, first in the expand-only details (a badge row no
-   longer holds it). Tabular so the number does not shuffle once a second. */
+/* The ticking queued-at age, last in the strip after the badges. Tabular so
+   the number does not shuffle once a second. */
 .queued-age {
   font-size: 0.7rem;
   color: var(--muted);
@@ -5435,7 +5465,6 @@ ar-button.outcome-marker-pill {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.45; }
 }
-.queued-reason.queued-unclassified { font-style: normal; color: var(--muted); }
 /* An attached image, capped so a paste cannot take over the tray. */
 .queued-image { max-width: 100%; max-height: 8rem; border-radius: 6px; }
 /* A host-local image the webview cannot fetch: named, not drawn broken. */
@@ -5445,9 +5474,17 @@ ar-button.outcome-marker-pill {
   color: var(--muted);
 }
 /* The row's controls, and the refusal that lands under them. */
+/* SHORT, SLEEK CONTROLS (owner requests, 2026-10-13 and 2026-10-14): a
+   small font, a tight leading and almost no vertical padding, so the row
+   costs little height. The 1.15 leading makes a control about 10% shorter
+   than the 1.3 one did. Every control wears the same plain border. */
 .queued-actions ar-button {
-  padding: 0.15rem 0.6rem;
-  border-radius: 6px;
+  padding: 0.05rem 0.6rem;
+  font-size: calc(0.75rem * var(--feed-text-scale));
+  line-height: 1.15;
+  text-align: center;
+  white-space: nowrap;
+  border-radius: 5px;
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--fg);

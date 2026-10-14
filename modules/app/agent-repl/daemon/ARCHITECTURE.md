@@ -621,8 +621,7 @@ UpdateAgent.stop / StopBash; all_agents → fan-wide), `AnswerPermission`,
   add-support brief from `prompts/add-support-slash-command.md` (loud on
   absence) and creates via the ordinary standard form with initial_prompt;
   `SubmitPromptRequest.origin` is REQUIRED (UNSPECIFIED refused; persisted
-  onto the turn via StartTurn); `UpdateHeldPrompt.accept` is legal only on a
-  `hold_for_turn_end` verdict (flips HeldPromptAccepted, re-pushes the tray);
+  onto the turn via StartTurn); `UpdateHeldPrompt` is release or drop only;
   `SessionFault.kind` (store_unreachable | converter_defect |
   log_sink_poisoned | keepalive_failed | vendor_query_failed) feeds the
   topbar's session_fault warnings; every shim.v1 failure now carries a

@@ -196,34 +196,6 @@ func (q *queue) dropLocked(ctx context.Context, d *delivery, held wsm.HeldPrompt
 	return nil
 }
 
-// Accept confirms a hold_for_turn_end verdict. It is VIEW STATE ONLY: delivery
-// is unchanged and the tray re-pushes.
-func (q *queue) Accept(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) error {
-	log, err := q.logger(ctx, ws)
-	if err != nil {
-		return err
-	}
-	log = log.With(dlog.Context{"turn": string(turn)})
-
-	held, err := q.standingHold(ctx, ws, turn)
-	if err != nil {
-		log.Warn(opAccept, "there is no such standing hold to accept", dlog.Context{"cause": err.Error()})
-		return err
-	}
-	if held.Classification == nil || held.Classification.Arm != wsm.ArmHoldForTurnEnd {
-		log.Warn(opAccept, "accept is legal only on a hold_for_turn_end verdict", dlog.Context{
-			"arm": classificationName(held),
-		})
-		return ErrAcceptNotApplicable
-	}
-	if err := q.deps.DB.SetHeldPromptAccepted(ctx, turn); err != nil {
-		log.Error(opAccept, "the acceptance could not be recorded", dlog.Context{"cause": err.Error()})
-		return fmt.Errorf("accept hold %q on %q: %w", turn, ws, err)
-	}
-	log.Info(opAccept, "the user accepted the wait for the turn's end", nil)
-	return q.pushTray(ctx, ws, log)
-}
-
 // deliverHeld sends a standing hold to the shim and retires it as delivered.
 // Every caller holds the delivery lock (d) and has already filtered what a
 // standing edit withholds; the check here is the backstop that keeps a

@@ -27,17 +27,6 @@ func releaseRequest() *agentreplv1.UpdateHeldPromptRequest {
 	}
 }
 
-// acceptRequest is the accept action on one held prompt.
-func acceptRequest() *agentreplv1.UpdateHeldPromptRequest {
-	return &agentreplv1.UpdateHeldPromptRequest{
-		Workspace: ref(),
-		Turn:      &conversationv1.TurnId{Value: "turn-1"},
-		Action: &agentreplv1.UpdateHeldPromptRequest_Accept{
-			Accept: &agentreplv1.UpdateHeldPromptAccept{},
-		},
-	}
-}
-
 // TestUpdateHeldPromptReleaseReachesTheQueue pins that release delivers through
 // the queue's own verb rather than through a second delivery path.
 func TestUpdateHeldPromptReleaseReachesTheQueue(t *testing.T) {
@@ -53,6 +42,24 @@ func TestUpdateHeldPromptReleaseReachesTheQueue(t *testing.T) {
 	}
 	if resp.Msg.GetSuccess() == nil || len(h.Queue.released) != 1 {
 		t.Fatalf("released = %v, result = %v", h.Queue.released, resp.Msg.GetResult())
+	}
+}
+
+// TestUpdateHeldPromptDropReachesTheQueue pins that a drop discards through
+// the queue's own verb and delivers nothing.
+func TestUpdateHeldPromptDropReachesTheQueue(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	resp, err := h.Client.UpdateHeldPrompt(context.Background(), connect.NewRequest(dropRequest()))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("UpdateHeldPrompt: %v", err)
+	}
+	if resp.Msg.GetSuccess() == nil || len(h.Queue.dropped) != 1 || len(h.Queue.released) != 0 {
+		t.Fatalf("dropped = %v, released = %v, result = %v", h.Queue.dropped, h.Queue.released, resp.Msg.GetResult())
 	}
 }
 
@@ -106,25 +113,6 @@ func TestUpdateHeldPromptMapsBeingDelivered(t *testing.T) {
 				t.Fatalf("result = %v, want being_delivered", resp.Msg.GetResult())
 			}
 		})
-	}
-}
-
-// TestUpdateHeldPromptMapsAcceptNotApplicable pins that `accept` is legal ONLY
-// on a hold_for_turn_end verdict.
-func TestUpdateHeldPromptMapsAcceptNotApplicable(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	h.Queue.acceptErr = promptqueue.ErrAcceptNotApplicable
-
-	// Act.
-	resp, err := h.Client.UpdateHeldPrompt(context.Background(), connect.NewRequest(acceptRequest()))
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("UpdateHeldPrompt: %v", err)
-	}
-	if resp.Msg.GetError().GetAcceptNotApplicable() == nil {
-		t.Fatalf("result = %v, want accept_not_applicable", resp.Msg.GetResult())
 	}
 }
 

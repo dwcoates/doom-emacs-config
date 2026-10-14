@@ -2,13 +2,8 @@
  * HOLD TRAY — held prompts at the feed's tail.
  *
  * A held prompt is a `UserSaid` the daemon has NOT yet delivered, so it is
- * never a feed row: it lives in its own whole-list-replaced region. The rules
- * with teeth here are the two rulings:
- *
- *   - [accept] exists ONLY on `hold_for_turn_end` entries and on no other
- *     classification, and
- *   - a hold delivers itself when it clears, so `accepted` is also drawn as
- *     pure state.
+ * never a feed row: it lives in its own whole-list-replaced region. A hold
+ * delivers itself when it clears, so its only answers are release and drop.
  *
  * The tray is also where prompt LOSS would happen, so release and drop are
  * asserted to echo the TurnId verbatim rather than any index or position.
@@ -31,7 +26,6 @@ import { bootColdOnce, startHarness, type Harness } from "./harness";
 import {
   HELD_TURN_ID,
   HOLD_BADGES,
-  HOLD_ACCEPTABLE_ARM,
   HOLD_ARMS,
   HOLD_CLASSIFICATION_ARMS,
   WORKSPACE_ID,
@@ -69,7 +63,7 @@ describe("arm coverage", () => {
   });
 
   it("covers every UpdateHeldPrompt action", () => {
-    assertCoversOneof(UpdateHeldPromptRequestSchema, "action", ["release", "drop", "accept"]);
+    assertCoversOneof(UpdateHeldPromptRequestSchema, "action", ["release", "drop"]);
   });
 });
 
@@ -176,11 +170,11 @@ describe("hold reasons draw distinctly", () => {
     expect([new Set(rendered).size, rendered.includes("")]).toEqual([HOLD_ARMS.length, false]);
   });
 
-  it("draws the shutdown hold's own schedule id", async () => {
+  it("titles the shutdown hold's badge with its own schedule id", async () => {
     // Arrange / Act
     await withTray({ items: [heldPromptItem({ hold: "shutdown" })] });
-    // Assert
-    expect(harness.$(`[data-held-turn="${HELD_TURN_ID}"]`)?.textContent).toContain("sched-1");
+    // Assert — the badge's detail sentence is its hover title.
+    expect(harness.$(`[data-held-turn="${HELD_TURN_ID}"] .held-badge`)?.title).toContain("sched-1");
   }, 1_500);
 });
 
@@ -288,7 +282,7 @@ describe("the fold above button", () => {
     await withTray(foldable());
     // Assert
     const button = harness.$('[data-held-turn="turn-behind"] [data-held-action="fold"]');
-    expect(button?.textContent).toBe("fold above");
+    expect(button?.textContent).toBe("Fold Above");
   });
 
   it("is not drawn on an entry the daemon offers no fold", async () => {
@@ -371,62 +365,19 @@ describe("the update classifier button", () => {
   });
 });
 
-describe("the accept button", () => {
-  it("exists on a hold_for_turn_end entry", async () => {
+describe("a hold_for_turn_end entry's controls", () => {
+  it("offers no Accept control", async () => {
     // Arrange / Act
-    await withTray({ items: [heldPromptItem({ classification: HOLD_ACCEPTABLE_ARM })] });
+    await withTray({ items: [heldPromptItem({ classification: "holdForTurnEnd" })] });
     // Assert
-    expect(harness.$('[data-held-action="accept"]')).not.toBeNull();
+    expect(harness.$('[data-held-action="accept"]')).toBeNull();
   });
 
-  it("calls UpdateHeldPrompt with the accept arm", async () => {
-    // Arrange
-    await withTray({ items: [heldPromptItem({ classification: HOLD_ACCEPTABLE_ARM })] });
-    // Act
-    await harness.click('[data-held-action="accept"]');
-    // Assert
-    const [request] = harness.fake.calls<{ action: { case?: string } }>("updateHeldPrompt");
-    expect(request.action.case).toBe("accept");
-  });
-
-  it("echoes the TurnId on an accept", async () => {
-    // Arrange
-    await withTray({
-      items: [heldPromptItem({ classification: HOLD_ACCEPTABLE_ARM, turn: "turn-accept" })],
-    });
-    // Act
-    await harness.click('[data-held-turn="turn-accept"] [data-held-action="accept"]');
-    // Assert
-    const [request] = harness.fake.calls<{ turn?: { value: string } }>("updateHeldPrompt");
-    expect(request.turn?.value).toBe("turn-accept");
-  });
-
-  it.each(HOLD_CLASSIFICATION_ARMS.filter((arm) => arm !== HOLD_ACCEPTABLE_ARM))(
-    "does not exist on a %s entry",
-    async (classification) => {
-      // Arrange / Act
-      await withTray({ items: [heldPromptItem({ classification })] });
-      // Assert
-      expect(harness.$('[data-held-action="accept"]')).toBeNull();
-    },
-  );
-
-  it("draws the accepted marker as state", async () => {
+  it("carries no acceptance state on the card", async () => {
     // Arrange / Act
-    await withTray({
-      items: [heldPromptItem({ classification: HOLD_ACCEPTABLE_ARM, accepted: true })],
-    });
+    await withTray({ items: [heldPromptItem({ classification: "holdForTurnEnd" })] });
     // Assert
-    expect(harness.$(`[data-held-turn="${HELD_TURN_ID}"]`)?.dataset.accepted).toBe("true");
-  });
-
-  it("draws the un-accepted marker as state", async () => {
-    // Arrange / Act
-    await withTray({
-      items: [heldPromptItem({ classification: HOLD_ACCEPTABLE_ARM, accepted: false })],
-    });
-    // Assert
-    expect(harness.$(`[data-held-turn="${HELD_TURN_ID}"]`)?.dataset.accepted).toBe("false");
+    expect(harness.$(`[data-held-turn="${HELD_TURN_ID}"]`)?.hasAttribute("data-accepted")).toBe(false);
   });
 });
 

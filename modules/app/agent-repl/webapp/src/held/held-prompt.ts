@@ -7,10 +7,10 @@
  * (src/bubble/draw.ts, owner rulings 2026-09-23): a prompt-role bubble on the
  * prompt rail whose fill is only 5% of the held grey-blue tint over the feed
  * (owner ruling, 2026-09-27), so it barely lifts off the page — the reader
- * sees their words have NOT reached the agent — at HALF the one bubble
- * width, whose header strip is its status BADGES, whose content is what the
- * user said, painted by the one body pipeline, and which collapses to ONE line
- * ending in the one bubble's ellipsis when there is more, never a fade (owner
+ * sees their words have NOT reached the agent — at the one bubble width every
+ * prompt takes (owner request, 2026-10-13), whose header strip is its status
+ * BADGES, whose content is what the user said, painted by the one body
+ * pipeline, and which collapses to ONE line ending in the one bubble's ellipsis when there is more, never a fade (owner
  * ruling, 2026-09-27), opened by the one toggle (expand.ts, armed on the held section).
  *
  * COLLAPSED IT IS ONE LINE AND ITS BADGES (owner spec, 2026-09-23; one line,
@@ -207,8 +207,10 @@ export function drawHeldPrompt(
     },
   });
 
-  // THE STRIP IS THE ONE BADGE: the card's headline, the one thing besides the
-  // first line a collapsed card shows.
+  // THE STRIP IS THE STATUS LINE (owner request, 2026-10-13): the one badge,
+  // a quiet pill for every further standing fact, and the queued age. A
+  // collapsed card shows everything but the rest of the words, so expanding
+  // one only ever reveals more of what was said.
   const head = document.createElement("div");
   head.className = "queued-head";
   const verdict = drawClassification(classification, `${path}.classification`);
@@ -219,6 +221,14 @@ export function drawHeldPrompt(
     `${path}.badge`,
   );
   head.appendChild(drawn.pill);
+  for (const note of drawn.notes) head.appendChild(note);
+  head.appendChild(
+    drawHeldPromptQueuedAt(
+      requireMessage(u.queuedAt, `${path}.queued_at`),
+      tc,
+      `${path}.queued_at`,
+    ),
+  );
   if (hold !== null && hold.case === "shutdown" && drawn.status === "shutdown") {
     // The schedule id is a HOOK on the hold's badge, not words: it joins this
     // card to the shutdown it should explain.
@@ -230,25 +240,16 @@ export function drawHeldPrompt(
       ? drawUserSaid(said, `${path}.said`)
       : [drawHeldSessionAct(u.act, `${path}.act`)];
 
-  // EVERYTHING ELSE IS EXPAND-ONLY, in ONE element, so a refusal an action
-  // draws beside its row lands inside the region and folds away with it.
-  const details = document.createElement("div");
-  details.className = "queued-details";
-  details.appendChild(
-    drawHeldPromptQueuedAt(
-      requireMessage(u.queuedAt, `${path}.queued_at`),
-      tc,
-      `${path}.queued_at`,
-    ),
-  );
-  for (const detail of drawn.details) details.appendChild(detail);
-  if (verdict.detail !== null) details.appendChild(verdict.detail);
+  // THE CONTROLS ARE ALWAYS SHOWN (owner request, 2026-10-13), in ONE footer
+  // element, so a refusal an action draws beside its row lands in it too.
+  const controls = document.createElement("div");
+  controls.className = "queued-controls";
   // A CLASSIFIED PROMPT OFFERS "Update classifier": its form is this turn's
   // one element, kept across pushes (classifier-update.ts).
   const route = u.act === undefined ? classifierRouteOf(classification.case) : null;
   const classifierForm =
     route === null ? null : tc.classifierForms.formFor(turn.value, { text: spokenText(said), route });
-  details.appendChild(
+  controls.appendChild(
     drawHeldPromptActions({
       tc,
       turn,
@@ -256,7 +257,6 @@ export function drawHeldPrompt(
       text: spokenText(said),
       classification: classification.case,
       hold: hold === null ? null : hold.case,
-      accept: verdict.offersAccept,
       foldAbove:
         u.foldAbove === undefined
           ? null
@@ -273,8 +273,11 @@ export function drawHeldPrompt(
       hooks: holdCardHooks(hold === null ? null : hold.case),
       working: false,
       strip: [head],
+      // THE REASON ENDS THE FIRST LINE (owner request, 2026-10-13): floated
+      // into the corner, so the collapsed line's ellipsis falls before it.
+      ...(verdict.detail === null ? {} : { corner: verdict.detail }),
       content,
-      expandOnly: classifierForm === null ? [details] : [details, classifierForm.element],
+      footer: classifierForm === null ? [controls] : [controls, classifierForm.element],
       capLines: ELLIPSIS_CAP_LINES,
       more: BUBBLE_MORE_ELLIPSIS,
     },
@@ -292,15 +295,6 @@ export function drawHeldPrompt(
     card.setAttribute(
       "data-act",
       requireCase(u.act.act, `${path}.act.act`).case,
-    );
-  // The acceptance is STATE OF THE CARD, not of a marker that only exists once
-  // it is true: the arm that has an acceptance says which way it stands, and
-  // the arms that have none say nothing at all.
-  if (verdict.acceptedState === null) card.removeAttribute("data-accepted");
-  else
-    card.setAttribute(
-      "data-accepted",
-      verdict.acceptedState ? "true" : "false",
     );
   return card;
 }
@@ -381,12 +375,8 @@ export function drawHeldPromptQueuedAt(
 
 /** What one classification arm contributes to the card. */
 interface Verdict {
-  /** Whether this arm's acceptance stands, or null where it has none. */
-  acceptedState: boolean | null;
   /** The rationale or failure detail, when the arm carries one. */
   detail: HTMLElement | null;
-  /** Whether the accept button is this arm's to offer. */
-  offersAccept: boolean;
 }
 
 /** Route the verdict. EVERY arm is named; an unknown one is a malformed view. */
@@ -442,8 +432,8 @@ function drawClassification(
 /**
  * Still deciding: a breathing in-flight badge and nothing else.
  *
- * No rationale, because none exists yet, and no accept, because there is no
- * verdict to confirm. The pulse is what says the state is transient.
+ * No rationale, because none exists yet. The pulse is what says the state is
+ * transient.
  */
 export function drawHeldPromptClassifying(
   _u: HeldPromptClassifying,
@@ -453,11 +443,7 @@ export function drawHeldPromptClassifying(
     operation: "held.held-prompt.classifying",
     context: { path },
   });
-  return {
-    acceptedState: null,
-    detail: null,
-    offersAccept: false,
-  };
+  return { detail: null };
 }
 
 /** Interjects: the green the owner named for a prompt that interrupts. */
@@ -469,11 +455,7 @@ export function drawHeldPromptInterject(
     operation: "held.held-prompt.interject",
     context: { path },
   });
-  return {
-    acceptedState: null,
-    detail: rationale(u.rationale),
-    offersAccept: false,
-  };
+  return { detail: rationale(u.rationale) };
 }
 
 /**
@@ -488,35 +470,19 @@ export function drawHeldPromptAfterToolCall(
     operation: "held.held-prompt.after-tool-call",
     context: { path },
   });
-  return {
-    acceptedState: null,
-    detail: rationale(u.rationale),
-    offersAccept: false,
-  };
+  return { detail: rationale(u.rationale) };
 }
 
-/**
- * Waits for the turn: the ONE arm with something to accept.
- *
- * Accepting changes nothing about delivery — it records that the user saw the
- * hold — so once `accepted` is true the button is gone and a quiet marker
- * stands in its place rather than a button that would say the same thing
- * twice.
- */
+/** Waits for the turn to end on its own, with the classifier's reason. */
 export function drawHeldPromptHoldForTurnEnd(
   u: HeldPromptHoldForTurnEnd,
   path: string,
 ): Verdict {
-  const confirmed = u.accepted?.accepted === true;
   log.debug("drawing a hold-for-turn-end held prompt", {
     operation: "held.held-prompt.hold-for-turn-end",
-    context: { path, accepted: confirmed },
+    context: { path },
   });
-  return {
-    acceptedState: confirmed,
-    detail: rationale(u.rationale),
-    offersAccept: !confirmed,
-  };
+  return { detail: rationale(u.rationale) };
 }
 
 /**
@@ -533,11 +499,7 @@ export function drawHeldPromptUninterruptibleTurn(
     operation: "held.held-prompt.uninterruptible-turn",
     context: { path, command: literal },
   });
-  return {
-    acceptedState: null,
-    detail: null,
-    offersAccept: false,
-  };
+  return { detail: null };
 }
 
 /** Nothing decided this: the error red, and the failure said out loud. */
@@ -549,20 +511,12 @@ export function drawHeldPromptClassificationError(
     operation: "held.held-prompt.classification-error",
     context: { path, detail: u.detail },
   });
-  const detail = document.createElement("div");
-  detail.className = "queued-reason queued-unclassified";
-  detail.textContent = u.detail;
-  return {
-    acceptedState: null,
-    detail,
-    offersAccept: false,
-  };
+  return { detail: reasonBadge(u.detail, `badge ${HELD_REASON_CLASS} queued-unclassified`) };
 }
 
 /**
  * No classifier ran and none will: a daemon condition holds the entry. It
- * draws NO badge — the hold arm's badge is what holds it — and offers no
- * accept, since there is no verdict to confirm.
+ * draws NO badge — the hold arm's badge is what holds it.
  */
 export function drawHeldPromptDaemonHeld(
   _u: HeldPromptDaemonHeld,
@@ -572,16 +526,12 @@ export function drawHeldPromptDaemonHeld(
     operation: "held.held-prompt.daemon-held",
     context: { path },
   });
-  return {
-    acceptedState: null,
-    detail: null,
-    offersAccept: false,
-  };
+  return { detail: null };
 }
 
 /**
  * Nothing is classifying the entry and nothing holds it: it waits its place in
- * the queue. No rationale and no accept, because no verdict exists.
+ * the queue. No rationale, because no verdict exists.
  */
 export function drawHeldPromptAwaitingDelivery(
   _u: HeldPromptAwaitingDelivery,
@@ -591,11 +541,7 @@ export function drawHeldPromptAwaitingDelivery(
     operation: "held.held-prompt.awaiting-delivery",
     context: { path },
   });
-  return {
-    acceptedState: null,
-    detail: null,
-    offersAccept: false,
-  };
+  return { detail: null };
 }
 
 /**
@@ -737,22 +683,21 @@ interface ActionSpec {
   text: string;
   classification: string;
   hold: string | null;
-  accept: boolean;
-  /** The entry the "fold above" control folds into, or null when the daemon offers no fold. */
+  /** The entry the "Fold Above" control folds into, or null when the daemon offers no fold. */
   foldAbove: TurnId | null;
   /** The "Update classifier" form, or null on a card no classifier decided. */
   classifierForm: ClassifierUpdateForm | null;
 }
 
-/** The three answers an entry takes, exactly as the request's arms name them. */
-export type HeldAction = "release" | "drop" | "accept";
+/** The two answers an entry takes, exactly as the request's arms name them. */
+export type HeldAction = "release" | "drop";
 
 /**
- * The entry's controls: release (labelled "Send now"), drop (labelled "Cancel"), and — on one arm
- * only — accept.
+ * The entry's controls: release (labelled "Send now") and drop (labelled
+ * "Cancel"), with Edit, the daemon-offered fold and Meta between them.
  *
- * IN-FLIGHT DISABLES THE ROW, not just the clicked button: the three actions
- * are mutually exclusive answers about one entry, and a drop landing while a
+ * IN-FLIGHT DISABLES THE ROW, not just the clicked button: the actions are
+ * mutually exclusive answers about one entry, and a drop landing while a
  * release is in flight is a race the user should not be able to start.
  */
 export function drawHeldPromptActions(spec: ActionSpec): HTMLElement {
@@ -767,7 +712,6 @@ export function drawHeldPromptActions(spec: ActionSpec): HTMLElement {
     context: {
       turn: spec.turn.value,
       release: noReleaseTitle === undefined,
-      accept: spec.accept,
       fold_above: spec.foldAbove?.value ?? null,
       update_classifier: spec.classifierForm !== null,
     },
@@ -790,19 +734,20 @@ export function drawHeldPromptActions(spec: ActionSpec): HTMLElement {
     release.classList.add("queued-action-unlikely");
   }
   actions.appendChild(release);
-  // EDIT sits between Send now and Cancel (owner spec, 2026-09-23).
+  // EDIT follows Send now (owner spec, 2026-09-23).
   actions.appendChild(editButton(spec));
-  // The drop is LABELLED "Cancel" (owner ruling, 2026-09-23): to the reader it
-  // takes back a prompt they sent, and the text comes back to the composer. The
-  // wire verb is still `drop`, and so are the hooks it is found by.
-  actions.appendChild(actionButton("drop", "Cancel", spec));
-  if (spec.accept) actions.appendChild(actionButton("accept", "Accept", spec));
   // DAEMON-OFFERED: the fold stands exactly while the entry carries
   // `fold_above` (FoldHeldPrompt).
   if (spec.foldAbove !== null)
     actions.appendChild(foldAboveButton(spec, spec.foldAbove));
   if (spec.classifierForm !== null)
     actions.appendChild(updateClassifierButton(spec.classifierForm));
+  // The drop is LABELLED "Cancel" (owner ruling, 2026-09-23): to the reader it
+  // takes back a prompt they sent, and the text comes back to the composer. The
+  // wire verb is still `drop`, and so are the hooks it is found by. It is
+  // ALWAYS THE LAST control (owner request, 2026-10-13), the one destructive
+  // action at the row's far end.
+  actions.appendChild(actionButton("drop", "Cancel", spec));
   return actions;
 }
 
@@ -942,10 +887,10 @@ function updateClassifierButton(form: ClassifierUpdateForm): Control {
 }
 
 /** The fold control's label: what the reader sees it do. */
-export const FOLD_ABOVE_LABEL = "fold above";
+export const FOLD_ABOVE_LABEL = "Fold Above";
 
 /**
- * The "fold above" control (FoldHeldPrompt): folds this prompt into the entry
+ * The "Fold Above" control (FoldHeldPrompt): folds this prompt into the entry
  * directly ahead of it. Drawn only when the daemon's entry carries
  * `fold_above`, and it sends back exactly the token that element served, so
  * the daemon folds into the entry the reader saw above this one or refuses.
@@ -1174,8 +1119,6 @@ export function updateHeldPromptRefusal(
       return "this prompt is no longer held";
     case "alreadyDelivered":
       return "this prompt has already been delivered";
-    case "acceptNotApplicable":
-      return "accept applies only to a prompt held for the turn's end";
     case "releaseRefused":
       return "the session would not take this prompt now";
     case "beingDelivered":
@@ -1193,23 +1136,20 @@ export function updateHeldPromptRefusal(
 /**
  * The request's `action` arm, built by name.
  *
- * A switch rather than `{ case: action, value: {} }`: the three arms are three
- * distinct message types, and spelling them out is what makes a fourth action
+ * A switch rather than `{ case: action, value: {} }`: the two arms are two
+ * distinct message types, and spelling them out is what makes a third action
  * a compile error here instead of a silently-typed object.
  */
 function heldAction(
   action: HeldAction,
 ):
   | { case: "release"; value: Record<string, never> }
-  | { case: "drop"; value: Record<string, never> }
-  | { case: "accept"; value: Record<string, never> } {
+  | { case: "drop"; value: Record<string, never> } {
   switch (action) {
     case "release":
       return { case: "release", value: {} };
     case "drop":
       return { case: "drop", value: {} };
-    case "accept":
-      return { case: "accept", value: {} };
   }
 }
 
@@ -1307,15 +1247,15 @@ function badge(label: string, status: HeldStatus): HTMLElement {
   return pill;
 }
 
-/** The class a badge's detail wears in the expand-only region. */
-export const HELD_BADGE_DETAIL_CLASS = "queued-status-detail";
-
-/** The class a note on a fact the badge does not show wears in the expand-only region. */
+/** The class a note on a fact the badge does not show wears, a quiet pill in the strip. */
 export const HELD_NOTE_CLASS = "queued-status-note";
 
+/** The class the reason badge ending the card's first line wears. */
+export const HELD_REASON_CLASS = "held-reason";
+
 /**
- * The wire's ONE badge, colored by the fact it stands for, with its detail and
- * the notes for every other standing fact as expand-only lines.
+ * The wire's ONE badge, colored by the fact it stands for, its detail the
+ * badge's hover title, and a quiet pill for every other standing fact.
  *
  * A badge with no fact or an empty label, and a note with an empty sentence,
  * are malformed views (feed_held.proto), logged and thrown, never drawn.
@@ -1324,7 +1264,7 @@ export function drawHeldPromptBadge(
   wire: HeldPromptBadge,
   notes: readonly HeldPromptStatusNote[],
   path: string,
-): { pill: HTMLElement; status: HeldStatus; details: HTMLElement[] } {
+): { pill: HTMLElement; status: HeldStatus; notes: HTMLElement[] } {
   const status = requireCase(wire.standsFor, `${path}.stands_for`).case;
   if (wire.label === "") {
     log.error("a held prompt's badge carried an empty label", {
@@ -1333,14 +1273,7 @@ export function drawHeldPromptBadge(
     });
     throw new MalformedView(`${path}.label`, "the badge label is empty");
   }
-  const details: HTMLElement[] = [];
-  if (wire.detail !== undefined) {
-    const detail = document.createElement("div");
-    detail.className = HELD_BADGE_DETAIL_CLASS;
-    detail.setAttribute("data-held-status", status);
-    detail.textContent = wire.detail;
-    details.push(detail);
-  }
+  const pills: HTMLElement[] = [];
   for (const [index, n] of notes.entries()) {
     if (n.sentence === "") {
       log.error("a held prompt's note carried an empty sentence", {
@@ -1349,20 +1282,32 @@ export function drawHeldPromptBadge(
       });
       throw new MalformedView(`HeldPrompt.notes[${index}].sentence`, "the note is empty");
     }
-    const line = document.createElement("div");
-    line.className = HELD_NOTE_CLASS;
-    line.textContent = n.sentence;
-    details.push(line);
+    const pill = document.createElement("span");
+    pill.className = `badge ${HELD_NOTE_CLASS}`;
+    pill.textContent = n.sentence;
+    pills.push(pill);
   }
-  return { pill: badge(wire.label, status), status, details };
+  const pill = badge(wire.label, status);
+  if (wire.detail !== undefined) pill.title = wire.detail;
+  return { pill, status, notes: pills };
 }
 
-/** The classifier quoting itself: an aside, and only when it said something. */
+/**
+ * The classifier quoting itself, as the badge that ends the card's first line,
+ * and only when it said something. Its full words are its hover title too,
+ * since the collapsed badge may be cut short.
+ */
 function rationale(text: string): HTMLElement | null {
   if (text === "") return null;
-  const reason = document.createElement("div");
-  reason.className = "queued-reason";
+  return reasonBadge(text, `badge ${HELD_REASON_CLASS}`);
+}
+
+/** The reason badge: TEXT in an element of CLASSNAME, titled with itself. */
+function reasonBadge(text: string, className: string): HTMLElement {
+  const reason = document.createElement("span");
+  reason.className = className;
   reason.textContent = text;
+  reason.title = text;
   return reason;
 }
 
