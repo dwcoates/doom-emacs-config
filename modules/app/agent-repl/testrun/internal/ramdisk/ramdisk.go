@@ -283,6 +283,9 @@ type Manager struct {
 	Now func() time.Time
 	// LockBound is how long the registry lock is waited for (LockBound).
 	LockBound time.Duration
+	// Memory answers the host's physical memory, which sizes the memory
+	// seats (seats.go).
+	Memory func() (uint64, error)
 }
 
 // Volume is one attached, mounted RAM disk owned by this run.
@@ -294,6 +297,8 @@ type Volume struct {
 
 	m    Manager
 	lock *os.File
+	// seat is the memory seat the disk holds until its release (seats.go).
+	seat *os.File
 }
 
 // Default is the Manager a real run uses.
@@ -302,7 +307,7 @@ func Default(log Logger) Manager {
 		Run: ExecRunner, Registry: DefaultRegistry, MountParent: DefaultMountParent, Pid: os.Getpid(),
 		Reap:  reap.OSReap(log),
 		Probe: RunBounded, Watch: RunWatched, Alive: ProcessAlive, Mounted: IsMountPoint, Log: log, Now: time.Now,
-		LockBound: LockBound,
+		LockBound: LockBound, Memory: HostMemory,
 	}
 }
 
@@ -350,7 +355,19 @@ func (m Manager) Acquire(sizeMiB int) (_ *Volume, err error) {
 	if err := os.MkdirAll(m.Registry, 0o755); err != nil {
 		return nil, fmt.Errorf("make the RAM disk registry %s: %w", m.Registry, err)
 	}
+	seat, err := m.seat(sizeMiB)
+	if err != nil {
+		return nil, err
+	}
 	v, err := m.attach(sizeMiB)
+	if v == nil {
+		// Nothing was attached, so the seat goes back now.
+		if closeErr := seat.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("give back the RAM disk seat: %w", closeErr))
+		}
+		return nil, err
+	}
+	v.seat = seat
 	if v != nil {
 		defer func() {
 			if err != nil {
@@ -529,6 +546,15 @@ func (v *Volume) Release() error {
 			errs = append(errs, fmt.Errorf("close the RAM disk record: %w", err))
 		}
 		v.lock = nil
+	}
+	if v.seat != nil {
+		// THE SEAT GOES BACK WITH THE DISK. A disk kept for the next run's
+		// reclaim gives its seat back with this run's exit all the same, and
+		// that reclaim runs before the next run takes a seat of its own.
+		if err := v.seat.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("give back the RAM disk seat: %w", err))
+		}
+		v.seat = nil
 	}
 	if len(errs) > 0 {
 		v.m.Log.Infof("RAM disk release: failed after %s", v.m.Now().Sub(start))
