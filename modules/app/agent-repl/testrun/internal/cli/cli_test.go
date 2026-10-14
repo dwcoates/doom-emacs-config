@@ -79,39 +79,13 @@ func TestSlotsForHost(t *testing.T) {
 	}
 }
 
-func TestSlots(t *testing.T) {
-	tests := []struct {
-		name    string
-		budget  string
-		want    int
-		wantErr bool
-	}{
-		{name: "no budget is every core but the reserve", budget: "", want: 13},
-		{name: "a claimed budget is the run's size", budget: "3", want: 3},
-		{name: "a budget above the host default is honored", budget: "15", want: 15},
-		{name: "a zero budget is refused", budget: "0", wantErr: true},
-		{name: "a negative budget is refused", budget: "-2", wantErr: true},
-		{name: "a non-numeric budget is refused", budget: "four", wantErr: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange: a 16-core host.
-			const cpus = 16
+func TestSlotsIsEveryCoreButTheReserve(t *testing.T) {
+	// Act
+	got, err := Slots(16)
 
-			// Act
-			got, err := Slots(cpus, tt.budget)
-
-			// Assert
-			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("Slots(%d, %q) = %d, want an error", cpus, tt.budget, got)
-				}
-				return
-			}
-			if err != nil || got != tt.want {
-				t.Fatalf("Slots(%d, %q) = %d, %v; want %d", cpus, tt.budget, got, err, tt.want)
-			}
-		})
+	// Assert
+	if err != nil || got != 13 {
+		t.Fatalf("Slots(16) = %d, %v; want 13", got, err)
 	}
 }
 
@@ -120,11 +94,11 @@ func TestSlotsRefusesAHostTooSmallToLeaveTheReserve(t *testing.T) {
 	cpus := HostReserve
 
 	// Act
-	got, err := Slots(cpus, "")
+	got, err := Slots(cpus)
 
 	// Assert
 	if err == nil {
-		t.Fatalf("Slots(%d, \"\") = %d, want an error", cpus, got)
+		t.Fatalf("Slots(%d) = %d, want an error", cpus, got)
 	}
 	if !strings.Contains(err.Error(), "reserves 3 for the live runtime") {
 		t.Fatalf("error = %v, want it to name the reserve", err)

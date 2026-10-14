@@ -271,7 +271,7 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 		log.Errorf("create the run's scratch directory: %v", err)
 		return 1
 	}
-	slots, err := cli.Slots(runtime.NumCPU(), os.Getenv(cli.CPUBudgetEnv))
+	slots, err := cli.Slots(runtime.NumCPU())
 	if err != nil {
 		log.Errorf("size the run: %v", err)
 		return 1
