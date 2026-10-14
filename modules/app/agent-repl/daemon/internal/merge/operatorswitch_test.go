@@ -162,6 +162,11 @@ var everyOperatorSwitch = []struct {
 		on:  func(o Orchestrator) error { return o.HoldRollouts(context.Background()) },
 		off: func(o Orchestrator) error { return o.ReleaseRollouts(context.Background()) },
 	},
+	{
+		name: "the racing switch", sw: (*orchestrator).racingSwitch,
+		on:  func(o Orchestrator) error { return o.DisableRacing(context.Background()) },
+		off: func(o Orchestrator) error { return o.EnableRacing(context.Background()) },
+	},
 }
 
 // TestEveryOperatorSwitchVerbFlipsItsSwitch pins that each Orchestrator verb

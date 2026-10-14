@@ -11,6 +11,13 @@
 // merge behind its head the moment the host is plugged in and suspends it the
 // moment it is unplugged.
 //
+// THE OPERATOR CAN DISABLE THE RACE (owner ruling, 2026-10-14): while racing
+// is disabled the window is the head alone whatever the power source, as on
+// battery. The switch is durable (wsm's merge_racing_disabled) and the
+// governor is BORN with it (New), so no merge is ever admitted to a window the
+// switch has already narrowed; SetRacingDisabled changes it at runtime and
+// tells every subscriber, exactly as a change of power source does.
+//
 // THE POWER SOURCE IS READ every SampleEvery (Run), and a failure to read it
 // is said once per distinct cause, at ERROR.
 //
@@ -42,6 +49,22 @@ const (
 	// SampleEvery is the production cadence the power source is read at.
 	SampleEvery = 5 * time.Second
 )
+
+// Mode is what decides the window: the host's power source and whether the
+// operator disabled racing.
+type Mode struct {
+	Power          Power
+	RacingDisabled bool
+}
+
+// Window answers how many merges at the front of a queue the mode works on:
+// the top two on AC power with racing enabled, else the head alone.
+func (m Mode) Window() int {
+	if m.Power == PowerAC && !m.RacingDisabled {
+		return QueueWindow
+	}
+	return BatteryWindow
+}
 
 // Power is the source the host runs on.
 type Power int
@@ -118,25 +141,27 @@ type Governor struct {
 	log    dlog.Logger
 
 	mu sync.Mutex
-	// power is the source the host last read as running on, and powerErr
-	// the standing cause it could not be read.
-	power       Power
+	// mode is the power source the host last read as running on and the
+	// racing switch, and powerErr the standing cause the power source could
+	// not be read.
+	mode        Mode
 	powerErr    string
-	subscribers []func(Power)
+	subscribers []func(Mode)
 	active      map[*Permit]struct{}
 	waiting     []*waiter
 	arrivals    uint64
 }
 
-// New builds a governor. Every collaborator is required.
-func New(cfg Config, source PowerSource, log dlog.Logger) (*Governor, error) {
+// New builds a governor, born with the racing switch the operator left
+// (racingDisabled). Every collaborator is required.
+func New(cfg Config, source PowerSource, racingDisabled bool, log dlog.Logger) (*Governor, error) {
 	if source == nil || log == nil {
 		return nil, errors.New("cpugov: a power source and a logger are required")
 	}
 	if cfg.MaxGates < 1 {
 		return nil, fmt.Errorf("cpugov: the configuration %+v bounds no gate", cfg)
 	}
-	return &Governor{cfg: cfg, source: source, log: log, active: map[*Permit]struct{}{}}, nil
+	return &Governor{cfg: cfg, source: source, log: log, mode: Mode{RacingDisabled: racingDisabled}, active: map[*Permit]struct{}{}}, nil
 }
 
 // Run reads the power source every SampleEvery until ctx ends. The ticker is
@@ -169,13 +194,34 @@ func (g *Governor) ObservePower(power Power) {
 }
 
 // install records one reading and, when it changed the power source, tells
-// every subscriber, outside the lock and in the order they subscribed.
+// every subscriber.
 func (g *Governor) install(power Power, err error) {
+	g.change(func() { g.notePowerLocked(power, err) })
+}
+
+// SetRacingDisabled installs the operator's racing switch and, when it
+// changed it, tells every subscriber.
+func (g *Governor) SetRacingDisabled(disabled bool) {
+	g.change(func() {
+		if g.mode.RacingDisabled == disabled {
+			return
+		}
+		g.log.Info("daemon.cpugov.racing", "the operator switched the merge queue's racing", dlog.Context{
+			"racing_disabled": disabled, "power": g.mode.Power.String(),
+			"window": Mode{Power: g.mode.Power, RacingDisabled: disabled}.Window()})
+		g.mode.RacingDisabled = disabled
+	})
+}
+
+// change applies one change of mode under the lock and, when the mode
+// changed, tells every subscriber, outside the lock and in the order they
+// subscribed.
+func (g *Governor) change(apply func()) {
 	g.mu.Lock()
-	was := g.power
-	g.notePowerLocked(power, err)
-	now := g.power
-	subscribers := append([]func(Power){}, g.subscribers...)
+	was := g.mode
+	apply()
+	now := g.mode
+	subscribers := append([]func(Mode){}, g.subscribers...)
 	g.mu.Unlock()
 	if now == was {
 		return
@@ -193,44 +239,40 @@ func (g *Governor) notePowerLocked(power Power, err error) {
 		if err.Error() != g.powerErr {
 			g.powerErr = err.Error()
 			g.log.Error("daemon.cpugov.power", "could not read the host's power source; the queue works only its head until it reads", dlog.Context{
-				"error": err.Error(), "was": g.power.String()})
+				"error": err.Error(), "was": g.mode.Power.String()})
 		}
 		power = PowerUnknown
 	} else {
 		g.powerErr = ""
 	}
-	if power == g.power {
+	if power == g.mode.Power {
 		return
 	}
 	g.log.Info("daemon.cpugov.power", "the host's power source changed", dlog.Context{
-		"was": g.power.String(), "power": power.String(), "window": windowOf(power)})
-	g.power = power
+		"was": g.mode.Power.String(), "power": power.String(), "racing_disabled": g.mode.RacingDisabled,
+		"window": Mode{Power: power, RacingDisabled: g.mode.RacingDisabled}.Window()})
+	g.mode.Power = power
 }
 
-// OnPowerChange subscribes tell to every change of the power source.
-func (g *Governor) OnPowerChange(tell func(Power)) {
+// OnModeChange subscribes tell to every change of the mode: of the power
+// source, or of the racing switch.
+func (g *Governor) OnModeChange(tell func(Mode)) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.subscribers = append(g.subscribers, tell)
 }
 
-// Power answers the source the host last read as running on.
-func (g *Governor) Power() Power {
+// Mode answers the power source the host last read as running on and the
+// racing switch.
+func (g *Governor) Mode() Mode {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return g.power
+	return g.mode
 }
 
 // Window answers how many merges at the front of a queue are worked on.
 func (g *Governor) Window() int {
-	return windowOf(g.Power())
-}
-
-func windowOf(power Power) int {
-	if power == PowerAC {
-		return QueueWindow
-	}
-	return BatteryWindow
+	return g.Mode().Window()
 }
 
 // Acquire admits one gate, blocking until it may run or ctx ends. A head gate
@@ -336,6 +378,6 @@ func (g *Governor) decideLocked() {
 func (g *Governor) fieldsLocked(req Request, decision, reason string) dlog.Context {
 	return dlog.Context{
 		"workspace": string(req.Workspace), "repo": req.Repo, "rank": req.Rank, "decision": decision, "reason": reason,
-		"active": len(g.active), "waiting": len(g.waiting), "max_gates": g.cfg.MaxGates, "power": g.power.String(),
+		"active": len(g.active), "waiting": len(g.waiting), "max_gates": g.cfg.MaxGates, "power": g.mode.Power.String(),
 	}
 }

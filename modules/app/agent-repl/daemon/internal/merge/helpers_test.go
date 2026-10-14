@@ -83,8 +83,11 @@ type fakeDB struct {
 	// rolloutHoldOnce, when set, is the hold every read AFTER the first
 	// answers: the first read answers rolloutHold, and the hold then changes.
 	rolloutHoldOnce *wsm.RolloutHold
-	repos           []wsm.Repository
-	seq             int
+	// racing is the racing switch; racingErr fails its read.
+	racing    wsm.RacingSwitch
+	racingErr error
+	repos     []wsm.Repository
+	seq       int
 	// onPausedRead, when set, runs at the start of every MergeQueuePaused
 	// read, outside the fake's lock, so a test can hold an admission step in
 	// flight; pausedReads counts those reads.
@@ -777,6 +780,25 @@ func (f *fakeDB) SetMergeRolloutHold(_ context.Context, held bool, at time.Time)
 		f.rolloutHold = wsm.RolloutHold{Held: true, Since: at}
 	}
 	return nil
+}
+
+func (f *fakeDB) SetMergeRacingDisabled(_ context.Context, disabled bool, at time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !disabled {
+		f.racing = wsm.RacingSwitch{}
+		return nil
+	}
+	if !f.racing.Disabled {
+		f.racing = wsm.RacingSwitch{Disabled: true, Since: at}
+	}
+	return nil
+}
+
+func (f *fakeDB) MergeRacing(context.Context) (wsm.RacingSwitch, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.racing, f.racingErr
 }
 
 func (f *fakeDB) MergeRolloutHold(context.Context) (wsm.RolloutHold, error) {
@@ -2314,7 +2336,7 @@ func newHarness(t *testing.T) *harness {
 	h.briefs[BriefConflictResolve] = []string{"conflict_commit", "source_branch", "worktree_dir", "target_branch", "conflicted_files"}
 	h.briefs[BriefTestFailureResolve] = []string{"source_branch", "worktree_dir", "target_branch", "failing_suites", "archive_path", "failure_tail", "attempt", "max_attempts", "escalation_file", "escalation_marker", "failing_tests_file"}
 
-	governor, err := cpugov.New(cpugov.DefaultConfig(), fakePower{}, h.logs.Global())
+	governor, err := cpugov.New(cpugov.DefaultConfig(), fakePower{}, false, h.logs.Global())
 	if err != nil {
 		t.Fatalf("building the gate governor: %v", err)
 	}

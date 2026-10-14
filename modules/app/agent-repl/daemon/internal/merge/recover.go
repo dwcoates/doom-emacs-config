@@ -45,8 +45,10 @@ func (o *orchestrator) Recover(ctx context.Context) error {
 	if err := o.recoverDisplaced(ctx); err != nil {
 		return err
 	}
-	if err := o.recordInherited(ctx, o.rolloutHold()); err != nil {
-		return err
+	for _, sw := range []operatorSwitch{o.rolloutHold(), o.racingSwitch()} {
+		if err := o.recordInherited(ctx, sw); err != nil {
+			return err
+		}
 	}
 	o.sweepOrphanedState(ctx)
 	queues, err := o.deps.DB.AllMergeQueues(ctx)

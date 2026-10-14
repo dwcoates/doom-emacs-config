@@ -626,7 +626,7 @@ func newChainOfWidth(t *testing.T, width int) *chain {
 	if width > 0 {
 		cfg.MaxGates = width
 	}
-	gov, err := cpugov.New(cfg, fakePower{}, h.logs.Global())
+	gov, err := cpugov.New(cfg, fakePower{}, false, h.logs.Global())
 	if err != nil {
 		t.Fatalf("building the governor: %v", err)
 	}
@@ -644,7 +644,7 @@ func (c *chain) wire(o *orchestrator) {
 	o.deps.Git = c.git
 	o.deps.TestRunner = c.runner
 	o.deps.Governor = c.h.governor
-	c.h.governor.OnPowerChange(o.powerChanged)
+	c.h.governor.OnModeChange(o.modeChanged)
 	o.onChainIdle = func(ws ids.WorkspaceID) { c.idle <- ws }
 	o.onTestTurnAsk = c.turns.ask
 	o.onTestTurnLine = func(ws ids.WorkspaceID) { c.turns.lined <- ws }

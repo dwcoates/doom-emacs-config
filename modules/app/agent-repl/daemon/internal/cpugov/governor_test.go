@@ -36,8 +36,14 @@ func newRig(t *testing.T) *rig {
 
 func newRigWith(t *testing.T, cfg Config) *rig {
 	t.Helper()
+	return newRigBorn(t, cfg, false)
+}
+
+// newRigBorn builds a rig whose governor is born with racingDisabled.
+func newRigBorn(t *testing.T, cfg Config, racingDisabled bool) *rig {
+	t.Helper()
 	r := &rig{source: &fakeSource{}, log: dlog.NewTestLogger()}
-	g, err := New(cfg, r.source, r.log)
+	g, err := New(cfg, r.source, racingDisabled, r.log)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -78,7 +84,7 @@ func TestNewRefusesAMissingCollaboratorOrBound(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act.
-			_, err := New(tt.cfg, tt.source, tt.log)
+			_, err := New(tt.cfg, tt.source, false, tt.log)
 
 			// Assert.
 			if err == nil {
@@ -114,12 +120,99 @@ func TestTheWindowFollowsThePowerSource(t *testing.T) {
 	}
 }
 
+func TestTheWindowFollowsTheRacingSwitch(t *testing.T) {
+	tests := []struct {
+		name     string
+		power    Power
+		disabled bool
+		want     int
+	}{
+		{name: "on AC power with racing enabled the top two race", power: PowerAC, want: QueueWindow},
+		{name: "on AC power with racing disabled the head alone", power: PowerAC, disabled: true, want: BatteryWindow},
+		{name: "on battery with racing disabled the head alone", power: PowerBattery, disabled: true, want: BatteryWindow},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			r := newRig(t)
+			r.g.ObservePower(tt.power)
+
+			// Act.
+			r.g.SetRacingDisabled(tt.disabled)
+
+			// Assert.
+			if got := r.g.Window(); got != tt.want {
+				t.Fatalf("Window = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAGovernorBornWithRacingDisabledNeverRacesOnACPower(t *testing.T) {
+	// Arrange.
+	r := newRigBorn(t, DefaultConfig(), true)
+
+	// Act.
+	r.g.ObservePower(PowerAC)
+
+	// Assert.
+	if got := r.g.Window(); got != BatteryWindow {
+		t.Fatalf("Window = %d, want the head alone", got)
+	}
+	if !r.g.Mode().RacingDisabled {
+		t.Fatal("the governor forgot the racing switch it was born with")
+	}
+}
+
+func TestARacingSwitchChangeTellsEverySubscriberAndIsRecorded(t *testing.T) {
+	// Arrange: on AC power, racing enabled.
+	r := newRig(t)
+	r.g.ObservePower(PowerAC)
+	var told []Mode
+	r.g.OnModeChange(func(m Mode) { told = append(told, m) })
+
+	// Act.
+	r.g.SetRacingDisabled(true)
+	r.g.SetRacingDisabled(false)
+
+	// Assert.
+	want := []Mode{{Power: PowerAC, RacingDisabled: true}, {Power: PowerAC}}
+	if !slices.Equal(told, want) {
+		t.Fatalf("told = %v, want %v", told, want)
+	}
+	records := r.recordsAt("info", "daemon.cpugov.racing")
+	if len(records) != 2 {
+		t.Fatalf("racing records = %d, want one per change", len(records))
+	}
+	if records[0].Context["racing_disabled"] != true || records[0].Context["window"] != BatteryWindow {
+		t.Fatalf("record context = %v, want racing disabled with the head-alone window", records[0].Context)
+	}
+}
+
+func TestAnUnchangedRacingSwitchTellsNoSubscriber(t *testing.T) {
+	// Arrange.
+	r := newRigBorn(t, DefaultConfig(), true)
+	told := 0
+	r.g.OnModeChange(func(Mode) { told++ })
+
+	// Act.
+	r.g.SetRacingDisabled(true)
+
+	// Assert.
+	if told != 0 {
+		t.Fatalf("told %d times, want none for an unchanged switch", told)
+	}
+	if n := len(r.recordsAt("info", "daemon.cpugov.racing")); n != 0 {
+		t.Fatalf("racing records = %d, want none for an unchanged switch", n)
+	}
+}
+
 func TestAPowerChangeTellsEverySubscriberInOrder(t *testing.T) {
 	// Arrange.
 	r := newRig(t)
 	var told []string
-	r.g.OnPowerChange(func(p Power) { told = append(told, "first:"+p.String()) })
-	r.g.OnPowerChange(func(p Power) { told = append(told, "second:"+p.String()) })
+	r.g.OnModeChange(func(m Mode) { told = append(told, "first:"+m.Power.String()) })
+	r.g.OnModeChange(func(m Mode) { told = append(told, "second:"+m.Power.String()) })
 
 	// Act.
 	r.g.ObservePower(PowerAC)
@@ -138,7 +231,7 @@ func TestAnUnchangedPowerSourceTellsNoSubscriber(t *testing.T) {
 	r := newRig(t)
 	r.g.ObservePower(PowerBattery)
 	told := 0
-	r.g.OnPowerChange(func(Power) { told++ })
+	r.g.OnModeChange(func(Mode) { told++ })
 
 	// Act.
 	r.g.ObservePower(PowerBattery)
@@ -158,7 +251,7 @@ func TestTheReadingLoopReadsThePowerSource(t *testing.T) {
 	r.g.observe()
 
 	// Assert.
-	if got := r.g.Power(); got != PowerAC {
+	if got := r.g.Mode().Power; got != PowerAC {
 		t.Fatalf("Power = %v, want ac", got)
 	}
 }
@@ -169,7 +262,7 @@ func TestAnUnreadablePowerSourceWorksTheHeadAloneAndIsRecordedOnce(t *testing.T)
 	r.source.power = PowerAC
 	r.g.observe()
 	var told []Power
-	r.g.OnPowerChange(func(p Power) { told = append(told, p) })
+	r.g.OnModeChange(func(m Mode) { told = append(told, m.Power) })
 	r.source.err = errors.New("IOPSCopyPowerSourcesInfo answered nothing")
 
 	// Act.
