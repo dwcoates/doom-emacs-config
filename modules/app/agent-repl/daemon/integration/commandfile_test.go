@@ -37,6 +37,29 @@ func commandfileWrite(t *testing.T, d *harness.Daemon, name, body string) string
 	return path
 }
 
+// commandfilePlace places one command file into DIR as every producer does
+// (commandfile/write.go): the whole BODY is written under a dot name the
+// ingress glob does not match, its mtime pinned to MTIME when one is given,
+// and renamed into place as NAME (a rename keeps the mtime). The sweep never
+// sees a partly written or not yet pinned file.
+func commandfilePlace(t *testing.T, dir, name, body string, mtime *time.Time) string {
+	t.Helper()
+	staged := filepath.Join(dir, "."+name)
+	if err := os.WriteFile(staged, []byte(body), 0o644); err != nil {
+		t.Fatalf("stage %s: %v", staged, err)
+	}
+	if mtime != nil {
+		if err := os.Chtimes(staged, *mtime, *mtime); err != nil {
+			t.Fatalf("pin %s's mtime: %v", staged, err)
+		}
+	}
+	path := filepath.Join(dir, name)
+	if err := os.Rename(staged, path); err != nil {
+		t.Fatalf("place %s: %v", path, err)
+	}
+	return path
+}
+
 // commandfileRowByName finds a roster row by its display name, anywhere in
 // the repository grouping.
 func commandfileRowByName(r *frontendv1.WorkspaceRoster, name string) *frontendv1.RosterRow {
@@ -412,17 +435,24 @@ func TestIngestionIsAtomicAHalfWrittenFileIsNotClaimedUntilComplete(t *testing.T
 	// Arrange
 	d := harness.StartDaemon(t, harness.Opts{})
 	partial := `[{"type":"task-cre`
-	path := commandfileWrite(t, d, "workspace_commands_atomic.json", partial)
 	// THE FILE'S YOUTH IS PINNED, NOT RACED. The ingress claims a file once it
 	// is one poll interval old whether or not it parses, so a wall-clock probe
 	// shorter than that interval raced the sweep: under a loaded run the
 	// completing write landed after the partial had aged out and was
 	// quarantined. A future mtime keeps the partial young for every sweep this
 	// test can see, which is exactly the condition under test.
-	future := time.Now().Add(time.Hour)
-	if err := os.Chtimes(path, future, future); err != nil {
-		t.Fatalf("pin the partial command file's youth: %v", err)
+	//
+	// THE PIN IS IN PLACE BEFORE THE SWEEP CAN SEE THE FILE: the partial is
+	// written and pinned under a name the glob does not match, then renamed
+	// into place (a rename keeps the mtime). Pinning it after writing it in
+	// place raced the sweep the same way: a sweep between the write and the
+	// pin claimed it by age and quarantined it, and the pin then found it gone.
+	dir := filepath.Join(d.StateDir, "output")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir the command-file ingress dir: %v", err)
 	}
+	future := time.Now().Add(time.Hour)
+	path := commandfilePlace(t, dir, "workspace_commands_atomic.json", partial, &future)
 
 	// Act / Assert: a sweep judges the half-written file and leaves it alone —
 	// never claimed on a truncated snapshot.
@@ -442,13 +472,7 @@ func TestIngestionIsAtomicAHalfWrittenFileIsNotClaimedUntilComplete(t *testing.T
 	// left an EMPTY file whose fresh mtime aged past one poll interval on a
 	// loaded run, which the ingress then rightly claimed by age and
 	// quarantined: a race of this test's own making, not of the producers'.
-	staged := filepath.Join(filepath.Dir(path), ".workspace_commands_atomic.json")
-	if err := os.WriteFile(staged, []byte(`[{"type":"task-create","title":"atomic-cmdfile-task"}]`), 0o644); err != nil {
-		t.Fatalf("stage the completed command file: %v", err)
-	}
-	if err := os.Rename(staged, path); err != nil {
-		t.Fatalf("complete the command file: %v", err)
-	}
+	commandfilePlace(t, dir, "workspace_commands_atomic.json", `[{"type":"task-create","title":"atomic-cmdfile-task"}]`, nil)
 
 	// Assert: the COMPLETE request is what actually applies.
 	roster := d.WatchRoster()
@@ -606,5 +630,48 @@ func TestACreateEntryNamingAnUnregisteredRepositoryIsRefused(t *testing.T) {
 	d.AwaitRunLogOperation("daemon.commandfile.quarantine")
 	if repo.HasBranch("stray-ws") {
 		t.Fatalf("branches = %v, want nothing materialized for the refused create", repo.Branches())
+	}
+}
+
+func TestCommandfilePlaceLandsTheWholeBodyUnderItsName(t *testing.T) {
+	pinned := time.Unix(1_900_000_000, 0)
+	tests := []struct {
+		name  string
+		mtime *time.Time
+	}{
+		{name: "unpinned", mtime: nil},
+		{name: "pinned", mtime: &pinned},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			dir := t.TempDir()
+
+			// Act.
+			path := commandfilePlace(t, dir, "workspace_commands_x.json", "[]", tc.mtime)
+
+			// Assert: only the placed file stands, whole, with its pin.
+			entries, err := os.ReadDir(dir)
+			if err != nil || len(entries) != 1 || entries[0].Name() != "workspace_commands_x.json" || path != filepath.Join(dir, "workspace_commands_x.json") {
+				t.Fatalf("dir holds %v (%v), want only the placed file at %s", entries, err, path)
+			}
+			body, _ := os.ReadFile(path)
+			info, _ := os.Stat(path)
+			if string(body) != "[]" || (tc.mtime != nil && !info.ModTime().Equal(*tc.mtime)) {
+				t.Fatalf("placed %q at %v, want [] pinned to %v", body, info.ModTime(), tc.mtime)
+			}
+		})
+	}
+}
+
+func TestTheAtomicIngestionTestPlacesEveryFileThroughCommandfilePlace(t *testing.T) {
+	// Assert: no hand-rolled stage-and-rename beside the helper.
+	src, err := os.ReadFile("commandfile_test.go")
+	if err != nil {
+		t.Fatalf("read the suite: %v", err)
+	}
+	// The needle is split so this assertion is not itself a match.
+	if n := strings.Count(string(src), "os."+"Rename("); n != 1 {
+		t.Fatalf("the suite renames in %d places, want only commandfilePlace's", n)
 	}
 }

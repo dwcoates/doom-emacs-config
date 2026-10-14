@@ -51,3 +51,18 @@ The shapes follow the nearest precedents (`frontend.v1.RosterHiddenSection`,
 - `turn_ended` (field 5) and `created` (field 4) are retired: no row shows
   the time since its last turn ended any more.
 - The arm is never unset: every row has a precedence arm to draw.
+
+### `frontend.v1.RosterRowWhen.sync_merging`
+
+- WHAT: while a SYNC merge stands in the workspace (in line or being worked
+  on), the when-column counts from
+  `frontend.v1.RosterRowWhenSyncMerging.started_at_ms`, the instant the merge
+  joined its repository's queue (owner request, 2026-10-14).
+- WHY the queue instant: it is the queue entry's durable `EnqueuedAt`, so a
+  daemon restart that resumes the merge does not reset the count.
+- WHY it outranks `turn_running`: the turns a merge runs (its configured
+  prompts, conflict resolution, fixing) are the merge's work, so the row
+  counts the whole merge rather than restarting at each of them.
+- WHY sync only: the daemon reads the instant off the footer's published
+  merging arm (`footer.Resolver.MergeStartedAt`), and an async merge's
+  requester is never told its merge, so its row keeps its turn clock.

@@ -284,6 +284,74 @@ func TestTheWhenColumnStopsCountingWhenTheTurnEnds(t *testing.T) {
 	}
 }
 
+func TestTheWhenColumnCountsASyncMergeFromItsQueueInstant(t *testing.T) {
+	queued := epoch.Add(time.Hour)
+	tests := []struct {
+		name  string
+		facts footer.MergeFacts
+	}{
+		{name: "a merge waiting in line", facts: footer.MergeFacts{State: "queued", QueuedAt: queued, Step: footer.StepEnqueued, QueuePlace: 1, QueueWaiting: 1}},
+		{name: "a merge waiting for the workspace to fall free", facts: footer.MergeFacts{State: "merging", QueuedAt: queued, Step: footer.StepAwaitingFree}},
+		{name: "a merge being worked on", facts: footer.MergeFacts{State: "merging", QueuedAt: queued, Step: footer.StepTesting}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r := live(t, arrange(t))
+
+			// Act.
+			r.SetMerge(theWS, tc.facts)
+
+			// Assert: the row counts from the instant the footer reads.
+			merging := onlyRow(t, r).GetWhen().GetSyncMerging()
+			started := r.Resolver.(*fanned).footer.MergeStartedAt(theWS)
+			if merging == nil || started == nil || merging.GetStartedAtMs() != queued.UnixMilli() || *started != queued.UnixMilli() {
+				t.Fatalf("when = %v, footer merge start = %v, want sync_merging from %d", onlyRow(t, r).GetWhen(), started, queued.UnixMilli())
+			}
+		})
+	}
+}
+
+func TestTheWhenColumnCountsTheMergeRatherThanTheTurnItRuns(t *testing.T) {
+	// Arrange: a merge's own turn (its fixing prompt) runs while it stands.
+	r := live(t, arrange(t))
+	queued := epoch.Add(time.Hour)
+	r.SetMerge(theWS, footer.MergeFacts{State: "merging", QueuedAt: queued, Step: footer.StepFixing, Attempt: 1, MaxAttempts: 3})
+
+	// Act.
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch.Add(2 * time.Hour), Act: footer.ActPrompt})
+
+	// Assert.
+	if got := onlyRow(t, r).GetWhen().GetSyncMerging().GetStartedAtMs(); got != queued.UnixMilli() {
+		t.Fatalf("when = %v, want sync_merging from %d", onlyRow(t, r).GetWhen(), queued.UnixMilli())
+	}
+}
+
+func TestTheWhenColumnStopsCountingTheMergeOnceItLeaves(t *testing.T) {
+	tests := []struct {
+		name  string
+		facts footer.MergeFacts
+	}{
+		{name: "a failed merge", facts: footer.MergeFacts{State: "failed", FailedArea: footer.FailedTests}},
+		{name: "a merge taken off the queue", facts: footer.MergeFacts{State: "none"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r := live(t, arrange(t))
+			r.SetMerge(theWS, footer.MergeFacts{State: "merging", QueuedAt: epoch, Step: footer.StepTesting})
+
+			// Act.
+			r.SetMerge(theWS, tc.facts)
+
+			// Assert.
+			if when := onlyRow(t, r).GetWhen(); when.GetNoTurnRunning() == nil {
+				t.Fatalf("when = %v, want no_turn_running once the merge left", when)
+			}
+		})
+	}
+}
+
 func TestTheRowCarriesTheDurableLastSelectedInstant(t *testing.T) {
 	cases := []struct {
 		name     string

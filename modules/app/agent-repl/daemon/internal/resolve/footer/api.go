@@ -41,6 +41,11 @@ type MergeFacts struct {
 	// State names the merge's standing: "none", "queued", "merging",
 	// "failed", "merged".
 	State string
+	// QueuedAt is when the merge joined its repository's queue: the queue
+	// entry's durable EnqueuedAt, so a restart does not move it. Set for
+	// "queued" and "merging" alike, and zero otherwise. The roster's
+	// when-column counts a sync merge from it (MergeStartedAt).
+	QueuedAt time.Time
 	// Step is the merging substatus: the step the merge is on. Set for
 	// "queued" (always StepEnqueued) and "merging"; empty otherwise.
 	Step MergeStep
@@ -390,6 +395,12 @@ type Resolver interface {
 	// (resolve/sidebar), so no surface resolves a status of its own. Each
 	// change of its arm or step is told to WithStatusChanged's sink.
 	Status(ws ids.WorkspaceID) *frontendv1.FooterStatus
+	// MergeStartedAt answers when the merge the workspace's strip shows
+	// started, in epoch ms: its MergeFacts.QueuedAt while the published status
+	// is the merging arm, nil under any other arm. The roster's when-column
+	// counts a sync merge from it. A merge workspace's footer is never told
+	// its merge (an async merge runs there), so it answers nil there.
+	MergeStartedAt(ws ids.WorkspaceID) *int64
 	// TurnClock answers the turn clock the workspace's strip shows. The
 	// roster's when-column counts from its start, so each change of it is
 	// told to WithStatusChanged's sink too.

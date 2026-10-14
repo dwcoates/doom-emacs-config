@@ -590,6 +590,12 @@ type wsState struct {
 	// TurnClock answers, so the roster's when-column counts from exactly the
 	// instant this strip's clock does.
 	publishedClock *frontendv1.FooterClock
+	// publishedMergeStart is when the merge the last published view's
+	// merging arm draws started (mergeStartedAt): what MergeStartedAt
+	// answers, so the roster's when-column counts a merge exactly while this
+	// strip draws one. Nil before the first publication; its ms is nil under
+	// any other arm.
+	publishedMergeStart *mergeStart
 
 	// resumeWaits are the background subagents the shim is waiting to resume
 	// after a network outage, in the order the shim stated them: the LAST
@@ -717,6 +723,17 @@ func (s *wsState) observeClock(view *frontendv1.FooterView) bool {
 	changed := !proto.Equal(clock, s.publishedClock)
 	s.publishedClock = clock
 	return changed
+}
+
+// observeMergeStart folds the published view's merge start in, answering
+// whether it CHANGED: a merge's start appearing, leaving, or moving.
+func (s *wsState) observeMergeStart(start *mergeStart) bool {
+	previous := s.publishedMergeStart
+	s.publishedMergeStart = start
+	if previous == nil || previous.ms == nil || start.ms == nil {
+		return previous == nil || (previous.ms == nil) != (start.ms == nil)
+	}
+	return *previous.ms != *start.ms
 }
 
 // observeSubstatus folds the published view's substatus in, answering it,

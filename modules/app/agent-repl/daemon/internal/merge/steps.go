@@ -31,7 +31,7 @@ func (r *run) setStep(ctx context.Context, step footer.MergeStep, apply func(*fo
 	now := r.o.deps.Now()
 	r.mu.Lock()
 	changed := r.facts.Step != step
-	facts := footer.MergeFacts{State: StateMerging, Step: step, LineAt: now}
+	facts := footer.MergeFacts{State: StateMerging, QueuedAt: time.UnixMilli(r.queuedMS), Step: step, LineAt: now}
 	if apply != nil {
 		apply(&facts)
 	}
