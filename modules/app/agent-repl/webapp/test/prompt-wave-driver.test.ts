@@ -16,6 +16,7 @@ import {
   createPromptWaveDriver,
   type PromptWaveDriver,
 } from "../src/prompt-wave-driver.js";
+import { createPresence, type PresenceSource } from "../src/presence.js";
 
 /** The container this test's bubbles live in, torn down after each case. */
 let root: HTMLElement;
@@ -190,5 +191,98 @@ describe("the hidden-page prompt-wave driver", () => {
     // Assert — nothing repainted, and the root flag is cleared.
     expect(bubble.style.backgroundPositionX).toBe(afterStop);
     expect(document.documentElement.hasAttribute(PAGE_HIDDEN_ATTRIBUTE)).toBe(false);
+  });
+});
+
+describe("the prompt-wave driver in a page the webhost is not showing", () => {
+  let presence: PresenceSource;
+
+  beforeEach(() => {
+    presence = createPresence(document, true);
+  });
+
+  afterEach(() => {
+    presence.dispose();
+  });
+
+  it("paints nothing while the webview is hidden and the webhost does not show the page", () => {
+    // Arrange
+    let clock = Date.now();
+    const bubble = workingBubble();
+    setVisibility("hidden");
+    driver = createPromptWaveDriver({ root, now: () => clock, reducedMotion: () => false, presence });
+
+    // Act
+    driver.start();
+    clock += 1600;
+    vi.advanceTimersByTime(HIDDEN_TICK_MS * 4);
+
+    // Assert
+    expect(bubble.style.backgroundPositionX).toBe("");
+  });
+
+  it("still flags the root, so the dead compositor animation stays off", () => {
+    // Arrange
+    workingBubble();
+    setVisibility("hidden");
+    driver = createPromptWaveDriver({ root, reducedMotion: () => false, presence });
+
+    // Act
+    driver.start();
+
+    // Assert
+    expect(document.documentElement.hasAttribute(PAGE_HIDDEN_ATTRIBUTE)).toBe(true);
+  });
+
+  it("starts painting the moment the webhost shows the page while the webview is hidden", () => {
+    // Arrange
+    const clock = Date.now();
+    const bubble = workingBubble();
+    setVisibility("hidden");
+    driver = createPromptWaveDriver({ root, now: () => clock, reducedMotion: () => false, presence });
+    driver.start();
+
+    // Act
+    presence.setShown(true);
+
+    // Assert
+    expect(bubble.style.backgroundPositionX).toBe(`${bubbleWave.positionX(clock)}%`);
+  });
+
+  it("stops painting when the webhost hides the page again", () => {
+    // Arrange
+    let clock = Date.now();
+    const bubble = workingBubble();
+    setVisibility("hidden");
+    presence.setShown(true);
+    driver = createPromptWaveDriver({ root, now: () => clock, reducedMotion: () => false, presence });
+    driver.start();
+    presence.setShown(false);
+    const atHide = bubble.style.backgroundPositionX;
+
+    // Act
+    clock += 1600;
+    vi.advanceTimersByTime(HIDDEN_TICK_MS * 4);
+
+    // Assert
+    expect(bubble.style.backgroundPositionX).toBe(atHide);
+  });
+
+  it("leaves a visible page's bubble delays alone when the webhost hides it", () => {
+    // Arrange
+    let clock = Date.now();
+    const bubble = workingBubble();
+    setVisibility("visible");
+    presence.setShown(true);
+    driver = createPromptWaveDriver({ root, now: () => clock, reducedMotion: () => false, presence });
+    driver.start();
+    const stamped = bubble.style.animationDelay;
+
+    // Act
+    clock += 900;
+    presence.setShown(false);
+
+    // Assert
+    expect(bubble.style.animationDelay).toBe(stamped);
   });
 });
