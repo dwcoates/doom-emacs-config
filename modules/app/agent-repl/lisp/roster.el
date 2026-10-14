@@ -253,6 +253,14 @@ it leaves `:pending'."
   "Return non-nil when ROW is CLOSED: no tab, whatever its lifecycle."
   (eq (plist-get (plist-get row :closed) :closed) t))
 
+(defun agent-repl-roster-row-instant-ms (row field)
+  "Return the epoch ms of ROW's durable instant FIELD, or nil.
+FIELD is the row key of one of the durable instants (`:last-selected',
+`:last-turn-ended'), each decoded to `(:at-ms MS)' by the one instant
+decoder.  nil when ROW is nil or does not carry FIELD.  The one reader
+every durable-instant accessor goes through."
+  (plist-get (plist-get row field) :at-ms))
+
 (defun agent-repl-roster-row-attention-p (row)
   "Return non-nil when ROW carries the attention marker."
   (and (plist-get row :attention) t))
@@ -828,11 +836,9 @@ the order NAMES gives them."
 
 (defun agent-repl-roster--instant-ms (ws field)
   "Return the epoch ms of WS's roster-row instant FIELD, or nil.
-FIELD is the row key of one of the durable instants, each decoded to
-`(:at-ms MS)\=' by the one instant decoder.  nil when the roster has no
-row for WS or the row does not carry FIELD.  The one reader every
-durable-instant accessor goes through."
-  (plist-get (plist-get (agent-repl-roster-row-for-ws ws) field) :at-ms))
+nil when the roster has no row for WS; otherwise
+`agent-repl-roster-row-instant-ms' reads it."
+  (agent-repl-roster-row-instant-ms (agent-repl-roster-row-for-ws ws) field))
 
 (defun agent-repl-roster-selection-recency-order (names)
   "Return NAMES ordered most recently selected first.
