@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { createJumpCollapse, type JumpCollapse } from "../../src/feed/jump-collapse.js";
+import { createOutOfViewCollapse, type OutOfViewCollapse } from "../../src/feed/out-of-view-collapse.js";
 import { fireIntersection, intersectionObservers } from "../intersection-observer.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 
-/** An entry a jump expanded: its row, its open state, and its collapses counted. */
+/** A watched entry: its row, its cause, its open state, and its collapses counted. */
 interface Entry {
   row: HTMLElement;
+  cause: "jump";
   open: boolean;
   collapses: number;
   isExpanded(): boolean;
@@ -19,6 +20,7 @@ function entry(box: HTMLElement, id: string): Entry {
   box.append(row);
   const e: Entry = {
     row,
+    cause: "jump",
     open: true,
     collapses: 0,
     isExpanded: () => e.open,
@@ -30,16 +32,16 @@ function entry(box: HTMLElement, id: string): Entry {
   return e;
 }
 
-/** A scroll box, the jump watches over it, and two entries in it. */
-function watching(): { box: HTMLElement; jumps: JumpCollapse; a: Entry; b: Entry } {
+/** A scroll box, the watches over it, and two entries in it. */
+function watching(): { box: HTMLElement; jumps: OutOfViewCollapse; a: Entry; b: Entry } {
   const box = document.createElement("div");
   document.body.replaceChildren(box);
-  const jumps = createJumpCollapse(box);
+  const jumps = createOutOfViewCollapse(box);
   if (jumps === null) throw new Error("the jsdom setup installs an IntersectionObserver");
   return { box, jumps, a: entry(box, "a"), b: entry(box, "b") };
 }
 
-describe("createJumpCollapse: the guard", () => {
+describe("createOutOfViewCollapse: the guard", () => {
   const saved = (globalThis as { IntersectionObserver?: unknown }).IntersectionObserver;
   afterEach(() => {
     (globalThis as { IntersectionObserver?: unknown }).IntersectionObserver = saved;
@@ -49,13 +51,13 @@ describe("createJumpCollapse: the guard", () => {
     // Arrange
     delete (globalThis as { IntersectionObserver?: unknown }).IntersectionObserver;
     // Act
-    const jumps = createJumpCollapse(document.createElement("div"));
+    const jumps = createOutOfViewCollapse(document.createElement("div"));
     // Assert
     expect(jumps).toBeNull();
   });
 });
 
-describe("createJumpCollapse", () => {
+describe("createOutOfViewCollapse", () => {
   it("collapses a jumped entry once it was seen and then left the view wholly", () => {
     // Arrange
     const w = watching();
@@ -189,8 +191,8 @@ describe("createJumpCollapse", () => {
     // Act
     fireIntersection(w.a.row, false);
     // Assert
-    const record = await forwardedRecord(capture, "feed.jump-collapse");
-    expect([record.level.case, record.context?.row]).toEqual(["info", "a"]);
+    const record = await forwardedRecord(capture, "feed.out-of-view-collapse");
+    expect([record.level.case, record.context?.row, record.context?.cause]).toEqual(["info", "a", "jump"]);
   });
 
   it("logs a detached entry at debug", async () => {
@@ -202,7 +204,7 @@ describe("createJumpCollapse", () => {
     // Act
     fireIntersection(w.a.row, false);
     // Assert
-    const record = await forwardedRecord(capture, "feed.jump-collapse-detached");
+    const record = await forwardedRecord(capture, "feed.out-of-view-collapse-detached");
     expect(record.context?.row).toBe("a");
   });
 
@@ -214,7 +216,7 @@ describe("createJumpCollapse", () => {
     // Act
     w.jumps.release(w.a.row);
     // Assert
-    const record = await forwardedRecord(capture, "feed.jump-collapse-released");
+    const record = await forwardedRecord(capture, "feed.out-of-view-collapse-released");
     expect(record.context?.row).toBe("a");
   });
 });

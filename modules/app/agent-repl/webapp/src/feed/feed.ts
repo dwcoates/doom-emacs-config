@@ -30,7 +30,7 @@ import {
   expandSection,
 } from "../expand.js";
 import { controlPlaneFailed } from "../failure/sink.js";
-import { createJumpCollapse } from "./jump-collapse.js";
+import { createOutOfViewCollapse } from "./out-of-view-collapse.js";
 import { installBackgroundClear } from "./background-click.js";
 import { governedRowAt, installBubbleSelect } from "./bubble-selection.js";
 import {
@@ -207,9 +207,9 @@ export function mountFeed(
           );
         });
   // AN ENTRY A JUMP EXPANDED CLOSES ONCE IT IS WHOLLY OUT OF VIEW (owner
-  // request, 2026-10-01; jump-collapse.ts). Only what the jump itself opened is
-  // watched; the reader's own expansions are left to them.
-  const jumps = scrollBox === null ? null : createJumpCollapse(scrollBox);
+  // request, 2026-10-01; out-of-view-collapse.ts). Only what the jump itself
+  // opened is watched; the reader's own expansions are left to them.
+  const outOfView = scrollBox === null ? null : createOutOfViewCollapse(scrollBox);
   // THE READER RETURNING TO THE TAIL CLOSES EVERY EXPANDED ENTRY (owner ruling,
   // 2026-10-01), hooked to the tail owner's one re-latch.
   tail?.onTailReached(() => {
@@ -647,7 +647,7 @@ export function mountFeed(
   /**
    * THE ONE JUMP TO A FEED ENTRY: bring the row onto the page, EXPAND the
    * entry, CENTER it under CAUSE, and mark it (`land`). The expansion is the
-   * jump's, and is undone once the entry is wholly out of view (`jumps`).
+   * jump's, and is undone once the entry is wholly out of view (`outOfView`).
    *
    * FOUND FIRST: a row already drawn — on the root feed or inside any OPEN
    * sub-feed — is simply landed on. Only when it is nowhere on screen is the
@@ -975,8 +975,9 @@ export function mountFeed(
       operation: "feed.jump-expanded",
       context: { row: id.value, sections: sections.length },
     });
-    jumps?.track({
+    outOfView?.track({
       row,
+      cause: "jump",
       isExpanded: () =>
         sectionsOwnedBy(row).some((section) => isExpanded(section)),
       collapse: () => {
@@ -997,8 +998,9 @@ export function mountFeed(
       });
       throw new Error("feed: a bubble a jump opened hangs in no feed row");
     }
-    jumps?.track({
+    outOfView?.track({
       row,
+      cause: "jump",
       isExpanded: () => bubble.isExpanded(),
       collapse: () => bubble.collapse(),
     });
@@ -1028,7 +1030,7 @@ export function mountFeed(
   /** The reader toggled something inside EL's row: the row is theirs now. */
   function releaseJump(el: HTMLElement): void {
     const row = el.closest<HTMLElement>(FEED_ROW_SELECTOR);
-    if (row !== null) jumps?.release(row);
+    if (row !== null) outOfView?.release(row);
   }
 
   /**
@@ -1042,7 +1044,7 @@ export function mountFeed(
    * reader opened stays open until the reader closes it.
    */
   function collapseEveryExpandedEntry(): void {
-    jumps?.clear();
+    outOfView?.clear();
     const sections = autoCollapseFor(host.ownerDocument).collapseOutside(
       "tailReached",
       null,
@@ -1083,7 +1085,7 @@ export function mountFeed(
     held?.dispose();
     uninstallClear?.();
     selectionVisibility?.dispose();
-    jumps?.dispose();
+    outOfView?.dispose();
     root.dispose();
   }
 }
