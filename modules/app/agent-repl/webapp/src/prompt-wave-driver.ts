@@ -35,6 +35,7 @@
  * reduced-motion ruling: under `prefers-reduced-motion` it paints nothing, and
  * the stylesheet drops the band's fill, so the wave is off exactly as before.
  */
+import type { Presence } from "./presence.js";
 import { prefersReducedMotion } from "./reduced-motion.js";
 import {
   PROMPT_WAVE_ATTRIBUTE,
@@ -74,6 +75,13 @@ export interface PromptWaveDriverOptions {
   now?: () => number;
   /** Whether reduced motion is asked for. Defaults to the media query. */
   reducedMotion?: ReducedMotionQuery;
+  /**
+   * Whether the webhost shows the page, and its changes. A page it does not
+   * show is painted by no one: its animations are paused
+   * (host/unshown-animations.ts), so a hidden-webview tick would be the one
+   * animation still running there. Defaults to always shown.
+   */
+  presence?: Pick<Presence, "shown" | "onChange">;
 }
 
 /** A running driver: started once at boot, stoppable for teardown and tests. */
@@ -95,6 +103,9 @@ export function createPromptWaveDriver(options: PromptWaveDriverOptions = {}): P
   const now = options.now ?? ((): number => Date.now());
   const reducedMotion = options.reducedMotion ?? ((): boolean => prefersReducedMotion(doc));
   const html = doc.documentElement;
+  const presence = options.presence;
+  const shown = (): boolean => presence?.shown() ?? true;
+  let unsubscribePresence: (() => void) | null = null;
 
   let hiddenTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -132,18 +143,26 @@ export function createPromptWaveDriver(options: PromptWaveDriverOptions = {}): P
     }
   }
 
+  function stopTicking(): void {
+    if (hiddenTimer !== null) {
+      clearInterval(hiddenTimer);
+      hiddenTimer = null;
+    }
+  }
+
   function enterHidden(): void {
-    if (hiddenTimer !== null) return;
     html.setAttribute(PAGE_HIDDEN_ATTRIBUTE, "");
+    if (!shown()) {
+      stopTicking();
+      return;
+    }
+    if (hiddenTimer !== null) return;
     paint();
     hiddenTimer = setInterval(paint, HIDDEN_TICK_MS);
   }
 
   function enterVisible(): void {
-    if (hiddenTimer !== null) {
-      clearInterval(hiddenTimer);
-      hiddenTimer = null;
-    }
+    stopTicking();
     handBackToCompositor();
     html.removeAttribute(PAGE_HIDDEN_ATTRIBUTE);
   }
@@ -156,14 +175,20 @@ export function createPromptWaveDriver(options: PromptWaveDriverOptions = {}): P
   return {
     start(): void {
       doc.addEventListener("visibilitychange", sync);
+      // ONLY THE TICK FOLLOWS THE WEBHOST. A visible page's bubbles are left
+      // alone when it is hidden or shown: re-seeking their delay then would
+      // shift a paused animation's phase under unshown-animations.ts.
+      unsubscribePresence =
+        presence?.onChange(() => {
+          if (doc.visibilityState === "hidden") enterHidden();
+        }) ?? null;
       sync();
     },
     stop(): void {
       doc.removeEventListener("visibilitychange", sync);
-      if (hiddenTimer !== null) {
-        clearInterval(hiddenTimer);
-        hiddenTimer = null;
-      }
+      unsubscribePresence?.();
+      unsubscribePresence = null;
+      stopTicking();
       html.removeAttribute(PAGE_HIDDEN_ATTRIBUTE);
     },
   };

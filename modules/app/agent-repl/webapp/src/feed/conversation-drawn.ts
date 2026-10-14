@@ -23,6 +23,7 @@
  */
 import { log } from "../log.js";
 import { pagePresence } from "../presence.js";
+import { nextFrame } from "../frame.js";
 
 /** The attribute Emacs reads. */
 export const CONVERSATION_DRAWN_ATTRIBUTE = "data-conversation-drawn";
@@ -42,9 +43,7 @@ export interface ConversationDrawnEnv {
 export function conversationDrawnEnv(): ConversationDrawnEnv {
   return {
     doc: document,
-    frame: (callback) => {
-      requestAnimationFrame(() => callback());
-    },
+    frame: nextFrame,
     seen: () => pagePresence().seen(),
   };
 }

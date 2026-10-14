@@ -20,6 +20,7 @@
  */
 import { log } from "./log.js";
 import { pagePresence, type Presence } from "./presence.js";
+import { nextFrame } from "./frame.js";
 
 /** What the presence log needs from its environment, injectable for tests. */
 export interface PagePresenceEnv {
@@ -45,9 +46,7 @@ function pagePresenceEnv(): PagePresenceEnv {
     doc: document,
     win: window,
     now: () => performance.now(),
-    frame: (callback) => {
-      requestAnimationFrame(() => callback());
-    },
+    frame: nextFrame,
     presence: pagePresence(),
   };
 }
