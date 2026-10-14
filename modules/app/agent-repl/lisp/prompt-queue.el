@@ -38,13 +38,13 @@
 (declare-function agent-repl--history-reset "agent-repl-history" ())
 (declare-function agent-repl--history-save "agent-repl-history" (ws))
 (declare-function agent-repl--input-buffer "agent-repl-input" (ws))
-(declare-function agent-repl--read-input-buffer "agent-repl-input" (ws))
-(declare-function agent-repl--prepare-input "agent-repl-input" (ws raw &optional force))
-(declare-function agent-repl--input-said "agent-repl-input" (text attachments))
+(declare-function agent-repl--read-input-parts "agent-repl-input" (ws))
+(declare-function agent-repl--input-parts-text "agent-repl-input" (parts))
+(declare-function agent-repl--input-parts-images "agent-repl-input" (parts))
+(declare-function agent-repl--prepare-input-parts "agent-repl-input" (ws parts &optional force))
+(declare-function agent-repl--input-said "agent-repl-input" (parts))
 (declare-function agent-repl--input-submit "agent-repl-input"
                   (ws said origin raw &optional key from-buffer snapshot delivery))
-(declare-function agent-repl-input-attachments "agent-repl-input" (ws))
-(declare-function agent-repl-input-clear-attachments "agent-repl-input" (ws))
 
 (defconst agent-repl--prompt-queue-drain-origin :deferred-prompt
   "The `PromptOrigin' every deferred prompt carries.
@@ -74,25 +74,24 @@ daemon and the shim; one the daemon could not take is held on disk
 \(`held-ingress.el').  Returns the submission's idempotency key."
   (interactive)
   (let* ((ws (agent-repl--ws-current-name))
-         (raw (or (agent-repl--read-input-buffer ws) ""))
-         (attachments (agent-repl-input-attachments ws))
-         (empty-p (and (string-empty-p (string-trim raw)) (null attachments))))
+         (parts (agent-repl--read-input-parts ws))
+         (raw (agent-repl--input-parts-text parts))
+         (empty-p (and (string-empty-p (string-trim raw))
+                       (null (agent-repl--input-parts-images parts)))))
     (unless ws
       (user-error "No current workspace to queue a prompt for"))
     (if empty-p
         (progn
           (agent-repl--log ws "elisp.prompt-queue.defer-empty ws=%s -- nothing to queue" ws)
           (message "agent-repl: no input to queue"))
-      (let* ((text (agent-repl--prepare-input ws raw))
-             (said (agent-repl--input-said text attachments))
+      (let* ((said (agent-repl--input-said (agent-repl--prepare-input-parts ws parts)))
              (buf (agent-repl--input-buffer ws)))
         (when buf
           (with-current-buffer buf
-            (agent-repl--history-push raw)
+            (agent-repl--history-push (buffer-string))
             (agent-repl--history-reset)
             (erase-buffer)))
         (agent-repl--history-save ws)
-        (agent-repl-input-clear-attachments ws)
         (agent-repl--info ws "elisp.prompt-queue.deferred ws=%s origin=%S delivery=%S"
                           ws agent-repl--prompt-queue-drain-origin
                           agent-repl--prompt-queue-delivery)

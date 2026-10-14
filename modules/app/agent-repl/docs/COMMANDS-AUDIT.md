@@ -47,7 +47,9 @@ Findings are collected at the end, in "Audit findings".
 | `agent-repl--history-prev` | Previous (older) history entry. | `<up>` (normal) | composer | missing |
 | `agent-repl--history-next` | Next (newer) history entry, or restore stashed text. | `<down>` (normal) | composer | missing |
 | `agent-repl-history-search` | Search input history with `completing-read`. | `C-M-r` (normal, insert) | composer | missing |
-| `agent-repl-attach-clipboard-image` | Attach the clipboard image to the composer. | `C-c C-i` (normal, insert) | composer | missing |
+| `agent-repl-attach-clipboard-image` | Attach the clipboard image at point, even with text beside it. | `C-c C-i` (normal, insert) | composer | missing |
+| `agent-repl-input-yank` | Paste the clipboard's image at point, or yank as usual. | `[remap yank]`, `[remap clipboard-yank]` | composer | works |
+| `agent-repl-input-evil-paste-after` / `-before` | Evil's `p` / `P`: the clipboard's image, or evil's paste. | `[remap evil-paste-after]`, `[remap evil-paste-before]` | composer | works |
 | `agent-repl-input-insert-escape` | Close a standing news digest, then leave insert state. | `<escape>` (insert) | composer | missing |
 
 ## 3. Feed selection and search

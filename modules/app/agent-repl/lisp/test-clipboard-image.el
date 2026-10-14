@@ -6,19 +6,15 @@
 ;;   AGENT_REPL_FORBID_VENDOR_CALLS=1 emacs -batch -Q -l ert \
 ;;     -l lisp/test-clipboard-image.el -f ert-run-tests-batch-and-exit
 ;;
-;; Every external boundary is stubbed per test so each capture branch runs
-;; with no subprocess and no real clipboard: `agent-repl--image-call-process'
-;; (osascript/sips) for the macOS branches -- the PNG flavor, the
-;; TIFF-plus-conversion fallback, and an empty clipboard -- and
-;; `agent-repl--image-call-process-to-file' plus
-;; `agent-repl--executable-find' for the Linux branches, where the
-;; display server and what is installed on PATH are both stated by the test.
+;; Both external boundaries are stubbed per test, so no case reads the real
+;; clipboard or runs a program: `agent-repl--image-clipboard-selection' is a
+;; clipboard the test scripts (its TARGETS and each type's bytes), and
+;; `agent-repl--image-call-process' records `sips' and the image opener.
 ;;
-;; The behavior under test is the one the overhaul changed: the captured file
-;; becomes an ATTACHMENT, registered through the composer's own entry point,
-;; and the buffer text gets a MARKER rather than the path.  A path in the
-;; text would have travelled as words, leaving the agent to infer that they
-;; named an image, where the content model states it by arm.
+;; The behavior under test: a paste with an image (and no text) on the
+;; clipboard puts ONE marker character at point, and that character is the
+;; whole record of the image -- input.el reads it back in its place among
+;; the words.
 
 ;;; Code:
 
@@ -26,392 +22,449 @@
                                            (or load-file-name buffer-file-name)))
       nil t)
 
+;; Evil is not loaded in the batch harness; its register variable is
+;; special in production, so it is special here too.
+(defvar evil-this-register)
+
 ;;;; ---- Fixtures ----
 
-(defvar agent-repl-test-image--calls nil
-  "Boundary invocations, oldest first, as (PROGRAM . ARGS).")
+(defvar agent-repl-test-image--clipboard nil
+  "The scripted clipboard: an alist of (TYPE . VALUE), TARGETS included.")
 
-(defvar agent-repl-test-image--written nil
-  "Paths the stubbed boundary should treat as successfully written.")
+(defvar agent-repl-test-image--calls nil
+  "Program invocations, oldest first, as (PROGRAM . ARGS).")
+
+(defvar agent-repl-test-image--exit 0
+  "The exit code the stubbed program boundary answers.")
+
+(defvar agent-repl-test-image--errors nil
+  "Error records, oldest first, as formatted lines.")
 
 (defvar agent-repl-test-image--dir nil
   "The temporary workspace directory for the test.")
 
-(defun agent-repl-test-image--stub (program &rest args)
-  "Record the call and create the destination when it is a scripted success."
-  (push (cons program args) agent-repl-test-image--calls)
-  (let ((dest (cond
-               ;; osascript writes the flavor to the path in its script.
-               ((equal program "osascript")
-                (when (string-match "POSIX file \"\\([^\"]+\\)\"" (cadr args))
-                  (match-string 1 (cadr args))))
-               ;; sips converts to the path after --out.
-               ((equal program "sips") (car (last args))))))
-    (if (and dest (member dest agent-repl-test-image--written))
-        (progn (with-temp-file dest (insert "png-bytes")) 0)
-      1)))
+(defun agent-repl-test-image--run (program &rest args)
+  "Record PROGRAM ARGS; a `sips' run writes its `--out' file when it succeeds."
+  (setq agent-repl-test-image--calls
+        (append agent-repl-test-image--calls (list (cons program args))))
+  (when (and (equal program "sips") (eq 0 agent-repl-test-image--exit))
+    (with-temp-file (car (last args)) (insert "converted-png")))
+  agent-repl-test-image--exit)
+
+(defun agent-repl-test-image--clip (&rest pairs)
+  "Script the clipboard to hold PAIRS, alternating TYPE and VALUE.
+TARGETS is derived from the types, as a vector, the way Emacs answers it."
+  (let ((alist nil))
+    (while pairs
+      (push (cons (car pairs) (cadr pairs)) alist)
+      (setq pairs (cddr pairs)))
+    (setq alist (nreverse alist))
+    (setq agent-repl-test-image--clipboard
+          (cons (cons 'TARGETS (vconcat (cons 'TARGETS (mapcar #'car alist)))) alist))))
 
 (defmacro agent-repl-test-image--with (&rest body)
-  "Run BODY in a live composer buffer with the capture boundary stubbed."
+  "Run BODY in a live composer buffer with both boundaries stubbed."
   (declare (indent 0))
-  `(let* ((agent-repl-test-image--calls nil)
-          (agent-repl-test-image--written nil)
-          ;; The AppleScript branch is a macOS branch, so these scenarios
-          ;; state the platform rather than inheriting the host's.
+  `(let* ((agent-repl-test-image--clipboard nil)
+          (agent-repl-test-image--calls nil)
+          (agent-repl-test-image--exit 0)
+          (agent-repl-test-image--errors nil)
           (system-type 'darwin)
           (agent-repl-test-image--dir (make-temp-file "agent-repl-image-test" t))
           (buf (generate-new-buffer " *agent-repl-test-composer*")))
      (unwind-protect
          (progn
-           (with-current-buffer buf (agent-repl-input-mode))
+           (with-current-buffer buf
+             (setq-local agent-repl--owning-workspace "ws-one")
+             (agent-repl-input-mode))
            (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws-one"))
                      ((symbol-function 'agent-repl--ws-dir)
                       (lambda (_ws) agent-repl-test-image--dir))
                      ((symbol-function 'agent-repl--ws-get)
                       (lambda (_ws key) (when (eq key :input-buffer) buf)))
+                     ((symbol-function 'agent-repl--image-clipboard-selection)
+                      (lambda (type) (cdr (assq type agent-repl-test-image--clipboard))))
                      ((symbol-function 'agent-repl--image-call-process)
-                      #'agent-repl-test-image--stub)
-                     ((symbol-function 'display-graphic-p) (lambda () nil))
+                      #'agent-repl-test-image--run)
+                     ((symbol-function 'agent-repl--error)
+                      (lambda (_ws fmt &rest args)
+                        (setq agent-repl-test-image--errors
+                              (append agent-repl-test-image--errors
+                                      (list (apply #'format fmt args))))))
+                     ((symbol-function 'display-images-p) (lambda (&rest _) nil))
                      ((symbol-function 'message) (lambda (&rest _) nil)))
              (with-current-buffer buf ,@body)))
        (kill-buffer buf)
        (delete-directory agent-repl-test-image--dir t))))
 
-(defun agent-repl-test-image--allow-png ()
-  "Script the PNG flavor to succeed at whatever path is allocated."
-  (setq agent-repl-test-image--written
-        (list (expand-file-name
-               (car (directory-files agent-repl-test-image--dir nil "\\.png\\'"))
-               agent-repl-test-image--dir))))
+(defun agent-repl-test-image--images ()
+  "Return the images the current composer holds, in order."
+  (agent-repl-input-attachments))
 
-(defun agent-repl-test-image--programs ()
-  "Return the programs the boundary was asked to run, oldest first."
-  (mapcar #'car (reverse agent-repl-test-image--calls)))
+(defun agent-repl-test-image--kept (name)
+  "Return the absolute path of NAME in the test's image directory."
+  (expand-file-name (concat ".claude/emacs/images/" name) agent-repl-test-image--dir))
 
-;;;; ---- The capture branches ----
+(defun agent-repl-test-image--kept-name (data extension)
+  "Return the file name DATA is kept under, with EXTENSION."
+  (format "clip-%s.%s" (substring (secure-hash 'sha256 data) 0 16) extension))
 
-(ert-deftest agent-repl-image-png-flavor-is-tried-first ()
-  "The PNG pasteboard flavor is what a macOS screenshot provides."
+;;;; ---- What the clipboard holds ----
+
+(ert-deftest agent-repl-image-paste-type-is-the-image-when-no-text-rides-with-it ()
+  "An image with no text on the clipboard is pasted as the image."
   (agent-repl-test-image--with
-    (let ((dest (expand-file-name "clip.png" agent-repl-test-image--dir)))
-      (setq agent-repl-test-image--written (list dest))
-      (should (equal (agent-repl--image-capture-clipboard dest "ws-one") dest))
-      (should (equal (agent-repl-test-image--programs) '("osascript"))))))
+    (agent-repl-test-image--clip 'image/png "PNG")
+    (should (equal (car (agent-repl--image-clipboard-paste-type "ws-one")) 'image/png))))
 
-(ert-deftest agent-repl-image-tiff-fallback-converts-with-sips ()
-  "With only a TIFF flavor the capture converts it rather than giving up."
+(ert-deftest agent-repl-image-paste-type-is-nil-when-text-rides-with-the-image ()
+  "Text on the clipboard makes the paste the ordinary one, image or not."
   (agent-repl-test-image--with
-    (let* ((dest (expand-file-name "clip.png" agent-repl-test-image--dir))
-           (tiff (expand-file-name "clip.tiff" agent-repl-test-image--dir)))
-      ;; The PNG write fails; the TIFF write and the conversion succeed.
-      (setq agent-repl-test-image--written (list tiff dest))
-      (cl-letf* ((real #'agent-repl-test-image--stub)
-                 ((symbol-function 'agent-repl--image-call-process)
-                  (lambda (program &rest args)
-                    (if (and (equal program "osascript")
-                             (string-match-p "PNGf" (cadr args)))
-                        (progn (push (cons program args) agent-repl-test-image--calls) 1)
-                      (apply real program args)))))
-        (should (equal (agent-repl--image-capture-clipboard dest "ws-one") dest))
-        (should (equal (agent-repl-test-image--programs)
-                       '("osascript" "osascript" "sips")))))))
+    (agent-repl-test-image--clip 'STRING "report.png" 'image/tiff "TIFF")
+    (should (null (agent-repl--image-clipboard-paste-type "ws-one")))))
 
-(ert-deftest agent-repl-image-empty-clipboard-refuses ()
-  "No image on the clipboard is a refusal, never a silent no-op."
+(ert-deftest agent-repl-image-paste-type-is-nil-with-no-image ()
+  "A clipboard holding only text pastes text."
   (agent-repl-test-image--with
-    (let ((dest (expand-file-name "clip.png" agent-repl-test-image--dir)))
-      (should-error (agent-repl--image-capture-clipboard dest "ws-one")
-                    :type 'user-error))))
+    (agent-repl-test-image--clip 'STRING "words")
+    (should (null (agent-repl--image-clipboard-paste-type "ws-one")))))
 
-(ert-deftest agent-repl-image-an-empty-file-is-not-a-write ()
-  "A zero-byte destination means the flavor was not really there."
+(ert-deftest agent-repl-image-paste-type-is-nil-on-an-empty-clipboard ()
+  "A clipboard answering no TARGETS at all pastes as usual."
   (agent-repl-test-image--with
-    (let ((dest (expand-file-name "clip.png" agent-repl-test-image--dir)))
-      (cl-letf (((symbol-function 'agent-repl--image-call-process)
-                 (lambda (_program &rest _args) (with-temp-file dest (insert "")) 0)))
-        (should-error (agent-repl--image-capture-clipboard dest "ws-one")
-                      :type 'user-error)))))
+    (should (null (agent-repl--image-clipboard-paste-type "ws-one")))))
 
-;;;; ---- The attachment ----
-
-(ert-deftest agent-repl-image-attach-registers-the-attachment ()
-  "The captured file is registered on the composer, path and MIME type."
+(ert-deftest agent-repl-image-paste-type-prefers-png-over-tiff ()
+  "PNG wins over the TIFF a macOS app offers beside it."
   (agent-repl-test-image--with
-    (cl-letf (((symbol-function 'agent-repl--image-capture-clipboard)
-               (lambda (dest &optional _ws) dest)))
-      (let ((dest (agent-repl-attach-clipboard-image)))
-        (should (equal agent-repl-input-attachments
-                       (list (list :path dest
-                                   :media-type agent-repl--image-media-type))))))))
+    (agent-repl-test-image--clip 'image/tiff "TIFF" 'image/png "PNG")
+    (should (equal (car (agent-repl--image-clipboard-paste-type "ws-one")) 'image/png))))
 
-(ert-deftest agent-repl-image-media-type-is-png ()
-  "Both capture branches land as PNG, so the stated type is image/png."
-  (should (equal agent-repl--image-media-type "image/png")))
-
-(ert-deftest agent-repl-image-attach-inserts-a-marker-not-the-path ()
-  "The buffer text is a MARKER: the path never travels as words."
+(ert-deftest agent-repl-image-targets-read-a-list-answer ()
+  "A TARGETS answer given as a list is read like the vector."
   (agent-repl-test-image--with
-    (cl-letf (((symbol-function 'agent-repl--image-capture-clipboard)
-               (lambda (dest &optional _ws) dest)))
-      (let ((dest (agent-repl-attach-clipboard-image)))
-        (should (string-match-p (regexp-quote (agent-repl--image-marker-text dest))
-                               (buffer-string)))
-        (should-not (string-match-p (regexp-quote dest) (buffer-string)))))))
+    (setq agent-repl-test-image--clipboard '((TARGETS . (TARGETS image/gif))))
+    (should (equal (agent-repl--image-clipboard-targets "ws-one") '(TARGETS image/gif)))))
 
-(ert-deftest agent-repl-image-marker-span-carries-the-marker-property ()
-  "The whole inserted span -- marker line AND newline -- is named a marker."
+;;;; ---- Capture ----
+
+(ert-deftest agent-repl-image-capture-keeps-the-bytes-under-their-digest ()
+  "The clipboard's bytes are written to a file named by their digest."
   (agent-repl-test-image--with
-    ;; Arrange.
-    (let ((path "/tmp/x/clip-1.png"))
-      ;; Act.
-      (agent-repl--image-insert-marker path "ws-one")
-      ;; Assert.
-      (should (equal (buffer-string) "[image attached: clip-1.png]\n"))
-      (should (equal (mapcar (lambda (i)
-                               (get-text-property i agent-repl--input-image-marker-property))
-                             (number-sequence (point-min) (1- (point-max))))
-                     (make-list (1- (point-max)) path))))))
+    (agent-repl-test-image--clip 'image/png "PNG-BYTES")
+    (let ((kept (agent-repl--image-capture "ws-one" (assq 'image/png agent-repl--image-clipboard-types))))
+      (should (equal kept (cons (agent-repl-test-image--kept
+                                 (agent-repl-test-image--kept-name "PNG-BYTES" "png"))
+                                "image/png")))
+      (should (equal (with-temp-buffer
+                       (set-buffer-multibyte nil)
+                       (insert-file-contents-literally (car kept))
+                       (buffer-string))
+                     "PNG-BYTES")))))
 
-(ert-deftest agent-repl-image-marker-is-not-read-back-as-words ()
-  "An attached image leaves the composer's TEXT exactly what was typed."
+(ert-deftest agent-repl-image-capture-of-the-same-image-twice-is-one-file ()
+  "Pasting the same bytes twice keeps one file."
   (agent-repl-test-image--with
-    ;; Arrange.
-    (insert "what is in this picture?")
-    (cl-letf (((symbol-function 'agent-repl--image-capture-clipboard)
-               (lambda (dest &optional _ws) dest)))
-      ;; Act.
-      (agent-repl-attach-clipboard-image)
-      ;; Assert.
-      (should (equal (agent-repl--read-input-buffer "ws-one")
-                     "what is in this picture?")))))
+    (agent-repl-test-image--clip 'image/png "PNG-BYTES")
+    (let ((entry (assq 'image/png agent-repl--image-clipboard-types)))
+      (should (equal (agent-repl--image-capture "ws-one" entry)
+                     (agent-repl--image-capture "ws-one" entry)))
+      (should (equal (length (directory-files (agent-repl-test-image--kept "") nil "\\`clip-")) 1)))))
 
-(ert-deftest agent-repl-image-marker-opening-newline-is-part-of-the-marker ()
-  "The newline the marker opens a line with was never typed, so it goes too."
+(ert-deftest agent-repl-image-capture-keeps-a-jpeg-as-a-jpeg ()
+  "A JPEG is kept and attached as `image/jpeg'."
   (agent-repl-test-image--with
-    ;; Arrange.
-    (insert "mid-line")
-    ;; Act.
-    (agent-repl--image-insert-marker "/tmp/x/clip-1.png" "ws-one")
-    ;; Assert.
-    (should (equal (agent-repl--read-input-buffer "ws-one") "mid-line"))))
+    (agent-repl-test-image--clip 'image/jpeg "JPEG")
+    (should (equal (cdr (agent-repl--image-capture
+                         "ws-one" (assq 'image/jpeg agent-repl--image-clipboard-types)))
+                   "image/jpeg"))))
 
-(ert-deftest agent-repl-image-two-markers-are-both-stripped ()
-  "Two attachments strip two markers and leave the words between them."
+(ert-deftest agent-repl-image-capture-converts-a-tiff-with-sips ()
+  "A TIFF is converted to PNG and attached as PNG."
   (agent-repl-test-image--with
-    ;; Arrange.
-    (cl-letf (((symbol-function 'agent-repl--image-capture-clipboard)
-               (lambda (dest &optional _ws) dest)))
-      (insert "before\n")
-      (agent-repl-attach-clipboard-image)
-      ;; Act.
-      (insert "between\n")
-      (agent-repl-attach-clipboard-image)
-      ;; Assert.
-      (should (equal (agent-repl--read-input-buffer "ws-one")
-                     "before\nbetween\n")))))
+    (agent-repl-test-image--clip 'image/tiff "TIFF")
+    (let* ((tiff (agent-repl-test-image--kept (agent-repl-test-image--kept-name "TIFF" "tiff")))
+           (png (concat (file-name-sans-extension tiff) ".png")))
+      (should (equal (agent-repl--image-capture
+                      "ws-one" (assq 'image/tiff agent-repl--image-clipboard-types))
+                     (cons png "image/png")))
+      (should (equal agent-repl-test-image--calls
+                     (list (list "sips" "-s" "format" "png" tiff "--out" png)))))))
 
-(ert-deftest agent-repl-image-marker-names-the-file ()
-  "The marker names the file so the user can tell two attachments apart."
-  (should (equal (agent-repl--image-marker-text "/tmp/x/clip-1.png")
-                 "[image attached: clip-1.png]")))
-
-(ert-deftest agent-repl-image-two-attachments-accumulate ()
-  "Attaching twice attaches two images, in the order they were attached."
+(ert-deftest agent-repl-image-capture-refuses-a-failed-tiff-conversion ()
+  "A `sips' that fails is a refusal, recorded at error."
   (agent-repl-test-image--with
-    (cl-letf (((symbol-function 'agent-repl--image-capture-clipboard)
-               (lambda (dest &optional _ws) dest)))
-      (let ((first (agent-repl-attach-clipboard-image))
-            (second (agent-repl-attach-clipboard-image)))
-        (should-not (equal first second))
-        (should (equal (mapcar (lambda (a) (plist-get a :path))
-                              agent-repl-input-attachments)
-                       (list first second)))))))
+    (agent-repl-test-image--clip 'image/tiff "TIFF")
+    (setq agent-repl-test-image--exit 1)
+    (should-error (agent-repl--image-capture
+                   "ws-one" (assq 'image/tiff agent-repl--image-clipboard-types))
+                  :type 'user-error)
+    (should (string-match-p "tiff conversion failed .* exit=1"
+                            (car agent-repl-test-image--errors)))))
 
-(ert-deftest agent-repl-image-capture-failure-attaches-nothing ()
-  "A failed capture leaves no attachment and no marker behind."
+(ert-deftest agent-repl-image-capture-refuses-a-tiff-off-macos ()
+  "Off macOS a TIFF cannot be converted: refused, recorded, nothing run."
   (agent-repl-test-image--with
+    (agent-repl-test-image--clip 'image/tiff "TIFF")
+    (let ((system-type 'gnu/linux))
+      (should-error (agent-repl--image-capture
+                     "ws-one" (assq 'image/tiff agent-repl--image-clipboard-types))
+                    :type 'user-error))
+    (should (string-match-p "tiff conversion unsupported system-type=gnu/linux"
+                            (car agent-repl-test-image--errors)))
+    (should (null agent-repl-test-image--calls))))
+
+(ert-deftest agent-repl-image-capture-refuses-a-clipboard-with-no-bytes ()
+  "A type that answers no bytes is refused and recorded, and nothing is kept."
+  (agent-repl-test-image--with
+    (agent-repl-test-image--clip 'image/png "")
+    (should-error (agent-repl--image-capture
+                   "ws-one" (assq 'image/png agent-repl--image-clipboard-types))
+                  :type 'user-error)
+    (should (string-match-p "no image bytes target=image/png"
+                            (car agent-repl-test-image--errors)))
+    (should (null (file-exists-p (agent-repl-test-image--kept ""))))))
+
+(ert-deftest agent-repl-image-write-failure-is-recorded-and-resignalled ()
+  "A write that fails is recorded at error with its path, then re-signalled."
+  (agent-repl-test-image--with
+    (cl-letf (((symbol-function 'agent-repl--write-file-atomically)
+               (lambda (&rest _) (signal 'file-error '("Opening output file" "denied")))))
+      (should-error (agent-repl--image-write "/nowhere/clip.png" "PNG" "ws-one")
+                    :type 'file-error))
+    (should (string-match-p "image write failed path=/nowhere/clip.png bytes=3"
+                            (car agent-repl-test-image--errors)))))
+
+(ert-deftest agent-repl-image-write-goes-through-the-shared-atomic-writer-as-binary ()
+  "The bytes are written by the one atomic writer, unencoded."
+  (agent-repl-test-image--with
+    (let (written)
+      (cl-letf (((symbol-function 'agent-repl--write-file-atomically)
+                 (lambda (&rest args) (setq written args))))
+        (agent-repl--image-write "/nowhere/clip.png" "PNG" "ws-one"))
+      (should (equal written '("/nowhere/clip.png" "PNG" t))))))
+
+;;;; ---- The image in the composer ----
+
+(ert-deftest agent-repl-image-attach-inserts-one-character-at-point ()
+  "An attached image is one character, inserted where point is."
+  (agent-repl-test-image--with
+    (insert "look  here")
+    (goto-char 6)
+    (agent-repl-input-attach-image "/tmp/a.png" "image/png")
+    (should (equal (buffer-substring-no-properties (point-min) (point-max))
+                   (concat "look " agent-repl--image-marker-text " here")))))
+
+(ert-deftest agent-repl-image-attach-records-the-path-and-media-type ()
+  "The character carries the image's path and MIME type."
+  (agent-repl-test-image--with
+    (agent-repl-input-attach-image "/tmp/a.png" "image/png")
+    (should (equal (get-text-property (point-min) agent-repl--input-image-marker-property)
+                   '(:path "/tmp/a.png" :media-type "image/png")))))
+
+(ert-deftest agent-repl-image-attach-returns-the-character-position ()
+  "The entry point answers where the image went."
+  (agent-repl-test-image--with
+    (insert "ab")
+    (should (equal (agent-repl-input-attach-image "/tmp/a.png" "image/png") 3))))
+
+(ert-deftest agent-repl-image-attach-outside-a-composer-is-fatal ()
+  "Attaching anywhere but a composer is an invariant break."
+  (agent-repl-test-image--with
+    (with-temp-buffer
+      (should-error (agent-repl-input-attach-image "/tmp/a.png" "image/png")))))
+
+(ert-deftest agent-repl-image-words-typed-after-it-are-not-the-image ()
+  "Text typed right after the image is the user's own, not more image."
+  (agent-repl-test-image--with
+    (agent-repl-input-attach-image "/tmp/a.png" "image/png")
+    (insert-and-inherit "x")
+    (should (null (get-text-property (1- (point-max)) agent-repl--input-image-marker-property)))))
+
+(ert-deftest agent-repl-image-is-drawn-as-copied-image-without-graphics ()
+  "A frame that cannot draw images shows the fallback text."
+  (agent-repl-test-image--with
+    (agent-repl-input-attach-image "/tmp/a.png" "image/png")
+    (should (equal (get-text-property (point-min) 'display) "[Copied Image]"))))
+
+(ert-deftest agent-repl-image-is-drawn-as-the-image-with-graphics ()
+  "A frame that draws images shows the image at the fixed height."
+  (agent-repl-test-image--with
+    (cl-letf (((symbol-function 'display-images-p) (lambda (&rest _) t))
+              ((symbol-function 'create-image)
+               (lambda (file &rest props) (append (list 'image :file file) (cddr props)))))
+      (agent-repl-input-attach-image "/tmp/a.png" "image/png"))
+    (should (equal (get-text-property (point-min) 'display)
+                   (list 'image :file "/tmp/a.png"
+                         :max-height agent-repl-image-thumbnail-max-height :ascent 'center)))))
+
+(ert-deftest agent-repl-image-thumbnail-height-is-120 ()
+  "The image is drawn at most 120 pixels tall (owner ruling)."
+  (should (equal (default-value 'agent-repl-image-thumbnail-max-height) 120)))
+
+(ert-deftest agent-repl-image-keeps-its-click-through-kill-and-yank ()
+  "A killed and yanked image keeps its keymap: yanking would strip it."
+  (agent-repl-test-image--with
+    (agent-repl-input-attach-image "/tmp/a.png" "image/png")
+    (kill-region (point-min) (point-max))
+    (insert-for-yank (current-kill 0))
+    (should (eq (get-text-property (point-min) 'keymap) agent-repl--image-marker-map))
+    (should (equal (agent-repl-test-image--images)
+                   '((:path "/tmp/a.png" :media-type "image/png"))))))
+
+;;;; ---- Opening ----
+
+(ert-deftest agent-repl-image-open-runs-the-system-opener ()
+  "macOS opens the image with `open'."
+  (agent-repl-test-image--with
+    (let ((file (make-temp-file "agent-repl-open" nil ".png")))
+      (unwind-protect
+          (progn
+            (agent-repl--image-open file "ws-one")
+            (should (equal agent-repl-test-image--calls (list (list "open" file)))))
+        (delete-file file)))))
+
+(ert-deftest agent-repl-image-open-uses-xdg-open-off-macos ()
+  "Elsewhere the image opens with `xdg-open'."
+  (agent-repl-test-image--with
+    (let ((file (make-temp-file "agent-repl-open" nil ".png"))
+          (system-type 'gnu/linux))
+      (unwind-protect
+          (progn
+            (agent-repl--image-open file "ws-one")
+            (should (equal (caar agent-repl-test-image--calls) "xdg-open")))
+        (delete-file file)))))
+
+(ert-deftest agent-repl-image-open-refuses-a-missing-file ()
+  "A file that is gone is refused and recorded, and nothing is run."
+  (agent-repl-test-image--with
+    (should-error (agent-repl--image-open "/nowhere/a.png" "ws-one") :type 'user-error)
+    (should (string-match-p "file missing path=/nowhere/a.png" (car agent-repl-test-image--errors)))
+    (should (null agent-repl-test-image--calls))))
+
+(ert-deftest agent-repl-image-open-refuses-a-failing-opener ()
+  "An opener that fails is refused and recorded with its exit."
+  (agent-repl-test-image--with
+    (let ((file (make-temp-file "agent-repl-open" nil ".png")))
+      (unwind-protect
+          (progn
+            (setq agent-repl-test-image--exit 1)
+            (should-error (agent-repl--image-open file "ws-one") :type 'user-error)
+            (should (string-match-p "open failed .* opener=open exit=1"
+                                    (car agent-repl-test-image--errors))))
+        (delete-file file)))))
+
+(ert-deftest agent-repl-image-click-opens-the-clicked-image ()
+  "A click on the image opens that image's file."
+  (agent-repl-test-image--with
+    (let ((opened nil)
+          (window-buffer (current-buffer)))
+      (agent-repl-input-attach-image "/tmp/a.png" "image/png")
+      (cl-letf (((symbol-function 'posn-window) (lambda (_) 'window))
+                ((symbol-function 'window-buffer) (lambda (_) window-buffer))
+                ((symbol-function 'posn-point) (lambda (_) 1))
+                ((symbol-function 'agent-repl--image-open)
+                 (lambda (path _ws) (setq opened path))))
+        (agent-repl-input-open-image-at-mouse '(mouse-1 (window 1))))
+      (should (equal opened "/tmp/a.png")))))
+
+;;;; ---- Pasting ----
+
+(ert-deftest agent-repl-image-yank-pastes-the-clipboard-image-at-point ()
+  "`yank' with an image on the clipboard puts the image where point is."
+  (agent-repl-test-image--with
+    (agent-repl-test-image--clip 'image/png "PNG")
+    (insert "see ")
+    (agent-repl-input-yank)
+    (should (equal (agent-repl-test-image--images)
+                   (list (list :path (agent-repl-test-image--kept
+                                      (agent-repl-test-image--kept-name "PNG" "png"))
+                               :media-type "image/png"))))
+    (should (equal (get-text-property 5 agent-repl--input-image-marker-property)
+                   (car (agent-repl-test-image--images))))))
+
+(ert-deftest agent-repl-image-yank-with-text-on-the-clipboard-yanks ()
+  "`yank' with text on the clipboard is the ordinary yank."
+  (agent-repl-test-image--with
+    (agent-repl-test-image--clip 'STRING "words")
+    (let ((yanked nil))
+      (cl-letf (((symbol-function 'yank) (lambda (&optional _) (interactive) (setq yanked t))))
+        (agent-repl-input-yank))
+      (should yanked)
+      (should (null (agent-repl-test-image--images))))))
+
+(ert-deftest agent-repl-image-yank-with-a-prefix-yanks-an-older-kill ()
+  "A prefix argument asks for an older kill, so the clipboard image is not pasted."
+  (agent-repl-test-image--with
+    (agent-repl-test-image--clip 'image/png "PNG")
+    (let ((yanked nil)
+          (current-prefix-arg 2))
+      (cl-letf (((symbol-function 'yank) (lambda (&optional _) (interactive) (setq yanked t))))
+        (agent-repl-input-yank))
+      (should yanked)
+      (should (null (agent-repl-test-image--images))))))
+
+(ert-deftest agent-repl-image-evil-paste-after-goes-after-the-cursor ()
+  "Evil's `p' puts the image after the character under the cursor."
+  (agent-repl-test-image--with
+    (agent-repl-test-image--clip 'image/png "PNG")
+    (insert "ab")
+    (goto-char 1)
+    (let ((evil-this-register nil))
+      (agent-repl-input-evil-paste-after))
+    (should (get-text-property 2 agent-repl--input-image-marker-property))))
+
+(ert-deftest agent-repl-image-evil-paste-before-goes-at-the-cursor ()
+  "Evil's `P' puts the image before the character under the cursor."
+  (agent-repl-test-image--with
+    (agent-repl-test-image--clip 'image/png "PNG")
+    (insert "ab")
+    (goto-char 1)
+    (let ((evil-this-register nil))
+      (agent-repl-input-evil-paste-before))
+    (should (get-text-property 1 agent-repl--input-image-marker-property))))
+
+(ert-deftest agent-repl-image-evil-paste-from-a-named-register-pastes-the-register ()
+  "A named register holds what the user put in it, so evil pastes it."
+  (agent-repl-test-image--with
+    (agent-repl-test-image--clip 'image/png "PNG")
+    (let ((evil-this-register ?a)
+          (pasted nil))
+      (cl-letf (((symbol-function 'evil-paste-after)
+                 (lambda (&rest _) (interactive) (setq pasted t))))
+        (agent-repl-input-evil-paste-after))
+      (should pasted)
+      (should (null (agent-repl-test-image--images))))))
+
+(ert-deftest agent-repl-image-attach-command-takes-the-image-beside-text ()
+  "`C-c C-i' attaches the image even when text rides beside it."
+  (agent-repl-test-image--with
+    (agent-repl-test-image--clip 'STRING "icon.png" 'image/png "PNG")
+    (agent-repl-attach-clipboard-image)
+    (should (equal (length (agent-repl-test-image--images)) 1))))
+
+(ert-deftest agent-repl-image-attach-command-refuses-a-clipboard-with-no-image ()
+  "`C-c C-i' with no image on the clipboard is refused, and nothing is attached."
+  (agent-repl-test-image--with
+    (agent-repl-test-image--clip 'STRING "words")
     (should-error (agent-repl-attach-clipboard-image) :type 'user-error)
-    (should-not agent-repl-input-attachments)
-    (should (equal (buffer-string) ""))))
+    (should (null (agent-repl-test-image--images)))))
 
-;;;; ---- The capture destination ----
+(ert-deftest agent-repl-image-paste-commands-are-remapped-in-the-composer ()
+  "Every paste command the composer has runs the image-aware paste."
+  (should (equal (list (lookup-key agent-repl-input-mode-map [remap yank])
+                       (lookup-key agent-repl-input-mode-map [remap clipboard-yank])
+                       (lookup-key agent-repl-input-mode-map [remap evil-paste-after])
+                       (lookup-key agent-repl-input-mode-map [remap evil-paste-before]))
+                 '(agent-repl-input-yank
+                   agent-repl-input-yank
+                   agent-repl-input-evil-paste-after
+                   agent-repl-input-evil-paste-before))))
 
-(ert-deftest agent-repl-image-dir-is-under-the-workspace ()
-  "The file is written inside the workspace so the agent can read it."
-  (agent-repl-test-image--with
-    (let ((dir (agent-repl--image-dir "ws-one")))
-      (should (file-directory-p dir))
-      (should (string-prefix-p (file-name-as-directory agent-repl-test-image--dir) dir)))))
-
-(ert-deftest agent-repl-image-new-path-is-a-png-under-the-dir ()
-  "The allocated destination is a .png inside the capture directory."
-  (agent-repl-test-image--with
-    (let* ((dir (agent-repl--image-dir "ws-one"))
-           (path (agent-repl--image-new-path dir "ws-one")))
-      (should (equal (file-name-extension path) "png"))
-      (should (string-prefix-p dir path))
-      (should-not (file-exists-p path)))))
-
-(ert-deftest agent-repl-image-new-path-is-unique-per-call ()
-  "Two captures in the same second must not collide."
-  (agent-repl-test-image--with
-    (let ((dir (agent-repl--image-dir "ws-one")))
-      (should-not (equal (agent-repl--image-new-path dir "ws-one")
-                         (agent-repl--image-new-path dir "ws-one"))))))
-
-(ert-deftest agent-repl-image-thumbnail-nil-without-graphics ()
-  "A TTY frame draws no thumbnail, and the marker text carries on alone."
-  (agent-repl-test-image--with
-    (should-not (agent-repl--image-thumbnail "/tmp/x.png" "ws-one"))))
-
-;;;; ---- Which reader the platform gets ----
-
-;; The capture used to be macOS-only: it shelled out to `osascript' on every
-;; host, so on Linux -- the e2e sandbox and any Linux user -- the verb simply
-;; failed.  The reader is now chosen BY PLATFORM at the source, and a host
-;; with no reader installed is REPORTED, naming the tool it wanted.
-
-(defvar agent-repl-test-image--to-file-calls nil
-  "Calls to the stdout-to-file boundary, oldest first, as (PROGRAM . ARGS).")
-
-(defvar agent-repl-test-image--installed nil
-  "Program names the fake host has on PATH.")
-
-(defvar agent-repl-test-image--errors nil
-  "Formatted `agent-repl--error' records, oldest first.")
-
-(defmacro agent-repl-test-image--on-linux (display installed &rest body)
-  "Run BODY on a fake Linux host under DISPLAY with INSTALLED tools on PATH.
-DISPLAY is `wayland' or `x11'; INSTALLED is a list of program names.  The
-capture writes PNG bytes whenever it runs, so a scenario that reaches a
-reader gets a successful capture unless it says otherwise."
-  (declare (indent 2))
-  `(let* ((agent-repl-test-image--to-file-calls nil)
-          (agent-repl-test-image--installed ,installed)
-          (agent-repl-test-image--errors nil)
-          (agent-repl-test-image--dir (make-temp-file "agent-repl-image-test" t))
-          (system-type 'gnu/linux)
-          (process-environment
-           (cons (if (eq ,display 'wayland) "WAYLAND_DISPLAY=wayland-0" "DISPLAY=:0")
-                 (seq-remove (lambda (v) (or (string-prefix-p "DISPLAY=" v)
-                                             (string-prefix-p "WAYLAND_DISPLAY=" v)))
-                             process-environment))))
-     (unwind-protect
-         (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws-one"))
-                   ((symbol-function 'agent-repl--ws-dir)
-                    (lambda (_ws) agent-repl-test-image--dir))
-                   ((symbol-function 'agent-repl--executable-find)
-                    (lambda (program)
-                      (when (member program agent-repl-test-image--installed)
-                        (concat "/usr/bin/" program))))
-                   ((symbol-function 'agent-repl--image-call-process-to-file)
-                    (lambda (dest program &rest args)
-                      (push (cons program args) agent-repl-test-image--to-file-calls)
-                      (with-temp-file dest (insert "png-bytes"))
-                      0))
-                   ((symbol-function 'agent-repl--error)
-                    (lambda (_ws fmt &rest args)
-                      (push (apply #'format fmt args) agent-repl-test-image--errors)
-                      nil))
-                   ((symbol-function 'message) (lambda (&rest _) nil)))
-           ,@body)
-       (delete-directory agent-repl-test-image--dir t))))
-
-(defun agent-repl-test-image--to-file-programs ()
-  "Return the programs the stdout-to-file boundary ran, oldest first."
-  (mapcar #'car (reverse agent-repl-test-image--to-file-calls)))
-
-(ert-deftest agent-repl-image-macos-reads-through-osascript ()
-  "On macOS the reader is the AppleScript pasteboard read, as it always was."
-  (agent-repl-test-image--with
-    (let ((dest (expand-file-name "clip.png" agent-repl-test-image--dir)))
-      (setq agent-repl-test-image--written (list dest))
-      (should (equal (agent-repl--image-capture-clipboard dest "ws-one") dest))
-      (should (equal (agent-repl-test-image--programs) '("osascript"))))))
-
-(ert-deftest agent-repl-image-linux-x11-reads-through-xclip ()
-  "Under X11 the reader is `xclip', asked for the clipboard's PNG target."
-  (agent-repl-test-image--on-linux 'x11 '("xclip")
-    (let ((dest (expand-file-name "clip.png" agent-repl-test-image--dir)))
-      (should (equal (agent-repl--image-capture-clipboard dest "ws-one") dest))
-      (should (equal (reverse agent-repl-test-image--to-file-calls)
-                     '(("xclip" "-selection" "clipboard" "-t" "image/png" "-o")))))))
-
-(ert-deftest agent-repl-image-linux-wayland-reads-through-wl-paste ()
-  "Under Wayland the reader is `wl-paste', asked for the PNG mime type."
-  (agent-repl-test-image--on-linux 'wayland '("wl-paste")
-    (let ((dest (expand-file-name "clip.png" agent-repl-test-image--dir)))
-      (should (equal (agent-repl--image-capture-clipboard dest "ws-one") dest))
-      (should (equal (reverse agent-repl-test-image--to-file-calls)
-                     '(("wl-paste" "-t" "image/png")))))))
-
-(ert-deftest agent-repl-image-linux-falls-back-to-the-installed-tool ()
-  "A Wayland session carrying only `xclip' uses it rather than refusing."
-  (agent-repl-test-image--on-linux 'wayland '("xclip")
-    (let ((dest (expand-file-name "clip.png" agent-repl-test-image--dir)))
-      (should (equal (agent-repl--image-capture-clipboard dest "ws-one") dest))
-      (should (equal (agent-repl-test-image--to-file-programs) '("xclip"))))))
-
-(ert-deftest agent-repl-image-linux-without-a-tool-refuses ()
-  "No clipboard tool on PATH is a refusal the user sees, never a no-op."
-  (agent-repl-test-image--on-linux 'x11 '()
-    (let ((dest (expand-file-name "clip.png" agent-repl-test-image--dir)))
-      (should-error (agent-repl--image-capture-clipboard dest "ws-one")
-                    :type 'user-error)
-      (should-not agent-repl-test-image--to-file-calls))))
-
-(ert-deftest agent-repl-image-linux-without-a-tool-names-the-tool ()
-  "The refusal names the tool to install, so the user can act on it."
-  (agent-repl-test-image--on-linux 'x11 '()
-    (let ((dest (expand-file-name "clip.png" agent-repl-test-image--dir)))
-      (should (string-match-p
-               "xclip"
-               (cadr (should-error (agent-repl--image-capture-clipboard dest "ws-one")
-                                   :type 'user-error)))))))
-
-(ert-deftest agent-repl-image-linux-without-a-tool-is-recorded ()
-  "The missing tool also lands on the error record, not only in the echo area."
-  (agent-repl-test-image--on-linux 'wayland '()
-    (let ((dest (expand-file-name "clip.png" agent-repl-test-image--dir)))
-      (should-error (agent-repl--image-capture-clipboard dest "ws-one")
-                    :type 'user-error)
-      (should (seq-find (lambda (line) (string-match-p "wl-paste" line))
-                        agent-repl-test-image--errors)))))
-
-(ert-deftest agent-repl-image-linux-empty-clipboard-refuses ()
-  "A reader that returns nothing is an empty clipboard, and it is reported."
-  (agent-repl-test-image--on-linux 'x11 '("xclip")
-    (cl-letf (((symbol-function 'agent-repl--image-call-process-to-file)
-               (lambda (dest _program &rest _args)
-                 (with-temp-file dest (insert ""))
-                 1)))
-      (let ((dest (expand-file-name "clip.png" agent-repl-test-image--dir)))
-        (should-error (agent-repl--image-capture-clipboard dest "ws-one")
-                      :type 'user-error)
-        (should agent-repl-test-image--errors)))))
-
-(ert-deftest agent-repl-image-unsupported-platform-refuses ()
-  "A platform with no reader at all refuses instead of trying AppleScript."
-  (agent-repl-test-image--on-linux 'x11 '("xclip")
-    (let ((system-type 'windows-nt)
-          (dest (expand-file-name "clip.png" agent-repl-test-image--dir)))
-      (should-error (agent-repl--image-capture-clipboard dest "ws-one")
-                    :type 'user-error)
-      (should-not agent-repl-test-image--to-file-calls))))
-
-(ert-deftest agent-repl-image-display-type-prefers-wayland ()
-  "With both variables set the compositor wins: a Wayland session is Wayland."
-  (let ((process-environment (append '("WAYLAND_DISPLAY=wayland-0" "DISPLAY=:0")
-                                     process-environment)))
-    (should (eq (agent-repl--image-display-type "ws-one") 'wayland))))
-
-(ert-deftest agent-repl-image-display-type-is-x11-when-headless ()
-  "With neither variable set the answer is X11, so a report names `xclip'."
-  (let ((process-environment
-         (seq-remove (lambda (v) (or (string-prefix-p "DISPLAY=" v)
-                                     (string-prefix-p "WAYLAND_DISPLAY=" v)))
-                     process-environment)))
-    (should (eq (agent-repl--image-display-type "ws-one") 'x11))))
+(ert-deftest agent-repl-image-boundaries-are-registered ()
+  "Both external boundaries are registered, so the harness guards them."
+  (should (memq 'agent-repl--image-call-process agent-repl--external-boundary-functions))
+  (should (memq 'agent-repl--image-clipboard-selection agent-repl--external-boundary-functions)))
 
 (provide 'test-clipboard-image)
 

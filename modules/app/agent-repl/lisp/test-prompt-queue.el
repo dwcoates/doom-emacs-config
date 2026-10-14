@@ -110,6 +110,35 @@
     ;; Assert
     (should (equal (with-current-buffer buf (buffer-string)) ""))))
 
+(ert-deftest agent-repl-pq-defer-carries-the-images-in-their-place ()
+  "A deferred prompt's images travel where they stood among its words."
+  (agent-repl-test-pq--with-composer "see "
+    ;; Arrange
+    (with-current-buffer buf
+      (setq-local agent-repl--owning-workspace "ws-one")
+      (agent-repl-input-attach-image "/tmp/a.png" "image/png")
+      (insert " here"))
+    ;; Act
+    (agent-repl-queue-deferred-prompt)
+    ;; Assert
+    (should (equal (mapcar (lambda (block) (plist-get block :arm))
+                           (plist-get (plist-get (plist-get (car agent-repl-test-pq--submitted) :said)
+                                                 :content)
+                                      :blocks))
+                   '(:text :image :text)))))
+
+(ert-deftest agent-repl-pq-defer-of-an-image-alone-submits-it ()
+  "An image with no words is something to defer."
+  (agent-repl-test-pq--with-composer ""
+    ;; Arrange
+    (with-current-buffer buf
+      (setq-local agent-repl--owning-workspace "ws-one")
+      (agent-repl-input-attach-image "/tmp/a.png" "image/png"))
+    ;; Act
+    (agent-repl-queue-deferred-prompt)
+    ;; Assert
+    (should (equal (length agent-repl-test-pq--submitted) 1))))
+
 (ert-deftest agent-repl-pq-defer-is-a-from-buffer-submission ()
   "The deferral already cleared and recorded the composer, so the accept records nothing."
   (agent-repl-test-pq--with-composer "later please"

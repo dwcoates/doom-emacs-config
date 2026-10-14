@@ -227,18 +227,17 @@ fake would not exercise them."
       ;; Assert
       (should (equal reset 0)))))
 
-(ert-deftest agent-repl-input-an-explicit-text-send-still-clears-attachments ()
-  "The submission carried them, whatever composed its text."
+(ert-deftest agent-repl-input-an-explicit-text-send-leaves-the-draft-images ()
+  "A caller-composed prompt never carried the draft's images, so they stay."
   (agent-repl-test-input--with
     ;; Arrange
-    (agent-repl-test-input--type "my draft")
-    (let ((cleared nil))
-      (cl-letf (((symbol-function 'agent-repl-input-clear-attachments)
-                 (lambda (ws) (push ws cleared))))
-        ;; Act
-        (agent-repl--send :command-update-pr "update the pr"))
-      ;; Assert
-      (should (equal cleared '("ws-one"))))))
+    (agent-repl-test-input--compose "my draft" '("/tmp/a.png"))
+    ;; Act
+    (agent-repl--send :command-update-pr "update the pr")
+    ;; Assert
+    (should (equal (agent-repl-test-input--blocks)
+                   (list (agent-repl-test-input--words-block "update the pr"))))
+    (should (equal (length (agent-repl-input-attachments "ws-one")) 1))))
 
 (ert-deftest agent-repl-input-a-command-panel-answer-to-an-explicit-send-keeps-the-draft ()
   "Every accepted arm follows the same rule, not just the minted turn."
@@ -1211,15 +1210,33 @@ ring (owner ruling overrides the old keep-the-text contract)."
       (should-not agent-repl-test-input--submitted)
       (should (equal (length agent-repl-test-input--queued) 1)))))
 
-;;;; ---- Attachments ----
+;;;; ---- Images in the composer ----
 
-(ert-deftest agent-repl-input-attach-records-path-and-media-type ()
-  "The attach entry point records the reference and its MIME type."
+(defun agent-repl-test-input--image-block (path &optional media-type)
+  "The `UserContentBlock' image arm a composer sends for PATH."
+  (list :arm :image
+        :value (list :location (list :arm :path :value (list :path path))
+                     :media-type (or media-type "image/png"))))
+
+(defun agent-repl-test-input--words-block (text)
+  "The `UserContentBlock' text arm a composer sends for TEXT."
+  (list :arm :text :value (list :text text)))
+
+(defun agent-repl-test-input--compose (&rest parts)
+  "Make the composer hold PARTS: strings typed, (PATH) lists attached."
+  (with-current-buffer agent-repl-test-input--buffer
+    (erase-buffer)
+    (dolist (part parts)
+      (if (stringp part)
+          (insert part)
+        (agent-repl-input-attach-image (car part) (or (cadr part) "image/png"))))))
+
+(ert-deftest agent-repl-input-attach-is-read-back-with-path-and-media-type ()
+  "An attached image is read back from the buffer, reference and MIME type."
   (agent-repl-test-input--with
-    (with-current-buffer agent-repl-test-input--buffer
-      (agent-repl-input-attach-image "/tmp/a.png" "image/png")
-      (should (equal agent-repl-input-attachments
-                     '((:path "/tmp/a.png" :media-type "image/png")))))))
+    (agent-repl-test-input--compose '("/tmp/a.png"))
+    (should (equal (agent-repl-input-attachments "ws-one")
+                   '((:path "/tmp/a.png" :media-type "image/png"))))))
 
 (ert-deftest agent-repl-input-attach-attributes-the-record-to-the-composer-owner ()
   "Attachment diagnostics carry the composer buffer's workspace explicitly."
@@ -1240,84 +1257,120 @@ ring (owner ruling overrides the old keep-the-text contract)."
     (with-temp-buffer
       (should-error (agent-repl-input-attach-image "/tmp/a.png" "image/png")))))
 
-(ert-deftest agent-repl-input-attachments-keep-attach-order ()
-  "Blocks travel in the order the person composed them."
+(ert-deftest agent-repl-input-attachments-keep-buffer-order ()
+  "Images are read in the order they stand in the composer."
   (agent-repl-test-input--with
-    (with-current-buffer agent-repl-test-input--buffer
-      (agent-repl-input-attach-image "/tmp/a.png" "image/png")
-      (agent-repl-input-attach-image "/tmp/b.png" "image/png"))
+    (agent-repl-test-input--compose '("/tmp/a.png") "and" '("/tmp/b.png"))
     (should (equal (mapcar (lambda (a) (plist-get a :path))
                            (agent-repl-input-attachments "ws-one"))
                    '("/tmp/a.png" "/tmp/b.png")))))
 
-(ert-deftest agent-repl-input-attachment-becomes-an-image-block ()
-  "An attachment travels as ImageBlock{path, media_type}, stated by ARM."
+(ert-deftest agent-repl-input-attachments-of-no-composer-are-none ()
+  "A workspace with no composer holds no images."
   (agent-repl-test-input--with
+    (cl-letf (((symbol-function 'agent-repl--input-buffer) (lambda (_ws) nil)))
+      (should (null (agent-repl-input-attachments "ws-one"))))))
+
+(ert-deftest agent-repl-input-a-yanked-copy-of-an-image-is-a-second-image ()
+  "Two characters sharing one image's record are two images, not one."
+  (agent-repl-test-input--with
+    (agent-repl-test-input--compose '("/tmp/a.png"))
     (with-current-buffer agent-repl-test-input--buffer
-      (agent-repl-input-attach-image "/tmp/a.png" "image/png"))
-    (agent-repl-test-input--type "look")
+      (insert (buffer-substring (point-min) (point-max))))
+    (should (equal (length (agent-repl-input-attachments "ws-one")) 2))))
+
+(ert-deftest agent-repl-input-an-image-travels-as-an-image-block-after-the-words ()
+  "Words then an image travel as a TextBlock then an ImageBlock{path, media_type}."
+  (agent-repl-test-input--with
+    (agent-repl-test-input--compose "look" '("/tmp/a.png"))
     (agent-repl--send :user-sent)
     (should (equal (agent-repl-test-input--blocks)
-                   (list (list :arm :text :value (list :text "look"))
-                         (list :arm :image
-                               :value (list :location
-                                            (list :arm :path
-                                                  :value (list :path "/tmp/a.png"))
-                                            :media-type "image/png")))))))
+                   (list (agent-repl-test-input--words-block "look")
+                         (agent-repl-test-input--image-block "/tmp/a.png"))))))
+
+(ert-deftest agent-repl-input-images-travel-in-their-place-among-the-words ()
+  "Images interspersed with words travel exactly where they stood."
+  (agent-repl-test-input--with
+    (agent-repl-test-input--compose "before " '("/tmp/a.png") " between "
+                                    '("/tmp/b.jpg" "image/jpeg") " after")
+    (agent-repl--send :user-sent)
+    (should (equal (agent-repl-test-input--blocks)
+                   (list (agent-repl-test-input--words-block "before ")
+                         (agent-repl-test-input--image-block "/tmp/a.png")
+                         (agent-repl-test-input--words-block " between ")
+                         (agent-repl-test-input--image-block "/tmp/b.jpg" "image/jpeg")
+                         (agent-repl-test-input--words-block " after"))))))
+
+(ert-deftest agent-repl-input-whitespace-between-two-images-sends-no-text-block ()
+  "Only whitespace between two images carries no words, so no block."
+  (agent-repl-test-input--with
+    (agent-repl-test-input--compose '("/tmp/a.png") " \n" '("/tmp/b.png"))
+    (agent-repl--send :user-sent)
+    (should (equal (agent-repl-test-input--blocks)
+                   (list (agent-repl-test-input--image-block "/tmp/a.png")
+                         (agent-repl-test-input--image-block "/tmp/b.png"))))))
 
 (ert-deftest agent-repl-input-an-image-marker-never-rides-the-text-block ()
-  "The composer's attachment marker is DRAWN, never submitted as words."
+  "The image's character is DRAWN, never submitted as words."
   (agent-repl-test-input--with
-    ;; Arrange: the words, then the marker clipboard-image.el draws.
-    (with-current-buffer agent-repl-test-input--buffer
-      (agent-repl-input-attach-image "/tmp/a.png" "image/png")
-      (erase-buffer)
-      (insert "what is in this picture?")
-      (agent-repl--image-insert-marker "/tmp/a.png" "ws-one"))
+    (agent-repl-test-input--compose "what is in this picture?" '("/tmp/a.png"))
     ;; Act.
     (agent-repl--send :user-sent)
     ;; Assert.
     (should (equal (plist-get (plist-get (car (agent-repl-test-input--blocks)) :value) :text)
                    "what is in this picture?"))))
 
-(ert-deftest agent-repl-input-history-records-the-stripped-text ()
-  "The ring is the record of what was SENT, so it holds no marker either."
+(ert-deftest agent-repl-input-a-deleted-image-is-not-sent ()
+  "Deleting the image's character detaches the image: the buffer is the record."
+  (agent-repl-test-input--with
+    (agent-repl-test-input--compose "keep my words" '("/tmp/a.png"))
+    (with-current-buffer agent-repl-test-input--buffer
+      (delete-char -1))
+    (agent-repl--send :user-sent)
+    (should (equal (agent-repl-test-input--blocks)
+                   (list (agent-repl-test-input--words-block "keep my words"))))))
+
+(ert-deftest agent-repl-input-read-input-buffer-is-the-words-alone ()
+  "A reader of the draft's words gets the words, every image left out."
+  (agent-repl-test-input--with
+    (agent-repl-test-input--compose "my " '("/tmp/a.png") "words")
+    (should (equal (agent-repl--read-input-buffer "ws-one") "my words"))))
+
+(ert-deftest agent-repl-input-read-input-buffer-of-no-composer-is-nil ()
+  "A workspace with no composer has no words to read."
+  (agent-repl-test-input--with
+    (cl-letf (((symbol-function 'agent-repl--input-buffer) (lambda (_ws) nil)))
+      (should (null (agent-repl--read-input-buffer "ws-one"))))))
+
+(ert-deftest agent-repl-input-history-records-the-composer-images-and-all ()
+  "The ring records what the composer held, so a recalled entry brings its images."
   (agent-repl-test-input--with
     ;; Arrange.
     (let (pushed)
       (cl-letf (((symbol-function 'agent-repl--history-push)
                  (lambda (&optional text) (push text pushed))))
-        (with-current-buffer agent-repl-test-input--buffer
-          (agent-repl-input-attach-image "/tmp/a.png" "image/png")
-          (erase-buffer)
-          (insert "remember only my words")
-          (agent-repl--image-insert-marker "/tmp/a.png" "ws-one"))
+        (agent-repl-test-input--compose "remember " '("/tmp/a.png"))
         ;; Act.
         (agent-repl--send :user-sent)
         ;; Assert.
-        (should (equal pushed (list "remember only my words")))))))
+        (should (equal (length pushed) 1))
+        (should (equal (get-text-property 9 agent-repl--input-image-marker-property (car pushed))
+                       '(:path "/tmp/a.png" :media-type "image/png")))))))
 
-(ert-deftest agent-repl-input-attachments-cleared-after-a-turn ()
-  "Attachments clear once the daemon has accepted the submission."
+(ert-deftest agent-repl-input-images-go-with-the-composer-after-a-turn ()
+  "A from-buffer send clears the images with the words: the next send has none."
   (agent-repl-test-input--with
-    (with-current-buffer agent-repl-test-input--buffer
-      (agent-repl-input-attach-image "/tmp/a.png" "image/png"))
-    (agent-repl-test-input--type "look")
+    (agent-repl-test-input--compose "look" '("/tmp/a.png"))
     (agent-repl--send :user-sent)
     (should-not (agent-repl-input-attachments "ws-one"))))
 
-(ert-deftest agent-repl-input-a-from-buffer-refusal-restores-attachments ()
-  "A REFUSAL puts the attachments back: the submission never landed.
-The optimistic clear drops them at dispatch because an accepted submission
-carried them, but a refused one carried nothing -- an attachment left
-cleared would be silently lost user intent."
+(ert-deftest agent-repl-input-a-from-buffer-refusal-restores-the-images ()
+  "A REFUSAL puts the images back with the words: the submission never landed."
   ;; Arrange.
   (agent-repl-test-input--with
     (setq agent-repl-test-input--answer
           '(:response (:arm :error :value (:reason (:arm :merging :value nil)))))
-    (with-current-buffer agent-repl-test-input--buffer
-      (agent-repl-input-attach-image "/tmp/a.png" "image/png"))
-    (agent-repl-test-input--type "look")
+    (agent-repl-test-input--compose "look" '("/tmp/a.png"))
     ;; Act.
     (agent-repl--send :user-sent)
     ;; Assert.
@@ -1327,12 +1380,22 @@ cleared would be silently lost user intent."
 (ert-deftest agent-repl-input-image-only-submission-carries-no-text-block ()
   "An image alone is a legitimate thing to say; an empty TextBlock is not."
   (agent-repl-test-input--with
-    (with-current-buffer agent-repl-test-input--buffer
-      (agent-repl-input-attach-image "/tmp/a.png" "image/png"))
-    (agent-repl-test-input--type "")
+    (agent-repl-test-input--compose '("/tmp/a.png"))
     (agent-repl--send :user-sent)
-    (should (equal (length (agent-repl-test-input--blocks)) 1))
-    (should (eq (plist-get (car (agent-repl-test-input--blocks)) :arm) :image))))
+    (should (equal (agent-repl-test-input--blocks)
+                   (list (agent-repl-test-input--image-block "/tmp/a.png"))))))
+
+(ert-deftest agent-repl-input-the-metaprompt-goes-before-the-images ()
+  "The read-directive goes before the first part and the images keep their places."
+  (agent-repl-test-input--with
+    (cl-letf (((symbol-function 'agent-repl--input-prefix)
+               (lambda (_ws _raw &optional _force) "PREFIX ")))
+      (agent-repl-test-input--compose '("/tmp/a.png") "words")
+      (agent-repl--send :user-sent))
+    (should (equal (agent-repl-test-input--blocks)
+                   (list (agent-repl-test-input--words-block "PREFIX ")
+                         (agent-repl-test-input--image-block "/tmp/a.png")
+                         (agent-repl-test-input--words-block "words"))))))
 
 (ert-deftest agent-repl-input-discard-saves-as-a-discard ()
   "`agent-repl-discard-input' saves through the discard-aware history push."
@@ -1345,14 +1408,13 @@ cleared would be silently lost user intent."
           (agent-repl-discard-input)))
       (should (equal calls '(:discard))))))
 
-(ert-deftest agent-repl-input-discard-drops-attachments ()
-  "Discarding the composer discards what was attached to it."
+(ert-deftest agent-repl-input-discard-drops-the-images ()
+  "Discarding the composer discards the images in it."
   (agent-repl-test-input--with
+    (agent-repl-test-input--compose '("/tmp/a.png") "hello")
     (with-current-buffer agent-repl-test-input--buffer
-      (agent-repl-input-attach-image "/tmp/a.png" "image/png")
-      (insert "hello")
-      (agent-repl-discard-input)
-      (should-not agent-repl-input-attachments))))
+      (agent-repl-discard-input))
+    (should-not (agent-repl-input-attachments "ws-one"))))
 
 (ert-deftest agent-repl-input-discard-empties-the-composer ()
   "Discarding leaves the composer empty."
@@ -1384,6 +1446,21 @@ cleared would be silently lost user intent."
   (agent-repl-test-input--with
     (should (equal (agent-repl--prepare-input "ws-one" "fix it" t)
                    (concat (agent-repl--input-prefix "ws-one" "fix it" t) "fix it")))))
+
+(ert-deftest agent-repl-input-prepare-input-parts-frames-like-prepare-input ()
+  "Words alone composed as parts are exactly the words `agent-repl--prepare-input' composes."
+  (agent-repl-test-input--with
+    (should (equal (apply #'concat (agent-repl--prepare-input-parts "ws-one" (list "fix it") t))
+                   (agent-repl--prepare-input "ws-one" "fix it" t)))))
+
+(ert-deftest agent-repl-input-prepare-input-parts-keeps-images-behind-the-prefix ()
+  "The prefix goes before the first part, and the images keep their places."
+  (agent-repl-test-input--with
+    (cl-letf (((symbol-function 'agent-repl--input-prefix)
+               (lambda (_ws raw &optional _force) (format "<%s>" raw))))
+      (should (equal (agent-repl--prepare-input-parts
+                      "ws-one" (list "a" '(:path "/i.png" :media-type "image/png") "b"))
+                     (list "<ab>" "a" '(:path "/i.png" :media-type "image/png") "b"))))))
 
 (ert-deftest agent-repl-input-prefix-is-empty-unless-forced ()
   "An unforced submission carries no prefix."
@@ -2566,32 +2643,49 @@ The second escape is treated as a FIRST again -- it warns, never clears."
   (list :arm :image :value (list :location (list :arm :url :value (list :url url))
                                  :media-type "image/png")))
 
-(ert-deftest agent-repl-test-input-said-text-joins-text-blocks ()
-  "The words of what was said are its text blocks, joined by newlines."
-  (should (equal (agent-repl--input-said-text
+(ert-deftest agent-repl-test-input-said-parts-joins-adjacent-text-blocks ()
+  "Two adjacent text blocks are one run of words, joined by a newline."
+  (should (equal (agent-repl--input-said-parts
+                  (agent-repl-test-input--said (agent-repl-test-input--text-block "one")
+                                               (agent-repl-test-input--text-block "two")))
+                 '(:parts ("one\ntwo") :dropped 0))))
+
+(ert-deftest agent-repl-test-input-said-parts-keeps-images-between-the-words ()
+  "A path image is a part in its place, splitting the words around it."
+  (should (equal (agent-repl--input-said-parts
                   (agent-repl-test-input--said (agent-repl-test-input--text-block "one")
                                                (agent-repl-test-input--path-image "/a.png")
                                                (agent-repl-test-input--text-block "two")))
-                 "one\ntwo")))
+                 '(:parts ("one" (:path "/a.png" :media-type "image/png") "two") :dropped 0))))
 
-(ert-deftest agent-repl-test-input-said-attachments-keeps-path-images ()
-  "A path image becomes a composer attachment."
-  (should (equal (agent-repl--input-said-attachments
-                  (agent-repl-test-input--said (agent-repl-test-input--path-image "/a.png")))
-                 '(:attachments ((:path "/a.png" :media-type "image/png")) :dropped 0))))
-
-(ert-deftest agent-repl-test-input-said-attachments-counts-url-images-dropped ()
-  "An image by URL cannot be an attachment: it is counted as dropped."
-  (should (equal (agent-repl--input-said-attachments
+(ert-deftest agent-repl-test-input-said-parts-counts-url-images-dropped ()
+  "An image by URL cannot go in the composer: it is counted as dropped."
+  (should (equal (agent-repl--input-said-parts
                   (agent-repl-test-input--said (agent-repl-test-input--url-image "https://x/i.png")))
-                 '(:attachments nil :dropped 1))))
+                 '(:parts nil :dropped 1))))
 
-(ert-deftest agent-repl-test-input-said-attachments-counts-unsupported-dropped ()
+(ert-deftest agent-repl-test-input-said-parts-counts-unsupported-dropped ()
   "A block the schema does not model is counted as dropped."
-  (should (equal (plist-get (agent-repl--input-said-attachments
+  (should (equal (plist-get (agent-repl--input-said-parts
                              (agent-repl-test-input--said '(:arm :unsupported :value (:kind "x"))))
                             :dropped)
                  1)))
+
+(ert-deftest agent-repl-test-input-a-said-round-trips-through-the-composer ()
+  "What the composer sends, refilled into it, is what it held: one shape both ways."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (agent-repl-test-input--compose "one " '("/tmp/a.png") " two")
+    (let ((held (with-current-buffer agent-repl-test-input--buffer (agent-repl--input-parts))))
+      ;; Act
+      (agent-repl--input-fill-said "ws-one" agent-repl-test-input--buffer
+                                   (agent-repl--input-said held)
+                                   (plist-get (agent-repl--input-said-parts
+                                               (agent-repl--input-said held))
+                                              :parts))
+      ;; Assert
+      (should (equal (with-current-buffer agent-repl-test-input--buffer (agent-repl--input-parts))
+                     held)))))
 
 ;;;; ---- Rollback --------------------------------------------------------
 
@@ -2648,7 +2742,6 @@ CONFIRM is what the y/n question answers; ROLL-BACK is RollBack's answer."
                                          (cadr agent-repl-test-input--roll-back-answer))))))
                  ((symbol-function 'y-or-n-p)
                   (lambda (prompt) (setq agent-repl-test-input--asked prompt) confirm))
-                 ((symbol-function 'agent-repl--image-insert-marker) (lambda (&rest _) nil))
                  ((symbol-function 'agent-repl--warn)
                   (lambda (_ws fmt &rest args)
                     (push (apply #'format fmt args) agent-repl-test-input--warned))))
@@ -2915,19 +3008,19 @@ CONFIRM is what the y/n question answers; ROLL-BACK is RollBack's answer."
     ;; Assert
     (should (equal (agent-repl-test-input--composer-text) "line one\nline two"))))
 
-(ert-deftest agent-repl-test-input-rollback-done-sets-path-attachments ()
-  "The rolled-back prompt's path images become the composer's attachments."
+(ert-deftest agent-repl-test-input-rollback-done-puts-path-images-in-their-place ()
+  "The rolled-back prompt's path images return to the composer among its words."
   (agent-repl-test-input--with-rollback
       (agent-repl-test-input--plan-answer (agent-repl-test-input--plan)) t
       (agent-repl-test-input--done
        (agent-repl-test-input--said (agent-repl-test-input--text-block "see")
-                                    (agent-repl-test-input--path-image "/tmp/a.png")))
+                                    (agent-repl-test-input--path-image "/tmp/a.png")
+                                    (agent-repl-test-input--text-block "this")))
     ;; Act
     (agent-repl-rollback-keep-files)
     ;; Assert
-    (should (equal (buffer-local-value 'agent-repl-input-attachments
-                                       agent-repl-test-input--buffer)
-                   '((:path "/tmp/a.png" :media-type "image/png"))))))
+    (should (equal (with-current-buffer agent-repl-test-input--buffer (agent-repl--input-parts))
+                   '("see" (:path "/tmp/a.png" :media-type "image/png") "this")))))
 
 (ert-deftest agent-repl-test-input-rollback-done-says-done ()
   "A rollback that restored no files says it is done."

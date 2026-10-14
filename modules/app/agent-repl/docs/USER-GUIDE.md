@@ -305,6 +305,24 @@ While the agent waits on a question or a permission card, type the choice's numb
   - On a card of several questions, the card moves on to the next unanswered question.
   - Each answered question stays listed above it, with its header and its answer, typed words in italics.
 
+## Images in prompts
+
+Copy an image, then paste it into the input window the way you paste words.
+
+- **Every paste key pastes images:** `C-y`, `s-v`, and evil's `p` and `P`.
+  - The image goes where the paste happened, so images and words can alternate.
+  - When the clipboard holds text, those keys paste the text as usual. A file copied in Finder pastes its name, for example.
+  - `C-c C-i` pastes the clipboard's image even when text comes with it.
+- **The image shows in the input window, at most 120 pixels tall.**
+  - Click it to open the file in your system's image viewer.
+  - It is one character: one `DEL` removes it, and killing and yanking moves it.
+  - A terminal frame shows `[Copied Image]` in its place.
+- **The agent receives the image itself**, between your words, in the order you placed them.
+- **The file is kept in the workspace at `.claude/emacs/images/`**, named after its contents.
+  - Pasting the same image twice keeps one file.
+  - A TIFF-only clipboard (from some macOS apps) is converted to PNG with `sips`, because Claude takes PNG, JPEG, GIF and WebP.
+- **Prompt history keeps the images.** Recalling an entry brings them back, as long as the files still exist.
+
 ## Replying to a response
 
 Select a final response with `M-s-k` / `M-s-j` and send a prompt with `RET`. The
@@ -344,7 +362,7 @@ you are replying to. Sending ends the selection.
 - **After a rollback:**
   - the dropped prompts and everything after them are gone from the feed, for good;
   - the input window's previous contents are saved to its history;
-  - the input window holds the rolled-back prompt's text and attachments, ready to edit and send again.
+  - the input window holds the rolled-back prompt's text and images, in their places, ready to edit and send again.
 - **Limits of `C-c M-RET` (file restore):**
   - Only changes made by the agent's own file-editing tools are restored. Changes made by shell commands (`sed -i`, a build, `git checkout`) are not.
   - Git commits are not undone, so files and history can disagree after a restore.
