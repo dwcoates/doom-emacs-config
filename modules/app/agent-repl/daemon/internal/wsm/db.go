@@ -354,9 +354,10 @@ type DB interface {
 	// MergeProgressOf loads a workspace's merge progress record; the bool is
 	// false when none stands.
 	MergeProgressOf(ctx context.Context, id WorkspaceID) (MergeProgress, bool, error)
-	// SweepOrphanedMergeState drops progress records and closes open ledger
-	// rounds that no queue entry names any more (mergeorphans.go).
-	SweepOrphanedMergeState(ctx context.Context, at time.Time) (progress, rounds int, err error)
+	// SweepOrphanedMergeState releases merge leases, drops progress records
+	// and closes open ledger rounds that no queue entry names any more
+	// (mergeorphans.go).
+	SweepOrphanedMergeState(ctx context.Context, at time.Time) (OrphanedMergeState, error)
 	// DropMergeProgress deletes one merge lease's progress record and
 	// reports whether one stood.
 	DropMergeProgress(ctx context.Context, lease LeaseID) (bool, error)

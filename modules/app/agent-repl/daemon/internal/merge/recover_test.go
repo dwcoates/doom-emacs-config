@@ -10,6 +10,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
@@ -530,7 +531,7 @@ func TestRecoverSweepsTheMergeStateNoQueueEntryNames(t *testing.T) {
 func TestRecoverRecordsWhatTheSweepRemoved(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	h.db.sweepProgress, h.db.sweepRounds = 1, 29
+	h.db.swept = wsm.OrphanedMergeState{ProgressRecords: 1, RoundsClosed: 29}
 
 	// Act
 	if err := h.o.Recover(context.Background()); err != nil {
@@ -557,5 +558,31 @@ func TestRecoverGoesOnWhenTheSweepFailsAndSaysSoAtError(t *testing.T) {
 	}
 	if !recordedAt(h, "error", "could not sweep the merge state no queue entry names any more") {
 		t.Fatal("the failed sweep was not recorded at ERROR")
+	}
+}
+
+func TestRecoverRecordsEachMergeLeaseTheSweepReleasedWithItsWorkspaceAndTellsTheQueue(t *testing.T) {
+	// Arrange: the lease an eviction left standing over no entry.
+	h := newHarness(t)
+	orphan := wsm.Lease{ID: "lease-orphan", Workspace: theWorkspace, Holder: wsm.HolderMerge}
+	h.db.mu.Lock()
+	h.db.leases[theWorkspace] = orphan
+	h.db.swept = wsm.OrphanedMergeState{ReleasedLeases: []wsm.Lease{orphan}}
+	h.db.mu.Unlock()
+
+	// Act.
+	if err := h.o.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+
+	// Assert.
+	rec, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.merge.recover", Message: "released a merge lease no queue entry names any more; the workspace takes prompts again"})
+	if !ok || rec.Context["workspace"] != string(theWorkspace) || rec.Context["lease"] != "lease-orphan" {
+		t.Fatalf("the released lease was recorded as %+v, want INFO naming its workspace and lease", rec)
+	}
+	h.queue.mu.Lock()
+	defer h.queue.mu.Unlock()
+	if n := len(h.queue.leaseEvents); n == 0 || h.queue.leaseEvents[n-1] {
+		t.Fatalf("lease events %v, want the queue told the merge lease is gone", h.queue.leaseEvents)
 	}
 }
