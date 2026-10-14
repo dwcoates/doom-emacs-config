@@ -130,4 +130,17 @@ enum PromptOrigin {
   // no prompt bubble, and the compaction's status, footer and separator drawn
   // as for one the user typed.
   PROMPT_ORIGIN_MERGE_COMPACT_AFTER = 34;
+  // The daemon's request that a repository's MAIN-WORKTREE workspace find out
+  // why a workspace create in that repository failed. Every create, whichever
+  // way it was asked for (agentrepl.v1.CreateWorkspace, synchronous or
+  // option-B, a command file, a support workspace), that fails rather than
+  // being handed to a successor daemon opens the main-worktree workspace when
+  // it is closed and submits this. It names what was asked for and the
+  // failure's cause, and asks the agent to analyze the failure without
+  // changing anything until the user answers. Submitted through the prompt
+  // queue as a deferred prompt, so it waits behind a running turn and wakes
+  // an idle agent. Drawn as an ordinary prompt bubble. A merge's own
+  // workspace (the hidden one an async merge runs in) is not reported here:
+  // the merge queue hands its failure back to the requester.
+  PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED = 35;
 }
