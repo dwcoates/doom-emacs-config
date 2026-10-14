@@ -74,7 +74,7 @@ do them all yourselves").
   - The projection is a replayed arm of `SessionPushes`, withdrawn on `run`.
 - Daemon.
   - `internal/cachelapse.Keeper` owns the cadence and the deadline in one loop.
-  - `wsm` layout 46 stores the projection (`cache_lapses_at`,
+  - `wsm` layout 48 stores the projection (`cache_lapses_at`,
     `cache_lapse_gated_tokens`); `SetCacheLapse` writes only a hidden row,
     and `SetHidden` clears it.
   - Every bring-up site sets `StartSessionRequest.hold_keepalive` from the
