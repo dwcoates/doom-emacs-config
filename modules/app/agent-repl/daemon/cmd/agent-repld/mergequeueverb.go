@@ -31,7 +31,7 @@ import (
 // THE `merge-queue` VERB:
 //
 //	agent-repld merge-queue -one-shot [-pr-merged] [-front] [-version-part PART -changelog-line TEXT] [-wait] [-state-dir DIR]
-//	agent-repld merge-queue -async -name NAME -branch BRANCH [-instruction TEXT] [-close-dir WORKTREE] [-cleanup-worktree] [-compact-after] [-front] [-version-part PART -changelog-line TEXT] [-state-dir DIR]
+//	agent-repld merge-queue -async -name NAME -branch BRANCH [-instruction TEXT] [-close-dir WORKTREE] [-cleanup-worktree] [-compact-after] [-before-merge TEXT] [-after-merge TEXT] [-front] [-version-part PART -changelog-line TEXT] [-state-dir DIR]
 //	agent-repld merge-queue -evict | -evict-dir WORKTREE [-answer-timeout D] [-state-dir DIR]
 //	agent-repld merge-queue -move-up | -move-down [-move-dir WORKTREE] [-answer-timeout D] [-state-dir DIR]
 //	agent-repld merge-queue -pause | -resume [-repository-dir DIR] [-answer-timeout D] [-state-dir DIR]
@@ -56,6 +56,12 @@ import (
 //     `-close-dir WORKTREE` names another workspace to close once it lands;
 //     `-cleanup-worktree` removes the worktree that has BRANCH checked out
 //     once it lands; `-compact-after` compacts the calling workspace then.
+//     `-before-merge TEXT` and `-after-merge TEXT` are the merge actions the
+//     MERGE WORKSPACE runs (agentrepl.v1.MergeWorkspaceAsync.merge_actions):
+//     the first before the landing, failing the merge if it fails, the
+//     second after it lands, never failing it. They are the only actions it
+//     runs: the calling workspace's own configured actions are never
+//     inherited.
 //
 // `-front` puts any of them at the FRONT of its queue once it is put in line:
 // ahead of every ordinary merge still waiting, never ahead of the one running.
@@ -253,6 +259,8 @@ func runMergeQueueVerb(ctx context.Context, args []string, dial mergeQueueDialer
 	closeDir := fs.String("close-dir", "", "with -async: another workspace, by its worktree, to close once the merge lands")
 	cleanupWorktree := fs.Bool("cleanup-worktree", false, "with -async: remove the worktree that has the branch checked out once the merge lands")
 	compactAfter := fs.Bool("compact-after", false, "with -async: compact the calling workspace's conversation once the branch lands")
+	beforeMerge := fs.String("before-merge", "", "with -async: a prompt the merge workspace runs before the landing; its failure fails the merge")
+	afterMerge := fs.String("after-merge", "", "with -async: a prompt the merge workspace runs after the branch lands; it never fails the merge")
 	front := fs.Bool("front", false, "with a merge: put it at the front of its queue, ahead of every ordinary merge waiting, never ahead of the one running")
 	versionPart := fs.String("version-part", "", "with a merge onto agent-repl's master: the version number it moves, minor or patch")
 	changelogLine := fs.String("changelog-line", "", "with -version-part: the one-line changelog entry the version's tag carries")
@@ -277,7 +285,7 @@ func runMergeQueueVerb(ctx context.Context, args []string, dial mergeQueueDialer
 	}
 	source, err := resolveMergeQueueSource(mergeQueueFlags{
 		oneShot: *oneShot, prMerged: *prMerged, async: *async, name: *name, branch: *branch, instruction: *instruction,
-		closeDir: *closeDir, cleanupWorktree: *cleanupWorktree, compactAfter: *compactAfter, wait: *wait, front: *front,
+		closeDir: *closeDir, cleanupWorktree: *cleanupWorktree, compactAfter: *compactAfter, beforeMerge: *beforeMerge, afterMerge: *afterMerge, wait: *wait, front: *front,
 		versionPart: *versionPart, changelogLine: *changelogLine,
 		evict: *evict, evictDir: *evictDir, moveUp: *moveUp, moveDown: *moveDown, moveDir: *moveDir,
 		pause: *pause, resume: *resume, repositoryDir: *repositoryDir,
@@ -320,6 +328,9 @@ type mergeQueueFlags struct {
 	instruction, closeDir string
 	cleanupWorktree       bool
 	compactAfter          bool
+	// beforeMerge and afterMerge are the merge workspace's own merge actions
+	// (commandfile.Entry.BeforeWSMerge, .PostprocessingPrompt).
+	beforeMerge, afterMerge string
 	// front puts the merge at the front of its queue (commandfile.Entry.Front).
 	front bool
 	// versionPart and changelogLine are the merge's version increment
@@ -383,8 +394,8 @@ func resolveMergeQueueRequest(f mergeQueueFlags) (mergeQueueSource, error) {
 		return mergeQueueSource{}, errors.New("-one-shot, -async, -evict, -evict-dir, -move-up, -move-down, -pause, -resume, -hold-rollouts and -release-rollouts each name a different request; give one")
 	case f.prMerged && !f.oneShot:
 		return mergeQueueSource{}, errors.New("-pr-merged goes with -one-shot: it closes the calling workspace")
-	case !f.async && (f.name != "" || f.branch != "" || f.instruction != "" || f.closeDir != "" || f.cleanupWorktree || f.compactAfter):
-		return mergeQueueSource{}, errors.New("-name, -branch, -instruction, -close-dir, -cleanup-worktree and -compact-after go with -async")
+	case !f.async && (f.name != "" || f.branch != "" || f.instruction != "" || f.closeDir != "" || f.cleanupWorktree || f.compactAfter || f.beforeMerge != "" || f.afterMerge != ""):
+		return mergeQueueSource{}, errors.New("-name, -branch, -instruction, -close-dir, -cleanup-worktree, -compact-after, -before-merge and -after-merge go with -async")
 	case f.async && f.wait:
 		return mergeQueueSource{}, errors.New("-wait waits on a merge in the calling workspace; an async merge reports back to its conversation instead")
 	case f.async && strings.TrimSpace(f.name) == "":
@@ -393,6 +404,10 @@ func resolveMergeQueueRequest(f mergeQueueFlags) (mergeQueueSource, error) {
 		return mergeQueueSource{}, errors.New("-async names the branch it lands: give -branch BRANCH")
 	case f.instruction != "" && strings.TrimSpace(f.instruction) == "":
 		return mergeQueueSource{}, errors.New("-instruction says how to prepare the branch")
+	case f.beforeMerge != "" && strings.TrimSpace(f.beforeMerge) == "":
+		return mergeQueueSource{}, errors.New("-before-merge is the prompt the merge workspace runs before the landing")
+	case f.afterMerge != "" && strings.TrimSpace(f.afterMerge) == "":
+		return mergeQueueSource{}, errors.New("-after-merge is the prompt the merge workspace runs after the landing")
 	case f.moveDir != "" && !f.moveUp && !f.moveDown:
 		return mergeQueueSource{}, errors.New("-move-dir goes with -move-up or -move-down: it names the workspace whose merge they move")
 	case f.repositoryDir != "" && !f.pause && !f.resume:
@@ -454,7 +469,8 @@ func resolveMergeQueueRequest(f mergeQueueFlags) (mergeQueueSource, error) {
 	// AN ASYNC MERGE lands the named branch in a hidden merge workspace.
 	name, branch, instruction := strings.TrimSpace(f.name), strings.TrimSpace(f.branch), strings.TrimSpace(f.instruction)
 	entry := commandfile.Entry{Type: commandfile.TypeMerge, AsyncName: name, Branch: branch, Instruction: instruction,
-		CleanupWorktree: f.cleanupWorktree, CompactAfter: f.compactAfter}
+		CleanupWorktree: f.cleanupWorktree, CompactAfter: f.compactAfter,
+		BeforeWSMerge: strings.TrimSpace(f.beforeMerge), PostprocessingPrompt: strings.TrimSpace(f.afterMerge)}
 	label := branch + ", async, in merge workspace " + name
 	if instruction != "" {
 		label += ", prepared as instructed"
@@ -472,6 +488,12 @@ func resolveMergeQueueRequest(f mergeQueueFlags) (mergeQueueSource, error) {
 	}
 	if f.compactAfter {
 		label += ", compacting this workspace once it lands"
+	}
+	if entry.BeforeWSMerge != "" {
+		label += ", running its before-merge prompt"
+	}
+	if entry.PostprocessingPrompt != "" {
+		label += ", running its after-merge prompt once it lands"
 	}
 	return mergeQueueSource{label: label, entry: entry}, nil
 }
