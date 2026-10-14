@@ -1969,6 +1969,39 @@ func TestKillSessionHangsUpAfterReadingAnEndedSessionsAnswer(t *testing.T) {
 	}
 }
 
+// TestKillSessionHangsUpAfterACallThatFailed covers a kill whose answer was
+// never read: the shim may have ended its session (a call bound that expired
+// mid-teardown), and such a shim exits only on the hang-up, so the daemon
+// hangs up before the failure returns to a caller that waits for the exit.
+func TestKillSessionHangsUpAfterACallThatFailed(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	f.killSessionErr = connect.NewError(connect.CodeDeadlineExceeded, errors.New("the call bound expired mid-teardown"))
+	log := dlog.NewTestLogger()
+	c := newClient(log, ids.WorkspaceID("ws-1"), uds, defaultBackoff, nil, nil)
+
+	// Act.
+	_, err := c.KillSession(context.Background(), &shimv1.KillSessionRequest{})
+
+	// Assert.
+	if err == nil {
+		t.Fatal("KillSession() answered no error, want the call's failure returned whole")
+	}
+	if n := openConns(c.conns); n != 0 {
+		t.Fatalf("%d connection(s) to the shim still open when the failed KillSession returned", n)
+	}
+	select {
+	case <-<-f.killHungUp:
+	case <-time.After(killHangUpWait):
+		t.Fatal("the shim never saw the hang-up")
+	}
+	rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "debug", Operation: "daemon.shimclient.kill_session", Message: "hung up on the shim after its KillSession; the shim exits on the hang-up"})
+	if !ok || rec.Context["answered"] != false {
+		t.Fatalf("the hang-up after a failed call was not recorded as unanswered: %+v", log.Records())
+	}
+}
+
 // TestKillSessionKeepsTheConnectionOfARefusedKill covers a kill the shim
 // refused: the shim goes on serving, so nothing is hung up on it.
 func TestKillSessionKeepsTheConnectionOfARefusedKill(t *testing.T) {

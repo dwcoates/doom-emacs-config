@@ -194,7 +194,12 @@ daemon READS that answer, the daemon hangs up the connection
 through `shimclient.dialedConns.hangUp`), and only then does the shim exit.
 Every caller that waits for the process afterwards (`Fleet.Stop`, the drain's
 sweep, the relaunch engine's stand-down) gets the hang-up from `KillSession`
-itself. A refused kill hangs nothing up: that shim goes on serving.
+itself. A refused kill hangs nothing up: that shim goes on serving. A kill
+whose CALL FAILED is hung up on too: its answer was never read, so the shim
+may have ended its session (a call bound that expired mid-teardown), and the
+unforced relaunch only waits for such a shim to leave
+(`rollout.awaitUnansweredStandDown`), so without the hang-up it would wait
+forever and the relaunch would defer behind it.
 
 An exit once the answer was merely written lost it: the daemon's
 `x/net/http2` transport wrote an RST_STREAM or a WINDOW_UPDATE to the dead
