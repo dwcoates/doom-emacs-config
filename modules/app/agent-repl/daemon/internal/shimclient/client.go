@@ -213,7 +213,7 @@ type client struct {
 	exitInfo    *ExitInfo
 
 	// processExiting reads whether a pid's process has begun exiting
-	// (procExiting); a field so a test stages a dying or a live shim.
+	// (procgroup.Exiting); a field so a test stages a dying or a live shim.
 	processExiting func(pid int) (bool, error)
 }
 
@@ -244,7 +244,7 @@ func newClient(log dlog.Logger, ws ids.WorkspaceID, udsPath string, back backoff
 		dead:            make(chan struct{}),
 		monitorCtx:      ctx,
 		cancelMonitor:   cancel,
-		processExiting:  procExiting,
+		processExiting:  procgroup.Exiting,
 	}
 }
 

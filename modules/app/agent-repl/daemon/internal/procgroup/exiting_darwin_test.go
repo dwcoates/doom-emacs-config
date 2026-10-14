@@ -1,6 +1,6 @@
 //go:build darwin
 
-package shimclient
+package procgroup
 
 import (
 	"os/exec"
@@ -26,7 +26,7 @@ func awaitExitUnreaped(t *testing.T, pid int) {
 	}
 }
 
-func TestProcExitingReadsARunningProcessAsNotExiting(t *testing.T) {
+func TestExitingReadsARunningProcessAsNotExiting(t *testing.T) {
 	// Arrange.
 	cmd := exec.Command("sleep", "60")
 	if err := cmd.Start(); err != nil {
@@ -35,15 +35,15 @@ func TestProcExitingReadsARunningProcessAsNotExiting(t *testing.T) {
 	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
 
 	// Act.
-	got, err := procExiting(cmd.Process.Pid)
+	got, err := Exiting(cmd.Process.Pid)
 
 	// Assert.
 	if err != nil || got {
-		t.Fatalf("procExiting(running) = %v, %v; want false", got, err)
+		t.Fatalf("Exiting(running) = %v, %v; want false", got, err)
 	}
 }
 
-func TestProcExitingReadsAnUnreapedExitAsExiting(t *testing.T) {
+func TestExitingReadsAnUnreapedExitAsExiting(t *testing.T) {
 	// Arrange: a child killed and exited, its reap not yet taken.
 	cmd := exec.Command("sleep", "60")
 	if err := cmd.Start(); err != nil {
@@ -57,15 +57,15 @@ func TestProcExitingReadsAnUnreapedExitAsExiting(t *testing.T) {
 	awaitExitUnreaped(t, pid)
 
 	// Act.
-	got, err := procExiting(pid)
+	got, err := Exiting(pid)
 
 	// Assert.
 	if err != nil || !got {
-		t.Fatalf("procExiting(zombie) = %v, %v; want true", got, err)
+		t.Fatalf("Exiting(zombie) = %v, %v; want true", got, err)
 	}
 }
 
-func TestProcExitingReadsAReapedProcessAsGone(t *testing.T) {
+func TestExitingReadsAReapedProcessAsGone(t *testing.T) {
 	// Arrange.
 	cmd := exec.Command("true")
 	if err := cmd.Run(); err != nil {
@@ -73,10 +73,10 @@ func TestProcExitingReadsAReapedProcessAsGone(t *testing.T) {
 	}
 
 	// Act.
-	got, err := procExiting(cmd.Process.Pid)
+	got, err := Exiting(cmd.Process.Pid)
 
 	// Assert.
 	if err != nil || !got {
-		t.Fatalf("procExiting(reaped) = %v, %v; want true", got, err)
+		t.Fatalf("Exiting(reaped) = %v, %v; want true", got, err)
 	}
 }

@@ -8,16 +8,29 @@ import (
 	"strconv"
 )
 
-// ReadState reads pid's state letter from /proc/<pid>/stat.
-func ReadState(pid int) (State, error) {
+// readStat reads pid's /proc/<pid>/stat line, answering gone for a pid with
+// no process.
+func readStat(pid int) (stat string, gone bool, err error) {
 	raw, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
 	if errors.Is(err, fs.ErrNotExist) {
+		return "", true, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("read /proc/%d/stat: %w", pid, err)
+	}
+	return string(raw), false, nil
+}
+
+// ReadState reads pid's state letter from /proc/<pid>/stat.
+func ReadState(pid int) (State, error) {
+	raw, gone, err := readStat(pid)
+	if gone {
 		return State{Frozen: true, Exited: true, Name: "gone"}, nil
 	}
 	if err != nil {
 		return State{}, err
 	}
-	line, err := ParseStat(string(raw))
+	line, err := ParseStat(raw)
 	if err != nil {
 		return State{}, fmt.Errorf("unparseable /proc/%d/stat: %w", pid, err)
 	}
@@ -69,4 +82,17 @@ func LiveMembers(pgid int) ([]Member, error) {
 		}
 	}
 	return live, nil
+}
+
+// Exiting answers whether pid's process has begun exiting: PF_EXITING, a
+// zombie or dead state, or gone, read from /proc/<pid>/stat.
+func Exiting(pid int) (bool, error) {
+	raw, gone, err := readStat(pid)
+	if gone {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return parseStatExiting(raw)
 }
