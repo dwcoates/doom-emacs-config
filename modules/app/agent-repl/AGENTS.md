@@ -928,7 +928,8 @@ park, failure or refusal it reports and stops, and never merges by hand.
 
 ## The merge queue's test gate and remediation contract
 
-Owner rulings, 2026-10-12. THIS IS THE INTENDED DESIGN. Do not change any rule
+Owner rulings, 2026-10-12, amended 2026-10-14 (end-to-end suites ride along
+with the system they run). THIS IS THE INTENDED DESIGN. Do not change any rule
 below without a conversation with the owner first; a change that only looks
 like an improvement still needs that conversation. Code:
 `daemon/internal/merge/suiteselect.go`, `gate.go`, `failingtests.go`,
@@ -939,28 +940,39 @@ like an improvement still needs that conversation. Code:
   `<state>/merge-logs/<lease>-tests-<round>.log`. There is no flake re-run.
 - **Only relevant systems run.** The suites are chosen from the paths the
   rebased branch changes against the tip it stands on:
-  - a change to one system runs only that system's own suites, its unit and
-    integration tests, and never an end-to-end suite:
-    - Emacs elisp (`lisp/` and the module-root `.el` files): `ert`;
-    - `daemon/`: `daemon`;
-    - the shim, the sidecar and the store: `shim`, `sidecar` and `store`;
+  - a change to one system runs that system's own suites, its unit and
+    integration tests, plus the end-to-end suites that run it for real. A
+    system's own suites run every other system as a mock ("A system's
+    integration tests run that system alone"), so only the end-to-end suites
+    test the systems together:
+    - Emacs elisp (`lisp/` and the module-root `.el` files): `ert` and
+      `e2e-emacs`;
+    - `daemon/`: `daemon`, `e2e` and `e2e-emacs`;
+    - the shim, the sidecar and the store: `shim`, `sidecar` and `store`,
+      each with `e2e` and `e2e-emacs`;
     - `agent-shim/shim-lock/`: `lock`, plus `shim`, whose integration tests
-      spawn the real lock helper;
-    - `webapp/`: `webapp` and `build-frontend-harness`;
+      spawn the real lock helper, and `e2e` and `e2e-emacs`;
+    - `webapp/`: `webapp`, `build-frontend-harness`, `e2e` and `e2e-emacs`;
     - the module's `bin/`: every `bin/` harness;
   - a change to something several systems share fans out to its consumers and
-    the cross-system suite:
-    - `proto/`: `proto`, `daemon`, `shim`, `webapp` and `e2e`;
-    - `agent-shim/logging/`: `logging`, `logging-density`, `daemon`, `store`,
-      `sidecar` and `e2e`;
+    the end-to-end suites:
+    - `proto/` (the contract and its Go helpers): every suite;
+    - `agent-shim/logging/`: `logging`, `logging-density`, and every consumer
+      of its Go half (`daemon`, `store`, `sidecar`, `lock`) and its TS half
+      (`shim`, `webapp`, `build-frontend-harness`), with `e2e` and
+      `e2e-emacs`;
     - `e2e/`: `e2e` and `e2e-emacs`, and `e2e/sandbox/` only `e2e-emacs`;
+  - two tests keep the map honest: every local module a Go suite's `go.mod`
+    replaces, and every tree a Vitest suite imports outside itself, must select
+    that suite (`daemon/internal/merge/suiteselect_test.go`);
   - the runner itself (`testrun/`, `bin/test-all.sh` and the two report
     scripts it delegates to) runs every suite;
-  - the briefs (`prompts/`) run `daemon`: the daemon composes every merge and
-    repair prompt from them and its suite pins their placeholders;
+  - the briefs (`prompts/`) run `daemon`, `e2e` and `e2e-emacs`: the daemon
+    composes every merge and repair prompt from them and its suite pins their
+    placeholders;
   - documentation runs nothing: the module's `docs/` and `plans/`, and every
     Markdown file at the module root, except `metaprompt.md`, which the shim's
-    own suite reads back and so runs `shim`;
+    own suite reads back and so runs `shim`, `e2e` and `e2e-emacs`;
   - outside the module, the paths a roster harness reads run exactly the
     suites that read them: the git hooks, the `.claude` scripts and the
     repository's `bin/` (each one's harness, plus `background-harness`,
