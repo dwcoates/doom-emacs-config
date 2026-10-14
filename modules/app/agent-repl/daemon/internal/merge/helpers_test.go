@@ -71,6 +71,9 @@ type fakeDB struct {
 	ledger        map[ids.WorkspaceID][]wsm.MergeLedgerEntry
 	queues        map[wsm.RepoKey][]wsm.MergeQueueEntry
 	paused        map[wsm.RepoKey]bool
+	// allQueuesErr fails AllMergeQueues, the read a workspace's take-back
+	// (AdoptWorkspace) starts from.
+	allQueuesErr error
 	// rolloutHold is the rollout hold; rolloutHoldErr fails its read.
 	rolloutHold    wsm.RolloutHold
 	rolloutHoldErr error
@@ -615,7 +618,6 @@ func (f *fakeDB) YieldMergeHead(_ context.Context, repo wsm.RepoKey, loser, winn
 	if li < 0 || wi < 0 || li >= wi || queue[li].State != wsm.MergeAdmitted || queue[wi].State != wsm.MergeAdmitted {
 		return fmt.Errorf("yield %s to %s: not two admitted entries in that order", loser, winner)
 	}
-	queue[li].State = wsm.MergeQueued
 	moving := queue[wi]
 	copy(queue[li+1:wi+1], queue[li:wi])
 	queue[li] = moving
@@ -728,6 +730,9 @@ func (f *fakeDB) MergeQueue(_ context.Context, repo wsm.RepoKey) ([]wsm.MergeQue
 func (f *fakeDB) AllMergeQueues(_ context.Context) (map[wsm.RepoKey][]wsm.MergeQueueEntry, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.allQueuesErr != nil {
+		return nil, f.allQueuesErr
+	}
 	out := map[wsm.RepoKey][]wsm.MergeQueueEntry{}
 	for repo, entries := range f.queues {
 		out[repo] = append([]wsm.MergeQueueEntry(nil), entries...)
@@ -1425,6 +1430,8 @@ type fakeQueue struct {
 	db *fakeDB
 
 	submissions []promptqueue.Submission
+	// submitCtxErrs is the context error each submission was made under.
+	submitCtxErrs []error
 	// onSubmit, when set, is told each submission as it is made, outside the
 	// lock, standing for what the session does while the turn runs.
 	onSubmit    func(sub promptqueue.Submission)
@@ -1465,9 +1472,10 @@ func (q *fakeQueue) ColdGateAnswered(context.Context, ids.WorkspaceID, promptque
 // OnVendorServes is a no-op: no merge scenario stands a vendor block.
 func (q *fakeQueue) OnVendorServes(ids.WorkspaceID) {}
 
-func (q *fakeQueue) Submit(_ context.Context, sub promptqueue.Submission) (promptqueue.Disposition, error) {
+func (q *fakeQueue) Submit(ctx context.Context, sub promptqueue.Submission) (promptqueue.Disposition, error) {
 	q.mu.Lock()
 	q.submissions = append(q.submissions, sub)
+	q.submitCtxErrs = append(q.submitCtxErrs, ctx.Err())
 	hook := q.onSubmit
 	q.mu.Unlock()
 	if hook != nil {
@@ -2020,24 +2028,18 @@ func (r *fakeRunner) runLines(ctx context.Context, dir string, argv []string, on
 	return run.Output, run.Code, run.Err
 }
 
-// fakeLoad is the host's load, as the gate governor samples it.
-type fakeLoad struct {
-	mu     sync.Mutex
-	sample cpugov.Sample
+// fakePower is the host's power source, which the governor never reads
+// itself here: the harness installs every reading directly (harness.power).
+type fakePower struct{}
+
+func (fakePower) Power() (cpugov.Power, error) {
+	return cpugov.PowerUnknown, errors.New("the harness installs the power source; nothing reads it")
 }
 
-func (f *fakeLoad) Ticks() (cpugov.Ticks, error) {
-	return cpugov.Ticks{CPUs: 16}, nil
-}
-
-// load stands the host at a fraction of its 16 processors and has the
-// governor decide on it.
-func (h *harness) load(fraction float64) {
-	h.sampler.mu.Lock()
-	h.sampler.sample = cpugov.Sample{Utilization: fraction, CPUs: 16}
-	sample := h.sampler.sample
-	h.sampler.mu.Unlock()
-	h.governor.Observe(sample)
+// power stands the host on a power source, which the governor tells the
+// orchestrator.
+func (h *harness) power(p cpugov.Power) {
+	h.governor.ObservePower(p)
 }
 
 // harness is one orchestrator with every fake it was built from.
@@ -2126,7 +2128,6 @@ type harness struct {
 	// governor is the gate governor, sampling an idle host unless a test says
 	// otherwise (h.load).
 	governor *cpugov.Governor
-	sampler  *fakeLoad
 	// seq is the shared monotonic sequence both the feed and the git fakes
 	// stamp their calls with, so an ordering between two subsystems is asserted
 	// on the real order.
@@ -2294,13 +2295,14 @@ func newHarness(t *testing.T) *harness {
 	h.briefs[BriefConflictResolve] = []string{"conflict_commit", "source_branch", "worktree_dir", "target_branch", "conflicted_files"}
 	h.briefs[BriefTestFailureResolve] = []string{"source_branch", "worktree_dir", "target_branch", "failing_suites", "archive_path", "failure_tail", "attempt", "max_attempts", "escalation_file", "escalation_marker", "failing_tests_file"}
 
-	h.sampler = &fakeLoad{sample: cpugov.Sample{Utilization: 0, CPUs: 16}}
-	governor, err := cpugov.New(cpugov.DefaultConfig(), h.sampler, h.clock, h.logs.Global())
+	governor, err := cpugov.New(cpugov.DefaultConfig(), fakePower{}, h.logs.Global())
 	if err != nil {
 		t.Fatalf("building the gate governor: %v", err)
 	}
 	h.governor = governor
-	h.governor.Observe(h.sampler.sample)
+	// THE HARNESS'S HOST IS ON AC POWER, so its queues race their top two;
+	// a test of the battery window says so (harness.power).
+	h.governor.ObservePower(cpugov.PowerAC)
 	h.repoRoot = t.TempDir()
 	h.script = filepath.Join(h.stateDir, "test-all.sh")
 	if err := os.WriteFile(h.script, []byte("#!/usr/bin/env bash\n"), 0o644); err != nil {

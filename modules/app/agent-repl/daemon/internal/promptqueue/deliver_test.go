@@ -417,6 +417,21 @@ func TestDeliveringAPromptStampsTheSessionsEngagement(t *testing.T) {
 	}
 }
 
+func TestTheEngagementStampOutlivesASubmitterThatLeft(t *testing.T) {
+	// Arrange: the delivery happened, and its submitter has since left.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act
+	h.q.touchEngagement(ctx, "ws-1", dlog.NewTestLogger())
+
+	// Assert
+	if h.db.engagements != 1 || h.db.engagementCtxErr != nil {
+		t.Fatalf("stamps = %d written under %v, want one written under a live context", h.db.engagements, h.db.engagementCtxErr)
+	}
+}
+
 // TestDeliveringAPromptTellsTheRosterATurnIsRunning pins the roster's turn
 // fact: nothing on the shim's streams says a turn was accepted, so a roster
 // left to infer it reads `ready` for a workspace whose turn is running.

@@ -775,7 +775,10 @@ func (o *orchestrator) pumpOnce(ctx context.Context, repo wsm.RepoKey) (bool, er
 	}
 	if promoted != nil {
 		// A MERGE PROMOTED FROM BEHIND THE HEAD RUNS ON ITS OWN GOROUTINE,
-		// already started; the pump holds the slot for it until it ends.
+		// already started; the pump holds the slot for it until it ends. The
+		// merge now behind it joins the race at once, as behind an admitted
+		// head (run.admit).
+		o.extendChain(context.WithoutCancel(ctx), repo)
 		<-promoted.finished
 		return true, nil
 	}

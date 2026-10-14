@@ -64,11 +64,9 @@ type run struct {
 	lease wsm.Lease
 	// joined reports that the run is a member of its repository's chain
 	// (chain.go), which its one release (releaseSlot) ends. speculative
-	// reports that it stands BEHIND the head: it rebases onto the merge ahead
-	// of it and tests ahead of its turn, and never moves the target until the
-	// pump promotes it. tip is the branch's tip as this run last settled it in
-	// the chain, empty until its first rebase settles: what the merge behind it
-	// rebases onto. All three are guarded by the orchestrator's mutex.
+	// reports that it stands BEHIND the head: it rebases onto the target's tip
+	// and tests ahead of its turn, and never moves the target until the
+	// pump promotes it. Both are guarded by the orchestrator's mutex.
 	joined      bool
 	speculative bool
 	// landing reports the run began committing: nothing overtakes it from
@@ -84,7 +82,6 @@ type run struct {
 	// claimedOn is the base the run last claimed the race to land on, so it
 	// claims once per base (race.go).
 	claimedOn string
-	tip       string
 	// chainBase is the commit the branch's OWN commits stand on: the tip its
 	// last rebase replayed them onto, empty before its first. A rebase replays
 	// exactly chainBase..branch, so a merge never carries the commits of a
@@ -548,6 +545,9 @@ func (r *run) admit(ctx context.Context) error {
 	o, ws := r.o, r.ws
 	log := o.log(ctx, ws)
 	o.register(r)
+	// THE MERGE BEHIND A HEAD JOINS AT ONCE (race.go): it races the head from
+	// master's tip, so it waits on none of the head's steps.
+	o.extendChain(context.WithoutCancel(ctx), r.repo)
 
 	subject, err := o.resolveSubject(ctx, r)
 	if err != nil {
@@ -797,10 +797,6 @@ func (r *run) end(ctx context.Context, err error) {
 	// boot to resume, whatever error its step returned on the way out.
 	if r.exiting() {
 		r.suspend(settle, err)
-		return
-	}
-	if winner, lost := raceLostOf(ctx); lost {
-		r.yieldTerminal(settle, winner)
 		return
 	}
 	if cause, abandoned := abandonCauseOf(ctx); abandoned {
@@ -1078,7 +1074,11 @@ func (r *run) submit(ctx context.Context, turn ids.TurnID, text string, origin c
 // submit sends one merge prompt to WS's session as TURN and waits for that
 // turn to end.
 func (o *orchestrator) submit(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, text string, origin conversationv1.PromptOrigin) (wsm.TurnClose, error) {
-	disposition, err := o.deps.Queue.Submit(ctx, promptqueue.Submission{
+	// THE HAND-OFF IS WHOLE. A merge stopped mid-step (a race to land it
+	// lost, a pause, the daemon's exit) lets its turn live on in the session
+	// and reattaches to it on resume, so the delivery it began is never cut
+	// halfway: only the wait for the turn's end is the run's to cancel.
+	disposition, err := o.deps.Queue.Submit(context.WithoutCancel(ctx), promptqueue.Submission{
 		WS: ws, Turn: turn, Said: saidText(text), Origin: origin,
 	})
 	if err != nil {
