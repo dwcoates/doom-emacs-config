@@ -1364,7 +1364,7 @@ func TestRunWatchedKillsALateCommandAtItsLimit(t *testing.T) {
 	}
 }
 
-func TestScriptDispatchStartsItsCommandThroughBoundedCommand(t *testing.T) {
+func TestScriptDispatchRunsItsCommandThroughTheSharedBoundedRun(t *testing.T) {
 	// Arrange
 	src, err := os.ReadFile("investigation.go")
 	if err != nil {
@@ -1376,8 +1376,8 @@ func TestScriptDispatchStartsItsCommandThroughBoundedCommand(t *testing.T) {
 	body := rest[:strings.Index(rest, "\n}\n")]
 
 	// Assert
-	if !strings.Contains(body, "boundedCommand(") || strings.Contains(body, "exec.CommandContext") {
-		t.Fatal("ScriptDispatch starts its command by hand; want boundedCommand")
+	if !strings.Contains(body, "command.Bounded(") || !strings.Contains(body, "command.Outcome(") || strings.Contains(body, "exec.CommandContext") {
+		t.Fatal("ScriptDispatch starts or judges its command by hand; want command.Bounded and command.Outcome")
 	}
 }
 
@@ -1396,8 +1396,8 @@ func TestBoundedRunsShareOneOutcome(t *testing.T) {
 
 	// Assert
 	for _, name := range []string{"runBounded", "runWatched"} {
-		if b := body(name); !strings.Contains(b, "commandOutcome(") || !strings.Contains(b, "boundedCommand(") || strings.Contains(b, "exec.CommandContext") {
-			t.Errorf("%s forms its command or its outcome by hand; want boundedCommand and commandOutcome", name)
+		if b := body(name); !strings.Contains(b, "commandOutcome(") || !strings.Contains(b, "command.Bounded(") || strings.Contains(b, "exec.CommandContext") {
+			t.Errorf("%s forms its command or its outcome by hand; want command.Bounded and commandOutcome", name)
 		}
 	}
 }

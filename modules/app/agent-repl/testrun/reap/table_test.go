@@ -47,9 +47,10 @@ func TestOutput(t *testing.T) {
 		want    string
 		wantErr string
 	}{
-		{name: "answers what the command printed", bound: exitWait, command: []string{"/bin/sh", "-c", "echo $LC_ALL"}, want: "C\n"},
-		{name: "fails a command that fails", bound: exitWait, command: []string{"/usr/bin/false"}, wantErr: "/usr/bin/false : exit status 1"},
-		{name: "fails a command that does not answer within its bound", bound: 50 * time.Millisecond, command: []string{"/bin/sleep", "300"}, wantErr: "/bin/sleep did not answer within 50ms"},
+		{name: "answers what the command printed to stdout", bound: exitWait, command: []string{"/bin/sh", "-c", "echo $LC_ALL; echo noise >&2"}, want: "C\n"},
+		{name: "fails a command that fails", bound: exitWait, command: []string{"/usr/bin/false"}, wantErr: "/usr/bin/false: exit status 1"},
+		{name: "fails a command that fails with what it said", bound: exitWait, command: []string{"/bin/sh", "-c", "echo refused >&2; exit 3"}, wantErr: "/bin/sh -c echo refused >&2; exit 3: exit status 3: refused"},
+		{name: "fails a command that does not answer within its bound", bound: 50 * time.Millisecond, command: []string{"/bin/sleep", "300"}, wantErr: "/bin/sleep 300 did not answer within 50ms: context deadline exceeded"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
