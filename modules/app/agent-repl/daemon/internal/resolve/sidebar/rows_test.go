@@ -191,109 +191,96 @@ func TestSelectingAWorkspaceLeavesAnotherRowsAttentionMarker(t *testing.T) {
 	}
 }
 
-func TestTheWhenColumnCountsFromTheLastTurnEnd(t *testing.T) {
+func TestTheWhenColumnCountsTheRunningTurnFromTheFootersClock(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+	started := epoch.Add(time.Hour)
+
+	// Act.
+	r.SetTurn(theWS, &footer.TurnStarted{At: started, Act: footer.ActPrompt})
+
+	// Assert: the row counts from the very instant the strip's clock does.
+	running := onlyRow(t, r).GetWhen().GetTurnRunning()
+	clock := r.Resolver.(*fanned).footer.TurnClock(theWS)
+	if running == nil || running.GetStartedAtMs() != started.UnixMilli() || running.GetStartedAtMs() != clock.GetTurnStartedAtMs() {
+		t.Fatalf("when = %v, footer clock = %v, want turn_running at the clock's start %d", onlyRow(t, r).GetWhen(), clock, started.UnixMilli())
+	}
+}
+
+func TestTheWhenColumnReadsNoTurnRunning(t *testing.T) {
 	tests := []struct {
-		name string
-		// record shapes the durable record; told, when set, is the close the
-		// door tells the roster live.
-		record func(*wsm.Workspace)
-		told   *time.Time
-		want   time.Time
+		name    string
+		record  func(*wsm.Workspace)
+		arrange func(t *testing.T, r sidebarResolver)
 	}{
+		{name: "a workspace that has never run a turn", record: func(*wsm.Workspace) {}, arrange: func(*testing.T, sidebarResolver) {}},
+		{name: "a workspace with no creation time", record: func(ws *wsm.Workspace) { ws.CreatedAt = time.Time{} }, arrange: func(*testing.T, sidebarResolver) {}},
+		{name: "a finished turn", record: func(*wsm.Workspace) {}, arrange: func(t *testing.T, r sidebarResolver) { finished(t, r) }},
 		{
-			name:   "the durable last turn end",
-			record: func(ws *wsm.Workspace) { ws.LastTurnEndedAt = at(time.Hour) },
-			want:   epoch.Add(time.Hour),
-		},
-		{
-			name:   "a live close the record has not caught up to",
-			record: func(ws *wsm.Workspace) { ws.LastTurnEndedAt = at(time.Hour) },
-			told:   at(2 * time.Hour),
-			want:   epoch.Add(2 * time.Hour),
-		},
-		{
-			name:   "a live close on a record that has never seen one",
+			// A turn the shim link has not been seen for has no clock yet,
+			// exactly as the strip draws none.
+			name:   "an accepted turn before its link is seen",
 			record: func(*wsm.Workspace) {},
-			told:   at(time.Hour),
-			want:   epoch.Add(time.Hour),
+			arrange: func(_ *testing.T, r sidebarResolver) {
+				r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+			},
 		},
 		{
-			name:   "a durable close newer than the live one",
-			record: func(ws *wsm.Workspace) { ws.LastTurnEndedAt = at(2 * time.Hour) },
-			told:   at(time.Hour),
-			want:   epoch.Add(2 * time.Hour),
-		},
-		{
-			// REGRESSION LOCK: a turn START moves LastActivityAt, and the
-			// column once reset to zero the moment work began.
-			name: "a later turn start",
+			// REGRESSION LOCK: the column no longer counts from a turn end,
+			// an activity or a selection.
+			name: "a record with a turn end, an activity and a selection",
 			record: func(ws *wsm.Workspace) {
 				ws.LastTurnEndedAt = at(time.Hour)
 				ws.LastActivityAt = at(2 * time.Hour)
+				ws.LastSelectedAt = at(3 * time.Hour)
 			},
-			want: epoch.Add(time.Hour),
-		},
-		{
-			// REGRESSION LOCK: the column once showed LastSelectedAt, which
-			// reset on every SelectWorkspace and made the age jump on mere
-			// navigation.
-			name: "a later selection",
-			record: func(ws *wsm.Workspace) {
-				ws.LastTurnEndedAt = at(time.Hour)
-				ws.LastSelectedAt = at(2 * time.Hour)
-			},
-			want: epoch.Add(time.Hour),
+			arrange: func(*testing.T, sidebarResolver) {},
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
-			r, _ := newResolver(t)
-			ws := workspace("w1", "one")
+			ws := workspace(string(theWS), "one")
 			tc.record(&ws)
+			r := arrange(t, ws)
 
 			// Act.
-			r.SetRegistry(registry(ws))
-			if tc.told != nil {
-				r.SetTurnClosedAt(theWS, *tc.told)
-			}
+			tc.arrange(t, r)
 
 			// Assert.
-			when := onlyRow(t, r).GetWhen()
-			if when.GetTurnEnded() == nil || when.GetTurnEnded().GetAtMs() != tc.want.UnixMilli() {
-				t.Fatalf("when = %v, want the turn_ended arm at %d", when, tc.want.UnixMilli())
+			if when := onlyRow(t, r).GetWhen(); when.GetNoTurnRunning() == nil {
+				t.Fatalf("when = %v, want no_turn_running", when)
 			}
 		})
 	}
 }
 
-func TestTheRosterKeepsTheLatestLiveTurnClose(t *testing.T) {
-	// Arrange.
-	r, _ := newResolver(t)
-	r.SetRegistry(registry(workspace("w1", "one")))
-	r.SetTurnClosedAt(theWS, *at(2 * time.Hour))
+func TestTheWhenColumnStartsCountingOnceTheTurnsLinkIsSeen(t *testing.T) {
+	// Arrange: the turn is accepted before the shim link is seen, so the
+	// strip's clock has not started.
+	r := arrange(t)
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 
-	// Act — an older close told after a newer one.
-	r.SetTurnClosedAt(theWS, *at(time.Hour))
+	// Act.
+	live(t, r)
 
-	// Assert.
-	if got := onlyRow(t, r).GetWhen().GetTurnEnded().GetAtMs(); got != epoch.Add(2*time.Hour).UnixMilli() {
-		t.Fatalf("when = %d, want the newer close kept", got)
+	// Assert: the clock's start reaches the roster when the strip's does.
+	if got := onlyRow(t, r).GetWhen().GetTurnRunning().GetStartedAtMs(); got != epoch.UnixMilli() {
+		t.Fatalf("when = %v, want turn_running from %d", onlyRow(t, r).GetWhen(), epoch.UnixMilli())
 	}
 }
 
-func TestATurnStartWithNoTurnEndFallsBackToCreated(t *testing.T) {
-	// Arrange — the first turn is running: activity, but no close yet.
-	r, _ := newResolver(t)
-	ws := workspace("w1", "one")
-	ws.LastActivityAt = at(time.Hour)
+func TestTheWhenColumnStopsCountingWhenTheTurnEnds(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 
 	// Act.
-	r.SetRegistry(registry(ws))
+	r.SetTurnEnded(theWS, wsm.CloseCompleted)
 
 	// Assert.
-	if got := onlyRow(t, r).GetWhen().GetCreated().GetAtMs(); got != epoch.UnixMilli() {
-		t.Fatalf("when = %v, want the creation instant", onlyRow(t, r).GetWhen())
+	if when := onlyRow(t, r).GetWhen(); when.GetNoTurnRunning() == nil {
+		t.Fatalf("when = %v, want no_turn_running once the turn ended", when)
 	}
 }
 
@@ -358,49 +345,36 @@ func millis(t *time.Time) *int64 {
 	return &ms
 }
 
-func TestMergedBeatsTheLastTurnEndInTheWhenColumn(t *testing.T) {
+func TestMergedBeatsARunningTurnInTheWhenColumn(t *testing.T) {
 	// Arrange.
-	r, _ := newResolver(t)
-	ws := workspace("w1", "one")
-	ws.LastTurnEndedAt = at(0)
+	ws := workspace(string(theWS), "one")
 	ws.MergedAt = at(time.Hour)
+	r := live(t, arrange(t, ws))
 
 	// Act.
-	r.SetRegistry(registry(ws))
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 
 	// Assert: that the workspace is done is the more interesting fact.
-	row := rowFor(rosterwalk.MergedRows(latest(t, r)), "w1")
+	row := rowFor(rosterwalk.MergedRows(latest(t, r)), string(theWS))
 	if got := row.GetWhen().GetMerged().GetAtMs(); got != epoch.Add(time.Hour).UnixMilli() {
 		t.Fatalf("when = %v, want the merge instant", row.GetWhen())
 	}
 }
 
-func TestTheWhenColumnFallsBackToCreatedForANeverActiveWorkspace(t *testing.T) {
-	// Arrange — never merged, never active, but a registered workspace always
-	// has a creation time.
-	r, _ := newResolver(t)
-	r.SetRegistry(registry(workspace("w1", "one")))
-
-	// Assert.
-	got := onlyRow(t, r).GetWhen().GetCreated().GetAtMs()
-	if got != epoch.UnixMilli() {
-		t.Fatalf("when = %d, want the creation instant", got)
-	}
-}
-
-func TestTheWhenColumnIsEmptyWithGenuinelyNoTimeToShow(t *testing.T) {
-	// Arrange — a record with no merge, no activity and no creation time: the
-	// one case an empty column is correct.
-	r, _ := newResolver(t)
-	ws := workspace("w1", "one")
-	ws.CreatedAt = time.Time{}
+func TestHiddenBeatsARunningTurnInTheWhenColumn(t *testing.T) {
+	// Arrange.
+	ws := workspace(string(theWS), "one")
+	ws.Hidden = true
+	ws.HiddenAt = at(time.Hour)
+	r := live(t, arrange(t, ws))
 
 	// Act.
-	r.SetRegistry(registry(ws))
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 
-	// Assert: an unset oneof is an empty column, never "0ms ago".
-	if got := onlyRow(t, r).GetWhen().GetShown(); got != nil {
-		t.Fatalf("when = %v, want an unset oneof", got)
+	// Assert: a hidden row counts from its hide.
+	row := latest(t, r).GetHidden().GetRows().GetRows()[0]
+	if got := row.GetWhen().GetHidden().GetAtMs(); got != epoch.Add(time.Hour).UnixMilli() {
+		t.Fatalf("when = %v, want the hide instant", row.GetWhen())
 	}
 }
 
