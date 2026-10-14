@@ -65,3 +65,16 @@ func TestRunningThreadsOfAGoneProcessIsESRCH(t *testing.T) {
 		t.Fatalf("runningThreads(gone) = %v, want ESRCH", err)
 	}
 }
+
+// TestThreadsHaltedOfARunningThreadAwaitsTheCPU pins the darwin reading: a
+// thread the kernel reports running is on a CPU or a run queue, so a process
+// with one is not halted and awaits only the CPU.
+func TestThreadsHaltedOfARunningThreadAwaitsTheCPU(t *testing.T) {
+	// Act: the asking thread runs while it asks.
+	halted, awaitingCPU, name, err := threadsHalted(os.Getpid())
+
+	// Assert
+	if err != nil || halted || !awaitingCPU || name == "" {
+		t.Fatalf("threadsHalted(self) = %v, %v, %q, %v; want not halted, awaiting the CPU, named", halted, awaitingCPU, name, err)
+	}
+}
