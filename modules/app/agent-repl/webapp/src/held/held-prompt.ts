@@ -790,12 +790,8 @@ export function drawHeldPromptActions(spec: ActionSpec): HTMLElement {
     release.classList.add("queued-action-unlikely");
   }
   actions.appendChild(release);
-  // EDIT sits between Send now and Cancel (owner spec, 2026-09-23).
+  // EDIT follows Send now (owner spec, 2026-09-23).
   actions.appendChild(editButton(spec));
-  // The drop is LABELLED "Cancel" (owner ruling, 2026-09-23): to the reader it
-  // takes back a prompt they sent, and the text comes back to the composer. The
-  // wire verb is still `drop`, and so are the hooks it is found by.
-  actions.appendChild(actionButton("drop", "Cancel", spec));
   if (spec.accept) actions.appendChild(actionButton("accept", "Accept", spec));
   // DAEMON-OFFERED: the fold stands exactly while the entry carries
   // `fold_above` (FoldHeldPrompt).
@@ -803,6 +799,12 @@ export function drawHeldPromptActions(spec: ActionSpec): HTMLElement {
     actions.appendChild(foldAboveButton(spec, spec.foldAbove));
   if (spec.classifierForm !== null)
     actions.appendChild(updateClassifierButton(spec.classifierForm));
+  // The drop is LABELLED "Cancel" (owner ruling, 2026-09-23): to the reader it
+  // takes back a prompt they sent, and the text comes back to the composer. The
+  // wire verb is still `drop`, and so are the hooks it is found by. It is
+  // ALWAYS THE LAST control (owner request, 2026-10-13), the one destructive
+  // action at the row's far end.
+  actions.appendChild(actionButton("drop", "Cancel", spec));
   return actions;
 }
 
