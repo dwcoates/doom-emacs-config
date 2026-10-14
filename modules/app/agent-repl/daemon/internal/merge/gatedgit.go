@@ -187,6 +187,30 @@ func (g *gatedGit) FastForward(ctx context.Context, dir, commit string) error {
 	return g.inner.FastForward(ctx, dir, commit)
 }
 
+func (g *gatedGit) TagsMerged(ctx context.Context, dir, commit string) ([]string, error) {
+	if err := g.enter("TagsMerged"); err != nil {
+		return nil, err
+	}
+	defer g.leave()
+	return g.inner.TagsMerged(ctx, dir, commit)
+}
+
+func (g *gatedGit) TagsAt(ctx context.Context, dir, commit string) ([]string, error) {
+	if err := g.enter("TagsAt"); err != nil {
+		return nil, err
+	}
+	defer g.leave()
+	return g.inner.TagsAt(ctx, dir, commit)
+}
+
+func (g *gatedGit) CreateAnnotatedTag(ctx context.Context, dir, name, commit, message string) error {
+	if err := g.enter("CreateAnnotatedTag"); err != nil {
+		return err
+	}
+	defer g.leave()
+	return g.inner.CreateAnnotatedTag(ctx, dir, name, commit, message)
+}
+
 func (g *gatedGit) IsAncestor(ctx context.Context, dir, ancestor, descendant string) (bool, error) {
 	if err := g.enter("IsAncestor"); err != nil {
 		return false, err
