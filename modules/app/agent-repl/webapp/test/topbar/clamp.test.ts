@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { REVEAL_MARGIN_PX, clampReveal, type Rect } from "../../src/topbar/clamp.js";
+import { REVEAL_MARGIN_PX, clampLeft, clampReveal, heightBelow, type Rect } from "../../src/topbar/clamp.js";
 
 const rect = (left: number, top: number, width: number, height: number): Rect => ({
   left,
@@ -50,5 +50,49 @@ describe("clampReveal", () => {
   it("never answers a negative height, however short the window", () => {
     expect(clampReveal(anchorAt(100, 60), rect(0, 0, 200, 300), { width: 1000, height: 10 })
       .maxHeight).toBe(0);
+  });
+});
+
+describe("clampLeft", () => {
+  it("keeps the preferred edge when the box fits", () => {
+    expect(clampLeft(100, 200, VIEWPORT)).toBe(100);
+  });
+
+  it("slides left only as far as the right edge demands", () => {
+    expect(clampLeft(900, 200, VIEWPORT)).toBe(1000 - REVEAL_MARGIN_PX - 200);
+  });
+
+  it("holds a box one margin clear of the left edge", () => {
+    expect(clampLeft(0, 200, VIEWPORT)).toBe(REVEAL_MARGIN_PX);
+  });
+
+  it("overflows right rather than left for a box wider than the viewport", () => {
+    expect(clampLeft(400, 1200, VIEWPORT)).toBe(REVEAL_MARGIN_PX);
+  });
+});
+
+describe("heightBelow", () => {
+  it("answers what is left of the window below the top, less the margin", () => {
+    expect(heightBelow(100, VIEWPORT)).toBe(800 - 100 - REVEAL_MARGIN_PX);
+  });
+
+  it("never answers a negative height", () => {
+    expect(heightBelow(900, VIEWPORT)).toBe(0);
+  });
+});
+
+describe("clampReveal shares the clamp arithmetic", () => {
+  it("answers clampLeft over the anchor's left and heightBelow under the anchor", () => {
+    // ARRANGE
+    const anchor = anchorAt(950, 40);
+    const reveal = rect(0, 0, 300, 900);
+    // ACT
+    const placement = clampReveal(anchor, reveal, VIEWPORT);
+    // ASSERT
+    expect(placement).toEqual({
+      left: clampLeft(anchor.left, reveal.width, VIEWPORT),
+      top: anchor.bottom,
+      maxHeight: heightBelow(anchor.bottom, VIEWPORT),
+    });
   });
 });
