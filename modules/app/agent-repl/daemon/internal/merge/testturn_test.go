@@ -85,12 +85,7 @@ func (w *turnWorld) holder() *run {
 
 // recorded reports whether an INFO test-turn record holding text names ws.
 func (w *turnWorld) recorded(ws ids.WorkspaceID, text string) bool {
-	for _, r := range w.h.logs.Records() {
-		if r.Level == "info" && r.Operation == "daemon.merge.test_turn" && strings.Contains(r.Message, text) && r.Context["workspace"] == string(ws) {
-			return true
-		}
-	}
-	return false
+	return loggedLike(w.h, logLike{level: "info", op: "daemon.merge.test_turn", text: text, context: map[string]string{"workspace": string(ws)}})
 }
 
 func TestAMergeTakesAFreeTestTurnAtOnce(t *testing.T) {
