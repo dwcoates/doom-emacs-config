@@ -127,12 +127,12 @@ func promptProse(message map[string]any) (string, bool) {
 
 // keepaliveScope is the per-file memory the rule needs.
 type keepaliveScope struct {
-	records map[string]struct{}
+	records lineage
 	prompts map[string]struct{}
 }
 
 func newKeepaliveScope() keepaliveScope {
-	return keepaliveScope{records: map[string]struct{}{}, prompts: map[string]struct{}{}}
+	return keepaliveScope{records: newLineage(), prompts: map[string]struct{}{}}
 }
 
 // empty reports that no keep-alive has been seen, so only a line naming the
@@ -155,10 +155,10 @@ func (s keepaliveScope) classify(f keepaliveFacts) bool {
 	case f.kind == "user" && f.prompt:
 		keepalive = f.marked
 	case f.parent != "":
-		_, keepalive = s.records[f.parent]
+		keepalive = s.records.has(f.parent)
 	}
-	if keepalive && f.uuid != "" {
-		s.records[f.uuid] = struct{}{}
+	if keepalive {
+		s.records.add(f.uuid)
 	}
 	return keepalive
 }

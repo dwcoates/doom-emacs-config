@@ -116,7 +116,7 @@ func (c *Converter) contextCompacted(record map[string]any, at Attribution, env 
 		// (attachCompactSummary).
 		compacted.Summary = &conversationv1.AgentResponseProse{Markdown: NoSummaryWritten}
 		c.pendingCut = &pendingCompaction{boundaryUUID: env.uuid, agent: agent, compacted: compacted,
-			descendants: map[string]struct{}{env.uuid: {}}}
+			descendants: newLineage(env.uuid)}
 		c.log.With(at.ctxFor("context-compacted")).With(logging.Context{UpsertKey: SessionKey("context_cut", env.uuid)}).
 			Log("compact boundary's summary is not in its batch; the cut is drawn with the stated placeholder %q, and the summary descending from this boundary supersedes it when it arrives (records after it in the batch: %d)", NoSummaryWritten, len(following))
 	} else {
@@ -181,10 +181,9 @@ type pendingCompaction struct {
 	boundaryUUID string
 	agent        string
 	compacted    *conversationv1.ContextCompacted
-	// descendants are the uuids of the boundary and of every record since it
-	// whose parent is one of them: the records the summary's parent link may
-	// name.
-	descendants map[string]struct{}
+	// descendants are the boundary and every record since it that descends
+	// from it: the records the summary's parent link may name.
+	descendants lineage
 }
 
 // extend records RECORD as one of the boundary's descendants when its parent
@@ -193,16 +192,13 @@ func (p *pendingCompaction) extend(record map[string]any) {
 	if p == nil {
 		return
 	}
-	if _, ok := p.descendants[str(record["parentUuid"])]; ok && str(record["uuid"]) != "" {
-		p.descendants[str(record["uuid"])] = struct{}{}
-	}
+	p.descendants.extend(str(record["uuid"]), str(record["parentUuid"]))
 }
 
 // descendsFrom reports whether RECORD's parent is one of the boundary's
 // descendants.
 func (p *pendingCompaction) descendsFrom(record map[string]any) bool {
-	_, ok := p.descendants[str(record["parentUuid"])]
-	return ok
+	return p.descendants.has(str(record["parentUuid"]))
 }
 
 // attachCompactSummary supersedes a placeholder cut with the summary that
@@ -255,7 +251,7 @@ func (c *Converter) attachCompactSummary(record map[string]any, at Attribution) 
 // envelope's flag and never by its type: it is the harness's own text standing in
 // for the discarded history, not the user's prompt.
 func compactSummaryAfter(boundaryUUID string, following []map[string]any) map[string]any {
-	chain := &pendingCompaction{boundaryUUID: boundaryUUID, descendants: map[string]struct{}{boundaryUUID: {}}}
+	chain := newLineage(boundaryUUID)
 	for i, record := range following {
 		if record == nil {
 			// An unparsable line names no parent and is no summary.
@@ -265,10 +261,10 @@ func compactSummaryAfter(boundaryUUID string, following []map[string]any) map[st
 			return nil
 		}
 		adjacentOrphan := i == 0 && str(record["parentUuid"]) == ""
-		if summaryProse(record) != "" && (adjacentOrphan || chain.descendsFrom(record)) {
+		if summaryProse(record) != "" && (adjacentOrphan || chain.has(str(record["parentUuid"]))) {
 			return record
 		}
-		chain.extend(record)
+		chain.extend(str(record["uuid"]), str(record["parentUuid"]))
 	}
 	return nil
 }
