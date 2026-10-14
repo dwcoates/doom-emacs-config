@@ -256,7 +256,6 @@ export function drawHeldPrompt(
       text: spokenText(said),
       classification: classification.case,
       hold: hold === null ? null : hold.case,
-      accept: verdict.offersAccept,
       foldAbove:
         u.foldAbove === undefined
           ? null
@@ -292,15 +291,6 @@ export function drawHeldPrompt(
     card.setAttribute(
       "data-act",
       requireCase(u.act.act, `${path}.act.act`).case,
-    );
-  // The acceptance is STATE OF THE CARD, not of a marker that only exists once
-  // it is true: the arm that has an acceptance says which way it stands, and
-  // the arms that have none say nothing at all.
-  if (verdict.acceptedState === null) card.removeAttribute("data-accepted");
-  else
-    card.setAttribute(
-      "data-accepted",
-      verdict.acceptedState ? "true" : "false",
     );
   return card;
 }
@@ -381,12 +371,8 @@ export function drawHeldPromptQueuedAt(
 
 /** What one classification arm contributes to the card. */
 interface Verdict {
-  /** Whether this arm's acceptance stands, or null where it has none. */
-  acceptedState: boolean | null;
   /** The rationale or failure detail, when the arm carries one. */
   detail: HTMLElement | null;
-  /** Whether the accept button is this arm's to offer. */
-  offersAccept: boolean;
 }
 
 /** Route the verdict. EVERY arm is named; an unknown one is a malformed view. */
@@ -442,8 +428,8 @@ function drawClassification(
 /**
  * Still deciding: a breathing in-flight badge and nothing else.
  *
- * No rationale, because none exists yet, and no accept, because there is no
- * verdict to confirm. The pulse is what says the state is transient.
+ * No rationale, because none exists yet. The pulse is what says the state is
+ * transient.
  */
 export function drawHeldPromptClassifying(
   _u: HeldPromptClassifying,
@@ -453,11 +439,7 @@ export function drawHeldPromptClassifying(
     operation: "held.held-prompt.classifying",
     context: { path },
   });
-  return {
-    acceptedState: null,
-    detail: null,
-    offersAccept: false,
-  };
+  return { detail: null };
 }
 
 /** Interjects: the green the owner named for a prompt that interrupts. */
@@ -469,11 +451,7 @@ export function drawHeldPromptInterject(
     operation: "held.held-prompt.interject",
     context: { path },
   });
-  return {
-    acceptedState: null,
-    detail: rationale(u.rationale),
-    offersAccept: false,
-  };
+  return { detail: rationale(u.rationale) };
 }
 
 /**
@@ -488,35 +466,19 @@ export function drawHeldPromptAfterToolCall(
     operation: "held.held-prompt.after-tool-call",
     context: { path },
   });
-  return {
-    acceptedState: null,
-    detail: rationale(u.rationale),
-    offersAccept: false,
-  };
+  return { detail: rationale(u.rationale) };
 }
 
-/**
- * Waits for the turn: the ONE arm with something to accept.
- *
- * Accepting changes nothing about delivery — it records that the user saw the
- * hold — so once `accepted` is true the button is gone and a quiet marker
- * stands in its place rather than a button that would say the same thing
- * twice.
- */
+/** Waits for the turn to end on its own, with the classifier's reason. */
 export function drawHeldPromptHoldForTurnEnd(
   u: HeldPromptHoldForTurnEnd,
   path: string,
 ): Verdict {
-  const confirmed = u.accepted?.accepted === true;
   log.debug("drawing a hold-for-turn-end held prompt", {
     operation: "held.held-prompt.hold-for-turn-end",
-    context: { path, accepted: confirmed },
+    context: { path },
   });
-  return {
-    acceptedState: confirmed,
-    detail: rationale(u.rationale),
-    offersAccept: !confirmed,
-  };
+  return { detail: rationale(u.rationale) };
 }
 
 /**
@@ -533,11 +495,7 @@ export function drawHeldPromptUninterruptibleTurn(
     operation: "held.held-prompt.uninterruptible-turn",
     context: { path, command: literal },
   });
-  return {
-    acceptedState: null,
-    detail: null,
-    offersAccept: false,
-  };
+  return { detail: null };
 }
 
 /** Nothing decided this: the error red, and the failure said out loud. */
@@ -552,17 +510,12 @@ export function drawHeldPromptClassificationError(
   const detail = document.createElement("div");
   detail.className = "queued-reason queued-unclassified";
   detail.textContent = u.detail;
-  return {
-    acceptedState: null,
-    detail,
-    offersAccept: false,
-  };
+  return { detail };
 }
 
 /**
  * No classifier ran and none will: a daemon condition holds the entry. It
- * draws NO badge — the hold arm's badge is what holds it — and offers no
- * accept, since there is no verdict to confirm.
+ * draws NO badge — the hold arm's badge is what holds it.
  */
 export function drawHeldPromptDaemonHeld(
   _u: HeldPromptDaemonHeld,
@@ -572,16 +525,12 @@ export function drawHeldPromptDaemonHeld(
     operation: "held.held-prompt.daemon-held",
     context: { path },
   });
-  return {
-    acceptedState: null,
-    detail: null,
-    offersAccept: false,
-  };
+  return { detail: null };
 }
 
 /**
  * Nothing is classifying the entry and nothing holds it: it waits its place in
- * the queue. No rationale and no accept, because no verdict exists.
+ * the queue. No rationale, because no verdict exists.
  */
 export function drawHeldPromptAwaitingDelivery(
   _u: HeldPromptAwaitingDelivery,
@@ -591,11 +540,7 @@ export function drawHeldPromptAwaitingDelivery(
     operation: "held.held-prompt.awaiting-delivery",
     context: { path },
   });
-  return {
-    acceptedState: null,
-    detail: null,
-    offersAccept: false,
-  };
+  return { detail: null };
 }
 
 /**
@@ -737,22 +682,21 @@ interface ActionSpec {
   text: string;
   classification: string;
   hold: string | null;
-  accept: boolean;
   /** The entry the "fold above" control folds into, or null when the daemon offers no fold. */
   foldAbove: TurnId | null;
   /** The "Update classifier" form, or null on a card no classifier decided. */
   classifierForm: ClassifierUpdateForm | null;
 }
 
-/** The three answers an entry takes, exactly as the request's arms name them. */
-export type HeldAction = "release" | "drop" | "accept";
+/** The two answers an entry takes, exactly as the request's arms name them. */
+export type HeldAction = "release" | "drop";
 
 /**
- * The entry's controls: release (labelled "Send now"), drop (labelled "Cancel"), and — on one arm
- * only — accept.
+ * The entry's controls: release (labelled "Send now") and drop (labelled
+ * "Cancel"), with Edit, the daemon-offered fold and Meta between them.
  *
- * IN-FLIGHT DISABLES THE ROW, not just the clicked button: the three actions
- * are mutually exclusive answers about one entry, and a drop landing while a
+ * IN-FLIGHT DISABLES THE ROW, not just the clicked button: the actions are
+ * mutually exclusive answers about one entry, and a drop landing while a
  * release is in flight is a race the user should not be able to start.
  */
 export function drawHeldPromptActions(spec: ActionSpec): HTMLElement {
@@ -767,7 +711,6 @@ export function drawHeldPromptActions(spec: ActionSpec): HTMLElement {
     context: {
       turn: spec.turn.value,
       release: noReleaseTitle === undefined,
-      accept: spec.accept,
       fold_above: spec.foldAbove?.value ?? null,
       update_classifier: spec.classifierForm !== null,
     },
@@ -792,7 +735,6 @@ export function drawHeldPromptActions(spec: ActionSpec): HTMLElement {
   actions.appendChild(release);
   // EDIT follows Send now (owner spec, 2026-09-23).
   actions.appendChild(editButton(spec));
-  if (spec.accept) actions.appendChild(actionButton("accept", "Accept", spec));
   // DAEMON-OFFERED: the fold stands exactly while the entry carries
   // `fold_above` (FoldHeldPrompt).
   if (spec.foldAbove !== null)
@@ -1176,8 +1118,6 @@ export function updateHeldPromptRefusal(
       return "this prompt is no longer held";
     case "alreadyDelivered":
       return "this prompt has already been delivered";
-    case "acceptNotApplicable":
-      return "accept applies only to a prompt held for the turn's end";
     case "releaseRefused":
       return "the session would not take this prompt now";
     case "beingDelivered":
@@ -1195,23 +1135,20 @@ export function updateHeldPromptRefusal(
 /**
  * The request's `action` arm, built by name.
  *
- * A switch rather than `{ case: action, value: {} }`: the three arms are three
- * distinct message types, and spelling them out is what makes a fourth action
+ * A switch rather than `{ case: action, value: {} }`: the two arms are two
+ * distinct message types, and spelling them out is what makes a third action
  * a compile error here instead of a silently-typed object.
  */
 function heldAction(
   action: HeldAction,
 ):
   | { case: "release"; value: Record<string, never> }
-  | { case: "drop"; value: Record<string, never> }
-  | { case: "accept"; value: Record<string, never> } {
+  | { case: "drop"; value: Record<string, never> } {
   switch (action) {
     case "release":
       return { case: "release", value: {} };
     case "drop":
       return { case: "drop", value: {} };
-    case "accept":
-      return { case: "accept", value: {} };
   }
 }
 
