@@ -209,13 +209,27 @@ dependency chain first. Parallelism belongs to this scheduler:
 ordinary and merge-gate runs omit them. `--record` is reserved for the
 canonical post-merge timing run on master.
 
-NO HOST-WIDE GATE BOUNDS HOW MANY RUNS OVERLAP (owner ruling, 2026-10-14).
-`bin/background.sh` puts every test at nice 19, which keeps the owner's live
-runtime ahead of test load, and the merge queue orders its own gates.
-Contention between test runs is accepted: it slows them, and it never reaches
-the owner's processes. The host suite gate (`bin/suite-slot.sh`) and the
-daemon-suite host flock were removed for that reason; inside one run the flock
-had serialized the run's own integration and e2e processes.
+OVERLAPPING RUNS SHARE THE HOST BY PRIORITY, AND RATION ONLY MEMORY (owner
+ruling, 2026-10-14, the hybrid):
+
+- NO PROCESSOR IS RESERVED AND NO RUN WAITS FOR ANOTHER'S CORES. Each run
+  sizes itself to the host (`cli.Slots`), and contention between overlapping
+  runs is accepted: it slows them, and it never reaches the owner's processes.
+  The host suite gate (`bin/suite-slot.sh`, with its run limit and processor
+  tokens) and the daemon-suite host flock were removed for that reason;
+  inside one run the flock had serialized the run's own integration and e2e
+  processes.
+- PRIORITY ORDERS THEM. `bin/background.sh` demotes every test run to the
+  niceness `AGENT_REPL_TEST_NICENESS` names, 19 by default; the merge queue's
+  head gate names 10 and the merge behind it 15 (`merge.HeadNice`,
+  `merge.SpeculativeNice`). So the head's tests run first, then the merge
+  behind it, then every ad-hoc run, and all of them yield to the owner's
+  processes at 0.
+- MEMORY IS SEATED, because `nice` does nothing for it and a RAM disk's memory
+  is wired. A run's RAM disk holds one of `ramdisk.MemorySeats` seats (half
+  the host's memory over the disk's size, at least one) from before it is
+  attached until it is released; a run that finds every seat held waits for
+  one on its flock and says so in the run log.
 
 Do NOT gate on the load average instead. It is a decaying mean, so it keeps
 climbing for a minute after the work stops, and every waiter reads the same
