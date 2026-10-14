@@ -3120,13 +3120,6 @@ describe("mountFeed: the reader's merge bubble fold", () => {
  * after a reload, and a reader's own open outlives every later push.
  */
 describe("mountFeed: an async merge bubble's default fold", () => {
-  /** A root feed whose watch is CHANNEL, opening empty. */
-  function watched(channel: Channel<WatchFeedResponse>): Harness {
-    const channels = new Map<string, Channel<WatchFeedResponse>>();
-    channels.set("tok:root", channel);
-    return harness({ channels });
-  }
-
   /** The merge row's element in HOST. */
   function mergeRowIn(host: HTMLElement): HTMLElement {
     const el = host.querySelector<HTMLElement>('[data-feed-row="m1"]');
@@ -3136,8 +3129,7 @@ describe("mountFeed: an async merge bubble's default fold", () => {
 
   it("draws an async merge bubble collapsed when it first appears", async () => {
     // Arrange
-    const channel = new Channel<WatchFeedResponse>();
-    const h = watched(channel);
+    const { h, channel } = liveRootHarness();
     const { feed, host } = mount(h);
     await settle();
     // Act
@@ -3153,8 +3145,7 @@ describe("mountFeed: an async merge bubble's default fold", () => {
 
   it("draws a sync merge bubble open when it first appears", async () => {
     // Arrange
-    const channel = new Channel<WatchFeedResponse>();
-    const h = watched(channel);
+    const { h, channel } = liveRootHarness();
     const { feed, host } = mount(h);
     await settle();
     // Act
@@ -3167,8 +3158,7 @@ describe("mountFeed: an async merge bubble's default fold", () => {
 
   it("keeps an async merge bubble collapsed through its progress and its terminal", async () => {
     // Arrange
-    const channel = new Channel<WatchFeedResponse>();
-    const h = watched(channel);
+    const { h, channel } = liveRootHarness();
     const { feed, host } = mount(h);
     await settle();
     channel.push(push(asyncMergeRow("m1")));
@@ -3184,8 +3174,7 @@ describe("mountFeed: an async merge bubble's default fold", () => {
 
   it("keeps an async merge bubble the reader opened open through a later push", async () => {
     // Arrange
-    const channel = new Channel<WatchFeedResponse>();
-    const h = watched(channel);
+    const { h, channel } = liveRootHarness();
     const { feed, host } = mount(h);
     await settle();
     channel.push(push(asyncMergeRow("m1")));
