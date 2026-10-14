@@ -75,6 +75,7 @@ import type {
   FeedResponseUsageStamp,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { drawSignInAction } from "../../login/request.js";
+import { pageResizeObserver } from "../../dom.js";
 import { log } from "../../log.js";
 import {
   BUBBLE_CLASS,
@@ -643,15 +644,15 @@ export function drawFeedResponseUsageStamp(
  * when a size lands, and a duration that hangs in none is a defect.
  */
 function measureUsageAgo(ago: HTMLElement, path: string): void {
-  const view = ago.ownerDocument.defaultView;
-  if (view === null || typeof view.ResizeObserver !== "function") {
+  const Observer = pageResizeObserver(ago);
+  if (Observer === null) {
     log.error("an interim's usage corner cannot measure its duration: the page has no ResizeObserver", {
       operation: "feed.cards.response.usage-ago-unmeasured",
       context: { path },
     });
     return;
   }
-  const observer = new view.ResizeObserver(() => {
+  const observer = new Observer(() => {
     const bubble = ago.closest<HTMLElement>(`.${BUBBLE_CLASS}`);
     if (bubble === null) {
       log.error("a measured usage duration hangs in no bubble", {

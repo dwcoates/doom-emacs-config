@@ -35,6 +35,7 @@
  * `ResizeObserver` included. A card therefore folds its title AFTER that stop,
  * as the final step of its draw.
  */
+import { pageResizeObserver } from "../dom.js";
 import { log } from "../log.js";
 import type { RowContext } from "./cards/context.js";
 import { revealTitle } from "./title-reveal.js";
@@ -73,8 +74,7 @@ export function foldTitle(title: HTMLElement, owner: TitleFoldOwner, rc: RowCont
     operation: "feed.title-fold",
     context: { owner, element: title.className },
   });
-  const view = title.ownerDocument.defaultView;
-  if (view === null || typeof view.ResizeObserver !== "function") {
+  if (pageResizeObserver(title) === null) {
     // Without an observer nothing ever measures this title, so an overflowing
     // one would never be marked `has-more`, and a standalone one could not offer its click.
     log.error("a card title cannot measure its overflow: the page has no ResizeObserver", {

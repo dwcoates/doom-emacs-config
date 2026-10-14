@@ -16,7 +16,7 @@ import { createConnectHookElement, type ConnectHookElement } from "../connect-ho
 import { log } from "../log.js";
 import { inline, hasFencedTree, renderMarkdown, type NewlineRendering, type TreeCols } from "../markdown.js";
 import { findTreeRegion, renderTreeHtml, type TreeIssue } from "../metaprompt-tree.js";
-import { computedPx, placeChildren, scrollbarWidthPx } from "../dom.js";
+import { computedPx, pageResizeObserver, placeChildren, scrollbarWidthPx } from "../dom.js";
 import { onDiscard, stopTicking } from "../feed/ticking.js";
 import { applyTextReveal, clearTextReveal, fullTextOf } from "./text-reveal.js";
 
@@ -538,8 +538,10 @@ function armPainter(body: BubbleBody): Painter {
  * repaints only when the integer column count moved.
  */
 function observeContainingBlock(body: HTMLElement, rewrap: () => void): ResizeObserver {
+  const Observer = pageResizeObserver(body);
+  // A page with an observer has a view; naming both narrows both.
   const view = body.ownerDocument.defaultView;
-  if (view === null || typeof view.ResizeObserver !== "function") {
+  if (Observer === null || view === null) {
     unmeasurable("the page has no ResizeObserver to follow the column's width", {});
   }
   const containing = containingBlockOf(requireBubble(body));
@@ -548,7 +550,7 @@ function observeContainingBlock(body: HTMLElement, rewrap: () => void): ResizeOb
     scheduled = false;
     rewrap();
   };
-  const observer = new view.ResizeObserver(() => {
+  const observer = new Observer(() => {
     if (scheduled) return;
     scheduled = true;
     const raf = view.requestAnimationFrame?.bind(view);
