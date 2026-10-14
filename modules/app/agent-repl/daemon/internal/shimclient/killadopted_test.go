@@ -18,6 +18,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/procgroup"
 )
 
 // A shim this daemon ADOPTED is not its child, so none of the in-process fakes
@@ -178,9 +179,17 @@ func adoptedClientFor(udsPath string, grace time.Duration) *client {
 	return c
 }
 
-// gone reports whether a pid is no longer running.
+// gone reports whether a pid is no longer running: gone from the table, or
+// exited and awaiting its reap. A peer's reap runs on its own goroutine
+// (startPeer), so the instant Kill returns its process may still be an
+// unreaped zombie, which kill(pid, 0) answers as present; an adopted shim's
+// zombie is init's to reap, and it runs nothing.
 func gone(pid int) bool {
-	return errors.Is(syscall.Kill(pid, 0), syscall.ESRCH)
+	if errors.Is(syscall.Kill(pid, 0), syscall.ESRCH) {
+		return true
+	}
+	st, err := procgroup.ReadState(pid)
+	return err == nil && st.Exited
 }
 
 // TestKillStopsAnAdoptedShim asserts the case the leak was: a client with no
@@ -617,5 +626,115 @@ func TestKillOfAnAdoptedShimWhoseGroupCannotBeReadIsAnError(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("the unreadable group was not recorded at ERROR with its pid")
+	}
+}
+
+// TestKillOfAnAdoptedShimWhoseGroupHoldsOnlyItsZombieSucceeds is the merge
+// teardown that failed: the shim left on the daemon's hang-up, so its group
+// holds only its unreaped zombie, which darwin's killpg answers EPERM for and
+// procgroup reads as gone.
+func TestKillOfAnAdoptedShimWhoseGroupHoldsOnlyItsZombieSucceeds(t *testing.T) {
+	// Arrange.
+	p := startPeer(t, 0)
+	c := adoptedClientFor(p.uds, 2*time.Second)
+	var signalled []syscall.Signal
+	c.signalGroupOf = func(pgid int, sig syscall.Signal) error {
+		signalled = append(signalled, sig)
+		return nil
+	}
+	c.groupGone = func(int) (bool, error) { return true, nil }
+
+	// Act.
+	err := c.Kill(context.Background(), KillAttribution{Actor: "test", Reason: "merge teardown", Force: true})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Kill() error = %v, want nil", err)
+	}
+	if len(signalled) != 1 || signalled[0] != syscall.SIGKILL {
+		t.Fatalf("signalled %v, want one SIGKILL", signalled)
+	}
+}
+
+// TestKillOfAnAdoptedShimWhoseGroupSignalFailsIsAnError covers a group signal
+// procgroup refuses: it is recorded at ERROR and answered.
+func TestKillOfAnAdoptedShimWhoseGroupSignalFailsIsAnError(t *testing.T) {
+	// Arrange.
+	p := startPeer(t, 0)
+	c := adoptedClientFor(p.uds, 2*time.Second)
+	c.signalGroupOf = func(int, syscall.Signal) error { return errors.New("member 7 refused") }
+
+	// Act.
+	err := c.Kill(context.Background(), KillAttribution{Actor: "test", Reason: "merge teardown", Force: true})
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "member 7 refused") {
+		t.Fatalf("Kill() error = %v, want the refusal", err)
+	}
+	if !hasRecordAt(c.log.(*dlog.TestLogger), "error", "daemon.shimclient.kill") {
+		t.Fatalf("no ERROR record: %+v", c.log.(*dlog.TestLogger).Records())
+	}
+}
+
+// TestKillOfAnAdoptedShimWhoseGroupCannotBeProbedIsAnError covers a probe of
+// the group that fails: the wait gives up, recorded at ERROR, and the kill is
+// answered as not done.
+func TestKillOfAnAdoptedShimWhoseGroupCannotBeProbedIsAnError(t *testing.T) {
+	// Arrange.
+	p := startPeer(t, 0)
+	c := adoptedClientFor(p.uds, 2*time.Second)
+	c.signalGroupOf = func(int, syscall.Signal) error { return nil }
+	c.groupGone = func(int) (bool, error) { return false, errors.New("sysctl refused") }
+
+	// Act.
+	err := c.Kill(context.Background(), KillAttribution{Actor: "test", Reason: "merge teardown", Force: true})
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "did not go down") {
+		t.Fatalf("Kill() error = %v, want the kill answered as not done", err)
+	}
+	if !hasRecordSaying(c.log.(*dlog.TestLogger), "error", "daemon.shimclient.kill", "could not read whether the adopted shim's process group is gone") {
+		t.Fatalf("no ERROR record of the failed probe: %+v", c.log.(*dlog.TestLogger).Records())
+	}
+}
+
+// TestAwaitAdoptedExitPublishesAGroupLeftWithOnlyItsZombie pins that the
+// exit watch reads a group the way the kill does (adoptedGroupGone): a group
+// holding only exited members is gone, without waiting on init's reap.
+func TestAwaitAdoptedExitPublishesAGroupLeftWithOnlyItsZombie(t *testing.T) {
+	// Arrange.
+	p := startPeer(t, 0)
+	c := standingDownAdopted(p)
+	c.groupGone = func(pgid int) (bool, error) { return pgid == p.pid, nil }
+
+	// Act.
+	go c.awaitAdoptedExit(context.Background())
+
+	// Assert.
+	info := awaitExitInfo(t, c, 5*time.Second)
+	if info.PID != p.pid || !info.Inferred {
+		t.Fatalf("exit = %+v, want the adopted peer's pid %d, inferred", info, p.pid)
+	}
+}
+
+// TestAwaitAdoptedExitRecordsAGroupItCannotRead covers a probe of the group
+// that fails: recorded at ERROR, and no exit is published on a guess.
+func TestAwaitAdoptedExitRecordsAGroupItCannotRead(t *testing.T) {
+	// Arrange.
+	p := startPeer(t, 0)
+	c := standingDownAdopted(p)
+	c.groupGone = func(int) (bool, error) { return false, errors.New("sysctl refused") }
+
+	// Act.
+	c.awaitAdoptedExit(context.Background())
+
+	// Assert.
+	if !hasRecordSaying(c.log.(*dlog.TestLogger), "error", "daemon.shimclient.exit", "could not read whether the adopted shim's process group is gone; its exit is left to the socket or a kill") {
+		t.Fatalf("no ERROR record: %+v", c.log.(*dlog.TestLogger).Records())
+	}
+	select {
+	case info := <-c.Exited():
+		t.Fatalf("an exit %+v was published on a failed read", info)
+	default:
 	}
 }

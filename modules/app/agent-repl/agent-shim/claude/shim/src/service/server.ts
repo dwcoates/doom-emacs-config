@@ -103,6 +103,22 @@ const STREAMING_RPCS: readonly string[] = [
   "WatchWorkflow",
 ];
 
+/** Does this request path name the KillSession rpc? */
+export function isKillSessionPath(url: string): boolean {
+  return (url.split("/").pop() ?? "") === "KillSession";
+}
+
+/**
+ * The property each accepted connection carries itself under, so a request
+ * can name the raw socket it came in on. An h2c request's `socket` is node's
+ * session proxy, which reads every property it does not intercept from the
+ * raw socket, so the lookup is the same for both dialects.
+ */
+const RAW_SOCKET = Symbol("shim.rawSocket");
+
+/** A connection tagged with itself under {@link RAW_SOCKET}. */
+type TaggedSocket = Socket & { [RAW_SOCKET]?: Socket };
+
 /** Does this request path name a server-streaming rpc? */
 export function isStreamingPath(url: string): boolean {
   const rpc = url.split("/").pop() ?? "";
@@ -246,6 +262,27 @@ export interface ShimServer {
   /** Stop accepting, cut every open connection, and remove the socket file. */
   close(): Promise<void>;
   /**
+   * Resolve once the daemon has hung up every connection a KillSession came in
+   * on.
+   *
+   * THE EXIT AFTER `KillSession` WAITS FOR THIS, not only for its answer to
+   * leave. A shim that ended once its answer was on the socket still raced
+   * the daemon: the daemon's Go http2 transport, writing an RST_STREAM or a
+   * WINDOW_UPDATE to the dead peer, hit EPIPE, closed its whole connection and
+   * aborted the KillSession whose answer sat unread in its socket buffer,
+   * which it recorded as "the session kill did not answer". The daemon hangs
+   * up only once it has READ the answer, so an exit after the hang-up cannot
+   * overtake it.
+   *
+   * NO TIMER. The hang-up comes from the daemon closing the connection or from
+   * the daemon dying, and the daemon's stop escalation (SIGTERM, then
+   * SIGKILL) covers a shim that never sees either.
+   *
+   * Asked with no KillSession ever served, it rejects: the exit it orders is
+   * only ever reached from inside a KillSession.
+   */
+  hungUp(): Promise<void>;
+  /**
    * Resolve once no response is still being written.
    *
    * The exit after `KillSession` needs this: {@link close} DESTROYS every open
@@ -360,7 +397,16 @@ export async function serve(
   // a bounded last resort into the ordinary path.
   let inFlight = 0;
   const quietWaiters = new Set<() => void>();
+  // The connections a KillSession came in on, for {@link ShimServer.hungUp}.
+  const killCarriers = new Set<Socket>();
   const handler: typeof served = (request, response) => {
+    if (isKillSessionPath(request.url ?? "")) {
+      const raw = (request.socket as TaggedSocket)[RAW_SOCKET];
+      if (raw === undefined) {
+        throw new Error("shim: a KillSession arrived on a connection the listener never accepted");
+      }
+      killCarriers.add(raw);
+    }
     if (isStreamingPath(request.url ?? "")) {
       served(request, response);
       return;
@@ -412,6 +458,7 @@ export async function serve(
 
   const open = new Set<Socket>();
   const listener = createNetServer((socket) => {
+    (socket as TaggedSocket)[RAW_SOCKET] = socket;
     open.add(socket);
     socket.once("close", () => open.delete(socket));
     routeByPreface(socket, h1, h2);
@@ -439,6 +486,27 @@ export async function serve(
 
   return {
     socketPath,
+    hungUp: async (): Promise<void> => {
+      if (killCarriers.size === 0) {
+        throw new Error("shim: waited for the daemon to hang up a KillSession's connection, but no KillSession was served");
+      }
+      await Promise.all(
+        [...killCarriers].map(
+          (socket) =>
+            new Promise<void>((resolve) => {
+              if (socket.destroyed) {
+                resolve();
+                return;
+              }
+              socket.once("close", () => resolve());
+            }),
+        ),
+      );
+      LOGGER.info(
+        { socket_path: socketPath, connections: killCarriers.size },
+        "the daemon hung up every connection a KillSession came in on",
+      );
+    },
     quiet: async (budgetMs: number): Promise<void> => {
       if (inFlight === 0) return;
       await new Promise<void>((resolve) => {

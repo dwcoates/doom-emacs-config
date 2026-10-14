@@ -104,7 +104,7 @@ func (m Manager) readRecordsLocked() ([]recordInfo, error) {
 		if err != nil {
 			return nil, fmt.Errorf("read the RAM disk record %s: %w", path, err)
 		}
-		device, _ := parseRecord(string(raw))
+		device := parseRecord(string(raw)).Device
 		records = append(records, recordInfo{path: path, pid: pid, device: device, live: !dead})
 	}
 	return records, nil
@@ -288,11 +288,7 @@ func (m Manager) Setup(sizeMiB int) (*Volume, *Trouble, error) {
 	}
 	reclaimed, err := m.Reclaim()
 	for _, r := range reclaimed {
-		if r.Stray {
-			m.Log.Infof("removed the mount point %s left by dead run pid %d, which no record named (killed %d leftover processes)", r.Mount, r.Pid, r.Killed)
-			continue
-		}
-		m.Log.Infof("reclaimed the RAM disk %s at %s left by dead run pid %d (attached %v, killed %d leftover processes)", r.Device, r.Mount, r.Pid, r.Attached, r.Killed)
+		m.logReclaimed(r)
 	}
 	// A STUCK REGISTRY LOCK IS NOT WAITED ON TWICE: the acquire would wait
 	// out the same bound on the same holder.

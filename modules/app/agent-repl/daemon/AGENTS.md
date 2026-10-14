@@ -186,6 +186,29 @@ at the same lifetime edge, and `WatchPage` has no ending arm.
 `integration/exit_streams_test.go` pins the ending then the clean end on each
 of the three.
 
+### A killed shim exits on the daemon's hang-up, never on its answer leaving
+
+THE SHUTDOWN ORDER of an ended session is: the shim answers `KillSession`, the
+daemon READS that answer, the daemon hangs up the connection
+(`shimclient.client.KillSession` closes every connection its transport dialed,
+through `shimclient.dialedConns.hangUp`), and only then does the shim exit.
+Every caller that waits for the process afterwards (`Fleet.Stop`, the drain's
+sweep, the relaunch engine's stand-down) gets the hang-up from `KillSession`
+itself. A refused kill hangs nothing up: that shim goes on serving.
+
+An exit once the answer was merely written lost it: the daemon's
+`x/net/http2` transport wrote an RST_STREAM or a WINDOW_UPDATE to the dead
+peer, hit EPIPE, closed its whole `ClientConn` and aborted the `KillSession`
+whose answer sat unread in the socket buffer ("the session kill did not
+answer", cause `http2: client connection force closed via ClientConn.Close`).
+The shim side waits on `internal/hangup` (the fake shim) and
+`ShimServer.hungUp` (the real one), with NO timer: the hang-up comes from the
+daemon closing the connection or from the daemon dying, and the daemon's
+stop escalation (SIGTERM, then SIGKILL) covers a shim that sees neither. Do
+not add one, and do not read "the connection failed, then the shim exited 0"
+as the kill answering: that is a guess, and it loses
+`conversation.v1.SessionKilled`.
+
 ### The shim link's requests own the bytes they promise
 
 `shimclient.ownedRequestBody` (`internal/shimclient/transport.go`) copies a

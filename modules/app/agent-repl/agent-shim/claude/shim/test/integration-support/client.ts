@@ -21,7 +21,8 @@
 import { create, type DescMessage, type MessageInitShape } from "@bufbuild/protobuf";
 import { Code, ConnectError, createClient, type Client } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-node";
-import { connect as netConnect } from "node:net";
+import { Agent as HttpAgent } from "node:http";
+import { connect as netConnect, type Socket } from "node:net";
 import { conversationv1, shimv1 } from "../../src/proto.js";
 import { FAKE_DEFAULT_MODEL } from "../../src/fake/catalogs.js";
 
@@ -49,27 +50,65 @@ export interface ShimClients {
   readonly h2: ShimClient;
 }
 
-/** Build both clients for one shim socket. */
+/**
+ * Build both clients for one shim socket.
+ *
+ * EACH CLIENT HANGS UP AFTER READING AN ENDED SESSION'S KillSession ANSWER,
+ * exactly as the daemon does (`shimclient.client.KillSession`): the shim exits
+ * on that hang-up, never on its answer leaving (`ShimServer.hungUp`), so a
+ * client that kept its connection open would leave every killed shim waiting
+ * on it.
+ */
 export function createShimClients(socketPath: string): ShimClients {
+  // A private agent, so the hang-up closes this client's connections only.
+  const agent = new HttpAgent({ keepAlive: true });
+  const h2Sockets = new Set<Socket>();
   return {
-    h1: createClient(
-      shimv1.Shim,
-      createConnectTransport({
-        httpVersion: "1.1",
-        baseUrl: "http://shim",
-        nodeOptions: { socketPath },
-      }),
+    h1: hangingUpAfterKill(
+      createClient(
+        shimv1.Shim,
+        createConnectTransport({
+          httpVersion: "1.1",
+          baseUrl: "http://shim",
+          nodeOptions: { socketPath, agent },
+        }),
+      ),
+      () => agent.destroy(),
     ),
-    h2: createClient(
-      shimv1.Shim,
-      createConnectTransport({
-        httpVersion: "2",
-        baseUrl: "http://shim",
-        // socketPath is silently ignored by http2.connect; createConnection is
-        // the only way to point an h2 session at a unix socket.
-        nodeOptions: { createConnection: () => netConnect(socketPath) },
-      }),
+    h2: hangingUpAfterKill(
+      createClient(
+        shimv1.Shim,
+        createConnectTransport({
+          httpVersion: "2",
+          baseUrl: "http://shim",
+          // socketPath is silently ignored by http2.connect; createConnection is
+          // the only way to point an h2 session at a unix socket.
+          nodeOptions: {
+            createConnection: () => {
+              const socket = netConnect(socketPath);
+              h2Sockets.add(socket);
+              socket.once("close", () => h2Sockets.delete(socket));
+              return socket;
+            },
+          },
+        }),
+      ),
+      () => {
+        for (const socket of h2Sockets) socket.destroy();
+      },
     ),
+  };
+}
+
+/** client, whose killSession calls hangUp once it has read an ended session's answer. */
+function hangingUpAfterKill(client: ShimClient, hangUp: () => void): ShimClient {
+  return {
+    ...client,
+    killSession: async (...args: Parameters<ShimClient["killSession"]>) => {
+      const response = await client.killSession(...args);
+      if (response.result.case === "success") hangUp();
+      return response;
+    },
   };
 }
 

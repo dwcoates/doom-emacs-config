@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"agent-repld/internal/procgroup"
 	"context"
 	"errors"
 	"fmt"
@@ -161,15 +162,15 @@ func TestLiveGroupMembers(t *testing.T) {
 			}
 
 			// Act
-			got, err := liveGroupMembers(cmd.Process.Pid)
+			got, err := procgroup.LiveMembers(cmd.Process.Pid)
 
 			// Assert
 			if err != nil {
-				t.Fatalf("liveGroupMembers(%d) = %v", cmd.Process.Pid, err)
+				t.Fatalf("procgroup.LiveMembers(%d) = %v", cmd.Process.Pid, err)
 			}
-			listed := len(got) == 1 && got[0].pid == cmd.Process.Pid && got[0].comm == "sleep"
+			listed := len(got) == 1 && got[0].Pid == cmd.Process.Pid && got[0].Comm == "sleep"
 			if listed != tc.wantLeader || (!tc.wantLeader && len(got) != 0) {
-				t.Fatalf("liveGroupMembers(%d) = %+v, want the leader listed = %v and nothing else", cmd.Process.Pid, got, tc.wantLeader)
+				t.Fatalf("procgroup.LiveMembers(%d) = %+v, want the leader listed = %v and nothing else", cmd.Process.Pid, got, tc.wantLeader)
 			}
 		})
 	}

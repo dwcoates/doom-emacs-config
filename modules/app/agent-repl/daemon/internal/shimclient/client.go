@@ -21,6 +21,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/procgroup"
 	"agent-repld/internal/shimsocket"
 )
 
@@ -133,6 +134,11 @@ type client struct {
 	// injects the answer a shim that exits between the peer read and the
 	// group read gives (killAdopted).
 	processGroup func(pid int) (int, error)
+	// signalGroupOf signals an adopted shim's process group and groupGone
+	// reads whether it holds no live process; nil is procgroup.Signal and
+	// procgroup.Gone. A test injects their failures (killAdopted).
+	signalGroupOf func(pgid int, sig syscall.Signal) error
+	groupGone     func(pgid int) (bool, error)
 
 	// lockProbe answers whether the workspace's kernel lock reads FREE. It is
 	// injected because sessionlock is shimclient's PEER, not its dependency;
@@ -151,6 +157,10 @@ type client struct {
 	// the supervisor never started and therefore never held.
 	release     func()
 	releaseOnce sync.Once
+
+	// conns are the connections rpc's transport dialed: KillSession hangs
+	// them up once the shim's answer is read.
+	conns *dialedConns
 
 	link *linkFeed
 	exit chan ExitInfo
@@ -235,12 +245,14 @@ type client struct {
 // reader is a client built outside a supervisor, which orders nothing.
 func newClient(log dlog.Logger, ws ids.WorkspaceID, udsPath string, back backoff, probe func(ids.WorkspaceID) (bool, error), daemonStandDown func() bool) *client {
 	ctx, cancel := context.WithCancel(context.Background())
+	conns := newDialedConns()
 	return &client{
 		daemonStandDown: daemonStandDown,
 		log:             log,
 		ws:              ws,
 		udsPath:         udsPath,
-		rpc:             shimv1connect.NewShimClient(newUDSClient(udsPath), udsBaseURL),
+		rpc:             shimv1connect.NewShimClient(newUDSClient(udsPath, conns), udsBaseURL),
+		conns:           conns,
 		back:            back,
 		grace:           DefaultKillGrace,
 		lockProbe:       probe,
@@ -700,14 +712,22 @@ func (c *client) adoptedAlreadyGone(attr KillAttribution, pid int, observed dlog
 	return nil
 }
 
-// signalAdoptedGroup sends one signal to an adopted shim's process group. A
-// group that is already gone is SUCCESS — the caller asked for it to stop —
-// and every other errno is returned.
+// signalAdoptedGroup sends one signal to an adopted shim's process group
+// (procgroup.Signal). A group that is already gone, or holds only exited
+// members, is SUCCESS — the caller asked for it to stop — and every other
+// failure is returned.
+//
+// A GROUP OF ONE UNREAPED ZOMBIE ANSWERS killpg EPERM ON DARWIN. A shim that
+// answered KillSession leaves once the daemon hangs up, so the forced kill
+// that follows routinely meets it exited and not yet reaped by launchd; read
+// as a refusal, that failed a merge's teardown ("killed the adopted process
+// group ...: operation not permitted").
 func (c *client) signalAdoptedGroup(sig syscall.Signal, pgid int) error {
-	if err := syscall.Kill(-pgid, sig); err != nil {
-		if errors.Is(err, syscall.ESRCH) {
-			return nil
-		}
+	signal := c.signalGroupOf
+	if signal == nil {
+		signal = procgroup.Signal
+	}
+	if err := signal(pgid, sig); err != nil {
 		c.log.Error("daemon.shimclient.kill", "signalling the adopted shim's process group failed", dlog.Context{
 			"workspace_id": string(c.ws), "pgid": pgid, "signal": sig.String(), "error": err.Error(),
 		})
@@ -727,7 +747,14 @@ func (c *client) awaitAdoptedGone(ctx context.Context, pgid int, bound time.Dura
 	poll := time.NewTicker(adoptedGonePoll)
 	defer poll.Stop()
 	for {
-		if processGone(-pgid) {
+		gone, err := c.adoptedGroupGone(pgid)
+		if err != nil {
+			c.log.Error("daemon.shimclient.kill", "could not read whether the adopted shim's process group is gone", dlog.Context{
+				"workspace_id": string(c.ws), "pgid": pgid, "error": err.Error(),
+			})
+			return false
+		}
+		if gone {
 			return true
 		}
 		if !time.Now().Before(deadline) {
@@ -739,6 +766,16 @@ func (c *client) awaitAdoptedGone(ctx context.Context, pgid int, bound time.Dura
 			return false
 		}
 	}
+}
+
+// adoptedGroupGone is the one reading of whether an adopted shim's process
+// group holds no live process (procgroup.Gone): gone from the kernel, or left
+// with only exited members, whose reap is init's.
+func (c *client) adoptedGroupGone(pgid int) (bool, error) {
+	if c.groupGone != nil {
+		return c.groupGone(pgid)
+	}
+	return procgroup.Gone(pgid)
 }
 
 // processGone reports whether the kernel holds no process for target: a pid,
@@ -1374,7 +1411,17 @@ func (c *client) awaitAdoptedExit(ctx context.Context) {
 	poll := time.NewTicker(adoptedGonePoll)
 	defer poll.Stop()
 	for {
-		if processGone(target) {
+		gone := processGone(target)
+		if target < 0 {
+			var err error
+			if gone, err = c.adoptedGroupGone(pid); err != nil {
+				c.log.Error("daemon.shimclient.exit", "could not read whether the adopted shim's process group is gone; its exit is left to the socket or a kill", dlog.Context{
+					"workspace_id": string(c.ws), "pid": pid, "error": err.Error(),
+				})
+				return
+			}
+		}
+		if gone {
 			c.log.Debug("daemon.shimclient.exit", "the adopted shim's process is gone after the stand-down it was asked for", dlog.Context{
 				"workspace_id": string(c.ws), "pid": pid, "group": target < 0,
 			})
@@ -1558,9 +1605,31 @@ func (c *client) SetKeepalive(ctx context.Context, req *shimv1.SetKeepaliveReque
 // The stand-down is latched BEFORE the verb goes, not after it answers: the
 // shim ends its process as it answers, so a monitor told only afterwards has
 // already read the break as a fault.
+//
+// AN ENDED SESSION IS HUNG UP ON once its answer is read. The shim exits on
+// that hang-up, not on its answer leaving: a shim gone before the daemon read
+// the answer let this transport's next write to it fail, and http2 aborted the
+// unread KillSession with the whole connection. Every caller that then waits
+// for the process to exit (Fleet.Stop, the drain's sweep, the relaunch
+// engine's stand-down) gets the hang-up from here. A refused kill leaves the
+// shim serving, so nothing is hung up.
 func (c *client) KillSession(ctx context.Context, req *shimv1.KillSessionRequest) (*shimv1.KillSessionResponse, error) {
 	c.standDown.Store(true)
-	return unary(ctx, c, "kill_session", req, validateKillSessionRequest, c.rpc.KillSession)
+	resp, err := unary(ctx, c, "kill_session", req, validateKillSessionRequest, c.rpc.KillSession)
+	if err != nil || resp.GetSuccess() == nil {
+		return resp, err
+	}
+	closed, hangUpErr := c.conns.hangUp()
+	fields := dlog.Context{"workspace_id": string(c.ws), "connections": closed}
+	if hangUpErr != nil {
+		// The shim then waits for a hang-up that never comes; the caller's
+		// stop escalation is what ends it, and this record says why.
+		fields["error"] = hangUpErr.Error()
+		c.log.Error("daemon.shimclient.kill_session", "could not hang up on the shim after reading its KillSession answer; the shim exits only on the stop escalation", fields)
+		return resp, nil
+	}
+	c.log.Debug("daemon.shimclient.kill_session", "hung up on the shim after reading its KillSession answer; the shim exits on the hang-up", fields)
+	return resp, nil
 }
 
 // StartTurn opens a turn with the daemon's minted TurnId and its origin.
@@ -1682,6 +1751,13 @@ func unary[Req any, Resp any](
 			c.log.Info(operation, "the shim call ended in a stand-down this daemon ordered", fields)
 			return nil, standDownOrdered(err)
 		}
+		// A CALL ITS OWN CALLER ABANDONED IS NOT A FAULT (callerAbandoned).
+		// MEASURED, daemon integration run 2026-10-14: a handover's exit
+		// cancelled the cache-lapse keeper's SetKeepalive, recorded here at
+		// ERROR before the keeper recorded its own leaving at INFO.
+		if c.callerAbandoned(ctx, operation, "the shim call", fields) {
+			return nil, err
+		}
 		// A CALL THE SHIM'S DEATH CUT IS NOT A SECOND FAULT: the death is
 		// recorded once, by daemon.shimclient.exit, and this is its effect.
 		if info, waited, died := c.diedUnder(ctx, err); died {
@@ -1693,6 +1769,24 @@ func unary[Req any, Resp any](
 	}
 	c.log.Debug(operation, "shim answered", dlog.Context{"workspace_id": string(c.ws)})
 	return resp.Msg, nil
+}
+
+// callerAbandoned reports whether ctx, the caller's own context, ended before
+// the shim answered what (a call or a stream open), and records it at INFO
+// when it did.
+//
+// A WITHDRAWAL ITS OWN CALLER ORDERED IS NOT A FAILURE OF THE SHIM. When the
+// caller's context ended first (the watcher closing, the daemon tearing down
+// or handing over), the shim answered nothing; the request was withdrawn on
+// this side, an ordinary end the caller asked for. The caller still gets the
+// error and rules on it.
+func (c *client) callerAbandoned(ctx context.Context, operation, what string, fields dlog.Context) bool {
+	if ctx.Err() == nil {
+		return false
+	}
+	fields["cause"] = ctx.Err().Error()
+	c.log.Info(operation, what+" was abandoned: its caller's context ended before the shim answered", fields)
+	return true
 }
 
 // quietOpenKey marks a context whose stream open is part of a RETRY LADDER,
@@ -1730,13 +1824,8 @@ func (c *client) refusedOpen(ctx context.Context, verb string, err error) error 
 		refused.Err = standDownOrdered(err)
 		return refused
 	}
-	// AN OPEN ITS OWN CALLER ABANDONED IS NOT A REFUSAL. When the caller's
-	// context ended first (the watcher closing, the daemon tearing down), the
-	// shim answered nothing; the open was withdrawn on this side, which is an
-	// ordinary end the caller asked for, not a failure of the shim.
-	if ctx.Err() != nil {
-		fields["cause"] = ctx.Err().Error()
-		c.log.Info(operation, "the stream open was abandoned: its caller's context ended before the shim answered", fields)
+	// AN OPEN ITS OWN CALLER ABANDONED IS NOT A REFUSAL (callerAbandoned).
+	if c.callerAbandoned(ctx, operation, "the stream open", fields) {
 		return refused
 	}
 	switch connect.CodeOf(err) {

@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"agent-repld/internal/procgroup"
 	"fmt"
 	"syscall"
 	"time"
@@ -145,9 +146,7 @@ func stopFrozen(pid int, reportAfter time.Duration, signal func(int, syscall.Sig
 	}
 }
 
-// groupMember is one process of a process group, as the kernel lists it.
-type groupMember struct {
-	pid   int
-	comm  string
-	state string
+// fromState is the kernel's account as the harness reads it.
+func fromState(s procgroup.State) processState {
+	return processState{frozen: s.Frozen, exited: s.Exited, name: s.Name}
 }
