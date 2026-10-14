@@ -517,3 +517,19 @@ func TestReclaimsShareTheOneReap(t *testing.T) {
 		}
 	}
 }
+
+func TestDescribeNamesEachMembersTMPDIR(t *testing.T) {
+	// Arrange.
+	procs := []Proc{
+		{Pid: 9, Line: "/bin/sleep 60 HOME=/Users/x TMPDIR=/tmp/artr-7/tr-1/tu-2/test-suite-slot.x"},
+		{Pid: 3, Line: "/usr/bin/git status"},
+	}
+
+	// Act.
+	got := describe(procs)
+
+	// Assert.
+	if want := "git[3], sleep[9] (TMPDIR=/tmp/artr-7/tr-1/tu-2/test-suite-slot.x)"; got != want {
+		t.Fatalf("describe() = %q, want %q", got, want)
+	}
+}
