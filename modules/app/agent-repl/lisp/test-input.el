@@ -1379,6 +1379,17 @@ cleared would be silently lost user intent."
 
 ;;;; ---- Input preparation ----
 
+(ert-deftest agent-repl-input-prepare-input-is-the-prefix-before-the-words ()
+  "`agent-repl--prepare-input' is exactly RAW behind `agent-repl--input-prefix'."
+  (agent-repl-test-input--with
+    (should (equal (agent-repl--prepare-input "ws-one" "fix it" t)
+                   (concat (agent-repl--input-prefix "ws-one" "fix it" t) "fix it")))))
+
+(ert-deftest agent-repl-input-prefix-is-empty-unless-forced ()
+  "An unforced submission carries no prefix."
+  (agent-repl-test-input--with
+    (should (equal (agent-repl--input-prefix "ws-one" "fix it") ""))))
+
 (ert-deftest agent-repl-input-workspace-command-gets-no-source-tag ()
   "A workspace command is sent as typed: the agent API finds the asking
 workspace from the working directory, so no source tag rides it."

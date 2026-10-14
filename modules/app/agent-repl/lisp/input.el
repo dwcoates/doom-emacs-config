@@ -1415,21 +1415,27 @@ that copy; otherwise fall back to the canonical file."
         agent-repl--command-prefix
       (format agent-repl-command-prefix-template file))))
 
-(defun agent-repl--prepare-input (ws raw &optional force-metaprompt)
-  "Compose the text WS actually submits from RAW.
+(defun agent-repl--input-prefix (ws raw &optional force-metaprompt)
+  "Return the text WS's submission of RAW is prefixed with, or \"\".
 PROMPT COMPOSITION IS FREE: everything this function does happens BEFORE
 submission, and what is submitted is what is drawn.  The read-directive
-is prepended ONLY when FORCE-METAPROMPT is non-nil, bracketed as a
+is the prefix ONLY when FORCE-METAPROMPT is non-nil, bracketed as a
 harness-injected span (`agent-repl--meta-wrap') so the daemon strips it
 from the DRAWN row while the agent still receives it verbatim.  The
 agent API finds the asking workspace from the agent's working directory,
-so a prompt carries no workspace tag of its own."
+so a prompt carries no workspace tag of its own.  THE ONE FRAMING every
+submission is composed with."
   (let ((prepend-p (agent-repl--should-prepend-metaprompt-p raw force-metaprompt ws)))
     (agent-repl--log ws "elisp.input.prepare raw-len=%d force=%s prepend=%s"
                      (length raw) force-metaprompt prepend-p)
     (if prepend-p
-        (concat (agent-repl--meta-wrap (agent-repl--command-prefix-for ws)) "\n\n" raw)
-      raw)))
+        (concat (agent-repl--meta-wrap (agent-repl--command-prefix-for ws)) "\n\n")
+      "")))
+
+(defun agent-repl--prepare-input (ws raw &optional force-metaprompt)
+  "Compose the text WS actually submits from RAW.
+RAW behind `agent-repl--input-prefix'."
+  (concat (agent-repl--input-prefix ws raw force-metaprompt) raw))
 
 ;;;; ---- Identity --------------------------------------------------------
 
