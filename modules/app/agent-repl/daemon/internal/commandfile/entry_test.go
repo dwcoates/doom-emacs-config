@@ -40,6 +40,8 @@ func TestValidateAcceptsEveryAcceptedShape(t *testing.T) {
 		{name: "merge resume of one repository", entry: Entry{Type: TypeMergeResume, ProjectDir: "/tree", RepositoryDir: "/repo"}},
 		{name: "merge hold rollouts", entry: Entry{Type: TypeMergeHoldRollouts, ProjectDir: "/tree"}},
 		{name: "merge release rollouts", entry: Entry{Type: TypeMergeReleaseRollouts, ProjectDir: "/tree"}},
+		{name: "merge disable racing", entry: Entry{Type: TypeMergeDisableRacing, ProjectDir: "/tree"}},
+		{name: "merge enable racing", entry: Entry{Type: TypeMergeEnableRacing, ProjectDir: "/tree"}},
 		{name: "retarget to a parent", entry: Entry{Type: TypeRetarget, ProjectDir: "/tree", Parent: PresentDir{Present: true, Dir: "/tree2"}}},
 		{name: "retarget to top-level", entry: Entry{Type: TypeRetarget, ProjectDir: "/tree", Parent: PresentDir{Present: true}}},
 	}
@@ -78,6 +80,9 @@ func TestValidateRefusesEveryIncompleteShape(t *testing.T) {
 		{name: "merge resume with no requester", entry: Entry{Type: TypeMergeResume}},
 		{name: "merge hold rollouts with no requester", entry: Entry{Type: TypeMergeHoldRollouts}},
 		{name: "merge release rollouts with no requester", entry: Entry{Type: TypeMergeReleaseRollouts}},
+		{name: "merge disable racing with no requester", entry: Entry{Type: TypeMergeDisableRacing}},
+		{name: "merge enable racing with no requester", entry: Entry{Type: TypeMergeEnableRacing}},
+		{name: "repository_dir on a racing switch", entry: Entry{Type: TypeMergeDisableRacing, ProjectDir: "/tree", RepositoryDir: "/repo"}},
 		{name: "repository_dir on a rollout hold", entry: Entry{Type: TypeMergeHoldRollouts, ProjectDir: "/tree", RepositoryDir: "/repo"}},
 		{name: "merge move up with no requester", entry: Entry{Type: TypeMergeMoveUp}},
 		{name: "merge move down with no requester", entry: Entry{Type: TypeMergeMoveDown}},

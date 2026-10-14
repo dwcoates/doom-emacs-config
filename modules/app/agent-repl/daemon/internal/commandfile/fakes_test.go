@@ -153,6 +153,22 @@ type fakeMerge struct {
 	// is what either answers.
 	holds, releases int
 	holdErr         error
+	// disables and enables count DisableRacing and EnableRacing, and
+	// racingErr is what either answers.
+	disables, enables int
+	racingErr         error
+}
+
+// DisableRacing and EnableRacing count into disables and enables, and
+// answer racingErr.
+func (m *fakeMerge) DisableRacing(context.Context) error {
+	m.disables++
+	return m.racingErr
+}
+
+func (m *fakeMerge) EnableRacing(context.Context) error {
+	m.enables++
+	return m.racingErr
 }
 
 func (m *fakeMerge) HoldRollouts(context.Context) error {

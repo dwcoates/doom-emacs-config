@@ -339,7 +339,7 @@ func (i *ingress) apply(ctx context.Context, log dlog.Logger, file string, index
 		return i.applyMergeMove(ctx, log, entry)
 	case TypeMergePause, TypeMergeResume:
 		return i.applyMergePause(ctx, log, entry)
-	case TypeMergeHoldRollouts, TypeMergeReleaseRollouts:
+	case TypeMergeHoldRollouts, TypeMergeReleaseRollouts, TypeMergeDisableRacing, TypeMergeEnableRacing:
 		return i.applyDaemonWideSwitch(ctx, log, entry)
 	case TypeRetarget:
 		return i.applyRetarget(ctx, log, entry)
@@ -584,6 +584,10 @@ var daemonWideSwitches = map[string]daemonWideSwitch{
 		message: "held the merge queue's rollouts: merges still land, but a landing no longer redeploys"},
 	TypeMergeReleaseRollouts: {apply: merge.Orchestrator.ReleaseRollouts, outcome: "released",
 		message: "released the merge queue's rollouts: the next landing redeploys"},
+	TypeMergeDisableRacing: {apply: merge.Orchestrator.DisableRacing, outcome: "racing_disabled",
+		message: "disabled the merge queue's racing: every queue works its head alone"},
+	TypeMergeEnableRacing: {apply: merge.Orchestrator.EnableRacing, outcome: "racing_enabled",
+		message: "enabled the merge queue's racing: on AC power each queue works its top two merges"},
 }
 
 // applyDaemonWideSwitch maps a daemon-wide switch entry onto its orchestrator
