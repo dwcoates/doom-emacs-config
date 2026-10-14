@@ -2,8 +2,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
+  type FeedMerge,
   FeedMergeSchema,
   FeedMergeErrorSchema,
+  FeedMergeModeSchema,
   FeedMergeWorkspaceSwitchSchema,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { MalformedView } from "../../../src/rpc/malformed.js";
@@ -211,12 +213,24 @@ describe("drawFeedMerge: a settled head's clocks", () => {
 });
 
 describe("drawFeedMerge: a detached merge's switch", () => {
+  /** Make MSG an async merge whose head carries an available switch. */
+  function withSwitch(msg: FeedMerge): void {
+    msg.head!.mode = create(FeedMergeModeSchema, {
+      mode: {
+        case: "async",
+        value: {
+          workspaceSwitch: create(FeedMergeWorkspaceSwitchSchema, {
+            label: { text: "open merge workspace" },
+            availability: { case: "available", value: { target: { id: "ws-merge", dir: "/w/merge" } } },
+          }),
+        },
+      },
+    });
+  }
+
   it("draws the switch to the merge workspace when the head carries one", () => {
     const msg = mergeHead({ case: "update" });
-    msg.head!.workspaceSwitch = create(FeedMergeWorkspaceSwitchSchema, {
-      label: { text: "open merge workspace" },
-      availability: { case: "available", value: { target: { id: "ws-merge", dir: "/w/merge" } } },
-    });
+    withSwitch(msg);
     const el = draw(msg);
     expect(el.querySelector(".merge-workspace-switch-head .merge-workspace-switch-button")?.textContent).toBe(
       "open merge workspace",
@@ -225,14 +239,23 @@ describe("drawFeedMerge: a detached merge's switch", () => {
 
   it("keeps the switch on a settled merge", () => {
     const msg = mergeHead({ case: "success", endedAtMs: 61_000n, commit: "a1b2c3d" });
-    msg.head!.workspaceSwitch = create(FeedMergeWorkspaceSwitchSchema, {
-      label: { text: "open merge workspace" },
-      availability: { case: "available", value: { target: { id: "ws-merge", dir: "/w/merge" } } },
-    });
+    withSwitch(msg);
     expect(draw(msg).querySelector(".merge-workspace-switch-head")).not.toBeNull();
   });
 
   it("draws no switch for an in-place merge", () => {
+    const msg = mergeHead({ case: "update" });
+    msg.head!.mode = create(FeedMergeModeSchema, { mode: { case: "sync", value: {} } });
+    expect(draw(msg).querySelector(".merge-workspace-switch")).toBeNull();
+  });
+
+  it("draws no switch for an async merge whose workspace is hidden", () => {
+    const msg = mergeHead({ case: "update" });
+    msg.head!.mode = create(FeedMergeModeSchema, { mode: { case: "async", value: {} } });
+    expect(draw(msg).querySelector(".merge-workspace-switch")).toBeNull();
+  });
+
+  it("draws no switch for a head recorded before heads carried their mode", () => {
     expect(draw(mergeHead({ case: "update" })).querySelector(".merge-workspace-switch")).toBeNull();
   });
 });

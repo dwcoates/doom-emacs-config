@@ -52,14 +52,14 @@ func (r *resolver) MarkMergeWorkspaceRemoved(ws, mergeWS ids.WorkspaceID, remove
 // switchesTo reports whether ROW is a merge head carrying an available switch
 // to MERGEWS.
 func switchesTo(row *frontendv1.FeedRow, mergeWS ids.WorkspaceID) bool {
-	target := row.GetActivity().GetMerge().GetHead().GetWorkspaceSwitch().GetAvailable().GetTarget()
+	target := row.GetActivity().GetMerge().GetHead().GetMode().GetAsync().GetWorkspaceSwitch().GetAvailable().GetTarget()
 	return target != nil && target.GetId() == string(mergeWS)
 }
 
 // markSwitchRemoved turns ROW's switch to its removed arm.
 func markSwitchRemoved(row *frontendv1.FeedRow, removedAtMS int64) {
-	if head := row.GetActivity().GetMerge().GetHead(); head.GetWorkspaceSwitch() != nil {
-		head.WorkspaceSwitch = &frontendv1.FeedMergeWorkspaceSwitch{
+	if async := row.GetActivity().GetMerge().GetHead().GetMode().GetAsync(); async.GetWorkspaceSwitch() != nil {
+		async.WorkspaceSwitch = &frontendv1.FeedMergeWorkspaceSwitch{
 			Label: &frontendv1.FeedMergeWorkspaceSwitchLabel{Text: removedSwitchLabel},
 			Availability: &frontendv1.FeedMergeWorkspaceSwitch_Removed{
 				Removed: &frontendv1.FeedMergeWorkspaceSwitchRemoved{RemovedAtMs: removedAtMS},

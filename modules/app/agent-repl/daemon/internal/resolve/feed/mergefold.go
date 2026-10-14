@@ -1,6 +1,8 @@
 package feed
 
 import (
+	"fmt"
+
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
@@ -8,32 +10,40 @@ import (
 	"agent-repld/internal/ids"
 )
 
-// A MERGE BUBBLE IS OPEN BY DEFAULT AND NEVER COLLAPSES AUTOMATICALLY (owner
-// ruling, 2026-10-08). Its head row is durable, so the fold it carries is what
-// every push, page, reload and restart draws, and THIS FILE IS THE ONE PLACE
-// THAT FOLD IS DECIDED. The merge orchestrator composes a head with no fold;
-// the resolver settles it here on every publication (settleMergeFold) and on
-// every restore of a durable row (resettleRestoredMergeFold):
+// A SYNC MERGE BUBBLE IS OPEN BY DEFAULT AND NEVER COLLAPSES AUTOMATICALLY
+// (owner ruling, 2026-10-08); AN ASYNC MERGE BUBBLE IS FOLDED BY DEFAULT
+// (owner ruling, 2026-10-14). Its head row is durable, so the fold it carries
+// is what every push, page, reload and restart draws, and THIS FILE IS THE ONE
+// PLACE THAT FOLD IS DECIDED. The merge orchestrator composes a head with its
+// mode and no fold; the resolver settles the fold here on every publication
+// (settleMergeFold) and on every restore of a durable row
+// (resettleRestoredMergeFold):
 //
 //   - THE READER'S FOLD WINS (SetMergeFold): the webapp tells the daemon each
 //     fold or unfold the reader makes, the stored row is restated with it under
 //     the `reader` arm, and no later push, restore or default overrides it.
-//   - OTHERWISE THE DAEMON'S DEFAULT (mergeFoldDefault): open, with its one
-//     documented exception, a merge that ended in success.
+//   - OTHERWISE THE DAEMON'S DEFAULT (mergeFoldDefault), read off the head's
+//     mode (frontend.v1.FeedMergeHead.mode) and the merge's state.
 
-// mergeFoldDefault is THE DAEMON'S DEFAULT FOLD for a merge in MERGE's state,
-// and the single site that decides it.
+// mergeFoldDefault is THE DAEMON'S DEFAULT FOLD for MERGE, and the single site
+// that decides it.
 //
-// THE ONE EXCEPTION TO "A MERGE BUBBLE NEVER COLLAPSES AUTOMATICALLY" (owner
-// ruling, 2026-10-08): a merge that ended in SUCCESS is drawn folded. It holds
-// both when the success lands live and when the row is restored or repainted
-// from durable history after a reload or a daemon restart, because both paths
-// come through here. Every other state (queued, running, waiting on the user,
-// in conflicts, failed, abandoned) is drawn open, and nothing folds it but
-// the reader.
+//   - AN ASYNC MERGE IS FOLDED at every state: queued, running, landed, failed
+//     or abandoned. It runs in a hidden merge workspace while the requester's
+//     conversation moves on past its bubble, so the bubble stays a one-line
+//     head until the reader opens it.
+//   - A SYNC MERGE IS OPEN, with the one exception that a merge that ended in
+//     SUCCESS is folded (owner ruling, 2026-10-08). Every other state (queued,
+//     running, waiting on the user, in conflicts, failed, abandoned) is drawn
+//     open, and nothing folds it but the reader.
+//
+// Both hold when the state is pushed live and when the row is restored or
+// repainted from durable history after a reload or a daemon restart, because
+// both paths come through here. A head with no mode is a durable row recorded
+// before heads carried one, and takes the sync default.
 func mergeFoldDefault(merge *frontendv1.FeedMerge) *frontendv1.FeedMergeFold {
 	return &frontendv1.FeedMergeFold{
-		Folded:    merge.GetSuccess() != nil,
+		Folded:    merge.GetHead().GetMode().GetAsync() != nil || merge.GetSuccess() != nil,
 		DecidedBy: &frontendv1.FeedMergeFold_Daemon{Daemon: &frontendv1.FeedMergeFoldByDaemon{}},
 	}
 }
@@ -72,10 +82,17 @@ func readerFold(row *frontendv1.FeedRow) (*frontendv1.FeedMergeFold, bool) {
 // settleMergeFold settles the fold of an incoming merge head ROW before it is
 // published: the reader's fold on the stored row when there is one, the
 // daemon's default otherwise. The caller holds the lock.
+//
+// EVERY PUBLISHED HEAD CARRIES ITS MODE: the merge orchestrator sets it on
+// every head it composes, so a head published without one is a producer
+// defect, and it panics rather than be folded by a guess.
 func (r *resolver) settleMergeFold(s *wsState, feed feedid.Feed, row *frontendv1.FeedRow) {
 	merge, ok := mergeHeadOf(row)
 	if !ok {
 		return
+	}
+	if merge.GetHead().GetMode().GetMode() == nil {
+		panic(fmt.Sprintf("feed: merge head %q was published with no mode (frontend.v1.FeedMergeHead.mode)", row.GetId().GetValue()))
 	}
 	if stored, ok := r.feed(s, feed).rows[row.GetId().GetValue()]; ok {
 		if fold, ok := readerFold(stored); ok {
@@ -92,7 +109,7 @@ func (r *resolver) settleMergeFold(s *wsState, feed feedid.Feed, row *frontendv1
 // resettleRestoredMergeFold settles the fold of a merge head ROW read back
 // from the durable record: the reader's recorded fold stands, and any other
 // (the daemon's, or none on a row recorded before the fold said who decided
-// it) is repainted with the daemon's default for the merge's state.
+// it) is repainted with the daemon's default for the merge's mode and state.
 func (r *resolver) resettleRestoredMergeFold(s *wsState, row *frontendv1.FeedRow) {
 	merge, ok := mergeHeadOf(row)
 	if !ok {
@@ -103,11 +120,16 @@ func (r *resolver) resettleRestoredMergeFold(s *wsState, row *frontendv1.FeedRow
 	}
 	was := merge.GetHead().GetFold()
 	merge.GetHead().Fold = mergeFoldDefault(merge)
+	if merge.GetHead().GetMode().GetMode() == nil {
+		r.logger(s.id).Info("daemon.feed.merge_mode_unrecorded",
+			"a restored merge bubble was recorded before heads carried their mode; it takes the sync merge's default fold",
+			dlog.Context{"row": row.GetId().GetValue(), "folded": merge.GetHead().GetFold().GetFolded()})
+	}
 	if was.GetDaemon() == nil || was.GetFolded() != merge.GetHead().GetFold().GetFolded() {
 		r.logger(s.id).Debug("daemon.feed.merge_fold_restored",
-			"a restored merge bubble's fold was repainted with the daemon's default for its state",
+			"a restored merge bubble's fold was repainted with the daemon's default for its mode and state",
 			dlog.Context{"row": row.GetId().GetValue(), "folded": merge.GetHead().GetFold().GetFolded(),
-				"recorded_by_daemon": was.GetDaemon() != nil})
+				"recorded_by_daemon": was.GetDaemon() != nil, "async": merge.GetHead().GetMode().GetAsync() != nil})
 	}
 }
 

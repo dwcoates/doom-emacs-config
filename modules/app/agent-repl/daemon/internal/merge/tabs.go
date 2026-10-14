@@ -306,14 +306,7 @@ func (o *orchestrator) publishHead(ws ids.WorkspaceID, lease ids.LeaseID, label 
 	o.mu.Unlock()
 	at := o.bubbleOf(ws)
 	row := headRow(at.ws, lease, label, startedMS, result)
-	if at.async() && o.mergeWorkspaceVisible(ws) {
-		row.GetActivity().GetMerge().Head.WorkspaceSwitch = &frontendv1.FeedMergeWorkspaceSwitch{
-			Label: &frontendv1.FeedMergeWorkspaceSwitchLabel{Text: headSwitchLabel},
-			Availability: &frontendv1.FeedMergeWorkspaceSwitch_Available{
-				Available: &frontendv1.FeedMergeWorkspaceSwitchAvailable{Target: at.mergeWS},
-			},
-		}
-	}
+	row.GetActivity().GetMerge().Head.Mode = o.headMode(ws, at)
 	if result == nil && !at.async() {
 		o.mu.Lock()
 		offered := o.offers[ws]
@@ -325,6 +318,25 @@ func (o *orchestrator) publishHead(ws ids.WorkspaceID, lease ids.LeaseID, label 
 		return
 	}
 	o.deps.Feed.UpsertDurable(at.ws, feedid.Feed{Root: true}, row)
+}
+
+// headMode is the head's mode for the bubble AT of merging workspace WS: sync,
+// or async with the switch to the merge workspace once that workspace is
+// visible. The mode is what the feed resolver's default fold reads.
+func (o *orchestrator) headMode(ws ids.WorkspaceID, at bubble) *frontendv1.FeedMergeMode {
+	if !at.async() {
+		return &frontendv1.FeedMergeMode{Mode: &frontendv1.FeedMergeMode_Sync{Sync: &frontendv1.FeedMergeModeSync{}}}
+	}
+	async := &frontendv1.FeedMergeModeAsync{}
+	if o.mergeWorkspaceVisible(ws) {
+		async.WorkspaceSwitch = &frontendv1.FeedMergeWorkspaceSwitch{
+			Label: &frontendv1.FeedMergeWorkspaceSwitchLabel{Text: headSwitchLabel},
+			Availability: &frontendv1.FeedMergeWorkspaceSwitch_Available{
+				Available: &frontendv1.FeedMergeWorkspaceSwitchAvailable{Target: at.mergeWS},
+			},
+		}
+	}
+	return &frontendv1.FeedMergeMode{Mode: &frontendv1.FeedMergeMode_Async{Async: async}}
 }
 
 // headArgs is the last head publishHead drew for one merging workspace.
