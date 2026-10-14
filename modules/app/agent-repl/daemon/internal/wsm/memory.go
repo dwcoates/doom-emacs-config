@@ -46,6 +46,9 @@ func memoryURI() string {
 type memoryKeeper struct {
 	db   *sql.DB
 	conn *sql.Conn
+	// closed makes Close idempotent, as the handle's own *sql.DB Close is:
+	// a store closed twice closes its keeper once.
+	closed sync.Once
 }
 
 // keepMemoryDatabase opens and holds a connection to the database URI names.
@@ -62,9 +65,12 @@ func keepMemoryDatabase(ctx context.Context, uri string) (*memoryKeeper, error) 
 }
 
 // Close releases the keeper's connection, and with it the database once the
-// handle's own connection is closed too.
+// handle's own connection is closed too. Only the first call closes anything;
+// a later one answers nil, as *sql.DB's does.
 func (k *memoryKeeper) Close() error {
-	return errors.Join(k.conn.Close(), k.db.Close())
+	var err error
+	k.closed.Do(func() { err = errors.Join(k.conn.Close(), k.db.Close()) })
+	return err
 }
 
 // isTestBinary is testing.Testing, reached through a variable so the refusal
