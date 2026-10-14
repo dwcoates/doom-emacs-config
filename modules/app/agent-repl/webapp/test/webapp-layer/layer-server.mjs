@@ -30,6 +30,9 @@ import { resolve } from "node:path";
 import { createVitest } from "vitest/node";
 
 const RESULT_PREFIX = "WEBAPP-LAYER-RESULT ";
+// READY_PREFIX marks the one line the driver prints once its warm-up ran:
+// {"ok", "warmMs", "failures"}. No area is sent before it.
+const READY_PREFIX = "WEBAPP-LAYER-READY ";
 const LAYER_DIR = resolve("test/webapp-layer");
 
 const vitest = await createVitest("test", {
@@ -55,19 +58,29 @@ function testsOf(task) {
   return (task.tasks ?? []).reduce((n, child) => n + testsOf(child), 0);
 }
 
-let first = true;
+// THE WARM-UP RUNS FIRST, before any request is read: vite transforms and the
+// worker evaluates the module graph every area imports (warmup.layer.test.ts),
+// so the first area's run costs what every later one does instead of also
+// paying the cold start against its own bound.
+const warmStarted = Date.now();
+const warmupPath = resolve(LAYER_DIR, "warmup.layer.test.ts");
+await vitest.start([warmupPath]);
+const warmed = vitest.state.getFiles([warmupPath])[0];
+const warmFailures = warmed === undefined ? ["vitest ran no warm-up file"] : failuresOf(warmed);
+const warmOk = warmed?.result?.state === "pass" && warmFailures.length === 0;
+process.stdout.write(READY_PREFIX + JSON.stringify({ ok: warmOk, warmMs: Date.now() - warmStarted, failures: warmFailures }) + "\n");
+if (!warmOk) {
+  await vitest.close();
+  process.exit(1);
+}
+
 const lines = createInterface({ input: process.stdin });
 for await (const line of lines) {
   if (line.trim() === "") continue;
   const request = JSON.parse(line);
   const path = resolve(LAYER_DIR, request.file);
   project.provide("webappLayerWorld", request.world);
-  if (first) {
-    await vitest.start([path]);
-    first = false;
-  } else {
-    await vitest.rerunFiles([path]);
-  }
+  await vitest.rerunFiles([path]);
   const file = vitest.state.getFiles([path])[0];
   const answer = { file: request.file, ok: false, tests: 0, failures: [] };
   if (file === undefined) {
