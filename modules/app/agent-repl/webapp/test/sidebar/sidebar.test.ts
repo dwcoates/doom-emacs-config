@@ -934,8 +934,8 @@ describe("an open row's detail panel, placed by the rail", () => {
     const ws = await mountExpanded(host, rect({ left: 8, top: 120, width: 190, height: 24 }));
     // ACT
     window.dispatchEvent(new Event("resize"));
-    // ASSERT: hanging under the row's own line.
-    expect((ws.querySelector(":scope > .detail") as HTMLElement).style.top).toBe("144px");
+    // ASSERT: on the row's own line.
+    expect((ws.querySelector(":scope > .detail") as HTMLElement).style.top).toBe("120px");
   });
 
   it("follows the row when a scroller moves it, because a fixed panel does not", async () => {
@@ -952,7 +952,7 @@ describe("an open row's detail panel, placed by the rail", () => {
       new Event("scroll", { bubbles: false }),
     );
     // ASSERT
-    expect((ws.querySelector(":scope > .detail") as HTMLElement).style.top).toBe("84px");
+    expect((ws.querySelector(":scope > .detail") as HTMLElement).style.top).toBe("60px");
   });
 
   it("stops being placed once the rail is disposed", async () => {
@@ -969,7 +969,7 @@ describe("an open row's detail panel, placed by the rail", () => {
     );
     window.dispatchEvent(new Event("resize"));
     // ASSERT: the panel the disposed rail drew is nobody's to move any more.
-    expect(detail.style.top).toBe("144px");
+    expect(detail.style.top).toBe("120px");
   });
 });
 

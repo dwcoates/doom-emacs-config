@@ -67,7 +67,7 @@ import { viewedMode } from "./viewed.js";
 import { rosterRowMark, type RosterStatusCase, type RowMarkers } from "./tones.js";
 import { toneClass } from "../vocab.js";
 import { guardMalformed } from "../rpc/guard.js";
-import { clampReveal } from "../topbar/clamp.js";
+import { clampBeside } from "../topbar/clamp.js";
 import {
   buildSelectWorkspaceRequest,
   buildSetWorkspaceHiddenRequest,
@@ -699,18 +699,26 @@ export function paintRowDetail(ws: HTMLElement, open: boolean): void {
  * the rail and was cropped at the rail's bottom edge; `position: fixed` is the
  * one positioning that escapes BOTH, since neither ancestor is transformed.
  *
- * Placing it is then arithmetic over rectangles, and it is the topbar reveals'
- * arithmetic — `clampReveal`, which puts a panel under its anchor, slides it
- * left only as far as the right edge demands, and caps its height at what is
- * left below it so it scrolls inside itself instead of running off the bottom.
- * A second implementation of "stay inside the window" is exactly the drift the
- * reveals' helper exists to prevent.
+ * THE PANEL GROWS OUT OF THE ROW'S RIGHT EDGE (owner request, 2026-10-14):
+ * its top-left corner sits at the top-right corner of the row's own line, so
+ * it covers no workspace name or duration in the rail and spills into the
+ * feed instead, on the line of the workspace it describes. It may cover the
+ * topbar or the footer when the window demands it.
+ *
+ * Placing it is then arithmetic over rectangles, shared with the topbar
+ * reveals — `clampBeside`, which slides it left or up only as far as the
+ * window's edges demand and caps its height so it scrolls inside itself
+ * instead of running off the bottom. A second implementation of "stay inside
+ * the window" is exactly the drift the shared helpers exist to prevent.
  */
 export function placeRowDetail(ws: HTMLElement): void {
   const line = ws.querySelector<HTMLElement>(":scope > .row");
   const detail = ws.querySelector<HTMLElement>(":scope > .detail");
   if (line === null || detail === null) return;
-  const placement = clampReveal(line.getBoundingClientRect(), detail.getBoundingClientRect(), {
+  // Measured at its natural height: a cap the last placement applied would
+  // otherwise hold a panel that moved up the window at its old, shorter size.
+  detail.style.maxHeight = "";
+  const placement = clampBeside(line.getBoundingClientRect(), detail.getBoundingClientRect(), {
     width: window.innerWidth,
     height: window.innerHeight,
   });
