@@ -104,3 +104,15 @@ export function repaintMark(el: HTMLElement, className: string, text: string): v
   if (el.className !== className) el.className = className;
   if (el.textContent !== text) el.textContent = text;
 }
+
+/**
+ * The `ResizeObserver` of the page EL lives in, or null when that page has
+ * none (a detached document, or a host without the capability). Every
+ * measurer asks through here; what an absent observer means is each
+ * caller's own to say.
+ */
+export function pageResizeObserver(el: Node): typeof ResizeObserver | null {
+  const view = el.ownerDocument?.defaultView;
+  if (view === null || view === undefined || typeof view.ResizeObserver !== "function") return null;
+  return view.ResizeObserver;
+}
