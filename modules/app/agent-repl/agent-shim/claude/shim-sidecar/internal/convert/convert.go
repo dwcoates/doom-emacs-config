@@ -222,7 +222,7 @@ type Converter struct {
 	joinedOffset int64
 
 	// pendingCut is a compaction drawn with the placeholder because its summary
-	// was not the line after the boundary, kept until the summary that names
+	// was not in the boundary's batch, kept until the summary descending from
 	// that boundary arrives (contextcut.go). Nil whenever no cut is waiting.
 	pendingCut *pendingCompaction
 
@@ -261,9 +261,10 @@ func (c *Converter) SetObserver(o Observer) {
 
 // Line converts one decoded transcript line into the entries it implies.
 //
-// `next` is the line that FOLLOWS this one IN THE FILE, or nil at the end of a
-// batch. It exists for exactly one record: a compaction boundary, whose summary
-// the harness writes as the following line.
+// `following` is the batch's records AFTER this one, in FILE order (nil past
+// the end of a batch). It exists for exactly one record: a compaction
+// boundary, whose summary the harness writes after it — not always on the very
+// next line (compactSummaryAfter).
 //
 // It NEVER returns zero entries for a line it was given, except for the EXEMPT
 // SET, the NEVER-PERSISTED RESIDUE KINDS and a KEEP-ALIVE TURN'S RECORDS, all
@@ -271,7 +272,7 @@ func (c *Converter) SetObserver(o Observer) {
 // READ: every line is decoded and classified, and irrelevance to a reader is
 // never a reason to stop reading one — only, for the ruled kinds, a reason not
 // to store it.
-func (c *Converter) Line(record map[string]any, at Attribution, next map[string]any) []*storev1.StoreEntry {
+func (c *Converter) Line(record map[string]any, at Attribution, following []map[string]any) []*storev1.StoreEntry {
 	// SET ONCE, HERE, FOR THE WHOLE RECORD. Attribution travels by value, so
 	// every conversion this record fans out to carries the vendor's uuid without
 	// thirty call sites having to pass it — and residue minted anywhere in that
@@ -290,7 +291,11 @@ func (c *Converter) Line(record map[string]any, at Attribution, next map[string]
 	// states what the vendor recorded. A keep-alive's record is converted too,
 	// so the joins it opens or settles stay exactly as warm as any other's.
 	c.openedTurn = ""
-	entries := c.lineEntries(record, at, next)
+	// A WAITING CUT LEARNS WHICH RECORDS DESCEND FROM ITS BOUNDARY before this
+	// one converts, so the summary that does is recognized by its own parent
+	// link however many records stand between them (contextcut.go).
+	c.pendingCut.extend(record)
+	entries := c.lineEntries(record, at, following)
 	// AN ANSWER DECIDES WHICH VERSION OF A RE-SENT PROMPT ITS ROW HOLDS
 	// (resend.go), read off the record's own parent link after the conversion
 	// that may have opened or joined a set.
@@ -319,7 +324,7 @@ func (c *Converter) Line(record map[string]any, at Attribution, next map[string]
 }
 
 // lineEntries is the conversion itself.
-func (c *Converter) lineEntries(record map[string]any, at Attribution, next map[string]any) []*storev1.StoreEntry {
+func (c *Converter) lineEntries(record map[string]any, at Attribution, following []map[string]any) []*storev1.StoreEntry {
 	if !c.joined {
 		c.joined = true
 		c.joinedOffset = at.Offset
@@ -345,7 +350,7 @@ func (c *Converter) lineEntries(record map[string]any, at Attribution, next map[
 	case "assistant":
 		return c.assistantLine(record, at)
 	case "system":
-		return c.systemLine(record, at, next)
+		return c.systemLine(record, at, following)
 	case "attachment":
 		return c.attachmentLine(record, at)
 	default:

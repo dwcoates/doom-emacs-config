@@ -46,16 +46,17 @@ func (h *SessionTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*
 	h.log.With(handleCtx("transcript-handle", ctx)).
 		LogVerbose("handling frames=%d records_observed=%d", len(frames), ctx.RecordsObserved)
 
-	// A compaction boundary at the very end of a batch is UNSETTLED: its summary
-	// is the next line in the file and may not be written yet. holdCount defers
-	// it — leaving the reader's cursor parked BEFORE it — rather than converting
-	// it on half the evidence and throwing the summary away for good.
+	// A compaction boundary whose summary the batch does not hold is
+	// UNSETTLED: the summary may not be written yet. holdCount defers it and
+	// everything after it — leaving the reader's cursor parked BEFORE it —
+	// rather than converting it on half the evidence, which draws the
+	// placeholder over the summary the stream plane already stored.
 	originalCount := len(frames)
 	frames = frames[:h.holdCount(frames, ctx)]
 	if len(frames) != originalCount {
 		h.log.With(handleCtx("hold", ctx)).
 			With(logging.Context{Offset: logging.Off(ctx.HeldOffset)}).
-			Log("deferred the trailing compaction boundary: frames=%d processed=%d held_deliveries=%d",
+			Log("deferred the compaction boundary awaiting its summary, with the frames after it: frames=%d processed=%d held_deliveries=%d",
 				originalCount, len(frames), ctx.HeldDeliveries)
 	}
 
@@ -84,6 +85,7 @@ func (h *SessionTranscriptHandler) Prime(prefix io.Reader, ctx *Context) error {
 // durable evidence rather than a silent drop.
 func convertFrames(conv *convert.Converter, log *logging.Bound, frames []tail.Frame, ctx *Context) []*storev1.StoreEntry {
 	var out []*storev1.StoreEntry
+	objs := records(frames)
 	for i, frame := range frames {
 		at := attribute(ctx, frame.Offset)
 		if frame.ParseErr != nil {
@@ -94,7 +96,7 @@ func convertFrames(conv *convert.Converter, log *logging.Bound, frames []tail.Fr
 			out = append(out, unparsed)
 			continue
 		}
-		converted := conv.Line(frame.Obj, at, lookahead(frames, i+1))
+		converted := conv.Line(frame.Obj, at, objs[i+1:])
 		logResidue(log, ctx, frame.Offset, converted)
 		out = append(out, converted...)
 		// WHAT THIS RECORD NO LONGER CONVERTS TO, for a re-read of bytes an
@@ -119,9 +121,10 @@ const maxHoldDeliveries = 1
 // holdCount returns how many frames may be converted NOW, and records on ctx
 // whatever it deferred.
 //
-// It defers exactly one frame, the batch's LAST, and only when that frame is a
-// compaction boundary — the sole record whose meaning depends on a line that may
-// not be written yet. Everything else is settled by its own bytes.
+// It defers the batch's compaction boundary whose summary the batch does not
+// hold, WITH every frame after it — the boundary is the sole record whose
+// meaning depends on a line that may not be written yet, and the cursor can
+// only park before it. Everything else is settled by its own bytes.
 //
 // A DEFERRAL IS ONLY EVER TAKEN WHEN THE READER PROMISES TO HAND THE FRAME BACK
 // (ctx.Redelivers). A handler given one standalone batch has no next delivery, so
@@ -136,33 +139,29 @@ func (h *SessionTranscriptHandler) holdCount(frames []tail.Frame, ctx *Context) 
 	if n == 0 || !ctx.Redelivers {
 		return n
 	}
-	last := frames[n-1]
-	if last.ParseErr != nil {
-		// An unparsable frame is settled: it is stored as unparsed now, and no
-		// later line can change that.
+	waiting := convert.AwaitsCompactSummary(records(frames))
+	if waiting < 0 {
 		return n
 	}
-	if !convert.IsCompactBoundary(last.Obj) {
-		return n
-	}
-	if heldOffset == last.Offset && heldFor >= maxHoldDeliveries {
+	boundary := frames[waiting]
+	if heldOffset == boundary.Offset && heldFor >= maxHoldDeliveries {
 		// Held once already and the file still says nothing after it. Stop
 		// waiting: the boundary converts without a summary, loudly.
 		// INFO, NOT WARN: converting without one is no longer a loss. The cut is
-		// drawn with the stated placeholder, and a summary that names this
-		// boundary supersedes it whenever it arrives, however many deliveries
-		// later (convert.attachCompactSummary).
-		h.log.With(handleCtx("hold", ctx)).With(logging.Context{Offset: logging.Off(last.Offset)}).
-			Log("the held compaction boundary was held for %d delivery and no summary followed; converting it with the placeholder, which a later summary naming it supersedes", heldFor)
+		// drawn with the stated placeholder, and the summary descending from
+		// this boundary supersedes it whenever it arrives, however many
+		// deliveries later (convert.attachCompactSummary).
+		h.log.With(handleCtx("hold", ctx)).With(logging.Context{Offset: logging.Off(boundary.Offset)}).
+			Log("the held compaction boundary was held for %d delivery and no summary followed; converting it with the placeholder, which a later summary descending from it supersedes", heldFor)
 		return n
 	}
-	if heldOffset == last.Offset {
+	if heldOffset == boundary.Offset {
 		ctx.HeldDeliveries = heldFor + 1
 	} else {
 		ctx.HeldDeliveries = 1
 	}
-	ctx.HeldOffset = last.Offset
-	return n - 1
+	ctx.HeldOffset = boundary.Offset
+	return waiting
 }
 
 // Conv exposes the handler's converter, so the reader can read the per-file

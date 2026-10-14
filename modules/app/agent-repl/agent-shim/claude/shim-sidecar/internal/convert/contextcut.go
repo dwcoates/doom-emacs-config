@@ -5,11 +5,15 @@ package convert
 // Two producers, one carrier. `/clear` is detected by UNWRAPPING the vendor's
 // expanded command envelope — the literal "/clear" NEVER appears on disk, so
 // anything matching raw prompt text against it misses every real session.
-// Compaction COALESCES the boundary record with the FOLLOWING summary line in
-// FILE ORDER, never timestamp order: the harness composes the summary before
-// writing the boundary that announces it, so the summary's timestamp is EARLIER
-// and a timestamp-ordered assembly pairs every boundary with the wrong summary
-// in a session that compacted more than once.
+// Compaction COALESCES the boundary record with ITS summary: the first summary
+// record AFTER it in FILE ORDER whose parent links lead back to it — never
+// timestamp order, because the harness composes the summary before writing the
+// boundary that announces it, so the summary's timestamp is EARLIER and a
+// timestamp-ordered assembly pairs every boundary with the wrong summary in a
+// session that compacted more than once. The summary is not always the next
+// line: the harness writes `instructions`, `session_context` and `date`
+// attachments between them, each the previous one's child (owner's report,
+// 2026-10-14: 32 of 169 compactions on disk were written that way).
 //
 // Both land as a page line of the MAIN AGENT'S book, keyed
 // `session:context_cut:<the cut's identity>` — the boundary's uuid for a
@@ -18,6 +22,8 @@ package convert
 
 import (
 	"strings"
+
+	"google.golang.org/protobuf/proto"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
@@ -81,9 +87,9 @@ func clearCutIdentity(at Attribution, env envelope) string {
 const NoSummaryWritten = "context compacted; no summary was written"
 
 // contextCompacted stores that history was replaced by a summary of itself.
-func (c *Converter) contextCompacted(record map[string]any, at Attribution, env envelope, agent string, next map[string]any) *storev1.StoreEntry {
+func (c *Converter) contextCompacted(record map[string]any, at Attribution, env envelope, agent string, following []map[string]any) *storev1.StoreEntry {
 	metadata := obj(record["compactMetadata"])
-	summary := compactSummaryText(env.uuid, next)
+	summary := summaryProse(compactSummaryAfter(env.uuid, following))
 
 	compacted := &conversationv1.ContextCompacted{
 		Summary:    &conversationv1.AgentResponseProse{Markdown: summary},
@@ -103,16 +109,16 @@ func (c *Converter) contextCompacted(record map[string]any, at Attribution, env 
 		// nothing here is degraded any more — the condition is stated on the
 		// wire, and the vendor writing no summary is the vendor's business.
 		//
-		// AND THE SUMMARY MAY STILL BE COMING. It is not always the very next
-		// line: a real transcript put a `system/scheduled_task_fire` between a
-		// boundary and its summary, and the summary named the boundary as its
-		// parent. The boundary is remembered here so that summary, whenever it
-		// lands and however many lines or batches later, supersedes this
-		// placeholder on the cut's own key (attachCompactSummary).
+		// AND THE SUMMARY MAY STILL BE COMING: it was not in this batch. The
+		// boundary is remembered, with every record that descends from it, so
+		// that summary, whenever it lands and however many lines or batches
+		// later, supersedes this placeholder on the cut's own key
+		// (attachCompactSummary).
 		compacted.Summary = &conversationv1.AgentResponseProse{Markdown: NoSummaryWritten}
-		c.pendingCut = &pendingCompaction{boundaryUUID: env.uuid, agent: agent, compacted: compacted}
+		c.pendingCut = &pendingCompaction{boundaryUUID: env.uuid, agent: agent, compacted: compacted,
+			descendants: map[string]struct{}{env.uuid: {}}}
 		c.log.With(at.ctxFor("context-compacted")).With(logging.Context{UpsertKey: SessionKey("context_cut", env.uuid)}).
-			Log("compact boundary carries no summary on the following line; the cut is drawn with the stated placeholder %q, and a summary naming this boundary later supersedes it", NoSummaryWritten)
+			Log("compact boundary's summary is not in its batch; the cut is drawn with the stated placeholder %q, and the summary descending from this boundary supersedes it when it arrives (records after it in the batch: %d)", NoSummaryWritten, len(following))
 	} else {
 		c.pendingCut = nil
 		c.log.With(at.ctxFor("context-compacted")).With(logging.Context{UpsertKey: SessionKey("context_cut", env.uuid)}).
@@ -175,10 +181,32 @@ type pendingCompaction struct {
 	boundaryUUID string
 	agent        string
 	compacted    *conversationv1.ContextCompacted
+	// descendants are the uuids of the boundary and of every record since it
+	// whose parent is one of them: the records the summary's parent link may
+	// name.
+	descendants map[string]struct{}
 }
 
-// attachCompactSummary supersedes a placeholder cut with the summary that named
-// its boundary, and answers nil for a summary that names none of ours.
+// extend records RECORD as one of the boundary's descendants when its parent
+// is one. A nil cut waits for nothing, so it learns nothing.
+func (p *pendingCompaction) extend(record map[string]any) {
+	if p == nil {
+		return
+	}
+	if _, ok := p.descendants[str(record["parentUuid"])]; ok && str(record["uuid"]) != "" {
+		p.descendants[str(record["uuid"])] = struct{}{}
+	}
+}
+
+// descendsFrom reports whether RECORD's parent is one of the boundary's
+// descendants.
+func (p *pendingCompaction) descendsFrom(record map[string]any) bool {
+	_, ok := p.descendants[str(record["parentUuid"])]
+	return ok
+}
+
+// attachCompactSummary supersedes a placeholder cut with the summary that
+// descends from its boundary, and answers nil for a summary that does not.
 //
 // THE KEY IS THE CUT'S, THE POSITION IS THIS RECORD'S. Re-emitting under
 // `session:context_cut:<boundary uuid>` is what makes the store replace the
@@ -190,7 +218,7 @@ func (c *Converter) attachCompactSummary(record map[string]any, at Attribution) 
 	if pending == nil {
 		return nil
 	}
-	if str(record["parentUuid"]) != pending.boundaryUUID {
+	if !pending.descendsFrom(record) {
 		return nil
 	}
 	summary := summaryProse(record)
@@ -198,36 +226,68 @@ func (c *Converter) attachCompactSummary(record map[string]any, at Attribution) 
 		return nil
 	}
 	c.pendingCut = nil
-	pending.compacted.Summary = &conversationv1.AgentResponseProse{Markdown: summary}
+	// A COPY, NEVER THE PLACEHOLDER'S OWN MESSAGE: the placeholder's entry
+	// already left with that message, and writing the summary into it would
+	// rewrite an entry this converter no longer owns.
+	compacted := proto.Clone(pending.compacted).(*conversationv1.ContextCompacted)
+	compacted.Summary = &conversationv1.AgentResponseProse{Markdown: summary}
 	c.log.With(at.ctxFor("context-compacted")).With(logging.Context{UpsertKey: SessionKey("context_cut", pending.boundaryUUID)}).
 		Log("the compact boundary's summary arrived on a later line (%d characters); it supersedes the placeholder on the cut's own key", len(summary))
 	return c.contextCutEntry(at, pending.boundaryUUID, pending.agent, &conversationv1.ContextCut{
-		Cut: &conversationv1.ContextCut_Compacted{Compacted: pending.compacted},
+		Cut: &conversationv1.ContextCut_Compacted{Compacted: compacted},
 	})
 }
 
-// compactSummaryText returns the summary carried by the line FOLLOWING a
-// boundary, or "" when that line is not a summary.
+// compactSummaryAfter returns the summary record of the boundary BOUNDARYUUID
+// from FOLLOWING, the records after it in file order, or nil when the batch
+// does not hold it.
+//
+// The summary is the first summary record whose parent links lead back to the
+// boundary through the records between them — or, POSITION BEING ITS OWN
+// CLAIM, the very next record when that summary names no parent at all. A
+// summary naming a parent that does not descend from the boundary is never
+// this boundary's, however close it stands. Reaching another boundary first
+// ends the search: a second boundary means the first one's summary is never
+// coming. A summary descending from something else is not this boundary's,
+// and the search walks on past it.
 //
 // The summary line is typed `user`, which is why it is identified by the
 // envelope's flag and never by its type: it is the harness's own text standing in
 // for the discarded history, not the user's prompt.
-//
-// POSITION IS THE WHOLE CLAIM HERE, and it is why this asks for no parent link:
-// the line immediately after a boundary is that boundary's summary by file
-// order, which is the rule two compactions in one file are told apart by. A
-// summary further away has to name its boundary instead — see
-// attachCompactSummary.
-func compactSummaryText(boundaryUUID string, next map[string]any) string {
-	if next == nil {
-		return ""
+func compactSummaryAfter(boundaryUUID string, following []map[string]any) map[string]any {
+	chain := &pendingCompaction{boundaryUUID: boundaryUUID, descendants: map[string]struct{}{boundaryUUID: {}}}
+	for i, record := range following {
+		if record == nil {
+			// An unparsable line names no parent and is no summary.
+			continue
+		}
+		if IsCompactBoundary(record) {
+			return nil
+		}
+		adjacentOrphan := i == 0 && str(record["parentUuid"]) == ""
+		if summaryProse(record) != "" && (adjacentOrphan || chain.descendsFrom(record)) {
+			return record
+		}
+		chain.extend(record)
 	}
-	if parent := str(next["parentUuid"]); parent != "" && parent != boundaryUUID {
-		// It names a DIFFERENT boundary, so file order is not what it looks
-		// like and this cut's summary is elsewhere.
-		return ""
+	return nil
+}
+
+// AwaitsCompactSummary returns the index in RECORDS of the batch's compaction
+// boundary whose summary the batch does not hold, or -1 when every boundary in
+// it is settled. Only the LAST boundary can be waiting: a later boundary means
+// an earlier one's summary is never coming.
+func AwaitsCompactSummary(records []map[string]any) int {
+	for i := len(records) - 1; i >= 0; i-- {
+		if records[i] == nil || !IsCompactBoundary(records[i]) {
+			continue
+		}
+		if compactSummaryAfter(str(records[i]["uuid"]), records[i+1:]) != nil {
+			return -1
+		}
+		return i
 	}
-	return summaryProse(next)
+	return -1
 }
 
 // summaryProse reads the harness's standing-in text off a compaction summary

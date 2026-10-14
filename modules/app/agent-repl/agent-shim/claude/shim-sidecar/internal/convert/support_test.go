@@ -71,11 +71,7 @@ func convertLines(t *testing.T, c *Converter, lines ...string) []*storev1.StoreE
 	}
 	var out []*storev1.StoreEntry
 	for i, record := range records {
-		var next map[string]any
-		if i+1 < len(records) {
-			next = records[i+1]
-		}
-		out = append(out, c.Line(record, testAttribution(int64(i*1000)), next)...)
+		out = append(out, c.Line(record, testAttribution(int64(i*1000)), records[i+1:])...)
 	}
 	return out
 }
@@ -92,11 +88,7 @@ func convertLinesFrom(t *testing.T, c *Converter, startOffset int64, lines ...st
 	}
 	var out []*storev1.StoreEntry
 	for i, record := range records {
-		var next map[string]any
-		if i+1 < len(records) {
-			next = records[i+1]
-		}
-		out = append(out, c.Line(record, testAttribution(startOffset+int64(i*1000)), next)...)
+		out = append(out, c.Line(record, testAttribution(startOffset+int64(i*1000)), records[i+1:])...)
 	}
 	return out
 }

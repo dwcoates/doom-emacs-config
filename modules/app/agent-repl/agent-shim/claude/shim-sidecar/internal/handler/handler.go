@@ -175,12 +175,14 @@ func handleErr(operation string, ctx *Context) logging.Context {
 	return c
 }
 
-// lookahead returns the decoded record that FOLLOWS a frame in the file, or nil
-// past the end of the batch. It exists for exactly one record: a compaction
-// boundary, whose summary the harness writes as the following line.
-func lookahead(frames []tail.Frame, i int) map[string]any {
-	if i < 0 || i >= len(frames) {
-		return nil
+// records returns the batch's decoded records in file order, nil for a frame
+// that did not parse. A record's lookahead is the slice after it: it exists
+// for exactly one record, a compaction boundary, whose summary the harness
+// writes after it.
+func records(frames []tail.Frame) []map[string]any {
+	out := make([]map[string]any, len(frames))
+	for i, frame := range frames {
+		out[i] = frame.Obj
 	}
-	return frames[i].Obj
+	return out
 }

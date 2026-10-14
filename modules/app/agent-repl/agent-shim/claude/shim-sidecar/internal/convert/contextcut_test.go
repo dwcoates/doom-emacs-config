@@ -2,7 +2,11 @@ package convert
 
 // contextcut_test.go — /clear detection through the expanded command envelope.
 
-import "testing"
+import (
+	"slices"
+	"strings"
+	"testing"
+)
 
 // clearEnvelope is what the harness ACTUALLY writes for `/clear`. The literal
 // "/clear" never appears on disk, so anything matching raw prompt text against it
@@ -222,17 +226,17 @@ func TestASummarylessCompactionIsStatedAtInfo(t *testing.T) {
 	convertLines(t, c, line)
 
 	// Assert.
-	if got := levelForMessage(t, sink, "carries no summary on the following line"); got != "info" {
+	if got := levelForMessage(t, sink, "summary is not in its batch"); got != "info" {
 		t.Fatalf("the summary-less boundary was recorded at %q, want info", got)
 	}
 }
 
 // TestASummaryThatArrivesLaterSupersedesThePlaceholder is the shape the owner's
 // own transcript carries: a `system/scheduled_task_fire` between the boundary
-// and its summary, and the summary naming the boundary as its parent. The
-// boundary's one-record lookahead cannot see past the intervening line, so the
-// summary would otherwise be dropped by the branch that folds it into a cut it
-// never reached.
+// and its summary, and the summary naming the boundary as its parent, written
+// AFTER the boundary's batch ended. The boundary's lookahead reaches only its
+// own batch, so the summary would otherwise be dropped by the branch that
+// folds it into a cut it never reached.
 func TestASummaryThatArrivesLaterSupersedesThePlaceholder(t *testing.T) {
 	// Arrange.
 	c := newTestConverter(t)
@@ -242,8 +246,9 @@ func TestASummaryThatArrivesLaterSupersedesThePlaceholder(t *testing.T) {
 	summary := `{"type":"user","uuid":"u1","parentUuid":"b1","isCompactSummary":true,"isSidechain":false,` +
 		`"timestamp":"` + ts2 + `","message":{"role":"user","content":"the story so far"}}`
 
-	// Act.
-	entries := convertLines(t, c, boundary, between, summary)
+	// Act: the summary lands in a LATER batch than its boundary.
+	entries := convertLines(t, c, boundary, between)
+	entries = append(entries, convertLinesFrom(t, c, 2000, summary)...)
 
 	// Assert: ONE key, carrying the real summary — the later write supersedes
 	// the placeholder rather than standing a second cut beside it.
@@ -363,6 +368,142 @@ func TestIsClearCommandIsTheRuleTheConverterDrawsACutBy(t *testing.T) {
 			}
 			if shared := c.isClearCommand(tc.message); shared != got {
 				t.Errorf("the converter's isClearCommand = %v, the exported rule = %v; the two spellings diverged", shared, got)
+			}
+		})
+	}
+}
+
+// attachmentLine is one of the attachment records the harness writes between a
+// compaction boundary and its summary, the child of PARENT.
+func attachmentLine(uuid, parent, kind string) string {
+	return `{"type":"attachment","uuid":"` + uuid + `","parentUuid":"` + parent + `","isSidechain":false,` +
+		`"timestamp":"` + ts1 + `","attachment":{"type":"` + kind + `"}}`
+}
+
+// chainedSummaryLine is a compaction summary whose parent is PARENT.
+func chainedSummaryLine(parent, prose string) string {
+	return `{"type":"user","uuid":"u1","parentUuid":"` + parent + `","isCompactSummary":true,"isSidechain":false,` +
+		`"timestamp":"` + ts2 + `","message":{"role":"user","content":"` + prose + `"}}`
+}
+
+const chainedBoundaryLine = `{"type":"system","subtype":"compact_boundary","uuid":"b1","isSidechain":false,` +
+	`"timestamp":"` + ts1 + `","compactMetadata":{"trigger":"auto","preTokens":100,"postTokens":10}}`
+
+// TestASummaryBehindTheAttachmentChainCoalescesWithItsBoundary is the owner's
+// report of 2026-10-14: the harness wrote `instructions`, `session_context` and
+// `date` attachments between the boundary and its summary, each the previous
+// one's child, and the cut was drawn with the placeholder.
+func TestASummaryBehindTheAttachmentChainCoalescesWithItsBoundary(t *testing.T) {
+	// Arrange.
+	c := newTestConverter(t)
+	lines := []string{
+		chainedBoundaryLine,
+		attachmentLine("a1", "b1", "instructions"),
+		attachmentLine("a2", "a1", "session_context"),
+		attachmentLine("a3", "a2", "date"),
+		chainedSummaryLine("a3", "the story so far"),
+	}
+
+	// Act.
+	entries := convertLines(t, c, lines...)
+
+	// Assert: one cut write, carrying the summary.
+	var carried []string
+	for _, e := range entries {
+		if compacted := frameOf(e).GetUpdate().GetContextCut().GetCompacted(); compacted != nil {
+			carried = append(carried, compacted.GetSummary().GetMarkdown())
+		}
+	}
+	if !slices.Equal(carried, []string{"the story so far"}) {
+		t.Fatalf("cut writes carried %q, want one write carrying the summary", carried)
+	}
+}
+
+// TestASummaryBehindTheAttachmentChainInALaterBatchSupersedesThePlaceholder —
+// the chain is remembered across batches, so the summary still finds its
+// boundary when the batch ended inside the chain.
+func TestASummaryBehindTheAttachmentChainInALaterBatchSupersedesThePlaceholder(t *testing.T) {
+	// Arrange.
+	c := newTestConverter(t)
+	entries := convertLines(t, c,
+		chainedBoundaryLine,
+		attachmentLine("a1", "b1", "instructions"),
+		attachmentLine("a2", "a1", "session_context"))
+
+	// Act.
+	later := convertLinesFrom(t, c, 3000,
+		attachmentLine("a3", "a2", "date"),
+		chainedSummaryLine("a3", "the story so far"))
+
+	// Assert.
+	if got := frameOf(entryByKey(t, entries, SessionKey("context_cut", "b1"))).GetUpdate().GetContextCut().GetCompacted().GetSummary().GetMarkdown(); got != NoSummaryWritten {
+		t.Fatalf("first batch's cut = %q, want the placeholder", got)
+	}
+	if got := frameOf(entryByKey(t, later, SessionKey("context_cut", "b1"))).GetUpdate().GetContextCut().GetCompacted().GetSummary().GetMarkdown(); got != "the story so far" {
+		t.Fatalf("later batch's cut = %q, want the summary superseding the placeholder", got)
+	}
+}
+
+// TestASummaryNotDescendingFromTheBoundaryIsNotItsSummary — distance is safe
+// only because the summary's parent links lead back to the boundary, so a
+// summary whose links lead elsewhere leaves the placeholder standing.
+func TestASummaryNotDescendingFromTheBoundaryIsNotItsSummary(t *testing.T) {
+	// Arrange.
+	c := newTestConverter(t)
+
+	// Act.
+	entries := convertLines(t, c,
+		chainedBoundaryLine,
+		attachmentLine("a1", "b1", "instructions"),
+		chainedSummaryLine("elsewhere", "someone else's history"))
+
+	// Assert.
+	if got := frameOf(entryByKey(t, entries, SessionKey("context_cut", "b1"))).GetUpdate().GetContextCut().GetCompacted().GetSummary().GetMarkdown(); got != NoSummaryWritten {
+		t.Fatalf("summary = %q, want the placeholder left standing", got)
+	}
+}
+
+// TestAwaitsCompactSummaryNamesTheBoundaryTheBatchCannotSettle pins the hold's
+// question: which boundary's summary the batch does not hold.
+func TestAwaitsCompactSummaryNamesTheBoundaryTheBatchCannotSettle(t *testing.T) {
+	secondBoundary := strings.Replace(chainedBoundaryLine, `"uuid":"b1"`, `"uuid":"b2"`, 1)
+	tests := []struct {
+		name  string
+		lines []string
+		want  int
+	}{
+		{name: "no boundary", lines: []string{attachmentLine("a1", "x", "date")}, want: -1},
+		{name: "a trailing boundary", lines: []string{attachmentLine("a0", "x", "date"), chainedBoundaryLine}, want: 1},
+		{name: "a boundary followed only by its attachments", lines: []string{
+			chainedBoundaryLine, attachmentLine("a1", "b1", "instructions"), attachmentLine("a2", "a1", "date"),
+		}, want: 0},
+		{name: "a boundary whose summary ends the chain", lines: []string{
+			chainedBoundaryLine, attachmentLine("a1", "b1", "instructions"), chainedSummaryLine("a1", "s"),
+		}, want: -1},
+		{name: "a boundary followed by a summary descending from elsewhere", lines: []string{
+			chainedBoundaryLine, chainedSummaryLine("elsewhere", "s"),
+		}, want: 0},
+		{name: "an earlier unsettled boundary behind a settled one", lines: []string{
+			chainedBoundaryLine, secondBoundary, chainedSummaryLine("b2", "s"),
+		}, want: -1},
+		{name: "the later of two boundaries unsettled", lines: []string{
+			chainedBoundaryLine, chainedSummaryLine("b1", "s"), secondBoundary,
+		}, want: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			records := make([]map[string]any, len(tt.lines))
+			for i, line := range tt.lines {
+				records[i] = decode(t, line)
+			}
+
+			// Act.
+			got := AwaitsCompactSummary(records)
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("AwaitsCompactSummary = %d, want %d", got, tt.want)
 			}
 		})
 	}

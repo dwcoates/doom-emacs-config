@@ -12,7 +12,7 @@ import (
 )
 
 // systemLine converts a `system` record by its subtype.
-func (c *Converter) systemLine(record map[string]any, at Attribution, next map[string]any) []*storev1.StoreEntry {
+func (c *Converter) systemLine(record map[string]any, at Attribution, following []map[string]any) []*storev1.StoreEntry {
 	env := readEnvelope(record)
 	agent := c.frameAgent(at, env)
 	subtype := str(record["subtype"])
@@ -23,7 +23,7 @@ func (c *Converter) systemLine(record map[string]any, at Attribution, next map[s
 			Log("system line carries no %q field; stored as unknown residue", "subtype")
 		return []*storev1.StoreEntry{UnknownEntry(at, "", "subtype", record)}
 	case "compact_boundary":
-		return []*storev1.StoreEntry{c.contextCompacted(record, at, env, agent, next)}
+		return []*storev1.StoreEntry{c.contextCompacted(record, at, env, agent, following)}
 	case "api_error":
 		return []*storev1.StoreEntry{c.apiError(record, at, env, agent)}
 	case "local_command":

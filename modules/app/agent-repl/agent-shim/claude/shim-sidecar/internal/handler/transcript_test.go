@@ -497,3 +497,73 @@ func TestAHeldBoundaryNamesNoRetiredKey(t *testing.T) {
 		t.Fatalf("Retired = %v, want nothing for a held record", ctx.Retired)
 	}
 }
+
+// ---- a summary behind the attachment chain (owner's report, 2026-10-14) ----
+
+// chainBoundary, its attachments and its chained summary are the shape the
+// harness writes now: `instructions`, `session_context` and `date` between the
+// boundary and its summary, each the previous record's child.
+const chainBoundary = `{"type":"system","subtype":"compact_boundary","uuid":"cb-1","isSidechain":false,` +
+	`"timestamp":"2026-10-14T18:31:00.270Z","compactMetadata":{"trigger":"auto","preTokens":967437,"postTokens":16295}}`
+
+const chainAttachments = `{"type":"attachment","uuid":"ca-1","parentUuid":"cb-1","isSidechain":false,"timestamp":"2026-10-14T18:31:00.271Z","attachment":{"type":"instructions"}}` + "\n" +
+	`{"type":"attachment","uuid":"ca-2","parentUuid":"ca-1","isSidechain":false,"timestamp":"2026-10-14T18:31:00.272Z","attachment":{"type":"session_context"}}` + "\n" +
+	`{"type":"attachment","uuid":"ca-3","parentUuid":"ca-2","isSidechain":false,"timestamp":"2026-10-14T18:31:00.273Z","attachment":{"type":"date"}}`
+
+const chainSummary = `{"type":"user","uuid":"cs-1","parentUuid":"ca-3","isCompactSummary":true,"isSidechain":false,` +
+	`"timestamp":"2026-10-14T18:31:00.274Z","message":{"role":"user","content":"the story so far"}}`
+
+func TestHoldDefersABoundaryWithTheAttachmentsAfterIt(t *testing.T) {
+	// Arrange: the batch ends inside the attachment chain, before the summary.
+	h := NewSessionTranscriptHandler(testLogger(t))
+	ctx := sessionContext("/p/s.jsonl", "s")
+	ctx.Redelivers = true
+	frames := framesFrom(t, chainBoundary+"\n"+chainAttachments)
+
+	// Act.
+	entries := h.Handle(frames, ctx)
+
+	// Assert: nothing converted, and the cursor parks before the boundary, so
+	// no placeholder is drawn over the summary the stream plane already stored.
+	if len(entries) != 0 {
+		t.Fatalf("entries = %d, want 0: the boundary and the frames after it must be held", len(entries))
+	}
+	if ctx.HeldOffset != frames[0].Offset || ctx.HeldDeliveries != 1 {
+		t.Fatalf("held offset=%d deliveries=%d, want offset=%d deliveries=1", ctx.HeldOffset, ctx.HeldDeliveries, frames[0].Offset)
+	}
+}
+
+func TestABoundaryCoalescesWithItsSummaryBehindTheAttachmentChain(t *testing.T) {
+	// Arrange.
+	h := NewSessionTranscriptHandler(testLogger(t))
+	ctx := sessionContext("/p/s.jsonl", "s")
+	ctx.Redelivers = true
+
+	// Act.
+	entries := h.Handle(framesFrom(t, chainBoundary+"\n"+chainAttachments+"\n"+chainSummary), ctx)
+
+	// Assert.
+	cut := entryByKey(t, entries, convert.SessionKey("context_cut", "cb-1"))
+	if got := frameOf(cut).GetUpdate().GetContextCut().GetCompacted().GetSummary().GetMarkdown(); got != "the story so far" {
+		t.Fatalf("summary = %q, want the summary behind the attachment chain", got)
+	}
+	if ctx.HeldDeliveries != 0 {
+		t.Fatalf("HeldDeliveries = %d, want 0: a settled boundary is never held", ctx.HeldDeliveries)
+	}
+}
+
+func TestTheFramesBeforeAnUnsettledBoundaryStillConvert(t *testing.T) {
+	// Arrange: a settled record, then the boundary awaiting its summary.
+	h := NewSessionTranscriptHandler(testLogger(t))
+	ctx := sessionContext("/p/s.jsonl", "s")
+	ctx.Redelivers = true
+	frames := framesFrom(t, summary+"\n"+chainBoundary+"\n"+chainAttachments)
+
+	// Act.
+	h.Handle(frames, ctx)
+
+	// Assert: the hold starts AT the boundary, not at the batch's start.
+	if ctx.HeldOffset != frames[1].Offset {
+		t.Fatalf("HeldOffset = %d, want the boundary's offset %d", ctx.HeldOffset, frames[1].Offset)
+	}
+}
