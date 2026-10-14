@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   REVEAL_MARGIN_PX,
   clampBeside,
-  clampLeft,
+  clampEdge,
   clampReveal,
   heightBelow,
   type Rect,
@@ -60,21 +60,21 @@ describe("clampReveal", () => {
   });
 });
 
-describe("clampLeft", () => {
+describe("clampEdge", () => {
   it("keeps the preferred edge when the box fits", () => {
-    expect(clampLeft(100, 200, VIEWPORT)).toBe(100);
+    expect(clampEdge(100, 200, 1000)).toBe(100);
   });
 
-  it("slides left only as far as the right edge demands", () => {
-    expect(clampLeft(900, 200, VIEWPORT)).toBe(1000 - REVEAL_MARGIN_PX - 200);
+  it("slides back only as far as the far edge demands", () => {
+    expect(clampEdge(900, 200, 1000)).toBe(1000 - REVEAL_MARGIN_PX - 200);
   });
 
-  it("holds a box one margin clear of the left edge", () => {
-    expect(clampLeft(0, 200, VIEWPORT)).toBe(REVEAL_MARGIN_PX);
+  it("holds a box one margin clear of the near edge", () => {
+    expect(clampEdge(0, 200, 1000)).toBe(REVEAL_MARGIN_PX);
   });
 
-  it("overflows right rather than left for a box wider than the viewport", () => {
-    expect(clampLeft(400, 1200, VIEWPORT)).toBe(REVEAL_MARGIN_PX);
+  it("overflows the far edge rather than the near one for a box longer than the axis", () => {
+    expect(clampEdge(400, 1200, 1000)).toBe(REVEAL_MARGIN_PX);
   });
 });
 
@@ -89,7 +89,7 @@ describe("heightBelow", () => {
 });
 
 describe("clampReveal shares the clamp arithmetic", () => {
-  it("answers clampLeft over the anchor's left and heightBelow under the anchor", () => {
+  it("answers clampEdge over the anchor's left and heightBelow under the anchor", () => {
     // ARRANGE
     const anchor = anchorAt(950, 40);
     const reveal = rect(0, 0, 300, 900);
@@ -97,7 +97,7 @@ describe("clampReveal shares the clamp arithmetic", () => {
     const placement = clampReveal(anchor, reveal, VIEWPORT);
     // ASSERT
     expect(placement).toEqual({
-      left: clampLeft(anchor.left, reveal.width, VIEWPORT),
+      left: clampEdge(anchor.left, reveal.width, VIEWPORT.width),
       top: anchor.bottom,
       maxHeight: heightBelow(anchor.bottom, VIEWPORT),
     });
@@ -139,7 +139,7 @@ describe("clampBeside", () => {
     );
   });
 
-  it("answers clampLeft over the anchor's right and heightBelow under its own top", () => {
+  it("answers clampEdge on both axes and heightBelow under its own top", () => {
     // ARRANGE
     const anchor = rect(700, 100, 190, 24);
     const reveal = rect(0, 0, 300, 200);
@@ -147,8 +147,8 @@ describe("clampBeside", () => {
     const placement = clampBeside(anchor, reveal, VIEWPORT);
     // ASSERT
     expect(placement).toEqual({
-      left: clampLeft(anchor.right, reveal.width, VIEWPORT),
-      top: anchor.top,
+      left: clampEdge(anchor.right, reveal.width, VIEWPORT.width),
+      top: clampEdge(anchor.top, reveal.height, VIEWPORT.height),
       maxHeight: heightBelow(anchor.top, VIEWPORT),
     });
   });
