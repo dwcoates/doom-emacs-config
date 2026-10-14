@@ -1,7 +1,6 @@
 package feed
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -12,6 +11,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
@@ -626,7 +626,7 @@ func (r *resolver) logger(ws ids.WorkspaceID) dlog.Logger {
 	global := r.deps.Log.Global()
 	dir, err := r.deps.WorkspaceDir(ws)
 	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		if ctxend.Is(err) {
 			// THE DAEMON IS GOING AWAY, and the workspace lookup runs under
 			// the daemon's own context. A cancelled read is that shutdown, not
 			// an unresolvable workspace: it is recorded at INFO, and the global

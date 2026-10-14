@@ -363,6 +363,23 @@ describe("an interim's growing corner in WebKit", () => {
     expect(drawn.fromLeft.lineRight).toBeLessThanOrEqual(drawn.fromLeft.stamp.left - GAP + 1);
   });
 
+  it("bounds an open interim's lines a text gap before its token, whatever word ends them", async () => {
+    // Arrange: the open corner is a float, so its margin box is where every
+    // line beside it must end.
+    await draw(page, { text: prose(40), ghost: true, ellipsis: "open" });
+
+    // Act
+    const bound = await page.evaluate(() => {
+      const corner = document.querySelector(".usage-corner")!;
+      const stamp = document.querySelector(".usage-stamp")!.getBoundingClientRect();
+      const marginBoxLeft = corner.getBoundingClientRect().left - parseFloat(getComputedStyle(corner).marginLeft);
+      return stamp.left - marginBoxLeft;
+    });
+
+    // Assert
+    expect(Math.abs(bound - GAP)).toBeLessThanOrEqual(1);
+  });
+
   it.each(["closed", "open"] as const)("opens a short %s interim by exactly the duration and its gap", async (ellipsis) => {
     // Arrange
     const rest = await draw(page, { text: prose(6), ghost: true, ellipsis });

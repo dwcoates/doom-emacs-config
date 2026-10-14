@@ -5,6 +5,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
+	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 )
@@ -53,7 +54,7 @@ func (s *server) composeWebSessionIdentity(
 	const op = "daemon.server.compose_web_session_identity"
 	session, hasSession, err := s.deps.DB.Session(ctx, ws)
 	if err != nil {
-		if endedOnCancel(err) {
+		if ctxend.Is(err) {
 			log.Info(op, "the web identity was not composed; the stream's context was cancelled",
 				dlog.Context{"stream": "WatchWebWorkspace", "cause": err.Error()})
 			return nil, false

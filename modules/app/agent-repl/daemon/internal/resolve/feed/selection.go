@@ -133,13 +133,13 @@ func (r *resolver) FinalResponses(ws ids.WorkspaceID) []*frontendv1.FeedId {
 	return out
 }
 
-// SelectableText is one selectable row's text and which side of the
-// conversation said it.
-type SelectableText struct {
+// RowText is one root-feed bubble's text and which side of the conversation
+// said it.
+type RowText struct {
 	// Markdown is the row's text as markdown source, verbatim.
 	Markdown string
 	// Prompt is true for a prompt (a user's, or one agent's to another) and
-	// false for an agent's response bubble, so a reply can say which it quotes.
+	// false for an agent's response bubble, so a quote can say which it quotes.
 	Prompt bool
 }
 
@@ -149,33 +149,44 @@ type SelectableText struct {
 // the composer searches is what the reader saw. A miss (false) is a feedid that
 // names no selectable row of this workspace's root feed — the caller's to
 // refuse, never to paper over with an empty text.
-func (r *resolver) SelectableText(ws ids.WorkspaceID, id *frontendv1.FeedId) (SelectableText, bool) {
+func (r *resolver) SelectableText(ws ids.WorkspaceID, id *frontendv1.FeedId) (RowText, bool) {
+	return r.rootRowText(ws, id, selectableMarkdown)
+}
+
+// BubbleText answers the text of one root-feed bubble as markdown, whether or
+// not it can be selected: a thinking bubble has text a link clicked inside it
+// can quote, though the reader never selects it. A miss (false) is a feedid
+// that names no landed bubble of this workspace's root feed.
+func (r *resolver) BubbleText(ws ids.WorkspaceID, id *frontendv1.FeedId) (RowText, bool) {
+	return r.rootRowText(ws, id, bubbleMarkdown)
+}
+
+// rootRowText reads the root-feed row ID names, as last published, through
+// RULE.
+func (r *resolver) rootRowText(ws ids.WorkspaceID, id *frontendv1.FeedId, rule func(*frontendv1.FeedRow) (string, bool)) (RowText, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s, ok := r.workspaces[ws]
 	if !ok {
-		return SelectableText{}, false
+		return RowText{}, false
 	}
 	root, ok := s.feeds[r.feedKey(ws, feedid.Feed{Root: true})]
 	if !ok {
-		return SelectableText{}, false
+		return RowText{}, false
 	}
 	row, ok := root.rows[id.GetValue()]
-	if !ok || row.GetSelectable() == nil {
-		return SelectableText{}, false
+	if !ok {
+		return RowText{}, false
 	}
-	markdown, ok := selectableMarkdown(row)
-	return SelectableText{Markdown: markdown, Prompt: row.GetUserPrompt() != nil || row.GetAgentPrompt() != nil}, ok
+	markdown, ok := rule(row)
+	return RowText{Markdown: markdown, Prompt: row.GetUserPrompt() != nil || row.GetAgentPrompt() != nil}, ok
 }
 
-// selectableMarkdown is THE ONE RULE for which rows the reader can select, and
-// what a selected row says. A row is selectable when it is a prompt (a user's
-// or another agent's) or a LANDED response bubble (final, interim or
-// thinking); a response still arriving, a broken one and a vendor notice are
-// not, and neither is any other kind. Stamping (stampSelectable) and reading
-// (SelectableText) both go through it, so a row is selectable exactly when
-// its text can be read.
-func selectableMarkdown(row *frontendv1.FeedRow) (string, bool) {
+// bubbleMarkdown is THE ONE RULE for which rows are bubbles with text, and
+// what each says: a prompt (a user's or another agent's) or a LANDED response
+// bubble (final, interim or thinking); a response still arriving, a broken one
+// and a vendor notice are not, and neither is any other kind.
+func bubbleMarkdown(row *frontendv1.FeedRow) (string, bool) {
 	switch {
 	case row.GetUserPrompt() != nil:
 		return joinPromptText(userPromptTexts(row.GetUserPrompt())), true
@@ -189,6 +200,20 @@ func selectableMarkdown(row *frontendv1.FeedRow) (string, bool) {
 		return resp.GetSuccess().GetProse().GetMarkdown(), true
 	}
 	return "", false
+}
+
+// selectableMarkdown is THE ONE RULE for which rows the reader can select, and
+// what a selected row says: every bubble with text (bubbleMarkdown) except a
+// THINKING bubble. A click on a thinking bubble only expands it, with no
+// selection (owner specification, 2026-10-14), so the daemon never offers one
+// for selection and refuses a click that names one. Stamping (stampSelectable)
+// and reading (SelectableText) both go through it, so a row is selectable
+// exactly when its text can be read as a selection's.
+func selectableMarkdown(row *frontendv1.FeedRow) (string, bool) {
+	if row.GetActivity().GetResponse().GetThinking() {
+		return "", false
+	}
+	return bubbleMarkdown(row)
 }
 
 // stampSelectable states FeedRow.selectable on a row about to be published to

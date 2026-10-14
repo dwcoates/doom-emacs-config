@@ -223,7 +223,8 @@ func settled(markdown string) *frontendv1.FeedResponse_Success {
 }
 
 // TestSelectableMarkdownIsTheOneRule pins which rows can be selected and what
-// each says: prompts and landed, non-notice response bubbles, nothing else.
+// each says: prompts and landed, non-notice, non-thinking response bubbles,
+// nothing else.
 func TestSelectableMarkdownIsTheOneRule(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -236,7 +237,7 @@ func TestSelectableMarkdownIsTheOneRule(t *testing.T) {
 		{name: "an image-only prompt is selectable with no text", row: promptRowWith(), wantOK: true, wantMarkup: ""},
 		{name: "a final response", row: responseRowWith(&frontendv1.FeedResponse{Result: settled("the answer"), FinalAnswer: true}), wantOK: true, wantMarkup: "the answer"},
 		{name: "an interim response", row: responseRowWith(&frontendv1.FeedResponse{Result: settled("meanwhile")}), wantOK: true, wantMarkup: "meanwhile"},
-		{name: "a thinking response", row: responseRowWith(&frontendv1.FeedResponse{Result: settled("pondering"), Thinking: true}), wantOK: true, wantMarkup: "pondering"},
+		{name: "a thinking response is never selectable", row: responseRowWith(&frontendv1.FeedResponse{Result: settled("pondering"), Thinking: true}), wantOK: false},
 		{name: "a response still arriving", row: responseRowWith(&frontendv1.FeedResponse{Result: &frontendv1.FeedResponse_Update{Update: &frontendv1.FeedResponseUpdate{
 			Prose: &frontendv1.FeedResponseProse{Markdown: "partial"},
 		}}}), wantOK: false},
@@ -259,6 +260,112 @@ func TestSelectableMarkdownIsTheOneRule(t *testing.T) {
 				t.Fatalf("selectableMarkdown = (%q, %v), want (%q, %v)", got, ok, tc.wantMarkup, tc.wantOK)
 			}
 		})
+	}
+}
+
+// TestBubbleMarkdownAdmitsEveryLandedBubble pins the text rule a quote reads:
+// every landed bubble, a thinking one included, and nothing still arriving.
+func TestBubbleMarkdownAdmitsEveryLandedBubble(t *testing.T) {
+	tests := []struct {
+		name       string
+		row        *frontendv1.FeedRow
+		wantOK     bool
+		wantMarkup string
+	}{
+		{name: "a prompt", row: promptRowWith("hi"), wantOK: true, wantMarkup: "hi"},
+		{name: "a final response", row: responseRowWith(&frontendv1.FeedResponse{Result: settled("the answer"), FinalAnswer: true}), wantOK: true, wantMarkup: "the answer"},
+		{name: "a thinking response", row: responseRowWith(&frontendv1.FeedResponse{Result: settled("pondering"), Thinking: true}), wantOK: true, wantMarkup: "pondering"},
+		{name: "a thinking response still arriving", row: responseRowWith(&frontendv1.FeedResponse{Thinking: true, Result: &frontendv1.FeedResponse_Update{Update: &frontendv1.FeedResponseUpdate{
+			Prose: &frontendv1.FeedResponseProse{Markdown: "partial"},
+		}}}), wantOK: false},
+		{name: "a vendor notice", row: responseRowWith(&frontendv1.FeedResponse{Result: settled("interrupted"), Notice: &frontendv1.FeedResponseNotice{}}), wantOK: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got, ok := bubbleMarkdown(tc.row)
+
+			// Assert.
+			if ok != tc.wantOK || got != tc.wantMarkup {
+				t.Fatalf("bubbleMarkdown = (%q, %v), want (%q, %v)", got, ok, tc.wantMarkup, tc.wantOK)
+			}
+		})
+	}
+}
+
+// settledThinking draws a settled thinking bubble on the root feed under
+// UNIT, reading TEXT.
+func (h *harness) settledThinking(unit, text string) {
+	h.t.Helper()
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		thinkingResultFrame(unit, &conversationv1.AgentThinkingSuccess{
+			Reasoning: &conversationv1.AgentThinkingSuccess_Text{
+				Text: &conversationv1.AgentThinkingText{Text: text},
+			},
+		}), nil, nil)
+}
+
+// TestASettledThinkingBubbleIsPublishedUnselectable pins the stamp on the real
+// publication path: a thinking bubble is never offered for selection.
+func TestASettledThinkingBubbleIsPublishedUnselectable(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+
+	// Act.
+	h.settledThinking("unit-t", "the whole reasoning")
+
+	// Assert.
+	if h.activityRow("unit-t").GetSelectable() != nil {
+		t.Fatalf("a settled thinking bubble was published selectable")
+	}
+}
+
+// TestSelectableTextMissesAThinkingBubble pins that the selection and the
+// reply path refuse a thinking bubble.
+func TestSelectableTextMissesAThinkingBubble(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+	h.settledThinking("unit-t", "the whole reasoning")
+
+	// Act.
+	_, ok := selectableTextOf(h, testWorkspace, &frontendv1.FeedId{Value: h.responseRowID("unit-t")})
+
+	// Assert.
+	if ok {
+		t.Fatalf("SelectableText answered a thinking bubble")
+	}
+}
+
+// TestBubbleTextReadsAThinkingBubble pins that a quote of a thinking bubble
+// reads its text, though the bubble cannot be selected.
+func TestBubbleTextReadsAThinkingBubble(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+	h.settledThinking("unit-t", "the whole reasoning")
+
+	// Act.
+	text, ok := h.resolver.BubbleText(testWorkspace, &frontendv1.FeedId{Value: h.responseRowID("unit-t")})
+
+	// Assert.
+	if !ok || text.Markdown != "the whole reasoning" || text.Prompt {
+		t.Fatalf("BubbleText = (%+v, %v), want the reasoning as a response", text, ok)
+	}
+}
+
+// TestBubbleTextMissesAnUnknownRow pins the miss a quote falls back on.
+func TestBubbleTextMissesAnUnknownRow(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	_, ok := h.resolver.BubbleText(testWorkspace, &frontendv1.FeedId{Value: "row-unknown"})
+
+	// Assert.
+	if ok {
+		t.Fatalf("BubbleText answered a row that does not exist")
 	}
 }
 

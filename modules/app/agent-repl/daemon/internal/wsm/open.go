@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dirpath"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/tempdirs"
@@ -97,8 +99,11 @@ type store struct {
 	// handover, where it became a false unknown_workspace for an adopting
 	// page). Guarded by mu.
 	retired []*sql.DB
-	path    string
-	log     dlog.Logger
+	// keeper holds an in-memory handle's database for the handle's life
+	// (memory.go); nil for a file. Closed with the handle.
+	keeper io.Closer
+	path   string
+	log    dlog.Logger
 	// canonicalDir is dirpath.Canonical, the spelling the open's directory
 	// reconciliation compares each row against (dirspelling.go). Injectable
 	// so a test can model a case-folding volume on any host.
@@ -460,6 +465,9 @@ func (s *store) Close() error {
 	for _, handle := range handles {
 		errs = append(errs, handle.Close())
 	}
+	if s.keeper != nil {
+		errs = append(errs, s.keeper.Close())
+	}
 	return errors.Join(errs...)
 }
 
@@ -542,7 +550,7 @@ func (s *store) write(ctx context.Context, op string, fields dlog.Context, fn fu
 	tx, err := current.db.BeginTx(ctx, nil)
 	if err != nil {
 		wrapped := fmt.Errorf("wsm: begin transaction: %w", err)
-		if callerCancelled(err) {
+		if ctxend.Is(err) {
 			s.log.Info(op, writeCancelledMessage, withError(fields, wrapped))
 			return wrapped
 		}
@@ -595,7 +603,7 @@ func (s *store) write(ctx context.Context, op string, fields dlog.Context, fn fu
 			s.log.Debug(op, "the retarget was refused; nothing was written", withError(fields, err))
 			return err
 		}
-		if callerCancelled(err) {
+		if ctxend.Is(err) {
 			s.log.Info(op, writeCancelledMessage, withError(fields, err))
 			return err
 		}
@@ -604,7 +612,7 @@ func (s *store) write(ctx context.Context, op string, fields dlog.Context, fn fu
 	}
 	if err := tx.Commit(); err != nil {
 		wrapped := fmt.Errorf("wsm: commit transaction: %w", err)
-		if callerCancelled(err) {
+		if ctxend.Is(err) {
 			s.log.Info(op, writeCancelledMessage, withError(fields, wrapped))
 			return wrapped
 		}
@@ -635,7 +643,7 @@ func (s *store) read(ctx context.Context, op string, fields dlog.Context, fn fun
 			s.log.Debug(op, "the read found no such record", withError(fields, err))
 			return err
 		}
-		if callerCancelled(err) {
+		if ctxend.Is(err) {
 			s.log.Info(op, "the read ended when its caller's context was cancelled",
 				withError(fields, err))
 			return err
@@ -645,15 +653,6 @@ func (s *store) read(ctx context.Context, op string, fields dlog.Context, fn fun
 	}
 	s.log.Debug(op, "read durable state", fields)
 	return nil
-}
-
-// callerCancelled reports whether err is the CALLER going away — its context
-// cancelled or past its deadline — rather than the store failing. Every store
-// call runs under its caller's context, and that context ends whenever a
-// client leaves or the daemon exits in an orderly way, so this is the one
-// test every logging path here uses to keep such an end off the ERROR level.
-func callerCancelled(err error) bool {
-	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 // endTx is the one way a transaction in this package ends without a Commit:

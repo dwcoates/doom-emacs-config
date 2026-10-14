@@ -3,7 +3,7 @@
  *
  * Two things end when a feed entry has been scrolled wholly out of view: the
  * reply selection (selection-visibility.ts tells the daemon `left_view`), and
- * an entry a JUMP expanded (jump-collapse.ts closes it again). Both ask the
+ * an entry a JUMP expanded (out-of-view-collapse.ts closes it again). Both ask the
  * same question of the feed's scroll box, and this is the one place it is
  * answered, so the two cannot drift apart about what "left" means.
  *

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/shimclient"
@@ -175,7 +176,7 @@ func (v *verbs) FollowStoredSelection(ctx context.Context) error {
 	log := v.deps.Log.Global()
 	stored, err := v.deps.DB.Current(ctx)
 	if err != nil {
-		if canceled(err) {
+		if ctxend.Is(err) {
 			log.Info(opFollowSelected, "the stored selection's read ended when its context was cancelled", dlog.Context{"cause": err.Error()})
 			return err
 		}
