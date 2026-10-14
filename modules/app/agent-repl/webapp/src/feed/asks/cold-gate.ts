@@ -35,11 +35,19 @@
  * of its own, and a moment the footer carries no compaction line is a moment
  * the slot is empty rather than one this end fills with a placeholder.
  *
+ * HIDING THE WORKSPACE IS NOT A REMEDIATION (owner request, 2026-10-13). The
+ * grey "hide workspace" button at the end of the row sends `SetWorkspaceHidden`
+ * — the same hide `SPC TAB h` sends, which moves the workspace into the
+ * sidebar's hidden section and lands the user elsewhere — and answers nothing
+ * about the gate: the gate keeps standing for whenever the workspace is shown
+ * again.
+ *
  * EVERY COMPACT VALUE IS ECHOED FROM THE MENU. The summarizer is the served
  * `AgentModel` handed back whole; the scope is one of the served enum values.
  * UNSPECIFIED is never offered and never sent, and a resolved trace carrying it
  * is a MALFORMED VIEW rather than a scope this end quietly words as "everything".
  */
+import type { DescMessage, Message } from "@bufbuild/protobuf";
 import { closeStandingNewsDigest } from "../../news-digest/news-digest.js";
 import { createControl, type Control } from "../../control.js";
 import { formatTickedAge } from "../../duration.js";
@@ -49,9 +57,9 @@ import { coldGateFigureColor } from "../../pressure-color.js";
 import { log } from "../../log.js";
 import {
   AnswerColdGateResponseSchema,
-  type AnswerColdGateResponse,
   type AnswerColdGateReopenFailed,
 } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_answer_cold_gate_pb";
+import { SetWorkspaceHiddenResponseSchema } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
 import type { AgentModel } from "../../../../proto/gen/ts/conversation/v1/api_pb";
 import { SessionCompactScope } from "../../../../proto/gen/ts/conversation/v1/session_pb";
 import type {
@@ -65,6 +73,7 @@ import type {
   FeedColdGateResolvedCompact,
   FeedColdGateStanding,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
+import type { AgentReplClient } from "../../rpc/client.js";
 import { MalformedView } from "../../rpc/malformed.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { callUnary } from "../../rpc/unary.js";
@@ -72,9 +81,11 @@ import {
   clearRefusals,
   drawMalformedRefusal,
   refusal,
+  release,
   whileInFlight,
 } from "../cards/controls.js";
-import { callFailure, refusalOf, type SentenceTable } from "../../rpc/refuse.js";
+import { callFailure, refusalOf, type Cause, type SentenceTable } from "../../rpc/refuse.js";
+import { buildSetWorkspaceHiddenRequest } from "../../sidebar/verbs.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
 import { tickWhileShown } from "../ticking.js";
@@ -108,6 +119,10 @@ export const COLD_GATE_COPY = {
   compact: {
     label: "compact first",
     hint: "summarize, then resume from the summary; held prompts stay held for you to send",
+  },
+  hide: {
+    label: "hide workspace",
+    hint: "move this workspace to the sidebar's hidden section; the gate stands until it is shown again",
   },
   /** {held} is the served count of prompts held at the gate, worded by heldPromptsPhrase. */
   compactAndResume: {
@@ -409,15 +424,21 @@ function drawActions(
   const buttons: Control[] = [];
   const pay = actionButton("pay", COLD_GATE_COPY.pay, buttons);
   const clear = actionButton("clear", COLD_GATE_COPY.clear, buttons);
-  // PAY GOES LAST, furthest right, in red (owner request, 2026-10-06): it is
-  // the weightiest choice on the gate, so it takes the end of the row and the
-  // red border; clear takes the place and the border pay had.
-  row.append(clear, pay);
+  // PAY GOES LAST OF THE REMEDIATIONS, in red (owner request, 2026-10-06): it
+  // is the weightiest choice on the gate, so it takes the end of their run and
+  // the red border; clear takes the place and the border pay had.
+  // HIDE WORKSPACE ENDS THE ROW, in grey (owner request, 2026-10-13): it is
+  // not a remediation, so it sits past pay, the last of them.
+  const hide = gateButton("cold-gate-hide", ["data-cold-gate-hide", ""], COLD_GATE_COPY.hide, buttons);
+  row.append(clear, pay, hide);
   pay.addEventListener("click", () => {
     void answer(rc, actions, buttons, progress, { kind: "pay" });
   });
   clear.addEventListener("click", () => {
     void answer(rc, actions, buttons, progress, { kind: "clear" });
+  });
+  hide.addEventListener("click", () => {
+    void hideWorkspace(rc, actions, buttons);
   });
   if (menu === undefined) {
     actions.append(progress);
@@ -601,7 +622,6 @@ async function answer(
   choice: ColdGateChoice,
 ): Promise<void> {
   const id = requireMessage(rc.row.id, "FeedRow.id");
-  clearRefusals(actions);
   // ANSWERING THE GATE CLOSES A STANDING NEWS DIGEST, as sending a prompt does
   // (owner, 2026-10-06): the user has moved on to the conversation.
   closeStandingNewsDigest(actions.ownerDocument);
@@ -623,38 +643,110 @@ async function answer(
     progress.textContent = text ?? "";
     progress.hidden = progress.textContent === "";
   });
+  await callFromGate(rc, actions, buttons, {
+    rpc: "AnswerColdGate",
+    call: (client) => client.answerColdGate(buildAnswerColdGateRequest(rc.ctx.workspace, id, choice)),
+    schema: AnswerColdGateResponseSchema,
+    own: OWN_CAUSES,
+    malformedOperation: "feed.asks.cold-gate.malformed-refusal",
+    // THE WAIT IS OVER, whichever way it ended: the slot is emptied and the
+    // subscription dropped before the outcome is drawn, so a refusal is never
+    // read underneath a progress line about a compaction that has stopped.
+    settled: () => {
+      unsubscribe();
+      progress.textContent = "";
+      progress.hidden = true;
+    },
+  });
+}
+
+/**
+ * Hide the workspace, and nothing else: the gate is not answered, so it stands
+ * again when the workspace is shown. The landing elsewhere is the daemon's, as
+ * for every hide.
+ */
+async function hideWorkspace(
+  rc: RowContext,
+  actions: HTMLElement,
+  buttons: readonly Control[],
+): Promise<void> {
+  log.info("hiding the workspace from a cold gate", {
+    operation: "feed.asks.cold-gate.hide",
+    context: { workspace: rc.ctx.workspace.id },
+  });
+  await callFromGate(rc, actions, buttons, {
+    rpc: "SetWorkspaceHidden",
+    call: (client) => client.setWorkspaceHidden(buildSetWorkspaceHiddenRequest(rc.ctx.workspace, true)),
+    schema: SetWorkspaceHiddenResponseSchema,
+    // SetWorkspaceHidden answers only the cross-cutting four.
+    own: {},
+    malformedOperation: "feed.asks.cold-gate.hide.malformed-refusal",
+  });
+}
+
+/** A response whose result is the `success` or `error` arm every gate call answers. */
+type GateResponse = Message & {
+  result:
+    | { case: "success"; value: unknown }
+    | { case: "error"; value: { cause: Cause } }
+    | { case: undefined; value?: undefined };
+};
+
+/**
+ * ONE CALL FROM THE GATE'S ROW, whichever button made it: every button latched
+ * inert while it is in flight, and what came back drawn at the buttons.
+ *
+ * Success draws nothing (the daemon's push redraws the row, or the workspace
+ * leaves the tab bar) and keeps the buttons latched. A refusal is worded from OWN
+ * plus the cross-cutting four and gives the buttons back. A call that threw is
+ * drawn as what actually happened (`callUnary` already logged it, as its
+ * owner), and an answer this build cannot read is reported once rather than
+ * becoming an unhandled rejection inside a click handler.
+ */
+async function callFromGate<Res extends GateResponse>(
+  rc: RowContext,
+  actions: HTMLElement,
+  buttons: readonly Control[],
+  spec: {
+    rpc: string;
+    call: (client: AgentReplClient) => Promise<Res>;
+    schema: DescMessage;
+    own: SentenceTable;
+    malformedOperation: string;
+    /** Runs the moment the call is over, whichever way it ended, before anything is drawn. */
+    settled?: () => void;
+  },
+): Promise<void> {
+  clearRefusals(actions);
   const answered = await whileInFlight(buttons, () =>
-    callUnary(
-      rc.ctx,
-      "AnswerColdGate",
-      (client) =>
-        client.answerColdGate(buildAnswerColdGateRequest(rc.ctx.workspace, id, choice)),
-      AnswerColdGateResponseSchema,
-    ),
+    callUnary(rc.ctx, spec.rpc, spec.call, spec.schema),
   );
-  // THE WAIT IS OVER, whichever way it ended: the slot is emptied and the
-  // subscription dropped before the outcome is drawn, so a refusal is never
-  // read underneath a progress line about a compaction that has stopped.
-  unsubscribe();
-  progress.textContent = "";
-  progress.hidden = true;
+  spec.settled?.();
   if ("failed" in answered) {
-    // callUnary already logged the failure once, as its owner. What is drawn
-    // here is the FEEDBACK AT THE CLICK: the buttons are already back (
-    // `whileInFlight` gives them up on a throw), so the gate stays answerable,
-    // and the line beside them says what actually happened rather than
-    // reporting an unreachable daemon that answered.
+    // The buttons are already back (`whileInFlight` gives them up on a throw),
+    // so the gate stays answerable, and the line beside them says what
+    // actually happened rather than reporting an unreachable daemon that
+    // answered.
     const said = callFailure(answered.failed);
     actions.append(refusal(said.arm, said.text));
     return;
   }
   try {
-    drawAnswerOutcome(answered.value, actions, buttons);
+    const result = requireCase(answered.value.result, `${spec.rpc}Response.result`);
+    switch (result.case) {
+      case "success":
+        return;
+      case "error": {
+        const said = refusalOf(result.value.cause, spec.own, `${spec.rpc}Error.cause`);
+        actions.append(refusal(said.arm, said.text));
+        release(buttons);
+        return;
+      }
+      default:
+        unreachableArm(`${spec.rpc}Response.result`, armName(result));
+    }
   } catch (err) {
-    // A refusal this build cannot read is still a failure the reader owns; it is
-    // stated at the control and reported once rather than becoming an unhandled
-    // rejection inside a click handler.
-    if (!drawMalformedRefusal(rc.ctx, actions, "feed.asks.cold-gate.malformed-refusal", err)) throw err;
+    if (!drawMalformedRefusal(rc.ctx, actions, spec.malformedOperation, err)) throw err;
   }
 }
 
@@ -674,27 +766,6 @@ const OWN_CAUSES = {
       ? "the session did not come back from the re-open"
       : `the session did not come back from the re-open: ${v.detail}`,
 } as unknown as SentenceTable;
-
-/** Nothing on success (the daemon retires the gate row as it answers); the refusal on error. */
-function drawAnswerOutcome(
-  response: AnswerColdGateResponse,
-  actions: HTMLElement,
-  buttons: readonly Control[],
-): void {
-  const result = requireCase(response.result, "AnswerColdGateResponse.result");
-  switch (result.case) {
-    case "success":
-      return;
-    case "error": {
-      const said = refusalOf(result.value.cause, OWN_CAUSES, "AnswerColdGateError.cause");
-      actions.append(refusal(said.arm, said.text));
-      for (const button of buttons) button.disabled = false;
-      return;
-    }
-    default:
-      unreachableArm("AnswerColdGateResponse.result", armName(result));
-  }
-}
 
 /**
  * One scope's ENUM NAME — the single spelling `[data-compact-scope]` carries,
