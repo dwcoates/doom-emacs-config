@@ -2017,32 +2017,36 @@ opened."
      :on-error
      (lambda (value) (agent-repl-verbs--register-repository-on-error path value)))))
 
-(defun agent-repl-verbs--read-prompt (prompt-text &optional history-file)
+(defun agent-repl-verbs--read-prompt (prompt-text &optional history-file unseeded)
   "Read the creation prompt, defaulting to the composer's current text.
 The composer is where the user was already writing, so its contents are
 the obvious default rather than something to retype.
+
+With UNSEEDED, the composer is neither read nor offered and the prompt
+starts empty.  The one-shot commission reads this way: its prompt is a
+fresh piece of work, not whatever the current workspace was drafting.
 
 With HISTORY-FILE, the prompt's history lives in that file and the text
 being typed is saved there on every edit
 \(`agent-repl-verbs--read-string-persisted').  Without it, the read uses
 the ordinary minibuffer history."
-  (let* ((ws (agent-repl--ws-current-log-name))
+  (let* ((ws (unless unseeded (agent-repl--ws-current-log-name)))
          (buffered (and ws (agent-repl--read-input-buffer ws)))
          (initial (and buffered (not (string-empty-p (string-trim buffered)))
                        (string-trim buffered))))
-    (unless ws
+    (unless (or ws unseeded)
       (agent-repl--log '(:agent-repl-central "the current buffer has no workspace composer")
                        "elisp.verbs.read-prompt prompt=%S composer=none" prompt-text))
     (if history-file
         (agent-repl-verbs--read-string-persisted prompt-text initial history-file)
       (read-string prompt-text initial))))
 
-(defun agent-repl-verbs--read-required-prompt (prompt-text refusal &optional history-file)
+(defun agent-repl-verbs--read-required-prompt (prompt-text refusal &optional history-file unseeded)
   "Read a creation prompt with PROMPT-TEXT that must not be blank.
 The text is returned as read.  A blank or whitespace-only answer is
-refused with REFUSAL, before any request is built.  HISTORY-FILE is
-passed to `agent-repl-verbs--read-prompt'."
-  (let ((text (agent-repl-verbs--read-prompt prompt-text history-file)))
+refused with REFUSAL, before any request is built.  HISTORY-FILE and
+UNSEEDED are passed to `agent-repl-verbs--read-prompt'."
+  (let ((text (agent-repl-verbs--read-prompt prompt-text history-file unseeded)))
     (when (string-empty-p (string-trim text))
       (user-error "agent-repl: %s" refusal))
     text))
@@ -2384,7 +2388,10 @@ which is what asks the daemon to choose.  A nil setting seeds nothing."
   "Create a ONE-SHOT workspace for a commission read from the minibuffer.
 A one-shot is a DYNAMIC mode (owner ruling, 2026-09-12): it asks for its
 commission and nothing else -- the repository is the current workspace\='s,
-off that repo\='s main branch, and the daemon mints the name.
+off that repo\='s main branch, and the daemon mints the name.  The
+commission prompt starts EMPTY: unlike every other creation prompt it is
+never seeded from the composer, whose draft belongs to the current
+workspace rather than to the new one-shot.
 
 There is no finish to choose.  The repository states, in one plain-English
 file of its own policy directory, what is to be done when the work is
@@ -2403,7 +2410,7 @@ A prefix argument PICK-MODEL asks for the model."
                   (lambda ()
                     (agent-repl-verbs--read-required-prompt
                      "One-shot commission: " "a one-shot IS its prompt"
-                     (agent-repl-verbs--oneshot-history-file)))))
+                     (agent-repl-verbs--oneshot-history-file) 'unseeded))))
          (model (and pick-model
                      (agent-repl-verbs--read-for
                       command 'model #'agent-repl-verbs--read-model))))
