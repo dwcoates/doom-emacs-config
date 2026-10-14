@@ -1340,6 +1340,37 @@ The ink is `agent-repl-status-glyph-inks'\='s; an ink with no color in
         (agent-repl-status--glyph-fail
          "elisp.status.glyph-ink-color: ink %S of arm %S has no color" ink arm))))
 
+(defun agent-repl-status-roster-mark-color (arm)
+  "Return the color the sidebar inks a row standing on ARM with, or nil.
+The arm\='s glyph ink (`agent-repl-status-glyph-inks\=') when it declares
+one, else the arm\='s color in the SHARED assignment
+\(`agent-repl-status-color-table\='), the one the webapp sidebar draws
+from.  nil for an arm whose color is `none\=': the sidebar draws it grey.
+An arm with no row in the assignment is a build that ships its tables
+inconsistent, so it fails hard."
+  (let ((name (alist-get arm agent-repl-status-color-table)))
+    (unless name
+      (agent-repl-status--glyph-fail
+       "elisp.status.roster-mark-color: arm %S has no color in the shared assignment" arm))
+    (or (agent-repl-status--glyph-ink-color arm)
+        (cdr (assoc name agent-repl--color-by-name)))))
+
+(defun agent-repl-status-roster-mark (arm &optional glyph)
+  "Return the mark the sidebar draws before a row standing on ARM, as text.
+The sidebar\='s own mark: a merge arm draws the one merge glyph in place
+of the dot (`agent-repl-status-merge-glyphs\='), every other arm the dot,
+each inked by `agent-repl-status-roster-mark-color\=' and grey (the
+`shadow\=' face) where that answers nil.  GLYPH, when given, is the
+character drawn instead, inked the same way: a reader that marks a
+row\='s place rather than its kind (the switcher\='s hidden workspaces)
+keeps the status color the sidebar shows."
+  (let ((char (or glyph
+                  (agent-repl-status--glyph-char
+                   (or (alist-get arm agent-repl-status-merge-glyphs)
+                       agent-repl-status-dot-glyph))))
+        (color (agent-repl-status-roster-mark-color arm)))
+    (propertize char 'face (if color (list :foreground color) 'shadow))))
+
 (defun agent-repl-status-tab-glyph-run (arm name &optional frame)
   "Return the run drawing glyph NAME on a tab standing on ARM, on FRAME.
 On a graphic frame, NAME\='s character displayed as NAME\='s image at

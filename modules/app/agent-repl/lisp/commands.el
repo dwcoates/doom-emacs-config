@@ -46,6 +46,7 @@
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--path-canonical "agent-repl-core" (path))
 (declare-function agent-repl--ws-current-name "agent-repl-workspace" ())
 (declare-function agent-repl--ws-current-log-name "agent-repl-workspace" ())
@@ -86,9 +87,19 @@
 (declare-function agent-repl-roster-selection-recency-order "agent-repl-roster" (names))
 (declare-function agent-repl-roster-last-finished-name "agent-repl-roster" (names))
 (declare-function agent-repl-roster-last-turn-ended-ms "agent-repl-roster" (ws))
-(declare-function agent-repl-verbs--row-ref "agent-repl-verbs" (row))
-(declare-function agent-repl-verbs--row-closed-p "agent-repl-verbs" (row))
-(declare-function agent-repl-verbs--row-name "agent-repl-verbs" (row))
+(declare-function agent-repl-roster-row-ref "agent-repl-roster" (row))
+(declare-function agent-repl-roster-row-closed-p "agent-repl-roster" (row))
+(declare-function agent-repl-roster-row-name "agent-repl-roster" (row))
+(declare-function agent-repl-verbs--roster-or-view "agent-repl-verbs" (roster))
+(declare-function agent-repl-roster-walk "agent-repl-roster" (roster))
+(declare-function agent-repl-roster-row-status "agent-repl-roster" (row))
+(declare-function agent-repl-roster-row-instant-ms "agent-repl-roster" (row field))
+(declare-function agent-repl-roster-row-merged-at "agent-repl-roster" (row))
+(declare-function agent-repl-roster-row-closed-by-user-at "agent-repl-roster" (row))
+(declare-function agent-repl-roster-row-commit-count "agent-repl-roster" (row))
+(declare-function agent-repl-status-roster-mark "agent-repl-status" (arm &optional glyph))
+(declare-function agent-repl-status--glyph-char "agent-repl-status" (name))
+(declare-function agent-repl-format-age "core" (at-ms now-ms))
 (declare-function magit-current-section "magit-section" ())
 (declare-function magit-file-at-point "magit-git" (&optional expand assert))
 (declare-function magit-toplevel "magit-git" (&optional directory))
@@ -543,6 +554,8 @@ touched and the agent is not contacted."
 ;;;; ---- The most-recent-file cache ---------------------------------------
 
 (defvar recentf-list)
+(defvar agent-repl-ws-state-icon-default)
+(defvar agent-repl-status-dot-glyph)
 
 (defun agent-repl--record-last-file-visit ()
   "Cache the visited file as `:last-file' on the current workspace.
@@ -682,18 +695,32 @@ that is not a workspace arms nothing either -- there is no panel to show."
      (t
       (agent-repl--arm-landing-panels ws)))))
 
-(defconst agent-repl--switch-state-affixes
+(defconst agent-repl--switch-state-labels
   '((:open . "")
-    (:closed . " (closed)")
-    (:not-here . " (not open here)"))
-  "Affix drawn after a switcher candidate for each state it can be in.
+    (:closed . "closed")
+    (:not-here . "not open here"))
+  "The state column's word for each state a switcher candidate can be in.
 
 A CLOSED WORKSPACE IS STILL A WORKSPACE YOU CAN SWITCH TO, so it is
 offered -- but picking it costs a daemon round trip and a session
 revival, which picking an open one does not.  The user is owed that
 difference before they press RET, and text is the whole of how it is
-said: no face, no styling, nothing the affix could disagree with when
-the row's real state changes underneath it.")
+said: no face, no styling, nothing the column could disagree with when
+the row's real state changes underneath it.  A hidden or merged row says
+so in its place instead (`agent-repl--switch-state-label').")
+
+(defconst agent-repl--switch-recent-limit 25
+  "How many workspaces of each RECENT kind `SPC p p' offers.
+The most recently MERGED and the ones the USER most recently closed or
+killed, this many of each (owner request, 2026-10-14): enough to reach
+yesterday's work, few enough that the list stays a list of what is
+current.  `SPC p P' offers every known workspace regardless.")
+
+(defconst agent-repl--switch-hidden-glyph "◌"
+  "The mark a HIDDEN workspace draws in the switcher in place of its dot.
+A dotted ring: the workspace is there but kept out of sight.  It is inked
+with the row's status color, so the switcher still says what the sidebar
+says about the workspace's status.")
 
 (defun agent-repl--switch-candidates ()
   "Return every KNOWN workspace the `SPC p p' switcher can land on.
@@ -716,6 +743,10 @@ Each entry is a plist:
   :ws     the local workspace name when one is standing, else nil
   :state  `:open' (a tab is here), `:closed' (the roster says closed) or
           `:not-here' (the daemon knows it, this Emacs has no tab)
+  :row    the roster row, nil for a live local workspace with none yet
+  :section  the roster section the row sits in (`:repository',
+          `:hidden' or `:merged', `agent-repl-roster-walk'), nil
+          without a row
 
 A LIVE LOCAL WORKSPACE THE ROSTER DOES NOT CARRY IS STILL OFFERED: the
 roster push and the registry are reconciled asynchronously, and the
@@ -725,21 +756,25 @@ are persp-mode's, not workspaces -- and `agent-repl--live-ws-names'
 excludes them at its source."
   (let ((entries nil)
         (claimed nil))
-    (dolist (row (agent-repl-verbs--all-rows))
-      (let* ((ref (agent-repl-verbs--row-ref row))
+    (dolist (walked (agent-repl-roster-walk
+                     (agent-repl-verbs--roster-or-view nil)))
+      (let* ((row (plist-get walked :row))
+             (ref (agent-repl-roster-row-ref row))
              (id (plist-get ref :id)))
         (when id
           (let ((ws (agent-repl--ws-by-ref-id id)))
             (when ws (push ws claimed))
-            (push (list :name (or (agent-repl-verbs--row-name row)
+            (push (list :name (or (agent-repl-roster-row-name row)
                                   (plist-get ref :dir)
                                   id)
                         :dir (plist-get ref :dir)
                         :ref ref
                         :ws ws
                         :state (cond (ws :open)
-                                     ((agent-repl-verbs--row-closed-p row) :closed)
-                                     (t :not-here)))
+                                     ((agent-repl-roster-row-closed-p row) :closed)
+                                     (t :not-here))
+                        :row row
+                        :section (plist-get walked :section))
                   entries)))))
     (dolist (ws (agent-repl--live-ws-names))
       (unless (member ws claimed)
@@ -747,7 +782,9 @@ excludes them at its source."
                     :dir (agent-repl--ws-get ws :project-dir)
                     :ref (agent-repl--ws-get ws :ref)
                     :ws ws
-                    :state :open)
+                    :state :open
+                    :row nil
+                    :section nil)
               entries)))
     (nreverse entries)))
 
@@ -759,7 +796,9 @@ one and nothing else: NAMES COLLIDE ACROSS REPOS, and two rows sharing a
 name would make the second unreachable -- `assoc' would hand back the
 first every time.  A colliding name is qualified by its directory, which
 is the one thing that cannot collide; a name that is already unique is
-left alone rather than qualified for the sake of uniformity."
+left alone rather than qualified for the sake of uniformity.  Everything
+else a line shows rides beside the string, in its affixes
+\(`agent-repl--switch-affixation'), so it never makes two names differ."
   (let ((counts (make-hash-table :test 'equal)))
     (dolist (entry entries)
       (let ((name (plist-get entry :name)))
@@ -771,14 +810,149 @@ left alone rather than qualified for the sake of uniformity."
               (base (if (and (> (gethash name counts 0) 1) dir)
                         (format "%s [%s]" name dir)
                       name)))
-         (cons (concat base
-                       (alist-get (plist-get entry :state)
-                                  agent-repl--switch-state-affixes ""))
-               entry)))
+         (cons base entry)))
      entries)))
 
-(defun agent-repl--switch-to-known-workspace ()
-  "Pick a known workspace and stand on it, opening it first if it is not here.
+
+(defun agent-repl--switch-most-recent (entries instant)
+  "Return the `agent-repl--switch-recent-limit' ENTRIES latest by INSTANT.
+INSTANT answers an entry's epoch-ms instant; newest first.  Every entry
+handed here states one -- a merged row states when it landed, and a
+user-closed row when it was closed, by construction of the lists -- so
+an entry without one is a violated invariant and fails hard."
+  (dolist (entry entries)
+    (unless (funcall instant entry)
+      (agent-repl--error '(:agent-repl-central "the workspace switcher reads the whole roster")
+                         "elisp.commands.switch-most-recent: name=%s has no instant to rank by"
+                         (plist-get entry :name))
+      (error "agent-repl: switcher entry %s has no instant to rank by"
+             (plist-get entry :name))))
+    (seq-take (sort (copy-sequence entries)
+                    (lambda (a b) (> (funcall instant a) (funcall instant b))))
+              agent-repl--switch-recent-limit))
+
+(defun agent-repl--switch-curated (entries)
+  "Return the ENTRIES `SPC p p' offers, in the order it offers them.
+
+THE WORKSPACES THAT ARE CURRENT, AND THE RECENT ONES (owner request,
+2026-10-14): every open workspace, every hidden one, the
+`agent-repl--switch-recent-limit' most recently MERGED, and as many of
+the ones the USER most recently closed or killed -- by their own gesture,
+which the daemon's close record says (`RosterRowClosure').  A workspace
+the daemon, an agent or a merge closed is left to `SPC p P', and so is
+one whose close predates that record: nothing says the user closed it.
+
+A live local workspace with no roster row yet is open by construction --
+a tab is standing for it here -- and is never dropped."
+  (let (open hidden merged closed)
+    (dolist (entry entries)
+      (let ((row (plist-get entry :row)))
+        (pcase (plist-get entry :section)
+          (:hidden (push entry hidden))
+          (:merged (push entry merged))
+          (_ (cond
+              ((or (null row) (not (agent-repl-roster-row-closed-p row)))
+               (push entry open))
+              ((agent-repl-roster-row-closed-by-user-at row)
+               (push entry closed)))))))
+    (append (nreverse open)
+            (nreverse hidden)
+            (agent-repl--switch-most-recent
+             (nreverse merged)
+             (lambda (entry) (agent-repl-roster-row-merged-at (plist-get entry :row))))
+            (agent-repl--switch-most-recent
+             (nreverse closed)
+             (lambda (entry) (agent-repl-roster-row-closed-by-user-at (plist-get entry :row)))))))
+
+;;;; ---- The switcher's columns ---------------------------------------------
+
+(defun agent-repl--switch-mark (entry)
+  "Return the mark ENTRY's line opens with: its status as the sidebar shows it.
+A closed or merged workspace is the sidebar's grey dot; a hidden one
+draws `agent-repl--switch-hidden-glyph' in its status color; every other
+row draws the sidebar's own mark for its status arm
+\(`agent-repl-status-roster-mark').  A live local workspace no roster push
+carries yet has no status to show, and draws the default glyph, grey."
+  (let ((row (plist-get entry :row)))
+    (cond
+     ((null row)
+      (propertize agent-repl-ws-state-icon-default 'face 'shadow))
+     ((or (eq (plist-get entry :section) :merged)
+          (agent-repl-roster-row-closed-p row))
+      (propertize (agent-repl-status--glyph-char agent-repl-status-dot-glyph)
+                  'face 'shadow))
+     ((eq (plist-get entry :section) :hidden)
+      (agent-repl-status-roster-mark (agent-repl-roster-row-status row)
+                                     agent-repl--switch-hidden-glyph))
+     (t
+      (agent-repl-status-roster-mark (agent-repl-roster-row-status row))))))
+
+(defun agent-repl--switch-state-label (entry)
+  "Return the state column's word for ENTRY.
+Where the workspace sits outranks how it would open: a hidden or merged
+workspace says so, and every other says `agent-repl--switch-state-labels'."
+  (pcase (plist-get entry :section)
+    (:hidden "hidden")
+    (:merged "merged")
+    (_ (alist-get (plist-get entry :state) agent-repl--switch-state-labels ""))))
+
+(defun agent-repl--switch-turn-age (entry now-ms)
+  "Return how long ago ENTRY's last turn ended, read at NOW-MS.
+The daemon's durable instant (`RosterRowLastTurnEnded'), drawn in the
+one age format (`agent-repl-format-age').  A workspace none of whose
+turns has ended says so rather than showing an age."
+  (let ((at (agent-repl-roster-row-instant-ms (plist-get entry :row) :last-turn-ended)))
+    (if at (agent-repl-format-age at now-ms) "no turn yet")))
+
+(defun agent-repl--switch-commits (entry)
+  "Return the commit column for ENTRY: its branch's commits past the merge-base.
+Empty when the daemon states no count; zero is a real count and says so."
+  (let ((count (agent-repl-roster-row-commit-count (plist-get entry :row))))
+    (cond ((null count) "")
+          ((= count 1) "1 commit")
+          (t (format "%d commits" count)))))
+
+(defun agent-repl--switch-affixation (alist now-ms)
+  "Return the `affixation-function' for the switcher over ALIST, read at NOW-MS.
+ALIST is `agent-repl--switch-display-alist''s.  Each line is its status
+mark, the name, and three columns aligned past the longest name: the
+state, how long ago its last turn ended, and how many commits its branch
+holds past its merge-base."
+  (let ((column (+ 4 (apply #'max 0 (mapcar (lambda (cell) (string-width (car cell)))
+                                            alist)))))
+    (lambda (candidates)
+      (mapcar
+       (lambda (candidate)
+         (let ((entry (cdr (assoc candidate alist))))
+           (list candidate
+                 (concat (agent-repl--switch-mark entry) " ")
+                 (concat (propertize " " 'display `(space :align-to ,column))
+                         (propertize
+                          (format "%-14s %-12s %s"
+                                  (agent-repl--switch-state-label entry)
+                                  (agent-repl--switch-turn-age entry now-ms)
+                                  (agent-repl--switch-commits entry))
+                          'face 'completions-annotations)))))
+       candidates))))
+
+(defun agent-repl--switch-table (alist now-ms)
+  "Return the completion table offering ALIST's names with their columns.
+A function table, because that is how a table states its
+`affixation-function' (`agent-repl--switch-affixation')."
+  (let ((names (mapcar #'car alist))
+        (affixation (agent-repl--switch-affixation alist now-ms)))
+    (lambda (string predicate action)
+      (if (eq action 'metadata)
+          `(metadata (affixation-function . ,affixation))
+        (complete-with-action action names string predicate)))))
+
+(defun agent-repl--switch-to-known-workspace (&optional all)
+  "Pick a workspace and stand on it, opening it first if it is not here.
+
+WHICH WORKSPACES ARE OFFERED: the current and recent ones
+\(`agent-repl--switch-curated'), or with ALL non-nil every known one.
+Each line shows the workspace's status mark and its columns
+\(`agent-repl--switch-affixation').
 
 AN OPEN WORKSPACE IS A SWITCH REQUEST and nothing more: the daemon is
 asked to select it (`agent-repl-host-request-switch') and the frame
@@ -801,18 +975,22 @@ perspective of its own and re-point the workspace being left.
 
 A CANDIDATE WITH NO REF CANNOT BE OPENED and says so: the ref is
 daemon-minted and there is no spelling of it Emacs could construct."
-  (let ((candidates (agent-repl--switch-display-alist
-                     (agent-repl--switch-candidates))))
+  (let* ((known (agent-repl--switch-candidates))
+         (candidates (agent-repl--switch-display-alist
+                      (if all known (agent-repl--switch-curated known)))))
     (unless candidates
       (user-error "agent-repl: no known workspaces"))
-    (let* ((choice (completing-read "Switch to workspace: "
-                                    (mapcar #'car candidates) nil t))
+    (let* ((choice (completing-read (if all "Switch to any workspace: "
+                                      "Switch to workspace: ")
+                                    (agent-repl--switch-table
+                                     candidates (truncate (* 1000 (float-time))))
+                                    nil t))
            (entry (cdr (assoc choice candidates)))
            (ws (plist-get entry :ws))
            (ref (plist-get entry :ref)))
       (cond
        (ws
-        (agent-repl--info ws "elisp.commands.switch-chosen ws=%s" ws)
+        (agent-repl--info ws "elisp.commands.switch-chosen ws=%s all=%s" ws (and all t))
         (agent-repl-host-request-switch ws 'picker))
        (ref
         (agent-repl--info (agent-repl--ws-current-log-name)
@@ -828,12 +1006,14 @@ daemon-minted and there is no spelling of it Emacs could construct."
         (user-error "agent-repl: %s has no daemon identity to open" choice))))))
 
 (defun agent-repl-switch-to-project (&optional project)
-  "Switch to a known workspace, or to PROJECT.
+  "Switch to a current or recent workspace, or to PROJECT.
 
-With no argument, completes over EVERY KNOWN workspace -- the daemon's
-roster is the source of what exists -- and stands on the chosen one,
-opening it first when it is closed or has no tab here.  See
-`agent-repl--switch-to-known-workspace'.
+With no argument, completes over the open and hidden workspaces, the
+most recently merged and the ones the user most recently closed -- the
+daemon's roster is the source of what exists -- and stands on the chosen
+one, opening it first when it is closed or has no tab here.  See
+`agent-repl--switch-to-known-workspace'; `agent-repl-switch-to-any-workspace'
+offers every known workspace.
 
 With PROJECT (a project root path), switches to that project and opens
 its most recently accessed file.  Both steps are deferred onto one timer
@@ -864,6 +1044,15 @@ two timers."
                                 "elisp.commands.switch-no-recent project=%s" project))))))
     (agent-repl--switch-to-known-workspace)))
 
+(defun agent-repl-switch-to-any-workspace ()
+  "Switch to ANY known workspace, opening it first when it is not here.
+Every workspace the daemon's roster carries, closed and merged ones
+however old, beside every live local one: what `SPC p p' offers when the
+work wanted is no longer current or recent.  See
+`agent-repl--switch-to-known-workspace'."
+  (interactive)
+  (agent-repl--switch-to-known-workspace t))
+
 (defvar agent-repl--opened-recent-cycle nil
   "Workspaces already visited by `agent-repl-open-most-recent-workspace'.
 Reset when the cycle exhausts, so repeated presses walk the whole roster
@@ -877,8 +1066,8 @@ then the daemon's durable last-selected instant, then never-selected
 rows in roster order -- the same order a close lands by."
   (let (names)
     (dolist (row (agent-repl-verbs--all-rows))
-      (unless (agent-repl-verbs--row-closed-p row)
-        (let* ((ref (agent-repl-verbs--row-ref row))
+      (unless (agent-repl-roster-row-closed-p row)
+        (let* ((ref (agent-repl-roster-row-ref row))
                (ws (and ref (agent-repl--ws-by-ref-id (plist-get ref :id)))))
           (when ws (push ws names)))))
     (agent-repl-roster-selection-recency-order (nreverse names))))

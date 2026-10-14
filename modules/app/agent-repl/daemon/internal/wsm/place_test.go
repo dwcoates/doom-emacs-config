@@ -8,6 +8,7 @@ import (
 	"slices"
 	"sort"
 	"testing"
+	"time"
 )
 
 // placeRepo is one repository directory shared by every workspace a place
@@ -122,8 +123,8 @@ func TestRegisterLandsWorkspacesOnPlaces(t *testing.T) {
 			for _, ws := range tc.given {
 				registered := registerIn(t, s, repoDir, ws.name, ws.priority)
 				if ws.closed {
-					if err := s.SetClosed(context.Background(), registered.ID, true); err != nil {
-						t.Fatalf("SetClosed: %v", err)
+					if err := s.MarkClosed(context.Background(), registered.ID, Closure{At: time.Now(), By: CloseByUser}); err != nil {
+						t.Fatalf("MarkClosed: %v", err)
 					}
 				}
 			}
@@ -340,15 +341,15 @@ func TestReopeningAClosedWorkspaceRestoresItsPlace(t *testing.T) {
 	registerIn(t, s, repoDir, "a", nil)
 	b := registerIn(t, s, repoDir, "b", nil)
 	registerIn(t, s, repoDir, "c", nil)
-	if err := s.SetClosed(context.Background(), b.ID, true); err != nil {
-		t.Fatalf("SetClosed(true): %v", err)
+	if err := s.MarkClosed(context.Background(), b.ID, Closure{At: time.Now(), By: CloseByUser}); err != nil {
+		t.Fatalf("MarkClosed: %v", err)
 	}
 	registerIn(t, s, repoDir, "d", nil)
 	before := orderedNames(t, s)
 
 	// Act.
-	if err := s.SetClosed(context.Background(), b.ID, false); err != nil {
-		t.Fatalf("SetClosed(false): %v", err)
+	if err := s.Reopen(context.Background(), b.ID); err != nil {
+		t.Fatalf("Reopen: %v", err)
 	}
 
 	// Assert: nothing moved; b is back where it was.
@@ -365,11 +366,11 @@ func TestReopeningAnUnknownWorkspaceIsNotFound(t *testing.T) {
 	s, _ := testStore(t)
 
 	// Act.
-	err := s.SetClosed(context.Background(), "ws-missing", false)
+	err := s.Reopen(context.Background(), "ws-missing")
 
 	// Assert.
 	if !errors.Is(err, ErrNotFound) {
-		t.Fatalf("SetClosed error = %v, want ErrNotFound", err)
+		t.Fatalf("Reopen error = %v, want ErrNotFound", err)
 	}
 }
 

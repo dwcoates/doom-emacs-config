@@ -307,6 +307,23 @@ func TestApplyFileKeysTheIdempotencyOnTheFileAndIndex(t *testing.T) {
 	}
 }
 
+func TestApplyFileClosesOnAnAgentsBehalf(t *testing.T) {
+	// Arrange: a command file is an agent's request, never the user's gesture.
+	f := newFixture(t)
+	f.workspace("w1", "/tree/w1")
+	path := f.write(t, "workspace_commands_c.json", `[{"type":"close","workspace":"w1"}]`)
+
+	// Act.
+	if err := f.ingress.ApplyFile(context.Background(), path); err != nil {
+		t.Fatalf("ApplyFile: %v", err)
+	}
+
+	// Assert.
+	if len(f.verbs.calls) != 1 || f.verbs.calls[0].CloseBy != wsm.CloseByAgent {
+		t.Fatalf("verb calls = %+v, want one close by the agent", f.verbs.calls)
+	}
+}
+
 func TestApplyFileMapsEveryWorkspaceVerb(t *testing.T) {
 	tests := []struct {
 		name string

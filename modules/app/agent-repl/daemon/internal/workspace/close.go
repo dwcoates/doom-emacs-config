@@ -6,6 +6,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // Close tears a workspace's editor state down. It REQUIRES QUIET — no turn in
@@ -17,9 +18,12 @@ import (
 // A refusal MANIFESTS IN THE FOOTER as well as in the answer, so the user sees
 // why the workspace would not close where they are looking.
 //
+// BY says who asked for the close (the user's CloseWorkspace, an agent's
+// command file), and the close record keeps it (wsm.MarkClosed).
+//
 // Closing leaves the SESSION alone: Close is view-level, Kill is what ends a
 // session, and the worktree is untouched either way.
-func (v *verbs) Close(ctx context.Context, ws ids.WorkspaceID) error {
+func (v *verbs) Close(ctx context.Context, ws ids.WorkspaceID, by wsm.CloseCause) error {
 	record, log, err := v.owned(ctx, "CloseWorkspace", ws)
 	if err != nil {
 		return err
@@ -54,7 +58,7 @@ func (v *verbs) Close(ctx context.Context, ws ids.WorkspaceID) error {
 		}
 	}
 
-	if err := v.deps.DB.SetClosed(ctx, ws, true); err != nil {
+	if err := v.deps.DB.MarkClosed(ctx, ws, wsm.Closure{At: v.now(), By: by}); err != nil {
 		log.Error(opClose, "could not record the close", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("close %q: %w", ws, err)
 	}

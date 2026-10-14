@@ -540,16 +540,35 @@ when the daemon answered the register with REFUSAL, a decoded error."
         :detail (list :branch nil :parent-branch nil :summary nil)
         :closed (list :closed (and closed t))))
 
-(defun agent-repl-test-commands--roster (rows)
-  "Return a decoded roster carrying ROWS in one repo section."
+(defun agent-repl-test-commands--roster (rows &optional hidden merged)
+  "Return a decoded roster carrying ROWS in one repo section.
+HIDDEN is the hidden section's rows and MERGED the recently-merged band's,
+in one group."
   (list :repository
         (list :sections (list (list :key (list :repository (list :id "r" :dir "/tmp"))
                                     :header (list :label (list :text "repo"))
                                     :rows (list :rows rows))))
         :task (list :sections nil)
+        :hidden (list :header (list :label (list :text "Hidden"))
+                      :rows (list :rows hidden))
         :recently-merged (list :header (list :label (list :text "m"))
-                               :groups nil)
+                               :groups (and merged
+                                            (list (list :header (list :label (list :text "repo"))
+                                                        :rows (list :rows merged)
+                                                        :drawn '(:arm :shown :value nil)))))
         :current nil))
+
+(defun agent-repl-test-commands--closed-row (name by at-ms)
+  "Return a decoded CLOSED roster row for NAME, closed BY (an arm) at AT-MS.
+BY nil is a close that predates the daemon's record: no `closure'."
+  (append (list :closure (and by (list :at-ms at-ms :by (list :arm by :value nil))))
+          (agent-repl-test-commands--row name (concat "id-" name) 100 t)))
+
+(defun agent-repl-test-commands--merged-row (name at-ms)
+  "Return a decoded merged roster row for NAME, landed at AT-MS."
+  (let ((row (agent-repl-test-commands--row name (concat "id-" name) 100 t)))
+    (plist-put row :status '(:arm :merged :value nil))
+    (plist-put row :when (list :arm :merged :value (list :at-ms at-ms)))))
 
 (defmacro agent-repl-test-commands--with-rows (rows history &rest body)
   "Run BODY over a roster of ROWS, with HISTORY as this session's switches.
@@ -1161,7 +1180,7 @@ workspaces only."
       (agent-repl--ws-put "real-ws" :project-dir "/tmp/real")
       (cl-letf (((symbol-function 'completing-read)
                  (lambda (_prompt candidates &rest _)
-                   (setq offered candidates)
+                   (setq offered (all-completions "" candidates))
                    "real-ws"))
                 ((symbol-function 'agent-repl-host-request-switch) (lambda (_ws _trigger) nil))
                 ((symbol-function 'agent-repl--ws-current-log-name) (lambda () nil)))
@@ -1196,9 +1215,11 @@ nothing to switch to."
   "The (REF . LANDER) the stubbed pending landing was registered with.")
 
 (defun agent-repl-test-commands--pick (answer)
-  "Return a `completing-read' stub recording its candidates and answering ANSWER."
+  "Return a `completing-read' stub recording its candidates and answering ANSWER.
+The switcher hands a function table (it states its columns as metadata),
+so the recorded candidates are every name the table completes."
   (lambda (_prompt candidates &rest _)
-    (setq agent-repl-test-commands--offered candidates)
+    (setq agent-repl-test-commands--offered (all-completions "" candidates))
     answer))
 
 (defmacro agent-repl-test-commands--switcher (rows live &rest body)
@@ -1228,17 +1249,17 @@ and `--switched' to the workspace whose switch was requested of the daemon."
        ,@body)))
 
 (ert-deftest agent-repl-test-commands-switcher-offers-a-closed-workspace ()
-  "A closed workspace is a workspace you can switch to, so it is offered."
+  "A workspace the user closed is a workspace you can switch to, so it is offered."
   ;; Arrange
   (agent-repl-test-commands--switcher
-      (list (agent-repl-test-commands--row "shut" "id-shut" 100 t)) nil
+      (list (agent-repl-test-commands--closed-row "shut" :user 100)) nil
     (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil))
               ((symbol-function 'completing-read)
-               (agent-repl-test-commands--pick "shut (closed)")))
+               (agent-repl-test-commands--pick "shut")))
       ;; Act
       (agent-repl-switch-to-project)
       ;; Assert
-      (should (equal agent-repl-test-commands--offered '("shut (closed)"))))))
+      (should (equal agent-repl-test-commands--offered '("shut"))))))
 
 (ert-deftest agent-repl-test-commands-switcher-offers-a-workspace-with-no-tab-here ()
   "The daemon knows it and this Emacs has not reconciled it: still offered."
@@ -1247,11 +1268,11 @@ and `--switched' to the workspace whose switch was requested of the daemon."
       (list (agent-repl-test-commands--row "fresh" "id-fresh" 100)) nil
     (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil))
               ((symbol-function 'completing-read)
-               (agent-repl-test-commands--pick "fresh (not open here)")))
+               (agent-repl-test-commands--pick "fresh")))
       ;; Act
       (agent-repl-switch-to-project)
       ;; Assert
-      (should (equal agent-repl-test-commands--offered '("fresh (not open here)"))))))
+      (should (equal agent-repl-test-commands--offered '("fresh"))))))
 
 (ert-deftest agent-repl-test-commands-switcher-offers-a-local-workspace-off-the-roster ()
   "A live local workspace no roster push carries yet is never dropped."
@@ -1294,7 +1315,7 @@ and `--switched' to the workspace whose switch was requested of the daemon."
                 '((:name "api" :dir "/a/api" :ref nil :ws "api" :state :open)
                   (:name "api" :dir "/b/api" :ref nil :ws nil :state :closed)))))
     ;; Assert
-    (should (equal (mapcar #'car alist) '("api [/a/api]" "api [/b/api] (closed)")))))
+    (should (equal (mapcar #'car alist) '("api [/a/api]" "api [/b/api]")))))
 
 (ert-deftest agent-repl-test-commands-switcher-switches-to-an-open-workspace ()
   "An open workspace is a switch REQUEST and nothing more."
@@ -1326,10 +1347,10 @@ and `--switched' to the workspace whose switch was requested of the daemon."
   "A workspace that is not here is reopened through `OpenWorkspace' itself."
   ;; Arrange
   (agent-repl-test-commands--switcher
-      (list (agent-repl-test-commands--row "shut" "id-shut" 100 t)) nil
+      (list (agent-repl-test-commands--closed-row "shut" :user 100)) nil
     (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil))
               ((symbol-function 'completing-read)
-               (agent-repl-test-commands--pick "shut (closed)")))
+               (agent-repl-test-commands--pick "shut")))
       ;; Act
       (agent-repl-switch-to-project)
       ;; Assert
@@ -1339,10 +1360,10 @@ and `--switched' to the workspace whose switch was requested of the daemon."
   "The tab arrives on the roster push, so the landing waits for it BY REF."
   ;; Arrange
   (agent-repl-test-commands--switcher
-      (list (agent-repl-test-commands--row "shut" "id-shut" 100 t)) nil
+      (list (agent-repl-test-commands--closed-row "shut" :user 100)) nil
     (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil))
               ((symbol-function 'completing-read)
-               (agent-repl-test-commands--pick "shut (closed)")))
+               (agent-repl-test-commands--pick "shut")))
       ;; Act
       (agent-repl-switch-to-project)
       ;; Assert
@@ -1354,12 +1375,12 @@ and `--switched' to the workspace whose switch was requested of the daemon."
   "Opening an absent workspace lands only while the user stays put in Emacs."
   ;; Arrange
   (agent-repl-test-commands--switcher
-      (list (agent-repl-test-commands--row "shut" "id-shut" 100 t)) nil
+      (list (agent-repl-test-commands--closed-row "shut" :user 100)) nil
     (let ((agent-repl-host--editor-switches 7)
           (dispatched nil))
       (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil))
                 ((symbol-function 'completing-read)
-                 (agent-repl-test-commands--pick "shut (closed)"))
+                 (agent-repl-test-commands--pick "shut"))
                 ((symbol-function 'agent-repl-verbs-select-minted)
                  (lambda (_ref dispatched-at &optional _lander)
                    (setq dispatched dispatched-at))))
@@ -1375,9 +1396,232 @@ and `--switched' to the workspace whose switch was requested of the daemon."
     (cl-letf (((symbol-function 'agent-repl--switch-candidates)
                (lambda () '((:name "orphan" :dir nil :ref nil :ws nil :state :closed))))
               ((symbol-function 'completing-read)
-               (agent-repl-test-commands--pick "orphan (closed)")))
+               (agent-repl-test-commands--pick "orphan")))
       ;; Act / Assert
       (should-error (agent-repl-switch-to-project) :type 'user-error))))
+
+;;;; ---- `SPC p p' offers the current and recent workspaces ----
+
+(defun agent-repl-test-commands--offered-by (command rows &optional hidden merged)
+  "Run COMMAND over a roster of ROWS, HIDDEN and MERGED; answer what it offered."
+  (let ((agent-repl-test-commands--offered nil)
+        (agent-repl-roster-view (agent-repl-test-commands--roster rows hidden merged)))
+    (cl-letf (((symbol-function 'agent-repl--live-ws-names) (lambda () nil))
+              ((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil))
+              ((symbol-function 'agent-repl--ws-current-log-name) (lambda () nil))
+              ((symbol-function 'agent-repl--info) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl-verb-open) #'ignore)
+              ((symbol-function 'agent-repl-verbs-select-minted) #'ignore)
+              ((symbol-function 'completing-read)
+               (lambda (_prompt table &rest _)
+                 (setq agent-repl-test-commands--offered (all-completions "" table))
+                 (car agent-repl-test-commands--offered))))
+      (funcall command)
+      agent-repl-test-commands--offered)))
+
+(ert-deftest agent-repl-test-commands-switcher-offers-open-hidden-merged-and-user-closed ()
+  "`SPC p p' offers the open, hidden, merged and user-closed workspaces."
+  ;; Arrange
+  (let ((rows (list (agent-repl-test-commands--row "open" "id-open" 100)
+                    (agent-repl-test-commands--closed-row "mine" :user 500)))
+        (hidden (list (agent-repl-test-commands--row "tucked" "id-tucked" 100)))
+        (merged (list (agent-repl-test-commands--merged-row "landed" 700))))
+    ;; Act
+    (let ((offered (agent-repl-test-commands--offered-by
+                    #'agent-repl-switch-to-project rows hidden merged)))
+      ;; Assert
+      (should (equal offered '("open" "tucked" "landed" "mine"))))))
+
+(ert-deftest agent-repl-test-commands-switcher-leaves-out-what-the-user-did-not-close ()
+  "A workspace the daemon, an agent or a merge closed is left to `SPC p P'."
+  ;; Arrange
+  (let ((rows (list (agent-repl-test-commands--closed-row "by-daemon" :daemon 500)
+                    (agent-repl-test-commands--closed-row "by-agent" :agent 500)
+                    (agent-repl-test-commands--closed-row "by-merge" :merge 500)
+                    (agent-repl-test-commands--closed-row "mine" :user 500))))
+    ;; Act
+    (let ((offered (agent-repl-test-commands--offered-by
+                    #'agent-repl-switch-to-project rows)))
+      ;; Assert
+      (should (equal offered '("mine"))))))
+
+(ert-deftest agent-repl-test-commands-switcher-leaves-out-a-close-with-no-record ()
+  "A close that predates the daemon's record says nothing of who closed it."
+  ;; Arrange
+  (let ((rows (list (agent-repl-test-commands--row "open" "id-open" 100)
+                    (agent-repl-test-commands--closed-row "old" nil nil))))
+    ;; Act
+    (let ((offered (agent-repl-test-commands--offered-by
+                    #'agent-repl-switch-to-project rows)))
+      ;; Assert
+      (should (equal offered '("open"))))))
+
+(ert-deftest agent-repl-test-commands-switcher-offers-the-25-most-recently-merged ()
+  "Only the most recently merged are offered, newest first."
+  ;; Arrange
+  (let ((merged (cl-loop for i from 1 to 30
+                         collect (agent-repl-test-commands--merged-row
+                                  (format "m%02d" i) (* 1000 i)))))
+    ;; Act
+    (let ((offered (agent-repl-test-commands--offered-by
+                    #'agent-repl-switch-to-project nil nil merged)))
+      ;; Assert
+      (should (= (length offered) agent-repl--switch-recent-limit))
+      (should (equal (car offered) "m30"))
+      (should (equal (car (last offered)) "m06")))))
+
+(ert-deftest agent-repl-test-commands-switcher-offers-the-25-most-recently-user-closed ()
+  "Only the ones the user most recently closed are offered, newest first."
+  ;; Arrange
+  (let ((rows (cl-loop for i from 1 to 30
+                       collect (agent-repl-test-commands--closed-row
+                                (format "c%02d" i) :user (* 1000 i)))))
+    ;; Act
+    (let ((offered (agent-repl-test-commands--offered-by
+                    #'agent-repl-switch-to-project rows)))
+      ;; Assert
+      (should (= (length offered) agent-repl--switch-recent-limit))
+      (should (equal (car offered) "c30"))
+      (should (equal (car (last offered)) "c06")))))
+
+(ert-deftest agent-repl-test-commands-switch-to-any-offers-every-known-workspace ()
+  "`SPC p P' offers every known workspace, however it was closed."
+  ;; Arrange
+  (let ((rows (list (agent-repl-test-commands--row "open" "id-open" 100)
+                    (agent-repl-test-commands--closed-row "by-daemon" :daemon 500)
+                    (agent-repl-test-commands--closed-row "old" nil nil)))
+        (merged (cl-loop for i from 1 to 30
+                         collect (agent-repl-test-commands--merged-row
+                                  (format "m%02d" i) (* 1000 i)))))
+    ;; Act
+    (let ((offered (agent-repl-test-commands--offered-by
+                    #'agent-repl-switch-to-any-workspace rows nil merged)))
+      ;; Assert
+      (should (= (length offered) 33))
+      (should (member "by-daemon" offered))
+      (should (member "old" offered)))))
+
+(ert-deftest agent-repl-test-commands-switcher-ranking-without-an-instant-fails-hard ()
+  "An entry handed to the ranking with no instant is a violated invariant."
+  ;; Arrange
+  (let ((errors nil))
+    (cl-letf (((symbol-function 'agent-repl--error)
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+      ;; Act / Assert
+      (should-error (agent-repl--switch-most-recent
+                     '((:name "no-instant")) (lambda (_entry) nil)))
+      (should (string-match-p "name=no-instant has no instant" (car errors))))))
+
+;;;; ---- The switcher's columns ----
+
+(ert-deftest agent-repl-test-commands-switch-mark-of-a-closed-row-is-the-grey-dot ()
+  "A closed workspace opens its line with the sidebar's grey dot."
+  ;; Arrange
+  (let ((entry (list :row (agent-repl-test-commands--closed-row "c" :user 1)
+                     :section :repository)))
+    ;; Act
+    (let ((mark (agent-repl--switch-mark entry)))
+      ;; Assert
+      (should (equal mark "●"))
+      (should (eq (get-text-property 0 'face mark) 'shadow)))))
+
+(ert-deftest agent-repl-test-commands-switch-mark-of-a-merged-row-is-the-grey-dot ()
+  "A merged workspace opens its line with the grey dot, not its green."
+  ;; Arrange
+  (let ((entry (list :row (agent-repl-test-commands--merged-row "m" 1) :section :merged)))
+    ;; Act
+    (let ((mark (agent-repl--switch-mark entry)))
+      ;; Assert
+      (should (equal mark "●"))
+      (should (eq (get-text-property 0 'face mark) 'shadow)))))
+
+(ert-deftest agent-repl-test-commands-switch-mark-of-a-hidden-row-is-the-hidden-ring ()
+  "A hidden workspace draws the hidden ring in its status color."
+  ;; Arrange
+  (let ((entry (list :row (agent-repl-test-commands--row "h" "id-h" 1) :section :hidden)))
+    ;; Act
+    (let ((mark (agent-repl--switch-mark entry)))
+      ;; Assert
+      (should (equal mark agent-repl--switch-hidden-glyph))
+      (should (equal (get-text-property 0 'face mark)
+                     (list :foreground (agent-repl-status-roster-mark-color :ready)))))))
+
+(ert-deftest agent-repl-test-commands-switch-mark-of-an-open-row-is-its-sidebar-mark ()
+  "An open workspace draws the sidebar's own mark for its status arm."
+  ;; Arrange
+  (let ((entry (list :row (agent-repl-test-commands--row "o" "id-o" 1) :section :repository)))
+    ;; Act / Assert
+    (should (equal-including-properties (agent-repl--switch-mark entry)
+                                        (agent-repl-status-roster-mark :ready)))))
+
+(ert-deftest agent-repl-test-commands-switch-mark-without-a-row-is-the-default-glyph ()
+  "A live local workspace no push carries yet has no status to show."
+  ;; Arrange / Act
+  (let ((mark (agent-repl--switch-mark '(:row nil :section nil))))
+    ;; Assert
+    (should (equal mark agent-repl-ws-state-icon-default))
+    (should (eq (get-text-property 0 'face mark) 'shadow))))
+
+(ert-deftest agent-repl-test-commands-switch-state-label-names-the-section-first ()
+  "Where a workspace sits outranks how it would open."
+  (should (equal (agent-repl--switch-state-label '(:section :hidden :state :open)) "hidden"))
+  (should (equal (agent-repl--switch-state-label '(:section :merged :state :closed)) "merged"))
+  (should (equal (agent-repl--switch-state-label '(:section :repository :state :closed)) "closed"))
+  (should (equal (agent-repl--switch-state-label '(:section :repository :state :not-here)) "not open here"))
+  (should (equal (agent-repl--switch-state-label '(:section nil :state :open)) "")))
+
+(ert-deftest agent-repl-test-commands-switch-turn-age-reads-the-durable-instant ()
+  "The age column is how long ago the last turn ended, in the shared format."
+  ;; Arrange
+  (let ((row (append (list :last-turn-ended '(:at-ms 0))
+                     (agent-repl-test-commands--row "a" "id-a" 1))))
+    ;; Act / Assert
+    (should (equal (agent-repl--switch-turn-age (list :row row) (* 1000 600))
+                   (agent-repl-format-age 0 (* 1000 600))))))
+
+(ert-deftest agent-repl-test-commands-switch-turn-age-without-a-turn-says-so ()
+  "A workspace none of whose turns ended shows no age."
+  ;; Arrange
+  (let ((row (agent-repl-test-commands--row "a" "id-a" 1)))
+    ;; Act / Assert
+    (should (equal (agent-repl--switch-turn-age (list :row row) 1000) "no turn yet"))))
+
+(ert-deftest agent-repl-test-commands-switch-commits-column ()
+  "The commit column states the daemon's count, and nothing without one."
+  (cl-flet ((with-count (count)
+              (let ((row (agent-repl-test-commands--row "a" "id-a" 1)))
+                (plist-put row :detail (list :commits (and count (list :count count))))
+                (agent-repl--switch-commits (list :row row)))))
+    (should (equal (with-count nil) ""))
+    (should (equal (with-count 0) "0 commits"))
+    (should (equal (with-count 1) "1 commit"))
+    (should (equal (with-count 7) "7 commits"))))
+
+(ert-deftest agent-repl-test-commands-switch-affixation-draws-mark-and-columns ()
+  "Each line is its mark, its name, and its columns past the longest name."
+  ;; Arrange
+  (let* ((row (append (list :last-turn-ended '(:at-ms 0))
+                      (agent-repl-test-commands--row "short" "id-s" 1)))
+         (alist (list (cons "short" (list :row row :section :repository :state :open))
+                      (cons "a-longer-name" (list :row nil :section nil :state :open))))
+         (affix (agent-repl--switch-affixation alist (* 1000 120))))
+    ;; Act
+    (let ((line (car (funcall affix '("short")))))
+      ;; Assert
+      (should (equal (nth 0 line) "short"))
+      (should (equal (nth 1 line) (concat (agent-repl-status-roster-mark :ready) " ")))
+      (should (equal (get-text-property 0 'display (nth 2 line))
+                     `(space :align-to ,(+ 4 (string-width "a-longer-name")))))
+      (should (string-match-p "2m ago" (nth 2 line))))))
+
+(ert-deftest agent-repl-test-commands-switch-table-states-its-columns ()
+  "The completion table states the affixation function and completes names."
+  ;; Arrange
+  (let ((table (agent-repl--switch-table
+                (list (cons "one" '(:row nil :section nil :state :open))) 0)))
+    ;; Act / Assert
+    (should (functionp (alist-get 'affixation-function (cdr (funcall table "" nil 'metadata)))))
+    (should (equal (all-completions "" table) '("one")))))
 
 ;;;; ---- A project switch lands on the workspace's own panel ----
 

@@ -496,14 +496,14 @@ func TestRegisterRepositoryRefusesABlankDirectory(t *testing.T) {
 	}
 }
 
-func TestSetClosedRecordsTheTeardown(t *testing.T) {
+func TestMarkClosedRecordsTheTeardown(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
 	ws := testWorkspace(t, s)
 
 	// Act
-	if err := s.SetClosed(context.Background(), ws.ID, true); err != nil {
-		t.Fatalf("SetClosed: %v", err)
+	if err := s.MarkClosed(context.Background(), ws.ID, Closure{At: time.Now(), By: CloseByUser}); err != nil {
+		t.Fatalf("MarkClosed: %v", err)
 	}
 
 	// Assert
@@ -512,31 +512,41 @@ func TestSetClosedRecordsTheTeardown(t *testing.T) {
 		t.Fatalf("Workspace: %v", err)
 	}
 	if !got.Closed {
-		t.Fatalf("closed = false after SetClosed(true)")
+		t.Fatalf("closed = false after MarkClosed")
 	}
 }
 
-func TestSetClosedRefusesAnUnknownWorkspace(t *testing.T) {
+func TestMarkClosedRefusesAnUnknownWorkspace(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
 
 	// Act
-	err := s.SetClosed(context.Background(), WorkspaceID("absent"), true)
+	err := s.MarkClosed(context.Background(), WorkspaceID("absent"), Closure{At: time.Now(), By: CloseByUser})
 
 	// Assert
 	if !errors.Is(err, ErrNotFound) {
-		t.Fatalf("SetClosed = %v, want ErrNotFound", err)
+		t.Fatalf("MarkClosed = %v, want ErrNotFound", err)
 	}
 }
 
-func TestSetClosedReleasesOwnership(t *testing.T) {
+func TestCloseAndReopenOwnership(t *testing.T) {
 	tests := []struct {
-		name   string
-		closed bool
-		want   bool // whether serving and the spawned pid survive the write
+		name  string
+		write func(ctx context.Context, s *store, id WorkspaceID) error
+		want  bool // whether serving and the spawned pid survive the write
 	}{
-		{name: "a close releases serving and clears the spawned shim pid", closed: true, want: false},
-		{name: "a reopen leaves serving and the spawned shim pid untouched", closed: false, want: true},
+		{
+			name: "a close releases serving and clears the spawned shim pid",
+			write: func(ctx context.Context, s *store, id WorkspaceID) error {
+				return s.MarkClosed(ctx, id, Closure{At: time.Now(), By: CloseByUser})
+			},
+			want: false,
+		},
+		{
+			name:  "a reopen leaves serving and the spawned shim pid untouched",
+			write: func(ctx context.Context, s *store, id WorkspaceID) error { return s.Reopen(ctx, id) },
+			want:  true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -553,8 +563,8 @@ func TestSetClosedReleasesOwnership(t *testing.T) {
 			}
 
 			// Act
-			if err := s.SetClosed(ctx, ws.ID, tt.closed); err != nil {
-				t.Fatalf("SetClosed: %v", err)
+			if err := tt.write(ctx, s, ws.ID); err != nil {
+				t.Fatalf("write: %v", err)
 			}
 
 			// Assert

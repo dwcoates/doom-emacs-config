@@ -99,7 +99,8 @@ Findings are collected at the end, in "Audit findings".
 | `agent-repl-switch-right` | Switch to the tab on the right, wrapping. | `s-}`, remap of `+workspace/switch-right` | global, numerals map | works |
 | `agent-repl-switch-to-workspace-1` .. `-9` (generated) | Switch to tab slot N. | `M-1`..`M-9`, `s-1`..`s-9`, remap of `+workspace/switch-to-N` | numerals map (evil intercept) | works |
 | `agent-repl-switch-to-workspace` | Switch to tab slot N (the generated commands call it). | - | - | - |
-| `agent-repl-switch-to-project` | Switch to a known workspace, or to a project. | `SPC p p` | leader | leader |
+| `agent-repl-switch-to-project` | Switch to a current or recent workspace, or to a project. | `SPC p p` | leader | leader |
+| `agent-repl-switch-to-any-workspace` | Switch to any known workspace. | `SPC p P` | leader | leader |
 | `agent-repl-open-most-recent-workspace` | Switch to the most recently selected workspace not yet visited. | `SPC TAB R` | leader | leader |
 | `agent-repl-switch-to-last-finished-workspace` | Switch to the workspace that most recently went from working to done. | `SPC TAB TAB` | leader | leader |
 | `agent-repl-workspace-push-to-back` | Push the current tab to the back of the tab order. | - | - | - |

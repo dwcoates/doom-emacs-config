@@ -1338,10 +1338,26 @@ A repository whose section is drawn with NO rows is still an ordinary state
 (every workspace under it closed), so neither the daemon's roster resolver nor
 the webapp's sidebar may drop an empty section.
 
-## `SPC p p` offers EVERY KNOWN workspace, not only the live ones
+## `SPC p p` offers the current and recent workspaces, `SPC p P` every known one
 
-Owner ruling, 2026-09-20. `agent-repl-switch-to-project` with no argument is
-the one switcher, and its candidate list is built from THE DAEMON'S ROSTER
+Owner request, 2026-10-14. `SPC p p` (`agent-repl-switch-to-project`) offers
+the open workspaces, the hidden ones, the 25 most recently MERGED and the 25
+the USER most recently closed or killed (`agent-repl--switch-curated`). "The
+user closed it" is the daemon's close record (`frontend.v1.RosterRowClosure`,
+its `user` arm: CloseWorkspace or KillWorkspace), never inferred in Emacs: a
+workspace the daemon, an agent or a merge closed is left out, and so is one
+whose close predates the record. `SPC p P`
+(`agent-repl-switch-to-any-workspace`) offers every known workspace, which is
+what `SPC p p` offered before.
+
+Both draw each line with the sidebar's status mark before the name (a grey
+dot for a closed or merged row, `◌` in the status color for a hidden one,
+`agent-repl-status-roster-mark` otherwise) and three columns after it: the
+state, how long ago the last turn ended (`agent-repl-format-age`) and the
+branch's commits past its merge-base. The columns ride in the completion
+table's `affixation-function`, never in the candidate string.
+
+Owner ruling, 2026-09-20. The switcher's candidate list is built from THE DAEMON'S ROSTER
 (`agent-repl-verbs--all-rows`), which is the source of what exists. Emacs's
 own `agent-repl--workspaces` table is not: it holds the workspaces that have
 a PERSPECTIVE STANDING IN THIS EMACS, which excluded three real kinds of
@@ -1366,12 +1382,11 @@ tab and lands BY IDENTITY rather than by directory. Never add a second open
 path here: a switcher that opened workspaces its own way is a second
 mechanism to disagree with the first.
 
-The candidate strings are plain text and must stay that way: an open
-workspace carries no affix, a closed one ` (closed)`, one the daemon knows
-but this Emacs has no tab for ` (not open here)`. A name that collides with
-another candidate's is qualified by its directory, because `completing-read`
-answers with the string and two identical strings make the second
-unreachable.
+The candidate strings are the names and nothing else: whether a workspace is
+closed, hidden, merged or not open here is its state column. A name that
+collides with another candidate's is qualified by its directory, because
+`completing-read` answers with the string and two identical strings make the
+second unreachable.
 
 ## Implementers do not judge proto design
 
