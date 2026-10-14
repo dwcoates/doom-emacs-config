@@ -97,6 +97,51 @@ ANSWER is `(:response PLIST)', `(:failure DETAIL)', or nil to answer nothing."
     (insert "/merge ")
     (should-not (agent-repl--command-completion-bounds))))
 
+(ert-deftest agent-repl-test-command-completion-bounds-after-an-opening-paren ()
+  "A slash word right after an opening paren starts at its slash."
+  (with-temp-buffer
+    (insert "see (/mer")
+    (should (equal (agent-repl--command-completion-bounds) '(6 . 10)))))
+
+(ert-deftest agent-repl-test-command-completion-bounds-after-opening-quotes ()
+  "A slash word after several opening quotes and brackets starts at its slash."
+  (with-temp-buffer
+    (insert "[\"/mer")
+    (should (equal (agent-repl--command-completion-bounds) '(3 . 7)))))
+
+(ert-deftest agent-repl-test-command-completion-bounds-drop-trailing-punctuation ()
+  "Trailing closing brackets and sentence punctuation are outside the word."
+  (with-temp-buffer
+    (insert "(/merge-queue).")
+    (goto-char 5)
+    (should (equal (agent-repl--command-completion-bounds) '(2 . 14)))))
+
+(ert-deftest agent-repl-test-command-completion-bounds-keep-a-bare-slash-in-parens ()
+  "A bare slash before a closing paren is a one-character slash word."
+  (with-temp-buffer
+    (insert "(/)")
+    (goto-char 3)
+    (should (equal (agent-repl--command-completion-bounds) '(2 . 3)))))
+
+(ert-deftest agent-repl-test-command-completion-bounds-ignore-point-past-trailing-punctuation ()
+  "Point after a slash word's trailing punctuation is not in the word."
+  (with-temp-buffer
+    (insert "(/mer)")
+    (should-not (agent-repl--command-completion-bounds))))
+
+(ert-deftest agent-repl-test-command-completion-bounds-ignore-point-on-opening-punctuation ()
+  "Point before a slash word's opening punctuation is not in the word."
+  (with-temp-buffer
+    (insert "(/mer")
+    (goto-char 1)
+    (should-not (agent-repl--command-completion-bounds))))
+
+(ert-deftest agent-repl-test-command-completion-bounds-ignore-a-slash-after-other-punctuation ()
+  "A slash after punctuation that opens nothing (a relative path) is not a slash word."
+  (with-temp-buffer
+    (insert "../mer")
+    (should-not (agent-repl--command-completion-bounds))))
+
 ;;;; ---- Candidates ----
 
 (ert-deftest agent-repl-test-command-completion-candidates-name-and-alias ()
@@ -232,6 +277,48 @@ ANSWER is `(:response PLIST)', `(:failure DETAIL)', or nil to answer nothing."
     ;; Assert
     (should (equal (agent-repl-test-command-completion--marked) '("/clear")))))
 
+(ert-deftest agent-repl-test-command-completion-mark-inside-parens ()
+  "A known slash word wrapped in parens is marked without the parens."
+  (agent-repl-test-command-completion--marking
+    ;; Act
+    (insert "hello (/merge-queue) here")
+    ;; Assert
+    (should (equal (agent-repl-test-command-completion--marked) '("/merge-queue")))))
+
+(ert-deftest agent-repl-test-command-completion-mark-before-a-period ()
+  "A known slash word ending a sentence is marked without the period."
+  (agent-repl-test-command-completion--marking
+    ;; Act
+    (insert "hello /merge-queue.")
+    ;; Assert
+    (should (equal (agent-repl-test-command-completion--marked) '("/merge-queue")))))
+
+(ert-deftest agent-repl-test-command-completion-mark-inside-quotes ()
+  "A known slash word in quotes followed by a comma is marked without them."
+  (agent-repl-test-command-completion--marking
+    ;; Act
+    (insert "run \"/clear\", then")
+    ;; Assert
+    (should (equal (agent-repl-test-command-completion--marked) '("/clear")))))
+
+(ert-deftest agent-repl-test-command-completion-mark-when-closing-punctuation-is-typed ()
+  "Typing a closing paren after a known slash word keeps it marked."
+  (agent-repl-test-command-completion--marking
+    ;; Arrange
+    (insert "(/usage")
+    ;; Act
+    (insert ")")
+    ;; Assert
+    (should (equal (agent-repl-test-command-completion--marked) '("/usage")))))
+
+(ert-deftest agent-repl-test-command-completion-mark-skips-mid-word-closing-punctuation ()
+  "A closing paren inside the run, not trailing it, keeps the word unknown."
+  (agent-repl-test-command-completion--marking
+    ;; Act
+    (insert "/clear)x")
+    ;; Assert
+    (should-not (agent-repl-test-command-completion--marked))))
+
 (ert-deftest agent-repl-test-command-completion-mark-is-removed-when-the-word-changes ()
   "Typing on past a known command unmarks the slash word."
   (agent-repl-test-command-completion--marking
@@ -303,6 +390,22 @@ ANSWER is `(:response PLIST)', `(:failure DETAIL)', or nil to answer nothing."
       (should (equal (list (nth 0 capf) (nth 1 capf)) '(1 4)))
       (should (equal (all-completions "/me" (nth 2 capf)) '("/merge-queue")))
       (should (eq (plist-get (nthcdr 3 capf) :exclusive) 'no)))))
+
+(ert-deftest agent-repl-test-command-completion-capf-completes-inside-parens ()
+  "A slash word inside parens completes over its slash and name only."
+  (agent-repl-test-command-completion--with
+      (list :response (agent-repl-test-command-completion--stated
+                       agent-repl-test-command-completion--catalog))
+    ;; Arrange
+    (agent-repl-test-command-completion--type "(/")
+    (agent-repl-command-completion-at-point)
+    (agent-repl-test-command-completion--type "me)")
+    (backward-char)
+    ;; Act
+    (let ((capf (agent-repl-command-completion-at-point)))
+      ;; Assert
+      (should (equal (list (nth 0 capf) (nth 1 capf)) '(2 5)))
+      (should (equal (all-completions "/me" (nth 2 capf)) '("/merge-queue"))))))
 
 (ert-deftest agent-repl-test-command-completion-capf-is-nil-outside-a-slash-word ()
   "Outside a slash word the capf declines and asks nothing."

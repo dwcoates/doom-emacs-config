@@ -30,6 +30,11 @@
 ;; then description) is cut to `agent-repl-command-completion-annotation-width'
 ;; columns; the full description is the candidate's doc signature.
 ;;
+;; PUNCTUATION AROUND A SLASH WORD IS NOT PART OF IT.  A slash word may
+;; follow opening brackets and quotes, and drops trailing closing brackets,
+;; quotes and sentence punctuation, so `(/merge-queue).' completes and marks
+;; `/merge-queue' just as a whitespace-bounded one does.
+;;
 ;; A KNOWN COMMAND IS PURPLE IN THE COMPOSER.  Every slash word naming a
 ;; command in the catalog in hand -- typed, completed or pasted -- takes
 ;; `agent-repl-command-completion-known' through an overlay.  An edit
@@ -74,17 +79,39 @@ TICK, and so a new ask.")
 
 ;;;; ---- The slash word at point ----
 
+(defconst agent-repl--command-completion-opening-chars "([{<\"'`\u201c\u2018"
+  "The punctuation a slash word may follow inside its whitespace-bounded run.
+A `skip-chars-forward' set: opening brackets and quotes, so `(/clear' and
+`\"/clear' hold the slash word `/clear'.")
+
+(defconst agent-repl--command-completion-closing-chars ")]}>\"'`.,;:!?\u201d\u2019\u2026"
+  "The punctuation a slash word's whitespace-bounded run may end in, outside it.
+A `skip-chars-backward' set: closing brackets and quotes and sentence
+punctuation, so `/clear).' holds the slash word `/clear'.")
+
 (defun agent-repl--command-completion-bounds ()
   "Return (START . END) of the slash word around point, or nil.
-A slash word is a run of non-whitespace that begins with `/' at the start
-of a line or after whitespace, and point sits inside it or at its end."
+A slash word lies in a run of non-whitespace.  It begins with `/' at the
+run's start or after the run's leading opening punctuation
+\(`agent-repl--command-completion-opening-chars'), and ends at the run's
+end less its trailing closing punctuation
+\(`agent-repl--command-completion-closing-chars'), never before the slash's
+next character.  Point sits inside it or at its end."
   (save-excursion
     (let* ((here (point))
-           (start (progn (skip-chars-backward "^[:space:]") (point)))
-           (end (progn (goto-char here) (skip-chars-forward "^[:space:]") (point))))
-      (when (and (< start end)
+           (run-start (progn (skip-chars-backward "^[:space:]") (point)))
+           (run-end (progn (goto-char here) (skip-chars-forward "^[:space:]") (point)))
+           (start (progn (goto-char run-start)
+                         (skip-chars-forward agent-repl--command-completion-opening-chars run-end)
+                         (point))))
+      (when (and (< start run-end)
                  (eq (char-after start) ?/))
-        (cons start end)))))
+        (let ((end (progn (goto-char run-end)
+                          (skip-chars-backward agent-repl--command-completion-closing-chars
+                                               (1+ start))
+                          (point))))
+          (when (<= start here end)
+            (cons start end)))))))
 
 ;;;; ---- Candidates ----
 
