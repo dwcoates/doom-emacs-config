@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"agentrepl/testrun/internal/ramdisk"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/internal/suites"
 	"agentrepl/testrun/roster"
@@ -940,6 +941,28 @@ func TestParseWardenArgs(t *testing.T) {
 			}
 			if err != nil || got.Runner != 77 || got.Sentinel != 76 || got.Since.Unix() != 1760400000 {
 				t.Fatalf("ParseWardenArgs() = %+v, %v", got, err)
+			}
+		})
+	}
+}
+
+func TestRunConditions(t *testing.T) {
+	cases := []struct {
+		name   string
+		prefix []string
+		want   string
+	}{
+		{name: "a run on the RAM disk names its units' I/O tier", prefix: ramdisk.UnitPrefix(), want: "ramdisk-io-" + ramdisk.UnitIOTier},
+		{name: "a run on the disk names the tier it inherited", prefix: nil, want: "disk-io-inherited"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := RunConditions(tc.prefix)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("RunConditions = %q, want %q", got, tc.want)
 			}
 		})
 	}

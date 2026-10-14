@@ -16,8 +16,8 @@ func TestProgram(t *testing.T) {
 		t.Fatal(err)
 	}
 	tests := []struct {
-		name    string
-		env     string
+		name     string
+		env      string
 		program  string
 		coverage bool
 		wantOK   bool
