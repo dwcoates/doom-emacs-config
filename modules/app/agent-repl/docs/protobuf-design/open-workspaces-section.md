@@ -37,3 +37,17 @@ The shapes follow the nearest precedents (`frontend.v1.RosterHiddenSection`,
 
 - WHAT: a `agentrepl.v1.SidebarViewOpen` arm on the fold's section oneof.
 - Stored on the `sidebar_view` singleton as `open_folded` (layout 46, additive).
+
+### `frontend.v1.RosterRowWhen.turn_running` / `.no_turn_running`
+
+- WHAT: the open workspaces section's when-column is the running turn's
+  duration, from `frontend.v1.RosterRowWhenTurnRunning.started_at_ms`, and
+  `frontend.v1.RosterRowWhenNoTurnRunning` ("0s") with no turn running (owner
+  request, 2026-10-13).
+- WHY the start instant is the footer's: the owner asked for exactly the turn
+  duration number, so the daemon reads it off the workspace's published
+  `frontend.v1.FooterClock.turn_started_at_ms`, and the webapp ticks it with
+  the footer clock's own formatter. The two cannot disagree.
+- `turn_ended` (field 5) and `created` (field 4) are retired: no row shows
+  the time since its last turn ended any more.
+- The arm is never unset: every row has a precedence arm to draw.

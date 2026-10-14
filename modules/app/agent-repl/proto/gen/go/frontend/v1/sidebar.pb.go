@@ -4836,28 +4836,29 @@ func (x *RosterRowCurrent) GetCurrent() bool {
 	return false
 }
 
-// The when-column: ONE value, chosen by the daemon. The column reflects when
-// the workspace's LAST TURN ENDED — how long it has sat since it last
-// finished work — never when it was last VIEWED, so it is STABLE across mere
-// selection and navigation, and it does not reset when a new turn starts. The
-// daemon's precedence is: MERGED wins ("the workspace is done" is the more
-// interesting fact); else HIDDEN (a workspace in the hidden section counts from
-// when it was hidden, owner request 2026-10-13); else TURN_ENDED (the last
-// turn close); else CREATED (a
-// registered workspace always has a creation time, and a workspace whose
-// first turn is still running has no turn end yet). The client renders
-// whichever arm arrives and applies no precedence of its own.
+// The when-column: ONE value, chosen by the daemon. The daemon's precedence
+// is: MERGED wins ("the workspace is done" is the more interesting fact);
+// else HIDDEN (a workspace in the hidden section counts from when it was
+// hidden, owner request 2026-10-13); else, for every row of the open
+// workspaces section, the TURN CLOCK (owner request, 2026-10-13): TURN_RUNNING
+// while a turn runs, counting from the very instant the footer's turn clock
+// counts from (frontend.v1.FooterClock.turn_started_at_ms), so the two read
+// the same number; NO_TURN_RUNNING otherwise, drawn "0s". The client renders
+// whichever arm arrives and applies no precedence of its own. Never unset.
+//
+// `turn_ended` (field 5) and `created` (field 4) are RETIRED and reserved:
+// the open workspaces section counted the time since the last turn ended, or
+// since the workspace was created before its first turn ended; it now shows
+// the running turn's duration (2026-10-13).
 //
 // `active` (field 3) is RETIRED and reserved: it carried the most recent turn
 // START or close, so the age reset to zero the moment a turn began and read
 // as time-since-work-began rather than time-since-work-ended (2026-10-11).
 //
-// `last_selected` (field 1) is RETIRED and reserved: the column no longer
-// shows viewing-recency, because it reset on every SelectWorkspace and read
-// as a broken clock (2026-09-14), and nothing has produced it since. The
-// selection instant the roster orders by is RosterRow.last_selected. An UNSET
-// oneof draws an empty column; the daemon leaves it unset only when there is
-// genuinely no instant to show.
+// `last_selected` (field 1) is RETIRED and reserved: the column showed
+// viewing-recency, which reset on every SelectWorkspace and read as a broken
+// clock (2026-09-14). The selection instant the roster orders by is
+// RosterRow.last_selected.
 //
 // `viewed` (field 6) is RETIRED and reserved: the retired viewed band's
 // time-since-last-viewed arm (2026-10-12).
@@ -4866,9 +4867,9 @@ type RosterRowWhen struct {
 	// Types that are valid to be assigned to Shown:
 	//
 	//	*RosterRowWhen_Merged
-	//	*RosterRowWhen_Created
-	//	*RosterRowWhen_TurnEnded
 	//	*RosterRowWhen_Hidden
+	//	*RosterRowWhen_TurnRunning
+	//	*RosterRowWhen_NoTurnRunning
 	Shown         isRosterRowWhen_Shown `protobuf_oneof:"shown"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -4920,28 +4921,28 @@ func (x *RosterRowWhen) GetMerged() *RosterRowWhenMerged {
 	return nil
 }
 
-func (x *RosterRowWhen) GetCreated() *RosterRowWhenCreated {
-	if x != nil {
-		if x, ok := x.Shown.(*RosterRowWhen_Created); ok {
-			return x.Created
-		}
-	}
-	return nil
-}
-
-func (x *RosterRowWhen) GetTurnEnded() *RosterRowWhenTurnEnded {
-	if x != nil {
-		if x, ok := x.Shown.(*RosterRowWhen_TurnEnded); ok {
-			return x.TurnEnded
-		}
-	}
-	return nil
-}
-
 func (x *RosterRowWhen) GetHidden() *RosterRowWhenHidden {
 	if x != nil {
 		if x, ok := x.Shown.(*RosterRowWhen_Hidden); ok {
 			return x.Hidden
+		}
+	}
+	return nil
+}
+
+func (x *RosterRowWhen) GetTurnRunning() *RosterRowWhenTurnRunning {
+	if x != nil {
+		if x, ok := x.Shown.(*RosterRowWhen_TurnRunning); ok {
+			return x.TurnRunning
+		}
+	}
+	return nil
+}
+
+func (x *RosterRowWhen) GetNoTurnRunning() *RosterRowWhenNoTurnRunning {
+	if x != nil {
+		if x, ok := x.Shown.(*RosterRowWhen_NoTurnRunning); ok {
+			return x.NoTurnRunning
 		}
 	}
 	return nil
@@ -4955,25 +4956,25 @@ type RosterRowWhen_Merged struct {
 	Merged *RosterRowWhenMerged `protobuf:"bytes,2,opt,name=merged,proto3,oneof"`
 }
 
-type RosterRowWhen_Created struct {
-	Created *RosterRowWhenCreated `protobuf:"bytes,4,opt,name=created,proto3,oneof"`
-}
-
-type RosterRowWhen_TurnEnded struct {
-	TurnEnded *RosterRowWhenTurnEnded `protobuf:"bytes,5,opt,name=turn_ended,json=turnEnded,proto3,oneof"`
-}
-
 type RosterRowWhen_Hidden struct {
 	Hidden *RosterRowWhenHidden `protobuf:"bytes,7,opt,name=hidden,proto3,oneof"`
 }
 
+type RosterRowWhen_TurnRunning struct {
+	TurnRunning *RosterRowWhenTurnRunning `protobuf:"bytes,8,opt,name=turn_running,json=turnRunning,proto3,oneof"`
+}
+
+type RosterRowWhen_NoTurnRunning struct {
+	NoTurnRunning *RosterRowWhenNoTurnRunning `protobuf:"bytes,9,opt,name=no_turn_running,json=noTurnRunning,proto3,oneof"`
+}
+
 func (*RosterRowWhen_Merged) isRosterRowWhen_Shown() {}
 
-func (*RosterRowWhen_Created) isRosterRowWhen_Shown() {}
-
-func (*RosterRowWhen_TurnEnded) isRosterRowWhen_Shown() {}
-
 func (*RosterRowWhen_Hidden) isRosterRowWhen_Shown() {}
+
+func (*RosterRowWhen_TurnRunning) isRosterRowWhen_Shown() {}
+
+func (*RosterRowWhen_NoTurnRunning) isRosterRowWhen_Shown() {}
 
 // When the workspace was moved into the hidden section, in epoch
 // MILLISECONDS. Set for exactly the rows the hidden section draws.
@@ -5066,30 +5067,31 @@ func (x *RosterRowWhenMerged) GetAtMs() int64 {
 	return 0
 }
 
-// When the workspace's LAST TURN ENDED, in epoch MILLISECONDS — the most
-// recent turn close the daemon recorded, of any close kind, NOT the compose
-// time and NOT a turn start. Renders as relative age ("3m", "2h").
-type RosterRowWhenTurnEnded struct {
+// A turn is running: when it started, in epoch MILLISECONDS on the daemon's
+// clock, exactly the workspace's frontend.v1.FooterClock.turn_started_at_ms.
+// The client ticks the elapsed time from it with the footer clock's own
+// formatter, so the row and the strip read the same duration.
+type RosterRowWhenTurnRunning struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	AtMs          int64                  `protobuf:"varint,1,opt,name=at_ms,json=atMs,proto3" json:"at_ms,omitempty"`
+	StartedAtMs   int64                  `protobuf:"varint,1,opt,name=started_at_ms,json=startedAtMs,proto3" json:"started_at_ms,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *RosterRowWhenTurnEnded) Reset() {
-	*x = RosterRowWhenTurnEnded{}
+func (x *RosterRowWhenTurnRunning) Reset() {
+	*x = RosterRowWhenTurnRunning{}
 	mi := &file_frontend_v1_sidebar_proto_msgTypes[70]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *RosterRowWhenTurnEnded) String() string {
+func (x *RosterRowWhenTurnRunning) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*RosterRowWhenTurnEnded) ProtoMessage() {}
+func (*RosterRowWhenTurnRunning) ProtoMessage() {}
 
-func (x *RosterRowWhenTurnEnded) ProtoReflect() protoreflect.Message {
+func (x *RosterRowWhenTurnRunning) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_sidebar_proto_msgTypes[70]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -5101,42 +5103,40 @@ func (x *RosterRowWhenTurnEnded) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RosterRowWhenTurnEnded.ProtoReflect.Descriptor instead.
-func (*RosterRowWhenTurnEnded) Descriptor() ([]byte, []int) {
+// Deprecated: Use RosterRowWhenTurnRunning.ProtoReflect.Descriptor instead.
+func (*RosterRowWhenTurnRunning) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{70}
 }
 
-func (x *RosterRowWhenTurnEnded) GetAtMs() int64 {
+func (x *RosterRowWhenTurnRunning) GetStartedAtMs() int64 {
 	if x != nil {
-		return x.AtMs
+		return x.StartedAtMs
 	}
 	return 0
 }
 
-// When the workspace was CREATED, in epoch MILLISECONDS — the when-column's
-// fallback for a workspace that has never ended a turn, so the column is never
-// left empty for a workspace that genuinely has a time to show.
-type RosterRowWhenCreated struct {
+// No turn is running: the open workspaces section draws "0s". DELIBERATELY
+// EMPTY: the arm is the fact.
+type RosterRowWhenNoTurnRunning struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	AtMs          int64                  `protobuf:"varint,1,opt,name=at_ms,json=atMs,proto3" json:"at_ms,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *RosterRowWhenCreated) Reset() {
-	*x = RosterRowWhenCreated{}
+func (x *RosterRowWhenNoTurnRunning) Reset() {
+	*x = RosterRowWhenNoTurnRunning{}
 	mi := &file_frontend_v1_sidebar_proto_msgTypes[71]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *RosterRowWhenCreated) String() string {
+func (x *RosterRowWhenNoTurnRunning) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*RosterRowWhenCreated) ProtoMessage() {}
+func (*RosterRowWhenNoTurnRunning) ProtoMessage() {}
 
-func (x *RosterRowWhenCreated) ProtoReflect() protoreflect.Message {
+func (x *RosterRowWhenNoTurnRunning) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_sidebar_proto_msgTypes[71]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -5148,16 +5148,9 @@ func (x *RosterRowWhenCreated) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RosterRowWhenCreated.ProtoReflect.Descriptor instead.
-func (*RosterRowWhenCreated) Descriptor() ([]byte, []int) {
+// Deprecated: Use RosterRowWhenNoTurnRunning.ProtoReflect.Descriptor instead.
+func (*RosterRowWhenNoTurnRunning) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{71}
-}
-
-func (x *RosterRowWhenCreated) GetAtMs() int64 {
-	if x != nil {
-		return x.AtMs
-	}
-	return 0
 }
 
 // The expanded detail panel: three lines, each its own sub-element, each
@@ -6848,22 +6841,21 @@ const file_frontend_v1_sidebar_proto_rawDesc = "" +
 	"\x15RosterRowLastSelected\x12\x13\n" +
 	"\x05at_ms\x18\x01 \x01(\x03R\x04atMs\",\n" +
 	"\x10RosterRowCurrent\x12\x18\n" +
-	"\acurrent\x18\x01 \x01(\bR\acurrent\"\xc6\x02\n" +
+	"\acurrent\x18\x01 \x01(\bR\acurrent\"\x81\x03\n" +
 	"\rRosterRowWhen\x12:\n" +
-	"\x06merged\x18\x02 \x01(\v2 .frontend.v1.RosterRowWhenMergedH\x00R\x06merged\x12=\n" +
-	"\acreated\x18\x04 \x01(\v2!.frontend.v1.RosterRowWhenCreatedH\x00R\acreated\x12D\n" +
-	"\n" +
-	"turn_ended\x18\x05 \x01(\v2#.frontend.v1.RosterRowWhenTurnEndedH\x00R\tturnEnded\x12:\n" +
-	"\x06hidden\x18\a \x01(\v2 .frontend.v1.RosterRowWhenHiddenH\x00R\x06hiddenB\a\n" +
-	"\x05shownJ\x04\b\x01\x10\x02J\x04\b\x03\x10\x04J\x04\b\x06\x10\aR\rlast_selectedR\x06activeR\x06viewed\"*\n" +
+	"\x06merged\x18\x02 \x01(\v2 .frontend.v1.RosterRowWhenMergedH\x00R\x06merged\x12:\n" +
+	"\x06hidden\x18\a \x01(\v2 .frontend.v1.RosterRowWhenHiddenH\x00R\x06hidden\x12J\n" +
+	"\fturn_running\x18\b \x01(\v2%.frontend.v1.RosterRowWhenTurnRunningH\x00R\vturnRunning\x12Q\n" +
+	"\x0fno_turn_running\x18\t \x01(\v2'.frontend.v1.RosterRowWhenNoTurnRunningH\x00R\rnoTurnRunningB\a\n" +
+	"\x05shownJ\x04\b\x01\x10\x02J\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\x05\x10\x06J\x04\b\x06\x10\aR\rlast_selectedR\x06activeR\acreatedR\n" +
+	"turn_endedR\x06viewed\"*\n" +
 	"\x13RosterRowWhenHidden\x12\x13\n" +
 	"\x05at_ms\x18\x01 \x01(\x03R\x04atMs\"*\n" +
 	"\x13RosterRowWhenMerged\x12\x13\n" +
-	"\x05at_ms\x18\x01 \x01(\x03R\x04atMs\"-\n" +
-	"\x16RosterRowWhenTurnEnded\x12\x13\n" +
-	"\x05at_ms\x18\x01 \x01(\x03R\x04atMs\"+\n" +
-	"\x14RosterRowWhenCreated\x12\x13\n" +
-	"\x05at_ms\x18\x01 \x01(\x03R\x04atMs\"\xab\x02\n" +
+	"\x05at_ms\x18\x01 \x01(\x03R\x04atMs\">\n" +
+	"\x18RosterRowWhenTurnRunning\x12\"\n" +
+	"\rstarted_at_ms\x18\x01 \x01(\x03R\vstartedAtMs\"\x1c\n" +
+	"\x1aRosterRowWhenNoTurnRunning\"\xab\x02\n" +
 	"\x0fRosterRowDetail\x12:\n" +
 	"\x06branch\x18\x01 \x01(\v2\".frontend.v1.RosterRowDetailBranchR\x06branch\x12M\n" +
 	"\rparent_branch\x18\x02 \x01(\v2(.frontend.v1.RosterRowDetailParentBranchR\fparentBranch\x12=\n" +
@@ -6997,8 +6989,8 @@ var file_frontend_v1_sidebar_proto_goTypes = []any{
 	(*RosterRowWhen)(nil),                            // 67: frontend.v1.RosterRowWhen
 	(*RosterRowWhenHidden)(nil),                      // 68: frontend.v1.RosterRowWhenHidden
 	(*RosterRowWhenMerged)(nil),                      // 69: frontend.v1.RosterRowWhenMerged
-	(*RosterRowWhenTurnEnded)(nil),                   // 70: frontend.v1.RosterRowWhenTurnEnded
-	(*RosterRowWhenCreated)(nil),                     // 71: frontend.v1.RosterRowWhenCreated
+	(*RosterRowWhenTurnRunning)(nil),                 // 70: frontend.v1.RosterRowWhenTurnRunning
+	(*RosterRowWhenNoTurnRunning)(nil),               // 71: frontend.v1.RosterRowWhenNoTurnRunning
 	(*RosterRowDetail)(nil),                          // 72: frontend.v1.RosterRowDetail
 	(*RosterRowDetailBranch)(nil),                    // 73: frontend.v1.RosterRowDetailBranch
 	(*RosterRowDetailParentBranch)(nil),              // 74: frontend.v1.RosterRowDetailParentBranch
@@ -7161,9 +7153,9 @@ var file_frontend_v1_sidebar_proto_depIdxs = []int32{
 	77,  // 117: frontend.v1.RosterRow.closed:type_name -> frontend.v1.RosterRowClosed
 	109, // 118: frontend.v1.RosterRowWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
 	69,  // 119: frontend.v1.RosterRowWhen.merged:type_name -> frontend.v1.RosterRowWhenMerged
-	71,  // 120: frontend.v1.RosterRowWhen.created:type_name -> frontend.v1.RosterRowWhenCreated
-	70,  // 121: frontend.v1.RosterRowWhen.turn_ended:type_name -> frontend.v1.RosterRowWhenTurnEnded
-	68,  // 122: frontend.v1.RosterRowWhen.hidden:type_name -> frontend.v1.RosterRowWhenHidden
+	68,  // 120: frontend.v1.RosterRowWhen.hidden:type_name -> frontend.v1.RosterRowWhenHidden
+	70,  // 121: frontend.v1.RosterRowWhen.turn_running:type_name -> frontend.v1.RosterRowWhenTurnRunning
+	71,  // 122: frontend.v1.RosterRowWhen.no_turn_running:type_name -> frontend.v1.RosterRowWhenNoTurnRunning
 	73,  // 123: frontend.v1.RosterRowDetail.branch:type_name -> frontend.v1.RosterRowDetailBranch
 	74,  // 124: frontend.v1.RosterRowDetail.parent_branch:type_name -> frontend.v1.RosterRowDetailParentBranch
 	75,  // 125: frontend.v1.RosterRowDetail.summary:type_name -> frontend.v1.RosterRowDetailSummary
@@ -7264,9 +7256,9 @@ func file_frontend_v1_sidebar_proto_init() {
 	}
 	file_frontend_v1_sidebar_proto_msgTypes[67].OneofWrappers = []any{
 		(*RosterRowWhen_Merged)(nil),
-		(*RosterRowWhen_Created)(nil),
-		(*RosterRowWhen_TurnEnded)(nil),
 		(*RosterRowWhen_Hidden)(nil),
+		(*RosterRowWhen_TurnRunning)(nil),
+		(*RosterRowWhen_NoTurnRunning)(nil),
 	}
 	file_frontend_v1_sidebar_proto_msgTypes[72].OneofWrappers = []any{}
 	type x struct{}
