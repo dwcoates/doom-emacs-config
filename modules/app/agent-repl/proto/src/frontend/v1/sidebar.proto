@@ -21,6 +21,7 @@
 // message is one drawn box, nesting equal, and no value rides bare:
 //
 //   ┌─ WORKSPACES ──────────────────────────┐  WorkspaceRoster
+//   │ ▾ OPEN (4)                            │  RosterOpenSection + the view's open_count
 //   │ ▾ repo-name                           │  RosterRepoSection → header
 //   │   ● row-name                    3m    │  RosterRow: status · name · when
 //   │ ▌ ● current-row                 now   │  RosterRowCurrent highlight
@@ -79,6 +80,13 @@ message WorkspaceRoster {
   // exactly as for a workspace of a collapsed repository section. A merged
   // workspace is in recently_merged, never here. Always set.
   RosterHiddenSection hidden = 9;
+  // THE OPEN-WORKSPACES SECTION's heading and fold: the box every grouping
+  // above draws its sections in, under one "Open" header, above the hidden
+  // section. Its count is the shown grouping's own (RosterRepositoryView,
+  // RosterTaskView and RosterMaturityView each carry `open_count`), because
+  // the groupings do not list the same workspaces: the task grouping leaves
+  // an unassigned workspace out. Always set.
+  RosterOpenSection open = 13;
   // THE EDITOR'S TAB BAR, in registry order. The registry holds one order
   // of every workspace; this is that order restricted to open workspaces,
   // and it is independent of the groupings above, so repositories
@@ -354,12 +362,18 @@ message RosterRepositoryView {
   // One section per repository. Order is the resolver's; clients do not
   // re-sort.
   repeated RosterRepoSection sections = 1;
+  // How many rows the open-workspaces section lists under this grouping
+  // (RosterOpenCount). Always set.
+  RosterOpenCount open_count = 2;
 }
 
 // The task grouping's sections, in the order they render.
 message RosterTaskView {
   // One section per task. Order is the resolver's; clients do not re-sort.
   repeated RosterTaskSection sections = 1;
+  // How many rows the open-workspaces section lists under this grouping
+  // (RosterOpenCount). Always set.
+  RosterOpenCount open_count = 2;
 }
 
 // The maturity grouping's sections, in the order they render: EVERY stage,
@@ -368,6 +382,42 @@ message RosterTaskView {
 // grouping keeps its shape as work moves on. Clients do not re-sort.
 message RosterMaturityView {
   repeated RosterMaturitySection sections = 1;
+  // How many rows the open-workspaces section lists under this grouping
+  // (RosterOpenCount). Always set.
+  RosterOpenCount open_count = 2;
+}
+
+// The open-workspaces section: the heading over whichever grouping is shown,
+// drawn like the hidden and recently-merged sections' (fold toggle and label),
+// with the shown grouping's open_count beside the label whether the section
+// is folded or not (owner request, 2026-10-13).
+message RosterOpenSection {
+  RosterLabel label = 1;
+  // WHETHER THE SECTION IS FOLDED. DAEMON-HELD (UpdateSidebarView), so every
+  // page draws the same fold. It folds the SIDEBAR's rows only: the Emacs
+  // tab bar draws an open workspace whichever arm is set. Never folded or
+  // unfolded by anyone, it is EXPANDED. Never unset on the wire.
+  oneof fold {
+    // The groupings' sections are shown.
+    RosterOpenSectionExpanded expanded = 2;
+    // The groupings' sections are folded away; the header and its count stay.
+    RosterOpenSectionCollapsed collapsed = 3;
+  }
+}
+
+// An expanded open-workspaces section. DELIBERATELY EMPTY: the arm is the fact.
+message RosterOpenSectionExpanded {}
+
+// A collapsed open-workspaces section. DELIBERATELY EMPTY: the arm is the fact.
+message RosterOpenSectionCollapsed {}
+
+// How many rows the open-workspaces section lists under one grouping: every
+// row of every one of the grouping's sections, nested family rows included,
+// that is not closed. It is the sum of the grouping's section counts
+// (RosterSectionCount), so it is the number a person arrives at by counting
+// every entry, a folded section's included.
+message RosterOpenCount {
+  uint32 workspaces = 1;
 }
 
 // One stage's section: identity, header, rows.
