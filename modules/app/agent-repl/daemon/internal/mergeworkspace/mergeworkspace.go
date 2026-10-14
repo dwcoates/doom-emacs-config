@@ -150,6 +150,12 @@ func (s *Service) Reveal(ctx context.Context, mergeWS ids.WorkspaceID) (bool, er
 // the feed's handback badge. MERGEWS is the zero value when the merge workspace
 // was never forked.
 //
+// A LANDING WHOSE DEPLOY WAS TOLD IS NOT REPORTED YET. Its report is OWED
+// (wsm owed_handbacks) and paid by whoever finishes the deploy that covers it
+// (PayOwed), so the requester hears of the landing only once the build that
+// carries it is running -- its own shim included, since the prompt queue
+// takes a registered bounce before it delivers anything queued.
+//
 // A LANDED MERGE THAT ASKED TO COMPACT AFTER (MergeOrigin.CompactAfter) is
 // followed by the requester's compaction, submitted right after the handback
 // down the same one delivery path, so it runs behind the handback's turn.
@@ -161,11 +167,6 @@ func (s *Service) HandBack(ctx context.Context, requester ids.WorkspaceID, merge
 		log.Error(op, "a detached merge ended in an undeclared way; its requester is not told", withCause(fields, err))
 		return err
 	}
-	text, err := s.deps.Briefs(BriefHandback, map[string]string{"label": label, "report": report})
-	if err != nil {
-		log.Error(op, "could not compose a detached merge's handback; its requester is not told", withCause(fields, err))
-		return err
-	}
 	key, err := s.deps.MintKey("merge-handback")
 	if err != nil {
 		log.Error(op, "could not mint a detached merge handback's idempotency key; its requester is not told", withCause(fields, err))
@@ -173,6 +174,36 @@ func (s *Service) HandBack(ctx context.Context, requester ids.WorkspaceID, merge
 	}
 	if out.Kind == merge.DetachedLanded {
 		s.stampLanding(ctx, requester, mergeWS, fields)
+	}
+	if out.Kind == merge.DetachedLanded && out.Deploy == merge.LandingDeployOwed {
+		return s.owe(ctx, requester, mergeWS, out, key, fields)
+	}
+	return s.submit(ctx, requester, label, report, key, compactsAfter(mergeWS, out), fields)
+}
+
+// owe records a landed merge's report as owed until its deploy has run.
+func (s *Service) owe(ctx context.Context, requester ids.WorkspaceID, mergeWS wsm.Workspace, out merge.DetachedOutcome, key string, fields dlog.Context) error {
+	log := s.deps.Log.Global()
+	owed := wsm.OwedHandBack{
+		MergeWorkspace: mergeWS.ID, Requester: requester, MergeName: mergeWS.Name, Branch: out.Branch,
+		Summary: out.Summary, CompactAfter: compactsAfter(mergeWS, out), IdempotencyKey: key, OwedAt: s.deps.Now(),
+	}
+	if err := s.deps.DB.OweHandBack(ctx, owed); err != nil {
+		log.Error(op, "could not record a landed merge's report as owed until its deploy; its requester is not told", withCause(fields, err))
+		return err
+	}
+	log.Info(op, "a landed merge's report is owed until the deploy that carries it has run", fields)
+	return nil
+}
+
+// submit hands one report to REQUESTER's session under KEY, then the
+// compaction it asked for, if any.
+func (s *Service) submit(ctx context.Context, requester ids.WorkspaceID, label, report, key string, compact bool, fields dlog.Context) error {
+	log := s.deps.Log.Global()
+	text, err := s.deps.Briefs(BriefHandback, map[string]string{"label": label, "report": report})
+	if err != nil {
+		log.Error(op, "could not compose a detached merge's handback; its requester is not told", withCause(fields, err))
+		return err
 	}
 	outcome, err := s.deps.Prompts.Submit(ctx, requester, feed.SaidText(text), key,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK, wsm.DeliveryDeferred, nil)
@@ -182,10 +213,64 @@ func (s *Service) HandBack(ctx context.Context, requester ids.WorkspaceID, merge
 	}
 	fields["turn"] = string(outcome.Turn)
 	log.Info(op, "handed a detached merge's outcome back to its requester", fields)
-	if out.Kind == merge.DetachedLanded && mergeWS.MergeOf != nil && mergeWS.MergeOf.CompactAfter {
+	if compact {
 		return s.compactAfter(ctx, requester, fields)
 	}
 	return nil
+}
+
+// compactsAfter reports whether a merge's requester asked to be compacted once
+// its landing is reported.
+func compactsAfter(mergeWS wsm.Workspace, out merge.DetachedOutcome) bool {
+	return out.Kind == merge.DetachedLanded && mergeWS.MergeOf != nil && mergeWS.MergeOf.CompactAfter
+}
+
+// CoverOwed marks every owed report covered by the deploy committing now: what
+// that deploy builds carries every landing before this instant. A failure is
+// recorded and returned; the reports stay owed for the next deploy.
+func (s *Service) CoverOwed(ctx context.Context) error {
+	log := s.deps.Log.Global()
+	covered, err := s.deps.DB.CoverOwedHandBacks(ctx)
+	if err != nil {
+		log.Error(op, "could not mark the owed landing reports covered by the deploy; they wait for the next one", withCause(nil, err))
+		return err
+	}
+	log.Info(op, "the deploy covers the landing reports owed before it", dlog.Context{"covered": covered})
+	return nil
+}
+
+// PayOwed hands every owed report back to its requester, once the deploy that
+// covers it has run: only the covered ones when coveredOnly (a deploy's own
+// end), else every one (a fresh boot, whose build carries everything that
+// landed before it). DEPLOYERR is how that deploy ended, which each report
+// states. A report that could not be handed back stays owed, recorded at
+// ERROR, and the next payment hands it back with the same key.
+func (s *Service) PayOwed(ctx context.Context, coveredOnly bool, deployErr error) {
+	log := s.deps.Log.Global()
+	owed, err := s.deps.DB.OwedHandBacks(ctx, coveredOnly)
+	if err != nil {
+		log.Error(op, "could not read the owed landing reports; they stay owed", withCause(dlog.Context{"covered_only": coveredOnly}, err))
+		return
+	}
+	for _, report := range owed {
+		fields := dlog.Context{"requester": string(report.Requester), "merge_workspace": string(report.MergeWorkspace),
+			"outcome": merge.DetachedLanded.String(), "branch": report.Branch, "covered": report.Covered}
+		label, text := landedText(report.Branch, report.MergeName, report.Summary, deployedNote(deployErr))
+		if err := s.submit(ctx, report.Requester, label, text, report.IdempotencyKey, report.CompactAfter, fields); err != nil {
+			continue
+		}
+		if _, err := s.deps.DB.PayHandBack(ctx, report.MergeWorkspace); err != nil {
+			log.Error(op, "handed a landed merge's report back but could not mark it paid; the next payment hands it back again under the same key", withCause(fields, err))
+		}
+	}
+}
+
+// deployedNote is what a paid report says about the deploy that covered it.
+func deployedNote(deployErr error) string {
+	if deployErr != nil {
+		return fmt.Sprintf(" Its deploy failed (%v): master holds it, but the running build does not carry it.", deployErr)
+	}
+	return " Its deploy has finished: this report waited until the build that carries it was running, this session's shim included."
 }
 
 // compactAfter sends REQUESTER's session /compact once its detached merge has
@@ -252,14 +337,35 @@ func inPlaceHandbackText(out merge.DetachedOutcome) (string, string, error) {
 	return "", "", fmt.Errorf("mergeworkspace: an in-place merge is handed back only when it did not land, not %s", out.Kind)
 }
 
+// landedText composes the badge label and the report of a landed detached
+// merge, with NOTE (what became of its deploy) at its end.
+func landedText(branch, mergeName, summary, note string) (string, string) {
+	return fmt.Sprintf("merge of %s landed", branch),
+		fmt.Sprintf("It ran detached, in a merge workspace forked from this conversation. %s. Its merge workspace `%s` is closed now and listed under Recently Merged; the user can still open it to read the merge's own conversation.%s", summary, mergeName, note)
+}
+
+// undeployedNote is what a landing reported at once says about its deploy:
+// nothing for a landing that deploys nothing, and why nothing deployed it for
+// one in the daemon's own checkout. A landing whose deploy was told is owed,
+// never reported here.
+func undeployedNote(deploy merge.LandingDeploy) string {
+	switch deploy {
+	case merge.LandingRolloutsHeld:
+		return " The rollouts are held, so nothing deployed it: the running build does not carry it yet."
+	case merge.LandingHoldUnread:
+		return " The rollout hold could not be read, so its deploy was not started: the running build does not carry it yet."
+	}
+	return ""
+}
+
 func handbackText(mergeWS wsm.Workspace, out merge.DetachedOutcome) (string, string, error) {
 	if out.InPlace {
 		return inPlaceHandbackText(out)
 	}
 	switch out.Kind {
 	case merge.DetachedLanded:
-		return fmt.Sprintf("merge of %s landed", out.Branch),
-			fmt.Sprintf("It ran detached, in a merge workspace forked from this conversation. %s. Its merge workspace `%s` is closed now and listed under Recently Merged; the user can still open it to read the merge's own conversation.", out.Summary, mergeWS.Name), nil
+		label, report := landedText(out.Branch, mergeWS.Name, out.Summary, undeployedNote(out.Deploy))
+		return label, report, nil
 	case merge.DetachedFailed:
 		return fmt.Sprintf("merge of %s failed", out.Branch),
 			fmt.Sprintf("It ran detached, in a merge workspace forked from this conversation. It failed: %s. Its merge workspace `%s` is now shown in the tab bar and the sidebar, at %s, exactly where the merge stopped; the user can switch to it to finish the merge.", out.Summary, mergeWS.Name, mergeWS.Dir), nil
