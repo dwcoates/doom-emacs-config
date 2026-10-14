@@ -69,6 +69,7 @@ status arm and whatever else the case is about."
                    :opening nil
                    :async-merging nil
                    :last-selected nil
+                   :last-turn-ended nil
                    :availability (:arm :available :value nil)
                    :name (:text "fix-flaky")
                    :status (:arm :ready :value nil)
@@ -204,6 +205,23 @@ status arm and whatever else the case is about."
                   (agent-repl-test-wire-roster--row
                    "\"ready\":{}" "\"lastSelected\":{\"atMs\":\"1\",\"by\":\"emacs\"}"))
                  '("RosterRowLastSelected" by "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-row-decodes-the-last-turn-ended-instant ()
+  "A row carrying `lastTurnEnded' decodes its durable turn-end instant."
+  (should (equal (plist-get (agent-repl-test-wire-roster--decode
+                             #'agent-repl-wire-decode-roster-row
+                             (agent-repl-test-wire-roster--row
+                              "\"done\":{}" "\"lastTurnEnded\":{\"atMs\":\"1756400000000\"}"))
+                            :last-turn-ended)
+                 '(:at-ms 1756400000000))))
+
+(ert-deftest agent-repl-test-wire-roster-row-last-turn-ended-refuses-an-unknown-field ()
+  "`RosterRowLastTurnEnded' carries only its instant: anything else is a breach."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row
+                  (agent-repl-test-wire-roster--row
+                   "\"done\":{}" "\"lastTurnEnded\":{\"atMs\":\"1\",\"kind\":\"done\"}"))
+                 '("RosterRowLastTurnEnded" kind "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-row-decodes-every-status-arm ()
   "Every one of the declared status arms decodes to its own keyword."
@@ -444,6 +462,7 @@ decodes to its keyword: the decode and the allow-list read the same table."
   "Every roster instant decoder is the shared helper under its own message
 name: each one's breach names that message exactly as the helper's does."
   (dolist (pair '((agent-repl-wire-decode-roster-row-last-selected . "RosterRowLastSelected")
+                  (agent-repl-wire-decode-roster-row-last-turn-ended . "RosterRowLastTurnEnded")
                   (agent-repl-wire-decode-roster-row-when-merged . "RosterRowWhenMerged")))
     (let ((json "{\"atMs\":\"1\",\"extra\":1}"))
       (should (equal (agent-repl-test-wire-roster--breach (car pair) json)

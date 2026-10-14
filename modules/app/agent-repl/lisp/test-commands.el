@@ -645,6 +645,51 @@ order a close lands by."
       (should-not switched)
       (should-not agent-repl--opened-recent-cycle))))
 
+;;;; ---- The jump to the workspace that most recently finished ----
+
+(defmacro agent-repl-test-commands--with-last-finished (shown drawn finished &rest body)
+  "Run BODY standing on SHOWN with DRAWN tabs, the ranking answering FINISHED.
+Binds `switched' to the requested target and `asked' to the names ranked."
+  (declare (indent 3))
+  `(let ((switched nil) (asked :unset) (logged nil))
+     (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () ,shown))
+               ((symbol-function 'agent-repl--ws-log-name) (lambda (ws) ws))
+               ((symbol-function 'agent-repl--drawn-tab-names) (lambda () ,drawn))
+               ((symbol-function 'agent-repl-roster-last-finished-name)
+                (lambda (names) (setq asked names) ,finished))
+               ((symbol-function 'agent-repl-roster-last-turn-ended-ms) (lambda (_ws) 42))
+               ((symbol-function 'agent-repl--info)
+                (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged)))
+               ((symbol-function 'agent-repl-host-request-switch)
+                (lambda (ws trigger) (setq switched (cons ws trigger))))
+               ((symbol-function 'message) (lambda (&rest _) nil)))
+       ,@body)))
+
+(ert-deftest agent-repl-test-commands-last-finished-requests-the-ranked-target ()
+  "The jump requests the switch to the workspace the ranking names."
+  (agent-repl-test-commands--with-last-finished "here" '("here" "a" "b") "b"
+    (agent-repl-switch-to-last-finished-workspace)
+    (should (equal switched '("b" . last-finished)))))
+
+(ert-deftest agent-repl-test-commands-last-finished-never-ranks-the-shown-workspace ()
+  "The workspace the user stands in is not a candidate: switching there is no switch."
+  (agent-repl-test-commands--with-last-finished "here" '("a" "here" "b") "a"
+    (agent-repl-switch-to-last-finished-workspace)
+    (should (equal asked '("a" "b")))))
+
+(ert-deftest agent-repl-test-commands-last-finished-logs-the-switch ()
+  "A jump records where it went from, where to, and the turn-end instant."
+  (agent-repl-test-commands--with-last-finished "here" '("here" "b") "b"
+    (agent-repl-switch-to-last-finished-workspace)
+    (should (member "elisp.commands.last-finished from=here target=b ended-ms=42" logged))))
+
+(ert-deftest agent-repl-test-commands-last-finished-without-a-candidate-is-a-logged-no-op ()
+  "No finished workspace requests nothing and says so in the log."
+  (agent-repl-test-commands--with-last-finished "here" '("here" "a") nil
+    (agent-repl-switch-to-last-finished-workspace)
+    (should-not switched)
+    (should (member "elisp.commands.last-finished-none from=here candidates=1" logged))))
+
 ;;;; ---- Navigation follows the DRAWN tab order ----
 
 ;; The bar is drawn from `agent-repl-roster-tab-order' (roster.el), so that
