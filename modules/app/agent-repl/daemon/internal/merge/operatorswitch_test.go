@@ -35,6 +35,7 @@ func (s *scriptedSwitch) operatorSwitch() operatorSwitch {
 			refusedMessage: "refused a flip on", askedBy: "test.on_arm", message: "turned on"},
 		off: switchSide{op: "test.off", refusedArm: "not_on", refusedReason: "not on",
 			refusedMessage: "refused a flip off", askedBy: "test.off_arm", message: "turned off"},
+		inheritedMessage: "inherited on",
 	}
 }
 
@@ -194,5 +195,57 @@ func TestEveryOperatorSwitchVerbFlipsItsSwitch(t *testing.T) {
 				t.Fatalf("a second off = %v, want the %s refusal", errOffAgain, sw.off.refusedArm)
 			}
 		})
+	}
+}
+
+func TestRecordInheritedStatesASwitchInheritedOn(t *testing.T) {
+	since := time.Unix(7, 0)
+	tests := []struct {
+		name       string
+		on         bool
+		wantRecord bool
+	}{
+		{name: "on is stated", on: true, wantRecord: true},
+		{name: "off states nothing", on: false, wantRecord: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			sw := &scriptedSwitch{on: tt.on, since: since}
+
+			// Act
+			err := h.o.recordInherited(context.Background(), sw.operatorSwitch())
+
+			// Assert
+			if err != nil {
+				t.Fatalf("recordInherited: %v", err)
+			}
+			rec, got := h.recordFor("info", "test.on")
+			if got != tt.wantRecord {
+				t.Fatalf("INFO test.on record = %v, want %v", got, tt.wantRecord)
+			}
+			if got && rec.Context["on_since"] != since {
+				t.Fatalf("record context = %v, want on_since %v", rec.Context, since)
+			}
+		})
+	}
+}
+
+func TestRecordInheritedPassesAnUnreadableSwitchThrough(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	want := errors.New("state database unreadable")
+	sw := &scriptedSwitch{readErr: want}
+
+	// Act
+	err := h.o.recordInherited(context.Background(), sw.operatorSwitch())
+
+	// Assert
+	if !errors.Is(err, want) {
+		t.Fatalf("recordInherited = %v, want the read's own failure", err)
+	}
+	if _, ok := h.recordFor("info", "test.on"); ok {
+		t.Fatal("an unreadable switch was recorded as inherited")
 	}
 }

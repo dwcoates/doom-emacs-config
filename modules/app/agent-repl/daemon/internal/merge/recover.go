@@ -45,7 +45,7 @@ func (o *orchestrator) Recover(ctx context.Context) error {
 	if err := o.recoverDisplaced(ctx); err != nil {
 		return err
 	}
-	if err := o.recordRolloutHold(ctx); err != nil {
+	if err := o.recordInherited(ctx, o.rolloutHold()); err != nil {
 		return err
 	}
 	o.sweepOrphanedState(ctx)

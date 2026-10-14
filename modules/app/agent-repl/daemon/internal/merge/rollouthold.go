@@ -3,8 +3,6 @@ package merge
 import (
 	"context"
 	"time"
-
-	"agent-repld/internal/dlog"
 )
 
 // The ROLLOUT HOLD is the operator's daemon-wide switch between a landing and
@@ -46,6 +44,7 @@ func (o *orchestrator) rolloutHold() operatorSwitch {
 			askedBy:        "UpdateMergeQueue.release_rollouts",
 			message:        "released the merge queue's rollouts: the next landing in this daemon's own checkout tells the deploy; nothing that landed while held is deployed until then",
 		},
+		inheritedMessage: "the merge queue's rollouts are held: merges land, but a landing in this daemon's own checkout does not tell the deploy until they are released",
 	}
 }
 
@@ -57,20 +56,4 @@ func (o *orchestrator) HoldRollouts(ctx context.Context) error {
 // ReleaseRollouts implements Orchestrator.
 func (o *orchestrator) ReleaseRollouts(ctx context.Context) error {
 	return o.flip(ctx, o.rolloutHold(), false)
-}
-
-// recordRolloutHold states, once per boot, a hold this daemon inherited: a
-// hold taken before a restart or a handover is otherwise invisible until the
-// next landing does not deploy. Unheld, it records nothing.
-func (o *orchestrator) recordRolloutHold(ctx context.Context) error {
-	hold, err := o.deps.DB.MergeRolloutHold(ctx)
-	if err != nil {
-		return err
-	}
-	if hold.Held {
-		o.deps.Log.Global().Info(opHoldRollouts,
-			"the merge queue's rollouts are held: merges land, but a landing in this daemon's own checkout does not tell the deploy until they are released",
-			dlog.Context{"held_since": hold.Since})
-	}
-	return nil
 }

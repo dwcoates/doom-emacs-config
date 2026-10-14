@@ -41,6 +41,9 @@ type operatorSwitch struct {
 	// turned on.
 	sinceField string
 	on, off    switchSide
+	// inheritedMessage records, once per boot, a switch this daemon inherited
+	// on, under on.op.
+	inheritedMessage string
 }
 
 // flip turns sw on or off.
@@ -72,5 +75,19 @@ func (o *orchestrator) flip(ctx context.Context, sw operatorSwitch, on bool) err
 		fields[sw.sinceField] = since
 	}
 	o.deps.Log.Global().Info(side.op, side.message, fields)
+	return nil
+}
+
+// recordInherited states, once per boot, a switch this daemon inherited on: a
+// switch flipped before a restart or a handover is otherwise invisible until
+// its effect is missed. Off, it records nothing.
+func (o *orchestrator) recordInherited(ctx context.Context, sw operatorSwitch) error {
+	on, since, err := sw.read(ctx)
+	if err != nil {
+		return err
+	}
+	if on {
+		o.deps.Log.Global().Info(sw.on.op, sw.inheritedMessage, dlog.Context{sw.sinceField: since})
+	}
 	return nil
 }
