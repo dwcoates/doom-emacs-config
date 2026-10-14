@@ -595,7 +595,8 @@ export function drawStatusMark(arm: RosterStatusCase, path: string, markers: Row
   dot.className = `st ${mark.toneClass}`;
   dot.setAttribute("data-glyph", mark.glyph);
   dot.title = arm;
-  if (mark.char !== "") dot.textContent = mark.char;
+  // The picture is bundled markup from images/glyphs/, never data off the wire.
+  if (mark.image !== "") dot.innerHTML = mark.image;
   if (mark.glyph !== "dot") dot.classList.add("st-glyph");
   if (mark.ink !== undefined) dot.classList.add(`ink-${mark.ink}`);
   if (mark.motion !== "still") dot.classList.add(mark.motion);

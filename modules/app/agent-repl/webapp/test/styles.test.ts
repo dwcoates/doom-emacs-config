@@ -4051,7 +4051,7 @@ describe("the rail's mark column", () => {
     expect(rule).toMatch(/(?:^|;)\s*width:\s*var\(--ws-mark-width\)/);
   });
 
-  it("sizes a glyph's box by the same token, never by its character", () => {
+  it("sizes a glyph's box by the same token, never by its picture", () => {
     // Arrange / Act
     const rule = declarationsOf("#ws-sidebar .st-glyph");
 
@@ -4059,7 +4059,7 @@ describe("the rail's mark column", () => {
     expect(rule).toMatch(/(?:^|;)\s*width:\s*var\(--ws-mark-width\)/);
   });
 
-  it("centers the glyph's character in its box", () => {
+  it("centers the glyph's picture in its box", () => {
     // Arrange / Act
     const rule = declarationsOf("#ws-sidebar .st-glyph");
 
@@ -4156,13 +4156,21 @@ describe("the rail's marks", () => {
     expect(rule?.declarations).toMatch(/(?:^|;)\s*--ws-mark-cycle:\s*2s\s*;/);
   });
 
-  it("draws a glyph's character at the dot's size", () => {
+  it("sizes a glyph's box at the dot's size", () => {
     // Arrange / Act
     const rule = declarationsOf("#ws-sidebar .st-glyph");
 
     // Assert
-    expect(rule).toMatch(/(?:^|;)\s*font-size:\s*var\(--ws-mark-size\)/);
     expect(rule).toMatch(/(?:^|;)\s*height:\s*var\(--ws-mark-size\)/);
+  });
+
+  it("draws a glyph's picture at its box's full height", () => {
+    // Arrange / Act
+    const rule = declarationsOf("#ws-sidebar .st-glyph > svg");
+
+    // Assert
+    expect(rule).toMatch(/(?:^|;)\s*height:\s*100%/);
+    expect(rule).toMatch(/(?:^|;)\s*width:\s*auto/);
   });
 
   it("sizes the dot by the same mark size", () => {
@@ -4171,14 +4179,6 @@ describe("the rail's marks", () => {
 
     // Assert
     expect(rule).toMatch(/(?:^|;)\s*height:\s*var\(--ws-mark-size\)/);
-  });
-
-  it("draws the merge glyph in the mark's box from its ink", () => {
-    // Arrange / Act
-    const rule = declarationsOf('#ws-sidebar .st-glyph[data-glyph="merge"]');
-
-    // Assert
-    expect(rule).toMatch(/linear-gradient\(currentColor, currentColor\)/);
   });
 
   it("strikes a cold-gated workspace's name and nothing else", () => {

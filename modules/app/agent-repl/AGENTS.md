@@ -2270,6 +2270,42 @@ The rules that keep this true:
   does today. The sidebar's disc fill and merge-glyph ink are the arm's tone
   (`#ws-sidebar .st.tone-*`), and no later rule may recolor a mark.
 
+## Status glyphs are one set of pictures, drawn as tall as a text row
+
+Every glyph a workspace's status draws before its name -- the merge glyph's
+three bars, the gates' exclamation mark, question mark and snowflake, a
+working one-shot's target, and the Emacs tab bar's dot -- is a picture in
+`images/glyphs/<name>.svg`, named by the `render-colors.json` glyph NAME
+(`merge_glyphs`, `gate_glyphs`; `target` for the one-shot, `dot` for the
+dot). The Emacs tab bar (`lisp/status.el`, "The glyph's image") and the
+webapp sidebar (`webapp/src/sidebar/tones.ts`, `GLYPH_IMAGES`) draw the SAME
+files, so both surfaces show the same mark; the sidebar's plain status dot
+stays the stylesheet's disc. Owner rulings, 2026-10-13.
+
+- **Every picture is cropped to fill its file's full height** (a viewBox 16
+  units tall that its picture touches top and bottom), so drawn at one height
+  every glyph is exactly that tall on screen. A new picture keeps this, and
+  `lisp/test-status.el` checks every viewBox. `merge` and `dot` fill with
+  `currentColor`, so the tone or the `glyph_inks` ink colors them; the other
+  pictures carry their own colors.
+- **On the tab bar every picture is exactly as tall as a text row, and never
+  taller.** Emacs sizes a row by the space each font RESERVES, so emoji
+  characters fit a plain row only up to 8px and could never share one visible
+  height. An image reserves exactly its own height, and centered on the text
+  (`:ascent center`) it leaves the row unchanged up to the text row's height
+  and grows it one pixel past
+  (`docs/investigations/2026-10-13-tab-bar-icon-heights.md`). So the height is
+  the MEASURED text row (`agent-repl-status-glyph-image-height`), and the row
+  holding an image of that height is measured beside it: a row that grew fails
+  hard. A taller tab-bar row is the defect this exists to prevent (two rows of
+  tabs then clip in the tab bar's allotted space), so never size a tab glyph
+  any other way.
+- **Pictures are rasterized at the frame's backing scale**
+  (`frame-scale-factor`) and drawn back down, so they are as sharp as the text
+  on a Retina screen.
+- **A text frame draws the glyph's character** from
+  `agent-repl-status-glyph-chars`, since it cannot draw an image.
+
 ## The "expanded footer" is what the progress footer's detail section is called
 
 The progress footer's expandable detail section — the `FooterDisclosure.expanded`

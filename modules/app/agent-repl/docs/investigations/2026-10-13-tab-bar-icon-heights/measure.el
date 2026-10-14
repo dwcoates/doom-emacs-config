@@ -1,11 +1,16 @@
 ;;; measure.el --- measure each tab-bar icon's largest size that keeps the row height  -*- lexical-binding: t -*-
 ;; Run in a WINDOWED Emacs: Emacs -Q -l measure.el. Writes $TABICONS_OUT and exits, always.
+;; Measures the icons as font characters, then as images: a square SVG at every height
+;; and `:ascent', and every picture in the module's images/glyphs/.
 (require 'cl-lib)
 (defvar ti-out (getenv "TABICONS_OUT"))
 (defvar ti-font (or (getenv "TABICONS_FONT") "Menlo-13"))
 (defvar ti-glyphs '(("❄️" . "cold gate") ("🎯" . "one-shot") ("❗" . "permission") ("❓" . "question")
                     ("●" . "dot/attention") ("≡" . "failed merge")))
 (defvar ti-item "x")
+(defvar ti-glyph-dir
+  (expand-file-name "../../../images/glyphs/" (file-name-directory load-file-name))
+  "The module's images/glyphs/, the pictures the tab bar draws.")
 (defun ti-format () `((ti menu-item ,ti-item ignore)))
 (defun ti-tab (str)
   "Row height of a tab bar showing STR."
@@ -23,6 +28,32 @@
       (list (line-pixel-height) (and f (font-get f :family)) (and f (font-get f :size))))))
 (defun ti-glyph (g px r)
   (propertize g 'face `(:height ,(* 10 px)) 'display (if (zerop r) nil `(raise ,r))))
+(defun ti-square (h ascent)
+  "A square SVG H pixels on a side, raised per ASCENT."
+  (create-image (format "<svg xmlns='http://www.w3.org/2000/svg' width='%d' height='%d'><rect width='%d' height='%d'/></svg>" h h h h)
+                'svg t :ascent ascent))
+(defun ti-image-row (image)
+  "Pixel height of a buffer row of the tab bar's face holding IMAGE, or the text alone."
+  (with-current-buffer (get-buffer-create "*ti*")
+    (erase-buffer)
+    (insert (propertize "[1] name" 'face 'tab-bar))
+    (when image (insert (propertize " " 'face 'tab-bar 'display image)))
+    (cdr (buffer-text-pixel-size nil (selected-window)))))
+(defun ti-images ()
+  "Lines measuring images: how tall one can be per `:ascent', then every picture."
+  (let* ((text (ti-image-row nil))
+         (lines (list (format "images: text-row=%d (row height with a square image of each px)" text))))
+    (dolist (ascent '(50 center 60 70 75 80 85 90 100))
+      (push (concat (format "   ascent=%-6s " ascent)
+                    (mapconcat (lambda (h) (format "%d:%d" h (ti-image-row (ti-square h ascent))))
+                               (number-sequence 6 18) " "))
+            lines))
+    (dolist (file (directory-files ti-glyph-dir t "\\.svg\\'"))
+      (push (format "   %s: at %d row=%d, at %d row=%d" (file-name-nondirectory file)
+                    text (ti-image-row (create-image file 'svg nil :height text :ascent 'center))
+                    (1+ text) (ti-image-row (create-image file 'svg nil :height (1+ text) :ascent 'center)))
+            lines))
+    (nreverse lines)))
 (defun ti-run ()
   (let (lines)
     (condition-case err
@@ -43,7 +74,8 @@
                             (mapconcat (lambda (r) (format "%s:%d/%d" r (ti-tab (ti-glyph (car g) 9 r))
                                                            (car (ti-line (ti-glyph (car g) 9 r)))))
                                        '(0 0.05 0.07 0.1 0.15) " "))
-                    lines))))
+                    lines))
+            (dolist (line (ti-images)) (push line lines))))
       (error (push (format "ERROR: %S" err) lines)))
     (with-temp-file ti-out (insert (mapconcat #'identity (nreverse lines) "\n") "\n"))
     (kill-emacs 0)))
