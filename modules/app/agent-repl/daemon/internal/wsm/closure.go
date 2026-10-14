@@ -15,8 +15,8 @@ import (
 
 // closureDDL is the layout-52 addition. It adds:
 //
-//   - workspaces.closed_at: when the workspace was closed, in nanoseconds.
-//   - workspaces.closed_by: who closed it, a CloseCause.
+//   - workspaces.closure_at: when the workspace was closed, in nanoseconds.
+//   - workspaces.closure_by: who closed it, a CloseCause.
 //
 // Both stand and fall together, and only on a closed row. A row already
 // closed when the columns land keeps NULL in both: nothing records when or by
@@ -25,8 +25,8 @@ import (
 // IT IS ADDITIVE: the previous build names neither column, so a close it
 // writes leaves both NULL, which reads as a close with no record.
 const closureDDL = `
-ALTER TABLE workspaces ADD COLUMN closed_at INTEGER;
-ALTER TABLE workspaces ADD COLUMN closed_by TEXT;
+ALTER TABLE workspaces ADD COLUMN closure_at INTEGER;
+ALTER TABLE workspaces ADD COLUMN closure_by TEXT;
 `
 
 // CloseCause says who closed a workspace.
@@ -69,17 +69,17 @@ type Closure struct {
 // row with either, is corrupt.
 func decodeClosure(ws Workspace, at sql.NullInt64, by sql.NullString) (*Closure, error) {
 	if at.Valid != by.Valid {
-		return nil, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "closed_by", Err: errors.New("a close records its instant and its cause together")}
+		return nil, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "closure_by", Err: errors.New("a close records its instant and its cause together")}
 	}
 	if !at.Valid {
 		return nil, nil
 	}
 	if !ws.Closed {
-		return nil, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "closed_at", Err: errors.New("only a closed workspace carries a close record")}
+		return nil, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "closure_at", Err: errors.New("only a closed workspace carries a close record")}
 	}
 	cause := CloseCause(by.String)
 	if !cause.valid() {
-		return nil, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "closed_by", Err: fmt.Errorf("unknown close cause %q", by.String)}
+		return nil, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "closure_by", Err: fmt.Errorf("unknown close cause %q", by.String)}
 	}
 	return &Closure{At: fromNanos(at.Int64), By: cause}, nil
 }
