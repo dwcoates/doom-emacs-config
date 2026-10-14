@@ -3366,6 +3366,14 @@ required: an arm without one is incomplete and errors before send."
   "Encode UpdateMergeQueueReleaseRollouts.  Empty: the hold is daemon-wide."
   nil)
 
+(defun agent-repl-wire-encode-update-merge-queue-disable-racing (_value)
+  "Encode UpdateMergeQueueDisableRacing.  Empty: the switch is daemon-wide."
+  nil)
+
+(defun agent-repl-wire-encode-update-merge-queue-enable-racing (_value)
+  "Encode UpdateMergeQueueEnableRacing.  Empty: the switch is daemon-wide."
+  nil)
+
 (defun agent-repl-wire-encode-update-merge-queue-request-pause (value)
   "Encode UpdateMergeQueueRequest's `pause' action arm from VALUE."
   (agent-repl-wire-encode-update-merge-queue-pause value))
@@ -3394,6 +3402,14 @@ required: an arm without one is incomplete and errors before send."
   "Encode UpdateMergeQueueRequest's `release_rollouts' action arm from VALUE."
   (agent-repl-wire-encode-update-merge-queue-release-rollouts value))
 
+(defun agent-repl-wire-encode-update-merge-queue-request-disable-racing (value)
+  "Encode UpdateMergeQueueRequest's `disable_racing' action arm from VALUE."
+  (agent-repl-wire-encode-update-merge-queue-disable-racing value))
+
+(defun agent-repl-wire-encode-update-merge-queue-request-enable-racing (value)
+  "Encode UpdateMergeQueueRequest's `enable_racing' action arm from VALUE."
+  (agent-repl-wire-encode-update-merge-queue-enable-racing value))
+
 (defun agent-repl-wire-encode-update-merge-queue-request (request)
   "Encode UpdateMergeQueueRequest from plist REQUEST (:action ONEOF)."
   (list (agent-repl-wire-verbs--encode-oneof
@@ -3404,7 +3420,9 @@ required: an arm without one is incomplete and errors before send."
                (list :move-up 'moveUp #'agent-repl-wire-encode-update-merge-queue-request-move-up)
                (list :move-down 'moveDown #'agent-repl-wire-encode-update-merge-queue-request-move-down)
                (list :hold-rollouts 'holdRollouts #'agent-repl-wire-encode-update-merge-queue-request-hold-rollouts)
-               (list :release-rollouts 'releaseRollouts #'agent-repl-wire-encode-update-merge-queue-request-release-rollouts)))))
+               (list :release-rollouts 'releaseRollouts #'agent-repl-wire-encode-update-merge-queue-request-release-rollouts)
+               (list :disable-racing 'disableRacing #'agent-repl-wire-encode-update-merge-queue-request-disable-racing)
+               (list :enable-racing 'enableRacing #'agent-repl-wire-encode-update-merge-queue-request-enable-racing)))))
 
 (defun agent-repl-wire-decode-update-merge-queue-success (json)
   "Decode UpdateMergeQueueSuccess from JSON.  Empty: the bubbles reflect it."
@@ -3466,6 +3484,16 @@ are already held."
 not held."
   (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueRolloutsNotHeld" json))
 
+(defun agent-repl-wire-decode-update-merge-queue-racing-already-disabled (json)
+  "Decode UpdateMergeQueueRacingAlreadyDisabled from JSON.  Empty: racing is
+already disabled."
+  (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueRacingAlreadyDisabled" json))
+
+(defun agent-repl-wire-decode-update-merge-queue-racing-not-disabled (json)
+  "Decode UpdateMergeQueueRacingNotDisabled from JSON.  Empty: racing is not
+disabled."
+  (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueRacingNotDisabled" json))
+
 (defun agent-repl-wire-decode-update-merge-queue-error-unknown-workspace (json)
   "Decode UpdateMergeQueueError's `unknown_workspace' cause arm from JSON."
   (agent-repl-wire-decode-update-merge-queue-unknown-workspace json))
@@ -3506,12 +3534,20 @@ not held."
   "Decode UpdateMergeQueueError's `rollouts_not_held' cause arm from JSON."
   (agent-repl-wire-decode-update-merge-queue-rollouts-not-held json))
 
+(defun agent-repl-wire-decode-update-merge-queue-error-racing-already-disabled (json)
+  "Decode UpdateMergeQueueError's `racing_already_disabled' cause arm from JSON."
+  (agent-repl-wire-decode-update-merge-queue-racing-already-disabled json))
+
+(defun agent-repl-wire-decode-update-merge-queue-error-racing-not-disabled (json)
+  "Decode UpdateMergeQueueError's `racing_not_disabled' cause arm from JSON."
+  (agent-repl-wire-decode-update-merge-queue-racing-not-disabled json))
+
 (defun agent-repl-wire-decode-update-merge-queue-error (json)
   "Decode UpdateMergeQueueError from JSON into (:cause (:arm ARM :value V)).
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "UpdateMergeQueueError"))
-    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted alreadyPaused notPaused noSuchQueuedMerge unknownRepository rolloutsAlreadyHeld rolloutsNotHeld))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted alreadyPaused notPaused noSuchQueuedMerge unknownRepository rolloutsAlreadyHeld rolloutsNotHeld racingAlreadyDisabled racingNotDisabled))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -3524,7 +3560,9 @@ arm this codec does not know is refused as an unknown field."
          (list 'noSuchQueuedMerge :no-such-queued-merge #'agent-repl-wire-decode-update-merge-queue-error-no-such-queued-merge)
          (list 'unknownRepository :unknown-repository #'agent-repl-wire-decode-update-merge-queue-error-unknown-repository)
          (list 'rolloutsAlreadyHeld :rollouts-already-held #'agent-repl-wire-decode-update-merge-queue-error-rollouts-already-held)
-         (list 'rolloutsNotHeld :rollouts-not-held #'agent-repl-wire-decode-update-merge-queue-error-rollouts-not-held))))))
+         (list 'rolloutsNotHeld :rollouts-not-held #'agent-repl-wire-decode-update-merge-queue-error-rollouts-not-held)
+         (list 'racingAlreadyDisabled :racing-already-disabled #'agent-repl-wire-decode-update-merge-queue-error-racing-already-disabled)
+         (list 'racingNotDisabled :racing-not-disabled #'agent-repl-wire-decode-update-merge-queue-error-racing-not-disabled))))))
 
 (defun agent-repl-wire-decode-update-merge-queue-response-success (json)
   "Decode UpdateMergeQueueResponse's `success' arm from JSON."

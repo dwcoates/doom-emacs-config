@@ -1311,6 +1311,20 @@ never sent as an empty ref, because unset is what means every queue."
                    '(:action (:arm :move-down :value nil)))
                   :type 'agent-repl-wire-error)))
 
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-disable-racing ()
+  "A disable of racing is daemon-wide, so its message is empty."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize (agent-repl-wire-encode-update-merge-queue-request
+                                    '(:action (:arm :disable-racing :value nil))))
+                   "{\"disableRacing\":{}}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-enable-racing ()
+  "An enable of racing is daemon-wide, so its message is empty."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize (agent-repl-wire-encode-update-merge-queue-request
+                                    '(:action (:arm :enable-racing :value nil))))
+                   "{\"enableRacing\":{}}"))))
+
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-hold-rollouts ()
   "A hold of the rollouts is daemon-wide, so its message is empty."
   (agent-repl-test-wire-verbs--with-common
@@ -1601,13 +1615,13 @@ encoded here."
                  '("cancel" "now" "schedule"))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-action-arms-pinned ()
-  "UpdateMergeQueueRequest's action oneof has exactly the seven arms encoded
+  "UpdateMergeQueueRequest's action oneof has exactly the nine arms encoded
 here."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_update_merge_queue.pb.go"
                         "UpdateMergeQueueRequest")
                        #'string<)
-                 '("evict" "holdRollouts" "moveDown" "moveUp" "pause" "releaseRollouts" "resume"))))
+                 '("disableRacing" "enableRacing" "evict" "holdRollouts" "moveDown" "moveUp" "pause" "releaseRollouts" "resume"))))
 
 (ert-deftest agent-repl-test-wire-verbs-daemon-health-arms-pinned ()
   "DaemonHealthSuccess's health oneof has exactly the two verdict arms decoded
@@ -2907,6 +2921,22 @@ it carries."
                     (agent-repl-test-wire-verbs--parse "{\"rolloutsAlreadyHeld\":{}}"))
                    '(:cause (:arm :rollouts-already-held :value nil))))))
 
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-racing-already-disabled-arm ()
+  "UpdateMergeQueueError's `racing_already_disabled' arm decodes with
+everything it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-update-merge-queue-error
+                    (agent-repl-test-wire-verbs--parse "{\"racingAlreadyDisabled\":{}}"))
+                   '(:cause (:arm :racing-already-disabled :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-racing-not-disabled-arm ()
+  "UpdateMergeQueueError's `racing_not_disabled' arm decodes with everything
+it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-update-merge-queue-error
+                    (agent-repl-test-wire-verbs--parse "{\"racingNotDisabled\":{}}"))
+                   '(:cause (:arm :racing-not-disabled :value nil))))))
+
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-error-rollouts-not-held-arm ()
   "UpdateMergeQueueError's `rollouts_not_held' arm decodes with everything it
 carries."
@@ -2935,7 +2965,7 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_update_merge_queue.pb.go" "UpdateMergeQueueError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "alreadyPaused" "notPaused" "noSuchQueuedMerge" "unknownRepository" "rolloutsAlreadyHeld" "rolloutsNotHeld")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "alreadyPaused" "notPaused" "noSuchQueuedMerge" "unknownRepository" "rolloutsAlreadyHeld" "rolloutsNotHeld" "racingAlreadyDisabled" "racingNotDisabled")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-session-health-error-unknown-workspace-arm ()
