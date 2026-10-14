@@ -1008,7 +1008,12 @@ func udsHTTPClient(socket string) *http.Client {
 }
 
 func storeClient(socket string) storev1connect.ShimStoreClient {
-	return storev1connect.NewShimStoreClient(udsHTTPClient(socket), "http://store")
+	return storeClientOver(udsHTTPClient(socket))
+}
+
+// storeClientOver answers a store client riding hc.
+func storeClientOver(hc *http.Client) storev1connect.ShimStoreClient {
+	return storev1connect.NewShimStoreClient(hc, "http://store")
 }
 
 // ---------------------------------------------------------------------------
@@ -1120,8 +1125,10 @@ func resolved(p string) string {
 type fakeStore struct {
 	t      *testing.T
 	Socket string
-	// Client reads the fake over its socket, exactly as a store client would.
-	Client storev1connect.ShimStoreClient
+	// Client reads the fake over its socket, exactly as a store client would,
+	// riding httpClient's connections.
+	Client     storev1connect.ShimStoreClient
+	httpClient *http.Client
 
 	mu      sync.Mutex
 	calls   []string
@@ -1199,9 +1206,11 @@ func startFakeStoreAt(t *testing.T, socket string) *fakeStore {
 // startFakeStoreAt wraps, and the whole of the shared vendor store, whose
 // lifetime is the test binary's.
 func serveFakeStore(socket string) (*fakeStore, error) {
+	hc := udsHTTPClient(socket)
 	f := &fakeStore{
 		Socket:      socket,
-		Client:      storeClient(socket),
+		Client:      storeClientOver(hc),
+		httpClient:  hc,
 		batchC:      make(chan *storev1.WriteBatchRequest, 4096),
 		callC:       make(chan string, 4096),
 		bashRows:    map[string][]*storev1.StoreAgentBash{},
@@ -1248,12 +1257,23 @@ func (f *fakeStore) shutdown() error {
 	f.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), waitBudget)
 	defer cancel()
-	_ = srv.Shutdown(ctx)
+	shutdownErr := srv.Shutdown(ctx)
 	<-done
-	if err := os.Remove(f.Socket); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("remove the fake store's socket %s: %w", f.Socket, err)
+	// A BOUNCE ENDS EVERY CONNECTION TO THE FAKE, ITS OWN CLIENT'S INCLUDED.
+	// The server has closed them, but the client's pool notices a close only
+	// when its read loop runs, so a read right after Resume could ride a
+	// connection from before the bounce and fail with an unexpected EOF
+	// (TestAStoreBounceLeavesOneCursorRowAtTheFilesFullLength, 2026-10-14).
+	// Every request has finished by now, so every pooled connection is idle,
+	// and dropping them leaves the next read nothing to ride but a new one.
+	f.httpClient.CloseIdleConnections()
+	if shutdownErr != nil {
+		shutdownErr = fmt.Errorf("shut the fake store on %s down: %w", f.Socket, shutdownErr)
 	}
-	return nil
+	if err := os.Remove(f.Socket); err != nil && !os.IsNotExist(err) {
+		return errors.Join(shutdownErr, fmt.Errorf("remove the fake store's socket %s: %w", f.Socket, err))
+	}
+	return shutdownErr
 }
 
 func (f *fakeStore) Stop() {
