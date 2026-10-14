@@ -111,7 +111,7 @@ describe("joining", () => {
 describe("presence", () => {
   it("takes the host showing it", () => {
     // Act
-    fromHost({ channel: HOST_CHANNEL, kind: "presence", shown: true, warm: true });
+    fromHost({ channel: HOST_CHANNEL, kind: "presence", shown: true });
 
     // Assert
     expect(presence.shown()).toBe(true);
@@ -119,7 +119,7 @@ describe("presence", () => {
 
   it("records the host showing it at info", async () => {
     // Act
-    fromHost({ channel: HOST_CHANNEL, kind: "presence", shown: true, warm: true });
+    fromHost({ channel: HOST_CHANNEL, kind: "presence", shown: true });
 
     // Assert
     await operations();
@@ -128,7 +128,7 @@ describe("presence", () => {
 
   it("records nothing when the host repeats what it said", async () => {
     // Arrange
-    fromHost({ channel: HOST_CHANNEL, kind: "presence", shown: false, warm: false });
+    fromHost({ channel: HOST_CHANNEL, kind: "presence", shown: false });
 
     // Act / Assert
     expect(await operations()).not.toContain("page.host-presence");
@@ -136,7 +136,7 @@ describe("presence", () => {
 
   it("ignores a message from a window other than its host", () => {
     // Act
-    fromHost({ channel: HOST_CHANNEL, kind: "presence", shown: true, warm: true }, pageWin);
+    fromHost({ channel: HOST_CHANNEL, kind: "presence", shown: true }, pageWin);
 
     // Assert
     expect(presence.shown()).toBe(false);
@@ -153,29 +153,6 @@ describe("presence", () => {
   });
 });
 
-
-describe("warmth", () => {
-  it("takes the host warming it", () => {
-    // Act
-    fromHost({ channel: HOST_CHANNEL, kind: "presence", shown: false, warm: true });
-
-    // Assert
-    expect(presence.warm()).toBe(true);
-  });
-
-  it("records the host cooling a hidden page at info", async () => {
-    // Arrange
-    fromHost({ channel: HOST_CHANNEL, kind: "presence", shown: false, warm: true });
-
-    // Act
-    fromHost({ channel: HOST_CHANNEL, kind: "presence", shown: false, warm: false });
-
-    // Assert
-    capture.logger.flush();
-    await Promise.resolve();
-    expect(capture.sent.find((r) => r.operation === "page.host-warmth" && r.context?.["warm"] === false)?.level.case).toBe("info");
-  });
-});
 
 describe("commands", () => {
   it("paints the input window's background where the gate reads it", () => {

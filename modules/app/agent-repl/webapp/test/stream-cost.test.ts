@@ -27,7 +27,7 @@ function env(): StreamCostEnv & { at: { ms: number }; fire(): void; armedMs: num
       };
     },
     nodes: () => ({ page: 40, sidebar: 30, topbar: 4, feed: 5, footer: 1 }),
-    presence: () => ({ shown: false, warm: true }),
+    presence: () => ({ shown: false }),
     fire: () => armed?.(),
   };
   return e;
@@ -60,7 +60,7 @@ describe("the stream cost meter", () => {
     });
   });
 
-  it("states the DOM size of each component and whether the page is shown and warm", async () => {
+  it("states the DOM size of each component and whether the page is shown", async () => {
     // Arrange
     const capture = captureLogRecords();
     const e = env();
@@ -75,7 +75,6 @@ describe("the stream cost meter", () => {
     expect(record.context).toMatchObject({
       nodes: { page: 40, sidebar: 30, topbar: 4, feed: 5, footer: 1 },
       shown: false,
-      warm: true,
     });
   });
 
