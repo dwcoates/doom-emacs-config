@@ -190,7 +190,10 @@ export function drawRosterRow(
   if (current) ws.setAttribute("data-current", "true");
   if (closed) ws.setAttribute("data-closed", "true");
   if (current) ws.classList.add("current");
-  if (closed) ws.classList.add("gone");
+  // A CLOSED OR HIDDEN ROW RECEDES (owner request, 2026-10-13): a Hidden
+  // row's name reads in the Recently Merged band's grey, which is the band
+  // name colour at the receded opacity.
+  if (closed || hidden) ws.classList.add("receded");
   // THE DETAIL IS A DROPDOWN, transient to this page (owner ruling,
   // 2026-10-06), so its openness is the page's own and survives a redraw.
   if (sc.openDetails.has(workspace.id)) ws.classList.add("open");
