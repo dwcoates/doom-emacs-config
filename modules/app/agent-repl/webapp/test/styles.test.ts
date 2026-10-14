@@ -177,6 +177,20 @@ const THEME_BLOCKS = [
 ] as const;
 
 /**
+ * The color and percentage TOKEN's transparent wash mixes in, read from its
+ * `TOKEN: color-mix(in srgb, #rrggbb N%, transparent)` declaration in BLOCK.
+ * Comments are stripped first, so a note quoting the declaration never stands
+ * in for it. Module scope because more than one suite pins a wash's strength.
+ */
+function washOf(block: string, token: string): { color: string; percent: number } {
+  const declaration = new RegExp(`${token}:\\s*color-mix\\(in srgb,\\s*(#[0-9a-f]{6})\\s*([\\d.]+)%,\\s*transparent\\)`).exec(
+    withoutBlockComments(block),
+  );
+  if (declaration === null) throw new Error(`no ${token} wash found`);
+  return { color: declaration[1], percent: Number(declaration[2]) };
+}
+
+/**
  * The boxes that CLIP while collapsed (owner ruling, 2026-09-15: "remove the
  * scroll from the collapsed bubble views"). Every click-to-expand capped section
  * and the response/prompt bubble's scroll box: no inner scroll while collapsed,
@@ -2424,6 +2438,31 @@ describe("workingPromptRules", () => {
 });
 
 /**
+ * THE INLINE-CODE CHIP'S WASH (owner ruling, 2026-10-14: inline code was
+ * "nearly imperceptible against the dark grey background" of a response
+ * bubble, a shade darker than it, so it should be lighter instead).
+ *
+ * `--code-bg` is a transparent wash laid over whatever bubble holds the chip,
+ * so which color it mixes in decides whether the chip sinks or lifts: black
+ * sinks it into the light theme's pale bubble, white lifts it off the dark
+ * theme's dark one.
+ */
+describe("the inline-code chip's wash", () => {
+  const EXPECTED = {
+    light: { color: "#000000", percent: 13 },
+    dark: { color: "#ffffff", percent: 12 },
+  } as const;
+
+  it.each(THEME_BLOCKS)("washes the %s theme's chip with its own color", (theme, block) => {
+    // Arrange / Act
+    const wash = washOf(block(), "--code-bg");
+
+    // Assert
+    expect(wash).toEqual(EXPECTED[theme]);
+  });
+});
+
+/**
  * THE PROMPT GLIMMER'S INTENSITY (owner ruling, 2026-09-21: "make the
  * glimmering in the webapp response bubbles 50% more intense").
  *
@@ -2434,19 +2473,12 @@ describe("workingPromptRules", () => {
  * Both themes carry the same +50%, because one ruling moved both.
  */
 describe("the prompt glimmer's intensity", () => {
-  /** The black percentage in a `--bubble-wave` declaration's color-mix. */
-  function wavePercent(block: string): number {
-    const declaration = /--bubble-wave:\s*color-mix\(in srgb,\s*#000000\s*([\d.]+)%/.exec(block);
-    if (declaration === null) throw new Error("no --bubble-wave color-mix found");
-    return Number(declaration[1]);
-  }
-
   it("washes the light theme's band with 10.5% black, the ruling's +50% over 7%", () => {
     // Arrange / Act
     const root = declarationsOf(":root") ?? "";
 
     // Assert
-    expect(wavePercent(root)).toBeCloseTo(10.5, 5);
+    expect(washOf(root, "--bubble-wave")).toEqual({ color: "#000000", percent: 10.5 });
   });
 
   it("washes the dark theme's band with 39% black, the same +50% over 26%", () => {
@@ -2454,13 +2486,13 @@ describe("the prompt glimmer's intensity", () => {
     const dark = darkThemeBlock();
 
     // Assert
-    expect(wavePercent(dark)).toBeCloseTo(39, 5);
+    expect(washOf(dark, "--bubble-wave")).toEqual({ color: "#000000", percent: 39 });
   });
 
   it("keeps the dark theme's band the deeper of the two, as a dark fill needs", () => {
     // Arrange / Act
-    const light = wavePercent(declarationsOf(":root") ?? "");
-    const dark = wavePercent(darkThemeBlock());
+    const light = washOf(declarationsOf(":root") ?? "", "--bubble-wave").percent;
+    const dark = washOf(darkThemeBlock(), "--bubble-wave").percent;
 
     // Assert
     expect(dark).toBeGreaterThan(light);
@@ -4737,6 +4769,42 @@ describe("the classic diff", () => {
 
     // Assert
     expect(got).toBeDefined();
+  });
+});
+
+describe("washOf, a token's transparent wash", () => {
+  it("reads the mixed-in color and percentage", () => {
+    // Arrange
+    const block = "--x: color-mix(in srgb, #ffffff 12.5%, transparent);";
+    // Act
+    const wash = washOf(block, "--x");
+    // Assert
+    expect(wash).toEqual({ color: "#ffffff", percent: 12.5 });
+  });
+
+  it("ignores a declaration quoted inside a comment", () => {
+    // Arrange
+    const block = "/* --x: color-mix(in srgb, #000000 1%, transparent) */ --x: color-mix(in srgb, #ffffff 9%, transparent);";
+    // Act
+    const wash = washOf(block, "--x");
+    // Assert
+    expect(wash).toEqual({ color: "#ffffff", percent: 9 });
+  });
+
+  it("throws when the token is not a wash", () => {
+    // Arrange
+    const block = "--x: #ffffff;";
+    // Act / Assert
+    expect(() => washOf(block, "--x")).toThrow("no --x wash found");
+  });
+
+  it("is the only wash parser in this suite", () => {
+    // Arrange
+    const source = readFileSync(fileURLToPath(import.meta.url), "utf8");
+    // Act — a hand-rolled parser is a regex literal naming its token.
+    const handRolled = source.match(/\/--[a-z-]+:\\s\*color-mix\\\(in srgb/g) ?? [];
+    // Assert
+    expect(handRolled).toHaveLength(0);
   });
 });
 
