@@ -8,13 +8,9 @@
  * the bubble's ceiling, in real headless WebKit over the real stylesheet,
  * scrolls the panel, and measures the strip against the panel's top edge.
  */
-import path from "node:path";
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
-import { webkit, type Browser, type Page } from "playwright-core";
+import type { Browser, Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
+import { openFeedPage } from "./feed-page";
 
 /** An expanded merge bubble whose selected tab holds far more than fits. */
 const BUBBLE = `
@@ -60,16 +56,7 @@ describe("the merge tab strip in WebKit", () => {
   let page: Page;
 
   beforeAll(async () => {
-    const css = await readFile(path.join(here, "../../src/styles.css"), "utf8");
-    browser = await webkit.launch();
-    page = await browser.newPage({ viewport: { width: 800, height: 800 } });
-    await page.setContent(`<!doctype html><html><head></head><body>
-      <div id="main-col">
-        <div id="feed-scroll" class="scroll-zone">
-          <main id="feed" data-feed="root"></main>
-        </div>
-      </div></body></html>`);
-    await page.addStyleTag({ content: css });
+    ({ browser, page } = await openFeedPage({ width: 800, height: 800 }));
   });
 
   afterAll(async () => {
