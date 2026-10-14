@@ -976,22 +976,22 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// ---- the merge orchestrator ----
 
 	ownership = workspace.NewOwnership(rolloutController)
-	// THE GATE GOVERNOR admits the merge queue's speculative test gates by the
-	// host's power source and load; its sampling loop is a background loop
-	// below. A harness pins the load it reads (cpugov.FixedHostLoadEnv); the
-	// power source is always the host's own.
-	fixedLoad := os.Getenv(cpugov.FixedHostLoadEnv)
-	hostSampler, err := cpugov.HostSampler(fixedLoad)
+	// THE GATE GOVERNOR counts the merge queue's test gates and reads the
+	// host's power source, which decides how many merges each queue works on;
+	// its reading loop is a background loop below. A harness pins the power
+	// source it reads (cpugov.FixedPowerEnv).
+	fixedPower := os.Getenv(cpugov.FixedPowerEnv)
+	powerSource, err := cpugov.HostPowerSource(fixedPower)
 	if err != nil {
-		p.Surfaces.Global().Error("daemon.boot.gate_governor", "refused the fixed host load the environment names", dlog.Context{
-			"env": cpugov.FixedHostLoadEnv, "value": fixedLoad, "error": err.Error()})
+		p.Surfaces.Global().Error("daemon.boot.gate_governor", "refused the fixed power source the environment names", dlog.Context{
+			"env": cpugov.FixedPowerEnv, "value": fixedPower, "error": err.Error()})
 		return nil, fmt.Errorf("agent-repld: build the gate governor: %w", err)
 	}
-	if fixedLoad != "" {
-		p.Surfaces.Global().Info("daemon.boot.gate_governor", "the gate governor reads a fixed host load, not the host's own", dlog.Context{
-			"env": cpugov.FixedHostLoadEnv, "value": fixedLoad})
+	if fixedPower != "" {
+		p.Surfaces.Global().Info("daemon.boot.gate_governor", "the gate governor reads a fixed power source, not the host's own", dlog.Context{
+			"env": cpugov.FixedPowerEnv, "value": fixedPower})
 	}
-	gateGovernor, err := cpugov.New(cpugov.DefaultConfig(), hostSampler, &cpugov.Host{}, time.Now, p.Surfaces.Global())
+	gateGovernor, err := cpugov.New(cpugov.DefaultConfig(), powerSource, p.Surfaces.Global())
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the gate governor: %w", err)
 	}

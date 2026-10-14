@@ -16,7 +16,6 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/cpugov"
-	"agent-repld/internal/dlog"
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/scriptrunner"
@@ -514,20 +513,6 @@ func (c *chainRunner) RunLinesMeasured(ctx context.Context, dir string, argv []s
 	return scriptrunner.Run{Output: run.Output, ExitCode: run.Code}, run.Err
 }
 
-// decisionLog forwards to the harness's log and reports every governor
-// decision as it is made.
-type decisionLog struct {
-	dlog.Logger
-	decisions chan dlog.Context
-}
-
-func (d *decisionLog) Info(op, msg string, ctx dlog.Context) {
-	d.Logger.Info(op, msg, ctx)
-	if op == "daemon.cpugov.admit" {
-		d.decisions <- ctx
-	}
-}
-
 // chain is one chain test's world.
 type chain struct {
 	h      *harness
@@ -538,11 +523,10 @@ type chain struct {
 	// (kick is a no-op without o.async): drain wakes on it as production's
 	// pump is woken. One pending kick is all a wake needs, so a kick that
 	// finds one pending is dropped rather than blocking the orchestrator.
-	kicks     chan wsm.RepoKey
-	decisions chan dlog.Context
-	dirs      map[ids.WorkspaceID]string
-	branches  map[ids.WorkspaceID]string
-	turns     *chainTurns
+	kicks    chan wsm.RepoKey
+	dirs     map[ids.WorkspaceID]string
+	branches map[ids.WorkspaceID]string
+	turns    *chainTurns
 }
 
 // chainTurns orders the gates of a chain's merges at their repository's test
@@ -635,18 +619,18 @@ func newChainOfWidth(t *testing.T, width int) *chain {
 	h.emacsRepo()
 	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
 	c := &chain{h: h, git: newChainGit(h.git), runner: newChainRunner(),
-		idle: make(chan ids.WorkspaceID, 1024), kicks: make(chan wsm.RepoKey, 1), decisions: make(chan dlog.Context, 1024),
+		idle: make(chan ids.WorkspaceID, 1024), kicks: make(chan wsm.RepoKey, 1),
 		dirs: map[ids.WorkspaceID]string{theWorkspace: h.sourceD}, branches: map[ids.WorkspaceID]string{theWorkspace: "feature"},
 		turns: &chainTurns{parks: map[ids.WorkspaceID]chan struct{}{}, lined: make(chan ids.WorkspaceID, 1024)}}
 	cfg := cpugov.DefaultConfig()
 	if width > 0 {
 		cfg.MaxGates = width
 	}
-	gov, err := cpugov.New(cfg, h.sampler, h.sampler, h.clock, &decisionLog{Logger: h.logs.Global(), decisions: c.decisions})
+	gov, err := cpugov.New(cfg, fakePower{}, h.logs.Global())
 	if err != nil {
 		t.Fatalf("building the governor: %v", err)
 	}
-	gov.Observe(cpugov.Sample{Utilization: 0, CPUs: 16})
+	gov.ObservePower(cpugov.PowerAC)
 	h.governor = gov
 	c.wire(h.o)
 	h.o.window = width
@@ -660,6 +644,7 @@ func (c *chain) wire(o *orchestrator) {
 	o.deps.Git = c.git
 	o.deps.TestRunner = c.runner
 	o.deps.Governor = c.h.governor
+	c.h.governor.OnPowerChange(o.powerChanged)
 	o.onChainIdle = func(ws ids.WorkspaceID) { c.idle <- ws }
 	o.onTestTurnAsk = c.turns.ask
 	o.onTestTurnLine = func(ws ids.WorkspaceID) { c.turns.lined <- ws }
@@ -696,23 +681,6 @@ func (c *chain) awaitIdle(t *testing.T, ws ids.WorkspaceID, until func() bool) {
 			}
 		case <-bound.C:
 			t.Fatalf("%s never went idle in the awaited state", ws)
-		}
-	}
-}
-
-// awaitDecision waits for the governor's decision about ws.
-func (c *chain) awaitDecision(t *testing.T, ws ids.WorkspaceID, decision string) dlog.Context {
-	t.Helper()
-	bound := time.NewTimer(5 * time.Second)
-	defer bound.Stop()
-	for {
-		select {
-		case got := <-c.decisions:
-			if got["workspace"] == string(ws) && got["decision"] == decision {
-				return got
-			}
-		case <-bound.C:
-			t.Fatalf("the governor never decided %s for %s", decision, ws)
 		}
 	}
 }
@@ -996,100 +964,6 @@ func TestAConflictMetByTheHeadStartingOverIsResolvedByItsOwnSession(t *testing.T
 	}
 	if got := c.prompts("ws-b", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR); got != 0 {
 		t.Fatalf("B's session got %d conflict prompts, want none: B stood on the target", got)
-	}
-}
-
-func TestASpeculativeGateWaitsForTheLoadToFallBelowTheBand(t *testing.T) {
-	// Arrange: the host is inside the band; the head's ask for the test turn
-	// is parked, so the merge behind it holds the turn and asks the governor.
-	c := newChain(t)
-	c.h.load(0.6)
-	release := c.parkTurn(theWorkspace)
-	enqueue(t, c.h)
-	c.queue(t, "ws-b", "b1")
-	done := admitAsync(c.h, context.Background())
-	deferred := c.awaitDecision(t, "ws-b", "defer")
-	ranWhileDeferred := c.runner.ran(c.dirs["ws-b"])
-
-	// Act: the load falls, so the merge behind runs, passes and overtakes.
-	c.h.load(0.2)
-	<-done
-	release()
-	// THE QUEUE IS DRAINED: whichever merge lost the race rejoins it at once
-	// behind the winner.
-	c.drain(t)
-
-	// Assert.
-	if deferred["reason"] != "load_in_or_above_band" || ranWhileDeferred != 0 {
-		t.Fatalf("deferred for %v with %d runs, want load_in_or_above_band and no run", deferred["reason"], ranWhileDeferred)
-	}
-	if got := c.runner.ran(c.dirs["ws-b"]); got != 1 {
-		t.Fatalf("B ran its gate %d times, want once: once the load fell", got)
-	}
-}
-
-func TestASpeculativeGateIsNeverAdmittedAboveTheBand(t *testing.T) {
-	// Arrange: the head's ask for the test turn is parked, so the merge
-	// behind it holds the turn and asks the governor.
-	c := newChain(t)
-	c.h.load(0.9)
-	release := c.parkTurn(theWorkspace)
-	enqueue(t, c.h)
-	c.queue(t, "ws-b", "b1")
-	done := admitAsync(c.h, context.Background())
-
-	// Act: the head asks once B is deferred; B gives it the turn.
-	deferred := c.awaitDecision(t, "ws-b", "defer")
-	release()
-	<-done
-	c.promote(t)
-
-	// Assert.
-	if deferred["reason"] != "load_in_or_above_band" {
-		t.Fatalf("deferred for %v, want load_in_or_above_band", deferred["reason"])
-	}
-	if got := c.runner.ran(c.dirs["ws-b"]); got != 1 {
-		t.Fatalf("B ran its gate %d times, want once: only at the head", got)
-	}
-	if !c.recorded("info", "daemon.merge.tests", "gives its test turn to its head") {
-		t.Fatal("B holding the turn unadmitted did not record giving it to its head")
-	}
-}
-
-func TestASpeculativeGateBelowTheBandIsAdmitted(t *testing.T) {
-	// Arrange: the head's ask for the test turn is parked.
-	c := newChain(t)
-	release := c.parkTurn(theWorkspace)
-	enqueue(t, c.h)
-	c.queue(t, "ws-b", "b1")
-	done := admitAsync(c.h, context.Background())
-
-	// Act.
-	admitted := c.awaitDecision(t, "ws-b", "admit")
-	<-done
-	release()
-	c.drain(t)
-
-	// Assert.
-	if admitted["reason"] != "below_band" {
-		t.Fatalf("admitted for %v, want below_band", admitted["reason"])
-	}
-}
-
-func TestTheHeadsGateRunsOnASaturatedHost(t *testing.T) {
-	// Arrange.
-	c := newChain(t)
-	c.h.load(1)
-	enqueue(t, c.h)
-
-	// Act.
-	if err := c.h.admit(context.Background()); err != nil {
-		t.Fatalf("the head ended on: %v", err)
-	}
-
-	// Assert.
-	if tree := c.git.tree("master"); tree != "a1+base" {
-		t.Fatalf("master holds %s, want the head landed on a saturated host", tree)
 	}
 }
 

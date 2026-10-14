@@ -54,18 +54,18 @@ type gateVerdict struct {
 // A gate behind the head (adm set) is governed; one whose merge was promoted
 // before the governor admitted it answers errPromoted, its round settled, and
 // runs again as the head's. The permit is released when the gate's script
-// ends, with the run's measured cost, which the governor learns from.
+// ends.
 func (r *run) gate(ctx context.Context, round tabRound, tip, head string, adm *gateAdmission) (verdict gateVerdict, err error) {
 	const op = "daemon.merge.tests"
 	var permit *cpugov.Permit
 	released := false
-	release := func(cores float64, wall time.Duration, measured bool) {
+	release := func() {
 		if !released && permit != nil {
 			released = true
-			permit.Release(cores, wall, measured)
+			permit.Release()
 		}
 	}
-	defer func() { release(0, 0, false) }()
+	defer release()
 	begun := r.o.deps.Now()
 	dir := r.subject.dir
 	rangeSpec := tip + ".." + head
@@ -287,8 +287,8 @@ type gateRun struct {
 	// written reports that the log file exists, so the tab may link it.
 	written bool
 
-	// release gives the governor's permit back with the run's measured cost.
-	release func(cores float64, wall time.Duration, measured bool)
+	// release gives the governor's permit back.
+	release func()
 	// begun is when the gate began; slotTaken reports that the host's suite
 	// slot was recorded taken (guarded by mu).
 	begun     time.Time
@@ -333,7 +333,7 @@ func (g *gateRun) run(ctx context.Context, dir string, argv, selected []string) 
 		}
 		g.edge(line)
 	})
-	g.release(measured.Cores(), measured.Wall, runErr == nil)
+	g.release()
 	if runErr == nil {
 		g.r.o.log(ctx, g.r.ws).Info("daemon.merge.tests", "the merge's test runner finished", dlog.Context{
 			"workspace": string(g.r.ws), "round": g.round.n, "exit_code": measured.ExitCode,

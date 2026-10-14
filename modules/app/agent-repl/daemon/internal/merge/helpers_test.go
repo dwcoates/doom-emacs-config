@@ -2028,35 +2028,18 @@ func (r *fakeRunner) runLines(ctx context.Context, dir string, argv []string, on
 	return run.Output, run.Code, run.Err
 }
 
-// fakeLoad is the host's load, as the gate governor samples it.
-type fakeLoad struct {
-	mu     sync.Mutex
-	sample cpugov.Sample
+// fakePower is the host's power source, which the governor never reads
+// itself here: the harness installs every reading directly (harness.power).
+type fakePower struct{}
+
+func (fakePower) Power() (cpugov.Power, error) {
+	return cpugov.PowerUnknown, errors.New("the harness installs the power source; nothing reads it")
 }
 
-func (f *fakeLoad) Ticks() (cpugov.Ticks, error) {
-	return cpugov.Ticks{CPUs: 16}, nil
-}
-
-// Power is never read: the harness installs the power source directly
-// (harness.power), as it installs the load.
-func (f *fakeLoad) Power() (cpugov.Power, error) {
-	return cpugov.PowerUnknown, nil
-}
-
-// power stands the host on a power source and has the governor decide on it.
+// power stands the host on a power source, which the governor tells the
+// orchestrator.
 func (h *harness) power(p cpugov.Power) {
 	h.governor.ObservePower(p)
-}
-
-// load stands the host at a fraction of its 16 processors and has the
-// governor decide on it.
-func (h *harness) load(fraction float64) {
-	h.sampler.mu.Lock()
-	h.sampler.sample = cpugov.Sample{Utilization: fraction, CPUs: 16}
-	sample := h.sampler.sample
-	h.sampler.mu.Unlock()
-	h.governor.Observe(sample)
 }
 
 // harness is one orchestrator with every fake it was built from.
@@ -2145,7 +2128,6 @@ type harness struct {
 	// governor is the gate governor, sampling an idle host unless a test says
 	// otherwise (h.load).
 	governor *cpugov.Governor
-	sampler  *fakeLoad
 	// seq is the shared monotonic sequence both the feed and the git fakes
 	// stamp their calls with, so an ordering between two subsystems is asserted
 	// on the real order.
@@ -2313,13 +2295,14 @@ func newHarness(t *testing.T) *harness {
 	h.briefs[BriefConflictResolve] = []string{"conflict_commit", "source_branch", "worktree_dir", "target_branch", "conflicted_files"}
 	h.briefs[BriefTestFailureResolve] = []string{"source_branch", "worktree_dir", "target_branch", "failing_suites", "archive_path", "failure_tail", "attempt", "max_attempts", "escalation_file", "escalation_marker", "failing_tests_file"}
 
-	h.sampler = &fakeLoad{sample: cpugov.Sample{Utilization: 0, CPUs: 16}}
-	governor, err := cpugov.New(cpugov.DefaultConfig(), h.sampler, h.sampler, h.clock, h.logs.Global())
+	governor, err := cpugov.New(cpugov.DefaultConfig(), fakePower{}, h.logs.Global())
 	if err != nil {
 		t.Fatalf("building the gate governor: %v", err)
 	}
 	h.governor = governor
-	h.governor.Observe(h.sampler.sample)
+	// THE HARNESS'S HOST IS ON AC POWER, so its queues race their top two;
+	// a test of the battery window says so (harness.power).
+	h.governor.ObservePower(cpugov.PowerAC)
 	h.repoRoot = t.TempDir()
 	h.script = filepath.Join(h.stateDir, "test-all.sh")
 	if err := os.WriteFile(h.script, []byte("#!/usr/bin/env bash\n"), 0o644); err != nil {
