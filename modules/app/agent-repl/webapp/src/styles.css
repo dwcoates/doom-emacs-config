@@ -682,10 +682,6 @@ body::after {
      token and hands the inset it gave up to the CONTENT inside the scroll box,
      so the bar lands on the edge while the text keeps the margin it had. */
   --bubble-scroll-gap: 2px;
-  /* The right inset the content keeps from the bar: the 0.9rem the bubble's
-     right padding gave up, less the gap the bubble still keeps. The body and
-     the header strip both read it. */
-  --bubble-content-inset: calc(0.9rem - var(--bubble-scroll-gap));
   /* THE ONE BUBBLE WIDTH (owner ruling, 2026-09-23): every blue and purple
      bubble -- response, prompt, peer, held prompt, compaction summary,
      agentic card -- fits its text up to this cap, and a metaprompt tree in
@@ -1676,9 +1672,9 @@ pre {
    beside it.
    IT USED TO BE A ROW — the stamp held its own flex column next to the body —
    which put the scrollbar's whole run alongside the stamp instead of under it.
-   The right inset is `--bubble-scroll-gap` rather than the 0.9rem the left
-   still carries: that 0.9rem was the gap between the scroll box and the
-   bubble's border, and the scroll box now reaches the edge. The inset the
+   The right inset is `--bubble-scroll-gap` rather than the `--bubble-pad-x`
+   the left still carries: that inset was the gap between the scroll box and
+   the bubble's border, and the scroll box now reaches the edge. The inset the
    right gave up is handed to `.bubble-body`, the CONTENT wrapper inside the
    scroll box, so the prose keeps exactly the margin it had. */
 .bubble {
@@ -1689,8 +1685,20 @@ pre {
      `--bubble-pad-y` down from it. */
   --bubble-pad-y-base: 0.6rem;
   --bubble-pad-y: var(--bubble-pad-y-base);
+  /* The horizontal twin: the gap between the bubble's left and right edges and
+     its text. The left padding is it outright; the right is split between the
+     bubble's own `--bubble-scroll-gap` and `--bubble-content-inset`. A prompt
+     bubble scales `--bubble-pad-x` down from its base (see the ladder below).
+     The inset is declared HERE, on the bubble, not on the column, so it
+     re-derives from whichever `--bubble-pad-x` the bubble's variant set. */
+  --bubble-pad-x-base: 0.9rem;
+  --bubble-pad-x: var(--bubble-pad-x-base);
+  /* The right inset the content keeps from the bar: the bubble's horizontal
+     padding less the gap the bubble's own right padding keeps. The body and
+     the header strip both read it. */
+  --bubble-content-inset: calc(var(--bubble-pad-x) - var(--bubble-scroll-gap));
   --bubble-radius: 8px;
-  padding: var(--bubble-pad-y) var(--bubble-scroll-gap) var(--bubble-pad-y) 0.9rem;
+  padding: var(--bubble-pad-y) var(--bubble-scroll-gap) var(--bubble-pad-y) var(--bubble-pad-x);
   border-radius: var(--bubble-radius);
   border: 0.3px solid transparent;
   /* A quiet hint of depth: a soft drop shadow lifts the bubble off the feed
@@ -1811,6 +1819,9 @@ pre {
    insets and the gaps between rows never read it. Kinds not named here (the
    agentic tool and monitor cards, the compaction summary) keep the base.
    - PROMPT AND RESPONSE BUBBLES SIT 30% TIGHTER (owner request, 2026-10-12).
+   - A PROMPT BUBBLE (user, agent, peer, held) sits 30% tighter again ON EVERY
+     SIDE (owner request, 2026-10-14): 0.7 of 0.7 vertically, and 0.7 of the
+     base horizontally. Its rung is the one that also sets `--bubble-pad-x`.
    - AN INTERIM RESPONSE, the amber-bordered one with no fill, sits 30% tighter
      again (owner request, 2026-10-13): 0.7 of 0.7. The green answer keeps the
      response's 0.7.
@@ -1818,12 +1829,15 @@ pre {
      as empty feed around floating text; it keeps about a third of the base
      (owner request, 2026-10-13), which brings its visible gap to a neighbor to
      about 65% of what the base padding made it. */
-.bubble[data-variant="response"],
+.bubble[data-variant="response"] {
+  --bubble-pad-y: calc(var(--bubble-pad-y-base) * 0.7);
+}
 .bubble[data-variant="user"],
 .bubble[data-variant="agent"],
 .bubble[data-variant="peer"],
 .bubble[data-variant="held"] {
-  --bubble-pad-y: calc(var(--bubble-pad-y-base) * 0.7);
+  --bubble-pad-y: calc(var(--bubble-pad-y-base) * 0.49);
+  --bubble-pad-x: calc(var(--bubble-pad-x-base) * 0.7);
 }
 .bubble[data-variant="response"].interim-response {
   --bubble-pad-y: calc(var(--bubble-pad-y-base) * 0.49);
