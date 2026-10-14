@@ -48,6 +48,9 @@ var errFake = errors.New("workspace test: arranged failure")
 type fakeDB struct {
 	wsm.DB
 
+	// workspaceByDirErr fails WorkspaceByDir.
+	workspaceByDirErr error
+
 	// owedMu guards owed, the resumptions a stand-down recorded.
 	owedMu sync.Mutex
 	owed   map[ids.WorkspaceID][]ids.TurnID
@@ -365,9 +368,14 @@ func (d *fakeDB) Workspace(_ context.Context, id ids.WorkspaceID) (wsm.Workspace
 }
 
 func (d *fakeDB) WorkspaceByDir(_ context.Context, dir string) (wsm.Workspace, error) {
+	if d.workspaceByDirErr != nil {
+		return wsm.Workspace{}, d.workspaceByDirErr
+	}
 	ws, ok := d.byDir[dir]
 	if !ok {
-		return wsm.Workspace{}, errors.New("no workspace at that dir")
+		// The store's own contract: a dir nothing is registered at is
+		// wsm.ErrNotFound.
+		return wsm.Workspace{}, fmt.Errorf("no workspace at that dir: %w", wsm.ErrNotFound)
 	}
 	return ws, nil
 }
@@ -1054,8 +1062,10 @@ type fakeQueue struct {
 
 	submissions []promptqueue.Submission
 	submitErr   error
-	acts        map[ids.WorkspaceID][]promptqueue.Act
-	actErr      error
+	// submitRefusedArm makes Submit answer a refusal disposition.
+	submitRefusedArm string
+	acts             map[ids.WorkspaceID][]promptqueue.Act
+	actErr           error
 	// db is the fixture's store, which the door closes orphans on.
 	db *fakeDB
 	// rollBacks records every RollBack call, in order.
@@ -1123,6 +1133,9 @@ func newFakeQueue() *fakeQueue {
 func (q *fakeQueue) Submit(_ context.Context, sub promptqueue.Submission) (promptqueue.Disposition, error) {
 	if q.submitErr != nil {
 		return promptqueue.Disposition{}, q.submitErr
+	}
+	if q.submitRefusedArm != "" {
+		return promptqueue.Disposition{RefusedArm: q.submitRefusedArm}, nil
 	}
 	q.submissions = append(q.submissions, sub)
 	return promptqueue.Disposition{Delivered: true}, nil

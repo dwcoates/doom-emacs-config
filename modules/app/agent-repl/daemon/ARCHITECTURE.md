@@ -549,7 +549,11 @@ fork = the create records a pending fork; the bring-up asks the parent's shim
 for the fork point (GetForkPoint) and the child's shim for the vendor's fork
 (ForkSession) while the parent's deliveries are held, records the fork's
 vendor id and lineage, then StartSession(resume); the fork's feed reads its
-inherited past from the parent's book), `Open` (spawn on mount
+inherited past from the parent's book; a create that FAILS, by any caller,
+opens its repository's main-worktree workspace and queues the
+`workspace-create-failed` brief there, deferred, under
+`PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED`, unless it was a handover or a merge
+workspace, whose failure the merge queue hands back), `Open` (spawn on mount
 semantics), `Close` (requires quiet: no turn, no live work, no held prompts,
 no queued merge; refusal manifests in the footer), `Kill`, `Nuke`, `Forget`
 (registration's undo: the record goes, and its repository's record with it when
