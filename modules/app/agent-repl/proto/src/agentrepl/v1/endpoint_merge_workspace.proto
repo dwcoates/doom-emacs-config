@@ -23,6 +23,7 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
+import "agentrepl/v1/endpoint_create_workspace.proto";
 import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -159,6 +160,16 @@ message MergeWorkspaceAsync {
   // (conversation.v1.PromptOrigin.PROMPT_ORIGIN_MERGE_COMPACT_AFTER). A merge
   // that fails compacts nothing.
   bool compact_after = 6;
+  // The merge actions THIS merge runs, in the MERGE WORKSPACE under its
+  // merge lease -- never in the requester: before_ws_merge runs before the
+  // landing, and its failure fails the merge; postprocessing_prompt runs
+  // after the branch lands, and can never fail it (its error rides the
+  // merge's terminal status). A merge workspace runs ONLY the actions its
+  // request names: the actions the requester was configured with at its
+  // creation (CreateWorkspaceStandard.merge_actions) belong to the
+  // requester's own merges and are never inherited. UNSET, or set with
+  // neither action: the merge runs no merge action.
+  optional CreateWorkspaceMergeActions merge_actions = 7;
 }
 // The workspace an async merge closes once it lands. It must be open, in the
 // requester's repository, and not the requester itself; otherwise the request

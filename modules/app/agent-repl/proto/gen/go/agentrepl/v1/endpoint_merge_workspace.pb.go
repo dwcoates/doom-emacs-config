@@ -564,7 +564,17 @@ type MergeWorkspaceAsync struct {
 	// after the landed handback, through the prompt queue
 	// (conversation.v1.PromptOrigin.PROMPT_ORIGIN_MERGE_COMPACT_AFTER). A merge
 	// that fails compacts nothing.
-	CompactAfter  bool `protobuf:"varint,6,opt,name=compact_after,json=compactAfter,proto3" json:"compact_after,omitempty"`
+	CompactAfter bool `protobuf:"varint,6,opt,name=compact_after,json=compactAfter,proto3" json:"compact_after,omitempty"`
+	// The merge actions THIS merge runs, in the MERGE WORKSPACE under its
+	// merge lease -- never in the requester: before_ws_merge runs before the
+	// landing, and its failure fails the merge; postprocessing_prompt runs
+	// after the branch lands, and can never fail it (its error rides the
+	// merge's terminal status). A merge workspace runs ONLY the actions its
+	// request names: the actions the requester was configured with at its
+	// creation (CreateWorkspaceStandard.merge_actions) belong to the
+	// requester's own merges and are never inherited. UNSET, or set with
+	// neither action: the merge runs no merge action.
+	MergeActions  *CreateWorkspaceMergeActions `protobuf:"bytes,7,opt,name=merge_actions,json=mergeActions,proto3,oneof" json:"merge_actions,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -639,6 +649,13 @@ func (x *MergeWorkspaceAsync) GetCompactAfter() bool {
 		return x.CompactAfter
 	}
 	return false
+}
+
+func (x *MergeWorkspaceAsync) GetMergeActions() *CreateWorkspaceMergeActions {
+	if x != nil {
+		return x.MergeActions
+	}
+	return nil
 }
 
 // The workspace an async merge closes once it lands. It must be open, in the
@@ -1829,7 +1846,7 @@ var File_agentrepl_v1_endpoint_merge_workspace_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_merge_workspace_proto_rawDesc = "" +
 	"\n" +
-	"+agentrepl/v1/endpoint_merge_workspace.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\"\xcc\x02\n" +
+	"+agentrepl/v1/endpoint_merge_workspace.proto\x12\fagentrepl.v1\x1a,agentrepl/v1/endpoint_create_workspace.proto\x1a\x1cworkspace/v1/workspace.proto\"\xcc\x02\n" +
 	"\x15MergeWorkspaceRequest\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12@\n" +
 	"\bone_shot\x18\x02 \x01(\v2#.agentrepl.v1.MergeWorkspaceOneShotH\x00R\aoneShot\x129\n" +
@@ -1850,16 +1867,18 @@ const file_agentrepl_v1_endpoint_merge_workspace_proto_rawDesc = "" +
 	"\x0fmerged_upstream\x18\x02 \x01(\v21.agentrepl.v1.MergeWorkspaceOneShotMergedUpstreamH\x00R\x0emergedUpstreamB\t\n" +
 	"\alanding\" \n" +
 	"\x1eMergeWorkspaceOneShotOwnBranch\"%\n" +
-	"#MergeWorkspaceOneShotMergedUpstream\"\x9f\x02\n" +
+	"#MergeWorkspaceOneShotMergedUpstream\"\x86\x03\n" +
 	"\x13MergeWorkspaceAsync\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
 	"\x06branch\x18\x02 \x01(\tR\x06branch\x12%\n" +
 	"\vinstruction\x18\x03 \x01(\tH\x00R\vinstruction\x88\x01\x01\x12H\n" +
 	"\bone_shot\x18\x04 \x01(\v2(.agentrepl.v1.MergeWorkspaceAsyncOneShotH\x01R\aoneShot\x88\x01\x01\x12)\n" +
 	"\x10cleanup_worktree\x18\x05 \x01(\bR\x0fcleanupWorktree\x12#\n" +
-	"\rcompact_after\x18\x06 \x01(\bR\fcompactAfterB\x0e\n" +
+	"\rcompact_after\x18\x06 \x01(\bR\fcompactAfter\x12S\n" +
+	"\rmerge_actions\x18\a \x01(\v2).agentrepl.v1.CreateWorkspaceMergeActionsH\x02R\fmergeActions\x88\x01\x01B\x0e\n" +
 	"\f_instructionB\v\n" +
-	"\t_one_shot\"V\n" +
+	"\t_one_shotB\x10\n" +
+	"\x0e_merge_actions\"V\n" +
 	"\x1aMergeWorkspaceAsyncOneShot\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\x9e\x01\n" +
 	"\x16MergeWorkspaceResponse\x12?\n" +
@@ -1955,6 +1974,7 @@ var file_agentrepl_v1_endpoint_merge_workspace_proto_goTypes = []any{
 	(*MergeWorkspaceVersionIncrementUnexpectedNotDefaultBranch)(nil),  // 27: agentrepl.v1.MergeWorkspaceVersionIncrementUnexpectedNotDefaultBranch
 	(*MergeWorkspaceVersionIncrementUnexpectedMergedUpstream)(nil),    // 28: agentrepl.v1.MergeWorkspaceVersionIncrementUnexpectedMergedUpstream
 	(*v1.WorkspaceRef)(nil),                                           // 29: workspace.v1.WorkspaceRef
+	(*CreateWorkspaceMergeActions)(nil),                               // 30: agentrepl.v1.CreateWorkspaceMergeActions
 }
 var file_agentrepl_v1_endpoint_merge_workspace_proto_depIdxs = []int32{
 	29, // 0: agentrepl.v1.MergeWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
@@ -1966,31 +1986,32 @@ var file_agentrepl_v1_endpoint_merge_workspace_proto_depIdxs = []int32{
 	5,  // 6: agentrepl.v1.MergeWorkspaceOneShot.own_branch:type_name -> agentrepl.v1.MergeWorkspaceOneShotOwnBranch
 	6,  // 7: agentrepl.v1.MergeWorkspaceOneShot.merged_upstream:type_name -> agentrepl.v1.MergeWorkspaceOneShotMergedUpstream
 	8,  // 8: agentrepl.v1.MergeWorkspaceAsync.one_shot:type_name -> agentrepl.v1.MergeWorkspaceAsyncOneShot
-	29, // 9: agentrepl.v1.MergeWorkspaceAsyncOneShot.workspace:type_name -> workspace.v1.WorkspaceRef
-	10, // 10: agentrepl.v1.MergeWorkspaceResponse.success:type_name -> agentrepl.v1.MergeWorkspaceSuccess
-	11, // 11: agentrepl.v1.MergeWorkspaceResponse.error:type_name -> agentrepl.v1.MergeWorkspaceError
-	12, // 12: agentrepl.v1.MergeWorkspaceError.unknown_workspace:type_name -> agentrepl.v1.MergeWorkspaceUnknownWorkspace
-	13, // 13: agentrepl.v1.MergeWorkspaceError.workspace_ref_mismatch:type_name -> agentrepl.v1.MergeWorkspaceWorkspaceRefMismatch
-	14, // 14: agentrepl.v1.MergeWorkspaceError.transferring_away:type_name -> agentrepl.v1.MergeWorkspaceTransferringAway
-	15, // 15: agentrepl.v1.MergeWorkspaceError.not_yet_adopted:type_name -> agentrepl.v1.MergeWorkspaceNotYetAdopted
-	16, // 16: agentrepl.v1.MergeWorkspaceError.no_layout_facts:type_name -> agentrepl.v1.MergeWorkspaceNoLayoutFacts
-	17, // 17: agentrepl.v1.MergeWorkspaceError.session_deleted:type_name -> agentrepl.v1.MergeWorkspaceSessionDeleted
-	18, // 18: agentrepl.v1.MergeWorkspaceError.already_queued:type_name -> agentrepl.v1.MergeWorkspaceAlreadyQueued
-	19, // 19: agentrepl.v1.MergeWorkspaceError.already_merging:type_name -> agentrepl.v1.MergeWorkspaceAlreadyMerging
-	20, // 20: agentrepl.v1.MergeWorkspaceError.unknown_one_shot_workspace:type_name -> agentrepl.v1.MergeWorkspaceUnknownOneShotWorkspace
-	22, // 21: agentrepl.v1.MergeWorkspaceError.unknown_branch:type_name -> agentrepl.v1.MergeWorkspaceUnknownBranch
-	23, // 22: agentrepl.v1.MergeWorkspaceError.name_taken:type_name -> agentrepl.v1.MergeWorkspaceNameTaken
-	21, // 23: agentrepl.v1.MergeWorkspaceError.branch_checked_out_in_requester:type_name -> agentrepl.v1.MergeWorkspaceBranchCheckedOutInRequester
-	24, // 24: agentrepl.v1.MergeWorkspaceError.version_increment_required:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementRequired
-	25, // 25: agentrepl.v1.MergeWorkspaceError.version_increment_unexpected:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected
-	26, // 26: agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected.foreign_repository:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementUnexpectedForeignRepository
-	27, // 27: agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected.not_default_branch:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementUnexpectedNotDefaultBranch
-	28, // 28: agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected.merged_upstream:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementUnexpectedMergedUpstream
-	29, // [29:29] is the sub-list for method output_type
-	29, // [29:29] is the sub-list for method input_type
-	29, // [29:29] is the sub-list for extension type_name
-	29, // [29:29] is the sub-list for extension extendee
-	0,  // [0:29] is the sub-list for field type_name
+	30, // 9: agentrepl.v1.MergeWorkspaceAsync.merge_actions:type_name -> agentrepl.v1.CreateWorkspaceMergeActions
+	29, // 10: agentrepl.v1.MergeWorkspaceAsyncOneShot.workspace:type_name -> workspace.v1.WorkspaceRef
+	10, // 11: agentrepl.v1.MergeWorkspaceResponse.success:type_name -> agentrepl.v1.MergeWorkspaceSuccess
+	11, // 12: agentrepl.v1.MergeWorkspaceResponse.error:type_name -> agentrepl.v1.MergeWorkspaceError
+	12, // 13: agentrepl.v1.MergeWorkspaceError.unknown_workspace:type_name -> agentrepl.v1.MergeWorkspaceUnknownWorkspace
+	13, // 14: agentrepl.v1.MergeWorkspaceError.workspace_ref_mismatch:type_name -> agentrepl.v1.MergeWorkspaceWorkspaceRefMismatch
+	14, // 15: agentrepl.v1.MergeWorkspaceError.transferring_away:type_name -> agentrepl.v1.MergeWorkspaceTransferringAway
+	15, // 16: agentrepl.v1.MergeWorkspaceError.not_yet_adopted:type_name -> agentrepl.v1.MergeWorkspaceNotYetAdopted
+	16, // 17: agentrepl.v1.MergeWorkspaceError.no_layout_facts:type_name -> agentrepl.v1.MergeWorkspaceNoLayoutFacts
+	17, // 18: agentrepl.v1.MergeWorkspaceError.session_deleted:type_name -> agentrepl.v1.MergeWorkspaceSessionDeleted
+	18, // 19: agentrepl.v1.MergeWorkspaceError.already_queued:type_name -> agentrepl.v1.MergeWorkspaceAlreadyQueued
+	19, // 20: agentrepl.v1.MergeWorkspaceError.already_merging:type_name -> agentrepl.v1.MergeWorkspaceAlreadyMerging
+	20, // 21: agentrepl.v1.MergeWorkspaceError.unknown_one_shot_workspace:type_name -> agentrepl.v1.MergeWorkspaceUnknownOneShotWorkspace
+	22, // 22: agentrepl.v1.MergeWorkspaceError.unknown_branch:type_name -> agentrepl.v1.MergeWorkspaceUnknownBranch
+	23, // 23: agentrepl.v1.MergeWorkspaceError.name_taken:type_name -> agentrepl.v1.MergeWorkspaceNameTaken
+	21, // 24: agentrepl.v1.MergeWorkspaceError.branch_checked_out_in_requester:type_name -> agentrepl.v1.MergeWorkspaceBranchCheckedOutInRequester
+	24, // 25: agentrepl.v1.MergeWorkspaceError.version_increment_required:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementRequired
+	25, // 26: agentrepl.v1.MergeWorkspaceError.version_increment_unexpected:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected
+	26, // 27: agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected.foreign_repository:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementUnexpectedForeignRepository
+	27, // 28: agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected.not_default_branch:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementUnexpectedNotDefaultBranch
+	28, // 29: agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected.merged_upstream:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementUnexpectedMergedUpstream
+	30, // [30:30] is the sub-list for method output_type
+	30, // [30:30] is the sub-list for method input_type
+	30, // [30:30] is the sub-list for extension type_name
+	30, // [30:30] is the sub-list for extension extendee
+	0,  // [0:30] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_merge_workspace_proto_init() }
@@ -1998,6 +2019,7 @@ func file_agentrepl_v1_endpoint_merge_workspace_proto_init() {
 	if File_agentrepl_v1_endpoint_merge_workspace_proto != nil {
 		return
 	}
+	file_agentrepl_v1_endpoint_create_workspace_proto_init()
 	file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[0].OneofWrappers = []any{
 		(*MergeWorkspaceRequest_OneShot)(nil),
 		(*MergeWorkspaceRequest_Async)(nil),
