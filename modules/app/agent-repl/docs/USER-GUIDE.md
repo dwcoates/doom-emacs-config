@@ -323,6 +323,20 @@ The top bar's effort selector sits between the model selector and the permission
   - A section left with no match is hidden until the search changes.
 - **Pressing the magnifier again, or `Escape` in the bar, closes it and shows everything again.**
 
+## Hidden workspaces
+
+- **Hiding a workspace keeps its conversation's cache warm for a while instead of stopping it at once.**
+  - Its keep-alives stop, so the cache runs out on its own clock.
+  - Showing it again before then brings it back with the cache still warm.
+- **The Hidden Workspaces section counts down to the moment the cache runs out.**
+  - The time reads like `12m 34s`, and `cold cache` once it has run out.
+  - Its color moves from green, an hour or more out, to deep red when it runs out.
+  - A row with no countdown is one whose cache was not being kept when it was hidden; it counts up from the hide instead.
+- **When the cache runs out, the workspace's session is stopped, as idle workspaces are.**
+  - Its conversation is kept.
+  - A workspace whose conversation is large enough to need the cold-cache choice when it resumes has its name struck through.
+  - Showing it again asks that choice, as any cold resume does.
+
 ## When Claude does not start
 
 The footer's `disconnected` status has three vendor substatuses for a Claude SDK that did not start. They are blue: the workspace is unusable until it is up.
