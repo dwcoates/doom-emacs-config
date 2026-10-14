@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"sort"
 	"strings"
 
 	"time"
@@ -892,8 +893,20 @@ func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.Wo
 }
 
 // resumeIn answers the merge of one repository the boot recovery handed the
-// pump to resume as its head: of several, the first in the queue's order.
+// pump to resume as its head.
+//
+// THE HEAD AFTER A RESTART IS THE FIRST ADMITTED ENTRY IN QUEUE ORDER, never
+// whichever recovery path ran first. The boot recovery takes back the merges
+// whose leases it finds at once, while a merge that was mid-handover comes
+// back only when its workspace's adoption takes it (AdoptWorkspace), possibly
+// after a merge behind it was already handed over. So when the first admitted
+// entry is not yet a resume here -- and has no run here either -- nothing of
+// the repository resumes until it is: its adoption's kick resumes it as the
+// head, and the merges behind it resume in its chain (extendChain). A merge
+// resumed ahead of it would have stranded it, its bubble showing a step with
+// no run behind it.
 func (o *orchestrator) resumeIn(ctx context.Context, repo wsm.RepoKey) (ids.WorkspaceID, bool, error) {
+	const op = "daemon.merge.resume"
 	o.mu.Lock()
 	any := false
 	for _, doc := range o.resumes {
@@ -911,14 +924,32 @@ func (o *orchestrator) resumeIn(ctx context.Context, repo wsm.RepoKey) (ids.Work
 		return "", false, err
 	}
 	o.mu.Lock()
-	defer o.mu.Unlock()
 	for _, entry := range entries {
+		if entry.State != wsm.MergeAdmitted {
+			continue
+		}
 		if doc, ok := o.resumes[entry.Workspace]; ok && doc.Repo == string(repo) {
+			o.mu.Unlock()
 			return entry.Workspace, true, nil
 		}
+		running := o.runsByWorkspace[entry.Workspace] != nil || o.inChainLocked(repo, entry.Workspace)
+		var waiting []string
+		for ws, doc := range o.resumes {
+			if doc.Repo == string(repo) {
+				waiting = append(waiting, string(ws))
+			}
+		}
+		o.mu.Unlock()
+		if !running {
+			sort.Strings(waiting)
+			o.deps.Log.Global().Info(op, "the queue's first admitted merge is not taken back yet; nothing of the repository resumes until its workspace's adoption resumes it as the head", dlog.Context{
+				"repo": string(repo), "head": string(entry.Workspace), "waiting": strings.Join(waiting, ",")})
+		}
+		return "", false, nil
 	}
-	// A RESUME WITH NO QUEUE ENTRY is answered as before: its run reads the
-	// entry it lands and ends on the missing one, loudly.
+	defer o.mu.Unlock()
+	// A RESUME WITH NO ADMITTED QUEUE ENTRY is answered as before: its run
+	// reads the entry it lands and ends on the missing one, loudly.
 	for ws, doc := range o.resumes {
 		if doc.Repo == string(repo) {
 			return ws, true, nil
