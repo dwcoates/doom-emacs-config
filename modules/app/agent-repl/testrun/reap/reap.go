@@ -141,7 +141,8 @@ type Result struct {
 // passes end once one finds none. Every stopped member is then SIGKILLed, and
 // Reap waits for each to exit. A last listing confirms no member remains.
 //
-// Every pass, the kill and the confirmation are logged; a failure is logged at
+// Every pass, the kill and the confirmation are logged, each with how long its
+// listing took (ListBound is set from those times); a failure is logged at
 // ERROR and answered, and the caller then keeps whatever the members ran out
 // of (a RAM disk is never detached under a member).
 func Reap(t Table, m Members, log Logger) (Result, error) {
@@ -154,7 +155,9 @@ func Reap(t Table, m Members, log Logger) (Result, error) {
 	stopped := map[int]Proc{}
 	var errs []error
 	for {
+		listedAt := time.Now()
 		procs, err := t.List()
+		listTook := time.Since(listedAt)
 		if err != nil {
 			return fail("list the processes on freeze pass %d: %w", res.Passes+1, err)
 		}
@@ -171,7 +174,7 @@ func Reap(t Table, m Members, log Logger) (Result, error) {
 			fresh = append(fresh, p)
 		}
 		if len(fresh) == 0 {
-			log.Infof("reap %s: freeze pass %d found no member left running; %d member(s) stopped", m.What, res.Passes, len(stopped))
+			log.Infof("reap %s: freeze pass %d found no member left running; %d member(s) stopped; the listing took %s", m.What, res.Passes, len(stopped), listTook.Round(time.Microsecond))
 			break
 		}
 		for _, p := range fresh {
@@ -180,7 +183,7 @@ func Reap(t Table, m Members, log Logger) (Result, error) {
 				errs = append(errs, fmt.Errorf("stop pid %d (%s): %w", p.Pid, p.command(), err))
 			}
 		}
-		log.Infof("reap %s: freeze pass %d stopped %d process(es): %s", m.What, res.Passes, len(fresh), describe(fresh))
+		log.Infof("reap %s: freeze pass %d stopped %d process(es): %s; the listing took %s", m.What, res.Passes, len(fresh), describe(fresh), listTook.Round(time.Microsecond))
 	}
 	// A MEMBER THAT WOULD NOT STOP IS STILL KILLED WITH THE REST, and the
 	// failure is answered once all of them are dealt with: a reap that gave up
@@ -208,7 +211,9 @@ func Reap(t Table, m Members, log Logger) (Result, error) {
 			errs = append(errs, fmt.Errorf("%d killed member(s) had not exited within %s: pids %v", len(left), KillExitBound, left))
 		}
 	}
+	confirmedAt := time.Now()
 	procs, err := t.List()
+	confirmTook := time.Since(confirmedAt)
 	if err != nil {
 		errs = append(errs, fmt.Errorf("list the processes to confirm no member remains: %w", err))
 	} else {
@@ -227,7 +232,7 @@ func Reap(t Table, m Members, log Logger) (Result, error) {
 		return fail("%w", errors.Join(errs...))
 	}
 	if len(res.Killed) > 0 {
-		log.Infof("reap %s: killed %d member(s), all exited in %s: %s", m.What, len(res.Killed), exitTook.Round(time.Microsecond), describe(res.Killed))
+		log.Infof("reap %s: killed %d member(s), all exited in %s: %s; the confirming listing took %s", m.What, len(res.Killed), exitTook.Round(time.Microsecond), describe(res.Killed), confirmTook.Round(time.Microsecond))
 	}
 	return res, nil
 }
