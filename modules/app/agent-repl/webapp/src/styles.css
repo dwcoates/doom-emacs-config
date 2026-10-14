@@ -1834,12 +1834,15 @@ pre {
    - PROMPT AND RESPONSE BUBBLES SIT 30% TIGHTER (owner request, 2026-10-12).
    - A PROMPT BUBBLE (user, agent, peer, held) sits 30% tighter again ON EVERY
      SIDE (owner request, 2026-10-14): 0.7 of 0.7 vertically, and 0.7 of the
-     base horizontally. Its rung is the one that also sets `--bubble-pad-x`.
+     base horizontally. Its rung is one that also sets `--bubble-pad-x`.
+   - A USER PROMPT then sits 15% WIDER than that ON EVERY SIDE (owner request,
+     2026-10-14): 1.15 of the prompt's 0.49 vertically and 0.7 horizontally,
+     on a rung of its own that also sets `--bubble-pad-x`.
    - AN INTERIM RESPONSE, the amber-bordered one with no fill, sits 30% tighter
      again (owner request, 2026-10-13): 0.7 of 0.7. Its gap then shrinks ON EVERY SIDE by as much as its
      narrower text did (owner request, 2026-10-14): both tokens are multiplied
      by its `--bubble-font-rem` over the base, so the padding follows the text
-     size rather than copying its ratio. Its rung is the other one that sets
+     size rather than copying its ratio. Its rung is the last one that sets
      `--bubble-pad-x`.
    - THE GREEN ANSWER (`.final-response`) sits 25% WIDER than the response's
      0.7, top and bottom only (owner request, 2026-10-14): 1.25 of 0.7.
@@ -1850,12 +1853,15 @@ pre {
 .bubble[data-variant="response"] {
   --bubble-pad-y: calc(var(--bubble-pad-y-base) * 0.7);
 }
-.bubble[data-variant="user"],
 .bubble[data-variant="agent"],
 .bubble[data-variant="peer"],
 .bubble[data-variant="held"] {
   --bubble-pad-y: calc(var(--bubble-pad-y-base) * 0.49);
   --bubble-pad-x: calc(var(--bubble-pad-x-base) * 0.7);
+}
+.bubble[data-variant="user"] {
+  --bubble-pad-y: calc(var(--bubble-pad-y-base) * 0.49 * 1.15);
+  --bubble-pad-x: calc(var(--bubble-pad-x-base) * 0.7 * 1.15);
 }
 .bubble[data-variant="response"].interim-response {
   --bubble-pad-y: calc(var(--bubble-pad-y-base) * 0.49 * var(--bubble-font-rem) / var(--bubble-base-font-rem));
