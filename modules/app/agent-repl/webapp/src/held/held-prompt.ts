@@ -207,8 +207,10 @@ export function drawHeldPrompt(
     },
   });
 
-  // THE STRIP IS THE ONE BADGE: the card's headline, the one thing besides the
-  // first line a collapsed card shows.
+  // THE STRIP IS THE STATUS LINE (owner request, 2026-10-13): the one badge,
+  // a quiet pill for every further standing fact, and the queued age. A
+  // collapsed card shows everything but the rest of the words, so expanding
+  // one only ever reveals more of what was said.
   const head = document.createElement("div");
   head.className = "queued-head";
   const verdict = drawClassification(classification, `${path}.classification`);
@@ -219,6 +221,14 @@ export function drawHeldPrompt(
     `${path}.badge`,
   );
   head.appendChild(drawn.pill);
+  for (const note of drawn.notes) head.appendChild(note);
+  head.appendChild(
+    drawHeldPromptQueuedAt(
+      requireMessage(u.queuedAt, `${path}.queued_at`),
+      tc,
+      `${path}.queued_at`,
+    ),
+  );
   if (hold !== null && hold.case === "shutdown" && drawn.status === "shutdown") {
     // The schedule id is a HOOK on the hold's badge, not words: it joins this
     // card to the shutdown it should explain.
@@ -230,25 +240,16 @@ export function drawHeldPrompt(
       ? drawUserSaid(said, `${path}.said`)
       : [drawHeldSessionAct(u.act, `${path}.act`)];
 
-  // EVERYTHING ELSE IS EXPAND-ONLY, in ONE element, so a refusal an action
-  // draws beside its row lands inside the region and folds away with it.
-  const details = document.createElement("div");
-  details.className = "queued-details";
-  details.appendChild(
-    drawHeldPromptQueuedAt(
-      requireMessage(u.queuedAt, `${path}.queued_at`),
-      tc,
-      `${path}.queued_at`,
-    ),
-  );
-  for (const detail of drawn.details) details.appendChild(detail);
-  if (verdict.detail !== null) details.appendChild(verdict.detail);
+  // THE CONTROLS ARE ALWAYS SHOWN (owner request, 2026-10-13), in ONE footer
+  // element, so a refusal an action draws beside its row lands in it too.
+  const controls = document.createElement("div");
+  controls.className = "queued-controls";
   // A CLASSIFIED PROMPT OFFERS "Update classifier": its form is this turn's
   // one element, kept across pushes (classifier-update.ts).
   const route = u.act === undefined ? classifierRouteOf(classification.case) : null;
   const classifierForm =
     route === null ? null : tc.classifierForms.formFor(turn.value, { text: spokenText(said), route });
-  details.appendChild(
+  controls.appendChild(
     drawHeldPromptActions({
       tc,
       turn,
@@ -272,8 +273,11 @@ export function drawHeldPrompt(
       hooks: holdCardHooks(hold === null ? null : hold.case),
       working: false,
       strip: [head],
+      // THE REASON ENDS THE FIRST LINE (owner request, 2026-10-13): floated
+      // into the corner, so the collapsed line's ellipsis falls before it.
+      ...(verdict.detail === null ? {} : { corner: verdict.detail }),
       content,
-      expandOnly: classifierForm === null ? [details] : [details, classifierForm.element],
+      footer: classifierForm === null ? [controls] : [controls, classifierForm.element],
       capLines: ELLIPSIS_CAP_LINES,
       more: BUBBLE_MORE_ELLIPSIS,
     },
@@ -507,10 +511,7 @@ export function drawHeldPromptClassificationError(
     operation: "held.held-prompt.classification-error",
     context: { path, detail: u.detail },
   });
-  const detail = document.createElement("div");
-  detail.className = "queued-reason queued-unclassified";
-  detail.textContent = u.detail;
-  return { detail };
+  return { detail: reasonBadge(u.detail, `badge ${HELD_REASON_CLASS} queued-unclassified`) };
 }
 
 /**
@@ -1246,15 +1247,15 @@ function badge(label: string, status: HeldStatus): HTMLElement {
   return pill;
 }
 
-/** The class a badge's detail wears in the expand-only region. */
-export const HELD_BADGE_DETAIL_CLASS = "queued-status-detail";
-
-/** The class a note on a fact the badge does not show wears in the expand-only region. */
+/** The class a note on a fact the badge does not show wears, a quiet pill in the strip. */
 export const HELD_NOTE_CLASS = "queued-status-note";
 
+/** The class the reason badge ending the card's first line wears. */
+export const HELD_REASON_CLASS = "held-reason";
+
 /**
- * The wire's ONE badge, colored by the fact it stands for, with its detail and
- * the notes for every other standing fact as expand-only lines.
+ * The wire's ONE badge, colored by the fact it stands for, its detail the
+ * badge's hover title, and a quiet pill for every other standing fact.
  *
  * A badge with no fact or an empty label, and a note with an empty sentence,
  * are malformed views (feed_held.proto), logged and thrown, never drawn.
@@ -1263,7 +1264,7 @@ export function drawHeldPromptBadge(
   wire: HeldPromptBadge,
   notes: readonly HeldPromptStatusNote[],
   path: string,
-): { pill: HTMLElement; status: HeldStatus; details: HTMLElement[] } {
+): { pill: HTMLElement; status: HeldStatus; notes: HTMLElement[] } {
   const status = requireCase(wire.standsFor, `${path}.stands_for`).case;
   if (wire.label === "") {
     log.error("a held prompt's badge carried an empty label", {
@@ -1272,14 +1273,7 @@ export function drawHeldPromptBadge(
     });
     throw new MalformedView(`${path}.label`, "the badge label is empty");
   }
-  const details: HTMLElement[] = [];
-  if (wire.detail !== undefined) {
-    const detail = document.createElement("div");
-    detail.className = HELD_BADGE_DETAIL_CLASS;
-    detail.setAttribute("data-held-status", status);
-    detail.textContent = wire.detail;
-    details.push(detail);
-  }
+  const pills: HTMLElement[] = [];
   for (const [index, n] of notes.entries()) {
     if (n.sentence === "") {
       log.error("a held prompt's note carried an empty sentence", {
@@ -1288,20 +1282,32 @@ export function drawHeldPromptBadge(
       });
       throw new MalformedView(`HeldPrompt.notes[${index}].sentence`, "the note is empty");
     }
-    const line = document.createElement("div");
-    line.className = HELD_NOTE_CLASS;
-    line.textContent = n.sentence;
-    details.push(line);
+    const pill = document.createElement("span");
+    pill.className = `badge ${HELD_NOTE_CLASS}`;
+    pill.textContent = n.sentence;
+    pills.push(pill);
   }
-  return { pill: badge(wire.label, status), status, details };
+  const pill = badge(wire.label, status);
+  if (wire.detail !== undefined) pill.title = wire.detail;
+  return { pill, status, notes: pills };
 }
 
-/** The classifier quoting itself: an aside, and only when it said something. */
+/**
+ * The classifier quoting itself, as the badge that ends the card's first line,
+ * and only when it said something. Its full words are its hover title too,
+ * since the collapsed badge may be cut short.
+ */
 function rationale(text: string): HTMLElement | null {
   if (text === "") return null;
-  const reason = document.createElement("div");
-  reason.className = "queued-reason";
+  return reasonBadge(text, `badge ${HELD_REASON_CLASS}`);
+}
+
+/** The reason badge: TEXT in an element of CLASSNAME, titled with itself. */
+function reasonBadge(text: string, className: string): HTMLElement {
+  const reason = document.createElement("span");
+  reason.className = className;
   reason.textContent = text;
+  reason.title = text;
   return reason;
 }
 
