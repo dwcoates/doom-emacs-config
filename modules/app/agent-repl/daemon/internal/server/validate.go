@@ -801,6 +801,25 @@ func validateUpdateMergeQueueRequest(req *agentreplv1.UpdateMergeQueueRequest) *
 	if down := req.GetMoveDown(); down != nil {
 		return validateWorkspaceRef("move_down.workspace", down.GetWorkspace())
 	}
+	if subscribe := req.GetSubscribe(); subscribe != nil {
+		if err := validateWorkspaceRef("subscribe.subscriber", subscribe.GetSubscriber()); err != nil {
+			return err
+		}
+		if subscribe.GetDetail().GetLevel() == nil {
+			return invalid("subscribe.detail", "a subscription's detail level arm is required")
+		}
+		if subscribe.Repository != nil {
+			return validateRepositoryRef("subscribe.repository", subscribe.GetRepository())
+		}
+	}
+	if unsubscribe := req.GetUnsubscribe(); unsubscribe != nil {
+		if err := validateWorkspaceRef("unsubscribe.subscriber", unsubscribe.GetSubscriber()); err != nil {
+			return err
+		}
+		if unsubscribe.Repository != nil {
+			return validateRepositoryRef("unsubscribe.repository", unsubscribe.GetRepository())
+		}
+	}
 	return nil
 }
 

@@ -42,6 +42,7 @@ import (
 	"agent-repld/internal/lockwatch"
 	"agent-repld/internal/login"
 	"agent-repld/internal/merge"
+	"agent-repld/internal/mergenotice"
 	"agent-repld/internal/mergeworkspace"
 	"agent-repld/internal/opentabs"
 	"agent-repld/internal/paint"
@@ -1012,7 +1013,17 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the gate governor: %w", err)
 	}
+	// THE MERGE QUEUE'S SUBSCRIPTION NOTICES are told every queue change the
+	// orchestrator makes; they only buffer until their loop runs, which is
+	// handed the prompt handler built below.
+	queueNotices := mergenotice.New(mergenotice.Deps{
+		Subscriptions: p.DB,
+		Briefs:        merge.BriefsFrom(paths.PromptsDir),
+		MintKey:       prompthandler.MintKey,
+		Log:           p.Surfaces,
+	})
 	mergeOrchestrator, err := merge.New(merge.Deps{
+		QueueEvents:   queueNotices,
 		Detached:      detachedRef,
 		Names:         verbsRef,
 		InterruptTurn: verbsRef.interruptTurn,
@@ -1302,6 +1313,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			ticker := time.NewTicker(time.Hour)
 			defer ticker.Stop()
 			detached.Run(ctx, ticker.C)
+			return nil
+		}},
+		{Name: "merge_queue_notices", Run: func(ctx context.Context) error {
+			queueNotices.Run(ctx, handler)
 			return nil
 		}},
 		{Name: "lock_watchdog", Run: stalls.Run},

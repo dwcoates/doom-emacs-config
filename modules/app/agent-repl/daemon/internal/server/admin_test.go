@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -856,5 +857,172 @@ func TestClientLogFilesAWebhostRecordCentrally(t *testing.T) {
 	}
 	if got := h.Surfaces.centralRecords[0]; got.ClientKind != dlog.RuntimeWebapp || got.Operation != "sidebar.roster" {
 		t.Fatalf("record = %+v, want the webapp's sidebar.roster record", got)
+	}
+}
+
+// subscribeRequest asks UpdateMergeQueue to subscribe the harness workspace
+// at DETAIL, scoped to REPO when it is set.
+func subscribeRequest(detail *agentreplv1.UpdateMergeQueueSubscribeDetail, repo *workspacev1.RepositoryRef) *connect.Request[agentreplv1.UpdateMergeQueueRequest] {
+	return connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+		Action: &agentreplv1.UpdateMergeQueueRequest_Subscribe{Subscribe: &agentreplv1.UpdateMergeQueueSubscribe{
+			Subscriber: ref(), Repository: repo, Detail: detail,
+		}},
+	})
+}
+
+// unsubscribeRequest asks UpdateMergeQueue to end the harness workspace's
+// subscription, scoped to REPO when it is set.
+func unsubscribeRequest(repo *workspacev1.RepositoryRef) *connect.Request[agentreplv1.UpdateMergeQueueRequest] {
+	return connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+		Action: &agentreplv1.UpdateMergeQueueRequest_Unsubscribe{Unsubscribe: &agentreplv1.UpdateMergeQueueUnsubscribe{
+			Subscriber: ref(), Repository: repo,
+		}},
+	})
+}
+
+func TestSubscribeReachesTheOrchestratorAtEachDetail(t *testing.T) {
+	tests := []struct {
+		name   string
+		detail *agentreplv1.UpdateMergeQueueSubscribeDetail
+		want   wsm.MergeQueueDetail
+	}{
+		{name: "every change", want: wsm.MergeQueueDetailEveryChange, detail: &agentreplv1.UpdateMergeQueueSubscribeDetail{
+			Level: &agentreplv1.UpdateMergeQueueSubscribeDetail_EveryChange{EveryChange: &agentreplv1.UpdateMergeQueueSubscribeEveryChange{}}}},
+		{name: "advances", want: wsm.MergeQueueDetailAdvances, detail: &agentreplv1.UpdateMergeQueueSubscribeDetail{
+			Level: &agentreplv1.UpdateMergeQueueSubscribeDetail_Advances{Advances: &agentreplv1.UpdateMergeQueueSubscribeAdvances{}}}},
+		{name: "depletes", want: wsm.MergeQueueDetailDepletes, detail: &agentreplv1.UpdateMergeQueueSubscribeDetail{
+			Level: &agentreplv1.UpdateMergeQueueSubscribeDetail_Depletes{Depletes: &agentreplv1.UpdateMergeQueueSubscribeDepletes{}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			resp, err := h.Client.UpdateMergeQueue(context.Background(), subscribeRequest(tt.detail, nil))
+
+			// Assert.
+			if err != nil || resp.Msg.GetSuccess() == nil {
+				t.Fatalf("UpdateMergeQueue = %v, %v; want success", resp, err)
+			}
+			want := []fakeSubscription{{ws: ids.WorkspaceID(ref().GetId()), detail: tt.want}}
+			if !reflect.DeepEqual(h.Merge.subscriptions, want) {
+				t.Fatalf("subscriptions = %+v, want %+v", h.Merge.subscriptions, want)
+			}
+		})
+	}
+}
+
+func TestSubscribeCarriesItsRepositoryScope(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	advances := &agentreplv1.UpdateMergeQueueSubscribeDetail{
+		Level: &agentreplv1.UpdateMergeQueueSubscribeDetail_Advances{Advances: &agentreplv1.UpdateMergeQueueSubscribeAdvances{}}}
+
+	// Act.
+	_, err := h.Client.UpdateMergeQueue(context.Background(), subscribeRequest(advances, &workspacev1.RepositoryRef{Id: "repo-1"}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("UpdateMergeQueue: %v", err)
+	}
+	if len(h.Merge.subscriptions) != 1 || h.Merge.subscriptions[0].scope == nil || h.Merge.subscriptions[0].scope.ID != "repo-1" {
+		t.Fatalf("subscriptions = %+v, want one scoped to repo-1", h.Merge.subscriptions)
+	}
+}
+
+func TestASubscriptionWithNoDetailIsInvalid(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	_, err := h.Client.UpdateMergeQueue(context.Background(), subscribeRequest(&agentreplv1.UpdateMergeQueueSubscribeDetail{}, nil))
+
+	// Assert.
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("UpdateMergeQueue = %v, want InvalidArgument", err)
+	}
+	if len(h.Merge.subscriptions) != 0 {
+		t.Fatalf("subscriptions = %+v, want none", h.Merge.subscriptions)
+	}
+}
+
+func TestASubscriptionOrUnsubscribeWithNoSubscriberIsInvalid(t *testing.T) {
+	tests := []struct {
+		name string
+		req  *agentreplv1.UpdateMergeQueueRequest
+	}{
+		{name: "subscribe", req: &agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_Subscribe{
+			Subscribe: &agentreplv1.UpdateMergeQueueSubscribe{Detail: &agentreplv1.UpdateMergeQueueSubscribeDetail{
+				Level: &agentreplv1.UpdateMergeQueueSubscribeDetail_Advances{Advances: &agentreplv1.UpdateMergeQueueSubscribeAdvances{}}}}}}},
+		{name: "unsubscribe", req: &agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_Unsubscribe{
+			Unsubscribe: &agentreplv1.UpdateMergeQueueUnsubscribe{}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			_, err := h.Client.UpdateMergeQueue(context.Background(), connect.NewRequest(tt.req))
+
+			// Assert.
+			if connect.CodeOf(err) != connect.CodeInvalidArgument {
+				t.Fatalf("UpdateMergeQueue = %v, want InvalidArgument", err)
+			}
+		})
+	}
+}
+
+func TestASubscriptionOfAClosedWorkspaceIsAnAnswer(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Merge.subscribeErr = &merge.RefusalError{Arm: merge.ArmSubscriberClosed, Reason: "closed"}
+	advances := &agentreplv1.UpdateMergeQueueSubscribeDetail{
+		Level: &agentreplv1.UpdateMergeQueueSubscribeDetail_Advances{Advances: &agentreplv1.UpdateMergeQueueSubscribeAdvances{}}}
+
+	// Act.
+	resp, err := h.Client.UpdateMergeQueue(context.Background(), subscribeRequest(advances, nil))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("UpdateMergeQueue: %v", err)
+	}
+	if resp.Msg.GetError().GetSubscriberClosed() == nil {
+		t.Fatalf("result = %v, want subscriber_closed", resp.Msg.GetResult())
+	}
+}
+
+func TestUnsubscribeReachesTheOrchestratorInItsScope(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	resp, err := h.Client.UpdateMergeQueue(context.Background(), unsubscribeRequest(nil))
+
+	// Assert.
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("UpdateMergeQueue = %v, %v; want success", resp, err)
+	}
+	want := []fakeSubscription{{ws: ids.WorkspaceID(ref().GetId())}}
+	if !reflect.DeepEqual(h.Merge.unsubscriptions, want) {
+		t.Fatalf("unsubscriptions = %+v, want %+v", h.Merge.unsubscriptions, want)
+	}
+}
+
+func TestUnsubscribingWithNoSubscriptionIsAnAnswer(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Merge.unsubscribeErr = &merge.RefusalError{Arm: merge.ArmNotSubscribed, Reason: "none"}
+
+	// Act.
+	resp, err := h.Client.UpdateMergeQueue(context.Background(), unsubscribeRequest(nil))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("UpdateMergeQueue: %v", err)
+	}
+	if resp.Msg.GetError().GetNotSubscribed() == nil {
+		t.Fatalf("result = %v, want not_subscribed", resp.Msg.GetResult())
 	}
 }

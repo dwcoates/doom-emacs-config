@@ -756,6 +756,29 @@ type fakeMerge struct {
 	tabInterrupts []feedid.Ref
 	tabRunning    bool
 	tabErr        error
+	// subscriptions records every Subscribe, unsubscriptions every
+	// Unsubscribe; subscribeErr and unsubscribeErr answer them.
+	subscriptions   []fakeSubscription
+	unsubscriptions []fakeSubscription
+	subscribeErr    error
+	unsubscribeErr  error
+}
+
+// fakeSubscription is one Subscribe or Unsubscribe the fake was asked for.
+type fakeSubscription struct {
+	ws     ids.WorkspaceID
+	scope  *merge.RepositoryScope
+	detail wsm.MergeQueueDetail
+}
+
+func (f *fakeMerge) Subscribe(_ context.Context, ws ids.WorkspaceID, scope *merge.RepositoryScope, detail wsm.MergeQueueDetail) (bool, error) {
+	f.subscriptions = append(f.subscriptions, fakeSubscription{ws: ws, scope: scope, detail: detail})
+	return false, f.subscribeErr
+}
+
+func (f *fakeMerge) Unsubscribe(_ context.Context, ws ids.WorkspaceID, scope *merge.RepositoryScope) error {
+	f.unsubscriptions = append(f.unsubscriptions, fakeSubscription{ws: ws, scope: scope})
+	return f.unsubscribeErr
 }
 
 func (f *fakeMerge) RevealMergeWorkspace(_ context.Context, ws ids.WorkspaceID, _ string) error {
