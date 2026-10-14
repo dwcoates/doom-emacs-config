@@ -477,3 +477,40 @@ func TestCancelOnLifelineCancelsAndReapsWhenTheSentinelGoes(t *testing.T) {
 		t.Fatalf("info = %q", log.info)
 	}
 }
+
+func TestCutLogFallsBackToTheRunLog(t *testing.T) {
+	// Arrange.
+	path := filepath.Join(t.TempDir(), "run.log")
+
+	// Act.
+	log := CutLog(path)
+
+	// Assert.
+	for name, w := range map[string]any{"Out": log.Out, "Err": log.Err} {
+		fw, ok := w.(*FallbackWriter)
+		if !ok || fw.Path != path {
+			t.Fatalf("CutLog().%s = %#v, want a FallbackWriter onto %s", name, w, path)
+		}
+	}
+	if log.Out.(*FallbackWriter).Primary != os.Stdout || log.Err.(*FallbackWriter).Primary != os.Stderr {
+		t.Fatal("CutLog() does not relay through stdout and stderr")
+	}
+}
+
+func TestEveryCutProcessLogsThroughCutLog(t *testing.T) {
+	// Arrange: the runner and the warden, and the helpers standing in for them.
+	sites := []string{"../../main.go", "process_test.go"}
+
+	for _, site := range sites {
+		// Act.
+		src, err := os.ReadFile(site)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Assert.
+		if !strings.Contains(string(src), "CutLog(") || strings.Contains(string(src), "&FallbackWriter{") {
+			t.Errorf("%s builds its own cut log; want life.CutLog", site)
+		}
+	}
+}

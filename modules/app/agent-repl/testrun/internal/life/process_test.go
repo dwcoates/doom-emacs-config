@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -48,20 +47,10 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func helperLog() *run.Log {
-	signal.Notify(make(chan os.Signal, 1), syscall.SIGPIPE)
-	path := os.Getenv(envRunLog)
-	return &run.Log{Out: &FallbackWriter{Primary: os.Stdout, Path: path}, Err: &FallbackWriter{Primary: os.Stderr, Path: path}}
-}
-
-func helperReap(log *run.Log) func(reap.Members) (reap.Result, error) {
-	return func(ms reap.Members) (reap.Result, error) { return reap.Reap(reap.OSTable{}, ms, log) }
-}
-
 func helperRunner() int {
-	log := helperLog()
+	log := CutLog(os.Getenv(envRunLog))
 	os.Unsetenv(EnvRole)
-	r, err := StartRunner(reap.OSTable{}, helperReap(log), WardenCommand{Name: os.Args[0], Args: []string{"warden"}}, log)
+	r, err := StartRunner(reap.OSTable{}, reap.OSReap(log), WardenCommand{Name: os.Args[0], Args: []string{"warden"}}, log)
 	if err != nil {
 		log.Errorf("%v", err)
 		return 1
@@ -102,7 +91,7 @@ func helperRunner() int {
 }
 
 func helperWarden(argv []string) int {
-	log := helperLog()
+	log := CutLog(os.Getenv(envRunLog))
 	var runner int
 	var since int64
 	var sentinel int
@@ -120,7 +109,7 @@ func helperWarden(argv []string) int {
 		Runner:   runner,
 		Since:    time.Unix(since, 0),
 		Sentinel: sentinel,
-		Reap:     helperReap(log),
+		Reap:     reap.OSReap(log),
 		Release: func(int) (bool, error) {
 			return true, os.RemoveAll(os.Getenv(envDisk))
 		},

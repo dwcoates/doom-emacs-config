@@ -86,3 +86,9 @@ func parsePS(out string, getsid func(int) (int, error)) ([]Proc, error) {
 
 // Signal implements Table.
 func (OSTable) Signal(pid int, sig syscall.Signal) error { return syscall.Kill(pid, sig) }
+
+// OSReap is Reap over the host's process table, logging to log: the reap every
+// caller outside a test is given.
+func OSReap(log Logger) func(Members) (Result, error) {
+	return func(m Members) (Result, error) { return Reap(OSTable{}, m, log) }
+}
