@@ -18,6 +18,9 @@ THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_SRC="$THIS_DIR/test-all.sh"
 REAL_SAFE_TEST_RUN="$(cd "$THIS_DIR/../../../.." && pwd)/.claude/safe-test-run.sh"
 CSVHeader="run_id,recorded_at_utc,commit,branch,suite,duration_seconds,measure"
+# shellcheck source=/dev/null
+. "$THIS_DIR/lib-fake-git-fixture.sh"
+
 PASS=0
 FAIL=0
 
@@ -96,7 +99,7 @@ stub_path() { printf '%s:/usr/bin:/bin' "$1/stubs"; }
 # did exactly what --record is documented to do.
 #
 # These cases run the REAL safe-test-run.sh (never stubbed) against a fake
-# `git` (same shape as .claude/test-safe-test-run.sh's), plus a stub testrun
+# `git` (bin/fake-git.sh, with the real reference-transaction hook), plus a stub testrun
 # that models the staging/finishing split precisely enough to prove the
 # timing: its `run` subcommand writes ONLY to --record-out (a path outside
 # the checkout), and can simulate a suite failure or a HEAD moving mid-run;
@@ -108,7 +111,7 @@ make_real_net_tree() {
     local tree="$1"
     local repo="$tree/repo"
     local module="$repo/modules/app/agent-repl"
-    mkdir -p "$module/bin" "$module/testrun" "$module/lisp" "$repo/.claude" "$tree/stubs" "$tree/gitstate"
+    mkdir -p "$module/bin" "$module/testrun" "$module/lisp" "$repo/.claude" "$tree/stubs"
     cp "$SCRIPT_SRC" "$module/bin/test-all.sh"
     cp "$REAL_SAFE_TEST_RUN" "$repo/.claude/safe-test-run.sh"
     # safe-test-run.sh checks this file exists even in `--` command mode.
@@ -120,25 +123,14 @@ make_real_net_tree() {
 exec "$@"
 EOF
 
-    # fake git answers exactly the plumbing commands safe-test-run.sh issues,
-    # from state files a case controls (same shape as
-    # .claude/test-safe-test-run.sh's fake git).
-    cat >"$tree/stubs/git" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-S="$FAKE_GIT_STATE"
-case "$*" in
-    "rev-parse --show-toplevel") printf '%s\n' "$FAKE_GIT_TOPLEVEL" ;;
-    "rev-parse HEAD") cat "$S/head" ;;
-    "rev-parse --abbrev-ref HEAD") cat "$S/branch" ;;
-    "worktree list --porcelain") printf 'worktree %s\nbranch refs/heads/%s\n' "$FAKE_GIT_TOPLEVEL" "$(cat "$S/branch")" ;;
-    "for-each-ref --format=%(refname) %(objectname) refs/heads/ refs/tags/") cat "$S/refs" ;;
-    "status --porcelain") cat "$S/status" ;;
-    "tag -d "*) grep -v "^refs/tags/$3 " "$S/refs" >"$S/refs.new" || true; mv "$S/refs.new" "$S/refs" ;;
-    "tag "*) printf 'refs/tags/%s %s\n' "$2" "$3" >>"$S/refs" ;;
-    *) echo "fake git: unexpected command: git $*" >&2; exit 99 ;;
-esac
-EOF
+    # The checkout is a bin/fake-git.sh repository with the real
+    # reference-transaction hook installed, as .claude/test-safe-test-run.sh's
+    # are: the net journals the run's refs through the hook itself.
+    "$THIS_DIR/fake-git.sh" --install "$tree/stubs/git"
+    PATH="$tree/stubs:/usr/bin:/bin" git -C "$repo" init
+    PATH="$tree/stubs:/usr/bin:/bin" git -C "$repo" add -A
+    PATH="$tree/stubs:/usr/bin:/bin" git -C "$repo" commit -m base
+    install_checked_in_hook "$repo" reference-transaction
 
     # The stub testrun: `run` stages to --record-out only (and can simulate a
     # suite failure or HEAD moving); `finish-record` is the only thing that
@@ -161,7 +153,7 @@ done
 case "$sub" in
     run)
         if [ "${STUB_MOVE_HEAD:-0}" = 1 ]; then
-            echo 2222222222222222222222222222222222222222 >"$FAKE_GIT_STATE/head"
+            (cd "$MODULE" && echo moved >moved && git add -A && git commit -m moved)
         fi
         [ "${STUB_RUN_EXIT:-0}" != 0 ] && exit "$STUB_RUN_EXIT"
         [ -n "$RECORD_OUT" ] && printf '{"RunID":"run1","Branch":"main","Commit":"1111111111111111111111111111111111111111","Rows":[{"RunID":"run1","RecordedAt":"t","Commit":"1111111111111111111111111111111111111111","Branch":"main","Suite":"ert","Seconds":1.000,"Measure":"unit-wall-sum"}]}' >"$RECORD_OUT"
@@ -176,25 +168,20 @@ INNER
 chmod +x "$3"
 EOF
     chmod +x "$module/bin/test-all.sh" "$module/bin/suite-slot.sh" \
-        "$repo/.claude/safe-test-run.sh" "$tree/stubs/go" "$tree/stubs/git"
+        "$repo/.claude/safe-test-run.sh" "$tree/stubs/go"
 }
 
 # run_test_all_real_net runs test-all.sh through the REAL safe-test-run.sh
-# and the fake git above; GIT state (head/branch/refs/status) and RC/OUT are
-# in STATE/RUN_RC/RUN_OUT.
+# and the fake git above; the checkout's refs are in REFS, RC/OUT in
+# RUN_RC/RUN_OUT.
 run_test_all_real_net() {
     local tree="$1"
     shift
-    STATE="$tree/gitstate"
-    echo 1111111111111111111111111111111111111111 >"$STATE/head"
-    echo main >"$STATE/branch"
-    echo "refs/heads/main 1111111111111111111111111111111111111111" >"$STATE/refs"
-    : >"$STATE/status"
+    REFS="$tree/repo/.fakegit/refs"
     STUB_LOG="$tree/stub.log"
     : >"$STUB_LOG"
     set +e
-    RUN_OUT="$(cd "$tree/repo" && PATH="$tree/stubs:/usr/bin:/bin" \
-        FAKE_GIT_STATE="$STATE" FAKE_GIT_TOPLEVEL="$tree/repo" STUB_LOG="$STUB_LOG" \
+    RUN_OUT="$(cd "$tree/repo" && PATH="$tree/stubs:/usr/bin:/bin" STUB_LOG="$STUB_LOG" \
         AGENT_REPL_TEST_LOG_ROOT="$tree/test-runs" \
         STUB_RUN_EXIT="${STUB_RUN_EXIT:-0}" STUB_MOVE_HEAD="${STUB_MOVE_HEAD:-0}" \
         bash "$tree/repo/modules/app/agent-repl/bin/test-all.sh" "$@" 2>&1)"
@@ -209,11 +196,11 @@ test_integration_clean_record_run_exits_0_with_no_tag() {
     run_test_all_real_net "$tree" --record
     if [ "$RUN_RC" -eq 0 ] \
         && [ "$(cat "$tree/repo/modules/app/agent-repl/test_time.csv")" = "$(printf '%s\nrun1,t,1111111111111111111111111111111111111111,main,ert,1.000,unit-wall-sum' "$CSVHeader")" ] \
-        && [ -z "$(grep '^refs/tags/agent-repl-test-checkpoint-' "$STATE/refs" || true)" ]; then
+        && [ -z "$(grep '^refs/tags/agent-repl-test-checkpoint-' "$REFS" 2>/dev/null || true)" ]; then
         pass "a clean --record run exits 0, records the row, and leaves no checkpoint tag"
     else
         fail "a clean --record run exits 0, records the row, and leaves no checkpoint tag" \
-            "rc=$RUN_RC refs=$(cat "$STATE/refs") csv=$(cat "$tree/repo/modules/app/agent-repl/test_time.csv") out=$RUN_OUT"
+            "rc=$RUN_RC refs=$(cat "$REFS" 2>/dev/null) csv=$(cat "$tree/repo/modules/app/agent-repl/test_time.csv") out=$RUN_OUT"
     fi
     rm -rf "$tree"
 }
@@ -226,12 +213,12 @@ test_integration_real_drift_during_record_run_is_still_caught() {
     if [ "$RUN_RC" -eq 2 ] \
         && [[ "$RUN_OUT" == *"DRIFT DETECTED"* ]] \
         && [[ "$RUN_OUT" == *"HEAD changed"* ]] \
-        && [ -n "$(grep '^refs/tags/agent-repl-test-checkpoint-' "$STATE/refs" || true)" ] \
+        && [ -n "$(grep '^refs/tags/agent-repl-test-checkpoint-' "$REFS" 2>/dev/null || true)" ] \
         && [ "$(cat "$tree/repo/modules/app/agent-repl/test_time.csv")" = "$CSVHeader" ]; then
         pass "a HEAD moved by something other than the record write is still caught, and nothing is recorded"
     else
         fail "real drift during a --record run is still caught" \
-            "rc=$RUN_RC refs=$(cat "$STATE/refs") csv=$(cat "$tree/repo/modules/app/agent-repl/test_time.csv") out=$RUN_OUT"
+            "rc=$RUN_RC refs=$(cat "$REFS" 2>/dev/null) csv=$(cat "$tree/repo/modules/app/agent-repl/test_time.csv") out=$RUN_OUT"
     fi
     rm -rf "$tree"
 }
@@ -244,7 +231,7 @@ test_integration_failed_suite_records_nothing() {
     if [ "$RUN_RC" -eq 1 ] \
         && ! grep -q '^testrun finish-record ' "$STUB_LOG" \
         && [ "$(cat "$tree/repo/modules/app/agent-repl/test_time.csv")" = "$CSVHeader" ] \
-        && [ -z "$(grep '^refs/tags/agent-repl-test-checkpoint-' "$STATE/refs" || true)" ]; then
+        && [ -z "$(grep '^refs/tags/agent-repl-test-checkpoint-' "$REFS" 2>/dev/null || true)" ]; then
         pass "a failed suite under the real net records nothing and leaves no checkpoint"
     else
         fail "a failed suite under the real net records nothing" \

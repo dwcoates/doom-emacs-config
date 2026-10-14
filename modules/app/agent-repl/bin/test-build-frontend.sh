@@ -37,7 +37,9 @@ test_split_init "${BASH_SOURCE[0]}" "$@"
 
 # A pre-commit hook exports its live index to children. The fake git ignores
 # them, but nothing here should carry a binding to the caller's repository.
-unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX
+# shellcheck source=/dev/null
+. "$(dirname "${BASH_SOURCE[0]}")/lib-fake-git-fixture.sh"
+clear_live_git_bindings
 
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_UNDER_TEST="$THIS_DIR/build-frontend.sh"
