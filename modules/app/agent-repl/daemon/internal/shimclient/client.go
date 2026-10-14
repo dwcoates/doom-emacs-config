@@ -1723,6 +1723,24 @@ func unary[Req any, Resp any](
 	return resp.Msg, nil
 }
 
+// callerAbandoned reports whether ctx, the caller's own context, ended before
+// the shim answered what (a call or a stream open), and records it at INFO
+// when it did.
+//
+// A WITHDRAWAL ITS OWN CALLER ORDERED IS NOT A FAILURE OF THE SHIM. When the
+// caller's context ended first (the watcher closing, the daemon tearing down
+// or handing over), the shim answered nothing; the request was withdrawn on
+// this side, an ordinary end the caller asked for. The caller still gets the
+// error and rules on it.
+func (c *client) callerAbandoned(ctx context.Context, operation, what string, fields dlog.Context) bool {
+	if ctx.Err() == nil {
+		return false
+	}
+	fields["cause"] = ctx.Err().Error()
+	c.log.Info(operation, what+" was abandoned: its caller's context ended before the shim answered", fields)
+	return true
+}
+
 // quietOpenKey marks a context whose stream open is part of a RETRY LADDER,
 // where a refusal is an ordinary branch rather than a warning. The error is
 // still returned; only the record's level changes.
@@ -1758,13 +1776,8 @@ func (c *client) refusedOpen(ctx context.Context, verb string, err error) error 
 		refused.Err = standDownOrdered(err)
 		return refused
 	}
-	// AN OPEN ITS OWN CALLER ABANDONED IS NOT A REFUSAL. When the caller's
-	// context ended first (the watcher closing, the daemon tearing down), the
-	// shim answered nothing; the open was withdrawn on this side, which is an
-	// ordinary end the caller asked for, not a failure of the shim.
-	if ctx.Err() != nil {
-		fields["cause"] = ctx.Err().Error()
-		c.log.Info(operation, "the stream open was abandoned: its caller's context ended before the shim answered", fields)
+	// AN OPEN ITS OWN CALLER ABANDONED IS NOT A REFUSAL (callerAbandoned).
+	if c.callerAbandoned(ctx, operation, "the stream open", fields) {
 		return refused
 	}
 	switch connect.CodeOf(err) {

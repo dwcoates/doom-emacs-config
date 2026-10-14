@@ -2013,3 +2013,50 @@ func TestKillSessionRecordsAHangUpThatFailed(t *testing.T) {
 		t.Fatalf("the failed hang-up's record = %+v, want the workspace and the cause", rec.Context)
 	}
 }
+
+// TestCallerAbandoned pins the one reading of a request its own caller
+// withdrew: an ended caller context is recorded at INFO with its cause, and a
+// live one records nothing and is not an abandonment.
+func TestCallerAbandoned(t *testing.T) {
+	tests := []struct {
+		name      string
+		cancelled bool
+		want      bool
+	}{
+		{name: "the caller's context ended", cancelled: true, want: true},
+		{name: "the caller's context is live", cancelled: false, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			log := dlog.NewTestLogger()
+			c := newClient(log, ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff, nil, nil)
+			ctx, cancel := context.WithCancel(context.Background())
+			if tt.cancelled {
+				cancel()
+			} else {
+				defer cancel()
+			}
+
+			// Act.
+			got := c.callerAbandoned(ctx, "daemon.shimclient.verb", "the request", dlog.Context{"workspace_id": "ws-1"})
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("callerAbandoned() = %v, want %v", got, tt.want)
+			}
+			if !tt.want {
+				if len(log.Records()) != 0 {
+					t.Fatalf("a live caller's request was recorded: %+v", log.Records())
+				}
+				return
+			}
+			if !hasRecordSaying(log, "info", "daemon.shimclient.verb", "the request was abandoned: its caller's context ended before the shim answered") {
+				t.Fatalf("no info record of the abandonment: %+v", log.Records())
+			}
+			if got := recordFields(t, log, "daemon.shimclient.verb")["cause"]; got != context.Canceled.Error() {
+				t.Fatalf("cause = %v, want %q", got, context.Canceled.Error())
+			}
+		})
+	}
+}
