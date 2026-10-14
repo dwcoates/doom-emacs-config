@@ -16,6 +16,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { webkit, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { readGlyphPicture } from "../glyph-pictures";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -26,21 +27,14 @@ interface Mark {
   image: string;
 }
 
-/** The shared picture of glyph NAME, as the rail inlines it. */
-async function picture(name: string): Promise<string> {
-  return readFile(path.join(here, `../../../images/glyphs/${name}.svg`), "utf8");
-}
-
 const DOT: Mark = { arm: "ready", glyph: "dot", image: "" };
-const GLYPHS: readonly Mark[] = await Promise.all(
-  [
-    { arm: "mergeQueued", glyph: "merge" },
-    { arm: "permission", glyph: "exclaim" },
-    { arm: "question", glyph: "ask" },
-    { arm: "coldGate", glyph: "snowflake" },
-    { arm: "thinking", glyph: "target" },
-  ].map(async (m) => ({ ...m, image: await picture(m.glyph) })),
-);
+const GLYPHS: readonly Mark[] = [
+  { arm: "mergeQueued", glyph: "merge" },
+  { arm: "permission", glyph: "exclaim" },
+  { arm: "question", glyph: "ask" },
+  { arm: "coldGate", glyph: "snowflake" },
+  { arm: "thinking", glyph: "target" },
+].map((m) => ({ ...m, image: readGlyphPicture(m.glyph) }));
 const NONE: Mark = { arm: "none", glyph: "none", image: "" };
 
 /** One rail row, as `drawStatusMark` and the row draw shape it. */
