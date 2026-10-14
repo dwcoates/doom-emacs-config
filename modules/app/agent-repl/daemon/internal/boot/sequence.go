@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"agent-repld/internal/bringup"
+	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
@@ -499,7 +500,7 @@ func (s *sequence) adopt(ctx context.Context, log dlog.Logger, workspaces []wsm.
 			// and there is nothing to remediate about a survivor nobody will
 			// serve. The boot still fails -- the caller decides what an
 			// abandoned boot means -- but it does not report a defect.
-			if errors.Is(sv.err, context.Canceled) || errors.Is(sv.err, context.DeadlineExceeded) {
+			if ctxend.Is(sv.err) {
 				log.Info("daemon.boot.adopt", "the adoption ended when the boot's context was cancelled", dlog.Context{
 					"workspace_id": string(sv.ws.ID),
 					"error":        sv.err.Error(),

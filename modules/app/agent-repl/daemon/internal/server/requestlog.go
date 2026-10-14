@@ -11,6 +11,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
+	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/workspace"
@@ -78,7 +79,7 @@ func (s *server) beginRequest(
 					With(dlog.Context{dlog.KeyWorkspaceID: workspaceIDText, dlog.KeyWorkspaceDir: record.Dir})
 			case errors.Is(err, wsm.ErrNotFound):
 				log = log.With(dlog.Context{"workspace_id": workspaceIDText, "workspace_known": false})
-			case endedOnCancel(err):
+			case ctxend.Is(err):
 				// The caller went away before its workspace was read: the
 				// request is over, and that is not a fault of the daemon's.
 				s.log.Info("daemon.server.request_boundary", "the request's workspace was not read; the request's context ended",
@@ -144,7 +145,7 @@ func (b requestBoundary) completionContext(err error) dlog.Context {
 	outcome := "success"
 	if err != nil {
 		outcome = "error"
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		if ctxend.Is(err) {
 			outcome = "cancelled"
 		}
 	}

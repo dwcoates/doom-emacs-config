@@ -2,7 +2,6 @@ package workspace
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -10,6 +9,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
@@ -149,7 +149,7 @@ func (v *verbs) readRegistry(ctx context.Context, log dlog.Logger, operation str
 		// flight, and a roster nobody is left to receive is no loss. Every
 		// other refusal keeps its ERROR. The precedent is the state client's
 		// own read, which has always answered a cancellation at info.
-		if canceled(err) {
+		if ctxend.Is(err) {
 			log.Info(operation, "the roster read ended when its context was cancelled", dlog.Context{"cause": err.Error()})
 			return sidebar.Registry{}, false
 		}
@@ -224,11 +224,4 @@ func coldGateRowID(ws ids.WorkspaceID, vendorSessionID string) *frontendv1.FeedI
 		Feed: rootFeed(),
 		Row:  feedid.RowKey{Kind: feedid.KindColdGate, ID: vendorSessionID},
 	})
-}
-
-// canceled reports whether err is a context ending -- this daemon's own exit,
-// or a caller that left -- rather than something that broke. Work abandoned
-// that way is stated at info; everything else keeps its error.
-func canceled(err error) bool {
-	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }

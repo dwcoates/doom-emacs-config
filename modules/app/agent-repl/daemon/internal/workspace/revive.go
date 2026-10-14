@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 
+	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/shimclient"
@@ -265,7 +266,7 @@ func startEndedByDaemon(err error) (string, bool) {
 		return "met a network this machine cannot reach; its network fault stands", true
 	case errors.As(err, &label) && label.vendor:
 		return "met a vendor that would not start; its vendor fault stands", true
-	case canceled(err):
+	case ctxend.Is(err):
 		return "ended when its context was cancelled", true
 	case errors.Is(err, shimclient.ErrStandingDown):
 		return "stopped because this daemon is standing down", true
