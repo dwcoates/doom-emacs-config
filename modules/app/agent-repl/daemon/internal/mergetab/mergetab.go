@@ -15,7 +15,7 @@ import (
 // whose conflict a recorded resolution settled, holds no agent stream.
 func Agentic(tab *frontendv1.FeedMergeTab) bool {
 	switch arm := tab.GetKind().(type) {
-	case *frontendv1.FeedMergeTab_Pick,
+	case *frontendv1.FeedMergeTab_Resolving,
 		*frontendv1.FeedMergeTab_PrePrompt,
 		*frontendv1.FeedMergeTab_TestsRunFixing,
 		*frontendv1.FeedMergeTab_PostPrompt:

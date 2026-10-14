@@ -112,7 +112,7 @@ func TestSetWorkspaceParentToTopLevelUnnestsTellsTheSessionAndMergesToTheMainChe
 
 	// Assert: the child's own-branch merge now lands in the main checkout.
 	harness.CommitWork(t, f.child.GetDir())
-	if _, err := f.d.Client().MergeWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.child, Source: harness.OwnBranch(false)})); err != nil {
+	if _, err := f.d.Client().MergeWorkspace(f.d.Ctx(), connect.NewRequest(harness.MergeRequest(f.child, harness.OneShot()))); err != nil {
 		t.Fatalf("MergeWorkspace(child) = error %v, want the merge enqueued", err)
 	}
 	awaitRoster(t, f.d, f.roster, "the child's merge landed", func(r *frontendv1.WorkspaceRoster) bool {

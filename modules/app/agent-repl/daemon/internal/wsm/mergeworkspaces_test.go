@@ -132,13 +132,13 @@ func TestRequestMergeRoundTripsADetachedRequest(t *testing.T) {
 	}
 }
 
-func TestADetachedSourceMustBeAnOwnBranchThatNeverKeepsTheRequesterOpen(t *testing.T) {
+func TestADetachedSourceMergesANamedBranchAndNeverKeepsTheRequesterOpen(t *testing.T) {
 	tests := []struct {
 		name   string
 		source MergeSource
 	}{
 		{name: "keep open", source: MergeSource{Kind: MergeSourceOwnBranch, KeepOpen: true, Detach: "d", DetachName: "n"}},
-		{name: "a branch source", source: MergeSource{Kind: MergeSourceBranch, Branch: "b", Detach: "d", DetachName: "n"}},
+		{name: "another workspace", source: MergeSource{Kind: MergeSourceWorkspace, Workspace: "w", Detach: "d", DetachName: "n"}},
 		{name: "merged upstream", source: MergeSource{Kind: MergeSourceMergedUpstream, Detach: "d", DetachName: "n"}},
 	}
 	for _, tt := range tests {
@@ -150,6 +150,72 @@ func TestADetachedSourceMustBeAnOwnBranchThatNeverKeepsTheRequesterOpen(t *testi
 				t.Fatalf("validate = %v, want a detached-merge refusal", err)
 			}
 		})
+	}
+}
+
+func TestADetachedSourceOfANamedBranchIsValid(t *testing.T) {
+	tests := []struct {
+		name   string
+		source MergeSource
+	}{
+		{name: "a named branch", source: MergeSource{Kind: MergeSourceBranch, Branch: "b", Detach: "d", DetachName: "n"}},
+		{name: "a named branch with an instruction", source: MergeSource{Kind: MergeSourceBranch, Branch: "b", Detach: "d", DetachName: "n", Pick: "rebase it"}},
+		{name: "a named branch with landing effects", source: MergeSource{Kind: MergeSourceBranch, Branch: "b", Detach: "d", DetachName: "n", CloseOnLanding: "w", CleanupWorktree: true, CleanupDir: "/x"}},
+		{name: "a request an earlier layout recorded on the requester's own branch", source: MergeSource{Kind: MergeSourceOwnBranch, Branch: "b", Detach: "d", DetachName: "n"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange in the table. Act.
+			err := tt.source.validate()
+			// Assert
+			if err != nil {
+				t.Fatalf("validate = %v, want nil", err)
+			}
+		})
+	}
+}
+
+func TestLandingEffectsRideADetachedRequestAlone(t *testing.T) {
+	tests := []struct {
+		name   string
+		source MergeSource
+		want   string
+	}{
+		{name: "closing another workspace in place", source: MergeSource{Kind: MergeSourceOwnBranch, CloseOnLanding: "w"}, want: "async merge's ask"},
+		{name: "cleaning up in place", source: MergeSource{Kind: MergeSourceOwnBranch, CleanupWorktree: true}, want: "async merge's ask"},
+		{name: "a cleanup directory without cleanup", source: MergeSource{Kind: MergeSourceBranch, Branch: "b", Detach: "d", DetachName: "n", CleanupDir: "/x"}, want: "only for a request that cleans up"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange in the table. Act.
+			err := tt.source.validate()
+			// Assert
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("validate = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestADetachedRequestKeepsItsLandingEffectsInTheQueue(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	requester := testWorkspace(t, s)
+	repo := RepoKey(t.TempDir())
+	source := MergeSource{Kind: MergeSourceBranch, Branch: "fix", Detach: "d", DetachName: "n", Pick: "rebase it",
+		CloseOnLanding: "child", CleanupWorktree: true, CleanupDir: "/wt/fix"}
+
+	// Act
+	err := s.RequestMerge(context.Background(), repo, requester.ID, source, time.Now())
+	queue, readErr := s.MergeQueue(context.Background(), repo)
+
+	// Assert
+	if err != nil || readErr != nil || len(queue) != 1 {
+		t.Fatalf("RequestMerge = %v, MergeQueue = %+v, %v; want one request", err, queue, readErr)
+	}
+	got := queue[0].Source
+	if got.CloseOnLanding != "child" || !got.CleanupWorktree || got.CleanupDir != "/wt/fix" || got.Pick != "rebase it" {
+		t.Fatalf("Source = %+v, want the landing effects and the instruction kept", got)
 	}
 }
 

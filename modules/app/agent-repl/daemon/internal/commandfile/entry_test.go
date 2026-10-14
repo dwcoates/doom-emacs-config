@@ -16,8 +16,8 @@ func TestValidateAcceptsEveryAcceptedShape(t *testing.T) {
 		{name: "create with only a prompt", entry: Entry{Type: TypeCreate, GitRoot: "/repo", Prompt: "p"}},
 		{name: "prompt", entry: Entry{Type: TypePrompt, Workspace: "w1", Prompt: "p"}},
 		{name: "send", entry: Entry{Type: TypeSend, Dir: "/tree", Prompt: "p"}},
-		{name: "merge", entry: Entry{Type: TypeMerge, Workspace: "w1"}},
-		{name: "merge by the skill's project_dir", entry: Entry{Type: TypeMerge, Workspace: "a-display-name", ProjectDir: "/tree"}},
+		{name: "merge", entry: Entry{Type: TypeMerge, Workspace: "w1", OneShot: true}},
+		{name: "merge by the skill's project_dir", entry: Entry{Type: TypeMerge, Workspace: "a-display-name", ProjectDir: "/tree", OneShot: true}},
 		{name: "close by project_dir alone", entry: Entry{Type: TypeClose, ProjectDir: "/tree"}},
 		{name: "close", entry: Entry{Type: TypeClose, Dir: "/tree"}},
 		{name: "forget", entry: Entry{Type: TypeForget, Workspace: "w1"}},
@@ -112,7 +112,7 @@ func TestValidateDistinguishesAbsentFromFalseOnDone(t *testing.T) {
 
 func TestParseDecodesTheWholeArray(t *testing.T) {
 	// Arrange.
-	body := `[{"type":"merge","workspace":"w1"},{"type":"close","workspace":"w1"}]`
+	body := `[{"type":"merge","workspace":"w1","one_shot":true},{"type":"close","workspace":"w1"}]`
 
 	// Act.
 	entries, err := parse([]byte(body))
@@ -151,7 +151,7 @@ func TestParseRefusesAHalfWrittenDocument(t *testing.T) {
 func TestParseRefusesTrailingBytesAfterTheArray(t *testing.T) {
 	// Arrange.
 	// Act.
-	_, err := parse([]byte(`[{"type":"merge","workspace":"w1"}] trailing`))
+	_, err := parse([]byte(`[{"type":"merge","workspace":"w1","one_shot":true}] trailing`))
 
 	// Assert.
 	if err == nil {
@@ -162,7 +162,7 @@ func TestParseRefusesTrailingBytesAfterTheArray(t *testing.T) {
 func TestParseRefusesTheWholeArrayForOneInvalidEntry(t *testing.T) {
 	// Arrange: the array is ONE request, and half of it is not a smaller
 	// request.
-	body := `[{"type":"merge","workspace":"w1"},{"type":"merge"}]`
+	body := `[{"type":"merge","workspace":"w1","one_shot":true},{"type":"merge"}]`
 
 	// Act.
 	_, err := parse([]byte(body))
@@ -205,8 +205,8 @@ func TestWithAbsolutePaths(t *testing.T) {
 		},
 		{
 			name:  "an entry with no directory is unchanged",
-			entry: Entry{Type: TypeMerge, Workspace: "w1"},
-			want:  Entry{Type: TypeMerge, Workspace: "w1"},
+			entry: Entry{Type: TypeMerge, Workspace: "w1", OneShot: true},
+			want:  Entry{Type: TypeMerge, Workspace: "w1", OneShot: true},
 		},
 		{
 			name:    "a relative git_root is refused, naming the field",
@@ -248,7 +248,7 @@ func TestWithAbsolutePaths(t *testing.T) {
 
 func TestDecodeRefusesTheWholeArrayForOneUnresolvableDirectory(t *testing.T) {
 	// Arrange: a valid first entry and a second whose project_dir is relative.
-	body := `[{"type":"merge","project_dir":"/tree/w1"},{"type":"merge","project_dir":"tree/w2"}]`
+	body := `[{"type":"merge","project_dir":"/tree/w1","one_shot":true},{"type":"merge","project_dir":"tree/w2","one_shot":true}]`
 
 	// Act.
 	entries, err := decode([]byte(body), "/Users/me")
@@ -413,20 +413,17 @@ func TestWithAbsolutePathsRefusesARelativeSourcePath(t *testing.T) {
 	}
 }
 
-func TestAMergeEntryNamingOneSourceValidates(t *testing.T) {
+func TestAMergeEntryInOneModeValidates(t *testing.T) {
 	tests := []struct {
 		name  string
 		entry Entry
 	}{
-		{name: "own branch", entry: Entry{Type: TypeMerge, Workspace: "w1"}},
-		{name: "own branch kept open", entry: Entry{Type: TypeMerge, Workspace: "w1", KeepOpen: true}},
-		{name: "own branch async", entry: Entry{Type: TypeMerge, Workspace: "w1", Detached: true, DetachedName: "reconnect-fix"}},
-		{name: "own branch async pick", entry: Entry{Type: TypeMerge, Workspace: "w1", Detached: true, DetachedName: "reconnect-fix", Pick: "the fix"}},
-		{name: "own branch async compact after", entry: Entry{Type: TypeMerge, Workspace: "w1", Detached: true, DetachedName: "reconnect-fix", CompactAfter: true}},
-		{name: "own branch one-shot", entry: Entry{Type: TypeMerge, Workspace: "w1", OneShot: true}},
-		{name: "a branch", entry: Entry{Type: TypeMerge, Workspace: "w1", Branch: "agent-1/fix"}},
-		{name: "another workspace", entry: Entry{Type: TypeMerge, Workspace: "w1", SourceDir: "/wt/two"}},
-		{name: "merged upstream", entry: Entry{Type: TypeMerge, Workspace: "w1", PRWasMerged: true}},
+		{name: "a one-shot", entry: Entry{Type: TypeMerge, Workspace: "w1", OneShot: true}},
+		{name: "a one-shot already merged upstream", entry: Entry{Type: TypeMerge, Workspace: "w1", OneShot: true, PRWasMerged: true}},
+		{name: "an async merge", entry: Entry{Type: TypeMerge, Workspace: "w1", AsyncName: "fix", Branch: "agent-1/fix"}},
+		{name: "an async merge with an instruction", entry: Entry{Type: TypeMerge, Workspace: "w1", AsyncName: "fix", Branch: "agent-1/fix", Instruction: "rebase it"}},
+		{name: "an async merge closing a workspace and cleaning up", entry: Entry{Type: TypeMerge, Workspace: "w1", AsyncName: "fix", Branch: "agent-1/fix", CloseDir: "/wt/two", CleanupWorktree: true}},
+		{name: "an async merge compacting after", entry: Entry{Type: TypeMerge, Workspace: "w1", AsyncName: "fix", Branch: "agent-1/fix", CompactAfter: true}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -441,49 +438,23 @@ func TestAMergeEntryNamingOneSourceValidates(t *testing.T) {
 	}
 }
 
-func TestAMergeEntryNamingTwoSourcesIsRefused(t *testing.T) {
-	tests := []struct {
-		name  string
-		entry Entry
-	}{
-		{name: "a branch and a workspace", entry: Entry{Type: TypeMerge, Workspace: "w1", Branch: "b", SourceDir: "/wt/two"}},
-		{name: "a branch already merged upstream", entry: Entry{Type: TypeMerge, Workspace: "w1", Branch: "b", PRWasMerged: true}},
-		{name: "keep_open on a branch", entry: Entry{Type: TypeMerge, Workspace: "w1", Branch: "b", KeepOpen: true}},
-		{name: "keep_open on merged upstream", entry: Entry{Type: TypeMerge, Workspace: "w1", PRWasMerged: true, KeepOpen: true}},
-		{name: "detached on a branch", entry: Entry{Type: TypeMerge, Workspace: "w1", Branch: "b", Detached: true, DetachedName: "n"}},
-		{name: "detached and kept open", entry: Entry{Type: TypeMerge, Workspace: "w1", Detached: true, DetachedName: "n", KeepOpen: true}},
-		{name: "detached with no name", entry: Entry{Type: TypeMerge, Workspace: "w1", Detached: true}},
-		{name: "a name with no detach", entry: Entry{Type: TypeMerge, Workspace: "w1", DetachedName: "n"}},
-		{name: "a pick with no detach", entry: Entry{Type: TypeMerge, Workspace: "w1", Pick: "the fix"}},
-		{name: "a blank pick", entry: Entry{Type: TypeMerge, Workspace: "w1", Detached: true, DetachedName: "n", Pick: "   "}},
-		{name: "compact_after in place", entry: Entry{Type: TypeMerge, Workspace: "w1", CompactAfter: true}},
-		{name: "compact_after in place kept open", entry: Entry{Type: TypeMerge, Workspace: "w1", KeepOpen: true, CompactAfter: true}},
-		{name: "compact_after on a branch", entry: Entry{Type: TypeMerge, Workspace: "w1", Branch: "b", CompactAfter: true}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Act.
-			err := tt.entry.Validate()
-
-			// Assert.
-			if err == nil {
-				t.Fatalf("Validate() = nil, want the contradiction refused")
-			}
-		})
-	}
-}
-
-func TestAOneShotMergeEntryThatContradictsItselfIsRefused(t *testing.T) {
+func TestAMergeEntryThatIsNotExactlyOneModeIsRefused(t *testing.T) {
 	tests := []struct {
 		name    string
 		entry   Entry
 		wantErr string
 	}{
-		{name: "on a branch", entry: Entry{Type: TypeMerge, Workspace: "w1", OneShot: true, Branch: "b"}, wantErr: "one_shot merges the requester's OWN branch"},
-		{name: "on another workspace", entry: Entry{Type: TypeMerge, Workspace: "w1", OneShot: true, SourceDir: "/wt/two"}, wantErr: "one_shot merges the requester's OWN branch"},
-		{name: "on merged upstream", entry: Entry{Type: TypeMerge, Workspace: "w1", OneShot: true, PRWasMerged: true}, wantErr: "one_shot merges the requester's OWN branch"},
-		{name: "kept open", entry: Entry{Type: TypeMerge, Workspace: "w1", OneShot: true, KeepOpen: true}, wantErr: "cannot keep_open"},
-		{name: "detached", entry: Entry{Type: TypeMerge, Workspace: "w1", OneShot: true, Detached: true}, wantErr: "cannot run detached"},
+		{name: "no mode", entry: Entry{Type: TypeMerge, Workspace: "w1"}, wantErr: "is a one_shot"},
+		{name: "both modes", entry: Entry{Type: TypeMerge, Workspace: "w1", OneShot: true, AsyncName: "fix", Branch: "b"}, wantErr: "never both"},
+		{name: "a blank async name", entry: Entry{Type: TypeMerge, Workspace: "w1", AsyncName: "  ", Branch: "b"}, wantErr: "names its merge workspace"},
+		{name: "an async merge with no branch", entry: Entry{Type: TypeMerge, Workspace: "w1", AsyncName: "fix"}, wantErr: "names the branch it lands"},
+		{name: "an async merge already merged upstream", entry: Entry{Type: TypeMerge, Workspace: "w1", AsyncName: "fix", Branch: "b", PRWasMerged: true}, wantErr: "pr_was_merged belongs to a one_shot"},
+		{name: "a one-shot naming a branch", entry: Entry{Type: TypeMerge, Workspace: "w1", OneShot: true, Branch: "b"}, wantErr: "belong to an async merge"},
+		{name: "a one-shot with an instruction", entry: Entry{Type: TypeMerge, Workspace: "w1", OneShot: true, Instruction: "x"}, wantErr: "belong to an async merge"},
+		{name: "a one-shot closing another workspace", entry: Entry{Type: TypeMerge, Workspace: "w1", OneShot: true, CloseDir: "/wt/two"}, wantErr: "belong to an async merge"},
+		{name: "a one-shot cleaning up", entry: Entry{Type: TypeMerge, Workspace: "w1", OneShot: true, CleanupWorktree: true}, wantErr: "belong to an async merge"},
+		{name: "a one-shot compacting after", entry: Entry{Type: TypeMerge, Workspace: "w1", OneShot: true, CompactAfter: true}, wantErr: "belong to an async merge"},
+		{name: "a blank instruction", entry: Entry{Type: TypeMerge, Workspace: "w1", AsyncName: "fix", Branch: "b", Instruction: "   "}, wantErr: "says how to prepare the branch"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -539,7 +510,7 @@ func TestFrontOnAnotherEntryIsRefused(t *testing.T) {
 
 func TestParseReadsTheSkillsPRMergedEntry(t *testing.T) {
 	// Act.
-	entries, err := parse([]byte(`[{"type":"merge","project_dir":"/wt/one","workspace":"one","pr_was_merged":true}]`))
+	entries, err := parse([]byte(`[{"type":"merge","project_dir":"/wt/one","workspace":"one","one_shot":true,"pr_was_merged":true}]`))
 
 	// Assert.
 	if err != nil || len(entries) != 1 || !entries[0].PRWasMerged {
@@ -547,15 +518,15 @@ func TestParseReadsTheSkillsPRMergedEntry(t *testing.T) {
 	}
 }
 
-func TestWithAbsolutePathsExpandsTheSourceDir(t *testing.T) {
+func TestWithAbsolutePathsExpandsTheCloseDir(t *testing.T) {
 	// Arrange.
-	entry := Entry{Type: TypeMerge, Workspace: "w1", SourceDir: "~/wt/two"}
+	entry := Entry{Type: TypeMerge, Workspace: "w1", AsyncName: "fix", Branch: "b", CloseDir: "~/wt/two"}
 
 	// Act.
 	got, err := entry.withAbsolutePaths("/home/u")
 
 	// Assert.
-	if err != nil || got.SourceDir != "/home/u/wt/two" {
+	if err != nil || got.CloseDir != "/home/u/wt/two" {
 		t.Fatalf("withAbsolutePaths = (%+v, %v), want the source dir under home", got, err)
 	}
 }

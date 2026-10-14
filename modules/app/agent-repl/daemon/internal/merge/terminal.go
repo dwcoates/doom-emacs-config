@@ -124,16 +124,18 @@ func (o *orchestrator) ended(ctx context.Context, ws ids.WorkspaceID, out Detach
 	o.handBack(ctx, ws, out)
 }
 
-// handBack reports how a merge ended to the requester of an ASYNC merge, the
-// workspace whose feed carries the bubble. A sync merge has no requester to
-// tell and sends nothing. A merge that FAILED or was ABANDONED also reveals the
-// merge workspace: it needs the user now.
+// handBack reports how a merge ended to the workspace whose feed carries the
+// bubble: an ASYNC merge's requester whether it landed or not, and a SYNC
+// merge's own workspace when it did not land (one that landed closed it). A
+// merge that FAILED or was ABANDONED also reveals an async merge's merge
+// workspace: it needs the user now.
 //
 // THE HANDBACK'S OWN FAILURE IS RECORDED BY ITS OWNER (DetachedMerges.HandBack);
 // the merge's terminal stands either way, so it is only noted here.
 func (o *orchestrator) handBack(ctx context.Context, ws ids.WorkspaceID, out DetachedOutcome) {
 	requester, async := o.requesterOf(ws)
 	if !async {
+		o.handBackInPlace(ctx, ws, out)
 		return
 	}
 	// AN END SOMEBODY ASKED FOR IS NOT A FAILURE: the bubble and the roster
@@ -159,6 +161,28 @@ func (o *orchestrator) handBack(ctx context.Context, ws ids.WorkspaceID, out Det
 	if err := o.deps.Detached.HandBack(ctx, requester, record, out); err != nil {
 		o.log(ctx, ws).Debug("daemon.merge.detached", "the handback of an async merge failed; its owner recorded why", dlog.Context{
 			"workspace": string(ws), "requester": string(requester), "outcome": out.Kind.String(), "error": err.Error()})
+	}
+}
+
+// handBackInPlace reports a SYNC merge that did not land to its own
+// workspace's conversation, which stays open after it: a failure, or an
+// abandonment nobody asked for. A landing closed the workspace, and an end
+// somebody asked for failed nothing, so neither is reported.
+func (o *orchestrator) handBackInPlace(ctx context.Context, ws ids.WorkspaceID, out DetachedOutcome) {
+	if out.Kind == DetachedLanded || out.Requested {
+		return
+	}
+	record, err := o.deps.DB.Workspace(ctx, ws)
+	if err != nil {
+		o.log(ctx, ws).Error("daemon.merge.handback", "could not read the workspace whose merge ended; it is not told", dlog.Context{
+			"workspace": string(ws), "outcome": out.Kind.String(), "error": err.Error()})
+		return
+	}
+	out.InPlace = true
+	out.Branch = record.Branch
+	if err := o.deps.Detached.HandBack(ctx, ws, record, out); err != nil {
+		o.log(ctx, ws).Debug("daemon.merge.handback", "the handback of an in-place merge failed; its owner recorded why", dlog.Context{
+			"workspace": string(ws), "outcome": out.Kind.String(), "error": err.Error()})
 	}
 }
 
@@ -189,16 +213,19 @@ func landedCount(out outcome) *uint32 {
 // closes nothing -- a requester kept open, a branch that is no workspace --
 // stamps nothing.
 func (r *run) stampClosed(ctx context.Context, log dlog.Logger, op string, landed *uint32) {
-	closes := r.subject.closes
-	if closes == "" {
+	closings := r.closings(ctx, log)
+	if len(closings) == 0 {
 		return
 	}
-	if err := r.o.deps.DB.SetMergedAt(ctx, closes, r.o.deps.Now(), landed); err != nil {
-		log.Error(op, "could not stamp the merge's landing", dlog.Context{"workspace": string(closes), "error": err.Error()})
+	for _, closes := range closings {
+		if err := r.o.deps.DB.SetMergedAt(ctx, closes, r.o.deps.Now(), landed); err != nil {
+			log.Error(op, "could not stamp the merge's landing", dlog.Context{"workspace": string(closes), "error": err.Error()})
+		}
+		if err := r.o.deps.DB.SetClosed(ctx, closes, true); err != nil {
+			log.Error(op, "could not close the merged workspace", dlog.Context{"workspace": string(closes), "error": err.Error()})
+		}
 	}
-	if err := r.o.deps.DB.SetClosed(ctx, closes, true); err != nil {
-		log.Error(op, "could not close the merged workspace", dlog.Context{"workspace": string(closes), "error": err.Error()})
-	}
+	closes := closings[0]
 	// THE ROSTER'S DURABLE HALF MOVED: merged_at and closed are what put the
 	// row under `recently_merged`, and nothing else republishes them.
 	if r.o.deps.PublishRegistry != nil {
@@ -207,6 +234,43 @@ func (r *run) stampClosed(ctx context.Context, log dlog.Logger, op string, lande
 				dlog.Context{"workspace": string(closes), "error": err.Error()})
 		}
 	}
+}
+
+// closings answers the workspaces a landing closes: the subject's own, then
+// ANOTHER workspace an async merge's one-shot named, while that one is still
+// open. A one-shot workspace that closed meanwhile is passed over (it is
+// already closed), and one whose record cannot be read is kept open, loudly.
+func (r *run) closings(ctx context.Context, log dlog.Logger) []ids.WorkspaceID {
+	if r.closed != nil {
+		return *r.closed
+	}
+	out := r.readClosings(ctx, log)
+	r.closed = &out
+	return out
+}
+
+// readClosings is closings' one read of the workspaces a landing closes.
+func (r *run) readClosings(ctx context.Context, log dlog.Logger) []ids.WorkspaceID {
+	var out []ids.WorkspaceID
+	if r.subject.closes != "" {
+		out = append(out, r.subject.closes)
+	}
+	also := r.subject.closesAlso
+	if also == "" || also == r.subject.closes {
+		return out
+	}
+	record, err := r.o.deps.DB.Workspace(ctx, also)
+	switch {
+	case err != nil:
+		log.Error("daemon.merge.teardown", "could not read the workspace an async merge's one-shot closes; it is kept open", dlog.Context{
+			"workspace": string(r.ws), "one_shot": string(also), "error": err.Error()})
+		return out
+	case record.Closed:
+		log.Info("daemon.merge.teardown", "the workspace an async merge's one-shot closes is already closed", dlog.Context{
+			"workspace": string(r.ws), "one_shot": string(also)})
+		return out
+	}
+	return append(out, also)
 }
 
 // abort ends a run that could not continue. It is the FAILED end reached by an
@@ -337,8 +401,11 @@ func (r *run) teardown(ctx context.Context, out outcome, terminal func()) {
 	//
 	// THE LOG SURFACES LET GO OF THE DIRECTORY INSIDE RemoveWorktree
 	// (Surfaces.DetachDir), so a late record cannot recreate it.
-	if out.failed == "" && out.abandoned == "" && out.landed != "" && r.subject.closes != "" {
-		r.closeLanded(ctx, log)
+	if out.failed == "" && out.abandoned == "" && out.landed != "" {
+		for _, closes := range r.closings(ctx, log) {
+			r.closeLanded(ctx, log, closes)
+		}
+		r.cleanupLanded(ctx, log)
 	}
 	// A WORKTREE THE MERGE MADE FOR A BRANCH goes with the merge -- except
 	// when its conflict resolution gave up, which leaves the rebase in
@@ -397,9 +464,8 @@ func (r *run) keepOpenForHeldPrompts(ctx context.Context, log dlog.Logger) {
 // closeLanded ends the landed-and-closed workspace's session and removes its
 // worktree: the requester for its own branch (unless kept open) or a branch
 // already merged upstream, the other workspace for another workspace's branch.
-func (r *run) closeLanded(ctx context.Context, log dlog.Logger) {
+func (r *run) closeLanded(ctx context.Context, log dlog.Logger, closes ids.WorkspaceID) {
 	const op = "daemon.merge.teardown"
-	closes := r.subject.closes
 	job, err := r.o.layoutFor(ctx, closes)
 	if err != nil {
 		log.Error(op, "could not read the closed workspace's worktree to remove it", dlog.Context{
@@ -422,6 +488,33 @@ func (r *run) closeLanded(ctx context.Context, log dlog.Logger) {
 	// next reads the removal off this record (owner SOP, 2026-10-06).
 	log.Info(op, "stopped the merged workspace's session and removed its worktree", dlog.Context{
 		"workspace": string(closes), "worktree": dir, "force": true})
+}
+
+// cleanupLanded removes the worktree a landed async merge asked to clean up
+// (wsm.MergeOrigin.CleanupDir) through git's clean door, never forced: a
+// worktree that holds uncommitted changes is kept, and says so. The branch is
+// never deleted.
+func (r *run) cleanupLanded(ctx context.Context, log dlog.Logger) {
+	const op = "daemon.merge.teardown"
+	dir := r.subject.cleanupDir
+	if dir == "" {
+		return
+	}
+	fields := dlog.Context{"workspace": string(r.ws), "worktree": dir}
+	clean, err := r.git.IsClean(ctx, dir)
+	if err != nil {
+		log.Error(op, "could not read whether the worktree to clean up is clean; it is kept", withField(fields, "error", err.Error()))
+		return
+	}
+	if !clean {
+		log.Info(op, "kept the worktree an async merge asked to clean up: it holds uncommitted changes", fields)
+		return
+	}
+	if err := r.git.RemoveCleanWorktree(ctx, string(r.repo), dir); err != nil {
+		log.Error(op, "could not remove the worktree an async merge asked to clean up", withField(fields, "error", err.Error()))
+		return
+	}
+	log.Info(op, "removed the worktree an async merge asked to clean up", fields)
 }
 
 // TerminalDrainBound is how long the orderly exit gives the merge runs that
