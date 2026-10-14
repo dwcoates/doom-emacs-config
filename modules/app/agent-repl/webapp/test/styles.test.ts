@@ -3190,9 +3190,11 @@ describe("the one bubble rule set", () => {
             // suite pins it.
             !(prop === "--bubble-pad-y" && rule.selectors.every((sel) => TIGHTER_PAD_SELECTORS.includes(sel))) &&
             // The dimmed prose of a thinking or interim bubble (owner request,
-            // 2026-10-08) is the one text color a variant sets; its own suite
-            // pins it.
+            // 2026-10-08) is the one text color a variant sets, and the
+            // thinking prose's italic (owner request, 2026-10-14) the one font
+            // style; their own suite pins both.
             !(prop === "color" && rule.selectors.every((sel) => DIMMED_TEXT_SELECTORS.includes(sel))) &&
+            !(prop === "font-style" && rule.selectors.length === 1 && rule.selectors[0] === THINKING_SELECTOR) &&
             // NO BUBBLE AT ALL (owner ruling, 2026-10-08): the same two
             // selectors also turn off the base rule's box-shadow, the one
             // remaining visible highlight once their fill is already the
@@ -3993,8 +3995,10 @@ const PAD_LADDER: readonly { selectors: readonly string[]; value: string }[] = [
 ];
 /** Every variant selector the ladder pads. */
 const TIGHTER_PAD_SELECTORS: readonly string[] = PAD_LADDER.flatMap((rung) => rung.selectors);
-/** The two bubble kinds whose prose is the dimmed `--interim-text` (half way from the command grey to the body text). */
-const DIMMED_TEXT_SELECTORS: readonly string[] = ['.bubble[data-variant="thinking"]', ".bubble.interim-response"];
+/** The thinking bubble's own selector. */
+const THINKING_SELECTOR = variantSelector("thinking");
+/** The two bubble kinds whose prose is dimmed: the interim's `--interim-text`, the thinking bubble's greyer `--thinking-text`. */
+const DIMMED_TEXT_SELECTORS: readonly string[] = [THINKING_SELECTOR, ".bubble.interim-response"];
 
 describe("the page-colored fill", () => {
   /** The `--bubble-bg` the cascade hands a bubble with ATTRS and HOOKS. */
@@ -4319,28 +4323,82 @@ describe("the repository header's add control", () => {
 });
 
 /**
- * THE DIMMED PROSE (owner request, 2026-10-10): a thinking bubble's and an
- * interim response's text sits half way between the tool card's header grey
- * (the Bash command's `--tool-command`) and the body text (`--fg`) in either
- * theme, by mixing those two tokens.
+ * THE DIMMED PROSE (owner request, 2026-10-10): an interim response's text
+ * sits half way between the tool card's header grey (the Bash command's
+ * `--tool-command`) and the body text (`--fg`) in either theme, by mixing those
+ * two tokens. A thinking bubble's text (owner request, 2026-10-14) mixes the
+ * same two tokens a touch nearer the grey, and is italic.
  */
 describe("the dimmed prose of a thinking or interim bubble", () => {
-  /** The `color` the cascade hands a response bubble with HOOKS and VARIANT. */
-  function textOf(variant: string, hooks: readonly string[]): string {
+  /** The PROPERTY the cascade hands a settled response bubble with HOOKS and VARIANT. */
+  function cascadedOnResponse(variant: string, hooks: readonly string[], property: string): string {
     const el = document.createElement("div");
     el.className = ["bubble", "md", ...hooks].join(" ");
     el.setAttribute("data-role", "response");
     el.setAttribute("data-variant", variant);
     el.setAttribute("data-state", "success");
-    return inDocument(el, () => cascadedValue(el, "color"));
+    return inDocument(el, () => cascadedValue(el, property));
   }
 
-  it("dims a thinking bubble's prose", () => {
+  /** The `color` the cascade hands a response bubble with HOOKS and VARIANT. */
+  const textOf = (variant: string, hooks: readonly string[]): string => cascadedOnResponse(variant, hooks, "color");
+
+  /** The `font-style` the cascade hands a response bubble with HOOKS and VARIANT. */
+  const fontStyleOf = (variant: string, hooks: readonly string[]): string => cascadedOnResponse(variant, hooks, "font-style");
+
+  /** The value `:root` declares for the custom property NAME. */
+  const rootToken = (name: string): string | undefined =>
+    new RegExp(`${name}:\\s*([^;]+);`).exec(declarationsOf(":root") ?? "")?.[1]?.trim();
+
+  it("dims a thinking bubble's prose to the thinking grey", () => {
     // Arrange / Act
     const got = textOf("thinking", ["assistant", "thinking-bubble"]);
 
     // Assert
-    expect(got).toBe("var(--interim-text)");
+    expect(got).toBe("var(--thinking-text)");
+  });
+
+  it("sets a thinking bubble's prose in italic", () => {
+    // Arrange / Act
+    const got = fontStyleOf("thinking", ["assistant", "thinking-bubble"]);
+
+    // Assert
+    expect(got).toBe("italic");
+  });
+
+  it("leaves an interim response's prose upright", () => {
+    // Arrange / Act
+    const got = fontStyleOf("response", ["assistant", "interim-response"]);
+
+    // Assert
+    expect(got).not.toBe("italic");
+  });
+
+  it("leaves the turn's answer upright", () => {
+    // Arrange / Act
+    const got = fontStyleOf("response", ["assistant", "final-response"]);
+
+    // Assert
+    expect(got).not.toBe("italic");
+  });
+
+  it("defines the thinking grey as the same two tokens leaning further to the command grey", () => {
+    // Arrange / Act
+    const got = rootToken("--thinking-text");
+
+    // Assert
+    expect(got).toBe("color-mix(in srgb, var(--tool-command) 65%, var(--fg))");
+  });
+
+  it("declares the thinking grey once, so no theme redefines it away from the mix", () => {
+    // Arrange
+    const declaration = /--thinking-text\s*:/g;
+
+    // Act
+    const count = stylesheet.match(declaration)?.length ?? 0;
+
+    // Assert
+    expect(count).toBe(1);
   });
 
   it("dims an interim response's prose", () => {
@@ -4360,11 +4418,8 @@ describe("the dimmed prose of a thinking or interim bubble", () => {
   });
 
   it("defines the dimmed prose as an even mix of the command grey and the body text", () => {
-    // Arrange
-    const block = declarationsOf(":root") ?? "";
-
-    // Act
-    const got = /--interim-text:\s*([^;]+);/.exec(block)?.[1]?.trim();
+    // Arrange / Act
+    const got = rootToken("--interim-text");
 
     // Assert
     expect(got).toBe("color-mix(in srgb, var(--tool-command), var(--fg))");
