@@ -13,6 +13,7 @@ import { Code, ConnectError } from "@connectrpc/connect";
 import { afterEach, describe, expect, test } from "vitest";
 import { conversationv1, shimv1, storev1 } from "../../src/proto.js";
 import { cleanupShims, spawnShim } from "../integration-support/harness.js";
+import { detachGate } from "../integration-support/detach-gate.js";
 import {
   agentId,
   allowOnce,
@@ -1780,6 +1781,9 @@ describe("keep-alives", () => {
     expect(answer.turn?.value).toBe(opened[0]?.turn?.value);
   });
 
+  /** The INFO the cadence states when it spares live detached work. */
+  const SPARED = "no keep-alive is scheduled: detached work is live, and the rewind a keep-alive owes would kill it";
+
   /** The message the span invariant's refusal is recorded under. */
   const REFUSED = "the keep-alive rewind is REFUSED";
 
@@ -1868,6 +1872,56 @@ describe("keep-alives", () => {
     await servedLanded(shim, "after the replays");
 
     expect(shim.log.records().filter((record) => record.message.startsWith(REFUSED))).toEqual([]);
+  });
+
+  test("a background shell outlives what used to be a rewind: no keep-alive beats over it, and the cadence resumes when it ends", async () => {
+    // THE 2026-10-14 LOSS: a rewind replaced the vendor's query and a live
+    // watcher shell ended with it. The shell here parks on its gate after its
+    // turn ends, with a keep-alive's debt already behind the real turn before
+    // it, so the old cadence would beat and then rewind over it.
+    const gate = detachGate();
+    try {
+      // Arrange: a real turn, a keep-alive after it, then the turn that backgrounds the shell.
+      const shim = await spawnShim({
+        env: { AGENT_REPL_FAKE_KEEPALIVE_INTERVAL_MS: "200", AGENT_REPL_FAKE_DETACH_GATE: gate.path },
+      });
+      await shim.clients.h1.startSession(freshSession());
+      turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "before the shell" })));
+      await servedLanded(shim, "before the shell");
+      await keepaliveTurnClosed(shim);
+      turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "!bash-detach" })));
+      const spared = await shim.log.record((record) => record.message === SPARED);
+
+      // Act: the shell goes on, finishes, and leaves the live set.
+      gate.release();
+      const concluded = await shim.log.record(
+        (record) => record.message === "a detached-work item concluded and left the live set",
+      );
+      let past = false;
+      await shim.log.record((record) => {
+        if (record === concluded) past = true;
+        return past && record.context.outcome === "keepalive_submitted";
+      });
+
+      // Assert: the one rewind before the shell ended was t2's, with nothing live; between the spare
+      // and the shell's end no keep-alive went out and no process ended; and
+      // the shell concluded on its own.
+      const records = shim.log.records();
+      const untilConcluded = records.slice(0, records.indexOf(concluded));
+      const window = untilConcluded.slice(untilConcluded.indexOf(spared));
+      expect([
+        untilConcluded.filter((record) => record.message.startsWith("REWINDING the vendor context")).map((record) => record.context.before),
+        window.filter(
+          (record) =>
+            record.context.outcome === "keepalive_submitted" ||
+            record.message.startsWith("the vendor process ended") ||
+            record.message.startsWith("INVARIANT VIOLATED"),
+        ),
+        concluded.context.status,
+      ]).toEqual([["real_prompt"], [], "completed"]);
+    } finally {
+      gate.dispose();
+    }
   });
 
   test("a restarted shim holds no anchor: its keep-alives are carried, never rewound, until a real reply", async () => {
