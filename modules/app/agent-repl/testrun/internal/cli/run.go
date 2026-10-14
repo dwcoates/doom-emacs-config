@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -64,26 +63,16 @@ func SlotsForHost(numCPU int) int {
 	return numCPU - HostReserve
 }
 
-// CPUBudgetEnv names a core budget a caller may hand a run, so several runs
-// that share one host can each be sized to their share rather than assuming
-// they own the machine.
-const CPUBudgetEnv = "AGENT_REPL_TEST_CPU_BUDGET"
-
-// Slots is the run's core budget: the claimed budget when one was handed in
-// (budget non-empty), else SlotsForHost. A budget that is not a positive
-// integer, and a host too small to leave HostReserve cores free, are refused,
-// never adjusted.
-func Slots(numCPU int, budget string) (int, error) {
-	if budget == "" {
-		n := SlotsForHost(numCPU)
-		if n < 1 {
-			return 0, fmt.Errorf("this host has %d cores; a run reserves %d for the live runtime and needs at least one more", numCPU, HostReserve)
-		}
-		return n, nil
-	}
-	n, err := strconv.Atoi(budget)
-	if err != nil || n < 1 {
-		return 0, fmt.Errorf("%s=%q is not a positive integer", CPUBudgetEnv, budget)
+// Slots is the run's core count, SlotsForHost. NO PROCESSOR IS HANDED OUT
+// BETWEEN RUNS (owner ruling, 2026-10-14): a run sizes itself to the host,
+// overlapping runs contend, nice orders them (the merge queue's head first),
+// and the one thing rationed between them is the memory their RAM disks wire
+// (ramdisk seats). A host too small to leave HostReserve cores free is
+// refused, never adjusted.
+func Slots(numCPU int) (int, error) {
+	n := SlotsForHost(numCPU)
+	if n < 1 {
+		return 0, fmt.Errorf("this host has %d cores; a run reserves %d for the live runtime and needs at least one more", numCPU, HostReserve)
 	}
 	return n, nil
 }
