@@ -307,6 +307,11 @@ walked for KEY followed by its #\\='COMMAND."
   (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "H")
               'agent-repl-show-hidden-workspace)))
 
+(ert-deftest agent-repl-test-keybindings-spc-tab-tab-switches-to-the-last-finished ()
+  "`SPC TAB TAB\=' jumps to the workspace that most recently went from working to done."
+  (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "TAB")
+              'agent-repl-switch-to-last-finished-workspace)))
+
 (ert-deftest agent-repl-test-keybindings-m-0-switches-to-the-last-tab ()
   "`M-0' runs the last-tab command, not Doom's persp-indexed final switch."
   (should (eq (lookup-key agent-repl-workspace-numerals-mode-map (kbd "M-0"))

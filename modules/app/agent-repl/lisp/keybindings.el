@@ -141,6 +141,7 @@ the module."
        :desc "Show a hidden workspace and switch to it" "H" #'agent-repl-show-hidden-workspace
        :desc "Merge current workspace (one-shot: closes once it lands)" "M" #'agent-repl-merge-workspace
        :desc "Open most recent workspace" "R" #'agent-repl-open-most-recent-workspace
+       :desc "Switch to the workspace that most recently finished" "TAB" #'agent-repl-switch-to-last-finished-workspace
        :desc "Move workspace to tab (digit, 0 = 10)" "p" #'agent-repl-workspace-place))
 
 ;; Tabs follow ROSTER ORDER strictly (the resolver orders them, priority

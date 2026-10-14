@@ -701,6 +701,76 @@ last-selected instants and HISTORY as this session's switches."
   (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws) (lambda (_ws) nil)))
     (should-not (agent-repl-roster--instant-ms "a" :last-selected))))
 
+(ert-deftest agent-repl-test-roster-instant-accessors-share-the-reader ()
+  "Every durable-instant accessor reads through `agent-repl-roster--instant-ms',
+naming its own row field, so no accessor hand-rolls a divergent read."
+  (let (asked)
+    (cl-letf (((symbol-function 'agent-repl-roster--instant-ms)
+               (lambda (ws field) (push (cons ws field) asked) 1)))
+      (agent-repl-roster-last-selected-ms "a")
+      (agent-repl-roster-last-turn-ended-ms "b"))
+    (should (equal (reverse asked) '(("a" . :last-selected) ("b" . :last-turn-ended))))))
+
+(ert-deftest agent-repl-test-roster-last-turn-ended-ms-reads-the-row ()
+  "The durable turn-end instant is the row's `last_turn_ended'."
+  (agent-repl-test-roster--with-editor
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (plist-put (agent-repl-test-roster--row "a" "first" :done)
+                                               :last-turn-ended '(:at-ms 42)))))))
+    (should (equal (agent-repl-roster-last-turn-ended-ms "first") 42))))
+
+;;; --- The last-finished ranking
+
+(defmacro agent-repl-test-roster--with-finishes (rows &rest body)
+  "Run BODY with ROWS (list of (NAME STATUS ENDED-MS)) as the roster's rows."
+  (declare (indent 1))
+  `(let ((rows ,rows))
+     (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws)
+                (lambda (ws)
+                  (let ((row (assoc ws rows)))
+                    (and row
+                         (list :status (list :arm (nth 1 row) :value nil)
+                               :last-turn-ended (and (nth 2 row)
+                                                     (list :at-ms (nth 2 row)))))))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-roster-last-finished-picks-the-newest-done ()
+  "Among done workspaces the one whose turn ended last wins."
+  (agent-repl-test-roster--with-finishes '(("a" :done 100) ("b" :done 900) ("c" :done 500))
+    (should (equal (agent-repl-roster-last-finished-name '("a" "b" "c")) "b"))))
+
+(ert-deftest agent-repl-test-roster-last-finished-skips-a-workspace-working-again ()
+  "A workspace whose next turn already runs has not finished, however recent its last end."
+  (agent-repl-test-roster--with-finishes '(("a" :done 100) ("b" :thinking 900))
+    (should (equal (agent-repl-roster-last-finished-name '("a" "b")) "a"))))
+
+(ert-deftest agent-repl-test-roster-last-finished-skips-an-interrupted-turn ()
+  "An interrupted turn is not a finish: the user stopped it."
+  (agent-repl-test-roster--with-finishes '(("a" :done 100) ("b" :interrupted 900))
+    (should (equal (agent-repl-roster-last-finished-name '("a" "b")) "a"))))
+
+(ert-deftest agent-repl-test-roster-last-finished-skips-a-failed-turn ()
+  "A failed turn is turquoise, not green: it is not a finish."
+  (agent-repl-test-roster--with-finishes '(("a" :done 100) ("b" :turn-failed 900))
+    (should (equal (agent-repl-roster-last-finished-name '("a" "b")) "a"))))
+
+(ert-deftest agent-repl-test-roster-last-finished-skips-a-done-row-without-an-instant ()
+  "A done row with no recorded close has nothing to rank by."
+  (agent-repl-test-roster--with-finishes '(("a" :done 100) ("b" :done nil))
+    (should (equal (agent-repl-roster-last-finished-name '("b" "a")) "a"))))
+
+(ert-deftest agent-repl-test-roster-last-finished-is-nil-with-no-done-row ()
+  "No done workspace means no finish to jump to."
+  (agent-repl-test-roster--with-finishes '(("a" :thinking 100) ("b" :ready 900))
+    (should-not (agent-repl-roster-last-finished-name '("a" "b")))))
+
+(ert-deftest agent-repl-test-roster-last-finished-keeps-the-given-order-on-a-tie ()
+  "Two finishes at the same instant resolve to the first NAMES gives."
+  (agent-repl-test-roster--with-finishes '(("a" :done 500) ("b" :done 500))
+    (should (equal (agent-repl-roster-last-finished-name '("b" "a")) "b"))))
+
 (ert-deftest agent-repl-test-roster-last-selected-ms-reads-the-row ()
   "The durable instant is the row's `last_selected'."
   (agent-repl-test-roster--with-editor
