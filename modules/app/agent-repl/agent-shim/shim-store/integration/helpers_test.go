@@ -12,6 +12,7 @@ package integration
 
 import (
 	"agentrepl/shim-store/internal/testclose"
+	"agentrepl/testrun/testenv"
 	"bufio"
 	"context"
 	"crypto/rand"
@@ -100,6 +101,17 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
+	// A TEST RUN BUILDS THE STORE ONCE (testenv.Programs) for every suite
+	// that runs it; outside a run, this process builds it.
+	built, fromRun, err := testenv.Program(os.Getenv, "shim-store")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "integration: %v\n", err)
+		os.Exit(1)
+	}
+	if fromRun {
+		storeBinary = built
+		os.Exit(m.Run())
+	}
 	binDir, err := os.MkdirTemp("", "shim-store-itest-bin")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "integration: temp dir for the store binary: %v\n", err)

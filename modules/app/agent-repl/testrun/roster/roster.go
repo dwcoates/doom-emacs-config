@@ -36,9 +36,6 @@ type Suite struct {
 	Args []string
 	// MayDecline marks the suites allowed to exit 77 ("precondition unmet").
 	MayDecline bool
-	// PrebuildPackage names the Go package whose TestMain fills and consumes
-	// shared binaries before its test chunks run. Empty means no prebuild.
-	PrebuildPackage string
 	// Harness marks a suite that tests the module's own shell scripts in bin/,
 	// which is the blast radius the merge gate gives a change under bin/.
 	Harness bool
@@ -53,10 +50,6 @@ type Suite struct {
 	// IntegrationPackages is the `go list` pattern (relative to Path) the
 	// integration pass covers.
 	IntegrationPackages string
-	// IntegrationPrebuildPackage is the integration package whose TestMain
-	// fills and consumes shared binaries, as PrebuildPackage is for the
-	// ordinary pass. Empty means no prebuild.
-	IntegrationPrebuildPackage string
 	// IntegrationConfig adds a Vitest suite's integration config (relative to
 	// Path) to the suite: its files are a second split run under that config.
 	IntegrationConfig string
@@ -78,6 +71,59 @@ type Suite struct {
 	// each, and eight at a time (2026-10-12) cut the full run's slot-seconds a
 	// further 13% (2,056 -> 1,798) with every suite green.
 	TestParallel map[string]int
+	// Programs names, per Go package (by path relative to Path, "." for the
+	// root), the shared programs (by Program.Name) that package's tests run.
+	// The run builds each program ONCE (Programs) and every chunk of a package
+	// named here waits for it and reads it from AGENT_REPL_TEST_PROGRAMS.
+	Programs map[string][]string
+}
+
+// Program is one binary a run builds ONCE, into its programs directory, for
+// every test process of every suite that runs it.
+type Program struct {
+	// Name is the binary's file name in the programs directory, and the name
+	// a test asks testenv.Program for.
+	Name string
+	// Owner is the suite whose system the program is: the run reports the
+	// program's build under it when it is selected, and otherwise under the
+	// first selected suite that runs the program.
+	Owner string
+	// Module is the Go module directory, relative to the agent-repl module
+	// root; Package is the package built, relative to Module.
+	Module, Package string
+	// Links are the -X bindings the build sets, each pointing a variable at
+	// another program of the same run.
+	Links []ProgramLink
+}
+
+// ProgramLink binds the package variable Var, at link time, to the path of the
+// run's program Program.
+type ProgramLink struct {
+	Var     string
+	Program string
+}
+
+// Programs is every program a run may build. A test build of the daemon runs
+// the mocked git by construction (its gitclient seam, the daemon's integration
+// harness's MockedGitLink).
+var Programs = []Program{
+	{Name: "agent-repld", Owner: "daemon", Module: "daemon", Package: "./cmd/agent-repld",
+		Links: []ProgramLink{{Var: "agent-repld/internal/gitclient.gitBinary", Program: "git"}}},
+	{Name: "fakeshim", Owner: "daemon", Module: "daemon", Package: "./integration/fakeshim"},
+	{Name: "git", Owner: "daemon", Module: "daemon", Package: "./integration/fakegit/git"},
+	{Name: "shim-store", Owner: "store", Module: "agent-shim/shim-store", Package: "."},
+	{Name: "shim-claude-sidecar", Owner: "sidecar", Module: "agent-shim/claude/shim-sidecar", Package: "."},
+	{Name: "shim-lock", Owner: "lock", Module: "agent-shim/shim-lock", Package: "."},
+}
+
+// LookupProgram answers the program named name.
+func LookupProgram(name string) (Program, bool) {
+	for _, p := range Programs {
+		if p.Name == name {
+			return p, true
+		}
+	}
+	return Program{}, false
 }
 
 // Suites is the roster. Order is report order only; the scheduler decides run
@@ -124,10 +170,13 @@ var Suites = []Suite{
 	// (`make integration`, `npm run test:integration`), and so outside the
 	// host slot too.
 	{Name: "daemon", Kind: GoModule, Path: "daemon",
-		IntegrationTags: "integration", IntegrationPackages: "./integration", IntegrationPrebuildPackage: "integration",
-		TestParallel: map[string]int{"integration": 8}},
-	{Name: "sidecar", Kind: GoModule, Path: "agent-shim/claude/shim-sidecar", PrebuildPackage: "integration", TestParallel: map[string]int{"integration": 8}},
-	{Name: "store", Kind: GoModule, Path: "agent-shim/shim-store", TestParallel: map[string]int{"integration": 8}},
+		IntegrationTags: "integration", IntegrationPackages: "./integration",
+		TestParallel: map[string]int{"integration": 8},
+		Programs:     map[string][]string{"integration": {"agent-repld", "fakeshim", "git"}}},
+	{Name: "sidecar", Kind: GoModule, Path: "agent-shim/claude/shim-sidecar", TestParallel: map[string]int{"integration": 8},
+		Programs: map[string][]string{"integration": {"shim-claude-sidecar", "shim-lock"}}},
+	{Name: "store", Kind: GoModule, Path: "agent-shim/shim-store", TestParallel: map[string]int{"integration": 8},
+		Programs: map[string][]string{"integration": {"shim-store"}}},
 	{Name: "lock", Kind: GoModule, Path: "agent-shim/shim-lock"},
 	{Name: "logging", Kind: GoModule, Path: "agent-shim/logging/go"},
 	{Name: "protohelpers", Kind: GoModule, Path: "proto/helpers/go"},
@@ -139,7 +188,8 @@ var Suites = []Suite{
 		IntegrationBuild: []string{"npm", "run", "pretest:integration"}},
 	{Name: "proto", Kind: Script, Path: "bin/report-nonlisp-coverage.sh", Args: []string{"proto"}},
 	{Name: "logging-density", Kind: Script, Path: "bin/report-logging-density.sh"},
-	{Name: "e2e", Kind: E2E, Path: "e2e", TestParallel: map[string]int{".": 8}, VetTags: []string{"perf", "realtest"}},
+	{Name: "e2e", Kind: E2E, Path: "e2e", TestParallel: map[string]int{".": 8}, VetTags: []string{"perf", "realtest"},
+		Programs: map[string][]string{".": {"agent-repld", "fakeshim", "git", "shim-store", "shim-claude-sidecar", "shim-lock"}}},
 	// Two slots: the sandbox container is capped to the width it is given
 	// (docker --cpus, GOMAXPROCS), and the layer runs its two Emacsen
 	// (e2e/EMACS-LAYER-SPEC.md, "The parallelism bound, measured") on two

@@ -145,6 +145,14 @@ func Run(ctx context.Context, d Deps, a Args) int {
 		}
 		planned = append(planned, built[i])
 	}
+	programs, err := programUnits(layout, a, selected, built, buildErrs)
+	if err != nil {
+		log.Errorf("planning the run's shared programs failed: %v", err)
+		return 1
+	}
+	if len(programs.Atomic) > 0 {
+		planned = append(planned, programs)
+	}
 
 	p, err := plan.Build(hist, planned, d.Slots)
 	if err != nil {
@@ -421,4 +429,34 @@ func printClosing(log *run.Log, a Args, passed, declined []run.SuiteResult) {
 		skipped = []string{"none"}
 	}
 	log.Infof("not selected, NOT run: %s", strings.Join(skipped, " "))
+}
+
+// programUnits is the run's one build of every shared program a planned suite
+// runs (roster.Programs). A program is reported under its own system's suite
+// when that suite is selected, and otherwise under the first selected suite,
+// in roster order, that runs it.
+func programUnits(layout suites.Layout, a Args, selected []roster.Suite, built []suites.Units, buildErrs []error) (suites.Units, error) {
+	var needed []string
+	firstConsumer := map[string]string{}
+	for i, s := range selected {
+		if buildErrs[i] != nil {
+			continue
+		}
+		for _, name := range built[i].Programs {
+			needed = append(needed, name)
+			if _, ok := firstConsumer[name]; !ok {
+				firstConsumer[name] = s.Name
+			}
+		}
+	}
+	specs, err := suites.ProgramUnits(layout, needed, func(p roster.Program) string {
+		if a.Selects(p.Owner) {
+			return p.Owner
+		}
+		return firstConsumer[p.Name]
+	})
+	if err != nil {
+		return suites.Units{}, err
+	}
+	return suites.Units{Atomic: specs}, nil
 }

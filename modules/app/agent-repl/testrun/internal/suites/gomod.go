@@ -102,16 +102,13 @@ func goIntegrationUnitsForPackages(l Layout, s roster.Suite, dir string, pkgs []
 	tag := s.IntegrationTags
 	vet := goVetTagged(s.Name, dir, tag, s.IntegrationPackages)
 	u := Units{Atomic: []run.Spec{vet}}
-	prebuildConfigured := false
 	for i, rel := range pkgs {
 		p := goPkg{
 			Suite: s.Name, Module: dir, Rel: rel, Tags: tag, Parallel: s.TestParallel[rel],
-			Bin: filepath.Join(l.Work, "bin", s.Name+"-"+tag, fmt.Sprintf("%03d.test", i)),
+			Bin:      filepath.Join(l.Work, "bin", s.Name+"-"+tag, fmt.Sprintf("%03d.test", i)),
+			Programs: s.Programs[rel], ProgramsDir: l.ProgramsDir(),
 		}
-		if rel == s.IntegrationPrebuildPackage && s.IntegrationPrebuildPackage != "" {
-			p.sharePrebuilt(filepath.Join(l.Work, "prebuilt", s.Name+"-"+tag))
-			prebuildConfigured = true
-		}
+		u.Programs = append(u.Programs, p.Programs...)
 		build, split, err := p.units()
 		if err != nil {
 			return Units{}, err
@@ -120,9 +117,6 @@ func goIntegrationUnitsForPackages(l Layout, s roster.Suite, dir string, pkgs []
 		if split != nil {
 			u.Splits = append(u.Splits, *split)
 		}
-	}
-	if s.IntegrationPrebuildPackage != "" && !prebuildConfigured {
-		return Units{}, fmt.Errorf("suites: %s integration prebuild package %q is not a tested package", s.Name, s.IntegrationPrebuildPackage)
 	}
 	if len(u.Splits) == 0 {
 		return Units{}, fmt.Errorf("suites: %s has %s-tagged test files but no test to run under %s", s.Name, tag, dir)
@@ -135,17 +129,15 @@ func goModuleUnitsForPackages(l Layout, s roster.Suite, dir string, pkgs []strin
 	u := Units{Atomic: goVets(s, dir)}
 	var reportDeps []string
 	hasTests := false
-	prebuildConfigured := false
 	for i, rel := range pkgs {
 		p := goPkg{
 			Suite: s.Name, Module: dir, Rel: rel, Parallel: s.TestParallel[rel],
-			Bin: filepath.Join(l.Work, "bin", s.Name, fmt.Sprintf("%03d.test", i)),
+			Bin:      filepath.Join(l.Work, "bin", s.Name, fmt.Sprintf("%03d.test", i)),
+			Programs: s.Programs[rel], ProgramsDir: l.ProgramsDir(),
 		}
+		u.Programs = append(u.Programs, p.Programs...)
 		if l.Coverage {
 			p.CovDir = filepath.Join(covRoot, fmt.Sprintf("%03d", i))
-		} else if rel == s.PrebuildPackage && s.PrebuildPackage != "" {
-			p.sharePrebuilt(filepath.Join(l.Work, "prebuilt", s.Name))
-			prebuildConfigured = true
 		}
 		build, split, err := p.units()
 		if err != nil {
@@ -160,9 +152,6 @@ func goModuleUnitsForPackages(l Layout, s roster.Suite, dir string, pkgs []strin
 		if l.Coverage {
 			reportDeps = append(reportDeps, split.Group)
 		}
-	}
-	if s.PrebuildPackage != "" && !l.Coverage && !prebuildConfigured {
-		return Units{}, fmt.Errorf("suites: %s prebuild package %q is not a tested package", s.Name, s.PrebuildPackage)
 	}
 	if !hasTests {
 		return Units{}, fmt.Errorf("suites: %s has test files but no test to run under %s", s.Name, dir)

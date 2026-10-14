@@ -1488,7 +1488,22 @@ func TestATestDaemonRunsTheMockedGitItWasLinkedTo(t *testing.T) {
 	boot := d.AwaitLogRecord(d.RunLogPath(), "the boot record", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.cmd.boot" && r.Message == "the daemon boot started"
 	})
-	if got, want := boot.Context["git_binary"], harness.MockedGitBinary(t); got != want {
-		t.Fatalf("git_binary = %v, want the mocked git %s", got, want)
+	// The same file, not the same spelling: the run's programs directory is
+	// named /tmp/artr-<pid>/... at link time and /private/tmp/... once resolved.
+	got, ok := boot.Context["git_binary"].(string)
+	if !ok {
+		t.Fatalf("git_binary = %#v, want a path", boot.Context["git_binary"])
+	}
+	want := harness.MockedGitBinary(t)
+	gotInfo, err := os.Stat(got)
+	if err != nil {
+		t.Fatalf("git_binary = %s, which does not exist: %v", got, err)
+	}
+	wantInfo, err := os.Stat(want)
+	if err != nil {
+		t.Fatalf("the mocked git %s does not exist: %v", want, err)
+	}
+	if !os.SameFile(gotInfo, wantInfo) {
+		t.Fatalf("git_binary = %s, want the mocked git %s", got, want)
 	}
 }
