@@ -473,6 +473,7 @@ func (w *fakeWatcher) Connected() bool { return true }
 // AwaitSessionFacts answers the facts wait the fixture states: at once, with
 // factsErr.
 func (w *fakeWatcher) AwaitSessionFacts(context.Context) error { return w.factsErr }
+func (w *fakeWatcher) AwaitMainWatching(context.Context) error { return nil }
 
 func (w *fakeWatcher) TurnInFlight() *ids.TurnID { return w.turn }
 

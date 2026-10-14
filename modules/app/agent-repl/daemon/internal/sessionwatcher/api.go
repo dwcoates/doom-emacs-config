@@ -663,6 +663,11 @@ type Watcher interface {
 	// the nil before the facts. A watcher closed first answers
 	// ErrWatcherClosed.
 	AwaitSessionFacts(ctx context.Context) error
+	// AwaitMainWatching blocks until the main agent's watch has served its
+	// opening page, so a turn started after it loses no frame: the shim opens
+	// that page and the watch's live tail together. A watcher closed first
+	// answers ErrWatcherClosed.
+	AwaitMainWatching(ctx context.Context) error
 	// SessionFactsIn reports, without waiting, whether the session facts have
 	// been taken up. Until they are, TurnInFlight answers nil for a turn an
 	// adopted shim may be running, so "no turn runs" cannot be read from it.

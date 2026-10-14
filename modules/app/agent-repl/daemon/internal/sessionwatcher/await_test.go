@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
@@ -525,4 +526,172 @@ func TestAPureAttachWhoseFactsNameATurnStaysBusy(t *testing.T) {
 		t.Fatal("the attach's facts named a turn in flight, and it answered free")
 	}
 	h.noFree(t)
+}
+
+// mainWatched reads whether the main watch has served its opening page.
+func (h *harness) mainWatched() bool {
+	h.w.mu.Lock()
+	defer h.w.mu.Unlock()
+	return h.w.mainWatched
+}
+
+func TestTheMainWatchIsNotServingBeforeItsOpeningPage(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+
+	// Act: an entry, not the page, rides the main watch.
+	h.quiet()
+
+	// Assert.
+	if h.mainWatched() {
+		t.Fatal("the main watch reads serving before its opening page")
+	}
+}
+
+func TestAwaitMainWatchingAnswersOnceTheMainWatchServesItsOpeningPage(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+
+	// Act.
+	h.route(h.main, pageFrame())
+	err := h.w.AwaitMainWatching(context.Background())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("AwaitMainWatching after the opening page = %v, want nil", err)
+	}
+}
+
+func TestAwaitMainWatchingIsReleasedByTheOpeningPage(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	answered := make(chan error, 1)
+	go func() { answered <- h.w.AwaitMainWatching(context.Background()) }()
+
+	// Act.
+	h.route(h.main, pageFrame())
+
+	// Assert.
+	if err := <-answered; err != nil {
+		t.Fatalf("AwaitMainWatching = %v, want nil once the opening page arrived", err)
+	}
+}
+
+func TestASubagentsOpeningPageDoesNotReleaseTheMainWatchLatch(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", subagentWork("sub-1")))))
+	sub := h.client.nextAgentOpen(t)
+
+	// Act.
+	h.route(sub.stream, pageFrame())
+
+	// Assert.
+	if h.mainWatched() {
+		t.Fatal("a subagent's opening page released the main watch's latch")
+	}
+}
+
+func TestAwaitMainWatchingAnswersItsContext(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act.
+	err := h.w.AwaitMainWatching(ctx)
+
+	// Assert.
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("AwaitMainWatching on an ended context = %v, want context.Canceled", err)
+	}
+}
+
+func TestAwaitMainWatchingAnswersACloseLoudly(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	answered := make(chan error, 1)
+	go func() { answered <- h.w.AwaitMainWatching(context.Background()) }()
+
+	// Act.
+	if err := h.w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Assert.
+	if err := <-answered; !errors.Is(err, ErrWatcherClosed) {
+		t.Fatalf("AwaitMainWatching after Close = %v, want ErrWatcherClosed", err)
+	}
+}
+
+func TestAwaitMainWatchingOnAClosedWatcherAnswersAtOnce(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	if err := h.w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Act.
+	err := h.w.AwaitMainWatching(context.Background())
+
+	// Assert.
+	if !errors.Is(err, ErrWatcherClosed) {
+		t.Fatalf("AwaitMainWatching on a closed watcher = %v, want ErrWatcherClosed", err)
+	}
+}
+
+func TestTheMainWatchServingIsRecordedAtInfoWithHowLongItTook(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+
+	// Act.
+	h.route(h.main, pageFrame())
+
+	// Assert.
+	record, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.sessionwatcher.main_watching"})
+	if !ok {
+		t.Fatal("no info record of the main watch serving")
+	}
+	if _, has := record.Context["since_open_ms"]; !has {
+		t.Fatalf("main_watching context = %v, want since_open_ms", record.Context)
+	}
+}
+
+func TestATurnThatWaitedForTheMainWatchIsRecordedWithHowLong(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	answered := make(chan error, 1)
+	go func() { answered <- h.w.waitMainWatching(context.Background()) }()
+
+	// Act.
+	h.route(h.main, pageFrame())
+	if err := <-answered; err != nil {
+		t.Fatalf("AwaitMainWatching = %v", err)
+	}
+
+	// Assert.
+	record, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.sessionwatcher.main_watching_waited"})
+	if !ok {
+		t.Fatal("no info record of a turn waiting for the main watch")
+	}
+	if _, has := record.Context["waited_ms"]; !has {
+		t.Fatalf("main_watching_waited context = %v, want waited_ms", record.Context)
+	}
+}
+
+func TestATurnThatNeverWaitedRecordsNoWait(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.route(h.main, pageFrame())
+
+	// Act.
+	if err := h.w.AwaitMainWatching(context.Background()); err != nil {
+		t.Fatalf("AwaitMainWatching = %v", err)
+	}
+
+	// Assert.
+	if h.hasRecord("info", "daemon.sessionwatcher.main_watching_waited") {
+		t.Fatal("a turn that found the watch standing recorded a wait")
+	}
 }
