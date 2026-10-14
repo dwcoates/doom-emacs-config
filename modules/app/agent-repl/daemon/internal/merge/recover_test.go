@@ -660,3 +660,67 @@ func TestEveryContainingLogMatchRunsThroughLoggedLike(t *testing.T) {
 		}
 	}
 }
+
+func TestRecoverUnderAPausedQueueRecordsThatTheMergeStaysSuspended(t *testing.T) {
+	// Arrange: a merge a restart interrupted in its tests, on a paused queue.
+	h := newHarness(t)
+	interruptedAt(t, h, atStep(TabTests, 1))
+	h.db.mu.Lock()
+	h.db.paused[h.repoKey()] = true
+	h.db.mu.Unlock()
+
+	// Act.
+	if err := h.o.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+
+	// Assert.
+	rec, found := dlog.FindRecord(h.logs.Global().(*dlog.TestLogger).Records(), dlog.RecordQuery{
+		Level: dlog.LevelInfo, Operation: "daemon.merge.recover", Message: "a suspended merge is taken back at the step it recorded; its queue is paused, so it stays suspended until the queue is resumed"})
+	if !found || rec.Context["paused"] != true {
+		t.Fatalf("recover record = %v (found %v), want that the merge stays suspended on its paused queue", rec, found)
+	}
+}
+
+func TestRecoverUnderARunningQueueRecordsThatTheMergeResumes(t *testing.T) {
+	// Arrange: a merge a restart interrupted in its tests.
+	h := newHarness(t)
+	interruptedAt(t, h, atStep(TabTests, 1))
+
+	// Act.
+	if err := h.o.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+
+	// Assert.
+	rec, found := dlog.FindRecord(h.logs.Global().(*dlog.TestLogger).Records(), dlog.RecordQuery{
+		Level: dlog.LevelInfo, Operation: "daemon.merge.recover", Message: "a merge a restart interrupted resumes at the step it recorded"})
+	if !found || rec.Context["paused"] != false {
+		t.Fatalf("recover record = %v (found %v), want that the merge resumes", rec, found)
+	}
+}
+
+func TestRecoverRefusesTheBootWhenTheQueuesPauseCannotBeRead(t *testing.T) {
+	// Arrange: a merge a restart interrupted, and a pause that cannot be read.
+	h := newHarness(t)
+	interruptedAt(t, h, atStep(TabTests, 1))
+	h.db.mu.Lock()
+	h.db.pausedReadErr = errors.New("database is locked")
+	h.db.mu.Unlock()
+
+	// Act.
+	err := h.o.Recover(context.Background())
+
+	// Assert: the boot is refused, recorded, and nothing was taken.
+	if err == nil || !strings.Contains(err.Error(), "database is locked") {
+		t.Fatalf("Recover = %v, want the unreadable pause", err)
+	}
+	rec, found := dlog.FindRecord(h.logs.Global().(*dlog.TestLogger).Records(), dlog.RecordQuery{
+		Level: dlog.LevelError, Operation: "daemon.merge.recover"})
+	if !found || rec.Context["repo"] != string(h.repoKey()) || rec.Context["error"] != "database is locked" {
+		t.Fatalf("error record = %v (found %v), want the repo and the cause", rec, found)
+	}
+	if len(h.db.adopted) != 0 {
+		t.Fatalf("adopted = %v, want no lease taken", h.db.adopted)
+	}
+}

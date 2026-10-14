@@ -43,7 +43,7 @@ func (o *orchestrator) register(r *run) {
 	}
 	o.runsByWorkspace[r.ws] = r
 	if o.draining {
-		r.suspending = true
+		r.suspendLocked(suspendExit)
 		r.git.stop()
 	}
 }
@@ -197,19 +197,28 @@ func (o *orchestrator) reattachTurn(ctx context.Context, ws ids.WorkspaceID, fie
 	return o.submit(ctx, ws, turn, text, origin)
 }
 
-// suspend lets go of what a run holds IN THIS PROCESS when the daemon's exit
-// or its workspace's transfer took it away, and leaves its lease, its queue
-// entry and its progress record to the daemon that serves the workspace next,
-// which resumes it. It writes nothing durable: the state
-// client is closing.
-func (r *run) suspend(ctx context.Context, cause error) {
-	step := r.progressStep()
-	fields := dlog.Context{"workspace": string(r.ws), "lease": string(r.lease.ID), "step": step}
-	if cause != nil {
-		fields["cause"] = cause.Error()
+// suspend lets go of what a run holds IN THIS PROCESS when a suspension took
+// it away -- the daemon's exit, its workspace's transfer or restart, or its
+// queue's pause -- and leaves its lease, its queue entry and its progress
+// record to whoever resumes it. It writes nothing durable: the state client
+// may be closing.
+//
+// THE RECORD NAMES THE SUSPENSION, never the step's error. The step that was
+// cut answers whatever its cancelled command did (a killed test runner's
+// "context canceled"), which says how the step ended, not why; that error is
+// kept beside the cause as step_error.
+func (r *run) suspend(ctx context.Context, stepErr error) {
+	why, suspended := r.suspendedFor()
+	if !suspended {
+		panic(fmt.Sprintf("merge: suspend(%s) on a run no suspension took", r.ws))
+	}
+	fields := dlog.Context{"workspace": string(r.ws), "lease": string(r.lease.ID), "step": r.progressStep(),
+		"by": why.by, "cause": why.cause.Error()}
+	if stepErr != nil {
+		fields["step_error"] = stepErr.Error()
 	}
 	r.o.deps.Log.Global().Info("daemon.merge.suspend",
-		"a merge stopped at a stopping point for the daemon's exit or its workspace's transfer; the daemon that serves the workspace next resumes it at the step it recorded", fields)
+		"a merge stopped at a stopping point for "+why.by+"; "+why.resumes, fields)
 	r.releaseInProcess(ctx)
 }
 

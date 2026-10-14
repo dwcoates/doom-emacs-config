@@ -499,3 +499,45 @@ func TestAGateTheDaemonsExitCutIsRecorded(t *testing.T) {
 		t.Fatalf("cut = %v, want how long the gate had run", got)
 	}
 }
+
+func TestAGateTheDaemonsExitCutNamesTheExit(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.landsCleanly("abc123def4567")
+
+	// Act.
+	heldInGate(t, h)
+
+	// Assert.
+	got := gateRecord(t, h, "test gate was cut before its verdict")
+	if got["by"] != suspendExit.by {
+		t.Fatalf("cut by = %v, want %q", got["by"], suspendExit.by)
+	}
+	if gateRecords(h, suspendExit.gateRerun) != 1 {
+		t.Fatalf("the cut does not say %q", suspendExit.gateRerun)
+	}
+}
+
+func TestAGateAnEvictionCutNamesTheAbandonment(t *testing.T) {
+	// Arrange: the head holds in its gate.
+	c := newChain(t)
+	inGate, _ := c.runner.hold(c.dirs[theWorkspace])
+	enqueue(t, c.h)
+	done := admitAsync(c.h, context.Background())
+	<-inGate
+
+	// Act.
+	if err := c.h.o.Evict(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("Evict: %v", err)
+	}
+	<-done
+
+	// Assert.
+	got := gateRecord(t, c.h, "test gate was cut before its verdict")
+	if by, _ := got["by"].(string); !strings.HasPrefix(by, "the merge's abandonment") {
+		t.Fatalf("cut by = %v, want the merge's abandonment", got["by"])
+	}
+	if gateRecords(c.h, "it does not run again") != 1 {
+		t.Fatal("the cut does not say the gate does not run again")
+	}
+}

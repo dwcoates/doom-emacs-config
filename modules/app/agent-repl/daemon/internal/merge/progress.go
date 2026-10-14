@@ -417,7 +417,7 @@ func (r *run) stopAtStepBoundary() bool {
 	if !r.stopAtBoundary || r.suspending {
 		return false
 	}
-	r.suspending = true
+	r.suspendLocked(suspendRestart)
 	close(r.atBoundary)
 	return true
 }
