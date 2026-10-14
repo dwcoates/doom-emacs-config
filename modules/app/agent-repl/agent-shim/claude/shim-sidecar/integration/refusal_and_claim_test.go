@@ -1,7 +1,6 @@
 package integration
 
 import (
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -69,22 +68,20 @@ func TestAKindlessRefusalIsAContractViolationThatStillSuspends(t *testing.T) {
 // exactly once.
 func TestAParkedFileStaysParkedAcrossAStoreBounce(t *testing.T) {
 	t.Parallel()
-	// Arrange: a store whose socket and database outlive the process, so the
-	// second one is genuinely the same store — and still holds the decoy row
-	// that makes the sidecar's batch a permanent producer defect.
+	// Arrange: one store, taken down and brought back on the same socket with
+	// its durable state — still contesting the key that makes the sidecar's
+	// batch a permanent producer defect.
 	ctx, cancel := testContext(t)
 	defer cancel()
 	socket := shortSocketPath(t, "park-bounce")
-	dbPath := filepath.Join(t.TempDir(), "store.db")
-	store := startRealStoreAt(t, socket, dbPath)
+	store := startFakeStoreAt(t, socket)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
 	cwd := "/work/park-bounce-probe"
 	session := "e6e6e6e6-e6e6-4e6e-8e6e-e6e6e6e6e6e6"
 	opts := defaultSidecarOptions(t, socket, tree)
 
-	seedDecoyRow(ctx, t, store.Client, "claude-shim:"+session,
-		decoyEntry("activity:"+capturedThinking1, "decoy-bounce-"+capturedThinking1, "seeded-by-the-suite"))
+	store.ContestUpsertKey("activity:" + capturedThinking1)
 	g := newGrowingFile(t, tree.sessionPath(cwdSlug(cwd), session))
 	g.AppendLine(encodeRecord(t, retargetSession(t, decodeRecord(t, captured.Lines[7]), session, cwd)))
 
@@ -95,16 +92,16 @@ func TestAParkedFileStaysParkedAcrossAStoreBounce(t *testing.T) {
 		return r.Operation == "producer-defect" && samePathAny(r.Context["path"], g.Path())
 	})
 	store.Stop()
-	recovered := startRealStoreAt(t, socket, dbPath)
+	store.Resume()
 
 	otherCwd := "/work/park-bounce-other-probe"
 	otherSession := "e7e7e7e7-e7e7-4e7e-8e7e-e7e7e7e7e7e7"
 	other := newGrowingFile(t, tree.sessionPath(cwdSlug(otherCwd), otherSession))
 	other.AppendLine(encodeRecord(t, retargetSession(t, decodeRecord(t, captured.Lines[12]), otherSession, otherCwd)))
-	awaitCursorAtLeast(ctx, t, recovered.Client, other.Path(), other.Offset())
+	awaitCursorAtLeast(ctx, t, store.Client, other.Path(), other.Offset())
 
 	// Assert: the parked file is still parked, and still stated once.
-	if cs := cursorByPath(ctx, t, recovered.Client, g.Path()); cs != nil {
+	if cs := cursorByPath(ctx, t, store.Client, g.Path()); cs != nil {
 		t.Errorf("the parked file advanced a cursor to %d after a store bounce; a park is a verdict about its bytes, which a bounce does not change",
 			cs.GetOffset())
 	}
