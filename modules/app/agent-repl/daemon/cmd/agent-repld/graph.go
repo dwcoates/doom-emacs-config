@@ -170,6 +170,10 @@ type graph struct {
 	// (standDownShims): an ordinary exit or a handover leaves them for a
 	// successor to adopt, and with the root gone nothing ever can.
 	StopShims func(ctx context.Context) (int, error)
+	// SettleBoot ends a FRESH boot once its bring-up has run: every live shim
+	// is judged against the installed build, and every owed landing report is
+	// paid. A joining successor has none; its takeover does the same.
+	SettleBoot func(ctx context.Context)
 }
 
 // backgroundLoop is one long-running loop the daemon runs for its whole
@@ -854,7 +858,11 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, err
 	}
 	mergeMover := &mergeMoverForwarder{}
+	// THE DETACHED-MERGE SERVICE IS BUILT AFTER THE ROLLOUT AND THE DEPLOY,
+	// which pay the landing reports it owes; both reach it through this.
+	detachedRef := &detachedForwarder{}
 	rolloutController, err := rollout.New(rollout.Deps{
+		Reports:          detachedRef,
 		Merges:           mergeMover,
 		HoldoutWarnEvery: holdoutWarnEvery,
 		FactsBound:       factsBound,
@@ -911,6 +919,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		SelfExe:    selfExe,
 		Bundle:     shimBundle,
 		Rollout:    rolloutController,
+		Reports:    detachedRef,
 		Clients:    clients,
 		Runner:     scripts,
 		Store:      p.Opts.storeSocket,
@@ -967,7 +976,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// ---- the merge orchestrator ----
 
 	ownership = workspace.NewOwnership(rolloutController)
-	detachedRef := &detachedForwarder{}
 	// THE GATE GOVERNOR admits the merge queue's speculative test gates by the
 	// host's load; its sampling loop is a background loop below. A harness
 	// pins the load it reads (cpugov.FixedHostLoadEnv).
@@ -1394,6 +1402,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		DrainLandings: deployer.DrainLandings,
 		DrainMerges:   mergeOrchestrator.Drain,
 		StopShims:     stopEveryShim(fleet, supervisor, rootLossShimStopBound),
+		SettleBoot:    freshBootSettle(p.Opts.joining != "", rolloutController),
 	}, nil
 }
 
@@ -1978,4 +1987,13 @@ func resumeKind(kind promptqueue.ResumeKind) opentabs.ResumeKind {
 		// ERROR rather than reading it as any known one.
 		return opentabs.ResumeKind(0)
 	}
+}
+
+// freshBootSettle answers the boot's settle: the rollout's for a fresh boot,
+// none for a joining successor, whose takeover judges and pays instead.
+func freshBootSettle(joining bool, controller rollout.Controller) func(ctx context.Context) {
+	if joining {
+		return nil
+	}
+	return controller.SettleBoot
 }
