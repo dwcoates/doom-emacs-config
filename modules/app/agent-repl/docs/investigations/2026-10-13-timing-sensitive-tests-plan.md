@@ -57,9 +57,11 @@ The sites seen failing:
 
 - `webapp/test/webapp-layer/roster.layer.test.ts`, the 900ms vitest timeout
   (`vitest.webapp-layer.config.ts`), 15 failures in one run.
-- `daemon/integration/handover_stale_bounce_test.go:110`: the successor's
-  handover took 10s against a healthy 1-2s; the record it waited for did
-  arrive, late.
+- `daemon/integration/handover_stale_bounce_test.go:110`: first read here as
+  pure load (the successor's handover took 10s against a healthy 1-2s). It was
+  a race that load exposed: the newer build was installed before the
+  incumbent judged its own shim's report, so the incumbent bounced the shim
+  and the successor's bounce never came. Fixed on master (167346a42).
 - `lisp/test-integration-helpers.el` `agent-repl-itest-default-timeout` (14s).
 - `e2e` disk-manager waits (`context deadline exceeded`).
 - The harness's own self-checks (`harness/stop_test.go:65`,
@@ -89,3 +91,20 @@ Options:
 4. **Re-measure under load and size each bound at 2x that.** This is the
    current rule (write-tests pitfall 5) applied to a 50-load host; the bounds
    grow 3-7x and a hang takes that much longer to report.
+
+## Reassessed after rebasing onto master (2026-10-14)
+
+- Kind A: every conversion above rebased unchanged; master touched none of
+  those tests.
+- Kind B, re-read against the 30 full runs since:
+  - The handover failure was a race, not load (above).
+  - `roster.layer.test.ts`: no failure in the 17 runs that ran it.
+  - The ERT 14s timeouts that recurred (`test-integration-host.el`, the
+    webview redial at a successor) came with master's webhost handover work.
+    Inferred functional rather than load, not yet confirmed from their logs.
+  - The daemon failures since (`TestARestartOverAMergeWaitingForItsWorkspace...`,
+    `TestNoMergeFactReachesAnyClientBeforeTheRequestingTurnEnds`) sit in code
+    master's merge-modes work changed. Inferred functional, not yet confirmed.
+- So no failure since is shown to come from load alone. Lesson: a wait
+  that times out only under load is first checked for an ordering race;
+  load is the usual way a race shows itself.
