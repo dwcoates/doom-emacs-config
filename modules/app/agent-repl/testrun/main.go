@@ -259,6 +259,13 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 		log.Errorf("point TMPDIR at the run's temp root %s: %v", root, err)
 		return 1
 	}
+	for name, dir := range cli.RunArtifactsEnv(os.Getenv(ramdisk.EnvRunLog), os.Getenv) {
+		if err := os.Setenv(name, dir); err != nil {
+			log.Errorf("point %s at the run's artifacts %s: %v", name, dir, err)
+			return 1
+		}
+		log.Infof("a failing test's whole logs are kept under %s (%s)", dir, name)
+	}
 	work, err := os.MkdirTemp(root, "work-")
 	if err != nil {
 		log.Errorf("create the run's scratch directory: %v", err)
