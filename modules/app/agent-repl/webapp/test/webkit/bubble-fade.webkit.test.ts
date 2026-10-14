@@ -93,26 +93,34 @@ async function paint(page: Page, footer: string): Promise<Painted> {
 
 describe("the collapsed bubble's fade in WebKit", () => {
   let browser: Browser;
-  let page: Page;
+  // THE PAINTS ARE THE beforeAll'S, AND THE TESTS ONLY READ THEM, as every
+  // webkit suite does (vitest.webkit.config.ts): a screenshot inside a test
+  // ran past the 850ms test bound on a loaded host.
+  let shownLast: Painted;
+  let footerAfter: Painted;
 
   beforeAll(async () => {
     const css = await readFile(path.join(here, "../../src/styles.css"), "utf8");
     browser = await webkit.launch();
-    page = await browser.newPage({ viewport: { width: 800, height: 800 }, deviceScaleFactor: 1 });
+    const page = await browser.newPage({ viewport: { width: 800, height: 800 }, deviceScaleFactor: 1 });
     await page.setContent(`<!doctype html><html><head></head><body>
       <div id="main-col"><div id="feed-scroll"><main id="feed" data-feed="root"></main></div></div>
       </body></html>`);
     await page.addStyleTag({ content: css });
     await page.addStyleTag({ content: SENTINEL });
+    shownLast = await paint(page, "");
+    // A footer after the box, as an errored response draws its cut-short
+    // marker (unstyled here, so its own red cannot pass for the fade).
+    footerAfter = await paint(page, `<div class="${BUBBLE_FOOTER_CLASS}">cut short</div>`);
   });
 
   afterAll(async () => {
     await browser.close();
   });
 
-  it("ends the fade at the bubble's bottom edge when the box is the last thing shown", async () => {
+  it("ends the fade at the bubble's bottom edge when the box is the last thing shown", () => {
     // Arrange / Act — the hidden expand-only chrome is all that follows the box.
-    const p = await paint(page, "");
+    const p = shownLast;
 
     // Assert — a whole padding band below the box, and the fade reaches through
     // it to the bubble's edge, short of it by no more than the hairline border
@@ -121,26 +129,25 @@ describe("the collapsed bubble's fade in WebKit", () => {
     expect(Math.abs(p.redBottom - p.bubbleBottom)).toBeLessThanOrEqual(EDGE_SLACK);
   });
 
-  it("spans the bubble's left padding when the box is the last thing shown", async () => {
+  it("spans the bubble's left padding when the box is the last thing shown", () => {
     // Arrange / Act
-    const p = await paint(page, "");
+    const p = shownLast;
 
     // Assert
     expect(p.redInLeftPadding).toBe(true);
   });
 
-  it("keeps the bubble's rounded bottom corner unpainted by the fade", async () => {
+  it("keeps the bubble's rounded bottom corner unpainted by the fade", () => {
     // Arrange / Act
-    const p = await paint(page, "");
+    const p = shownLast;
 
     // Assert
     expect(p.redInCorner).toBe(false);
   });
 
-  it("ends the fade at the box's bottom when a footer follows it", async () => {
-    // Arrange / Act — a footer after the box, as an errored response draws its
-    // cut-short marker (unstyled here, so its own red cannot pass for the fade).
-    const p = await paint(page, `<div class="${BUBBLE_FOOTER_CLASS}">cut short</div>`);
+  it("ends the fade at the box's bottom when a footer follows it", () => {
+    // Arrange / Act
+    const p = footerAfter;
 
     // Assert — the fade stops above the footer, at the box's own bottom edge.
     expect(Math.abs(p.redBottom - p.boxBottom)).toBeLessThanOrEqual(EDGE_SLACK);

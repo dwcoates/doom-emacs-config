@@ -102,3 +102,68 @@ describe("watchShownEdge", () => {
     expect(switches).toBe(0);
   });
 });
+
+describe("what a show costs in the page", () => {
+  /** An edge timed on a hand clock whose frames run when the test says. */
+  function timed() {
+    presence = createPresence(document, true);
+    const clock = { ms: 100 };
+    let frames: (() => void)[] = [];
+    watchShownEdge(presence, () => undefined, {
+      now: () => clock.ms,
+      frame: (fn) => {
+        frames.push(fn);
+      },
+    });
+    const runFrame = (): void => {
+      const due = frames;
+      frames = [];
+      for (const fn of due) fn();
+    };
+    return { p: presence, clock, runFrame, pending: () => frames.length };
+  }
+
+  it("records the time to the frame after the first painted one, at info", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const { p, clock, runFrame } = timed();
+    p.setShown(true);
+    clock.ms += 16;
+    runFrame();
+    clock.ms += 17.25;
+
+    // Act
+    runFrame();
+
+    // Assert
+    const record = await forwardedRecord(capture, "page.shown-frame");
+    expect([record.level.case, record.context?.["ms"]]).toEqual(["info", 33.3]);
+  });
+
+  it("records nothing until that second frame runs", () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const { p, runFrame } = timed();
+    p.setShown(true);
+
+    // Act
+    runFrame();
+
+    // Assert
+    capture.logger.flush();
+    expect(capture.sent.some((r) => r.operation === "page.shown-frame")).toBe(false);
+  });
+
+  it("times nothing for a hide", () => {
+    // Arrange
+    const { p, pending } = timed();
+    p.setShown(true);
+    const afterShow = pending();
+
+    // Act
+    p.setShown(false);
+
+    // Assert
+    expect(pending()).toBe(afterShow);
+  });
+});

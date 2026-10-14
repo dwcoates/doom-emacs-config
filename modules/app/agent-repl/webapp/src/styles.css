@@ -1939,6 +1939,17 @@ pre {
 html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
   animation: none;
 }
+/* A PAGE THE WEBHOST IS NOT SHOWING RUNS NO ANIMATIONS. Hidden in the webhost
+   it is `visibility: hidden`, which WebKit keeps animating, so every loop of
+   every working workspace forced a style pass a frame on a page nobody saw.
+   `host/unshown-animations.ts` stamps the flag, and moves every animation on
+   by the time it was frozen when the page is shown again, so nothing jumps.
+   `!important` because an inline `animation` shorthand resets the play state. */
+html[data-page-unshown] *,
+html[data-page-unshown] *::before,
+html[data-page-unshown] *::after {
+  animation-play-state: paused !important;
+}
 /* Left to right, entering fully off the left edge and leaving fully off the
    right. Percentages in `background-position` measure the image's travel
    across the leftover (container − image), which is NEGATIVE for an image

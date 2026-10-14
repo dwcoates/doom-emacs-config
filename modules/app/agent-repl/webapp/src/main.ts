@@ -44,6 +44,7 @@ import { answerLoginRequests } from "./login/request.js";
 import { mountNewsDigest } from "./news-digest/news-digest.js";
 import { drawCommandPanel } from "./panels/panels.js";
 import { createPromptWaveDriver } from "./prompt-wave-driver.js";
+import { liveUnshownAnimationsEnv, pauseAnimationsWhileUnshown } from "./host/unshown-animations.js";
 import { mountSidebar } from "./sidebar/sidebar.js";
 import { mountTopbar } from "./topbar/topbar.js";
 import { installProseLinkRouting } from "./link.js";
@@ -279,7 +280,10 @@ export async function boot(): Promise<void> {
     // hidden (Emacs not frontmost), so a JS timer hand-paints it then. Page-
     // global, started once the feed that holds the bubbles is mounted; see
     // prompt-wave-driver.ts for the whole account.
-    createPromptWaveDriver().start();
+    createPromptWaveDriver({ presence: pagePresence() }).start();
+    // A PAGE THE WEBHOST IS NOT SHOWING RUNS NO ANIMATIONS, and resumes each
+    // where it would have been when shown (host/unshown-animations.ts).
+    if (pagePresence().embedded) pauseAnimationsWhileUnshown(liveUnshownAnimationsEnv(document, pagePresence()));
 
     const footer = mountFooter(shell.footer, ctx, {
       selectDetachedWork: (id) => feed.selectDetachedWork(id),
