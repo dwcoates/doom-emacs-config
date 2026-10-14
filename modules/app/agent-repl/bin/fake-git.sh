@@ -25,6 +25,12 @@
 #                         which checks HEAD's tree out into PATH
 #   hooks:                rev-parse --git-path hooks (core.hooksPath, else
 #                         <repository>/hooks)
+#   named refs:           rev-parse --abbrev-ref HEAD |
+#                         --path-format=absolute --git-common-dir,
+#                         tag NAME REV, tag -d NAME, update-ref REF REV,
+#                         update-ref -d REF; each is one ref transaction that
+#                         runs the reference-transaction hook as git does
+#                         (prepared, where nonzero aborts; then committed)
 #
 # A LINKED WORKTREE is a directory whose .fakegit is a FILE naming the main
 # worktree ("main <path>"), as a real linked worktree's .git file names its
