@@ -128,7 +128,7 @@ func WithRunRoot(body func() int) int {
 		fmt.Fprintln(os.Stderr, "harness:", err)
 		return 1
 	}
-	if err := space.reclaimDeadRuns(); err != nil {
+	if _, err := TimedStep(os.Stderr, "harness", "reclaim the dead run roots", func() (struct{}, error) { return struct{}{}, space.reclaimDeadRuns() }); err != nil {
 		fmt.Fprintln(os.Stderr, "harness:", err)
 		return 1
 	}
@@ -217,7 +217,7 @@ func mainIn(m *testing.M, module, root string) int {
 		cmd.Dir = module
 		cmd.Stderr = os.Stderr
 		cmd.Stdout = os.Stderr
-		if err := cmd.Run(); err != nil {
+		if _, err := TimedStep(os.Stderr, "harness", "go build "+b.pkg, func() (struct{}, error) { return struct{}{}, cmd.Run() }); err != nil {
 			// Recorded rather than fatal: a suite that only exercises the fake
 			// still reports a real failure through DaemonBinary below.
 			buildErr = fmt.Errorf("harness: go build %s: %w", b.pkg, err)
@@ -240,7 +240,9 @@ const prebuiltSub = "harness"
 func runPinned(m *testing.M, module, parent string) int {
 	repo := filepath.Dir(module)
 	var err error
-	pinnedCheckout, err = newPinnedCheckout(filepath.Join(parent, "checkout"), repo)
+	pinnedCheckout, err = TimedStep(os.Stderr, "harness", "lay the pinned checkout", func() (string, error) {
+		return newPinnedCheckout(filepath.Join(parent, "checkout"), repo)
+	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "harness:", err)
 		return 1
@@ -248,7 +250,7 @@ func runPinned(m *testing.M, module, parent string) int {
 	// The self-check runs BEFORE any test, because a build identity that
 	// disagrees fails as a stale-shim relaunch on every spawn rather than as
 	// anything a test can read.
-	if err := checkBuildIdentityAgrees(pinnedCheckout); err != nil {
+	if _, err := TimedStep(os.Stderr, "harness", "check the build identity", func() (struct{}, error) { return struct{}{}, checkBuildIdentityAgrees(pinnedCheckout) }); err != nil {
 		fmt.Fprintln(os.Stderr, "harness:", err)
 		return 1
 	}
