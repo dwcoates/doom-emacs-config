@@ -1129,9 +1129,11 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 }
 #ws-sidebar .kids .ws.current > .row { padding-left: calc(0.55rem - var(--row-gutter-w)); }
 
-/* Workspaces whose agent-repl is closed (and merged ones) stay listed but
-   recede. */
-#ws-sidebar .ws.gone > .row { opacity: 0.55; }
+/* A RECEDED ROW stays listed but steps back: a closed (or merged)
+   workspace, and a hidden one (owner request, 2026-10-13: a Hidden row reads
+   in exactly the grey a Recently Merged row does, which is the band name
+   colour at this opacity). */
+#ws-sidebar .ws.receded > .row { opacity: 0.55; }
 
 /* The current row's merge (sidebar.ts `mergeRowHtml`). The rail LEADS on
    merges, and the merge glyph beside the name says only that one is
