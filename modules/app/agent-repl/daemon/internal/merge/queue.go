@@ -535,7 +535,7 @@ func (o *orchestrator) republishQueue(ctx context.Context, repo wsm.RepoKey) err
 		// not counted, so 1 means next and there is never a 0.
 		place++
 		o.publish(entry.Workspace, MergeFacts{
-			State: StateQueued, Step: footer.StepEnqueued, QueuePlace: place, QueueWaiting: waiting,
+			State: StateQueued, QueuedAt: entry.EnqueuedAt, Step: footer.StepEnqueued, QueuePlace: place, QueueWaiting: waiting,
 			Line: ahead, LineAt: aheadAt,
 		})
 	}

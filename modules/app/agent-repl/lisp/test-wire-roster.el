@@ -405,7 +405,8 @@ reserved."
                        #'string<))))
 
 (defconst agent-repl-test-wire-roster--when-arm-samples
-  '((turnRunning "{\"startedAtMs\":\"1\"}" (:started-at-ms 1))
+  '((syncMerging "{\"startedAtMs\":\"1\"}" (:started-at-ms 1))
+    (turnRunning "{\"startedAtMs\":\"1\"}" (:started-at-ms 1))
     (noTurnRunning "{}" nil)
     (merged "{\"atMs\":\"1\"}" (:at-ms 1))
     (hidden "{\"atMs\":\"1\"}" (:at-ms 1 :cache nil)))
@@ -450,6 +451,40 @@ name: each one's breach names that message exactly as the helper's does."
                       (lambda (v) (agent-repl-wire-roster--decode-instant (cdr pair) v))
                       json))))))
 
+;;;; ---- The shared start decoder ----
+
+(ert-deftest agent-repl-test-wire-roster-decode-started-at-reads-started-at-ms ()
+  "The start decoder answers the plist `(:started-at-ms)' from a decimal string."
+  (should (equal (agent-repl-test-wire-roster--decode
+                  (lambda (v) (agent-repl-wire-roster--decode-started-at "Some" v))
+                  "{\"startedAtMs\":\"1756400000000\"}")
+                 '(:started-at-ms 1756400000000))))
+
+(ert-deftest agent-repl-test-wire-roster-decode-started-at-refuses-an-extra-key ()
+  "An unknown field is a breach naming the MESSAGE the caller passed."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  (lambda (v) (agent-repl-wire-roster--decode-started-at "Some" v))
+                  "{\"startedAtMs\":\"1\",\"extra\":1}")
+                 '("Some" extra "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-decode-started-at-refuses-a-non-integer ()
+  "A start that is no int64 is a breach naming the MESSAGE and the field."
+  (should (equal (car (agent-repl-test-wire-roster--breach
+                       (lambda (v) (agent-repl-wire-roster--decode-started-at "Some" v))
+                       "{\"startedAtMs\":\"soon\"}"))
+                 "Some")))
+
+(ert-deftest agent-repl-test-wire-roster-start-decoders-share-the-helper ()
+  "Every counting when-arm decoder is the shared helper under its own message
+name: each one's breach names that message exactly as the helper's does."
+  (dolist (pair '((agent-repl-wire-decode-roster-row-when-sync-merging . "RosterRowWhenSyncMerging")
+                  (agent-repl-wire-decode-roster-row-when-turn-running . "RosterRowWhenTurnRunning")))
+    (let ((json "{\"startedAtMs\":\"1\",\"extra\":1}"))
+      (should (equal (agent-repl-test-wire-roster--breach (car pair) json)
+                     (agent-repl-test-wire-roster--breach
+                      (lambda (v) (agent-repl-wire-roster--decode-started-at (cdr pair) v))
+                      json))))))
+
 (ert-deftest agent-repl-test-wire-roster-when-turn-running-carries-its-start ()
   "Regression: the strict decoder must accept the `turnRunning' arm or it
 rejects the whole WatchWorkspaceRoster push and every tab falls back to a
@@ -465,6 +500,21 @@ stale blue status."
                   #'agent-repl-wire-decode-roster-row-when-turn-running
                   "{\"startedAtMs\":\"1\",\"atMs\":\"1\"}")
                  '("RosterRowWhenTurnRunning" atMs "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-when-sync-merging-carries-its-start ()
+  "Regression: the strict decoder must accept the `syncMerging' arm (see
+`turnRunning')."
+  (should (equal (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-row-when
+                  "{\"syncMerging\":{\"startedAtMs\":\"1756400000000\"}}")
+                 '(:arm :sync-merging :value (:started-at-ms 1756400000000)))))
+
+(ert-deftest agent-repl-test-wire-roster-when-sync-merging-refuses-an-unknown-field ()
+  "The sync merging arm carries its start alone."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row-when-sync-merging
+                  "{\"startedAtMs\":\"1\",\"atMs\":\"1\"}")
+                 '("RosterRowWhenSyncMerging" atMs "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-when-no-turn-running-decodes ()
   "The `noTurnRunning' arm must decode too (see `turnRunning')."

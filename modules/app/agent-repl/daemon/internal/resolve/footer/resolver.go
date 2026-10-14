@@ -328,7 +328,10 @@ type publication struct {
 	lineChanged  bool
 	previousLine activityLine
 	clockChanged bool
-	jumps        []dlog.Context
+	// mergeStartChanged reports that the drawn merge's start moved: a merge
+	// appearing, leaving, or restated from another instant.
+	mergeStartChanged bool
+	jumps             []dlog.Context
 }
 
 // publishLocked renders the workspace's view, notes what moved, and publishes
@@ -341,6 +344,7 @@ func (r *resolver) publishLocked(ws ids.WorkspaceID, s *wsState) publication {
 	p.line, p.lineChanged, p.previousLine = s.observeLine(view)
 	p.clockChanged = s.observeClock(view)
 	s.published = view.GetStrip().GetStatus()
+	p.mergeStartChanged = s.observeMergeStart(mergeStartedAt(s.published, s.merge))
 	r.topicLocked(ws).Publish(view)
 	return p
 }
@@ -350,8 +354,11 @@ func (r *resolver) publishLocked(ws ids.WorkspaceID, s *wsState) publication {
 func (p publication) statusMoved() bool { return p.armChanged || p.subChanged }
 
 // rosterMoved reports a publication the roster re-projects on: its status
-// moved, or its turn clock did, which the roster's when-column counts from.
-func (p publication) rosterMoved() bool { return p.statusMoved() || p.clockChanged }
+// moved, or its turn clock or merge start did, which the roster's when-column
+// counts from.
+func (p publication) rosterMoved() bool {
+	return p.statusMoved() || p.clockChanged || p.mergeStartChanged
+}
 
 // tellStatusChanged tells the status sink every workspace whose status or
 // turn clock moved, after the lock is released.
@@ -377,6 +384,34 @@ func (r *resolver) tellStatusChanged(pubs []publication) {
 // logOf records for a fact.
 func (r *resolver) Status(ws ids.WorkspaceID) *frontendv1.FooterStatus {
 	return publishedOrResolved(r, ws, func(s *wsState) *frontendv1.FooterStatus { return s.published }, r.status)
+}
+
+// MergeStartedAt answers when the merge the workspace's strip shows started:
+// the one the last published view carried, resolved from what the footer
+// holds when it has published nothing yet, exactly as Status is.
+func (r *resolver) MergeStartedAt(ws ids.WorkspaceID) *int64 {
+	return publishedOrResolved(r, ws, func(s *wsState) *mergeStart { return s.publishedMergeStart },
+		func(s *wsState, log dlog.Logger) *mergeStart { return mergeStartedAt(r.status(s, log), s.merge) }).ms
+}
+
+// mergeStart is a view's merge start: ms is when its merge started, in epoch
+// ms, and nil when the view draws no merge. It is a value of its own so a
+// published "no merge" is still a publication (publishedOrResolved reads nil
+// as "nothing published yet").
+type mergeStart struct {
+	ms *int64
+}
+
+// mergeStartedAt is THE ONE RULE for when a drawn merge started: under the
+// merging arm, the merge's QueuedAt in epoch ms, and no instant under any
+// other arm. The instant rides on the same status it is read beside, so a
+// merge is counted exactly while the strip draws one.
+func mergeStartedAt(status *frontendv1.FooterStatus, facts MergeFacts) *mergeStart {
+	if status.GetMerging() == nil {
+		return &mergeStart{}
+	}
+	ms := facts.QueuedAt.UnixMilli()
+	return &mergeStart{ms: &ms}
 }
 
 // TurnClock answers the turn clock the workspace's strip shows: the one the
