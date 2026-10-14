@@ -2437,8 +2437,8 @@ func (w *watcher) streamEnded(gen uint64, kind, operation, key string, reaped fu
 		return
 	}
 	w.mu.Unlock()
-	// OFF THE LOCK: the verdict may be waited for (see diedUnder).
-	info, waited, died := w.client.AwaitDeath(w.ctx)
+	// OFF THE LOCK: Died reads the shim's process state.
+	info, died := w.client.Died()
 
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -2446,7 +2446,7 @@ func (w *watcher) streamEnded(gen uint64, kind, operation, key string, reaped fu
 		return
 	}
 	if died {
-		w.endedByDeathLocked(operation, kind+" stream ended because the shim died", err, info, waited, dlog.Context{
+		w.endedByDeathLocked(operation, kind+" stream ended because the shim died", err, info, dlog.Context{
 			"stream": kind, "key": key,
 		})
 		return
@@ -2488,14 +2488,13 @@ func (w *watcher) endedOrdinarilyLocked(gen uint64, kind, key string, reaped fun
 // marks it. The link is NOT walked to redialing: a dead shim's link goes to
 // dead on the client's own feed, and a redialing written after that walks it
 // backwards and raises a `link_severed` fault the death does not warrant.
-func (w *watcher) endedByDeathLocked(operation, detail string, err error, info shimclient.ExitInfo, waited time.Duration, extra ...dlog.Context) {
+func (w *watcher) endedByDeathLocked(operation, detail string, err error, info shimclient.ExitInfo, extra ...dlog.Context) {
 	ctx := dlog.Context{
 		"detail":           detail,
 		"cause":            "the shim died",
 		"shim_pid":         info.PID,
 		"shim_exit_code":   info.Code,
 		"shim_exit_signal": info.Signal,
-		"verdict_wait_ms":  float64(waited.Microseconds()) / 1000,
 	}
 	if err != nil {
 		ctx["error"] = err.Error()
@@ -2517,7 +2516,7 @@ func (w *watcher) openEndedByDeathLocked(operation, detail string, err error) bo
 		return false
 	}
 	info, _ := w.client.Reaped()
-	w.endedByDeathLocked(operation, detail, err, info, 0)
+	w.endedByDeathLocked(operation, detail, err, info)
 	return true
 }
 
@@ -2538,7 +2537,7 @@ func (w *watcher) shellStreamEnded(gen uint64, s *shellWatch, err error) {
 	w.mu.Unlock()
 	// OFF THE LOCK, as streamEnded: a dead shim's shell stream is the death's
 	// effect, and re-opening it would only reach the dead socket.
-	info, waited, died := w.client.AwaitDeath(w.ctx)
+	info, died := w.client.Died()
 
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -2547,7 +2546,7 @@ func (w *watcher) shellStreamEnded(gen uint64, s *shellWatch, err error) {
 	}
 	if died {
 		s.stream = nil
-		w.endedByDeathLocked("watch_bash", "a detached shell's stream ended because the shim died", err, info, waited, dlog.Context{
+		w.endedByDeathLocked("watch_bash", "a detached shell's stream ended because the shim died", err, info, dlog.Context{
 			"stream": "shell", "key": key,
 		})
 		return

@@ -531,11 +531,8 @@ func (s *fakeShim) ForceKills() []shimclient.KillAttribution {
 
 func (s *fakeShim) Exited() <-chan shimclient.ExitInfo { return s.exited }
 
-// AwaitDeath answers the exit Die recorded, at once: this suite stages no race.
-func (s *fakeShim) AwaitDeath(context.Context) (shimclient.ExitInfo, time.Duration, bool) {
-	info, ok := s.Reaped()
-	return info, 0, ok
-}
+// Died answers the fake's reaped exit: this suite stages no exiting process.
+func (s *fakeShim) Died() (shimclient.ExitInfo, bool) { return s.Reaped() }
 
 // Reaped answers the exit Die recorded.
 func (s *fakeShim) Reaped() (shimclient.ExitInfo, bool) {

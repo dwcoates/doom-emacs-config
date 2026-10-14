@@ -176,9 +176,9 @@ type fakeClient struct {
 	sessionCount int
 	// reaped is the decoded exit Reaped answers, nil when nothing was reaped.
 	reaped *shimclient.ExitInfo
-	// verdictLands, when set, is the exit decided WHILE a broken stream's
-	// consumer waits in AwaitDeath: the EOF-before-reap order, staged.
-	verdictLands *shimclient.ExitInfo
+	// exiting, when set, is the inferred exit Died answers for a process that
+	// reads exiting before its reap is in: the EOF-before-reap order, staged.
+	exiting *shimclient.ExitInfo
 	// standingDown is the shim's stand-down latch, which the real client sets
 	// the moment a KillSession is asked of it.
 	standingDown bool
@@ -569,16 +569,17 @@ func (c *fakeClient) Detach()                            { panic("sessionwatcher
 func (c *fakeClient) Exited() <-chan shimclient.ExitInfo { return c.exits }
 func (c *fakeClient) PID() int                           { return 4242 }
 
-// AwaitDeath answers the held exit, or -- when the test staged one to land
-// during the wait -- decides that exit first, as the reaper would.
-func (c *fakeClient) AwaitDeath(context.Context) (shimclient.ExitInfo, time.Duration, bool) {
-	c.mu.Lock()
-	if c.reaped == nil && c.verdictLands != nil {
-		c.reaped = c.verdictLands
+// Died answers the reaped exit, or the staged exiting one when no reap is in.
+func (c *fakeClient) Died() (shimclient.ExitInfo, bool) {
+	if info, ok := c.Reaped(); ok {
+		return info, true
 	}
-	c.mu.Unlock()
-	info, ok := c.Reaped()
-	return info, 0, ok
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.exiting == nil {
+		return shimclient.ExitInfo{}, false
+	}
+	return *c.exiting, true
 }
 
 // Reaped answers the decoded exit the fake was told to hold.
