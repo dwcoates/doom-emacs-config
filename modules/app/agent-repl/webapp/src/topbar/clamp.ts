@@ -89,3 +89,23 @@ export function clampReveal(anchor: Rect, reveal: Rect, viewport: Viewport): Rev
     maxHeight: heightBelow(top, viewport),
   };
 }
+
+/**
+ * Place REVEAL BESIDE ANCHOR, to its right, inside VIEWPORT.
+ *
+ * The reveal's top-left corner prefers the anchor's top-right corner, so it
+ * reads as growing out of the anchor's right edge on the anchor's own line,
+ * and covers nothing to the anchor's left. It slides left only as far as the
+ * right edge demands, and UP only as far as the bottom edge demands, so it
+ * keeps the anchor's line in its span for as long as the window allows; what
+ * still does not fit scrolls inside itself.
+ */
+export function clampBeside(anchor: Rect, reveal: Rect, viewport: Viewport): RevealPlacement {
+  const lowest = viewport.height - REVEAL_MARGIN_PX - reveal.height;
+  const top = Math.max(REVEAL_MARGIN_PX, Math.min(anchor.top, lowest));
+  return {
+    left: clampLeft(anchor.right, reveal.width, viewport),
+    top,
+    maxHeight: heightBelow(top, viewport),
+  };
+}
