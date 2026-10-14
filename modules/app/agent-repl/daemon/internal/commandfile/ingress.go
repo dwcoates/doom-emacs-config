@@ -330,7 +330,7 @@ func (i *ingress) apply(ctx context.Context, log dlog.Logger, file string, index
 			if err != nil {
 				return err
 			}
-			detached = merge.NewDetachedRun(entry.AsyncName, entry.Instruction, entry.CompactAfter, closes, entry.CleanupWorktree)
+			detached = merge.NewDetachedRun(entry.AsyncName, entry.Instruction, entry.CompactAfter, closes, entry.CleanupWorktree, entry.MergeActions())
 		}
 		return i.deps.Merge.Enqueue(ctx, merge.Request{Workspace: ws, Source: source, By: merge.RequestedByAgent, Detached: detached, OneShot: entry.OneShot})
 	case TypeMergeEvict:
