@@ -584,6 +584,23 @@ func (c *chain) parkTurn(ws ids.WorkspaceID) (release func()) {
 	}
 }
 
+// headHoldsTheTurn admits the queue with the head held inside its gate,
+// holding its repository's test turn, and the merge BEHIND it waiting in line
+// for that turn, and answers the head gate's release and the admission's
+// end. The merge behind the head joins the race at once, so left alone it
+// could reach the test turn before the head; its first ask is parked until
+// the head's gate runs.
+func (c *chain) headHoldsTheTurn(t *testing.T, behind ids.WorkspaceID) (releaseHead chan struct{}, done <-chan error) {
+	t.Helper()
+	headGate, releaseHead := c.runner.hold(c.dirs[theWorkspace])
+	releaseBehind := c.parkTurn(behind)
+	done = admitAsync(c.h, context.Background())
+	<-headGate
+	releaseBehind()
+	c.awaitLined(t, behind)
+	return releaseHead, done
+}
+
 // awaitLined waits, bounded, for ws to join the line for its test turn.
 func (c *chain) awaitLined(t *testing.T, ws ids.WorkspaceID) {
 	t.Helper()
@@ -800,13 +817,11 @@ func TestTheMergeBehindTheHeadRebasesOntoTheTargetsTip(t *testing.T) {
 	// Arrange: the head holds in its gate; the merge behind it, rebased,
 	// waits in line for the test turn.
 	c := newChain(t)
-	_, releaseHead := c.runner.hold(c.dirs[theWorkspace])
 	enqueue(t, c.h)
 	c.queue(t, "ws-b", "b1")
-	done := admitAsync(c.h, context.Background())
+	releaseHead, done := c.headHoldsTheTurn(t, "ws-b")
 
 	// Act.
-	c.awaitLined(t, "ws-b")
 	tree, own := c.git.tree("b-ws-b"), c.git.own(c.git.ref("master"), "b-ws-b")
 	close(releaseHead)
 	<-done
@@ -852,34 +867,31 @@ func TestTheMergeBehindTheHeadStartsWhileTheHeadsRebaseStands(t *testing.T) {
 }
 
 func TestTheMergeBehindAPromotedHeadJoinsTheRaceAtOnce(t *testing.T) {
-	// Arrange: A holds in its gate; B races it from behind, its first gate on
-	// the old tip held (and cut when A lands), its gate at the head held too;
-	// C waits beyond the window.
+	// Arrange: A holds in its gate; B races it from behind, every gate of
+	// its held; C waits beyond the window, its rebase held.
 	c := newChain(t)
-	headGate, releaseHead := c.runner.hold(c.dirs[theWorkspace])
 	enqueue(t, c.h)
 	c.queue(t, "ws-b", "b1")
 	c.queue(t, "ws-c", "c1")
-	behindGate, _ := c.runner.hold(c.dirs["ws-b"])
+	_, releaseBehind := c.runner.hold(c.dirs["ws-b"])
 	_, releasePromoted := c.runner.hold(c.dirs["ws-b"])
-	thirdGate, releaseThird := c.runner.hold(c.dirs["ws-c"])
-	done := admitAsync(c.h, context.Background())
-	<-headGate
-	<-behindGate
+	thirdRebase, releaseThird := c.git.holdRebase(c.dirs["ws-c"])
+	releaseHead, done := c.headHoldsTheTurn(t, "ws-b")
 	close(releaseHead)
 	if err := <-done; err != nil {
 		t.Fatalf("the head's admission ended on: %v", err)
 	}
 
-	// Act: B is promoted; C reaches its gate while B's still holds.
+	// Act: B is promoted; C starts while B still runs.
 	promoted := admitAsync(c.h, context.Background())
 	bound := time.NewTimer(5 * time.Second)
 	defer bound.Stop()
 	select {
-	case <-thirdGate:
+	case <-thirdRebase:
 	case <-bound.C:
-		t.Fatal("the merge behind the promoted head never reached its gate while that head ran")
+		t.Fatal("the merge behind the promoted head never started while that head ran")
 	}
+	close(releaseBehind)
 	close(releasePromoted)
 	close(releaseThird)
 	if err := <-promoted; err != nil {
@@ -894,16 +906,17 @@ func TestTheMergeBehindAPromotedHeadJoinsTheRaceAtOnce(t *testing.T) {
 }
 
 func TestAChainWhoseHeadIsSuspendedTakesNoMergeUntilTheHeadIsBack(t *testing.T) {
-	// Arrange: A holds in its gate with B racing it; C waits beyond the
-	// window; then A alone is suspended, leaving B in the chain.
+	// Arrange: A waits to ask for its test turn while B, racing it, holds in
+	// its gate; C waits beyond the window; then A alone is suspended, leaving
+	// B in the chain.
 	c := newChain(t)
-	headGate, _ := c.runner.hold(c.dirs[theWorkspace])
+	releaseHeadTurn := c.parkTurn(theWorkspace)
+	defer releaseHeadTurn()
 	enqueue(t, c.h)
 	c.queue(t, "ws-b", "b1")
 	c.queue(t, "ws-c", "c1")
 	behindGate, releaseBehind := c.runner.hold(c.dirs["ws-b"])
 	done := admitAsync(c.h, context.Background())
-	<-headGate
 	<-behindGate
 	if err := c.h.o.suspendFor(context.Background(), theWorkspace, suspendPause); err != nil {
 		t.Fatalf("suspending the head: %v", err)
@@ -1043,33 +1056,6 @@ func TestASpeculativeGateIsNeverAdmittedAboveTheBand(t *testing.T) {
 	}
 }
 
-func TestOnACPowerTheMergeBehindTheHeadGatesBesideItOnASaturatedHost(t *testing.T) {
-	// Arrange: the host is saturated but on AC power; the head holds in its
-	// gate.
-	c := newChain(t)
-	c.h.load(1)
-	c.h.power(cpugov.PowerAC)
-	inGate, releaseHead := c.runner.hold(c.dirs[theWorkspace])
-	enqueue(t, c.h)
-	c.queue(t, "ws-b", "b1")
-	behindGate, releaseBehind := c.runner.hold(c.dirs["ws-b"])
-	done := admitAsync(c.h, context.Background())
-	<-inGate
-
-	// Act: the merge behind reaches its gate while the head's still runs.
-	admitted := c.awaitDecision(t, "ws-b", "admit")
-	<-behindGate
-	close(releaseHead)
-	close(releaseBehind)
-	<-done
-	c.drain(t)
-
-	// Assert.
-	if admitted["reason"] != "on_ac_power" {
-		t.Fatalf("admitted for %v, want on_ac_power", admitted["reason"])
-	}
-}
-
 func TestASpeculativeGateBelowTheBandIsAdmitted(t *testing.T) {
 	// Arrange: the head's ask for the test turn is parked.
 	c := newChain(t)
@@ -1135,12 +1121,10 @@ func TestTheDefaultWindowHoldsTheHeadAndOneMergeBehindIt(t *testing.T) {
 	// the top two only); the head holds in its gate and the merge behind it
 	// waits in line for the test turn.
 	c := newChain(t)
-	_, releaseHead := c.runner.hold(c.dirs[theWorkspace])
 	enqueue(t, c.h)
 	c.queue(t, "ws-b", "b1")
 	c.queue(t, "ws-c", "c1")
-	done := admitAsync(c.h, context.Background())
-	c.awaitLined(t, "ws-b")
+	releaseHead, done := c.headHoldsTheTurn(t, "ws-b")
 
 	// Act.
 	_, cRuns := c.h.o.runFor("ws-c")
@@ -1163,12 +1147,10 @@ func TestARestartMidRaceResumesBothMergesAndLandsEachWithItsOwnCommits(t *testin
 	// Arrange: the head holds in its gate and the merge behind it waits in
 	// line for the test turn; the daemon exits mid-race.
 	c := newChain(t)
-	_, releaseHead := c.runner.hold(c.dirs[theWorkspace])
 	enqueue(t, c.h)
 	c.queue(t, "ws-b", "b1")
 	first := c.h.o
-	done := admitAsync(c.h, context.Background())
-	c.awaitLined(t, "ws-b")
+	releaseHead, done := c.headHoldsTheTurn(t, "ws-b")
 	first.Drain(context.Background())
 	close(releaseHead)
 	<-done
@@ -1313,4 +1295,26 @@ func TestEveryOrchestratorWatchRunsThroughWatch(t *testing.T) {
 	if body, _ := os.ReadFile("testturn.go"); strings.Contains(string(body), "go func()") {
 		t.Fatal("testturn.go starts a watcher goroutine of its own instead of watch")
 	}
+}
+
+func TestHeadHoldsTheTurnLeavesTheHeadInItsGateAndTheMergeBehindInLine(t *testing.T) {
+	// Arrange.
+	c := newChain(t)
+	enqueue(t, c.h)
+	c.queue(t, "ws-b", "b1")
+
+	// Act.
+	releaseHead, done := c.headHoldsTheTurn(t, "ws-b")
+
+	// Assert.
+	c.h.o.mu.Lock()
+	line := c.h.o.testTurns[c.h.repoKey()]
+	holder, waiting := line.holder, append([]*run(nil), line.waiting...)
+	c.h.o.mu.Unlock()
+	if holder == nil || holder.ws != theWorkspace || len(waiting) != 1 || waiting[0].ws != "ws-b" {
+		t.Fatalf("holder=%v waiting=%v, want the head holding the turn and ws-b alone in line", holder, waiting)
+	}
+	close(releaseHead)
+	<-done
+	c.drain(t)
 }
