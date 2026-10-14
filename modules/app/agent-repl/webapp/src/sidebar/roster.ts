@@ -124,6 +124,7 @@ export function drawWorkspaceRoster(u: WorkspaceRoster, sc: SidebarContext): HTM
   // The copies drawn from the last roster are about to be thrown away.
   sc.view.beginDraw();
   sc.dropdowns.beginDraw();
+  sc.rowHover.beginDraw();
   sc.tasks.length = 0;
   for (const [index, section] of task.sections.entries()) {
     sc.tasks.push({

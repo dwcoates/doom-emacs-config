@@ -14,6 +14,7 @@ import { GROUPING_PICK_LABELS, PREFS_KEY, drawRailHead, mountSidebar, mountWebho
 import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { GROUPINGS, type SidebarContext } from "../../src/sidebar/context.js";
 import { createRailSearch } from "../../src/sidebar/search.js";
+import { HOVER_CLOSE_GRACE_MS, HOVER_OPEN_DELAY_MS } from "../../src/sidebar/row-hover.js";
 import { GROUPING_VIEW_KEY } from "../../src/sidebar/view.js";
 import { captureLogRecords, forwardedRecord, type LogCapture } from "../log-capture.js";
 import type { PhasedAnimation } from "../../src/sidebar/wall-phase.js";
@@ -441,7 +442,7 @@ describe("mounting the rail: its looping animations", () => {
     });
 
     // Act
-    handle.dispose();
+    handle?.dispose();
     document.dispatchEvent(new Event("visibilitychange"));
 
     // Assert
@@ -602,7 +603,7 @@ describe("mounting the rail", () => {
     const host = document.createElement("nav");
     const handle = mountSidebar(host, ctxFor(), { storage: null, timers: fakeTimers() });
     await settle();
-    handle.dispose();
+    handle?.dispose();
     expect([host.hidden, host.childElementCount]).toEqual([true, 0]);
   });
 
@@ -638,7 +639,7 @@ describe("mounting the rail", () => {
     const host = document.createElement("nav");
     const handle = mountSidebar(host, ctx, { storage: null, timers: fakeTimers() });
     await settle();
-    handle.dispose();
+    handle?.dispose();
     expect(ticker.subscribers()).toBe(0);
   });
 
@@ -695,7 +696,7 @@ describe("the roster stream's planned ending", () => {
     // ACT
     const handle = mountSidebar(document.createElement("nav"), ctx, { storage: null, timers: fakeTimers() });
     await settle();
-    handle.dispose();
+    handle?.dispose();
     // ASSERT
     expect({ reported, requests }).toEqual({ reported: [], requests: 2 });
   });
@@ -1121,5 +1122,61 @@ describe("the webhost sidebar's create form", () => {
     // Assert
     expect((request as CreateWorkspaceRequest | null)?.parent?.workspace?.id).toBe("ws-current");
     host.remove();
+  });
+});
+
+describe("the rail reports where the pointer is to the row hover gesture", () => {
+  const mounted: Array<{ dispose(): void }> = [];
+  afterEach(() => {
+    for (const handle of mounted.splice(0)) handle.dispose();
+    vi.useRealTimers();
+  });
+
+  /** Mount a rail of one row, with the pointer resting on its duration field until the panel opened. */
+  async function mountHovered(): Promise<{ host: HTMLElement; ws: HTMLElement }> {
+    const host = document.createElement("div");
+    mounted.push(
+      mountSidebar(host, ctxFor([roster({ repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-1" })] })] })]), {
+        timers: fakeTimers(),
+      }),
+    );
+    await settle();
+    vi.useFakeTimers();
+    const ws = host.querySelector("[data-grouping='repository'] [data-roster-row='ws-1']") as HTMLElement;
+    (ws.querySelector(":scope > .row > [data-when]") as HTMLElement).dispatchEvent(new MouseEvent("mouseenter"));
+    vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
+    return { host, ws };
+  }
+
+  it("closes the panel when the pointer leaves the rail without the duration field seeing it go", async () => {
+    // ARRANGE
+    const { host, ws } = await mountHovered();
+    // ACT
+    host.dispatchEvent(new MouseEvent("mouseleave"));
+    vi.advanceTimersByTime(HOVER_CLOSE_GRACE_MS);
+    // ASSERT
+    expect(ws.classList.contains("open")).toBe(false);
+  });
+
+  it("closes the panel when the pointer moves elsewhere in the rail without the duration field seeing it go", async () => {
+    // ARRANGE
+    const { host, ws } = await mountHovered();
+    // ACT
+    (host.querySelector(".sb-head") as HTMLElement).dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
+    vi.advanceTimersByTime(HOVER_CLOSE_GRACE_MS);
+    // ASSERT
+    expect(ws.classList.contains("open")).toBe(false);
+  });
+
+  it("keeps the panel open while the pointer moves over the duration field", async () => {
+    // ARRANGE
+    const { ws } = await mountHovered();
+    // ACT
+    (ws.querySelector(":scope > .row > [data-when]") as HTMLElement).dispatchEvent(
+      new MouseEvent("mousemove", { bubbles: true }),
+    );
+    vi.advanceTimersByTime(HOVER_CLOSE_GRACE_MS * 10);
+    // ASSERT
+    expect(ws.classList.contains("open")).toBe(true);
   });
 });
