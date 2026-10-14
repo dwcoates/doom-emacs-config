@@ -1884,6 +1884,24 @@ describe("the hidden section's rows", () => {
     expect(opacities).toEqual([rowOpacity, when]);
   });
 
+  it.each<{ name: string; when: MessageInitShape<typeof RosterRowWhenSchema>["shown"]; want: string }>([
+    { name: "a turn running", when: { case: "turnRunning", value: { startedAtMs: BigInt(NOW - 65_000) } }, want: "var(--when-counting-opacity)" },
+    { name: "a sync merge", when: { case: "syncMerging", value: { startedAtMs: BigInt(NOW - 65_000) } }, want: "var(--when-counting-opacity)" },
+    { name: "no turn running", when: { case: "noTurnRunning", value: {} }, want: "var(--receded-opacity)" },
+  ])("draws an open row's when-column with $name at $want", ({ when, want }) => {
+    // Arrange
+    const drawn = drawRosterRow(row({ id: "ws-1", when }), sidebarContext(), "R", "grouping");
+    // Act
+    const opacity = inRail(drawn, () => cascadedValue(drawn.querySelector(":scope > .row > .when") as HTMLElement, "opacity"));
+    // Assert
+    expect(opacity).toBe(want);
+  });
+
+  it("lifts a counting when-column to 0.75", () => {
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
+    expect(inRail(drawn, (rail) => cascadedValue(rail, "--when-counting-opacity"))).toBe("0.75");
+  });
+
   it("strikes a hidden row's name through at a cold gate", () => {
     const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "coldGate", value: {} } }), sidebarContext(), "R", "hidden");
     expect(inRail(drawn, () => cascadedValue(drawn.querySelector(":scope > .row > .name") as HTMLElement, "text-decoration"))).toBe(
