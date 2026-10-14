@@ -138,9 +138,12 @@ Throttled-I/O artifacts (absent in all default-tier runs; verify after R1):
   long before releaseSlot took it out of its chain, so a chain extension in
   between read the chain as off its queue's front. The run now leaves its
   line (run.leftLine) before its entry goes, and extendOnce's check leaves
-  such runs out of both sides (standingFront). The one recorded occurrence
-  (entries=2) is not fully explained by that window; the refusal now names
-  the whole chain and line, so the next one is diagnosable from the log.
+  such runs out of both sides (standingFront). The recorded occurrence
+  (entries=2) was the second path, which the refusal's new fields named on
+  its next appearance: a handover transfers the head (suspendFor marks it)
+  and its run leaves this daemon's chain while its entry stays in line for
+  the adopter. standingFront leaves every transferred workspace out of both
+  sides until it is adopted back.
 - New failures found in the R3 runs, each fixed at its source:
   - a stray's SIGSTOP whose last thread awaited the CPU (a shim's FSEvents
     dispatch thread at background QoS, host load 81) was reported as a stuck
