@@ -3134,7 +3134,18 @@ html[data-page-unshown] *::after {
 .queued-reason { margin-top: 0.3rem; font-size: calc(0.8rem * var(--feed-text-scale)); font-style: italic; }
 /* A held badge's full sentence, the daemon's words, in the expand-only details. */
 .queued-status-detail, .queued-status-note { margin-top: 0.3rem; font-size: calc(0.8rem * var(--feed-text-scale)); }
-.queued-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+/* THE ROW IS COMPACT AND EVEN (owner request, 2026-10-13): every control is
+   one width, the widest label's, because a grid's `1fr` columns sized at the
+   row's own max-content all resolve to the largest column. */
+.queued-actions {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  width: max-content;
+  max-width: 100%;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+}
 .queued-actions ar-button { cursor: pointer; font: inherit; }
 /* A release the holding arm is likely to refuse: offered, because the daemon
    is the one that answers, but drawn back so it does not read as the ordinary
@@ -5444,13 +5455,25 @@ ar-button.outcome-marker-pill {
   color: var(--muted);
 }
 /* The row's controls, and the refusal that lands under them. */
+/* SHORT, SLEEK CONTROLS (owner request, 2026-10-13): a small font, a tight
+   leading and almost no vertical padding, so the row costs little height. */
 .queued-actions ar-button {
-  padding: 0.15rem 0.6rem;
-  border-radius: 6px;
+  padding: 0.05rem 0.6rem;
+  font-size: calc(0.75rem * var(--feed-text-scale));
+  line-height: 1.3;
+  text-align: center;
+  white-space: nowrap;
+  border-radius: 5px;
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--fg);
 }
+/* The two controls that decide the prompt's fate are outlined in their
+   outcome's color (owner request, 2026-10-13): Send now in the ready green,
+   Cancel, which discards it, in the error red. Only the border: neither is
+   filled, so neither reads as the default a stray click lands on. */
+.queued-actions ar-button.queued-action-release { border-color: var(--ok); }
+.queued-actions ar-button.queued-action-drop { border-color: var(--err); }
 .queued-actions ar-button[aria-disabled="true"] { cursor: not-allowed; opacity: 0.5; }
 .queued-refusal {
   margin-top: 0.35rem;
