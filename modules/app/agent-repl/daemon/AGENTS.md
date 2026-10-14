@@ -409,10 +409,17 @@ editor asks with `OpenTabs`, and each workspace is answered `opened` as soon as
 it opens, never in registry order (`ARCHITECTURE.md`, "The editor opens
 workspaces with OpenTabs"). Every bring-up (the boot's, a takeover's, an
 open's) starts only workspaces `bringup.OnlyVisible` keeps: never one the user
-hid or whose repository section is collapsed. Hiding or collapsing stands the
-session down through the idle sweep's own gate and hibernation
-(`drain/withheld.go`); a turn in flight defers it to the free edge that turn's
-end raises, and a workspace shown again meanwhile is not stood down. Records:
+hid or whose repository section is collapsed. Collapsing stands the session
+down through the idle sweep's own gate and hibernation (`drain/withheld.go`);
+a turn in flight defers it to the free edge that turn's end raises, and a
+workspace expanded again meanwhile is not stood down. HIDING leaves the cache
+to lapse first (`internal/cachelapse`, 2026-10-13): the keeper holds the
+shim's keep-alives, records the lapse the held shim projects on the row (the
+hidden section counts down to it), and stands the session down through the
+same withheld path when it comes; a hidden workspace's session is also
+started held. Records: `daemon.cachelapse.cadence` (INFO per hold or run),
+`daemon.cachelapse.projection` (INFO per recorded or dropped projection),
+`daemon.cachelapse.lapse` (INFO per lapse taken or skipped),
 `daemon.opentabs.open` (INFO per answered workspace, with its
 `roster_revision`; INFO when an open waits on an owed cut turn and when that
 wait ends), `daemon.opentabs.page`

@@ -13,7 +13,9 @@ workspace's web page was checked by Emacs alone, never by the daemon.
 1. ONLY OPEN AND VISIBLE WORKSPACES RUN. The daemon restores and starts the
    sessions of open, visible workspaces only. A hidden workspace (or one in a
    collapsed repository section) runs nothing; it is started when shown and
-   stood down when hidden.
+   stood down when hidden. Amended 2026-10-13 (hidden-cache-lapse.md): a
+   hidden workspace's session is stood down when its prompt cache lapses,
+   not at the hide, so it can be shown again warm until then.
    - Consequence: boot's bring-up and every open skip invisible workspaces;
      hide and collapse stand sessions down; show and expand start nothing by
      themselves, the editor asks with OpenTabs.
@@ -73,6 +75,8 @@ workspace's web page was checked by Emacs alone, never by the daemon.
   a daemon restart under open tabs never greys them (principle 4).
 
 ### Hide and collapse stand sessions down
+- AMENDED 2026-10-13 for the hide (hidden-cache-lapse.md): the hide holds the
+  session's keep-alives and the stand-down below happens when its cache lapses.
 - WHAT: SetWorkspaceHidden(hide) and a repository collapse stand the session
   down as the idle sweep does (hibernate, conversation kept), deferred while a
   turn runs and taken once it ends (owner delegated the timing; recorded as

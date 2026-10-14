@@ -2,16 +2,19 @@
 // into the sidebar's HIDDEN WORKSPACES section, or back out of it. SIDEBAR
 // section.
 //
-// A HIDDEN WORKSPACE RUNS NOTHING. Its worktree and its place in the registry
-// are kept; the roster resolver hoists its row out of every grouping into
-// frontend.v1.WorkspaceRoster.hidden, and the Emacs tab bar stops drawing,
-// numbering and navigating to its tab, exactly as it does for a workspace
-// whose repository section is collapsed. Its SESSION is stood down as the
-// idle sweep stands one down (it sleeps, and its conversation is kept): at
-// once when no turn runs, and once the running turn ends otherwise, never
-// under it. SHOWING it again starts nothing by itself: the editor asks for it
-// with OpenTabs, which brings it up and answers when it is open. The new state
-// arrives on the roster stream.
+// A HIDDEN WORKSPACE'S CACHE IS LEFT TO LAPSE. Its worktree and its place in
+// the registry are kept; the roster resolver hoists its row out of every
+// grouping into frontend.v1.WorkspaceRoster.hidden, and the Emacs tab bar
+// stops drawing, numbering and navigating to its tab, exactly as it does for a
+// workspace whose repository section is collapsed. Its session's keep-alives
+// are HELD (shim.v1.SetKeepalive, 2026-10-13), so its prompt cache lapses on
+// its own clock, and the hidden row counts down to that moment
+// (frontend.v1.RosterRowWhenHiddenCache). When it comes, the session is stood
+// down as the idle sweep stands one down (it sleeps, and its conversation is
+// kept), never under a running turn. SHOWING it again before then runs the
+// keep-alives again; showing it starts nothing by itself either way: the
+// editor asks for it with OpenTabs, which brings it up and answers when it is
+// open. The new state arrives on the roster stream.
 //
 // DURABLE: the daemon records the flag on the workspace, so a hidden
 // workspace stays hidden across a daemon restart.

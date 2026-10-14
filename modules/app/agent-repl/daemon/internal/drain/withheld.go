@@ -14,9 +14,9 @@ import (
 const opWithheld = "daemon.drain.withheld"
 
 // A WORKSPACE THE USER WITHHELD RUNS NOTHING (owner principle 1,
-// docs/protobuf-design/open-tabs.md). Hiding a workspace (SetWorkspaceHidden)
-// or collapsing its repository's section stands its session down exactly as
-// the idle sweep does — the same gate, the same hibernate directive, graceful
+// docs/protobuf-design/open-tabs.md). Collapsing a repository's section, and a
+// hidden workspace's cache lapsing (cachelapse.Keeper), stands its session down
+// exactly as the idle sweep does — the same gate, the same hibernate directive, graceful
 // KillSession, hibernated terminal and cleared pids (hibernate) — with its own
 // reason on the records and the terminal.
 //
@@ -48,8 +48,9 @@ const (
 	withheldPending
 )
 
-// StandDownWithheld asks for the stand-down of a workspace the user hid or
-// collapsed. It returns at once; the attempt runs on the detached lifetime.
+// StandDownWithheld asks for the stand-down of a workspace whose repository
+// section the user collapsed, or a hidden one whose cache has lapsed. It
+// returns at once; the attempt runs on the detached lifetime.
 func (c *controller) StandDownWithheld(ws ids.WorkspaceID) {
 	c.mu.Lock()
 	if c.withheld == nil {
