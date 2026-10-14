@@ -1067,6 +1067,50 @@ IMMEDIATELY by whoever receives the report, as a `--no-ff` merge commit.
   breath. No finished branch or worktree is left behind.
 - The merge is followed by the ONE deploy the next section requires.
 
+## A generated workspace cleans up after itself, and its dispatcher never does
+
+Owner ruling (2026-10-14). A workspace generated through
+`/create-or-update-workspace` owns its own end. Its landing closes it, removes
+its worktree and deletes its branch: the "deleted and removed in the same
+breath" bullet of the section above, carried out by the landing itself.
+
+- **The dispatcher never cleans up for it.** The workspace that dispatched a
+  generated workspace never closes it, never removes its worktree, never
+  deletes its branch, and never promises or schedules any of these as
+  follow-up work.
+- **Anything left behind is a lifecycle defect.** A worktree, a branch or an
+  open workspace that outlives its landing is a defect in the generated
+  workspace's lifecycle (the merge queue's teardown or the reaper below). It
+  is fixed THERE, never patched by hand from the dispatcher.
+- **Separate work starts in a generated workspace.** Work meant to be handed
+  off or landed separately goes into a generated workspace from the start,
+  never into a worktree an agent cuts by hand (the skill's `create.md`
+  already forbids hand-made worktrees and branches). A hand-cut worktree is
+  exactly what leaves the dispatcher holding the cleanup.
+- **A failed one-shot stays open, and is still not the dispatcher's.** A
+  one-shot whose merge FAILS is left open by design, so the user can see it
+  and its branch still holds the work. Its cleanup is still not the
+  dispatcher's to do.
+
+What carries the cleanup out today:
+
+- **The landing closes the workspace and removes its worktree.**
+  `daemon/internal/merge/terminal.go`: the teardown runs only for a merge
+  that landed (`out.landed` set, `out.failed` and `out.abandoned` empty), and
+  for each workspace the landing closes (`closings`: the requester's own
+  one-shot, or the one-shot an async merge names) `closeLanded` stops the
+  session and calls `RemoveWorktree`. `cleanupLanded` removes, through the
+  clean door, the worktree an async merge asked to clean up; a worktree the
+  merge itself made for a branch is removed by the `RemoveWorktree` that
+  follows. A failed merge skips all of this, which is what keeps a failed
+  one-shot open.
+- **The reaper sweeps the landed worktrees the queue never saw.**
+  `daemon/internal/worktreereap/reaper.go` (`daemon/AGENTS.md` "The
+  landed-worktree reaper"): every linked worktree whose changes are already
+  on the default branch, once idle, clean and not an open workspace's, is
+  removed, and its branch is deleted with `DeleteBranchAt` at the judged
+  head. It only sees branches that still have a worktree.
+
 ## ONE deploy per complete change landing on master, and the daemon runs it
 
 Owner design, standing (2026-09-23; supersedes the 2026-09-21 "deploy
