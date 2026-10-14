@@ -1151,7 +1151,8 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 /* THERE IS NO CHEVRON (owner ruling, 2026-09-14): "Hovering the workspace
    should have the same effect as opening the chevron currently does. No need
    for a chevron to show the dropdown on hover." The row opens its own panel
-   after a short intent delay; `row.ts` owns both delays. */
+   the moment the pointer reaches its duration; `row-hover.ts` owns the
+   gesture. */
 #ws-sidebar .kids { margin-left: 1.55rem; border-left: 1px solid var(--border); }
 #ws-sidebar .kids .row { padding-left: 0.55rem; }
 
@@ -1201,7 +1202,7 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 #ws-sidebar .ws-merge-note.error { color: var(--err); }
 #ws-sidebar .ws-merge-note { font-style: italic; }
 
-/* Expanded detail panel under a row.
+/* Expanded detail panel beside a row.
 
    IT LEAVES THE RAIL (owner ruling 3, 2026-09-13): it may extend past the
    sidebar's width into the feed for room, and may never be cut off by the
@@ -1209,8 +1210,8 @@ html.webhost-sidebar #ws-sidebar[hidden] {
    an in-flow panel could only ever be rail-wide and was cropped at the rail's
    bottom edge. `position: fixed` is the one positioning that escapes both --
    no ancestor here is transformed -- and row.ts's `placeRowDetail` sets the
-   left, top and max-height through the topbar reveals' own `clampReveal`, so
-   the panel lands under its row and stays inside the viewport. `width:
+   left, top and max-height through `clampBeside`, so the panel grows out of
+   its row's right edge and stays inside the viewport. `width:
    max-content` is what lets it grow into the feed only as far as its own
    content asks; the max-width is the window's own last word on that. */
 #ws-sidebar .detail { display: none; }
