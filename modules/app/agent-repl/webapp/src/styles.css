@@ -162,6 +162,12 @@
      rather than copying a value, so it cannot drift from either; the dark
      theme redefines --tool-command and --fg alone, and this follows both. */
   --interim-text: color-mix(in srgb, var(--tool-command), var(--fg));
+  /* The prose of a THINKING bubble: a touch greyer than --interim-text, so the
+     agent's reasoning reads ever so slightly quieter than every other response
+     (owner request, 2026-10-14). It leans 65% toward the command grey where
+     --interim-text sits at the even 50%, mixing the same two tokens so it
+     follows both themes. */
+  --thinking-text: color-mix(in srgb, var(--tool-command) 65%, var(--fg));
   /* Textless-thinking progress indicator: orange, distinct from every other
      status color in the palette. */
   --thinking: #ea580c;
@@ -1845,7 +1851,16 @@ pre {
 .bubble.interim-response {
   --bubble-bg: var(--bg);
   box-shadow: none;
+}
+.bubble.interim-response {
   color: var(--interim-text);
+}
+/* THE THINKING PROSE (owner request, 2026-10-14): a thinking bubble's text is
+   italic and a touch greyer than an interim's (--thinking-text), so reasoning
+   reads apart from every response the agent actually says. */
+.bubble[data-variant="thinking"] {
+  color: var(--thinking-text);
+  font-style: italic;
 }
 /* THE THINKING WAVE, AND ONLY WHILE THE TURN IS IN FLIGHT.
 
