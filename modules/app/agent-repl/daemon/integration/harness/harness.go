@@ -155,30 +155,28 @@ func WithRunRoot(body func() int) int {
 func RunRoot() string { return runRoot }
 
 func mainIn(m *testing.M, module, root string) int {
-	mode, shared, err := testenv.BinaryMode(os.Getenv)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	if mode == testenv.UsePrebuilt {
-		for _, b := range []struct {
-			path *string
-			name string
-		}{{&daemonBinary, "agent-repld"}, {&fakeshimBinary, "fakeshim"}, {&gitBinary, "git"}} {
-			if *b.path, err = testenv.SharedBinary(shared, prebuiltSub, b.name); err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return 1
-			}
+	// A TEST RUN BUILDS THE PROGRAMS ONCE (testenv.Programs): the daemon, the
+	// fake shim and the mocked git come from its programs directory, the
+	// daemon already linked to that same mocked git. Outside a run, this
+	// process builds them itself.
+	var fromRun []bool
+	for _, b := range []struct {
+		path *string
+		name string
+	}{{&daemonBinary, "agent-repld"}, {&fakeshimBinary, "fakeshim"}, {&gitBinary, "git"}} {
+		path, ok, err := testenv.Program(os.Getenv, b.name)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
 		}
+		*b.path = path
+		fromRun = append(fromRun, ok)
+	}
+	if fromRun[0] && fromRun[1] && fromRun[2] {
 		// The pinned checkout is this process's own, never shared.
 		return runPinned(m, module, root)
 	}
-	var dir string
-	if mode == testenv.BuildHere {
-		dir, err = os.MkdirTemp(root, "agent-repl-integration-bin-")
-	} else {
-		dir, err = testenv.PrebuildDir(shared, prebuiltSub)
-	}
+	dir, err := os.MkdirTemp(root, "agent-repl-integration-bin-")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "harness: binary dir:", err)
 		return 1
@@ -233,15 +231,8 @@ func mainIn(m *testing.M, module, root string) int {
 			return 1
 		}
 	}
-	if mode == testenv.BuildInto {
-		return 0
-	}
 	return runPinned(m, module, dir)
 }
-
-// prebuiltSub is the harness's own subdirectory of a shared prebuilt
-// directory; a suite that builds more keeps its binaries beside it.
-const prebuiltSub = "harness"
 
 // runPinned lays out the pinned checkout under parent, self-checks the build
 // identity and runs the suite.

@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"agentrepl/testrun/roster"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -60,5 +61,26 @@ func main() { fmt.Print(gitclient.Binary()) }
 	// Assert.
 	if err != nil || strings.TrimSpace(string(out)) != "/mocked/git" {
 		t.Fatalf("the linked seam reads %q (%v), want /mocked/git", out, err)
+	}
+}
+
+// TestTheRunsDaemonProgramLinksTheMockedGitAsThisHarnessDoes pins the one link
+// a test run builds the daemon with (roster.Programs) to MockedGitLink, so a
+// daemon built once for the run runs the mocked git exactly as one this
+// harness builds itself.
+func TestTheRunsDaemonProgramLinksTheMockedGitAsThisHarnessDoes(t *testing.T) {
+	// Arrange.
+	program, ok := roster.LookupProgram("agent-repld")
+	if !ok || len(program.Links) != 1 {
+		t.Fatalf("roster program agent-repld = %+v, %v; want one link", program, ok)
+	}
+	link := program.Links[0]
+
+	// Act.
+	got := "-X " + link.Var + "=" + filepath.Join("/programs", link.Program)
+
+	// Assert.
+	if want := MockedGitLink(filepath.Join("/programs", "git")); got != want || link.Program != "git" {
+		t.Fatalf("the run links %q, the harness %q", got, want)
 	}
 }

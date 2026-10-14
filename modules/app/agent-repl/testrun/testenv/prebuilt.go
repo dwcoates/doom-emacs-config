@@ -3,15 +3,19 @@
 // process reads them.
 //
 // BUILD ONCE, RUN IN MANY PROCESSES. The test runner splits a suite's tests
-// across several test processes, one per core. Each process's TestMain would
-// otherwise build every binary again -- the daemon, the fakes, and in the e2e
-// suite the real store, sidecar, lock and shim bundle -- so N chunks would pay
-// N identical builds. Instead ONE process builds them all into a directory and
-// exits (Prebuild), and every chunk reads them from it (Prebuilt).
+// across several test processes, one per core, and several suites run the
+// same programs. So:
 //
-// The two are mutually exclusive, and neither may be combined with coverage:
-// a prebuilt binary is uninstrumented, so a coverage run that read one would
-// silently measure nothing.
+//   - every Go program a test runs (the daemon, its fakes, the store, the
+//     sidecar, the lock helper) is built ONCE per run, by the runner, into
+//     its programs directory (Programs), and every test process of every
+//     suite reads it from there (Program);
+//   - what one suite alone builds beyond those (the e2e suite's shim bundle)
+//     is built by ONE of its processes into a directory, which then exits
+//     (Prebuild), and every chunk reads it from there (Prebuilt).
+//
+// Neither may be combined with coverage: a prebuilt binary is uninstrumented,
+// so a coverage run that read one would silently measure nothing.
 package testenv
 
 import (
@@ -82,4 +86,38 @@ func PrebuildDir(shared, sub string) (string, error) {
 		return "", fmt.Errorf("testenv: create the prebuild directory %s: %w", dir, err)
 	}
 	return dir, nil
+}
+
+// Programs names the directory a test run builds every shared program into,
+// ONCE for the whole run: the daemon, its fakes, the store, the sidecar and
+// the lock helper, each by its roster name (roster.Programs). Every test
+// process that runs one of them reads it from here instead of building it
+// again, whichever suite it belongs to.
+const Programs = "AGENT_REPL_TEST_PROGRAMS"
+
+// Program answers the run's built program name: its path and true when the
+// run named a programs directory, or false when the process runs outside such
+// a run and builds the program itself. A run that names the directory without
+// the program in it is a defect in the run, answered as an error.
+func Program(getenv func(string) string, name string) (string, bool, error) {
+	dir := getenv(Programs)
+	if dir == "" {
+		return "", false, nil
+	}
+	if getenv(Coverage) != "" {
+		return "", false, fmt.Errorf("testenv: a run's programs are uninstrumented, so they cannot serve a coverage run (%s is set)", Coverage)
+	}
+	p := filepath.Join(dir, name)
+	info, err := os.Stat(p)
+	if err != nil {
+		return "", false, fmt.Errorf("testenv: %s names %s, which holds no program %s: %w", Programs, dir, name, err)
+	}
+	if info.IsDir() {
+		return "", false, fmt.Errorf("testenv: the program %s is a directory", p)
+	}
+	real, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		return "", false, fmt.Errorf("testenv: resolve the program %s: %w", p, err)
+	}
+	return real, true, nil
 }
