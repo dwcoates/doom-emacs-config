@@ -841,7 +841,7 @@ type fakeGit struct {
 	// tagsMerged answers TagsMerged; tagsMergedErr fails it. tagsAt answers
 	// TagsAt by commit. createdTags records every CreateAnnotatedTag as
 	// "<name>@<commit>: <message>"; createTagErr fails it.
-	tagsMerged    []string
+	tagsMerged []string
 	// mainWorktrees answers MainWorktree by directory; an unnamed directory
 	// is its own main worktree.
 	mainWorktrees map[string]string
