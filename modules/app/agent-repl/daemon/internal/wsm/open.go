@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -98,8 +99,11 @@ type store struct {
 	// handover, where it became a false unknown_workspace for an adopting
 	// page). Guarded by mu.
 	retired []*sql.DB
-	path    string
-	log     dlog.Logger
+	// keeper holds an in-memory handle's database for the handle's life
+	// (memory.go); nil for a file. Closed with the handle.
+	keeper io.Closer
+	path   string
+	log    dlog.Logger
 	// canonicalDir is dirpath.Canonical, the spelling the open's directory
 	// reconciliation compares each row against (dirspelling.go). Injectable
 	// so a test can model a case-folding volume on any host.
@@ -460,6 +464,9 @@ func (s *store) Close() error {
 	errs := []error{released}
 	for _, handle := range handles {
 		errs = append(errs, handle.Close())
+	}
+	if s.keeper != nil {
+		errs = append(errs, s.keeper.Close())
 	}
 	return errors.Join(errs...)
 }
