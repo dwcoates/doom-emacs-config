@@ -1229,3 +1229,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-10-14 the sidecar's integration suite runs no real store: a fake store holding the store's contract (shared validation in protohelpers/storewrite), and the mocked vendor's store is the shim's fake as a process
 - 2026-10-14 testrun plans from a timing history per run conditions (test-history.<conditions>.json), so throttled-tier samples no longer under-chunk default-tier runs
 - 2026-10-14 the webapp-layer areas are bounded by the silence between finished tests (WebappLayerSilence 20s) after a warm-up that also pre-transforms every area file
+- 2026-10-14 a merge chain left behind a head handed to another daemon is no defect: the front check leaves transferred workspaces out of chain and line (daemon merge standingFront), ending the ERROR "the chain does not stand at the front of its queue" seen in TestAHeadHandedOverAfterTheMergeBehindIt...
