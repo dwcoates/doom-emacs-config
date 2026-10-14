@@ -2165,3 +2165,36 @@ func TestEveryAbandonedSentenceIsReadThroughAbandonedSentence(t *testing.T) {
 		}
 	}
 }
+
+// TestAFinishedRunLeavesItsLineBeforeItsEntryGoes pins the order the chain's
+// check against its queue relies on (standingFront): the run is marked out of
+// its line before its queue entry is removed.
+func TestAFinishedRunLeavesItsLineBeforeItsEntryGoes(t *testing.T) {
+	// Arrange: a landing merge, and a removal that reads the run's mark.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	enqueue(t, h)
+	var marked []bool
+	h.db.mu.Lock()
+	h.db.beforeRemove = func(id ids.WorkspaceID) {
+		h.o.mu.Lock()
+		defer h.o.mu.Unlock()
+		if r := h.o.runsByWorkspace[id]; r != nil {
+			marked = append(marked, r.leftLine)
+		}
+	}
+	h.db.mu.Unlock()
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	if !slices.Equal(marked, []bool{true}) {
+		t.Fatalf("the run's mark at its entry's removal was %v, want it already out of its line", marked)
+	}
+}

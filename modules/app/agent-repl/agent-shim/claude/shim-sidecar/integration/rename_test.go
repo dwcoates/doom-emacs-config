@@ -27,7 +27,7 @@ func TestARenamedTranscriptKeepsItsFileIdCursor(t *testing.T) {
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
-	store := startRealStore(t)
+	store := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
 	opts := defaultSidecarOptions(t, store.Socket, tree)
@@ -72,7 +72,7 @@ func TestARenamedSpoolKeepsItsFileIdCursor(t *testing.T) {
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
-	store := startRealStore(t)
+	store := startFakeStore(t)
 	tree := newVendorTree(t)
 	fx := seedDetachedShell(t, tree, "/work/spool-rename-probe",
 		"d1d1d1d1-d1d1-4d1d-8d1d-d1d1d1d1d1d1")
@@ -126,7 +126,7 @@ func TestARenamedTranscriptResumesFromItsFileIdCursorOnTheNextCycle(t *testing.T
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
-	store := startRealStore(t)
+	store := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
 	opts := defaultSidecarOptions(t, store.Socket, tree)
@@ -187,7 +187,7 @@ func TestARenamedTranscriptIsNotReReadFromZeroWithinOneCycle(t *testing.T) {
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
-	store := startRealStore(t)
+	store := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
 	opts := defaultSidecarOptions(t, store.Socket, tree)
@@ -237,7 +237,7 @@ func TestARenamedTranscriptIsRewoundOnceForTheWholeFile(t *testing.T) {
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
-	store := startRealStore(t)
+	store := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
 	opts := defaultSidecarOptions(t, store.Socket, tree)

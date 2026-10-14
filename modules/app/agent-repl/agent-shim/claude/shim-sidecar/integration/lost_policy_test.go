@@ -207,7 +207,7 @@ func TestAVanishedSpoolIsConcludedFileVanished(t *testing.T) {
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
-	store := startRealStore(t)
+	store := startFakeStore(t)
 	tree := newVendorTree(t)
 	fx := seedDetachedShell(t, tree, "/work/lost-vanished-probe",
 		"a1a1a1a1-a1a1-4a1a-8a1a-a1a1a1a1a1a1")
@@ -272,7 +272,7 @@ func TestASpoolThatStopsGrowingIsConcludedWentSilent(t *testing.T) {
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
-	store := startRealStore(t)
+	store := startFakeStore(t)
 	tree := newVendorTree(t)
 	fx := seedDetachedShell(t, tree, "/work/lost-silent-probe",
 		"b1b1b1b1-b1b1-4b1b-8b1b-b1b1b1b1b1b1")
@@ -398,7 +398,7 @@ func TestASpoolThatKeepsGrowingIsNeverConcludedLost(t *testing.T) {
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
-	store := startRealStore(t)
+	store := startFakeStore(t)
 	tree := newVendorTree(t)
 	session := "d1d1d1d1-d1d1-4d1d-8d1d-d1d1d1d1d1d1"
 	fx := seedDetachedShell(t, tree, "/work/lost-growing-probe", session)

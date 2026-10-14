@@ -25,7 +25,7 @@ func TestARestartLeavesNoGapAndNoRepeat(t *testing.T) {
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
-	store := startRealStore(t)
+	store := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
 	opts := defaultSidecarOptions(t, store.Socket, tree)
@@ -44,13 +44,13 @@ func TestARestartLeavesNoGapAndNoRepeat(t *testing.T) {
 		g.AppendLine(line)
 	}
 	startSidecar(t, opts)
-	lines := awaitBookUnits(ctx, t, store.Client, captured.Session,
+	lines := store.awaitBookUnits(ctx, t, captured.Session,
 		capturedThinking1, capturedBashCall1, capturedThinking2, capturedBashCall2)
 
 	// Assert: no unit appears twice, and the four expected units are all there.
 	seen := map[string]int{}
 	for _, at := range lines {
-		if a := activityOf(at.GetLine()); a != nil {
+		if a := activityOf(at); a != nil {
 			seen[a.GetActivityId().GetValue()]++
 		}
 	}
@@ -296,7 +296,7 @@ func TestARestartRewindsToTheInProgressTurnsFirstRecord(t *testing.T) {
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
-	store := startRealStore(t)
+	store := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
 	opts := defaultSidecarOptions(t, store.Socket, tree)
@@ -312,7 +312,7 @@ func TestARestartRewindsToTheInProgressTurnsFirstRecord(t *testing.T) {
 	// its result still to come; "at least one line" is satisfied by the user
 	// prompt that precedes it, which would stop the reader before the premise
 	// held.
-	awaitBookUnits(ctx, t, store.Client, captured.Session, capturedBashCall1)
+	store.awaitBookUnits(ctx, t, captured.Session, capturedBashCall1)
 	first.Stop()
 
 	for _, line := range captured.Lines[9:11] { // the hook attachment and the tool_result
@@ -324,12 +324,12 @@ func TestARestartRewindsToTheInProgressTurnsFirstRecord(t *testing.T) {
 	// already true of the book the FIRST reader left behind, so it waited for
 	// nothing at all and read back a book the result had not reached.
 	awaitCursorAtLeast(ctx, t, store.Client, g.Path(), g.Offset())
-	lines := bookLines(ctx, t, store.Client, captured.Session)
+	lines := store.Book(captured.Session)
 
 	// Assert: the call's unit is settled in place, and nothing doubled.
 	var calls int
 	for _, at := range lines {
-		a := activityOf(at.GetLine())
+		a := activityOf(at)
 		if a == nil || a.GetActivityId().GetValue() != capturedBashCall1 {
 			continue
 		}
@@ -350,7 +350,7 @@ func TestARewindIsStatedInTheLog(t *testing.T) {
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
-	store := startRealStore(t)
+	store := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
 	opts := defaultSidecarOptions(t, store.Socket, tree)
@@ -371,7 +371,7 @@ func TestARewindIsStatedInTheLog(t *testing.T) {
 	// On the call's own unit, for the reason the subject above states: the
 	// rewind this asserts is the one a reader performs over an in-progress
 	// turn, which needs the turn to have been read.
-	awaitBookUnits(ctx, t, store.Client, captured.Session, capturedBashCall1)
+	store.awaitBookUnits(ctx, t, captured.Session, capturedBashCall1)
 	first.Stop()
 
 	restarted := opts

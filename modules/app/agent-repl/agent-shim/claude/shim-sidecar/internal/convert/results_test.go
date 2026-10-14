@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+
+	"google.golang.org/protobuf/proto"
 )
 
 func TestWriteSuccessNamesACreationRatherThanARewrite(t *testing.T) {
@@ -254,6 +256,25 @@ func TestArtifactSuccessReportsAListingSeparatelyFromAPublish(t *testing.T) {
 	// Assert
 	if _, ok := got.GetOutcome().(*conversationv1.AgentArtifactSuccess_Listed); !ok {
 		t.Fatalf("Outcome = %T, want AgentArtifactSuccess_Listed", got.GetOutcome())
+	}
+}
+
+func TestArtifactSuccessRestatesThePublishItAnswered(t *testing.T) {
+	// Arrange: the favicon and file are stated only by the call.
+	input := map[string]any{"file_path": "report.html", "favicon": "📊", "title": "Offline Report"}
+	call := openCall{input: input}
+	want, _ := artifactAct(input)
+
+	// Act
+	got := artifactSuccess(call, map[string]any{"url": "https://claude.ai/public/artifacts/abc"})
+
+	// Assert
+	published := got.GetPublished()
+	if published == nil {
+		t.Fatalf("Outcome = %T, want AgentArtifactSuccess_Published", got.GetOutcome())
+	}
+	if !proto.Equal(published.GetPublish(), want) || published.GetPublish().GetFavicon() != "📊" {
+		t.Fatalf("Publish = %v, want the call's publish %v", published.GetPublish(), want)
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"agentrepl/testrun/internal/ramdisk"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/internal/suites"
 	"agentrepl/testrun/roster"
@@ -71,46 +72,36 @@ func TestSelects(t *testing.T) {
 }
 
 func TestSlotsForHost(t *testing.T) {
-	for cpus, want := range map[int]int{16: 8, 15: 7, 3: 1, 2: 1, 1: 0} {
+	for cpus, want := range map[int]int{16: 13, 15: 12, 4: 1, 3: 0, 1: -2} {
 		if got := SlotsForHost(cpus); got != want {
 			t.Errorf("SlotsForHost(%d) = %d, want %d", cpus, got, want)
 		}
 	}
 }
 
-func TestSlots(t *testing.T) {
-	tests := []struct {
-		name    string
-		budget  string
-		want    int
-		wantErr bool
-	}{
-		{name: "no budget is half the host", budget: "", want: 8},
-		{name: "a claimed budget is the run's size", budget: "3", want: 3},
-		{name: "a budget above half the host is honored", budget: "12", want: 12},
-		{name: "a zero budget is refused", budget: "0", wantErr: true},
-		{name: "a negative budget is refused", budget: "-2", wantErr: true},
-		{name: "a non-numeric budget is refused", budget: "four", wantErr: true},
+func TestSlotsIsEveryCoreButTheReserve(t *testing.T) {
+	// Act
+	got, err := Slots(16)
+
+	// Assert
+	if err != nil || got != 13 {
+		t.Fatalf("Slots(16) = %d, %v; want 13", got, err)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange: a 16-core host.
-			const cpus = 16
+}
 
-			// Act
-			got, err := Slots(cpus, tt.budget)
+func TestSlotsRefusesAHostTooSmallToLeaveTheReserve(t *testing.T) {
+	// Arrange: a host with exactly the reserve and nothing for the run.
+	cpus := HostReserve
 
-			// Assert
-			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("Slots(%d, %q) = %d, want an error", cpus, tt.budget, got)
-				}
-				return
-			}
-			if err != nil || got != tt.want {
-				t.Fatalf("Slots(%d, %q) = %d, %v; want %d", cpus, tt.budget, got, err, tt.want)
-			}
-		})
+	// Act
+	got, err := Slots(cpus)
+
+	// Assert
+	if err == nil {
+		t.Fatalf("Slots(%d) = %d, want an error", cpus, got)
+	}
+	if !strings.Contains(err.Error(), "reserves 3 for the live runtime") {
+		t.Fatalf("error = %v, want it to name the reserve", err)
 	}
 }
 
@@ -924,6 +915,28 @@ func TestParseWardenArgs(t *testing.T) {
 			}
 			if err != nil || got.Runner != 77 || got.Sentinel != 76 || got.Since.Unix() != 1760400000 {
 				t.Fatalf("ParseWardenArgs() = %+v, %v", got, err)
+			}
+		})
+	}
+}
+
+func TestRunConditions(t *testing.T) {
+	cases := []struct {
+		name   string
+		prefix []string
+		want   string
+	}{
+		{name: "a run on the RAM disk names its units' I/O tier", prefix: ramdisk.UnitPrefix(), want: "ramdisk-io-" + ramdisk.UnitIOTier},
+		{name: "a run on the disk names the tier it inherited", prefix: nil, want: "disk-io-inherited"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := RunConditions(tc.prefix)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("RunConditions = %q, want %q", got, tc.want)
 			}
 		})
 	}

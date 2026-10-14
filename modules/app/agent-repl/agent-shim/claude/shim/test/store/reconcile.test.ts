@@ -545,7 +545,7 @@ describe("closingAgentTerminal", () => {
     const frame = entry.item.kind === "frame" ? entry.item.frame : undefined;
     const activity = (frame?.result.value as conversationv1.AgentUpdate).update
       .value as conversationv1.AgentActivity;
-    expect(activity.contract).toBe(conversationv1.AgentActivityContract.SETTLES_STAND_ALONE);
+    expect(activity.contract).toBe(conversationv1.AgentActivityContract.ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH);
   });
 
   it("keys the row deterministically, so a second reconciliation upserts one ending", async () => {
@@ -632,7 +632,7 @@ describe("closingMonitorTerminal", () => {
     const frame = entry.item.kind === "frame" ? entry.item.frame : undefined;
     const activity = (frame?.result.value as conversationv1.AgentUpdate).update
       .value as conversationv1.AgentActivity;
-    expect(activity.contract).toBe(conversationv1.AgentActivityContract.SETTLES_STAND_ALONE);
+    expect(activity.contract).toBe(conversationv1.AgentActivityContract.ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH);
   });
 
   it("keys the row by the monitor's own unit, so the unit concludes in place", () => {

@@ -33,6 +33,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
+	"agentrepl/protohelpers/oneofarm"
 	"agentrepl/protohelpers/rosterwalk"
 
 	"connectrpc.com/connect"
@@ -367,34 +368,9 @@ func perfWalkRosterRows(r *frontendv1.WorkspaceRoster, visit func(*frontendv1.Ro
 // view carries no status at all.
 func perfFooterArm(v *frontendv1.FooterView) string {
 	s := v.GetStrip().GetStatus()
-	switch {
-	case s == nil:
-		return ""
-	case s.GetIdle() != nil:
-		return "idle"
-	case s.GetWorking() != nil:
-		return "working"
-	case s.GetWaiting() != nil:
-		return "waiting"
-	case s.GetInterrupted() != nil:
-		return "interrupted"
-	case s.GetMerging() != nil:
-		return "merging"
-	case s.GetBackground() != nil:
-		return "background"
-	case s.GetBlocked() != nil:
-		return "blocked"
-	case s.GetDisconnected() != nil:
-		return "disconnected"
-	case s.GetClosing() != nil:
-		return "closing"
-	case s.GetLoading() != nil:
-		return "loading"
-	case s.GetMergeFailed() != nil:
-		return "merge_failed"
-	case s.GetMerged() != nil:
-		return "merged"
-	default:
+	if s == nil {
 		return ""
 	}
+	name, _ := oneofarm.Name(s, "status")
+	return name
 }

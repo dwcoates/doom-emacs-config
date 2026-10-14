@@ -247,6 +247,19 @@ func standsAlone(act *conversationv1.AgentActivity) bool {
 // the stands-alone contract has violated it (ERROR); one that predates it wrote
 // expected old data (INFO).
 func (r *resolver) unrestated(s *wsState, act *conversationv1.AgentActivity, kind, field, drawn string) {
+	r.unrestatedUnder(s, act, kind, field, drawn, standsAlone(act))
+}
+
+// artifactPublishedStandsAlone reports whether act's producer restates the
+// publish on a published artifact's success: contract revision 2 and later.
+func artifactPublishedStandsAlone(act *conversationv1.AgentActivity) bool {
+	return act.GetContract() >= conversationv1.AgentActivityContract_AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH
+}
+
+// unrestatedUnder is unrestated graded by bound: whether the producer's
+// stamped revision obliges it to restate `field` (ERROR) or predates that
+// obligation (INFO, expected old data).
+func (r *resolver) unrestatedUnder(s *wsState, act *conversationv1.AgentActivity, kind, field, drawn string, bound bool) {
 	ctx := dlog.Context{
 		"unit":     act.GetActivityId().GetValue(),
 		"kind":     kind,
@@ -254,7 +267,7 @@ func (r *resolver) unrestated(s *wsState, act *conversationv1.AgentActivity, kin
 		"drawn":    drawn,
 		"contract": act.GetContract().String(),
 	}
-	if standsAlone(act) {
+	if bound {
 		r.logger(s.id).Error("daemon.feed.settle_not_restated",
 			"a settled frame restated nothing of its call though its producer is bound by the stands-alone contract",
 			ctx)

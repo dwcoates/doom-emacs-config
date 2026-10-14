@@ -118,6 +118,9 @@ type peer struct {
 	pid        int
 	grandchild int
 	uds        string
+	// reaped closes once this test process has reaped the peer: only then is
+	// its pid gone from the process table rather than an unreaped zombie.
+	reaped <-chan struct{}
 }
 
 // startPeer spawns a helper child that binds its own socket and blocks. joinPGID
@@ -168,7 +171,7 @@ func startPeer(t *testing.T, joinPGID int, env ...string) *peer {
 		}
 		<-reaped
 	})
-	return &peer{pid: pid, grandchild: grandchild, uds: uds}
+	return &peer{pid: pid, grandchild: grandchild, uds: uds, reaped: reaped}
 }
 
 // adoptedClientFor is a client shaped exactly like one Adopt returns: a socket
@@ -510,6 +513,10 @@ func TestProcessGoneReadsTheKernelsAnswer(t *testing.T) {
 				c := standingDownAdopted(p)
 				go c.awaitAdoptedExit(context.Background())
 				awaitExitInfo(t, c, 5*time.Second)
+				// THE EXIT IS PUBLISHED WHILE THE PEER MAY STILL BE A ZOMBIE:
+				// a group holding only its zombie is gone to the watch, and
+				// the reap is this test's own goroutine's (startPeer).
+				<-p.reaped
 			}
 
 			// Act.

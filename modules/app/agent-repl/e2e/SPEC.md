@@ -306,8 +306,9 @@ That is the direct, focused invocation. The canonical all-module gate is
 runs one prebuild process for the daemon/store/sidecar/lock/shim artifacts,
 and distributes top-level tests across scheduler chunks. Each chunk carries
 `GOMAXPROCS=2` and `-test.parallel=1`; the scheduler, not `go test`, owns the
-host-wide parallelism and runs on `runtime.NumCPU()-2` slots. Chunk sizing is
-chosen from `~/.cache/agent-repl/test-history.json` rather than fixed here.
+host-wide parallelism and runs on `runtime.NumCPU()-3` slots. Chunk sizing is
+chosen from `~/.cache/agent-repl/test-history.<conditions>.json` rather than
+fixed here.
 
 `-parallel 8` is not decoration. **Every test in this package declares
 `t.Parallel()`**, so without a bound `go test` would use `GOMAXPROCS` and

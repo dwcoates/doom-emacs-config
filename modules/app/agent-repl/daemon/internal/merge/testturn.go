@@ -27,8 +27,7 @@ import (
 //
 // THE TURN IS TAKEN BEFORE THE GOVERNOR'S PERMIT, so a merge waiting for its
 // repository's turn never holds a share of the machine's gates (cpugov) that
-// another repository's gate could use. The host's suite slot
-// (bin/suite-slot.sh) is machine-wide and separate from it.
+// another repository's gate could use.
 //
 // THE HEAD IS NEVER HELD BY THE GOVERNOR, through the turn either. A merge
 // behind the head that holds the turn but whose gate the governor has not

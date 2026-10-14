@@ -967,15 +967,15 @@ func TestAConflictMetByTheHeadStartingOverIsResolvedByItsOwnSession(t *testing.T
 	}
 }
 
-func TestAGateClaimsTheHostBudgetAtItsClassAndASpeculativeOneRunsNiced(t *testing.T) {
+func TestEveryGateNamesTheNicenessItsTreeRunsAt(t *testing.T) {
 	// Arrange.
 	tests := []struct {
 		name        string
 		speculative bool
 		want        []string
 	}{
-		{name: "the head", want: []string{"env", "AGENT_REPL_SUITE_PRIORITY=merge", "bash", "s"}},
-		{name: "behind the head", speculative: true, want: []string{"/usr/bin/nice", "-n", "12", "env", "AGENT_REPL_SUITE_PRIORITY=merge", "bash", "s"}},
+		{name: "the head", want: []string{"env", "AGENT_REPL_TEST_NICENESS=10", "bash", "s"}},
+		{name: "behind the head", speculative: true, want: []string{"env", "AGENT_REPL_TEST_NICENESS=15", "bash", "s"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1191,4 +1191,123 @@ func TestHeadHoldsTheTurnLeavesTheHeadInItsGateAndTheMergeBehindInLine(t *testin
 	close(releaseHead)
 	<-done
 	c.drain(t)
+}
+
+func TestStandingFront(t *testing.T) {
+	cases := []struct {
+		name      string
+		left      map[ids.WorkspaceID]bool
+		line      []ids.WorkspaceID
+		wantFront []ids.WorkspaceID
+		wantLine  []ids.WorkspaceID
+	}{
+		{
+			name:      "a chain whose members are all in line is answered as it is",
+			line:      []ids.WorkspaceID{"ws-a", "ws-b", "ws-c"},
+			wantFront: []ids.WorkspaceID{"ws-a", "ws-b"},
+			wantLine:  []ids.WorkspaceID{"ws-a", "ws-b", "ws-c"},
+		},
+		{
+			name:      "a member that left is out of the chain and of a line still holding its entry",
+			left:      map[ids.WorkspaceID]bool{"ws-a": true},
+			line:      []ids.WorkspaceID{"ws-a", "ws-b", "ws-c"},
+			wantFront: []ids.WorkspaceID{"ws-b"},
+			wantLine:  []ids.WorkspaceID{"ws-b", "ws-c"},
+		},
+		{
+			name:      "a member that left is out of the chain once its entry is gone",
+			left:      map[ids.WorkspaceID]bool{"ws-a": true},
+			line:      []ids.WorkspaceID{"ws-b", "ws-c"},
+			wantFront: []ids.WorkspaceID{"ws-b"},
+			wantLine:  []ids.WorkspaceID{"ws-b", "ws-c"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the chain is ws-a then ws-b.
+			chain := []*run{{ws: "ws-a", leftLine: tc.left["ws-a"]}, {ws: "ws-b", leftLine: tc.left["ws-b"]}}
+			var line []wsm.MergeQueueEntry
+			for _, ws := range tc.line {
+				line = append(line, admittedEntry(ws))
+			}
+
+			// Act
+			front, entries := standingFront(chain, line)
+
+			// Assert
+			var gotFront, gotLine []ids.WorkspaceID
+			for _, r := range front {
+				gotFront = append(gotFront, r.ws)
+			}
+			for _, e := range entries {
+				gotLine = append(gotLine, e.Workspace)
+			}
+			if !slices.Equal(gotFront, tc.wantFront) || !slices.Equal(gotLine, tc.wantLine) {
+				t.Fatalf("standingFront = %v, %v; want %v, %v", gotFront, gotLine, tc.wantFront, tc.wantLine)
+			}
+		})
+	}
+}
+
+// TestTheChainCheckAgainstItsQueue covers extendOnce's check that its chain is
+// the queue's front: a run whose merge is over left its line before its entry
+// went, so a queue read on either side of that removal agrees with the chain,
+// while a chain that truly stands elsewhere is still refused loudly.
+func TestTheChainCheckAgainstItsQueue(t *testing.T) {
+	cases := []struct {
+		name      string
+		chain     []ids.WorkspaceID
+		leftLine  ids.WorkspaceID
+		queue     []ids.WorkspaceID
+		wantError bool
+	}{
+		{name: "a head that left, read before its entry went, is no defect", chain: []ids.WorkspaceID{"ws-a", "ws-b"}, leftLine: "ws-a", queue: []ids.WorkspaceID{"ws-a", "ws-b"}},
+		{name: "a head that left, read after its entry went, is no defect", chain: []ids.WorkspaceID{"ws-a", "ws-b"}, leftLine: "ws-a", queue: []ids.WorkspaceID{"ws-b"}},
+		{name: "a chain whose only member left has nothing to extend behind", chain: []ids.WorkspaceID{"ws-a"}, leftLine: "ws-a", queue: []ids.WorkspaceID{"ws-b"}},
+		{name: "a chain standing behind an entry it does not hold is refused", chain: []ids.WorkspaceID{"ws-b"}, queue: []ids.WorkspaceID{"ws-a", "ws-b"}, wantError: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			var entries []wsm.MergeQueueEntry
+			for _, ws := range tc.queue {
+				entries = append(entries, admittedEntry(ws))
+			}
+			h := resumeWorld(t, entries)
+			ctx, cancel := context.WithCancelCause(context.Background())
+			defer cancel(nil)
+			h.o.mu.Lock()
+			h.o.window = 4
+			var chain []*run
+			for _, ws := range tc.chain {
+				r := h.o.newRun(ctx, cancel, h.repoKey(), ws)
+				r.joined, r.leftLine = true, ws == tc.leftLine
+				chain = append(chain, r)
+			}
+			h.o.chains[h.repoKey()] = chain
+			// The chain extends only behind its running head (extendOnce), so
+			// its first member is the head running.
+			h.o.running[h.repoKey()] = chain[0]
+			h.o.mu.Unlock()
+
+			// Act
+			started := h.o.extendOnce(context.Background(), h.repoKey())
+
+			// Assert
+			if started {
+				t.Fatal("extendOnce started a resumed run, want none")
+			}
+			if got := len(h.o.chains[h.repoKey()]); got != len(tc.chain) {
+				t.Fatalf("the chain holds %d runs, want the %d it had: none of these chains is extended", got, len(tc.chain))
+			}
+			refused := loggedLike(h, logLike{level: "error", op: "daemon.merge.chain", text: "does not stand at the front of its queue"})
+			if refused != tc.wantError {
+				t.Fatalf("the chain was recorded as off its queue's front: %v, want %v", refused, tc.wantError)
+			}
+			if tc.wantError && !loggedLike(h, logLike{level: "error", op: "daemon.merge.chain", text: "does not stand at the front of its queue",
+				context: map[string]string{"member": "ws-b", "place": "0", "entries": "2", "chain": "ws-b", "line": "ws-a(" + fmt.Sprint(wsm.MergeAdmitted) + ") ws-b(" + fmt.Sprint(wsm.MergeAdmitted) + ")"}}) {
+				t.Fatal("the refusal did not name the member, its place, the whole chain and the whole line")
+			}
+		})
+	}
 }

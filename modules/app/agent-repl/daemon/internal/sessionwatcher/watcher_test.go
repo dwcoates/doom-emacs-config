@@ -3627,9 +3627,9 @@ type deathStaging int
 const (
 	// diedBefore: the exit was decided before the stream ended.
 	diedBefore deathStaging = iota
-	// diedWhileWaiting: the stream ended first and the verdict landed while
-	// its consumer waited, the order a SIGKILL's EOF and its reap race in.
-	diedWhileWaiting
+	// exitingUnreaped: the stream ended while the process reads exiting and
+	// its reap is not in, the order a SIGKILL's EOF and its reap race in.
+	exitingUnreaped
 )
 
 // stage arranges the fake client's death verdict per staging.
@@ -3638,17 +3638,17 @@ func (s deathStaging) stage(c *fakeClient) {
 	switch s {
 	case diedBefore:
 		c.setReaped(exit)
-	case diedWhileWaiting:
+	case exitingUnreaped:
 		c.mu.Lock()
-		c.verdictLands = &exit
+		c.exiting = &exit
 		c.mu.Unlock()
 	}
 }
 
 // TestAStandingStreamTheShimsDeathEndedIsAttributedToIt pins the consumer half
 // of ONE DEATH, ONE ERROR: a standing stream that ended because its shim died
-// is recorded at INFO with the death as its cause -- whether the verdict was in
-// when the stream ended or landed while it waited -- and never at ERROR.
+// is recorded at INFO with the death as its cause -- whether the reap was in
+// when the stream ended or the process only read exiting -- and never at ERROR.
 //
 // MEASURED, live logs 2026-10-03 (workspace `definitions`): six shim deaths
 // each wrote `watch_session` AND `watch_agent` ERROR "a standing stream ended
@@ -3661,9 +3661,9 @@ func TestAStandingStreamTheShimsDeathEndedIsAttributedToIt(t *testing.T) {
 		end       func(h *harness)
 	}{
 		{name: "the agent stream, death decided first", staging: diedBefore, operation: "daemon.sessionwatcher.watch_agent", end: func(h *harness) { h.main.Close() }},
-		{name: "the agent stream, death decided in the wait", staging: diedWhileWaiting, operation: "daemon.sessionwatcher.watch_agent", end: func(h *harness) { h.main.Close() }},
+		{name: "the agent stream, death decided in the wait", staging: exitingUnreaped, operation: "daemon.sessionwatcher.watch_agent", end: func(h *harness) { h.main.Close() }},
 		{name: "the session stream, death decided first", staging: diedBefore, operation: "daemon.sessionwatcher.watch_session", end: func(h *harness) { h.session.Close() }},
-		{name: "the session stream, death decided in the wait", staging: diedWhileWaiting, operation: "daemon.sessionwatcher.watch_session", end: func(h *harness) { h.session.Close() }},
+		{name: "the session stream, death decided in the wait", staging: exitingUnreaped, operation: "daemon.sessionwatcher.watch_session", end: func(h *harness) { h.session.Close() }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -3696,7 +3696,7 @@ func TestAShellStreamTheShimsDeathEndedIsNotReopened(t *testing.T) {
 		staging deathStaging
 	}{
 		{name: "death decided first", staging: diedBefore},
-		{name: "death decided in the wait", staging: diedWhileWaiting},
+		{name: "death decided in the wait", staging: exitingUnreaped},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

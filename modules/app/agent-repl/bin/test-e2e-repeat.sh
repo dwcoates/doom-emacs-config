@@ -5,7 +5,7 @@
 # that is what is asserted here: one directory per run, a transcript inside it,
 # and NOTHING removed when a run goes red. No container and no Go toolchain is
 # involved — a throwaway module root is built around a copy of the script with
-# stub `suite-slot.sh` and `e2e-sandbox.sh` on the paths the script resolves.
+# stub `background.sh` and `e2e-sandbox.sh` on the paths the script resolves.
 #
 # Run with:   bash bin/test-e2e-repeat.sh
 
@@ -28,7 +28,7 @@ make_root() {
     root=$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")
     mkdir -p "$root/bin" "$root/e2e/sandbox/bin"
     cp "$SCRIPT_UNDER_TEST" "$root/bin/e2e-repeat.sh"
-    cat > "$root/bin/suite-slot.sh" <<'STUB'
+    cat > "$root/bin/background.sh" <<'STUB'
 #!/usr/bin/env bash
 exec "$@"
 STUB
@@ -41,7 +41,7 @@ n=\$((n + 1))
 echo "\$n" > "\$count_file"
 $1
 STUB
-    chmod +x "$root/bin/suite-slot.sh" "$root/e2e/sandbox/bin/e2e-sandbox.sh"
+    chmod +x "$root/bin/background.sh" "$root/e2e/sandbox/bin/e2e-sandbox.sh"
     printf '%s\n' "$root"
 }
 
@@ -104,7 +104,7 @@ fi
 rm -rf "$root" "$out_root"
 
 # --- a run starts at once under load, and records the load it started at ---
-# The slot is the only gate: a stub `uptime` reading a loaded box must neither
+# Nothing gates on the load: a stub `uptime` reading a loaded box must neither
 # hold the run back nor go unrecorded.
 root=$(make_root 'exit 0')
 out_root=$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")

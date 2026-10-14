@@ -5,6 +5,8 @@ go 1.24.0
 require (
 	agentrepl/logging v0.0.0
 	agentrepl/proto v0.0.0
+	agentrepl/protohelpers v0.0.0
+	agentrepl/testrun v0.0.0
 	connectrpc.com/connect v1.17.0
 	golang.org/x/net v0.43.0
 	google.golang.org/protobuf v1.36.11
@@ -28,3 +30,7 @@ require (
 replace agentrepl/proto => ../../proto/gen/go
 
 replace agentrepl/logging => ../logging/go
+
+replace agentrepl/protohelpers => ../../proto/helpers/go
+
+replace agentrepl/testrun => ../../testrun

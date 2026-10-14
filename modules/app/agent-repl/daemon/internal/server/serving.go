@@ -29,12 +29,12 @@ type RequestGate interface {
 	AwaitWritesQuiet(bound time.Duration) bool
 	// EndStreams runs end, which ends every standing stream the daemon
 	// serves, and from then on holds each one that ends until its END FRAME
-	// is on the socket.
-	EndStreams(end func())
-	// AwaitStreamsEnded waits, bounded, for every standing stream to have
-	// ended and written its end frame, and reports how many had not when the
-	// bound expired.
-	AwaitStreamsEnded(bound time.Duration) int
+	// is on the socket or the exit's deadline has passed.
+	EndStreams(deadline time.Time, end func())
+	// AwaitStreamsEnded waits for every standing stream to have ended and
+	// written its end frame, up to deadline, and reports how many had not
+	// when it passed.
+	AwaitStreamsEnded(deadline time.Time) int
 }
 
 // Serving is the daemon's one serving handler: h2c over the loopback listener,
@@ -84,6 +84,10 @@ type Serving struct {
 	// streamsGone is closed when streams reaches zero, only while somebody is
 	// waiting.
 	streamsGone chan struct{}
+	// deadline is the exit's, set by EndStreams with ending: the one moment
+	// every end-frame wait gives up at, so a slow host spends more of the
+	// exit's grace rather than tripping a bound of its own.
+	deadline time.Time
 	// ending is set by EndStreams: from then on a standing stream that ends
 	// was ended by the exit, and is counted until its end frame has left.
 	ending bool
@@ -249,7 +253,7 @@ func (s *Serving) leaveStream() {
 // frame", not "every handler has returned".
 func (s *Serving) leaveStreamOnceEnded(r *http.Request) {
 	s.mu.Lock()
-	ending := s.ending
+	ending, deadline := s.ending, s.deadline
 	s.mu.Unlock()
 	answered := r.Context()
 	if !ending || answered.Done() == nil {
@@ -260,10 +264,10 @@ func (s *Serving) leaveStreamOnceEnded(r *http.Request) {
 	path := r.URL.Path
 	go func() {
 		<-answered.Done()
-		if !s.barrier.AwaitWrittenSince(mark, answerWriteBound) && s.log != nil {
+		if !s.barrier.AwaitWrittenSince(mark, time.Until(deadline)) && s.log != nil {
 			s.log.Error("daemon.server.stream_end_unwritten",
-				"a standing stream the exit ended never had its end frame reach the socket within the bound; its client will read a cut connection",
-				dlog.Context{"path": path, "bound_ms": answerWriteBound.Milliseconds()})
+				"a standing stream the exit ended never had its end frame reach the socket before the exit's deadline; its client will read a cut connection",
+				dlog.Context{"path": path, "deadline": deadline.Format(time.RFC3339Nano)})
 		}
 		s.leaveStream()
 	}()
@@ -271,10 +275,11 @@ func (s *Serving) leaveStreamOnceEnded(r *http.Request) {
 
 // EndStreams marks the exit as ending the standing streams, then runs end,
 // which does it. The mark comes FIRST, so no stream end could be read as its
-// client's own.
-func (s *Serving) EndStreams(end func()) {
+// client's own. Every end-frame wait from here on ends at deadline.
+func (s *Serving) EndStreams(deadline time.Time, end func()) {
 	s.mu.Lock()
 	s.ending = true
+	s.deadline = deadline
 	open := s.streams
 	s.mu.Unlock()
 	if s.log != nil {
@@ -284,9 +289,10 @@ func (s *Serving) EndStreams(end func()) {
 }
 
 // AwaitStreamsEnded waits for every standing stream to have ended and written
-// its end frame, and says so loudly when the bound expires with some still
-// open: those clients will read a cut connection instead of an end frame.
-func (s *Serving) AwaitStreamsEnded(bound time.Duration) int {
+// its end frame, and says so loudly when the exit's deadline passes with some
+// still open: those clients will read a cut connection instead of an end
+// frame.
+func (s *Serving) AwaitStreamsEnded(deadline time.Time) int {
 	s.mu.Lock()
 	if s.streams == 0 {
 		s.mu.Unlock()
@@ -298,7 +304,7 @@ func (s *Serving) AwaitStreamsEnded(bound time.Duration) int {
 	gone := s.streamsGone
 	s.mu.Unlock()
 
-	timer := time.NewTimer(bound)
+	timer := time.NewTimer(time.Until(deadline))
 	defer timer.Stop()
 	select {
 	case <-gone:
@@ -308,8 +314,8 @@ func (s *Serving) AwaitStreamsEnded(bound time.Duration) int {
 		left := s.streams
 		s.mu.Unlock()
 		if s.log != nil {
-			s.log.Error("daemon.server.await_streams_ended", "the exit's stream-end bound expired with standing streams still open; their clients will read a cut connection rather than an end frame",
-				dlog.Context{"open": left, "bound_ms": bound.Milliseconds()})
+			s.log.Error("daemon.server.await_streams_ended", "the exit's deadline passed with standing streams still open; their clients will read a cut connection rather than an end frame",
+				dlog.Context{"open": left, "deadline": deadline.Format(time.RFC3339Nano)})
 		}
 		return left
 	}

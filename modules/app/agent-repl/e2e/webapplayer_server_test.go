@@ -35,6 +35,30 @@ import (
 // layer-server.mjs).
 const wlResultPrefix = "WEBAPP-LAYER-RESULT "
 
+// wlProgressPrefix marks the driver's line for each finished test
+// (PROGRESS_PREFIX in layer-server.mjs). Each one restarts the run's
+// WebappLayerSilence: the bound is on the silence between finished tests.
+const wlProgressPrefix = "WEBAPP-LAYER-PROGRESS "
+
+// wlReadyPrefix marks the driver's one line once its warm-up has run
+// (READY_PREFIX in layer-server.mjs). No area is sent before it, so no area's
+// WebappLayerTimeout carries vitest's cold transform and collect.
+const wlReadyPrefix = "WEBAPP-LAYER-READY "
+
+// wlWarmupBound is how long the driver's warm-up may take: vitest's cold
+// transform and collect of the module graph every area imports. MEASURED
+// 2026-10-14: 17.0s on an idle host, 26.4s inside a full run at the default I/O
+// tier (the cold first area of the failing runs); just over twice the loaded
+// figure.
+const wlWarmupBound = 55 * time.Second
+
+// wlReady is the driver's warm-up verdict.
+type wlReady struct {
+	OK       bool     `json:"ok"`
+	WarmMs   int64    `json:"warmMs"`
+	Failures []string `json:"failures"`
+}
+
 // wlServerStopBound is how long a driver whose stdin closed has to exit
 // before it is killed; it ends on stdin's EOF after its current run.
 const wlServerStopBound = 5 * time.Second
@@ -69,7 +93,29 @@ type wlServer struct {
 	broken error
 	// tmp is the driver's own temp dir, removed once it has stopped.
 	tmp string
+	// silence is how long a run may go without finishing a test
+	// (WebappLayerSilence), and newTimer makes the timer that bounds it: a
+	// real one, or a unit test's own.
+	silence  time.Duration
+	newTimer func(time.Duration) wlTimer
 }
+
+// wlTimer is the silence bound's timer: what wlServer.Run needs of a
+// time.Timer.
+type wlTimer interface {
+	C() <-chan time.Time
+	Reset(time.Duration)
+	Stop()
+}
+
+// wlRealTimer is a time.Timer as a wlTimer.
+type wlRealTimer struct{ t *time.Timer }
+
+func (r wlRealTimer) C() <-chan time.Time   { return r.t.C }
+func (r wlRealTimer) Reset(d time.Duration) { r.t.Reset(d) }
+func (r wlRealTimer) Stop()                 { r.t.Stop() }
+
+func newWlRealTimer(d time.Duration) wlTimer { return wlRealTimer{time.NewTimer(d)} }
 
 var (
 	wlServerMu  sync.Mutex
@@ -116,7 +162,7 @@ func wlLayerServer(t *testing.T, npm, webappDir string) (*wlServer, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start the layer driver in %s: %w", webappDir, err)
 	}
-	s := &wlServer{cmd: cmd, stdin: stdin, lines: make(chan string, 4096), tmp: tmp}
+	s := &wlServer{cmd: cmd, stdin: stdin, lines: make(chan string, 4096), tmp: tmp, silence: WebappLayerSilence, newTimer: newWlRealTimer}
 	var streams sync.WaitGroup
 	pump := func(r io.Reader) {
 		defer streams.Done()
@@ -130,8 +176,46 @@ func wlLayerServer(t *testing.T, npm, webappDir string) (*wlServer, error) {
 	go pump(stdout)
 	go pump(stderr)
 	go func() { streams.Wait(); close(s.lines) }()
+	if err := s.awaitReady(t); err != nil {
+		s.broken = err
+	}
 	wlTheServer = s
 	return s, nil
+}
+
+// awaitReady consumes the driver's output until its warm-up verdict, within
+// wlWarmupBound. A warm-up that failed, a driver that died, and one that took
+// too long are each answered as the driver being unusable.
+func (s *wlServer) awaitReady(t *testing.T) error {
+	t.Helper()
+	var tail []string
+	deadline := time.NewTimer(wlWarmupBound)
+	defer deadline.Stop()
+	for {
+		select {
+		case line, ok := <-s.lines:
+			if !ok {
+				return fmt.Errorf("the layer driver exited during its warm-up; last output:\n%s", strings.Join(tail, "\n"))
+			}
+			if rest, isReady := strings.CutPrefix(line, wlReadyPrefix); isReady {
+				var ready wlReady
+				if err := json.Unmarshal([]byte(rest), &ready); err != nil {
+					return fmt.Errorf("decode the layer driver's warm-up verdict: %w (%q)", err, rest)
+				}
+				if !ready.OK {
+					return fmt.Errorf("the layer driver's warm-up failed: %s\nlast output:\n%s", strings.Join(ready.Failures, "\n"), strings.Join(tail, "\n"))
+				}
+				t.Logf("e2e/webapp-layer: the driver warmed up in %dms (bound %s)", ready.WarmMs, wlWarmupBound)
+				return nil
+			}
+			tail = append(tail, line)
+			if len(tail) > wlTailLines {
+				tail = tail[len(tail)-wlTailLines:]
+			}
+		case <-deadline.C:
+			return errors.Join(fmt.Errorf("the layer driver did not warm up within %s; last output:\n%s", wlWarmupBound, strings.Join(tail, "\n")), s.killGroup())
+		}
+	}
 }
 
 // wlStopLayerServer ends the binary's driver, if one was started: its stdin
@@ -155,7 +239,9 @@ func wlStopLayerServer() {
 		}
 	case <-time.After(wlServerStopBound):
 		fmt.Fprintf(os.Stderr, "e2e/webapp-layer: the layer driver outlived its stdin by %s; killing its group\n", wlServerStopBound)
-		_ = syscall.Kill(-s.cmd.Process.Pid, syscall.SIGKILL)
+		if err := s.killGroup(); err != nil {
+			fmt.Fprintf(os.Stderr, "e2e/webapp-layer: %v\n", err)
+		}
 		<-done
 	}
 	if err := os.RemoveAll(s.tmp); err != nil {
@@ -185,8 +271,9 @@ func (s *wlServer) Run(t *testing.T, file string, world wlWorld) error {
 		return s.broken
 	}
 	var tail []string
-	deadline := time.NewTimer(WebappLayerTimeout)
+	deadline := s.newTimer(s.silence)
 	defer deadline.Stop()
+	lastProgress, longestSilence, finished := started, time.Duration(0), 0
 	for {
 		select {
 		case line, ok := <-s.lines:
@@ -194,8 +281,15 @@ func (s *wlServer) Run(t *testing.T, file string, world wlWorld) error {
 				s.broken = fmt.Errorf("the layer driver exited during %s; last output:\n%s", file, strings.Join(tail, "\n"))
 				return s.broken
 			}
+			if strings.HasPrefix(line, wlProgressPrefix) {
+				finished++
+				longestSilence = max(longestSilence, time.Since(lastProgress))
+				lastProgress = time.Now()
+				deadline.Reset(s.silence)
+				continue
+			}
 			if rest, isAnswer := strings.CutPrefix(line, wlResultPrefix); isAnswer {
-				t.Logf("e2e/webapp-layer: %s run wall %s (bound %s)", file, time.Since(started).Round(time.Millisecond), WebappLayerTimeout)
+				t.Logf("e2e/webapp-layer: %s run wall %s, %d finished test(s), longest silence %s (bound %s)", file, time.Since(started).Round(time.Millisecond), finished, longestSilence.Round(time.Millisecond), s.silence)
 				var answer wlAnswer
 				if err := json.Unmarshal([]byte(rest), &answer); err != nil {
 					s.broken = fmt.Errorf("decode the answer for %s: %w (%q)", file, err, rest)
@@ -215,9 +309,8 @@ func (s *wlServer) Run(t *testing.T, file string, world wlWorld) error {
 			if len(tail) > wlTailLines {
 				tail = tail[len(tail)-wlTailLines:]
 			}
-		case <-deadline.C:
-			s.broken = fmt.Errorf("%s did not finish within %s; last output:\n%s", file, WebappLayerTimeout, strings.Join(tail, "\n"))
-			_ = syscall.Kill(-s.cmd.Process.Pid, syscall.SIGKILL)
+		case <-deadline.C():
+			s.broken = errors.Join(fmt.Errorf("%s finished no test for %s (%d finished before); last output:\n%s", file, s.silence, finished, strings.Join(tail, "\n")), s.killGroup())
 			return s.broken
 		}
 	}
@@ -240,4 +333,24 @@ func wlRunLayerFile(t *testing.T, npm, webappDir, file string, w *World, ws *wor
 		WorkspaceDir: ws.GetDir(),
 		WebappBuild:  harness.FakeWebappEntry,
 	})
+}
+
+// killGroup SIGKILLs the driver's whole process group. A group already gone
+// is no failure; any other refusal is answered, never dropped, since a
+// driver left running holds its vitest workers.
+func (s *wlServer) killGroup() error {
+	return killProcessGroup(s.cmd.Process.Pid)
+}
+
+// killProcessGroup SIGKILLs process group pgid, answering nil when the group
+// is already gone.
+func killProcessGroup(pgid int) error {
+	err := syscall.Kill(-pgid, syscall.SIGKILL)
+	if errors.Is(err, syscall.ESRCH) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("kill the layer driver's process group %d: %w", pgid, err)
+	}
+	return nil
 }

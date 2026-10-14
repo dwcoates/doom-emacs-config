@@ -276,3 +276,40 @@ func TestOwnedRequestBodyReplaysOnRetry(t *testing.T) {
 		t.Errorf("the replayed body held %q, want the declared %q", got, payload)
 	}
 }
+
+// idleCountingRoundTripper is a delegate that can drop its pool, counting how
+// often it did.
+type idleCountingRoundTripper struct {
+	recordingRoundTripper
+	drops int
+}
+
+func (r *idleCountingRoundTripper) CloseIdleConnections() { r.drops++ }
+
+func TestOwnedRequestBodyDropsItsDelegatesIdleConnections(t *testing.T) {
+	// Arrange
+	delegate := &idleCountingRoundTripper{}
+	client := &http.Client{Transport: &ownedRequestBody{next: delegate}}
+
+	// Act
+	client.CloseIdleConnections()
+
+	// Assert
+	if delegate.drops != 1 {
+		t.Fatalf("the delegate dropped its connections %d time(s), want once", delegate.drops)
+	}
+}
+
+func TestOwnedRequestBodyOverADelegateWithNoPoolFailsHard(t *testing.T) {
+	// Arrange
+	transport := &ownedRequestBody{next: &recordingRoundTripper{}}
+
+	// Act
+	defer func() {
+		// Assert
+		if recover() == nil {
+			t.Fatal("CloseIdleConnections over a delegate with no pool did not fail hard")
+		}
+	}()
+	transport.CloseIdleConnections()
+}

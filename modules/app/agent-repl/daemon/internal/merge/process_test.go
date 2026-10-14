@@ -261,31 +261,6 @@ func TestGateSelectsSuitesFromTheLandedRange(t *testing.T) {
 	}
 }
 
-// TestGateRunsAtMergePriority covers the host suite gate's ordering: the merge
-// queue's run marks itself so bin/suite-slot.sh serves it ahead of ad-hoc runs.
-func TestGateRunsAtMergePriority(t *testing.T) {
-	// Arrange: an ordinary merge.
-	h := newHarness(t)
-	h.emacsRepo()
-	h.landsCleanly("abc123def4567")
-	h.git.changed = []string{"modules/app/agent-repl/webapp/src/App.tsx"}
-	h.gatePasses("build-frontend-harness", "webapp")
-	enqueue(t, h)
-
-	// Act.
-	if err := h.admit(context.Background()); err != nil {
-		t.Fatalf("the merge failed: %v", err)
-	}
-
-	// Assert.
-	h.runner.mu.Lock()
-	defer h.runner.mu.Unlock()
-	got := h.runner.argv[0]
-	if len(got) < 2 || got[0] != "env" || got[1] != "AGENT_REPL_SUITE_PRIORITY=merge" {
-		t.Fatalf("the gate was invoked as %v, want it run at merge priority", got)
-	}
-}
-
 // TestGatePassesNoNarrowingForTheFullSet covers the conservative answer: running
 // everything is the script's own default, so a full selection hands it no flag.
 func TestGatePassesNoNarrowingForTheFullSet(t *testing.T) {

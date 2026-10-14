@@ -55,6 +55,12 @@ const (
 	// the start instant it closes, so a settled frame alone draws its card, its
 	// sub-feed and its runtime.
 	AgentActivityContract_AGENT_ACTIVITY_CONTRACT_SETTLES_STAND_ALONE AgentActivityContract = 1
+	// A published artifact's success restates the publish it answered
+	// (AgentArtifactPublished.publish), so the finished card's favicon, title
+	// and file are drawn from the settle alone. Under SETTLES_STAND_ALONE alone
+	// the success arm had no place to carry that act, so a row stamped 1 and
+	// not 2 lacks it as expected old data.
+	AgentActivityContract_AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH AgentActivityContract = 2
 )
 
 // Enum value maps for AgentActivityContract.
@@ -62,10 +68,12 @@ var (
 	AgentActivityContract_name = map[int32]string{
 		0: "AGENT_ACTIVITY_CONTRACT_UNSPECIFIED",
 		1: "AGENT_ACTIVITY_CONTRACT_SETTLES_STAND_ALONE",
+		2: "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH",
 	}
 	AgentActivityContract_value = map[string]int32{
-		"AGENT_ACTIVITY_CONTRACT_UNSPECIFIED":         0,
-		"AGENT_ACTIVITY_CONTRACT_SETTLES_STAND_ALONE": 1,
+		"AGENT_ACTIVITY_CONTRACT_UNSPECIFIED":                             0,
+		"AGENT_ACTIVITY_CONTRACT_SETTLES_STAND_ALONE":                     1,
+		"AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH": 2,
 	}
 )
 
@@ -18588,7 +18596,16 @@ type AgentArtifactPublished struct {
 	Url string `protobuf:"bytes,1,opt,name=url,proto3" json:"url,omitempty"`
 	// The page's resolved title, as the result reports it. UNSET when the
 	// result names none; the bubble then draws the call's title or filename.
-	Title         *string `protobuf:"bytes,2,opt,name=title,proto3,oneof" json:"title,omitempty"`
+	Title *string `protobuf:"bytes,2,opt,name=title,proto3,oneof" json:"title,omitempty"`
+	// THE PUBLISH THIS ANSWERS, restated whole from the call, so the finished
+	// card stands alone: a call's start and its settle upsert ONE unit, so a
+	// consumer that never saw the start (a replay, or a live intake that served
+	// the settle first) still draws the card's favicon, title and file, which
+	// only the call states. `title` above, when set, wins over the restated
+	// title; the favicon and the file come only from here. UNSET only on a row
+	// written before AgentActivityContract
+	// ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH.
+	Publish       *AgentArtifactPublish `protobuf:"bytes,3,opt,name=publish,proto3,oneof" json:"publish,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -18635,6 +18652,13 @@ func (x *AgentArtifactPublished) GetTitle() string {
 		return *x.Title
 	}
 	return ""
+}
+
+func (x *AgentArtifactPublished) GetPublish() *AgentArtifactPublish {
+	if x != nil {
+		return x.Publish
+	}
+	return nil
 }
 
 // The listing answered. Empty ON PURPOSE even though the vendor's
@@ -21787,11 +21811,14 @@ const file_conversation_v1_agent_activity_proto_rawDesc = "" +
 	"\x14AgentArtifactSuccess\x12G\n" +
 	"\tpublished\x18\x01 \x01(\v2'.conversation.v1.AgentArtifactPublishedH\x00R\tpublished\x12>\n" +
 	"\x06listed\x18\x02 \x01(\v2$.conversation.v1.AgentArtifactListedH\x00R\x06listedB\t\n" +
-	"\aoutcome\"O\n" +
+	"\aoutcome\"\xa1\x01\n" +
 	"\x16AgentArtifactPublished\x12\x10\n" +
 	"\x03url\x18\x01 \x01(\tR\x03url\x12\x19\n" +
-	"\x05title\x18\x02 \x01(\tH\x00R\x05title\x88\x01\x01B\b\n" +
-	"\x06_title\"\x15\n" +
+	"\x05title\x18\x02 \x01(\tH\x00R\x05title\x88\x01\x01\x12D\n" +
+	"\apublish\x18\x03 \x01(\v2%.conversation.v1.AgentArtifactPublishH\x01R\apublish\x88\x01\x01B\b\n" +
+	"\x06_titleB\n" +
+	"\n" +
+	"\b_publish\"\x15\n" +
 	"\x13AgentArtifactListed\"\xd7\x01\n" +
 	"\x14AgentArtifactFailure\x12;\n" +
 	"\afailure\x18\x01 \x01(\v2!.conversation.v1.AgentToolFailureR\afailure\x12A\n" +
@@ -21928,10 +21955,11 @@ const file_conversation_v1_agent_activity_proto_rawDesc = "" +
 	"\acontent\x18\x03 \x01(\tH\x01R\acontent\x88\x01\x01B\a\n" +
 	"\x05_pathB\n" +
 	"\n" +
-	"\b_content*q\n" +
+	"\b_content*\xb6\x01\n" +
 	"\x15AgentActivityContract\x12'\n" +
 	"#AGENT_ACTIVITY_CONTRACT_UNSPECIFIED\x10\x00\x12/\n" +
-	"+AGENT_ACTIVITY_CONTRACT_SETTLES_STAND_ALONE\x10\x01*X\n" +
+	"+AGENT_ACTIVITY_CONTRACT_SETTLES_STAND_ALONE\x10\x01\x12C\n" +
+	"?AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH\x10\x02*X\n" +
 	"\x10AgentBashTailCap\x12#\n" +
 	"\x1fAGENT_BASH_TAIL_CAP_UNSPECIFIED\x10\x00\x12\x1f\n" +
 	"\x19AGENT_BASH_TAIL_CAP_BYTES\x10\x80\x80\x01*\xa4\t\n" +
@@ -22660,59 +22688,60 @@ var file_conversation_v1_agent_activity_proto_depIdxs = []int32{
 	252, // 374: conversation.v1.AgentArtifactStart.list:type_name -> conversation.v1.AgentArtifactList
 	254, // 375: conversation.v1.AgentArtifactSuccess.published:type_name -> conversation.v1.AgentArtifactPublished
 	255, // 376: conversation.v1.AgentArtifactSuccess.listed:type_name -> conversation.v1.AgentArtifactListed
-	7,   // 377: conversation.v1.AgentArtifactFailure.failure:type_name -> conversation.v1.AgentToolFailure
-	251, // 378: conversation.v1.AgentArtifactFailure.publish:type_name -> conversation.v1.AgentArtifactPublish
-	252, // 379: conversation.v1.AgentArtifactFailure.list:type_name -> conversation.v1.AgentArtifactList
-	260, // 380: conversation.v1.AgentMcpToolCall.start:type_name -> conversation.v1.AgentMcpToolCallStart
-	69,  // 381: conversation.v1.AgentMcpToolCall.progress:type_name -> conversation.v1.AgentToolCallProgress
-	261, // 382: conversation.v1.AgentMcpToolCall.success:type_name -> conversation.v1.AgentMcpToolCallSuccess
-	262, // 383: conversation.v1.AgentMcpToolCall.failure:type_name -> conversation.v1.AgentMcpToolCallFailure
-	259, // 384: conversation.v1.AgentMcpTool.address:type_name -> conversation.v1.AgentMcpToolAddress
-	258, // 385: conversation.v1.AgentMcpToolCallStart.tool:type_name -> conversation.v1.AgentMcpTool
-	286, // 386: conversation.v1.AgentMcpToolCallStart.arguments:type_name -> google.protobuf.Struct
-	119, // 387: conversation.v1.AgentMcpToolCallStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
-	258, // 388: conversation.v1.AgentMcpToolCallSuccess.tool:type_name -> conversation.v1.AgentMcpTool
-	286, // 389: conversation.v1.AgentMcpToolCallSuccess.arguments:type_name -> google.protobuf.Struct
-	263, // 390: conversation.v1.AgentMcpToolCallSuccess.content:type_name -> conversation.v1.ToolResultContent
-	8,   // 391: conversation.v1.AgentMcpToolCallSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
-	258, // 392: conversation.v1.AgentMcpToolCallFailure.tool:type_name -> conversation.v1.AgentMcpTool
-	286, // 393: conversation.v1.AgentMcpToolCallFailure.arguments:type_name -> google.protobuf.Struct
-	7,   // 394: conversation.v1.AgentMcpToolCallFailure.error:type_name -> conversation.v1.AgentToolFailure
-	264, // 395: conversation.v1.ToolResultContent.blocks:type_name -> conversation.v1.ToolResultContentBlock
-	287, // 396: conversation.v1.ToolResultContentBlock.text:type_name -> conversation.v1.TextBlock
-	288, // 397: conversation.v1.ToolResultContentBlock.image:type_name -> conversation.v1.ImageBlock
-	289, // 398: conversation.v1.ToolResultContentBlock.unsupported:type_name -> conversation.v1.UnsupportedBlock
-	266, // 399: conversation.v1.AgentUnmodeled.start:type_name -> conversation.v1.AgentUnmodeledStart
-	69,  // 400: conversation.v1.AgentUnmodeled.progress:type_name -> conversation.v1.AgentToolCallProgress
-	267, // 401: conversation.v1.AgentUnmodeled.success:type_name -> conversation.v1.AgentUnmodeledSuccess
-	268, // 402: conversation.v1.AgentUnmodeled.failure:type_name -> conversation.v1.AgentUnmodeledFailure
-	286, // 403: conversation.v1.AgentUnmodeledStart.arguments:type_name -> google.protobuf.Struct
-	119, // 404: conversation.v1.AgentUnmodeledStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
-	263, // 405: conversation.v1.AgentUnmodeledSuccess.content:type_name -> conversation.v1.ToolResultContent
-	8,   // 406: conversation.v1.AgentUnmodeledSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
-	263, // 407: conversation.v1.AgentUnmodeledFailure.content:type_name -> conversation.v1.ToolResultContent
-	8,   // 408: conversation.v1.AgentUnmodeledFailure.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
-	270, // 409: conversation.v1.AgentHook.start:type_name -> conversation.v1.AgentHookStart
-	271, // 410: conversation.v1.AgentHook.succeeded:type_name -> conversation.v1.AgentHookSucceeded
-	273, // 411: conversation.v1.AgentHook.blocking_error:type_name -> conversation.v1.AgentHookBlockingError
-	274, // 412: conversation.v1.AgentHook.non_blocking_error:type_name -> conversation.v1.AgentHookNonBlockingError
-	275, // 413: conversation.v1.AgentHook.cancelled:type_name -> conversation.v1.AgentHookCancelled
-	2,   // 414: conversation.v1.AgentHookStart.event:type_name -> conversation.v1.AgentHookEvent
-	6,   // 415: conversation.v1.AgentHookStart.gated_call:type_name -> conversation.v1.AgentActivityId
-	119, // 416: conversation.v1.AgentHookStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
-	272, // 417: conversation.v1.AgentHookSucceeded.output:type_name -> conversation.v1.AgentHookOutput
-	272, // 418: conversation.v1.AgentHookNonBlockingError.output:type_name -> conversation.v1.AgentHookOutput
-	277, // 419: conversation.v1.AgentDiagnosticsReport.files:type_name -> conversation.v1.AgentDiagnosticsFile
-	278, // 420: conversation.v1.AgentDiagnosticsFile.diagnostics:type_name -> conversation.v1.AgentDiagnostic
-	3,   // 421: conversation.v1.AgentDiagnostic.severity:type_name -> conversation.v1.AgentDiagnosticSeverity
-	280, // 422: conversation.v1.AgentContextInjected.memory:type_name -> conversation.v1.AgentInjectedMemory
-	281, // 423: conversation.v1.AgentContextInjected.skills:type_name -> conversation.v1.AgentInjectedSkills
-	282, // 424: conversation.v1.AgentInjectedSkills.skills:type_name -> conversation.v1.AgentInjectedSkill
-	425, // [425:425] is the sub-list for method output_type
-	425, // [425:425] is the sub-list for method input_type
-	425, // [425:425] is the sub-list for extension type_name
-	425, // [425:425] is the sub-list for extension extendee
-	0,   // [0:425] is the sub-list for field type_name
+	251, // 377: conversation.v1.AgentArtifactPublished.publish:type_name -> conversation.v1.AgentArtifactPublish
+	7,   // 378: conversation.v1.AgentArtifactFailure.failure:type_name -> conversation.v1.AgentToolFailure
+	251, // 379: conversation.v1.AgentArtifactFailure.publish:type_name -> conversation.v1.AgentArtifactPublish
+	252, // 380: conversation.v1.AgentArtifactFailure.list:type_name -> conversation.v1.AgentArtifactList
+	260, // 381: conversation.v1.AgentMcpToolCall.start:type_name -> conversation.v1.AgentMcpToolCallStart
+	69,  // 382: conversation.v1.AgentMcpToolCall.progress:type_name -> conversation.v1.AgentToolCallProgress
+	261, // 383: conversation.v1.AgentMcpToolCall.success:type_name -> conversation.v1.AgentMcpToolCallSuccess
+	262, // 384: conversation.v1.AgentMcpToolCall.failure:type_name -> conversation.v1.AgentMcpToolCallFailure
+	259, // 385: conversation.v1.AgentMcpTool.address:type_name -> conversation.v1.AgentMcpToolAddress
+	258, // 386: conversation.v1.AgentMcpToolCallStart.tool:type_name -> conversation.v1.AgentMcpTool
+	286, // 387: conversation.v1.AgentMcpToolCallStart.arguments:type_name -> google.protobuf.Struct
+	119, // 388: conversation.v1.AgentMcpToolCallStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
+	258, // 389: conversation.v1.AgentMcpToolCallSuccess.tool:type_name -> conversation.v1.AgentMcpTool
+	286, // 390: conversation.v1.AgentMcpToolCallSuccess.arguments:type_name -> google.protobuf.Struct
+	263, // 391: conversation.v1.AgentMcpToolCallSuccess.content:type_name -> conversation.v1.ToolResultContent
+	8,   // 392: conversation.v1.AgentMcpToolCallSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
+	258, // 393: conversation.v1.AgentMcpToolCallFailure.tool:type_name -> conversation.v1.AgentMcpTool
+	286, // 394: conversation.v1.AgentMcpToolCallFailure.arguments:type_name -> google.protobuf.Struct
+	7,   // 395: conversation.v1.AgentMcpToolCallFailure.error:type_name -> conversation.v1.AgentToolFailure
+	264, // 396: conversation.v1.ToolResultContent.blocks:type_name -> conversation.v1.ToolResultContentBlock
+	287, // 397: conversation.v1.ToolResultContentBlock.text:type_name -> conversation.v1.TextBlock
+	288, // 398: conversation.v1.ToolResultContentBlock.image:type_name -> conversation.v1.ImageBlock
+	289, // 399: conversation.v1.ToolResultContentBlock.unsupported:type_name -> conversation.v1.UnsupportedBlock
+	266, // 400: conversation.v1.AgentUnmodeled.start:type_name -> conversation.v1.AgentUnmodeledStart
+	69,  // 401: conversation.v1.AgentUnmodeled.progress:type_name -> conversation.v1.AgentToolCallProgress
+	267, // 402: conversation.v1.AgentUnmodeled.success:type_name -> conversation.v1.AgentUnmodeledSuccess
+	268, // 403: conversation.v1.AgentUnmodeled.failure:type_name -> conversation.v1.AgentUnmodeledFailure
+	286, // 404: conversation.v1.AgentUnmodeledStart.arguments:type_name -> google.protobuf.Struct
+	119, // 405: conversation.v1.AgentUnmodeledStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
+	263, // 406: conversation.v1.AgentUnmodeledSuccess.content:type_name -> conversation.v1.ToolResultContent
+	8,   // 407: conversation.v1.AgentUnmodeledSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
+	263, // 408: conversation.v1.AgentUnmodeledFailure.content:type_name -> conversation.v1.ToolResultContent
+	8,   // 409: conversation.v1.AgentUnmodeledFailure.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
+	270, // 410: conversation.v1.AgentHook.start:type_name -> conversation.v1.AgentHookStart
+	271, // 411: conversation.v1.AgentHook.succeeded:type_name -> conversation.v1.AgentHookSucceeded
+	273, // 412: conversation.v1.AgentHook.blocking_error:type_name -> conversation.v1.AgentHookBlockingError
+	274, // 413: conversation.v1.AgentHook.non_blocking_error:type_name -> conversation.v1.AgentHookNonBlockingError
+	275, // 414: conversation.v1.AgentHook.cancelled:type_name -> conversation.v1.AgentHookCancelled
+	2,   // 415: conversation.v1.AgentHookStart.event:type_name -> conversation.v1.AgentHookEvent
+	6,   // 416: conversation.v1.AgentHookStart.gated_call:type_name -> conversation.v1.AgentActivityId
+	119, // 417: conversation.v1.AgentHookStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
+	272, // 418: conversation.v1.AgentHookSucceeded.output:type_name -> conversation.v1.AgentHookOutput
+	272, // 419: conversation.v1.AgentHookNonBlockingError.output:type_name -> conversation.v1.AgentHookOutput
+	277, // 420: conversation.v1.AgentDiagnosticsReport.files:type_name -> conversation.v1.AgentDiagnosticsFile
+	278, // 421: conversation.v1.AgentDiagnosticsFile.diagnostics:type_name -> conversation.v1.AgentDiagnostic
+	3,   // 422: conversation.v1.AgentDiagnostic.severity:type_name -> conversation.v1.AgentDiagnosticSeverity
+	280, // 423: conversation.v1.AgentContextInjected.memory:type_name -> conversation.v1.AgentInjectedMemory
+	281, // 424: conversation.v1.AgentContextInjected.skills:type_name -> conversation.v1.AgentInjectedSkills
+	282, // 425: conversation.v1.AgentInjectedSkills.skills:type_name -> conversation.v1.AgentInjectedSkill
+	426, // [426:426] is the sub-list for method output_type
+	426, // [426:426] is the sub-list for method input_type
+	426, // [426:426] is the sub-list for extension type_name
+	426, // [426:426] is the sub-list for extension extendee
+	0,   // [0:426] is the sub-list for field type_name
 }
 
 func init() { file_conversation_v1_agent_activity_proto_init() }

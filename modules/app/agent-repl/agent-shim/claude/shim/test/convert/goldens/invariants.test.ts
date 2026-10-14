@@ -413,7 +413,7 @@ describe("every activity stands alone on a real capture", () => {
     const unstamped = foldScenario(scenario)
       .entries.map(activityOf)
       .filter((activity) => activity !== undefined)
-      .filter((activity) => activity.contract !== conversationv1.AgentActivityContract.SETTLES_STAND_ALONE)
+      .filter((activity) => activity.contract !== conversationv1.AgentActivityContract.ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH)
       .map((activity) => activity.activityId?.value);
     expect(unstamped).toEqual([]);
   });

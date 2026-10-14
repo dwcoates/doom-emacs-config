@@ -12,6 +12,7 @@ package integration
 
 import (
 	"agentrepl/shim-store/internal/testclose"
+	"agentrepl/testrun/testenv"
 	"bufio"
 	"context"
 	"crypto/rand"
@@ -100,31 +101,44 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
-	binDir, err := os.MkdirTemp("", "shim-store-itest-bin")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "integration: temp dir for the store binary: %v\n", err)
-		os.Exit(1)
-	}
-	storeBinary = filepath.Join(binDir, "shim-store")
-
-	// -buildvcs=false: a test build never asks git to stamp the binary (no
-	// test runs real git, owner rule).
-	build := exec.Command("go", "build", "-buildvcs=false", "-o", storeBinary, "./")
-	build.Dir = ".."
-	build.Stdout = os.Stderr
-	build.Stderr = os.Stderr
-	if err := build.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "integration: building the store binary: %v\n", err)
-		if rmErr := os.RemoveAll(binDir); rmErr != nil {
-			fmt.Fprintf(os.Stderr, "integration: removing the store binary dir: %v\n", rmErr)
+	// A TEST RUN BUILDS THE STORE ONCE (testenv.Programs) for every suite
+	// that runs it; outside a run, this process builds it.
+	binDir := ""
+	removeBinDir := func() {
+		if binDir == "" {
+			return
 		}
+		if err := os.RemoveAll(binDir); err != nil {
+			fmt.Fprintf(os.Stderr, "integration: removing the store binary dir: %v\n", err)
+		}
+	}
+	built, err := testenv.ProgramOr(os.Getenv, "shim-store", func() (string, error) {
+		dir, err := os.MkdirTemp("", "shim-store-itest-bin")
+		if err != nil {
+			return "", fmt.Errorf("temp dir for the store binary: %w", err)
+		}
+		binDir = dir
+		out := filepath.Join(dir, "shim-store")
+		// -buildvcs=false: a test build never asks git to stamp the binary
+		// (no test runs real git, owner rule).
+		build := exec.Command("go", "build", "-buildvcs=false", "-o", out, "./")
+		build.Dir = ".."
+		build.Stdout = os.Stderr
+		build.Stderr = os.Stderr
+		if err := build.Run(); err != nil {
+			return "", fmt.Errorf("building the store binary: %w", err)
+		}
+		return out, nil
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "integration: %v\n", err)
+		removeBinDir()
 		os.Exit(1)
 	}
+	storeBinary = built
 
 	code := m.Run()
-	if err := os.RemoveAll(binDir); err != nil {
-		fmt.Fprintf(os.Stderr, "integration: removing the store binary dir: %v\n", err)
-	}
+	removeBinDir()
 	os.Exit(code)
 }
 

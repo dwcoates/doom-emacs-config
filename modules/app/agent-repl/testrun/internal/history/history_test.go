@@ -164,7 +164,7 @@ func TestDefaultPathHonorsTheOverride(t *testing.T) {
 	t.Setenv("AGENT_REPL_TEST_HISTORY", "/x/h.json")
 
 	// Act
-	got, err := DefaultPath()
+	got, err := DefaultPath("ramdisk-io-default")
 
 	// Assert
 	if err != nil || got != "/x/h.json" {
@@ -178,10 +178,10 @@ func TestDefaultPathIsTheModulesHostCache(t *testing.T) {
 	t.Setenv("HOME", "/home/u")
 
 	// Act
-	got, err := DefaultPath()
+	got, err := DefaultPath("ramdisk-io-default")
 
 	// Assert
-	if err != nil || got != "/home/u/.cache/agent-repl/test-history.json" {
+	if err != nil || got != "/home/u/.cache/agent-repl/test-history.ramdisk-io-default.json" {
 		t.Fatalf("DefaultPath = %q, %v", got, err)
 	}
 }
@@ -192,10 +192,35 @@ func TestDefaultPathWithoutAHomeFails(t *testing.T) {
 	t.Setenv("HOME", "")
 
 	// Act
-	_, err := DefaultPath()
+	_, err := DefaultPath("ramdisk-io-default")
 
 	// Assert
 	if err == nil || !strings.Contains(err.Error(), "resolve the home directory") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestDefaultPathRefusesConditionsThatAreNotOneName(t *testing.T) {
+	cases := []struct {
+		name       string
+		conditions string
+	}{
+		{name: "no conditions", conditions: ""},
+		{name: "conditions holding a separator", conditions: "a/b"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			t.Setenv("AGENT_REPL_TEST_HISTORY", "")
+			t.Setenv("HOME", "/home/u")
+
+			// Act
+			_, err := DefaultPath(tc.conditions)
+
+			// Assert
+			if err == nil || !strings.Contains(err.Error(), "not one file-name component") {
+				t.Fatalf("err = %v, want the conditions refused", err)
+			}
+		})
 	}
 }

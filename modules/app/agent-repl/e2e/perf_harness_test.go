@@ -22,7 +22,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -385,13 +384,17 @@ func perfWriteBaseline(t *testing.T, name string, n int, p50, p95 time.Duration)
 	perfBaselineHighWater[name] = [2]time.Duration{p50, p95}
 	perfBaselineHighWaterMu.Unlock()
 
+	tip, err := perfTip(os.Getenv)
+	if err != nil {
+		t.Fatalf("perf %s: %v", name, err)
+	}
 	base := perfBaseline{
 		Assertion: name,
 		N:         n,
 		P50Ms:     msOf(p50),
 		P95Ms:     msOf(p95),
 		Cores:     runtime.NumCPU(),
-		Tip:       perfTip(),
+		Tip:       tip,
 		Measured:  time.Now().Format("2006-01-02"),
 		Note:      "the high-water p50/p95 across the baseline run's repetitions",
 	}
@@ -484,19 +487,20 @@ func (s PerfShipped) Assert(t *testing.T, p50Budget, p95Budget time.Duration) {
 // PERF-SPEC.md is stated in.
 func msOf(d time.Duration) float64 { return float64(d) / float64(time.Millisecond) }
 
-// perfTip answers the commit a baseline was measured at, or "unknown". It
-// shells out to the repo's git ONCE per process — this is the harness's own
-// bookkeeping, not a system under test, and it reads nothing the suite mocks.
-var perfTipOnce = sync.OnceValue(func() string {
-	cmd := exec.Command("git", "-C", repo.repoDir, "rev-parse", "--short", "HEAD")
-	out, err := cmd.Output()
-	if err != nil {
-		return "unknown"
-	}
-	return strings.TrimSpace(string(out))
-})
+// PerfTipEnv names the commit a baseline run measures. The caller states it
+// (e2e/Makefile's perf-baseline target); the suite never runs git itself
+// (AGENTS.md, "Tests NEVER run real git or a real vendor").
+const PerfTipEnv = "AGENT_REPL_E2E_PERF_TIP"
 
-func perfTip() string { return perfTipOnce() }
+// perfTip answers the commit a baseline is being written at, from PerfTipEnv.
+// A baseline with no commit to name is refused, never labelled "unknown".
+func perfTip(getenv func(string) string) (string, error) {
+	tip := strings.TrimSpace(getenv(PerfTipEnv))
+	if tip == "" {
+		return "", fmt.Errorf("%s is unset: a baseline must name the commit it was measured at (run it through `make -C e2e perf-baseline`)", PerfTipEnv)
+	}
+	return tip, nil
+}
 
 // ===========================================================================
 // D2. The calibration guard.

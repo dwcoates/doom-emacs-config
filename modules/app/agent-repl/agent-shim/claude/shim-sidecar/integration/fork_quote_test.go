@@ -67,19 +67,12 @@ func TestAForkQuotingAParentMessageDoesNotMoveItsRowAndItsOwnWorkCommits(t *test
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
-	store := startRealStore(t)
+	store := startFakeStore(t)
 	tree := newVendorTree(t)
 	cwd := "/work/fork-quote-probe"
 	slug := cwdSlug(cwd)
 	session := "f0f0f0f0-f0f0-4f0f-8f0f-f0f0f0f0f0f0"
 	opts := defaultSidecarOptions(t, store.Socket, tree)
-
-	// The producer already booked the parent's message under its OWN book,
-	// exactly as first ingest would. Seeding claims `activity:<message id>:0` so
-	// a re-book under the fork's book is a genuine identity move the real store
-	// refuses.
-	seedDecoyRow(ctx, t, store.Client, "claude-shim:"+session,
-		decoyEntry("activity:"+forkQuotedUnitFirstB, "producer-"+forkQuotedMessageID, "the-producing-agent"))
 
 	// The fork sidechain: the parent's message it QUOTES, then its OWN work.
 	writeForkMeta(t, tree, slug, session, forkQuoteLocator, forkQuoteBook)
@@ -90,10 +83,10 @@ func TestAForkQuotingAParentMessageDoesNotMoveItsRowAndItsOwnWorkCommits(t *test
 		`{"type":"text","text":"the fork's own work"}`))
 
 	// Act: ingest. The fork's own unit reaching its book is the signal the batch
-	// committed — if the quoted entry had moved a row, the atomic batch would
-	// have rolled back and this unit would never appear.
+	// committed; whether the quoted entry was booked under the fork is read off
+	// the book below.
 	first := startSidecar(t, opts)
-	awaitBookUnits(ctx, t, store.Client, forkQuoteBook, forkOwnUnitFirstBlk)
+	store.awaitBookUnits(ctx, t, forkQuoteBook, forkOwnUnitFirstBlk)
 
 	// Assert: no book-move refusal — the fork wrote residue, not the seeded key.
 	assertNoProducerDefect(t, opts.LogPath, g.Path())
@@ -103,14 +96,14 @@ func TestAForkQuotingAParentMessageDoesNotMoveItsRowAndItsOwnWorkCommits(t *test
 	// absorbs — never a second refusal, never a duplicated unit.
 	first.Stop()
 	startSidecar(t, opts)
-	awaitBookUnits(ctx, t, store.Client, forkQuoteBook, forkOwnUnitFirstBlk)
+	store.awaitBookUnits(ctx, t, forkQuoteBook, forkOwnUnitFirstBlk)
 	assertNoProducerDefect(t, opts.LogPath, g.Path())
 
 	// The fork's own book holds its own unit EXACTLY once after the replay.
-	lines := awaitBookUnits(ctx, t, store.Client, forkQuoteBook, forkOwnUnitFirstBlk)
+	lines := store.awaitBookUnits(ctx, t, forkQuoteBook, forkOwnUnitFirstBlk)
 	seen := 0
 	for _, at := range lines {
-		if a := activityOf(at.GetLine()); a != nil && a.GetActivityId().GetValue() == forkOwnUnitFirstBlk {
+		if a := activityOf(at); a != nil && a.GetActivityId().GetValue() == forkOwnUnitFirstBlk {
 			seen++
 		}
 	}
@@ -119,7 +112,7 @@ func TestAForkQuotingAParentMessageDoesNotMoveItsRowAndItsOwnWorkCommits(t *test
 	}
 	// The quoted message never became a page line in the fork's book.
 	for _, at := range lines {
-		if a := activityOf(at.GetLine()); a != nil && a.GetActivityId().GetValue() == forkQuotedUnitFirstB {
+		if a := activityOf(at); a != nil && a.GetActivityId().GetValue() == forkQuotedUnitFirstB {
 			t.Fatalf("the quoted parent message was booked under the fork %q; it must be residue", forkQuoteBook)
 		}
 	}
