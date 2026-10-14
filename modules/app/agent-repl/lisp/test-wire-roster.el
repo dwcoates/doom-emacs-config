@@ -408,7 +408,7 @@ reserved."
   '((turnRunning "{\"startedAtMs\":\"1\"}" (:started-at-ms 1))
     (noTurnRunning "{}" nil)
     (merged "{\"atMs\":\"1\"}" (:at-ms 1))
-    (hidden "{\"atMs\":\"1\"}" (:at-ms 1)))
+    (hidden "{\"atMs\":\"1\"}" (:at-ms 1 :cache nil)))
   "One payload per when arm and the value it decodes to.")
 
 (ert-deftest agent-repl-test-wire-roster-when-decodes-every-arm-of-its-table ()
@@ -443,8 +443,7 @@ decodes to its keyword: the decode and the allow-list read the same table."
   "Every roster instant decoder is the shared helper under its own message
 name: each one's breach names that message exactly as the helper's does."
   (dolist (pair '((agent-repl-wire-decode-roster-row-last-selected . "RosterRowLastSelected")
-                  (agent-repl-wire-decode-roster-row-when-merged . "RosterRowWhenMerged")
-                  (agent-repl-wire-decode-roster-row-when-hidden . "RosterRowWhenHidden")))
+                  (agent-repl-wire-decode-roster-row-when-merged . "RosterRowWhenMerged")))
     (let ((json "{\"atMs\":\"1\",\"extra\":1}"))
       (should (equal (agent-repl-test-wire-roster--breach (car pair) json)
                      (agent-repl-test-wire-roster--breach
@@ -487,6 +486,38 @@ stale blue status."
                     #'agent-repl-wire-decode-roster-row-when
                     (format "{\"%s\":{\"atMs\":\"1\"}}" arm))
                    (list "RosterRowWhen" arm "unknown field")))))
+
+(ert-deftest agent-repl-test-wire-roster-when-hidden-carries-its-instant ()
+  "A hidden row whose cache lapse the daemon does not know decodes with no
+cache."
+  (should (equal (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-row-when
+                  "{\"hidden\":{\"atMs\":\"1756400000000\"}}")
+                 '(:arm :hidden :value (:at-ms 1756400000000 :cache nil)))))
+
+(ert-deftest agent-repl-test-wire-roster-when-hidden-carries-its-cache-lapse ()
+  "Regression watch: a hidden row's cache lapse (2026-10-13) must decode, or
+the strict decoder rejects the whole WatchWorkspaceRoster push and the tab
+bar goes dark."
+  (should (equal (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-row-when
+                  "{\"hidden\":{\"atMs\":\"1\",\"cache\":{\"lapsesAtMs\":\"2\"}}}")
+                 '(:arm :hidden :value (:at-ms 1 :cache (:lapses-at-ms 2))))))
+
+(ert-deftest agent-repl-test-wire-roster-when-hidden-refuses-an-extra-key ()
+  "An unknown field on a hidden row is a breach naming its message."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row-when-hidden
+                  "{\"atMs\":\"1\",\"extra\":1}")
+                 '("RosterRowWhenHidden" extra "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-when-hidden-cache-refuses-an-extra-key ()
+  "An unknown field on a hidden row's cache lapse is a breach naming its
+message."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row-when-hidden-cache
+                  "{\"lapsesAtMs\":\"1\",\"extra\":1}")
+                 '("RosterRowWhenHiddenCache" extra "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-when-retired-active-is-refused ()
   "The retired `active' arm (field 3, reserved) is an unknown field now."
