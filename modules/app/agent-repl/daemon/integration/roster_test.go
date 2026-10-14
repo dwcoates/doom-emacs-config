@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"agentrepl/protohelpers/oneofarm"
 	"agentrepl/protohelpers/rosterwalk"
 	"testing"
 
@@ -1035,10 +1036,8 @@ func TestTasksAndWorkspaceAssignmentsSurviveADaemonRestart(t *testing.T) {
 // rosterStatusName answers which arm of RosterRow.status a row carries, by the
 // proto's own field name, so a walk can be recorded and compared as data.
 func rosterStatusName(row *frontendv1.RosterRow) string {
-	m := row.ProtoReflect()
-	oneof := m.Descriptor().Oneofs().ByName("status")
-	if field := m.WhichOneof(oneof); field != nil {
-		return string(field.Name())
+	if name, ok := oneofarm.Name(row, "status"); ok {
+		return name
 	}
 	return "<unset>"
 }
