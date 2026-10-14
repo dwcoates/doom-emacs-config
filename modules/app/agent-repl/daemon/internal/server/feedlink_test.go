@@ -139,8 +139,24 @@ func TestAnUnresolvedFeedLinksQuestionQuotesTheSourceBubble(t *testing.T) {
 	}
 }
 
-func TestAnUnresolvedFeedLinksQuestionIsSentUnquotedForAnUnselectableRow(t *testing.T) {
-	// Arrange: the row resolves to no selectable bubble.
+func TestAnUnresolvedFeedLinksQuestionQuotesAThinkingBubble(t *testing.T) {
+	// Arrange: a thinking bubble is never selectable, but it has text.
+	h := newHarness(t)
+	h.Feed.thinking = map[string]string{"row-1": "maybe [AGENTS](nowhere.md)"}
+	unresolvedLink(h, "nowhere.md")
+
+	// Act.
+	openFeedLink(t, h, "nowhere.md", "row-1")
+
+	// Assert.
+	want := replyquote.Quote(said("which file is nowhere.md?"), "maybe [AGENTS](nowhere.md)", false)
+	if !proto.Equal(h.Prompts.lastSaid, want) {
+		t.Fatalf("question = %v, want %v", h.Prompts.lastSaid, want)
+	}
+}
+
+func TestAnUnresolvedFeedLinksQuestionIsSentUnquotedForARowWithNoBubble(t *testing.T) {
+	// Arrange: the row resolves to no landed bubble.
 	h := newHarness(t)
 	unresolvedLink(h, "nowhere.md")
 

@@ -8,6 +8,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
@@ -283,7 +284,7 @@ func (v *verbs) coldGateSettled(ctx context.Context, log dlog.Logger, ws ids.Wor
 		// returns; retiring the gate here is what lets them.
 		v.deps.Topbar.SetColdGate(ws, topbar.ColdGate{Standing: false})
 		log.Info(opColdGate, "answered the cold gate", dlog.Context{"choice": choice})
-	case canceled(err):
+	case ctxend.Is(err):
 		v.deps.Footer.SetColdGateAnswer(ws, nil)
 		log.Info(opColdGate, "the answered cold gate's re-open was abandoned as the daemon stood down",
 			dlog.Context{"choice": choice, "cause": err.Error()})

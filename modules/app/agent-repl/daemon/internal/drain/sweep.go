@@ -8,6 +8,7 @@ import (
 
 	shimv1 "agentrepl/proto/shim/v1"
 
+	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
@@ -405,7 +406,7 @@ func (c *controller) Run(ctx context.Context) error {
 			// exit withdrawing the loop, not a schedule that could not be read:
 			// there is no drain left to fire and nothing to remediate. A read
 			// that fails while serving is still an error.
-			if cancelled(err) {
+			if ctxend.Is(err) {
 				c.log.Debug(opRun, "the schedule read ended when the drain loop's context was cancelled", withCause(nil, err))
 			} else {
 				c.log.Error(opRun, "could not read the standing drain schedule", withCause(nil, err))
@@ -446,13 +447,6 @@ func (c *controller) claimFire() bool {
 	}
 	c.fired = true
 	return true
-}
-
-// cancelled reports whether err is a context ending -- this daemon's own exit
-// cancelling the serving context under work in flight, rather than a failure
-// of the work itself.
-func cancelled(err error) bool {
-	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 // queuedSince answers when each workspace with a queued merge joined its

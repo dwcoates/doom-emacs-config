@@ -10,6 +10,7 @@ import { SelectFeedRowResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/
 import { FeedRowSchema, type FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 import {
+  OUT_OF_VIEW_COLLAPSE_ATTRIBUTE,
   SELECTABLE_ATTRIBUTE,
   SELECTION_GOVERNED_ATTRIBUTE,
   SELECT_REQUEST,
@@ -44,12 +45,14 @@ function rowOf(arm: MessageInitShape<typeof FeedRowSchema>["row"], selectable = 
 
 const RESPONSE = { case: "activity", value: { unit: { case: "response", value: {} } } } as const;
 const TOOL = { case: "activity", value: { unit: { case: "simpleToolCall", value: {} } } } as const;
+const THINKING = { case: "activity", value: { unit: { case: "response", value: { thinking: true } } } } as const;
 
 describe("isSelectionGoverned", () => {
   it.each([
     ["a user prompt", { case: "userPrompt", value: {} }, true],
     ["an agent prompt", { case: "agentPrompt", value: {} }, true],
     ["a response bubble", RESPONSE, true],
+    ["a thinking bubble", THINKING, false],
     ["a tool call", TOOL, false],
     ["a separation", { case: "separation", value: {} }, false],
   ] as const)("answers %s: %s", (_name, arm, want) => {
@@ -71,6 +74,33 @@ describe("stampSelection", () => {
     stampSelection(el, rowOf(arm, selectable), root);
     // Assert
     expect([el.hasAttribute(SELECTION_GOVERNED_ATTRIBUTE), el.hasAttribute(SELECTABLE_ATTRIBUTE)]).toEqual(want);
+  });
+
+  it.each([
+    ["a root thinking bubble", THINKING, true, [false, false, true]],
+    ["a sub-feed thinking bubble", THINKING, false, [false, false, false]],
+    ["a root response bubble", RESPONSE, true, [true, false, false]],
+  ] as const)("stamps the out-of-view collapse on %s", (_name, arm, root, want) => {
+    // Arrange
+    const el = document.createElement("article");
+    // Act
+    stampSelection(el, rowOf(arm), root);
+    // Assert
+    expect([
+      el.hasAttribute(SELECTION_GOVERNED_ATTRIBUTE),
+      el.hasAttribute(SELECTABLE_ATTRIBUTE),
+      el.hasAttribute(OUT_OF_VIEW_COLLAPSE_ATTRIBUTE),
+    ]).toEqual(want);
+  });
+
+  it("clears the out-of-view collapse a re-push no longer states", () => {
+    // Arrange
+    const el = document.createElement("article");
+    stampSelection(el, rowOf(THINKING), true);
+    // Act
+    stampSelection(el, rowOf(RESPONSE), true);
+    // Assert
+    expect(el.hasAttribute(OUT_OF_VIEW_COLLAPSE_ATTRIBUTE)).toBe(false);
   });
 
   it("clears a stamp a re-push no longer states", () => {
