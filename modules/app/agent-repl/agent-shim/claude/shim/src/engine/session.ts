@@ -113,6 +113,7 @@ import { normalizeModel, SYNTHETIC_MODEL } from "../model.js";
 import { TRUST_KEY, VENDOR_CONFIG_FILE, trustRoot } from "../trust.js";
 import { recordTimestampMs } from "../convert/place.js";
 import { compactionIdField, compactionTracker, fastModeUpdate } from "../convert/session-updates.js";
+import { SerialProbe } from "./serial-probe.js";
 import { backupTranscript } from "./backup.js";
 import {
   appendCompactionLines,
@@ -1644,36 +1645,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   }
 
   /**
-   * THE CONTEXT READINGS ARE SERIAL. Each probe starts only after the one before
-   * it has pushed, so the readings reach the daemon in the order they were
-   * asked for: a turn-end probe can never be overtaken by a slower mid-turn one
-   * and leave a stale figure standing on the topbar's chip and the footer's
-   * cell.
+   * THE CONTEXT READINGS ARE SERIAL (engine/serial-probe.ts), so a turn-end
+   * probe can never be overtaken by a slower mid-turn one and leave a stale
+   * figure standing on the topbar's chip and the footer's cell.
    */
-  let contextUsageChain: Promise<void> = Promise.resolve();
-  /** Whether a mid-turn refresh is queued and not yet started. */
-  let contextRefreshQueued = false;
+  const contextProbe = new SerialProbe(() => probeContextUsage());
 
   function pushContextUsage(): Promise<void> {
-    return enqueueContextProbe(() => undefined);
-  }
-
-  /**
-   * Queue one probe behind every probe already asked for. The caller holds the
-   * returned promise and so hears the probe's own failure; the chain keeps only
-   * its SETTLEMENT, so one failed probe cannot stop every later one from
-   * running.
-   */
-  function enqueueContextProbe(onStart: () => void): Promise<void> {
-    const next = contextUsageChain.then(async () => {
-      onStart();
-      await probeContextUsage();
-    });
-    contextUsageChain = next.then(
-      () => undefined,
-      () => undefined,
-    );
-    return next;
+    return contextProbe.run();
   }
 
   /**
@@ -1695,16 +1674,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // response moves the window as much as a StartTurn's does.
     const turn = turnFor(false, running);
     if (turn === undefined) return;
-    if (contextRefreshQueued) {
+    if (contextProbe.refreshPending) {
       LOGGER.logVerbose({}, "a context refresh is already queued; this response rides it");
       return;
     }
-    contextRefreshQueued = true;
     const turnId = turn.value;
     LOGGER.debug({ turn_id: turnId }, "a main-agent API response landed; refreshing the context reading");
-    void enqueueContextProbe(() => {
-      contextRefreshQueued = false;
-    }).catch((err: unknown) => {
+    void contextProbe.refresh().catch((err: unknown) => {
       LOGGER.error(
         { turn_id: turnId, cause: err instanceof Error ? err.message : String(err) },
         "the mid-turn context refresh failed before it could push a reading",
