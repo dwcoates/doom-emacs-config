@@ -9,9 +9,8 @@ import { RosterRowSchema, type RosterRowWhenSchema } from "../../../proto/gen/ts
 import { liveElapsedClock } from "../../src/elapsed-clock.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { heatColor } from "../../src/heat.js";
+import { HOVER_CLOSE_GRACE_MS, HOVER_OPEN_DELAY_MS } from "../../src/sidebar/row-hover.js";
 import {
-  HOVER_CLOSE_GRACE_MS,
-  HOVER_OPEN_DELAY_MS,
   MERGED_TODAY_CLASS,
   drawRosterRow,
   drawRosterRowOneShot,

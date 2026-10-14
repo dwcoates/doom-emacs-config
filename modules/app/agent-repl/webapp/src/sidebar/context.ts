@@ -13,6 +13,7 @@ import type { DaemonContext } from "../rpc/context.js";
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import type { AttentionRegistry } from "./attention.js";
 import type { Dropdowns } from "./dropdowns.js";
+import type { RowHover } from "./row-hover.js";
 import type { SidebarView } from "./view.js";
 
 /** The resolved groupings; which one is drawn is the daemon's view state. */
@@ -55,6 +56,12 @@ export interface SidebarContext {
   drawnStatus: DrawnStatusLog;
   /** The one dismiss rule every dropdown in the rail shares. */
   dropdowns: Dropdowns;
+  /**
+   * The page's one owner of the detail panels' hover and focus gesture,
+   * which outlives every draw so a redraw never strands a timer on a
+   * thrown-away row (`row-hover.ts`).
+   */
+  rowHover: RowHover;
   /** The blink registry the attention markers are driven from. */
   attention: AttentionRegistry;
   /**
