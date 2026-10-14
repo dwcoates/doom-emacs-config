@@ -358,6 +358,27 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
   - Uses Unicode box-drawing connectors (├──, └──, │) for the parent-child edges.
   - Uses dotted hierarchical numbering for the labels (e.g., '1 ...', '1.1 ...', '1.1.1 ...', '1.1.1.1 ...').
     - A dot appears ONLY as a separator between two numerals, so a label ends on its final numeral and carries NO trailing dot.
+- EVERY node at EVERY depth MUST carry its dotted label, immediately after its connector.
+  - A node is never a bare connector followed by text, and never a `-` or `*` bullet.
+  - A leaf at depth 4 is labelled exactly as carefully as a root branch.
+- A complete depth-4 tree looks like this, every label present:
+
+```text
+Response (👀 no changes made)
+
+1 🔎 The cache misses on every compacted fork
+├── 1.1 The fork's boundary names the parent's records
+│   ├── 1.1.1 The shim copies the boundary verbatim
+│   │   ├── 1.1.1.1 The copy happens at fork time
+│   │   └── 1.1.1.2 The parent's record IDs never exist in the fork
+│   └── 1.1.2 The prefix therefore differs from the parent's
+└── 1.2 The miss shows as a thinking_drop attachment
+
+2 🔧 Remap the boundary to the forked records
+├── 2.1 The shim remaps each boundary record at fork time
+└── 2.2 A unit test pins the remapped boundary
+```
+
 - Connectors MUST emanate from the column where the parent's dotted hierarchical label begins rather than from the emoji or any other character that follows that label.
   - Each child's ├──, └──, and │ connector aligns vertically beneath the first character of the parent's dotted hierarchical label.
   - This connector-alignment rule governs ONLY the horizontal column at which connectors are drawn.
