@@ -21,18 +21,23 @@ func readProcessState(pid int) (processState, error) {
 // how many still do. A thread the kernel wakes after this (a child's exit, a
 // socket's data) is held by the task's suspension before it can return to
 // user mode, so once this holds the process can observe nothing.
-func threadsHalted(pid int) (bool, string, error) {
+//
+// EVERY THREAD STILL TO BE HALTED AWAITS ONLY THE CPU. TH_STATE_RUNNING is a
+// thread on a CPU or on a run queue, and the task's suspension holds it at
+// its next return to user mode; every other state (waiting, uninterruptible,
+// halted) is held already. So a not-halted answer is always awaitingCPU.
+func threadsHalted(pid int) (halted, awaitingCPU bool, name string, err error) {
 	running, err := runningThreads(pid)
 	if errors.Is(err, unix.ESRCH) {
-		return true, "gone", nil
+		return true, false, "gone", nil
 	}
 	if err != nil {
-		return false, "", fmt.Errorf("read the threads of process %d: %w", pid, err)
+		return false, false, "", fmt.Errorf("read the threads of process %d: %w", pid, err)
 	}
 	if running > 0 {
-		return false, fmt.Sprintf("stopping (%d thread(s) still running)", running), nil
+		return false, true, fmt.Sprintf("stopping (%d thread(s) still running)", running), nil
 	}
-	return true, "", nil
+	return true, false, "", nil
 }
 
 // The <sys/proc_info.h> values runningThreads reads the kernel with.

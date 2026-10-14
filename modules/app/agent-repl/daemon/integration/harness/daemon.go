@@ -1949,12 +1949,41 @@ func (d *Daemon) freezeStrays() ([]int, error) {
 // strayStopStalled reports a stray whose stop has not held after waited, with
 // the kernel's view of the process: the evidence a stuck stop leaves nowhere
 // else. The sweep goes on waiting.
-func (d *Daemon) strayStopStalled(s stray) func(pid int, state string, waited time.Duration) {
-	return func(pid int, state string, waited time.Duration) {
+func (d *Daemon) strayStopStalled(s stray) func(pid int, state processState, waited time.Duration) {
+	return func(pid int, state processState, waited time.Duration) {
 		d.t.Helper()
-		out, err := exec.Command("ps", "-M", "-o", "pid,stat,wchan,flags,time,command", "-p", strconv.Itoa(pid)).CombinedOutput()
-		d.t.Errorf("harness: stray %d (%s) is still %s %s after its SIGSTOP; still waiting. The kernel's view (ps err %v):\n%s", pid, s.args, state, waited, err, out)
+		out, err := exec.Command("ps", "-M", "-o", "pid,stat,pri,wchan,flags,time,command", "-p", strconv.Itoa(pid)).CombinedOutput()
+		reportStrayStall(d.t, s, pid, state, waited, fmt.Sprintf("(ps err %v):\n%s", err, out))
 	}
+}
+
+// stallReporter is the part of testing.TB a stall report writes to.
+type stallReporter interface {
+	Helper()
+	Errorf(format string, args ...any)
+	Logf(format string, args ...any)
+}
+
+// reportStrayStall reports a stray whose stop has not held after waited, on
+// the KERNEL'S account of why, not on the duration.
+//
+// A STOP WHOSE LAST THREADS AWAIT THE CPU IS STARVED, NOT STUCK: it is
+// LOGGED. The kernel has posted the stop and suspended the task, and every
+// thread still to take it is runnable, so it holds the moment the scheduler
+// runs them. On a host loaded by other work a test process's threads at
+// background QoS (a shim's FSEvents dispatch thread, priority 4) waited past
+// thirty seconds for that (2026-10-14, load average 81 on 16 cores:
+// TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce). Anything else --
+// a stop not yet posted, a thread blocked rather than runnable -- is a stop
+// that may never hold, and FAILS the test while the wait goes on. A starved
+// stop that never gets the CPU is still bounded, by the test's own timeout.
+func reportStrayStall(r stallReporter, s stray, pid int, state processState, waited time.Duration, view string) {
+	r.Helper()
+	if state.awaitingCPU {
+		r.Logf("harness: stray %d (%s) is still %s %s after its SIGSTOP; its stop is posted and its remaining threads await only the CPU, so it is starved, not stuck; still waiting. The kernel's view %s", pid, s.args, state.name, waited, view)
+		return
+	}
+	r.Errorf("harness: stray %d (%s) is still %s %s after its SIGSTOP; still waiting. The kernel's view %s", pid, s.args, state.name, waited, view)
 }
 
 // settleFrozen answers the stopped pids to kill: those listed (every stopped
