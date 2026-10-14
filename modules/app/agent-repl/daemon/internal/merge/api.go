@@ -245,15 +245,21 @@ type DetachedRun struct {
 	// the branch checked out when the request was accepted
 	// (agentrepl.v1.MergeWorkspaceAsync.cleanup_worktree).
 	CleanupWorktree bool
+	// Actions are the merge actions the merge workspace runs
+	// (agentrepl.v1.MergeWorkspaceAsync.merge_actions), and the only ones it
+	// runs: it never inherits its requester's. Empty when the request names
+	// none.
+	Actions wsm.MergeActions
 }
 
 // NewDetachedRun is the async run an ingress reads off a request: the merge
 // workspace's name and the instruction with their surrounding space trimmed,
-// and the landing asks as given. Every ingress builds its run here, so the
-// rpc and the command file cannot read the same request apart.
-func NewDetachedRun(name, instruction string, compactAfter bool, closeOnLanding ids.WorkspaceID, cleanupWorktree bool) *DetachedRun {
+// and the landing asks and merge actions as given. Every ingress builds its
+// run here, so the rpc and the command file cannot read the same request
+// apart.
+func NewDetachedRun(name, instruction string, compactAfter bool, closeOnLanding ids.WorkspaceID, cleanupWorktree bool, actions wsm.MergeActions) *DetachedRun {
 	return &DetachedRun{Name: strings.TrimSpace(name), Pick: strings.TrimSpace(instruction), CompactAfter: compactAfter,
-		CloseOnLanding: closeOnLanding, CleanupWorktree: cleanupWorktree}
+		CloseOnLanding: closeOnLanding, CleanupWorktree: cleanupWorktree, Actions: actions}
 }
 
 // DetachedMerges forks the merge workspace a detached request runs in, and
