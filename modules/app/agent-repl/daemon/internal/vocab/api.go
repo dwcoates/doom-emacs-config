@@ -10,8 +10,10 @@ package vocab
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -95,10 +97,12 @@ type RenderColors struct {
 }
 
 // AsyncMergeMark is the shared drawing of an async merge of the workspace's
-// own branch (frontend.v1.RosterRowAsyncMerging): the ink and motion the
-// sidebar's plain status dot takes, and the background of the Emacs tab's
-// [N] run. Every renderer reads it here, so no surface picks its own purple.
+// own branch (frontend.v1.RosterRowAsyncMerging): the merge glyph, ink and
+// motion the sidebar draws in place of its plain status dot, and the
+// background of the Emacs tab's [N] run. Every renderer reads it here, so no
+// surface picks its own purple.
 type AsyncMergeMark struct {
+	Glyph      string `json:"glyph"`
 	Ink        string `json:"ink"`
 	Motion     string `json:"motion"`
 	TabBracket string `json:"tab_bracket"`
@@ -281,6 +285,9 @@ func (c RenderColors) validate() error {
 		if _, ok := c.RosterStatus[arm]; !ok {
 			return fmt.Errorf("one_shot_glyph_arms names %q, which is no roster_status arm", arm)
 		}
+	}
+	if m := c.AsyncMergeMark; !slices.Contains(slices.Collect(maps.Values(c.MergeGlyphs)), m.Glyph) {
+		return fmt.Errorf("async_merge_mark.glyph = %q, which no merge_glyphs arm draws", m.Glyph)
 	}
 	if m := c.AsyncMergeMark; m.Ink == ColorNone || !contains(c.Colors, m.Ink) {
 		return fmt.Errorf("async_merge_mark.ink = %q, which is not a color", m.Ink)

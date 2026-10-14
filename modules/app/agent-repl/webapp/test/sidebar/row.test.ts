@@ -1712,23 +1712,30 @@ describe("the one-shot mark", () => {
 });
 
 // AN ASYNC MERGE OF THE WORKSPACE'S OWN BRANCH (owner request, 2026-10-13):
-// the NAME keeps the workspace's own status color and only a plain dot turns
-// purple; every other mark outranks it.
+// the NAME keeps the workspace's own status color and only a plain dot gives
+// way to the purple merge glyph; every other mark outranks it.
 describe("the async-merging marker", () => {
   it.each([
     ["ready", "tone-green"],
     ["done", "tone-green"],
     ["thinking", "tone-red"],
     ["idleAsync", "tone-yellow"],
-  ] as const)("keeps a %s row's own %s and inks its dot purple, breathing", (arm, tone) => {
+  ] as const)("keeps a %s row's own %s and draws the purple merge glyph, breathing", (arm, tone) => {
     const drawn = drawRosterRow(row({ id: "ws-1", status: { case: arm, value: {} }, asyncMerging: true }), sidebarContext(), "R");
     expect([
       drawn.classList.contains(tone),
       drawn.classList.contains("tone-purple"),
       dotOf(drawn).classList.contains(tone),
+      dotOf(drawn).getAttribute("data-glyph"),
+      dotOf(drawn).classList.contains("st-glyph"),
       dotOf(drawn).classList.contains("ink-purple"),
       dotOf(drawn).classList.contains("breathes"),
-    ]).toEqual([true, false, true, true, true]);
+    ]).toEqual([true, false, true, "merge", true, true, true]);
+  });
+
+  it("draws the async merge's glyph with a running merge's picture", () => {
+    const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "ready", value: {} }, asyncMerging: true }), sidebarContext(), "R");
+    expect(dotOf(drawn).innerHTML).toBe(drawStatusMark("merging", "R.status", NO_MARKERS).innerHTML);
   });
 
   it.each(["compacting", "permission", "question", "coldGate", "mergeFailed"] as const)(
