@@ -177,7 +177,7 @@ func TestCreateWorkspaceWithAParentNestsTheChildAndTargetsTheParentsWorktreeOnMe
 	script.SetStdout("daemon: passed in 1s\n")
 	d := newDaemon(t, harness.Opts{
 		SelfRepo: repo.Dir,
-		ExtraEnv: []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path},
+		ExtraEnv: []string{harness.TestAllScriptEnv(script.Path)},
 		// A merge-spanning wait chains dozens of subprocesses; see harness.MergeChainTimeout.
 		Timeout: harness.MergeChainTimeout,
 	})

@@ -239,7 +239,7 @@ func mainCheckoutRequester(t *testing.T) *sourcedRepo {
 	script := harness.NewTestAllScript(t, repo.Dir)
 	script.SetExitCode(0)
 	script.SetStdout("daemon: starting\ndaemon: passed in 1s\n")
-	d := harness.StartDaemon(t, harness.Opts{DurableState: true, SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout, ExtraEnv: []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path}})
+	d := harness.StartDaemon(t, harness.Opts{DurableState: true, SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout, ExtraEnv: []string{harness.TestAllScriptEnv(script.Path)}})
 	f := &fixture{d: d, repo: repo, ws: harness.Register(t, d, repo.Dir), t: t}
 	f.open()
 	f.host = d.WatchHost(f.ws)
@@ -335,7 +335,7 @@ func TestAnAsyncMergeRunsNoneOfItsRequestersConfiguredActions(t *testing.T) {
 	script := harness.NewTestAllScript(t, repo.Dir)
 	script.SetExitCode(0)
 	script.SetStdout("daemon: starting\ndaemon: passed in 1s\n")
-	d := harness.StartDaemon(t, harness.Opts{DurableState: true, SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout, ExtraEnv: []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path}})
+	d := harness.StartDaemon(t, harness.Opts{DurableState: true, SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout, ExtraEnv: []string{harness.TestAllScriptEnv(script.Path)}})
 	f := mergeCreateChild(t, d, mergeRepositoryRef(t, d, repo), "configured", "do the configured thing",
 		&agentreplv1.CreateWorkspaceMergeActions{BeforeWsMerge: said("the requester's own pre-merge")})
 	f.repo = repo
