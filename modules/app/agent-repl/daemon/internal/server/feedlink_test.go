@@ -142,7 +142,7 @@ func TestAnUnresolvedFeedLinksQuestionQuotesTheSourceBubble(t *testing.T) {
 func TestAnUnresolvedFeedLinksQuestionQuotesAThinkingBubble(t *testing.T) {
 	// Arrange: a thinking bubble is never selectable, but it has text.
 	h := newHarness(t)
-	h.Feed.thinking = map[string]string{"row-1": "maybe [AGENTS](nowhere.md)"}
+	h.Feed.unselectable = map[string]string{"row-1": "maybe [AGENTS](nowhere.md)"}
 	unresolvedLink(h, "nowhere.md")
 
 	// Act.

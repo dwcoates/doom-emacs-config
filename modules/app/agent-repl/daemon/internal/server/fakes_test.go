@@ -995,9 +995,10 @@ type fakeFeed struct {
 	// promptRows names selectable rows that are prompts but not rollback
 	// prompts (an agent prompt, a user prompt a rollback cannot reach).
 	promptRows map[string]bool
-	// thinking names thinking bubbles by row, each with its text: BubbleText
-	// answers them and SelectableText misses them, as the resolver does.
-	thinking map[string]string
+	// unselectable names bubbles the reader cannot select (a thinking bubble,
+	// an interim response) by row, each with its text: BubbleText answers them
+	// and SelectableText misses them, as the resolver does.
+	unselectable map[string]string
 	// mergeHeads names the merge bubble heads SetMergeFold accepts, and
 	// mergeFolds records each fold it was told, keyed by row.
 	mergeHeads map[string]bool
@@ -1098,7 +1099,7 @@ func (f *fakeFeed) SetMergeFold(_ ids.WorkspaceID, id *frontendv1.FeedId, folded
 // treats every final response and rollback prompt as selectable (they are
 // landed root-feed rows by construction), answering "text of <row>" for one
 // with no scripted text; unreadable breaks that guarantee for a row, so a test
-// can drive the defect path. A thinking row is never selectable.
+// can drive the defect path. An unselectable row is never selectable.
 func (f *fakeFeed) SelectableText(_ ids.WorkspaceID, id *frontendv1.FeedId) (feed.RowText, bool) {
 	prompt := indexOfFeedID(f.prompts, id) >= 0 || f.promptRows[id.GetValue()]
 	if f.unreadable[id.GetValue()] {
@@ -1113,10 +1114,10 @@ func (f *fakeFeed) SelectableText(_ ids.WorkspaceID, id *frontendv1.FeedId) (fee
 	return feed.RowText{}, false
 }
 
-// BubbleText answers a thinking row's text, and otherwise what SelectableText
-// does: every selectable row is a bubble with text.
+// BubbleText answers an unselectable row's text, and otherwise what
+// SelectableText does: every selectable row is a bubble with text.
 func (f *fakeFeed) BubbleText(ws ids.WorkspaceID, id *frontendv1.FeedId) (feed.RowText, bool) {
-	if md, ok := f.thinking[id.GetValue()]; ok {
+	if md, ok := f.unselectable[id.GetValue()]; ok {
 		return feed.RowText{Markdown: md}, true
 	}
 	return f.SelectableText(ws, id)

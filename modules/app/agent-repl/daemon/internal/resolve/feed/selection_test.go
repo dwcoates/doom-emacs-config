@@ -223,8 +223,8 @@ func settled(markdown string) *frontendv1.FeedResponse_Success {
 }
 
 // TestSelectableMarkdownIsTheOneRule pins which rows can be selected and what
-// each says: prompts and landed, non-notice, non-thinking response bubbles,
-// nothing else.
+// each says: prompts and landed, non-notice response bubbles that are neither
+// thinking nor interim, nothing else.
 func TestSelectableMarkdownIsTheOneRule(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -236,7 +236,8 @@ func TestSelectableMarkdownIsTheOneRule(t *testing.T) {
 		{name: "an agent prompt joins its text blocks", row: agentPromptRowWith("go look"), wantOK: true, wantMarkup: "go look"},
 		{name: "an image-only prompt is selectable with no text", row: promptRowWith(), wantOK: true, wantMarkup: ""},
 		{name: "a final response", row: responseRowWith(&frontendv1.FeedResponse{Result: settled("the answer"), FinalAnswer: true}), wantOK: true, wantMarkup: "the answer"},
-		{name: "an interim response", row: responseRowWith(&frontendv1.FeedResponse{Result: settled("meanwhile")}), wantOK: true, wantMarkup: "meanwhile"},
+		{name: "a settled response that is its turn's latest row", row: responseRowWith(&frontendv1.FeedResponse{Result: settled("meanwhile")}), wantOK: true, wantMarkup: "meanwhile"},
+		{name: "an interim response is never selectable", row: responseRowWith(&frontendv1.FeedResponse{Result: settled("meanwhile"), Interim: true}), wantOK: false},
 		{name: "a thinking response is never selectable", row: responseRowWith(&frontendv1.FeedResponse{Result: settled("pondering"), Thinking: true}), wantOK: false},
 		{name: "a response still arriving", row: responseRowWith(&frontendv1.FeedResponse{Result: &frontendv1.FeedResponse_Update{Update: &frontendv1.FeedResponseUpdate{
 			Prose: &frontendv1.FeedResponseProse{Markdown: "partial"},
@@ -275,6 +276,7 @@ func TestBubbleMarkdownAdmitsEveryLandedBubble(t *testing.T) {
 		{name: "a prompt", row: promptRowWith("hi"), wantOK: true, wantMarkup: "hi"},
 		{name: "a final response", row: responseRowWith(&frontendv1.FeedResponse{Result: settled("the answer"), FinalAnswer: true}), wantOK: true, wantMarkup: "the answer"},
 		{name: "a thinking response", row: responseRowWith(&frontendv1.FeedResponse{Result: settled("pondering"), Thinking: true}), wantOK: true, wantMarkup: "pondering"},
+		{name: "an interim response", row: responseRowWith(&frontendv1.FeedResponse{Result: settled("meanwhile"), Interim: true}), wantOK: true, wantMarkup: "meanwhile"},
 		{name: "a thinking response still arriving", row: responseRowWith(&frontendv1.FeedResponse{Thinking: true, Result: &frontendv1.FeedResponse_Update{Update: &frontendv1.FeedResponseUpdate{
 			Prose: &frontendv1.FeedResponseProse{Markdown: "partial"},
 		}}}), wantOK: false},
@@ -352,6 +354,55 @@ func TestBubbleTextReadsAThinkingBubble(t *testing.T) {
 	// Assert.
 	if !ok || text.Markdown != "the whole reasoning" || text.Prompt {
 		t.Fatalf("BubbleText = (%+v, %v), want the reasoning as a response", text, ok)
+	}
+}
+
+// TestAResponseProvedInterimIsRepublishedUnselectable pins the stamp on the
+// real publication path: a response selectable as its turn's latest row loses
+// the stamp on the republication that proves it interim.
+func TestAResponseProvedInterimIsRepublishedUnselectable(t *testing.T) {
+	tests := []struct {
+		name  string
+		after func(h *harness)
+		want  bool
+	}{
+		{name: "the turn's latest response is selectable", after: func(h *harness) {}, want: true},
+		{name: "a later tool call takes the stamp off", after: func(h *harness) { h.send(settledRead("read-1")) }, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.deliverPrompt("turn-1", "do the thing")
+			h.send(responseSuccessActivity("prose-1", "a note"))
+
+			// Act.
+			tt.after(h)
+
+			// Assert.
+			if got := h.activityRow("prose-1").GetSelectable() != nil; got != tt.want {
+				t.Fatalf("selectable = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestBubbleTextReadsAnInterimResponse pins that a quote of an interim
+// response (a selection held from before it was proved interim) reads its
+// text, though the response can no longer be selected.
+func TestBubbleTextReadsAnInterimResponse(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+	h.send(responseSuccessActivity("prose-1", "a note"))
+	h.send(settledRead("read-1"))
+
+	// Act.
+	text, ok := h.resolver.BubbleText(testWorkspace, &frontendv1.FeedId{Value: h.responseRowID("prose-1")})
+
+	// Assert.
+	if !ok || text.Markdown != "a note" || text.Prompt {
+		t.Fatalf("BubbleText = (%+v, %v), want the note as a response", text, ok)
 	}
 }
 

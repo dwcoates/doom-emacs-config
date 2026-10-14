@@ -204,13 +204,16 @@ func bubbleMarkdown(row *frontendv1.FeedRow) (string, bool) {
 
 // selectableMarkdown is THE ONE RULE for which rows the reader can select, and
 // what a selected row says: every bubble with text (bubbleMarkdown) except a
-// THINKING bubble. A click on a thinking bubble only expands it, with no
-// selection (owner specification, 2026-10-14), so the daemon never offers one
-// for selection and refuses a click that names one. Stamping (stampSelectable)
-// and reading (SelectableText) both go through it, so a row is selectable
-// exactly when its text can be read as a selection's.
+// THINKING bubble and an INTERIM response. A click on either only expands it,
+// with no selection (owner specification, 2026-10-14, extended to the interim
+// the same day), so the daemon never offers one for selection and refuses a
+// click that names one. Stamping (stampSelectable) and reading
+// (SelectableText) both go through it, so a row is selectable exactly when its
+// text can be read as a selection's. The interim flag is stamped before the
+// selectable one on the one write path (`upsert`), so the edge that proves a
+// response interim republishes it unselectable.
 func selectableMarkdown(row *frontendv1.FeedRow) (string, bool) {
-	if row.GetActivity().GetResponse().GetThinking() {
+	if resp := row.GetActivity().GetResponse(); resp.GetThinking() || resp.GetInterim() {
 		return "", false
 	}
 	return bubbleMarkdown(row)
