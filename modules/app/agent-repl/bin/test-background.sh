@@ -269,7 +269,7 @@ printf 'marker=%s args=%s\n' "$AGENT_REPL_BACKGROUND_PRIORITY" "$*"
 SUBJECT
 : >"$d/log"
 set +e
-env -u AGENT_REPL_BACKGROUND_PRIORITY PATH="$STUBS:/usr/bin:/bin" STUB_LOG="$d/log" \
+env -u AGENT_REPL_BACKGROUND_PRIORITY -u AGENT_REPL_TEST_NICENESS PATH="$STUBS:/usr/bin:/bin" STUB_LOG="$d/log" \
     STUB_UNAME=Darwin STUB_NICENESS=0 \
     bash "$d/bin/test-subject.sh" one two >"$d/out" 2>"$d/err"
 RC=$?
@@ -286,7 +286,7 @@ d="$TMP/h1k"
 mkdir -p "$d"
 : >"$d/log"
 set +e
-env PATH="$STUBS:/usr/bin:/bin" STUB_LOG="$d/log" AGENT_REPL_BACKGROUND_PRIORITY=nice-19 \
+env -u AGENT_REPL_TEST_NICENESS PATH="$STUBS:/usr/bin:/bin" STUB_LOG="$d/log" AGENT_REPL_BACKGROUND_PRIORITY=nice-19 \
     bash "$TMP/h1j/bin/test-subject.sh" >"$d/out" 2>"$d/err"
 RC=$?
 set -e
@@ -300,9 +300,10 @@ fi
 # 2. The helper on this host, for real.
 # ============================================================================
 #
-# This harness itself runs at niceness 19 or above (its prologue saw to that:
-# below 19 it was demoted to 19, at 19 or above it passed straight through, as
-# when the whole run was started at macOS's 20), and an unprivileged process
+# This harness itself runs at its target niceness or above: 19, or the one
+# AGENT_REPL_TEST_NICENESS names (a merge gate's 10 or 15). Its prologue saw
+# to that: below the target it was demoted to it, at or above it passed
+# straight through, as when the whole run was started at macOS's 20, and an unprivileged process
 # can never lower its niceness again, so the wrap from normal priority is
 # pinned hermetically above. Here the real kernel answers what inheritance and
 # idempotency depend on, measured against the harness's OWN niceness: a
@@ -318,12 +319,13 @@ case $HOST_OS in
 esac
 
 if [ -n "$QUERY" ]; then
-    # --- 2a. this harness runs at niceness 19 or above ------------------------
+    # --- 2a. this harness runs at its target niceness or above ---------------
     BASE="$(bash -c "$QUERY" 2>&1)" || true
-    if [[ $BASE =~ ^[0-9]+$ ]] && [ "$BASE" -ge 19 ]; then
-        pass "$HOST_OS (real): a test entry point runs at niceness 19 or above"
+    TARGET="${AGENT_REPL_TEST_NICENESS:-19}"
+    if [[ $BASE =~ ^[0-9]+$ ]] && [ "$BASE" -ge "$TARGET" ]; then
+        pass "$HOST_OS (real): a test entry point runs at its target niceness ($TARGET) or above"
     else
-        fail "$HOST_OS (real): a test entry point runs at niceness 19 or above" "niceness=$BASE"
+        fail "$HOST_OS (real): a test entry point runs at its target niceness ($TARGET) or above" "niceness=$BASE"
     fi
 
     # --- 2b. a wrapped command's grandchild inherits the harness's niceness ---
