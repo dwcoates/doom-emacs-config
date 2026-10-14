@@ -1,4 +1,4 @@
-<!-- used by: daemon/internal/workspace (Create, the naming call); placeholders: {{prompt}}, {{conversation}}, {{correction}} -->
+<!-- used by: daemon/internal/workspace (Create, the naming call); placeholders: {{prompt}}, {{conversation}} -->
 Name the workspace a developer is about to open for the work described below.
 
 Answer with the NAME AND NOTHING ELSE. No sentence around it, no quotes, no
@@ -38,4 +38,3 @@ The work (empty when a fork carries on its conversation as it stands):
 The earlier conversation this workspace continues (empty when it starts fresh):
 
 {{conversation}}
-{{correction}}

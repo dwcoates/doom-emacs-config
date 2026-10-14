@@ -15,26 +15,31 @@ import (
 // 2026-09-12). A create that supplies no name gets one from a headless Haiku
 // call the daemon makes inside Create, before the id is used for anything,
 // before git is touched. There is no word-truncation fallback: the old `Slug`
-// is deleted, and a naming call that cannot answer REFUSES the create.
+// is deleted. A rejected answer is handed back to the model to SHORTEN, and
+// once that retry is spent the last well-shaped answer is taken even over the
+// limits (owner ruling, 2026-10-14): a slightly long name the model chose
+// beats a refused create. Only a call that never produced a well-shaped
+// answer REFUSES the create.
 const (
 	// BriefWorkspaceName is the naming question's brief, read from the prompts
 	// directory AT USE TIME so an edit takes effect without a daemon bounce.
 	BriefWorkspaceName = "workspace-name-from-prompt"
+	// BriefWorkspaceNameShorten is the retry's brief: the rejected answer
+	// handed back with what is wrong with it, to be rewritten. It is NOT the
+	// naming question asked again.
+	BriefWorkspaceNameShorten = "workspace-name-shorten"
 	// NamingSite is the vendor-guard site name the naming call asks under,
 	// beside "classifier" and "login".
 	NamingSite = "workspace_naming"
-	// NamingAttempts is how many times the call is made before it refuses:
-	// the first, plus EXACTLY ONE retry on an invalid or failed answer (owner
-	// ruling). One retry covers the common failure — the model wrapped the
-	// name in a sentence — without doubling the worst-case wait more than
-	// once.
+	// NamingAttempts is how many times the call is made: the first, plus
+	// EXACTLY ONE retry on an invalid or failed answer (owner ruling).
 	NamingAttempts = 2
 	// NamingTimeout bounds ONE attempt. It is a handful of tokens from a small
 	// model; a call that has not answered in this long has failed. The bound
 	// is a constant until a measurement of the real call justifies a flag.
 	NamingTimeout = 15 * time.Second
 	// NamingCauseInvalidAnswer is the naming refusal's cause when the model
-	// answered but no answer obeyed the naming rule. Every other cause is one
+	// answered but no answer had the slug's shape. Every other cause is one
 	// of headless's own.
 	NamingCauseInvalidAnswer = "invalid_answer"
 	// CollisionSuffixLimit bounds the disambiguating -2/-3/... walk. A
@@ -63,6 +68,13 @@ func (f *namingFailure) Error() string {
 	return fmt.Sprintf("the workspace naming call failed after %d attempts (%s): %s", f.Attempts, f.Cause, f.Detail)
 }
 
+// rejectedName is an answer the naming rule refused, which the retry hands
+// back to the model to rewrite.
+type rejectedName struct {
+	answer string
+	reason error
+}
+
 // mintName asks the model for the workspace's name.
 //
 // The prompt it names from is the RAW commission the user typed — never a
@@ -75,8 +87,11 @@ func (f *namingFailure) Error() string {
 // separate mechanism, only with more to go on, and a fork whose prompt is
 // blank is named from the conversation alone.
 //
-// The answer is VALIDATED, never repaired. An invalid or failed answer is
-// tried exactly once more; a second failure is a namingFailure the caller
+// The answer is VALIDATED, never repaired. A rejected answer is handed back
+// to the model to shorten (BriefWorkspaceNameShorten); a call that did not
+// answer at all is asked the naming question again. Once both attempts are
+// spent, the LAST answer that had the slug's shape is taken even over the
+// limits; only when no attempt produced one is it a namingFailure the caller
 // turns into the create's refusal.
 func (v *verbs) mintName(ctx context.Context, log dlog.Logger, repoDir, prompt, conversation string) (string, error) {
 	if v.deps.Headless == nil {
@@ -86,14 +101,6 @@ func (v *verbs) mintName(ctx context.Context, log dlog.Logger, repoDir, prompt, 
 			Attempts: 0,
 		}
 	}
-	brief, err := v.load(v.deps.PromptsDir, BriefWorkspaceName)
-	if err != nil {
-		// A MISSING BRIEF IS ITS OWN ARM. It is a deployment fault, not a
-		// model failure, and the client is owed the brief's name.
-		return "", refuseWith(log, "CreateWorkspace", ArmBriefMissing,
-			fmt.Sprintf("the %s brief could not be read: %v", BriefWorkspaceName, err), false,
-			map[string]any{"name": BriefWorkspaceName})
-	}
 
 	configDir := ""
 	if v.deps.Accounts != nil {
@@ -101,17 +108,19 @@ func (v *verbs) mintName(ctx context.Context, log dlog.Logger, repoDir, prompt, 
 	}
 
 	var last namingFailure
-	correction := ""
+	var rejected *rejectedName
+	// settle is the last answer of the slug's shape that broke only the
+	// limits: what the call takes once its retry is spent.
+	settle := ""
 	for attempt := 1; attempt <= NamingAttempts; attempt++ {
-		question, err := v.splice(brief, map[string]string{
-			"prompt": prompt, "conversation": conversation, "correction": correction,
-		})
+		question, err := v.namingQuestion(log, prompt, conversation, rejected)
 		if err != nil {
-			return "", fmt.Errorf("splice the %s brief: %w", BriefWorkspaceName, err)
+			return "", err
 		}
 		log.Info(opNaming, "issued the workspace naming call", dlog.Context{
 			"model": headless.ModelHaiku, "repo_dir": repoDir, "config_dir": configDir, "attempt": attempt,
 			"prompt_blank": strings.TrimSpace(prompt) == "", "conversation_chars": len(conversation),
+			"shortening": rejected != nil,
 		})
 		log.Debug(opNaming, "the naming prompt", dlog.Context{"prompt": question, "attempt": attempt})
 
@@ -125,7 +134,7 @@ func (v *verbs) mintName(ctx context.Context, log dlog.Logger, repoDir, prompt, 
 		})
 		if err != nil {
 			last = namingFailure{Cause: headless.CauseOf(err), Detail: err.Error(), Attempts: uint32(attempt)}
-			log.Debug(opNaming, "the workspace naming call did not answer", dlog.Context{
+			log.Info(opNaming, "the workspace naming call did not answer", dlog.Context{
 				"cause": last.Cause, "detail": last.Detail, "attempt": attempt,
 			})
 			// A GUARD REFUSAL IS NOT RETRIED. It is a standing fact about this
@@ -134,6 +143,9 @@ func (v *verbs) mintName(ctx context.Context, log dlog.Logger, repoDir, prompt, 
 			if last.Cause == headless.CauseGuardRefused {
 				break
 			}
+			// A call that never answered leaves nothing to shorten, so the
+			// retry asks the naming question again. An EARLIER rejected
+			// answer still stands as what the retry shortens.
 			continue
 		}
 
@@ -143,10 +155,13 @@ func (v *verbs) mintName(ctx context.Context, log dlog.Logger, repoDir, prompt, 
 				Cause: NamingCauseInvalidAnswer, Detail: err.Error(),
 				Attempts: uint32(attempt), Answer: answer,
 			}
-			log.Debug(opNaming, "the naming answer did not validate", dlog.Context{
-				"answer": answer, "reason": err.Error(), "attempt": attempt,
+			if ValidateSlugShape(answer) == nil {
+				settle = answer
+			}
+			log.Info(opNaming, "the naming answer did not validate", dlog.Context{
+				"answer": answer, "reason": err.Error(), "attempt": attempt, "well_shaped": settle == answer,
 			})
-			correction = namingCorrection(answer, err)
+			rejected = &rejectedName{answer: answer, reason: err}
 			continue
 		}
 
@@ -157,6 +172,14 @@ func (v *verbs) mintName(ctx context.Context, log dlog.Logger, repoDir, prompt, 
 		return answer, nil
 	}
 
+	if settle != "" {
+		log.Info(opNaming, "took the last well-shaped naming answer over the naming limits", dlog.Context{
+			"model": headless.ModelHaiku, "name": settle, "words": SlugWordCount(settle),
+			"chars": len(settle), "attempts": last.Attempts,
+		})
+		return settle, nil
+	}
+
 	log.Error(opNaming, "the workspace naming call failed", dlog.Context{
 		"model": headless.ModelHaiku, "cause": last.Cause,
 		"attempts": last.Attempts, "answer": last.Answer,
@@ -165,18 +188,34 @@ func (v *verbs) mintName(ctx context.Context, log dlog.Logger, repoDir, prompt, 
 	return "", &failure
 }
 
-// namingCorrection is the retry's correction: the rejected answer quoted
-// back, why it was rejected, the word count it had, and the word limit, both
-// read off ValidateSlug's own rule (SlugWordCount, SlugWordLimit) so the
-// sentence can never state a limit the validator does not enforce.
-// MEASURED 2026-09-28: a four-word answer ("agent-repl-input-shorter") drew a
-// correction that never said how many words were allowed, and the retry
-// failed the same way.
-func namingCorrection(answer string, reason error) string {
-	return fmt.Sprintf(
-		"Your previous answer was %q, which is not acceptable: %s. It has %d words; "+
-			"the name must be AT MOST %d words. Answer with the bare name alone.",
-		answer, reason.Error(), SlugWordCount(answer), SlugWordLimit)
+// namingQuestion composes one attempt's question: the naming brief spliced
+// with the work when nothing has been rejected yet, and the shorten brief
+// spliced with the rejected answer once something has.
+//
+// A MISSING BRIEF IS ITS OWN ARM. It is a deployment fault, not a model
+// failure, and the client is owed the brief's name.
+func (v *verbs) namingQuestion(log dlog.Logger, prompt, conversation string, rejected *rejectedName) (string, error) {
+	name := BriefWorkspaceName
+	values := map[string]string{"prompt": prompt, "conversation": conversation}
+	if rejected != nil {
+		name = BriefWorkspaceNameShorten
+		values = map[string]string{
+			"answer":  rejected.answer,
+			"problem": rejected.reason.Error(),
+			"limit":   strconv.Itoa(SlugWordLimit),
+		}
+	}
+	brief, err := v.load(v.deps.PromptsDir, name)
+	if err != nil {
+		return "", refuseWith(log, "CreateWorkspace", ArmBriefMissing,
+			fmt.Sprintf("the %s brief could not be read: %v", name, err), false,
+			map[string]any{"name": name})
+	}
+	question, err := v.splice(brief, values)
+	if err != nil {
+		return "", fmt.Errorf("splice the %s brief: %w", name, err)
+	}
+	return question, nil
 }
 
 // freeName disambiguates a MINTED name against what already exists: an
