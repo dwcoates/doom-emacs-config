@@ -801,6 +801,31 @@ fills from its own record, so it survives an Emacs restart.  nil when the
 roster has no row for WS or the user never selected it."
   (agent-repl-roster--instant-ms ws :last-selected))
 
+(defun agent-repl-roster-last-turn-ended-ms (ws)
+  "Return WS's durable last-turn-ended instant in epoch ms, or nil.
+Read from WS's roster row (`RosterRowLastTurnEnded'), which the daemon
+fills from its turn record, so it survives an Emacs restart.  nil when
+the roster has no row for WS or no turn of WS has closed."
+  (agent-repl-roster--instant-ms ws :last-turn-ended))
+
+(defun agent-repl-roster-last-finished-name (names)
+  "Return the one of NAMES that most recently FINISHED, or nil.
+FINISHED is the move from working (red) to done (green): the row's arm
+is `:done' NOW, and its durable last-turn-ended instant
+\(`agent-repl-roster-last-turn-ended-ms') says when.  The arm excludes a
+workspace whose next turn already runs, an interrupted or failed turn,
+and every other state; the instant ranks the rest, newest first.  A
+`:done' row without an instant has no recorded close to rank by and is
+not a candidate (`RosterRowLastTurnEnded' allows its absence).  Ties keep
+the order NAMES gives them."
+  (let (best best-ms)
+    (dolist (name names)
+      (let ((ms (and (eq (agent-repl-roster-status-for-ws name) :done)
+                     (agent-repl-roster-last-turn-ended-ms name))))
+        (when (and ms (or (null best-ms) (> ms best-ms)))
+          (setq best name best-ms ms))))
+    best))
+
 (defun agent-repl-roster--instant-ms (ws field)
   "Return the epoch ms of WS's roster-row instant FIELD, or nil.
 FIELD is the row key of one of the durable instants, each decoded to
