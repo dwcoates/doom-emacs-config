@@ -18,11 +18,10 @@ import (
 // on channels.
 type waitingWorld struct {
 	*chain
-	rebased       chan ids.WorkspaceID
-	passes        chan wsm.RepoKey
-	releaseHead   chan struct{}
-	releaseBehind chan struct{}
-	done          <-chan error
+	rebased     chan ids.WorkspaceID
+	passes      chan wsm.RepoKey
+	releaseHead chan struct{}
+	done        <-chan error
 }
 
 func newWaitingWorld(t *testing.T, waiting ...ids.WorkspaceID) *waitingWorld {
@@ -38,15 +37,13 @@ func newWaitingWorld(t *testing.T, waiting ...ids.WorkspaceID) *waitingWorld {
 	for i, ws := range waiting {
 		c.queue(t, ws, "w"+string(rune('1'+i)))
 	}
-	behindGate, releaseBehind := c.runner.hold(c.dirs["ws-b"])
-	w.releaseBehind = releaseBehind
 	w.done = admitAsync(c.h, context.Background())
-	<-behindGate
+	c.awaitLined(t, "ws-b")
 	return w
 }
 
-// land lets the head's gate pass, while the merge behind it is still inside
-// its gate on the old tip, and waits for the head to land.
+// land lets the head's gate pass, while the merge behind it still waits in
+// line for the test turn on the old tip, and waits for the head to land.
 func (w *waitingWorld) land(t *testing.T) {
 	t.Helper()
 	close(w.releaseHead)
@@ -201,7 +198,6 @@ func TestTheDaemonsExitAbortsAWaitingMergesRebaseAndKeepsItsBase(t *testing.T) {
 
 	// Act
 	w.h.o.Drain(context.Background())
-	close(w.releaseBehind)
 	waitGone(t, w.h.o)
 
 	// Assert

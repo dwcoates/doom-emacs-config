@@ -99,6 +99,10 @@ type tabState struct {
 	// waiting is a live agentic tab whose agent has an ask open: drawn
 	// waiting on the user. Only conflict resolution and fixing read it.
 	waiting bool
+	// turnHolder names the merge holding the repository's test turn while a
+	// test run, its round open, waits in line for it; empty otherwise. Only a
+	// run's subtab reads it.
+	turnHolder string
 }
 
 // badge resolves the state into the shared leaf messages every kind's state

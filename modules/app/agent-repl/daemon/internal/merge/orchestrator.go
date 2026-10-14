@@ -106,6 +106,11 @@ type orchestrator struct {
 	// overtakings are the races to land being won by the merge behind the
 	// head, by repository (race.go). Guarded by mu.
 	overtakings map[wsm.RepoKey]*overtaking
+	// testTurns are each repository's test turn and the line for it
+	// (testturn.go): only one merge of a repository runs its test gate at a
+	// time. A repository is here only while some run holds its turn. Guarded
+	// by mu.
+	testTurns map[wsm.RepoKey]*turnLine
 	// waitingPass marks the repositories whose waiting members are being
 	// rebased now, and waitingAgain those whose landing asked for one more
 	// pass (rebasewaiting.go). Guarded by mu.
@@ -212,6 +217,12 @@ type orchestrator struct {
 	// idle between steps, waiting for its chain to change. Nil in production;
 	// a test reads where the chain stands from it.
 	onChainIdle func(ws ids.WorkspaceID)
+	// onTestTurnAsk, when set, is called each time a gate is about to ask for
+	// its repository's test turn, and may hold it there until ctx is done;
+	// onTestTurnLine, when set, each time a gate joined the line for it. Nil
+	// in production; a test orders the gates of two merges through them.
+	onTestTurnAsk  func(ctx context.Context, ws ids.WorkspaceID)
+	onTestTurnLine func(ws ids.WorkspaceID)
 	// onKick, when set, is called by every kick of a synchronous (test)
 	// orchestrator, whose kick starts no pump: a test that pumps by hand
 	// wakes on it, so an edge that would have pumped production's queue
@@ -275,6 +286,7 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		chainSignals:    map[wsm.RepoKey]chan struct{}{},
 		targetTips:      map[wsm.RepoKey]string{},
 		overtakings:     map[wsm.RepoKey]*overtaking{},
+		testTurns:       map[wsm.RepoKey]*turnLine{},
 		waitingPass:     map[wsm.RepoKey]bool{},
 		waitingAgain:    map[wsm.RepoKey]bool{},
 		repoLocks:       map[wsm.RepoKey]*repoLock{},

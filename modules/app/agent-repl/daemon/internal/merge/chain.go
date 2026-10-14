@@ -537,24 +537,16 @@ func (r *run) speculativeGate(ctx context.Context, place chainPlace, targetBranc
 	gctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 	// THE WAIT FOR ADMISSION ENDS AT A PROMOTION: the head's gate is never
-	// governed, so a merge promoted while it waited runs its gate as the
-	// head. A gate already running is not cut by a promotion: its pass
-	// stands for the tree it tested.
+	// governed, so a merge promoted before the governor admitted it runs its
+	// gate as the head, from the head's own steps (admitGate answers
+	// errPromoted). A gate already running is not cut by a promotion: its
+	// pass stands for the tree it tested.
 	actx, admitted := context.WithCancelCause(gctx)
 	defer admitted(nil)
 	stop := r.watchBase(gctx, place.base, cancel, admitted)
 	defer stop()
-	permit, err := r.o.deps.Governor.Acquire(actx, cpugov.Request{Workspace: r.ws, Repo: string(r.repo), Rank: place.rank})
-	if err != nil {
-		if errors.Is(context.Cause(gctx), errBaseMoved) || errors.Is(context.Cause(actx), errPromoted) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	admitted(nil)
 	head, err := r.git.ResolveRef(ctx, r.subject.dir, r.subject.branch)
 	if err != nil {
-		permit.Release(0, 0, false)
 		return nil, fmt.Errorf("merge: resolving %s: %w", r.subject.branch, err)
 	}
 	r.publishTip(ctx, head)
@@ -563,10 +555,12 @@ func (r *run) speculativeGate(ctx context.Context, place chainPlace, targetBranc
 		d.TargetBranch, d.Tip = targetBranch, place.base
 		d.FixAttempt, d.Turn, d.FailingSuites, d.FailingArchive, d.FailingTail = r.fixesUsed, "", nil, "", ""
 	}); err != nil {
-		permit.Release(0, 0, false)
 		return nil, err
 	}
-	verdict, err := r.gate(gctx, round, place.base, head, permit)
+	verdict, err := r.gate(gctx, round, place.base, head, &gateAdmission{ctx: actx, rank: place.rank})
+	if errors.Is(err, errPromoted) {
+		return nil, nil
+	}
 	if errors.Is(context.Cause(gctx), errBaseMoved) {
 		r.o.log(ctx, r.ws).Info(op, "the merge ahead moved under the speculative gate; it runs again on the new tip", dlog.Context{
 			"workspace": string(r.ws), "base": place.base, "round": round.n})
