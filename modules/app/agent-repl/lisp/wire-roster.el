@@ -1333,8 +1333,8 @@ THE ARM IS THE GROUPING every page shows; it is never unset."
 (defun agent-repl-wire-decode-workspace-roster (value)
   "Decode VALUE as `WorkspaceRoster'.
 Returns `(:repository V :task V :maturity V :open O :hidden H
-:recently-merged S :tab-bar B :current C-or-nil :shown ARM :revision N)'.  EVERY grouping
-arrives fully resolved:
+:recently-merged S :tab-bar B :current C-or-nil :shown ARM
+:revision N)'.  EVERY grouping arrives fully resolved:
 which one is drawn is the daemon's view state (`shown'), a selection
 between resolved views, never a derivation."
   (let ((object (agent-repl-wire--object "WorkspaceRoster" value)))
