@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"syscall"
@@ -164,6 +165,32 @@ func TestReapFreezesUntilAPassFindsNothingNewThenKillsEveryMember(t *testing.T) 
 	}
 	if table.procs[leader].State != 'S' {
 		t.Error("the reaper stopped or killed itself")
+	}
+}
+
+// TestReapLogsHowLongEachListingTook pins the record ListBound is set from:
+// every freeze pass and the confirmation name their listing's time.
+func TestReapLogsHowLongEachListingTook(t *testing.T) {
+	// Arrange.
+	table := newFakeTable(member(501, "bash harness.sh"))
+	log := &recLog{}
+	took := regexp.MustCompile(`the (confirming )?listing took [0-9.]+(ns|µs|ms|s)$`)
+
+	// Act.
+	_, err := Reap(table, runMembers(), log)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Reap() error = %v", err)
+	}
+	for _, prefix := range []string{"reap run: freeze pass 1 stopped", "reap run: freeze pass 2 found no member", "reap run: killed 1 member(s)"} {
+		i := slices.IndexFunc(log.info, func(s string) bool { return strings.HasPrefix(s, prefix) })
+		if i < 0 || !took.MatchString(log.info[i]) {
+			t.Errorf("no line %q... naming its listing's time in %q", prefix, log.info)
+		}
+	}
+	if !strings.Contains(log.info[len(log.info)-1], "the confirming listing took") {
+		t.Errorf("the kill line %q does not name the confirming listing", log.info[len(log.info)-1])
 	}
 }
 
