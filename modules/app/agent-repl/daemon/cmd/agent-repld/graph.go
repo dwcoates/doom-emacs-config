@@ -857,7 +857,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, err
 	}
-	mergeMover := &mergeMoverForwarder{}
+	mergeMover := &mergeForwarder{}
 	// THE DETACHED-MERGE SERVICE IS BUILT AFTER THE ROLLOUT AND THE DEPLOY,
 	// which pay the landing reports it owes; both reach it through this.
 	detachedRef := &detachedForwarder{}
@@ -941,7 +941,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// also reach the shims that were spawned and have not yet reached the
 		// fleet's session map, and the supervisor is the only thing that knows
 		// one exists.
-		Spawns:       supervisor,
+		Spawns: supervisor,
+		// THE ORCHESTRATOR, through the forwarder: it is built below, and
+		// nothing shuts down before the graph is whole.
+		Merges:       mergeMover,
 		Freeness:     fleet.Freeness(),
 		Reviving:     queue.Reviving,
 		Announcer:    pushes,

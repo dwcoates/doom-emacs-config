@@ -313,6 +313,13 @@ func (c *controller) ShutdownNow(ctx context.Context, reason *agentreplv1.DrainR
 	if c.deps.Spawns.BeginStandDown() {
 		c.log.Debug(opNow, "latched the stand-down before any shim is ended", nil)
 	}
+	// THE MERGES ARE SUSPENDED BEFORE ANY SESSION IS ENDED, for the same
+	// reason the latch goes up first: the walk below closes the session a
+	// mid-step merge is waiting on, and a merge that learns of the exit only
+	// from that closed wait fails as a fault. Detached from the caller's
+	// deadline, as the walk is: the caller bounds its answer, never the act.
+	c.deps.Merges.Drain(context.WithoutCancel(ctx))
+	c.log.Debug(opNow, "suspended every merge before any shim is ended", nil)
 	c.standEverySessionDown(ctx)
 	c.sweepInFlightSpawns(ctx)
 	if err := c.deps.Exit(ctx); err != nil {
