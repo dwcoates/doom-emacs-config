@@ -112,14 +112,33 @@ describe("abandon", () => {
 });
 
 describe("paintSectionFold", () => {
-  it.each([true, false])("states folded=%s on the section and every triangle in it", (folded) => {
+  it.each([true, false])("states folded=%s on the section and every triangle of its own header", (folded) => {
+    // Arrange
     const section = document.createElement("div");
-    section.innerHTML = "<span data-section-fold></span><span data-section-fold></span>";
+    section.innerHTML =
+      "<div class=\"repo-head\"><span data-section-fold></span></div><div class=\"task-head\"><span data-section-fold></span></div>";
+    // Act
     paintSectionFold(section, folded);
+    // Assert
     expect([
       section.classList.contains("folded"),
       ...[...section.querySelectorAll("[data-section-fold]")].map((t) => t.getAttribute("data-folded")),
     ]).toEqual([folded, String(folded), String(folded)]);
+  });
+
+  it("leaves a nested section's triangle to that section's own fold", () => {
+    // Arrange: the open-workspaces section holds whole sections.
+    const outer = document.createElement("div");
+    outer.innerHTML =
+      "<div class=\"repo-head\"><span id=\"own\" data-section-fold></span></div>" +
+      "<div class=\"sb-sections\"><div class=\"repo\"><div class=\"repo-head\"><span id=\"nested\" data-section-fold data-folded=\"false\"></span></div></div></div>";
+    // Act
+    paintSectionFold(outer, true);
+    // Assert
+    expect([outer.querySelector("#own")?.getAttribute("data-folded"), outer.querySelector("#nested")?.getAttribute("data-folded")]).toEqual([
+      "true",
+      "false",
+    ]);
   });
 });
 

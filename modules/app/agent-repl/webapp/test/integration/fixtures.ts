@@ -2533,6 +2533,7 @@ export function roster(init?: {
           divergence: PENDING_DIVERGENCE,
         },
       ],
+      openCount: { workspaces: rows.length },
     },
     task: {
       sections: [
@@ -2543,6 +2544,7 @@ export function roster(init?: {
           fold: init?.taskCollapsed === true ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
         },
       ],
+      openCount: { workspaces: (init?.taskRows ?? rows).length },
     },
     maturity: {
       sections: [
@@ -2550,7 +2552,9 @@ export function roster(init?: {
         maturityStageSection("inProgress", "In Progress", rows, init?.inProgressCollapsed === true),
         maturityStageSection("merging", "Merging", [], false),
       ],
+      openCount: { workspaces: rows.length },
     },
+    open: { label: { text: "Open" }, fold: { case: "expanded", value: {} } },
     hidden: {
       header: { label: { text: "Hidden" }, count: { workspaces: (init?.hidden ?? []).length } },
       rows: { rows: init?.hidden ?? [] },

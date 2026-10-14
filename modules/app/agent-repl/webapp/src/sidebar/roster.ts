@@ -38,6 +38,8 @@ import type {
   RosterMergedRepoGroup,
   RosterMergedRepoGroupHeader,
   RosterMergedSection,
+  RosterOpenCount,
+  RosterOpenSection,
   RosterRepoDivergence,
   RosterRepoKey,
   RosterRepoSection,
@@ -66,6 +68,7 @@ import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import {
   HIDDEN_FOLD_KEY,
   MERGED_FOLD_KEY,
+  OPEN_FOLD_KEY,
   maturityFoldKey,
   repoFoldKey,
   taskFoldKey,
@@ -100,6 +103,7 @@ export function drawWorkspaceRoster(u: WorkspaceRoster, sc: SidebarContext): HTM
   const maturity = requireMessage(u.maturity, `${path}.maturity`);
   const merged = requireMessage(u.recentlyMerged, `${path}.recently_merged`);
   const hidden = requireMessage(u.hidden, `${path}.hidden`);
+  const open = requireMessage(u.open, `${path}.open`);
   const current =
     u.current === undefined
       ? null
@@ -133,7 +137,7 @@ export function drawWorkspaceRoster(u: WorkspaceRoster, sc: SidebarContext): HTM
 
   const roster = document.createElement("div");
   roster.className = "sb-roster";
-  const bands: PaneBands = { hidden, merged, path };
+  const bands: PaneBands = { open, hidden, merged, path };
   roster.appendChild(pane("repository", drawRosterRepositoryView(repository, sc, `${path}.repository`), sc, bands));
   roster.appendChild(pane("task", drawRosterTaskView(task, sc, `${path}.task`), sc, bands));
   roster.appendChild(pane("maturity", drawRosterMaturityView(maturity, sc, `${path}.maturity`), sc, bands));
@@ -168,22 +172,30 @@ export function showPane(roster: ParentNode, grouping: string): void {
   }
 }
 
-/** The sections drawn under EVERY grouping, and the roster path they sit at. */
+/** The sections drawn around EVERY grouping, and the roster path they sit at. */
 interface PaneBands {
+  open: RosterOpenSection;
   hidden: RosterHiddenSection;
   merged: RosterMergedSection;
   path: string;
 }
 
+/** One grouping's drawn sections and the count of the rows they list. */
+export interface DrawnGroupingView {
+  body: HTMLElement;
+  openCount: number;
+}
+
 /**
- * One grouping's pane, with its own copies of the sections every grouping
- * draws below its own: the hidden workspaces, then the recently-merged band.
+ * One grouping's pane: its sections inside its own copy of the open-workspaces
+ * section, then its own copies of the sections every grouping draws below:
+ * the hidden workspaces, then the recently-merged band.
  */
-function pane(grouping: Grouping, body: HTMLElement, sc: SidebarContext, bands: PaneBands): HTMLElement {
+function pane(grouping: Grouping, view: DrawnGroupingView, sc: SidebarContext, bands: PaneBands): HTMLElement {
   const element = document.createElement("div");
   element.className = "sb-pane";
   element.setAttribute("data-grouping", grouping);
-  element.appendChild(body);
+  element.appendChild(drawRosterOpenSection(bands.open, view, sc, `${bands.path}.open`));
   element.appendChild(drawRosterHiddenSection(bands.hidden, sc, `${bands.path}.hidden`));
   element.appendChild(drawRosterMergedSection(bands.merged, sc, `${bands.path}.recently_merged`));
   return element;
@@ -204,13 +216,13 @@ export function drawRosterRepositoryView(
   u: RosterRepositoryView,
   sc: SidebarContext,
   path: string,
-): HTMLElement {
+): DrawnGroupingView {
   const view = document.createElement("div");
   view.className = "sb-sections";
   for (const [index, section] of u.sections.entries()) {
     view.appendChild(drawRosterRepoSection(section, sc, `${path}.sections[${index}]`));
   }
-  return view;
+  return { body: view, openCount: drawRosterOpenCount(requireMessage(u.openCount, `${path}.open_count`), `${path}.open_count`) };
 }
 
 /** The task grouping: one section per task, plus the new-task control. */
@@ -218,14 +230,14 @@ export function drawRosterTaskView(
   u: RosterTaskView,
   sc: SidebarContext,
   path: string,
-): HTMLElement {
+): DrawnGroupingView {
   const view = document.createElement("div");
   view.className = "sb-sections";
   view.appendChild(drawCreateTaskControl(sc));
   for (const [index, section] of u.sections.entries()) {
     view.appendChild(drawRosterTaskSection(section, sc, `${path}.sections[${index}]`));
   }
-  return view;
+  return { body: view, openCount: drawRosterOpenCount(requireMessage(u.openCount, `${path}.open_count`), `${path}.open_count`) };
 }
 
 /** The maturity grouping: one section per stage, in the order work moves through them. */
@@ -233,13 +245,56 @@ export function drawRosterMaturityView(
   u: RosterMaturityView,
   sc: SidebarContext,
   path: string,
-): HTMLElement {
+): DrawnGroupingView {
   const view = document.createElement("div");
   view.className = "sb-sections";
   for (const [index, section] of u.sections.entries()) {
     view.appendChild(drawRosterMaturitySection(section, sc, `${path}.sections[${index}]`));
   }
-  return view;
+  return { body: view, openCount: drawRosterOpenCount(requireMessage(u.openCount, `${path}.open_count`), `${path}.open_count`) };
+}
+
+/** How many rows the open-workspaces section lists under a grouping, exactly as the daemon resolved it. */
+export function drawRosterOpenCount(u: RosterOpenCount, path: string): number {
+  void path;
+  return u.workspaces;
+}
+
+/** The class of the open-workspaces section, and of its count. */
+export const OPEN_SECTION_CLASS = "open-section";
+export const OPEN_COUNT_CLASS = "sb-open-count";
+
+/**
+ * The open-workspaces section: the "Open" heading over one grouping's
+ * sections, drawn like the Hidden and Recently Merged headings, with "(N)"
+ * beside the label whether the section is folded or not (owner request,
+ * 2026-10-13). N is the grouping's own count, the daemon's sum of its
+ * sections' counts, so it is what a person counting the section's entries
+ * arrives at, a folded section's entries included.
+ *
+ * Its fold is the daemon's, like every section's, and a fold gesture paints
+ * every pane's copy at once.
+ */
+export function drawRosterOpenSection(
+  u: RosterOpenSection,
+  view: DrawnGroupingView,
+  sc: SidebarContext,
+  path: string,
+): HTMLElement {
+  const section = daemonFoldedBox(OPEN_FOLD_KEY, drawRosterSectionFold(u.fold, `${path}.fold`), sc);
+  section.classList.add(OPEN_SECTION_CLASS);
+  const header = drawFoldHeader(
+    drawSectionLabel(requireMessage(u.label, `${path}.label`), `${path}.label`),
+    section,
+    sectionFold(sc, OPEN_FOLD_KEY, { case: "open", value: {} }),
+  );
+  const count = document.createElement("span");
+  count.className = OPEN_COUNT_CLASS;
+  count.textContent = `(${view.openCount})`;
+  header.appendChild(count);
+  section.appendChild(header);
+  section.appendChild(view.body);
+  return section;
 }
 
 /** One maturity stage's section: its key, its header, its rows. */

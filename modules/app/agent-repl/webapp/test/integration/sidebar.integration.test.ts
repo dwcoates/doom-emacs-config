@@ -187,10 +187,10 @@ describe("the groupings", () => {
 });
 
 /** A task section's fold triangle. */
-const TASK_FOLD = '[data-grouping="task"] [data-section-fold]';
+const TASK_FOLD = '[data-grouping="task"] .task-section [data-section-fold]';
 
 /** A repository section's fold triangle. */
-const REPOSITORY_FOLD = '[data-grouping="repository"] [data-section-fold]';
+const REPOSITORY_FOLD = '[data-grouping="repository"] .repo-section [data-section-fold]';
 
 /** The fold the one recorded UpdateSidebarView asked for, and of which section. */
 function askedFold(): { section: string | undefined; fold: string | undefined } {
@@ -313,6 +313,28 @@ describe("repository folds", () => {
     await harness.settle();
     // Assert
     expect(harness.$(REPOSITORY_FOLD)?.dataset.folded).toBe("true");
+  });
+});
+
+/** The open workspaces section's own fold triangle, in the repository grouping's copy. */
+const OPEN_FOLD = '[data-grouping="repository"] .open-section > .repo-head [data-section-fold]';
+
+describe("the open workspaces section's fold", () => {
+  it("starts unfolded, as the daemon's default is", async () => {
+    // Arrange / Act
+    await withRoster({});
+    // Assert
+    expect(harness.$(OPEN_FOLD)?.dataset.folded).toBe("false");
+  });
+
+  it("asks the daemon to fold it in every page", async () => {
+    // Arrange
+    await withRoster({});
+    harness.fake.clearCalls();
+    // Act
+    await harness.click(OPEN_FOLD);
+    // Assert
+    expect(askedFold()).toEqual({ section: "open", fold: "collapse" });
   });
 });
 
@@ -901,8 +923,10 @@ describe("roster ordering", () => {
       ],
     });
     // Assert
-    // The recently-merged section is the grouping's last, by construction.
+    // The open workspaces section heads the pane and the recently-merged
+    // section is its last, by construction.
     expect(harness.texts('[data-grouping="repository"] .repo-head .sb-label')).toEqual([
+      "Open",
       "zulu",
       "alpha",
       "recently merged",
