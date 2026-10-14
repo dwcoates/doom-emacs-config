@@ -985,3 +985,96 @@ func TestAFailingHooksClockSpansTheDurationItReported(t *testing.T) {
 		t.Fatalf("clock spans %d..%d, want 4200 ms from the hook's start", start, end)
 	}
 }
+
+// publishedSuccess is a published artifact's success for unit-1, restating
+// publish when it is non-nil, stamped at contract.
+func publishedSuccess(contract conversationv1.AgentActivityContract, title string, publish *conversationv1.AgentArtifactPublish) *conversationv1.AgentActivity {
+	published := &conversationv1.AgentArtifactPublished{Url: "https://claude.ai/a/1", Publish: publish}
+	if title != "" {
+		published.Title = &title
+	}
+	return &conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "unit-1"},
+		Contract:   contract,
+		Item: &conversationv1.AgentActivity_Artifact{Artifact: &conversationv1.AgentArtifact{
+			Result: &conversationv1.AgentArtifact_Success{Success: &conversationv1.AgentArtifactSuccess{
+				Outcome: &conversationv1.AgentArtifactSuccess_Published{Published: published},
+			}},
+		}},
+	}
+}
+
+func TestAPublishedSuccessAloneDrawsItsFaviconFromTheRestatedPublish(t *testing.T) {
+	// Arrange: no start was ever drawn by this process (a replay, or a live
+	// intake that served the settle first).
+	h := newHarness(t)
+	favicon, draft := "📊", "Draft"
+	restated := &conversationv1.AgentArtifactPublish{FilePath: "/tmp/report.html", Favicon: &favicon, Title: &draft}
+
+	// Act.
+	h.send(publishedSuccess(conversationv1.AgentActivityContract_AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH, "Offline Report", restated))
+
+	// Assert: the outcome's title under the restated favicon, and no fault.
+	if got := h.artifactBubble().GetHeading().GetText(); got != "📊 Offline Report" {
+		t.Fatalf("heading = %q, want the outcome's title under the restated favicon", got)
+	}
+	if errs := h.anyErrors(); len(errs) != 0 {
+		t.Fatalf("errors = %v, want none", errs)
+	}
+}
+
+func TestAPublishedSuccessWithNoTitleDrawsTheRestatedTitle(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	favicon, title := "📊", "Quarterly"
+	restated := &conversationv1.AgentArtifactPublish{FilePath: "/tmp/report.html", Favicon: &favicon, Title: &title}
+
+	// Act.
+	h.send(publishedSuccess(conversationv1.AgentActivityContract_AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH, "", restated))
+
+	// Assert.
+	if got := h.artifactBubble().GetHeading().GetText(); got != "📊 Quarterly" {
+		t.Fatalf("heading = %q, want the restated favicon and title", got)
+	}
+}
+
+func TestAPublishedSuccessThatOmitsItsPublishIsGradedByItsRevision(t *testing.T) {
+	tests := []struct {
+		name      string
+		contract  conversationv1.AgentActivityContract
+		wantLevel string
+		wantOp    string
+	}{
+		{name: "a revision-2 producer has broken its contract", contract: conversationv1.AgentActivityContract_AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH, wantLevel: "error", wantOp: "daemon.feed.settle_not_restated"},
+		{name: "a revision-1 row is expected old data", contract: conversationv1.AgentActivityContract_AGENT_ACTIVITY_CONTRACT_SETTLES_STAND_ALONE, wantLevel: "info", wantOp: "daemon.feed.settle_predates_contract"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the start was held, so the card still draws from it.
+			h := newHarness(t)
+			favicon, title := "📊", "Report"
+			h.send(&conversationv1.AgentActivity{
+				ActivityId: &conversationv1.AgentActivityId{Value: "unit-1"},
+				Item: &conversationv1.AgentActivity_Artifact{Artifact: &conversationv1.AgentArtifact{
+					Result: &conversationv1.AgentArtifact_Start{Start: &conversationv1.AgentArtifactStart{
+						Act: &conversationv1.AgentArtifactStart_Publish{Publish: &conversationv1.AgentArtifactPublish{
+							FilePath: "/tmp/report.html", Favicon: &favicon, Title: &title,
+						}},
+						StartedAtMs: 1_000,
+					}},
+				}},
+			})
+
+			// Act.
+			h.send(publishedSuccess(tt.contract, "", nil))
+
+			// Assert: recorded at the revision's level, and drawn from the held start.
+			if !h.hasRecord(tt.wantLevel, tt.wantOp) {
+				t.Fatalf("records = %+v, want %s %s", h.records(), tt.wantLevel, tt.wantOp)
+			}
+			if got := h.artifactBubble().GetHeading().GetText(); got != "📊 Report" {
+				t.Fatalf("heading = %q, want the held start's", got)
+			}
+		})
+	}
+}
