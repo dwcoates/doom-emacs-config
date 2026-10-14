@@ -52,7 +52,7 @@ func runSuite(m *testing.M) int {
 	}
 	repo = l
 
-	if err := runGrepGate(l.e2eDir); err != nil {
+	if _, err := harness.TimedStep(os.Stderr, "e2e", "the grep gate", func() (struct{}, error) { return struct{}{}, runGrepGate(l.e2eDir) }); err != nil {
 		fmt.Fprintln(os.Stderr, "e2e: grep gate:", err)
 		return 1
 	}
@@ -460,7 +460,7 @@ func prebuildE2E() error {
 	if _, err := os.Stat(filepath.Join(repo.shimDir, "node_modules")); err != nil {
 		return fmt.Errorf("e2e: prebuild: shim deps not installed (%s/node_modules missing): run `npm ci` in %s", repo.shimDir, repo.shimDir)
 	}
-	if _, err := buildShimBundle(node); err != nil {
+	if _, err := harness.TimedStep(os.Stderr, "e2e", "prebuild the shim bundle", func() (string, error) { return buildShimBundle(node) }); err != nil {
 		return fmt.Errorf("e2e: prebuild the shim bundle: %w", err)
 	}
 	for _, b := range []struct {
@@ -471,7 +471,7 @@ func prebuildE2E() error {
 		{repo.sidecarDir, "shim-claude-sidecar", goBuildCovered},
 		{repo.lockDir, "shim-lock", goBuildOnce},
 	} {
-		if _, err := b.build(b.dir, filepath.Join(e2eBinDir(), b.name)); err != nil {
+		if _, err := harness.TimedStep(os.Stderr, "e2e", "prebuild "+b.name, func() (string, error) { return b.build(b.dir, filepath.Join(e2eBinDir(), b.name)) }); err != nil {
 			return fmt.Errorf("e2e: prebuild %s: %w", b.name, err)
 		}
 	}
