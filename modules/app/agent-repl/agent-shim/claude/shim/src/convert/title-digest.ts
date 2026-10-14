@@ -1,27 +1,22 @@
 /**
- * convert/title-digest.ts — the material a synthesized workspace title is made
- * of, computed from the transcript's own records.
+ * convert/title-digest.ts — the material the workspace summary is made of,
+ * computed from the transcript's own records.
  *
- * WHAT THE DIGEST IS. The daemon writes its own one-line title when the vendor
- * has stated no `ai-title`, and it summarizes the user's PROMPTS since the last
- * context boundary. The boundary is whichever of these was most recent in the
- * CURRENT transcript:
+ * WHAT THE DIGEST IS. The daemon distills the user's PROMPTS since the last
+ * /clear into the one-sentence workspace summary the topbar draws. ONLY A
+ * /clear CUTS THE DIGEST (owner ruling, 2026-10-14: every prompt of the
+ * session, including pre-compaction, but not pre-clear):
  *
- *   - a /compact — a `system:compact_boundary` record followed by an
- *     `isCompactSummary` user record. The digest then carries that summary
- *     (the vendor's own compression of the discarded history) plus the prompts
- *     that followed it;
  *   - a /clear — recognized by the `<command-name>/clear</command-name>`
  *     command envelope the vendor writes at the TOP of the NEW transcript a
  *     clear rotates to. Since a clear rotates the file, "the prompts in this
  *     transcript" is already "the prompts since the clear", so the envelope is
  *     reported as the boundary but does not change which prompts are collected;
- *   - nothing — the conversation has never been cut, so every prompt counts.
+ *   - nothing — the conversation has never been cleared, so every prompt counts.
  *
- * A /compact stays IN the same file (it never rotates the id), so a compaction
- * is always found by scanning the current transcript; a /clear only ever leaves
- * its envelope at the head of the file it rotated to. The most recent boundary
- * in file order wins.
+ * A /compact stays IN the same file and leaves the user's earlier prompt
+ * records in it, so a compaction cuts nothing: the prompts before it are read
+ * exactly as the prompts after it are, and its summary is not a prompt.
  *
  * WHAT IS NOT A PROMPT. The transcript carries much under `type:"user"` that a
  * person never typed: the SDK writes tool results as user records (array
@@ -37,15 +32,13 @@
 import { isKeepalivePrompt } from "../engine/keepalive.js";
 
 /** The kind of context boundary a digest is measured from. */
-export type TitleDigestBoundary = "none" | "clear" | "compact";
+export type TitleDigestBoundary = "none" | "clear";
 
-/** The material a synthesized title is made of. */
+/** The material the workspace summary is made of. */
 export interface TitleDigest {
   /** Which boundary the prompts are measured from. */
   readonly boundary: TitleDigestBoundary;
-  /** The most recent compaction's summary, verbatim. Present iff boundary is "compact". */
-  readonly lastCompactSummary?: string;
-  /** The user's prompts since the boundary, oldest first. */
+  /** The user's prompts since the last /clear, across every compaction, oldest first. */
   readonly prompts: string[];
 }
 
@@ -82,10 +75,10 @@ const COMMAND_ARTIFACT_PREFIXES = ["<command-name>", "<local-command-stdout>", "
 /**
  * Whether a record is a compaction boundary (the marker, not the summary).
  *
- * EXPORTED because `engine/cold.ts` decides the same question about the same
- * records while reading a transcript for ReadTranscripts. A second spelling of
- * "what is a boundary" is how two surfaces come to disagree about one
- * conversation, so there is one.
+ * The digest no longer cuts at a compaction, but `engine/cold.ts` decides this
+ * question about the same records while reading a transcript for
+ * ReadTranscripts, and the record shapes this module reads are spelled here
+ * once, so the predicate stays beside its siblings.
  */
 export function isCompactBoundary(r: TitleDigestRecord): boolean {
   return r.type === "system" && r.subtype === "compact_boundary";
@@ -101,8 +94,8 @@ function userString(r: TitleDigestRecord): string | undefined {
 /**
  * Whether a user string is a /clear command envelope.
  *
- * EXPORTED for the same reason `isCompactBoundary` is: one spelling of the
- * boundary rule, shared by the digest and by ReadTranscripts.
+ * EXPORTED because ReadTranscripts (`engine/cold.ts`) decides the same
+ * question: one spelling of the boundary rule, shared by the digest and by it.
  */
 export function isClearEnvelope(r: TitleDigestRecord): boolean {
   const s = userString(r);
@@ -163,46 +156,18 @@ export function userRecordText(r: TitleDigestRecord): string | undefined {
   return trimmed === "" ? undefined : trimmed;
 }
 
-/** The summary of the compaction whose boundary is at `boundaryIndex`, or undefined. */
-function compactSummaryAfter(records: readonly TitleDigestRecord[], boundaryIndex: number): string | undefined {
-  for (let i = boundaryIndex + 1; i < records.length; i++) {
-    const r = records[i];
-    if (r.isCompactSummary === true) {
-      const content = r.message?.content;
-      if (typeof content === "string") {
-        const trimmed = content.trim();
-        return trimmed === "" ? undefined : trimmed;
-      }
-      return undefined;
-    }
-  }
-  return undefined;
-}
-
 /**
  * The digest the records state.
  *
- * The boundary is found in ONE forward pass, last-writer-wins, so the most
- * recent cut in file order is the one the prompts are measured from. The
- * prompts are then every prompt strictly after that boundary (or every prompt
- * at all when there was none).
+ * The last /clear is found in ONE forward pass, last-writer-wins. The prompts
+ * are then every prompt strictly after it (or every prompt at all when there
+ * was none). A compaction boundary is passed over like any other non-prompt
+ * record, so the prompts before it still count.
  */
 export function computeTitleDigest(records: readonly TitleDigestRecord[]): TitleDigest {
   let boundaryIndex = -1;
-  let boundary: TitleDigestBoundary = "none";
-  let lastCompactSummary: string | undefined;
-
   for (let i = 0; i < records.length; i++) {
-    const r = records[i];
-    if (isCompactBoundary(r)) {
-      boundaryIndex = i;
-      boundary = "compact";
-      lastCompactSummary = compactSummaryAfter(records, i);
-    } else if (isClearEnvelope(r)) {
-      boundaryIndex = i;
-      boundary = "clear";
-      lastCompactSummary = undefined;
-    }
+    if (isClearEnvelope(records[i])) boundaryIndex = i;
   }
 
   const prompts: string[] = [];
@@ -211,7 +176,5 @@ export function computeTitleDigest(records: readonly TitleDigestRecord[]): Title
     if (text !== undefined) prompts.push(text);
   }
 
-  return boundary === "compact"
-    ? { boundary, lastCompactSummary, prompts }
-    : { boundary, prompts };
+  return { boundary: boundaryIndex < 0 ? "none" : "clear", prompts };
 }

@@ -1,21 +1,20 @@
 // endpoint_gather_title_digest.proto — GatherTitleDigest: the material the
-// daemon summarizes into a workspace title of its OWN when the vendor has not
-// written one.
+// daemon distills into the workspace summary the topbar draws.
 //
 // WHY IT LIVES ON THE SHIM. The shim owns the transcript, and the digest is a
-// fact ABOUT the transcript: the user's prompts since the last context
-// boundary, plus — when the last boundary was a compaction — the compaction
-// summary the vendor already wrote. The daemon cannot read the transcript
-// itself (it does not know the file, and a compaction rewrites it), so it asks
-// the one process that does.
+// fact ABOUT the transcript: every prompt the user sent since the last /clear.
+// The daemon cannot read the transcript itself (it does not know the file), so
+// it asks the one process that does.
 //
-// THE BOUNDARY IS THE MOST RECENT CUT IN THE CURRENT TRANSCRIPT. A /clear
-// rotates to a NEW transcript file, so "the prompts in the current transcript"
-// is the same statement as "the prompts since the last /clear"; a /compact
-// stays in the SAME file and appends a `compact_boundary` plus the summary, so
-// the compaction is found by scanning that file. The digest reports which
-// boundary it found so the daemon can key its reset and its cost control on the
-// same fact the shim keyed the digest on.
+// ONLY A /clear CUTS THE DIGEST. A /clear rotates to a NEW transcript file, so
+// "the prompts in the current transcript" is the same statement as "the
+// prompts since the last /clear". A /compact stays in the SAME file and
+// discards nothing the user sent from it, so the prompts before a compaction
+// are still the user's prompts in this session and the digest carries them
+// (owner ruling, 2026-10-14: the summary distills every prompt of the session,
+// including pre-compaction, but not pre-clear). The digest reports whether it
+// found a clear so the daemon can key its reset on the same fact the shim keyed
+// the digest on.
 //
 // NO PAINT ATTESTATION: this answers what the transcript states, never that
 // anything was drawn from it.
@@ -43,36 +42,35 @@ message GatherTitleDigestResponse {
 // no distinction between NONE and CLEAR for the prompt set — both are "every
 // prompt in the current transcript" — but the two are reported apart because a
 // clear is a deliberate reset the daemon keys its own reset on, while NONE is
-// simply a conversation that has never been cut.
+// simply a conversation that has never been cleared.
 enum TitleDigestBoundary {
+  // A /compact was once a boundary; it no longer cuts the digest.
+  reserved 3;
+  reserved "TITLE_DIGEST_BOUNDARY_COMPACT";
   // Never sent; an unset boundary is a malformed frame.
   TITLE_DIGEST_BOUNDARY_UNSPECIFIED = 0;
-  // No cut anywhere in the current transcript: the prompts are the whole
-  // conversation.
+  // No clear anywhere in the current transcript: the prompts are the whole
+  // conversation, across every compaction.
   TITLE_DIGEST_BOUNDARY_NONE = 1;
   // The current transcript opened at a /clear: the prompts are everything
-  // since that clear (which is everything in this transcript file).
+  // since that clear (which is everything in this transcript file), across
+  // every compaction.
   TITLE_DIGEST_BOUNDARY_CLEAR = 2;
-  // The most recent cut was a /compact: `last_compact_summary` carries the
-  // summary the compaction wrote, and `prompts` are the prompts that followed
-  // it.
-  TITLE_DIGEST_BOUNDARY_COMPACT = 3;
 }
 
 // The material to summarize.
 message GatherTitleDigestSuccess {
+  // The compaction summary once rode here; the digest is the user's own
+  // prompts alone now, which a compaction no longer cuts.
+  reserved 2;
+  reserved "last_compact_summary";
   // Which boundary the prompts are measured from.
   TitleDigestBoundary boundary = 1;
-  // The compaction summary the most recent /compact wrote, verbatim. SET ONLY
-  // when `boundary` is COMPACT; a summary is the vendor's own compression of
-  // the discarded history, so it belongs in the digest beside the prompts that
-  // followed it. Absent for every other boundary.
-  optional string last_compact_summary = 2;
-  // The user's prompts since the boundary, oldest first — the slash-command
-  // envelopes, tool-result echoes, compaction artifacts and subagent prompts
-  // the transcript also carries are NOT prompts and are excluded. An empty
-  // list is a legitimate answer for a fresh conversation nobody has prompted
-  // yet.
+  // The user's prompts since the last /clear, oldest first, including every
+  // prompt sent before a /compact — the slash-command envelopes, tool-result
+  // echoes, compaction artifacts and subagent prompts the transcript also
+  // carries are NOT prompts and are excluded. An empty list is a legitimate
+  // answer for a fresh conversation nobody has prompted yet.
   repeated string prompts = 3;
 }
 
