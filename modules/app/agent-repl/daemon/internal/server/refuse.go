@@ -14,6 +14,7 @@ import (
 
 	"agent-repld/internal/bounce"
 	"agent-repld/internal/classifierupdate"
+	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/drain"
 	"agent-repld/internal/ids"
@@ -425,7 +426,7 @@ func (s *server) resolveRefLogging(
 	// rollout controller, so it costs no read.
 	standing, err := s.deps.Ownership.Standing(ctx, id)
 	if err != nil {
-		if endedOnCancel(err) {
+		if ctxend.Is(err) {
 			s.log.Info(rpc, "the serving standing was not determined; the request's context was cancelled",
 				dlog.Context{"stream": rpc, "workspace": string(id), "cause": err.Error()})
 		} else {
@@ -501,7 +502,7 @@ func (s *server) resolveRegistered(ctx context.Context, rpc string, ref *workspa
 			})
 			return resolved{}, &r, nil
 		}
-		if endedOnCancel(err) {
+		if ctxend.Is(err) {
 			s.log.Info(rpc, "the workspace record was not read; the request's context was cancelled",
 				dlog.Context{"stream": rpc, "workspace": string(id), "cause": err.Error()})
 		} else {
@@ -569,7 +570,7 @@ func (s *server) registryWorkspace(ctx context.Context, id ids.WorkspaceID) (wsm
 // were decided, so they keep their Connect code and add no ERROR. Everything
 // else is a failure and goes through fail.
 func failResolution(log dlog.Logger, rpc string, err error) *connect.Error {
-	if errors.Is(err, errServingEnded) || endedOnCancel(err) {
+	if errors.Is(err, errServingEnded) || ctxend.Is(err) {
 		var coded *connect.Error
 		if errors.As(err, &coded) {
 			return coded
@@ -594,15 +595,6 @@ func fail(log dlog.Logger, rpc string, err error) *connect.Error {
 	return connect.NewError(connect.CodeInternal, err)
 }
 
-// endedOnCancel reports whether err is the CLIENT'S OWN request context ending
-// — a cancellation or a deadline — rather than something that broke. Every
-// read a standing stream performs runs under that context, and it is cancelled
-// on the client leaving and on the daemon's orderly exit alike, so the two are
-// the same fact and neither is a fault.
-func endedOnCancel(err error) bool {
-	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
-}
-
 // endStream renders a STANDING STREAM's failure. A cancelled request context is
 // the client leaving: the stream ends quietly, recorded once at INFO naming the
 // stream, and the handler returns no error. Every other failure keeps fail's
@@ -611,7 +603,7 @@ func endedOnCancel(err error) bool {
 // It returns `error` rather than *connect.Error precisely so a quiet ending is
 // an untyped nil, never the typed-nil trap a *connect.Error return would carry.
 func endStream(log dlog.Logger, rpc string, err error) error {
-	if endedOnCancel(err) {
+	if ctxend.Is(err) {
 		log.Info(rpc, "the standing stream ended when its client's context was cancelled",
 			dlog.Context{"stream": rpc, "cause": err.Error()})
 		return nil

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"agent-repld/internal/clock"
+	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 )
 
@@ -106,7 +107,7 @@ func (f *Follower) Run(ctx context.Context) error {
 func (f *Follower) Check(ctx context.Context) {
 	version, err := f.deps.Versions.DataVersion(ctx)
 	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		if ctxend.Is(err) {
 			f.deps.Log.Debug(opCheck, "the data_version read ended with its context", dlog.Context{"cause": err.Error()})
 			return
 		}
