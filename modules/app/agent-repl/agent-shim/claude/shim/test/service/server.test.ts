@@ -18,6 +18,7 @@ import { shimRoutes } from "../../src/service/routes.js";
 import {
   HTTP2_PREFACE,
   flushStreamHead,
+  isKillSessionPath,
   isStreamingContentType,
   isStreamingPath,
   probeSocket,
@@ -400,6 +401,85 @@ describe("isStreamingPath", () => {
   it("names KillSession a unary rpc, so the exit waits for its response", () => {
     // Arrange, Act, Assert.
     expect(isStreamingPath("/shim.v1.Shim/KillSession")).toBe(false);
+  });
+});
+
+describe("isKillSessionPath", () => {
+  it("names the KillSession rpc", () => {
+    // Arrange, Act, Assert.
+    expect(isKillSessionPath("/shim.v1.Shim/KillSession")).toBe(true);
+  });
+
+  it("does not name another rpc", () => {
+    // Arrange, Act, Assert.
+    expect(isKillSessionPath("/shim.v1.Shim/KillTurn")).toBe(false);
+  });
+});
+
+/** An engine whose KillSession answers an ended session. */
+function killingEngine(): NotImplementedEngine {
+  const engine = new NotImplementedEngine();
+  engine.killSession = async (): Promise<shimv1.KillSessionResponse> =>
+    create(shimv1.KillSessionResponseSchema, {});
+  return engine;
+}
+
+describe("waiting for the daemon to hang up", () => {
+  it("does not resolve while the daemon is still connected", async () => {
+    // Arrange.
+    const sock = socketPath();
+    const server = await serve(sock, shimRoutes(killingEngine()));
+    started.push(server);
+    const daemon = client(sock, "2");
+    await daemon.killSession(create(shimv1.KillSessionRequestSchema, {}));
+    let resolved = false;
+    void server.hungUp().then(() => {
+      resolved = true;
+    });
+
+    // Act — a second answer on the same connection proves it is still up and
+    // that the event loop has turned past any settling of the wait.
+    await daemon.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    // Assert.
+    expect(resolved).toBe(false);
+  });
+
+  it("resolves once the daemon hangs up the connection the KillSession came in on", async () => {
+    // Arrange.
+    const sock = socketPath();
+    const server = await serve(sock, shimRoutes(killingEngine()));
+    started.push(server);
+    await client(sock, "2").killSession(create(shimv1.KillSessionRequestSchema, {}));
+    const hungUp = server.hungUp();
+
+    // Act.
+    for (const socket of dialed) socket.destroy();
+
+    // Assert.
+    await expect(hungUp).resolves.toBeUndefined();
+  });
+
+  it("resolves at once when the daemon hung up before it was asked", async () => {
+    // Arrange — the first wait sees the connection close, so the second finds
+    // it already destroyed.
+    const sock = socketPath();
+    const server = await serve(sock, shimRoutes(killingEngine()));
+    started.push(server);
+    await client(sock, "2").killSession(create(shimv1.KillSessionRequestSchema, {}));
+    for (const socket of dialed) socket.destroy();
+    await server.hungUp();
+
+    // Act, Assert.
+    await expect(server.hungUp()).resolves.toBeUndefined();
+  });
+
+  it("REJECTS when no KillSession was ever served", async () => {
+    // Arrange.
+    const server = await start(socketPath());
+
+    // Act, Assert.
+    await expect(server.hungUp()).rejects.toThrow(/no KillSession was served/);
   });
 });
 
