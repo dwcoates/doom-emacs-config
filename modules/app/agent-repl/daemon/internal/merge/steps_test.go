@@ -27,6 +27,34 @@ func TestANewStepClearsTheLastStepsLine(t *testing.T) {
 	}
 }
 
+func TestEveryStepCarriesWhenTheMergeWasQueued(t *testing.T) {
+	queued := int64(1_700_000_000_000)
+	tests := []struct {
+		name string
+		act  func(r *run)
+	}{
+		{name: "a new step", act: func(r *run) { r.setStep(context.Background(), footer.StepPostprocessing, nil) }},
+		{name: "progress on the standing step", act: func(r *run) { r.updateFacts(func(f *footer.MergeFacts) { f.Replayed = 1 }) }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			r := steppedRun(h)
+			r.queuedMS = queued
+			r.setStep(context.Background(), footer.StepRebasing, nil)
+
+			// Act.
+			tc.act(r)
+
+			// Assert.
+			if got := h.footer.last().QueuedAt.UnixMilli(); got != queued {
+				t.Fatalf("facts are queued at %d, want the run's %d", got, queued)
+			}
+		})
+	}
+}
+
 func TestTheEnqueuedLineNamesTheRequesterAndItsStepInPlainWords(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)

@@ -177,10 +177,11 @@ type Resolver interface {
 
 // FooterStatus is the footer resolver's answers to what a workspace's strip
 // shows: the status every roster row projects (footer.Resolver.Status), and
-// the turn clock the open workspaces section's when-column counts from
-// (footer.Resolver.TurnClock).
+// the sync merge start and turn clock the open workspaces section's
+// when-column counts from (footer.Resolver.MergeStartedAt and TurnClock).
 type FooterStatus interface {
 	Status(ws ids.WorkspaceID) *frontendv1.FooterStatus
+	MergeStartedAt(ws ids.WorkspaceID) *int64
 	TurnClock(ws ids.WorkspaceID) *frontendv1.FooterClock
 }
 

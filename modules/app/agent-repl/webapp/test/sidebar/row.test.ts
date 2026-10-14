@@ -294,41 +294,54 @@ describe("the when-column", () => {
     expect([drawn.querySelector(".when")?.textContent, sc.disposers.length]).toEqual(["0s", 0]);
   });
 
-  it("counts a running turn's elapsed time", () => {
-    const drawn = drawRosterRow(row({ id: "ws-1", when: running(NOW - 65_000) }), sidebarContext(), "R");
-    expect([drawn.querySelector(".when")?.getAttribute("data-when"), drawn.querySelector(".when")?.textContent]).toEqual([
-      "turnRunning",
-      "1m 5s",
-    ]);
-  });
+  describe.each(["turnRunning", "syncMerging"] as const)("the counting arm %s", (arm) => {
+    const counting = (startedMs: number): MessageInitShape<typeof RosterRowWhenSchema>["shown"] => ({
+      case: arm,
+      value: { startedAtMs: BigInt(startedMs) },
+    });
 
-  it("ticks a running turn off the SHARED clock", () => {
-    // Arrange
-    const ticker = fakeTicker();
-    const sc = sidebarContext(appContext({}, ticker));
-    const drawn = drawRosterRow(row({ id: "ws-1", when: running(NOW - 60_000) }), sc, "R");
-    // Act
-    ticker.tick(NOW + 120_000);
-    // Assert
-    expect(drawn.querySelector(".when")?.textContent).toBe("3m");
-  });
+    it("counts its elapsed time", () => {
+      const drawn = drawRosterRow(row({ id: "ws-1", when: counting(NOW - 65_000) }), sidebarContext(), "R");
+      expect([drawn.querySelector(".when")?.getAttribute("data-when"), drawn.querySelector(".when")?.textContent]).toEqual([
+        arm,
+        "1m 5s",
+      ]);
+    });
 
-  it("registers a running turn's tick as a teardown the next push runs", () => {
-    const sc = sidebarContext(appContext({}, fakeTicker()));
-    drawRosterRow(row({ id: "ws-1", when: running(NOW) }), sc, "R");
-    expect(sc.disposers.length).toBe(1);
-  });
+    it("ticks off the SHARED clock", () => {
+      // Arrange
+      const ticker = fakeTicker();
+      const sc = sidebarContext(appContext({}, ticker));
+      const drawn = drawRosterRow(row({ id: "ws-1", when: counting(NOW - 60_000) }), sc, "R");
+      // Act
+      ticker.tick(NOW + 120_000);
+      // Assert
+      expect(drawn.querySelector(".when")?.textContent).toBe("3m");
+    });
 
-  it.each([0, 4_920, 65_432, 3_725_000])("reads exactly what the footer's turn clock reads %sms into the turn", (elapsed) => {
-    // Arrange: the strip's clock is a live elapsed clock from the same start.
-    const ticker = fakeTicker();
-    const started = NOW - elapsed;
-    const strip = liveElapsedClock(ticker, "info-time", started);
-    // Act
-    const drawn = drawRosterRow(row({ id: "ws-1", when: running(started) }), sidebarContext(appContext({}, ticker)), "R");
-    ticker.tick(NOW + 7_300);
-    // Assert
-    expect(drawn.querySelector(".when")?.textContent).toBe(strip.textContent);
+    it("registers its tick as a teardown the next push runs", () => {
+      const sc = sidebarContext(appContext({}, fakeTicker()));
+      drawRosterRow(row({ id: "ws-1", when: counting(NOW) }), sc, "R");
+      expect(sc.disposers.length).toBe(1);
+    });
+
+    it.each([0, 4_920, 65_432, 3_725_000])("reads exactly what the footer's turn clock reads %sms in", (elapsed) => {
+      // Arrange: the strip's clock is a live elapsed clock from the same start.
+      const ticker = fakeTicker();
+      const started = NOW - elapsed;
+      const strip = liveElapsedClock(ticker, "info-time", started);
+      // Act
+      const drawn = drawRosterRow(row({ id: "ws-1", when: counting(started) }), sidebarContext(appContext({}, ticker)), "R");
+      ticker.tick(NOW + 7_300);
+      // Assert
+      expect(drawn.querySelector(".when")?.textContent).toBe(strip.textContent);
+    });
+
+    it("refuses a start no JS instant holds as a malformed view", () => {
+      const bad = row({ id: "ws-1", when: counting(0) });
+      (bad.when!.shown.value as { startedAtMs: bigint }).startedAtMs = BigInt(Number.MAX_SAFE_INTEGER) + 1n;
+      expect(() => drawRosterRow(bad, sidebarContext(), "R")).toThrow(MalformedView);
+    });
   });
 
   it("refuses an unset when-column as a malformed view", () => {

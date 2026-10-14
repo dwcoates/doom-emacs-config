@@ -405,7 +405,8 @@ reserved."
                        #'string<))))
 
 (defconst agent-repl-test-wire-roster--when-arm-samples
-  '((turnRunning "{\"startedAtMs\":\"1\"}" (:started-at-ms 1))
+  '((syncMerging "{\"startedAtMs\":\"1\"}" (:started-at-ms 1))
+    (turnRunning "{\"startedAtMs\":\"1\"}" (:started-at-ms 1))
     (noTurnRunning "{}" nil)
     (merged "{\"atMs\":\"1\"}" (:at-ms 1))
     (hidden "{\"atMs\":\"1\"}" (:at-ms 1 :cache nil)))
@@ -465,6 +466,21 @@ stale blue status."
                   #'agent-repl-wire-decode-roster-row-when-turn-running
                   "{\"startedAtMs\":\"1\",\"atMs\":\"1\"}")
                  '("RosterRowWhenTurnRunning" atMs "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-when-sync-merging-carries-its-start ()
+  "Regression: the strict decoder must accept the `syncMerging' arm (see
+`turnRunning')."
+  (should (equal (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-row-when
+                  "{\"syncMerging\":{\"startedAtMs\":\"1756400000000\"}}")
+                 '(:arm :sync-merging :value (:started-at-ms 1756400000000)))))
+
+(ert-deftest agent-repl-test-wire-roster-when-sync-merging-refuses-an-unknown-field ()
+  "The sync merging arm carries its start alone."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row-when-sync-merging
+                  "{\"startedAtMs\":\"1\",\"atMs\":\"1\"}")
+                 '("RosterRowWhenSyncMerging" atMs "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-when-no-turn-running-decodes ()
   "The `noTurnRunning' arm must decode too (see `turnRunning')."

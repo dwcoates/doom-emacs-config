@@ -107,6 +107,22 @@ func TestMoveLeavesAMergeWithNoNeighborWhereItIs(t *testing.T) {
 	}
 }
 
+func TestAWaitingMergeCountsFromWhenItJoinedTheQueue(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	enqueue(t, h)
+
+	// Act.
+	queueAnother(t, h, "ws-2", "two")
+
+	// Assert.
+	for _, ws := range []wsm.WorkspaceID{theWorkspace, "ws-2"} {
+		if got, want := h.factsOf(ws).QueuedAt.UnixMilli(), queuedAtMS(t, h, ws); got != want {
+			t.Fatalf("%s's facts are queued at %d, want its entry's %d", ws, got, want)
+		}
+	}
+}
+
 // TestMoveRecordsAFailedMoveAndRedrawsNothing covers the store failing the
 // move: the error reaches the caller, is recorded at ERROR with its context,
 // and no bubble is told a new place.
