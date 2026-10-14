@@ -1710,6 +1710,13 @@ func unary[Req any, Resp any](
 			c.log.Info(operation, "the shim call ended in a stand-down this daemon ordered", fields)
 			return nil, standDownOrdered(err)
 		}
+		// A CALL ITS OWN CALLER ABANDONED IS NOT A FAULT (callerAbandoned).
+		// MEASURED, daemon integration run 2026-10-14: a handover's exit
+		// cancelled the cache-lapse keeper's SetKeepalive, recorded here at
+		// ERROR before the keeper recorded its own leaving at INFO.
+		if c.callerAbandoned(ctx, operation, "the shim call", fields) {
+			return nil, err
+		}
 		// A CALL THE SHIM'S DEATH CUT IS NOT A SECOND FAULT: the death is
 		// recorded once, by daemon.shimclient.exit, and this is its effect.
 		if info, waited, died := c.diedUnder(ctx, err); died {
