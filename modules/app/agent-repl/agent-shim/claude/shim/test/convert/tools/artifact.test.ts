@@ -157,8 +157,25 @@ describe("artifactConverter.settle", () => {
       value: create(conversationv1.AgentArtifactPublishedSchema, {
         url: "https://claude.ai/public/artifacts/abc",
         title: "Quarterly",
+        publish: create(conversationv1.AgentArtifactPublishSchema, { filePath: "page.html", force: false }),
       }),
     });
+  });
+
+  it("restates the publish it answered exactly as the start states it, favicon included", () => {
+    // Arrange.
+    const call = callWith({ file_path: "report.html", favicon: "📊", title: "Offline Report", url: "https://claude.ai/x" });
+
+    // Act.
+    const artifact = artifactOf(
+      artifactConverter.settle(call, outcomeWith({ url: "https://claude.ai/public/artifacts/abc" })),
+    );
+
+    // Assert.
+    const published = (artifact.result.value as conversationv1.AgentArtifactSuccess).outcome
+      .value as conversationv1.AgentArtifactPublished;
+    expect(published.publish).toEqual(startOf(call).act.value);
+    expect(published.publish?.favicon).toBe("📊");
   });
 
   it("leaves the published title UNSET when the result named none", () => {
