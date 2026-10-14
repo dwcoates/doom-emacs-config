@@ -1130,7 +1130,7 @@ html.webhost-sidebar #ws-sidebar[hidden] {
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
-  animation: ws-revive-shimmer 2.4s ease-in-out infinite;
+  animation: ws-revive-shimmer var(--ws-revive-cycle) ease-in-out infinite;
 }
 @keyframes ws-revive-shimmer {
   from { background-position-x: 100%; }
@@ -1253,11 +1253,11 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 }
 #ws-sidebar .detail .summary { font-style: italic; color: var(--muted); margin: 0.35rem 0 0; }
 
-/* THE BREATH SHRINKS A MARK TO 90.2% (owner ruling, 2026-10-13: 30% less
-   than the 14% it shrank before, which was itself half of the 28% to 72%). */
+/* THE BREATH ONLY FADES (owner ruling, 2026-10-14): a breathing name goes
+   light to dark and back, and never changes size. */
 @keyframes ws-pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.35; transform: scale(0.902); }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
 }
 
 #topbar {
@@ -5869,12 +5869,19 @@ ar-button.outcome-marker-pill {
 #ws-sidebar .st.ink-orange { color: var(--compact-rule); }
 #ws-sidebar .st.ink-purple { color: var(--blocked); }
 #ws-sidebar .st[data-glyph="none"] { visibility: hidden; }
-/* ONE ANIMATION FOR THE WHOLE RAIL (owner ruling, 2026-10-13): every animated
-   mark breathes (normal, shrunk, normal) with the same keyframes, easing and
+/* ONE ANIMATION FOR THE WHOLE RAIL (owner ruling, 2026-10-13): every breath
+   (bright, faded, bright) runs the same keyframes, easing and
    `--ws-mark-cycle`, and a breath always means something is in progress. The
-   cycle is 2s (owner ruling, 2026-10-13: 30% slower than the 1.4s before). */
-#ws-sidebar { --ws-mark-cycle: 2s; }
-#ws-sidebar .st.breathes { animation: ws-pulse var(--ws-mark-cycle) ease-in-out infinite; }
+   cycle is 2s (owner ruling, 2026-10-13: 30% slower than the 1.4s before).
+   THE NAME BREATHES, THE MARK STANDS STILL (owner request, 2026-10-14): row.ts
+   puts `breathes` on the row's name, and no status mark animates at all. A
+   name that is also reviving runs both loops, since the shimmer moves the
+   background and the breath the opacity. */
+#ws-sidebar { --ws-mark-cycle: 2s; --ws-revive-cycle: 2.4s; }
+#ws-sidebar .row .name.breathes { animation: ws-pulse var(--ws-mark-cycle) ease-in-out infinite; }
+#ws-sidebar .row .name.breathes.reviving {
+  animation: ws-revive-shimmer var(--ws-revive-cycle) ease-in-out infinite, ws-pulse var(--ws-mark-cycle) ease-in-out infinite;
+}
 
 /* THE ATTENTION MARKER, on the ONE cadence frontend.v1.RosterRowAttention
    specifies: two blinks of 500 ms on / 500 ms off, then steady. The phases are

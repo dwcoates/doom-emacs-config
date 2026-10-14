@@ -265,6 +265,11 @@ export function drawRosterRow(
   if (!hidden && u.reviving !== undefined && drawRosterRowReviving(u.reviving, `${path}.reviving`)) {
     markReviving(ws, label);
   }
+  // THE NAME BREATHES, NOT THE MARK (owner request, 2026-10-14): a row whose
+  // mark's motion is a breath fades its name light to dark and back, and the
+  // mark stands still. Only a row that draws a mark breathes, so the bands'
+  // names never do.
+  if (place === "grouping" && mark.motion !== "still") label.classList.add(mark.motion);
   line.appendChild(label);
 
   // PRESENCE, NEVER A SENTINEL: an absent marker or badge draws nothing at
@@ -595,9 +600,9 @@ export function drawRosterRowDetailSummary(u: RosterRowDetailSummary, path: stri
  * The status mark: a dot for a lifecycle, a glyph for a merge, a gate or a
  * working one-shot.
  *
- * The color and the ink are the shared vocabulary's, through `tones.ts`; the
- * motion is `tones.rosterRowMark`'s, and it says the same thing everywhere:
- * a breath means something is in progress.
+ * The color and the ink are the shared vocabulary's, through `tones.ts`. The
+ * mark itself NEVER MOVES (owner request, 2026-10-14): the breath that says
+ * something is in progress is the row's NAME's (`drawRosterRow`).
  */
 export function drawStatusMark(arm: RosterStatusCase, path: string, markers: RowMarkers): HTMLElement {
   const mark = rosterRowMark(arm, markers);
@@ -611,7 +616,6 @@ export function drawStatusMark(arm: RosterStatusCase, path: string, markers: Row
       glyph: mark.glyph,
       tone: mark.toneClass,
       ink: mark.ink ?? "",
-      motion: mark.motion,
     },
   });
   const dot = document.createElement("span");
@@ -622,7 +626,6 @@ export function drawStatusMark(arm: RosterStatusCase, path: string, markers: Row
   if (mark.image !== "") dot.innerHTML = mark.image;
   if (mark.glyph !== "dot") dot.classList.add("st-glyph");
   if (mark.ink !== undefined) dot.classList.add(`ink-${mark.ink}`);
-  if (mark.motion !== "still") dot.classList.add(mark.motion);
   return dot;
 }
 
