@@ -928,6 +928,14 @@ func TestTheMergeQueueVerbWritesEachControl(t *testing.T) {
 			check: func(_ *mergeFixture, e commandfile.Entry) bool {
 				return e.Type == commandfile.TypeMergeReleaseRollouts && e.RepositoryDir == ""
 			}},
+		{name: "disable racing", args: func(*mergeFixture) []string { return []string{"-disable-racing"} },
+			check: func(_ *mergeFixture, e commandfile.Entry) bool {
+				return e.Type == commandfile.TypeMergeDisableRacing && e.RepositoryDir == ""
+			}},
+		{name: "enable racing", args: func(*mergeFixture) []string { return []string{"-enable-racing"} },
+			check: func(_ *mergeFixture, e commandfile.Entry) bool {
+				return e.Type == commandfile.TypeMergeEnableRacing && e.RepositoryDir == ""
+			}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -961,6 +969,8 @@ func TestTheMergeQueueVerbReportsEachAppliedOutcome(t *testing.T) {
 		{outcome: "resumed", args: []string{"-resume"}},
 		{outcome: "held", args: []string{"-hold-rollouts"}},
 		{outcome: "released", args: []string{"-release-rollouts"}},
+		{outcome: "racing_disabled", args: []string{"-disable-racing"}},
+		{outcome: "racing_enabled", args: []string{"-enable-racing"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.outcome, func(t *testing.T) {
@@ -1125,6 +1135,10 @@ func TestTheMergeQueueVerbRefusesAMalformedControl(t *testing.T) {
 		{name: "a hold and a release", args: func(*mergeFixture) []string { return []string{"-hold-rollouts", "-release-rollouts"} }},
 		{name: "a hold scoped by a repository", args: func(f *mergeFixture) []string { return []string{"-hold-rollouts", "-repository-dir", f.other} }},
 		{name: "a hold that waits", args: func(*mergeFixture) []string { return []string{"-hold-rollouts", "-wait"} }},
+		{name: "a disable and an enable", args: func(*mergeFixture) []string { return []string{"-disable-racing", "-enable-racing"} }},
+		{name: "a disable scoped by a repository", args: func(f *mergeFixture) []string { return []string{"-disable-racing", "-repository-dir", f.other} }},
+		{name: "a disable that waits", args: func(*mergeFixture) []string { return []string{"-disable-racing", "-wait"} }},
+		{name: "a disable to the front", args: func(*mergeFixture) []string { return []string{"-disable-racing", "-front"} }},
 		{name: "move up and move down", args: func(*mergeFixture) []string { return []string{"-move-up", "-move-down"} }},
 		{name: "move-dir off a move", args: func(f *mergeFixture) []string { return []string{"-evict", "-move-dir", f.other} }},
 		{name: "a move-dir that is not there", args: func(*mergeFixture) []string { return []string{"-move-up", "-move-dir", "/no/such/worktree"} }},

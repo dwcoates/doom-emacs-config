@@ -36,6 +36,7 @@ import (
 //	agent-repld merge-queue -move-up | -move-down [-move-dir WORKTREE] [-answer-timeout D] [-state-dir DIR]
 //	agent-repld merge-queue -pause | -resume [-repository-dir DIR] [-answer-timeout D] [-state-dir DIR]
 //	agent-repld merge-queue -hold-rollouts | -release-rollouts [-answer-timeout D] [-state-dir DIR]
+//	agent-repld merge-queue -disable-racing | -enable-racing [-answer-timeout D] [-state-dir DIR]
 //
 // A MERGE RUNS IN THE WORKSPACE THAT ASKED FOR IT, and the verb asks FROM THE
 // CALLING WORKSPACE: the workspace whose worktree contains the caller's working
@@ -97,12 +98,17 @@ import (
 //   - `-hold-rollouts` / `-release-rollouts` hold or release the queue's
 //     ROLLOUTS, daemon-wide: while held, merges still land, but a landing in
 //     the daemon's own checkout no longer redeploys, hot-reloads or bounces
-//     the runtime (merge_hold_rollouts, merge_release_rollouts).
+//     the runtime (merge_hold_rollouts, merge_release_rollouts);
+//   - `-disable-racing` / `-enable-racing` disable or enable the queue's
+//     RACING, daemon-wide: while disabled, every queue works its head alone,
+//     whatever the host's power source (merge_disable_racing,
+//     merge_enable_racing).
 //
 // A control is answered AT ONCE, so the verb waits (at most -answer-timeout)
 // for the file's fate and prints the daemon's own answer, read off the record
 // the ingress keys by the file's path in the run log: `outcome: <outcome>`
-// (evicted, moved_up, moved_down, unmoved, not_queued, paused, resumed, held, released) when applied, or the refusal's cause
+// (evicted, moved_up, moved_down, unmoved, not_queued, paused, resumed, held, released, racing_disabled,
+// racing_enabled) when applied, or the refusal's cause
 // when quarantined. An answer the run log does not carry is printed as unread,
 // on stderr, and the file's fate still decides the exit.
 
@@ -273,6 +279,8 @@ func runMergeQueueVerb(ctx context.Context, args []string, dial mergeQueueDialer
 	resume := fs.Bool("resume", false, "resume the merge queue (every repository's, or -repository-dir's)")
 	holdRollouts := fs.Bool("hold-rollouts", false, "hold the merge queue's rollouts: merges still land, but a landing no longer redeploys")
 	releaseRollouts := fs.Bool("release-rollouts", false, "release the merge queue's rollouts: the next landing redeploys")
+	disableRacing := fs.Bool("disable-racing", false, "disable the merge queue's racing: every queue works its head alone, whatever the power source")
+	enableRacing := fs.Bool("enable-racing", false, "enable the merge queue's racing: on AC power each queue works its top two merges")
 	repositoryDir := fs.String("repository-dir", "", "with -pause or -resume: the repository's main checkout")
 	answerTimeout := fs.Duration("answer-timeout", defaultAnswerTimeout, "with a queue control: how long to wait for the daemon's answer")
 	wait := fs.Bool("wait", false, "wait for the outcome: landed (0) or failed (5)")
@@ -290,6 +298,7 @@ func runMergeQueueVerb(ctx context.Context, args []string, dial mergeQueueDialer
 		evict: *evict, evictDir: *evictDir, moveUp: *moveUp, moveDown: *moveDown, moveDir: *moveDir,
 		pause: *pause, resume: *resume, repositoryDir: *repositoryDir,
 		holdRollouts: *holdRollouts, releaseRollouts: *releaseRollouts,
+		disableRacing: *disableRacing, enableRacing: *enableRacing,
 	})
 	if err != nil {
 		return fail("%v", err)
@@ -346,6 +355,8 @@ type mergeQueueFlags struct {
 	repositoryDir    string
 	// holdRollouts and releaseRollouts hold or release the queue's rollouts.
 	holdRollouts, releaseRollouts bool
+	// disableRacing and enableRacing disable or enable the queue's racing.
+	disableRacing, enableRacing bool
 }
 
 // resolveMergeQueueSource turns the flags into what the calling workspace
@@ -382,16 +393,16 @@ func resolveMergeQueueSource(f mergeQueueFlags) (mergeQueueSource, error) {
 // name.
 func resolveMergeQueueRequest(f mergeQueueFlags) (mergeQueueSource, error) {
 	named := 0
-	for _, set := range []bool{f.oneShot, f.async, f.evict, f.evictDir != "", f.moveUp, f.moveDown, f.pause, f.resume, f.holdRollouts, f.releaseRollouts} {
+	for _, set := range []bool{f.oneShot, f.async, f.evict, f.evictDir != "", f.moveUp, f.moveDown, f.pause, f.resume, f.holdRollouts, f.releaseRollouts, f.disableRacing, f.enableRacing} {
 		if set {
 			named++
 		}
 	}
 	switch {
 	case named == 0:
-		return mergeQueueSource{}, errors.New("name the merge or control: -one-shot, -async, -evict, -evict-dir WORKTREE, -move-up, -move-down, -pause, -resume, -hold-rollouts or -release-rollouts")
+		return mergeQueueSource{}, errors.New("name the merge or control: -one-shot, -async, -evict, -evict-dir WORKTREE, -move-up, -move-down, -pause, -resume, -hold-rollouts, -release-rollouts, -disable-racing or -enable-racing")
 	case named > 1:
-		return mergeQueueSource{}, errors.New("-one-shot, -async, -evict, -evict-dir, -move-up, -move-down, -pause, -resume, -hold-rollouts and -release-rollouts each name a different request; give one")
+		return mergeQueueSource{}, errors.New("-one-shot, -async, -evict, -evict-dir, -move-up, -move-down, -pause, -resume, -hold-rollouts, -release-rollouts, -disable-racing and -enable-racing each name a different request; give one")
 	case f.prMerged && !f.oneShot:
 		return mergeQueueSource{}, errors.New("-pr-merged goes with -one-shot: it closes the calling workspace")
 	case !f.async && (f.name != "" || f.branch != "" || f.instruction != "" || f.closeDir != "" || f.cleanupWorktree || f.compactAfter || f.beforeMerge != "" || f.afterMerge != ""):
@@ -441,6 +452,10 @@ func resolveMergeQueueRequest(f mergeQueueFlags) (mergeQueueSource, error) {
 		return mergeQueueSource{label: "a hold of the merge queue's rollouts", control: true, entry: commandfile.Entry{Type: commandfile.TypeMergeHoldRollouts}}, nil
 	case f.releaseRollouts:
 		return mergeQueueSource{label: "a release of the merge queue's rollouts", control: true, entry: commandfile.Entry{Type: commandfile.TypeMergeReleaseRollouts}}, nil
+	case f.disableRacing:
+		return mergeQueueSource{label: "a disable of the merge queue's racing", control: true, entry: commandfile.Entry{Type: commandfile.TypeMergeDisableRacing}}, nil
+	case f.enableRacing:
+		return mergeQueueSource{label: "an enable of the merge queue's racing", control: true, entry: commandfile.Entry{Type: commandfile.TypeMergeEnableRacing}}, nil
 	case f.pause, f.resume:
 		typ, verb := commandfile.TypeMergePause, "a pause"
 		if f.resume {
