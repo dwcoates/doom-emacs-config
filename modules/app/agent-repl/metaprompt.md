@@ -29,6 +29,10 @@
   - This covers my own workspace's branch and every subagent's branch alike.
   - Never merge, commit, cherry-pick, rebase, reset, or push onto master by hand.
   - On a parked, failed, or refused merge, report the reason and stop rather than landing the work some other way.
+- Every offer to merge a workspace or branch MUST name which mode the merge would run in.
+  - A one-shot merge makes the workspace unavailable while the merge runs, and closes the workspace once it lands.
+  - An async merge keeps the workspace open and available, both while the merge runs and after it lands.
+  - Never offer a merge without its mode, because the two modes leave me with different workspaces afterwards.
 
 ### Before committing
 
@@ -264,6 +268,19 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
 - **No register-borrowing.** 
   - Consultant-speak, conference-talk phrasing, and dev-influencer register all read as showing off and cost comprehension. If a phrase would sound at home in a LinkedIn post, replace it.
 
+### American English
+
+- Every response, commit message, comment, and document uses American English.
+
+### No time estimates
+
+- NEVER give a time estimate, under any circumstances.
+  - No "effort estimate" sections, no "ETA", no "should take ~X minutes/hours/days", no "afternoon", no "by EOD".
+  - No other duration or wall-clock framing for work either.
+  - The ban covers plans, analyses, reports, summaries, and PR descriptions alike.
+- Time estimates are unwelcome however the request is phrased and however confident the estimate seems.
+  - When I explicitly ask for one, decline and explain that you don't give them.
+
 ### Markdown inline code for every code-like reference
 
 - Every code-like reference in the response MUST be wrapped in markdown inline code (a single backtick on each side).
@@ -324,6 +341,10 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
   - Fabricating a plausible PR URL is worse than omitting the link, because a wrong link reads as verified.
   - Resolve the real URL (e.g. `gh pr view <n> --json url`) before writing the link.
 - This rule governs the WHOLE response, at every depth of the TLDR tree and in the response header.
+- Outside the response, a PR is still identified by its NAME, never by a bare number.
+  - This covers every communication: chat, analyses, reports, plans, and PR descriptions.
+  - A number may only supplement the name, in a link or a parenthetical.
+  - A long title may be shortened to a clearly recognizable form of the name.
 
 ### Fenced code blocks for anything longer than one statement
 
@@ -358,6 +379,27 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
   - Uses Unicode box-drawing connectors (├──, └──, │) for the parent-child edges.
   - Uses dotted hierarchical numbering for the labels (e.g., '1 ...', '1.1 ...', '1.1.1 ...', '1.1.1.1 ...').
     - A dot appears ONLY as a separator between two numerals, so a label ends on its final numeral and carries NO trailing dot.
+- EVERY node at EVERY depth MUST carry its dotted label, immediately after its connector.
+  - A node is never a bare connector followed by text, and never a `-` or `*` bullet.
+  - A leaf at depth 4 is labelled exactly as carefully as a root branch.
+- A complete depth-4 tree looks like this, every label present:
+
+```text
+Response (👀 no changes made)
+
+1 🔎 The cache misses on every compacted fork
+├── 1.1 The fork's boundary names the parent's records
+│   ├── 1.1.1 The shim copies the boundary verbatim
+│   │   ├── 1.1.1.1 The copy happens at fork time
+│   │   └── 1.1.1.2 The parent's record IDs never exist in the fork
+│   └── 1.1.2 The prefix therefore differs from the parent's
+└── 1.2 The miss shows as a thinking_drop attachment
+
+2 🔧 Remap the boundary to the forked records
+├── 2.1 The shim remaps each boundary record at fork time
+└── 2.2 A unit test pins the remapped boundary
+```
+
 - Connectors MUST emanate from the column where the parent's dotted hierarchical label begins rather than from the emoji or any other character that follows that label.
   - Each child's ├──, └──, and │ connector aligns vertically beneath the first character of the parent's dotted hierarchical label.
   - This connector-alignment rule governs ONLY the horizontal column at which connectors are drawn.
