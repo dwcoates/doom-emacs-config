@@ -26,7 +26,7 @@ import (
 // mergeQueueSubscriptionsDDL is the layout-55 addition: one row per
 // subscription, keyed by its subscriber and its scope. The scope is the
 // repository's queue key (its common dir, as merge_queue.repo_key holds it),
-// or ” for the every-repository subscription; a NULL cannot take part in a
+// or the empty string for the every-repository subscription; a NULL cannot take part in a
 // primary key's uniqueness, so the every-repository scope is the empty key.
 // The fresh-file schema appends this same text (schema.go), so a migrated
 // file and a created one cannot differ.
