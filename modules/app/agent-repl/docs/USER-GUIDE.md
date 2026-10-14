@@ -128,7 +128,11 @@ These clicks jump to an entry in the feed:
     - While one merge's agent fixes a failed run, the other merge's tests run, and the fixed one runs again once they end.
   - Each run has an `output` tab listing the suites, each with passed/failed/total counts on the right, and the run's log; a failed run that the agent then fixed also has a `fixing` tab streaming that fix.
   - A merge that starts over because the target moved replays under the same rebasing tab, its commits marked `(2)`, and its runs keep counting under the same tests tab.
-  - Each strip keeps the tab you clicked until a new tab appears in it.
+  - Each strip shows its most relevant tab: the one whose state changed last.
+    - A tab that starts, or starts waiting on you, is shown.
+    - When a tab finishes, the strip goes back to the tab still running, such as the queue tab of a merge that is waiting in line again after rebasing.
+    - With nothing running, the tab that finished last stays shown.
+  - Each strip keeps the tab you clicked until a tab in it starts, waits on you, or finishes.
 - **If a subagent's feed cannot be opened, the jump still scrolls to its bubble.**
   - The failure is listed under the warning chip in the top bar.
 
