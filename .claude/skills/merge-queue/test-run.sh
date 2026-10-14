@@ -316,6 +316,38 @@ test_hold_rollouts_refuses_front() {
   fi
 }
 
+test_disable_racing_disables_racing() {
+  mkfixture
+  invoke --disable-racing
+  expect_args "--disable-racing asks the daemon to disable racing" "merge-queue -disable-racing"
+}
+
+test_enable_racing_enables_racing() {
+  mkfixture
+  invoke --enable-racing
+  expect_args "--enable-racing asks the daemon to enable racing" "merge-queue -enable-racing"
+}
+
+test_disable_racing_refuses_an_argument() {
+  mkfixture
+  invoke --disable-racing "$FX/main"
+  if [ "$RUN_RC" -eq 2 ] && [ -z "$(daemon_args)" ] && grep_in "$RUN_OUT" -q "daemon-wide"; then
+    pass "--disable-racing with an argument is an error and requests nothing"
+  else
+    fail "--disable-racing with an argument is an error and requests nothing" "exit=$RUN_RC args=$(daemon_args)" "$RUN_OUT"
+  fi
+}
+
+test_disable_racing_refuses_front() {
+  mkfixture
+  invoke --disable-racing --front
+  if [ "$RUN_RC" -eq 2 ] && [ -z "$(daemon_args)" ] && grep_in "$RUN_OUT" -q "goes with a merge verb"; then
+    pass "--front is refused on --disable-racing and nothing is asked"
+  else
+    fail "--front is refused on --disable-racing and nothing is asked" "exit=$RUN_RC args=$(daemon_args)" "$RUN_OUT"
+  fi
+}
+
 # git_logged LINE — the fake git saw exactly LINE.
 git_logged() {
   grep -qxF -- "$1" "$FX/git-log" 2>/dev/null
@@ -503,6 +535,10 @@ test_hold_rollouts_holds_the_rollouts
 test_release_rollouts_releases_the_rollouts
 test_hold_rollouts_refuses_an_argument
 test_hold_rollouts_refuses_front
+test_disable_racing_disables_racing
+test_enable_racing_enables_racing
+test_disable_racing_refuses_an_argument
+test_disable_racing_refuses_front
 test_the_skill_calls_only_the_installed_script
 test_front_is_refused_on_a_queue_control
 test_one_shot_announces_the_own_branch

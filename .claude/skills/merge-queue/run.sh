@@ -9,7 +9,8 @@
 # hidden merge workspace forked from this one, which stays free).
 #
 # The queue-control verbs (--dequeue-*, --move-*, --pause-queue,
-# --resume-queue, --hold-rollouts, --release-rollouts) ask,
+# --resume-queue, --hold-rollouts, --release-rollouts, --disable-racing,
+# --enable-racing) ask,
 # from the workspace this shell is inside, for the queue itself to change, and
 # wait (bounded) for the answer, which they print: the outcome when applied, the
 # refusal's cause when refused.
@@ -60,6 +61,11 @@
 #                                checkout no longer redeploys, hot-reloads or
 #                                bounces the runtime. Durable until released.
 #   --release-rollouts           End the hold; the next landing redeploys.
+#   --disable-racing             Disable the queue's RACING, daemon-wide: every
+#                                queue works its head alone, whatever the
+#                                host's power source. Durable until enabled.
+#   --enable-racing              Enable racing again; on AC power each queue
+#                                works its top two merges.
 #
 # Modifiers:
 #   --front                      With a merge verb (--one-shot, --async),
@@ -81,7 +87,8 @@
 #   0  requested (--async; the outcome reports into this session), announced
 #      (--one-shot; the turn goes on), or applied (queue-control verbs; the
 #      printed outcome line is evicted, moved_up, moved_down, unmoved,
-#      not_queued, paused, resumed, held or released, or unread)
+#      not_queued, paused, resumed, held, released, racing_disabled or
+#      racing_enabled, or unread)
 #   2  script/usage error, or the merge or control could not be requested
 #   5  refused by the daemon; why (or how to read why) is printed (an async
 #      merge's name already taken, its branch checked out in this workspace,
@@ -266,15 +273,13 @@ case "${1:-}" in
     fi
     run_verb "$control"
     ;;
-  --hold-rollouts | --release-rollouts)
+  --hold-rollouts | --release-rollouts | --disable-racing | --enable-racing)
     no_front "$1"
-    [ -z "${2:-}" ] || die "$1 takes no argument, not $2: the hold is daemon-wide"
-    control=-hold-rollouts
-    [ "$1" = --hold-rollouts ] || control=-release-rollouts
-    run_verb "$control"
+    [ -z "${2:-}" ] || die "$1 takes no argument, not $2: the switch is daemon-wide"
+    run_verb "${1#-}"
     ;;
   *)
-    printf 'usage: run.sh --one-shot [--pr-merged] | --async <name> <branch> [--instruction <text>] [--close <dir>] [--cleanup] [--compact-after] [--before-merge <prompt>] [--after-merge <prompt>] | --dequeue-own | --dequeue-workspace <dir> | --move-up-own | --move-up-workspace <dir> | --move-down-own | --move-down-workspace <dir> | --pause-queue [<repo-dir>] | --resume-queue [<repo-dir>] | --hold-rollouts | --release-rollouts  (any merge verb also takes --front, and --minor <line> or --patch <line>)\n' >&2
+    printf 'usage: run.sh --one-shot [--pr-merged] | --async <name> <branch> [--instruction <text>] [--close <dir>] [--cleanup] [--compact-after] [--before-merge <prompt>] [--after-merge <prompt>] | --dequeue-own | --dequeue-workspace <dir> | --move-up-own | --move-up-workspace <dir> | --move-down-own | --move-down-workspace <dir> | --pause-queue [<repo-dir>] | --resume-queue [<repo-dir>] | --hold-rollouts | --release-rollouts | --disable-racing | --enable-racing  (any merge verb also takes --front, and --minor <line> or --patch <line>)\n' >&2
     exit 1
     ;;
 esac
