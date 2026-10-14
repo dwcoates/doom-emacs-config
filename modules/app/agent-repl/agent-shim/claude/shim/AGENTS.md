@@ -221,9 +221,11 @@ means the daemon and this build disagree about the contract.
   `hookBlockingText`, shared by the gate and the drawn hook row so they cannot
   drift.
 - **`KillSession`'s exit waits for the daemon to hang up.** `main.ts`
-  `endProcess` drains (`ShimServer.quiet`), then waits until the daemon has
-  closed every connection a `KillSession` came in on (`ShimServer.hungUp`),
-  then closes the listener and exits. The daemon hangs up only once it has
+  `endProcess` waits until the daemon has closed every connection a
+  `KillSession` came in on (`ShimServer.hungUp`), then closes the listener and
+  exits. There is no drain before it and no bounded quiet wait: the daemon has
+  read everything owed on a connection it closed, and `close()` still lets any
+  other connection's owed bytes leave before cutting it. The daemon hangs up only once it has
   READ the answer, so the exit cannot overtake it; an exit on the answer
   merely leaving let the daemon's http2 transport abort the unread answer on
   its next write to the dead peer. NO TIMER on the wait: the daemon's own stop
@@ -1738,8 +1740,10 @@ a hang — never fixed by raising the number back up.
 
 ### The production windows a test would otherwise RIDE
 
-Three constants are LAST-RESORT bounds that only a test arranging the
-pathological case ever actually spends. Riding them cost the suite 35 of its 80
+Two constants are LAST-RESORT bounds that only a test arranging the
+pathological case ever actually spends. (A third, the exit's quiet-drain budget,
+is gone: the exit after `KillSession` waits for the daemon's hang-up, with no
+bound at all.) Riding them cost the suite 35 of its 80
 seconds of test time and made those eight scenarios the slowest here, while
 proving nothing the same scenario at a smaller bound does not prove — what they
 assert is an ordering and an attempt count, neither of which is a function of
@@ -1753,10 +1757,9 @@ defaults are unchanged, and a real session cannot reach any of them.**
 | Constant | Where | Production default | Override | Harness value |
 | --- | --- | --- | --- | --- |
 | `WATCHER_CONCLUSION_BUDGET_MS` | `src/engine/session.ts` | 5,000ms | `AGENT_REPL_FAKE_WATCHER_CONCLUSION_BUDGET_MS` | 500ms |
-| `EXIT_QUIET_BUDGET_MS` | `src/main.ts` | 5,000ms | `AGENT_REPL_FAKE_EXIT_QUIET_BUDGET_MS` | 500ms |
 | `DEFAULT_RETRY_POLICY.backoffMs` | `src/store/persistence.ts` | `[50, 200, 800, 3000]` | `AGENT_REPL_FAKE_STORE_BACKOFF_MS` | `5,20,80,300` |
 
-`test/integration-support/harness.ts` sets all three in every spawn's standard
+`test/integration-support/harness.ts` sets both in every spawn's standard
 env; a test that wants a production window back overrides it per-spawn through
 `SpawnShimOptions.env`, which layers over that standard env.
 

@@ -17,8 +17,6 @@ import { LOCK_DIR_ENV, lockBinaryPath, lockDir } from "../src/locks.js";
 import { DEFAULT_RETRY_POLICY } from "../src/store/persistence.js";
 import {
   DEFAULT_STATE_DIR_NAME,
-  EXIT_QUIET_BUDGET_MS,
-  FAKE_EXIT_QUIET_BUDGET_ENV,
   FAKE_KEEPALIVE_INTERVAL_ENV,
   FAKE_STORE_BACKOFF_ENV,
   FAKE_WATCHER_CONCLUSION_BUDGET_ENV,
@@ -28,7 +26,6 @@ import {
   resolveNetworkResumeIntervalMs,
   resolveNetworkResumeWindowMs,
   resolveReachabilityProbe,
-  resolveExitQuietBudgetMs,
   resolveRetryPolicy,
   resolveWatcherConclusionBudgetMs,
   logCorrelation,
@@ -732,48 +729,6 @@ describe("the cold-gate lateness override", () => {
   });
 });
 
-describe("the quiet-drain budget override", () => {
-  it("answers the production budget when the environment names none", () => {
-    expect(resolveExitQuietBudgetMs({}, true)).toBe(EXIT_QUIET_BUDGET_MS);
-  });
-
-  it("answers the production budget for an empty value", () => {
-    expect(resolveExitQuietBudgetMs({ [FAKE_EXIT_QUIET_BUDGET_ENV]: "" }, true)).toBe(
-      EXIT_QUIET_BUDGET_MS,
-    );
-  });
-
-  it("is honored under --fake", () => {
-    expect(resolveExitQuietBudgetMs({ [FAKE_EXIT_QUIET_BUDGET_ENV]: "150" }, true)).toBe(150);
-  });
-
-  it("is REFUSED for a real session", () => {
-    // A production shim told to exit instantly would destroy the socket out
-    // from under a response still on it.
-    expect(resolveExitQuietBudgetMs({ [FAKE_EXIT_QUIET_BUDGET_ENV]: "150" }, false)).toBe(
-      EXIT_QUIET_BUDGET_MS,
-    );
-  });
-
-  it("refuses a value that is not a whole number", () => {
-    expect(resolveExitQuietBudgetMs({ [FAKE_EXIT_QUIET_BUDGET_ENV]: "1.5" }, true)).toBe(
-      EXIT_QUIET_BUDGET_MS,
-    );
-  });
-
-  it("refuses a value that is not positive", () => {
-    expect(resolveExitQuietBudgetMs({ [FAKE_EXIT_QUIET_BUDGET_ENV]: "0" }, true)).toBe(
-      EXIT_QUIET_BUDGET_MS,
-    );
-  });
-
-  it("refuses a value that is not a number at all", () => {
-    expect(resolveExitQuietBudgetMs({ [FAKE_EXIT_QUIET_BUDGET_ENV]: "soon" }, true)).toBe(
-      EXIT_QUIET_BUDGET_MS,
-    );
-  });
-});
-
 describe("the watcher-conclusion budget override", () => {
   it("is unset when the environment names none", () => {
     expect(resolveWatcherConclusionBudgetMs({}, true)).toBeUndefined();
@@ -1063,7 +1018,8 @@ describe("queryFactory", () => {
  * never reached. What is asserted is the wiring main() performs and the order
  * it performs it in, which is the part no other suite covers: the dist smoke
  * runs the built bundle, and neither it nor the integration suite can provoke
- * a quiet-drain failure or a kill that arrives before the listener exists.
+ * a failed wait for the daemon's hang-up or a kill that arrives before the
+ * listener exists.
  */
 describe("main", () => {
   const priorArgv = process.argv;
@@ -1099,7 +1055,6 @@ describe("main", () => {
     /** Resolves with the first fatal main() reported, so no poll is needed. */
     readonly firstFatal: Promise<unknown>;
     readonly exits: number[];
-    readonly quiet: ReturnType<typeof vi.fn>;
     readonly hungUp: ReturnType<typeof vi.fn>;
     readonly close: ReturnType<typeof vi.fn>;
     readonly stdout: string[];
@@ -1134,7 +1089,6 @@ describe("main", () => {
     const stdout: string[] = [];
     const signals = new Map<string, () => void>();
     const waiters = new Map<string, (record: Lifecycle) => void>();
-    const quiet = vi.fn(async (): Promise<void> => {});
     const hungUp = vi.fn(async (): Promise<void> => {});
     const close = vi.fn(async (): Promise<void> => {});
     let deps: Record<string, unknown> = {};
@@ -1183,7 +1137,7 @@ describe("main", () => {
     vi.doMock("../src/service/server.js", () => ({
       serve: async () => {
         await serveGate;
-        return { socketPath: "/tmp/0100059cb65649bc.sock", quiet, hungUp, close };
+        return { socketPath: "/tmp/0100059cb65649bc.sock", hungUp, close };
       },
     }));
     vi.doMock("../src/service/routes.js", () => ({ shimRoutes: () => (): void => {} }));
@@ -1218,7 +1172,6 @@ describe("main", () => {
       fatals,
       firstFatal,
       exits,
-      quiet,
       hungUp,
       close,
       stdout,
@@ -1341,7 +1294,7 @@ describe("main", () => {
 
   it("exits immediately when a session end is requested before the listener exists", async () => {
     // Arrange: serve() has not returned, so KillSession's exit has no
-    // response left to drain.
+    // connection to wait on.
     const h = await harness(SERVING);
     h.run();
     await h.reached("startup_arguments_validated");
@@ -1353,10 +1306,10 @@ describe("main", () => {
     const record = await h.reached("exit_before_serving");
     expect(record.fields).toMatchObject({ level: "error", exit_code: 3 });
     expect(h.exits).toEqual([3]);
-    expect(h.quiet).not.toHaveBeenCalled();
+    expect(h.hungUp).not.toHaveBeenCalled();
   });
 
-  it("drains the wire before closing the listener on a clean kill", async () => {
+  it("ends the process at info with code 0 on a clean kill", async () => {
     // Arrange.
     const h = await harness(SERVING);
     h.run();
@@ -1367,15 +1320,13 @@ describe("main", () => {
     (h.engineDeps()["endProcess"] as (code: number) => void)(0);
     const record = await h.reached("session_killed_exit");
 
-    // Assert — closing first would destroy the socket carrying the
-    // KillSession response itself.
-    expect(h.quiet.mock.invocationCallOrder[0]).toBeLessThan(h.close.mock.invocationCallOrder[0]);
+    // Assert.
     expect(record.fields).toMatchObject({ exit_code: 0 });
     expect(record.fields["level"]).toBe("info");
     expect(h.exits).toEqual([0]);
   });
 
-  it("waits for the daemon's hang-up after the drain and before closing the listener", async () => {
+  it("waits for the daemon's hang-up before closing the listener", async () => {
     // Arrange.
     const h = await harness(SERVING);
     h.run();
@@ -1388,7 +1339,6 @@ describe("main", () => {
 
     // Assert — an exit before the daemon read the answer lost it to the
     // daemon's own write to a dead peer.
-    expect(h.quiet.mock.invocationCallOrder[0]).toBeLessThan(h.hungUp.mock.invocationCallOrder[0]);
     expect(h.hungUp.mock.invocationCallOrder[0]).toBeLessThan(h.close.mock.invocationCallOrder[0]);
   });
 
@@ -1458,7 +1408,7 @@ describe("main", () => {
     expect(h.exits).toEqual([1]);
   });
 
-  it("ignores a second end request rather than draining twice", async () => {
+  it("ignores a second end request rather than waiting and closing twice", async () => {
     // Arrange.
     const h = await harness(SERVING);
     h.run();
@@ -1471,28 +1421,8 @@ describe("main", () => {
     end(0);
     await h.reached("session_killed_exit");
 
-    // Assert — two concurrent drains race over one socket's responses.
-    expect(h.quiet).toHaveBeenCalledTimes(1);
-  });
-
-  it("reports a failed drain as a fatal and exits 1 rather than claiming a clean end", async () => {
-    // Arrange.
-    const h = await harness(SERVING);
-    h.run();
-    h.letServeReturn();
-    await h.reached("serving");
-    const failure = new Error("the socket died mid-drain");
-    h.quiet.mockRejectedValueOnce(failure);
-
-    // Act.
-    (h.engineDeps()["endProcess"] as (code: number) => void)(0);
-    await h.firstFatal;
-
-    // Assert — the first exit is the honest one; `process.exit` is mocked to
-    // a no-op here, so the real process's termination at that point is what
-    // stops anything after it from running.
-    expect(h.fatals).toEqual([failure]);
-    expect(h.exits[0]).toBe(1);
+    // Assert — two concurrent exits would race to close one listener.
+    expect(h.hungUp).toHaveBeenCalledTimes(1);
   });
 
   it("self-names its log correlation when the daemon exported no session id", async () => {
