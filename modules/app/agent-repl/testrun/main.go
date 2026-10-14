@@ -2,6 +2,7 @@
 // cores. bin/test-all.sh is its entry point; see that script and AGENTS.md.
 //
 //	testrun run --module DIR [--suites a,b] [--record --record-out PATH]
+//	testrun warden --runner PID --since UNIX (started by the runner; see internal/life)
 //	testrun finish-record --module DIR --record-out PATH
 //	testrun cover-report -name N -module DIR -covdirs ROOT
 //	testrun roster
@@ -22,9 +23,11 @@ import (
 	"agentrepl/testrun/internal/cli"
 	"agentrepl/testrun/internal/cover"
 	"agentrepl/testrun/internal/history"
+	"agentrepl/testrun/internal/life"
 	"agentrepl/testrun/internal/ramdisk"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/internal/suites"
+	"agentrepl/testrun/reap"
 	"agentrepl/testrun/roster"
 )
 
@@ -36,7 +39,14 @@ func main() {
 	}
 	switch os.Args[1] {
 	case "run":
-		os.Exit(runCmd(log, os.Args[2:]))
+		// `testrun run` is the SENTINEL; the runner it starts in a session of
+		// its own runs `testrun run` again under life.EnvRole (internal/life).
+		if os.Getenv(life.EnvRole) == life.RoleRunner {
+			os.Exit(runnerCmd(os.Args[2:]))
+		}
+		os.Exit(sentinelCmd(log, os.Args[2:]))
+	case "warden":
+		os.Exit(wardenCmd(os.Args[2:]))
 	case "finish-record":
 		os.Exit(finishRecordCmd(log, os.Args[2:]))
 	case "cover-report":
@@ -49,7 +59,41 @@ func main() {
 	}
 }
 
-func runCmd(log *run.Log, argv []string) int {
+// sentinelCmd starts the runner and stands in for it to the invoker.
+func sentinelCmd(log *run.Log, argv []string) int {
+	self, err := os.Executable()
+	if err != nil {
+		log.Errorf("resolve the testrun binary: %v", err)
+		return 1
+	}
+	return life.Sentinel(self, append([]string{"run"}, argv...), os.Stdout, os.Stderr, log)
+}
+
+// cutLog is the log of a runner or a warden: its sentinel's relay, and the
+// run's log file once the relay is gone (life.FallbackWriter). SIGPIPE is
+// taken, so a write to the broken relay answers EPIPE instead of ending the
+// process before its cleanup; a handler, unlike SIG_IGN, is not inherited by
+// the units.
+func cutLog() *run.Log {
+	signal.Notify(make(chan os.Signal, 1), syscall.SIGPIPE)
+	path := os.Getenv(ramdisk.EnvRunLog)
+	return &run.Log{Out: &life.FallbackWriter{Primary: os.Stdout, Path: path}, Err: &life.FallbackWriter{Primary: os.Stderr, Path: path}}
+}
+
+// osReap is the one reap over the host's process table.
+func osReap(log *run.Log) func(reap.Members) (reap.Result, error) {
+	return func(ms reap.Members) (reap.Result, error) { return reap.Reap(reap.OSTable{}, ms, log) }
+}
+
+// runnerCmd runs the suites, leading the run's session.
+func runnerCmd(argv []string) int {
+	log := cutLog()
+	// The role is this process's alone: a unit that runs testrun itself
+	// starts a sentinel of its own.
+	if err := os.Unsetenv(life.EnvRole); err != nil {
+		log.Errorf("unset %s: %v", life.EnvRole, err)
+		return 1
+	}
 	args, err := cli.ParseArgs(argv)
 	if err != nil {
 		log.Errorf("%v", err)
@@ -65,6 +109,19 @@ func runCmd(log *run.Log, argv []string) int {
 		log.Errorf("%v", err)
 		return 1
 	}
+	runner, err := life.StartRunner(reap.OSTable{}, osReap(log), life.WardenCommand{Name: self, Args: []string{"warden"}}, log)
+	if err != nil {
+		log.Errorf("%v", err)
+		return 1
+	}
+	gone, err := life.Lifeline()
+	if err != nil {
+		log.Errorf("%v", err)
+		return 1
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runner.CancelOnLifeline(gone, cancel)
 	// THE RUN'S ROOT LIVES ON A RAM DISK on macOS (ramdisk), so the SQLite
 	// files and everything else the suites write never reach the SSD the
 	// owner's live store shares; a RAM disk that cannot be made falls back to
@@ -74,17 +131,34 @@ func runCmd(log *run.Log, argv []string) int {
 		log.Errorf("resolve the module root %s: %v", args.Module, err)
 		return 1
 	}
-	parent, prefix, release := runParent(log, module)
-	code := runRooted(log, args, self, histPath, parent, prefix)
-	if err := release(); err != nil {
-		log.Errorf("%v", err)
-		return 1
-	}
-	return code
+	parent, prefix, release := runParent(log, module, runner)
+	code := runRooted(ctx, log, args, self, histPath, parent, prefix, runner)
+	return runner.Finish(code, gone, release)
 }
 
-// runRooted runs in a fresh temp root under parent and removes it after.
-func runRooted(log *run.Log, args cli.Args, self, histPath, parent string, prefix []string) int {
+// wardenCmd watches the runner's lifeline and, if the runner dies without
+// releasing its run, reaps and releases it (internal/life).
+func wardenCmd(argv []string) int {
+	log := cutLog()
+	a, err := cli.ParseWardenArgs(argv)
+	if err != nil {
+		log.Errorf("%v", err)
+		return 2
+	}
+	m := ramdisk.Default(log)
+	return life.Warden{
+		Runner:   a.Runner,
+		Since:    a.Since,
+		Sentinel: a.Sentinel,
+		Reap:     osReap(log),
+		Release:  m.ReclaimRun,
+		Log:      log,
+	}.WatchLifeline()
+}
+
+// runRooted runs in a fresh temp root under parent and removes it after,
+// once every process of the run is reaped.
+func runRooted(ctx context.Context, log *run.Log, args cli.Args, self, histPath, parent string, prefix []string, runner *life.Runner) int {
 	// THE RUN LIVES IN ITS OWN TEMP ROOT, and so does each unit under it
 	// (run.OSExec). TMPDIR moves to the root, so even planning's
 	// `go list`/`vitest list` write nothing in the user's temp directory.
@@ -93,7 +167,16 @@ func runRooted(log *run.Log, args cli.Args, self, histPath, parent string, prefi
 		log.Errorf("create the run's temp root: %v", err)
 		return 1
 	}
-	code := runIn(log, args, self, histPath, root, prefix)
+	if err := runner.Root(root); err != nil {
+		log.Errorf("%v", err)
+		return 1
+	}
+	code := runIn(ctx, log, args, self, histPath, root, prefix)
+	// NOTHING OF THE RUN OUTLIVES IT: a unit's leftover (a test daemon, its
+	// shim) dies here, and a root is never removed from under one.
+	if err := runner.ReapSession(); err != nil {
+		return 1
+	}
 	if err := os.RemoveAll(root); err != nil {
 		log.Errorf("remove the run's temp root %s: %v", root, err)
 		return 1
@@ -108,12 +191,13 @@ func runRooted(log *run.Log, args cli.Args, self, histPath, parent string, prefi
 // roots make them in instead of /tmp. A leaked RAM disk or a disk manager that
 // does not answer puts the run on the disk and opens the one workspace that
 // investigates it.
-func runParent(log *run.Log, module string) (string, []string, func() error) {
+func runParent(log *run.Log, module string, runner *life.Runner) (string, []string, func() error) {
 	disk := func() error { return nil }
 	if runtime.GOOS != "darwin" {
 		return run.DefaultTmpParent, nil, disk
 	}
 	m := ramdisk.Default(log)
+	m.Own = runner.Members()
 	m.Run = ramdisk.Timed(m.Run, func(call string, took time.Duration, err error) {
 		if err != nil {
 			log.Infof("ramdisk: %s failed after %s", call, took.Round(time.Millisecond))
@@ -186,7 +270,7 @@ func investigate(log *run.Log, m ramdisk.Manager, module string, trouble *ramdis
 	}
 }
 
-func runIn(log *run.Log, args cli.Args, self, histPath, root string, prefix []string) int {
+func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, root string, prefix []string) int {
 	if err := os.Setenv("TMPDIR", root); err != nil {
 		log.Errorf("point TMPDIR at the run's temp root %s: %v", root, err)
 		return 1
@@ -201,7 +285,7 @@ func runIn(log *run.Log, args cli.Args, self, histPath, root string, prefix []st
 		log.Errorf("size the run: %v", err)
 		return 1
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	return cli.Run(ctx, cli.Deps{
 		Log:         log,
