@@ -1313,9 +1313,35 @@ Owner rulings, 2026-10-11 (`internal/merge/chain.go`, `internal/cpugov`).
   a merge ahead that does not land leaves nothing behind; at the head, a
   branch standing on a chain base that is not on the target is rebased, never
   read as already on the tip. Landing order is strictly head-first.
+- **ONE TEST GATE PER REPOSITORY AT A TIME** (owner ruling, 2026-10-14;
+  `internal/merge/testturn.go`). Every gate that runs anything first takes
+  its repository's TEST TURN, owned by the orchestrator under `o.mu` and
+  never by a timer, retry or poll. A merge ready to run its gate (freshly
+  rebased, or done with a fixing attempt) joins the back of the LINE; the
+  turn passes to the front of the line the moment the holder's run ends
+  (passed, failed, cut by a moved target, stopped, the daemon leaving), so
+  while one merge fixes, the other tests, and the two alternate. `gate`
+  gives the turn back on every way out; `releaseSlot` gives back a turn or
+  a place in line a run leaving its chain still holds.
+  - The turn is taken BEFORE the governor's permit, so a run in line holds
+    no share of the machine's gates. A merge behind the head that holds the
+    turn while the governor has not admitted its gate gives it to its head
+    the moment the head stands in line (`errTurnToHead`), so the head is
+    never held by machine load through the turn.
+  - A run in line stands at a step boundary (`run.idling`): a restart's
+    boundary stop takes it at once, and it resumes at its tests step.
+  - The wait is visible: the run's subtab draws
+    `frontend.v1.FeedMergeTabTestsRunWaitingForTurn` naming the holder, and
+    `daemon.merge.test_turn` records at INFO the join, the grant (with
+    `waited_seconds`), the give-back (with how the run `ended` and the
+    `next` holder), and a stopped run leaving the line.
+  - The host's suite slot (`bin/suite-slot.sh`) is machine-wide and separate.
+  - Tests order two merges' gates through the TEST-ONLY seams
+    `onTestTurnAsk` (hold a gate before it asks) and `onTestTurnLine`.
 - **SPECULATIVE GATES.** A member whose rebase settled runs its gate (and its
   fixing attempts, under the merge's one `MaxFixAttempts` bound) against its
-  chained base once the governor admits it, niced (`SpeculativeNice`). A base
+  chained base once it holds the test turn and the governor admits it,
+  niced (`SpeculativeNice`). A base
   that moves under it cuts it (`errBaseMoved`) and it runs again. Its pass
   (`testedDoc`) is valid only for the tree it tested: at the head a rebased
   tree equal to it lands without testing again (INFO
