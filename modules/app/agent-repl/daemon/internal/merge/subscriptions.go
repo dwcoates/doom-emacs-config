@@ -344,8 +344,9 @@ func (d queueEventsDB) reported(ctx context.Context, repo wsm.RepoKey, leaves bo
 	fields := dlog.Context{"repo": string(repo), "change": w.kind.String(), "workspace": string(w.subject), "cause": w.cause}
 	if beforeErr != nil {
 		d.o.events.mu.Unlock()
-		d.o.deps.Log.Global().Error(opQueueEvents, "could not read the merge queue before a merge left it; its subscribers are not told of the change",
-			withField(fields, "error", beforeErr.Error()))
+		recordFailed(d.o.deps.Log.Global(), opQueueEvents, "could not read the merge queue before a merge left it; its subscribers are not told of the change",
+			"the merge queue's read before a merge left it ended when its context was cancelled; its subscribers are not told, and the next notice carries its effect",
+			fields, beforeErr)
 		return nil
 	}
 	change, ok, err := d.describe(ctx, repo, w, before)
@@ -354,8 +355,9 @@ func (d queueEventsDB) reported(ctx context.Context, repo wsm.RepoKey, leaves bo
 	}
 	d.o.events.mu.Unlock()
 	if err != nil {
-		d.o.deps.Log.Global().Error(opQueueEvents, "could not read the merge queue after its change; its subscribers are not told of the change",
-			withField(fields, "error", err.Error()))
+		recordFailed(d.o.deps.Log.Global(), opQueueEvents, "could not read the merge queue after its change; its subscribers are not told of the change",
+			"the merge queue's read after its change ended when its context was cancelled; its subscribers are not told, and the next notice carries its effect",
+			fields, err)
 		return nil
 	}
 	if !ok {
