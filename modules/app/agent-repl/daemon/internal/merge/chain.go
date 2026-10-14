@@ -177,6 +177,15 @@ func (o *orchestrator) extendOnce(ctx context.Context, repo wsm.RepoKey) bool {
 		o.mu.Unlock()
 		return false
 	}
+	// THE CHAIN EXTENDS ONLY BEHIND ITS RUNNING HEAD. A head a pause, a
+	// restart or a transfer suspended leaves the merges behind it in the chain
+	// until it registers again at the chain's front (register), and the pump
+	// promotes the merge behind a head that ended: until then the chain stands
+	// behind an entry it holds no run for, and nothing joins it.
+	if head := o.running[repo]; head == nil || chain[0] != head {
+		o.mu.Unlock()
+		return false
+	}
 	// THE CHAIN IS THE QUEUE'S FRONT, IN ORDER. Every member stands where its
 	// entry stands; anything else is a defect, said once here and never
 	// extended past.
