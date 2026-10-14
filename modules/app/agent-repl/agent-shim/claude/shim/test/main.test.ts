@@ -1100,6 +1100,7 @@ describe("main", () => {
     readonly firstFatal: Promise<unknown>;
     readonly exits: number[];
     readonly quiet: ReturnType<typeof vi.fn>;
+    readonly hungUp: ReturnType<typeof vi.fn>;
     readonly close: ReturnType<typeof vi.fn>;
     readonly stdout: string[];
     /** The signals main() registered a handler for, without registering them. */
@@ -1134,6 +1135,7 @@ describe("main", () => {
     const signals = new Map<string, () => void>();
     const waiters = new Map<string, (record: Lifecycle) => void>();
     const quiet = vi.fn(async (): Promise<void> => {});
+    const hungUp = vi.fn(async (): Promise<void> => {});
     const close = vi.fn(async (): Promise<void> => {});
     let deps: Record<string, unknown> = {};
     let letServeReturn = (): void => {};
@@ -1181,7 +1183,7 @@ describe("main", () => {
     vi.doMock("../src/service/server.js", () => ({
       serve: async () => {
         await serveGate;
-        return { socketPath: "/tmp/0100059cb65649bc.sock", quiet, close };
+        return { socketPath: "/tmp/0100059cb65649bc.sock", quiet, hungUp, close };
       },
     }));
     vi.doMock("../src/service/routes.js", () => ({ shimRoutes: () => (): void => {} }));
@@ -1217,6 +1219,7 @@ describe("main", () => {
       firstFatal,
       exits,
       quiet,
+      hungUp,
       close,
       stdout,
       signals,
@@ -1370,6 +1373,73 @@ describe("main", () => {
     expect(record.fields).toMatchObject({ exit_code: 0 });
     expect(record.fields["level"]).toBe("info");
     expect(h.exits).toEqual([0]);
+  });
+
+  it("waits for the daemon's hang-up after the drain and before closing the listener", async () => {
+    // Arrange.
+    const h = await harness(SERVING);
+    h.run();
+    h.letServeReturn();
+    await h.reached("serving");
+
+    // Act.
+    (h.engineDeps()["endProcess"] as (code: number) => void)(0);
+    await h.reached("session_killed_exit");
+
+    // Assert — an exit before the daemon read the answer lost it to the
+    // daemon's own write to a dead peer.
+    expect(h.quiet.mock.invocationCallOrder[0]).toBeLessThan(h.hungUp.mock.invocationCallOrder[0]);
+    expect(h.hungUp.mock.invocationCallOrder[0]).toBeLessThan(h.close.mock.invocationCallOrder[0]);
+  });
+
+  it("does not end the process while the daemon has not hung up", async () => {
+    // Arrange.
+    const h = await harness(SERVING);
+    h.run();
+    h.letServeReturn();
+    await h.reached("serving");
+    let hangUp = (): void => {};
+    let waiting = (): void => {};
+    const asked = new Promise<void>((resolve) => {
+      waiting = resolve;
+    });
+    h.hungUp.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          hangUp = resolve;
+          waiting();
+        }),
+    );
+
+    // Act.
+    (h.engineDeps()["endProcess"] as (code: number) => void)(0);
+    await asked;
+
+    // Assert.
+    expect(h.close).not.toHaveBeenCalled();
+    expect(h.exits).toEqual([]);
+    hangUp();
+    await h.reached("session_killed_exit");
+    expect(h.exits).toEqual([0]);
+  });
+
+  it("reports a failed wait for the hang-up as a fatal and exits 1", async () => {
+    // Arrange.
+    const h = await harness(SERVING);
+    h.run();
+    h.letServeReturn();
+    await h.reached("serving");
+    const failure = new Error("no KillSession was served");
+    h.hungUp.mockRejectedValueOnce(failure);
+
+    // Act.
+    (h.engineDeps()["endProcess"] as (code: number) => void)(0);
+    await h.firstFatal;
+
+    // Assert.
+    expect(h.fatals).toEqual([failure]);
+    expect(h.exits[0]).toBe(1);
+    expect(h.close).not.toHaveBeenCalled();
   });
 
   it("exits nonzero and at error when the kill left writes the store never acked", async () => {
