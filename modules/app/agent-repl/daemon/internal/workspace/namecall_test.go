@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/headless"
 	"agent-repld/internal/prompts"
 	"agent-repld/internal/wsm"
@@ -19,8 +20,8 @@ func script(f *fixture, answers ...headlessAnswer) {
 }
 
 // TestTheShippedNamingBriefTakesTheConversation pins the brief the daemon
-// ships against the values mintName splices: the prompt, the conversation a
-// fork continues, and the retry's correction — no more, no fewer.
+// ships against the values mintName splices: the prompt and the conversation a
+// fork continues — no more, no fewer.
 func TestTheShippedNamingBriefTakesTheConversation(t *testing.T) {
 	// Arrange.
 	brief, err := prompts.Load(filepath.Join("..", "..", "..", "prompts"), BriefWorkspaceName)
@@ -30,7 +31,7 @@ func TestTheShippedNamingBriefTakesTheConversation(t *testing.T) {
 
 	// Act.
 	got, err := brief.Splice(map[string]string{
-		"prompt": "", "conversation": "The user's requests:\n- wire iterm2\n", "correction": "",
+		"prompt": "", "conversation": "The user's requests:\n- wire iterm2\n",
 	})
 
 	// Assert.
@@ -184,36 +185,50 @@ func TestCreateRetriesExactlyOnceOnAnInvalidAnswer(t *testing.T) {
 	}
 }
 
-// TestCreateTellsTheModelWhatWasWrongWithItsFirstAnswer pins that the retry is
-// a CORRECTED question, not the identical one asked twice.
-func TestCreateTellsTheModelWhatWasWrongWithItsFirstAnswer(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	script(f,
-		headlessAnswer{text: "The name is flaky-login-test."},
-		headlessAnswer{text: "flaky-login-test"})
-
-	// Act.
-	if _, err := f.verbs.Create(context.Background(), standardSpec(t, f)); err != nil {
-		t.Fatalf("Create: %v", err)
+// TestCreateHandsTheRejectedNameBackToBeShortened pins that the retry is the
+// SHORTEN brief carrying the model's own rejected answer, not the naming
+// question asked again.
+func TestCreateHandsTheRejectedNameBackToBeShortened(t *testing.T) {
+	tests := []struct {
+		name    string
+		want    string
+		present bool
+	}{
+		{name: "the rejected answer is quoted back", want: "agent-repl-input-box-shorter", present: true},
+		{name: "the retry is the shorten brief", want: "shorten the name:", present: true},
+		{name: "the naming question is not asked again", want: "name the work:", present: false},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			script(f,
+				headlessAnswer{text: "agent-repl-input-box-shorter"},
+				headlessAnswer{text: "input-shorter"})
 
-	// Assert.
-	if !strings.Contains(f.headless.calls[1].Prompt, "The name is flaky-login-test.") {
-		t.Fatalf("retry prompt = %q, want the rejected answer quoted back", f.headless.calls[1].Prompt)
+			// Act.
+			if _, err := f.verbs.Create(context.Background(), standardSpec(t, f)); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+
+			// Assert.
+			if got := strings.Contains(f.headless.calls[1].Prompt, tt.want); got != tt.present {
+				t.Fatalf("retry prompt = %q, want %q present=%v", f.headless.calls[1].Prompt, tt.want, tt.present)
+			}
+		})
 	}
 }
 
-// TestNamingCorrectionStatesTheLimitAndTheCount pins that the retry after a
-// four-word answer tells the model the concrete limit (read off the
-// validator's own constant) and how many words its rejected answer had.
-func TestNamingCorrectionStatesTheLimitAndTheCount(t *testing.T) {
+// TestShortenRetryStatesTheLimitAndTheCount pins that the shorten retry after
+// a five-word answer tells the model how many words its answer had and the
+// limit, read off the validator's own constant.
+func TestShortenRetryStatesTheLimitAndTheCount(t *testing.T) {
 	tests := []struct {
 		name string
 		want string
 	}{
-		{name: "the word limit", want: fmt.Sprintf("the name must be AT MOST %d words", SlugWordLimit)},
-		{name: "the previous answer's word count", want: "It has 5 words"},
+		{name: "the word limit", want: fmt.Sprintf("over the %d-word limit %d", SlugWordLimit, SlugWordLimit)},
+		{name: "the previous answer's word count", want: "the answer is 5 words"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -236,6 +251,180 @@ func TestNamingCorrectionStatesTheLimitAndTheCount(t *testing.T) {
 	}
 }
 
+// TestCreateReasksTheNamingQuestionAfterACallThatDidNotAnswer pins that a
+// failed call leaves nothing to shorten, so the retry is the naming question.
+func TestCreateReasksTheNamingQuestionAfterACallThatDidNotAnswer(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	script(f,
+		headlessAnswer{err: &headless.Error{Cause: headless.CauseTimeout, Detail: "signal: killed"}},
+		headlessAnswer{text: "flaky-login-test"})
+
+	// Act.
+	if _, err := f.verbs.Create(context.Background(), standardSpec(t, f)); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert.
+	if !strings.HasPrefix(f.headless.calls[1].Prompt, "name the work:") {
+		t.Fatalf("retry prompt = %q, want the naming question asked again", f.headless.calls[1].Prompt)
+	}
+}
+
+// TestCreateSettlesForAWellShapedNameOnceTheRetryIsSpent pins the owner's
+// 2026-10-14 ruling: a well-shaped answer over the limits is taken rather
+// than the create refused, and the later such answer wins.
+func TestCreateSettlesForAWellShapedNameOnceTheRetryIsSpent(t *testing.T) {
+	tests := []struct {
+		name    string
+		answers []headlessAnswer
+		want    string
+	}{
+		{
+			name: "the second answer is over the word limit",
+			answers: []headlessAnswer{
+				{text: "agent-repl-workspace-summary-haiku-names"},
+				{text: "agent-repl-workspace-summary-haiku"},
+			},
+			want: "agent-repl-workspace-summary-haiku",
+		},
+		{
+			name: "the second answer is over the length bound",
+			answers: []headlessAnswer{
+				{text: "Not A Slug"},
+				{text: "supercalifragilisticexpialidocious-names"},
+			},
+			want: "supercalifragilisticexpialidocious-names",
+		},
+		{
+			name: "the second answer is not a slug at all",
+			answers: []headlessAnswer{
+				{text: "agent-repl-workspace-summary-haiku"},
+				{text: "Sure! Here it is"},
+			},
+			want: "agent-repl-workspace-summary-haiku",
+		},
+		{
+			name: "the second call did not answer",
+			answers: []headlessAnswer{
+				{text: "agent-repl-workspace-summary-haiku"},
+				{err: &headless.Error{Cause: headless.CauseTimeout, Detail: "signal: killed"}},
+			},
+			want: "agent-repl-workspace-summary-haiku",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			t.Setenv(PrefixEnv, "")
+			t.Setenv(LegacyPrefixEnv, "")
+			script(f, tt.answers...)
+
+			// Act.
+			if _, err := f.verbs.Create(context.Background(), standardSpec(t, f)); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+
+			// Assert.
+			if f.git.created[0].Branch != tt.want {
+				t.Fatalf("branch = %q, want %q", f.git.created[0].Branch, tt.want)
+			}
+		})
+	}
+}
+
+// TestCreateRecordsTheSettledName pins the canonical record of a name taken
+// over the limits: it names what was taken and by how much it is over.
+func TestCreateRecordsTheSettledName(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	script(f,
+		headlessAnswer{text: "agent-repl-workspace-summary-haiku"},
+		headlessAnswer{text: "agent-repl-workspace-summary-haiku"})
+
+	// Act.
+	if _, err := f.verbs.Create(context.Background(), standardSpec(t, f)); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert.
+	record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{
+		Operation: opNaming, Message: "took the last well-shaped naming answer over the naming limits",
+	})
+	if !ok {
+		t.Fatalf("records = %+v, want the settled name recorded", f.log.logger.Records())
+	}
+	if record.Context["name"] != "agent-repl-workspace-summary-haiku" || record.Context["words"] != 5 {
+		t.Fatalf("context = %+v, want the name and its five words", record.Context)
+	}
+}
+
+// TestCreateRecordsEveryRejectedAnswer pins that each rejected answer reaches
+// the persisted log, not only the last: the first is what diagnoses a brief.
+func TestCreateRecordsEveryRejectedAnswer(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	script(f,
+		headlessAnswer{text: "Sure! Here is a name:"},
+		headlessAnswer{text: "Fix The Login Bug Today"})
+
+	// Act.
+	_, _ = f.verbs.Create(context.Background(), standardSpec(t, f))
+
+	// Assert.
+	var answers []any
+	for _, record := range f.log.logger.Records() {
+		if record.Operation == opNaming && record.Message == "the naming answer did not validate" && record.Level == "info" {
+			answers = append(answers, record.Context["answer"])
+		}
+	}
+	if len(answers) != 2 || answers[0] != "Sure! Here is a name:" || answers[1] != "Fix The Login Bug Today" {
+		t.Fatalf("rejected answers recorded = %v, want both, at info", answers)
+	}
+}
+
+// TestTheShippedShortenBriefStatesTheLimit pins the shipped shorten brief to
+// the values namingQuestion splices and to the validator's limit.
+func TestTheShippedShortenBriefStatesTheLimit(t *testing.T) {
+	// Arrange.
+	brief, err := prompts.Load(filepath.Join("..", "..", "..", "prompts"), BriefWorkspaceNameShorten)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// Act.
+	got, err := brief.Splice(map[string]string{
+		"answer": "agent-repl-input-box-shorter", "problem": "the answer is 5 words", "limit": fmt.Sprint(SlugWordLimit),
+	})
+
+	// Assert.
+	want := fmt.Sprintf("AT MOST %d WORDS", SlugWordLimit)
+	if err != nil || !strings.Contains(got, want) || !strings.Contains(got, "agent-repl-input-box-shorter") {
+		t.Fatalf("Splice = %q, %v; want the answer and the limit %q", got, err, want)
+	}
+}
+
+// TestCreateRefusesWhenTheShortenBriefIsAbsent pins that the retry's brief is
+// a deployment fact like the naming brief: missing, it is its own arm.
+func TestCreateRefusesWhenTheShortenBriefIsAbsent(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	delete(f.briefs, BriefWorkspaceNameShorten)
+	script(f,
+		headlessAnswer{text: "agent-repl-workspace-summary-haiku"},
+		headlessAnswer{text: "summary-haiku"})
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), standardSpec(t, f))
+
+	// Assert.
+	refusal := asRefusal(t, err, ArmBriefMissing)
+	if refusal.Fields["name"] != BriefWorkspaceNameShorten {
+		t.Fatalf("name = %v, want %q", refusal.Fields["name"], BriefWorkspaceNameShorten)
+	}
+}
+
 // TestTheShippedNamingBriefStatesTheWordLimit pins the brief's stated limit to
 // the validator's constant, so the two can never disagree.
 func TestTheShippedNamingBriefStatesTheWordLimit(t *testing.T) {
@@ -246,7 +435,7 @@ func TestTheShippedNamingBriefStatesTheWordLimit(t *testing.T) {
 	}
 
 	// Act.
-	got, err := brief.Splice(map[string]string{"prompt": "p", "conversation": "", "correction": ""})
+	got, err := brief.Splice(map[string]string{"prompt": "p", "conversation": ""})
 
 	// Assert.
 	want := fmt.Sprintf("THE NAME IS AT MOST %d WORDS", SlugWordLimit)

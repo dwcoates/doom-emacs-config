@@ -60,6 +60,53 @@ func TestValidateSlugRefusesWhatTheRuleForbids(t *testing.T) {
 	}
 }
 
+func TestValidateSlugShapeAcceptsAWellShapedNameOverTheLimits(t *testing.T) {
+	tests := []struct {
+		name string
+		slug string
+	}{
+		{name: "within the limits", slug: "flaky-login-test"},
+		{name: "five words", slug: "fix-the-flaky-login-bug"},
+		{name: "over the length bound", slug: strings.Repeat("a", SlugMaxLen+1)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange in the table. Act.
+			err := ValidateSlugShape(tt.slug)
+			// Assert.
+			if err != nil {
+				t.Fatalf("ValidateSlugShape(%q) = %v, want nil", tt.slug, err)
+			}
+		})
+	}
+}
+
+func TestValidateSlugShapeRefusesWhatIsNotAName(t *testing.T) {
+	tests := []struct {
+		name string
+		slug string
+	}{
+		{name: "empty", slug: ""},
+		{name: "uppercase", slug: "Fix-Login"},
+		{name: "spaces", slug: "fix login"},
+		{name: "leading hyphen", slug: "-fix-login"},
+		{name: "trailing hyphen", slug: "fix-login-"},
+		{name: "a slash", slug: "ABC/fix-login"},
+		{name: "a path component", slug: "../escape"},
+		{name: "punctuation", slug: "fix_login"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange in the table. Act.
+			err := ValidateSlugShape(tt.slug)
+			// Assert.
+			if err == nil {
+				t.Fatalf("ValidateSlugShape(%q) = nil, want a refusal", tt.slug)
+			}
+		})
+	}
+}
+
 func TestSlugWordCountCountsAlphanumericRuns(t *testing.T) {
 	tests := []struct {
 		name   string
