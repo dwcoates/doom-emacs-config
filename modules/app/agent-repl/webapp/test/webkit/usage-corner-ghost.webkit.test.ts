@@ -47,6 +47,12 @@ interface Drawn {
   lines: number;
   /** The words on the first line, in order. */
   firstLine: string;
+  /**
+   * The words the first line shows WHOLE, in order: a word the clamp cut
+   * mid-word (styles.css "THE ONE-LINE CLAMP'S SHAPE") breaks across two
+   * lines, so it is not among them.
+   */
+  firstLineWhole: string;
   firstLineRight: number;
   corner: { right: number; top: number; width: number; height: number };
   stamp: { right: number; top: number };
@@ -92,11 +98,13 @@ async function draw(
       const px = (v: number): number => Math.round(v * 100) / 100;
       const tops = new Map<number, number>();
       const words = new Map<number, string[]>();
+      const whole = new Map<number, string[]>();
       for (const w of feed.querySelectorAll(".w")) {
         const r = rel(w);
         const top = Math.round(r.top);
         tops.set(top, Math.max(tops.get(top) ?? 0, r.right));
         words.set(top, [...(words.get(top) ?? []), w.textContent ?? ""]);
+        if (w.getClientRects().length === 1) whole.set(top, [...(whole.get(top) ?? []), w.textContent ?? ""]);
       }
       const firstTop = Math.min(...tops.keys());
       const corner = rel(feed.querySelector(".usage-corner")!);
@@ -107,6 +115,7 @@ async function draw(
         bubble: b.width,
         lines: tops.size,
         firstLine: words.get(firstTop)!.join(" "),
+        firstLineWhole: (whole.get(firstTop) ?? []).join(" "),
         firstLineRight: b.right - tops.get(firstTop)!,
         corner: {
           right: px(b.right - corner.right),
@@ -310,17 +319,18 @@ describe("an ellipsis bubble with a corner in WebKit", () => {
     expect(open.firstLine).toBe(closed.firstLine);
   });
 
-  it("keeps every word an overflowing interim showed, in place, once opened", async () => {
-    // Arrange: 40 words overflow the one clamped line, which ends in "…"; the
-    // clamp may give the ellipsis the room of the line's last word, which the
-    // opened line then shows in its place.
+  it("keeps every whole word an overflowing interim showed, in place, once opened", async () => {
+    // Arrange: 40 words overflow the one clamped line, which ends in "…" at
+    // the edge, mid-word if need be (owner request, 2026-10-14); the opened
+    // line wraps at its words, so a word the ellipsis cut may move to the next
+    // line, and the words before it may not.
     const closed = await draw(page, { text: prose(40), ghost: true, ellipsis: "closed" });
 
     // Act
     const open = await draw(page, { text: prose(40), ghost: true, ellipsis: "open" });
 
-    // Assert: no word the closed line showed moves.
-    expect(open.firstLine.startsWith(closed.firstLine)).toBe(true);
+    // Assert: the closed line showed words whole, and none of them moves.
+    expect([closed.firstLineWhole !== "", open.firstLine.startsWith(closed.firstLineWhole)]).toEqual([true, true]);
   });
 });
 
