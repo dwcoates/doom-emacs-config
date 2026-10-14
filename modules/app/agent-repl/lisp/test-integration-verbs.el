@@ -1700,7 +1700,7 @@ overrides the display name, defaulting to ID."
     (name . ((text . ,(or name id))))
     (ready . ())
     (current . ((current . :false)))
-    (when . ())
+    (when . ((noTurnRunning . ())))
     (detail . ())
     (closed . ((closed . ,(if closed t :false))))
     (availability . ((available . ())))))
