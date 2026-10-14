@@ -158,6 +158,9 @@ CREATE TABLE held_prompts (
   classification_reason    TEXT,
   classification_command   INTEGER,
   classification_at        INTEGER,
+  -- RETIRED: held prompts no longer carry an acceptance. Every write stores 0
+  -- and nothing reads it; it stays only so the build before this one keeps
+  -- working across a hand-over, and a later breaking step drops it.
   accepted                 INTEGER NOT NULL,
   tombstone_kind           TEXT,
   tombstone_at             INTEGER,
