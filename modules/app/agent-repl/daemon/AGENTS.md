@@ -1989,17 +1989,20 @@ still the user's, so its worktree is RECREATED from its recorded branch
   `daemon.boot.close_missing_dir` "recreated"). It is still CLOSED when there
   is nothing to restore from, and when git could not act (the restorer's own
   ERROR; the boot finishes, and an explicit open retries and surfaces it). A
-  CLOSED row is never touched by the boot.
+  CLOSED row is never touched by the boot. A row carrying `merged_at` is
+  never restored by the boot either: a merged tree was removed ON PURPOSE (the
+  queue stamps `merged_at` before it closes the row, so the stamp alone
+  decides, even on a row a crash left open), recorded at INFO.
 - **Open** (`OpenWorkspace` on a closed row): the same restore, entered as
   `WorkspaceOpenStage.restoring_worktree` between `checking_worktree` and
   `starting_session`, then the ordinary open (session and history come back
-  from the store).
+  from the store). A MERGED workspace is restored too: the merge keeps its
+  branch, and opening one is the user taking it back to revise what it landed
+  (owner request, 2026-10-14). See "Reopening a merged workspace" below.
 
-The restore, in order: refuse when the workspace carries `merged_at` (a merged
-tree was removed ON PURPOSE; the queue stamps `merged_at` before it closes the
-row, so the stamp alone decides, even on a row a crash left open; a nuked
-workspace has no row at all), when no branch was recorded, when the repository
-is gone, or when the branch no longer exists; then retire a STALE GIT
+The restore, in order: refuse when no branch was recorded, when the repository
+is gone, or when the branch no longer exists (a nuked workspace has no row at
+all); then retire a STALE GIT
 REGISTRATION for that one path (a plain `rm` leaves `.git/worktrees/<name>`,
 and `git worktree add` refuses "'<dir>' is a missing but already registered
 worktree"): `gitclient.UnregisterMissingWorktree` runs `git worktree remove
@@ -2018,6 +2021,29 @@ Nothing to restore from is the typed refusal
 INFO: a user picking such a row is an ordinary answer, not a fault. A git that
 cannot answer or act is an ERROR and a returned failure, never a refusal and
 never a bring-up in a directory that is not there.
+
+### Reopening a merged workspace
+
+`OpenWorkspace` on a workspace carrying `merged_at` (Recently Merged, or a
+merged row a crash left open) brings it back as an ordinary open workspace:
+
+1. The worktree is restored from the branch the merge kept, as above.
+2. `advanceMerged` fast-forwards the branch to its `ParentBranch`'s tip. The
+   branch landed there, so its tip is inside the parent and the advance
+   carries nothing away: the revision is made against the code as it stands
+   now, and the next merge carries only the revision. The workspace STAYS at
+   its branch's tip, at INFO saying why, when no parent branch was recorded,
+   the parent branch is gone, the worktree is dirty, or the branch holds
+   commits its parent does not. A git that cannot answer or act fails the open
+   at ERROR, before any session comes up.
+3. `wsm.Reopen` clears the close AND the merge's settlement in one statement:
+   `merged_at`, the landed `commit_count` (back to "never counted"; the next
+   turn close recounts it live), the detached landing (`landed_head`,
+   `landed_at`, which the merge workspace sweep would otherwise retire it
+   again on), and a merge workspace's hiding. AN OPEN WORKSPACE IS NEVER
+   MERGED. A row that is not merged keeps all of those as they stand.
+4. `merge.Orchestrator.RetireConcluded` drops the landed merge's standing
+   facts, so the row and the footer stop drawing it merged.
 
 ## Workspace naming: one call, and a fork brings its conversation
 

@@ -164,6 +164,8 @@ type fakeDB struct {
 	resolvedForks    []resolvedFork
 	bindSessionCalls []wsm.Session
 	closedFlags      map[ids.WorkspaceID]bool
+	// reopened records every Reopen, in order.
+	reopened []ids.WorkspaceID
 	// closures is every close record MarkClosed was handed, in order, per
 	// workspace.
 	closures map[ids.WorkspaceID][]wsm.Closure
@@ -476,6 +478,7 @@ func (d *fakeDB) Reopen(_ context.Context, id ids.WorkspaceID) error {
 		return d.setClosedErr
 	}
 	d.closedFlags[id] = false
+	d.reopened = append(d.reopened, id)
 	return nil
 }
 
@@ -834,6 +837,10 @@ type fakeGit struct {
 	// removedClean records every RemoveCleanWorktree; removeCleanErr fails it.
 	removedClean   []nukedWorktree
 	removeCleanErr error
+	// fastForwarded records every FastForward as "dir->commit";
+	// fastForwardErr fails it.
+	fastForwarded  []string
+	fastForwardErr error
 }
 
 type restoredWorktree struct{ RepoDir, WorktreeDir, Branch string }
@@ -869,6 +876,14 @@ func (g *fakeGit) IsAncestor(_ context.Context, _, ancestor, descendant string) 
 		return false, g.ancestorErr
 	}
 	return !g.offPrimary[ancestor], nil
+}
+
+func (g *fakeGit) FastForward(_ context.Context, dir, commit string) error {
+	if g.fastForwardErr != nil {
+		return g.fastForwardErr
+	}
+	g.fastForwarded = append(g.fastForwarded, dir+"->"+commit)
+	return nil
 }
 
 func (g *fakeGit) BranchExists(_ context.Context, _, branch string) (bool, error) {
@@ -1169,6 +1184,13 @@ type fakeMerge struct {
 	// the rollout's bounces are appended by the tests that need the order.
 	steps      []string
 	suspendErr error
+	// retired records every RetireConcluded.
+	retired []ids.WorkspaceID
+}
+
+// RetireConcluded records the retirement.
+func (m *fakeMerge) RetireConcluded(_ context.Context, ws ids.WorkspaceID) {
+	m.retired = append(m.retired, ws)
 }
 
 // SuspendForRestart records the suspension and answers suspendErr.
