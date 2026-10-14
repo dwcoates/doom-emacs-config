@@ -2767,6 +2767,48 @@ children are NOT niced: the daemon has no idiom for lowering a child's
 priority (`bin/background.sh` is the test suites'), and git inherits the
 daemon's own.
 
+## A landing is reported only once its deploy has run (`internal/mergeworkspace`, `internal/deploy`, `internal/rollout`)
+
+An async merge that lands in the daemon's OWN checkout tells the deploy
+(`merge.run.selfReload`), and the deploy rolls the landed build out. Its
+report to the requester waits for that deploy, so the requester never hears
+"landed" while the running daemon, or its own shim, still runs the build before
+it (owner request, 2026-10-14).
+
+**One decision.** `merge.run.landingDeploy` decides once per run what the
+landing does about deploying itself (`merge.LandingDeploy`): nothing (it landed
+nothing, or outside the daemon's own checkout), owed (the deploy is told), held
+(the rollouts are held) or unread (the hold could not be read). The report
+carries the decision (`DetachedOutcome.Deploy`) and `selfReload` acts on the
+same one, so the two cannot disagree.
+
+**Owed, covered, paid.** `mergeworkspace.Service.HandBack` records an owed
+landing's report (`wsm.OwedHandBack`, `owed_handbacks`, layout 50) BEFORE
+`selfReload` tells the deploy, with the idempotency key it will be submitted
+under. `deploy.Deployer.Deploy` COVERS every owed report the instant it commits
+to building the checkout (`CoverOwed`): what it builds carries those landings.
+A report owed after that instant waits for the next deploy. The covered
+reports are PAID (`PayOwed`):
+
+- by a deploy that stays, once it has decided every component;
+- by a deploy that failed, saying so ("Its deploy failed (...)");
+- by the successor of a deploy that hands over, at its takeover, once it has
+  judged every adopted shim (`rollout.controller.becomeIncumbent`);
+- by a fresh boot, every report, once its bring-up has run and it has judged
+  every live shim (`rollout.Controller.SettleBoot`).
+
+**The requester's own shim.** Judging the shims first registers the bounce of
+each stale one, and the prompt queue takes a registered bounce before it
+delivers anything queued (`promptqueue` turn end; a submission during a bounce
+is held for the new shim). So the report is delivered on the build that
+carries the landing.
+
+**Exactly once.** A paid report's row is deleted after its submission; a payer
+that dies between the two submits the same key again, which the prompt handler
+answers with the turn it already made. A held or unread rollout, and a landing
+outside the daemon's own checkout, are reported at once, saying why nothing
+deployed them.
+
 ## A detached merge's requester is retired a day after its merge lands (`internal/mergeworkspace`)
 
 An in-place own merge closes its requester and removes its worktree the moment
