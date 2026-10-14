@@ -30,8 +30,8 @@ import (
 
 // THE `merge-queue` VERB:
 //
-//	agent-repld merge-queue -one-shot [-pr-merged] [-front] [-wait] [-state-dir DIR]
-//	agent-repld merge-queue -async -name NAME -branch BRANCH [-instruction TEXT] [-close-dir WORKTREE] [-cleanup-worktree] [-compact-after] [-front] [-state-dir DIR]
+//	agent-repld merge-queue -one-shot [-pr-merged] [-front] [-version-part PART -changelog-line TEXT] [-wait] [-state-dir DIR]
+//	agent-repld merge-queue -async -name NAME -branch BRANCH [-instruction TEXT] [-close-dir WORKTREE] [-cleanup-worktree] [-compact-after] [-front] [-version-part PART -changelog-line TEXT] [-state-dir DIR]
 //	agent-repld merge-queue -evict | -evict-dir WORKTREE [-answer-timeout D] [-state-dir DIR]
 //	agent-repld merge-queue -move-up | -move-down [-move-dir WORKTREE] [-answer-timeout D] [-state-dir DIR]
 //	agent-repld merge-queue -pause | -resume [-repository-dir DIR] [-answer-timeout D] [-state-dir DIR]
@@ -59,6 +59,12 @@ import (
 //
 // `-front` puts any of them at the FRONT of its queue once it is put in line:
 // ahead of every ordinary merge still waiting, never ahead of the one running.
+//
+// `-version-part minor|patch` with `-changelog-line TEXT` is how a merge onto
+// agent-repl's master moves the version: the queue tags the landed merge with
+// the next version, annotated with the line. The daemon refuses an agent's
+// merge onto agent-repl's master without them, and any other merge with them
+// (agentrepl.v1.MergeWorkspaceRequest.version_increment).
 //
 // No workspace is ever created for a merge. The verb decides nothing and never
 // touches git.
@@ -248,6 +254,8 @@ func runMergeQueueVerb(ctx context.Context, args []string, dial mergeQueueDialer
 	cleanupWorktree := fs.Bool("cleanup-worktree", false, "with -async: remove the worktree that has the branch checked out once the merge lands")
 	compactAfter := fs.Bool("compact-after", false, "with -async: compact the calling workspace's conversation once the branch lands")
 	front := fs.Bool("front", false, "with a merge: put it at the front of its queue, ahead of every ordinary merge waiting, never ahead of the one running")
+	versionPart := fs.String("version-part", "", "with a merge onto agent-repl's master: the version number it moves, minor or patch")
+	changelogLine := fs.String("changelog-line", "", "with -version-part: the one-line changelog entry the version's tag carries")
 	evict := fs.Bool("evict", false, "take the calling workspace's merge off the queue")
 	evictDir := fs.String("evict-dir", "", "take another workspace's merge off the queue, by its worktree")
 	moveUp := fs.Bool("move-up", false, "move the calling workspace's waiting merge one place up its queue (or -move-dir's)")
@@ -270,6 +278,7 @@ func runMergeQueueVerb(ctx context.Context, args []string, dial mergeQueueDialer
 	source, err := resolveMergeQueueSource(mergeQueueFlags{
 		oneShot: *oneShot, prMerged: *prMerged, async: *async, name: *name, branch: *branch, instruction: *instruction,
 		closeDir: *closeDir, cleanupWorktree: *cleanupWorktree, compactAfter: *compactAfter, wait: *wait, front: *front,
+		versionPart: *versionPart, changelogLine: *changelogLine,
 		evict: *evict, evictDir: *evictDir, moveUp: *moveUp, moveDown: *moveDown, moveDir: *moveDir,
 		pause: *pause, resume: *resume, repositoryDir: *repositoryDir,
 		holdRollouts: *holdRollouts, releaseRollouts: *releaseRollouts,
@@ -312,7 +321,10 @@ type mergeQueueFlags struct {
 	cleanupWorktree       bool
 	compactAfter          bool
 	// front puts the merge at the front of its queue (commandfile.Entry.Front).
-	front    bool
+	front bool
+	// versionPart and changelogLine are the merge's version increment
+	// (commandfile.Entry.VersionPart, .ChangelogLine).
+	versionPart, changelogLine string
 	evict    bool
 	evictDir string
 	// moveUp and moveDown move a waiting merge one place; moveDir names
@@ -326,17 +338,32 @@ type mergeQueueFlags struct {
 }
 
 // resolveMergeQueueSource turns the flags into what the calling workspace
-// asks for, and puts a merge asked for with -front at the front of its queue.
+// asks for, puts a merge asked for with -front at the front of its queue, and
+// carries a merge's version increment.
 func resolveMergeQueueSource(f mergeQueueFlags) (mergeQueueSource, error) {
 	source, err := resolveMergeQueueRequest(f)
-	if err != nil || !f.front {
+	if err != nil {
 		return source, err
 	}
-	if source.control {
-		return mergeQueueSource{}, errors.New("-front goes with a merge: it places the merge in its queue, and a queue control places nothing")
+	if f.front {
+		if source.control {
+			return mergeQueueSource{}, errors.New("-front goes with a merge: it places the merge in its queue, and a queue control places nothing")
+		}
+		source.entry.Front = true
+		source.label += ", to the front of the queue"
 	}
-	source.entry.Front = true
-	source.label += ", to the front of the queue"
+	if f.versionPart != "" || f.changelogLine != "" {
+		if source.control {
+			return mergeQueueSource{}, errors.New("-version-part and -changelog-line go with a merge: they move the version it lands, and a queue control lands nothing")
+		}
+		source.entry.VersionPart, source.entry.ChangelogLine = f.versionPart, f.changelogLine
+		// The entry's own rule refuses a malformed increment here, before any
+		// file is written, with the same words the daemon would.
+		if _, err := source.entry.VersionIncrement(); err != nil {
+			return mergeQueueSource{}, err
+		}
+		source.label += ", moving the version's " + f.versionPart
+	}
 	return source, nil
 }
 
