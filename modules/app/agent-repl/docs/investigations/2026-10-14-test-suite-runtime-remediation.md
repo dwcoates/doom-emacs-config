@@ -162,6 +162,18 @@ Throttled-I/O artifacts (absent in all default-tier runs; verify after R1):
   webapp 53.01 (all unchanged or up); testrun 86.0 to 88.2 once main.go's
   glue stopped being pulled into the total by a test file in package main.
 
+## Decisions at the close (2026-10-14)
+
+- The shim bundle stays on the e2e package's own prebuild (testenv Prebuild /
+  Prebuilt) rather than joining roster.Programs (owner: "whatever you
+  think"). It is already built once per run; that prebuild also installs the
+  e2e npm deps before anything builds, and moving the bundle to a program
+  unit would need a new cross-unit ordering so two npm installs never race
+  in the shim's directory, for no build saved.
+- Realtest's git becomes the mocked git everywhere (owner ruling), in its own
+  workspace, realtest-mocked-git, which must not restart Emacs until the
+  owner says so.
+
 ## Owner rulings (2026-10-14)
 
 - R1 approved: units at the default I/O tier.
