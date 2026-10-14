@@ -28,15 +28,10 @@ message UpdateHeldPromptRequest {
     UpdateHeldPromptRelease release = 3;
     // Discard it, never delivered (the composer takes the text back).
     UpdateHeldPromptDrop drop = 4;
-    // Confirm the hold (view state only: HeldPromptAccepted.accepted flips
-    // and the held section re-pushes; delivery is unchanged). Legal ONLY on an
-    // entry whose classification is hold_for_turn_end; refused otherwise.
-    UpdateHeldPromptAccept accept = 5;
   }
 }
 message UpdateHeldPromptRelease {}
 message UpdateHeldPromptDrop {}
-message UpdateHeldPromptAccept {}
 
 // THE ARM IS THE OUTCOME.
 message UpdateHeldPromptResponse {
@@ -65,8 +60,6 @@ message UpdateHeldPromptError {
     UpdateHeldPromptNoSuchHold no_such_hold = 5;
     // The hold was already delivered.
     UpdateHeldPromptAlreadyDelivered already_delivered = 6;
-    // An accept on a verdict other than hold_for_turn_end.
-    UpdateHeldPromptAcceptNotApplicable accept_not_applicable = 7;
     // A force-through on an uninterruptible or reconnect hold, or on
     // a prompt that is being edited or queued after one that is
     // (EditHeldPrompt): an edit keeps it and everything after it held. Also
@@ -93,7 +86,6 @@ message UpdateHeldPromptTransferringAway {
 message UpdateHeldPromptNotYetAdopted {}
 message UpdateHeldPromptNoSuchHold {}
 message UpdateHeldPromptAlreadyDelivered {}
-message UpdateHeldPromptAcceptNotApplicable {}
 message UpdateHeldPromptReleaseRefused {}
 
 // The prompt's delivery call is in flight. See the `being_delivered` arm.
