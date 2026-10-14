@@ -9,6 +9,7 @@ import {
   ELAPSED_RESERVE_LABELS,
   RESERVED_CLOCK_CLASS,
   liveElapsedClock,
+  liveElapsedReading,
   reservedLiveElapsedClock,
   reservedQuietClock,
   reservedSettledElapsedClock,
@@ -52,6 +53,27 @@ describe("liveElapsedClock", () => {
     stopTicking(el);
     vi.advanceTimersByTime(3_000);
     expect(el.textContent).toBe("0s");
+  });
+});
+
+describe("liveElapsedReading", () => {
+  it.each([
+    { name: "zero at its start", started: 1_000_000, now: 1_000_000, want: "0s" },
+    { name: "seconds", started: 1_000_000, now: 1_007_000, want: "7s" },
+    { name: "minutes and seconds", started: 1_000_000, now: 1_065_000, want: "1m 5s" },
+    { name: "nothing before its start", started: 1_000_000, now: 999_000, want: "0s" },
+  ])("reads $name", ({ started, now, want }) => {
+    expect(liveElapsedReading(started, now)).toBe(want);
+  });
+
+  it("is what a live elapsed clock paints", () => {
+    // Arrange
+    const started = 1_000_000 - 65_432;
+    // Act
+    const el = liveElapsedClock(ticker, "c", started);
+    vi.advanceTimersByTime(4_000);
+    // Assert
+    expect(el.textContent).toBe(liveElapsedReading(started, Date.now()));
   });
 });
 
