@@ -279,3 +279,73 @@ func TestNewRefusesAMissingProgressSink(t *testing.T) {
 		t.Fatalf("New accepted a controller with no progress sink")
 	}
 }
+
+// ---- the landing reports a takeover and a fresh boot pay ----
+
+func TestATakeoverPaysTheCoveredReportsAfterItJudgedTheAdoptedShims(t *testing.T) {
+	// Arrange: an adopted shim on an older build.
+	h := newHarness(t)
+	staleReported(t, h)
+
+	// Act
+	takeOver(h)
+
+	// Assert: one payment of the covered reports, after the stale shim's
+	// bounce was asked.
+	paid := h.reports.payments()
+	if len(paid) != 1 || !paid[0].coveredOnly || paid[0].deployErr != nil || paid[0].bouncesAsked != 1 {
+		t.Fatalf("payments = %+v, want the covered reports paid once, after the bounce was asked", paid)
+	}
+}
+
+func TestAFreshBootJudgesEveryLiveShimThenPaysEveryReport(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	staleReported(t, h)
+
+	// Act
+	h.c.SettleBoot(context.Background())
+
+	// Assert
+	paid := h.reports.payments()
+	if len(paid) != 1 || paid[0].coveredOnly || paid[0].deployErr != nil || paid[0].bouncesAsked != 1 {
+		t.Fatalf("payments = %+v, want every report paid once, after the stale shim's bounce was asked", paid)
+	}
+}
+
+func TestAFreshBootThatCannotListItsWorkspacesStillPaysTheReports(t *testing.T) {
+	// Arrange: the report is owed whatever the judgement found; what the
+	// boot runs carries every landing before it.
+	h := newHarness(t)
+	h.workspace(t)
+	h.db.Close()
+
+	// Act
+	h.c.SettleBoot(context.Background())
+
+	// Assert
+	if paid := h.reports.payments(); len(paid) != 1 {
+		t.Fatalf("payments = %+v, want one", paid)
+	}
+	if !hasRecord(h, opStaleness, "error", "could not list the workspaces to check for stale shims") {
+		t.Fatalf("records = %+v, want the failed listing at ERROR", h.log.Records())
+	}
+}
+
+func TestAFreshBootThatStandsDownBeforeJudgingSaysSoAtInfo(t *testing.T) {
+	// Arrange: the daemon is standing down as the boot settles.
+	h := newHarness(t)
+	h.workspace(t)
+	h.endLifetime()
+
+	// Act
+	h.c.SettleBoot(context.Background())
+
+	// Assert
+	if !hasRecord(h, opStaleness, "info", "the daemon stood down before the shims were judged against the installed build") {
+		t.Fatalf("records = %+v, want the stand-down at INFO", h.log.Records())
+	}
+	if hasRecord(h, opStaleness, "error", "could not list the workspaces to check for stale shims") {
+		t.Fatal("a stand-down was recorded as a failed listing at ERROR")
+	}
+}

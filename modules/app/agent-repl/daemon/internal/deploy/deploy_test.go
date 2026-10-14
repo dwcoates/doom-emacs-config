@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -630,6 +631,9 @@ func TestADeployIsRefused(t *testing.T) {
 			}
 			if h.builder.count() != 0 {
 				t.Fatalf("a refused deploy built")
+			}
+			if calls := h.reports.made(); len(calls) != 0 {
+				t.Fatalf("a refused deploy touched the owed landing reports: %v", calls)
 			}
 			if !logged(h.log, "info", opDeploy, tc.wantLog) {
 				t.Fatalf("records = %+v, want %q at INFO", h.log.Records(), tc.wantLog)
@@ -1287,5 +1291,90 @@ func TestDrainLandingsAnswersFalseForALandingDeployThatOutlivesItsBound(t *testi
 	// Assert
 	if drained {
 		t.Fatal("DrainLandings = true while the landing's deploy still runs, want false")
+	}
+}
+
+// ---- the landing reports a deploy owes ----
+
+func TestADeployCoversTheOwedReportsBeforeItBuilds(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	if _, err := h.d.Deploy(context.Background(), false); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	// Assert: covered once, before the build read the checkout.
+	h.reports.mu.Lock()
+	defer h.reports.mu.Unlock()
+	if len(h.reports.calls) == 0 || h.reports.calls[0] != "cover" || h.reports.buildsAtCover != 0 {
+		t.Fatalf("calls %v with %d build(s) at the cover, want the cover first and before any build", h.reports.calls, h.reports.buildsAtCover)
+	}
+}
+
+func TestADeployThatStaysPaysTheReportsItCoveredOnceItHasRun(t *testing.T) {
+	// Arrange: the daemon already runs the fresh build, so it stays.
+	h := newHarness(t)
+
+	// Act
+	if _, err := h.d.Deploy(context.Background(), false); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	// Assert
+	if got := h.reports.made(); !slices.Equal(got, []string{"cover", "pay covered_only=true"}) {
+		t.Fatalf("calls = %v, want the cover and then the covered reports paid", got)
+	}
+}
+
+func TestADeployThatHandsOverLeavesTheReportsToItsSuccessor(t *testing.T) {
+	// Arrange: an older daemon, so the deploy hands it over.
+	h := newHarness(t)
+	h.d.deps.DaemonBuild = hashOf(t, theOld.daemon)
+
+	// Act
+	if _, err := h.d.Deploy(context.Background(), false); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	// Assert
+	if len(h.rollout.handovers) != 1 {
+		t.Fatalf("handovers = %v, want one", h.rollout.handovers)
+	}
+	if got := h.reports.made(); !slices.Equal(got, []string{"cover"}) {
+		t.Fatalf("calls = %v, want the reports covered and left for the successor", got)
+	}
+}
+
+func TestADeployThatFailsPaysTheReportsItCoveredSayingSo(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.builder.fail = &BuildFailed{Step: "build", Detail: "webapp: tsc failed"}
+
+	// Act
+	_, err := h.d.Deploy(context.Background(), false)
+
+	// Assert
+	if err == nil {
+		t.Fatal("Deploy succeeded with a failing build")
+	}
+	if got := h.reports.made(); !slices.Equal(got, []string{"cover", "pay covered_only=true failed"}) {
+		t.Fatalf("calls = %v, want the covered reports paid as failed", got)
+	}
+}
+
+func TestNewRefusesADeployWithNoOwedReports(t *testing.T) {
+	// Arrange: every other dependency in place.
+	h := newHarness(t)
+	deps := h.d.deps
+	deps.Reports = nil
+
+	// Act
+	_, err := New(deps)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "the owed landing reports are required") {
+		t.Fatalf("New = %v, want the missing reports refused", err)
 	}
 }

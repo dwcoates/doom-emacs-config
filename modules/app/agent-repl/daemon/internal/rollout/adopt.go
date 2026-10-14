@@ -14,6 +14,7 @@ import (
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/sessionlock"
+	"agent-repld/internal/standdown"
 	"agent-repld/internal/wsm"
 )
 
@@ -1049,6 +1050,12 @@ func (c *controller) becomeIncumbent(fields dlog.Context) {
 		c.recoverOrphans(fields)
 	}
 	c.bounceStaleAdopted(fields)
+	// THE LANDING REPORTS THE HANDOVER'S DEPLOY COVERED ARE PAID NOW, after
+	// every adopted shim was judged: a stale one is bounced, or registered to
+	// be once its work ends, and the prompt queue takes a registered bounce
+	// before it delivers anything queued. So a report reaches its requester on
+	// the build that carries the landing it reports.
+	c.deps.Reports.PayOwed(c.lifetime(context.Background()), true, nil)
 	c.settleTakeover(fields)
 }
 
@@ -1190,11 +1197,36 @@ func (c *controller) adoptStragglers(fields dlog.Context) {
 // re-judges them all. Each stale one goes to the bounce registry, which bounces
 // it now or when its work ends; nothing here waits on a workspace.
 func (c *controller) bounceStaleAdopted(fields dlog.Context) {
+	deferred, judged := c.judgeLiveShims(fields)
+	if !judged {
+		return
+	}
+	c.finishDeployStory(deferred, fields)
+}
+
+// SettleBoot ends a fresh boot: the shims it adopted reported their builds
+// while it adopted them, each judged off the reporter's goroutine, so they are
+// judged again here, synchronously, and only then is every owed landing
+// report paid -- after the bounce each stale shim owes is registered.
+func (c *controller) SettleBoot(ctx context.Context) {
+	fields := dlog.Context{"why": "fresh_boot"}
+	c.judgeLiveShims(fields)
+	c.deps.Reports.PayOwed(ctx, false, nil)
+}
+
+// judgeLiveShims judges every live shim against the installed build, and
+// answers the workspaces whose stale shim waits for its work to end, and
+// whether the workspaces could be listed at all.
+func (c *controller) judgeLiveShims(fields dlog.Context) (map[ids.WorkspaceID][]deployprogress.Note, bool) {
 	lifetime := c.lifetime(context.Background())
 	workspaces, err := c.deps.DB.ListWorkspaces(lifetime)
+	if standdown.CutShort(lifetime, err) {
+		c.log.Info(opStaleness, "the daemon stood down before the shims were judged against the installed build", withCause(fields, err))
+		return nil, false
+	}
 	if err != nil {
 		c.log.Error(opStaleness, "could not list the workspaces to check for stale shims", withCause(fields, err))
-		return
+		return nil, false
 	}
 	checked := 0
 	deferred := map[ids.WorkspaceID][]deployprogress.Note{}
@@ -1215,7 +1247,7 @@ func (c *controller) bounceStaleAdopted(fields dlog.Context) {
 	}
 	c.log.Info(opStaleness, "judged every adopted shim against the installed build",
 		merge(fields, dlog.Context{"live_shims": checked}))
-	c.finishDeployStory(deferred, fields)
+	return deferred, true
 }
 
 // retryAdvertise writes daemon.addr once the outgoing daemon's exit releases

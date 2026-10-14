@@ -183,3 +183,45 @@ func TestAnAsyncInstructionStreamsItsAgentIntoTheResolvingTabAndThenLands(t *tes
 		t.Fatalf("the picked merge ended %v, want landed", merge.GetActivity().GetMerge().GetResult())
 	}
 }
+
+// TestAnAsyncLandingIsReportedOnlyOnceItsDeployHasRun pins that a landing in the
+// daemon's own checkout reaches its requester only after the deploy that
+// carries it has decided every component: the report is owed at the landing,
+// covered by the deploy as it commits, and handed back once it has run.
+func TestAnAsyncLandingIsReportedOnlyOnceItsDeployHasRun(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	s := newSourcedRepo(t)
+	s.repo.AddBranch("agent-fix")
+
+	// Act
+	s.mergeAs(t, harness.Async("async-fix", "agent-fix"))
+	s.d.AwaitLandingDeployed()
+
+	// Assert: owed, then covered, then deployed, then handed back.
+	at := func(what string, pred func(harness.LogRecord) bool) int {
+		t.Helper()
+		for i, r := range s.d.RunLog() {
+			if pred(r) {
+				return i
+			}
+		}
+		t.Fatalf("no record of %s in the run log", what)
+		return -1
+	}
+	owed := at("the owed report", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.mergeworkspace" && r.Message == "a landed merge's report is owed until the deploy that carries it has run"
+	})
+	covered := at("the deploy's cover", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.mergeworkspace" && r.Message == "the deploy covers the landing reports owed before it"
+	})
+	deployed := at("the deploy deciding every component", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.deploy.run" && r.Message == "deployed: every component decided"
+	})
+	handedBack := at("the handback", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.mergeworkspace" && r.Message == "handed a detached merge's outcome back to its requester"
+	})
+	if !(owed < covered && covered < deployed && deployed < handedBack) {
+		t.Fatalf("records at owed %d, covered %d, deployed %d, handed back %d; want them in that order", owed, covered, deployed, handedBack)
+	}
+}

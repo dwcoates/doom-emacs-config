@@ -50,6 +50,8 @@ type deployerParams struct {
 	SelfExe string
 	Bundle  *buildid.ShimBundle
 	Rollout deploy.Rollout
+	// Reports are the landing reports a deploy covers and pays.
+	Reports deploy.OwedReports
 	Clients deploy.Clients
 	Runner  deploy.Runner
 	// Store is the store's socket, which a store restart awaits.
@@ -141,6 +143,7 @@ func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, *de
 		Bundle:      p.Bundle,
 		DaemonBuild: selfBuild,
 		Rollout:     p.Rollout,
+		Reports:     p.Reports,
 		Workspaces: func(context.Context) ([]ids.WorkspaceID, error) {
 			return p.Workspace(), nil
 		},
