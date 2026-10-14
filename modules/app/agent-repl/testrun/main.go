@@ -111,23 +111,13 @@ func runnerCmd(argv []string) int {
 		return 1
 	}
 	parent, prefix, release := runParent(log, module, runner)
-	histPath, err := history.DefaultPath(runConditions(prefix))
+	histPath, err := history.DefaultPath(cli.RunConditions(prefix))
 	if err != nil {
 		log.Errorf("%v", err)
 		return runner.Finish(1, gone, release)
 	}
 	code := runRooted(ctx, log, args, self, histPath, parent, prefix, runner)
 	return runner.Finish(code, gone, release)
-}
-
-// runConditions names what a run's units measure under, for the history they
-// plan from (history.DefaultPath): the RAM disk at ramdisk.UnitIOTier when the
-// run has its unit prefix, else the disk at the tier the run inherited.
-func runConditions(unitPrefix []string) string {
-	if unitPrefix == nil {
-		return "disk-io-inherited"
-	}
-	return "ramdisk-io-" + ramdisk.UnitIOTier
 }
 
 // wardenCmd watches the runner's lifeline and, if the runner dies without

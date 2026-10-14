@@ -14,6 +14,7 @@ import (
 
 	"agentrepl/testrun/internal/history"
 	"agentrepl/testrun/internal/plan"
+	"agentrepl/testrun/internal/ramdisk"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/internal/suites"
 	"agentrepl/testrun/roster"
@@ -45,6 +46,17 @@ type Deps struct {
 // The run itself is at nice 19 (bin/background.sh), so it always yields the
 // CPU to them as well.
 const HostReserve = 3
+
+// RunConditions names what a run's units measure under, for the timing
+// history they plan from (history.DefaultPath): the RAM disk at
+// ramdisk.UnitIOTier when the run has its unit prefix, else the disk at the
+// tier the run inherited.
+func RunConditions(unitPrefix []string) string {
+	if unitPrefix == nil {
+		return "disk-io-inherited"
+	}
+	return "ramdisk-io-" + ramdisk.UnitIOTier
+}
 
 // SlotsForHost is the core budget: every core but HostReserve. A host with no
 // core left over is answered with a non-positive count, which Slots refuses.
