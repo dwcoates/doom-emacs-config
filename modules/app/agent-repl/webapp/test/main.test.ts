@@ -665,7 +665,7 @@ describe("a page in the webhost", { timeout: BOOT_TIMEOUT_MS }, () => {
     const webhost = embedInWebhost();
     await bootMain();
 
-    fromWebhost(webhost, { channel: "agent-repl-host", kind: "presence", shown: true, warm: true });
+    fromWebhost(webhost, { channel: "agent-repl-host", kind: "presence", shown: true });
 
     expect(page.feedWorkspaceSelected).toHaveBeenCalledTimes(1);
   });

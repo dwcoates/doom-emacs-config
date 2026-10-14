@@ -174,7 +174,7 @@ export async function boot(): Promise<void> {
           return () => window.clearInterval(timer);
         },
         nodes: () => regionNodes(document),
-        presence: () => ({ shown: pagePresence().shown(), warm: pagePresence().warm() }),
+        presence: () => ({ shown: pagePresence().shown() }),
       }),
     });
     opened = ctx;

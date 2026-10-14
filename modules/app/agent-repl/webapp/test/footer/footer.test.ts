@@ -36,6 +36,7 @@ import {
 import STYLESHEET from "../../src/styles.css?raw";
 import { cascadedValue, installStylesheet } from "../stylesheet.js";
 import { enduringLine } from "./enduring-line.js";
+import { pagePresence } from "../../src/presence.js";
 
 const NOW = 1_800_000_000_000;
 
@@ -212,6 +213,19 @@ describe("mountFooter: the standing stream", () => {
     h.tail.push(pushView(footerView()));
     await settle();
     expect(host.querySelector(".footer-strip")).not.toBeNull();
+  });
+
+  it("draws every push while the webhost hides its page, so a switch to it shows the current strip", async () => {
+    pagePresence().setShown(false);
+    try {
+      const { host, h } = mount();
+      await settle();
+      h.tail.push(pushView(footerView()));
+      await settle();
+      expect(host.querySelector(".footer-strip")).not.toBeNull();
+    } finally {
+      pagePresence().setShown(true);
+    }
   });
 
   it("REPLACES the view whole on a later push", async () => {
