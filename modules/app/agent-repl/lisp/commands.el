@@ -84,6 +84,8 @@
 (declare-function agent-repl-roster-tab-order "agent-repl-roster" ())
 (declare-function agent-repl-roster-drawn-tab-order "agent-repl-roster" ())
 (declare-function agent-repl-roster-selection-recency-order "agent-repl-roster" (names))
+(declare-function agent-repl-roster-last-finished-name "agent-repl-roster" (names))
+(declare-function agent-repl-roster-last-turn-ended-ms "agent-repl-roster" (ws))
 (declare-function agent-repl-verbs--row-ref "agent-repl-verbs" (row))
 (declare-function agent-repl-verbs--row-closed-p "agent-repl-verbs" (row))
 (declare-function agent-repl-verbs--row-name "agent-repl-verbs" (row))
@@ -905,6 +907,33 @@ resets."
       (agent-repl--info (agent-repl--ws-log-name current)
                         "elisp.commands.open-most-recent-cycle-reset")
       (message "All workspaces visited -- cycle reset"))))
+
+(defun agent-repl-switch-to-last-finished-workspace ()
+  "Switch to the workspace that most recently FINISHED its turn.
+FINISHED means its tab went from working (red) to done (green), and it
+is still done: `agent-repl-roster-last-finished-name' ranks by the
+daemon's durable turn-end instant, so a finish that landed while Emacs
+was down or reconnecting counts as surely as one it watched.
+
+The candidates are the DRAWN tabs (`agent-repl--drawn-tab-names') less
+the workspace shown: the red-to-green change the user is answering is
+the one the bar showed them, and switching to where they stand is no
+switch.  No candidate is a reported, logged no-op.  The target is
+REQUESTED of the daemon, never switched to here."
+  (interactive)
+  (let* ((shown (agent-repl--ws-current-name))
+         (log-ws (or (agent-repl--ws-log-name shown)
+                     '(:agent-repl-context "a jump from a placeholder names no workspace")))
+         (names (remove shown (agent-repl--drawn-tab-names)))
+         (target (agent-repl-roster-last-finished-name names)))
+    (if (null target)
+        (progn
+          (agent-repl--info log-ws "elisp.commands.last-finished-none from=%s candidates=%d"
+                            shown (length names))
+          (message "No other workspace has finished"))
+      (agent-repl--info log-ws "elisp.commands.last-finished from=%s target=%s ended-ms=%s"
+                        shown target (agent-repl-roster-last-turn-ended-ms target))
+      (agent-repl-host-request-switch target 'last-finished))))
 
 (defun agent-repl--drawn-tab-names ()
   "Return the workspace names the tab bar DRAWS, in the order it draws them.
