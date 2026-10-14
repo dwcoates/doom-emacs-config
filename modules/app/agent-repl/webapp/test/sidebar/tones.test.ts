@@ -1,4 +1,7 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import renderColors from "../../../proto/vocab/render-colors.json";
 import { RosterRowSchema } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
@@ -6,7 +9,7 @@ import { toneClass, rosterStatusColor, protoArmName } from "../../src/vocab.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { oneofArms } from "../../src/rpc/oneof.js";
 import {
-  GLYPH_CHARS,
+  GLYPH_IMAGES,
   ROSTER_ARM_CLASS,
   ROSTER_STATUS_CASES,
   armMotion,
@@ -23,6 +26,8 @@ const ROSTER_STATUS = renderColors.roster_status as Record<string, string>;
 const MERGE_GLYPHS = renderColors.merge_glyphs as Record<string, string>;
 const GATE_GLYPHS = renderColors.gate_glyphs as Record<string, string>;
 const GLYPH_INKS = renderColors.glyph_inks as Record<string, string>;
+/** The shared glyph pictures, which the Emacs tab bar draws too. */
+const GLYPH_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../../images/glyphs");
 /** A one-shot row carrying no other marker. */
 const ONE_SHOT: RowMarkers = { oneShot: true, asyncMerging: false };
 /** The arms a one-shot's glyph replaces the mark on, in the generated spelling. */
@@ -53,10 +58,30 @@ describe("the status mark", () => {
     expect(glyphName(arm)).toBe(name);
   });
 
-  it.each([...ROSTER_STATUS_CASES])("draws a glyph character for %s", (arm) => {
+  it.each([...ROSTER_STATUS_CASES])("draws a glyph picture for %s", (arm) => {
     const mark = rosterArmMark(arm);
-    expect(mark.char).toBe(GLYPH_CHARS[mark.glyph]);
+    expect(mark.image).toBe(GLYPH_IMAGES[mark.glyph]);
   });
+
+  // ONE PICTURE PER NAME FOR BOTH SURFACES: every glyph the rail draws as a
+  // picture is the file the Emacs tab bar draws, byte for byte.
+  it.each(Object.entries(GLYPH_IMAGES).filter(([, image]) => image !== ""))(
+    "draws the %s glyph from the shared images/glyphs file",
+    (name, image) => {
+      expect(image).toBe(readFileSync(path.join(GLYPH_DIR, `${name}.svg`), "utf8"));
+    },
+  );
+
+  it("draws the merge picture in currentColor, so the tone or the ink colors it", () => {
+    expect(GLYPH_IMAGES.merge).toContain('fill="currentColor"');
+  });
+
+  it.each([...Object.values(MERGE_GLYPHS), ...Object.values(GATE_GLYPHS), "target"])(
+    "has a picture for the shared glyph name %s",
+    (name) => {
+      expect(GLYPH_IMAGES[name]).toMatch(/^<svg /);
+    },
+  );
 
   it.each(Object.entries(GLYPH_INKS))("inks the %s arm's mark %s, apart from its tone", (key, ink) => {
     const arm = ROSTER_STATUS_CASES.find((c) => protoArmName(c) === key) as RosterStatusCase;
@@ -64,59 +89,59 @@ describe("the status mark", () => {
   });
 
   it("draws the lifecycle arms as the plain still dot", () => {
-    expect(rosterArmMark("ready")).toEqual({ toneClass: "tone-green", glyph: "dot", char: "", ink: undefined, motion: "still" });
+    expect(rosterArmMark("ready")).toEqual({ toneClass: "tone-green", glyph: "dot", image: "", ink: undefined, motion: "still" });
   });
 
   // A GATE IS READY FOR YOU (owner ruling, 2026-10-08): the green of a
   // finished turn, with the gate's emoji in place of the dot (owner requests,
   // 2026-10-11 and 2026-10-13).
   it("draws a permission gate as a still green exclamation emoji", () => {
-    expect(rosterArmMark("permission")).toEqual({ toneClass: "tone-green", glyph: "exclaim", char: "❗", ink: undefined, motion: "still" });
+    expect(rosterArmMark("permission")).toEqual({ toneClass: "tone-green", glyph: "exclaim", image: GLYPH_IMAGES.exclaim, ink: undefined, motion: "still" });
   });
 
   it("draws a question gate as a still green question emoji", () => {
-    expect(rosterArmMark("question")).toEqual({ toneClass: "tone-green", glyph: "ask", char: "❓", ink: undefined, motion: "still" });
+    expect(rosterArmMark("question")).toEqual({ toneClass: "tone-green", glyph: "ask", image: GLYPH_IMAGES.ask, ink: undefined, motion: "still" });
   });
 
   it("draws a cold gate as a still green snowflake", () => {
-    expect(rosterArmMark("coldGate")).toEqual({ toneClass: "tone-green", glyph: "snowflake", char: "\u2744\uFE0F", ink: undefined, motion: "still" });
+    expect(rosterArmMark("coldGate")).toEqual({ toneClass: "tone-green", glyph: "snowflake", image: GLYPH_IMAGES.snowflake, ink: undefined, motion: "still" });
   });
 
   it("draws an interrupt landing as the still green dot, since it is no gate", () => {
-    expect(rosterArmMark("waiting")).toEqual({ toneClass: "tone-green", glyph: "dot", char: "", ink: undefined, motion: "still" });
+    expect(rosterArmMark("waiting")).toEqual({ toneClass: "tone-green", glyph: "dot", image: "", ink: undefined, motion: "still" });
   });
 
   it("draws a compaction as a red workspace with an orange dot", () => {
-    expect(rosterArmMark("compacting")).toEqual({ toneClass: "tone-red", glyph: "dot", char: "", ink: "orange", motion: "breathes" });
+    expect(rosterArmMark("compacting")).toEqual({ toneClass: "tone-red", glyph: "dot", image: "", ink: "orange", motion: "breathes" });
   });
 
   it("draws a failed turn end as a turquoise dot", () => {
-    expect(rosterArmMark("turnFailed")).toEqual({ toneClass: "tone-turquoise", glyph: "dot", char: "", ink: undefined, motion: "still" });
+    expect(rosterArmMark("turnFailed")).toEqual({ toneClass: "tone-turquoise", glyph: "dot", image: "", ink: undefined, motion: "still" });
   });
 
   it("draws a degraded view as a turquoise dot", () => {
-    expect(rosterArmMark("degraded")).toEqual({ toneClass: "tone-turquoise", glyph: "dot", char: "", ink: undefined, motion: "still" });
+    expect(rosterArmMark("degraded")).toEqual({ toneClass: "tone-turquoise", glyph: "dot", image: "", ink: undefined, motion: "still" });
   });
 
   // ONE MERGE GLYPH (owner ruling, 2026-10-13): its ink and motion say which arm.
   it("draws a queued merge as the still purple merge glyph", () => {
-    expect(rosterArmMark("mergeQueued")).toEqual({ toneClass: "tone-purple", glyph: "merge", char: "", ink: undefined, motion: "still" });
+    expect(rosterArmMark("mergeQueued")).toEqual({ toneClass: "tone-purple", glyph: "merge", image: GLYPH_IMAGES.merge, ink: undefined, motion: "still" });
   });
 
   it("draws a running merge as the breathing purple merge glyph", () => {
-    expect(rosterArmMark("merging")).toEqual({ toneClass: "tone-purple", glyph: "merge", char: "", ink: undefined, motion: "breathes" });
+    expect(rosterArmMark("merging")).toEqual({ toneClass: "tone-purple", glyph: "merge", image: GLYPH_IMAGES.merge, ink: undefined, motion: "breathes" });
   });
 
   it("draws a failed merge as a green workspace with a red merge glyph", () => {
-    expect(rosterArmMark("mergeFailed")).toEqual({ toneClass: "tone-green", glyph: "merge", char: "", ink: "red", motion: "still" });
+    expect(rosterArmMark("mergeFailed")).toEqual({ toneClass: "tone-green", glyph: "merge", image: GLYPH_IMAGES.merge, ink: "red", motion: "still" });
   });
 
   it("draws a landed merge as the green merge glyph", () => {
-    expect(rosterArmMark("merged")).toEqual({ toneClass: "tone-green", glyph: "merge", char: "", ink: undefined, motion: "still" });
+    expect(rosterArmMark("merged")).toEqual({ toneClass: "tone-green", glyph: "merge", image: GLYPH_IMAGES.merge, ink: undefined, motion: "still" });
   });
 
   it("draws an incidentally inactive workspace as the grey dot", () => {
-    expect(rosterArmMark("inactive")).toEqual({ toneClass: "tone-none", glyph: "dot", char: "", ink: undefined, motion: "still" });
+    expect(rosterArmMark("inactive")).toEqual({ toneClass: "tone-none", glyph: "dot", image: "", ink: undefined, motion: "still" });
   });
 
   it("draws a booting session as the same grey dot, breathing", () => {
@@ -124,7 +149,7 @@ describe("the status mark", () => {
   });
 
   it("draws nothing at all for a workspace with no session", () => {
-    expect(rosterArmMark("none")).toEqual({ toneClass: "tone-none", glyph: "none", char: "", ink: undefined, motion: "still" });
+    expect(rosterArmMark("none")).toEqual({ toneClass: "tone-none", glyph: "none", image: "", ink: undefined, motion: "still" });
   });
 
   it("refuses an arm this build has no mark for", () => {
@@ -155,7 +180,7 @@ describe("a row's mark with its one-shot mark", () => {
     expect(rosterRowMark(arm, ONE_SHOT)).toEqual({
       toneClass: rosterArmMark(arm).toneClass,
       glyph: "target",
-      char: "🎯",
+      image: GLYPH_IMAGES.target,
       ink: undefined,
       motion: "breathes",
     });
