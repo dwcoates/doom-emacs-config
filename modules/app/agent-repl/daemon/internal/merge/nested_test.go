@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -519,5 +520,61 @@ func TestEveryExhaustedGateGivesUpThroughFixesExhausted(t *testing.T) {
 	// Assert: two callers, and the summary spelled once, in the helper.
 	if calls != 2 || copies != 1 {
 		t.Fatalf("fixesExhausted calls = %d, summary spellings = %d; want 2 and 1", calls, copies)
+	}
+}
+
+func TestEndRunSettlesTheRunTheTestsTabAndTheRoundAsOne(t *testing.T) {
+	// Arrange.
+	tests := []struct {
+		name, line, closed string
+		failed             bool
+	}{
+		{name: "a pass", line: "", closed: "succeeded"},
+		{name: "a cut", line: "the merge ahead moved; the tests run again on its new tip", closed: "restarted", failed: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newHarness(t)
+			r := ledgeredRun(t, h)
+			round := r.openTab(context.Background(), TabTests)
+			r.openTesting(round)
+
+			// Act.
+			r.endRun(context.Background(), round, tt.line, nil, nil, tt.closed)
+
+			// Assert.
+			run := h.feed.lastTabOfKind(rowTestsRun).GetTestsRun().GetSettled()
+			tests := h.feed.lastTabOfKind(TabTests).GetTests().GetSettled()
+			if run == nil || tests == nil {
+				t.Fatalf("run settled %v, tests tab settled %v; want both settled", run, tests)
+			}
+			if got := run.GetFailed() != nil; got != tt.failed || (tests.GetFailed() != nil) != tt.failed {
+				t.Fatalf("run failed %v, tests tab failed %v; want both %v", got, tests.GetFailed() != nil, tt.failed)
+			}
+			intervals := ledgerIntervals(h)
+			if last := intervals[len(intervals)-1]; last.Kind != TabTests || last.Outcome != tt.closed {
+				t.Fatalf("the round closed as %+v, want tests %s", last, tt.closed)
+			}
+		})
+	}
+}
+
+// handSettled is a run's settled draw followed by its tests tab settling.
+var handSettled = regexp.MustCompile(`publishRun\([^\n]*\.settled\([^\n]*\n\s*(g\.)?r\.settleTesting\(`)
+
+func TestEveryRunEndingSettlesThroughEndRun(t *testing.T) {
+	// Arrange.
+	for _, file := range []string{"gate.go", "chain.go", "process.go"} {
+		body, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("reading %s: %v", file, err)
+		}
+
+		// Act / Assert: a run settled together with its tests tab never
+		// stands outside endRun. (A failed run alone, which leaves the tab
+		// live for the fixing attempt after it, is not that shape.)
+		if handSettled.Match(body) {
+			t.Fatalf("%s settles a run and its tests tab by hand instead of through endRun", file)
+		}
 	}
 }

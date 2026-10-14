@@ -979,16 +979,36 @@ func (r *run) selfReload(ctx context.Context, out outcome) {
 // the collapsed line, composed from the abandon CAUSE, so the cause reaches a
 // reader in prose even though the arm does not distinguish it.
 func (o *orchestrator) publishAbandoned(ctx context.Context, ws ids.WorkspaceID, ledger ids.LeaseID, entry wsm.MergeQueueEntry, cause AbandonCause) {
-	const op = "daemon.merge.abandoned"
+	o.publishAbandonedWith(ctx, ws, ledger, entry, cause, o.abandonedSentence(ws, cause, false))
+}
+
+// abandonedSentence is the abandoned terminal's sentence for CAUSE: the one a
+// merge that RAN reads, or the one a merge that never did.
+//
+// AN UNDECLARED CAUSE IS A DEFECT, never a silent empty line: the bubble still
+// ends, and the raw cause rides the sentence so the reader is not left with
+// nothing while the ERROR names the gap.
+func (o *orchestrator) abandonedSentence(ws ids.WorkspaceID, cause AbandonCause, ran bool) string {
 	summary, declared := cause.summary()
-	if !declared {
-		// AN UNDECLARED CAUSE IS A DEFECT, never a silent empty line: the
-		// bubble still ends, and the raw cause rides the sentence so the
-		// reader is not left with nothing while the ERROR names the gap.
-		summary = fmt.Sprintf("this merge left the queue before it ran (%s)", cause)
-		o.deps.Log.Global().Error(op, "a merge was abandoned under a cause with no declared summary",
-			dlog.Context{"workspace": string(ws), "cause": string(cause)})
+	fallback := "this merge left the queue before it ran (%s)"
+	if ran {
+		summary, declared = cause.summaryRunning()
+		fallback = "this merge was abandoned while it was running (%s)"
 	}
+	if declared {
+		return summary
+	}
+	o.deps.Log.Global().Error("daemon.merge.abandoned", "a merge was abandoned under a cause with no declared summary",
+		dlog.Context{"workspace": string(ws), "cause": string(cause)})
+	return fmt.Sprintf(fallback, cause)
+}
+
+// publishAbandonedWith ends a merge with no run in this process: its bubble's
+// abandoned terminal reading SUMMARY, its banner and its hand-back, then its
+// surfaces. publishAbandoned is the merge that never ran; a merge a restart
+// took back and that left before it resumed reads the running sentence.
+func (o *orchestrator) publishAbandonedWith(ctx context.Context, ws ids.WorkspaceID, ledger ids.LeaseID, entry wsm.MergeQueueEntry, cause AbandonCause, summary string) {
+	const op = "daemon.merge.abandoned"
 	// THE ABANDONMENT IS AN INFO RECORD, keyed by the cause: which of the four
 	// ends a merge had is exactly what a reader of the run log comes for, and
 	// the cause key is what makes them countable.
@@ -1222,12 +1242,7 @@ func (r *run) abandonTerminal(ctx context.Context, cause AbandonCause) {
 		r.teardown(ctx, outcome{abandoned: cause}, nil)
 		return
 	}
-	summary, declared := cause.summaryRunning()
-	if !declared {
-		summary = fmt.Sprintf("this merge was abandoned while it was running (%s)", cause)
-		r.o.deps.Log.Global().Error(op, "a merge was abandoned under a cause with no declared summary",
-			dlog.Context{"workspace": string(r.ws), "cause": string(cause)})
-	}
+	summary := r.o.abandonedSentence(r.ws, cause, true)
 	r.closeOpenRounds(ctx, "abandoned")
 	r.o.log(ctx, r.ws).Info(op, "abandoned a running merge", dlog.Context{
 		"workspace": string(r.ws), "lease": string(r.lease.ID), "cause": string(cause), "summary": summary})

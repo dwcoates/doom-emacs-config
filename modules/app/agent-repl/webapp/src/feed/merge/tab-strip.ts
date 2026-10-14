@@ -85,11 +85,14 @@ export const SECTIONED_KINDS: readonly string[] = ["rebaseCommit"];
  * The glyph each tab state reports itself with. Glyphs, never emojis, with one
  * exception the owner asked for by name (2026-10-08): a tab whose agent waits
  * on the user wears the question mark emoji. A commit the replay has not
- * reached yet (`pending`) wears no glyph and no clock.
+ * reached yet (`pending`) wears no glyph and no clock. A test run waiting for
+ * its repository's test turn (`waitingForTurn`) wears a hollow dot: it is
+ * under way, with its clock ticking, but nothing of it runs yet.
  */
 const STATE_GLYPHS = {
   live: "●",
   waitingOnUser: "❓",
+  waitingForTurn: "○",
   succeeded: "✓",
   failed: "✗",
 } as const satisfies Record<string, string>;
@@ -105,7 +108,7 @@ export interface MergeTab {
   label: FeedMergeTabLabel;
   /** The `kind` oneof arm ("queue", "prePrompt", …). */
   kind: string;
-  /** The `state` oneof arm within that kind ("pending", "live", "waitingOnUser", "settled"). */
+  /** The `state` oneof arm within that kind ("pending", "live", "waitingOnUser", "waitingForTurn", "settled"). */
   state: string;
   /** For a settled tab, the `outcome` arm ("succeeded" | "failed"). */
   outcome?: string;
@@ -300,6 +303,9 @@ function tabGlyphOf(tab: MergeTab): [string | null, string] {
       // The merge's agent has a permission ask or a question open: the tab
       // says so for exactly as long as the footer reads "waiting on user".
       return ["is-waiting-on-user", STATE_GLYPHS.waitingOnUser];
+    case "waitingForTurn":
+      // Another merge of the repository runs its tests; this run is in line.
+      return ["is-waiting-for-turn", STATE_GLYPHS.waitingForTurn];
     case "settled":
       return tab.outcome === "failed"
         ? ["is-failed", STATE_GLYPHS.failed]
@@ -325,8 +331,14 @@ function tabGlyphOf(tab: MergeTab): [string | null, string] {
 export function autoSelectedTab(tabs: readonly MergeTab[]): MergeTab | undefined {
   for (let i = tabs.length - 1; i >= 0; i -= 1) {
     const tab = tabs[i];
-    // A tab waiting on the user is still running: the merge is there.
-    if (tab.state === "live" || tab.state === "waitingOnUser") return tab;
+    // A tab waiting on the user, or a run waiting for its test turn, is still
+    // under way: the merge is there.
+    if (isUnderWay(tab)) return tab;
   }
   return tabs[tabs.length - 1];
+}
+
+/** Whether TAB's work is under way: running, held on the user, or in line for its test turn. */
+export function isUnderWay(tab: MergeTab): boolean {
+  return tab.state === "live" || tab.state === "waitingOnUser" || tab.state === "waitingForTurn";
 }

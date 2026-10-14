@@ -280,6 +280,12 @@ func (t tabRound) key() string { return roundKey(t.kind, t.n) }
 // live is the round's live badge.
 func (t tabRound) live() tabState { return tabState{startedMS: t.started.UnixMilli()} }
 
+// waitingForTurn is a run round's badge while it waits in line for its
+// repository's test turn, which the merge named HOLDER holds.
+func (t tabRound) waitingForTurn(holder string) tabState {
+	return tabState{startedMS: t.started.UnixMilli(), turnHolder: holder}
+}
+
 // settled is the round's settled badge: ended at endedMS, failed with the
 // one-line account when failure is set, succeeded otherwise.
 func (t tabRound) settled(endedMS int64, failure string) tabState {

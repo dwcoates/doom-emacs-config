@@ -281,3 +281,36 @@ branch into the target as a non-fast-forward merge.
   (`proto/vocab/render-colors.json`) drops the retired arms, which the proto
   commit had missed; repair rows are rebuilt from history on replay, in their
   tab (the e2e rewrite, `mq-e2e`).
+
+### 3. A restart resumes the head first, and no merge lease outlives its entry (2026-10-14)
+
+- **Decided by** the owner, from the diagnosis of 2026-10-14 00:02-00:42
+  (workspace merge-bubble-tab-focus, the queue's head, and the merge behind
+  it). No contract changed; the fixes are the daemon's.
+- **What happened.** A deploy handed the head over mid-tests after the merge
+  behind it had already been taken back. The pump resumed whichever merge
+  it had been handed (`resumeIn` chose among the resumes only), so the merge
+  behind led, and the head, adopted 1.5s later, found the slot busy and was
+  never resumed: its bubble showed "tests" with no run for 32 minutes.
+  Evicting it then removed only its queue entry (`dequeue` decided by the
+  in-memory run, which a pending resume does not have), leaving its merge
+  lease over no entry, and every later prompt to the workspace was refused
+  by `bindMergeHold`.
+- **What changed.**
+  - After a restart the head is the first admitted entry in queue order; a
+    head not yet taken back holds back every resume of its repository until
+    its adoption's kick resumes it.
+  - A merge taken back but not resumed is dropped as an admitted merge: entry,
+    merge lease and progress record in one store transaction
+    (`wsm.DropAdmittedMerge`), which owns the invariant that a merge lease
+    stands with exactly one queue entry.
+  - The boot sweep releases every merge lease no queue entry names, recorded
+    per lease with its workspace, so the stranded lease heals on the next
+    deploy without hand repair.
+- **Consequences.**
+  - A repository whose head's handover never completes resumes nothing until
+    it does, which is the honest state: the head is elsewhere. The wait is
+    recorded at INFO.
+  - `dropQueued` now refuses an admitted entry that has no run and no resume
+    in this daemon (another daemon's merge, or one whose run is starting),
+    at ERROR, where it used to remove the entry and strand the lease.

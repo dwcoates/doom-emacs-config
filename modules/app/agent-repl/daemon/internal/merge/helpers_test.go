@@ -52,11 +52,11 @@ type fakeDB struct {
 
 	wsm.DB
 
-	// sweeps counts SweepOrphanedMergeState calls; sweepProgress, sweepRounds
-	// and sweepErr are what it answers.
-	sweeps                     int
-	sweepProgress, sweepRounds int
-	sweepErr                   error
+	// sweeps counts SweepOrphanedMergeState calls; swept and sweepErr are
+	// what it answers.
+	sweeps   int
+	swept    wsm.OrphanedMergeState
+	sweepErr error
 
 	mu sync.Mutex
 
@@ -98,6 +98,9 @@ type fakeDB struct {
 	enqueueErr error
 	// queueErr, when set, fails every QueueMerge.
 	queueErr error
+	// dropAdmittedErr, when set, fails every DropAdmittedMerge, which then
+	// changes nothing.
+	dropAdmittedErr error
 	// shut stands for the state client the daemon's orderly exit has already
 	// closed: every write refuses, exactly as a write against a closed
 	// handle does. A test sets it after the drain, so any durable work a run
@@ -617,11 +620,17 @@ func (f *fakeDB) YieldMergeHead(_ context.Context, repo wsm.RepoKey, loser, winn
 	return nil
 }
 
-func (f *fakeDB) SweepOrphanedMergeState(context.Context, time.Time) (int, int, error) {
+func (f *fakeDB) SweepOrphanedMergeState(context.Context, time.Time) (wsm.OrphanedMergeState, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.sweeps++
-	return f.sweepProgress, f.sweepRounds, f.sweepErr
+	if f.sweepErr != nil {
+		return wsm.OrphanedMergeState{}, f.sweepErr
+	}
+	for _, l := range f.swept.ReleasedLeases {
+		delete(f.leases, l.Workspace)
+	}
+	return f.swept, nil
 }
 
 func (f *fakeDB) AdmitMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID) error {
@@ -672,6 +681,36 @@ func (f *fakeDB) RemoveMergeQueueEntry(_ context.Context, repo wsm.RepoKey, id i
 		}
 	}
 	return fmt.Errorf("no queue entry for %s", id)
+}
+
+// DropAdmittedMerge stands for the store's one transaction: the admitted
+// entry, the merge lease and its progress record go together, or nothing does.
+func (f *fakeDB) DropAdmittedMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, lease wsm.LeaseID, cause string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.dropAdmittedErr != nil {
+		return f.dropAdmittedErr
+	}
+	at := -1
+	for i, entry := range f.queues[repo] {
+		if entry.Workspace == id && entry.State == wsm.MergeAdmitted {
+			at = i
+		}
+	}
+	if held, ok := f.leases[id]; at < 0 || !ok || held.ID != lease || held.Holder != wsm.HolderMerge {
+		return fmt.Errorf("drop admitted merge of %s: %w", id, wsm.ErrNotFound)
+	}
+	f.queues[repo] = append(f.queues[repo][:at], f.queues[repo][at+1:]...)
+	f.renumber(repo)
+	delete(f.leases, id)
+	f.releasedLeases = append(f.releasedLeases, lease)
+	for ws, p := range f.progress {
+		if p.Lease == lease {
+			delete(f.progress, ws)
+		}
+	}
+	f.dropped = append(f.dropped, fmt.Sprintf("%s:%s", id, cause))
+	return nil
 }
 
 func (f *fakeDB) MergeQueue(_ context.Context, repo wsm.RepoKey) ([]wsm.MergeQueueEntry, error) {

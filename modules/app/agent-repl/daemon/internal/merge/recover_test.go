@@ -3,13 +3,16 @@ package merge
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
@@ -504,8 +507,31 @@ func TestRecoverKeepsAResumedMergesSource(t *testing.T) {
 
 // recordedAt reports whether h logged a record at level whose message says msg.
 func recordedAt(h *harness, level, msg string) bool {
+	return loggedLike(h, logLike{level: level, text: msg})
+}
+
+// logLike is what a test looks for in the harness's log: every field set must
+// match -- the level and operation exactly, the message by containing text,
+// and each context key by its value.
+type logLike struct {
+	level, op, text string
+	context         map[string]string
+}
+
+// loggedLike reports whether h's log holds a record like want. It is the one
+// matcher every "was it recorded" helper of this package's tests reads.
+func loggedLike(h *harness, want logLike) bool {
 	for _, r := range h.logs.Records() {
-		if r.Level == level && strings.Contains(r.Message, msg) {
+		if want.level != "" && r.Level != want.level || want.op != "" && r.Operation != want.op || !strings.Contains(r.Message, want.text) {
+			continue
+		}
+		matched := true
+		for k, v := range want.context {
+			if fmt.Sprint(r.Context[k]) != v {
+				matched = false
+			}
+		}
+		if matched {
 			return true
 		}
 	}
@@ -530,7 +556,7 @@ func TestRecoverSweepsTheMergeStateNoQueueEntryNames(t *testing.T) {
 func TestRecoverRecordsWhatTheSweepRemoved(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	h.db.sweepProgress, h.db.sweepRounds = 1, 29
+	h.db.swept = wsm.OrphanedMergeState{ProgressRecords: 1, RoundsClosed: 29}
 
 	// Act
 	if err := h.o.Recover(context.Background()); err != nil {
@@ -557,5 +583,79 @@ func TestRecoverGoesOnWhenTheSweepFailsAndSaysSoAtError(t *testing.T) {
 	}
 	if !recordedAt(h, "error", "could not sweep the merge state no queue entry names any more") {
 		t.Fatal("the failed sweep was not recorded at ERROR")
+	}
+}
+
+func TestRecoverRecordsEachMergeLeaseTheSweepReleasedWithItsWorkspaceAndTellsTheQueue(t *testing.T) {
+	// Arrange: the lease an eviction left standing over no entry.
+	h := newHarness(t)
+	orphan := wsm.Lease{ID: "lease-orphan", Workspace: theWorkspace, Holder: wsm.HolderMerge}
+	h.db.mu.Lock()
+	h.db.leases[theWorkspace] = orphan
+	h.db.swept = wsm.OrphanedMergeState{ReleasedLeases: []wsm.Lease{orphan}}
+	h.db.mu.Unlock()
+
+	// Act.
+	if err := h.o.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+
+	// Assert.
+	rec, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.merge.recover", Message: "released a merge lease no queue entry names any more; the workspace takes prompts again"})
+	if !ok || rec.Context["workspace"] != string(theWorkspace) || rec.Context["lease"] != "lease-orphan" {
+		t.Fatalf("the released lease was recorded as %+v, want INFO naming its workspace and lease", rec)
+	}
+	h.queue.mu.Lock()
+	defer h.queue.mu.Unlock()
+	if n := len(h.queue.leaseEvents); n == 0 || h.queue.leaseEvents[n-1] {
+		t.Fatalf("lease events %v, want the queue told the merge lease is gone", h.queue.leaseEvents)
+	}
+}
+
+func TestLoggedLikeMatchesEveryFieldItIsGiven(t *testing.T) {
+	// Arrange: one record.
+	h := newHarness(t)
+	h.logs.Global().Info("daemon.merge.test", "the merge did the thing", dlog.Context{"workspace": "ws-1", "round": 2})
+	tests := []struct {
+		name string
+		want logLike
+		hit  bool
+	}{
+		{name: "nothing asked", want: logLike{}, hit: true},
+		{name: "level and op", want: logLike{level: "info", op: "daemon.merge.test"}, hit: true},
+		{name: "part of the message", want: logLike{text: "did the"}, hit: true},
+		{name: "a context value, any type", want: logLike{context: map[string]string{"workspace": "ws-1", "round": "2"}}, hit: true},
+		{name: "another level", want: logLike{level: "error"}, hit: false},
+		{name: "another op", want: logLike{op: "daemon.merge.other"}, hit: false},
+		{name: "another message", want: logLike{text: "did nothing"}, hit: false},
+		{name: "another context value", want: logLike{context: map[string]string{"workspace": "ws-2"}}, hit: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act / Assert.
+			if got := loggedLike(h, tt.want); got != tt.hit {
+				t.Fatalf("loggedLike(%+v) = %v, want %v", tt.want, got, tt.hit)
+			}
+		})
+	}
+}
+
+func TestEveryContainingLogMatchRunsThroughLoggedLike(t *testing.T) {
+	// Arrange.
+	files, err := filepath.Glob("*_test.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range files {
+		body, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("reading %s: %v", file, err)
+		}
+
+		// Act / Assert: a hand loop matching a message by containment is a
+		// second matcher; only loggedLike loops so.
+		if n := strings.Count(string(body), "strings.Contains(r.Message,"); n > 0 && file != "recover_test.go" {
+			t.Fatalf("%s matches log records by hand %d times instead of loggedLike", file, n)
+		}
 	}
 }
