@@ -224,21 +224,16 @@
      hue, so the answer a turn actually landed on is findable at a glance among
      the commentary bubbles the agent emitted between its tool calls. */
   --final-response: #16a34a;
-  /* The border around a FINISHED response the agent wrote MID-TURN (prose
-     between tool calls: settled, but not the turn's answer): pear, the step
-     before an answer's green (owner ruling, 2026-09-23), so the border ladder
-     runs monotonic toward done: pear (said, not concluded) -> green (the
-     answer). A thinking bubble wears no border at all. */
-  --interim-response-border: #b0b00c;
-  /* THE PEAR AND GREEN EDGES ARE DRAWN AT HALF STRENGTH (owner ruling,
-     2026-10-08: the interim border must read noticeably thinner than every
-     other bubble's; owner request, 2026-10-14: the final response's green
-     border must read as thin as the interim's). Every bubble border is
-     already 0.3px, which a Retina WebKit rounds up to one device pixel, the
-     thinnest line it draws, so a narrower width changes nothing on screen. A
-     fainter line is what reads thinner: each hue, at this one share of its
-     strength, in both themes, so the two response borders cannot drift
-     apart in weight. */
+  /* A FINISHED response the agent wrote MID-TURN (prose between tool calls:
+     settled, but not the turn's answer) wears NO border (owner request,
+     2026-10-14, retiring the pear edge of 2026-09-23), as a thinking bubble
+     wears none. */
+  /* THE GREEN ANSWER EDGE IS DRAWN AT HALF STRENGTH (owner ruling,
+     2026-10-08; owner request, 2026-10-14: the final response's green border
+     must read thin). Every bubble border is already 0.3px, which a Retina
+     WebKit rounds up to one device pixel, the thinnest line it draws, so a
+     narrower width changes nothing on screen. A fainter line is what reads
+     thinner: the hue at this share of its strength, in both themes. */
   --response-border-strength: 50%;
   /* THE SELECTED ENTRY's color: the ring on a non-bubble card a footer
      detached-work jump landed on. A selected BUBBLE is marked by its fill
@@ -512,7 +507,6 @@
     --clear-divider: #ef4444;
     --compact-rule: #f97316;
     --final-response: #4ade80;
-    --interim-response-border: #d2d22c;
     /* Brighter blue for the dark theme, as the other state borders lift, so
        the selected-entry ring still reads against the dark page. */
     --selected-entry: #60a5fa;
@@ -1841,7 +1835,7 @@ pre {
    - A USER PROMPT then sits 15% WIDER than that ON EVERY SIDE (owner request,
      2026-10-14): 1.15 of the prompt's 0.49 vertically and 0.7 horizontally,
      on a rung of its own that also sets `--bubble-pad-x`.
-   - AN INTERIM RESPONSE, the amber-bordered one with no fill, sits 30% tighter
+   - AN INTERIM RESPONSE, the one with no fill and no border, sits 30% tighter
      again (owner request, 2026-10-13): 0.7 of 0.7. Its gap then shrinks ON EVERY SIDE by as much as its
      narrower text did (owner request, 2026-10-14): both tokens are multiplied
      by its `--bubble-font-rem` over the base, so the padding follows the text
@@ -1879,8 +1873,7 @@ pre {
 /* THE SECOND BACKGROUND A KIND SETS (owner request, 2026-10-08): a THINKING
    bubble and an INTERIM response (`.interim-response`, response.ts
    `isInterimResponse`) are filled with the page's own `--bg`, so in either
-   theme the fill is not there at all and only the prose (and the interim's
-   pear border, once settled) reads. It feeds `--bubble-bg`, so anything
+   theme the fill is not there at all and only the prose reads. It feeds `--bubble-bg`, so anything
    painted from it matches. Their prose is `--interim-text`, the tool card's
    header grey (owner request, 2026-10-08); a link or a quote keeps its own
    color.
@@ -1889,8 +1882,7 @@ pre {
    --bubble-shadow) is the one thing left that still painted a highlight
    around these two kinds even with no fill — it is turned off here so
    neither reads as a bubble, while the 0.3px transparent border the base
-   rule reserves (and the interim's own half-strength pear border, once
-   settled) are untouched: nothing here reflows, since box-shadow paints
+   rule reserves is untouched: nothing here reflows, since box-shadow paints
    outside the layout box. */
 .bubble[data-variant="thinking"],
 .bubble.interim-response {
@@ -2154,13 +2146,9 @@ html[data-page-unshown] *::after {
    change recolors a laid-out hairline and never reflows the feed.
    THE THINKING BUBBLE: the agent's intermediate reasoning wears NO border.
    No rule here colors it, so it keeps the base's transparent 0.3px box, still
-   reserved, and nothing reflows; it can never take the pear or green below. */
-/* A settled response that is neither the turn's answer nor thinking: the pear
-   step of the ladder. Keyed on the daemon's settled state, so a response still
-   streaming keeps the base border until it settles. */
-.bubble[data-variant="response"][data-state="success"]:not(.final-response) {
-  border-color: color-mix(in srgb, var(--interim-response-border) var(--response-border-strength), transparent);
-}
+   reserved, and nothing reflows; it can never take the green below.
+   AN INTERIM RESPONSE, settled but not the turn's answer, wears no border
+   either (owner request, 2026-10-14): no rule here colors it. */
 /* The answer the turn landed on, as against the commentary above it: green.
    `:not([data-variant="thinking"])` keeps it off reasoning — the structural
    half is that the daemon never names a thinking row as the answer. */
@@ -5140,7 +5128,7 @@ bubble-body.bubble-body { display: block; }
   }
 }
 /* AN INTERIM RESPONSE'S CORNER GROWS ITS BUBBLE TO THE RIGHT (owner request,
-   2026-10-13). Only the amber-bordered interim: a final answer and a thinking
+   2026-10-13). Only the interim: a final answer and a thinking
    bubble keep the reveal above.
 
    AT REST the corner is the token alone, `--usage-text-gap` from the end of
