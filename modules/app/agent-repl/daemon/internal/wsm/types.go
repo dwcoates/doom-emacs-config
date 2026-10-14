@@ -79,6 +79,10 @@ type Workspace struct {
 	// HiddenAt is when the user moved the workspace into the hidden section,
 	// set exactly while Hidden is (SetHidden).
 	HiddenAt *time.Time
+	// CacheLapse is a HIDDEN workspace's projected cache lapse, as its shim
+	// last stated it (SetCacheLapse); nil when none is known. Never set on a
+	// workspace that is not hidden.
+	CacheLapse *CacheLapse
 	// DweltAt is the last instant the user LEFT the workspace after looking at
 	// it for at least DwellThreshold (SetCurrent); nil when they never have.
 	DweltAt *time.Time

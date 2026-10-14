@@ -1548,6 +1548,11 @@ func (c *client) Hibernate(ctx context.Context, req *shimv1.HibernateRequest) (*
 	return unary(ctx, c, "hibernate", req, validateHibernateRequest, c.rpc.Hibernate)
 }
 
+// SetKeepalive holds the session's keep-alive cadence, or runs it again.
+func (c *client) SetKeepalive(ctx context.Context, req *shimv1.SetKeepaliveRequest) (*shimv1.SetKeepaliveResponse, error) {
+	return unary(ctx, c, "set_keepalive", req, validateSetKeepaliveRequest, c.rpc.SetKeepalive)
+}
+
 // KillSession ends the session, gracefully unless forced.
 //
 // The stand-down is latched BEFORE the verb goes, not after it answers: the

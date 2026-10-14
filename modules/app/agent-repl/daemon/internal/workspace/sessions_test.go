@@ -40,6 +40,10 @@ import (
 // fakeClient is a shimclient.Client whose StartSession answer the test
 // arranges.
 type fakeClient struct {
+	// keepalives is every SetKeepalive the daemon sent, in order, answered
+	// with keepaliveErr when it is set.
+	keepalives   []*shimv1.SetKeepaliveRequest
+	keepaliveErr error
 	shimclient.Client
 
 	// efforts is every SetSessionEffort asked; effortResponse and effortErr
@@ -280,6 +284,14 @@ func (c *fakeClient) KillSession(context.Context, *shimv1.KillSessionRequest) (*
 
 func (c *fakeClient) Hibernate(context.Context, *shimv1.HibernateRequest) (*shimv1.HibernateResponse, error) {
 	return &shimv1.HibernateResponse{}, nil
+}
+
+func (c *fakeClient) SetKeepalive(_ context.Context, req *shimv1.SetKeepaliveRequest) (*shimv1.SetKeepaliveResponse, error) {
+	c.keepalives = append(c.keepalives, req)
+	if c.keepaliveErr != nil {
+		return nil, c.keepaliveErr
+	}
+	return &shimv1.SetKeepaliveResponse{Result: &shimv1.SetKeepaliveResponse_Success{Success: &shimv1.SetKeepaliveSuccess{}}}, nil
 }
 
 func (c *fakeClient) PID() int { return c.pid }
