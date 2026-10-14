@@ -54,6 +54,29 @@ export interface RevealPlacement {
 export const REVEAL_MARGIN_PX = 8;
 
 /**
+ * The leading edge nearest PREFERRED that keeps a SIZE-long box inside an
+ * EXTENT-long viewport axis, either axis alike.
+ *
+ * It slides back only as far as the far edge demands. A box LONGER than the
+ * axis would make the furthest fitting edge smaller than the margin, so the
+ * lower bound is applied second and wins: overflowing the far edge is better
+ * than overflowing the near one, where the reader's text begins.
+ */
+export function clampEdge(preferred: number, size: number, extent: number): number {
+  const furthest = extent - REVEAL_MARGIN_PX - size;
+  return Math.max(REVEAL_MARGIN_PX, Math.min(preferred, furthest));
+}
+
+/**
+ * The height a box whose top edge is TOP may take inside VIEWPORT before it
+ * must scroll inside itself. Floored at zero so a box starting below the
+ * window yields no negative height for a caller to apply.
+ */
+export function heightBelow(top: number, viewport: Viewport): number {
+  return Math.max(0, viewport.height - top - REVEAL_MARGIN_PX);
+}
+
+/**
  * Place REVEAL under ANCHOR inside VIEWPORT.
  *
  * The left edge prefers the anchor's own left, so a reveal reads as belonging
@@ -61,17 +84,28 @@ export const REVEAL_MARGIN_PX = 8;
  */
 export function clampReveal(anchor: Rect, reveal: Rect, viewport: Viewport): RevealPlacement {
   const top = anchor.bottom;
+  return {
+    left: clampEdge(anchor.left, reveal.width, viewport.width),
+    top,
+    maxHeight: heightBelow(top, viewport),
+  };
+}
 
-  // The rightmost left edge that still fits the reveal's width on screen. A
-  // reveal WIDER than the viewport would make this smaller than the margin, so
-  // the lower bound is applied second and wins: overflowing right is better
-  // than overflowing left, where the reader's line of text begins.
-  const rightmost = viewport.width - REVEAL_MARGIN_PX - reveal.width;
-  const left = Math.max(REVEAL_MARGIN_PX, Math.min(anchor.left, rightmost));
-
-  // What is left of the window below the strip. Floored at zero so a strip
-  // taller than the window yields no negative height for a caller to apply.
-  const maxHeight = Math.max(0, viewport.height - top - REVEAL_MARGIN_PX);
-
-  return { left, top, maxHeight };
+/**
+ * Place REVEAL BESIDE ANCHOR, to its right, inside VIEWPORT.
+ *
+ * The reveal's top-left corner prefers the anchor's top-right corner, so it
+ * reads as growing out of the anchor's right edge on the anchor's own line,
+ * and covers nothing to the anchor's left. It slides left only as far as the
+ * right edge demands, and UP only as far as the bottom edge demands, so it
+ * keeps the anchor's line in its span for as long as the window allows; what
+ * still does not fit scrolls inside itself.
+ */
+export function clampBeside(anchor: Rect, reveal: Rect, viewport: Viewport): RevealPlacement {
+  const top = clampEdge(anchor.top, reveal.height, viewport.height);
+  return {
+    left: clampEdge(anchor.right, reveal.width, viewport.width),
+    top,
+    maxHeight: heightBelow(top, viewport),
+  };
 }

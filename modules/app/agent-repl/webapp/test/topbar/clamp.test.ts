@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { REVEAL_MARGIN_PX, clampReveal, type Rect } from "../../src/topbar/clamp.js";
+import {
+  REVEAL_MARGIN_PX,
+  clampBeside,
+  clampEdge,
+  clampReveal,
+  heightBelow,
+  type Rect,
+} from "../../src/topbar/clamp.js";
 
 const rect = (left: number, top: number, width: number, height: number): Rect => ({
   left,
@@ -50,5 +57,99 @@ describe("clampReveal", () => {
   it("never answers a negative height, however short the window", () => {
     expect(clampReveal(anchorAt(100, 60), rect(0, 0, 200, 300), { width: 1000, height: 10 })
       .maxHeight).toBe(0);
+  });
+});
+
+describe("clampEdge", () => {
+  it("keeps the preferred edge when the box fits", () => {
+    expect(clampEdge(100, 200, 1000)).toBe(100);
+  });
+
+  it("slides back only as far as the far edge demands", () => {
+    expect(clampEdge(900, 200, 1000)).toBe(1000 - REVEAL_MARGIN_PX - 200);
+  });
+
+  it("holds a box one margin clear of the near edge", () => {
+    expect(clampEdge(0, 200, 1000)).toBe(REVEAL_MARGIN_PX);
+  });
+
+  it("overflows the far edge rather than the near one for a box longer than the axis", () => {
+    expect(clampEdge(400, 1200, 1000)).toBe(REVEAL_MARGIN_PX);
+  });
+});
+
+describe("heightBelow", () => {
+  it("answers what is left of the window below the top, less the margin", () => {
+    expect(heightBelow(100, VIEWPORT)).toBe(800 - 100 - REVEAL_MARGIN_PX);
+  });
+
+  it("never answers a negative height", () => {
+    expect(heightBelow(900, VIEWPORT)).toBe(0);
+  });
+});
+
+describe("clampReveal shares the clamp arithmetic", () => {
+  it("answers clampEdge over the anchor's left and heightBelow under the anchor", () => {
+    // ARRANGE
+    const anchor = anchorAt(950, 40);
+    const reveal = rect(0, 0, 300, 900);
+    // ACT
+    const placement = clampReveal(anchor, reveal, VIEWPORT);
+    // ASSERT
+    expect(placement).toEqual({
+      left: clampEdge(anchor.left, reveal.width, VIEWPORT.width),
+      top: anchor.bottom,
+      maxHeight: heightBelow(anchor.bottom, VIEWPORT),
+    });
+  });
+});
+
+describe("clampBeside", () => {
+  /** A rail row: 190 wide from the window's left, 24 tall. */
+  const rowAt = (top: number): Rect => rect(8, top, 190, 24);
+
+  it("starts at the anchor's right edge, so it covers nothing to the anchor's left", () => {
+    expect(clampBeside(rowAt(100), rect(0, 0, 300, 200), VIEWPORT).left).toBe(198);
+  });
+
+  it("starts on the anchor's own line", () => {
+    expect(clampBeside(rowAt(100), rect(0, 0, 300, 200), VIEWPORT).top).toBe(100);
+  });
+
+  it("slides up only as far as the bottom edge demands", () => {
+    // ARRANGE: a 200-tall reveal beside a row at 700 would end at 900.
+    const placement = clampBeside(rowAt(700), rect(0, 0, 300, 200), VIEWPORT);
+    // ASSERT: held one margin clear of the bottom edge.
+    expect(placement.top).toBe(800 - REVEAL_MARGIN_PX - 200);
+  });
+
+  it("holds a reveal taller than the window one margin clear of the top edge", () => {
+    expect(clampBeside(rowAt(400), rect(0, 0, 300, 2000), VIEWPORT).top).toBe(REVEAL_MARGIN_PX);
+  });
+
+  it("caps the height at what is left below its top, so it scrolls instead of overflowing", () => {
+    expect(clampBeside(rowAt(400), rect(0, 0, 300, 2000), VIEWPORT).maxHeight).toBe(
+      800 - 2 * REVEAL_MARGIN_PX,
+    );
+  });
+
+  it("slides left when the reveal would overflow the right edge", () => {
+    expect(clampBeside(rect(700, 100, 190, 24), rect(0, 0, 300, 200), VIEWPORT).left).toBe(
+      1000 - REVEAL_MARGIN_PX - 300,
+    );
+  });
+
+  it("answers clampEdge on both axes and heightBelow under its own top", () => {
+    // ARRANGE
+    const anchor = rect(700, 100, 190, 24);
+    const reveal = rect(0, 0, 300, 200);
+    // ACT
+    const placement = clampBeside(anchor, reveal, VIEWPORT);
+    // ASSERT
+    expect(placement).toEqual({
+      left: clampEdge(anchor.right, reveal.width, VIEWPORT.width),
+      top: clampEdge(anchor.top, reveal.height, VIEWPORT.height),
+      maxHeight: heightBelow(anchor.top, VIEWPORT),
+    });
   });
 });
