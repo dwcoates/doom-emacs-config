@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -171,7 +172,6 @@ func (o *orchestrator) extendOnce(ctx context.Context, repo wsm.RepoKey) bool {
 		o.deps.Log.Global().Error(op, "could not read whether the queue is paused to extend its chain", dlog.Context{"repo": string(repo), "error": err.Error()})
 		return false
 	}
-	entries := inLine(stored)
 	o.mu.Lock()
 	chain := o.chains[repo]
 	if len(chain) == 0 || len(chain) >= o.queueWindow() || o.draining {
@@ -187,22 +187,27 @@ func (o *orchestrator) extendOnce(ctx context.Context, repo wsm.RepoKey) bool {
 		o.mu.Unlock()
 		return false
 	}
-	// THE CHAIN IS THE QUEUE'S FRONT, IN ORDER. Every member stands where its
-	// entry stands; anything else is a defect, said once here and never
-	// extended past.
-	for i, member := range chain {
+	front, entries := standingFront(chain, inLine(stored))
+	// THE CHAIN IS THE QUEUE'S FRONT, IN ORDER. Every member still in line
+	// stands where its entry stands; anything else is a defect, said once
+	// here and never extended past.
+	for i, member := range front {
 		if i >= len(entries) || entries[i].Workspace != member.ws {
+			seen := chainView(chain)
 			o.mu.Unlock()
 			o.deps.Log.Global().Error(op, "the chain does not stand at the front of its queue in queue order; it is not extended", dlog.Context{
-				"repo": string(repo), "member": string(member.ws), "place": i, "entries": len(entries)})
+				"repo": string(repo), "member": string(member.ws), "place": i, "entries": len(entries),
+				"chain": seen, "line": lineView(inLine(stored))})
 			return false
 		}
 	}
-	if len(chain) >= len(entries) {
+	// A CHAIN WHOSE EVERY MEMBER HAS LEFT THE LINE HAS NO TAIL to extend
+	// behind: the next entry is admitted as a head once they release.
+	if len(front) == 0 || len(front) >= len(entries) {
 		o.mu.Unlock()
 		return false
 	}
-	tail, next := chain[len(chain)-1], entries[len(chain)]
+	tail, next := front[len(front)-1], entries[len(front)]
 	doc, resuming := o.resumes[next.Workspace]
 	switch {
 	case resuming && !doc.Speculative:
@@ -327,6 +332,65 @@ func (o *orchestrator) unstart(ctx context.Context, r *run, err error) {
 		fields["error"] = err.Error()
 	}
 	o.deps.Log.Global().Info("daemon.merge.chain", "a merge that was starting behind the head let go before its lease; its entry waits in line as it was", fields)
+}
+
+// chainView names each member of a chain, in order, with how it stands: the
+// evidence a chain off its queue's front leaves nowhere else. Called with o.mu
+// held.
+func chainView(chain []*run) string {
+	parts := make([]string, 0, len(chain))
+	for _, member := range chain {
+		part := string(member.ws)
+		if member.speculative {
+			part += "(speculative)"
+		}
+		if member.leftLine {
+			part += "(left its line)"
+		}
+		parts = append(parts, part)
+	}
+	return strings.Join(parts, " ")
+}
+
+// lineView names each entry of a queue's line, in order, with its state.
+func lineView(line []wsm.MergeQueueEntry) string {
+	parts := make([]string, 0, len(line))
+	for _, entry := range line {
+		parts = append(parts, fmt.Sprintf("%s(%s)", entry.Workspace, entry.State))
+	}
+	return strings.Join(parts, " ")
+}
+
+// standingFront answers the chain's members still in line, and the queue's
+// line without the entries of the members that left it (run.leftLine).
+//
+// A RUN LEAVES ITS LINE BEFORE ITS CHAIN. Its teardown removes its queue
+// entry, then closes what it closes, and only then releases its slot; the
+// queue read the chain is checked against may fall on either side of that
+// removal. Leaving the run out of BOTH sides makes every such read agree with
+// the chain, because the mark precedes the removal: a read that still holds
+// the entry is answered without it, and a read that lacks it meets a chain
+// that no longer counts it. Called with o.mu held.
+func standingFront(chain []*run, line []wsm.MergeQueueEntry) ([]*run, []wsm.MergeQueueEntry) {
+	left := map[ids.WorkspaceID]bool{}
+	front := make([]*run, 0, len(chain))
+	for _, member := range chain {
+		if member.leftLine {
+			left[member.ws] = true
+			continue
+		}
+		front = append(front, member)
+	}
+	if len(left) == 0 {
+		return front, line
+	}
+	entries := make([]wsm.MergeQueueEntry, 0, len(line))
+	for _, entry := range line {
+		if !left[entry.Workspace] {
+			entries = append(entries, entry)
+		}
+	}
+	return front, entries
 }
 
 // inChainLocked reports whether ws has a run in the repository's chain.
