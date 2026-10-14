@@ -1151,7 +1151,8 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 /* THERE IS NO CHEVRON (owner ruling, 2026-09-14): "Hovering the workspace
    should have the same effect as opening the chevron currently does. No need
    for a chevron to show the dropdown on hover." The row opens its own panel
-   after a short intent delay; `row.ts` owns both delays. */
+   the moment the pointer reaches its duration; `row-hover.ts` owns the
+   gesture. */
 #ws-sidebar .kids { margin-left: 1.55rem; border-left: 1px solid var(--border); }
 #ws-sidebar .kids .row { padding-left: 0.55rem; }
 
