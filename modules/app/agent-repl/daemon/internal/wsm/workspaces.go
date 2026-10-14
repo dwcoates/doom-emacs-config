@@ -44,7 +44,7 @@ func normalizeDir(dir string) (string, error) {
 // the row, so it cannot drift from the closes it summarizes: CloseTurn's one
 // write of closed_at is the only edge, and turns_by_workspace keeps the MAX an
 // index range.
-const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at, result_end, result_read, hidden, hidden_at, dwelt_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, landed_head, landed_at, commit_count, place, merge_revealed, cache_lapses_at, cache_lapse_gated_tokens, closed_at, closed_by, ` +
+const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at, result_end, result_read, hidden, hidden_at, dwelt_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, landed_head, landed_at, commit_count, place, merge_revealed, cache_lapses_at, cache_lapse_gated_tokens, closure_at, closure_by, ` +
 	`EXISTS (SELECT 1 FROM creation_jobs WHERE creation_jobs.workspace_id = workspaces.id AND creation_jobs.one_shot = 1), ` +
 	`EXISTS (SELECT 1 FROM merge_queue WHERE merge_queue.workspace_id = workspaces.id ` +
 	`OR merge_queue.workspace_id IN (SELECT merge_ws.id FROM workspaces AS merge_ws WHERE merge_ws.merge_of = workspaces.id)), ` +
@@ -562,7 +562,7 @@ func requireOneRow(res sql.Result, what string) error {
 // workspace the daemon had closed is the user's kill.
 func (s *store) MarkClosed(ctx context.Context, id WorkspaceID, closure Closure) error {
 	const op = "daemon.wsm.mark_closed"
-	fields := dlog.Context{"workspace": string(id), "closed_at": closure.At, "closed_by": string(closure.By)}
+	fields := dlog.Context{"workspace": string(id), "closure_at": closure.At, "closure_by": string(closure.By)}
 	if !closure.By.valid() {
 		err := fmt.Errorf("wsm: workspace %s: unknown close cause %q", id, closure.By)
 		s.log.Error(op, "refused a close with no declared cause", withError(fields, err))
@@ -576,10 +576,10 @@ func (s *store) MarkClosed(ctx context.Context, id WorkspaceID, closure Closure)
 		}
 		// `restamp` is evaluated against the row as it stood BEFORE this
 		// update: SQLite reads every right-hand side off the old row.
-		const restamp = `(closed = 0 OR (? = 'user' AND closed_by IS NOT 'user'))`
+		const restamp = `(closed = 0 OR (? = 'user' AND closure_by IS NOT 'user'))`
 		res, err := tx.ExecContext(ctx, `UPDATE workspaces SET closed = 1, serving_instance = NULL, spawned_shim_pid = NULL, `+
-			`closed_at = CASE WHEN `+restamp+` THEN ? ELSE closed_at END, `+
-			`closed_by = CASE WHEN `+restamp+` THEN ? ELSE closed_by END WHERE id = ?`,
+			`closure_at = CASE WHEN `+restamp+` THEN ? ELSE closure_at END, `+
+			`closure_by = CASE WHEN `+restamp+` THEN ? ELSE closure_by END WHERE id = ?`,
 			string(closure.By), nanos(closure.At), string(closure.By), string(closure.By), id)
 		if err != nil {
 			return err
@@ -605,8 +605,8 @@ func (s *store) MarkClosed(ctx context.Context, id WorkspaceID, closure Closure)
 func (s *store) Reopen(ctx context.Context, id WorkspaceID) error {
 	return s.setWorkspaceColumns(ctx, "daemon.wsm.reopen", id, dlog.Context{},
 		workspaceColumn{name: "closed", value: false},
-		workspaceColumn{name: "closed_at", value: nil},
-		workspaceColumn{name: "closed_by", value: nil})
+		workspaceColumn{name: "closure_at", value: nil},
+		workspaceColumn{name: "closure_by", value: nil})
 }
 
 // SetSpawnedShimPID records, or clears with nil, the pid of a shim a daemon

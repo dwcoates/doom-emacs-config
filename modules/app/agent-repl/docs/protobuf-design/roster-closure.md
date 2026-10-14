@@ -30,7 +30,7 @@ restart.
   user killing a workspace the daemon had closed is the user's kill. A
   re-open clears the record.
 - Consequences:
-  - WSM gains `workspaces.closed_at` and `workspaces.closed_by` (layout 52),
+  - WSM gains `workspaces.closure_at` and `workspaces.closure_by` (layout 52),
     written in the same statement that sets `closed`. A row already closed
     when the columns land has neither: the daemon cannot vouch for when, or
     by whom, so the field is unset for it rather than guessed.
