@@ -67,16 +67,16 @@ ID names the workspace, NAME its row label, STATUS the status arm's
 protojson key symbol.  OVERRIDES replaces entries, so one test changes
 exactly one fact.
 
-Every non-optional field is populated.  `when' carries an unset oneof and
-`detail' carries no lines, both of which the proto comments declare legal
-— presence itself is the fact for RosterRowDetail's three lines."
+Every non-optional field is populated.  `when' carries `noTurnRunning', and
+`detail' carries no lines, which the proto comments declare legal —
+presence itself is the fact for RosterRowDetail's three lines."
   (append overrides
           `((workspace . ((workspace . ((id . ,id)
                                         (dir . ,(agent-repl-itest--fixture-dir (concat "roster-" id)))))))
             (name . ((text . ,name)))
             (,status . ())
             (current . ((current . :false)))
-            (when . ())
+            (when . ((noTurnRunning . ())))
             (detail . ())
             (closed . ((closed . :false)))
             (availability . ((available . ()))))))
@@ -303,7 +303,7 @@ fall back to, and inventing one would paint a wrong tab silently."
                (list `((workspace . ((workspace . ((id . "ws-x") (dir . ,(agent-repl-itest--fixture-dir "ws-x"))))))
                        (name . ((text . "ws-x")))
                        (current . ((current . :false)))
-                       (when . ())
+                       (when . ((noTurnRunning . ())))
                        (detail . ())
                        (closed . ((closed . :false)))))))
       ;; Assert.
@@ -321,7 +321,7 @@ Losing the roster would lose the ONLY source of which workspaces exist."
                (list `((workspace . ((workspace . ((id . "ws-x") (dir . ,(agent-repl-itest--fixture-dir "ws-x"))))))
                        (name . ((text . "ws-x")))
                        (current . ((current . :false)))
-                       (when . ())
+                       (when . ((noTurnRunning . ())))
                        (detail . ())
                        (closed . ((closed . :false)))))))
       (agent-repl-itest--await-log daemon "elisp.rpc.push-invalid" "error")
@@ -1657,7 +1657,7 @@ pinned directly."
                             (ready . nil)
                             (thinking . nil)
                             (current . ((current . :false)))
-                            (when . nil)
+                            (when . ((noTurnRunning . ())))
                             (detail . nil)
                             (closed . ((closed . :false))))]))))])))
           (task . ((sections . []) (openCount . ())))
@@ -1773,8 +1773,8 @@ the host re-key bug above and already holds independently of it.)"
       (should (equal (agent-repl--ws-by-ref-id "itest-collide-live") "live")))))
 
 ;; audit-3 #34
-(ert-deftest agent-repl-itest-roster-when-turn-ended-at-ms-decodes-from-a-decimal-string ()
-  "`when.turnEnded.atMs' rides the wire as a STRING and still decodes.
+(ert-deftest agent-repl-itest-roster-when-turn-running-started-at-ms-decodes-from-a-decimal-string ()
+  "`when.turnRunning.startedAtMs' rides the wire as a STRING and still decodes.
 fanout §2: Go emits int64 as a decimal string; a decoder mis-typing
 `atMs' as a bare number would refuse every real push while a fixture
 that always sends unset `when' stays green."
@@ -1785,19 +1785,19 @@ that always sends unset `when' stays green."
        daemon (agent-repl-itest-roster--roster
                (list (agent-repl-itest-roster--row
                       "itest-when-ac" "itest-when-ac" 'ready
-                      '(when . ((turnEnded . ((atMs . "1700000000000")))))))))
+                      '(when . ((turnRunning . ((startedAtMs . "1700000000000")))))))))
       (agent-repl-itest--wait-until
        (lambda () (agent-repl-roster-row-for-ws "itest-when-ac")) nil "the row to be indexed")
       ;; Assert.
       (should-not (agent-repl-itest--logged-p daemon "elisp.rpc.push-invalid" "error"))
       (let ((when-value (plist-get (agent-repl-roster-row-for-ws "itest-when-ac") :when)))
-        (should (eq (plist-get when-value :arm) :turn-ended))
-        (should (= (plist-get (plist-get when-value :value) :at-ms) 1700000000000))))))
+        (should (eq (plist-get when-value :arm) :turn-running))
+        (should (= (plist-get (plist-get when-value :value) :started-at-ms) 1700000000000))))))
 
 ;; audit-3 #34
 (ert-deftest agent-repl-itest-roster-when-merged-at-ms-decodes-from-a-decimal-string ()
   "`when.merged.atMs' rides the wire as a STRING and still decodes.
-The `merged' arm of the same oneof, pinned separately from `turnEnded'."
+The `merged' arm of the same oneof, pinned separately from `turnRunning'."
   ;; Arrange / Act.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-roster--with-subscription daemon
