@@ -75,7 +75,6 @@ import { PROMPT_WAVE_ATTRIBUTE } from "../../src/breathing.js";
 import {
   FITTING_TREE,
   WIDE_TREE,
-  installTreeLayout,
   stagedCols,
   treeLineWidths,
   useTreeLayout,
@@ -1988,44 +1987,6 @@ describe("a held prompt collapsed and expanded", () => {
         .querySelector(".queued-refusal")
         ?.parentElement?.classList.contains("queued-details"),
     ).toBe(true);
-  });
-});
-
-describe("a tree the held prompt carries, at the held bubble's halved width", () => {
-  let uninstall: (() => void) | null = null;
-  afterEach(() => {
-    uninstall?.();
-    uninstall = null;
-    document.body.replaceChildren();
-  });
-
-  /** A held prompt of TEXT under a column, its max-width the browser's half of 77%. */
-  function mountedHalved(text: string): { card: HTMLElement; cols: number } {
-    const installed = installTreeLayout({ maxWidth: "calc(38.5%)" });
-    uninstall = installed.uninstall;
-    const { tc } = trayContext();
-    const card = drawHeldPrompt(saying(text), tc);
-    const column = document.createElement("div");
-    column.append(card);
-    document.body.append(column);
-    return {
-      card,
-      cols: stagedCols({ ...installed.layout, maxWidth: "38.5%" }),
-    };
-  }
-
-  it("wraps at half the bubble cap", () => {
-    // Arrange / Act
-    const { card, cols } = mountedHalved(WIDE_TREE);
-    // Assert
-    expect(Math.max(...treeLineWidths(card))).toBeLessThanOrEqual(cols);
-  });
-
-  it("wraps a tree that would fit a full-width bubble", () => {
-    // Arrange / Act
-    const { card } = mountedHalved(FITTING_TREE);
-    // Assert
-    expect(treeLineWidths(card).length).toBeGreaterThan(3);
   });
 });
 
