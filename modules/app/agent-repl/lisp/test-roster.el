@@ -346,6 +346,25 @@ whose calls are the observation."
       (should-not (plist-get entry :collapsed))
       (should (equal (plist-get entry :label) "Recently Merged")))))
 
+(ert-deftest agent-repl-test-roster-walk-names-each-rows-section ()
+  "Every walked entry names the section its row sits in, children included."
+  ;; Arrange
+  (let ((roster (agent-repl-test-roster--roster
+                 :sections (list (agent-repl-test-roster--section
+                                  "alpha"
+                                  (list (agent-repl-test-roster--row
+                                         "p" "p" :ready
+                                         :children (list (agent-repl-test-roster--row "c" "c" :ready))))))
+                 :hidden (list (agent-repl-test-roster--row "h" "h" :ready))
+                 :merged (list (agent-repl-test-roster--row "m" "m" :merged)))))
+    ;; Act
+    (let ((sections (mapcar (lambda (e) (cons (agent-repl-roster-row-id (plist-get e :row))
+                                              (plist-get e :section)))
+                            (agent-repl-roster-walk roster))))
+      ;; Assert
+      (should (equal sections '(("p" . :repository) ("c" . :repository)
+                                ("h" . :hidden) ("m" . :merged)))))))
+
 (ert-deftest agent-repl-test-roster-walk-ignores-the-task-view ()
   "The task view is the same rows regrouped; walking it would double them."
   ;; Arrange — the fixture's task view carries the very same rows.
@@ -3275,7 +3294,40 @@ Each element is (WS LINE)."
       ;; Assert
       (should (equal (car (car drawn)) "one")))))
 
-;;;; ---- The one durable-instant reader ----
+;;;; ---- Reading the switcher's facts off a row ----
+
+(ert-deftest agent-repl-test-roster-row-closed-by-user-at-reads-a-users-close ()
+  "A user's close answers its instant."
+  (should (equal (agent-repl-roster-row-closed-by-user-at
+                  '(:closure (:at-ms 42 :by (:arm :user :value nil))))
+                 42)))
+
+(ert-deftest agent-repl-test-roster-row-closed-by-user-at-ignores-every-other-cause ()
+  "A close the user did not make answers nil."
+  (dolist (arm '(:agent :merge :daemon))
+    (should-not (agent-repl-roster-row-closed-by-user-at
+                 (list :closure (list :at-ms 42 :by (list :arm arm :value nil)))))))
+
+(ert-deftest agent-repl-test-roster-row-closed-by-user-at-of-an-unrecorded-close-is-nil ()
+  "A row with no close record answers nil."
+  (should-not (agent-repl-roster-row-closed-by-user-at '(:closure nil))))
+
+(ert-deftest agent-repl-test-roster-row-merged-at-reads-the-merged-arm ()
+  "A merged row's when-column carries when its merge landed."
+  (should (equal (agent-repl-roster-row-merged-at
+                  '(:when (:arm :merged :value (:at-ms 7))))
+                 7)))
+
+(ert-deftest agent-repl-test-roster-row-merged-at-of-an-unmerged-row-is-nil ()
+  "Any other when-arm answers nil."
+  (should-not (agent-repl-roster-row-merged-at
+               '(:when (:arm :hidden :value (:at-ms 7 :cache nil))))))
+
+(ert-deftest agent-repl-test-roster-row-commit-count-reads-the-detail ()
+  "The detail panel's count is the row's commit count, zero included."
+  (should (equal (agent-repl-roster-row-commit-count '(:detail (:commits (:count 0)))) 0))
+  (should (equal (agent-repl-roster-row-commit-count '(:detail (:commits (:count 3)))) 3))
+  (should-not (agent-repl-roster-row-commit-count '(:detail (:commits nil)))))
 
 (ert-deftest agent-repl-test-roster-row-instant-ms-reads-a-durable-instant ()
   "The one instant reader answers a row's `:at-ms', nil without the field."

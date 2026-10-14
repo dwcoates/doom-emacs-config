@@ -253,6 +253,22 @@ it leaves `:pending'."
   "Return non-nil when ROW is CLOSED: no tab, whatever its lifecycle."
   (eq (plist-get (plist-get row :closed) :closed) t))
 
+(defun agent-repl-roster-row-closed-by-user-at (row)
+  "Return the epoch-ms instant the USER closed ROW, or nil.
+Nil for an open row, for one the daemon, an agent or a merge closed, and
+for a close that predates the daemon's record (`RosterRowClosure')."
+  (let ((closure (plist-get row :closure)))
+    (and (eq (plist-get (plist-get closure :by) :arm) :user)
+         (plist-get closure :at-ms))))
+
+(defun agent-repl-roster-row-merged-at (row)
+  "Return the epoch-ms instant ROW's merge landed, or nil.
+The when-column's `merged' arm carries it, and MERGED WINS that column's
+precedence, so every merged row states it."
+  (let ((when-column (plist-get row :when)))
+    (and (eq (plist-get when-column :arm) :merged)
+         (plist-get (plist-get when-column :value) :at-ms))))
+
 (defun agent-repl-roster-row-instant-ms (row field)
   "Return the epoch ms of ROW's durable instant FIELD, or nil.
 FIELD is the row key of one of the durable instants (`:last-selected',
@@ -260,6 +276,11 @@ FIELD is the row key of one of the durable instants (`:last-selected',
 decoder.  nil when ROW is nil or does not carry FIELD.  The one reader
 every durable-instant accessor goes through."
   (plist-get (plist-get row field) :at-ms))
+
+(defun agent-repl-roster-row-commit-count (row)
+  "Return how many commits ROW's branch holds past its merge-base, or nil.
+Nil when the daemon has no count to state; zero is a real count."
+  (plist-get (plist-get (plist-get row :detail) :commits) :count))
 
 (defun agent-repl-roster-row-attention-p (row)
   "Return non-nil when ROW carries the attention marker."
@@ -306,14 +327,18 @@ its branch is in flight.  The tab bar paints its [N] run purple from it
 
 ;;;; ---- The walk ---------------------------------------------------------
 
-(defun agent-repl-roster--walk-rows (rows label acc &optional collapsed)
+(defun agent-repl-roster--walk-rows (rows label section acc &optional collapsed)
   "Walk ROWS depth-first under section LABEL, pushing entries onto ACC.
-Each entry is `(:row ROW :label LABEL :collapsed COLLAPSED)'; COLLAPSED is
-non-nil when the section's repository is folded.  A row precedes its
-children, which is the render order the contract's nesting states."
+Each entry is `(:row ROW :label LABEL :section SECTION :collapsed
+COLLAPSED)'.  SECTION names which of the roster's sections the row sits
+in -- `:repository', `:hidden' or `:merged' -- so a reader that treats
+them differently asks the walk rather than re-deriving membership from
+a row's own fields.  COLLAPSED is non-nil when the section's repository
+is folded.  A row precedes its children, which is the render order the
+contract's nesting states."
   (dolist (row rows)
-    (push (list :row row :label label :collapsed collapsed) (car acc))
-    (agent-repl-roster--walk-rows (plist-get row :children) label acc collapsed))
+    (push (list :row row :label label :section section :collapsed collapsed) (car acc))
+    (agent-repl-roster--walk-rows (plist-get row :children) label section acc collapsed))
   acc)
 
 (defun agent-repl-roster--section-collapsed-p (section)
@@ -327,7 +352,7 @@ so its workspaces leave the bar exactly as that repository's others do."
   (eq (plist-get (plist-get group :drawn) :arm) :repository-collapsed))
 
 (defun agent-repl-roster-walk (roster)
-  "Return ROSTER's rows in tab order: `(:row ROW :label REPO-LABEL)' entries.
+  "Return ROSTER's rows in tab order, as `agent-repl-roster--walk-rows' entries.
 Repository sections in the resolver's order, each section's rows
 depth-first, then the hidden section's rows, then the recently-merged
 band's rows, group by group.  THE TASK VIEW IS IGNORED — it is the same
@@ -344,12 +369,14 @@ hidden from the bar whichever way it is folded."
       (agent-repl-roster--walk-rows
        (plist-get (plist-get section :rows) :rows)
        (plist-get (plist-get (plist-get section :header) :label) :text)
+       :repository
        acc
        (agent-repl-roster--section-collapsed-p section)))
     (let ((hidden (plist-get roster :hidden)))
       (agent-repl-roster--walk-rows
        (plist-get (plist-get hidden :rows) :rows)
        (plist-get (plist-get (plist-get hidden :header) :label) :text)
+       :hidden
        acc
        t))
     (let* ((merged (plist-get roster :recently-merged))
@@ -358,6 +385,7 @@ hidden from the bar whichever way it is folded."
         (agent-repl-roster--walk-rows
          (plist-get (plist-get group :rows) :rows)
          label
+         :merged
          acc
          (agent-repl-roster--merged-group-collapsed-p group))))
     (nreverse (car acc))))
@@ -366,7 +394,7 @@ hidden from the bar whichever way it is folded."
   "Return non-nil when SECTION's rows include the workspace ID."
   (let ((acc (list nil)))
     (agent-repl-roster--walk-rows
-     (plist-get (plist-get section :rows) :rows) nil acc)
+     (plist-get (plist-get section :rows) :rows) nil :repository acc)
     (seq-some (lambda (entry)
                 (equal (agent-repl-roster-row-id (plist-get entry :row)) id))
               (car acc))))
