@@ -837,6 +837,16 @@ this directly and own their own caching."
                    (expand-file-name raw dir))))
         (agent-repl--path-canonical abs)))))
 
+(defun agent-repl--main-worktree-for-dir (dir)
+  "Return the canonical main worktree of the repository holding DIR, or nil.
+The main worktree is the parent of the git common-dir
+`agent-repl--repo-key-for-dir' resolves, so a DIR inside a linked
+worktree still names the repository's main checkout.  Returns nil
+exactly when `agent-repl--repo-key-for-dir' does (DIR nil or not in a
+git repository); callers own surfacing that."
+  (when-let* ((common-dir (agent-repl--repo-key-for-dir dir)))
+    (agent-repl--path-canonical (file-name-directory common-dir))))
+
 (defun agent-repl--ws-repo-key (ws)
   "Return WS's repo key: the canonical git common-dir of its project-dir.
 Cached on the workspace plist as `:group-key' so each workspace shells

@@ -316,6 +316,136 @@ Guards against the untracked-fallback regressing the tracked path."
       (agent-repl-magit-status-workspace)
       (should (null (agent-repl--ws-get "test-ws" :fullscreen-config))))))
 
+;;;; ---- Tests: agent-repl-magit-status-main-worktree (SPC g G) ----
+
+(defmacro agent-repl-test-magit--with-common-dir (common-dir &rest body)
+  "Run BODY with every git common-dir lookup answering COMMON-DIR.
+Paths canonicalize by trailing-slash removal alone, so the fixture
+directories need not exist."
+  (declare (indent 1))
+  `(cl-letf (((symbol-function 'agent-repl--git-string-quiet) (lambda (&rest _) ,common-dir))
+             ((symbol-function 'agent-repl--path-canonical) #'directory-file-name))
+     ,@body))
+
+(ert-deftest agent-repl-test-magit-status-main-worktree-opens-main-checkout ()
+  "Opens magit's status at the main worktree of the workspace's repository."
+  (agent-repl-test--with-clean-state
+    (let ((magit-status-args nil))
+      (agent-repl-test-magit--with-common-dir "/repos/doom/.git"
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                  ((symbol-function 'agent-repl--ws-dir) (lambda (_ws) "/repos/doom-worktrees/feat"))
+                  ((symbol-function 'window-parameter) (lambda (_w _p) nil))
+                  ((symbol-function 'magit-status-setup-buffer)
+                   (lambda (&rest args) (setq magit-status-args args))))
+          (agent-repl-magit-status-main-worktree)
+          (should (equal magit-status-args '("/repos/doom/"))))))))
+
+(ert-deftest agent-repl-test-magit-status-main-worktree-resolves-from-workspace-dir ()
+  "Resolves the main worktree from the workspace's own directory."
+  (agent-repl-test--with-clean-state
+    (let ((asked nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'agent-repl--ws-dir) (lambda (_ws) "/repos/doom-worktrees/feat"))
+                ((symbol-function 'agent-repl--main-worktree-for-dir)
+                 (lambda (dir) (push dir asked) "/repos/doom"))
+                ((symbol-function 'window-parameter) (lambda (_w _p) nil))
+                ((symbol-function 'magit-status-setup-buffer) #'ignore))
+        (agent-repl-magit-status-main-worktree)
+        (should (equal asked '("/repos/doom-worktrees/feat")))))))
+
+(ert-deftest agent-repl-test-magit-status-main-worktree-untracked-resolves-from-default-directory ()
+  "An untracked workspace resolves the main worktree from `default-directory'."
+  (agent-repl-test--with-clean-state
+    (let ((asked nil)
+          (default-directory "/repos/doom-worktrees/other/"))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "untracked-ws"))
+                ((symbol-function 'agent-repl--main-worktree-for-dir)
+                 (lambda (dir) (push dir asked) "/repos/doom"))
+                ((symbol-function 'window-parameter) (lambda (_w _p) nil))
+                ((symbol-function 'magit-status-setup-buffer) #'ignore))
+        (agent-repl-magit-status-main-worktree)
+        (should (equal asked '("/repos/doom-worktrees/other/")))))))
+
+(ert-deftest agent-repl-test-magit-status-main-worktree-binds-same-window-display-fn ()
+  "Opens with the same-window display function, exactly as `SPC g g' does."
+  (agent-repl-test--with-clean-state
+    (let ((observed-fn nil))
+      (agent-repl-test-magit--with-common-dir "/repos/doom/.git"
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                  ((symbol-function 'agent-repl--ws-dir) (lambda (_ws) "/repos/doom-worktrees/feat"))
+                  ((symbol-function 'window-parameter) (lambda (_w _p) nil))
+                  ((symbol-function 'magit-status-setup-buffer)
+                   (lambda (&rest _) (setq observed-fn magit-display-buffer-function))))
+          (agent-repl-magit-status-main-worktree)
+          (should (eq observed-fn #'agent-repl--magit-display-buffer-same-window)))))))
+
+(ert-deftest agent-repl-test-magit-status-main-worktree-clears-fullscreen-config ()
+  "A tracked workspace's `:fullscreen-config' is cleared, exactly as `SPC g g' does."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "test-ws" :project-dir "/repos/doom-worktrees/feat")
+    (agent-repl--ws-put "test-ws" :fullscreen-config 'fake-config)
+    (agent-repl-test-magit--with-common-dir "/repos/doom/.git"
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'window-parameter) (lambda (_w _p) nil))
+                ((symbol-function 'magit-status-setup-buffer) #'ignore))
+        (agent-repl-magit-status-main-worktree)
+        (should (null (agent-repl--ws-get "test-ws" :fullscreen-config)))))))
+
+(ert-deftest agent-repl-test-magit-status-main-worktree-refuses-outside-a-repository ()
+  "Outside a git repository: a `user-error', an error log, and no magit."
+  (agent-repl-test--with-clean-state
+    (let ((magit-calls 0)
+          (logged nil))
+      (agent-repl-test-magit--with-common-dir "fatal: not a git repository"
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                  ((symbol-function 'agent-repl--ws-dir) (lambda (_ws) "/tmp/nowhere"))
+                  ((symbol-function 'window-parameter) (lambda (_w _p) nil))
+                  ((symbol-function 'agent-repl--error)
+                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged)))
+                  ((symbol-function 'magit-status-setup-buffer)
+                   (lambda (&rest _) (cl-incf magit-calls))))
+          (should-error (agent-repl-magit-status-main-worktree) :type 'user-error)
+          (should (= magit-calls 0))
+          (should (equal logged
+                         '("magit-status-main-worktree: ws=test-ws ws-dir=/tmp/nowhere cause=not-a-git-repository"))))))))
+
+(ert-deftest agent-repl-test-magit-status-main-worktree-refusal-leaves-state-untouched ()
+  "A refusal neither clears `:fullscreen-config' nor pops out of a side window."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "test-ws" :project-dir "/tmp/nowhere")
+    (agent-repl--ws-put "test-ws" :fullscreen-config 'fake-config)
+    (let ((select-calls 0))
+      (agent-repl-test-magit--with-common-dir "fatal: not a git repository"
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                  ((symbol-function 'window-parameter)
+                   (lambda (_win param) (and (eq param 'window-side) 'left)))
+                  ((symbol-function 'window-main-window) (lambda (&rest _) 'fake-main))
+                  ((symbol-function 'select-window) (lambda (_w) (cl-incf select-calls)))
+                  ((symbol-function 'agent-repl--error) #'ignore)
+                  ((symbol-function 'magit-status-setup-buffer) #'ignore))
+          (should-error (agent-repl-magit-status-main-worktree) :type 'user-error)
+          (should (= select-calls 0))
+          (should (eq (agent-repl--ws-get "test-ws" :fullscreen-config) 'fake-config)))))))
+
+(ert-deftest agent-repl-test-magit-status-commands-share-the-workspace-opener ()
+  "`SPC g g' and `SPC g G' both open through `agent-repl--magit-status-workspace-open'."
+  (let ((target-fns nil))
+    (cl-letf (((symbol-function 'agent-repl--magit-status-workspace-open)
+               (lambda (target-fn) (push target-fn target-fns))))
+      (agent-repl-magit-status-workspace)
+      (agent-repl-magit-status-main-worktree)
+      (should (= (length target-fns) 2))
+      (should (eq (car target-fns) #'agent-repl--magit-main-worktree-target))
+      (should (equal (funcall (cadr target-fns) "ws" "/repos/doom-worktrees/feat")
+                     "/repos/doom-worktrees/feat")))))
+
+(ert-deftest agent-repl-test-magit-status-main-worktree-bound-to-spc-g-G ()
+  "`SPC g G' names the main-worktree command in the module's leader bindings."
+  (with-temp-buffer
+    (insert-file-contents (expand-file-name "magit.el" agent-repl-test--module-dir))
+    (should (re-search-forward
+             "\"g G\" #'agent-repl-magit-status-main-worktree" nil t))))
+
 ;;;; ---- Tests: agent-repl-magit-status-workspace (fullscreen panel handling) ----
 
 (ert-deftest agent-repl-test-magit-status-workspace-fullscreen-closes-input-window ()
