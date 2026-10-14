@@ -117,11 +117,13 @@ var suiteRules = []suiteRule{
 	// daemon's integration tests (daemon/integration) with it.
 	{Kind: matchSubtree, Path: moduleRoot + "webapp/", Suites: []string{"webapp", "build-frontend-harness", "e2e", "e2e-emacs"}},
 	{Kind: matchSubtree, Path: moduleRoot + "daemon/", Suites: []string{"daemon", "e2e", "e2e-emacs"}},
-	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/claude/shim/", Suites: []string{"shim", "e2e", "e2e-emacs"}},
+	// The sidecar's mocked vendor IS the shim's fake mode, built from this tree.
+	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/claude/shim/", Suites: []string{"shim", "sidecar", "e2e", "e2e-emacs"}},
 	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/claude/shim-sidecar/", Suites: []string{"sidecar", "e2e", "e2e-emacs"}},
 	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/shim-store/", Suites: []string{"store", "e2e", "e2e-emacs"}},
-	// The shim's integration files spawn the real lock helper.
-	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/shim-lock/", Suites: []string{"lock", "shim", "e2e", "e2e-emacs"}},
+	// The shim's integration files, and the sidecar's mocked vendor, spawn the
+	// real lock helper.
+	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/shim-lock/", Suites: []string{"lock", "shim", "sidecar", "e2e", "e2e-emacs"}},
 
 	// SHARED BY SEVERAL SYSTEMS: their consumers, plus the end-to-end suites.
 	// The logging module's Go half is replaced into the daemon, the store, the
@@ -149,7 +151,7 @@ var suiteRules = []suiteRule{
 	// shim's AGENTS.md, a testdata MANIFEST.md, a skill's SKILL.md).
 	{Kind: matchSubtree, Path: moduleRoot + "docs/", Suites: []string{}},
 	{Kind: matchSubtree, Path: moduleRoot + "plans/", Suites: []string{}},
-	{Kind: matchExact, Path: moduleRoot + "metaprompt.md", Suites: []string{"shim", "e2e", "e2e-emacs"}},
+	{Kind: matchExact, Path: moduleRoot + "metaprompt.md", Suites: []string{"shim", "sidecar", "e2e", "e2e-emacs"}},
 	{Kind: matchDirFile, Path: moduleRoot, Suffix: ".md", Suites: []string{}},
 
 	// The module's elisp: every source and suite lives in lisp/, while the three
