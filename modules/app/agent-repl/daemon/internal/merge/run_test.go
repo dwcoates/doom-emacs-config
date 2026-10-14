@@ -448,6 +448,33 @@ func TestOpenTabStampsTheRoundWithItsLedgerStart(t *testing.T) {
 	}
 }
 
+// TestATabRoundsLedgerWritesOutliveTheRunsCancellation covers a cancel that
+// lands between a round's exiting check and its ledger write (the daemon's
+// drain, an abandon): the interval the check decided on is still recorded,
+// begun and ended, so no interval is left open with nothing to close it.
+func TestATabRoundsLedgerWritesOutliveTheRunsCancellation(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	r := ledgeredRun(t, h)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act.
+	round := r.openTab(ctx, TabRebasing)
+	r.closeTab(ctx, round, "failed")
+
+	// Assert.
+	intervals := ledgerIntervals(h)
+	if len(intervals) != 2 || intervals[1].EndedAt == nil || intervals[1].Outcome != "failed" {
+		t.Fatalf("the ledger holds %+v, want the round begun and then ended as failed", intervals)
+	}
+	for _, rec := range h.logs.Records() {
+		if rec.Level == "error" && (rec.Operation == "daemon.merge.tab_open" || rec.Operation == "daemon.merge.tab_close") {
+			t.Fatalf("a ledger write was refused: %+v", rec)
+		}
+	}
+}
+
 // TestOpenTabMakesTheRoundTheActiveOne covers what the queue's front reads:
 // the round opened last, with its own start.
 func TestOpenTabMakesTheRoundTheActiveOne(t *testing.T) {

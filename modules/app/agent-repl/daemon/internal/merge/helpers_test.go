@@ -434,7 +434,11 @@ func (f *fakeDB) OpenMergeLedger(_ context.Context, id ids.WorkspaceID, lease ws
 	return nil
 }
 
-func (f *fakeDB) RecordTabInterval(_ context.Context, lease wsm.LeaseID, interval wsm.TabInterval) error {
+func (f *fakeDB) RecordTabInterval(ctx context.Context, lease wsm.LeaseID, interval wsm.TabInterval) error {
+	// As the store does: a write on a cancelled context begins no transaction.
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("wsm: begin transaction: %w", err)
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for id, entries := range f.ledger {
