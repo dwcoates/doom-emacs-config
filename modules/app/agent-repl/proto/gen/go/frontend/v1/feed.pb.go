@@ -682,7 +682,8 @@ type FeedRow struct {
 	//
 	// Set only on ROOT-feed rows that have LANDED: a user prompt, an agent
 	// prompt, and a settled (`success`) response bubble that is not interim.
-	// A THINKING bubble and an INTERIM response never carry it (owner
+	// A THINKING bubble and an INTERIM response (`interim` set and
+	// `final_answer` unset) never carry it (owner
 	// specification, 2026-10-14, extended to the interim the same day): a click
 	// on either only expands it, with no selection. A response loses it on the
 	// publication that proves it interim. A

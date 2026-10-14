@@ -238,6 +238,7 @@ func TestSelectableMarkdownIsTheOneRule(t *testing.T) {
 		{name: "a final response", row: responseRowWith(&frontendv1.FeedResponse{Result: settled("the answer"), FinalAnswer: true}), wantOK: true, wantMarkup: "the answer"},
 		{name: "a settled response that is its turn's latest row", row: responseRowWith(&frontendv1.FeedResponse{Result: settled("meanwhile")}), wantOK: true, wantMarkup: "meanwhile"},
 		{name: "an interim response is never selectable", row: responseRowWith(&frontendv1.FeedResponse{Result: settled("meanwhile"), Interim: true}), wantOK: false},
+		{name: "a final response flagged interim stays selectable", row: responseRowWith(&frontendv1.FeedResponse{Result: settled("the answer"), Interim: true, FinalAnswer: true}), wantOK: true, wantMarkup: "the answer"},
 		{name: "a thinking response is never selectable", row: responseRowWith(&frontendv1.FeedResponse{Result: settled("pondering"), Thinking: true}), wantOK: false},
 		{name: "a response still arriving", row: responseRowWith(&frontendv1.FeedResponse{Result: &frontendv1.FeedResponse_Update{Update: &frontendv1.FeedResponseUpdate{
 			Prose: &frontendv1.FeedResponseProse{Markdown: "partial"},

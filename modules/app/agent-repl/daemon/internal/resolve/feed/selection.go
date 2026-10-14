@@ -211,9 +211,13 @@ func bubbleMarkdown(row *frontendv1.FeedRow) (string, bool) {
 // (SelectableText) both go through it, so a row is selectable exactly when its
 // text can be read as a selection's. The interim flag is stamped before the
 // selectable one on the one write path (`upsert`), so the edge that proves a
-// response interim republishes it unselectable.
+// response interim republishes it unselectable. A response is INTERIM here
+// exactly as the webapp draws one (response.ts `isInterimResponse`): flagged
+// interim and not the turn's answer, which stays selectable whatever follows
+// it (a broken one is no bubble with text at all).
 func selectableMarkdown(row *frontendv1.FeedRow) (string, bool) {
-	if resp := row.GetActivity().GetResponse(); resp.GetThinking() || resp.GetInterim() {
+	resp := row.GetActivity().GetResponse()
+	if resp.GetThinking() || (resp.GetInterim() && !resp.GetFinalAnswer()) {
 		return "", false
 	}
 	return bubbleMarkdown(row)
