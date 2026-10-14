@@ -54,11 +54,9 @@ func TestTheHeadWinsTheRaceWhenItsGatePassesFirst(t *testing.T) {
 	// Arrange: the head holds in its gate, so the merge behind it waits in
 	// line for the test turn.
 	c := newChain(t)
-	_, releaseHead := c.runner.hold(c.dirs[theWorkspace])
 	enqueue(t, c.h)
 	c.queue(t, "ws-b", "b1")
-	done := admitAsync(c.h, context.Background())
-	c.awaitLined(t, "ws-b")
+	releaseHead, done := c.headHoldsTheTurn(t, "ws-b")
 
 	// Act: the head lands; the merge behind it starts over on the new tip as
 	// the head and lands.
@@ -136,15 +134,16 @@ func TestAHeadThatLosesTheRaceMidConflictFinishesItsStepThenRebasesOntoTheNewTip
 }
 
 func TestATakeBackThatFailsAfterTheRaceIsRecordedAndLeavesTheLoserSuspended(t *testing.T) {
-	// Arrange: the head holds in its gate; the store cannot answer the
-	// take-back's read once the head is suspended.
+	// Arrange: the head waits to ask for its test turn while the merge behind
+	// it holds in its gate; the store cannot answer the take-back's read once
+	// the head is suspended.
 	c := newChain(t)
-	headGate, _ := c.runner.hold(c.dirs[theWorkspace])
+	releaseHeadTurn := c.parkTurn(theWorkspace)
+	defer releaseHeadTurn()
 	enqueue(t, c.h)
 	c.queue(t, "ws-b", "b1")
 	behindGate, releaseBehind := c.runner.hold(c.dirs["ws-b"])
 	done := admitAsync(c.h, context.Background())
-	<-headGate
 	<-behindGate
 	c.h.db.mu.Lock()
 	c.h.db.allQueuesErr = errors.New("the store is closed")
