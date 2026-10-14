@@ -138,6 +138,7 @@ var migrations = []migration{
 	{To: 45, Name: "async_merge_landing_effects", Kind: MigrationAdditive, DDL: asyncLandingDDL},
 	{To: 46, Name: "sidebar_view_open_folded", Kind: MigrationAdditive, DDL: openFoldedDDL},
 	{To: 47, Name: "fork_lineage", Kind: MigrationAdditive, DDL: forkLineageDDL},
+	{To: 48, Name: "hidden_cache_lapse", Kind: MigrationAdditive, DDL: cacheLapseDDL},
 }
 
 // mergeQueueFrontDDL records whether a merge asked to go to the FRONT of its
