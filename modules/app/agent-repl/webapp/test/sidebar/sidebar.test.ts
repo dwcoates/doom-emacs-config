@@ -1179,3 +1179,56 @@ describe("the rail reports where the pointer is to the row hover gesture", () =>
     expect(ws.classList.contains("open")).toBe(true);
   });
 });
+
+// A PAUSED QUEUE ON THE LIVE RAIL (owner ruling, 2026-10-14): each roster
+// push is drawn as it stands, so the pause greys a repository's merges and
+// the resume brings them back with no reload.
+describe("the rail under a paused merge queue", () => {
+  /** A roster whose repo-1 merges ws-1 and whose repo-2 merges ws-2; PAUSED names the paused repositories. */
+  function mergingRoster(paused: ReadonlySet<string>) {
+    return roster({
+      repos: [
+        repoSection({
+          id: "repo-1",
+          rows: [row({ id: "ws-1", status: { case: "merging", value: {} }, mergePaused: paused.has("repo-1") })],
+        }),
+        repoSection({
+          id: "repo-2",
+          rows: [row({ id: "ws-2", status: { case: "merging", value: {} }, mergePaused: paused.has("repo-2") })],
+        }),
+      ],
+    });
+  }
+  const markOf = (host: Element, id: string): Element | null => host.querySelector(`[data-roster-row='${id}'] .st`);
+  const nameOf = (host: Element, id: string): Element | null => host.querySelector(`[data-roster-row='${id}'] .name`);
+
+  it("greys the paused repository's merge once the pause is pushed", async () => {
+    const host = document.createElement("nav");
+    mountSidebar(host, ctxFor([mergingRoster(new Set()), mergingRoster(new Set(["repo-1"]))]), { timers: fakeTimers() });
+    await settle();
+    expect([markOf(host, "ws-1")?.classList.contains("ink-grey"), nameOf(host, "ws-1")?.classList.contains("breathes")]).toEqual([
+      true,
+      false,
+    ]);
+  });
+
+  it("leaves the other repository's merge purple and breathing", async () => {
+    const host = document.createElement("nav");
+    mountSidebar(host, ctxFor([mergingRoster(new Set(["repo-1"]))]), { timers: fakeTimers() });
+    await settle();
+    expect([markOf(host, "ws-2")?.classList.contains("ink-grey"), nameOf(host, "ws-2")?.classList.contains("breathes")]).toEqual([
+      false,
+      true,
+    ]);
+  });
+
+  it("brings the merge back once the resume is pushed", async () => {
+    const host = document.createElement("nav");
+    mountSidebar(host, ctxFor([mergingRoster(new Set(["repo-1"])), mergingRoster(new Set())]), { timers: fakeTimers() });
+    await settle();
+    expect([markOf(host, "ws-1")?.classList.contains("ink-grey"), nameOf(host, "ws-1")?.classList.contains("breathes")]).toEqual([
+      false,
+      true,
+    ]);
+  });
+});

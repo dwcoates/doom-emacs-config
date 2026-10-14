@@ -19,6 +19,7 @@ import {
   type BandReturn,
   drawRosterRowOneShot,
   drawRosterRowAsyncMerging,
+  drawRosterRowMergePaused,
   mergedToday,
   drawRosterRowWhen,
   drawStatusMark,
@@ -178,7 +179,7 @@ describe("the status mark", () => {
   });
 
   it("holds an async merge's glyph still", () => {
-    expect(drawStatusMark("ready", "R.status", { oneShot: false, asyncMerging: true }).classList.contains("breathes")).toBe(false);
+    expect(drawStatusMark("ready", "R.status", { oneShot: false, asyncMerging: true, mergePaused: false }).classList.contains("breathes")).toBe(false);
   });
 });
 
@@ -1953,6 +1954,62 @@ describe("the async-merging marker", () => {
     const mark = row({ id: "ws-1", asyncMerging: true }).asyncMerging;
     expect(mark).toBeDefined();
     expect(drawRosterRowAsyncMerging(mark!, "R.asyncMerging")).toBe(true);
+  });
+});
+
+// A PAUSED QUEUE (owner ruling, 2026-10-14): the merge indicator greys and
+// the name stops breathing for the merge, keeping its color.
+describe("the merge-paused marker", () => {
+  const nameOf = (drawn: HTMLElement): HTMLElement => lineOf(drawn).querySelector(".name") as HTMLElement;
+
+  it("greys a paused merging row's glyph", () => {
+    const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "merging", value: {} }, mergePaused: true }), sidebarContext(), "R");
+    expect(dotOf(drawn).classList.contains("ink-grey")).toBe(true);
+  });
+
+  it("stops a paused merging row's name breathing", () => {
+    const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "merging", value: {} }, mergePaused: true }), sidebarContext(), "R");
+    expect(nameOf(drawn).classList.contains("breathes")).toBe(false);
+  });
+
+  it("keeps a paused merging row's purple tone", () => {
+    const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "merging", value: {} }, mergePaused: true }), sidebarContext(), "R");
+    expect([drawn.classList.contains("tone-purple"), dotOf(drawn).classList.contains("tone-purple")]).toEqual([true, true]);
+  });
+
+  it("greys a paused merge_queued row's glyph", () => {
+    const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "mergeQueued", value: {} }, mergePaused: true }), sidebarContext(), "R");
+    expect([dotOf(drawn).classList.contains("ink-grey"), dotOf(drawn).classList.contains("ink-purple")]).toEqual([true, false]);
+  });
+
+  it("greys a paused async merge's mark and stops the name breathing", () => {
+    const drawn = drawRosterRow(
+      row({ id: "ws-1", status: { case: "ready", value: {} }, asyncMerging: true, mergePaused: true }),
+      sidebarContext(),
+      "R",
+    );
+    expect([
+      dotOf(drawn).getAttribute("data-glyph"),
+      dotOf(drawn).classList.contains("ink-grey"),
+      dotOf(drawn).classList.contains("ink-purple"),
+      nameOf(drawn).classList.contains("breathes"),
+      drawn.classList.contains("tone-green"),
+    ]).toEqual(["merge", true, false, false, true]);
+  });
+
+  it("keeps a thinking row breathing under a paused async merge", () => {
+    const drawn = drawRosterRow(
+      row({ id: "ws-1", status: { case: "thinking", value: {} }, asyncMerging: true, mergePaused: true }),
+      sidebarContext(),
+      "R",
+    );
+    expect(nameOf(drawn).classList.contains("breathes")).toBe(true);
+  });
+
+  it("answers true for a merge-paused marker that is there", () => {
+    const mark = row({ id: "ws-1", mergePaused: true }).mergePaused;
+    expect(mark).toBeDefined();
+    expect(drawRosterRowMergePaused(mark!, "R.mergePaused")).toBe(true);
   });
 });
 

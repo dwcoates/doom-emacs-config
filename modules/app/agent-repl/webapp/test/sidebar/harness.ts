@@ -192,6 +192,8 @@ export function row(init: {
   opening?: boolean;
   /** The ASYNC-MERGING marker: present while the workspace's own branch merges async. */
   asyncMerging?: boolean;
+  /** The MERGE-PAUSED marker: present while the queue holding the row's merge is paused. */
+  mergePaused?: boolean;
   /** The durable last-selected instant, epoch ms; omitted = never selected. */
   lastSelectedAtMs?: bigint;
   priority?: string;
@@ -215,6 +217,7 @@ export function row(init: {
     ...(init.oneShot === true ? { oneShot: {} } : {}),
     ...(init.opening === true ? { opening: {} } : {}),
     ...(init.asyncMerging === true ? { asyncMerging: {} } : {}),
+    ...(init.mergePaused === true ? { mergePaused: {} } : {}),
     ...(init.lastSelectedAtMs === undefined ? {} : { lastSelected: { atMs: init.lastSelectedAtMs } }),
     ...(init.priority === undefined ? {} : { priority: { label: init.priority } }),
   });
