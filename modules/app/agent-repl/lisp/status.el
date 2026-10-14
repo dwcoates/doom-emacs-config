@@ -1510,18 +1510,19 @@ Keys in the returned plist: :bg :fg :bracket-bg :bracket-fg :underline
                 spec)))))
 
 (defun agent-repl--tab-spec-async-merge (spec)
-  "Return SPEC with its [N] run painted for an async merge.
-The bracket and the one space after it take the background named by
+  "Return SPEC with its [N] bracket painted for an async merge.
+The bracket alone takes the background named by
 `agent-repl-status-async-merge-tab-bracket\=' (owner request, 2026-10-13),
 whatever STATE and selection painted there; every other key of SPEC, the
 name\='s ground among them, is kept, so the name still says the
-workspace\='s own status.  `:bracket-gap\=' tells `agent-repl--render-tab\='
-to draw that space in the bracket\='s face."
+workspace\='s own status.  The one space after `[N]\=' belongs to the name
+\(owner request, 2026-10-13): `agent-repl--render-tab\=' always draws it in
+the name\='s face, so the tab reads as purple `[N]\=' then ` <name>\=' on
+the status ground."
   (let ((bg (cdr (assoc agent-repl-status-async-merge-tab-bracket
                         agent-repl--color-by-name))))
     (append (list :bracket-bg bg
-                  :bracket-fg (agent-repl--tab-bar-legible-fg bg)
-                  :bracket-gap t)
+                  :bracket-fg (agent-repl--tab-bar-legible-fg bg))
             spec)))
 
 (defun agent-repl--tab-spec-bracket-only (state selected)
@@ -1683,10 +1684,8 @@ for the cache-buster rationale."
 
 (defun agent-repl--render-tab (name spec label name-face img-str)
   "Render a tab string for workspace NAME from SPEC.
-SPEC is a plist with keys :bg :fg :bracket-fg :underline :weight, and
-:bracket-gap, which draws the one space after `[N]\=' in the bracket\='s
-face rather than the name\='s (`agent-repl--tab-spec-async-merge\='; see
-`agent-repl--tab-palette' docstring).  NAME-FACE is applied to the
+SPEC is a plist with keys :bg :fg :bracket-bg :bracket-fg :underline
+:weight (see `agent-repl--tab-palette' docstring).  NAME-FACE is applied to the
 workspace-name portion.  LABEL is the bracket content (the tab number).
 IMG-STR, when non-nil, is the badge run (priority label and glyph),
 drawn BEFORE `[N]\=' as `<badge> [N] <name>\=' (owner request,
@@ -1696,7 +1695,9 @@ paint starts at `[N]\='.  A blank IMG-STR is treated as no badge at all.
 
 EXACTLY ONE SPACE SEPARATES [N] FROM THE NAME, always (owner ruling,
 2026-09-13).  The gap is emitted HERE, as one space carrying the name's
-own face, and never by `agent-repl-tab-name-padding': that format's
+own face, whatever ground the bracket draws (an async merge's purple
+`[N]\=' included, owner request 2026-10-13), and never by
+`agent-repl-tab-name-padding': that format's
 leading whitespace is stripped, so a padding format and a badge run can
 no longer each contribute a space and draw `[3]   ws'.  The name itself
 is trimmed too, so a daemon-supplied leading space cannot widen the gap
@@ -1728,7 +1729,6 @@ whenever an entry landed at a wrap (or the final row's) end."
          (bracket-fg (or (plist-get spec :bracket-fg) 'unspecified))
          (weight     (or (plist-get spec :weight)     'normal))
          (underline  (plist-get spec :underline))
-         (bracket-gap (plist-get spec :bracket-gap))
          (separator-face `(:background unspecified :foreground ,fg :weight ,weight))
          (bracket-face   `(:background ,bracket-bg  :foreground ,bracket-fg :weight ,weight))
          (name-face*     (if underline
@@ -1746,7 +1746,7 @@ whenever an entry landed at a wrap (or the final row's) end."
             (when badge
               (concat badge (propertize " " 'face separator-face)))
             (propertize (format agent-repl-tab-bracket-format label) 'face bracket-face)
-            (propertize " " 'face (if bracket-gap bracket-face name-face))
+            (propertize " " 'face name-face)
             (propertize text 'face name-face*)
             (propertize fill 'face name-face)
             " ")))
@@ -2040,8 +2040,9 @@ panels are not open), the spec is built via
 `agent-repl--tab-spec-bracket-only' so only the [N] bracket keeps the
 arm's color.  The bracket label is the tab's 1-based INDEX and nothing
 else: state reaches the bracket as COLOR.  While the row carries the
-async-merging marker the `[N] ' run takes the async-merge purple instead
-\(`agent-repl--tab-spec-async-merge'), and the name keeps its status.
+async-merging marker the `[N]' bracket takes the async-merge purple
+instead \(`agent-repl--tab-spec-async-merge'), and the space after it and
+the name keep the status.
 
 The badge run — the roster's priority label and the arm's glyph — is
 drawn BEFORE the name.
