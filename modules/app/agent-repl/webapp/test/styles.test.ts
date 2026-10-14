@@ -2149,6 +2149,14 @@ describe("the one-line clamp's shared shape", () => {
     expect(rule).toMatch(/overflow:\s*hidden\s*;/);
   });
 
+  it("lets both clamps break their kept line anywhere, so the ellipsis reaches the edge", () => {
+    // Arrange / Act
+    const rule = shapeRule() ?? "";
+
+    // Assert
+    expect(rule).toMatch(/line-break:\s*anywhere\s*;/);
+  });
+
   it("is the only rule stating the shape for either clamp", () => {
     // Arrange / Act — any other rule re-declaring the box on one clamp alone.
     const handRolled = rulesOf(stylesheet).filter(
@@ -2237,6 +2245,14 @@ describe("the title fold", () => {
     expect(rule).toMatch(/-webkit-line-clamp:\s*none/);
     expect(rule).toMatch(/max-height:\s*none/);
     expect(rule).toMatch(/overflow:\s*visible/);
+  });
+
+  it("wraps an expanded title at its word breaks again", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".tool-fold.expanded .title-fold");
+
+    // Assert
+    expect(rule).toMatch(/line-break:\s*auto\s*;/);
   });
 
   it("draws no fade on a title: the ellipsis is its whole signal", () => {
