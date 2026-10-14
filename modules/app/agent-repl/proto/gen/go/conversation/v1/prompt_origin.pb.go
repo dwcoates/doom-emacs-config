@@ -154,6 +154,15 @@ const (
 	// workspace (the hidden one an async merge runs in) is not reported here:
 	// the merge queue hands its failure back to the requester.
 	PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED PromptOrigin = 35
+	// The daemon's notice to a workspace's session that a merge queue it
+	// subscribed to changed (agentrepl.v1.UpdateMergeQueueSubscribe): it names
+	// each change and carries the queue as it stands after it. Submitted
+	// through the prompt queue as a deferred prompt, the way a merge handback
+	// is, so it waits behind a running turn and wakes an idle agent. The feed
+	// draws NO row for it: the notice is the daemon's word to the agent, not
+	// anything the user said or needs to read, and the agent's reply is drawn
+	// as any reply is.
+	PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE PromptOrigin = 36
 )
 
 // Enum value maps for PromptOrigin.
@@ -194,6 +203,7 @@ var (
 		33: "PROMPT_ORIGIN_MERGE_PICK",
 		34: "PROMPT_ORIGIN_MERGE_COMPACT_AFTER",
 		35: "PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED",
+		36: "PROMPT_ORIGIN_MERGE_QUEUE_NOTICE",
 	}
 	PromptOrigin_value = map[string]int32{
 		"PROMPT_ORIGIN_UNSPECIFIED":                 0,
@@ -231,6 +241,7 @@ var (
 		"PROMPT_ORIGIN_MERGE_PICK":                  33,
 		"PROMPT_ORIGIN_MERGE_COMPACT_AFTER":         34,
 		"PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED":     35,
+		"PROMPT_ORIGIN_MERGE_QUEUE_NOTICE":          36,
 	}
 )
 
@@ -265,7 +276,7 @@ var File_conversation_v1_prompt_origin_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"\n" +
-	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1*\xc5\n" +
+	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1*\xeb\n" +
 	"\n" +
 	"\fPromptOrigin\x12\x1d\n" +
 	"\x19PROMPT_ORIGIN_UNSPECIFIED\x10\x00\x12\x1b\n" +
@@ -303,7 +314,8 @@ const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"\"PROMPT_ORIGIN_WORKSPACE_RETARGETED\x10 \x12\x1c\n" +
 	"\x18PROMPT_ORIGIN_MERGE_PICK\x10!\x12%\n" +
 	"!PROMPT_ORIGIN_MERGE_COMPACT_AFTER\x10\"\x12)\n" +
-	"%PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED\x10#B0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
+	"%PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED\x10#\x12$\n" +
+	" PROMPT_ORIGIN_MERGE_QUEUE_NOTICE\x10$B0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
 
 var (
 	file_conversation_v1_prompt_origin_proto_rawDescOnce sync.Once
