@@ -187,6 +187,9 @@ func (k *Keeper) restore(ctx context.Context) error {
 	log := k.deps.Log.Global()
 	workspaces, err := k.deps.DB.ListWorkspaces(ctx)
 	if err != nil {
+		if leaving(ctx, log, opLapse, "listing the workspaces to re-arm their cache lapses", err) {
+			return nil
+		}
 		log.Error(opLapse, "could not list the workspaces to re-arm their cache lapses", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("cachelapse: list the workspaces: %w", err)
 	}
@@ -242,6 +245,9 @@ func (k *Keeper) record(ctx context.Context, ws ids.WorkspaceID, stated *convers
 	}
 	recorded, err := k.deps.DB.SetCacheLapse(ctx, ws, lapse)
 	if err != nil {
+		if leaving(ctx, log, opProjection, "recording the projected cache lapse", err) {
+			return
+		}
 		log.Error(opProjection, "could not record the hidden workspace's projected cache lapse", withCause(fields, err))
 		return
 	}
@@ -266,6 +272,9 @@ func (k *Keeper) reconcile(ctx context.Context, ws ids.WorkspaceID, why string) 
 			delete(k.deadlines, ws)
 			return
 		}
+		if leaving(ctx, log, opCadence, "reading the workspace's visibility", err) {
+			return
+		}
 		log.Error(opCadence, "could not read the workspace's visibility; its keep-alive cadence is not set", dlog.Context{"cause": err.Error()})
 		return
 	}
@@ -286,6 +295,9 @@ func (k *Keeper) reconcile(ctx context.Context, ws ids.WorkspaceID, why string) 
 	if err := set(ctx); err != nil {
 		if errors.Is(err, ErrNoSession) {
 			log.Debug(opCadence, "the shim holds no session yet; the session's coming up sets its cadence", fields)
+			return
+		}
+		if leaving(ctx, log, opCadence, "setting the shim's keep-alive cadence", err) {
 			return
 		}
 		log.Error(opCadence, "could not set the shim's keep-alive cadence", withCause(fields, err))
@@ -324,6 +336,9 @@ func (k *Keeper) lapse(ctx context.Context, ws ids.WorkspaceID, now time.Time) b
 			log.Info(opLapse, "a workspace whose cache lapsed is no longer registered", nil)
 			return false
 		}
+		if leaving(ctx, log, opLapse, "reading a workspace whose cache lapsed", err) {
+			return false
+		}
 		log.Error(opLapse, "could not read a workspace whose cache lapsed; its session is not stood down", dlog.Context{"cause": err.Error()})
 		return false
 	}
@@ -343,8 +358,22 @@ func (k *Keeper) lapse(ctx context.Context, ws ids.WorkspaceID, now time.Time) b
 
 func (k *Keeper) publish(ctx context.Context, log dlog.Logger, op string) {
 	if err := k.deps.PublishRegistry(ctx); err != nil {
+		if leaving(ctx, log, op, "republishing the roster", err) {
+			return
+		}
 		log.Error(op, "could not republish the roster", dlog.Context{"cause": err.Error()})
 	}
+}
+
+// leaving reports whether ERR is the Run loop's own lifetime ending (the
+// daemon is leaving), and records it at INFO when it is: an exit cancels the
+// context under whatever was in flight, which is not a fault.
+func leaving(ctx context.Context, log dlog.Logger, op, doing string, err error) bool {
+	if ctx.Err() == nil {
+		return false
+	}
+	log.Info(op, "the daemon is leaving; "+doing+" ended with it", dlog.Context{"cause": err.Error()})
+	return true
 }
 
 // lapseOf is the stored shape of a stated projection.

@@ -535,3 +535,51 @@ func TestRunRefusesAListThatFails(t *testing.T) {
 		t.Fatalf("Run = %v with records %v, want an error and its record", err, h.log.Records())
 	}
 }
+
+func TestAnOperationTheDaemonsExitCancelsIsRecordedAsLeaving(t *testing.T) {
+	tests := []struct {
+		name string
+		act  func(ctx context.Context, h *harness)
+	}{
+		{name: "re-arming at the start", act: func(ctx context.Context, h *harness) {
+			h.db.listErr = context.Canceled
+			if err := h.keeper.Run(ctx); err != nil {
+				t.Errorf("Run = %v, want nil when the daemon is leaving", err)
+			}
+		}},
+		{name: "recording a projection", act: func(ctx context.Context, h *harness) {
+			h.db.setErr = context.Canceled
+			h.keeper.record(ctx, theWorkspace, stated(lapseAt, nil))
+		}},
+		{name: "reading a visibility", act: func(ctx context.Context, h *harness) {
+			h.db.readErr = context.Canceled
+			h.keeper.reconcile(ctx, theWorkspace, "test")
+		}},
+		{name: "setting a cadence", act: func(ctx context.Context, h *harness) {
+			h.shim.err = context.Canceled
+			h.keeper.reconcile(ctx, theWorkspace, "test")
+		}},
+		{name: "reading a lapsed workspace", act: func(ctx context.Context, h *harness) {
+			h.db.readErr = context.Canceled
+			h.keeper.deadlines[theWorkspace] = lapseAt
+			h.clock.Set(lapseAt)
+			h.keeper.lapseDue(ctx)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t, hidden())
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+
+			// Act
+			tt.act(ctx, h)
+
+			// Assert
+			if h.found(dlog.RecordQuery{Level: "error"}) || !h.found(dlog.RecordQuery{Level: "info"}) {
+				t.Fatalf("records = %+v, want the leaving at INFO and no ERROR", h.log.Records())
+			}
+		})
+	}
+}
