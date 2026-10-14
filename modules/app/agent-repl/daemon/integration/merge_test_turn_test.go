@@ -47,6 +47,11 @@ if [ "$code" = 0 ]; then echo "daemon: passed in 1s"; else echo "daemon failed a
 exit "$code"
 `
 
+// fixedIdleHost pins the host load the daemon's gate governor reads to idle:
+// a merge testing behind its head is admitted by that load, and a suite must
+// not inherit whatever else the machine is running.
+const fixedIdleHost = "AGENT_REPL_FIXED_HOST_LOAD=0"
+
 func newTurnGate(t *testing.T) *turnGate {
 	t.Helper()
 	dir := t.TempDir()
@@ -135,7 +140,7 @@ func TestTwoMergesOfARepositoryAlternateTheTestTurnAndTheirGatesNeverOverlap(t *
 	repo := harness.NewRepo(t)
 	gate := newTurnGate(t)
 	d := harness.StartDaemon(t, harness.Opts{DurableState: true, SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout,
-		ExtraEnv: []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + gate.path}})
+		ExtraEnv: []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + gate.path, fixedIdleHost}})
 	d.ExpectWarnings("daemon.merge.tests", "daemon.scriptrunner.run")
 	repoRef := mergeRepositoryRef(t, d, repo)
 	a := mergeCreateChild(t, d, repoRef, "alpha", "the first work", nil)
