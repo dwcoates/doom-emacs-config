@@ -344,12 +344,14 @@
      the zoom scoped to the feed. Default 1 = 100%. */
   --feed-text-scale: 1;
   /* THE BUBBLE AND TREE TYPE SIZES, as bare rem multipliers, so a rule can
-     compute one from the other. `--bubble-font-rem` is every bubble's text
-     size but a thinking bubble's, which narrows it;`--tree-font-rem` and `--tree-line-h` are a metaprompt tree's
-     monospace size and leading. A prompt's leading is derived from all three
-     so its lines sit exactly as far apart as a tree's (owner request,
-     2026-10-13). */
-  --bubble-font-rem: 0.9;
+     compute one from the other. `--bubble-font-rem` is a bubble's text size:
+     every bubble's base (`--bubble-base-font-rem`) but a thinking bubble's and
+     an interim response's, which narrow it (owner requests, 2026-10-14).
+     `--tree-font-rem` and `--tree-line-h` are a metaprompt tree's monospace
+     size and leading. A prompt's leading is derived from all three so its
+     lines sit exactly as far apart as a tree's (owner request, 2026-10-13). */
+  --bubble-base-font-rem: 0.9;
+  --bubble-font-rem: var(--bubble-base-font-rem);
   --tree-font-rem: 0.85;
   --tree-line-h: 1.45;
   /* THE FEED'S BOTTOM GAP (owner ruling, 2026-09-27): the one source of the
@@ -1824,7 +1826,11 @@ pre {
      base horizontally. Its rung is the one that also sets `--bubble-pad-x`.
    - AN INTERIM RESPONSE, the amber-bordered one with no fill, sits 30% tighter
      again (owner request, 2026-10-13): 0.7 of 0.7. The green answer keeps the
-     response's 0.7.
+     response's 0.7. Its gap then shrinks ON EVERY SIDE by as much as its
+     narrower text did (owner request, 2026-10-14): both tokens are multiplied
+     by its `--bubble-font-rem` over the base, so the padding follows the text
+     size rather than copying its ratio. Its rung is the other one that sets
+     `--bubble-pad-x`.
    - A THINKING BUBBLE has no fill, border or shadow, so its padding read only
      as empty feed around floating text; it keeps about a third of the base
      (owner request, 2026-10-13), which brings its visible gap to a neighbor to
@@ -1840,7 +1846,8 @@ pre {
   --bubble-pad-x: calc(var(--bubble-pad-x-base) * 0.7);
 }
 .bubble[data-variant="response"].interim-response {
-  --bubble-pad-y: calc(var(--bubble-pad-y-base) * 0.49);
+  --bubble-pad-y: calc(var(--bubble-pad-y-base) * 0.49 * var(--bubble-font-rem) / var(--bubble-base-font-rem));
+  --bubble-pad-x: calc(var(--bubble-pad-x-base) * var(--bubble-font-rem) / var(--bubble-base-font-rem));
 }
 .bubble[data-variant="thinking"] {
   --bubble-pad-y: calc(var(--bubble-pad-y-base) * 0.35);
@@ -1869,16 +1876,27 @@ pre {
 .bubble.interim-response {
   color: var(--interim-text);
 }
+/* THE SMALLER PROSE (owner requests, 2026-10-14): a thinking bubble's text and
+   an interim response's are set a touch smaller than every other bubble's,
+   from one shared value. The two kinds narrow `--bubble-font-rem`, so the base
+   `.bubble` rule still computes the one font-size and the feed zoom still
+   scales it. */
+.bubble[data-variant="thinking"],
+.bubble.interim-response {
+  --bubble-font-rem: 0.8;
+}
 /* THE THINKING PROSE (owner request, 2026-10-14): a thinking bubble's text is
    italic and a touch greyer than an interim's (--thinking-text), so reasoning
-   reads apart from every response the agent actually says. It is also set a
-   touch smaller than every other bubble's text (owner request, 2026-10-14):
-   the kind narrows `--bubble-font-rem`, so the base `.bubble` rule still
-   computes the one font-size and the feed zoom still scales it. */
+   reads apart from every response the agent actually says. */
 .bubble[data-variant="thinking"] {
-  --bubble-font-rem: 0.8;
   color: var(--thinking-text);
   font-style: italic;
+}
+/* THE INTERIM PROSE (owner request, 2026-10-14): an interim response's text is
+   bold, where a thinking bubble's is italic. It is set on the body alone, so
+   the duration in the interim's usage corner keeps its own weight. */
+.bubble.interim-response .bubble-body {
+  font-weight: bold;
 }
 /* THE THINKING WAVE, AND ONLY WHILE THE TURN IS IN FLIGHT.
 
