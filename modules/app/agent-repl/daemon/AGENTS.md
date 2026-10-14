@@ -70,13 +70,12 @@ Read `ARCHITECTURE.md` first: the package map, the seams, the conventions.
   whatever `-p`/`-parallel` the run was invoked with, because
   `go test -tags integration ./...` otherwise runs up to `nproc x nproc`
   daemons and every wait bound above was measured at eight.
-- **One daemon suite holds the host at a time**: every suite started through
-  `harness.MainAt` (integration and e2e) takes the exclusive flock
-  `harness.HostSuiteLockPath` (`/tmp/agent-repl-daemon-suite.lock`) before
-  it builds, and a second suite waits for it in the kernel, saying whom it
-  waits for. The daemon cap above bounds one suite; this bounds the host, so
-  parallel sessions never stack their caps into the load the bounds were not
-  measured at.
+- **No host-wide lock.** Suites from different runs may overlap. Every test
+  run is at `nice 19` (`bin/background.sh`), which keeps the owner's live
+  runtime ahead of test load; contention between test runs is accepted (owner
+  ruling, 2026-10-14). The 2026-10-12 host flock was removed because inside
+  one `testrun` run it serialized the run's own integration and e2e processes
+  behind each other.
 - Every test process exports `AGENT_REPL_FORBID_VENDOR_CALLS=1`. No test
   ever calls the vendor.
 - **Wait bounds are TIGHT, on purpose.** Every wait the harness performs is
