@@ -219,12 +219,6 @@ They can no more act on the workspace than during the merge itself."
                  (plist-get spec :bracket-fg) (plist-get spec :bracket-bg))
                 agent-repl-tab-contrast-floor))))
 
-(ert-deftest agent-repl-test-tab-spec-async-merge-marks-the-gap ()
-  "An async merge asks the renderer to draw the space after [N] in the bracket\='s face."
-  ;; Act / Assert
-  (should (plist-get (agent-repl--tab-spec-async-merge (agent-repl--tab-spec :done nil))
-                     :bracket-gap)))
-
 (ert-deftest agent-repl-test-tab-spec-vendor-blocked-is-turquoise ()
   "A vendor-blocked tab paints TURQUOISE: a vendor fault leaves the
 workspace usable (owner ruling, 2026-10-02)."
@@ -1227,22 +1221,9 @@ foreground (owner ruling, 2026-10-01), for every state."
     (should (equal (plist-get face :background) "#cc3333"))
     (should (equal (plist-get face :foreground) "white"))))
 
-(ert-deftest agent-repl-test-render-tab-bracket-gap-takes-the-bracket-face ()
-  "With :bracket-gap the one space after [N] is drawn in the bracket\='s face."
-  ;; Arrange
-  (let* ((spec '(:bg "#22c55e" :fg "black" :bracket-bg "#a21caf" :bracket-fg "white"
-                 :bracket-gap t :weight bold))
-         ;; Act
-         (result (agent-repl--render-tab "ws1" spec "1" '+workspace-tab-face nil))
-         (gap-pos (1+ (string-match "\\]" result))))
-    ;; Assert
-    (should (equal (plist-get (get-text-property gap-pos 'face result) :background)
-                   "#a21caf"))
-    (should (eq (get-text-property (string-match "ws1" result) 'face result)
-                '+workspace-tab-face))))
-
-(ert-deftest agent-repl-test-render-tab-no-bracket-gap-gap-takes-the-name-face ()
-  "Without :bracket-gap the space after [N] stays in the name\='s face."
+(ert-deftest agent-repl-test-render-tab-gap-takes-the-name-face-over-a-distinct-bracket ()
+  "The space after [N] is drawn in the name\='s face even when the bracket\='s
+ground differs from the name\='s (owner request, 2026-10-13)."
   ;; Arrange
   (let* ((spec '(:bg "#22c55e" :fg "black" :bracket-bg "#a21caf" :bracket-fg "white" :weight bold))
          ;; Act
@@ -1251,19 +1232,17 @@ foreground (owner ruling, 2026-10-01), for every state."
     ;; Assert
     (should (eq (get-text-property gap-pos 'face result) '+workspace-tab-face))))
 
-(ert-deftest agent-repl-test-render-tab-bracket-gap-with-a-badge ()
-  "With :bracket-gap and a badge, the one space after [N] is still the
-bracket\='s: the badge is drawn before [N] and splits nothing after it."
+(ert-deftest agent-repl-test-render-tab-gap-takes-the-name-face-with-a-badge ()
+  "With a badge, the space after [N] is still the name\='s and directly
+precedes the name: the badge is drawn before [N] and splits nothing after it."
   ;; Arrange
-  (let* ((spec '(:bg "#22c55e" :fg "black" :bracket-bg "#a21caf" :bracket-fg "white"
-                 :bracket-gap t :weight bold))
+  (let* ((spec '(:bg "#22c55e" :fg "black" :bracket-bg "#a21caf" :bracket-fg "white" :weight bold))
          ;; Act
          (result (agent-repl--render-tab "ws1" spec "1" '+workspace-tab-face "IMG"))
          (gap-pos (1+ (string-match "\\]" result)))
          (name-pos (string-match "ws1" result)))
     ;; Assert
-    (should (equal (plist-get (get-text-property gap-pos 'face result) :background)
-                   "#a21caf"))
+    (should (eq (get-text-property gap-pos 'face result) '+workspace-tab-face))
     (should (= name-pos (1+ gap-pos)))))
 
 (ert-deftest agent-repl-test-render-tab-bracket-bg-falls-back-to-bg ()
@@ -1786,8 +1765,8 @@ row carries the async-merging marker."
      ,@body))
 
 (ert-deftest agent-repl-test-render-tab-entry-async-merge-paints-only-the-bracket ()
-  "An async-merging tab reads `[N] name\=' with `[N] \=' purple and the name on
-its own status ground (owner request, 2026-10-13)."
+  "An async-merging tab reads `[N] name\=' with `[N]\=' purple and ` name\='
+on its own status ground (owner request, 2026-10-13)."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (agent-repl-test-status--with-entry :done t
@@ -1799,8 +1778,8 @@ its own status ground (owner request, 2026-10-13)."
         ;; Assert
         (should (equal (plist-get (get-text-property bracket-pos 'face result) :background)
                        agent-repl--color-merging-purple))
-        (should (equal (plist-get (get-text-property gap-pos 'face result) :background)
-                       agent-repl--color-merging-purple))
+        (should (eq (get-text-property gap-pos 'face result)
+                    (agent-repl--tab-face :done nil)))
         (should (eq (get-text-property name-pos 'face result)
                     (agent-repl--tab-face :done nil)))))))
 

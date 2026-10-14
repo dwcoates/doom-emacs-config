@@ -549,8 +549,9 @@ export const RosterRowOneShotSchema: GenMessage<RosterRowOneShot> = /*@__PURE__*
  *     dot with an ink of its own (`render-colors.json#glyph_inks`, e.g. the
  *     compacting orange). Which marks are plain is the shared vocabulary's
  *     `async_merge_mark` section.
- *   - the Emacs tab bar paints the tab's `[N] ` run with the merge purple
- *     background, and the workspace name keeps its status background.
+ *   - the Emacs tab bar paints the tab's `[N]` bracket with the merge purple
+ *     background, and the space after it and the workspace name keep the
+ *     status background.
  *
  * @generated from message frontend.v1.RosterRowAsyncMerging
  */
