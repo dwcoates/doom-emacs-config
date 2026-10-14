@@ -1,25 +1,30 @@
 package reap
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
+
+	"agentrepl/testrun/internal/command"
 )
 
 // ListBound is how long one listing of the process table may take before it
 // is taken not to answer, and the reap fails rather than kill blind.
 //
-// `ps -axE` answers in about 40ms on the owner's host (load 6, 2026-10-14).
-// Like the RAM disk's probes, the bound covers a process started at the run's
-// nice 19 on a loaded host, whose slowest healthy answer the runs record is
-// 471ms (ramdisk.InfoBound): just over twice that.
-const ListBound = 1000 * time.Millisecond
+// MEASURED (2026-10-14): `ps -axE` at the run's nice 19, sampled every 250ms
+// over a whole merge gate's suites (build-frontend-harness, daemon, webapp,
+// shim, proto, e2e, testrun; 8 slots, load up to 20, about 720 processes):
+// 1008 listings, median 61ms, p99 372ms, slowest 2092ms. A bound of 1s failed
+// the gate twice (2026-10-14, merge e3d73ae8eb71461a). Just over twice the
+// slowest. Every reap logs each listing's time, so the bound can be set again
+// from the runs.
+const ListBound = 4500 * time.Millisecond
 
 // lstartLayout is ps's `lstart` under LC_ALL=C, its fields joined by one space.
 const lstartLayout = "Mon Jan 2 15:04:05 2006"
@@ -34,18 +39,27 @@ type OSTable struct{}
 // List implements Table: `ps` for the processes, getsid(2) for each one's
 // session.
 func (OSTable) List() ([]Proc, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), ListBound)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "ps", psArgs...)
-	cmd.Env = append(os.Environ(), "LC_ALL=C")
-	out, err := cmd.Output()
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return nil, fmt.Errorf("ps did not answer within %s", ListBound)
-	}
+	out, err := output(ListBound, "ps", psArgs...)
 	if err != nil {
-		return nil, fmt.Errorf("ps %s: %w", strings.Join(psArgs, " "), err)
+		return nil, err
 	}
-	return parsePS(string(out), Getsid)
+	return parsePS(out, Getsid)
+}
+
+// output runs name under LC_ALL=C and answers what it printed to stdout,
+// failing once bound passes without its answer.
+func output(bound time.Duration, name string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), bound)
+	defer cancel()
+	cmd := command.Bounded(ctx, name, args...)
+	cmd.Env = append(os.Environ(), "LC_ALL=C")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err := command.Outcome(ctx, bound, command.Line(name, args), "", stderr.Bytes(), err); err != nil {
+		return "", err
+	}
+	return string(out), nil
 }
 
 // parsePS reads `ps -o pid=,stat=,lstart=,args=` into processes, asking getsid

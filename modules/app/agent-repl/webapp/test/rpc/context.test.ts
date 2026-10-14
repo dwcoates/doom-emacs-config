@@ -87,6 +87,31 @@ describe("quiesce", () => {
     context.quiesce();
     expect(fn).not.toHaveBeenCalled();
   });
+
+  it("stops the page's stream-cost meter, once however often it is called", () => {
+    // Arrange
+    const dispose = vi.fn();
+    const context = testAppContext({
+      client: client(),
+      workspace: create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" }),
+      ticker: createTicker(1000),
+      failures: SINK,
+      composerEnabled: false,
+      costs: { record: () => {}, flush: () => {}, dispose },
+    });
+
+    // Act
+    context.quiesce();
+    context.quiesce();
+
+    // Assert
+    expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("quiets a page given no meter", () => {
+    // Arrange / Act / Assert
+    expect(() => ctx().quiesce()).not.toThrow();
+  });
 });
 
 describe("notePush", () => {
