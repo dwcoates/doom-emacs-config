@@ -2,8 +2,9 @@
  * THE RAIL'S STATUS MARKS SHARE ONE CENTER AND ONE SIZE, IN WEBKIT (owner
  * requests, 2026-10-08 and 2026-10-13).
  *
- * Every glyph (the merge glyph's three bars, the gate emojis ❗ ❓ ❄️ and a
- * working one-shot's 🎯) must sit centered on the same vertical line as the
+ * Every glyph (the pictures in images/glyphs/: the merge glyph's three bars,
+ * the gates' exclamation mark, question mark and snowflake, and a working
+ * one-shot's target) must sit centered on the same vertical line as the
  * filled status dots, draw at the dot's size, and hold one column width with
  * every other mark, the hidden `none` one included, so the names beside them
  * stay aligned. jsdom lays nothing out, so this draws rail rows as
@@ -15,35 +16,36 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { webkit, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { readGlyphPicture } from "../glyph-pictures";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
-/** One row's mark: its arm, glyph name and the character drawn (none for a disc). */
+/** One row's mark: its arm, glyph name and the picture drawn (none for a disc). */
 interface Mark {
   arm: string;
   glyph: string;
-  char: string;
+  image: string;
 }
 
-const DOT: Mark = { arm: "ready", glyph: "dot", char: "" };
+const DOT: Mark = { arm: "ready", glyph: "dot", image: "" };
 const GLYPHS: readonly Mark[] = [
-  { arm: "mergeQueued", glyph: "merge", char: "" },
-  { arm: "permission", glyph: "exclaim", char: "❗" },
-  { arm: "question", glyph: "ask", char: "❓" },
-  { arm: "coldGate", glyph: "snowflake", char: "\u2744\uFE0F" },
-  { arm: "thinking", glyph: "target", char: "🎯" },
-];
-const NONE: Mark = { arm: "none", glyph: "none", char: "" };
+  { arm: "mergeQueued", glyph: "merge" },
+  { arm: "permission", glyph: "exclaim" },
+  { arm: "question", glyph: "ask" },
+  { arm: "coldGate", glyph: "snowflake" },
+  { arm: "thinking", glyph: "target" },
+].map((m) => ({ ...m, image: readGlyphPicture(m.glyph) }));
+const NONE: Mark = { arm: "none", glyph: "none", image: "" };
 
 /** One rail row, as `drawStatusMark` and the row draw shape it. */
 function row(m: Mark): string {
   const glyphClass = m.glyph === "dot" ? "" : " st-glyph";
-  return `<div class="row"><span class="st tone-green${glyphClass}" data-glyph="${m.glyph}">${m.char}</span><span class="name">workspace</span></div>`;
+  return `<div class="row"><span class="st tone-green${glyphClass}" data-glyph="${m.glyph}">${m.image}</span><span class="name">workspace</span></div>`;
 }
 
 /**
  * What one row measured: the mark's ink center and height (the disc's box, or
- * the character's own box) and the name's left edge.
+ * the picture's own box) and the name's left edge.
  */
 interface Measured {
   center: number;
@@ -59,13 +61,7 @@ async function measure(page: Page, marks: readonly Mark[]): Promise<Measured[]> 
     host.innerHTML = markup;
     return [...host.querySelectorAll(".row")].map((r) => {
       const st = r.querySelector(".st") as HTMLElement;
-      let box = st.getBoundingClientRect();
-      const text = st.firstChild;
-      if (text !== null) {
-        const range = document.createRange();
-        range.selectNodeContents(text);
-        box = range.getBoundingClientRect();
-      }
+      const box = (st.querySelector("svg") ?? st).getBoundingClientRect();
       const name = (r.querySelector(".name") as HTMLElement).getBoundingClientRect();
       return { center: box.left + box.width / 2, height: box.height, nameLeft: name.left };
     });
@@ -96,14 +92,13 @@ describe("the rail's status marks in WebKit", () => {
   });
 
   // ONE SIZE (owner ruling, 2026-10-13): no mark reads bigger than the dot.
-  // A character's box is its line box, a little taller than its ink, so the
-  // bound is the dot's height plus the line's own leading.
+  // Every picture fills its file's full height, so its box is its ink and
+  // draws exactly the dot's height.
   it.each(GLYPHS)("draws the $glyph glyph at the dot's size", async (glyph) => {
     // Arrange / Act
     const [dot, mark] = await measure(page, [DOT, glyph]);
     // Assert
-    expect(mark?.height ?? NaN).toBeGreaterThanOrEqual((dot?.height ?? NaN) - 1);
-    expect(mark?.height ?? NaN).toBeLessThanOrEqual((dot?.height ?? NaN) + 3);
+    expect(mark?.height ?? NaN).toBeCloseTo(dot?.height ?? NaN, 1);
   });
 
   it.each([...GLYPHS, NONE])("starts the name beside a $glyph mark where it starts beside a dot", async (glyph) => {

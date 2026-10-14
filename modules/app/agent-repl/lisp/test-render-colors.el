@@ -59,14 +59,15 @@
 
 (defun agent-repl-test--glyph-table-mismatches (key table)
   "Return where the glyph TABLE disagrees with the fixture's KEY section.
-Every fixture row must have a string glyph in TABLE, and every TABLE row
-must be named by the fixture.  The result lists each offending wire name,
-fixture rows first, so nil means the two agree row for row."
+Every fixture row must have the fixture\='s glyph NAME in TABLE, and every
+TABLE row must be named by the fixture.  The result lists each offending
+wire name, fixture rows first, so nil means the two agree row for row."
   (let ((fixture (agent-repl-test--fixture key)))
     (append
      (seq-keep (lambda (entry)
-                 (unless (stringp (alist-get (agent-repl-test--arm-keyword (car entry))
-                                             table))
+                 (unless (equal (alist-get (agent-repl-test--arm-keyword (car entry))
+                                           table)
+                                (cdr entry))
                    (car entry)))
                fixture)
      (seq-keep (lambda (row)
@@ -78,20 +79,27 @@ fixture rows first, so nil means the two agree row for row."
   "A table matching the fixture row for row has no mismatches."
   ;; Act / Assert
   (should (null (agent-repl-test--glyph-table-mismatches
-                 "gate_glyphs" '((:permission . "!") (:question . "?") (:cold-gate . "x"))))))
+                 "gate_glyphs" '((:permission . "exclaim") (:question . "ask") (:cold-gate . "snowflake"))))))
 
 (ert-deftest agent-repl-test-colors-glyph-mismatches-a-missing-row ()
   "A fixture row with no glyph in the table is reported."
   ;; Act / Assert
   (should (equal (agent-repl-test--glyph-table-mismatches
-                  "gate_glyphs" '((:permission . "!") (:cold-gate . "x")))
+                  "gate_glyphs" '((:permission . "exclaim") (:cold-gate . "snowflake")))
                  '("question"))))
 
 (ert-deftest agent-repl-test-colors-glyph-mismatches-a-non-string-glyph ()
   "A table row whose glyph is not a string counts as missing."
   ;; Act / Assert
   (should (equal (agent-repl-test--glyph-table-mismatches
-                  "gate_glyphs" '((:permission . "!") (:question . nil) (:cold-gate . "x")))
+                  "gate_glyphs" '((:permission . "exclaim") (:question . nil) (:cold-gate . "snowflake")))
+                 '("question"))))
+
+(ert-deftest agent-repl-test-colors-glyph-mismatches-another-name ()
+  "A table row naming a glyph other than the fixture\='s is reported."
+  ;; Act / Assert
+  (should (equal (agent-repl-test--glyph-table-mismatches
+                  "gate_glyphs" '((:permission . "exclaim") (:question . "❓") (:cold-gate . "snowflake")))
                  '("question"))))
 
 (ert-deftest agent-repl-test-colors-glyph-mismatches-an-extra-row ()
@@ -99,7 +107,7 @@ fixture rows first, so nil means the two agree row for row."
   ;; Act / Assert
   (should (equal (agent-repl-test--glyph-table-mismatches
                   "gate_glyphs"
-                  '((:permission . "!") (:question . "?") (:cold-gate . "x") (:waiting . "~")))
+                  '((:permission . "exclaim") (:question . "ask") (:cold-gate . "snowflake") (:waiting . "~")))
                  '("waiting"))))
 
 ;;;; ---- roster_status, row for row --------------------------------------

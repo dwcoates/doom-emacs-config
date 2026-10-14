@@ -134,7 +134,7 @@ These clicks jump to an entry in the feed:
   - An async merge lands a named branch in a hidden merge workspace forked from yours, and your workspace stays free; the agent is told how it ended.
   - "Sync" and "in place" mean the same thing, and so do "async" and "detached".
 - **An agent uses `/merge-queue one-shot` only when your workspace is done once the merge lands.**
-  - The workspace is marked a one-shot at once, so its tab and its sidebar row show the one-shot mark (🎯) while the agent keeps working.
+  - The workspace is marked a one-shot at once, so its tab and its sidebar row show the one-shot mark (a red-and-white target) while the agent keeps working.
   - When the turn ends, the workspace's branch merges in place, and the workspace closes once the merge lands.
   - Work left uncommitted when the turn ends fails the merge, and the workspace stays open.
   - `SPC TAB M` and the sidebar's Merge are the same one-shot.

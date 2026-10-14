@@ -1,6 +1,6 @@
 /**
  * tones — the rail's ONE table from a `RosterRow.status` arm to what the row
- * draws for it: a color class, a glyph name, the character (if any) that
+ * draws for it: a color class, a glyph name, the picture (if any) that
  * glyph is drawn with, the ink the mark takes, and its motion.
  *
  * THIS TABLE IS A THIN WRAPPER, NEVER A SECOND OPINION. The colors live in
@@ -12,12 +12,14 @@
  * arm added to the proto without a color, or a color added to the file without
  * a row here, fails loudly in the suite instead of drawing a quiet grey dot.
  *
- * ONE SIZE FOR EVERY MARK (owner ruling, 2026-10-13): the dot, the merge glyph
- * and the three emojis all draw at the dot's visible size, so no mark reads
- * bigger than another. The merge glyph is drawn by the stylesheet (three bars
- * in the dot's box); the gate emojis ❗ ❓ ❄️ and
- * a working one-shot's 🎯 are characters, the same ones the Emacs tab bar
- * draws before the workspace name.
+ * ONE SIZE FOR EVERY MARK (owner ruling, 2026-10-13): the dot and every glyph
+ * draw at the dot's visible size, so no mark reads bigger than another. Every
+ * glyph -- the merge glyph's three bars, the three gates' exclamation mark,
+ * question mark and snowflake, and a working one-shot's target -- is a
+ * picture, images/glyphs/<name>.svg, the SAME file the Emacs tab bar draws
+ * before the workspace name (lisp/status.el, "The glyph's image"). Each
+ * picture is cropped to fill its file's full height, so drawn at the dot's
+ * height it is exactly as tall as the dot.
  */
 import {
   toneClass,
@@ -29,6 +31,11 @@ import {
   asyncMergeMark,
 } from "../vocab.js";
 import { MalformedView } from "../rpc/malformed.js";
+import mergePicture from "../../../images/glyphs/merge.svg?raw";
+import exclaimPicture from "../../../images/glyphs/exclaim.svg?raw";
+import askPicture from "../../../images/glyphs/ask.svg?raw";
+import snowflakePicture from "../../../images/glyphs/snowflake.svg?raw";
+import targetPicture from "../../../images/glyphs/target.svg?raw";
 import { oneofArms } from "../rpc/oneof.js";
 import { RosterRowSchema, type RosterRow } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 
@@ -59,27 +66,28 @@ export const ROSTER_ARM_CLASS: Readonly<Record<RosterStatusCase, string>> = Obje
 );
 
 /**
- * The character each shared glyph NAME is drawn with.
+ * The picture each shared glyph NAME is drawn with: the SVG markup of
+ * images/glyphs/<name>.svg, which the Emacs tab bar draws too.
  *
- * The names are the vocabulary file's (`merge_glyphs`, `gate_glyphs`); which
- * mark stands for one is this surface's own business, which is exactly why the
- * file ships names rather than characters. A name mapped to "" is drawn by the
- * stylesheet alone: the dot's disc, and the merge glyph's three bars.
+ * The names are the vocabulary file's (`merge_glyphs`, `gate_glyphs`); the file
+ * ships names rather than pictures, and this surface and the tab bar map each
+ * name to the one shared file. A name mapped to "" is drawn by the stylesheet
+ * alone: the dot's disc. `merge` and the dot are drawn in `currentColor`, so
+ * the tone or the ink colors them; the other pictures carry their own colors.
  */
-export const GLYPH_CHARS: Readonly<Record<string, string>> = Object.freeze({
-  // EVERY MERGE ARM (owner ruling, 2026-10-13): three bars, drawn by the
-  // stylesheet in the dot's box. Its ink says which arm, and `merging`
-  // breathes it.
-  merge: "",
-  // A GATE ON YOU (owner requests, 2026-10-11 and 2026-10-13): the emoji
-  // replaces the dot, and matches the one the Emacs tab bar draws.
-  exclaim: "❗",
-  ask: "❓",
+export const GLYPH_IMAGES: Readonly<Record<string, string>> = Object.freeze({
+  // EVERY MERGE ARM (owner ruling, 2026-10-13): three bars. Its ink says which
+  // arm, and `merging` breathes it.
+  merge: mergePicture,
+  // A GATE ON YOU (owner requests, 2026-10-11 and 2026-10-13): the picture
+  // replaces the dot.
+  exclaim: exclaimPicture,
+  ask: askPicture,
   // A COLD GATE (owner ruling, 2026-10-13): the session has gone cold.
-  snowflake: "\u2744\uFE0F",
-  // A ONE-SHOT AT WORK (owner ruling, 2026-10-13): the emoji replaces the dot
-  // while the one-shot works, and matches the Emacs tab bar's.
-  target: "🎯",
+  snowflake: snowflakePicture,
+  // A ONE-SHOT AT WORK (owner ruling, 2026-10-13): the picture replaces the dot
+  // while the one-shot works.
+  target: targetPicture,
   dot: "",
   none: "",
 });
@@ -93,8 +101,8 @@ export interface RosterArmMark {
   toneClass: string;
   /** The `data-glyph` name: a merge, gate or one-shot glyph, or `dot` / `none`. */
   glyph: string;
-  /** The character drawn inside the mark; "" leaves the stylesheet's shape. */
-  char: string;
+  /** The SVG picture drawn inside the mark; "" leaves the stylesheet's shape. */
+  image: string;
   /** The mark's own ink where it differs from the tone (`glyph_inks`), or undefined. */
   ink: string | undefined;
   /** The mark's motion. */
@@ -120,7 +128,7 @@ export function rosterArmMark(arm: string): RosterArmMark {
   return {
     toneClass: tone,
     glyph,
-    char: GLYPH_CHARS[glyph] ?? "",
+    image: GLYPH_IMAGES[glyph] ?? "",
     ink: glyphInk(arm),
     motion: armMotion(arm as RosterStatusCase),
   };
@@ -158,7 +166,7 @@ export const NO_MARKERS: RowMarkers = Object.freeze({ oneShot: false, asyncMergi
 export function rosterRowMark(arm: string, markers: RowMarkers): RosterArmMark {
   const mark = rosterArmMark(arm);
   if (markers.oneShot && oneShotGlyphArm(arm)) {
-    return { toneClass: mark.toneClass, glyph: "target", char: GLYPH_CHARS.target, ink: undefined, motion: "breathes" };
+    return { toneClass: mark.toneClass, glyph: "target", image: GLYPH_IMAGES.target, ink: undefined, motion: "breathes" };
   }
   if (markers.asyncMerging && mark.glyph === "dot" && mark.ink === undefined) {
     const merge = asyncMergeMark();
