@@ -692,7 +692,7 @@ const RESIDUE = scenario({
 });
 
 /** The context `!cold-seed` reports: comfortably above the cold-gate floor. */
-const COLD_SEED_CONTEXT_TOKENS = 90_000;
+const COLD_SEED_CONTEXT_TOKENS = 150_000;
 
 const COLD_SEED = scenario({
   name: "cold-seed",
@@ -705,7 +705,7 @@ const COLD_SEED = scenario({
   run(ctx) {
     ctx.log.debug({ turn: ctx.turn, branch: "cold-seed" }, "fake cold-context seeding turn");
     // A CONTEXT ABOVE THE COLD-GATE FLOOR, and nothing else. The gate does not
-    // ask below 70,000 tokens (owner ruling, engine/cold.ts
+    // ask at or under 120,000 tokens (owner ruling, engine/cold.ts
     // COLD_GATE_FLOOR_TOKENS), and the mock's ordinary usage reports ~25,000 —
     // a seed that left it there would produce a session that resumes warm.
     //
