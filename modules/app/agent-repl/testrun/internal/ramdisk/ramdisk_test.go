@@ -710,12 +710,12 @@ func TestIsAttachedRAMDisk(t *testing.T) {
 	}
 }
 
-func TestUnitPrefixRunsUnitsAtTheUtilityTier(t *testing.T) {
+func TestUnitPrefixRunsUnitsAtTheDefaultTier(t *testing.T) {
 	// Act
 	got := strings.Join(UnitPrefix(), " ")
 
 	// Assert
-	if got != "/usr/sbin/taskpolicy -d utility" {
+	if got != "/usr/sbin/taskpolicy -d default" {
 		t.Fatalf("UnitPrefix = %q", got)
 	}
 }

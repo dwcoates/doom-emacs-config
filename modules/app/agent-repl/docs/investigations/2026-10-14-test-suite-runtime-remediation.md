@@ -123,14 +123,14 @@ Throttled-I/O artifacts (absent in all default-tier runs; verify after R1):
   "git". Open: realtest drives the owner's own daemon on the owner's real
   repositories, so a fake-git daemon there breaks the owner's workspaces for
   the sweep (see Questions).
-- R9 Shared e2e worlds: deprioritized by measurement (~17s of 219
-  unit-seconds). Revisit only if a profile shows world setup in the long
-  poles.
+- R9 Shared e2e worlds: dropped (owner, 2026-10-14) on the measurement
+  (~17s of 219 unit-seconds); per-test worlds stay isolated.
 
-## Questions for the owner
+## Owner rulings (2026-10-14)
 
-- Q1 R1 reverses the 2026-10-06 disk ruling for testrun units only, on the
-  live-store evidence above.
-- Q2 R8: should realtest run its own daemon (fake git, scratch state root)
-  instead of the owner's, or stay exempt from the git rule?
-- Q3 R9: still wanted, given the measurement?
+- R1 approved: units at the default I/O tier.
+- R8: the daemon takes its git binary from an override, and every test,
+  realtest included, points it at the mocked git.
+- R9 dropped.
+- Coverage may fall by at most 1% (ideally far less), and no change a user
+  would notice.
