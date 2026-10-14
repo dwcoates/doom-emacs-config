@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"os"
 	"strconv"
-	"strings"
 )
 
 // ReadState reads pid's state letter from /proc/<pid>/stat.
@@ -18,15 +17,11 @@ func ReadState(pid int) (State, error) {
 	if err != nil {
 		return State{}, err
 	}
-	// The state follows the parenthesized command name, which may itself hold
-	// spaces or parentheses, so it is found after the LAST ')'.
-	stat := string(raw)
-	end := strings.LastIndexByte(stat, ')')
-	fields := strings.Fields(stat[end+1:])
-	if end < 0 || len(fields) == 0 {
-		return State{}, fmt.Errorf("unparseable /proc/%d/stat %q", pid, stat)
+	line, err := ParseStat(string(raw))
+	if err != nil {
+		return State{}, fmt.Errorf("unparseable /proc/%d/stat: %w", pid, err)
 	}
-	switch letter := fields[0]; letter {
+	switch letter := line.Fields[0]; letter {
 	case "T", "t":
 		return State{Frozen: true, Name: "stopped"}, nil
 	case "Z", "X", "x":
@@ -57,23 +52,20 @@ func LiveMembers(pgid int) ([]Member, error) {
 			return nil, err
 		}
 		// The state, ppid and pgrp follow the parenthesized command name.
-		stat := string(raw)
-		start := strings.IndexByte(stat, '(')
-		end := strings.LastIndexByte(stat, ')')
-		if start < 0 || end < start {
-			return nil, fmt.Errorf("unparseable /proc/%d/stat %q", pid, stat)
+		line, err := ParseStat(string(raw))
+		if err != nil {
+			return nil, fmt.Errorf("unparseable /proc/%d/stat: %w", pid, err)
 		}
-		fields := strings.Fields(stat[end+1:])
-		if len(fields) < 3 {
-			return nil, fmt.Errorf("unparseable /proc/%d/stat %q", pid, stat)
+		if len(line.Fields) < 3 {
+			return nil, fmt.Errorf("unparseable /proc/%d/stat %q: no process group", pid, raw)
 		}
-		if fields[2] != strconv.Itoa(pgid) {
+		if line.Fields[2] != strconv.Itoa(pgid) {
 			continue
 		}
-		switch fields[0] {
+		switch line.Fields[0] {
 		case "Z", "X", "x":
 		default:
-			live = append(live, Member{Pid: pid, Comm: stat[start+1 : end], State: "in state " + fields[0]})
+			live = append(live, Member{Pid: pid, Comm: line.Comm, State: "in state " + line.Fields[0]})
 		}
 	}
 	return live, nil
