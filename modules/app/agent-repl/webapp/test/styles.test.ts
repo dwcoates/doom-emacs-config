@@ -4008,6 +4008,7 @@ const PAD_LADDER: readonly { selectors: readonly string[]; props: readonly strin
   { selectors: [variantSelector("response")], props: ["--bubble-pad-y"] },
   { selectors: ["user", "agent", "peer", "held"].map(variantSelector), props: ["--bubble-pad-y", "--bubble-pad-x"] },
   { selectors: [`${variantSelector("response")}.interim-response`], props: ["--bubble-pad-y", "--bubble-pad-x"] },
+  { selectors: [`${variantSelector("response")}.final-response`], props: ["--bubble-pad-y"] },
   { selectors: [variantSelector("thinking")], props: ["--bubble-pad-y"] },
 ];
 /** The two padding tokens a ladder rung may set. */
@@ -4726,6 +4727,7 @@ describe("the padding ladder", () => {
   const INTERIM_Y = "calc(var(--bubble-pad-y-base)*0.49*var(--bubble-font-rem)/var(--bubble-base-font-rem))";
   const INTERIM_X = "calc(var(--bubble-pad-x-base)*var(--bubble-font-rem)/var(--bubble-base-font-rem))";
   const BASE_X = "var(--bubble-pad-x-base)";
+  const ANSWER_Y = "calc(var(--bubble-pad-y-base)*0.7*1.25)";
 
   /** The PROPERTY the cascade hands a bubble of VARIANT, wearing CLASSES. */
   function tokenOf(property: string, variant: string, classes: readonly string[] = []): string {
@@ -4755,12 +4757,20 @@ describe("the padding ladder", () => {
     expect(stated).toEqual(Object.keys(BUBBLE_VARIANTS).sort());
   });
 
-  it("gives an interim response 30% less than the green answer it is not, shrunk with its text", () => {
+  it("gives an interim response 30% less than a plain response, shrunk with its text", () => {
     // Arrange / Act
-    const got = [tokenOf("--bubble-pad-y", "response", ["interim-response"]), tokenOf("--bubble-pad-y", "response", ["final-response"])];
+    const got = [tokenOf("--bubble-pad-y", "response", ["interim-response"]), tokenOf("--bubble-pad-y", "response")];
 
     // Assert
     expect(got).toEqual([INTERIM_Y, RESPONSE]);
+  });
+
+  it("gives the green answer 25% more top and bottom than a plain response", () => {
+    // Arrange / Act
+    const got = [tokenOf("--bubble-pad-y", "response", ["final-response"]), tokenOf("--bubble-pad-y", "response")];
+
+    // Assert
+    expect(got).toEqual([ANSWER_Y, RESPONSE]);
   });
 
   it("shrinks an interim response's sides with its text, where the green answer keeps the base", () => {
