@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"agentrepl/testrun/reap"
 )
 
 // fakeHost is a scripted hdiutil/diskutil: it records every call and answers
@@ -176,7 +178,7 @@ func newManager(t *testing.T, h *fakeHost) Manager {
 	h.mount = filepath.Join(parent, "artr-4242")
 	return Manager{
 		Run: h.run, Registry: filepath.Join(t.TempDir(), "registry"), MountParent: parent, Pid: 4242,
-		KillUnder: func(string) (int, error) { return 0, nil },
+		Reap:      func(reap.Members) (reap.Result, error) { return reap.Result{}, nil },
 		Probe:     h.probe,
 		Watch:     h.watch,
 		Alive:     func(int) bool { return false },
@@ -220,6 +222,7 @@ func TestAcquireRecordsTheDeviceAndMount(t *testing.T) {
 	// Arrange
 	h := &fakeHost{}
 	m := newManager(t, h)
+	m.Own = reap.Members{Session: 4242, Since: time.Unix(1760400000, 0)}
 
 	// Act
 	v, err := m.Acquire(16)
@@ -233,7 +236,7 @@ func TestAcquireRecordsTheDeviceAndMount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read the record: %v", err)
 	}
-	if got := string(raw); got != "device=/dev/disk9\nmount="+h.mount+"\n" {
+	if got := string(raw); got != "device=/dev/disk9\nmount="+h.mount+"\nsession=4242\nsince=1760400000\n" {
 		t.Fatalf("record = %q", got)
 	}
 }
@@ -301,7 +304,10 @@ func TestReleaseKillsWhatRunsOutOfTheVolumeBeforeDetaching(t *testing.T) {
 	m := newManager(t, h)
 	var killedUnder string
 	callsAtKill := -1
-	m.KillUnder = func(dir string) (int, error) { killedUnder, callsAtKill = dir, len(h.calls); return 3, nil }
+	m.Reap = func(ms reap.Members) (reap.Result, error) {
+		killedUnder, callsAtKill = ms.Dirs[0], len(h.calls)
+		return killedN(3), nil
+	}
 	v, err := m.Acquire(16)
 	if err != nil {
 		t.Fatalf("Acquire: %v", err)
@@ -324,7 +330,7 @@ func TestReleaseKeepsTheDiskWhenWhatRunsOutOfItCannotBeKilled(t *testing.T) {
 	// Arrange
 	h := &fakeHost{}
 	m := newManager(t, h)
-	m.KillUnder = func(string) (int, error) { return 0, errors.New("ps failed") }
+	m.Reap = func(reap.Members) (reap.Result, error) { return reap.Result{}, errors.New("ps failed") }
 	v, err := m.Acquire(16)
 	if err != nil {
 		t.Fatalf("Acquire: %v", err)
@@ -536,7 +542,7 @@ func TestReclaimTakesDownADeadRunsRAMDisk(t *testing.T) {
 	h := &fakeHost{info: attachedInfo}
 	m := newManager(t, h)
 	var killedUnder string
-	m.KillUnder = func(dir string) (int, error) { killedUnder = dir; return 2, nil }
+	m.Reap = func(ms reap.Members) (reap.Result, error) { killedUnder = ms.Dirs[0]; return killedN(2), nil }
 	mount := filepath.Join(t.TempDir(), "artr-7")
 	record := deadRecord(t, m, "7", "/dev/disk7", mount)
 
@@ -1414,7 +1420,7 @@ func TestReclaimRemovesAStrayMountPointNoRecordNames(t *testing.T) {
 	m := newManager(t, h)
 	dir := strayDir(t, m, "artr-28386")
 	var killedUnder string
-	m.KillUnder = func(d string) (int, error) { killedUnder = d; return 12, nil }
+	m.Reap = func(ms reap.Members) (reap.Result, error) { killedUnder = ms.Dirs[0]; return killedN(12), nil }
 
 	// Act
 	done, err := m.Reclaim()
@@ -1441,7 +1447,10 @@ func TestReclaimLeavesAStrayWhoseRunIsAlive(t *testing.T) {
 	m := newManager(t, h)
 	dir := strayDir(t, m, "artr-28386")
 	m.Alive = func(pid int) bool { return pid == 28386 }
-	m.KillUnder = func(string) (int, error) { t.Fatal("killed under a live run's mount point"); return 0, nil }
+	m.Reap = func(reap.Members) (reap.Result, error) {
+		t.Fatal("reaped a live run's mount point")
+		return reap.Result{}, nil
+	}
 
 	// Act
 	done, err := m.Reclaim()
@@ -1497,7 +1506,7 @@ func TestReclaimKeepsAStrayWhoseProcessesCannotBeKilled(t *testing.T) {
 	h := &fakeHost{}
 	m := newManager(t, h)
 	dir := strayDir(t, m, "artr-28386")
-	m.KillUnder = func(string) (int, error) { return 0, errors.New("ps failed") }
+	m.Reap = func(reap.Members) (reap.Result, error) { return reap.Result{}, errors.New("ps failed") }
 
 	// Act
 	done, err := m.Reclaim()
@@ -1532,7 +1541,10 @@ func TestReclaimFinishesAStrayAnEarlierRemovalLeft(t *testing.T) {
 	h := &fakeHost{}
 	m := newManager(t, h)
 	dir := strayDir(t, m, "artr-28386.reclaim")
-	m.KillUnder = func(string) (int, error) { t.Fatal("killed under a mount point already taken"); return 0, nil }
+	m.Reap = func(reap.Members) (reap.Result, error) {
+		t.Fatal("reaped a mount point already taken")
+		return reap.Result{}, nil
+	}
 
 	// Act
 	done, err := m.Reclaim()
@@ -1713,6 +1725,145 @@ func TestRegistryHoldersShareReleaseRegistry(t *testing.T) {
 		// Assert
 		if takes == 0 || takes != releases || strings.Count(string(src), "closeErr := unlock()") > 1 {
 			t.Errorf("%s takes the registry lock %d times and releases it through releaseRegistry %d times; want every release through it", file, takes, releases)
+		}
+	}
+}
+
+// killedN is a reap's result that killed n members.
+func killedN(n int) reap.Result { return reap.Result{Killed: make([]reap.Proc, n)} }
+
+func TestParseRecord(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want record
+	}{
+		{name: "a record naming the run's session", raw: "device=/dev/disk9\nmount=/tmp/artr-7\nsession=7\nsince=1760400000\n", want: record{Device: "/dev/disk9", Mount: "/tmp/artr-7", Session: 7, Since: time.Unix(1760400000, 0)}},
+		{name: "a record written before the session was recorded", raw: "device=/dev/disk9\nmount=/tmp/artr-7\n", want: record{Device: "/dev/disk9", Mount: "/tmp/artr-7"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			got := parseRecord(tt.raw)
+
+			// Assert.
+			if got.Device != tt.want.Device || got.Mount != tt.want.Mount || got.Session != tt.want.Session || !got.Since.Equal(tt.want.Since) {
+				t.Fatalf("parseRecord() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestReleaseReapsTheRunsSessionAndWhatRunsOutOfTheVolume(t *testing.T) {
+	// Arrange
+	h := &fakeHost{}
+	m := newManager(t, h)
+	m.Own = reap.Members{What: "run 4242", Session: 4242, Since: time.Unix(1760400000, 0), Except: []int{4242, 4243}}
+	var got reap.Members
+	m.Reap = func(ms reap.Members) (reap.Result, error) { got = ms; return reap.Result{}, nil }
+	v, err := m.Acquire(16)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+
+	// Act
+	err = v.Release()
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+	if got.Session != 4242 || !got.Since.Equal(m.Own.Since) || !slices.Equal(got.Except, []int{4242, 4243}) || !slices.Contains(got.Dirs, h.mount) {
+		t.Fatalf("reaped %+v, want the run's session and the mount %s", got, h.mount)
+	}
+}
+
+func TestReclaimReapsTheDeadRunsRecordedSession(t *testing.T) {
+	// Arrange
+	h := &fakeHost{info: attachedInfo}
+	m := newManager(t, h)
+	var got reap.Members
+	m.Reap = func(ms reap.Members) (reap.Result, error) { got = ms; return reap.Result{}, nil }
+	mount := filepath.Join(t.TempDir(), "artr-7")
+	path := deadRecord(t, m, "7", "/dev/disk7", mount)
+	if err := os.WriteFile(path, []byte("device=/dev/disk7\nmount="+mount+"\nsession=7\nsince=1760400000\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	if _, err := m.Reclaim(); err != nil {
+		t.Fatalf("Reclaim: %v", err)
+	}
+
+	// Assert
+	if got.Session != 7 || !got.Since.Equal(time.Unix(1760400000, 0)) || !slices.Contains(got.Except, 4242) || !slices.Contains(got.Dirs, mount) {
+		t.Fatalf("reaped %+v, want session 7 since its record and the mount %s", got, mount)
+	}
+}
+
+func TestReclaimRunTakesDownTheDeadRunnersDisk(t *testing.T) {
+	// Arrange
+	h := &fakeHost{info: attachedInfo}
+	m := newManager(t, h)
+	mount := filepath.Join(t.TempDir(), "artr-7")
+	record := deadRecord(t, m, "7", "/dev/disk7", mount)
+	log := m.Log.(*fakeLog)
+
+	// Act
+	ok, err := m.ReclaimRun(7)
+
+	// Assert
+	if err != nil || !ok {
+		t.Fatalf("ReclaimRun = %v, %v; want the disk reclaimed", ok, err)
+	}
+	if _, statErr := os.Stat(record); !os.IsNotExist(statErr) {
+		t.Fatalf("the dead runner's record survives (stat err = %v)", statErr)
+	}
+	if !log.has("INFO reclaimed the RAM disk /dev/disk7 at " + mount + " left by dead run pid 7") {
+		t.Fatalf("log = %q, want the reclaim at INFO", log.snapshot())
+	}
+}
+
+func TestReclaimRunAnswersFalseForARunWithNoRecord(t *testing.T) {
+	// Arrange
+	m := newManager(t, &fakeHost{})
+	if err := os.MkdirAll(m.Registry, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	ok, err := m.ReclaimRun(7)
+
+	// Assert
+	if err != nil || ok {
+		t.Fatalf("ReclaimRun = %v, %v; want nothing to reclaim", ok, err)
+	}
+}
+
+func TestReclaimRunKeepsTheRecordWhenTheReapFails(t *testing.T) {
+	// Arrange
+	h := &fakeHost{info: attachedInfo}
+	m := newManager(t, h)
+	m.Reap = func(reap.Members) (reap.Result, error) { return reap.Result{}, errors.New("a member did not exit") }
+	record := deadRecord(t, m, "7", "/dev/disk7", filepath.Join(t.TempDir(), "artr-7"))
+	log := m.Log.(*fakeLog)
+
+	// Act
+	ok, err := m.ReclaimRun(7)
+
+	// Assert
+	if err == nil || ok || !strings.Contains(err.Error(), "a member did not exit") {
+		t.Fatalf("ReclaimRun = %v, %v; want the failed reap", ok, err)
+	}
+	if !log.has("ERROR reclaim the RAM disk of dead run pid 7") {
+		t.Fatalf("log = %q, want the failure at ERROR", log.snapshot())
+	}
+	if _, statErr := os.Stat(record); statErr != nil {
+		t.Fatalf("the record went with its run's processes unreaped (stat err = %v)", statErr)
+	}
+	for _, call := range h.calls {
+		if strings.Contains(call, "detach") {
+			t.Fatalf("detached under unreaped members: %q", h.calls)
 		}
 	}
 }

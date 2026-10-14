@@ -8,6 +8,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"agentrepl/testrun/reap"
 )
 
 // liveRecord writes a record and holds its lock for the test's life.
@@ -737,7 +739,7 @@ func TestSetupLogsAStrayMountPointItRemoved(t *testing.T) {
 	h := &fakeHost{}
 	m := newManager(t, h)
 	dir := strayDir(t, m, "artr-28386")
-	m.KillUnder = func(string) (int, error) { return 12, nil }
+	m.Reap = func(reap.Members) (reap.Result, error) { return killedN(12), nil }
 	log := m.Log.(*fakeLog)
 
 	// Act
