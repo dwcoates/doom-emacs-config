@@ -80,7 +80,7 @@ func reportCreateStage(spec CreateSpec, stage CreateStage) {
 	}
 }
 
-func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, error) {
+func (v *verbs) create(ctx context.Context, spec CreateSpec) (wsm.Workspace, error) {
 	global := v.deps.Log.Global().With(dlog.Context{"repo_dir": spec.RepoDir, "one_shot": spec.OneShot})
 
 	if err := v.validateCreate(global, spec); err != nil {

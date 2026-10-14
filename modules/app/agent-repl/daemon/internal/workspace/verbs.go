@@ -75,6 +75,10 @@ type verbs struct {
 	revivals revivalFlights
 	// names are the workspace names claimed in this process (mergenames.go).
 	names nameClaims
+	// createFailureReports counts the failed-create reports still being
+	// delivered (createfailed.go), so whoever must know they are done waits
+	// for them rather than for a record to appear.
+	createFailureReports sync.WaitGroup
 }
 
 // load resolves one workspace's durable record and its own logger. A REGISTERED
