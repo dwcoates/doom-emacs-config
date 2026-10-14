@@ -7779,6 +7779,68 @@ describe("the account's rate-limit windows", () => {
         : undefined,
     ).toBe("the usage endpoint is down");
   });
+
+  it("stamps each sample when it is asked for, not when it answers", async () => {
+    // A stamp taken on the answer lets a slow sample asked earlier outrank a
+    // fast one asked later; the daemon orders every session's samples by it.
+    let now = 1_000_000;
+    const asked: bigint[] = [];
+    const h = harness({
+      clock: () => now,
+      onQueryCreated: (query) => {
+        query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET = () => {
+          asked.push(BigInt(now));
+          now += 5_000;
+          return Promise.resolve(query.accountUsage);
+        };
+      },
+    });
+
+    const seen = await pushedUpdates(
+      h,
+      (update) => (update.case === "accountUsage" ? update.value.observedAtMs : undefined),
+      async () => {
+        await started(h);
+      },
+    );
+
+    expect(asked.length).toBeGreaterThan(0);
+    expect(seen).toEqual(asked);
+  });
+
+  it("takes a fresh sample when the vendor states a live rate-limit event", async () => {
+    // The event's own utilization is never drawn (it carries no instant), so
+    // the event asks for a sample that does.
+    let now = 1_000_000;
+    let eventSent = false;
+    let sampledAfterEvent = (): void => undefined;
+    const sampled = new Promise<void>((resolve) => {
+      sampledAfterEvent = resolve;
+    });
+    const h = harness({
+      clock: () => (now += 1),
+      onQueryCreated: (query) => {
+        query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET = () => {
+          if (eventSent) sampledAfterEvent();
+          return Promise.resolve(query.accountUsage);
+        };
+      },
+    });
+    await started(h);
+    const query = (await untilQuery(h, 0)).query;
+
+    eventSent = true;
+    query.emit({
+      type: "rate_limit_event",
+      uuid: "rate-limit-1",
+      session_id: "s",
+      rate_limit_info: { status: "allowed", rateLimitType: "five_hour", utilization: 0.97 },
+    } as unknown as SdkMessage);
+    await sampled;
+
+    expect(eventSent).toBe(true);
+    await h.engine.standDown("collected");
+  });
 });
 
 describe("mcp server health, arm by arm", () => {
