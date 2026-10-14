@@ -345,7 +345,7 @@
   --feed-text-scale: 1;
   /* THE BUBBLE AND TREE TYPE SIZES, as bare rem multipliers, so a rule can
      compute one from the other. `--bubble-font-rem` is every bubble's text
-     size; `--tree-font-rem` and `--tree-line-h` are a metaprompt tree's
+     size but a thinking bubble's, which narrows it;`--tree-font-rem` and `--tree-line-h` are a metaprompt tree's
      monospace size and leading. A prompt's leading is derived from all three
      so its lines sit exactly as far apart as a tree's (owner request,
      2026-10-13). */
@@ -1871,8 +1871,12 @@ pre {
 }
 /* THE THINKING PROSE (owner request, 2026-10-14): a thinking bubble's text is
    italic and a touch greyer than an interim's (--thinking-text), so reasoning
-   reads apart from every response the agent actually says. */
+   reads apart from every response the agent actually says. It is also set a
+   touch smaller than every other bubble's text (owner request, 2026-10-14):
+   the kind narrows `--bubble-font-rem`, so the base `.bubble` rule still
+   computes the one font-size and the feed zoom still scales it. */
 .bubble[data-variant="thinking"] {
+  --bubble-font-rem: 0.8;
   color: var(--thinking-text);
   font-style: italic;
 }
