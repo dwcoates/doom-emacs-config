@@ -2203,11 +2203,13 @@ html[data-page-unshown] *::after {
    SELECTED bubble is excluded: on the root feed a bubble is open exactly while
    it is selected, and the selection's grey fill is its mark with no colored
    border over it, so the eggshell shows only on an open bubble that cannot be
-   selected (one in a sub-feed). It sets
+   selected (one in a sub-feed). A THINKING bubble is excluded too (owner
+   specification, 2026-10-14): a click only expands it, and an open one wears
+   no highlight an unclicked one does not. It sets
    the color alone:
    the 0.3px the base reserves is recolored, never reflowed, and closing the
    box hands the ladder's own border straight back. */
-.bubble[data-role="response"]:not(.entry-selected):has(> .bubble-scroll.expanded) {
+.bubble[data-role="response"]:not(.entry-selected):not([data-variant="thinking"]):has(> .bubble-scroll.expanded) {
   border-color: var(--expanded-response-border) !important;
 }
 /* The working-frontier BREATH is gone with the pulse machinery that drove it,

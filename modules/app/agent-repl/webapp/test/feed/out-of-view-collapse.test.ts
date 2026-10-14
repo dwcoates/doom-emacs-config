@@ -1,26 +1,26 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { createOutOfViewCollapse, type OutOfViewCollapse } from "../../src/feed/out-of-view-collapse.js";
+import { createOutOfViewCollapse, type OutOfViewCause, type OutOfViewCollapse } from "../../src/feed/out-of-view-collapse.js";
 import { fireIntersection, intersectionObservers } from "../intersection-observer.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 
 /** A watched entry: its row, its cause, its open state, and its collapses counted. */
 interface Entry {
   row: HTMLElement;
-  cause: "jump";
+  cause: OutOfViewCause;
   open: boolean;
   collapses: number;
   isExpanded(): boolean;
   collapse(): void;
 }
 
-function entry(box: HTMLElement, id: string): Entry {
+function entry(box: HTMLElement, id: string, cause: OutOfViewCause = "jump"): Entry {
   const row = document.createElement("article");
   row.setAttribute("data-feed-row", id);
   box.append(row);
   const e: Entry = {
     row,
-    cause: "jump",
+    cause,
     open: true,
     collapses: 0,
     isExpanded: () => e.open,
@@ -193,6 +193,20 @@ describe("createOutOfViewCollapse", () => {
     // Assert
     const record = await forwardedRecord(capture, "feed.out-of-view-collapse");
     expect([record.level.case, record.context?.row, record.context?.cause]).toEqual(["info", "a", "jump"]);
+  });
+
+  it("names a thinking click's cause in the collapse record", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const w = watching();
+    const thinking = entry(w.box, "t", "thinkingClick");
+    w.jumps.track(thinking);
+    fireIntersection(thinking.row, true);
+    // Act
+    fireIntersection(thinking.row, false);
+    // Assert
+    const record = await forwardedRecord(capture, "feed.out-of-view-collapse");
+    expect([record.context?.row, record.context?.cause]).toEqual(["t", "thinkingClick"]);
   });
 
   it("logs a detached entry at debug", async () => {
