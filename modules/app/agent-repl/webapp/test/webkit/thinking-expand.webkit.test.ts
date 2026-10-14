@@ -11,13 +11,9 @@
  * whose open box DOES take the eggshell border, so the probe is shown to see
  * the rule it guards.
  */
-import path from "node:path";
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
-import { webkit, type Browser, type Page } from "playwright-core";
+import type { Browser, Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
+import { openFeedPage } from "./feed-page";
 
 /** A capped response bubble of VARIANT (and CLASSES), its box open when OPEN. */
 const bubbleHtml = (variant: string, classes: string, open: boolean): string => `
@@ -58,13 +54,7 @@ describe("an expanded thinking bubble in WebKit", () => {
   let page: Page;
 
   beforeAll(async () => {
-    const css = await readFile(path.join(here, "../../src/styles.css"), "utf8");
-    browser = await webkit.launch();
-    page = await browser.newPage({ viewport: { width: 800, height: 800 } });
-    await page.setContent(`<!doctype html><html><head></head><body>
-      <div id="feed-scroll" class="scroll-zone"><main id="feed" data-feed="root"></main></div>
-      </body></html>`);
-    await page.addStyleTag({ content: css });
+    ({ browser, page } = await openFeedPage({ width: 800, height: 800 }));
   });
 
   afterAll(async () => {
