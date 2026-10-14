@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTicker } from "../../../src/clock.js";
 import { childTabsOf, type MergeTab } from "../../../src/feed/merge/tab-strip.js";
-import { createTabSet, drawSummary, type TabPanel } from "../../../src/feed/merge/tab-set.js";
+import { createTabSet, drawSummary, tabStatesOf, type TabPanel } from "../../../src/feed/merge/tab-set.js";
 import { tabRow } from "./fixtures.js";
 import MERGE_BODY from "../../../src/feed/merge/merge-body.ts?raw";
 import TAB_PANELS from "../../../src/feed/merge/tab-panels.ts?raw";
@@ -120,6 +120,28 @@ describe("createTabSet", () => {
     expect(host.querySelector("[data-panel]")?.getAttribute("data-panel")).toBe("c");
   });
 
+  it("releases the reader's pick when a tab settles", () => {
+    const { host, set } = mounted();
+    set.draw(tabs(["a", { kind: "queue", state: "live", startedAtMs: 1_000n }], ["b", { kind: "rebasing", state: "live", startedAtMs: 2_000n }]));
+    host.querySelector<HTMLElement>('[data-merge-tab="rebasing"]')?.click();
+    set.draw(
+      tabs(
+        ["a", { kind: "queue", state: "live", startedAtMs: 1_000n }],
+        ["b", { kind: "rebasing", state: "settled", outcome: "succeeded", startedAtMs: 2_000n, endedAtMs: 3_000n }],
+      ),
+    );
+    expect(host.querySelector("[data-panel]")?.getAttribute("data-panel")).toBe("a");
+  });
+
+  it("keeps the reader's pick across a push that changes no tab's state", () => {
+    const { host, set } = mounted();
+    const served = tabs(["a", { kind: "queue", state: "live", startedAtMs: 1_000n }], ["b", { kind: "rebasing", state: "live", startedAtMs: 2_000n }]);
+    set.draw(served);
+    host.querySelector<HTMLElement>('[data-merge-tab="queue"]')?.click();
+    set.draw(tabs(["a", { kind: "queue", state: "live", startedAtMs: 1_000n }], ["b", { kind: "rebasing", state: "live", startedAtMs: 2_000n, payload: { progress: { replayed: 1, total: 2 } } }]));
+    expect(host.querySelector("[data-panel]")?.getAttribute("data-panel")).toBe("a");
+  });
+
   it("empties the panel when no tab is served", () => {
     const { host, set } = mounted();
     set.draw(tabs(["a", { kind: "committing", state: "live" }]));
@@ -132,6 +154,38 @@ describe("createTabSet", () => {
     set.draw(tabs(["a", { kind: "committing", state: "live" }]));
     set.dispose();
     expect(host.children.length).toBe(0);
+  });
+});
+
+describe("tabStatesOf: a strip's tab states as one key", () => {
+  it("is unchanged by a change of content", () => {
+    const before = tabs(["a", { kind: "rebasing", state: "live", payload: { progress: { replayed: 0, total: 2 } } }]);
+    const after = tabs(["a", { kind: "rebasing", state: "live", payload: { progress: { replayed: 1, total: 2 } } }]);
+    expect(tabStatesOf(after)).toBe(tabStatesOf(before));
+  });
+
+  it("is unchanged by a change of instants", () => {
+    const before = tabs(["a", { kind: "committing", state: "live", startedAtMs: 1_000n }]);
+    const after = tabs(["a", { kind: "committing", state: "live", startedAtMs: 2_000n }]);
+    expect(tabStatesOf(after)).toBe(tabStatesOf(before));
+  });
+
+  it("changes when a tab changes state", () => {
+    const before = tabs(["a", { kind: "rebasing", state: "live" }]);
+    const after = tabs(["a", { kind: "rebasing", state: "waitingOnUser" }]);
+    expect(tabStatesOf(after)).not.toBe(tabStatesOf(before));
+  });
+
+  it("changes when a settled tab's outcome differs", () => {
+    const before = tabs(["a", { kind: "committing", state: "settled", outcome: "succeeded" }]);
+    const after = tabs(["a", { kind: "committing", state: "settled", outcome: "failed" }]);
+    expect(tabStatesOf(after)).not.toBe(tabStatesOf(before));
+  });
+
+  it("changes when a tab appears", () => {
+    const before = tabs(["a", { kind: "queue", state: "live" }]);
+    const after = tabs(["a", { kind: "queue", state: "live" }], ["b", { kind: "rebasing", state: "live" }]);
+    expect(tabStatesOf(after)).not.toBe(tabStatesOf(before));
   });
 });
 

@@ -3,12 +3,14 @@
  * panel: the shape the bubble's own strip and every nested strip (a rebasing
  * tab's commits, a tests tab's runs) share.
  *
- * SELECTION IS LOCAL AND THE READER'S. The auto rule (the last live tab, else
- * the last tab) decides until the reader clicks, and their choice then stands —
- * a re-push must never yank the tab out from under someone reading it. It is
- * released only when a NEW tab appears in THIS strip, because a new tab is the
- * run moving on and the reader asked to follow the run, not to be pinned to a
- * phase that is over. Each strip keeps its own choice.
+ * SELECTION IS LOCAL AND THE READER'S. The auto rule (the most relevant tab,
+ * `autoSelectedTab`) decides until the reader clicks, and their choice then
+ * stands — a re-push must never yank the tab out from under someone reading
+ * it. It is released when a tab in THIS strip CHANGES STATE (a tab appears,
+ * starts, waits on the user, or settles), because that is the run moving on
+ * and the reader asked to follow the run, not to be pinned to a phase that is
+ * over; a push that only redrew content or moved a clock keeps it. Each strip
+ * keeps its own choice.
  *
  * THE STRIP IS DRAWN IN PLACE (owner request, 2026-10-10). The daemon re-pushes
  * a tab row on every beat of its work — a run on every unit verdict, many times
@@ -78,8 +80,8 @@ export function createTabSet(
 ): TabSet {
   /** The tab the reader picked, by id; null while the auto rule decides. */
   let picked: string | null = null;
-  /** Every tab id drawn so far, so a NEW tab can release the reader's pick. */
-  let known = new Set<string>();
+  /** Every tab's state as last drawn, so a state change can release the reader's pick. */
+  let states = "";
   /** Each drawn tab's element, and the tab and activeness it was drawn from, by tab id. */
   const drawnTabs = new Map<string, { el: HTMLElement; tab: MergeTab; active: boolean }>();
   /** The tab the panel last drew, and its panel, kept while that tab stays shown. */
@@ -97,7 +99,7 @@ export function createTabSet(
 
   const draw = (tabs: readonly MergeTab[]): void => {
     served = tabs;
-    releasePickOnNewTab(tabs);
+    releasePickOnStateChange(tabs);
     const active = tabs.find((t) => t.id === picked) ?? autoSelectedTab(tabs);
     log.debug("drawing a merge tab strip", {
       operation: "merge.draw-strip",
@@ -160,19 +162,16 @@ export function createTabSet(
   }
 
   /**
-   * Let go of the reader's pick when a tab they have never seen arrives.
+   * Let go of the reader's pick when any tab's state moved since the last draw.
    *
-   * Tabs are APPEND-ONLY, so a tab id the strip has not drawn before means the
-   * run moved into a new phase — the one event that should move the view.
+   * Tabs are APPEND-ONLY, so a new tab is a state change too: the run moved
+   * into a new phase, or a phase began, waited or ended — the events that
+   * should move the view.
    */
-  function releasePickOnNewTab(tabs: readonly MergeTab[]): void {
-    const ids = new Set(tabs.map((t) => t.id));
-    for (const id of ids) {
-      if (known.has(id)) continue;
-      if (known.size > 0) picked = null;
-      break;
-    }
-    known = ids;
+  function releasePickOnStateChange(tabs: readonly MergeTab[]): void {
+    const next = tabStatesOf(tabs);
+    if (next !== states) picked = null;
+    states = next;
   }
 
   return {
@@ -184,6 +183,15 @@ export function createTabSet(
       }
     },
   };
+}
+
+/**
+ * The states of TABS as one comparable key: each tab's id, state and outcome,
+ * in strip order. Content and clocks are left out, since neither is a change
+ * of state.
+ */
+export function tabStatesOf(tabs: readonly MergeTab[]): string {
+  return JSON.stringify(tabs.map((tab) => [tab.id, tab.state, tab.outcome ?? null]));
 }
 
 /**

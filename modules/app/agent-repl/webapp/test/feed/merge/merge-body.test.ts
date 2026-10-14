@@ -145,16 +145,30 @@ describe("which tab is active", () => {
     expect(activeKind(host)).toBe("queue");
   });
 
-  it("KEEPS the reader's tab across a push that only changed a tab's state", () => {
+  it("KEEPS the reader's tab across a push that changed no tab's state", () => {
     const view = new FakeSubfeed([
       tabRow("t1", { kind: "queue", state: "live" }),
-      tabRow("t2", { kind: "tests", state: "live" }),
+      tabRow("t2", { kind: "rebasing", state: "live", payload: { progress: { replayed: 0, total: 2 } } }),
     ]);
     const { host } = mount(view);
     host.querySelector<HTMLElement>('[data-merge-tab="queue"]')?.click();
     view.push([
-      tabRow("t1", { kind: "queue", state: "settled", outcome: "succeeded" }),
-      tabRow("t2", { kind: "tests", state: "live" }),
+      tabRow("t1", { kind: "queue", state: "live" }),
+      tabRow("t2", { kind: "rebasing", state: "live", payload: { progress: { replayed: 1, total: 2 } } }),
+    ]);
+    expect(activeKind(host)).toBe("queue");
+  });
+
+  it("RELEASES the reader's tab when a tab changes state — the run moved on", () => {
+    const view = new FakeSubfeed([
+      tabRow("t1", { kind: "queue", state: "live" }),
+      tabRow("t2", { kind: "rebasing", state: "live", startedAtMs: 2_000n }),
+    ]);
+    const { host } = mount(view);
+    host.querySelector<HTMLElement>('[data-merge-tab="rebasing"]')?.click();
+    view.push([
+      tabRow("t1", { kind: "queue", state: "live" }),
+      tabRow("t2", { kind: "rebasing", state: "settled", outcome: "succeeded", startedAtMs: 2_000n }),
     ]);
     expect(activeKind(host)).toBe("queue");
   });
@@ -183,11 +197,12 @@ describe("which tab is active", () => {
     expect([activeKinds(host), runViewOf(host)]).toEqual([["tests", "testsRun"], "remediation"]);
   });
 
-  it("keeps each strip's own pick: a commit picked in the rebasing tab survives a push", () => {
-    const rows = (second: "live" | "settled") => [
+  it("keeps each strip's own pick: a commit picked in the rebasing tab survives the bubble's strip moving", () => {
+    const rows = (queue: "live" | "settled") => [
+      tabRow("t-queue", { kind: "queue", state: queue, outcome: "succeeded" }),
       tabRow("t-rebase", { kind: "rebasing", state: "live" }),
       tabRow("c1", { kind: "rebaseCommit", state: "settled", outcome: "succeeded", parent: "t-rebase" }),
-      tabRow("c2", { kind: "rebaseCommit", state: second, outcome: "succeeded", parent: "t-rebase" }),
+      tabRow("c2", { kind: "rebaseCommit", state: "live", parent: "t-rebase" }),
     ];
     const view = new FakeSubfeed(rows("live"));
     const { host } = mount(view);
