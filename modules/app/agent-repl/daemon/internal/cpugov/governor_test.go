@@ -108,6 +108,12 @@ func ready(w *waiter) bool {
 
 func speculative(rank int) Request { return Request{Workspace: "ws", Repo: "/repo/.git", Rank: rank} }
 
+// recordsAt answers every record the governor logged at level under op, in
+// order.
+func (r *rig) recordsAt(level, op string) []dlog.Record {
+	return dlog.FilterRecords(r.log.Records(), dlog.RecordQuery{Level: level, Operation: op})
+}
+
 func (r *rig) recordAt(level, op string) (dlog.Record, bool) {
 	return dlog.FindRecord(r.log.Records(), dlog.RecordQuery{Level: level, Operation: op})
 }
@@ -290,8 +296,8 @@ func TestAnUnchangedDeferralIsRecordedOnce(t *testing.T) {
 
 	// Assert.
 	deferrals := 0
-	for _, rec := range r.log.Records() {
-		if rec.Operation == "daemon.cpugov.admit" && rec.Context["decision"] == "defer" {
+	for _, rec := range r.recordsAt("info", "daemon.cpugov.admit") {
+		if rec.Context["decision"] == "defer" {
 			deferrals++
 		}
 	}
@@ -396,13 +402,7 @@ func TestASamplerFailureAdmitsNothingAndIsRecordedOnce(t *testing.T) {
 	if ready(w) {
 		t.Fatal("a gate was admitted with the host's load unread")
 	}
-	errorsSeen := 0
-	for _, rec := range r.log.Records() {
-		if rec.Level == "error" && rec.Operation == "daemon.cpugov.sample" {
-			errorsSeen++
-		}
-	}
-	if errorsSeen != 1 {
+	if errorsSeen := len(r.recordsAt("error", "daemon.cpugov.sample")); errorsSeen != 1 {
 		t.Fatalf("error records = %d, want one for one standing cause", errorsSeen)
 	}
 }
@@ -567,8 +567,8 @@ func TestPluggingInAdmitsAGateTheBandDeferred(t *testing.T) {
 		t.Fatal("the deferred gate was not admitted once the host ran on AC power")
 	}
 	found := false
-	for _, rec := range r.log.Records() {
-		if rec.Level == "info" && rec.Operation == "daemon.cpugov.power" && rec.Context["was"] == "battery" && rec.Context["power"] == "ac" {
+	for _, rec := range r.recordsAt("info", "daemon.cpugov.power") {
+		if rec.Context["was"] == "battery" && rec.Context["power"] == "ac" {
 			found = true
 		}
 	}
@@ -633,16 +633,28 @@ func TestAPowerReadFailureLeavesTheBandDecidingAndIsRecordedOnce(t *testing.T) {
 	if ready(w) {
 		t.Fatal("a gate was admitted past the band with the power source unread")
 	}
-	errorsSeen := 0
-	for _, rec := range r.log.Records() {
-		if rec.Level == "error" && rec.Operation == "daemon.cpugov.power" {
-			errorsSeen++
-			if rec.Context["error"] != "IOPSCopyPowerSourcesInfo answered nothing" || rec.Context["was"] != "ac" {
-				t.Fatalf("error context = %v, want the cause and the source it was on", rec.Context)
-			}
-		}
+	errs := r.recordsAt("error", "daemon.cpugov.power")
+	if len(errs) != 1 {
+		t.Fatalf("error records = %d, want one for one standing cause", len(errs))
 	}
-	if errorsSeen != 1 {
-		t.Fatalf("error records = %d, want one for one standing cause", errorsSeen)
+	if errs[0].Context["error"] != "IOPSCopyPowerSourcesInfo answered nothing" || errs[0].Context["was"] != "ac" {
+		t.Fatalf("error context = %v, want the cause and the source it was on", errs[0].Context)
+	}
+}
+
+func TestRecordsAtAnswersOnlyTheLevelAndOperationAskedForInOrder(t *testing.T) {
+	// Arrange.
+	r := newRig(t)
+	r.log.Info("daemon.cpugov.power", "first", dlog.Context{"n": 1})
+	r.log.Error("daemon.cpugov.power", "an error", nil)
+	r.log.Info("daemon.cpugov.sample", "another operation", nil)
+	r.log.Info("daemon.cpugov.power", "second", dlog.Context{"n": 2})
+
+	// Act.
+	got := r.recordsAt("info", "daemon.cpugov.power")
+
+	// Assert.
+	if len(got) != 2 || got[0].Message != "first" || got[1].Message != "second" {
+		t.Fatalf("recordsAt = %v, want the two info power records in order", got)
 	}
 }
