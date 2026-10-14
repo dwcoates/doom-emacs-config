@@ -61,10 +61,9 @@ type fakeDB struct {
 	closedTurns map[ids.TurnID]wsm.TurnClose
 	orphaned    []ids.WorkspaceID
 
-	// putHeldErr, tombstoneErr and acceptErr fail their write when set.
+	// putHeldErr and tombstoneErr fail their write when set.
 	putHeldErr   error
 	tombstoneErr error
-	acceptErr    error
 	// allHeldErr fails the boot restore's all-or-nothing read.
 	allHeldErr error
 	// heldErr fails every standing-holds read.
@@ -227,20 +226,6 @@ func (d *fakeDB) UpdateHeldPromptHold(_ context.Context, turn ids.TurnID, kind *
 	return nil
 }
 
-func (d *fakeDB) SetHeldPromptAccepted(_ context.Context, turn ids.TurnID) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.acceptErr != nil {
-		return d.acceptErr
-	}
-	h, ok := d.held[turn]
-	if !ok {
-		return errors.New("no such hold")
-	}
-	h.Accepted = true
-	return nil
-}
-
 func (d *fakeDB) TombstoneHeldPrompt(_ context.Context, turn ids.TurnID, why wsm.Tombstone) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -303,7 +288,6 @@ func (d *fakeDB) ReplaceHeldPromptSaid(_ context.Context, turn ids.TurnID, said 
 	}
 	h.Said = said
 	h.Classification = nil
-	h.Accepted = false
 	return nil
 }
 
@@ -325,7 +309,6 @@ func (d *fakeDB) CoalesceHeldPrompts(_ context.Context, c wsm.Coalescence) error
 	into.Coalesced = true
 	if c.DiscardVerdict {
 		into.Classification = nil
-		into.Accepted = false
 	}
 	retired := c.Retired
 	from.Tombstone = &retired

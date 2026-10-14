@@ -43,8 +43,11 @@ import { callFailure, refusalOf, type SentenceTable } from "../rpc/refuse.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 
-/** The control's label on the card's actions row. */
-export const UPDATE_CLASSIFIER_LABEL = "Update classifier";
+/**
+ * The control's label on the card's actions row: "Meta" (owner request,
+ * 2026-10-13), since it changes how prompts are classified, not this prompt.
+ */
+export const UPDATE_CLASSIFIER_LABEL = "Meta";
 
 /** What the warning chip names a failed or refused update as. */
 export const UPDATE_CLASSIFIER_REQUEST = "update the classifier";

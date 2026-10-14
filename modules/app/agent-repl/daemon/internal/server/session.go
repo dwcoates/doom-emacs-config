@@ -123,8 +123,8 @@ func (s *server) SelectAccount(
 	return connect.NewResponse(resp), nil
 }
 
-// UpdateHeldPrompt acts on one held prompt: deliver it now, discard it, or
-// accept a hold_for_turn_end verdict. All three are the queue's own verbs.
+// UpdateHeldPrompt acts on one held prompt: deliver it now, or discard it.
+// Both are the queue's own verbs.
 func (s *server) UpdateHeldPrompt(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.UpdateHeldPromptRequest],
@@ -143,10 +143,8 @@ func (s *server) UpdateHeldPrompt(
 	switch {
 	case req.Msg.GetRelease() != nil:
 		err = s.deps.Queue.Release(ctx, subject.Record.ID, turn)
-	case req.Msg.GetDrop() != nil:
-		err = s.deps.Queue.Drop(ctx, subject.Record.ID, turn)
 	default:
-		err = s.deps.Queue.Accept(ctx, subject.Record.ID, turn)
+		err = s.deps.Queue.Drop(ctx, subject.Record.ID, turn)
 	}
 	if err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))

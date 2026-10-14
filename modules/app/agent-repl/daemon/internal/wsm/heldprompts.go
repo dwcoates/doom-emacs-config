@@ -14,10 +14,13 @@ import (
 )
 
 // heldPromptColumns is the one select list every held-prompt read shares, so a
-// column added to the row can never be decoded by only some of them.
+// column added to the row can never be decoded by only some of them. The
+// retired `accepted` column is not read: every write stores 0 so the build
+// before this one, which still decodes it, never sees an acceptance it would
+// refuse (see schema.go).
 const heldPromptColumns = `turn_id, workspace_id, said, origin, target, hold_kind, hold_schedule_id,
 	classification_arm, classification_reason, classification_command, classification_at,
-	accepted, tombstone_kind, tombstone_at, queued_at, delivery, act_kind, act_value, coalesced`
+	tombstone_kind, tombstone_at, queued_at, delivery, act_kind, act_value, coalesced`
 
 // scanHeldPrompt decodes one held prompt all-or-nothing. This is the row the
 // all-or-nothing rule was written for: a corrupt hold must never restore as a
@@ -44,7 +47,7 @@ func scanHeldPrompt(row interface{ Scan(...any) error }) (HeldPrompt, error) {
 		actValue sql.NullString
 	)
 	if err := row.Scan(&h.Turn, &h.Workspace, &said, &h.Origin, &target, &holdKind, &schedule,
-		&arm, &reason, &command, &classAt, &h.Accepted, &tombKind, &tombAt, &queued, &delivery,
+		&arm, &reason, &command, &classAt, &tombKind, &tombAt, &queued, &delivery,
 		&actKind, &actValue, &h.Coalesced); err != nil {
 		return HeldPrompt{}, err
 	}
@@ -104,12 +107,6 @@ func scanHeldPrompt(row interface{ Scan(...any) error }) (HeldPrompt, error) {
 	default:
 		return HeldPrompt{}, &DecodeError{Table: "held_prompts", Row: id, Field: "classification", Err: errors.New("a classification is stored whole or not at all")}
 	}
-	// Accepting is legal only on a hold_for_turn_end verdict, so an accepted row
-	// with any other verdict is corruption rather than a state to render.
-	if h.Accepted && (h.Classification == nil || h.Classification.Arm != ArmHoldForTurnEnd) {
-		return HeldPrompt{}, &DecodeError{Table: "held_prompts", Row: id, Field: "accepted", Err: ErrAcceptNotOffered}
-	}
-
 	switch {
 	case !tombKind.Valid && !tombAt.Valid:
 	case tombKind.Valid && tombAt.Valid:
@@ -209,7 +206,7 @@ func (s *store) PutHeldPrompt(ctx context.Context, h HeldPrompt) error {
 			`INSERT INTO held_prompts (turn_id, workspace_id, said, origin, target, hold_kind, hold_schedule_id,
 			   classification_arm, classification_reason, classification_command, classification_at,
 			   accepted, tombstone_kind, tombstone_at, queued_at, delivery, act_kind, act_value, coalesced)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(turn_id) DO UPDATE SET
 			   workspace_id = excluded.workspace_id, said = excluded.said, origin = excluded.origin,
 			   target = excluded.target, hold_kind = excluded.hold_kind,
@@ -218,12 +215,12 @@ func (s *store) PutHeldPrompt(ctx context.Context, h HeldPrompt) error {
 			   classification_reason = excluded.classification_reason,
 			   classification_command = excluded.classification_command,
 			   classification_at = excluded.classification_at,
-			   accepted = excluded.accepted,
+			   accepted = 0,
 			   tombstone_kind = excluded.tombstone_kind, tombstone_at = excluded.tombstone_at,
 			   queued_at = excluded.queued_at, delivery = excluded.delivery,
 			   act_kind = excluded.act_kind, act_value = excluded.act_value, coalesced = excluded.coalesced`,
 			h.Turn, h.Workspace, said, h.Origin, target, holdKind, schedule,
-			arm, reason, command, classAt, h.Accepted, tombKind, tombAt, nanos(h.QueuedAt), int(h.Delivery),
+			arm, reason, command, classAt, tombKind, tombAt, nanos(h.QueuedAt), int(h.Delivery),
 			actKind, actValue, h.Coalesced)
 		return err
 	})
@@ -252,9 +249,6 @@ func validateHold(h HeldPrompt) error {
 	}
 	if h.Classification != nil && !h.Classification.Arm.valid() {
 		return fmt.Errorf("wsm: undeclared classification arm %d", int(h.Classification.Arm))
-	}
-	if h.Accepted && (h.Classification == nil || h.Classification.Arm != ArmHoldForTurnEnd) {
-		return ErrAcceptNotOffered
 	}
 	return nil
 }
@@ -293,9 +287,7 @@ func requireStandingHold(ctx context.Context, tx *sql.Tx, turn TurnID) error {
 	return nil
 }
 
-// UpdateHeldPromptClassification records the classifier's verdict. A verdict
-// that is not hold_for_turn_end clears any standing acceptance, because the
-// offer the user accepted no longer exists.
+// UpdateHeldPromptClassification records the classifier's verdict.
 func (s *store) UpdateHeldPromptClassification(ctx context.Context, turn TurnID, c Classification) error {
 	const op = "daemon.wsm.update_held_prompt_classification"
 	fields := dlog.Context{"turn": string(turn), "classification_arm": c.Arm.String()}
@@ -310,30 +302,9 @@ func (s *store) UpdateHeldPromptClassification(ctx context.Context, turn TurnID,
 		}
 		_, err := tx.ExecContext(ctx,
 			`UPDATE held_prompts SET classification_arm = ?, classification_reason = ?, classification_command = ?, classification_at = ?,
-			   accepted = CASE WHEN ? THEN accepted ELSE 0 END
+			   accepted = 0
 			 WHERE turn_id = ?`,
-			int(c.Arm), c.Reason, int32(c.Command), nanos(c.At), c.Arm == ArmHoldForTurnEnd, turn)
-		return err
-	})
-}
-
-// SetHeldPromptAccepted records the user's acceptance of the tray's offer to let
-// the prompt wait for the turn's end. It is LEGAL ONLY on a hold_for_turn_end
-// verdict, which is checked here rather than trusted from the caller.
-func (s *store) SetHeldPromptAccepted(ctx context.Context, turn TurnID) error {
-	fields := dlog.Context{"turn": string(turn)}
-	return s.write(ctx, "daemon.wsm.set_held_prompt_accepted", fields, func(ctx context.Context, tx *sql.Tx) error {
-		if err := requireStandingHold(ctx, tx, turn); err != nil {
-			return err
-		}
-		var arm sql.NullInt64
-		if err := tx.QueryRowContext(ctx, `SELECT classification_arm FROM held_prompts WHERE turn_id = ?`, turn).Scan(&arm); err != nil {
-			return err
-		}
-		if !arm.Valid || ClassificationArm(arm.Int64) != ArmHoldForTurnEnd {
-			return fmt.Errorf("wsm: held prompt %s: %w", turn, ErrAcceptNotOffered)
-		}
-		_, err := tx.ExecContext(ctx, `UPDATE held_prompts SET accepted = 1 WHERE turn_id = ?`, turn)
+			int(c.Arm), c.Reason, int32(c.Command), nanos(c.At), turn)
 		return err
 	})
 }
@@ -425,8 +396,8 @@ func turnStrings(turns []TurnID) []string {
 }
 
 // ReplaceHeldPromptSaid replaces a standing hold's content and discards its
-// verdict in one transaction: the classification columns go NULL and the
-// acceptance goes false, because both were about the content being replaced.
+// verdict in one transaction: the classification columns go NULL, because the
+// verdict was about the content being replaced.
 // queued_at is untouched, so the hold keeps its place in the queue. A retired
 // or unknown hold is refused.
 func (s *store) ReplaceHeldPromptSaid(ctx context.Context, turn TurnID, said *conversationv1.UserSaid) error {

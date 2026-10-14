@@ -112,7 +112,6 @@ func (q *queue) reholdFailedTry(ctx context.Context, d *delivery, turn ids.TurnI
 	again.Hold = &kind
 	again.ScheduleID = ""
 	again.Classification = nil
-	again.Accepted = false
 	again.Tombstone = nil
 	if err := q.deps.DB.PutHeldPrompt(ctx, again); err != nil {
 		log.Error(opTurnEnded, "could not put the blocked tried prompt back on the hold; it is lost from the queue",

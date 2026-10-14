@@ -41,7 +41,6 @@ import (
 //	ErrColdGate          → SubmitPromptError.cold_gate
 //	ErrNoSuchHold        → UpdateHeldPromptError.no_such_hold
 //	ErrAlreadyDelivered  → UpdateHeldPromptError.already_delivered
-//	ErrAcceptNotApplicable → UpdateHeldPromptError.accept_not_applicable
 //	ErrReleaseRefused    → UpdateHeldPromptError.release_refused
 //	ErrNoSuchHold        → EditHeldPromptError.no_such_hold
 //	ErrNotHeld           → EditHeldPromptError.not_held
@@ -100,9 +99,6 @@ var (
 	// shim is in flight (call.go): it is neither held nor delivered yet, and
 	// once the call settles it is either delivered or back in the tray.
 	ErrBeingDelivered = errors.New("promptqueue: that hold is being delivered to the shim")
-	// ErrAcceptNotApplicable is an accept on a verdict other than
-	// hold_for_turn_end. The landed contract makes accept legal only there.
-	ErrAcceptNotApplicable = errors.New("promptqueue: accept is legal only on a hold_for_turn_end verdict")
 	// ErrReleaseRefused is a force-through on an uninterruptible verdict or a
 	// session_starting hold: there is nothing delivery could do yet.
 	ErrReleaseRefused = errors.New("promptqueue: this hold cannot be released through")
@@ -274,10 +270,6 @@ type Queue interface {
 	Release(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) error
 	// Drop discards a held prompt (UpdateHeldPrompt.drop).
 	Drop(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) error
-	// Accept flips a hold_for_turn_end verdict to accepted and re-pushes the
-	// tray (UpdateHeldPrompt.accept). It is LEGAL ONLY on a hold_for_turn_end
-	// verdict; every other hold refuses.
-	Accept(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) error
 	// BeginEdit claims a held prompt as being edited (EditHeldPrompt.begin).
 	// While the claim stands, the prompt and every prompt queued after it are
 	// withheld from delivery. It refuses a turn nothing was held under

@@ -2632,9 +2632,6 @@ export const HOLD_CLASSIFICATION_ARMS = [
 ] as const;
 export type HoldClassificationArm = (typeof HOLD_CLASSIFICATION_ARMS)[number];
 
-/** The ONE classification that draws an [accept] button (ruled). */
-export const HOLD_ACCEPTABLE_ARM = "holdForTurnEnd";
-
 export const HOLD_ARMS = ["shutdown", "reconnect", "buildRefresh", "merge", "coldGate", "coldGateAnswered"] as const;
 export type HoldArm = (typeof HOLD_ARMS)[number];
 
@@ -2642,7 +2639,6 @@ type HeldPromptInit = MessageInitShape<typeof HeldPromptSchema>;
 
 const classificationValue = (
   arm: HoldClassificationArm,
-  accepted?: boolean,
 ): NonNullable<HeldPromptInit["classification"]> => {
   switch (arm) {
     case "classifying":
@@ -2652,10 +2648,7 @@ const classificationValue = (
     case "afterToolCall":
       return { case: "afterToolCall", value: { rationale: "it adds to the running work" } };
     case "holdForTurnEnd":
-      return {
-        case: "holdForTurnEnd",
-        value: { rationale: "it is a follow-up", accepted: { accepted: accepted ?? false } },
-      };
+      return { case: "holdForTurnEnd", value: { rationale: "it is a follow-up" } };
     case "uninterruptibleTurn":
       return { case: "uninterruptibleTurn", value: { command: SessionCommand.COMPACT } };
     case "classificationError":
@@ -2711,26 +2704,24 @@ export function heldPrompt(init?: {
   text?: string;
   classification?: HoldClassificationArm;
   hold?: HoldArm;
-  accepted?: boolean;
   /** The entry the daemon offers to fold this one into; no fold is offered when absent. */
   foldAbove?: string;
 }): HeldPrompt {
   const classification = init?.classification ?? "interject";
   const hold = init?.hold ?? "reconnect";
   // THE ONE BADGE IS THE HOLD'S: a hold outranks the verdict, which, unless it
-  // is `daemon_held`, is a note, followed by the verdict's confirmation.
+  // is `daemon_held`, is a note.
   const holdBadge = HOLD_BADGES[hold] ?? { label: hold };
   const notes: string[] = [];
   if (classification !== "daemonHeld") {
     const verdict = HOLD_BADGES[classification] ?? { label: classification };
     notes.push(verdict.detail ?? verdict.label);
   }
-  if (classification === "holdForTurnEnd" && init?.accepted === true) notes.push("confirmed");
   return create(HeldPromptSchema, {
     turn: turnId(init?.turn ?? HELD_TURN_ID),
     said: userSaid(init?.text ?? "also fix the footer"),
     queuedAt: { atMs: 3_000n },
-    classification: classificationValue(classification, init?.accepted),
+    classification: classificationValue(classification),
     hold: holdValue(hold),
     badge: { ...holdBadge, standsFor: { case: hold, value: {} } },
     notes: notes.map((sentence) => ({ sentence })),

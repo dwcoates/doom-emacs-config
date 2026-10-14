@@ -2629,6 +2629,51 @@ describe("the feed's bottom gap", () => {
   });
 });
 
+/** THE HELD PROMPT'S CONTROL ROW (owner requests, 2026-10-13 and 2026-10-14): compact, even, plain. */
+describe("the held prompt's control row", () => {
+  it.each([
+    ["grid", "display"],
+    ["column", "grid-auto-flow"],
+    ["1fr", "grid-auto-columns"],
+    ["max-content", "width"],
+  ])("gives every control one width through %s %s", (value, property) => {
+    // Arrange / Act
+    const decls = allDeclarationsOf(".queued-actions");
+    // Assert
+    expect(valueOf(decls, property)).toBe(value);
+  });
+
+  it("keeps a control's vertical padding near zero", () => {
+    // Arrange / Act
+    const padding = valueOf(allDeclarationsOf(".queued-actions ar-button"), "padding");
+    // Assert
+    expect(rem(padding?.split(" ")[0])).toBeLessThanOrEqual(0.05);
+  });
+
+  it("sets a control's text smaller than the bubble's", () => {
+    // Arrange / Act
+    const size = valueOf(allDeclarationsOf(".queued-actions ar-button"), "font-size");
+    // Assert
+    expect(size).toBe("calc(0.75rem * var(--feed-text-scale))");
+  });
+
+  it("keeps a control's leading at 1.15, about 10% shorter than 1.3", () => {
+    // Arrange / Act
+    const leading = valueOf(allDeclarationsOf(".queued-actions ar-button"), "line-height");
+    // Assert
+    expect(leading).toBe("1.15");
+  });
+
+  it("draws every control in the one plain border, none in a color of its own", () => {
+    // Arrange / Act — every rule naming one held control by its action class.
+    const own = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.some((sel) => /\.queued-actions ar-button\.queued-action-/.test(sel)),
+    );
+    // Assert
+    expect(own.filter((rule) => /border/.test(rule.declarations))).toEqual([]);
+  });
+});
+
 /**
  * THE HELD PROMPT IS A BUBBLE (owner rulings, 2026-09-23, superseding the
  * one-line fold of the same day): it collapses at two lines through the one cap
@@ -3111,10 +3156,6 @@ describe("the one bubble rule set", () => {
         (sel) => onBubble(sel) && sel !== ".bubble" && !/^\.bubble\[data-(?:role|cap-lines)=/.test(sel) && !sel.includes("[hidden]"),
       ),
     );
-    // The held variant's HALVED cap (owner spec, 2026-09-23) is the one width a
-    // variant sets, and only as the one token halved: its own test below pins
-    // the value, so here it is the one sanctioned property beyond the border.
-    const held = '.bubble[data-variant="held"]';
     const beyondBorder = keyed.filter((rule) =>
       rule.declarations
         .split(";")
@@ -3124,7 +3165,6 @@ describe("the one bubble rule set", () => {
             prop !== "" &&
             !prop.startsWith("border") &&
             prop !== "--bubble-bg" &&
-            !(prop === "max-width" && rule.selectors.length === 1 && rule.selectors[0] === held) &&
             // The vertical padding ladder (owner requests, 2026-10-12 and
             // 2026-10-13) is the one padding token a variant sets; its own
             // suite pins it.
@@ -3416,11 +3456,14 @@ describe("the held prompt's fill: the response bubble's own token", () => {
     expect(assistant).toHaveLength(3);
   });
 
-  it("caps the held variant at half the one bubble width token", () => {
-    // Arrange / Act
-    const rule = declarationsOf('.bubble[data-variant="held"]') ?? "";
+  it("leaves the held variant at the one bubble width every prompt takes", () => {
+    // Arrange / Act — every rule keyed on the held variant (owner request,
+    // 2026-10-13, superseding 2026-09-23's halved cap).
+    const held = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.some((sel) => sel.includes('[data-variant="held"]')),
+    );
     // Assert
-    expect(rule).toMatch(/max-width:\s*calc\(var\(--bubble-max-width\) \/ 2\)\s*;/);
+    expect(held.filter((rule) => /(?:^|;)\s*(?:max-)?width\s*:/.test(rule.declarations))).toEqual([]);
   });
 });
 

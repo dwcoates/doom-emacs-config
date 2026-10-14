@@ -44,10 +44,9 @@ import {
   DROPPED_EVENT,
   BEING_DELIVERED,
   EDIT_REQUEST,
-  FOLD_ABOVE_LABEL,
   NO_RELEASE_TITLES,
   SEND_NOW_LABEL,
-  HELD_BADGE_DETAIL_CLASS,
+  HELD_REASON_CLASS,
   HELD_STATUS_BADGES,
   HELD_NOTE_CLASS,
   drawHeldPrompt,
@@ -61,10 +60,10 @@ import { BUBBLE_QUOTE_CLASS } from "../../src/bubble/quote.js";
 import * as heldPromptModule from "../../src/held/held-prompt.js";
 import type { HeldContext } from "../../src/held/context.js";
 import { testHeldContext } from "./held-context.js";
-import { UPDATE_CLASSIFIER_LABEL } from "../../src/held/classifier-update.js";
 import {
   BUBBLE_CAP_ATTRIBUTE,
   BUBBLE_EXPAND_ONLY_CLASS,
+  BUBBLE_FOOTER_CLASS,
   BUBBLE_MORE_ATTRIBUTE,
   BUBBLE_MORE_ELLIPSIS,
   BUBBLE_ROLE_ATTRIBUTE,
@@ -75,7 +74,6 @@ import { PROMPT_WAVE_ATTRIBUTE } from "../../src/breathing.js";
 import {
   FITTING_TREE,
   WIDE_TREE,
-  installTreeLayout,
   stagedCols,
   treeLineWidths,
   useTreeLayout,
@@ -204,7 +202,6 @@ const wireLabel = (status: HeldStatus): string => `wire ${status}`;
 const wireDetail = (status: HeldStatus): string =>
   `the daemon's whole sentence for ${status}`;
 /** The note the test daemon sends for the verdict's confirmation. */
-const CONFIRMED_NOTE = "wire note confirmed";
 /** The note the test daemon sends for a coalescence. */
 const COALESCED_NOTE = "wire note coalesced";
 
@@ -229,9 +226,6 @@ function serveStatus(prompt: HeldPrompt): void {
     standsFor: { case: top, value: {} } as never,
   });
   const notes = rest.map((status) => wireDetail(status));
-  const classification = prompt.classification;
-  if (classification.case === "holdForTurnEnd" && classification.value.accepted?.accepted === true)
-    notes.push(CONFIRMED_NOTE);
   if (prompt.coalesced !== undefined) notes.push(COALESCED_NOTE);
   prompt.notes = notes.map((sentence) => create(HeldPromptStatusNoteSchema, { sentence }));
 }
@@ -381,7 +375,7 @@ describe("drawHeldPrompt classification arms", () => {
       }),
       tc,
     );
-    expect(card.querySelector(".queued-reason")?.textContent).toBe("urgent");
+    expect(card.querySelector(`.${HELD_REASON_CLASS}`)?.textContent).toBe("urgent");
   });
 
   it("draws the classifier's rationale on a prompt joining the running turn", () => {
@@ -395,20 +389,9 @@ describe("drawHeldPrompt classification arms", () => {
       }),
       tc,
     );
-    expect(card.querySelector(".queued-reason")?.textContent).toBe(
+    expect(card.querySelector(`.${HELD_REASON_CLASS}`)?.textContent).toBe(
       "it adds to it",
     );
-  });
-
-  it("offers no accept on a prompt joining the running turn", () => {
-    const { tc } = trayContext();
-    const card = drawHeldPrompt(
-      heldPrompt({
-        classification: { case: "afterToolCall", value: { rationale: "" } },
-      }),
-      tc,
-    );
-    expect(card.querySelector("[data-held-action='accept']")).toBeNull();
   });
 
   it("draws no rationale element when the classifier gave none", () => {
@@ -419,7 +402,7 @@ describe("drawHeldPrompt classification arms", () => {
       }),
       tc,
     );
-    expect(card.querySelector(".queued-reason")).toBeNull();
+    expect(card.querySelector(`.${HELD_REASON_CLASS}`)).toBeNull();
   });
 
   it("draws the failure detail on classification_error", () => {
@@ -446,68 +429,6 @@ describe("drawHeldPrompt classification arms", () => {
       queuedAt: { atMs: BigInt(NOW) },
     });
     expect(() => drawHeldPrompt(prompt, tc)).toThrow(MalformedView);
-  });
-});
-
-describe("drawHeldPrompt accept", () => {
-  it("offers accept on hold_for_turn_end", () => {
-    const { tc } = trayContext();
-    const card = drawHeldPrompt(
-      heldPrompt({
-        classification: {
-          case: "holdForTurnEnd",
-          value: { rationale: "later" },
-        },
-      }),
-      tc,
-    );
-    expect(card.querySelector('[data-held-action="accept"]')).not.toBeNull();
-  });
-
-  it("offers accept on no other classification arm", () => {
-    const { tc } = trayContext();
-    const card = drawHeldPrompt(
-      heldPrompt({
-        classification: { case: "interject", value: { rationale: "now" } },
-      }),
-      tc,
-    );
-    expect(card.querySelector('[data-held-action="accept"]')).toBeNull();
-  });
-
-  it("replaces the accept button with the confirmed marker once accepted", () => {
-    const { tc } = trayContext();
-    const card = drawHeldPrompt(
-      heldPrompt({
-        classification: {
-          case: "holdForTurnEnd",
-          value: { rationale: "later", accepted: { accepted: true } },
-        },
-      }),
-      tc,
-    );
-    expect(card.querySelector('[data-held-action="accept"]')).toBeNull();
-    expect(card.querySelector(`.${HELD_NOTE_CLASS}`)?.textContent).toBe(
-      CONFIRMED_NOTE,
-    );
-  });
-
-  it("echoes the TurnId on the accept request", async () => {
-    const seen: UpdateHeldPromptRequest[] = [];
-    const { tc } = trayContext(successResponse, seen);
-    const card = drawHeldPrompt(
-      heldPrompt({
-        classification: {
-          case: "holdForTurnEnd",
-          value: { rationale: "later" },
-        },
-      }),
-      tc,
-    );
-    card.querySelector<Control>('[data-held-action="accept"]')?.click();
-    await settle();
-    expect(seen[0]?.action.case).toBe("accept");
-    expect(seen[0]?.turn?.value).toBe("turn-1");
   });
 });
 
@@ -863,16 +784,6 @@ describe("drawHeldPrompt actions", () => {
     // Assert
     expect(card.querySelector(".queued-refusal")?.textContent).toContain(
       BEING_DELIVERED,
-    );
-  });
-
-  it("says accept applies only to a turn-end hold", async () => {
-    const { tc } = trayContext(refusalResponse("acceptNotApplicable"));
-    const card = drawHeldPrompt(heldPrompt(), tc);
-    card.querySelector<Control>('[data-held-action="drop"]')?.click();
-    await settle();
-    expect(card.querySelector(".queued-refusal")?.textContent).toContain(
-      "the turn's end",
     );
   });
 
@@ -1285,24 +1196,6 @@ describe("a held prompt's redraw", () => {
     ]);
   });
 
-  it("drops the acceptance mark when the new arm has none", () => {
-    // Arrange
-    const { tc } = trayContext();
-    const first = drawHeldPrompt(
-      heldPrompt({
-        classification: { case: "holdForTurnEnd", value: { rationale: "r" } },
-      }),
-      tc,
-    );
-    // Act
-    drawHeldPrompt(
-      heldPrompt({ classification: { case: "classifying", value: {} } }),
-      tc,
-      first,
-    );
-    // Assert
-    expect(first.hasAttribute("data-accepted")).toBe(false);
-  });
 });
 
 describe("the Cancel control", () => {
@@ -1522,7 +1415,7 @@ describe("the daemon's badge words", () => {
   );
 
   it.each(byStatus)(
-    "draws the %s detail verbatim in the expand-only details",
+    "titles the %s badge with its detail verbatim",
     (status, prompt) => {
       // Arrange
       const { tc } = trayContext();
@@ -1530,14 +1423,12 @@ describe("the daemon's badge words", () => {
       const card = drawHeldPrompt(prompt(), tc);
       // Assert
       expect(
-        card.querySelector(
-          `.queued-details > .${HELD_BADGE_DETAIL_CLASS}[data-held-status="${status}"]`,
-        )?.textContent,
+        card.querySelector<HTMLElement>(`.queued-head > .held-badge[data-held-status="${status}"]`)?.title,
       ).toBe(wireDetail(status));
     },
   );
 
-  it("draws no detail element for a badge the daemon gave none", () => {
+  it("titles a badge the daemon gave no detail with nothing", () => {
     // Arrange
     const { tc } = trayContext();
     const prompt = heldPrompt({
@@ -1547,7 +1438,7 @@ describe("the daemon's badge words", () => {
     // Act
     const card = drawHeldPrompt(prompt, tc);
     // Assert
-    expect(card.querySelector(`.${HELD_BADGE_DETAIL_CLASS}`)).toBeNull();
+    expect(card.querySelector<HTMLElement>(".held-badge")?.title).toBe("");
   });
 
   it("refuses a badge with an empty label", () => {
@@ -1600,15 +1491,15 @@ describe("the daemon's badge words", () => {
     // Arrange
     const { tc } = trayContext();
     const prompt = heldPrompt({
-      classification: { case: "holdForTurnEnd", value: { accepted: { accepted: true } } },
+      classification: { case: "holdForTurnEnd", value: {} },
       hold: { case: "merge", value: {} },
     });
     // Act
     const card = drawHeldPrompt(prompt, tc);
     // Assert
     expect(
-      [...card.querySelectorAll(`.queued-details > .${HELD_NOTE_CLASS}`)].map((n) => n.textContent),
-    ).toEqual([wireDetail("holdForTurnEnd"), CONFIRMED_NOTE]);
+      [...card.querySelectorAll(`.queued-head > .${HELD_NOTE_CLASS}`)].map((n) => n.textContent),
+    ).toEqual([wireDetail("holdForTurnEnd")]);
   });
 
   it("draws a coalescence as a note, never a badge", () => {
@@ -1860,19 +1751,6 @@ describe("every status a held card shows is a badge in the table's tone", () => 
     },
   );
 
-  it("draws no acceptance badge on a hold the user has not confirmed", () => {
-    // Arrange
-    const { tc } = trayContext();
-    // Act
-    const card = drawHeldPrompt(
-      heldPrompt({
-        classification: { case: "holdForTurnEnd", value: { rationale: "r" } },
-      }),
-      tc,
-    );
-    // Assert
-    expect(card.querySelector('[data-held-status="accepted"]')).toBeNull();
-  });
 });
 
 /** The stylesheet's selector for an expand-only element the toggle has not opened. */
@@ -1881,8 +1759,8 @@ const HIDDEN_WHILE_COLLAPSED = selectorOf(
   "hidden expand-only region",
 );
 
-describe("a held prompt collapsed and expanded", () => {
-  /** A held prompt carrying every expand-only part, mounted under the one toggle. */
+describe("a held prompt collapsed", () => {
+  /** A held prompt carrying every part a card draws, mounted under the one toggle. */
   function mountedFull(): HTMLElement {
     const { tc } = trayContext();
     const card = drawHeldPrompt(
@@ -1902,80 +1780,71 @@ describe("a held prompt collapsed and expanded", () => {
     return card;
   }
 
-  const EXPAND_ONLY: Array<[string, string]> = [
+  const ALWAYS_SHOWN: Array<[string, string]> = [
+    ["the status badge", ".held-badge"],
+    ["a further fact's note", `.${HELD_NOTE_CLASS}`],
     ["the queued age", "[data-queued]"],
-    ["the rationale", ".queued-reason"],
+    ["the reason", `.${HELD_REASON_CLASS}`],
     ["the Send now button", '[data-held-action="release"]'],
+    ["the Meta button", '[data-held-action="update-classifier"]'],
     ["the Cancel button", '[data-held-action="drop"]'],
-    ["the Accept button", '[data-held-action="accept"]'],
   ];
 
-  it("holds nothing but badges in its collapsed strip", () => {
+  it.each(ALWAYS_SHOWN)("shows %s while collapsed", (_name, selector) => {
+    // Arrange / Act
+    const part = mountedFull().querySelector(selector);
+    // Assert
+    expect([part === null, part?.closest(HIDDEN_WHILE_COLLAPSED) ?? null]).toEqual([false, null]);
+  });
+
+  it("keeps nothing expand-only, so expanding reveals only more words", () => {
+    // Arrange / Act
+    const card = mountedFull();
+    // Assert
+    expect(card.querySelector(`.${BUBBLE_EXPAND_ONLY_CLASS}`)).toBeNull();
+  });
+
+  it("strips the badge, then the notes, then the queued age", () => {
     // Arrange / Act
     const head = mountedFull().querySelector(".queued-head");
     // Assert
     expect(
       [...(head?.children ?? [])].map((child) =>
-        child.classList.contains("held-badge"),
+        child.classList.contains("held-badge")
+          ? "badge"
+          : child.classList.contains(HELD_NOTE_CLASS)
+            ? "note"
+            : child.hasAttribute("data-queued")
+              ? "age"
+              : child.className,
       ),
-    ).toEqual([true]);
+    ).toEqual(["badge", "note", "age"]);
   });
 
-  it("keeps its badges visible while collapsed", () => {
+  it("floats the reason into the scroll box's corner, ahead of the words", () => {
     // Arrange / Act
-    const badges = [...mountedFull().querySelectorAll(".held-badge")];
+    const scroll = mountedFull().querySelector(".bubble-scroll");
     // Assert
-    expect(
-      badges.map((badge) => badge.closest(HIDDEN_WHILE_COLLAPSED)),
-    ).toEqual([null]);
+    expect(scroll?.firstElementChild?.classList.contains(HELD_REASON_CLASS)).toBe(true);
   });
 
-  it("puts the details in the bubble's one expand-only region", () => {
+  it("titles the reason with its whole words, since the pill may cut them short", () => {
+    // Arrange / Act
+    const reason = mountedFull().querySelector<HTMLElement>(`.${HELD_REASON_CLASS}`);
+    // Assert
+    expect(reason?.title).toBe("it can wait");
+  });
+
+  it("draws the controls in the bubble's footer", () => {
     // Arrange / Act
     const card = mountedFull();
     // Assert
     expect(
-      card
-        .querySelector(`:scope > .${BUBBLE_EXPAND_ONLY_CLASS}`)
-        ?.classList.contains("queued-details"),
+      card.querySelector(".queued-actions")?.closest(`.${BUBBLE_FOOTER_CLASS}`)?.classList.contains("queued-controls"),
     ).toBe(true);
   });
 
-  it.each(EXPAND_ONLY)("hides %s while collapsed", (_name, selector) => {
-    // Arrange / Act
-    const part = mountedFull().querySelector(selector);
-    // Assert
-    expect(part?.closest(HIDDEN_WHILE_COLLAPSED)).not.toBeNull();
-  });
-
-  it.each(EXPAND_ONLY)(
-    "shows %s once the bubble is expanded",
-    (_name, selector) => {
-      // Arrange
-      const card = mountedFull();
-      // Act
-      card.querySelector<HTMLElement>(".queued-head")?.click();
-      // Assert
-      expect(
-        card.querySelector(selector)?.closest(HIDDEN_WHILE_COLLAPSED),
-      ).toBeNull();
-    },
-  );
-
-  it("hides the details again once the bubble is collapsed", () => {
-    // Arrange
-    const card = mountedFull();
-    const head = card.querySelector<HTMLElement>(".queued-head");
-    head?.click();
-    // Act
-    head?.click();
-    // Assert
-    expect(
-      card.querySelector(".queued-details")?.closest(HIDDEN_WHILE_COLLAPSED),
-    ).not.toBeNull();
-  });
-
-  it("draws a refused action's sentence inside the expand-only region", async () => {
+  it("draws a refused action's sentence inside the footer", async () => {
     // Arrange
     const { tc } = trayContext(errorResponse);
     const card = drawHeldPrompt(heldPrompt(), tc);
@@ -1983,49 +1852,7 @@ describe("a held prompt collapsed and expanded", () => {
     card.querySelector<Control>('[data-held-action="release"]')?.click();
     await settle();
     // Assert
-    expect(
-      card
-        .querySelector(".queued-refusal")
-        ?.parentElement?.classList.contains("queued-details"),
-    ).toBe(true);
-  });
-});
-
-describe("a tree the held prompt carries, at the held bubble's halved width", () => {
-  let uninstall: (() => void) | null = null;
-  afterEach(() => {
-    uninstall?.();
-    uninstall = null;
-    document.body.replaceChildren();
-  });
-
-  /** A held prompt of TEXT under a column, its max-width the browser's half of 77%. */
-  function mountedHalved(text: string): { card: HTMLElement; cols: number } {
-    const installed = installTreeLayout({ maxWidth: "calc(38.5%)" });
-    uninstall = installed.uninstall;
-    const { tc } = trayContext();
-    const card = drawHeldPrompt(saying(text), tc);
-    const column = document.createElement("div");
-    column.append(card);
-    document.body.append(column);
-    return {
-      card,
-      cols: stagedCols({ ...installed.layout, maxWidth: "38.5%" }),
-    };
-  }
-
-  it("wraps at half the bubble cap", () => {
-    // Arrange / Act
-    const { card, cols } = mountedHalved(WIDE_TREE);
-    // Assert
-    expect(Math.max(...treeLineWidths(card))).toBeLessThanOrEqual(cols);
-  });
-
-  it("wraps a tree that would fit a full-width bubble", () => {
-    // Arrange / Act
-    const { card } = mountedHalved(FITTING_TREE);
-    // Assert
-    expect(treeLineWidths(card).length).toBeGreaterThan(3);
+    expect(card.querySelector(".queued-refusal")?.parentElement?.classList.contains("queued-controls")).toBe(true);
   });
 });
 
@@ -2074,8 +1901,48 @@ function filed(kind: FailureKind | undefined): [string, string] | undefined {
     : undefined;
 }
 
+describe("the Cancel control", () => {
+  /** The actions row's hooks, in order. */
+  const order = (card: HTMLElement): (string | null)[] =>
+    [...card.querySelectorAll<Control>(".queued-actions ar-button")].map((b) =>
+      b.getAttribute("data-held-action"),
+    );
+
+  it("is the last control on a card offering only the standing three", () => {
+    // Arrange
+    const { tc } = editContext();
+    // Act
+    const card = drawHeldPrompt(heldPrompt(), tc);
+    // Assert
+    expect(order(card)).toEqual(["release", "edit", "drop"]);
+  });
+
+  it("is the last control on a hold-for-turn-end card, which offers no Accept", () => {
+    // Arrange
+    const { tc } = editContext();
+    // Act
+    const card = drawHeldPrompt(
+      heldPrompt({ classification: { case: "holdForTurnEnd", value: { rationale: "later" } } }),
+      tc,
+    );
+    // Assert
+    expect(order(card)).toEqual(["release", "edit", "update-classifier", "drop"]);
+  });
+
+  it("is the last control on a card that also offers a fold and Meta", () => {
+    // Arrange
+    const { tc } = foldContext(foldSuccess);
+    const u = foldable();
+    u.classification = { case: "interject", value: {} } as never;
+    // Act
+    const card = drawHeldPrompt(u, tc);
+    // Assert
+    expect(order(card)).toEqual(["release", "edit", "fold", "update-classifier", "drop"]);
+  });
+});
+
 describe("the Edit control", () => {
-  it("sits between Send now and Cancel", () => {
+  it("follows Send now", () => {
     // Arrange
     const { tc } = editContext();
     // Act
@@ -2084,7 +1951,7 @@ describe("the Edit control", () => {
     const labels = [
       ...card.querySelectorAll<Control>(".queued-actions ar-button"),
     ].map((b) => b.textContent);
-    expect(labels.slice(0, 3)).toEqual(["Send now", "Edit", "Cancel"]);
+    expect(labels.slice(0, 2)).toEqual(["Send now", "Edit"]);
   });
 
   it("begins an edit of this card's turn", async () => {
@@ -2596,15 +2463,13 @@ function foldable(above = "turn-0"): HeldPrompt {
 }
 
 describe("the fold above control", () => {
-  it("is drawn, labelled fold above, when the daemon offers a fold", () => {
+  it("is drawn, labelled Fold Above, when the daemon offers a fold", () => {
     // Arrange
     const { tc } = foldContext(foldSuccess);
     // Act
     const card = drawHeldPrompt(foldable(), tc);
     // Assert
-    expect(card.querySelector('[data-held-action="fold"]')?.textContent).toBe(
-      FOLD_ABOVE_LABEL,
-    );
+    expect(card.querySelector('[data-held-action="fold"]')?.textContent).toBe("Fold Above");
   });
 
   it("is not drawn when the daemon offers no fold", () => {
@@ -2616,7 +2481,7 @@ describe("the fold above control", () => {
     expect(card.querySelector('[data-held-action="fold"]')).toBeNull();
   });
 
-  it("is a button of the held row's own kind, last in the actions row", () => {
+  it("is a button of the held row's own kind, just before Cancel", () => {
     // Arrange
     const { tc } = foldContext(foldSuccess);
     // Act
@@ -2627,12 +2492,12 @@ describe("the fold above control", () => {
       button?.localName,
       button?.getAttribute("role"),
       button?.className,
-      button?.parentElement?.lastElementChild === button,
+      button?.nextElementSibling?.getAttribute("data-held-action"),
     ]).toEqual([
       "ar-button",
       "button",
       "queued-action queued-action-fold",
-      true,
+      "drop",
     ]);
   });
 
@@ -2778,16 +2643,14 @@ describe("the update classifier control", () => {
     heldPrompt({ classification: { case: arm, value: {} } as never });
 
   it.each(["interject", "afterToolCall", "holdForTurnEnd"])(
-    "is drawn, labelled Update classifier, on a %s card",
+    "is drawn, labelled Meta, on a %s card",
     (arm) => {
       // Arrange
       const { tc } = trayContext();
       // Act
       const card = drawHeldPrompt(classifiedAs(arm), tc);
       // Assert
-      expect(card.querySelector('[data-held-action="update-classifier"]')?.textContent).toBe(
-        UPDATE_CLASSIFIER_LABEL,
-      );
+      expect(card.querySelector('[data-held-action="update-classifier"]')?.textContent).toBe("Meta");
     },
   );
 
@@ -2811,14 +2674,14 @@ describe("the update classifier control", () => {
     expect(card.querySelector('[data-held-action="update-classifier"]')).toBeNull();
   });
 
-  it("draws the turn's form, hidden, in the card's expand-only region", () => {
+  it("draws the turn's form, hidden, in the card's footer", () => {
     // Arrange
     const { tc } = trayContext();
     // Act
     const card = drawHeldPrompt(classifiedAs("holdForTurnEnd"), tc);
     // Assert
     const form = card.querySelector<HTMLElement>(".classifier-update");
-    expect([form?.hidden, form?.classList.contains(BUBBLE_EXPAND_ONLY_CLASS)]).toEqual([true, true]);
+    expect([form?.hidden, form?.classList.contains(BUBBLE_FOOTER_CLASS)]).toEqual([true, true]);
   });
 
   it("reveals the form when clicked", () => {

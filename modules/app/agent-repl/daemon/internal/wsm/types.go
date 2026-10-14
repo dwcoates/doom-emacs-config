@@ -477,10 +477,6 @@ type HeldPrompt struct {
 	ScheduleID string
 	// Classification is the classifier's verdict, nil until judged.
 	Classification *Classification
-	// Accepted records that the user accepted the tray's offer to let the
-	// prompt wait for the turn's end (UpdateHeldPrompt.accept), which is legal
-	// only on a hold_for_turn_end verdict.
-	Accepted bool
 	// Tombstone is why it was retired, nil while it stands.
 	Tombstone *Tombstone
 	// QueuedAt is when it was submitted.
@@ -622,9 +618,9 @@ type Coalescence struct {
 	Said *conversationv1.UserSaid
 	// Retired is FROM's tombstone.
 	Retired Tombstone
-	// DiscardVerdict clears INTO's verdict and acceptance with the merge, as
-	// an edit's replacement does, because both were about the words the merge
-	// replaced. False keeps them.
+	// DiscardVerdict clears INTO's verdict with the merge, as an edit's
+	// replacement does, because it was about the words the merge replaced.
+	// False keeps it.
 	DiscardVerdict bool
 }
 

@@ -263,10 +263,6 @@ func (a ClassificationArm) String() string {
 	}
 }
 
-// ErrAcceptNotOffered refuses an accept on a verdict that never offered one.
-// Accepting is legal ONLY on a hold_for_turn_end verdict.
-var ErrAcceptNotOffered = errors.New("wsm: accept is legal only on a hold_for_turn_end verdict")
-
 // valid reports whether the turn close is one of the declared arms.
 func (c TurnClose) valid() bool { return c >= CloseCompleted && c <= CloseFolded }
 
