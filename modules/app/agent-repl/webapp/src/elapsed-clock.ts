@@ -22,7 +22,16 @@ import { fitsReserve, reserveLabels, reserveLabelsCss } from "./width-reserve.js
  * every tick of the shared clock.
  */
 export function liveElapsedClock(ticker: Ticker, className: string, startedMs: number): HTMLElement {
-  return tickingClock(ticker, className, (nowMs) => formatTickedElapsed(nowMs - startedMs));
+  return tickingClock(ticker, className, (nowMs) => liveElapsedReading(startedMs, nowMs));
+}
+
+/**
+ * THE ONE READING of a clock counting up from STARTEDMS, at NOWMS: what every
+ * live elapsed clock paints, so a clock drawn under another owner's ticking
+ * (the sidebar's row) reads the same number as the strip's.
+ */
+export function liveElapsedReading(startedMs: number, nowMs: number): string {
+  return formatTickedElapsed(nowMs - startedMs);
 }
 
 /**
