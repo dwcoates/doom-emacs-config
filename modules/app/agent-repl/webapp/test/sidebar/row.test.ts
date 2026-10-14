@@ -269,11 +269,6 @@ describe("the priority badge", () => {
 });
 
 describe("the when-column", () => {
-  const running = (startedMs: number): MessageInitShape<typeof RosterRowWhenSchema>["shown"] => ({
-    case: "turnRunning",
-    value: { startedAtMs: BigInt(startedMs) },
-  });
-
   it("reads 0s with no turn running", () => {
     const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
     expect([drawn.querySelector(".when")?.getAttribute("data-when"), drawn.querySelector(".when")?.textContent]).toEqual([
