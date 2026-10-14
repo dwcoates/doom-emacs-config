@@ -17,6 +17,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/integration/harness"
+	"agent-repld/internal/desktopnotify"
 )
 
 // ==========================================================================
@@ -137,7 +138,8 @@ func TestAgentAddressedRaisesABannerWithItsText(t *testing.T) {
 
 // TestACompletedTurnRaisesTheCompletedBanner pins the turn-end banner: a turn
 // that concluded raises ✅ "<name> turn completed <time>" over the summary the
-// daemon's headless call wrote (the fake vendor answers ROUTE_HOLD to text).
+// daemon's headless call wrote (the fake vendor answers ROUTE_HOLD to text),
+// set in italics.
 func TestACompletedTurnRaisesTheCompletedBanner(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -149,7 +151,7 @@ func TestACompletedTurnRaisesTheCompletedBanner(t *testing.T) {
 
 	// Assert
 	argvs := awaitBannerSettled(t, f, "the completed-turn banner")
-	if !bannerCarrying(argvs, "✅", "turn completed", "ROUTE_HOLD") {
+	if !bannerCarrying(argvs, "✅", "turn completed", desktopnotify.Italic("ROUTE_HOLD")) {
 		t.Fatalf("banners %q, want the completed title over the model's summary", argvs)
 	}
 }
