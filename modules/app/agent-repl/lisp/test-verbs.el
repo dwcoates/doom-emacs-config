@@ -2735,6 +2735,24 @@ trailing-slash removal alone, so the fixture directories need not exist."
                               m))
                            logged)))))))
 
+(ert-deftest agent-repl-verbs-help-resolves-the-repository-through-the-shared-main-worktree-helper ()
+  "The help repository is found by `agent-repl--main-worktree-for-dir', not a hand-rolled derivation."
+  ;; Arrange.
+  (let ((agent-repl-roster-view
+         (agent-repl-test-verbs--roster nil nil (agent-repl-test-verbs--help-sections)))
+        (asked nil))
+    (cl-letf (((symbol-function 'agent-repl--main-worktree-for-dir)
+               (lambda (dir) (push dir asked) "/tmp/agent-repl-test/doom"))
+              ((symbol-function 'agent-repl--repo-key-for-dir)
+               (lambda (_dir) (error "the derivation must go through the shared helper")))
+              ((symbol-function 'agent-repl--path-canonical) #'directory-file-name))
+      ;; Act.
+      (let ((ref (agent-repl-verbs--help-repository)))
+        ;; Assert.
+        (should (equal asked (list (file-name-directory agent-repl-metaprompt-file))))
+        (should (equal ref (agent-repl-test-verbs--repo-ref
+                            "agent-repl-repo" "/tmp/agent-repl-test/doom")))))))
+
 ;;;; ---- Repository selection ----
 
 (ert-deftest agent-repl-verbs-read-repository-defaults-to-the-current-section ()
