@@ -1,6 +1,8 @@
-// Package command runs the helper commands testrun itself needs while
-// planning and reporting (`go list`, `vitest list`, a harness's --list,
-// `go tool cover`), never a unit: units run through run.OSExec.
+// Package command runs the helper commands testrun itself needs, never a
+// unit (units run through run.OSExec): those of planning and reporting
+// (`go list`, `vitest list`, a harness's --list, `go tool cover`) through
+// Output, and every command held to a bound (the RAM disk's disk-manager
+// probes, the reap's `ps`) through Bounded and Outcome.
 package command
 
 import (
