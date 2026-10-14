@@ -24,8 +24,17 @@ nothing already means accepting the wait, and asked for it to be removed.
   The classifier, the shim and the elisp read none of it. That rules out the
   concern that the classifier learned from acceptances.
 - **Consequences.**
-  - The daemon's held-prompt store loses its `accepted` column, so the store
-    needs a schema migration that drops it.
+  - The daemon's held-prompt store keeps its `accepted` column for now, under
+    the store's two-deploy rule for breaking layout changes
+    (`daemon/internal/wsm/migrate.go`). This landing stops reading it and
+    writes 0 on every write path, including the classification, edit and
+    coalescence updates. That way the previous build, whose decoder refuses
+    an acceptance beside any verdict but hold_for_turn_end, keeps working
+    across a hand-over.
+  - OUTSTANDING: once no running build reads the column, a breaking
+    migration step drops `held_prompts.accepted`. It also deletes the `= 0`
+    writes in `daemon/internal/wsm/heldprompts.go` and the column's
+    "RETIRED" note in `daemon/internal/wsm/schema.go`.
   - The fold, edit and re-hold paths no longer reset an acceptance, because
     there is none to reset.
   - The UpdateHeldPrompt dispatch now has two actions, release and drop.
