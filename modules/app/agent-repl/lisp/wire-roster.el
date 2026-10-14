@@ -229,7 +229,8 @@ INVALID and is rejected loudly, as for the status."
 (defun agent-repl-wire-roster--decode-instant (message value)
   "Decode VALUE as MESSAGE, an instant message whose only field is `atMs'.
 Answers the plist `(:at-ms)'.  Every roster instant (the durable last
-selection and each when-column arm) shares this one shape."
+selection, the durable last turn end and each when-column arm) shares
+this one shape."
   (let ((object (agent-repl-wire--object message value)))
     (agent-repl-wire--check-keys message object '(atMs))
     (agent-repl-wire--decoded
@@ -244,6 +245,14 @@ restart.  Emacs orders by it and never draws it
 \(`agent-repl-roster-selection-recency-order'); the when-column is
 `RosterRowWhen'."
   (agent-repl-wire-roster--decode-instant "RosterRowLastSelected" value))
+
+(defun agent-repl-wire-decode-roster-row-last-turn-ended (value)
+  "Decode VALUE as `RosterRowLastTurnEnded', a plist `(:at-ms)'.
+The DURABLE instant the workspace's most recent turn closed, epoch
+MILLISECONDS, read from the daemon's turn record so it survives an Emacs
+restart.  Emacs orders by it and never draws it
+\(`agent-repl-roster-last-finished-name')."
+  (agent-repl-wire-roster--decode-instant "RosterRowLastTurnEnded" value))
 
 ;;;; ---- The when column ----
 ;;
@@ -618,7 +627,7 @@ Nested workspaces — a spawned family under its parent — in render order."
   (agent-repl-wire-decode-roster-row value))
 
 (defconst agent-repl-wire--roster-row-keys
-  (append '(workspace attention priority viewed reviving detachedLive oneShot opening asyncMerging lastSelected availability name current children when detail closed)
+  (append '(workspace attention priority viewed reviving detachedLive oneShot opening asyncMerging lastSelected lastTurnEnded availability name current children when detail closed)
           (mapcar #'car agent-repl-wire-roster-row-status-arms))
   "Every key `RosterRow' may carry: its own fields plus the 22 status arms.")
 
@@ -626,7 +635,7 @@ Nested workspaces — a spawned family under its parent — in render order."
   "Decode VALUE as `RosterRow'.
 Returns `(:workspace W :attention A :priority P :viewed V :reviving R
 :detached-live DL :one-shot OS :opening O :async-merging AM
-:last-selected L :availability AV
+:last-selected L :last-turn-ended LT :availability AV
 :name N :status
 S :current C :children ROWS :when WHEN :detail D :closed CLOSED)', with
 the message tree preserved as the contract spells it."
@@ -664,6 +673,9 @@ the message tree preserved as the contract spells it."
            :last-selected (agent-repl-wire--decode-optional-message
                            "RosterRow" 'lastSelected object
                            #'agent-repl-wire-decode-roster-row-last-selected)
+           :last-turn-ended (agent-repl-wire--decode-optional-message
+                             "RosterRow" 'lastTurnEnded object
+                             #'agent-repl-wire-decode-roster-row-last-turn-ended)
            :availability (agent-repl-wire--decode-message
                           "RosterRow" 'availability object
                           #'agent-repl-wire-decode-roster-row-availability)
