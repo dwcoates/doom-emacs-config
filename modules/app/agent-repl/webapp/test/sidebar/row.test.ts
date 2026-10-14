@@ -22,9 +22,10 @@ import {
   placeOpenRowDetails,
   placeRowDetail,
   toggleRowMenu,
+  type RowPlace,
 } from "../../src/sidebar/row.js";
 import { REVEAL_MARGIN_PX } from "../../src/topbar/clamp.js";
-import { GLYPH_IMAGES, NO_MARKERS, ROSTER_ARM_CLASS, ROSTER_STATUS_CASES } from "../../src/sidebar/tones.js";
+import { GLYPH_IMAGES, NO_MARKERS, ROSTER_ARM_CLASS, ROSTER_STATUS_CASES, type RosterStatusCase } from "../../src/sidebar/tones.js";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import {
   NOW,
@@ -158,30 +159,63 @@ describe("the status mark", () => {
     ]);
   });
 
-  it("draws a still snowflake for a cold gate", () => {
-    const mark = drawStatusMark("coldGate", "R.status", NO_MARKERS);
-    expect([mark.innerHTML, mark.classList.contains("breathes")]).toEqual([drawnPicture("snowflake"), false]);
+  it("draws a snowflake for a cold gate", () => {
+    expect(drawStatusMark("coldGate", "R.status", NO_MARKERS).innerHTML).toBe(drawnPicture("snowflake"));
   });
 
   it("draws no picture for a workspace with no session", () => {
     expect(drawStatusMark("none", "R.status", NO_MARKERS).textContent).toBe("");
   });
 
-  it("breathes while a turn is in flight", () => {
-    expect(drawStatusMark("thinking", "R.status", NO_MARKERS).classList.contains("breathes")).toBe(true);
-  });
-
-  it("breathes while the merge queue is on this run", () => {
-    expect(drawStatusMark("merging", "R.status", NO_MARKERS).classList.contains("breathes")).toBe(true);
-  });
-
-  it.each(["permission", "question", "waiting"] as const)("holds a %s mark still", (arm) => {
+  // THE MARK STANDS STILL (owner request, 2026-10-14): the name breathes in
+  // its place.
+  it.each(["thinking", "merging", "init", "compacting"] as const)("holds a %s mark still", (arm) => {
     expect(drawStatusMark(arm, "R.status", NO_MARKERS).classList.contains("breathes")).toBe(false);
   });
 
-  it("holds a queued merge still", () => {
-    const mark = drawStatusMark("mergeQueued", "R.status", NO_MARKERS);
-    expect(mark.classList.contains("breathes")).toBe(false);
+  it("holds an async merge's glyph still", () => {
+    expect(drawStatusMark("ready", "R.status", { oneShot: false, asyncMerging: true }).classList.contains("breathes")).toBe(false);
+  });
+});
+
+describe("the breathing name", () => {
+  const nameOf = (drawn: HTMLElement): HTMLElement => lineOf(drawn).querySelector(".name") as HTMLElement;
+  const drawArm = (arm: RosterStatusCase, place: RowPlace = "grouping"): HTMLElement =>
+    drawRosterRow(
+      row({ id: "ws-1", status: { case: arm, value: {} } as MessageInitShape<typeof RosterRowSchema>["status"] }),
+      sidebarContext(),
+      "R",
+      place,
+    );
+
+  it("breathes the name while a turn is in flight", () => {
+    expect(nameOf(drawArm("thinking")).classList.contains("breathes")).toBe(true);
+  });
+
+  it("breathes the name while the merge queue is on this run", () => {
+    expect(nameOf(drawArm("merging")).classList.contains("breathes")).toBe(true);
+  });
+
+  it.each(["permission", "question", "waiting", "mergeQueued", "coldGate"] as const)("holds a %s name still", (arm) => {
+    expect(nameOf(drawArm(arm)).classList.contains("breathes")).toBe(false);
+  });
+
+  it("breathes the name of a working one-shot", () => {
+    const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "thinking", value: {} }, oneShot: true }), sidebarContext(), "R");
+    expect(nameOf(drawn).classList.contains("breathes")).toBe(true);
+  });
+
+  it("breathes the name of a row with an async merge", () => {
+    const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "ready", value: {} }, asyncMerging: true }), sidebarContext(), "R");
+    expect(nameOf(drawn).classList.contains("breathes")).toBe(true);
+  });
+
+  it.each(["merged", "hidden"] as const)("holds a %s band row's name still", (place) => {
+    expect(nameOf(drawArm("thinking", place)).classList.contains("breathes")).toBe(false);
+  });
+
+  it("never breathes the mark of a breathing row", () => {
+    expect(dotOf(drawArm("thinking")).classList.contains("breathes")).toBe(false);
   });
 });
 
@@ -1718,11 +1752,7 @@ describe("a merge that landed today", () => {
 describe("the one-shot mark", () => {
   it.each(["submitting", "thinking", "clearing"] as const)("draws a breathing target in place of the %s mark", (arm) => {
     const drawn = drawRosterRow(row({ id: "ws-1", status: { case: arm, value: {} }, oneShot: true }), sidebarContext(), "R");
-    expect([dotOf(drawn).getAttribute("data-glyph"), dotOf(drawn).innerHTML, dotOf(drawn).classList.contains("breathes")]).toEqual([
-      "target",
-      drawnPicture("target"),
-      true,
-    ]);
+    expect([dotOf(drawn).getAttribute("data-glyph"), dotOf(drawn).innerHTML]).toEqual(["target", drawnPicture("target")]);
   });
 
   it.each(["compacting", "done", "idleAsync", "permission", "question", "coldGate", "mergeQueued", "merging", "mergeFailed"] as const)(
@@ -1754,7 +1784,7 @@ describe("the async-merging marker", () => {
     ["done", "tone-green"],
     ["thinking", "tone-red"],
     ["idleAsync", "tone-yellow"],
-  ] as const)("keeps a %s row's own %s and draws the purple merge glyph, breathing", (arm, tone) => {
+  ] as const)("keeps a %s row's own %s and draws the purple merge glyph, its name breathing", (arm, tone) => {
     const drawn = drawRosterRow(row({ id: "ws-1", status: { case: arm, value: {} }, asyncMerging: true }), sidebarContext(), "R");
     expect([
       drawn.classList.contains(tone),
@@ -1763,7 +1793,7 @@ describe("the async-merging marker", () => {
       dotOf(drawn).getAttribute("data-glyph"),
       dotOf(drawn).classList.contains("st-glyph"),
       dotOf(drawn).classList.contains("ink-purple"),
-      dotOf(drawn).classList.contains("breathes"),
+      lineOf(drawn).querySelector(".name")?.classList.contains("breathes"),
     ]).toEqual([true, false, true, "merge", true, true, true]);
   });
 

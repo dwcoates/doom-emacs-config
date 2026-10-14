@@ -4298,15 +4298,15 @@ describe("the rail's search toggle", () => {
 describe("the rail's marks", () => {
   it("times the breath by the one mark cycle", () => {
     // Arrange / Act
-    const rule = declarationsOf("#ws-sidebar .st.breathes");
+    const rule = declarationsOf("#ws-sidebar .row .name.breathes");
 
     // Assert
     expect(rule).toMatch(/animation:\s*ws-pulse\s+var\(--ws-mark-cycle\)\s+ease-in-out\s+infinite/);
   });
 
-  // ONE ANIMATION (owner ruling, 2026-10-13): no rail mark rule animates with
-  // anything but the breath.
-  it("animates no rail mark but by the breath", () => {
+  // THE MARK STANDS STILL (owner request, 2026-10-14): the name breathes in
+  // its place.
+  it("animates no rail mark", () => {
     // Arrange / Act
     const animated = rulesOf(stylesheet).filter(
       (rule) =>
@@ -4315,7 +4315,17 @@ describe("the rail's marks", () => {
     );
 
     // Assert
-    expect(animated.map((rule) => rule.selectors.join(", "))).toEqual(["#ws-sidebar .st.breathes"]);
+    expect(animated).toEqual([]);
+  });
+
+  it("runs the shimmer and the breath together on a reviving name that breathes", () => {
+    // Arrange / Act
+    const rule = declarationsOf("#ws-sidebar .row .name.breathes.reviving");
+
+    // Assert
+    expect(rule).toMatch(
+      /animation:\s*ws-revive-shimmer 2\.4s ease-in-out infinite,\s*ws-pulse var\(--ws-mark-cycle\) ease-in-out infinite/,
+    );
   });
 
   it("states the mark cycle once", () => {
@@ -4326,12 +4336,22 @@ describe("the rail's marks", () => {
     expect(defs).toHaveLength(1);
   });
 
-  it("shrinks a breathing mark to 90.2%, 30% less than the 14% it once shrank", () => {
+  // THE BREATH ONLY FADES (owner ruling, 2026-10-14): no size change.
+  it("never changes a breathing name's size", () => {
     // Arrange / Act
     const keyframes = /@keyframes ws-pulse \{([^}]*\}[^}]*\})/.exec(stylesheet)?.[1] ?? "";
 
     // Assert
-    expect(keyframes).toMatch(/50%\s*\{[^}]*transform:\s*scale\(0\.902\)/);
+    expect(keyframes).not.toBe("");
+    expect(keyframes).not.toMatch(/transform|scale|width|height|font-size/);
+  });
+
+  it("fades a breathing name to 35% opacity at mid-breath", () => {
+    // Arrange / Act
+    const keyframes = /@keyframes ws-pulse \{([^}]*\}[^}]*\})/.exec(stylesheet)?.[1] ?? "";
+
+    // Assert
+    expect(keyframes).toMatch(/50%\s*\{[^}]*opacity:\s*0\.35/);
   });
 
   it("breathes once every 2s, 30% slower than the 1.4s it once took", () => {
