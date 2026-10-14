@@ -5,13 +5,16 @@
  * vertical middle on the feed's vertical middle at once (`itemExpanded`, one
  * of the closed set of scroll causes in scroll.ts). It supersedes, for
  * expansion, the rule of 2026-09-23 that the caret never moves the feed; a
- * collapse still moves nothing. The centering ends a standing follow, as every
- * centering reveal does, and latches a new one only when the latest entry is
- * then in sight (`latestVisible`).
+ * collapse still moves nothing. A STANDING FOLLOW SURVIVES THE EXPANSION
+ * (owner ruling, 2026-10-14): the feed stays at its tail instead of centering,
+ * and only the reader's own scroll up ends the follow. A reader who can see the
+ * latest entry is following (`latestVisible`), so only a reader with the
+ * latest entry out of sight is centered.
  *
  * WHAT IS ASSERTED HERE and not in the unit suite: that the caret of a bubble
  * built by the REAL mount, in the real shell, against a real sub-feed page,
- * centers the bubble's row in the page's own `#feed-scroll`.
+ * centers the bubble's row in the page's own `#feed-scroll` for a reader away
+ * from the tail, and keeps a following reader at the tail.
  *
  * THE GEOMETRY IS SCRIPTED, exactly as test/integration/feed-tail.integration
  * .test.ts scripts it and for the same reason: jsdom lays nothing out, so a
@@ -120,26 +123,26 @@ async function bootWithBubble(scrollTop: number, panelTop: number) {
 
 describe("the caret on the booted app", () => {
   it("centers the opened bubble for a reader holding a place", async () => {
-    // Arrange — 40px down; the row will hang from 220 to 450 in a 300px box.
-    const view = await bootWithBubble(40, 250);
+    // Arrange — 40px down, the bubble (the latest entry) below the 300px box,
+    // so no follow stands; the row will hang from 370 to 600.
+    const view = await bootWithBubble(40, 400);
     // Act
     await harness.click('[data-feed-row="bubble"] [data-expand]');
-    // Assert — its middle (335) onto the box's (150): 40 + 185.
-    expect(view.top()).toBe(225);
+    // Assert — its middle (485) onto the box's (150): 40 + 335.
+    expect(view.top()).toBe(375);
   });
 
-  it("centers the opened bubble for a reader who was following the tail", async () => {
+  it("keeps a reader following the tail at the grown tail instead of centering", async () => {
     // Arrange — parked at the tail: 1000 - 300 = 700.
     const view = await bootWithBubble(700, 250);
     // Act — the expansion grows the feed by the panel's 200px.
     await harness.click('[data-feed-row="bubble"] [data-expand]');
-    // Assert — 700 + 185, inside the grown range (1200 - 300 = 900).
-    expect(view.top()).toBe(885);
+    // Assert — the grown range's end (1200 - 300 = 900), not centered (885).
+    expect(view.top()).toBe(900);
   });
 
-  it("latches the follow where the centered view shows the latest entry", async () => {
-    // Arrange — the bubble is the feed's latest entry, and the centering
-    // leaves it in sight, so the follow latches there (`latestVisible`).
+  it("keeps the follow standing through the expansion", async () => {
+    // Arrange — the reader was following the tail when the bubble expanded.
     const view = await bootWithBubble(700, 250);
     await harness.click('[data-feed-row="bubble"] [data-expand]');
     // Act — the content's size change reaches the tail owner.
