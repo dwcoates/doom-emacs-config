@@ -9,25 +9,18 @@
  * it builds a spec, calls `drawBubble`, and hands its prose to the body as a
  * markdown slot rather than rendering markdown itself.
  */
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 import { codeOf } from "../source-text.js";
+import { filesUnder } from "../files-under.js";
 
 const SRC = join(process.cwd(), "src");
 
-/** Every `.ts` source under DIR, recursively. */
-function sourcesUnder(dir: string): string[] {
-  return readdirSync(dir).flatMap((name) => {
-    const path = join(dir, name);
-    if (statSync(path).isDirectory()) return sourcesUnder(path);
-    return path.endsWith(".ts") ? [path] : [];
-  });
-}
 
 /** Every source, keyed by its path under src/, comments stripped. */
 const SOURCES: ReadonlyMap<string, string> = new Map(
-  sourcesUnder(SRC).map((path) => [
+  filesUnder(SRC).map((path) => [
     relative(SRC, path),
     codeOf(readFileSync(path, "utf8")),
   ]),

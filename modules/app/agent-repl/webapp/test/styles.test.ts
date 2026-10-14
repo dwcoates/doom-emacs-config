@@ -3102,7 +3102,7 @@ describe("a card head's clock holds a fixed footprint", () => {
  * THE ONE BUBBLE RULE SET (owner rulings, 2026-09-23, and 2026-10-13 for a
  * prompt's leading). Every blue and purple bubble is drawn by
  * src/bubble/draw.ts and styled by the rules on `.bubble`: the role sets the
- * side and the fill, and a prompt's role also sets its lines a tree line apart;
+ * side and the fill, and a prompt's role also sets its lines just inside a tree line apart;
  * a variant or state sets only the border, `data-cap-lines` sets the collapsed
  * limit, and one size rule serves every kind (a thinking bubble and an interim
  * response narrow only the `--bubble-font-rem` token it reads, 2026-10-14).
@@ -3128,13 +3128,13 @@ describe("the one bubble rule set", () => {
     expect(bubble).toMatch(/font-size:\s*calc\(var\(--bubble-font-rem\) \* 1rem \* var\(--feed-text-scale\)\)/);
   });
 
-  it("spaces a prompt's lines one metaprompt tree line apart", () => {
+  it("spaces a prompt's lines 25% tighter than a metaprompt tree line", () => {
     // Arrange / Act
     const prompt = declarationsOf('.bubble[data-role="prompt"]') ?? "";
     const tree = declarationsOf(".mp-tree") ?? "";
     // Assert
     expect([
-      /--md-line-h:\s*calc\(var\(--tree-font-rem\) \* var\(--tree-line-h\) \/ var\(--bubble-font-rem\)\)/.test(prompt),
+      /--md-line-h:\s*calc\(1 \+ \(var\(--tree-font-rem\) \* var\(--tree-line-h\) \/ var\(--bubble-font-rem\) - 1\) \* 0\.75\)/.test(prompt),
       /font-size:\s*calc\(var\(--tree-font-rem\) \* 1rem \* var\(--feed-text-scale\)\)/.test(tree),
       /line-height:\s*var\(--tree-line-h\)/.test(tree),
     ]).toEqual([true, true, true]);
