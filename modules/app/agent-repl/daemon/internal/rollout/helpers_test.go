@@ -577,6 +577,36 @@ func (s *steps) Taken() []string {
 	return append([]string(nil), s.in...)
 }
 
+// fakeReports records every payment of the owed landing reports, with how
+// many bounces had been asked of the registry when it came.
+type fakeReports struct {
+	mu       sync.Mutex
+	registry *fakeRegistry
+	paid     []reportPayment
+}
+
+// reportPayment is one PayOwed call.
+type reportPayment struct {
+	coveredOnly bool
+	deployErr   error
+	// bouncesAsked is how many bounces the registry had been asked for.
+	bouncesAsked int
+}
+
+func (r *fakeReports) PayOwed(_ context.Context, coveredOnly bool, deployErr error) {
+	asked := len(r.registry.Requests())
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.paid = append(r.paid, reportPayment{coveredOnly: coveredOnly, deployErr: deployErr, bouncesAsked: asked})
+}
+
+// payments answers every payment, in order.
+func (r *fakeReports) payments() []reportPayment {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]reportPayment(nil), r.paid...)
+}
+
 // fakeFleet is the shim fleet.
 type fakeFleet struct {
 	mu sync.Mutex
@@ -1063,6 +1093,7 @@ type harness struct {
 	// merges records the merge mover's calls, in order, as "suspend <ws>" and
 	// "adopt <ws>"; suspendErr and adoptErr fail them.
 	merges       *fakeMerges
+	reports      *fakeReports
 	progress     *fakeProgress
 	db           wsm.DB
 	clock        *fakeClock
@@ -1210,7 +1241,9 @@ func newHarnessOn(t *testing.T, onFile bool, adjust ...func(*Deps)) *harness {
 		startErr:     make(map[ids.WorkspaceID]error),
 		merges:       &fakeMerges{order: order},
 	}
+	h.reports = &fakeReports{registry: h.registry}
 	deps := Deps{
+		Reports:        h.reports,
 		Merges:         h.merges,
 		SelfExe:        filepath.Join(state, "agent-repld"),
 		SelfAddress:    "127.0.0.1:7777",

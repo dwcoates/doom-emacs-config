@@ -95,6 +95,11 @@ type Controller interface {
 	// the registry when the build is not the installed bundle's. It never
 	// blocks its caller, which is a stream router holding its own lock.
 	ShimReported(ws ids.WorkspaceID, build string)
+	// SettleBoot ends a FRESH boot (never a successor's, whose takeover does
+	// the same): every live shim is judged against the installed build, and
+	// then every owed landing report is paid, since what this daemon runs
+	// carries every landing before it started.
+	SettleBoot(ctx context.Context)
 	// CheckStaleness re-judges a workspace's last reported shim build against
 	// the installed bundle, bouncing it through the registry when they differ.
 	// It is what a deploy and a mount call; neither waits on the bounce.
@@ -211,7 +216,16 @@ type StaleCheck struct {
 }
 
 // Deps are the controller's collaborators.
+// OwedReports pays the landing reports owed until a deploy has run
+// (mergeworkspace.Service.PayOwed).
+type OwedReports interface {
+	PayOwed(ctx context.Context, coveredOnly bool, deployErr error)
+}
+
 type Deps struct {
+	// Reports pays the landing reports a deploy covered, once the shims this
+	// daemon serves have been judged against the build it installed.
+	Reports OwedReports
 	// SelfExe is the daemon binary a successor is spawned from.
 	SelfExe string
 	// SelfAddress is this daemon's own `127.0.0.1:<port>`, handed to the
@@ -642,6 +656,9 @@ func New(deps Deps) (Controller, error) {
 	}
 	if deps.Merges == nil {
 		return nil, errors.New("rollout: the merge mover is required; a workspace whose merge runs must carry it across a handover")
+	}
+	if deps.Reports == nil {
+		return nil, errors.New("rollout: the owed landing reports are required; a successor pays the reports its deploy covered")
 	}
 	if deps.BringingUp == nil {
 		return nil, errors.New("rollout: the bring-up marker is required; a workspace whose session is starting must not read as usable")

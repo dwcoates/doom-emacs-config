@@ -7,13 +7,17 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/mergeworkspace"
 	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/rollout"
 	"agent-repld/internal/workspace"
+	"agent-repld/internal/wsm"
 )
 
 // recordingRelay is a workspace.HostRelay that records feed tail returns.
@@ -414,3 +418,108 @@ func TestEveryForwardedVerbsReadGoesThroughBound(t *testing.T) {
 		t.Fatalf("forward.go reads f.verbs() %d times, want once, inside bound", reads)
 	}
 }
+
+// boundDetached answers a detached forwarder bound to a service over a fresh
+// in-memory state client holding one owed landing report.
+func boundDetached(t *testing.T) (*detachedForwarder, wsm.DB, *dlog.TestSurfaces) {
+	t.Helper()
+	db, err := wsm.OpenInMemory(context.Background())
+	if err != nil {
+		t.Fatalf("OpenInMemory: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if err := db.OweHandBack(context.Background(), wsm.OwedHandBack{MergeWorkspace: "ws-merge", Requester: "ws-requester",
+		MergeName: "m", Branch: "b", Summary: "s", IdempotencyKey: "k", OwedAt: time.Unix(1, 0)}); err != nil {
+		t.Fatalf("OweHandBack: %v", err)
+	}
+	logs := dlog.NewTestSurfaces()
+	f := &detachedForwarder{}
+	f.bind(mergeworkspace.New(mergeworkspace.Deps{DB: db, Log: logs}))
+	return f, db, logs
+}
+
+func TestDetachedForwarderCoversTheOwedReportsThroughTheBoundService(t *testing.T) {
+	// Arrange
+	f, db, _ := boundDetached(t)
+
+	// Act
+	err := f.CoverOwed(context.Background())
+
+	// Assert
+	covered, readErr := db.OwedHandBacks(context.Background(), true)
+	if err != nil || readErr != nil || len(covered) != 1 {
+		t.Fatalf("CoverOwed = %v; covered %+v, %v; want the report covered", err, covered, readErr)
+	}
+}
+
+func TestDetachedForwarderCoversNothingBeforeTheService(t *testing.T) {
+	// Arrange
+	f := &detachedForwarder{}
+
+	// Act
+	err := f.CoverOwed(context.Background())
+
+	// Assert
+	if err == nil {
+		t.Fatal("CoverOwed before the service = nil, want the error")
+	}
+}
+
+func TestDetachedForwarderPaysThroughTheBoundService(t *testing.T) {
+	// Arrange: a service whose state read fails, so the payment is visible
+	// in its own record without a prompt path behind it.
+	f, db, logs := boundDetached(t)
+	db.Close()
+
+	// Act
+	f.PayOwed(context.Background(), false, nil)
+
+	// Assert
+	if !slices.ContainsFunc(logs.Records(), func(r dlog.Record) bool {
+		return r.Level == "error" && r.Message == "could not read the owed landing reports; they stay owed"
+	}) {
+		t.Fatalf("records = %+v, want the service's own record of the payment", logs.Records())
+	}
+}
+
+func TestDetachedForwarderPayingBeforeTheServicePanics(t *testing.T) {
+	// Arrange
+	f := &detachedForwarder{}
+	defer func() {
+		// Assert
+		if recover() == nil {
+			t.Fatal("PayOwed before the service returned, want a panic: the graph's order is broken")
+		}
+	}()
+
+	// Act
+	f.PayOwed(context.Background(), true, nil)
+}
+
+func TestFreshBootSettle(t *testing.T) {
+	tests := []struct {
+		name    string
+		joining bool
+		want    bool
+	}{
+		{name: "a fresh boot settles through the rollout", joining: false, want: true},
+		{name: "a joining successor settles at its takeover instead", joining: true, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			settle := freshBootSettle(tt.joining, settlingController{})
+
+			// Assert
+			if (settle != nil) != tt.want {
+				t.Fatalf("freshBootSettle(joining=%v) present = %v, want %v", tt.joining, settle != nil, tt.want)
+			}
+		})
+	}
+}
+
+// settlingController is a rollout controller whose only method in use is
+// SettleBoot.
+type settlingController struct{ rollout.Controller }
+
+func (settlingController) SettleBoot(context.Context) {}
