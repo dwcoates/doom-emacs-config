@@ -232,13 +232,28 @@ func Reap(t Table, m Members, log Logger) (Result, error) {
 	return res, nil
 }
 
-// describe names processes "command[pid]", in pid order.
+// tmpdir answers the TMPDIR the process's environment names, or "".
+func (p Proc) tmpdir() string {
+	for _, field := range strings.Fields(p.Line) {
+		if v, ok := strings.CutPrefix(field, "TMPDIR="); ok {
+			return v
+		}
+	}
+	return ""
+}
+
+// describe names processes "command[pid]", in pid order, each with the TMPDIR
+// it was handed when it has one: a run gives every unit a root of its own, so
+// the TMPDIR says which unit left the process.
 func describe(procs []Proc) string {
 	sorted := slices.Clone(procs)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Pid < sorted[j].Pid })
 	names := make([]string, len(sorted))
 	for i, p := range sorted {
 		names[i] = fmt.Sprintf("%s[%d]", p.command(), p.Pid)
+		if dir := p.tmpdir(); dir != "" {
+			names[i] += " (TMPDIR=" + dir + ")"
+		}
 	}
 	return strings.Join(names, ", ")
 }
