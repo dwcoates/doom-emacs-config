@@ -1226,3 +1226,36 @@ A hand-rolled hidden-section decoder would skip the shared helper and fail here.
                   #'agent-repl-wire-decode-roster-section-header
                   "{\"label\":{\"text\":\"doom\"}}")
                  '("RosterSectionHeader" count "required message field is absent"))))
+
+;;;; ---- The grouping views' shared shape ----
+
+(ert-deftest agent-repl-test-wire-roster-grouping-view-decodes-its-sections-in-order ()
+  "The shared grouping-view decoder keeps the resolver's section order."
+  (should (equal (agent-repl-test-wire-roster--quiet
+                   (agent-repl-wire--decode-grouping-view
+                    "RosterTaskView"
+                    (agent-repl-test-wire-roster--parse "{\"sections\":[1,2]}")
+                    (lambda (n) (* 10 n))))
+                 '(:sections (10 20)))))
+
+(ert-deftest agent-repl-test-wire-roster-grouping-view-refuses-an-unknown-field-under-its-name ()
+  "The shared grouping-view decoder names the message it decodes in a breach."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  (lambda (value)
+                    (agent-repl-wire--decode-grouping-view "RosterTaskView" value #'identity))
+                  "{\"sections\":[],\"extra\":{}}")
+                 '("RosterTaskView" extra "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-every-grouping-view-shares-the-grouping-shape ()
+  "Every grouping view decodes through `agent-repl-wire--decode-grouping-view'."
+  (dolist (case '((agent-repl-wire-decode-roster-repository-view . "RosterRepositoryView")
+                  (agent-repl-wire-decode-roster-task-view . "RosterTaskView")
+                  (agent-repl-wire-decode-roster-maturity-view . "RosterMaturityView")))
+    (let (seen)
+      (cl-letf* ((real (symbol-function 'agent-repl-wire--decode-grouping-view))
+                 ((symbol-function 'agent-repl-wire--decode-grouping-view)
+                  (lambda (name value sections)
+                    (push name seen)
+                    (funcall real name value sections))))
+        (agent-repl-test-wire-roster--decode (car case) "{\"sections\":[]}"))
+      (should (equal seen (list (cdr case)))))))

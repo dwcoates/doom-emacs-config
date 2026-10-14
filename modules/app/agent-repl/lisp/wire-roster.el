@@ -1104,16 +1104,23 @@ It has no key of its own — the roster carries exactly one."
   "Decode one element of `RosterRepositoryView''s repeated `sections'."
   (agent-repl-wire-decode-roster-repo-section value))
 
+(defun agent-repl-wire--decode-grouping-view (message-name value sections)
+  "Decode VALUE as MESSAGE-NAME, one grouping's view: a plist `(:sections LIST)'.
+SECTIONS decodes one element of its repeated `sections'.  Every grouping
+view shares this shape, so the three decode through this one function."
+  (let ((object (agent-repl-wire--object message-name value)))
+    (agent-repl-wire--check-keys message-name object '(sections))
+    (agent-repl-wire--decoded
+     message-name
+     (list :sections (agent-repl-wire--decode-repeated
+                      message-name 'sections object sections)))))
+
 (defun agent-repl-wire-decode-roster-repository-view (value)
   "Decode VALUE as `RosterRepositoryView', a plist `(:sections LIST)'.
 Order is the resolver's; clients do not re-sort."
-  (let ((object (agent-repl-wire--object "RosterRepositoryView" value)))
-    (agent-repl-wire--check-keys "RosterRepositoryView" object '(sections))
-    (agent-repl-wire--decoded
-     "RosterRepositoryView"
-     (list :sections (agent-repl-wire--decode-repeated
-                      "RosterRepositoryView" 'sections object
-                      #'agent-repl-wire-decode-roster-repository-view-sections)))))
+  (agent-repl-wire--decode-grouping-view
+   "RosterRepositoryView" value
+   #'agent-repl-wire-decode-roster-repository-view-sections))
 
 (defun agent-repl-wire-decode-roster-task-view-sections (value)
   "Decode one element of `RosterTaskView''s repeated `sections'."
@@ -1121,13 +1128,9 @@ Order is the resolver's; clients do not re-sort."
 
 (defun agent-repl-wire-decode-roster-task-view (value)
   "Decode VALUE as `RosterTaskView', a plist `(:sections LIST)'."
-  (let ((object (agent-repl-wire--object "RosterTaskView" value)))
-    (agent-repl-wire--check-keys "RosterTaskView" object '(sections))
-    (agent-repl-wire--decoded
-     "RosterTaskView"
-     (list :sections (agent-repl-wire--decode-repeated
-                      "RosterTaskView" 'sections object
-                      #'agent-repl-wire-decode-roster-task-view-sections)))))
+  (agent-repl-wire--decode-grouping-view
+   "RosterTaskView" value
+   #'agent-repl-wire-decode-roster-task-view-sections))
 
 (defun agent-repl-wire-decode-roster-maturity-view-sections (value)
   "Decode one element of `RosterMaturityView''s repeated `sections'."
@@ -1136,13 +1139,9 @@ Order is the resolver's; clients do not re-sort."
 (defun agent-repl-wire-decode-roster-maturity-view (value)
   "Decode VALUE as `RosterMaturityView', a plist `(:sections LIST)'.
 Every stage, in the order work moves through them; clients do not re-sort."
-  (let ((object (agent-repl-wire--object "RosterMaturityView" value)))
-    (agent-repl-wire--check-keys "RosterMaturityView" object '(sections))
-    (agent-repl-wire--decoded
-     "RosterMaturityView"
-     (list :sections (agent-repl-wire--decode-repeated
-                      "RosterMaturityView" 'sections object
-                      #'agent-repl-wire-decode-roster-maturity-view-sections)))))
+  (agent-repl-wire--decode-grouping-view
+   "RosterMaturityView" value
+   #'agent-repl-wire-decode-roster-maturity-view-sections))
 
 (defun agent-repl-wire-decode-roster-current-workspace-workspace (value)
   "Decode `RosterCurrentWorkspace''s `workspace' field VALUE."
