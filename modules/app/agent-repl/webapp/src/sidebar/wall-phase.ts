@@ -29,6 +29,7 @@
  */
 import { log } from "../log.js";
 import { createPresence, pagePresence, type Presence } from "../presence.js";
+import { nextFrame } from "../frame.js";
 
 /** The slice of a Web Animation the seek reads and moves. */
 export interface PhasedAnimation {
@@ -126,7 +127,7 @@ export function installWallPhase(host: Element, env: WallPhaseEnv = {}): WallPha
   const animations = env.animations ?? PAGE_ANIMATIONS;
   const now = env.now ?? ((): number => Date.now());
   const doc = env.doc ?? document;
-  const frame = env.frame ?? ((callback: () => void): void => void requestAnimationFrame(() => callback()));
+  const frame = env.frame ?? nextFrame;
   const owned = env.presence === undefined && doc !== document ? createPresence(doc, false) : null;
   const presence = env.presence ?? owned ?? pagePresence();
 
