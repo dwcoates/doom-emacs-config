@@ -1004,6 +1004,13 @@ type MergeSource struct {
 	// moves none. A detached request's hand-off carries it onto the merge
 	// workspace's own request.
 	Version *VersionIncrement
+	// Actions are the merge actions a DETACHED request names
+	// (agentrepl.v1.MergeWorkspaceAsync.merge_actions), run by its merge
+	// workspace and never by the requester; empty when it names none. Only a
+	// detached request carries them: the hand-off moves them onto the merge
+	// workspace's origin (MergeOrigin.Actions), and from there into its
+	// creation job, so the merge workspace's own request row carries none.
+	Actions MergeActions
 }
 
 // DetachedMergeID is one detached merge request's identity, minted when the
@@ -1037,6 +1044,27 @@ type MergeOrigin struct {
 	// CleanupDir is the worktree the landing removes besides this merge
 	// workspace's own (MergeSource.CleanupDir).
 	CleanupDir string
+
+	// THE LANDING THE QUEUE DECIDED. The merge queue decides where an async
+	// merge lands ONCE, at hand-off (merge.orchestrator.handOffDetached), and
+	// the merge workspace's create lands by exactly these, reading nothing off
+	// the requester. They are TRANSPORT-ONLY: the create records TargetDir and
+	// Actions in the merge workspace's own creation job and ParentBranch on
+	// its registry row, which is where they live durably, so the stored origin
+	// (workspaces.merge_*) does not carry them and a read of one answers them
+	// empty.
+
+	// TargetDir is the checkout the merge workspace's branch lands in: the
+	// requester's creation-job target, or its repository's main worktree when
+	// the requester is the main checkout.
+	TargetDir string
+	// ParentBranch is the branch the merge workspace lands on: the
+	// requester's own parent branch.
+	ParentBranch string
+	// Actions are the merge actions the async request named
+	// (MergeSource.Actions), and nothing else: a merge workspace never
+	// inherits its requester's configured actions.
+	Actions MergeActions
 }
 
 // MergeQueueEntry is one workspace's place in its repository's merge queue. The
