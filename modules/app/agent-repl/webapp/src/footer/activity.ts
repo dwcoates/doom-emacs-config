@@ -118,6 +118,7 @@ import { grabber, statusWords, textLine } from "./parts.js";
 import { coldGateFigureColor, pressurePercentColor } from "../pressure-color.js";
 import { MalformedView } from "../rpc/malformed.js";
 import { activityDatumClass } from "./tones.js";
+import { pluralNoun } from "../count-noun.js";
 
 /**
  * What a clocked piece of the cell needs: the ticker its figure rides.
@@ -610,10 +611,9 @@ export function drawFooterActivityTransientUpdated(
 export function drawFooterActivityTransientApiRestored(
   u: FooterActivityTransientApiRestored,
 ): HTMLElement {
-  const noun = u.failedAttempts === 1 ? "attempt" : "attempts";
   return textLine(
     "footer-activity-api-restored",
-    `API answering again after ${u.failedAttempts} failed ${noun}`,
+    `API answering again after ${u.failedAttempts} failed ${pluralNoun(u.failedAttempts, "attempt")}`,
   );
 }
 

@@ -96,6 +96,7 @@ import {
   type TaskChange,
 } from "./tasks.js";
 import { fireVerb } from "./verbs.js";
+import { countNoun } from "../count-noun.js";
 
 /**
  * The whole roster.
@@ -753,9 +754,9 @@ export function mergedTodayCommitsText(today: MergedRowFacts[]): string {
     if (m.commits === undefined) uncounted += 1;
     else commits += m.commits;
   }
-  const summed = `${commits} ${commits === 1 ? "commit" : "commits"} merged today`;
+  const summed = `${countNoun(commits, "commit")} merged today`;
   if (uncounted === 0) return summed;
-  return `${summed} (${uncounted} ${uncounted === 1 ? "merge" : "merges"} not counted)`;
+  return `${summed} (${countNoun(uncounted, "merge")} not counted)`;
 }
 
 /**

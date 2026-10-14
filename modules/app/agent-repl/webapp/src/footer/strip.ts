@@ -79,6 +79,7 @@ import type { FooterPanel } from "./expanded.js";
 import { grabber, statusWords, textLine } from "./parts.js";
 import { activityDatumClass, statusArmClass, type ActivityDatum } from "./tones.js";
 import type { StopControls } from "./stop.js";
+import { countNoun } from "../count-noun.js";
 
 /** The label the clock cell shows between turns. The baseline strip's own. */
 export const IDLE_CLOCK_LABEL = "--";
@@ -504,7 +505,7 @@ export function awaitingFreeText(v: {
     [v.pending, "starting task"],
   ];
   for (const [n, noun] of counted) {
-    if (n > 0) parts.push(`${n} ${noun}${n === 1 ? "" : "s"}`);
+    if (n > 0) parts.push(countNoun(n, noun));
   }
   const what = parts.length > 0 ? parts.join(", ") : "the session to come up";
   return v.otherWorkspace !== "" ? `${what} in ${v.otherWorkspace}` : what;
