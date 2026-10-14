@@ -101,6 +101,7 @@ Findings are collected at the end, in "Audit findings".
 | `agent-repl-switch-to-workspace` | Switch to tab slot N (the generated commands call it). | - | - | - |
 | `agent-repl-switch-to-project` | Switch to a known workspace, or to a project. | `SPC p p` | leader | leader |
 | `agent-repl-open-most-recent-workspace` | Switch to the most recently selected workspace not yet visited. | `SPC TAB R` | leader | leader |
+| `agent-repl-switch-to-last-finished-workspace` | Switch to the workspace that most recently went from working to done. | `SPC TAB TAB` | leader | leader |
 | `agent-repl-workspace-push-to-back` | Push the current tab to the back of the tab order. | - | - | - |
 
 ## 8. Workspace creation
