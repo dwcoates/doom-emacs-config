@@ -111,8 +111,10 @@ type fakeClient struct {
 	startTurns []*shimv1.StartTurnRequest
 	// historyReads counts ReadHistory calls; history is the answer, a floor
 	// page of nothing when unset.
-	historyReads    int
-	history         *shimv1.ReadHistoryResponse
+	historyReads int
+	history      *shimv1.ReadHistoryResponse
+	// historyErr, when set, fails every history read with it.
+	historyErr      error
 	historyRequests []*shimv1.ReadHistoryRequest
 
 	// forkPoint and forkPointErr answer GetForkPoint (a whole point when

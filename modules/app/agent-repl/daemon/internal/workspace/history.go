@@ -12,6 +12,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/sessionwatcher"
+	"agent-repld/internal/shimclient"
 )
 
 // THE FEED'S HISTORY SOURCE (feed.HistorySource). History is loaded only on a
@@ -43,6 +44,9 @@ func (f *Fleet) ReadHistory(ctx context.Context, ws ids.WorkspaceID, target *con
 	}
 	page, err := readHistory(ctx, client, target, after)
 	watcher, watched := f.sessionWatcher(ws)
+	if errors.Is(err, shimclient.ErrStandDownOrdered) {
+		return nil, f.readEndedInStandDown(ws, err)
+	}
 	if err != nil {
 		if !watched && target == nil && isUnknownAgent(err) {
 			// NO BOOK YET IS NO SOURCE YET: a shim with no session settled
@@ -83,7 +87,24 @@ func (f *Fleet) ReadInherited(ctx context.Context, ws ids.WorkspaceID, book *con
 	} else {
 		req.Position = &shimv1.ReadHistoryRequest_Through{Through: &conversationv1.ConversationThrough{AtMs: throughMs}}
 	}
-	return readHistoryPage(ctx, client, req)
+	page, err := readHistoryPage(ctx, client, req)
+	if errors.Is(err, shimclient.ErrStandDownOrdered) {
+		return nil, f.readEndedInStandDown(ws, err)
+	}
+	return page, err
+}
+
+// readEndedInStandDown answers a history read that a stand-down THIS DAEMON
+// ORDERED cut short (an idle park, a bounce) as no source, recorded at INFO.
+// It is the same condition as a workspace with no shim at all, met while the
+// read was in flight rather than before it: the shim it was reading from is
+// going away on purpose, so the feed serves what it holds and loads the page
+// when the next shim comes up, exactly as it does for a hibernated workspace.
+func (f *Fleet) readEndedInStandDown(ws ids.WorkspaceID, err error) error {
+	f.deps.Log.Global().Info("daemon.workspace.history_stood_down",
+		"a history read ended in a stand-down this daemon ordered; the reader waits for the next shim",
+		dlog.Context{"workspace": string(ws), "cause": err.Error()})
+	return fmt.Errorf("%w: %w", feed.ErrNoHistorySource, err)
 }
 
 // noteHistoryWithoutWatcher states for the views what a loaded page states when

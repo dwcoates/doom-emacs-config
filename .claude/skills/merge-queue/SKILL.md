@@ -15,7 +15,7 @@ Asks the merge queue, from this workspace, to land work in its merge target: mas
 |---|---|
 | `one-shot` | Announce NOW, without ending the turn, that this workspace's own branch merges SYNC, in place, once the current turn ends, holding its feed, and that this workspace CLOSES once it lands; it is marked a one-shot at once. A failed one-shot leaves this workspace open and is reported back to it. Refused in the repository's main worktree. |
 | `one-shot pr-merged` | This workspace's branch already merged upstream: update master from upstream and close this workspace. |
-| `async <name> <branch>` | Merge `<branch>` ASYNC, in a hidden merge workspace named `<name>` (a short slug naming what is merged) forked from this conversation onto `<branch>`'s tip; this workspace stays free and open, and is told how the merge ended. `<branch>` is NEVER the branch checked out in this workspace. |
+| `async <name> <branch>` | Merge `<branch>` ASYNC, in a hidden merge workspace named `<name>` (a short slug naming what is merged) forked from this conversation onto `<branch>`'s tip; this workspace stays free and open, and is told how the merge ended (a landing on agent-repl's master once its deploy has run). `<branch>` is NEVER the branch checked out in this workspace. |
 | `instruction <text>` | With `async`: free text the merge workspace carries out on `<branch>` before the merge joins the queue (the bubble's resolving tab), e.g. "rebase onto master, dropping every commit this workspace's branch shares with it", "combine agent-a and agent-b", "fail the merge if you cannot tell which commits are the fix". |
 | `close <worktree-dir>` | With `async`: ANOTHER workspace (a child's, a subagent's) to close once the merge lands. Never this workspace. |
 | `cleanup` | With `async`: once the merge lands, remove the worktree that has `<branch>` checked out (never this workspace's, the main worktree or any workspace's; branches are kept). |
@@ -127,6 +127,8 @@ Asks the merge queue, from this workspace, to land work in its merge target: mas
     - CRITICAL: NEVER run `git rebase --continue`, `--abort` or `--skip`; the queue continues the rebase itself.
   - b. A test-failure prompt (a `one-shot`): fix the failure in the worktree the prompt names and commit the fix with its tests.
   - c. A report of how a merge ended (landed, failed, or did not run): report it in one line and STOP.
+    - *NOTE*: a report of a landing on agent-repl's master arrives only once the build that carries it is running, this session's own included, and says so; NEVER wait for, poll, or check the restart before acting on it.
+    - *NOTE*: a report saying the rollouts are held or the deploy failed means the running build does NOT carry the landing.
 
 4. Refused.
   - Report the printed refusal verbatim and STOP.
