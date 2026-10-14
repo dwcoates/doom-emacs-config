@@ -1148,6 +1148,13 @@ html.webhost-sidebar #ws-sidebar[hidden] {
    receded opacity, so an unreceded row's takes that same opacity on the
    column alone, and the two composite to the same colour. */
 #ws-sidebar .ws:not(.receded) > .row > .when { opacity: var(--receded-opacity); }
+/* A COUNTING DURATION READS A SHADE LIGHTER (owner request, 2026-10-14): in
+   the open section, a when-column that is not the zero reading ("0s", no turn
+   running) steps up from the receded grey, so a live count stands apart. */
+#ws-sidebar { --when-counting-opacity: 0.75; }
+#ws-sidebar .ws:not(.receded) > .row > .when:not([data-when="noTurnRunning"]) {
+  opacity: var(--when-counting-opacity);
+}
 /* THERE IS NO CHEVRON (owner ruling, 2026-09-14): "Hovering the workspace
    should have the same effect as opening the chevron currently does. No need
    for a chevron to show the dropdown on hover." The row opens its own panel
