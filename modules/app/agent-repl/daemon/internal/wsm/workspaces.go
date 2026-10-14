@@ -44,7 +44,7 @@ func normalizeDir(dir string) (string, error) {
 // the row, so it cannot drift from the closes it summarizes: CloseTurn's one
 // write of closed_at is the only edge, and turns_by_workspace keeps the MAX an
 // index range.
-const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at, result_end, result_read, hidden, hidden_at, dwelt_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, landed_head, landed_at, commit_count, place, merge_revealed, ` +
+const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at, result_end, result_read, hidden, hidden_at, dwelt_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, landed_head, landed_at, commit_count, place, merge_revealed, cache_lapses_at, cache_lapse_gated_tokens, ` +
 	`EXISTS (SELECT 1 FROM creation_jobs WHERE creation_jobs.workspace_id = workspaces.id AND creation_jobs.one_shot = 1), ` +
 	`EXISTS (SELECT 1 FROM merge_queue WHERE merge_queue.workspace_id = workspaces.id ` +
 	`OR merge_queue.workspace_id IN (SELECT merge_ws.id FROM workspaces AS merge_ws WHERE merge_ws.merge_of = workspaces.id)), ` +
@@ -78,8 +78,10 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		ended    sql.NullInt64
 		hiddenAt sql.NullInt64
 		dweltAt  sql.NullInt64
+		lapsesAt sql.NullInt64
+		gated    sql.NullInt64
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &hiddenAt, &dweltAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &ws.OneShot, &ws.MergePending, &ended); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &hiddenAt, &dweltAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &ws.OneShot, &ws.MergePending, &ended); err != nil {
 		return Workspace{}, err
 	}
 	if mergeOf.Valid != request.Valid {
@@ -146,6 +148,11 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 	}
 	ws.HiddenAt = optTime(hiddenAt)
 	ws.DweltAt = optTime(dweltAt)
+	lapse, err := decodeCacheLapse(ws, lapsesAt, gated)
+	if err != nil {
+		return Workspace{}, err
+	}
+	ws.CacheLapse = lapse
 	count, err := decodeCommitCount(ws.ID, commits)
 	if err != nil {
 		return Workspace{}, err
@@ -684,7 +691,9 @@ func (s *store) SetPriority(ctx context.Context, id WorkspaceID, p *Priority) er
 
 // SetHidden records whether a workspace sits in the roster's hidden section,
 // and, in the same statement, WHEN it was hidden: AT while it is hidden, none
-// once it is shown again. Hiding a workspace already hidden re-stamps it, so
+// once it is shown again. The same statement CLEARS the projected cache lapse
+// either way: a shown workspace keeps its cache warm again, and a fresh hide
+// waits for the shim's own projection rather than reading an old one. Hiding a workspace already hidden re-stamps it, so
 // the instant is always the latest hide. An unknown workspace is refused
 // (ErrNotFound), never a write that touched nothing.
 func (s *store) SetHidden(ctx context.Context, id WorkspaceID, hidden bool, at time.Time) error {
@@ -696,7 +705,9 @@ func (s *store) SetHidden(ctx context.Context, id WorkspaceID, hidden bool, at t
 	}
 	return s.setWorkspaceColumns(ctx, "daemon.wsm.set_hidden", id, fields,
 		workspaceColumn{name: "hidden", value: hidden},
-		workspaceColumn{name: "hidden_at", value: hiddenAt})
+		workspaceColumn{name: "hidden_at", value: hiddenAt},
+		workspaceColumn{name: "cache_lapses_at", value: nil},
+		workspaceColumn{name: "cache_lapse_gated_tokens", value: nil})
 }
 
 // DwellThreshold is how long the user must hold a workspace selected for it to

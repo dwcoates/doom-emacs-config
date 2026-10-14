@@ -29,6 +29,7 @@ import {
   validateGatherTitleDigestRequest,
   validateGetForkPointRequest,
   validateHibernateRequest,
+  validateSetKeepaliveRequest,
   validateKillSessionRequest,
   validateKillTurnRequest,
   validateReadHistoryRequest,
@@ -208,6 +209,12 @@ export function shimRoutes(engine: Engine): (router: ConnectRouter) => void {
         entered("Hibernate");
         validateHibernateRequest(request);
         return answering("Hibernate", () => engine.hibernate(request));
+      },
+
+      async setKeepalive(request) {
+        entered("SetKeepalive");
+        validateSetKeepaliveRequest(request);
+        return answering("SetKeepalive", () => engine.setKeepalive(request));
       },
 
       async killSession(request) {

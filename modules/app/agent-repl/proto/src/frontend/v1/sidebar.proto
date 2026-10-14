@@ -983,6 +983,10 @@ message RosterRow {
     // is parked on the user's remediation choice (pay / clear / compact).
     // GREEN, the same coarse claim as the footer's `waiting · cold_gate`. The
     // row's NAME is struck through while it stands, in every sidebar section.
+    //
+    // A HIDDEN workspace wears it too once its cache has LAPSED with a gated
+    // verdict (conversation.v1.SessionCacheLapse): its session was stood down
+    // at the lapse, and showing it again will raise this gate (2026-10-13).
     RosterRowStatusColdGate cold_gate = 61;
   }
   // Tags 19 (`merge_enqueuing`) and 22 (`merge_conflict`) are RETIRED: no
@@ -1103,8 +1107,24 @@ message RosterRowWhen {
 
 // When the workspace was moved into the hidden section, in epoch
 // MILLISECONDS. Set for exactly the rows the hidden section draws.
+//
+// A HIDDEN WORKSPACE'S KEEP-ALIVES ARE HELD, so its prompt cache lapses on its
+// own clock (shim.v1.SetKeepalive, 2026-10-13). When the daemon knows that
+// moment, `cache` carries it and the column COUNTS DOWN to it ("12m 34s"),
+// reading "cold cache" once it is reached, on a continuous green-to-red
+// gradient: green an hour or more out, the deepest red at the lapse. Unset,
+// the daemon knows no lapse (the session was stood down before it stated one,
+// or never ran), and the column counts up from `at_ms` as before.
 message RosterRowWhenHidden {
   int64 at_ms = 1;
+  optional RosterRowWhenHiddenCache cache = 2;
+}
+
+// The hidden workspace's prompt cache lapse.
+message RosterRowWhenHiddenCache {
+  // When the cache lapses, in epoch MILLISECONDS. At or before now, the cache
+  // is cold.
+  int64 lapses_at_ms = 1;
 }
 
 // When the workspace's merge settled, in epoch MILLISECONDS.

@@ -152,6 +152,9 @@ type Client interface {
 	// Hibernate stands the session down for the idle sweep. It is NOT used by
 	// the relaunch engine, which kills gracefully instead.
 	Hibernate(ctx context.Context, req *shimv1.HibernateRequest) (*shimv1.HibernateResponse, error)
+	// SetKeepalive holds the session's keep-alive cadence (its workspace is
+	// hidden, so its cache is left to lapse) or runs it again.
+	SetKeepalive(ctx context.Context, req *shimv1.SetKeepaliveRequest) (*shimv1.SetKeepaliveResponse, error)
 	// KillSession ends the session, gracefully unless forced.
 	KillSession(ctx context.Context, req *shimv1.KillSessionRequest) (*shimv1.KillSessionResponse, error)
 	// StartTurn opens a turn with the daemon's minted TurnId and the required

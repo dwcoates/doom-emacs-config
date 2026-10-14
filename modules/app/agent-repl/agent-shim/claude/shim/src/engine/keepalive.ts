@@ -806,6 +806,8 @@ export interface CacheAnchor {
   /** When that request happened, on the cadence's clock, in epoch milliseconds. */
   readonly atMs: number;
   readonly ttlMs: number | undefined;
+  /** The context that request sent: what a cold read after the lapse re-reads. */
+  readonly contextTokens: number;
 }
 
 /**
@@ -834,6 +836,13 @@ export interface CacheAnchor {
  * - With no tier stated (no request yet), the cadence beats on the interval
  *   from its anchor, as it always did.
  *
+ * HELD while the workspace is hidden (shim.v1.SetKeepalive, 2026-10-13): a held
+ * cadence sends no beat, so the cache lapses on its own clock, and instead it
+ * PROJECTS the lapse -- when it comes and the context a cold read would re-read
+ * -- on every hold and on every anchor change while held. With no tier stated
+ * nothing is known to be cached, so the lapse is the anchor itself. Running it
+ * again schedules from the anchor exactly as a start does.
+ *
  * STARTED BEFORE `StartSession` RETURNS SUCCESS, so a session that is never
  * prompted still keeps its cache warm. PAUSED while a turn is in flight,
  * because a keep-alive submitted into an open turn would be a second submitter
@@ -843,12 +852,15 @@ export interface CacheAnchor {
 export class KeepaliveCadence {
   private handle: unknown;
   private paused = false;
+  private held = false;
   private anchor: CacheAnchor | undefined;
   /** The schedule last stated at INFO, so an unchanged reschedule is not restated. */
   private stated: string | undefined;
 
   constructor(
     private readonly beat: () => void,
+    /** States the projected lapse while held: when the cache lapses, and the context it held. */
+    private readonly project: (lapsesAtMs: number, contextTokens: number) => void,
     private readonly nowMs: () => number,
     private readonly intervalMs: number = KEEPALIVE_INTERVAL_MS,
     private readonly scheduler: KeepaliveScheduler = REAL_SCHEDULER,
@@ -859,7 +871,7 @@ export class KeepaliveCadence {
    * request. A second start re-anchors; it never doubles the cadence.
    */
   start(anchor: CacheAnchor | undefined, reason: string): void {
-    this.anchor = anchor ?? { atMs: this.nowMs(), ttlMs: undefined };
+    this.anchor = anchor ?? { atMs: this.nowMs(), ttlMs: undefined, contextTokens: 0 };
     this.arm(anchor === undefined ? `${reason}; no request stated, anchored at the start` : reason);
   }
 
@@ -867,9 +879,9 @@ export class KeepaliveCadence {
    * An API request just answered: the cache was read or written now. A request
    * that wrote nothing states no tier and keeps the one the cache was bought at.
    */
-  noteRequest(writtenTtlMs: number | undefined): void {
+  noteRequest(writtenTtlMs: number | undefined, contextTokens: number): void {
     if (this.anchor === undefined) return;
-    this.anchor = { atMs: this.nowMs(), ttlMs: writtenTtlMs ?? this.anchor.ttlMs };
+    this.anchor = { atMs: this.nowMs(), ttlMs: writtenTtlMs ?? this.anchor.ttlMs, contextTokens };
     this.arm("an API request answered");
   }
 
@@ -883,6 +895,25 @@ export class KeepaliveCadence {
   resume(): void {
     this.paused = false;
     this.arm("the session is idle again");
+  }
+
+  /**
+   * The workspace is hidden: send no beat, and project the lapse instead. A
+   * hold before the start takes effect at the start, so a session born held
+   * never beats.
+   */
+  hold(): void {
+    this.held = true;
+    LOGGER.info({ ...anchorContext(this.anchor) }, "keep-alives are held; the cache is left to lapse");
+    this.arm("keep-alives were held");
+  }
+
+  /** The workspace is shown again: keep the cache warm, from the last request. */
+  run(): void {
+    if (!this.held) return;
+    this.held = false;
+    LOGGER.info({ ...anchorContext(this.anchor) }, "keep-alives run again");
+    this.arm("keep-alives run again");
   }
 
   /** The session is ending. */
@@ -903,10 +934,25 @@ export class KeepaliveCadence {
   private arm(reason: string): void {
     this.disarm();
     const anchor = this.anchor;
-    if (anchor === undefined || this.paused) return;
+    if (anchor === undefined) return;
+    if (this.held) {
+      this.projectLapse(anchor);
+      return;
+    }
+    if (this.paused) return;
     if (!this.keepable(anchor, reason)) return;
     const dueAtMs = anchor.atMs + this.intervalMs;
     this.schedule(dueAtMs, Math.max(0, dueAtMs - this.nowMs()), reason);
+  }
+
+  /** States when the anchored cache lapses: a TTL after the anchor, or the anchor itself when no tier is stated. */
+  private projectLapse(anchor: CacheAnchor): void {
+    const lapsesAtMs = anchor.ttlMs === undefined ? anchor.atMs : anchor.atMs + anchor.ttlMs;
+    LOGGER.debug(
+      { ...anchorContext(anchor), lapses_at: new Date(lapsesAtMs).toISOString(), context_tokens: anchor.contextTokens },
+      "projected the held cache's lapse",
+    );
+    this.project(lapsesAtMs, anchor.contextTokens);
   }
 
   /** Whether a beat can still keep the anchored cache warm; INFO when it cannot. */
@@ -948,6 +994,10 @@ export class KeepaliveCadence {
     this.handle = undefined;
     const anchor = this.anchor;
     if (anchor === undefined) return;
+    if (this.held) {
+      LOGGER.logVerbose({ outcome: "skipped_held" }, "keep-alive beat skipped: keep-alives are held");
+      return;
+    }
     if (this.paused) {
       LOGGER.logVerbose({ outcome: "skipped_turn_in_flight" }, "keep-alive beat skipped: a turn is in flight");
       return;
@@ -959,7 +1009,7 @@ export class KeepaliveCadence {
     // A BEAT THAT MAKES NO REQUEST (skipped, refused) must not end the cadence:
     // the next falls one interval on, and the keep-alive's own answer, when it
     // comes, re-anchors over it.
-    if (this.handle === undefined && this.anchor !== undefined && !this.paused) {
+    if (this.handle === undefined && this.anchor !== undefined && !this.paused && !this.held) {
       const dueAtMs = this.nowMs() + this.intervalMs;
       this.schedule(dueAtMs, this.intervalMs, "the beat went out; the next falls one interval on unless its answer re-anchors");
     }

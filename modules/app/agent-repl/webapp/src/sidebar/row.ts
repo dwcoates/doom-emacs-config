@@ -41,6 +41,7 @@ import type {
   RosterRowPriorityBadge,
   RosterRowWhen,
   RosterRowWhenHidden,
+  RosterRowWhenHiddenCache,
   RosterRowWhenMerged,
   RosterRowWhenNoTurnRunning,
   RosterRowWhenTurnRunning,
@@ -53,6 +54,8 @@ import { SetWorkspaceHiddenResponseSchema } from "../../../proto/gen/ts/agentrep
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { formatTickedAge } from "../duration.js";
 import { liveElapsedReading, settledElapsedClock } from "../elapsed-clock.js";
+import { heatColor } from "../heat.js";
+import { cacheLapseHeat, cacheLapseText } from "./cache-lapse.js";
 import { log } from "../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import type { SidebarContext } from "./context.js";
@@ -461,6 +464,17 @@ export function drawRosterRowWhen(
       tickAge(when, sc, drawRosterRowWhenMerged(shown.value, `${path}.merged`));
       return when;
     case "hidden":
+      // THE COLUMN COUNTS DOWN TO THE CACHE'S LAPSE once the daemon knows it,
+      // and up from the hide until then.
+      if (shown.value.cache !== undefined) {
+        tickCacheLapse(
+          when,
+          sc,
+          drawRosterRowWhenHiddenCache(shown.value.cache, `${path}.hidden.cache`),
+          `${path}.hidden.cache`,
+        );
+        return when;
+      }
       tickAge(when, sc, drawRosterRowWhenHidden(shown.value, `${path}.hidden`));
       return when;
     default: {
@@ -489,6 +503,11 @@ export function drawRosterRowWhenMerged(u: RosterRowWhenMerged, path: string): n
 /** When the workspace was hidden, as an epoch instant. */
 export function drawRosterRowWhenHidden(u: RosterRowWhenHidden, path: string): number {
   return msOf(u.atMs, `${path}.at_ms`);
+}
+
+/** When a hidden workspace's prompt cache lapses, as an epoch instant. */
+export function drawRosterRowWhenHiddenCache(u: RosterRowWhenHiddenCache, path: string): number {
+  return msOf(u.lapsesAtMs, `${path}.lapses_at_ms`);
 }
 
 /**
@@ -904,6 +923,20 @@ function appendDetailLine(list: HTMLElement, label: string, value: string): void
 function tickAge(host: HTMLElement, sc: SidebarContext, atMs: number): void {
   tickPaint(sc, (nowMs) => {
     host.textContent = formatTickedAge(nowMs - atMs);
+  });
+}
+
+/**
+ * Count HOST down to a hidden workspace's cache lapse now and on every tick: its
+ * text, its place on the heat gradient, and `data-cache-cold` once it has come.
+ */
+function tickCacheLapse(host: HTMLElement, sc: SidebarContext, lapsesAtMs: number, path: string): void {
+  host.setAttribute("data-cache", "");
+  tickPaint(sc, (nowMs) => {
+    const remainingMs = lapsesAtMs - nowMs;
+    host.textContent = cacheLapseText(remainingMs);
+    host.style.color = heatColor(cacheLapseHeat(remainingMs), path);
+    host.toggleAttribute("data-cache-cold", remainingMs <= 0);
   });
 }
 

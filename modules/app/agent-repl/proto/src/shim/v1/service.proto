@@ -21,6 +21,7 @@ import "shim/v1/endpoint_read_transcripts.proto";
 import "shim/v1/endpoint_set_session_model.proto";
 import "shim/v1/endpoint_set_session_effort.proto";
 import "shim/v1/endpoint_set_session_permission_mode.proto";
+import "shim/v1/endpoint_set_keepalive.proto";
 import "shim/v1/endpoint_start_session.proto";
 import "shim/v1/endpoint_start_turn.proto";
 import "shim/v1/endpoint_stop_bash.proto";
@@ -68,6 +69,11 @@ service Shim {
   // The pre-hibernation directive: the shim compacts, then acks; the daemon
   // stands the shim down only after the ack. See endpoint_hibernate.proto.
   rpc Hibernate(HibernateRequest) returns (HibernateResponse);
+
+  // Hold the keep-alive cadence (the workspace is hidden, so its cache is left
+  // to lapse and the projected lapse is stated on the session stream), or run
+  // it again. See endpoint_set_keepalive.proto.
+  rpc SetKeepalive(SetKeepaliveRequest) returns (SetKeepaliveResponse);
 
   // END: the session and EVERYTHING live in it — the turn if one is open and
   // every live task, whichever turn spawned it. Refuses while anything is

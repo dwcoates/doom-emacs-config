@@ -69,13 +69,14 @@ func TestStartAcceptsAnUnsetSessionStartedAsAPureAttach(t *testing.T) {
 	// Arrange.
 	rec := newRecorder()
 	sinks := Sinks{
-		Feed:      &feedSink{rec: rec},
-		Footer:    &footerSink{rec: rec},
-		Topbar:    &topbarSink{rec: rec},
-		Sidebar:   &sidebarSink{rec: rec},
-		Lifecycle: &lifecycleSink{rec: rec},
-		Commands:  &commandSink{rec: rec},
-		Clock:     newManualClock(),
+		Feed:       &feedSink{rec: rec},
+		Footer:     &footerSink{rec: rec},
+		Topbar:     &topbarSink{rec: rec},
+		Sidebar:    &sidebarSink{rec: rec},
+		Lifecycle:  &lifecycleSink{rec: rec},
+		Commands:   &commandSink{rec: rec},
+		CacheLapse: &cacheLapseSink{rec: rec},
+		Clock:      newManualClock(),
 	}
 
 	// Act.
@@ -110,6 +111,11 @@ func TestStartRefusesAnIncompleteFleet(t *testing.T) {
 			wantErr: "every sink but Holds is required",
 		},
 		{
+			name:    "a missing cache lapse sink is refused",
+			mutate:  func(_ *Session, sinks *Sinks) { sinks.CacheLapse = nil },
+			wantErr: "every sink but Holds is required",
+		},
+		{
 			name:    "a missing clock is refused",
 			mutate:  func(_ *Session, sinks *Sinks) { sinks.Clock = nil },
 			wantErr: "a clock is required",
@@ -122,13 +128,14 @@ func TestStartRefusesAnIncompleteFleet(t *testing.T) {
 			rec := newRecorder()
 			session := Session{Started: sessionStarted(""), Opening: WorkspaceOpened()}
 			sinks := Sinks{
-				Feed:      &feedSink{rec: rec},
-				Footer:    &footerSink{rec: rec},
-				Topbar:    &topbarSink{rec: rec},
-				Sidebar:   &sidebarSink{rec: rec},
-				Lifecycle: &lifecycleSink{rec: rec},
-				Commands:  &commandSink{rec: rec},
-				Clock:     newManualClock(),
+				Feed:       &feedSink{rec: rec},
+				Footer:     &footerSink{rec: rec},
+				Topbar:     &topbarSink{rec: rec},
+				Sidebar:    &sidebarSink{rec: rec},
+				Lifecycle:  &lifecycleSink{rec: rec},
+				Commands:   &commandSink{rec: rec},
+				CacheLapse: &cacheLapseSink{rec: rec},
+				Clock:      newManualClock(),
 			}
 			tt.mutate(&session, &sinks)
 

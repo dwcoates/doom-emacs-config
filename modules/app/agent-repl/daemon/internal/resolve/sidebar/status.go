@@ -1,6 +1,8 @@
 package sidebar
 
 import (
+	"time"
+
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
@@ -28,15 +30,29 @@ import (
 // marker, so a daemon that restarted under open tabs draws them as they are.
 // It dominates every session state, and no footer is ever drawn for it.
 //
+// A SECOND ARM SITS ABOVE IT FOR THE SAME REASON: `cold_gate`, for a HIDDEN
+// workspace whose cache has lapsed with a gated verdict (cachelapse.Keeper,
+// 2026-10-13). Its session was stood down at the lapse, and showing it again
+// will raise this gate, so its name is struck through the moment the lapse
+// comes. No footer is drawn for a hidden workspace, and the gate it projects
+// is raised by the start that shows it again, which then makes the claim the
+// footer draws.
+//
 // WITHIN A CLAIM the roster draws the footer's step as its own arm
 // (`projectArm`), except on the idle rung, whose detail is the roster's own
 // ruling (`idleArm`): live detached work draws `idle_async` over an unread
 // turn end, and a read turn end is drawn partial. An async merge of the
 // workspace's own branch is NO ARM: it is the row's `async_merging` marker
 // beside whatever arm this resolves (`asyncMergingMarker`).
-func statusArm(s *wsState, rec wsm.Workspace, session *wsm.Session, status *frontendv1.FooterStatus, log dlog.Logger) string {
+func statusArm(s *wsState, rec wsm.Workspace, session *wsm.Session, status *frontendv1.FooterStatus, now time.Time, log dlog.Logger) string {
 	if s.opening || !s.live(session) && rec.Closed {
 		return "inactive"
+	}
+	if hiddenColdGate(rec, now) {
+		log.Debug("daemon.sidebar.status_decision", "the hidden workspace's cache lapsed with a gated verdict", dlog.Context{
+			"lapses_at": rec.CacheLapse.LapsesAt, "gated_tokens": *rec.CacheLapse.GatedTokens,
+		})
+		return "cold_gate"
 	}
 	claim, ok := ladder.FooterClaim(status)
 	if !ok {
@@ -67,6 +83,13 @@ func statusArm(s *wsState, rec wsm.Workspace, session *wsm.Session, status *fron
 	log.Debug("daemon.sidebar.status_decision", "the roster projected the footer's status",
 		dlog.Context{"claim": string(claim), "footer_arm": footerArmName(status), "arm": arm})
 	return arm
+}
+
+// hiddenColdGate reports whether a hidden workspace's cache has lapsed with a
+// gated verdict at NOW.
+func hiddenColdGate(rec wsm.Workspace, now time.Time) bool {
+	lapse := rec.CacheLapse
+	return rec.InHiddenSection() && lapse != nil && lapse.GatedTokens != nil && lapse.Lapsed(now)
 }
 
 // projectArm names the roster arm that draws the footer's status on every rung
