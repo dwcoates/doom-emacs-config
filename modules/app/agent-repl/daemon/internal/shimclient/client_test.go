@@ -2060,3 +2060,56 @@ func TestCallerAbandoned(t *testing.T) {
 		})
 	}
 }
+
+// TestARequestItsCallerAbandonedIsRecordedAtInfo pins that a unary call and a
+// stream open whose own caller's context ended first are both read by
+// callerAbandoned: recorded at INFO with the cause, never at ERROR, and the
+// error still returned. A site that hand-rolled its own reading would fail
+// the shared message.
+func TestARequestItsCallerAbandonedIsRecordedAtInfo(t *testing.T) {
+	tests := []struct {
+		name      string
+		operation string
+		what      string
+		call      func(ctx context.Context, c *client) error
+	}{
+		{
+			name: "a unary call", operation: "daemon.shimclient.set_keepalive", what: "the shim call",
+			call: func(ctx context.Context, c *client) error {
+				_, err := c.SetKeepalive(ctx, &shimv1.SetKeepaliveRequest{Cadence: &shimv1.SetKeepaliveRequest_Run{Run: &shimv1.SetKeepaliveRun{}}})
+				return err
+			},
+		},
+		{
+			name: "a stream open", operation: "daemon.shimclient.watch_bash", what: "the stream open",
+			call: func(ctx context.Context, c *client) error {
+				_, err := c.WatchBash(ctx, &conversationv1.DetachedWorkId{Value: "toolu_1"})
+				return err
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			_, uds := startFakeShim(t, shortDir(t))
+			log := dlog.NewTestLogger()
+			c := newClient(log, ids.WorkspaceID("ws-1"), uds, defaultBackoff, nil, nil)
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+
+			// Act.
+			err := tt.call(ctx, c)
+
+			// Assert.
+			if err == nil {
+				t.Fatal("the abandoned request answered no error")
+			}
+			if hasRecordAt(log, "error", tt.operation) {
+				t.Fatalf("the abandoned request was recorded at error: %+v", log.Records())
+			}
+			if !hasRecordSaying(log, "info", tt.operation, tt.what+" was abandoned: its caller's context ended before the shim answered") {
+				t.Fatalf("no info record of the abandonment: %+v", log.Records())
+			}
+		})
+	}
+}
