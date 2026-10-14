@@ -332,7 +332,7 @@ describe("a commit the replay has not reached", () => {
   });
 });
 
-describe("autoSelectedTab: the last live tab, else the last tab", () => {
+describe("autoSelectedTab: the tab whose state changed last", () => {
   it("picks the live tab even when a settled one follows nothing", () => {
     const tabs = childTabsOf([
       tabRow("t1", { kind: "queue", state: "settled", outcome: "succeeded" }),
@@ -359,6 +359,73 @@ describe("autoSelectedTab: the last live tab, else the last tab", () => {
 
   it("selects nothing at all when the sub-feed has no tabs yet", () => {
     expect(autoSelectedTab([])).toBeUndefined();
+  });
+
+  it("follows a tab that started after the live queue tab", () => {
+    const tabs = childTabsOf([
+      tabRow("q", { kind: "queue", state: "live", startedAtMs: 1_000n }),
+      tabRow("r", { kind: "rebasing", state: "live", startedAtMs: 2_000n }),
+    ], undefined);
+    expect(autoSelectedTab(tabs)?.id).toBe("r");
+  });
+
+  it("goes back to the live queue tab once a tab concludes", () => {
+    const tabs = childTabsOf([
+      tabRow("q", { kind: "queue", state: "live", startedAtMs: 1_000n }),
+      tabRow("r", { kind: "rebasing", state: "settled", outcome: "succeeded", startedAtMs: 2_000n, endedAtMs: 3_000n }),
+    ], undefined);
+    expect(autoSelectedTab(tabs)?.id).toBe("q");
+  });
+
+  it("follows a tab that started after an earlier one concluded", () => {
+    const tabs = childTabsOf([
+      tabRow("q", { kind: "queue", state: "live", startedAtMs: 1_000n }),
+      tabRow("r", { kind: "rebasing", state: "settled", outcome: "succeeded", startedAtMs: 2_000n, endedAtMs: 3_000n }),
+      tabRow("t", { kind: "tests", state: "live", startedAtMs: 4_000n }),
+    ], undefined);
+    expect(autoSelectedTab(tabs)?.id).toBe("t");
+  });
+
+  it("hands a step that settles as the next begins to the next", () => {
+    const tabs = childTabsOf([
+      tabRow("r", { kind: "rebasing", state: "settled", outcome: "succeeded", startedAtMs: 1_000n, endedAtMs: 3_000n }),
+      tabRow("t", { kind: "tests", state: "live", startedAtMs: 3_000n }),
+    ], undefined);
+    expect(autoSelectedTab(tabs)?.id).toBe("t");
+  });
+
+  it("hands a conclusion to the most recently started of several running tabs", () => {
+    const tabs = childTabsOf([
+      tabRow("t", { kind: "tests", state: "live", startedAtMs: 2_000n }),
+      tabRow("q", { kind: "queue", state: "live", startedAtMs: 1_000n }),
+      tabRow("r", { kind: "rebasing", state: "settled", outcome: "succeeded", startedAtMs: 2_500n, endedAtMs: 3_000n }),
+    ], undefined);
+    expect(autoSelectedTab(tabs)?.id).toBe("t");
+  });
+
+  it("hands a conclusion to a run waiting for its test turn", () => {
+    const tabs = childTabsOf([
+      tabRow("r1", { kind: "testsRun", state: "waitingForTurn", startedAtMs: 1_000n }),
+      tabRow("r0", { kind: "testsRun", state: "settled", outcome: "failed", startedAtMs: 500n, endedAtMs: 3_000n }),
+    ], undefined);
+    expect(autoSelectedTab(tabs)?.id).toBe("r1");
+  });
+
+  it("keeps the concluded tab shown when nothing is running", () => {
+    const tabs = childTabsOf([
+      tabRow("q", { kind: "queue", state: "settled", outcome: "succeeded", startedAtMs: 1_000n, endedAtMs: 2_000n }),
+      tabRow("c", { kind: "committing", state: "settled", outcome: "failed", startedAtMs: 2_000n, endedAtMs: 4_000n }),
+      tabRow("u", { kind: "updatingMain", state: "settled", outcome: "succeeded", startedAtMs: 2_000n, endedAtMs: 3_000n }),
+    ], undefined);
+    expect(autoSelectedTab(tabs)?.id).toBe("c");
+  });
+
+  it("shows the last tab when no tab has begun", () => {
+    const tabs = childTabsOf([
+      tabRow("c1", { kind: "rebaseCommit", state: "pending" }),
+      tabRow("c2", { kind: "rebaseCommit", state: "pending" }),
+    ], undefined);
+    expect(autoSelectedTab(tabs)?.id).toBe("c2");
   });
 });
 
