@@ -1425,6 +1425,8 @@ type fakeQueue struct {
 	db *fakeDB
 
 	submissions []promptqueue.Submission
+	// submitCtxErrs is the context error each submission was made under.
+	submitCtxErrs []error
 	// onSubmit, when set, is told each submission as it is made, outside the
 	// lock, standing for what the session does while the turn runs.
 	onSubmit    func(sub promptqueue.Submission)
@@ -1465,9 +1467,10 @@ func (q *fakeQueue) ColdGateAnswered(context.Context, ids.WorkspaceID, promptque
 // OnVendorServes is a no-op: no merge scenario stands a vendor block.
 func (q *fakeQueue) OnVendorServes(ids.WorkspaceID) {}
 
-func (q *fakeQueue) Submit(_ context.Context, sub promptqueue.Submission) (promptqueue.Disposition, error) {
+func (q *fakeQueue) Submit(ctx context.Context, sub promptqueue.Submission) (promptqueue.Disposition, error) {
 	q.mu.Lock()
 	q.submissions = append(q.submissions, sub)
+	q.submitCtxErrs = append(q.submitCtxErrs, ctx.Err())
 	hook := q.onSubmit
 	q.mu.Unlock()
 	if hook != nil {

@@ -1078,7 +1078,11 @@ func (r *run) submit(ctx context.Context, turn ids.TurnID, text string, origin c
 // submit sends one merge prompt to WS's session as TURN and waits for that
 // turn to end.
 func (o *orchestrator) submit(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, text string, origin conversationv1.PromptOrigin) (wsm.TurnClose, error) {
-	disposition, err := o.deps.Queue.Submit(ctx, promptqueue.Submission{
+	// THE HAND-OFF IS WHOLE. A merge stopped mid-step (a race to land it
+	// lost, a pause, the daemon's exit) lets its turn live on in the session
+	// and reattaches to it on resume, so the delivery it began is never cut
+	// halfway: only the wait for the turn's end is the run's to cancel.
+	disposition, err := o.deps.Queue.Submit(context.WithoutCancel(ctx), promptqueue.Submission{
 		WS: ws, Turn: turn, Said: saidText(text), Origin: origin,
 	})
 	if err != nil {
