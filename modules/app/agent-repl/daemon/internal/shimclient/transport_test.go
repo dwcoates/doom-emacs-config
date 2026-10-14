@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -218,5 +219,91 @@ func TestOwnedRequestBodyRefusesABodyShorterThanItsDeclaredLength(t *testing.T) 
 	// Assert.
 	if err == nil || !strings.Contains(err.Error(), "contradicts its own length") {
 		t.Fatalf("RoundTrip() = %v, want a refusal naming the length contradiction", err)
+	}
+}
+
+// closeConn is a net.Conn whose Close answers err.
+type closeConn struct {
+	net.Conn
+	err    error
+	closed bool
+}
+
+func (c *closeConn) Close() error {
+	c.closed = true
+	return c.err
+}
+
+// openConns is how many connections d still holds.
+func openConns(d *dialedConns) int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return len(d.open)
+}
+
+func TestDialedConnsHangUpClosesEveryOpenConnection(t *testing.T) {
+	// Arrange.
+	d := newDialedConns()
+	first, second := &closeConn{}, &closeConn{}
+	d.track(first)
+	d.track(second)
+
+	// Act.
+	closed, err := d.hangUp()
+
+	// Assert.
+	if err != nil || closed != 2 {
+		t.Fatalf("hangUp() = %d, %v, want 2, nil", closed, err)
+	}
+	if !first.closed || !second.closed {
+		t.Fatalf("closed = %v, %v, want both", first.closed, second.closed)
+	}
+	if n := openConns(d); n != 0 {
+		t.Fatalf("%d connection(s) still held after the hang-up", n)
+	}
+}
+
+func TestDialedConnsForgetsAConnectionClosedByItsUser(t *testing.T) {
+	// Arrange.
+	d := newDialedConns()
+	conn := d.track(&closeConn{})
+
+	// Act.
+	if err := conn.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	// Assert.
+	if closed, err := d.hangUp(); err != nil || closed != 0 {
+		t.Fatalf("hangUp() = %d, %v, want 0, nil", closed, err)
+	}
+}
+
+func TestDialedConnsHangUpAnswersAFailedClose(t *testing.T) {
+	// Arrange.
+	d := newDialedConns()
+	want := errors.New("close failed")
+	d.track(&closeConn{err: want})
+
+	// Act.
+	_, err := d.hangUp()
+
+	// Assert.
+	if !errors.Is(err, want) {
+		t.Fatalf("hangUp() error = %v, want %v", err, want)
+	}
+}
+
+func TestDialedConnsHangUpAcceptsAConnectionAlreadyClosed(t *testing.T) {
+	// Arrange.
+	d := newDialedConns()
+	d.track(&closeConn{err: net.ErrClosed})
+
+	// Act.
+	_, err := d.hangUp()
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("hangUp() error = %v, want nil", err)
 	}
 }

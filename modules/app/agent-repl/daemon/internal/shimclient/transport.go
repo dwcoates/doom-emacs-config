@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"golang.org/x/net/http2"
@@ -19,17 +21,79 @@ const udsBaseURL = "http://shim.uds"
 
 // newUDSClient builds the http.Client for one shim socket: h2c over the unix
 // domain socket, so one connection carries every unary call and every open
-// watch stream at once.
-func newUDSClient(udsPath string) *http.Client {
+// watch stream at once. The dialed connections are kept in conns, so the
+// client can hang up on the shim (dialedConns.hangUp).
+func newUDSClient(udsPath string, conns *dialedConns) *http.Client {
 	return &http.Client{
 		Transport: &ownedRequestBody{next: &http2.Transport{
 			AllowHTTP: true,
 			DialTLSContext: func(ctx context.Context, _, _ string, _ *tls.Config) (net.Conn, error) {
 				var d net.Dialer
-				return d.DialContext(ctx, "unix", udsPath)
+				conn, err := d.DialContext(ctx, "unix", udsPath)
+				if err != nil {
+					return nil, err
+				}
+				return conns.track(conn), nil
 			},
 		}},
 	}
+}
+
+// dialedConns is every connection a client's transport has dialed to its shim
+// and not yet closed.
+//
+// IT EXISTS SO THE DAEMON CAN HANG UP, which `http2.Transport` has no verb
+// for: CloseIdleConnections leaves a connection carrying a standing watch
+// open. A shim that answered KillSession exits on this hang-up, never on its
+// answer leaving (agent-repld/internal/hangup carries the account),
+// so the daemon hangs up once it has read the answer.
+type dialedConns struct {
+	mu   sync.Mutex
+	open map[*trackedConn]struct{}
+}
+
+func newDialedConns() *dialedConns {
+	return &dialedConns{open: map[*trackedConn]struct{}{}}
+}
+
+// track keeps conn until it is closed.
+func (d *dialedConns) track(conn net.Conn) net.Conn {
+	t := &trackedConn{Conn: conn, owner: d}
+	d.mu.Lock()
+	d.open[t] = struct{}{}
+	d.mu.Unlock()
+	return t
+}
+
+// hangUp closes every connection still open, answering how many it closed.
+// Every failed close is answered, never dropped.
+func (d *dialedConns) hangUp() (int, error) {
+	d.mu.Lock()
+	conns := make([]*trackedConn, 0, len(d.open))
+	for c := range d.open {
+		conns = append(conns, c)
+	}
+	d.mu.Unlock()
+	var errs []error
+	for _, c := range conns {
+		if err := c.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+			errs = append(errs, fmt.Errorf("shimclient: hang up a shim connection: %w", err))
+		}
+	}
+	return len(conns), errors.Join(errs...)
+}
+
+// trackedConn leaves its owner's set when it is closed, by anyone.
+type trackedConn struct {
+	net.Conn
+	owner *dialedConns
+}
+
+func (c *trackedConn) Close() error {
+	c.owner.mu.Lock()
+	delete(c.owner.open, c)
+	c.owner.mu.Unlock()
+	return c.Conn.Close()
 }
 
 // ownedRequestBody takes ownership of a request body whose length is already
