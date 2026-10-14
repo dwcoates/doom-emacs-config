@@ -569,8 +569,11 @@ hand any more:
   middle of ANY feed item the reader expands on the feed viewport's vertical
   middle at once (`expandCenterDelta`: midpoint onto midpoint whatever the
   item's height, clamped at the feed's edges), through the same
-  `TailFollow.centerReveal`. The item is the expanded element's nearest feed
-  row. A capped section the click owner toggles centers through its callback;
+  `TailFollow.centerReveal`, while no follow stands. A STANDING FOLLOW SURVIVES
+  AN EXPANSION (owner ruling, 2026-10-14): the feed stays parked at its tail
+  under the follow's own cause instead of centering, and the follow ends only
+  when the reader scrolls away, as it otherwise does. The item is the expanded
+  element's nearest feed row. A capped section the click owner toggles centers through its callback;
   an item owning its own fold (a sub-feed bubble)
   dispatches `ITEM_EXPANDED_EVENT` (`announceItemExpanded`, src/expand.ts) on
   the reader's toggle only — a reveal opening bubbles never announces. A

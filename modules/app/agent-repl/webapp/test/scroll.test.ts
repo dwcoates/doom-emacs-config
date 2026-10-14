@@ -921,13 +921,56 @@ describe("TailFollow.itemExpanded", () => {
     expect(box.scrollTop).toBe(300);
   });
 
-  it("ends a standing follow", () => {
+  it("keeps a standing follow", () => {
     // Arrange
     const f = following();
     // Act
     f.tail.itemExpanded({ boxTop: 0, boxHeight: 300, nodeTop: 100, nodeHeight: 50 });
     // Assert
+    expect(f.tail.isFollowing()).toBe(true);
+  });
+
+  it("keeps a standing follow at the tail instead of centering the item", () => {
+    // Arrange: following at the tail; the expanded item grew the content to 1400.
+    const f = following();
+    f.box.scrollHeight = 1400;
+    // Act: centering would put the item's middle (150) on the viewport's (150).
+    f.tail.itemExpanded({ boxTop: 0, boxHeight: 300, nodeTop: 100, nodeHeight: 100 });
+    // Assert: a plain box takes the park's write unclamped.
+    expect(f.box.scrollTop).toBe(1400);
+  });
+
+  it("goes on following content that arrives after the expansion", () => {
+    // Arrange
+    const f = following();
+    f.tail.itemExpanded({ boxTop: 0, boxHeight: 300, nodeTop: 100, nodeHeight: 50 });
+    f.box.scrollHeight = 1500;
+    // Act
+    f.tail.follow();
+    // Assert: a plain box takes the park's write unclamped.
+    expect(f.box.scrollTop).toBe(1500);
+  });
+
+  it("lets the reader's own scroll up end the follow it kept", () => {
+    // Arrange
+    const f = following();
+    f.tail.itemExpanded({ boxTop: 0, boxHeight: 300, nodeTop: 100, nodeHeight: 50 });
+    // Act
+    f.box.scrollTop = 650;
+    f.gesture();
+    // Assert
     expect(f.tail.isFollowing()).toBe(false);
+  });
+
+  it("records the kept follow at DEBUG under its standing cause", async () => {
+    // Arrange
+    const f = following();
+    const capture = captureLogRecords("debug");
+    // Act
+    f.tail.itemExpanded({ boxTop: 0, boxHeight: 300, nodeTop: 100, nodeHeight: 50 });
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.expand-kept-follow");
+    expect(record.context).toMatchObject({ cause: "promptSent", at: 1000 });
   });
 
   it("puts a TALLER-than-viewport item's middle on the viewport's middle", () => {
