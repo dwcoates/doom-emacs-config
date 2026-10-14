@@ -12,17 +12,13 @@
  * stylesheet, screenshots it, and finds the sentinel's leftmost and rightmost
  * pixels against the box's own edges.
  */
-import path from "node:path";
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
-import { webkit, type Browser, type Page } from "playwright-core";
+import type { Browser, Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ELLIPSIS_CAP_LINES } from "../../src/bubble/draw.js";
 import { BUBBLE_MORE_ELLIPSIS } from "../../src/feed/bubble-more.js";
 import { TITLE_FOLD_CLASS } from "../../src/feed/title-fold.js";
 import { screenshotPixels } from "./pixels";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
+import { openFeedPage } from "./feed-page";
 
 /**
  * The text in solid red over solid blue boxes with no shadow or motion, so a
@@ -105,14 +101,8 @@ describe("the collapsed one-line clamp's ellipsis in WebKit", () => {
   let bubble: Gaps;
 
   beforeAll(async () => {
-    const css = await readFile(path.join(here, "../../src/styles.css"), "utf8");
-    browser = await webkit.launch();
-    const page = await browser.newPage({ viewport: { width: 800, height: 400 }, deviceScaleFactor: 1 });
-    await page.setContent(`<!doctype html><html><head></head><body>
-      <div id="main-col"><div id="feed-scroll"><main id="feed" data-feed="root"></main></div></div>
-      </body></html>`);
-    await page.addStyleTag({ content: css });
-    await page.addStyleTag({ content: SENTINEL });
+    let page: Page;
+    ({ browser, page } = await openFeedPage({ width: 800, height: 400, deviceScaleFactor: 1, styles: [SENTINEL] }));
     card = await gaps(page, CARD, `.${TITLE_FOLD_CLASS}`);
     bubble = await gaps(page, BUBBLE, ".bubble-body");
   });
