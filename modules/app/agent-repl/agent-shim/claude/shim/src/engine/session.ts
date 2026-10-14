@@ -113,6 +113,7 @@ import { normalizeModel, SYNTHETIC_MODEL } from "../model.js";
 import { TRUST_KEY, VENDOR_CONFIG_FILE, trustRoot } from "../trust.js";
 import { recordTimestampMs } from "../convert/place.js";
 import { compactionIdField, compactionTracker, fastModeUpdate } from "../convert/session-updates.js";
+import { SerialProbe } from "./serial-probe.js";
 import { backupTranscript } from "./backup.js";
 import {
   appendCompactionLines,
@@ -1644,36 +1645,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   }
 
   /**
-   * THE CONTEXT READINGS ARE SERIAL. Each probe starts only after the one before
-   * it has pushed, so the readings reach the daemon in the order they were
-   * asked for: a turn-end probe can never be overtaken by a slower mid-turn one
-   * and leave a stale figure standing on the topbar's chip and the footer's
-   * cell.
+   * THE CONTEXT READINGS ARE SERIAL (engine/serial-probe.ts), so a turn-end
+   * probe can never be overtaken by a slower mid-turn one and leave a stale
+   * figure standing on the topbar's chip and the footer's cell.
    */
-  let contextUsageChain: Promise<void> = Promise.resolve();
-  /** Whether a mid-turn refresh is queued and not yet started. */
-  let contextRefreshQueued = false;
+  const contextProbe = new SerialProbe(() => probeContextUsage());
 
   function pushContextUsage(): Promise<void> {
-    return enqueueContextProbe(() => undefined);
-  }
-
-  /**
-   * Queue one probe behind every probe already asked for. The caller holds the
-   * returned promise and so hears the probe's own failure; the chain keeps only
-   * its SETTLEMENT, so one failed probe cannot stop every later one from
-   * running.
-   */
-  function enqueueContextProbe(onStart: () => void): Promise<void> {
-    const next = contextUsageChain.then(async () => {
-      onStart();
-      await probeContextUsage();
-    });
-    contextUsageChain = next.then(
-      () => undefined,
-      () => undefined,
-    );
-    return next;
+    return contextProbe.run();
   }
 
   /**
@@ -1695,16 +1674,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // response moves the window as much as a StartTurn's does.
     const turn = turnFor(false, running);
     if (turn === undefined) return;
-    if (contextRefreshQueued) {
+    if (contextProbe.refreshPending) {
       LOGGER.logVerbose({}, "a context refresh is already queued; this response rides it");
       return;
     }
-    contextRefreshQueued = true;
     const turnId = turn.value;
     LOGGER.debug({ turn_id: turnId }, "a main-agent API response landed; refreshing the context reading");
-    void enqueueContextProbe(() => {
-      contextRefreshQueued = false;
-    }).catch((err: unknown) => {
+    void contextProbe.refresh().catch((err: unknown) => {
       LOGGER.error(
         { turn_id: turnId, cause: err instanceof Error ? err.message : String(err) },
         "the mid-turn context refresh failed before it could push a reading",
@@ -1742,8 +1718,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * rather than an absent field, because "we did not ask" and "the service is
    * down" are different facts to a consumer deciding whether to warn a user.
    */
-  function accountUsageUpdate(usage: AccountUsageLike): conversationv1.SessionUpdate {
-    const observedAtMs = BigInt(deps.nowMs());
+  function accountUsageUpdate(usage: AccountUsageLike, observedAtMs: bigint): conversationv1.SessionUpdate {
     const subscriptionType = subscriptionTypeOf(usage.subscription_type);
     const unavailable = (
       reason: conversationv1.SessionAccountUsageUnavailable["reason"],
@@ -1983,12 +1958,56 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     });
   }
 
-  async function pushAccountUsage(): Promise<void> {
+  /**
+   * THE ACCOUNT'S USAGE SAMPLES ARE SERIAL (engine/serial-probe.ts). The daemon
+   * draws only the newest sample by its `observed_at_ms`, across every session
+   * on the account; serial samples make one shim's stamps rise in the order its
+   * answers land, so its own samples never race each other there.
+   */
+  const accountUsageProbe = new SerialProbe(() => sampleAccountUsage());
+
+  /** Sample the account's usage behind every sample already asked for. */
+  function pushAccountUsage(): Promise<void> {
+    return accountUsageProbe.run();
+  }
+
+  /**
+   * Sample the account's usage again, folded into a sample already queued.
+   * Never rejects: `sampleAccountUsage` states its own failure as a sample.
+   */
+  function refreshAccountUsage(trigger: string): void {
+    if (accountUsageProbe.refreshPending) {
+      LOGGER.logVerbose({ trigger }, "an account usage sample is already queued; this trigger rides it");
+      return;
+    }
+    LOGGER.debug({ trigger }, "refreshing the account's usage sample");
+    void accountUsageProbe.refresh();
+  }
+
+  /**
+   * A LIVE RATE-LIMIT EVENT MEANS THE ACCOUNT'S USAGE MOVED, so it asks for a
+   * fresh sample. The event's own utilization is never the drawn figure: it
+   * carries no instant, so it cannot be ordered against the samples every
+   * session on the account takes; the daemon takes only its verdict.
+   */
+  function noteRateLimitEvent(message: SdkMessage): void {
+    if (message.type !== "rate_limit_event") return;
+    refreshAccountUsage("rate_limit_event");
+  }
+
+  /**
+   * One usage sample. STAMPED WHEN IT IS ASKED FOR, not when it answers: the
+   * vendor reads the usage at some instant between the two, and a stamp taken
+   * on the answer would let a slow sample asked earlier outrank a fast one
+   * asked later, on this shim or another on the same account.
+   */
+  async function sampleAccountUsage(): Promise<void> {
     const active = query;
     if (active === undefined) return;
+    const observedAtMs = BigInt(deps.nowMs());
     try {
       pushes.push(
-        accountUsageUpdate(await active.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET()),
+        accountUsageUpdate(await active.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET(), observedAtMs),
       );
     } catch (err) {
       pushes.push(
@@ -1996,7 +2015,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           update: {
             case: "accountUsage",
             value: create(conversationv1.SessionAccountUsageSchema, {
-              observedAtMs: BigInt(deps.nowMs()),
+              observedAtMs,
               outcome: {
                 case: "unavailable",
                 value: create(conversationv1.SessionAccountUsageUnavailableSchema, {
@@ -2014,6 +2033,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       );
     }
   }
+
 
   /** The five declared healths, each its own arm. */
   function mcpUpdate(status: McpServerStatusLike): conversationv1.SessionUpdate {
@@ -2132,6 +2152,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     notePreInitMessage(message);
     noteIdentityFacts(message, attribution);
     noteMainApiResponse(message, attribution, verdict.turn);
+    noteRateLimitEvent(message);
     noteCacheRequest(message);
     settleStartOnBlockingHook(message);
     settleStartOnErrorResult(message);
@@ -4774,7 +4795,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     const cacheAnchor = startingCacheAnchor(facts, clearedTo, coldCompacted);
     cadence.start(cacheAnchor.anchor, cacheAnchor.reason);
     accountUsageHandle = (deps.scheduler ?? REAL_SCHEDULER).setInterval(
-      () => void pushAccountUsage(),
+      () => refreshAccountUsage("interval"),
       ACCOUNT_USAGE_INTERVAL_MS,
     );
     pushModel();
