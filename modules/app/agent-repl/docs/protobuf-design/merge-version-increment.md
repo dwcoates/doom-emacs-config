@@ -73,7 +73,7 @@ and the queue creates the tag in the same step that lands the merge.
   two facts in JSON; the ingress maps it onto the same `merge.Request` the rpc
   builds, so both paths share one validation site in `merge.Enqueue`.
 - **Consequences:**
-  - The increment is persisted with the queue row (`merge_queue`, layout 46)
+  - The increment is persisted with the queue row (`merge_queue`, layout 48)
     and carried across the async hand-off to the merge workspace's own row,
     because the version is computed when the merge LANDS.
   - The tag is created right after the fast-forward, inside the committing
