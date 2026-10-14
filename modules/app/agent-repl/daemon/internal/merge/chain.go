@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"agent-repld/internal/cpugov"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/footer"
@@ -17,8 +16,10 @@ import (
 // 2026-10-11).
 //
 // THE WINDOW. The chain is the head and the merges right behind it, at most
-// cpugov.QueueWindow in all; an entry beyond the window waits untouched until
-// a merge ahead of it lands or drops out and it moves in.
+// the window in all, which the host's power source decides (power.go): the
+// head and the merge behind it on AC power, the head alone on battery. An
+// entry beyond the window waits untouched until a merge ahead of it lands or
+// drops out, or the window grows, and it moves in.
 //
 // EVERY MEMBER STANDS ON THE TARGET (race.go). The head and the merges behind
 // it each rebase onto the target's tip, their conflicts resolved by their OWN
@@ -731,10 +732,10 @@ func gateArgv(argv []string, speculative bool) []string {
 }
 
 // queueWindow is the window in force: the test override when one is set, else
-// cpugov.QueueWindow.
+// the governor's, which the host's power source decides (power.go).
 func (o *orchestrator) queueWindow() int {
 	if o.window > 0 {
 		return o.window
 	}
-	return cpugov.QueueWindow
+	return o.deps.Governor.Window()
 }
