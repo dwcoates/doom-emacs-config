@@ -156,13 +156,23 @@ function isCliSynthesized(record: TranscriptLine): boolean {
  */
 export interface CacheRequest {
   readonly writtenTtlMs: number | undefined;
+  /**
+   * The context the request sent: `cache_read_input_tokens +
+   * cache_creation_input_tokens + input_tokens`, what a cold read of the
+   * conversation after it re-reads.
+   */
+  readonly contextTokens: number;
 }
 
 export function cacheRequestOf(record: TranscriptLine): CacheRequest | undefined {
   if (isCliSynthesized(record)) return undefined;
   const usage = record.message?.usage;
   if (usage === undefined) return undefined;
-  return { writtenTtlMs: writtenCacheTtlMs(usage) };
+  return {
+    writtenTtlMs: writtenCacheTtlMs(usage),
+    contextTokens:
+      (usage.cache_read_input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0) + (usage.input_tokens ?? 0),
+  };
 }
 
 function writtenCacheTtlMs(usage: TranscriptUsage): number | undefined {
@@ -242,12 +252,8 @@ export function readTranscriptFacts(file: string): TranscriptFacts | undefined {
     if (record.type !== "assistant") continue;
     const request = cacheRequestOf(record);
     if (request === undefined) continue;
-    const usage = record.message?.usage ?? {};
     sawUsage = true;
-    contextTokens =
-      (usage.cache_read_input_tokens ?? 0) +
-      (usage.cache_creation_input_tokens ?? 0) +
-      (usage.input_tokens ?? 0);
+    contextTokens = request.contextTokens;
     // A request that wrote nothing keeps the tier the last write bought.
     cacheTtlMs = request.writtenTtlMs ?? cacheTtlMs;
     if (typeof record.message?.model === "string") lastModel = record.message.model;
@@ -306,6 +312,11 @@ export type ColdReason = "lapsed" | "model_switch";
  */
 export const COLD_GATE_FLOOR_TOKENS = 70_000;
 
+/** Whether a cold read of this many context tokens is at or above the floor, so the gate asks. */
+export function coldGateAsks(contextTokens: number): boolean {
+  return contextTokens >= COLD_GATE_FLOOR_TOKENS;
+}
+
 /**
  * Whether a cold read this small falls under the floor, recorded once when it
  * does.
@@ -319,7 +330,7 @@ export function underColdGateFloor(
   nowMs: number,
   reason: ColdReason,
 ): boolean {
-  if (facts.contextTokens >= COLD_GATE_FLOOR_TOKENS) return false;
+  if (coldGateAsks(facts.contextTokens)) return false;
   LOGGER.info(
     {
       context_tokens: facts.contextTokens,
@@ -388,5 +399,23 @@ export function sessionCold(
             }),
           }
         : { case: "modelSwitch", value: create(conversationv1.SessionColdModelSwitchSchema, {}) },
+  });
+}
+
+/**
+ * The projected lapse a HELD keep-alive cadence states (engine/keepalive.ts):
+ * when the cache lapses, and the cold gate's verdict on a resume after it. The
+ * verdict is the floor's, the same rule {@link judgeCold} applies to a lapse,
+ * so a hidden workspace is struck through exactly when showing it will ask.
+ */
+export function sessionCacheLapse(lapsesAtMs: number, contextTokens: number): conversationv1.SessionCacheLapse {
+  return create(conversationv1.SessionCacheLapseSchema, {
+    lapsesAtMs: BigInt(lapsesAtMs),
+    afterLapse: coldGateAsks(contextTokens)
+      ? {
+          case: "gated",
+          value: create(conversationv1.SessionCacheLapseGatedSchema, { contextTokens: BigInt(contextTokens) }),
+        }
+      : { case: "ungated", value: create(conversationv1.SessionCacheLapseUngatedSchema, {}) },
   });
 }
