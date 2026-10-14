@@ -203,6 +203,18 @@ run_verb() {
   exit $?
 }
 
+# run_scoped runs agent-repld merge-queue with ARGS, scoped to the
+# repository whose main checkout is DIR when DIR is given, else to every
+# repository, and exits with its mapped status.
+run_scoped() {
+  local dir="$1"
+  shift
+  if [ -n "$dir" ]; then
+    run_verb "$@" -repository-dir "$dir"
+  fi
+  run_verb "$@"
+}
+
 case "${1:-}" in
   --one-shot)
     shift
@@ -279,10 +291,7 @@ case "${1:-}" in
     no_front "$1"
     control=-pause
     [ "$1" = --pause-queue ] || control=-resume
-    if [ -n "${2:-}" ]; then
-      run_verb "$control" -repository-dir "$2"
-    fi
-    run_verb "$control"
+    run_scoped "${2:-}" "$control"
     ;;
   --subscribe)
     no_front "$1"
@@ -293,18 +302,12 @@ case "${1:-}" in
       *) die "--subscribe takes every-change, advances or depletes, not $2" ;;
     esac
     [ -z "${4:-}" ] || die "--subscribe <detail> takes at most a repository directory after it, not $4"
-    if [ -n "${3:-}" ]; then
-      run_verb -subscribe "$detail" -repository-dir "$3"
-    fi
-    run_verb -subscribe "$detail"
+    run_scoped "${3:-}" -subscribe "$detail"
     ;;
   --unsubscribe)
     no_front "$1"
     [ -z "${3:-}" ] || die "--unsubscribe takes at most a repository directory, not $3"
-    if [ -n "${2:-}" ]; then
-      run_verb -unsubscribe -repository-dir "$2"
-    fi
-    run_verb -unsubscribe
+    run_scoped "${2:-}" -unsubscribe
     ;;
   --hold-rollouts | --release-rollouts | --disable-racing | --enable-racing)
     no_front "$1"

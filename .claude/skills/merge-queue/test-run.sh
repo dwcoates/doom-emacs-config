@@ -323,6 +323,16 @@ test_subscription_verbs_refuse_malformed_forms() {
   expect_refused "--unsubscribe refuses --patch" --unsubscribe --patch "Fix the footer"
 }
 
+test_every_scoped_verb_dispatches_through_run_scoped() {
+  local direct
+  direct="$(grep -c -- '-repository-dir "\$' "$RUN" || true)"
+  if [ "$direct" -eq 1 ]; then
+    pass "only run_scoped passes -repository-dir"
+  else
+    fail "only run_scoped passes -repository-dir" "found $direct sites"
+  fi
+}
+
 test_hold_rollouts_holds_the_rollouts() {
   mkfixture
   invoke --hold-rollouts
@@ -575,6 +585,7 @@ test_subscribe_names_one_repository
 test_unsubscribe_ends_every_repositorys_subscription
 test_unsubscribe_names_one_repository
 test_subscription_verbs_refuse_malformed_forms
+test_every_scoped_verb_dispatches_through_run_scoped
 test_hold_rollouts_holds_the_rollouts
 test_release_rollouts_releases_the_rollouts
 test_hold_rollouts_refuses_an_argument
