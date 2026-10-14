@@ -95,3 +95,9 @@ export const MERGED_FOLD_KEY = "merged";
  * `MERGED_FOLD_KEY`: the roster carries exactly one such section.
  */
 export const HIDDEN_FOLD_KEY = "hidden";
+
+/**
+ * The open-workspaces section's fold key. FIXED for the same reason as
+ * `MERGED_FOLD_KEY`: the roster carries exactly one such section.
+ */
+export const OPEN_FOLD_KEY = "open";

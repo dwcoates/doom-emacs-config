@@ -16,14 +16,12 @@
  * navigation is the host's to perform; the rail only says which workspace the
  * user picked, and the roster's new `current` arrives on the stream.
  *
- * WHAT TICKS AND WHAT DOES NOT. Every when-column arm ships an INSTANT
- * (`turn_ended` = the last turn's end, `created` = the fallback before any
- * turn has ended, and `merged`), so the age beside a row is animated here
- * off the shared ticker — never a `setInterval` of this module's own. An unset
- * `shown` oneof means there is nothing to show: the column is empty, not
- * "0ms ago". The column counts from the last turn END, never from last
- * VIEWING or a turn's start, so it does not jump when the user selects the
- * workspace or when the next turn begins.
+ * WHAT TICKS AND WHAT DOES NOT. The when-column's arms that ship an INSTANT
+ * (`merged`, `hidden`, and `turn_running`'s start) are animated here off the
+ * shared ticker — never a `setInterval` of this module's own. A running turn
+ * reads exactly what the footer strip's turn clock reads
+ * (`liveElapsedReading`, from the same start instant), and `no_turn_running`
+ * reads "0s" and never ticks (owner request, 2026-10-13).
  */
 import { createControl } from "../control.js";
 import type {
@@ -42,10 +40,10 @@ import type {
   RosterRowAsyncMerging,
   RosterRowPriorityBadge,
   RosterRowWhen,
-  RosterRowWhenCreated,
   RosterRowWhenHidden,
   RosterRowWhenMerged,
-  RosterRowWhenTurnEnded,
+  RosterRowWhenNoTurnRunning,
+  RosterRowWhenTurnRunning,
   RosterRowReviving,
   RosterRowViewed,
   RosterRowWorkspace,
@@ -54,6 +52,7 @@ import { SelectWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v
 import { SetWorkspaceHiddenResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { formatTickedAge } from "../duration.js";
+import { liveElapsedReading, settledElapsedClock } from "../elapsed-clock.js";
 import { log } from "../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import type { SidebarContext } from "./context.js";
@@ -232,12 +231,8 @@ export function drawRosterRow(
   // 2026-10-13): a recently-merged row and a hidden row show no dot or glyph.
   // Both bands' names are in the repository names' grey; a hidden row's is
   // struck through only at a cold gate.
-  // With no mark, the NAME is the detail panel's pointer trigger (owner
-  // request, 2026-10-11).
-  let statusMark: HTMLElement | null = null;
   if (place === "grouping") {
-    statusMark = drawStatusMark(status.case, `${path}.status`, markers);
-    line.appendChild(statusMark);
+    line.appendChild(drawStatusMark(status.case, `${path}.status`, markers));
   }
 
   const label = document.createElement("span");
@@ -301,7 +296,7 @@ export function drawRosterRow(
   );
   // AFTER the panel is in the tree: the hover wiring listens on the panel too,
   // so the pointer can travel from the row into it without it closing.
-  installHoverPanel(ws, line, statusMark ?? label, sc, workspace.id);
+  installHoverPanel(ws, line, label, sc, workspace.id);
 
   const visibleChildren = expandVisibleRows(u.children, `${path}.children`);
   if (visibleChildren.length > 0) {
@@ -432,35 +427,36 @@ export function drawRosterRowPriorityBadge(
 }
 
 /**
- * The when-column. ONE value, chosen by the daemon.
+ * The when-column. ONE value, chosen by the daemon; never unset.
  *
- * An UNSET oneof is legitimate here (never selected, not merged) and draws an
- * empty column — the one place in this file where an unset oneof is not a
- * malformed view, because the message says so.
+ * A running turn ticks its elapsed time with the footer turn clock's own
+ * reading, from the start instant the daemon read off that clock, so the row
+ * and the strip read the same number; with no turn running the column reads
+ * the zero reading, "0s".
  */
 export function drawRosterRowWhen(
   u: RosterRowWhen,
   sc: SidebarContext,
   path: string,
 ): HTMLElement {
+  const shown = requireCase(u.shown, `${path}.shown`);
+  if (shown.case === "noTurnRunning") {
+    drawRosterRowWhenNoTurnRunning(shown.value, `${path}.no_turn_running`);
+    const idle = settledElapsedClock("when", 0);
+    idle.setAttribute("data-when", shown.case);
+    return idle;
+  }
   const when = document.createElement("span");
   when.className = "when";
-  if (u.shown.case === undefined) {
-    log.debug("drawing an empty when-column", {
-      operation: "sidebar.row.when-empty",
-      context: { path },
-    });
-    return when;
-  }
-  const shown = requireCase(u.shown, `${path}.shown`);
   when.setAttribute("data-when", shown.case);
   switch (shown.case) {
-    case "turnEnded":
-      tickAge(when, sc, drawRosterRowWhenTurnEnded(shown.value, `${path}.turn_ended`));
+    case "turnRunning": {
+      const startedMs = drawRosterRowWhenTurnRunning(shown.value, `${path}.turn_running`);
+      tickPaint(sc, (nowMs) => {
+        when.textContent = liveElapsedReading(startedMs, nowMs);
+      });
       return when;
-    case "created":
-      tickAge(when, sc, drawRosterRowWhenCreated(shown.value, `${path}.created`));
-      return when;
+    }
     case "merged":
       tickAge(when, sc, drawRosterRowWhenMerged(shown.value, `${path}.merged`));
       return when;
@@ -474,14 +470,15 @@ export function drawRosterRowWhen(
   }
 }
 
-/** When the workspace's last turn ended, as an epoch instant. */
-export function drawRosterRowWhenTurnEnded(u: RosterRowWhenTurnEnded, path: string): number {
-  return msOf(u.atMs, `${path}.at_ms`);
+/** When the running turn started, as an epoch instant: the footer clock's own start. */
+export function drawRosterRowWhenTurnRunning(u: RosterRowWhenTurnRunning, path: string): number {
+  return msOf(u.startedAtMs, `${path}.started_at_ms`);
 }
 
-/** When the workspace was created — the fallback before any turn ended — as an instant. */
-export function drawRosterRowWhenCreated(u: RosterRowWhenCreated, path: string): number {
-  return msOf(u.atMs, `${path}.at_ms`);
+/** No turn is running. EMPTY: the arm is the fact. */
+export function drawRosterRowWhenNoTurnRunning(u: RosterRowWhenNoTurnRunning, path: string): void {
+  void u;
+  void path;
 }
 
 /** When the workspace's merge settled, as an epoch instant. */
@@ -623,16 +620,18 @@ export function drawStatusMark(arm: RosterStatusCase, path: string, markers: Row
  * page that opened it, never the daemon's view state (owner ruling,
  * 2026-10-06).
  *
- * THE POINTER'S TRIGGER IS ONE ELEMENT OF THE ROW: the status dot (owner
- * request, 2026-10-02), or, on a recently-merged row, which draws no dot, the
- * name (owner request, 2026-10-11). Hovering the rest of the row opens
- * nothing, and the pointer leaving the trigger for the row closes the panel as
- * it does for anywhere else.
+ * THE POINTER'S TRIGGER IS THE ROW'S NAME, in every section alike: the open
+ * workspaces section, Hidden and Recently Merged (owner request, 2026-10-13,
+ * which retired the status dot as the open section's trigger). Hovering the
+ * rest of the row, the dot included, opens nothing, and the pointer leaving
+ * the name for the row closes the panel as it does for anywhere else. The
+ * intent delay is three seconds (owner request, 2026-10-13), so the panel
+ * opens only on a pointer that has settled on the name.
  *
  * The keyboard gets the same panel through `focusin`/`focusout`, without the
  * intent delay — a focus move is deliberate in a way a pointer's path is not.
  */
-export const HOVER_OPEN_DELAY_MS = 150;
+export const HOVER_OPEN_DELAY_MS = 3000;
 export const HOVER_CLOSE_GRACE_MS = 120;
 
 function installHoverPanel(

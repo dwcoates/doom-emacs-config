@@ -895,7 +895,7 @@ opens are OpenTabs streams."
 (defconst agent-repl-test-wire-host--row-json
   (concat "{\"workspace\":{\"workspace\":{\"id\":\"w1\",\"dir\":\"/t/w1\"}},"
           "\"name\":{\"text\":\"one\"},"
-          "\"current\":{},\"when\":{},\"detail\":{},\"closed\":{},"
+          "\"current\":{},\"when\":{\"noTurnRunning\":{}},\"detail\":{},\"closed\":{},"
           "\"availability\":{\"available\":{}},\"ready\":{}}")
   "A minimal valid RosterRow for workspace w1.")
 

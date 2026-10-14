@@ -20,12 +20,15 @@ import { SetWorkspaceHiddenResponseSchema } from "../../../proto/gen/ts/agentrep
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { repoFoldKey } from "../../src/sidebar/context.js";
 import {
+  drawFoldHeader,
   drawHeadedSection,
   drawRosterRepoDivergence,
   drawRosterSectionFold,
   drawSectionLabel,
   drawWorkspaceRoster,
   MERGED_TODAY_COUNT_CLASS,
+  OPEN_COUNT_CLASS,
+  OPEN_SECTION_CLASS,
   SECTION_LABEL_CLASS,
 } from "../../src/sidebar/roster.js";
 import { cascadedValue, inRail } from "../stylesheet.js";
@@ -38,6 +41,7 @@ import {
   mergedGroup,
   mergedSection,
   NOW,
+  openSection,
   repoSection,
   roster,
   row,
@@ -148,7 +152,7 @@ describe("the sections", () => {
       roster({ repos: [repoSection({ id: "repo-1", label: "doom" })] }),
       sidebarContext(),
     );
-    expect(pane(drawn, "repository").querySelector(".sb-label")?.textContent).toBe("doom");
+    expect(pane(drawn, "repository").querySelector(".repo-section .sb-label")?.textContent).toBe("doom");
   });
 
   // A JUST-REGISTERED REPOSITORY HAS NO ROWS. RegisterRepository (SPC j .)
@@ -161,7 +165,7 @@ describe("the sections", () => {
       sidebarContext(),
     );
     const section = pane(drawn, "repository").querySelector(
-      ".repo:not(.merged-section)",
+      ".repo-section",
     ) as HTMLElement;
     expect(section).not.toBeNull();
     expect(section.hidden).toBe(false);
@@ -172,7 +176,7 @@ describe("the sections", () => {
       roster({ repos: [repoSection({ id: "repo-new", label: "just-registered", rows: [] })] }),
       sidebarContext(),
     );
-    expect(pane(drawn, "repository").querySelector(".sb-label")?.textContent).toBe(
+    expect(pane(drawn, "repository").querySelector(".repo-section .sb-label")?.textContent).toBe(
       "just-registered",
     );
   });
@@ -190,7 +194,7 @@ describe("the sections", () => {
       roster({ repos: [repoSection({ id: "repo-1" })] }),
       sidebarContext(),
     );
-    expect(pane(drawn, "repository").querySelector("[data-section-fold]")).not.toBeNull();
+    expect(pane(drawn, "repository").querySelector(".repo-section [data-section-fold]")).not.toBeNull();
   });
 
   it.each([
@@ -201,7 +205,7 @@ describe("the sections", () => {
       roster({ repos: [repoSection({ id: "repo-1", collapsed })] }),
       sidebarContext(),
     );
-    expect(pane(drawn, "repository").querySelector(".repo")?.classList.contains("folded")).toBe(folded);
+    expect(pane(drawn, "repository").querySelector(".open-section .repo")?.classList.contains("folded")).toBe(folded);
   });
 
   it.each([
@@ -217,7 +221,7 @@ describe("the sections", () => {
 
   it("marks a repository section so its header takes its fold's grey", () => {
     const drawn = drawWorkspaceRoster(roster({ repos: [repoSection({ id: "repo-1" })] }), sidebarContext());
-    expect(pane(drawn, "repository").querySelector(".repo")?.classList.contains("repo-section")).toBe(true);
+    expect(pane(drawn, "repository").querySelector(".open-section .repo")?.classList.contains("repo-section")).toBe(true);
   });
 
   it.each([
@@ -288,6 +292,12 @@ const FOLDING_SECTIONS = [
     kind: "hidden",
     roster: (collapsed: boolean) => roster({ hidden: hiddenSection([HIDDEN_ROW], 1, collapsed) }),
     selector: ".hidden-section",
+    id: "",
+  },
+  {
+    kind: "open",
+    roster: (collapsed: boolean) => roster({ open: openSection(collapsed), repos: [repoSection({ id: "repo-1" })] }),
+    selector: ".open-section",
     id: "",
   },
 ] as const;
@@ -1024,7 +1034,7 @@ describe("the create controls", () => {
       roster({ repos: [repoSection({ id: "repo-1" })] }),
       sidebarContext(),
     );
-    expect(pane(drawn, "repository").querySelector(".repo-head .sb-add")).not.toBeNull();
+    expect(pane(drawn, "repository").querySelector(".repo-section > .repo-head .sb-add")).not.toBeNull();
   });
 
   it("opens the create form under that section's header", async () => {
@@ -1032,9 +1042,9 @@ describe("the create controls", () => {
       roster({ repos: [repoSection({ id: "repo-1" })] }),
       sidebarContext(),
     );
-    await click(pane(drawn, "repository").querySelector(".repo-head .sb-add") as Element);
+    await click(pane(drawn, "repository").querySelector(".repo-section > .repo-head .sb-add") as Element);
     expect(
-      pane(drawn, "repository").querySelector(".repo-head")?.nextElementSibling?.hasAttribute(
+      pane(drawn, "repository").querySelector(".repo-section > .repo-head")?.nextElementSibling?.hasAttribute(
         "data-create-form",
       ),
     ).toBe(true);
@@ -1045,7 +1055,7 @@ describe("the create controls", () => {
       roster({ repos: [repoSection({ id: "repo-1" })] }),
       sidebarContext(),
     );
-    const section = pane(drawn, "repository").querySelector(".repo") as HTMLElement;
+    const section = pane(drawn, "repository").querySelector(".repo-section") as HTMLElement;
     await click(section.querySelector(".sb-add") as Element);
     expect(section.classList.contains("folded")).toBe(false);
   });
@@ -1495,7 +1505,7 @@ describe("the open Recently Merged band's today count", () => {
   });
 
   it("refuses a merged row whose when-column is on another arm than merged", () => {
-    const bad = row({ id: "ws-1", closed: true, when: { case: "turnEnded", value: { atMs: BigInt(NOW) } } });
+    const bad = row({ id: "ws-1", closed: true, when: { case: "turnRunning", value: { startedAtMs: BigInt(NOW) } } });
     expect(() => drawBand([bad])).toThrow(MalformedView);
   });
 
@@ -1728,5 +1738,168 @@ describe("the repository label's divergence hover", () => {
     const wire = roster({ repos: [] });
     wire.repository = { $typeName: "frontend.v1.RosterRepositoryView", sections: [section] };
     expect(() => drawWorkspaceRoster(wire, sidebarContext())).toThrow(MalformedView);
+  });
+});
+
+describe("drawFoldHeader", () => {
+  const draw = (): { header: HTMLElement; section: HTMLElement; calls: HTMLElement[] } => {
+    const section = document.createElement("div");
+    const label = document.createElement("span");
+    label.textContent = "alpha";
+    const calls: HTMLElement[] = [];
+    const header = drawFoldHeader(label, section, (_section, control) => calls.push(control));
+    return { header, section, calls };
+  };
+
+  it("draws the fold triangle, then the label, in a repo-head", () => {
+    // Arrange, Act
+    const { header } = draw();
+    // Assert
+    expect([header.className, ...[...header.children].map((c) => c.className || c.textContent)]).toEqual([
+      "repo-head",
+      "tri",
+      "alpha",
+    ]);
+  });
+
+  it("asks for the other fold from a click anywhere on the header", () => {
+    // Arrange
+    const { header, calls } = draw();
+    // Act
+    header.click();
+    // Assert
+    expect(calls).toEqual([header]);
+  });
+
+  it("asks once, from the triangle, when the triangle is clicked", () => {
+    // Arrange
+    const { header, calls } = draw();
+    const triangle = header.querySelector<HTMLElement>("[data-section-fold]")!;
+    // Act
+    triangle.click();
+    // Assert
+    expect(calls).toEqual([triangle]);
+  });
+
+  it("is the header every headed section draws", () => {
+    // Arrange, Act
+    const drawn = drawWorkspaceRoster(
+      roster({
+        repos: [repoSection({ id: "repo-1" })],
+        hidden: hiddenSection([HIDDEN_ROW]),
+        merged: mergedSection([row({ id: "ws-m", closed: true })], 1, false),
+      }),
+      sidebarContext(),
+    );
+    // Assert: each section's header is a repo-head opening on the triangle then the label.
+    const heads = [...pane(drawn, "repository").querySelectorAll<HTMLElement>(".repo > .repo-head")];
+    expect(heads.length).toBeGreaterThanOrEqual(3);
+    for (const head of heads) {
+      expect([...head.children].slice(0, 2).map((c) => c.className)).toEqual(["tri", SECTION_LABEL_CLASS]);
+    }
+  });
+});
+
+describe("the open workspaces section", () => {
+  const openIn = (drawn: HTMLElement, grouping: "repository" | "task" | "maturity"): HTMLElement =>
+    pane(drawn, grouping).querySelector<HTMLElement>(`:scope > .${OPEN_SECTION_CLASS}`)!;
+  const openCount = (drawn: HTMLElement, grouping: "repository" | "task" | "maturity" = "repository"): HTMLElement =>
+    openIn(drawn, grouping).querySelector<HTMLElement>(`:scope > .repo-head > .${OPEN_COUNT_CLASS}`)!;
+  const MANY = (): ReturnType<typeof roster> =>
+    roster({
+      repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-1" }), row({ id: "ws-2" })] })],
+      tasks: [taskSection({ id: "task-1", rows: [row({ id: "ws-1" })] })],
+      maturity: [maturitySection({ stage: "inProgress", rows: [row({ id: "ws-1" }), row({ id: "ws-2" })] })],
+      openCounts: { repository: 3, task: 1, maturity: 2 },
+    });
+
+  it("is the first box of every pane, holding that grouping's sections", () => {
+    // Arrange, Act
+    const drawn = drawWorkspaceRoster(MANY(), sidebarContext());
+    // Assert
+    for (const grouping of ["repository", "task", "maturity"] as const) {
+      const section = openIn(drawn, grouping);
+      expect([pane(drawn, grouping).firstElementChild === section, section.lastElementChild?.className]).toEqual([true, "sb-sections"]);
+    }
+  });
+
+  it("draws the daemon's label in its header", () => {
+    const drawn = drawWorkspaceRoster(MANY(), sidebarContext());
+    expect(openIn(drawn, "repository").querySelector(`:scope > .repo-head > .${SECTION_LABEL_CLASS}`)?.textContent).toBe("Open");
+  });
+
+  it("draws each grouping's own count beside the label", () => {
+    const drawn = drawWorkspaceRoster(MANY(), sidebarContext());
+    expect((["repository", "task", "maturity"] as const).map((g) => openCount(drawn, g).textContent)).toEqual(["(3)", "(1)", "(2)"]);
+  });
+
+  it.each([false, true])("shows its count with the section folded=%s", (collapsed) => {
+    const drawn = drawWorkspaceRoster(roster({ open: openSection(collapsed) }), sidebarContext());
+    expect(inRail(drawn, () => cascadedValue(openCount(drawn), "display"))).not.toBe("none");
+  });
+
+  it("draws its count in the Recently Merged today count's grey and size", () => {
+    const drawn = drawWorkspaceRoster(roster(), sidebarContext());
+    expect(inRail(drawn, () => [cascadedValue(openCount(drawn), "color"), cascadedValue(openCount(drawn), "font-size")])).toEqual([
+      "var(--muted)",
+      "0.85em",
+    ]);
+  });
+
+  it("draws its header in the Hidden and Recently Merged headers' purple", () => {
+    const drawn = drawWorkspaceRoster(roster(), sidebarContext());
+    const header = openIn(drawn, "repository").querySelector<HTMLElement>(":scope > .repo-head")!;
+    expect(inRail(drawn, () => cascadedValue(header, "color"))).toBe("var(--info-agents)");
+  });
+
+  it.each([
+    [false, "block"],
+    [true, "none"],
+  ])("folded=%s shows the grouping's sections as %s", (collapsed, want) => {
+    const drawn = drawWorkspaceRoster(roster({ open: openSection(collapsed), repos: [repoSection({ id: "repo-1" })] }), sidebarContext());
+    const sections = openIn(drawn, "repository").querySelector<HTMLElement>(":scope > .sb-sections")!;
+    expect(inRail(drawn, () => cascadedValue(sections, "display") ?? "block")).toBe(want);
+  });
+
+  it("folds every pane's copy at once", async () => {
+    // Arrange
+    const { sc } = viewDaemon();
+    const drawn = drawWorkspaceRoster(roster(), sc);
+    // Act
+    await click(openIn(drawn, "repository").querySelector("[data-section-fold]") as Element);
+    // Assert
+    expect([...drawn.querySelectorAll(`.${OPEN_SECTION_CLASS}`)].map((o) => o.classList.contains("folded"))).toEqual([true, true, true]);
+  });
+
+  it("leaves the repository sections' own folds alone when it folds", async () => {
+    // Arrange
+    const { sc } = viewDaemon();
+    const drawn = drawWorkspaceRoster(roster({ repos: [repoSection({ id: "repo-1" })] }), sc);
+    // Act
+    await click(openIn(drawn, "repository").querySelector("[data-section-fold]") as Element);
+    // Assert
+    const repo = drawn.querySelector<HTMLElement>(".repo-section")!;
+    expect([repo.classList.contains("folded"), repo.querySelector("[data-section-fold]")?.getAttribute("data-folded")]).toEqual([
+      false,
+      "false",
+    ]);
+  });
+
+  it("refuses a roster without it as a malformed view", () => {
+    const bare = roster();
+    bare.open = undefined;
+    expect(() => drawWorkspaceRoster(bare, sidebarContext())).toThrow(MalformedView);
+  });
+
+  it.each(["repository", "task", "maturity"] as const)("refuses a %s view without its open count", (grouping) => {
+    const bare = roster();
+    bare[grouping]!.openCount = undefined;
+    expect(() => drawWorkspaceRoster(bare, sidebarContext())).toThrow(MalformedView);
+  });
+
+  it("refuses a section with no fold arm", () => {
+    const bare = roster();
+    bare.open!.fold = { case: undefined };
+    expect(() => drawWorkspaceRoster(bare, sidebarContext())).toThrow(MalformedView);
   });
 });

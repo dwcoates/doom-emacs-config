@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { captureLogRecords, forwardedRecord, type LogCapture } from "../log-capture.js";
-import { create } from "@bufbuild/protobuf";
+import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { SelectWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
 import { SetWorkspaceHiddenResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
 import { UpdateSidebarViewResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
-import { RosterRowSchema } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import { RosterRowSchema, type RosterRowWhenSchema } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import { liveElapsedClock } from "../../src/elapsed-clock.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import {
   HOVER_CLOSE_GRACE_MS,
@@ -58,16 +59,20 @@ const lineOf = (drawn: HTMLElement): HTMLElement =>
 const panelOf = (drawn: HTMLElement): HTMLElement =>
   drawn.querySelector(":scope > .detail") as HTMLElement;
 
-/** The status dot: a live row's pointer trigger for the panel (owner request, 2026-10-02). */
+/** The status dot. */
 const dotOf = (drawn: HTMLElement): HTMLElement =>
   lineOf(drawn).querySelector(".st") as HTMLElement;
 
+/** The row's name: every row's pointer trigger for the panel (owner request, 2026-10-13). */
+const nameOf = (drawn: HTMLElement): HTMLElement =>
+  lineOf(drawn).querySelector(".name") as HTMLElement;
+
 function hoverIn(drawn: HTMLElement): void {
-  dotOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
+  nameOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
 }
 
 function hoverOut(drawn: HTMLElement): void {
-  dotOf(drawn).dispatchEvent(new MouseEvent("mouseleave"));
+  nameOf(drawn).dispatchEvent(new MouseEvent("mouseleave"));
 }
 
 async function click(control: Element): Promise<void> {
@@ -264,70 +269,71 @@ describe("the priority badge", () => {
 });
 
 describe("the when-column", () => {
-  it("is empty when the daemon has nothing to show", () => {
+  const running = (startedMs: number): MessageInitShape<typeof RosterRowWhenSchema>["shown"] => ({
+    case: "turnRunning",
+    value: { startedAtMs: BigInt(startedMs) },
+  });
+
+  it("reads 0s with no turn running", () => {
     const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
-    expect(drawn.querySelector(".when")?.textContent).toBe("");
+    expect([drawn.querySelector(".when")?.getAttribute("data-when"), drawn.querySelector(".when")?.textContent]).toEqual([
+      "noTurnRunning",
+      "0s",
+    ]);
   });
 
-  it("reads the nearest second when a turn-end age is sampled just short of one", () => {
-    // Arrange + Act: the stamp does not share the shared ticker's phase.
-    const drawn = drawRosterRow(
-      row({ id: "ws-1", when: { case: "turnEnded", value: { atMs: BigInt(NOW - 4920) } } }),
-      sidebarContext(),
-      "R",
-    );
-    // Assert: five real seconds ago reads 5s, not the lagging 4s.
-    expect(drawn.querySelector(".when")?.textContent).toBe("5s");
-  });
-
-  it("ticks a turn-end age off the SHARED clock", () => {
+  it("never ticks with no turn running", () => {
+    // Arrange
     const ticker = fakeTicker();
     const sc = sidebarContext(appContext({}, ticker));
-    const drawn = drawRosterRow(
-      row({ id: "ws-1", when: { case: "turnEnded", value: { atMs: BigInt(NOW - 60_000) } } }),
-      sc,
-      "R",
-    );
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sc, "R");
+    // Act
     ticker.tick(NOW + 120_000);
+    // Assert
+    expect([drawn.querySelector(".when")?.textContent, sc.disposers.length]).toEqual(["0s", 0]);
+  });
+
+  it("counts a running turn's elapsed time", () => {
+    const drawn = drawRosterRow(row({ id: "ws-1", when: running(NOW - 65_000) }), sidebarContext(), "R");
+    expect([drawn.querySelector(".when")?.getAttribute("data-when"), drawn.querySelector(".when")?.textContent]).toEqual([
+      "turnRunning",
+      "1m 5s",
+    ]);
+  });
+
+  it("ticks a running turn off the SHARED clock", () => {
+    // Arrange
+    const ticker = fakeTicker();
+    const sc = sidebarContext(appContext({}, ticker));
+    const drawn = drawRosterRow(row({ id: "ws-1", when: running(NOW - 60_000) }), sc, "R");
+    // Act
+    ticker.tick(NOW + 120_000);
+    // Assert
     expect(drawn.querySelector(".when")?.textContent).toBe("3m");
   });
 
-  it("registers a turn-end age's tick as a teardown the next push runs", () => {
-    const ticker = fakeTicker();
-    const sc = sidebarContext(appContext({}, ticker));
-    drawRosterRow(
-      row({ id: "ws-1", when: { case: "turnEnded", value: { atMs: BigInt(NOW) } } }),
-      sc,
-      "R",
-    );
+  it("registers a running turn's tick as a teardown the next push runs", () => {
+    const sc = sidebarContext(appContext({}, fakeTicker()));
+    drawRosterRow(row({ id: "ws-1", when: running(NOW) }), sc, "R");
     expect(sc.disposers.length).toBe(1);
   });
 
-  it("states the arm the daemon chose for the last turn end", () => {
-    const drawn = drawRosterRow(
-      row({ id: "ws-1", when: { case: "turnEnded", value: { atMs: BigInt(NOW - 180_000) } } }),
-      sidebarContext(),
-      "R",
-    );
-    expect(drawn.querySelector(".when")?.getAttribute("data-when")).toBe("turnEnded");
+  it.each([0, 4_920, 65_432, 3_725_000])("reads exactly what the footer's turn clock reads %sms into the turn", (elapsed) => {
+    // Arrange: the strip's clock is a live elapsed clock from the same start.
+    const ticker = fakeTicker();
+    const started = NOW - elapsed;
+    const strip = liveElapsedClock(ticker, "info-time", started);
+    // Act
+    const drawn = drawRosterRow(row({ id: "ws-1", when: running(started) }), sidebarContext(appContext({}, ticker)), "R");
+    ticker.tick(NOW + 7_300);
+    // Assert
+    expect(drawn.querySelector(".when")?.textContent).toBe(strip.textContent);
   });
 
-  it("draws the last turn end as a relative age", () => {
-    const drawn = drawRosterRow(
-      row({ id: "ws-1", when: { case: "turnEnded", value: { atMs: BigInt(NOW - 180_000) } } }),
-      sidebarContext(),
-      "R",
-    );
-    expect(drawn.querySelector(".when")?.textContent).toBe("3m");
-  });
-
-  it("draws a never-active workspace's creation time as a bare relative age", () => {
-    const drawn = drawRosterRow(
-      row({ id: "ws-1", when: { case: "created", value: { atMs: BigInt(NOW - 3_600_000) } } }),
-      sidebarContext(),
-      "R",
-    );
-    expect(drawn.querySelector(".when")?.textContent).toBe("1h");
+  it("refuses an unset when-column as a malformed view", () => {
+    const bad = row({ id: "ws-1" });
+    bad.when!.shown = { case: undefined };
+    expect(() => drawRosterRow(bad, sidebarContext(), "R")).toThrow(MalformedView);
   });
 
   it("draws a settled merge as a bare relative age", () => {
@@ -986,14 +992,18 @@ describe("the detail panel opens on hover", () => {
     expect(drawn.classList.contains("open")).toBe(false);
   });
 
-  it("does not open when the pointer rests on the row's name", () => {
+  it("does not open when the pointer rests on the status dot", () => {
     // ARRANGE
     const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
     // ACT
-    (lineOf(drawn).querySelector(".name") as HTMLElement).dispatchEvent(new MouseEvent("mouseenter"));
+    (lineOf(drawn).querySelector(".st") as HTMLElement).dispatchEvent(new MouseEvent("mouseenter"));
     vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS * 10);
     // ASSERT
     expect(drawn.classList.contains("open")).toBe(false);
+  });
+
+  it("waits three seconds of rest before it opens", () => {
+    expect(HOVER_OPEN_DELAY_MS).toBe(3000);
   });
 
   it("does not open when the pointer rests on the row line itself", () => {
@@ -1006,7 +1016,7 @@ describe("the detail panel opens on hover", () => {
     expect(drawn.classList.contains("open")).toBe(false);
   });
 
-  it("opens once the pointer has rested on the status dot for the intent delay", () => {
+  it("opens once the pointer has rested on the name for the intent delay", () => {
     // ARRANGE
     const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
     // ACT
@@ -1079,33 +1089,43 @@ describe("the detail panel opens on hover", () => {
     expect(drawn.classList.contains("open")).toBe(false);
   });
 
-  describe("on a recently-merged row, whose name is the trigger", () => {
-    const mergedRow = (): HTMLElement =>
-      drawRosterRow(
+  describe.each([
+    {
+      place: "merged" as const,
+      make: () =>
         row({ id: "ws-1", closed: true, status: { case: "merged", value: {} }, when: { case: "merged", value: { atMs: BigInt(NOW) } } }),
-        sidebarContext(),
-        "R",
-        "merged",
-      );
-    const nameOf = (drawn: HTMLElement): HTMLElement => lineOf(drawn).querySelector(".name") as HTMLElement;
+    },
+    { place: "hidden" as const, make: () => row({ id: "ws-1", when: { case: "hidden", value: { atMs: BigInt(NOW) } } }) },
+  ])("on a $place row, whose name is the trigger as everywhere", ({ place, make }) => {
+    const bandRow = (): HTMLElement => drawRosterRow(make(), sidebarContext(), "R", place);
 
     it("opens once the pointer has rested on the name for the intent delay", () => {
       // ARRANGE
-      const drawn = mergedRow();
+      const drawn = bandRow();
       // ACT
-      nameOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
+      hoverIn(drawn);
       vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
       // ASSERT
       expect(drawn.classList.contains("open")).toBe(true);
     });
 
+    it("does not open before the intent delay has run out", () => {
+      // ARRANGE
+      const drawn = bandRow();
+      // ACT
+      hoverIn(drawn);
+      vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS - 1);
+      // ASSERT
+      expect(drawn.classList.contains("open")).toBe(false);
+    });
+
     it("closes once the pointer has left the name and the grace has run out", () => {
       // ARRANGE
-      const drawn = mergedRow();
-      nameOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
+      const drawn = bandRow();
+      hoverIn(drawn);
       vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
       // ACT
-      nameOf(drawn).dispatchEvent(new MouseEvent("mouseleave"));
+      hoverOut(drawn);
       vi.advanceTimersByTime(HOVER_CLOSE_GRACE_MS);
       // ASSERT
       expect(drawn.classList.contains("open")).toBe(false);
@@ -1113,7 +1133,7 @@ describe("the detail panel opens on hover", () => {
 
     it("does not open when the pointer rests on the row line itself", () => {
       // ARRANGE
-      const drawn = mergedRow();
+      const drawn = bandRow();
       // ACT
       lineOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
       vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS * 10);
@@ -1741,7 +1761,28 @@ describe("the hidden section's rows", () => {
       const drawn = drawRosterRow(row({ id: "ws-1", closed }), sidebarContext(), "R", place);
       return inRail(drawn, () => cascadedValue(drawn.querySelector(":scope > .row") as HTMLElement, "opacity"));
     };
-    expect([opacityOf("hidden", false), opacityOf("merged", true)]).toEqual(["0.55", "0.55"]);
+    expect([opacityOf("hidden", false), opacityOf("merged", true)]).toEqual(["var(--receded-opacity)", "var(--receded-opacity)"]);
+  });
+
+  it("recedes at 0.55", () => {
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
+    expect(inRail(drawn, (rail) => cascadedValue(rail, "--receded-opacity"))).toBe("0.55");
+  });
+
+  it.each([
+    { name: "an open grouping row", place: "grouping", closed: false, row: "1", when: "var(--receded-opacity)" },
+    { name: "a hidden row", place: "hidden", closed: false, row: "var(--receded-opacity)", when: "1" },
+    { name: "a merged row", place: "merged", closed: true, row: "var(--receded-opacity)", when: "1" },
+  ] as const)("draws $name's when-column at the one receded grey", ({ place, closed, row: rowOpacity, when }) => {
+    // Arrange
+    const drawn = drawRosterRow(row({ id: "ws-1", closed }), sidebarContext(), "R", place);
+    // Act
+    const opacities = inRail(drawn, () => [
+      cascadedValue(drawn.querySelector(":scope > .row") as HTMLElement, "opacity") || "1",
+      cascadedValue(drawn.querySelector(":scope > .row > .when") as HTMLElement, "opacity") || "1",
+    ]);
+    // Assert: the row's and the column's opacities compound to the receded one exactly once.
+    expect(opacities).toEqual([rowOpacity, when]);
   });
 
   it("strikes a hidden row's name through at a cold gate", () => {

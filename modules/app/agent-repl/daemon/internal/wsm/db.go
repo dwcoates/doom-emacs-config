@@ -313,6 +313,9 @@ type DB interface {
 	// SetHiddenSectionFolded records whether the hidden-workspaces section is
 	// collapsed.
 	SetHiddenSectionFolded(ctx context.Context, folded bool) error
+	// SetOpenSectionFolded records whether the open-workspaces section is
+	// collapsed.
+	SetOpenSectionFolded(ctx context.Context, folded bool) error
 	// SetGrouping records which grouping every page shows.
 	SetGrouping(ctx context.Context, grouping Grouping) error
 	// SidebarView loads the sidebar's view state that belongs to no row, or

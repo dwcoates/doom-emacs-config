@@ -619,7 +619,7 @@ describe("mounting the rail", () => {
                 rows: [
                   row({
                     id: "ws-1",
-                    when: { case: "turnEnded", value: { atMs: BigInt(NOW) } },
+                    when: { case: "turnRunning", value: { startedAtMs: BigInt(NOW) } },
                   }),
                 ],
               }),

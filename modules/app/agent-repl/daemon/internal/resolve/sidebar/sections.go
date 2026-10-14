@@ -21,6 +21,9 @@ const MergedSectionLabel = "Recently Merged"
 // HiddenSectionLabel is the hidden-workspaces section's heading.
 const HiddenSectionLabel = "Hidden"
 
+// OpenSectionLabel is the open-workspaces section's heading.
+const OpenSectionLabel = "Open"
+
 // repositoryView resolves the repository grouping: ONE SECTION PER REPOSITORY,
 // its rows nested by branch lineage and ordered in roster order.
 //
@@ -47,6 +50,7 @@ func (r *resolver) repositoryView(live []wsm.Workspace, rc rowContext, log dlog.
 		out.Sections = append(out.Sections, section)
 	}
 	r.assertRepositoryInvariant(byRepo, "daemon.sidebar.repository_view", "the repo grouping", log)
+	out.OpenCount = openCount(out.GetSections())
 	return out
 }
 
@@ -174,6 +178,7 @@ func (r *resolver) taskView(live []wsm.Workspace, rc rowContext, log dlog.Logger
 		setTaskFold(section, task.Folded)
 		out.Sections = append(out.Sections, section)
 	}
+	out.OpenCount = openCount(out.GetSections())
 	for task, orphans := range byTask {
 		log.Error("daemon.sidebar.task_view",
 			"workspaces are assigned to a task the registry does not carry and were left out of the task grouping",
@@ -218,6 +223,7 @@ func (r *resolver) maturityView(live []wsm.Workspace, rc rowContext, log dlog.Lo
 		setMaturityFold(section, r.state.reg.View.MaturityFolded.Folded(stage))
 		out.Sections = append(out.Sections, section)
 	}
+	out.OpenCount = openCount(out.GetSections())
 	return out
 }
 
@@ -355,6 +361,33 @@ func setHiddenFold(section *frontendv1.RosterHiddenSection, folded bool) {
 		return
 	}
 	section.Fold = &frontendv1.RosterHiddenSection_Expanded{Expanded: &frontendv1.RosterHiddenSectionExpanded{}}
+}
+
+// openSection resolves the open-workspaces section: its heading and its fold.
+// The groupings it boxes stay on the roster, each carrying its own count
+// (openCount). The fold is the daemon's so every page draws the same one
+// (UpdateSidebarView); it folds sidebar rows only, never a tab.
+func (r *resolver) openSection() *frontendv1.RosterOpenSection {
+	section := &frontendv1.RosterOpenSection{Label: &frontendv1.RosterLabel{Text: OpenSectionLabel}}
+	if r.state.reg.View.OpenFolded {
+		section.Fold = &frontendv1.RosterOpenSection_Collapsed{Collapsed: &frontendv1.RosterOpenSectionCollapsed{}}
+	} else {
+		section.Fold = &frontendv1.RosterOpenSection_Expanded{Expanded: &frontendv1.RosterOpenSectionExpanded{}}
+	}
+	return section
+}
+
+// openCount is how many rows the open-workspaces section lists under one
+// grouping: every not-closed row of every one of its sections, nested family
+// rows included, a folded section's too. It reads the very rows each section
+// carries (drawnLiveRowCount), so it is always the sum of the sections' own
+// counts and no client counts rows for itself.
+func openCount[S interface{ GetRows() *frontendv1.RosterRows }](sections []S) *frontendv1.RosterOpenCount {
+	n := 0
+	for _, section := range sections {
+		n += drawnLiveRowCount(section.GetRows())
+	}
+	return &frontendv1.RosterOpenCount{Workspaces: uint32(n)}
 }
 
 // setShownGrouping states which grouping every page shows. The grouping is
