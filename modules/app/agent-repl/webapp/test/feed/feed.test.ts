@@ -2341,6 +2341,15 @@ describe("mountFeed: a card toggle re-measures the titles it owns", () => {
 });
 
 describe("mountFeed: expanding a feed item centers it in the feed", () => {
+  /**
+   * The reader wheeled away from the tail, so no follow stands: a standing
+   * follow keeps the tail instead of centering (`TailFollow.itemExpanded`).
+   */
+  function readerAwayFromTail(scroll: HTMLElement): void {
+    scroll.dispatchEvent(new Event("wheel"));
+    scroll.dispatchEvent(new Event("scroll"));
+  }
+
   /** A feed row hung in HOST, laid out at TOP and 100px tall. */
   function rowAt(host: HTMLElement, top: number, id = "row-1"): HTMLElement {
     const row = document.createElement("article");
@@ -2375,11 +2384,26 @@ describe("mountFeed: expanding a feed item centers it in the feed", () => {
     await settle();
     const scroll = host.parentElement as HTMLElement;
     scriptFeedBox(scroll);
+    readerAwayFromTail(scroll);
     const box = bubbleIn(rowAt(host, 500));
     // Act
     box.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     // Assert -- its midpoint (550) onto the viewport's (150): 100 + 400.
     expect(scroll.scrollTop).toBe(500);
+    feed.dispose();
+  });
+
+  it("keeps a standing follow at the tail instead of centering the item", async () => {
+    // Arrange -- the follow the first paint latched stands; the row hangs 500..600.
+    const { feed, host } = mount();
+    await settle();
+    const scroll = host.parentElement as HTMLElement;
+    scriptFeedBox(scroll);
+    const box = bubbleIn(rowAt(host, 500));
+    // Act
+    box.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // Assert -- parked at the tail (2000), not centered (500).
+    expect(scroll.scrollTop).toBe(2000);
     feed.dispose();
   });
 
@@ -2389,6 +2413,7 @@ describe("mountFeed: expanding a feed item centers it in the feed", () => {
     await settle();
     const scroll = host.parentElement as HTMLElement;
     scriptFeedBox(scroll);
+    readerAwayFromTail(scroll);
     const card = toolCardIn(rowAt(host, 500));
     // Act
     card.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -2403,6 +2428,7 @@ describe("mountFeed: expanding a feed item centers it in the feed", () => {
     await settle();
     const scroll = host.parentElement as HTMLElement;
     scriptFeedBox(scroll);
+    readerAwayFromTail(scroll);
     const inner = document.createElement("div");
     rowAt(host, 500).append(inner);
     // Act
@@ -2418,6 +2444,7 @@ describe("mountFeed: expanding a feed item centers it in the feed", () => {
     await settle();
     const scroll = host.parentElement as HTMLElement;
     scriptFeedBox(scroll);
+    readerAwayFromTail(scroll);
     const outer = rowAt(host, 0, "outer");
     outer.getBoundingClientRect = domRect(0, 1000);
     const nested = document.createElement("article");
@@ -2438,6 +2465,7 @@ describe("mountFeed: expanding a feed item centers it in the feed", () => {
     const { feed, host } = mount();
     await settle();
     scriptFeedBox(host.parentElement as HTMLElement);
+    readerAwayFromTail(host.parentElement as HTMLElement);
     const box = bubbleIn(rowAt(host, 500));
     const capture = captureLogRecords("debug");
     // Act
@@ -2456,6 +2484,7 @@ describe("mountFeed: expanding a feed item centers it in the feed", () => {
     await settle();
     const scroll = host.parentElement as HTMLElement;
     scriptFeedBox(scroll);
+    readerAwayFromTail(scroll);
     const box = bubbleIn(rowAt(host, 500));
     box.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     scroll.scrollTop = 250;
@@ -2472,6 +2501,7 @@ describe("mountFeed: expanding a feed item centers it in the feed", () => {
     await settle();
     const scroll = host.parentElement as HTMLElement;
     scriptFeedBox(scroll);
+    readerAwayFromTail(scroll);
     const inner = document.createElement("div");
     rowAt(host, 500).append(inner);
     feed.dispose();
@@ -2487,6 +2517,7 @@ describe("mountFeed: expanding a feed item centers it in the feed", () => {
     await settle();
     const scroll = host.parentElement as HTMLElement;
     scriptFeedBox(scroll);
+    readerAwayFromTail(scroll);
     const card = document.createElement("div");
     card.className = "tool-card tool-fold";
     host.append(card);
