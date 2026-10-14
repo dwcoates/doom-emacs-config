@@ -15,6 +15,7 @@ import (
 	"agent-repld/internal/daemonaddr"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/envc"
+	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/pprofsurface"
 	"agent-repld/internal/rollout"
@@ -146,6 +147,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 	log.Info("daemon.cmd.boot", "the daemon boot started", dlog.Context{
 		"joining":    joining,
 		"state_root": layout.Dir(),
+		"git_binary": gitclient.Binary(),
 	})
 	defer log.Info("daemon.cmd.exit", "the daemon process ended", dlog.Context{
 		"joining":    joining,
