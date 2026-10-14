@@ -226,7 +226,8 @@ pid is gone. It is the same mechanism as the sandbox's container gate in
 **THE MERGE QUEUE'S GATES TAKE NO SLOT.** A gate runs with
 `AGENT_REPL_SUITE_PRIORITY=merge` and goes straight through, saying so: the two
 merges at the front of the queue race to land, each gating at once, and the
-merge queue's own governor admits them. A machine slot on top serialized the two
+merge queue's own governor admits them (at once on AC power, by the load band
+on battery). A machine slot on top serialized the two
 racers and once stood the queue's head behind the merge behind it (owner
 ruling, 2026-10-12).
 

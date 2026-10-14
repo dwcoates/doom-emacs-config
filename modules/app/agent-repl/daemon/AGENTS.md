@@ -1377,7 +1377,13 @@ Owner rulings, 2026-10-11 (`internal/merge/chain.go`, `internal/cpugov`).
   tree equal to it lands without testing again (INFO
   `daemon.merge.speculative`), any other is tested again and the invalidation
   is recorded.
-- **THE GOVERNOR** (`cpugov`) samples the host's own processor ticks (user,
+- **THE GOVERNOR** (`cpugov`) reads the host's power source with every
+  sample (IOKit's providing power source on macOS,
+  `/sys/class/power_supply` on Linux). ON AC POWER it admits a speculative
+  gate at once, bounded only by `QueueWindow` (owner ruling, 2026-10-13:
+  the merge behind the head races it). On battery, and while the source is
+  unread (an ERROR `daemon.cpugov.power` once per cause), the band decides:
+  it samples the host's own processor ticks (user,
   nice and system; `host_statistics` on macOS, `/proc/stat` on Linux), smooths
   them over 30s, and admits a speculative gate only while the smoothed load --
   counting the share the gates it admitted have not shown yet -- stands below

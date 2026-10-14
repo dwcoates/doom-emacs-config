@@ -52,7 +52,7 @@ func TestHostSamplerRefusesAValueThatIsNoLoad(t *testing.T) {
 func TestAFixedLoadIsWhatTheGovernorSmoothsTo(t *testing.T) {
 	// Arrange: a governor reading a fixed 60% load.
 	r := newRig(t)
-	g, err := New(DefaultConfig(), &Fixed{Utilization: 0.6, CPUs: 16}, r.clock.Now, r.log)
+	g, err := New(DefaultConfig(), &Fixed{Utilization: 0.6, CPUs: 16}, r.sampler, r.clock.Now, r.log)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

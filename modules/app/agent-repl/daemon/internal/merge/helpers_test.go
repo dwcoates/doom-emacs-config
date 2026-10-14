@@ -2030,6 +2030,17 @@ func (f *fakeLoad) Ticks() (cpugov.Ticks, error) {
 	return cpugov.Ticks{CPUs: 16}, nil
 }
 
+// Power is never read: the harness installs the power source directly
+// (harness.power), as it installs the load.
+func (f *fakeLoad) Power() (cpugov.Power, error) {
+	return cpugov.PowerUnknown, nil
+}
+
+// power stands the host on a power source and has the governor decide on it.
+func (h *harness) power(p cpugov.Power) {
+	h.governor.ObservePower(p)
+}
+
 // load stands the host at a fraction of its 16 processors and has the
 // governor decide on it.
 func (h *harness) load(fraction float64) {
@@ -2295,7 +2306,7 @@ func newHarness(t *testing.T) *harness {
 	h.briefs[BriefTestFailureResolve] = []string{"source_branch", "worktree_dir", "target_branch", "failing_suites", "archive_path", "failure_tail", "attempt", "max_attempts", "escalation_file", "escalation_marker", "failing_tests_file"}
 
 	h.sampler = &fakeLoad{sample: cpugov.Sample{Utilization: 0, CPUs: 16}}
-	governor, err := cpugov.New(cpugov.DefaultConfig(), h.sampler, h.clock, h.logs.Global())
+	governor, err := cpugov.New(cpugov.DefaultConfig(), h.sampler, h.sampler, h.clock, h.logs.Global())
 	if err != nil {
 		t.Fatalf("building the gate governor: %v", err)
 	}
