@@ -35,6 +35,7 @@
  */
 import { ancestorMatching } from "./dom.js";
 import { log } from "./log.js";
+import { nextFrame } from "./frame.js";
 
 /** Slack below which a downward gesture still counts as arriving at the tail. */
 const PIN_PX = 40;
@@ -1025,7 +1026,7 @@ export function observeScrollBox(box: HTMLElement, tail: TailFollow): () => void
     }
   };
   const children = new MutationObserver(watchChildren);
-  const witness = new MoveWitness(box, () => performance.now(), (fn) => requestAnimationFrame(fn));
+  const witness = new MoveWitness(box, () => performance.now(), nextFrame);
   const content = new MutationObserver((records) => witness.mutated(records.map((r) => r.target)));
   content.observe(box, { subtree: true, childList: true, characterData: true, attributes: true });
   tail.witnessMoves(() => witness.report());
