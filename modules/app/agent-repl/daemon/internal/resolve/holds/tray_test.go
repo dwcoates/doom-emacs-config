@@ -901,3 +901,26 @@ func TestTrayOffersFoldAbove(t *testing.T) {
 		})
 	}
 }
+
+func TestTrayDrawsNoCardForAPromptDrawnNowhere(t *testing.T) {
+	// Arrange: a merge queue notice waiting behind a running turn, beside a
+	// prompt the user sent.
+	r, surfaces := newRenderer(t)
+	notice := hold("t-notice", "merge queue of doom: fix landed")
+	notice.Origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE.String()
+	sent := hold("t-sent", "and then fix the footer")
+	sent.QueuedAt = queuedAt.Add(time.Second)
+
+	// Act.
+	r.SetHeldPrompts(testWS, []wsm.HeldPrompt{notice, sent})
+
+	// Assert.
+	cards := latest(t, r)
+	if len(cards) != 1 || cards[0].Turn != "t-sent" {
+		t.Fatalf("cards = %+v, want only the sent prompt's", cards)
+	}
+	if _, ok := dlog.FindRecord(surfaces.Records(), dlog.RecordQuery{Level: "debug", Operation: "daemon.holds.convert",
+		Message: "a held prompt of an origin drawn nowhere was skipped: the tray draws no card for it"}); !ok {
+		t.Fatalf("no record of the skipped notice: %+v", surfaces.Records())
+	}
+}
