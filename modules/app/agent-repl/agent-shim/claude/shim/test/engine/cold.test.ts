@@ -19,6 +19,7 @@ import {
   cacheRequestOf,
   judgeCold,
   readTranscriptFacts,
+  sessionCacheLapse,
   sessionCold,
   TRANSCRIPT_OPENING_MAX_CHARS,
   type TranscriptFacts,
@@ -298,25 +299,31 @@ describe("what one assistant record states about its request", () => {
   it("states the 1-hour tier for a request that wrote the 1h bucket", () => {
     const record = { message: { model: "m", usage: { cache_creation: { ephemeral_1h_input_tokens: 3, ephemeral_5m_input_tokens: 0 } } } };
 
-    expect(cacheRequestOf(record)).toEqual({ writtenTtlMs: CACHE_TTL_1H_MS });
+    expect(cacheRequestOf(record)).toEqual({ writtenTtlMs: CACHE_TTL_1H_MS, contextTokens: 0 });
   });
 
   it("states the 5-minute tier for a request that wrote the 5m bucket", () => {
     const record = { message: { model: "m", usage: { cache_creation: { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 3 } } } };
 
-    expect(cacheRequestOf(record)).toEqual({ writtenTtlMs: CACHE_TTL_5M_MS });
+    expect(cacheRequestOf(record)).toEqual({ writtenTtlMs: CACHE_TTL_5M_MS, contextTokens: 0 });
   });
 
   it("states the 5-minute tier for cache writes with no per-tier split", () => {
     const record = { message: { model: "m", usage: { cache_creation_input_tokens: 3 } } };
 
-    expect(cacheRequestOf(record)).toEqual({ writtenTtlMs: CACHE_TTL_5M_MS });
+    expect(cacheRequestOf(record)).toEqual({ writtenTtlMs: CACHE_TTL_5M_MS, contextTokens: 3 });
   });
 
   it("states no tier for a request that wrote nothing", () => {
     const record = { message: { model: "m", usage: { cache_read_input_tokens: 3 } } };
 
-    expect(cacheRequestOf(record)).toEqual({ writtenTtlMs: undefined });
+    expect(cacheRequestOf(record)).toEqual({ writtenTtlMs: undefined, contextTokens: 3 });
+  });
+
+  it("states the context the request sent as its read, written and uncached input", () => {
+    const record = { message: { model: "m", usage: { input_tokens: 2, cache_creation_input_tokens: 30, cache_read_input_tokens: 400 } } };
+
+    expect(cacheRequestOf(record)?.contextTokens).toBe(432);
   });
 
   it("is no request when the record states no usage", () => {
@@ -510,5 +517,36 @@ describe("reading facts off a transcript that cannot be read", () => {
     ]);
 
     expect(readTranscriptFacts(file)?.lastModel).toBeUndefined();
+  });
+});
+
+describe("the held cache's projected lapse", () => {
+  it.each([
+    ["at the floor", COLD_GATE_FLOOR_TOKENS, "gated"],
+    ["above the floor", COLD_GATE_FLOOR_TOKENS + 1, "gated"],
+    ["under the floor", COLD_GATE_FLOOR_TOKENS - 1, "ungated"],
+    ["with no context", 0, "ungated"],
+  ] as const)("states the gate's verdict %s", (_name, contextTokens, verdict) => {
+    // Act
+    const lapse = sessionCacheLapse(1_000, contextTokens);
+
+    // Assert
+    expect(lapse.afterLapse.case).toBe(verdict);
+  });
+
+  it("states when the cache lapses", () => {
+    // Act
+    const lapse = sessionCacheLapse(1_234, 0);
+
+    // Assert
+    expect(lapse.lapsesAtMs).toBe(1_234n);
+  });
+
+  it("states the context a gated resume re-reads", () => {
+    // Act
+    const lapse = sessionCacheLapse(1_000, 90_000);
+
+    // Assert
+    expect(lapse.afterLapse.case === "gated" ? lapse.afterLapse.value.contextTokens : undefined).toBe(90_000n);
   });
 });

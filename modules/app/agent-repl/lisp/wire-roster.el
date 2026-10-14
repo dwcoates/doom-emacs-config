@@ -272,10 +272,29 @@ The instant the running turn started, exactly the footer clock's."
   "Decode VALUE as the empty message `RosterRowWhenNoTurnRunning'."
   (agent-repl-wire--decode-empty "RosterRowWhenNoTurnRunning" value))
 
+(defun agent-repl-wire-decode-roster-row-when-hidden-cache (value)
+  "Decode VALUE as `RosterRowWhenHiddenCache', a plist `(:lapses-at-ms)'.
+When the hidden workspace's prompt cache lapses, epoch MILLISECONDS."
+  (let ((object (agent-repl-wire--object "RosterRowWhenHiddenCache" value)))
+    (agent-repl-wire--check-keys "RosterRowWhenHiddenCache" object '(lapsesAtMs))
+    (agent-repl-wire--decoded
+     "RosterRowWhenHiddenCache"
+     (list :lapses-at-ms (agent-repl-wire--decode-int64
+                          "RosterRowWhenHiddenCache" 'lapsesAtMs object)))))
+
 (defun agent-repl-wire-decode-roster-row-when-hidden (value)
-  "Decode VALUE as `RosterRowWhenHidden', a plist `(:at-ms)'.
-The instant the workspace was moved into the hidden section."
-  (agent-repl-wire-roster--decode-instant "RosterRowWhenHidden" value))
+  "Decode VALUE as `RosterRowWhenHidden', a plist `(:at-ms :cache)'.
+The instant the workspace was moved into the hidden section, and the lapse
+of its prompt cache when the daemon knows it (nil otherwise).  Emacs draws
+no hidden row, but the roster push carries them, so this decodes them whole."
+  (let ((object (agent-repl-wire--object "RosterRowWhenHidden" value)))
+    (agent-repl-wire--check-keys "RosterRowWhenHidden" object '(atMs cache))
+    (agent-repl-wire--decoded
+     "RosterRowWhenHidden"
+     (list :at-ms (agent-repl-wire--decode-int64 "RosterRowWhenHidden" 'atMs object)
+           :cache (agent-repl-wire--decode-optional-message
+                   "RosterRowWhenHidden" 'cache object
+                   #'agent-repl-wire-decode-roster-row-when-hidden-cache)))))
 
 (defconst agent-repl-wire-roster-row-when-arms
   '((turnRunning :turn-running agent-repl-wire-decode-roster-row-when-turn-running)

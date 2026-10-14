@@ -1,7 +1,9 @@
 /**
- * token-heat — the ONE color a token figure takes by how hot it is (frontend.v1
- * TokenHeat): the footer's tokens cell and a response bubble's corner figure
- * draw it alike, so a figure reads the same color wherever it is drawn.
+ * heat — the ONE green-to-red gradient a figure takes by how hot it is. A token
+ * figure takes it by its frontend.v1.TokenHeat (the footer's tokens cell and a
+ * response bubble's corner figure draw it alike), and a hidden workspace's
+ * cache countdown by how near its lapse is, so every heated figure reads on
+ * the same gradient wherever it is drawn.
  */
 import { MalformedView } from "./rpc/malformed.js";
 
@@ -12,10 +14,10 @@ const HEAT_COLORS = 4;
  * The color at POSITION on the heat gradient: the two theme colors bracketing
  * it, mixed by how far between them it sits. The daemon owns where a figure
  * falls (TokenHeat); the stylesheet owns the four colors, so this only
- * interpolates. A position outside [0, 1] is a daemon contract breach and is
+ * interpolates. A position outside [0, 1] is a caller's contract breach and is
  * refused.
  */
-export function tokenHeatColor(position: number, path: string): string {
+export function heatColor(position: number, path: string): string {
   if (!Number.isFinite(position) || position < 0 || position > 1) {
     throw new MalformedView(path, `heat position ${String(position)} is outside [0, 1]`);
   }

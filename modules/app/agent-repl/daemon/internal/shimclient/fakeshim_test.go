@@ -268,6 +268,11 @@ func (f *fakeShim) SetSessionPermissionMode(_ context.Context, _ *connect.Reques
 	return connect.NewResponse(&shimv1.SetSessionPermissionModeResponse{}), nil
 }
 
+func (f *fakeShim) SetKeepalive(_ context.Context, _ *connect.Request[shimv1.SetKeepaliveRequest]) (*connect.Response[shimv1.SetKeepaliveResponse], error) {
+	f.record("SetKeepalive")
+	return connect.NewResponse(&shimv1.SetKeepaliveResponse{}), nil
+}
+
 func (f *fakeShim) Hibernate(_ context.Context, _ *connect.Request[shimv1.HibernateRequest]) (*connect.Response[shimv1.HibernateResponse], error) {
 	f.record("Hibernate")
 	return connect.NewResponse(&shimv1.HibernateResponse{}), nil

@@ -72,7 +72,7 @@ import {
 import { liveElapsedClock, settledElapsedClock } from "../elapsed-clock.js";
 import { log } from "../log.js";
 import { MalformedView } from "../rpc/malformed.js";
-import { tokenHeatColor } from "../token-heat.js";
+import { heatColor } from "../heat.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { drawFooterStatusActivity, type ActivityDeps, type FooterActivity } from "./activity.js";
 import type { FooterPanel } from "./expanded.js";
@@ -606,7 +606,7 @@ export function drawFooterTokensCellInput(u: FooterTokensCellInput): HTMLElement
   if (u.heat !== undefined) {
     const position = u.heat.position;
     input.setAttribute("data-heat", String(position));
-    input.style.color = tokenHeatColor(position, "FooterTokensCellInput.heat.position");
+    input.style.color = heatColor(position, "FooterTokensCellInput.heat.position");
   }
   return input;
 }

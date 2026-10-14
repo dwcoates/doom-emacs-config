@@ -181,6 +181,7 @@ export class SessionPushes {
     "networkResumeWaits",
     "effortChanged",
     "commandCatalog",
+    "cacheLapse",
   ];
 
   /**
@@ -245,6 +246,18 @@ export class SessionPushes {
     }
     this.fanOut(update, arm);
     return true;
+  }
+
+  /**
+   * Withdraw a replayed arm's standing value: a subscriber that joins later is
+   * not caught up on it. For a level whose producer stops stating it (the held
+   * cadence's projected lapse once keep-alives run again).
+   */
+  withdraw(arm: string): void {
+    if (!SessionPushes.REPLAYED.includes(arm)) {
+      throw new Error(`SessionPushes.withdraw: ${arm} is not a replayed arm`);
+    }
+    if (this.current.delete(arm)) LOGGER.debug({ arm }, "withdrew a standing session fact");
   }
 
   private fanOut(update: conversationv1.SessionUpdate, arm: string): void {

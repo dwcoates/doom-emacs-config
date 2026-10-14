@@ -101,7 +101,7 @@ import { revealPaceOf, type RevealPace } from "../../reveal-pace.js";
 import { typeOut } from "../../type-out.js";
 import { onDiscard, tickWhileShown } from "../ticking.js";
 import { shouldShowMore } from "../bubble-more.js";
-import { tokenHeatColor } from "../../token-heat.js";
+import { heatColor } from "../../heat.js";
 import type { RowContext } from "./context.js";
 import { FINAL_RESPONSE_CLASS } from "../rows/turn-ended.js";
 import { easeIntoLook, readBubbleLook } from "../../bubble/collapse-motion.js";
@@ -597,7 +597,7 @@ export function drawFeedResponseUsageStamp(
   stamp.textContent = u.text;
   // THE FIGURE WEARS ITS HEAT, by the one rule the footer's tokens cell uses.
   const heat = requireMessage(u.heat, `${path}.heat`);
-  stamp.style.color = tokenHeatColor(heat.position, `${path}.heat.position`);
+  stamp.style.color = heatColor(heat.position, `${path}.heat.position`);
   slider.appendChild(stamp);
 
   // The reserve is drawn either way; an arriving corner marks itself so its

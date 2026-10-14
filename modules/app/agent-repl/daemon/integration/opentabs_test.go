@@ -190,25 +190,6 @@ var standDownWarnings = []string{
 	"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.bring_up",
 }
 
-func TestHidingAWorkspaceStandsItsSessionDown(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	f.d.ExpectWarnings(standDownWarnings...)
-	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCStartSession, &shimv1.StartSessionRequest{})
-
-	// Act
-	hide(t, f.d, f.ws)
-
-	// Assert: the idle sweep's stand-down, graceful.
-	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCHibernate, &shimv1.HibernateRequest{})
-	killed := &shimv1.KillSessionRequest{}
-	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCKillSession, killed)
-	if killed.GetForce() {
-		t.Fatal("the hidden workspace's KillSession was forced, want a graceful stand-down")
-	}
-}
-
 func TestCollapsingARepositoryStandsItsWorkspacesSessionDown(t *testing.T) {
 	t.Parallel()
 	// Arrange

@@ -89,6 +89,8 @@ import {
   forkSessionRefused,
   hibernateAcked,
   hibernateRefused,
+  setKeepaliveApplied,
+  setKeepaliveNoSession,
   killSessionClosed,
   killSessionRefused,
   rollBackSessionRefused,
@@ -130,6 +132,7 @@ import {
   cacheRequestOf,
   judgeCold,
   readTranscriptFacts,
+  sessionCacheLapse,
   sessionCold,
   underColdGateFloor,
   type TranscriptFacts,
@@ -4897,11 +4900,21 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // it judges.
     cadence = new KeepaliveCadence(
       () => void keepaliveBeat(),
+      (lapsesAtMs, contextTokens) =>
+        void pushes.push(
+          create(conversationv1.SessionUpdateSchema, {
+            update: { case: "cacheLapse", value: sessionCacheLapse(lapsesAtMs, contextTokens) },
+          }),
+        ),
       coldNowMs,
       deps.keepaliveIntervalMs,
       deps.scheduler ?? REAL_SCHEDULER,
     );
     const cacheAnchor = startingCacheAnchor(facts, clearedTo, coldCompacted);
+    // A SESSION BORN HELD NEVER BEATS: the hold is taken before the start, so
+    // the start projects the lapse instead of scheduling a beat
+    // (StartSessionRequest.hold_keepalive, the workspace is hidden).
+    if (request.holdKeepalive !== undefined) cadence.hold();
     cadence.start(cacheAnchor.anchor, cacheAnchor.reason);
     accountUsageHandle = (deps.scheduler ?? REAL_SCHEDULER).setInterval(
       () => refreshAccountUsage("interval"),
@@ -5754,7 +5767,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (compacted) return { anchor: undefined, reason: "the cold gate compacted the conversation" };
     if (facts.lastRequestAtMs === 0) return { anchor: undefined, reason: "the transcript states no request instant" };
     return {
-      anchor: { atMs: facts.lastRequestAtMs, ttlMs: facts.cacheTtlMs },
+      anchor: { atMs: facts.lastRequestAtMs, ttlMs: facts.cacheTtlMs, contextTokens: facts.contextTokens },
       reason: "a resumed conversation, anchored at the transcript's last request",
     };
   }
@@ -5768,7 +5781,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (message.type !== "assistant" || message.parent_tool_use_id !== null) return;
     const request = cacheRequestOf(message as TranscriptLine);
     if (request === undefined) return;
-    cadence?.noteRequest(request.writtenTtlMs);
+    cadence?.noteRequest(request.writtenTtlMs, request.contextTokens);
   }
 
   async function keepaliveBeat(): Promise<void> {
@@ -6172,6 +6185,30 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * is nothing to stand down without a session, and standing one down under
    * a live turn would kill the turn.
    */
+  /**
+   * Hold the keep-alive cadence, or run it again (shim.v1.SetKeepalive). A
+   * hold states the projected lapse on the session stream; running again
+   * withdraws it, so a WatchSession opened afterwards replays no stale lapse.
+   */
+  async function setKeepalive(request: shimv1.SetKeepaliveRequest): Promise<shimv1.SetKeepaliveResponse> {
+    if (!started || identity === undefined || cadence === undefined) {
+      LOGGER.info({ cadence: request.cadence.case }, "refused SetKeepalive: no session is open");
+      return setKeepaliveNoSession();
+    }
+    switch (request.cadence.case) {
+      case "hold":
+        cadence.hold();
+        break;
+      case "run":
+        pushes.withdraw("cacheLapse");
+        cadence.run();
+        break;
+      default:
+        throw new Error(`SetKeepalive reached the engine with no cadence arm (${String(request.cadence.case)}); validation admits none`);
+    }
+    return setKeepaliveApplied();
+  }
+
   async function hibernate(): Promise<shimv1.HibernateResponse> {
     if (!started || identity === undefined) {
       return hibernateRefused({ kind: "noSession" });
@@ -6923,6 +6960,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     setSessionEffort,
     setSessionPermissionMode,
     hibernate,
+    setKeepalive,
     killSession,
     startTurn: (request, signal) => turns.startTurn(request, signal),
     watchAgent: (request, signal) => turns.watchAgent(request, signal),

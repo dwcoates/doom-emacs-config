@@ -1145,9 +1145,17 @@ asks for the workspaces it wants open with the `OpenTabs` server stream.
   takeover's session-less starts and every open skip a workspace the user hid
   or whose repository section is collapsed. A hidden MERGE workspace still
   runs: its async merge withholds it, not the user.
-- **Hide and collapse stand the session down** (`drain.StandDownWithheld`,
-  called by `SetHidden(hide)` and `FoldRepository(collapse)`, which both
-  `SetWorkspaceHidden` and `UpdateSidebarView`'s repository fold reach): the
+- **A hidden workspace's cache lapses first** (`cachelapse.Keeper`,
+  2026-10-13): `SetHidden` tells the keeper, whose one loop holds the shim's
+  keep-alives (`shim.v1.SetKeepalive`), records the lapse the held shim
+  projects (`conversation.v1.SessionCacheLapse`) on the workspace's row, arms
+  one deadline for it, and at the deadline calls `drain.StandDownWithheld`. A
+  show, and every session coming up, reconciles the cadence with the stored
+  visibility, and a hidden workspace's `StartSession` carries
+  `hold_keepalive`, so no keep-alive fires between a start and a hold.
+- **Collapse stands the session down** (`drain.StandDownWithheld`, called by
+  `FoldRepository(collapse)`, which `UpdateSidebarView`'s repository fold
+  reaches, and by the cache keeper at a hidden workspace's lapse): the
   idle sweep's own gate and hibernation, on the fleet's detached lifetime. A
   busy workspace stays pending and is retried on the daemon's own edges, the
   free edge a turn's end raises (`lifecycleSink.OnFree`) and a session coming

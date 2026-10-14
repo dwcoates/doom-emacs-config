@@ -4919,6 +4919,130 @@ describe("SetSessionPermissionMode", () => {
   });
 });
 
+describe("SetKeepalive", () => {
+  function hold(): shimv1.SetKeepaliveRequest {
+    return create(shimv1.SetKeepaliveRequestSchema, {
+      cadence: { case: "hold", value: create(shimv1.SetKeepaliveHoldSchema, {}) },
+    });
+  }
+
+  function run(): shimv1.SetKeepaliveRequest {
+    return create(shimv1.SetKeepaliveRequestSchema, {
+      cadence: { case: "run", value: create(shimv1.SetKeepaliveRunSchema, {}) },
+    });
+  }
+
+  /**
+   * The arms a stream opened now is caught up on: everything queued before a
+   * sentinel event pushed after the open, which reaches the stream last.
+   */
+  async function standingArms(h: Harness): Promise<string[]> {
+    const stream = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
+    h.engine.pushes.push(
+      create(conversationv1.SessionUpdateSchema, {
+        update: { case: "compacting", value: create(conversationv1.SessionCompactingSchema, {}) },
+      }),
+    );
+    const arms: string[] = [];
+    for (;;) {
+      const step = await stream.next();
+      if (step.done === true || step.value.update.case === "compacting") return arms;
+      arms.push(step.value.update.case ?? "");
+    }
+  }
+
+  it("refuses when no session has been started", async () => {
+    // Arrange
+    const h = harness();
+
+    // Act
+    const response = await h.engine.setKeepalive(hold());
+
+    // Assert
+    expect(response.result.case === "error" ? response.result.value.kind.case : undefined).toBe("noSession");
+  });
+
+  it("records the refusal when no session has been started", async () => {
+    // Arrange
+    const h = harness();
+    const before = logSinkMark();
+
+    // Act
+    await h.engine.setKeepalive(hold());
+
+    // Assert
+    expect(logRecordsSince(before).map((record) => record.message)).toContain(
+      "refused SetKeepalive: no session is open",
+    );
+  });
+
+  it("cancels the scheduled keep-alive on a hold", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+
+    // Act
+    const response = await h.engine.setKeepalive(hold());
+
+    // Assert
+    expect([response.result.case, h.scheduler.pendingTimeout()]).toEqual(["success", undefined]);
+  });
+
+  it("states the projected lapse on the session stream on a hold", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+
+    // Act
+    await h.engine.setKeepalive(hold());
+
+    // Assert
+    expect(await standingArms(h)).toContain("cacheLapse");
+  });
+
+  it("schedules the keep-alive again when it runs", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await h.engine.setKeepalive(hold());
+
+    // Act
+    await h.engine.setKeepalive(run());
+
+    // Assert
+    expect(h.scheduler.pendingTimeout()).toBeDefined();
+  });
+
+  it("withdraws the projected lapse when it runs", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await h.engine.setKeepalive(hold());
+
+    // Act
+    await h.engine.setKeepalive(run());
+
+    // Assert
+    expect(await standingArms(h)).not.toContain("cacheLapse");
+  });
+
+  it("schedules no keep-alive for a session born held", async () => {
+    // Arrange
+    const h = harness();
+    const request = freshRequest();
+    request.holdKeepalive = create(shimv1.StartSessionHoldKeepaliveSchema, {});
+
+    // Act
+    const pending = h.engine.startSession(request);
+    const first = await untilQuery(h, 0);
+    first.query.emit(initMessage({ sessionId: freshSessionId(first.spec) }));
+    await pending;
+
+    // Assert
+    expect([h.scheduler.pendingTimeout(), await standingArms(h)]).toEqual([undefined, expect.arrayContaining(["cacheLapse"])]);
+  });
+});
+
 describe("Hibernate", () => {
   it("refuses when no session has been started", async () => {
     const h = harness();

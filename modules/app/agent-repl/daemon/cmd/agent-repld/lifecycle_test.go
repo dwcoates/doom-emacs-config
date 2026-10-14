@@ -695,6 +695,55 @@ func TestSessionUpBeforeTheQueueIsWiredIsRecordedAtError(t *testing.T) {
 	t.Fatalf("records = %+v, want the unwired queue at ERROR", log.Records())
 }
 
+// fakeCaches records every session-up the sink told the cache keeper.
+type fakeCaches struct{ up []ids.WorkspaceID }
+
+func (c *fakeCaches) SessionUp(ws ids.WorkspaceID) { c.up = append(c.up, ws) }
+
+func TestSessionUpTellsTheCacheKeeper(t *testing.T) {
+	// Arrange
+	caches := &fakeCaches{}
+	sink := &lifecycleSink{queue: &fakeFreeQueue{}, caches: caches, log: dlog.NewTestLogger()}
+
+	// Act
+	sink.SessionUp("ws-1")
+
+	// Assert
+	if len(caches.up) != 1 || caches.up[0] != "ws-1" {
+		t.Fatalf("cache keeper session-ups = %v, want ws-1", caches.up)
+	}
+}
+
+func TestSessionUpBeforeTheCacheKeeperIsWiredIsRecordedAtError(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	sink := &lifecycleSink{queue: &fakeFreeQueue{}, log: log}
+
+	// Act
+	sink.SessionUp("ws-1")
+
+	// Assert
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{
+		Level: dlog.LevelError, Message: "a session came up before the cache keeper was wired; its keep-alive cadence was not reconciled",
+	}); !ok {
+		t.Fatalf("records = %+v, want the unwired keeper at ERROR", log.Records())
+	}
+}
+
+func TestStandDownsFuncForwardsTheWorkspace(t *testing.T) {
+	// Arrange
+	var got ids.WorkspaceID
+	standDowns := standDownsFunc(func(ws ids.WorkspaceID) { got = ws })
+
+	// Act
+	standDowns.StandDownWithheld("ws-1")
+
+	// Assert
+	if got != "ws-1" {
+		t.Fatalf("stood down %q, want ws-1", got)
+	}
+}
+
 // fakeRetrier records every workspace a deferred stand-down was retried for.
 type fakeRetrier struct{ retried []ids.WorkspaceID }
 
