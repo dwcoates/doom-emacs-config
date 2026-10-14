@@ -227,18 +227,18 @@ func (o *orchestrator) checkSource(ctx context.Context, requester wsm.Workspace,
 //     worktree, so the match is exact). It is recorded only when it is no
 //     workspace's worktree, not the requester's and not the repository's
 //     main worktree: those are never removed by a merge's cleanup.
+//
+// THE REQUESTER'S BRANCH IS READ OFF ITS OWN WORKTREE, never off a creation
+// job: the main checkout, which is the workspace that always merges async, was
+// never created by the daemon and records no merge geometry.
 func (o *orchestrator) checkAsync(ctx context.Context, requester wsm.Workspace, source wsm.MergeSource, run *DetachedRun) (wsm.MergeSource, error) {
 	ws := requester.ID
-	job, err := o.layoutFor(ctx, ws)
+	own, err := o.deps.Git.CurrentBranch(ctx, requester.Dir)
 	if err != nil {
-		return wsm.MergeSource{}, err
-	}
-	own, err := o.deps.Git.CurrentBranch(ctx, job.Layout.SourceDir)
-	if err != nil {
-		return wsm.MergeSource{}, fmt.Errorf("merge: reading the branch checked out in %s: %w", job.Layout.SourceDir, err)
+		return wsm.MergeSource{}, fmt.Errorf("merge: reading the branch checked out in %s: %w", requester.Dir, err)
 	}
 	if own != "" && own == source.Branch {
-		return wsm.MergeSource{}, refuse(ArmBranchCheckedOutInRequester, ws, "branch %q is checked out in the requesting worktree %s", source.Branch, job.Layout.SourceDir)
+		return wsm.MergeSource{}, refuse(ArmBranchCheckedOutInRequester, ws, "branch %q is checked out in the requesting worktree %s", source.Branch, requester.Dir)
 	}
 	if run.CloseOnLanding != "" {
 		if run.CloseOnLanding == ws {
