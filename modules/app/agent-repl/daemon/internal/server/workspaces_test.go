@@ -19,6 +19,7 @@ import (
 	"agent-repld/internal/merge"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/workspace"
+	"agent-repld/internal/semver"
 	"agent-repld/internal/wsm"
 )
 
@@ -1753,5 +1754,121 @@ func TestCreateWorkspaceAnswersTheBaseRefOffPrimaryBranchArm(t *testing.T) {
 	got := resp.Msg.GetError().GetBaseRefOffPrimaryBranch()
 	if got.GetRef() != "feature-tip" || got.GetPrimaryBranch() != "main" {
 		t.Fatalf("result = %v, want base_ref_off_primary_branch naming the ref and the branch", resp.Msg.GetResult())
+	}
+}
+
+// versioned is a one-shot request carrying INCREMENT.
+func versioned(increment *agentreplv1.MergeWorkspaceVersionIncrement) *agentreplv1.MergeWorkspaceRequest {
+	req := oneShotRequest()
+	req.VersionIncrement = increment
+	return req
+}
+
+func TestMergeWorkspaceMapsTheVersionIncrement(t *testing.T) {
+	tests := []struct {
+		name      string
+		increment *agentreplv1.MergeWorkspaceVersionIncrement
+		want      *wsm.VersionIncrement
+	}{
+		{name: "a minor", increment: &agentreplv1.MergeWorkspaceVersionIncrement{
+			Increment: &agentreplv1.MergeWorkspaceVersionIncrement_Minor{Minor: &agentreplv1.MergeWorkspaceVersionIncrementMinor{}}, ChangelogLine: "Merges record a version"},
+			want: &wsm.VersionIncrement{Part: semver.Minor, ChangelogLine: "Merges record a version"}},
+		{name: "a patch", increment: &agentreplv1.MergeWorkspaceVersionIncrement{
+			Increment: &agentreplv1.MergeWorkspaceVersionIncrement_Patch{Patch: &agentreplv1.MergeWorkspaceVersionIncrementPatch{}}, ChangelogLine: "Fix the footer"},
+			want: &wsm.VersionIncrement{Part: semver.Patch, ChangelogLine: "Fix the footer"}},
+		{name: "none", increment: nil, want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act
+			if _, err := h.Client.MergeWorkspace(context.Background(), connect.NewRequest(versioned(tt.increment))); err != nil {
+				t.Fatalf("MergeWorkspace: %v", err)
+			}
+
+			// Assert
+			if len(h.Merge.requests) != 1 {
+				t.Fatalf("requests = %+v, want one", h.Merge.requests)
+			}
+			got := h.Merge.requests[0].Source.Version
+			if (got == nil) != (tt.want == nil) || (got != nil && *got != *tt.want) {
+				t.Fatalf("version = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMergeWorkspaceRefusesAMalformedVersionIncrementAsInvalid(t *testing.T) {
+	patch := func(line string) *agentreplv1.MergeWorkspaceVersionIncrement {
+		return &agentreplv1.MergeWorkspaceVersionIncrement{
+			Increment: &agentreplv1.MergeWorkspaceVersionIncrement_Patch{Patch: &agentreplv1.MergeWorkspaceVersionIncrementPatch{}}, ChangelogLine: line}
+	}
+	tests := []struct {
+		name      string
+		increment *agentreplv1.MergeWorkspaceVersionIncrement
+	}{
+		{name: "no increment arm", increment: &agentreplv1.MergeWorkspaceVersionIncrement{ChangelogLine: "x"}},
+		{name: "a blank changelog line", increment: patch(" ")},
+		{name: "a changelog line of two lines", increment: patch("a\nb")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act
+			_, err := h.Client.MergeWorkspace(context.Background(), connect.NewRequest(versioned(tt.increment)))
+
+			// Assert
+			if connect.CodeOf(err) != connect.CodeInvalidArgument {
+				t.Fatalf("MergeWorkspace = %v, want invalid_argument", err)
+			}
+			if len(h.Merge.requests) != 0 {
+				t.Fatalf("requests = %+v, want none", h.Merge.requests)
+			}
+		})
+	}
+}
+
+func TestMergeWorkspaceAnswersTheVersionRefusalsOnTheirArms(t *testing.T) {
+	tests := []struct {
+		name  string
+		err   *merge.RefusalError
+		check func(*agentreplv1.MergeWorkspaceError) bool
+	}{
+		{name: "a missing increment", err: &merge.RefusalError{Arm: merge.ArmVersionIncrementRequired, Workspace: testWorkspaceID, Reason: "required"},
+			check: func(e *agentreplv1.MergeWorkspaceError) bool { return e.GetVersionIncrementRequired() != nil }},
+		{name: "an increment in another repository", err: &merge.RefusalError{Arm: merge.ArmVersionIncrementUnexpected, Workspace: testWorkspaceID, Reason: "foreign",
+			Fields: map[string]any{"reason": merge.NestedArm("foreign_repository")}},
+			check: func(e *agentreplv1.MergeWorkspaceError) bool {
+				return e.GetVersionIncrementUnexpected().GetForeignRepository() != nil
+			}},
+		{name: "an increment off the default branch", err: &merge.RefusalError{Arm: merge.ArmVersionIncrementUnexpected, Workspace: testWorkspaceID, Reason: "parent",
+			Fields: map[string]any{"reason": merge.NestedArm("not_default_branch")}},
+			check: func(e *agentreplv1.MergeWorkspaceError) bool {
+				return e.GetVersionIncrementUnexpected().GetNotDefaultBranch() != nil
+			}},
+		{name: "an increment on a merge already upstream", err: &merge.RefusalError{Arm: merge.ArmVersionIncrementUnexpected, Workspace: testWorkspaceID, Reason: "upstream",
+			Fields: map[string]any{"reason": merge.NestedArm("merged_upstream")}},
+			check: func(e *agentreplv1.MergeWorkspaceError) bool {
+				return e.GetVersionIncrementUnexpected().GetMergedUpstream() != nil
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.Merge.enqueueErr = tt.err
+
+			// Act
+			resp, err := h.Client.MergeWorkspace(context.Background(), connect.NewRequest(oneShotRequest()))
+
+			// Assert
+			if err != nil || !tt.check(resp.Msg.GetError()) {
+				t.Fatalf("MergeWorkspace = (%v, %v), want the %s arm", resp.Msg.GetResult(), err, tt.err.Arm)
+			}
+		})
 	}
 }
