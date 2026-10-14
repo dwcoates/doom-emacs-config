@@ -2002,3 +2002,50 @@ func TestForEachRefRefusesAnUnmodeledQuery(t *testing.T) {
 		t.Fatalf("for-each-ref = %+v, want the unmodeled refusal", got)
 	}
 }
+
+func TestRunTagCreatesAnAnnotatedTagAndListsIt(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	head := repo.Worktrees[0].Head
+
+	// Act.
+	created := Run(s, "/", []string{"-C", dir, "tag", "--annotate", "--message", "Fix it", "--end-of-options", "0.0.2", "main"})
+	merged := Run(s, "/", []string{"-C", dir, "tag", "--list", "--merged", "main"})
+	at := Run(s, "/", []string{"-C", dir, "tag", "--list", "--points-at", head})
+
+	// Assert.
+	if created.Exit != 0 || repo.Tags["0.0.2"] == nil || *repo.Tags["0.0.2"] != (Tag{Commit: head, Message: "Fix it"}) {
+		t.Fatalf("create = %+v, tags = %+v; want 0.0.2 on %s", created, repo.Tags, head)
+	}
+	if merged.Stdout != "0.0.2\n" || at.Stdout != "0.0.2\n" {
+		t.Fatalf("merged = %q, points-at = %q; want 0.0.2 from both", merged.Stdout, at.Stdout)
+	}
+}
+
+func TestRunTagListsOnlyWhatIsReachable(t *testing.T) {
+	// Arrange: a tag on a commit main does not reach.
+	s, repo, dir := world(t)
+	repo.Tags = map[string]*Tag{"9.9.9": {Commit: "0000000000000000000000000000000000000009"}}
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "tag", "--list", "--merged", "main"})
+
+	// Assert.
+	if got.Exit != 0 || got.Stdout != "" {
+		t.Fatalf("tag --merged = %+v, want nothing reachable", got)
+	}
+}
+
+func TestRunTagRefusesANameThatIsAlreadyATag(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	repo.Tags = map[string]*Tag{"0.0.2": {Commit: repo.Worktrees[0].Head, Message: "first"}}
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "tag", "--annotate", "--message", "second", "--end-of-options", "0.0.2", "main"})
+
+	// Assert.
+	if got.Exit != 128 || !strings.Contains(got.Stderr, "already exists") || repo.Tags["0.0.2"].Message != "first" {
+		t.Fatalf("tag = %+v, tags = %+v; want the existing tag kept and the create refused", got, repo.Tags)
+	}
+}

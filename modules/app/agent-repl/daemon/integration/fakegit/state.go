@@ -107,6 +107,15 @@ type Repo struct {
 	// preservations under refs/agent-repl/) to its commit.
 	Refs      map[string]string `json:"refs,omitempty"`
 	Worktrees []*Worktree       `json:"worktrees"`
+	// Tags maps every annotated tag to what it names: the version tags the
+	// merge queue creates and the seed a test places.
+	Tags map[string]*Tag `json:"tags,omitempty"`
+}
+
+// Tag is one annotated tag: the commit it points at and its annotation.
+type Tag struct {
+	Commit  string `json:"commit"`
+	Message string `json:"message"`
 }
 
 // Conflict scripts a conflict between Branch and the repository Dir belongs
