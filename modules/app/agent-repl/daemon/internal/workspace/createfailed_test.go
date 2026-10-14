@@ -341,7 +341,9 @@ func TestDescribeCreateRequest(t *testing.T) {
 				"- permission mode: `auto`",
 				"- initial prompt:",
 				"",
-				"> fix the login bug",
+				"```",
+				"fix the login bug",
+				"```",
 			}, "\n"),
 		},
 		{
@@ -350,9 +352,9 @@ func TestDescribeCreateRequest(t *testing.T) {
 			want: "- initial prompt: none",
 		},
 		{
-			name: "a multi-line prompt is quoted line by line",
+			name: "a prompt carrying its own fence is fenced by a longer one",
 			spec: CreateSpec{InitialPrompt: "first\n\n```go\nx\n```"},
-			want: "- initial prompt:\n\n> first\n>\n> ```go\n> x\n> ```",
+			want: "- initial prompt:\n\n````\nfirst\n\n```go\nx\n```\n````",
 		},
 	}
 	for _, tc := range cases {
@@ -379,14 +381,14 @@ func TestTheShippedCreateFailedBriefSplices(t *testing.T) {
 
 	// Act.
 	text, err := brief.Splice(map[string]string{
-		"repository": "/repo", "request": "- initial prompt: none", "cause": "> boom", "agent_repl_dir": "/agent-repl",
+		"repository": "/repo", "request": "- initial prompt: none", "cause": "```\nboom\n```", "agent_repl_dir": "/agent-repl",
 	})
 
 	// Assert.
 	if err != nil {
 		t.Fatalf("Splice: %v", err)
 	}
-	for _, want := range []string{"/repo", "- initial prompt: none", "> boom", "/agent-repl"} {
+	for _, want := range []string{"/repo", "- initial prompt: none", "```\nboom\n```", "/agent-repl"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("brief = %q, want it to carry %q", text, want)
 		}
