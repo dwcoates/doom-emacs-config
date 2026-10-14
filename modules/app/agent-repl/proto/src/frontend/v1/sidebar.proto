@@ -1072,11 +1072,15 @@ message RosterRowCurrent {
 // is: MERGED wins ("the workspace is done" is the more interesting fact);
 // else HIDDEN (a workspace in the hidden section counts from when it was
 // hidden, owner request 2026-10-13); else, for every row of the open
-// workspaces section, the TURN CLOCK (owner request, 2026-10-13): TURN_RUNNING
-// while a turn runs, counting from the very instant the footer's turn clock
-// counts from (frontend.v1.FooterClock.turn_started_at_ms), so the two read
-// the same number; NO_TURN_RUNNING otherwise, drawn "0s". The client renders
-// whichever arm arrives and applies no precedence of its own. Never unset.
+// workspaces section, the WORK CLOCK: SYNC_MERGING while a sync merge stands
+// in the workspace (owner request, 2026-10-14), counting from when the merge
+// joined its repository's queue, and covering the turns the merge itself runs
+// (its configured prompts, conflict resolution, fixing); else TURN_RUNNING
+// while a turn runs (owner request, 2026-10-13), counting from the very
+// instant the footer's turn clock counts from
+// (frontend.v1.FooterClock.turn_started_at_ms), so the two read the same
+// number; NO_TURN_RUNNING otherwise, drawn "0s". The client renders whichever
+// arm arrives and applies no precedence of its own. Never unset.
 //
 // `turn_ended` (field 5) and `created` (field 4) are RETIRED and reserved:
 // the open workspaces section counted the time since the last turn ended, or
@@ -1102,6 +1106,7 @@ message RosterRowWhen {
     RosterRowWhenHidden hidden = 7;
     RosterRowWhenTurnRunning turn_running = 8;
     RosterRowWhenNoTurnRunning no_turn_running = 9;
+    RosterRowWhenSyncMerging sync_merging = 10;
   }
 }
 
@@ -1143,6 +1148,19 @@ message RosterRowWhenTurnRunning {
 // No turn is running: the open workspaces section draws "0s". DELIBERATELY
 // EMPTY: the arm is the fact.
 message RosterRowWhenNoTurnRunning {}
+
+// A SYNC merge stands in the workspace -- waiting in its repository's queue or
+// being worked on -- and the row counts how long: from when the merge joined
+// the queue, in epoch MILLISECONDS on the daemon's clock. The instant is the
+// queue's durable record, so a daemon restart does not reset the count. The
+// client ticks the elapsed time from it with the footer clock's own
+// formatter, exactly as for TURN_RUNNING.
+//
+// SYNC ONLY: a workspace whose branch merges ASYNC is free while it merges
+// (frontend.v1.RosterRowAsyncMerging), so its row keeps its turn clock.
+message RosterRowWhenSyncMerging {
+  int64 started_at_ms = 1;
+}
 
 // The expanded detail panel: three lines, each its own sub-element, each
 // PRESENT or ABSENT by message presence rather than by an empty string. An

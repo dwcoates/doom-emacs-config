@@ -254,11 +254,13 @@ func toRoundDoc(t tabRound) roundDoc {
 	return roundDoc{Kind: t.kind, N: t.n, StartedMS: t.started.UnixMilli()}
 }
 
-// footerFacts is the record's facts as the footer draws them.
-func (d factsDoc) footerFacts(at time.Time) footer.MergeFacts {
+// footerFacts is the record's facts as the footer draws them, counted from
+// when the recorded merge was queued.
+func (d progressDoc) footerFacts(at time.Time) footer.MergeFacts {
+	f := d.Facts
 	return footer.MergeFacts{
-		State: StateMerging, Step: footer.MergeStep(d.Step), LineAt: at,
-		Replayed: d.Replayed, Total: d.Total, Attempt: d.Attempt, MaxAttempts: d.MaxAttempts,
+		State: StateMerging, QueuedAt: time.UnixMilli(d.QueuedMS), Step: footer.MergeStep(f.Step), LineAt: at,
+		Replayed: f.Replayed, Total: f.Total, Attempt: f.Attempt, MaxAttempts: f.MaxAttempts,
 	}
 }
 
@@ -441,7 +443,7 @@ func (r *run) restoreFrom(doc progressDoc) {
 	} else {
 		r.queueRound = tabRound{kind: TabQueue, n: 1, started: time.UnixMilli(doc.QueuedMS)}
 	}
-	r.facts = doc.Facts.footerFacts(r.o.deps.Now())
+	r.facts = doc.footerFacts(r.o.deps.Now())
 	r.attempts = doc.TreeAttempts
 	if doc.MachineryNoted {
 		r.machinery = map[string]bool{}
