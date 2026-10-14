@@ -59,7 +59,7 @@ type DB interface {
 	// and by whom; the first close's record stands (see the store's doc).
 	MarkClosed(ctx context.Context, id WorkspaceID, closure Closure) error
 	// Reopen records that a workspace's editor state stands again, clearing
-	// its close record.
+	// its close record and, for a merged workspace, the merge's settlement.
 	Reopen(ctx context.Context, id WorkspaceID) error
 	// SetCurrent records the user's selection of a workspace at an instant.
 	SetCurrent(ctx context.Context, id WorkspaceID, at time.Time) error

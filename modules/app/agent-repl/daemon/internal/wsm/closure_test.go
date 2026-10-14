@@ -3,6 +3,7 @@ package wsm
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -148,6 +149,155 @@ func TestReopenClearsTheCloseRecord(t *testing.T) {
 	}
 	if got.Closed || got.Closure != nil {
 		t.Fatalf("closed = %v, closure = %v, want an open row with no record", got.Closed, got.Closure)
+	}
+}
+
+// mergedAndClosed stamps ws merged with a landed count and closes it, as the
+// merge queue's landing leaves its requester.
+func mergedAndClosed(t *testing.T, s *store, ws Workspace) {
+	t.Helper()
+	ctx := context.Background()
+	commits := uint32(4)
+	if err := s.SetMergedAt(ctx, ws.ID, firstClose, &commits); err != nil {
+		t.Fatalf("SetMergedAt: %v", err)
+	}
+	if err := s.MarkClosed(ctx, ws.ID, Closure{At: firstClose, By: CloseByMerge}); err != nil {
+		t.Fatalf("MarkClosed: %v", err)
+	}
+}
+
+func TestReopenRetiresAMergesSettlement(t *testing.T) {
+	tests := []struct {
+		name string
+		read func(t *testing.T, s *store, ws Workspace) any
+	}{
+		{name: "merged_at", read: func(t *testing.T, s *store, ws Workspace) any {
+			return scalar[*int64](t, s, `SELECT merged_at FROM workspaces WHERE id = ?`, ws.ID)
+		}},
+		{name: "commit_count", read: func(t *testing.T, s *store, ws Workspace) any {
+			return scalar[*int64](t, s, `SELECT commit_count FROM workspaces WHERE id = ?`, ws.ID)
+		}},
+		{name: "landed_head", read: func(t *testing.T, s *store, ws Workspace) any {
+			return scalar[*string](t, s, `SELECT landed_head FROM workspaces WHERE id = ?`, ws.ID)
+		}},
+		{name: "landed_at", read: func(t *testing.T, s *store, ws Workspace) any {
+			return scalar[*int64](t, s, `SELECT landed_at FROM workspaces WHERE id = ?`, ws.ID)
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a requester retired after its detached merge landed
+			// carries a landing as well as merged_at.
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+			if err := s.SetLanded(context.Background(), ws.ID, &Landing{Head: "f00d", At: firstClose}); err != nil {
+				t.Fatalf("SetLanded: %v", err)
+			}
+			mergedAndClosed(t, s, ws)
+
+			// Act
+			if err := s.Reopen(context.Background(), ws.ID); err != nil {
+				t.Fatalf("Reopen: %v", err)
+			}
+
+			// Assert
+			if got := tc.read(t, s, ws); !reflect.ValueOf(got).IsNil() {
+				t.Fatalf("%s = %v after reopening a merged workspace, want NULL", tc.name, reflect.ValueOf(got).Elem())
+			}
+		})
+	}
+}
+
+func TestReopenOpensAMergedWorkspace(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	mergedAndClosed(t, s, ws)
+
+	// Act
+	if err := s.Reopen(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Reopen: %v", err)
+	}
+
+	// Assert
+	got, err := s.Workspace(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	if got.Closed || got.Closure != nil || got.MergedAt != nil {
+		t.Fatalf("closed = %v, closure = %v, merged_at = %v, want an open, unmerged row", got.Closed, got.Closure, got.MergedAt)
+	}
+}
+
+func TestReopenRevealsAMergedMergeWorkspace(t *testing.T) {
+	// Arrange: a merge workspace that landed without ever being revealed.
+	s, _ := testStore(t)
+	requester := testWorkspace(t, s)
+	ws := registerMergeWorkspace(t, s, requester.ID, NewDetachedMergeID())
+	mergedAndClosed(t, s, ws)
+
+	// Act
+	if err := s.Reopen(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Reopen: %v", err)
+	}
+
+	// Assert
+	got, err := s.Workspace(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	if got.MergeHidden() {
+		t.Fatalf("the reopened merge workspace is hidden (revealed = %v), want it drawn", got.MergeRevealed)
+	}
+}
+
+func TestReopenKeepsTheLandingOfAWorkspaceThatIsNotMerged(t *testing.T) {
+	// Arrange: a requester whose detached merge landed keeps its worktree and
+	// is never stamped merged; the sweep still owes it its retirement.
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	landing := Landing{Head: "f00d", At: firstClose}
+	if err := s.SetLanded(context.Background(), ws.ID, &landing); err != nil {
+		t.Fatalf("SetLanded: %v", err)
+	}
+	if err := s.MarkClosed(context.Background(), ws.ID, Closure{At: firstClose, By: CloseByUser}); err != nil {
+		t.Fatalf("MarkClosed: %v", err)
+	}
+
+	// Act
+	if err := s.Reopen(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Reopen: %v", err)
+	}
+
+	// Assert
+	got, err := s.Workspace(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	if got.Landed == nil || got.Landed.Head != landing.Head {
+		t.Fatalf("landed = %+v, want the landing %+v kept", got.Landed, landing)
+	}
+}
+
+func TestReopenKeepsTheLiveCountOfAWorkspaceThatIsNotMerged(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	if _, err := s.SetLiveCommitCount(context.Background(), ws.ID, 3); err != nil {
+		t.Fatalf("SetLiveCommitCount: %v", err)
+	}
+	if err := s.MarkClosed(context.Background(), ws.ID, Closure{At: firstClose, By: CloseByUser}); err != nil {
+		t.Fatalf("MarkClosed: %v", err)
+	}
+
+	// Act
+	if err := s.Reopen(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Reopen: %v", err)
+	}
+
+	// Assert
+	if got := scalar[*int64](t, s, `SELECT commit_count FROM workspaces WHERE id = ?`, ws.ID); got == nil || *got != 3 {
+		t.Fatalf("commit_count = %v, want the live count 3 kept", got)
 	}
 }
 

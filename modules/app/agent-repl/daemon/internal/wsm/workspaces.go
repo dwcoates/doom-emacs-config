@@ -600,13 +600,38 @@ func (s *store) MarkClosed(ctx context.Context, id WorkspaceID, closure Closure)
 // close record in the same statement.
 //
 // A RE-OPEN MOVES NOTHING: the workspace returns to the place it held in the
-// registry when it was closed (place.go). Re-opening touches only the flag
-// and the record, because the bring-up claims serving itself.
+// registry when it was closed (place.go). Re-opening touches only the flag,
+// the record and a merge's settlement, because the bring-up claims serving
+// itself.
+//
+// AN OPEN WORKSPACE IS NEVER MERGED. Re-opening a merged workspace is the user
+// taking it back to revise what it landed, so the same statement retires the
+// merge's settlement: merged_at (the row leaves Recently Merged for its
+// groupings), the count the merge landed (commit_count goes back to "never
+// counted", and the next turn close recounts it live), the detached merge's
+// landing (landed_head, landed_at), which would otherwise have the merge
+// workspace sweep retire it again, and, for a merge workspace, its hiding: a
+// merge workspace the user opened is revealed, never drawn nowhere. A row that
+// is not merged keeps every one of those columns as it stands.
 func (s *store) Reopen(ctx context.Context, id WorkspaceID) error {
-	return s.setWorkspaceColumns(ctx, "daemon.wsm.reopen", id, dlog.Context{},
-		workspaceColumn{name: "closed", value: false},
-		workspaceColumn{name: "closure_at", value: nil},
-		workspaceColumn{name: "closure_by", value: nil})
+	fields := dlog.Context{"workspace": string(id)}
+	return s.write(ctx, "daemon.wsm.reopen", fields, func(ctx context.Context, tx *sql.Tx) error {
+		var merged sql.NullInt64
+		if err := scanWorkspaceRow(ctx, tx, id, "merged_at", &merged); err != nil {
+			return err
+		}
+		fields["was_merged"] = merged.Valid
+		if !merged.Valid {
+			_, err := tx.ExecContext(ctx,
+				`UPDATE workspaces SET closed = 0, closure_at = NULL, closure_by = NULL WHERE id = ?`, id)
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `UPDATE workspaces SET closed = 0, closure_at = NULL, closure_by = NULL,
+  merged_at = NULL, commit_count = NULL, landed_head = NULL, landed_at = NULL,
+  merge_revealed = CASE WHEN merge_of IS NULL THEN merge_revealed ELSE 1 END
+ WHERE id = ?`, id)
+		return err
+	})
 }
 
 // SetSpawnedShimPID records, or clears with nil, the pid of a shim a daemon
