@@ -231,6 +231,29 @@ func (r *Repo) Branch(name string) {
 	})
 }
 
+// Tag places the annotated tag name on the main worktree's head, as a person
+// tagging master by hand does.
+func (r *Repo) Tag(name string) {
+	r.t.Helper()
+	r.edit(func(s *fakegit.State) {
+		repo := r.state(s)
+		if repo.Tags == nil {
+			repo.Tags = map[string]*fakegit.Tag{}
+		}
+		repo.Tags[name] = &fakegit.Tag{Commit: repo.Worktree(r.Dir).Head, Message: "seed " + name}
+	})
+}
+
+// Tags answers the repository's tags as the fake records them.
+func (r *Repo) Tags() map[string]fakegit.Tag {
+	r.t.Helper()
+	out := map[string]fakegit.Tag{}
+	for name, t := range r.state(r.w.read()).Tags {
+		out[name] = *t
+	}
+	return out
+}
+
 // Checkout switches the main worktree to an existing branch.
 func (r *Repo) Checkout(name string) {
 	r.t.Helper()

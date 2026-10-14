@@ -170,6 +170,9 @@ func headRow(ws ids.WorkspaceID, lease ids.LeaseID, label string, startedMS int6
 		},
 	}
 	switch r := result.(type) {
+	case landedHead:
+		merge.Result = &frontendv1.FeedMerge_Success{Success: r.success}
+		merge.Head.Version = r.version
 	case *frontendv1.FeedMergeSuccess:
 		merge.Result = &frontendv1.FeedMerge_Success{Success: r}
 	case *frontendv1.FeedMergeError:
@@ -183,6 +186,14 @@ func headRow(ws ids.WorkspaceID, lease ids.LeaseID, label string, startedMS int6
 			Unit: &frontendv1.FeedTurnActivity_Merge{Merge: merge},
 		}},
 	}
+}
+
+// landedHead is the head's result for a merge that landed a commit: the
+// success arm, and the version the landing tagged (nil when it tagged none),
+// which the head draws beside it.
+type landedHead struct {
+	success *frontendv1.FeedMergeSuccess
+	version *frontendv1.FeedMergeVersion
 }
 
 // bubble is where one merging workspace's bubble is drawn, and how.

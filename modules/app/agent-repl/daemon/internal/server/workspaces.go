@@ -16,6 +16,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
+	"agent-repld/internal/semver"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
 )
@@ -686,6 +687,32 @@ func (s *server) MergeWorkspace(
 // the unknown_one_shot_workspace refusal; whether it is open and in the
 // requester's repository is the orchestrator's to judge.
 func (s *server) mergeRequest(ctx context.Context, requester ids.WorkspaceID, req *agentreplv1.MergeWorkspaceRequest) (merge.Request, error) {
+	out, err := s.mergeRequestMode(ctx, requester, req)
+	if err != nil {
+		return merge.Request{}, err
+	}
+	out.Source.Version = versionIncrement(req.GetVersionIncrement())
+	return out, nil
+}
+
+// versionIncrement reads the request's version increment, nil when it carries
+// none. validateMergeWorkspaceRequest refused a malformed one before this.
+func versionIncrement(v *agentreplv1.MergeWorkspaceVersionIncrement) *wsm.VersionIncrement {
+	if v == nil {
+		return nil
+	}
+	out := &wsm.VersionIncrement{ChangelogLine: v.GetChangelogLine()}
+	switch v.GetIncrement().(type) {
+	case *agentreplv1.MergeWorkspaceVersionIncrement_Minor:
+		out.Part = semver.Minor
+	case *agentreplv1.MergeWorkspaceVersionIncrement_Patch:
+		out.Part = semver.Patch
+	}
+	return out
+}
+
+// mergeRequestMode reads the request's mode arm.
+func (s *server) mergeRequestMode(ctx context.Context, requester ids.WorkspaceID, req *agentreplv1.MergeWorkspaceRequest) (merge.Request, error) {
 	out := merge.Request{Workspace: requester, By: merge.RequestedByUser}
 	switch mode := req.GetMode().(type) {
 	case *agentreplv1.MergeWorkspaceRequest_OneShot:

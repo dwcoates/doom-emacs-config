@@ -3,8 +3,10 @@ package promptqueue
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 
+	"agent-repld/internal/bounce"
 	"agent-repld/internal/ids"
 )
 
@@ -73,4 +75,119 @@ func TestExclusivelyReturnsTheWorksErrorAndRecordsIt(t *testing.T) {
 	if !logged(h.log.Records(), "info", opExclusive, "the work done while the workspace's turn sequence was held failed; deliveries resume") {
 		t.Fatalf("records = %+v, want the failure logged", h.log.Records())
 	}
+}
+
+// exclusiveWhileDraining starts a bounce that holds the workspace draining,
+// then starts an exclusive call that records whether the workspace was still
+// draining when its work ran. It answers once the call is waiting on the
+// bounce, with the call's result channel.
+func exclusiveWhileDraining(t *testing.T, h *harness, g *gate, req bounce.Request) (drainingWhenRun *atomic.Bool, ran chan struct{}, done chan error) {
+	t.Helper()
+	if _, err := h.q.RequestBounce(context.Background(), theWorkspace, req); err != nil {
+		t.Fatalf("RequestBounce: %v", err)
+	}
+	g.awaitStart(t)
+	waiting := make(chan struct{}, 4)
+	h.q.onDrainWait = func() { waiting <- struct{}{} }
+	drainingWhenRun, ran, done = &atomic.Bool{}, make(chan struct{}, 1), make(chan error, 1)
+	go func() {
+		done <- h.q.Exclusively(context.Background(), theWorkspace, "fork", func(context.Context) error {
+			drainingWhenRun.Store(h.q.isDraining(theWorkspace))
+			ran <- struct{}{}
+			return nil
+		})
+	}()
+	<-waiting
+	return drainingWhenRun, ran, done
+}
+
+func TestAnExclusiveCallWaitsOutADrainingBounceAndRunsAfterIt(t *testing.T) {
+	// Arrange: a shim replacement is draining the workspace when the call
+	// arrives.
+	h := newHarness(t)
+	g := newGate()
+	drainingWhenRun, ran, done := exclusiveWhileDraining(t, h, g, g.request("build_stale", false))
+
+	// Act: the replacement finishes.
+	select {
+	case <-ran:
+		t.Fatal("the call's work ran while the bounce was draining the workspace")
+	default:
+	}
+	g.finish(h, nil)
+	err := <-done
+
+	// Assert
+	if err != nil || drainingWhenRun.Load() {
+		t.Fatalf("Exclusively = %v, draining when run = %v; want the work run after the bounce", err, drainingWhenRun.Load())
+	}
+	if !logged(h.log.Records(), "info", opExclusive, "a bounce is draining the workspace; the call waits for it to finish so it runs on what serves the workspace after") {
+		t.Fatalf("records = %+v, want the wait recorded", h.log.Records())
+	}
+}
+
+func TestAnExclusiveCallWaitingOnAReplacementTheShimRefusedRunsOnTheShimThatKeepsServing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	g := newGate()
+	drainingWhenRun, _, done := exclusiveWhileDraining(t, h, g, g.request("build_stale", false))
+
+	// Act: the shim refuses to stand down over live work.
+	g.finish(h, errDeferredRun)
+	err := <-done
+
+	// Assert
+	if err != nil || drainingWhenRun.Load() {
+		t.Fatalf("Exclusively = %v, draining when run = %v; want the work run once the drain ended", err, drainingWhenRun.Load())
+	}
+}
+
+func TestAnExclusiveCallWaitingOnAMoveIsRefusedOnceTheWorkspaceMoved(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	g := newGate()
+	req := g.request("handover_transfer", false)
+	req.KeepDraining = true
+	_, ran, done := exclusiveWhileDraining(t, h, g, req)
+
+	// Act: the move hands the workspace to its new owner.
+	g.finish(h, nil)
+	err := <-done
+
+	// Assert
+	if !errors.Is(err, bounce.ErrMovedAway) {
+		t.Fatalf("Exclusively = %v, want the move's refusal", err)
+	}
+	select {
+	case <-ran:
+		t.Fatal("the call's work ran on a workspace this daemon no longer serves")
+	default:
+	}
+	if !logged(h.log.Records(), "info", opExclusive, "the workspace was moved off this daemon; the call is refused so it is asked of the daemon it moved to") {
+		t.Fatalf("records = %+v, want the refusal recorded", h.log.Records())
+	}
+}
+
+func TestAnExclusiveCallWaitingOnABounceEndsWithItsContext(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	g := newGate()
+	if _, err := h.q.RequestBounce(context.Background(), theWorkspace, g.request("build_stale", false)); err != nil {
+		t.Fatalf("RequestBounce: %v", err)
+	}
+	g.awaitStart(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	h.q.onDrainWait = cancel
+
+	// Act
+	err := h.q.Exclusively(ctx, theWorkspace, "fork", func(context.Context) error {
+		t.Error("the call's work ran although its caller gave up")
+		return nil
+	})
+
+	// Assert
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Exclusively = %v, want the context's end", err)
+	}
+	g.finish(h, nil)
 }

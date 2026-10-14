@@ -184,6 +184,9 @@ type outcomeDoc struct {
 	Landed    string      `json:"landed"`
 	Commits   []commitDoc `json:"commits,omitempty"`
 	AlreadyOn string      `json:"already_on,omitempty"`
+	// Version is the version tag the landing created, absent when it created
+	// none.
+	Version *versionDoc `json:"version,omitempty"`
 }
 
 // toCommitDocs and fromCommitDocs carry commits through the record.
@@ -211,14 +214,20 @@ func fromCommitDocs(docs []commitDoc) []gitclient.Commit {
 
 // toOutcomeDoc and outcome carry a landing through the record.
 func toOutcomeDoc(out outcome) *outcomeDoc {
-	return &outcomeDoc{Landed: out.landed, Commits: toCommitDocs(out.commits), AlreadyOn: out.alreadyOn}
+	return &outcomeDoc{Landed: out.landed, Commits: toCommitDocs(out.commits), AlreadyOn: out.alreadyOn, Version: toVersionDoc(out.version)}
 }
 
-func (d *outcomeDoc) outcome() outcome {
+// outcome reads the landing back. A recorded version that does not parse was
+// not written by toOutcomeDoc, and is refused rather than dropped.
+func (d *outcomeDoc) outcome() (outcome, error) {
 	if d == nil {
-		return outcome{}
+		return outcome{}, nil
 	}
-	return outcome{landed: d.Landed, commits: fromCommitDocs(d.Commits), alreadyOn: d.AlreadyOn}
+	version, err := d.Version.landed()
+	if err != nil {
+		return outcome{}, fmt.Errorf("merge: reading the recorded landing's version: %w", err)
+	}
+	return outcome{landed: d.Landed, commits: fromCommitDocs(d.Commits), alreadyOn: d.AlreadyOn, version: version}, nil
 }
 
 // subject and toSubjectDoc carry the subject through the record.

@@ -113,6 +113,11 @@ These clicks jump to an entry in the feed:
   - Open a landed merge's bubble and it stays open, across a reload too; close a running merge's bubble and it stays closed, even when the merge later fails.
   - Reloading the page, restarting Emacs or restarting the daemon draws the bubble the way you left it.
   - If the daemon cannot record your choice, the failure is listed under the warning chip in the top bar, and the bubble stays the way you left it on this page.
+- **A merge that lands on agent-repl's master shows the version it landed as on the bubble's head.**
+  - Every merge an agent asks for onto agent-repl's master says whether it moves the version's minor or patch number, with a one-line changelog entry.
+  - The merge queue tags the landed merge with the next version (for example `0.5.0`), and the changelog entry is that tag's annotation.
+  - The head draws the version after the clock, the number the merge moved in green.
+  - Only a person moves the major version, by tagging master by hand; the next merge counts up from that tag.
 - **A merge never opens the expanded footer.**
 - **The bubble has one rebasing tab and one tests tab, each with tabs of its own inside.**
   - The rebasing tab has a tab for each commit being replayed, named by its short hash and subject; commits the rebase has not reached yet show no clock.

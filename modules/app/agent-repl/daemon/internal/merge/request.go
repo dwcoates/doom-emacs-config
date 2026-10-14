@@ -53,6 +53,19 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) error {
 		log.Warn(op, "refused a merge request", withField(fields, "error", err.Error()))
 		return err
 	}
+	if v := req.Source.Version; v != nil {
+		fields["version_part"] = v.Part.String()
+	}
+	// A MERGE ONTO AGENT-REPL'S MASTER MOVES THE VERSION, and no other merge
+	// does (checkVersion).
+	if err := o.checkVersion(ctx, record, req); err != nil {
+		if _, refused := Refused(err); refused {
+			log.Warn(op, "refused a merge request for its version increment", withField(fields, "error", err.Error()))
+		} else {
+			log.Error(op, "could not decide whether the merge moves agent-repl's version", withField(fields, "error", err.Error()))
+		}
+		return err
+	}
 	// releaseName lets go of an async request's name claim; a no-op for every
 	// other request. It runs once the request is recorded or refused.
 	releaseName := func() {}

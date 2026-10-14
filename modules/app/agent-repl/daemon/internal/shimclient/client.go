@@ -1743,9 +1743,12 @@ func unary[Req any, Resp any](
 		// peer it was talking to. The error is unchanged in substance -- it is
 		// returned, wrapped so a caller can tell the two apart -- and only the
 		// record's level and wording change.
+		// THE SHIM'S PID names which shim answered, so a call that reached a
+		// shim being replaced is told apart from one that reached its
+		// successor.
 		fields := dlog.Context{
 			"workspace_id": string(c.ws), "error": err.Error(),
-			"connect_code": connect.CodeOf(err).String(),
+			"connect_code": connect.CodeOf(err).String(), "shim_pid": c.PID(),
 		}
 		if c.StandingDown() {
 			c.log.Info(operation, "the shim call ended in a stand-down this daemon ordered", fields)
