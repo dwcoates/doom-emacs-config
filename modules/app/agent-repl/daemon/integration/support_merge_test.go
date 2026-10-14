@@ -39,7 +39,7 @@ func mergeBlockedRepoOn(t *testing.T, d *harness.Daemon, namePrefix string) (fro
 	behind = mergeCreateChild(t, d, repoRef, namePrefix+"-behind", namePrefix+" behind work", nil)
 
 	harness.CommitWork(t, front.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: front.ws, Source: harness.OwnBranch(false)})); err != nil {
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(harness.MergeRequest(front.ws, harness.OneShot()))); err != nil {
 		t.Fatalf("MergeWorkspace(%s front) = error %v, want the merge enqueued", namePrefix, err)
 	}
 	// The pre-prompt's turn is started and NEVER answered: the run sits in it
@@ -47,7 +47,7 @@ func mergeBlockedRepoOn(t *testing.T, d *harness.Daemon, namePrefix string) (fro
 	front.shim.ExpectStartTurn()
 
 	harness.CommitWork(t, behind.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: behind.ws, Source: harness.OwnBranch(false)})); err != nil {
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(harness.MergeRequest(behind.ws, harness.OneShot()))); err != nil {
 		t.Fatalf("MergeWorkspace(%s behind) = error %v, want the merge enqueued", namePrefix, err)
 	}
 	return front, behind, repo, repoRef

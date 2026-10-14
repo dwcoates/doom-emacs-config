@@ -908,42 +908,34 @@ func validateOpenInEditorRequest(req *agentreplv1.OpenInEditorRequest) *connect.
 }
 
 // validateMergeWorkspaceRequest is MergeWorkspaceRequest's base function: the
-// requester's ref, and exactly one source arm, each carrying what it names.
+// requester's ref, and exactly one mode arm, each carrying what it names.
 func validateMergeWorkspaceRequest(req *agentreplv1.MergeWorkspaceRequest) *connect.Error {
 	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
 		return err
 	}
-	switch source := req.GetSource().GetSource().(type) {
-	case *agentreplv1.MergeWorkspaceSource_OwnBranch:
-		if source.OwnBranch.GetRun() == nil {
-			return invalid("source.own_branch.run", "a run arm (in_place or detached) is required")
-		}
-		if detached := source.OwnBranch.GetDetached(); detached != nil {
-			if strings.TrimSpace(detached.GetName()) == "" {
-				return invalid("source.own_branch.detached.name", "an async merge names its merge workspace")
-			}
-			switch content := detached.GetContent().(type) {
-			case *agentreplv1.MergeWorkspaceSourceOwnBranchDetached_WholeBranch:
-			case *agentreplv1.MergeWorkspaceSourceOwnBranchDetached_Pick:
-				if strings.TrimSpace(content.Pick.GetInstruction()) == "" {
-					return invalid("source.own_branch.detached.pick.instruction", "a pick names the changes it lands")
-				}
-			default:
-				return invalid("source.own_branch.detached.content", "a content arm (whole_branch or pick) is required")
-			}
+	switch mode := req.GetMode().(type) {
+	case *agentreplv1.MergeWorkspaceRequest_OneShot:
+		if mode.OneShot.GetLanding() == nil {
+			return invalid("one_shot.landing", "a landing arm (own_branch or merged_upstream) is required")
 		}
 		return nil
-	case *agentreplv1.MergeWorkspaceSource_MergedUpstream:
-		return nil
-	case *agentreplv1.MergeWorkspaceSource_Workspace:
-		return validateWorkspaceRef("source.workspace.ref", source.Workspace.GetRef())
-	case *agentreplv1.MergeWorkspaceSource_Branch:
-		if source.Branch.GetName() == "" {
-			return invalid("source.branch.name", "a branch name is required")
+	case *agentreplv1.MergeWorkspaceRequest_Async:
+		async := mode.Async
+		if strings.TrimSpace(async.GetName()) == "" {
+			return invalid("async.name", "an async merge names its merge workspace")
+		}
+		if strings.TrimSpace(async.GetBranch()) == "" {
+			return invalid("async.branch", "an async merge names the branch it lands")
+		}
+		if async.Instruction != nil && strings.TrimSpace(async.GetInstruction()) == "" {
+			return invalid("async.instruction", "an instruction says how to prepare the branch")
+		}
+		if async.OneShot != nil {
+			return validateWorkspaceRef("async.one_shot.workspace", async.GetOneShot().GetWorkspace())
 		}
 		return nil
 	default:
-		return invalid("source", "a source arm is required")
+		return invalid("mode", "a mode arm (one_shot or async) is required")
 	}
 }
 

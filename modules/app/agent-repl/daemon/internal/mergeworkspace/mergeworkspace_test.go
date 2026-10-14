@@ -351,6 +351,60 @@ func TestHandBackSubmitsADeferredReportLedByItsLabel(t *testing.T) {
 	}
 }
 
+func TestHandBackOfAnInPlaceMergeReportsItToTheWorkspaceItRanIn(t *testing.T) {
+	ws := wsm.Workspace{ID: "ws-requester", Name: "sample", Dir: "/w/sample"}
+	tests := []struct {
+		name      string
+		outcome   merge.DetachedOutcome
+		wantLabel string
+		wantText  string
+	}{
+		{name: "failed", outcome: merge.DetachedOutcome{Kind: merge.DetachedFailed, Summary: "tests failed", Branch: "sample", InPlace: true},
+			wantLabel: "one-shot merge of sample failed", wantText: "It ran in place, in this workspace. It failed: tests failed. This workspace stays open"},
+		{name: "abandoned", outcome: merge.DetachedOutcome{Kind: merge.DetachedAbandoned, Summary: "the queue closed", Branch: "sample", InPlace: true},
+			wantLabel: "one-shot merge of sample did not run", wantText: "It did not run: the queue closed. This workspace stays open."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+
+			// Act
+			err := f.svc.HandBack(context.Background(), "ws-requester", ws, tt.outcome)
+
+			// Assert
+			if err != nil || len(f.prompts.sent) != 1 {
+				t.Fatalf("HandBack = %v with %d submissions, want one", err, len(f.prompts.sent))
+			}
+			sent := f.prompts.sent[0]
+			if sent.ws != "ws-requester" || sent.origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK {
+				t.Fatalf("submission = %+v, want a merge handback to the workspace", sent)
+			}
+			if first, _, _ := strings.Cut(sent.text, "\n"); first != tt.wantLabel || !strings.Contains(sent.text, tt.wantText) {
+				t.Fatalf("text = %q, want it led by %q and naming %q", sent.text, tt.wantLabel, tt.wantText)
+			}
+			if strings.Contains(sent.text, "merge workspace") {
+				t.Fatalf("text = %q, want no merge workspace named for an in-place merge", sent.text)
+			}
+		})
+	}
+}
+
+func TestHandBackOfAnInPlaceLandingIsRefusedAsUndeclared(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+
+	// Act
+	err := f.svc.HandBack(context.Background(), "ws-requester", wsm.Workspace{ID: "ws-requester"},
+		merge.DetachedOutcome{Kind: merge.DetachedLanded, InPlace: true, Branch: "sample"})
+
+	// Assert: a landed one-shot closed its workspace, so handing it back is a
+	// defect in the caller, refused with nothing submitted.
+	if err == nil || len(f.prompts.sent) != 0 {
+		t.Fatalf("HandBack = %v with %d submissions, want refused with none", err, len(f.prompts.sent))
+	}
+}
+
 // compactingMergeWS is a merge workspace whose requester asked to be
 // compacted once it lands.
 var compactingMergeWS = wsm.Workspace{ID: "ws-merge", Name: "sample-merge", Dir: "/w/sample-merge",

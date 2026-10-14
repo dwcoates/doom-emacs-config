@@ -11,7 +11,7 @@ import (
 func TestWritePublishesAFileTheIngressGlobMatches(t *testing.T) {
 	// Arrange.
 	dir := t.TempDir()
-	entries := []Entry{{Type: TypeMerge, ProjectDir: "/tree"}}
+	entries := []Entry{{Type: TypeMerge, ProjectDir: "/tree", OneShot: true}}
 
 	// Act.
 	name, err := Write(dir, entries)
@@ -30,7 +30,7 @@ func TestWriteRoundTripsThroughTheIngressParse(t *testing.T) {
 	dir := t.TempDir()
 	entries := []Entry{
 		{Type: TypeCreate, GitRoot: "/repo", Name: "merge-queue/x-landing", BaseRef: "feat/x"},
-		{Type: TypeMerge, ProjectDir: "/repo-worktrees/x-landing", Workspace: "merge-queue/x-landing"},
+		{Type: TypeMerge, ProjectDir: "/repo-worktrees/x-landing", Workspace: "merge-queue/x-landing", OneShot: true},
 	}
 
 	// Act.
@@ -58,7 +58,7 @@ func TestWriteLeavesOnlyThePublishedFile(t *testing.T) {
 	dir := t.TempDir()
 
 	// Act.
-	name, err := Write(dir, []Entry{{Type: TypeMerge, ProjectDir: "/tree"}})
+	name, err := Write(dir, []Entry{{Type: TypeMerge, ProjectDir: "/tree", OneShot: true}})
 	if err != nil {
 		t.Fatalf("Write: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestWriteLeavesOnlyThePublishedFile(t *testing.T) {
 func TestWriteMintsADistinctNamePerFile(t *testing.T) {
 	// Arrange.
 	dir := t.TempDir()
-	entries := []Entry{{Type: TypeMerge, ProjectDir: "/tree"}}
+	entries := []Entry{{Type: TypeMerge, ProjectDir: "/tree", OneShot: true}}
 
 	// Act.
 	first, err := Write(dir, entries)

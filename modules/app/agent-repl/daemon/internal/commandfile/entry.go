@@ -162,39 +162,34 @@ type Entry struct {
 	// (CreateWorkspaceMergeActions.postprocessing_prompt).
 	PostprocessingPrompt string `json:"postprocessing_prompt,omitempty"`
 
-	// THE MERGE'S SOURCE (agentrepl.v1.MergeWorkspaceSource). The entry's
-	// workspace is the REQUESTER, which the merge runs in; these name what it
-	// merges. None set is the requester's own branch. Each is merge-only.
+	// THE MERGE'S MODE (agentrepl.v1.MergeWorkspaceRequest.mode). A merge
+	// entry is EITHER a one-shot (OneShot: the requester's own branch, merged
+	// in place, closing the requester once it lands) OR an async merge
+	// (AsyncName set: the named Branch, merged in a merge workspace forked
+	// from the requester). Each field below is merge-only.
 
-	// Branch merges a branch that is no workspace (source.branch).
+	// AsyncName is an async merge's merge workspace name, as the requesting
+	// agent chose it (async.name). Its presence makes the entry async.
+	AsyncName string `json:"async_name,omitempty"`
+	// Branch is the branch an async merge lands (async.branch). Required
+	// beside AsyncName, and meaningless without it.
 	Branch string `json:"branch,omitempty"`
-	// SourceDir merges another workspace's branch, the workspace keyed by its
-	// worktree path (source.workspace).
-	SourceDir string `json:"source_dir,omitempty"`
-	// KeepOpen keeps the requester open once its own branch lands
-	// (source.own_branch.in_place.keep_open). It is an in-place merge's alone.
-	KeepOpen bool `json:"keep_open,omitempty"`
-	// Detached runs the requester's own branch's merge ASYNC, in a hidden
-	// merge workspace forked from it, leaving the requester free
-	// (source.own_branch.detached). Own-branch only, never kept open, and
-	// always named (DetachedName).
-	Detached bool `json:"detached,omitempty"`
-	// DetachedName is an async merge's merge workspace name, as the requesting
-	// agent chose it (source.own_branch.detached.name). Required beside
-	// Detached, and meaningless without it.
-	DetachedName string `json:"detached_name,omitempty"`
-	// Pick lands only the changes this instruction names, the merge agent
-	// cherry-picking them onto the target branch
-	// (source.own_branch.detached.pick.instruction); empty merges the whole
-	// branch. Async only.
-	Pick string `json:"pick,omitempty"`
+	// Instruction tells the merge workspace how to prepare Branch before it
+	// joins the queue (async.instruction); empty lands it as it is. Async
+	// only.
+	Instruction string `json:"instruction,omitempty"`
+	// CloseDir names, by its worktree root, another workspace an async merge
+	// closes once it lands (async.one_shot). Async only.
+	CloseDir string `json:"close_dir,omitempty"`
+	// CleanupWorktree removes, once an async merge lands, the worktree that
+	// had its branch checked out (async.cleanup_worktree). Async only.
+	CleanupWorktree bool `json:"cleanup_worktree,omitempty"`
 	// CompactAfter compacts the requester's conversation once its async merge
-	// lands (source.own_branch.detached.compact_after). Async only: an
-	// in-place merge carrying it is refused.
+	// lands (async.compact_after). Async only.
 	CompactAfter bool `json:"compact_after,omitempty"`
-	// PRWasMerged says the requester's own branch already merged upstream
-	// through its pull request (source.merged_upstream): the default branch
-	// is updated from upstream and the requester closed.
+	// PRWasMerged says the one-shot's branch already merged upstream through
+	// its pull request (one_shot.merged_upstream): the default branch is
+	// updated from upstream and the requester closed. One-shot only.
 	PRWasMerged bool `json:"pr_was_merged,omitempty"`
 	// Front puts the merge at the FRONT of its queue once it is put in line:
 	// ahead of every ordinary merge still waiting, never ahead of the one
@@ -428,12 +423,11 @@ func (e Entry) mergeOnly() string {
 		name string
 		set  bool
 	}{
+		{"async_name", e.AsyncName != ""},
 		{"branch", e.Branch != ""},
-		{"source_dir", e.SourceDir != ""},
-		{"keep_open", e.KeepOpen},
-		{"detached", e.Detached},
-		{"detached_name", e.DetachedName != ""},
-		{"pick", e.Pick != ""},
+		{"instruction", e.Instruction != ""},
+		{"close_dir", e.CloseDir != ""},
+		{"cleanup_worktree", e.CleanupWorktree},
 		{"compact_after", e.CompactAfter},
 		{"pr_was_merged", e.PRWasMerged},
 		{"front", e.Front},
@@ -446,38 +440,25 @@ func (e Entry) mergeOnly() string {
 	return ""
 }
 
-// validateMergeSource refuses a merge naming more than one source, or keeping
-// open a requester whose own branch it does not merge.
+// validateMergeSource refuses a merge entry that is not exactly one mode, or
+// carries a field its mode does not have.
 func (e Entry) validateMergeSource() error {
-	named := 0
-	for _, set := range []bool{e.Branch != "", e.SourceDir != "", e.PRWasMerged} {
-		if set {
-			named++
-		}
-	}
+	async := e.AsyncName != ""
 	switch {
-	case named > 1:
-		return fmt.Errorf("%s: branch, source_dir and pr_was_merged each name a different merge; name one", TypeMerge)
-	case e.KeepOpen && named > 0:
-		return fmt.Errorf("%s: keep_open keeps the requester open after its OWN branch lands, and this merge lands another", TypeMerge)
-	case e.Detached && named > 0:
-		return fmt.Errorf("%s: detached runs the requester's OWN branch's merge in a merge workspace, and this merge lands another", TypeMerge)
-	case e.Detached && e.KeepOpen:
-		return fmt.Errorf("%s: a detached merge never closes the requester, so keep_open means nothing beside it", TypeMerge)
-	case e.OneShot && named > 0:
-		return fmt.Errorf("%s: one_shot merges the requester's OWN branch, and this merge lands another", TypeMerge)
-	case e.OneShot && e.KeepOpen:
-		return fmt.Errorf("%s: a one_shot merge closes the requester once it lands, so it cannot keep_open", TypeMerge)
-	case e.OneShot && e.Detached:
-		return fmt.Errorf("%s: a one_shot merge runs in the requester, which it closes once it lands, so it cannot run detached", TypeMerge)
-	case e.Detached && strings.TrimSpace(e.DetachedName) == "":
-		return fmt.Errorf("%s: a detached merge names its merge workspace (detached_name)", TypeMerge)
-	case !e.Detached && (e.DetachedName != "" || e.Pick != ""):
-		return fmt.Errorf("%s: detached_name and pick belong to a detached merge", TypeMerge)
-	case !e.Detached && e.CompactAfter:
-		return fmt.Errorf("%s: compact_after belongs to a detached merge; an in-place merge cannot compact after it lands", TypeMerge)
-	case e.Pick != "" && strings.TrimSpace(e.Pick) == "":
-		return fmt.Errorf("%s: a pick names the changes it lands", TypeMerge)
+	case e.OneShot && async:
+		return fmt.Errorf("%s: a merge is a one_shot or an async merge (async_name), never both", TypeMerge)
+	case !e.OneShot && !async:
+		return fmt.Errorf("%s: a merge is a one_shot (the requester's own branch, closing it once it lands) or an async merge (async_name and branch)", TypeMerge)
+	case async && strings.TrimSpace(e.AsyncName) == "":
+		return fmt.Errorf("%s: an async merge names its merge workspace (async_name)", TypeMerge)
+	case async && strings.TrimSpace(e.Branch) == "":
+		return fmt.Errorf("%s: an async merge names the branch it lands (branch)", TypeMerge)
+	case async && e.PRWasMerged:
+		return fmt.Errorf("%s: pr_was_merged belongs to a one_shot", TypeMerge)
+	case e.OneShot && (e.Branch != "" || e.Instruction != "" || e.CloseDir != "" || e.CleanupWorktree || e.CompactAfter):
+		return fmt.Errorf("%s: branch, instruction, close_dir, cleanup_worktree and compact_after belong to an async merge", TypeMerge)
+	case e.Instruction != "" && strings.TrimSpace(e.Instruction) == "":
+		return fmt.Errorf("%s: an instruction says how to prepare the branch", TypeMerge)
 	}
 	return nil
 }
@@ -542,7 +523,7 @@ func (e Entry) withAbsolutePaths(home string) (Entry, error) {
 		{name: "git_root", value: &e.GitRoot},
 		{name: "project_dir", value: &e.ProjectDir},
 		{name: "dir", value: &e.Dir},
-		{name: "source_dir", value: &e.SourceDir},
+		{name: "close_dir", value: &e.CloseDir},
 		{name: "evict_dir", value: &e.EvictDir},
 		{name: "move_dir", value: &e.MoveDir},
 		{name: "repository_dir", value: &e.RepositoryDir},

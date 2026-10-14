@@ -955,9 +955,8 @@ type MergeSource struct {
 	// the branch checked out in the workspace's worktree when the request was
 	// made for every other arm (empty on a request an earlier build recorded).
 	Branch string
-	// Detach is set on an own-branch request that runs DETACHED, in a merge
-	// workspace forked from the requester
-	// (agentrepl.v1.MergeWorkspaceSourceOwnBranchDetached): the request's own
+	// Detach is set on a request that runs ASYNC, in a merge workspace forked
+	// from the requester (agentrepl.v1.MergeWorkspaceAsync): the request's own
 	// identity, which the merge workspace records as its MergeOrigin.Request so
 	// a recovery finds the one workspace forked for THIS request. Empty for an
 	// in-place merge.
@@ -967,10 +966,10 @@ type MergeSource struct {
 	// request is recorded until the merge workspace exists under it. Set iff
 	// Detach is.
 	DetachName string
-	// Pick is the requesting agent's instruction naming which changes of the
-	// requester's branch an async merge lands
-	// (agentrepl.v1.MergeWorkspaceSourceOwnBranchDetachedPick), empty when the
-	// whole branch is merged. It rides the requester's detached request, then
+	// Pick is the requesting agent's instruction for preparing an async
+	// merge's branch before it joins the queue
+	// (agentrepl.v1.MergeWorkspaceAsync.instruction), empty when the branch
+	// lands as it is. It rides the requester's detached request, then
 	// the merge workspace's own request, which carries it until the pick has
 	// run; PickStartedAt says whether it has begun.
 	Pick string
@@ -980,9 +979,21 @@ type MergeSource struct {
 	// PickTurn is the merge workspace's pick turn, set with PickStartedAt.
 	PickTurn TurnID
 	// CompactAfter compacts the requester's conversation once a DETACHED
-	// merge lands (agentrepl.v1.MergeWorkspaceSourceOwnBranchDetached.compact_after).
+	// merge lands (agentrepl.v1.MergeWorkspaceAsync.compact_after).
 	// Only a detached request carries it: the in-place run has no way to ask.
 	CompactAfter bool
+	// CloseOnLanding is the workspace a DETACHED request closes once it lands
+	// (agentrepl.v1.MergeWorkspaceAsync.one_shot), empty when it closes none.
+	// Never the requester.
+	CloseOnLanding WorkspaceID
+	// CleanupWorktree removes, once a DETACHED request lands, the merge
+	// workspace's worktree and CleanupDir
+	// (agentrepl.v1.MergeWorkspaceAsync.cleanup_worktree).
+	CleanupWorktree bool
+	// CleanupDir is the worktree that had the request's branch checked out
+	// when the request was accepted, removed once it lands; empty when none
+	// qualified. Only a request with CleanupWorktree carries one.
+	CleanupDir string
 	// Front puts the merge at the FRONT of its queue when it is put in line
 	// (QueueMerge): ahead of every merge still waiting, never ahead of the one
 	// already running. Any arm may ask for it; a hotfix that must land before
@@ -1012,6 +1023,15 @@ type MergeOrigin struct {
 	// conversation be compacted once this merge workspace's branch lands
 	// (MergeSource.CompactAfter, carried over when the workspace is forked).
 	CompactAfter bool
+	// CloseOnLanding is the workspace this merge workspace's landing closes
+	// (MergeSource.CloseOnLanding, carried over when the workspace is forked).
+	CloseOnLanding WorkspaceID
+	// CleanupWorktree removes this merge workspace's worktree and CleanupDir
+	// once its branch lands (MergeSource.CleanupWorktree).
+	CleanupWorktree bool
+	// CleanupDir is the worktree the landing removes besides this merge
+	// workspace's own (MergeSource.CleanupDir).
+	CleanupDir string
 }
 
 // MergeQueueEntry is one workspace's place in its repository's merge queue. The
