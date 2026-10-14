@@ -61,10 +61,10 @@ describe("arm coverage", () => {
 
   it("covers every when-column arm", () => {
     assertCoversOneof(RosterRowWhenSchema, "shown", [
-      "created",
       "merged",
-      "turnEnded",
       "hidden",
+      "turnRunning",
+      "noTurnRunning",
     ]);
   });
 
@@ -187,10 +187,10 @@ describe("the groupings", () => {
 });
 
 /** A task section's fold triangle. */
-const TASK_FOLD = '[data-grouping="task"] [data-section-fold]';
+const TASK_FOLD = '[data-grouping="task"] .task-section [data-section-fold]';
 
 /** A repository section's fold triangle. */
-const REPOSITORY_FOLD = '[data-grouping="repository"] [data-section-fold]';
+const REPOSITORY_FOLD = '[data-grouping="repository"] .repo-section [data-section-fold]';
 
 /** The fold the one recorded UpdateSidebarView asked for, and of which section. */
 function askedFold(): { section: string | undefined; fold: string | undefined } {
@@ -313,6 +313,28 @@ describe("repository folds", () => {
     await harness.settle();
     // Assert
     expect(harness.$(REPOSITORY_FOLD)?.dataset.folded).toBe("true");
+  });
+});
+
+/** The open workspaces section's own fold triangle, in the repository grouping's copy. */
+const OPEN_FOLD = '[data-grouping="repository"] .open-section > .repo-head [data-section-fold]';
+
+describe("the open workspaces section's fold", () => {
+  it("starts unfolded, as the daemon's default is", async () => {
+    // Arrange / Act
+    await withRoster({});
+    // Assert
+    expect(harness.$(OPEN_FOLD)?.dataset.folded).toBe("false");
+  });
+
+  it("asks the daemon to fold it in every page", async () => {
+    // Arrange
+    await withRoster({});
+    harness.fake.clearCalls();
+    // Act
+    await harness.click(OPEN_FOLD);
+    // Assert
+    expect(askedFold()).toEqual({ section: "open", fold: "collapse" });
   });
 });
 
@@ -493,59 +515,37 @@ describe("row decoration", () => {
 });
 
 describe("the when column", () => {
-  it("draws a relative age from the turn_ended arm", async () => {
-    // Arrange / Act: `turn_ended` is what this build's daemon sends — when the
-    // workspace's LAST TURN ENDED, not when it was last looked at.
-    await withRoster({ rows: [rosterRow({ when: "turnEnded", whenAtMs: 0n })] });
-    // Assert
-    expect(harness.$(`[data-roster-row="${WORKSPACE_ID}"] [data-when]`)?.dataset.when).toBe(
-      "turnEnded",
-    );
-  });
+  const whenOf = (): HTMLElement | null => harness.$(`[data-roster-row="${WORKSPACE_ID}"] [data-when]`);
 
-  it("draws the turn_ended arm as a bare age, with no prefix", async () => {
+  it("draws 0s from the no_turn_running arm", async () => {
     // Arrange / Act
-    await withRoster({ rows: [rosterRow({ when: "turnEnded", whenAtMs: 0n })] });
-    // Assert: only `merged` earns a word in front of its age.
-    expect(
-      harness.$(`[data-roster-row="${WORKSPACE_ID}"] [data-when]`)?.textContent,
-    ).not.toContain("merged");
-  });
-
-  it("draws a relative age from the created arm", async () => {
-    // Arrange / Act: the fallback for a workspace that has never ended a turn,
-    // so the column is never blank for one that genuinely has a time to show.
-    await withRoster({ rows: [rosterRow({ when: "created", whenAtMs: 0n })] });
+    await withRoster({ rows: [rosterRow({ when: "noTurnRunning" })] });
     // Assert
-    expect(harness.$(`[data-roster-row="${WORKSPACE_ID}"] [data-when]`)?.dataset.when).toBe(
-      "created",
-    );
+    expect([whenOf()?.dataset.when, whenOf()?.textContent]).toEqual(["noTurnRunning", "0s"]);
   });
 
-  it("draws the created arm as a bare age, with no prefix", async () => {
+  it("draws the running turn's elapsed time from the turn_running arm", async () => {
     // Arrange / Act
-    await withRoster({ rows: [rosterRow({ when: "created", whenAtMs: 0n })] });
+    await withRoster({ rows: [rosterRow({ when: "turnRunning", whenAtMs: 0n })] });
     // Assert
-    expect(
-      harness.$(`[data-roster-row="${WORKSPACE_ID}"] [data-when]`)?.textContent,
-    ).not.toContain("created");
+    expect(whenOf()?.dataset.when).toBe("turnRunning");
   });
 
   it("draws a relative age from the merged arm", async () => {
     // Arrange / Act
     await withRoster({ rows: [rosterRow({ when: "merged", whenAtMs: 0n })] });
     // Assert
-    expect(harness.$(`[data-roster-row="${WORKSPACE_ID}"] [data-when]`)?.dataset.when).toBe("merged");
+    expect(whenOf()?.dataset.when).toBe("merged");
   });
 
-  it("ages a turn-end figure as time passes", async () => {
+  it("counts a running turn up as time passes", async () => {
     // Arrange
-    await withRoster({ rows: [rosterRow({ when: "turnEnded", whenAtMs: 0n })] });
-    const before = harness.$(`[data-roster-row="${WORKSPACE_ID}"] [data-when]`)?.textContent;
+    await withRoster({ rows: [rosterRow({ when: "turnRunning", whenAtMs: 0n })] });
+    const before = whenOf()?.textContent;
     // Act
     await harness.tick(120_000);
     // Assert
-    expect(harness.$(`[data-roster-row="${WORKSPACE_ID}"] [data-when]`)?.textContent).not.toBe(before);
+    expect(whenOf()?.textContent).not.toBe(before);
   });
 });
 
@@ -901,8 +901,10 @@ describe("roster ordering", () => {
       ],
     });
     // Assert
-    // The recently-merged section is the grouping's last, by construction.
+    // The open workspaces section heads the pane and the recently-merged
+    // section is its last, by construction.
     expect(harness.texts('[data-grouping="repository"] .repo-head .sb-label')).toEqual([
+      "Open",
       "zulu",
       "alpha",
       "recently merged",

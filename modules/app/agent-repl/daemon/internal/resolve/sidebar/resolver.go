@@ -268,6 +268,7 @@ func (r *resolver) render(log dlog.Logger, cause string) *frontendv1.WorkspaceRo
 		Task:           r.taskView(live, rc, log),
 		Maturity:       r.maturityView(live, rc, log),
 		Hidden:         r.hiddenSection(hidden, rc, log),
+		Open:           r.openSection(),
 		RecentlyMerged: r.mergedSection(merged, rc, log),
 		TabBar:         r.tabBar(),
 	}
@@ -685,13 +686,6 @@ func contextCut(turn *footer.TurnStarted) string {
 	default:
 		return ""
 	}
-}
-
-// SetTurnClosedAt keeps the latest turn close the door told of, which the
-// when-column counts from. See the Resolver interface.
-func (r *resolver) SetTurnClosedAt(ws ids.WorkspaceID, at time.Time) {
-	r.mutateWorkspace(ws, "daemon.sidebar.set_turn_closed_at", "the roster took the instant a turn closed",
-		dlog.Context{"at": at}, func(s *wsState) { s.turnEndedAt = laterInstant(s.turnEndedAt, &at) })
 }
 
 // SetSummary installs the row detail's summary line.

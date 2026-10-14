@@ -47,7 +47,7 @@ A row's non-optional message fields are all present; FRAGMENTS supply the
 status arm and whatever else the case is about."
   (concat "{\"workspace\":{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/1\"}},"
           "\"name\":{\"text\":\"fix-flaky\"},"
-          "\"current\":{},\"when\":{},\"detail\":{},\"closed\":{},"
+          "\"current\":{},\"when\":{\"noTurnRunning\":{}},\"detail\":{},\"closed\":{},"
           "\"availability\":{\"available\":{}}"
           (mapconcat (lambda (f) (concat "," f)) fragments "")
           "}"))
@@ -74,7 +74,7 @@ status arm and whatever else the case is about."
                    :status (:arm :ready :value nil)
                    :current (:current nil)
                    :children nil
-                   :when nil
+                   :when (:arm :no-turn-running :value nil)
                    :detail (:branch nil :parent-branch nil :summary nil :commits nil)
                    :closed (:closed nil)))))
 
@@ -355,7 +355,7 @@ reserved."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row
                   (concat "{\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"current\":{},"
-                          "\"when\":{},\"detail\":{},\"closed\":{}}"))
+                          "\"when\":{\"noTurnRunning\":{}},\"detail\":{},\"closed\":{}}"))
                  '("RosterRow" workspace "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-roster-row-without-a-name-is-a-breach ()
@@ -363,7 +363,7 @@ reserved."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row
                   (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},\"ready\":{},\"availability\":{\"available\":{}},"
-                          "\"current\":{},\"when\":{},\"detail\":{},\"closed\":{}}"))
+                          "\"current\":{},\"when\":{\"noTurnRunning\":{}},\"detail\":{},\"closed\":{}}"))
                  '("RosterRow" name "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-roster-row-without-closed-is-a-breach ()
@@ -372,7 +372,7 @@ reserved."
                   #'agent-repl-wire-decode-roster-row
                   (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},"
                           "\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"current\":{},"
-                          "\"when\":{},\"detail\":{}}"))
+                          "\"when\":{\"noTurnRunning\":{}},\"detail\":{}}"))
                  '("RosterRow" closed "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-roster-row-closed-true-decodes-to-t ()
@@ -381,18 +381,12 @@ reserved."
                              #'agent-repl-wire-decode-roster-row
                              (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},"
                                      "\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},"
-                                     "\"current\":{},\"when\":{},\"detail\":{},"
+                                     "\"current\":{},\"when\":{\"noTurnRunning\":{}},\"detail\":{},"
                                      "\"closed\":{\"closed\":true}}"))
                             :closed)
                  '(:closed t))))
 
 ;;;; ---- The when column ----
-
-(ert-deftest agent-repl-test-wire-roster-when-unset-is-legal ()
-  "UNSET oneof = nothing to show; the column is empty, not \"0ms ago\"."
-  (should (equal (agent-repl-test-wire-roster--decode
-                  #'agent-repl-wire-decode-roster-row-when "{}")
-                 nil)))
 
 (ert-deftest agent-repl-test-wire-roster-when-refuses-the-retired-last-selected-arm ()
   "`last_selected' is retired and reserved in `RosterRowWhen': it is an unknown field."
@@ -410,14 +404,24 @@ reserved."
                         "frontend/v1/sidebar.pb.go" "RosterRowWhen")
                        #'string<))))
 
+(defconst agent-repl-test-wire-roster--when-arm-samples
+  '((turnRunning "{\"startedAtMs\":\"1\"}" (:started-at-ms 1))
+    (noTurnRunning "{}" nil)
+    (merged "{\"atMs\":\"1\"}" (:at-ms 1))
+    (hidden "{\"atMs\":\"1\"}" (:at-ms 1)))
+  "One payload per when arm and the value it decodes to.")
+
 (ert-deftest agent-repl-test-wire-roster-when-decodes-every-arm-of-its-table ()
   "Every arm of the one when-arm table is accepted by the key allow-list and
 decodes to its keyword: the decode and the allow-list read the same table."
+  (should (equal (mapcar #'car agent-repl-wire-roster-row-when-arms)
+                 (mapcar #'car agent-repl-test-wire-roster--when-arm-samples)))
   (dolist (arm agent-repl-wire-roster-row-when-arms)
-    (should (equal (agent-repl-test-wire-roster--decode
-                    #'agent-repl-wire-decode-roster-row-when
-                    (format "{\"%s\":{\"atMs\":\"1\"}}" (nth 0 arm)))
-                   (list :arm (nth 1 arm) :value '(:at-ms 1))))))
+    (let ((sample (alist-get (nth 0 arm) agent-repl-test-wire-roster--when-arm-samples)))
+      (should (equal (agent-repl-test-wire-roster--decode
+                      #'agent-repl-wire-decode-roster-row-when
+                      (format "{\"%s\":%s}" (nth 0 arm) (nth 0 sample)))
+                     (list :arm (nth 1 arm) :value (nth 1 sample)))))))
 
 ;;;; ---- The shared instant decoder ----
 
@@ -440,8 +444,6 @@ decodes to its keyword: the decode and the allow-list read the same table."
 name: each one's breach names that message exactly as the helper's does."
   (dolist (pair '((agent-repl-wire-decode-roster-row-last-selected . "RosterRowLastSelected")
                   (agent-repl-wire-decode-roster-row-when-merged . "RosterRowWhenMerged")
-                  (agent-repl-wire-decode-roster-row-when-turn-ended . "RosterRowWhenTurnEnded")
-                  (agent-repl-wire-decode-roster-row-when-created . "RosterRowWhenCreated")
                   (agent-repl-wire-decode-roster-row-when-hidden . "RosterRowWhenHidden")))
     (let ((json "{\"atMs\":\"1\",\"extra\":1}"))
       (should (equal (agent-repl-test-wire-roster--breach (car pair) json)
@@ -449,15 +451,42 @@ name: each one's breach names that message exactly as the helper's does."
                       (lambda (v) (agent-repl-wire-roster--decode-instant (cdr pair) v))
                       json))))))
 
-(ert-deftest agent-repl-test-wire-roster-when-turn-ended-carries-its-instant ()
-  "Regression: the daemon's when column counts from the last turn end, the
-`turnEnded' arm (2026-10-11); the strict decoder must accept it or it rejects
-the whole WatchWorkspaceRoster push and every tab falls back to a stale blue
-status."
+(ert-deftest agent-repl-test-wire-roster-when-turn-running-carries-its-start ()
+  "Regression: the strict decoder must accept the `turnRunning' arm or it
+rejects the whole WatchWorkspaceRoster push and every tab falls back to a
+stale blue status."
   (should (equal (agent-repl-test-wire-roster--decode
                   #'agent-repl-wire-decode-roster-row-when
-                  "{\"turnEnded\":{\"atMs\":\"1756400000000\"}}")
-                 '(:arm :turn-ended :value (:at-ms 1756400000000)))))
+                  "{\"turnRunning\":{\"startedAtMs\":\"1756400000000\"}}")
+                 '(:arm :turn-running :value (:started-at-ms 1756400000000)))))
+
+(ert-deftest agent-repl-test-wire-roster-when-turn-running-refuses-an-unknown-field ()
+  "The running arm carries its start alone."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row-when-turn-running
+                  "{\"startedAtMs\":\"1\",\"atMs\":\"1\"}")
+                 '("RosterRowWhenTurnRunning" atMs "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-when-no-turn-running-decodes ()
+  "The `noTurnRunning' arm must decode too (see `turnRunning')."
+  (should (equal (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-row-when
+                  "{\"noTurnRunning\":{}}")
+                 '(:arm :no-turn-running :value nil))))
+
+(ert-deftest agent-repl-test-wire-roster-when-unset-is-a-breach ()
+  "The when-column's oneof is never unset."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row-when "{}")
+                 '("RosterRowWhen" shown "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-roster-when-retired-turn-ended-and-created-are-refused ()
+  "The retired `turnEnded' and `created' arms (fields 5 and 4) are unknown fields now."
+  (dolist (arm '(turnEnded created))
+    (should (equal (agent-repl-test-wire-roster--breach
+                    #'agent-repl-wire-decode-roster-row-when
+                    (format "{\"%s\":{\"atMs\":\"1\"}}" arm))
+                   (list "RosterRowWhen" arm "unknown field")))))
 
 (ert-deftest agent-repl-test-wire-roster-when-retired-active-is-refused ()
   "The retired `active' arm (field 3, reserved) is an unknown field now."
@@ -465,13 +494,6 @@ status."
                   #'agent-repl-wire-decode-roster-row-when
                   "{\"active\":{\"atMs\":\"1756400000000\"}}")
                  '("RosterRowWhen" active "unknown field"))))
-
-(ert-deftest agent-repl-test-wire-roster-when-created-carries-its-instant ()
-  "Regression: the `created' fallback arm must decode too (see `turnEnded')."
-  (should (equal (agent-repl-test-wire-roster--decode
-                  #'agent-repl-wire-decode-roster-row-when
-                  "{\"created\":{\"atMs\":\"1756400000000\"}}")
-                 '(:arm :created :value (:at-ms 1756400000000)))))
 
 (ert-deftest agent-repl-test-wire-roster-when-merged-accepts-a-numeric-instant ()
   "protojson accepts a number for int64, and the merged instant is one."
@@ -484,11 +506,11 @@ status."
   "The daemon chooses ONE value for the column; two is a breach."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row-when
-                  "{\"turnEnded\":{\"atMs\":\"1\"},\"merged\":{\"atMs\":\"2\"}}")
+                  "{\"noTurnRunning\":{},\"merged\":{\"atMs\":\"2\"}}")
                  '("RosterRowWhen" shown "oneof has more than one arm set"))))
 
 (ert-deftest agent-repl-test-wire-roster-row-without-when-is-a-breach ()
-  "The when element itself is a required message, even when its oneof is unset."
+  "The when element itself is a required message."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row
                   (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},"
@@ -556,7 +578,7 @@ status."
                   #'agent-repl-wire-decode-roster-row
                   (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},"
                           "\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"current\":{},"
-                          "\"when\":{},\"closed\":{}}"))
+                          "\"when\":{\"noTurnRunning\":{}},\"closed\":{}}"))
                  '("RosterRow" detail "required message field is absent"))))
 
 ;;;; ---- Nested families ----
@@ -755,15 +777,15 @@ status."
   (concat "{\"repository\":{\"sections\":[{"
           "\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},\"divergence\":{\"pending\":{}},"
           "\"header\":{\"label\":{\"text\":\"doom\"},\"count\":{\"workspaces\":2}},"
-          "\"rows\":{\"rows\":[]},\"expanded\":{}}]},"
-          "\"task\":{\"sections\":[]},\"maturity\":{\"sections\":[]},"
+          "\"rows\":{\"rows\":[]},\"expanded\":{}}],\"openCount\":{\"workspaces\":2}},"
+          "\"task\":{\"sections\":[],\"openCount\":{}},\"maturity\":{\"sections\":[],\"openCount\":{}},\"open\":{\"label\":{\"text\":\"Open\"},\"collapsed\":{}},"
           "\"hidden\":{\"header\":{\"label\":{\"text\":\"Hidden\"},\"count\":{\"workspaces\":0}},"
           "\"rows\":{\"rows\":[]},\"expanded\":{}},"
           "\"tabBar\":{},\"recentlyMerged\":{\"header\":{\"label\":{\"text\":\"Recently Merged\"},\"count\":{\"workspaces\":2}},"
           "\"groups\":[],\"collapsed\":{}},"
           "\"current\":{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/1\"}},"
           "\"shownRepository\":{}}")
-  "A whole roster: every grouping resolved, the hidden and merged sections, and current.")
+  "A whole roster: every grouping resolved, the open, hidden and merged sections, and current.")
 
 (ert-deftest agent-repl-test-wire-roster-decodes-the-whole-roster ()
   "The roster is always whole, never a delta, and decodes as one picture."
@@ -774,9 +796,11 @@ status."
                                             :header (:label (:text "doom") :count (:workspaces 2))
                                             :rows (:rows nil)
                                             :fold (:arm :expanded :value nil)
-                                            :divergence (:state (:arm :pending :value nil)))))
-                   :task (:sections nil)
-                   :maturity (:sections nil)
+                                            :divergence (:state (:arm :pending :value nil))))
+                               :open-count (:workspaces 2))
+                   :task (:sections nil :open-count (:workspaces 0))
+                   :maturity (:sections nil :open-count (:workspaces 0))
+                   :open (:label (:text "Open") :fold (:arm :collapsed :value nil))
                    :hidden (:header (:label (:text "Hidden") :count (:workspaces 0))
                             :rows (:rows nil)
                             :fold (:arm :expanded :value nil))
@@ -826,8 +850,8 @@ status."
   "UNSET current means there is no selected workspace."
   (should (equal (plist-get (agent-repl-test-wire-roster--decode
                              #'agent-repl-wire-decode-workspace-roster
-                             (concat "{\"repository\":{\"sections\":[]},"
-                                     "\"task\":{\"sections\":[]},\"maturity\":{\"sections\":[]},"
+                             (concat "{\"repository\":{\"sections\":[],\"openCount\":{}},"
+                                     "\"task\":{\"sections\":[],\"openCount\":{}},\"maturity\":{\"sections\":[],\"openCount\":{}},\"open\":{\"label\":{},\"expanded\":{}},"
                                      "\"hidden\":{\"header\":{\"label\":{},\"count\":{}},\"rows\":{},\"expanded\":{}},"
                                      "\"tabBar\":{},\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},"
                                      "\"groups\":[],\"collapsed\":{}},\"shownRepository\":{}}"))
@@ -838,7 +862,7 @@ status."
   "BOTH groupings arrive fully resolved; an absent one is a breach."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-workspace-roster
-                  (concat "{\"task\":{\"sections\":[]},\"maturity\":{\"sections\":[]},"
+                  (concat "{\"task\":{\"sections\":[],\"openCount\":{}},\"maturity\":{\"sections\":[],\"openCount\":{}},\"open\":{\"label\":{},\"expanded\":{}},"
                           "\"hidden\":{\"header\":{\"label\":{},\"count\":{}},\"rows\":{},\"expanded\":{}},"
                           "\"tabBar\":{},\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},\"groups\":[]}}"))
                  '("WorkspaceRoster" repository "required message field is absent"))))
@@ -847,7 +871,7 @@ status."
   "The task grouping is resolved alongside the repository grouping."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-workspace-roster
-                  (concat "{\"repository\":{\"sections\":[]},"
+                  (concat "{\"repository\":{\"sections\":[],\"openCount\":{}},"
                           "\"tabBar\":{},\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},\"groups\":[]}}"))
                  '("WorkspaceRoster" task "required message field is absent"))))
 
@@ -855,7 +879,7 @@ status."
   "The maturity grouping is resolved alongside the other two."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-workspace-roster
-                  (concat "{\"repository\":{\"sections\":[]},\"task\":{\"sections\":[]},"
+                  (concat "{\"repository\":{\"sections\":[],\"openCount\":{}},\"task\":{\"sections\":[],\"openCount\":{}},"
                           "\"tabBar\":{},\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},\"groups\":[]}}"))
                  '("WorkspaceRoster" maturity "required message field is absent"))))
 
@@ -863,7 +887,7 @@ status."
   "The merged section is hoisted onto every roster, always present."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-workspace-roster
-                  (concat "{\"repository\":{\"sections\":[]},\"task\":{\"sections\":[]},\"maturity\":{\"sections\":[]},"
+                  (concat "{\"repository\":{\"sections\":[],\"openCount\":{}},\"task\":{\"sections\":[],\"openCount\":{}},\"maturity\":{\"sections\":[],\"openCount\":{}},\"open\":{\"label\":{},\"expanded\":{}},"
                           "\"hidden\":{\"header\":{\"label\":{},\"count\":{}},\"rows\":{},\"expanded\":{}}}"))
                  '("WorkspaceRoster" recentlyMerged "required message field is absent"))))
 
@@ -871,7 +895,7 @@ status."
   "The hidden section is on every roster, empty when nothing is hidden."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-workspace-roster
-                  (concat "{\"repository\":{\"sections\":[]},\"task\":{\"sections\":[]},\"maturity\":{\"sections\":[]},"
+                  (concat "{\"repository\":{\"sections\":[],\"openCount\":{}},\"task\":{\"sections\":[],\"openCount\":{}},\"maturity\":{\"sections\":[],\"openCount\":{}},\"open\":{\"label\":{},\"expanded\":{}},"
                           "\"tabBar\":{},\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},\"groups\":[],\"collapsed\":{}}}"))
                  '("WorkspaceRoster" hidden "required message field is absent"))))
 
@@ -946,7 +970,7 @@ A hand-rolled hidden-section decoder would skip the shared helper and fail here.
   "An unknown key on the roster is refused at the roster."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-workspace-roster
-                  (concat "{\"repository\":{\"sections\":[]},\"task\":{\"sections\":[]},\"maturity\":{\"sections\":[]},"
+                  (concat "{\"repository\":{\"sections\":[],\"openCount\":{}},\"task\":{\"sections\":[],\"openCount\":{}},\"maturity\":{\"sections\":[],\"openCount\":{}},\"open\":{\"label\":{},\"expanded\":{}},"
                           "\"hidden\":{\"header\":{\"label\":{},\"count\":{}},\"rows\":{},\"expanded\":{}},"
                           "\"tabBar\":{},\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},\"groups\":[]},"
                           "\"hibernating\":{}}"))
@@ -964,7 +988,7 @@ A hand-rolled hidden-section decoder would skip the shared helper and fail here.
 
 (defun agent-repl-test-wire-roster--with-shown (shown)
   "A roster JSON whose `shown' members are SHOWN (a JSON fragment, maybe empty)."
-  (concat "{\"repository\":{\"sections\":[]},\"task\":{\"sections\":[]},\"maturity\":{\"sections\":[]},"
+  (concat "{\"repository\":{\"sections\":[],\"openCount\":{}},\"task\":{\"sections\":[],\"openCount\":{}},\"maturity\":{\"sections\":[],\"openCount\":{}},\"open\":{\"label\":{},\"expanded\":{}},"
           agent-repl-test-wire-roster--hidden-json ","
           agent-repl-test-wire-roster--merged-json
           (if (string-empty-p shown) "" (concat "," shown))
@@ -1019,7 +1043,7 @@ A hand-rolled hidden-section decoder would skip the shared helper and fail here.
                                      (concat "{\"sections\":["
                                              "{\"key\":{\"stage\":{\"backlog\":{}}},\"header\":{\"label\":{},\"count\":{}},\"rows\":{},\"expanded\":{}},"
                                              "{\"key\":{\"stage\":{\"merging\":{}}},\"header\":{\"label\":{},\"count\":{}},\"rows\":{},\"expanded\":{}}"
-                                             "]}"))
+                                             "],\"openCount\":{}}"))
                                     :sections))
                  '((:arm :backlog :value nil) (:arm :merging :value nil)))))
 
@@ -1210,7 +1234,7 @@ A hand-rolled hidden-section decoder would skip the shared helper and fail here.
                   #'agent-repl-wire-decode-roster-row
                   (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},"
                           "\"name\":{\"text\":\"n\"},\"ready\":{},\"current\":{},"
-                          "\"when\":{},\"detail\":{},\"closed\":{}}"))
+                          "\"when\":{\"noTurnRunning\":{}},\"detail\":{},\"closed\":{}}"))
                  '("RosterRow" availability "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-roster-section-header-decodes-its-count ()
@@ -1226,3 +1250,80 @@ A hand-rolled hidden-section decoder would skip the shared helper and fail here.
                   #'agent-repl-wire-decode-roster-section-header
                   "{\"label\":{\"text\":\"doom\"}}")
                  '("RosterSectionHeader" count "required message field is absent"))))
+
+;;;; ---- The grouping views' shared shape ----
+
+(ert-deftest agent-repl-test-wire-roster-grouping-view-decodes-its-sections-in-order ()
+  "The shared grouping-view decoder keeps the resolver's section order."
+  (should (equal (agent-repl-test-wire-roster--quiet
+                   (agent-repl-wire--decode-grouping-view
+                    "RosterTaskView"
+                    (agent-repl-test-wire-roster--parse "{\"sections\":[1,2],\"openCount\":{\"workspaces\":2}}")
+                    (lambda (n) (* 10 n))))
+                 '(:sections (10 20) :open-count (:workspaces 2)))))
+
+(ert-deftest agent-repl-test-wire-roster-grouping-view-refuses-an-unknown-field-under-its-name ()
+  "The shared grouping-view decoder names the message it decodes in a breach."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  (lambda (value)
+                    (agent-repl-wire--decode-grouping-view "RosterTaskView" value #'identity))
+                  "{\"sections\":[],\"extra\":{}}")
+                 '("RosterTaskView" extra "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-every-grouping-view-shares-the-grouping-shape ()
+  "Every grouping view decodes through `agent-repl-wire--decode-grouping-view'."
+  (dolist (case '((agent-repl-wire-decode-roster-repository-view . "RosterRepositoryView")
+                  (agent-repl-wire-decode-roster-task-view . "RosterTaskView")
+                  (agent-repl-wire-decode-roster-maturity-view . "RosterMaturityView")))
+    (let (seen)
+      (cl-letf* ((real (symbol-function 'agent-repl-wire--decode-grouping-view))
+                 ((symbol-function 'agent-repl-wire--decode-grouping-view)
+                  (lambda (name value sections)
+                    (push name seen)
+                    (funcall real name value sections))))
+        (agent-repl-test-wire-roster--decode (car case) "{\"sections\":[],\"openCount\":{}}"))
+      (should (equal seen (list (cdr case)))))))
+
+;;;; ---- The open-workspaces section ----
+
+(ert-deftest agent-repl-test-wire-roster-without-the-open-section-is-a-breach ()
+  "The open section is on every roster."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-workspace-roster
+                  (replace-regexp-in-string
+                   "\"open\":{\"label\":{\"text\":\"Open\"},\"collapsed\":{}}," ""
+                   agent-repl-test-wire-roster--roster-json t t))
+                 '("WorkspaceRoster" open "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-roster-decodes-an-expanded-open-section ()
+  "The open section decodes its label and its fold."
+  (should (equal (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-open-section
+                  "{\"label\":{\"text\":\"Open\"},\"expanded\":{}}")
+                 '(:label (:text "Open") :fold (:arm :expanded :value nil)))))
+
+(ert-deftest agent-repl-test-wire-roster-an-open-section-without-a-fold-is-a-breach ()
+  "The open section's fold is never unset on the wire."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-open-section
+                  "{\"label\":{\"text\":\"Open\"}}")
+                 '("RosterOpenSection" fold "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-roster-an-open-section-refuses-an-unknown-field ()
+  "An unknown key on the open section is refused at the section."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-open-section
+                  "{\"label\":{},\"expanded\":{},\"header\":{}}")
+                 '("RosterOpenSection" header "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-a-grouping-view-without-its-open-count-is-a-breach ()
+  "Every grouping view carries the open section's count."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-task-view "{\"sections\":[]}")
+                 '("RosterTaskView" openCount "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-roster-an-open-count-refuses-an-unknown-field ()
+  "An unknown key on the open count is refused at the count."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-open-count "{\"workspaces\":1,\"rows\":2}")
+                 '("RosterOpenCount" rows "unknown field"))))

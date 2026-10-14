@@ -97,7 +97,7 @@ current workspace's row sits in, so a create test hands them this."
                    :status (list :arm :ready :value nil)
                    :current (list :current nil)
                    :children nil
-                   :when nil
+                   :when '(:arm :no-turn-running :value nil)
                    :detail (list :branch nil :parent-branch nil :summary nil)
                    :closed (list :closed nil))))
     (while overrides
