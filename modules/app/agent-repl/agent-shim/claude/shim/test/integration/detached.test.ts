@@ -24,6 +24,7 @@ import { Code, ConnectError } from "@connectrpc/connect";
 import { afterEach, describe, expect, test } from "vitest";
 import { conversationv1, shimv1, storev1 } from "../../src/proto.js";
 import { cleanupShims, spawnShim } from "../integration-support/harness.js";
+import { detachGate } from "../integration-support/detach-gate.js";
 import {
   activityId,
   agentId,
@@ -697,17 +698,6 @@ describe("what the PRODUCER states about a shell run", () => {
 // ---------------------------------------------------------------------------
 
 describe("a detached shell's lifecycle: the shim writes its start, the sidecar its end", () => {
-  /** A detach gate: a path the mock vendor's detached work parks on until it exists. */
-  function detachGate(): { readonly path: string; release(): void; dispose(): void } {
-    const dir = mkdtempSync(join(tmpdir(), "shim-detach-gate-"));
-    const path = join(dir, "release");
-    return {
-      path,
-      release: () => writeFileSync(path, ""),
-      dispose: () => rmSync(dir, { recursive: true, force: true }),
-    };
-  }
-
   /** The live membership a NEW WatchSession is re-announced, by handle. */
   async function reannouncedLiveWork(shim: Awaited<ReturnType<typeof spawnShim>>): Promise<string[]> {
     const watch = openStream((options) =>
