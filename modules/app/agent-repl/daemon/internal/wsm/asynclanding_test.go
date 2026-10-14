@@ -3,6 +3,7 @@ package wsm
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 )
 
@@ -25,7 +26,7 @@ func TestRegisterWorkspaceRecordsAMergeWorkspacesLandingEffects(t *testing.T) {
 	loaded, err := s.Workspace(context.Background(), ws.ID)
 
 	// Assert
-	if err != nil || loaded.MergeOf == nil || *loaded.MergeOf != origin {
+	if err != nil || loaded.MergeOf == nil || !reflect.DeepEqual(*loaded.MergeOf, origin) {
 		t.Fatalf("MergeOf = %+v, %v; want %+v", loaded.MergeOf, err, origin)
 	}
 }

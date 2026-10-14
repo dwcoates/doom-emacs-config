@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -1267,6 +1268,14 @@ func TestMergeWorkspaceMapsEachModeArm(t *testing.T) {
 			want: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix"}, detached: &merge.DetachedRun{Name: "reconnect-fix", Pick: "the fix"}},
 		{name: "an async merge compacting after", req: asyncRequest(&agentreplv1.MergeWorkspaceAsync{Name: "reconnect-fix", Branch: "agent-1/fix", CompactAfter: true}),
 			want: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix"}, detached: &merge.DetachedRun{Name: "reconnect-fix", CompactAfter: true}},
+		{name: "an async merge with its own merge actions", req: asyncRequest(&agentreplv1.MergeWorkspaceAsync{Name: "reconnect-fix", Branch: "agent-1/fix",
+			MergeActions: &agentreplv1.CreateWorkspaceMergeActions{BeforeWsMerge: said("run the linters"), PostprocessingPrompt: said("post the summary")}}),
+			want: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix"}, detached: &merge.DetachedRun{Name: "reconnect-fix",
+				Actions: wsm.MergeActions{Before: []string{"run the linters"}, After: []string{"post the summary"}}}},
+		{name: "an async merge with a before action alone", req: asyncRequest(&agentreplv1.MergeWorkspaceAsync{Name: "reconnect-fix", Branch: "agent-1/fix",
+			MergeActions: &agentreplv1.CreateWorkspaceMergeActions{BeforeWsMerge: said("run the linters")}}),
+			want: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix"}, detached: &merge.DetachedRun{Name: "reconnect-fix",
+				Actions: wsm.MergeActions{Before: []string{"run the linters"}}}},
 		{name: "an async one-shot cleaning up", req: asyncRequest(&agentreplv1.MergeWorkspaceAsync{Name: "reconnect-fix", Branch: "agent-1/fix",
 			OneShot: &agentreplv1.MergeWorkspaceAsyncOneShot{Workspace: ref()}, CleanupWorktree: true}),
 			want: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix"}, detached: &merge.DetachedRun{Name: "reconnect-fix", CloseOnLanding: testWorkspaceID, CleanupWorktree: true}},
@@ -1282,11 +1291,11 @@ func TestMergeWorkspaceMapsEachModeArm(t *testing.T) {
 			}
 
 			// Assert.
-			if len(h.Merge.requests) != 1 || h.Merge.requests[0].Source != tt.want {
+			if len(h.Merge.requests) != 1 || !reflect.DeepEqual(h.Merge.requests[0].Source, tt.want) {
 				t.Fatalf("requests = %+v, want source %+v", h.Merge.requests, tt.want)
 			}
 			got := h.Merge.requests[0].Detached
-			if (got == nil) != (tt.detached == nil) || (got != nil && *got != *tt.detached) {
+			if (got == nil) != (tt.detached == nil) || (got != nil && !reflect.DeepEqual(*got, *tt.detached)) {
 				t.Fatalf("async run = %+v, want %+v", got, tt.detached)
 			}
 		})

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -500,7 +501,7 @@ func TestRecoverKeepsAResumedMergesSource(t *testing.T) {
 
 	// Assert.
 	entries, _ := h.db.MergeQueue(context.Background(), h.repoKey())
-	if len(entries) != 1 || entries[0].Source != recorded || entries[0].State != wsm.MergeQueued {
+	if len(entries) != 1 || !reflect.DeepEqual(entries[0].Source, recorded) || entries[0].State != wsm.MergeQueued {
 		t.Fatalf("queue = %+v, want the merge back in line with its source", entries)
 	}
 }

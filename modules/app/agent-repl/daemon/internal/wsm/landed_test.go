@@ -3,6 +3,7 @@ package wsm
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -28,7 +29,7 @@ func TestRegisterWorkspaceRecordsAMergeWorkspacesForkHead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Workspace: %v", err)
 	}
-	if loaded.MergeOf == nil || *loaded.MergeOf != origin {
+	if loaded.MergeOf == nil || !reflect.DeepEqual(*loaded.MergeOf, origin) {
 		t.Fatalf("MergeOf = %+v, want %+v", loaded.MergeOf, origin)
 	}
 }

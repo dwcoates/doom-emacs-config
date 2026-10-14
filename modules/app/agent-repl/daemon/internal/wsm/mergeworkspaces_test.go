@@ -3,6 +3,7 @@ package wsm
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -46,7 +47,7 @@ func TestRegisterWorkspaceRecordsWhatAMergeWorkspaceWasForkedFor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Workspace: %v", err)
 	}
-	if loaded.MergeOf == nil || *loaded.MergeOf != (MergeOrigin{Requester: requester.ID, Request: request}) {
+	if loaded.MergeOf == nil || !reflect.DeepEqual(*loaded.MergeOf, MergeOrigin{Requester: requester.ID, Request: request}) {
 		t.Fatalf("MergeOf = %+v, want the requester and the request", loaded.MergeOf)
 	}
 }
@@ -241,7 +242,7 @@ func TestHandOffDetachedMergeMovesTheRequestOntoTheMergeWorkspace(t *testing.T) 
 		t.Fatalf("MergeQueue = %+v, %v; want one entry", queue, err)
 	}
 	want := MergeSource{Kind: MergeSourceOwnBranch, Branch: "sample-merge"}
-	if queue[0].Workspace != forked.ID || queue[0].Source != want || queue[0].State != MergeRequested {
+	if queue[0].Workspace != forked.ID || !reflect.DeepEqual(queue[0].Source, want) || queue[0].State != MergeRequested {
 		t.Fatalf("entry = %+v, want the merge workspace's requested in-place merge", queue[0])
 	}
 }

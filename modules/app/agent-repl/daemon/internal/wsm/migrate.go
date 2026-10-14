@@ -141,6 +141,7 @@ var migrations = []migration{
 	{To: 48, Name: "hidden_cache_lapse", Kind: MigrationAdditive, DDL: cacheLapseDDL},
 	{To: 49, Name: "merge_version_increment", Kind: MigrationAdditive, DDL: versionIncrementDDL},
 	{To: 50, Name: "owed_handbacks", Kind: MigrationAdditive, DDL: owedHandBacksDDL},
+	{To: 51, Name: "async_merge_actions", Kind: MigrationAdditive, DDL: asyncMergeActionsDDL},
 }
 
 // mergeQueueFrontDDL records whether a merge asked to go to the FRONT of its
