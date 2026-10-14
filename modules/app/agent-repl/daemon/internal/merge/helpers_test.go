@@ -838,6 +838,17 @@ type fakeGit struct {
 	// fastForwards records every landing, as "<dir>@<commit>".
 	fastForwards   []string
 	fastForwardErr error
+	// tagsMerged answers TagsMerged; tagsMergedErr fails it. tagsAt answers
+	// TagsAt by commit. createdTags records every CreateAnnotatedTag as
+	// "<name>@<commit>: <message>"; createTagErr fails it.
+	tagsMerged    []string
+	// mainWorktrees answers MainWorktree by directory; an unnamed directory
+	// is its own main worktree.
+	mainWorktrees map[string]string
+	tagsMergedErr error
+	tagsAt        map[string][]string
+	createdTags   []string
+	createTagErr  error
 	// contained answers IsAncestor for the source branch: it is already in the
 	// target. ancestry answers every other IsAncestor, keyed "<a>><b>", false
 	// when unscripted.
@@ -1013,6 +1024,31 @@ func (g *fakeGit) FastForward(_ context.Context, dir, commit string) error {
 	return g.fastForwardErr
 }
 
+func (g *fakeGit) TagsMerged(context.Context, string, string) ([]string, error) {
+	g.record("tags_merged")
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.tagsMerged, g.tagsMergedErr
+}
+
+func (g *fakeGit) TagsAt(_ context.Context, _, commit string) ([]string, error) {
+	g.record("tags_at")
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.tagsAt[commit], nil
+}
+
+func (g *fakeGit) CreateAnnotatedTag(_ context.Context, _, name, commit, message string) error {
+	g.record("create_annotated_tag")
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.createTagErr != nil {
+		return g.createTagErr
+	}
+	g.createdTags = append(g.createdTags, name+"@"+commit+": "+message)
+	return nil
+}
+
 func (g *fakeGit) IsAncestor(_ context.Context, _, ancestor, descendant string) (bool, error) {
 	g.record("is_ancestor")
 	g.mu.Lock()
@@ -1038,6 +1074,11 @@ func (g *fakeGit) CommonDir(_ context.Context, dir string) (string, error) {
 
 func (g *fakeGit) MainWorktree(_ context.Context, dir string) (string, error) {
 	g.record("main_worktree")
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if main, ok := g.mainWorktrees[dir]; ok {
+		return main, nil
+	}
 	return dir, nil
 }
 

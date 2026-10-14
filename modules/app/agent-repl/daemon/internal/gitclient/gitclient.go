@@ -209,6 +209,39 @@ func (c *client) FastForward(ctx context.Context, dir, commit string) error {
 	return err
 }
 
+// TagsMerged lists the tags reachable from commit (`tag --list --merged`).
+func (c *client) TagsMerged(ctx context.Context, dir, commit string) ([]string, error) {
+	out, err := c.run(ctx, "daemon.gitclient.tags_merged", dir, "tag", "--list", "--merged", commit)
+	if err != nil {
+		return nil, err
+	}
+	return lines(out), nil
+}
+
+// TagsAt lists the tags that point at commit (`tag --list --points-at`).
+func (c *client) TagsAt(ctx context.Context, dir, commit string) ([]string, error) {
+	out, err := c.run(ctx, "daemon.gitclient.tags_at", dir, "tag", "--list", "--points-at", commit)
+	if err != nil {
+		return nil, err
+	}
+	return lines(out), nil
+}
+
+// CreateAnnotatedTag creates an annotated tag. Without -f, git refuses a name
+// that is already a tag, which is what keeps a version from being re-pointed.
+func (c *client) CreateAnnotatedTag(ctx context.Context, dir, name, commit, message string) error {
+	_, err := c.run(ctx, "daemon.gitclient.create_annotated_tag", dir, "tag", "--annotate", "--message", message, "--end-of-options", name, commit)
+	return err
+}
+
+// lines splits git's one-name-per-line output, an empty output being none.
+func lines(out string) []string {
+	if out == "" {
+		return nil
+	}
+	return strings.Split(out, "\n")
+}
+
 // IsAncestor reports whether ancestor is reachable from descendant, through
 // `merge-base --is-ancestor`: exit 0 is yes and exit 1 is no, both ANSWERS.
 // Any other exit is git failing to tell (an unknown ref, a broken repository),
