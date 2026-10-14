@@ -536,7 +536,7 @@ when the daemon answered the register with REFUSAL, a decoded error."
         :status (list :arm :ready :value nil)
         :current (list :current nil)
         :children nil
-        :when nil
+        :when '(:arm :no-turn-running :value nil)
         :detail (list :branch nil :parent-branch nil :summary nil)
         :closed (list :closed (and closed t))))
 
