@@ -52,11 +52,11 @@ type fakeDB struct {
 
 	wsm.DB
 
-	// sweeps counts SweepOrphanedMergeState calls; sweepProgress, sweepRounds
-	// and sweepErr are what it answers.
-	sweeps                     int
-	sweepProgress, sweepRounds int
-	sweepErr                   error
+	// sweeps counts SweepOrphanedMergeState calls; swept and sweepErr are
+	// what it answers.
+	sweeps   int
+	swept    wsm.OrphanedMergeState
+	sweepErr error
 
 	mu sync.Mutex
 
@@ -620,11 +620,17 @@ func (f *fakeDB) YieldMergeHead(_ context.Context, repo wsm.RepoKey, loser, winn
 	return nil
 }
 
-func (f *fakeDB) SweepOrphanedMergeState(context.Context, time.Time) (int, int, error) {
+func (f *fakeDB) SweepOrphanedMergeState(context.Context, time.Time) (wsm.OrphanedMergeState, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.sweeps++
-	return f.sweepProgress, f.sweepRounds, f.sweepErr
+	if f.sweepErr != nil {
+		return wsm.OrphanedMergeState{}, f.sweepErr
+	}
+	for _, l := range f.swept.ReleasedLeases {
+		delete(f.leases, l.Workspace)
+	}
+	return f.swept, nil
 }
 
 func (f *fakeDB) AdmitMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID) error {
