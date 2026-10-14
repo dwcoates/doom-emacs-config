@@ -1,7 +1,4 @@
 // @vitest-environment jsdom
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import renderColors from "../../../proto/vocab/render-colors.json";
 import { RosterRowSchema } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
@@ -20,14 +17,13 @@ import {
   type RosterStatusCase,
   type RowMarkers,
 } from "../../src/sidebar/tones.js";
+import { readGlyphPicture } from "../glyph-pictures";
 
 
 const ROSTER_STATUS = renderColors.roster_status as Record<string, string>;
 const MERGE_GLYPHS = renderColors.merge_glyphs as Record<string, string>;
 const GATE_GLYPHS = renderColors.gate_glyphs as Record<string, string>;
 const GLYPH_INKS = renderColors.glyph_inks as Record<string, string>;
-/** The shared glyph pictures, which the Emacs tab bar draws too. */
-const GLYPH_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../../images/glyphs");
 /** A one-shot row carrying no other marker. */
 const ONE_SHOT: RowMarkers = { oneShot: true, asyncMerging: false };
 /** The arms a one-shot's glyph replaces the mark on, in the generated spelling. */
@@ -68,7 +64,7 @@ describe("the status mark", () => {
   it.each(Object.entries(GLYPH_IMAGES).filter(([, image]) => image !== ""))(
     "draws the %s glyph from the shared images/glyphs file",
     (name, image) => {
-      expect(image).toBe(readFileSync(path.join(GLYPH_DIR, `${name}.svg`), "utf8"));
+      expect(image).toBe(readGlyphPicture(name));
     },
   );
 
