@@ -268,6 +268,7 @@ func (r *resolver) render(log dlog.Logger, cause string) *frontendv1.WorkspaceRo
 		Task:           r.taskView(live, rc, log),
 		Maturity:       r.maturityView(live, rc, log),
 		Hidden:         r.hiddenSection(hidden, rc, log),
+		Open:           r.openSection(),
 		RecentlyMerged: r.mergedSection(merged, rc, log),
 		TabBar:         r.tabBar(),
 	}

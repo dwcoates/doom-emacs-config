@@ -357,6 +357,9 @@ type Verbs interface {
 	// FoldHiddenSection records whether the hidden-workspaces section is
 	// collapsed and republishes the roster.
 	FoldHiddenSection(ctx context.Context, folded bool) error
+	// FoldOpenSection records whether the open-workspaces section is
+	// collapsed and republishes the roster.
+	FoldOpenSection(ctx context.Context, folded bool) error
 	// FoldMaturitySection records whether a maturity stage's section is
 	// collapsed and republishes the roster.
 	FoldMaturitySection(ctx context.Context, stage wsm.MaturityStage, folded bool) error

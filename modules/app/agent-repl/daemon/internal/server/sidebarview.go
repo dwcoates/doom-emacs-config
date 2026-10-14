@@ -75,6 +75,8 @@ func (s *server) foldSection(
 		return false, nil, s.deps.Verbs.FoldMergedSection(ctx, folded)
 	case *agentreplv1.SidebarViewFoldSection_Hidden:
 		return false, nil, s.deps.Verbs.FoldHiddenSection(ctx, folded)
+	case *agentreplv1.SidebarViewFoldSection_Open:
+		return false, nil, s.deps.Verbs.FoldOpenSection(ctx, folded)
 	case *agentreplv1.SidebarViewFoldSection_Maturity:
 		return false, nil, s.deps.Verbs.FoldMaturitySection(ctx, maturityStageOf(section.Maturity), folded)
 	default:
