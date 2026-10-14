@@ -177,17 +177,13 @@ func TestTwoMergesOfARepositoryAlternateTheTestTurnAndTheirGatesNeverOverlap(t *
 	b.shim.ExpectStartTurn()
 	gate.awaitStart(d, a.ws.GetDir())
 	gate.release(0)
-	aMerge := awaitRow(t, a, aRoot, "alpha's terminal", func(row *frontendv1.FeedRow) bool {
-		return row.GetActivity().GetMerge().GetSuccess() != nil || row.GetActivity().GetMerge().GetError() != nil
-	})
+	aMerge := awaitRow(t, a, aRoot, "alpha's terminal", isMergeTerminal)
 	d.AwaitLandingDeployed()
 	// B's fix ends; B runs alone and passes.
 	pushConcludedTurn(b.shim, mainAgent, "beta-fix")
 	gate.awaitStart(d, b.ws.GetDir())
 	gate.release(0)
-	bMerge := awaitRow(t, b, bRoot, "beta's terminal", func(row *frontendv1.FeedRow) bool {
-		return row.GetActivity().GetMerge().GetSuccess() != nil || row.GetActivity().GetMerge().GetError() != nil
-	})
+	bMerge := awaitRow(t, b, bRoot, "beta's terminal", isMergeTerminal)
 	d.AwaitLandingDeployed()
 
 	// Assert.
