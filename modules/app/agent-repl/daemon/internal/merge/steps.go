@@ -40,7 +40,7 @@ func (r *run) setStep(ctx context.Context, step footer.MergeStep, apply func(*fo
 		r.stepAt = now
 	}
 	r.mu.Unlock()
-	r.o.publish(r.ws, facts)
+	r.o.publish(r.repo, r.ws, facts)
 	if changed && step != footer.StepEnqueued {
 		if err := r.o.republishQueue(ctx, r.repo); err != nil {
 			recordFailed(r.o.log(ctx, r.ws), "daemon.merge.step", "could not tell the merges waiting behind this one its new step",
@@ -66,7 +66,7 @@ func (r *run) updateFacts(apply func(*footer.MergeFacts)) {
 	}
 	r.facts = facts
 	r.mu.Unlock()
-	r.o.publish(r.ws, facts)
+	r.o.publish(r.repo, r.ws, facts)
 }
 
 // enqueuedLine is the line every merge waiting behind this one draws: this

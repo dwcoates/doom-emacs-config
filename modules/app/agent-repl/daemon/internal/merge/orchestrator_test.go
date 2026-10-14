@@ -124,7 +124,7 @@ func TestAMergeInLineOrInFlightWithNoQueueInstantIsRecorded(t *testing.T) {
 			h := newHarness(t)
 
 			// Act.
-			h.o.publish(theWorkspace, tc.facts)
+			h.o.publish(h.repoKey(), theWorkspace, tc.facts)
 
 			// Assert: recorded with what diagnoses it, and still published.
 			record, ok := h.recordFor("error", "daemon.merge.publish")
@@ -157,7 +157,7 @@ func TestAMergeWithItsQueueInstantOrNoneStandingIsNotRecorded(t *testing.T) {
 			h := newHarness(t)
 
 			// Act.
-			h.o.publish(theWorkspace, tc.facts)
+			h.o.publish(h.repoKey(), theWorkspace, tc.facts)
 
 			// Assert.
 			if record, ok := h.recordFor("error", "daemon.merge.publish"); ok {

@@ -97,6 +97,11 @@ type fakeDB struct {
 	// pauseWriteErr what every SetMergeQueuePaused answers.
 	pausedReadErr error
 	pauseWriteErr error
+	// subscriptions are the merge queue subscriptions; subscribeErr and
+	// unsubscribeErr, when set, fail every subscribe and unsubscribe.
+	subscriptions  []wsm.MergeQueueSubscription
+	subscribeErr   error
+	unsubscribeErr error
 	// prioritizeErr, when set, is what every PrioritizeMerge answers.
 	prioritizeErr error
 	// moveErr, when set, is what every MoveMerge answers.
@@ -832,6 +837,42 @@ func (f *fakeDB) MergeQueuePaused(_ context.Context, repo wsm.RepoKey) (bool, er
 		return false, f.pausedReadErr
 	}
 	return f.paused[repo], nil
+}
+
+// SubscribeMergeQueue records a subscription in the fake's set, replacing the
+// one its subscriber holds in the same scope; subscribeErr, when set, is what
+// it answers instead.
+func (f *fakeDB) SubscribeMergeQueue(_ context.Context, sub wsm.MergeQueueSubscription) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.subscribeErr != nil {
+		return false, f.subscribeErr
+	}
+	for i, held := range f.subscriptions {
+		if held.Subscriber == sub.Subscriber && held.Repo == sub.Repo {
+			f.subscriptions[i] = sub
+			return true, nil
+		}
+	}
+	f.subscriptions = append(f.subscriptions, sub)
+	return false, nil
+}
+
+// UnsubscribeMergeQueue ends one subscription in the fake's set;
+// unsubscribeErr, when set, is what it answers instead.
+func (f *fakeDB) UnsubscribeMergeQueue(_ context.Context, subscriber wsm.WorkspaceID, repo wsm.RepoKey) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.unsubscribeErr != nil {
+		return false, f.unsubscribeErr
+	}
+	for i, held := range f.subscriptions {
+		if held.Subscriber == subscriber && held.Repo == repo {
+			f.subscriptions = slices.Delete(f.subscriptions, i, i+1)
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // fakeGit answers every git fact from a script. It embeds nothing: the whole
@@ -2112,8 +2153,10 @@ type harness struct {
 	// asks are the workspace sessions' open asks, as the watcher reports them.
 	asks *Asks
 
-	o       *orchestrator
-	db      *fakeDB
+	o  *orchestrator
+	db *fakeDB
+	// events records every queue change the orchestrator reports.
+	events  *fakeQueueEvents
 	git     *fakeGit
 	queue   *fakeQueue
 	feed    *fakeFeed
@@ -2347,6 +2390,7 @@ func newHarness(t *testing.T) *harness {
 		freeness:  &fakeFreeness{},
 	}
 	h.detached = &fakeDetached{h: h}
+	h.events = &fakeQueueEvents{}
 	h.names = &fakeNames{}
 	h.banners = &fakeBanners{}
 	h.queue = &fakeQueue{db: h.db}
@@ -2403,7 +2447,8 @@ func newHarness(t *testing.T) *harness {
 // deps assembles the dependency set from the harness's fakes.
 func (h *harness) deps() Deps {
 	return Deps{
-		DB: h.db, Git: h.git, Queue: h.queue, Feed: h.feed, Footer: h.footer,
+		QueueEvents: h.events,
+		DB:          h.db, Git: h.git, Queue: h.queue, Feed: h.feed, Footer: h.footer,
 		Sidebar: h.sidebar, Asks: h.asks, Banners: h.banners, PromptsDir: "prompts",
 		Policy:      harnessPolicy{h: h},
 		Briefs:      h.loadBrief,
@@ -2983,6 +3028,35 @@ func attemptsUpTo(n int) []int {
 	out := make([]int, n)
 	for i := range out {
 		out[i] = i + 1
+	}
+	return out
+}
+
+// fakeQueueEvents records every reported queue change, in order.
+type fakeQueueEvents struct {
+	mu      sync.Mutex
+	changes []QueueChange
+}
+
+// QueueChanged records CHANGE.
+func (f *fakeQueueEvents) QueueChanged(change QueueChange) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.changes = append(f.changes, change)
+}
+
+// reported answers every change reported so far.
+func (f *fakeQueueEvents) reported() []QueueChange {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.changes)
+}
+
+// kinds names every change reported so far, in order.
+func (f *fakeQueueEvents) kinds() []QueueChangeKind {
+	var out []QueueChangeKind
+	for _, change := range f.reported() {
+		out = append(out, change.Kind)
 	}
 	return out
 }

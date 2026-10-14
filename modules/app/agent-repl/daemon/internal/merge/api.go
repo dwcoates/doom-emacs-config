@@ -132,6 +132,15 @@ type Orchestrator interface {
 	// which gives back its lease, its queue entry, its ledger interval and its
 	// repository's slot, and the call returns once that is done.
 	Evict(ctx context.Context, ws ids.WorkspaceID) error
+	// Subscribe records SUBSCRIBER's subscription to the queue of the
+	// repository SCOPE names (every repository's for nil) at DETAIL,
+	// replacing the detail of the one it holds in that scope, and answers
+	// whether it replaced one. A closed subscriber is refused
+	// (ArmSubscriberClosed), as is an unknown repository.
+	Subscribe(ctx context.Context, subscriber ids.WorkspaceID, scope *RepositoryScope, detail wsm.MergeQueueDetail) (bool, error)
+	// Unsubscribe ends SUBSCRIBER's subscription in SCOPE, and only there. A
+	// subscriber holding none there is refused (ArmNotSubscribed).
+	Unsubscribe(ctx context.Context, subscriber ids.WorkspaceID, scope *RepositoryScope) error
 	// Move moves a workspace's waiting merge one place up or down its queue,
 	// past the nearest waiting merge on that side, answering whether it moved.
 	// A merge with no waiting merge on that side, or one not waiting (running,
@@ -462,6 +471,10 @@ type Deps struct {
 	// Detached forks a detached request's merge workspace and hands its
 	// outcome back to the requester.
 	Detached DetachedMerges
+	// QueueEvents is told every change of every queue this daemon makes, with
+	// the queue as it stands after it: the merge queue subscriptions' notices
+	// (internal/mergenotice).
+	QueueEvents QueueObserver
 	// Names checks and claims an async request's merge workspace name.
 	Names Names
 	// Footer and Sidebar receive the merge facts.

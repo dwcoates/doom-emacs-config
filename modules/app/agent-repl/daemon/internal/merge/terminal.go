@@ -195,7 +195,7 @@ func (r *run) concluded(facts MergeFacts) {
 	r.mu.Lock()
 	r.facts = facts
 	r.mu.Unlock()
-	r.o.publish(r.ws, facts)
+	r.o.publish(r.repo, r.ws, facts)
 }
 
 // landedCount is the commit count a landed merge brought in: the commits its

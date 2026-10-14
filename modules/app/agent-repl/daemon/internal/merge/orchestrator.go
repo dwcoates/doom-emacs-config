@@ -136,6 +136,9 @@ type orchestrator struct {
 	// and the requests waiting for their turn to end. Nothing in production
 	// waits on it; a test does, so nothing it started outlives the test.
 	live sync.WaitGroup
+	// events serializes the queue's reported changes (subscriptions.go). It
+	// is its own lock, never taken with mu.
+	events *queueEvents
 	// runsByWorkspace addresses the in-flight run of one requester.
 	runsByWorkspace map[ids.WorkspaceID]*run
 	// requested are the requests waiting for their requesting turn to end.
@@ -303,11 +306,17 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		offers:          map[ids.WorkspaceID]bool{},
 		repoOf:          map[ids.WorkspaceID]wsm.RepoKey{},
 		pumping:         map[wsm.RepoKey]bool{},
+		events:          newQueueEvents(),
 	}
 	// EVERY WRITE THAT ADDS OR REMOVES A QUEUE ROW REPUBLISHES THE ROSTER'S
-	// ASYNC SET (asyncmerges.go): the orchestrator only ever writes through
-	// the wrapped DB.
-	o.deps.DB = rosterQueueDB{DB: deps.DB, o: o}
+	// QUEUE (rosterqueue.go): the orchestrator only ever writes through the
+	// wrapped DB.
+	//
+	// AND EVERY WRITE THAT CHANGES A QUEUE'S LINE REPORTS ITSELF to the
+	// subscriptions' observer (subscriptions.go), beneath that: the report is
+	// made under the queue events' lock, and the roster's republish after it,
+	// outside it.
+	o.deps.DB = rosterQueueDB{DB: queueEventsDB{DB: deps.DB, o: o}, o: o}
 	deps.Asks.bind(o.askChanged)
 	deps.Governor.OnModeChange(o.modeChanged)
 	return o, nil
@@ -370,6 +379,7 @@ func (d Deps) validate() error {
 	check(d.Freeness != nil, "Freeness")
 	check(d.TurnInFlight != nil, "TurnInFlight")
 	check(d.Rollout != nil, "Rollout")
+	check(d.QueueEvents != nil, "QueueEvents")
 	check(d.Log != nil, "Log")
 	check(d.StateDir != "", "StateDir")
 	check(d.SelfRepoDir != "", "SelfRepoDir")
@@ -404,14 +414,21 @@ func (o *orchestrator) Facts(ws ids.WorkspaceID) (MergeFacts, bool) {
 // publish installs one workspace's merge facts on both surfaces that draw them.
 // The footer and the roster read the SAME value, so the two can never disagree
 // about a merge.
-func (o *orchestrator) publish(ws ids.WorkspaceID, facts MergeFacts) {
+//
+// A STARTED MERGE MOVING TO A NEW STEP is reported to the subscribers of
+// REPO, the queue the merge stands in, from here (noteFacts), since a step
+// is no queue write. Every caller names the queue it publishes for, so a
+// step can never be reported against no queue.
+func (o *orchestrator) publish(repo wsm.RepoKey, ws ids.WorkspaceID, facts MergeFacts) {
 	checkQueuedAt(o.log(context.Background(), ws), ws, facts)
 	o.mu.Lock()
+	_, hadFacts := o.facts[ws]
 	o.facts[ws] = facts
 	o.mu.Unlock()
 	o.footerSetMerge(ws, facts)
 	o.deps.Sidebar.SetMerge(ws, facts)
 	o.publishHost(ws)
+	o.noteFacts(ws, repo, hadFacts, facts)
 }
 
 // checkQueuedAt records a merge standing in line or in flight that carries no

@@ -110,7 +110,7 @@ func (r *run) resumeRun(ctx context.Context) error {
 	// pinned, and the footer shows the step the merge stands on before that
 	// step speaks.
 	r.head(nil)
-	o.publish(ws, r.factsNow())
+	o.publish(r.repo, ws, r.factsNow())
 	if err := o.republishQueue(ctx, r.repo); err != nil {
 		r.end(ctx, fmt.Errorf("could not publish the queue: %w", err))
 		return err

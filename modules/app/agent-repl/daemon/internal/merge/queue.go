@@ -572,7 +572,7 @@ func (o *orchestrator) republishQueue(ctx context.Context, repo wsm.RepoKey) err
 		// ENQUEUED k/n COUNTS ONLY THE WAITING: the merge being worked on is
 		// not counted, so 1 means next and there is never a 0.
 		place++
-		o.publish(entry.Workspace, MergeFacts{
+		o.publish(repo, entry.Workspace, MergeFacts{
 			State: StateQueued, QueuedAt: entry.EnqueuedAt, Step: footer.StepEnqueued, QueuePlace: place, QueueWaiting: waiting,
 			Line: ahead, LineAt: aheadAt,
 		})
