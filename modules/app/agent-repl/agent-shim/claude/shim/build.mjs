@@ -27,7 +27,7 @@
 import { build } from "esbuild";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { esbuildRegistryGuard } from "../../../proto/ts/registry-guard.mjs";
+import { bundleOptions } from "./build-options.mjs";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -46,20 +46,9 @@ const outfile = process.env.SHIM_BUILD_OUTFILE || path.join(dir, "dist/main.js")
 const sourcemap = process.env.SHIM_BUILD_SOURCEMAP === "1";
 
 await build({
-  entryPoints: [path.join(dir, "src/main.ts")],
-  outfile,
-  bundle: true,
-  platform: "node",
-  format: "esm",
-  target: "node20",
+  ...bundleOptions(path.join(dir, "src/main.ts"), outfile),
   sourcemap,
   external: ["@anthropic-ai/claude-agent-sdk"],
-  // Resolve bare imports (notably @bufbuild/protobuf, imported by the
-  // out-of-package proto stubs) from THIS package's node_modules.
-  nodePaths: [path.join(dir, "node_modules")],
-  // protobuf-es re-walks every booted dependency's closure for each file it
-  // boots; the guard cuts ~55ms from every shim start (proto/ts/registry-guard.mjs).
-  plugins: [esbuildRegistryGuard()],
   // THE BUILD IDENTITY IS NOT BAKED. It is read from the SPAWN ENV at
   // runtime (`process.env.SHIM_BUILD_SHA`, src/build-identity.ts), because a
   // shim outlives its daemon and the daemon must be able to tell what the
