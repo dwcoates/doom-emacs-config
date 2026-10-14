@@ -36,7 +36,9 @@ test_split_init "${BASH_SOURCE[0]}" "$@"
 
 # A pre-commit hook exports its live index to children. The fake git ignores
 # them, but nothing here should carry a binding to the caller's repository.
-unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX
+# shellcheck source=/dev/null
+. "$(dirname "${BASH_SOURCE[0]}")/lib-fake-git-fixture.sh"
+clear_live_git_bindings
 # The services' build reports live under $AGENT_REPL_LOCK_DIR when it is set.
 # A value inherited from the caller would point every fixture at a real run
 # directory, so the harness sets it only where a test means to.

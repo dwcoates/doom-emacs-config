@@ -25,10 +25,11 @@ set -euo pipefail
 
 # This harness may itself be run from a git hook.  Clear the caller's live Git
 # bindings so nothing below can read them as its own.
-unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX
+# shellcheck source=/dev/null
+. "$(dirname "${BASH_SOURCE[0]}")/../modules/app/agent-repl/bin/lib-fake-git-fixture.sh"
+clear_live_git_bindings
 
 THIS_DIR="$(cd "$(dirname "$0")" && pwd)"
-HOOK_SRC="$THIS_DIR/pre-commit"
 FAKE_GIT="$THIS_DIR/../modules/app/agent-repl/bin/fake-git.sh"
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/agent-repl-precommit-test.XXXXXX")"
@@ -84,9 +85,7 @@ exit "${HOOK_TEST_RUN_EXIT:-0}"
 EOF
   chmod +x "$repo/modules/app/$module/bin/test-all.sh"
 
-  mkdir -p "$repo/.fakegit/hooks"
-  cp "$HOOK_SRC" "$repo/.fakegit/hooks/pre-commit"
-  chmod +x "$repo/.fakegit/hooks/pre-commit"
+  install_checked_in_hook "$repo" pre-commit
   printf '%s\n' "$repo"
 }
 

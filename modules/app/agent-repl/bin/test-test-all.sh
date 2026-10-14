@@ -18,6 +18,9 @@ THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_SRC="$THIS_DIR/test-all.sh"
 REAL_SAFE_TEST_RUN="$(cd "$THIS_DIR/../../../.." && pwd)/.claude/safe-test-run.sh"
 CSVHeader="run_id,recorded_at_utc,commit,branch,suite,duration_seconds,measure"
+# shellcheck source=/dev/null
+. "$THIS_DIR/lib-fake-git-fixture.sh"
+
 PASS=0
 FAIL=0
 
@@ -127,9 +130,7 @@ EOF
     PATH="$tree/stubs:/usr/bin:/bin" git -C "$repo" init
     PATH="$tree/stubs:/usr/bin:/bin" git -C "$repo" add -A
     PATH="$tree/stubs:/usr/bin:/bin" git -C "$repo" commit -m base
-    mkdir -p "$repo/.fakegit/hooks"
-    cp "$THIS_DIR/../../../../.githooks/reference-transaction" "$repo/.fakegit/hooks/reference-transaction"
-    chmod +x "$repo/.fakegit/hooks/reference-transaction"
+    install_checked_in_hook "$repo" reference-transaction
 
     # The stub testrun: `run` stages to --record-out only (and can simulate a
     # suite failure or HEAD moving); `finish-record` is the only thing that
