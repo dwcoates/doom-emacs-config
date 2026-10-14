@@ -325,8 +325,10 @@ type fakeVerbs struct {
 	groupings      []wsm.Grouping
 	sectionFoldErr error
 	closeErr       error
-	openErr        error
-	forgetErr      error
+	// closedBy is every cause Close was asked with, in order.
+	closedBy  []wsm.CloseCause
+	openErr   error
+	forgetErr error
 
 	// openStages are replayed into whatever reporter the rpc armed, and
 	// openProgress is the reporter itself so a test can assert its absence.
@@ -547,7 +549,10 @@ func (f *fakeVerbs) MarkViewed(_ context.Context, ws ids.WorkspaceID) error {
 	return f.markViewedErr
 }
 
-func (f *fakeVerbs) Close(context.Context, ids.WorkspaceID) error { return f.closeErr }
+func (f *fakeVerbs) Close(_ context.Context, _ ids.WorkspaceID, by wsm.CloseCause) error {
+	f.closedBy = append(f.closedBy, by)
+	return f.closeErr
+}
 
 func (f *fakeVerbs) Forget(context.Context, ids.WorkspaceID) error { return f.forgetErr }
 

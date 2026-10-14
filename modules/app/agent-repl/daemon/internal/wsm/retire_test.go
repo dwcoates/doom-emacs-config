@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 )
 
 // closedUnder registers a workspace under repoDir and closes it, which is the
@@ -11,8 +12,8 @@ import (
 func closedUnder(t *testing.T, s *store, repoDir string) Workspace {
 	t.Helper()
 	ws := registerUnder(t, s, repoDir)
-	if err := s.SetClosed(context.Background(), ws.ID, true); err != nil {
-		t.Fatalf("SetClosed: %v", err)
+	if err := s.MarkClosed(context.Background(), ws.ID, Closure{At: time.Now(), By: CloseByUser}); err != nil {
+		t.Fatalf("MarkClosed: %v", err)
 	}
 	return ws
 }
@@ -151,8 +152,8 @@ func TestRetireRepositoryRefusesWhileLiveStateRemains(t *testing.T) {
 		{
 			name: "an open workspace",
 			arrange: func(t *testing.T, s *store, ws Workspace) {
-				if err := s.SetClosed(context.Background(), ws.ID, false); err != nil {
-					t.Fatalf("SetClosed: %v", err)
+				if err := s.Reopen(context.Background(), ws.ID); err != nil {
+					t.Fatalf("Reopen: %v", err)
 				}
 			},
 		},

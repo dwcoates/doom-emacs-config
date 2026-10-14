@@ -97,6 +97,7 @@ type fakeDB struct {
 	mergedAt       map[ids.WorkspaceID]time.Time
 	landedCommits  map[ids.WorkspaceID]uint32
 	closed         map[ids.WorkspaceID]bool
+	closures       map[ids.WorkspaceID]wsm.Closure
 	releasedLeases []wsm.LeaseID
 	policies       map[wsm.LeaseID]wsm.LeasePolicy
 	dropped        []string
@@ -158,6 +159,7 @@ func newFakeDB() *fakeDB {
 		mergedAt:      map[ids.WorkspaceID]time.Time{},
 		landedCommits: map[ids.WorkspaceID]uint32{},
 		closed:        map[ids.WorkspaceID]bool{},
+		closures:      map[ids.WorkspaceID]wsm.Closure{},
 		policies:      map[wsm.LeaseID]wsm.LeasePolicy{},
 		progress:      map[ids.WorkspaceID]wsm.MergeProgress{},
 		held:          map[wsm.TurnID]wsm.HeldPrompt{},
@@ -353,13 +355,14 @@ func (f *fakeDB) SetMergedAt(_ context.Context, id ids.WorkspaceID, at time.Time
 	return nil
 }
 
-func (f *fakeDB) SetClosed(_ context.Context, id ids.WorkspaceID, closed bool) error {
+func (f *fakeDB) MarkClosed(_ context.Context, id ids.WorkspaceID, closure wsm.Closure) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.shut {
 		return errStateClientClosed
 	}
-	f.closed[id] = closed
+	f.closed[id] = true
+	f.closures[id] = closure
 	return nil
 }
 

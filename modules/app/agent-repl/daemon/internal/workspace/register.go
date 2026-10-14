@@ -155,7 +155,7 @@ func (v *verbs) register(ctx context.Context, dir string, facts wsm.RegisterFact
 	// session bring-up stays OpenWorkspace's, because registration has never
 	// spawned anything and the mount is what spawns.
 	if !created && record.Closed {
-		if err := v.deps.DB.SetClosed(ctx, record.ID, false); err != nil {
+		if err := v.deps.DB.Reopen(ctx, record.ID); err != nil {
 			log.Error(opRegister, "could not re-open the announced workspace", dlog.Context{
 				"workspace": string(record.ID), "cause": err.Error(),
 			})
@@ -518,7 +518,7 @@ func (v *verbs) PublishRegistry(ctx context.Context) error {
 		// one.
 		if _, err := os.Stat(ws.Dir); errors.Is(err, fs.ErrNotExist) {
 			if !ws.Closed {
-				if err := v.deps.DB.SetClosed(ctx, ws.ID, true); err != nil {
+				if err := v.deps.DB.MarkClosed(ctx, ws.ID, wsm.Closure{At: v.now(), By: wsm.CloseByDaemon}); err != nil {
 					global.Error(opRegister, "a workspace whose directory is gone could not be closed", dlog.Context{
 						"workspace": string(ws.ID), "dir": ws.Dir, "cause": err.Error(),
 					})
