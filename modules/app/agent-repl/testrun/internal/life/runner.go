@@ -45,7 +45,7 @@ type WardenCommand struct {
 // wiring defect, answered as an error before anything runs.
 func StartRunner(table reap.Table, reapFn func(reap.Members) (reap.Result, error), warden WardenCommand, log Logger) (*Runner, error) {
 	pid := os.Getpid()
-	sid, err := syscall.Getsid(0)
+	sid, err := reap.Getsid(pid)
 	if err != nil {
 		return nil, fmt.Errorf("read the runner's session: %w", err)
 	}

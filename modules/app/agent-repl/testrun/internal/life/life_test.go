@@ -346,7 +346,7 @@ func TestStartOf(t *testing.T) {
 
 func TestStartRunnerRefusesAProcessThatDoesNotLeadItsSession(t *testing.T) {
 	// Arrange: this test process was not started by a sentinel.
-	if sid, _ := syscall.Getsid(0); sid == os.Getpid() {
+	if sid, _ := reap.Getsid(os.Getpid()); sid == os.Getpid() {
 		t.Skip("the test process leads its own session")
 	}
 

@@ -2,5 +2,5 @@ package reap
 
 import "syscall"
 
-// getsid is getsid(2).
-func getsid(pid int) (int, error) { return syscall.Getsid(pid) }
+// Getsid is getsid(2).
+func Getsid(pid int) (int, error) { return syscall.Getsid(pid) }
