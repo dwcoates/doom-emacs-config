@@ -31,7 +31,7 @@
 //
 // EVERY MESSAGE HERE IS FRONTEND SURFACE, not shim wire. A held prompt is an
 // artifact of the DAEMON's decision to hold it back, and its actions (force,
-// cancel, accept, answer) are agentrepl.v1 requests whose MECHANISM (Interrupt
+// cancel, answer) are agentrepl.v1 requests whose MECHANISM (Interrupt
 // then SubmitPrompt) is what actually crosses the shim UDS.
 
 syntax = "proto3";
@@ -85,7 +85,7 @@ message FeedHeldItem {
 // leaves it to be delivered FIFO when the turn ends on its own.
 message HeldPrompt {
   // The turn this prompt will run as — DAEMON-MINTED, the one identity a
-  // force, cancel or accept names, and the same TurnId the submission's
+  // force or cancel names, and the same TurnId the submission's
   // response returned. There is no second, daemon-internal entry id.
   conversation.v1.TurnId turn = 1;
   // What the user said, WHOLE — the very payload the daemon will forward, so
@@ -97,9 +97,8 @@ message HeldPrompt {
   // What the classifier decided about ORDER. THE ARM IS THE VERDICT. Never
   // unset on a wire entry: an entry with no arm here is a malformed frame and
   // is rejected loudly rather than rendered as pending. Each verdict's own
-  // facts — a rationale, an acceptance — live on the arm that owns them, so a
-  // rationale cannot arrive with no verdict to explain and an acceptance
-  // cannot be set on an entry no classifier held.
+  // facts — a rationale — live on the arm that owns them, so a rationale
+  // cannot arrive with no verdict to explain.
   oneof classification {
     // A classifier is still deciding. Expect this arm to be replaced by one of
     // the verdicts below. Set ONLY while a classifier call is in flight; an
@@ -387,19 +386,10 @@ message HeldPromptAfterToolCall {
 message HeldPromptHoldForTurnEnd {
   // The classifier's stated reason. Free text for display; never parsed.
   string rationale = 1;
-  // Whether the user has seen and confirmed this hold. View state only — it
-  // changes nothing about when the entry is delivered. It lives on this arm
-  // because confirming a hold is the ONLY thing an accept does; no other
-  // verdict has anything to accept.
-  HeldPromptAccepted accepted = 2;
-}
-
-// The user's confirmation of a hold.
-message HeldPromptAccepted {
-  // True once the user has confirmed the hold. False means the confirmation has
-  // not been given yet, not that it was declined — a declined hold is dropped
-  // and leaves the held section entirely.
-  bool accepted = 1;
+  // Tag 2 and the name `accepted` are RETIRED: a hold carries no
+  // confirmation, because confirming one changed nothing about delivery.
+  reserved 2;
+  reserved "accepted";
 }
 
 // NOTHING CLASSIFIED THIS ENTRY, because the turn in front of it is a CONTEXT

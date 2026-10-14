@@ -455,51 +455,6 @@ func TestTopbarIdenticalContextUsagePushProducesNoSecondPush(t *testing.T) {
 	harness.ExpectNoPush(t, topbar, harness.ProbeWindow, "an identical consecutive context_usage push is not sent")
 }
 
-// TestHoldsIdenticalSecondAcceptProducesNoSecondPush accepts the same
-// hold_for_turn_end verdict twice. internal/promptqueue/holdactions.go's
-// Accept only checks that the classification is STILL hold_for_turn_end, not
-// whether it was already accepted, so the second call succeeds as a no-op —
-// and the tray's whole-view dedup means it produces no second push.
-func TestHoldsIdenticalSecondAcceptProducesNoSecondPush(t *testing.T) {
-	t.Parallel()
-	// Arrange: a turn running, and a follow-up held with the hold_for_turn_end
-	// verdict.
-	f := newOpened(t, harness.Opts{})
-	f.submit("start the work", "k-accept-run", origin)
-	f.shim.ExpectStartTurn()
-	resp := f.submit("a follow-up while it runs", "k-accept-held", origin)
-	turn := resp.GetSuccess().GetTurn().GetTurn()
-	holds := f.d.WatchHolds(f.ws)
-	awaitView(t, f, holds, "the hold_for_turn_end verdict", func(tray *frontendv1.FeedHeld) bool {
-		e := promptHeldEntry(tray, turn)
-		return e != nil && e.GetHoldForTurnEnd() != nil
-	})
-
-	// Act: accept once.
-	accept1, err := f.d.Client().UpdateHeldPrompt(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateHeldPromptRequest{
-		Workspace: f.ws, Turn: turn,
-		Action: &agentreplv1.UpdateHeldPromptRequest_Accept{Accept: &agentreplv1.UpdateHeldPromptAccept{}},
-	}))
-	if err != nil || accept1.Msg.GetSuccess() == nil {
-		t.Fatalf("UpdateHeldPrompt{accept} = (%v, %v), want a success", accept1, err)
-	}
-	awaitView(t, f, holds, "the tray after the first accept", func(tray *frontendv1.FeedHeld) bool {
-		return promptHeldEntry(tray, turn).GetHoldForTurnEnd().GetAccepted().GetAccepted()
-	})
-
-	// Act: the SAME accept again — a no-op.
-	accept2, err := f.d.Client().UpdateHeldPrompt(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateHeldPromptRequest{
-		Workspace: f.ws, Turn: turn,
-		Action: &agentreplv1.UpdateHeldPromptRequest_Accept{Accept: &agentreplv1.UpdateHeldPromptAccept{}},
-	}))
-	if err != nil || accept2.Msg.GetSuccess() == nil {
-		t.Fatalf("UpdateHeldPrompt{accept} (second, no-op) = (%v, %v), want a success", accept2, err)
-	}
-
-	// Assert: the unchanged tray is never re-pushed.
-	harness.ExpectNoPush(t, holds, harness.ProbeWindow, "an already-accepted hold_for_turn_end re-accepted produces no second tray push")
-}
-
 // TestHostStreamIdenticalRepublishedViewProducesNoSecondPush opens a SECOND
 // WatchHostWorkspace on the same, unchanged workspace: the handler composes
 // and publishes the host view again on every open ("COMPOSE BEFORE

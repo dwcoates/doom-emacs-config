@@ -138,8 +138,6 @@ func (s *server) asRefusal(err error) (refusal, bool) {
 		return s.fill(refusal{Arm: "being_delivered", Reason: err.Error()}), true
 	case errors.Is(err, promptqueue.ErrAlreadyDelivered):
 		return s.fill(refusal{Arm: "already_delivered", Reason: err.Error()}), true
-	case errors.Is(err, promptqueue.ErrAcceptNotApplicable):
-		return s.fill(refusal{Arm: "accept_not_applicable", Reason: err.Error()}), true
 	case errors.Is(err, promptqueue.ErrReleaseRefused):
 		return s.fill(refusal{Arm: "release_refused", Reason: err.Error()}), true
 	case errors.Is(err, promptqueue.ErrNotHeld):

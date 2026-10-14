@@ -55,7 +55,7 @@ func snapshot(h *harness) map[ids.TurnID]wsm.HeldPrompt {
 }
 
 // unchanged fails the test when any hold differs from BEFORE in its words,
-// retirement, verdict, acceptance or coalesced mark.
+// retirement, verdict or coalesced mark.
 func unchanged(t *testing.T, h *harness, before map[ids.TurnID]wsm.HeldPrompt) {
 	t.Helper()
 	after := snapshot(h)
@@ -65,7 +65,7 @@ func unchanged(t *testing.T, h *harness, before map[ids.TurnID]wsm.HeldPrompt) {
 	for turn, was := range before {
 		now := after[turn]
 		if saidText(now.Said) != saidText(was.Said) || (now.Tombstone == nil) != (was.Tombstone == nil) ||
-			(now.Classification == nil) != (was.Classification == nil) || now.Accepted != was.Accepted || now.Coalesced != was.Coalesced {
+			(now.Classification == nil) != (was.Classification == nil) || now.Coalesced != was.Coalesced {
 			t.Fatalf("hold %s changed: was %+v, now %+v", turn, was, now)
 		}
 	}
@@ -119,13 +119,10 @@ func TestFoldRepublishesTheTray(t *testing.T) {
 }
 
 func TestFoldDiscardsTheMergedPromptsVerdictAndReclassifiesIt(t *testing.T) {
-	// Arrange: t1's standing verdict was accepted; the fold must not carry it
-	// onto the merged words.
+	// Arrange: t1 stands with its own verdict; the fold must not carry it onto
+	// the merged words.
 	h := newHarness(t)
 	twoQueued(t, h)
-	if err := h.q.Accept(context.Background(), theWorkspace, "t1"); err != nil {
-		t.Fatalf("Accept: %v", err)
-	}
 	h.judge.verdict = classifier.Verdict{Route: classifier.RouteAfterToolCall, Reason: "adds to the work"}
 
 	// Act
@@ -136,8 +133,8 @@ func TestFoldDiscardsTheMergedPromptsVerdictAndReclassifiesIt(t *testing.T) {
 	if last := questions[len(questions)-1]; last[1] != "first words\n\nsecond words" {
 		t.Fatalf("the judge was last asked about %q, want the merged words", last[1])
 	}
-	if got := h.db.hold("t1"); got.Accepted || got.Classification == nil || got.Classification.Arm != wsm.ArmAfterToolCall {
-		t.Fatalf("t1 = %+v, want the merged words' own verdict and no acceptance", got)
+	if got := h.db.hold("t1"); got.Classification == nil || got.Classification.Arm != wsm.ArmAfterToolCall {
+		t.Fatalf("t1 = %+v, want the merged words' own verdict", got)
 	}
 }
 
