@@ -965,6 +965,8 @@ a `merge` entry does; that is the workspace whose agent wrote it.
 | `merge_resume` | `repository_dir` optional, as for a pause | `Unpause`, scoped as a pause is |
 | `merge_hold_rollouts` | none: the hold is daemon-wide | `HoldRollouts`: merges still land, but a landing in the daemon's own checkout no longer tells the deploy; durable (wsm `merge_rollout_hold`) until released |
 | `merge_release_rollouts` | none | `ReleaseRollouts`: the next landing tells the deploy again; nothing is deployed retroactively |
+| `merge_disable_racing` | none: the switch is daemon-wide | `DisableRacing`: every queue works its head alone whatever the power source (the gate governor's window narrows to one); durable (wsm `merge_racing_disabled`) until enabled, and the governor is born with it at boot |
+| `merge_enable_racing` | none | `EnableRacing`: on AC power each queue works its top two merges again, the merge behind each head starting at once |
 
 `evict_dir` is refused on any other type, and `repository_dir` on any but a
 pause or a resume. The OUTCOME is the file's fate plus one INFO
