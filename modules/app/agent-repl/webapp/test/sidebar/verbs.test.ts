@@ -68,6 +68,7 @@ import {
   lockHolderHowText,
   openWorkspaceRefusal,
   fireVerb,
+  runOpenWorkspace,
   refusalCause,
   refusalDetail,
   runVerb,
@@ -294,14 +295,7 @@ const VERBS: readonly VerbUnderTest[] = [
     method: "openWorkspace",
     responseSchema: OpenWorkspaceResponseSchema,
     errorSchema: OpenWorkspaceErrorSchema,
-    call: (t, control) =>
-      runVerb(control, {
-        sc: t.sc,
-        rpc: "OpenWorkspace",
-        call: (client) => client.openWorkspace(buildOpenWorkspaceRequest(TARGET_WS)),
-        schema: OpenWorkspaceResponseSchema,
-        refusalText: (cause) => openWorkspaceRefusal(cause as never),
-      }),
+    call: (t, control) => runOpenWorkspace(control, t.sc, TARGET_WS),
   },
   {
     rpc: "CloseWorkspace",

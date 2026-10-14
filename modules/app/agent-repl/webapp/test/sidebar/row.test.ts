@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { captureLogRecords, forwardedRecord, type LogCapture } from "../log-capture.js";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
+import { OpenWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_workspace_pb";
 import { SelectWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
 import { SetWorkspaceHiddenResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
 import { UpdateSidebarViewResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
@@ -751,6 +752,71 @@ describe("the row click in the hidden section", () => {
       "the daemon does not know this workspace",
       "warn",
     ]);
+  });
+});
+
+describe("the row click in the recently-merged band", () => {
+  // OWNER REQUEST, 2026-10-14: a merged workspace is taken back to revise
+  // what it landed, so the click reopens it and then selects it.
+  const OPEN_OK = create(OpenWorkspaceResponseSchema, { result: { case: "success", value: {} } });
+  const OPEN_REFUSED = create(OpenWorkspaceResponseSchema, {
+    result: { case: "error", value: { cause: { case: "unknownWorkspace", value: {} } } },
+  });
+
+  it("reopens the workspace, then selects it", async () => {
+    const calls: string[] = [];
+    const sc = sidebarContext(
+      appContext({
+        openWorkspace: (request) => {
+          calls.push(`open:${request.workspace?.id ?? ""}`);
+          return OPEN_OK;
+        },
+        selectWorkspace: (request) => {
+          calls.push(`select:${request.workspace?.id ?? ""}`);
+          return SELECT_OK;
+        },
+      }),
+    );
+    const drawn = drawRosterRow(row({ id: "ws-1", closed: true }), sc, "R", "merged");
+    await click(drawn.querySelector("[data-select]") as Element);
+    expect(calls).toEqual(["open:ws-1", "select:ws-1"]);
+  });
+
+  it("selects nothing when the open is refused", async () => {
+    const selected: string[] = [];
+    const sc = sidebarContext(
+      appContext({
+        openWorkspace: () => OPEN_REFUSED,
+        selectWorkspace: (request) => {
+          selected.push(request.workspace?.id ?? "");
+          return SELECT_OK;
+        },
+      }),
+    );
+    const drawn = drawRosterRow(row({ id: "ws-1", closed: true }), sc, "R", "merged");
+    await click(drawn.querySelector("[data-select]") as Element);
+    expect(selected).toEqual([]);
+  });
+
+  it("says a refused open at the row itself", async () => {
+    const sc = sidebarContext(appContext({ openWorkspace: () => OPEN_REFUSED }));
+    const capture = captureLogRecords();
+    const drawn = drawRosterRow(row({ id: "ws-1", closed: true }), sc, "R", "merged");
+    await click(drawn.querySelector("[data-select]") as Element);
+    const record = await forwardedRecord(capture, "sidebar.verbs.refused");
+    expect([drawn.querySelector(":scope > .sb-refusal")?.textContent, record.level.case]).toEqual([
+      "the daemon does not know this workspace",
+      "warn",
+    ]);
+  });
+
+  it("records the reopen at info", async () => {
+    const sc = sidebarContext(appContext({ openWorkspace: () => OPEN_OK, selectWorkspace: () => SELECT_OK }));
+    const capture = captureLogRecords();
+    const drawn = drawRosterRow(row({ id: "ws-1", closed: true }), sc, "R", "merged");
+    await click(drawn.querySelector("[data-select]") as Element);
+    const record = await forwardedRecord(capture, "sidebar.row.reopen");
+    expect(record.level.case).toBe("info");
   });
 });
 

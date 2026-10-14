@@ -72,6 +72,7 @@ import {
   buildSelectWorkspaceRequest,
   buildSetWorkspaceHiddenRequest,
   drawRowMenu,
+  runOpenWorkspace,
   runVerb,
   type VerbTarget,
 } from "./verbs.js";
@@ -120,7 +121,9 @@ export function expandVisibleRows(rows: readonly RosterRow[], basePath: string):
  * and what a click on it does:
  *
  *   - `grouping`: a live grouping's section. Drawn whole; a click selects it.
- *   - `merged`: the recently-merged band. Drawn plain; a click selects it.
+ *   - `merged`: the recently-merged band. Drawn plain; a click REOPENS the
+ *     workspace and then selects it (`OpenWorkspace`, owner request
+ *     2026-10-14): a merged workspace is taken back to revise what it landed.
  *   - `hidden`: the hidden-workspaces section. Drawn with NO STATE (owner
  *     request, 2026-10-13): no status color, no status mark, no read greying,
  *     no reviving shimmer and no attention marker; its name is in the
@@ -224,6 +227,10 @@ export function drawRosterRow(
     }
     if (place === "hidden") {
       void guardMalformed(sc.ctx, "sidebar.row.show", showWorkspace(line, sc, workspace));
+      return;
+    }
+    if (place === "merged") {
+      void guardMalformed(sc.ctx, "sidebar.row.reopen", reopenWorkspace(line, sc, workspace));
       return;
     }
     void guardMalformed(sc.ctx, "sidebar.row.select", selectWorkspace(line, sc, workspace));
@@ -824,6 +831,28 @@ async function showWorkspace(
     schema: SetWorkspaceHiddenResponseSchema,
   });
   if (!shown) return;
+  await selectWorkspace(line, sc, workspace);
+}
+
+/**
+ * Reopen a merged workspace, then select it: the click on its row in the
+ * Recently Merged band (owner request, 2026-10-14). The daemon restores its
+ * worktree and brings its session back, and the push that follows moves it
+ * out of the band into its groupings and onto the tab bar; once the daemon
+ * has answered the open, the same click selects it. A refused open selects
+ * nothing: the refusal stands on the row instead.
+ */
+async function reopenWorkspace(
+  line: HTMLElement,
+  sc: SidebarContext,
+  workspace: WorkspaceRef,
+): Promise<void> {
+  log.info("reopening a merged workspace from the rail", {
+    operation: "sidebar.row.reopen",
+    context: { workspace: workspace.id },
+  });
+  const opened = await runOpenWorkspace(line, sc, workspace);
+  if (!opened) return;
   await selectWorkspace(line, sc, workspace);
 }
 
