@@ -3270,12 +3270,19 @@ same as on the pause arm."
   "Encode UpdateMergeQueueEvict's `workspace' use site from REF."
   (agent-repl-wire-encode-workspace-ref ref))
 
+(defun agent-repl-wire-verbs--encode-merge-queue-workspace-arm (message value encode-ref)
+  "Encode MESSAGE, an UpdateMergeQueue arm naming one workspace, from plist
+VALUE (:workspace REF), with ENCODE-REF its use site.  The workspace is
+required: an arm without one is incomplete and errors before send."
+  (list (cons 'workspace
+              (funcall encode-ref
+                       (agent-repl-wire-verbs--require message "workspace"
+                                                        (plist-get value :workspace))))))
+
 (defun agent-repl-wire-encode-update-merge-queue-evict (value)
   "Encode UpdateMergeQueueEvict from plist VALUE (:workspace REF)."
-  (list (cons 'workspace
-              (agent-repl-wire-encode-update-merge-queue-evict-workspace
-               (agent-repl-wire-verbs--require "UpdateMergeQueueEvict" "workspace"
-                                                (plist-get value :workspace))))))
+  (agent-repl-wire-verbs--encode-merge-queue-workspace-arm
+   "UpdateMergeQueueEvict" value #'agent-repl-wire-encode-update-merge-queue-evict-workspace))
 
 (defun agent-repl-wire-encode-update-merge-queue-move-up-workspace (ref)
   "Encode UpdateMergeQueueMoveUp's `workspace' use site from REF."
@@ -3283,10 +3290,8 @@ same as on the pause arm."
 
 (defun agent-repl-wire-encode-update-merge-queue-move-up (value)
   "Encode UpdateMergeQueueMoveUp from plist VALUE (:workspace REF)."
-  (list (cons 'workspace
-              (agent-repl-wire-encode-update-merge-queue-move-up-workspace
-               (agent-repl-wire-verbs--require "UpdateMergeQueueMoveUp" "workspace"
-                                                (plist-get value :workspace))))))
+  (agent-repl-wire-verbs--encode-merge-queue-workspace-arm
+   "UpdateMergeQueueMoveUp" value #'agent-repl-wire-encode-update-merge-queue-move-up-workspace))
 
 (defun agent-repl-wire-encode-update-merge-queue-move-down-workspace (ref)
   "Encode UpdateMergeQueueMoveDown's `workspace' use site from REF."
@@ -3294,10 +3299,8 @@ same as on the pause arm."
 
 (defun agent-repl-wire-encode-update-merge-queue-move-down (value)
   "Encode UpdateMergeQueueMoveDown from plist VALUE (:workspace REF)."
-  (list (cons 'workspace
-              (agent-repl-wire-encode-update-merge-queue-move-down-workspace
-               (agent-repl-wire-verbs--require "UpdateMergeQueueMoveDown" "workspace"
-                                                (plist-get value :workspace))))))
+  (agent-repl-wire-verbs--encode-merge-queue-workspace-arm
+   "UpdateMergeQueueMoveDown" value #'agent-repl-wire-encode-update-merge-queue-move-down-workspace))
 
 (defun agent-repl-wire-encode-update-merge-queue-hold-rollouts (_value)
   "Encode UpdateMergeQueueHoldRollouts.  Empty: the hold is daemon-wide."
