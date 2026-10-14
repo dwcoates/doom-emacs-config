@@ -2629,6 +2629,55 @@ describe("the feed's bottom gap", () => {
   });
 });
 
+/** THE HELD PROMPT'S CONTROL ROW (owner request, 2026-10-13): compact, even, two outlined. */
+describe("the held prompt's control row", () => {
+  it.each([
+    ["grid", "display"],
+    ["column", "grid-auto-flow"],
+    ["1fr", "grid-auto-columns"],
+    ["max-content", "width"],
+  ])("gives every control one width through %s %s", (value, property) => {
+    // Arrange / Act
+    const decls = allDeclarationsOf(".queued-actions");
+    // Assert
+    expect(valueOf(decls, property)).toBe(value);
+  });
+
+  it("keeps a control's vertical padding near zero", () => {
+    // Arrange / Act
+    const padding = valueOf(allDeclarationsOf(".queued-actions ar-button"), "padding");
+    // Assert
+    expect(rem(padding?.split(" ")[0])).toBeLessThanOrEqual(0.05);
+  });
+
+  it("sets a control's text smaller than the bubble's", () => {
+    // Arrange / Act
+    const size = valueOf(allDeclarationsOf(".queued-actions ar-button"), "font-size");
+    // Assert
+    expect(size).toBe("calc(0.75rem * var(--feed-text-scale))");
+  });
+
+  it.each([
+    ["Send now", ".queued-actions ar-button.queued-action-release", "var(--ok)"],
+    ["Cancel", ".queued-actions ar-button.queued-action-drop", "var(--err)"],
+  ])("outlines %s in its outcome's color", (_label, selector, color) => {
+    // Arrange / Act
+    const decls = allDeclarationsOf(selector);
+    // Assert
+    expect(valueOf(decls, "border-color")).toBe(color);
+  });
+
+  it.each([
+    [".queued-actions ar-button.queued-action-release"],
+    [".queued-actions ar-button.queued-action-drop"],
+  ])("leaves %s unfilled", (selector) => {
+    // Arrange / Act
+    const decls = allDeclarationsOf(selector);
+    // Assert
+    expect(valueOf(decls, "background")).toBeUndefined();
+  });
+});
+
 /**
  * THE HELD PROMPT IS A BUBBLE (owner rulings, 2026-09-23, superseding the
  * one-line fold of the same day): it collapses at two lines through the one cap

@@ -2034,8 +2034,36 @@ function filed(kind: FailureKind | undefined): [string, string] | undefined {
     : undefined;
 }
 
+describe("the Cancel control", () => {
+  /** The actions row's hooks, in order. */
+  const order = (card: HTMLElement): (string | null)[] =>
+    [...card.querySelectorAll<Control>(".queued-actions ar-button")].map((b) =>
+      b.getAttribute("data-held-action"),
+    );
+
+  it("is the last control on a card offering only the standing three", () => {
+    // Arrange
+    const { tc } = editContext();
+    // Act
+    const card = drawHeldPrompt(heldPrompt(), tc);
+    // Assert
+    expect(order(card)).toEqual(["release", "edit", "drop"]);
+  });
+
+  it("is the last control on a card that also offers a fold and Meta", () => {
+    // Arrange
+    const { tc } = foldContext(foldSuccess);
+    const u = foldable();
+    u.classification = { case: "interject", value: {} } as never;
+    // Act
+    const card = drawHeldPrompt(u, tc);
+    // Assert
+    expect(order(card)).toEqual(["release", "edit", "fold", "update-classifier", "drop"]);
+  });
+});
+
 describe("the Edit control", () => {
-  it("sits between Send now and Cancel", () => {
+  it("follows Send now", () => {
     // Arrange
     const { tc } = editContext();
     // Act
@@ -2044,7 +2072,7 @@ describe("the Edit control", () => {
     const labels = [
       ...card.querySelectorAll<Control>(".queued-actions ar-button"),
     ].map((b) => b.textContent);
-    expect(labels.slice(0, 3)).toEqual(["Send now", "Edit", "Cancel"]);
+    expect(labels.slice(0, 2)).toEqual(["Send now", "Edit"]);
   });
 
   it("begins an edit of this card's turn", async () => {
@@ -2576,7 +2604,7 @@ describe("the fold above control", () => {
     expect(card.querySelector('[data-held-action="fold"]')).toBeNull();
   });
 
-  it("is a button of the held row's own kind, last in the actions row", () => {
+  it("is a button of the held row's own kind, just before Cancel", () => {
     // Arrange
     const { tc } = foldContext(foldSuccess);
     // Act
@@ -2587,12 +2615,12 @@ describe("the fold above control", () => {
       button?.localName,
       button?.getAttribute("role"),
       button?.className,
-      button?.parentElement?.lastElementChild === button,
+      button?.nextElementSibling?.getAttribute("data-held-action"),
     ]).toEqual([
       "ar-button",
       "button",
       "queued-action queued-action-fold",
-      true,
+      "drop",
     ]);
   });
 
