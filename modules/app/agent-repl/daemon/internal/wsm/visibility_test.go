@@ -33,6 +33,49 @@ func TestWithheld(t *testing.T) {
 	}
 }
 
+func TestInHiddenSection(t *testing.T) {
+	merged := time.Unix(100, 0)
+	cases := []struct {
+		name string
+		ws   Workspace
+		want bool
+	}{
+		{name: "an ordinary workspace is not", ws: Workspace{}, want: false},
+		{name: "a hidden workspace is", ws: Workspace{Hidden: true}, want: true},
+		{name: "a merged hidden workspace is not", ws: Workspace{Hidden: true, MergedAt: &merged}, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := tc.ws.InHiddenSection()
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("InHiddenSection = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestTheHiddenSectionIsOneStatement pins that Withheld's hidden arm IS
+// InHiddenSection: every workspace it calls hidden, and no other, is in the
+// hidden section, so the tab bar, the start path and the cache keeper cannot
+// disagree about which workspaces are hidden.
+func TestTheHiddenSectionIsOneStatement(t *testing.T) {
+	merged := time.Unix(100, 0)
+	for _, ws := range []Workspace{{}, {Hidden: true}, {MergedAt: &merged}, {Hidden: true, MergedAt: &merged}} {
+		for _, folded := range []bool{false, true} {
+			// Act
+			withheldHidden := ws.Withheld(folded) == WithheldHidden
+
+			// Assert
+			if withheldHidden != ws.InHiddenSection() {
+				t.Fatalf("Withheld(%v) of %+v = %v, InHiddenSection = %v", folded, ws, ws.Withheld(folded), ws.InHiddenSection())
+			}
+		}
+	}
+}
+
 func TestRuns(t *testing.T) {
 	of := MergeOrigin{}
 	cases := []struct {

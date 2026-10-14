@@ -35,13 +35,20 @@ func (w Withholding) String() string {
 // withhold it, exactly as its merged group follows that fold.
 func (ws Workspace) Withheld(repoFolded bool) Withholding {
 	switch {
-	case ws.MergedAt == nil && ws.Hidden:
+	case ws.InHiddenSection():
 		return WithheldHidden
 	case repoFolded:
 		return WithheldCollapsed
 	default:
 		return Drawn
 	}
+}
+
+// InHiddenSection reports whether the workspace sits in the roster's hidden
+// section: the user hid it, and it has not merged, since a merged workspace
+// files under recently merged whatever its hidden flag.
+func (ws Workspace) InHiddenSection() bool {
+	return ws.Hidden && ws.MergedAt == nil
 }
 
 // Runs reports whether the daemon runs the workspace's session (owner
