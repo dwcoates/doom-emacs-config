@@ -21,6 +21,11 @@ type standing struct {
 	text string
 	// at is when the line began standing.
 	at time.Time
+	// compaction is the identity of the compaction a vendor compaction's
+	// start signal stood this line for (SessionCompacting.compaction), empty
+	// for any other line: the cut that names it ends the line, whenever that
+	// cut's identity reaches the footer (OnContextCutRestated).
+	compaction string
 }
 
 // allowanceWindow is ONE drawn allowance's evidence, assembled from two

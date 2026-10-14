@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"fmt"
+	"strings"
 	"sync"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -1040,7 +1041,8 @@ func (r *resolver) sessionArm(ws ids.WorkspaceID, update *conversationv1.Session
 			// A START SIGNAL OUTRUN BY ITS OWN CUT stands nothing: the start
 			// rides WatchSession and the cut WatchAgent, with no order between
 			// them, so the compaction it announces is already over.
-			if id := u.Compacting.GetCompaction().GetValue(); compactionConcluded(s, id) {
+			id := u.Compacting.GetCompaction().GetValue()
+			if compactionConcluded(s, id) {
 				r.logOf(ws, s).Info("daemon.footer.compacting_after_its_cut",
 					"a compaction's start signal arrived after the cut that ended it; it stands nothing",
 					dlog.Context{"compaction_id": id})
@@ -1052,6 +1054,11 @@ func (r *resolver) sessionArm(ws ids.WorkspaceID, update *conversationv1.Session
 			// exactly that and nothing it does not know (owner ruling,
 			// 2026-09-14: both compactions read the same).
 			r.standCompaction(ws, s, vendorCompactionLine, "daemon.footer.on_session_update.compacting")
+			if s.compaction.compaction == "" {
+				s.compaction.compaction = id
+			}
+			r.logOf(ws, s).Debug("daemon.footer.compacting_line_named", "a compaction's start signal names the compaction its line stands for",
+				dlog.Context{"compaction_id": id, "concluded": strings.Join(s.concludedCompactions, " ")})
 		}
 	case *conversationv1.SessionUpdate_CompactionProgress:
 		return "compaction_progress", func(s *wsState) {
@@ -1572,7 +1579,7 @@ func (r *resolver) OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentI
 	// line goes), and a change published past mutate is a change no record
 	// states.
 	r.mutate(ws, "daemon.footer.on_context_cut", "the footer took a context cut",
-		dlog.Context{"arm": arm}, func(s *wsState) {
+		dlog.Context{"arm": arm, "compaction_id": cutCompactionID(cut)}, func(s *wsState) {
 			s.endTurn(r.opts.clock.Now())
 			s.turnEverRan = true
 			s.compacting = false
@@ -1589,6 +1596,39 @@ func (r *resolver) OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentI
 			r.logOf(ws, s).Warn("daemon.footer.on_context_cut",
 				"a compaction failed, so nothing was cut and the context is still too large",
 				dlog.Context{"arm": arm, "error": failed.CompactionFailed.GetError()})
+		})
+}
+
+// OnContextCutRestated takes a cut served AGAIN for the one thing a second
+// serving can add: the identity of the compaction it concludes.
+//
+// ONE CUT ROW HAS TWO PRODUCERS. The shim's live fold names the compaction its
+// start signal opened (ContextCompacted.compaction); the sidecar, reading the
+// same boundary from the transcript, cannot, because no start signal is
+// written there, and the contract has it leave the field absent. Both write
+// the row under one upsert key, and the first served is the one routed: when
+// the sidecar's came first, the cut ended no compaction by name, the start
+// signal that followed it on its own stream stood a line, and the shim's
+// version -- naming the compaction -- was dropped as a replay, so the line
+// outlived its turn (2026-10-14, TestWebappLayerFeedFamilies). Here the
+// identity is taken whichever serving brings it: the compaction is concluded,
+// so a start signal yet to come stands nothing, and a line already standing
+// for it ends.
+func (r *resolver) OnContextCutRestated(ws ids.WorkspaceID, cut *conversationv1.ContextCut) {
+	id := cutCompactionID(cut)
+	if id == "" {
+		return
+	}
+	r.mutate(ws, "daemon.footer.on_context_cut_restated", "the footer took a served-again cut's compaction identity",
+		dlog.Context{"compaction_id": id}, func(s *wsState) {
+			if !compactionConcluded(s, id) {
+				concludeCompactionID(s, id)
+			}
+			if s.compaction == nil || s.compaction.compaction != id {
+				return
+			}
+			s.compacting = false
+			r.endCompaction(ws, s, "daemon.footer.on_context_cut_restated")
 		})
 }
 
