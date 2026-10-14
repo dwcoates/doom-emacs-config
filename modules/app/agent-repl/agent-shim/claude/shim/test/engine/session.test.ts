@@ -22,7 +22,8 @@ import { bindLog, clearRequestId } from "../../src/log.js";
 import { createEngine, type QuerySpec, type SessionEngine } from "../../src/engine/session.js";
 import { agentIdPath } from "../../src/engine/identity.js";
 import { LockHeldError, LockHolderUnavailableError, workspaceLockKey } from "../../src/locks.js";
-import { saidText, textSaid } from "../../src/engine/turn.js";
+import { textSaid } from "../../src/engine/turn.js";
+import { saidContent } from "../../src/engine/said-content.js";
 import { KEEPALIVE_INTERVAL_MS, KEEPALIVE_PROMPT_MARKER } from "../../src/engine/keepalive.js";
 import { toStanding } from "../../src/engine/permission-gate.js";
 import { sessionFault } from "../../src/service/failures.js";
@@ -2989,6 +2990,94 @@ describe("the keep-alive turn serves nothing", () => {
     expect(sends.at(-1)?.uuid).toBe(h.minted.at(-1));
   });
 
+  it("sends a prompt's image to the vendor as an image block, in its place among the words", async () => {
+    // Arrange
+    const sends: SdkUserMessage[] = [];
+    const h = harness({ drainSends: sends });
+    await started(h);
+    const imagePath = path.join(scratch(), "pasted.png");
+    writeFileSync(imagePath, "PNG-BYTES");
+    const said = create(conversationv1.UserSaidSchema, {
+      content: create(conversationv1.UserContentSchema, {
+        blocks: [
+          ...(textSaid("look at").content?.blocks ?? []),
+          create(conversationv1.UserContentBlockSchema, {
+            block: {
+              case: "image",
+              value: create(conversationv1.ImageBlockSchema, {
+                mediaType: "image/png",
+                location: { case: "path", value: create(conversationv1.ImageBlockPathSchema, { path: imagePath }) },
+              }),
+            },
+          }),
+          ...(textSaid("and fix it").content?.blocks ?? []),
+        ],
+      }),
+    });
+
+    // Act
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-image" }),
+        said,
+        origin: conversationv1.PromptOrigin.USER_SENT,
+      }),
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // Assert
+    expect(sends.at(-1)?.message.content).toEqual([
+      { type: "text", text: "look at" },
+      { type: "image", source: { type: "base64", media_type: "image/png", data: Buffer.from("PNG-BYTES").toString("base64") } },
+      { type: "text", text: "and fix it" },
+    ]);
+  });
+
+  it("REFUSES a prompt whose image cannot be read, logging the path, and sends the vendor nothing", async () => {
+    // Arrange
+    const sends: SdkUserMessage[] = [];
+    const h = harness({ drainSends: sends });
+    await started(h);
+    await new Promise((resolve) => setImmediate(resolve));
+    const before = sends.length;
+    const missing = path.join(scratch(), "gone.png");
+    const said = create(conversationv1.UserSaidSchema, {
+      content: create(conversationv1.UserContentSchema, {
+        blocks: [
+          create(conversationv1.UserContentBlockSchema, {
+            block: {
+              case: "image",
+              value: create(conversationv1.ImageBlockSchema, {
+                mediaType: "image/png",
+                location: { case: "path", value: create(conversationv1.ImageBlockPathSchema, { path: missing }) },
+              }),
+            },
+          }),
+        ],
+      }),
+    });
+    const mark = logSinkMark();
+
+    // Act
+    const response = await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-missing-image" }),
+        said,
+        origin: conversationv1.PromptOrigin.USER_SENT,
+      }),
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // Assert
+    const record = logRecordsSince(mark).find((r) => r.message === "the vendor refused the prompt");
+    expect([
+      response.result.case === "failure" ? response.result.value.kind.case : response.result.case,
+      record?.level,
+      String(record?.context.cause).includes(`the prompt's image ${missing} could not be read`),
+      sends.length - before,
+    ]).toEqual(["vendorRefused", "error", true, 0]);
+  });
+
   it("keeps the keep-alive's reply off every page", async () => {
     // Arrange
     const h = harness();
@@ -3722,7 +3811,10 @@ describe("the keep-alive rewind between beats", () => {
     for (const entry of h.persistence.buffered) {
       if (entry.item.kind !== "prompt" || !entry.keepalive) continue;
       const said = entry.item.prompt.said;
-      if (said !== undefined) texts.push(saidText(said));
+      if (said === undefined) continue;
+      const content = saidContent(said);
+      if (typeof content !== "string") throw new Error("a keep-alive prompt is words alone");
+      texts.push(content);
     }
     expect(texts.length).toBeGreaterThanOrEqual(2);
     expect(new Set(texts).size).toBe(texts.length);

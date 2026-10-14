@@ -30,6 +30,7 @@
  * `init` advertises `msg_lifecycle_v1` for the first), so they are read
  * loosely here, by their observed shape, and nowhere else.
  */
+import type { SaidContent } from "./said-content.js";
 import { conversationv1, type shimv1 } from "../proto.js";
 import { bindLog } from "../log.js";
 import { AGENT_REPL_PEER_PREFIX } from "../convert/peer.js";
@@ -123,6 +124,23 @@ function attributeValue(value: string): string {
 export function peerEnvelope(text: string, peer: PeerDeclaration): string {
   const name = peer.fromName === undefined ? "" : ` from-name="${attributeValue(peer.fromName)}"`;
   return `<cross-session-message from="${attributeValue(peer.from)}"${name}>\n${text}\n</cross-session-message>`;
+}
+
+/**
+ * A peer send's whole content, in the cross-session envelope.
+ *
+ * Words alone are {@link peerEnvelope}'s string. A prompt that carries images
+ * is a block list (engine/said-content.ts), so the envelope's opening and
+ * closing tags become its first and last text blocks and every block between
+ * keeps its place -- an image an agent sends stays an image.
+ */
+export function peerContent(content: SaidContent, peer: PeerDeclaration): SaidContent {
+  if (typeof content === "string") return peerEnvelope(content, peer);
+  const [open, close] = peerEnvelope("\u0000", peer).split("\u0000");
+  if (open === undefined || close === undefined) {
+    throw new Error("shim peer send: the cross-session envelope did not split around its body");
+  }
+  return [{ type: "text", text: open.trimEnd() }, ...content, { type: "text", text: close.trimStart() }];
 }
 
 /** The fate of a queued command, as the vendor's `command_lifecycle` frame states it. */
