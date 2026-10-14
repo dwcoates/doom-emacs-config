@@ -683,7 +683,7 @@ interface ActionSpec {
   text: string;
   classification: string;
   hold: string | null;
-  /** The entry the "fold above" control folds into, or null when the daemon offers no fold. */
+  /** The entry the "Fold Above" control folds into, or null when the daemon offers no fold. */
   foldAbove: TurnId | null;
   /** The "Update classifier" form, or null on a card no classifier decided. */
   classifierForm: ClassifierUpdateForm | null;
@@ -887,10 +887,10 @@ function updateClassifierButton(form: ClassifierUpdateForm): Control {
 }
 
 /** The fold control's label: what the reader sees it do. */
-export const FOLD_ABOVE_LABEL = "fold above";
+export const FOLD_ABOVE_LABEL = "Fold Above";
 
 /**
- * The "fold above" control (FoldHeldPrompt): folds this prompt into the entry
+ * The "Fold Above" control (FoldHeldPrompt): folds this prompt into the entry
  * directly ahead of it. Drawn only when the daemon's entry carries
  * `fold_above`, and it sends back exactly the token that element served, so
  * the daemon folds into the entry the reader saw above this one or refuses.

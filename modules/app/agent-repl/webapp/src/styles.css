@@ -5474,12 +5474,14 @@ ar-button.outcome-marker-pill {
   color: var(--muted);
 }
 /* The row's controls, and the refusal that lands under them. */
-/* SHORT, SLEEK CONTROLS (owner request, 2026-10-13): a small font, a tight
-   leading and almost no vertical padding, so the row costs little height. */
+/* SHORT, SLEEK CONTROLS (owner requests, 2026-10-13 and 2026-10-14): a
+   small font, a tight leading and almost no vertical padding, so the row
+   costs little height. The 1.15 leading makes a control about 10% shorter
+   than the 1.3 one did. Every control wears the same plain border. */
 .queued-actions ar-button {
   padding: 0.05rem 0.6rem;
   font-size: calc(0.75rem * var(--feed-text-scale));
-  line-height: 1.3;
+  line-height: 1.15;
   text-align: center;
   white-space: nowrap;
   border-radius: 5px;
@@ -5487,12 +5489,6 @@ ar-button.outcome-marker-pill {
   background: var(--bg);
   color: var(--fg);
 }
-/* The two controls that decide the prompt's fate are outlined in their
-   outcome's color (owner request, 2026-10-13): Send now in the ready green,
-   Cancel, which discards it, in the error red. Only the border: neither is
-   filled, so neither reads as the default a stray click lands on. */
-.queued-actions ar-button.queued-action-release { border-color: var(--ok); }
-.queued-actions ar-button.queued-action-drop { border-color: var(--err); }
 .queued-actions ar-button[aria-disabled="true"] { cursor: not-allowed; opacity: 0.5; }
 .queued-refusal {
   margin-top: 0.35rem;
