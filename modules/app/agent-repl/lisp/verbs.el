@@ -2466,14 +2466,13 @@ Refuses when the module root is not in a git repository, or when that
 repository is not on the roster -- the help workspace has nowhere else to
 go, and registering the repository (`SPC TAB C-n') is the user\='s act."
   (let* ((module-root (file-name-directory agent-repl-metaprompt-file))
-         (common-dir (agent-repl--repo-key-for-dir module-root)))
-    (unless common-dir
+         (main (agent-repl--main-worktree-for-dir module-root)))
+    (unless main
       (agent-repl--error agent-repl-verbs--create-log-scope
                          "elisp.verbs.help-repository-unresolved module-root=%s cause=not-a-git-repository"
                          module-root)
       (user-error "agent-repl: agent-repl's source at %s is in no git repository" module-root))
-    (let* ((main (agent-repl--path-canonical (file-name-directory common-dir)))
-           (section (cl-find-if
+    (let* ((section (cl-find-if
                      (lambda (section)
                        (let ((dir (plist-get (agent-repl-verbs--section-ref section) :dir)))
                          (and dir (equal (agent-repl--path-canonical dir) main))))

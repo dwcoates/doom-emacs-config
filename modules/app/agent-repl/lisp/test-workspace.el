@@ -2095,6 +2095,34 @@ in the same shape (still leftmost, nil-name still at head)."
     (agent-repl--ws-put "ws" :group-key "/repos/doom/.git")
     (should (equal (agent-repl--ws-repo-key "ws") "/repos/doom/.git"))))
 
+;;;; ---- Tests: agent-repl--main-worktree-for-dir ----
+
+(ert-deftest agent-repl-test-main-worktree-for-dir-from-linked-worktree ()
+  "`--main-worktree-for-dir' names the main checkout from a linked worktree."
+  (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+             (lambda (&rest _) "/repos/doom/.git")))
+    (should (equal (agent-repl--main-worktree-for-dir "/repos/doom-worktrees/feat/")
+                   (agent-repl--path-canonical "/repos/doom")))))
+
+(ert-deftest agent-repl-test-main-worktree-for-dir-from-main-checkout ()
+  "`--main-worktree-for-dir' names the main checkout from the main checkout itself."
+  (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+             (lambda (&rest _) ".git")))
+    (should (equal (agent-repl--main-worktree-for-dir "/repos/doom/")
+                   (agent-repl--path-canonical "/repos/doom")))))
+
+(ert-deftest agent-repl-test-main-worktree-for-dir-not-a-repository ()
+  "`--main-worktree-for-dir' answers nil when DIR is in no git repository."
+  (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+             (lambda (&rest _) "fatal: not a git repository")))
+    (should (null (agent-repl--main-worktree-for-dir "/tmp/nowhere/")))))
+
+(ert-deftest agent-repl-test-main-worktree-for-dir-nil-dir ()
+  "`--main-worktree-for-dir' answers nil for a nil DIR without shelling out."
+  (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+             (lambda (&rest _) (error "must not shell out for nil dir"))))
+    (should (null (agent-repl--main-worktree-for-dir nil)))))
+
 (ert-deftest agent-repl-test-repo-key-for-dir-nil-dir ()
   "`--repo-key-for-dir' returns nil for a nil DIR without shelling out."
   (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
