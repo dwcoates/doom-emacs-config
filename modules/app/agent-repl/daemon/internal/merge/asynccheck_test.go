@@ -69,6 +69,30 @@ func TestAnAsyncRequestIsRefusedWhatItCannotRunAsAsked(t *testing.T) {
 	}
 }
 
+// TestAnAsyncRequestFromAWorkspaceTheDaemonNeverCreatedIsAccepted covers the
+// main checkout: it records no creation job, and it is the workspace that
+// always merges async.
+func TestAnAsyncRequestFromAWorkspaceTheDaemonNeverCreatedIsAccepted(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.db.mu.Lock()
+	delete(h.db.jobs, theWorkspace)
+	h.db.mu.Unlock()
+	h.inFlight = "turn-asking"
+
+	// Act: an agent's request, still waiting on the turn that asked.
+	err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource, By: RequestedByAgent,
+		Detached: &DetachedRun{Name: "n"}})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Enqueue = %v, want the async request accepted", err)
+	}
+	if _, ok := h.entryOf(theWorkspace); !ok {
+		t.Fatal("the async request was not recorded")
+	}
+}
+
 func TestAnAsyncRequestRecordsItsLandingEffects(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
