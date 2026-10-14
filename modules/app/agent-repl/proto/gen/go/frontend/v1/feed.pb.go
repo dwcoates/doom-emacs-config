@@ -249,8 +249,9 @@ type FeedSelection_Prompt struct {
 }
 
 type FeedSelection_Bubble struct {
-	// Any other selectable bubble is selected: an interim or thinking
-	// response, an agent prompt, or a user prompt a rollback cannot reach.
+	// Any other selectable bubble is selected: an interim response, an agent
+	// prompt, or a user prompt a rollback cannot reach. A thinking bubble is
+	// never selected: a click on it only expands it.
 	Bubble *FeedSelectionBubble `protobuf:"bytes,7,opt,name=bubble,proto3,oneof"`
 }
 
@@ -680,10 +681,12 @@ type FeedRow struct {
 	// which kinds are selectable, so the two can never disagree.
 	//
 	// Set only on ROOT-feed rows that have LANDED: a user prompt, an agent
-	// prompt, and a settled (`success`) response bubble, whether final, interim
-	// or thinking. A response still arriving, a broken one, a vendor notice,
-	// every other row kind, and every row of a sub-feed leave it UNSET. A
-	// response row gains it on the publication that settles it.
+	// prompt, and a settled (`success`) response bubble, whether final or
+	// interim. A THINKING bubble never carries it (owner specification,
+	// 2026-10-14): a click on one only expands it, with no selection. A
+	// response still arriving, a broken one, a vendor notice, every other row
+	// kind, and every row of a sub-feed leave it UNSET. A response row gains it
+	// on the publication that settles it.
 	Selectable    *FeedRowSelectable `protobuf:"bytes,22,opt,name=selectable,proto3,oneof" json:"selectable,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
