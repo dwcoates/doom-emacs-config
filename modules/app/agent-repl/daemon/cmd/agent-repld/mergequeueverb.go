@@ -325,8 +325,8 @@ type mergeQueueFlags struct {
 	// versionPart and changelogLine are the merge's version increment
 	// (commandfile.Entry.VersionPart, .ChangelogLine).
 	versionPart, changelogLine string
-	evict    bool
-	evictDir string
+	evict                      bool
+	evictDir                   string
 	// moveUp and moveDown move a waiting merge one place; moveDir names
 	// another workspace's merge to move rather than the calling workspace's.
 	moveUp, moveDown bool
