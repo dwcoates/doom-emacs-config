@@ -32,18 +32,8 @@ import (
 	"golang.org/x/net/http2/h2c"
 	"google.golang.org/protobuf/proto"
 
-	daemonserver "agent-repld/internal/server"
+	"agent-repld/internal/hangup"
 )
-
-// killAnswerWriteBound is how long the KillSession answer has to reach the
-// socket before this fake ends the process anyway.
-//
-// A LAST RESORT, not the mechanism: the barrier ends on the connection going
-// quiet, and the work it covers is one flush of a few dozen bytes onto a unix
-// socket. It is deliberately far under the daemon's own stand-down window, so
-// an overrun still looks to the daemon like a fake that took a moment rather
-// than one that hung.
-const killAnswerWriteBound = 250 * time.Millisecond
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -148,41 +138,22 @@ func run(args []string) error {
 	// answered KillSession and kept running would leave every stand-down
 	// waiting out its window and then force-killing.
 	//
-	// THE EXIT WAITS FOR THE ANSWER'S BYTES, NOT FOR THE HANDLER AND NOT FOR
-	// THE REQUEST CONTEXT. A handler returning does not mean its answer has
-	// left: over h2c the response's final frames are written by the
-	// connection's own goroutine after `handlerDone`, and an `os.Exit` on the
-	// handler's goroutine raced them -- the daemon read
-	// `unavailable: unexpected EOF` from a `KillSession` this fake had
-	// accepted, recorded "the session kill did not answer" against an orderly
-	// stand-down, and failed the warning sweep with it.
-	//
-	// Waiting on the request's context was the first repair and it was one
-	// step short: `serverConn.runHandler` cancels that context in a defer that
-	// runs BEFORE the same defer's `rw.handlerDone()` produces those frames at
-	// all, so the exit still landed ahead of the answer in about one
-	// integration run in ten. The wait is now on the SOCKET having written
-	// them -- see the daemon's server.WriteBarrier, which carries the whole account.
-	answers := &daemonserver.WriteBarrier{}
-	mux.Handle(path, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		standingDown := strings.HasSuffix(r.URL.Path, "/KillSession")
-		mark := answers.Mark()
-		handler.ServeHTTP(w, r)
-		if standingDown && proc.srv.killedSession() {
-			answered := r.Context()
-			go func() {
-				<-answered.Done()
-				if !answers.AwaitWrittenSince(mark, killAnswerWriteBound) {
-					proc.log.write("kill-answer-unwritten", map[string]any{
-						"detail":   "the KillSession answer never reached the socket within the bound; the daemon will read a cut connection instead of the stand-down it asked for",
-						"bound_ms": killAnswerWriteBound.Milliseconds(),
-					})
-				}
-				proc.die(0, "")
-			}()
-		}
+	// THE EXIT WAITS FOR THE DAEMON TO HANG UP the connection the KillSession
+	// came in on, never for the answer's bytes alone. An exit once the answer
+	// was on the socket still raced the daemon: its http2 transport, writing
+	// an RST_STREAM or a WINDOW_UPDATE to the dead peer, hit EPIPE, closed the
+	// whole ClientConn and aborted the KillSession whose answer sat unread in
+	// the socket buffer, which the daemon recorded as "the session kill did
+	// not answer". The daemon hangs up only after it has read the answer, so
+	// this order cannot lose it. See the daemon's internal/hangup, which
+	// carries the whole account.
+	mux.Handle(path, standDownOnHangUp(handler, proc.srv.killedSession, func() {
+		proc.log.write("kill-hung-up", map[string]any{
+			"detail": "the daemon hung up the connection its KillSession came in on; the process ends",
+		})
+		proc.die(0, "")
 	}))
-	httpSrv := &http.Server{Handler: h2c.NewHandler(mux, &http2.Server{})}
+	httpSrv := &http.Server{Handler: h2c.NewHandler(mux, &http2.Server{}), ConnContext: hangup.ConnContext}
 
 	go proc.serveControl(ctlListener)
 
@@ -194,10 +165,27 @@ func run(args []string) error {
 	}()
 
 	log.write("listening", map[string]any{"uds": argv.Listen, "control": argv.Listen + ".ctl"})
-	if err := httpSrv.Serve(answers.Listener(rpcListener)); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if err := httpSrv.Serve(hangup.Listener(rpcListener)); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("fakeshim: serve: %w", err)
 	}
 	return nil
+}
+
+// standDownOnHangUp serves inner, and once a KillSession the shim accepted
+// (killed) has been answered, calls end when the daemon hangs up the
+// connection that KillSession came in on, and not before.
+func standDownOnHangUp(inner http.Handler, killed func() bool, end func()) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		standingDown := strings.HasSuffix(r.URL.Path, "/KillSession")
+		inner.ServeHTTP(w, r)
+		if standingDown && killed() {
+			hungUp := hangup.Of(r.Context())
+			go func() {
+				<-hungUp
+				end()
+			}()
+		}
+	})
 }
 
 // listenUnix binds a unix socket, clearing a stale path first.
