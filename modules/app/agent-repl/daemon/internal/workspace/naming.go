@@ -12,7 +12,7 @@ import (
 
 // The naming rule's constants. The rule itself — lowercase, hyphenated, at
 // most four words — is stated to the model by
-// prompts/workspace-name-from-prompt.md and ENFORCED here on its answer: a
+// prompts/workspace-name-from-prompt.md and checked here on its answer: a
 // name is validated, never repaired.
 const (
 	// UnnamedSlugPrefix leads the name a create with neither a supplied name
@@ -55,7 +55,9 @@ func Prefix() string {
 //
 // THERE IS NO REPAIR PATH. An answer that does not match is refused and the
 // call is made again; word truncation — the old `Slug` — is deleted, because
-// a truncated name is a name nobody chose.
+// a truncated name is a name nobody chose. A well-shaped answer that is only
+// over the limits is settled for once the retry is spent, since it is a name
+// the model chose.
 var slugShape = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
 // SlugWordCount counts the words in a naming answer: its runs of ASCII letters
@@ -68,14 +70,25 @@ func SlugWordCount(answer string) int {
 	}))
 }
 
-// ValidateSlug reports whether a naming answer is a legal slug, naming what is
-// wrong with it when it is not.
-func ValidateSlug(slug string) error {
+// ValidateSlugShape reports whether a naming answer has the slug's SHAPE —
+// a usable branch and directory name — whatever its word count or length.
+// An answer of this shape that breaks only the limits is still a name the
+// naming call can settle for once its retry is spent (namecall.go).
+func ValidateSlugShape(slug string) error {
 	if slug == "" {
 		return fmt.Errorf("the answer is empty")
 	}
 	if !slugShape.MatchString(slug) {
 		return fmt.Errorf("the answer is not at most %d lowercase hyphen-separated alphanumeric words", SlugWordLimit)
+	}
+	return nil
+}
+
+// ValidateSlug reports whether a naming answer is a legal slug — its shape
+// AND its limits — naming what is wrong with it when it is not.
+func ValidateSlug(slug string) error {
+	if err := ValidateSlugShape(slug); err != nil {
+		return err
 	}
 	if words := SlugWordCount(slug); words > SlugWordLimit {
 		return fmt.Errorf("the answer is %d words, over the %d-word limit", words, SlugWordLimit)

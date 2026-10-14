@@ -2122,8 +2122,9 @@ func TestAnswerColdGateOnAnAlreadyResolvedGateAnswersNoColdGate(t *testing.T) {
 		Gate:      gateRow.GetId(),
 		Choice:    &agentreplv1.AnswerColdGateRequest_Pay{Pay: &agentreplv1.AnswerColdGatePay{}},
 	}))
-	if err != nil || resolved.Msg.GetSuccess() == nil {
-		t.Fatalf("the first AnswerColdGate{pay} = (%v, %v), want a success setting up the resolved gate", resolved.Msg, err)
+	requireRPCAnswered(t, "the first AnswerColdGate{pay}", resolved, err)
+	if resolved.Msg.GetSuccess() == nil {
+		t.Fatalf("the first AnswerColdGate{pay} = (%v), want a success setting up the resolved gate", resolved.Msg)
 	}
 	shim.ExpectStartSession()
 
