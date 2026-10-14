@@ -170,10 +170,10 @@ func TestWorkspaceRefusesACorruptCloseRecord(t *testing.T) {
 		update string
 		field  string
 	}{
-		{name: "an instant without a cause", update: `UPDATE workspaces SET closed = 1, closed_at = 1 WHERE id = ?`, field: "closed_by"},
-		{name: "a cause without an instant", update: `UPDATE workspaces SET closed = 1, closed_by = 'user' WHERE id = ?`, field: "closed_by"},
-		{name: "a record on an open row", update: `UPDATE workspaces SET closed_at = 1, closed_by = 'user' WHERE id = ?`, field: "closed_at"},
-		{name: "an undeclared cause", update: `UPDATE workspaces SET closed = 1, closed_at = 1, closed_by = 'someone' WHERE id = ?`, field: "closed_by"},
+		{name: "an instant without a cause", update: `UPDATE workspaces SET closed = 1, closure_at = 1 WHERE id = ?`, field: "closure_by"},
+		{name: "a cause without an instant", update: `UPDATE workspaces SET closed = 1, closure_by = 'user' WHERE id = ?`, field: "closure_by"},
+		{name: "a record on an open row", update: `UPDATE workspaces SET closure_at = 1, closure_by = 'user' WHERE id = ?`, field: "closure_at"},
+		{name: "an undeclared cause", update: `UPDATE workspaces SET closed = 1, closure_at = 1, closure_by = 'someone' WHERE id = ?`, field: "closure_by"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
