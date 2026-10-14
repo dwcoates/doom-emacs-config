@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # safe-test-run.sh — run the agent-repl ERT suite with a git-state safety net.
 #
-# Captures HEAD + refs/heads/* + working-tree status before invoking the
-# suite, drops a timestamped checkpoint tag at HEAD, then re-captures the
-# same state after the suite finishes.  On any drift the checkpoint tag
-# is LEFT IN PLACE and the user is told exactly how to roll back; on a
-# clean run the tag is auto-removed.
+# Captures this checkout's HEAD, branch and working-tree status before
+# invoking the suite, drops a timestamped checkpoint tag at HEAD, then
+# re-captures the same state after the suite finishes.  Every ref the run's
+# OWN git processes move, anywhere in the repository, is drift too: the
+# reference-transaction hook journals them (see "Ref drift" below).  On any
+# drift the checkpoint tag is LEFT IN PLACE and the user is told exactly how
+# to roll back; on a clean run the tag is auto-removed.
 #
 # Why this exists: the agent-repl runtime guards catch unmocked-WRAPPER
 # call paths, but a raw `(shell-command-to-string "git ...")` in
@@ -30,7 +32,8 @@
 #   0   — tests passed AND no git drift
 #   1   — tests failed (exit code propagated from ert)
 #   2   — tests passed BUT git state drifted (checkpoint left for rollback)
-#   3   — environment error (not a git repo, missing files, etc.)
+#   3   — environment error (not a git repo, missing files, the
+#         reference-transaction hook not journaling, etc.)
 #
 # Designed for manual invocation and (eventually) CI; no interactive
 # prompts.
@@ -65,85 +68,85 @@ if [ "$SELECTOR" = "--" ]; then
   SELECTOR=""
 fi
 
-# ---- Ref snapshot scope ----------------------------------------------------
-# The refs snapshot must cover only state THIS test run could damage. The
-# repo's refs database is shared with every linked worktree, and live
-# agent-repl workspace sessions legitimately commit to their own branches
-# (and workspace creation adds a branch plus a start/* tag) while the suite
-# runs — so refs vouched for by ANOTHER worktree are excluded, additions and
-# movements alike. Everything else stays covered: this checkout's HEAD and
-# branch, its working-tree status, and every ref no sibling worktree owns.
+# ---- Ref drift ---------------------------------------------------------------
+# The repository's refs are shared with every linked worktree, and other
+# sessions legitimately commit, rebase, create and delete branches while a
+# suite runs. So ref drift is never inferred from a before/after snapshot of
+# the shared refs, which cannot tell who moved a ref: it is the set of refs
+# this run's OWN git processes moved, as .githooks/reference-transaction
+# journals them in its committed phase. The run registers itself as
+# REGISTRY/RUN_ID, one mkdir, where RUN_ID ends in this script's pid, before
+# anything else; the hook journals a ref there only for a git that carries
+# AGENT_REPL_SAFE_TEST_RUN=RUN_ID (exported to the wrapped command) or descends
+# from that pid. Another session's git is neither, so its activity can never
+# fail a run, while a ref the run moves is caught whatever its name. A canary
+# ref the run moves itself proves the journal is live before the suite starts;
+# a hook that is not installed is an environment error, never a blind pass.
 
-# foreign_owned_refs prints "refs/heads/<branch>" for every branch a worktree
-# OTHER than this one owns: the branch it has checked out, or, while it is
-# mid-rebase on a detached HEAD, the branch that rebase is rewriting. A merge
-# queue rebasing a sibling workspace detaches it for the rebase's whole run, so
-# without the second arm that sibling's branch flips between owned and unowned
-# across this suite and reads as drift (2026-10-12: workspace-retarget-zci and
-# duration-since-turn-end-merge, both rebased by the queue mid-run).
-foreign_owned_refs() {
-  local dir
-  git worktree list --porcelain \
-    | awk -v self="worktree $REPO_ROOT" '
-        /^worktree /              { cur = $0 }
-        /^branch / && cur != self { print $2 }
-        /^detached$/ && cur != self { print "DETACHED " substr(cur, 10) }' \
-    | while IFS= read -r line; do
-        case "$line" in
-          "DETACHED "*)
-            dir="${line#DETACHED }"
-            rebasing_branch "$dir"
-            ;;
-          *) printf '%s\n' "$line" ;;
-        esac
-      done
-}
+GIT_COMMON_DIR="$(git rev-parse --path-format=absolute --git-common-dir)"
+REGISTRY="$GIT_COMMON_DIR/agent-repl-safe-test-runs"
+RUN_ID="$(date +%Y%m%d-%H%M%S)-$$"
+RUN_DIR="$REGISTRY/$RUN_ID"
+CANARY_REF="refs/agent-repl-safe-test-run-canary/$RUN_ID"
+CHECKPOINT_TAG="agent-repl-test-checkpoint-$RUN_ID"
 
-# rebasing_branch prints the ref a rebase in worktree DIR is rewriting, and
-# nothing when no rebase is in progress there. A worktree's .git is a file
-# naming its git directory, where git keeps the rebase's head-name.
-rebasing_branch() {
-  local dotgit="$1/.git" gitdir state
-  [ -f "$dotgit" ] || return 0
-  gitdir="$(sed -n 's/^gitdir: //p' "$dotgit")"
-  [ -n "$gitdir" ] || return 0
-  case "$gitdir" in /*) ;; *) gitdir="$1/$gitdir" ;; esac
-  for state in rebase-merge rebase-apply; do
-    if [ -f "$gitdir/$state/head-name" ]; then
-      cat "$gitdir/$state/head-name"
-      return 0
+# prune_gone_runs removes the registration of every run whose script is no
+# longer alive (killed before its exit trap ran), so the hook stops scanning
+# it. The pid comes from the run's name, so a concurrent run's registration
+# or removal can never be caught half done.
+prune_gone_runs() {
+  local run pid
+  [ -d "$REGISTRY" ] || return 0
+  for run in "$REGISTRY"/*; do
+    [ -d "$run" ] || continue
+    pid="${run##*-}"
+    if ! kill -0 "$pid" 2>/dev/null; then
+      rm -rf "$run"
+      echo "[safe-test-run] Removed the registration of a run that is gone: $run (root pid $pid)"
     fi
   done
 }
 
-# snapshot_refs prints the drift-scoped ref list: all heads and tags, minus
-# workspace start/* tags and minus branches a sibling worktree vouches for.
-snapshot_refs() {
-  local exclude
-  exclude="$(foreign_owned_refs)"
-  git for-each-ref --format='%(refname) %(objectname)' refs/heads/ refs/tags/ \
-    | grep -v '^refs/tags/start/' \
-    | grep -v '^refs/tags/agent-repl-test-checkpoint-' \
-    | { if [ -n "$exclude" ]; then
-          grep -v -F -f <(printf '%s\n' "$exclude" | sed 's/$/ /')
-        else
-          cat
-        fi; } || true
+# prove_journal moves the canary ref as the wrapped command's git would, and
+# refuses to run the suite unless the hook journaled it.
+prove_journal() {
+  local head journaled
+  head="$(git rev-parse HEAD)"
+  AGENT_REPL_SAFE_TEST_RUN="$RUN_ID" git update-ref "$CANARY_REF" "$head"
+  journaled="$(awk -v ref="$CANARY_REF" '$3 == ref' "$RUN_DIR/journal")"
+  AGENT_REPL_SAFE_TEST_RUN="$RUN_ID" git update-ref -d "$CANARY_REF"
+  if [ -z "$journaled" ]; then
+    echo "[safe-test-run] FATAL: the reference-transaction hook did not journal this run's canary ref $CANARY_REF," >&2
+    echo "[safe-test-run] so no ref the run moves could be attributed to it. Install .githooks/reference-transaction:" >&2
+    echo "[safe-test-run] core.hooksPath set to .githooks, or modules/app/agent-repl/bin/requirements.sh (requirement reference-transaction-hook)." >&2
+    exit 3
+  fi
 }
+
+# run_ref_moves prints the journal's real moves, the run's own bookkeeping
+# refs (the canary, the checkpoint tag) left out.
+run_ref_moves() {
+  awk -v canary="$CANARY_REF" -v tag="refs/tags/$CHECKPOINT_TAG" \
+    '$3 != canary && $3 != tag && $1 != $2' "$RUN_DIR/journal"
+}
+
+prune_gone_runs
+mkdir -p "$REGISTRY"
+mkdir "$RUN_DIR"
+trap 'rm -rf "$RUN_DIR"' EXIT
+: >"$RUN_DIR/journal"
+prove_journal
 
 # ---- Capture pre-test state ------------------------------------------------
 
 PRE_HEAD="$(git rev-parse HEAD)"
 PRE_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-PRE_REFS="$(snapshot_refs)"
-PRE_REFS_HASH="$(printf '%s' "$PRE_REFS" | shasum -a 256 | cut -d' ' -f1)"
 PRE_STATUS="$(git status --porcelain)"
 
-CHECKPOINT_TAG="agent-repl-test-checkpoint-$(date +%Y%m%d-%H%M%S)-$$"
 git tag "$CHECKPOINT_TAG" "$PRE_HEAD"
 
 echo "[safe-test-run] Checkpoint tag: $CHECKPOINT_TAG @ $PRE_HEAD"
-echo "[safe-test-run] Pre-state: branch=$PRE_BRANCH, refs-hash=${PRE_REFS_HASH:0:12}"
+echo "[safe-test-run] Pre-state: branch=$PRE_BRANCH, ref journal=$RUN_DIR/journal"
 echo ""
 
 # ---- Run the suite ---------------------------------------------------------
@@ -164,7 +167,7 @@ echo "[safe-test-run] Running: ${EMACS_INVOKE[*]}"
 echo ""
 
 set +e
-"${EMACS_INVOKE[@]}"
+AGENT_REPL_SAFE_TEST_RUN="$RUN_ID" "${EMACS_INVOKE[@]}"
 TEST_RC=$?
 set -e
 
@@ -175,8 +178,7 @@ echo "[safe-test-run] ${EMACS_INVOKE[0]} exited with code $TEST_RC"
 
 POST_HEAD="$(git rev-parse HEAD)"
 POST_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-POST_REFS="$(snapshot_refs | grep -v "^refs/tags/$CHECKPOINT_TAG " || true)"
-POST_REFS_HASH="$(printf '%s' "$POST_REFS" | shasum -a 256 | cut -d' ' -f1)"
+RUN_REF_MOVES="$(run_ref_moves)"
 POST_STATUS="$(git status --porcelain | grep -v "scheduled_tasks.lock" || true)"
 PRE_STATUS_FILTERED="$(printf '%s' "$PRE_STATUS" | grep -v "scheduled_tasks.lock" || true)"
 
@@ -195,23 +197,13 @@ if [ "$PRE_BRANCH" != "$POST_BRANCH" ]; then
   DRIFT_REPORT="${DRIFT_REPORT}  - Active branch changed: $PRE_BRANCH -> $POST_BRANCH\n"
 fi
 
-if [ "$PRE_REFS_HASH" != "$POST_REFS_HASH" ]; then
+if [ -n "$RUN_REF_MOVES" ]; then
   DRIFT=1
-  # `diff` exits 1 when the inputs differ — which is the ONLY reason this
-  # branch runs — so under `set -o pipefail` an unguarded pipeline kills the
-  # script right here and the drift is never reported. The guard keeps the
-  # reporter alive; the drift itself still fails the run below.
-  ADDED_REFS="$(diff <(printf '%s\n' "$PRE_REFS") <(printf '%s\n' "$POST_REFS") | awk '/^>/{$1=""; print}' | sed 's/^ //' || true)"
-  REMOVED_REFS="$(diff <(printf '%s\n' "$PRE_REFS") <(printf '%s\n' "$POST_REFS") | awk '/^</{$1=""; print}' | sed 's/^ //' || true)"
-  DRIFT_REPORT="${DRIFT_REPORT}  - refs/heads or refs/tags changed:\n"
-  if [ -n "$ADDED_REFS" ]; then
-    DRIFT_REPORT="${DRIFT_REPORT}      added:\n"
-    while IFS= read -r line; do [ -n "$line" ] && DRIFT_REPORT="${DRIFT_REPORT}        + $line\n"; done <<< "$ADDED_REFS"
-  fi
-  if [ -n "$REMOVED_REFS" ]; then
-    DRIFT_REPORT="${DRIFT_REPORT}      removed:\n"
-    while IFS= read -r line; do [ -n "$line" ] && DRIFT_REPORT="${DRIFT_REPORT}        - $line\n"; done <<< "$REMOVED_REFS"
-  fi
+  DRIFT_REPORT="${DRIFT_REPORT}  - refs this run's own git moved (<old> <new> <ref>, the git's pid, how it was attributed, its cwd):\n"
+  while IFS= read -r line; do DRIFT_REPORT="${DRIFT_REPORT}        $line\n"; done <<< "$RUN_REF_MOVES"
+  # Each ref back to the value it held before the run's first move of it.
+  RESTORE="$(awk '$3 != "HEAD" && !seen[$3]++ {
+      if ($1 ~ /^0+$/) print "git update-ref -d " $3; else print "git update-ref " $3 " " $1 }' <<< "$RUN_REF_MOVES")"
 fi
 
 if [ "$PRE_STATUS_FILTERED" != "$POST_STATUS" ]; then
@@ -240,6 +232,10 @@ echo ""
 echo "[safe-test-run] Checkpoint tag preserved: $CHECKPOINT_TAG @ $PRE_HEAD" >&2
 echo "[safe-test-run] To roll back the worktree + HEAD to pre-test state:" >&2
 echo "[safe-test-run]     git reset --hard $CHECKPOINT_TAG" >&2
+if [ -n "${RESTORE:-}" ]; then
+  echo "[safe-test-run] To put back each other ref the run moved:" >&2
+  while IFS= read -r line; do echo "[safe-test-run]     $line" >&2; done <<< "$RESTORE"
+fi
 echo "[safe-test-run] To accept the drift and discard the checkpoint:" >&2
 echo "[safe-test-run]     git tag -d $CHECKPOINT_TAG" >&2
 
