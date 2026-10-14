@@ -32,7 +32,8 @@ const (
 	opGate       = "daemon.commandfile.gate"
 	// opMergeQueue is the outcome record of a merge-queue control entry
 	// (merge_evict, merge_move_up, merge_move_down, merge_pause, merge_resume,
-	// merge_hold_rollouts, merge_release_rollouts): the answer the requesting
+	// merge_hold_rollouts, merge_release_rollouts, merge_subscribe,
+	// merge_unsubscribe): the answer the requesting
 	// agent reads back, keyed by the file's path like every other record here.
 	opMergeQueue = "daemon.commandfile.merge_queue"
 )
@@ -341,6 +342,8 @@ func (i *ingress) apply(ctx context.Context, log dlog.Logger, file string, index
 		return i.applyMergePause(ctx, log, entry)
 	case TypeMergeHoldRollouts, TypeMergeReleaseRollouts, TypeMergeDisableRacing, TypeMergeEnableRacing:
 		return i.applyDaemonWideSwitch(ctx, log, entry)
+	case TypeMergeSubscribe, TypeMergeUnsubscribe:
+		return i.applyMergeSubscription(ctx, log, entry)
 	case TypeRetarget:
 		return i.applyRetarget(ctx, log, entry)
 	case TypeClose:
@@ -607,6 +610,61 @@ func (i *ingress) applyDaemonWideSwitch(ctx context.Context, log dlog.Logger, en
 		return err
 	}
 	log.Info(opMergeQueue, sw.message, dlog.Context{"type": entry.Type, "requester": string(requester), "outcome": sw.outcome})
+	return nil
+}
+
+// applyMergeSubscription maps a merge_subscribe or merge_unsubscribe entry
+// onto the orchestrator's Subscribe or Unsubscribe, the entry points
+// UpdateMergeQueue's subscribe and unsubscribe arms call, scoped the way the
+// rpc scopes them: an unset repository_dir is every repository. The
+// requester is the subscriber: an agent subscribes its own workspace.
+//
+// AN UNSUBSCRIBE OF NOTHING IS AN ANSWER, NOT A FAILURE, exactly as an evict
+// of nothing is: the rpc answers it as `not_subscribed`, and an agent asking
+// to stop being told is satisfied when it was not, so the file is applied
+// with that outcome. Any other refusal (subscriber_closed,
+// unknown_repository) quarantines the file.
+func (i *ingress) applyMergeSubscription(ctx context.Context, log dlog.Logger, entry Entry) error {
+	requester, err := i.target(ctx, entry)
+	if err != nil {
+		return err
+	}
+	var scope *merge.RepositoryScope
+	if entry.RepositoryDir != "" {
+		scope = &merge.RepositoryScope{Dir: entry.RepositoryDir}
+	}
+	outcome := dlog.Context{
+		"type": entry.Type, "requester": string(requester), "repository_dir": entry.RepositoryDir, "scoped": scope != nil,
+	}
+	if entry.Type == TypeMergeSubscribe {
+		// Validate already refused an undeclared detail, so this reads it.
+		detail, err := wsm.ParseMergeQueueDetail(entry.Detail)
+		if err != nil {
+			return err
+		}
+		outcome["detail"] = detail.String()
+		replaced, err := i.deps.Merge.Subscribe(ctx, requester, scope, detail)
+		if err != nil {
+			return err
+		}
+		outcome["outcome"] = "subscribed"
+		if replaced {
+			outcome["outcome"] = "resubscribed"
+		}
+		log.Info(opMergeQueue, "subscribed the requester's agent to the merge queue's changes", outcome)
+		return nil
+	}
+	err = i.deps.Merge.Unsubscribe(ctx, requester, scope)
+	if refusal, ok := merge.Refused(err); ok && refusal.Arm == merge.ArmNotSubscribed {
+		outcome["outcome"] = "not_subscribed"
+		log.Info(opMergeQueue, "nothing to unsubscribe: the requester holds no merge queue subscription in that scope", outcome)
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	outcome["outcome"] = "unsubscribed"
+	log.Info(opMergeQueue, "ended the requester's merge queue subscription", outcome)
 	return nil
 }
 

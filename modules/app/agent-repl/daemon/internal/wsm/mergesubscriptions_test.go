@@ -380,3 +380,27 @@ func TestMergeQueueDetailNamesEachDetail(t *testing.T) {
 		})
 	}
 }
+
+func TestParseMergeQueueDetailReadsEachDetailsSpelling(t *testing.T) {
+	for _, want := range []MergeQueueDetail{MergeQueueDetailEveryChange, MergeQueueDetailAdvances, MergeQueueDetailDepletes} {
+		t.Run(want.String(), func(t *testing.T) {
+			// Act.
+			got, err := ParseMergeQueueDetail(want.String())
+
+			// Assert.
+			if err != nil || got != want {
+				t.Fatalf("ParseMergeQueueDetail(%q) = %v, %v; want %v", want.String(), got, err, want)
+			}
+		})
+	}
+}
+
+func TestParseMergeQueueDetailRefusesAnUndeclaredSpelling(t *testing.T) {
+	// Act.
+	_, err := ParseMergeQueueDetail("sometimes")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("ParseMergeQueueDetail accepted an undeclared detail")
+	}
+}

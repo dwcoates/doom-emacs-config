@@ -74,6 +74,17 @@ func (d MergeQueueDetail) String() string {
 	return fmt.Sprintf("MergeQueueDetail(%d)", int(d))
 }
 
+// ParseMergeQueueDetail reads a detail as String spells it, the spelling a
+// command file and the merge-queue verb carry. Any other text is refused.
+func ParseMergeQueueDetail(text string) (MergeQueueDetail, error) {
+	for _, detail := range []MergeQueueDetail{MergeQueueDetailEveryChange, MergeQueueDetailAdvances, MergeQueueDetailDepletes} {
+		if detail.String() == text {
+			return detail, nil
+		}
+	}
+	return 0, fmt.Errorf("wsm: %q is none of the merge queue subscription details every_change, advances and depletes", text)
+}
+
 // Valid reports whether d is one of the declared details.
 func (d MergeQueueDetail) Valid() bool {
 	return d >= MergeQueueDetailEveryChange && d <= MergeQueueDetailDepletes
