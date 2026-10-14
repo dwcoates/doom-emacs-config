@@ -158,42 +158,32 @@ func mainIn(m *testing.M, module, root string) int {
 	// A TEST RUN BUILDS THE PROGRAMS ONCE (testenv.Programs): the daemon, the
 	// fake shim and the mocked git come from its programs directory, the
 	// daemon already linked to that same mocked git. Outside a run, this
-	// process builds them itself.
-	var fromRun []bool
-	for _, b := range []struct {
-		path *string
-		name string
-	}{{&daemonBinary, "agent-repld"}, {&fakeshimBinary, "fakeshim"}, {&gitBinary, "git"}} {
-		path, ok, err := testenv.Program(os.Getenv, b.name)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return 1
+	// process builds each itself, into one directory made on the first build.
+	dir := ""
+	binDir := func() (string, error) {
+		if dir != "" {
+			return dir, nil
 		}
-		*b.path = path
-		fromRun = append(fromRun, ok)
+		made, err := os.MkdirTemp(root, "agent-repl-integration-bin-")
+		if err != nil {
+			return "", fmt.Errorf("harness: binary dir: %w", err)
+		}
+		dir = made
+		return dir, nil
 	}
-	if fromRun[0] && fromRun[1] && fromRun[2] {
-		// The pinned checkout is this process's own, never shared.
-		return runPinned(m, module, root)
-	}
-	dir, err := os.MkdirTemp(root, "agent-repl-integration-bin-")
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "harness: binary dir:", err)
-		return 1
-	}
-
-	daemonBinary = filepath.Join(dir, "agent-repld")
-	fakeshimBinary = filepath.Join(dir, "fakeshim")
-	// The scripted `git`. It is built under its real name because it is placed
-	// first on the daemon's PATH: nothing in a test ever reaches the real
-	// binary.
-	gitBinary = filepath.Join(dir, "git")
 	for _, b := range []struct {
-		out, pkg string
-		covered  bool
-		// links are the -ldflags -X bindings the build sets.
-		links []string
+		path      *string
+		name, pkg string
+		covered   bool
+		// links are the -ldflags -X bindings the build sets, read when it
+		// runs.
+		links func() []string
 	}{
+		// The scripted `git`, FIRST: the daemon is linked to it. It is built
+		// under its real name because it is placed first on the daemon's
+		// PATH: nothing in a test ever reaches the real binary.
+		{&gitBinary, "git", "./integration/fakegit/git", false, nil},
+		{&fakeshimBinary, "fakeshim", "./integration/fakeshim", false, nil},
 		// ONLY THE DAEMON IS INSTRUMENTED. The two fakes are harness
 		// scaffolding, not a system under test, and both inherit the
 		// daemon's environment when they run — an instrumented fake would
@@ -202,36 +192,47 @@ func mainIn(m *testing.M, module, root string) int {
 		// THE DAEMON RUNS THE MOCKED GIT BY CONSTRUCTION: it is linked in as
 		// the daemon's git binary, so no PATH a test or a child sets can
 		// reach the host's git.
-		{daemonBinary, "./cmd/agent-repld", true, []string{MockedGitLink(gitBinary)}},
-		{fakeshimBinary, "./integration/fakeshim", false, nil},
-		{gitBinary, "./integration/fakegit/git", false, nil},
+		{&daemonBinary, "agent-repld", "./cmd/agent-repld", true, func() []string { return []string{MockedGitLink(gitBinary)} }},
 	} {
-		// An instrumented build when coverage is on; the plain build
-		// otherwise. `-cover` changes only what the binary WRITES, never
-		// what it does.
-		// -buildvcs=false: a test build never asks git to stamp the binary
-		// (no test runs real git, owner rule).
-		buildArgs := []string{"build", "-buildvcs=false"}
-		if b.covered {
-			buildArgs = append(buildArgs, CoverageBuildArgs(CoverageRoot())...)
-		}
-		if len(b.links) > 0 {
-			buildArgs = append(buildArgs, "-ldflags="+strings.Join(b.links, " "))
-		}
-		buildArgs = append(buildArgs, "-o", b.out, b.pkg)
-		cmd := exec.Command("go", buildArgs...)
-		cmd.Dir = module
-		cmd.Stderr = os.Stderr
-		cmd.Stdout = os.Stderr
-		if _, err := TimedStep(os.Stderr, "harness", "go build "+b.pkg, func() (struct{}, error) { return struct{}{}, cmd.Run() }); err != nil {
-			// Recorded rather than fatal: a suite that only exercises the fake
-			// still reports a real failure through DaemonBinary below.
-			buildErr = fmt.Errorf("harness: go build %s: %w", b.pkg, err)
+		path, err := testenv.ProgramOr(os.Getenv, b.name, func() (string, error) {
+			d, err := binDir()
+			if err != nil {
+				return "", err
+			}
+			out := filepath.Join(d, b.name)
+			// An instrumented build when coverage is on; the plain build
+			// otherwise. `-cover` changes only what the binary WRITES, never
+			// what it does.
+			// -buildvcs=false: a test build never asks git to stamp the binary
+			// (no test runs real git, owner rule).
+			buildArgs := []string{"build", "-buildvcs=false"}
+			if b.covered {
+				buildArgs = append(buildArgs, CoverageBuildArgs(CoverageRoot())...)
+			}
+			if b.links != nil {
+				buildArgs = append(buildArgs, "-ldflags="+strings.Join(b.links(), " "))
+			}
+			buildArgs = append(buildArgs, "-o", out, b.pkg)
+			cmd := exec.Command("go", buildArgs...)
+			cmd.Dir = module
+			cmd.Stderr = os.Stderr
+			cmd.Stdout = os.Stderr
+			if _, err := TimedStep(os.Stderr, "harness", "go build "+b.pkg, func() (struct{}, error) { return struct{}{}, cmd.Run() }); err != nil {
+				return "", fmt.Errorf("harness: go build %s: %w", b.pkg, err)
+			}
+			return out, nil
+		})
+		if err != nil {
+			// Recorded as well as fatal here: DaemonBinary reports it to any
+			// test that asks for the daemon.
+			buildErr = err
 			fmt.Fprintln(os.Stderr, buildErr)
 			return 1
 		}
+		*b.path = path
 	}
-	return runPinned(m, module, dir)
+	// The pinned checkout is this process's own, never shared.
+	return runPinned(m, module, root)
 }
 
 // runPinned lays out the pinned checkout under parent, self-checks the build
