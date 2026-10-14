@@ -254,7 +254,9 @@ func TestTheMergeQueueVerbNamesEachMode(t *testing.T) {
 			check: func(_ *mergeFixture, e commandfile.Entry) bool { return e.OneShot && e.Front }},
 		{name: "a one-shot already merged upstream", args: func(*mergeFixture) []string { return []string{"-one-shot", "-pr-merged"} },
 			check: func(_ *mergeFixture, e commandfile.Entry) bool { return e.OneShot && e.PRWasMerged }},
-		{name: "an async merge", args: func(*mergeFixture) []string { return []string{"-async", "-name", "reconnect-fix", "-branch", "agent-1/fix"} },
+		{name: "an async merge", args: func(*mergeFixture) []string {
+			return []string{"-async", "-name", "reconnect-fix", "-branch", "agent-1/fix"}
+		},
 			check: func(_ *mergeFixture, e commandfile.Entry) bool {
 				return !e.OneShot && e.AsyncName == "reconnect-fix" && e.Branch == "agent-1/fix" && e.Instruction == "" &&
 					e.CloseDir == "" && !e.CleanupWorktree && !e.CompactAfter
