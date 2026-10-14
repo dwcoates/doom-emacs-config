@@ -271,9 +271,10 @@ type DetachedMerges interface {
 	// it when none is registered yet: a fork of the requester's conversation
 	// named NAME (the name the request reserved), its own worktree on BASE as
 	// it stands now — the requester's branch for a whole-branch merge, the
-	// target branch for a pick — landing where the requester would, and
-	// recording ORIGIN (whose Requester is REQUESTER's id) as what it was
-	// forked for. It is idempotent per request, so a hand-off a restart cut
+	// target branch for a pick — landing by ORIGIN's TargetDir and
+	// ParentBranch and running exactly ORIGIN's Actions, which the hand-off
+	// decided, and recording ORIGIN (whose Requester is REQUESTER's id) as
+	// what it was forked for. It is idempotent per request, so a hand-off a restart cut
 	// short finds the workspace already forked.
 	Fork(ctx context.Context, requester wsm.Workspace, origin wsm.MergeOrigin, name, base string) (wsm.Workspace, error)
 	// HandBack reports how a detached merge ended to the conversation of the
