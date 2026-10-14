@@ -178,7 +178,9 @@ and schedules it across `runtime.NumCPU() - 3` slots: every core but three
 so it always yields the CPU to the owner's live runtime, input handling and
 apps. A host with no core left past the reserve is refused. The planner chooses each suite's chunk count by simulating
 the run against EWMA unit timings in
-`~/.cache/agent-repl/test-history.json`, then assigns the longest remaining
+`~/.cache/agent-repl/test-history.<conditions>.json` (one history per set of
+run conditions, e.g. `ramdisk-io-default`, so timings taken at another I/O
+tier never feed this one's plan), then assigns the longest remaining
 dependency chain first. Parallelism belongs to this scheduler:
 
 - every Go package is compiled once and split by top-level test; the go
