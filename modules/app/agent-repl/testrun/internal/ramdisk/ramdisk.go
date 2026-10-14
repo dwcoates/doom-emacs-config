@@ -296,7 +296,7 @@ type Volume struct {
 func Default(log Logger) Manager {
 	return Manager{
 		Run: ExecRunner, Registry: DefaultRegistry, MountParent: DefaultMountParent, Pid: os.Getpid(),
-		Reap:  func(ms reap.Members) (reap.Result, error) { return reap.Reap(reap.OSTable{}, ms, log) },
+		Reap:  reap.OSReap(log),
 		Probe: RunBounded, Watch: RunWatched, Alive: ProcessAlive, Mounted: IsMountPoint, Log: log, Now: time.Now,
 		LockBound: LockBound,
 	}

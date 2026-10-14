@@ -137,3 +137,34 @@ func TestAwaitExitAnswersAProcessStillRunningAtItsBound(t *testing.T) {
 		t.Fatalf("AwaitExit() = %v, %v, want the running pid answered", left, err)
 	}
 }
+
+func TestOSReapReapsOverTheHostsTable(t *testing.T) {
+	// Arrange.
+	log := &recLog{}
+
+	// Act.
+	res, err := OSReap(log)(Members{What: "nothing"})
+
+	// Assert.
+	if err != nil || res.Passes != 1 || !log.infoHas("reap nothing: freeze pass 1 found no member left running") {
+		t.Fatalf("OSReap() = %+v, %v, log %q", res, err, log.info)
+	}
+}
+
+func TestEveryCallerTakesOSReap(t *testing.T) {
+	// Arrange: every place a reap over the host's table is built.
+	sites := []string{"../main.go", "../internal/ramdisk/ramdisk.go"}
+
+	for _, site := range sites {
+		// Act.
+		src, err := os.ReadFile(site)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Assert.
+		if !strings.Contains(string(src), "reap.OSReap(") || strings.Contains(string(src), "reap.Reap(reap.OSTable") {
+			t.Errorf("%s builds its own reap over the host's table; want reap.OSReap", site)
+		}
+	}
+}
