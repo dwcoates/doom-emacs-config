@@ -41,14 +41,16 @@ export function foldViewKey(sectionKey: string): string {
 export const GROUPING_VIEW_KEY = "grouping";
 
 /**
- * Say on a section, and on every fold triangle inside it, which way it stands.
+ * Say on a section, and on its OWN header's fold triangle, which way it stands.
  *
  * The triangle carries the state as `[data-section-fold][data-folded]`, so the
- * element that takes the gesture is also the one that reports it.
+ * element that takes the gesture is also the one that reports it. Only the
+ * triangles of the section's own header are painted: the open-workspaces
+ * section holds whole sections, whose triangles answer their own folds.
  */
 export function paintSectionFold(section: HTMLElement, folded: boolean): void {
   section.classList.toggle("folded", folded);
-  for (const triangle of section.querySelectorAll<HTMLElement>("[data-section-fold]")) {
+  for (const triangle of section.querySelectorAll<HTMLElement>(":scope > * > [data-section-fold]")) {
     paintTriangle(triangle, folded);
   }
 }

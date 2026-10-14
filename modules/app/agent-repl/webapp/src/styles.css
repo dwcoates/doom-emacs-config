@@ -961,11 +961,18 @@ html.webhost-sidebar #ws-sidebar[hidden] {
    hidden rows included (src/sidebar/roster.ts drawMergedTodayCount), sized as
    the folded count and drawn grey, present only while the band is unfolded,
    where the folded count is not (owner request, 2026-10-11). */
-#ws-sidebar .repo-head .sb-today-count {
+/* THE OPEN WORKSPACES SECTION'S COUNT "(N)" takes the same size and grey
+   (owner request, 2026-10-13), and shows whether the section is folded or
+   not (src/sidebar/roster.ts drawRosterOpenSection). */
+#ws-sidebar .repo-head .sb-today-count,
+#ws-sidebar .repo-head .sb-open-count {
   font-size: 0.85em;
   color: var(--muted);
 }
 #ws-sidebar .repo.folded > .repo-head .sb-today-count { display: none; }
+/* A folded open workspaces section folds away every grouping section it
+   holds, headers included; only its own header stays. */
+#ws-sidebar .repo.open-section.folded > .sb-sections { display: none; }
 /* A repository section's header takes its fold's grey rather than the
    --info-ws hue the task and merged headers keep. */
 #ws-sidebar .repo.repo-section > .repo-head { color: var(--repo-head-expanded); }
@@ -1000,7 +1007,9 @@ html.webhost-sidebar #ws-sidebar[hidden] {
    -- hold no grouping's sections, so each is set off from the list above by
    ONE shared light rule. Both bands' headers are drawn purple: Recently
    Merged's matches its rows' dots, and Hidden's matches Recently Merged's
-   (owner request, 2026-10-11). The rows under either keep their own colours. */
+   (owner request, 2026-10-11), and so is the open workspaces section's header
+   above the groupings (owner request, 2026-10-13). The rows under any of them
+   keep their own colours. */
 #ws-sidebar .repo.hidden-section,
 #ws-sidebar .repo.merged-section {
   margin-top: 0.5rem;
@@ -1046,6 +1055,7 @@ html.webhost-sidebar #ws-sidebar[hidden] {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+#ws-sidebar .repo.open-section > .repo-head,
 #ws-sidebar .repo.hidden-section > .repo-head,
 #ws-sidebar .repo.merged-section > .repo-head { color: var(--info-agents); }
 /* The LINE BOX is pinned, not the row height. Setting `height` drew every
