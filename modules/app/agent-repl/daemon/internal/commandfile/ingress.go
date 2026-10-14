@@ -548,10 +548,7 @@ func (i *ingress) applyMergePause(ctx context.Context, log dlog.Logger, entry En
 	if err != nil {
 		return err
 	}
-	var scope *merge.RepositoryScope
-	if entry.RepositoryDir != "" {
-		scope = &merge.RepositoryScope{Dir: entry.RepositoryDir}
-	}
+	scope := entry.queueScope()
 	outcome := dlog.Context{
 		"type": entry.Type, "requester": string(requester), "repository_dir": entry.RepositoryDir,
 		"scoped": scope != nil,
@@ -629,10 +626,7 @@ func (i *ingress) applyMergeSubscription(ctx context.Context, log dlog.Logger, e
 	if err != nil {
 		return err
 	}
-	var scope *merge.RepositoryScope
-	if entry.RepositoryDir != "" {
-		scope = &merge.RepositoryScope{Dir: entry.RepositoryDir}
-	}
+	scope := entry.queueScope()
 	outcome := dlog.Context{
 		"type": entry.Type, "requester": string(requester), "repository_dir": entry.RepositoryDir, "scoped": scope != nil,
 	}

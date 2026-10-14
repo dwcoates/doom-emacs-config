@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"agent-repld/internal/dirpath"
+	"agent-repld/internal/merge"
 	"agent-repld/internal/semver"
 	"agent-repld/internal/wsm"
 )
@@ -420,6 +421,16 @@ func (e Entry) queueScoped() bool {
 		return true
 	}
 	return false
+}
+
+// queueScope is the merge queue scope a queue-scoped entry addresses, as the
+// rpc's optional RepositoryRef reads: nil (every repository) for an unset
+// repository_dir, else that repository's main checkout.
+func (e Entry) queueScope() *merge.RepositoryScope {
+	if e.RepositoryDir == "" {
+		return nil
+	}
+	return &merge.RepositoryScope{Dir: e.RepositoryDir}
 }
 
 // validateCreate refuses a create whose fields contradict each other or name
