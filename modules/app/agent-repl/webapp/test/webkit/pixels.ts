@@ -4,6 +4,12 @@
  * laid out (a pseudo-element has no client rect, a snapped glyph no rect that
  * says where it landed). The page decodes its own screenshot through a canvas,
  * so no PNG decoder rides in node.
+ *
+ * THE PIXELS CROSS BACK AS ONE BASE64 STRING OF RAW RGBA BYTES, never as an
+ * array of numbers: an 800px-wide shot is about 640k channel values, and
+ * serializing those as a JSON array took most of a second per shot, which put
+ * every screenshot test over the suite's 850ms test timeout under a full run
+ * (bubble-fade.webkit.test.ts, measured 2026-10-13).
  */
 import type { Page } from "playwright-core";
 
@@ -26,7 +32,7 @@ export interface Pixels {
 /** PAGE's painted pixels inside CLIP, or the whole viewport without one. */
 export async function screenshotPixels(page: Page, clip?: Clip): Promise<Pixels> {
   const shot = await page.screenshot(clip === undefined ? {} : { clip });
-  const { width, height, data } = await page.evaluate(async (b64) => {
+  const { width, height, rgba } = await page.evaluate(async (b64) => {
     const img = new Image();
     img.src = `data:image/png;base64,${b64}`;
     await img.decode();
@@ -36,8 +42,16 @@ export async function screenshotPixels(page: Page, clip?: Clip): Promise<Pixels>
     const g = canvas.getContext("2d");
     if (g === null) throw new Error("no 2d context");
     g.drawImage(img, 0, 0);
-    return { width: img.width, height: img.height, data: Array.from(g.getImageData(0, 0, img.width, img.height).data) };
+    const bytes = g.getImageData(0, 0, img.width, img.height).data;
+    // btoa takes a binary string; build it in chunks, as one spread of the
+    // whole array overflows the argument limit.
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    }
+    return { width: img.width, height: img.height, rgba: btoa(binary) };
   }, shot.toString("base64"));
+  const data = Buffer.from(rgba, "base64");
   return {
     width,
     height,
