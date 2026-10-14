@@ -4093,7 +4093,8 @@ const variantSelector = (variant: string): string => `.bubble[data-variant="${va
  */
 const PAD_LADDER: readonly { selectors: readonly string[]; props: readonly string[] }[] = [
   { selectors: [variantSelector("response")], props: ["--bubble-pad-y"] },
-  { selectors: ["user", "agent", "peer", "held"].map(variantSelector), props: ["--bubble-pad-y", "--bubble-pad-x"] },
+  { selectors: ["agent", "peer", "held"].map(variantSelector), props: ["--bubble-pad-y", "--bubble-pad-x"] },
+  { selectors: [variantSelector("user")], props: ["--bubble-pad-y", "--bubble-pad-x"] },
   { selectors: [`${variantSelector("response")}.interim-response`], props: ["--bubble-pad-y", "--bubble-pad-x"] },
   { selectors: [`${variantSelector("response")}.final-response`], props: ["--bubble-pad-y"] },
   { selectors: [variantSelector("thinking")], props: ["--bubble-pad-y"] },
@@ -4849,6 +4850,8 @@ describe("the padding ladder", () => {
   const THINKING = "calc(var(--bubble-pad-y-base)*0.35)";
   const BASE = "var(--bubble-pad-y-base)";
   const PROMPT_X = "calc(var(--bubble-pad-x-base)*0.7)";
+  const USER_Y = "calc(var(--bubble-pad-y-base)*0.49*1.15)";
+  const USER_X = "calc(var(--bubble-pad-x-base)*0.7*1.15)";
   const INTERIM_Y = "calc(var(--bubble-pad-y-base)*0.49*var(--bubble-font-rem)/var(--bubble-base-font-rem))";
   const INTERIM_X = "calc(var(--bubble-pad-x-base)*var(--bubble-font-rem)/var(--bubble-base-font-rem))";
   const BASE_X = "var(--bubble-pad-x-base)";
@@ -4865,7 +4868,7 @@ describe("the padding ladder", () => {
 
   const cases: readonly { variant: keyof typeof BUBBLE_VARIANTS; y: string; x: string }[] = [
     { variant: "response", y: RESPONSE, x: BASE_X },
-    { variant: "user", y: TIGHT, x: PROMPT_X },
+    { variant: "user", y: USER_Y, x: USER_X },
     { variant: "agent", y: TIGHT, x: PROMPT_X },
     { variant: "peer", y: TIGHT, x: PROMPT_X },
     { variant: "held", y: TIGHT, x: PROMPT_X },
@@ -4888,6 +4891,14 @@ describe("the padding ladder", () => {
 
     // Assert
     expect(got).toEqual([INTERIM_Y, RESPONSE]);
+  });
+
+  it("gives a user prompt 15% more on every side than a subagent prompt", () => {
+    // Arrange / Act
+    const got = [tokenOf("--bubble-pad-y", "user"), tokenOf("--bubble-pad-x", "user"), tokenOf("--bubble-pad-y", "agent"), tokenOf("--bubble-pad-x", "agent")];
+
+    // Assert
+    expect(got).toEqual([USER_Y, USER_X, TIGHT, PROMPT_X]);
   });
 
   it("gives the green answer 25% more top and bottom than a plain response", () => {
