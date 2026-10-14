@@ -40,3 +40,33 @@ wait is never invisible. The owner delegated the contract decision.
     account under the strip (`webapp/src/feed/merge/tab-set.ts` `drawSummary`).
   - `holder` is republished whenever the turn passes to a merge other than the
     waiting one; with the production window of two there is at most one waiter.
+
+## Implementation consequences (daemon, `internal/merge`)
+
+- **The turn and its line live in `testturn.go`**, under the orchestrator's
+  lock; `gate` (`gate.go`) takes the turn after selecting suites (an empty
+  selection runs nothing and takes no turn) and gives it back on every way
+  out. `releaseSlot` gives back what a run leaving its chain still holds.
+- **The governor's permit is taken after the turn**, inside `gate`
+  (`admitGate`), for the head and the merge behind it alike. A merge behind
+  the head that holds the turn unadmitted gives it to its head when the head
+  joins the line (`errTurnToHead`, `watchHeadInLine`), and rejoins the line
+  behind it: the governor's head-first rule holds through the turn. Without
+  that, a busy machine would have held the head's gate behind a merge that
+  runs nothing.
+- **A merge promoted before the governor admitted it** settles its round
+  ("the merge reached its queue's head") and runs its gate from the head's own
+  steps, which rebase first. Running it at once as the head's gate would have
+  tested a base the landing that promoted it had just moved.
+- **Accepted cost: a brief run on an old tip.** When the head's gate passes it
+  gives back the turn at once, so the merge behind may start a run that the
+  head's landing cuts moments later. The owner's design releases the turn
+  whenever a run ends, and the merge behind may still win the race to land
+  while the head is in its post-merge steps, so the run is not withheld.
+- **A run in line stands at a step boundary** (`run.idling`), so a
+  workspace restart suspends it at once instead of waiting through another
+  merge's whole run.
+- **Tests that needed two gates at once were re-arranged, not weakened**:
+  the chain and race suites order the two merges with the TEST-ONLY seams
+  `onTestTurnAsk` / `onTestTurnLine` (`chain.parkTurn`, `chain.awaitLined`),
+  and `chainRunner.overlapped` asserts no two gates ever ran together.

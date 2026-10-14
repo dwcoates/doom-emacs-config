@@ -79,7 +79,7 @@ daemon/
     headless/      the ONE exec site for the daemon's own `claude -p` calls:
                    the classifier's routing question and the workspace naming
                    call. Guard, binary resolution, stdin discipline, deadline
-    merge/         merge orchestrator (per-repo queue, two methods, tabs, lease, test gate, briefs, ledger)
+    merge/         merge orchestrator (per-repo queue, two methods, tabs, lease, test gate and its per-repo test turn, briefs, ledger)
     drain/         shutdown schedule + idle sweep (hibernation policy incl. Hibernate directive);
                    the SAME stand-down for a workspace the user hid or collapsed (withheld.go),
                    deferred to its turn's end, never under it
