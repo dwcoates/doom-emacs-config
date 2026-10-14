@@ -59,7 +59,7 @@ const MERGE_GLYPHS: Readonly<Record<string, string>> = renderColors.merge_glyphs
 const GATE_GLYPHS: Readonly<Record<string, string>> = renderColors.gate_glyphs;
 const GLYPH_INKS: Readonly<Record<string, string>> = renderColors.glyph_inks;
 const ONE_SHOT_GLYPH_ARMS: readonly string[] = renderColors.one_shot_glyph_arms;
-const ASYNC_MERGE_MARK: Readonly<{ ink: string; motion: string; tab_bracket: string }> = renderColors.async_merge_mark;
+const ASYNC_MERGE_MARK: Readonly<{ glyph: string; ink: string; motion: string; tab_bracket: string }> = renderColors.async_merge_mark;
 const FAILURE_SIDES: Readonly<Record<string, Color>> = renderColors.failure_sides as Record<string, Color>;
 const FEED_SUBAGENT_DOT: Readonly<Record<string, Color>> = renderColors.feed_subagent_dot as Record<string, Color>;
 const FEED_SHELL_DOT: Readonly<Record<string, Color>> = renderColors.feed_shell_dot as Record<string, Color>;
@@ -203,13 +203,14 @@ export function glyphInk(arm: string): string | undefined {
 }
 
 /**
- * The ink and motion a row's PLAIN status dot takes while the workspace's own
- * branch merges async (`render-colors.json#async_merge_mark`,
- * `frontend.v1.RosterRowAsyncMerging`, owner request 2026-10-13). Which dot is
- * plain is `tones.rosterRowMark`'s to apply; the values are the file's.
+ * The glyph, ink and motion drawn in place of a row's PLAIN status dot while
+ * the workspace's own branch merges async (`render-colors.json#async_merge_mark`,
+ * `frontend.v1.RosterRowAsyncMerging`, owner requests 2026-10-13 and
+ * 2026-10-14). Which dot is plain is `tones.rosterRowMark`'s to apply; the
+ * values are the file's.
  */
-export function asyncMergeMark(): { ink: string; motion: string } {
-  return { ink: ASYNC_MERGE_MARK.ink, motion: ASYNC_MERGE_MARK.motion };
+export function asyncMergeMark(): { glyph: string; ink: string; motion: string } {
+  return { glyph: ASYNC_MERGE_MARK.glyph, ink: ASYNC_MERGE_MARK.ink, motion: ASYNC_MERGE_MARK.motion };
 }
 
 /**

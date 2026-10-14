@@ -198,8 +198,8 @@ describe("a row's mark with its one-shot mark", () => {
 });
 
 // AN ASYNC MERGE OF THE WORKSPACE'S OWN BRANCH (owner request, 2026-10-13):
-// the plain dot takes the shared vocabulary's async-merge ink and motion, on
-// the arm's own tone; every other mark outranks it.
+// the plain dot gives way to the shared vocabulary's async-merge glyph, ink
+// and motion, on the arm's own tone; every other mark outranks it.
 describe("a row's mark with its async-merging marker", () => {
   const ASYNC_MERGING: RowMarkers = { oneShot: false, asyncMerging: true };
   const PLAIN_DOT_ARMS = ROSTER_STATUS_CASES.filter(
@@ -207,8 +207,18 @@ describe("a row's mark with its async-merging marker", () => {
   );
   const OTHER_MARK_ARMS = ROSTER_STATUS_CASES.filter((arm) => !PLAIN_DOT_ARMS.includes(arm));
 
-  it.each(PLAIN_DOT_ARMS)("inks the plain %s dot in the async-merge purple, breathing, on the arm's own tone", (arm) => {
-    expect(rosterRowMark(arm, ASYNC_MERGING)).toEqual({ ...rosterArmMark(arm), ink: "purple", motion: "breathes" });
+  it.each(PLAIN_DOT_ARMS)("draws the purple merge glyph, breathing, over the plain %s dot on the arm's own tone", (arm) => {
+    expect(rosterRowMark(arm, ASYNC_MERGING)).toEqual({
+      ...rosterArmMark(arm),
+      glyph: "merge",
+      image: GLYPH_IMAGES.merge,
+      ink: "purple",
+      motion: "breathes",
+    });
+  });
+
+  it("draws the same picture as a running merge", () => {
+    expect(rosterRowMark("ready", ASYNC_MERGING).image).toBe(rosterArmMark("merging").image);
   });
 
   it.each(OTHER_MARK_ARMS)("keeps the %s arm's own mark over the async merge", (arm) => {

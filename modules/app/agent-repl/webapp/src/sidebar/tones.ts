@@ -156,9 +156,10 @@ export const NO_MARKERS: RowMarkers = Object.freeze({ oneShot: false, asyncMergi
  * other arm. The glyph breathes, as the work it stands for does, and the
  * row keeps the arm's tone.
  *
- * An ASYNC MERGE of the workspace's own branch inks the PLAIN dot -- the
- * `dot` glyph with no ink of its own -- in `render-colors.json#async_merge_mark`
- * (owner request, 2026-10-13). Every other mark outranks it: a gate's glyph,
+ * An ASYNC MERGE of the workspace's own branch draws the merge glyph in place
+ * of the PLAIN dot -- the `dot` glyph with no ink of its own -- in the glyph,
+ * ink and motion of `render-colors.json#async_merge_mark` (owner requests,
+ * 2026-10-13 and 2026-10-14). Every other mark outranks it: a gate's glyph,
  * the one-shot glyph, a merge glyph, an inked dot (compacting's orange) and no
  * mark at all. The row keeps the arm's tone either way, so its NAME stays the
  * workspace's own status color.
@@ -170,7 +171,7 @@ export function rosterRowMark(arm: string, markers: RowMarkers): RosterArmMark {
   }
   if (markers.asyncMerging && mark.glyph === "dot" && mark.ink === undefined) {
     const merge = asyncMergeMark();
-    return { ...mark, ink: merge.ink, motion: merge.motion as MarkMotion };
+    return { ...mark, glyph: merge.glyph, image: GLYPH_IMAGES[merge.glyph], ink: merge.ink, motion: merge.motion as MarkMotion };
   }
   return mark;
 }
@@ -192,7 +193,7 @@ export function glyphName(arm: RosterStatusCase): string {
  * How the arm's mark MOVES. The rail has ONE animation, the breath, and it
  * makes ONE claim everywhere (owner ruling, 2026-10-13): something is in
  * progress. A turn in flight, its context cuts, detached work, a session
- * booting and a merge running breathe (and an async merge's dot, through
+ * booting and a merge running breathe (and an async merge's glyph, through
  * `rosterRowMark`). A gate (permission, question, cold
  * gate) and an interrupt landing wait on the user, so nothing is in progress
  * and they hold still, as everything else does.
