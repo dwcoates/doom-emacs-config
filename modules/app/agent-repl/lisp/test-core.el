@@ -6958,3 +6958,36 @@ A stale entry guards nothing and hides that the wrapper it named is gone."
             (should (equal (mapcar (lambda (r) (alist-get 'level r)) records) '("info")))
             (should (string-match-p "reverted to info"
                                     (alist-get 'message (car records))))))))))
+
+;;;; ---- Tests: how long ago ----
+
+(ert-deftest agent-repl-test-core-format-age-reads-seconds ()
+  "A span under a minute reads in seconds."
+  ;; Arrange, Act, Assert.
+  (should (equal (agent-repl-format-age 1000 31000) "30s ago")))
+
+(ert-deftest agent-repl-test-core-format-age-reads-minutes ()
+  "A span under an hour reads in whole minutes."
+  ;; Arrange, Act, Assert.
+  (should (equal (agent-repl-format-age 0 (* 1000 659)) "10m ago")))
+
+(ert-deftest agent-repl-test-core-format-age-reads-hours ()
+  "A span under a day reads in whole hours."
+  ;; Arrange, Act, Assert.
+  (should (equal (agent-repl-format-age 0 (* 1000 7200)) "2h ago")))
+
+(ert-deftest agent-repl-test-core-format-age-reads-days ()
+  "A span of a day or more reads in whole days."
+  ;; Arrange, Act, Assert.
+  (should (equal (agent-repl-format-age 0 (* 1000 86400 3)) "3d ago")))
+
+(ert-deftest agent-repl-test-core-format-age-at-the-minute-boundary ()
+  "Sixty seconds is the first minute, not sixty seconds."
+  ;; Arrange, Act, Assert.
+  (should (equal (agent-repl-format-age 0 60000) "1m ago")))
+
+(ert-deftest agent-repl-test-core-format-age-of-a-future-instant-is-none ()
+  "An instant a moment past now reads as no time at all, never negative."
+  ;; Arrange, Act, Assert.
+  (should (equal (agent-repl-format-age 5000 1000) "0s ago")))
+
