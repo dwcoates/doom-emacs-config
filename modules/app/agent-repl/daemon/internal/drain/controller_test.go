@@ -979,6 +979,28 @@ func TestNewRefusesWithoutASpawnSweep(t *testing.T) {
 	}
 }
 
+// TestNewRefusesWithoutAMergeSuspension pins that the merge drain is REQUIRED
+// wiring: an immediate shutdown without it stands down the session a mid-step
+// merge waits on, and the merge reads its own daemon's exit as a fault.
+func TestNewRefusesWithoutAMergeSuspension(t *testing.T) {
+	// Arrange & Act
+	_, err := New(Deps{
+		DB:        newHarness(t).db,
+		Stand:     newFakeStand(),
+		Spawns:    newFakeSpawns(),
+		Freeness:  newFakeFreeness(),
+		Reviving:  newFakeReviving().Reviving,
+		Announcer: &fakeAnnouncer{},
+		Exit:      func(context.Context) error { return nil },
+		Log:       dlog.NewTestSurfaces(),
+	})
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "merge suspension") {
+		t.Fatalf("New = %v, want the missing merge suspension refused", err)
+	}
+}
+
 // TestNewRefusesWithoutARevivalAnswer pins that the prompt queue's revival
 // state is REQUIRED wiring: a sweep that cannot see a revival hibernates the
 // session the revival is bringing up.
@@ -988,6 +1010,7 @@ func TestNewRefusesWithoutARevivalAnswer(t *testing.T) {
 		DB:        newHarness(t).db,
 		Stand:     newFakeStand(),
 		Spawns:    newFakeSpawns(),
+		Merges:    &fakeMerges{},
 		Freeness:  newFakeFreeness(),
 		Announcer: &fakeAnnouncer{},
 		Exit:      func(context.Context) error { return nil },
@@ -1049,6 +1072,43 @@ func TestShutdownNowLatchesTheStandDownBeforeTheSessionWalk(t *testing.T) {
 	// Assert
 	if at := h.spawns.LatchedAt(); at != 0 {
 		t.Fatalf("the stand-down latched after %d session stand-downs, want it up before the walk begins", at)
+	}
+}
+
+// TestShutdownNowSuspendsTheMergesBeforeTheSessionWalk pins the ordering a
+// merge needs: the walk closes the session a mid-step merge waits on, and a
+// merge that learns of the exit only from that closed wait fails as a fault.
+func TestShutdownNowSuspendsTheMergesBeforeTheSessionWalk(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.workspace(t, instant)
+	h.workspace(t, instant)
+
+	// Act
+	if err := h.c.ShutdownNow(context.Background(), maintenanceReason()); err != nil {
+		t.Fatalf("ShutdownNow: %v", err)
+	}
+
+	// Assert
+	if seen := h.merges.Seen(); len(seen) != 1 || seen[0] != 0 {
+		t.Fatalf("merge drains saw %v session stand-downs, want exactly one drain before the walk begins", seen)
+	}
+}
+
+// TestShutdownNowDrainsTheMergesPastTheCallersDeadline pins that the caller's
+// context bounds the answer it waits for, never the merge drain.
+func TestShutdownNowDrainsTheMergesPastTheCallersDeadline(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act
+	_ = h.c.ShutdownNow(ctx, maintenanceReason())
+
+	// Assert
+	if got := h.merges.Cancelled(); len(got) != 1 || got[0] {
+		t.Fatalf("merge drain contexts cancelled = %v, want one drain on a live context", got)
 	}
 }
 
