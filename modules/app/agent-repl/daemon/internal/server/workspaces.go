@@ -16,8 +16,8 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
-	"agent-repld/internal/workspace"
 	"agent-repld/internal/semver"
+	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
 )
 
