@@ -2841,11 +2841,27 @@ html[data-page-unshown] *::after {
    (`.tool-input`, `.bash-input`), so the one row is the only limit. This is
    the ONE title cap: title-fold.ts marks every title site, and no card caps
    its title any other way. */
-.title-fold {
+/* THE ONE-LINE CLAMP'S SHAPE, shared by the title fold and the collapsed
+   ellipsis bubble's body (below): a vertical box that hides what the clamp
+   drops, which is the shape that makes the engine write the `…`. Each site
+   states only its own line count, so the two clamps cannot drift apart.
+   THE `…` SITS AT THE CONTENT'S RIGHT EDGE, MID-WORD IF NEED BE (owner
+   report, 2026-10-14: the ellipsis often fell well short of the card's end).
+   The engine writes the `…` at the end of the last line it keeps, and that
+   line ended at its last word break, a whole word's width short of the edge.
+   `line-break: anywhere` lets the line break between any two characters, so
+   the kept line fills to the content edge and the `…` lands as far from the
+   right side as the text starts from the left. Collapsed only: the title's
+   lift resets it, and the bubble's clamp never matches an expanded box. */
+.title-fold,
+.bubble[data-more="ellipsis"] > .bubble-scroll:not(.expanded) > .bubble-body {
   display: -webkit-box;
-  -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  line-break: anywhere;
+}
+.title-fold {
+  -webkit-line-clamp: 1;
   max-height: none;
 }
 /* EXPANDED LIFTS THE CAP: the whole title shows, alongside the card's output.
@@ -2860,6 +2876,7 @@ html[data-page-unshown] *::after {
   -webkit-line-clamp: none;
   overflow: visible;
   max-height: none;
+  line-break: auto;
 }
 /* A STANDALONE TITLE IS ITS OWN EXPANDED ITEM, so it stays under the
    expanded-item ceiling (--feed-item-max-h, on #feed-scroll) and scrolls the
@@ -2945,12 +2962,10 @@ html[data-page-unshown] *::after {
    the clamped body's `scrollHeight`), so the measurer changes no layout. The
    clamp is lifted with the one toggle's `.expanded`, which shows everything.
    The spec types allow the ellipsis at a one-line cap only, a whole line
-   count the clamp can state. */
+   count the clamp can state. The clamp's shape is the title fold's (THE
+   ONE-LINE CLAMP'S SHAPE, above); this states only its line count. */
 .bubble[data-more="ellipsis"] > .bubble-scroll:not(.expanded) > .bubble-body {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
   -webkit-line-clamp: var(--bubble-cap-lines);
-  overflow: hidden;
 }
 /* ...and the fade is never drawn on it: the ellipsis is its whole signal. Not
    keyed on `has-more`, so the class still toggles nothing; the role attribute
@@ -4879,6 +4894,7 @@ bubble-body.bubble-body { display: block; }
   /* THE ONE SIZE both figures read (owner ruling, 2026-09-15): set here and
      inherited, so the token, the duration and both reserves cannot differ. */
   font-size: var(--usage-font-size);
+  font-weight: var(--usage-font-weight);
   float: right;
   position: relative;
   display: flex;
@@ -4959,6 +4975,10 @@ bubble-body.bubble-body { display: block; }
      its footprint, so the two cannot differ: a quarter smaller than the 0.85em
      it was (owner request, 2026-10-13). */
   --usage-font-size: calc(0.85em * 0.75);
+  /* THE FIGURES' ONE WEIGHT, read by the corner and its ghost alike: the ghost
+     sits inside the prose, which an interim sets bold, and a bold ghost
+     measured wider than the regular corner it stands for. */
+  --usage-font-weight: normal;
 }
 /* THE GHOST (see "THE SIZING GHOST" above): an invisible, zero-height float
    exactly the corner's footprint wide. That footprint is the corner's in-flow
@@ -4982,6 +5002,7 @@ bubble-body.bubble-body { display: block; }
   visibility: hidden;
   white-space: pre;
   font-size: var(--usage-font-size);
+  font-weight: var(--usage-font-weight);
   font-variant-numeric: tabular-nums;
   padding-left: calc(6ch + var(--usage-pair-gap));
   padding-right: calc(var(--usage-corner-gap-x) - var(--bubble-scroll-gap));
@@ -5125,6 +5146,19 @@ bubble-body.bubble-body { display: block; }
    ends `--usage-text-gap` from the token rather than the inset plus the gap. */
 .bubble.interim-response > .bubble-scroll > .usage-corner {
   margin-left: var(--usage-interim-margin-left);
+}
+/* AN OPEN INTERIM'S CORNER GIVES THE INSET BACK. Closed, the clamped body is a
+   box of its own, set beside the float with its right padding (the inset)
+   still inside it, so the margin above reaches back over that inset. Open, the
+   body rejoins the corner's formatting context, and its first line wraps
+   against the float's own margin edge, which the body's padding does not
+   push: the same margin let that line run the whole inset into the token's
+   gap. So the open corner's margin is the closed one plus the inset, and the
+   line again ends `--usage-text-gap` from the token. Its ghost keeps the
+   closed margin: the ghost sits inside the body's inset, where that reach is
+   still owed (see "AN OPEN INTERIM'S GHOST"). */
+.bubble.interim-response > .bubble-scroll.expanded > .usage-corner {
+  margin-left: calc(var(--usage-interim-margin-left) + var(--bubble-content-inset));
 }
 .bubble.interim-response > .bubble-scroll > .usage-corner::before {
   width: auto;
