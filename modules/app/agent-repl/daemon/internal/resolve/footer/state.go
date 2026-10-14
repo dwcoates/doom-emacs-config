@@ -3,6 +3,8 @@ package footer
 import (
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
@@ -599,6 +601,10 @@ type wsState struct {
 	// published is the status the last published view carried: what Status
 	// answers, so the roster projects exactly the status this strip shows.
 	published *frontendv1.FooterStatus
+	// publishedClock is the turn clock the last published view carried: what
+	// TurnClock answers, so the roster's when-column counts from exactly the
+	// instant this strip's clock does.
+	publishedClock *frontendv1.FooterClock
 
 	// resumeWaits are the background subagents the shim is waiting to resume
 	// after a network outage, in the order the shim stated them: the LAST
@@ -717,6 +723,15 @@ func (s *wsState) observeArm(view *frontendv1.FooterView) (arm string, changed b
 	}
 	s.lastArm = arm
 	return arm, true, previous
+}
+
+// observeClock folds the published view's turn clock in, answering whether it
+// CHANGED: a turn's start appearing or leaving, or its end being stamped.
+func (s *wsState) observeClock(view *frontendv1.FooterView) bool {
+	clock := view.GetStrip().GetClock()
+	changed := !proto.Equal(clock, s.publishedClock)
+	s.publishedClock = clock
+	return changed
 }
 
 // observeSubstatus folds the published view's substatus in, answering it,
