@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -752,7 +753,7 @@ func TestRequestMergeKeepsTheBranchAWorkspaceSourceWasRequestedWith(t *testing.T
 		t.Fatalf("RequestMerge: %v", err)
 	}
 	entries, err := s.MergeQueue(context.Background(), repo)
-	if err != nil || len(entries) != 1 || entries[0].Source != source {
+	if err != nil || len(entries) != 1 || !reflect.DeepEqual(entries[0].Source, source) {
 		t.Fatalf("MergeQueue = %+v, %v, want the source with its branch", entries, err)
 	}
 }
@@ -816,7 +817,7 @@ func TestMergeQueueRoundTripsEverySource(t *testing.T) {
 			if err != nil {
 				t.Fatalf("MergeQueue: %v", err)
 			}
-			if len(got) != 1 || got[0].Source != tt.source || got[0].State != MergeRequested {
+			if len(got) != 1 || !reflect.DeepEqual(got[0].Source, tt.source) || got[0].State != MergeRequested {
 				t.Fatalf("queue = %+v, want one requested entry with source %+v", got, tt.source)
 			}
 		})
@@ -1131,7 +1132,7 @@ func TestRequestOneShotMergeRecordsTheRequestAndMarksTheOneShot(t *testing.T) {
 		t.Fatalf("RequestOneShotMerge: %v", err)
 	}
 	entries, err := s.MergeQueue(context.Background(), repo)
-	if err != nil || len(entries) != 1 || entries[0].State != MergeRequested || entries[0].Source != ownBranch {
+	if err != nil || len(entries) != 1 || entries[0].State != MergeRequested || !reflect.DeepEqual(entries[0].Source, ownBranch) {
 		t.Fatalf("MergeQueue = %+v, %v, want one requested own-branch merge", entries, err)
 	}
 	if !markedOneShot(t, s, ws.ID) {

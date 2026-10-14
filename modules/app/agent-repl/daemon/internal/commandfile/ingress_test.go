@@ -838,7 +838,7 @@ func TestApplyFileMapsEachMergeSourceOntoTheRequest(t *testing.T) {
 			}
 
 			// Assert.
-			if len(f.merge.sources) != 1 || f.merge.sources[0] != tt.want || f.merge.enqueued[0] != "w1" || f.merge.oneShot[0] != tt.oneShot {
+			if len(f.merge.sources) != 1 || !reflect.DeepEqual(f.merge.sources[0], tt.want) || f.merge.enqueued[0] != "w1" || f.merge.oneShot[0] != tt.oneShot {
 				t.Fatalf("requests = %v (one-shot %v) from %v, want %+v (one-shot %v) from w1", f.merge.sources, f.merge.oneShot, f.merge.enqueued, tt.want, tt.oneShot)
 			}
 			got := f.merge.detached[0]

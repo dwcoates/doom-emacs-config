@@ -24,12 +24,16 @@ func encodeActions(names []string) (string, error) {
 	return string(out), nil
 }
 
-// decodeActions parses one stored action list, failing the whole read when the
-// column is not a JSON array of names.
-func decodeActions(row, field, raw string) ([]string, error) {
+// decodeActions parses one stored action list of TABLE's, failing the whole
+// read when the column is not a JSON array of names.
+func decodeActions(table, row, field, raw string) ([]string, error) {
 	var names []string
 	if err := json.Unmarshal([]byte(raw), &names); err != nil {
-		return nil, &DecodeError{Table: "creation_jobs", Row: row, Field: field, Err: err}
+		return nil, &DecodeError{Table: table, Row: row, Field: field, Err: err}
+	}
+	// An empty list is no list, the same as encodeActions stores it.
+	if len(names) == 0 {
+		return nil, nil
 	}
 	return names, nil
 }
@@ -94,10 +98,10 @@ func (s *store) CreationJob(ctx context.Context, id WorkspaceID) (CreationJob, b
 		if err != nil {
 			return err
 		}
-		if job.Actions.Before, err = decodeActions(string(id), "actions_before", before); err != nil {
+		if job.Actions.Before, err = decodeActions("creation_jobs", string(id), "actions_before", before); err != nil {
 			return err
 		}
-		if job.Actions.After, err = decodeActions(string(id), "actions_after", after); err != nil {
+		if job.Actions.After, err = decodeActions("creation_jobs", string(id), "actions_after", after); err != nil {
 			return err
 		}
 		job.CreatedAt = fromNanos(created)

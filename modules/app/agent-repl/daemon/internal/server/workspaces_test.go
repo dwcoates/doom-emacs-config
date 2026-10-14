@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -1282,7 +1283,7 @@ func TestMergeWorkspaceMapsEachModeArm(t *testing.T) {
 			}
 
 			// Assert.
-			if len(h.Merge.requests) != 1 || h.Merge.requests[0].Source != tt.want {
+			if len(h.Merge.requests) != 1 || !reflect.DeepEqual(h.Merge.requests[0].Source, tt.want) {
 				t.Fatalf("requests = %+v, want source %+v", h.Merge.requests, tt.want)
 			}
 			got := h.Merge.requests[0].Detached

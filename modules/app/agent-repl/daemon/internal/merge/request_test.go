@@ -3,6 +3,7 @@ package merge
 import (
 	"context"
 	"errors"
+	"reflect"
 	"slices"
 	"testing"
 
@@ -126,7 +127,7 @@ func TestARequestRecordsItsSource(t *testing.T) {
 
 	// Assert.
 	entries, _ := h.db.MergeQueue(context.Background(), h.repoKey())
-	if len(entries) != 1 || entries[0].Source != recorded {
+	if len(entries) != 1 || !reflect.DeepEqual(entries[0].Source, recorded) {
 		t.Fatalf("queue = %+v, want the request's source recorded", entries)
 	}
 }
