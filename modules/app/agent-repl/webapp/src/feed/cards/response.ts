@@ -65,7 +65,7 @@
  * markdown and a half-typed construct (`**`, an opening fence) is never drawn
  * as its raw syntax. Both attributes count rendered characters.
  */
-import { fitsReserve, reserveLabels, reserveLabelsCss } from "../../width-reserve.js";
+import { cssString, fitsReserve, reserveLabels, reserveLabelsCss } from "../../width-reserve.js";
 import type {
   FeedResponse,
   FeedResponseError,
@@ -75,8 +75,10 @@ import type {
   FeedResponseUsageStamp,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { drawSignInAction } from "../../login/request.js";
+import { pageResizeObserver } from "../../dom.js";
 import { log } from "../../log.js";
 import {
+  BUBBLE_CLASS,
   BUBBLE_MORE_ELLIPSIS,
   BUBBLE_UNCAPPED,
   ELLIPSIS_CAP_LINES,
@@ -97,7 +99,7 @@ import {
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { revealPaceOf, type RevealPace } from "../../reveal-pace.js";
 import { typeOut } from "../../type-out.js";
-import { tickWhileShown } from "../ticking.js";
+import { onDiscard, tickWhileShown } from "../ticking.js";
 import { shouldShowMore } from "../bubble-more.js";
 import { tokenHeatColor } from "../../token-heat.js";
 import type { RowContext } from "./context.js";
@@ -193,8 +195,9 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   // The cost corner rides INSIDE the scroll box, before the body, floated
   // top-right, so the prose's FIRST line wraps around it and every later line
   // runs the full width (see `.usage-corner`).
+  const interim = isInterimResponse(u);
   const corner =
-    u.usage === undefined ? undefined : drawFeedResponseUsageStamp(u.usage, rc, `${path}.usage`);
+    u.usage === undefined ? undefined : drawFeedResponseUsageStamp(u.usage, rc, `${path}.usage`, interim);
 
   // The arm is read BEFORE anything is drawn, so an arm a newer daemon set
   // reaches the refusal that names it rather than half a bubble.
@@ -275,6 +278,10 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   // bubble by the corner's footprint. Set only while the bubble has a corner.
   if (corner === undefined) bubble.style.removeProperty(USAGE_RESERVE_LABELS_PROPERTY);
   else bubble.style.setProperty(USAGE_RESERVE_LABELS_PROPERTY, usageReserveLabelsCss());
+  // AN OPEN INTERIM'S GHOST IS ITS RESTING CORNER, the token alone (styles.css
+  // "AN INTERIM RESPONSE'S CORNER GROWS ITS BUBBLE"), so it reads the figure.
+  if (corner === undefined || !interim) bubble.style.removeProperty(USAGE_TOKEN_TEXT_PROPERTY);
+  else bubble.style.setProperty(USAGE_TOKEN_TEXT_PROPERTY, cssString(requireMessage(u.usage, `${path}.usage`).text));
   if (turningInterim !== undefined && turningInterim.height > 0 && bubble !== rc.previous) {
     easeIntoLook(bubble, turningInterim);
   }
@@ -491,6 +498,12 @@ export const USAGE_AGE_RESERVE_LABELS: readonly string[] = reserveLabels(USAGE_A
 /** The custom property the sizing ghost (styles.css) reads its reserved labels from. */
 export const USAGE_RESERVE_LABELS_PROPERTY = "--usage-reserve-labels";
 
+/** The custom property an open interim's ghost (styles.css) reads the token's text from. */
+export const USAGE_TOKEN_TEXT_PROPERTY = "--usage-token-text";
+
+/** The custom property an interim bubble's hover growth (styles.css) reads the duration's drawn width from. */
+export const USAGE_AGO_WIDTH_PROPERTY = "--usage-ago-w";
+
 /**
  * The reserve labels as one CSS string, one label per line (`\A`), for the
  * sizing ghost's `content`: drawn `white-space: pre`, its box is as wide as
@@ -541,11 +554,15 @@ export function usageAgeWithinReserve(label: string): boolean {
  * NO TIMESTAMP WHILE ARRIVING: `at_ms` is zero until the response settles, and
  * a corner with no settled instant has an empty slider, marked
  * `data-arriving`, so the token sits at the right edge and nothing slides.
+ *
+ * AN INTERIM'S CORNER MEASURES ITS DURATION (INTERIM): its bubble opens to the
+ * right by the duration's drawn width on hover (`measureUsageAgo`).
  */
 export function drawFeedResponseUsageStamp(
   u: FeedResponseUsageStamp,
   rc: RowContext,
   path: string,
+  interim: boolean,
 ): HTMLElement {
   const atMs = u.atMs === 0n ? 0 : msOf(u.atMs, `${path}.at_ms`);
   log.debug("drawing a response usage stamp", {
@@ -556,7 +573,9 @@ export function drawFeedResponseUsageStamp(
   const corner = document.createElement("span");
   corner.className = "usage-corner";
   corner.dataset.tokens = u.text;
-  corner.setAttribute(SAYS_ATTRIBUTE, `${u.text}|${String(atMs)}`);
+  // What it says includes whether it measures (INTERIM), so a redraw never
+  // keeps a corner that does not measure in a bubble that needs it.
+  corner.setAttribute(SAYS_ATTRIBUTE, `${u.text}|${String(atMs)}|${interim ? "interim" : "whole"}`);
 
   const reserve = document.createElement("span");
   reserve.className = "usage-reserve";
@@ -599,6 +618,7 @@ export function drawFeedResponseUsageStamp(
       });
     });
     slider.appendChild(ago);
+    if (interim) measureUsageAgo(ago, path);
 
     // A focusable hover target: focus reveals the same timestamp a hover does.
     corner.tabIndex = 0;
@@ -611,6 +631,41 @@ export function drawFeedResponseUsageStamp(
   }
 
   return corner;
+}
+
+/**
+ * Keep AGO's drawn width on its bubble, as `--usage-ago-w`, for an interim
+ * bubble's hover growth (styles.css "AN INTERIM RESPONSE'S CORNER GROWS ITS
+ * BUBBLE"): the bubble opens by exactly the duration, and a tick that changes
+ * the label's width changes the opening with it. A `ResizeObserver` watches the
+ * duration and is torn down with it through `onDiscard`. A corner only ever
+ * hangs in the bubble it was drawn into (a redraw keeps it only inside the
+ * bubble it already hangs in, and discards it otherwise), so the bubble is read
+ * when a size lands, and a duration that hangs in none is a defect.
+ */
+function measureUsageAgo(ago: HTMLElement, path: string): void {
+  const Observer = pageResizeObserver(ago);
+  if (Observer === null) {
+    log.error("an interim's usage corner cannot measure its duration: the page has no ResizeObserver", {
+      operation: "feed.cards.response.usage-ago-unmeasured",
+      context: { path },
+    });
+    return;
+  }
+  const observer = new Observer(() => {
+    const bubble = ago.closest<HTMLElement>(`.${BUBBLE_CLASS}`);
+    if (bubble === null) {
+      log.error("a measured usage duration hangs in no bubble", {
+        operation: "feed.cards.response.usage-ago-orphaned",
+        context: { path, label: ago.textContent },
+      });
+      throw new Error(`${path}: a measured usage duration hangs in no bubble`);
+    }
+    const width = ago.getBoundingClientRect().width;
+    bubble.style.setProperty(USAGE_AGO_WIDTH_PROPERTY, `${String(width)}px`);
+  });
+  observer.observe(ago);
+  onDiscard(ago, () => observer.disconnect());
 }
 
 /** Record the shown length, so the next draw of this row resumes from it. */

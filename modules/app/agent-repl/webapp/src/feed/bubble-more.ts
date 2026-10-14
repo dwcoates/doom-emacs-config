@@ -37,6 +37,7 @@
 import { BUBBLE_BODY_CLASS } from "../bubble/body.js";
 import { BUBBLE_QUOTE_CLASS } from "../bubble/quote.js";
 import { EXPANDED_CLASS } from "../expand.js";
+import { pageResizeObserver } from "../dom.js";
 import { log } from "../log.js";
 import { onDiscard } from "./ticking.js";
 
@@ -244,9 +245,11 @@ export function installHasMore(
   refresh: (box: HTMLElement) => void = refreshHasMore,
   content: (box: HTMLElement) => Element | null = (box) => box.firstElementChild,
 ): void {
+  const Observer = pageResizeObserver(scroll);
+  // A page with an observer has a view; naming both narrows both.
   const view = scroll.ownerDocument?.defaultView;
-  if (view === null || view === undefined || typeof view.ResizeObserver !== "function") return;
-  const observer = new view.ResizeObserver(() => refresh(scroll));
+  if (Observer === null || view === null || view === undefined) return;
+  const observer = new Observer(() => refresh(scroll));
   observer.observe(scroll);
   // THE BODY IS FOLLOWED, NOT CAPTURED: a redraw that keeps the box a reader
   // is scrolled inside hands it a new body (keep-scroll.ts), and the observer
