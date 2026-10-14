@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -19,6 +19,7 @@ import {
 import { stopTicking } from "../src/feed/ticking.js";
 import { fitsReserve, reserveLabelsCss } from "../src/width-reserve.js";
 import { captureLogRecords, forwardedRecord } from "./log-capture.js";
+import { filesUnder } from "./files-under.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -211,21 +212,13 @@ describe("the card heads' clocks share the reserved builders", () => {
   );
 });
 
-/** Every .ts file under DIR, recursively. */
-function sources(dir: string): string[] {
-  return readdirSync(dir).flatMap((name) => {
-    const full = path.join(dir, name);
-    if (statSync(full).isDirectory()) return sources(full);
-    return name.endsWith(".ts") ? [full] : [];
-  });
-}
 
 // EVERY ELAPSED CLOCK IS BUILT HERE: a span painted with a bare elapsed reading
 // anywhere else is a second spelling of the same shape, which drifts.
 describe("the page's elapsed clocks share one builder", () => {
   it("paints no bare elapsed reading by hand outside elapsed-clock.ts", () => {
     const src = path.join(here, "..", "src");
-    const offenders = sources(src)
+    const offenders = filesUnder(src)
       .filter((file) => path.basename(file) !== "elapsed-clock.ts")
       .filter((file) => /\.textContent = format(Ticked)?Elapsed\(/.test(readFileSync(file, "utf8")))
       .map((file) => path.relative(src, file));

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -20,17 +20,10 @@ import {
   drawToolHead,
 } from "../../../src/feed/cards/tool-head.js";
 import { runningClock, stoppedClock } from "./tool-card-head-shape.js";
+import { filesUnder } from "../../files-under.js";
 
 const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../../src");
 
-/** Every .ts file under DIR. */
-function sources(dir: string): string[] {
-  return readdirSync(dir).flatMap((name) => {
-    const full = path.join(dir, name);
-    if (statSync(full).isDirectory()) return sources(full);
-    return full.endsWith(".ts") ? [full] : [];
-  });
-}
 
 /** A badge reading WORD. */
 function badge(word: string): HTMLElement {
@@ -183,7 +176,7 @@ describe("every tool card heads through the one builder", () => {
     // shared row; any other module building a bare head row is a hand-rolled
     // tool card head.
     const own = path.join(SRC, "feed/cards/tool-head.ts");
-    const users = sources(SRC)
+    const users = filesUnder(SRC)
       .filter((file) => file !== own)
       .filter((file) => /drawToolHead\(/.test(readFileSync(file, "utf8")));
     expect(users.map((file) => path.relative(SRC, file))).toEqual(["feed/bubble.ts"]);
@@ -192,7 +185,7 @@ describe("every tool card heads through the one builder", () => {
   it("leaves no module building a tool head or tool name by hand", () => {
     // A hand-rolled head drifts from the shared one; this fails it by name.
     const own = path.join(SRC, "feed/cards/tool-head.ts");
-    const offenders = sources(SRC)
+    const offenders = filesUnder(SRC)
       .filter((file) => file !== own)
       .filter((file) => /className\s*=\s*["'`]tool-(head|name|clock)\b/.test(readFileSync(file, "utf8")));
     expect(offenders.map((file) => path.relative(SRC, file))).toEqual([]);

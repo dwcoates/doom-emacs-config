@@ -6,11 +6,12 @@
  * stylesheet rule scan instead of going through `source-text.ts` and
  * `stylesheet.ts`, so the stripping rule cannot drift between scans again.
  */
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { codeOf, withoutBlockComments } from "./source-text.js";
+import { filesUnder } from "./files-under.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -42,14 +43,6 @@ describe("codeOf", () => {
 });
 
 describe("the call sites", () => {
-  /** Every TypeScript file under test/, recursively. */
-  function testFiles(dir: string): string[] {
-    return readdirSync(dir).flatMap((name) => {
-      const full = path.join(dir, name);
-      if (statSync(full).isDirectory()) return testFiles(full);
-      return full.endsWith(".ts") ? [full] : [];
-    });
-  }
 
   it("strip comments and scan stylesheet rules only through the shared readers", () => {
     // Arrange: the hand-rolled shapes the shared readers replaced.
@@ -64,7 +57,7 @@ describe("the call sites", () => {
       fileURLToPath(import.meta.url),
     ]);
     // Act
-    const handRolled = testFiles(here).filter(
+    const handRolled = filesUnder(here).filter(
       (file) => !owners.has(file) && shapes.some((shape) => readFileSync(file, "utf8").includes(shape)),
     );
     // Assert

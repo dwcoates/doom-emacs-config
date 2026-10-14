@@ -8,7 +8,7 @@
  * two error paths, and — reading the sources — that every title site comes
  * through `foldTitle` rather than rolling its own cap.
  */
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
@@ -26,6 +26,7 @@ import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { measureTitle } from "./title-measure.js";
 import { codeOf } from "../source-text.js";
 import { pagedRowContext } from "./harness.js";
+import { filesUnder } from "../files-under.js";
 
 /** A connected `.tool-card.tool-fold` holding one card-owned title. */
 function toolFoldTitle(overflow: boolean): { card: HTMLElement; title: HTMLElement } {
@@ -339,14 +340,6 @@ describe("the error paths, logged through the canonical logger", () => {
   });
 });
 
-/** Every `.ts` file under DIR, recursively. */
-function sourcesUnder(dir: string): string[] {
-  return readdirSync(dir).flatMap((name) => {
-    const path = join(dir, name);
-    if (statSync(path).isDirectory()) return sourcesUnder(path);
-    return path.endsWith(".ts") ? [path] : [];
-  });
-}
 
 describe("every title site shares the one fold", () => {
   const src = join(process.cwd(), "src");
@@ -370,7 +363,7 @@ describe("every title site shares the one fold", () => {
 
   it("no source clamps lines by hand", () => {
     // Arrange / Act — an inline clamp is a title cap rolled outside the fold.
-    const clamping = sourcesUnder(src)
+    const clamping = filesUnder(src)
       .filter((path) => /line-?clamp|lineClamp/i.test(readFileSync(path, "utf8")))
       .map((path) => relative(src, path));
 
@@ -383,7 +376,7 @@ describe("every title site shares the one fold", () => {
     // and the toggle's list means a site marking a title without the measurer.
     // Comments are prose about the fold, so they are read past.
     const owners = new Set(["feed/bubble-more.ts", "feed/title-fold.ts", "expand.ts"]);
-    const marking = sourcesUnder(src)
+    const marking = filesUnder(src)
       .map((path) => relative(src, path))
       .filter((path) => !owners.has(path))
       .filter((path) => /["'`.]title-fold/.test(codeOf(readFileSync(join(src, path), "utf8"))));

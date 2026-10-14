@@ -349,7 +349,7 @@
      an interim response's, which narrow it (owner requests, 2026-10-14).
      `--tree-font-rem` and `--tree-line-h` are a metaprompt tree's monospace
      size and leading. A prompt's leading is derived from all three so its
-     lines sit exactly as far apart as a tree's (owner request, 2026-10-13). */
+     lines sit as far apart as a tree's (owner request, 2026-10-13), less a quarter of the gap (2026-10-14). */
   --bubble-base-font-rem: 0.9;
   --bubble-font-rem: var(--bubble-base-font-rem);
   --tree-font-rem: 0.85;
@@ -1792,8 +1792,11 @@ pre {
   /* A PROMPT'S LINES ARE SPACED AS A TREE'S (owner request, 2026-10-13,
      narrowing 2026-09-23's one leading for every bubble): the prompt keeps the
      bubble's text size, and this ratio puts its lines exactly one tree line
-     apart. The collapsed cap counts in `--md-line-h`, so it follows. */
-  --md-line-h: calc(var(--tree-font-rem) * var(--tree-line-h) / var(--bubble-font-rem));
+     apart. The SPACE BETWEEN those lines, the leading above 1, is then 25%
+     tighter (owner request, 2026-10-14): 0.75 of the tree-line gap, so the
+     glyphs themselves keep their full height. The collapsed cap counts in
+     `--md-line-h`, so it follows. */
+  --md-line-h: calc(1 + (var(--tree-font-rem) * var(--tree-line-h) / var(--bubble-font-rem) - 1) * 0.75);
   margin-left: auto;
   margin-right: calc((100% - var(--agent-bubble-cap)) / 2);
 }
