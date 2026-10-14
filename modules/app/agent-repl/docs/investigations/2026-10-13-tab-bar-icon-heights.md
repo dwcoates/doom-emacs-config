@@ -59,14 +59,39 @@ every row to 18px. Each glyph is now sized by measuring the row it lays out
 (`buffer-text-pixel-size` on the tab bar's face) and taking the largest size
 whose row is no taller than the text's, returned as an absolute `:height`.
 
-## The route to equal visible heights (not built)
+## The route to equal visible heights (built, 2026-10-13)
 
-Draw every icon as an IMAGE: an image reserves exactly its pixel height, so an
-image up to the text row's height (15px) can never grow the row. Crop each
-icon to its picture and scale every one to one shared visible height.
-Sources: render Apple's emoji on the machine at install/build time (not
-committed: redistribution is a licensing question), or bundle our own SVG
-icons (the sidebar would then need the same icons so both surfaces match).
+Owner rulings: draw every icon as an IMAGE from our own bundled SVGs
+(`images/glyphs/<name>.svg`, which the webapp sidebar draws too), at the
+tallest height that provably leaves the tab bar's rows as tall as a text row.
+
+How tall an image can be, measured by `measure.el`'s image section (a square
+SVG at each height, `:ascent` as listed, beside Menlo 13px text whose row is
+15px):
+
+| `:ascent` | 6  | 8  | 10 | 12 | 13 | 14 | 15 | 16 | 17 |
+|-----------|----|----|----|----|----|----|----|----|----|
+| 50 (default) | 15 | 16 | 17 | 18 | 19 | 19 | 20 | 20 | 21 |
+| `center`  | 15 | 15 | 15 | 15 | 15 | 15 | 15 | 16 | 17 |
+| 80        | 15 | 15 | 15 | 15 | 15 | 15 | 15 | 16 | 17 |
+| 100       | 15 | 15 | 15 | 15 | 16 | 17 | 18 | 19 | 20 |
+
+- `:ascent center` puts (HEIGHT + ASCENT - DESCENT) / 2 above the baseline
+  and the rest below, so at HEIGHT = ASCENT + DESCENT (the text row) it fills
+  exactly the text's ascent and descent: the row keeps its height, and one
+  pixel more grows it.  Each of the six real pictures measured the same: 15px
+  keeps a 15px row, 16px makes it 16.
+- So every picture is drawn at the MEASURED text row's height, centered
+  (`agent-repl-status-glyph-image-height` in `lisp/status.el`), and that
+  function measures the row holding the image beside the text's and fails
+  hard if it grew.
+- Each SVG's viewBox is 16 units tall and its picture touches the top and
+  bottom, so every glyph is exactly the row's height on screen.
+- Rasterized at the requested height alone, an image is blown up 2x on a
+  Retina screen and draws soft; the pictures are rasterized at
+  `frame-scale-factor` times the height and drawn back down by `:scale`.
+- The developer documentation is AGENTS.md, "Status glyphs are one set of
+  pictures, drawn as tall as a text row".
 
 ## Re-measuring
 
@@ -76,9 +101,13 @@ and exits (60s safety exit):
 
 ```sh
 OUT=/tmp/tabicons.txt; open -gjnW -a /Applications/Emacs.app --env TABICONS_OUT=$OUT \
-  --args -Q -l modules/app/agent-repl/docs/investigations/2026-10-13-tab-bar-icon-heights/measure.el
+  --args -Q -l $PWD/modules/app/agent-repl/docs/investigations/2026-10-13-tab-bar-icon-heights/measure.el
 cat $OUT
 ```
 
 `tab-bar-height` reads a constant in that hidden frame, so the buffer-line
 column is the one to read.
+
+It then measures images the same way: every height from 6 to 18px at each
+`:ascent`, then every picture in `images/glyphs/` at the text row's height and
+one pixel more.

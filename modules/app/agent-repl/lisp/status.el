@@ -753,8 +753,8 @@ rather than written out, so the tab bar\='s table can never disagree with
 the shared one about which arms EXIST — only about the four colors it
 explicitly overrides.")
 
-(defconst agent-repl-status-one-shot-glyph "🎯"
-  "The glyph a one-shot workspace\='s tab draws while the one-shot works.
+(defconst agent-repl-status-one-shot-glyph "target"
+  "The glyph NAME a one-shot workspace\='s tab draws while the one-shot works.
 `RosterRowOneShot\=' says the workspace was created as a one-shot; its
 glyph is drawn ONLY on `agent-repl-status-one-shot-glyph-arms\=' (owner
 ruling, 2026-10-13), and it is static.")
@@ -774,18 +774,18 @@ with this background and keeps its name on the status background (owner
 request, 2026-10-13).  No glyph is drawn for it.")
 
 (defconst agent-repl-status-merge-glyphs
-  '((:merge-queued    . "≡")
-    (:merging         . "≡")
-    (:merge-failed    . "≡")
-    (:merged          . "≡"))
-  "The character each merge arm draws, keyed by the fixture\='s glyph NAMES.
+  '((:merge-queued    . "merge")
+    (:merging         . "merge")
+    (:merge-failed    . "merge")
+    (:merged          . "merge"))
+  "The glyph NAME each merge arm draws, keyed by roster status arm.
 
 proto/vocab/render-colors.json\='s `merge_glyphs\=' section names WHICH
 glyph a merge state gets -- the one `merge\=' glyph for every arm (owner
-ruling, 2026-10-13) -- and deliberately not which character: each
-renderer maps those names to whatever its surface can draw.  This is the
-tab bar\='s mapping, and the assertion test checks that every named glyph
-has a character here.
+ruling, 2026-10-13); this restates it, and the assertion test checks the
+two agree row for row.  A name is drawn as its image from
+`agent-repl-status-glyph-chars\=' and images/glyphs/ (see \"The glyph\='s
+image\" below).
 
 The tab bar DRAWS only the arms in
 `agent-repl-status-tab-bar-merge-glyph-arms\=': its purple already says
@@ -799,21 +799,24 @@ when they fail, and the failed merge\='s glyph is inked red on the green
 of a workspace back with the user (owner ruling, 2026-10-13).")
 
 (defconst agent-repl-status-gate-glyphs
-  '((:permission . "❗")
-    (:question   . "❓")
-    (:cold-gate  . "❄️"))
-  "The character each gate arm draws, keyed by the fixture\='s glyph NAMES.
+  '((:permission . "exclaim")
+    (:question   . "ask")
+    (:cold-gate  . "snowflake"))
+  "The glyph NAME each gate arm draws, keyed by roster status arm.
 
 proto/vocab/render-colors.json\='s `gate_glyphs\=' section names WHICH
-glyph a gate on the user gets (exclaim, ask, snowflake); this is the tab
-bar\='s mapping, the same emoji the webapp sidebar draws in place of its
-dot (owner requests, 2026-10-11 and 2026-10-13).  The arm keeps its
-green, so the tab reads `❗ [N] name\=', `❓ [N] name\=' or `❄️ [N] name\='.")
+glyph a gate on the user gets (exclaim, ask, snowflake); this restates
+it, and the assertion test checks the two agree row for row.  The tab
+bar and the webapp sidebar draw each name from the same image in
+images/glyphs/ (owner requests, 2026-10-11 and 2026-10-13).  The arm
+keeps its green, so the tab reads `! [N] name\=', `? [N] name\=' or
+`(snowflake) [N] name\='.")
 
-(defconst agent-repl-status-dot-glyph "●"
-  "The status dot, drawn on the tab bar only where its ink differs from
-the tab\='s color (`agent-repl-status-glyph-inks\='): a compacting turn\='s
-orange on its red tab (owner ruling, 2026-10-13).")
+(defconst agent-repl-status-dot-glyph "dot"
+  "The glyph NAME of the status dot.
+The tab bar draws it only where its ink differs from the tab\='s color
+\(`agent-repl-status-glyph-inks\='): a compacting turn\='s orange on its
+red tab (owner ruling, 2026-10-13).")
 
 (defconst agent-repl-status-glyph-inks
   '((:merge-failed . "red")
@@ -827,9 +830,10 @@ while the mark before the name takes the ink: a failed merge is a green
 tab with a red merge glyph, a compacting turn a red tab with an orange
 dot (owner ruling, 2026-10-13).")
 
-(defconst agent-repl-status-attention-glyph "●"
-  "The steady attention marker: the workspace has an unseen notification.
-The daemon sets `RosterRow.attention\=' when a notification fires and
+(defconst agent-repl-status-attention-glyph "dot"
+  "The glyph NAME of the steady attention marker.
+The workspace has an unseen notification.  The daemon sets
+`RosterRow.attention\=' when a notification fires and
 CLEARS it when SelectWorkspace names the workspace, so an ordinary tab
 switch is the whole clearing act — no dedicated ack verb exists.")
 
@@ -1159,13 +1163,13 @@ at ERROR rather than painted."
     "none")))
 
 (defun agent-repl-status-tab-glyph (ws arm)
-  "Return the glyph WS draws for ARM, or nil when it draws none.
-In precedence order: a gate\='s emoji (a pending permission, question or
-cold gate), the one-shot mark while the one-shot works
+  "Return the glyph NAME WS draws for ARM, or nil when it draws none.
+The name is render-colors.json\='s; `agent-repl-status-tab-glyph-run'
+draws it.  In precedence order: a gate\='s glyph (a pending permission,
+question or cold gate), the one-shot mark while the one-shot works
 \(`agent-repl-status-tab-one-shot-glyph'), a failed merge\='s merge glyph
 \(the only merge glyph the tab bar draws), an inked dot
-\(`agent-repl-status-glyph-inks'), and the attention marker.  The glyph
-is a plain string; `agent-repl-status-tab-glyph-face' draws it."
+\(`agent-repl-status-glyph-inks'), and the attention marker."
   (let ((glyph (or (alist-get arm agent-repl-status-gate-glyphs)
                    (agent-repl-status-tab-one-shot-glyph ws arm)
                    (and (memq arm agent-repl-status-tab-bar-merge-glyph-arms)
@@ -1190,122 +1194,164 @@ says only that the one-shot is working (owner ruling, 2026-10-13)."
        (agent-repl-roster-one-shot-for-ws ws)
        agent-repl-status-one-shot-glyph))
 
-;;; The glyph's face: its ink and its height ---------------------------------
+;;; The glyph's image: one shared height, never a taller row ------------------
 ;;
-;; A GLYPH NEVER MAKES THE TAB BAR'S ROW TALLER (owner request, 2026-10-13).
-;; Emacs sizes a row by the space each font RESERVES above and below the
-;; baseline, not by what it draws, and the emoji font reserves far more than
-;; the text font (measured on the owner's frame: Menlo 13px reserves 12+3,
-;; Apple Color Emoji 13px 16+5).  So each glyph is drawn at the LARGEST pixel
-;; size whose row is no taller than the text's own row.
+;; EVERY GLYPH IS AN IMAGE, AND EVERY IMAGE IS THE TEXT ROW'S HEIGHT (owner
+;; rulings, 2026-10-13: the same visible height for every glyph, the tallest
+;; that provably leaves the tab bar's rows as tall as a plain text row).
 ;;
-;; THE ROW IS MEASURED, NOT INFERRED.  Which font draws a glyph is decided by
-;; Emacs's composition and fontset machinery, and asking for it (`font-at')
-;; answers the text font for an emoji presentation sequence such as "❄️"
-;; (U+2744 U+FE0F), which Apple Color Emoji draws: the cold gate's snowflake
-;; was left at the text's full size and grew every row by its reserved space
-;; (2026-10-13).  Measuring the row the glyph lays out with
-;; (`buffer-text-pixel-size') answers whatever font Emacs really picks, on
-;; the tab bar's own face, so the fit cannot disagree with the tab bar.  The size is handed back as an ABSOLUTE `:height' (tenths of a
-;; point, a point being a pixel on macOS), never a fraction of the text's,
-;; so no rounding moves it off the measured size.
+;; WHY NOT CHARACTERS.  Emacs sizes a row by the space each font RESERVES
+;; above and below the baseline, not by what it draws, and the emoji font
+;; reserves far more than it draws (on the owner's frame Menlo 13px reserves
+;; 12+3px, Apple Color Emoji 13px 16+5px for a picture about 16px tall).  An
+;; emoji therefore fit a plain row only up to 8px, and no font can crop the
+;; margin each picture leaves inside its square (from 1% for the snowflake to
+;; 56% for `≡'), so characters could never share one visible height.  The
+;; measurements are in docs/investigations/2026-10-13-tab-bar-icon-heights.md.
+;;
+;; WHY AN IMAGE CANNOT GROW THE ROW.  An image reserves exactly its own pixel
+;; height, and `:ascent center' centers it on the text, putting
+;; (HEIGHT + ASCENT - DESCENT) / 2 above the baseline and the rest below.  At
+;; HEIGHT = ASCENT + DESCENT -- the text row's own height -- that is exactly
+;; the text's ascent above and its descent below, so the row keeps its
+;; height; one pixel more grows it (measured for every height and ascent in
+;; the investigation's image table).  The text row's height is therefore the
+;; largest the images can be, and it is what they are drawn at.
+;;
+;; THE HEIGHT IS MEASURED, NEVER INFERRED.  The text row is laid out with
+;; `buffer-text-pixel-size' on the tab bar's own face, and the row holding an
+;; image of that height is measured once beside it: a row that grew is an
+;; invariant violation and fails hard.  Both are cached per text font.
+;;
+;; THE PICTURES ARE images/glyphs/<NAME>.svg, one per render-colors.json glyph
+;; NAME, each cropped so its picture fills the file's full height: drawn at one
+;; height, every glyph is that tall on screen.  The webapp sidebar draws the
+;; same files (webapp/src/sidebar/glyph-images.ts), so both surfaces match.
+;; `dot' and `merge' are drawn in `currentColor', which Emacs fills with the
+;; image's `:foreground': the arm's ink (`agent-repl-status-glyph-inks') when
+;; it declares one, else the tab's own foreground.
 
-(defvar agent-repl-status--glyph-heights (make-hash-table :test 'equal)
-  "Cache: (TEXT-FONT-NAME . GLYPH) -> the face `:height' it draws at.
+(defconst agent-repl-status-glyph-chars
+  '(("exclaim"   . "❗")
+    ("ask"       . "❓")
+    ("snowflake" . "❄️")
+    ("target"    . "🎯")
+    ("merge"     . "≡")
+    ("dot"       . "●"))
+  "The character under each glyph NAME\='s image, keyed by render-colors.json name.
+A graphic frame displays the image over it (`agent-repl-status-tab-glyph-run');
+a text frame, which cannot draw an image, draws the character itself.  Every
+name here has its picture at images/glyphs/<NAME>.svg, which the suite checks.")
+
+(defconst agent-repl-status--glyph-dir
+  ;; `images/' sits at the module root; this file lives in `lisp/'.
+  (expand-file-name "../images/glyphs/"
+                    (file-name-directory (or load-file-name buffer-file-name)))
+  "The directory of the glyph pictures, one SVG per glyph NAME.")
+
+(defvar agent-repl-status--glyph-image-heights (make-hash-table :test 'equal)
+  "Cache: the tab bar\='s text font name -> the pixel height glyph images draw at.
 Keyed by the text font, so a frame whose font changes measures again.")
 
 (defun agent-repl-status--glyph-fail (fmt &rest args)
   "Record FMT and ARGS as an ERROR, then signal it.
-The tab glyph\='s face is computed from invariants the layout guarantees;
-a violation is logged through `agent-repl--error' at the point it is
+The tab glyph is computed from invariants the layout guarantees; a
+violation is logged through `agent-repl--error' at the point it is
 found and then fails hard."
   (let ((message (apply #'format fmt args)))
     (agent-repl--error '(:agent-repl-central "tab rendering and shared assets span workspaces")
                        "%s" message)
     (error "%s" message)))
 
-(defun agent-repl-status-glyph-fit-size (text-height size row-height-at)
-  "Return the largest pixel size, at most SIZE, whose row fits the text\='s.
-TEXT-HEIGHT is the pixel height of a row holding the tab\='s text alone.
-ROW-HEIGHT-AT is called with a pixel size and answers the pixel height of
-a row holding the glyph at that size.  A size fits when its row is no
-taller than TEXT-HEIGHT.  Signals an error when no size from SIZE down
-to 1 fits, which no real pair of fonts produces."
-  (or (cl-loop for px downfrom size to 1
-               when (<= (funcall row-height-at px) text-height)
-               return px)
-      (agent-repl-status--glyph-fail
-       "elisp.status.glyph-fit-size: no size up to %d fits a row of %dpx"
-       size text-height)))
+(defun agent-repl-status--glyph-char (name)
+  "Return the character under glyph NAME\='s image.
+A NAME with no row in `agent-repl-status-glyph-chars' is a table this
+build ships inconsistent, so it fails hard."
+  (or (cdr (assoc name agent-repl-status-glyph-chars))
+      (agent-repl-status--glyph-fail "elisp.status.glyph-char: glyph %S has no character" name)))
 
-(defun agent-repl-status--glyph-face-spec (glyph-height)
-  "Return the face spec a tab glyph is measured with at GLYPH-HEIGHT.
-GLYPH-HEIGHT is a face `:height' value; the spec inherits the tab bar\='s
-face, so the measurement lays the glyph out in the tab bar\='s fonts."
-  `(:inherit tab-bar :height ,glyph-height))
+(defun agent-repl-status--glyph-file (name)
+  "Return the path of glyph NAME\='s picture, images/glyphs/NAME.svg.
+A missing file is a checkout this build ships broken, so it fails hard."
+  (let ((file (expand-file-name (concat name ".svg") agent-repl-status--glyph-dir)))
+    (unless (file-exists-p file)
+      (agent-repl-status--glyph-fail "elisp.status.glyph-file: glyph %S has no picture at %s"
+                                     name file))
+    file))
+
+(defun agent-repl-status--glyph-image (name height color frame)
+  "Return glyph NAME\='s image for FRAME, HEIGHT pixels tall, centered on the text.
+COLOR, when non-nil, fills the picture\='s `currentColor'; nil leaves the
+foreground of the face the image is displayed in.
+
+The picture is rasterized at FRAME\='s backing scale (`frame-scale-factor',
+2 on a Retina screen) and drawn back down by that scale, so it is HEIGHT
+logical pixels tall and as sharp as the text beside it: rasterized at
+HEIGHT alone, it was blown up 2x and drew soft (measured 2026-10-13)."
+  (let ((scale (frame-scale-factor frame)))
+    (apply #'create-image (agent-repl-status--glyph-file name) 'svg nil
+           :height (round (* height scale)) :scale (/ 1.0 scale) :ascent 'center
+           (and color (list :foreground color)))))
 
 (defun agent-repl-status--row-height (frame text)
   "Return the pixel height of one row holding TEXT, laid out on FRAME.
-TEXT carries its own faces.  The row is measured in a scratch buffer
-against FRAME\='s first window (`buffer-text-pixel-size'), which lays it
-out with the fonts Emacs really picks, composition included."
+TEXT carries its own faces and display properties.  The row is measured
+in a scratch buffer against FRAME\='s first window (`buffer-text-pixel-size'),
+which lays it out as Emacs really draws it."
   (let ((buffer (get-buffer-create " *agent-repl-glyph-measure*")))
     (with-current-buffer buffer
       (erase-buffer)
       (insert text))
     (cdr (buffer-text-pixel-size buffer (frame-first-window frame)))))
 
-(defun agent-repl-status--font-size (font frame)
-  "Return FONT\='s pixel size on FRAME; `font-info' supplies it."
-  (let ((info (font-info font frame)))
-    (unless info
-      (agent-repl-status--glyph-fail "elisp.status.font-size: no font info for %S" font))
-    (aref info 2)))
+(defun agent-repl-status-glyph-image-height (&optional frame)
+  "Return the pixel height every glyph image draws at on FRAME\='s tab bar.
+The measured height of a row of the tab bar\='s text, the tallest an
+image centered on that text can be without growing the row.  The row
+holding an image of that height is measured beside it, and one taller
+than the text\='s is an invariant violation that fails hard.  Cached per
+text font."
+  (let* ((frame (or frame (selected-frame)))
+         (text-font (face-font 'tab-bar frame)))
+    (or (gethash text-font agent-repl-status--glyph-image-heights)
+        (let* ((text (propertize "x" 'face 'tab-bar))
+               (height (agent-repl-status--row-height frame text))
+               (row (agent-repl-status--row-height
+                     frame (concat text (propertize
+                                         " " 'face 'tab-bar 'display
+                                         (agent-repl-status--glyph-image
+                                          agent-repl-status-dot-glyph height nil frame))))))
+          (unless (= row height)
+            (agent-repl-status--glyph-fail
+             "elisp.status.glyph-image-height: text-font=%s text-row=%d image-row=%d: an image as tall as the text row changed the row"
+             text-font height row))
+          (agent-repl--log '(:agent-repl-central "tab rendering and shared assets span workspaces")
+                           "elisp.status.glyph-image-height: text-font=%s height=%d"
+                           text-font height)
+          (puthash text-font height agent-repl-status--glyph-image-heights)))))
 
-(defun agent-repl-status-glyph-height (glyph &optional frame)
-  "Return the face `:height' GLYPH draws at on FRAME\='s tab bar.
-1.0 on a frame that is not graphic, where every character fills one
-cell, and 1.0 when GLYPH at the text\='s full size leaves the row
-unchanged.  Otherwise the absolute `:height' (tenths of a point) of the
-largest pixel size whose measured row is no taller than the text\='s
-\(`agent-repl-status-glyph-fit-size'), cached per text font."
-  (let ((frame (or frame (selected-frame))))
-    (if (not (display-graphic-p frame))
-        1.0
-      (let* ((text-font (face-font 'tab-bar frame))
-             (key (cons text-font glyph)))
-        (or (gethash key agent-repl-status--glyph-heights)
-            (puthash
-             key
-             (let* ((size (agent-repl-status--font-size text-font frame))
-                    (text-height (agent-repl-status--row-height
-                                  frame (propertize "x" 'face 'tab-bar)))
-                    (fit (agent-repl-status-glyph-fit-size
-                          text-height size
-                          (lambda (px)
-                            (agent-repl-status--row-height
-                             frame
-                             (concat (propertize "x" 'face 'tab-bar)
-                                     (propertize glyph 'face (agent-repl-status--glyph-face-spec
-                                                              (* 10 px)))))))))
-               (agent-repl--log '(:agent-repl-central "tab rendering and shared assets span workspaces")
-                                "elisp.status.glyph-height: glyph=%s text-font=%s size=%d row=%d fit=%d"
-                                glyph text-font size text-height fit)
-               (if (= fit size) 1.0 (* 10 fit)))
-             agent-repl-status--glyph-heights))))))
+(defun agent-repl-status--glyph-ink-color (arm)
+  "Return the color of ARM\='s glyph ink, or nil when ARM declares none.
+The ink is `agent-repl-status-glyph-inks'\='s; an ink with no color in
+`agent-repl--ink-by-name' fails hard."
+  (when-let ((ink (alist-get arm agent-repl-status-glyph-inks)))
+    (or (cdr (assoc ink agent-repl--ink-by-name))
+        (agent-repl-status--glyph-fail
+         "elisp.status.glyph-ink-color: ink %S of arm %S has no color" ink arm))))
 
-(defun agent-repl-status-tab-glyph-face (arm glyph)
-  "Return the face GLYPH draws with on a tab standing on ARM.
-Its `:height' is `agent-repl-status-glyph-height', so the glyph never
-makes the tab bar\='s row taller than its text, and its `:foreground' is
-ARM\='s ink from `agent-repl-status-glyph-inks' when ARM declares one."
-  (let ((ink (alist-get arm agent-repl-status-glyph-inks)))
-    `(:height ,(agent-repl-status-glyph-height glyph)
-      ,@(when ink
-          (list :foreground
-                (or (cdr (assoc ink agent-repl--ink-by-name))
-                    (agent-repl-status--glyph-fail
-                     "elisp.status.tab-glyph-face: ink %S of arm %S has no color" ink arm)))))))
+(defun agent-repl-status-tab-glyph-run (arm name &optional frame)
+  "Return the run drawing glyph NAME on a tab standing on ARM, on FRAME.
+On a graphic frame, NAME\='s character displayed as NAME\='s image at
+`agent-repl-status-glyph-image-height', filled with ARM\='s ink when it
+declares one.  On a text frame, the character itself, in that ink."
+  (let ((frame (or frame (selected-frame)))
+        (char (agent-repl-status--glyph-char name))
+        (color (agent-repl-status--glyph-ink-color arm)))
+    (if (display-graphic-p frame)
+        (propertize char 'display
+                    (agent-repl-status--glyph-image
+                     name (agent-repl-status-glyph-image-height frame) color frame))
+      (if color (propertize char 'face (list :foreground color)) char))))
 
 ;;; The attention marker and its blink ---------------------------------------
 ;;
@@ -1782,8 +1828,7 @@ run left with no parts is nil."
                    (agent-repl-roster-row-for-ws name)))
          (badge (and row (agent-repl-roster-row-priority-label row)))
          (glyph (agent-repl-status-tab-glyph name arm))
-         (glyph (and glyph
-                     (propertize glyph 'face (agent-repl-status-tab-glyph-face arm glyph))))
+         (glyph (and glyph (agent-repl-status-tab-glyph-run arm glyph)))
          (parts (seq-remove #'string-blank-p
                             (delq nil (list badge glyph)))))
     (when parts
