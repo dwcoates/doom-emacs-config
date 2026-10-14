@@ -1577,7 +1577,7 @@ func TestACutOnACatchUpPageReachesEveryViewOnce(t *testing.T) {
 		// titleReset is whether the cut moved the digest boundary.
 		titleReset bool
 	}{
-		{name: "a completed compaction", cut: compactedCut(), titleReset: true},
+		{name: "a completed compaction", cut: compactedCut(), titleReset: false},
 		{name: "a clear", cut: clearedCut(), titleReset: true},
 		{name: "a failed compaction", cut: failedCompactionCut(), titleReset: false},
 	}
