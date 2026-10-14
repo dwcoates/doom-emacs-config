@@ -190,24 +190,6 @@ func TestPutHeldPromptRefusesAnUndeclaredHoldKind(t *testing.T) {
 	}
 }
 
-func TestPutHeldPromptRefusesAnAcceptOnAnUnofferedVerdict(t *testing.T) {
-	// Arrange
-	s, _ := testStore(t)
-	ws := testWorkspace(t, s)
-
-	// Act
-	err := s.PutHeldPrompt(context.Background(), HeldPrompt{
-		Workspace: ws.ID, Turn: NewTurnID(), Said: said("x"), Origin: "webapp",
-		Classification: &Classification{Arm: ArmInterject, Reason: "urgent", At: instant},
-		Accepted:       true, QueuedAt: instant,
-	})
-
-	// Assert
-	if !errors.Is(err, ErrAcceptNotOffered) {
-		t.Fatalf("PutHeldPrompt = %v, want ErrAcceptNotOffered", err)
-	}
-}
-
 func TestUpdateHeldPromptClassificationRoundTripsTheVerdict(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
@@ -250,90 +232,6 @@ func TestUpdateHeldPromptClassificationRefusesAnUndeclaredArm(t *testing.T) {
 	}
 	if !loggedOperation(log, "daemon.wsm.update_held_prompt_classification", "error") {
 		t.Fatalf("the refusal was not logged at error: %v", log.Records())
-	}
-}
-
-func TestUpdateHeldPromptClassificationClearsAStaleAcceptance(t *testing.T) {
-	// Arrange
-	s, _ := testStore(t)
-	ws := testWorkspace(t, s)
-	turn := standingHold(t, s, ws.ID)
-	if err := s.UpdateHeldPromptClassification(context.Background(), turn, Classification{Arm: ArmHoldForTurnEnd, At: instant}); err != nil {
-		t.Fatalf("UpdateHeldPromptClassification: %v", err)
-	}
-	if err := s.SetHeldPromptAccepted(context.Background(), turn); err != nil {
-		t.Fatalf("SetHeldPromptAccepted: %v", err)
-	}
-
-	// Act
-	if err := s.UpdateHeldPromptClassification(context.Background(), turn, Classification{Arm: ArmInterject, At: instant}); err != nil {
-		t.Fatalf("UpdateHeldPromptClassification: %v", err)
-	}
-
-	// Assert
-	got, err := s.HeldPrompts(context.Background(), ws.ID)
-	if err != nil {
-		t.Fatalf("HeldPrompts: %v", err)
-	}
-	if got[0].Accepted {
-		t.Fatalf("accepted survived a verdict that offers no acceptance")
-	}
-}
-
-func TestSetHeldPromptAcceptedFlipsTheOfferedVerdict(t *testing.T) {
-	// Arrange
-	s, _ := testStore(t)
-	ws := testWorkspace(t, s)
-	turn := standingHold(t, s, ws.ID)
-	if err := s.UpdateHeldPromptClassification(context.Background(), turn, Classification{Arm: ArmHoldForTurnEnd, At: instant}); err != nil {
-		t.Fatalf("UpdateHeldPromptClassification: %v", err)
-	}
-
-	// Act
-	if err := s.SetHeldPromptAccepted(context.Background(), turn); err != nil {
-		t.Fatalf("SetHeldPromptAccepted: %v", err)
-	}
-
-	// Assert
-	got, err := s.HeldPrompts(context.Background(), ws.ID)
-	if err != nil {
-		t.Fatalf("HeldPrompts: %v", err)
-	}
-	if !got[0].Accepted {
-		t.Fatalf("accepted = false after SetHeldPromptAccepted")
-	}
-}
-
-func TestSetHeldPromptAcceptedRefusesAnUnofferedVerdict(t *testing.T) {
-	// Arrange
-	s, _ := testStore(t)
-	ws := testWorkspace(t, s)
-	turn := standingHold(t, s, ws.ID)
-	if err := s.UpdateHeldPromptClassification(context.Background(), turn, Classification{Arm: ArmInterject, At: instant}); err != nil {
-		t.Fatalf("UpdateHeldPromptClassification: %v", err)
-	}
-
-	// Act
-	err := s.SetHeldPromptAccepted(context.Background(), turn)
-
-	// Assert
-	if !errors.Is(err, ErrAcceptNotOffered) {
-		t.Fatalf("SetHeldPromptAccepted = %v, want ErrAcceptNotOffered", err)
-	}
-}
-
-func TestSetHeldPromptAcceptedRefusesAnUnjudgedPrompt(t *testing.T) {
-	// Arrange
-	s, _ := testStore(t)
-	ws := testWorkspace(t, s)
-	turn := standingHold(t, s, ws.ID)
-
-	// Act
-	err := s.SetHeldPromptAccepted(context.Background(), turn)
-
-	// Assert
-	if !errors.Is(err, ErrAcceptNotOffered) {
-		t.Fatalf("SetHeldPromptAccepted = %v, want ErrAcceptNotOffered", err)
 	}
 }
 
@@ -646,23 +544,6 @@ func TestHeldPromptsFailsWholeOnAnUnknownSessionCommand(t *testing.T) {
 	}
 }
 
-func TestHeldPromptsFailsWholeOnAnAcceptedRowWithNoOffer(t *testing.T) {
-	// Arrange
-	s, _ := testStore(t)
-	ws := testWorkspace(t, s)
-	broken := standingHold(t, s, ws.ID)
-	corrupt(t, s, `UPDATE held_prompts SET accepted = 1 WHERE turn_id = ?`, broken)
-
-	// Act
-	_, err := s.HeldPrompts(context.Background(), ws.ID)
-
-	// Assert
-	var refusal *DecodeError
-	if !errors.As(err, &refusal) || refusal.Field != "accepted" {
-		t.Fatalf("HeldPrompts = %v, want a *DecodeError naming held_prompts.accepted", err)
-	}
-}
-
 func TestHeldPromptsFailsWholeOnAShutdownHoldWithNoSchedule(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
@@ -777,9 +658,6 @@ func TestReplaceHeldPromptSaidDiscardsTheVerdict(t *testing.T) {
 	if err := s.UpdateHeldPromptClassification(context.Background(), turn, Classification{Arm: ArmHoldForTurnEnd, At: instant}); err != nil {
 		t.Fatalf("UpdateHeldPromptClassification: %v", err)
 	}
-	if err := s.SetHeldPromptAccepted(context.Background(), turn); err != nil {
-		t.Fatalf("SetHeldPromptAccepted: %v", err)
-	}
 
 	// Act
 	if err := s.ReplaceHeldPromptSaid(context.Background(), turn, said("the edited words")); err != nil {
@@ -791,8 +669,8 @@ func TestReplaceHeldPromptSaidDiscardsTheVerdict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HeldPrompts: %v", err)
 	}
-	if got[0].Classification != nil || got[0].Accepted {
-		t.Fatalf("hold = %+v, want the verdict and the acceptance discarded", got[0])
+	if got[0].Classification != nil {
+		t.Fatalf("hold = %+v, want the verdict discarded", got[0])
 	}
 }
 
@@ -1112,15 +990,12 @@ func coalescePair(t *testing.T, s *store, ws WorkspaceID) (into, from TurnID) {
 	return into, from
 }
 
-// acceptedHoldForTurnEnd stamps TURN with an accepted hold_for_turn_end
-// verdict, the one a coalescence either keeps or discards.
-func acceptedHoldForTurnEnd(t *testing.T, s *store, turn TurnID) {
+// holdForTurnEndVerdict stamps TURN with a hold_for_turn_end verdict, the one
+// a coalescence either keeps or discards.
+func holdForTurnEndVerdict(t *testing.T, s *store, turn TurnID) {
 	t.Helper()
 	if err := s.UpdateHeldPromptClassification(context.Background(), turn, Classification{Arm: ArmHoldForTurnEnd, Reason: "waits", At: instant}); err != nil {
 		t.Fatalf("UpdateHeldPromptClassification: %v", err)
-	}
-	if err := s.SetHeldPromptAccepted(context.Background(), turn); err != nil {
-		t.Fatalf("SetHeldPromptAccepted: %v", err)
 	}
 }
 
@@ -1193,7 +1068,7 @@ func TestCoalesceHeldPromptsVerdict(t *testing.T) {
 			s, _ := testStore(t)
 			ws := testWorkspace(t, s)
 			into, from := coalescePair(t, s, ws.ID)
-			acceptedHoldForTurnEnd(t, s, into)
+			holdForTurnEndVerdict(t, s, into)
 
 			// Act
 			err := s.CoalesceHeldPrompts(context.Background(), Coalescence{
@@ -1206,8 +1081,8 @@ func TestCoalesceHeldPromptsVerdict(t *testing.T) {
 				t.Fatalf("CoalesceHeldPrompts: %v", err)
 			}
 			got := heldRow(t, s, into)
-			if hasVerdict := got.Classification != nil && got.Accepted; hasVerdict != tt.wantVerdict {
-				t.Fatalf("into verdict = %+v accepted %v, want verdict standing = %v", got.Classification, got.Accepted, tt.wantVerdict)
+			if hasVerdict := got.Classification != nil; hasVerdict != tt.wantVerdict {
+				t.Fatalf("into verdict = %+v, want verdict standing = %v", got.Classification, tt.wantVerdict)
 			}
 		})
 	}
@@ -1307,7 +1182,7 @@ func TestCoalesceHeldPromptsIsAtomic(t *testing.T) {
 	s, log := testStore(t)
 	ws := testWorkspace(t, s)
 	into, from := coalescePair(t, s, ws.ID)
-	acceptedHoldForTurnEnd(t, s, into)
+	holdForTurnEndVerdict(t, s, into)
 	corrupt(t, s, `CREATE TRIGGER fail_the_retirement BEFORE UPDATE OF tombstone_kind ON held_prompts
 		BEGIN SELECT RAISE(ABORT, 'the retirement failed'); END`)
 
@@ -1321,8 +1196,8 @@ func TestCoalesceHeldPromptsIsAtomic(t *testing.T) {
 		t.Fatalf("CoalesceHeldPrompts succeeded through a failed retirement")
 	}
 	gotInto, gotFrom := heldRow(t, s, into), heldRow(t, s, from)
-	if firstText(gotInto.Said) != string(into) || gotInto.Coalesced || gotInto.Classification == nil || !gotInto.Accepted {
-		t.Fatalf("into = %+v, want its own words, verdict and acceptance, uncoalesced", gotInto)
+	if firstText(gotInto.Said) != string(into) || gotInto.Coalesced || gotInto.Classification == nil {
+		t.Fatalf("into = %+v, want its own words and verdict, uncoalesced", gotInto)
 	}
 	if gotFrom.Tombstone != nil || firstText(gotFrom.Said) != string(from) {
 		t.Fatalf("from = %+v, want it standing with its own words", gotFrom)
@@ -1379,4 +1254,109 @@ func heldFixture(t *testing.T, s *store, ws WorkspaceID) TurnID {
 		t.Fatalf("PutHeldPrompt: %v", err)
 	}
 	return turn
+}
+
+// retiredAccepted reads the retired `accepted` column of TURN's row directly,
+// since no HeldPrompt field carries it any more.
+func retiredAccepted(t *testing.T, s *store, turn TurnID) int {
+	t.Helper()
+	var got int
+	if err := s.db().QueryRow(`SELECT accepted FROM held_prompts WHERE turn_id = ?`, turn).Scan(&got); err != nil {
+		t.Fatalf("read accepted: %v", err)
+	}
+	return got
+}
+
+// legacyAcceptance stamps TURN as an older build left an accepted hold: a
+// hold_for_turn_end verdict with `accepted` set.
+func legacyAcceptance(t *testing.T, s *store, turn TurnID) {
+	t.Helper()
+	holdForTurnEndVerdict(t, s, turn)
+	if _, err := s.db().Exec(`UPDATE held_prompts SET accepted = 1 WHERE turn_id = ?`, turn); err != nil {
+		t.Fatalf("stamp a legacy acceptance: %v", err)
+	}
+}
+
+func TestHeldPromptWritersStoreTheRetiredAcceptanceAsZero(t *testing.T) {
+	tests := []struct {
+		name  string
+		write func(t *testing.T, s *store, ws WorkspaceID, turn TurnID) error
+	}{
+		{
+			name: "a put",
+			write: func(t *testing.T, s *store, ws WorkspaceID, turn TurnID) error {
+				return s.PutHeldPrompt(context.Background(), heldRow(t, s, turn))
+			},
+		},
+		{
+			name: "a classification that keeps the verdict",
+			write: func(_ *testing.T, s *store, _ WorkspaceID, turn TurnID) error {
+				return s.UpdateHeldPromptClassification(context.Background(), turn, Classification{Arm: ArmHoldForTurnEnd, At: instant})
+			},
+		},
+		{
+			name: "a classification that changes the verdict",
+			write: func(_ *testing.T, s *store, _ WorkspaceID, turn TurnID) error {
+				return s.UpdateHeldPromptClassification(context.Background(), turn, Classification{Arm: ArmInterject, At: instant})
+			},
+		},
+		{
+			name: "an edit's replacement",
+			write: func(_ *testing.T, s *store, _ WorkspaceID, turn TurnID) error {
+				return s.ReplaceHeldPromptSaid(context.Background(), turn, said("the edited words"))
+			},
+		},
+		{
+			name: "a coalescence that discards the verdict",
+			write: func(t *testing.T, s *store, ws WorkspaceID, turn TurnID) error {
+				from := standingHold(t, s, ws)
+				return s.CoalesceHeldPrompts(context.Background(), Coalescence{
+					Into: turn, From: from, Said: said("merged"),
+					Retired: Tombstone{Kind: "coalesced", At: instant}, DiscardVerdict: true,
+				})
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange — a row an older build accepted, which that build's
+			// decoder still refuses beside any verdict but hold_for_turn_end.
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+			turn := standingHold(t, s, ws.ID)
+			legacyAcceptance(t, s, turn)
+
+			// Act
+			if err := tt.write(t, s, ws.ID, turn); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+
+			// Assert
+			if got := retiredAccepted(t, s, turn); got != 0 {
+				t.Fatalf("accepted = %d after %s, want 0", got, tt.name)
+			}
+		})
+	}
+}
+
+func TestHeldPromptsDecodesALegacyAcceptance(t *testing.T) {
+	// Arrange — an older build's accepted row beside a verdict that never
+	// offered one, which this build no longer has any reason to refuse.
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	turn := standingHold(t, s, ws.ID)
+	if err := s.UpdateHeldPromptClassification(context.Background(), turn, Classification{Arm: ArmInterject, At: instant}); err != nil {
+		t.Fatalf("UpdateHeldPromptClassification: %v", err)
+	}
+	if _, err := s.db().Exec(`UPDATE held_prompts SET accepted = 1 WHERE turn_id = ?`, turn); err != nil {
+		t.Fatalf("stamp a legacy acceptance: %v", err)
+	}
+
+	// Act
+	got, err := s.HeldPrompts(context.Background(), ws.ID)
+
+	// Assert
+	if err != nil || len(got) != 1 || got[0].Classification == nil || got[0].Classification.Arm != ArmInterject {
+		t.Fatalf("HeldPrompts = (%+v, %v), want the one hold with its interject verdict", got, err)
+	}
 }

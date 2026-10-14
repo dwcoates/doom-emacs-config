@@ -125,21 +125,6 @@ func TestTrayCarriesTheInterjectRationale(t *testing.T) {
 	}
 }
 
-func TestTrayCarriesTheHoldForTurnEndAcceptance(t *testing.T) {
-	// Arrange.
-	r, _ := newRenderer(t)
-	held := verdict(hold("t1", "later"), wsm.ArmHoldForTurnEnd, "no urgency")
-	held.Accepted = true
-
-	// Act.
-	r.SetHeldPrompts(testWS, []wsm.HeldPrompt{held})
-
-	// Assert.
-	if !onlyPrompt(t, latest(t, r)).GetHoldForTurnEnd().GetAccepted().GetAccepted() {
-		t.Fatal("the accepted flag did not reach the tray")
-	}
-}
-
 func TestTrayNamesTheUninterruptibleCommand(t *testing.T) {
 	// Arrange.
 	r, _ := newRenderer(t)
@@ -478,13 +463,8 @@ func TestHeldStatusComposesEveryStatus(t *testing.T) {
 		},
 		{
 			name: "hold for turn end",
-			p:    &frontendv1.HeldPrompt{Turn: turn, Classification: holdForTurnEnd(false)},
+			p:    &frontendv1.HeldPrompt{Turn: turn, Classification: holdForTurnEnd()},
 			want: wantStatus{badge: wantBadge{"after this turn", ""}, fact: "hold_for_turn_end", notes: []string{}},
-		},
-		{
-			name: "a confirmation is a note",
-			p:    &frontendv1.HeldPrompt{Turn: turn, Classification: holdForTurnEnd(true)},
-			want: wantStatus{badge: wantBadge{"after this turn", ""}, fact: "hold_for_turn_end", notes: []string{"confirmed"}},
 		},
 		{
 			name: "uninterruptible compact",
@@ -503,29 +483,29 @@ func TestHeldStatusComposesEveryStatus(t *testing.T) {
 		},
 		{
 			name: "editing outranks the verdict",
-			p:    &frontendv1.HeldPrompt{Turn: turn, Classification: holdForTurnEnd(false), Editing: &frontendv1.HeldPromptEditing{}},
+			p:    &frontendv1.HeldPrompt{Turn: turn, Classification: holdForTurnEnd(), Editing: &frontendv1.HeldPromptEditing{}},
 			want: wantStatus{badge: wantBadge{"editing", ""}, fact: "editing", notes: []string{"after this turn"}},
 		},
 		{
 			name: "every fact at once: the edit claims the badge, the rest are notes in rank order",
-			p: &frontendv1.HeldPrompt{Turn: turn, Classification: holdForTurnEnd(true), Editing: &frontendv1.HeldPromptEditing{},
+			p: &frontendv1.HeldPrompt{Turn: turn, Classification: holdForTurnEnd(), Editing: &frontendv1.HeldPromptEditing{},
 				Hold: &frontendv1.HeldPrompt_BuildRefresh{BuildRefresh: &frontendv1.HeldPromptBuildRefreshHold{}}, Coalesced: &frontendv1.HeldPromptCoalesced{}},
 			want: wantStatus{badge: wantBadge{"editing", ""}, fact: "editing",
-				notes: []string{"held for the build refresh", "after this turn", "confirmed", "later prompts were folded into this one"}},
+				notes: []string{"held for the build refresh", "after this turn", "later prompts were folded into this one"}},
 		},
 		{
 			name: "a hold outranks the verdict",
-			p:    &frontendv1.HeldPrompt{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_Shutdown{Shutdown: &frontendv1.HeldPromptShutdownHold{ScheduleId: "s-1"}}},
+			p:    &frontendv1.HeldPrompt{Classification: holdForTurnEnd(), Hold: &frontendv1.HeldPrompt_Shutdown{Shutdown: &frontendv1.HeldPromptShutdownHold{ScheduleId: "s-1"}}},
 			want: wantStatus{badge: wantBadge{"restart hold", "held for the scheduled restart (s-1)"}, fact: "shutdown", notes: []string{"after this turn"}},
 		},
 		{
 			name: "build refresh hold",
-			p:    &frontendv1.HeldPrompt{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_BuildRefresh{BuildRefresh: &frontendv1.HeldPromptBuildRefreshHold{}}},
+			p:    &frontendv1.HeldPrompt{Classification: holdForTurnEnd(), Hold: &frontendv1.HeldPrompt_BuildRefresh{BuildRefresh: &frontendv1.HeldPromptBuildRefreshHold{}}},
 			want: wantStatus{badge: wantBadge{"build refresh", "held for the build refresh"}, fact: "build_refresh", notes: []string{"after this turn"}},
 		},
 		{
 			name: "the reported card: a merge hold over a turn-end verdict shows the merge",
-			p:    &frontendv1.HeldPrompt{Classification: holdForTurnEnd(false), Hold: merge},
+			p:    &frontendv1.HeldPrompt{Classification: holdForTurnEnd(), Hold: merge},
 			want: wantStatus{badge: wantBadge{"after the merge", "held until the merge ends; the workspace stays open for it"}, fact: "merge", notes: []string{"after this turn"}},
 		},
 		{
@@ -535,7 +515,7 @@ func TestHeldStatusComposesEveryStatus(t *testing.T) {
 		},
 		{
 			name: "reconnect hold",
-			p:    &frontendv1.HeldPrompt{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_Reconnect{Reconnect: &frontendv1.HeldPromptReconnectHold{}}},
+			p:    &frontendv1.HeldPrompt{Classification: holdForTurnEnd(), Hold: &frontendv1.HeldPrompt_Reconnect{Reconnect: &frontendv1.HeldPromptReconnectHold{}}},
 			want: wantStatus{badge: wantBadge{"after reconnect", "held until the session reconnects"}, fact: "reconnect", notes: []string{"after this turn"}},
 		},
 		{
@@ -545,7 +525,7 @@ func TestHeldStatusComposesEveryStatus(t *testing.T) {
 		},
 		{
 			name: "a cold-gate hold outranks a turn-end verdict",
-			p:    &frontendv1.HeldPrompt{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_ColdGate{ColdGate: &frontendv1.HeldPromptColdGateHold{}}},
+			p:    &frontendv1.HeldPrompt{Classification: holdForTurnEnd(), Hold: &frontendv1.HeldPrompt_ColdGate{ColdGate: &frontendv1.HeldPromptColdGateHold{}}},
 			want: wantStatus{badge: wantBadge{"awaiting cold gate", "held until the cold gate is answered; a prompt never answers it"}, fact: "cold_gate", notes: []string{"after this turn"}},
 		},
 		{
@@ -586,13 +566,13 @@ func TestHeldStatusLabelsAreOneToThreeWords(t *testing.T) {
 	all := []*frontendv1.HeldPrompt{
 		{Classification: &frontendv1.HeldPrompt_Classifying{Classifying: &frontendv1.HeldPromptClassifying{}}},
 		{Classification: &frontendv1.HeldPrompt_Interject{Interject: &frontendv1.HeldPromptInterject{}}},
-		{Classification: holdForTurnEnd(true)},
+		{Classification: holdForTurnEnd()},
 		{Classification: uninterruptibleArm(conversationv1.SessionCommand_SESSION_COMMAND_COMPACT)},
 		{Classification: &frontendv1.HeldPrompt_ClassificationError{ClassificationError: &frontendv1.HeldPromptClassificationError{}}},
-		{Classification: holdForTurnEnd(false), Editing: &frontendv1.HeldPromptEditing{}},
-		{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_Shutdown{Shutdown: &frontendv1.HeldPromptShutdownHold{ScheduleId: "s"}}},
-		{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_BuildRefresh{BuildRefresh: &frontendv1.HeldPromptBuildRefreshHold{}}},
-		{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_Reconnect{Reconnect: &frontendv1.HeldPromptReconnectHold{}}},
+		{Classification: holdForTurnEnd(), Editing: &frontendv1.HeldPromptEditing{}},
+		{Classification: holdForTurnEnd(), Hold: &frontendv1.HeldPrompt_Shutdown{Shutdown: &frontendv1.HeldPromptShutdownHold{ScheduleId: "s"}}},
+		{Classification: holdForTurnEnd(), Hold: &frontendv1.HeldPrompt_BuildRefresh{BuildRefresh: &frontendv1.HeldPromptBuildRefreshHold{}}},
+		{Classification: holdForTurnEnd(), Hold: &frontendv1.HeldPrompt_Reconnect{Reconnect: &frontendv1.HeldPromptReconnectHold{}}},
 		{Classification: &frontendv1.HeldPrompt_DaemonHeld{DaemonHeld: &frontendv1.HeldPromptDaemonHeld{}}, Hold: &frontendv1.HeldPrompt_Merge{Merge: &frontendv1.HeldPromptMergeHold{}}},
 		{Classification: &frontendv1.HeldPrompt_DaemonHeld{DaemonHeld: &frontendv1.HeldPromptDaemonHeld{}}, Hold: &frontendv1.HeldPrompt_ColdGate{ColdGate: &frontendv1.HeldPromptColdGateHold{}}},
 		{Classification: &frontendv1.HeldPrompt_DaemonHeld{DaemonHeld: &frontendv1.HeldPromptDaemonHeld{}}, Hold: &frontendv1.HeldPrompt_ColdGateAnswered{ColdGateAnswered: &frontendv1.HeldPromptColdGateAnsweredHold{}}},
@@ -670,7 +650,7 @@ func TestHeldStatusRecordsAMissingVerdict(t *testing.T) {
 func TestHeldStatusShutdownWithNoScheduleOmitsTheId(t *testing.T) {
 	// Arrange.
 	log := dlog.NewTestLogger()
-	p := &frontendv1.HeldPrompt{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_Shutdown{Shutdown: &frontendv1.HeldPromptShutdownHold{}}}
+	p := &frontendv1.HeldPrompt{Classification: holdForTurnEnd(), Hold: &frontendv1.HeldPrompt_Shutdown{Shutdown: &frontendv1.HeldPromptShutdownHold{}}}
 
 	// Act.
 	got := statusOf(holds.HeldStatus(p, log))
@@ -708,7 +688,6 @@ func TestTrayCarriesTheComposedBadge(t *testing.T) {
 	// Arrange.
 	r, _ := newRenderer(t)
 	held := verdict(hold("t1", "then run the tests"), wsm.ArmHoldForTurnEnd, "no urgency")
-	held.Accepted = true
 	held.Hold = kindOf(wsm.HoldShutdown)
 	held.ScheduleID = "s-7"
 
@@ -717,15 +696,14 @@ func TestTrayCarriesTheComposedBadge(t *testing.T) {
 
 	// Assert.
 	got := promptStatus(onlyPrompt(t, latest(t, r)))
-	want := wantStatus{badge: wantBadge{"restart hold", "held for the scheduled restart (s-7)"}, fact: "shutdown", notes: []string{"after this turn", "confirmed"}}
+	want := wantStatus{badge: wantBadge{"restart hold", "held for the scheduled restart (s-7)"}, fact: "shutdown", notes: []string{"after this turn"}}
 	if !equalStatus(got, want) {
 		t.Fatalf("status = %+v, want %+v", got, want)
 	}
 }
 
-func holdForTurnEnd(accepted bool) *frontendv1.HeldPrompt_HoldForTurnEnd {
-	return &frontendv1.HeldPrompt_HoldForTurnEnd{HoldForTurnEnd: &frontendv1.HeldPromptHoldForTurnEnd{
-		Accepted: &frontendv1.HeldPromptAccepted{Accepted: accepted}}}
+func holdForTurnEnd() *frontendv1.HeldPrompt_HoldForTurnEnd {
+	return &frontendv1.HeldPrompt_HoldForTurnEnd{HoldForTurnEnd: &frontendv1.HeldPromptHoldForTurnEnd{}}
 }
 
 func uninterruptibleArm(command conversationv1.SessionCommand) *frontendv1.HeldPrompt_UninterruptibleTurn {
