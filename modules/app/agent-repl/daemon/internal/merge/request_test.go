@@ -475,6 +475,7 @@ func TestNewDetachedRunTrimsTheNameAndTheInstructionAndKeepsTheAsks(t *testing.T
 		compactAfter     bool
 		closeOnLanding   ids.WorkspaceID
 		cleanupWorktree  bool
+		actions          wsm.MergeActions
 		want             DetachedRun
 	}{
 		{name: "a branch as it is", inName: " reconnect-fix ", want: DetachedRun{Name: "reconnect-fix"}},
@@ -483,14 +484,16 @@ func TestNewDetachedRunTrimsTheNameAndTheInstructionAndKeepsTheAsks(t *testing.T
 		{name: "compacting after", inName: "reconnect-fix", compactAfter: true, want: DetachedRun{Name: "reconnect-fix", CompactAfter: true}},
 		{name: "closing another workspace", inName: "reconnect-fix", closeOnLanding: "child", want: DetachedRun{Name: "reconnect-fix", CloseOnLanding: "child"}},
 		{name: "cleaning up", inName: "reconnect-fix", cleanupWorktree: true, want: DetachedRun{Name: "reconnect-fix", CleanupWorktree: true}},
+		{name: "its own merge actions", inName: "reconnect-fix", actions: wsm.MergeActions{Before: []string{"lint"}, After: []string{"announce"}},
+			want: DetachedRun{Name: "reconnect-fix", Actions: wsm.MergeActions{Before: []string{"lint"}, After: []string{"announce"}}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			got := NewDetachedRun(tt.inName, tt.instruct, tt.compactAfter, tt.closeOnLanding, tt.cleanupWorktree)
+			got := NewDetachedRun(tt.inName, tt.instruct, tt.compactAfter, tt.closeOnLanding, tt.cleanupWorktree, tt.actions)
 
 			// Assert
-			if got == nil || *got != tt.want {
+			if got == nil || !reflect.DeepEqual(*got, tt.want) {
 				t.Fatalf("NewDetachedRun = %+v, want %+v", got, tt.want)
 			}
 		})

@@ -821,6 +821,9 @@ func TestApplyFileMapsEachMergeSourceOntoTheRequest(t *testing.T) {
 			want: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix"}, detached: &merge.DetachedRun{Name: "reconnect-fix", CompactAfter: true}},
 		{name: "an async one-shot closing another workspace and cleaning up", body: `[{"type":"merge","workspace":"w1","async_name":"reconnect-fix","branch":"agent-1/fix","close_dir":"/tree/w2","cleanup_worktree":true}]`,
 			want: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix"}, detached: &merge.DetachedRun{Name: "reconnect-fix", CloseOnLanding: "w2", CleanupWorktree: true}},
+		{name: "an async merge with its own merge actions", body: `[{"type":"merge","workspace":"w1","async_name":"reconnect-fix","branch":"agent-1/fix","before_ws_merge":"run the linters","postprocessing_prompt":"post the summary"}]`,
+			want: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix"}, detached: &merge.DetachedRun{Name: "reconnect-fix",
+				Actions: wsm.MergeActions{Before: []string{"run the linters"}, After: []string{"post the summary"}}}},
 		{name: "an async merge to the front", body: `[{"type":"merge","workspace":"w1","async_name":"reconnect-fix","branch":"agent-1/fix","front":true}]`,
 			want: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix", Front: true}, detached: &merge.DetachedRun{Name: "reconnect-fix"}},
 	}
@@ -842,7 +845,7 @@ func TestApplyFileMapsEachMergeSourceOntoTheRequest(t *testing.T) {
 				t.Fatalf("requests = %v (one-shot %v) from %v, want %+v (one-shot %v) from w1", f.merge.sources, f.merge.oneShot, f.merge.enqueued, tt.want, tt.oneShot)
 			}
 			got := f.merge.detached[0]
-			if (got == nil) != (tt.detached == nil) || (got != nil && *got != *tt.detached) {
+			if (got == nil) != (tt.detached == nil) || (got != nil && !reflect.DeepEqual(*got, *tt.detached)) {
 				t.Fatalf("async run = %+v, want %+v", got, tt.detached)
 			}
 		})

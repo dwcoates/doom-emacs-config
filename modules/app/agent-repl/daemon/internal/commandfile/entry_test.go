@@ -2,6 +2,7 @@ package commandfile
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -313,8 +314,6 @@ func TestValidateRefusesACreateFieldOnAnyOtherVerb(t *testing.T) {
 		{name: "fork_from", entry: Entry{ForkFrom: "w"}, field: "fork_from"},
 		{name: "model", entry: Entry{Model: "sonnet"}, field: "model"},
 		{name: "priority", entry: Entry{Priority: "p1"}, field: "priority"},
-		{name: "before_ws_merge", entry: Entry{BeforeWSMerge: "b"}, field: "before_ws_merge"},
-		{name: "postprocessing_prompt", entry: Entry{PostprocessingPrompt: "p"}, field: "postprocessing_prompt"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -329,6 +328,107 @@ func TestValidateRefusesACreateFieldOnAnyOtherVerb(t *testing.T) {
 			// Assert.
 			if err == nil || !strings.Contains(err.Error(), "merge: "+tt.field+" is a create's field") {
 				t.Fatalf("Validate() = %v, want %s refused as a create's field", err, tt.field)
+			}
+		})
+	}
+}
+
+func TestValidateAcceptsMergeActionsOnAnAsyncMerge(t *testing.T) {
+	tests := []struct {
+		name  string
+		entry Entry
+	}{
+		{name: "before_ws_merge", entry: Entry{BeforeWSMerge: "b"}},
+		{name: "postprocessing_prompt", entry: Entry{PostprocessingPrompt: "p"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			entry := tt.entry
+			entry.Type, entry.Workspace, entry.AsyncName, entry.Branch = TypeMerge, "w1", "reconnect-fix", "agent-1/fix"
+
+			// Act.
+			err := entry.Validate()
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("Validate() = %v, want an async merge's actions accepted", err)
+			}
+		})
+	}
+}
+
+func TestValidateRefusesMergeActionsOnAOneShotMerge(t *testing.T) {
+	tests := []struct {
+		name  string
+		entry Entry
+		field string
+	}{
+		{name: "before_ws_merge", entry: Entry{BeforeWSMerge: "b"}, field: "before_ws_merge"},
+		{name: "postprocessing_prompt", entry: Entry{PostprocessingPrompt: "p"}, field: "postprocessing_prompt"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			entry := tt.entry
+			entry.Type, entry.Workspace, entry.OneShot = TypeMerge, "w1", true
+
+			// Act.
+			err := entry.Validate()
+
+			// Assert.
+			if err == nil || !strings.Contains(err.Error(), tt.field+" belongs to an async merge") {
+				t.Fatalf("Validate() = %v, want %s refused on a one_shot", err, tt.field)
+			}
+		})
+	}
+}
+
+func TestValidateRefusesMergeActionsOnAVerbThatIsNeitherACreateNorAMerge(t *testing.T) {
+	tests := []struct {
+		name  string
+		entry Entry
+		field string
+	}{
+		{name: "before_ws_merge", entry: Entry{BeforeWSMerge: "b"}, field: "before_ws_merge"},
+		{name: "postprocessing_prompt", entry: Entry{PostprocessingPrompt: "p"}, field: "postprocessing_prompt"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			entry := tt.entry
+			entry.Type, entry.Workspace = TypeClose, "w1"
+
+			// Act.
+			err := entry.Validate()
+
+			// Assert.
+			if err == nil || !strings.Contains(err.Error(), "close: "+tt.field+" is a create's or an async merge's field") {
+				t.Fatalf("Validate() = %v, want %s refused on a close", err, tt.field)
+			}
+		})
+	}
+}
+
+func TestEntryMergeActionsReadsBothFields(t *testing.T) {
+	tests := []struct {
+		name  string
+		entry Entry
+		want  wsm.MergeActions
+	}{
+		{name: "neither", entry: Entry{}, want: wsm.MergeActions{}},
+		{name: "before alone", entry: Entry{BeforeWSMerge: "b"}, want: wsm.MergeActions{Before: []string{"b"}}},
+		{name: "after alone", entry: Entry{PostprocessingPrompt: "p"}, want: wsm.MergeActions{After: []string{"p"}}},
+		{name: "both", entry: Entry{BeforeWSMerge: "b", PostprocessingPrompt: "p"}, want: wsm.MergeActions{Before: []string{"b"}, After: []string{"p"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			got := tt.entry.MergeActions()
+
+			// Assert.
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("MergeActions() = %+v, want %+v", got, tt.want)
 			}
 		})
 	}

@@ -744,7 +744,7 @@ func (s *server) mergeRequestMode(ctx context.Context, requester ids.WorkspaceID
 			closes = id
 		}
 		out.Source = wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: strings.TrimSpace(async.GetBranch())}
-		out.Detached = merge.NewDetachedRun(async.GetName(), async.GetInstruction(), async.GetCompactAfter(), closes, async.GetCleanupWorktree())
+		out.Detached = merge.NewDetachedRun(async.GetName(), async.GetInstruction(), async.GetCompactAfter(), closes, async.GetCleanupWorktree(), s.mergeActions(async.GetMergeActions()))
 		return out, nil
 	}
 	// validateMergeWorkspaceRequest refused an unset arm before this.

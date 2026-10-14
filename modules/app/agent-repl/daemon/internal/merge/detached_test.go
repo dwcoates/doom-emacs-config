@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -987,5 +988,175 @@ func TestEveryMergeTabIsPublishedThroughPublishTab(t *testing.T) {
 		if strings.Contains(string(file.Source), "tabRow(") {
 			t.Errorf("%s composes a tab row itself, want every tab published through publishTab", file.Name)
 		}
+	}
+}
+
+// asMainCheckout makes the requester the repository's main checkout: no
+// creation job, its directory its own main worktree, its parent branch master.
+func asMainCheckout(h *harness) {
+	h.db.mu.Lock()
+	defer h.db.mu.Unlock()
+	delete(h.db.jobs, theWorkspace)
+	requester := h.db.workspaces[theWorkspace]
+	requester.ParentBranch = "master"
+	h.db.workspaces[theWorkspace] = requester
+}
+
+// withParentBranch gives the created requester a recorded parent branch.
+func withParentBranch(h *harness, parent string) {
+	h.db.mu.Lock()
+	defer h.db.mu.Unlock()
+	requester := h.db.workspaces[theWorkspace]
+	requester.ParentBranch = parent
+	h.db.workspaces[theWorkspace] = requester
+}
+
+func TestAnAsyncRequestsHandOffForksWithTheLandingTheQueueDecided(t *testing.T) {
+	actions := wsm.MergeActions{Before: []string{"run the linters"}, After: []string{"post the summary"}}
+	tests := []struct {
+		name          string
+		arrange       func(h *harness)
+		wantTarget    func(h *harness) string
+		wantParent    string
+		actions       wsm.MergeActions
+		wantOriginAct wsm.MergeActions
+	}{
+		{name: "a created requester lands at its creation job's target", arrange: func(h *harness) { withParentBranch(h, "feature-parent") },
+			wantTarget: func(h *harness) string { return h.targetD }, wantParent: "feature-parent", actions: actions, wantOriginAct: actions},
+		{name: "the main checkout lands in its main worktree", arrange: asMainCheckout,
+			wantTarget: func(h *harness) string { return h.sourceD }, wantParent: "master", actions: actions, wantOriginAct: actions},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			tt.arrange(h)
+
+			// Act: the user's ask is put in line at once, which hands it off.
+			err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource,
+				By: RequestedByUser, Detached: &DetachedRun{Name: "reconnect-fix", Actions: tt.actions}})
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Enqueue: %v", err)
+			}
+			origins := h.detached.origins
+			if len(origins) != 1 {
+				t.Fatalf("origins = %+v, want one", origins)
+			}
+			got := origins[0]
+			if got.TargetDir != tt.wantTarget(h) || got.ParentBranch != tt.wantParent || !reflect.DeepEqual(got.Actions, tt.wantOriginAct) {
+				t.Fatalf("origin landing = (%q, %q, %+v), want (%q, %q, %+v)", got.TargetDir, got.ParentBranch, got.Actions,
+					tt.wantTarget(h), tt.wantParent, tt.wantOriginAct)
+			}
+		})
+	}
+}
+
+func TestAnAsyncRequestWithNoActionsForksWithNoneEvenWhenItsRequesterHasSome(t *testing.T) {
+	// Arrange: the requester was created with merge actions of its own.
+	h := newHarness(t)
+	h.db.mu.Lock()
+	job := h.db.jobs[theWorkspace]
+	job.Actions = wsm.MergeActions{Before: []string{"the requester's own before"}, After: []string{"the requester's own after"}}
+	h.db.jobs[theWorkspace] = job
+	h.db.mu.Unlock()
+
+	// Act
+	err := requestDetached(t, h, RequestedByUser)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	if origins := h.detached.origins; len(origins) != 1 || !reflect.DeepEqual(origins[0].Actions, wsm.MergeActions{}) {
+		t.Fatalf("origins = %+v, want one carrying no merge action", origins)
+	}
+}
+
+func TestAnAsyncRequestRecordsItsMergeActionsOnItsEntry(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.mu.Lock()
+	h.inFlight = "turn-asking"
+	h.mu.Unlock()
+	actions := wsm.MergeActions{Before: []string{"run the linters"}}
+
+	// Act: an agent's request, still waiting on the turn that asked.
+	err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource,
+		By: RequestedByAgent, Detached: &DetachedRun{Name: "reconnect-fix", Actions: actions}})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	if entry, ok := h.entryOf(theWorkspace); !ok || !reflect.DeepEqual(entry.Source.Actions, actions) {
+		t.Fatalf("entry = %+v, %v; want the request's actions recorded", entry, ok)
+	}
+}
+
+func TestAHandOffWhoseLandingCannotBeDecidedDropsTheRequestAndTellsTheRequester(t *testing.T) {
+	// Arrange: an agent's request recorded while the requester was created,
+	// whose creation job is gone by its hand-off although it is no main
+	// checkout.
+	h := newHarness(t)
+	h.mu.Lock()
+	h.inFlight = "turn-asking"
+	h.mu.Unlock()
+	if err := requestDetached(t, h, RequestedByAgent); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	entry, ok := h.entryOf(theWorkspace)
+	if !ok {
+		t.Fatal("the request was not recorded")
+	}
+	joblessLinkedWorktree(h)
+
+	// Act
+	err := h.o.handOffDetached(context.Background(), theWorkspace, h.repoKey(), entry.Source)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("handOffDetached = %v, want the request answered and the failure handed back", err)
+	}
+	if len(h.detached.forks) != 0 {
+		t.Fatalf("forks = %v, want none", h.detached.forks)
+	}
+	if _, ok := h.entryOf(theWorkspace); ok {
+		t.Fatal("a request whose landing could not be decided still stands in the queue")
+	}
+	if sent := h.detached.sent(); len(sent) != 1 || sent[0].outcome.Kind != DetachedAbandoned {
+		t.Fatalf("handbacks = %+v, want one abandoned handback", sent)
+	}
+}
+
+func TestBothAsyncLandingSitesDecideByTheOneRule(t *testing.T) {
+	tests := []struct {
+		name string
+		act  func(h *harness) error
+	}{
+		{name: "the request's version check", act: func(h *harness) error {
+			return h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource, By: RequestedByUser, Detached: &DetachedRun{Name: "n"}})
+		}},
+		{name: "the hand-off", act: func(h *harness) error {
+			source := asyncSource
+			source.Detach, source.DetachName = wsm.NewDetachedMergeID(), "n"
+			return h.o.handOffDetached(context.Background(), theWorkspace, h.repoKey(), source)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the one state detachedTarget alone refuses.
+			h := newHarness(t)
+			joblessLinkedWorktree(h)
+
+			// Act
+			_ = tt.act(h)
+
+			// Assert: the refusal is detachedTarget's own record.
+			if _, ok := h.recordFor(dlog.LevelError, opDetachedTarget); !ok {
+				t.Fatalf("%s did not decide by detachedTarget: no %s record", tt.name, opDetachedTarget)
+			}
+		})
 	}
 }
