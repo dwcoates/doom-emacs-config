@@ -1,7 +1,7 @@
 ---
 name: manage-agent-repl-runtime
 description: Operate the agent-repl runtime — build it, bounce its backends, hard bounce everything including Emacs, roll a deploy out, hot-reload elisp into the running Emacs, check health and readiness, read logs, and send any unary request to the running daemon (restart or interrupt a workspace, select one, ask its health). Use whenever the user asks to build, deploy, bounce, hard bounce, restart, hot-reload, or poke agent-repl, or names one of the terms in this skill's terminology table.
-argument-hint: "<build|byte-compile|bounce|hard-bounce|deploy|hot-reload FILE...|call METHOD ...|doctor|readiness|logs> or a plain-English request"
+argument-hint: "<build|byte-compile|bounce|hard-bounce|deploy|hot-reload FILE...|call [-workspace DIR] METHOD ...|doctor|readiness|logs> or a plain-English request"
 allowed-tools: Bash(.claude/skills/manage-agent-repl-runtime/run.sh:*)
 lineage_root: user.dodge.skills.manage-agent-repl-runtime
 ---
@@ -20,7 +20,7 @@ Runs agent-repl's build, bounce, deploy, hot-reload, health and daemon-request o
 | `hard-bounce` | `byte-compile`, then hot-load the fresh elisp into the running Emacs when it is stale (a failed load stops with nothing stopped), then `bounce`, then quit and relaunch Emacs.app, so the editor and every backend run the fresh build. Refuses while Emacs holds unsaved file buffers. |
 | `deploy [-force]` | Rolling deploy: the running daemon rebuilds what is stale and moves every workspace onto it without killing turns; `-force` ends them. |
 | `hot-reload FILE.el...` | Load changed elisp files into the running Emacs. Refuses any `test-*.el`. |
-| `call METHOD [-workspace DIR] [JSON]` | Send one unary request to the running daemon and print its answer; `-workspace DIR` fills the request's workspace from that workspace directory. |
+| `call [-workspace DIR] METHOD [JSON]` | Send one unary request to the running daemon and print its answer; `-workspace DIR`, which comes BEFORE the method, fills the request's workspace from that workspace directory. |
 | `doctor` | Read-only health sweep of the running services. |
 | `readiness` | Report whether each component's running build matches its source. |
 | `logs [args...]` | Read the canonical logs. |
@@ -36,9 +36,9 @@ Runs agent-repl's build, bounce, deploy, hot-reload, health and daemon-request o
     | "hard bounce agent-repl" (or "hard bounce", "bounce everything") | `hard-bounce` | Rebuild everything, byte-compile, hot-load stale elisp, stand down every daemon of the state root and every shim AND restart Emacs.app, unless the user says to leave Emacs running, in which case use `bounce`. |
     | "bounce" / "force bounce the backends" | `bounce` | The same without restarting Emacs. |
     | "deploy" / "roll out" | `deploy` | Rolling deploy; running turns continue. |
-    | "restart the workspace" / "bounce this workspace" | `call RestartWorkspace -workspace DIR` | Immediate: the workspace's shim is relaunched on the same session and its webapp page reloads. The user's own key is `SPC o C-c`. |
-    | "interrupt / stop the turn in DIR" | `call Interrupt -workspace DIR '{"target":{"turn":{}}}'` | Stops the running turn. The user's own key is `C-c C-k` in the input window. |
-    | "switch to / select workspace DIR" | `call SelectWorkspace -workspace DIR` | Makes it current; Emacs and the webapp follow. |
+    | "restart the workspace" / "bounce this workspace" | `call -workspace DIR RestartWorkspace` | Immediate: the workspace's shim is relaunched on the same session and its webapp page reloads. The user's own key is `SPC o C-c`. |
+    | "interrupt / stop the turn in DIR" | `call -workspace DIR Interrupt '{"target":{"turn":{}}}'` | Stops the running turn. The user's own key is `C-c C-k` in the input window. |
+    | "switch to / select workspace DIR" | `call -workspace DIR SelectWorkspace` | Makes it current; Emacs and the webapp follow. |
     | "is the daemon healthy" | `call DaemonHealth` | Prints the daemon's health and identity. |
     | "hot reload" / "reload the lisp" | `hot-reload FILE.el...` | Loads the changed non-test `.el` files into the running Emacs. |
     | "reload the page" / "reload the webview" | *(no argument)* | The user's own key is `SPC o l`; suggest it, do not act. |
