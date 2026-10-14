@@ -2166,6 +2166,159 @@ standing in still says when its status moves."
           (should (= 2 (cl-count ?\[ visible)))
           (should (string-match-p "\\[1\\] first .*\\[2\\] second" visible)))))))
 
+;;;; ---- Tests: clickable, quiet tab-bar items ----
+
+(defun agent-repl-test-status--ws-run (name text)
+  "Return TEXT tagged as workspace NAME's tab entry."
+  (propertize text agent-repl--tab-workspace-property name 'face 'bold))
+
+(ert-deftest agent-repl-test-render-tab-entry-tags-every-char-with-its-workspace ()
+  "Every character of a rendered entry names its workspace, so the items
+splitter can find the whole entry again after packing."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--ws-display-state) (lambda (_) :done))
+              ((symbol-function 'agent-repl-roster-async-merging-for-ws) (lambda (_) nil))
+              ((symbol-function 'agent-repl-roster-row-for-ws) (lambda (_) nil))
+              ((symbol-function 'agent-repl-status-attention-visible-p) (lambda (_) nil)))
+      ;; Act
+      (let ((result (agent-repl--render-tab-entry "ws1" "other" 1)))
+        ;; Assert
+        (should (cl-every (lambda (i)
+                            (equal "ws1" (get-text-property
+                                          i agent-repl--tab-workspace-property result)))
+                          (number-sequence 0 (1- (length result)))))))))
+
+(ert-deftest agent-repl-test-tabline-items-captions-rebuild-the-rendered-string ()
+  "The items' captions concatenate back to the rendered tabline exactly,
+properties included, so height and repaint keys carry over."
+  ;; Arrange
+  (let ((rendered (concat (propertize "7" 'invisible t) "  "
+                          (agent-repl-test-status--ws-run "a" "[1] a ")
+                          " "
+                          (agent-repl-test-status--ws-run "b" "[2] b ")
+                          " \n    ")))
+    ;; Act
+    (let ((items (agent-repl--tabline-items rendered)))
+      ;; Assert
+      (should (equal-including-properties
+               rendered (mapconcat (lambda (item) (nth 2 item)) items ""))))))
+
+(ert-deftest agent-repl-test-tabline-items-one-item-per-run ()
+  "Filler and entries alternate as separate items, in rendered order."
+  ;; Arrange
+  (let ((rendered (concat "  " (agent-repl-test-status--ws-run "a" "[1] a")
+                          " " (agent-repl-test-status--ws-run "b" "[2] b")
+                          " \n ")))
+    ;; Act
+    (let ((captions (mapcar (lambda (item) (substring-no-properties (nth 2 item)))
+                            (agent-repl--tabline-items rendered))))
+      ;; Assert
+      (should (equal captions '("  " "[1] a" " " "[2] b" " \n "))))))
+
+(ert-deftest agent-repl-test-tabline-items-adjacent-entries-split ()
+  "Two workspaces' entries with nothing between them are still two items."
+  ;; Arrange
+  (let ((rendered (concat (agent-repl-test-status--ws-run "a" "[1] a")
+                          (agent-repl-test-status--ws-run "b" "[2] b"))))
+    ;; Act
+    (let ((items (agent-repl--tabline-items rendered)))
+      ;; Assert
+      (should (equal (mapcar (lambda (item) (substring-no-properties (nth 2 item))) items)
+                     '("[1] a" "[2] b"))))))
+
+(ert-deftest agent-repl-test-tabline-items-keys-are-unique ()
+  "Every item has its own key, so no tab-bar lookup can land on a sibling."
+  ;; Arrange
+  (let ((rendered (concat " " (agent-repl-test-status--ws-run "a" "a")
+                          " " (agent-repl-test-status--ws-run "b" "b") " ")))
+    ;; Act
+    (let ((keys (mapcar #'car (agent-repl--tabline-items rendered))))
+      ;; Assert
+      (should (= 5 (length keys)))
+      (should (equal keys (cl-remove-duplicates keys))))))
+
+(ert-deftest agent-repl-test-tabline-items-empty-string-has-no-items ()
+  "An empty rendered tabline yields no items at all."
+  ;; Act / Assert
+  (should (null (agent-repl--tabline-items ""))))
+
+(ert-deftest agent-repl-test-tabline-items-filler-is-bound-to-ignore ()
+  "A run naming no workspace is inert when clicked."
+  ;; Arrange
+  (let ((items (agent-repl--tabline-items
+                (concat "  " (agent-repl-test-status--ws-run "a" "a")))))
+    ;; Act / Assert
+    (should (eq #'ignore (nth 3 (car items))))))
+
+(ert-deftest agent-repl-test-tabline-items-click-requests-the-switch ()
+  "Clicking an entry's item requests a switch to ITS workspace, trigger `click'."
+  ;; Arrange
+  (let ((requests nil)
+        (items (agent-repl--tabline-items
+                (concat " " (agent-repl-test-status--ws-run "a" "a")
+                        " " (agent-repl-test-status--ws-run "b" "b")))))
+    (cl-letf (((symbol-function 'agent-repl-host-request-switch)
+               (lambda (ws trigger) (push (list ws trigger) requests) t)))
+      ;; Act
+      (call-interactively (nth 3 (nth 3 items)))
+      ;; Assert
+      (should (equal requests '(("b" click)))))))
+
+(ert-deftest agent-repl-test-tabline-items-every-item-is-quiet ()
+  "Every item's help is the function that shows nothing, so no item falls
+back to echoing its caption (the whole bar) in the echo area."
+  ;; Arrange
+  (let ((items (agent-repl--tabline-items
+                (concat " " (agent-repl-test-status--ws-run "a" "a") " \n "))))
+    ;; Act / Assert
+    (should (cl-every (lambda (item)
+                        (eq #'agent-repl--tab-bar-item-help
+                            (plist-get (nthcdr 4 item) :help)))
+                      items))))
+
+(ert-deftest agent-repl-test-tab-bar-item-help-shows-nothing ()
+  "The help function answers nil, which `show_help_echo' displays as nothing."
+  ;; Act / Assert
+  (should (null (agent-repl--tab-bar-item-help (selected-window) nil 0))))
+
+(ert-deftest agent-repl-test-tab-bar-switch-to-workspace-requests-with-click ()
+  "The click command requests the switch through the shared host path."
+  ;; Arrange
+  (let ((requests nil))
+    (cl-letf (((symbol-function 'agent-repl-host-request-switch)
+               (lambda (ws trigger) (push (list ws trigger) requests) t)))
+      ;; Act
+      (agent-repl-tab-bar-switch-to-workspace "ws1")
+      ;; Assert
+      (should (equal requests '(("ws1" click)))))))
+
+(ert-deftest agent-repl-test-workspace-tabline-items-splits-the-formatted-tabline ()
+  "The `tab-bar-format' entry is exactly the formatter's string, split."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "first" :project-dir "/tmp/first")
+    (agent-repl--ws-put "second" :project-dir "/tmp/second")
+    (let ((persp-names-cache '("first" "second"))
+          (agent-repl--tabline-space-toggle nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "second"))
+                ((symbol-function 'frame-width) (lambda () 80))
+                ((symbol-function 'agent-repl-roster-drawn-tab-order) (lambda () nil)))
+        ;; Act
+        (let* ((formatted (agent-repl-workspace-tabline-formatted))
+               (items (agent-repl-workspace-tabline-items)))
+          ;; Assert
+          (should (equal (substring-no-properties formatted)
+                         (mapconcat (lambda (item) (substring-no-properties (nth 2 item)))
+                                    items "")))
+          (should (equal '("[1] first" "[2] second")
+                         (delq nil
+                               (mapcar (lambda (item)
+                                         (unless (eq #'ignore (nth 3 item))
+                                           (string-trim
+                                            (substring-no-properties (nth 2 item)))))
+                                       items)))))))))
+
 ;;;; ---- Tests: current-workspace-name-segment (extracted from the personal config) ----
 
 (ert-deftest agent-repl-test-current-workspace-name-segment-is-invisible ()
@@ -3420,6 +3573,7 @@ called and verifies the advice runs cleanly."
   "Installation pins `default-frame-alist' even with no current GUI frame."
   (let ((auto-resize-tab-bars t)
         (tab-bar-auto-width t)
+        (tab-bar-format nil)
         (default-frame-alist nil)
         (frame-inhibit-implied-resize t))
     (cl-letf (((symbol-function 'frame-list) (lambda () nil))
@@ -3433,6 +3587,7 @@ called and verifies the advice runs cleanly."
       (agent-repl--install-fixed-height-tab-bar)
       (should-not auto-resize-tab-bars)
       (should-not tab-bar-auto-width)
+      (should (eq 'agent-repl-workspace-tabline-items (car tab-bar-format)))
       (should (= (alist-get 'tab-bar-lines default-frame-alist)
                  agent-repl--tabline-row-count))
       (should (eq t (alist-get 'tab-bar-lines-keep-state
