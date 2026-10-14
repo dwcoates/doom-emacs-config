@@ -11,6 +11,7 @@ import (
 	"agent-repld/internal/prompts"
 	"agent-repld/internal/runecap"
 	"agent-repld/internal/standdown"
+	"agent-repld/internal/textline"
 )
 
 // opSummary is the operation the turn summary's records carry.
@@ -138,7 +139,7 @@ func (s Summarizer) summarize(ctx context.Context, ws ids.WorkspaceID, answer st
 		})
 		return "", cause
 	}
-	summary := firstLine(resp.Text)
+	summary := textline.FirstNonBlank(resp.Text)
 	if summary == "" {
 		log.Error(opSummary, "the turn-summary model call answered empty", dlog.Context{"model": SummaryModel})
 		return "", "the model answered empty"
@@ -147,15 +148,4 @@ func (s Summarizer) summarize(ctx context.Context, ws ids.WorkspaceID, answer st
 		"model": SummaryModel, "duration_ms": resp.Duration.Milliseconds(),
 	})
 	return summary, ""
-}
-
-// firstLine keeps the first non-blank line of text, trimmed: the banner body
-// is one sentence.
-func firstLine(text string) string {
-	for _, line := range strings.Split(text, "\n") {
-		if line = strings.TrimSpace(line); line != "" {
-			return line
-		}
-	}
-	return ""
 }

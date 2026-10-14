@@ -476,29 +476,6 @@ func TestATaskActTheChecklistCannotHoldRaisesNothing(t *testing.T) {
 	}
 }
 
-func TestFirstLineIsTheFirstNonBlankLine(t *testing.T) {
-	tests := []struct {
-		name string
-		text string
-		want string
-	}{
-		{name: "one line", text: "hello", want: "hello"},
-		{name: "leading blank lines", text: "\n \n  hello  \nworld", want: "hello"},
-		{name: "nothing but blanks", text: " \n\t\n", want: ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange, Act
-			got := firstLine(tt.text)
-
-			// Assert
-			if got != tt.want {
-				t.Fatalf("firstLine(%q) = %q, want %q", tt.text, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestTransientKindNamesAnUnsetKind(t *testing.T) {
 	// Arrange, Act
 	got := transientKind(&frontendv1.FooterActivityTransient{})
