@@ -977,8 +977,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 
 	ownership = workspace.NewOwnership(rolloutController)
 	// THE GATE GOVERNOR admits the merge queue's speculative test gates by the
-	// host's load; its sampling loop is a background loop below. A harness
-	// pins the load it reads (cpugov.FixedHostLoadEnv).
+	// host's power source and load; its sampling loop is a background loop
+	// below. A harness pins the load it reads (cpugov.FixedHostLoadEnv); the
+	// power source is always the host's own.
 	fixedLoad := os.Getenv(cpugov.FixedHostLoadEnv)
 	hostSampler, err := cpugov.HostSampler(fixedLoad)
 	if err != nil {
@@ -990,7 +991,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		p.Surfaces.Global().Info("daemon.boot.gate_governor", "the gate governor reads a fixed host load, not the host's own", dlog.Context{
 			"env": cpugov.FixedHostLoadEnv, "value": fixedLoad})
 	}
-	gateGovernor, err := cpugov.New(cpugov.DefaultConfig(), hostSampler, time.Now, p.Surfaces.Global())
+	gateGovernor, err := cpugov.New(cpugov.DefaultConfig(), hostSampler, &cpugov.Host{}, time.Now, p.Surfaces.Global())
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the gate governor: %w", err)
 	}

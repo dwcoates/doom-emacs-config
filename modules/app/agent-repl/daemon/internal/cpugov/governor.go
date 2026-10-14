@@ -29,6 +29,13 @@
 // seeded with 2.2: the measured 147% average scaled by the third summed
 // per-process %cpu was found to undercount.
 //
+// ON AC POWER THE BAND IS LIFTED (owner ruling, 2026-10-13). The merge behind
+// the head races it to land (merge's race.go), so on a host that is not on
+// battery a speculative gate is admitted at once, bounded only by MaxGates;
+// on battery, and while the power source is unread, the band decides. The
+// power source is read with every sample, and a failure to read it is said
+// once per distinct cause, at ERROR.
+//
 // PRIORITY IS HEAD-FIRST. A gate of the merge at its queue's head is never
 // governed: it is granted at once and only counted. Waiting speculative gates
 // are considered closest-to-head first, and a gate is never admitted while one
@@ -96,6 +103,35 @@ type Sampler interface {
 	Ticks() (Ticks, error)
 }
 
+// Power is the source the host runs on.
+type Power int
+
+const (
+	// PowerUnknown is a power source not yet read, or unreadable: the band
+	// decides.
+	PowerUnknown Power = iota
+	// PowerAC is a host on external power: speculative gates run at once.
+	PowerAC
+	// PowerBattery is a host on its battery: the band decides.
+	PowerBattery
+)
+
+func (p Power) String() string {
+	switch p {
+	case PowerAC:
+		return "ac"
+	case PowerBattery:
+		return "battery"
+	default:
+		return "unknown"
+	}
+}
+
+// PowerSource reads the source the host runs on.
+type PowerSource interface {
+	Power() (Power, error)
+}
+
 // Request is one gate asking to run.
 type Request struct {
 	Workspace ids.WorkspaceID
@@ -148,6 +184,7 @@ type waiter struct {
 type Governor struct {
 	cfg     Config
 	sampler Sampler
+	source  PowerSource
 	now     func() time.Time
 	log     dlog.Logger
 
@@ -155,6 +192,10 @@ type Governor struct {
 	sample    Sample
 	sampled   bool
 	sampleErr string
+	// power is the source the host last read as running on, and powerErr
+	// the standing cause it could not be read.
+	power    Power
+	powerErr string
 	// last is the previous tick reading and when it was taken; primed says
 	// one stands.
 	last     Ticks
@@ -167,15 +208,15 @@ type Governor struct {
 }
 
 // New builds a governor. Every collaborator is required.
-func New(cfg Config, sampler Sampler, now func() time.Time, log dlog.Logger) (*Governor, error) {
-	if sampler == nil || now == nil || log == nil {
-		return nil, errors.New("cpugov: a sampler, a clock and a logger are required")
+func New(cfg Config, sampler Sampler, source PowerSource, now func() time.Time, log dlog.Logger) (*Governor, error) {
+	if sampler == nil || source == nil || now == nil || log == nil {
+		return nil, errors.New("cpugov: a sampler, a power source, a clock and a logger are required")
 	}
 	if !(cfg.Low > 0 && cfg.Low < cfg.High && cfg.High <= 1) || cfg.MeanCores <= 0 ||
 		cfg.LearnRate <= 0 || cfg.LearnRate > 1 || cfg.Tau <= 0 || cfg.MaxGates < 1 {
 		return nil, fmt.Errorf("cpugov: the configuration %+v is not a band and a cost model", cfg)
 	}
-	return &Governor{cfg: cfg, sampler: sampler, now: now, log: log, mean: cfg.MeanCores, active: map[*Permit]struct{}{}}, nil
+	return &Governor{cfg: cfg, sampler: sampler, source: source, now: now, log: log, mean: cfg.MeanCores, active: map[*Permit]struct{}{}}, nil
 }
 
 // Run samples the host every SampleEvery until ctx ends, re-deciding the
@@ -195,13 +236,52 @@ func (g *Governor) Run(ctx context.Context) {
 	}
 }
 
-// observe reads the host's ticks, folds the interval since the last reading
-// into the smoothed load, and re-decides the waiting gates.
+// observe reads the host's ticks and power source, folds the interval since
+// the last reading into the smoothed load, and re-decides the waiting gates.
 func (g *Governor) observe() {
 	t, err := g.sampler.Ticks()
+	power, powerErr := g.source.Power()
 	now := g.now()
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	g.notePowerLocked(power, powerErr)
+	g.foldLocked(t, err, now)
+	g.decideLocked()
+}
+
+// notePowerLocked records the source the host runs on. An unreadable source
+// leaves the band deciding, said once per distinct cause at ERROR; a change of
+// source is said at INFO.
+func (g *Governor) notePowerLocked(power Power, err error) {
+	if err != nil {
+		if err.Error() != g.powerErr {
+			g.powerErr = err.Error()
+			g.log.Error("daemon.cpugov.power", "could not read the host's power source; speculative gates stay under the load band until it reads", dlog.Context{
+				"error": err.Error(), "was": g.power.String()})
+		}
+		g.power = PowerUnknown
+		return
+	}
+	g.powerErr = ""
+	if power == g.power {
+		return
+	}
+	g.log.Info("daemon.cpugov.power", "the host's power source changed", dlog.Context{
+		"was": g.power.String(), "power": power.String(), "band_lifted": power == PowerAC})
+	g.power = power
+}
+
+// ObservePower installs the power source and re-decides the waiting gates:
+// the sampling loop's step, driven directly by a caller that reads it itself.
+func (g *Governor) ObservePower(power Power) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.notePowerLocked(power, nil)
+	g.decideLocked()
+}
+
+// foldLocked folds one tick reading into the smoothed load.
+func (g *Governor) foldLocked(t Ticks, err error, now time.Time) {
 	if err == nil && t.CPUs <= 0 {
 		err = fmt.Errorf("cpugov: the host reports %d processors", t.CPUs)
 	}
@@ -209,13 +289,13 @@ func (g *Governor) observe() {
 		err = fmt.Errorf("cpugov: the host's processor ticks went backwards (busy %d->%d, total %d->%d)", g.last.Busy, t.Busy, g.last.Total, t.Total)
 	}
 	if err != nil {
-		// NO SAMPLE, NO ADMISSION. A speculative gate admitted blind could
-		// push the host past the ceiling; the head's gate is never governed,
-		// so the queue still moves. The failure is said once per distinct
-		// cause, at ERROR.
+		// NO SAMPLE, NO ADMISSION BY THE BAND. A speculative gate the band
+		// admitted blind could push the host past the ceiling; the head's gate
+		// is never governed, and on AC power the band is lifted, so the queue
+		// still moves. The failure is said once per distinct cause, at ERROR.
 		if err.Error() != g.sampleErr {
 			g.sampleErr = err.Error()
-			g.log.Error("daemon.cpugov.sample", "could not read the host's load; no speculative gate is admitted until it reads", dlog.Context{"error": err.Error()})
+			g.log.Error("daemon.cpugov.sample", "could not read the host's load; the band admits no speculative gate until it reads", dlog.Context{"error": err.Error()})
 		}
 		g.sampled, g.primed = false, false
 		return
@@ -237,7 +317,6 @@ func (g *Governor) observe() {
 	g.sample = Sample{Utilization: g.sample.Utilization + weight*(interval-g.sample.Utilization), CPUs: t.CPUs}
 	g.sampled = true
 	g.last, g.lastAt = t, now
-	g.decideLocked()
 }
 
 // Observe installs one sample and re-decides the waiting gates: the sampling
@@ -377,16 +456,20 @@ func (g *Governor) projectLocked() projection {
 func (g *Governor) decideLocked() {
 	for len(g.waiting) > 0 {
 		w := g.waiting[0]
-		reason := ""
+		reason, admitted := "", "below_band"
 		var pr projection
+		if g.sampled {
+			pr = g.projectLocked()
+		}
 		switch {
+		case len(g.active) >= g.cfg.MaxGates:
+			reason = "gate_limit"
+		case g.power == PowerAC:
+			admitted = "on_ac_power"
 		case !g.sampled:
 			reason = "no_sample"
 		default:
-			pr = g.projectLocked()
 			switch {
-			case len(g.active) >= g.cfg.MaxGates:
-				reason = "gate_limit"
 			case pr.settled >= g.cfg.Low:
 				reason = "load_in_or_above_band"
 			case pr.projected > g.cfg.High:
@@ -405,7 +488,7 @@ func (g *Governor) decideLocked() {
 		}
 		g.waiting = g.waiting[1:]
 		w.permit = g.grantLocked(w.req)
-		g.log.Info("daemon.cpugov.admit", "admitted a speculative gate", g.fieldsLocked(w.req, "admit", "below_band", pr))
+		g.log.Info("daemon.cpugov.admit", "admitted a speculative gate", g.fieldsLocked(w.req, "admit", admitted, pr))
 		close(w.ready)
 	}
 }
@@ -415,6 +498,6 @@ func (g *Governor) fieldsLocked(req Request, decision, reason string, pr project
 		"workspace": string(req.Workspace), "repo": req.Repo, "rank": req.Rank, "decision": decision, "reason": reason,
 		"utilization": pr.utilization, "background": pr.background, "settled": pr.settled, "projected": pr.projected,
 		"band_low": g.cfg.Low, "band_high": g.cfg.High, "mean_cores": g.mean,
-		"active": len(g.active), "waiting": len(g.waiting), "cpus": g.sample.CPUs,
+		"active": len(g.active), "waiting": len(g.waiting), "cpus": g.sample.CPUs, "power": g.power.String(),
 	}
 }

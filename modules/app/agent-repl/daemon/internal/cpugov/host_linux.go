@@ -22,3 +22,8 @@ func (*Host) Ticks() (Ticks, error) {
 	}
 	return Ticks{Busy: busy, Total: total, CPUs: runtime.NumCPU()}, nil
 }
+
+// Power reads the source the host runs on from /sys/class/power_supply.
+func (*Host) Power() (Power, error) {
+	return powerFromSysfs("/sys/class/power_supply")
+}
