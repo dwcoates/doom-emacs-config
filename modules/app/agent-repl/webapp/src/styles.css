@@ -1130,7 +1130,7 @@ html.webhost-sidebar #ws-sidebar[hidden] {
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
-  animation: ws-revive-shimmer 2.4s ease-in-out infinite;
+  animation: ws-revive-shimmer var(--ws-revive-cycle) ease-in-out infinite;
 }
 @keyframes ws-revive-shimmer {
   from { background-position-x: 100%; }
@@ -5877,10 +5877,10 @@ ar-button.outcome-marker-pill {
    puts `breathes` on the row's name, and no status mark animates at all. A
    name that is also reviving runs both loops, since the shimmer moves the
    background and the breath the opacity. */
-#ws-sidebar { --ws-mark-cycle: 2s; }
+#ws-sidebar { --ws-mark-cycle: 2s; --ws-revive-cycle: 2.4s; }
 #ws-sidebar .row .name.breathes { animation: ws-pulse var(--ws-mark-cycle) ease-in-out infinite; }
 #ws-sidebar .row .name.breathes.reviving {
-  animation: ws-revive-shimmer 2.4s ease-in-out infinite, ws-pulse var(--ws-mark-cycle) ease-in-out infinite;
+  animation: ws-revive-shimmer var(--ws-revive-cycle) ease-in-out infinite, ws-pulse var(--ws-mark-cycle) ease-in-out infinite;
 }
 
 /* THE ATTENTION MARKER, on the ONE cadence frontend.v1.RosterRowAttention
