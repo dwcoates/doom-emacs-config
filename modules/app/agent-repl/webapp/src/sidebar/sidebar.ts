@@ -19,7 +19,6 @@
  * preferences it once stored in `localStorage` starts from the daemon's view
  * instead, says so once at INFO, and drops what it stored.
  */
-import { pagePresence, warmthCondition } from "../presence.js";
 import { createControl, type Control } from "../control.js";
 import { WatchWorkspaceRosterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_roster_pb";
 import { createDrawnStatusLog } from "../drawn-status.js";
@@ -242,11 +241,6 @@ function mountSidebarIn(
     name: "WatchWorkspaceRoster",
     schema: WatchWorkspaceRosterResponseSchema,
     open: (_client, signal) => ctx.streams.watch("roster", {}, signal),
-    // A COLD PAGE'S SIDEBAR STANDS DOWN (host.ts, WARM_RECENT): no one sees it,
-    // and a whole roster redrawn on every push in every page of the host is
-    // what held the startup's pages back. It reopens on a fresh snapshot. The
-    // webhost's sidebar always stands.
-    standsWhile: placement.case === "page" ? warmthCondition(pagePresence()) : undefined,
     plannedEnding: (response) => response.push.case === "ending",
     // A run that ended forgets what `current` was: the next run's first push
     // is a baseline, so a reconnect restating it is never taken for a switch.

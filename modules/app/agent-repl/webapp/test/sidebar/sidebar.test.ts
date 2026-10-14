@@ -1049,7 +1049,6 @@ describe("mounting the webhost's sidebar", () => {
   afterEach(() => {
     // The page's own presence is shared by every test in the file: put it back.
     pagePresence().setShown(true);
-    pagePresence().setWarm(true);
   });
 
   it("draws every push: there is no page of its own to be unseen", async () => {
@@ -1090,24 +1089,6 @@ describe("mounting the webhost's sidebar", () => {
 
     // Assert
     expect([revealed, host.hidden]).toEqual([1, false]);
-  });
-
-  it("stands whatever the page's warmth: the webhost is on screen whenever any page is", async () => {
-    // Arrange
-    pagePresence().setShown(false);
-    pagePresence().setWarm(false);
-    const host = document.createElement("nav");
-
-    // Act
-    mountWebhostSidebar(
-      host,
-      ctxFor([roster({ repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-1" })] })] })]),
-      { storage: null, timers: fakeTimers() },
-    );
-    await settle();
-
-    // Assert
-    expect(host.querySelector("[data-roster-row='ws-1']")).not.toBeNull();
   });
 });
 

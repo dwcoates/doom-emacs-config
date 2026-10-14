@@ -65,14 +65,7 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
             context: { shown: message.shown, visibility: doc.visibilityState },
           });
         }
-        if (message.warm !== presence.warm() && !message.shown) {
-          log.info(message.warm ? "the host warmed this page" : "the host cooled this page", {
-            operation: "page.host-warmth",
-            context: { warm: message.warm },
-          });
-        }
         presence.setShown(message.shown);
-        presence.setWarm(message.warm);
         return;
       case "inputBackground":
         root.setProperty(DOCK_BACKGROUND_PROPERTY, message.background);

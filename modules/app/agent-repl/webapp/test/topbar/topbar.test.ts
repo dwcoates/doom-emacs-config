@@ -8,6 +8,7 @@ import { MalformedView } from "../../src/rpc/malformed.js";
 import STYLESHEET from "../../src/styles.css?raw";
 import { drawTopbarView, mountTopbar } from "../../src/topbar/topbar.js";
 import { createLocalFailures, type LocalFailures } from "../../src/failure/local.js";
+import { pagePresence } from "../../src/presence.js";
 import type { AppContext } from "../../src/rpc/context.js";
 import { clearClientFailures } from "../../src/rpc/link.js";
 import {
@@ -262,6 +263,24 @@ describe("mountTopbar", () => {
     // ASSERT
     expect(host.querySelector(".topbar-title")?.textContent).toBe("ABC/fix");
     handle.dispose();
+  });
+
+  it("draws every push while the webhost hides its page, so a switch to it shows the current strip", async () => {
+    // ARRANGE
+    const host = document.createElement("div");
+    document.body.replaceChildren(host);
+    pagePresence().setShown(false);
+    const second = view({ title: create(TopbarViewSchema, { title: { text: "other" } }).title });
+    try {
+      // ACT
+      const handle = mountWatching(host, daemon([view(), second]));
+      await settle();
+      // ASSERT
+      expect(host.querySelector(".topbar-title")?.textContent).toBe("other");
+      handle.dispose();
+    } finally {
+      pagePresence().setShown(true);
+    }
   });
 
   it("replaces the strip whole on the next push", async () => {
