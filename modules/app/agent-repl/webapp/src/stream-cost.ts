@@ -40,8 +40,8 @@ export interface StreamCostEnv {
   readonly every: (fn: () => void, ms: number) => () => void;
   /** The element count of each component's region, and of the whole page. */
   readonly nodes: () => Record<string, number>;
-  /** Whether the webhost shows the page, and whether it is warm. */
-  readonly presence: () => { shown: boolean; warm: boolean };
+  /** Whether the webhost shows the page. */
+  readonly presence: () => { shown: boolean };
 }
 
 /** The meter `watchStream` records into. */
