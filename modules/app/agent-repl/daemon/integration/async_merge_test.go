@@ -68,10 +68,7 @@ func TestAnAsyncMergeLandsWithItsBubblePlacedInTheRequestersFeed(t *testing.T) {
 
 	// Act.
 	s.mergeAs(t, harness.Async("async-fix", "agent-fix"))
-	merge := awaitRow(t, s.f, root, "the async merge's terminal", func(row *frontendv1.FeedRow) bool {
-		m := row.GetActivity().GetMerge()
-		return m.GetSuccess() != nil || m.GetError() != nil
-	})
+	merge := awaitRow(t, s.f, root, "the async merge's terminal", isMergeTerminal)
 	s.d.AwaitLandingDeployed()
 
 	// Assert: landed, drawn placed in the requester's feed, and the merge
@@ -180,10 +177,7 @@ func TestAnAsyncInstructionStreamsItsAgentIntoTheResolvingTabAndThenLands(t *tes
 	s.f.awaitRowInFeed(head.GetId(), "the resolving tab, settled succeeded", func(row *frontendv1.FeedRow) bool {
 		return row.GetMergeTab().GetResolving().GetSettled().GetSucceeded() != nil
 	})
-	merge := awaitRow(t, s.f, root, "the async merge's terminal", func(row *frontendv1.FeedRow) bool {
-		m := row.GetActivity().GetMerge()
-		return m.GetSuccess() != nil || m.GetError() != nil
-	})
+	merge := awaitRow(t, s.f, root, "the async merge's terminal", isMergeTerminal)
 	s.d.AwaitLandingDeployed()
 	if merge.GetActivity().GetMerge().GetSuccess() == nil {
 		t.Fatalf("the picked merge ended %v, want landed", merge.GetActivity().GetMerge().GetResult())
