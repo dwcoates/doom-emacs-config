@@ -684,6 +684,23 @@ last-selected instants and HISTORY as this session's switches."
     (should (equal (agent-repl-roster-selection-recency-order '("a" "b"))
                    '("b" "a")))))
 
+(ert-deftest agent-repl-test-roster-instant-ms-reads-the-named-field ()
+  "The instant reader answers the `:at-ms' of the row field it is named."
+  (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws)
+             (lambda (_ws) '(:last-selected (:at-ms 7) :other (:at-ms 9)))))
+    (should (equal (agent-repl-roster--instant-ms "a" :other) 9))))
+
+(ert-deftest agent-repl-test-roster-instant-ms-is-nil-for-an-absent-field ()
+  "A row without the field has no instant to read."
+  (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws)
+             (lambda (_ws) '(:last-selected nil))))
+    (should-not (agent-repl-roster--instant-ms "a" :last-selected))))
+
+(ert-deftest agent-repl-test-roster-instant-ms-is-nil-without-a-row ()
+  "A workspace the roster has no row for has no instant."
+  (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws) (lambda (_ws) nil)))
+    (should-not (agent-repl-roster--instant-ms "a" :last-selected))))
+
 (ert-deftest agent-repl-test-roster-last-selected-ms-reads-the-row ()
   "The durable instant is the row's `last_selected'."
   (agent-repl-test-roster--with-editor

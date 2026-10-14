@@ -799,7 +799,15 @@ The one shape every `agent-repl-roster-*-for-ws' reader shares."
 Read from WS's roster row (`RosterRowLastSelected'), which the daemon
 fills from its own record, so it survives an Emacs restart.  nil when the
 roster has no row for WS or the user never selected it."
-  (plist-get (plist-get (agent-repl-roster-row-for-ws ws) :last-selected) :at-ms))
+  (agent-repl-roster--instant-ms ws :last-selected))
+
+(defun agent-repl-roster--instant-ms (ws field)
+  "Return the epoch ms of WS's roster-row instant FIELD, or nil.
+FIELD is the row key of one of the durable instants, each decoded to
+`(:at-ms MS)\=' by the one instant decoder.  nil when the roster has no
+row for WS or the row does not carry FIELD.  The one reader every
+durable-instant accessor goes through."
+  (plist-get (plist-get (agent-repl-roster-row-for-ws ws) field) :at-ms))
 
 (defun agent-repl-roster-selection-recency-order (names)
   "Return NAMES ordered most recently selected first.
