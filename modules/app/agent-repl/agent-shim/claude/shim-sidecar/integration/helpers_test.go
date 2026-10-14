@@ -1504,6 +1504,11 @@ type fakeStore struct {
 	// rejections holds every batch the fake refused on its OWN validation, so a
 	// subject can state what the store objected to.
 	rejections []string
+	// contestedKeys are upsert keys another producer's row already holds under
+	// a different identity (ContestUpsertKey): every batch carrying one is
+	// refused invalid_request, as the store refuses an upsert that would change
+	// a row's identity.
+	contestedKeys map[string]bool
 	// gate, when armed, WITHHOLDS the response to the first batch that matches
 	// it. See writeGate.
 	gate *writeGate
@@ -1727,6 +1732,33 @@ func (f *fakeStore) FailWritesInvalid(n int, field, detail string) {
 	f.writeKindless = false
 }
 
+// ContestUpsertKey makes every batch carrying key answer the invalid_request
+// arm the store gives an upsert that would change a row's identity (shim-store
+// SiteUpsertChangesIdentity, field entries[i].agent_update): another
+// producer's row already holds the key as a different kind of thing, so no
+// retry can ever succeed. The store's own suite tests that refusal
+// (internal/db/identity_test.go); this scripts it by key, so whichever batch
+// carries the key is the one refused.
+func (f *fakeStore) ContestUpsertKey(key string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.contestedKeys == nil {
+		f.contestedKeys = map[string]bool{}
+	}
+	f.contestedKeys[key] = true
+}
+
+// contestedEntry answers the index of the first entry of req whose key is
+// contested, or -1. Called under f.mu.
+func (f *fakeStore) contestedEntry(req *storev1.WriteBatchRequest) int {
+	for i, e := range req.GetBatch().GetEntries() {
+		if f.contestedKeys[e.GetUpsertKey()] {
+			return i
+		}
+	}
+	return -1
+}
+
 // FailWritesWithoutAKind makes the next n WriteBatch calls answer a failure
 // carrying NEITHER arm — a shape this contract forbids, scripted so the
 // sidecar's handling of a store that violates it has a subject.
@@ -1882,6 +1914,20 @@ func (f *fakeStore) WriteBatch(_ context.Context, req *connect.Request[storev1.W
 	if fail {
 		return connect.NewResponse(&storev1.WriteBatchResponse{
 			Result: &storev1.WriteBatchResponse_Failure{Failure: f.scriptedFailure(detail)},
+		}), nil
+	}
+	f.mu.Lock()
+	contested := f.contestedEntry(req.Msg)
+	f.mu.Unlock()
+	if contested >= 0 {
+		key := req.Msg.GetBatch().GetEntries()[contested].GetUpsertKey()
+		return connect.NewResponse(&storev1.WriteBatchResponse{
+			Result: &storev1.WriteBatchResponse_Failure{Failure: &storev1.WriteBatchFailure{
+				Detail: fmt.Sprintf("entries[%d] (upsert_key=%q) would change the row's kind — an upsert supersedes a row's content, never its identity", contested, key),
+				Kind: &storev1.WriteBatchFailure_InvalidRequest{InvalidRequest: &storev1.WriteBatchInvalidRequest{
+					Field: fmt.Sprintf("entries[%d].agent_update", contested),
+				}},
+			}},
 		}), nil
 	}
 	f.mu.Lock()
