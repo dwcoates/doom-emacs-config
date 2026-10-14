@@ -10,6 +10,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/drain"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
@@ -396,25 +397,38 @@ func (f *statusChangedForwarder) StatusChanged(ws ids.WorkspaceID) {
 	roster.FooterStatusChanged(ws)
 }
 
-// mergeMoverForwarder carries a handover's merge moves to the merge
-// orchestrator, which is built after the rollout controller (it is told of a
-// landing through it). Nothing transfers or adopts before the graph is whole;
-// a move asked of an unbound forwarder is a wiring defect, answered as the
-// error it is rather than as a move that happened.
-type mergeMoverForwarder struct {
-	mu     sync.RWMutex
-	target rollout.MergeMover
+// mergeTarget is what the merge forwarder hands on to: the orchestrator's
+// handover moves and its drain.
+type mergeTarget interface {
+	rollout.MergeMover
+	drain.MergeSuspension
 }
 
-var _ rollout.MergeMover = (*mergeMoverForwarder)(nil)
+// mergeForwarder carries a handover's merge moves and the immediate
+// shutdown's merge drain to the merge orchestrator, which is built after the
+// rollout controller (it is told of a landing through it) and after the drain
+// controller. Nothing transfers or adopts before the graph is whole; a move
+// asked of an unbound forwarder is a wiring defect, answered as the error it
+// is rather than as a move that happened. A drain asked of an unbound
+// forwarder is the same defect, and the drain has no error to answer it with,
+// so it panics.
+type mergeForwarder struct {
+	mu     sync.RWMutex
+	target mergeTarget
+}
 
-func (f *mergeMoverForwarder) bind(target rollout.MergeMover) {
+var (
+	_ rollout.MergeMover    = (*mergeForwarder)(nil)
+	_ drain.MergeSuspension = (*mergeForwarder)(nil)
+)
+
+func (f *mergeForwarder) bind(target mergeTarget) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.target = target
 }
 
-func (f *mergeMoverForwarder) mover() (rollout.MergeMover, error) {
+func (f *mergeForwarder) mover() (mergeTarget, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	if f.target == nil {
@@ -423,7 +437,7 @@ func (f *mergeMoverForwarder) mover() (rollout.MergeMover, error) {
 	return f.target, nil
 }
 
-func (f *mergeMoverForwarder) SuspendForTransfer(ctx context.Context, ws ids.WorkspaceID) error {
+func (f *mergeForwarder) SuspendForTransfer(ctx context.Context, ws ids.WorkspaceID) error {
 	m, err := f.mover()
 	if err != nil {
 		return err
@@ -431,7 +445,7 @@ func (f *mergeMoverForwarder) SuspendForTransfer(ctx context.Context, ws ids.Wor
 	return m.SuspendForTransfer(ctx, ws)
 }
 
-func (f *mergeMoverForwarder) AdoptWorkspace(ctx context.Context, ws ids.WorkspaceID) error {
+func (f *mergeForwarder) AdoptWorkspace(ctx context.Context, ws ids.WorkspaceID) error {
 	m, err := f.mover()
 	if err != nil {
 		return err
@@ -439,7 +453,16 @@ func (f *mergeMoverForwarder) AdoptWorkspace(ctx context.Context, ws ids.Workspa
 	return m.AdoptWorkspace(ctx, ws)
 }
 
-// errMergeMoverUnbound is a merge move asked before the orchestrator exists.
+func (f *mergeForwarder) Drain(ctx context.Context) {
+	m, err := f.mover()
+	if err != nil {
+		panic(err)
+	}
+	m.Drain(ctx)
+}
+
+// errMergeMoverUnbound is a merge move or drain asked before the orchestrator
+// exists.
 var errMergeMoverUnbound = errors.New("agent-repld: the merge orchestrator is not bound; a workspace's merges cannot be moved")
 
 // detachedForwarder carries the detached-merge service to the merge

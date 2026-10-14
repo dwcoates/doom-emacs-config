@@ -1885,12 +1885,20 @@ or simply not started yet — states that IN ITS OWN SLOT:
 publication; they fill in as they arrive. Gating on one is what left the strip
 BLANK for as long as a session-less state stood.
 
-**The title is the workspace SUMMARY when the vendor has one.** The vendor
-writes an `ai-title` line into the session transcript; the shim reads it
-(`convert/session-title.ts`, `engine/title.ts`) and states it as
-`conversation.v1 SessionUpdate.title`, and the resolver composes
-`TopbarTitle.text` from it in preference to the workspace name. The branch
-suffix is a different fact and its rule is unchanged.
+**The title is the workspace SUMMARY the daemon distills from the user's
+prompts** (owner ruling, 2026-10-14). `daemon/internal/titlesynth` asks the
+shim for every prompt the user sent since the last `/clear` (a `/compact` cuts
+none of them; `shim.v1 GatherTitleDigest`), strips agent-repl's injected meta
+spans, and has headless Haiku distill them into ONE imperative sentence stating
+the workspace's task (`prompts/synthesized-title-from-digest.md`). It runs at
+the first prompt, whether the workspace's preliminary prompt or one the user
+typed, and again every `titlesynth.SynthesizeEvery` (5) prompts after it. The
+resolver composes `TopbarTitle.text` from that summary first; the vendor's own
+`ai-title` (the shim reads it in `convert/session-title.ts` and
+`engine/title.ts` and states it as `conversation.v1 SessionUpdate.title`)
+stands in only until the first distillation lands, and the workspace name only
+when neither exists. The branch suffix is a different fact and its rule is
+unchanged.
 
 ## A merge bubble never collapses automatically, save a success
 

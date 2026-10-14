@@ -152,9 +152,9 @@ type Resolver interface {
 	SetWorkspaceDir(ws ids.WorkspaceID, dir string) error
 	// SetNaming installs the WSM-derived title and session line.
 	SetNaming(ws ids.WorkspaceID, naming Naming)
-	// SetSynthesizedTitle installs the daemon's OWN one-line conversation
-	// summary, shown in the title's MIDDLE precedence: below the vendor's
-	// ai-title, above the workspace name. An empty text retracts it. Its sole
+	// SetSynthesizedTitle installs the daemon's OWN one-sentence workspace
+	// summary, shown in the title's FIRST precedence: above the vendor's
+	// ai-title and the workspace name. An empty text retracts it. Its sole
 	// producer is the title synthesizer.
 	SetSynthesizedTitle(ws ids.WorkspaceID, title string)
 	// SetModelCatalog installs the switchable model set the selector renders,

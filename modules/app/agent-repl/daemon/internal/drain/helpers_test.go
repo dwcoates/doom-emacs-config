@@ -399,6 +399,44 @@ type fakeSpawns struct {
 	latchedAt int
 }
 
+// fakeMerges is the merge orchestrator's drain. It records each drain and how
+// many registered sessions had been stood down when it was asked for, which is
+// how its ORDER against the session walk is asserted without a clock.
+type fakeMerges struct {
+	mu      sync.Mutex
+	witness func() int
+	seen    []int
+	// cancelled records whether each drain's context was already done, so a
+	// test can assert the drain was detached from its caller's deadline.
+	cancelled []bool
+}
+
+// Drain implements MergeSuspension.
+func (m *fakeMerges) Drain(ctx context.Context) {
+	at := 0
+	if m.witness != nil {
+		at = m.witness()
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.seen = append(m.seen, at)
+	m.cancelled = append(m.cancelled, ctx.Err() != nil)
+}
+
+// Seen answers the witness reading of every drain, in order.
+func (m *fakeMerges) Seen() []int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]int(nil), m.seen...)
+}
+
+// Cancelled answers whether each drain's context was already done.
+func (m *fakeMerges) Cancelled() []bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]bool(nil), m.cancelled...)
+}
+
 func newFakeSpawns() *fakeSpawns {
 	return &fakeSpawns{calls: make(chan string, 16)}
 }
@@ -505,6 +543,7 @@ type harness struct {
 	reviving  *fakeReviving
 	stand     *fakeStand
 	spawns    *fakeSpawns
+	merges    *fakeMerges
 	log       *dlog.TestSurfaces
 	exits     chan struct{}
 }
@@ -530,6 +569,7 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 		reviving:  newFakeReviving(),
 		stand:     newFakeStand(),
 		spawns:    newFakeSpawns(),
+		merges:    &fakeMerges{},
 		log:       log,
 		exits:     make(chan struct{}, 4),
 	}
@@ -540,6 +580,7 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 		RefusalWindow: time.Minute,
 		Stand:         h.stand,
 		Spawns:        h.spawns,
+		Merges:        h.merges,
 		Freeness:      h.freeness,
 		Reviving:      h.reviving.Reviving,
 		Announcer:     h.announcer,
@@ -552,6 +593,7 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 		Log:    log,
 	}
 	h.spawns.witness = func() int { return len(h.stand.Killed()) }
+	h.merges.witness = func() int { return len(h.stand.Killed()) }
 	for _, a := range adjust {
 		a(&deps)
 	}
