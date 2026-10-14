@@ -15,6 +15,7 @@ const (
 	opFoldTaskSection     = "daemon.workspace.fold_task_section"
 	opFoldMergedSection   = "daemon.workspace.fold_merged_section"
 	opFoldHiddenSection   = "daemon.workspace.fold_hidden_section"
+	opFoldOpenSection     = "daemon.workspace.fold_open_section"
 	opFoldMaturitySection = "daemon.workspace.fold_maturity_section"
 	opShowGrouping        = "daemon.workspace.show_grouping"
 )
@@ -50,6 +51,13 @@ func (v *verbs) FoldMergedSection(ctx context.Context, folded bool) error {
 // refuse: the roster carries exactly one hidden section.
 func (v *verbs) FoldHiddenSection(ctx context.Context, folded bool) error {
 	return v.foldSingletonSection(ctx, opFoldHiddenSection, "hidden section", v.deps.DB.SetHiddenSectionFolded, folded)
+}
+
+// FoldOpenSection records whether the open-workspaces section is collapsed,
+// then republishes the roster to every page. There is nothing to refuse: the
+// roster carries exactly one open section.
+func (v *verbs) FoldOpenSection(ctx context.Context, folded bool) error {
+	return v.foldSingletonSection(ctx, opFoldOpenSection, "open section", v.deps.DB.SetOpenSectionFolded, folded)
 }
 
 // foldSingletonSection records the fold of a section the roster carries
