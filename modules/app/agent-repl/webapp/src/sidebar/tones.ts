@@ -77,7 +77,7 @@ export const ROSTER_ARM_CLASS: Readonly<Record<RosterStatusCase, string>> = Obje
  */
 export const GLYPH_IMAGES: Readonly<Record<string, string>> = Object.freeze({
   // EVERY MERGE ARM (owner ruling, 2026-10-13): three bars. Its ink says which
-  // arm, and `merging` breathes it.
+  // arm, and `merging` breathes the row's name.
   merge: mergePicture,
   // A GATE ON YOU (owner requests, 2026-10-11 and 2026-10-13): the picture
   // replaces the dot.
@@ -92,7 +92,10 @@ export const GLYPH_IMAGES: Readonly<Record<string, string>> = Object.freeze({
   none: "",
 });
 
-/** How a mark moves: the rail's one animation, or none. */
+/**
+ * How a row moves: the rail's one animation, or none. The mark itself never
+ * moves (owner request, 2026-10-14): row.ts puts the breath on the row's NAME.
+ */
 export type MarkMotion = "breathes" | "still";
 
 /** What a row draws for its status. */
@@ -153,8 +156,8 @@ export const NO_MARKERS: RowMarkers = Object.freeze({ oneShot: false, asyncMergi
  * A one-shot draws its glyph in place of the arm's own mark ONLY while it
  * works (`render-colors.json#one_shot_glyph_arms`, owner ruling 2026-10-13):
  * submitting, thinking or clearing, never compacting, a gate, a merge or any
- * other arm. The glyph breathes, as the work it stands for does, and the
- * row keeps the arm's tone.
+ * other arm. The row's name breathes, as the work it stands for does, and
+ * the row keeps the arm's tone.
  *
  * An ASYNC MERGE of the workspace's own branch draws the merge glyph in place
  * of the PLAIN dot -- the `dot` glyph with no ink of its own -- in the glyph,
@@ -190,10 +193,11 @@ export function glyphName(arm: RosterStatusCase): string {
 }
 
 /**
- * How the arm's mark MOVES. The rail has ONE animation, the breath, and it
+ * How the arm's row MOVES. The rail has ONE animation, the breath on the
+ * row's name (owner request, 2026-10-14: never on the mark), and it
  * makes ONE claim everywhere (owner ruling, 2026-10-13): something is in
  * progress. A turn in flight, its context cuts, detached work, a session
- * booting and a merge running breathe (and an async merge's glyph, through
+ * booting and a merge running breathe (and a row with an async merge, through
  * `rosterRowMark`). A gate (permission, question, cold
  * gate) and an interrupt landing wait on the user, so nothing is in progress
  * and they hold still, as everything else does.
