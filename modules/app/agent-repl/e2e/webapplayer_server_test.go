@@ -35,6 +35,11 @@ import (
 // layer-server.mjs).
 const wlResultPrefix = "WEBAPP-LAYER-RESULT "
 
+// wlProgressPrefix marks the driver's line for each finished test
+// (PROGRESS_PREFIX in layer-server.mjs). Each one restarts the run's
+// WebappLayerSilence: the bound is on the silence between finished tests.
+const wlProgressPrefix = "WEBAPP-LAYER-PROGRESS "
+
 // wlReadyPrefix marks the driver's one line once its warm-up has run
 // (READY_PREFIX in layer-server.mjs). No area is sent before it, so no area's
 // WebappLayerTimeout carries vitest's cold transform and collect.
@@ -88,7 +93,29 @@ type wlServer struct {
 	broken error
 	// tmp is the driver's own temp dir, removed once it has stopped.
 	tmp string
+	// silence is how long a run may go without finishing a test
+	// (WebappLayerSilence), and newTimer makes the timer that bounds it: a
+	// real one, or a unit test's own.
+	silence  time.Duration
+	newTimer func(time.Duration) wlTimer
 }
+
+// wlTimer is the silence bound's timer: what wlServer.Run needs of a
+// time.Timer.
+type wlTimer interface {
+	C() <-chan time.Time
+	Reset(time.Duration)
+	Stop()
+}
+
+// wlRealTimer is a time.Timer as a wlTimer.
+type wlRealTimer struct{ t *time.Timer }
+
+func (r wlRealTimer) C() <-chan time.Time   { return r.t.C }
+func (r wlRealTimer) Reset(d time.Duration) { r.t.Reset(d) }
+func (r wlRealTimer) Stop()                 { r.t.Stop() }
+
+func newWlRealTimer(d time.Duration) wlTimer { return wlRealTimer{time.NewTimer(d)} }
 
 var (
 	wlServerMu  sync.Mutex
@@ -135,7 +162,7 @@ func wlLayerServer(t *testing.T, npm, webappDir string) (*wlServer, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start the layer driver in %s: %w", webappDir, err)
 	}
-	s := &wlServer{cmd: cmd, stdin: stdin, lines: make(chan string, 4096), tmp: tmp}
+	s := &wlServer{cmd: cmd, stdin: stdin, lines: make(chan string, 4096), tmp: tmp, silence: WebappLayerSilence, newTimer: newWlRealTimer}
 	var streams sync.WaitGroup
 	pump := func(r io.Reader) {
 		defer streams.Done()
@@ -244,8 +271,9 @@ func (s *wlServer) Run(t *testing.T, file string, world wlWorld) error {
 		return s.broken
 	}
 	var tail []string
-	deadline := time.NewTimer(WebappLayerTimeout)
+	deadline := s.newTimer(s.silence)
 	defer deadline.Stop()
+	lastProgress, longestSilence, finished := started, time.Duration(0), 0
 	for {
 		select {
 		case line, ok := <-s.lines:
@@ -253,8 +281,15 @@ func (s *wlServer) Run(t *testing.T, file string, world wlWorld) error {
 				s.broken = fmt.Errorf("the layer driver exited during %s; last output:\n%s", file, strings.Join(tail, "\n"))
 				return s.broken
 			}
+			if strings.HasPrefix(line, wlProgressPrefix) {
+				finished++
+				longestSilence = max(longestSilence, time.Since(lastProgress))
+				lastProgress = time.Now()
+				deadline.Reset(s.silence)
+				continue
+			}
 			if rest, isAnswer := strings.CutPrefix(line, wlResultPrefix); isAnswer {
-				t.Logf("e2e/webapp-layer: %s run wall %s (bound %s)", file, time.Since(started).Round(time.Millisecond), WebappLayerTimeout)
+				t.Logf("e2e/webapp-layer: %s run wall %s, %d finished test(s), longest silence %s (bound %s)", file, time.Since(started).Round(time.Millisecond), finished, longestSilence.Round(time.Millisecond), s.silence)
 				var answer wlAnswer
 				if err := json.Unmarshal([]byte(rest), &answer); err != nil {
 					s.broken = fmt.Errorf("decode the answer for %s: %w (%q)", file, err, rest)
@@ -274,8 +309,8 @@ func (s *wlServer) Run(t *testing.T, file string, world wlWorld) error {
 			if len(tail) > wlTailLines {
 				tail = tail[len(tail)-wlTailLines:]
 			}
-		case <-deadline.C:
-			s.broken = errors.Join(fmt.Errorf("%s did not finish within %s; last output:\n%s", file, WebappLayerTimeout, strings.Join(tail, "\n")), s.killGroup())
+		case <-deadline.C():
+			s.broken = errors.Join(fmt.Errorf("%s finished no test for %s (%d finished before); last output:\n%s", file, s.silence, finished, strings.Join(tail, "\n")), s.killGroup())
 			return s.broken
 		}
 	}
