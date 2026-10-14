@@ -1828,7 +1828,8 @@ pending merge\='s reservation; BRANCH is what the name resolves to."
   (agent-repl-wire-decode-merge-workspace-unknown-one-shot-workspace json))
 
 (defun agent-repl-wire-decode-merge-workspace-error-branch-checked-out-in-requester (json)
-  "Decode MergeWorkspaceError's `branch_checked_out_in_requester' cause arm from JSON."
+  "Decode MergeWorkspaceError's `branch_checked_out_in_requester' cause arm.
+JSON is the arm's value."
   (agent-repl-wire-decode-merge-workspace-branch-checked-out-in-requester json))
 
 (defun agent-repl-wire-decode-merge-workspace-error-unknown-branch (json)
