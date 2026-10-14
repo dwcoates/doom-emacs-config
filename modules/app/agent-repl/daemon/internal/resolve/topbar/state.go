@@ -159,17 +159,17 @@ type wsState struct {
 	catalog []*conversationv1.ModelOption
 
 	// sessionTitle is the vendor's OWN summary of this conversation, as the
-	// session last stated it (conversation.v1 SessionUpdate.title). Empty
-	// until the vendor has written one, which is what makes the workspace name
-	// the fallback rather than a second title.
+	// session last stated it (conversation.v1 SessionUpdate.title). It is the
+	// MIDDLE precedence in title(): drawn only until the synthesizer's summary
+	// lands, and always in preference to the workspace name.
 	sessionTitle string
 
-	// synthesizedTitle is the daemon's OWN one-line summary of this
-	// conversation, produced by a cheap headless call over the title digest
-	// when the vendor has written no ai-title. It is the MIDDLE precedence in
-	// title(): the vendor's own summary always wins over it, and it always
-	// wins over the workspace name. Empty until the synthesizer has produced
-	// one; its sole writer is SetSynthesizedTitle.
+	// synthesizedTitle is the daemon's OWN one-sentence imperative summary of
+	// this workspace's task, distilled by a cheap headless call from every
+	// prompt the user sent since the last /clear. It is the FIRST precedence
+	// in title(), ahead of the vendor's ai-title and the workspace name. Empty
+	// until the synthesizer has produced one; its sole writer is
+	// SetSynthesizedTitle.
 	synthesizedTitle string
 
 	// permissionMode is the mode in force, as the session facts spell it.

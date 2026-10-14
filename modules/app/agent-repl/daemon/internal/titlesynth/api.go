@@ -1,35 +1,43 @@
-// Package titlesynth synthesizes a workspace's title when the vendor has
-// written no ai-title.
+// Package titlesynth synthesizes the workspace summary the topbar draws.
 //
-// THE VENDOR'S TITLE ALWAYS WINS. The topbar draws the vendor's own ai-title
-// summary in place of the workspace name whenever the vendor has stated one,
-// but many CLI versions never write one, so those workspaces fell back to the
-// bare directory name. This package fills that gap: it asks the shim for the
-// title DIGEST (the prompts since the last context boundary, plus the
-// compaction summary when the last boundary was a /compact), makes ONE cheap
-// headless model call to summarize it into a single short sentence, and installs
-// that as the topbar's SYNTHESIZED title — the middle precedence, below the
-// vendor's ai-title and above the workspace name.
+// THE SUMMARY DISTILLS EVERY PROMPT THE USER SENT (owner ruling, 2026-10-14).
+// It asks the shim for the title DIGEST (every prompt the user sent since the
+// last /clear, including the prompts before any /compact), makes ONE cheap
+// headless Haiku call to distill them into a single imperative sentence that
+// states the workspace's task, and installs that as the topbar's SYNTHESIZED
+// title. It is the first precedence: it wins over the vendor's own ai-title,
+// which is only drawn until the first distillation lands, and over the
+// workspace name.
 //
-// COST IS CONTROLLED BY A CADENCE AND A DIGEST HASH. Synthesis is considered at
-// session start and at the end of every turn, but a model call is made only
-// for the first title of a context (since the last /clear or /compact), and
-// after that once every SynthesizeEvery prompts (owner ruling, 2026-10-02:
-// "every 5 prompts, not every prompt"). A digest unchanged since the last
-// synthesis costs nothing either. A /clear or /compact resets both, so the
-// next trigger re-synthesizes, and the vendor stating a title stops synthesis
-// outright.
+// THE CADENCE IS THE FIRST PROMPT, THEN EVERY SynthesizeEvery PROMPTS (owner
+// ruling, 2026-10-14: "when the first prompt is made, whether it was made
+// automatically during workspace generation as the preliminary prompt, or by
+// the user explicitly, and then subsequently updated every 5 new prompts").
+// Synthesis is considered at session start, at every main-agent prompt row,
+// and at the end of every turn; a model call is made only for the first
+// summary of a context (since the last /clear), and after that once every
+// SynthesizeEvery prompts. A digest unchanged since the last synthesis costs
+// nothing either. A /clear resets both, so the next trigger re-synthesizes.
 //
-// THE MODEL SEES ONLY THE USER'S PROMPTS since the last /clear or /compact,
-// whole and untruncated, with no response (owner ruling, 2026-10-02), the most
-// recent RecentPrompts set apart so the sentence weighs them most. The
-// compaction summary leads only when fewer than RecentPrompts prompts followed
-// the compaction (TitleDigest).
+// WHY BOTH THE PROMPT ROW AND THE TURN END. The prompt row is the earliest
+// edge at which a prompt has been made, so the first summary appears while the
+// first turn is still running. But the row the daemon is served is the shim's
+// own stream-plane prompt, and the vendor writes the transcript record the
+// digest reads separately, so a digest gathered at the row may not hold that
+// prompt yet. By a turn's end the vendor has answered the prompt, which it
+// does only after recording it, so the turn-end trigger always reads the
+// prompt. The digest hash and the cadence make the second trigger free when
+// the first one already saw the prompt.
 //
-// BEST EFFORT, NEVER A FAULT. The synthesized title is an enhancement over the
-// workspace name; a shim that cannot answer, a guard that refuses the vendor
-// call, or a model that returns nothing all leave the name standing and are
-// recorded at INFO/DEBUG, never WARN — there is nothing for anyone to remediate.
+// THE MODEL SEES ONLY THE USER'S OWN WORDS: the prompts, whole and
+// untruncated, oldest first, with agent-repl's injected meta spans stripped
+// (they are the editor's decoration, not the user's request) and no response.
+//
+// BEST EFFORT, NEVER A FAULT. The summary is an enhancement over the workspace
+// name; a shim that cannot answer, a guard that refuses the vendor call, or a
+// model that returns nothing all leave the previous title standing and are
+// recorded at INFO/DEBUG, never WARN — there is nothing for anyone to
+// remediate.
 package titlesynth
 
 import (
@@ -108,10 +116,6 @@ const (
 	// SynthesizeEvery is the cadence: after a context's first title, the
 	// model is asked again only once this many more prompts have been made.
 	SynthesizeEvery = 5
-	// RecentPrompts is how many of the newest prompts the title digest sets
-	// apart as the ones to weigh most, and the count below which a
-	// compaction's summary leads the digest.
-	RecentPrompts = 10
 	// MaxPrompts caps how many of the most recent prompts ride the model
 	// prompt, so a long conversation's digest cannot grow the call without
 	// bound. The most recent prompts are the ones a title should reflect.

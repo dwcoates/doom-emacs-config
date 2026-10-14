@@ -577,22 +577,24 @@ type MergeSink interface {
 }
 
 // TitleSink is the synthesized-title synthesizer, seen from the watcher: the
-// four occasions on which a workspace's own title may need (re)making or
+// four occasions on which a workspace's own summary may need (re)making or
 // dropping. It is a SEPARATE sink from TopbarSink because it is not a view — it
 // is the daemon deciding, from these edges, whether to spend a cheap model call
 // on a title. Every method is keyed by workspace alone; the synthesizer
 // resolves the shim, the account and the digest itself.
 type TitleSink interface {
 	// OnSessionStarted is a session naming itself: a resumed or adopted
-	// conversation may already carry prompts and no vendor title.
+	// conversation may already carry prompts.
 	OnSessionStarted(ws ids.WorkspaceID)
-	// OnTurnEnded is a turn completing: a new prompt has changed the digest.
+	// OnPrompt is a MAIN-agent prompt row: a prompt has been made, so the
+	// first summary is due without waiting for the turn to end.
+	OnPrompt(ws ids.WorkspaceID)
+	// OnTurnEnded is a turn completing: the vendor has recorded the turn's
+	// prompt in the transcript the digest reads.
 	OnTurnEnded(ws ids.WorkspaceID)
-	// OnVendorTitle is the vendor stating its own ai-title: synthesis stops,
-	// because the vendor's title always wins.
-	OnVendorTitle(ws ids.WorkspaceID)
-	// OnContextReset is a /clear or a completed /compact: the boundary moved,
-	// so the last synthesis no longer describes the conversation.
+	// OnContextReset is a /clear: the boundary moved, so the last synthesis no
+	// longer describes the conversation. A /compact cuts no prompt from the
+	// digest, so it is not a reset.
 	OnContextReset(ws ids.WorkspaceID)
 }
 
