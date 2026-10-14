@@ -3697,6 +3697,15 @@ html[data-page-unshown] *::after {
    card) render as empty nodes: hide them so #feed's gap does not show. */
 .feed-item:empty { display: none; }
 
+/* A CONCLUDED TURN'S END ROW TAKES NO SLOT EITHER (owner request,
+   2026-10-14). A conclusion says nothing (src/feed/rows/turn-ended.ts), so its
+   row is an empty marker that still stood between the turn's answer and the
+   next row, and #feed's gap fell on both sides of it: the answer sat two gaps
+   above the next bubble where a tool card sits one. Not taking a slot puts the
+   answer exactly one gap above whatever follows it. An errored or interrupted
+   ending draws its outcome marker and keeps its slot. */
+.feed-item:has(> .turn-ended-concluded) { display: none; }
+
 /* EVERY ROW IS LAID OUT AT ITS REAL HEIGHT (owner ruling, 2026-10-11). No
    `content-visibility: auto`: a skipped row stood in a 320px guess, so a new
    row at the tail drew one frame of blank placeholder before its real height
