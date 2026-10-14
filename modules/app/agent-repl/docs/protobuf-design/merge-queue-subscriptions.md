@@ -130,5 +130,19 @@ selection round; each decision below records the reasoning a reviewer needs.
 - **Delivery never blocks the queue.** Changes go to an in-memory FIFO drained
   by one goroutine (`internal/mergenotice`), which reads the subscriptions at
   delivery time, renders the brief, and submits. The orchestrator therefore
-  never waits on, or re-enters through, the prompt queue. A notice still in
-  the FIFO when the daemon exits is recorded as undelivered at ERROR.
+  never waits on, or re-enters through, the prompt queue.
+- **CORRECTION (2026-10-14): the notice loop outlives the merge drain.** The
+  record first said a notice still pending at exit is recorded as undelivered
+  at ERROR. That was wrong: the exit stops background loops BEFORE the merge
+  drain, so a merge landing inside the drain reported its landing to a loop
+  that had already stopped (caught by the integration test
+  `TestStoppingTheDaemonInsideAMergesTerminalStampsTheLandingWithNoFailedWrites`).
+  Root cause: the loop's lifetime was tied to the serving context rather than
+  to the last moment a queue write can happen. The loop now has its own
+  lifetime (`cmd/agent-repld/notices.go`), ended by the teardown step
+  `stop_merge_notices` right after `drain_merges`, and it delivers every
+  pending change before it returns (a submission during teardown is held by
+  the prompt queue for the successor, as an async merge's handback is). A
+  change reported after that can only come from a merge the drain abandoned to
+  the successor; it is recorded at INFO as untold, matching the contract's
+  "a change made while no daemon serves is never reported".
