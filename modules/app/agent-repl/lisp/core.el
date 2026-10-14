@@ -333,8 +333,10 @@ empty string yields the state dir itself.  The parent directory is NOT
 created here."
   (expand-file-name relative (agent-repl--global-state-dir)))
 
-(defun agent-repl--write-file-atomically (file text)
+(defun agent-repl--write-file-atomically (file text &optional binary)
   "Write TEXT to FILE as UTF-8, ATOMICALLY, and return FILE.
+BINARY non-nil writes TEXT, a unibyte string, as the bytes it holds,
+with no encoding at all (an image's bytes).
 TEXT goes to a hidden temporary sibling of FILE, `.<name>.<random>.tmp',
 which is then renamed over FILE: FILE holds its previous contents or TEXT
 in full and never a torn write, and a directory watcher matching FILE\='s
@@ -350,8 +352,9 @@ caller owns logging it, because only the caller knows what was lost."
           (setq tmp (make-temp-file
                      (expand-file-name (concat "." (file-name-nondirectory file) ".") dir)
                      nil ".tmp"))
-          (let ((coding-system-for-write 'utf-8-unix))
+          (let ((coding-system-for-write (if binary 'no-conversion 'utf-8-unix)))
             (with-temp-file tmp
+              (when binary (set-buffer-multibyte nil))
               (insert text)))
           (rename-file tmp file t)
           file)

@@ -1471,6 +1471,21 @@ one to its caller.  A caller that must abort signals for itself."
                        (buffer-string))
                      (encode-coding-string "caf\u00e9" 'utf-8))))))
 
+(ert-deftest agent-repl-test-write-file-atomically-writes-binary-bytes-as-they-are ()
+  "BINARY writes a unibyte string's bytes with no encoding."
+  (agent-repl-test--with-atomic-dir dir
+    ;; Arrange.
+    (let ((file (expand-file-name "f.png" dir))
+          (bytes (unibyte-string #x89 #x50 #x4e #x47 #x00 #xff #xe9)))
+      ;; Act.
+      (agent-repl--write-file-atomically file bytes t)
+      ;; Assert.
+      (should (equal (with-temp-buffer
+                       (set-buffer-multibyte nil)
+                       (insert-file-contents-literally file)
+                       (buffer-string))
+                     bytes)))))
+
 (ert-deftest agent-repl-test-write-file-atomically-failure-keeps-previous-contents ()
   "A write failing before its rename keeps FILE whole, removes the temporary, and re-signals."
   (agent-repl-test--with-atomic-dir dir
