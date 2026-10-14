@@ -15,7 +15,7 @@ import type { FailureSink } from "../../../src/failure/sink.js";
 import { createAgentReplClient } from "../../../src/rpc/client.js";
 import { testAppContext } from "../../rpc/app-context.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
-import { tokenHeatColor } from "../../../src/token-heat.js";
+import { heatColor } from "../../../src/heat.js";
 import type { RowContext } from "../../../src/feed/cards/context.js";
 import {
   REVEALED_ATTRIBUTE,
@@ -422,7 +422,7 @@ describe("the usage stamp", () => {
       rowContext(),
     );
     const probe = document.createElement("span");
-    probe.style.color = tokenHeatColor(0.5, "p");
+    probe.style.color = heatColor(0.5, "p");
     expect(el.querySelector<HTMLElement>(".usage-stamp")?.style.color).toBe(probe.style.color);
   });
 
