@@ -31,12 +31,14 @@
 package integration
 
 import (
+	"bufio"
 	"context"
 	crand "crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"math/rand"
 	"net"
@@ -81,6 +83,10 @@ var (
 	mockShimOnce sync.Once
 	mockShimMain string
 	mockShimErr  error
+	// mockFakeStoreBundle is the shim package's fake store, bundled as a
+	// process (test/fakes/store-server-main.ts) beside the private shim
+	// bundle: the store behind the mocked vendor's shim.
+	mockFakeStoreBundle string
 )
 
 // ---------------------------------------------------------------------------
@@ -190,6 +196,11 @@ func buildMockShim() (string, error) {
 	if _, err := os.Stat(entry); err != nil {
 		return "", fmt.Errorf("the build produced no bundle at %s: %w", entry, err)
 	}
+	fakeStore := filepath.Join(filepath.Dir(entry), "fake-store.mjs")
+	if out, err := runIn(dir, []string{"STORE_SERVER_OUTFILE=" + fakeStore}, "node", "test/fakes/build-store-server.mjs"); err != nil {
+		return "", fmt.Errorf("build the shim's fake store into %s: %v\n%s", fakeStore, err, out)
+	}
+	mockFakeStoreBundle = fakeStore
 	// Node resolves a module's own URL to its REAL path, and the shim's argv[1]
 	// self-check compares the two, so a symlinked temp root (macOS:
 	// /var/folders -> /private/var/folders) must be resolved here.
@@ -275,8 +286,9 @@ var (
 // subjects that compose the two systems, and says why.
 func sharedVendorStoreSocket(t *testing.T) string {
 	t.Helper()
+	mockShimEntry(t)
 	vendorStoreOnce.Do(func() {
-		vendorStoreSocket, vendorStoreStop, vendorStoreErr = startVendorStore()
+		vendorStoreSocket, vendorStoreStop, vendorStoreErr = startVendorStore(mockFakeStoreBundle)
 	})
 	if vendorStoreErr != nil {
 		t.Fatalf("the mocked vendor needs a store for its own stream-plane writes, and it would not start: %v", vendorStoreErr)
@@ -292,85 +304,68 @@ func stopSharedVendorStore() {
 	}
 }
 
-func startVendorStore() (string, func(), error) {
-	bin, err := storeBinaryPath()
-	if err != nil {
-		return "", nil, fmt.Errorf("building the store: %w", err)
-	}
-	dir, err := os.MkdirTemp("", "ar-vendor-store-")
-	if err != nil {
-		return "", nil, fmt.Errorf("temp dir: %w", err)
-	}
+// startVendorStore runs the shim package's own fake store (a mock of the
+// store, test/fakes/store-server.ts) as a process on a private socket: the
+// store behind the mocked vendor's shim, which reads its own writes back
+// through it. Ready is the process's own `ready` line, never a duration.
+func startVendorStore(bundle string) (string, func(), error) {
 	suffix := make([]byte, 4)
 	if _, err := crand.Read(suffix); err != nil {
-		return "", nil, errors.Join(fmt.Errorf("random socket suffix: %w", err), os.RemoveAll(dir))
+		return "", nil, fmt.Errorf("random socket suffix: %w", err)
 	}
 	socket := filepath.Join(os.TempDir(), "ar-vendorstore-"+hex.EncodeToString(suffix)+".sock")
-	logPath := filepath.Join(dir, "store.log")
-	cmd := exec.Command(bin, "--socket", socket, "--db", filepath.Join(dir, "store.db"), "--log", logPath)
-	cmd.Env = append(os.Environ(),
-		"AGENT_REPL_STORE_SOCKET="+socket,
-		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
-		// The store's database is thrown away with the test: no forced flushes.
-		"AGENT_REPL_TEST_SQLITE_UNSYNCED=1",
-		// A private lock dir keeps the boot's build-report write
-		// (agentrepl/logging/buildreport) out of the owner's real
-		// ~/.cache/agent-repl/run.
-		"AGENT_REPL_LOCK_DIR="+filepath.Join(dir, "lock"),
-	)
-	// Its output is kept, not printed: no subject owns it, and interleaving it
-	// with 133 scenarios' output would be noise. A failure to START is reported
-	// through the error above, and the log file survives in the temp dir until
-	// the stand-down removes it.
-	var sink childOutput
-	cmd.Stdout = &sink
-	cmd.Stderr = &sink
+	cmd := exec.Command("node", bundle, "--socket", socket)
+	cmd.Env = append(os.Environ(), "AGENT_REPL_FORBID_VENDOR_CALLS=1")
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", nil, fmt.Errorf("the fake store's stdout: %w", err)
+	}
+	var stderr childOutput
+	cmd.Stderr = &stderr
 	if err := cmd.Start(); err != nil {
-		return "", nil, errors.Join(fmt.Errorf("start: %w", err), os.RemoveAll(dir))
+		return "", nil, fmt.Errorf("start the fake store: %w", err)
 	}
 	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
+	ready := make(chan error, 1)
+	go func() {
+		line, err := bufio.NewReader(stdout).ReadString('\n')
+		if err == nil && line != "ready\n" {
+			err = fmt.Errorf("the fake store's first line was %q, not ready", line)
+		}
+		ready <- err
+		_, _ = io.Copy(io.Discard, stdout)
+		done <- cmd.Wait()
+	}()
 	stop := func() {
-		if cmd.Process != nil {
-			_ = cmd.Process.Signal(syscall.SIGTERM)
-		}
-		select {
-		case <-done:
-		case <-time.After(waitBudget):
-			if cmd.Process != nil {
-				_ = cmd.Process.Kill()
-			}
-			<-done
-		}
 		// Nothing here has a *testing.T: this stop runs once, at process
-		// teardown (runSuite's defer), for the mocked-vendor suite's ONE
-		// shared throwaway store — so a teardown failure is stated loudly to
-		// stderr rather than checked against a test that no longer exists.
+		// teardown (runSuite's defer), so a teardown failure is stated loudly
+		// to stderr rather than checked against a test that no longer exists.
+		_ = cmd.Process.Signal(syscall.SIGTERM)
+		select {
+		case err := <-done:
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "integration: the vendor fake store exited: %v\n%s", err, stderr.String())
+			}
+		case <-time.After(waitBudget):
+			_ = cmd.Process.Kill()
+			<-done
+			fmt.Fprintf(os.Stderr, "integration: the vendor fake store ignored SIGTERM for %s and was killed\n%s", waitBudget, stderr.String())
+		}
 		if err := os.Remove(socket); err != nil && !os.IsNotExist(err) {
 			fmt.Fprintf(os.Stderr, "integration: removing vendor store socket %s: %v\n", socket, err)
 		}
-		if err := os.RemoveAll(dir); err != nil {
-			fmt.Fprintf(os.Stderr, "integration: removing vendor store dir %s: %v\n", dir, err)
-		}
 	}
-
-	// READY IS AN ANSWERED RPC, never a duration.
-	ctx, cancel := context.WithTimeout(context.Background(), waitBudget)
-	defer cancel()
-	client := storeClient(socket)
-	tick := time.NewTicker(pollTick)
-	defer tick.Stop()
-	for {
-		if _, err := client.GetSidecarCursors(ctx, connect.NewRequest(&storev1.GetSidecarCursorsRequest{})); err == nil {
-			return socket, stop, nil
-		}
-		select {
-		case <-ctx.Done():
+	select {
+	case err := <-ready:
+		if err != nil {
 			stop()
-			return "", nil, fmt.Errorf("it never answered GetSidecarCursors within %s; its output was:\n%s", waitBudget, sink.buf.String())
-		case <-tick.C:
+			return "", nil, fmt.Errorf("the fake store never said ready: %w\n%s", err, stderr.String())
 		}
+	case <-time.After(waitBudget):
+		stop()
+		return "", nil, fmt.Errorf("the fake store did not say ready within %s\n%s", waitBudget, stderr.String())
 	}
+	return socket, stop, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -1124,7 +1119,7 @@ func (p *proxyStore) Batches() []*storev1.WriteBatchRequest {
 // mockIngest is one generated tree, ingested.
 type mockIngest struct {
 	Tree    *mockTree
-	Store   *realStore
+	Store   *fakeStore
 	Proxy   *proxyStore
 	Sidecar *sidecarProc
 }
@@ -1135,13 +1130,13 @@ func (in *mockIngest) Entries() []*storev1.StoreEntry {
 	return entriesOf(in.Proxy.Batches())
 }
 
-// ingestMock starts the real store and the real sidecar over a generated tree
+// ingestMock starts a store and the real sidecar over a generated tree
 // and waits until every discovered file's cursor has reached its end — the
 // signal that ingestion is COMPLETE, so an assertion of "zero residue" is a
 // statement about the whole tree and not about however much had landed.
 func ingestMock(t *testing.T, tree *mockTree) *mockIngest {
 	t.Helper()
-	store := startRealStore(t)
+	store := startFakeStore(t)
 	proxy := startProxyStore(t, store.Socket)
 	// THE MOCKED VENDOR'S SHIM IS GONE BY NOW, and a workspace is active only
 	// while a shim holds its lock. The subject stands in for that shim over the

@@ -267,48 +267,6 @@ func unitsInBook(store *fakeStore, agent string) map[string]int {
 	return seen
 }
 
-// decoyEntry builds a STREAM-plane residue row on an upsert key, so a later
-// write of that key by the sidecar changes the row's identity — which is the
-// one thing an upsert may never do, and the store's own invalid_request.
-func decoyEntry(upsertKey, writeID, source string) *storev1.StoreEntry {
-	return &storev1.StoreEntry{
-		Plane:     &storev1.Plane{Plane: &storev1.Plane_Stream{Stream: &storev1.PlaneStream{}}},
-		WriteId:   writeID,
-		UpsertKey: upsertKey,
-		Entry: &storev1.StoreEntry_AgentUpdate{AgentUpdate: &storev1.StoreAgentUpdate{
-			AgentInfo: &storev1.StoreAgentUpdate_UnservedItem{UnservedItem: &storev1.StoreUnservedItem{
-				UnservedItem: &storev1.StoreUnservedItem_Unparsed{Unparsed: &storev1.StoreUnparsed{
-					Source:     source,
-					ParseError: "seeded by the suite to claim this upsert key as an unservable row",
-					Raw:        "{}",
-				}},
-			}},
-		}},
-	}
-}
-
-// seedDecoyRow writes one entry to the real store as another producer, and
-// fails loudly if the store did not accept it.
-func seedDecoyRow(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, producer string, entry *storev1.StoreEntry) {
-	t.Helper()
-	res, err := c.WriteBatch(ctx, connect.NewRequest(&storev1.WriteBatchRequest{
-		// The decoy stands in for the shim's live write, so it states the
-		// shim's class.
-		WriteClass: &storev1.WriteClass{WriteClass: &storev1.WriteClass_Interactive{Interactive: &storev1.WriteClassInteractive{}}},
-		Producer:   producer,
-		Batch:      &storev1.EntryBatch{Entries: []*storev1.StoreEntry{entry}},
-	}))
-	if err != nil {
-		t.Fatalf("seeding the decoy row: %v", err)
-	}
-	if f := res.Msg.GetFailure(); f != nil {
-		t.Fatalf("the store refused the decoy row this subject rests on: %s", f.GetDetail())
-	}
-	if res.Msg.GetSuccess() == nil {
-		t.Fatalf("the store answered neither arm for the decoy row")
-	}
-}
-
 // renameFile moves a file on disk, which is the vendor's own rotation: the
 // INODE is unchanged, so the cursor's identity survives while its path does not.
 func renameFile(t *testing.T, from, to string) {
