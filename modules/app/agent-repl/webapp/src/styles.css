@@ -5639,12 +5639,16 @@ ar-button.outcome-marker-pill {
    parked on its cold gate's choice. The name alone, in every section, never
    the mark or the when-column. */
 #ws-sidebar .ws[data-arm="coldGate"] > .row > .name { text-decoration: line-through; }
-/* The glyph statuses are not discs: a box that centers a single character, so
-   a breathing glyph shrinks about its own center. The box is the
-   DOT'S width, not the character's (owner request, 2026-10-08), and the
-   character is drawn at the dot's size (owner ruling, 2026-10-13): an emoji's
-   image fills its em box, so an em of `--ws-mark-size` draws it as tall as the
-   dot. */
+/* The glyph statuses are not discs: a box that centers a picture, so a
+   breathing glyph shrinks about its own center. The box is the DOT'S width,
+   not the picture's (owner request, 2026-10-08), and the picture is drawn at
+   the dot's height (owner ruling, 2026-10-13). Every picture is
+   images/glyphs/<name>.svg, the file the Emacs tab bar draws too, cropped to
+   fill its full height, so at the box's height it is exactly as tall as the
+   dot: the three bars of a merge, the gates' exclamation mark, question mark
+   and snowflake, and a working one-shot's target. A picture wider than the
+   box overflows it evenly on both sides, so its center stays the box's. The
+   merge bars are drawn in `currentColor`, so the tone or the ink colors them. */
 #ws-sidebar .st-glyph {
   width: var(--ws-mark-width);
   height: var(--ws-mark-size);
@@ -5653,18 +5657,12 @@ ar-button.outcome-marker-pill {
   justify-content: center;
   border-radius: 0;
   background: none;
-  font-size: var(--ws-mark-size);
-  line-height: 1;
 }
-/* THE MERGE GLYPH (owner ruling, 2026-10-13): three bars filling the dot's
-   box, drawn here rather than as a character, so it is exactly the dot's size
-   and its center is the box's: `merging` breathes it about that center. Its ink is
-   the arm's tone, or its `glyph_inks` row. */
-#ws-sidebar .st-glyph[data-glyph="merge"] {
-  background:
-    linear-gradient(currentColor, currentColor) 0 0 / 100% 2px no-repeat,
-    linear-gradient(currentColor, currentColor) 0 50% / 100% 2px no-repeat,
-    linear-gradient(currentColor, currentColor) 0 100% / 100% 2px no-repeat;
+#ws-sidebar .st-glyph > svg {
+  display: block;
+  flex: 0 0 auto;
+  height: 100%;
+  width: auto;
 }
 /* THE TONE WINS OVER EVERY PER-STATE RULE. Every merge arm spends a color of
    its own (render-colors.json colored_merge_arms), so a glyph's ink is its
