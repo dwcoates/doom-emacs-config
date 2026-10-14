@@ -259,7 +259,19 @@ func TestTheMergeQueueVerbNamesEachMode(t *testing.T) {
 		},
 			check: func(_ *mergeFixture, e commandfile.Entry) bool {
 				return !e.OneShot && e.AsyncName == "reconnect-fix" && e.Branch == "agent-1/fix" && e.Instruction == "" &&
-					e.CloseDir == "" && !e.CleanupWorktree && !e.CompactAfter
+					e.CloseDir == "" && !e.CleanupWorktree && !e.CompactAfter && e.BeforeWSMerge == "" && e.PostprocessingPrompt == ""
+			}},
+		{name: "an async merge with a before-merge prompt", args: func(*mergeFixture) []string {
+			return []string{"-async", "-name", "reconnect-fix", "-branch", "agent-1/fix", "-before-merge", " run the linters "}
+		},
+			check: func(_ *mergeFixture, e commandfile.Entry) bool {
+				return e.BeforeWSMerge == "run the linters" && e.PostprocessingPrompt == ""
+			}},
+		{name: "an async merge with an after-merge prompt", args: func(*mergeFixture) []string {
+			return []string{"-async", "-name", "reconnect-fix", "-branch", "agent-1/fix", "-after-merge", "post the summary"}
+		},
+			check: func(_ *mergeFixture, e commandfile.Entry) bool {
+				return e.BeforeWSMerge == "" && e.PostprocessingPrompt == "post the summary"
 			}},
 		{name: "an async merge to the front", args: func(*mergeFixture) []string {
 			return []string{"-async", "-name", "reconnect-fix", "-branch", "agent-1/fix", "-front"}
@@ -335,6 +347,10 @@ func TestTheMergeQueueVerbRefusesAMalformedRequest(t *testing.T) {
 		{name: "a close-dir off async", args: []string{"-one-shot", "-close-dir", "/tmp"}},
 		{name: "a cleanup off async", args: []string{"-one-shot", "-cleanup-worktree"}},
 		{name: "compact-after off async", args: []string{"-one-shot", "-compact-after"}},
+		{name: "a before-merge off async", args: []string{"-one-shot", "-before-merge", "x"}},
+		{name: "an after-merge off async", args: []string{"-one-shot", "-after-merge", "x"}},
+		{name: "a blank before-merge", args: []string{"-async", "-name", "n", "-branch", "b", "-before-merge", " "}},
+		{name: "a blank after-merge", args: []string{"-async", "-name", "n", "-branch", "b", "-after-merge", " "}},
 		{name: "async with no name", args: []string{"-async", "-branch", "b"}},
 		{name: "async with no branch", args: []string{"-async", "-name", "n"}},
 		{name: "async waited on", args: []string{"-async", "-name", "n", "-branch", "b", "-wait"}},
