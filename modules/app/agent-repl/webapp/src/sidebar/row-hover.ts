@@ -4,13 +4,13 @@
  *
  * WHY THE GESTURE IS NOT THE ROW'S. A roster push throws every drawn row away
  * and draws new ones, and a push lands whenever a workspace's state moves — a
- * prompt sent from Emacs is one. When each row node owned its own intent and
- * grace timers, a push arriving while the pointer rested on a trigger left the
- * DETACHED row's open timer armed: it fired seconds later, wrote the
- * workspace into `SidebarContext.openDetails` and registered an invisible
- * panel, and the NEXT push drew that row open, long after the pointer had
- * gone (the "old hovers come back" defect, 2026-10-14). Here the timers and
- * the pointer's whereabouts are the page's, keyed by `WorkspaceRef.id`, and
+ * prompt sent from Emacs is one. When each row node owned its own timers, a
+ * push arriving while the pointer rested on a trigger left the DETACHED row's
+ * timer armed: it fired seconds later, wrote the workspace into
+ * `SidebarContext.openDetails` and registered an invisible panel, and the
+ * NEXT push drew that row open, long after the pointer had gone (the "old
+ * hovers come back" defect, 2026-10-14). Here the timers and the pointer's
+ * whereabouts are the page's, keyed by `WorkspaceRef.id`, and
  * every open or close acts only on the copies the CURRENT draw registered
  * (`drawn`, cleared by `beginDraw`), so a thrown-away row can never be acted
  * on.
@@ -33,18 +33,16 @@ import { paintRowDetail } from "./row.js";
  * appears. There should be no chevron. Hovering the workspace should have the
  * same effect as opening the chevron currently does."
  *
- * Two delays, and they are the whole mechanism. `HOVER_OPEN_DELAY_MS` is
- * intent: a pointer crossing the rail on its way somewhere else passes over
- * several rows in a few milliseconds, and opening on the bare `mouseenter`
- * flickers a panel under each of them. The intent delay is three seconds
- * (owner request, 2026-10-13), so the panel opens only on a pointer that has
- * settled on the trigger, the row's duration field (owner request,
- * 2026-10-14). `HOVER_CLOSE_GRACE_MS` is travel: the panel hangs BELOW the
- * row rather than touching it, so the pointer is briefly over neither on its
- * way in, and a close on the bare `mouseleave` would snatch the panel away as
- * it is being reached for.
+ * It opens THE MOMENT the pointer reaches the trigger, the row's duration
+ * field (owner request, 2026-10-14, which retired the three-second intent
+ * delay of 2026-10-13). The trigger is a few characters wide, so a pointer
+ * crossing the rail on its way elsewhere rarely passes over one.
+ *
+ * One delay remains, and it is travel: `HOVER_CLOSE_GRACE_MS`. The panel
+ * stands beside the row's line rather than touching the duration, so the
+ * pointer is briefly over neither on its way in, and a close on the bare
+ * `mouseleave` would snatch the panel away as it is being reached for.
  */
-export const HOVER_OPEN_DELAY_MS = 3000;
 export const HOVER_CLOSE_GRACE_MS = 120;
 
 /** One drawn copy of a row, as the current draw registered it. */
@@ -90,13 +88,9 @@ interface Pointer {
 export function createRowHover(dropdowns: Dropdowns, openDetails: Set<string>): RowHover {
   let copies = new Map<string, DrawnRow[]>();
   const pointers = new Map<string, Pointer>();
-  const openTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const closeTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-  const cancelTimers = (id: string): void => {
-    const open = openTimers.get(id);
-    if (open !== undefined) clearTimeout(open);
-    openTimers.delete(id);
+  const cancelClose = (id: string): void => {
     const close = closeTimers.get(id);
     if (close !== undefined) clearTimeout(close);
     closeTimers.delete(id);
@@ -128,7 +122,7 @@ export function createRowHover(dropdowns: Dropdowns, openDetails: Set<string>): 
   };
 
   function setOpen(id: string, open: boolean, via: string): void {
-    cancelTimers(id);
+    cancelClose(id);
     if (openDetails.has(id) === open) return;
     log.debug("toggling a row's detail panel", {
       operation: "sidebar.row.detail-toggle",
@@ -143,19 +137,8 @@ export function createRowHover(dropdowns: Dropdowns, openDetails: Set<string>): 
     }
   }
 
-  const scheduleOpen = (id: string): void => {
-    cancelTimers(id);
-    openTimers.set(
-      id,
-      setTimeout(() => {
-        openTimers.delete(id);
-        setOpen(id, true, "hover");
-      }, HOVER_OPEN_DELAY_MS),
-    );
-  };
-
   const scheduleClose = (id: string): void => {
-    cancelTimers(id);
+    cancelClose(id);
     closeTimers.set(
       id,
       setTimeout(() => {
@@ -186,8 +169,8 @@ export function createRowHover(dropdowns: Dropdowns, openDetails: Set<string>): 
       const at = pointers.get(id) ?? { trigger: false, panel: false };
       at[part] = true;
       pointers.set(id, at);
-      if (part === "trigger" && !openDetails.has(id)) scheduleOpen(id);
-      else cancelTimers(id);
+      if (part === "trigger") setOpen(id, true, "hover");
+      else cancelClose(id);
     },
     leave(id: string, part: HoverPart): void {
       const at = pointers.get(id);
@@ -220,7 +203,7 @@ export function createRowHover(dropdowns: Dropdowns, openDetails: Set<string>): 
       }
     },
     dispose(): void {
-      for (const id of new Set([...openTimers.keys(), ...closeTimers.keys()])) cancelTimers(id);
+      for (const id of [...closeTimers.keys()]) cancelClose(id);
       pointers.clear();
       copies = new Map();
     },

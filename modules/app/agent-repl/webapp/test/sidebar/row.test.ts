@@ -9,7 +9,7 @@ import { RosterRowSchema, type RosterRowWhenSchema } from "../../../proto/gen/ts
 import { liveElapsedClock } from "../../src/elapsed-clock.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { heatColor } from "../../src/heat.js";
-import { HOVER_CLOSE_GRACE_MS, HOVER_OPEN_DELAY_MS } from "../../src/sidebar/row-hover.js";
+import { HOVER_CLOSE_GRACE_MS } from "../../src/sidebar/row-hover.js";
 import {
   MERGED_TODAY_CLASS,
   drawRosterRow,
@@ -496,14 +496,13 @@ describe("the detail panel", () => {
     expect(drawn.classList.contains("open")).toBe(false);
   });
 
-  it("opens on hover, once the intent delay has passed", () => {
+  it("opens on hover", () => {
     // ARRANGE
     vi.useFakeTimers();
     try {
       const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
       // ACT
       hoverIn(drawn);
-      vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
       // ASSERT
       expect(drawn.classList.contains("open")).toBe(true);
     } finally {
@@ -519,7 +518,6 @@ describe("the detail panel", () => {
       const drawn = drawRosterRow(row({ id: "ws-1" }), sc, "R");
       // ACT
       hoverIn(drawn);
-      vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
       // ASSERT
       expect([...sc.openDetails]).toEqual(["ws-1"]);
     } finally {
@@ -549,7 +547,6 @@ describe("the detail panel", () => {
       const drawn = drawRosterRow(row({ id: "ws-1" }), sc, "R");
       // ACT
       hoverIn(drawn);
-      vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
       // ASSERT
       expect(asked).toEqual([]);
     } finally {
@@ -1062,7 +1059,7 @@ describe("the detail panel opens on hover", () => {
     const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
     // ACT
     (lineOf(drawn).querySelector(".st") as HTMLElement).dispatchEvent(new MouseEvent("mouseenter"));
-    vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS * 10);
+    vi.runAllTimers();
     // ASSERT
     expect(drawn.classList.contains("open")).toBe(false);
   });
@@ -1072,12 +1069,12 @@ describe("the detail panel opens on hover", () => {
     const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
     // ACT
     (lineOf(drawn).querySelector(".name") as HTMLElement).dispatchEvent(new MouseEvent("mouseenter"));
-    vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS * 10);
+    vi.runAllTimers();
     // ASSERT
     expect(drawn.classList.contains("open")).toBe(false);
   });
 
-  it("opens once the pointer has rested on a running turn's duration", () => {
+  it("opens when the pointer reaches a running turn's duration", () => {
     // ARRANGE
     const drawn = drawRosterRow(
       row({ id: "ws-1", when: { case: "turnRunning", value: { startedAtMs: BigInt(NOW) } } }),
@@ -1086,13 +1083,18 @@ describe("the detail panel opens on hover", () => {
     );
     // ACT
     hoverIn(drawn);
-    vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
     // ASSERT
     expect([durationOf(drawn).getAttribute("data-when"), drawn.classList.contains("open")]).toEqual(["turnRunning", true]);
   });
 
-  it("waits three seconds of rest before it opens", () => {
-    expect(HOVER_OPEN_DELAY_MS).toBe(3000);
+  it("opens the moment the pointer reaches the duration, arming no timer", () => {
+    // ARRANGE
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
+    const timers = vi.getTimerCount();
+    // ACT
+    hoverIn(drawn);
+    // ASSERT
+    expect([drawn.classList.contains("open"), vi.getTimerCount()]).toEqual([true, timers]);
   });
 
   it("does not open when the pointer rests on the row line itself", () => {
@@ -1100,29 +1102,18 @@ describe("the detail panel opens on hover", () => {
     const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
     // ACT
     lineOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
-    vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS * 10);
+    vi.runAllTimers();
     // ASSERT
     expect(drawn.classList.contains("open")).toBe(false);
   });
 
-  it("opens once the pointer has rested on the duration for the intent delay", () => {
+  it("closes again after a pass-through once the grace has run out", () => {
     // ARRANGE
     const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
-    // ACT
+    // ACT: the pointer crosses the duration on its way somewhere else.
     hoverIn(drawn);
-    vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
-    // ASSERT
-    expect(drawn.classList.contains("open")).toBe(true);
-  });
-
-  it("does not open on a pass-through shorter than the intent delay", () => {
-    // ARRANGE
-    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
-    // ACT: the pointer crosses the row on its way somewhere else.
-    hoverIn(drawn);
-    vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS - 1);
     hoverOut(drawn);
-    vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS + HOVER_CLOSE_GRACE_MS);
+    vi.advanceTimersByTime(HOVER_CLOSE_GRACE_MS);
     // ASSERT
     expect(drawn.classList.contains("open")).toBe(false);
   });
@@ -1131,7 +1122,6 @@ describe("the detail panel opens on hover", () => {
     // ARRANGE
     const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
     hoverIn(drawn);
-    vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
     // ACT
     hoverOut(drawn);
     vi.advanceTimersByTime(HOVER_CLOSE_GRACE_MS);
@@ -1143,7 +1133,6 @@ describe("the detail panel opens on hover", () => {
     // ARRANGE
     const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
     hoverIn(drawn);
-    vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
     // ACT
     hoverOut(drawn);
     vi.advanceTimersByTime(HOVER_CLOSE_GRACE_MS - 1);
@@ -1155,7 +1144,6 @@ describe("the detail panel opens on hover", () => {
     // ARRANGE
     const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
     hoverIn(drawn);
-    vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
     hoverOut(drawn);
     // ACT: the pointer arrives in the panel before the grace runs out.
     panelOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
@@ -1168,7 +1156,6 @@ describe("the detail panel opens on hover", () => {
     // ARRANGE
     const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
     hoverIn(drawn);
-    vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
     hoverOut(drawn);
     panelOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
     // ACT
@@ -1188,31 +1175,19 @@ describe("the detail panel opens on hover", () => {
   ])("on a $place row, whose duration is the trigger as everywhere", ({ place, make }) => {
     const bandRow = (): HTMLElement => drawRosterRow(make(), sidebarContext(), "R", place);
 
-    it("opens once the pointer has rested on the duration for the intent delay", () => {
+    it("opens the moment the pointer reaches the duration", () => {
       // ARRANGE
       const drawn = bandRow();
       // ACT
       hoverIn(drawn);
-      vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
       // ASSERT
       expect(drawn.classList.contains("open")).toBe(true);
-    });
-
-    it("does not open before the intent delay has run out", () => {
-      // ARRANGE
-      const drawn = bandRow();
-      // ACT
-      hoverIn(drawn);
-      vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS - 1);
-      // ASSERT
-      expect(drawn.classList.contains("open")).toBe(false);
     });
 
     it("closes once the pointer has left the duration and the grace has run out", () => {
       // ARRANGE
       const drawn = bandRow();
       hoverIn(drawn);
-      vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
       // ACT
       hoverOut(drawn);
       vi.advanceTimersByTime(HOVER_CLOSE_GRACE_MS);
@@ -1225,7 +1200,7 @@ describe("the detail panel opens on hover", () => {
       const drawn = bandRow();
       // ACT
       lineOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
-      vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS * 10);
+      vi.runAllTimers();
       // ASSERT
       expect(drawn.classList.contains("open")).toBe(false);
     });
@@ -1336,7 +1311,7 @@ describe("the detail panel leaves the rail and stays inside the window", () => {
     return drawn;
   }
 
-  it("hangs the panel directly under the row's own line", () => {
+  it("grows the panel out of the right edge of the row's own line", () => {
     // ARRANGE: a rail-width row at the window's left edge.
     const drawn = expandedRow(
       rect({ left: 8, top: 100, width: 190, height: 24 }),
@@ -1344,8 +1319,8 @@ describe("the detail panel leaves the rail and stays inside the window", () => {
     );
     // ACT
     placeRowDetail(drawn);
-    // ASSERT: the line's own left, and its bottom.
-    expect([panelOf(drawn).style.left, panelOf(drawn).style.top]).toEqual(["8px", "124px"]);
+    // ASSERT: the line's own right, and its top.
+    expect([panelOf(drawn).style.left, panelOf(drawn).style.top]).toEqual(["198px", "100px"]);
   });
 
   it("slides a panel that would run off the right edge back inside the window", () => {
@@ -1360,16 +1335,45 @@ describe("the detail panel leaves the rail and stays inside the window", () => {
     expect(panelOf(drawn).style.left).toBe(`${1000 - REVEAL_MARGIN_PX - 320}px`);
   });
 
-  it("caps a panel near the bottom edge at the height the window leaves it", () => {
-    // ARRANGE: a row low in a short window, with a tall panel.
+  it("slides a panel near the bottom edge up until it fits the window", () => {
+    // ARRANGE: a row low in the window, with a tall panel.
     const drawn = expandedRow(
       rect({ left: 8, top: 700, width: 190, height: 24 }),
       rect({ left: 0, top: 0, width: 320, height: 400 }),
     );
     // ACT
     placeRowDetail(drawn);
+    // ASSERT: held one margin clear of the bottom edge.
+    expect(panelOf(drawn).style.top).toBe(`${800 - REVEAL_MARGIN_PX - 400}px`);
+  });
+
+  it("caps a panel taller than the window at the height the window leaves it", () => {
+    // ARRANGE
+    const drawn = expandedRow(
+      rect({ left: 8, top: 300, width: 190, height: 24 }),
+      rect({ left: 0, top: 0, width: 320, height: 2000 }),
+    );
+    // ACT
+    placeRowDetail(drawn);
     // ASSERT: it scrolls inside itself rather than running past the bottom.
-    expect(panelOf(drawn).style.maxHeight).toBe(`${800 - 724 - REVEAL_MARGIN_PX}px`);
+    expect(panelOf(drawn).style.maxHeight).toBe(`${800 - 2 * REVEAL_MARGIN_PX}px`);
+  });
+
+  it("measures the panel free of the cap the last placement applied", () => {
+    // ARRANGE: a panel whose last placement capped it, measured as tall as
+    // its natural height only once that cap is lifted.
+    const drawn = expandedRow(
+      rect({ left: 8, top: 700, width: 190, height: 24 }),
+      rect({ left: 0, top: 0, width: 320, height: 90 }),
+    );
+    const panel = panelOf(drawn);
+    panel.style.maxHeight = "50px";
+    panel.getBoundingClientRect = (): DOMRect =>
+      rect({ left: 0, top: 0, width: 320, height: panel.style.maxHeight === "" ? 400 : 90 });
+    // ACT
+    placeRowDetail(drawn);
+    // ASSERT: placed by its natural 400px, not the capped 90px.
+    expect(panel.style.top).toBe(`${800 - REVEAL_MARGIN_PX - 400}px`);
   });
 
   it("places a row that was drawn already expanded, once it is on the page", () => {
@@ -1383,7 +1387,7 @@ describe("the detail panel leaves the rail and stays inside the window", () => {
     // ACT
     placeOpenRowDetails(host);
     // ASSERT
-    expect(panelOf(drawn).style.top).toBe("64px");
+    expect(panelOf(drawn).style.top).toBe("40px");
   });
 
   it("leaves a closed row's panel unplaced", () => {
@@ -1416,9 +1420,8 @@ describe("the detail panel leaves the rail and stays inside the window", () => {
       );
       // ACT
       hoverIn(drawn);
-      vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
       // ASSERT
-      expect(panelOf(drawn).style.top).toBe("224px");
+      expect(panelOf(drawn).style.top).toBe("200px");
     } finally {
       vi.useRealTimers();
     }
