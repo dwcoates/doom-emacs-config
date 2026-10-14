@@ -29,7 +29,7 @@ func TestABashRunReplaysThenFollowsOnOneStream(t *testing.T) {
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
-	store := startRealStore(t)
+	store := startFakeStore(t)
 	tree := newVendorTree(t)
 	fx := seedDetachedShell(t, tree, "/work/bash-readback-probe",
 		"c1c1c1c1-c1c1-4c1c-8c1c-c1c1c1c1c1c1")
@@ -79,7 +79,7 @@ func TestABashRunsStreamEndsAfterItsTerminalRow(t *testing.T) {
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
-	store := startRealStore(t)
+	store := startFakeStore(t)
 	tree := newVendorTree(t)
 	fx := seedDetachedShell(t, tree, "/work/bash-terminal-probe",
 		"c2c2c2c2-c2c2-4c2c-8c2c-c2c2c2c2c2c2")
