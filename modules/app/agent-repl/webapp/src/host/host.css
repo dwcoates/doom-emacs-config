@@ -4,7 +4,9 @@
    its page-level layout back to a plain full-window box.
    A page not shown is `visibility: hidden`, never `display: none`: it keeps its
    full size and layout, so showing it needs no reflow, and its timers and
-   animation frames keep running (measured in WebKit, 2026-10-12). */
+   animation frames keep running (measured in WebKit, 2026-10-12). Its CSS
+   animations would keep running too, so the page pauses them itself while
+   not shown (host/unshown-animations.ts). */
 html.agent-repl-host,
 html.agent-repl-host body {
   margin: 0;
