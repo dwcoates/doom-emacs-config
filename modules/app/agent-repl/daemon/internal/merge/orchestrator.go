@@ -92,7 +92,7 @@ type orchestrator struct {
 	running map[wsm.RepoKey]*run
 	// chains are each repository's runs IN QUEUE ORDER (chain.go): the head
 	// first, when it stands, then the merges rebased and tested ahead of their
-	// turn behind it, never more than cpugov.QueueWindow in all. A run joins
+	// turn behind it, never more than the window in all (queueWindow). A run joins
 	// it before it starts and leaves it at its one release (releaseSlot).
 	chains map[wsm.RepoKey][]*run
 	// chainSignals are each repository's chain-change broadcast: closed and
@@ -209,7 +209,7 @@ type orchestrator struct {
 	drainBound time.Duration
 	// gitBound overrides MergeGitStopBound, TEST-ONLY as drainBound is.
 	gitBound time.Duration
-	// window overrides cpugov.QueueWindow, TEST-ONLY as drainBound is: the
+	// window overrides the governor's window, TEST-ONLY as drainBound is: the
 	// package's tests of one merge at a time run with a window of one, so no
 	// merge behind the head starts; zero means the production window.
 	window int
@@ -309,6 +309,7 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 	// the wrapped DB.
 	o.deps.DB = asyncMergesDB{DB: deps.DB, o: o}
 	deps.Asks.bind(o.askChanged)
+	deps.Governor.OnPowerChange(o.powerChanged)
 	return o, nil
 }
 

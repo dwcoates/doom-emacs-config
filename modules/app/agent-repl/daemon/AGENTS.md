@@ -1320,10 +1320,16 @@ Owner rulings, 2026-09-30 (`internal/merge`; the contract is
 
 Owner rulings, 2026-10-11 (`internal/merge/chain.go`, `internal/cpugov`).
 
-- **THE WINDOW** is `cpugov.QueueWindow` (2): the head and the merge
-  behind it. It is the one setting bounding both chained rebasing and
-  concurrent test gates; an entry beyond it waits untouched until a merge
-  ahead lands or drops out.
+- **THE WINDOW** is decided by the host's POWER SOURCE (owner ruling,
+  2026-10-14; `cpugov.Governor.Window`, `internal/merge/power.go`): on AC the
+  head and the merge behind it (`cpugov.QueueWindow`, 2), which race and take
+  turns at the tests; on battery, and while the source is unread, the head
+  alone (`cpugov.BatteryWindow`, 1) -- no race and no turns. An entry beyond
+  the window waits untouched until a merge ahead lands or drops out, or the
+  window grows. PLUGGING IN extends every chain at once; UNPLUGGING suspends
+  every member beyond the window at its step (`suspendFor`, then
+  `AdoptWorkspace`), to resume there once it heads its queue or the host is
+  plugged in again.
 - **THE RACE TO LAND** (`internal/merge/race.go`, owner rulings 2026-10-12
   and 2026-10-13). Every member rebases ITS OWN commits onto the TARGET's tip,
   conflicts resolved by its OWN session through the same prompts, and the
@@ -1387,25 +1393,19 @@ Owner rulings, 2026-10-11 (`internal/merge/chain.go`, `internal/cpugov`).
   tree equal to it lands without testing again (INFO
   `daemon.merge.speculative`), any other is tested again and the invalidation
   is recorded.
-- **THE GOVERNOR** (`cpugov`) reads the host's power source with every
-  sample (IOKit's providing power source on macOS,
-  `/sys/class/power_supply` on Linux). ON AC POWER it admits a speculative
-  gate at once, bounded only by `QueueWindow` (owner ruling, 2026-10-13:
-  the merge behind the head races it). On battery, and while the source is
-  unread (an ERROR `daemon.cpugov.power` once per cause), the band decides:
-  it samples the host's own processor ticks (user,
-  nice and system; `host_statistics` on macOS, `/proc/stat` on Linux), smooths
-  them over 30s, and admits a speculative gate only while the smoothed load --
-  counting the share the gates it admitted have not shown yet -- stands below
-  50% and the gate's learned mean cost keeps it at or under 70%, closest to
-  the head first, at most `QueueWindow` gates. The head's gate is never
-  governed. Every admission and every change of a deferral's reason is INFO
-  `daemon.cpugov.admit` with the arithmetic.
-  `AGENT_REPL_FIXED_HOST_LOAD` (a fraction in [0, 1]; `cpugov.HostSampler`)
-  pins the load it reads instead of the host's ticks, recorded at boot
-  (INFO `daemon.boot.gate_governor`); a value that is no load refuses the
-  boot. An integration test whose merges test behind their head sets it, so
-  the machine's other work cannot defer them.
+- **THE GOVERNOR** (`cpugov`) reads the host's power source every 5s
+  (IOKit's providing power source on macOS, `/sys/class/power_supply` on
+  Linux), answers the window, and tells the orchestrator every change
+  (`OnPowerChange`); a source it cannot read is an ERROR
+  `daemon.cpugov.power` once per cause and reads as battery. It also counts
+  the gates: the head's runs at once and is never governed, and a gate
+  behind its head is admitted while fewer than `MaxGates` run, closest to the
+  head first (INFO `daemon.cpugov.admit`). There is no load band (owner
+  ruling, 2026-10-14): the power source alone decides how much the queue
+  runs. `AGENT_REPL_FIXED_POWER` (`ac` or `battery`;
+  `cpugov.HostPowerSource`) pins the source it reads, recorded at boot (INFO
+  `daemon.boot.gate_governor`); any other value refuses the boot. The
+  integration harness pins `ac` for every daemon (`HostNeutralPowerEnv`).
 - **A RESTART MID-CHAIN** resumes every member at its recorded step: the head
   through the pump, the members behind it through `extendChain` from its
   resume, a speculative step (`progressDoc.Speculative`) finished as such
