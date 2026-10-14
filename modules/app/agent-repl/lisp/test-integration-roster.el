@@ -67,16 +67,16 @@ ID names the workspace, NAME its row label, STATUS the status arm's
 protojson key symbol.  OVERRIDES replaces entries, so one test changes
 exactly one fact.
 
-Every non-optional field is populated.  `when' carries an unset oneof and
-`detail' carries no lines, both of which the proto comments declare legal
-— presence itself is the fact for RosterRowDetail's three lines."
+Every non-optional field is populated.  `when' carries `noTurnRunning', and
+`detail' carries no lines, which the proto comments declare legal —
+presence itself is the fact for RosterRowDetail's three lines."
   (append overrides
           `((workspace . ((workspace . ((id . ,id)
                                         (dir . ,(agent-repl-itest--fixture-dir (concat "roster-" id)))))))
             (name . ((text . ,name)))
             (,status . ())
             (current . ((current . :false)))
-            (when . ())
+            (when . ((noTurnRunning . ())))
             (detail . ())
             (closed . ((closed . :false)))
             (availability . ((available . ()))))))
@@ -92,9 +92,11 @@ OVERRIDES replaces top-level entries (notably `current')."
                                      (dir . ,agent-repl-itest-roster--repo-dir)))))
               (header . ((label . ((text . "itest-repo"))) (count . ((workspaces . 1)))))
               (rows . ((rows . ,(vconcat rows))))
-             (divergence . ((pending . ()))) (expanded . ()))])))
-     (task . ((sections . [])))
-     (maturity . ((sections . [])))
+             (divergence . ((pending . ()))) (expanded . ()))])
+         (openCount . ((workspaces . 1)))))
+     (task . ((sections . []) (openCount . ())))
+     (maturity . ((sections . []) (openCount . ())))
+     (open . ((label . ((text . "Open"))) (expanded . ())))
      (hidden . ((header . ((label . ((text . "Hidden"))) (count . ((workspaces . 0)))))
                 (rows . ((rows . [])))
                 (expanded . ())))
@@ -151,9 +153,11 @@ order apart from declaration order."
             ((key . ((repository . ((id . "repo-b") (dir . ,(agent-repl-itest--fixture-dir "itest-repo-b"))))))
              (header . ((label . ((text . "repo-b"))) (count . ((workspaces . 1)))))
              (rows . ((rows . ,(vconcat rows-b))))
-             (divergence . ((pending . ()))) (expanded . ()))])))
-    (task . ((sections . [])))
-    (maturity . ((sections . [])))
+             (divergence . ((pending . ()))) (expanded . ()))])
+         (openCount . ((workspaces . 1)))))
+    (task . ((sections . []) (openCount . ())))
+    (maturity . ((sections . []) (openCount . ())))
+    (open . ((label . ((text . "Open"))) (expanded . ())))
     (hidden . ((header . ((label . ((text . "Hidden"))) (count . ((workspaces . 0)))))
                (rows . ((rows . [])))
                (expanded . ())))
@@ -299,7 +303,7 @@ fall back to, and inventing one would paint a wrong tab silently."
                (list `((workspace . ((workspace . ((id . "ws-x") (dir . ,(agent-repl-itest--fixture-dir "ws-x"))))))
                        (name . ((text . "ws-x")))
                        (current . ((current . :false)))
-                       (when . ())
+                       (when . ((noTurnRunning . ())))
                        (detail . ())
                        (closed . ((closed . :false)))))))
       ;; Assert.
@@ -317,7 +321,7 @@ Losing the roster would lose the ONLY source of which workspaces exist."
                (list `((workspace . ((workspace . ((id . "ws-x") (dir . ,(agent-repl-itest--fixture-dir "ws-x"))))))
                        (name . ((text . "ws-x")))
                        (current . ((current . :false)))
-                       (when . ())
+                       (when . ((noTurnRunning . ())))
                        (detail . ())
                        (closed . ((closed . :false)))))))
       (agent-repl-itest--await-log daemon "elisp.rpc.push-invalid" "error")
@@ -796,7 +800,8 @@ repository view's."
                               . ,(vector
                                   (agent-repl-itest-roster--row "ws-t2" "ws-t2" 'ready)
                                   (agent-repl-itest-roster--row "ws-t1" "ws-t1" 'ready)))))
-                         (expanded . ()))])))))
+                         (expanded . ()))])
+                    (openCount . ((workspaces . 2)))))))
       ;; Assert.
       (agent-repl-itest--wait-until
        (lambda () (equal (agent-repl-roster-tab-order) '("ws-t1" "ws-t2")))
@@ -1652,11 +1657,12 @@ pinned directly."
                             (ready . nil)
                             (thinking . nil)
                             (current . ((current . :false)))
-                            (when . nil)
+                            (when . ((noTurnRunning . ())))
                             (detail . nil)
                             (closed . ((closed . :false))))]))))])))
-          (task . ((sections . [])))
-          (maturity . ((sections . [])))
+          (task . ((sections . []) (openCount . ())))
+          (maturity . ((sections . []) (openCount . ())))
+          (open . ((label . ((text . "Open"))) (expanded . ())))
           (recentlyMerged . ((header . ((label . ((text . "recently merged"))) (count . ((workspaces . 1)))))
                              (groups . [])))))))
    :type 'agent-repl-wire-error))
@@ -1767,8 +1773,8 @@ the host re-key bug above and already holds independently of it.)"
       (should (equal (agent-repl--ws-by-ref-id "itest-collide-live") "live")))))
 
 ;; audit-3 #34
-(ert-deftest agent-repl-itest-roster-when-turn-ended-at-ms-decodes-from-a-decimal-string ()
-  "`when.turnEnded.atMs' rides the wire as a STRING and still decodes.
+(ert-deftest agent-repl-itest-roster-when-turn-running-started-at-ms-decodes-from-a-decimal-string ()
+  "`when.turnRunning.startedAtMs' rides the wire as a STRING and still decodes.
 fanout §2: Go emits int64 as a decimal string; a decoder mis-typing
 `atMs' as a bare number would refuse every real push while a fixture
 that always sends unset `when' stays green."
@@ -1779,19 +1785,19 @@ that always sends unset `when' stays green."
        daemon (agent-repl-itest-roster--roster
                (list (agent-repl-itest-roster--row
                       "itest-when-ac" "itest-when-ac" 'ready
-                      '(when . ((turnEnded . ((atMs . "1700000000000")))))))))
+                      '(when . ((turnRunning . ((startedAtMs . "1700000000000")))))))))
       (agent-repl-itest--wait-until
        (lambda () (agent-repl-roster-row-for-ws "itest-when-ac")) nil "the row to be indexed")
       ;; Assert.
       (should-not (agent-repl-itest--logged-p daemon "elisp.rpc.push-invalid" "error"))
       (let ((when-value (plist-get (agent-repl-roster-row-for-ws "itest-when-ac") :when)))
-        (should (eq (plist-get when-value :arm) :turn-ended))
-        (should (= (plist-get (plist-get when-value :value) :at-ms) 1700000000000))))))
+        (should (eq (plist-get when-value :arm) :turn-running))
+        (should (= (plist-get (plist-get when-value :value) :started-at-ms) 1700000000000))))))
 
 ;; audit-3 #34
 (ert-deftest agent-repl-itest-roster-when-merged-at-ms-decodes-from-a-decimal-string ()
   "`when.merged.atMs' rides the wire as a STRING and still decodes.
-The `merged' arm of the same oneof, pinned separately from `turnEnded'."
+The `merged' arm of the same oneof, pinned separately from `turnRunning'."
   ;; Arrange / Act.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-roster--with-subscription daemon

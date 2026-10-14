@@ -4,6 +4,10 @@ import (
 	"sync"
 	"testing"
 
+	"google.golang.org/protobuf/proto"
+
+	frontendv1 "agentrepl/proto/frontend/v1"
+
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
@@ -151,5 +155,88 @@ func TestADaemonRecordOnAWorkspaceNotYetPublishedRecordsNoViolation(t *testing.T
 	// Assert: the first view is no move of the status.
 	if hasLevel(h.log.Records(), "error", "daemon.footer.line_moved_status") {
 		t.Fatal("a workspace's first view was recorded as a line moving the status")
+	}
+}
+
+func TestTurnClockAnswersThePublishedClock(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(h *harness)
+	}{
+		{name: "a running turn", arrange: func(h *harness) {
+			h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+		}},
+		{name: "no turn yet", arrange: func(*harness) {}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+
+			// Act
+			tt.arrange(h)
+
+			// Assert
+			if got, want := h.r.TurnClock(testWS), h.view(t).GetStrip().GetClock(); !proto.Equal(got, want) {
+				t.Fatalf("TurnClock = %v, want the published %v", got, want)
+			}
+		})
+	}
+}
+
+func TestTurnClockResolvesAWorkspaceTheFooterNeverSawAsNoClock(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	got := h.r.TurnClock(ids.WorkspaceID("ws-never-seen"))
+
+	// Assert
+	if got == nil || got.TurnStartedAtMs != nil || got.TurnEndedAtMs != nil {
+		t.Fatalf("TurnClock = %v, want an empty clock", got)
+	}
+}
+
+func TestTheStatusEdgeIsToldWhenTheTurnClockMoves(t *testing.T) {
+	tests := []struct {
+		name string
+		pub  publication
+		want bool
+	}{
+		{name: "the clock alone", pub: publication{clockChanged: true}, want: true},
+		{name: "the arm alone", pub: publication{armChanged: true}, want: true},
+		{name: "the step alone", pub: publication{subChanged: true}, want: true},
+		{name: "the line alone", pub: publication{lineChanged: true}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h, edges := newEdgeHarness(t)
+			tt.pub.ws = testWS
+
+			// Act
+			h.r.tellStatusChanged([]publication{tt.pub})
+
+			// Assert
+			if got := edges.count() == 1; got != tt.want {
+				t.Fatalf("told = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestObserveClockReportsAChangeOnlyWhenTheClockMoves(t *testing.T) {
+	// Arrange
+	started := int64(1_000)
+	running := &frontendv1.FooterView{Strip: &frontendv1.FooterStrip{Clock: &frontendv1.FooterClock{TurnStartedAtMs: &started}}}
+	s := newWSState()
+
+	// Act
+	first, again := s.observeClock(running), s.observeClock(running)
+
+	// Assert
+	if !first || again {
+		t.Fatalf("observeClock = %v then %v, want a change then none", first, again)
 	}
 }

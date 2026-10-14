@@ -128,12 +128,12 @@ func TestSelectWorkspaceStampsCurrentOnTheRoster(t *testing.T) {
 	if !row.GetCurrent().GetCurrent() {
 		t.Fatalf("row.current = false for the selected workspace, want true")
 	}
-	// SELECTING DOES NOT DRIVE THE WHEN-COLUMN. The column shows the last turn
-	// end, never last viewing, so a freshly-selected workspace that has ended no turn
-	// falls back to its creation time. (The column's old last_selected arm is
-	// reserved, so only the instant shown can regress.)
-	if row.GetWhen().GetCreated().GetAtMs() == 0 {
-		t.Fatalf("row.when.created = %v, want the creation instant for a never-active workspace", row.GetWhen())
+	// SELECTING DOES NOT DRIVE THE WHEN-COLUMN. The column shows the turn
+	// clock, never last viewing, so a freshly-selected workspace running no
+	// turn reads no_turn_running. (The column's old last_selected arm is
+	// reserved, so only the arm shown can regress.)
+	if row.GetWhen().GetNoTurnRunning() == nil {
+		t.Fatalf("row.when = %v, want no_turn_running for a never-active workspace", row.GetWhen())
 	}
 }
 

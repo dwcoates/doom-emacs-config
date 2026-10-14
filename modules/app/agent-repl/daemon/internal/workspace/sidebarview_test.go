@@ -183,6 +183,56 @@ func TestFoldHiddenSectionRecordsTheFoldAndRepublishesTheRoster(t *testing.T) {
 	}
 }
 
+func TestFoldOpenSectionRecordsTheFoldAndRepublishesTheRoster(t *testing.T) {
+	tests := []struct {
+		name   string
+		folded bool
+	}{{"collapse", true}, {"expand", false}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			prior := wsm.DefaultSidebarView
+			prior.OpenFolded = !tt.folded
+			f.db.view = &prior
+
+			// Act
+			err := f.verbs.FoldOpenSection(context.Background(), tt.folded)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("FoldOpenSection: %v", err)
+			}
+			if len(f.sidebar.registries) != 1 {
+				t.Fatalf("roster republications = %d, want exactly one", len(f.sidebar.registries))
+			}
+			if got := f.sidebar.registries[0].View.OpenFolded; got != tt.folded {
+				t.Fatalf("republished open fold = %v, want %v", got, tt.folded)
+			}
+		})
+	}
+}
+
+func TestFoldOpenSectionSurfacesAFailedWriteAtError(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.db.setOpenFoldedErr = errors.New("disk I/O error")
+
+	// Act
+	err := f.verbs.FoldOpenSection(context.Background(), false)
+
+	// Assert
+	if err == nil {
+		t.Fatal("a failed fold write was answered as success")
+	}
+	if !loggedAtError(f, opFoldOpenSection) {
+		t.Fatal("the failed write was not recorded at error")
+	}
+	if len(f.sidebar.registries) != 0 {
+		t.Fatalf("roster republications = %d, want none for a failed fold", len(f.sidebar.registries))
+	}
+}
+
 func TestFoldHiddenSectionSurfacesAFailedWriteAtError(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
@@ -444,6 +494,7 @@ func TestEverySingletonSectionFoldSharesOneShape(t *testing.T) {
 	}{
 		{"recently merged", opFoldMergedSection, "recently-merged band", func(v Verbs) error { return v.FoldMergedSection(context.Background(), true) }},
 		{"hidden", opFoldHiddenSection, "hidden section", func(v Verbs) error { return v.FoldHiddenSection(context.Background(), true) }},
+		{"open", opFoldOpenSection, "open section", func(v Verbs) error { return v.FoldOpenSection(context.Background(), true) }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -16,6 +16,7 @@ import {
   RosterRowWhenSchema,
   RosterMaturitySectionSchema,
   RosterHiddenSectionSchema,
+  RosterOpenSectionSchema,
   RosterMergedRepoGroupSchema,
   RosterMergedSectionSchema,
   RosterRepoSectionSchema,
@@ -23,6 +24,7 @@ import {
   WorkspaceRosterSchema,
   type RosterMaturitySection,
   type RosterHiddenSection,
+  type RosterOpenSection,
   type RosterMergedRepoGroup,
   type RosterMergedSection,
   type RosterRepoSection,
@@ -190,7 +192,7 @@ export function row(init: {
   /** The durable last-selected instant, epoch ms; omitted = never selected. */
   lastSelectedAtMs?: bigint;
   priority?: string;
-  /** The when-column's ARM; omitted leaves the column empty. */
+  /** The when-column's ARM; omitted = no turn running, as a live row with no turn draws. */
   when?: MessageInitShape<typeof RosterRowWhenSchema>["shown"];
   detail?: MessageInitShape<typeof RosterRowDetailSchema>;
   children?: RosterRow[];
@@ -201,7 +203,7 @@ export function row(init: {
     status: init.status ?? { case: "ready", value: {} },
     current: { current: init.current ?? false },
     closed: { closed: init.closed ?? false },
-    when: { shown: init.when },
+    when: { shown: init.when ?? { case: "noTurnRunning", value: {} } },
     detail: init.detail ?? {},
     children: init.children ?? [],
     ...(init.attention === true ? { attention: {} } : {}),
@@ -298,13 +300,13 @@ export function mergedBand(
 
 /**
  * One repository's group inside the recently-merged band, SHOWN unless its
- * repository is said to be collapsed. A row whose `when` names no arm is
- * stamped on the merged arm, as the daemon stamps every merged row, a minute apart and most
- * recent first.
+ * repository is said to be collapsed. A row left on `row`'s default when arm
+ * (no turn running) is stamped on the merged arm, as the daemon stamps every
+ * merged row, a minute apart and most recent first.
  */
 export function mergedGroup(init: { id: string; label?: string; rows?: RosterRow[]; repositoryCollapsed?: boolean }): RosterMergedRepoGroup {
   const rows = (init.rows ?? []).map((r, i) => {
-    if (r.when === undefined || r.when.shown.case !== undefined) return r;
+    if (r.when === undefined || r.when.shown.case !== "noTurnRunning") return r;
     const stamped = clone(RosterRowSchema, r);
     stamped.when = create(RosterRowWhenSchema, { shown: { case: "merged", value: { atMs: BigInt(1_000_000_000 - i * 60_000) } } });
     return stamped;
@@ -334,6 +336,17 @@ export function hiddenSection(
   });
 }
 
+/**
+ * The open-workspaces section. Its daemon-held fold is EXPANDED unless said,
+ * as the daemon draws a section nobody has folded.
+ */
+export function openSection(collapsed: boolean = false): RosterOpenSection {
+  return create(RosterOpenSectionSchema, {
+    label: { text: "Open" },
+    fold: collapsed ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
+  });
+}
+
 /** The `WorkspaceRoster.shown` arm each grouping is spelled with. */
 const SHOWN_ARMS = {
   repository: { case: "shownRepository", value: {} },
@@ -348,14 +361,29 @@ export function roster(init: {
   maturity?: RosterMaturitySection[];
   merged?: RosterMergedSection;
   hidden?: RosterHiddenSection;
+  open?: RosterOpenSection;
+  /**
+   * Each grouping's daemon-resolved open count; unless said, the sum of its
+   * sections' counts (a task section, which states none, counts its rows).
+   */
+  openCounts?: Partial<Record<Grouping, number>>;
   current?: string;
   /** The daemon-held grouping every page shows; the repository's unless said. */
   shown?: Grouping;
 } = {}): WorkspaceRoster {
+  const repos = init.repos ?? [];
+  const tasks = init.tasks ?? [];
+  const maturity = init.maturity ?? [];
+  const counted = (sections: { header?: { count?: { workspaces: number } } }[]): number =>
+    sections.reduce((sum, section) => sum + (section.header?.count?.workspaces ?? 0), 0);
   return create(WorkspaceRosterSchema, {
-    repository: { sections: init.repos ?? [] },
-    task: { sections: init.tasks ?? [] },
-    maturity: { sections: init.maturity ?? [] },
+    repository: { sections: repos, openCount: { workspaces: init.openCounts?.repository ?? counted(repos) } },
+    task: {
+      sections: tasks,
+      openCount: { workspaces: init.openCounts?.task ?? tasks.reduce((sum, t) => sum + (t.rows?.rows.length ?? 0), 0) },
+    },
+    maturity: { sections: maturity, openCount: { workspaces: init.openCounts?.maturity ?? counted(maturity) } },
+    open: init.open ?? openSection(),
     recentlyMerged: init.merged ?? mergedSection(),
     hidden: init.hidden ?? hiddenSection(),
     shown: SHOWN_ARMS[init.shown ?? "repository"],

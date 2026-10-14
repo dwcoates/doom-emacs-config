@@ -405,8 +405,7 @@ type Deps struct {
 	// `submitting` and `thinking` from the SAME edge the footer does — the
 	// daemon's acceptance of a turn — because nothing on the shim's streams
 	// states it, and a roster left to infer it reads `ready` while a turn runs.
-	// THE DOOR tells it every turn close's instant, which its when-column
-	// counts from. REQUIRED.
+	// REQUIRED.
 	Sidebar sidebar.Resolver
 	// Holds is the feed's held section, which the queue states its standing
 	// holds and edit claim to.

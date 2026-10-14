@@ -301,12 +301,13 @@ func (r *resolver) mutateTelling(ws ids.WorkspaceID, operation, message string, 
 	// A workspace's FIRST view is no move: the status it publishes is the one
 	// Status already resolved from the same state.
 	for _, p := range pubs {
-		if p.statusMoved() && p.previousArm != "none" {
+		if p.rosterMoved() && p.previousArm != "none" {
 			p.logger.Error("daemon.footer.line_moved_status",
-				"a change to the activity line alone moved the status, and the roster was not told", dlog.Context{
+				"a change to the activity line alone moved the status or the turn clock, and the roster was not told", dlog.Context{
 					"cause": operation, "arm": p.arm, "previous_arm": p.previousArm, "substatus": p.sub,
-					"invariant_violation": "only a fact moves the status; a line never does",
-					"remediation":         "route the change through mutate, or keep it off the status tree",
+					"clock_moved":         p.clockChanged,
+					"invariant_violation": "only a fact moves the status or the turn clock; a line never does",
+					"remediation":         "route the change through mutate, or keep it off the status tree and the clock",
 				})
 		}
 	}
@@ -326,6 +327,7 @@ type publication struct {
 	line         activityLine
 	lineChanged  bool
 	previousLine activityLine
+	clockChanged bool
 	jumps        []dlog.Context
 }
 
@@ -337,23 +339,28 @@ func (r *resolver) publishLocked(ws ids.WorkspaceID, s *wsState) publication {
 	p.arm, p.armChanged, p.previousArm = s.observeArm(view)
 	p.sub, p.subChanged, p.previousSub = s.observeSubstatus(view)
 	p.line, p.lineChanged, p.previousLine = s.observeLine(view)
+	p.clockChanged = s.observeClock(view)
 	s.published = view.GetStrip().GetStatus()
 	r.topicLocked(ws).Publish(view)
 	return p
 }
 
-// statusMoved reports a publication whose status arm or step changed: the
-// edge the roster re-projects on. An activity line alone moves no claim.
+// statusMoved reports a publication whose status arm or step changed. An
+// activity line alone moves no claim.
 func (p publication) statusMoved() bool { return p.armChanged || p.subChanged }
 
-// tellStatusChanged tells the status sink every workspace whose status moved,
-// after the lock is released.
+// rosterMoved reports a publication the roster re-projects on: its status
+// moved, or its turn clock did, which the roster's when-column counts from.
+func (p publication) rosterMoved() bool { return p.statusMoved() || p.clockChanged }
+
+// tellStatusChanged tells the status sink every workspace whose status or
+// turn clock moved, after the lock is released.
 func (r *resolver) tellStatusChanged(pubs []publication) {
 	if r.opts.statusChanged == nil {
 		return
 	}
 	for _, p := range pubs {
-		if p.statusMoved() {
+		if p.rosterMoved() {
 			r.opts.statusChanged(p.ws)
 		}
 	}
@@ -369,11 +376,30 @@ func (r *resolver) tellStatusChanged(pubs []publication) {
 // answer is resolved on the global sink without the unbound-frame violation
 // logOf records for a fact.
 func (r *resolver) Status(ws ids.WorkspaceID) *frontendv1.FooterStatus {
+	return publishedOrResolved(r, ws, func(s *wsState) *frontendv1.FooterStatus { return s.published }, r.status)
+}
+
+// TurnClock answers the turn clock the workspace's strip shows: the one the
+// last published view carried, resolved from what the footer holds when it
+// has published nothing yet, exactly as Status is.
+func (r *resolver) TurnClock(ws ids.WorkspaceID) *frontendv1.FooterClock {
+	return publishedOrResolved(r, ws, func(s *wsState) *frontendv1.FooterClock { return s.publishedClock },
+		func(s *wsState, _ dlog.Logger) *frontendv1.FooterClock { return r.clockCell(s) })
+}
+
+// publishedOrResolved is THE ONE ANSWER to "what does this workspace's strip
+// show" for each piece the roster projects: PUBLISHED's piece of the last
+// published view, or, before any, RESOLVE over what the footer holds for the
+// workspace (a fresh state when it holds nothing). A query is not a frame, so
+// an unbound workspace resolves on the global sink.
+func publishedOrResolved[T any](r *resolver, ws ids.WorkspaceID, published func(*wsState) *T, resolve func(*wsState, dlog.Logger) *T) *T {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s, ok := r.states[ws]
-	if ok && s.published != nil {
-		return s.published
+	if ok {
+		if piece := published(s); piece != nil {
+			return piece
+		}
 	}
 	if !ok {
 		s = newWSState()
@@ -383,7 +409,7 @@ func (r *resolver) Status(ws ids.WorkspaceID) *frontendv1.FooterStatus {
 	if log == nil {
 		log = r.log.Global().With(dlog.Context{"workspace_id": string(ws)})
 	}
-	return r.status(s, log)
+	return resolve(s, log)
 }
 
 // log writes the publication's records, after the lock is released.

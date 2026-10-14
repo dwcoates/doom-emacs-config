@@ -1275,3 +1275,109 @@ func TestAMergedHiddenRowCountsFromItsMerge(t *testing.T) {
 		t.Fatalf("merged rows = %v, want one counting from its merge", rows)
 	}
 }
+
+func TestTheOpenSectionIsLabelledOpen(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+
+	// Act.
+	r.SetRegistry(registry(workspace("w1", "one")))
+
+	// Assert.
+	if got := latest(t, r).GetOpen().GetLabel().GetText(); got != "Open" {
+		t.Fatalf("open label = %q, want %q", got, "Open")
+	}
+}
+
+func TestOpenSectionStatesItsFold(t *testing.T) {
+	tests := []struct {
+		name          string
+		folded        bool
+		wantCollapsed bool
+	}{
+		{"an expanded section", false, false},
+		{"a collapsed section", true, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			r, _ := newResolver(t)
+			reg := registry(workspace("w1", "one"))
+			reg.View.OpenFolded = tt.folded
+
+			// Act.
+			r.SetRegistry(reg)
+
+			// Assert: the arm is always set, and it is the recorded fold.
+			section := latest(t, r).GetOpen()
+			if (section.GetCollapsed() != nil) != tt.wantCollapsed || (section.GetExpanded() != nil) == tt.wantCollapsed {
+				t.Fatalf("fold = %v, want collapsed=%v", section.GetFold(), tt.wantCollapsed)
+			}
+		})
+	}
+}
+
+func TestEveryGroupingCountsTheRowsItsOpenSectionLists(t *testing.T) {
+	// Arrange: a family of two on a task, an unassigned workspace, a closed
+	// one, a hidden one and a merged one, across two repositories.
+	r, _ := newResolver(t)
+	taskID := ids.TaskID("task-1")
+	parent := workspace("w-parent", "parent")
+	parent.Task = &taskID
+	child := workspace("w-child", "child")
+	child.Parent = &parent.ID
+	child.Task = &taskID
+	other := workspace("w-other", "other")
+	other.Repo = otherRepo.ID
+	closed := workspace("w-closed", "closed")
+	closed.Closed = true
+	merged := workspace("w-merged", "merged")
+	merged.MergedAt = at(0)
+	reg := twoRepoRegistry(parent, child, other, closed, hiddenWorkspace("w-hidden", "hidden"), merged)
+	reg.Tasks = []wsm.Task{{ID: taskID, Title: "the task", CreatedAt: epoch}}
+
+	// Act.
+	r.SetRegistry(reg)
+
+	// Assert: each grouping counts the rows it lists, nested child included,
+	// and the task grouping leaves the unassigned workspace out.
+	roster := latest(t, r)
+	tests := []struct {
+		name string
+		got  uint32
+		want uint32
+	}{
+		{"repository", roster.GetRepository().GetOpenCount().GetWorkspaces(), 3},
+		{"task", roster.GetTask().GetOpenCount().GetWorkspaces(), 2},
+		{"maturity", roster.GetMaturity().GetOpenCount().GetWorkspaces(), 3},
+	}
+	for _, tt := range tests {
+		if tt.got != tt.want {
+			t.Errorf("%s open count = %d, want %d", tt.name, tt.got, tt.want)
+		}
+	}
+}
+
+func TestTheOpenCountIsTheSumOfTheSectionCounts(t *testing.T) {
+	// Arrange: a folded repository section still counts toward the open count.
+	r, _ := newResolver(t)
+	reg := twoRepoRegistry(workspace("w1", "one"), func() wsm.Workspace {
+		ws := workspace("w2", "two")
+		ws.Repo = otherRepo.ID
+		return ws
+	}())
+	reg.Repositories[1].Folded = true
+
+	// Act.
+	r.SetRegistry(reg)
+
+	// Assert.
+	view := latest(t, r).GetRepository()
+	var sum uint32
+	for _, section := range view.GetSections() {
+		sum += section.GetHeader().GetCount().GetWorkspaces()
+	}
+	if got := view.GetOpenCount().GetWorkspaces(); got != sum || got != 2 {
+		t.Fatalf("open count = %d, want the sections' sum %d (2)", got, sum)
+	}
+}

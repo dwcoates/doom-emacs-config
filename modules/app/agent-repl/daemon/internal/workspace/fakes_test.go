@@ -89,6 +89,7 @@ type fakeDB struct {
 	view                 *wsm.SidebarView
 	setMergedFoldedErr   error
 	setHiddenFoldedErr   error
+	setOpenFoldedErr     error
 	setMaturityFoldedErr error
 	setGroupingErr       error
 	viewErr              error
@@ -2685,6 +2686,17 @@ func (d *fakeDB) SetHiddenSectionFolded(_ context.Context, folded bool) error {
 	}
 	view := d.currentView()
 	view.HiddenFolded = folded
+	d.view = &view
+	return nil
+}
+
+// SetOpenSectionFolded records the open section's fold.
+func (d *fakeDB) SetOpenSectionFolded(_ context.Context, folded bool) error {
+	if d.setOpenFoldedErr != nil {
+		return d.setOpenFoldedErr
+	}
+	view := d.currentView()
+	view.OpenFolded = folded
 	d.view = &view
 	return nil
 }

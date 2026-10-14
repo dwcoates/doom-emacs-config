@@ -126,6 +126,21 @@ func TestSidebarViewWritesAreReadBack(t *testing.T) {
 			want:  SidebarView{HiddenFolded: true, Grouping: GroupingRepository},
 		},
 		{
+			name:  "folding the open section keeps the band, the hidden section and the grouping",
+			write: func(s *store) error { return s.SetOpenSectionFolded(context.Background(), true) },
+			want:  SidebarView{OpenFolded: true, Grouping: GroupingRepository},
+		},
+		{
+			name: "unfolding the open section again replaces its fold",
+			write: func(s *store) error {
+				if err := s.SetOpenSectionFolded(context.Background(), true); err != nil {
+					return err
+				}
+				return s.SetOpenSectionFolded(context.Background(), false)
+			},
+			want: SidebarView{Grouping: GroupingRepository},
+		},
+		{
 			name: "unfolding the hidden section again replaces its fold",
 			write: func(s *store) error {
 				if err := s.SetHiddenSectionFolded(context.Background(), true); err != nil {
@@ -469,5 +484,38 @@ func TestTheMigrationAddsTheHiddenWorkspaces(t *testing.T) {
 		if got := scalar[int](t, s, `SELECT count(*) FROM pragma_table_info(?) WHERE name = ?`, column.table, column.name); got != 1 {
 			t.Fatalf("%s.%s columns after the migration = %d, want 1", column.table, column.name, got)
 		}
+	}
+}
+
+func TestTheDefaultViewExpandsTheOpenSection(t *testing.T) {
+	// Arrange, Act, Assert
+	if DefaultSidebarView.OpenFolded {
+		t.Fatalf("DefaultSidebarView = %+v, want the open section expanded", DefaultSidebarView)
+	}
+}
+
+// TestTheMigrationAddsTheOpenSectionFold pins the layout-46 step.
+func TestTheMigrationAddsTheOpenSectionFold(t *testing.T) {
+	// Arrange
+	path := fixtureAt(t, 45)
+
+	// Act
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("Open on a layout-45 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	s := handle.(*store)
+	if got := scalar[int](t, s, `SELECT count(*) FROM pragma_table_info('sidebar_view') WHERE name = 'open_folded'`); got != 1 {
+		t.Fatalf("sidebar_view.open_folded columns after the migration = %d, want 1", got)
+	}
+	view, err := s.SidebarView(context.Background())
+	if err != nil {
+		t.Fatalf("SidebarView after the migration: %v", err)
+	}
+	if view.OpenFolded {
+		t.Fatalf("SidebarView after the migration = %+v, want the open section expanded", view)
 	}
 }
