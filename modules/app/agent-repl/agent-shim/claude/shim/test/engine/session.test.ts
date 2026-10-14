@@ -3029,6 +3029,7 @@ describe("the keep-alive turn serves nothing", () => {
     expect(sends.at(-1)?.message.content).toEqual([
       { type: "text", text: "look at" },
       { type: "image", source: { type: "base64", media_type: "image/png", data: Buffer.from("PNG-BYTES").toString("base64") } },
+      { type: "text", text: `[the image above is the file ${imagePath}]` },
       { type: "text", text: "and fix it" },
     ]);
   });

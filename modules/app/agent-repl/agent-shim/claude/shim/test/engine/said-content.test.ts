@@ -1,7 +1,7 @@
 import { create } from "@bufbuild/protobuf";
 import { describe, expect, it } from "vitest";
 import { conversationv1 } from "../../src/proto.js";
-import { saidContent, saidContentShape, type ReadImage } from "../../src/engine/said-content.js";
+import { imagePathNote, saidContent, saidContentShape, type ReadImage } from "../../src/engine/said-content.js";
 
 type Block = conversationv1.UserContentBlock;
 
@@ -65,7 +65,10 @@ describe("what the vendor is sent for what the user said", () => {
     {
       name: "an image by path is sent as its bytes, in base64",
       blocks: [pathImage("/ws/a.png")],
-      want: [{ type: "image", source: { type: "base64", media_type: "image/png", data: b64("PNG-A") } }],
+      want: [
+        { type: "image", source: { type: "base64", media_type: "image/png", data: b64("PNG-A") } },
+        { type: "text", text: imagePathNote("/ws/a.png") },
+      ],
     },
     {
       name: "images keep their place between the words",
@@ -73,8 +76,10 @@ describe("what the vendor is sent for what the user said", () => {
       want: [
         { type: "text", text: "before" },
         { type: "image", source: { type: "base64", media_type: "image/png", data: b64("PNG-A") } },
+        { type: "text", text: imagePathNote("/ws/a.png") },
         { type: "text", text: "between" },
         { type: "image", source: { type: "base64", media_type: "image/png", data: b64("PNG-B") } },
+        { type: "text", text: imagePathNote("/ws/b.png") },
         { type: "text", text: "after" },
       ],
     },
@@ -84,6 +89,7 @@ describe("what the vendor is sent for what the user said", () => {
       want: [
         { type: "text", text: "the quote\nmy words" },
         { type: "image", source: { type: "base64", media_type: "image/png", data: b64("PNG-A") } },
+        { type: "text", text: imagePathNote("/ws/a.png") },
       ],
     },
     {
@@ -91,7 +97,9 @@ describe("what the vendor is sent for what the user said", () => {
       blocks: [pathImage("/ws/a.png"), text(" \n "), pathImage("/ws/b.png")],
       want: [
         { type: "image", source: { type: "base64", media_type: "image/png", data: b64("PNG-A") } },
+        { type: "text", text: imagePathNote("/ws/a.png") },
         { type: "image", source: { type: "base64", media_type: "image/png", data: b64("PNG-B") } },
+        { type: "text", text: imagePathNote("/ws/b.png") },
       ],
     },
     {
@@ -102,7 +110,10 @@ describe("what the vendor is sent for what the user said", () => {
     {
       name: "a jpeg keeps its own media type",
       blocks: [pathImage("/ws/c.jpg", "image/jpeg")],
-      want: [{ type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64("JPEG-C") } }],
+      want: [
+        { type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64("JPEG-C") } },
+        { type: "text", text: imagePathNote("/ws/c.jpg") },
+      ],
     },
   ])("$name", ({ blocks, want }) => {
     // Arrange
@@ -114,6 +125,10 @@ describe("what the vendor is sent for what the user said", () => {
 
     // Assert
     expect(content).toEqual(want);
+  });
+
+  it("names the file an image came from, so the agent can act on it", () => {
+    expect(imagePathNote("/ws/a.png")).toBe("[the image above is the file /ws/a.png]");
   });
 
   it.each([

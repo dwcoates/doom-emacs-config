@@ -14,6 +14,11 @@
  * carries an image becomes a block list, where each run of words between two
  * images is one text block, joined the same way.
  *
+ * AN IMAGE BY PATH IS FOLLOWED BY ITS PATH, for the model alone. The pixels
+ * say what the image shows; only the path lets the agent act on the file (copy
+ * it into docs, commit it, crop it). The note is part of what the vendor is
+ * sent, never of the `UserSaid` the record keeps, so no bubble draws it.
+ *
  * THE BYTES ARE READ HERE AND NOWHERE ELSE. The record keeps the reference
  * (`ImageBlockPath`), which is what is replayed; only the vendor needs the
  * bytes, so only the send reads them.
@@ -74,11 +79,14 @@ export function saidContent(said: conversationv1.UserSaid, readImage: ReadImage 
       case "quote":
         run.push(block.block.value.text);
         break;
-      case "image":
+      case "image": {
         flushRun();
-        blocks.push(vendorImage(block.block.value, readImage));
+        const image = block.block.value;
+        blocks.push(vendorImage(image, readImage));
+        if (image.location.case === "path") blocks.push({ type: "text", text: imagePathNote(image.location.value.path) });
         images += 1;
         break;
+      }
       case "unsupported":
         throw new Error(
           `shim turn: a prompt carries an UnsupportedBlock (${block.block.value.kind}); ` +
@@ -91,6 +99,11 @@ export function saidContent(said: conversationv1.UserSaid, readImage: ReadImage 
   if (images === 0) return run.join("\n");
   flushRun();
   return blocks;
+}
+
+/** The note naming the file an image by path was read from. */
+export function imagePathNote(path: string): string {
+  return `[the image above is the file ${path}]`;
 }
 
 /** The vendor image block for one of the user's images. */
