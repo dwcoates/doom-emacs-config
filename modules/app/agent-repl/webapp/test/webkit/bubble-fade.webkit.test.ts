@@ -30,7 +30,7 @@ const TALL = Array.from({ length: 40 }, (_, i) => `line ${i}`).join("<br>");
 
 /** A collapsed prompt bubble wearing has-more, with FOOTER after its box when given. */
 const bubbleHtml = (footer: string): string => `
-  <div class="bubble md" data-role="prompt" data-variant="user" data-cap-lines="5" data-more="fade">
+  <div class="bubble md" data-role="prompt" data-variant="agent" data-cap-lines="5" data-more="fade">
     <div class="bubble-box bubble-scroll has-more"><div class="bubble-body">${TALL}</div></div>
     <div class="${BUBBLE_EXPAND_ONLY_CLASS}">details</div>${footer}
   </div>`;
