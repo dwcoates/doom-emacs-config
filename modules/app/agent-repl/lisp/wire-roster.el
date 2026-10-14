@@ -258,15 +258,19 @@ restart.  Emacs orders by it and never draws it
   "Decode VALUE as `RosterRowWhenMerged', a plist `(:at-ms)'."
   (agent-repl-wire-roster--decode-instant "RosterRowWhenMerged" value))
 
-(defun agent-repl-wire-decode-roster-row-when-turn-ended (value)
-  "Decode VALUE as `RosterRowWhenTurnEnded', a plist `(:at-ms)'.
-The instant the workspace's last turn ended; the client renders the age and
-ticks."
-  (agent-repl-wire-roster--decode-instant "RosterRowWhenTurnEnded" value))
+(defun agent-repl-wire-decode-roster-row-when-turn-running (value)
+  "Decode VALUE as `RosterRowWhenTurnRunning', a plist `(:started-at-ms)'.
+The instant the running turn started, exactly the footer clock's."
+  (let ((object (agent-repl-wire--object "RosterRowWhenTurnRunning" value)))
+    (agent-repl-wire--check-keys "RosterRowWhenTurnRunning" object '(startedAtMs))
+    (agent-repl-wire--decoded
+     "RosterRowWhenTurnRunning"
+     (list :started-at-ms (agent-repl-wire--decode-int64
+                           "RosterRowWhenTurnRunning" 'startedAtMs object)))))
 
-(defun agent-repl-wire-decode-roster-row-when-created (value)
-  "Decode VALUE as `RosterRowWhenCreated', a plist `(:at-ms)'."
-  (agent-repl-wire-roster--decode-instant "RosterRowWhenCreated" value))
+(defun agent-repl-wire-decode-roster-row-when-no-turn-running (value)
+  "Decode VALUE as the empty message `RosterRowWhenNoTurnRunning'."
+  (agent-repl-wire--decode-empty "RosterRowWhenNoTurnRunning" value))
 
 (defun agent-repl-wire-decode-roster-row-when-hidden (value)
   "Decode VALUE as `RosterRowWhenHidden', a plist `(:at-ms)'.
@@ -274,8 +278,8 @@ The instant the workspace was moved into the hidden section."
   (agent-repl-wire-roster--decode-instant "RosterRowWhenHidden" value))
 
 (defconst agent-repl-wire-roster-row-when-arms
-  '((turnEnded :turn-ended agent-repl-wire-decode-roster-row-when-turn-ended)
-    (created :created agent-repl-wire-decode-roster-row-when-created)
+  '((turnRunning :turn-running agent-repl-wire-decode-roster-row-when-turn-running)
+    (noTurnRunning :no-turn-running agent-repl-wire-decode-roster-row-when-no-turn-running)
     (merged :merged agent-repl-wire-decode-roster-row-when-merged)
     (hidden :hidden agent-repl-wire-decode-roster-row-when-hidden))
   "`RosterRowWhen.shown''s arm table: (WIRE-KEY ARM-KEYWORD DECODER).
@@ -284,13 +288,12 @@ allow-list both read it.")
 
 (defun agent-repl-wire-decode-roster-row-when-shown (value)
   "Decode `RosterRowWhen''s `shown' oneof from the object VALUE.
-UNSET IS LEGAL and means nothing to show — no turn ended, not created, not
-merged — so the column is empty rather than \"0ms ago\"."
+NEVER UNSET: every row has an arm to draw, `noTurnRunning' at the least."
   (agent-repl-wire--decode-oneof
-   "RosterRowWhen" 'shown value agent-repl-wire-roster-row-when-arms t))
+   "RosterRowWhen" 'shown value agent-repl-wire-roster-row-when-arms))
 
 (defun agent-repl-wire-decode-roster-row-when (value)
-  "Decode VALUE as `RosterRowWhen': the oneof plist, or nil when unset."
+  "Decode VALUE as `RosterRowWhen': the oneof plist."
   (let ((object (agent-repl-wire--object "RosterRowWhen" value)))
     (agent-repl-wire--check-keys "RosterRowWhen" object
                                  (mapcar #'car agent-repl-wire-roster-row-when-arms))
