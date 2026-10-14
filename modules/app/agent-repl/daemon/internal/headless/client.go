@@ -40,6 +40,9 @@ func (c *Client) Run(ctx context.Context, req Request) (Response, error) {
 	if req.Site == "" {
 		return Response{}, fmt.Errorf("headless: a run must name its vendor-guard site")
 	}
+	if req.Plain && len(req.Tools) > 0 {
+		panic(fmt.Sprintf("headless: a Plain run for site %q named tools %v", req.Site, req.Tools))
+	}
 	// THE GUARD AND THE BINARY ARE ONE RULE, and it is login's, stated once
 	// here for every headless call: the guard refuses only the DEFAULT
 	// `claude` on PATH, because an explicitly named binary is by definition
@@ -66,6 +69,9 @@ func (c *Client) Run(ctx context.Context, req Request) (Response, error) {
 	if len(req.Tools) > 0 {
 		tools := strings.Join(req.Tools, ",")
 		args = append(args, "--tools", tools, "--allowedTools", tools)
+	}
+	if req.Plain {
+		args = append(args, "--tools", "", "--system-prompt", "")
 	}
 	args = append(args, pinnedArgs...)
 

@@ -541,7 +541,8 @@ is Emacs-wide: a focused Emacs, whatever workspace it shows, gets no banner.
   is composed from (`feed.Resolver.TakeTurnEnding`, filed on the LIVE plane
   only, so a replay raises nothing). How the end reads is
   `ladder.ResolveTurnEnd`, the table the roster's arm comes from: `done` and
-  `interrupted` raise ✅ over a Sonnet summary of the final answer, `turn_failed`
+  `interrupted` raise ✅ over a one-sentence Haiku summary of the final answer
+  (bare inference: `headless.Request.Plain`, no tools and no system prompt), `turn_failed`
   raises ❌ over the errored ending's line.
 - **Agent notifications** (a permission ask, a question, an agent push) raise
   the workspace's banner from `workspace.verbs.Notify`, beside the attention
