@@ -3,6 +3,8 @@ package sessionwatcher
 import (
 	"context"
 	"errors"
+	"os"
+	"strings"
 	"testing"
 
 	"agent-repld/internal/dlog"
@@ -693,5 +695,68 @@ func TestATurnThatNeverWaitedRecordsNoWait(t *testing.T) {
 	// Assert.
 	if h.hasRecord("info", "daemon.sessionwatcher.main_watching_waited") {
 		t.Fatal("a turn that found the watch standing recorded a wait")
+	}
+}
+
+// TestAwaitLatch covers the one wait both of the watcher's latches stand on.
+func TestAwaitLatch(t *testing.T) {
+	tests := []struct {
+		name        string
+		latchClosed bool
+		closeFirst  bool
+		cancelFirst bool
+		want        error
+	}{
+		{name: "a closed latch answers at once", latchClosed: true},
+		{name: "a closed watcher with its latch open answers the close", closeFirst: true, want: ErrWatcherClosed},
+		{name: "a closed watcher whose latch had closed answers the latch", latchClosed: true, closeFirst: true},
+		{name: "an ended context answers its own error", cancelFirst: true, want: context.Canceled},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, Session{Started: sessionStarted("")})
+			latch := make(chan struct{})
+			if tt.latchClosed {
+				close(latch)
+			}
+			if tt.closeFirst {
+				if err := h.w.Close(); err != nil {
+					t.Fatalf("Close: %v", err)
+				}
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tt.cancelFirst {
+				cancel()
+			}
+
+			// Act.
+			err := h.w.awaitLatch(ctx, latch)
+
+			// Assert.
+			if !errors.Is(err, tt.want) || (tt.want == nil && err != nil) {
+				t.Fatalf("awaitLatch = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
+
+// TestTheWatchersLatchesShareOneWait fails a latch wait hand-rolled beside
+// awaitLatch: a select on the watcher's own close belongs in it alone.
+func TestTheWatchersLatchesShareOneWait(t *testing.T) {
+	// Arrange.
+	source, err := os.ReadFile("await.go")
+	if err != nil {
+		t.Fatalf("read await.go: %v", err)
+	}
+
+	// Act.
+	selects := strings.Count(string(source), "case <-w.ctx.Done():")
+
+	// Assert.
+	if selects != 1 {
+		t.Fatalf("await.go selects on the watcher's close %d times, want once, in awaitLatch", selects)
 	}
 }
