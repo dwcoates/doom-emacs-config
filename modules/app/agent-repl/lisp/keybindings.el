@@ -122,7 +122,8 @@ the module."
 
 (map! :leader
       (:prefix "p"
-       :desc "Switch to workspace" "p" #'agent-repl-switch-to-project))
+       :desc "Switch to workspace" "p" #'agent-repl-switch-to-project
+       :desc "Switch to any workspace" "P" #'agent-repl-switch-to-any-workspace))
 
 ;;;; ---- SPC TAB : workspaces ---------------------------------------------
 
