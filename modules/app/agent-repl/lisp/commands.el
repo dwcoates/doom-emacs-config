@@ -930,7 +930,7 @@ REQUESTED of the daemon, never switched to here."
         (progn
           (agent-repl--info log-ws "elisp.commands.last-finished-none from=%s candidates=%d"
                             shown (length names))
-          (message "No other workspace has finished"))
+          (message "[agent-repl] No other workspace has finished"))
       (agent-repl--info log-ws "elisp.commands.last-finished from=%s target=%s ended-ms=%s"
                         shown target (agent-repl-roster-last-turn-ended-ms target))
       (agent-repl-host-request-switch target 'last-finished))))
