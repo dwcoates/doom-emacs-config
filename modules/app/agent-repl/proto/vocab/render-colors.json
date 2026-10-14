@@ -234,7 +234,8 @@
     "compacting": "orange"
   },
   "glyph_only_colors": [
-    "orange"
+    "orange",
+    "grey"
   ],
   "_async_merge_mark_comment": [
     "THE ASYNC-MERGE MARK (frontend.v1.RosterRowAsyncMerging, owner request",
@@ -261,6 +262,20 @@
     "ink": "purple",
     "motion": "breathes",
     "tab_bracket": "purple"
+  },
+  "_paused_merge_mark_comment": [
+    "THE PAUSED-MERGE MARK (frontend.v1.RosterRowMergePaused, owner ruling",
+    "2026-10-14): the merge queue holding the row's merge is paused, so the",
+    "merge is not progressing. The sidebar draws every merge indicator of",
+    "the row -- the merge glyph of a 'merging' or 'merge_queued' row, and the",
+    "'async_merge_mark' -- in 'ink' instead of its own, and the breath the",
+    "merge gave the row's name takes 'motion'. The row's status color, and so",
+    "its name's color, is untouched, and a breath the row's own status arm",
+    "draws (a turn in flight) stands. The tab bar draws nothing for it."
+  ],
+  "paused_merge_mark": {
+    "ink": "grey",
+    "motion": "still"
   },
   "_one_shot_glyph_arms_comment": [
     "THE ONE-SHOT GLYPH (frontend.v1.RosterRowOneShot) is drawn in place of",

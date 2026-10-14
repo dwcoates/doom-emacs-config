@@ -851,6 +851,20 @@ func TestTheAsyncMergeMarkIsABreathingPurpleMergeGlyph(t *testing.T) {
 	}
 }
 
+func TestThePausedMergeMarkIsAStillGreyInk(t *testing.T) {
+	// Arrange.
+	c := loadColors(t)
+
+	// Act.
+	got := c.PausedMergeMark
+
+	// Assert.
+	want := PausedMergeMark{Ink: "grey", Motion: "still"}
+	if got != want {
+		t.Fatalf("paused_merge_mark = %+v, want %+v (owner ruling, 2026-10-14)", got, want)
+	}
+}
+
 func TestLoadRenderColorsRefusesAMalformedGlyphTable(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -900,6 +914,18 @@ func TestLoadRenderColorsRefusesAMalformedGlyphTable(t *testing.T) {
 		}},
 		{name: "an async-merge tab bracket that is not a color", mutate: func(m map[string]any) {
 			m["async_merge_mark"].(map[string]any)["tab_bracket"] = "orange"
+		}},
+		{name: "an absent paused-merge mark", mutate: func(m map[string]any) {
+			delete(m, "paused_merge_mark")
+		}},
+		{name: "a paused-merge ink that is neither a color nor glyph-only", mutate: func(m map[string]any) {
+			m["paused_merge_mark"].(map[string]any)["ink"] = "chartreuse"
+		}},
+		{name: "a paused-merge ink of none", mutate: func(m map[string]any) {
+			m["paused_merge_mark"].(map[string]any)["ink"] = "none"
+		}},
+		{name: "a paused-merge motion the rail has no animation for", mutate: func(m map[string]any) {
+			m["paused_merge_mark"].(map[string]any)["motion"] = "spins"
 		}},
 	}
 	for _, tc := range tests {
