@@ -1336,10 +1336,11 @@ Owner rulings, 2026-10-11 (`internal/merge/chain.go`, `internal/cpugov`).
   the cwd (the deepest match). It asks through the command-file ingress
   (`commandfile.Write`), so the merge is an agent's ask
   (`merge.RequestedByAgent`) exactly as a skill-written file is.
-- Exactly one source: `-own [-keep-open | -one-shot]`, `-dir WORKTREE`
-  (another workspace), `-branch B` (a branch that is no workspace), or
-  `-pr-merged`.
-- `-own -one-shot` ANNOUNCES a one-shot merge from inside the turn it
+- Exactly one mode: `-one-shot [-pr-merged]` (the requester's own branch,
+  sync, closing it once it lands) or `-async -name NAME -branch BRANCH`
+  with `-instruction TEXT`, `-close-dir WORKTREE`, `-cleanup-worktree` and
+  `-compact-after` (the named branch, in a merge workspace).
+- `-one-shot` ANNOUNCES a one-shot merge from inside the turn it
   follows: the command file's merge carries `one_shot`, the request
   (`merge.Request.OneShot`) runs in place once the turn ends and closes the
   requester once it lands, and `wsm.DB.RequestOneShotMerge` records it and

@@ -64,7 +64,9 @@ func tabWord(kind string) string {
 	case TabQueue:
 		return "queue"
 	case TabPick:
-		return "pick"
+		// The ledger keeps the "pick" kind it always recorded; the tab is
+		// drawn as the resolving turn it is (frontend.v1.FeedMergeTabResolving).
+		return "resolving"
 	case TabPrePrompt:
 		return "pre-prompt"
 	case TabRebasing:

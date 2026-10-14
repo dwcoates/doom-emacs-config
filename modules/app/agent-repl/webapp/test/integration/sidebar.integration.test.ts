@@ -693,11 +693,8 @@ describe("the merge verb's source", () => {
     await harness.click('[data-roster-row="ws-target"] [data-verb="merge"]');
     // Assert
     const [request] = harness.fake.calls<MergeWorkspaceRequest>("mergeWorkspace");
-    const source = request.source?.source;
-    const run = source?.case === "ownBranch" ? source.value.run : undefined;
-    expect(run?.case === "inPlace" ? { keepOpen: run.value.keepOpen } : run?.case).toEqual({
-      keepOpen: false,
-    });
+    const mode = request.mode;
+    expect(mode.case === "oneShot" ? mode.value.landing.case : mode.case).toBe("ownBranch");
   });
 });
 

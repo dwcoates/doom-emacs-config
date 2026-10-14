@@ -249,7 +249,7 @@ func (f *fakeDB) Workspace(_ context.Context, id ids.WorkspaceID) (wsm.Workspace
 	defer f.mu.Unlock()
 	ws, ok := f.workspaces[id]
 	if !ok {
-		return wsm.Workspace{}, fmt.Errorf("no workspace %s", id)
+		return wsm.Workspace{}, fmt.Errorf("no workspace %s: %w", id, wsm.ErrNotFound)
 	}
 	return ws, nil
 }
@@ -317,6 +317,18 @@ func (f *fakeDB) SetLeasePolicy(_ context.Context, lease wsm.LeaseID, p wsm.Leas
 	defer f.mu.Unlock()
 	f.policies[lease] = p
 	return nil
+}
+
+// WorkspaceByDir answers the workspace registered at DIR.
+func (f *fakeDB) WorkspaceByDir(_ context.Context, dir string) (wsm.Workspace, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, ws := range f.workspaces {
+		if ws.Dir == dir {
+			return ws, nil
+		}
+	}
+	return wsm.Workspace{}, fmt.Errorf("no workspace at %s: %w", dir, wsm.ErrNotFound)
 }
 
 func (f *fakeDB) SetMergedAt(_ context.Context, id ids.WorkspaceID, at time.Time, commits *uint32) error {
@@ -773,6 +785,9 @@ type fakeGit struct {
 	rangesAsked []string
 	clean       bool
 	cleanErr    error
+	// cleanByDir answers IsClean for the directories it names, ahead of
+	// clean.
+	cleanByDir map[string]bool
 	// ahead is what CountCommits answers: the commits a pick left ahead of
 	// its target.
 	ahead uint32
@@ -817,7 +832,11 @@ type fakeGit struct {
 	calls []string
 	// removedWorktrees records the teardown's removals of a workspace's
 	// worktree; removedQueueTrees the queue's scratch trees it removed.
-	removedWorktrees  []string
+	removedWorktrees []string
+	// cleanedWorktrees records an async landing's cleanups through git's
+	// clean door (RemoveCleanWorktree); cleanRemoveErr fails each one.
+	cleanedWorktrees  []string
+	cleanRemoveErr    error
 	removedQueueTrees []string
 	// mergeDirs records where every merge was made; mergeErr fails them all.
 	mergeDirs []string
@@ -830,7 +849,7 @@ func newFakeGit(seq func() int) *fakeGit {
 		at:            map[string]int{},
 		defaultBranch: "master",
 		commonDirs:    map[string]string{},
-		refs:          map[string]string{},
+		refs:          map[string]string{"refs/heads/" + asyncBranch: "a5ync"},
 		trees:         map[string]string{},
 		refSeqs:       map[string][]string{},
 		changedIn:     map[string][][]string{},
@@ -1072,8 +1091,13 @@ func (g *fakeGit) ChangedPaths(_ context.Context, _, rangeSpec string) ([]string
 	return g.changed, g.changedErr
 }
 
-func (g *fakeGit) IsClean(context.Context, string) (bool, error) {
+func (g *fakeGit) IsClean(_ context.Context, dir string) (bool, error) {
 	g.record("is_clean")
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if clean, ok := g.cleanByDir[dir]; ok {
+		return clean, nil
+	}
 	return g.clean, g.cleanErr
 }
 
@@ -1211,8 +1235,15 @@ func (g *fakeGit) CommitPath(context.Context, string, string, string) (string, e
 	return "", errors.New("merge fake git: CommitPath is not a merge operation")
 }
 
-func (g *fakeGit) RemoveCleanWorktree(context.Context, string, string) error {
-	return errors.New("merge fake git: RemoveCleanWorktree is not a merge operation")
+func (g *fakeGit) RemoveCleanWorktree(_ context.Context, _, worktreeDir string) error {
+	g.record("remove_clean_worktree")
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.cleanRemoveErr != nil {
+		return g.cleanRemoveErr
+	}
+	g.cleanedWorktrees = append(g.cleanedWorktrees, worktreeDir)
+	return nil
 }
 
 func (g *fakeGit) PreserveWorktree(context.Context, string, string, string, string) (string, error) {
@@ -2122,6 +2153,13 @@ func (p harnessPolicy) Text(_ string, name string) (string, error) {
 
 // newHarness builds an orchestrator whose admission is driven a step at a time,
 // so a queue's ordering is asserted without waiting on a goroutine.
+// asyncBranch is the branch the suite's async requests land: one that exists
+// and that the requester does not have checked out.
+const asyncBranch = "agent-fix"
+
+// asyncSource is the source of the suite's async requests.
+var asyncSource = wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: asyncBranch}
+
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	h := &harness{

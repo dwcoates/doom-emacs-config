@@ -477,16 +477,17 @@ func TestRecoverReArmsARequestStillWaitingForItsTurn(t *testing.T) {
 }
 
 func TestRecoverKeepsAResumedMergesSource(t *testing.T) {
-	// Arrange: an admitted merge of another workspace's branch, interrupted.
+	// Arrange: an admitted merge of a branch already merged upstream, which is
+	// not the default source, interrupted.
 	h := newHarness(t)
-	h.registerOther(otherWorkspace, "ws-two", "other-branch")
-	source := wsm.MergeSource{Kind: wsm.MergeSourceWorkspace, Workspace: otherWorkspace}
-	// The request is recorded with the branch checked out in the other worktree.
-	recorded := source
-	recorded.Branch = "other-branch"
-	if err := h.request(t, source, RequestedByUser); err != nil {
+	if err := h.request(t, wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}, RequestedByUser); err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
+	before, _ := h.db.MergeQueue(context.Background(), h.repoKey())
+	if len(before) != 1 {
+		t.Fatalf("queue = %+v, want the one request", before)
+	}
+	recorded := before[0].Source
 	interruptMerge(t, h)
 
 	// Act.

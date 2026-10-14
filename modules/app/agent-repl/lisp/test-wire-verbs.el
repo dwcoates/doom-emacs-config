@@ -2147,165 +2147,95 @@ at."
 
 ;;;; ---- MergeWorkspaceRequest ----------------------------------------
 
-(defun agent-repl-test-wire-verbs--merge-json (source)
-  "Encode a MergeWorkspaceRequest for the fixture ref with SOURCE, as JSON."
+(defun agent-repl-test-wire-verbs--merge-json (mode)
+  "Encode a MergeWorkspaceRequest for the fixture ref in MODE, as JSON."
   (json-serialize (agent-repl-wire-encode-merge-workspace-request
-                   (list :workspace agent-repl-test-wire-verbs--ref :source source))))
+                   (list :workspace agent-repl-test-wire-verbs--ref :mode mode))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-request-own-branch-closing ()
-  "An in-place own-branch merge spells `keep_open' false explicitly."
+(ert-deftest agent-repl-test-wire-verbs-merge-request-one-shot-own-branch ()
+  "A one-shot of the requester's own branch spells the empty `ownBranch' landing."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-test-wire-verbs--merge-json
-                    '(:arm :own-branch :value (:run (:arm :in-place :value (:keep-open nil)))))
+                    '(:arm :one-shot :value (:landing (:arm :own-branch :value nil))))
                    (concat "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},"
-                           "\"source\":{\"ownBranch\":{\"inPlace\":{\"keepOpen\":false}}}}")))))
+                           "\"oneShot\":{\"ownBranch\":{}}}")))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-request-own-branch-keep-open ()
-  "An in-place own-branch merge that keeps the workspace open spells `keep_open' true."
+(ert-deftest agent-repl-test-wire-verbs-merge-request-one-shot-merged-upstream ()
+  "A one-shot already merged upstream spells the empty `mergedUpstream' landing."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-test-wire-verbs--merge-json
-                    '(:arm :own-branch :value (:run (:arm :in-place :value (:keep-open t)))))
+                    '(:arm :one-shot :value (:landing (:arm :merged-upstream :value nil))))
                    (concat "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},"
-                           "\"source\":{\"ownBranch\":{\"inPlace\":{\"keepOpen\":true}}}}")))))
+                           "\"oneShot\":{\"mergedUpstream\":{}}}")))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-request-own-branch-detached-whole-branch ()
-  "An async whole-branch merge spells its name and its empty `wholeBranch' arm."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-test-wire-verbs--merge-json
-                    '(:arm :own-branch
-                      :value (:run (:arm :detached
-                                    :value (:name "reconnect-fix"
-                                            :content (:arm :whole-branch))))))
-                   (concat "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},"
-                           "\"source\":{\"ownBranch\":{\"detached\":"
-                           "{\"name\":\"reconnect-fix\",\"wholeBranch\":{}}}}}")))))
-
-(ert-deftest agent-repl-test-wire-verbs-merge-request-own-branch-detached-pick ()
-  "An async pick merge spells its name and the pick's instruction."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-test-wire-verbs--merge-json
-                    '(:arm :own-branch
-                      :value (:run (:arm :detached
-                                    :value (:name "reconnect-fix"
-                                            :content (:arm :pick
-                                                      :value (:instruction "commit a1b2")))))))
-                   (concat "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},"
-                           "\"source\":{\"ownBranch\":{\"detached\":"
-                           "{\"name\":\"reconnect-fix\",\"pick\":{\"instruction\":\"commit a1b2\"}}}}}")))))
-
-(ert-deftest agent-repl-test-wire-verbs-merge-request-own-branch-detached-with-no-name-is-refused ()
-  "An async merge that names no merge workspace is refused before it is sent."
-  (agent-repl-test-wire-verbs--with-common
-    (should-error (agent-repl-test-wire-verbs--merge-json
-                   '(:arm :own-branch
-                     :value (:run (:arm :detached :value (:content (:arm :whole-branch)))))))))
-
-(ert-deftest agent-repl-test-wire-verbs-merge-request-own-branch-detached-with-no-content-is-refused ()
-  "An async merge that says neither whole branch nor pick is refused before it is sent."
-  (agent-repl-test-wire-verbs--with-common
-    (should-error (agent-repl-test-wire-verbs--merge-json
-                   '(:arm :own-branch :value (:run (:arm :detached :value (:name "fix"))))))))
-
-(ert-deftest agent-repl-test-wire-verbs-merge-request-own-branch-detached-blank-pick-is-refused ()
-  "A pick with an empty instruction is refused before it is sent."
-  (agent-repl-test-wire-verbs--with-common
-    (should-error (agent-repl-test-wire-verbs--merge-json
-                   '(:arm :own-branch
-                     :value (:run (:arm :detached
-                                   :value (:name "fix" :content (:arm :pick :value (:instruction ""))))))))))
-
-(ert-deftest agent-repl-test-wire-verbs-merge-request-own-branch-with-no-run-is-refused ()
-  "An own-branch merge that names no run is refused before it is sent."
-  (agent-repl-test-wire-verbs--with-common
-    (should-error (agent-repl-test-wire-verbs--merge-json '(:arm :own-branch :value nil)))))
-
-(ert-deftest agent-repl-test-wire-verbs-merge-request-workspace-source ()
-  "A workspace source carries the other workspace's ref verbatim."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-test-wire-verbs--merge-json
-                    '(:arm :workspace :value (:ref (:id "ws-2" :dir "/w/two"))))
-                   (concat "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},"
-                           "\"source\":{\"workspace\":{\"ref\":{\"id\":\"ws-2\",\"dir\":\"/w/two\"}}}}")))))
-
-(ert-deftest agent-repl-test-wire-verbs-merge-request-workspace-source-without-ref ()
-  "A workspace source naming no workspace is refused."
+(ert-deftest agent-repl-test-wire-verbs-merge-request-one-shot-with-no-landing-is-refused ()
+  "A one-shot naming no landing is refused before it is sent."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (cdr (should-error
-                         (agent-repl-test-wire-verbs--merge-json '(:arm :workspace :value nil))
+                         (agent-repl-test-wire-verbs--merge-json '(:arm :one-shot :value nil))
                          :type 'agent-repl-wire-error))
-                   '("MergeWorkspaceSourceWorkspace" "ref" "required field is unset")))))
+                   '("MergeWorkspaceOneShot" "landing" "oneof is unset")))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-request-branch-source ()
-  "A branch source carries the branch name as git spells it."
+(ert-deftest agent-repl-test-wire-verbs-merge-request-async-minimal ()
+  "An async merge spells its name and its branch, and nothing it was not given."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-test-wire-verbs--merge-json
-                    '(:arm :branch :value (:name "agent-1a2b/fix-reconnect")))
+                    '(:arm :async :value (:name "reconnect-fix" :branch "agent-1/fix")))
                    (concat "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},"
-                           "\"source\":{\"branch\":{\"name\":\"agent-1a2b/fix-reconnect\"}}}")))))
+                           "\"async\":{\"name\":\"reconnect-fix\",\"branch\":\"agent-1/fix\"}}")))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-request-branch-source-without-name ()
-  "A branch source naming no branch is refused."
+(ert-deftest agent-repl-test-wire-verbs-merge-request-async-with-everything ()
+  "An async merge spells its instruction, its one-shot workspace, its cleanup
+and its compaction when given."
   (agent-repl-test-wire-verbs--with-common
-    (should (equal (cdr (should-error
-                         (agent-repl-test-wire-verbs--merge-json '(:arm :branch :value nil))
-                         :type 'agent-repl-wire-error))
-                   '("MergeWorkspaceSourceBranch" "name" "required field is unset")))))
-
-(ert-deftest agent-repl-test-wire-verbs-merge-request-branch-source-empty-name ()
-  "A branch source with an empty name is refused."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (cdr (should-error
-                         (agent-repl-test-wire-verbs--merge-json '(:arm :branch :value (:name "")))
-                         :type 'agent-repl-wire-error))
-                   '("MergeWorkspaceSourceBranch" "name" "required string is empty")))))
-
-(ert-deftest agent-repl-test-wire-verbs-merge-request-merged-upstream-source ()
-  "A merged-upstream source is the empty message: presence IS the assertion."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-test-wire-verbs--merge-json '(:arm :merged-upstream :value nil))
+    (should (equal (agent-repl-test-wire-verbs--merge-json
+                    '(:arm :async :value (:name "reconnect-fix" :branch "agent-1/fix"
+                                          :instruction "rebase it"
+                                          :one-shot (:workspace (:id "ws-2" :dir "/w/two"))
+                                          :cleanup-worktree t :compact-after t)))
                    (concat "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},"
-                           "\"source\":{\"mergedUpstream\":{}}}")))))
+                           "\"async\":{\"name\":\"reconnect-fix\",\"branch\":\"agent-1/fix\","
+                           "\"instruction\":\"rebase it\","
+                           "\"oneShot\":{\"workspace\":{\"id\":\"ws-2\",\"dir\":\"/w/two\"}},"
+                           "\"cleanupWorktree\":true,\"compactAfter\":true}}")))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-request-merged-upstream-with-a-value ()
-  "A merged-upstream source carrying a value is refused: the message is empty."
+(ert-deftest agent-repl-test-wire-verbs-merge-request-async-refuses-what-it-lacks ()
+  "An async merge missing its name or its branch, or with a blank
+instruction, or a one-shot naming no workspace, is refused before it is sent."
   (agent-repl-test-wire-verbs--with-common
-    (should (equal (cdr (should-error
-                         (agent-repl-test-wire-verbs--merge-json
-                          '(:arm :merged-upstream :value (:name "x")))
-                         :type 'agent-repl-wire-error))
-                   '("MergeWorkspaceSourceMergedUpstream" - "expected an empty message")))))
+    (dolist (case '(((:branch "b") "MergeWorkspaceAsync" "name" "required field is unset")
+                    ((:name "fix") "MergeWorkspaceAsync" "branch" "required field is unset")
+                    ((:name "fix" :branch "b" :instruction "") "MergeWorkspaceAsync" "instruction" "required string is empty")
+                    ((:name "fix" :branch "b" :one-shot (:workspace nil)) "MergeWorkspaceAsyncOneShot" "workspace" "required field is unset")))
+      (pcase-let ((`(,value . ,want) case))
+        (should (equal (cdr (should-error
+                             (agent-repl-test-wire-verbs--merge-json (list :arm :async :value value))
+                             :type 'agent-repl-wire-error))
+                       want))))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-request-without-source ()
-  "A merge request naming no source is refused: the source is REQUIRED."
+(ert-deftest agent-repl-test-wire-verbs-merge-request-without-mode ()
+  "A merge request naming no mode is refused: the mode is REQUIRED."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (cdr (should-error
                          (agent-repl-wire-encode-merge-workspace-request
                           (list :workspace agent-repl-test-wire-verbs--ref))
                          :type 'agent-repl-wire-error))
-                   '("MergeWorkspaceRequest" "source" "required field is unset")))))
+                   '("MergeWorkspaceRequest" "mode" "required field is unset")))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-request-unknown-source-arm ()
-  "A source arm the contract does not declare is refused."
+(ert-deftest agent-repl-test-wire-verbs-merge-request-unknown-mode-arm ()
+  "A mode arm the contract does not declare is refused."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (cdr (should-error
-                         (agent-repl-test-wire-verbs--merge-json '(:arm :landing-workspace :value nil))
+                         (agent-repl-test-wire-verbs--merge-json '(:arm :keep-open :value nil))
                          :type 'agent-repl-wire-error))
-                   '("MergeWorkspaceSource" "source" "unknown oneof arm")))))
-
-(ert-deftest agent-repl-test-wire-verbs-merge-request-source-without-arm ()
-  "A source with no arm set is refused."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (cdr (should-error
-                         (agent-repl-test-wire-verbs--merge-json '(:value nil))
-                         :type 'agent-repl-wire-error))
-                   '("MergeWorkspaceSource" "source" "oneof is unset")))))
+                   '("MergeWorkspaceRequest" "mode" "unknown oneof arm")))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-request-without-workspace ()
   "A merge request naming no requesting workspace is refused."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (cdr (should-error
                          (agent-repl-wire-encode-merge-workspace-request
-                          (list :source '(:arm :own-branch :value (:keep-open nil))))
+                          (list :mode '(:arm :one-shot :value (:landing (:arm :own-branch :value nil)))))
                          :type 'agent-repl-wire-error))
                    '("MergeWorkspaceRequest" "workspace" "required field is unset")))))
 
@@ -2382,13 +2312,20 @@ carries."
                     (agent-repl-test-wire-verbs--parse "{\"alreadyMerging\":{}}"))
                    '(:cause (:arm :already-merging :value nil))))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-error-unknown-source-workspace-arm ()
-  "MergeWorkspaceError's `unknown_source_workspace' arm decodes with everything
+(ert-deftest agent-repl-test-wire-verbs-merge-error-unknown-one-shot-workspace-arm ()
+  "MergeWorkspaceError's `unknown_one_shot_workspace' arm decodes with everything
 it carries."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-merge-workspace-error
-                    (agent-repl-test-wire-verbs--parse "{\"unknownSourceWorkspace\":{}}"))
-                   '(:cause (:arm :unknown-source-workspace :value nil))))))
+                    (agent-repl-test-wire-verbs--parse "{\"unknownOneShotWorkspace\":{}}"))
+                   '(:cause (:arm :unknown-one-shot-workspace :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-error-branch-checked-out-in-requester-arm ()
+  "MergeWorkspaceError's `branch_checked_out_in_requester' arm decodes."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-merge-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"branchCheckedOutInRequester\":{}}"))
+                   '(:cause (:arm :branch-checked-out-in-requester :value nil))))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-error-unknown-branch-arm ()
   "MergeWorkspaceError's `unknown_branch' arm decodes with everything it
@@ -2418,16 +2355,22 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_merge_workspace.pb.go" "MergeWorkspaceError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "noLayoutFacts" "sessionDeleted" "alreadyQueued" "alreadyMerging" "unknownSourceWorkspace" "unknownBranch" "nameTaken")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "noLayoutFacts" "sessionDeleted" "alreadyQueued" "alreadyMerging" "unknownOneShotWorkspace" "unknownBranch" "nameTaken" "branchCheckedOutInRequester")
                        #'string<))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-source-arms-pinned ()
-  "MergeWorkspaceSource's arm set is exactly what the frozen schema declares."
+(ert-deftest agent-repl-test-wire-verbs-merge-mode-arms-pinned ()
+  "MergeWorkspaceRequest's mode arm set is exactly what the frozen schema declares."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
-                        "agentrepl/v1/endpoint_merge_workspace.pb.go" "MergeWorkspaceSource")
+                        "agentrepl/v1/endpoint_merge_workspace.pb.go" "MergeWorkspaceRequest")
                        #'string<)
-                 (sort (list "ownBranch" "workspace" "branch" "mergedUpstream")
-                       #'string<))))
+                 (sort (list "oneShot" "async") #'string<))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-one-shot-landing-arms-pinned ()
+  "MergeWorkspaceOneShot's landing arm set is exactly what the frozen schema declares."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_merge_workspace.pb.go" "MergeWorkspaceOneShot")
+                       #'string<)
+                 (sort (list "ownBranch" "mergedUpstream") #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-restart-error-unknown-workspace-arm ()
   "RestartWorkspaceError's `unknown_workspace' arm decodes with everything it

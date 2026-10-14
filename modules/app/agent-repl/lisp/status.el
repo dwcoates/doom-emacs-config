@@ -808,7 +808,7 @@ proto/vocab/render-colors.json\='s `gate_glyphs\=' section names WHICH
 glyph a gate on the user gets (exclaim, ask, snowflake); this is the tab
 bar\='s mapping, the same emoji the webapp sidebar draws in place of its
 dot (owner requests, 2026-10-11 and 2026-10-13).  The arm keeps its
-green, so the tab reads `[N] ❗ name\=', `[N] ❓ name\=' or `[N] ❄️ name\='.")
+green, so the tab reads `❗ [N] name\=', `❓ [N] name\=' or `❄️ [N] name\='.")
 
 (defconst agent-repl-status-dot-glyph "●"
   "The status dot, drawn on the tab bar only where its ink differs from
@@ -1641,10 +1641,11 @@ SPEC is a plist with keys :bg :fg :bracket-fg :underline :weight, and
 face rather than the name\='s (`agent-repl--tab-spec-async-merge\='; see
 `agent-repl--tab-palette' docstring).  NAME-FACE is applied to the
 workspace-name portion.  LABEL is the bracket content (the tab number).
-IMG-STR, when non-nil, is the badge run (priority label and glyph)
-inserted between bracket and name with a single space on each side so it
-does not butt up against the name's background.  A blank IMG-STR is
-treated as no badge at all.
+IMG-STR, when non-nil, is the badge run (priority label and glyph),
+drawn BEFORE `[N]\=' as `<badge> [N] <name>\=' (owner request,
+2026-10-13), so it never splits the `[N] <name>\=' entry: the space
+between the badge and `[N]\=' carries no background, so the entry\='s
+paint starts at `[N]\='.  A blank IMG-STR is treated as no badge at all.
 
 EXACTLY ONE SPACE SEPARATES [N] FROM THE NAME, always (owner ruling,
 2026-09-13).  The gap is emitted HERE, as one space carrying the name's
@@ -1695,12 +1696,10 @@ whenever an entry landed at a wrap (or the final row's) end."
          (text           (string-trim-right padded))
          (fill           (substring padded (length text))))
     (concat (propertize " " 'face separator-face)
+            (when badge
+              (concat badge (propertize " " 'face separator-face)))
             (propertize (format agent-repl-tab-bracket-format label) 'face bracket-face)
-            (if badge
-                (concat (propertize " " 'face (and bracket-gap bracket-face))
-                        badge
-                        (propertize " " 'face name-face))
-              (propertize " " 'face (if bracket-gap bracket-face name-face)))
+            (propertize " " 'face (if bracket-gap bracket-face name-face))
             (propertize text 'face name-face*)
             (propertize fill 'face name-face)
             " ")))
@@ -1764,7 +1763,7 @@ themed frame and on the no-theme sandbox alike."
       (propertize " " 'display img))))
 
 (defun agent-repl--tab-badge-str (name arm)
-  "Return the run drawn BEFORE NAME's name region for ARM, or nil.
+  "Return the run drawn BEFORE NAME's `[N]' for ARM, or nil.
 
 Two things live there, in this order: the roster's PRIORITY BADGE label
 \(resolver-composed and drawn verbatim; ordering is already the
@@ -1776,8 +1775,8 @@ alone.
 
 A BLANK PART IS NO PART.  A roster row can carry a priority label that is
 present but empty, and joining that into the run produced a run made of
-nothing but spaces — which the renderer then padded on both sides and drew
-as extra gap between `[N]' and the name.  Blank parts are dropped, and a
+nothing but spaces — which the renderer then drew as an empty gap before
+the entry.  Blank parts are dropped, and a
 run left with no parts is nil."
   (let* ((row (and (fboundp 'agent-repl-roster-row-for-ws)
                    (agent-repl-roster-row-for-ws name)))

@@ -8,7 +8,6 @@ import (
 
 	"connectrpc.com/connect"
 
-	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -53,7 +52,7 @@ func TestTheMergeBubbleIsPinnedLastFromItsQueueingAndSettlesWhereItLands(t *test
 		return r.Operation == "daemon.sessionwatcher.live_work" && ok && agents == 1
 	})
 	harness.CommitWork(t, f.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws, Source: harness.OwnBranch(true)})); err != nil {
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(harness.MergeRequest(f.ws, harness.OneShot()))); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
 	f.shim.ExpectKillTurn()

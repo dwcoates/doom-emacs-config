@@ -115,14 +115,9 @@ describe("the requests each verb is", () => {
     expect(buildMergeWorkspaceRequest(TARGET_WS).workspace).toEqual(TARGET_WS);
   });
 
-  it("asks MergeWorkspace to merge the row's own branch", () => {
-    expect(buildMergeWorkspaceRequest(TARGET_WS).source?.source.case).toBe("ownBranch");
-  });
-
-  it("asks MergeWorkspace to merge in place and close the workspace once its branch lands", () => {
-    const source = buildMergeWorkspaceRequest(TARGET_WS).source?.source;
-    const run = source?.case === "ownBranch" ? source.value.run : undefined;
-    expect(run?.case === "inPlace" ? run.value.keepOpen : "not in place").toBe(false);
+  it("asks MergeWorkspace for a one-shot of the row's own branch", () => {
+    const mode = buildMergeWorkspaceRequest(TARGET_WS).mode;
+    expect(mode.case === "oneShot" ? mode.value.landing.case : mode.case).toBe("ownBranch");
   });
 
   it("echoes the row's workspace on the one-mode restart request", () => {

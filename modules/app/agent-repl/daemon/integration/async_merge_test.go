@@ -64,10 +64,10 @@ func TestAnAsyncMergeLandsWithItsBubblePlacedInTheRequestersFeed(t *testing.T) {
 	s := newSourcedRepo(t)
 	root := s.f.watchRootFeed()
 	roster := s.d.WatchRoster()
-	harness.CommitWork(t, s.f.ws.GetDir())
+	s.repo.AddBranch("agent-fix")
 
 	// Act.
-	s.mergeAs(t, harness.OwnBranchAsync("async-fix"))
+	s.mergeAs(t, harness.Async("async-fix", "agent-fix"))
 	merge := awaitRow(t, s.f, root, "the async merge's terminal", func(row *frontendv1.FeedRow) bool {
 		m := row.GetActivity().GetMerge()
 		return m.GetSuccess() != nil || m.GetError() != nil
@@ -100,15 +100,15 @@ func TestAnAsyncMergeWorkspaceIsHiddenUntilItsMergeFailsAndThenRevealed(t *testi
 	t.Parallel()
 	// Arrange: replaying the merge workspace's branch conflicts.
 	s := newSourcedRepo(t)
-	harness.CommitWork(t, s.f.ws.GetDir())
+	s.repo.AddBranch("agent-fix")
 	s.repo.CommitIn(s.repo.Dir, "main.txt", "moved\n")
-	s.repo.ScriptRebaseConflict("async-fix", 1, "work.txt")
+	s.repo.ScriptRebaseConflict("async-fix", 1, "branch.txt")
 	// The sweep covers every test; the declared records are evidence of the
 	// merge conflict the test stages.
 	s.d.ExpectWarnings("daemon.gitclient.merge_no_ff")
 
 	// Act: the merge workspace's agent is briefed on the conflict, and gives up.
-	s.mergeAs(t, harness.OwnBranchAsync("async-fix"))
+	s.mergeAs(t, harness.Async("async-fix", "agent-fix"))
 	mergeWS := mergeWorkspaceOf(t, s.d, s.f.ws)
 	shim := s.d.Shim(mergeWS)
 	shim.ExpectStartTurn()
@@ -143,16 +143,16 @@ func TestAnAsyncMergeWorkspaceIsHiddenUntilItsMergeFailsAndThenRevealed(t *testi
 	t.Fatal("the revealed merge workspace has no tab")
 }
 
-func TestAnAsyncPickStreamsItsAgentIntoThePickTabAndThenLands(t *testing.T) {
+func TestAnAsyncInstructionStreamsItsAgentIntoTheResolvingTabAndThenLands(t *testing.T) {
 	t.Parallel()
-	// Arrange: the requester's branch carries the work to pick.
+	// Arrange: a branch carrying the work to resolve.
 	s := newSourcedRepo(t)
 	root := s.f.watchRootFeed()
-	harness.CommitWork(t, s.f.ws.GetDir())
+	s.repo.AddBranch("agent-fix")
 
-	// Act: the merge workspace's agent is briefed with the instruction, picks
-	// (a commit lands in its worktree), and ends its turn.
-	s.mergeAs(t, harness.OwnBranchPick("pick-fix", "the clean work"))
+	// Act: the merge workspace's agent is briefed with the instruction,
+	// resolves (a commit lands in its worktree), and ends its turn.
+	s.mergeAs(t, harness.Async("pick-fix", "agent-fix", harness.WithInstruction("the clean work")))
 	mergeWS := mergeWorkspaceOf(t, s.d, s.f.ws)
 	shim := s.d.Shim(mergeWS)
 	brief := shim.ExpectStartTurn()
@@ -160,8 +160,8 @@ func TestAnAsyncPickStreamsItsAgentIntoThePickTabAndThenLands(t *testing.T) {
 	head := s.f.awaitRowInFeed(nil, "the async merge's head", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge() != nil
 	})
-	pickTab := s.f.awaitRowInFeed(head.GetId(), "the pick tab, live", func(row *frontendv1.FeedRow) bool {
-		return row.GetMergeTab().GetPick().GetLive() != nil
+	pickTab := s.f.awaitRowInFeed(head.GetId(), "the resolving tab, live", func(row *frontendv1.FeedRow) bool {
+		return row.GetMergeTab().GetResolving().GetLive() != nil
 	})
 	harness.CommitWork(t, mergeWS.GetDir())
 	pushConcludedTurn(shim, mainAgent, "picked")
@@ -177,8 +177,8 @@ func TestAnAsyncPickStreamsItsAgentIntoThePickTabAndThenLands(t *testing.T) {
 	if mirrored.GetTurn() != nil {
 		t.Fatalf("the mirrored row carries turn %v, want none of the requester's", mirrored.GetTurn())
 	}
-	s.f.awaitRowInFeed(head.GetId(), "the pick tab, settled succeeded", func(row *frontendv1.FeedRow) bool {
-		return row.GetMergeTab().GetPick().GetSettled().GetSucceeded() != nil
+	s.f.awaitRowInFeed(head.GetId(), "the resolving tab, settled succeeded", func(row *frontendv1.FeedRow) bool {
+		return row.GetMergeTab().GetResolving().GetSettled().GetSucceeded() != nil
 	})
 	merge := awaitRow(t, s.f, root, "the async merge's terminal", func(row *frontendv1.FeedRow) bool {
 		m := row.GetActivity().GetMerge()

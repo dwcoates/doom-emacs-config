@@ -17,8 +17,8 @@
  * workspace, and points this page at the child — because a merge needs
  * something to merge. Nothing here touches real git.
  *
- * ONE MERGE, ENQUEUED ONCE, IN `beforeAll`, of the workspace's own branch
- * kept open, so the page's workspace outlives the landing. A merge is not a step the page can
+ * ONE MERGE, ENQUEUED ONCE, IN `beforeAll`: an ASYNC merge of the default
+ * branch, which never closes the page's workspace, so it outlives the landing. A merge is not a step the page can
  * repeat: `MergeWorkspace` enqueues, and "life thereafter is the feed's merge
  * bubble" — a second enqueue mid-merge is a different subject (the merge
  * queue's, which the Go area owns). It is also LIVE while it runs, which keeps
@@ -48,12 +48,11 @@ beforeAll(async () => {
   app = await bootLayer();
 
   // Enqueue the merge through the app's OWN verb, then wait for the bubble the
-  // daemon draws for it. The request names its source -- the workspace's own
-  // branch, KEPT OPEN, so the page's own workspace is not closed under it when
-  // the merge lands.
+  // daemon draws for it. The request is ASYNC, of the default branch (already
+  // on its target), so the page's own workspace is never closed under it.
   const response = await app.ctx.client.mergeWorkspace({
     workspace: app.ctx.workspace,
-    source: { source: { case: "ownBranch", value: { run: { case: "inPlace", value: { keepOpen: true } } } } },
+    mode: { case: "async", value: { name: "wl-merge-main", branch: "main" } },
   });
   expect(response.result.case, `MergeWorkspace answered ${response.result.case}`).toBe("success");
   await awaitDrawn(app, "the merge bubble", () => mergeRows().length > 0);

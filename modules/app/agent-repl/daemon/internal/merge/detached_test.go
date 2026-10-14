@@ -118,6 +118,10 @@ func (h *harness) registerMergeWorkspace(requester ids.WorkspaceID, request wsm.
 func (h *harness) registerMergeWorkspaceFor(origin wsm.MergeOrigin, branch string) wsm.Workspace {
 	dir := h.t.TempDir()
 	requester := origin.Requester
+	// THE REAL FORK RECORDS THE COMMIT IT CUT the merge workspace at.
+	if origin.ForkHead == "" {
+		origin.ForkHead = "f0rkhead"
+	}
 	ws := wsm.Workspace{ID: theMergeWorkspace, Name: "feature-merge", Dir: dir, Branch: "feature-merge", Repo: theRepository,
 		Parent: &requester, MergeOf: &origin}
 	h.db.mu.Lock()
@@ -160,7 +164,7 @@ func (f *fakeDB) HandOffDetachedMerge(_ context.Context, repo wsm.RepoKey, reque
 // async, as BY asks, under the name "reconnect-fix".
 func requestDetached(t *testing.T, h *harness, by Requester) error {
 	t.Helper()
-	return h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, By: by, Detached: &DetachedRun{Name: "reconnect-fix"}})
+	return h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource, By: by, Detached: &DetachedRun{Name: "reconnect-fix"}})
 }
 
 // entryOf answers ws's queue entry, false when it has none.
@@ -356,11 +360,11 @@ func TestAnAsyncRequestIsHandedToTheMergeWorkspaceForkedUnderItsName(t *testing.
 		t.Fatalf("Enqueue: %v", err)
 	}
 
-	// Assert: the fork was named as asked and cut from the requester's branch,
+	// Assert: the fork was named as asked and cut from the request's branch,
 	// the requester holds no entry, and the merge workspace's own in-place
 	// merge is in line.
-	if forks := h.detached.forks; len(forks) != 1 || forks[0] != string(theWorkspace)+":reconnect-fix:feature" {
-		t.Fatalf("forks = %v, want one named reconnect-fix of the requester's branch", forks)
+	if forks := h.detached.forks; len(forks) != 1 || forks[0] != string(theWorkspace)+":reconnect-fix:"+asyncBranch {
+		t.Fatalf("forks = %v, want one named reconnect-fix of the request's branch", forks)
 	}
 	if _, ok := h.entryOf(theWorkspace); ok {
 		t.Fatal("the requester still holds a queue entry after the hand-off")
@@ -379,7 +383,7 @@ func TestAnAsyncRequestThatCompactsAfterRecordsTheAskOnItsEntry(t *testing.T) {
 	h.mu.Unlock()
 
 	// Act: an agent's request, still waiting on the turn that asked.
-	err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch},
+	err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource,
 		By: RequestedByAgent, Detached: &DetachedRun{Name: "reconnect-fix", CompactAfter: true}})
 
 	// Assert
@@ -406,7 +410,7 @@ func TestAnAsyncRequestsHandOffForksWithItsCompactAfterAsk(t *testing.T) {
 			h := newHarness(t)
 
 			// Act: the user's ask is put in line at once, which hands it off.
-			err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch},
+			err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource,
 				By: RequestedByUser, Detached: &DetachedRun{Name: "reconnect-fix", CompactAfter: tt.compactAfter}})
 
 			// Assert: the fork's origin names the requester, the request, and

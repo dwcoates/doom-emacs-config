@@ -12,12 +12,12 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-// This file is an async merge's PICK (agentrepl.v1
-// MergeWorkspaceSourceOwnBranchDetachedPick): the first turn of a merge
-// workspace forked onto the target branch's tip, its agent cherry-picking the
-// changes the requesting agent named from the requester's branch. It runs
-// BEFORE the merge joins the queue, so the queue never waits on an agent
-// picking, and it is the bubble's first tab (frontend.v1.FeedMergeTabPick).
+// This file is an async merge's RESOLVING TURN, called the pick here
+// (agentrepl.v1.MergeWorkspaceAsync.instruction): the first turn of a merge
+// workspace forked onto the merge's branch tip, its agent preparing that
+// branch as the requesting agent's instruction says. It runs BEFORE the merge
+// joins the queue, so the queue never waits on an agent resolving, and it is
+// the bubble's first tab (frontend.v1.FeedMergeTabResolving).
 //
 // THE PICK IS JUDGED BY THE TREE, never by the agent's word: it succeeded when
 // its turn ended unfailed with at least one commit ahead of the target and a
@@ -32,28 +32,11 @@ import (
 // BriefPick is the pick agent's brief.
 const BriefPick = "merge-pick"
 
-// pickBase answers the branch an async pick merge's workspace is forked onto:
-// the requester's merge target, as its target checkout has it checked out.
-func (o *orchestrator) pickBase(ctx context.Context, requester ids.WorkspaceID) (string, error) {
-	job, err := o.layoutFor(ctx, requester)
-	if err != nil {
-		return "", err
-	}
-	branch, err := o.deps.Git.CurrentBranch(ctx, job.Layout.TargetDir)
-	if err != nil {
-		return "", fmt.Errorf("merge: reading the target branch checked out in %s: %w", job.Layout.TargetDir, err)
-	}
-	if branch == "" {
-		return "", fmt.Errorf("merge: the target checkout %s has no branch checked out, so there is no target to pick onto", job.Layout.TargetDir)
-	}
-	return branch, nil
-}
-
 // pick is one merge workspace's pick, from its start to its judgement.
 type pick struct {
 	// ws is the merge workspace.
 	ws ids.WorkspaceID
-	// requester is the workspace whose branch the changes are picked from.
+	// requester is the workspace that asked for the merge.
 	requester ids.WorkspaceID
 	// repo is the queue the merge joins once the pick has succeeded.
 	repo wsm.RepoKey
@@ -226,10 +209,12 @@ func (o *orchestrator) runPick(ctx context.Context, p *pick, resumed bool) {
 // failure is recorded: the brief still states the instruction.
 func (o *orchestrator) pickBriefValues(ctx context.Context, p *pick) map[string]string {
 	values := map[string]string{"pick_instruction": p.instruction}
-	if record, err := o.deps.DB.Workspace(ctx, p.requester); err == nil {
-		values["source_branch"] = record.Branch
+	if record, err := o.deps.DB.Workspace(ctx, p.ws); err == nil && record.MergeOf != nil {
+		values["fork_head"] = record.MergeOf.ForkHead
+	} else if err != nil {
+		o.log(ctx, p.ws).Error("daemon.merge.pick", "could not read the merge workspace for the resolving brief", dlog.Context{"workspace": string(p.ws), "error": err.Error()})
 	} else {
-		o.log(ctx, p.ws).Error("daemon.merge.pick", "could not read the requester for the pick's brief", dlog.Context{"workspace": string(p.ws), "requester": string(p.requester), "error": err.Error()})
+		o.log(ctx, p.ws).Error("daemon.merge.pick", "the merge workspace records no origin for the resolving brief", dlog.Context{"workspace": string(p.ws)})
 	}
 	if job, err := o.layoutFor(ctx, p.ws); err == nil {
 		values["worktree_dir"] = job.Layout.SourceDir
@@ -310,17 +295,17 @@ func (o *orchestrator) pickFailed(ctx context.Context, p *pick, summary string) 
 	o.forget(p.ws)
 }
 
-// pickTab builds the pick tab at its badge.
+// pickTab builds the resolving tab (frontend.v1.FeedMergeTabResolving) at its badge.
 func pickTab(st tabState) *frontendv1.FeedMergeTab {
-	inner := &frontendv1.FeedMergeTabPick{}
+	inner := &frontendv1.FeedMergeTabResolving{}
 	if waiting := st.waitingOnUser(); waiting != nil {
-		inner.State = &frontendv1.FeedMergeTabPick_WaitingOnUser{WaitingOnUser: waiting}
+		inner.State = &frontendv1.FeedMergeTabResolving_WaitingOnUser{WaitingOnUser: waiting}
 	} else if live, settled := st.badge(); live != nil {
-		inner.State = &frontendv1.FeedMergeTabPick_Live{Live: live}
+		inner.State = &frontendv1.FeedMergeTabResolving_Live{Live: live}
 	} else {
-		inner.State = &frontendv1.FeedMergeTabPick_Settled{Settled: settled}
+		inner.State = &frontendv1.FeedMergeTabResolving_Settled{Settled: settled}
 	}
-	return &frontendv1.FeedMergeTab{Kind: &frontendv1.FeedMergeTab_Pick{Pick: inner}}
+	return &frontendv1.FeedMergeTab{Kind: &frontendv1.FeedMergeTab_Resolving{Resolving: inner}}
 }
 
 // redrawPick draws merge workspace WS's live pick tab again at the waiting

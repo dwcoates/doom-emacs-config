@@ -572,7 +572,7 @@ export type CreateWorkspaceError = Message<"agentrepl.v1.CreateWorkspaceError"> 
     /**
      * The supplied name is reserved by a pending async merge, whose merge
      * workspace will be created under it when the requesting turn ends
-     * (agentrepl.v1.MergeWorkspaceSourceOwnBranchDetached.name).
+     * (agentrepl.v1.MergeWorkspaceAsync.name).
      *
      * @generated from field: agentrepl.v1.CreateWorkspaceNameReserved name_reserved = 18;
      */

@@ -212,11 +212,10 @@ type Request struct {
 	// By says who asked, which decides whether the admission may displace the
 	// requester's turn in flight (see Requester).
 	By Requester
-	// Detached runs an own-branch merge ASYNC, in a hidden MERGE WORKSPACE
+	// Detached runs a named branch's merge ASYNC, in a hidden MERGE WORKSPACE
 	// forked from the requester instead of in the requester
-	// (agentrepl.v1.MergeWorkspaceSourceOwnBranchDetached); nil runs it SYNC,
-	// in place. It is legal on the own-branch source alone, which never keeps
-	// the requester open.
+	// (agentrepl.v1.MergeWorkspaceAsync); nil runs it SYNC, in place. It is
+	// legal on the branch source alone.
 	Detached *DetachedRun
 	// OneShot ANNOUNCES the requester a one-shot: its own branch merges in
 	// place once the requesting turn ends and the requester closes once it
@@ -232,20 +231,29 @@ type DetachedRun struct {
 	// Name is the merge workspace's name as the requesting agent chose it,
 	// unprefixed. It is checked and reserved when the request is recorded.
 	Name string
-	// Pick is the instruction naming which changes of the requester's branch
-	// the merge lands, empty when the whole branch is merged.
+	// Pick is the requesting agent's instruction for preparing the branch
+	// before it joins the queue (agentrepl.v1.MergeWorkspaceAsync.instruction),
+	// empty when the branch lands as it is.
 	Pick string
 	// CompactAfter compacts the requester's conversation once the merge
-	// lands (agentrepl.v1.MergeWorkspaceSourceOwnBranchDetached.compact_after).
+	// lands (agentrepl.v1.MergeWorkspaceAsync.compact_after).
 	CompactAfter bool
+	// CloseOnLanding is another workspace the merge closes once it lands
+	// (agentrepl.v1.MergeWorkspaceAsync.one_shot), empty when it closes none.
+	CloseOnLanding ids.WorkspaceID
+	// CleanupWorktree removes, once the merge lands, the worktree that had
+	// the branch checked out when the request was accepted
+	// (agentrepl.v1.MergeWorkspaceAsync.cleanup_worktree).
+	CleanupWorktree bool
 }
 
 // NewDetachedRun is the async run an ingress reads off a request: the merge
-// workspace's name and the pick instruction with their surrounding space
-// trimmed, and the compact-after ask as given. Every ingress builds its run
-// here, so the rpc and the command file cannot read the same request apart.
-func NewDetachedRun(name, pick string, compactAfter bool) *DetachedRun {
-	return &DetachedRun{Name: strings.TrimSpace(name), Pick: strings.TrimSpace(pick), CompactAfter: compactAfter}
+// workspace's name and the instruction with their surrounding space trimmed,
+// and the landing asks as given. Every ingress builds its run here, so the
+// rpc and the command file cannot read the same request apart.
+func NewDetachedRun(name, instruction string, compactAfter bool, closeOnLanding ids.WorkspaceID, cleanupWorktree bool) *DetachedRun {
+	return &DetachedRun{Name: strings.TrimSpace(name), Pick: strings.TrimSpace(instruction), CompactAfter: compactAfter,
+		CloseOnLanding: closeOnLanding, CleanupWorktree: cleanupWorktree}
 }
 
 // DetachedMerges forks the merge workspace a detached request runs in, and
@@ -305,6 +313,9 @@ type DetachedOutcome struct {
 	// releases): the requester's roster is told the merge ended, and its
 	// conversation is not handed the end back, since nothing failed.
 	Requested bool
+	// InPlace marks the end of a SYNC merge, which ran in the workspace it is
+	// handed back to rather than in a merge workspace.
+	InPlace bool
 }
 
 // DetachedOutcomeKind names how a detached merge ended.

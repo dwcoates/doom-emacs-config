@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -320,8 +321,12 @@ func (i *ingress) apply(ctx context.Context, log dlog.Logger, file string, index
 		// turn: it is put in line once that turn ends, and never displaces
 		// the turn in flight (merge.Requester).
 		var detached *merge.DetachedRun
-		if entry.Detached {
-			detached = merge.NewDetachedRun(entry.DetachedName, entry.Pick, entry.CompactAfter)
+		if entry.AsyncName != "" {
+			closes, err := i.closeOnLanding(ctx, ws, entry)
+			if err != nil {
+				return err
+			}
+			detached = merge.NewDetachedRun(entry.AsyncName, entry.Instruction, entry.CompactAfter, closes, entry.CleanupWorktree)
 		}
 		return i.deps.Merge.Enqueue(ctx, merge.Request{Workspace: ws, Source: source, By: merge.RequestedByAgent, Detached: detached, OneShot: entry.OneShot})
 	case TypeMergeEvict:
@@ -392,27 +397,36 @@ func (i *ingress) mergeSource(ctx context.Context, requester ids.WorkspaceID, en
 	return source, nil
 }
 
-// mergeSourceArm reads a merge entry's source arm. Another workspace is keyed
-// by its worktree path, and a path no workspace is registered at is the
-// contract's unknown_source_workspace refusal.
-func (i *ingress) mergeSourceArm(ctx context.Context, requester ids.WorkspaceID, entry Entry) (wsm.MergeSource, error) {
+// mergeSourceArm reads a merge entry's source: an async merge's named branch,
+// or a one-shot's own branch, already merged upstream when pr_was_merged says
+// so.
+func (i *ingress) mergeSourceArm(_ context.Context, _ ids.WorkspaceID, entry Entry) (wsm.MergeSource, error) {
 	switch {
-	case entry.Branch != "":
-		return wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: entry.Branch}, nil
+	case entry.AsyncName != "":
+		return wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: strings.TrimSpace(entry.Branch)}, nil
 	case entry.PRWasMerged:
 		return wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}, nil
-	case entry.SourceDir != "":
-		if i.deps.DB == nil {
-			return wsm.MergeSource{}, fmt.Errorf("this entry names a source directory and the ingress has no state client to resolve it with")
-		}
-		record, err := i.deps.DB.WorkspaceByDir(ctx, entry.SourceDir)
-		if err != nil {
-			return wsm.MergeSource{}, &merge.RefusalError{Arm: merge.ArmUnknownSourceWorkspace, Workspace: requester,
-				Reason: fmt.Sprintf("no workspace is registered at %q: %v", entry.SourceDir, err)}
-		}
-		return wsm.MergeSource{Kind: wsm.MergeSourceWorkspace, Workspace: record.ID}, nil
 	}
-	return wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, KeepOpen: entry.KeepOpen}, nil
+	return wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, nil
+}
+
+// closeOnLanding resolves an async entry's close_dir to the workspace
+// registered there, empty when the entry names none. A directory no
+// workspace is registered at is the contract's unknown_one_shot_workspace
+// refusal.
+func (i *ingress) closeOnLanding(ctx context.Context, requester ids.WorkspaceID, entry Entry) (ids.WorkspaceID, error) {
+	if entry.CloseDir == "" {
+		return "", nil
+	}
+	if i.deps.DB == nil {
+		return "", fmt.Errorf("this entry names a workspace to close and the ingress has no state client to resolve it with")
+	}
+	record, err := i.deps.DB.WorkspaceByDir(ctx, entry.CloseDir)
+	if err != nil {
+		return "", &merge.RefusalError{Arm: merge.ArmUnknownOneShotWorkspace, Workspace: requester,
+			Reason: fmt.Sprintf("no workspace is registered at %q: %v", entry.CloseDir, err)}
+	}
+	return record.ID, nil
 }
 
 // applyMergeEvict maps a merge_evict entry onto the orchestrator's Evict, the

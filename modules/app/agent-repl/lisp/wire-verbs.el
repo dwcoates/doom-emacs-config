@@ -1641,114 +1641,76 @@ teardown\='s end arrives on the WatchDaemon progress channel."
   "Encode MergeWorkspaceRequest's `workspace' use site from REF."
   (agent-repl-wire-encode-workspace-ref ref))
 
-(defun agent-repl-wire-encode-merge-workspace-source-own-branch-in-place (value)
-  "Encode MergeWorkspaceSourceOwnBranchInPlace from plist VALUE (:keep-open BOOL).
-`keep_open' is spelled EXPLICITLY on the wire even when false: whether the
-requesting workspace closes once its branch lands is the request\='s own
-statement, never an omitted default."
-  (list (cons 'keepOpen
-              (agent-repl-wire-verbs--encode-bool (plist-get value :keep-open)))))
+(defun agent-repl-wire-encode-merge-workspace-one-shot-own-branch (value)
+  "Encode MergeWorkspaceOneShotOwnBranch from VALUE.  Empty: the branch is
+the requester\='s own."
+  (agent-repl-wire--encode-empty "MergeWorkspaceOneShotOwnBranch" value))
 
-(defun agent-repl-wire-encode-merge-workspace-source-own-branch-detached-whole-branch (value)
-  "Encode MergeWorkspaceSourceOwnBranchDetachedWholeBranch from VALUE.
-Empty: the requester\='s whole branch is merged."
-  (agent-repl-wire--encode-empty "MergeWorkspaceSourceOwnBranchDetachedWholeBranch" value))
+(defun agent-repl-wire-encode-merge-workspace-one-shot-merged-upstream (value)
+  "Encode MergeWorkspaceOneShotMergedUpstream from VALUE.  Empty: the
+requester\='s own branch already landed upstream."
+  (agent-repl-wire--encode-empty "MergeWorkspaceOneShotMergedUpstream" value))
 
-(defun agent-repl-wire-encode-merge-workspace-source-own-branch-detached-pick (value)
-  "Encode MergeWorkspaceSourceOwnBranchDetachedPick from plist VALUE
-\(:instruction STRING).  The instruction is required and non-blank: it is
-the merge agent\='s only account of which changes to take."
-  (list (cons 'instruction
-              (agent-repl-wire-verbs--require-string
-               "MergeWorkspaceSourceOwnBranchDetachedPick" "instruction"
-               (plist-get value :instruction)))))
-
-(defun agent-repl-wire-encode-merge-workspace-source-own-branch-detached (value)
-  "Encode MergeWorkspaceSourceOwnBranchDetached from plist VALUE
-\(:name STRING :content CONTENT).  An ASYNC merge: it runs in a hidden
-merge workspace forked from the requester under NAME, which is required
-and non-blank.  CONTENT is `:whole-branch' (nil) or `:pick'
-\(:instruction STRING); an unset content and an unknown arm are refused."
-  (let ((message "MergeWorkspaceSourceOwnBranchDetached"))
-    (cons (cons 'name
-                (agent-repl-wire-verbs--require-string
-                 message "name" (plist-get value :name)))
-          (list (agent-repl-wire-verbs--encode-oneof
-                 message "content" (plist-get value :content)
-                 '((:whole-branch wholeBranch
-                                  agent-repl-wire-encode-merge-workspace-source-own-branch-detached-whole-branch)
-                   (:pick pick
-                          agent-repl-wire-encode-merge-workspace-source-own-branch-detached-pick)))))))
-
-(defun agent-repl-wire-encode-merge-workspace-source-own-branch (value)
-  "Encode MergeWorkspaceSourceOwnBranch from plist VALUE (:run RUN).
-THE ARM IS WHERE THE MERGE RUNS: `:in-place' (:keep-open BOOL), a SYNC
-merge in the requesting workspace, or `:detached' (:name STRING :content
-CONTENT), an ASYNC merge in a hidden merge workspace forked from it.
-An unset run and an unknown arm are both refused."
+(defun agent-repl-wire-encode-merge-workspace-one-shot (value)
+  "Encode MergeWorkspaceOneShot from plist VALUE (:landing LANDING).
+A SYNC merge in the requesting workspace, which closes once its branch
+lands.  LANDING is `:own-branch' (nil) or `:merged-upstream' (nil); an
+unset landing and an unknown arm are both refused."
   (list (agent-repl-wire-verbs--encode-oneof
-         "MergeWorkspaceSourceOwnBranch" "run" (plist-get value :run)
-         '((:in-place inPlace
-                      agent-repl-wire-encode-merge-workspace-source-own-branch-in-place)
-           (:detached detached
-                      agent-repl-wire-encode-merge-workspace-source-own-branch-detached)))))
-
-(defun agent-repl-wire-encode-merge-workspace-source-workspace (value)
-  "Encode MergeWorkspaceSourceWorkspace from plist VALUE (:ref REF).
-The other workspace's ref is required: a workspace source naming no
-workspace names nothing to merge."
-  (list (cons 'ref
-              (agent-repl-wire-encode-workspace-ref
-               (agent-repl-wire-verbs--require "MergeWorkspaceSourceWorkspace" "ref"
-                                                (plist-get value :ref))))))
-
-(defun agent-repl-wire-encode-merge-workspace-source-branch (value)
-  "Encode MergeWorkspaceSourceBranch from plist VALUE (:name STRING).
-The branch name is required and non-blank, spelled as git spells it."
-  (list (cons 'name
-              (agent-repl-wire-verbs--require-string
-               "MergeWorkspaceSourceBranch" "name" (plist-get value :name)))))
-
-(defun agent-repl-wire-encode-merge-workspace-source-merged-upstream (value)
-  "Encode MergeWorkspaceSourceMergedUpstream from VALUE.  Empty: the
-branch and the repository are the requester\='s own."
-  (agent-repl-wire--encode-empty "MergeWorkspaceSourceMergedUpstream" value))
-
-(defun agent-repl-wire-encode-merge-workspace-source (value)
-  "Encode MergeWorkspaceSource from the oneof plist VALUE (:arm ARM :value V).
-THE ARM IS THE SOURCE: `:own-branch' (:run RUN), `:workspace'
-\(:ref REF), `:branch' (:name STRING) or `:merged-upstream' (nil).  An
-unset oneof and an unknown arm are both refused."
-  (list (agent-repl-wire-verbs--encode-oneof
-         "MergeWorkspaceSource" "source" value
+         "MergeWorkspaceOneShot" "landing" (plist-get value :landing)
          '((:own-branch ownBranch
-                        agent-repl-wire-encode-merge-workspace-source-own-branch)
-           (:workspace workspace
-                       agent-repl-wire-encode-merge-workspace-source-workspace)
-           (:branch branch
-                    agent-repl-wire-encode-merge-workspace-source-branch)
+                        agent-repl-wire-encode-merge-workspace-one-shot-own-branch)
            (:merged-upstream mergedUpstream
-                             agent-repl-wire-encode-merge-workspace-source-merged-upstream)))))
+                             agent-repl-wire-encode-merge-workspace-one-shot-merged-upstream)))))
 
-(defun agent-repl-wire-encode-merge-workspace-request-source (value)
-  "Encode MergeWorkspaceRequest's `source' use site from VALUE."
-  (agent-repl-wire-encode-merge-workspace-source value))
+(defun agent-repl-wire-encode-merge-workspace-async-one-shot (value)
+  "Encode MergeWorkspaceAsyncOneShot from plist VALUE (:workspace REF).
+The workspace an async merge closes once it lands; its ref is required."
+  (list (cons 'workspace
+              (agent-repl-wire-encode-workspace-ref
+               (agent-repl-wire-verbs--require "MergeWorkspaceAsyncOneShot" "workspace"
+                                                (plist-get value :workspace))))))
+
+(defun agent-repl-wire-encode-merge-workspace-async (value)
+  "Encode MergeWorkspaceAsync from plist VALUE (:name STRING :branch STRING
+:instruction STRING :one-shot ONE-SHOT :cleanup-worktree BOOL
+:compact-after BOOL).  An ASYNC merge of BRANCH in a hidden merge
+workspace named NAME, both required and non-blank.  INSTRUCTION, when
+given, must be non-blank; ONE-SHOT (:workspace REF) names another
+workspace to close once the merge lands."
+  (let* ((message "MergeWorkspaceAsync")
+         (instruction (plist-get value :instruction))
+         (one-shot (plist-get value :one-shot)))
+    (append
+     (list (cons 'name (agent-repl-wire-verbs--require-string message "name" (plist-get value :name)))
+           (cons 'branch (agent-repl-wire-verbs--require-string message "branch" (plist-get value :branch))))
+     (when instruction
+       (list (cons 'instruction (agent-repl-wire-verbs--require-string message "instruction" instruction))))
+     (when one-shot
+       (list (cons 'oneShot (agent-repl-wire-encode-merge-workspace-async-one-shot one-shot))))
+     (when (plist-get value :cleanup-worktree)
+       (list (cons 'cleanupWorktree t)))
+     (when (plist-get value :compact-after)
+       (list (cons 'compactAfter t))))))
 
 (defun agent-repl-wire-encode-merge-workspace-request (request)
-  "Encode MergeWorkspaceRequest from plist REQUEST (:workspace REF :source S).
-`workspace' is the REQUESTING workspace, the one the merge runs in;
-`source' is WHAT it merges (`agent-repl-wire-encode-merge-workspace-source').
-Both are required."
-  (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-merge-workspace-request source=%S"
-                   (plist-get (plist-get request :source) :arm))
-  (list (cons 'workspace
+  "Encode MergeWorkspaceRequest from plist REQUEST (:workspace REF :mode MODE).
+`workspace' is the REQUESTING workspace; MODE is the oneof plist
+\(:arm ARM :value V) with ARM `:one-shot'
+\(`agent-repl-wire-encode-merge-workspace-one-shot') or `:async'
+\(`agent-repl-wire-encode-merge-workspace-async').  Both are required,
+and an unknown mode arm is refused."
+  (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-merge-workspace-request mode=%S"
+                   (plist-get (plist-get request :mode) :arm))
+  (cons (cons 'workspace
               (agent-repl-wire-encode-merge-workspace-request-workspace
                (agent-repl-wire-verbs--require "MergeWorkspaceRequest" "workspace"
                                                 (plist-get request :workspace))))
-        (cons 'source
-              (agent-repl-wire-encode-merge-workspace-request-source
-               (agent-repl-wire-verbs--require "MergeWorkspaceRequest" "source"
-                                                (plist-get request :source))))))
+        (list (agent-repl-wire-verbs--encode-oneof
+               "MergeWorkspaceRequest" "mode"
+               (agent-repl-wire-verbs--require "MergeWorkspaceRequest" "mode" (plist-get request :mode))
+               '((:one-shot oneShot agent-repl-wire-encode-merge-workspace-one-shot)
+                 (:async async agent-repl-wire-encode-merge-workspace-async))))))
 
 (defun agent-repl-wire-decode-merge-workspace-success (json)
   "Decode MergeWorkspaceSuccess from JSON.  Empty: success means ENQUEUED."
@@ -1801,10 +1763,16 @@ is already in the queue."
 merge is already in flight."
   (agent-repl-wire-verbs--decode-empty "MergeWorkspaceAlreadyMerging" json))
 
-(defun agent-repl-wire-decode-merge-workspace-unknown-source-workspace (json)
-  "Decode MergeWorkspaceUnknownSourceWorkspace from JSON.  Empty: the source
-workspace is not open, is in another repository, or is the requester itself."
-  (agent-repl-wire-verbs--decode-empty "MergeWorkspaceUnknownSourceWorkspace" json))
+(defun agent-repl-wire-decode-merge-workspace-unknown-one-shot-workspace (json)
+  "Decode MergeWorkspaceUnknownOneShotWorkspace from JSON.  Empty: the async
+one-shot\='s workspace is not open, is in another repository, or is the
+requester itself."
+  (agent-repl-wire-verbs--decode-empty "MergeWorkspaceUnknownOneShotWorkspace" json))
+
+(defun agent-repl-wire-decode-merge-workspace-branch-checked-out-in-requester (json)
+  "Decode MergeWorkspaceBranchCheckedOutInRequester from JSON.  Empty: the
+async merge\='s branch is the one the requester has checked out."
+  (agent-repl-wire-verbs--decode-empty "MergeWorkspaceBranchCheckedOutInRequester" json))
 
 (defun agent-repl-wire-decode-merge-workspace-unknown-branch (json)
   "Decode MergeWorkspaceUnknownBranch from JSON.  Empty: the named branch does
@@ -1855,9 +1823,14 @@ pending merge\='s reservation; BRANCH is what the name resolves to."
   "Decode MergeWorkspaceError's `already_merging' cause arm from JSON."
   (agent-repl-wire-decode-merge-workspace-already-merging json))
 
-(defun agent-repl-wire-decode-merge-workspace-error-unknown-source-workspace (json)
-  "Decode MergeWorkspaceError's `unknown_source_workspace' cause arm from JSON."
-  (agent-repl-wire-decode-merge-workspace-unknown-source-workspace json))
+(defun agent-repl-wire-decode-merge-workspace-error-unknown-one-shot-workspace (json)
+  "Decode MergeWorkspaceError's `unknown_one_shot_workspace' cause arm from JSON."
+  (agent-repl-wire-decode-merge-workspace-unknown-one-shot-workspace json))
+
+(defun agent-repl-wire-decode-merge-workspace-error-branch-checked-out-in-requester (json)
+  "Decode MergeWorkspaceError's `branch_checked_out_in_requester' cause arm.
+JSON is the arm's value."
+  (agent-repl-wire-decode-merge-workspace-branch-checked-out-in-requester json))
 
 (defun agent-repl-wire-decode-merge-workspace-error-unknown-branch (json)
   "Decode MergeWorkspaceError's `unknown_branch' cause arm from JSON."
@@ -1868,7 +1841,7 @@ pending merge\='s reservation; BRANCH is what the name resolves to."
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "MergeWorkspaceError"))
-    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted noLayoutFacts sessionDeleted alreadyQueued alreadyMerging unknownSourceWorkspace unknownBranch nameTaken))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted noLayoutFacts sessionDeleted alreadyQueued alreadyMerging unknownOneShotWorkspace unknownBranch nameTaken branchCheckedOutInRequester))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -1880,9 +1853,10 @@ arm this codec does not know is refused as an unknown field."
          (list 'sessionDeleted :session-deleted #'agent-repl-wire-decode-merge-workspace-error-session-deleted)
          (list 'alreadyQueued :already-queued #'agent-repl-wire-decode-merge-workspace-error-already-queued)
          (list 'alreadyMerging :already-merging #'agent-repl-wire-decode-merge-workspace-error-already-merging)
-         (list 'unknownSourceWorkspace :unknown-source-workspace #'agent-repl-wire-decode-merge-workspace-error-unknown-source-workspace)
+         (list 'unknownOneShotWorkspace :unknown-one-shot-workspace #'agent-repl-wire-decode-merge-workspace-error-unknown-one-shot-workspace)
          (list 'unknownBranch :unknown-branch #'agent-repl-wire-decode-merge-workspace-error-unknown-branch)
-         (list 'nameTaken :name-taken #'agent-repl-wire-decode-merge-workspace-error-name-taken))))))
+         (list 'nameTaken :name-taken #'agent-repl-wire-decode-merge-workspace-error-name-taken)
+         (list 'branchCheckedOutInRequester :branch-checked-out-in-requester #'agent-repl-wire-decode-merge-workspace-error-branch-checked-out-in-requester))))))
 
 (defun agent-repl-wire-decode-merge-workspace-response-success (json)
   "Decode MergeWorkspaceResponse's `success' arm from JSON."

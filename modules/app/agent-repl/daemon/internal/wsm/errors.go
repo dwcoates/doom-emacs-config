@@ -345,20 +345,29 @@ func (m MergeSource) validate() error {
 		return fmt.Errorf("a %s source cannot keep the requester open", m.Kind)
 	}
 	// A DETACHED MERGE NEVER CLOSES ITS REQUESTER, so keeping it open means
-	// nothing, and only the requester's own branch runs detached.
-	if m.Detach != "" && (m.Kind != MergeSourceOwnBranch || m.KeepOpen) {
-		return fmt.Errorf("a detached merge is an own-branch merge that never keeps the requester open, not a %s source with keep_open %v", m.Kind, m.KeepOpen)
+	// nothing, and it merges a named branch. A request recorded at layout 44
+	// or earlier named the requester's own branch, which still runs: its
+	// recorded Branch is what the merge workspace is forked onto.
+	if m.Detach != "" && (m.Kind != MergeSourceBranch && m.Kind != MergeSourceOwnBranch || m.KeepOpen) {
+		return fmt.Errorf("a detached merge merges a named branch and never keeps the requester open, not a %s source with keep_open %v", m.Kind, m.KeepOpen)
+	}
+	// AN ASYNC MERGE'S LANDING EFFECTS ride a detached request alone, and a
+	// cleanup directory is recorded only for a request that cleans up.
+	if m.Detach == "" && (m.CloseOnLanding != "" || m.CleanupWorktree) {
+		return fmt.Errorf("closing another workspace or cleaning up worktrees on landing is an async merge's ask, not a %s source's that runs in place", m.Kind)
+	}
+	if m.CleanupDir != "" && !m.CleanupWorktree {
+		return fmt.Errorf("a cleanup directory %q is recorded only for a request that cleans up", m.CleanupDir)
 	}
 	// A DETACHED MERGE IS NAMED by its requesting agent, and only a detached
 	// merge reserves a name.
 	if (m.Detach != "") != (m.DetachName != "") {
 		return fmt.Errorf("a detached merge carries its merge workspace's name and only a detached merge does (detach %q, name %q)", m.Detach, m.DetachName)
 	}
-	// A PICK lands only some changes of the requester's own branch: it rides
-	// the requester's detached request, and then the merge workspace's own
-	// request until the pick has run.
-	if m.Pick != "" && (m.Kind != MergeSourceOwnBranch || m.KeepOpen) {
-		return fmt.Errorf("a pick is an own-branch merge that never keeps the requester open, not a %s source with keep_open %v", m.Kind, m.KeepOpen)
+	// AN INSTRUCTION (the pick) rides the requester's detached request, and
+	// then the merge workspace's own-branch request until its turn has run.
+	if m.Pick != "" && (m.Detach == "" && m.Kind != MergeSourceOwnBranch || m.KeepOpen) {
+		return fmt.Errorf("an instruction rides a detached request or a merge workspace's own-branch request, never kept open, not a %s source with keep_open %v", m.Kind, m.KeepOpen)
 	}
 	// COMPACT AFTER rides a detached request alone: only an async merge
 	// leaves its requester open and free to compact once it lands.

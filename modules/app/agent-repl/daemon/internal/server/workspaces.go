@@ -663,15 +663,11 @@ func (s *server) MergeWorkspace(
 	if done {
 		return answer(resp, cerr)
 	}
-	source, err := s.mergeSource(ctx, subject.Record.ID, req.Msg.GetSource())
+	request, err := s.mergeRequest(ctx, subject.Record.ID, req.Msg)
 	if err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
-	var detached *merge.DetachedRun
-	if run := req.Msg.GetSource().GetOwnBranch().GetDetached(); run != nil {
-		detached = merge.NewDetachedRun(run.GetName(), run.GetPick().GetInstruction(), run.GetCompactAfter())
-	}
-	if err := s.deps.Merge.Enqueue(ctx, merge.Request{Workspace: subject.Record.ID, Source: source, By: merge.RequestedByUser, Detached: detached}); err != nil {
+	if err := s.deps.Merge.Enqueue(ctx, request); err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
 	// The verb moved the session's standing or the composer's gate; the host
@@ -683,37 +679,49 @@ func (s *server) MergeWorkspace(
 	return connect.NewResponse(resp), nil
 }
 
-// mergeSource reads the request's source arm. Another workspace is named by
-// its ref, and a ref that names no workspace is the unknown_source_workspace
-// refusal; whether it is open and in the requester's repository is the
-// orchestrator's to judge.
-func (s *server) mergeSource(ctx context.Context, requester ids.WorkspaceID, source *agentreplv1.MergeWorkspaceSource) (wsm.MergeSource, error) {
-	switch arm := source.GetSource().(type) {
-	case *agentreplv1.MergeWorkspaceSource_OwnBranch:
-		// THE RUN DECIDES keep_open: only an in-place merge can close the
-		// requester. A detached run is carried on the request (merge.Request),
-		// which mints its identity.
-		return wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, KeepOpen: arm.OwnBranch.GetInPlace().GetKeepOpen()}, nil
-	case *agentreplv1.MergeWorkspaceSource_Workspace:
-		id := ids.WorkspaceID(arm.Workspace.GetRef().GetId())
-		record, ended, err := s.registryWorkspace(ctx, id)
-		switch {
-		case ended:
-			return wsm.MergeSource{}, connect.NewError(connect.CodeUnavailable, fmt.Errorf("MergeWorkspace: source workspace %q: %w", id, errServingEnded))
-		case errors.Is(err, wsm.ErrNotFound):
-			return wsm.MergeSource{}, &merge.RefusalError{Arm: merge.ArmUnknownSourceWorkspace, Workspace: requester,
-				Reason: fmt.Sprintf("no workspace %q is registered", id)}
-		case err != nil:
-			return wsm.MergeSource{}, fmt.Errorf("MergeWorkspace: reading source workspace %q: %w", id, err)
+// mergeRequest reads the request's mode into the orchestrator's request. A
+// one-shot merges the requester's own branch in place and closes it once it
+// lands; an async merge lands the named branch in a merge workspace. An async
+// one-shot workspace is named by its ref, and a ref that names no workspace is
+// the unknown_one_shot_workspace refusal; whether it is open and in the
+// requester's repository is the orchestrator's to judge.
+func (s *server) mergeRequest(ctx context.Context, requester ids.WorkspaceID, req *agentreplv1.MergeWorkspaceRequest) (merge.Request, error) {
+	out := merge.Request{Workspace: requester, By: merge.RequestedByUser}
+	switch mode := req.GetMode().(type) {
+	case *agentreplv1.MergeWorkspaceRequest_OneShot:
+		switch mode.OneShot.GetLanding().(type) {
+		case *agentreplv1.MergeWorkspaceOneShot_OwnBranch:
+			out.Source = wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}
+		case *agentreplv1.MergeWorkspaceOneShot_MergedUpstream:
+			out.Source = wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}
+		default:
+			// validateMergeWorkspaceRequest refused an unset arm before this.
+			return merge.Request{}, fmt.Errorf("server: MergeWorkspace one-shot landing arm %T is unknown", mode.OneShot.GetLanding())
 		}
-		return wsm.MergeSource{Kind: wsm.MergeSourceWorkspace, Workspace: record.ID}, nil
-	case *agentreplv1.MergeWorkspaceSource_Branch:
-		return wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: arm.Branch.GetName()}, nil
-	case *agentreplv1.MergeWorkspaceSource_MergedUpstream:
-		return wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}, nil
+		return out, nil
+	case *agentreplv1.MergeWorkspaceRequest_Async:
+		async := mode.Async
+		var closes ids.WorkspaceID
+		if async.OneShot != nil {
+			id := ids.WorkspaceID(async.GetOneShot().GetWorkspace().GetId())
+			_, ended, err := s.registryWorkspace(ctx, id)
+			switch {
+			case ended:
+				return merge.Request{}, connect.NewError(connect.CodeUnavailable, fmt.Errorf("MergeWorkspace: one-shot workspace %q: %w", id, errServingEnded))
+			case errors.Is(err, wsm.ErrNotFound):
+				return merge.Request{}, &merge.RefusalError{Arm: merge.ArmUnknownOneShotWorkspace, Workspace: requester,
+					Reason: fmt.Sprintf("no workspace %q is registered", id)}
+			case err != nil:
+				return merge.Request{}, fmt.Errorf("MergeWorkspace: reading one-shot workspace %q: %w", id, err)
+			}
+			closes = id
+		}
+		out.Source = wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: strings.TrimSpace(async.GetBranch())}
+		out.Detached = merge.NewDetachedRun(async.GetName(), async.GetInstruction(), async.GetCompactAfter(), closes, async.GetCleanupWorktree())
+		return out, nil
 	}
 	// validateMergeWorkspaceRequest refused an unset arm before this.
-	return wsm.MergeSource{}, fmt.Errorf("server: MergeWorkspace source arm %T is unknown", source.GetSource())
+	return merge.Request{}, fmt.Errorf("server: MergeWorkspace mode arm %T is unknown", req.GetMode())
 }
 
 // RestartWorkspace bounces the workspace's shim and reloads its webapp page,

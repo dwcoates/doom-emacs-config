@@ -3,18 +3,18 @@
 // requesting workspace's feed either way; WHERE its agentic work runs depends
 // on the request:
 //
-//   - SYNC, the IN PLACE run (every source but a detached own-branch merge):
-//     the merge's whole life is the requesting workspace's own — its footer's
-//     merging status, its session doing any conflict resolution and test
-//     fixing, and every prompt the user sends held until the merge ends. One
-//     workspace and one session are involved.
-//   - ASYNC, the DETACHED run (an own-branch merge with the `detached` run):
-//     the daemon forks the requesting workspace into a HIDDEN MERGE WORKSPACE
-//     when the requesting turn ends — the conversation forked, a worktree of
-//     its own — and the merge runs there. The requesting workspace is never
-//     held and never closed by it; the merge workspace's turns stream into the
-//     bubble's agentic tabs in the requester's feed; and the merge's outcome
-//     comes back into the requester's conversation as a handback.
+//   - SYNC, the ONE-SHOT (`one_shot`): the merge's whole life is the
+//     requesting workspace's own — its footer's merging status, its session
+//     doing any conflict resolution and test fixing, and every prompt the
+//     user sends held until the merge ends — and the workspace closes once
+//     its branch lands. One workspace and one session are involved.
+//   - ASYNC (`async`): the daemon forks the requesting workspace into a
+//     HIDDEN MERGE WORKSPACE when the requesting turn ends — the conversation
+//     forked, a worktree of its own on the named branch — and the merge runs
+//     there. The requesting workspace is never held and never closed by it;
+//     the merge workspace's turns stream into the bubble's agentic tabs in
+//     the requester's feed; and the merge's outcome comes back into the
+//     requester's conversation as a handback.
 //
 // The merge targets the merged branch's parent by definition, and the daemon
 // decides everything else.
@@ -28,150 +28,104 @@ import "workspace/v1/workspace.proto";
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
 message MergeWorkspaceRequest {
-  // The REQUESTING workspace: the one the merge runs in, whose feed, footer
-  // and session carry it from the queue to its end.
+  // The REQUESTING workspace: the one whose feed carries the merge's bubble
+  // and whose conversation is told how the merge ended.
   workspace.v1.WorkspaceRef workspace = 1;
-  // WHAT the requesting workspace merges. REQUIRED: a request with no arm
-  // set is refused as invalid.
-  MergeWorkspaceSource source = 2;
+  // The merge's mode. REQUIRED: a request with no arm set is refused as
+  // invalid. A sync merge exists only as a one-shot, because the only reason
+  // to hold the requester's feed is to conclude the workspace once its branch
+  // lands; every merge that leaves the requester working is async.
+  oneof mode {
+    MergeWorkspaceOneShot one_shot = 2;
+    MergeWorkspaceAsync async = 3;
+  }
 }
 
-// What a merge lands. THE ARM IS THE SOURCE, and each arm decides where the
-// rebase runs and what closes once the branch lands.
-message MergeWorkspaceSource {
-  // Exactly one is set.
-  oneof source {
-    // The requesting workspace's own branch, rebased and gated in its own
-    // worktree.
-    MergeWorkspaceSourceOwnBranch own_branch = 1;
-    // Another open workspace's branch, rebased in THAT workspace's worktree
-    // by the REQUESTING workspace's session. The other workspace is closed
-    // once its branch lands; the requester is never closed by it.
-    MergeWorkspaceSourceWorkspace workspace = 2;
-    // A branch that is no workspace (a subagent's branch), rebased in the
-    // branch's own worktree when one exists, else in a worktree the daemon
-    // makes for it and removes afterwards. The requester is never closed by
-    // it.
-    MergeWorkspaceSourceBranch branch = 3;
-    // The requesting workspace's own branch, ALREADY MERGED UPSTREAM through
-    // its pull request: the daemon updates the repository's default branch
-    // in its main worktree from upstream and closes the workspace, merging
-    // nothing itself. The caller asserts the upstream merge; the daemon does
-    // not re-check it.
-    MergeWorkspaceSourceMergedUpstream merged_upstream = 4;
+// SYNC, IN PLACE: the requester's own branch, rebased, gated and landed in
+// its own worktree by its own session, its feed held and the bubble pinned
+// until the merge ends. The requester CLOSES once the branch lands. A merge
+// that fails never closes it: the feed is released and the failure is
+// handed back to the requester's conversation
+// (conversation.v1.PromptOrigin.PROMPT_ORIGIN_MERGE_HANDBACK).
+message MergeWorkspaceOneShot {
+  // What concludes the workspace. Exactly one is set.
+  oneof landing {
+    // The requester's own branch, merged by the queue.
+    MergeWorkspaceOneShotOwnBranch own_branch = 1;
+    // The requester's own branch, ALREADY MERGED UPSTREAM through its pull
+    // request: the daemon updates the repository's default branch in its
+    // main worktree from upstream and closes the workspace, merging nothing
+    // itself. The caller asserts the upstream merge; the daemon does not
+    // re-check it.
+    MergeWorkspaceOneShotMergedUpstream merged_upstream = 2;
   }
 }
-// The requesting workspace's own branch.
-message MergeWorkspaceSourceOwnBranch {
-  // `keep_open` lives on the in-place run, the only run that can close the
-  // requester.
-  reserved 1;
-  reserved "keep_open";
-  // WHERE the merge's agentic work runs. Exactly one is set: a request with
-  // neither is refused as invalid. The two differ in whether the requesting
-  // workspace is held while the merge runs, so the choice is the caller's.
-  oneof run {
-    // SYNC: in the requesting workspace, by its own session, holding its
-    // prompts until the merge ends.
-    MergeWorkspaceSourceOwnBranchInPlace in_place = 2;
-    // ASYNC: in a hidden merge workspace forked from the requester, leaving
-    // the requester free.
-    MergeWorkspaceSourceOwnBranchDetached detached = 3;
-  }
-}
-// The merge runs in the requesting workspace.
-message MergeWorkspaceSourceOwnBranchInPlace {
-  // TRUE keeps the requesting workspace open once its branch lands, so it
-  // can go on to further work and further merges; FALSE closes it on
-  // landing. A failed merge never closes it either way.
-  bool keep_open = 1;
-}
-// The merge runs ASYNC, in a MERGE WORKSPACE: a forked workspace the daemon
-// creates when the requesting turn ends, so the fork holds that whole turn. Its
-// conversation is a fork of the requester's, so its agent knows the work.
-//
-// THE MERGE WORKSPACE IS HIDDEN until it needs the user: it is in no tab bar
-// and no sidebar section while it runs, and it is revealed — drawn like any
-// workspace from then on — when its merge fails, when its agent asks for
-// permission or asks a question, when the user interrupts its agent from the
-// bubble (agentrepl.v1.InterruptRequest.merge_tab), or when the user selects
-// it. Its feed is its own ordinary feed with no merge bubble; its turns are
-// also streamed into the bubble's agentic tabs in the requester's feed, which
-// is the only place the bubble is drawn, PLACED rather than pinned. It lands
-// on the requester's own target branch and is closed (its worktree and
-// conversation kept, drawn under Recently Merged) once its branch lands; a
-// failed merge leaves it open and revealed for the user to finish. Either way
-// the daemon hands the outcome back to the requester's conversation
-// (conversation.v1.PromptOrigin.PROMPT_ORIGIN_MERGE_HANDBACK). A merge
-// workspace idle for 15 calendar days is removed. The repository and the
-// target are the requester's own.
-message MergeWorkspaceSourceOwnBranchDetached {
-  // The merge workspace's name, chosen by the calling agent: a short slug
-  // naming what is being merged ("reconnect-fix"), with no decoration. It is
-  // prefixed and validated exactly as a supplied workspace name is, and it is
-  // RESERVED from the moment the request is accepted until the merge
-  // workspace exists, so nothing else can take it in between. A name that is
-  // already a workspace, a branch, or another pending merge's reservation is
-  // refused as `name_taken`, while the calling agent's turn still runs, so it
-  // can retry with another. REQUIRED: a blank name is refused as invalid.
-  string name = 1;
-  // WHAT the merge workspace lands. REQUIRED: a request with neither is
-  // refused as invalid.
-  oneof content {
-    // The requester's whole branch, as its tip stands when the requesting
-    // turn ends: the merge workspace's worktree is checked out there, so the
-    // requester's later commits are not part of this merge and the rebase
-    // never touches files the requester is editing.
-    MergeWorkspaceSourceOwnBranchDetachedWholeBranch whole_branch = 2;
-    // Only the changes the instruction names: the merge workspace's worktree
-    // starts on the target branch's tip, and its first turn is the merge
-    // agent cherry-picking those changes from the requester's branch, drawn
-    // as the bubble's pick tab (frontend.v1.FeedMergeTabPick). The merge
-    // joins the queue only once that turn ends.
-    MergeWorkspaceSourceOwnBranchDetachedPick pick = 3;
-  }
-  // TRUE compacts the REQUESTER's conversation once its branch lands: right
-  // after the landed handback, the daemon sends `/compact` to the requester's
-  // session through the prompt queue
-  // (conversation.v1.PromptOrigin.PROMPT_ORIGIN_MERGE_COMPACT_AFTER), so it
-  // runs behind the handback's turn and draws exactly as any compaction does
-  // (the footer's compacting status, the feed's compaction separator) with no
-  // prompt bubble for the command. A merge that fails or does not run
-  // compacts nothing. It lives on the detached run alone because only an
-  // async merge leaves its requester open and free to compact; the in-place
-  // run has no way to ask for it.
-  bool compact_after = 4;
-}
-// The whole requester branch is merged. No fields: the branch is the
+// The requester's own branch is merged. No fields: the branch is the
 // requester's own.
-message MergeWorkspaceSourceOwnBranchDetachedWholeBranch {}
-// Only some changes of the requester's branch are merged.
-message MergeWorkspaceSourceOwnBranchDetachedPick {
-  // The calling agent's instruction to the merge agent, in free text: which
-  // changes to take ("the reconnect fix: commits a1b2 and c3d4, plus the test
-  // hunk in e5f6"). Free text rather than a commit list, because the merge
-  // agent may take only some hunks of a commit. The daemon wraps it in its
-  // pick brief, which tells the merge agent its worktree is on the target
-  // branch, names the requester's branch, has it cherry-pick and commit, and
-  // forbids the rebase the queue does itself. REQUIRED: a blank instruction
-  // is refused as invalid.
-  string instruction = 1;
-}
-// Another open workspace, named by its ref.
-message MergeWorkspaceSourceWorkspace {
-  // The workspace whose branch is merged. It must be open, in the same
-  // repository as the requester, and not the requester itself.
-  workspace.v1.WorkspaceRef ref = 1;
-}
-// A branch that is no workspace.
-message MergeWorkspaceSourceBranch {
-  // The branch's name in the requesting workspace's repository, as git
-  // spells it ("agent-1a2b/fix-reconnect").
+message MergeWorkspaceOneShotOwnBranch {}
+// The requester's own branch already landed upstream. No fields.
+message MergeWorkspaceOneShotMergedUpstream {}
+
+// ASYNC: the merge runs in a hidden MERGE WORKSPACE the daemon forks from
+// the requester's conversation when the requesting turn ends, so its agent
+// knows the work. The requester is never held and never closed; the bubble
+// is PLACED in its feed rather than pinned, the merge workspace's turns
+// stream into the bubble's agentic tabs, and how the merge ended -- landed
+// or failed -- is handed back to the requester's conversation
+// (conversation.v1.PromptOrigin.PROMPT_ORIGIN_MERGE_HANDBACK). The merge
+// workspace stays hidden until it needs the user: revealed when its merge
+// fails, when its agent asks a permission or a question, when the user
+// interrupts it from the bubble, or when the user selects it.
+message MergeWorkspaceAsync {
+  // The merge workspace's name, chosen by the calling agent: a short slug
+  // naming what is merged ("reconnect-fix"). Prefixed and validated as a
+  // supplied workspace name is, and RESERVED from acceptance until the
+  // merge workspace exists; a taken name is refused as `name_taken` while
+  // the calling turn still runs. REQUIRED: blank is refused as invalid.
   string name = 1;
+  // The branch this merge lands, as git spells it in the requester's
+  // repository. The merge workspace's worktree starts at its tip. REQUIRED:
+  // blank is refused as invalid; a branch that does not exist is refused as
+  // `unknown_branch`; a branch checked out in the requester's own worktree is
+  // refused as `branch_checked_out_in_requester`, because the requester keeps
+  // working on it while the merge rebases it. It names the merge, so several
+  // async merges a requester sends in quick succession stay apart.
+  string branch = 2;
+  // How the merge workspace prepares `branch` before it joins the queue, in
+  // free text written by the requesting agent: anything from "rebase onto the
+  // target, dropping every commit the requester's branch shares with it" to
+  // "fail the merge if you cannot tell which commits are the fix". The daemon
+  // hands it to the merge workspace as its first turn, drawn as the bubble's
+  // resolving tab (frontend.v1.FeedMergeTabResolving); the merge joins the
+  // queue once that turn settles succeeded, and a failed turn fails the
+  // merge. UNSET: `branch` lands as it is, with no resolving turn.
+  optional string instruction = 3;
+  // Another workspace to CLOSE once this merge lands -- typically the
+  // workspace a child or subagent did the work in. An async merge never
+  // closes its requester, which is still working. A merge that fails closes
+  // nothing. UNSET: no workspace is closed.
+  optional MergeWorkspaceAsyncOneShot one_shot = 4;
+  // TRUE removes worktrees once the merge lands, to keep disk use bounded:
+  // the merge workspace's own worktree, and the worktree that had `branch`
+  // checked out when the request was accepted. Never removed: the requester's
+  // worktree, the repository's main worktree, any registered workspace's
+  // worktree, or a worktree with uncommitted changes (git's own refusal
+  // stands and is logged). Branches are never deleted. A merge that fails
+  // removes nothing.
+  bool cleanup_worktree = 5;
+  // TRUE compacts the REQUESTER's conversation once the branch lands, right
+  // after the landed handback, through the prompt queue
+  // (conversation.v1.PromptOrigin.PROMPT_ORIGIN_MERGE_COMPACT_AFTER). A merge
+  // that fails compacts nothing.
+  bool compact_after = 6;
 }
-// The requesting workspace's own branch, already merged upstream. No
-// fields: the branch and the repository are the requester's own.
-message MergeWorkspaceSourceMergedUpstream {}
+// The workspace an async merge closes once it lands. It must be open, in the
+// requester's repository, and not the requester itself; otherwise the request
+// is refused as `unknown_one_shot_workspace`.
+message MergeWorkspaceAsyncOneShot {
+  // The workspace to close.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
 
 // THE ARM IS THE OUTCOME.
 message MergeWorkspaceResponse {
@@ -204,15 +158,19 @@ message MergeWorkspaceError {
     MergeWorkspaceAlreadyQueued already_queued = 7;
     // This workspace's merge is already in flight.
     MergeWorkspaceAlreadyMerging already_merging = 8;
-    // The source workspace is not open, is in another repository, or is the
-    // requester itself.
-    MergeWorkspaceUnknownSourceWorkspace unknown_source_workspace = 9;
+    // The async one-shot's workspace is not open, is in another repository,
+    // or is the requester itself.
+    MergeWorkspaceUnknownOneShotWorkspace unknown_one_shot_workspace = 9;
     // The named branch does not exist in the requester's repository.
     MergeWorkspaceUnknownBranch unknown_branch = 10;
     // The async merge's name is already a workspace, a branch, or another
     // pending async merge's reservation. Nothing was recorded; the caller
     // retries with another name.
     MergeWorkspaceNameTaken name_taken = 11;
+    // The async merge's branch is checked out in the requester's own
+    // worktree. Nothing was recorded; the caller names a branch the requester
+    // is not working on.
+    MergeWorkspaceBranchCheckedOutInRequester branch_checked_out_in_requester = 12;
   }
 }
 message MergeWorkspaceUnknownWorkspace {}
@@ -229,7 +187,10 @@ message MergeWorkspaceNoLayoutFacts {}
 message MergeWorkspaceSessionDeleted {}
 message MergeWorkspaceAlreadyQueued {}
 message MergeWorkspaceAlreadyMerging {}
-message MergeWorkspaceUnknownSourceWorkspace {}
+// The async one-shot's workspace cannot be closed by this merge.
+message MergeWorkspaceUnknownOneShotWorkspace {}
+// The async merge's branch is the one the requester has checked out.
+message MergeWorkspaceBranchCheckedOutInRequester {}
 message MergeWorkspaceUnknownBranch {}
 // The refused name, as the branch it resolves to once prefixed.
 message MergeWorkspaceNameTaken {
