@@ -7,6 +7,7 @@ import (
 
 	"agent-repld/internal/deployprogress"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 )
 
 // THE UPDATE LINE: a deploy's progress on every workspace's strip (owner
@@ -177,13 +178,9 @@ func deployContext(progress *deployprogress.Progress) dlog.Context {
 	if progress == nil {
 		return dlog.Context{"phase": "none"}
 	}
-	components := make([]string, 0, len(progress.Components))
-	for _, c := range progress.Components {
-		components = append(components, string(c))
-	}
 	return dlog.Context{
 		"phase":      progress.Phase.String(),
-		"components": components,
+		"components": ids.Strings(progress.Components),
 		"draining":   progress.Draining,
 		"noted":      len(progress.Notes),
 	}

@@ -124,17 +124,8 @@ func (o *orchestrator) publishRosterQueue(ctx context.Context, repo wsm.RepoKey)
 		queue.Workspaces = append(queue.Workspaces, entry.Workspace)
 	}
 	o.deps.Log.Global().Debug(op, "told the roster the merge queue",
-		dlog.Context{"repo": string(repo), "entries": len(entries), "paused": paused, "requesters": workspaceNames(requesters)})
+		dlog.Context{"repo": string(repo), "entries": len(entries), "paused": paused, "requesters": ids.Strings(requesters)})
 	o.deps.Sidebar.SetMergeQueue(repo, queue)
-}
-
-// workspaceNames spells WS for a record.
-func workspaceNames(ws []ids.WorkspaceID) []string {
-	names := make([]string, 0, len(ws))
-	for _, w := range ws {
-		names = append(names, string(w))
-	}
-	return names
 }
 
 // asyncRequesters answers, in queue order, the workspace whose own branch each

@@ -78,12 +78,8 @@ func deployError(err error) (*agentreplv1.DeployError, bool) {
 			AlreadyDeploying: &agentreplv1.DeployAlreadyDeploying{},
 		}}, true
 	case errors.As(err, &inFlight):
-		waiting := make([]string, 0, len(inFlight.WaitingOn))
-		for _, ws := range inFlight.WaitingOn {
-			waiting = append(waiting, string(ws))
-		}
 		return &agentreplv1.DeployError{Cause: &agentreplv1.DeployError_AlreadyRollingOut{
-			AlreadyRollingOut: &agentreplv1.DeployAlreadyRollingOut{WaitingOn: waiting},
+			AlreadyRollingOut: &agentreplv1.DeployAlreadyRollingOut{WaitingOn: ids.Strings(inFlight.WaitingOn)},
 		}}, true
 	case errors.Is(err, rollout.ErrJoining):
 		return &agentreplv1.DeployError{Cause: &agentreplv1.DeployError_Joining{

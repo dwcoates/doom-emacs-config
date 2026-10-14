@@ -98,7 +98,7 @@ func (v *verbs) Forget(ctx context.Context, ws ids.WorkspaceID) error {
 	if len(children) > 0 {
 		return refuseWith(log, "ForgetWorkspace", ArmHasChildren,
 			fmt.Sprintf("%d workspaces were spawned from %q; forget them first", len(children), ws),
-			false, map[string]any{"children": childIDs(children)})
+			false, map[string]any{"children": ids.Strings(children)})
 	}
 
 	// THE SESSION GOES BEFORE THE ROW. `kill` is the same stand-down Nuke
@@ -163,13 +163,4 @@ func (v *verbs) childrenOf(ctx context.Context, ws ids.WorkspaceID) ([]ids.Works
 		}
 	}
 	return out, nil
-}
-
-// childIDs renders the child ids as the strings the refusal's arm carries.
-func childIDs(children []ids.WorkspaceID) []string {
-	out := make([]string, 0, len(children))
-	for _, child := range children {
-		out = append(out, string(child))
-	}
-	return out
 }

@@ -432,7 +432,7 @@ func (r *resolver) SetMerge(ws ids.WorkspaceID, facts footer.MergeFacts) {
 func (r *resolver) SetMergeQueue(repo wsm.RepoKey, queue MergeQueue) {
 	r.mutate("daemon.sidebar.set_merge_queue", "the roster took a repository's merge queue",
 		dlog.Context{"repo": string(repo), "paused": queue.Paused,
-			"workspaces": workspaceNames(queue.Workspaces), "async_requesters": workspaceNames(queue.AsyncRequesters)},
+			"workspaces": ids.Strings(queue.Workspaces), "async_requesters": ids.Strings(queue.AsyncRequesters)},
 		r.log.Global(),
 		func() {
 			q := newMergeQueue(queue)
@@ -442,15 +442,6 @@ func (r *resolver) SetMergeQueue(repo wsm.RepoKey, queue MergeQueue) {
 			}
 			r.state.queues[repo] = q
 		})
-}
-
-// workspaceNames spells WS for a record.
-func workspaceNames(ws []ids.WorkspaceID) []string {
-	names := make([]string, 0, len(ws))
-	for _, w := range ws {
-		names = append(names, string(w))
-	}
-	return names
 }
 
 // SetRepoDivergence installs a repository's latest ahead/behind measure.

@@ -111,7 +111,7 @@ func (c *controller) Sweep(ctx context.Context, now time.Time) ([]ids.WorkspaceI
 		}
 	}
 	c.log.Debug(opSweep, "one idle-sweep pass finished",
-		dlog.Context{"scanned": len(workspaces), "hibernated": workspaceIDs(hibernated)})
+		dlog.Context{"scanned": len(workspaces), "hibernated": ids.Strings(hibernated)})
 	return hibernated, nil
 }
 
