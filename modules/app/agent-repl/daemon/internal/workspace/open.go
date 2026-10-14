@@ -110,7 +110,7 @@ func (v *verbs) Open(ctx context.Context, ws ids.WorkspaceID, progress OpenProgr
 
 	if record.Closed {
 		reportOpenStage(progress, OpenStageClearingClosed)
-		if err := v.deps.DB.SetClosed(ctx, ws, false); err != nil {
+		if err := v.deps.DB.Reopen(ctx, ws); err != nil {
 			log.Error(opOpen, "could not clear the closed flag", dlog.Context{"cause": err.Error()})
 			return fmt.Errorf("open %q: clear closed: %w", ws, err)
 		}

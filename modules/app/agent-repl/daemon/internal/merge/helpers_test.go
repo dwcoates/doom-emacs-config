@@ -97,6 +97,7 @@ type fakeDB struct {
 	mergedAt       map[ids.WorkspaceID]time.Time
 	landedCommits  map[ids.WorkspaceID]uint32
 	closed         map[ids.WorkspaceID]bool
+	closures       map[ids.WorkspaceID]wsm.Closure
 	releasedLeases []wsm.LeaseID
 	policies       map[wsm.LeaseID]wsm.LeasePolicy
 	dropped        []string
@@ -158,6 +159,7 @@ func newFakeDB() *fakeDB {
 		mergedAt:      map[ids.WorkspaceID]time.Time{},
 		landedCommits: map[ids.WorkspaceID]uint32{},
 		closed:        map[ids.WorkspaceID]bool{},
+		closures:      map[ids.WorkspaceID]wsm.Closure{},
 		policies:      map[wsm.LeaseID]wsm.LeasePolicy{},
 		progress:      map[ids.WorkspaceID]wsm.MergeProgress{},
 		held:          map[wsm.TurnID]wsm.HeldPrompt{},
@@ -353,13 +355,14 @@ func (f *fakeDB) SetMergedAt(_ context.Context, id ids.WorkspaceID, at time.Time
 	return nil
 }
 
-func (f *fakeDB) SetClosed(_ context.Context, id ids.WorkspaceID, closed bool) error {
+func (f *fakeDB) MarkClosed(_ context.Context, id ids.WorkspaceID, closure wsm.Closure) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.shut {
 		return errStateClientClosed
 	}
-	f.closed[id] = closed
+	f.closed[id] = true
+	f.closures[id] = closure
 	return nil
 }
 
@@ -431,7 +434,11 @@ func (f *fakeDB) OpenMergeLedger(_ context.Context, id ids.WorkspaceID, lease ws
 	return nil
 }
 
-func (f *fakeDB) RecordTabInterval(_ context.Context, lease wsm.LeaseID, interval wsm.TabInterval) error {
+func (f *fakeDB) RecordTabInterval(ctx context.Context, lease wsm.LeaseID, interval wsm.TabInterval) error {
+	// As the store does: a write on a cancelled context begins no transaction.
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("wsm: begin transaction: %w", err)
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for id, entries := range f.ledger {

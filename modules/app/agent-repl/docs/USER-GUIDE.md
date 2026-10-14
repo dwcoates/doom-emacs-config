@@ -356,6 +356,22 @@ The top bar's effort selector sits between the model selector and the permission
   - A section left with no match is hidden until the search changes.
 - **Pressing the magnifier again, or `Escape` in the bar, closes it and shows everything again.**
 
+## Switching workspaces from the keyboard
+
+- **`SPC p p` lists the workspaces you are working with now.**
+  - Every open workspace, and every hidden one.
+  - The 25 most recently merged.
+  - The 25 you most recently closed or killed yourself; one closed by an agent, a merge or agent-repl is not listed.
+- **`SPC p P` lists every workspace agent-repl knows, however old.**
+- **Each line shows the workspace's status mark as the sidebar draws it.**
+  - A closed or merged workspace has the grey dot.
+  - A hidden workspace has a dotted ring, `◌`, in its status color.
+- **After the name, three columns.**
+  - Whether it is closed, hidden, merged or not open in this Emacs.
+  - How long ago its last turn ended.
+  - How many commits its branch has past where it was cut.
+- **Picking a workspace that is not open here opens it first.**
+
 ## Hidden workspaces
 
 - **Hiding a workspace keeps its conversation's cache warm for a while instead of stopping it at once.**

@@ -70,6 +70,7 @@ status arm and whatever else the case is about."
                    :async-merging nil
                    :last-selected nil
                    :last-turn-ended nil
+                   :closure nil
                    :availability (:arm :available :value nil)
                    :name (:text "fix-flaky")
                    :status (:arm :ready :value nil)
@@ -222,6 +223,48 @@ status arm and whatever else the case is about."
                   (agent-repl-test-wire-roster--row
                    "\"done\":{}" "\"lastTurnEnded\":{\"atMs\":\"1\",\"kind\":\"done\"}"))
                  '("RosterRowLastTurnEnded" kind "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-row-decodes-the-close-record ()
+  "A row carrying `closure' decodes its durable close instant and its cause."
+  (should (equal (plist-get (agent-repl-test-wire-roster--decode
+                             #'agent-repl-wire-decode-roster-row
+                             (agent-repl-test-wire-roster--row
+                              "\"inactive\":{}"
+                              "\"closure\":{\"atMs\":\"1756400000000\",\"user\":{}}"))
+                            :closure)
+                 '(:at-ms 1756400000000 :by (:arm :user :value nil)))))
+
+(ert-deftest agent-repl-test-wire-roster-row-closure-decodes-every-cause ()
+  "Every declared close cause decodes to its own keyword."
+  (dolist (arm agent-repl-wire-roster-row-closure-by-arms)
+    (should (equal (plist-get (agent-repl-test-wire-roster--decode
+                               #'agent-repl-wire-decode-roster-row-closure
+                               (format "{\"atMs\":\"1\",\"%s\":{}}" (nth 0 arm)))
+                              :by)
+                   (list :arm (nth 1 arm) :value nil)))))
+
+(ert-deftest agent-repl-test-wire-roster-row-closure-refuses-an-unset-cause ()
+  "A close record with no cause is a breach, never a default."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row-closure
+                  "{\"atMs\":\"1\"}")
+                 '("RosterRowClosure" by "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-roster-row-closure-refuses-an-unknown-field ()
+  "`RosterRowClosure' carries only its instant and its cause."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row-closure
+                  "{\"atMs\":\"1\",\"user\":{},\"why\":\"x\"}")
+                 '("RosterRowClosure" why "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-row-closure-arms-match-the-contract ()
+  "The cause table names exactly the generated oneof's arms."
+  (should (equal (sort (mapcar (lambda (arm) (symbol-name (nth 0 arm)))
+                               agent-repl-wire-roster-row-closure-by-arms)
+                       #'string<)
+                 (sort (agent-repl-test--generated-oneof-arms
+                        "frontend/v1/sidebar.pb.go" "RosterRowClosure")
+                       #'string<))))
 
 (ert-deftest agent-repl-test-wire-roster-row-decodes-every-status-arm ()
   "Every one of the declared status arms decodes to its own keyword."

@@ -348,7 +348,7 @@ func (i *ingress) apply(ctx context.Context, log dlog.Logger, file string, index
 		if err != nil {
 			return err
 		}
-		return i.deps.Verbs.Close(ctx, ws)
+		return i.deps.Verbs.Close(ctx, ws, wsm.CloseByAgent)
 	case TypeForget:
 		ws, err := i.target(ctx, entry)
 		if err != nil {

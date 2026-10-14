@@ -1508,3 +1508,81 @@ func TestTheLastTurnEndedInstantIsNotTheSelectionInstant(t *testing.T) {
 		t.Fatalf("last_turn_ended = %d, want the close instant, not the selection", got)
 	}
 }
+
+func TestTheRowCarriesTheDurableCloseRecord(t *testing.T) {
+	cases := []struct {
+		name    string
+		closure *wsm.Closure
+		wantArm string // the set `by` arm, "" for an unset field
+	}{
+		{name: "an open workspace carries none", closure: nil, wantArm: ""},
+		{name: "the user's close", closure: &wsm.Closure{At: *at(time.Hour), By: wsm.CloseByUser}, wantArm: "user"},
+		{name: "an agent's close", closure: &wsm.Closure{At: *at(time.Hour), By: wsm.CloseByAgent}, wantArm: "agent"},
+		{name: "a merge's close", closure: &wsm.Closure{At: *at(time.Hour), By: wsm.CloseByMerge}, wantArm: "merge"},
+		{name: "the daemon's close", closure: &wsm.Closure{At: *at(time.Hour), By: wsm.CloseByDaemon}, wantArm: "daemon"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r, _ := newResolver(t)
+			ws := workspace("w1", "one")
+			ws.Closure = tc.closure
+			ws.Closed = tc.closure != nil
+
+			// Act.
+			r.SetRegistry(registry(ws))
+
+			// Assert.
+			got := onlyRow(t, r).GetClosure()
+			if tc.wantArm == "" {
+				if got != nil {
+					t.Fatalf("closure = %v, want unset", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatalf("closure unset, want the %s arm", tc.wantArm)
+			}
+			if got.GetAtMs() != *millis(at(time.Hour)) {
+				t.Fatalf("closure at = %d, want %d", got.GetAtMs(), *millis(at(time.Hour)))
+			}
+			arm := ""
+			switch {
+			case got.GetUser() != nil:
+				arm = "user"
+			case got.GetAgent() != nil:
+				arm = "agent"
+			case got.GetMerge() != nil:
+				arm = "merge"
+			case got.GetDaemon() != nil:
+				arm = "daemon"
+			}
+			if arm != tc.wantArm {
+				t.Fatalf("closure by = %q, want %q", arm, tc.wantArm)
+			}
+		})
+	}
+}
+
+func TestAnUndeclaredCloseCauseFailsHard(t *testing.T) {
+	// Arrange.
+	r, log := newResolver(t)
+	ws := workspace("w1", "one")
+	ws.Closed = true
+	ws.Closure = &wsm.Closure{At: *at(time.Hour), By: wsm.CloseCause("someone")}
+
+	// Act.
+	defer func() {
+		// Assert.
+		if recover() == nil {
+			t.Fatal("an undeclared close cause did not fail hard")
+		}
+		for _, rec := range log.Records() {
+			if rec.Operation == "daemon.sidebar.closure" && rec.Level == "error" {
+				return
+			}
+		}
+		t.Fatalf("the undeclared cause was not logged at error: %v", log.Records())
+	}()
+	r.SetRegistry(registry(ws))
+}

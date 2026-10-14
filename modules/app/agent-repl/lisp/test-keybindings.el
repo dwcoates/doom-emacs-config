@@ -117,6 +117,7 @@
 (ert-deftest agent-repl-test-keybindings-navigation-commands-are-defined ()
   "The navigation and utility commands bound outside SPC j exist."
   (dolist (cmd '(agent-repl-switch-to-project
+                 agent-repl-switch-to-any-workspace
                  agent-repl-add-project-workspace
                  agent-repl-open-most-recent-workspace
                  agent-repl-switch-left
@@ -271,6 +272,16 @@ walked for KEY followed by its #\\='COMMAND."
                         (setq found (cadr (cadr tail))))))))))
         (end-of-file nil)))
     found))
+
+(ert-deftest agent-repl-test-keybindings-spc-p-p-switches-among-current-workspaces ()
+  "`SPC p p\=' offers the current and recent workspaces."
+  (should (eq (agent-repl-test-keybindings--leader-prefix-binding "p" "p")
+              'agent-repl-switch-to-project)))
+
+(ert-deftest agent-repl-test-keybindings-spc-p-upper-p-switches-among-every-workspace ()
+  "`SPC p P\=' offers every known workspace."
+  (should (eq (agent-repl-test-keybindings--leader-prefix-binding "p" "P")
+              'agent-repl-switch-to-any-workspace)))
 
 (ert-deftest agent-repl-test-keybindings-spc-tab-f-forks-into-the-primary-branch ()
   "`SPC TAB f\=' forks the conversation into a top-level workspace."

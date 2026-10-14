@@ -806,6 +806,11 @@ message RosterRow {
   // field's whole contract.
   optional RosterRowLastTurnEnded last_turn_ended = 65;
 
+  // When this workspace was CLOSED, and by whom: the durable close record the
+  // daemon keeps across restarts of every client. UNSET while the workspace
+  // is open. See RosterRowClosure, which carries the field's whole contract.
+  optional RosterRowClosure closure = 66;
+
   // Whether this workspace may be OPENED by an editor yet: its session is
   // being brought up, is up, or could not be brought up. See
   // RosterRowAvailability, which carries the field's whole contract. ALWAYS
@@ -1093,6 +1098,50 @@ message RosterRowLastTurnEnded {
   // The instant the workspace's most recent turn closed, epoch milliseconds.
   int64 at_ms = 1;
 }
+
+// When the workspace was closed, in epoch MILLISECONDS, and WHO closed it:
+// read from the durable workspace record, so it survives a restart of the
+// daemon and of every client.
+//
+// It exists so a client can tell the workspaces the USER put away from the
+// ones the daemon or an agent closed on its own -- the editor's workspace
+// switcher offers the most recently user-closed ones beside the open ones.
+// Clients order and filter by it and never draw it.
+//
+// THE FIRST CLOSE IS THE ONE RECORDED: closing a workspace that is already
+// closed moves nothing, except that a USER close takes over a close the user
+// did not make (the user killing a workspace the daemon had closed). A
+// re-open clears it. UNSET on an open workspace, and on a closed one whose
+// close predates the record (the daemon cannot vouch for when, or by whom).
+message RosterRowClosure {
+  // The close instant, epoch milliseconds.
+  int64 at_ms = 1;
+  // Who closed it. THE SET ARM IS THE CAUSE; an unset oneof is a contract
+  // breach and is rejected loudly.
+  oneof by {
+    // The user's own gesture: CloseWorkspace or KillWorkspace.
+    RosterRowClosureByUser user = 2;
+    // An agent's request, through a workspace command file.
+    RosterRowClosureByAgent agent = 3;
+    // The merge that landed the workspace closed it.
+    RosterRowClosureByMerge merge = 4;
+    // The daemon itself, unasked: the workspace's directory was gone.
+    RosterRowClosureByDaemon daemon = 5;
+  }
+}
+
+// The user closed the workspace. DELIBERATELY EMPTY: the arm is the fact.
+message RosterRowClosureByUser {}
+
+// An agent closed the workspace. DELIBERATELY EMPTY: the arm is the fact.
+message RosterRowClosureByAgent {}
+
+// The workspace's merge closed it. DELIBERATELY EMPTY: the arm is the fact.
+message RosterRowClosureByMerge {}
+
+// The daemon closed the workspace unasked. DELIBERATELY EMPTY: the arm is the
+// fact.
+message RosterRowClosureByDaemon {}
 
 // The row's selected-workspace highlight.
 message RosterRowCurrent {

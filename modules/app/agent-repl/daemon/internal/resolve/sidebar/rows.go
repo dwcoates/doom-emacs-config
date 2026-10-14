@@ -1,6 +1,8 @@
 package sidebar
 
 import (
+	"fmt"
+
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
@@ -132,6 +134,10 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	// the workspace that most recently finished ranks by it. Unset when no
 	// turn of the workspace has closed.
 	out.LastTurnEnded = lastTurnEnded(rec)
+	// THE DURABLE CLOSE RECORD, for filtering and ordering only: the editor's
+	// switcher offers the workspaces the user most recently closed. Unset
+	// while open, and on a close that predates the record.
+	out.Closure = closure(rec, rowLog)
 	for _, child := range rc.tree.children[rec.ID] {
 		out.Children = append(out.Children, r.row(child, rc, rowLog))
 	}
@@ -180,6 +186,31 @@ func lastTurnEnded(rec wsm.Workspace) *frontendv1.RosterRowLastTurnEnded {
 		return nil
 	}
 	return &frontendv1.RosterRowLastTurnEnded{AtMs: rec.LastTurnEndedAt.UnixMilli()}
+}
+
+// closure resolves the row's durable close record, or nil for an open
+// workspace and for a closed one whose close predates the record. A cause
+// outside wsm's declared set is impossible (the record refuses it at the write
+// and at the read), so reaching one here fails hard.
+func closure(rec wsm.Workspace, log dlog.Logger) *frontendv1.RosterRowClosure {
+	if rec.Closure == nil {
+		return nil
+	}
+	out := &frontendv1.RosterRowClosure{AtMs: rec.Closure.At.UnixMilli()}
+	switch rec.Closure.By {
+	case wsm.CloseByUser:
+		out.By = &frontendv1.RosterRowClosure_User{User: &frontendv1.RosterRowClosureByUser{}}
+	case wsm.CloseByAgent:
+		out.By = &frontendv1.RosterRowClosure_Agent{Agent: &frontendv1.RosterRowClosureByAgent{}}
+	case wsm.CloseByMerge:
+		out.By = &frontendv1.RosterRowClosure_Merge{Merge: &frontendv1.RosterRowClosureByMerge{}}
+	case wsm.CloseByDaemon:
+		out.By = &frontendv1.RosterRowClosure_Daemon{Daemon: &frontendv1.RosterRowClosureByDaemon{}}
+	default:
+		log.Error("daemon.sidebar.closure", "the close record names an undeclared cause", dlog.Context{"closed_by": string(rec.Closure.By)})
+		panic(fmt.Sprintf("sidebar: workspace %s: undeclared close cause %q", rec.ID, rec.Closure.By))
+	}
+	return out
 }
 
 // attention reports whether the row draws the attention marker.

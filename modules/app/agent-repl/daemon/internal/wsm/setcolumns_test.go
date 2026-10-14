@@ -68,11 +68,11 @@ func TestPlainWorkspaceUpdatesGoThroughSetWorkspaceColumns(t *testing.T) {
 	// Act
 	spelled := strings.Count(string(source), "UPDATE workspaces SET ")
 
-	// Assert: setWorkspaceColumns, SetClosed's, SetCurrent's three (the
+	// Assert: setWorkspaceColumns, MarkClosed's, SetCurrent's three (the
 	// departing workspace's dwell, the clear and the set), and SetPriority's,
 	// which share a transaction with another statement (the priority's
 	// re-landing of the workspace's place) or assign NULLs and literals.
 	if spelled != 6 {
-		t.Fatalf("workspaces.go spells a workspace update %d times, want 6 (setWorkspaceColumns, SetClosed, SetCurrent three times, SetPriority)", spelled)
+		t.Fatalf("workspaces.go spells a workspace update %d times, want 6 (setWorkspaceColumns, MarkClosed, SetCurrent three times, SetPriority)", spelled)
 	}
 }
