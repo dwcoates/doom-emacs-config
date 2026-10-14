@@ -281,6 +281,18 @@ type DB interface {
 	ClaimResumptions(ctx context.Context, ws WorkspaceID) (int, error)
 	// OwedTurns answers the turns ws is owed a resumption for, unclaimed.
 	OwedTurns(ctx context.Context, ws WorkspaceID) ([]TurnID, error)
+	// OweHandBack records a landed async merge's report as owed until the
+	// build that carries the landing is running (owedhandbacks.go).
+	OweHandBack(ctx context.Context, owed OwedHandBack) error
+	// CoverOwedHandBacks marks every owed report covered by the deploy
+	// committing now, and answers how many it newly covered.
+	CoverOwedHandBacks(ctx context.Context) (int, error)
+	// OwedHandBacks answers the owed reports, oldest first: only the covered
+	// ones when coveredOnly.
+	OwedHandBacks(ctx context.Context, coveredOnly bool) ([]OwedHandBack, error)
+	// PayHandBack deletes mergeWS's owed report once it was submitted, and
+	// answers whether one was there.
+	PayHandBack(ctx context.Context, mergeWS WorkspaceID) (bool, error)
 	// ClaimIdempotencyKey binds a client's key to a turn. A key whose
 	// submission the queue ACCEPTED answers ClaimAccepted with that turn and
 	// binds nothing; a key claimed for a submission that never reached

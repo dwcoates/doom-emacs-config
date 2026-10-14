@@ -198,9 +198,20 @@ type Services interface {
 type Clock = rollout.Clock
 
 // Deps are a Deployer's collaborators.
+// OwedReports covers and pays the landing reports owed until a deploy has run
+// (mergeworkspace.Service).
+type OwedReports interface {
+	CoverOwed(ctx context.Context) error
+	PayOwed(ctx context.Context, coveredOnly bool, deployErr error)
+}
+
 type Deps struct {
 	// Live names the installed artifacts.
 	Live Live
+	// Reports are the landing reports a deploy covers when it commits and
+	// pays once it has run, unless it hands this daemon over: then the
+	// successor pays them at its takeover.
+	Reports OwedReports
 	// StagingRoot is where each deploy's staging directory is made.
 	StagingRoot string
 	Builder     Builder
@@ -277,6 +288,8 @@ func New(deps Deps) (*Deployer, error) {
 		return nil, errors.New("deploy: the shim bundle guard is required")
 	case deps.Rollout == nil:
 		return nil, errors.New("deploy: the rollout controller is required")
+	case deps.Reports == nil:
+		return nil, errors.New("deploy: the owed landing reports are required; a deploy pays the reports it covered")
 	case deps.Workspaces == nil:
 		return nil, errors.New("deploy: the workspace list is required")
 	case deps.Clients == nil:
@@ -320,6 +333,21 @@ func (d *Deployer) Deploy(ctx context.Context, force bool) (result Result, err e
 	}
 	committed := false
 	defer func() { d.end(committed) }()
+	// A COMMITTED DEPLOY PAYS THE LANDING REPORTS IT COVERED, once it has
+	// decided every component: a stale shim was bounced, or registered to be
+	// once its work ends, and the prompt queue takes a registered bounce
+	// before it delivers anything queued. A deploy that failed pays them too,
+	// saying so. One that hands this daemon over leaves them to the
+	// successor, which pays them once it has judged the shims it adopted.
+	defer func() {
+		switch {
+		case !committed:
+		case err != nil:
+			d.deps.Reports.PayOwed(ctx, true, err)
+		case !movesDaemon(result):
+			d.deps.Reports.PayOwed(ctx, true, nil)
+		}
+	}()
 
 	if d.deps.Rollout.Joining() {
 		d.log.Info(opDeploy, "refused a deploy asked of a successor still joining", fields)
@@ -335,6 +363,10 @@ func (d *Deployer) Deploy(ctx context.Context, force bool) (result Result, err e
 	// none, so a landing it was asked for stays owed.
 	d.commit()
 	committed = true
+	// EVERY LANDING REPORT OWED BEFORE THIS INSTANT IS THIS DEPLOY'S TO PAY:
+	// what it builds carries those landings. A cover that fails is recorded
+	// by its owner, and the reports wait for the next deploy.
+	_ = d.deps.Reports.CoverOwed(ctx)
 
 	// FROM HERE THE LINE IS THIS DEPLOY'S. A deploy that stops short of the
 	// phase that ends it (updated here, or a handover whose successor says it)

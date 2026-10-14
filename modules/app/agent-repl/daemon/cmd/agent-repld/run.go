@@ -518,7 +518,14 @@ func run(ctx context.Context, opts options, h hooks) error {
 	// It joins with the background loops, so an orderly exit waits for a
 	// session start in flight on the same bound they get rather than closing
 	// the state client under it.
-	loops.Go("bring_up", func() { sequence.BringUp(serving, report.PendingBringUp) })
+	loops.Go("bring_up", func() {
+		sequence.BringUp(serving, report.PendingBringUp)
+		// A FRESH BOOT'S LANDING REPORTS ARE PAID ONCE ITS SESSIONS ARE UP:
+		// what this daemon runs carries every landing before it started.
+		if built.SettleBoot != nil {
+			built.SettleBoot(serving)
+		}
+	})
 	// AND THE STATE ROOT IS WATCHED FOR AS LONG AS IT IS SERVED. A loss ends
 	// the serving lifetime, and the exit reports it as the cause rather than
 	// as an orderly one. It joins with the loops above.

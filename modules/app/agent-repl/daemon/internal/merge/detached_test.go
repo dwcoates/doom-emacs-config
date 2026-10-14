@@ -730,6 +730,118 @@ func TestALandedAsyncMergeIsHandedBackAsLanded(t *testing.T) {
 	}
 }
 
+// landedAsync lands an async merge whose target the harness has set up, and
+// answers the one report it handed back.
+func landedAsync(t *testing.T, h *harness) handback {
+	t.Helper()
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	if err := requestDetached(t, h, RequestedByUser); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+	sent := h.detached.sent()
+	if len(sent) != 1 || sent[0].outcome.Kind != DetachedLanded {
+		t.Fatalf("handbacks = %+v, want one landing", sent)
+	}
+	return sent[0]
+}
+
+func TestALandingInTheDaemonsOwnCheckoutIsHandedBackAsOwedItsDeploy(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ownCheckout()
+
+	// Act
+	sent := landedAsync(t, h)
+
+	// Assert
+	if sent.outcome.Deploy != LandingDeployOwed {
+		t.Fatalf("deploy = %v, want the report owed its deploy", sent.outcome.Deploy)
+	}
+}
+
+func TestALandingsReportIsHandedOverBeforeItsDeployIsTold(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ownCheckout()
+
+	// Act
+	landedAsync(t, h)
+
+	// Assert: the report exists before the deploy, so the deploy covers it.
+	h.rollout.mu.Lock()
+	defer h.rollout.mu.Unlock()
+	if h.rollout.fired != 1 || h.rollout.handbacksAtFire != 1 {
+		t.Fatalf("deploy fired %d time(s) with %d report(s) handed over, want once, after the report", h.rollout.fired, h.rollout.handbacksAtFire)
+	}
+}
+
+func TestALandingInASiblingWorktreeIsHandedBackWithNothingToDeploy(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.emacsRepo()
+
+	// Act
+	sent := landedAsync(t, h)
+
+	// Assert
+	if sent.outcome.Deploy != LandingNotDeployed {
+		t.Fatalf("deploy = %v, want nothing to deploy", sent.outcome.Deploy)
+	}
+}
+
+func TestALandingWhileTheRolloutsAreHeldIsHandedBackAsHeld(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ownCheckout()
+	h.db.rolloutHold = wsm.RolloutHold{Held: true, Since: time.Unix(1, 0)}
+
+	// Act
+	sent := landedAsync(t, h)
+
+	// Assert
+	if sent.outcome.Deploy != LandingRolloutsHeld {
+		t.Fatalf("deploy = %v, want the held rollouts named", sent.outcome.Deploy)
+	}
+}
+
+func TestALandingWhoseHoldWillNotReadIsHandedBackAsUnread(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ownCheckout()
+	h.db.rolloutHoldErr = errors.New("state database unreadable")
+
+	// Act
+	sent := landedAsync(t, h)
+
+	// Assert
+	if sent.outcome.Deploy != LandingHoldUnread {
+		t.Fatalf("deploy = %v, want the unread hold named", sent.outcome.Deploy)
+	}
+}
+
+func TestTheReportAndTheDeployReadTheHoldOnce(t *testing.T) {
+	// Arrange: the hold reads as free for the first read only.
+	h := newHarness(t)
+	h.ownCheckout()
+	h.db.rolloutHoldOnce = &wsm.RolloutHold{Held: true, Since: time.Unix(1, 0)}
+
+	// Act
+	sent := landedAsync(t, h)
+
+	// Assert: the report says owed, and the deploy it was owed was told.
+	h.rollout.mu.Lock()
+	fired := h.rollout.fired
+	h.rollout.mu.Unlock()
+	if sent.outcome.Deploy != LandingDeployOwed || fired != 1 {
+		t.Fatalf("deploy = %v and the deploy fired %d time(s), want one decision both act on", sent.outcome.Deploy, fired)
+	}
+}
+
 func TestAnEvictedAsyncMergeIsNotHandedBack(t *testing.T) {
 	// Arrange: an async request handed off and waiting in line.
 	h := newHarness(t)

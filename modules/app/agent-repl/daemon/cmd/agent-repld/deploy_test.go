@@ -167,6 +167,7 @@ func TestTheBootingDeployerClosesTheDeployFaultsAnEarlierDaemonLeft(t *testing.T
 				Evidence: health.DeployFailure{Step: health.DeployStepBuild}.Evidence()}}
 			p := deployerParamsFor(t, exe)
 			p.Rollout, p.Progress, p.Faults, p.Joining = idleRollout{}, noProgress{}, faults, tc.joining
+			p.Reports = &detachedForwarder{}
 
 			// Act
 			if _, _, err := buildDeployer(context.Background(), p); err != nil {
