@@ -20,6 +20,7 @@ import { SetWorkspaceHiddenResponseSchema } from "../../../proto/gen/ts/agentrep
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { repoFoldKey } from "../../src/sidebar/context.js";
 import {
+  drawFoldHeader,
   drawHeadedSection,
   drawRosterRepoDivergence,
   drawRosterSectionFold,
@@ -1728,5 +1729,64 @@ describe("the repository label's divergence hover", () => {
     const wire = roster({ repos: [] });
     wire.repository = { $typeName: "frontend.v1.RosterRepositoryView", sections: [section] };
     expect(() => drawWorkspaceRoster(wire, sidebarContext())).toThrow(MalformedView);
+  });
+});
+
+describe("drawFoldHeader", () => {
+  const draw = (): { header: HTMLElement; section: HTMLElement; calls: HTMLElement[] } => {
+    const section = document.createElement("div");
+    const label = document.createElement("span");
+    label.textContent = "alpha";
+    const calls: HTMLElement[] = [];
+    const header = drawFoldHeader(label, section, (_section, control) => calls.push(control));
+    return { header, section, calls };
+  };
+
+  it("draws the fold triangle, then the label, in a repo-head", () => {
+    // Arrange, Act
+    const { header } = draw();
+    // Assert
+    expect([header.className, ...[...header.children].map((c) => c.className || c.textContent)]).toEqual([
+      "repo-head",
+      "tri",
+      "alpha",
+    ]);
+  });
+
+  it("asks for the other fold from a click anywhere on the header", () => {
+    // Arrange
+    const { header, calls } = draw();
+    // Act
+    header.click();
+    // Assert
+    expect(calls).toEqual([header]);
+  });
+
+  it("asks once, from the triangle, when the triangle is clicked", () => {
+    // Arrange
+    const { header, calls } = draw();
+    const triangle = header.querySelector<HTMLElement>("[data-section-fold]")!;
+    // Act
+    triangle.click();
+    // Assert
+    expect(calls).toEqual([triangle]);
+  });
+
+  it("is the header every headed section draws", () => {
+    // Arrange, Act
+    const drawn = drawWorkspaceRoster(
+      roster({
+        repos: [repoSection({ id: "repo-1" })],
+        hidden: hiddenSection([HIDDEN_ROW]),
+        merged: mergedSection([row({ id: "ws-m", closed: true })], 1, false),
+      }),
+      sidebarContext(),
+    );
+    // Assert: each section's header is a repo-head opening on the triangle then the label.
+    const heads = [...pane(drawn, "repository").querySelectorAll<HTMLElement>(".repo > .repo-head")];
+    expect(heads.length).toBeGreaterThanOrEqual(3);
+    for (const head of heads) {
+      expect([...head.children].slice(0, 2).map((c) => c.className)).toEqual(["tri", SECTION_LABEL_CLASS]);
+    }
   });
 });
