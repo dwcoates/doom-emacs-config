@@ -27,6 +27,7 @@
  * global it stubs, and leaves the page empty.
  */
 import { createControl } from "../src/control.js";
+import { STREAM_COST_WINDOW_MS } from "../src/stream-cost.js";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi, type Mock } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -424,6 +425,28 @@ describe("the boot", { timeout: BOOT_TIMEOUT_MS }, () => {
     expect(page.mounts.footer.mock.calls[0]?.[0]).toBe(document.getElementById("footer"));
     expect(page.mounts.login.mock.calls[0]?.[0]).toBe(document.getElementById("login-overlay"));
     expect(page.mounts.newsDigest.mock.calls[0]?.[0]).toBe(document.getElementById("news-digest"));
+  });
+
+  test("stops its stream-cost window timer when the page goes quiet", async () => {
+    // Arrange: the meter's timer is the one interval armed at its window.
+    // Restored however the test ends: the unit run is un-isolated.
+    const armed = vi.spyOn(window, "setInterval");
+    const cleared = vi.spyOn(window, "clearInterval");
+    try {
+      await bootMain();
+      const windowCall = armed.mock.calls.findIndex(([, ms]) => ms === STREAM_COST_WINDOW_MS);
+      expect(windowCall).toBeGreaterThanOrEqual(0);
+      const timer = armed.mock.results[windowCall]?.value;
+
+      // Act
+      page.bootedContext?.quiesce();
+
+      // Assert
+      expect(cleared).toHaveBeenCalledWith(timer);
+    } finally {
+      armed.mockRestore();
+      cleared.mockRestore();
+    }
   });
 
   test("mounts the news digest overlay before the lifecycle whose stream feeds it", async () => {

@@ -61,7 +61,9 @@ export interface DaemonContext {
    *
    * Every subsequent `callUnary` refuses locally and every registered stream
    * cancels itself, so nothing this page holds keeps addressing a daemon that
-   * has released the workspace.
+   * has released the workspace. The stream-cost meter's window timer stops
+   * with them: with no stream left there is no cost to state, and a timer left
+   * running would outlive the page that armed it.
    */
   quiesce(): void;
   /** Whether the page has gone quiet. */
@@ -191,6 +193,7 @@ export function createDaemonContext(init: DaemonContextInit): DaemonContext {
       });
       // A copy: a listener cancelling its stream unsubscribes itself here.
       for (const fn of [...quietListeners]) fn();
+      init.costs?.dispose();
     },
     isQuiesced(): boolean {
       return quiesced;
