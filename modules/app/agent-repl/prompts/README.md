@@ -8,9 +8,10 @@ editing source or rebuilding anything.
 
 `workspace-name-from-prompt.md` is worth knowing about: every dynamically
 created workspace whose name you did not type is named by a headless model
-call the daemon makes from that file, and the three-word rule it states is
-ENFORCED on the answer rather than hoped for. Loosen the words in the brief
-and the daemon still refuses what the rule forbids — the rule itself lives in
+call the daemon makes from that file, and the word-limit rule it states is
+CHECKED on the answer rather than hoped for. An answer over the limit is handed
+back to the model to shorten through `workspace-name-shorten.md`; if the
+shortened answer is still over, it is taken anyway. The rule itself lives in
 `daemon/internal/workspace/naming.go`.
 
 **This directory is doom's own policy, not everyone's.** These files are the
