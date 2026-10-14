@@ -29,6 +29,10 @@
   - This covers my own workspace's branch and every subagent's branch alike.
   - Never merge, commit, cherry-pick, rebase, reset, or push onto master by hand.
   - On a parked, failed, or refused merge, report the reason and stop rather than landing the work some other way.
+- Every offer to merge a workspace or branch MUST name which mode the merge would run in.
+  - A one-shot merge makes the workspace unavailable while the merge runs, and closes the workspace once it lands.
+  - An async merge keeps the workspace open and available, both while the merge runs and after it lands.
+  - Never offer a merge without its mode, because the two modes leave me with different workspaces afterwards.
 
 ### Before committing
 
