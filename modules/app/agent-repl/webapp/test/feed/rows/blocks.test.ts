@@ -13,6 +13,7 @@ import {
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import {
+  IMAGE_MISSING_TEXT,
   drawFeedImageBlock,
   drawFeedQuoteBlock,
   drawFeedTextBlock,
@@ -128,12 +129,15 @@ describe("the attached image's own rule in the stylesheet", () => {
     expect(rule).toContain("max-width: 100%");
   });
 
-  it("leaves the height to follow the capped width, so the picture is not squashed", () => {
+  it.each([
+    ["draws every image at the one thumbnail height, large or small", "height: 120px"],
+    ["keeps the aspect ratio when the width cap bites", "object-fit: contain"],
+  ])("%s", (_name, declaration) => {
     // Arrange.
     const rule = stylesheet.match(/\.prompt-block-image\s*\{[^}]*\}/)?.[0] ?? "";
 
     // Act / Assert.
-    expect(rule).toContain("height: auto");
+    expect(rule).toContain(declaration);
   });
 });
 
@@ -146,6 +150,38 @@ describe("drawFeedImageBlock", () => {
   it("keeps an empty alt empty, that being a legitimate resolution", () => {
     const el = drawFeedImageBlock(create(FeedImageBlockSchema, { src: "/x.png", alt: "" }));
     expect(el.getAttribute("alt")).toBe("");
+  });
+
+  it("says the image is no longer available, in its place, when it cannot be loaded", () => {
+    // Arrange
+    const box = document.createElement("div");
+    const el = drawFeedImageBlock(create(FeedImageBlockSchema, { src: "/gone.png", alt: "clip.png" }));
+    box.appendChild(el);
+
+    // Act
+    el.dispatchEvent(new Event("error"));
+
+    // Assert
+    expect([box.children.length, box.firstElementChild?.className, box.textContent, (box.firstElementChild as HTMLElement).title]).toEqual([
+      1,
+      "prompt-block prompt-block-image-missing",
+      IMAGE_MISSING_TEXT,
+      "clip.png",
+    ]);
+  });
+
+  it("records an image that cannot be loaded at info, naming its src", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const el = drawFeedImageBlock(create(FeedImageBlockSchema, { src: "/gone.png", alt: "" }));
+    document.createElement("div").appendChild(el);
+
+    // Act
+    el.dispatchEvent(new Event("error"));
+
+    // Assert
+    const record = await forwardedRecord(capture, "feed.draw-image-block.missing");
+    expect([record.level.case, record.context?.src]).toEqual(["info", "/gone.png"]);
   });
 });
 

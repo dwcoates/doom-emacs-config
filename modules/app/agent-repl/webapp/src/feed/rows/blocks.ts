@@ -54,10 +54,22 @@ export function drawFeedTextBlock(block: FeedTextBlock, mark?: SlotMark): HTMLEl
   return markdownSlot("prompt-block prompt-block-text", block.text, mark);
 }
 
+/** What an image the webview cannot load is drawn as, in its place. */
+export const IMAGE_MISSING_TEXT = "Image no longer available";
+
 /**
  * An image block. The `src` is the DAEMON's resolution of the record's
  * reference into something a browser can load — this end never resolves a host
  * path itself — and the alt text is resolved too and may legitimately be empty.
+ *
+ * It is drawn as a THUMBNAIL: every image, large or small, fills the same
+ * fixed-height box (`.prompt-block-image`), so a screenshot never takes over
+ * the feed and an icon is never a speck.
+ *
+ * AN IMAGE THAT CANNOT BE LOADED SAYS SO. A pasted image lives in its
+ * workspace's worktree, and a deleted worktree takes it along; the load's own
+ * failure is what reports that, whenever it happens, so the image is swapped
+ * for {@link IMAGE_MISSING_TEXT} rather than left as a broken-image icon.
  */
 export function drawFeedImageBlock(block: FeedImageBlock): HTMLElement {
   log.info("drawing a prompt image block", {
@@ -68,6 +80,17 @@ export function drawFeedImageBlock(block: FeedImageBlock): HTMLElement {
   el.className = "prompt-block prompt-block-image";
   el.src = block.src;
   el.alt = block.alt;
+  el.addEventListener("error", () => {
+    log.info("a drawn image could not be loaded; it is drawn as no longer available", {
+      operation: "feed.draw-image-block.missing",
+      context: { src: block.src, alt: block.alt },
+    });
+    const missing = document.createElement("div");
+    missing.className = "prompt-block prompt-block-image-missing";
+    missing.textContent = IMAGE_MISSING_TEXT;
+    if (block.alt !== "") missing.title = block.alt;
+    el.replaceWith(missing);
+  });
   return el;
 }
 

@@ -6073,18 +6073,27 @@ bubble-body.bubble-body { display: block; }
   max-width: 100%;
 }
 .prompt-block-unsupported { color: var(--muted); font-style: italic; }
-/* An ATTACHED IMAGE is drawn at its own size, but never wider than the bubble
-   it sits in: an unconstrained `<img>` of a screenshot is a couple of thousand
-   pixels wide and would push the bubble -- and with it the feed's column --
-   off the panel. `height: auto` keeps the aspect ratio while the width is
-   capped, and the block display puts it on its own line beneath the words
-   rather than in their flow. */
+/* AN IMAGE IS A THUMBNAIL (owner ruling, 2026-10-14): every image, large or
+   small, is scaled to the same fixed height -- the height the Emacs input
+   window draws it at (`agent-repl-image-thumbnail-height') -- and never wider
+   than the bubble it sits in. `object-fit: contain' keeps the aspect ratio
+   when the width cap bites, and the block display puts it on its own line
+   between the words around it. */
 .prompt-block-image {
   display: block;
+  height: 120px;
+  width: auto;
   max-width: 100%;
-  height: auto;
+  object-fit: contain;
+  object-position: left center;
   margin-top: 0.35rem;
   border-radius: 3px;
+}
+/* An image whose file is gone (its worktree was deleted): said, in its place. */
+.prompt-block-image-missing {
+  margin-top: 0.35rem;
+  color: var(--muted);
+  font-style: italic;
 }
 
 /* ---- held section (src/held) ------------------------------------------ */
