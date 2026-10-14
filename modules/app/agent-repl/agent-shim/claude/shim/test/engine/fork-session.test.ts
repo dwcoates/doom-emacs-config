@@ -1,5 +1,5 @@
 import { create } from "@bufbuild/protobuf";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
@@ -15,6 +15,7 @@ import { workspaceLockKey } from "../../src/locks.js";
 import { shimv1 } from "../../src/proto.js";
 import { logRecordsSince, logSinkMark } from "../log-records.js";
 import { testTempDir } from "../temp-dir.js";
+import { sequentialIds, writeTranscript } from "../vendor-transcript.js";
 import { transcriptPath } from "../../src/engine/vendor-paths.js";
 
 const PARENT_ID = "11111111-1111-4111-8111-111111111111";
@@ -45,16 +46,13 @@ function beforeRecord(uuid: string): shimv1.ForkPoint {
 
 /** A parent transcript of three chained records and one unchained metadata line. */
 function writeParent(configDir: string): string {
-  const file = transcriptPath(configDir, PARENT_DIR, PARENT_ID);
-  mkdirSync(path.dirname(file), { recursive: true });
   const lines = [
     { type: "user", uuid: "u1", parentUuid: null, message: { role: "user", content: "hello" } },
     { type: "ai-title", aiTitle: "a title" },
     { type: "assistant", uuid: "a1", parentUuid: "u1", message: { role: "assistant", content: [{ type: "text", text: "hi" }] } },
     { type: "user", uuid: "u2", parentUuid: "a1", message: { role: "user", content: "again" } },
   ];
-  writeFileSync(file, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
-  return file;
+  return writeTranscript(configDir, PARENT_DIR, PARENT_ID, lines);
 }
 
 /** The directories a fork needs, with the parent's book persisted unless asked otherwise. */
@@ -152,7 +150,7 @@ describe("forkSession", () => {
     const { configDir, stateDir } = await fixture();
     writeParent(configDir);
     const fork = vi.fn<ForkVendorSession>(() => {
-      writeFileSync(transcriptPath(configDir, PARENT_DIR, "forked"), "{}\n");
+      writeTranscript(configDir, PARENT_DIR, "forked", [{}]);
       return Promise.resolve("forked");
     });
 
@@ -255,10 +253,6 @@ describe("forkSession", () => {
 });
 
 /** Mint ids id-1, id-2, … so a fork's identities are predictable. */
-function sequentialIds(): () => string {
-  let next = 0;
-  return () => `id-${String(++next)}`;
-}
 
 /** The fork's own records since `mark`: the identity store's reads log too. */
 function forkRecordsSince(mark: number): ReturnType<typeof logRecordsSince> {

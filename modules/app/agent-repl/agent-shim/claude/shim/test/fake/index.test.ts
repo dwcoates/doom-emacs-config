@@ -6,10 +6,11 @@
  * scenario stands on, because a defect here is invisible in a scenario test
  * (which asserts what the scenario said, not how the engine said it).
  */
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { logRecordsSince } from "../log-records.js";
+import { writeTranscript } from "../vendor-transcript.js";
 import { join } from "node:path";
 
 import {
@@ -34,7 +35,6 @@ import {
   FAKE_WEEKLY_WINDOW_RESETS_IN_MS,
 } from "../../src/fake/catalogs.js";
 import { HARNESS_NOW_MS, driveScenario, ofType, recordsOfType, theResult } from "./harness.js";
-import { transcriptPath } from "../../src/engine/vendor-paths.js";
 
 const ALLOW: CanUseToolLike = async (_n, input) =>
   ({ behavior: "allow", updatedInput: input });
@@ -1279,9 +1279,7 @@ describe("a truncating resume and file checkpointing", () => {
     const root = mkdtempSync(join(tmpdir(), "fake-rollback-"));
     const configDir = join(root, "cfg");
     const cwd = join(root, "workspace");
-    const file = transcriptPath(configDir, cwd, "sess-r");
-    mkdirSync(join(file, ".."), { recursive: true });
-    writeFileSync(file, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
+    const file = writeTranscript(configDir, cwd, "sess-r", lines);
     return { configDir, cwd, file };
   }
 
