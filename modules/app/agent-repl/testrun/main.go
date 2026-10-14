@@ -88,11 +88,6 @@ func runnerCmd(argv []string) int {
 		log.Errorf("resolve the testrun binary: %v", err)
 		return 1
 	}
-	histPath, err := history.DefaultPath()
-	if err != nil {
-		log.Errorf("%v", err)
-		return 1
-	}
 	runner, err := life.StartRunner(reap.OSTable{}, reap.OSReap(log), life.WardenCommand{Name: self, Args: []string{"warden"}}, log)
 	if err != nil {
 		log.Errorf("%v", err)
@@ -116,8 +111,23 @@ func runnerCmd(argv []string) int {
 		return 1
 	}
 	parent, prefix, release := runParent(log, module, runner)
+	histPath, err := history.DefaultPath(runConditions(prefix))
+	if err != nil {
+		log.Errorf("%v", err)
+		return runner.Finish(1, gone, release)
+	}
 	code := runRooted(ctx, log, args, self, histPath, parent, prefix, runner)
 	return runner.Finish(code, gone, release)
+}
+
+// runConditions names what a run's units measure under, for the history they
+// plan from (history.DefaultPath): the RAM disk at ramdisk.UnitIOTier when the
+// run has its unit prefix, else the disk at the tier the run inherited.
+func runConditions(unitPrefix []string) string {
+	if unitPrefix == nil {
+		return "disk-io-inherited"
+	}
+	return "ramdisk-io-" + ramdisk.UnitIOTier
 }
 
 // wardenCmd watches the runner's lifeline and, if the runner dies without
