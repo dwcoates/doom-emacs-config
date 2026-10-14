@@ -26,18 +26,9 @@ func TestAPausedQueueAdmitsNothing(t *testing.T) {
 }
 
 func TestAPauseSuspendsTheRunningMergeAndTheQueuesResumeTakesItOnAtItsStep(t *testing.T) {
-	// Arrange: the head holds in its gate.
-	c := newChain(t)
-	inGate, _ := c.runner.hold(c.dirs[theWorkspace])
-	enqueue(t, c.h)
-	done := admitAsync(c.h, context.Background())
-	<-inGate
-
-	// Act: pause (the running gate is cut), then resume the queue.
-	if err := c.h.o.Pause(context.Background(), nil); err != nil {
-		t.Fatalf("Pause: %v", err)
-	}
-	<-done
+	// Arrange, Act: pause while the head holds in its gate (the running gate
+	// is cut), then resume the queue.
+	c := pausedUnderGate(t)
 	cut := c.runner.ran(c.dirs[theWorkspace])
 	queued, err := c.h.db.MergeQueue(context.Background(), c.h.repoKey())
 	if err != nil {
@@ -64,11 +55,7 @@ func TestAPauseSuspendsTheRunningMergeAndTheQueuesResumeTakesItOnAtItsStep(t *te
 // and answers once the paused run has let go.
 func pausedUnderGate(t *testing.T) *chain {
 	t.Helper()
-	c := newChain(t)
-	inGate, _ := c.runner.hold(c.dirs[theWorkspace])
-	enqueue(t, c.h)
-	done := admitAsync(c.h, context.Background())
-	<-inGate
+	c, done := headInGate(t)
 	if err := c.h.o.Pause(context.Background(), nil); err != nil {
 		t.Fatalf("Pause: %v", err)
 	}

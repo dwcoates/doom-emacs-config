@@ -1311,3 +1311,15 @@ func TestTheChainCheckAgainstItsQueue(t *testing.T) {
 		})
 	}
 }
+
+// headInGate runs the chain's head merge into its test gate and holds it
+// there, answering the chain and the pump's result once the gate is entered.
+func headInGate(t *testing.T) (*chain, <-chan error) {
+	t.Helper()
+	c := newChain(t)
+	inGate, _ := c.runner.hold(c.dirs[theWorkspace])
+	enqueue(t, c.h)
+	done := admitAsync(c.h, context.Background())
+	<-inGate
+	return c, done
+}

@@ -520,11 +520,7 @@ func TestAGateTheDaemonsExitCutNamesTheExit(t *testing.T) {
 
 func TestAGateAnEvictionCutNamesTheAbandonment(t *testing.T) {
 	// Arrange: the head holds in its gate.
-	c := newChain(t)
-	inGate, _ := c.runner.hold(c.dirs[theWorkspace])
-	enqueue(t, c.h)
-	done := admitAsync(c.h, context.Background())
-	<-inGate
+	c, done := headInGate(t)
 
 	// Act.
 	if err := c.h.o.Evict(context.Background(), theWorkspace); err != nil {
