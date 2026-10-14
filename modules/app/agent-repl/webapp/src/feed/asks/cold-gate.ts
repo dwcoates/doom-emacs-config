@@ -40,6 +40,7 @@
  * UNSPECIFIED is never offered and never sent, and a resolved trace carrying it
  * is a MALFORMED VIEW rather than a scope this end quietly words as "everything".
  */
+import type { DescMessage, Message } from "@bufbuild/protobuf";
 import { closeStandingNewsDigest } from "../../news-digest/news-digest.js";
 import { createControl, type Control } from "../../control.js";
 import { formatTickedAge } from "../../duration.js";
@@ -49,7 +50,6 @@ import { coldGateFigureColor } from "../../pressure-color.js";
 import { log } from "../../log.js";
 import {
   AnswerColdGateResponseSchema,
-  type AnswerColdGateResponse,
   type AnswerColdGateReopenFailed,
 } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_answer_cold_gate_pb";
 import type { AgentModel } from "../../../../proto/gen/ts/conversation/v1/api_pb";
@@ -65,6 +65,7 @@ import type {
   FeedColdGateResolvedCompact,
   FeedColdGateStanding,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
+import type { AgentReplClient } from "../../rpc/client.js";
 import { MalformedView } from "../../rpc/malformed.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { callUnary } from "../../rpc/unary.js";
@@ -72,9 +73,10 @@ import {
   clearRefusals,
   drawMalformedRefusal,
   refusal,
+  release,
   whileInFlight,
 } from "../cards/controls.js";
-import { callFailure, refusalOf, type SentenceTable } from "../../rpc/refuse.js";
+import { callFailure, refusalOf, type Cause, type SentenceTable } from "../../rpc/refuse.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
 import { tickWhileShown } from "../ticking.js";
@@ -601,7 +603,6 @@ async function answer(
   choice: ColdGateChoice,
 ): Promise<void> {
   const id = requireMessage(rc.row.id, "FeedRow.id");
-  clearRefusals(actions);
   // ANSWERING THE GATE CLOSES A STANDING NEWS DIGEST, as sending a prompt does
   // (owner, 2026-10-06): the user has moved on to the conversation.
   closeStandingNewsDigest(actions.ownerDocument);
@@ -623,38 +624,86 @@ async function answer(
     progress.textContent = text ?? "";
     progress.hidden = progress.textContent === "";
   });
+  await callFromGate(rc, actions, buttons, {
+    rpc: "AnswerColdGate",
+    call: (client) => client.answerColdGate(buildAnswerColdGateRequest(rc.ctx.workspace, id, choice)),
+    schema: AnswerColdGateResponseSchema,
+    own: OWN_CAUSES,
+    malformedOperation: "feed.asks.cold-gate.malformed-refusal",
+    // THE WAIT IS OVER, whichever way it ended: the slot is emptied and the
+    // subscription dropped before the outcome is drawn, so a refusal is never
+    // read underneath a progress line about a compaction that has stopped.
+    settled: () => {
+      unsubscribe();
+      progress.textContent = "";
+      progress.hidden = true;
+    },
+  });
+}
+
+/** A response whose result is the `success` or `error` arm every gate call answers. */
+type GateResponse = Message & {
+  result:
+    | { case: "success"; value: unknown }
+    | { case: "error"; value: { cause: Cause } }
+    | { case: undefined; value?: undefined };
+};
+
+/**
+ * ONE CALL FROM THE GATE'S ROW, whichever button made it: every button latched
+ * inert while it is in flight, and what came back drawn at the buttons.
+ *
+ * Success draws nothing (the daemon's push redraws the row) and keeps the
+ * buttons latched. A refusal is worded from OWN plus the cross-cutting four and
+ * gives the buttons back. A call that threw is
+ * drawn as what actually happened (`callUnary` already logged it, as its
+ * owner), and an answer this build cannot read is reported once rather than
+ * becoming an unhandled rejection inside a click handler.
+ */
+async function callFromGate<Res extends GateResponse>(
+  rc: RowContext,
+  actions: HTMLElement,
+  buttons: readonly Control[],
+  spec: {
+    rpc: string;
+    call: (client: AgentReplClient) => Promise<Res>;
+    schema: DescMessage;
+    own: SentenceTable;
+    malformedOperation: string;
+    /** Runs the moment the call is over, whichever way it ended, before anything is drawn. */
+    settled?: () => void;
+  },
+): Promise<void> {
+  clearRefusals(actions);
   const answered = await whileInFlight(buttons, () =>
-    callUnary(
-      rc.ctx,
-      "AnswerColdGate",
-      (client) =>
-        client.answerColdGate(buildAnswerColdGateRequest(rc.ctx.workspace, id, choice)),
-      AnswerColdGateResponseSchema,
-    ),
+    callUnary(rc.ctx, spec.rpc, spec.call, spec.schema),
   );
-  // THE WAIT IS OVER, whichever way it ended: the slot is emptied and the
-  // subscription dropped before the outcome is drawn, so a refusal is never
-  // read underneath a progress line about a compaction that has stopped.
-  unsubscribe();
-  progress.textContent = "";
-  progress.hidden = true;
+  spec.settled?.();
   if ("failed" in answered) {
-    // callUnary already logged the failure once, as its owner. What is drawn
-    // here is the FEEDBACK AT THE CLICK: the buttons are already back (
-    // `whileInFlight` gives them up on a throw), so the gate stays answerable,
-    // and the line beside them says what actually happened rather than
-    // reporting an unreachable daemon that answered.
+    // The buttons are already back (`whileInFlight` gives them up on a throw),
+    // so the gate stays answerable, and the line beside them says what
+    // actually happened rather than reporting an unreachable daemon that
+    // answered.
     const said = callFailure(answered.failed);
     actions.append(refusal(said.arm, said.text));
     return;
   }
   try {
-    drawAnswerOutcome(answered.value, actions, buttons);
+    const result = requireCase(answered.value.result, `${spec.rpc}Response.result`);
+    switch (result.case) {
+      case "success":
+        return;
+      case "error": {
+        const said = refusalOf(result.value.cause, spec.own, `${spec.rpc}Error.cause`);
+        actions.append(refusal(said.arm, said.text));
+        release(buttons);
+        return;
+      }
+      default:
+        unreachableArm(`${spec.rpc}Response.result`, armName(result));
+    }
   } catch (err) {
-    // A refusal this build cannot read is still a failure the reader owns; it is
-    // stated at the control and reported once rather than becoming an unhandled
-    // rejection inside a click handler.
-    if (!drawMalformedRefusal(rc.ctx, actions, "feed.asks.cold-gate.malformed-refusal", err)) throw err;
+    if (!drawMalformedRefusal(rc.ctx, actions, spec.malformedOperation, err)) throw err;
   }
 }
 
@@ -674,27 +723,6 @@ const OWN_CAUSES = {
       ? "the session did not come back from the re-open"
       : `the session did not come back from the re-open: ${v.detail}`,
 } as unknown as SentenceTable;
-
-/** Nothing on success (the daemon retires the gate row as it answers); the refusal on error. */
-function drawAnswerOutcome(
-  response: AnswerColdGateResponse,
-  actions: HTMLElement,
-  buttons: readonly Control[],
-): void {
-  const result = requireCase(response.result, "AnswerColdGateResponse.result");
-  switch (result.case) {
-    case "success":
-      return;
-    case "error": {
-      const said = refusalOf(result.value.cause, OWN_CAUSES, "AnswerColdGateError.cause");
-      actions.append(refusal(said.arm, said.text));
-      for (const button of buttons) button.disabled = false;
-      return;
-    }
-    default:
-      unreachableArm("AnswerColdGateResponse.result", armName(result));
-  }
-}
 
 /**
  * One scope's ENUM NAME — the single spelling `[data-compact-scope]` carries,
