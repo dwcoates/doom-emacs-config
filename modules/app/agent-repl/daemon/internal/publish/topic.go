@@ -1,7 +1,8 @@
 // Package publish is the daemon's one publication primitive.
 //
 // Every resolver publishes whole views through a Topic; every stream handler
-// subscribes to one. The subscription guarantee — never miss an update, never
+// subscribes to one. An EVENT (a click, a reload request) is not a view and is
+// emitted through Events instead, which neither replays nor deduplicates. The subscription guarantee — never miss an update, never
 // end on a stale one — is implemented here once so no handler reimplements it.
 // See ARCHITECTURE.md "publish (internal/publish)" and docs/overhaul/daemon.md
 // "Resolvers and push duties".
@@ -121,12 +122,7 @@ func (t *Topic[T]) Latest() (T, bool) {
 // every later value in order. The channel closes when ctx is cancelled, and
 // only then. The caller must cancel ctx or the subscriber leaks.
 func (t *Topic[T]) Subscribe(ctx context.Context) <-chan T {
-	out := make(chan T)
-	s := &subscriber[T]{
-		out:        out,
-		signal:     make(chan struct{}, 1),
-		latestOnly: t.latestOnly,
-	}
+	s := newSubscriber[T](t.latestOnly)
 
 	t.mu.Lock()
 	if t.has {
@@ -138,8 +134,8 @@ func (t *Topic[T]) Subscribe(ctx context.Context) <-chan T {
 	t.subs[s] = struct{}{}
 	t.mu.Unlock()
 
-	go t.pump(ctx, s)
-	return out
+	go pump(ctx, s, t.remove)
+	return s.out
 }
 
 // Subscribers reports how many live subscriptions the topic is serving. It
@@ -151,10 +147,11 @@ func (t *Topic[T]) Subscribers() int {
 }
 
 // pump drains one subscriber's queue onto its channel until ctx is cancelled,
-// then unregisters it and closes the channel.
-func (t *Topic[T]) pump(ctx context.Context, s *subscriber[T]) {
+// then unregisters it through unregister and closes the channel. It is the one
+// delivery loop Topic and Events share.
+func pump[T any](ctx context.Context, s *subscriber[T], unregister func(*subscriber[T])) {
 	defer func() {
-		t.remove(s)
+		unregister(s)
 		close(s.out)
 	}()
 	for {
@@ -191,6 +188,15 @@ type subscriber[T any] struct {
 	signal chan struct{}
 	// latestOnly replaces a value still queued rather than queuing behind it.
 	latestOnly bool
+}
+
+// newSubscriber builds an unregistered subscription with an empty queue.
+func newSubscriber[T any](latestOnly bool) *subscriber[T] {
+	return &subscriber[T]{
+		out:        make(chan T),
+		signal:     make(chan struct{}, 1),
+		latestOnly: latestOnly,
+	}
 }
 
 // enqueue appends v and wakes the pump. It never blocks, which is what keeps a
