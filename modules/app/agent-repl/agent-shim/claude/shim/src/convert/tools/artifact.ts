@@ -37,6 +37,11 @@ function actOf(call: PendingCall): conversationv1.AgentArtifactStart["act"] {
       }),
     };
   }
+  return { case: "publish", value: publishOf(call) };
+}
+
+/** The publish a call asks for, as its start states it and its settles restate it. */
+function publishOf(call: PendingCall): conversationv1.AgentArtifactPublish {
   const filePath = str(call.input, "file_path");
   if (filePath === undefined) {
     LOGGER.debug(
@@ -44,19 +49,16 @@ function actOf(call: PendingCall): conversationv1.AgentArtifactStart["act"] {
       "an artifact publish names no file to render; the unit cannot restate what is being published",
     );
   }
-  return {
-    case: "publish",
-    value: create(conversationv1.AgentArtifactPublishSchema, {
-      filePath: filePath ?? "",
-      favicon: str(call.input, "favicon"),
-      title: str(call.input, "title"),
-      // PRESENCE IS THE FACT: an existing url means this publish is a redeploy.
-      updatesUrl: str(call.input, "url"),
-      label: str(call.input, "label"),
-      description: str(call.input, "description"),
-      force: bool(call.input, "force") ?? false,
-    }),
-  };
+  return create(conversationv1.AgentArtifactPublishSchema, {
+    filePath: filePath ?? "",
+    favicon: str(call.input, "favicon"),
+    title: str(call.input, "title"),
+    // PRESENCE IS THE FACT: an existing url means this publish is a redeploy.
+    updatesUrl: str(call.input, "url"),
+    label: str(call.input, "label"),
+    description: str(call.input, "description"),
+    force: bool(call.input, "force") ?? false,
+  });
 }
 
 /** The one wrapper every frame of this unit shares. */
@@ -136,6 +138,10 @@ export const artifactConverter: ToolConverter = {
           value: create(conversationv1.AgentArtifactPublishedSchema, {
             url,
             title: str(output, "title"),
+            // THE PUBLISH ANSWERED, restated whole from the call: the finished
+            // card's favicon and file are stated only by the call, and a
+            // consumer may draw this settle with no start beside it.
+            publish: publishOf(call),
           }),
         },
       }),
