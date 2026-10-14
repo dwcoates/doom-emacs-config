@@ -664,6 +664,10 @@ body::after {
      token and hands the inset it gave up to the CONTENT inside the scroll box,
      so the bar lands on the edge while the text keeps the margin it had. */
   --bubble-scroll-gap: 2px;
+  /* The right inset the content keeps from the bar: the 0.9rem the bubble's
+     right padding gave up, less the gap the bubble still keeps. The body and
+     the header strip both read it. */
+  --bubble-content-inset: calc(0.9rem - var(--bubble-scroll-gap));
   /* THE ONE BUBBLE WIDTH (owner ruling, 2026-09-23): every blue and purple
      bubble -- response, prompt, peer, held prompt, compaction summary,
      agentic card -- fits its text up to this cap, and a metaprompt tree in
@@ -1722,7 +1726,7 @@ pre {
    bubble's right padding gave up. A scrollbar is laid out between the scroll
    box's border and its padding, so this padding is the distance from the TEXT
    to the bar, never from the bar to the bubble. */
-.bubble-body { flex: 1; min-width: 0; padding-right: calc(0.9rem - var(--bubble-scroll-gap)); overflow-wrap: anywhere; }
+.bubble-body { flex: 1; min-width: 0; padding-right: var(--bubble-content-inset); overflow-wrap: anywhere; }
 /* THE TYPE-OUT HIDES WHAT IT HAS NOT REACHED (src/bubble/text-reveal.ts): an
    element none of whose text is revealed yet draws no box at all, so a bullet,
    a code block's frame or a table row never appears ahead of its text. */
@@ -1732,7 +1736,7 @@ pre {
    keeps the right inset the bubble's padding used to give it, so a label sits
    where it always sat while the bar below it runs to the edge. */
 .bubble > .bubble-strip {
-  padding-right: calc(0.9rem - var(--bubble-scroll-gap));
+  padding-right: var(--bubble-content-inset);
 }
 /* THE ROLE: the side and the background, and nothing else (owner ruling,
    2026-09-23). A prompt hugs the RIGHT rail in blue: its right margin is half
