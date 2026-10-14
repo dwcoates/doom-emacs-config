@@ -1359,6 +1359,27 @@ Owner rulings, 2026-10-11 (`internal/merge/chain.go`, `internal/cpugov`).
   through the pump, the members behind it through `extendChain` from its
   resume, a speculative step (`progressDoc.Speculative`) finished as such
   whatever the merge's place now is.
+  - THE HEAD IS THE FIRST ADMITTED ENTRY IN QUEUE ORDER (`resumeIn`, fixed
+    2026-10-14), never whichever recovery path took a merge back first. A
+    handover can take the merge behind back (boot or an early adoption)
+    before the head's own adoption; until the head is taken back nothing of
+    the repository resumes, recorded at INFO `daemon.merge.resume` ("not
+    taken back yet", with `head` and `waiting`), and the head's adoption kick
+    then resumes it with the others behind it.
+  - A MERGE TAKEN BACK BUT NOT RESUMED is dropped as an admitted merge
+    (`dequeue` -> `dropPendingResume`): its entry, its merge lease and its
+    progress record go in ONE transaction (`wsm.DropAdmittedMerge`, the owner
+    of "a merge lease stands with exactly one queue entry", which
+    `bindMergeHold` relies on), its scratch trees are swept, and its bubble
+    ends with the running sentence. A failed drop changes nothing and leaves
+    it to resume. `dropQueued` refuses an admitted entry with no run and no
+    resume here, at ERROR, rather than leave its lease over no entry.
+  - THE BOOT SWEEP RELEASES EVERY MERGE LEASE NO QUEUE ENTRY NAMES
+    (`wsm.SweepOrphanedMergeState`), each recorded at INFO
+    `daemon.merge.recover` with its workspace and lease, and tells the prompt
+    queue: a lease a past defect stranded heals on the next deploy. A merge
+    in flight never stands as a lease with no entry, because its teardown
+    releases the lease before it removes the entry.
 
 ## `agent-repld merge-queue` is how an agent asks for a merge
 
