@@ -125,9 +125,7 @@ func TestUpdateMergeQueuePauseThenResumeToggleTheQueueStateAndRefuseNoOps(t *tes
 	}))
 
 	// Assert: pause succeeds.
-	if err != nil || resp.Msg.GetError() != nil {
-		t.Fatalf("UpdateMergeQueue(pause) = %v, %v, want a success", resp.Msg, err)
-	}
+	requireRPCSuccess(t, "UpdateMergeQueue(pause)", resp, err)
 
 	// Act: pause again.
 	resp2, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
@@ -144,9 +142,7 @@ func TestUpdateMergeQueuePauseThenResumeToggleTheQueueStateAndRefuseNoOps(t *tes
 	resp3, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
 		Action: &agentreplv1.UpdateMergeQueueRequest_Resume{Resume: &agentreplv1.UpdateMergeQueueResume{Repository: repoRef}},
 	}))
-	if err != nil || resp3.Msg.GetError() != nil {
-		t.Fatalf("UpdateMergeQueue(resume) = %v, %v, want a success", resp3.Msg, err)
-	}
+	requireRPCSuccess(t, "UpdateMergeQueue(resume)", resp3, err)
 
 	// Act: resume again.
 	resp4, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
@@ -175,9 +171,7 @@ func TestUpdateMergeQueueEvictRemovesOneWorkspacesQueuedMerge(t *testing.T) {
 	resp, err := behind.d.Client().UpdateMergeQueue(behind.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
 		Action: &agentreplv1.UpdateMergeQueueRequest_Evict{Evict: &agentreplv1.UpdateMergeQueueEvict{Workspace: behind.ws}},
 	}))
-	if err != nil || resp.Msg.GetError() != nil {
-		t.Fatalf("UpdateMergeQueue(evict) = %v, %v, want a success", resp.Msg, err)
-	}
+	requireRPCSuccess(t, "UpdateMergeQueue(evict)", resp, err)
 
 	// Assert: the roster no longer shows it queued.
 	got := awaitRoster(t, behind.d, roster, "the evicted workspace off the queue", func(r *frontendv1.WorkspaceRoster) bool {
@@ -233,9 +227,7 @@ func TestUpdateMergeQueueMoveSwapsTwoWaitingMerges(t *testing.T) {
 
 			// Act
 			resp, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(tt.action(behind.ws, last.ws)))
-			if err != nil || resp.Msg.GetError() != nil {
-				t.Fatalf("UpdateMergeQueue(move) = %v, %v, want a success", resp.Msg, err)
-			}
+			requireRPCSuccess(t, "UpdateMergeQueue(move)", resp, err)
 
 			// Assert: the queue reads the two racing merges, then the last merge,
 			// then the one it swapped with.
@@ -303,9 +295,7 @@ func TestAnswerMergeQueueOfferEvictTakesTheQueuedMergeOff(t *testing.T) {
 	}))
 
 	// Assert
-	if err != nil || resp.Msg.GetError() != nil {
-		t.Fatalf("AnswerMergeQueueOffer(evict) = %v, %v, want a success", resp.Msg, err)
-	}
+	requireRPCSuccess(t, "AnswerMergeQueueOffer(evict)", resp, err)
 	roster := behind.d.WatchRoster()
 	got := awaitRoster(t, behind.d, roster, "the evicted workspace off the queue", func(r *frontendv1.WorkspaceRoster) bool {
 		return rosterRow(r, behind.ws.GetId()).GetMergeQueued() == nil
@@ -330,9 +320,7 @@ func TestAnswerMergeQueueOfferCancelKeepsTheQueuedMergeAndClearsTheQuestion(t *t
 	}))
 
 	// Assert
-	if err != nil || resp.Msg.GetError() != nil {
-		t.Fatalf("AnswerMergeQueueOffer(cancel) = %v, %v, want a success", resp.Msg, err)
-	}
+	requireRPCSuccess(t, "AnswerMergeQueueOffer(cancel)", resp, err)
 	awaitRow(t, behind, feed, "the merge head without the question", func(r *frontendv1.FeedRow) bool {
 		return r.GetActivity().GetMerge() != nil && mergeQueueOffer(r) == nil
 	})
@@ -363,9 +351,7 @@ func TestAnswerMergeQueueOfferPrioritizeRunsTheMergeNext(t *testing.T) {
 		Workspace: last.ws,
 		Decision:  &agentreplv1.AnswerMergeQueueOfferRequest_Prioritize{Prioritize: &agentreplv1.AnswerMergeQueueOfferPrioritize{}},
 	}))
-	if err != nil || resp.Msg.GetError() != nil {
-		t.Fatalf("AnswerMergeQueueOffer(prioritize) = %v, %v, want a success", resp.Msg, err)
-	}
+	requireRPCSuccess(t, "AnswerMergeQueueOffer(prioritize)", resp, err)
 
 	// Assert: the queue reads the two racing merges, then the prioritized
 	// one, then the one it passed.
@@ -1273,9 +1259,7 @@ func TestUpdateMergeQueuePauseWithNoRepositoryPausesEveryRepositoryWithAQueue(t 
 	resp, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
 		Action: &agentreplv1.UpdateMergeQueueRequest_Pause{Pause: &agentreplv1.UpdateMergeQueuePause{}},
 	}))
-	if err != nil || resp.Msg.GetError() != nil {
-		t.Fatalf("UpdateMergeQueue(pause, no repository) = %v, %v, want a success", resp.Msg, err)
-	}
+	requireRPCSuccess(t, "UpdateMergeQueue(pause, no repository)", resp, err)
 
 	// Assert: BOTH repositories' queues are now paused — proven by each one
 	// individually refusing a further pause as already_paused.
