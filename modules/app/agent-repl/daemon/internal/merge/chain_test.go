@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"slices"
 	"sort"
 	"strings"
@@ -1068,5 +1069,69 @@ func TestASpeculativePassStartsTheFixingCountOver(t *testing.T) {
 	}
 	if !fixed || !passed {
 		t.Fatalf("fixed=%v passed=%v, want a fixing attempt and then a speculative pass", fixed, passed)
+	}
+}
+
+func TestWatchLooksAgainAtEachSignalUntilItIsDone(t *testing.T) {
+	// Arrange: a look that is done on its third reading.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancelCause(context.Background())
+	signals := make(chan chan struct{}, 3)
+	looks := 0
+	stop := h.o.watch(ctx, cancel, func() (bool, <-chan struct{}) {
+		looks++
+		if looks == 3 {
+			return true, nil
+		}
+		ch := make(chan struct{})
+		signals <- ch
+		return false, ch
+	})
+
+	// Act.
+	close(<-signals)
+	close(<-signals)
+	stop()
+
+	// Assert.
+	if looks != 3 {
+		t.Fatalf("the watch looked %d times, want 3: once, then at each signal", looks)
+	}
+}
+
+func TestStoppingAWatchEndsItAndCancelsItsWork(t *testing.T) {
+	// Arrange: a look that never finishes.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancelCause(context.Background())
+	stop := h.o.watch(ctx, cancel, func() (bool, <-chan struct{}) { return false, make(chan struct{}) })
+
+	// Act.
+	stop()
+
+	// Assert.
+	if ctx.Err() == nil {
+		t.Fatal("stopping the watch left its work uncancelled")
+	}
+}
+
+func TestEveryOrchestratorWatchRunsThroughWatch(t *testing.T) {
+	// Arrange.
+	tests := []struct{ file, watcher string }{
+		{file: "chain.go", watcher: "return r.o.watch(ctx, cancel,"},
+		{file: "testturn.go", watcher: "return o.watch(ctx, cut,"},
+	}
+	for _, tt := range tests {
+		body, err := os.ReadFile(tt.file)
+		if err != nil {
+			t.Fatalf("reading %s: %v", tt.file, err)
+		}
+
+		// Act / Assert.
+		if !strings.Contains(string(body), tt.watcher) {
+			t.Fatalf("%s's watch no longer runs through watch", tt.file)
+		}
+	}
+	if body, _ := os.ReadFile("testturn.go"); strings.Contains(string(body), "go func()") {
+		t.Fatal("testturn.go starts a watcher goroutine of its own instead of watch")
 	}
 }
