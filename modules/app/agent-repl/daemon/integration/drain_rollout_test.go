@@ -1134,7 +1134,7 @@ func TestARefusedMidWorkAdoptionFallsBackToFreenessAndNamesTheHoldout(t *testing
 		DurableState: true,
 		SelfRepo:     selfRepo.Dir,
 		ExtraEnv: []string{
-			"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path,
+			harness.TestAllScriptEnv(script.Path),
 			"AGENT_REPL_HOLDOUT_WARN_EVERY=25ms",
 			"AGENT_REPL_HANDOVER_FACTS_BOUND=300ms",
 		},
@@ -1514,7 +1514,7 @@ func drainSelfRepoDaemon(t *testing.T) (*harness.Repo, *harness.Daemon) {
 	d := harness.StartDaemon(t, harness.Opts{
 		DurableState: true,
 		SelfRepo:     selfRepo.Dir,
-		ExtraEnv:     []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path},
+		ExtraEnv:     []string{harness.TestAllScriptEnv(script.Path)},
 		// Every caller of this fixture drives a real self-reload handover
 		// (drainTriggerDeploy): a second real agent-repld boots and adopts
 		// every workspace within THIS daemon's one context, never a fresh one

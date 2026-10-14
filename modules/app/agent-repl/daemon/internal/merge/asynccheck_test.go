@@ -3,6 +3,7 @@ package merge
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 
 	"agent-repld/internal/gitclient"
@@ -116,7 +117,7 @@ func TestAnAsyncRequestRecordsItsLandingEffects(t *testing.T) {
 	}
 	want := wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: asyncBranch, Detach: entry.Source.Detach, DetachName: "n", Pick: "rebase it",
 		CloseOnLanding: otherWorkspace, CleanupWorktree: true, CleanupDir: "/wt/agent-fix"}
-	if entry.Source != want {
+	if !reflect.DeepEqual(entry.Source, want) {
 		t.Fatalf("source = %+v, want %+v", entry.Source, want)
 	}
 }

@@ -158,6 +158,10 @@ These clicks jump to an entry in the feed:
   - `instruction <text>` has the merge workspace prepare the branch first, for example rebasing it onto master or combining branches; that work is the bubble's first tab, `resolving`, and the merge joins the queue once it ends.
   - `close <worktree-dir>` closes another workspace once the merge lands, such as the subagent workspace the work came from.
   - `cleanup` removes the worktree that had the branch checked out once the merge lands; branches are kept.
+  - `before-merge <prompt>` and `after-merge <prompt>` are prompts the merge workspace runs before the landing and after it.
+    - A failed `before-merge` prompt fails the merge, and `after-merge` never does.
+    - The merge workspace runs only the prompts its request names, never the ones the asking workspace was created with.
+  - The main workspace can ask for an async merge; it lands in the repository's own checkout.
 - **An async merge workspace is hidden from the tab bar and the sidebar's open rows.**
   - It is listed among the closed workspaces, and under Recently Merged once it lands.
   - The bubble is drawn only in your feed, placed where it was asked for rather than pinned, and its resolving, conflicts and fixes tabs stream the merge workspace's agent.

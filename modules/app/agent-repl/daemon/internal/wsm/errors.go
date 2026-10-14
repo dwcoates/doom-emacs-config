@@ -370,6 +370,11 @@ func (m MergeSource) validate() error {
 	if m.CompactAfter && m.Detach == "" {
 		return fmt.Errorf("compact_after is a detached merge's ask, not a %s source's that runs in place", m.Kind)
 	}
+	// A REQUEST'S OWN MERGE ACTIONS ride a detached request alone: every other
+	// merge runs the actions its workspace was created with.
+	if m.Detach == "" && (len(m.Actions.Before) > 0 || len(m.Actions.After) > 0) {
+		return fmt.Errorf("merge actions on the request are an async merge's ask, not a %s source's that runs in place", m.Kind)
+	}
 	// A PICK THAT BEGAN names its turn, and only a pick begins.
 	if (m.PickStartedAt != nil) != (m.PickTurn != "") || (m.PickStartedAt != nil && m.Pick == "") {
 		return fmt.Errorf("a begun pick records both when it began and its turn, and only a pick begins (pick %v, started %v, turn %q)", m.Pick != "", m.PickStartedAt != nil, m.PickTurn)

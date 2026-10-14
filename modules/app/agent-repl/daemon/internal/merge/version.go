@@ -90,25 +90,17 @@ func (o *orchestrator) checkVersion(ctx context.Context, requester wsm.Workspace
 // requestTarget answers where a request's merge will land, by the rule the
 // run resolves its subject by (resolveSubject): a workspace's own branch and
 // an async request (which lands by its requester's geometry) in the target
-// recorded at creation, another workspace's in that workspace's, and a named
-// branch run in place in the repository's main worktree.
+// recorded at creation (the main worktree for the main checkout, which has no
+// creation), another workspace's in that workspace's, and a named branch run
+// in place in the repository's main worktree.
 //
-// AN ASYNC REQUEST FROM A WORKSPACE THE DAEMON NEVER CREATED comes from the
-// main checkout, which records no merge geometry (checkAsync): its merge lands
-// in the repository's main worktree.
+// An async request lands where detachedTarget says.
 func (o *orchestrator) requestTarget(ctx context.Context, requester wsm.Workspace, req Request) (string, error) {
 	switch {
 	case req.Source.Kind == wsm.MergeSourceBranch && req.Detached == nil:
 		return o.deps.Git.MainWorktree(ctx, requester.Dir)
 	case req.Detached != nil:
-		job, found, err := o.deps.DB.CreationJob(ctx, requester.ID)
-		if err != nil {
-			return "", fmt.Errorf("merge: reading %s's creation job for where its async merge lands: %w", requester.ID, err)
-		}
-		if !found {
-			return o.deps.Git.MainWorktree(ctx, requester.Dir)
-		}
-		return job.Layout.TargetDir, nil
+		return o.detachedTarget(ctx, requester)
 	case req.Source.Kind == wsm.MergeSourceWorkspace:
 		job, err := o.layoutFor(ctx, req.Source.Workspace)
 		if err != nil {
@@ -122,6 +114,47 @@ func (o *orchestrator) requestTarget(ctx context.Context, requester wsm.Workspac
 	}
 	return job.Layout.TargetDir, nil
 }
+
+// detachedTarget answers where an ASYNC request from REQUESTER lands: the
+// target its creation job recorded, which is where the requester's own merge
+// would land.
+//
+// AN ASYNC REQUEST FROM A WORKSPACE THE DAEMON NEVER CREATED comes from the
+// main checkout, which records no merge geometry (checkAsync): its merge lands
+// in the repository's main worktree.
+//
+// ONLY A MAIN CHECKOUT LACKS A CREATION JOB: every other workspace was made
+// by the create, which records one first. A jobless requester whose directory
+// is not its repository's main worktree is therefore a defect, recorded at
+// ERROR and refused, never landed somewhere guessed.
+//
+// THIS IS THE ONE PLACE THE RULE IS DECIDED: the request's version check
+// (requestTarget) and the hand-off that forks the merge workspace
+// (handOffDetached) both ask it, so where a merge is checked to land and where
+// it lands cannot disagree.
+func (o *orchestrator) detachedTarget(ctx context.Context, requester wsm.Workspace) (string, error) {
+	job, found, err := o.deps.DB.CreationJob(ctx, requester.ID)
+	if err != nil {
+		return "", fmt.Errorf("merge: reading %s's creation job for where its async merge lands: %w", requester.ID, err)
+	}
+	if found {
+		return job.Layout.TargetDir, nil
+	}
+	main, err := o.deps.Git.MainWorktree(ctx, requester.Dir)
+	if err != nil {
+		return "", fmt.Errorf("merge: resolving the main worktree %s's async merge lands in: %w", requester.ID, err)
+	}
+	if !sameDir(main, requester.Dir) {
+		err := fmt.Errorf("merge: %s has no creation job but %s is not its repository's main worktree %s", requester.ID, requester.Dir, main)
+		o.log(ctx, requester.ID).Error(opDetachedTarget, "an async merge's requester has no creation job and is no main checkout",
+			dlog.Context{"workspace": string(requester.ID), "dir": requester.Dir, "main_worktree": main, "error": err.Error()})
+		return "", err
+	}
+	return main, nil
+}
+
+// opDetachedTarget is the record of an async landing that cannot be decided.
+const opDetachedTarget = "daemon.merge.detached_target"
 
 // unexpectedVersion is the unexpected-increment refusal with its reason arm.
 func unexpectedVersion(ws ids.WorkspaceID, reason NestedArm, format string, args ...any) *RefusalError {

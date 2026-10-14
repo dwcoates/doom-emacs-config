@@ -28,7 +28,7 @@ func TestARefusedMidWorkAdoptionAnswersTheHostTransferDeferred(t *testing.T) {
 		DurableState: true,
 		SelfRepo:     selfRepo.Dir,
 		ExtraEnv: []string{
-			"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path,
+			harness.TestAllScriptEnv(script.Path),
 			"AGENT_REPL_HANDOVER_FACTS_BOUND=300ms",
 		},
 		Timeout: harness.HandoverChainTimeout,

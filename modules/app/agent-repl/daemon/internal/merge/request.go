@@ -103,6 +103,9 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) error {
 		source.DetachName = req.Detached.Name
 		source.Pick = req.Detached.Pick
 		source.CompactAfter = req.Detached.CompactAfter
+		source.Actions = req.Detached.Actions
+		fields["actions_before"] = len(source.Actions.Before)
+		fields["actions_after"] = len(source.Actions.After)
 		fields["close_on_landing"] = string(source.CloseOnLanding)
 		fields["cleanup_worktree"] = source.CleanupWorktree
 		fields["cleanup_dir"] = source.CleanupDir
@@ -496,9 +499,18 @@ func (o *orchestrator) requestOf(ctx context.Context, repo wsm.RepoKey, ws ids.W
 // request carries an instruction: an instruction prepares that branch in the
 // merge workspace's first turn before the merge joins the queue.
 //
+// THE QUEUE DECIDES WHERE THE MERGE LANDS, HERE AND ONCE: the target by the
+// one rule the request's version check also asked (detachedTarget), the
+// requester's parent branch, and exactly the merge actions the request named.
+// The merge workspace's create lands by what the origin carries and reads
+// nothing off the requester, so a main checkout, which has no creation job,
+// is forked from like any other requester, and a merge workspace never
+// inherits its requester's configured actions.
+//
 // A FORK THAT FAILS ENDS THE REQUEST: it leaves the requester's queue, and the
 // requester is told through its handback, so a request never stands in nobody's
-// line waiting for a fork that will not come.
+// line waiting for a fork that will not come. A landing that cannot be decided
+// ends it the same way.
 func (o *orchestrator) handOffDetached(ctx context.Context, requester ids.WorkspaceID, repo wsm.RepoKey, source wsm.MergeSource) error {
 	const op = "daemon.merge.detached"
 	log := o.log(ctx, requester)
@@ -510,8 +522,18 @@ func (o *orchestrator) handOffDetached(ctx context.Context, requester ids.Worksp
 	}
 	base := source.Branch
 	fields["base"] = base
+	target, err := o.detachedTarget(ctx, record)
+	if err != nil {
+		log.Error(op, "could not decide where a detached merge lands; the request is dropped and the requester told", withField(fields, "error", err.Error()))
+		return o.dropDetached(ctx, requester, repo, source, fmt.Sprintf("where the merge lands could not be decided: %v", err))
+	}
+	fields["target_dir"] = target
+	fields["parent_branch"] = record.ParentBranch
+	fields["actions_before"] = len(source.Actions.Before)
+	fields["actions_after"] = len(source.Actions.After)
 	origin := wsm.MergeOrigin{Requester: requester, Request: source.Detach, CompactAfter: source.CompactAfter,
-		CloseOnLanding: source.CloseOnLanding, CleanupWorktree: source.CleanupWorktree, CleanupDir: source.CleanupDir}
+		CloseOnLanding: source.CloseOnLanding, CleanupWorktree: source.CleanupWorktree, CleanupDir: source.CleanupDir,
+		TargetDir: target, ParentBranch: record.ParentBranch, Actions: source.Actions}
 	forked, err := o.deps.Detached.Fork(ctx, record, origin, source.DetachName, base)
 	if err != nil {
 		log.Error(op, "could not fork the merge workspace for a detached merge; the request is dropped and the requester told", withField(fields, "error", err.Error()))

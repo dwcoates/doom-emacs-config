@@ -34,12 +34,7 @@ func (i *ingress) createSpec(ctx context.Context, entry Entry) (workspace.Create
 	if priority, ok := priorities[entry.Priority]; ok {
 		spec.Priority = &priority
 	}
-	if entry.BeforeWSMerge != "" {
-		spec.MergeActions.Before = []string{entry.BeforeWSMerge}
-	}
-	if entry.PostprocessingPrompt != "" {
-		spec.MergeActions.After = []string{entry.PostprocessingPrompt}
-	}
+	spec.MergeActions = entry.MergeActions()
 	if entry.SourceWS == nil && entry.ForkFrom == "" {
 		// Nothing below needs the registry: an entry that names neither
 		// resolves exactly as it always did.
