@@ -1445,3 +1445,89 @@ func TestEveryReorderingReadsItsPlaceThroughEntryPlace(t *testing.T) {
 		t.Fatalf("state/seq reads = %d, entryPlace calls = %d; want 1 and 3", reads, calls)
 	}
 }
+
+// admittedWithLease queues ws's merge, admits it, takes its merge lease and
+// records its progress under that lease: the merge a restart took back but
+// has not resumed yet.
+func admittedWithLease(t *testing.T, s *store, repo RepoKey, ws WorkspaceID) Lease {
+	t.Helper()
+	queuedWith(t, s, repo, ws, ownBranch)
+	if err := s.AdmitMerge(context.Background(), repo, ws); err != nil {
+		t.Fatalf("AdmitMerge: %v", err)
+	}
+	lease, err := s.AcquireLease(context.Background(), ws, HolderMerge, PolicyHold)
+	if err != nil {
+		t.Fatalf("AcquireLease: %v", err)
+	}
+	putProgress(t, s, ws, lease.ID)
+	return lease
+}
+
+func TestDropAdmittedMergeTakesTheEntryTheLeaseAndTheProgressTogether(t *testing.T) {
+	// Arrange.
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	repo := RepoKey(t.TempDir())
+	lease := admittedWithLease(t, s, repo, ws.ID)
+
+	// Act.
+	err := s.DropAdmittedMerge(context.Background(), repo, ws.ID, lease.ID, "user_drop")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("DropAdmittedMerge: %v", err)
+	}
+	entries, _ := s.MergeQueue(context.Background(), repo)
+	_, held, _ := s.Lease(context.Background(), ws.ID)
+	_, progress, _ := s.MergeProgressOf(context.Background(), ws.ID)
+	if len(entries) != 0 || held || progress {
+		t.Fatalf("after the drop: %d entries, lease held %v, progress %v; want none of them", len(entries), held, progress)
+	}
+}
+
+func TestDropAdmittedMergeRefusesAMergeStillWaitingInLine(t *testing.T) {
+	// Arrange.
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	repo := RepoKey(t.TempDir())
+	queuedWith(t, s, repo, ws.ID, ownBranch)
+	lease, err := s.AcquireLease(context.Background(), ws.ID, HolderMerge, PolicyHold)
+	if err != nil {
+		t.Fatalf("AcquireLease: %v", err)
+	}
+
+	// Act.
+	err = s.DropAdmittedMerge(context.Background(), repo, ws.ID, lease.ID, "user_drop")
+
+	// Assert.
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("DropAdmittedMerge = %v, want the refusal", err)
+	}
+	entries, _ := s.MergeQueue(context.Background(), repo)
+	if _, held, _ := s.Lease(context.Background(), ws.ID); len(entries) != 1 || !held {
+		t.Fatalf("after the refusal: %d entries, lease held %v; want both left", len(entries), held)
+	}
+}
+
+func TestDropAdmittedMergeRefusesALeaseThatIsNotTheWorkspacesMergeLeaseAndKeepsTheEntry(t *testing.T) {
+	// Arrange.
+	s, log := testStore(t)
+	ws := testWorkspace(t, s)
+	repo := RepoKey(t.TempDir())
+	admittedWithLease(t, s, repo, ws.ID)
+
+	// Act.
+	err := s.DropAdmittedMerge(context.Background(), repo, ws.ID, NewLeaseID(), "user_drop")
+
+	// Assert: the transaction rolled back the entry's removal.
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("DropAdmittedMerge = %v, want the refusal", err)
+	}
+	entries, _ := s.MergeQueue(context.Background(), repo)
+	if _, held, _ := s.Lease(context.Background(), ws.ID); len(entries) != 1 || !held {
+		t.Fatalf("after the refusal: %d entries, lease held %v; want both left", len(entries), held)
+	}
+	if !loggedOperation(log, "daemon.wsm.drop_admitted_merge", "debug") {
+		t.Fatalf("the refusal was not recorded: %v", log.Records())
+	}
+}

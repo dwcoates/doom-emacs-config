@@ -105,9 +105,11 @@ describe("readMergeTab: the arms are read from the contract", () => {
       const want =
         kind === "rebaseCommit"
           ? ["live", "pending", "settled", "waitingOnUser"]
-          : waits
-            ? ["live", "settled", "waitingOnUser"]
-            : ["live", "settled"];
+          : kind === "testsRun"
+            ? ["live", "settled", "waitingForTurn"]
+            : waits
+              ? ["live", "settled", "waitingOnUser"]
+              : ["live", "settled"];
       expect(message === undefined ? [] : [...oneofArms(message, "state")].sort()).toEqual(want);
     },
   );
@@ -282,6 +284,27 @@ describe("a tab waiting on the user", () => {
       tabRow("t2", { kind: "queue", state: "settled", outcome: "succeeded" }),
     ], undefined);
     expect(autoSelectedTab(tabs)?.id).toBe("t1");
+  });
+});
+
+describe("a test run waiting for its repository's test turn", () => {
+  it("draws a hollow dot", () => {
+    const [tab] = childTabsOf([tabRow("r1", { kind: "testsRun", state: "waitingForTurn" })], undefined);
+    const glyph = drawFeedMergeTab(tab, { active: false, ticker: TICKER }).querySelector(".merge-tab-glyph");
+    expect([glyph?.textContent, glyph?.classList.contains("is-waiting-for-turn")]).toEqual(["○", true]);
+  });
+
+  it("ticks from when its round began", () => {
+    const [tab] = childTabsOf([tabRow("r1", { kind: "testsRun", state: "waitingForTurn" })], undefined);
+    expect(drawTabDuration(tab, TICKER).textContent).toBe("4s");
+  });
+
+  it("is where the merge is when the reader has chosen nothing", () => {
+    const tabs = childTabsOf([
+      tabRow("r1", { kind: "testsRun", state: "waitingForTurn" }),
+      tabRow("r0", { kind: "testsRun", state: "settled", outcome: "failed" }),
+    ], undefined);
+    expect(autoSelectedTab(tabs)?.id).toBe("r1");
   });
 });
 

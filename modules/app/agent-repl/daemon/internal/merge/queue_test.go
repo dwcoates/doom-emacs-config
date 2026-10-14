@@ -13,6 +13,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
 
@@ -1324,4 +1325,269 @@ func TestAKickOfASynchronousOrchestratorReachesItsKickSeam(t *testing.T) {
 	if len(kicked) != 1 || kicked[0] != h.repoKey() {
 		t.Fatalf("kicks seen = %v, want the one kick of %s", kicked, h.repoKey())
 	}
+}
+
+// resumeWorld is a repository's queue after a restart: its entries as stored,
+// and the merges the recovery has taken back so far.
+func resumeWorld(t *testing.T, entries []wsm.MergeQueueEntry, resumed ...ids.WorkspaceID) *harness {
+	t.Helper()
+	h := newHarness(t)
+	h.db.mu.Lock()
+	h.db.queues[h.repoKey()] = entries
+	h.db.mu.Unlock()
+	h.o.mu.Lock()
+	for _, ws := range resumed {
+		h.o.resumes[ws] = progressDoc{Repo: string(h.repoKey()), Step: TabTests}
+	}
+	h.o.mu.Unlock()
+	return h
+}
+
+func admittedEntry(ws ids.WorkspaceID) wsm.MergeQueueEntry {
+	return wsm.MergeQueueEntry{Workspace: ws, State: wsm.MergeAdmitted}
+}
+
+func TestAfterARestartTheFirstAdmittedMergeInQueueOrderResumesAsTheHead(t *testing.T) {
+	// Arrange: both admitted merges taken back, the second one first.
+	h := resumeWorld(t, []wsm.MergeQueueEntry{admittedEntry("ws-head"), admittedEntry("ws-behind")}, "ws-behind", "ws-head")
+
+	// Act.
+	ws, resuming, err := h.o.resumeIn(context.Background(), h.repoKey())
+
+	// Assert.
+	if err != nil || !resuming || ws != "ws-head" {
+		t.Fatalf("resumeIn = (%s, %v, %v), want ws-head resumed as the head", ws, resuming, err)
+	}
+}
+
+func TestAfterARestartNothingResumesAheadOfAHeadNotTakenBackYet(t *testing.T) {
+	// Arrange: the head is mid-handover; only the merge behind it is back.
+	h := resumeWorld(t, []wsm.MergeQueueEntry{admittedEntry("ws-head"), admittedEntry("ws-behind")}, "ws-behind")
+
+	// Act.
+	ws, resuming, err := h.o.resumeIn(context.Background(), h.repoKey())
+
+	// Assert.
+	if err != nil || resuming {
+		t.Fatalf("resumeIn = (%s, %v, %v), want nothing resumed ahead of the head", ws, resuming, err)
+	}
+	if !loggedLike(h, logLike{level: "info", op: "daemon.merge.resume", text: "not taken back yet",
+		context: map[string]string{"head": "ws-head", "waiting": "ws-behind"}}) {
+		t.Fatal("the wait for the head's adoption was not recorded with the head and the merge waiting")
+	}
+}
+
+func TestAfterARestartAHeadThatTheChainHoldsLeavesTheResumesBehindIt(t *testing.T) {
+	// Arrange: the head already runs here in its chain.
+	h := resumeWorld(t, []wsm.MergeQueueEntry{admittedEntry("ws-head"), admittedEntry("ws-behind")}, "ws-behind")
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+	h.o.mu.Lock()
+	h.o.chains[h.repoKey()] = []*run{h.o.newRun(ctx, cancel, h.repoKey(), "ws-head")}
+	h.o.mu.Unlock()
+
+	// Act.
+	_, resuming, err := h.o.resumeIn(context.Background(), h.repoKey())
+
+	// Assert.
+	if err != nil || resuming {
+		t.Fatalf("resumeIn = (%v, %v), want nothing resumed: the head runs in its chain", resuming, err)
+	}
+	if loggedLike(h, logLike{text: "not taken back yet"}) {
+		t.Fatal("a head running here was recorded as not taken back")
+	}
+}
+
+func TestAfterARestartAMergeStillWaitingInLineIsNoHead(t *testing.T) {
+	// Arrange: a merge waiting in line stands ahead of the admitted one.
+	h := resumeWorld(t, []wsm.MergeQueueEntry{{Workspace: "ws-queued", State: wsm.MergeQueued}, admittedEntry("ws-head")}, "ws-head")
+
+	// Act.
+	ws, resuming, err := h.o.resumeIn(context.Background(), h.repoKey())
+
+	// Assert.
+	if err != nil || !resuming || ws != "ws-head" {
+		t.Fatalf("resumeIn = (%s, %v, %v), want ws-head: a waiting merge is nobody's head", ws, resuming, err)
+	}
+}
+
+func TestAfterARestartAResumeWithNoAdmittedEntryIsStillHandedToItsRun(t *testing.T) {
+	// Arrange: the resumed merge's entry is gone.
+	h := resumeWorld(t, nil, "ws-gone")
+
+	// Act.
+	ws, resuming, err := h.o.resumeIn(context.Background(), h.repoKey())
+
+	// Assert: its run reads the missing entry and ends on it, loudly.
+	if err != nil || !resuming || ws != "ws-gone" {
+		t.Fatalf("resumeIn = (%s, %v, %v), want ws-gone handed to its run", ws, resuming, err)
+	}
+}
+
+func TestAfterARestartAQueueThatCannotBeReadResumesNothing(t *testing.T) {
+	// Arrange.
+	h := resumeWorld(t, []wsm.MergeQueueEntry{admittedEntry("ws-head")}, "ws-head")
+	h.db.mu.Lock()
+	h.db.queueReadErr = errors.New("the store is gone")
+	h.db.mu.Unlock()
+
+	// Act.
+	_, resuming, err := h.o.resumeIn(context.Background(), h.repoKey())
+
+	// Assert.
+	if err == nil || resuming {
+		t.Fatalf("resumeIn = (%v, %v), want the read's failure surfaced and nothing resumed", resuming, err)
+	}
+}
+
+// pendingResume leaves the harness's merge taken back by the boot recovery
+// and not resumed yet: admitted, its lease adopted, its record in o.resumes.
+func pendingResume(t *testing.T) *harness {
+	t.Helper()
+	h := newHarness(t)
+	interruptedAt(t, h, atStep(TabTests, 1))
+	if err := h.o.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	return h
+}
+
+func TestEvictingAMergeTakenBackButNotResumedDropsItsEntryAndItsLeaseTogether(t *testing.T) {
+	// Arrange.
+	h := pendingResume(t)
+
+	// Act.
+	err := h.o.Evict(context.Background(), theWorkspace)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Evict: %v", err)
+	}
+	entries, _ := h.db.MergeQueue(context.Background(), h.repoKey())
+	_, held, _ := h.db.Lease(context.Background(), theWorkspace)
+	_, progress, _ := h.db.MergeProgressOf(context.Background(), theWorkspace)
+	if len(entries) != 0 || held || progress {
+		t.Fatalf("after the evict: %d entries, lease held %v, progress %v; want none of them", len(entries), held, progress)
+	}
+	h.o.mu.Lock()
+	_, pending := h.o.resumes[theWorkspace]
+	h.o.mu.Unlock()
+	if pending {
+		t.Fatal("the evicted merge is still handed to the pump to resume")
+	}
+}
+
+func TestEvictingAMergeTakenBackButNotResumedEndsItsBubbleAsAMergeThatRan(t *testing.T) {
+	// Arrange.
+	h := pendingResume(t)
+
+	// Act.
+	if err := h.o.Evict(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("Evict: %v", err)
+	}
+
+	// Assert.
+	if got, want := h.feed.lastAbandonedSummary(), runningSummaries[CauseUserDrop]; got != want {
+		t.Fatalf("the bubble ended %q, want %q", got, want)
+	}
+	if !recordedAt(h, "info", "dropped a merge a restart took back before it resumed: its entry, its lease and its progress record together") {
+		t.Fatal("the drop was not recorded")
+	}
+}
+
+func TestAFailedDropOfAMergeTakenBackLeavesItToResume(t *testing.T) {
+	// Arrange.
+	h := pendingResume(t)
+	h.db.mu.Lock()
+	h.db.dropAdmittedErr = errors.New("the store refused")
+	h.db.mu.Unlock()
+
+	// Act.
+	err := h.o.Evict(context.Background(), theWorkspace)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Evict succeeded over a refused drop")
+	}
+	h.o.mu.Lock()
+	_, pending := h.o.resumes[theWorkspace]
+	h.o.mu.Unlock()
+	entries, _ := h.db.MergeQueue(context.Background(), h.repoKey())
+	if !pending || len(entries) != 1 {
+		t.Fatalf("after the refused drop: pending %v, %d entries; want the merge left to resume", pending, len(entries))
+	}
+	rec, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.merge.drop_pending_resume"})
+	if !ok || rec.Context["workspace"] != string(theWorkspace) || rec.Context["lease"] == "" || rec.Context["error"] == nil {
+		t.Fatalf("the refused drop was recorded as %+v, want an ERROR naming the workspace, its lease and the cause", rec)
+	}
+}
+
+func TestAMergeTakenBackWhoseEntryCannotBeReadIsLeftToResume(t *testing.T) {
+	// Arrange.
+	h := pendingResume(t)
+	h.db.mu.Lock()
+	h.db.queueReadErr = errors.New("the store is gone")
+	h.db.mu.Unlock()
+
+	// Act.
+	err := h.o.Evict(context.Background(), theWorkspace)
+
+	// Assert.
+	h.o.mu.Lock()
+	_, pending := h.o.resumes[theWorkspace]
+	h.o.mu.Unlock()
+	if err == nil || !pending {
+		t.Fatalf("Evict = %v, pending %v; want the read's failure and the merge left to resume", err, pending)
+	}
+}
+
+func TestClosingTheWorkspaceOfAMergeTakenBackDropsItAsAnAdmittedMerge(t *testing.T) {
+	// Arrange.
+	h := pendingResume(t)
+
+	// Act.
+	h.o.OnWorkspaceClosed(context.Background(), theWorkspace)
+
+	// Assert.
+	if _, held, _ := h.db.Lease(context.Background(), theWorkspace); held {
+		t.Fatal("the closed workspace's merge lease outlived its entry")
+	}
+}
+
+func TestDroppingAnAdmittedMergeWithNoRunHereAsAWaitingOneIsRefused(t *testing.T) {
+	// Arrange: an admitted entry another daemon drives.
+	h := newHarness(t)
+	enqueue(t, h)
+	if err := h.db.AdmitMerge(context.Background(), h.repoKey(), theWorkspace); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act.
+	err := h.o.Evict(context.Background(), theWorkspace)
+
+	// Assert.
+	entries, _ := h.db.MergeQueue(context.Background(), h.repoKey())
+	if err == nil || len(entries) != 1 {
+		t.Fatalf("Evict = %v leaving %d entries, want the refusal and the entry kept", err, len(entries))
+	}
+	if !recordedAt(h, "error", "refused to drop an admitted merge as a waiting one") {
+		t.Fatal("the refusal was not recorded")
+	}
+}
+
+func TestAMergeTakenBackWithNoLeaseRecordedIsADefect(t *testing.T) {
+	// Arrange.
+	h := pendingResume(t)
+	h.o.mu.Lock()
+	doc := h.o.resumes[theWorkspace]
+	delete(h.o.ledgerOf, theWorkspace)
+	h.o.mu.Unlock()
+
+	// Act / Assert.
+	defer func() {
+		if recover() == nil {
+			t.Fatal("a taken-back merge with no lease did not fail hard")
+		}
+	}()
+	_ = h.o.dropPendingResume(context.Background(), theWorkspace, doc, CauseUserDrop)
 }

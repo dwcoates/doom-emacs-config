@@ -514,9 +514,7 @@ func TestTheTestGatePassingSettlesTheTestsTab(t *testing.T) {
 	}
 
 	// Assert: the merge lands (no conflict, gate passes).
-	mergeRow := awaitRow(t, f, root, "the merge's terminal push", func(row *frontendv1.FeedRow) bool {
-		return row.GetActivity().GetMerge().GetSuccess() != nil || row.GetActivity().GetMerge().GetError() != nil
-	})
+	mergeRow := awaitRow(t, f, root, "the merge's terminal push", isMergeTerminal)
 	d.AwaitLandingDeployed()
 	if mergeRow.GetActivity().GetMerge().GetError() != nil {
 		t.Fatalf("merge terminal = %v, want success", mergeRow.GetActivity().GetMerge())
@@ -1017,9 +1015,7 @@ func TestPrePromptTabRunsUnderTheLeaseAndParentsItsRowsToItsTabNotTheRoot(t *tes
 	}
 
 	// Assert: the merge lands, so none of its work outlives the test.
-	awaitRow(t, f, root, "the merge's terminal push", func(row *frontendv1.FeedRow) bool {
-		return row.GetActivity().GetMerge().GetSuccess() != nil || row.GetActivity().GetMerge().GetError() != nil
-	})
+	awaitRow(t, f, root, "the merge's terminal push", isMergeTerminal)
 	d.AwaitLandingDeployed()
 }
 
@@ -1062,9 +1058,7 @@ func TestAFailingPostPromptNeverFailsTheRunAndRidesTheTerminalSuccess(t *testing
 
 	// Assert: the merge STILL lands as FeedMergeSuccess — the post-prompt's
 	// failure rides the terminal rather than turning it into FeedMergeError.
-	mergeRow := awaitRow(t, f, root, "the merge's terminal push", func(row *frontendv1.FeedRow) bool {
-		return row.GetActivity().GetMerge().GetSuccess() != nil || row.GetActivity().GetMerge().GetError() != nil
-	})
+	mergeRow := awaitRow(t, f, root, "the merge's terminal push", isMergeTerminal)
 	if mergeRow.GetActivity().GetMerge().GetSuccess() == nil {
 		t.Fatalf("merge terminal = %v, want FeedMergeSuccess even though the post-prompt failed", mergeRow.GetActivity().GetMerge())
 	}

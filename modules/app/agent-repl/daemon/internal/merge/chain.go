@@ -537,24 +537,16 @@ func (r *run) speculativeGate(ctx context.Context, place chainPlace, targetBranc
 	gctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 	// THE WAIT FOR ADMISSION ENDS AT A PROMOTION: the head's gate is never
-	// governed, so a merge promoted while it waited runs its gate as the
-	// head. A gate already running is not cut by a promotion: its pass
-	// stands for the tree it tested.
+	// governed, so a merge promoted before the governor admitted it runs its
+	// gate as the head, from the head's own steps (admitGate answers
+	// errPromoted). A gate already running is not cut by a promotion: its
+	// pass stands for the tree it tested.
 	actx, admitted := context.WithCancelCause(gctx)
 	defer admitted(nil)
 	stop := r.watchBase(gctx, place.base, cancel, admitted)
 	defer stop()
-	permit, err := r.o.deps.Governor.Acquire(actx, cpugov.Request{Workspace: r.ws, Repo: string(r.repo), Rank: place.rank})
-	if err != nil {
-		if errors.Is(context.Cause(gctx), errBaseMoved) || errors.Is(context.Cause(actx), errPromoted) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	admitted(nil)
 	head, err := r.git.ResolveRef(ctx, r.subject.dir, r.subject.branch)
 	if err != nil {
-		permit.Release(0, 0, false)
 		return nil, fmt.Errorf("merge: resolving %s: %w", r.subject.branch, err)
 	}
 	r.publishTip(ctx, head)
@@ -563,10 +555,12 @@ func (r *run) speculativeGate(ctx context.Context, place chainPlace, targetBranc
 		d.TargetBranch, d.Tip = targetBranch, place.base
 		d.FixAttempt, d.Turn, d.FailingSuites, d.FailingArchive, d.FailingTail = r.fixesUsed, "", nil, "", ""
 	}); err != nil {
-		permit.Release(0, 0, false)
 		return nil, err
 	}
-	verdict, err := r.gate(gctx, round, place.base, head, permit)
+	verdict, err := r.gate(gctx, round, place.base, head, &gateAdmission{ctx: actx, rank: place.rank})
+	if errors.Is(err, errPromoted) {
+		return nil, nil
+	}
 	if errors.Is(context.Cause(gctx), errBaseMoved) {
 		r.o.log(ctx, r.ws).Info(op, "the merge ahead moved under the speculative gate; it runs again on the new tip", dlog.Context{
 			"workspace": string(r.ws), "base": place.base, "round": round.n})
@@ -611,28 +605,42 @@ func (r *run) speculativeGate(ctx context.Context, place chainPlace, targetBranc
 // admission with errPromoted the moment it heads its chain. It answers its
 // stop, which waits for the watch to end.
 func (r *run) watchBase(ctx context.Context, base string, cancel, promoted context.CancelCauseFunc) func() {
-	done := make(chan struct{})
-	r.o.live.Add(1)
-	go func() {
-		defer r.o.live.Done()
-		defer close(done)
-		for {
-			place := r.o.chainPosition(r)
-			if place.head {
-				promoted(errPromoted)
-				// A GATE ON A TIP THE TARGET LEFT IS CUT AT THE HEAD TOO
-				// (race.go): every merge stands on the target, so a pass on
-				// the old tip could only be run again.
-				if tip := r.o.targetTip(r.repo); tip != "" && tip != base {
-					cancel(errBaseMoved)
-					return
-				}
-			} else if place.base != base {
+	return r.o.watch(ctx, cancel, func() (bool, <-chan struct{}) {
+		place := r.o.chainPosition(r)
+		if place.head {
+			promoted(errPromoted)
+			// A GATE ON A TIP THE TARGET LEFT IS CUT AT THE HEAD TOO
+			// (race.go): every merge stands on the target, so a pass on the
+			// old tip could only be run again.
+			if tip := r.o.targetTip(r.repo); tip != "" && tip != base {
 				cancel(errBaseMoved)
+				return true, nil
+			}
+		} else if place.base != base {
+			cancel(errBaseMoved)
+			return true, nil
+		}
+		return false, place.changed
+	})
+}
+
+// watch runs LOOK on its own goroutine each time the signal it last answered
+// closes, until it reports done or ctx is done: a watch over orchestrator
+// state read under its lock, which cuts work through CANCEL. It answers its
+// stop, which cancels ctx through CANCEL and waits for the watch to end.
+func (o *orchestrator) watch(ctx context.Context, cancel context.CancelCauseFunc, look func() (done bool, changed <-chan struct{})) func() {
+	ended := make(chan struct{})
+	o.live.Add(1)
+	go func() {
+		defer o.live.Done()
+		defer close(ended)
+		for {
+			done, changed := look()
+			if done {
 				return
 			}
 			select {
-			case <-place.changed:
+			case <-changed:
 			case <-ctx.Done():
 				return
 			}
@@ -640,7 +648,7 @@ func (r *run) watchBase(ctx context.Context, base string, cancel, promoted conte
 	}()
 	return func() {
 		cancel(nil)
-		<-done
+		<-ended
 	}
 }
 
@@ -672,9 +680,7 @@ func (r *run) resumeSpeculative(ctx context.Context, res *progressDoc, targetBra
 			"workspace": string(r.ws), "lease": string(r.lease.ID), "round": round.n})
 		if res.Tested == nil {
 			const cut = "the daemon restarted under this run; the tests run again"
-			r.publishRun(round, round.settled(r.o.nowMS(), cut), nil, nil)
-			r.settleTesting(cut)
-			r.closeTab(ctx, round, "restarted")
+			r.endRun(ctx, round, cut, nil, nil, "restarted")
 		}
 		return nil, nil
 	default:
