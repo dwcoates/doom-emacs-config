@@ -325,23 +325,6 @@ func TestAFailedSubmissionIsRecordedAndTheOtherSubscribersAreStillTold(t *testin
 	}
 }
 
-func TestASubmissionCutShortByTheDaemonStandingDownIsRecordedAsSuch(t *testing.T) {
-	// Arrange.
-	f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{sub(alice, repoDoom, wsm.MergeQueueDetailAdvances)}})
-	f.prompts.failFor = map[ids.WorkspaceID]error{alice: context.Canceled}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	// Act.
-	f.s.deliver(ctx, f.prompts, landedLast)
-
-	// Assert.
-	if _, ok := dlog.FindRecord(f.logs.Records(), dlog.RecordQuery{Level: "error", Operation: op,
-		Message: "a merge queue change was never told to its subscriber: the daemon stood down mid-delivery"}); !ok {
-		t.Fatalf("no record of the cut-short delivery: %+v", f.logs.Records())
-	}
-}
-
 func TestAnUncomposableNoticeIsRecordedAndNotSubmitted(t *testing.T) {
 	// Arrange.
 	f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{sub(alice, repoDoom, wsm.MergeQueueDetailAdvances)}})
@@ -410,9 +393,9 @@ func TestRunDeliversEveryReportedChangeInOrder(t *testing.T) {
 	}
 }
 
-func TestAChangeReportedAfterRunEndedIsRecordedUndelivered(t *testing.T) {
+func TestAChangeReportedAfterRunEndedIsRecordedUntold(t *testing.T) {
 	// Arrange.
-	f := newFixture(fakeSubscriptions{})
+	f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{sub(alice, repoDoom, wsm.MergeQueueDetailAdvances)}})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	f.s.Run(ctx, f.prompts)
@@ -421,16 +404,20 @@ func TestAChangeReportedAfterRunEndedIsRecordedUndelivered(t *testing.T) {
 	f.s.QueueChanged(landedLast)
 
 	// Assert.
-	record, ok := dlog.FindRecord(f.logs.Records(), dlog.RecordQuery{Level: "error", Operation: op,
-		Message: "a merge queue change was never told to its subscribers: the notifier had already stopped"})
+	if got := f.prompts.submissions(); len(got) != 0 {
+		t.Fatalf("submissions = %+v, want none after the notifier stopped", got)
+	}
+	record, ok := dlog.FindRecord(f.logs.Records(), dlog.RecordQuery{Level: "info", Operation: op,
+		Message: "a merge queue change came after the notifier stopped, as the daemon stood down; it is not told, and the next notice carries its effect"})
 	if !ok || record.Context["change"] != "landed" {
-		t.Fatalf("no record of the undelivered change: %+v", f.logs.Records())
+		t.Fatalf("no record of the untold change: %+v", f.logs.Records())
 	}
 }
 
-func TestAChangePendingWhenRunEndsIsRecordedUndelivered(t *testing.T) {
-	// Arrange.
-	f := newFixture(fakeSubscriptions{})
+func TestAChangePendingWhenRunIsEndedIsStillDelivered(t *testing.T) {
+	// Arrange: a landing reported, and the daemon ending the notifier before
+	// its loop took it.
+	f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{sub(alice, repoDoom, wsm.MergeQueueDetailAdvances)}})
 	f.s.QueueChanged(landedLast)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -439,12 +426,8 @@ func TestAChangePendingWhenRunEndsIsRecordedUndelivered(t *testing.T) {
 	f.s.Run(ctx, f.prompts)
 
 	// Assert.
-	if _, ok := dlog.FindRecord(f.logs.Records(), dlog.RecordQuery{Level: "error", Operation: op,
-		Message: "a merge queue change was never told to its subscribers: the daemon stood down before delivering it"}); !ok {
-		t.Fatalf("no record of the undelivered change: %+v", f.logs.Records())
-	}
-	if got := f.prompts.submissions(); len(got) != 0 {
-		t.Fatalf("submissions = %+v, want none after the stand-down", got)
+	if got := f.prompts.submissions(); len(got) != 1 || got[0].ws != alice {
+		t.Fatalf("submissions = %+v, want the pending landing told to alice", got)
 	}
 }
 

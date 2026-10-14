@@ -15,7 +15,9 @@
 //
 // THE ORCHESTRATOR NEVER WAITS ON A DELIVERY. QueueChanged only appends, so a
 // queue write is never held up by, and never re-enters through, the prompt
-// queue; the loop does the delivering.
+// queue; the loop does the delivering. The loop outlives the daemon's merge
+// drain and delivers everything pending before it ends, so no change a
+// finishing merge reports is lost to the exit.
 package mergenotice
 
 import (
@@ -32,7 +34,6 @@ import (
 	"agent-repld/internal/merge"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/resolve/feed"
-	"agent-repld/internal/standdown"
 	"agent-repld/internal/wsm"
 )
 
@@ -71,8 +72,8 @@ type Service struct {
 	mu sync.Mutex
 	// pending are the changes reported and not yet delivered, oldest first.
 	pending []merge.QueueChange
-	// stopped is set once Run has ended: a change reported after it can
-	// never be delivered, and is recorded as such at once.
+	// stopped is set once Run has delivered its last pending change: a
+	// change reported after it is never told, and is recorded as such.
 	stopped bool
 	// wake is signalled, without blocking, whenever a change is appended.
 	wake chan struct{}
@@ -91,7 +92,7 @@ func (s *Service) QueueChanged(change merge.QueueChange) {
 	s.mu.Lock()
 	if s.stopped {
 		s.mu.Unlock()
-		s.undelivered([]merge.QueueChange{change}, "the notifier had already stopped")
+		s.untold(change)
 		return
 	}
 	s.pending = append(s.pending, change)
@@ -103,21 +104,20 @@ func (s *Service) QueueChanged(change merge.QueueChange) {
 }
 
 // Run delivers every reported change, in order, through PROMPTS until ctx
-// ends. A change still undelivered then is recorded as such: the daemon is
-// leaving, and a notice it never submitted is never sent.
+// ends, and then delivers every change still pending before it returns:
+// ctx ending is the signal to stop taking new work, never to drop what was
+// reported. The daemon ends it only after its merge drain, so a merge landing
+// inside the drain is still told. A change reported after Run has returned
+// is never told (stopped).
 func (s *Service) Run(ctx context.Context, prompts prompthandler.Submitter) {
+	deliveries := context.WithoutCancel(ctx)
 	for {
-		batch := s.take()
-		for i, change := range batch {
-			if ctx.Err() != nil {
-				s.stop(batch[i:])
-				return
-			}
-			s.deliver(ctx, prompts, change)
+		for _, change := range s.take() {
+			s.deliver(deliveries, prompts, change)
 		}
 		select {
 		case <-ctx.Done():
-			s.stop(nil)
+			s.finish(deliveries, prompts)
 			return
 		case <-s.wake:
 		}
@@ -133,24 +133,33 @@ func (s *Service) take() []merge.QueueChange {
 	return batch
 }
 
-// stop marks the service stopped and records LEFT, and every change still
-// pending, as undelivered.
-func (s *Service) stop(left []merge.QueueChange) {
-	s.mu.Lock()
-	s.stopped = true
-	left = append(left, s.pending...)
-	s.pending = nil
-	s.mu.Unlock()
-	if len(left) > 0 {
-		s.undelivered(left, "the daemon stood down before delivering it")
+// finish delivers every change still pending and marks the service stopped,
+// with no change able to slip between the last take and the mark: the mark
+// is set under the same lock that finds nothing pending.
+func (s *Service) finish(ctx context.Context, prompts prompthandler.Submitter) {
+	for {
+		s.mu.Lock()
+		if len(s.pending) == 0 {
+			s.stopped = true
+			s.mu.Unlock()
+			s.deps.Log.Global().Debug(op, "the notifier delivered every pending merge queue change and stopped", nil)
+			return
+		}
+		batch := s.pending
+		s.pending = nil
+		s.mu.Unlock()
+		for _, change := range batch {
+			s.deliver(ctx, prompts, change)
+		}
 	}
 }
 
-// undelivered records each of CHANGES as never told to anyone.
-func (s *Service) undelivered(changes []merge.QueueChange, why string) {
-	for _, change := range changes {
-		s.deps.Log.Global().Error(op, "a merge queue change was never told to its subscribers: "+why, changeFields(change))
-	}
+// untold records a change reported after the notifier stopped. The daemon is
+// leaving and the change is one a stood-down merge made; the merge's
+// successor resumes it, and its next notice carries the queue as it then
+// stands, as the subscription's contract states.
+func (s *Service) untold(change merge.QueueChange) {
+	s.deps.Log.Global().Info(op, "a merge queue change came after the notifier stopped, as the daemon stood down; it is not told, and the next notice carries its effect", changeFields(change))
 }
 
 // deliver tells CHANGE to every subscriber whose subscription admits it, once
@@ -233,11 +242,6 @@ func (s *Service) notify(ctx context.Context, prompts prompthandler.Submitter, t
 	}
 	outcome, err := prompts.Submit(ctx, told.Subscriber, feed.SaidText(text), key, Origin, wsm.DeliveryDeferred, nil)
 	if err != nil {
-		if standdown.CutShort(ctx, err) {
-			stood := dlog.WithCause(fields, err)
-			log.Error(op, "a merge queue change was never told to its subscriber: the daemon stood down mid-delivery", stood)
-			return
-		}
 		log.Error(op, "could not submit a merge queue notice to its subscriber", dlog.WithCause(fields, err))
 		return
 	}

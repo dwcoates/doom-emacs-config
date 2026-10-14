@@ -160,6 +160,11 @@ type graph struct {
 	// started (deploy.Deployer.DrainLandings): `run` calls it before the log
 	// surfaces close, so a landing's deploy always records how it ended.
 	DrainLandings func(bound time.Duration) bool
+	// Notices is the merge queue subscriptions' delivery loop. `run` starts
+	// it with the background loops and stops it AFTER the merge drain, not
+	// with them: a merge that lands inside the drain reports its landing, and
+	// the loop delivers every pending change before it stops.
+	Notices *noticeLifetime
 	// DrainMerges is the BOUNDED wait for merge runs that have reached their
 	// terminal. `run` calls it BEFORE the watchers close and before the state
 	// client does: a SIGTERM landing mid-terminal used to close the store
@@ -1315,10 +1320,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			detached.Run(ctx, ticker.C)
 			return nil
 		}},
-		{Name: "merge_queue_notices", Run: func(ctx context.Context) error {
-			queueNotices.Run(ctx, handler)
-			return nil
-		}},
 		{Name: "lock_watchdog", Run: stalls.Run},
 		{Name: "persistent_wifi", Run: wifi.Run},
 		{Name: "branch_commits", Run: commitRecounter.Run},
@@ -1435,6 +1436,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		DrainStarts:   fleet.DrainStarts,
 		DrainLandings: deployer.DrainLandings,
 		DrainMerges:   mergeOrchestrator.Drain,
+		Notices:       newNoticeLifetime(func(ctx context.Context) { queueNotices.Run(ctx, handler) }),
 		StopShims:     stopEveryShim(fleet, supervisor, rootLossShimStopBound),
 		SettleBoot:    freshBootSettle(p.Opts.joining != "", rolloutController),
 	}, nil
