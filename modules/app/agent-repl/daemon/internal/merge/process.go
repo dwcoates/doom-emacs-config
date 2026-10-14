@@ -110,9 +110,7 @@ func (r *run) attempt(ctx context.Context) (outcome, bool, error) {
 		}
 		return outcome{}, false, err
 	}
-	if err := r.settledOn(ctx, tip); err != nil {
-		return outcome{}, false, err
-	}
+	r.settledOn(tip)
 	return r.afterRebase(ctx, tip, targetBranch, r.fixesUsed, false)
 }
 
@@ -139,9 +137,7 @@ func (r *run) rebaseOntoMoved(ctx context.Context, tip, now, targetBranch string
 		}
 		return outcome{}, false, err
 	}
-	if err := r.settledOn(ctx, now); err != nil {
-		return outcome{}, false, err
-	}
+	r.settledOn(now)
 	return r.afterRebase(ctx, now, targetBranch, fromAttempt, false)
 }
 
@@ -182,17 +178,13 @@ func (r *run) resumeAttempt(ctx context.Context, res *progressDoc) (outcome, boo
 		if out, again, err, done := finish(r.resumeRebase(ctx, p, tip, targetBranch, res.BranchHead)); done {
 			return out, again, err
 		}
-		if err := r.settledOn(ctx, tip); err != nil {
-			return outcome{}, false, err
-		}
+		r.settledOn(tip)
 		return r.afterRebase(ctx, tip, targetBranch, r.fixesUsed, false)
 	case TabConflicts:
 		if out, again, err, done := finish(r.resumeConflict(ctx, p, tip, targetBranch, res)); done {
 			return out, again, err
 		}
-		if err := r.settledOn(ctx, tip); err != nil {
-			return outcome{}, false, err
-		}
+		r.settledOn(tip)
 		return r.afterRebase(ctx, tip, targetBranch, r.fixesUsed, false)
 	case TabTests:
 		if gaveUp, err := r.rebaseSettled(ctx, tip, targetBranch); err != nil || gaveUp != nil {
@@ -810,9 +802,6 @@ func (r *run) testAndFix(ctx context.Context, tip, targetBranch string, fromAtte
 		if err != nil {
 			return "", nil, fmt.Errorf("merge: resolving %s: %w", r.subject.branch, err)
 		}
-		// THE MERGE BEHIND THIS ONE STANDS ON THIS TIP: a fixing commit moves
-		// it, and the chain restacks.
-		r.publishTip(ctx, head)
 		if attempt == fromAttempt && !resumeTests {
 			reused, err := r.reuseTested(ctx, tip, head)
 			if err != nil {

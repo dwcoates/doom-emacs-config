@@ -61,13 +61,15 @@ type chainGit struct {
 	trees     map[string]string
 	n         int
 	landings  []string
+	// rebaseHolds parks the next rebase started in a worktree.
+	rebaseHolds map[string]chainHold
 }
 
 func newChainGit(inner *fakeGit) *chainGit {
 	g := &chainGit{
 		fakeGit: inner, commits: map[string]*chainCommit{}, refs: map[string]string{},
 		rebases: map[string]*chainRebase{}, conflicts: map[[2]string][]string{}, recorded: map[[2]string]bool{},
-		trees: map[string]string{},
+		trees: map[string]string{}, rebaseHolds: map[string]chainHold{},
 	}
 	root := g.mintLocked(nil, "base")
 	g.refs["master"] = root
@@ -254,7 +256,29 @@ func (g *chainGit) TreeOf(_ context.Context, dir, ref string) (string, error) {
 	return g.treeLocked(sha), nil
 }
 
-func (g *chainGit) StartRebase(_ context.Context, dir, onto string, commits []string) (gitclient.RebaseStep, error) {
+// holdRebase parks the next rebase started in dir until release closes;
+// entered closes once it is parked.
+func (g *chainGit) holdRebase(dir string) (entered, release chan struct{}) {
+	g.cmu.Lock()
+	defer g.cmu.Unlock()
+	h := chainHold{entered: make(chan struct{}), release: make(chan struct{})}
+	g.rebaseHolds[dir] = h
+	return h.entered, h.release
+}
+
+func (g *chainGit) StartRebase(ctx context.Context, dir, onto string, commits []string) (gitclient.RebaseStep, error) {
+	g.cmu.Lock()
+	hold, held := g.rebaseHolds[dir]
+	delete(g.rebaseHolds, dir)
+	g.cmu.Unlock()
+	if held {
+		close(hold.entered)
+		select {
+		case <-hold.release:
+		case <-ctx.Done():
+			return gitclient.RebaseStep{}, fmt.Errorf("chain rebase: %w", ctx.Err())
+		}
+	}
 	g.cmu.Lock()
 	defer g.cmu.Unlock()
 	base, err := g.resolveLocked(dir, onto)
@@ -774,6 +798,39 @@ func TestTheMergeBehindTheHeadRebasesOntoTheTargetsTip(t *testing.T) {
 	// Assert.
 	if tree != "b1+base" || !slices.Equal(own, []string{"b1"}) {
 		t.Fatalf("the merge behind the head holds %s carrying %v, want b1+base carrying [b1]: it stands on the target, not the head", tree, own)
+	}
+}
+
+func TestTheMergeBehindTheHeadStartsWhileTheHeadsRebaseStands(t *testing.T) {
+	// Arrange: master moved, so the head must rebase; it parks inside its
+	// rebase, and the merge behind it holds in its gate.
+	c := newChain(t)
+	c.git.commitOn("master", "m1")
+	headRebase, releaseHead := c.git.holdRebase(c.dirs[theWorkspace])
+	enqueue(t, c.h)
+	c.queue(t, "ws-b", "b1")
+	behindGate, releaseBehind := c.runner.hold(c.dirs["ws-b"])
+	done := admitAsync(c.h, context.Background())
+	<-headRebase
+
+	// Act: the merge behind reaches its gate while the head's rebase stands.
+	bound := time.NewTimer(5 * time.Second)
+	defer bound.Stop()
+	select {
+	case <-behindGate:
+	case <-bound.C:
+		t.Fatal("the merge behind the head never reached its gate while the head's rebase stood: it waited on the head")
+	}
+	close(releaseHead)
+	close(releaseBehind)
+	if err := <-done; err != nil {
+		t.Fatalf("the head's admission ended on: %v", err)
+	}
+	c.drain(t)
+
+	// Assert: both landed, each with its own commits.
+	if tree := c.git.tree("master"); tree != "a1+b1+base+m1" {
+		t.Fatalf("master holds %s, want a1+b1+base+m1", tree)
 	}
 }
 

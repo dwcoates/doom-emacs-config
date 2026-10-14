@@ -1320,21 +1320,23 @@ Owner rulings, 2026-09-30 (`internal/merge`; the contract is
 
 Owner rulings, 2026-10-11 (`internal/merge/chain.go`, `internal/cpugov`).
 
-- **THE WINDOW** is `cpugov.QueueWindow` (3): the head and the two merges
+- **THE WINDOW** is `cpugov.QueueWindow` (2): the head and the merge
   behind it. It is the one setting bounding both chained rebasing and
   concurrent test gates; an entry beyond it waits untouched until a merge
   ahead lands or drops out.
-- **CHAINED REBASING.** The head rebases onto the target's tip; the moment its
-  rebase settles it publishes its tip (`run.publishTip`), and the merge behind
-  it is admitted into the chain (lease, admission, bubble -- the same run a
-  head gets) and rebases ITS OWN commits onto that tip, conflicts resolved by
-  its OWN session through the same prompts. A chain member is
-  `wsm.MergeAdmitted` while it is behind the head; only the pump promotes it
-  into the slot, once its entry stands first in line.
-- **RESTACKS.** A new tip (a fixing commit, a rebase onto a moved target) and
-  a member leaving the chain without landing both close the repository's chain
-  signal; the merge behind restacks onto the tip now ahead of it. Every queue
-  rebase runs with rerere on (`gitclient`), and a stop rerere resolved
+- **THE RACE TO LAND** (`internal/merge/race.go`, owner rulings 2026-10-12
+  and 2026-10-13). Every member rebases ITS OWN commits onto the TARGET's tip,
+  conflicts resolved by its OWN session through the same prompts, and the
+  merge behind the head joins the chain (lease, admission, bubble -- the same
+  run a head gets) the moment the window has room: it waits on none of the
+  head's steps (the head's admission extends the chain right after it
+  registers). A chain member is `wsm.MergeAdmitted` while it is behind the
+  head; only the pump promotes it into the slot, once its entry stands first
+  in line, or once its gate passed first and it took the head's place
+  (`YieldMergeHead`).
+- **RESTACKS.** A target that moves (`noteTargetTip`) closes the repository's
+  chain signal; the merge behind rebases onto the new tip. Every queue rebase
+  runs with rerere on (`gitclient`), and a stop rerere resolved
   (`RebaseStep.Resolved`) is continued with no prompt.
 - **A MERGE ONLY CARRIES ITS OWN COMMITS.** A rebase replays exactly
   `chainBase..branch` (`run.chainBase`, recorded in the progress document), so
