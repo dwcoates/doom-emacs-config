@@ -264,6 +264,19 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
 - **No register-borrowing.** 
   - Consultant-speak, conference-talk phrasing, and dev-influencer register all read as showing off and cost comprehension. If a phrase would sound at home in a LinkedIn post, replace it.
 
+### American English
+
+- Every response, commit message, comment, and document uses American English.
+
+### No time estimates
+
+- NEVER give a time estimate, under any circumstances.
+  - No "effort estimate" sections, no "ETA", no "should take ~X minutes/hours/days", no "afternoon", no "by EOD".
+  - No other duration or wall-clock framing for work either.
+  - The ban covers plans, analyses, reports, summaries, and PR descriptions alike.
+- Time estimates are unwelcome however the request is phrased and however confident the estimate seems.
+  - When I explicitly ask for one, decline and explain that you don't give them.
+
 ### Markdown inline code for every code-like reference
 
 - Every code-like reference in the response MUST be wrapped in markdown inline code (a single backtick on each side).
@@ -324,6 +337,10 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
   - Fabricating a plausible PR URL is worse than omitting the link, because a wrong link reads as verified.
   - Resolve the real URL (e.g. `gh pr view <n> --json url`) before writing the link.
 - This rule governs the WHOLE response, at every depth of the TLDR tree and in the response header.
+- Outside the response, a PR is still identified by its NAME, never by a bare number.
+  - This covers every communication: chat, analyses, reports, plans, and PR descriptions.
+  - A number may only supplement the name, in a link or a parenthetical.
+  - A long title may be shortened to a clearly recognizable form of the name.
 
 ### Fenced code blocks for anything longer than one statement
 
