@@ -1049,3 +1049,64 @@ func TestNoResolverKeepsAHandTypedStatusArmList(t *testing.T) {
 		t.Fatalf("hand-typed status arm lists in %v, want every resolver on the vocab readers", found)
 	}
 }
+
+func TestInkColorTakesAColorOrAGlyphOnlyColorAndNeverNone(t *testing.T) {
+	c := loadColors(t)
+	tests := []struct {
+		ink  string
+		want bool
+	}{
+		{ink: "red", want: true},
+		{ink: "orange", want: true},
+		{ink: "grey", want: true},
+		{ink: ColorNone, want: false},
+		{ink: "chartreuse", want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.ink, func(t *testing.T) {
+			// Act, Assert.
+			if got := c.inkColor(tc.ink); got != tc.want {
+				t.Fatalf("inkColor(%q) = %v, want %v", tc.ink, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCheckMotionNamesTheSectionOfAMotionTheRailCannotDraw(t *testing.T) {
+	// Act.
+	err := checkMotion("paused_merge_mark", "spins")
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "paused_merge_mark.motion") {
+		t.Fatalf("checkMotion = %v, want a refusal naming the section", err)
+	}
+}
+
+func TestCheckMotionTakesEveryMarkMotion(t *testing.T) {
+	for _, motion := range markMotions {
+		t.Run(motion, func(t *testing.T) {
+			// Act, Assert.
+			if err := checkMotion("async_merge_mark", motion); err != nil {
+				t.Fatalf("checkMotion(%q) = %v, want nil", motion, err)
+			}
+		})
+	}
+}
+
+// TestEveryMarkSectionChecksItsMotionThroughCheckMotion fails a mark section
+// whose motion is checked by hand rather than through the one check.
+func TestEveryMarkSectionChecksItsMotionThroughCheckMotion(t *testing.T) {
+	// Arrange.
+	raw, err := os.ReadFile("api.go")
+	if err != nil {
+		t.Fatalf("read api.go: %v", err)
+	}
+
+	// Act.
+	handRolled := strings.Count(string(raw), "contains(markMotions,")
+
+	// Assert: the one membership test is checkMotion's own.
+	if handRolled != 1 {
+		t.Fatalf("api.go tests markMotions membership %d times, want once, inside checkMotion", handRolled)
+	}
+}

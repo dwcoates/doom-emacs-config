@@ -65,6 +65,9 @@ const lineOf = (drawn: HTMLElement): HTMLElement =>
 const panelOf = (drawn: HTMLElement): HTMLElement =>
   drawn.querySelector(":scope > .detail") as HTMLElement;
 
+/** The row's name. */
+const nameOf = (drawn: HTMLElement): HTMLElement => lineOf(drawn).querySelector(".name") as HTMLElement;
+
 /** The status dot. */
 const dotOf = (drawn: HTMLElement): HTMLElement =>
   lineOf(drawn).querySelector(".st") as HTMLElement;
@@ -184,7 +187,6 @@ describe("the status mark", () => {
 });
 
 describe("the breathing name", () => {
-  const nameOf = (drawn: HTMLElement): HTMLElement => lineOf(drawn).querySelector(".name") as HTMLElement;
   const drawArm = (arm: RosterStatusCase, place: RowPlace = "grouping"): HTMLElement =>
     drawRosterRow(
       row({ id: "ws-1", status: { case: arm, value: {} } as MessageInitShape<typeof RosterRowSchema>["status"] }),
@@ -1960,7 +1962,6 @@ describe("the async-merging marker", () => {
 // A PAUSED QUEUE (owner ruling, 2026-10-14): the merge indicator greys and
 // the name stops breathing for the merge, keeping its color.
 describe("the merge-paused marker", () => {
-  const nameOf = (drawn: HTMLElement): HTMLElement => lineOf(drawn).querySelector(".name") as HTMLElement;
 
   it("greys a paused merging row's glyph", () => {
     const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "merging", value: {} }, mergePaused: true }), sidebarContext(), "R");
