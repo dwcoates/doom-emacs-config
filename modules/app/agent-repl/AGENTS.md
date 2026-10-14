@@ -1838,6 +1838,14 @@ GNS, ever, by any agent, at any scope (personal, team, org or public).
 - An existing `lineage_root:` line is left as it stands (see the section
   above); it records history, not a reason to publish again.
 
+## Commits carry the running user's own git identity
+
+Every commit, whether made by an agent, a merge, or a hook, is authored and committed by the user's global git identity (`git config --global user.name` / `user.email`).
+
+- No code, script, hook or test sets `GIT_AUTHOR_*` / `GIT_COMMITTER_*` for a real repository or writes `user.*` into any repository's config.
+- A throwaway repository that needs an identity (a skill's self-test, a capture fixture) passes it per command with `git -c user.name=… -c user.email=…`, after unsetting inherited `GIT_DIR` / `GIT_WORK_TREE` / `GIT_INDEX_FILE`.
+  - Why: on 2026-10-14 a self-test run from inside a git hook inherited `GIT_DIR` and wrote `Test <test@example.com>` into this repository's `.git/config`, authoring thousands of commits as `Test` until history was rewritten.
+
 ## Requirements: the manifests are the one record of what a machine needs
 
 Everything agent-repl needs on a machine is an entry in a requirement
