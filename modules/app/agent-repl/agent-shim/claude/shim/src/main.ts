@@ -1025,7 +1025,9 @@ export async function main(): Promise<void> {
   // KillSession's own exit. The engine has already torn the session down and
   // built its response; the process may only end once that response — and every
   // stream terminal the teardown produced — is off the wire, which is what
-  // `quiet` waits for. Closing first would destroy the socket carrying it.
+  // `quiet` waits for, AND once the daemon has read it and hung up, which is
+  // what `hungUp` waits for (see ShimServer.hungUp for the race an exit on the
+  // answer alone lost). Closing first would destroy the socket carrying it.
   let ending = false;
   endProcess = (code): void => {
     if (ending) return;
@@ -1033,6 +1035,7 @@ export async function main(): Promise<void> {
     void (async (): Promise<void> => {
       try {
         await server.quiet(exitQuietBudgetMs);
+        await server.hungUp();
         await server.close();
         const fields = {
           outcome: code === 0 ? "session_killed_exit" : "session_killed_exit_lost_writes",

@@ -220,6 +220,16 @@ means the daemon and this build disagree about the contract.
   Blocking-versus-merely-failing has ONE reading, `convert/hooks.ts`
   `hookBlockingText`, shared by the gate and the drawn hook row so they cannot
   drift.
+- **`KillSession`'s exit waits for the daemon to hang up.** `main.ts`
+  `endProcess` drains (`ShimServer.quiet`), then waits until the daemon has
+  closed every connection a `KillSession` came in on (`ShimServer.hungUp`),
+  then closes the listener and exits. The daemon hangs up only once it has
+  READ the answer, so the exit cannot overtake it; an exit on the answer
+  merely leaving let the daemon's http2 transport abort the unread answer on
+  its next write to the dead peer. NO TIMER on the wait: the daemon's own stop
+  escalation (SIGTERM) ends a shim whose daemon never hangs up. A client that
+  kills a shim must hang up after reading the answer, as the integration
+  suites' clients do (`test/integration-support/client.ts`).
 - **Signals**: SIGTERM is the one authorized shutdown and takes the
   `KillSession{force:true}` path, then exits 0 (nonzero if the stand-down
   failed). SIGINT is REFUSED and logged at error — an attached terminal's Ctrl-C
