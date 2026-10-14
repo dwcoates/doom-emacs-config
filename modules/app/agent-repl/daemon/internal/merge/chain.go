@@ -666,9 +666,7 @@ func (r *run) resumeSpeculative(ctx context.Context, res *progressDoc, targetBra
 			"workspace": string(r.ws), "lease": string(r.lease.ID), "round": round.n})
 		if res.Tested == nil {
 			const cut = "the daemon restarted under this run; the tests run again"
-			r.publishRun(round, round.settled(r.o.nowMS(), cut), nil, nil)
-			r.settleTesting(cut)
-			r.closeTab(ctx, round, "restarted")
+			r.endRun(ctx, round, cut, nil, nil, "restarted")
 		}
 		return nil, nil
 	default:

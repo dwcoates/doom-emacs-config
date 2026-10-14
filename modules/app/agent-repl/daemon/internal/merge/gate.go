@@ -156,9 +156,7 @@ func (r *run) gate(ctx context.Context, round tabRound, tip, head string, adm *g
 		return g.brokenGate(ctx, result, fmt.Sprintf("%s; the whole run is archived at %s", why, result.ArchivePath)), nil
 	}
 	if result.Passed {
-		r.publishRun(round, round.settled(r.o.nowMS(), ""), result.Suites, g.link())
-		r.settleTesting("")
-		r.closeTab(ctx, round, "succeeded")
+		r.endRun(ctx, round, "", result.Suites, g.link(), "succeeded")
 		r.o.log(ctx, r.ws).Info(op, "the merge's suites passed", dlog.Context{
 			"workspace": string(r.ws), "round": round.n, "archive": result.ArchivePath, "verdict": "passed",
 			"total_seconds": g.since()})
@@ -225,26 +223,20 @@ func (g *gateRun) unrun(ctx context.Context, err error) error {
 	if errors.Is(err, errPromoted) {
 		g.cut(ctx, "the merge's promotion to its queue's head")
 		const promoted = "the merge reached its queue's head; its tests run there"
-		r.publishRun(round, round.settled(r.o.nowMS(), promoted), nil, g.link())
-		r.settleTesting(promoted)
-		r.closeTab(ctx, round, "restarted")
+		r.endRun(ctx, round, promoted, nil, g.link(), "restarted")
 		return err
 	}
 	if errors.Is(context.Cause(ctx), errBaseMoved) {
 		g.cut(ctx, "the merge ahead moved")
 		const moved = "the merge ahead moved; the tests run again on its new tip"
-		r.publishRun(round, round.settled(r.o.nowMS(), moved), nil, g.link())
-		r.settleTesting(moved)
-		r.closeTab(ctx, round, "restarted")
+		r.endRun(ctx, round, moved, nil, g.link(), "restarted")
 		return err
 	}
 	if ctx.Err() != nil || r.o.isDraining() || errors.Is(err, errMergeStopping) {
 		g.cut(ctx, "the daemon's exit, a restart or a transfer")
 	}
 	const unrun = "the test gate could not run"
-	r.publishRun(round, round.settled(r.o.nowMS(), unrun), nil, g.link())
-	r.settleTesting(unrun)
-	r.closeTab(ctx, round, "failed")
+	r.endRun(ctx, round, unrun, nil, g.link(), "failed")
 	return err
 }
 
@@ -280,9 +272,7 @@ func (r *run) gateNothing(ctx context.Context, round tabRound, paths []string, s
 	if err := os.WriteFile(log.path, []byte(body), 0o644); err != nil {
 		return gateVerdict{}, fmt.Errorf("merge: writing the test log %s: %w", log.path, err)
 	}
-	r.publishRun(round, round.settled(r.o.nowMS(), ""), nil, r.o.testLogLink(log))
-	r.settleTesting("")
-	r.closeTab(ctx, round, "succeeded")
+	r.endRun(ctx, round, "", nil, r.o.testLogLink(log), "succeeded")
 	r.o.log(ctx, r.ws).Info("daemon.merge.tests", "no suite is selected for the merge's change; the gate passes without starting the runner", dlog.Context{
 		"workspace": string(r.ws), "round": round.n, "paths": strings.Join(paths, ","), "reason": selection.Reason, "archive": log.path,
 		"verdict": "no suite selected", "total_seconds": r.o.deps.Now().Sub(begun).Seconds()})
@@ -500,9 +490,7 @@ func suiteEdge(line string) (string, suiteState, bool) {
 // the failure line it names.
 func (g *gateRun) brokenGate(ctx context.Context, result GateResult, why string) gateVerdict {
 	line := "the test gate itself failed to run: " + why
-	g.r.publishRun(g.round, g.round.settled(g.r.o.nowMS(), line), result.Suites, g.link())
-	g.r.settleTesting(line)
-	g.r.closeTab(ctx, g.round, "gate_broken")
+	g.r.endRun(ctx, g.round, line, result.Suites, g.link(), "gate_broken")
 	g.r.o.log(ctx, g.r.ws).Warn("daemon.merge.tests", "the test gate itself failed to run; the merge fails with no fixing attempt", dlog.Context{
 		"workspace": string(g.r.ws), "round": g.round.n, "why": why, "exit_code": result.ExitCode, "archive": result.ArchivePath,
 		"verdict": "broken", "total_seconds": g.since()})

@@ -416,6 +416,17 @@ func (r *run) settleTesting(failure string) {
 	r.publishTesting(false)
 }
 
+// endRun ends the run of tests round ROUND, and the tests tab with it: the
+// run's subtab and the tab settle with LINE (empty for a pass), the run
+// drawing SUITES and LOG, and the round's ledger interval closes as CLOSED.
+// Every way a run ends with the gate settles through it, so the subtab, the
+// tab and the ledger never disagree about how a run ended.
+func (r *run) endRun(ctx context.Context, round tabRound, line string, suites []*frontendv1.FeedMergeTestSuite, log *frontendv1.FeedMergeTestLog, closed string) {
+	r.publishRun(round, round.settled(r.o.nowMS(), line), suites, log)
+	r.settleTesting(line)
+	r.closeTab(ctx, round, closed)
+}
+
 // publishRun publishes the run of tests round ROUND at ST.
 func (r *run) publishRun(round tabRound, st tabState, suites []*frontendv1.FeedMergeTestSuite, log *frontendv1.FeedMergeTestLog) {
 	r.publish(runKey(round.n), runTab(round.n, st, suites, log))
