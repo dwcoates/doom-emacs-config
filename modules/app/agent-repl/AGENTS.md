@@ -364,6 +364,43 @@ unreachable from a live process.
     the root's FIRST daemon; the harness refuses the reuse or the read loudly
     when it is missing, and a daemon-spawned successor refuses to boot on the
     inherited flag.
+- NOTHING A RUN STARTS OUTLIVES IT, HOWEVER THE RUN ENDS
+  (`testrun/internal/life`, `testrun/reap`). A merge gate cut when master
+  moved SIGKILLs its run's process group; the units, each in a group of its
+  own, went on forking, and the next run's single-snapshot kill missed what
+  they forked meanwhile. Twenty processes of six dead runs spun for hours
+  out of detached RAM disks (2026-10-13 and 14).
+  - `testrun run` is a SENTINEL that stays in its invoker's group. It starts
+    the RUNNER with `Setsid`, relays its output and answers its exit status,
+    so `bin/test-all.sh` and every gate see no difference. The runner leads
+    the run's SESSION and starts every unit inside it (units keep their own
+    process groups).
+  - The sentinel holds the write end of the runner's LIFELINE pipe. However
+    the sentinel dies, a gate's SIGKILL included, the kernel closes it; the
+    runner reads EOF, cancels the run, reaps its session (never itself, its
+    warden or the sentinel), releases its disk and exits non-zero. Its last
+    lines go to `AGENT_REPL_TEST_RUN_LOG` once the relay is gone.
+  - The runner starts a WARDEN first, in a session of its own, and holds the
+    write end of the warden's lifeline. A runner killed outright never says
+    `done`; the warden reaps the runner's session, then reclaims its RAM
+    disk (`ramdisk.Manager.ReclaimRun`, under the record's own flock) and
+    removes its run roots. The next run's Reclaim is the backstop, with the
+    session the record names (`session=`, `since=`).
+  - ONE REAP (`reap.Reap`), used by the release, every reclaim, the runner on
+    a cut, the warden and the daemon harness's run-root reclaim. It freezes
+    before it kills: SIGSTOP passes until one finds no member it has not
+    stopped (a stopped process cannot fork), then SIGKILL to every member,
+    then a wait on each exit through kqueue (`reap.KillExitBound`), then a
+    listing that confirms none remains. Each pass, the kill and the exit time
+    are logged at INFO; a failed reap is ERROR and keeps the disk and its
+    record, because nothing is detached while a member remains.
+  - MEMBERSHIP IS THE SESSION ID, which the kernel keeps for every process
+    the run starts. A process started before the session's leader is not a
+    member, and a session id a live stranger now leads is not used. The
+    command line and environment match (`TMPDIR`, the mount) is the second
+    net, for the one known escape: the daemon rollout's successor, which
+    `daemon/internal/rollout/spawn.go` starts with `Setsid` in the handover
+    tests.
 - THE RUN'S ROOT IS A RAM DISK on macOS (`testrun/internal/ramdisk`).
   - Mounted at `/tmp/artr-<pid>` (APFS), so paths stay temporary to the
     registration guard and short enough for sockets; exported to units as
@@ -385,12 +422,11 @@ unreachable from a live process.
     reported, naming what held it (`lsof +f -- <mount>`, read before the
     force). A run killed outright leaves an flock'd record in
     `/tmp/agent-repl-test-ramdisks`, and the next run reclaims the disk.
-  - EVERY PROCESS RUNNING OUT OF THE VOLUME IS KILLED before a detach, by a
-    release or a reclaim (`testrun/reap.Under`, shared with the daemon
-    harness's run-root reclaim): one whose command line OR environment
-    names the mount. By command line alone, a dead run's ERT Emacs (handed
-    the volume only through `TMPDIR`) outlived the reclaim and refilled the
-    detached mount point.
+  - EVERY MEMBER OF THE RUN IS REAPED before a detach, by a release or a
+    reclaim (`reap.Reap`, above): its session, and any process whose command
+    line OR environment names the mount. By command line alone, a dead
+    run's ERT Emacs (handed the volume only through `TMPDIR`) outlived the
+    reclaim and refilled the detached mount point.
   - A MOUNT POINT NO RECORD NAMES IS REMOVED by the next run's reclaim, once
     its run is dead and no volume is mounted on it: what a process wrote
     under it after its disk went, or what a release could not remove. It is
