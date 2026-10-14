@@ -19,6 +19,7 @@ import {
   drawFeedMergeTestSuite,
   drawTestSuites,
   placeFeedMergeTestCounts,
+  suitesInListOrder,
   updateFeedMergeTestsRunOutput,
   updateTestSuites,
 } from "../../../src/feed/merge/tests-tab.js";
@@ -159,12 +160,12 @@ describe("the stylesheet's suite colors", () => {
   });
 });
 
-describe("drawTestSuites: one block per suite, in served order", () => {
-  it("draws every suite the tab carried", () => {
+describe("drawTestSuites: one block per suite, in list order", () => {
+  it("draws every suite the tab carried, the running before the passed", () => {
     const el = drawTestSuites([suite("unit", "passed"), suite("e2e", "running")]);
     expect([...el.querySelectorAll(".merge-suite-name")].map((e) => e.textContent)).toEqual([
-      "unit",
       "e2e",
+      "unit",
     ]);
   });
 
@@ -419,6 +420,57 @@ describe("updateFeedMergeTestsRunOutput", () => {
     updateFeedMergeTestsRunOutput(host, next, tab, ctx, "p");
     // Assert
     expect(host.querySelector(".merge-test-log")).not.toBeNull();
+  });
+});
+
+/** The names of SUITES, in order. */
+const namesOf = (suites: readonly FeedMergeTestSuite[]): string[] => suites.map((one) => one.name);
+
+describe("suitesInListOrder: the failed lead, the passed trail", () => {
+  it("lists the failed, then the running, then the passed", () => {
+    const listed = suitesInListOrder([suite("p", "passed"), suite("r", "running"), suite("f", "failed")]);
+    expect(namesOf(listed)).toEqual(["f", "r", "p"]);
+  });
+
+  it("keeps served order within a group", () => {
+    const listed = suitesInListOrder([suite("f1", "failed"), suite("p", "passed"), suite("f2", "failed")]);
+    expect(namesOf(listed)).toEqual(["f1", "f2", "p"]);
+  });
+
+  it("sorts a running suite by its state, whatever its tests said so far", () => {
+    const failing = create(FeedMergeTestSuiteSchema, {
+      name: "r",
+      state: { case: "running", value: { soFar: { case: "failing", value: {} } } },
+    });
+    expect(namesOf(suitesInListOrder([failing, suite("f", "failed")]))).toEqual(["f", "r"]);
+  });
+
+  it("leaves the served list as it was", () => {
+    const served = [suite("p", "passed"), suite("f", "failed")];
+    suitesInListOrder(served);
+    expect(namesOf(served)).toEqual(["p", "f"]);
+  });
+
+  it("refuses a suite whose state oneof is unset", () => {
+    expect(() => suitesInListOrder([create(FeedMergeTestSuiteSchema, { name: "unit" })])).toThrow(MalformedView);
+  });
+});
+
+describe("updateTestSuites: a suite whose state moved moves to its group", () => {
+  it("moves a suite that failed to the top, keeping its element", () => {
+    // Arrange
+    const el = drawTestSuites([suite("a", "running"), suite("b", "running")]);
+    const b = el.querySelector('[data-suite="b"]');
+    // Act
+    updateTestSuites(el, [suite("a", "running"), suite("b", "failed")]);
+    // Assert
+    expect([el.firstElementChild, b?.getAttribute("data-suite-state")]).toEqual([b, "failed"]);
+  });
+
+  it("moves a suite that passed below the still running", () => {
+    const el = drawTestSuites([suite("a", "running"), suite("b", "running")]);
+    updateTestSuites(el, [suite("a", "passed"), suite("b", "running")]);
+    expect([...el.children].map((child) => child.getAttribute("data-suite"))).toEqual(["b", "a"]);
   });
 });
 

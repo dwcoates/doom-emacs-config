@@ -12,6 +12,10 @@
  * THE OUTPUT IS ALREADY CAPPED by the daemon; the client scrolls what it was
  * given inside the block rather than growing the bubble without bound.
  *
+ * FAILED SUITES LEAD THE LIST (owner request, 2026-10-14): the failed first,
+ * then the still running, then the passed, each group in served order
+ * (`suitesInListOrder`).
+ *
  * THE RUN'S FULL LOG IS A LINK (owner, 2026-09-30), drawn under the suites
  * once the daemon has written it: the shared editor-link verb with the log's
  * token, in the response bubble's link blue (`renderMergeTestLogLink`).
@@ -88,11 +92,40 @@ export function drawFeedMergeTestLog(u: FeedMergeTestLog, ctx: AppContext, path:
   return el;
 }
 
-/** Every suite of a run, in served order. */
+/** Where each suite state sorts in a run's list: the failed lead, the passed trail. */
+const SUITE_LIST_RANK = {
+  failed: 0,
+  running: 1,
+  passed: 2,
+} as const satisfies Record<keyof typeof SUITE_GLYPHS, number>;
+
+/**
+ * SUITES as a run lists them: the failed, then the still running, then the
+ * passed, each group in served order.
+ */
+export function suitesInListOrder(suites: readonly FeedMergeTestSuite[]): FeedMergeTestSuite[] {
+  const rank = (suite: FeedMergeTestSuite): number => {
+    const state = requireCase(suite.state, `${PATH}.state`);
+    switch (state.case) {
+      case "failed":
+      case "running":
+      case "passed":
+        return SUITE_LIST_RANK[state.case];
+      default:
+        return unreachableArm(`${PATH}.state`, armName(state));
+    }
+  };
+  return suites
+    .map((suite, served) => ({ suite, served, rank: rank(suite) }))
+    .sort((a, b) => a.rank - b.rank || a.served - b.served)
+    .map((entry) => entry.suite);
+}
+
+/** Every suite of a run, in list order (`suitesInListOrder`). */
 export function drawTestSuites(suites: readonly FeedMergeTestSuite[]): HTMLElement {
   const el = document.createElement("div");
   el.className = "merge-suites list-rows";
-  for (const suite of suites) el.append(drawFeedMergeTestSuite(suite));
+  for (const suite of suitesInListOrder(suites)) el.append(drawFeedMergeTestSuite(suite));
   return el;
 }
 
@@ -100,7 +133,8 @@ export function drawTestSuites(suites: readonly FeedMergeTestSuite[]): HTMLEleme
  * Bring EL, a run's suites as `drawTestSuites` drew them, to SUITES IN
  * PLACE: each suite keeps its element, keyed by its name, and is repainted
  * where it changed (`updateFeedMergeTestSuite`); a new suite is drawn into its
- * place, and one no longer served is dropped. A push that only moved a running
+ * place, one no longer served is dropped, and a suite whose state moved moves
+ * to its group (`suitesInListOrder`). A push that only moved a running
  * suite's counts therefore moves only those figures, and its live dot breathes
  * on unbroken.
  */
@@ -109,7 +143,7 @@ export function updateTestSuites(el: HTMLElement, suites: readonly FeedMergeTest
   for (const child of el.querySelectorAll<HTMLElement>(":scope > .merge-suite")) {
     held.set(child.getAttribute(SUITE_NAME_ATTRIBUTE) ?? "", child);
   }
-  const next = suites.map((suite) => {
+  const next = suitesInListOrder(suites).map((suite) => {
     const existing = held.get(suite.name);
     if (existing === undefined) return drawFeedMergeTestSuite(suite);
     updateFeedMergeTestSuite(existing, suite);
