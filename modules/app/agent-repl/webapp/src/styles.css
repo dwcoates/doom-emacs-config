@@ -224,13 +224,16 @@
      runs monotonic toward done: pear (said, not concluded) -> green (the
      answer). A thinking bubble wears no border at all. */
   --interim-response-border: #b0b00c;
-  /* THE PEAR EDGE IS DRAWN AT HALF STRENGTH (owner ruling, 2026-10-08: the
-     interim border must read noticeably thinner than every other bubble's).
-     Every bubble border is already 0.3px, which a Retina WebKit rounds up to
-     one device pixel, the thinnest line it draws, so a narrower width changes
-     nothing on screen. A fainter line is what reads thinner: the same hue, at
-     this share of its strength, in both themes. */
-  --interim-response-border-strength: 50%;
+  /* THE PEAR AND GREEN EDGES ARE DRAWN AT HALF STRENGTH (owner ruling,
+     2026-10-08: the interim border must read noticeably thinner than every
+     other bubble's; owner request, 2026-10-14: the final response's green
+     border must read as thin as the interim's). Every bubble border is
+     already 0.3px, which a Retina WebKit rounds up to one device pixel, the
+     thinnest line it draws, so a narrower width changes nothing on screen. A
+     fainter line is what reads thinner: each hue, at this one share of its
+     strength, in both themes, so the two response borders cannot drift
+     apart in weight. */
+  --response-border-strength: 50%;
   /* THE SELECTED ENTRY's color: the ring on a non-bubble card a footer
      detached-work jump landed on. A selected BUBBLE is marked by its fill
      instead (--selected-bubble-bg, below). */
@@ -2081,12 +2084,14 @@ html[data-page-unshown] *::after {
    step of the ladder. Keyed on the daemon's settled state, so a response still
    streaming keeps the base border until it settles. */
 .bubble[data-variant="response"][data-state="success"]:not(.final-response) {
-  border-color: color-mix(in srgb, var(--interim-response-border) var(--interim-response-border-strength), transparent);
+  border-color: color-mix(in srgb, var(--interim-response-border) var(--response-border-strength), transparent);
 }
 /* The answer the turn landed on, as against the commentary above it: green.
    `:not([data-variant="thinking"])` keeps it off reasoning — the structural
    half is that the daemon never names a thinking row as the answer. */
-.bubble.final-response:not([data-variant="thinking"]) { border-color: var(--final-response); }
+.bubble.final-response:not([data-variant="thinking"]) {
+  border-color: color-mix(in srgb, var(--final-response) var(--response-border-strength), transparent);
+}
 /* A TURN THAT ENDED any way but a normal completed answer (owner ruling,
    2026-09-24): its bubble keeps the response's purple fill and wears red. */
 /* THE SELECTED ENTRY (src/feed/selected-entry.ts): the one mark a feed entry

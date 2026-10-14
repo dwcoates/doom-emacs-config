@@ -50,9 +50,15 @@ function selectorsSuppressingSelection(css: string): string[] {
 }
 
 
+/** A response border: the given hue at the one strength every response border is drawn at. */
+const responseBorder = (hue: string): string =>
+  `border-color: color-mix(in srgb, var(${hue}) var(--response-border-strength), transparent)`;
+
 /** The settled mid-turn response's border: the pear hue at its drawn strength. */
-const INTERIM_BORDER =
-  "border-color: color-mix(in srgb, var(--interim-response-border) var(--interim-response-border-strength), transparent)";
+const INTERIM_BORDER = responseBorder("--interim-response-border");
+
+/** The turn's answer's border: the green hue at the same drawn strength as the pear. */
+const FINAL_BORDER = responseBorder("--final-response");
 
 describe("the stylesheet's selectability contract", () => {
   it("suppresses selection nowhere", () => {
@@ -1745,7 +1751,7 @@ describe("the thinking bubble", () => {
     const borders = bordersOn(responseBubble("response", "success"), ["assistant", "final-response"]);
 
     // Assert
-    expect(borders).toEqual(["border-color: var(--final-response)"]);
+    expect(borders).toEqual([FINAL_BORDER]);
   });
 
   it("keeps the pear and green at the base's reserved thickness", () => {
@@ -1803,7 +1809,7 @@ describe("the thinking bubble", () => {
     const rule = declarationsOf('.bubble.final-response:not([data-variant="thinking"])');
 
     // Assert — the green declaration exists and applies only to non-thinking.
-    expect(rule).toMatch(/border-color:\s*var\(--final-response\)/);
+    expect(rule).toContain(FINAL_BORDER);
   });
 });
 
@@ -1835,7 +1841,7 @@ describe("the removed amber async border", () => {
     const rule = declarationsOf('.bubble.final-response:not([data-variant="thinking"])');
 
     // Assert — green, with nothing amber able to outrank it on settle.
-    expect(rule).toMatch(/border-color:\s*var\(--final-response\)/);
+    expect(rule).toContain(FINAL_BORDER);
   });
 });
 
@@ -2915,11 +2921,25 @@ describe("the response border ladder", () => {
     expect(rule).toContain(INTERIM_BORDER);
   });
 
-  it("draws the pear edge at half strength, so it reads thinner than every other bubble border", () => {
+  it("draws the response edges at half strength, so they read thinner than every other bubble border", () => {
     // Arrange / Act
-    const strengths = [...stylesheet.matchAll(/--interim-response-border-strength:\s*([0-9.]+)%/g)].map((m) => Number(m[1]));
+    const strengths = [...stylesheet.matchAll(/--response-border-strength:\s*([0-9.]+)%/g)].map((m) => Number(m[1]));
     // Assert — one value, shared by both themes, at half the hue's strength.
     expect(strengths).toEqual([50]);
+  });
+
+  it("draws the green answer edge exactly as thin as the pear interim edge", () => {
+    // Arrange — every border declaration mixing a hue at a strength.
+    const mixes = [...stylesheet.matchAll(/border-color:\s*color-mix\(in srgb, var\((--[a-z-]+)\) var\((--[a-z-]+)\), transparent\)/g)];
+    const strengthOf = (hue: string): string[] => mixes.filter((m) => m[1] === hue).map((m) => m[2]);
+
+    // Act
+    const pear = strengthOf("--interim-response-border");
+    const green = strengthOf("--final-response");
+
+    // Assert — both hues ride the one shared strength token, so neither drifts heavier.
+    expect(pear).toEqual(["--response-border-strength"]);
+    expect(green).toEqual(["--response-border-strength"]);
   });
 
   it("defines the pear border in both themes", () => {
@@ -2933,7 +2953,7 @@ describe("the response border ladder", () => {
     // Arrange / Act
     const rule = declarationsOf('.bubble.final-response:not([data-variant="thinking"])');
     // Assert
-    expect(rule).toMatch(/border-color:\s*var\(--final-response\)/);
+    expect(rule).toContain(FINAL_BORDER);
   });
 
   it("draws no bubble for a turn that ended abnormally: its outcome marker replaced it (owner ruling 2026-10-06)", () => {
