@@ -172,6 +172,7 @@ func TestARateLimitVerdictIsSharedAcrossTheAccount(t *testing.T) {
 	bindOther(t, h)
 	h.r.SetAccount(testWS, personalRoot)
 	h.r.SetAccount(otherWS, personalRoot)
+	h.r.OnSessionUpdate(testWS, usageSample(30, 20, instant.UnixMilli()))
 
 	// Act
 	h.r.OnSessionUpdate(testWS, rateLimitStatus(fiveHourWindow(), 30, 5*time.Hour))
