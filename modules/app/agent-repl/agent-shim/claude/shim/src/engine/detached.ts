@@ -118,6 +118,22 @@ export class LiveWorkTable {
   private readonly entries = new Map<string, LiveWorkEntry>();
 
   /**
+   * @param livenessChanged told whenever the live set goes from empty to
+   *   holding work or back (the keep-alive cadence spares live work, see
+   *   engine/keepalive.ts). Every public mutator runs through {@link observe},
+   *   so no path that moves the set can miss telling it.
+   */
+  constructor(private readonly livenessChanged: () => void = () => {}) {}
+
+  /** Run one mutation, and tell {@link livenessChanged} when it flipped whether anything is live. */
+  private observe<T>(mutate: () => T): T {
+    const wasEmpty = this.entries.size === 0;
+    const result = mutate();
+    if (wasEmpty !== (this.entries.size === 0)) this.livenessChanged();
+    return result;
+  }
+
+  /**
    * Work that started in the FOREGROUND and has not moved: known, never live.
    * Insertion-ordered, so the bound forgets the oldest first.
    */
@@ -154,6 +170,10 @@ export class LiveWorkTable {
 
   /** A task began: the one moment the id, the call and the kind are all stated. */
   onTaskStarted(message: SdkTaskStartedMessage, turnId?: string): LiveWorkEntry {
+    return this.observe(() => this.onTaskStartedUnobserved(message, turnId));
+  }
+
+  private onTaskStartedUnobserved(message: SdkTaskStartedMessage, turnId?: string): LiveWorkEntry {
     const entry: LiveWorkEntry = {
       taskId: message.task_id,
       description: message.description,
@@ -193,6 +213,10 @@ export class LiveWorkTable {
 
   /** A patch to one task. Unknown ids are ignored, loudly. */
   onTaskUpdated(message: SdkTaskUpdatedMessage): LiveWorkEntry | undefined {
+    return this.observe(() => this.onTaskUpdatedUnobserved(message));
+  }
+
+  private onTaskUpdatedUnobserved(message: SdkTaskUpdatedMessage): LiveWorkEntry | undefined {
     const held = this.foreground.get(message.task_id);
     if (held !== undefined) return this.onForegroundUpdated(held, message);
     const existing = this.entries.get(message.task_id);
@@ -247,6 +271,10 @@ export class LiveWorkTable {
    * foreground task it names becomes live detached work.
    */
   onToolResult(structured: unknown): LiveWorkEntry | undefined {
+    return this.observe(() => this.onToolResultUnobserved(structured));
+  }
+
+  private onToolResultUnobserved(structured: unknown): LiveWorkEntry | undefined {
     const taskId = resultBackgroundTaskId(structured);
     if (taskId === undefined) return undefined;
     const held = this.foreground.get(taskId);
@@ -296,6 +324,10 @@ export class LiveWorkTable {
 
   /** A task concluded. Its terminal fact is the vendor's; the entry leaves the set. */
   onTaskNotification(message: SdkTaskNotificationMessage): LiveWorkEntry | undefined {
+    return this.observe(() => this.onTaskNotificationUnobserved(message));
+  }
+
+  private onTaskNotificationUnobserved(message: SdkTaskNotificationMessage): LiveWorkEntry | undefined {
     if (this.foreground.delete(message.task_id)) {
       // NOTHING RETIRES: the work was never announced, so there is no handle a
       // consumer could still be holding.
@@ -324,6 +356,10 @@ export class LiveWorkTable {
    * are created with what the level states and nothing invented.
    */
   onLevel(message: SdkBackgroundTasksChangedMessage): void {
+    return this.observe(() => this.onLevelUnobserved(message));
+  }
+
+  private onLevelUnobserved(message: SdkBackgroundTasksChangedMessage): void {
     const next = new Map<string, LiveWorkEntry>();
     for (const task of message.tasks) {
       // A LEVEL NAMES ONLY BACKGROUND WORK, so a held foreground task it names
@@ -363,6 +399,10 @@ export class LiveWorkTable {
    * per-process, and the next process states its own from empty.
    */
   clear(why: string): void {
+    return this.observe(() => this.clearUnobserved(why));
+  }
+
+  private clearUnobserved(why: string): void {
     const live = this.entries.size;
     for (const entry of this.entries.values()) this.retire(entry);
     this.entries.clear();
