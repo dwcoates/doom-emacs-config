@@ -105,19 +105,6 @@ const GracefulKillBound = DefaultKillGrace + EscalationBound
 // instead of a caller that never returns.
 const DefaultAdoptBound = 10 * time.Second
 
-// DeathVerdictBudget is how long a call or open that failed at the transport
-// waits for this client's own verdict on whether the shim died.
-//
-// THE RACE IT CLOSES. A SIGKILLed shim's socket reaches EOF the moment the
-// kernel tears the process down, and the reaper's cmd.Wait returns on the
-// SIGCHLD that follows; a call in flight sees the EOF first about as often as
-// not. Recorded on the spot, the failure was a second ERROR for the one death
-// `daemon.shimclient.exit` already records ("shim stream refused ...
-// unexpected EOF"). The wait ends the instant the verdict lands; the budget is
-// only how long a link that broke under a LIVE shim delays its ERROR, and it
-// is far above a reap, which lands within milliseconds of the EOF.
-const DeathVerdictBudget = 500 * time.Millisecond
-
 // client is one shim connection AND, when it spawned the process, its
 // supervisor. Adopted clients have no cmd: they supervise the LINK only, and
 // their death evidence is the socket plus the workspace lock.
@@ -225,13 +212,9 @@ type client struct {
 	attribution *KillAttribution
 	exitInfo    *ExitInfo
 
-	// deathVerdictBudget is DeathVerdictBudget; a field so a test of the
-	// live-shim branch need not sit through it.
-	deathVerdictBudget time.Duration
-	// awaitingDeathVerdict, when set, is called as a failed call begins
-	// waiting for the death verdict: the seam a test publishes the exit
-	// through, so the "EOF first, verdict second" order is staged, not timed.
-	awaitingDeathVerdict func()
+	// processExiting reads whether a pid's process has begun exiting
+	// (procExiting); a field so a test stages a dying or a live shim.
+	processExiting func(pid int) (bool, error)
 }
 
 // newClient builds an unstarted client for one shim socket.
@@ -261,8 +244,7 @@ func newClient(log dlog.Logger, ws ids.WorkspaceID, udsPath string, back backoff
 		dead:            make(chan struct{}),
 		monitorCtx:      ctx,
 		cancelMonitor:   cancel,
-
-		deathVerdictBudget: DeathVerdictBudget,
+		processExiting:  procExiting,
 	}
 }
 
@@ -1030,51 +1012,56 @@ func shimDied(err error) error {
 }
 
 // diedUnder answers whether a call's transport failure was the shim dying:
-// only an `unavailable` failure can be, and only once this client has decided
-// the process exited. A failure that arrived ahead of the verdict waits for
-// it, on the client's own death signal, for at most deathVerdictBudget or the
-// caller's context.
-//
-// It also answers how long the verdict was waited for, which every record of
-// an attributed failure carries: it is the measurement DeathVerdictBudget is
-// sized against.
-func (c *client) diedUnder(ctx context.Context, err error) (ExitInfo, time.Duration, bool) {
+// only an `unavailable` failure can be, and only when Died says so.
+func (c *client) diedUnder(err error) (ExitInfo, bool) {
 	if connect.CodeOf(err) != connect.CodeUnavailable {
-		return ExitInfo{}, 0, false
+		return ExitInfo{}, false
 	}
-	return c.AwaitDeath(ctx)
+	return c.Died()
 }
 
-// AwaitDeath answers whether the shim died, waiting for this client's own
-// verdict when it is not in yet. See Client.AwaitDeath.
-func (c *client) AwaitDeath(ctx context.Context) (ExitInfo, time.Duration, bool) {
+// Died answers whether the shim has died or is dying, from the process's own
+// state at this instant. It never waits. See Client.Died.
+//
+// THE KERNEL ORDERS IT. An exiting process is marked exiting before its
+// descriptors are closed, so by the time a call or stream reads the EOF of a
+// shim's death, the process already reads exiting (or zombie, or gone). The
+// reap that publishes the exit can land later, under load seconds later; the
+// verdict does not wait for it. A pid this client does not know, or a state
+// it cannot read, decides nothing: the break stays the caller's to report,
+// and an unreadable state is recorded at ERROR.
+func (c *client) Died() (ExitInfo, bool) {
 	if info, ok := c.Reaped(); ok {
-		return info, 0, true
+		return info, true
 	}
-	if c.awaitingDeathVerdict != nil {
-		c.awaitingDeathVerdict()
+	pid := c.PID()
+	if pid <= 0 {
+		return ExitInfo{}, false
 	}
-	began := time.Now()
-	budget := time.NewTimer(c.deathVerdictBudget)
-	defer budget.Stop()
-	select {
-	case <-c.dead:
-	case <-budget.C:
-	case <-ctx.Done():
+	exiting, err := c.processExiting(pid)
+	if err != nil {
+		c.log.Error("daemon.shimclient.exit", "could not read whether the shim's process is exiting; a break is not attributed to its death", dlog.Context{
+			"workspace_id": string(c.ws), "pid": pid, "error": err.Error(),
+		})
+		return ExitInfo{}, false
 	}
-	// Read the verdict whichever case won: the death itself ends the
-	// client's supervision context, so its two signals land together.
-	info, ok := c.Reaped()
-	return info, time.Since(began), ok
+	if !exiting {
+		return ExitInfo{}, false
+	}
+	return ExitInfo{
+		PID:      pid,
+		Code:     -1,
+		Inferred: true,
+		Stderr:   "the shim's process is exiting; its exit is recorded by daemon.shimclient.exit once reaped",
+	}, true
 }
 
 // deathFields states the exit a failure is attributed to.
-func deathFields(fields dlog.Context, info ExitInfo, waited time.Duration) dlog.Context {
+func deathFields(fields dlog.Context, info ExitInfo) dlog.Context {
 	fields["cause"] = "the shim died"
 	fields["pid"] = info.PID
 	fields["code"] = info.Code
 	fields["signal"] = info.Signal
-	fields["verdict_wait_ms"] = float64(waited.Microseconds()) / 1000
 	return fields
 }
 
@@ -1301,17 +1288,17 @@ func (c *client) monitor(stream Stream[*shimv1.WatchSessionResponse], frames <-c
 		if c.exitedAlready() || ctx.Err() != nil {
 			return
 		}
-		// A SPAWNED SHIM'S DEATH IS DECIDED BY ITS REAP, which a SIGKILL's
-		// EOF routinely outruns. The break is that death's effect, and the
-		// death is recorded once, by daemon.shimclient.exit: so the reap is
-		// waited for before the break is called a severed link. An ADOPTED
-		// shim's death is decided by the redial below, so it is not waited
-		// for here.
+		// A SPAWNED SHIM'S BREAK IS READ AGAINST ITS PROCESS (Died): a
+		// SIGKILL's EOF routinely outruns the reap, but never the process
+		// being marked exiting. A break the death caused is that death's
+		// effect, recorded once by daemon.shimclient.exit, so it is not
+		// called a severed link. An ADOPTED shim's death is published by the
+		// redial below (witnessAdoptedDeath), so its break climbs the ladder.
 		if c.spawned() {
-			if info, waited, died := c.AwaitDeath(ctx); died {
+			if info, died := c.Died(); died {
 				c.log.Info("daemon.shimclient.redial", "the liveness stream ended because the shim died; the death is recorded by daemon.shimclient.exit", deathFields(dlog.Context{
 					"uds": c.udsPath, "error": errText(broke),
-				}, info, waited))
+				}, info))
 				return
 			}
 			if ctx.Err() != nil {
@@ -1355,7 +1342,7 @@ func (c *client) monitor(stream Stream[*shimv1.WatchSessionResponse], frames <-c
 			if info, ok := c.Reaped(); ok {
 				c.log.Info("daemon.shimclient.redial", "the redial ladder ended because the shim died; the death is recorded by daemon.shimclient.exit", deathFields(dlog.Context{
 					"uds": c.udsPath, "error": err.Error(),
-				}, info, 0))
+				}, info))
 				return
 			}
 			c.log.Warn("daemon.shimclient.redial", "redial stopped", c.standDownFields(dlog.Context{
@@ -1777,8 +1764,8 @@ func unary[Req any, Resp any](
 		}
 		// A CALL THE SHIM'S DEATH CUT IS NOT A SECOND FAULT: the death is
 		// recorded once, by daemon.shimclient.exit, and this is its effect.
-		if info, waited, died := c.diedUnder(ctx, err); died {
-			c.log.Info(operation, "the shim call failed because the shim died; the death is recorded by daemon.shimclient.exit", deathFields(fields, info, waited))
+		if info, died := c.diedUnder(err); died {
+			c.log.Info(operation, "the shim call failed because the shim died; the death is recorded by daemon.shimclient.exit", deathFields(fields, info))
 			return nil, shimDied(err)
 		}
 		c.log.Error(operation, "shim call failed", fields)
@@ -1852,8 +1839,8 @@ func (c *client) refusedOpen(ctx context.Context, verb string, err error) error 
 	}
 	// AN OPEN THE SHIM'S DEATH CUT IS NOT A REFUSAL. The shim never answered;
 	// its process ended, which daemon.shimclient.exit records once.
-	if info, waited, died := c.diedUnder(ctx, err); died {
-		c.log.Info(operation, "the stream open failed because the shim died; the death is recorded by daemon.shimclient.exit", deathFields(fields, info, waited))
+	if info, died := c.diedUnder(err); died {
+		c.log.Info(operation, "the stream open failed because the shim died; the death is recorded by daemon.shimclient.exit", deathFields(fields, info))
 		refused.Err = shimDied(err)
 		return refused
 	}
