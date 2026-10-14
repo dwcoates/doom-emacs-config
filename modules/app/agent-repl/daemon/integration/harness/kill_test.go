@@ -110,14 +110,7 @@ func TestReapStraysSparesATestOwnedProcess(t *testing.T) {
 			// Arrange: a child whose argv carries the state directory, the
 			// same way the store's and the sidecar's --log paths do.
 			stateDir := t.TempDir()
-			cmd := exec.Command("/bin/sh", "-c", "while :; do sleep 1; done # --log "+stateDir+"/logs/x.log")
-			if err := cmd.Start(); err != nil {
-				t.Fatalf("start child: %v", err)
-			}
-			t.Cleanup(func() {
-				_ = cmd.Process.Kill()
-				_ = cmd.Wait()
-			})
+			cmd := standIn(t, sleepLoop+" # --log "+stateDir+"/logs/x.log")
 			if tc.spare {
 				SpareFromStrayReaping(t, cmd.Process.Pid)
 			}
@@ -139,6 +132,37 @@ func TestReapStraysSparesATestOwnedProcess(t *testing.T) {
 			}
 		})
 	}
+}
+
+// sleepLoop is a stand-in shell's loop: it always has a `sleep 1` running.
+const sleepLoop = "while :; do /bin/sleep 1; done"
+
+// standIn starts the shell script (with args as $0...) in a process group of
+// its own, and kills the whole group at cleanup, before reaping its leader.
+//
+// KILLING THE SHELL ALONE ORPHANED ITS LOOP'S `sleep 1`, which outlived the
+// test: the test runner's last reap found one still running out of a harness
+// run root (2026-10-14). The group dies whole, and it is killed while the
+// unreaped leader still holds the group id, so no stranger can be signalled.
+func standIn(t *testing.T, script string, args ...string) *exec.Cmd {
+	t.Helper()
+	return standInTo(t, nil, script, args...)
+}
+
+// standInTo is standIn with the shell's stdout on out.
+func standInTo(t *testing.T, out *os.File, script string, args ...string) *exec.Cmd {
+	t.Helper()
+	cmd := exec.Command("/bin/sh", append([]string{"-c", script}, args...)...)
+	cmd.Stdout = out
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start the stand-in %q: %v", script, err)
+	}
+	t.Cleanup(func() {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		_ = cmd.Wait()
+	})
+	return cmd
 }
 
 // groupUnderKill starts a stand-in for the daemon: a shell leading its own
@@ -299,20 +323,15 @@ func TestKillLeavesTheLeaderNoInstantToObserveAMemberTheStopDidNotHold(t *testin
 // respawner reports its next child and answers that child's pid.
 func respawningStray(t *testing.T, stateDir string) (*exec.Cmd, int, func() int) {
 	t.Helper()
-	script := `while :; do /bin/sh -c 'while :; do /bin/sleep 1; done' "$0/child" & echo $!; wait $!; done`
-	cmd := exec.Command("/bin/sh", "-c", script, stateDir)
-	out, err := cmd.StdoutPipe()
+	script := `while :; do /bin/sh -c '` + sleepLoop + `' "$0/child" & echo $!; wait $!; done`
+	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("stdout: %v", err)
 	}
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start the respawner: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-	})
-	pids := bufio.NewReader(out)
+	cmd := standInTo(t, w, script, stateDir)
+	w.Close()
+	t.Cleanup(func() { r.Close() })
+	pids := bufio.NewReader(r)
 	next := func() int {
 		t.Helper()
 		line, err := pids.ReadString('\n')
@@ -441,22 +460,14 @@ func TestLeakedStrays(t *testing.T) {
 		{
 			name: "a running process naming the state directory is a leak",
 			arrange: func(t *testing.T, stateDir string) {
-				cmd := exec.Command("/bin/sh", "-c", "while :; do /bin/sleep 1; done", stateDir+"/sock/s.sock")
-				if err := cmd.Start(); err != nil {
-					t.Fatalf("start: %v", err)
-				}
-				t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+				standIn(t, sleepLoop, stateDir+"/sock/s.sock")
 			},
 			wantLeaked: true,
 		},
 		{
 			name: "an exited, unreaped process naming the state directory is not a leak",
 			arrange: func(t *testing.T, stateDir string) {
-				cmd := exec.Command("/bin/sh", "-c", "while :; do /bin/sleep 1; done", stateDir+"/sock/s.sock")
-				if err := cmd.Start(); err != nil {
-					t.Fatalf("start: %v", err)
-				}
-				t.Cleanup(func() { _ = cmd.Wait() })
+				cmd := standIn(t, sleepLoop, stateDir+"/sock/s.sock")
 				if err := cmd.Process.Kill(); err != nil {
 					t.Fatalf("SIGKILL: %v", err)
 				}
@@ -632,5 +643,52 @@ func TestKillStoppedEndsAStoppedProcess(t *testing.T) {
 	}
 	if err := WaitProcessExit(ctx, cmd.Process.Pid); err != nil {
 		t.Fatalf("the stopped process did not exit: %v", err)
+	}
+}
+
+func TestStandInDiesWithItsWholeGroup(t *testing.T) {
+	// Arrange: a stand-in whose child is running when the test ends.
+	var child int
+	t.Run("stand-in", func(t *testing.T) {
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer r.Close()
+		standInTo(t, w, "/bin/sleep 100 & echo $!; wait")
+		w.Close()
+		line, err := bufio.NewReader(r).ReadString('\n')
+		if err != nil {
+			t.Fatalf("read the child's pid: %v", err)
+		}
+		if child, err = strconv.Atoi(strings.TrimSpace(line)); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	// Act: the subtest's cleanup has run.
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
+	defer cancel()
+
+	// Assert.
+	if err := WaitProcessExit(ctx, child); err != nil {
+		t.Fatalf("the stand-in's child %d outlived its test: %v", child, err)
+	}
+}
+
+func TestEveryLoopingStandInIsStartedByStandIn(t *testing.T) {
+	// Arrange.
+	src, err := os.ReadFile("kill_test.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act: shells started by hand, outside standInTo and groupUnderKill.
+	byHand := strings.Count(string(src), "exec.Command("+`"/bin/sh"`)
+
+	// Assert: standInTo, groupUnderKill and the reaped-flag table, which
+	// leaves its group to the Kill under test.
+	if byHand != 3 {
+		t.Fatalf("kill_test.go starts %d shells by hand, want 3: start a looping stand-in with standIn", byHand)
 	}
 }
