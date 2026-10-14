@@ -361,7 +361,7 @@ func (o *orchestrator) recoverResumable(ctx context.Context, repo wsm.RepoKey, l
 	// resumed run's first word.
 	label := branchLabel(doc.Subject.Branch, doc.Subject.subject().targetLabel())
 	o.publishHead(ws, lease.ID, label, doc.StartedMS, nil)
-	o.publish(ws, doc.Facts.footerFacts(o.deps.Now()))
+	o.publish(ws, doc.footerFacts(o.deps.Now()))
 	// THE RUN LOG CARRIES IT TOO: a merge resumed is a fact about the
 	// restart, and the durable run log is where a boot sequence is read.
 	fields := dlog.Context{"workspace": string(ws), "repo": string(repo), "lease": string(lease.ID), "step": doc.Step,

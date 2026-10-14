@@ -80,7 +80,7 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 			Workspace: &workspacev1.WorkspaceRef{Id: string(rec.ID), Dir: rec.Dir}},
 		Name:    &frontendv1.RosterRowName{Text: rec.Name},
 		Current: &frontendv1.RosterRowCurrent{Current: current},
-		When:    when(rec, r.footer.TurnClock(rec.ID)),
+		When:    when(rec, r.footer.MergeStartedAt(rec.ID), r.footer.TurnClock(rec.ID)),
 		Detail:  detail(rec, s.summary),
 		Closed:  &frontendv1.RosterRowClosed{Closed: closed},
 		// ALWAYS SET: an editor opens the workspace only once this leaves
@@ -197,14 +197,22 @@ func recedes(rec wsm.Workspace, session *wsm.Session) bool {
 //
 // Precedence: MERGED WINS (that the workspace is done is the more interesting
 // fact), else HIDDEN (a hidden row counts from its hide, owner request
-// 2026-10-13), else the TURN CLOCK the workspace's footer strip shows (owner
-// request, 2026-10-13): a running turn counts from the clock's own start
-// instant, so the row and the strip read the same duration, and a workspace
-// with no turn running draws "0s". The clock is the footer's PUBLISHED one
-// (footer.Resolver.TurnClock), never a turn this resolver keeps for itself,
-// so the two cannot disagree; a clock with a start and an end is the last
-// turn's, frozen, and no turn is running.
-func when(rec wsm.Workspace, clock *frontendv1.FooterClock) *frontendv1.RosterRowWhen {
+// 2026-10-13), else a SYNC MERGE the workspace's footer strip draws (owner
+// request, 2026-10-14), counted from when it joined the queue, else the TURN
+// CLOCK the strip shows (owner request, 2026-10-13): a running turn counts
+// from the clock's own start instant, so the row and the strip read the same
+// duration, and a workspace with no turn running draws "0s".
+//
+// THE MERGE OUTRANKS THE TURN: the turns a merge runs (its prompts, conflict
+// resolution, fixing) are the merge's work, so the row counts the whole merge
+// rather than restarting at each of them.
+//
+// Both instants are the footer's PUBLISHED ones (footer.Resolver's
+// MergeStartedAt and TurnClock), never state this resolver keeps for itself,
+// so the row and the strip cannot disagree; a clock with a start and an end
+// is the last turn's, frozen, and no turn is running. An async merge's
+// requester is never told its merge, so its row keeps its turn clock.
+func when(rec wsm.Workspace, mergeStartedAt *int64, clock *frontendv1.FooterClock) *frontendv1.RosterRowWhen {
 	out := &frontendv1.RosterRowWhen{}
 	switch {
 	case rec.MergedAt != nil:
@@ -218,6 +226,9 @@ func when(rec wsm.Workspace, clock *frontendv1.FooterClock) *frontendv1.RosterRo
 			hidden.Cache = &frontendv1.RosterRowWhenHiddenCache{LapsesAtMs: rec.CacheLapse.LapsesAt.UnixMilli()}
 		}
 		out.Shown = &frontendv1.RosterRowWhen_Hidden{Hidden: hidden}
+	case mergeStartedAt != nil:
+		out.Shown = &frontendv1.RosterRowWhen_SyncMerging{
+			SyncMerging: &frontendv1.RosterRowWhenSyncMerging{StartedAtMs: *mergeStartedAt}}
 	case clock.TurnStartedAtMs != nil && clock.TurnEndedAtMs == nil:
 		out.Shown = &frontendv1.RosterRowWhen_TurnRunning{
 			TurnRunning: &frontendv1.RosterRowWhenTurnRunning{StartedAtMs: *clock.TurnStartedAtMs}}
