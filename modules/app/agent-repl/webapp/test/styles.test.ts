@@ -54,10 +54,7 @@ function selectorsSuppressingSelection(css: string): string[] {
 const responseBorder = (hue: string): string =>
   `border-color: color-mix(in srgb, var(${hue}) var(--response-border-strength), transparent)`;
 
-/** The settled mid-turn response's border: the pear hue at its drawn strength. */
-const INTERIM_BORDER = responseBorder("--interim-response-border");
-
-/** The turn's answer's border: the green hue at the same drawn strength as the pear. */
+/** The turn's answer's border: the green hue at its drawn strength. */
 const FINAL_BORDER = responseBorder("--final-response");
 
 describe("the stylesheet's selectability contract", () => {
@@ -1789,12 +1786,12 @@ describe("the thinking bubble", () => {
     expect(borders).toEqual([]);
   });
 
-  it("keeps the pear on a settled mid-turn response", () => {
+  it("gives a settled mid-turn response no border", () => {
     // Arrange / Act
-    const borders = bordersOn(responseBubble("response", "success"), ["assistant"]);
+    const borders = bordersOn(responseBubble("response", "success"), ["assistant", "interim-response"]);
 
-    // Assert
-    expect(borders).toEqual([INTERIM_BORDER]);
+    // Assert — none: it keeps the base's transparent 0.3px reservation.
+    expect(borders).toEqual([]);
   });
 
   it("keeps the green on the turn's answer", () => {
@@ -1805,18 +1802,20 @@ describe("the thinking bubble", () => {
     expect(borders).toEqual([FINAL_BORDER]);
   });
 
-  it("keeps the pear and green at the base's reserved thickness", () => {
-    // Arrange / Act — neither rule sets a width or a `border` shorthand; both
-    // change only the COLOR of the base `.bubble { border: 0.3px solid transparent }`.
-    const pear = declarationsOf('.bubble[data-variant="response"][data-state="success"]:not(.final-response)') ?? "";
+  it("keeps the green at the base's reserved thickness", () => {
+    // Arrange / Act — the rule sets no width or `border` shorthand; it
+    // changes only the COLOR of the base `.bubble { border: 0.3px solid transparent }`.
     const green = declarationsOf('.bubble.final-response:not([data-variant="thinking"])') ?? "";
 
     // Assert
-    for (const decls of [pear, green]) {
-      expect(decls).not.toMatch(/border-width/);
-      expect(decls).not.toMatch(/(?:^|[\s;])border\s*:/);
-      expect(decls).toMatch(/border-color/);
-    }
+    expect(green).not.toMatch(/border-width/);
+    expect(green).not.toMatch(/(?:^|[\s;])border\s*:/);
+    expect(green).toMatch(/border-color/);
+  });
+
+  it("carries no interim-response-border token any more", () => {
+    // Arrange / Act / Assert — the retired pear is defined in neither theme.
+    expect(stylesheet).not.toMatch(/--interim-response-border\s*:/);
   });
 
   it("carries no thinking-border token any more", () => {
@@ -2879,8 +2878,8 @@ describe("the warning chip as the one error surface", () => {
 });
 
 /**
- * THE BORDER LADDER (owner ruling, 2026-09-23): a settled mid-turn response is
- * pear and the turn's answer stays green; thinking wears no border at all.
+ * THE BORDER LADDER: the turn's answer stays green; a settled mid-turn
+ * response (owner request, 2026-10-14) and thinking wear no border at all.
  */
 describe("the expanded response's eggshell border", () => {
   /** The one rule that paints it. */
@@ -2916,7 +2915,7 @@ describe("the expanded response's eggshell border", () => {
 
   const RESPONSES = [
     ["a streaming response", { "data-role": "response", "data-variant": "response" }, []],
-    ["an interim response (pear)", { "data-role": "response", "data-variant": "response", "data-state": "success" }, []],
+    ["an interim response", { "data-role": "response", "data-variant": "response", "data-state": "success" }, []],
     ["the turn's answer (green)", { "data-role": "response", "data-variant": "response", "data-state": "success" }, ["final-response"]],
     ["an agentic card", { "data-role": "response", "data-variant": "agentic" }, []],
     ["a compaction summary", { "data-role": "response", "data-variant": "compaction" }, []],
@@ -3036,33 +3035,6 @@ describe("the expanded response's eggshell border", () => {
 });
 
 describe("the response border ladder", () => {
-  /** The hue, in degrees, of every `NAME: #rrggbb` declaration, in sheet order (light, then dark). */
-  function huesOf(name: string): number[] {
-    const re = new RegExp(`--${name}:\\s*#([0-9a-fA-F]{6})`, "g");
-    return [...stylesheet.matchAll(re)].map((m) =>
-      hueOf([0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16)) as [number, number, number]),
-    );
-  }
-
-  it("runs monotonically toward green in both themes: interim, then the answer", () => {
-    // Arrange / Act
-    const interim = huesOf("interim-response-border");
-    const answer = huesOf("final-response");
-    // Assert — one light and one dark value each, and the hue climbs from
-    // yellow-leaning pear to green in each theme.
-    expect([interim.length, answer.length]).toEqual([2, 2]);
-    for (const theme of [0, 1]) {
-      expect(interim[theme]).toBeLessThan(answer[theme]);
-    }
-  });
-
-  it("paints a settled mid-turn response pear", () => {
-    // Arrange / Act
-    const rule = declarationsOf('.bubble[data-variant="response"][data-state="success"]:not(.final-response)');
-    // Assert
-    expect(rule).toContain(INTERIM_BORDER);
-  });
-
   it("draws the response edges at half strength, so they read thinner than every other bubble border", () => {
     // Arrange / Act
     const strengths = [...stylesheet.matchAll(/--response-border-strength:\s*([0-9.]+)%/g)].map((m) => Number(m[1]));
@@ -3070,25 +3042,16 @@ describe("the response border ladder", () => {
     expect(strengths).toEqual([50]);
   });
 
-  it("draws the green answer edge exactly as thin as the pear interim edge", () => {
+  it("draws the green answer edge on the shared strength token", () => {
     // Arrange — every border declaration mixing a hue at a strength.
     const mixes = [...stylesheet.matchAll(/border-color:\s*color-mix\(in srgb, var\((--[a-z-]+)\) var\((--[a-z-]+)\), transparent\)/g)];
     const strengthOf = (hue: string): string[] => mixes.filter((m) => m[1] === hue).map((m) => m[2]);
 
     // Act
-    const pear = strengthOf("--interim-response-border");
     const green = strengthOf("--final-response");
 
-    // Assert — both hues ride the one shared strength token, so neither drifts heavier.
-    expect(pear).toEqual(["--response-border-strength"]);
-    expect(green).toEqual(["--response-border-strength"]);
-  });
-
-  it("defines the pear border in both themes", () => {
-    // Arrange / Act
-    const matches = stylesheet.match(/--interim-response-border:\s*#[0-9a-fA-F]{6}/g) ?? [];
     // Assert
-    expect(matches.length).toBe(2);
+    expect(green).toEqual(["--response-border-strength"]);
   });
 
   it("keeps the turn's answer green", () => {
@@ -3549,44 +3512,6 @@ function rgbOf(block: string, token: string): [number, number, number] {
   if (hex === undefined) throw new Error(`no six-digit ${token} in the block`);
   return [0, 2, 4].map((i) => Number.parseInt(hex.slice(i, i + 2), 16)) as [number, number, number];
 }
-
-/** An RGB triple's hue in degrees, 0 to 360. */
-const hueOf = ([r, g, b]: [number, number, number]): number => {
-  const [max, min] = [Math.max(r, g, b), Math.min(r, g, b)];
-  if (max === min) throw new Error("an achromatic color has no hue");
-  const raw =
-    max === r ? (g - b) / (max - min) : max === g ? (b - r) / (max - min) + 2 : (r - g) / (max - min) + 4;
-  return (raw * 60 + 360) % 360;
-};
-
-describe("hueOf", () => {
-  it.each([
-    ["red", [255, 0, 0], 0],
-    ["chartreuse", [127, 255, 0], 90],
-    ["green", [0, 255, 0], 120],
-    ["blue", [0, 0, 255], 240],
-    ["a red leaning blue", [255, 0, 51], 348],
-  ] as const)("puts %s at its hue", (_name, rgb, expected) => {
-    // Arrange / Act
-    const hue = hueOf([...rgb]);
-    // Assert
-    expect(hue).toBeCloseTo(expected, 0);
-  });
-
-  it("throws on an achromatic grey", () => {
-    // Arrange / Act / Assert
-    expect(() => hueOf([128, 128, 128])).toThrow("an achromatic color has no hue");
-  });
-
-  it("is the one hue computation in the suite", () => {
-    // Arrange
-    const source = readFileSync(fileURLToPath(import.meta.url), "utf8");
-    // Act — every hand-rolled green-sextant branch of a hue formula.
-    const sextants = source.match(/max === g \? \(b - r\)/g) ?? [];
-    // Assert
-    expect(sextants).toHaveLength(1);
-  });
-});
 
 /**
  * THE HELD PROMPT SHARES THE RESPONSE BUBBLE'S FILL (owner ruling,
@@ -4149,7 +4074,7 @@ describe("the tool card's command grey", () => {
  * THE PAGE-COLORED FILL (owner request, 2026-10-08): a thinking bubble and an
  * interim response are filled with the page's own `--bg`, so the bubble's
  * background is not there in either theme; every other response keeps the
- * purple, and the interim keeps its pear border.
+ * purple.
  */
 /** A bubble variant's selector. */
 const variantSelector = (variant: string): string => `.bubble[data-variant="${variant}"]`;
@@ -4206,14 +4131,6 @@ describe("the page-colored fill", () => {
 
     // Assert
     expect(got).toBe("var(--assistant)");
-  });
-
-  it("keeps the pear border on a settled interim response", () => {
-    // Arrange / Act
-    const borders = bordersOn({ "data-role": "response", "data-variant": "response", "data-state": "success" }, ["assistant", "interim-response"]);
-
-    // Assert
-    expect(borders).toEqual([INTERIM_BORDER]);
   });
 
   it("paints the page itself with the same background token", () => {
