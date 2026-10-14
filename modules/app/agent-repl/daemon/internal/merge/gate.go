@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -130,10 +128,7 @@ func (r *run) gate(ctx context.Context, round tabRound, tip, head string, adm *g
 	if err := validateSuites(selection.Suites); err != nil {
 		return gateVerdict{}, err
 	}
-	// THE MERGE QUEUE'S RUN GOES FIRST at the host's suite gate
-	// (bin/suite-slot.sh): master does not move while it waits, so it is served
-	// ahead of every ad-hoc run instead of racing them for a freed slot. A
-	// speculative gate (one behind the head) runs niced; see gateArgv.
+	// A speculative gate (one behind the head) runs niced; see gateArgv.
 	argv = gateArgv(append([]string(nil), argv...), speculative)
 	// The FULL selection passes no narrowing: running everything is the
 	// script's own default, and a repository whose script knows no --suites
@@ -289,10 +284,10 @@ type gateRun struct {
 
 	// release gives the governor's permit back.
 	release func()
-	// begun is when the gate began; slotTaken reports that the host's suite
-	// slot was recorded taken (guarded by mu).
-	begun     time.Time
-	slotTaken bool
+	// begun is when the gate began; runnerSeen reports that the test
+	// runner's first line was recorded (guarded by mu).
+	begun      time.Time
+	runnerSeen bool
 
 	mu sync.Mutex
 	// suites are the tab's live rows, in the order the suites started.
@@ -371,7 +366,7 @@ func (g *gateRun) run(ctx context.Context, dir string, argv, selected []string) 
 // moves its tab row and takes the testing step's line, and a unit's verdict
 // or a suite's planned total moves the suite's counts.
 func (g *gateRun) edge(line string) {
-	g.slotEdge(line)
+	g.runnerEdge(line)
 	if name, counted := g.countLine(line); counted {
 		g.mu.Lock()
 		state, started := g.states[name]
@@ -400,38 +395,21 @@ func (g *gateRun) edge(line string) {
 	g.r.publishRun(g.round, g.round.live(), suites, g.link())
 }
 
-// slotLine is bin/suite-slot.sh's line once a run waited for the host's suite
-// slot; a run that did not wait prints none.
-var slotLine = regexp.MustCompile(`suite-slot: slot (\d+) acquired after (\d+)s`)
-
-// slotEdge records, once, the host's suite slot taken: from suite-slot's own
-// line with its wait, or -- a run that did not wait prints none -- from the
-// runner's first line, with no wait.
-func (g *gateRun) slotEdge(line string) {
-	m := slotLine.FindStringSubmatch(line)
-	if m == nil && !strings.Contains(line, testrunPrefix) {
+// runnerEdge records, once, the test runner's first line: the moment the
+// gate's run actually began running suites.
+func (g *gateRun) runnerEdge(line string) {
+	if !strings.Contains(line, testrunPrefix) {
 		return
 	}
 	g.mu.Lock()
-	taken := g.slotTaken
-	g.slotTaken = true
+	seen := g.runnerSeen
+	g.runnerSeen = true
 	g.mu.Unlock()
-	if taken {
+	if seen {
 		return
 	}
-	fields := dlog.Context{"workspace": string(g.r.ws), "round": g.round.n, "since_gate_start_seconds": g.since()}
-	if m != nil {
-		wait, err := strconv.Atoi(m[2])
-		if err != nil {
-			g.r.o.log(context.Background(), g.r.ws).Error("daemon.merge.tests", "the suite slot's wait could not be read", dlog.Context{
-				"workspace": string(g.r.ws), "round": g.round.n, "line": line, "error": err.Error()})
-			return
-		}
-		fields["slot"], fields["wait_seconds"] = m[1], wait
-	} else {
-		fields["wait_seconds"] = 0
-	}
-	g.r.o.log(context.Background(), g.r.ws).Info("daemon.merge.tests", "the merge's test gate took the host's suite slot", fields)
+	g.r.o.log(context.Background(), g.r.ws).Info("daemon.merge.tests", "the merge's test runner began",
+		dlog.Context{"workspace": string(g.r.ws), "round": g.round.n, "since_gate_start_seconds": g.since()})
 }
 
 // testrunPrefix opens every line the test runner itself prints.

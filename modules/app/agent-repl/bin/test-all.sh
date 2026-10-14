@@ -42,10 +42,11 @@
 # --coverage adds Go and vitest instrumentation and reports. Ordinary runs do
 # not pay that cost.
 #
-# The whole suite run holds this host's suite slot (bin/suite-slot.sh),
-# because it fills the machine by design, and runs inside
+# The whole suite run runs at background priority (bin/background.sh), which
+# keeps the owner's live runtime ahead of it, and inside
 # .claude/safe-test-run.sh's git-state net, so a unit that touched the
-# checkout's git state is caught.
+# checkout's git state is caught. No host-wide gate bounds concurrent runs
+# (owner ruling, 2026-10-14).
 #
 # --record ITSELF NEVER RUNS INSIDE THAT NET. `testrun run --record` only
 # STAGES this run's timing rows (to $RUN_TMP, outside the checkout); this
@@ -130,8 +131,7 @@ RECORD_ARGS=()
 [ "$IS_RECORD" -eq 1 ] && RECORD_ARGS=(--record-out "$RECORD_OUT")
 
 set +e
-"$THIS_DIR/suite-slot.sh" \
-    "$REPO_ROOT/.claude/safe-test-run.sh" -- \
+"$REPO_ROOT/.claude/safe-test-run.sh" -- \
     "$TESTRUN" run --module "$MODULE_ROOT" "$@" ${RECORD_ARGS[@]+"${RECORD_ARGS[@]}"}
 RUN_RC=$?
 set -e

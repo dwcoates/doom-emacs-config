@@ -967,15 +967,15 @@ func TestAConflictMetByTheHeadStartingOverIsResolvedByItsOwnSession(t *testing.T
 	}
 }
 
-func TestAGateClaimsTheHostBudgetAtItsClassAndASpeculativeOneRunsNiced(t *testing.T) {
+func TestAGateRunsItsScriptAsIsAndASpeculativeOneRunsNiced(t *testing.T) {
 	// Arrange.
 	tests := []struct {
 		name        string
 		speculative bool
 		want        []string
 	}{
-		{name: "the head", want: []string{"env", "AGENT_REPL_SUITE_PRIORITY=merge", "bash", "s"}},
-		{name: "behind the head", speculative: true, want: []string{"/usr/bin/nice", "-n", "12", "env", "AGENT_REPL_SUITE_PRIORITY=merge", "bash", "s"}},
+		{name: "the head", want: []string{"bash", "s"}},
+		{name: "behind the head", speculative: true, want: []string{"/usr/bin/nice", "-n", "12", "bash", "s"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

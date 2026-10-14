@@ -69,7 +69,7 @@ helper every test entry point goes through.
 
 How each kind of entry point routes through it:
 
-- Every bash test entry point (`test-*.sh`, `test-all.sh`, `suite-slot.sh`,
+- Every bash test entry point (`test-*.sh`, `test-all.sh`,
   the coverage and repeat runners, the `.claude/` test hooks) carries this
   prologue as its FIRST executable line:
   `[[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/background.sh" bash "${BASH_SOURCE[0]}" "$@"`
@@ -137,8 +137,7 @@ is how broad a run is at each moment.
     workspace-merge flow): the queue already runs the full suite as its gate,
     so an agent never runs it again (owner ruling, 2026-10-06).
 - Full runs go through `bin/test-all.sh`, never a hand-assembled set of
-  per-suite commands: the scheduler holds the machine's one suite slot, so two
-  agents' full runs never overlap.
+  per-suite commands: the scheduler sizes and orders the whole run.
 - A SYSTEM'S SUITE IS ITS UNIT AND INTEGRATION TESTS TOGETHER. The roster
   entry carries both (`testrun/roster/roster.go`), so `--suites daemon` runs
   the daemon's packages and its `-tags integration` package
@@ -171,13 +170,13 @@ the path as its FIRST line and again, with the exit status, as its LAST:
 - The run's stderr is merged into the same stream and the same file.
 - `bin/test-test-all.sh` (`orchestrator-harness`) holds the contract.
 
-### Two ad-hoc scheduled runs at a time: `bin/test-all.sh` and `bin/suite-slot.sh`
+### One scheduled run: `bin/test-all.sh`
 
 `bin/test-all.sh` builds `testrun`, which turns the whole roster into one DAG
-and schedules it across `runtime.NumCPU()/2` slots: HALF the machine's cores
-(owner ruling, 2026-10-06), so a run never takes the machine from the owner's
-live runtime, input handling and apps. There is no special case
-for smaller hosts. The planner chooses each suite's chunk count by simulating
+and schedules it across `runtime.NumCPU() - 3` slots: every core but three
+(`cli.HostReserve`, owner ruling 2026-10-14), and the whole run is at nice 19,
+so it always yields the CPU to the owner's live runtime, input handling and
+apps. A host with no core left past the reserve is refused. The planner chooses each suite's chunk count by simulating
 the run against EWMA unit timings in
 `~/.cache/agent-repl/test-history.json`, then assigns the longest remaining
 dependency chain first. Parallelism belongs to this scheduler:
@@ -208,66 +207,13 @@ dependency chain first. Parallelism belongs to this scheduler:
 ordinary and merge-gate runs omit them. `--record` is reserved for the
 canonical post-merge timing run on master.
 
-The WHOLE scheduled run holds `bin/suite-slot.sh`, which allows two at once by
-default (`AGENT_REPL_SUITE_SLOTS`; owner ruling 2026-10-12, it was one). A run
-past that does not go faster: it competes with already machine-filling schedules
-and turns ordinary bounds into noise.
-
-That is not hypothetical. Several agents each running their own suites at once
-took this box to a load average of 253, and the Emacs layer then failed 37 of
-45 scenarios on Doom's boot bound alone — a whole run's evidence thrown away,
-with nothing wrong with the product. So:
-
-```bash
-bin/suite-slot.sh npm test          # from the package dir; wraps, never relocates
-bin/suite-slot.sh go test ./... -count=1
-```
-
-`bin/suite-slot.sh` re-execs itself through `bin/background.sh`, so a command
-it runs is at background priority too.
-
-The gate counts what is actually running, claiming slots as directories via
-`mkdir` (atomic, fails if the name exists), and reclaims a slot whose recorded
-pid is gone. It is the same mechanism as the sandbox's container gate in
-`e2e/sandbox/bin/e2e-sandbox.sh`, for the same reason.
-
-**THE MERGE QUEUE'S GATES TAKE NO SLOT.** A gate runs with
-`AGENT_REPL_SUITE_PRIORITY=merge` and goes straight through, saying so: the two
-merges at the front of the queue race to land on AC power (on battery only
-the head is worked on), taking turns at the tests, and the merge queue's own
-test turn and governor order them. A machine slot on top serialized the two
-racers and once stood the queue's head behind the merge behind it (owner
-ruling, 2026-10-12).
-
-**WAITERS ARE SERVED IN ORDER.** Each waiter takes a ticket in
-`$SLOT_DIR.queue` named `<priority>-<epoch seconds>-<pid>` and claims a freed
-slot only when it is at the front of the line, first come, first served.
-Before this, a freed slot went to whichever 2-second poller woke first. A dead
-waiter's ticket is reaped by its pid, like a dead holder's slot.
-
-**IT NESTS.** A slot is held by a process TREE, so wrapping a script that
-wraps its own children is safe: the holder exports
-`AGENT_REPL_SUITE_SLOT_HELD`, and an inner invocation that sees it runs
-straight through with one line saying so. Without that, `bin/suite-slot.sh
-bin/e2e-repeat.sh ...` deadlocked — every per-run acquisition queued behind the
-outer holder that was waiting for those very runs to finish, 6000s of "still
-waiting" with nothing running.
-
-**ONE MACHINE-WIDE TEST BUDGET** (owner ruling, 2026-10-11). Every run behind the
-gate also claims, with the same atomic `mkdir`, PROCESSOR tokens
-(`core-N`, one per logical processor) and MEMORY tokens (`mem-N`, one GiB each,
-half the machine's memory in all) under the slot directory, and is handed the
-processors it got as `AGENT_REPL_TEST_CPU_BUDGET` -- the parallelism the runner
-sizes itself to, instead of assuming it owns half the machine. The first half
-of the processors, and one RAM disk's memory, are the merge queue HEAD's
-(`AGENT_REPL_SUITE_PRIORITY=head`): nothing else may claim them. A head run
-wants half the machine; every other run a quarter, from the rest, taking what the
-runs before it left. A run's memory is its whole RAM disk
-(`AGENT_REPL_TEST_RAMDISK_MIB`, 8 GiB) or nothing, so three runs never exhaust
-the machine. A run short of memory or of a single processor gives back what it
-claimed and waits; nothing is held while waiting. The merge queue's gates
-(`head`, `speculative`) take no run slot: the daemon bounds them to its queue
-window, and the budget is what they share with every other run.
+NO HOST-WIDE GATE BOUNDS HOW MANY RUNS OVERLAP (owner ruling, 2026-10-14).
+`bin/background.sh` puts every test at nice 19, which keeps the owner's live
+runtime ahead of test load, and the merge queue orders its own gates.
+Contention between test runs is accepted: it slows them, and it never reaches
+the owner's processes. The host suite gate (`bin/suite-slot.sh`) and the
+daemon-suite host flock were removed for that reason; inside one run the flock
+had serialized the run's own integration and e2e processes.
 
 Do NOT gate on the load average instead. It is a decaying mean, so it keeps
 climbing for a minute after the work stops, and every waiter reads the same
@@ -1054,7 +1000,7 @@ like an improvement still needs that conversation. Code:
   queue it would show no longer holds it, and the queue tab's contract has no
   standing for a merge outside the line.
 - **Every gate edge is recorded at INFO with its timing** (`daemon.merge.tests`):
-  its start, the machine's suite slot taken with its wait, the runner's end, the
+  its start, the test runner's first line, the runner's end, the
   verdict with its total, and a cut.
 
 ## A finished branch lands on master at once, with no question asked
@@ -3159,6 +3105,6 @@ and its commit (or the open item). Test-performance lessons also go into the
 `/write-tests` skill; runtime profiling and the perf-sensitive list live in
 `/profile-agent-repl`.
 
-- The machine has ONE suite slot shared by every session's full runs and every merge gate. Gates waited 64-338s for it before any suite started; a load average of 25-95 turned timing-sensitive tests red across unrelated merges (docs/investigations/2026-10-12-merge-queue-latency.md). Run targeted tests while developing and one full run per complete change.
+- Test runs share the machine with no host gate (owner ruling, 2026-10-14); every run is at nice 19. Run targeted tests while developing and one full run per complete change.
 - Direct pushes to master outside the merge queue move the target under gates that already passed, and that work is thrown away; master that is red makes every gate inherit the failure (same report). Land only what was rebased onto master and tested there.
 - Startup: a boot used to hold every workspace's bring-up behind a stale sidecar's restart (29s). Since b438e783b bring-ups run beside it: at the 15:34 hard bounce the daemon served +0.9s, every workspace had its go-ahead +1.8s, all 26 sessions were up 14.6s after the Emacs relaunch (54s at 13:39).
