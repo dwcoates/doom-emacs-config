@@ -377,6 +377,16 @@ func (m MergeSource) validate() error {
 	if (m.Workspace != "") != (m.Kind == MergeSourceWorkspace) {
 		return fmt.Errorf("a %s source names workspace %q", m.Kind, m.Workspace)
 	}
+	// A VERSION INCREMENT moves a declared part and carries its changelog
+	// line, and a branch already merged upstream lands nothing to version.
+	if v := m.Version; v != nil {
+		if !v.Part.Valid() || v.ChangelogLine == "" {
+			return fmt.Errorf("a version increment moves minor or patch and carries a changelog line, not %s with line %q", v.Part, v.ChangelogLine)
+		}
+		if m.Kind == MergeSourceMergedUpstream {
+			return fmt.Errorf("a %s source lands nothing, so it carries no version increment", m.Kind)
+		}
+	}
 	// A WORKSPACE'S BRANCH IS RECORDED WITH THE REQUEST (the branch checked out
 	// in its worktree), so every arm may name one, and the branch arm must.
 	if m.Kind == MergeSourceBranch && m.Branch == "" {
