@@ -5137,6 +5137,19 @@ bubble-body.bubble-body { display: block; }
 .bubble.interim-response > .bubble-scroll > .usage-corner {
   margin-left: var(--usage-interim-margin-left);
 }
+/* AN OPEN INTERIM'S CORNER GIVES THE INSET BACK. Closed, the clamped body is a
+   box of its own, set beside the float with its right padding (the inset)
+   still inside it, so the margin above reaches back over that inset. Open, the
+   body rejoins the corner's formatting context, and its first line wraps
+   against the float's own margin edge, which the body's padding does not
+   push: the same margin let that line run the whole inset into the token's
+   gap. So the open corner's margin is the closed one plus the inset, and the
+   line again ends `--usage-text-gap` from the token. Its ghost keeps the
+   closed margin: the ghost sits inside the body's inset, where that reach is
+   still owed (see "AN OPEN INTERIM'S GHOST"). */
+.bubble.interim-response > .bubble-scroll.expanded > .usage-corner {
+  margin-left: calc(var(--usage-interim-margin-left) + var(--bubble-content-inset));
+}
 .bubble.interim-response > .bubble-scroll > .usage-corner::before {
   width: auto;
 }

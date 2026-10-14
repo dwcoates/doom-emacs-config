@@ -5024,6 +5024,14 @@ describe("the interim corner's shared tokens", () => {
     expect(margins).toEqual(["var(--usage-interim-margin-left)", "var(--usage-interim-margin-left)"]);
   });
 
+  it("gives an open corner the closed margin plus the body's inset, which its first line wraps against", () => {
+    // Arrange / Act
+    const open = declarationsOf(".bubble.interim-response > .bubble-scroll.expanded > .usage-corner") ?? "";
+
+    // Assert
+    expect(open).toMatch(/margin-left:\s*calc\(var\(--usage-interim-margin-left\) \+ var\(--bubble-content-inset\)\);/);
+  });
+
   it("gives the corner and its open ghost the one right margin", () => {
     // Arrange / Act
     const margins = [declarationsOf(".usage-corner"), declarationsOf(GHOST)].map(
