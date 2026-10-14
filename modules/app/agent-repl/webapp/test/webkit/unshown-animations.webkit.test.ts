@@ -13,7 +13,7 @@ import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { webkit, type Browser, type Page } from "playwright-core";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bundlePage } from "./bundle";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -34,166 +34,165 @@ interface Read {
   currentTime: number;
 }
 
+/** Start a fresh page under the real pause, shown; the presence rides on `window.presence`. */
+async function freshPage(page: Page, css: string, script: string): Promise<void> {
+  await page.setContent(`<!doctype html><html><head></head><body></body></html>`);
+  await page.addStyleTag({ content: css });
+  await page.addScriptTag({ content: script });
+  await page.evaluate(() => {
+    type Api = {
+      createPresence: (doc: Document, embedded: boolean) => { setShown(shown: boolean): void };
+      liveUnshownAnimationsEnv: (doc: Document, presence: unknown) => unknown;
+      pauseAnimationsWhileUnshown: (env: unknown) => () => void;
+    };
+    const api = (window as unknown as { UnshownAnimations: Api }).UnshownAnimations;
+    const presence = api.createPresence(document, true);
+    presence.setShown(true);
+    api.pauseAnimationsWhileUnshown(api.liveUnshownAnimationsEnv(document, presence));
+    (window as unknown as { presence: unknown }).presence = presence;
+  });
+}
+
+/** Add an element of CLS (with STYLE) to the page; answers its id. */
+async function add(page: Page, cls: string, style = ""): Promise<string> {
+  return page.evaluate(
+    ({ cls, style }) => {
+      const el = document.createElement("div");
+      el.id = `el-${document.body.children.length}`;
+      el.className = cls;
+      if (style !== "") el.setAttribute("style", style);
+      document.body.append(el);
+      return el.id;
+    },
+    { cls, style },
+  );
+}
+
+/** Show or hide the page, as the webhost would. */
+async function setShown(page: Page, shown: boolean): Promise<void> {
+  await page.evaluate((s) => {
+    (window as unknown as { presence: { setShown(shown: boolean): void } }).presence.setShown(s);
+  }, shown);
+}
+
+/** The animation of element ID, its computed opacity, and the timeline's time now. */
+async function read(page: Page, id: string): Promise<Read & { now: number; opacity: string }> {
+  return page.evaluate((elId) => {
+    const el = document.getElementById(elId)!;
+    const animation = el.getAnimations()[0];
+    return {
+      playState: animation.playState,
+      currentTime: Number(animation.currentTime),
+      now: Number(document.timeline.currentTime),
+      opacity: getComputedStyle(el).opacity,
+    };
+  }, id);
+}
+
+/** Let MS of the page's own time pass. The assertions measure against its timeline, so a late wake costs nothing. */
+async function wait(page: Page, ms: number): Promise<void> {
+  await page.evaluate((t) => new Promise((resolve) => setTimeout(resolve, t)), ms);
+}
+
+/** Whether A is within SLACK_MS of B. */
+const near = (a: number, b: number): boolean => Math.abs(a - b) <= SLACK_MS;
+
 describe("pausing a page the webhost does not show, in WebKit", () => {
   let browser: Browser;
-  let page: Page;
-  let script: string;
-  let css: string;
+  // EVERY SCENARIO RUNS IN THE beforeAll, AND THE TESTS ONLY READ ITS RESULT,
+  // as every webkit suite does (vitest.webkit.config.ts).
+  let held: { first: Read; second: Read };
+  let inline: Read;
+  let runningResumed: { after: Read & { now: number }; expected: number };
+  let madeResumed: { after: Read & { now: number }; expected: number };
+  let oneShot: Read & { opacity: string };
+  let footerWord: Read;
 
   beforeAll(async () => {
-    css = `${await readFile(path.join(here, "../../src/styles.css"), "utf8")}\n${KEYFRAMES}`;
-    script = await bundlePage(path.join(here, "unshown-animations-page.ts"), "UnshownAnimations");
+    const css = `${await readFile(path.join(here, "../../src/styles.css"), "utf8")}\n${KEYFRAMES}`;
+    const script = await bundlePage(path.join(here, "unshown-animations-page.ts"), "UnshownAnimations");
     browser = await webkit.launch();
-    page = await browser.newPage({ viewport: { width: 400, height: 400 } });
-  });
+    const page = await browser.newPage({ viewport: { width: 400, height: 400 } });
 
-  beforeEach(async () => {
-    await page.setContent(`<!doctype html><html><head></head><body></body></html>`);
-    await page.addStyleTag({ content: css });
-    await page.addScriptTag({ content: script });
-    // The page under test: a presence the test drives, and the pause over it.
-    await page.evaluate(() => {
-      type Api = {
-        createPresence: (doc: Document, embedded: boolean) => { setShown(shown: boolean): void };
-        liveUnshownAnimationsEnv: (doc: Document, presence: unknown) => unknown;
-        pauseAnimationsWhileUnshown: (env: unknown) => () => void;
-      };
-      const api = (window as unknown as { UnshownAnimations: Api }).UnshownAnimations;
-      const presence = api.createPresence(document, true);
-      presence.setShown(true);
-      api.pauseAnimationsWhileUnshown(api.liveUnshownAnimationsEnv(document, presence));
-      (window as unknown as { presence: unknown }).presence = presence;
-    });
+    // A running loop, held across a hidden spell.
+    await freshPage(page, css, script);
+    let id = await add(page, "test-loop");
+    await wait(page, 50);
+    await setShown(page, false);
+    const first = await read(page, id);
+    await wait(page, 200);
+    held = { first, second: await read(page, id) };
+
+    // A loop drawn with an inline animation shorthand.
+    await freshPage(page, css, script);
+    id = await add(page, "", "animation: test-loop 1000ms linear infinite");
+    await setShown(page, false);
+    inline = await read(page, id);
+
+    // A loop running at the hide, shown again.
+    await freshPage(page, css, script);
+    id = await add(page, "test-loop");
+    await wait(page, 50);
+    const before = await read(page, id);
+    await setShown(page, false);
+    await wait(page, 400);
+    await setShown(page, true);
+    let after = await read(page, id);
+    runningResumed = { after, expected: before.currentTime + (after.now - before.now) };
+
+    // A loop made while hidden, shown again.
+    await freshPage(page, css, script);
+    await setShown(page, false);
+    await wait(page, 100);
+    id = await add(page, "test-loop");
+    const made = await read(page, id);
+    await wait(page, 400);
+    await setShown(page, true);
+    after = await read(page, id);
+    madeResumed = { after, expected: after.now - made.now };
+
+    // A one-shot made while hidden that would have ended, shown again.
+    await freshPage(page, css, script);
+    await setShown(page, false);
+    id = await add(page, "test-once");
+    await wait(page, 500);
+    await setShown(page, true);
+    oneShot = await read(page, id);
+
+    // The footer's breathing word, under the real stylesheet's rule.
+    await freshPage(page, css, script);
+    id = await add(page, "pfooter-wave-letter");
+    await setShown(page, false);
+    footerWord = await read(page, id);
   });
 
   afterAll(async () => {
     await browser.close();
   });
 
-  /** Add an element of CLASS (with STYLE) to the page; answers its id. */
-  async function add(cls: string, style = ""): Promise<string> {
-    return page.evaluate(
-      ({ cls, style }) => {
-        const el = document.createElement("div");
-        el.id = `el-${document.body.children.length}`;
-        el.className = cls;
-        if (style !== "") el.setAttribute("style", style);
-        document.body.append(el);
-        return el.id;
-      },
-      { cls, style },
-    );
-  }
-
-  /** Show or hide the page, as the webhost would. */
-  async function setShown(shown: boolean): Promise<void> {
-    await page.evaluate((s) => {
-      (window as unknown as { presence: { setShown(shown: boolean): void } }).presence.setShown(s);
-    }, shown);
-  }
-
-  /** The animation of element ID, and the timeline's time now. */
-  async function read(id: string): Promise<Read & { now: number }> {
-    return page.evaluate((elId) => {
-      const animation = document.getElementById(elId)!.getAnimations()[0];
-      return {
-        playState: animation.playState,
-        currentTime: Number(animation.currentTime),
-        now: Number(document.timeline.currentTime),
-      };
-    }, id);
-  }
-
-  /** Let MS of real time pass in the page. */
-  async function wait(ms: number): Promise<void> {
-    await page.evaluate((t) => new Promise((resolve) => setTimeout(resolve, t)), ms);
-  }
-
-  it("holds a running loop still while the page is not shown", async () => {
-    // Arrange
-    const id = await add("test-loop");
-    await wait(50);
-
-    // Act
-    await setShown(false);
-    const first = await read(id);
-    await wait(200);
-    const second = await read(id);
-
-    // Assert
-    expect([first.playState, second.currentTime]).toEqual(["paused", first.currentTime]);
+  it("holds a running loop still while the page is not shown", () => {
+    expect([held.first.playState, held.second.currentTime]).toEqual(["paused", held.first.currentTime]);
   });
 
-  it("holds a loop drawn with an inline animation shorthand still too", async () => {
-    // Arrange
-    const id = await add("", "animation: test-loop 1000ms linear infinite");
-    await setShown(false);
-
-    // Act
-    const state = await read(id);
-
-    // Assert
-    expect(state.playState).toBe("paused");
+  it("holds a loop drawn with an inline animation shorthand still too", () => {
+    expect(inline.playState).toBe("paused");
   });
 
-  it("resumes a loop running at the hide where it would have been", async () => {
-    // Arrange
-    const id = await add("test-loop");
-    await wait(50);
-    const before = await read(id);
-    await setShown(false);
-    await wait(400);
-
-    // Act
-    await setShown(true);
-    const after = await read(id);
-
-    // Assert
-    const expected = before.currentTime + (after.now - before.now);
-    expect([after.playState, Math.abs(after.currentTime - expected) <= SLACK_MS]).toEqual(["running", true]);
+  it("resumes a loop running at the hide where it would have been", () => {
+    const { after, expected } = runningResumed;
+    expect([after.playState, near(after.currentTime, expected)]).toEqual(["running", true]);
   });
 
-  it("resumes a loop made while hidden where it would have been", async () => {
-    // Arrange
-    await setShown(false);
-    await wait(100);
-    const id = await add("test-loop");
-    const made = await read(id);
-    await wait(400);
-
-    // Act
-    await setShown(true);
-    const after = await read(id);
-
-    // Assert
-    const expected = after.now - made.now;
-    expect([after.playState, Math.abs(after.currentTime - expected) <= SLACK_MS]).toEqual(["running", true]);
+  it("resumes a loop made while hidden where it would have been", () => {
+    const { after, expected } = madeResumed;
+    expect([after.playState, near(after.currentTime, expected)]).toEqual(["running", true]);
   });
 
-  it("leaves a one-shot that would have ended while hidden ended, at its last frame", async () => {
-    // Arrange
-    await setShown(false);
-    const id = await add("test-once");
-    await wait(500);
-
-    // Act
-    await setShown(true);
-    const after = await read(id);
-    const opacity = await page.evaluate((elId) => getComputedStyle(document.getElementById(elId)!).opacity, id);
-
-    // Assert
-    expect([after.playState, opacity]).toEqual(["finished", "1"]);
+  it("leaves a one-shot that would have ended while hidden ended, at its last frame", () => {
+    expect([oneShot.playState, oneShot.opacity]).toEqual(["finished", "1"]);
   });
 
-  it("pauses the footer's breathing word by the real stylesheet's rule", async () => {
-    // Arrange
-    const id = await add("pfooter-wave-letter");
-    await setShown(false);
-
-    // Act
-    const state = await read(id);
-
-    // Assert
-    expect(state.playState).toBe("paused");
+  it("pauses the footer's breathing word by the real stylesheet's rule", () => {
+    expect(footerWord.playState).toBe("paused");
   });
 });
