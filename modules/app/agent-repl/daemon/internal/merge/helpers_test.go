@@ -93,6 +93,10 @@ type fakeDB struct {
 	// flight; pausedReads counts those reads.
 	onPausedRead func()
 	pausedReads  int
+	// pausedReadErr, when set, is what every MergeQueuePaused answers, and
+	// pauseWriteErr what every SetMergeQueuePaused answers.
+	pausedReadErr error
+	pauseWriteErr error
 	// prioritizeErr, when set, is what every PrioritizeMerge answers.
 	prioritizeErr error
 	// moveErr, when set, is what every MoveMerge answers.
@@ -765,6 +769,9 @@ func (f *fakeDB) AllMergeQueues(_ context.Context) (map[wsm.RepoKey][]wsm.MergeQ
 func (f *fakeDB) SetMergeQueuePaused(_ context.Context, repo wsm.RepoKey, paused bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.pauseWriteErr != nil {
+		return f.pauseWriteErr
+	}
 	f.paused[repo] = paused
 	return nil
 }
@@ -821,6 +828,9 @@ func (f *fakeDB) MergeQueuePaused(_ context.Context, repo wsm.RepoKey) (bool, er
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.pausedReadErr != nil {
+		return false, f.pausedReadErr
+	}
 	return f.paused[repo], nil
 }
 
@@ -1959,27 +1969,34 @@ type fakeSidebar struct {
 	sidebar.Resolver
 	mu    sync.Mutex
 	facts []footer.MergeFacts
-	// async is each repository's last async set (SetAsyncMerges), and
-	// asyncTold every set told, in order.
-	async     map[wsm.RepoKey][]ids.WorkspaceID
-	asyncTold [][]ids.WorkspaceID
+	// queues is each repository's last queue (SetMergeQueue), and told every
+	// queue told, in order.
+	queues map[wsm.RepoKey]sidebar.MergeQueue
+	told   []sidebar.MergeQueue
 }
 
-func (s *fakeSidebar) SetAsyncMerges(repo wsm.RepoKey, requesters []ids.WorkspaceID) {
+func (s *fakeSidebar) SetMergeQueue(repo wsm.RepoKey, queue sidebar.MergeQueue) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.async == nil {
-		s.async = map[wsm.RepoKey][]ids.WorkspaceID{}
+	if s.queues == nil {
+		s.queues = map[wsm.RepoKey]sidebar.MergeQueue{}
 	}
-	s.async[repo] = requesters
-	s.asyncTold = append(s.asyncTold, requesters)
+	s.queues[repo] = queue
+	s.told = append(s.told, queue)
 }
 
-// asyncOf answers the last async set REPO was told.
-func (s *fakeSidebar) asyncOf(repo wsm.RepoKey) []ids.WorkspaceID {
+// queueOf answers the last queue REPO was told.
+func (s *fakeSidebar) queueOf(repo wsm.RepoKey) sidebar.MergeQueue {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.async[repo]
+	return s.queues[repo]
+}
+
+// toldCount answers how many queues the roster was told.
+func (s *fakeSidebar) toldCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.told)
 }
 
 func (s *fakeSidebar) SetMerge(_ ids.WorkspaceID, facts footer.MergeFacts) {

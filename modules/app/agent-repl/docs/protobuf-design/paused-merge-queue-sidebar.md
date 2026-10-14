@@ -69,7 +69,8 @@ recorded here.
     not to the merge.
   - The row's tone (its name's color) is untouched.
 - CONSEQUENCES:
-  - Daemon: `merge.asyncMergesDB` wraps `SetMergeQueuePaused` as well, so
+  - Daemon: `merge.asyncMergesDB` becomes `merge.rosterQueueDB` and wraps
+    `SetMergeQueuePaused` as well, so
     every pause or resume republishes that repository's queue to the roster.
     No call site can forget to. Boot and adoption already republish every
     queue (`republishQueue`), so a restarted daemon draws a paused queue

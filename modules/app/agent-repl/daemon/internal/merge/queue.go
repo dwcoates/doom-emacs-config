@@ -467,7 +467,7 @@ func (o *orchestrator) queueOf(ctx context.Context, ws ids.WorkspaceID) (wsm.Rep
 // A REQUESTED MERGE IS IN NOBODY'S LINE: its requesting turn has not ended, so
 // it is on no snapshot and has no facts.
 func (o *orchestrator) republishQueue(ctx context.Context, repo wsm.RepoKey) error {
-	o.publishAsyncMerges(ctx, repo)
+	o.publishRosterQueue(ctx, repo)
 	stored, err := o.deps.DB.MergeQueue(ctx, repo)
 	if err != nil {
 		return err

@@ -1975,7 +1975,7 @@ func TestAsyncMergeMarker(t *testing.T) {
 			r := tc.arrange(t)
 
 			// Act.
-			r.SetAsyncMerges(theRepo, []ids.WorkspaceID{theWS})
+			r.SetMergeQueue(theRepo, sidebar.MergeQueue{AsyncRequesters: []ids.WorkspaceID{theWS}})
 
 			// Assert.
 			row := onlyRow(t, r)
@@ -1994,7 +1994,7 @@ func TestAsyncMergeMarkerIsLogged(t *testing.T) {
 	r := live(t, arrange(t))
 
 	// Act.
-	r.SetAsyncMerges(theRepo, []ids.WorkspaceID{theWS})
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{AsyncRequesters: []ids.WorkspaceID{theWS}})
 	onlyRow(t, r)
 
 	// Assert.
@@ -2025,10 +2025,10 @@ func TestAsyncMergeLeavingTheQueueDropsTheMarker(t *testing.T) {
 	r := live(t, arrange(t))
 	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 	r.SetTurnEnded(theWS, wsm.CloseCompleted)
-	r.SetAsyncMerges(theRepo, []ids.WorkspaceID{theWS})
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{AsyncRequesters: []ids.WorkspaceID{theWS}})
 
 	// Act: the repository's queue no longer carries the merge.
-	r.SetAsyncMerges(theRepo, nil)
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{})
 
 	// Assert.
 	row := onlyRow(t, r)
@@ -2045,7 +2045,7 @@ func TestAsyncMergeOfAnotherWorkspaceLeavesTheRow(t *testing.T) {
 	r := live(t, arrange(t))
 
 	// Act.
-	r.SetAsyncMerges(theRepo, []ids.WorkspaceID{"other"})
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{AsyncRequesters: []ids.WorkspaceID{"other"}})
 
 	// Assert.
 	if onlyRow(t, r).GetAsyncMerging() != nil {
@@ -2056,10 +2056,10 @@ func TestAsyncMergeOfAnotherWorkspaceLeavesTheRow(t *testing.T) {
 func TestAsyncMergeSetsAreReplacedPerRepository(t *testing.T) {
 	// Arrange.
 	r := live(t, arrange(t))
-	r.SetAsyncMerges(theRepo, []ids.WorkspaceID{theWS})
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{AsyncRequesters: []ids.WorkspaceID{theWS}})
 
 	// Act: another repository's set changes.
-	r.SetAsyncMerges(wsm.RepoKey("/other/.git"), nil)
+	r.SetMergeQueue(wsm.RepoKey("/other/.git"), sidebar.MergeQueue{})
 
 	// Assert.
 	if onlyRow(t, r).GetAsyncMerging() == nil {
@@ -2072,7 +2072,7 @@ func TestAsyncMergeLeavesTheFooterIdle(t *testing.T) {
 	r := live(t, arrange(t))
 
 	// Act.
-	r.SetAsyncMerges(theRepo, []ids.WorkspaceID{theWS})
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{AsyncRequesters: []ids.WorkspaceID{theWS}})
 
 	// Assert.
 	status := r.Resolver.(*fanned).footer.Status(theWS)
@@ -2089,10 +2089,209 @@ func TestAReadResultStaysPartialUnderAnAsyncMerge(t *testing.T) {
 	r.SetViewed(theWS)
 
 	// Act.
-	r.SetAsyncMerges(theRepo, []ids.WorkspaceID{theWS})
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{AsyncRequesters: []ids.WorkspaceID{theWS}})
 
 	// Assert: the arm is still the read done, so the row stays PARTIAL.
 	if onlyRow(t, r).GetViewed() == nil {
 		t.Fatal("the row is FULL, want PARTIAL: the async merge does not unread the result")
+	}
+}
+
+// otherQueue is a second repository's queue key, which the paused-merge tests keep
+// apart from theRepo's.
+const otherQueue = wsm.RepoKey("/other/.git")
+
+// mergingFacts puts a row on the `merging` arm.
+func mergingFacts() footer.MergeFacts {
+	return footer.MergeFacts{State: "merging", QueuedAt: epoch, Step: footer.StepTesting}
+}
+
+// queuedFacts puts a row on the `merge_queued` arm.
+func queuedFacts() footer.MergeFacts {
+	return footer.MergeFacts{State: "queued", QueuedAt: epoch, Step: footer.StepEnqueued, QueuePlace: 1, QueueWaiting: 1}
+}
+
+// TestMergePausedMarker walks which rows carry the `merge_paused` marker
+// (frontend.v1.RosterRowMergePaused, owner ruling 2026-10-14): exactly a row
+// drawing a merge indicator whose merge is on a paused queue.
+func TestMergePausedMarker(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(r sidebarResolver)
+		queue   sidebar.MergeQueue
+		want    bool
+	}{
+		{
+			name:    "a merging row on a paused queue",
+			arrange: func(r sidebarResolver) { r.SetMerge(theWS, mergingFacts()) },
+			queue:   sidebar.MergeQueue{Paused: true, Workspaces: []ids.WorkspaceID{theWS}},
+			want:    true,
+		},
+		{
+			name:    "a merge_queued row on a paused queue",
+			arrange: func(r sidebarResolver) { r.SetMerge(theWS, queuedFacts()) },
+			queue:   sidebar.MergeQueue{Paused: true, Workspaces: []ids.WorkspaceID{theWS}},
+			want:    true,
+		},
+		{
+			name:    "an async-merge row on a paused queue",
+			arrange: func(r sidebarResolver) {},
+			queue:   sidebar.MergeQueue{Paused: true, AsyncRequesters: []ids.WorkspaceID{theWS}},
+			want:    true,
+		},
+		{
+			name:    "a merging row on a running queue",
+			arrange: func(r sidebarResolver) { r.SetMerge(theWS, mergingFacts()) },
+			queue:   sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{theWS}},
+			want:    false,
+		},
+		{
+			name:    "an async-merge row on a running queue",
+			arrange: func(r sidebarResolver) {},
+			queue:   sidebar.MergeQueue{AsyncRequesters: []ids.WorkspaceID{theWS}},
+			want:    false,
+		},
+		{
+			name:    "a ready row on a paused queue with no merge of its own",
+			arrange: func(r sidebarResolver) {},
+			queue:   sidebar.MergeQueue{Paused: true},
+			want:    false,
+		},
+		{
+			name:    "a merging row whose merge is not on the paused queue",
+			arrange: func(r sidebarResolver) { r.SetMerge(theWS, mergingFacts()) },
+			queue:   sidebar.MergeQueue{Paused: true, Workspaces: []ids.WorkspaceID{"other"}},
+			want:    false,
+		},
+		{
+			name:    "a merge_failed row still on a paused queue",
+			arrange: func(r sidebarResolver) { r.SetMerge(theWS, footer.MergeFacts{State: "failed"}) },
+			queue:   sidebar.MergeQueue{Paused: true, Workspaces: []ids.WorkspaceID{theWS}},
+			want:    false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r := live(t, arrange(t))
+			tc.arrange(r)
+
+			// Act.
+			r.SetMergeQueue(theRepo, tc.queue)
+
+			// Assert.
+			if got := onlyRow(t, r).GetMergePaused() != nil; got != tc.want {
+				t.Fatalf("merge_paused present = %v, want %v (status %q)", got, tc.want, statusName(onlyRow(t, r)))
+			}
+		})
+	}
+}
+
+func TestAPausedQueueLeavesTheMergeArm(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+	r.SetMerge(theWS, mergingFacts())
+
+	// Act.
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Paused: true, Workspaces: []ids.WorkspaceID{theWS}})
+
+	// Assert: the pause changes how the merge is drawn, never the status.
+	if got := statusName(onlyRow(t, r)); got != "merging" {
+		t.Fatalf("status = %q, want merging", got)
+	}
+}
+
+func TestResumingTheQueueDropsTheMergePausedMarker(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+	r.SetMerge(theWS, mergingFacts())
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Paused: true, Workspaces: []ids.WorkspaceID{theWS}})
+
+	// Act: the queue is resumed with the merge still on it.
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{theWS}})
+
+	// Assert.
+	row := onlyRow(t, r)
+	if row.GetMergePaused() != nil {
+		t.Fatal("the merge_paused marker stands after the queue was resumed")
+	}
+	if got := statusName(row); got != "merging" {
+		t.Fatalf("status = %q, want merging", got)
+	}
+}
+
+func TestPausingOneRepositoryMarksOnlyItsRows(t *testing.T) {
+	// Arrange: w1 merges on theRepo and w2 on otherQueue.
+	r := live(t, arrange(t, workspace(string(theWS), "one"), workspace("w2", "two")))
+	r.OnLink("w2", shimclient.LinkConnected)
+	r.OnSessionStarted("w2", &conversationv1.SessionStarted{VendorSessionId: "vendor-2"})
+	r.SetMerge(theWS, queuedFacts())
+	r.SetMerge("w2", queuedFacts())
+	r.SetMergeQueue(otherQueue, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w2"}})
+
+	// Act: only theRepo's queue is paused.
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Paused: true, Workspaces: []ids.WorkspaceID{theWS}})
+
+	// Assert.
+	rows := repoRows(t, latest(t, r))
+	if rowFor(rows, string(theWS)).GetMergePaused() == nil {
+		t.Fatal("the paused repository's merge carries no merge_paused marker")
+	}
+	if rowFor(rows, "w2").GetMergePaused() != nil {
+		t.Fatal("a merge on the running repository's queue carries the merge_paused marker")
+	}
+}
+
+func TestPausingAnotherQueuesitoryLeavesAnAsyncMerge(t *testing.T) {
+	// Arrange: the branch merges async on theRepo's running queue.
+	r := live(t, arrange(t))
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{AsyncRequesters: []ids.WorkspaceID{theWS}})
+
+	// Act: a different repository's queue is paused.
+	r.SetMergeQueue(otherQueue, sidebar.MergeQueue{Paused: true})
+
+	// Assert.
+	row := onlyRow(t, r)
+	if row.GetMergePaused() != nil {
+		t.Fatal("the async merge carries the merge_paused marker for another repository's pause")
+	}
+	if row.GetAsyncMerging() == nil {
+		t.Fatal("the async merge lost its async_merging marker")
+	}
+}
+
+func TestMergePausedMarkerIsLogged(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+	r.SetMerge(theWS, mergingFacts())
+
+	// Act.
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Paused: true, Workspaces: []ids.WorkspaceID{theWS}})
+	onlyRow(t, r)
+
+	// Assert.
+	got := dlog.FilterRecords(r.surfaces.Records(), dlog.RecordQuery{Operation: "daemon.sidebar.merge_paused_marker"})
+	if len(got) == 0 {
+		t.Fatal("no daemon.sidebar.merge_paused_marker record for a row carrying the marker")
+	}
+	if ctx := got[len(got)-1].Context; ctx["status"] != "merging" || ctx["repo"] != string(theRepo) {
+		t.Fatalf("record context = %v, want status merging on %s", ctx, theRepo)
+	}
+}
+
+func TestSetMergeQueueIsLogged(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+
+	// Act.
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Paused: true, Workspaces: []ids.WorkspaceID{theWS}})
+
+	// Assert.
+	got := dlog.FilterRecords(r.surfaces.Records(), dlog.RecordQuery{Operation: "daemon.sidebar.set_merge_queue"})
+	if len(got) == 0 {
+		t.Fatal("no daemon.sidebar.set_merge_queue record")
+	}
+	if ctx := got[len(got)-1].Context; ctx["paused"] != true || ctx["repo"] != string(theRepo) {
+		t.Fatalf("record context = %v, want paused on %s", ctx, theRepo)
 	}
 }

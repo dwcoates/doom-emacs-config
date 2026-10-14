@@ -408,11 +408,40 @@ type rosterState struct {
 	// renderLogs are the decision records each workspace's row last logged,
 	// fingerprinted, so a render logs only the rows that changed (repeats.go).
 	renderLogs map[string]string
-	// asyncMerges are, per repository, the workspaces whose own branch has an
-	// async merge on that repository's merge queue (SetAsyncMerges). Each
-	// repository's set is replaced WHOLE, so a merge that left the queue can
-	// never linger in it.
-	asyncMerges map[wsm.RepoKey]map[ids.WorkspaceID]struct{}
+	// queues are the repositories' merge queues as the roster draws them
+	// (SetMergeQueue). Each repository's queue is replaced WHOLE, so a merge
+	// that left the queue, or a pause that was lifted, can never linger.
+	queues map[wsm.RepoKey]mergeQueue
+}
+
+// mergeQueue is one repository's merge queue, indexed for the row lookups.
+type mergeQueue struct {
+	// paused reports whether the queue is paused.
+	paused bool
+	// members are the workspaces with a row on the queue.
+	members map[ids.WorkspaceID]struct{}
+	// async are the workspaces whose own branch has an async merge on it.
+	async map[ids.WorkspaceID]struct{}
+}
+
+// newMergeQueue indexes one stated queue.
+func newMergeQueue(q MergeQueue) mergeQueue {
+	return mergeQueue{paused: q.Paused, members: setOf(q.Workspaces), async: setOf(q.AsyncRequesters)}
+}
+
+// setOf indexes WS as a set.
+func setOf(ws []ids.WorkspaceID) map[ids.WorkspaceID]struct{} {
+	set := make(map[ids.WorkspaceID]struct{}, len(ws))
+	for _, w := range ws {
+		set[w] = struct{}{}
+	}
+	return set
+}
+
+// empty reports whether the queue says nothing a row could draw: not paused,
+// and no workspace on it.
+func (q mergeQueue) empty() bool {
+	return !q.paused && len(q.members) == 0 && len(q.async) == 0
 }
 
 // newRosterState builds an empty roster accumulation.
@@ -420,19 +449,41 @@ func newRosterState() *rosterState {
 	return &rosterState{
 		workspaces:  map[ids.WorkspaceID]*wsState{},
 		divergence:  map[ids.RepoID]repodivergence.Measure{},
-		asyncMerges: map[wsm.RepoKey]map[ids.WorkspaceID]struct{}{},
+		queues:      map[wsm.RepoKey]mergeQueue{},
 	}
 }
 
 // asyncMerging reports whether WS's own branch has an async merge on any
 // repository's merge queue.
 func (r *rosterState) asyncMerging(ws ids.WorkspaceID) bool {
-	for _, requesters := range r.asyncMerges {
-		if _, ok := requesters[ws]; ok {
+	for _, q := range r.queues {
+		if _, ok := q.async[ws]; ok {
 			return true
 		}
 	}
 	return false
+}
+
+// pausedMergeQueue answers the paused repository queue that holds a merge the
+// row of WS draws, and false when none does. The row draws its own merge on
+// a `merging` or `merge_queued` ARM, which is the queue WS has a row on, and
+// an async merge of its branch when it carries the async_merging marker
+// (ASYNC), which is the queue that names WS as a requester. A row drawing
+// neither draws no merge for a pause to change.
+func (r *rosterState) pausedMergeQueue(ws ids.WorkspaceID, arm string, async bool) (wsm.RepoKey, bool) {
+	ownMerge := arm == "merging" || arm == "merge_queued"
+	for repo, q := range r.queues {
+		if !q.paused {
+			continue
+		}
+		if _, on := q.members[ws]; ownMerge && on {
+			return repo, true
+		}
+		if _, on := q.async[ws]; async && on {
+			return repo, true
+		}
+	}
+	return "", false
 }
 
 // workspace resolves a workspace's live half, minting it on first sight.
