@@ -3188,6 +3188,27 @@ func TestShowChessBoardToolNameMatchesTheVocabulary(t *testing.T) {
 	}
 }
 
+// TestRouteCacheLapseHandsTheProjectionToTheKeeper covers that a held shim's
+// projected lapse reaches the cache keeper as stated.
+func TestRouteCacheLapseHandsTheProjectionToTheKeeper(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	update := &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_CacheLapse{CacheLapse: &conversationv1.SessionCacheLapse{
+		LapsesAtMs: 1_800_000_000_000,
+		AfterLapse: &conversationv1.SessionCacheLapse_Ungated{Ungated: &conversationv1.SessionCacheLapseUngated{}},
+	}}}
+
+	// Act.
+	got := h.routeNow(func(w *watcher) { w.routeSessionUpdateLocked(update) })
+
+	// Assert.
+	e := requireEvent(t, got, "cachelapse.OnCacheLapse")
+	if e.detail != "1800000000000" {
+		t.Fatalf("the keeper was handed %q, want 1800000000000", e.detail)
+	}
+}
+
 // TestRouteCommandCatalogHandsOverTheWholeCatalog covers that the table is
 // handed the catalog the session stated, every command of it, in order.
 func TestRouteCommandCatalogHandsOverTheWholeCatalog(t *testing.T) {

@@ -736,6 +736,7 @@ func (f *Fleet) Resume(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cli
 	// freeness its watcher can never state (Fleet.SessionAbsent).
 	f.markSessionAbsent(ws, c)
 	runCtx, finishRun := f.beginVendorStart(ctx, ws)
+	src.HoldKeepalive = record.InHiddenSection()
 	started, err := f.startSession(runCtx, log, ws, c, src, session, configDir)
 	finishRun()
 	if err != nil {
