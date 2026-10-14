@@ -364,12 +364,15 @@ unreachable from a live process.
   - Sized `ramdisk.DefaultSizeMiB` (override `AGENT_REPL_TEST_RAMDISK_MIB`):
     the measured live peak of the run root is 1.5-1.8 GB for
     `daemon,store,sidecar`; a RAM disk holds at most its size in memory.
-  - ITS UNITS RUN AT THE UTILITY I/O TIER (`taskpolicy -d utility`), not the
-    throttle tier `bin/background.sh` gives the run: throttled I/O to a RAM
-    disk stalled up to 622ms per fsync (the kernel treats the volume as a
-    non-SSD device), and a whole run under it took twice as long and missed
-    timing bounds. Utility still yields to the live runtime's normal-tier I/O
-    on the SSD. A run that fell back to `/tmp` keeps the throttle tier.
+  - ITS UNITS RUN AT THE DEFAULT I/O TIER (`taskpolicy -d default`, owner
+    ruling 2026-10-14), not the throttle tier `bin/background.sh` gives the
+    run: a throttled tier stalls every read of build caches, sources and
+    binaries from the SSD whenever the live runtime touches it (the e2e
+    prebuild 4.7s at default, 11.8s at throttle, 23.0s at utility), and the
+    starved units miss their timing bounds. The units' own state is on the
+    RAM disk, which contends with nothing of the owner's, and the live store
+    measured unaffected. A run that fell back to `/tmp` keeps the throttle
+    tier.
   - MOUNTED NOBROWSE, which keeps Spotlight off it: mounted plainly, mds
     opened an index store on every run's volume and took part in its
     unmount (macOS 26.2); a `.metadata_never_index` did not stop it.

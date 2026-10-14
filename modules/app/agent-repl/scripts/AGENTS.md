@@ -109,4 +109,4 @@ and its commit (or the open item). Test-performance lessons also go into the
 `/profile-agent-repl`.
 
 - Every hdiutil, diskutil and lsof call testrun makes is bounded at 60s (7c18e136e): a wedged diskarbitrationd once hung a full run 36 minutes in `diskutil unmount` with nothing printed. A wedged disk manager also leaves dead mounts under /tmp that hang anything that stats them.
-- Units run at `taskpolicy -d utility` on the run's RAM disk, where a 4KB fsync is p90 166ms during a run (86ms per fsync whenever default-tier I/O touches the volume); the SSD shows no such effect (docs/investigations/2026-10-11-test-speed.md, fourth round).
+- Units run at `taskpolicy -d default` on the run's RAM disk (2026-10-14): the throttled tiers made SSD reads of build caches and binaries 2.5-5x slower and starved units past their bounds (docs/investigations/2026-10-14-test-suite-runtime-remediation.md).
