@@ -57,13 +57,20 @@ func (w *watcher) AwaitSessionFacts(ctx context.Context) error {
 	if closed {
 		return ErrWatcherClosed
 	}
+	return w.awaitLatch(ctx, w.factsIn)
+}
+
+// awaitLatch blocks until LATCH closes, or until ctx ends. The watcher closing
+// first answers ErrWatcherClosed, unless the latch had closed too: a latch is
+// a fact that was established, and a close does not take it back.
+func (w *watcher) awaitLatch(ctx context.Context, latch <-chan struct{}) error {
 	select {
-	case <-w.factsIn:
+	case <-latch:
 		return nil
 	case <-w.ctx.Done():
 		// The watcher's own context ends with its Close.
 		select {
-		case <-w.factsIn:
+		case <-latch:
 			return nil
 		default:
 			return ErrWatcherClosed
@@ -71,6 +78,52 @@ func (w *watcher) AwaitSessionFacts(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// markMainWatchingLocked releases AwaitMainWatching the first time the main
+// agent's watch serves its opening page. Later opens (a reopen, a revival's
+// fresh watch) catch up from the pointer the daemon holds, so only the first
+// one is a gate.
+func (w *watcher) markMainWatchingLocked() {
+	if w.mainWatched {
+		return
+	}
+	w.mainWatched = true
+	close(w.mainWatching)
+	w.log.Info("daemon.sessionwatcher.main_watching", "the main agent's watch is serving; turns may start", dlog.Context{
+		"since_open_ms": w.clock.Now().Sub(w.openedAt).Milliseconds(),
+	})
+}
+
+// AwaitMainWatching blocks until the main agent's watch has served its
+// opening page, or until ctx ends. StartTurn waits on it: a turn started
+// before the watch stands sends frames nothing is subscribed to, and a
+// tail_only watch opened after them never sees them. A watcher closed first
+// answers ErrWatcherClosed.
+func (w *watcher) AwaitMainWatching(ctx context.Context) error {
+	w.mu.Lock()
+	closed, watched := w.closed, w.mainWatched
+	w.mu.Unlock()
+	if watched {
+		return nil
+	}
+	if closed {
+		return ErrWatcherClosed
+	}
+	return w.waitMainWatching(ctx)
+}
+
+// waitMainWatching is AwaitMainWatching's wait, once the watch was found not
+// yet serving: every answer through it was a turn held back, and is recorded.
+func (w *watcher) waitMainWatching(ctx context.Context) error {
+	began := w.clock.Now()
+	if err := w.awaitLatch(ctx, w.mainWatching); err != nil {
+		return err
+	}
+	w.log.Info("daemon.sessionwatcher.main_watching_waited", "a turn waited for the main agent's watch to serve", dlog.Context{
+		"waited_ms": w.clock.Now().Sub(began).Milliseconds(),
+	})
+	return nil
 }
 
 // SessionFactsIn reports whether the session facts have been taken up, the
