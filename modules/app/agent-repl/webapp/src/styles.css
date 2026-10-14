@@ -2841,11 +2841,18 @@ html[data-page-unshown] *::after {
    (`.tool-input`, `.bash-input`), so the one row is the only limit. This is
    the ONE title cap: title-fold.ts marks every title site, and no card caps
    its title any other way. */
-.title-fold {
+/* THE ONE-LINE CLAMP'S SHAPE, shared by the title fold and the collapsed
+   ellipsis bubble's body (below): a vertical box that hides what the clamp
+   drops, which is the shape that makes the engine write the `…`. Each site
+   states only its own line count, so the two clamps cannot drift apart. */
+.title-fold,
+.bubble[data-more="ellipsis"] > .bubble-scroll:not(.expanded) > .bubble-body {
   display: -webkit-box;
-  -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+.title-fold {
+  -webkit-line-clamp: 1;
   max-height: none;
 }
 /* EXPANDED LIFTS THE CAP: the whole title shows, alongside the card's output.
@@ -2945,12 +2952,10 @@ html[data-page-unshown] *::after {
    the clamped body's `scrollHeight`), so the measurer changes no layout. The
    clamp is lifted with the one toggle's `.expanded`, which shows everything.
    The spec types allow the ellipsis at a one-line cap only, a whole line
-   count the clamp can state. */
+   count the clamp can state. The clamp's shape is the title fold's (THE
+   ONE-LINE CLAMP'S SHAPE, above); this states only its line count. */
 .bubble[data-more="ellipsis"] > .bubble-scroll:not(.expanded) > .bubble-body {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
   -webkit-line-clamp: var(--bubble-cap-lines);
-  overflow: hidden;
 }
 /* ...and the fade is never drawn on it: the ellipsis is its whole signal. Not
    keyed on `has-more`, so the class still toggles nothing; the role attribute
