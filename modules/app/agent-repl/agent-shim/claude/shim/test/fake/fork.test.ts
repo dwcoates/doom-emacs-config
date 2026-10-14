@@ -1,9 +1,9 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import path from "node:path";
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { forkFakeSession } from "../../src/fake/fork.js";
 
 import { testTempDir } from "../temp-dir.js";
+import { sequentialIds, writeTranscript } from "../vendor-transcript.js";
 import { transcriptPath } from "../../src/engine/vendor-paths.js";
 
 const PARENT_ID = "parent-session";
@@ -11,8 +11,6 @@ const PARENT_DIR = "/repo/parent";
 
 /** A parent transcript: a prompt, a progress line, a tool call, its result, and metadata. */
 function writeParent(configDir: string): void {
-  const file = transcriptPath(configDir, PARENT_DIR, PARENT_ID);
-  mkdirSync(path.dirname(file), { recursive: true });
   const lines = [
     { type: "user", uuid: "u1", parentUuid: null, sessionId: PARENT_ID, message: { role: "user", content: "hello" } },
     { type: "progress", uuid: "p1", parentUuid: "u1", sessionId: PARENT_ID },
@@ -32,14 +30,10 @@ function writeParent(configDir: string): void {
       message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "ok" }] },
     },
   ];
-  writeFileSync(file, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
+  writeTranscript(configDir, PARENT_DIR, PARENT_ID, lines);
 }
 
 /** Mint ids id-1, id-2, … so a fork's identities are predictable. */
-function sequentialIds(): () => string {
-  let next = 0;
-  return () => `id-${String(++next)}`;
-}
 
 function readFork(configDir: string, id: string): Array<Record<string, unknown>> {
   return readFileSync(transcriptPath(configDir, PARENT_DIR, id), "utf8")
