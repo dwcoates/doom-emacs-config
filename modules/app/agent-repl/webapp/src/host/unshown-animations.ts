@@ -31,6 +31,7 @@
  */
 import { log } from "../log.js";
 import type { Presence } from "../presence.js";
+import { nextFrame } from "../frame.js";
 
 /** The root attribute the stylesheet pauses every animation under. */
 export const PAGE_UNSHOWN_ATTRIBUTE = "data-page-unshown";
@@ -68,9 +69,7 @@ export function liveUnshownAnimationsEnv(doc: Document, presence: Presence): Uns
       observer.observe(doc.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
       return () => observer.disconnect();
     },
-    frame: (fn) => {
-      win.requestAnimationFrame(() => fn());
-    },
+    frame: nextFrame,
   };
 }
 
