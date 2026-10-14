@@ -70,13 +70,13 @@ export const BUBBLE_VARIANTS = {
 
 /**
  * A CAPPED bubble's collapsed line limit: the shared feed cap, five lines (a
- * user or subagent prompt), one line (a held prompt),
+ * subagent prompt), three lines (a user prompt), one line (a held prompt),
  * or none past the header strip (a peer message). Each kind states its limit itself, never through another kind's
  * constant, so changing one kind's cap never moves another's. A closed set,
  * because the stylesheet maps each value to its line count
  * (`.bubble[data-cap-lines=…]`) and styles.test.ts holds the two together.
  */
-export type CappedLines = "feed" | 5 | 1 | 0;
+export type CappedLines = "feed" | 5 | 3 | 1 | 0;
 
 /**
  * THE UNCAPPED MODE (owner request, 2026-09-27): a bubble shown at its FULL
@@ -93,7 +93,7 @@ export const BUBBLE_UNCAPPED = "none";
 export type BubbleCapLines = CappedLines | typeof BUBBLE_UNCAPPED;
 
 /** Every CAPPED value, each of which the stylesheet must map to a line count. */
-export const BUBBLE_CAP_LINES: readonly CappedLines[] = ["feed", 5, 1, 0];
+export const BUBBLE_CAP_LINES: readonly CappedLines[] = ["feed", 5, 3, 1, 0];
 
 /** Whether CAP limits the bubble at all (anything but `BUBBLE_UNCAPPED`). */
 export function isCapped(cap: BubbleCapLines): cap is CappedLines {
@@ -125,12 +125,18 @@ export type BubbleMore = typeof BUBBLE_MORE_FADE | typeof BUBBLE_MORE_ELLIPSIS;
 export const ELLIPSIS_CAP_LINES = 1 satisfies CappedLines;
 
 /**
- * A user or subagent prompt's collapsed line limit (owner request, 2026-09-28):
- * FIVE lines, far below the shared feed cap a response keeps, so a long prompt
- * never pushes its answer off the screen. Both prompt rows state it through
- * this one constant, so the two cannot drift apart.
+ * A subagent prompt's collapsed line limit (owner request, 2026-09-28): FIVE
+ * lines, far below the shared feed cap a response keeps, so a long prompt
+ * never pushes its answer off the screen.
  */
-export const PROMPT_CAP_LINES = 5 satisfies CappedLines;
+export const AGENT_PROMPT_CAP_LINES = 5 satisfies CappedLines;
+
+/**
+ * A user prompt's collapsed line limit (owner request, 2026-10-14): THREE
+ * lines, tighter than a subagent prompt's, so the person's own prompt takes
+ * even less of the feed before it is opened.
+ */
+export const USER_PROMPT_CAP_LINES = 3 satisfies CappedLines;
 
 /** The class every bubble wears, and the class every header strip element wears. */
 export const BUBBLE_CLASS = "bubble";
