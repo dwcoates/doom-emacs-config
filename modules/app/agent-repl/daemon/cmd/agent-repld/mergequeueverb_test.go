@@ -936,6 +936,28 @@ func TestTheMergeQueueVerbWritesEachControl(t *testing.T) {
 			check: func(_ *mergeFixture, e commandfile.Entry) bool {
 				return e.Type == commandfile.TypeMergeEnableRacing && e.RepositoryDir == ""
 			}},
+		{name: "subscribe to every repository at every change", args: func(*mergeFixture) []string { return []string{"-subscribe", "every_change"} },
+			check: func(_ *mergeFixture, e commandfile.Entry) bool {
+				return e.Type == commandfile.TypeMergeSubscribe && e.RepositoryDir == "" && e.Detail == "every_change"
+			}},
+		{name: "subscribe to one repository as it advances", args: func(f *mergeFixture) []string {
+			return []string{"-subscribe", "advances", "-repository-dir", f.other}
+		},
+			check: func(f *mergeFixture, e commandfile.Entry) bool {
+				return e.Type == commandfile.TypeMergeSubscribe && e.RepositoryDir == f.other && e.Detail == "advances"
+			}},
+		{name: "subscribe to every repository as it depletes", args: func(*mergeFixture) []string { return []string{"-subscribe", "depletes"} },
+			check: func(_ *mergeFixture, e commandfile.Entry) bool {
+				return e.Type == commandfile.TypeMergeSubscribe && e.Detail == "depletes"
+			}},
+		{name: "unsubscribe from every repository", args: func(*mergeFixture) []string { return []string{"-unsubscribe"} },
+			check: func(_ *mergeFixture, e commandfile.Entry) bool {
+				return e.Type == commandfile.TypeMergeUnsubscribe && e.RepositoryDir == "" && e.Detail == ""
+			}},
+		{name: "unsubscribe from one repository", args: func(f *mergeFixture) []string { return []string{"-unsubscribe", "-repository-dir", f.other} },
+			check: func(f *mergeFixture, e commandfile.Entry) bool {
+				return e.Type == commandfile.TypeMergeUnsubscribe && e.RepositoryDir == f.other
+			}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -971,6 +993,10 @@ func TestTheMergeQueueVerbReportsEachAppliedOutcome(t *testing.T) {
 		{outcome: "released", args: []string{"-release-rollouts"}},
 		{outcome: "racing_disabled", args: []string{"-disable-racing"}},
 		{outcome: "racing_enabled", args: []string{"-enable-racing"}},
+		{outcome: "subscribed", args: []string{"-subscribe", "advances"}},
+		{outcome: "resubscribed", args: []string{"-subscribe", "depletes"}},
+		{outcome: "unsubscribed", args: []string{"-unsubscribe"}},
+		{outcome: "not_subscribed", args: []string{"-unsubscribe"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.outcome, func(t *testing.T) {
@@ -1144,6 +1170,14 @@ func TestTheMergeQueueVerbRefusesAMalformedControl(t *testing.T) {
 		{name: "a move-dir that is not there", args: func(*mergeFixture) []string { return []string{"-move-up", "-move-dir", "/no/such/worktree"} }},
 		{name: "a move that waits", args: func(*mergeFixture) []string { return []string{"-move-down", "-wait"} }},
 		{name: "a move to the front", args: func(*mergeFixture) []string { return []string{"-move-up", "-front"} }},
+		{name: "a subscription at an undeclared detail", args: func(*mergeFixture) []string { return []string{"-subscribe", "sometimes"} }},
+		{name: "a subscribe and an unsubscribe", args: func(*mergeFixture) []string { return []string{"-subscribe", "advances", "-unsubscribe"} }},
+		{name: "a subscription and a pause", args: func(*mergeFixture) []string { return []string{"-subscribe", "advances", "-pause"} }},
+		{name: "a subscription that waits", args: func(*mergeFixture) []string { return []string{"-subscribe", "advances", "-wait"} }},
+		{name: "a subscription to the front", args: func(*mergeFixture) []string { return []string{"-subscribe", "advances", "-front"} }},
+		{name: "a subscription scoped by a repository that is not there", args: func(*mergeFixture) []string {
+			return []string{"-subscribe", "advances", "-repository-dir", "/no/such/repo"}
+		}},
 		{name: "a control moving the version", args: func(*mergeFixture) []string {
 			return []string{"-pause", "-version-part", "patch", "-changelog-line", "x"}
 		}},
