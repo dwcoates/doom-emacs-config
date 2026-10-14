@@ -1447,3 +1447,155 @@ func TestAfterARestartAQueueThatCannotBeReadResumesNothing(t *testing.T) {
 		t.Fatalf("resumeIn = (%v, %v), want the read's failure surfaced and nothing resumed", resuming, err)
 	}
 }
+
+// pendingResume leaves the harness's merge taken back by the boot recovery
+// and not resumed yet: admitted, its lease adopted, its record in o.resumes.
+func pendingResume(t *testing.T) *harness {
+	t.Helper()
+	h := newHarness(t)
+	interruptedAt(t, h, atStep(TabTests, 1))
+	if err := h.o.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	return h
+}
+
+func TestEvictingAMergeTakenBackButNotResumedDropsItsEntryAndItsLeaseTogether(t *testing.T) {
+	// Arrange.
+	h := pendingResume(t)
+
+	// Act.
+	err := h.o.Evict(context.Background(), theWorkspace)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Evict: %v", err)
+	}
+	entries, _ := h.db.MergeQueue(context.Background(), h.repoKey())
+	_, held, _ := h.db.Lease(context.Background(), theWorkspace)
+	_, progress, _ := h.db.MergeProgressOf(context.Background(), theWorkspace)
+	if len(entries) != 0 || held || progress {
+		t.Fatalf("after the evict: %d entries, lease held %v, progress %v; want none of them", len(entries), held, progress)
+	}
+	h.o.mu.Lock()
+	_, pending := h.o.resumes[theWorkspace]
+	h.o.mu.Unlock()
+	if pending {
+		t.Fatal("the evicted merge is still handed to the pump to resume")
+	}
+}
+
+func TestEvictingAMergeTakenBackButNotResumedEndsItsBubbleAsAMergeThatRan(t *testing.T) {
+	// Arrange.
+	h := pendingResume(t)
+
+	// Act.
+	if err := h.o.Evict(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("Evict: %v", err)
+	}
+
+	// Assert.
+	if got, want := h.feed.lastAbandonedSummary(), runningSummaries[CauseUserDrop]; got != want {
+		t.Fatalf("the bubble ended %q, want %q", got, want)
+	}
+	if !recordedAt(h, "info", "dropped a merge a restart took back before it resumed: its entry, its lease and its progress record together") {
+		t.Fatal("the drop was not recorded")
+	}
+}
+
+func TestAFailedDropOfAMergeTakenBackLeavesItToResume(t *testing.T) {
+	// Arrange.
+	h := pendingResume(t)
+	h.db.mu.Lock()
+	h.db.dropAdmittedErr = errors.New("the store refused")
+	h.db.mu.Unlock()
+
+	// Act.
+	err := h.o.Evict(context.Background(), theWorkspace)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Evict succeeded over a refused drop")
+	}
+	h.o.mu.Lock()
+	_, pending := h.o.resumes[theWorkspace]
+	h.o.mu.Unlock()
+	entries, _ := h.db.MergeQueue(context.Background(), h.repoKey())
+	if !pending || len(entries) != 1 {
+		t.Fatalf("after the refused drop: pending %v, %d entries; want the merge left to resume", pending, len(entries))
+	}
+	rec, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.merge.drop_pending_resume"})
+	if !ok || rec.Context["workspace"] != string(theWorkspace) || rec.Context["lease"] == "" || rec.Context["error"] == nil {
+		t.Fatalf("the refused drop was recorded as %+v, want an ERROR naming the workspace, its lease and the cause", rec)
+	}
+}
+
+func TestAMergeTakenBackWhoseEntryCannotBeReadIsLeftToResume(t *testing.T) {
+	// Arrange.
+	h := pendingResume(t)
+	h.db.mu.Lock()
+	h.db.queueReadErr = errors.New("the store is gone")
+	h.db.mu.Unlock()
+
+	// Act.
+	err := h.o.Evict(context.Background(), theWorkspace)
+
+	// Assert.
+	h.o.mu.Lock()
+	_, pending := h.o.resumes[theWorkspace]
+	h.o.mu.Unlock()
+	if err == nil || !pending {
+		t.Fatalf("Evict = %v, pending %v; want the read's failure and the merge left to resume", err, pending)
+	}
+}
+
+func TestClosingTheWorkspaceOfAMergeTakenBackDropsItAsAnAdmittedMerge(t *testing.T) {
+	// Arrange.
+	h := pendingResume(t)
+
+	// Act.
+	h.o.OnWorkspaceClosed(context.Background(), theWorkspace)
+
+	// Assert.
+	if _, held, _ := h.db.Lease(context.Background(), theWorkspace); held {
+		t.Fatal("the closed workspace's merge lease outlived its entry")
+	}
+}
+
+func TestDroppingAnAdmittedMergeWithNoRunHereAsAWaitingOneIsRefused(t *testing.T) {
+	// Arrange: an admitted entry another daemon drives.
+	h := newHarness(t)
+	enqueue(t, h)
+	if err := h.db.AdmitMerge(context.Background(), h.repoKey(), theWorkspace); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act.
+	err := h.o.Evict(context.Background(), theWorkspace)
+
+	// Assert.
+	entries, _ := h.db.MergeQueue(context.Background(), h.repoKey())
+	if err == nil || len(entries) != 1 {
+		t.Fatalf("Evict = %v leaving %d entries, want the refusal and the entry kept", err, len(entries))
+	}
+	if !recordedAt(h, "error", "refused to drop an admitted merge as a waiting one") {
+		t.Fatal("the refusal was not recorded")
+	}
+}
+
+func TestAMergeTakenBackWithNoLeaseRecordedIsADefect(t *testing.T) {
+	// Arrange.
+	h := pendingResume(t)
+	h.o.mu.Lock()
+	doc := h.o.resumes[theWorkspace]
+	delete(h.o.ledgerOf, theWorkspace)
+	h.o.mu.Unlock()
+
+	// Act / Assert.
+	defer func() {
+		if recover() == nil {
+			t.Fatal("a taken-back merge with no lease did not fail hard")
+		}
+	}()
+	_ = h.o.dropPendingResume(context.Background(), theWorkspace, doc, CauseUserDrop)
+}
