@@ -1252,6 +1252,10 @@ func TestAUnaryCallInsideAnOrderedStandDownIsNotAFault(t *testing.T) {
 			if hasRecordAt(log, other, "daemon.shimclient.start_session") {
 				t.Fatalf("the failed call was ALSO recorded at %q: %+v", other, log.Records())
 			}
+			record, _ := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: tt.wantLevel, Operation: "daemon.shimclient.start_session"})
+			if _, named := record.Context["shim_pid"]; !named {
+				t.Fatalf("the failed call's record names no shim pid: %+v", record)
+			}
 		})
 	}
 }
