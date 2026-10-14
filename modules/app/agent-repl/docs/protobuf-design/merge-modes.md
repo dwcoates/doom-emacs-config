@@ -120,3 +120,22 @@ ASYNC merge. A sync merge exists only as a ONE-SHOT.
     (merge/pick.go, wsm.StartMergePick) keep their names: the machinery is
     unchanged. Stored feed rows (durable_feed_rows) are binary protobuf, so the
     FeedMergeTab field rename is safe on disk.
+
+### Implementation notes (landed with the daemon change)
+
+- A merge workspace's own worktree was ALREADY removed when its merge lands
+  (merge.run.closeLanded removes the worktree of every workspace a landing
+  closes), so `cleanup_worktree`'s new effect is the branch's other worktree
+  (wsm.MergeOrigin.CleanupDir), found at request time by branch name and
+  removed on landing through git's clean door (RemoveCleanWorktree, after an
+  IsClean check; a dirty tree is kept and logged at INFO).
+- The async one-shot reuses the landing's close path: the named workspace is
+  stamped merged and closed, its session stopped and its worktree removed,
+  exactly as a one-shot's own workspace is (merge.run.closings).
+- The requester's "landed" stamp (mergeworkspace.Service.stampLanding) is
+  unchanged: it retires a requester only when the requester's HEAD is exactly
+  the landed fork head, which a named-branch merge reaches only when the
+  branch is the requester's own work.
+- The merge-queue skill's run.sh and `agent-repld merge-queue` speak the same
+  two modes (`--one-shot [--pr-merged]`, `--async <name> <branch> ...`); the
+  command file's merge entry is `one_shot` or `async_name` + `branch`.
