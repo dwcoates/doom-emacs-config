@@ -507,3 +507,59 @@ func TestAnUnreadableCreationJobFailsTheAsyncLanding(t *testing.T) {
 		t.Fatal("detachedTarget = nil error, want the read failure")
 	}
 }
+
+// joblessLinkedWorktree makes the requester a workspace with no creation job
+// whose directory is NOT its repository's main worktree: the impossible state.
+func joblessLinkedWorktree(h *harness) wsm.Workspace {
+	requester := h.db.workspaces[theWorkspace]
+	h.git.mu.Lock()
+	h.git.mainWorktrees = map[string]string{requester.Dir: "/repo/main"}
+	h.git.mu.Unlock()
+	h.db.mu.Lock()
+	delete(h.db.jobs, theWorkspace)
+	h.db.mu.Unlock()
+	return requester
+}
+
+func TestAJoblessRequesterThatIsNoMainCheckoutFailsHardWithItsRecord(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	requester := joblessLinkedWorktree(h)
+
+	// Act
+	got, err := h.o.detachedTarget(context.Background(), requester)
+
+	// Assert
+	if err == nil || got != "" {
+		t.Fatalf("detachedTarget = %q, %v; want refused", got, err)
+	}
+	record, ok := h.recordFor(dlog.LevelError, opDetachedTarget)
+	if !ok {
+		t.Fatalf("no ERROR %s record", opDetachedTarget)
+	}
+	want := map[string]any{"workspace": string(theWorkspace), "dir": requester.Dir, "main_worktree": "/repo/main"}
+	for key, value := range want {
+		if record.Context[key] != value {
+			t.Errorf("record %s = %v, want %v", key, record.Context[key], value)
+		}
+	}
+}
+
+func TestAnAsyncRequestFromAJoblessLinkedWorktreeRecordsNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	joblessLinkedWorktree(h)
+	h.inFlight = "turn-asking"
+
+	// Act
+	err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource, By: RequestedByAgent,
+		Detached: &DetachedRun{Name: "n"}})
+
+	// Assert
+	if err == nil {
+		t.Fatal("Enqueue = nil, want the invariant violation")
+	}
+	if _, recorded := h.entryState(); recorded {
+		t.Fatal("the refused request was recorded")
+	}
+}
