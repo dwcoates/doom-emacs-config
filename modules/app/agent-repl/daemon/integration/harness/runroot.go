@@ -150,7 +150,8 @@ func (s runRootSpace) reclaimDeadRunsLocked() error {
 		if !dead {
 			continue
 		}
-		killed, err := reap.Under(root)
+		res, err := reap.Under(reap.OSTable{}, root, stderrLog{})
+		killed := len(res.Killed)
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -185,4 +186,16 @@ func runIsDead(root string) (bool, error) {
 	default:
 		return false, fmt.Errorf("probe the owner lock of %s: %w", root, err)
 	}
+}
+
+// stderrLog is the reap's log for a reclaim: every line on stderr, where the
+// reclaim itself is reported.
+type stderrLog struct{}
+
+func (stderrLog) Infof(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, "harness: "+format+"\n", args...)
+}
+
+func (stderrLog) Errorf(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, "harness: ERROR: "+format+"\n", args...)
 }
