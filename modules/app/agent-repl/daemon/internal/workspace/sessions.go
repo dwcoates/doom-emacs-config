@@ -19,6 +19,7 @@ import (
 	shimv1 "agentrepl/proto/shim/v1"
 
 	"agent-repld/internal/account"
+	"agent-repld/internal/cachelapse"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/health"
@@ -812,6 +813,11 @@ type source struct {
 	// vendor's fork of the parent's, on the spawned shim before it is resumed
 	// (forking.go). Nil for every bring-up but a fork's first.
 	Fork *wsm.PendingFork
+	// HoldKeepalive starts the session with its keep-alives held: the
+	// workspace is in the hidden section, as the record the bring-up started
+	// from reads (cachelapse.Keeper). A hide or a show after that read is the
+	// keeper's to apply, once the session it starts comes up.
+	HoldKeepalive bool
 }
 
 // classifySource makes the FRESH-CONVERSATION decision, and it is the ONE
@@ -1384,6 +1390,7 @@ func (f *Fleet) startUp(ctx context.Context, ws ids.WorkspaceID, rebind bool) er
 	if !src.Fresh {
 		f.deps.Steps(ws, opentabs.Step{Kind: opentabs.StepResuming})
 	}
+	src.HoldKeepalive = record.InHiddenSection()
 	started, err := f.startSession(runCtx, log, ws, client, src, session, configDir)
 	if errors.Is(err, errSessionAlreadyRunning) {
 		finishRun()
@@ -1590,6 +1597,7 @@ func (f *Fleet) ResumeCold(ctx context.Context, ws ids.WorkspaceID, resume ColdR
 	started, err := f.startSession(runCtx, log, ws, session.client, source{
 		VendorSessionID: resume.VendorSessionID,
 		ColdRemediation: resume.Remediation,
+		HoldKeepalive:   record.InHiddenSection(),
 	}, previous, configDir)
 	finishRun()
 	stopPhases()
@@ -2362,6 +2370,13 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 		}
 		req.Source = &shimv1.StartSessionRequest_Resume{Resume: resume}
 	}
+	// A HIDDEN WORKSPACE'S SESSION IS BORN HELD, so no keep-alive can fire
+	// between its start and the cache keeper's hold (cachelapse.Keeper): its
+	// cache is left to lapse from the first instant it runs.
+	if src.HoldKeepalive {
+		req.HoldKeepalive = &shimv1.StartSessionHoldKeepalive{}
+		log.Info("daemon.workspace.start_session", "the workspace is hidden; its session starts with its keep-alives held", nil)
+	}
 
 	// THE CALL IS BOUNDED. See DefaultStartSessionBound: a shim that accepts
 	// the start and never answers held this call, and the workspace's start
@@ -2841,6 +2856,16 @@ func (f *Fleet) Shim(ws ids.WorkspaceID) (Shim, bool) {
 	return &shimAdapter{client: session.client}, true
 }
 
+// Keepalives answers the keep-alive cadence of the shim serving WS, on the
+// same terms as Shim: false for no session and for a reaped client.
+func (f *Fleet) Keepalives(ws ids.WorkspaceID) (cachelapse.Keepalives, bool) {
+	shim, ok := f.Shim(ws)
+	if !ok {
+		return nil, false
+	}
+	return shim.(*shimAdapter), true
+}
+
 // Workspaces answers every workspace this fleet holds a session for, sorted.
 // It reads the fleet's own map, never the state client, so it still answers
 // when the store under the state root is gone -- the state-root-loss
@@ -3230,6 +3255,35 @@ func (a *shimAdapter) StopBash(ctx context.Context, work *conversationv1.Detache
 // account — and a collapse to a bare arm name and sentence would lose it.
 func (a *shimAdapter) ReadTranscripts(ctx context.Context) (*shimv1.ReadTranscriptsResponse, error) {
 	return a.client.ReadTranscripts(ctx, &shimv1.ReadTranscriptsRequest{})
+}
+
+// Hold holds the session's keep-alive cadence (cachelapse.Keepalives).
+func (a *shimAdapter) Hold(ctx context.Context) error {
+	return a.setKeepalive(ctx, &shimv1.SetKeepaliveRequest{Cadence: &shimv1.SetKeepaliveRequest_Hold{Hold: &shimv1.SetKeepaliveHold{}}})
+}
+
+// Run runs the session's keep-alive cadence again (cachelapse.Keepalives).
+func (a *shimAdapter) Run(ctx context.Context) error {
+	return a.setKeepalive(ctx, &shimv1.SetKeepaliveRequest{Cadence: &shimv1.SetKeepaliveRequest_Run{Run: &shimv1.SetKeepaliveRun{}}})
+}
+
+// setKeepalive sends one SetKeepalive. The shim's one refusal, no session, is
+// cachelapse.ErrNoSession.
+func (a *shimAdapter) setKeepalive(ctx context.Context, req *shimv1.SetKeepaliveRequest) error {
+	response, err := a.client.SetKeepalive(ctx, req)
+	if err != nil {
+		return err
+	}
+	if failure := response.GetError(); failure != nil {
+		if failure.GetNoSession() != nil {
+			return cachelapse.ErrNoSession
+		}
+		return &ShimRefusal{Verb: "SetKeepalive", Arm: "unknown", Detail: "the shim refused with an arm this daemon does not name"}
+	}
+	if response.GetSuccess() == nil {
+		return fmt.Errorf("workspace: SetKeepalive answered no outcome")
+	}
+	return nil
 }
 
 // StandDown arms the client's stand-down latch. See Shim.StandDown.

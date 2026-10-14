@@ -434,7 +434,7 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 	if log == nil {
 		return nil, errors.New("sessionwatcher: nil logger")
 	}
-	if sinks.Feed == nil || sinks.Footer == nil || sinks.Topbar == nil || sinks.Sidebar == nil || sinks.Lifecycle == nil || sinks.Commands == nil {
+	if sinks.Feed == nil || sinks.Footer == nil || sinks.Topbar == nil || sinks.Sidebar == nil || sinks.Lifecycle == nil || sinks.Commands == nil || sinks.CacheLapse == nil {
 		return nil, errors.New("sessionwatcher: every sink but Holds is required")
 	}
 	if sinks.Clock == nil {

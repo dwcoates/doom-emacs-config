@@ -40,8 +40,25 @@ type lifecycleSink struct {
 	// it exists (graph.go): the free edge and a session coming up retry a
 	// stand-down a turn deferred.
 	standDowns withheldRetrier
-	log        dlog.Logger
+	// caches is the hidden workspaces' cache keeper, bound once it exists
+	// (graph.go): a session coming up has its keep-alive cadence reconciled
+	// with its workspace's visibility.
+	caches sessionUpNotifiee
+	log    dlog.Logger
 }
+
+// sessionUpNotifiee is the slice of the cache keeper the sink tells a session
+// coming up.
+type sessionUpNotifiee interface {
+	SessionUp(ws ids.WorkspaceID)
+}
+
+// standDownsFunc adapts a function to the cache keeper's withheld
+// stand-downs, so the keeper can reach a drain controller built after it.
+type standDownsFunc func(ws ids.WorkspaceID)
+
+// StandDownWithheld implements cachelapse.StandDowns.
+func (f standDownsFunc) StandDownWithheld(ws ids.WorkspaceID) { f(ws) }
 
 // withheldRetrier is the slice of the drain controller the sink retries a
 // deferred stand-down through.
@@ -75,6 +92,13 @@ func (s *lifecycleSink) SessionUp(ws ids.WorkspaceID) {
 	// A SESSION THAT CAME UP WHILE ITS WORKSPACE WAS WITHHELD is stood down
 	// now, if a hide or a collapse is waiting on its start.
 	s.retryWithheld(ws, "session_up")
+	if s.caches == nil {
+		s.log.Error("daemon.cmd.lifecycle", "a session came up before the cache keeper was wired; its keep-alive cadence was not reconciled", dlog.Context{
+			"workspace": string(ws), "invariant_violation": "the cache keeper is bound before any session starts",
+		})
+	} else {
+		s.caches.SessionUp(ws)
+	}
 	if s.queue == nil {
 		s.log.Error("daemon.cmd.lifecycle", "a session came up before the prompt queue was wired; its reconnect holds were not released", dlog.Context{
 			"workspace": string(ws), "invariant_violation": "the queue is bound before any session starts",
