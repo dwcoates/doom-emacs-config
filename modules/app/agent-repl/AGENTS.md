@@ -13,6 +13,14 @@ of its surfaces shares.
 
 Owner rule, reaffirmed 2026-10-06: no test of any form — unit, integration, e2e, e2e-emacs, harness, hook test — runs real `git` or reaches a real vendor (the Claude API, the Agent SDK against Anthropic, any network vendor). Git is the fake git executable (`bin/fake-git.sh`, `daemon/integration/fakegit`); the vendor is the mocked SDK. A test that needs either and cannot use the fake is a gap to report, never an exception to take.
 
+## A system's integration tests run that system alone; every other system is a mock
+
+Owner rule, 2026-10-14. A system's unit and integration tests run exactly one real agent-repl system: the one under test. Every other system it talks to (daemon, shim, store, sidecar, webapp, Emacs), and every external dependency (git, the vendor), is a mock of that system. Only the e2e layers (`e2e/`, `e2e-emacs`) run several real systems together.
+
+- Why: a system's suite then depends only on that system's own source, its mocks and the shared contracts (`proto/`, the shared Go modules). A change confined to one system can be shown, from the paths it touches, to leave every other system's unit and integration suites unaffected, so a run may skip them. One real peer system inside an integration suite breaks that proof for the whole suite.
+- Each test directory's own `AGENTS.md` names the mocks it uses for each peer.
+- A test that needs a real peer to say anything useful belongs in `e2e/`, never in the system's integration suite.
+
 ## Elisp layout
 
 Every elisp source and every ERT suite lives in `lisp/`. Exactly three files
