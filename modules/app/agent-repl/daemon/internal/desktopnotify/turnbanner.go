@@ -62,7 +62,7 @@ func NewTurnBanners(deps TurnDeps) *TurnBanners {
 
 // OnTurnEnded posts the banner for a turn that ended with how. It reads the turn's end through ladder.ResolveTurnEnd, the table the
 // roster's colour is drawn from: `done` and `interrupted` (green) raise ✅ with
-// a summary of the final answer, `turn_failed` (turquoise, or blue once the
+// a summary of the final answer set in italics (Italic), `turn_failed` (turquoise, or blue once the
 // vendor blocks) raises ❌ with the errored ending's line.
 //
 // THE BANNER'S CHIME IS THE TURN'S ONE SOUND, rung the instant the banner is
@@ -88,7 +88,7 @@ func (t *TurnBanners) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how wsm.T
 		if end == ladder.TurnEndFailed {
 			return Banner{Title: TurnTitle(end, name, at), Body: ending.Error}
 		}
-		return Banner{Title: TurnTitle(end, name, at), Body: t.deps.Summaries.Summarize(ctx, ws, ending.Answer)}
+		return Banner{Title: TurnTitle(end, name, at), Body: Italic(t.deps.Summaries.Summarize(ctx, ws, ending.Answer))}
 	})
 }
 
