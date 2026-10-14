@@ -275,6 +275,9 @@ When Emacs quits, each workspace's input window is saved to that workspace's pro
 
 The one-shot commission prompt (`SPC TAB o`) saves what you type to its history on every keystroke.
 
+- The prompt always starts empty.
+  - Unlike the other creation prompts, it never copies in the text of your current workspace's input window.
+
 - If Emacs crashes while you type, press `SPC TAB o` again, then the up arrow or `M-p`.
   - The text you were typing is the first history entry, in full.
 - The text also stays in the history when you press `C-g`.
