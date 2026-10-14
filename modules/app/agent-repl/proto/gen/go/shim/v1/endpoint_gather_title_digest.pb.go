@@ -1,21 +1,20 @@
 // endpoint_gather_title_digest.proto — GatherTitleDigest: the material the
-// daemon summarizes into a workspace title of its OWN when the vendor has not
-// written one.
+// daemon distills into the workspace summary the topbar draws.
 //
 // WHY IT LIVES ON THE SHIM. The shim owns the transcript, and the digest is a
-// fact ABOUT the transcript: the user's prompts since the last context
-// boundary, plus — when the last boundary was a compaction — the compaction
-// summary the vendor already wrote. The daemon cannot read the transcript
-// itself (it does not know the file, and a compaction rewrites it), so it asks
-// the one process that does.
+// fact ABOUT the transcript: every prompt the user sent since the last /clear.
+// The daemon cannot read the transcript itself (it does not know the file), so
+// it asks the one process that does.
 //
-// THE BOUNDARY IS THE MOST RECENT CUT IN THE CURRENT TRANSCRIPT. A /clear
-// rotates to a NEW transcript file, so "the prompts in the current transcript"
-// is the same statement as "the prompts since the last /clear"; a /compact
-// stays in the SAME file and appends a `compact_boundary` plus the summary, so
-// the compaction is found by scanning that file. The digest reports which
-// boundary it found so the daemon can key its reset and its cost control on the
-// same fact the shim keyed the digest on.
+// ONLY A /clear CUTS THE DIGEST. A /clear rotates to a NEW transcript file, so
+// "the prompts in the current transcript" is the same statement as "the
+// prompts since the last /clear". A /compact stays in the SAME file and
+// discards nothing the user sent from it, so the prompts before a compaction
+// are still the user's prompts in this session and the digest carries them
+// (owner ruling, 2026-10-14: the summary distills every prompt of the session,
+// including pre-compaction, but not pre-clear). The digest reports whether it
+// found a clear so the daemon can key its reset on the same fact the shim keyed
+// the digest on.
 //
 // NO PAINT ATTESTATION: this answers what the transcript states, never that
 // anything was drawn from it.
@@ -47,22 +46,19 @@ const (
 // no distinction between NONE and CLEAR for the prompt set — both are "every
 // prompt in the current transcript" — but the two are reported apart because a
 // clear is a deliberate reset the daemon keys its own reset on, while NONE is
-// simply a conversation that has never been cut.
+// simply a conversation that has never been cleared.
 type TitleDigestBoundary int32
 
 const (
 	// Never sent; an unset boundary is a malformed frame.
 	TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_UNSPECIFIED TitleDigestBoundary = 0
-	// No cut anywhere in the current transcript: the prompts are the whole
-	// conversation.
+	// No clear anywhere in the current transcript: the prompts are the whole
+	// conversation, across every compaction.
 	TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_NONE TitleDigestBoundary = 1
 	// The current transcript opened at a /clear: the prompts are everything
-	// since that clear (which is everything in this transcript file).
+	// since that clear (which is everything in this transcript file), across
+	// every compaction.
 	TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_CLEAR TitleDigestBoundary = 2
-	// The most recent cut was a /compact: `last_compact_summary` carries the
-	// summary the compaction wrote, and `prompts` are the prompts that followed
-	// it.
-	TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_COMPACT TitleDigestBoundary = 3
 )
 
 // Enum value maps for TitleDigestBoundary.
@@ -71,13 +67,11 @@ var (
 		0: "TITLE_DIGEST_BOUNDARY_UNSPECIFIED",
 		1: "TITLE_DIGEST_BOUNDARY_NONE",
 		2: "TITLE_DIGEST_BOUNDARY_CLEAR",
-		3: "TITLE_DIGEST_BOUNDARY_COMPACT",
 	}
 	TitleDigestBoundary_value = map[string]int32{
 		"TITLE_DIGEST_BOUNDARY_UNSPECIFIED": 0,
 		"TITLE_DIGEST_BOUNDARY_NONE":        1,
 		"TITLE_DIGEST_BOUNDARY_CLEAR":       2,
-		"TITLE_DIGEST_BOUNDARY_COMPACT":     3,
 	}
 )
 
@@ -235,16 +229,11 @@ type GatherTitleDigestSuccess struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Which boundary the prompts are measured from.
 	Boundary TitleDigestBoundary `protobuf:"varint,1,opt,name=boundary,proto3,enum=shim.v1.TitleDigestBoundary" json:"boundary,omitempty"`
-	// The compaction summary the most recent /compact wrote, verbatim. SET ONLY
-	// when `boundary` is COMPACT; a summary is the vendor's own compression of
-	// the discarded history, so it belongs in the digest beside the prompts that
-	// followed it. Absent for every other boundary.
-	LastCompactSummary *string `protobuf:"bytes,2,opt,name=last_compact_summary,json=lastCompactSummary,proto3,oneof" json:"last_compact_summary,omitempty"`
-	// The user's prompts since the boundary, oldest first — the slash-command
-	// envelopes, tool-result echoes, compaction artifacts and subagent prompts
-	// the transcript also carries are NOT prompts and are excluded. An empty
-	// list is a legitimate answer for a fresh conversation nobody has prompted
-	// yet.
+	// The user's prompts since the last /clear, oldest first, including every
+	// prompt sent before a /compact — the slash-command envelopes, tool-result
+	// echoes, compaction artifacts and subagent prompts the transcript also
+	// carries are NOT prompts and are excluded. An empty list is a legitimate
+	// answer for a fresh conversation nobody has prompted yet.
 	Prompts       []string `protobuf:"bytes,3,rep,name=prompts,proto3" json:"prompts,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -285,13 +274,6 @@ func (x *GatherTitleDigestSuccess) GetBoundary() TitleDigestBoundary {
 		return x.Boundary
 	}
 	return TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_UNSPECIFIED
-}
-
-func (x *GatherTitleDigestSuccess) GetLastCompactSummary() string {
-	if x != nil && x.LastCompactSummary != nil {
-		return *x.LastCompactSummary
-	}
-	return ""
 }
 
 func (x *GatherTitleDigestSuccess) GetPrompts() []string {
@@ -478,12 +460,10 @@ const file_shim_v1_endpoint_gather_title_digest_proto_rawDesc = "" +
 	"\x19GatherTitleDigestResponse\x12=\n" +
 	"\asuccess\x18\x01 \x01(\v2!.shim.v1.GatherTitleDigestSuccessH\x00R\asuccess\x12=\n" +
 	"\afailure\x18\x02 \x01(\v2!.shim.v1.GatherTitleDigestFailureH\x00R\afailureB\b\n" +
-	"\x06result\"\xbe\x01\n" +
+	"\x06result\"\x8a\x01\n" +
 	"\x18GatherTitleDigestSuccess\x128\n" +
-	"\bboundary\x18\x01 \x01(\x0e2\x1c.shim.v1.TitleDigestBoundaryR\bboundary\x125\n" +
-	"\x14last_compact_summary\x18\x02 \x01(\tH\x00R\x12lastCompactSummary\x88\x01\x01\x12\x18\n" +
-	"\aprompts\x18\x03 \x03(\tR\apromptsB\x17\n" +
-	"\x15_last_compact_summary\"\xd1\x01\n" +
+	"\bboundary\x18\x01 \x01(\x0e2\x1c.shim.v1.TitleDigestBoundaryR\bboundary\x12\x18\n" +
+	"\aprompts\x18\x03 \x03(\tR\apromptsJ\x04\b\x02\x10\x03R\x14last_compact_summary\"\xd1\x01\n" +
 	"\x18GatherTitleDigestFailure\x12\x16\n" +
 	"\x06detail\x18\x01 \x01(\tR\x06detail\x12M\n" +
 	"\rno_transcript\x18\x02 \x01(\v2&.shim.v1.GatherTitleDigestNoTranscriptH\x00R\fnoTranscript\x12F\n" +
@@ -492,12 +472,11 @@ const file_shim_v1_endpoint_gather_title_digest_proto_rawDesc = "" +
 	"unreadableB\x06\n" +
 	"\x04kind\"\x1f\n" +
 	"\x1dGatherTitleDigestNoTranscript\"\x1d\n" +
-	"\x1bGatherTitleDigestUnreadable*\xa0\x01\n" +
+	"\x1bGatherTitleDigestUnreadable*\xa2\x01\n" +
 	"\x13TitleDigestBoundary\x12%\n" +
 	"!TITLE_DIGEST_BOUNDARY_UNSPECIFIED\x10\x00\x12\x1e\n" +
 	"\x1aTITLE_DIGEST_BOUNDARY_NONE\x10\x01\x12\x1f\n" +
-	"\x1bTITLE_DIGEST_BOUNDARY_CLEAR\x10\x02\x12!\n" +
-	"\x1dTITLE_DIGEST_BOUNDARY_COMPACT\x10\x03B Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
+	"\x1bTITLE_DIGEST_BOUNDARY_CLEAR\x10\x02\"\x04\b\x03\x10\x03*\x1dTITLE_DIGEST_BOUNDARY_COMPACTB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
 
 var (
 	file_shim_v1_endpoint_gather_title_digest_proto_rawDescOnce sync.Once
@@ -544,7 +523,6 @@ func file_shim_v1_endpoint_gather_title_digest_proto_init() {
 		(*GatherTitleDigestResponse_Success)(nil),
 		(*GatherTitleDigestResponse_Failure)(nil),
 	}
-	file_shim_v1_endpoint_gather_title_digest_proto_msgTypes[2].OneofWrappers = []any{}
 	file_shim_v1_endpoint_gather_title_digest_proto_msgTypes[3].OneofWrappers = []any{
 		(*GatherTitleDigestFailure_NoTranscript)(nil),
 		(*GatherTitleDigestFailure_Unreadable)(nil),

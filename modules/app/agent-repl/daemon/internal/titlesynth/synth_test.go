@@ -16,6 +16,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/headless"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/prompts"
 )
 
 const testWS = ids.WorkspaceID("ws-1")
@@ -116,13 +117,11 @@ func briefDir(t *testing.T) string {
 }
 
 // digestResponse builds a success response.
-func digestResponse(boundary shimv1.TitleDigestBoundary, summary string, prompts ...string) *shimv1.GatherTitleDigestResponse {
-	success := &shimv1.GatherTitleDigestSuccess{Boundary: boundary, Prompts: prompts}
-	if summary != "" {
-		success.LastCompactSummary = &summary
-	}
+func digestResponse(boundary shimv1.TitleDigestBoundary, said ...string) *shimv1.GatherTitleDigestResponse {
 	return &shimv1.GatherTitleDigestResponse{
-		Result: &shimv1.GatherTitleDigestResponse_Success{Success: success},
+		Result: &shimv1.GatherTitleDigestResponse_Success{
+			Success: &shimv1.GatherTitleDigestSuccess{Boundary: boundary, Prompts: said},
+		},
 	}
 }
 
@@ -133,6 +132,7 @@ type harness struct {
 	model   *fakeHeadless
 	configs *fakeConfigDirs
 	titles  *fakeTitles
+	log     *dlog.TestLogger
 }
 
 func newHarness(t *testing.T, resp *shimv1.GatherTitleDigestResponse) *harness {
@@ -142,6 +142,7 @@ func newHarness(t *testing.T, resp *shimv1.GatherTitleDigestResponse) *harness {
 		model:   &fakeHeadless{text: "Wire up the reconnect backoff"},
 		configs: &fakeConfigDirs{dir: "/root/.claude", ok: true},
 		titles:  &fakeTitles{},
+		log:     dlog.NewTestLogger(),
 	}
 	h.synth = New(Deps{
 		Digester:   h.digest,
@@ -149,16 +150,16 @@ func newHarness(t *testing.T, resp *shimv1.GatherTitleDigestResponse) *harness {
 		ConfigDirs: h.configs,
 		Titles:     h.titles,
 		PromptsDir: briefDir(t),
-		Log:        dlog.NewTestLogger(),
+		Log:        h.log,
 	})
 	return h
 }
 
 // ---- tests ----------------------------------------------------------------
 
-func TestSynthesizesWhenThereIsMaterialAndNoVendorTitle(t *testing.T) {
+func TestSynthesizesWhenThereIsMaterial(t *testing.T) {
 	// Arrange.
-	h := newHarness(t, digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_NONE, "", "make reconnect backoff"))
+	h := newHarness(t, digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_NONE, "make reconnect backoff"))
 
 	// Act.
 	h.synth.synthesizeOnce(context.Background(), testWS)
@@ -172,7 +173,7 @@ func TestSynthesizesWhenThereIsMaterialAndNoVendorTitle(t *testing.T) {
 
 func TestNoModelCallWhenTheDigestIsUnchanged(t *testing.T) {
 	// Arrange.
-	h := newHarness(t, digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_NONE, "", "one prompt"))
+	h := newHarness(t, digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_NONE, "one prompt"))
 
 	// Act — synthesize twice with the same digest.
 	h.synth.synthesizeOnce(context.Background(), testWS)
@@ -184,26 +185,9 @@ func TestNoModelCallWhenTheDigestIsUnchanged(t *testing.T) {
 	}
 }
 
-func TestNoSynthesisWhenTheVendorTitleIsPresent(t *testing.T) {
-	// Arrange.
-	h := newHarness(t, digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_NONE, "", "a prompt"))
-	h.synth.OnVendorTitle(testWS)
-
-	// Act.
-	h.synth.synthesizeOnce(context.Background(), testWS)
-
-	// Assert — the vendor's own title always wins, so we never call.
-	if got := h.model.callCount(); got != 0 {
-		t.Fatalf("model calls = %d, want 0 (vendor title present)", got)
-	}
-	if _, set := h.titles.last(); set {
-		t.Fatalf("a title was synthesized despite the vendor's title")
-	}
-}
-
 func TestTheModelCallBillsTheWorkspaceAccount(t *testing.T) {
 	// Arrange.
-	h := newHarness(t, digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_NONE, "", "a prompt"))
+	h := newHarness(t, digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_NONE, "a prompt"))
 	h.configs.dir = "/root/second-account"
 
 	// Act.
@@ -217,7 +201,7 @@ func TestTheModelCallBillsTheWorkspaceAccount(t *testing.T) {
 
 func TestTheModelCallAsksForTheCheapModel(t *testing.T) {
 	// Arrange.
-	h := newHarness(t, digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_NONE, "", "a prompt"))
+	h := newHarness(t, digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_NONE, "a prompt"))
 
 	// Act.
 	h.synth.synthesizeOnce(context.Background(), testWS)
@@ -230,7 +214,7 @@ func TestTheModelCallAsksForTheCheapModel(t *testing.T) {
 
 func TestTheModelCallAsksUnderItsOwnGuardSite(t *testing.T) {
 	// Arrange.
-	h := newHarness(t, digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_NONE, "", "a prompt"))
+	h := newHarness(t, digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_NONE, "a prompt"))
 
 	// Act.
 	h.synth.synthesizeOnce(context.Background(), testWS)
@@ -243,7 +227,7 @@ func TestTheModelCallAsksUnderItsOwnGuardSite(t *testing.T) {
 
 func TestAGuardRefusalKeepsTheWorkspaceName(t *testing.T) {
 	// Arrange — the vendor guard refuses the call, as it does under test.
-	h := newHarness(t, digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_NONE, "", "a prompt"))
+	h := newHarness(t, digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_NONE, "a prompt"))
 	h.model.err = &headless.Error{Cause: headless.CauseGuardRefused, Detail: "forbidden"}
 
 	// Act.
@@ -280,7 +264,7 @@ func TestADigestFailureKeepsTheWorkspaceName(t *testing.T) {
 
 func TestAFreshConversationWithNoPromptsMakesNoCall(t *testing.T) {
 	// Arrange — a NONE boundary with no prompts is a fresh session.
-	h := newHarness(t, digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_NONE, ""))
+	h := newHarness(t, digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_NONE))
 
 	// Act.
 	h.synth.synthesizeOnce(context.Background(), testWS)
@@ -296,7 +280,7 @@ func TestAFreshConversationWithNoPromptsMakesNoCall(t *testing.T) {
 
 func TestAClearWithNoPromptsRetractsTheStaleTitle(t *testing.T) {
 	// Arrange — a /clear left an empty transcript; the old title is stale.
-	h := newHarness(t, digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_CLEAR, ""))
+	h := newHarness(t, digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_CLEAR))
 
 	// Act.
 	h.synth.synthesizeOnce(context.Background(), testWS)
@@ -312,8 +296,8 @@ func TestAClearWithNoPromptsRetractsTheStaleTitle(t *testing.T) {
 }
 
 func TestOnContextResetForcesRe_Synthesis(t *testing.T) {
-	// Arrange — one synthesis, then a /compact reset.
-	h := newHarness(t, digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_NONE, "", "a prompt"))
+	// Arrange — one synthesis, then a /clear reset.
+	h := newHarness(t, digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_NONE, "a prompt"))
 	h.synth.synthesizeOnce(context.Background(), testWS)
 
 	// Act — reset the hash, then synthesize the SAME digest again.
@@ -328,10 +312,24 @@ func TestOnContextResetForcesRe_Synthesis(t *testing.T) {
 
 func TestOnTurnEndedSynthesizesAsynchronously(t *testing.T) {
 	// Arrange.
-	h := newHarness(t, digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_NONE, "", "a prompt"))
+	h := newHarness(t, digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_NONE, "a prompt"))
 
 	// Act — the public trigger dispatches a goroutine; Wait joins it.
 	h.synth.OnTurnEnded(testWS)
+	h.synth.Wait()
+
+	// Assert.
+	if got, ok := h.titles.last(); !ok || got != "Wire up the reconnect backoff" {
+		t.Fatalf("synthesized title = %q (set=%v), want the async run's result", got, ok)
+	}
+}
+
+func TestOnPromptSynthesizesAsynchronously(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_NONE, "a prompt"))
+
+	// Act.
+	h.synth.OnPrompt(testWS)
 	h.synth.Wait()
 
 	// Assert.
@@ -483,7 +481,7 @@ func promptsN(n int) []string {
 // prompts and runs one synthesis.
 func (h *harness) synthesizeWith(t *testing.T, prompts []string) {
 	t.Helper()
-	h.digest.resp = digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_NONE, "", prompts...)
+	h.digest.resp = digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_NONE, prompts...)
 	h.synth.synthesizeOnce(context.Background(), testWS)
 }
 
@@ -548,8 +546,8 @@ func TestAMovedBoundaryIsDueAtOnce(t *testing.T) {
 	h := newHarness(t, nil)
 	h.synthesizeWith(t, promptsN(3))
 
-	// Act: the transcript now opens at a compaction, with one prompt after it.
-	h.digest.resp = digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_COMPACT, "the summary", "after")
+	// Act: the transcript now opens at a clear, with one prompt after it.
+	h.digest.resp = digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_CLEAR, "after")
 	h.synth.synthesizeOnce(context.Background(), testWS)
 
 	// Assert.
@@ -558,14 +556,14 @@ func TestAMovedBoundaryIsDueAtOnce(t *testing.T) {
 	}
 }
 
-// ---- the title digest: prompts only, whole, the newest weighed most ----
+// ---- the title digest: every prompt, whole, none weighed above another ----
 
 func TestTitleDigestCarriesAPromptWhole(t *testing.T) {
 	// Arrange: a prompt far past the naming digest's per-prompt cap.
 	long := strings.Repeat("x", MaxPromptRunes*3)
 
 	// Act.
-	got := TitleDigest("", []string{long})
+	got := TitleDigest([]string{long})
 
 	// Assert.
 	if !strings.Contains(got, long) {
@@ -575,10 +573,10 @@ func TestTitleDigestCarriesAPromptWhole(t *testing.T) {
 
 func TestTitleDigestCarriesEveryPrompt(t *testing.T) {
 	// Arrange: more prompts than the naming digest keeps.
-	prompts := promptsN(MaxPrompts + 5)
+	said := promptsN(MaxPrompts + 5)
 
 	// Act.
-	got := TitleDigest("", prompts)
+	got := TitleDigest(said)
 
 	// Assert.
 	if !strings.Contains(got, "prompt 0\n") || !strings.Contains(got, fmt.Sprintf("prompt %d\n", MaxPrompts+4)) {
@@ -586,43 +584,20 @@ func TestTitleDigestCarriesEveryPrompt(t *testing.T) {
 	}
 }
 
-func TestTitleDigestSetsTheNewestPromptsApart(t *testing.T) {
-	// Arrange.
-	prompts := promptsN(RecentPrompts + 2)
-
-	// Act.
-	got := TitleDigest("", prompts)
-
-	// Assert: the two oldest come before the recent header, the rest after.
-	recent := strings.Index(got, "most recent requests")
-	if recent < 0 || strings.Index(got, "prompt 1\n") > recent || strings.Index(got, "prompt 2\n") < recent {
-		t.Fatalf("TitleDigest = %q, want the newest %d after the recent header", got, RecentPrompts)
-	}
-}
-
-func TestTitleDigestLeadsWithTheSummaryWhenFewPromptsFollowedIt(t *testing.T) {
+func TestTitleDigestListsThePromptsOldestFirstUnderOneHeader(t *testing.T) {
 	// Arrange, Act.
-	got := TitleDigest("the compaction summary", promptsN(RecentPrompts-1))
+	got := TitleDigest([]string{"first", "second"})
 
-	// Assert.
-	if !strings.HasPrefix(got, "A summary of the conversation") || !strings.Contains(got, "the compaction summary") {
-		t.Fatalf("TitleDigest = %q, want the summary first", got)
-	}
-}
-
-func TestTitleDigestDropsTheSummaryOnceRecentPromptsFollowedIt(t *testing.T) {
-	// Arrange, Act.
-	got := TitleDigest("the compaction summary", promptsN(RecentPrompts))
-
-	// Assert.
-	if strings.Contains(got, "the compaction summary") {
-		t.Fatalf("TitleDigest = %q, want no summary past %d prompts", got, RecentPrompts)
+	// Assert: one list, no prompt set apart from another.
+	want := "Every request the user sent in this session, oldest first:\n- first\n- second\n"
+	if got != want {
+		t.Fatalf("TitleDigest = %q, want %q", got, want)
 	}
 }
 
 func TestTitleDigestOpensTemplateDelimitersAUserTyped(t *testing.T) {
 	// Arrange, Act.
-	got := TitleDigest("", []string{"why does {{prompt}} not splice"})
+	got := TitleDigest([]string{"why does {{prompt}} not splice"})
 
 	// Assert.
 	if strings.Contains(got, "{{") || strings.Contains(got, "}}") {
@@ -630,10 +605,102 @@ func TestTitleDigestOpensTemplateDelimitersAUserTyped(t *testing.T) {
 	}
 }
 
+// ---- the user's words: injected meta spans are not the request ----
+
+func TestUsersWords(t *testing.T) {
+	tests := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{name: "a plain prompt is kept whole", in: []string{"fix the backoff"}, want: []string{"fix the backoff"}},
+		{name: "an injected span is stripped", in: []string{prompts.Wrap("Do not wait. ") + "fix the backoff" + prompts.Wrap(" then merge")}, want: []string{"fix the backoff"}},
+		{name: "a prompt of nothing but injected spans is dropped", in: []string{prompts.Wrap("merge brief"), "fix the backoff"}, want: []string{"fix the backoff"}},
+		{name: "no prompts are no words", in: nil, want: []string{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			got, err := UsersWords(tt.in)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("UsersWords error = %v", err)
+			}
+			if len(got) != len(tt.want) || strings.Join(got, "|") != strings.Join(tt.want, "|") {
+				t.Fatalf("UsersWords = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestUsersWordsRefusesAnUnbalancedSpan(t *testing.T) {
+	// Arrange, Act.
+	_, err := UsersWords([]string{"fine", prompts.MetaOpen + "never closed"})
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "prompt 1") {
+		t.Fatalf("UsersWords error = %v, want the unbalanced prompt named", err)
+	}
+}
+
+func TestAnUnbalancedSpanMakesNoModelCallAndLogsTheCause(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_NONE, prompts.MetaOpen+"never closed"))
+
+	// Act.
+	h.synth.synthesizeOnce(context.Background(), testWS)
+
+	// Assert.
+	if got := h.model.callCount(); got != 0 {
+		t.Fatalf("model calls = %d, want 0", got)
+	}
+	if _, set := h.titles.last(); set {
+		t.Fatal("a title was installed from a prompt that could not be read")
+	}
+	rec, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error", Operation: opSynth})
+	if !ok {
+		t.Fatalf("no error record for the unbalanced span (records = %v)", h.log.Records())
+	}
+	if rec.Context["workspace"] != string(testWS) || rec.Context["prompts"] != 1 || !strings.Contains(fmt.Sprint(rec.Context["cause"]), "never closes") {
+		t.Fatalf("error record context = %v, want the workspace, the prompt count and the cause", rec.Context)
+	}
+}
+
+func TestAClearWithOnlyInjectedSpansRetractsTheStaleTitle(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_CLEAR, prompts.Wrap("merge brief")))
+
+	// Act.
+	h.synth.synthesizeOnce(context.Background(), testWS)
+
+	// Assert.
+	if got, ok := h.titles.last(); !ok || got != "" {
+		t.Fatalf("synthesized title = %q (set=%v), want a retraction", got, ok)
+	}
+	if calls := h.model.callCount(); calls != 0 {
+		t.Fatalf("model calls = %d, want 0", calls)
+	}
+}
+
+func TestTheModelIsSentTheUsersWordsAlone(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_NONE, "fix the backoff"+prompts.Wrap("then invoke the merge queue")))
+
+	// Act.
+	h.synth.synthesizeOnce(context.Background(), testWS)
+
+	// Assert.
+	sent := h.model.lastRequest().Prompt
+	if !strings.Contains(sent, "fix the backoff") || strings.Contains(sent, "merge queue") {
+		t.Fatalf("model prompt = %q, want the user's words without the injected span", sent)
+	}
+}
+
 func TestTheModelIsSentTheTitleDigest(t *testing.T) {
 	// Arrange: a prompt the naming digest would have cut.
 	long := strings.Repeat("y", MaxPromptRunes*2)
-	h := newHarness(t, digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_NONE, "", long))
+	h := newHarness(t, digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_NONE, long))
 
 	// Act.
 	h.synth.synthesizeOnce(context.Background(), testWS)

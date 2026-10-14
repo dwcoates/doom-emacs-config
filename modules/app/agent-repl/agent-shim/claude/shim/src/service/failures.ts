@@ -805,8 +805,6 @@ function titleDigestBoundary(boundary: TitleDigest["boundary"]): shimv1.TitleDig
       return shimv1.TitleDigestBoundary.NONE;
     case "clear":
       return shimv1.TitleDigestBoundary.CLEAR;
-    case "compact":
-      return shimv1.TitleDigestBoundary.COMPACT;
   }
 }
 
@@ -817,9 +815,6 @@ export function titleDigestGathered(digest: TitleDigest): shimv1.GatherTitleDige
       case: "success",
       value: create(shimv1.GatherTitleDigestSuccessSchema, {
         boundary: titleDigestBoundary(digest.boundary),
-        // `lastCompactSummary` is optional-by-presence: it is set only for a
-        // compaction boundary, matching the proto's "SET ONLY when COMPACT".
-        lastCompactSummary: digest.lastCompactSummary,
         prompts: digest.prompts,
       }),
     },
