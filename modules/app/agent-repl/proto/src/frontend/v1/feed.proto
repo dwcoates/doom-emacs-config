@@ -3320,15 +3320,47 @@ message FeedMergeTabTests {
 // remediation, which is the `tests_run_fixing` row parented to THIS row. When
 // the last attempt fails, the merge FAILS and the workspace is handed back.
 message FeedMergeTabTestsRun {
-  // The run of the suites itself, NOT the fixing after it.
+  // The run of the suites itself, NOT the fixing after it: waiting for its
+  // repository's test turn, running, or ended. A run moves only forward
+  // through them, waiting_for_turn → live → settled, and may settle straight
+  // from waiting_for_turn when it is cut before its turn comes (the target
+  // moved, the merge was stopped, the daemon left).
   oneof state {
     // The suites are running.
     FeedMergeTabLive live = 1;
     // The run ended: every suite passed (succeeded), or one failed (failed).
     FeedMergeTabSettled settled = 2;
+    // The suites have not started: another merge of the same repository
+    // holds its test turn, and this run is in line for it.
+    FeedMergeTabTestsRunWaitingForTurn waiting_for_turn = 4;
   }
-  // The run's tests view: the suites and the log.
+  // The run's tests view: the suites and the log. Empty while the run waits
+  // for its turn.
   FeedMergeTestsRunOutput output = 3;
+}
+
+// A run waiting for its repository's TEST TURN. Only one merge of a
+// repository runs its test gate at a time; the merges ready to run theirs
+// stand in line, first come first served, and the turn passes to the front of
+// the line the moment the holder's run ends. So while one merge fixes a failed
+// run, the other's tests run, and neither can be passed over for good. The
+// tab draws the wait, and whose run it waits behind, so a merge that is not
+// testing yet never reads as stalled.
+message FeedMergeTabTestsRunWaitingForTurn {
+  // When this run's round began, epoch ms: the moment it joined the line.
+  // The tab ticks its elapsed time from it, and the live arm that follows
+  // carries the same start, so the run's drawn duration includes its wait.
+  int64 started_at_ms = 1;
+  // The merge whose run holds the turn now. Always set: a run waits only
+  // while another holds the turn. Republished whenever the turn passes to a
+  // merge other than this one.
+  FeedMergeTestTurnHolder holder = 2;
+}
+
+// The merge holding its repository's test turn, as the waiting run names it.
+message FeedMergeTestTurnHolder {
+  // The holding merge's requesting workspace's name, drawn verbatim.
+  string workspace_name = 1;
 }
 
 // The tests view of a run: the programmatic test run — suites,

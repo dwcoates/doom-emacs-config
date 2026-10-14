@@ -301,7 +301,10 @@ func (v *testsView) testsTab(waiting bool) *frontendv1.FeedMergeTab {
 // runTab builds run n's subtab: the run's own badge and its output.
 func runTab(n int, st tabState, suites []*frontendv1.FeedMergeTestSuite, log *frontendv1.FeedMergeTestLog) *frontendv1.FeedMergeTab {
 	inner := &frontendv1.FeedMergeTabTestsRun{Output: &frontendv1.FeedMergeTestsRunOutput{Suites: suites, Log: log}}
-	if live, settled := st.badge(); live != nil {
+	if !st.settled && st.turnHolder != "" {
+		inner.State = &frontendv1.FeedMergeTabTestsRun_WaitingForTurn{WaitingForTurn: &frontendv1.FeedMergeTabTestsRunWaitingForTurn{
+			StartedAtMs: st.startedMS, Holder: &frontendv1.FeedMergeTestTurnHolder{WorkspaceName: st.turnHolder}}}
+	} else if live, settled := st.badge(); live != nil {
 		inner.State = &frontendv1.FeedMergeTabTestsRun_Live{Live: live}
 	} else {
 		inner.State = &frontendv1.FeedMergeTabTestsRun_Settled{Settled: settled}
@@ -411,6 +414,17 @@ func (r *run) publishTesting(waiting bool) {
 func (r *run) settleTesting(failure string) {
 	r.testing.Span.settle(r.o.nowMS(), failure)
 	r.publishTesting(false)
+}
+
+// endRun ends the run of tests round ROUND, and the tests tab with it: the
+// run's subtab and the tab settle with LINE (empty for a pass), the run
+// drawing SUITES and LOG, and the round's ledger interval closes as CLOSED.
+// Every way a run ends with the gate settles through it, so the subtab, the
+// tab and the ledger never disagree about how a run ended.
+func (r *run) endRun(ctx context.Context, round tabRound, line string, suites []*frontendv1.FeedMergeTestSuite, log *frontendv1.FeedMergeTestLog, closed string) {
+	r.publishRun(round, round.settled(r.o.nowMS(), line), suites, log)
+	r.settleTesting(line)
+	r.closeTab(ctx, round, closed)
 }
 
 // publishRun publishes the run of tests round ROUND at ST.

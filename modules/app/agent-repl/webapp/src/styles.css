@@ -7491,6 +7491,13 @@ ar-button.outcome-marker-pill {
   padding: 0.25rem 0;
   color: var(--err);
 }
+/* A RUN IN LINE FOR ITS TEST TURN is under way but runs nothing yet: its dot
+   is hollow and still, and the line under the strip names whose tests run. */
+.merge-tab-glyph.is-waiting-for-turn { color: var(--muted); }
+.merge-tab-summary .merge-tab-waiting-for-turn {
+  padding: 0.25rem 0;
+  color: var(--muted);
+}
 .merge-tab-panel { padding-top: 0.3rem; }
 /* A running agent stream's stop sits on its own line above its rows: a tab's,
    or a conflicted commit's section's. */

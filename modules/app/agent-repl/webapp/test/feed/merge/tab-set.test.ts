@@ -149,6 +149,13 @@ describe("drawSummary", () => {
     drawSummary(host, tab);
     expect([host.hidden, host.textContent]).toEqual([true, ""]);
   });
+
+  it("names the merge a run waits behind for its test turn", () => {
+    const host = document.createElement("div");
+    const [tab] = tabs(["r1", { kind: "testsRun", state: "waitingForTurn", holder: "beta" }]);
+    drawSummary(host, tab);
+    expect([host.hidden, host.textContent]).toEqual([false, "waiting for the test turn: beta's tests run first"]);
+  });
 });
 
 // EVERY STRIP IS THE ONE TAB SET: the bubble's own and every nested one. A

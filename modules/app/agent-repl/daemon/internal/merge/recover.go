@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -519,13 +520,22 @@ func (o *orchestrator) recoverDisplaced(ctx context.Context) error {
 // queue unrecovered.
 func (o *orchestrator) sweepOrphanedState(ctx context.Context) {
 	const op = "daemon.merge.recover"
-	progress, rounds, err := o.deps.DB.SweepOrphanedMergeState(ctx, o.deps.Now())
+	swept, err := o.deps.DB.SweepOrphanedMergeState(ctx, o.deps.Now())
 	if err != nil {
 		o.deps.Log.Global().Error(op, "could not sweep the merge state no queue entry names any more", dlog.Context{"error": err.Error()})
 		return
 	}
-	if progress+rounds > 0 {
+	// EACH MERGE LEASE RELEASED IS ITS OWN RECORD, with its workspace: a lease
+	// over no queue entry refused every prompt the workspace was sent, and
+	// the record is what says the boot healed it.
+	for _, l := range swept.ReleasedLeases {
+		fields := dlog.Context{"workspace": string(l.Workspace), "lease": string(l.ID), "acquired_at": l.AcquiredAt.UTC().Format(time.RFC3339Nano)}
+		o.log(ctx, l.Workspace).Info(op, "released a merge lease no queue entry names any more; the workspace takes prompts again", fields)
+		o.deps.Log.Global().Info(op, "released a merge lease no queue entry names any more; the workspace takes prompts again", fields)
+		o.deps.Queue.OnLeaseChanged(l.Workspace)
+	}
+	if swept.ProgressRecords+swept.RoundsClosed+len(swept.ReleasedLeases) > 0 {
 		o.deps.Log.Global().Info(op, "swept the merge state no queue entry names any more", dlog.Context{
-			"progress_records": progress, "rounds_closed": rounds})
+			"progress_records": swept.ProgressRecords, "rounds_closed": swept.RoundsClosed, "leases_released": len(swept.ReleasedLeases)})
 	}
 }

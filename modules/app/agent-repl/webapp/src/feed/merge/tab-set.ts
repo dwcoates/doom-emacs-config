@@ -29,6 +29,7 @@ import { placeChildren } from "../../dom.js";
 import type { Ticker } from "../../clock.js";
 import { FeedRowSchema } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { replaceTicking, stopTicking } from "../ticking.js";
+import { requireMessage } from "../../rpc/strict.js";
 import {
   autoSelectedTab,
   drawFeedMergeTab,
@@ -186,14 +187,25 @@ export function createTabSet(
 }
 
 /**
- * The line under a strip: a settled-failed tab's own account.
+ * The line under a strip: a settled-failed tab's own account, or the merge a
+ * test run waits behind for its repository's test turn.
  *
- * The daemon composed it; the tab's content carries the detail, so this states
- * the outcome once and does not restate what is already below it.
+ * The daemon composed both; the tab's content carries the detail, so this
+ * states the outcome or the wait once and does not restate what is below it.
  */
 export function drawSummary(host: HTMLElement, tab: MergeTab | undefined): void {
   replaceTicking(host);
   host.hidden = true;
+  if (tab !== undefined && tab.state === "waitingForTurn") {
+    const waiting = tab.value["state"] as { value: { holder?: { workspaceName: string } } };
+    const holder = requireMessage(waiting.value.holder, "FeedMergeTabTestsRunWaitingForTurn.holder");
+    const el = document.createElement("div");
+    el.className = "merge-tab-waiting-for-turn";
+    el.textContent = `waiting for the test turn: ${holder.workspaceName}'s tests run first`;
+    host.append(el);
+    host.hidden = false;
+    return;
+  }
   if (tab === undefined || tab.state !== "settled" || tab.outcome !== "failed") return;
   const settled = tab.value["state"] as { value: { outcome: { value: { summary: string } } } };
   const el = document.createElement("div");
