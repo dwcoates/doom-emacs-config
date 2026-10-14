@@ -21,6 +21,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/procgroup"
 	"agent-repld/internal/shimsocket"
 )
 
@@ -133,6 +134,11 @@ type client struct {
 	// injects the answer a shim that exits between the peer read and the
 	// group read gives (killAdopted).
 	processGroup func(pid int) (int, error)
+	// signalGroupOf signals an adopted shim's process group and groupGone
+	// reads whether it holds no live process; nil is procgroup.Signal and
+	// procgroup.Gone. A test injects their failures (killAdopted).
+	signalGroupOf func(pgid int, sig syscall.Signal) error
+	groupGone     func(pgid int) (bool, error)
 
 	// lockProbe answers whether the workspace's kernel lock reads FREE. It is
 	// injected because sessionlock is shimclient's PEER, not its dependency;
@@ -706,14 +712,22 @@ func (c *client) adoptedAlreadyGone(attr KillAttribution, pid int, observed dlog
 	return nil
 }
 
-// signalAdoptedGroup sends one signal to an adopted shim's process group. A
-// group that is already gone is SUCCESS — the caller asked for it to stop —
-// and every other errno is returned.
+// signalAdoptedGroup sends one signal to an adopted shim's process group
+// (procgroup.Signal). A group that is already gone, or holds only exited
+// members, is SUCCESS — the caller asked for it to stop — and every other
+// failure is returned.
+//
+// A GROUP OF ONE UNREAPED ZOMBIE ANSWERS killpg EPERM ON DARWIN. A shim that
+// answered KillSession leaves once the daemon hangs up, so the forced kill
+// that follows routinely meets it exited and not yet reaped by launchd; read
+// as a refusal, that failed a merge's teardown ("killed the adopted process
+// group ...: operation not permitted").
 func (c *client) signalAdoptedGroup(sig syscall.Signal, pgid int) error {
-	if err := syscall.Kill(-pgid, sig); err != nil {
-		if errors.Is(err, syscall.ESRCH) {
-			return nil
-		}
+	signal := c.signalGroupOf
+	if signal == nil {
+		signal = procgroup.Signal
+	}
+	if err := signal(pgid, sig); err != nil {
 		c.log.Error("daemon.shimclient.kill", "signalling the adopted shim's process group failed", dlog.Context{
 			"workspace_id": string(c.ws), "pgid": pgid, "signal": sig.String(), "error": err.Error(),
 		})
@@ -732,8 +746,19 @@ func (c *client) awaitAdoptedGone(ctx context.Context, pgid int, bound time.Dura
 	deadline := time.Now().Add(bound)
 	poll := time.NewTicker(adoptedGonePoll)
 	defer poll.Stop()
+	probe := c.groupGone
+	if probe == nil {
+		probe = procgroup.Gone
+	}
 	for {
-		if processGone(-pgid) {
+		gone, err := probe(pgid)
+		if err != nil {
+			c.log.Error("daemon.shimclient.kill", "could not read whether the adopted shim's process group is gone", dlog.Context{
+				"workspace_id": string(c.ws), "pgid": pgid, "error": err.Error(),
+			})
+			return false
+		}
+		if gone {
 			return true
 		}
 		if !time.Now().Before(deadline) {
