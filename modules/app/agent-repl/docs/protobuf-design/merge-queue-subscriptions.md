@@ -87,6 +87,18 @@ selection round; each decision below records the reasoning a reviewer needs.
     own words are hidden. Accepted by the owner's framing (the notification is
     not drawn; the agent's work is the agent's).
 
+### 3. `UpdateMergeQueueError.subscriber_closed` (12)
+
+- **What**: `subscribe` naming a closed workspace is refused.
+- **Why**: a close is what ends a subscription, so a subscription taken by a
+  workspace that is already closed would never end, and its notices would be
+  submitted to a session nobody runs. The store refuses it inside the same
+  transaction that writes the row, so the check and the write cannot be
+  separated by a close.
+- **Consequences**: `daemon/internal/merge/refusals.go` maps the store's
+  refusal to the arm; the command-file path quarantines the entry with the
+  cause, as any refusal.
+
 ## Non-contract decisions recorded for the implementation
 
 - **Persistence model.** Subscriptions are durable (wsm layout 52,

@@ -1185,6 +1185,7 @@ type UpdateMergeQueueError struct {
 	//	*UpdateMergeQueueError_RacingAlreadyDisabled
 	//	*UpdateMergeQueueError_RacingNotDisabled
 	//	*UpdateMergeQueueError_NotSubscribed
+	//	*UpdateMergeQueueError_SubscriberClosed
 	Cause         isUpdateMergeQueueError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1344,6 +1345,15 @@ func (x *UpdateMergeQueueError) GetNotSubscribed() *UpdateMergeQueueNotSubscribe
 	return nil
 }
 
+func (x *UpdateMergeQueueError) GetSubscriberClosed() *UpdateMergeQueueSubscriberClosed {
+	if x != nil {
+		if x, ok := x.Cause.(*UpdateMergeQueueError_SubscriberClosed); ok {
+			return x.SubscriberClosed
+		}
+	}
+	return nil
+}
+
 type isUpdateMergeQueueError_Cause interface {
 	isUpdateMergeQueueError_Cause()
 }
@@ -1415,6 +1425,13 @@ type UpdateMergeQueueError_NotSubscribed struct {
 	NotSubscribed *UpdateMergeQueueNotSubscribed `protobuf:"bytes,13,opt,name=not_subscribed,json=notSubscribed,proto3,oneof"`
 }
 
+type UpdateMergeQueueError_SubscriberClosed struct {
+	// `subscribe` naming a CLOSED workspace as the subscriber. A closed
+	// workspace runs no agent to tell, and a close is what ends a
+	// subscription, so one taken while closed would never end.
+	SubscriberClosed *UpdateMergeQueueSubscriberClosed `protobuf:"bytes,14,opt,name=subscriber_closed,json=subscriberClosed,proto3,oneof"`
+}
+
 func (*UpdateMergeQueueError_UnknownWorkspace) isUpdateMergeQueueError_Cause() {}
 
 func (*UpdateMergeQueueError_WorkspaceRefMismatch) isUpdateMergeQueueError_Cause() {}
@@ -1440,6 +1457,8 @@ func (*UpdateMergeQueueError_RacingAlreadyDisabled) isUpdateMergeQueueError_Caus
 func (*UpdateMergeQueueError_RacingNotDisabled) isUpdateMergeQueueError_Cause() {}
 
 func (*UpdateMergeQueueError_NotSubscribed) isUpdateMergeQueueError_Cause() {}
+
+func (*UpdateMergeQueueError_SubscriberClosed) isUpdateMergeQueueError_Cause() {}
 
 type UpdateMergeQueueUnknownWorkspace struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1930,6 +1949,44 @@ func (*UpdateMergeQueueNotSubscribed) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{31}
 }
 
+// The subscriber-closed refusal. Empty: the subscriber ref the request
+// carried is the only identity involved.
+type UpdateMergeQueueSubscriberClosed struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateMergeQueueSubscriberClosed) Reset() {
+	*x = UpdateMergeQueueSubscriberClosed{}
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateMergeQueueSubscriberClosed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateMergeQueueSubscriberClosed) ProtoMessage() {}
+
+func (x *UpdateMergeQueueSubscriberClosed) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateMergeQueueSubscriberClosed.ProtoReflect.Descriptor instead.
+func (*UpdateMergeQueueSubscriberClosed) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{32}
+}
+
 var File_agentrepl_v1_endpoint_update_merge_queue_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDesc = "" +
@@ -1998,7 +2055,8 @@ const file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2%.agentrepl.v1.UpdateMergeQueueSuccessH\x00R\asuccess\x12;\n" +
 	"\x05error\x18\x02 \x01(\v2#.agentrepl.v1.UpdateMergeQueueErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x19\n" +
-	"\x17UpdateMergeQueueSuccess\"\xf5\t\n" +
+	"\x17UpdateMergeQueueSuccess\"\xd4\n" +
+	"\n" +
 	"\x15UpdateMergeQueueError\x12]\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2..agentrepl.v1.UpdateMergeQueueUnknownWorkspaceH\x00R\x10unknownWorkspace\x12j\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v22.agentrepl.v1.UpdateMergeQueueWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12]\n" +
@@ -2014,7 +2072,8 @@ const file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDesc = "" +
 	" \x01(\v2-.agentrepl.v1.UpdateMergeQueueRolloutsNotHeldH\x00R\x0frolloutsNotHeld\x12m\n" +
 	"\x17racing_already_disabled\x18\v \x01(\v23.agentrepl.v1.UpdateMergeQueueRacingAlreadyDisabledH\x00R\x15racingAlreadyDisabled\x12a\n" +
 	"\x13racing_not_disabled\x18\f \x01(\v2/.agentrepl.v1.UpdateMergeQueueRacingNotDisabledH\x00R\x11racingNotDisabled\x12T\n" +
-	"\x0enot_subscribed\x18\r \x01(\v2+.agentrepl.v1.UpdateMergeQueueNotSubscribedH\x00R\rnotSubscribedB\a\n" +
+	"\x0enot_subscribed\x18\r \x01(\v2+.agentrepl.v1.UpdateMergeQueueNotSubscribedH\x00R\rnotSubscribed\x12]\n" +
+	"\x11subscriber_closed\x18\x0e \x01(\v2..agentrepl.v1.UpdateMergeQueueSubscriberClosedH\x00R\x10subscriberClosedB\a\n" +
 	"\x05cause\"\"\n" +
 	" UpdateMergeQueueUnknownWorkspace\"I\n" +
 	"$UpdateMergeQueueWorkspaceRefMismatch\x12!\n" +
@@ -2030,7 +2089,8 @@ const file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDesc = "" +
 	"\x1fUpdateMergeQueueRolloutsNotHeld\"'\n" +
 	"%UpdateMergeQueueRacingAlreadyDisabled\"#\n" +
 	"!UpdateMergeQueueRacingNotDisabled\"\x1f\n" +
-	"\x1dUpdateMergeQueueNotSubscribedB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x1dUpdateMergeQueueNotSubscribed\"\"\n" +
+	" UpdateMergeQueueSubscriberClosedB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescOnce sync.Once
@@ -2044,7 +2104,7 @@ func file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes = make([]protoimpl.MessageInfo, 32)
+var file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes = make([]protoimpl.MessageInfo, 33)
 var file_agentrepl_v1_endpoint_update_merge_queue_proto_goTypes = []any{
 	(*UpdateMergeQueueRequest)(nil),               // 0: agentrepl.v1.UpdateMergeQueueRequest
 	(*UpdateMergeQueuePause)(nil),                 // 1: agentrepl.v1.UpdateMergeQueuePause
@@ -2078,8 +2138,9 @@ var file_agentrepl_v1_endpoint_update_merge_queue_proto_goTypes = []any{
 	(*UpdateMergeQueueRacingAlreadyDisabled)(nil), // 29: agentrepl.v1.UpdateMergeQueueRacingAlreadyDisabled
 	(*UpdateMergeQueueRacingNotDisabled)(nil),     // 30: agentrepl.v1.UpdateMergeQueueRacingNotDisabled
 	(*UpdateMergeQueueNotSubscribed)(nil),         // 31: agentrepl.v1.UpdateMergeQueueNotSubscribed
-	(*v1.RepositoryRef)(nil),                      // 32: workspace.v1.RepositoryRef
-	(*v1.WorkspaceRef)(nil),                       // 33: workspace.v1.WorkspaceRef
+	(*UpdateMergeQueueSubscriberClosed)(nil),      // 32: agentrepl.v1.UpdateMergeQueueSubscriberClosed
+	(*v1.RepositoryRef)(nil),                      // 33: workspace.v1.RepositoryRef
+	(*v1.WorkspaceRef)(nil),                       // 34: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_update_merge_queue_proto_depIdxs = []int32{
 	1,  // 0: agentrepl.v1.UpdateMergeQueueRequest.pause:type_name -> agentrepl.v1.UpdateMergeQueuePause
@@ -2093,19 +2154,19 @@ var file_agentrepl_v1_endpoint_update_merge_queue_proto_depIdxs = []int32{
 	7,  // 8: agentrepl.v1.UpdateMergeQueueRequest.enable_racing:type_name -> agentrepl.v1.UpdateMergeQueueEnableRacing
 	10, // 9: agentrepl.v1.UpdateMergeQueueRequest.subscribe:type_name -> agentrepl.v1.UpdateMergeQueueSubscribe
 	15, // 10: agentrepl.v1.UpdateMergeQueueRequest.unsubscribe:type_name -> agentrepl.v1.UpdateMergeQueueUnsubscribe
-	32, // 11: agentrepl.v1.UpdateMergeQueuePause.repository:type_name -> workspace.v1.RepositoryRef
-	32, // 12: agentrepl.v1.UpdateMergeQueueResume.repository:type_name -> workspace.v1.RepositoryRef
-	33, // 13: agentrepl.v1.UpdateMergeQueueEvict.workspace:type_name -> workspace.v1.WorkspaceRef
-	33, // 14: agentrepl.v1.UpdateMergeQueueMoveUp.workspace:type_name -> workspace.v1.WorkspaceRef
-	33, // 15: agentrepl.v1.UpdateMergeQueueMoveDown.workspace:type_name -> workspace.v1.WorkspaceRef
-	33, // 16: agentrepl.v1.UpdateMergeQueueSubscribe.subscriber:type_name -> workspace.v1.WorkspaceRef
-	32, // 17: agentrepl.v1.UpdateMergeQueueSubscribe.repository:type_name -> workspace.v1.RepositoryRef
+	33, // 11: agentrepl.v1.UpdateMergeQueuePause.repository:type_name -> workspace.v1.RepositoryRef
+	33, // 12: agentrepl.v1.UpdateMergeQueueResume.repository:type_name -> workspace.v1.RepositoryRef
+	34, // 13: agentrepl.v1.UpdateMergeQueueEvict.workspace:type_name -> workspace.v1.WorkspaceRef
+	34, // 14: agentrepl.v1.UpdateMergeQueueMoveUp.workspace:type_name -> workspace.v1.WorkspaceRef
+	34, // 15: agentrepl.v1.UpdateMergeQueueMoveDown.workspace:type_name -> workspace.v1.WorkspaceRef
+	34, // 16: agentrepl.v1.UpdateMergeQueueSubscribe.subscriber:type_name -> workspace.v1.WorkspaceRef
+	33, // 17: agentrepl.v1.UpdateMergeQueueSubscribe.repository:type_name -> workspace.v1.RepositoryRef
 	11, // 18: agentrepl.v1.UpdateMergeQueueSubscribe.detail:type_name -> agentrepl.v1.UpdateMergeQueueSubscribeDetail
 	12, // 19: agentrepl.v1.UpdateMergeQueueSubscribeDetail.every_change:type_name -> agentrepl.v1.UpdateMergeQueueSubscribeEveryChange
 	13, // 20: agentrepl.v1.UpdateMergeQueueSubscribeDetail.advances:type_name -> agentrepl.v1.UpdateMergeQueueSubscribeAdvances
 	14, // 21: agentrepl.v1.UpdateMergeQueueSubscribeDetail.depletes:type_name -> agentrepl.v1.UpdateMergeQueueSubscribeDepletes
-	33, // 22: agentrepl.v1.UpdateMergeQueueUnsubscribe.subscriber:type_name -> workspace.v1.WorkspaceRef
-	32, // 23: agentrepl.v1.UpdateMergeQueueUnsubscribe.repository:type_name -> workspace.v1.RepositoryRef
+	34, // 22: agentrepl.v1.UpdateMergeQueueUnsubscribe.subscriber:type_name -> workspace.v1.WorkspaceRef
+	33, // 23: agentrepl.v1.UpdateMergeQueueUnsubscribe.repository:type_name -> workspace.v1.RepositoryRef
 	17, // 24: agentrepl.v1.UpdateMergeQueueResponse.success:type_name -> agentrepl.v1.UpdateMergeQueueSuccess
 	18, // 25: agentrepl.v1.UpdateMergeQueueResponse.error:type_name -> agentrepl.v1.UpdateMergeQueueError
 	19, // 26: agentrepl.v1.UpdateMergeQueueError.unknown_workspace:type_name -> agentrepl.v1.UpdateMergeQueueUnknownWorkspace
@@ -2121,11 +2182,12 @@ var file_agentrepl_v1_endpoint_update_merge_queue_proto_depIdxs = []int32{
 	29, // 36: agentrepl.v1.UpdateMergeQueueError.racing_already_disabled:type_name -> agentrepl.v1.UpdateMergeQueueRacingAlreadyDisabled
 	30, // 37: agentrepl.v1.UpdateMergeQueueError.racing_not_disabled:type_name -> agentrepl.v1.UpdateMergeQueueRacingNotDisabled
 	31, // 38: agentrepl.v1.UpdateMergeQueueError.not_subscribed:type_name -> agentrepl.v1.UpdateMergeQueueNotSubscribed
-	39, // [39:39] is the sub-list for method output_type
-	39, // [39:39] is the sub-list for method input_type
-	39, // [39:39] is the sub-list for extension type_name
-	39, // [39:39] is the sub-list for extension extendee
-	0,  // [0:39] is the sub-list for field type_name
+	32, // 39: agentrepl.v1.UpdateMergeQueueError.subscriber_closed:type_name -> agentrepl.v1.UpdateMergeQueueSubscriberClosed
+	40, // [40:40] is the sub-list for method output_type
+	40, // [40:40] is the sub-list for method input_type
+	40, // [40:40] is the sub-list for extension type_name
+	40, // [40:40] is the sub-list for extension extendee
+	0,  // [0:40] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_update_merge_queue_proto_init() }
@@ -2173,6 +2235,7 @@ func file_agentrepl_v1_endpoint_update_merge_queue_proto_init() {
 		(*UpdateMergeQueueError_RacingAlreadyDisabled)(nil),
 		(*UpdateMergeQueueError_RacingNotDisabled)(nil),
 		(*UpdateMergeQueueError_NotSubscribed)(nil),
+		(*UpdateMergeQueueError_SubscriberClosed)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -2180,7 +2243,7 @@ func file_agentrepl_v1_endpoint_update_merge_queue_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDesc), len(file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   32,
+			NumMessages:   33,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

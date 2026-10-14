@@ -221,6 +221,10 @@ message UpdateMergeQueueError {
     UpdateMergeQueueRacingNotDisabled racing_not_disabled = 12;
     // `unsubscribe` naming a workspace and scope with no subscription.
     UpdateMergeQueueNotSubscribed not_subscribed = 13;
+    // `subscribe` naming a CLOSED workspace as the subscriber. A closed
+    // workspace runs no agent to tell, and a close is what ends a
+    // subscription, so one taken while closed would never end.
+    UpdateMergeQueueSubscriberClosed subscriber_closed = 14;
   }
 }
 message UpdateMergeQueueUnknownWorkspace {}
@@ -245,3 +249,6 @@ message UpdateMergeQueueRacingNotDisabled {}
 // The not-subscribed refusal: the subscriber holds no subscription in the
 // scope the unsubscribe named (and may hold one in another scope).
 message UpdateMergeQueueNotSubscribed {}
+// The subscriber-closed refusal. Empty: the subscriber ref the request
+// carried is the only identity involved.
+message UpdateMergeQueueSubscriberClosed {}
