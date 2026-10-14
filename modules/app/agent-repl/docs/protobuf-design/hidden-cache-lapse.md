@@ -63,3 +63,24 @@ do them all yourselves").
   The request covered hidden workspaces only.
 - "Cold cache" needs no arm of its own: a lapse at or before now IS cold, and
   the daemon republishes the roster at the deadline.
+
+## Implementation notes
+
+- Shim (`agent-shim/claude/shim/src/engine/keepalive.ts`).
+  - `KeepaliveCadence.hold()` and `run()`; a held cadence projects the lapse
+    on every hold and every anchor change.
+  - The verdict is `engine/cold.ts`'s `sessionCacheLapse`, through the same
+    `coldGateAsks` floor `judgeCold` applies.
+  - The projection is a replayed arm of `SessionPushes`, withdrawn on `run`.
+- Daemon.
+  - `internal/cachelapse.Keeper` owns the cadence and the deadline in one loop.
+  - `wsm` layout 46 stores the projection (`cache_lapses_at`,
+    `cache_lapse_gated_tokens`); `SetCacheLapse` writes only a hidden row,
+    and `SetHidden` clears it.
+  - Every bring-up site sets `StartSessionRequest.hold_keepalive` from the
+    record it read (`source.HoldKeepalive`).
+  - The roster draws `cold_gate` for a lapsed, gated hidden row above the
+    footer projection, as `inactive` is drawn, because no footer is drawn for
+    a hidden workspace.
+- Webapp: `src/sidebar/cache-lapse.ts` and the shared `src/heat.ts` gradient.
+- Emacs: the strict roster decoder accepts `RosterRowWhenHidden.cache`.
