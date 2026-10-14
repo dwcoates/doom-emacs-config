@@ -1,20 +1,13 @@
 // @vitest-environment jsdom
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createConnectHookElement } from "../src/connect-hook.js";
 import { codeOf } from "./source-text.js";
+import { filesUnder } from "./files-under.js";
 
 const SRC = join(process.cwd(), "src");
 
-/** Every `.ts` source under DIR, recursively. */
-function sourcesUnder(dir: string): string[] {
-  return readdirSync(dir).flatMap((name) => {
-    const path = join(dir, name);
-    if (statSync(path).isDirectory()) return sourcesUnder(path);
-    return path.endsWith(".ts") ? [path] : [];
-  });
-}
 
 describe("createConnectHookElement", () => {
   it("builds an element of the tag it is given", () => {
@@ -66,7 +59,7 @@ describe("createConnectHookElement", () => {
 
 describe("every element that waits to join the document is a connect-hook element", () => {
   const sources = new Map(
-    sourcesUnder(SRC).map((path) => [relative(SRC, path), codeOf(readFileSync(path, "utf8"))]),
+    filesUnder(SRC).map((path) => [relative(SRC, path), codeOf(readFileSync(path, "utf8"))]),
   );
 
   it("defines a custom element nowhere but connect-hook.ts", () => {

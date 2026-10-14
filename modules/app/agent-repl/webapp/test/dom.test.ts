@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import {
   SVG_NS,
@@ -12,6 +12,7 @@ import {
   scrollbarWidthPx,
 } from "../src/dom.js";
 import { codeOf } from "./source-text.js";
+import { filesUnder } from "./files-under.js";
 
 describe("scrollbarWidthPx", () => {
   it("answers a classic bar's width", () => {
@@ -29,14 +30,8 @@ describe("scrollbarWidthPx", () => {
   it("is the one formula: every scrollbar measurement calls it, and none rolls its own", () => {
     // Arrange — every source under src/, comments stripped.
     const src = join(process.cwd(), "src");
-    const walk = (dir: string): string[] =>
-      readdirSync(dir).flatMap((name) => {
-        const path = join(dir, name);
-        if (statSync(path).isDirectory()) return walk(path);
-        return path.endsWith(".ts") ? [path] : [];
-      });
     const code = new Map(
-      walk(src).map((path) => [
+      filesUnder(src).map((path) => [
         relative(src, path),
         codeOf(readFileSync(path, "utf8")),
       ]),
@@ -73,13 +68,7 @@ describe("computedPx", () => {
   it("is the one parse of a computed px length in the webapp", () => {
     // Arrange
     const src = join(process.cwd(), "src");
-    const walk = (dir: string): string[] =>
-      readdirSync(dir).flatMap((name) => {
-        const path = join(dir, name);
-        if (statSync(path).isDirectory()) return walk(path);
-        return path.endsWith(".ts") ? [path] : [];
-      });
-    const code = new Map(walk(src).map((path) => [relative(src, path), readFileSync(path, "utf8")]));
+    const code = new Map(filesUnder(src).map((path) => [relative(src, path), readFileSync(path, "utf8")]));
     // Act
     const callers = [...code].filter(([, text]) => /\bcomputedPx\(/.test(text)).map(([p]) => p).sort();
     const rolled = [...code].filter(([, text]) => /px\$\//.test(text)).map(([p]) => p);
@@ -296,14 +285,8 @@ describe("SVG_NS", () => {
   it("is the one spelling: no source but dom.ts writes the namespace out", () => {
     // Arrange — every source under src/, comments stripped.
     const src = join(process.cwd(), "src");
-    const walk = (dir: string): string[] =>
-      readdirSync(dir).flatMap((name) => {
-        const path = join(dir, name);
-        if (statSync(path).isDirectory()) return walk(path);
-        return path.endsWith(".ts") ? [path] : [];
-      });
     // Act
-    const spelled = walk(src)
+    const spelled = filesUnder(src)
       .filter((path) => codeOf(readFileSync(path, "utf8")).includes("www.w3.org/2000/svg"))
       .map((path) => relative(src, path));
     // Assert
@@ -341,9 +324,11 @@ describe("pageResizeObserver", () => {
   it("is the one availability check every measurer asks", () => {
     // Arrange: every source file under src.
     const src = join(__dirname, "../src");
-    const files = readdirSync(src, { recursive: true, encoding: "utf8" }).filter((f) => f.endsWith(".ts"));
+    const files = filesUnder(src);
     // Act: a hand-rolled check reads `typeof <x>.ResizeObserver`.
-    const rolled = files.filter((f) => /typeof [\w.?]+\.ResizeObserver/.test(readFileSync(join(src, f), "utf8")));
+    const rolled = files
+      .filter((f) => /typeof [\w.?]+\.ResizeObserver/.test(readFileSync(f, "utf8")))
+      .map((f) => relative(src, f));
     // Assert: only the helper's own module.
     expect(rolled).toEqual(["dom.ts"]);
   });
