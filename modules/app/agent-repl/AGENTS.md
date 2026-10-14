@@ -2157,8 +2157,9 @@ queue (the requester's detached request, then the hidden merge workspace's
 row, until the row leaves the queue), the row carries
 `frontend.v1.RosterRow.async_merging` beside its own status arm, whatever that
 arm is. The row's NAME keeps the status's color, and both surfaces draw the
-marker from `render-colors.json#async_merge_mark`: the sidebar inks the PLAIN
-status dot purple and breathing (every other mark -- a gate glyph, the
+marker from `render-colors.json#async_merge_mark`: the sidebar draws the
+merge glyph, purple and breathing, in place of the PLAIN status dot (owner
+request, 2026-10-14; every other mark -- a gate glyph, the
 one-shot glyph, a merge glyph, compacting's orange dot -- outranks it), and
 the Emacs tab bar paints the `[N]` bracket purple while the space after it and
 the name keep the status background. A SYNC merge raises no marker: it is the row's own merge arms. The

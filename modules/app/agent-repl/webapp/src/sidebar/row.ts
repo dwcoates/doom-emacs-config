@@ -175,7 +175,8 @@ export function drawRosterRow(
   // set here, from the same one vocabulary table the mark reads.
   // PRESENCE IS THE FACT: only a one-shot carries the mark, and its glyph
   // replaces the dot while the one-shot works; an async merge of the
-  // workspace's own branch inks a plain dot purple (`tones.rosterRowMark`).
+  // workspace's own branch draws the purple merge glyph in place of a plain
+  // dot (`tones.rosterRowMark`).
   const markers: RowMarkers = {
     oneShot: u.oneShot !== undefined && drawRosterRowOneShot(u.oneShot, `${path}.oneShot`),
     asyncMerging: u.asyncMerging !== undefined && drawRosterRowAsyncMerging(u.asyncMerging, `${path}.asyncMerging`),
