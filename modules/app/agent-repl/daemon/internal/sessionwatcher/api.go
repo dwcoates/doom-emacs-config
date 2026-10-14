@@ -274,6 +274,11 @@ type FooterSink interface {
 	// the producer's account becomes the footer's evidence rather than passing
 	// silently.
 	OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentId, cut *conversationv1.ContextCut)
+	// OnContextCutRestated is a cut this watch already routed, served again:
+	// it carries only what a second serving can add, the identity of the
+	// compaction it concludes, which the first serving may have lacked (the
+	// sidecar's version of the same row cannot name it).
+	OnContextCutRestated(ws ids.WorkspaceID, cut *conversationv1.ContextCut)
 	// OnAgentTerminal retires an agent from the status tree.
 	OnAgentTerminal(ws ids.WorkspaceID, agent *conversationv1.AgentId, turn *ids.TurnID, success *conversationv1.AgentSuccess, failure *conversationv1.AgentFailure)
 	// OnDetachedWork adds or updates a live-work chip.

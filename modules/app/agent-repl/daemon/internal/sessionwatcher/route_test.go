@@ -1608,7 +1608,10 @@ func TestACutOnACatchUpPageReachesEveryViewOnce(t *testing.T) {
 
 // TestACutIsRoutedOncePerPointer covers the cut's identity: whichever serving
 // comes first — live, or on a page — is the only one routed, and a second
-// serving of the same row is a replay, dropped whole and recorded.
+// serving of the same row is a replay, recorded, that hands the footer the
+// compaction identity it concludes and nothing else
+// (FooterSink.OnContextCutRestated): the same row has two producers, and the
+// second serving may be the first to name that compaction.
 func TestACutIsRoutedOncePerPointer(t *testing.T) {
 	tests := []struct {
 		name string
@@ -1628,7 +1631,7 @@ func TestACutIsRoutedOncePerPointer(t *testing.T) {
 			again: func(t *testing.T, h *harness) []event {
 				return h.route(h.main, pageFrame(cutEntryAt("ptr-cut", compactedCut())))
 			},
-			want: []string{"feed.OnHistoryPage", "footer.OnHistoryPage"},
+			want: []string{"feed.OnHistoryPage", "footer.OnHistoryPage", "footer.OnContextCutRestated"},
 		},
 		{
 			name: "caught up on a page, then re-served live",
@@ -1640,7 +1643,7 @@ func TestACutIsRoutedOncePerPointer(t *testing.T) {
 			again: func(t *testing.T, h *harness) []event {
 				return h.route(h.main, liveCutAt("ptr-cut", compactedCut()))
 			},
-			want: nil,
+			want: []string{"footer.OnContextCutRestated"},
 		},
 		{
 			name: "seen live, then re-served live",
@@ -1650,7 +1653,7 @@ func TestACutIsRoutedOncePerPointer(t *testing.T) {
 			again: func(t *testing.T, h *harness) []event {
 				return h.route(h.main, liveCutAt("ptr-cut", compactedCut()))
 			},
-			want: nil,
+			want: []string{"footer.OnContextCutRestated"},
 		},
 		{
 			name: "history on a first page, then re-served live",
@@ -1660,7 +1663,7 @@ func TestACutIsRoutedOncePerPointer(t *testing.T) {
 			again: func(t *testing.T, h *harness) []event {
 				return h.route(h.main, liveCutAt("ptr-cut", compactedCut()))
 			},
-			want: nil,
+			want: []string{"footer.OnContextCutRestated"},
 		},
 	}
 	for _, tt := range tests {
