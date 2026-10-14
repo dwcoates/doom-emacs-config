@@ -258,25 +258,25 @@ restart.  Emacs orders by it and never draws it
   "Decode VALUE as `RosterRowWhenMerged', a plist `(:at-ms)'."
   (agent-repl-wire-roster--decode-instant "RosterRowWhenMerged" value))
 
+(defun agent-repl-wire-roster--decode-started-at (message value)
+  "Decode VALUE as MESSAGE, a start message whose only field is `startedAtMs'.
+Answers the plist `(:started-at-ms)'.  Every counting when-column arm (a
+sync merge and a running turn) shares this one shape."
+  (let ((object (agent-repl-wire--object message value)))
+    (agent-repl-wire--check-keys message object '(startedAtMs))
+    (agent-repl-wire--decoded
+     message
+     (list :started-at-ms (agent-repl-wire--decode-int64 message 'startedAtMs object)))))
+
 (defun agent-repl-wire-decode-roster-row-when-turn-running (value)
   "Decode VALUE as `RosterRowWhenTurnRunning', a plist `(:started-at-ms)'.
 The instant the running turn started, exactly the footer clock's."
-  (let ((object (agent-repl-wire--object "RosterRowWhenTurnRunning" value)))
-    (agent-repl-wire--check-keys "RosterRowWhenTurnRunning" object '(startedAtMs))
-    (agent-repl-wire--decoded
-     "RosterRowWhenTurnRunning"
-     (list :started-at-ms (agent-repl-wire--decode-int64
-                           "RosterRowWhenTurnRunning" 'startedAtMs object)))))
+  (agent-repl-wire-roster--decode-started-at "RosterRowWhenTurnRunning" value))
 
 (defun agent-repl-wire-decode-roster-row-when-sync-merging (value)
   "Decode VALUE as `RosterRowWhenSyncMerging', a plist `(:started-at-ms)'.
 The instant the workspace's sync merge joined its repository's queue."
-  (let ((object (agent-repl-wire--object "RosterRowWhenSyncMerging" value)))
-    (agent-repl-wire--check-keys "RosterRowWhenSyncMerging" object '(startedAtMs))
-    (agent-repl-wire--decoded
-     "RosterRowWhenSyncMerging"
-     (list :started-at-ms (agent-repl-wire--decode-int64
-                           "RosterRowWhenSyncMerging" 'startedAtMs object)))))
+  (agent-repl-wire-roster--decode-started-at "RosterRowWhenSyncMerging" value))
 
 (defun agent-repl-wire-decode-roster-row-when-no-turn-running (value)
   "Decode VALUE as the empty message `RosterRowWhenNoTurnRunning'."
