@@ -44,7 +44,6 @@ type UpdateHeldPromptRequest struct {
 	//
 	//	*UpdateHeldPromptRequest_Release
 	//	*UpdateHeldPromptRequest_Drop
-	//	*UpdateHeldPromptRequest_Accept
 	Action        isUpdateHeldPromptRequest_Action `protobuf_oneof:"action"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -119,15 +118,6 @@ func (x *UpdateHeldPromptRequest) GetDrop() *UpdateHeldPromptDrop {
 	return nil
 }
 
-func (x *UpdateHeldPromptRequest) GetAccept() *UpdateHeldPromptAccept {
-	if x != nil {
-		if x, ok := x.Action.(*UpdateHeldPromptRequest_Accept); ok {
-			return x.Accept
-		}
-	}
-	return nil
-}
-
 type isUpdateHeldPromptRequest_Action interface {
 	isUpdateHeldPromptRequest_Action()
 }
@@ -143,18 +133,9 @@ type UpdateHeldPromptRequest_Drop struct {
 	Drop *UpdateHeldPromptDrop `protobuf:"bytes,4,opt,name=drop,proto3,oneof"`
 }
 
-type UpdateHeldPromptRequest_Accept struct {
-	// Confirm the hold (view state only: HeldPromptAccepted.accepted flips
-	// and the held section re-pushes; delivery is unchanged). Legal ONLY on an
-	// entry whose classification is hold_for_turn_end; refused otherwise.
-	Accept *UpdateHeldPromptAccept `protobuf:"bytes,5,opt,name=accept,proto3,oneof"`
-}
-
 func (*UpdateHeldPromptRequest_Release) isUpdateHeldPromptRequest_Action() {}
 
 func (*UpdateHeldPromptRequest_Drop) isUpdateHeldPromptRequest_Action() {}
-
-func (*UpdateHeldPromptRequest_Accept) isUpdateHeldPromptRequest_Action() {}
 
 type UpdateHeldPromptRelease struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -228,42 +209,6 @@ func (*UpdateHeldPromptDrop) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{2}
 }
 
-type UpdateHeldPromptAccept struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *UpdateHeldPromptAccept) Reset() {
-	*x = UpdateHeldPromptAccept{}
-	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[3]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *UpdateHeldPromptAccept) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*UpdateHeldPromptAccept) ProtoMessage() {}
-
-func (x *UpdateHeldPromptAccept) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[3]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use UpdateHeldPromptAccept.ProtoReflect.Descriptor instead.
-func (*UpdateHeldPromptAccept) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{3}
-}
-
 // THE ARM IS THE OUTCOME.
 type UpdateHeldPromptResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -278,7 +223,7 @@ type UpdateHeldPromptResponse struct {
 
 func (x *UpdateHeldPromptResponse) Reset() {
 	*x = UpdateHeldPromptResponse{}
-	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -290,7 +235,7 @@ func (x *UpdateHeldPromptResponse) String() string {
 func (*UpdateHeldPromptResponse) ProtoMessage() {}
 
 func (x *UpdateHeldPromptResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -303,7 +248,7 @@ func (x *UpdateHeldPromptResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateHeldPromptResponse.ProtoReflect.Descriptor instead.
 func (*UpdateHeldPromptResponse) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{4}
+	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *UpdateHeldPromptResponse) GetResult() isUpdateHeldPromptResponse_Result {
@@ -356,7 +301,7 @@ type UpdateHeldPromptSuccess struct {
 
 func (x *UpdateHeldPromptSuccess) Reset() {
 	*x = UpdateHeldPromptSuccess{}
-	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -368,7 +313,7 @@ func (x *UpdateHeldPromptSuccess) String() string {
 func (*UpdateHeldPromptSuccess) ProtoMessage() {}
 
 func (x *UpdateHeldPromptSuccess) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -381,7 +326,7 @@ func (x *UpdateHeldPromptSuccess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateHeldPromptSuccess.ProtoReflect.Descriptor instead.
 func (*UpdateHeldPromptSuccess) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{5}
+	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{4}
 }
 
 // Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
@@ -396,7 +341,6 @@ type UpdateHeldPromptError struct {
 	//	*UpdateHeldPromptError_NotYetAdopted
 	//	*UpdateHeldPromptError_NoSuchHold
 	//	*UpdateHeldPromptError_AlreadyDelivered
-	//	*UpdateHeldPromptError_AcceptNotApplicable
 	//	*UpdateHeldPromptError_ReleaseRefused
 	//	*UpdateHeldPromptError_BeingDelivered
 	Cause         isUpdateHeldPromptError_Cause `protobuf_oneof:"cause"`
@@ -406,7 +350,7 @@ type UpdateHeldPromptError struct {
 
 func (x *UpdateHeldPromptError) Reset() {
 	*x = UpdateHeldPromptError{}
-	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -418,7 +362,7 @@ func (x *UpdateHeldPromptError) String() string {
 func (*UpdateHeldPromptError) ProtoMessage() {}
 
 func (x *UpdateHeldPromptError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -431,7 +375,7 @@ func (x *UpdateHeldPromptError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateHeldPromptError.ProtoReflect.Descriptor instead.
 func (*UpdateHeldPromptError) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{6}
+	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *UpdateHeldPromptError) GetCause() isUpdateHeldPromptError_Cause {
@@ -495,15 +439,6 @@ func (x *UpdateHeldPromptError) GetAlreadyDelivered() *UpdateHeldPromptAlreadyDe
 	return nil
 }
 
-func (x *UpdateHeldPromptError) GetAcceptNotApplicable() *UpdateHeldPromptAcceptNotApplicable {
-	if x != nil {
-		if x, ok := x.Cause.(*UpdateHeldPromptError_AcceptNotApplicable); ok {
-			return x.AcceptNotApplicable
-		}
-	}
-	return nil
-}
-
 func (x *UpdateHeldPromptError) GetReleaseRefused() *UpdateHeldPromptReleaseRefused {
 	if x != nil {
 		if x, ok := x.Cause.(*UpdateHeldPromptError_ReleaseRefused); ok {
@@ -556,11 +491,6 @@ type UpdateHeldPromptError_AlreadyDelivered struct {
 	AlreadyDelivered *UpdateHeldPromptAlreadyDelivered `protobuf:"bytes,6,opt,name=already_delivered,json=alreadyDelivered,proto3,oneof"`
 }
 
-type UpdateHeldPromptError_AcceptNotApplicable struct {
-	// An accept on a verdict other than hold_for_turn_end.
-	AcceptNotApplicable *UpdateHeldPromptAcceptNotApplicable `protobuf:"bytes,7,opt,name=accept_not_applicable,json=acceptNotApplicable,proto3,oneof"`
-}
-
 type UpdateHeldPromptError_ReleaseRefused struct {
 	// A force-through on an uninterruptible or reconnect hold, or on
 	// a prompt that is being edited or queued after one that is
@@ -591,8 +521,6 @@ func (*UpdateHeldPromptError_NoSuchHold) isUpdateHeldPromptError_Cause() {}
 
 func (*UpdateHeldPromptError_AlreadyDelivered) isUpdateHeldPromptError_Cause() {}
 
-func (*UpdateHeldPromptError_AcceptNotApplicable) isUpdateHeldPromptError_Cause() {}
-
 func (*UpdateHeldPromptError_ReleaseRefused) isUpdateHeldPromptError_Cause() {}
 
 func (*UpdateHeldPromptError_BeingDelivered) isUpdateHeldPromptError_Cause() {}
@@ -605,7 +533,7 @@ type UpdateHeldPromptUnknownWorkspace struct {
 
 func (x *UpdateHeldPromptUnknownWorkspace) Reset() {
 	*x = UpdateHeldPromptUnknownWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -617,7 +545,7 @@ func (x *UpdateHeldPromptUnknownWorkspace) String() string {
 func (*UpdateHeldPromptUnknownWorkspace) ProtoMessage() {}
 
 func (x *UpdateHeldPromptUnknownWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -630,7 +558,7 @@ func (x *UpdateHeldPromptUnknownWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateHeldPromptUnknownWorkspace.ProtoReflect.Descriptor instead.
 func (*UpdateHeldPromptUnknownWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{7}
+	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{6}
 }
 
 type UpdateHeldPromptWorkspaceRefMismatch struct {
@@ -643,7 +571,7 @@ type UpdateHeldPromptWorkspaceRefMismatch struct {
 
 func (x *UpdateHeldPromptWorkspaceRefMismatch) Reset() {
 	*x = UpdateHeldPromptWorkspaceRefMismatch{}
-	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -655,7 +583,7 @@ func (x *UpdateHeldPromptWorkspaceRefMismatch) String() string {
 func (*UpdateHeldPromptWorkspaceRefMismatch) ProtoMessage() {}
 
 func (x *UpdateHeldPromptWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -668,7 +596,7 @@ func (x *UpdateHeldPromptWorkspaceRefMismatch) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use UpdateHeldPromptWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
 func (*UpdateHeldPromptWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{8}
+	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *UpdateHeldPromptWorkspaceRefMismatch) GetRegistryDir() string {
@@ -688,7 +616,7 @@ type UpdateHeldPromptTransferringAway struct {
 
 func (x *UpdateHeldPromptTransferringAway) Reset() {
 	*x = UpdateHeldPromptTransferringAway{}
-	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -700,7 +628,7 @@ func (x *UpdateHeldPromptTransferringAway) String() string {
 func (*UpdateHeldPromptTransferringAway) ProtoMessage() {}
 
 func (x *UpdateHeldPromptTransferringAway) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -713,7 +641,7 @@ func (x *UpdateHeldPromptTransferringAway) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateHeldPromptTransferringAway.ProtoReflect.Descriptor instead.
 func (*UpdateHeldPromptTransferringAway) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{9}
+	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *UpdateHeldPromptTransferringAway) GetAddress() string {
@@ -731,7 +659,7 @@ type UpdateHeldPromptNotYetAdopted struct {
 
 func (x *UpdateHeldPromptNotYetAdopted) Reset() {
 	*x = UpdateHeldPromptNotYetAdopted{}
-	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -743,7 +671,7 @@ func (x *UpdateHeldPromptNotYetAdopted) String() string {
 func (*UpdateHeldPromptNotYetAdopted) ProtoMessage() {}
 
 func (x *UpdateHeldPromptNotYetAdopted) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -756,7 +684,7 @@ func (x *UpdateHeldPromptNotYetAdopted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateHeldPromptNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*UpdateHeldPromptNotYetAdopted) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{10}
+	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{9}
 }
 
 type UpdateHeldPromptNoSuchHold struct {
@@ -767,7 +695,7 @@ type UpdateHeldPromptNoSuchHold struct {
 
 func (x *UpdateHeldPromptNoSuchHold) Reset() {
 	*x = UpdateHeldPromptNoSuchHold{}
-	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -779,7 +707,7 @@ func (x *UpdateHeldPromptNoSuchHold) String() string {
 func (*UpdateHeldPromptNoSuchHold) ProtoMessage() {}
 
 func (x *UpdateHeldPromptNoSuchHold) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -792,7 +720,7 @@ func (x *UpdateHeldPromptNoSuchHold) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateHeldPromptNoSuchHold.ProtoReflect.Descriptor instead.
 func (*UpdateHeldPromptNoSuchHold) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{11}
+	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{10}
 }
 
 type UpdateHeldPromptAlreadyDelivered struct {
@@ -803,7 +731,7 @@ type UpdateHeldPromptAlreadyDelivered struct {
 
 func (x *UpdateHeldPromptAlreadyDelivered) Reset() {
 	*x = UpdateHeldPromptAlreadyDelivered{}
-	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -815,7 +743,7 @@ func (x *UpdateHeldPromptAlreadyDelivered) String() string {
 func (*UpdateHeldPromptAlreadyDelivered) ProtoMessage() {}
 
 func (x *UpdateHeldPromptAlreadyDelivered) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -828,43 +756,7 @@ func (x *UpdateHeldPromptAlreadyDelivered) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateHeldPromptAlreadyDelivered.ProtoReflect.Descriptor instead.
 func (*UpdateHeldPromptAlreadyDelivered) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{12}
-}
-
-type UpdateHeldPromptAcceptNotApplicable struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *UpdateHeldPromptAcceptNotApplicable) Reset() {
-	*x = UpdateHeldPromptAcceptNotApplicable{}
-	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[13]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *UpdateHeldPromptAcceptNotApplicable) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*UpdateHeldPromptAcceptNotApplicable) ProtoMessage() {}
-
-func (x *UpdateHeldPromptAcceptNotApplicable) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[13]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use UpdateHeldPromptAcceptNotApplicable.ProtoReflect.Descriptor instead.
-func (*UpdateHeldPromptAcceptNotApplicable) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{13}
+	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{11}
 }
 
 type UpdateHeldPromptReleaseRefused struct {
@@ -875,7 +767,7 @@ type UpdateHeldPromptReleaseRefused struct {
 
 func (x *UpdateHeldPromptReleaseRefused) Reset() {
 	*x = UpdateHeldPromptReleaseRefused{}
-	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -887,7 +779,7 @@ func (x *UpdateHeldPromptReleaseRefused) String() string {
 func (*UpdateHeldPromptReleaseRefused) ProtoMessage() {}
 
 func (x *UpdateHeldPromptReleaseRefused) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -900,7 +792,7 @@ func (x *UpdateHeldPromptReleaseRefused) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateHeldPromptReleaseRefused.ProtoReflect.Descriptor instead.
 func (*UpdateHeldPromptReleaseRefused) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{14}
+	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{12}
 }
 
 // The prompt's delivery call is in flight. See the `being_delivered` arm.
@@ -912,7 +804,7 @@ type UpdateHeldPromptBeingDelivered struct {
 
 func (x *UpdateHeldPromptBeingDelivered) Reset() {
 	*x = UpdateHeldPromptBeingDelivered{}
-	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -924,7 +816,7 @@ func (x *UpdateHeldPromptBeingDelivered) String() string {
 func (*UpdateHeldPromptBeingDelivered) ProtoMessage() {}
 
 func (x *UpdateHeldPromptBeingDelivered) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -937,29 +829,27 @@ func (x *UpdateHeldPromptBeingDelivered) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateHeldPromptBeingDelivered.ProtoReflect.Descriptor instead.
 func (*UpdateHeldPromptBeingDelivered) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{15}
+	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{13}
 }
 
 var File_agentrepl_v1_endpoint_update_held_prompt_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDesc = "" +
 	"\n" +
-	".agentrepl/v1/endpoint_update_held_prompt.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\x1a\x1aconversation/v1/turn.proto\"\xc7\x02\n" +
+	".agentrepl/v1/endpoint_update_held_prompt.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\x1a\x1aconversation/v1/turn.proto\"\x87\x02\n" +
 	"\x17UpdateHeldPromptRequest\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12+\n" +
 	"\x04turn\x18\x02 \x01(\v2\x17.conversation.v1.TurnIdR\x04turn\x12A\n" +
 	"\arelease\x18\x03 \x01(\v2%.agentrepl.v1.UpdateHeldPromptReleaseH\x00R\arelease\x128\n" +
-	"\x04drop\x18\x04 \x01(\v2\".agentrepl.v1.UpdateHeldPromptDropH\x00R\x04drop\x12>\n" +
-	"\x06accept\x18\x05 \x01(\v2$.agentrepl.v1.UpdateHeldPromptAcceptH\x00R\x06acceptB\b\n" +
+	"\x04drop\x18\x04 \x01(\v2\".agentrepl.v1.UpdateHeldPromptDropH\x00R\x04dropB\b\n" +
 	"\x06action\"\x19\n" +
 	"\x17UpdateHeldPromptRelease\"\x16\n" +
-	"\x14UpdateHeldPromptDrop\"\x18\n" +
-	"\x16UpdateHeldPromptAccept\"\xa4\x01\n" +
+	"\x14UpdateHeldPromptDrop\"\xa4\x01\n" +
 	"\x18UpdateHeldPromptResponse\x12A\n" +
 	"\asuccess\x18\x01 \x01(\v2%.agentrepl.v1.UpdateHeldPromptSuccessH\x00R\asuccess\x12;\n" +
 	"\x05error\x18\x02 \x01(\v2#.agentrepl.v1.UpdateHeldPromptErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x19\n" +
-	"\x17UpdateHeldPromptSuccess\"\xe9\x06\n" +
+	"\x17UpdateHeldPromptSuccess\"\x80\x06\n" +
 	"\x15UpdateHeldPromptError\x12]\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2..agentrepl.v1.UpdateHeldPromptUnknownWorkspaceH\x00R\x10unknownWorkspace\x12j\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v22.agentrepl.v1.UpdateHeldPromptWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12]\n" +
@@ -967,8 +857,7 @@ const file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDesc = "" +
 	"\x0fnot_yet_adopted\x18\x04 \x01(\v2+.agentrepl.v1.UpdateHeldPromptNotYetAdoptedH\x00R\rnotYetAdopted\x12L\n" +
 	"\fno_such_hold\x18\x05 \x01(\v2(.agentrepl.v1.UpdateHeldPromptNoSuchHoldH\x00R\n" +
 	"noSuchHold\x12]\n" +
-	"\x11already_delivered\x18\x06 \x01(\v2..agentrepl.v1.UpdateHeldPromptAlreadyDeliveredH\x00R\x10alreadyDelivered\x12g\n" +
-	"\x15accept_not_applicable\x18\a \x01(\v21.agentrepl.v1.UpdateHeldPromptAcceptNotApplicableH\x00R\x13acceptNotApplicable\x12W\n" +
+	"\x11already_delivered\x18\x06 \x01(\v2..agentrepl.v1.UpdateHeldPromptAlreadyDeliveredH\x00R\x10alreadyDelivered\x12W\n" +
 	"\x0frelease_refused\x18\b \x01(\v2,.agentrepl.v1.UpdateHeldPromptReleaseRefusedH\x00R\x0ereleaseRefused\x12W\n" +
 	"\x0fbeing_delivered\x18\t \x01(\v2,.agentrepl.v1.UpdateHeldPromptBeingDeliveredH\x00R\x0ebeingDeliveredB\a\n" +
 	"\x05cause\"\"\n" +
@@ -979,8 +868,7 @@ const file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDesc = "" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1f\n" +
 	"\x1dUpdateHeldPromptNotYetAdopted\"\x1c\n" +
 	"\x1aUpdateHeldPromptNoSuchHold\"\"\n" +
-	" UpdateHeldPromptAlreadyDelivered\"%\n" +
-	"#UpdateHeldPromptAcceptNotApplicable\" \n" +
+	" UpdateHeldPromptAlreadyDelivered\" \n" +
 	"\x1eUpdateHeldPromptReleaseRefused\" \n" +
 	"\x1eUpdateHeldPromptBeingDeliveredB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
@@ -996,49 +884,45 @@ func file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
+var file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_agentrepl_v1_endpoint_update_held_prompt_proto_goTypes = []any{
 	(*UpdateHeldPromptRequest)(nil),              // 0: agentrepl.v1.UpdateHeldPromptRequest
 	(*UpdateHeldPromptRelease)(nil),              // 1: agentrepl.v1.UpdateHeldPromptRelease
 	(*UpdateHeldPromptDrop)(nil),                 // 2: agentrepl.v1.UpdateHeldPromptDrop
-	(*UpdateHeldPromptAccept)(nil),               // 3: agentrepl.v1.UpdateHeldPromptAccept
-	(*UpdateHeldPromptResponse)(nil),             // 4: agentrepl.v1.UpdateHeldPromptResponse
-	(*UpdateHeldPromptSuccess)(nil),              // 5: agentrepl.v1.UpdateHeldPromptSuccess
-	(*UpdateHeldPromptError)(nil),                // 6: agentrepl.v1.UpdateHeldPromptError
-	(*UpdateHeldPromptUnknownWorkspace)(nil),     // 7: agentrepl.v1.UpdateHeldPromptUnknownWorkspace
-	(*UpdateHeldPromptWorkspaceRefMismatch)(nil), // 8: agentrepl.v1.UpdateHeldPromptWorkspaceRefMismatch
-	(*UpdateHeldPromptTransferringAway)(nil),     // 9: agentrepl.v1.UpdateHeldPromptTransferringAway
-	(*UpdateHeldPromptNotYetAdopted)(nil),        // 10: agentrepl.v1.UpdateHeldPromptNotYetAdopted
-	(*UpdateHeldPromptNoSuchHold)(nil),           // 11: agentrepl.v1.UpdateHeldPromptNoSuchHold
-	(*UpdateHeldPromptAlreadyDelivered)(nil),     // 12: agentrepl.v1.UpdateHeldPromptAlreadyDelivered
-	(*UpdateHeldPromptAcceptNotApplicable)(nil),  // 13: agentrepl.v1.UpdateHeldPromptAcceptNotApplicable
-	(*UpdateHeldPromptReleaseRefused)(nil),       // 14: agentrepl.v1.UpdateHeldPromptReleaseRefused
-	(*UpdateHeldPromptBeingDelivered)(nil),       // 15: agentrepl.v1.UpdateHeldPromptBeingDelivered
-	(*v1.WorkspaceRef)(nil),                      // 16: workspace.v1.WorkspaceRef
-	(*v11.TurnId)(nil),                           // 17: conversation.v1.TurnId
+	(*UpdateHeldPromptResponse)(nil),             // 3: agentrepl.v1.UpdateHeldPromptResponse
+	(*UpdateHeldPromptSuccess)(nil),              // 4: agentrepl.v1.UpdateHeldPromptSuccess
+	(*UpdateHeldPromptError)(nil),                // 5: agentrepl.v1.UpdateHeldPromptError
+	(*UpdateHeldPromptUnknownWorkspace)(nil),     // 6: agentrepl.v1.UpdateHeldPromptUnknownWorkspace
+	(*UpdateHeldPromptWorkspaceRefMismatch)(nil), // 7: agentrepl.v1.UpdateHeldPromptWorkspaceRefMismatch
+	(*UpdateHeldPromptTransferringAway)(nil),     // 8: agentrepl.v1.UpdateHeldPromptTransferringAway
+	(*UpdateHeldPromptNotYetAdopted)(nil),        // 9: agentrepl.v1.UpdateHeldPromptNotYetAdopted
+	(*UpdateHeldPromptNoSuchHold)(nil),           // 10: agentrepl.v1.UpdateHeldPromptNoSuchHold
+	(*UpdateHeldPromptAlreadyDelivered)(nil),     // 11: agentrepl.v1.UpdateHeldPromptAlreadyDelivered
+	(*UpdateHeldPromptReleaseRefused)(nil),       // 12: agentrepl.v1.UpdateHeldPromptReleaseRefused
+	(*UpdateHeldPromptBeingDelivered)(nil),       // 13: agentrepl.v1.UpdateHeldPromptBeingDelivered
+	(*v1.WorkspaceRef)(nil),                      // 14: workspace.v1.WorkspaceRef
+	(*v11.TurnId)(nil),                           // 15: conversation.v1.TurnId
 }
 var file_agentrepl_v1_endpoint_update_held_prompt_proto_depIdxs = []int32{
-	16, // 0: agentrepl.v1.UpdateHeldPromptRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	17, // 1: agentrepl.v1.UpdateHeldPromptRequest.turn:type_name -> conversation.v1.TurnId
+	14, // 0: agentrepl.v1.UpdateHeldPromptRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	15, // 1: agentrepl.v1.UpdateHeldPromptRequest.turn:type_name -> conversation.v1.TurnId
 	1,  // 2: agentrepl.v1.UpdateHeldPromptRequest.release:type_name -> agentrepl.v1.UpdateHeldPromptRelease
 	2,  // 3: agentrepl.v1.UpdateHeldPromptRequest.drop:type_name -> agentrepl.v1.UpdateHeldPromptDrop
-	3,  // 4: agentrepl.v1.UpdateHeldPromptRequest.accept:type_name -> agentrepl.v1.UpdateHeldPromptAccept
-	5,  // 5: agentrepl.v1.UpdateHeldPromptResponse.success:type_name -> agentrepl.v1.UpdateHeldPromptSuccess
-	6,  // 6: agentrepl.v1.UpdateHeldPromptResponse.error:type_name -> agentrepl.v1.UpdateHeldPromptError
-	7,  // 7: agentrepl.v1.UpdateHeldPromptError.unknown_workspace:type_name -> agentrepl.v1.UpdateHeldPromptUnknownWorkspace
-	8,  // 8: agentrepl.v1.UpdateHeldPromptError.workspace_ref_mismatch:type_name -> agentrepl.v1.UpdateHeldPromptWorkspaceRefMismatch
-	9,  // 9: agentrepl.v1.UpdateHeldPromptError.transferring_away:type_name -> agentrepl.v1.UpdateHeldPromptTransferringAway
-	10, // 10: agentrepl.v1.UpdateHeldPromptError.not_yet_adopted:type_name -> agentrepl.v1.UpdateHeldPromptNotYetAdopted
-	11, // 11: agentrepl.v1.UpdateHeldPromptError.no_such_hold:type_name -> agentrepl.v1.UpdateHeldPromptNoSuchHold
-	12, // 12: agentrepl.v1.UpdateHeldPromptError.already_delivered:type_name -> agentrepl.v1.UpdateHeldPromptAlreadyDelivered
-	13, // 13: agentrepl.v1.UpdateHeldPromptError.accept_not_applicable:type_name -> agentrepl.v1.UpdateHeldPromptAcceptNotApplicable
-	14, // 14: agentrepl.v1.UpdateHeldPromptError.release_refused:type_name -> agentrepl.v1.UpdateHeldPromptReleaseRefused
-	15, // 15: agentrepl.v1.UpdateHeldPromptError.being_delivered:type_name -> agentrepl.v1.UpdateHeldPromptBeingDelivered
-	16, // [16:16] is the sub-list for method output_type
-	16, // [16:16] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	4,  // 4: agentrepl.v1.UpdateHeldPromptResponse.success:type_name -> agentrepl.v1.UpdateHeldPromptSuccess
+	5,  // 5: agentrepl.v1.UpdateHeldPromptResponse.error:type_name -> agentrepl.v1.UpdateHeldPromptError
+	6,  // 6: agentrepl.v1.UpdateHeldPromptError.unknown_workspace:type_name -> agentrepl.v1.UpdateHeldPromptUnknownWorkspace
+	7,  // 7: agentrepl.v1.UpdateHeldPromptError.workspace_ref_mismatch:type_name -> agentrepl.v1.UpdateHeldPromptWorkspaceRefMismatch
+	8,  // 8: agentrepl.v1.UpdateHeldPromptError.transferring_away:type_name -> agentrepl.v1.UpdateHeldPromptTransferringAway
+	9,  // 9: agentrepl.v1.UpdateHeldPromptError.not_yet_adopted:type_name -> agentrepl.v1.UpdateHeldPromptNotYetAdopted
+	10, // 10: agentrepl.v1.UpdateHeldPromptError.no_such_hold:type_name -> agentrepl.v1.UpdateHeldPromptNoSuchHold
+	11, // 11: agentrepl.v1.UpdateHeldPromptError.already_delivered:type_name -> agentrepl.v1.UpdateHeldPromptAlreadyDelivered
+	12, // 12: agentrepl.v1.UpdateHeldPromptError.release_refused:type_name -> agentrepl.v1.UpdateHeldPromptReleaseRefused
+	13, // 13: agentrepl.v1.UpdateHeldPromptError.being_delivered:type_name -> agentrepl.v1.UpdateHeldPromptBeingDelivered
+	14, // [14:14] is the sub-list for method output_type
+	14, // [14:14] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_update_held_prompt_proto_init() }
@@ -1049,20 +933,18 @@ func file_agentrepl_v1_endpoint_update_held_prompt_proto_init() {
 	file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[0].OneofWrappers = []any{
 		(*UpdateHeldPromptRequest_Release)(nil),
 		(*UpdateHeldPromptRequest_Drop)(nil),
-		(*UpdateHeldPromptRequest_Accept)(nil),
 	}
-	file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[4].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[3].OneofWrappers = []any{
 		(*UpdateHeldPromptResponse_Success)(nil),
 		(*UpdateHeldPromptResponse_Error)(nil),
 	}
-	file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[6].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[5].OneofWrappers = []any{
 		(*UpdateHeldPromptError_UnknownWorkspace)(nil),
 		(*UpdateHeldPromptError_WorkspaceRefMismatch)(nil),
 		(*UpdateHeldPromptError_TransferringAway)(nil),
 		(*UpdateHeldPromptError_NotYetAdopted)(nil),
 		(*UpdateHeldPromptError_NoSuchHold)(nil),
 		(*UpdateHeldPromptError_AlreadyDelivered)(nil),
-		(*UpdateHeldPromptError_AcceptNotApplicable)(nil),
 		(*UpdateHeldPromptError_ReleaseRefused)(nil),
 		(*UpdateHeldPromptError_BeingDelivered)(nil),
 	}
@@ -1072,7 +954,7 @@ func file_agentrepl_v1_endpoint_update_held_prompt_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDesc), len(file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   16,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

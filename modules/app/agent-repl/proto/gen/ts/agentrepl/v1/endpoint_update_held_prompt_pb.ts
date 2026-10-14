@@ -23,7 +23,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_update_held_prompt.proto.
  */
 export const file_agentrepl_v1_endpoint_update_held_prompt: GenFile = /*@__PURE__*/
-  fileDesc("Ci5hZ2VudHJlcGwvdjEvZW5kcG9pbnRfdXBkYXRlX2hlbGRfcHJvbXB0LnByb3RvEgxhZ2VudHJlcGwudjEinwIKF1VwZGF0ZUhlbGRQcm9tcHRSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSJQoEdHVybhgCIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQSOAoHcmVsZWFzZRgDIAEoCzIlLmFnZW50cmVwbC52MS5VcGRhdGVIZWxkUHJvbXB0UmVsZWFzZUgAEjIKBGRyb3AYBCABKAsyIi5hZ2VudHJlcGwudjEuVXBkYXRlSGVsZFByb21wdERyb3BIABI2CgZhY2NlcHQYBSABKAsyJC5hZ2VudHJlcGwudjEuVXBkYXRlSGVsZFByb21wdEFjY2VwdEgAQggKBmFjdGlvbiIZChdVcGRhdGVIZWxkUHJvbXB0UmVsZWFzZSIWChRVcGRhdGVIZWxkUHJvbXB0RHJvcCIYChZVcGRhdGVIZWxkUHJvbXB0QWNjZXB0IpQBChhVcGRhdGVIZWxkUHJvbXB0UmVzcG9uc2USOAoHc3VjY2VzcxgBIAEoCzIlLmFnZW50cmVwbC52MS5VcGRhdGVIZWxkUHJvbXB0U3VjY2Vzc0gAEjQKBWVycm9yGAIgASgLMiMuYWdlbnRyZXBsLnYxLlVwZGF0ZUhlbGRQcm9tcHRFcnJvckgAQggKBnJlc3VsdCIZChdVcGRhdGVIZWxkUHJvbXB0U3VjY2VzcyLNBQoVVXBkYXRlSGVsZFByb21wdEVycm9yEksKEXVua25vd25fd29ya3NwYWNlGAEgASgLMi4uYWdlbnRyZXBsLnYxLlVwZGF0ZUhlbGRQcm9tcHRVbmtub3duV29ya3NwYWNlSAASVAoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIyLmFnZW50cmVwbC52MS5VcGRhdGVIZWxkUHJvbXB0V29ya3NwYWNlUmVmTWlzbWF0Y2hIABJLChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIuLmFnZW50cmVwbC52MS5VcGRhdGVIZWxkUHJvbXB0VHJhbnNmZXJyaW5nQXdheUgAEkYKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIrLmFnZW50cmVwbC52MS5VcGRhdGVIZWxkUHJvbXB0Tm90WWV0QWRvcHRlZEgAEkAKDG5vX3N1Y2hfaG9sZBgFIAEoCzIoLmFnZW50cmVwbC52MS5VcGRhdGVIZWxkUHJvbXB0Tm9TdWNoSG9sZEgAEksKEWFscmVhZHlfZGVsaXZlcmVkGAYgASgLMi4uYWdlbnRyZXBsLnYxLlVwZGF0ZUhlbGRQcm9tcHRBbHJlYWR5RGVsaXZlcmVkSAASUgoVYWNjZXB0X25vdF9hcHBsaWNhYmxlGAcgASgLMjEuYWdlbnRyZXBsLnYxLlVwZGF0ZUhlbGRQcm9tcHRBY2NlcHROb3RBcHBsaWNhYmxlSAASRwoPcmVsZWFzZV9yZWZ1c2VkGAggASgLMiwuYWdlbnRyZXBsLnYxLlVwZGF0ZUhlbGRQcm9tcHRSZWxlYXNlUmVmdXNlZEgAEkcKD2JlaW5nX2RlbGl2ZXJlZBgJIAEoCzIsLmFnZW50cmVwbC52MS5VcGRhdGVIZWxkUHJvbXB0QmVpbmdEZWxpdmVyZWRIAEIHCgVjYXVzZSIiCiBVcGRhdGVIZWxkUHJvbXB0VW5rbm93bldvcmtzcGFjZSI8CiRVcGRhdGVIZWxkUHJvbXB0V29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjMKIFVwZGF0ZUhlbGRQcm9tcHRUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiHwodVXBkYXRlSGVsZFByb21wdE5vdFlldEFkb3B0ZWQiHAoaVXBkYXRlSGVsZFByb21wdE5vU3VjaEhvbGQiIgogVXBkYXRlSGVsZFByb21wdEFscmVhZHlEZWxpdmVyZWQiJQojVXBkYXRlSGVsZFByb21wdEFjY2VwdE5vdEFwcGxpY2FibGUiIAoeVXBkYXRlSGVsZFByb21wdFJlbGVhc2VSZWZ1c2VkIiAKHlVwZGF0ZUhlbGRQcm9tcHRCZWluZ0RlbGl2ZXJlZEIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace, file_conversation_v1_turn]);
+  fileDesc("Ci5hZ2VudHJlcGwvdjEvZW5kcG9pbnRfdXBkYXRlX2hlbGRfcHJvbXB0LnByb3RvEgxhZ2VudHJlcGwudjEi5wEKF1VwZGF0ZUhlbGRQcm9tcHRSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSJQoEdHVybhgCIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQSOAoHcmVsZWFzZRgDIAEoCzIlLmFnZW50cmVwbC52MS5VcGRhdGVIZWxkUHJvbXB0UmVsZWFzZUgAEjIKBGRyb3AYBCABKAsyIi5hZ2VudHJlcGwudjEuVXBkYXRlSGVsZFByb21wdERyb3BIAEIICgZhY3Rpb24iGQoXVXBkYXRlSGVsZFByb21wdFJlbGVhc2UiFgoUVXBkYXRlSGVsZFByb21wdERyb3AilAEKGFVwZGF0ZUhlbGRQcm9tcHRSZXNwb25zZRI4CgdzdWNjZXNzGAEgASgLMiUuYWdlbnRyZXBsLnYxLlVwZGF0ZUhlbGRQcm9tcHRTdWNjZXNzSAASNAoFZXJyb3IYAiABKAsyIy5hZ2VudHJlcGwudjEuVXBkYXRlSGVsZFByb21wdEVycm9ySABCCAoGcmVzdWx0IhkKF1VwZGF0ZUhlbGRQcm9tcHRTdWNjZXNzIvkEChVVcGRhdGVIZWxkUHJvbXB0RXJyb3ISSwoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyLi5hZ2VudHJlcGwudjEuVXBkYXRlSGVsZFByb21wdFVua25vd25Xb3Jrc3BhY2VIABJUChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMjIuYWdlbnRyZXBsLnYxLlVwZGF0ZUhlbGRQcm9tcHRXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEksKEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMi4uYWdlbnRyZXBsLnYxLlVwZGF0ZUhlbGRQcm9tcHRUcmFuc2ZlcnJpbmdBd2F5SAASRgoPbm90X3lldF9hZG9wdGVkGAQgASgLMisuYWdlbnRyZXBsLnYxLlVwZGF0ZUhlbGRQcm9tcHROb3RZZXRBZG9wdGVkSAASQAoMbm9fc3VjaF9ob2xkGAUgASgLMiguYWdlbnRyZXBsLnYxLlVwZGF0ZUhlbGRQcm9tcHROb1N1Y2hIb2xkSAASSwoRYWxyZWFkeV9kZWxpdmVyZWQYBiABKAsyLi5hZ2VudHJlcGwudjEuVXBkYXRlSGVsZFByb21wdEFscmVhZHlEZWxpdmVyZWRIABJHCg9yZWxlYXNlX3JlZnVzZWQYCCABKAsyLC5hZ2VudHJlcGwudjEuVXBkYXRlSGVsZFByb21wdFJlbGVhc2VSZWZ1c2VkSAASRwoPYmVpbmdfZGVsaXZlcmVkGAkgASgLMiwuYWdlbnRyZXBsLnYxLlVwZGF0ZUhlbGRQcm9tcHRCZWluZ0RlbGl2ZXJlZEgAQgcKBWNhdXNlIiIKIFVwZGF0ZUhlbGRQcm9tcHRVbmtub3duV29ya3NwYWNlIjwKJFVwZGF0ZUhlbGRQcm9tcHRXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiMwogVXBkYXRlSGVsZFByb21wdFRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIfCh1VcGRhdGVIZWxkUHJvbXB0Tm90WWV0QWRvcHRlZCIcChpVcGRhdGVIZWxkUHJvbXB0Tm9TdWNoSG9sZCIiCiBVcGRhdGVIZWxkUHJvbXB0QWxyZWFkeURlbGl2ZXJlZCIgCh5VcGRhdGVIZWxkUHJvbXB0UmVsZWFzZVJlZnVzZWQiIAoeVXBkYXRlSGVsZFByb21wdEJlaW5nRGVsaXZlcmVkQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace, file_conversation_v1_turn]);
 
 /**
  * @generated from message agentrepl.v1.UpdateHeldPromptRequest
@@ -64,16 +64,6 @@ export type UpdateHeldPromptRequest = Message<"agentrepl.v1.UpdateHeldPromptRequ
      */
     value: UpdateHeldPromptDrop;
     case: "drop";
-  } | {
-    /**
-     * Confirm the hold (view state only: HeldPromptAccepted.accepted flips
-     * and the held section re-pushes; delivery is unchanged). Legal ONLY on an
-     * entry whose classification is hold_for_turn_end; refused otherwise.
-     *
-     * @generated from field: agentrepl.v1.UpdateHeldPromptAccept accept = 5;
-     */
-    value: UpdateHeldPromptAccept;
-    case: "accept";
   } | { case: undefined; value?: undefined };
 };
 
@@ -111,19 +101,6 @@ export const UpdateHeldPromptDropSchema: GenMessage<UpdateHeldPromptDrop> = /*@_
   messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 2);
 
 /**
- * @generated from message agentrepl.v1.UpdateHeldPromptAccept
- */
-export type UpdateHeldPromptAccept = Message<"agentrepl.v1.UpdateHeldPromptAccept"> & {
-};
-
-/**
- * Describes the message agentrepl.v1.UpdateHeldPromptAccept.
- * Use `create(UpdateHeldPromptAcceptSchema)` to create a new message.
- */
-export const UpdateHeldPromptAcceptSchema: GenMessage<UpdateHeldPromptAccept> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 3);
-
-/**
  * THE ARM IS THE OUTCOME.
  *
  * @generated from message agentrepl.v1.UpdateHeldPromptResponse
@@ -152,7 +129,7 @@ export type UpdateHeldPromptResponse = Message<"agentrepl.v1.UpdateHeldPromptRes
  * Use `create(UpdateHeldPromptResponseSchema)` to create a new message.
  */
 export const UpdateHeldPromptResponseSchema: GenMessage<UpdateHeldPromptResponse> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 4);
+  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 3);
 
 /**
  * Done; the held section's new state arrives on the root feed's watch.
@@ -167,7 +144,7 @@ export type UpdateHeldPromptSuccess = Message<"agentrepl.v1.UpdateHeldPromptSucc
  * Use `create(UpdateHeldPromptSuccessSchema)` to create a new message.
  */
 export const UpdateHeldPromptSuccessSchema: GenMessage<UpdateHeldPromptSuccess> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 5);
+  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 4);
 
 /**
  * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
@@ -229,14 +206,6 @@ export type UpdateHeldPromptError = Message<"agentrepl.v1.UpdateHeldPromptError"
     case: "alreadyDelivered";
   } | {
     /**
-     * An accept on a verdict other than hold_for_turn_end.
-     *
-     * @generated from field: agentrepl.v1.UpdateHeldPromptAcceptNotApplicable accept_not_applicable = 7;
-     */
-    value: UpdateHeldPromptAcceptNotApplicable;
-    case: "acceptNotApplicable";
-  } | {
-    /**
      * A force-through on an uninterruptible or reconnect hold, or on
      * a prompt that is being edited or queued after one that is
      * (EditHeldPrompt): an edit keeps it and everything after it held. Also
@@ -267,7 +236,7 @@ export type UpdateHeldPromptError = Message<"agentrepl.v1.UpdateHeldPromptError"
  * Use `create(UpdateHeldPromptErrorSchema)` to create a new message.
  */
 export const UpdateHeldPromptErrorSchema: GenMessage<UpdateHeldPromptError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 6);
+  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 5);
 
 /**
  * @generated from message agentrepl.v1.UpdateHeldPromptUnknownWorkspace
@@ -280,7 +249,7 @@ export type UpdateHeldPromptUnknownWorkspace = Message<"agentrepl.v1.UpdateHeldP
  * Use `create(UpdateHeldPromptUnknownWorkspaceSchema)` to create a new message.
  */
 export const UpdateHeldPromptUnknownWorkspaceSchema: GenMessage<UpdateHeldPromptUnknownWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 7);
+  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 6);
 
 /**
  * @generated from message agentrepl.v1.UpdateHeldPromptWorkspaceRefMismatch
@@ -299,7 +268,7 @@ export type UpdateHeldPromptWorkspaceRefMismatch = Message<"agentrepl.v1.UpdateH
  * Use `create(UpdateHeldPromptWorkspaceRefMismatchSchema)` to create a new message.
  */
 export const UpdateHeldPromptWorkspaceRefMismatchSchema: GenMessage<UpdateHeldPromptWorkspaceRefMismatch> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 8);
+  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 7);
 
 /**
  * @generated from message agentrepl.v1.UpdateHeldPromptTransferringAway
@@ -318,7 +287,7 @@ export type UpdateHeldPromptTransferringAway = Message<"agentrepl.v1.UpdateHeldP
  * Use `create(UpdateHeldPromptTransferringAwaySchema)` to create a new message.
  */
 export const UpdateHeldPromptTransferringAwaySchema: GenMessage<UpdateHeldPromptTransferringAway> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 9);
+  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 8);
 
 /**
  * @generated from message agentrepl.v1.UpdateHeldPromptNotYetAdopted
@@ -331,7 +300,7 @@ export type UpdateHeldPromptNotYetAdopted = Message<"agentrepl.v1.UpdateHeldProm
  * Use `create(UpdateHeldPromptNotYetAdoptedSchema)` to create a new message.
  */
 export const UpdateHeldPromptNotYetAdoptedSchema: GenMessage<UpdateHeldPromptNotYetAdopted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 10);
+  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 9);
 
 /**
  * @generated from message agentrepl.v1.UpdateHeldPromptNoSuchHold
@@ -344,7 +313,7 @@ export type UpdateHeldPromptNoSuchHold = Message<"agentrepl.v1.UpdateHeldPromptN
  * Use `create(UpdateHeldPromptNoSuchHoldSchema)` to create a new message.
  */
 export const UpdateHeldPromptNoSuchHoldSchema: GenMessage<UpdateHeldPromptNoSuchHold> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 11);
+  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 10);
 
 /**
  * @generated from message agentrepl.v1.UpdateHeldPromptAlreadyDelivered
@@ -357,20 +326,7 @@ export type UpdateHeldPromptAlreadyDelivered = Message<"agentrepl.v1.UpdateHeldP
  * Use `create(UpdateHeldPromptAlreadyDeliveredSchema)` to create a new message.
  */
 export const UpdateHeldPromptAlreadyDeliveredSchema: GenMessage<UpdateHeldPromptAlreadyDelivered> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 12);
-
-/**
- * @generated from message agentrepl.v1.UpdateHeldPromptAcceptNotApplicable
- */
-export type UpdateHeldPromptAcceptNotApplicable = Message<"agentrepl.v1.UpdateHeldPromptAcceptNotApplicable"> & {
-};
-
-/**
- * Describes the message agentrepl.v1.UpdateHeldPromptAcceptNotApplicable.
- * Use `create(UpdateHeldPromptAcceptNotApplicableSchema)` to create a new message.
- */
-export const UpdateHeldPromptAcceptNotApplicableSchema: GenMessage<UpdateHeldPromptAcceptNotApplicable> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 13);
+  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 11);
 
 /**
  * @generated from message agentrepl.v1.UpdateHeldPromptReleaseRefused
@@ -383,7 +339,7 @@ export type UpdateHeldPromptReleaseRefused = Message<"agentrepl.v1.UpdateHeldPro
  * Use `create(UpdateHeldPromptReleaseRefusedSchema)` to create a new message.
  */
 export const UpdateHeldPromptReleaseRefusedSchema: GenMessage<UpdateHeldPromptReleaseRefused> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 14);
+  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 12);
 
 /**
  * The prompt's delivery call is in flight. See the `being_delivered` arm.
@@ -398,5 +354,5 @@ export type UpdateHeldPromptBeingDelivered = Message<"agentrepl.v1.UpdateHeldPro
  * Use `create(UpdateHeldPromptBeingDeliveredSchema)` to create a new message.
  */
 export const UpdateHeldPromptBeingDeliveredSchema: GenMessage<UpdateHeldPromptBeingDelivered> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 15);
+  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 13);
 
