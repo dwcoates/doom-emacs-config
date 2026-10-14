@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"agent-repld/internal/dirpath"
+	"agent-repld/internal/semver"
 	"agent-repld/internal/wsm"
 )
 
@@ -195,6 +196,14 @@ type Entry struct {
 	// ahead of every ordinary merge still waiting, never ahead of the one
 	// running (wsm.MergeSource.Front). Any merge source may ask for it.
 	Front bool `json:"front,omitempty"`
+	// VersionPart is how the merge moves agent-repl's version, "minor" or
+	// "patch" (agentrepl.v1.MergeWorkspaceRequest.version_increment), set
+	// together with ChangelogLine. A merge onto agent-repl's master must
+	// carry both, and any other merge neither; the merge queue refuses the
+	// rest (merge.checkVersion).
+	VersionPart string `json:"version_part,omitempty"`
+	// ChangelogLine is the version tag's annotation: one non-blank line.
+	ChangelogLine string `json:"changelog_line,omitempty"`
 
 	// THE MERGE QUEUE CONTROLS' FIELDS.
 
@@ -431,6 +440,8 @@ func (e Entry) mergeOnly() string {
 		{"compact_after", e.CompactAfter},
 		{"pr_was_merged", e.PRWasMerged},
 		{"front", e.Front},
+		{"version_part", e.VersionPart != ""},
+		{"changelog_line", e.ChangelogLine != ""},
 	}
 	for _, field := range fields {
 		if field.set {
@@ -460,7 +471,31 @@ func (e Entry) validateMergeSource() error {
 	case e.Instruction != "" && strings.TrimSpace(e.Instruction) == "":
 		return fmt.Errorf("%s: an instruction says how to prepare the branch", TypeMerge)
 	}
+	if _, err := e.VersionIncrement(); err != nil {
+		return err
+	}
 	return nil
+}
+
+// VersionIncrement is the merge's version increment, nil when it carries
+// none. A part without a changelog line, or a line without a part, is refused:
+// both say one thing.
+func (e Entry) VersionIncrement() (*wsm.VersionIncrement, error) {
+	if e.VersionPart == "" && e.ChangelogLine == "" {
+		return nil, nil
+	}
+	if e.VersionPart == "" || e.ChangelogLine == "" {
+		return nil, fmt.Errorf("%s: version_part and changelog_line are given together (part %q, line %q)", TypeMerge, e.VersionPart, e.ChangelogLine)
+	}
+	part, err := semver.ParsePart(e.VersionPart)
+	if err != nil {
+		return nil, fmt.Errorf("%s: version_part: %w", TypeMerge, err)
+	}
+	out := &wsm.VersionIncrement{Part: part, ChangelogLine: e.ChangelogLine}
+	if err := out.Validate(); err != nil {
+		return nil, fmt.Errorf("%s: %w", TypeMerge, err)
+	}
+	return out, nil
 }
 
 // requireTarget refuses an entry that names no workspace at all.

@@ -80,13 +80,17 @@ func (r *run) concludedTerminal(ctx context.Context, log dlog.Logger, op string,
 		log.Info(op, "a merge concluded with its branch already on the target", dlog.Context{
 			"workspace": string(r.ws), "lease": string(r.lease.ID), "target": out.alreadyOn, "tip": out.landed})
 	default:
-		r.head(&frontendv1.FeedMergeSuccess{EndedAtMs: endedMS, Commit: out.landed})
+		r.head(landedHead{success: &frontendv1.FeedMergeSuccess{EndedAtMs: endedMS, Commit: out.landed}, version: headVersion(out.version)})
 		r.concluded(MergeFacts{State: StateMerged})
 		r.stampClosed(ctx, log, op, landedCount(out))
 		r.o.ended(ctx, r.ws, DetachedOutcome{Kind: DetachedLanded, Summary: fmt.Sprintf("it landed as commit %s", out.landed)})
-		log.Info(op, "a merge landed", dlog.Context{
+		fields := dlog.Context{
 			"workspace": string(r.ws), "lease": string(r.lease.ID), "commit": out.landed, "commits": len(out.commits),
-			"source": r.source.Kind.String(), "closes": string(r.subject.closes)})
+			"source": r.source.Kind.String(), "closes": string(r.subject.closes)}
+		if out.version != nil {
+			fields["version"] = out.version.tag
+		}
+		log.Info(op, "a merge landed", fields)
 	}
 }
 

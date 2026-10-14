@@ -16,6 +16,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/semver"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
 )
@@ -1526,5 +1527,42 @@ func TestEveryQueueControlAnswersNothingQueuedAlike(t *testing.T) {
 				t.Fatalf("record context %v, want outcome=not_queued for %s", record.Context, typ)
 			}
 		})
+	}
+}
+
+func TestApplyFileCarriesAMergesVersionIncrementOntoTheRequest(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("w1", "/tree/w1")
+	path := f.write(t, "workspace_commands_v.json", `[{"type":"merge","workspace":"w1","async_name":"fix","branch":"b","version_part":"minor","changelog_line":"Merges record a version"}]`)
+
+	// Act
+	if err := f.ingress.ApplyFile(context.Background(), path); err != nil {
+		t.Fatalf("ApplyFile: %v", err)
+	}
+
+	// Assert
+	if len(f.merge.sources) != 1 {
+		t.Fatalf("requests = %v, want one", f.merge.sources)
+	}
+	want := wsm.VersionIncrement{Part: semver.Minor, ChangelogLine: "Merges record a version"}
+	if got := f.merge.sources[0].Version; got == nil || *got != want {
+		t.Fatalf("version = %+v, want %+v", got, want)
+	}
+}
+
+func TestApplyFileQuarantinesAMergeTheQueueRefusesForItsVersion(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("w1", "/tree/w1")
+	f.merge.err = &merge.RefusalError{Arm: merge.ArmVersionIncrementRequired, Workspace: "w1", Reason: "a merge onto agent-repl's master names how it moves the version"}
+	path := f.write(t, "workspace_commands_w.json", `[{"type":"merge","workspace":"w1","one_shot":true}]`)
+
+	// Act
+	err := f.ingress.ApplyFile(context.Background(), path)
+
+	// Assert
+	if !errors.Is(err, ErrQuarantined) || !strings.Contains(err.Error(), merge.ArmVersionIncrementRequired) {
+		t.Fatalf("ApplyFile = %v, want the file quarantined naming %s", err, merge.ArmVersionIncrementRequired)
 	}
 }

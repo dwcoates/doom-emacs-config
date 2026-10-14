@@ -2856,6 +2856,42 @@ message FeedMergeHead {
   // merge workspace is hidden, since there is nothing to switch to, and on
   // every sync merge, which has no other workspace.
   optional FeedMergeWorkspaceSwitch workspace_switch = 5;
+  // The agent-repl version this merge landed as. PRESENT once a merge onto
+  // agent-repl's own master that carried a version increment has landed and
+  // its version tag exists, and from then on for the bubble's whole life,
+  // folded or not; UNSET on every other merge, and while the merge runs.
+  optional FeedMergeVersion version = 6;
+}
+
+// The version a landed merge produced ("0.4.0"), split into three runs so
+// the one number the merge incremented is drawn apart from the rest: the
+// incremented run is drawn green. Concatenated, the three runs are exactly
+// the version's tag.
+message FeedMergeVersion {
+  // Everything before the incremented number, its separator included
+  // ("0."). Never empty: MAJOR always precedes the number a merge moves.
+  FeedMergeVersionLeading leading = 1;
+  // The number this merge incremented ("4"), drawn green.
+  FeedMergeVersionIncremented incremented = 2;
+  // Everything after the incremented number, its separator included (".0"
+  // after a minor increment). UNSET after a patch increment, which moves the
+  // last number.
+  optional FeedMergeVersionTrailing trailing = 3;
+}
+
+// The version's text before the incremented number. Drawn verbatim.
+message FeedMergeVersionLeading {
+  string text = 1;
+}
+
+// The incremented number. Drawn verbatim, in green.
+message FeedMergeVersionIncremented {
+  string text = 1;
+}
+
+// The version's text after the incremented number. Drawn verbatim.
+message FeedMergeVersionTrailing {
+  string text = 1;
 }
 
 // The head's switch to the merge workspace: a prominent button while the

@@ -1787,6 +1787,47 @@ pending merge\='s reservation; BRANCH is what the name resolves to."
     (agent-repl-wire-verbs--check-keys message json '(branch))
     (list :branch (agent-repl-wire-verbs--decode-string message 'branch json))))
 
+(defun agent-repl-wire-decode-merge-workspace-version-increment-required (json)
+  "Decode MergeWorkspaceVersionIncrementRequired from JSON.  Empty: a merge
+onto agent-repl\='s master carries no version increment."
+  (agent-repl-wire-verbs--decode-empty "MergeWorkspaceVersionIncrementRequired" json))
+
+(defun agent-repl-wire-decode-merge-workspace-version-increment-unexpected-foreign-repository (json)
+  "Decode MergeWorkspaceVersionIncrementUnexpectedForeignRepository from JSON.
+Empty: the merge\='s target is not agent-repl\='s repository."
+  (agent-repl-wire-verbs--decode-empty "MergeWorkspaceVersionIncrementUnexpectedForeignRepository" json))
+
+(defun agent-repl-wire-decode-merge-workspace-version-increment-unexpected-not-default-branch (json)
+  "Decode MergeWorkspaceVersionIncrementUnexpectedNotDefaultBranch from JSON.
+Empty: the merge\='s target is a parent workspace\='s checkout."
+  (agent-repl-wire-verbs--decode-empty "MergeWorkspaceVersionIncrementUnexpectedNotDefaultBranch" json))
+
+(defun agent-repl-wire-decode-merge-workspace-version-increment-unexpected-merged-upstream (json)
+  "Decode MergeWorkspaceVersionIncrementUnexpectedMergedUpstream from JSON.
+Empty: the one-shot\='s branch already merged upstream."
+  (agent-repl-wire-verbs--decode-empty "MergeWorkspaceVersionIncrementUnexpectedMergedUpstream" json))
+
+(defun agent-repl-wire-decode-merge-workspace-version-increment-unexpected (json)
+  "Decode MergeWorkspaceVersionIncrementUnexpected from JSON into (:reason R).
+R is (:arm ARM :value V): why a supplied version increment does not belong
+on the merge."
+  (let ((message "MergeWorkspaceVersionIncrementUnexpected"))
+    (agent-repl-wire-verbs--check-keys message json '(foreignRepository notDefaultBranch mergedUpstream))
+    (list :reason
+          (agent-repl-wire-verbs--decode-oneof
+           message "reason" json
+           (list (list 'foreignRepository :foreign-repository #'agent-repl-wire-decode-merge-workspace-version-increment-unexpected-foreign-repository)
+                 (list 'notDefaultBranch :not-default-branch #'agent-repl-wire-decode-merge-workspace-version-increment-unexpected-not-default-branch)
+                 (list 'mergedUpstream :merged-upstream #'agent-repl-wire-decode-merge-workspace-version-increment-unexpected-merged-upstream))))))
+
+(defun agent-repl-wire-decode-merge-workspace-error-version-increment-required (json)
+  "Decode MergeWorkspaceError's `version_increment_required' cause arm from JSON."
+  (agent-repl-wire-decode-merge-workspace-version-increment-required json))
+
+(defun agent-repl-wire-decode-merge-workspace-error-version-increment-unexpected (json)
+  "Decode MergeWorkspaceError's `version_increment_unexpected' cause arm from JSON."
+  (agent-repl-wire-decode-merge-workspace-version-increment-unexpected json))
+
 (defun agent-repl-wire-decode-merge-workspace-error-name-taken (json)
   "Decode MergeWorkspaceError's `name_taken' cause arm from JSON."
   (agent-repl-wire-decode-merge-workspace-name-taken json))
@@ -1841,7 +1882,7 @@ JSON is the arm's value."
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "MergeWorkspaceError"))
-    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted noLayoutFacts sessionDeleted alreadyQueued alreadyMerging unknownOneShotWorkspace unknownBranch nameTaken branchCheckedOutInRequester))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted noLayoutFacts sessionDeleted alreadyQueued alreadyMerging unknownOneShotWorkspace unknownBranch nameTaken branchCheckedOutInRequester versionIncrementRequired versionIncrementUnexpected))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -1856,7 +1897,9 @@ arm this codec does not know is refused as an unknown field."
          (list 'unknownOneShotWorkspace :unknown-one-shot-workspace #'agent-repl-wire-decode-merge-workspace-error-unknown-one-shot-workspace)
          (list 'unknownBranch :unknown-branch #'agent-repl-wire-decode-merge-workspace-error-unknown-branch)
          (list 'nameTaken :name-taken #'agent-repl-wire-decode-merge-workspace-error-name-taken)
-         (list 'branchCheckedOutInRequester :branch-checked-out-in-requester #'agent-repl-wire-decode-merge-workspace-error-branch-checked-out-in-requester))))))
+         (list 'branchCheckedOutInRequester :branch-checked-out-in-requester #'agent-repl-wire-decode-merge-workspace-error-branch-checked-out-in-requester)
+         (list 'versionIncrementRequired :version-increment-required #'agent-repl-wire-decode-merge-workspace-error-version-increment-required)
+         (list 'versionIncrementUnexpected :version-increment-unexpected #'agent-repl-wire-decode-merge-workspace-error-version-increment-unexpected))))))
 
 (defun agent-repl-wire-decode-merge-workspace-response-success (json)
   "Decode MergeWorkspaceResponse's `success' arm from JSON."

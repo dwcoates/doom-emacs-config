@@ -733,6 +733,10 @@ export function mergeWorkspaceRefusal(cause: CauseOf<MergeWorkspaceError>): stri
       return `the merge workspace name ${cause.value.branch} is already taken`;
     case "branchCheckedOutInRequester":
       return "that branch is checked out in this workspace";
+    case "versionIncrementRequired":
+      return "a merge onto agent-repl's master names how it moves the version";
+    case "versionIncrementUnexpected":
+      return "only a merge onto agent-repl's master moves the version";
     default:
       return unreachableArm("MergeWorkspaceError.cause", cause.case);
   }

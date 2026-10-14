@@ -60,6 +60,24 @@ type refusal struct {
 	Op string
 }
 
+// mergeFields carries a merge refusal's fields onto the wire's: a field
+// naming a nested arm (merge.NestedArm, the unexpected increment's `reason`)
+// becomes the arm setNestedArms sets, and every other field passes as it is.
+func mergeFields(fields map[string]any) map[string]any {
+	if fields == nil {
+		return nil
+	}
+	out := make(map[string]any, len(fields))
+	for k, v := range fields {
+		if arm, ok := v.(merge.NestedArm); ok {
+			out[k] = nestedArm(arm)
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
 // asRefusal normalizes a component error into a refusal, reporting false for an
 // ordinary failure that must surface as an error rather than an answer.
 func (s *server) asRefusal(err error) (refusal, bool) {
@@ -75,7 +93,7 @@ func (s *server) asRefusal(err error) (refusal, bool) {
 		}), true
 	}
 	if mergeRefusal, ok := merge.Refused(err); ok {
-		return s.fill(refusal{Arm: mergeRefusal.Arm, Reason: mergeRefusal.Reason, Fields: mergeRefusal.Fields}), true
+		return s.fill(refusal{Arm: mergeRefusal.Arm, Reason: mergeRefusal.Reason, Fields: mergeFields(mergeRefusal.Fields)}), true
 	}
 	var confirm *workspace.ConfirmRequired
 	if errors.As(err, &confirm) {

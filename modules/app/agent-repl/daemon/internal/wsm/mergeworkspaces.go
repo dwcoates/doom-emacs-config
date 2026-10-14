@@ -95,11 +95,13 @@ func (s *store) HandOffDetachedMerge(ctx context.Context, repo RepoKey, requeste
 	fields := dlog.Context{"repo": string(key), "requester": string(requester), "request": string(request), "merge_workspace": string(mergeWS), "branch": branch}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		var (
-			state  int64
-			detach sql.NullString
-			front  bool
+			state   int64
+			detach  sql.NullString
+			front   bool
+			verPart sql.NullInt64
+			verLine sql.NullString
 		)
-		err := tx.QueryRowContext(ctx, `SELECT state, source_detach_id, source_front FROM merge_queue WHERE repo_key = ? AND workspace_id = ?`, key, requester).Scan(&state, &detach, &front)
+		err := tx.QueryRowContext(ctx, `SELECT state, source_detach_id, source_front, source_version_part, source_changelog_line FROM merge_queue WHERE repo_key = ? AND workspace_id = ?`, key, requester).Scan(&state, &detach, &front, &verPart, &verLine)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 			return fmt.Errorf("wsm: hand-off of detached merge %s: workspace %s has no merge request: %w", request, requester, ErrNotFound)
@@ -117,9 +119,14 @@ func (s *store) HandOffDetachedMerge(ctx context.Context, repo RepoKey, requeste
 		if err := requireOneRow(res, fmt.Sprintf("wsm: merge request of workspace %s", requester)); err != nil {
 			return err
 		}
-		// THE MERGE WORKSPACE CARRIES THE REQUEST'S PLACE IN LINE: a detached
-		// merge asked for the front still goes to the front.
-		return insertRequest(ctx, tx, key, mergeWS, MergeSource{Kind: MergeSourceOwnBranch, Branch: branch, Front: front, Pick: pick}, at)
+		version, err := scanVersion(verPart, verLine)
+		if err != nil {
+			return fmt.Errorf("wsm: hand-off of detached merge %s: workspace %s's request: %w", request, requester, err)
+		}
+		// THE MERGE WORKSPACE CARRIES THE REQUEST'S PLACE IN LINE AND ITS
+		// VERSION INCREMENT: a detached merge asked for the front still goes
+		// to the front, and the version it asked for is applied where it lands.
+		return insertRequest(ctx, tx, key, mergeWS, MergeSource{Kind: MergeSourceOwnBranch, Branch: branch, Front: front, Pick: pick, Version: version}, at)
 	})
 }
 

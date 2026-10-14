@@ -52,6 +52,13 @@ type Git interface {
 	// FastForward moves dir's checked-out branch, and its tree, forward to
 	// commit. It refuses anything that is not a fast-forward.
 	FastForward(ctx context.Context, dir, commit string) error
+	// TagsMerged lists every tag reachable from commit, in no promised order.
+	TagsMerged(ctx context.Context, dir, commit string) ([]string, error)
+	// TagsAt lists every tag that points at commit, in no promised order.
+	TagsAt(ctx context.Context, dir, commit string) ([]string, error)
+	// CreateAnnotatedTag creates the annotated tag name on commit with message
+	// as its annotation. It refuses a name that is already a tag.
+	CreateAnnotatedTag(ctx context.Context, dir, name, commit, message string) error
 	// IsAncestor reports whether ancestor is reachable from descendant. It is
 	// a PROBE: "no" is an ordinary answer, and only a git that could not tell
 	// is an error.

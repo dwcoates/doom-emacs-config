@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"agent-repld/internal/semver"
 	"agent-repld/internal/wsm"
 )
 
@@ -42,7 +43,11 @@ func TestAOneShotMergeClosesTheRequesterOnceItLands(t *testing.T) {
 	h.landsCleanly("abc123def4567")
 	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
 	h.gatePasses("daemon")
-	if err := h.requestOneShot(t, ownBranch, false); err != nil {
+	h.git.tagsMerged = []string{"0.0.1"}
+	// An agent's merge onto agent-repl's master names its version increment.
+	source := ownBranch
+	source.Version = &wsm.VersionIncrement{Part: semver.Patch, ChangelogLine: "Fix the footer"}
+	if err := h.requestOneShot(t, source, false); err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
 	h.runWait(t)
