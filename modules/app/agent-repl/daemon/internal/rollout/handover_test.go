@@ -1176,7 +1176,7 @@ func TestHandoverStandsDownAWorkspaceItCannotTransfer(t *testing.T) {
 }
 
 // TestHandoverNeverTransfersAClosedWorkspace asserts the defense in depth
-// behind wsm.SetClosed's release: a closed row still naming this daemon (the
+// behind wsm.MarkClosed's release: a closed row still naming this daemon (the
 // stale record 498b3b658c074bf4 carried, 2026-09-27) is never transferred.
 func TestHandoverNeverTransfersAClosedWorkspace(t *testing.T) {
 	tests := []struct {
@@ -1198,8 +1198,8 @@ func TestHandoverNeverTransfersAClosedWorkspace(t *testing.T) {
 			ws, _ := h.workspace(t)
 			shim := h.fleet.live[ws]
 			if tt.close {
-				if err := h.db.SetClosed(ctx, ws, true); err != nil {
-					t.Fatalf("SetClosed: %v", err)
+				if err := h.db.MarkClosed(ctx, ws, wsm.Closure{At: time.Now(), By: wsm.CloseByUser}); err != nil {
+					t.Fatalf("MarkClosed: %v", err)
 				}
 				// The stale record: a closed row a leaked path left served.
 				if err := h.db.ClaimServing(ctx, ws, selfInstance); err != nil {

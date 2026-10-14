@@ -203,7 +203,7 @@ type DB interface {
   RegisterWorkspace(dir string, facts RegisterFacts) (Workspace, bool /*created*/, error)   // idempotent by normalized dir; mints WorkspaceID + RepoID
   Workspace(id WorkspaceID) (Workspace, error); WorkspaceByDir(dir string) (Workspace, error)
   ListWorkspaces() ([]Workspace, error); ListRepositories() ([]Repository, error)
-  SetClosed(id WorkspaceID, closed bool) error; SetCurrent(id WorkspaceID, at time.Time) error; Current() (*WorkspaceID, error)
+  MarkClosed(id WorkspaceID, closure Closure) error; Reopen(id WorkspaceID) error; SetCurrent(id WorkspaceID, at time.Time) error; Current() (*WorkspaceID, error)
   SetPriority(id WorkspaceID, p *Priority) error; SetAttention(id WorkspaceID, on bool) error
   SetMergedAt(id WorkspaceID, at time.Time, commits *uint32) error   // commits: the count the merge brought in, nil keeps the recorded one
   SetLiveCommitCount(id WorkspaceID, count uint32) (bool, error)     // the turn-close recount; refused (false) once merged_at is set

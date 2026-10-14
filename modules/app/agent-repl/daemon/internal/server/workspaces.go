@@ -466,7 +466,7 @@ func (s *server) CloseWorkspace(
 	if done {
 		return answer(resp, cerr)
 	}
-	if err := s.deps.Verbs.Close(ctx, subject.Record.ID); err != nil {
+	if err := s.deps.Verbs.Close(ctx, subject.Record.ID, wsm.CloseByUser); err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
 	// The verb moved the session's standing or the composer's gate; the host

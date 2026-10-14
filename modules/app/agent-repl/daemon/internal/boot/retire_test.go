@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"agent-repld/internal/sessionlock"
 	"agent-repld/internal/wsm"
@@ -47,8 +48,8 @@ func (h *harness) registerUnderRepo(t *testing.T, dir, repoDir string) wsm.Works
 
 func (h *harness) closeWorkspace(t *testing.T, ws wsm.Workspace) {
 	t.Helper()
-	if err := h.db.SetClosed(context.Background(), ws.ID, true); err != nil {
-		t.Fatalf("SetClosed(%s): %v", ws.ID, err)
+	if err := h.db.MarkClosed(context.Background(), ws.ID, wsm.Closure{At: time.Now(), By: wsm.CloseByUser}); err != nil {
+		t.Fatalf("MarkClosed(%s): %v", ws.ID, err)
 	}
 }
 

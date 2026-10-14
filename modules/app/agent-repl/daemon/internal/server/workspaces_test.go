@@ -145,6 +145,28 @@ func TestCloseWorkspaceMapsTheBlockedArm(t *testing.T) {
 	}
 }
 
+// TestCloseWorkspaceIsTheUsersClose pins that the rpc closes on the user's
+// behalf, which the close record keeps.
+func TestCloseWorkspaceIsTheUsersClose(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	resp, err := h.Client.CloseWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: ref()}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("CloseWorkspace: %v", err)
+	}
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("result = %v, want success", resp.Msg.GetResult())
+	}
+	if len(h.Verbs.closedBy) != 1 || h.Verbs.closedBy[0] != wsm.CloseByUser {
+		t.Fatalf("close causes = %v, want one by the user", h.Verbs.closedBy)
+	}
+}
+
 // TestCreateWorkspaceRefusesAnUnknownRepository pins that a repository ref
 // matching nothing registered is refused rather than materialized somewhere.
 func TestCreateWorkspaceRefusesAnUnknownRepository(t *testing.T) {
