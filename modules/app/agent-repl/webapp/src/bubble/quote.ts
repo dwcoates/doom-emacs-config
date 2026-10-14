@@ -8,8 +8,9 @@
  * place among the blocks, once the bubble is opened. The stylesheet hides
  * every element wearing `BUBBLE_QUOTE_CLASS` in a body whose scroll box is not
  * `.expanded`, so the one toggle (expand.ts) that opens the text opens the
- * quote too, and the has-more measurer (feed/bubble-more.ts) counts a hidden
- * quote as content the collapsed bubble hides.
+ * quote too. The has-more measurer (feed/bubble-more.ts) never counts a
+ * hidden quote: the fade is the person's words' alone (owner ruling,
+ * 2026-10-14).
  *
  * The text is drawn VERBATIM as markdown: the daemon composed it (preamble,
  * fenced quote, closing marker), and this end never parses it.

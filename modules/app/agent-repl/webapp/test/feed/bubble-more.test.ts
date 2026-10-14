@@ -164,9 +164,18 @@ describe("hidesContentBeyondCap: the body's lines against the collapsed cap", ()
     expect(hidesContentBeyondCap(box)).toBe(false);
   });
 
-  it("counts a reply's quote as hidden, however short the words beside it", () => {
+  it("finds nothing hidden beside a reply's quote when the words fit the cap", () => {
     // Arrange — one line of words, and the quote the collapsed bubble does not draw.
     const box = bubbleBox({ lines: 1 });
+    box.querySelector(`.${BUBBLE_BODY_CLASS}`)?.append(quoteSlot("prompt-block", "the quote"));
+
+    // Act / Assert
+    expect(hidesContentBeyondCap(box)).toBe(false);
+  });
+
+  it("finds content hidden beside a reply's quote when the words overrun the cap", () => {
+    // Arrange — words past the cap, and the quote beside them.
+    const box = bubbleBox({ lines: CAP_LINES + 5 });
     box.querySelector(`.${BUBBLE_BODY_CLASS}`)?.append(quoteSlot("prompt-block", "the quote"));
 
     // Act / Assert
