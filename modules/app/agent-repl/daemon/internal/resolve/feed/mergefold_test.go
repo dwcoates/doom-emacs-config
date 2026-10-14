@@ -1,6 +1,8 @@
 package feed
 
 import (
+	"os"
+	"strings"
 	"testing"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -10,9 +12,11 @@ import (
 	"agent-repld/internal/feedid"
 )
 
-// A MERGE BUBBLE IS OPEN BY DEFAULT AND NEVER COLLAPSES AUTOMATICALLY, save a
-// merge that ended in success (owner ruling, 2026-10-08); the reader's fold
-// always wins, and both hold across a new daemon.
+// A SYNC MERGE BUBBLE IS OPEN BY DEFAULT AND NEVER COLLAPSES AUTOMATICALLY,
+// save a merge that ended in success (owner ruling, 2026-10-08); AN ASYNC
+// MERGE BUBBLE IS FOLDED BY DEFAULT at every state (owner ruling,
+// 2026-10-14); the reader's fold always wins, and all of it holds across a new
+// daemon.
 
 // mergeState names a merge head's state arm, for the tables.
 type mergeState int
@@ -44,6 +48,14 @@ func stateHead(state mergeState) *frontendv1.FeedRow {
 	return row
 }
 
+// asyncStateHead is stateHead for an async merge.
+func asyncStateHead(state mergeState) *frontendv1.FeedRow {
+	row := stateHead(state)
+	row.GetActivity().GetMerge().GetHead().Mode = &frontendv1.FeedMergeMode{
+		Mode: &frontendv1.FeedMergeMode_Async{Async: &frontendv1.FeedMergeModeAsync{}}}
+	return row
+}
+
 // headFoldOf answers the stored head's fold on R's root feed.
 func headFoldOf(t *testing.T, r *resolver) *frontendv1.FeedMergeFold {
 	t.Helper()
@@ -61,6 +73,11 @@ func headFoldOf(t *testing.T, r *resolver) *frontendv1.FeedMergeFold {
 // push publishes a merge head in STATE on R.
 func push(r *resolver, state mergeState) {
 	r.UpsertDurable(testWorkspace, rootFeed(), stateHead(state))
+}
+
+// pushAsync publishes an async merge head in STATE on R.
+func pushAsync(r *resolver, state mergeState) {
+	r.UpsertDurable(testWorkspace, rootFeed(), asyncStateHead(state))
 }
 
 // readerFolds records the reader's FOLDED on R's merge head.
@@ -128,6 +145,51 @@ func TestAMergeHeadFoldOnOneDaemon(t *testing.T) {
 				push(r, stateFailed)
 			},
 			wantFolded: true,
+			wantReader: true,
+		},
+		{
+			name:       "an async queued or running merge is folded",
+			act:        func(r *resolver) { pushAsync(r, stateRunning) },
+			wantFolded: true,
+		},
+		{
+			name:       "an async merge stays folded as it streams progress",
+			act:        func(r *resolver) { pushAsync(r, stateRunning); pushAsync(r, stateRunning) },
+			wantFolded: true,
+		},
+		{
+			name:       "an async merge that lands is folded",
+			act:        func(r *resolver) { pushAsync(r, stateRunning); pushAsync(r, stateSuccess) },
+			wantFolded: true,
+		},
+		{
+			name:       "an async merge that fails is folded",
+			act:        func(r *resolver) { pushAsync(r, stateRunning); pushAsync(r, stateFailed) },
+			wantFolded: true,
+		},
+		{
+			name:       "an async merge that did not run is folded",
+			act:        func(r *resolver) { pushAsync(r, stateRunning); pushAsync(r, stateAbandoned) },
+			wantFolded: true,
+		},
+		{
+			name: "the reader's unfold of an async merge stays open under a later push",
+			act: func(r *resolver) {
+				pushAsync(r, stateRunning)
+				readerFolds(r, false)
+				pushAsync(r, stateRunning)
+			},
+			wantFolded: false,
+			wantReader: true,
+		},
+		{
+			name: "the reader's unfold of an async merge stays open when it fails",
+			act: func(r *resolver) {
+				pushAsync(r, stateRunning)
+				readerFolds(r, false)
+				pushAsync(r, stateFailed)
+			},
+			wantFolded: false,
 			wantReader: true,
 		},
 		{
@@ -202,6 +264,24 @@ func TestAMergeHeadFoldOnANewDaemon(t *testing.T) {
 			wantFolded: false,
 		},
 		{
+			name:       "a restored async running merge is folded",
+			first:      func(r *resolver) { pushAsync(r, stateRunning) },
+			second:     func(*resolver) {},
+			wantFolded: true,
+		},
+		{
+			name:       "a restored async failure is folded",
+			first:      func(r *resolver) { pushAsync(r, stateFailed) },
+			second:     func(*resolver) {},
+			wantFolded: true,
+		},
+		{
+			name:       "a restored async merge the reader unfolded stays open",
+			first:      func(r *resolver) { pushAsync(r, stateRunning); readerFolds(r, false) },
+			second:     func(*resolver) {},
+			wantFolded: false,
+		},
+		{
 			name:       "a running merge the reader folded stays folded when the resumed merge pushes",
 			first:      func(r *resolver) { push(r, stateRunning); readerFolds(r, true) },
 			second:     func(r *resolver) { push(r, stateRunning) },
@@ -227,9 +307,9 @@ func TestAMergeHeadFoldOnANewDaemon(t *testing.T) {
 	}
 }
 
-// recordLegacyFold rewrites the recorded head as a row recorded before the
-// fold said who decided it: FOLDED, with no decider.
-func recordLegacyFold(t *testing.T, store *fakeDurableRows, folded bool) {
+// rewriteRecordedHead rewrites the head STORE recorded, through EDIT, as a row
+// recorded by an older daemon would read.
+func rewriteRecordedHead(t *testing.T, store *fakeDurableRows, edit func(head *frontendv1.FeedMergeHead)) {
 	t.Helper()
 	id := stateHead(stateRunning).GetId().GetValue()
 	recorded, ok := store.recorded(testWorkspace, id)
@@ -240,13 +320,22 @@ func recordLegacyFold(t *testing.T, store *fakeDurableRows, folded bool) {
 	if err := proto.Unmarshal(recorded.Row, row); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	row.GetActivity().GetMerge().GetHead().Fold = &frontendv1.FeedMergeFold{Folded: folded}
+	edit(row.GetActivity().GetMerge().GetHead())
 	encoded, err := proto.Marshal(row)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 	recorded.Row = encoded
 	store.rows[testWorkspace][id] = recorded
+}
+
+// recordLegacyFold rewrites the recorded head as a row recorded before the
+// fold said who decided it: FOLDED, with no decider.
+func recordLegacyFold(t *testing.T, store *fakeDurableRows, folded bool) {
+	t.Helper()
+	rewriteRecordedHead(t, store, func(head *frontendv1.FeedMergeHead) {
+		head.Fold = &frontendv1.FeedMergeFold{Folded: folded}
+	})
 }
 
 func TestALegacyRecordedFoldIsRepaintedWithTheDefault(t *testing.T) {
@@ -286,6 +375,113 @@ func TestALegacyRecordedFoldIsRepaintedWithTheDefault(t *testing.T) {
 			}
 		})
 	}
+}
+
+// recordWithoutMode rewrites the recorded head as a row recorded before heads
+// carried their mode.
+func recordWithoutMode(t *testing.T, store *fakeDurableRows) {
+	t.Helper()
+	rewriteRecordedHead(t, store, func(head *frontendv1.FeedMergeHead) { head.Mode = nil })
+}
+
+func TestRewriteRecordedHeadRestatesTheStoredRowOnly(t *testing.T) {
+	// Arrange
+	store := newFakeDurableRows()
+	r, _ := daemonOver(t, store)
+	push(r, stateRunning)
+
+	// Act
+	rewriteRecordedHead(t, store, func(head *frontendv1.FeedMergeHead) {
+		head.Label = &frontendv1.FeedMergeLabel{Text: "rewritten"}
+	})
+
+	// Assert
+	recorded, _ := store.recorded(testWorkspace, stateHead(stateRunning).GetId().GetValue())
+	row := &frontendv1.FeedRow{}
+	if err := proto.Unmarshal(recorded.Row, row); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	drawn := feedRows(r, rootFeed())[0].GetActivity().GetMerge().GetHead().GetLabel().GetText()
+	if got := row.GetActivity().GetMerge().GetHead().GetLabel().GetText(); got != "rewritten" || drawn == "rewritten" {
+		t.Fatalf("recorded label = %q, drawn label = %q; want only the record rewritten", got, drawn)
+	}
+}
+
+func TestEveryRecordedHeadRewriteGoesThroughOneHelper(t *testing.T) {
+	// Arrange
+	source, err := os.ReadFile("mergefold_test.go")
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+
+	// The needle is assembled so this test's own source never matches it.
+	needle := "encoded, err := proto." + "Marshal(row)"
+
+	// Act
+	marshals := strings.Count(string(source), needle)
+
+	// Assert
+	if marshals != 1 {
+		t.Fatalf("a recorded head is re-marshalled at %d sites in mergefold_test.go, want one, in rewriteRecordedHead", marshals)
+	}
+}
+
+func TestARestoredHeadWithNoModeTakesTheSyncDefault(t *testing.T) {
+	tests := []struct {
+		name       string
+		state      mergeState
+		wantFolded bool
+	}{
+		{"a modeless running merge is restored open", stateRunning, false},
+		{"a modeless success is restored folded", stateSuccess, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			store := newFakeDurableRows()
+			first, _ := daemonOver(t, store)
+			pushAsync(first, tt.state)
+			recordWithoutMode(t, store)
+
+			// Act
+			second, log := daemonOver(t, store)
+			fold := headFoldOf(t, second)
+
+			// Assert
+			if fold.GetFolded() != tt.wantFolded || fold.GetDaemon() == nil {
+				t.Fatalf("fold = %v, want folded=%v decided by the daemon", fold, tt.wantFolded)
+			}
+			found := false
+			for _, rec := range log.Records() {
+				if rec.Operation == "daemon.feed.merge_mode_unrecorded" && rec.Level == "info" &&
+					rec.Context["row"] == stateHead(stateRunning).GetId().GetValue() {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("no daemon.feed.merge_mode_unrecorded record naming the row in %v", log.Records())
+			}
+		})
+	}
+}
+
+func TestAHeadPublishedWithNoModePanics(t *testing.T) {
+	// Arrange
+	r, _ := daemonOver(t, newFakeDurableRows())
+	row := stateHead(stateRunning)
+	row.GetActivity().GetMerge().GetHead().Mode = nil
+	defer func() {
+		// Assert
+		if recover() == nil {
+			t.Fatal("a head with no mode was published")
+		}
+		if rows := feedRows(r, rootFeed()); len(rows) != 0 {
+			t.Fatalf("root rows = %d, want none published", len(rows))
+		}
+	}()
+
+	// Act
+	r.UpsertDurable(testWorkspace, rootFeed(), row)
 }
 
 func TestSetMergeFoldRecordsTheReadersArm(t *testing.T) {

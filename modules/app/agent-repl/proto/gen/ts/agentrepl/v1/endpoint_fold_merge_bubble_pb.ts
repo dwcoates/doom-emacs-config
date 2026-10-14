@@ -1,10 +1,11 @@
 // endpoint_fold_merge_bubble.proto — FoldMergeBubble: the reader opened or
 // closed a merge bubble. FEED section.
 //
-// THE READER'S FOLD IS DAEMON-HELD, AND IT ALWAYS WINS. A merge bubble is
-// open by default and never collapses automatically, with one exception: a
-// merge that ended in success is drawn folded (owner ruling, 2026-10-08;
-// frontend.v1.FeedMergeFold). The webapp tells the daemon each fold the reader
+// THE READER'S FOLD IS DAEMON-HELD, AND IT ALWAYS WINS. A sync merge's bubble
+// is open by default and never collapses automatically, with one exception: a
+// merge that ended in success is drawn folded (owner ruling, 2026-10-08). An
+// async merge's bubble is folded by default at every state (owner ruling,
+// 2026-10-14; frontend.v1.FeedMergeFold, frontend.v1.FeedMergeHead.mode). The webapp tells the daemon each fold the reader
 // makes, the daemon records it on the bubble's durable head row
 // (frontend.v1.FeedMergeHead.fold, `reader` arm), and every later draw of the
 // row — a push, a page, a reload, a daemon restart — carries it over the
