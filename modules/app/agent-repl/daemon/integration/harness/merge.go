@@ -2,46 +2,67 @@ package harness
 
 import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	workspacev1 "agentrepl/proto/workspace/v1"
 )
 
 // merge.go holds the merge-request shapes and the landing wait that the daemon
 // integration suite and the cross-system e2e suite share, so the two cannot
 // drift on what a merge request names or on what "the landing deployed" means.
 
-// OwnBranch is a MergeWorkspace source naming the requester's own branch, run
-// IN PLACE. With keepOpen false the workspace closes once its branch lands.
-func OwnBranch(keepOpen bool) *agentreplv1.MergeWorkspaceSource {
-	return &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_OwnBranch{
-		OwnBranch: &agentreplv1.MergeWorkspaceSourceOwnBranch{Run: &agentreplv1.MergeWorkspaceSourceOwnBranch_InPlace{
-			InPlace: &agentreplv1.MergeWorkspaceSourceOwnBranchInPlace{KeepOpen: keepOpen}}}}}
+// MergeMode sets a MergeWorkspace request's mode.
+type MergeMode func(*agentreplv1.MergeWorkspaceRequest)
+
+// MergeRequest is a MergeWorkspace request from WS in MODE.
+func MergeRequest(ws *workspacev1.WorkspaceRef, mode MergeMode) *agentreplv1.MergeWorkspaceRequest {
+	req := &agentreplv1.MergeWorkspaceRequest{Workspace: ws}
+	mode(req)
+	return req
 }
 
-// OwnBranchAsync is a MergeWorkspace source naming the requester's whole own
-// branch, run ASYNC in a hidden merge workspace named NAME.
-func OwnBranchAsync(name string) *agentreplv1.MergeWorkspaceSource {
-	return ownBranchDetached(&agentreplv1.MergeWorkspaceSourceOwnBranchDetached{Name: name,
-		Content: &agentreplv1.MergeWorkspaceSourceOwnBranchDetached_WholeBranch{WholeBranch: &agentreplv1.MergeWorkspaceSourceOwnBranchDetachedWholeBranch{}}})
+// OneShot is the SYNC mode: the requester's own branch, merged in place,
+// closing the requester once it lands.
+func OneShot() MergeMode {
+	return func(req *agentreplv1.MergeWorkspaceRequest) {
+		req.Mode = &agentreplv1.MergeWorkspaceRequest_OneShot{OneShot: &agentreplv1.MergeWorkspaceOneShot{
+			Landing: &agentreplv1.MergeWorkspaceOneShot_OwnBranch{OwnBranch: &agentreplv1.MergeWorkspaceOneShotOwnBranch{}}}}
+	}
 }
 
-// OwnBranchPick is a MergeWorkspace source naming only the changes of the
-// requester's own branch INSTRUCTION names, run ASYNC in a hidden merge
-// workspace named NAME.
-func OwnBranchPick(name, instruction string) *agentreplv1.MergeWorkspaceSource {
-	return ownBranchDetached(&agentreplv1.MergeWorkspaceSourceOwnBranchDetached{Name: name,
-		Content: &agentreplv1.MergeWorkspaceSourceOwnBranchDetached_Pick{Pick: &agentreplv1.MergeWorkspaceSourceOwnBranchDetachedPick{Instruction: instruction}}})
+// OneShotMergedUpstream is the one-shot whose branch already merged upstream.
+func OneShotMergedUpstream() MergeMode {
+	return func(req *agentreplv1.MergeWorkspaceRequest) {
+		req.Mode = &agentreplv1.MergeWorkspaceRequest_OneShot{OneShot: &agentreplv1.MergeWorkspaceOneShot{
+			Landing: &agentreplv1.MergeWorkspaceOneShot_MergedUpstream{MergedUpstream: &agentreplv1.MergeWorkspaceOneShotMergedUpstream{}}}}
+	}
 }
 
-// ownBranchDetached wraps an async run as an own-branch source.
-func ownBranchDetached(run *agentreplv1.MergeWorkspaceSourceOwnBranchDetached) *agentreplv1.MergeWorkspaceSource {
-	return &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_OwnBranch{
-		OwnBranch: &agentreplv1.MergeWorkspaceSourceOwnBranch{Run: &agentreplv1.MergeWorkspaceSourceOwnBranch_Detached{Detached: run}}}}
+// Async is the ASYNC mode: BRANCH, merged in a hidden merge workspace named
+// NAME, shaped further by EDITS (an instruction, a workspace to close, ...).
+func Async(name, branch string, edits ...func(*agentreplv1.MergeWorkspaceAsync)) MergeMode {
+	return func(req *agentreplv1.MergeWorkspaceRequest) {
+		async := &agentreplv1.MergeWorkspaceAsync{Name: name, Branch: branch}
+		for _, edit := range edits {
+			edit(async)
+		}
+		req.Mode = &agentreplv1.MergeWorkspaceRequest_Async{Async: async}
+	}
 }
 
-// BranchSource is a MergeWorkspace source naming a branch that is no
-// workspace's.
-func BranchSource(name string) *agentreplv1.MergeWorkspaceSource {
-	return &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_Branch{
-		Branch: &agentreplv1.MergeWorkspaceSourceBranch{Name: name}}}
+// WithInstruction gives an async merge its resolving instruction.
+func WithInstruction(instruction string) func(*agentreplv1.MergeWorkspaceAsync) {
+	return func(async *agentreplv1.MergeWorkspaceAsync) { async.Instruction = &instruction }
+}
+
+// ClosingOnLanding names the workspace an async merge closes once it lands.
+func ClosingOnLanding(ws *workspacev1.WorkspaceRef) func(*agentreplv1.MergeWorkspaceAsync) {
+	return func(async *agentreplv1.MergeWorkspaceAsync) {
+		async.OneShot = &agentreplv1.MergeWorkspaceAsyncOneShot{Workspace: ws}
+	}
+}
+
+// CleaningUp asks an async merge to remove the branch's worktree once it lands.
+func CleaningUp() func(*agentreplv1.MergeWorkspaceAsync) {
+	return func(async *agentreplv1.MergeWorkspaceAsync) { async.CleanupWorktree = true }
 }
 
 // IsLandingDeployed reports whether a run-log record is the ONE deploy a
