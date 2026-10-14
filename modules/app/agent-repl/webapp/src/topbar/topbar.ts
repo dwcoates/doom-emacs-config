@@ -41,7 +41,6 @@
  * as it is drawn so a reader with the model list open sees the NEW list rather
  * than the one from the push before.
  */
-import { pagePresence, warmthCondition } from "../presence.js";
 import { WatchTopbarResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_topbar_pb";
 import type { TopbarView } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import type { LocalFailureView } from "../failure/local.js";
@@ -163,8 +162,6 @@ export function mountTopbar(host: HTMLElement, deps: TopbarDeps): TopbarHandle {
         schema: WatchTopbarResponseSchema,
         open: (_client, signal) =>
           ctx.streams.watch("topbar", { workspace: ctx.workspace }, signal),
-        // A cold page's topbar stands down until it warms (host.ts).
-        standsWhile: warmthCondition(pagePresence()),
         onPush: (response) => {
           const next = requireMessage(response.topbar, "WatchTopbarResponse.topbar");
           show(drawTopbarView(next, watching));
