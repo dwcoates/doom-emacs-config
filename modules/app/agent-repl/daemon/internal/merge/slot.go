@@ -63,6 +63,9 @@ func (o *orchestrator) releaseRepoLockIfIdle(ctx context.Context, repo wsm.RepoK
 // kicks the pump so the next merge is admitted or promoted. It is the ONE
 // place a run leaves its chain, and it acts once.
 func (o *orchestrator) releaseSlot(ctx context.Context, r *run) {
+	// A RUN LEAVING ITS CHAIN GIVES BACK ITS TEST TURN, or its place in line
+	// for it (testturn.go), here with everything else it holds.
+	o.releaseTestTurn(ctx, r, "left its chain")
 	o.mu.Lock()
 	if !r.joined {
 		o.mu.Unlock()

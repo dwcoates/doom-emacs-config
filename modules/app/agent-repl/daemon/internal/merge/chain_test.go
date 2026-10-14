@@ -393,6 +393,9 @@ type chainRunner struct {
 	results map[string][]scriptedRun
 	holds   map[string][]chainHold
 	calls   map[string]int
+	// running counts the runs under way now, and most the most that ever
+	// were at once: one repository's gates never overlap (testturn.go).
+	running, most int
 }
 
 type chainHold struct{ entered, release chan struct{} }
@@ -417,6 +420,13 @@ func (c *chainRunner) script(dir string, run scriptedRun) {
 	c.results[dir] = append(c.results[dir], run)
 }
 
+// overlapped answers the most runs ever under way at once.
+func (c *chainRunner) overlapped() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.most
+}
+
 func (c *chainRunner) ran(dir string) int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -426,6 +436,13 @@ func (c *chainRunner) ran(dir string) int {
 func (c *chainRunner) RunLinesMeasured(ctx context.Context, dir string, argv []string, onLine func(string)) (scriptrunner.Run, error) {
 	c.mu.Lock()
 	c.calls[dir]++
+	c.running++
+	c.most = max(c.most, c.running)
+	defer func() {
+		c.mu.Lock()
+		c.running--
+		c.mu.Unlock()
+	}()
 	var hold *chainHold
 	if hs := c.holds[dir]; len(hs) > 0 {
 		hold = &hs[0]
@@ -483,6 +500,63 @@ type chain struct {
 	decisions chan dlog.Context
 	dirs      map[ids.WorkspaceID]string
 	branches  map[ids.WorkspaceID]string
+	turns     *chainTurns
+}
+
+// chainTurns orders the gates of a chain's merges at their repository's test
+// turn: a parked merge's next ask for the turn holds until it is released or
+// its run is stopped, and every merge that joins the line for it is told.
+type chainTurns struct {
+	mu    sync.Mutex
+	parks map[ids.WorkspaceID]chan struct{}
+	lined chan ids.WorkspaceID
+}
+
+// ask is the orchestrator's onTestTurnAsk.
+func (c *chainTurns) ask(ctx context.Context, ws ids.WorkspaceID) {
+	c.mu.Lock()
+	park, ok := c.parks[ws]
+	delete(c.parks, ws)
+	c.mu.Unlock()
+	if !ok {
+		return
+	}
+	select {
+	case <-park:
+	case <-ctx.Done():
+	}
+}
+
+// parkTurn holds ws's next ask for its test turn, until the release it
+// answers is called or its run is stopped.
+func (c *chain) parkTurn(ws ids.WorkspaceID) (release func()) {
+	park := make(chan struct{})
+	c.turns.mu.Lock()
+	c.turns.parks[ws] = park
+	c.turns.mu.Unlock()
+	return func() {
+		c.turns.mu.Lock()
+		delete(c.turns.parks, ws)
+		c.turns.mu.Unlock()
+		close(park)
+	}
+}
+
+// awaitLined waits, bounded, for ws to join the line for its test turn.
+func (c *chain) awaitLined(t *testing.T, ws ids.WorkspaceID) {
+	t.Helper()
+	bound := time.NewTimer(5 * time.Second)
+	defer bound.Stop()
+	for {
+		select {
+		case got := <-c.turns.lined:
+			if got == ws {
+				return
+			}
+		case <-bound.C:
+			t.Fatalf("%s never joined the line for its test turn", ws)
+		}
+	}
 }
 
 // newChain builds a harness whose queue runs the production window over the
@@ -503,7 +577,8 @@ func newChainOfWidth(t *testing.T, width int) *chain {
 	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
 	c := &chain{h: h, git: newChainGit(h.git), runner: newChainRunner(),
 		idle: make(chan ids.WorkspaceID, 1024), kicks: make(chan wsm.RepoKey, 1), decisions: make(chan dlog.Context, 1024),
-		dirs: map[ids.WorkspaceID]string{theWorkspace: h.sourceD}, branches: map[ids.WorkspaceID]string{theWorkspace: "feature"}}
+		dirs: map[ids.WorkspaceID]string{theWorkspace: h.sourceD}, branches: map[ids.WorkspaceID]string{theWorkspace: "feature"},
+		turns: &chainTurns{parks: map[ids.WorkspaceID]chan struct{}{}, lined: make(chan ids.WorkspaceID, 1024)}}
 	cfg := cpugov.DefaultConfig()
 	if width > 0 {
 		cfg.MaxGates = width
@@ -527,6 +602,8 @@ func (c *chain) wire(o *orchestrator) {
 	o.deps.TestRunner = c.runner
 	o.deps.Governor = c.h.governor
 	o.onChainIdle = func(ws ids.WorkspaceID) { c.idle <- ws }
+	o.onTestTurnAsk = c.turns.ask
+	o.onTestTurnLine = func(ws ids.WorkspaceID) { c.turns.lined <- ws }
 	o.onKick = func(repo wsm.RepoKey) {
 		select {
 		case c.kicks <- repo:
@@ -683,18 +760,17 @@ var broken = scriptedRun{Output: "bash: test-all.sh: command not found\n", Code:
 var failing = scriptedRun{Output: "[agent-repl-tests] ERROR: daemon failed after 4s with exit code 1\n", Code: 1}
 
 func TestTheMergeBehindTheHeadRebasesOntoTheTargetsTip(t *testing.T) {
-	// Arrange: both gates hold.
+	// Arrange: the head holds in its gate; the merge behind it, rebased,
+	// waits in line for the test turn.
 	c := newChain(t)
 	_, releaseHead := c.runner.hold(c.dirs[theWorkspace])
 	enqueue(t, c.h)
 	c.queue(t, "ws-b", "b1")
-	behindGate, releaseBehind := c.runner.hold(c.dirs["ws-b"])
 	done := admitAsync(c.h, context.Background())
 
 	// Act.
-	<-behindGate
+	c.awaitLined(t, "ws-b")
 	tree, own := c.git.tree("b-ws-b"), c.git.own(c.git.ref("master"), "b-ws-b")
-	close(releaseBehind)
 	close(releaseHead)
 	<-done
 	c.drain(t)
@@ -760,43 +836,45 @@ func TestAConflictMetByTheHeadStartingOverIsResolvedByItsOwnSession(t *testing.T
 }
 
 func TestASpeculativeGateWaitsForTheLoadToFallBelowTheBand(t *testing.T) {
-	// Arrange: the host is inside the band.
+	// Arrange: the host is inside the band; the head's ask for the test turn
+	// is parked, so the merge behind it holds the turn and asks the governor.
 	c := newChain(t)
 	c.h.load(0.6)
-	inGate, release := c.runner.hold(c.dirs[theWorkspace])
+	release := c.parkTurn(theWorkspace)
 	enqueue(t, c.h)
 	c.queue(t, "ws-b", "b1")
 	done := admitAsync(c.h, context.Background())
-	<-inGate
 	deferred := c.awaitDecision(t, "ws-b", "defer")
 	ranWhileDeferred := c.runner.ran(c.dirs["ws-b"])
 
-	// Act.
+	// Act: the load falls, so the merge behind runs, passes and overtakes.
 	c.h.load(0.2)
-	c.awaitIdle(t, "ws-b", func() bool { return c.runner.ran(c.dirs["ws-b"]) == 1 })
-	close(release)
 	<-done
-	c.promote(t)
+	release()
+	c.drain(t)
 
 	// Assert.
 	if deferred["reason"] != "load_in_or_above_band" || ranWhileDeferred != 0 {
 		t.Fatalf("deferred for %v with %d runs, want load_in_or_above_band and no run", deferred["reason"], ranWhileDeferred)
 	}
+	if got := c.runner.ran(c.dirs["ws-b"]); got != 1 {
+		t.Fatalf("B ran its gate %d times, want once: once the load fell", got)
+	}
 }
 
 func TestASpeculativeGateIsNeverAdmittedAboveTheBand(t *testing.T) {
-	// Arrange.
+	// Arrange: the head's ask for the test turn is parked, so the merge
+	// behind it holds the turn and asks the governor.
 	c := newChain(t)
 	c.h.load(0.9)
-	inGate, release := c.runner.hold(c.dirs[theWorkspace])
+	release := c.parkTurn(theWorkspace)
 	enqueue(t, c.h)
 	c.queue(t, "ws-b", "b1")
 	done := admitAsync(c.h, context.Background())
-	<-inGate
 
-	// Act.
+	// Act: the head asks once B is deferred; B gives it the turn.
 	deferred := c.awaitDecision(t, "ws-b", "defer")
-	close(release)
+	release()
 	<-done
 	c.promote(t)
 
@@ -807,22 +885,24 @@ func TestASpeculativeGateIsNeverAdmittedAboveTheBand(t *testing.T) {
 	if got := c.runner.ran(c.dirs["ws-b"]); got != 1 {
 		t.Fatalf("B ran its gate %d times, want once: only at the head", got)
 	}
+	if !c.recorded("info", "daemon.merge.tests", "gives its test turn to its head") {
+		t.Fatal("B holding the turn unadmitted did not record giving it to its head")
+	}
 }
 
 func TestASpeculativeGateBelowTheBandIsAdmitted(t *testing.T) {
-	// Arrange.
+	// Arrange: the head's ask for the test turn is parked.
 	c := newChain(t)
-	inGate, release := c.runner.hold(c.dirs[theWorkspace])
+	release := c.parkTurn(theWorkspace)
 	enqueue(t, c.h)
 	c.queue(t, "ws-b", "b1")
 	done := admitAsync(c.h, context.Background())
-	<-inGate
 
 	// Act.
 	admitted := c.awaitDecision(t, "ws-b", "admit")
-	close(release)
 	<-done
-	c.promote(t)
+	release()
+	c.drain(t)
 
 	// Assert.
 	if admitted["reason"] != "below_band" {
@@ -872,21 +952,20 @@ func TestAGateClaimsTheHostBudgetAtItsClassAndASpeculativeOneRunsNiced(t *testin
 
 func TestTheDefaultWindowHoldsTheHeadAndOneMergeBehindIt(t *testing.T) {
 	// Arrange: three merges at the default window (owner ruling, 2026-10-12:
-	// the top two only); both gates in the window hold.
+	// the top two only); the head holds in its gate and the merge behind it
+	// waits in line for the test turn.
 	c := newChain(t)
 	_, releaseHead := c.runner.hold(c.dirs[theWorkspace])
 	enqueue(t, c.h)
 	c.queue(t, "ws-b", "b1")
-	behindGate, releaseBehind := c.runner.hold(c.dirs["ws-b"])
 	c.queue(t, "ws-c", "c1")
 	done := admitAsync(c.h, context.Background())
-	<-behindGate
+	c.awaitLined(t, "ws-b")
 
 	// Act.
 	_, cRuns := c.h.o.runFor("ws-c")
 	cRuns = cRuns || c.h.o.inChain(c.h.repoKey(), "ws-c")
 	cTree := c.git.tree("b-ws-c")
-	close(releaseBehind)
 	close(releaseHead)
 	<-done
 	c.drain(t)
@@ -901,18 +980,17 @@ func TestTheDefaultWindowHoldsTheHeadAndOneMergeBehindIt(t *testing.T) {
 }
 
 func TestARestartMidRaceResumesBothMergesAndLandsEachWithItsOwnCommits(t *testing.T) {
-	// Arrange: both gates hold; the daemon exits mid-race.
+	// Arrange: the head holds in its gate and the merge behind it waits in
+	// line for the test turn; the daemon exits mid-race.
 	c := newChain(t)
 	_, releaseHead := c.runner.hold(c.dirs[theWorkspace])
 	enqueue(t, c.h)
 	c.queue(t, "ws-b", "b1")
-	behindGate, releaseBehind := c.runner.hold(c.dirs["ws-b"])
 	first := c.h.o
 	done := admitAsync(c.h, context.Background())
-	<-behindGate
+	c.awaitLined(t, "ws-b")
 	first.Drain(context.Background())
 	close(releaseHead)
-	close(releaseBehind)
 	<-done
 	waitGone(t, first)
 	next, err := newOrchestrator(c.h.deps())
