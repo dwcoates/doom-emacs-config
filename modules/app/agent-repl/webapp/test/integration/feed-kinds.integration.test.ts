@@ -60,6 +60,7 @@ import {
   MERGE_TAB_KINDS,
   MERGE_TAB_STATES,
   MERGE_TAB_PENDING_KINDS,
+  MERGE_TAB_TURN_KINDS,
   MERGE_TAB_WAITING_KINDS,
   MERGE_TEST_LOG,
   PERMISSION_ANSWERS,
@@ -276,10 +277,12 @@ describe("arm coverage", () => {
     if (field?.message === undefined) throw new Error(`no message under the ${kind} tab`);
     const waits = (MERGE_TAB_WAITING_KINDS as readonly string[]).includes(kind);
     const pends = (MERGE_TAB_PENDING_KINDS as readonly string[]).includes(kind);
+    const turns = (MERGE_TAB_TURN_KINDS as readonly string[]).includes(kind);
     assertCoversOneof(field.message, "state", [
       ...MERGE_TAB_STATES,
       ...(waits ? ["waitingOnUser"] : []),
       ...(pends ? ["pending"] : []),
+      ...(turns ? ["waitingForTurn"] : []),
     ]);
   });
 
@@ -1555,6 +1558,17 @@ describe("merge tabs", () => {
     const row = await drawRow(mergeTabRow(kind, "pending"));
     // Assert
     expect(row.querySelector(`[data-merge-tab="${kind}"]`)?.getAttribute("data-tab-state")).toBe("pending");
+  });
+
+  it.each(MERGE_TAB_TURN_KINDS)("draws the %s tab waiting for its test turn with a hollow dot", async (kind) => {
+    // Arrange / Act
+    const row = await drawRow(mergeTabRow(kind, "waitingForTurn"));
+    // Assert
+    const tab = row.querySelector(`[data-merge-tab="${kind}"]`);
+    expect([tab?.getAttribute("data-tab-state"), tab?.querySelector(".merge-tab-glyph")?.textContent]).toEqual([
+      "waitingForTurn",
+      "○",
+    ]);
   });
 
   it.each(MERGE_TAB_WAITING_KINDS)("draws the %s tab waiting on the user with a ❓", async (kind) => {

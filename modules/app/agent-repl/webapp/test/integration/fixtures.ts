@@ -1323,7 +1323,9 @@ export const MERGE_TAB_STATES = ["live", "settled"] as const;
 export const MERGE_TAB_WAITING_KINDS = ["resolving", "rebasing", "rebaseCommit", "tests", "testsRunFixing"] as const;
 /** The kinds that can also be pending: a commit the replay has not reached. */
 export const MERGE_TAB_PENDING_KINDS = ["rebaseCommit"] as const;
-export type MergeTabState = (typeof MERGE_TAB_STATES)[number] | "waitingOnUser" | "pending";
+/** The kinds that can also wait for their repository's test turn: a test run. */
+export const MERGE_TAB_TURN_KINDS = ["testsRun"] as const;
+export type MergeTabState = (typeof MERGE_TAB_STATES)[number] | "waitingOnUser" | "pending" | "waitingForTurn";
 
 /** When every fixture tab's work began, and each queue entry its stage. */
 const MERGE_TAB_STARTED_AT_MS = 1_000n;
@@ -1341,6 +1343,7 @@ const settledState = () => ({
 const plainState = (state: MergeTabState) => {
   if (state === "waitingOnUser") throw new Error("only the MERGE_TAB_WAITING_KINDS wait on the user");
   if (state === "pending") throw new Error("only the MERGE_TAB_PENDING_KINDS are pending");
+  if (state === "waitingForTurn") throw new Error("only the MERGE_TAB_TURN_KINDS wait for a test turn");
   return state === "settled" ? settledState() : liveState();
 };
 
@@ -1441,7 +1444,13 @@ const mergeTabKindValue = (
       return {
         case: "testsRun",
         value: {
-          state: plainState(state),
+          state:
+            state === "waitingForTurn"
+              ? {
+                  case: "waitingForTurn" as const,
+                  value: { startedAtMs: MERGE_TAB_STARTED_AT_MS, holder: { workspaceName: "ws-ahead" } },
+                }
+              : plainState(state),
           output: {
             suites: [
               {
