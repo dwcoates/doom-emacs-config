@@ -208,9 +208,7 @@ func (r *run) resumeAttempt(ctx context.Context, res *progressDoc) (outcome, boo
 			// back to the rebase step first (owner ruling, 2026-10-12).
 			round := r.activeRound()
 			const moved = "the daemon restarted under this run and the target moved; the branch rebases onto its new tip first"
-			r.publishRun(round, round.settled(r.o.nowMS(), moved), nil, nil)
-			r.settleTesting(moved)
-			r.closeTab(ctx, round, "restarted")
+			r.endRun(ctx, round, moved, nil, nil, "restarted")
 			return r.rebaseOntoMoved(ctx, tip, now, targetBranch, res.FixAttempt)
 		}
 		r.o.log(ctx, r.ws).Info("daemon.merge.resume", "the test gate the restart cut runs again from its start", dlog.Context{
