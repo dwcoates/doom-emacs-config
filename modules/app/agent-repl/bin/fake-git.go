@@ -28,6 +28,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"sort"
@@ -135,6 +136,9 @@ parsed:
 				return err
 			}
 		}
+		if err := os.WriteFile(filepath.Join(cwd, ".fakegit", "branch"), []byte("master\n"), 0o644); err != nil {
+			return err
+		}
 		return os.WriteFile(filepath.Join(cwd, ".fakegit", "index"), nil, 0o644)
 	}
 
@@ -179,7 +183,7 @@ parsed:
 		case joined == "rev-parse --git-dir":
 			fmt.Fprintf(out, "%s/worktrees/%s\n", r.g, path.Base(r.top))
 			return nil
-		case joined == "rev-parse --git-common-dir":
+		case joined == "rev-parse --git-common-dir", joined == "rev-parse --path-format=absolute --git-common-dir":
 			fmt.Fprintf(out, "%s\n", r.g)
 			return nil
 		case joined == "rev-parse --show-toplevel", joined == "rev-parse --git-path hooks",
@@ -199,8 +203,20 @@ parsed:
 		fmt.Fprintf(out, "%s\n", r.top)
 	case joined == "rev-parse --is-inside-work-tree":
 		fmt.Fprintf(out, "true\n")
-	case joined == "rev-parse --git-dir", joined == "rev-parse --git-common-dir":
+	case joined == "rev-parse --git-dir", joined == "rev-parse --git-common-dir",
+		joined == "rev-parse --path-format=absolute --git-common-dir":
 		fmt.Fprintf(out, "%s\n", r.g)
+	case joined == "rev-parse --abbrev-ref HEAD":
+		branch, err := firstLineRaw(r.g + "/branch")
+		if err != nil {
+			return err
+		}
+		if branch == "" {
+			return die(2, "no branch is recorded in %s/branch", r.g)
+		}
+		fmt.Fprintf(out, "%s\n", branch)
+	case strings.HasPrefix(joined, "tag "), strings.HasPrefix(joined, "update-ref "):
+		return r.refCommand(out, cmd, opts, argsJoined)
 	case strings.HasPrefix(joined, "config --type=bool --get "):
 		if len(opts) != 3 {
 			return die(2, "unmodelled config form: %s", argsJoined)
@@ -253,15 +269,11 @@ parsed:
 			fmt.Fprintf(out, "worktree %s\n\n", wt)
 		}
 	case joined == "rev-parse --git-path hooks":
-		hooks, found, err := r.configGet("core.hooksPath")
+		hooks, err := r.hooksPath()
 		if err != nil {
 			return err
 		}
-		if found {
-			fmt.Fprintf(out, "%s\n", hooks)
-		} else {
-			fmt.Fprintf(out, "%s/hooks\n", r.g)
-		}
+		fmt.Fprintf(out, "%s\n", hooks)
 	case strings.HasPrefix(joined, "worktree add "):
 		return r.worktreeAdd(opts, argsJoined)
 	case joined == "add -A":
@@ -371,6 +383,164 @@ parsed:
 		return die(2, "unmodelled invocation: %s %s", cmd, argsJoined)
 	}
 	return nil
+}
+
+// ---- named refs and ref transactions -----------------------------------------
+//
+// Named refs (tags, and whatever update-ref names) are a flat store, one
+// "<ref> <sha>" line each in .fakegit/refs. The checked-out branch's tip is
+// HEAD (.fakegit/HEAD), named by .fakegit/branch; it is not in the store.
+// Every change to the store is one ref transaction, run the way git runs one:
+// the reference-transaction hook's `prepared` phase, where a nonzero exit
+// aborts it (and the hook then hears `aborted`), then the write, then
+// `committed`. A commit does not run the hook.
+
+const zeroOID = "0000000000000000000000000000000000000000"
+
+// refCommand is tag NAME REV, tag -d NAME, update-ref REF REV and
+// update-ref -d REF.
+func (r *repo) refCommand(out io.Writer, cmd string, opts []string, argsJoined string) error {
+	refs, err := r.readRefs()
+	if err != nil {
+		return err
+	}
+	if len(opts) != 2 {
+		return die(2, "unmodelled %s form: %s", cmd, argsJoined)
+	}
+	if opts[0] == "-d" {
+		ref := opts[1]
+		if cmd == "tag" {
+			ref = "refs/tags/" + opts[1]
+		}
+		old, ok := refs[ref]
+		if !ok {
+			if cmd == "tag" {
+				return die(1, "tag '%s' not found", opts[1])
+			}
+			return die(2, "unmodelled: deleting the missing ref %s", ref)
+		}
+		if err := r.transact(ref, old, zeroOID); err != nil {
+			return err
+		}
+		if cmd == "tag" {
+			fmt.Fprintf(out, "Deleted tag '%s' (was %s)\n", opts[1], old[:7])
+		}
+		return nil
+	}
+	ref, rev := opts[0], opts[1]
+	if strings.HasPrefix(ref, "-") {
+		return die(2, "unmodelled %s form: %s", cmd, argsJoined)
+	}
+	if cmd == "tag" {
+		ref = "refs/tags/" + opts[0]
+		if _, exists := refs[ref]; exists {
+			return die(128, "tag '%s' already exists", opts[0])
+		}
+	}
+	sha, ok := r.resolve(rev)
+	if !ok {
+		return die(128, "'%s' is not a valid revision", rev)
+	}
+	old, ok := refs[ref]
+	if !ok {
+		old = zeroOID
+	}
+	return r.transact(ref, old, sha)
+}
+
+func (r *repo) readRefs() (map[string]string, error) {
+	lines, err := readLines(r.g + "/refs")
+	if err != nil {
+		return nil, err
+	}
+	refs := map[string]string{}
+	for _, l := range lines {
+		if ref, sha, ok := strings.Cut(l, " "); ok {
+			refs[ref] = sha
+		}
+	}
+	return refs, nil
+}
+
+// transact moves REF from OLD to NEW (zeroOID deletes it) as one transaction.
+func (r *repo) transact(ref, old, new string) error {
+	tx := fmt.Sprintf("%s %s %s\n", old, new, ref)
+	code, err := r.runRefHook("prepared", tx)
+	if err != nil {
+		return err
+	}
+	if code != 0 {
+		if _, err := r.runRefHook("aborted", tx); err != nil {
+			return err
+		}
+		return die(1, "ref updates aborted by hook")
+	}
+	refs, err := r.readRefs()
+	if err != nil {
+		return err
+	}
+	if new == zeroOID {
+		delete(refs, ref)
+	} else {
+		refs[ref] = new
+	}
+	names := make([]string, 0, len(refs))
+	for name := range refs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var b strings.Builder
+	for _, name := range names {
+		fmt.Fprintf(&b, "%s %s\n", name, refs[name])
+	}
+	if err := os.WriteFile(r.g+"/refs", []byte(b.String()), 0o644); err != nil {
+		return err
+	}
+	_, err = r.runRefHook("committed", tx)
+	return err
+}
+
+// runRefHook runs the reference-transaction hook, when one is installed, in
+// PHASE with TX on stdin, from the worktree's top, and answers its exit status.
+// Like git, it sends the hook's stdout to stderr.
+func (r *repo) runRefHook(phase, tx string) (int, error) {
+	hooks, err := r.hooksPath()
+	if err != nil {
+		return 0, err
+	}
+	if !filepath.IsAbs(hooks) {
+		hooks = filepath.Join(r.top, hooks)
+	}
+	hook := filepath.Join(hooks, "reference-transaction")
+	info, err := os.Stat(hook)
+	if errors.Is(err, fs.ErrNotExist) || (err == nil && info.Mode().Perm()&0o111 == 0) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	c := exec.Command(hook, phase)
+	c.Dir, c.Stdin, c.Stdout, c.Stderr = r.top, strings.NewReader(tx), os.Stderr, os.Stderr
+	if err := c.Run(); err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			return exit.ExitCode(), nil
+		}
+		return 0, err
+	}
+	return 0, nil
+}
+
+// hooksPath is core.hooksPath as configured, else <repository>/hooks.
+func (r *repo) hooksPath() (string, error) {
+	hooks, found, err := r.configGet("core.hooksPath")
+	if err != nil {
+		return "", err
+	}
+	if found {
+		return hooks, nil
+	}
+	return r.g + "/hooks", nil
 }
 
 // ---- repository discovery and state ------------------------------------------

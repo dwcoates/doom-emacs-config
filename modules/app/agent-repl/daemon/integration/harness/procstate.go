@@ -88,8 +88,22 @@ func heldState(pid int) (processState, error) {
 // is not yet frozen.
 const stopResendEvery = 5 * time.Millisecond
 
+// stopFrozenReportAfter is how long a stop may take to hold before stopFrozen
+// reports it. A stop that is re-sent until it holds is decided, as an
+// accepted SIGKILL's exit is, and only its scheduling is left: that ordinarily
+// takes milliseconds, but a test's processes run at background priority, and
+// on a loaded host a shim's runnable thread waited past reapGrace for the CPU
+// it needed to take its stop (2026-10-14: TestBashDetachedStartAndComplete and
+// TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce, both at the same
+// instant, each a shim with "1 thread(s) still running" 2s after SIGSTOP). As
+// leaderExitReportAfter, it is fifteen times reapGrace, so it reports a stuck
+// stop, never a starved one. It does NOT end the wait.
+const stopFrozenReportAfter = 15 * reapGrace
+
 // stopFrozen SIGSTOPs pid and returns once the kernel reports it unable to
-// run, or an error naming the state it was still in when bound ran out.
+// run. It waits UNBOUNDED, calling stalled once, with the state pid was still
+// in, if the stop has not held within reportAfter; it answers only a send or
+// a read that failed.
 //
 // THE STOP IS RE-SENT UNTIL IT HOLDS. On Darwin a SIGSTOP that reaches a
 // process inside execve is DISCARDED when the exec completes (see Kill), so
@@ -100,12 +114,12 @@ const stopResendEvery = 5 * time.Millisecond
 // so re-sending it every stopResendEvery until the kernel reports the
 // process frozen is safe, and the first send after the exec completes holds.
 // signal is the send, a seam for the test that drops the first stop.
-func stopFrozen(pid int, bound time.Duration, signal func(int, syscall.Signal) error) error {
+func stopFrozen(pid int, reportAfter time.Duration, signal func(int, syscall.Signal) error, stalled func(pid int, state string, waited time.Duration)) error {
 	if err := signal(pid, syscall.SIGSTOP); err != nil {
 		return err
 	}
-	deadline := time.NewTimer(bound)
-	defer deadline.Stop()
+	report := time.NewTimer(reportAfter)
+	defer report.Stop()
 	poll := time.NewTicker(freezePoll)
 	defer poll.Stop()
 	lastSent := time.Now()
@@ -124,8 +138,8 @@ func stopFrozen(pid int, bound time.Duration, signal func(int, syscall.Signal) e
 			lastSent = time.Now()
 		}
 		select {
-		case <-deadline.C:
-			return fmt.Errorf("process %d was still %s %s after SIGSTOP", pid, state.name, bound)
+		case <-report.C:
+			stalled(pid, state.name, reportAfter)
 		case <-poll.C:
 		}
 	}
