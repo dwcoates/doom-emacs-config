@@ -857,7 +857,7 @@ A reader that hand-rolls the defaulting reads the view a second time and fails h
     ;; Act.
     (let ((rows (agent-repl-verbs--hidden-rows roster)))
       ;; Assert.
-      (should (equal (mapcar #'agent-repl-verbs--row-name rows) '("parent" "child"))))))
+      (should (equal (mapcar #'agent-repl-roster-row-name rows) '("parent" "child"))))))
 
 (ert-deftest agent-repl-verbs-hidden-rows-reads-the-roster-view ()
   "With no ROSTER the hidden rows come from `agent-repl-roster-view'."
@@ -867,7 +867,7 @@ A reader that hand-rolls the defaulting reads the view a second time and fails h
                                         (list (agent-repl-test-verbs--row
                                                :name (list :text "hid"))))))
     ;; Act / Assert.
-    (should (equal (mapcar #'agent-repl-verbs--row-name (agent-repl-verbs--hidden-rows))
+    (should (equal (mapcar #'agent-repl-roster-row-name (agent-repl-verbs--hidden-rows))
                    '("hid")))))
 
 (ert-deftest agent-repl-verbs-show-hidden-offers-tab-names-shows-and-switches ()
@@ -1610,7 +1610,7 @@ to the staged progress the daemon pushes on the WatchDaemon channel."
                  :name (list :text "kid") :closed (list :closed t)))
          (parent (agent-repl-test-verbs--row :children (list child)))
          (roster (agent-repl-test-verbs--roster (list parent))))
-    (should (equal (mapcar #'agent-repl-verbs--row-name
+    (should (equal (mapcar #'agent-repl-roster-row-name
                            (agent-repl-verbs--closed-rows roster))
                    '("kid")))))
 
@@ -1620,7 +1620,7 @@ to the staged progress the daemon pushes on the WatchDaemon channel."
                   :workspace (list :workspace (agent-repl-test-verbs--ref "m" "/tmp/m"))
                   :name (list :text "merged-one") :closed (list :closed t)))
          (roster (agent-repl-test-verbs--roster nil (list merged))))
-    (should (equal (mapcar #'agent-repl-verbs--row-name
+    (should (equal (mapcar #'agent-repl-roster-row-name
                            (agent-repl-verbs--closed-rows roster))
                    '("merged-one")))))
 
@@ -1641,7 +1641,7 @@ skipped a section the bar walks fails here rather than passing silently."
     (should (equal (agent-repl-verbs--all-rows roster)
                    (mapcar (lambda (entry) (plist-get entry :row))
                            (agent-repl-roster-walk roster))))
-    (should (equal (mapcar #'agent-repl-verbs--row-name
+    (should (equal (mapcar #'agent-repl-roster-row-name
                            (agent-repl-verbs--all-rows roster))
                    '("row-one" "kid" "merged-one")))))
 
@@ -1649,7 +1649,7 @@ skipped a section the bar walks fails here rather than passing silently."
   "With no ROSTER the walk reads `agent-repl-roster-view'."
   (let ((agent-repl-roster-view
          (agent-repl-test-verbs--roster (list (agent-repl-test-verbs--row)))))
-    (should (equal (mapcar #'agent-repl-verbs--row-name (agent-repl-verbs--all-rows))
+    (should (equal (mapcar #'agent-repl-roster-row-name (agent-repl-verbs--all-rows))
                    '("row-one")))))
 
 (ert-deftest agent-repl-verbs-all-rows-of-no-roster-is-empty ()
@@ -4182,3 +4182,15 @@ A verb that forgets its op by hand is the one that misses a path."
         (setq count (1+ count) start (1+ start)))
       ;; The one occurrence in verbs.el is `agent-repl-verbs--send-op' itself.
       (should (equal (cons (car expected) count) expected)))))
+
+;;;; ---- One set of row readers ----
+
+(ert-deftest agent-repl-test-verbs-reads-rows-through-the-roster-readers ()
+  "verbs.el spells no row reader of its own: every read of a row's ref,
+name or closed flag is roster.el's, so the two files cannot disagree."
+  ;; Arrange
+  (let ((source (with-temp-buffer
+                  (insert-file-contents agent-repl-test-verbs--source)
+                  (buffer-string))))
+    ;; Act / Assert
+    (should-not (string-match-p "(defun agent-repl-verbs--row-\\(ref\\|name\\|closed-p\\) " source))))

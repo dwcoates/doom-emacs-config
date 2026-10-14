@@ -123,6 +123,9 @@
 ;; Defined by roster.el.  Declared, never defined here.
 (declare-function agent-repl-roster-repository-of "agent-repl-roster" (id &optional roster))
 (declare-function agent-repl-roster-walk "agent-repl-roster" (roster))
+(declare-function agent-repl-roster-row-ref "agent-repl-roster" (row))
+(declare-function agent-repl-roster-row-name "agent-repl-roster" (row))
+(declare-function agent-repl-roster-row-closed-p "agent-repl-roster" (row))
 (declare-function agent-repl-roster-drawn-tab-order "agent-repl-roster" ())
 (declare-function agent-repl-host-request-switch "agent-repl-host" (ws trigger))
 (defvar agent-repl-roster-view)
@@ -169,7 +172,7 @@ Matched by DIRECTORY, never by name: names collide across repositories."
     (when dir
       (let ((canonical (agent-repl--path-canonical dir)))
         (cl-some (lambda (row)
-                   (let ((ref (agent-repl-verbs--row-ref row)))
+                   (let ((ref (agent-repl-roster-row-ref row)))
                      (and (plist-get ref :dir)
                           (string= canonical (agent-repl--path-canonical (plist-get ref :dir)))
                           ref)))
@@ -461,19 +464,10 @@ must leave the other a no-op."
 ;;;; ---- Roster reading ---------------------------------------------------
 ;;
 ;; The roster is READ-ONLY for Emacs: the daemon authors it wholesale and
-;; these helpers only pick values out of the last decoded view.
-
-(defun agent-repl-verbs--row-ref (row)
-  "Return ROW's `WorkspaceRef' -- the join key every gesture travels with."
-  (plist-get (plist-get row :workspace) :workspace))
-
-(defun agent-repl-verbs--row-name (row)
-  "Return ROW's display name.  Never an identity: names collide across repos."
-  (plist-get (plist-get row :name) :text))
-
-(defun agent-repl-verbs--row-closed-p (row)
-  "Return non-nil when ROW is closed."
-  (plist-get (plist-get row :closed) :closed))
+;; these helpers only pick values out of the last decoded view.  A row's own
+;; fields are read through roster.el's ONE set of row readers
+;; (`agent-repl-roster-row-ref', `agent-repl-roster-row-name',
+;; `agent-repl-roster-row-closed-p'), never a second spelling here.
 
 (defun agent-repl-verbs--flatten-rows (rows)
   "Return ROWS and every descendant, depth-first, in walk order."
@@ -498,7 +492,7 @@ can never look for a row in fewer sections than the bar draws tabs from."
 
 (defun agent-repl-verbs--closed-rows (&optional roster)
   "Return the CLOSED rows of ROSTER -- exactly what OpenWorkspace can reopen."
-  (cl-remove-if-not #'agent-repl-verbs--row-closed-p
+  (cl-remove-if-not #'agent-repl-roster-row-closed-p
                     (agent-repl-verbs--all-rows roster)))
 
 (defun agent-repl-verbs--repo-sections (&optional roster)
@@ -523,7 +517,7 @@ obvious answer is the repo the user is already working in."
       (cl-find-if
        (lambda (section)
          (cl-find-if (lambda (row)
-                       (equal (plist-get (agent-repl-verbs--row-ref row) :id)
+                       (equal (plist-get (agent-repl-roster-row-ref row) :id)
                               (plist-get ref :id)))
                      (agent-repl-verbs--flatten-rows
                       (plist-get (plist-get section :rows) :rows))))
@@ -1731,8 +1725,8 @@ unrecoverable by design."
   (interactive)
   (let* ((rows (agent-repl-verbs--closed-rows))
          (candidates (mapcar (lambda (row)
-                               (cons (agent-repl-verbs--row-name row)
-                                     (agent-repl-verbs--row-ref row)))
+                               (cons (agent-repl-roster-row-name row)
+                                     (agent-repl-roster-row-ref row)))
                              rows)))
     (unless candidates
       (user-error "agent-repl: the roster lists no closed workspaces"))
@@ -1816,7 +1810,7 @@ ROSTER defaults to `agent-repl-roster-view'.  A closed row has no tab to
 switch to, so only open rows are offered back."
   (let* ((roster (agent-repl-verbs--roster-or-view roster))
          (rows (plist-get (plist-get (plist-get roster :hidden) :rows) :rows)))
-    (cl-remove-if #'agent-repl-verbs--row-closed-p
+    (cl-remove-if #'agent-repl-roster-row-closed-p
                   (agent-repl-verbs--flatten-rows rows))))
 
 (defun agent-repl-show-hidden-workspace ()
@@ -1827,7 +1821,7 @@ and the frame lands on it once the daemon accepts."
   (interactive)
   (let ((names (delq nil (mapcar (lambda (row)
                                    (agent-repl--ws-by-ref-id
-                                    (plist-get (agent-repl-verbs--row-ref row) :id)))
+                                    (plist-get (agent-repl-roster-row-ref row) :id)))
                                  (agent-repl-verbs--hidden-rows)))))
     (unless names
       (agent-repl--info '(:agent-repl-central "the hidden-workspace picker spans every workspace")
