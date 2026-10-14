@@ -79,6 +79,12 @@ var (
 	// hold, never refused: the death starts the session's revival, whose
 	// coming up delivers it.
 	ErrShimDied = errors.New("promptqueue: the shim died under the delivery")
+	// ErrSessionNotWatched is a delivery the sender would not send because no
+	// watch stands to see the turn: the session's watcher is gone, or closed
+	// while the turn waited for its main watch. A turn sent then writes frames
+	// nothing receives, so, like a no_session refusal, it is HELD under the
+	// reconnect hold, and the session's next coming up delivers it.
+	ErrSessionNotWatched = errors.New("promptqueue: no watch stands to see the turn")
 	// ErrColdGate is a submission to a workspace whose session is PARKED AT
 	// ITS COLD GATE. It is deliberately NOT ErrNoSession: a session exists —
 	// the shim is up and serving, which is exactly why the gate could be

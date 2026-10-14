@@ -11,6 +11,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/classifier"
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/replyquote"
@@ -799,6 +800,61 @@ func TestADeliveryTheShimDiedUnderHoldsThePromptForTheReconnect(t *testing.T) {
 	// Assert
 	if err != nil || got.Held == nil || *got.Held != wsm.HoldReconnect {
 		t.Fatalf("Submit = (%+v, %v), want the prompt held under the reconnect hold", got, err)
+	}
+}
+
+// errNotWatched is the sender's answer for a StartTurn it would not send
+// because no watch stood to see the turn, as the workspace sender maps it.
+var errNotWatched = fmt.Errorf("%w: no watcher stands for turn \"t1\"", ErrSessionNotWatched)
+
+// A DELIVERY NO WATCH STOOD TO SEE IS HELD for the session's next coming up,
+// never refused: a turn sent then writes frames nothing receives.
+func TestADeliveryNoWatchStoodToSeeHoldsThePromptForTheReconnect(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.sender.startErr = errNotWatched
+
+	// Act
+	got, err := h.q.Submit(context.Background(), submission("t1", "hello"))
+
+	// Assert
+	if err != nil || got.Held == nil || *got.Held != wsm.HoldReconnect {
+		t.Fatalf("Submit = (%+v, %v), want the prompt held under the reconnect hold", got, err)
+	}
+}
+
+func TestADeliveryNoWatchStoodToSeeTakesTheMirroredRowDown(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.sender.startErr = errNotWatched
+
+	// Act
+	_, _ = h.q.Submit(context.Background(), submission("t1", "hello"))
+
+	// Assert
+	if got := h.feed.retiredPrompts(); len(got) != 1 || got[0] != "t1" {
+		t.Fatalf("retired prompt rows = %v, want t1's mirrored row taken down", got)
+	}
+}
+
+func TestADeliveryNoWatchStoodToSeeIsRecordedWithItsCause(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.sender.startErr = errNotWatched
+
+	// Act
+	_, _ = h.q.Submit(context.Background(), submission("t1", "hello"))
+
+	// Assert
+	record, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{
+		Level: "info", Operation: opDeliver,
+		Message: "no watch stood to see the turn; the prompt is held until the session comes up again",
+	})
+	if !ok {
+		t.Fatalf("records = %+v, want the not-watched hold recorded at info", h.log.Records())
+	}
+	if record.Context["cause"] != errNotWatched.Error() {
+		t.Fatalf("cause = %v, want %q", record.Context["cause"], errNotWatched.Error())
 	}
 }
 
