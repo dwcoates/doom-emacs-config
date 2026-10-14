@@ -101,7 +101,7 @@ describe("readMergeTab: the arms are read from the contract", () => {
     "holds to the schema: the %s tab is live or settled, since nothing parks, a tab an asking agent works in can wait on the user, and a commit can be pending",
     (kind, field) => {
       const message = field.fieldKind === "message" ? field.message : undefined;
-      const waits = ["pick", "rebasing", "tests", "testsRunFixing"].includes(kind);
+      const waits = ["resolving", "rebasing", "tests", "testsRunFixing"].includes(kind);
       const want =
         kind === "rebaseCommit"
           ? ["live", "pending", "settled", "waitingOnUser"]

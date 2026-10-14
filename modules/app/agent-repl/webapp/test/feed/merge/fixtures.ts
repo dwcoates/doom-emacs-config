@@ -27,7 +27,7 @@ type FeedId = ReturnType<typeof create<typeof FeedIdSchema>>;
 /** How a tab fixture is asked for: its kind, its state, its payload. */
 export interface TabSpec {
   kind:
-    | "pick"
+    | "resolving"
     | "queue"
     | "prePrompt"
     | "rebasing"
@@ -39,7 +39,7 @@ export interface TabSpec {
     | "updatingMain"
     | "postPrompt";
   /**
-   * `waitingOnUser` only for the kinds that carry it (pick, rebasing, a
+   * `waitingOnUser` only for the kinds that carry it (resolving, rebasing, a
    * commit, tests, a fixing attempt); `pending` only for a commit.
    */
   state: "live" | "settled" | "waitingOnUser" | "pending";

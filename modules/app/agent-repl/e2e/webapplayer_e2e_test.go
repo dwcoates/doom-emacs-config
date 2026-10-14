@@ -492,12 +492,12 @@ func TestWebappLayerMergeTabs(t *testing.T) {
 	repoRef := wlRepositoryRef(t, w, repo)
 	ws := wlCreateChild(t, w, repoRef, "wl-merge")
 
-	// THE PAGE MERGES ITS WORKSPACE'S OWN BRANCH, KEPT OPEN (the request in
-	// merge-tabs.layer.test.ts), so the landing never pulls the page's own
-	// workspace out from under it. The branch carries no work of its own, so
-	// the merge concludes as already on its target: nothing lands and nothing
-	// deploys, and the strip still carries the queue and rebasing tabs that
-	// section F7 is about.
+	// THE PAGE MERGES THE DEFAULT BRANCH ASYNC (the request in
+	// merge-tabs.layer.test.ts): an async merge never closes its requester, so
+	// the landing never pulls the page's own workspace out from under it. The
+	// branch is already on its target, so the merge concludes at once: nothing
+	// lands and nothing deploys, and the strip still carries the queue and
+	// rebasing tabs that section F7 is about.
 
 	host := w.Daemon.WatchHost(ws)
 	defer host.Close()
