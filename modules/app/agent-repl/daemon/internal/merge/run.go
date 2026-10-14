@@ -12,6 +12,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
@@ -329,8 +330,7 @@ func (r *run) openTab(ctx context.Context, kind string) tabRound {
 	if err := r.o.deps.DB.RecordTabInterval(context.WithoutCancel(ctx), r.lease.ID, wsm.TabInterval{
 		Round: round.n, Kind: kind, StartedAt: started,
 	}); err != nil {
-		r.o.log(ctx, r.ws).Error("daemon.merge.tab_open", "could not record a tab interval",
-			dlog.Context{"workspace": string(r.ws), "tab": kind, "round": round.n, "error": err.Error()})
+		r.tabRecordFailed(ctx, "daemon.merge.tab_open", "could not record a tab interval", round, err)
 	}
 	r.o.log(ctx, r.ws).Debug("daemon.merge.tab_open", "opened a merge tab",
 		dlog.Context{"workspace": string(r.ws), "tab": kind, "round": round.n})
@@ -347,9 +347,6 @@ func (r *run) closeTab(ctx context.Context, round tabRound, outcome string) {
 		return
 	}
 	ended := r.o.deps.Now()
-	r.mu.Lock()
-	delete(r.openRounds, round.key())
-	r.mu.Unlock()
 	// A CLOSED ROUND IS NO LONGER LIVE, so no ask redraws it: an abandon
 	// closes the live agentic round here without settling its row.
 	r.agenticMu.Lock()
@@ -364,9 +361,29 @@ func (r *run) closeTab(ctx context.Context, round tabRound, outcome string) {
 	if err := r.o.deps.DB.RecordTabInterval(context.WithoutCancel(ctx), r.lease.ID, wsm.TabInterval{
 		Round: round.n, Kind: round.kind, StartedAt: round.started, EndedAt: &ended, Outcome: outcome,
 	}); err != nil {
-		r.o.log(ctx, r.ws).Error("daemon.merge.tab_close", "could not record a tab interval's end",
-			dlog.Context{"workspace": string(r.ws), "tab": round.kind, "round": round.n, "error": err.Error()})
+		r.tabRecordFailed(ctx, "daemon.merge.tab_close", "could not record a tab interval's end; the round stays open", round, err)
+		return
 	}
+	// A ROUND LEAVES openRounds ONLY ONCE ITS END IS RECORDED. It used to
+	// leave before the write, so an abandon that cancelled the write left its
+	// interval open in the ledger for good, since the abandon's own close
+	// (closeOpenRounds) no longer saw the round.
+	r.mu.Lock()
+	delete(r.openRounds, round.key())
+	r.mu.Unlock()
+}
+
+// tabRecordFailed records a tab interval write that failed: at INFO when the
+// run's context ended under it (the daemon's orderly exit suspending the run,
+// or an abandon), which the store has already recorded as an abandoned write
+// and the run's end settles, and at ERROR when anything else broke it.
+func (r *run) tabRecordFailed(ctx context.Context, op, message string, round tabRound, err error) {
+	fields := dlog.Context{"workspace": string(r.ws), "tab": round.kind, "round": round.n, "error": err.Error()}
+	if ctxend.Is(err) {
+		r.o.log(ctx, r.ws).Info(op, message+": the run's context ended under the write", fields)
+		return
+	}
+	r.o.log(ctx, r.ws).Error(op, message, fields)
 }
 
 // address stands one tab row as where the merge's OWN turns draw: the prompt

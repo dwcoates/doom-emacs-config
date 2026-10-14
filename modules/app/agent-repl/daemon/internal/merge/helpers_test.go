@@ -58,6 +58,9 @@ type fakeDB struct {
 	swept    wsm.OrphanedMergeState
 	sweepErr error
 
+	// tabErr, when set, is what RecordTabInterval answers, recording nothing.
+	tabErr error
+
 	mu sync.Mutex
 
 	workspaces map[ids.WorkspaceID]wsm.Workspace
@@ -441,6 +444,9 @@ func (f *fakeDB) RecordTabInterval(ctx context.Context, lease wsm.LeaseID, inter
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.tabErr != nil {
+		return f.tabErr
+	}
 	for id, entries := range f.ledger {
 		for i := range entries {
 			if entries[i].Lease == lease {
