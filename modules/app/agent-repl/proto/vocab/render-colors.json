@@ -248,8 +248,9 @@
     "           'ink' and 'motion' in place of the arm's own. Every other",
     "           mark outranks it: a gate's glyph, the one-shot glyph, a merge",
     "           glyph, an inked dot (compacting's orange) and no mark at all.",
-    "  tab bar  the tab's '[N] ' run takes 'tab_bracket' as its background;",
-    "           the name keeps its status background. No glyph is drawn.",
+    "  tab bar  the tab's '[N]' bracket takes 'tab_bracket' as its",
+    "           background; the space after it and the name keep the",
+    "           status background. No glyph is drawn.",
     "",
     "A SYNC merge raises no mark: it is the row's own merge arms."
   ],
