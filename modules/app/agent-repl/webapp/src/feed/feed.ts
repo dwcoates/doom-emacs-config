@@ -245,6 +245,8 @@ export function mountFeed(
   // the geometry read is the expanded layout; an item that owns its own fold (a
   // sub-feed bubble) announces ITEM_EXPANDED_EVENT and
   // centers through the listener below. A collapse never moves the feed.
+  // A STANDING FOLLOW SURVIVES AN EXPANSION (owner ruling, 2026-10-14): the
+  // feed stays at its tail instead of centering (`TailFollow.itemExpanded`).
   //
   // A READER'S TOGGLE MAKES THE ENTRY THEIRS: an entry a jump expanded and the
   // reader then toggled by hand is no longer the jump's to close.
