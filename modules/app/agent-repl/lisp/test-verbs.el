@@ -1684,7 +1684,7 @@ branch -- so a `read-string' here would be a question the ruling removed."
   (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
     (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
                (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
-              ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file) "do a thing"))
+              ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "do a thing"))
               ((symbol-function 'read-string)
                (lambda (&rest _) (error "a dynamic create asks nothing but its prompt"))))
       (agent-repl-create-workspace)
@@ -1699,7 +1699,7 @@ current workspace rides as the fork source, and no parent is sent."
   (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
     (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
                (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
-              ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file) "fork it")))
+              ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "fork it")))
       (agent-repl-fork-workspace-into-primary)
       (let ((request (agent-repl-test-verbs--request :create)))
         (should (equal (plist-get request :fork-source) (agent-repl-test-verbs--ref)))
@@ -1710,7 +1710,7 @@ current workspace rides as the fork source, and no parent is sent."
   (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
     (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
                (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
-              ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file) "do a thing"))
+              ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "do a thing"))
               ((symbol-function 'read-string) (lambda (&rest _) "")))
       (agent-repl-create-workspace)
       (should-not (plist-get (agent-repl-test-verbs--request :create) :parent)))))
@@ -1720,7 +1720,7 @@ current workspace rides as the fork source, and no parent is sent."
   (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
     (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
                (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
-              ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file) "fork it")))
+              ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "fork it")))
       (agent-repl-fork-workspace)
       (should (eq (plist-get (plist-get (agent-repl-test-verbs--request :create) :parent)
                              :fork)
@@ -1734,7 +1734,7 @@ current workspace rides as the fork source, and no parent is sent."
   (let ((agent-repl-roster-view
          (agent-repl-test-verbs--roster (list (agent-repl-test-verbs--row)))))
     (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
-      (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file) "do a thing"))
+      (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "do a thing"))
                 ((symbol-function 'completing-read)
                  (lambda (&rest _) (error "a dynamic create must not ask for a repository"))))
         ;; Act.
@@ -1756,7 +1756,7 @@ current workspace rides as the fork source, and no parent is sent."
          (agent-repl-roster-view
           (agent-repl-test-verbs--roster nil nil (list other mine))))
     (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
-      (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file) "do a thing")))
+      (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "do a thing")))
         ;; Act.
         (agent-repl-create-workspace)
         ;; Assert.
@@ -1780,7 +1780,7 @@ current workspace rides as the fork source, and no parent is sent."
   (let ((agent-repl-roster-view
          (agent-repl-test-verbs--roster (list (agent-repl-test-verbs--row)))))
     (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
-      (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file) "fork it"))
+      (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "fork it"))
                 ((symbol-function 'completing-read)
                  (lambda (&rest _) (error "a fork must not ask for a repository"))))
         ;; Act.
@@ -1795,7 +1795,7 @@ current workspace rides as the fork source, and no parent is sent."
   (let ((agent-repl-roster-view
          (agent-repl-test-verbs--roster (list (agent-repl-test-verbs--row)))))
     (agent-repl-test-verbs--with nil
-      (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file) "commission"))
+      (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "commission"))
                 ((symbol-function 'completing-read)
                  (lambda (&rest _) (error "a one-shot must not ask for a repository"))))
         ;; Act.
@@ -1826,7 +1826,7 @@ current workspace rides as the fork source, and no parent is sent."
     (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
                (lambda () (agent-repl-test-verbs--repo-ref)))
               ((symbol-function 'agent-repl-verbs--read-prompt)
-               (lambda (_p &optional _history-file) (error "a static create asks for no prompt")))
+               (lambda (_p &optional _history-file _unseeded) (error "a static create asks for no prompt")))
               ((symbol-function 'read-string) (lambda (&rest _) "named-one")))
       ;; Act.
       (agent-repl-create-workspace-static)
@@ -1854,7 +1854,7 @@ current workspace rides as the fork source, and no parent is sent."
     (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
                (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
               ((symbol-function 'agent-repl-verbs--read-prompt)
-               (lambda (_p &optional _history-file) (error "a named fork asks for no prompt")))
+               (lambda (_p &optional _history-file _unseeded) (error "a named fork asks for no prompt")))
               ((symbol-function 'read-string) (lambda (&rest _) "named-one")))
       ;; Act.
       (agent-repl-fork-workspace-into-primary-static)
@@ -1904,7 +1904,7 @@ current workspace rides as the fork source, and no parent is sent."
     (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
                (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
               ((symbol-function 'agent-repl-verbs--read-prompt)
-               (lambda (_p &optional _history-file) (error "a named fork asks for no prompt")))
+               (lambda (_p &optional _history-file _unseeded) (error "a named fork asks for no prompt")))
               ((symbol-function 'read-string) (lambda (&rest _) "named-fork")))
       ;; Act.
       (agent-repl-fork-workspace-static)
@@ -2020,7 +2020,7 @@ A fork that left no trace was indistinguishable from one never run."
                       ((symbol-function 'agent-repl-verbs--read-repository)
                        (lambda () (agent-repl-test-verbs--repo-ref)))
                       ((symbol-function 'agent-repl-verbs--read-prompt)
-                       (lambda (_p &optional _history-file) (signal 'quit nil)))
+                       (lambda (_p &optional _history-file _unseeded) (signal 'quit nil)))
                       ((symbol-function 'read-string)
                        (lambda (&rest _) (signal 'quit nil))))
               ;; Act / Assert: the quit still reaches the caller.
@@ -2066,7 +2066,7 @@ the create selects it the same way registering a directory does."
                                 (agent-repl-test-verbs--ref "new-id" "/tmp/agent-repl-test/new"))
     (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
                (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
-              ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file) "do a thing"))
+              ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "do a thing"))
               ((symbol-function 'read-string) (lambda (&rest _) "")))
       ;; Act.
       (agent-repl-create-workspace)
@@ -2082,7 +2082,7 @@ the create selects it the same way registering a directory does."
                                 (agent-repl-test-verbs--ref "fork-id" "/tmp/agent-repl-test/fork"))
     (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
                (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
-              ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file) "fork it")))
+              ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "fork it")))
       ;; Act.
       (agent-repl-fork-workspace)
       (agent-repl-test-verbs--tab-arrives "fork-id" "fork-ws")
@@ -2100,7 +2100,7 @@ opened over the new workspace\'s panel shows up here as a magit call."
     (let (magit-dirs)
       (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
                  (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
-                ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file) "do a thing"))
+                ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "do a thing"))
                 ((symbol-function 'read-string) (lambda (&rest _) ""))
                 ((symbol-function 'agent-repl--ws-name-for-dir)
                  (lambda (dir) (and (equal dir "/tmp/agent-repl-test/new") "new-ws")))
@@ -2126,7 +2126,7 @@ opened over the new workspace\'s panel shows up here as a magit call."
     (let (magit-dirs)
       (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
                  (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
-                ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file) "fork it"))
+                ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "fork it"))
                 ((symbol-function 'agent-repl--ws-name-for-dir)
                  (lambda (dir) (and (equal dir "/tmp/agent-repl-test/fork") "fork-ws")))
                 ((symbol-function 'doom-real-buffer-list) (lambda (&optional _b) nil))
@@ -2198,7 +2198,7 @@ because what happens on completion is the repository's own directive."
   (agent-repl-test-verbs--with nil
     (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
                (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
-              ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file) "commission")))
+              ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "commission")))
       (agent-repl-create-oneshot nil)
       (let ((one-shot (plist-get (plist-get (agent-repl-test-verbs--request :create) :form)
                                  :value)))
@@ -2210,7 +2210,7 @@ because what happens on completion is the repository's own directive."
   (agent-repl-test-verbs--with nil
     (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
                (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
-              ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file) "commission")))
+              ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "commission")))
       (agent-repl-create-oneshot nil)
       (let ((one-shot (plist-get (plist-get (agent-repl-test-verbs--request :create) :form)
                                  :value)))
@@ -2225,7 +2225,7 @@ because what happens on completion is the repository's own directive."
   (agent-repl-test-verbs--with nil
     (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
                (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
-              ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file) "   ")))
+              ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "   ")))
       (should-error (agent-repl-create-oneshot nil) :type 'user-error)
       (should-not agent-repl-test-verbs--sent))))
 
@@ -2234,7 +2234,7 @@ because what happens on completion is the repository's own directive."
   (agent-repl-test-verbs--with nil
     (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
                (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
-              ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file) "commission"))
+              ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "commission"))
               ((symbol-function 'agent-repl-verbs--read-model) (lambda () "haiku")))
       (agent-repl-create-oneshot t)
       (should (equal (plist-get (agent-repl-test-verbs--request :create) :model) "haiku")))))
@@ -2244,14 +2244,14 @@ because what happens on completion is the repository's own directive."
 (ert-deftest agent-repl-verbs-read-required-prompt-returns-the-text-as-read ()
   "A non-blank answer comes back untouched, surrounding whitespace included."
   ;; Arrange.
-  (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file) " ask \n")))
+  (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) " ask \n")))
     ;; Act / Assert.
     (should (equal (agent-repl-verbs--read-required-prompt "Q: " "refused") " ask \n"))))
 
 (ert-deftest agent-repl-verbs-read-required-prompt-refuses-a-blank-answer ()
   "A whitespace-only answer is refused with the caller's refusal."
   ;; Arrange.
-  (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file) " \t\n")))
+  (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) " \t\n")))
     ;; Act.
     (let ((err (should-error (agent-repl-verbs--read-required-prompt "Q: " "it IS its prompt")
                              :type 'user-error)))
@@ -2268,13 +2268,104 @@ because what happens on completion is the repository's own directive."
     (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
       (agent-repl-test-verbs--with-help-repo "/tmp/agent-repl-test/doom/.git"
         (cl-letf (((symbol-function 'agent-repl-verbs--read-required-prompt)
-                   (lambda (prompt-text _refusal &optional _history-file) (push prompt-text prompts) "q")))
+                   (lambda (prompt-text _refusal &optional _history-file _unseeded) (push prompt-text prompts) "q")))
           ;; Act.
           (agent-repl-create-oneshot nil)
           (agent-repl-create-help-workspace)
           ;; Assert.
           (should (equal (reverse prompts)
                          '("One-shot commission: " "agent-repl question: "))))))))
+
+;;;; ---- Create: which prompts the composer seeds ----
+
+(defun agent-repl-test-verbs--read-prompt-seeded-by (unseeded)
+  "Read a prompt with UNSEEDED from a workspace whose composer holds a draft.
+Return a plist of the `:initial' text the read was offered and whether the
+composer was `:read'."
+  (let (offered composer-read)
+    (cl-letf (((symbol-function 'agent-repl--ws-current-log-name) (lambda () "ws"))
+              ((symbol-function 'agent-repl--read-input-buffer)
+               (lambda (_ws) (setq composer-read t) "  the draft  "))
+              ((symbol-function 'read-string)
+               (lambda (_prompt initial &rest _) (setq offered initial) "typed")))
+      (agent-repl-verbs--read-prompt "Commission: " nil unseeded))
+    (list :initial offered :read composer-read)))
+
+(ert-deftest agent-repl-verbs-read-prompt-seeds-from-the-composer-by-default ()
+  "A creation prompt offers the composer's trimmed draft as its initial text."
+  ;; Act.
+  (let ((read (agent-repl-test-verbs--read-prompt-seeded-by nil)))
+    ;; Assert.
+    (should (equal (plist-get read :initial) "the draft"))))
+
+(ert-deftest agent-repl-verbs-read-prompt-unseeded-offers-no-initial-text ()
+  "An UNSEEDED creation prompt starts empty though the composer holds a draft."
+  ;; Act.
+  (let ((read (agent-repl-test-verbs--read-prompt-seeded-by t)))
+    ;; Assert.
+    (should-not (plist-get read :initial))))
+
+(ert-deftest agent-repl-verbs-read-prompt-unseeded-never-reads-the-composer ()
+  "An UNSEEDED creation prompt leaves the composer unread."
+  ;; Act.
+  (let ((read (agent-repl-test-verbs--read-prompt-seeded-by t)))
+    ;; Assert.
+    (should-not (plist-get read :read))))
+
+(ert-deftest agent-repl-verbs-read-prompt-unseeded-logs-no-missing-composer ()
+  "An UNSEEDED read outside a workspace records no missing composer: it never looked."
+  ;; Arrange.
+  (let (logged)
+    (cl-letf (((symbol-function 'agent-repl--ws-current-log-name) (lambda () nil))
+              ((symbol-function 'agent-repl--log)
+               (lambda (&rest _) (setq logged t)))
+              ((symbol-function 'read-string)
+               (lambda (_prompt initial &rest _) initial)))
+      ;; Act.
+      (agent-repl-verbs--read-prompt "Commission: " nil t))
+    ;; Assert.
+    (should-not logged)))
+
+(ert-deftest agent-repl-verbs-read-required-prompt-passes-unseeded-through ()
+  "The required-prompt reader hands UNSEEDED to the prompt reader."
+  ;; Arrange.
+  (let (passed)
+    (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt)
+               (lambda (_p &optional _history-file unseeded) (setq passed unseeded) "ask")))
+      ;; Act.
+      (agent-repl-verbs--read-required-prompt "Q: " "refused" nil t))
+    ;; Assert.
+    (should passed)))
+
+(defun agent-repl-test-verbs--unseeded-by (command)
+  "Run creation COMMAND and return the UNSEEDED flag its prompt was read with."
+  (let ((agent-repl-roster-view
+         (agent-repl-test-verbs--roster (list (agent-repl-test-verbs--row)) nil
+                                        (agent-repl-test-verbs--help-sections)))
+        (unseeded 'never-read))
+    (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
+      (agent-repl-test-verbs--with-help-repo "/tmp/agent-repl-test/doom/.git"
+        (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
+                   (lambda () (agent-repl-test-verbs--repo-ref)))
+                  ((symbol-function 'agent-repl-verbs--read-prompt)
+                   (lambda (_p &optional _history-file flag) (setq unseeded flag) "do a thing")))
+          (funcall command))))
+    unseeded))
+
+(ert-deftest agent-repl-verbs-oneshot-commission-is-unseeded ()
+  "The one-shot commission never starts from the composer's draft."
+  ;; Act / Assert.
+  (should (eq (agent-repl-test-verbs--unseeded-by #'agent-repl-create-oneshot) 'unseeded)))
+
+(ert-deftest agent-repl-verbs-other-prompted-creates-stay-seeded ()
+  "Every prompted create other than the one-shot still starts from the composer."
+  (dolist (command '(agent-repl-create-workspace
+                     agent-repl-fork-workspace
+                     agent-repl-fork-workspace-into-primary
+                     agent-repl-create-help-workspace))
+    (ert-info ((symbol-name command))
+      ;; Act / Assert.
+      (should-not (agent-repl-test-verbs--unseeded-by command)))))
 
 ;;;; ---- Create: the persisted prompt history ----
 
@@ -2483,7 +2574,7 @@ That is what survives a crash: nothing waits for the read to end."
       (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
                  (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
                 ((symbol-function 'agent-repl-verbs--read-prompt)
-                 (lambda (_p &optional history-file) (push history-file history-files) "commission")))
+                 (lambda (_p &optional history-file _unseeded) (push history-file history-files) "commission")))
         ;; Act.
         (agent-repl-create-oneshot nil))
       ;; Assert.
@@ -2549,7 +2640,7 @@ trailing-slash removal alone, so the fixture directories need not exist."
          (agent-repl-test-verbs--roster nil nil (agent-repl-test-verbs--help-sections))))
     (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
       (agent-repl-test-verbs--with-help-repo "/tmp/agent-repl-test/doom/.git"
-        (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file) "q")))
+        (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "q")))
           ;; Act.
           (agent-repl-create-help-workspace)
           ;; Assert.
@@ -2566,7 +2657,7 @@ trailing-slash removal alone, so the fixture directories need not exist."
     (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
       (agent-repl-test-verbs--with-help-repo "/tmp/agent-repl-test/doom/.git"
         (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt)
-                   (lambda (_p &optional _history-file) "  how do tabs work?  ")))
+                   (lambda (_p &optional _history-file _unseeded) "  how do tabs work?  ")))
           ;; Act.
           (agent-repl-create-help-workspace)
           ;; Assert.
@@ -2584,7 +2675,7 @@ trailing-slash removal alone, so the fixture directories need not exist."
     (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
       (agent-repl-test-verbs--with-help-repo "/tmp/agent-repl-test/doom/.git"
         (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (_ws) nil))
-                  ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file) "q")))
+                  ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "q")))
           ;; Act.
           (agent-repl-create-help-workspace)
           ;; Assert.
@@ -2597,7 +2688,7 @@ trailing-slash removal alone, so the fixture directories need not exist."
          (agent-repl-test-verbs--roster nil nil (agent-repl-test-verbs--help-sections))))
     (agent-repl-test-verbs--with nil
       (agent-repl-test-verbs--with-help-repo "/tmp/agent-repl-test/doom/.git"
-        (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file) "   ")))
+        (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "   ")))
           ;; Act / Assert.
           (should-error (agent-repl-create-help-workspace) :type 'user-error)
           (should-not agent-repl-test-verbs--sent))))))
@@ -2613,7 +2704,7 @@ trailing-slash removal alone, so the fixture directories need not exist."
         (cl-letf (((symbol-function 'agent-repl--error)
                    (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged)))
                   ((symbol-function 'agent-repl-verbs--read-prompt)
-                   (lambda (_p &optional _history-file) (error "the question must not be asked"))))
+                   (lambda (_p &optional _history-file _unseeded) (error "the question must not be asked"))))
           ;; Act / Assert.
           (should-error (agent-repl-create-help-workspace) :type 'user-error)
           (should-not agent-repl-test-verbs--sent)
@@ -2634,7 +2725,7 @@ trailing-slash removal alone, so the fixture directories need not exist."
         (cl-letf (((symbol-function 'agent-repl--warn)
                    (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged)))
                   ((symbol-function 'agent-repl-verbs--read-prompt)
-                   (lambda (_p &optional _history-file) (error "the question must not be asked"))))
+                   (lambda (_p &optional _history-file _unseeded) (error "the question must not be asked"))))
           ;; Act / Assert.
           (should-error (agent-repl-create-help-workspace) :type 'user-error)
           (should-not agent-repl-test-verbs--sent)
