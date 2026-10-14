@@ -999,6 +999,11 @@ type MergeSource struct {
 	// already running. Any arm may ask for it; a hotfix that must land before
 	// the work already waiting is what it is for.
 	Front bool
+	// Version is how the merge moves agent-repl's version once it lands
+	// (agentrepl.v1.MergeWorkspaceRequest.version_increment), nil when it
+	// moves none. A detached request's hand-off carries it onto the merge
+	// workspace's own request.
+	Version *VersionIncrement
 }
 
 // DetachedMergeID is one detached merge request's identity, minted when the
