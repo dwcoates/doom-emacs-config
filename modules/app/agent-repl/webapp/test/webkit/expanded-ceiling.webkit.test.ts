@@ -9,13 +9,9 @@
  * stylesheet, and measures it against the feed's visible height at two window
  * heights.
  */
-import path from "node:path";
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
-import { webkit, type Browser, type Page } from "playwright-core";
+import type { Browser, Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
+import { openFeedPage } from "./feed-page";
 
 /** Content far taller than any feed, so only the ceiling can bound the item. */
 const TALL = `<div style="height: 4000px">content</div>`;
@@ -66,16 +62,7 @@ describe("the expanded-item ceiling in WebKit", () => {
   let page: Page;
 
   beforeAll(async () => {
-    const css = await readFile(path.join(here, "../../src/styles.css"), "utf8");
-    browser = await webkit.launch();
-    page = await browser.newPage({ viewport: { width: 800, height: 800 } });
-    await page.setContent(`<!doctype html><html><head></head><body>
-      <div id="main-col">
-        <div id="feed-scroll" class="scroll-zone">
-          <main id="feed" data-feed="root"></main>
-        </div>
-      </div></body></html>`);
-    await page.addStyleTag({ content: css });
+    ({ browser, page } = await openFeedPage({ width: 800, height: 800 }));
   });
 
   afterAll(async () => {

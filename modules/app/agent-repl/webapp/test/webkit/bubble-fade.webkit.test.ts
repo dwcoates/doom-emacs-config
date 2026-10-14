@@ -10,15 +10,11 @@
  * paints the fade a solid sentinel color in real headless WebKit over the real
  * stylesheet, screenshots the page, and finds the sentinel's pixels.
  */
-import path from "node:path";
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
-import { webkit, type Browser, type Page } from "playwright-core";
+import type { Browser, Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { BUBBLE_EXPAND_ONLY_CLASS, BUBBLE_FOOTER_CLASS } from "../../src/bubble/draw.js";
 import { screenshotPixels } from "./pixels";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
+import { openFeedPage } from "./feed-page";
 
 /**
  * The fade in solid red over a solid blue bubble with no shadow, so a red
@@ -100,14 +96,8 @@ describe("the collapsed bubble's fade in WebKit", () => {
   let footerAfter: Painted;
 
   beforeAll(async () => {
-    const css = await readFile(path.join(here, "../../src/styles.css"), "utf8");
-    browser = await webkit.launch();
-    const page = await browser.newPage({ viewport: { width: 800, height: 800 }, deviceScaleFactor: 1 });
-    await page.setContent(`<!doctype html><html><head></head><body>
-      <div id="main-col"><div id="feed-scroll"><main id="feed" data-feed="root"></main></div></div>
-      </body></html>`);
-    await page.addStyleTag({ content: css });
-    await page.addStyleTag({ content: SENTINEL });
+    let page: Page;
+    ({ browser, page } = await openFeedPage({ width: 800, height: 800, deviceScaleFactor: 1, styles: [SENTINEL] }));
     shownLast = await paint(page, "");
     // A footer after the box, as an errored response draws its cut-short
     // marker (unstyled here, so its own red cannot pass for the fade).

@@ -11,10 +11,7 @@
  * WebKit over the real stylesheet and measures them with the ghost and with
  * the ghost suppressed (`content: none`), which is the layout before the fix.
  */
-import path from "node:path";
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
-import { webkit, type Browser, type Page } from "playwright-core";
+import type { Browser, Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   USAGE_AGE_RESERVE_LABELS,
@@ -23,8 +20,7 @@ import {
   USAGE_TOKEN_TEXT_PROPERTY,
   usageReserveLabelsCss,
 } from "../../src/feed/cards/response.js";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
+import { openFeedPage, type FeedPage } from "./feed-page";
 
 /** Suppresses the ghost: the layout the feed drew before it existed. */
 const NO_GHOST = `.response-prose p::before { content: none !important; }`;
@@ -47,6 +43,12 @@ interface Drawn {
   lines: number;
   /** The words on the first line, in order. */
   firstLine: string;
+  /**
+   * The words the first line shows WHOLE, in order: a word the clamp cut
+   * mid-word (styles.css "THE ONE-LINE CLAMP'S SHAPE") breaks across two
+   * lines, so it is not among them.
+   */
+  firstLineWhole: string;
   firstLineRight: number;
   corner: { right: number; top: number; width: number; height: number };
   stamp: { right: number; top: number };
@@ -92,11 +94,13 @@ async function draw(
       const px = (v: number): number => Math.round(v * 100) / 100;
       const tops = new Map<number, number>();
       const words = new Map<number, string[]>();
+      const whole = new Map<number, string[]>();
       for (const w of feed.querySelectorAll(".w")) {
         const r = rel(w);
         const top = Math.round(r.top);
         tops.set(top, Math.max(tops.get(top) ?? 0, r.right));
         words.set(top, [...(words.get(top) ?? []), w.textContent ?? ""]);
+        if (w.getClientRects().length === 1) whole.set(top, [...(whole.get(top) ?? []), w.textContent ?? ""]);
       }
       const firstTop = Math.min(...tops.keys());
       const corner = rel(feed.querySelector(".usage-corner")!);
@@ -107,6 +111,7 @@ async function draw(
         bubble: b.width,
         lines: tops.size,
         firstLine: words.get(firstTop)!.join(" "),
+        firstLineWhole: (whole.get(firstTop) ?? []).join(" "),
         firstLineRight: b.right - tops.get(firstTop)!,
         corner: {
           right: px(b.right - corner.right),
@@ -140,18 +145,8 @@ async function draw(
 }
 
 /** A headless WebKit page holding an empty feed over the real stylesheet, transitions off, with the ghost switch. */
-async function openFeed(): Promise<{ browser: Browser; page: Page }> {
-  const css = await readFile(path.join(here, "../../src/styles.css"), "utf8");
-  const browser = await webkit.launch();
-  const page = await browser.newPage({ viewport: { width: 1100, height: 900 } });
-  await page.setContent(`<!doctype html><html><head></head><body>
-    <div id="main-col">
-      <div id="feed-scroll" class="scroll-zone">
-        <main id="feed" data-feed="root"></main>
-      </div>
-    </div></body></html>`);
-  await page.addStyleTag({ content: css });
-  await page.addStyleTag({ content: NO_TRANSITIONS });
+async function openFeed(): Promise<FeedPage> {
+  const { browser, page } = await openFeedPage({ width: 1100, height: 900, styles: [NO_TRANSITIONS] });
   await page.evaluate(() => {
     const sw = document.createElement("style");
     sw.id = "ghost-switch";
@@ -310,17 +305,18 @@ describe("an ellipsis bubble with a corner in WebKit", () => {
     expect(open.firstLine).toBe(closed.firstLine);
   });
 
-  it("keeps every word an overflowing interim showed, in place, once opened", async () => {
-    // Arrange: 40 words overflow the one clamped line, which ends in "…"; the
-    // clamp may give the ellipsis the room of the line's last word, which the
-    // opened line then shows in its place.
+  it("keeps every whole word an overflowing interim showed, in place, once opened", async () => {
+    // Arrange: 40 words overflow the one clamped line, which ends in "…" at
+    // the edge, mid-word if need be (owner request, 2026-10-14); the opened
+    // line wraps at its words, so a word the ellipsis cut may move to the next
+    // line, and the words before it may not.
     const closed = await draw(page, { text: prose(40), ghost: true, ellipsis: "closed" });
 
     // Act
     const open = await draw(page, { text: prose(40), ghost: true, ellipsis: "open" });
 
-    // Assert: no word the closed line showed moves.
-    expect(open.firstLine.startsWith(closed.firstLine)).toBe(true);
+    // Assert: the closed line showed words whole, and none of them moves.
+    expect([closed.firstLineWhole !== "", open.firstLine.startsWith(closed.firstLineWhole)]).toEqual([true, true]);
   });
 });
 
