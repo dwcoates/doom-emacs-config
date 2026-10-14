@@ -232,12 +232,8 @@ export function drawRosterRow(
   // 2026-10-13): a recently-merged row and a hidden row show no dot or glyph.
   // Both bands' names are in the repository names' grey; a hidden row's is
   // struck through only at a cold gate.
-  // With no mark, the NAME is the detail panel's pointer trigger (owner
-  // request, 2026-10-11).
-  let statusMark: HTMLElement | null = null;
   if (place === "grouping") {
-    statusMark = drawStatusMark(status.case, `${path}.status`, markers);
-    line.appendChild(statusMark);
+    line.appendChild(drawStatusMark(status.case, `${path}.status`, markers));
   }
 
   const label = document.createElement("span");
@@ -301,7 +297,7 @@ export function drawRosterRow(
   );
   // AFTER the panel is in the tree: the hover wiring listens on the panel too,
   // so the pointer can travel from the row into it without it closing.
-  installHoverPanel(ws, line, statusMark ?? label, sc, workspace.id);
+  installHoverPanel(ws, line, label, sc, workspace.id);
 
   const visibleChildren = expandVisibleRows(u.children, `${path}.children`);
   if (visibleChildren.length > 0) {
@@ -623,16 +619,18 @@ export function drawStatusMark(arm: RosterStatusCase, path: string, markers: Row
  * page that opened it, never the daemon's view state (owner ruling,
  * 2026-10-06).
  *
- * THE POINTER'S TRIGGER IS ONE ELEMENT OF THE ROW: the status dot (owner
- * request, 2026-10-02), or, on a recently-merged row, which draws no dot, the
- * name (owner request, 2026-10-11). Hovering the rest of the row opens
- * nothing, and the pointer leaving the trigger for the row closes the panel as
- * it does for anywhere else.
+ * THE POINTER'S TRIGGER IS THE ROW'S NAME, in every section alike: the open
+ * workspaces section, Hidden and Recently Merged (owner request, 2026-10-13,
+ * which retired the status dot as the open section's trigger). Hovering the
+ * rest of the row, the dot included, opens nothing, and the pointer leaving
+ * the name for the row closes the panel as it does for anywhere else. The
+ * intent delay is three seconds (owner request, 2026-10-13), so the panel
+ * opens only on a pointer that has settled on the name.
  *
  * The keyboard gets the same panel through `focusin`/`focusout`, without the
  * intent delay — a focus move is deliberate in a way a pointer's path is not.
  */
-export const HOVER_OPEN_DELAY_MS = 150;
+export const HOVER_OPEN_DELAY_MS = 3000;
 export const HOVER_CLOSE_GRACE_MS = 120;
 
 function installHoverPanel(
