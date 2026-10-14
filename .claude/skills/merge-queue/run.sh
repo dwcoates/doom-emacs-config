@@ -55,13 +55,21 @@
 #                                bounces the runtime. Durable until released.
 #   --release-rollouts           End the hold; the next landing redeploys.
 #
-# Modifier:
+# Modifiers:
 #   --front                      With a merge verb (--one-shot, --async),
 #                                anywhere among
 #                                its arguments: the merge goes to the FRONT of
 #                                its queue once it is put in line, ahead of
 #                                every ordinary merge waiting, never ahead of
 #                                the one running. Refused on any other verb.
+#   --minor <line> | --patch <line>
+#                                With a merge verb, anywhere among its
+#                                arguments: how a merge onto agent-repl's
+#                                master moves the version, and the one-line
+#                                changelog entry its version tag carries. The
+#                                daemon refuses such a merge without one, and
+#                                any other merge with one (exit 5). One of the
+#                                two at most; refused on any other verb.
 #
 # Exit codes (every verb):
 #   0  requested (--async; the outcome reports into this session), announced
@@ -71,7 +79,9 @@
 #   2  script/usage error, or the merge or control could not be requested
 #   5  refused by the daemon; why (or how to read why) is printed (an async
 #      merge's name already taken, its branch checked out in this workspace,
-#      or a --close workspace that is not open here, is refused here)
+#      or a --close workspace that is not open here, is refused here, as is
+#      a merge onto agent-repl's master without --minor or --patch, or any
+#      other merge with one)
 #   8  the daemon did not answer a queue-control request in time; the request
 #      stays pending (queue-control verbs)
 
@@ -116,30 +126,44 @@ daemon_bin() {
 }
 
 # FRONT is the merge-queue verb's -front, set when --front is among the
-# arguments; it rides every merge request this script makes.
+# arguments; VERSION is its -version-part and -changelog-line, set when
+# --minor <line> or --patch <line> is. Both ride every merge request this
+# script makes.
 FRONT=()
+VERSION=()
 ARGS=()
-for arg in "$@"; do
-  if [ "$arg" = --front ]; then
-    FRONT=(-front)
-  else
-    ARGS+=("$arg")
-  fi
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --front)
+      FRONT=(-front)
+      shift ;;
+    --minor | --patch)
+      [ "${#VERSION[@]}" -eq 0 ] || die "--minor and --patch each move the version once; give one"
+      [ -n "${2:-}" ] && [ "${2#--}" = "$2" ] || die "$1 needs the one-line changelog entry the version's tag carries"
+      VERSION=(-version-part "${1#--}" -changelog-line "$2")
+      shift 2 ;;
+    *)
+      ARGS+=("$1")
+      shift ;;
+  esac
 done
 set -- "${ARGS[@]+"${ARGS[@]}"}"
 
-# no_front refuses --front on a verb that requests no merge.
+# no_front refuses --front, --minor and --patch on a verb that requests no
+# merge.
 no_front() {
   [ "${#FRONT[@]}" -eq 0 ] || die "--front goes with a merge verb; $1 requests no merge"
+  [ "${#VERSION[@]}" -eq 0 ] || die "--minor and --patch go with a merge verb; $1 requests no merge"
 }
 
 # verb_status runs agent-repld merge-queue, passing its output through, and
 # answers its exit mapped onto this script's. A merge request carries -front
-# when --front was given.
+# when --front was given, and its version increment when --minor or --patch
+# was.
 verb_status() {
   local bin rc
   bin="$(daemon_bin)" || return 2
-  "$bin" merge-queue "$@" "${FRONT[@]+"${FRONT[@]}"}"
+  "$bin" merge-queue "$@" "${FRONT[@]+"${FRONT[@]}"}" "${VERSION[@]+"${VERSION[@]}"}"
   rc=$?
   case "$rc" in
     0) return 0 ;;
@@ -236,7 +260,7 @@ case "${1:-}" in
     run_verb "$control"
     ;;
   *)
-    printf 'usage: run.sh --one-shot [--pr-merged] | --async <name> <branch> [--instruction <text>] [--close <dir>] [--cleanup] [--compact-after] | --dequeue-own | --dequeue-workspace <dir> | --move-up-own | --move-up-workspace <dir> | --move-down-own | --move-down-workspace <dir> | --pause-queue [<repo-dir>] | --resume-queue [<repo-dir>] | --hold-rollouts | --release-rollouts  (any merge verb also takes --front)\n' >&2
+    printf 'usage: run.sh --one-shot [--pr-merged] | --async <name> <branch> [--instruction <text>] [--close <dir>] [--cleanup] [--compact-after] | --dequeue-own | --dequeue-workspace <dir> | --move-up-own | --move-up-workspace <dir> | --move-down-own | --move-down-workspace <dir> | --pause-queue [<repo-dir>] | --resume-queue [<repo-dir>] | --hold-rollouts | --release-rollouts  (any merge verb also takes --front, and --minor <line> or --patch <line>)\n' >&2
     exit 1
     ;;
 esac
