@@ -231,7 +231,7 @@ func TestTheMergeQueueVerbAsksFromTheCallingWorkspace(t *testing.T) {
 	f.daemons = []*fakeMergeDaemon{f.appliedScript(t)}
 
 	// Act.
-	code := f.run(t, "-own")
+	code := f.run(t, "-one-shot")
 
 	// Assert.
 	entry := f.writtenEntry(t)
@@ -240,50 +240,41 @@ func TestTheMergeQueueVerbAsksFromTheCallingWorkspace(t *testing.T) {
 	}
 }
 
-func TestTheMergeQueueVerbNamesEachSource(t *testing.T) {
+func TestTheMergeQueueVerbNamesEachMode(t *testing.T) {
 	tests := []struct {
 		name  string
 		args  func(f *mergeFixture) []string
 		check func(f *mergeFixture, e commandfile.Entry) bool
 	}{
-		{name: "own branch, sync by default", args: func(*mergeFixture) []string { return []string{"-own"} },
+		{name: "a one-shot", args: func(*mergeFixture) []string { return []string{"-one-shot"} },
 			check: func(_ *mergeFixture, e commandfile.Entry) bool {
-				return !e.Detached && !e.KeepOpen && e.Branch == "" && e.SourceDir == "" && !e.PRWasMerged && !e.Front
+				return e.OneShot && e.AsyncName == "" && e.Branch == "" && !e.PRWasMerged && !e.Front
 			}},
-		{name: "own branch to the front", args: func(*mergeFixture) []string { return []string{"-own", "-front"} },
-			check: func(_ *mergeFixture, e commandfile.Entry) bool { return !e.Detached && e.Front }},
-		{name: "a branch to the front", args: func(*mergeFixture) []string { return []string{"-branch", "agent-1/fix", "-front"} },
-			check: func(_ *mergeFixture, e commandfile.Entry) bool { return e.Branch == "agent-1/fix" && e.Front }},
-		{name: "own branch in place", args: func(*mergeFixture) []string { return []string{"-own", "-in-place"} },
-			check: func(_ *mergeFixture, e commandfile.Entry) bool { return !e.Detached && !e.KeepOpen }},
-		{name: "own branch sync", args: func(*mergeFixture) []string { return []string{"-own", "-sync"} },
-			check: func(_ *mergeFixture, e commandfile.Entry) bool { return !e.Detached && !e.KeepOpen }},
-		{name: "own branch async", args: func(*mergeFixture) []string { return []string{"-own", "-async", "-name", "reconnect-fix"} },
+		{name: "a one-shot to the front", args: func(*mergeFixture) []string { return []string{"-one-shot", "-front"} },
+			check: func(_ *mergeFixture, e commandfile.Entry) bool { return e.OneShot && e.Front }},
+		{name: "a one-shot already merged upstream", args: func(*mergeFixture) []string { return []string{"-one-shot", "-pr-merged"} },
+			check: func(_ *mergeFixture, e commandfile.Entry) bool { return e.OneShot && e.PRWasMerged }},
+		{name: "an async merge", args: func(*mergeFixture) []string { return []string{"-async", "-name", "reconnect-fix", "-branch", "agent-1/fix"} },
 			check: func(_ *mergeFixture, e commandfile.Entry) bool {
-				return e.Detached && e.DetachedName == "reconnect-fix" && e.Pick == "" && !e.KeepOpen && !e.CompactAfter
+				return !e.OneShot && e.AsyncName == "reconnect-fix" && e.Branch == "agent-1/fix" && e.Instruction == "" &&
+					e.CloseDir == "" && !e.CleanupWorktree && !e.CompactAfter
 			}},
-		{name: "own branch async compacting after", args: func(*mergeFixture) []string {
-			return []string{"-own", "-async", "-name", "reconnect-fix", "-compact-after"}
+		{name: "an async merge to the front", args: func(*mergeFixture) []string {
+			return []string{"-async", "-name", "reconnect-fix", "-branch", "agent-1/fix", "-front"}
 		},
-			check: func(_ *mergeFixture, e commandfile.Entry) bool {
-				return e.Detached && e.DetachedName == "reconnect-fix" && e.CompactAfter
-			}},
-		{name: "own branch async pick", args: func(*mergeFixture) []string {
-			return []string{"-own", "-async", "-name", "reconnect-fix", "-pick", "the reconnect fix"}
+			check: func(_ *mergeFixture, e commandfile.Entry) bool { return e.AsyncName == "reconnect-fix" && e.Front }},
+		{name: "an async merge with an instruction", args: func(*mergeFixture) []string {
+			return []string{"-async", "-name", "reconnect-fix", "-branch", "agent-1/fix", "-instruction", " rebase it "}
 		},
-			check: func(_ *mergeFixture, e commandfile.Entry) bool {
-				return e.Detached && e.DetachedName == "reconnect-fix" && e.Pick == "the reconnect fix"
-			}},
-		{name: "own branch kept open, in place", args: func(*mergeFixture) []string { return []string{"-own", "-keep-open"} },
-			check: func(_ *mergeFixture, e commandfile.Entry) bool { return e.KeepOpen && !e.Detached }},
-		{name: "own branch as a one-shot", args: func(*mergeFixture) []string { return []string{"-own", "-one-shot"} },
-			check: func(_ *mergeFixture, e commandfile.Entry) bool { return e.OneShot && !e.Detached && !e.KeepOpen }},
-		{name: "a branch", args: func(*mergeFixture) []string { return []string{"-branch", "agent-1/fix"} },
-			check: func(_ *mergeFixture, e commandfile.Entry) bool { return e.Branch == "agent-1/fix" }},
-		{name: "another workspace", args: func(f *mergeFixture) []string { return []string{"-dir", f.other} },
-			check: func(f *mergeFixture, e commandfile.Entry) bool { return e.SourceDir == f.other }},
-		{name: "merged upstream", args: func(*mergeFixture) []string { return []string{"-pr-merged"} },
-			check: func(_ *mergeFixture, e commandfile.Entry) bool { return e.PRWasMerged }},
+			check: func(_ *mergeFixture, e commandfile.Entry) bool { return e.Instruction == "rebase it" }},
+		{name: "an async one-shot of another workspace", args: func(f *mergeFixture) []string {
+			return []string{"-async", "-name", "reconnect-fix", "-branch", "agent-1/fix", "-close-dir", f.other}
+		},
+			check: func(f *mergeFixture, e commandfile.Entry) bool { return e.CloseDir == f.other }},
+		{name: "an async merge cleaning up and compacting after", args: func(*mergeFixture) []string {
+			return []string{"-async", "-name", "reconnect-fix", "-branch", "agent-1/fix", "-cleanup-worktree", "-compact-after"}
+		},
+			check: func(_ *mergeFixture, e commandfile.Entry) bool { return e.CleanupWorktree && e.CompactAfter }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -308,7 +299,7 @@ func TestTheMergeQueueVerbNamesTheRequestingWorktree(t *testing.T) {
 	f.daemons = []*fakeMergeDaemon{f.appliedScript(t)}
 
 	// Act.
-	f.run(t, "-branch", "agent-1/fix")
+	f.run(t, "-one-shot")
 
 	// Assert.
 	if want := worktreeLinePrefix + canonicalDir(f.worktree) + "\n"; !strings.Contains(f.out.String(), want) {
@@ -321,29 +312,21 @@ func TestTheMergeQueueVerbRefusesAMalformedRequest(t *testing.T) {
 		name string
 		args []string
 	}{
-		{name: "no source", args: nil},
-		{name: "two sources", args: []string{"-own", "-branch", "b"}},
-		{name: "keep-open off the own branch", args: []string{"-branch", "b", "-keep-open"}},
-		{name: "in-place off the own branch", args: []string{"-branch", "b", "-in-place"}},
-		{name: "one-shot off the own branch", args: []string{"-branch", "b", "-one-shot"}},
-		{name: "one-shot kept open", args: []string{"-own", "-one-shot", "-keep-open"}},
-		{name: "one-shot in place", args: []string{"-own", "-one-shot", "-in-place"}},
-		{name: "one-shot waiting", args: []string{"-own", "-one-shot", "-wait"}},
-		{name: "one-shot async", args: []string{"-own", "-one-shot", "-async", "-name", "n"}},
-		{name: "async off the own branch", args: []string{"-branch", "b", "-async", "-name", "n"}},
-		{name: "async with no name", args: []string{"-own", "-async"}},
-		{name: "async kept open", args: []string{"-own", "-async", "-name", "n", "-keep-open"}},
-		{name: "async in place", args: []string{"-own", "-async", "-name", "n", "-in-place"}},
-		{name: "async waited on", args: []string{"-own", "-async", "-name", "n", "-wait"}},
-		{name: "a name with no async", args: []string{"-own", "-name", "n"}},
-		{name: "a pick with no async", args: []string{"-own", "-pick", "the fix"}},
-		{name: "a blank pick", args: []string{"-own", "-async", "-name", "n", "-pick", " "}},
-		{name: "compact-after in place", args: []string{"-own", "-compact-after"}},
-		{name: "compact-after sync", args: []string{"-own", "-in-place", "-compact-after"}},
-		{name: "compact-after kept open", args: []string{"-own", "-keep-open", "-compact-after"}},
-		{name: "compact-after one-shot", args: []string{"-own", "-one-shot", "-compact-after"}},
-		{name: "compact-after off the own branch", args: []string{"-branch", "b", "-compact-after"}},
-		{name: "a dir that is not there", args: []string{"-dir", "/no/such/worktree"}},
+		{name: "no mode", args: nil},
+		{name: "two modes", args: []string{"-one-shot", "-async", "-name", "n", "-branch", "b"}},
+		{name: "pr-merged off a one-shot", args: []string{"-pr-merged"}},
+		{name: "a name off async", args: []string{"-one-shot", "-name", "n"}},
+		{name: "a branch off async", args: []string{"-one-shot", "-branch", "b"}},
+		{name: "an instruction off async", args: []string{"-one-shot", "-instruction", "x"}},
+		{name: "a close-dir off async", args: []string{"-one-shot", "-close-dir", "/tmp"}},
+		{name: "a cleanup off async", args: []string{"-one-shot", "-cleanup-worktree"}},
+		{name: "compact-after off async", args: []string{"-one-shot", "-compact-after"}},
+		{name: "async with no name", args: []string{"-async", "-branch", "b"}},
+		{name: "async with no branch", args: []string{"-async", "-name", "n"}},
+		{name: "async waited on", args: []string{"-async", "-name", "n", "-branch", "b", "-wait"}},
+		{name: "a blank instruction", args: []string{"-async", "-name", "n", "-branch", "b", "-instruction", " "}},
+		{name: "a close-dir that is not there", args: []string{"-async", "-name", "n", "-branch", "b", "-close-dir", "/no/such/worktree"}},
+		{name: "a one-shot async", args: []string{"-one-shot", "-pr-merged", "-async", "-name", "n", "-branch", "b"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -367,7 +350,7 @@ func TestTheMergeQueueVerbRefusesACallerInNoWorkspace(t *testing.T) {
 	f.daemons = []*fakeMergeDaemon{{script: frames(roster(rosterRow(f.other, "done", 0)))}}
 
 	// Act.
-	code := f.run(t, "-own")
+	code := f.run(t, "-one-shot")
 
 	// Assert.
 	if code != exitFailure || !strings.Contains(f.errOut.String(), "in no workspace") || len(f.commandFiles(t)) != 0 {
@@ -384,7 +367,7 @@ func TestTheMergeQueueVerbPicksTheDeepestWorkspaceHoldingTheCaller(t *testing.T)
 	f.daemons = []*fakeMergeDaemon{{script: []scriptStep{{roster: roster(outer, inner)}, {roster: roster(outer, inner)}, {act: f.retireTheCommand(t, "applied")}, {roster: roster(outer, inner)}}}}
 
 	// Act.
-	f.run(t, "-own")
+	f.run(t, "-one-shot")
 
 	// Assert.
 	if entry := f.writtenEntry(t); entry.Workspace != "ws-1" {
@@ -435,7 +418,7 @@ func TestTheMergeQueueVerbAsksFromANestedWorkspace(t *testing.T) {
 			f.daemons = []*fakeMergeDaemon{{script: []scriptStep{{roster: r}, {roster: r}, {act: f.retireTheCommand(t, "applied")}, {roster: r}}}}
 
 			// Act.
-			code := f.run(t, "-own")
+			code := f.run(t, "-one-shot")
 
 			// Assert: the merge is asked by the nested workspace itself.
 			entry := f.writtenEntry(t)
@@ -464,7 +447,7 @@ func TestTheMergeQueueVerbReportsANestedWorkspacesLanding(t *testing.T) {
 	)}}
 
 	// Act.
-	code := f.run(t, "-own", "-wait")
+	code := f.run(t, "-one-shot", "-wait")
 
 	// Assert.
 	if code != exitSuccess || !strings.Contains(f.out.String(), "LANDED") {
@@ -480,7 +463,7 @@ func TestTheMergeQueueVerbReturnsOnceTheCommandIsApplied(t *testing.T) {
 	f.daemons = []*fakeMergeDaemon{f.appliedScript(t)}
 
 	// Act.
-	code := f.run(t, "-own")
+	code := f.run(t, "-one-shot")
 
 	// Assert.
 	if code != exitSuccess || !strings.Contains(f.out.String(), "put in line once this turn ends") {
@@ -495,7 +478,7 @@ func TestTheMergeQueueVerbReportsARefusedCommand(t *testing.T) {
 	f.daemons = []*fakeMergeDaemon{{script: []scriptStep{{roster: idle}, {roster: idle}, {act: f.retireTheCommand(t, "quarantine")}, {roster: idle}}}}
 
 	// Act.
-	code := f.run(t, "-branch", "no-such")
+	code := f.run(t, "-async", "-name", "n", "-branch", "no-such")
 
 	// Assert.
 	if code != exitMergeRefused || !strings.Contains(f.errOut.String(), "REFUSED") {
@@ -511,7 +494,7 @@ func TestTheMergeQueueVerbRefusesToWaitWhileTheCallersTurnRuns(t *testing.T) {
 	f.daemons = []*fakeMergeDaemon{{script: frames(roster(rosterRow(f.worktree, "thinking", 0)))}}
 
 	// Act.
-	code := f.run(t, "-own", "-wait")
+	code := f.run(t, "-one-shot", "-wait")
 
 	// Assert.
 	if code != exitFailure || !strings.Contains(f.errOut.String(), "starts only when that turn ends") || len(f.commandFiles(t)) != 0 {
@@ -529,11 +512,11 @@ func TestTheMergeQueueVerbWaitsOnlyOnAnInPlaceMerge(t *testing.T) {
 	)}}
 
 	// Act
-	code := f.run(t, "-own", "-wait")
+	code := f.run(t, "-one-shot", "-wait")
 
-	// Assert: the wait is on the calling workspace's own merge, so it runs in
-	// place rather than detached.
-	if entry := f.writtenEntry(t); code != exitSuccess || entry.Detached {
+	// Assert: the wait is on the calling workspace's own merge, so it is the
+	// one-shot that runs in place.
+	if entry := f.writtenEntry(t); code != exitSuccess || !entry.OneShot || entry.AsyncName != "" {
 		t.Fatalf("exit %d, entry %+v; want an in-place merge waited on", code, entry)
 	}
 }
@@ -549,7 +532,7 @@ func TestTheMergeQueueVerbReportsALanding(t *testing.T) {
 	)}}
 
 	// Act.
-	code := f.run(t, "-branch", "agent-1/fix", "-wait")
+	code := f.run(t, "-one-shot", "-wait")
 
 	// Assert.
 	if code != exitSuccess || !strings.Contains(f.out.String(), "LANDED") {
@@ -571,7 +554,7 @@ func TestTheMergeQueueVerbReportsAFailureWithItsArea(t *testing.T) {
 			f.daemons = []*fakeMergeDaemon{daemon}
 
 			// Act.
-			code := f.run(t, "-own", "-wait")
+			code := f.run(t, "-one-shot", "-wait")
 
 			// Assert.
 			if code != exitMergeFailed || !strings.Contains(f.out.String(), "FAILED ("+tt.area+")") {
@@ -593,7 +576,7 @@ func TestTheMergeQueueVerbSurfacesAnUnreadableFailedFooter(t *testing.T) {
 	), footErr: errors.New("footer stream refused")}}
 
 	// Act.
-	code := f.run(t, "-own", "-wait")
+	code := f.run(t, "-one-shot", "-wait")
 
 	// Assert.
 	if code != exitMergeFailed || !strings.Contains(f.errOut.String(), "footer stream refused") {
@@ -623,7 +606,7 @@ func TestTheMergeQueueVerbIgnoresAnEarlierMergesConclusion(t *testing.T) {
 			)}}
 
 			// Act.
-			code := f.run(t, "-own", "-keep-open", "-wait")
+			code := f.run(t, "-one-shot", "-wait")
 
 			// Assert.
 			if code != exitSuccess || !strings.Contains(f.out.String(), "LANDED") {
@@ -642,7 +625,7 @@ func TestTheMergeQueueVerbTakesAFreshLandingWithoutSeeingItInFlight(t *testing.T
 	)}}
 
 	// Act.
-	code := f.run(t, "-own", "-keep-open", "-wait")
+	code := f.run(t, "-one-shot", "-wait")
 
 	// Assert.
 	if code != exitSuccess || !strings.Contains(f.out.String(), "LANDED") {
@@ -662,7 +645,7 @@ func TestTheMergeQueueVerbReattachesAcrossAPlannedStandDown(t *testing.T) {
 	}
 
 	// Act.
-	code := f.run(t, "-own", "-wait")
+	code := f.run(t, "-one-shot", "-wait")
 
 	// Assert.
 	if code != exitSuccess || f.dialed != 2 {
@@ -676,7 +659,7 @@ func TestTheMergeQueueVerbFailsLoudlyOnABrokenStream(t *testing.T) {
 	f.daemons = []*fakeMergeDaemon{{script: frames(roster(rosterRow(f.worktree, "done", 0))), end: errors.New("connection reset")}}
 
 	// Act.
-	code := f.run(t, "-own", "-wait")
+	code := f.run(t, "-one-shot", "-wait")
 
 	// Assert.
 	if code != exitFailure || !strings.Contains(f.errOut.String(), "connection reset") {
@@ -692,7 +675,7 @@ func TestTheMergeQueueVerbNeedsAServingDaemon(t *testing.T) {
 	}
 
 	// Act.
-	code := f.run(t, "-own")
+	code := f.run(t, "-one-shot")
 
 	// Assert.
 	if code != exitFailure || !strings.Contains(f.errOut.String(), "no daemon is serving") || len(f.commandFiles(t)) != 0 {
@@ -1098,7 +1081,7 @@ func TestTheMergeQueueVerbRefusesAMalformedControl(t *testing.T) {
 	}{
 		{name: "a control that waits", args: func(*mergeFixture) []string { return []string{"-pause", "-wait"} }},
 		{name: "two controls", args: func(*mergeFixture) []string { return []string{"-pause", "-resume"} }},
-		{name: "a control and a merge", args: func(*mergeFixture) []string { return []string{"-evict", "-own"} }},
+		{name: "a control and a merge", args: func(*mergeFixture) []string { return []string{"-evict", "-one-shot"} }},
 		{name: "evict and evict-dir", args: func(f *mergeFixture) []string { return []string{"-evict", "-evict-dir", f.other} }},
 		{name: "repository-dir off a pause or resume", args: func(f *mergeFixture) []string { return []string{"-evict", "-repository-dir", f.other} }},
 		{name: "an evict-dir that is not there", args: func(*mergeFixture) []string { return []string{"-evict-dir", "/no/such/worktree"} }},
