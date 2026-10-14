@@ -69,25 +69,9 @@ func sentinelCmd(log *run.Log, argv []string) int {
 	return life.Sentinel(self, append([]string{"run"}, argv...), os.Stdout, os.Stderr, log)
 }
 
-// cutLog is the log of a runner or a warden: its sentinel's relay, and the
-// run's log file once the relay is gone (life.FallbackWriter). SIGPIPE is
-// taken, so a write to the broken relay answers EPIPE instead of ending the
-// process before its cleanup; a handler, unlike SIG_IGN, is not inherited by
-// the units.
-func cutLog() *run.Log {
-	signal.Notify(make(chan os.Signal, 1), syscall.SIGPIPE)
-	path := os.Getenv(ramdisk.EnvRunLog)
-	return &run.Log{Out: &life.FallbackWriter{Primary: os.Stdout, Path: path}, Err: &life.FallbackWriter{Primary: os.Stderr, Path: path}}
-}
-
-// osReap is the one reap over the host's process table.
-func osReap(log *run.Log) func(reap.Members) (reap.Result, error) {
-	return func(ms reap.Members) (reap.Result, error) { return reap.Reap(reap.OSTable{}, ms, log) }
-}
-
 // runnerCmd runs the suites, leading the run's session.
 func runnerCmd(argv []string) int {
-	log := cutLog()
+	log := life.CutLog(os.Getenv(ramdisk.EnvRunLog))
 	// The role is this process's alone: a unit that runs testrun itself
 	// starts a sentinel of its own.
 	if err := os.Unsetenv(life.EnvRole); err != nil {
@@ -109,7 +93,7 @@ func runnerCmd(argv []string) int {
 		log.Errorf("%v", err)
 		return 1
 	}
-	runner, err := life.StartRunner(reap.OSTable{}, osReap(log), life.WardenCommand{Name: self, Args: []string{"warden"}}, log)
+	runner, err := life.StartRunner(reap.OSTable{}, reap.OSReap(log), life.WardenCommand{Name: self, Args: []string{"warden"}}, log)
 	if err != nil {
 		log.Errorf("%v", err)
 		return 1
@@ -139,7 +123,7 @@ func runnerCmd(argv []string) int {
 // wardenCmd watches the runner's lifeline and, if the runner dies without
 // releasing its run, reaps and releases it (internal/life).
 func wardenCmd(argv []string) int {
-	log := cutLog()
+	log := life.CutLog(os.Getenv(ramdisk.EnvRunLog))
 	a, err := cli.ParseWardenArgs(argv)
 	if err != nil {
 		log.Errorf("%v", err)
@@ -150,7 +134,7 @@ func wardenCmd(argv []string) int {
 		Runner:   a.Runner,
 		Since:    a.Since,
 		Sentinel: a.Sentinel,
-		Reap:     osReap(log),
+		Reap:     reap.OSReap(log),
 		Release:  m.ReclaimRun,
 		Log:      log,
 	}.WatchLifeline()

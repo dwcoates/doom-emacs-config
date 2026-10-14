@@ -29,8 +29,11 @@ package life
 import (
 	"errors"
 	"os"
+	"os/signal"
 	"sync"
 	"syscall"
+
+	"agentrepl/testrun/internal/run"
 )
 
 // EnvRole names the role a testrun process was started in: RoleRunner for
@@ -90,4 +93,14 @@ func (w *FallbackWriter) Write(p []byte) (int, error) {
 		w.file = f
 	}
 	return w.file.Write(p)
+}
+
+// CutLog is the log of a runner or a warden: its sentinel's relay on stdout
+// and stderr, and the run's log file at path once the relay is gone
+// (FallbackWriter). It takes SIGPIPE, so a write to the broken relay answers
+// EPIPE instead of ending the process before its cleanup; a handler, unlike
+// SIG_IGN, is not inherited by the units.
+func CutLog(path string) *run.Log {
+	signal.Notify(make(chan os.Signal, 1), syscall.SIGPIPE)
+	return &run.Log{Out: &FallbackWriter{Primary: os.Stdout, Path: path}, Err: &FallbackWriter{Primary: os.Stderr, Path: path}}
 }
