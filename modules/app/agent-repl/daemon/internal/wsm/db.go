@@ -55,8 +55,12 @@ type DB interface {
 	// SetRepositoryFolded records whether a repository's roster section is
 	// collapsed; an unknown repository is ErrNotFound.
 	SetRepositoryFolded(ctx context.Context, id RepoID, folded bool) error
-	// SetClosed records whether a workspace's editor state is torn down.
-	SetClosed(ctx context.Context, id WorkspaceID, closed bool) error
+	// MarkClosed records that a workspace's editor state is torn down, when,
+	// and by whom; the first close's record stands (see the store's doc).
+	MarkClosed(ctx context.Context, id WorkspaceID, closure Closure) error
+	// Reopen records that a workspace's editor state stands again, clearing
+	// its close record.
+	Reopen(ctx context.Context, id WorkspaceID) error
 	// SetCurrent records the user's selection of a workspace at an instant.
 	SetCurrent(ctx context.Context, id WorkspaceID, at time.Time) error
 	// Current reports the currently selected workspace, nil when none is.

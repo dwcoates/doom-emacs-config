@@ -164,6 +164,9 @@ type fakeDB struct {
 	resolvedForks    []resolvedFork
 	bindSessionCalls []wsm.Session
 	closedFlags      map[ids.WorkspaceID]bool
+	// closures is every close record MarkClosed was handed, in order, per
+	// workspace.
+	closures map[ids.WorkspaceID][]wsm.Closure
 	// setClosedErr makes the closed-flag write fail, which the map cannot.
 	setClosedErr error
 	priorities   map[ids.WorkspaceID]*wsm.Priority
@@ -308,6 +311,7 @@ func newFakeDB() *fakeDB {
 		jobs:        map[ids.WorkspaceID]wsm.CreationJob{},
 		held:        map[ids.WorkspaceID][]wsm.HeldPrompt{},
 		closedFlags: map[ids.WorkspaceID]bool{},
+		closures:    map[ids.WorkspaceID][]wsm.Closure{},
 		priorities:  map[ids.WorkspaceID]*wsm.Priority{},
 		attention:   map[ids.WorkspaceID]bool{},
 		terminals:   map[ids.WorkspaceID]wsm.SessionTerminal{},
@@ -458,11 +462,20 @@ func (d *fakeDB) MovePlace(_ context.Context, ws, target ids.WorkspaceID) error 
 	return nil
 }
 
-func (d *fakeDB) SetClosed(_ context.Context, id ids.WorkspaceID, closed bool) error {
+func (d *fakeDB) MarkClosed(_ context.Context, id ids.WorkspaceID, closure wsm.Closure) error {
 	if d.setClosedErr != nil {
 		return d.setClosedErr
 	}
-	d.closedFlags[id] = closed
+	d.closedFlags[id] = true
+	d.closures[id] = append(d.closures[id], closure)
+	return nil
+}
+
+func (d *fakeDB) Reopen(_ context.Context, id ids.WorkspaceID) error {
+	if d.setClosedErr != nil {
+		return d.setClosedErr
+	}
+	d.closedFlags[id] = false
 	return nil
 }
 

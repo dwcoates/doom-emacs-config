@@ -1584,8 +1584,8 @@ func TestAnAdoptionOfAClosedFreeLockStartsNoSession(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws := freeLockAdoption(t, h)
-	if err := h.db.SetClosed(context.Background(), ws, true); err != nil {
-		t.Fatalf("SetClosed: %v", err)
+	if err := h.db.MarkClosed(context.Background(), ws, wsm.Closure{At: time.Now(), By: wsm.CloseByUser}); err != nil {
+		t.Fatalf("MarkClosed: %v", err)
 	}
 
 	// Act

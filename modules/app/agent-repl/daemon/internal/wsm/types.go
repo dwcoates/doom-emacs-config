@@ -58,6 +58,9 @@ type Workspace struct {
 	Parent *WorkspaceID
 	// Closed reports whether the workspace's editor state has been torn down.
 	Closed bool
+	// Closure is when the workspace was closed and by whom (MarkClosed); nil
+	// while it is open, and on a closed row whose close predates the record.
+	Closure *Closure
 	// Attention marks the roster's attention badge; set on a host
 	// notification, cleared on SelectWorkspace.
 	Attention bool
