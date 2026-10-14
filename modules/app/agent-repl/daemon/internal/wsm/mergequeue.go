@@ -466,9 +466,10 @@ func (s *store) setMergeQueueState(ctx context.Context, op string, repo RepoKey,
 // YieldMergeHead records a race to land the head lost: winner, the merge
 // right behind the head that passed its gate on the target's tip first, takes
 // the head's place at the front of the line, and loser, the head it overtook,
-// goes back to waiting right behind it, to start over once the winner lands.
-// Both must be admitted, with loser ahead of winner; anything else is a
-// refusal, because it means the caller lost track of the queue.
+// stands right behind it, still admitted: it is suspended at the step it was
+// on, and resumes there once the winner is done. Both must be admitted, with
+// loser ahead of winner; anything else is a refusal, because it means the
+// caller lost track of the queue.
 func (s *store) YieldMergeHead(ctx context.Context, repo RepoKey, loser, winner WorkspaceID) error {
 	const op = "daemon.wsm.yield_merge_head"
 	key, err := normalizeRepoKey(repo)
@@ -498,9 +499,6 @@ func (s *store) YieldMergeHead(ctx context.Context, repo RepoKey, loser, winner 
 		}
 		if loserSeq >= winnerSeq {
 			return fmt.Errorf("wsm: workspace %s in repo %q cannot overtake %s, which already stands behind it", winner, key, loser)
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE merge_queue SET state = ? WHERE repo_key = ? AND workspace_id = ?`, int(MergeQueued), key, loser); err != nil {
-			return err
 		}
 		return moveAhead(ctx, tx, key, winner, loserSeq)
 	})

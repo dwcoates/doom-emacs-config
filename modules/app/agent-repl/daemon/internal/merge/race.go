@@ -21,10 +21,18 @@ import (
 //
 // THE MERGE BEHIND WINS by passing its gate on the target's tip while the head
 // has not begun committing: it takes the head's place at the front (the
-// store's YieldMergeHead), the head is stopped and goes back to waiting right
-// behind it, the winner is promoted and lands on the tree it already tested,
-// and the head then starts over from a rebase onto the new tip, with a new
-// merge behind it.
+// store's YieldMergeHead), and the winner is promoted and lands on the tree it
+// already tested.
+//
+// THE LOSER IS SUSPENDED, NEVER TORN DOWN (owner ruling, 2026-10-13). It is
+// brought to a stopping point exactly as a pause brings a merge (suspendFor),
+// keeping its lease and its progress record, and taken straight back from its
+// durable rows (AdoptWorkspace), still admitted right behind the winner. An
+// agent turn it was waiting on -- a conflict's resolution, a fixing attempt --
+// lives on in the session. It resumes only once it heads the queue again
+// (resumeIn, extendOnce): it finishes the step it was on, reattaching to that
+// turn, and only then rebases onto the target's new tip and starts over
+// (resumeAttempt).
 //
 // THE DECISION IS ATOMIC UNDER THE ORCHESTRATOR'S LOCK. A head that has begun
 // committing (beginLanding) is never overtaken, and a head being overtaken
@@ -142,57 +150,19 @@ func (o *orchestrator) claimRace(ctx context.Context, r *run, base string) {
 			"workspace": string(r.ws), "head": string(head.ws), "error": err.Error()})
 		return
 	}
-	log.Info(op, "the merge behind the head passed its gate on the target's tip first; it lands ahead, and the head starts over behind it", dlog.Context{
+	log.Info(op, "the merge behind the head passed its gate on the target's tip first; it lands ahead, and the head is suspended behind it", dlog.Context{
 		"workspace": string(r.ws), "head": string(head.ws), "tip": tip})
-	o.log(ctx, head.ws).Info(op, "the merge behind this one passed its gate on the target's tip first; this merge stops and starts over behind it", dlog.Context{
+	o.log(ctx, head.ws).Info(op, "the merge behind this one passed its gate on the target's tip first; this merge is suspended at its step and resumes there once the winner is done", dlog.Context{
 		"workspace": string(head.ws), "winner": string(r.ws), "tip": tip})
-	head.cancel(&raceLost{winner: r.ws})
-	select {
-	case <-head.finished:
-	case <-ctx.Done():
+	settle := context.WithoutCancel(ctx)
+	lost := suspension{op: op, cause: &raceLost{winner: r.ws},
+		moved: "the merge that lost the race to land is suspended at the step it recorded; it resumes there once it heads the queue again"}
+	if err := o.suspendFor(settle, head.ws, lost); err != nil {
+		log.Error(op, "could not suspend the head that lost the race to land", dlog.Context{
+			"workspace": string(r.ws), "head": string(head.ws), "error": err.Error()})
+	} else if err := o.AdoptWorkspace(settle, head.ws); err != nil {
+		log.Error(op, "could not take back the head that lost the race to land", dlog.Context{
+			"workspace": string(r.ws), "head": string(head.ws), "error": err.Error()})
 	}
 	o.kick(r.repo)
-}
-
-// yieldTerminal ends a head that lost the race to land. Nothing of it is over:
-// its entry already waits right behind the winner (YieldMergeHead), and its
-// bubble goes on, so it gives back only what a run holds -- the output
-// address, the occupancy, the lease, the progress record, the displaced turn,
-// the queue's tree and the slot -- and publishes no terminal.
-func (r *run) yieldTerminal(ctx context.Context, winner ids.WorkspaceID) {
-	const op = "daemon.merge.race"
-	if r.exiting() {
-		r.suspend(ctx, &raceLost{winner: winner})
-		return
-	}
-	log := r.o.log(ctx, r.ws)
-	r.o.deps.Feed.SetOutputAddress(r.ws, nil)
-	if r.releaseOccupancy != nil {
-		r.releaseOccupancy()
-	}
-	r.closeOpenRounds(ctx, "abandoned")
-	if err := r.o.deps.DB.ReleaseLease(ctx, r.lease.ID); err != nil {
-		log.Error(op, "could not release the lease of the merge that lost the race to land", dlog.Context{
-			"workspace": string(r.ws), "lease": string(r.lease.ID), "error": err.Error()})
-	}
-	if _, err := r.o.deps.DB.DropMergeProgress(ctx, r.lease.ID); err != nil {
-		log.Error(op, "could not drop the progress record of the merge that lost the race to land", dlog.Context{
-			"workspace": string(r.ws), "lease": string(r.lease.ID), "error": err.Error()})
-	}
-	r.o.deps.Queue.OnLeaseChanged(r.ws)
-	r.o.mu.Lock()
-	if r.o.running[r.repo] == r {
-		delete(r.o.running, r.repo)
-	}
-	delete(r.o.runsByWorkspace, r.ws)
-	r.o.mu.Unlock()
-	r.resubmitDisplaced(ctx)
-	r.dropTree(ctx)
-	r.o.releaseSlot(ctx, r)
-	log.Info(op, "the merge that lost the race to land waits behind the winner and starts over once it lands", dlog.Context{
-		"workspace": string(r.ws), "winner": string(winner)})
-	if err := r.o.republishQueue(ctx, r.repo); err != nil {
-		log.Error(op, "could not republish the queue", dlog.Context{"repo": string(r.repo), "error": err.Error()})
-	}
-	r.o.kick(r.repo)
 }
