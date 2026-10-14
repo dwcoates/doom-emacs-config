@@ -32,6 +32,7 @@
 (declare-function agent-repl--ws-tabline-names "workspace")
 (declare-function agent-repl--ws-window-conf "workspace")
 (declare-function agent-repl-host-mark-viewed "host")
+(declare-function agent-repl-host-request-switch "host" (ws trigger))
 (declare-function agent-repl-roster-row-attention-p "roster")
 (declare-function agent-repl-roster-row-id "roster")
 (declare-function agent-repl-roster-row-priority-label "roster")
@@ -2021,6 +2022,12 @@ UI-boundary tolerance: returns nil for unknown ws (see
   (when (agent-repl--ws-known-p ws)
     (agent-repl--ws-render-status ws)))
 
+(defconst agent-repl--tab-workspace-property 'agent-repl-tab-workspace
+  "Text property naming the workspace a run of the rendered tabline draws.
+Set on every character of a tab entry by `agent-repl--render-tab-entry'
+and read by `agent-repl--tabline-items', which splits the tabline into
+one clickable tab-bar item per entry.")
+
 (defun agent-repl--render-tab-entry (name current-name index)
   "Render a single tab entry for workspace NAME.
 CURRENT-NAME is the active workspace name.  INDEX is the 1-based tab
@@ -2037,7 +2044,12 @@ async-merging marker the `[N] ' run takes the async-merge purple instead
 \(`agent-repl--tab-spec-async-merge'), and the name keeps its status.
 
 The badge run — the roster's priority label and the arm's glyph — is
-drawn BEFORE the name."
+drawn BEFORE the name.
+
+Every character of the entry carries NAME under
+`agent-repl--tab-workspace-property', which is how
+`agent-repl--tabline-items' finds the entry again after the rows are
+packed, padded and joined, and binds a click on it to NAME."
   ;; Called on every tab-bar redisplay, potentially many times per second;
   ;; renderer branch traces would overwhelm even verbose diagnostics.
   (let* ((selected      (equal current-name name))
@@ -2055,7 +2067,8 @@ drawn BEFORE the name."
          (face          (agent-repl--tab-face display-state selected))
          (badge         (agent-repl--tab-badge-str
                          name (or display-state bracket-state))))
-    (agent-repl--render-tab name spec label face badge)))
+    (propertize (agent-repl--render-tab name spec label face badge)
+                agent-repl--tab-workspace-property name)))
 
 (cl-defun agent-repl--tabline-rendered-entries (&optional (names nil names-supplied-p))
   "Return the list of rendered tab-entry strings for NAMES.
@@ -2710,6 +2723,69 @@ remaining tabs carry contiguous 1-based numbers."
      rows padded centered joined output)
     output))
 
+(defun agent-repl--tab-bar-item-help (_window _object _pos)
+  "Show nothing when the mouse is over an agent-repl tab-bar item.
+The tab bar's C code shows an item's CAPTION as its help when the item
+has no `:help', and with `tooltip-mode' off that help is echoed in the
+echo area -- so hovering the tabline painted the whole two-row bar a
+second time at the bottom of the frame.  A function as the help is
+called by `show_help_echo' and a nil answer shows nothing; every item
+`agent-repl--tabline-items' builds carries this one."
+  nil)
+
+(defun agent-repl-tab-bar-switch-to-workspace (ws)
+  "Switch to workspace WS, the tab the user clicked on the tab bar.
+Requests the switch of the daemon exactly as the slot chords and the
+picker do (`agent-repl-host-request-switch'), with trigger `click',
+which records the request."
+  (agent-repl-host-request-switch ws 'click))
+
+(defun agent-repl--tab-bar-click-binding (ws)
+  "Return the command a click on WS's tab-bar item runs.
+`tab-bar-mouse-down-1' calls an item's binding interactively when it is
+a function, so this is how a tab click reaches
+`agent-repl-tab-bar-switch-to-workspace'."
+  (lambda ()
+    (interactive)
+    (agent-repl-tab-bar-switch-to-workspace ws)))
+
+(defun agent-repl--tabline-items (rendered)
+  "Split RENDERED, the visible tabline string, into tab-bar menu items.
+
+Each maximal run of RENDERED that names one workspace under
+`agent-repl--tab-workspace-property' becomes an item bound to a switch
+to that workspace (`agent-repl--tab-bar-click-binding'), and every run
+between them (centering, separators, row breaks, badges and the
+zero-width cache-busting runs) an item bound to `ignore'.  The captions
+concatenate back to RENDERED exactly, so the fixed two-row height and
+the repaint keys the formatter guarantees carry over unchanged.
+
+Every item carries `agent-repl--tab-bar-item-help' as its `:help', so
+hovering the bar shows no help at all."
+  (let ((pos 0)
+        (len (length rendered))
+        (index 0)
+        items)
+    (while (< pos len)
+      (let* ((ws (get-text-property
+                  pos agent-repl--tab-workspace-property rendered))
+             (end (next-single-property-change
+                   pos agent-repl--tab-workspace-property rendered len)))
+        (push (list (intern (format "agent-repl-tabline-%d" (cl-incf index)))
+                    'menu-item (substring rendered pos end)
+                    (if ws (agent-repl--tab-bar-click-binding ws) #'ignore)
+                    :help #'agent-repl--tab-bar-item-help)
+              items)
+        (setq pos end)))
+    (nreverse items)))
+
+(defun agent-repl-workspace-tabline-items ()
+  "Return the visible tabline as clickable tab-bar items.
+The `tab-bar-format' entry: renders `agent-repl-workspace-tabline-formatted'
+and splits it with `agent-repl--tabline-items', so a click on a tab
+switches to its workspace and hovering echoes nothing."
+  (agent-repl--tabline-items (agent-repl-workspace-tabline-formatted)))
+
 (defun agent-repl-current-workspace-name-segment ()
   "Return current workspace name as an invisible tab-bar segment.
 Same alternating-space trick as
@@ -3059,7 +3135,7 @@ parameters, and the watchdog cleanup result."
                           (frame-parameter frame 'tab-bar-lines-keep-state)))
                   frames))
          (watchdog-cleanup (agent-repl--retire-redisplay-storm-watchdog)))
-    (setq tab-bar-format '(agent-repl-workspace-tabline-formatted
+    (setq tab-bar-format '(agent-repl-workspace-tabline-items
                            tab-bar-format-align-right
                            agent-repl-current-workspace-name-segment)
           tab-bar-show t
