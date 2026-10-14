@@ -6,15 +6,24 @@
 # test-safe-test-run.sh — hermetic tests for safe-test-run.sh's `--` mode, the
 # git-state net bin/test-all.sh runs its whole parallel run inside.
 #
-# NO REAL GIT RUNS. A stub `git` first on PATH answers exactly the commands the
-# net issues, from state files a case controls, and refuses anything else
-# loudly. A case "drifts" the checkout by editing those files from inside the
-# wrapped command, exactly when a real unit would have touched the repository.
+# NO REAL GIT RUNS. Each case is a bin/fake-git.sh repository with the REAL
+# .githooks/reference-transaction installed, so the net's ref journal is the
+# hook's own. A case "drifts" the checkout from inside the wrapped command,
+# exactly when a real unit would have touched the repository; a FOREIGN
+# session (another workspace's git, which neither carries the run's marker nor
+# descends from the net) is a process this harness starts before the net, and
+# the wrapped command hands it the turn and waits for it through FIFOs.
 
 set -euo pipefail
 
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_UNDER_TEST="$THIS_DIR/safe-test-run.sh"
+HOOK_SRC="$THIS_DIR/../.githooks/reference-transaction"
+FAKE_GIT="$THIS_DIR/../modules/app/agent-repl/bin/fake-git.sh"
+
+# This harness runs inside git hooks, agent sessions and other nets: no
+# caller binding may reach a fixture.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_COMMON_DIR AGENT_REPL_SAFE_TEST_RUN
 
 PASS=0
 FAIL=0
@@ -24,70 +33,84 @@ trap 'rm -rf "$TMP"' EXIT
 pass() { PASS=$((PASS + 1)); echo "ok   - $1"; }
 fail() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; [ -z "${2:-}" ] || echo "       $2"; }
 
-STUBS="$TMP/stubs"
-mkdir -p "$STUBS"
-cat >"$STUBS/git" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-S="$FAKE_GIT_STATE"
-printf '%s\n' "$*" >>"$S/calls"
-case "$*" in
-    "rev-parse --show-toplevel") printf '%s\n' "$FAKE_GIT_TOPLEVEL" ;;
-    "rev-parse HEAD") cat "$S/head" ;;
-    "rev-parse --abbrev-ref HEAD") cat "$S/branch" ;;
-    "worktree list --porcelain")
-        printf 'worktree %s\nbranch refs/heads/%s\n' "$FAKE_GIT_TOPLEVEL" "$(cat "$S/branch")"
-        [ ! -f "$S/siblings" ] || cat "$S/siblings"
-        ;;
-    "for-each-ref --format=%(refname) %(objectname) refs/heads/ refs/tags/") cat "$S/refs" ;;
-    "status --porcelain") cat "$S/status" ;;
-    "tag -d "*) grep -v "^refs/tags/$3 " "$S/refs" >"$S/refs.new" || true; mv "$S/refs.new" "$S/refs" ;;
-    "tag "*) printf 'refs/tags/%s %s\n' "$2" "$3" >>"$S/refs" ;;
-    *) echo "fake git: unexpected command: git $*" >&2; exit 99 ;;
-esac
-EOF
-chmod +x "$STUBS/git"
+# The only `git` the net, the hook, the cases and the foreign sessions reach.
+mkdir -p "$TMP/bin"
+"$FAKE_GIT" --install "$TMP/bin/git"
+export PATH="$TMP/bin:$PATH"
 
-# new_case — a fixture checkout and fresh git state, in CASE and STATE.
+# new_case — a fixture checkout with one commit and the hook installed; its top
+# in REPO, its HEAD in HEAD0, its git directory in G.
 new_case() {
-    CASE="$(mktemp -d "$TMP/case.XXXXXX")"
-    STATE="$CASE/git"
-    mkdir -p "$CASE/repo/modules/app/agent-repl/lisp" "$STATE"
-    : >"$CASE/repo/modules/app/agent-repl/lisp/test-agent-repl.el"
-    echo 1111111111111111111111111111111111111111 >"$STATE/head"
-    echo main >"$STATE/branch"
-    echo "refs/heads/main 1111111111111111111111111111111111111111" >"$STATE/refs"
-    : >"$STATE/status"
-    : >"$STATE/calls"
+    REPO="$(cd "$(mktemp -d "$TMP/case.XXXXXX")" && pwd)"
+    G="$REPO/.fakegit"
+    git -C "$REPO" init
+    mkdir -p "$REPO/modules/app/agent-repl/lisp" "$G/hooks"
+    : >"$REPO/modules/app/agent-repl/lisp/test-agent-repl.el"
+    git -C "$REPO" add -A
+    git -C "$REPO" commit -m base
+    cp "$HOOK_SRC" "$G/hooks/reference-transaction"
+    chmod +x "$G/hooks/reference-transaction"
+    HEAD0="$(git -C "$REPO" rev-parse HEAD)"
 }
 
 # run_net ARGS... — the net from inside the fixture; output in OUT, status in RC.
 run_net() {
     RC=0
-    OUT="$(cd "$CASE/repo" && PATH="$STUBS:$PATH" FAKE_GIT_STATE="$STATE" FAKE_GIT_TOPLEVEL="$CASE/repo" \
-        bash "$SCRIPT_UNDER_TEST" "$@" 2>&1)" || RC=$?
+    OUT="$(cd "$REPO" && bash "$SCRIPT_UNDER_TEST" "$@" 2>&1)" || RC=$?
 }
+
+refs() { cat "$G/refs" 2>/dev/null || true; }
+checkpoints() { refs | grep '^refs/tags/agent-repl-test-checkpoint-' || true; }
+registrations() { ls -A "$G/agent-repl-safe-test-runs" 2>/dev/null || true; }
+
+# foreign_session CMD... — another session's git, waiting for its turn: the
+# wrapped command FOREIGN_TURN writes $TMP/go, and blocks until CMD has run.
+foreign_session() {
+    rm -f "$TMP/go" "$TMP/done"
+    mkfifo "$TMP/go" "$TMP/done"
+    (read -r _ <"$TMP/go"; "$@"; echo finished >"$TMP/done") &
+    FOREIGN=$!
+}
+FOREIGN_TURN=(sh -c 'echo go >"$0"; read -r _ <"$1"' "$TMP/go" "$TMP/done")
 
 t_dashdash_without_a_command_is_refused() {
     new_case
     run_net --
-    if [ "$RC" -eq 3 ] && [[ "$OUT" == *"-- needs a command to wrap"* ]] && ! grep -q '^tag ' "$STATE/calls"; then
-        pass "-- without a command is refused before any checkpoint"
+    if [ "$RC" -eq 3 ] && [[ "$OUT" == *"-- needs a command to wrap"* ]] && [ -z "$(checkpoints)" ] && [ -z "$(registrations)" ]; then
+        pass "-- without a command is refused before any registration or checkpoint"
     else
-        fail "-- without a command is refused before any checkpoint" "rc=$RC out=$OUT"
+        fail "-- without a command is refused before any registration or checkpoint" "rc=$RC out=$OUT"
     fi
 }
 
 t_clean_wrapped_run_passes_and_removes_its_checkpoint() {
     new_case
     run_net -- true
-    if [ "$RC" -eq 0 ] && [[ "$OUT" == *"zero git-state drift"* ]] \
-        && grep -q '^tag agent-repl-test-checkpoint-' "$STATE/calls" \
-        && grep -q '^tag -d agent-repl-test-checkpoint-' "$STATE/calls" \
-        && [ "$(cat "$STATE/refs")" = "refs/heads/main 1111111111111111111111111111111111111111" ]; then
-        pass "a clean wrapped run exits 0 and removes its checkpoint"
+    if [ "$RC" -eq 0 ] && [[ "$OUT" == *"zero git-state drift"* ]] && [ -z "$(refs)" ]; then
+        pass "a clean wrapped run exits 0 and leaves no checkpoint and no canary"
     else
-        fail "a clean wrapped run exits 0 and removes its checkpoint" "rc=$RC out=$OUT calls=$(cat "$STATE/calls")"
+        fail "a clean wrapped run exits 0 and leaves no checkpoint and no canary" "rc=$RC refs=$(refs) out=$OUT"
+    fi
+}
+
+t_a_run_unregisters_itself() {
+    new_case
+    run_net -- sh -c 'git update-ref refs/heads/x HEAD'
+    if [ "$RC" -eq 2 ] && [ -d "$G/agent-repl-safe-test-runs" ] && [ -z "$(registrations)" ]; then
+        pass "a run's registration is gone once it ends, drift or not"
+    else
+        fail "a run's registration is gone once it ends, drift or not" "rc=$RC left=$(registrations)"
+    fi
+}
+
+t_the_wrapped_command_carries_the_run_marker() {
+    new_case
+    run_net -- sh -c 'printf "%s" "$AGENT_REPL_SAFE_TEST_RUN" >"$0"; ls "$1" >"$2"' "$TMP/marker" "$G/agent-repl-safe-test-runs" "$TMP/registered"
+    if [ "$RC" -eq 0 ] && [ -n "$(cat "$TMP/marker")" ] && [ "$(cat "$TMP/marker")" = "$(cat "$TMP/registered")" ] \
+        && [[ "$(cat "$TMP/marker")" == *-[0-9]* ]]; then
+        pass "the wrapped command carries the marker naming its run's registration, which ends in a pid"
+    else
+        fail "the wrapped command carries the marker naming its run's registration, which ends in a pid" "marker=$(cat "$TMP/marker") registered=$(cat "$TMP/registered")"
     fi
 }
 
@@ -104,19 +127,18 @@ t_wrapped_exit_status_passes_through() {
 
 t_wrapped_arguments_arrive_intact() {
     new_case
-    run_net -- sh -c 'printf "%s|" "$@" >"$0"' "$CASE/args" "a b" c
-    if [ "$RC" -eq 0 ] && [ "$(cat "$CASE/args")" = "a b|c|" ]; then
+    run_net -- sh -c 'printf "%s|" "$@" >"$0"' "$TMP/args" "a b" c
+    if [ "$RC" -eq 0 ] && [ "$(cat "$TMP/args")" = "a b|c|" ]; then
         pass "the wrapped command's arguments arrive intact"
     else
-        fail "the wrapped command's arguments arrive intact" "rc=$RC out=$OUT args=$(cat "$CASE/args" 2>/dev/null)"
+        fail "the wrapped command's arguments arrive intact" "rc=$RC out=$OUT args=$(cat "$TMP/args" 2>/dev/null)"
     fi
 }
 
 t_head_moved_by_the_command_is_drift() {
     new_case
-    run_net -- sh -c 'echo 2222222222222222222222222222222222222222 >"$0"' "$STATE/head"
-    if [ "$RC" -eq 2 ] && [[ "$OUT" == *"HEAD changed: 1111111111111111111111111111111111111111 -> 2222222222222222222222222222222222222222"* ]] \
-        && grep -q '^refs/tags/agent-repl-test-checkpoint-' "$STATE/refs"; then
+    run_net -- sh -c 'echo y >moved && git add -A && git commit -m moved'
+    if [ "$RC" -eq 2 ] && [[ "$OUT" == *"HEAD changed: $HEAD0 -> "* ]] && [ -n "$(checkpoints)" ]; then
         pass "a HEAD the command moved is drift, and the checkpoint stays"
     else
         fail "a HEAD the command moved is drift, and the checkpoint stays" "rc=$RC out=$OUT"
@@ -125,7 +147,7 @@ t_head_moved_by_the_command_is_drift() {
 
 t_status_dirtied_by_the_command_is_drift() {
     new_case
-    run_net -- sh -c 'echo " M lisp/core.el" >"$0"' "$STATE/status"
+    run_net -- sh -c 'echo dirty >"$0"' "$REPO/modules/app/agent-repl/lisp/test-agent-repl.el"
     if [ "$RC" -eq 2 ] && [[ "$OUT" == *"Working tree status changed"* ]]; then
         pass "a working tree the command dirtied is drift"
     else
@@ -135,7 +157,7 @@ t_status_dirtied_by_the_command_is_drift() {
 
 t_failure_outranks_drift() {
     new_case
-    run_net -- sh -c 'echo " M x" >"$0"; exit 7' "$STATE/status"
+    run_net -- sh -c 'echo dirty >"$0"; exit 7' "$REPO/modules/app/agent-repl/lisp/test-agent-repl.el"
     if [ "$RC" -eq 7 ] && [[ "$OUT" == *"DRIFT DETECTED"* ]]; then
         pass "a failing command that also drifted exits with its own status and reports the drift"
     else
@@ -143,74 +165,156 @@ t_failure_outranks_drift() {
     fi
 }
 
-# sibling_rebasing NAME — a sibling worktree whose rebase of refs/heads/NAME is
-# in progress, so it stands on a detached HEAD; its porcelain lines go into
-# NEXT, which the wrapped command installs as the sibling list mid-run.
-sibling_rebasing() {
-    local wt="$CASE/$1" gitdir="$CASE/gitdirs/$1"
-    mkdir -p "$wt" "$gitdir/rebase-merge"
-    printf 'gitdir: %s\n' "$gitdir" >"$wt/.git"
-    printf 'refs/heads/%s\n' "$1" >"$gitdir/rebase-merge/head-name"
-    printf '\nworktree %s\nHEAD 3333333333333333333333333333333333333333\ndetached\n' "$wt"
-}
-
-# sibling_on NAME — a sibling worktree with refs/heads/NAME checked out.
-sibling_on() {
-    mkdir -p "$CASE/$1"
-    printf '\nworktree %s\nHEAD 3333333333333333333333333333333333333333\nbranch refs/heads/%s\n' "$CASE/$1" "$1"
-}
-
-t_a_sibling_starting_a_rebase_is_not_drift() {
+t_a_ref_the_run_creates_is_drift() {
     new_case
-    echo "refs/heads/sib 4444444444444444444444444444444444444444" >>"$STATE/refs"
-    sibling_on sib >"$STATE/siblings"
-    sibling_rebasing sib >"$CASE/next"
-    run_net -- sh -c 'cp "$0" "$1"; sed -i.bak "s/^refs\/heads\/sib .*/refs\/heads\/sib 5555555555555555555555555555555555555555/" "$2"' \
-        "$CASE/next" "$STATE/siblings" "$STATE/refs"
-    if [ "$RC" -eq 0 ] && [[ "$OUT" == *"zero git-state drift"* ]]; then
-        pass "a sibling worktree that starts a rebase mid-run is not drift"
+    run_net -- git update-ref refs/heads/leaked "$HEAD0"
+    if [ "$RC" -eq 2 ] && [[ "$OUT" == *"0000000000000000000000000000000000000000 $HEAD0 refs/heads/leaked pid="*" by=marker cwd=$REPO"* ]] \
+        && [[ "$OUT" == *"git update-ref -d refs/heads/leaked"* ]] && [ -n "$(checkpoints)" ]; then
+        pass "a branch the run's own git creates is drift, with the command that deletes it"
     else
-        fail "a sibling worktree that starts a rebase mid-run is not drift" "rc=$RC out=$OUT"
+        fail "a branch the run's own git creates is drift, with the command that deletes it" "rc=$RC out=$OUT"
     fi
 }
 
-t_a_sibling_finishing_a_rebase_is_not_drift() {
+t_a_ref_the_run_deletes_is_drift() {
     new_case
-    echo "refs/heads/sib 4444444444444444444444444444444444444444" >>"$STATE/refs"
-    sibling_rebasing sib >"$STATE/siblings"
-    sibling_on sib >"$CASE/next"
-    run_net -- sh -c 'cp "$0" "$1"; sed -i.bak "s/^refs\/heads\/sib .*/refs\/heads\/sib 5555555555555555555555555555555555555555/" "$2"' \
-        "$CASE/next" "$STATE/siblings" "$STATE/refs"
-    if [ "$RC" -eq 0 ] && [[ "$OUT" == *"zero git-state drift"* ]]; then
-        pass "a sibling worktree that finishes a rebase mid-run is not drift"
+    git -C "$REPO" update-ref refs/heads/kept "$HEAD0"
+    run_net -- git update-ref -d refs/heads/kept
+    if [ "$RC" -eq 2 ] && [[ "$OUT" == *"$HEAD0 0000000000000000000000000000000000000000 refs/heads/kept"* ]] \
+        && [[ "$OUT" == *"git update-ref refs/heads/kept $HEAD0"* ]]; then
+        pass "a branch the run's own git deletes is drift, with the command that restores it"
     else
-        fail "a sibling worktree that finishes a rebase mid-run is not drift" "rc=$RC out=$OUT"
+        fail "a branch the run's own git deletes is drift, with the command that restores it" "rc=$RC out=$OUT"
     fi
 }
 
-t_a_detached_sibling_with_no_rebase_owns_nothing() {
+t_a_ref_moved_by_a_scrubbed_environment_is_drift() {
+    # A unit that builds its git's environment from scratch drops the marker,
+    # but its git still descends from the net.
     new_case
-    echo "refs/heads/loose 4444444444444444444444444444444444444444" >>"$STATE/refs"
-    mkdir -p "$CASE/idle"
-    printf '\nworktree %s\nHEAD 3333333333333333333333333333333333333333\ndetached\n' "$CASE/idle" >"$STATE/siblings"
-    run_net -- sh -c 'sed -i.bak "s/^refs\/heads\/loose .*/refs\/heads\/loose 5555555555555555555555555555555555555555/" "$0"' "$STATE/refs"
-    if [ "$RC" -eq 2 ] && [[ "$OUT" == *"refs/heads/loose"* ]]; then
-        pass "a detached sibling with no rebase in progress vouches for no branch"
+    run_net -- env -u AGENT_REPL_SAFE_TEST_RUN git tag leaked "$HEAD0"
+    if [ "$RC" -eq 2 ] && [[ "$OUT" == *"refs/tags/leaked pid="*" by=ancestry "* ]]; then
+        pass "a ref moved by the run's git without the marker is still drift, by ancestry"
     else
-        fail "a detached sibling with no rebase in progress vouches for no branch" "rc=$RC out=$OUT"
+        fail "a ref moved by the run's git without the marker is still drift, by ancestry" "rc=$RC out=$OUT"
+    fi
+}
+
+t_a_ref_the_run_sets_to_its_own_value_is_not_drift() {
+    new_case
+    git -C "$REPO" update-ref refs/heads/kept "$HEAD0"
+    run_net -- git update-ref refs/heads/kept "$HEAD0"
+    if [ "$RC" -eq 0 ] && [[ "$OUT" == *"zero git-state drift"* ]]; then
+        pass "a ref the run's git sets to the value it already held is not drift"
+    else
+        fail "a ref the run's git sets to the value it already held is not drift" "rc=$RC out=$OUT"
+    fi
+}
+
+# 2026-10-13, shape 1: a branch no worktree owned before the run was checked
+# out by a sibling workspace, which committed on it mid-run.
+t_a_branch_another_session_moves_mid_run_is_not_drift() {
+    local next
+    new_case
+    git -C "$REPO" update-ref refs/heads/hidden-pages-pause-animations "$HEAD0"
+    echo z >"$REPO/sibling-file" && git -C "$REPO" add -A && git -C "$REPO" commit -m sibling
+    next="$(git -C "$REPO" rev-parse HEAD)"
+    git -C "$REPO" revert --no-edit HEAD
+    foreign_session git -C "$REPO" update-ref refs/heads/hidden-pages-pause-animations "$next"
+    run_net -- "${FOREIGN_TURN[@]}"
+    wait "$FOREIGN"
+    if [ "$RC" -eq 0 ] && [[ "$OUT" == *"zero git-state drift"* ]] \
+        && grep -q "^refs/heads/hidden-pages-pause-animations $next\$" "$G/refs"; then
+        pass "a branch another session moves mid-run is not drift"
+    else
+        fail "a branch another session moves mid-run is not drift" "rc=$RC refs=$(refs) out=$OUT"
+    fi
+}
+
+# 2026-10-13, shape 2: another session created a branch no worktree owns.
+t_a_branch_another_session_creates_mid_run_is_not_drift() {
+    new_case
+    foreign_session git -C "$REPO" update-ref refs/heads/main-watch-latch "$HEAD0"
+    run_net -- "${FOREIGN_TURN[@]}"
+    wait "$FOREIGN"
+    if [ "$RC" -eq 0 ] && [[ "$OUT" == *"zero git-state drift"* ]] \
+        && grep -q "^refs/heads/main-watch-latch $HEAD0\$" "$G/refs"; then
+        pass "a branch another session creates mid-run is not drift"
+    else
+        fail "a branch another session creates mid-run is not drift" "rc=$RC refs=$(refs) out=$OUT"
+    fi
+}
+
+t_another_sessions_move_does_not_hide_the_runs_own() {
+    new_case
+    foreign_session git -C "$REPO" update-ref refs/heads/main-watch-latch "$HEAD0"
+    run_net -- sh -c '"$@"; git update-ref refs/heads/leaked HEAD' sh "${FOREIGN_TURN[@]}"
+    wait "$FOREIGN"
+    if [ "$RC" -eq 2 ] && [[ "$OUT" == *"refs/heads/leaked"* ]] && [[ "$OUT" != *"main-watch-latch"* ]]; then
+        pass "alongside another session's move, the run's own move is drift and only it is reported"
+    else
+        fail "alongside another session's move, the run's own move is drift and only it is reported" "rc=$RC out=$OUT"
+    fi
+}
+
+t_a_missing_hook_is_an_environment_error() {
+    new_case
+    rm "$G/hooks/reference-transaction"
+    run_net -- true
+    if [ "$RC" -eq 3 ] && [[ "$OUT" == *"the reference-transaction hook did not journal this run's canary ref"* ]] \
+        && [[ "$OUT" == *"reference-transaction-hook"* ]] && [ -z "$(refs)" ] && [ -z "$(registrations)" ]; then
+        pass "with no hook journaling, the net refuses to run, leaving no canary, checkpoint or registration"
+    else
+        fail "with no hook journaling, the net refuses to run, leaving no canary, checkpoint or registration" "rc=$RC refs=$(refs) out=$OUT"
+    fi
+}
+
+t_a_gone_runs_registration_is_pruned() {
+    local gone
+    new_case
+    sh -c 'exit 0' &
+    gone=$!
+    wait "$gone"
+    mkdir -p "$G/agent-repl-safe-test-runs/20261013-000000-$gone"
+    run_net -- true
+    if [ "$RC" -eq 0 ] && [[ "$OUT" == *"Removed the registration of a run that is gone: "*"20261013-000000-$gone (root pid $gone)"* ]] \
+        && [ -z "$(registrations)" ]; then
+        pass "the registration a killed run left behind is removed and reported"
+    else
+        fail "the registration a killed run left behind is removed and reported" "rc=$RC left=$(registrations) out=$OUT"
+    fi
+}
+
+t_a_live_runs_registration_is_kept() {
+    new_case
+    mkdir -p "$G/agent-repl-safe-test-runs/20261013-000000-$$"
+    run_net -- true
+    if [ "$RC" -eq 0 ] && [ "$(registrations)" = "20261013-000000-$$" ]; then
+        pass "a concurrent live run's registration is never pruned"
+    else
+        fail "a concurrent live run's registration is never pruned" "rc=$RC left=$(registrations) out=$OUT"
     fi
 }
 
 t_dashdash_without_a_command_is_refused
-t_a_sibling_starting_a_rebase_is_not_drift
-t_a_sibling_finishing_a_rebase_is_not_drift
-t_a_detached_sibling_with_no_rebase_owns_nothing
 t_clean_wrapped_run_passes_and_removes_its_checkpoint
+t_a_run_unregisters_itself
+t_the_wrapped_command_carries_the_run_marker
 t_wrapped_exit_status_passes_through
 t_wrapped_arguments_arrive_intact
 t_head_moved_by_the_command_is_drift
 t_status_dirtied_by_the_command_is_drift
 t_failure_outranks_drift
+t_a_ref_the_run_creates_is_drift
+t_a_ref_the_run_deletes_is_drift
+t_a_ref_moved_by_a_scrubbed_environment_is_drift
+t_a_ref_the_run_sets_to_its_own_value_is_not_drift
+t_a_branch_another_session_moves_mid_run_is_not_drift
+t_a_branch_another_session_creates_mid_run_is_not_drift
+t_another_sessions_move_does_not_hide_the_runs_own
+t_a_missing_hook_is_an_environment_error
+t_a_gone_runs_registration_is_pruned
+t_a_live_runs_registration_is_kept
 
 echo "-----"
 echo "passed: $PASS  failed: $FAIL"
