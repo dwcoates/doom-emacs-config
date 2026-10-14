@@ -120,10 +120,10 @@ func (m Members) member(p Proc, session bool) bool {
 // than let anything be detached under it.
 //
 // MEASURED (2026-10-14, load 6): 147 members of a forking loop all exited
-// 2.4ms after their kill, one harness leftover 142us after. Like ListBound,
-// the bound covers members at the run's nice 19 waiting for a CPU on a loaded
-// host, whose slowest healthy wait the runs record is 471ms
-// (ramdisk.InfoBound): just over twice that. Every reap logs its exit time,
+// 2.4ms after their kill, one harness leftover 142us after. The bound covers
+// members at the run's nice 19 waiting for a CPU on a loaded host, whose
+// slowest healthy wait the runs record is 471ms (ramdisk.InfoBound): just
+// over twice that. Every reap logs its exit time,
 // so the bound can be set again from the runs.
 const KillExitBound = 1000 * time.Millisecond
 
