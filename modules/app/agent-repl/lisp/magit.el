@@ -35,12 +35,14 @@
 ;; order config.el establishes and resolve each other's calls at call time,
 ;; so the declarations below exist for the byte-compiler alone.
 (declare-function agent-repl--close-buffer-window "panels")
+(declare-function agent-repl--error "core")
 (declare-function agent-repl--gh-string-quiet "core")
 (declare-function agent-repl--git-string "core")
 (declare-function agent-repl--git-string-quiet "core")
 (declare-function agent-repl--hide-panels "panels")
 (declare-function agent-repl--log "core")
 (declare-function agent-repl--log-verbose "core")
+(declare-function agent-repl--main-worktree-for-dir "workspace")
 (declare-function agent-repl--panels-visible-p "panels")
 (declare-function agent-repl--ws-current-name "workspace")
 (declare-function agent-repl--ws-dir "status")
@@ -440,9 +442,16 @@ wants anyway."
       (agent-repl--log ws "magit-status-same-window: ws=%s branch=opened dir=%s selected-window=%S"
                         ws dir (selected-window)))))
 
-(defun agent-repl-magit-status-workspace ()
-  "Open magit-status for the workspace in the SELECTED window.
-Always replaces the current buffer with the workspace's magit-status
+(defun agent-repl--magit-status-workspace-open (target-fn)
+  "Open magit-status for the workspace in the SELECTED window, at TARGET-FN's dir.
+The shared body of `agent-repl-magit-status-workspace' (`SPC g g') and
+`agent-repl-magit-status-main-worktree' (`SPC g G').  TARGET-FN is
+called with the workspace name and the workspace's directory and
+returns the directory magit opens; it may signal to refuse, and it runs
+before anything in the frame or the workspace state is touched, so a
+refusal leaves both exactly as they were.
+
+Always replaces the current buffer with the target's magit-status
 — no splits, no window reuse — regardless of the prior layout or
 agent-repl panel state.  Forces same-window display by let-binding
 `magit-display-buffer-function' for this call only, so other magit
@@ -452,26 +461,20 @@ If the selected window is a side window, first pops to the frame's
 main window so magit replaces the main buffer rather than failing on
 the dedicated side window.
 
-When the current workspace is tracked by agent-repl, uses the
-workspace's `:project-dir' and clears any saved `:fullscreen-config'
-(the saved pre-panel layout is moot once magit replaces the current
-window).  When the workspace is NOT tracked by agent-repl (e.g.,
+When the current workspace is tracked by agent-repl, the workspace's
+directory is its `:project-dir' and any saved `:fullscreen-config' is
+cleared (the saved pre-panel layout is moot once magit replaces the
+current window).  When the workspace is NOT tracked by agent-repl (e.g.,
 the main \"doom\" workspace, or a workspace whose entry has been
-killed), falls back to `default-directory' so magit still opens and
-skips the `:fullscreen-config' write to avoid creating a stub entry
-(see `agent-repl--ws-put' STUB-CREATE warning).
+killed), the workspace's directory is `default-directory' so magit
+still opens, and the `:fullscreen-config' write is skipped to avoid
+creating a stub entry (see `agent-repl--ws-put' STUB-CREATE warning).
 
 When the Claude panels are visible (they always fill the frame —
 fullscreen is the sole display format), closes the input window and
 un-dedicates the webview window before opening magit so that
 `display-buffer-same-window' can replace the webview window cleanly
 instead of splitting it."
-  (interactive)
-  (let ((ws (agent-repl--ws-current-name)))
-    (when (window-parameter (selected-window) 'window-side)
-      (agent-repl--log ws "magit-status-workspace: ws=%s branch=side-window selected=%S main=%S"
-                        ws (selected-window) (window-main-window))
-      (select-window (window-main-window)))
   (let* ((ws (agent-repl--ws-current-name))
          (tracked-error nil)
          (tracked-dir (condition-case err
@@ -479,10 +482,14 @@ instead of splitting it."
                         (error
                          (setq tracked-error err)
                          nil)))
-         (dir (or tracked-dir default-directory)))
-    (when (fboundp 'agent-repl--log)
-      (agent-repl--log ws "magit-status-workspace: same-window dir=%s tracked=%s tracked-error=%S selected-window=%S"
-                        dir (if tracked-dir "yes" "no") tracked-error (selected-window)))
+         (ws-dir (or tracked-dir default-directory))
+         (dir (funcall target-fn ws ws-dir)))
+    (when (window-parameter (selected-window) 'window-side)
+      (agent-repl--log ws "magit-status-workspace: ws=%s branch=side-window selected=%S main=%S"
+                        ws (selected-window) (window-main-window))
+      (select-window (window-main-window)))
+    (agent-repl--log ws "magit-status-workspace: same-window ws-dir=%s dir=%s tracked=%s tracked-error=%S selected-window=%S"
+                      ws-dir dir (if tracked-dir "yes" "no") tracked-error (selected-window))
     (when tracked-dir
       ;; When the panels are visible, close the input window and un-dedicate
       ;; the webview window so magit can replace the webview window via
@@ -508,7 +515,34 @@ instead of splitting it."
       (agent-repl--ws-put ws :fullscreen-config nil))
     (agent-repl--magit-status-same-window dir)
     (agent-repl--log ws "magit-status-workspace: ws=%s branch=complete dir=%s tracked=%s"
-                      ws dir (if tracked-dir "yes" "no")))))
+                      ws dir (if tracked-dir "yes" "no"))))
+
+(defun agent-repl-magit-status-workspace ()
+  "Open magit-status for the workspace's own worktree in the SELECTED window.
+See `agent-repl--magit-status-workspace-open' for the window and panel
+handling."
+  (interactive)
+  (agent-repl--magit-status-workspace-open (lambda (_ws ws-dir) ws-dir)))
+
+(defun agent-repl--magit-main-worktree-target (ws ws-dir)
+  "Return the main worktree of the repository holding WS-DIR, for WS.
+Refuses with a `user-error' when WS-DIR is in no git repository, after
+recording the failure through `agent-repl--error'."
+  (or (agent-repl--main-worktree-for-dir ws-dir)
+      (progn
+        (agent-repl--error ws "magit-status-main-worktree: ws=%s ws-dir=%s cause=not-a-git-repository"
+                           ws ws-dir)
+        (user-error "agent-repl: %s is in no git repository" ws-dir))))
+
+(defun agent-repl-magit-status-main-worktree ()
+  "Open magit-status for the repository's MAIN worktree in the SELECTED window.
+Like `agent-repl-magit-status-workspace' (`SPC g g'), but opens the main
+checkout of the repository the workspace's worktree belongs to rather
+than the workspace's own worktree.  See
+`agent-repl--magit-status-workspace-open' for the window and panel
+handling."
+  (interactive)
+  (agent-repl--magit-status-workspace-open #'agent-repl--magit-main-worktree-target))
 
 ;;;; --- Hide Claude panels before magit-status RET actions -----------------
 
@@ -553,9 +587,9 @@ transitions `:repl-state' to :inactive)."
 ;;;; --- Keybindings --------------------------------------------------------
 
 (map! :leader
-      :desc "Magit status for workspace" "g g" #'agent-repl-magit-status-workspace
-      :desc "Magit status"               "g G" #'magit-status
-      :desc "Open commit in GitHub"      "g O" #'agent-repl-magit-open-commit-in-github)
+      :desc "Magit status for workspace"     "g g" #'agent-repl-magit-status-workspace
+      :desc "Magit status for main worktree" "g G" #'agent-repl-magit-status-main-worktree
+      :desc "Open commit in GitHub"          "g O" #'agent-repl-magit-open-commit-in-github)
 
 (map! :leader
       (:prefix "j"
