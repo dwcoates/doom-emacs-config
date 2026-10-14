@@ -23,7 +23,7 @@ import {
   toggleRowMenu,
 } from "../../src/sidebar/row.js";
 import { REVEAL_MARGIN_PX } from "../../src/topbar/clamp.js";
-import { NO_MARKERS, ROSTER_ARM_CLASS, ROSTER_STATUS_CASES } from "../../src/sidebar/tones.js";
+import { GLYPH_IMAGES, NO_MARKERS, ROSTER_ARM_CLASS, ROSTER_STATUS_CASES } from "../../src/sidebar/tones.js";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import {
   NOW,
@@ -38,6 +38,13 @@ import {
 import { createSidebarView } from "../../src/sidebar/view.js";
 import stylesheet from "../../src/styles.css?raw";
 import { cascadedValue, inRail, rulesOf } from "../stylesheet.js";
+
+/** The markup the DOM holds once glyph NAME's shared picture is drawn into a mark. */
+function drawnPicture(name: string): string {
+  const host = document.createElement("span");
+  host.innerHTML = GLYPH_IMAGES[name] ?? "";
+  return host.innerHTML;
+}
 
 const SELECT_OK = create(SelectWorkspaceResponseSchema, {
   result: { case: "success", value: {} },
@@ -114,10 +121,10 @@ describe("the status mark", () => {
     "draws %s as the one merge glyph in a glyph box",
     (arm) => {
       const mark = drawStatusMark(arm, "R.status", NO_MARKERS);
-      expect([mark.getAttribute("data-glyph"), mark.classList.contains("st-glyph"), mark.textContent]).toEqual([
+      expect([mark.getAttribute("data-glyph"), mark.classList.contains("st-glyph"), mark.innerHTML]).toEqual([
         "merge",
         true,
-        "",
+        drawnPicture("merge"),
       ]);
     },
   );
@@ -148,10 +155,10 @@ describe("the status mark", () => {
 
   it("draws a still snowflake for a cold gate", () => {
     const mark = drawStatusMark("coldGate", "R.status", NO_MARKERS);
-    expect([mark.textContent, mark.classList.contains("breathes")]).toEqual(["\u2744\uFE0F", false]);
+    expect([mark.innerHTML, mark.classList.contains("breathes")]).toEqual([drawnPicture("snowflake"), false]);
   });
 
-  it("draws no character for a workspace with no session", () => {
+  it("draws no picture for a workspace with no session", () => {
     expect(drawStatusMark("none", "R.status", NO_MARKERS).textContent).toBe("");
   });
 
@@ -1599,9 +1606,9 @@ describe("a merge that landed today", () => {
 describe("the one-shot mark", () => {
   it.each(["submitting", "thinking", "clearing"] as const)("draws a breathing target in place of the %s mark", (arm) => {
     const drawn = drawRosterRow(row({ id: "ws-1", status: { case: arm, value: {} }, oneShot: true }), sidebarContext(), "R");
-    expect([dotOf(drawn).getAttribute("data-glyph"), dotOf(drawn).textContent, dotOf(drawn).classList.contains("breathes")]).toEqual([
+    expect([dotOf(drawn).getAttribute("data-glyph"), dotOf(drawn).innerHTML, dotOf(drawn).classList.contains("breathes")]).toEqual([
       "target",
-      "🎯",
+      drawnPicture("target"),
       true,
     ]);
   });
