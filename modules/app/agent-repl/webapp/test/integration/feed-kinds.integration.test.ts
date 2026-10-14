@@ -1450,7 +1450,7 @@ describe("an open question", () => {
     );
     expect(requests).toHaveLength(1);
     expect(requests[0].edit).toMatchObject({
-      case: "resolving",
+      case: "pick",
       value: { questionText: QUESTION_ONE.text, label: QUESTION_ONE.options[1] },
     });
   });
