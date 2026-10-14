@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/roster"
 )
 
@@ -25,7 +24,7 @@ func e2eUnits(l Layout, s roster.Suite) (Units, error) {
 
 func e2eUnitsForPackages(l Layout, s roster.Suite, dir string, pkgs []string) (Units, error) {
 	work := filepath.Join(l.Work, "e2e")
-	u := Units{Atomic: []run.Spec{goVet(s.Name, dir)}}
+	u := Units{Atomic: goVets(s, dir)}
 	for i, rel := range pkgs {
 		p := goPkg{Suite: s.Name, Module: dir, Rel: rel, Parallel: s.TestParallel[rel], Bin: filepath.Join(work, fmt.Sprintf("%03d.test", i))}
 		if rel == "." {

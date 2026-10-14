@@ -964,6 +964,68 @@ func TestEveryGoModuleKindIsVetted(t *testing.T) {
 	}
 }
 
+func TestGoVetTaggedRunsTheSameAnalyzersUnderItsTag(t *testing.T) {
+	// Act
+	v := goVetTagged("m", "/mod", "perf", "./...")
+
+	// Assert
+	want := []string{"go", "vet", "-tags", "perf", "-atomic", "-bool", "-buildtags", "-directive", "-errorsas",
+		"-ifaceassert", "-nilfunc", "-printf", "-stringintconv", "-tests", "./..."}
+	if v.ID != "m:vet[perf]" || v.Suite != "m" || v.Dir != "/mod" || !reflect.DeepEqual(v.Argv, want) {
+		t.Fatalf("goVetTagged = %+v", v)
+	}
+}
+
+func TestEveryVetTagGetsItsOwnVetUnit(t *testing.T) {
+	build := map[string]func(Layout, roster.Suite, string, []string) (Units, error){
+		"go module": goModuleUnitsForPackages,
+		"e2e":       e2eUnitsForPackages,
+	}
+	for kind, units := range build {
+		t.Run(kind, func(t *testing.T) {
+			// Arrange
+			module := goPackageFixture(t, "func TestA(t *testing.T) {}\n")
+			l := Layout{Module: module, Work: t.TempDir()}
+
+			// Act
+			u, err := units(l, roster.Suite{Name: "m", VetTags: []string{"perf", "realtest"}}, module, []string{"p"})
+
+			// Assert
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			for _, a := range u.Atomic {
+				if strings.HasPrefix(a.ID, "m:vet") {
+					got = append(got, a.ID)
+				}
+			}
+			if want := []string{"m:vet", "m:vet[perf]", "m:vet[realtest]"}; !reflect.DeepEqual(got, want) {
+				t.Fatalf("vet units = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+func TestTheIntegrationVetSharesGoVetTagged(t *testing.T) {
+	// Arrange
+	module := goPackageFixture(t, "func TestA(t *testing.T) {}\n")
+	l := Layout{Module: module, Work: t.TempDir()}
+	s := roster.Suite{Name: "m", IntegrationTags: "integration", IntegrationPackages: "./p"}
+
+	// Act
+	u, err := goIntegrationUnitsForPackages(l, s, module, []string{"p"})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := goVetTagged("m", module, "integration", "./p")
+	if len(u.Atomic) == 0 || !reflect.DeepEqual(u.Atomic[0].Argv, want.Argv) || u.Atomic[0].ID != want.ID {
+		t.Fatalf("integration vet = %+v, want %+v", u.Atomic, want)
+	}
+}
+
 func TestGoVetRunsTheAnalyzersGoTestRuns(t *testing.T) {
 	// Act
 	v := goVet("m", "/mod")

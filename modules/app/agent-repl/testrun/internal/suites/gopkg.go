@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"agentrepl/testrun/internal/run"
+	"agentrepl/testrun/roster"
 	"agentrepl/testrun/testenv"
 )
 
@@ -39,6 +40,23 @@ var goTestVetFlags = []string{
 // binaries never run.
 func goVet(suite, dir string) run.Spec {
 	return spec(suite+":vet", suite, dir, append(append([]string{"go", "vet"}, goTestVetFlags...), "./..."))
+}
+
+// goVetTagged is a vet unit over pattern under one build tag, exactly the
+// analyzers goVet runs.
+func goVetTagged(suite, dir, tag, pattern string) run.Spec {
+	return spec(suite+":vet["+tag+"]", suite, dir,
+		append(append([]string{"go", "vet", "-tags", tag}, goTestVetFlags...), pattern))
+}
+
+// goVets is a Go suite's vet units: the module's own, and one per VetTags tag
+// over the whole module.
+func goVets(s roster.Suite, dir string) []run.Spec {
+	vets := []run.Spec{goVet(s.Name, dir)}
+	for _, tag := range s.VetTags {
+		vets = append(vets, goVetTagged(s.Name, dir, tag, "./..."))
+	}
+	return vets
 }
 
 // goPkg is one Go package's units.

@@ -100,8 +100,7 @@ func goModuleUnits(l Layout, s roster.Suite) (Units, error) {
 // coverage; that question is the ordinary pass's.
 func goIntegrationUnitsForPackages(l Layout, s roster.Suite, dir string, pkgs []string) (Units, error) {
 	tag := s.IntegrationTags
-	vet := spec(s.Name+":vet["+tag+"]", s.Name, dir,
-		append(append([]string{"go", "vet", "-tags", tag}, goTestVetFlags...), s.IntegrationPackages))
+	vet := goVetTagged(s.Name, dir, tag, s.IntegrationPackages)
 	u := Units{Atomic: []run.Spec{vet}}
 	prebuildConfigured := false
 	for i, rel := range pkgs {
@@ -133,7 +132,7 @@ func goIntegrationUnitsForPackages(l Layout, s roster.Suite, dir string, pkgs []
 
 func goModuleUnitsForPackages(l Layout, s roster.Suite, dir string, pkgs []string) (Units, error) {
 	covRoot := filepath.Join(l.Work, "cover", s.Name)
-	u := Units{Atomic: []run.Spec{goVet(s.Name, dir)}}
+	u := Units{Atomic: goVets(s, dir)}
 	var reportDeps []string
 	hasTests := false
 	prebuildConfigured := false
