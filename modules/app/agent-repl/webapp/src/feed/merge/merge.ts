@@ -63,10 +63,15 @@ export function drawFeedMerge(msg: FeedMerge, rc: RowContext): HTMLElement {
   el.className = "merge-head";
   el.append(drawFeedMergeHead(head));
   // A DETACHED MERGE'S BUBBLE CARRIES ITS SWITCH for its whole life: queued,
-  // running and settled alike (workspace-switch.ts).
-  if (head.workspaceSwitch !== undefined) {
+  // running and settled alike (workspace-switch.ts). Only the async mode has
+  // one; a head with no mode was recorded before heads carried theirs.
+  const mode = head.mode?.mode;
+  if (mode?.case === "async" && mode.value.workspaceSwitch !== undefined) {
     el.append(
-      drawMergeWorkspaceSwitch(switchFacts(head.workspaceSwitch, `${PATH}.head.workspace_switch`), rc),
+      drawMergeWorkspaceSwitch(
+        switchFacts(mode.value.workspaceSwitch, `${PATH}.head.mode.async.workspace_switch`),
+        rc,
+      ),
     );
   }
 

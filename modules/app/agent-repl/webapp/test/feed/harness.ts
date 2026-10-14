@@ -62,7 +62,9 @@ import {
   FeedAgentPromptSchema,
   FeedBreadcrumbsSchema,
   FeedIdSchema,
+  FeedMergeErrorSchema,
   FeedMergeSchema,
+  FeedMergeSuccessSchema,
   FeedPageSchema,
   FeedRowSchema,
   FeedSelectionSchema,
@@ -637,12 +639,13 @@ export function subagentRow(
   });
 }
 
-/** A merge bubble row, its fold decided BY the daemon unless said. */
+/** A SYNC merge bubble row, its fold decided BY the daemon unless said. */
 export function mergeRow(
   id: string,
   folded = true,
   label = "branch → master",
   by: "daemon" | "reader" = "daemon",
+  mode: "sync" | "async" = "sync",
 ): FeedRow {
   return create(FeedRowSchema, {
     id: feedId(id),
@@ -658,6 +661,7 @@ export function mergeRow(
               label: { text: label },
               runtime: { startedAtMs: 0n },
               fold: { folded, decidedBy: { case: by, value: {} } },
+              mode: { mode: { case: mode, value: {} } },
             },
             result: { case: "update", value: {} },
           }),
@@ -665,6 +669,35 @@ export function mergeRow(
       },
     },
   });
+}
+
+/**
+ * An ASYNC merge bubble row in RESULT's state, its fold as the daemon ships
+ * an async merge's (folded) unless said.
+ */
+export function asyncMergeRow(
+  id: string,
+  result: "update" | "success" | "failed" = "update",
+  folded = true,
+  by: "daemon" | "reader" = "daemon",
+): FeedRow {
+  const row = mergeRow(id, folded, "branch → master", by, "async");
+  if (row.row.case !== "activity" || row.row.value.unit.case !== "merge") throw new Error("not a merge row");
+  const merge = row.row.value.unit.value;
+  switch (result) {
+    case "update":
+      break;
+    case "success":
+      merge.result = { case: "success", value: create(FeedMergeSuccessSchema, { endedAtMs: 1n, commit: "a1b2c3d" }) };
+      break;
+    case "failed":
+      merge.result = {
+        case: "error",
+        value: create(FeedMergeErrorSchema, { endedAtMs: 1n, reason: { case: "failed", value: { summary: "tests never passed" } } }),
+      };
+      break;
+  }
+  return row;
 }
 
 /** A merge-tab row: only ever a top-level row of a merge bubble's own feed. */

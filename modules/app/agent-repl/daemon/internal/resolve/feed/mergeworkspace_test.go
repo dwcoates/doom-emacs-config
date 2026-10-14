@@ -17,15 +17,18 @@ import (
 // theMergeWorkspace is the merge workspace the switches below name.
 const theMergeWorkspace = ids.WorkspaceID("ws-merge")
 
-// switchingHeadRow is a merge head carrying an available switch to TARGET.
+// switchingHeadRow is an async merge head carrying an available switch to
+// TARGET.
 func switchingHeadRow(target ids.WorkspaceID) *frontendv1.FeedRow {
 	row := mergeHeadRow("feature → master")
-	row.GetActivity().GetMerge().GetHead().WorkspaceSwitch = &frontendv1.FeedMergeWorkspaceSwitch{
-		Label: &frontendv1.FeedMergeWorkspaceSwitchLabel{Text: "open merge workspace"},
-		Availability: &frontendv1.FeedMergeWorkspaceSwitch_Available{Available: &frontendv1.FeedMergeWorkspaceSwitchAvailable{
-			Target: &workspacev1.WorkspaceRef{Id: string(target), Dir: "/tmp/ws-merge"},
-		}},
-	}
+	row.GetActivity().GetMerge().GetHead().Mode = &frontendv1.FeedMergeMode{Mode: &frontendv1.FeedMergeMode_Async{Async: &frontendv1.FeedMergeModeAsync{
+		WorkspaceSwitch: &frontendv1.FeedMergeWorkspaceSwitch{
+			Label: &frontendv1.FeedMergeWorkspaceSwitchLabel{Text: "open merge workspace"},
+			Availability: &frontendv1.FeedMergeWorkspaceSwitch_Available{Available: &frontendv1.FeedMergeWorkspaceSwitchAvailable{
+				Target: &workspacev1.WorkspaceRef{Id: string(target), Dir: "/tmp/ws-merge"},
+			}},
+		},
+	}}}
 	return row
 }
 
@@ -122,13 +125,13 @@ func TestMarkMergeWorkspaceRemovedRestatesTheHead(t *testing.T) {
 	if marked != 1 {
 		t.Fatalf("marked = %d, want the head", marked)
 	}
-	drawn := feedRows(r, rootFeed())[0].GetActivity().GetMerge().GetHead().GetWorkspaceSwitch()
+	drawn := feedRows(r, rootFeed())[0].GetActivity().GetMerge().GetHead().GetMode().GetAsync().GetWorkspaceSwitch()
 	if drawn.GetRemoved().GetRemovedAtMs() != 1234 || drawn.GetLabel().GetText() != removedSwitchLabel {
 		t.Fatalf("head switch = %+v, want removed at 1234", drawn)
 	}
 	recorded, _ := store.recorded(testWorkspace, head.GetId().GetValue())
 	decoded := &frontendv1.FeedRow{}
-	if err := proto.Unmarshal(recorded.Row, decoded); err != nil || decoded.GetActivity().GetMerge().GetHead().GetWorkspaceSwitch().GetRemoved() == nil {
+	if err := proto.Unmarshal(recorded.Row, decoded); err != nil || decoded.GetActivity().GetMerge().GetHead().GetMode().GetAsync().GetWorkspaceSwitch().GetRemoved() == nil {
 		t.Fatalf("recorded head = %+v, %v; want the removal recorded", decoded, err)
 	}
 }
@@ -143,7 +146,7 @@ func TestMarkMergeWorkspaceRemovedLeavesOtherSwitchesAlone(t *testing.T) {
 	marked := r.MarkMergeWorkspaceRemoved(testWorkspace, theMergeWorkspace, 1234)
 
 	// Assert
-	if marked != 0 || feedRows(r, rootFeed())[0].GetActivity().GetMerge().GetHead().GetWorkspaceSwitch().GetAvailable() == nil {
+	if marked != 0 || feedRows(r, rootFeed())[0].GetActivity().GetMerge().GetHead().GetMode().GetAsync().GetWorkspaceSwitch().GetAvailable() == nil {
 		t.Fatalf("marked = %d, want another workspace's switch left available", marked)
 	}
 }
@@ -159,7 +162,7 @@ func TestMarkMergeWorkspaceRemovedReachesARestartedDaemonsRestoredRows(t *testin
 	marked := second.MarkMergeWorkspaceRemoved(testWorkspace, theMergeWorkspace, 99)
 
 	// Assert
-	if marked != 1 || feedRows(second, rootFeed())[0].GetActivity().GetMerge().GetHead().GetWorkspaceSwitch().GetRemoved() == nil {
+	if marked != 1 || feedRows(second, rootFeed())[0].GetActivity().GetMerge().GetHead().GetMode().GetAsync().GetWorkspaceSwitch().GetRemoved() == nil {
 		t.Fatalf("marked = %d, want the restored head restated as removed", marked)
 	}
 }
