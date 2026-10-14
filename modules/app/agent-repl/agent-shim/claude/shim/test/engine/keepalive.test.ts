@@ -514,16 +514,24 @@ function cadenceAt(nowMs: number): {
   readonly scheduler: ManualScheduler;
   readonly clock: { now: number };
   readonly beats: () => number;
+  readonly lapses: Array<{ readonly lapsesAtMs: number; readonly contextTokens: number }>;
 } {
   const scheduler = new ManualScheduler();
   const clock = { now: nowMs };
   let beats = 0;
-  const cadence = new KeepaliveCadence(() => beats++, () => clock.now, KEEPALIVE_INTERVAL_MS, scheduler);
-  return { cadence, scheduler, clock, beats: () => beats };
+  const lapses: Array<{ readonly lapsesAtMs: number; readonly contextTokens: number }> = [];
+  const cadence = new KeepaliveCadence(
+    () => beats++,
+    (lapsesAtMs, contextTokens) => lapses.push({ lapsesAtMs, contextTokens }),
+    () => clock.now,
+    KEEPALIVE_INTERVAL_MS,
+    scheduler,
+  );
+  return { cadence, scheduler, clock, beats: () => beats, lapses };
 }
 
 /** The 1-hour cache the conversation's last request bought at {@link TURN_AT}. */
-const HOUR_CACHE = { atMs: TURN_AT, ttlMs: CACHE_TTL_1H_MS };
+const HOUR_CACHE = { atMs: TURN_AT, ttlMs: CACHE_TTL_1H_MS, contextTokens: 0 };
 
 describe("the cadence, anchored to the conversation's last request", () => {
   it("schedules a restart 5 minutes after a turn at turn + 52 minutes, not restart + 52", () => {
@@ -565,7 +573,7 @@ describe("the cadence, anchored to the conversation's last request", () => {
   it("schedules NO beat for a 5-minute cache, which a 52-minute cadence cannot keep warm", () => {
     const { cadence, scheduler } = cadenceAt(TURN_AT + MINUTE);
 
-    cadence.start({ atMs: TURN_AT, ttlMs: CACHE_TTL_5M_MS }, "restart");
+    cadence.start({ atMs: TURN_AT, ttlMs: CACHE_TTL_5M_MS, contextTokens: 0 }, "restart");
 
     expect(scheduler.pendingTimeout()).toBeUndefined();
   });
@@ -604,7 +612,7 @@ describe("the cadence, anchored to the conversation's last request", () => {
     scheduler.fireTimeout();
     clock.now += 4000;
 
-    cadence.noteRequest(undefined);
+    cadence.noteRequest(undefined, 0);
 
     expect(scheduler.pendingTimeout()?.delayMs).toBe(KEEPALIVE_INTERVAL_MS);
   });
@@ -623,7 +631,7 @@ describe("the cadence, anchored to the conversation's last request", () => {
     cadence.start(HOUR_CACHE, "restart");
     cadence.pause();
     clock.now = TURN_AT + 30 * MINUTE;
-    cadence.noteRequest(CACHE_TTL_1H_MS);
+    cadence.noteRequest(CACHE_TTL_1H_MS, 0);
     clock.now = TURN_AT + 31 * MINUTE;
 
     cadence.resume();
@@ -635,25 +643,25 @@ describe("the cadence, anchored to the conversation's last request", () => {
     const { cadence, scheduler } = cadenceAt(TURN_AT + 61 * MINUTE);
     cadence.start(HOUR_CACHE, "restart");
 
-    cadence.noteRequest(CACHE_TTL_1H_MS);
+    cadence.noteRequest(CACHE_TTL_1H_MS, 0);
 
     expect(scheduler.pendingTimeout()?.delayMs).toBe(KEEPALIVE_INTERVAL_MS);
   });
 
   it("keeps the cache's tier across a request that wrote nothing", () => {
     const { cadence, scheduler } = cadenceAt(TURN_AT + MINUTE);
-    cadence.start({ atMs: TURN_AT, ttlMs: CACHE_TTL_5M_MS }, "restart");
+    cadence.start({ atMs: TURN_AT, ttlMs: CACHE_TTL_5M_MS, contextTokens: 0 }, "restart");
 
-    cadence.noteRequest(undefined);
+    cadence.noteRequest(undefined, 0);
 
     expect(scheduler.pendingTimeout()).toBeUndefined();
   });
 
   it("takes the tier a request bought", () => {
     const { cadence, scheduler } = cadenceAt(TURN_AT + MINUTE);
-    cadence.start({ atMs: TURN_AT, ttlMs: CACHE_TTL_5M_MS }, "restart");
+    cadence.start({ atMs: TURN_AT, ttlMs: CACHE_TTL_5M_MS, contextTokens: 0 }, "restart");
 
-    cadence.noteRequest(CACHE_TTL_1H_MS);
+    cadence.noteRequest(CACHE_TTL_1H_MS, 0);
 
     expect(scheduler.pendingTimeout()?.delayMs).toBe(KEEPALIVE_INTERVAL_MS);
   });
@@ -673,7 +681,7 @@ describe("the cadence, anchored to the conversation's last request", () => {
     cadence.start(HOUR_CACHE, "restart");
     cadence.pause();
 
-    cadence.noteRequest(CACHE_TTL_1H_MS);
+    cadence.noteRequest(CACHE_TTL_1H_MS, 0);
 
     expect(scheduler.pendingTimeout()).toBeUndefined();
   });
@@ -701,7 +709,7 @@ describe("the cadence, anchored to the conversation's last request", () => {
     cadence.start(HOUR_CACHE, "restart");
     cadence.stop();
 
-    cadence.noteRequest(CACHE_TTL_1H_MS);
+    cadence.noteRequest(CACHE_TTL_1H_MS, 0);
 
     expect(scheduler.pendingTimeout()).toBeUndefined();
   });
@@ -750,6 +758,150 @@ describe("the cadence, anchored to the conversation's last request", () => {
     cadence.resume();
 
     expect(logRecordsSince(before).filter((held) => held.message.includes("keep-alive scheduled"))).toHaveLength(0);
+  });
+});
+
+/** The 1-hour cache, above the cold gate's floor. */
+const HELD_CACHE = { atMs: TURN_AT, ttlMs: CACHE_TTL_1H_MS, contextTokens: 120_000 };
+
+describe("the cadence held while the workspace is hidden", () => {
+  it("cancels the scheduled beat on a hold", () => {
+    // Arrange
+    const { cadence, scheduler } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HELD_CACHE, "restart");
+
+    // Act
+    cadence.hold();
+
+    // Assert
+    expect(scheduler.pendingTimeout()).toBeUndefined();
+  });
+
+  it("projects the lapse a tier after the anchor, with the anchor's context, on a hold", () => {
+    // Arrange
+    const { cadence, lapses } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HELD_CACHE, "restart");
+
+    // Act
+    cadence.hold();
+
+    // Assert
+    expect(lapses).toEqual([{ lapsesAtMs: TURN_AT + CACHE_TTL_1H_MS, contextTokens: 120_000 }]);
+  });
+
+  it("projects the anchor itself as the lapse when no tier is stated", () => {
+    // Arrange
+    const { cadence, lapses } = cadenceAt(TURN_AT);
+    cadence.start(undefined, "a fresh conversation");
+
+    // Act
+    cadence.hold();
+
+    // Assert
+    expect(lapses).toEqual([{ lapsesAtMs: TURN_AT, contextTokens: 0 }]);
+  });
+
+  it("re-projects the lapse from a request answered while held", () => {
+    // Arrange
+    const { cadence, clock, lapses } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HELD_CACHE, "restart");
+    cadence.hold();
+
+    // Act
+    cadence.noteRequest(CACHE_TTL_1H_MS, 130_000);
+
+    // Assert
+    expect(lapses.at(-1)).toEqual({ lapsesAtMs: clock.now + CACHE_TTL_1H_MS, contextTokens: 130_000 });
+  });
+
+  it("schedules no beat for a request answered while held", () => {
+    // Arrange
+    const { cadence, scheduler } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HELD_CACHE, "restart");
+    cadence.hold();
+
+    // Act
+    cadence.noteRequest(CACHE_TTL_1H_MS, 130_000);
+
+    // Assert
+    expect(scheduler.pendingTimeout()).toBeUndefined();
+  });
+
+  it("schedules no beat for a session held before its start", () => {
+    // Arrange
+    const { cadence, scheduler } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.hold();
+
+    // Act
+    cadence.start(HELD_CACHE, "restart");
+
+    // Assert
+    expect(scheduler.pendingTimeout()).toBeUndefined();
+  });
+
+  it("projects the lapse at the start of a session held before it", () => {
+    // Arrange
+    const { cadence, lapses } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.hold();
+
+    // Act
+    cadence.start(HELD_CACHE, "restart");
+
+    // Assert
+    expect(lapses).toEqual([{ lapsesAtMs: TURN_AT + CACHE_TTL_1H_MS, contextTokens: 120_000 }]);
+  });
+
+  it("schedules no beat when a turn ends while held", () => {
+    // Arrange
+    const { cadence, scheduler } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HELD_CACHE, "restart");
+    cadence.hold();
+    cadence.pause();
+
+    // Act
+    cadence.resume();
+
+    // Assert
+    expect(scheduler.pendingTimeout()).toBeUndefined();
+  });
+
+  it("schedules the beat from the anchor when it runs again", () => {
+    // Arrange
+    const { cadence, scheduler } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HELD_CACHE, "restart");
+    cadence.hold();
+
+    // Act
+    cadence.run();
+
+    // Assert
+    expect(scheduler.pendingTimeout()?.delayMs).toBe(47 * MINUTE);
+  });
+
+  it("projects nothing when it runs again", () => {
+    // Arrange
+    const { cadence, lapses } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HELD_CACHE, "restart");
+    cadence.hold();
+
+    // Act
+    cadence.run();
+
+    // Assert
+    expect(lapses).toHaveLength(1);
+  });
+
+  it("changes nothing when asked to run while not held", () => {
+    // Arrange
+    const { cadence } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HELD_CACHE, "restart");
+    const before = logSinkMark();
+
+    // Act
+    cadence.run();
+
+    // Assert
+    expect(logRecordsSince(before)).toEqual([]);
   });
 });
 

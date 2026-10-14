@@ -139,6 +139,15 @@ export function validateHibernateRequest(_request: shimv1.HibernateRequest): voi
   // No fields. Nothing to refuse.
 }
 
+/** `shim.v1.SetKeepaliveRequest` — hold or run, never neither. */
+export function validateSetKeepaliveRequest(request: shimv1.SetKeepaliveRequest): void {
+  try {
+    if (request.cadence.case === undefined) throw unsetOneof("set_keepalive.cadence");
+  } catch (err) {
+    refuse("SetKeepalive", err);
+  }
+}
+
 /** `shim.v1.KillSessionRequest` — `force` is a primitive with a legal false. */
 export function validateKillSessionRequest(_request: shimv1.KillSessionRequest): void {
   // `force` is a bool: false is a legitimate value, not an absence.

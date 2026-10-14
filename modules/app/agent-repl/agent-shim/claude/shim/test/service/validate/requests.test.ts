@@ -225,6 +225,27 @@ describe("validateHibernateRequest", () => {
   });
 });
 
+describe("validateSetKeepaliveRequest", () => {
+  it.each([
+    ["a hold", "hold", undefined],
+    ["a run", "run", undefined],
+    ["no cadence", undefined, Code.InvalidArgument],
+  ] as const)("answers %s", (_name, arm, code) => {
+    // Arrange.
+    const request = create(shimv1.SetKeepaliveRequestSchema, {
+      cadence:
+        arm === "hold"
+          ? { case: "hold", value: create(shimv1.SetKeepaliveHoldSchema, {}) }
+          : arm === "run"
+            ? { case: "run", value: create(shimv1.SetKeepaliveRunSchema, {}) }
+            : { case: undefined },
+    });
+
+    // Act, Assert.
+    expect(codeOf(() => validate.validateSetKeepaliveRequest(request))).toBe(code);
+  });
+});
+
 describe("validateKillSessionRequest", () => {
   it("accepts force:false, which is a value and not an absence", () => {
     // Arrange.
