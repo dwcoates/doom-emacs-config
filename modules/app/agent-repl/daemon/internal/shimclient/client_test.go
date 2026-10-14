@@ -3,10 +3,12 @@ package shimclient
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -1917,5 +1919,97 @@ func TestAnAdoptedShimsWitnessedDeathIsOneError(t *testing.T) {
 	}
 	if errorsRecorded != 1 {
 		t.Fatalf("the death wrote %d error records, want 1: %+v", errorsRecorded, log.Records())
+	}
+}
+
+// killAnswered is a KillSession answer whose session ended.
+func killAnswered() *shimv1.KillSessionResponse {
+	return &shimv1.KillSessionResponse{Result: &shimv1.KillSessionResponse_Success{Success: &shimv1.KillSessionSuccess{}}}
+}
+
+// killRefused is a KillSession answer whose session did not end.
+func killRefused() *shimv1.KillSessionResponse {
+	return &shimv1.KillSessionResponse{Result: &shimv1.KillSessionResponse_Failure{Failure: &shimv1.KillSessionFailure{
+		Cause: &shimv1.KillSessionFailure_QueryRefusedToEnd{QueryRefusedToEnd: &shimv1.KillSessionQueryRefusedToEnd{}},
+	}}}
+}
+
+// killHangUpWait bounds a wait the test expects to end at once.
+const killHangUpWait = 5 * time.Second
+
+// TestKillSessionHangsUpAfterReadingAnEndedSessionsAnswer pins the stand-down
+// order: the answer is read, then the connection it came on is hung up, and
+// only then does KillSession return to a caller that waits for the exit. The
+// shim exits on that hang-up, so it cannot leave before its answer is read.
+func TestKillSessionHangsUpAfterReadingAnEndedSessionsAnswer(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	f.killSessionResp = killAnswered()
+	c := newClient(dlog.NewTestLogger(), ids.WorkspaceID("ws-1"), uds, defaultBackoff, nil, nil)
+
+	// Act.
+	resp, err := c.KillSession(context.Background(), &shimv1.KillSessionRequest{})
+
+	// Assert.
+	if err != nil || resp.GetSuccess() == nil {
+		t.Fatalf("KillSession() = %v, %v, want the ended session's answer", resp, err)
+	}
+	if n := openConns(c.conns); n != 0 {
+		t.Fatalf("%d connection(s) to the shim still open when KillSession returned", n)
+	}
+	select {
+	case <-<-f.killHungUp:
+	case <-time.After(killHangUpWait):
+		t.Fatal("the shim never saw the hang-up")
+	}
+}
+
+// TestKillSessionKeepsTheConnectionOfARefusedKill covers a kill the shim
+// refused: the shim goes on serving, so nothing is hung up on it.
+func TestKillSessionKeepsTheConnectionOfARefusedKill(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	f.killSessionResp = killRefused()
+	c := newClient(dlog.NewTestLogger(), ids.WorkspaceID("ws-1"), uds, defaultBackoff, nil, nil)
+
+	// Act.
+	resp, err := c.KillSession(context.Background(), &shimv1.KillSessionRequest{})
+
+	// Assert.
+	if err != nil || resp.GetFailure() == nil {
+		t.Fatalf("KillSession() = %v, %v, want the refusal", resp, err)
+	}
+	if n := openConns(c.conns); n != 1 {
+		t.Fatalf("%d connection(s) to the shim open after a refused kill, want 1", n)
+	}
+}
+
+// TestKillSessionRecordsAHangUpThatFailed covers a hang-up whose close fails:
+// the answer still goes to the caller, whose stop escalation ends the shim,
+// and the failure is recorded once at ERROR with the workspace and the cause.
+func TestKillSessionRecordsAHangUpThatFailed(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	f.killSessionResp = killAnswered()
+	log := dlog.NewTestLogger()
+	c := newClient(log, ids.WorkspaceID("ws-1"), uds, defaultBackoff, nil, nil)
+	c.conns.track(&closeConn{err: errors.New("close refused")})
+
+	// Act.
+	resp, err := c.KillSession(context.Background(), &shimv1.KillSessionRequest{})
+
+	// Assert.
+	if err != nil || resp.GetSuccess() == nil {
+		t.Fatalf("KillSession() = %v, %v, want the ended session's answer", resp, err)
+	}
+	rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.shimclient.kill_session"})
+	if !ok {
+		t.Fatalf("no error record of the failed hang-up: %+v", log.Records())
+	}
+	if rec.Context["workspace_id"] != "ws-1" || !strings.Contains(fmt.Sprint(rec.Context["error"]), "close refused") {
+		t.Fatalf("the failed hang-up's record = %+v, want the workspace and the cause", rec.Context)
 	}
 }
