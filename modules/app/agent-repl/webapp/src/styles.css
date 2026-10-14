@@ -7450,6 +7450,10 @@ ar-button.outcome-marker-pill {
 .merge-clock,
 .merge-commit { color: var(--muted); font-variant-numeric: tabular-nums; }
 .merge-commit { font-family: var(--mono, monospace); }
+/* The version a merge onto agent-repl's master landed as (version.ts): the
+   number the merge incremented is green, the rest muted. */
+.merge-version { color: var(--muted); font-variant-numeric: tabular-nums; }
+.merge-version-incremented { color: var(--ok); }
 .merge-error { display: inline-flex; align-items: baseline; gap: 0.5rem; min-width: 0; }
 .merge-summary { color: var(--err); overflow: hidden; text-overflow: ellipsis; }
 /* The badge says the merge's state as a whole and nothing else — no counts (R5). */
