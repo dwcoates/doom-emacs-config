@@ -505,6 +505,10 @@ func (c *fakeClient) SetSessionPermissionMode(context.Context, *shimv1.SetSessio
 	panic("sessionwatcher must not call SetSessionPermissionMode")
 }
 
+func (c *fakeClient) SetKeepalive(context.Context, *shimv1.SetKeepaliveRequest) (*shimv1.SetKeepaliveResponse, error) {
+	panic("sessionwatcher must not call SetKeepalive")
+}
+
 func (c *fakeClient) Hibernate(context.Context, *shimv1.HibernateRequest) (*shimv1.HibernateResponse, error) {
 	panic("sessionwatcher must not call Hibernate")
 }
