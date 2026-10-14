@@ -20,17 +20,20 @@ import (
 // a selected bubble quotes it, and WITHOUT INTERRUPTING: it is delivered as a
 // deferred prompt, after whatever turn is running.
 //
-// A SOURCE ROW THAT IS NOT A SELECTABLE ROOT BUBBLE is asked about unquoted:
+// THE SOURCE IS QUOTED WHETHER OR NOT IT CAN BE SELECTED: a thinking bubble
+// is never selected, but a link clicked inside it still quotes its text.
+//
+// A SOURCE ROW THAT IS NOT A LANDED ROOT BUBBLE is asked about unquoted:
 // the question names the link itself, so it still stands on its own, and the
 // record says why no quote was carried.
 func (s *server) askAboutUnresolvedLink(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, source *frontendv1.FeedId, link *workspace.UnresolvedLink) error {
 	said := &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: []*conversationv1.UserContentBlock{{
 		Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: link.Question}},
 	}}}}
-	if quoted, ok := s.deps.Feed.SelectableText(ws, source); ok {
+	if quoted, ok := s.deps.Feed.BubbleText(ws, source); ok {
 		said = replyquote.Quote(said, quoted.Markdown, quoted.Prompt)
 	} else {
-		log.Info("daemon.server.open_in_editor", "the unresolved link's source row is not a selectable root bubble; its question is sent unquoted", dlog.Context{
+		log.Info("daemon.server.open_in_editor", "the unresolved link's source row is not a landed root bubble; its question is sent unquoted", dlog.Context{
 			"href": link.Href, "source_row": source.GetValue(),
 		})
 	}

@@ -321,11 +321,17 @@ type Resolver interface {
 	// the turns are still live: what a files-restoring rollback stops.
 	LiveDetachedIn(ws ids.WorkspaceID, turns []ids.TurnID) int
 	// SelectableText answers the text of one selectable root-feed row
-	// (FeedRow.selectable: a prompt or a landed response bubble) as markdown,
-	// with whether it is a prompt, and whether the feedid is selectable at
-	// all. A miss is a feedid the daemon does not deem selectable — the submit
-	// path and the selection refuse it rather than using an empty text.
-	SelectableText(ws ids.WorkspaceID, id *frontendv1.FeedId) (SelectableText, bool)
+	// (FeedRow.selectable: a prompt or a landed response bubble that is not a
+	// thinking bubble) as markdown, with whether it is a prompt, and whether
+	// the feedid is selectable at all. A miss is a feedid the daemon does not
+	// deem selectable — the submit path and the selection refuse it rather
+	// than using an empty text.
+	SelectableText(ws ids.WorkspaceID, id *frontendv1.FeedId) (RowText, bool)
+	// BubbleText answers the text of one landed root-feed bubble (a prompt or
+	// a landed response bubble, a thinking one included) as markdown, with
+	// whether it is a prompt, whether or not the reader can select it. A miss
+	// is a feedid that names no such bubble.
+	BubbleText(ws ids.WorkspaceID, id *frontendv1.FeedId) (RowText, bool)
 	// SetMergeFold records the reader's fold on a merge bubble's head row and
 	// restates the row with it (mergefold.go). False is a row that is not a
 	// merge head this daemon holds.
