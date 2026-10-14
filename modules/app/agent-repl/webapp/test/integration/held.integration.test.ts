@@ -282,7 +282,7 @@ describe("the fold above button", () => {
     await withTray(foldable());
     // Assert
     const button = harness.$('[data-held-turn="turn-behind"] [data-held-action="fold"]');
-    expect(button?.textContent).toBe("fold above");
+    expect(button?.textContent).toBe("Fold Above");
   });
 
   it("is not drawn on an entry the daemon offers no fold", async () => {

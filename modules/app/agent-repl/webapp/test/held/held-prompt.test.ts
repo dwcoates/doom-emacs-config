@@ -44,7 +44,6 @@ import {
   DROPPED_EVENT,
   BEING_DELIVERED,
   EDIT_REQUEST,
-  FOLD_ABOVE_LABEL,
   NO_RELEASE_TITLES,
   SEND_NOW_LABEL,
   HELD_REASON_CLASS,
@@ -2464,15 +2463,13 @@ function foldable(above = "turn-0"): HeldPrompt {
 }
 
 describe("the fold above control", () => {
-  it("is drawn, labelled fold above, when the daemon offers a fold", () => {
+  it("is drawn, labelled Fold Above, when the daemon offers a fold", () => {
     // Arrange
     const { tc } = foldContext(foldSuccess);
     // Act
     const card = drawHeldPrompt(foldable(), tc);
     // Assert
-    expect(card.querySelector('[data-held-action="fold"]')?.textContent).toBe(
-      FOLD_ABOVE_LABEL,
-    );
+    expect(card.querySelector('[data-held-action="fold"]')?.textContent).toBe("Fold Above");
   });
 
   it("is not drawn when the daemon offers no fold", () => {

@@ -2629,7 +2629,7 @@ describe("the feed's bottom gap", () => {
   });
 });
 
-/** THE HELD PROMPT'S CONTROL ROW (owner request, 2026-10-13): compact, even, two outlined. */
+/** THE HELD PROMPT'S CONTROL ROW (owner requests, 2026-10-13 and 2026-10-14): compact, even, plain. */
 describe("the held prompt's control row", () => {
   it.each([
     ["grid", "display"],
@@ -2657,24 +2657,20 @@ describe("the held prompt's control row", () => {
     expect(size).toBe("calc(0.75rem * var(--feed-text-scale))");
   });
 
-  it.each([
-    ["Send now", ".queued-actions ar-button.queued-action-release", "var(--ok)"],
-    ["Cancel", ".queued-actions ar-button.queued-action-drop", "var(--err)"],
-  ])("outlines %s in its outcome's color", (_label, selector, color) => {
+  it("keeps a control's leading at 1.15, about 10% shorter than 1.3", () => {
     // Arrange / Act
-    const decls = allDeclarationsOf(selector);
+    const leading = valueOf(allDeclarationsOf(".queued-actions ar-button"), "line-height");
     // Assert
-    expect(valueOf(decls, "border-color")).toBe(color);
+    expect(leading).toBe("1.15");
   });
 
-  it.each([
-    [".queued-actions ar-button.queued-action-release"],
-    [".queued-actions ar-button.queued-action-drop"],
-  ])("leaves %s unfilled", (selector) => {
-    // Arrange / Act
-    const decls = allDeclarationsOf(selector);
+  it("draws every control in the one plain border, none in a color of its own", () => {
+    // Arrange / Act — every rule naming one held control by its action class.
+    const own = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.some((sel) => /\.queued-actions ar-button\.queued-action-/.test(sel)),
+    );
     // Assert
-    expect(valueOf(decls, "background")).toBeUndefined();
+    expect(own.filter((rule) => /border/.test(rule.declarations))).toEqual([]);
   });
 });
 
