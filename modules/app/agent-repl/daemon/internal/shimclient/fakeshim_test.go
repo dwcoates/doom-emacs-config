@@ -43,6 +43,9 @@ type fakeShim struct {
 	watchBashRefusal    error
 	watchSessionRefuse  error
 	killSessionResp     *shimv1.KillSessionResponse
+	// killSessionErr, when set, fails the KillSession call instead of
+	// answering it, over a connection that stays up.
+	killSessionErr error
 
 	// killHungUp receives, per KillSession, the channel closed when the
 	// client hangs up the connection that KillSession came in on.
@@ -291,8 +294,11 @@ func (f *fakeShim) KillSession(ctx context.Context, _ *connect.Request[shimv1.Ki
 	f.record("KillSession")
 	f.killHungUp <- hangup.Of(ctx)
 	f.mu.Lock()
-	resp := f.killSessionResp
+	resp, failure := f.killSessionResp, f.killSessionErr
 	f.mu.Unlock()
+	if failure != nil {
+		return nil, failure
+	}
 	if resp == nil {
 		resp = &shimv1.KillSessionResponse{}
 	}

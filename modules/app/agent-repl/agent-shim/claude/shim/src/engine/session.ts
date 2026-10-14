@@ -360,7 +360,7 @@ interface EngineDeps {
    * serving would hold its socket, its workspace lock and its vendor account
    * against the next spawn. The engine cannot exit by itself, though — the
    * response has to reach the daemon first — so it hands the decision, and the
-   * exit CODE, to `main.ts`, which ends the process once the wire is quiet.
+   * exit CODE, to `main.ts`, which ends the process once the daemon hangs up.
    *
    * Unset in a suite that drives the engine directly, where the process is the
    * test runner and must survive.
@@ -6557,7 +6557,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    *
    * Called AFTER the response message is built and BEFORE it is returned, so
    * the exit is already requested when the handler resolves; `main.ts` is the
-   * half that waits for the wire to go quiet before actually exiting.
+   * half that waits for the daemon to hang up before actually exiting.
    */
   function endProcess(): void {
     const code = lostRowsAtStandDown > 0 ? 1 : 0;

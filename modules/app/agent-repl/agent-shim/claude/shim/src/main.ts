@@ -591,45 +591,6 @@ export function versionLine(): string {
 // signals
 // ---------------------------------------------------------------------------
 
-/**
- * How long the exit after `KillSession` waits for the wire to go quiet.
- *
- * A LAST RESORT, never the mechanism: the responses' own close events settle
- * the wait in microseconds. This only bounds the pathological case — a stream
- * the teardown somehow failed to conclude — so that a killed shim cannot be
- * kept alive by one wedged consumer.
- */
-export const EXIT_QUIET_BUDGET_MS = 5_000;
-
-/**
- * The quiet-drain budget override, honored ONLY under `--fake`.
- *
- * A LAST RESORT bound like the watcher budget above, and overridable for the
- * same reason: what a kill scenario asserts is that the exit WAITS for the wire
- * and then ends anyway, not the particular number of milliseconds it waits for.
- *
- * Refused for a real session: a production shim told to exit instantly would
- * destroy the socket out from under a response still on it.
- */
-export const FAKE_EXIT_QUIET_BUDGET_ENV = "AGENT_REPL_FAKE_EXIT_QUIET_BUDGET_MS";
-
-/**
- * Resolve the quiet-drain budget for this process.
- *
- * Answers {@link EXIT_QUIET_BUDGET_MS} unless a `--fake` session overrode it.
- */
-export function resolveExitQuietBudgetMs(env: NodeJS.ProcessEnv, fake: boolean): number {
-  return (
-    resolveFakeMsOverride(
-      env,
-      fake,
-      FAKE_EXIT_QUIET_BUDGET_ENV,
-      "exit_quiet_budget_override",
-      "quiet-drain budget",
-    ) ?? EXIT_QUIET_BUDGET_MS
-  );
-}
-
 /** What a signal handler set needs to reach. */
 export interface SignalTargets {
   /** The session, stood down before the process ends. */
@@ -973,7 +934,6 @@ export async function main(): Promise<void> {
 
   const keepaliveIntervalMs = resolveKeepaliveIntervalMs(process.env, args.fake);
   const coldGateLaterMs = resolveColdGateLaterMs(process.env, args.fake);
-  const exitQuietBudgetMs = resolveExitQuietBudgetMs(process.env, args.fake);
   const watcherConclusionBudgetMs = resolveWatcherConclusionBudgetMs(process.env, args.fake);
   const retry = resolveRetryPolicy(process.env, args.fake);
   const networkResumeIntervalMs = resolveNetworkResumeIntervalMs(process.env, args.fake);
@@ -1023,18 +983,18 @@ export async function main(): Promise<void> {
   const server = await serve(args.listen, shimRoutes(engine));
 
   // KillSession's own exit. The engine has already torn the session down and
-  // built its response; the process may only end once that response — and every
-  // stream terminal the teardown produced — is off the wire, which is what
-  // `quiet` waits for, AND once the daemon has read it and hung up, which is
-  // what `hungUp` waits for (see ShimServer.hungUp for the race an exit on the
-  // answer alone lost). Closing first would destroy the socket carrying it.
+  // built its response; the process may only end once the daemon has READ it
+  // and hung up, which is what `hungUp` waits for (see ShimServer.hungUp for
+  // the race an exit on the answer alone lost). Nothing is left to drain on a
+  // connection the daemon closed, so there is no wait for the wire before it,
+  // and NO BOUND on it: a daemon that dies closes its sockets in the kernel,
+  // and one that never hangs up stops this process itself.
   let ending = false;
   endProcess = (code): void => {
     if (ending) return;
     ending = true;
     void (async (): Promise<void> => {
       try {
-        await server.quiet(exitQuietBudgetMs);
         await server.hungUp();
         await server.close();
         const fields = {

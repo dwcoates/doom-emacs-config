@@ -1613,23 +1613,37 @@ func (c *client) SetKeepalive(ctx context.Context, req *shimv1.SetKeepaliveReque
 // for the process to exit (Fleet.Stop, the drain's sweep, the relaunch
 // engine's stand-down) gets the hang-up from here. A refused kill leaves the
 // shim serving, so nothing is hung up.
+//
+// A CALL THAT FAILED IS HUNG UP ON TOO. Its answer was never read, so this
+// daemon cannot tell whether the shim ended the session: a call bound that
+// expired mid-teardown is the ordinary case, and that shim has stood down and
+// waits for the hang-up like any other. Every caller stops the process or
+// waits for it to leave after a failed kill, and the unforced relaunch only
+// WAITS (rollout's awaitUnansweredStandDown), so without the hang-up that
+// shim would wait forever and the relaunch would defer behind it.
 func (c *client) KillSession(ctx context.Context, req *shimv1.KillSessionRequest) (*shimv1.KillSessionResponse, error) {
 	c.standDown.Store(true)
 	resp, err := unary(ctx, c, "kill_session", req, validateKillSessionRequest, c.rpc.KillSession)
-	if err != nil || resp.GetSuccess() == nil {
-		return resp, err
+	if err == nil && resp.GetSuccess() == nil {
+		return resp, nil
 	}
+	c.hangUpAfterKill(err == nil)
+	return resp, err
+}
+
+// hangUpAfterKill hangs up on the shim after a KillSession that ended its
+// session (answered) or whose answer was never read (!answered).
+func (c *client) hangUpAfterKill(answered bool) {
 	closed, hangUpErr := c.conns.hangUp()
-	fields := dlog.Context{"workspace_id": string(c.ws), "connections": closed}
+	fields := dlog.Context{"workspace_id": string(c.ws), "connections": closed, "answered": answered}
 	if hangUpErr != nil {
 		// The shim then waits for a hang-up that never comes; the caller's
 		// stop escalation is what ends it, and this record says why.
 		fields["error"] = hangUpErr.Error()
-		c.log.Error("daemon.shimclient.kill_session", "could not hang up on the shim after reading its KillSession answer; the shim exits only on the stop escalation", fields)
-		return resp, nil
+		c.log.Error("daemon.shimclient.kill_session", "could not hang up on the shim after its KillSession; the shim exits only on the stop escalation", fields)
+		return
 	}
-	c.log.Debug("daemon.shimclient.kill_session", "hung up on the shim after reading its KillSession answer; the shim exits on the hang-up", fields)
-	return resp, nil
+	c.log.Debug("daemon.shimclient.kill_session", "hung up on the shim after its KillSession; the shim exits on the hang-up", fields)
 }
 
 // StartTurn opens a turn with the daemon's minted TurnId and its origin.
