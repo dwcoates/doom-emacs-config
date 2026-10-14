@@ -614,7 +614,7 @@ func (s *store) read(ctx context.Context, op string, fields dlog.Context, fn fun
 			s.log.Debug(op, "the read found no such record", withError(fields, err))
 			return err
 		}
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		if callerCancelled(err) {
 			s.log.Info(op, "the read ended when its caller's context was cancelled",
 				withError(fields, err))
 			return err
@@ -624,6 +624,15 @@ func (s *store) read(ctx context.Context, op string, fields dlog.Context, fn fun
 	}
 	s.log.Debug(op, "read durable state", fields)
 	return nil
+}
+
+// callerCancelled reports whether err is the CALLER going away — its context
+// cancelled or past its deadline — rather than the store failing. Every store
+// call runs under its caller's context, and that context ends whenever a
+// client leaves or the daemon exits in an orderly way, so this is the one
+// test every logging path here uses to keep such an end off the ERROR level.
+func callerCancelled(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 // endTx is the one way a transaction in this package ends without a Commit:
