@@ -1355,6 +1355,11 @@ Owner rulings, 2026-10-11 (`internal/merge/chain.go`, `internal/cpugov`).
   the head first, at most `QueueWindow` gates. The head's gate is never
   governed. Every admission and every change of a deferral's reason is INFO
   `daemon.cpugov.admit` with the arithmetic.
+  `AGENT_REPL_FIXED_HOST_LOAD` (a fraction in [0, 1]; `cpugov.HostSampler`)
+  pins the load it reads instead of the host's ticks, recorded at boot
+  (INFO `daemon.boot.gate_governor`); a value that is no load refuses the
+  boot. An integration test whose merges test behind their head sets it, so
+  the machine's other work cannot defer them.
 - **A RESTART MID-CHAIN** resumes every member at its recorded step: the head
   through the pump, the members behind it through `extendChain` from its
   resume, a speculative step (`progressDoc.Speculative`) finished as such
