@@ -417,16 +417,20 @@ hand any more:
   (`expand.toggle-uncapped`) anything that is not a capped section. Thinking
   bubbles, interim responses, prompts, held prompts, peers, agentic cards and
   compaction summaries stay capped.
-- **ONLY A JUMP'S EXPANSION CLOSES ON LEAVING THE VIEW; THE READER'S CLOSE AT
-  THE TAIL** (owner rulings, 2026-10-01, replacing the wheel-armed close of
+- **ONLY A JUMP'S EXPANSION AND A CLICKED THINKING BUBBLE CLOSE ON LEAVING THE
+  VIEW; THE READER'S OTHER EXPANSIONS CLOSE AT THE TAIL** (owner rulings, 2026-10-01, replacing the wheel-armed close of
   2026-09-30). EVERY JUMP to a feed entry (a footer detached-work row, a
   breadcrumb, a hook's gated-call link: `reveal` in `src/feed/feed.ts`)
   EXPANDS the entry (its sub-feed bubble, else every capped section its row
   owns), then CENTERS it on the expanded layout, then marks it. An entry the
-  jump expanded is watched (`src/feed/jump-collapse.ts`) and collapsed once NO
+  jump expanded is watched (`src/feed/out-of-view-collapse.ts`) and collapsed once NO
   PART of it is visible; one already open when the jump landed, or one the
-  reader toggles by hand afterwards, is the reader's and is never watched. An
-  entry the READER expanded does NOT close when scrolled out of view: it
+  reader toggles by hand afterwards, is the reader's and is never watched. A
+  root-feed THINKING bubble a click opens is the one hand-opened entry that is
+  watched the same way (cause `thinkingClick`, owner specification,
+  2026-10-14): a click on it only expands it, never selecting it
+  (`src/feed/bubble-selection.ts`), and it closes once wholly out of view. Any
+  other entry the READER expanded does NOT close when scrolled out of view: it
   closes when the reader scrolls back to the tail so the follow re-latches
   (`TailFollow.onTailReached`, the one re-latch in `latchIfLatestVisible`,
   fired only for the reader's own scroll after the latest entry was out of

@@ -30,9 +30,17 @@ import {
   expandSection,
 } from "../expand.js";
 import { controlPlaneFailed } from "../failure/sink.js";
-import { createJumpCollapse } from "./jump-collapse.js";
+import {
+  createOutOfViewCollapse,
+  type CollapsingEntry,
+  type OutOfViewCause,
+} from "./out-of-view-collapse.js";
 import { installBackgroundClear } from "./background-click.js";
-import { governedRowAt, installBubbleSelect } from "./bubble-selection.js";
+import {
+  governedRowAt,
+  installBubbleSelect,
+  OUT_OF_VIEW_COLLAPSE_ATTRIBUTE,
+} from "./bubble-selection.js";
 import {
   LEFT_VIEW_REQUEST,
   createSelectionVisibility,
@@ -207,9 +215,9 @@ export function mountFeed(
           );
         });
   // AN ENTRY A JUMP EXPANDED CLOSES ONCE IT IS WHOLLY OUT OF VIEW (owner
-  // request, 2026-10-01; jump-collapse.ts). Only what the jump itself opened is
-  // watched; the reader's own expansions are left to them.
-  const jumps = scrollBox === null ? null : createJumpCollapse(scrollBox);
+  // request, 2026-10-01; out-of-view-collapse.ts). Only what the jump itself
+  // opened is watched; the reader's own expansions are left to them.
+  const outOfView = scrollBox === null ? null : createOutOfViewCollapse(scrollBox);
   // THE READER RETURNING TO THE TAIL CLOSES EVERY EXPANDED ENTRY (owner ruling,
   // 2026-10-01), hooked to the tail owner's one re-latch.
   tail?.onTailReached(() => {
@@ -249,12 +257,14 @@ export function mountFeed(
   // feed stays at its tail instead of centering (`TailFollow.itemExpanded`).
   //
   // A READER'S TOGGLE MAKES THE ENTRY THEIRS: an entry a jump expanded and the
-  // reader then toggled by hand is no longer the jump's to close.
+  // reader then toggled by hand is no longer the jump's to close. The one
+  // exception is a root-feed THINKING bubble a click opens: it closes again
+  // once wholly out of view (`watchThinkingClick`).
   //
   // A ROOT-FEED PROMPT OR RESPONSE BUBBLE'S BOX IS THE SELECTION'S
-  // (bubble-selection.ts): a click on it selects instead of toggling, and the
-  // auto-collapse never closes it, because selected and expanded are one state
-  // the daemon owns.
+  // (bubble-selection.ts), a thinking bubble's apart: a click on it selects
+  // instead of toggling, and the auto-collapse never closes it, because
+  // selected and expanded are one state the daemon owns.
   const ownedBySelection = (section: HTMLElement): boolean =>
     governedRowAt(section, host) !== null;
   const uninstallExpand = installClickExpand(
@@ -262,8 +272,9 @@ export function mountFeed(
     undefined,
     (section, expanded) => {
       afterSectionToggle(section);
-      releaseJump(section);
+      releaseOutOfView(section);
       if (!expanded) return;
+      watchThinkingClick(section);
       intentScroll?.arm(section);
       centerExpandedItem(section);
     },
@@ -271,7 +282,7 @@ export function mountFeed(
   );
   const onItemExpanded = (event: Event): void => {
     if (!(event.target instanceof HTMLElement)) return;
-    releaseJump(event.target);
+    releaseOutOfView(event.target);
     centerExpandedItem(event.target);
   };
   host.addEventListener(ITEM_EXPANDED_EVENT, onItemExpanded);
@@ -647,7 +658,7 @@ export function mountFeed(
   /**
    * THE ONE JUMP TO A FEED ENTRY: bring the row onto the page, EXPAND the
    * entry, CENTER it under CAUSE, and mark it (`land`). The expansion is the
-   * jump's, and is undone once the entry is wholly out of view (`jumps`).
+   * jump's, and is undone once the entry is wholly out of view (`outOfView`).
    *
    * FOUND FIRST: a row already drawn — on the root feed or inside any OPEN
    * sub-feed — is simply landed on. Only when it is nowhere on screen is the
@@ -975,8 +986,19 @@ export function mountFeed(
       operation: "feed.jump-expanded",
       context: { row: id.value, sections: sections.length },
     });
-    jumps?.track({
+    outOfView?.track(ownSectionsEntry(row, "jump"));
+  }
+
+  /**
+   * ROW as an entry that closes once out of view, opened by CAUSE: open while
+   * any section it owns itself is, and closed through the one collapse of
+   * each. The sections are read off the row at the moment of asking, so a
+   * section a redraw replaced is found on the element that is drawn.
+   */
+  function ownSectionsEntry(row: HTMLElement, cause: OutOfViewCause): CollapsingEntry {
+    return {
       row,
+      cause,
       isExpanded: () =>
         sectionsOwnedBy(row).some((section) => isExpanded(section)),
       collapse: () => {
@@ -984,7 +1006,19 @@ export function mountFeed(
           if (isExpanded(section)) collapseSection(section, afterSectionToggle);
         }
       },
-    });
+    };
+  }
+
+  /**
+   * A CLICK THAT OPENS A ROOT-FEED THINKING BUBBLE (owner specification,
+   * 2026-10-14) only expands it, with no selection (bubble-selection.ts), so
+   * the selection's leaving-the-view end no longer closes it: the out-of-view
+   * watch does instead. Any other section a click opens stays the reader's.
+   */
+  function watchThinkingClick(section: HTMLElement): void {
+    const row = section.closest<HTMLElement>(FEED_ROW_SELECTOR);
+    if (row === null || !row.hasAttribute(OUT_OF_VIEW_COLLAPSE_ATTRIBUTE)) return;
+    outOfView?.track(ownSectionsEntry(row, "thinkingClick"));
   }
 
   /** Watch a bubble a jump opened, keyed by its row. */
@@ -997,8 +1031,9 @@ export function mountFeed(
       });
       throw new Error("feed: a bubble a jump opened hangs in no feed row");
     }
-    jumps?.track({
+    outOfView?.track({
       row,
+      cause: "jump",
       isExpanded: () => bubble.isExpanded(),
       collapse: () => bubble.collapse(),
     });
@@ -1026,9 +1061,9 @@ export function mountFeed(
   }
 
   /** The reader toggled something inside EL's row: the row is theirs now. */
-  function releaseJump(el: HTMLElement): void {
+  function releaseOutOfView(el: HTMLElement): void {
     const row = el.closest<HTMLElement>(FEED_ROW_SELECTOR);
-    if (row !== null) jumps?.release(row);
+    if (row !== null) outOfView?.release(row);
   }
 
   /**
@@ -1042,7 +1077,7 @@ export function mountFeed(
    * reader opened stays open until the reader closes it.
    */
   function collapseEveryExpandedEntry(): void {
-    jumps?.clear();
+    outOfView?.clear();
     const sections = autoCollapseFor(host.ownerDocument).collapseOutside(
       "tailReached",
       null,
@@ -1083,7 +1118,7 @@ export function mountFeed(
     held?.dispose();
     uninstallClear?.();
     selectionVisibility?.dispose();
-    jumps?.dispose();
+    outOfView?.dispose();
     root.dispose();
   }
 }

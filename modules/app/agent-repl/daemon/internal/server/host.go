@@ -7,6 +7,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
@@ -129,7 +130,7 @@ func (s *server) PublishHostWorkspace(ctx context.Context, ws ids.WorkspaceID) {
 		// is cancelled the moment the client goes away or the daemon exits in
 		// an orderly way. The view is simply not published; there is nobody
 		// left to publish it to, and it is not a fault.
-		if endedOnCancel(err) {
+		if ctxend.Is(err) {
 			s.log.Info(op, "the host view was not published; the stream's context was cancelled",
 				dlog.Context{
 					"stream": "WatchHostWorkspace", "workspace": string(ws), "cause": err.Error(),
@@ -166,7 +167,7 @@ func (s *server) composeHostWorkspace(
 
 	record, err := s.deps.DB.Workspace(ctx, ws)
 	if err != nil {
-		if endedOnCancel(err) {
+		if ctxend.Is(err) {
 			log.Info(op, "the host view was not composed; the stream's context was cancelled",
 				dlog.Context{"stream": "WatchHostWorkspace", "cause": err.Error()})
 			return nil, false
@@ -176,7 +177,7 @@ func (s *server) composeHostWorkspace(
 	}
 	session, hasSession, err := s.deps.DB.Session(ctx, ws)
 	if err != nil {
-		if endedOnCancel(err) {
+		if ctxend.Is(err) {
 			log.Info(op, "the host view was not composed; the stream's context was cancelled",
 				dlog.Context{"stream": "WatchHostWorkspace", "cause": err.Error()})
 			return nil, false
@@ -423,7 +424,7 @@ func (s *server) setHostComposer(
 	const op = "daemon.server.compose_host_workspace"
 	lease, held, err := s.deps.DB.Lease(ctx, ws)
 	if err != nil {
-		if endedOnCancel(err) {
+		if ctxend.Is(err) {
 			log.Info(op, "the occupancy lease was not read; the stream's context was cancelled",
 				dlog.Context{"stream": "WatchHostWorkspace", "cause": err.Error()})
 			return false
@@ -474,7 +475,7 @@ func (s *server) hostFaults(ctx context.Context, log dlog.Logger, ws ids.Workspa
 	scope := ws
 	open, err := s.deps.Health.OpenFaults(ctx, wsm.FaultScope{Workspace: &scope})
 	if err != nil {
-		if endedOnCancel(err) {
+		if ctxend.Is(err) {
 			log.Info(op, "the open faults were not read; the stream's context was cancelled",
 				dlog.Context{"stream": "WatchHostWorkspace", "cause": err.Error()})
 			return nil

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"modernc.org/sqlite"
@@ -15,10 +16,62 @@ import (
 // errors. It is never opened as a file.
 const memoryPath = ":memory:"
 
-// memoryDSN is a private in-memory database on the handle's one connection,
-// with the writing connection's pragmas minus the journal mode: an in-memory
-// database has no WAL, and its pages never reach a disk to be synced.
-const memoryDSN = "file::memory:?_pragma=busy_timeout(5000)&_txlock=immediate&_pragma=foreign_keys(1)"
+// memoryPragmas are the writing connection's pragmas minus the journal mode:
+// an in-memory database has no WAL, and its pages never reach a disk to be
+// synced.
+const memoryPragmas = "&_pragma=busy_timeout(5000)&_txlock=immediate&_pragma=foreign_keys(1)"
+
+// memoryNames numbers the in-memory databases this process opens, so each
+// handle's name is its own.
+var memoryNames atomic.Uint64
+
+// memoryURI names a fresh in-memory database private to one handle: a memdb
+// database every connection opening the same name shares, alive while one
+// stays open (see memoryKeeper).
+func memoryURI() string {
+	return fmt.Sprintf("file:/agent-repl-wsm-%d?vfs=memdb", memoryNames.Add(1))
+}
+
+// memoryKeeper holds one connection to a handle's in-memory database for the
+// handle's whole life, so the database outlives any connection the handle's
+// pool replaces.
+//
+// THE POOL DOES REPLACE IT. A query whose context is cancelled interrupts its
+// SQLite connection, and the driver reports an interrupted connection as not
+// valid, so database/sql discards it instead of returning it to the pool. A
+// private `:memory:` database lived on that one connection, so the next
+// statement met a new, empty database ("no such table: merge_queue", the
+// 2026-10-14 integration run). The named database the keeper holds is still
+// there for the replacement to reopen.
+type memoryKeeper struct {
+	db   *sql.DB
+	conn *sql.Conn
+	// closed makes Close idempotent, as the handle's own *sql.DB Close is:
+	// a store closed twice closes its keeper once.
+	closed sync.Once
+}
+
+// keepMemoryDatabase opens and holds a connection to the database URI names.
+func keepMemoryDatabase(ctx context.Context, uri string) (*memoryKeeper, error) {
+	db, err := sql.Open("sqlite", uri)
+	if err != nil {
+		return nil, fmt.Errorf("wsm: open the in-memory database's keeper: %w", err)
+	}
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("wsm: hold the in-memory database's keeper connection: %w", err), db.Close())
+	}
+	return &memoryKeeper{db: db, conn: conn}, nil
+}
+
+// Close releases the keeper's connection, and with it the database once the
+// handle's own connection is closed too. Only the first call closes anything;
+// a later one answers nil, as *sql.DB's does.
+func (k *memoryKeeper) Close() error {
+	var err error
+	k.closed.Do(func() { err = errors.Join(k.conn.Close(), k.db.Close()) })
+	return err
+}
 
 // isTestBinary is testing.Testing, reached through a variable so the refusal
 // below can itself be tested from inside a test binary.
@@ -49,9 +102,9 @@ var errNotATest = errors.New("wsm: an in-memory state database is a test seam; t
 // with SQLITE_DESERIALIZE_FREEONCLOSE, so closing the connection frees memory
 // SQLite never allocated, and the test binary dies with SIGSEGV.
 //
-// The handle holds ONE connection, as every handle does. Its database lives on
-// that connection, so if the pool ever replaced it the next statement would
-// meet an empty database and fail loudly ("no such table"), never silently.
+// The handle holds ONE connection, as every handle does. Its database is a
+// named memdb database that a keeper connection holds for the handle's life
+// (memoryKeeper), so a connection the pool replaces reopens the same database.
 func OpenInMemory(ctx context.Context, opts ...Option) (DB, error) {
 	if !isTestBinary() {
 		return nil, errNotATest
@@ -65,11 +118,21 @@ func openInMemory(ctx context.Context, opts []Option) (DB, error) {
 	if err := memoryTemplate(ctx); err != nil {
 		return nil, err
 	}
-	s, err := openStore(ctx, memoryPath, memoryDSN, false, opts)
+	uri := memoryURI()
+	keeper, err := keepMemoryDatabase(ctx, uri)
 	if err != nil {
 		return nil, err
 	}
-	return s.finishWritingOpen(ctx, restoreTemplate)
+	s, err := openStore(ctx, memoryPath, uri+memoryPragmas, false, opts)
+	if err != nil {
+		return nil, errors.Join(err, keeper.Close())
+	}
+	s.keeper = keeper
+	db, err := s.finishWritingOpen(ctx, restoreTemplate)
+	if err != nil {
+		return nil, errors.Join(err, keeper.Close())
+	}
+	return db, nil
 }
 
 // templateURI names the template: a memdb database SHARED by every connection
@@ -78,8 +141,11 @@ const templateURI = "file:/agent-repl-wsm-schema-template?vfs=memdb"
 
 var (
 	templateOnce sync.Once
-	// templateHandle holds the template's one connection for the life of the
-	// process; a memdb database is discarded when its last connection closes.
+	// templateKeeper holds the template's database for the life of the
+	// process; a memdb database is discarded when its last connection closes,
+	// and templateHandle's pooled connection may be replaced (memoryKeeper).
+	templateKeeper *memoryKeeper
+	// templateHandle is the store the template was built through.
 	templateHandle *sql.DB
 	templateErr    error
 )
@@ -94,14 +160,18 @@ func memoryTemplate(ctx context.Context) error {
 }
 
 func buildTemplate(ctx context.Context) (*sql.DB, error) {
+	keeper, err := keepMemoryDatabase(ctx, templateURI)
+	if err != nil {
+		return nil, err
+	}
 	s, err := openStore(ctx, templateURI, templateURI, false, nil)
 	if err != nil {
-		return nil, fmt.Errorf("wsm: open the in-memory schema template: %w", err)
+		return nil, errors.Join(fmt.Errorf("wsm: open the in-memory schema template: %w", err), keeper.Close())
 	}
 	if err := s.createSchema(ctx); err != nil {
-		s.db().Close()
-		return nil, fmt.Errorf("wsm: create the in-memory schema template: %w", err)
+		return nil, errors.Join(fmt.Errorf("wsm: create the in-memory schema template: %w", err), s.db().Close(), keeper.Close())
 	}
+	templateKeeper = keeper
 	return s.db(), nil
 }
 
