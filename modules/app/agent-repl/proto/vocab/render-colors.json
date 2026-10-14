@@ -244,10 +244,12 @@
     "tab, is the workspace's own status throughout. Only the mark changes:",
     "",
     "  sidebar  the row's PLAIN status dot -- glyph 'dot' with no",
-    "           'glyph_inks' row and no one-shot glyph standing -- takes",
-    "           'ink' and 'motion' in place of the arm's own. Every other",
-    "           mark outranks it: a gate's glyph, the one-shot glyph, a merge",
-    "           glyph, an inked dot (compacting's orange) and no mark at all.",
+    "           'glyph_inks' row and no one-shot glyph standing -- is drawn",
+    "           as 'glyph', a 'merge_glyphs' name (the merge arms' three",
+    "           bars, owner request 2026-10-14), in 'ink' and 'motion' in",
+    "           place of the arm's own. Every other mark outranks it: a",
+    "           gate's glyph, the one-shot glyph, a merge glyph, an inked dot",
+    "           (compacting's orange) and no mark at all.",
     "  tab bar  the tab's '[N]' bracket takes 'tab_bracket' as its",
     "           background; the space after it and the name keep the",
     "           status background. No glyph is drawn.",
@@ -255,6 +257,7 @@
     "A SYNC merge raises no mark: it is the row's own merge arms."
   ],
   "async_merge_mark": {
+    "glyph": "merge",
     "ink": "purple",
     "motion": "breathes",
     "tab_bracket": "purple"

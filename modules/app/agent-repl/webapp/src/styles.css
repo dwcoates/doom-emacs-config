@@ -5757,8 +5757,8 @@ ar-button.outcome-marker-pill {
    2026-10-13): where the mark's ink differs from the workspace's tone. A
    failed merge is a green workspace whose merge glyph is red; a compacting
    turn is a red workspace whose dot is the orange of the feed's compaction
-   rule. An async merge of the workspace's own branch inks a plain dot
-   purple (render-colors.json async_merge_mark). After the tones, at their
+   rule. An async merge of the workspace's own branch draws the merge glyph
+   purple in place of a plain dot (render-colors.json async_merge_mark). After the tones, at their
    specificity, so the ink wins. */
 #ws-sidebar .st.ink-red { color: var(--err); }
 #ws-sidebar .st.ink-orange { color: var(--compact-rule); }
