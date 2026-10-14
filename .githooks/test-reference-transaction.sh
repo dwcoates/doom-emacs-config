@@ -24,11 +24,12 @@ set -euo pipefail
 # This harness is itself run from inside git hooks and agent sessions. Clear
 # the caller's live Git bindings, and the hook's own markers, before any
 # fixture command runs.
-unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_COMMON_DIR
+# shellcheck source=/dev/null
+. "$(dirname "${BASH_SOURCE[0]}")/../modules/app/agent-repl/bin/lib-fake-git-fixture.sh"
+clear_live_git_bindings
 unset AGENT_REPL_MERGE_QUEUE AGENT_REPL_OWNER_OVERRIDE AGENT_REPL_SAFE_TEST_RUN
 
 THIS_DIR="$(cd "$(dirname "$0")" && pwd)"
-HOOK_SRC="$THIS_DIR/reference-transaction"
 FAKE_GIT="$THIS_DIR/../modules/app/agent-repl/bin/fake-git.sh"
 PASS=0
 FAIL=0
@@ -65,9 +66,7 @@ mkrepo() {
   local repo
   repo="$(mktemp -d "$TMP/repo.XXXXXX")"
   git -C "$repo" init
-  mkdir -p "$repo/.fakegit/hooks"
-  cp "$HOOK_SRC" "$repo/.fakegit/hooks/reference-transaction"
-  chmod +x "$repo/.fakegit/hooks/reference-transaction"
+  install_checked_in_hook "$repo" reference-transaction
   # The directory as the hook's $PWD names it ($TMPDIR may end in a slash).
   (cd "$repo" && pwd)
 }

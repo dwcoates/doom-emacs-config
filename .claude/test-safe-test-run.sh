@@ -18,12 +18,14 @@ set -euo pipefail
 
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_UNDER_TEST="$THIS_DIR/safe-test-run.sh"
-HOOK_SRC="$THIS_DIR/../.githooks/reference-transaction"
 FAKE_GIT="$THIS_DIR/../modules/app/agent-repl/bin/fake-git.sh"
 
 # This harness runs inside git hooks, agent sessions and other nets: no
 # caller binding may reach a fixture.
-unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_COMMON_DIR AGENT_REPL_SAFE_TEST_RUN
+# shellcheck source=/dev/null
+. "$THIS_DIR/../modules/app/agent-repl/bin/lib-fake-git-fixture.sh"
+clear_live_git_bindings
+unset AGENT_REPL_SAFE_TEST_RUN
 
 PASS=0
 FAIL=0
@@ -44,12 +46,11 @@ new_case() {
     REPO="$(cd "$(mktemp -d "$TMP/case.XXXXXX")" && pwd)"
     G="$REPO/.fakegit"
     git -C "$REPO" init
-    mkdir -p "$REPO/modules/app/agent-repl/lisp" "$G/hooks"
+    mkdir -p "$REPO/modules/app/agent-repl/lisp"
     : >"$REPO/modules/app/agent-repl/lisp/test-agent-repl.el"
     git -C "$REPO" add -A
     git -C "$REPO" commit -m base
-    cp "$HOOK_SRC" "$G/hooks/reference-transaction"
-    chmod +x "$G/hooks/reference-transaction"
+    install_checked_in_hook "$REPO" reference-transaction
     HEAD0="$(git -C "$REPO" rev-parse HEAD)"
 }
 
