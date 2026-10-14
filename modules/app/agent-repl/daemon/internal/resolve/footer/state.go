@@ -449,6 +449,11 @@ type wsState struct {
 	motion feedMotion
 	// compacting reports a vendor-initiated auto-compaction in flight.
 	compacting bool
+	// cutLanded reports that the turn in flight has taken its context cut. A
+	// `/clear` or `/compact` turn's act is over at its cut, though the turn
+	// runs on to the vendor's `result`, so its clearing or compacting step
+	// stops standing here. Cleared by the next turn opening.
+	cutLanded bool
 	// compaction is the compaction's own progress line, from whichever
 	// producer is compacting — the vendor's auto-compaction or the cold gate's
 	// answered remediation. Nil when nothing is compacting. It is only ever

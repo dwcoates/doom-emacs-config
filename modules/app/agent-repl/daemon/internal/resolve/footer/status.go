@@ -697,12 +697,12 @@ func (r *resolver) thinking(s *wsState, log dlog.Logger) *frontendv1.FooterStatu
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.turn == nil (vendor compaction)"})
 		arm.Substatus = &frontendv1.FooterStatusWorking_Compacting{
 			Compacting: &frontendv1.FooterSubStatusWorkingCompacting{}}
-	case s.turn.Act == ActClear:
-		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.turn.Act == ActClear"})
+	case s.turn.Act == ActClear && !s.cutLanded:
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.turn.Act == ActClear && !s.cutLanded"})
 		arm.Substatus = &frontendv1.FooterStatusWorking_Clearing{
 			Clearing: &frontendv1.FooterSubStatusWorkingClearing{}}
-	case s.turn.Act == ActCompact || s.compacting:
-		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.turn.Act == ActCompact || s.compacting"})
+	case (s.turn.Act == ActCompact && !s.cutLanded) || s.compacting:
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case (s.turn.Act == ActCompact && !s.cutLanded) || s.compacting"})
 		arm.Substatus = &frontendv1.FooterStatusWorking_Compacting{
 			Compacting: &frontendv1.FooterSubStatusWorkingCompacting{}}
 	case !s.sawActivity:

@@ -694,7 +694,7 @@ func (r *resolver) OnTurnRunningAtAttach(ws ids.WorkspaceID, turn ids.TurnID, st
 
 // endTurn ends the turn in flight at AT. It is the ONE end of a turn the
 // footer watched — the main agent's terminal, the prompt queue's close, a dead
-// shim, a dead query, a compaction's cut — so whatever a turn's end settles is
+// shim, a dead query — so whatever a turn's end settles is
 // settled in one place, whichever edge arrives first. A refused submission is
 // not a turn that ran, and clears through SetTurn(nil) instead.
 //
@@ -733,6 +733,7 @@ func (r *resolver) applyTurnStarted(s *wsState, turn *TurnStarted) {
 	// ContextCut that ends the compaction, and the turn's terminal — never by
 	// a turn opening.
 	s.compacting = s.compacting || turn.Act == ActCompact
+	s.cutLanded = false
 	// A RETRY OF THE LAST TURN'S CALL IS OVER: the turn it held has ended.
 	s.retrying = nil
 	r.startTurnMotion(s)
@@ -1559,9 +1560,15 @@ func linkName(link sessionwatcher.LinkState) string {
 //
 // THE ASYMMETRY IS THE POINT: `SessionUpdate.compacting` only STARTS
 // `thinking · compacting` — no progress figure exists upstream — and this
-// record is the only end signal there is. Whichever way the cut went the
-// session is idle again afterwards, because a failed compaction cut nothing
-// and the turn is over either way.
+// record is the only end signal the COMPACTION has.
+//
+// THE CUT ENDS THE COMPACTION, NEVER THE TURN. A vendor auto-compaction runs
+// INSIDE a turn, which carries on working after the cut (owner's report,
+// 2026-10-14: a mid-turn auto-compaction ended the strip's turn, so the strip
+// read idle and the roster `done` for the rest of a turn the shim still held
+// in flight). A `/compact` or `/clear` is its own turn, and the vendor ends it
+// with its own `result` like any other, so the main agent's terminal is the
+// one edge that ends the turn either way.
 //
 // A FAILED COMPACTION IS NOT SILENCE: nothing was cut and the context is still
 // too large, so the producer's account is recorded at WARN. It raises NO
@@ -1575,21 +1582,22 @@ func (r *resolver) OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentI
 	failed, _ := cut.GetCut().(*conversationv1.ContextCut_CompactionFailed)
 
 	// THROUGH THE ONE PUBLICATION SITE, like every other fact: the cut moves
-	// the status arm (the turn ends) and the activity line (the compaction's
-	// line goes), and a change published past mutate is a change no record
-	// states.
+	// the status (the compaction's sub-status goes) and the activity line (the
+	// compaction's line goes), and a change published past mutate is a change
+	// no record states.
 	r.mutate(ws, "daemon.footer.on_context_cut", "the footer took a context cut",
 		dlog.Context{"arm": arm, "compaction_id": cutCompactionID(cut)}, func(s *wsState) {
-			s.endTurn(r.opts.clock.Now())
 			s.turnEverRan = true
 			s.compacting = false
+			if s.turn != nil {
+				s.cutLanded = true
+			}
 			concludeCompactionID(s, cutCompactionID(cut))
 			// THE LINE GOES WITH THE ACT IT NARRATED. The cut is the
 			// compaction's end signal, so its progress sentence stops standing
 			// here; a failed cut says what went wrong through the feed's
 			// outcome marker, never a footer line.
 			r.endCompaction(ws, s, "daemon.footer.on_context_cut")
-			s.tok.settled = true
 			if failed == nil {
 				return
 			}
