@@ -64,16 +64,16 @@ const panelOf = (drawn: HTMLElement): HTMLElement =>
 const dotOf = (drawn: HTMLElement): HTMLElement =>
   lineOf(drawn).querySelector(".st") as HTMLElement;
 
-/** The row's name: every row's pointer trigger for the panel (owner request, 2026-10-13). */
-const nameOf = (drawn: HTMLElement): HTMLElement =>
-  lineOf(drawn).querySelector(".name") as HTMLElement;
+/** The row's duration field: every row's pointer trigger for the panel (owner request, 2026-10-14). */
+const durationOf = (drawn: HTMLElement): HTMLElement =>
+  lineOf(drawn).querySelector(":scope > [data-when]") as HTMLElement;
 
 function hoverIn(drawn: HTMLElement): void {
-  nameOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
+  durationOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
 }
 
 function hoverOut(drawn: HTMLElement): void {
-  nameOf(drawn).dispatchEvent(new MouseEvent("mouseleave"));
+  durationOf(drawn).dispatchEvent(new MouseEvent("mouseleave"));
 }
 
 async function click(control: Element): Promise<void> {
@@ -1060,6 +1060,30 @@ describe("the detail panel opens on hover", () => {
     expect(drawn.classList.contains("open")).toBe(false);
   });
 
+  it("does not open when the pointer rests on the name", () => {
+    // ARRANGE
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
+    // ACT
+    (lineOf(drawn).querySelector(".name") as HTMLElement).dispatchEvent(new MouseEvent("mouseenter"));
+    vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS * 10);
+    // ASSERT
+    expect(drawn.classList.contains("open")).toBe(false);
+  });
+
+  it("opens once the pointer has rested on a running turn's duration", () => {
+    // ARRANGE
+    const drawn = drawRosterRow(
+      row({ id: "ws-1", when: { case: "turnRunning", value: { startedAtMs: BigInt(NOW) } } }),
+      sidebarContext(),
+      "R",
+    );
+    // ACT
+    hoverIn(drawn);
+    vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
+    // ASSERT
+    expect([durationOf(drawn).getAttribute("data-when"), drawn.classList.contains("open")]).toEqual(["turnRunning", true]);
+  });
+
   it("waits three seconds of rest before it opens", () => {
     expect(HOVER_OPEN_DELAY_MS).toBe(3000);
   });
@@ -1074,7 +1098,7 @@ describe("the detail panel opens on hover", () => {
     expect(drawn.classList.contains("open")).toBe(false);
   });
 
-  it("opens once the pointer has rested on the name for the intent delay", () => {
+  it("opens once the pointer has rested on the duration for the intent delay", () => {
     // ARRANGE
     const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
     // ACT
@@ -1154,10 +1178,10 @@ describe("the detail panel opens on hover", () => {
         row({ id: "ws-1", closed: true, status: { case: "merged", value: {} }, when: { case: "merged", value: { atMs: BigInt(NOW) } } }),
     },
     { place: "hidden" as const, make: () => row({ id: "ws-1", when: { case: "hidden", value: { atMs: BigInt(NOW) } } }) },
-  ])("on a $place row, whose name is the trigger as everywhere", ({ place, make }) => {
+  ])("on a $place row, whose duration is the trigger as everywhere", ({ place, make }) => {
     const bandRow = (): HTMLElement => drawRosterRow(make(), sidebarContext(), "R", place);
 
-    it("opens once the pointer has rested on the name for the intent delay", () => {
+    it("opens once the pointer has rested on the duration for the intent delay", () => {
       // ARRANGE
       const drawn = bandRow();
       // ACT
@@ -1177,7 +1201,7 @@ describe("the detail panel opens on hover", () => {
       expect(drawn.classList.contains("open")).toBe(false);
     });
 
-    it("closes once the pointer has left the name and the grace has run out", () => {
+    it("closes once the pointer has left the duration and the grace has run out", () => {
       // ARRANGE
       const drawn = bandRow();
       hoverIn(drawn);

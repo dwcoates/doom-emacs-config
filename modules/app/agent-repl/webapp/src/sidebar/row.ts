@@ -280,7 +280,8 @@ export function drawRosterRow(
   }
 
   const when = requireMessage(u.when, `${path}.when`);
-  line.appendChild(drawRosterRowWhen(when, sc, `${path}.when`));
+  const duration = drawRosterRowWhen(when, sc, `${path}.when`);
+  line.appendChild(duration);
   // A MERGE THAT LANDED TODAY CARRIES A GUTTER (owner request, 2026-10-11):
   // the row draws an off-white bar while its merge is on today's local date,
   // and drops it once the shared ticker crosses midnight.
@@ -300,7 +301,7 @@ export function drawRosterRow(
   );
   // AFTER the panel is in the tree: the hover wiring listens on the panel too,
   // so the pointer can travel from the row into it without it closing.
-  installHoverPanel(ws, line, label, sc, workspace.id);
+  installHoverPanel(ws, line, duration, sc, workspace.id);
 
   const visibleChildren = expandVisibleRows(u.children, `${path}.children`);
   if (visibleChildren.length > 0) {
@@ -640,13 +641,14 @@ export function drawStatusMark(arm: RosterStatusCase, path: string, markers: Row
  * page that opened it, never the daemon's view state (owner ruling,
  * 2026-10-06).
  *
- * THE POINTER'S TRIGGER IS THE ROW'S NAME, in every section alike: the open
- * workspaces section, Hidden and Recently Merged (owner request, 2026-10-13,
- * which retired the status dot as the open section's trigger). Hovering the
- * rest of the row, the dot included, opens nothing, and the pointer leaving
- * the name for the row closes the panel as it does for anywhere else. The
- * intent delay is three seconds (owner request, 2026-10-13), so the panel
- * opens only on a pointer that has settled on the name.
+ * THE POINTER'S TRIGGER IS THE ROW'S DURATION FIELD, in every section alike:
+ * the open workspaces section, Hidden and Recently Merged (owner request,
+ * 2026-10-14, which retired the name as the trigger after 2026-10-13 had
+ * retired the status dot). Hovering the rest of the row, the name and the dot
+ * included, opens nothing, and the pointer leaving the duration for the row
+ * closes the panel as it does for anywhere else. The intent delay is three
+ * seconds (owner request, 2026-10-13), so the panel opens only on a pointer
+ * that has settled on the duration.
  *
  * The keyboard gets the same panel through `focusin`/`focusout`, without the
  * intent delay — a focus move is deliberate in a way a pointer's path is not.
