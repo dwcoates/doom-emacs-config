@@ -3023,17 +3023,18 @@ describe("a card head's clock holds a fixed footprint", () => {
 });
 
 /**
- * THE ONE BUBBLE RULE SET (owner rulings, 2026-09-23). Every blue and purple
- * bubble is drawn by src/bubble/draw.ts and styled by the rules on `.bubble`:
- * the role sets only the side and the fill, a variant or state sets only the
- * border, `data-cap-lines` sets the collapsed limit, and one leading and one
- * size serve every kind.
+ * THE ONE BUBBLE RULE SET (owner rulings, 2026-09-23, and 2026-10-13 for a
+ * prompt's leading). Every blue and purple bubble is drawn by
+ * src/bubble/draw.ts and styled by the rules on `.bubble`: the role sets the
+ * side and the fill, and a prompt's role also sets its lines a tree line apart;
+ * a variant or state sets only the border, `data-cap-lines` sets the collapsed
+ * limit, and one size serves every kind.
  */
 describe("the one bubble rule set", () => {
   /** Whether SELECTOR styles a bubble ITSELF (not its strip, box or content). */
   const onBubble = (selector: string): boolean => /^\.bubble(?![-\w])[^\s>+~]*$/.test(selector);
 
-  it("sets one leading for every bubble, the response's 1.5", () => {
+  it("sets the response's 1.5 leading on the base bubble rule", () => {
     // Arrange / Act
     const bubble = declarationsOf(".bubble") ?? "";
     // Assert
@@ -3047,14 +3048,26 @@ describe("the one bubble rule set", () => {
     // Arrange / Act
     const bubble = declarationsOf(".bubble") ?? "";
     // Assert
-    expect(bubble).toMatch(/font-size:\s*calc\(0\.9rem \* var\(--feed-text-scale\)\)/);
+    expect(bubble).toMatch(/font-size:\s*calc\(var\(--bubble-font-rem\) \* 1rem \* var\(--feed-text-scale\)\)/);
   });
 
-  it("lets no other rule on a bubble set its size or leading", () => {
+  it("spaces a prompt's lines one metaprompt tree line apart", () => {
+    // Arrange / Act
+    const prompt = declarationsOf('.bubble[data-role="prompt"]') ?? "";
+    const tree = declarationsOf(".mp-tree") ?? "";
+    // Assert
+    expect([
+      /--md-line-h:\s*calc\(var\(--tree-font-rem\) \* var\(--tree-line-h\) \/ var\(--bubble-font-rem\)\)/.test(prompt),
+      /font-size:\s*calc\(var\(--tree-font-rem\) \* 1rem \* var\(--feed-text-scale\)\)/.test(tree),
+      /line-height:\s*var\(--tree-line-h\)/.test(tree),
+    ]).toEqual([true, true, true]);
+  });
+
+  it("lets no rule on a bubble but the prompt's set its size or leading", () => {
     // Arrange / Act
     const others = rulesOf(stylesheet).filter(
       (rule) =>
-        rule.selectors.some((sel) => onBubble(sel) && sel !== ".bubble") &&
+        rule.selectors.some((sel) => onBubble(sel) && sel !== ".bubble" && sel !== '.bubble[data-role="prompt"]') &&
         /(?:^|;)\s*(?:font-size|line-height|--md-line-h)\s*:/.test(rule.declarations),
     );
     // Assert

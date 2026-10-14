@@ -108,7 +108,7 @@ import {
 import { ConnectError } from "@connectrpc/connect";
 import { controlPlaneFailed } from "../failure/sink.js";
 import { formatTickedAge } from "../duration.js";
-import { typedTextSlot } from "../bubble/body.js";
+import { markdownSlot } from "../bubble/body.js";
 import { quoteSlot } from "../bubble/quote.js";
 import {
   BUBBLE_MORE_ELLIPSIS,
@@ -1413,7 +1413,7 @@ export function drawTextBlock(u: TextBlock, path: string): HTMLElement {
     operation: "held.held-prompt.text-block",
     context: { path, length: u.text.length },
   });
-  return typedTextSlot("queued-text", u.text);
+  return markdownSlot("queued-text", u.text);
 }
 
 /**
