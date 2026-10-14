@@ -141,6 +141,19 @@ const (
 	// no prompt bubble, and the compaction's status, footer and separator drawn
 	// as for one the user typed.
 	PromptOrigin_PROMPT_ORIGIN_MERGE_COMPACT_AFTER PromptOrigin = 34
+	// The daemon's request that a repository's MAIN-WORKTREE workspace find out
+	// why a workspace create in that repository failed. Every create, whichever
+	// way it was asked for (agentrepl.v1.CreateWorkspace, synchronous or
+	// option-B, a command file, a support workspace), that fails rather than
+	// being handed to a successor daemon opens the main-worktree workspace when
+	// it is closed and submits this. It names what was asked for and the
+	// failure's cause, and asks the agent to analyze the failure without
+	// changing anything until the user answers. Submitted through the prompt
+	// queue as a deferred prompt, so it waits behind a running turn and wakes
+	// an idle agent. Drawn as an ordinary prompt bubble. A merge's own
+	// workspace (the hidden one an async merge runs in) is not reported here:
+	// the merge queue hands its failure back to the requester.
+	PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED PromptOrigin = 35
 )
 
 // Enum value maps for PromptOrigin.
@@ -180,6 +193,7 @@ var (
 		32: "PROMPT_ORIGIN_WORKSPACE_RETARGETED",
 		33: "PROMPT_ORIGIN_MERGE_PICK",
 		34: "PROMPT_ORIGIN_MERGE_COMPACT_AFTER",
+		35: "PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED",
 	}
 	PromptOrigin_value = map[string]int32{
 		"PROMPT_ORIGIN_UNSPECIFIED":                 0,
@@ -216,6 +230,7 @@ var (
 		"PROMPT_ORIGIN_WORKSPACE_RETARGETED":        32,
 		"PROMPT_ORIGIN_MERGE_PICK":                  33,
 		"PROMPT_ORIGIN_MERGE_COMPACT_AFTER":         34,
+		"PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED":     35,
 	}
 )
 
@@ -250,7 +265,7 @@ var File_conversation_v1_prompt_origin_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"\n" +
-	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1*\x9a\n" +
+	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1*\xc5\n" +
 	"\n" +
 	"\fPromptOrigin\x12\x1d\n" +
 	"\x19PROMPT_ORIGIN_UNSPECIFIED\x10\x00\x12\x1b\n" +
@@ -287,7 +302,8 @@ const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"\x1cPROMPT_ORIGIN_MERGE_HANDBACK\x10\x1f\x12&\n" +
 	"\"PROMPT_ORIGIN_WORKSPACE_RETARGETED\x10 \x12\x1c\n" +
 	"\x18PROMPT_ORIGIN_MERGE_PICK\x10!\x12%\n" +
-	"!PROMPT_ORIGIN_MERGE_COMPACT_AFTER\x10\"B0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
+	"!PROMPT_ORIGIN_MERGE_COMPACT_AFTER\x10\"\x12)\n" +
+	"%PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED\x10#B0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
 
 var (
 	file_conversation_v1_prompt_origin_proto_rawDescOnce sync.Once

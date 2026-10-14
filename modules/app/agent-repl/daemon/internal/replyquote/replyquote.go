@@ -54,6 +54,15 @@ func Fence(quoted string) string {
 	return strings.Repeat("`", max(minFence, longest+1))
 }
 
+// Fenced is TEXT inside its own code fence (Fence), on lines of its own, so
+// nothing inside the text can close the fence or be read as the prompt's own
+// markdown. Every daemon prompt that carries text it did not write embeds it
+// through here.
+func Fenced(text string) string {
+	fence := Fence(text)
+	return fence + "\n" + text + "\n" + fence
+}
+
 // Block composes the quote of a selected bubble: the preamble naming what is
 // quoted (a PROMPT, or a response of the agent's), MARKDOWN inside its code
 // fence, and the marker introducing the person's words.
@@ -62,8 +71,7 @@ func Block(markdown string, prompt bool) *conversationv1.UserContentBlock {
 	if prompt {
 		opening = openingPrompt
 	}
-	fence := Fence(markdown)
-	text := opening + fence + "\n" + markdown + "\n" + fence + closing
+	text := opening + Fenced(markdown) + closing
 	return &conversationv1.UserContentBlock{
 		Block: &conversationv1.UserContentBlock_Quote{Quote: &conversationv1.UserQuoteBlock{Text: text}},
 	}
