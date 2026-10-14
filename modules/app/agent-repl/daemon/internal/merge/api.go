@@ -316,7 +316,29 @@ type DetachedOutcome struct {
 	// InPlace marks the end of a SYNC merge, which ran in the workspace it is
 	// handed back to rather than in a merge workspace.
 	InPlace bool
+	// Deploy is what became of a landing's deploy: the report of a landing
+	// the deploy was told of is owed until that deploy has run.
+	Deploy LandingDeploy
 }
+
+// LandingDeploy names what a merge's landing did about deploying itself.
+type LandingDeploy int
+
+const (
+	// LandingNotDeployed is a merge whose end deploys nothing: it did not
+	// land, it landed nothing new, or it landed outside the daemon's own
+	// checkout.
+	LandingNotDeployed LandingDeploy = iota
+	// LandingDeployOwed is a landing in the daemon's own checkout whose deploy
+	// was told: its report waits until the build that carries it runs.
+	LandingDeployOwed
+	// LandingRolloutsHeld is a landing in the daemon's own checkout while the
+	// rollouts are held, so nothing deploys it.
+	LandingRolloutsHeld
+	// LandingHoldUnread is a landing in the daemon's own checkout whose
+	// rollout hold could not be read, so the deploy was not told.
+	LandingHoldUnread
+)
 
 // DetachedOutcomeKind names how a detached merge ended.
 type DetachedOutcomeKind int
