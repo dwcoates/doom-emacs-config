@@ -14,7 +14,7 @@ import { GROUPING_PICK_LABELS, PREFS_KEY, drawRailHead, mountSidebar, mountWebho
 import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { GROUPINGS, type SidebarContext } from "../../src/sidebar/context.js";
 import { createRailSearch } from "../../src/sidebar/search.js";
-import { HOVER_CLOSE_GRACE_MS, HOVER_OPEN_DELAY_MS } from "../../src/sidebar/row-hover.js";
+import { HOVER_CLOSE_GRACE_MS } from "../../src/sidebar/row-hover.js";
 import { GROUPING_VIEW_KEY } from "../../src/sidebar/view.js";
 import { captureLogRecords, forwardedRecord, type LogCapture } from "../log-capture.js";
 import type { PhasedAnimation } from "../../src/sidebar/wall-phase.js";
@@ -910,7 +910,7 @@ describe("an open row's detail panel, placed by the rail", () => {
     mounted.push(handle);
     await settle();
     const ws = host.querySelector("[data-roster-row='ws-1']") as HTMLElement;
-    // Opened by keyboard focus, which opens at once, with no intent delay.
+    // Opened by keyboard focus.
     (ws.querySelector(":scope > .row") as HTMLElement).dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
     rects.set(ws.querySelector(":scope > .row") as Element, lineRect);
     rects.set(
@@ -1132,7 +1132,7 @@ describe("the rail reports where the pointer is to the row hover gesture", () =>
     vi.useRealTimers();
   });
 
-  /** Mount a rail of one row, with the pointer resting on its duration field until the panel opened. */
+  /** Mount a rail of one row, with the pointer on its duration field, which opened the panel. */
   async function mountHovered(): Promise<{ host: HTMLElement; ws: HTMLElement }> {
     const host = document.createElement("div");
     mounted.push(
@@ -1144,7 +1144,6 @@ describe("the rail reports where the pointer is to the row hover gesture", () =>
     vi.useFakeTimers();
     const ws = host.querySelector("[data-grouping='repository'] [data-roster-row='ws-1']") as HTMLElement;
     (ws.querySelector(":scope > .row > [data-when]") as HTMLElement).dispatchEvent(new MouseEvent("mouseenter"));
-    vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
     return { host, ws };
   }
 
