@@ -68,6 +68,7 @@ export function inline(escaped: string): string {
   out = out.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (whole: string, text: string, url: string) => {
     if (isWebHref(url)) return anchorHtml(url, null, restoreCodeSpans(text, codeSpans, false));
     if (!isFileLinkHref(url)) return whole;
+    // eslint-disable-next-line no-control-regex -- the code-span sentinel, as below
     const span = /^\u0000(\d+)\u0000$/.exec(text);
     const shown = span === null ? text : codeSpans[Number(span[1])];
     if (!isPathLinkText(shown)) return anchorHtml(url, null, restoreCodeSpans(text, codeSpans, false));
