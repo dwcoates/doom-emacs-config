@@ -1,0 +1,96 @@
+=== RUN   TestASecondRunAfterAHealReDerivesNothing
+=== PAUSE TestASecondRunAfterAHealReDerivesNothing
+=== RUN   TestMockScenariosShard0
+=== PAUSE TestMockScenariosShard0
+=== RUN   TestTwoLaunchesClaimingOneSpoolAttributeNothingAndSayWhy
+=== PAUSE TestTwoLaunchesClaimingOneSpoolAttributeNothingAndSayWhy
+=== RUN   TestARestartedSidecarNeverTracksOrLosesARunThatSettledBeforeIt
+=== PAUSE TestARestartedSidecarNeverTracksOrLosesARunThatSettledBeforeIt
+=== RUN   TestAnUnownedSpoolIsNeverReadEvenAfterItsWindowLapses
+=== PAUSE TestAnUnownedSpoolIsNeverReadEvenAfterItsWindowLapses
+=== RUN   TestATruncatedTranscriptIsReReadFromItsNewStart
+=== PAUSE TestATruncatedTranscriptIsReReadFromItsNewStart
+=== CONT  TestASecondRunAfterAHealReDerivesNothing
+--- PASS: TestASecondRunAfterAHealReDerivesNothing (0.30s)
+=== CONT  TestARestartedSidecarNeverTracksOrLosesARunThatSettledBeforeIt
+--- PASS: TestARestartedSidecarNeverTracksOrLosesARunThatSettledBeforeIt (0.41s)
+=== CONT  TestATruncatedTranscriptIsReReadFromItsNewStart
+--- PASS: TestATruncatedTranscriptIsReReadFromItsNewStart (0.20s)
+=== CONT  TestAnUnownedSpoolIsNeverReadEvenAfterItsWindowLapses
+--- PASS: TestAnUnownedSpoolIsNeverReadEvenAfterItsWindowLapses (0.85s)
+=== CONT  TestTwoLaunchesClaimingOneSpoolAttributeNothingAndSayWhy
+--- PASS: TestTwoLaunchesClaimingOneSpoolAttributeNothingAndSayWhy (0.63s)
+=== CONT  TestMockScenariosShard0
+=== RUN   TestMockScenariosShard0/!md
+=== PAUSE TestMockScenariosShard0/!md
+=== RUN   TestMockScenariosShard0/!edit
+=== PAUSE TestMockScenariosShard0/!edit
+=== RUN   TestMockScenariosShard0/!bash-timeout
+=== PAUSE TestMockScenariosShard0/!bash-timeout
+=== RUN   TestMockScenariosShard0/!web-fetch-redirect
+=== PAUSE TestMockScenariosShard0/!web-fetch-redirect
+=== RUN   TestMockScenariosShard0/!task-reject
+=== PAUSE TestMockScenariosShard0/!task-reject
+=== RUN   TestMockScenariosShard0/!plan
+=== PAUSE TestMockScenariosShard0/!plan
+=== RUN   TestMockScenariosShard0/!push-no-transport
+=== PAUSE TestMockScenariosShard0/!push-no-transport
+=== RUN   TestMockScenariosShard0/!hook-success
+=== PAUSE TestMockScenariosShard0/!hook-success
+=== RUN   TestMockScenariosShard0/!perm-undecidable
+=== PAUSE TestMockScenariosShard0/!perm-undecidable
+=== RUN   TestMockScenariosShard0/!model-fallback
+=== PAUSE TestMockScenariosShard0/!model-fallback
+=== RUN   TestMockScenariosShard0/!usage-opus-absent
+=== PAUSE TestMockScenariosShard0/!usage-opus-absent
+=== RUN   TestMockScenariosShard0/!compact-failed
+=== PAUSE TestMockScenariosShard0/!compact-failed
+=== RUN   TestMockScenariosShard0/!fail-blocking-limit
+=== PAUSE TestMockScenariosShard0/!fail-blocking-limit
+=== RUN   TestMockScenariosShard0/!fail-turn-setup
+=== PAUSE TestMockScenariosShard0/!fail-turn-setup
+=== RUN   TestMockScenariosShard0/!api-403
+=== PAUSE TestMockScenariosShard0/!api-403
+=== RUN   TestMockScenariosShard0/!api-unmodeled
+=== PAUSE TestMockScenariosShard0/!api-unmodeled
+=== RUN   TestMockScenariosShard0/!interrupt
+=== PAUSE TestMockScenariosShard0/!interrupt
+=== CONT  TestMockScenariosShard0/!md
+=== CONT  TestMockScenariosShard0/!model-fallback
+=== CONT  TestMockScenariosShard0/!interrupt
+=== CONT  TestMockScenariosShard0/!api-unmodeled
+=== CONT  TestMockScenariosShard0/!api-403
+=== CONT  TestMockScenariosShard0/!fail-turn-setup
+=== CONT  TestMockScenariosShard0/!fail-blocking-limit
+=== CONT  TestMockScenariosShard0/!compact-failed
+=== CONT  TestMockScenariosShard0/!usage-opus-absent
+=== CONT  TestMockScenariosShard0/!plan
+=== CONT  TestMockScenariosShard0/!perm-undecidable
+=== CONT  TestMockScenariosShard0/!hook-success
+=== CONT  TestMockScenariosShard0/!push-no-transport
+=== CONT  TestMockScenariosShard0/!web-fetch-redirect
+=== CONT  TestMockScenariosShard0/!task-reject
+=== CONT  TestMockScenariosShard0/!bash-timeout
+=== CONT  TestMockScenariosShard0/!edit
+--- PASS: TestMockScenariosShard0 (0.00s)
+    --- PASS: TestMockScenariosShard0/!md (13.23s)
+    --- PASS: TestMockScenariosShard0/!model-fallback (0.28s)
+    --- PASS: TestMockScenariosShard0/!interrupt (0.27s)
+    --- PASS: TestMockScenariosShard0/!api-unmodeled (0.27s)
+    --- PASS: TestMockScenariosShard0/!api-403 (0.27s)
+    --- PASS: TestMockScenariosShard0/!fail-turn-setup (0.29s)
+    --- PASS: TestMockScenariosShard0/!fail-blocking-limit (0.27s)
+    --- PASS: TestMockScenariosShard0/!compact-failed (0.25s)
+    --- PASS: TestMockScenariosShard0/!usage-opus-absent (0.25s)
+    --- PASS: TestMockScenariosShard0/!plan (0.28s)
+    --- PASS: TestMockScenariosShard0/!perm-undecidable (0.28s)
+    --- PASS: TestMockScenariosShard0/!hook-success (0.28s)
+    --- PASS: TestMockScenariosShard0/!push-no-transport (0.28s)
+    --- PASS: TestMockScenariosShard0/!web-fetch-redirect (0.27s)
+    --- PASS: TestMockScenariosShard0/!task-reject (0.25s)
+    --- PASS: TestMockScenariosShard0/!bash-timeout (0.44s)
+    --- PASS: TestMockScenariosShard0/!edit (0.30s)
+PASS
+real 39.88
+user 5.11
+sys 1.69
