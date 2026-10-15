@@ -1845,6 +1845,10 @@ Every commit, whether made by an agent, a merge, or a hook, is authored and comm
 - No code, script, hook or test sets `GIT_AUTHOR_*` / `GIT_COMMITTER_*` for a real repository or writes `user.*` into any repository's config.
 - A throwaway repository that needs an identity (a skill's self-test, a capture fixture) passes it per command with `git -c user.name=… -c user.email=…`, after unsetting inherited `GIT_DIR` / `GIT_WORK_TREE` / `GIT_INDEX_FILE`.
   - Why: on 2026-10-14 a self-test run from inside a git hook inherited `GIT_DIR` and wrote `Test <test@example.com>` into this repository's `.git/config`, authoring thousands of commits as `Test` until history was rewritten.
+- Two guards enforce it, both comparing against `git config --global user.name` / `user.email` and refusing when no global identity is set.
+  - `.githooks/pre-commit` refuses a commit whose `git var GIT_AUTHOR_IDENT` or `GIT_COMMITTER_IDENT` differs, naming every environment variable and `git config --show-origin` value that could have set it. A cherry-pick or rebase keeps its replayed author, so the hook checks only its committer.
+  - The merge queue checks every commit from the target's tip to the merge commit just before the fast-forward (`daemon/internal/merge/identity.go`), and a mismatch fails the merge with the target unmoved.
+  - An outside contributor's commit is refused on the queue's rebase-and-merge path, which lands only local work. It reaches master through its upstream instead, and a branch merged upstream is not checked.
 
 ## Requirements: the manifests are the one record of what a machine needs
 
