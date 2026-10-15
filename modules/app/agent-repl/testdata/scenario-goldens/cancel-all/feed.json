@@ -1,0 +1,166 @@
+{
+  "rows": [
+    {
+      "id": {
+        "value": "${ROW_1}"
+      },
+      "order": {
+        "key": "${ORDER_1}"
+      },
+      "selectable": {},
+      "turn": {
+        "value": "${TURN}"
+      },
+      "userPrompt": {
+        "author": {
+          "label": "You"
+        },
+        "success": {
+          "body": {
+            "blocks": [
+              {
+                "text": {
+                  "text": "!cancel-all"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "detachedSubagent": {
+        "subagent": {
+          "description": {
+            "text": "Fan item one"
+          },
+          "label": {
+            "text": "general-purpose"
+          },
+          "live": {},
+          "runtime": {
+            "startedAtMs": "1800000000019"
+          },
+          "tokens": {
+            "text": "3.2k tok"
+          },
+          "workId": {
+            "text": "toolu_fake_g0000000_1"
+          }
+        }
+      },
+      "id": {
+        "value": "${ROW_2}"
+      },
+      "order": {
+        "key": "${ORDER_2}"
+      },
+      "turn": {
+        "value": "${TURN}"
+      }
+    },
+    {
+      "detachedSubagent": {
+        "subagent": {
+          "description": {
+            "text": "Fan item two"
+          },
+          "label": {
+            "text": "general-purpose"
+          },
+          "live": {},
+          "runtime": {
+            "startedAtMs": "1800000000019"
+          },
+          "tokens": {
+            "text": "3.2k tok"
+          },
+          "workId": {
+            "text": "toolu_fake_g0000000_2"
+          }
+        }
+      },
+      "id": {
+        "value": "${ROW_3}"
+      },
+      "order": {
+        "key": "${ORDER_3}"
+      },
+      "turn": {
+        "value": "${TURN}"
+      }
+    },
+    {
+      "id": {
+        "value": "${ROW_4}"
+      },
+      "order": {
+        "key": "${ORDER_4}"
+      },
+      "shellHead": {
+        "command": {
+          "text": "sleep 100000"
+        },
+        "live": {},
+        "runtime": {
+          "startedAtMs": "1800000000019"
+        },
+        "workId": {
+          "text": "toolu_fake_g0000000_3"
+        }
+      },
+      "turn": {
+        "value": "${TURN}"
+      }
+    },
+    {
+      "activity": {
+        "response": {
+          "finalAnswer": true,
+          "success": {
+            "prose": {
+              "markdown": "Three detached items are live."
+            }
+          },
+          "usage": {
+            "atMs": "1800000000017",
+            "heat": {
+              "position": 0.14373333333333335
+            },
+            "text": "12.9k"
+          }
+        }
+      },
+      "id": {
+        "value": "${ROW_5}"
+      },
+      "order": {
+        "key": "${ORDER_5}"
+      },
+      "selectable": {},
+      "turn": {
+        "value": "${TURN}"
+      }
+    },
+    {
+      "id": {
+        "value": "${ROW_6}"
+      },
+      "order": {
+        "key": "${ORDER_6}"
+      },
+      "turn": {
+        "value": "${TURN}"
+      },
+      "turnEnded": {
+        "concluded": {
+          "answer": {
+            "value": "${ROW_5}"
+          }
+        },
+        "endedAtMs": "${NOW}"
+      }
+    }
+  ],
+  "warnings": []
+}

@@ -416,7 +416,9 @@ func (p *process) apply(line []byte) Reply {
 		p.srv.rememberPushedBash(f)
 		p.srv.rememberPushedPermission(agent, f)
 		p.srv.settleTurn(agent, cmd.Turn, f)
-		p.srv.publishAgent(agentFrame{agent: agent, frame: f, pointer: cmd.Pointer, turn: cmd.Turn, placeMs: cmd.PlaceMs})
+		pushed := stampedEntry(cmd, agent)
+		pushed.frame = f
+		p.srv.publishAgent(pushed)
 		return Reply{OK: true, Count: p.srv.agents.count()}
 
 	case OpPushUserPrompt:
@@ -430,7 +432,9 @@ func (p *process) apply(line []byte) Reply {
 		}
 		p.srv.adoptTurn(agent, prompt)
 		p.srv.foldTurn(agent, prompt)
-		p.srv.publishAgent(agentFrame{agent: agent, prompt: prompt})
+		pushed := stampedEntry(cmd, agent)
+		pushed.prompt = prompt
+		p.srv.publishAgent(pushed)
 		return Reply{OK: true, Count: p.srv.agents.count()}
 
 	case OpFileAgentFrame:
@@ -567,4 +571,12 @@ func awaitSpawnGate(fd int) (bool, error) {
 		return false, nil
 	}
 	return false, fmt.Errorf("fakeshim: read the spawn gate: %w", err)
+}
+
+// stampedEntry is the entry a push command delivers on AGENT's stream before
+// its arm is set: the command's pointer, turn and recorded place, which every
+// pushed entry carries alike, a frame or a prompt, as the real shim serves
+// every entry of its store stamped.
+func stampedEntry(cmd Command, agent string) agentFrame {
+	return agentFrame{agent: agent, pointer: cmd.Pointer, turn: cmd.Turn, placeMs: cmd.PlaceMs}
 }

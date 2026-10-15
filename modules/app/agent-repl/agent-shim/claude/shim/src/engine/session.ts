@@ -280,6 +280,13 @@ interface EngineDeps {
    */
   readonly newUuid?: () => string;
   /**
+   * Mints the vendor session id a FRESH conversation starts under, and the one
+   * a cold gate's clear binds. Injected so a drive that must write the same
+   * rows twice can name it; production mints a random one
+   * (engine/identity.ts, `mintVendorSessionId`).
+   */
+  readonly mintVendorSessionId?: () => string;
+  /**
    * Derives the vendor uuid a turn's prompt is sent under from its turn id —
    * `promptVendorUuid` (convert/ids.ts), and nothing else in production.
    * Injected only so a suite can observe each derived uuid it must stamp
@@ -743,6 +750,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   const sends = new SendLedger();
   /** The minter of the keep-alive send's client uuid, which the vendor echoes back. */
   const newUuid = deps.newUuid ?? randomUUID;
+  /** The minter of a fresh conversation's vendor session id. */
+  const mintSessionId = deps.mintVendorSessionId ?? mintVendorSessionId;
   /**
    * EVERY OTHER SEND'S CLIENT UUID IS ITS TURN'S PROMPT UUID, derived from the
    * turn id (`StartTurnRequest.turn`), so the prompt's transcript record can be
@@ -4684,7 +4693,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // A retry of an attempt that already recorded rows resumes ITS id: minting
       // a second one would key the retry's rows to a book the first attempt's
       // rows are not on.
-      vendorSessionId = recordedOriginalVendorSessionId ?? mintVendorSessionId();
+      vendorSessionId = recordedOriginalVendorSessionId ?? mintSessionId();
       rolledBackTurns.clear();
       requestedModel = normalizeModel(source.value.model?.name ?? "");
       if (source.value.permissionMode !== undefined) permissionMode = source.value.permissionMode;
@@ -5143,7 +5152,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         LOGGER.debug({ vendor_session_id: vendorSessionId }, "cold remediation: paying for the read");
         return { kind: "none" };
       case "clear": {
-        const minted = mintVendorSessionId();
+        const minted = mintSessionId();
         LOGGER.debug(
           { previous_vendor_session_id: vendorSessionId, vendor_session_id: minted },
           "cold remediation: CLEAR — binding a newly minted vendor session id, which discards the context and costs no API call; the AgentId is unaffected (R9)",

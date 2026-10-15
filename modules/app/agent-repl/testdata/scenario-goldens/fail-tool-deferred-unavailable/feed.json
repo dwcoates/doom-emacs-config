@@ -1,0 +1,108 @@
+{
+  "rows": [
+    {
+      "id": {
+        "value": "${ROW_1}"
+      },
+      "order": {
+        "key": "${ORDER_1}"
+      },
+      "selectable": {},
+      "turn": {
+        "value": "${TURN}"
+      },
+      "userPrompt": {
+        "author": {
+          "label": "You"
+        },
+        "success": {
+          "body": {
+            "blocks": [
+              {
+                "text": {
+                  "text": "!fail-tool-deferred-unavailable"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "activity": {
+        "response": {
+          "success": {
+            "prose": {
+              "markdown": "Working on it…"
+            }
+          },
+          "usage": {
+            "atMs": "1800000000004",
+            "heat": {
+              "position": 0.03593333333333334
+            },
+            "text": "3.2k"
+          }
+        }
+      },
+      "id": {
+        "value": "${ROW_2}"
+      },
+      "order": {
+        "key": "${ORDER_2}"
+      },
+      "selectable": {},
+      "turn": {
+        "value": "${TURN}"
+      }
+    },
+    {
+      "id": {
+        "value": "${ROW_3}"
+      },
+      "order": {
+        "key": "${ORDER_3}"
+      },
+      "turn": {
+        "value": "${TURN}"
+      },
+      "turnEnded": {
+        "endedAtMs": "${NOW}",
+        "errored": {
+          "headline": {
+            "text": "the run ended on a tool call deferred to something unavailable"
+          },
+          "marker": {
+            "detail": {
+              "text": "tool deferred unavailable"
+            },
+            "label": {
+              "text": "vendor error"
+            },
+            "vendorFault": {
+              "expansion": {
+                "errorType": {
+                  "text": "tool_deferred_unavailable"
+                },
+                "message": {
+                  "text": "the deferred tool is not available to this host"
+                },
+                "time": {
+                  "atMs": "${NOW}"
+                }
+              }
+            }
+          },
+          "message": {
+            "text": "the deferred tool is not available to this host"
+          },
+          "turnFailed": {
+            "stopReason": "tool_deferred_unavailable",
+            "vendor": {}
+          }
+        }
+      }
+    }
+  ],
+  "warnings": []
+}

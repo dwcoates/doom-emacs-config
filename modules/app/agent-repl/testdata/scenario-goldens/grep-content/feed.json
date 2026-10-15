@@ -1,0 +1,121 @@
+{
+  "rows": [
+    {
+      "id": {
+        "value": "${ROW_1}"
+      },
+      "order": {
+        "key": "${ORDER_1}"
+      },
+      "selectable": {},
+      "turn": {
+        "value": "${TURN}"
+      },
+      "userPrompt": {
+        "author": {
+          "label": "You"
+        },
+        "success": {
+          "body": {
+            "blocks": [
+              {
+                "text": {
+                  "text": "!grep-content"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "activity": {
+        "simpleToolCall": {
+          "clock": {
+            "startedAtMs": "1800000000009",
+            "stopped": {
+              "endedAtMs": "1800000000009"
+            }
+          },
+          "input": {
+            "query": {},
+            "text": "export const"
+          },
+          "name": {
+            "text": "Grep"
+          },
+          "returned": {
+            "lines": {
+              "lines": [
+                "example.ts:1:export const one = 1;",
+                "example.ts:2:export const two = 2;"
+              ],
+              "omitted": {
+                "text": "3 more lines not shown"
+              }
+            },
+            "succeeded": {}
+          }
+        }
+      },
+      "id": {
+        "value": "${ROW_2}"
+      },
+      "order": {
+        "key": "${ORDER_2}"
+      },
+      "turn": {
+        "value": "${TURN}"
+      }
+    },
+    {
+      "activity": {
+        "response": {
+          "finalAnswer": true,
+          "success": {
+            "prose": {
+              "markdown": "Found two matching lines."
+            }
+          },
+          "usage": {
+            "atMs": "1800000000007",
+            "heat": {
+              "position": 0.07186666666666668
+            },
+            "text": "6.5k"
+          }
+        }
+      },
+      "id": {
+        "value": "${ROW_3}"
+      },
+      "order": {
+        "key": "${ORDER_3}"
+      },
+      "selectable": {},
+      "turn": {
+        "value": "${TURN}"
+      }
+    },
+    {
+      "id": {
+        "value": "${ROW_4}"
+      },
+      "order": {
+        "key": "${ORDER_4}"
+      },
+      "turn": {
+        "value": "${TURN}"
+      },
+      "turnEnded": {
+        "concluded": {
+          "answer": {
+            "value": "${ROW_3}"
+          }
+        },
+        "endedAtMs": "${NOW}"
+      }
+    }
+  ],
+  "warnings": []
+}

@@ -1,0 +1,126 @@
+{
+  "rows": [
+    {
+      "id": {
+        "value": "${ROW_1}"
+      },
+      "order": {
+        "key": "${ORDER_1}"
+      },
+      "selectable": {},
+      "turn": {
+        "value": "${TURN}"
+      },
+      "userPrompt": {
+        "author": {
+          "label": "You"
+        },
+        "success": {
+          "body": {
+            "blocks": [
+              {
+                "text": {
+                  "text": "!perm-undecidable"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "activity": {
+        "simpleToolCall": {
+          "denied": {},
+          "input": {
+            "command": {},
+            "text": "./unknown-binary --flag"
+          },
+          "name": {
+            "text": "Bash"
+          }
+        }
+      },
+      "id": {
+        "value": "${ROW_2}"
+      },
+      "order": {
+        "key": "${ORDER_2}"
+      },
+      "turn": {
+        "value": "${TURN}"
+      }
+    },
+    {
+      "id": {
+        "value": "${ROW_3}"
+      },
+      "order": {
+        "key": "${ORDER_3}"
+      },
+      "permission": {
+        "answered": {
+          "deniedUndecidable": {
+            "text": "denied for want of a decider — the deciding machinery could not be reached: the classifier could not reach a verdict for this command"
+          }
+        },
+        "arguments": {},
+        "headline": {
+          "text": "Bash"
+        }
+      },
+      "turn": {
+        "value": "${TURN}"
+      }
+    },
+    {
+      "activity": {
+        "response": {
+          "finalAnswer": true,
+          "success": {
+            "prose": {
+              "markdown": "Nothing could decide whether to allow that."
+            }
+          },
+          "usage": {
+            "atMs": "1800000000006",
+            "heat": {
+              "position": 0.07186666666666668
+            },
+            "text": "6.5k"
+          }
+        }
+      },
+      "id": {
+        "value": "${ROW_4}"
+      },
+      "order": {
+        "key": "${ORDER_4}"
+      },
+      "selectable": {},
+      "turn": {
+        "value": "${TURN}"
+      }
+    },
+    {
+      "id": {
+        "value": "${ROW_5}"
+      },
+      "order": {
+        "key": "${ORDER_5}"
+      },
+      "turn": {
+        "value": "${TURN}"
+      },
+      "turnEnded": {
+        "concluded": {
+          "answer": {
+            "value": "${ROW_4}"
+          }
+        },
+        "endedAtMs": "${NOW}"
+      }
+    }
+  ],
+  "warnings": []
+}

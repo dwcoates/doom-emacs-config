@@ -544,6 +544,7 @@ func assertSessionProceeds(t *testing.T, g *coldGate) {
 // cannot share one arrangement.
 // ---------------------------------------------------------------------------
 
+// Seam: cold-gate
 func TestColdGate(t *testing.T) {
 	t.Parallel()
 	t.Run("Pay", func(t *testing.T) {

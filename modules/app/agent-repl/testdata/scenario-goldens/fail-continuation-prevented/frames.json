@@ -1,9 +1,9 @@
 [
   {
     "upsertKey": "session:mcp_server:u2:echo",
-    "book": "main-agent",
+    "book": "601de000-0000-4000-8000-000000000001",
     "keepalive": false,
-    "turn": "turn-1",
+    "turn": null,
     "recordPlace": null,
     "source": {
       "vendorUuid": "u2:echo",
@@ -21,9 +21,9 @@
   },
   {
     "upsertKey": "session:mcp_server:u2:broken",
-    "book": "main-agent",
+    "book": "601de000-0000-4000-8000-000000000001",
     "keepalive": false,
-    "turn": "turn-1",
+    "turn": null,
     "recordPlace": null,
     "source": {
       "vendorUuid": "u2:broken",
@@ -43,9 +43,9 @@
   },
   {
     "upsertKey": "session:mcp_server:u2:needs-login",
-    "book": "main-agent",
+    "book": "601de000-0000-4000-8000-000000000001",
     "keepalive": false,
-    "turn": "turn-1",
+    "turn": null,
     "recordPlace": null,
     "source": {
       "vendorUuid": "u2:needs-login",
@@ -63,9 +63,9 @@
   },
   {
     "upsertKey": "session:mcp_server:u2:slow",
-    "book": "main-agent",
+    "book": "601de000-0000-4000-8000-000000000001",
     "keepalive": false,
-    "turn": "turn-1",
+    "turn": null,
     "recordPlace": null,
     "source": {
       "vendorUuid": "u2:slow",
@@ -83,9 +83,9 @@
   },
   {
     "upsertKey": "session:mcp_server:u2:switched-off",
-    "book": "main-agent",
+    "book": "601de000-0000-4000-8000-000000000001",
     "keepalive": false,
-    "turn": "turn-1",
+    "turn": null,
     "recordPlace": null,
     "source": {
       "vendorUuid": "u2:switched-off",
@@ -103,9 +103,9 @@
   },
   {
     "upsertKey": "session:fast_mode:u2",
-    "book": "main-agent",
+    "book": "601de000-0000-4000-8000-000000000001",
     "keepalive": false,
-    "turn": "turn-1",
+    "turn": null,
     "recordPlace": null,
     "source": {
       "vendorUuid": "u2",
@@ -123,13 +123,47 @@
     }
   },
   {
-    "upsertKey": "residue:u5",
-    "book": "main-agent",
+    "upsertKey": "prompt:turn-1",
+    "book": "601de000-0000-4000-8000-000000000001",
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": null,
     "source": {
-      "vendorUuid": "u5",
+      "vendorUuid": "turn-1",
+      "discriminator": "agent_prompt"
+    },
+    "item": {
+      "kind": "prompt",
+      "prompt": {
+        "id": {
+          "value": "turn-1"
+        },
+        "agent": {
+          "value": "601de000-0000-4000-8000-000000000001"
+        },
+        "said": {
+          "content": {
+            "blocks": [
+              {
+                "text": {
+                  "text": "!fail-continuation-prevented"
+                }
+              }
+            ]
+          }
+        },
+        "origin": "PROMPT_ORIGIN_USER_SENT"
+      }
+    }
+  },
+  {
+    "upsertKey": "residue:u4",
+    "book": "601de000-0000-4000-8000-000000000001",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u4",
       "discriminator": "residue.vendor_specific.system/informational"
     },
     "item": {
@@ -138,26 +172,26 @@
         "vendorSpecific": {
           "kind": "system/informational",
           "raw": {
-            "session_id": "sess-fake-1",
+            "session_id": "601de000-0000-4000-8000-000000000001",
             "type": "system",
             "subtype": "informational",
             "content": "Execution stopped: continuation was prevented.",
             "level": "warning",
             "prevent_continuation": true,
-            "uuid": "u5"
+            "uuid": "u4"
           }
         }
       }
     }
   },
   {
-    "upsertKey": "terminal:main-agent:u7",
-    "book": "main-agent",
+    "upsertKey": "terminal:601de000-0000-4000-8000-000000000001:u6",
+    "book": "601de000-0000-4000-8000-000000000001",
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": null,
     "source": {
-      "vendorUuid": "u7",
+      "vendorUuid": "u6",
       "discriminator": "agent_frame.failure.stopHookPrevented"
     },
     "item": {
@@ -170,7 +204,7 @@
           ]
         },
         "agentId": {
-          "value": "main-agent"
+          "value": "601de000-0000-4000-8000-000000000001"
         }
       }
     }

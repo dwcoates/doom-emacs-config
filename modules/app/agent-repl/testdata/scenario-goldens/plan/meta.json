@@ -1,6 +1,6 @@
 {
   "scenario": "!plan",
-  "seam": null,
+  "seam": "two-plane-episode",
   "nowMs": 1800000000000,
   "planes": [
     "stream",

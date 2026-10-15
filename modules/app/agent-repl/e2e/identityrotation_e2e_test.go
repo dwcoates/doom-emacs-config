@@ -160,6 +160,8 @@ func awaitTopbarSessionLineNonEmpty(t *testing.T, w *World, topbar *harness.Stre
 // SessionIdentityRotated (observed via the topbar's session line, see the
 // file header) and AgentUpdate.context_cut(ContextCleared) (observed as a
 // feed separation row, matching every other context-cut test in this repo).
+//
+// Seam: clear-rotation
 func TestClearRotatesIdentity(t *testing.T) {
 	t.Parallel()
 	// Arrange

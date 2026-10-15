@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"net"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -252,5 +254,49 @@ func TestASessionPushIsRetriedUntilASessionStreamReceivesIt(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestStampedPush(t *testing.T) {
+	tests := []struct {
+		name  string
+		op    string
+		agent string
+		at    EntryStamp
+		want  controlCommand
+	}{
+		{name: "an unstamped frame push names only the agent and the frame", op: opPushAgentFrame, agent: "main",
+			want: controlCommand{Op: "push_agent_frame", Agent: "main", Payload: "p"}},
+		{name: "every stamp rides at once", op: opPushAgentFrame, agent: "main", at: EntryStamp{Pointer: "7", Turn: "turn-1", PlaceMs: 1000},
+			want: controlCommand{Op: "push_agent_frame", Agent: "main", Pointer: "7", Turn: "turn-1", PlaceMs: 1000, Payload: "p"}},
+		{name: "an empty agent leaves the payload's own agent to the fake", op: opPushAgentFrame, at: EntryStamp{Turn: "turn-1"},
+			want: controlCommand{Op: "push_agent_frame", Turn: "turn-1", Payload: "p"}},
+		{name: "a prompt push carries the same stamps", op: opPushUserPrompt, agent: "main", at: EntryStamp{Pointer: "g-1", Turn: "turn-1", PlaceMs: 1000},
+			want: controlCommand{Op: "push_user_prompt", Agent: "main", Pointer: "g-1", Turn: "turn-1", PlaceMs: 1000, Payload: "p"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := stampedPush(tt.op, tt.agent, tt.at, "p")
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("stampedPush = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEveryEntryPushSendsStampedPush(t *testing.T) {
+	// A push variant that builds its own command can drop a stamp the others
+	// carry; only the op constants may spell the two entry ops.
+	src, err := os.ReadFile("shimctl.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, op := range []string{`"push_agent_frame"`, `"push_user_prompt"`} {
+		if n := strings.Count(string(src), op); n != 1 {
+			t.Fatalf("shimctl.go spells %s %d times, want once, in its op constant", op, n)
+		}
 	}
 }

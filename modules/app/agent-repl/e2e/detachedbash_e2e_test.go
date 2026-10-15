@@ -289,6 +289,7 @@ func dbAwaitSimpleToolCall(
 // test's own act.
 // ===========================================================================
 
+// Seam: shell-spool
 func TestBashDetachedStartAndComplete(t *testing.T) {
 	t.Parallel()
 	gatePath := filepath.Join(t.TempDir(), "detach-gate")
@@ -443,6 +444,7 @@ func dbExpectNoUnmodeledWarning(t *testing.T, stream *harness.Stream[*frontendv1
 // should ever appear for this command.
 // ===========================================================================
 
+// Seam: stream-tool-card
 func TestBashForegroundCompleted(t *testing.T) {
 	t.Parallel()
 	w := NewWorld(t, WorldOpts{})
@@ -474,72 +476,6 @@ func TestBashForegroundCompleted(t *testing.T) {
 		if row.GetShellHead() != nil || row.GetDetachedShell() != nil {
 			t.Errorf("an ordinary foreground bash round trip produced a detached shell bubble: %v", row)
 		}
-	}
-}
-
-// ===========================================================================
-// #36 — BashNonzeroExit.
-//
-// Golden "bash-nonzero-exit" -> prompt "!bash-fail" (shell.ts's BASH_FAIL).
-// A non-zero exit is still a COMPLETED call, drawn SUCCEEDED — "the code is
-// the command's verdict on itself, NOT a failure of the call" (sidecar.md's
-// Gotchas; confirmed verbatim in toolcall.go's bashOcomeText, which returns
-// `true` unconditionally for the Completed arm).
-// ===========================================================================
-
-// ===========================================================================
-// #37 — BashImageOutput.
-//
-// Golden "bash-image-output" -> prompt "!bash-image" (shell.ts's BASH_IMAGE).
-// Per this area's explicit license to confirm the exact emitted
-// FeedToolCallReturned.form (SPEC.md §C #37).
-//
-// LANDING 16 CHANGED THIS SHAPE, AND THIS TEST WITH IT. The card used to draw
-// SUCCEEDED with the `none` arm — nothing at all, indistinguishable from a
-// command that printed nothing — because the form oneof had no image arm and
-// the daemon's bashOutputText fell through its Text type assertion to "".
-// It now draws the `image` arm carrying FeedImageBlock, the very block a
-// prompt body's image uses, with the src the DAEMON composed from the bytes
-// and media type the producers now carry. This test pins the arm BY NAME and
-// the src's own shape, which is the whole of what the landing added.
-// ===========================================================================
-
-// ===========================================================================
-// #38 — BashPartialOutputWithSpill.
-//
-// Golden "bash-partial-output-with-spill" -> prompt "!bash-spill" (shell.ts's
-// BASH_SPILL). The manifest flags this capture's own spool at 241MB, so this
-// test — per SPEC.md's own instruction for this row — reads back only the
-// daemon's small, store-durable COMPOSED SUMMARY line, never the spill file
-// itself. bashOutputText (toolcall.go) appends the fixed phrase "<count>
-// bytes more not shown" onto a partial extent's joined text; that phrase is
-// the summary this test pins.
-// ===========================================================================
-
-func TestBashPartialOutputWithSpill(t *testing.T) {
-	t.Parallel()
-	w := NewWorld(t, WorldOpts{})
-	ws := dbWorkspace(t, w)
-
-	initial, stream := dbOpenRootFeed(t, w, ws)
-	defer stream.Close()
-
-	turn := SubmitPrompt(t, w, ws, "!bash-spill")
-	AwaitTurnEnded(t, w, ws, turn)
-
-	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
-	defer cancel()
-
-	returned := dbAwaitSimpleToolCall(t, ctx, initial, stream, "Bash", "yes | head -100000",
-		func(r *frontendv1.FeedToolCallReturned) bool { return r.GetVerdict() != nil })
-	if returned == nil {
-		t.Fatalf("no Bash tool call returned within %s", DefaultTimeout)
-	}
-	if returned.GetSucceeded() == nil {
-		t.Errorf("a completed command must draw succeeded regardless of output size; got %v", returned.GetVerdict())
-	}
-	if got := returned.GetText().GetText(); !strings.Contains(got, "bytes more not shown") {
-		t.Errorf("returned text = %q, want it to contain the daemon's composed truncation summary (\"bytes more not shown\") — never the 241MB spill file itself", got)
 	}
 }
 

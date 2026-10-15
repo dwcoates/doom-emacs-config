@@ -103,6 +103,7 @@ type skillScenarioCase struct {
 	wantSkill string // the skill name the fake's skillInvocationOf derives.
 }
 
+// Seam: skill
 func TestSkillInvocation(t *testing.T) {
 	t.Parallel()
 	// #64 SkillInvocation -- `skill-invocation` -- tool_use -> ack -> isMeta

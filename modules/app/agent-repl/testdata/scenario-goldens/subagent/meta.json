@@ -1,6 +1,6 @@
 {
   "scenario": "!subagent",
-  "seam": null,
+  "seam": "subagent-frames",
   "nowMs": 1800000000000,
   "planes": [
     "stream",

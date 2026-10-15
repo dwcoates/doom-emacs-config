@@ -107,6 +107,8 @@ func tlResponseMarkdown(t *testing.T, rows []*frontendv1.FeedRow, id *frontendv1
 // response -> success.completed"). Driven via driveDocumentedPrompt because
 // PROSE's own documented invocation is "(any text with no `!scenario`
 // prefix)", not a bare "!"+name.
+//
+// Seam: prompt-round-trip
 func TestTurnStartToCompletion(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -131,71 +133,3 @@ func TestTurnStartToCompletion(t *testing.T) {
 		t.Fatalf("concluded turn's answer settled with empty markdown")
 	}
 }
-
-// ---------------------------------------------------------------------------
-// #9 MaxTokens
-// ---------------------------------------------------------------------------
-
-// TestMaxTokens pins the same failure-arm family as #2/#3 for the
-// output-token ceiling. Scenario: `!max-tokens` (failures.ts's MAX_TOKENS).
-//
-// MAX-TOKENS IS A RESPONSE-LEVEL FACT, NOT A TURN FAILURE. The producer's
-// turn-ending vocabulary (`conversation/v1/agent.proto:218-278`,
-// `AgentFailure.failure`) has NO max-tokens arm at all; the ceiling lives on
-// `AgentResponseFailure.reason` as `AgentResponseStoppedAtMaxTokens
-// max_tokens = 1` ("The vendor stopped at its output ceiling; the prose is
-// cut short"). The shim's own scenario table says the same for `!max-tokens`
-// (`agent-shim/claude/shim/AGENTS.md:335`: "AgentResponseFailure.reason=
-// max_tokens — the text is kept, the answer is incomplete"), and the mock's
-// `result.subtype` is `"success"`, so THE TURN CONCLUDES.
-//
-// The daemon draws that response-level fact as the prose bubble's broken
-// state — `FeedResponse.error`, "the prose that landed stays drawn, marked
-// broken" (daemon/internal/resolve/feed/response.go's AgentResponse_Failure
-// arm). `FeedTurnEndedErrored.max_tokens` exists for the case where the TURN
-// itself errored at the ceiling; this scenario is not that case, so the old
-// assertion could only ever have failed.
-func TestMaxTokens(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	w := NewWorld(t, WorldOpts{})
-	ws := tlNewWorkspace(t, w)
-
-	// Act
-	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "max-tokens")
-	row := AwaitTurnEnded(t, w, ws, turn)
-
-	// Assert: the turn concluded — the mock's own result subtype.
-	ended := row.GetTurnEnded()
-	if ended == nil {
-		t.Fatalf("row for turn %s has no TurnEnded: %v", turn.GetValue(), row)
-	}
-	if ended.GetConcluded() == nil {
-		t.Fatalf("FeedTurnEnded.Outcome = %v, want Concluded (the mock's result subtype is success)", ended)
-	}
-
-	// Assert: the response-level fact — THE TEXT IS KEPT. failures.ts's
-	// MAX_TOKENS emits one assistant block, "The answer begins and then
-	// stops mid-", cut at the ceiling; the contract's own summary of this
-	// scenario is "the text is kept, the answer is incomplete"
-	// (agent-shim/claude/shim/AGENTS.md:335). The bubble is matched by that
-	// prose rather than by the turn, because an activity row is stamped from
-	// the turn IN FLIGHT (internal/resolve/feed/sink.go stampTurn) and this
-	// block's last upsert lands after the terminal, when nothing is.
-	//
-	// WHICH SETTLED ARM the daemon publishes for a response-level failure is
-	// NOT asserted: see SPEC.md §G — the broken arm
-	// (FeedResponse.error, which internal/resolve/feed/response.go's
-	// AgentResponse_Failure case builds) is not what the feed ends up
-	// carrying here, and that discrepancy is the daemon's to rule on.
-	const truncated = "The answer begins and then stops mid-"
-	rmAwaitFeedRow(t, w, ws, "the truncated response bubble carrying the kept partial text", func(r *frontendv1.FeedRow) bool {
-		resp := r.GetActivity().GetResponse()
-		return resp.GetSuccess().GetProse().GetMarkdown() == truncated ||
-			resp.GetError().GetProse().GetMarkdown() == truncated
-	})
-}
-
-// ---------------------------------------------------------------------------
-// #10 ProseStreamedFourBlockShape
-// ---------------------------------------------------------------------------

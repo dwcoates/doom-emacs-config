@@ -1,0 +1,141 @@
+{
+  "rows": [
+    {
+      "id": {
+        "value": "${ROW_1}"
+      },
+      "order": {
+        "key": "${ORDER_1}"
+      },
+      "selectable": {},
+      "turn": {
+        "value": "${TURN}"
+      },
+      "userPrompt": {
+        "author": {
+          "label": "You"
+        },
+        "success": {
+          "body": {
+            "blocks": [
+              {
+                "text": {
+                  "text": "!ide-diagnostics"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "activity": {
+        "simpleToolCall": {
+          "clock": {
+            "startedAtMs": "1800000000010",
+            "stopped": {
+              "endedAtMs": "1800000000010"
+            }
+          },
+          "input": {
+            "path": {},
+            "text": "/w/s/example.ts"
+          },
+          "name": {
+            "text": "Edit"
+          },
+          "returned": {
+            "diagnostics": {
+              "lines": [
+                "/w/s/example.ts:3 · error · Cannot find name 'missing'."
+              ]
+            },
+            "diff": {
+              "lines": [
+                {
+                  "header": {},
+                  "text": "@@ -2,3 +2,3 @@"
+                },
+                {
+                  "context": {},
+                  "text": "export const two = 2;"
+                },
+                {
+                  "removed": {},
+                  "text": "export const three = 3;"
+                },
+                {
+                  "added": {},
+                  "text": "export const three = missing;"
+                },
+                {
+                  "context": {},
+                  "text": "export const four = 4;"
+                }
+              ]
+            },
+            "succeeded": {}
+          }
+        }
+      },
+      "id": {
+        "value": "${ROW_2}"
+      },
+      "order": {
+        "key": "${ORDER_2}"
+      },
+      "turn": {
+        "value": "${TURN}"
+      }
+    },
+    {
+      "activity": {
+        "response": {
+          "finalAnswer": true,
+          "success": {
+            "prose": {
+              "markdown": "The edit introduced a type error."
+            }
+          },
+          "usage": {
+            "atMs": "1800000000008",
+            "heat": {
+              "position": 0.07186666666666668
+            },
+            "text": "6.5k"
+          }
+        }
+      },
+      "id": {
+        "value": "${ROW_3}"
+      },
+      "order": {
+        "key": "${ORDER_3}"
+      },
+      "selectable": {},
+      "turn": {
+        "value": "${TURN}"
+      }
+    },
+    {
+      "id": {
+        "value": "${ROW_4}"
+      },
+      "order": {
+        "key": "${ORDER_4}"
+      },
+      "turn": {
+        "value": "${TURN}"
+      },
+      "turnEnded": {
+        "concluded": {
+          "answer": {
+            "value": "${ROW_3}"
+          }
+        },
+        "endedAtMs": "${NOW}"
+      }
+    }
+  ],
+  "warnings": []
+}

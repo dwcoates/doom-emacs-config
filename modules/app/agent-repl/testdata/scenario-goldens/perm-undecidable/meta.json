@@ -1,6 +1,6 @@
 {
   "scenario": "!perm-undecidable",
-  "seam": null,
+  "seam": "answer-path",
   "nowMs": 1800000000000,
   "planes": [
     "stream",

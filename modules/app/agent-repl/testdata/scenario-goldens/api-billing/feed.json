@@ -1,0 +1,107 @@
+{
+  "rows": [
+    {
+      "id": {
+        "value": "${ROW_1}"
+      },
+      "order": {
+        "key": "${ORDER_1}"
+      },
+      "selectable": {},
+      "turn": {
+        "value": "${TURN}"
+      },
+      "userPrompt": {
+        "author": {
+          "label": "You"
+        },
+        "success": {
+          "body": {
+            "blocks": [
+              {
+                "text": {
+                  "text": "!api-billing"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "activity": {
+        "response": {
+          "notice": {
+            "heading": "Notice — your allowance is exhausted. This is the vendor's own message, not the agent's."
+          },
+          "success": {
+            "prose": {
+              "markdown": "The account has a billing problem."
+            }
+          },
+          "usage": {
+            "atMs": "1800000000004",
+            "heat": {
+              "position": 0.03593333333333334
+            },
+            "text": "3.2k"
+          }
+        }
+      },
+      "id": {
+        "value": "${ROW_2}"
+      },
+      "order": {
+        "key": "${ORDER_2}"
+      },
+      "turn": {
+        "value": "${TURN}"
+      }
+    },
+    {
+      "id": {
+        "value": "${ROW_3}"
+      },
+      "order": {
+        "key": "${ORDER_3}"
+      },
+      "turn": {
+        "value": "${TURN}"
+      },
+      "turnEnded": {
+        "endedAtMs": "${NOW}",
+        "errored": {
+          "billingError": {},
+          "headline": {
+            "text": "the account could not be charged — check your billing"
+          },
+          "marker": {
+            "detail": {
+              "text": "billing error"
+            },
+            "label": {
+              "text": "vendor error"
+            },
+            "vendorFault": {
+              "expansion": {
+                "errorType": {
+                  "text": "billing_error"
+                },
+                "message": {
+                  "text": "The account has a billing problem."
+                },
+                "time": {
+                  "atMs": "${NOW}"
+                }
+              }
+            }
+          },
+          "message": {
+            "text": "The account has a billing problem."
+          }
+        }
+      }
+    }
+  ],
+  "warnings": []
+}

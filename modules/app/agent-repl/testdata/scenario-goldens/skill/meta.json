@@ -1,6 +1,6 @@
 {
   "scenario": "!skill",
-  "seam": null,
+  "seam": "skill",
   "nowMs": 1800000000000,
   "planes": [
     "stream",

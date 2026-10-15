@@ -1,6 +1,6 @@
 {
   "scenario": "!hold",
-  "seam": null,
+  "seam": "interrupt-live-tool",
   "nowMs": 1800000000000,
   "planes": [
     "stream",

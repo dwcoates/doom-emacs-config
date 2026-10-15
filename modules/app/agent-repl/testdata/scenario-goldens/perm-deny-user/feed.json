@@ -1,0 +1,145 @@
+{
+  "rows": [
+    {
+      "id": {
+        "value": "${ROW_1}"
+      },
+      "order": {
+        "key": "${ORDER_1}"
+      },
+      "selectable": {},
+      "turn": {
+        "value": "${TURN}"
+      },
+      "userPrompt": {
+        "author": {
+          "label": "You"
+        },
+        "success": {
+          "body": {
+            "blocks": [
+              {
+                "text": {
+                  "text": "!perm-deny-user"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": {
+        "value": "${ROW_2}"
+      },
+      "order": {
+        "key": "${ORDER_2}"
+      },
+      "permission": {
+        "answered": {
+          "deniedByUser": {
+            "marker": {
+              "label": {
+                "text": "permission denied by you"
+              },
+              "neutral": {}
+            }
+          }
+        },
+        "arguments": {
+          "lines": [
+            "rm -rf /"
+          ]
+        },
+        "clock": {
+          "startedAtMs": "1800000000005",
+          "stopped": {
+            "endedAtMs": "1800000000005"
+          }
+        },
+        "headline": {
+          "text": "Claude wants to run Bash"
+        },
+        "standingOffered": {},
+        "subtitle": {
+          "text": "Claude will use Bash"
+        }
+      },
+      "turn": {
+        "value": "${TURN}"
+      }
+    },
+    {
+      "activity": {
+        "simpleToolCall": {
+          "denied": {},
+          "input": {
+            "command": {},
+            "text": "rm -rf /"
+          },
+          "name": {
+            "text": "Bash"
+          }
+        }
+      },
+      "id": {
+        "value": "${ROW_3}"
+      },
+      "order": {
+        "key": "${ORDER_3}"
+      },
+      "turn": {
+        "value": "${TURN}"
+      }
+    },
+    {
+      "activity": {
+        "response": {
+          "finalAnswer": true,
+          "success": {
+            "prose": {
+              "markdown": "I will not run that."
+            }
+          },
+          "usage": {
+            "atMs": "1800000000006",
+            "heat": {
+              "position": 0.07186666666666668
+            },
+            "text": "6.5k"
+          }
+        }
+      },
+      "id": {
+        "value": "${ROW_4}"
+      },
+      "order": {
+        "key": "${ORDER_4}"
+      },
+      "selectable": {},
+      "turn": {
+        "value": "${TURN}"
+      }
+    },
+    {
+      "id": {
+        "value": "${ROW_5}"
+      },
+      "order": {
+        "key": "${ORDER_5}"
+      },
+      "turn": {
+        "value": "${TURN}"
+      },
+      "turnEnded": {
+        "concluded": {
+          "answer": {
+            "value": "${ROW_4}"
+          }
+        },
+        "endedAtMs": "${NOW}"
+      }
+    }
+  ],
+  "warnings": []
+}

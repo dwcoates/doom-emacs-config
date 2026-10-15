@@ -1,0 +1,152 @@
+{
+  "rows": [
+    {
+      "id": {
+        "value": "${ROW_1}"
+      },
+      "order": {
+        "key": "${ORDER_1}"
+      },
+      "selectable": {},
+      "turn": {
+        "value": "${TURN}"
+      },
+      "userPrompt": {
+        "author": {
+          "label": "You"
+        },
+        "success": {
+          "body": {
+            "blocks": [
+              {
+                "text": {
+                  "text": "!perm-allow-standing"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": {
+        "value": "${ROW_2}"
+      },
+      "order": {
+        "key": "${ORDER_2}"
+      },
+      "permission": {
+        "answered": {
+          "allowedOnce": {}
+        },
+        "arguments": {
+          "lines": [
+            "npm test"
+          ]
+        },
+        "clock": {
+          "startedAtMs": "1800000000005",
+          "stopped": {
+            "endedAtMs": "1800000000005"
+          }
+        },
+        "headline": {
+          "text": "Claude wants to run npm test"
+        },
+        "standingOffered": {},
+        "subtitle": {
+          "text": "Claude will use Bash"
+        },
+        "trigger": {
+          "text": "the command is not covered by an existing rule"
+        }
+      },
+      "turn": {
+        "value": "${TURN}"
+      }
+    },
+    {
+      "activity": {
+        "simpleToolCall": {
+          "clock": {
+            "startedAtMs": "1800000000009",
+            "stopped": {
+              "endedAtMs": "1800000000009"
+            }
+          },
+          "input": {
+            "command": {},
+            "text": "npm test"
+          },
+          "name": {
+            "text": "Bash"
+          },
+          "returned": {
+            "succeeded": {},
+            "text": {
+              "text": "ok\n"
+            }
+          }
+        }
+      },
+      "id": {
+        "value": "${ROW_3}"
+      },
+      "order": {
+        "key": "${ORDER_3}"
+      },
+      "turn": {
+        "value": "${TURN}"
+      }
+    },
+    {
+      "activity": {
+        "response": {
+          "finalAnswer": true,
+          "success": {
+            "prose": {
+              "markdown": "Ran the command with 0 standing rule(s)."
+            }
+          },
+          "usage": {
+            "atMs": "1800000000007",
+            "heat": {
+              "position": 0.07186666666666668
+            },
+            "text": "6.5k"
+          }
+        }
+      },
+      "id": {
+        "value": "${ROW_4}"
+      },
+      "order": {
+        "key": "${ORDER_4}"
+      },
+      "selectable": {},
+      "turn": {
+        "value": "${TURN}"
+      }
+    },
+    {
+      "id": {
+        "value": "${ROW_5}"
+      },
+      "order": {
+        "key": "${ORDER_5}"
+      },
+      "turn": {
+        "value": "${TURN}"
+      },
+      "turnEnded": {
+        "concluded": {
+          "answer": {
+            "value": "${ROW_4}"
+          }
+        },
+        "endedAtMs": "${NOW}"
+      }
+    }
+  ],
+  "warnings": []
+}

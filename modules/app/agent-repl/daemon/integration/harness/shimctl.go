@@ -561,11 +561,41 @@ func (s *ShimControl) PushUnhealthy(faults ...*conversationv1.SessionFault) {
 	})
 }
 
+// EntryStamp is what a pushed agent frame's served entry carries besides the
+// frame: its HistoryPointer (empty: the fake mints the next), the turn it is
+// stamped with (empty: unstamped) and its recorded place in milliseconds
+// (zero: unplaced). The real shim states all three on every entry it serves.
+type EntryStamp struct {
+	Pointer string
+	Turn    string
+	PlaceMs int64
+}
+
+// Ops of the two entry pushes, spelled here alone (stampedPush).
+const (
+	opPushAgentFrame = "push_agent_frame"
+	opPushUserPrompt = "push_user_prompt"
+)
+
+// stampedPush is the one command every entry push sends, a frame (OP
+// opPushAgentFrame) or a delivered prompt (opPushUserPrompt): AGENT's stream
+// (empty: the payload's own agent), stamped AT.
+func stampedPush(op, agent string, at EntryStamp, payload string) controlCommand {
+	return controlCommand{Op: op, Agent: agent, Pointer: at.Pointer, Turn: at.Turn, PlaceMs: at.PlaceMs, Payload: payload}
+}
+
+// PushAgentFrameStamped delivers one agent frame on AGENT's WatchAgent stream
+// as an entry stamped AT, every stamp at once.
+func (s *ShimControl) PushAgentFrameStamped(agent string, at EntryStamp, f *conversationv1.AgentFrame) {
+	s.t.Helper()
+	s.send(stampedPush(opPushAgentFrame, agent, at, encode(s.t, f)))
+}
+
 // PushAgentFrame delivers one agent frame on the matching WatchAgent stream.
 // An empty agent addresses the frame's own agent_id.
 func (s *ShimControl) PushAgentFrame(agent string, f *conversationv1.AgentFrame) {
 	s.t.Helper()
-	s.send(controlCommand{Op: "push_agent_frame", Agent: agent, Payload: encode(s.t, f)})
+	s.PushAgentFrameStamped(agent, EntryStamp{}, f)
 }
 
 // PushAgentFrameAt delivers one agent frame AT A NAMED HistoryPointer, which is
@@ -574,14 +604,14 @@ func (s *ShimControl) PushAgentFrame(agent string, f *conversationv1.AgentFrame)
 // agent_id.
 func (s *ShimControl) PushAgentFrameAt(agent, pointer string, f *conversationv1.AgentFrame) {
 	s.t.Helper()
-	s.send(controlCommand{Op: "push_agent_frame", Agent: agent, Pointer: pointer, Payload: encode(s.t, f)})
+	s.PushAgentFrameStamped(agent, EntryStamp{Pointer: pointer}, f)
 }
 
 // PushAgentFrameIn delivers one agent frame STAMPED with the turn it was
 // produced within, as the real shim stamps every row of an open turn.
 func (s *ShimControl) PushAgentFrameIn(agent, turn string, f *conversationv1.AgentFrame) {
 	s.t.Helper()
-	s.send(controlCommand{Op: "push_agent_frame", Agent: agent, Turn: turn, Payload: encode(s.t, f)})
+	s.PushAgentFrameStamped(agent, EntryStamp{Turn: turn}, f)
 }
 
 // PushAgentFramePlaced delivers one agent frame whose entry sits at AT_MS in
@@ -590,7 +620,7 @@ func (s *ShimControl) PushAgentFrameIn(agent, turn string, f *conversationv1.Age
 // agent_id.
 func (s *ShimControl) PushAgentFramePlaced(agent string, atMs int64, f *conversationv1.AgentFrame) {
 	s.t.Helper()
-	s.send(controlCommand{Op: "push_agent_frame", Agent: agent, PlaceMs: atMs, Payload: encode(s.t, f)})
+	s.PushAgentFrameStamped(agent, EntryStamp{PlaceMs: atMs}, f)
 }
 
 // FileAgentFrame files one agent frame of TURN into AGENT's book on the fake
@@ -614,7 +644,15 @@ func (s *ShimControl) FileUserPrompt(agent string, p *conversationv1.AgentPrompt
 // the feed resolver. An empty agent addresses the prompt's own recipient.
 func (s *ShimControl) PushUserPrompt(agent string, p *conversationv1.AgentPrompt) {
 	s.t.Helper()
-	s.send(controlCommand{Op: "push_user_prompt", Agent: agent, Payload: encode(s.t, p)})
+	s.PushUserPromptStamped(agent, EntryStamp{}, p)
+}
+
+// PushUserPromptStamped delivers one DELIVERED PROMPT as an entry stamped AT:
+// its pointer, its turn and its recorded place, as the real shim serves the
+// prompt of the turn it opens.
+func (s *ShimControl) PushUserPromptStamped(agent string, at EntryStamp, p *conversationv1.AgentPrompt) {
+	s.t.Helper()
+	s.send(stampedPush(opPushUserPrompt, agent, at, encode(s.t, p)))
 }
 
 // PushRetired delivers one RETIRED entry (WatchAgentResponse.retired) on the

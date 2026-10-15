@@ -30,13 +30,11 @@ import { fileURLToPath } from "node:url";
 
 import { toJson } from "@bufbuild/protobuf";
 
-import { createFold } from "../../src/convert/fold.js";
 import { cwdSlug } from "../../src/engine/vendor-paths.js";
 import { conversationv1, storev1 } from "../../src/proto.js";
-import type { CanUseToolLike } from "../../src/sdk/types.js";
 import type { PersistEntry } from "../../src/store/persistence.js";
-import { foldContext } from "../convert/fold-harness.js";
-import { driveScenario, HARNESS_NOW_MS, type DriveOptions, type Driven } from "./harness.js";
+import { driveEngineScenario, type EnginePolicy } from "./golden-engine.js";
+import { HARNESS_NOW_MS } from "./harness.js";
 
 /** Where the goldens live, under the module's shared testdata. */
 export const GOLDENS_DIR = resolve(fileURLToPath(new URL(".", import.meta.url)), "../../../../../testdata/scenario-goldens");
@@ -51,7 +49,7 @@ export const ROOT_TOKEN = "${GOLDEN_ROOT}";
 export const ROOT_SLUG_TOKEN = "${GOLDEN_ROOT_SLUG}";
 
 /** How the drive answers a scenario that blocks on the user, or what it does mid-drive. */
-type Policy = "allow" | "deny" | "answer" | "decline" | "background" | "interrupt";
+type Policy = EnginePolicy;
 
 /** One scenario the goldens cover, and how its drive is completed. */
 export interface GoldenScenario {
@@ -103,68 +101,6 @@ function policyOf(prompt: string): Policy {
   return "allow";
 }
 
-const ALLOW: CanUseToolLike = async (_name, input) => ({ behavior: "allow", updatedInput: input });
-
-const DENY: CanUseToolLike = async () => ({ behavior: "deny", message: "the user declined this call" });
-
-const DECLINE: CanUseToolLike = async () => ({ behavior: "deny", message: "the question was never answered" });
-
-/** Answers every question with its first option, or a free-text answer when it offers none. */
-const ANSWER_FIRST: CanUseToolLike = async (name, input) => {
-  if (name !== "AskUserQuestion") return { behavior: "allow", updatedInput: input };
-  const questions = (input as { questions: { question: string; options?: { label: string }[] }[] }).questions;
-  const answers: Record<string, string> = {};
-  for (const q of questions) answers[q.question] = q.options?.[0]?.label ?? "the user's own answer";
-  return { behavior: "allow", updatedInput: { ...input, answers } };
-};
-
-/** Lets the drive's queued messages reach the collector before acting on them. */
-async function settle(): Promise<void> {
-  for (let i = 0; i < 4; i++) await new Promise((r) => setImmediate(r));
-}
-
-/**
- * The drive's ONE clock: the fake reads it (advancing a millisecond per read)
- * and the fold reads it (without advancing) as each message arrives, so a row
- * the fold places at observation sits on the same timeline as the records the
- * fake stamped.
- */
-interface DriveClock {
-  now: number;
-}
-
-function driveOptions(policy: Policy, clock: DriveClock): DriveOptions {
-  const base: DriveOptions = { opts: { nowMs: () => clock.now++, spawnTag: "g0000000" } };
-  switch (policy) {
-    case "allow":
-      return { ...base, canUseTool: ALLOW };
-    case "deny":
-      return { ...base, canUseTool: DENY };
-    case "answer":
-      return { ...base, canUseTool: ANSWER_FIRST };
-    case "decline":
-      return { ...base, canUseTool: DECLINE };
-    case "background":
-      return {
-        ...base,
-        during: async (query, _prompts, messages) => {
-          await settle();
-          const started = messages.find((m) => m.subtype === "task_started");
-          if (started === undefined) throw new Error("goldens: no task to background");
-          await query.backgroundTasks(String(started.tool_use_id));
-        },
-      };
-    case "interrupt":
-      return {
-        ...base,
-        during: async (query) => {
-          await settle();
-          await query.interrupt();
-        },
-      };
-  }
-}
-
 /** What one scenario's drive produced, with its temp root already substituted. */
 export interface GoldenOutput {
   /** frames.json's content. */
@@ -180,32 +116,23 @@ export function goldenName(prompt: string): string {
   return prompt.replace(/^!/, "");
 }
 
-/** Drive one scenario and render both planes. Must run inside a test (its temp root is the test's). */
+/**
+ * Drive one scenario and render both planes. Must run inside a test (its temp
+ * root is the test's).
+ *
+ * THE STREAM PLANE IS THE ENGINE'S WRITES, not the bare fold's: the engine
+ * writes rows its fold never makes (the gate's asks, a failed or held cut, the
+ * session facts), and the shim serves every one (golden-engine.ts).
+ */
 export async function driveGolden(scenario: GoldenScenario): Promise<GoldenOutput> {
-  const clock: DriveClock = { now: HARNESS_NOW_MS };
-  const fold = createFold();
-  const context = { ...foldContext(), nowMs: () => clock.now };
-  const rows: unknown[] = [];
-  const driven = await driveScenario([scenario.prompt], {
-    ...driveOptions(scenario.policy, clock),
-    onMessage: (message) => {
-      for (const entry of fold.onSdkMessage(message, context).entries) rows.push(renderEntry(entry));
-    },
-  });
-  if (driven.failure !== undefined && !scenario.prompt.startsWith("!query-")) {
-    throw new Error(`goldens: the drive of ${scenario.prompt} died: ${String(driven.failure)}`);
-  }
-  const substitute = substitution(rootOf(driven));
+  const driven = await driveEngineScenario(scenario.prompt, scenario.policy, HARNESS_NOW_MS);
+  const root = resolve(driven.configDir, "..");
+  const substitute = substitution(root);
   return {
-    frames: substitute(`${JSON.stringify(rows, null, 2)}\n`),
+    frames: substitute(`${JSON.stringify(driven.entries.map(renderEntry), null, 2)}\n`),
     meta: { scenario: scenario.prompt, nowMs: HARNESS_NOW_MS, planes: ["stream", "file"] },
-    tree: readTree(rootOf(driven), substitute),
+    tree: readTree(root, substitute),
   };
-}
-
-/** The drive's own temp root: the parent of its config directory. */
-function rootOf(driven: Driven): string {
-  return resolve(driven.configDir, "..");
 }
 
 /** Replaces the root, as written and as resolved, and the vendor's slugs of both. */

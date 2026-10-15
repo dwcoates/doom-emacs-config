@@ -1,0 +1,62 @@
+{
+  "rows": [
+    {
+      "id": {
+        "value": "${ROW_1}"
+      },
+      "order": {
+        "key": "${ORDER_1}"
+      },
+      "selectable": {},
+      "turn": {
+        "value": "${TURN}"
+      },
+      "userPrompt": {
+        "author": {
+          "label": "You"
+        },
+        "success": {
+          "body": {
+            "blocks": [
+              {
+                "text": {
+                  "text": "!fail-continuation-prevented"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": {
+        "value": "${ROW_2}"
+      },
+      "order": {
+        "key": "${ORDER_2}"
+      },
+      "turn": {
+        "value": "${TURN}"
+      },
+      "turnEnded": {
+        "endedAtMs": "${NOW}",
+        "errored": {
+          "headline": {
+            "text": "a Stop hook ended the run"
+          },
+          "marker": {
+            "label": {
+              "text": "Stop hook ended the run"
+            },
+            "neutral": {}
+          },
+          "message": {
+            "text": "continuation was prevented"
+          },
+          "stopHookPrevented": {}
+        }
+      }
+    }
+  ],
+  "warnings": []
+}

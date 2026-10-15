@@ -78,6 +78,8 @@ import (
 // while the Bash tool call is genuinely live, must truncate the call in
 // place and end the turn `success.interrupted` — not a fabricated
 // AgentInterrupted the test invents by racing a sleep.
+//
+// Seam: interrupt-live-tool
 func TestInterruptAfterTextDelta(t *testing.T) {
 	t.Parallel()
 	// Arrange: a world with a scripted-fake-git workspace (a later user

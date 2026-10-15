@@ -1,6 +1,6 @@
 {
   "scenario": "!cancel-all",
-  "seam": null,
+  "seam": "fan-cancel",
   "nowMs": 1800000000000,
   "planes": [
     "stream",

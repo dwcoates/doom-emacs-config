@@ -1,6 +1,6 @@
 {
   "scenario": "!md",
-  "seam": null,
+  "seam": "prompt-round-trip",
   "nowMs": 1800000000000,
   "planes": [
     "stream",

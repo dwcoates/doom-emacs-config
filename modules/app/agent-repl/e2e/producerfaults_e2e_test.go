@@ -187,6 +187,8 @@ func pfQueryDiedWarnings(w *World) {
 // (route.go's routeQueryDiedLocked, "an open turn will never get a terminal
 // now"). feed.proto's arm for exactly that is
 // FeedTurnEndedErrored.query_died.
+//
+// Seam: query-death
 func TestQueryEofEndsTheTurnAsQueryDied(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -339,6 +341,8 @@ func TestConverterDefectOpensADegradedWindow(t *testing.T) {
 // The window is identified across the transition exactly as the store-outage
 // area identifies its own: by component plus began_at_ms, so this asserts
 // THAT window closed rather than merely that some closed window exists.
+//
+// Seam: shim-diagnostics
 func TestConverterRecoveryClosesTheDegradedWindow(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -395,6 +399,8 @@ func TestConverterRecoveryClosesTheDegradedWindow(t *testing.T) {
 // from every page by both planes", so the whole fact under test is a
 // negative: the turn draws its prompt, its prose and its terminal, and not
 // one row more.
+//
+// Seam: two-plane-episode
 func TestResidueAttachmentsDrawNoRow(t *testing.T) {
 	t.Parallel()
 	// Arrange

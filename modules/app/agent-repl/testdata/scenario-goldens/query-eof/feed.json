@@ -1,0 +1,90 @@
+{
+  "rows": [
+    {
+      "id": {
+        "value": "${ROW_1}"
+      },
+      "order": {
+        "key": "${ORDER_1}"
+      },
+      "selectable": {},
+      "turn": {
+        "value": "${TURN}"
+      },
+      "userPrompt": {
+        "author": {
+          "label": "You"
+        },
+        "success": {
+          "body": {
+            "blocks": [
+              {
+                "text": {
+                  "text": "!query-eof"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": {
+        "value": "${ROW_2}"
+      },
+      "order": {
+        "key": "${ORDER_2}"
+      },
+      "turn": {
+        "value": "${TURN}"
+      },
+      "turnEnded": {
+        "endedAtMs": "${NOW}",
+        "errored": {
+          "headline": {
+            "text": "the query died — the agent binary's stream ended without closing"
+          },
+          "marker": {
+            "agentReplFault": {
+              "expansion": {
+                "resend": {
+                  "said": {
+                    "content": {
+                      "blocks": [
+                        {
+                          "text": {
+                            "text": "!query-eof"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                },
+                "time": {
+                  "atMs": "${NOW}"
+                },
+                "whatDied": {
+                  "query": {
+                    "line": {
+                      "text": "the query died — the agent binary's stream ended without closing"
+                    }
+                  }
+                }
+              }
+            },
+            "detail": {
+              "text": "query died"
+            },
+            "label": {
+              "text": "agent-repl"
+            }
+          },
+          "queryDied": {
+            "unexpectedEof": {}
+          }
+        }
+      }
+    }
+  ],
+  "warnings": []
+}

@@ -297,6 +297,31 @@ func TestPushedUserPromptRendersTheUserPromptArm(t *testing.T) {
 	}
 }
 
+func TestStampedEntryCarriesEveryStampOfThePush(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  Command
+		want agentFrame
+	}{
+		{name: "an unstamped push leaves the pointer to the book and states no turn or place",
+			cmd: Command{Op: OpPushUserPrompt}, want: agentFrame{agent: MainAgentID}},
+		{name: "a stamped prompt or frame carries its pointer, turn and place",
+			cmd:  Command{Op: OpPushUserPrompt, Pointer: "g-1", Turn: "turn-1", PlaceMs: 1_800_000_000_000},
+			want: agentFrame{agent: MainAgentID, pointer: "g-1", turn: "turn-1", placeMs: 1_800_000_000_000}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			got := stampedEntry(tt.cmd, MainAgentID)
+
+			// Assert.
+			if got.agent != tt.want.agent || got.pointer != tt.want.pointer || got.turn != tt.want.turn || got.placeMs != tt.want.placeMs {
+				t.Fatalf("stampedEntry = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
 // A RUN THAT ENDED STAYS ENDED, and the real shim says so to every watch
 // opened afterwards -- it answers WatchBash out of a store holding every row
 // the run ever wrote. A fake that forgot the ending on a redial would report a

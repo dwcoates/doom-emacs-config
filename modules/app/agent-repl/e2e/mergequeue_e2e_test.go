@@ -808,6 +808,7 @@ func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 // because SPEC.md's fanout table assigns #39-43 to this writer.
 // ---------------------------------------------------------------------------
 
+// Seam: fan-cancel
 func TestFanWideCancel(t *testing.T) {
 	t.Parallel()
 	// Arrange: a plain registered, opened workspace (no repository/merge

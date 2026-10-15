@@ -1,1 +1,0 @@
-{"parentUuid":null,"isSidechain":true,"agentId":"a1600000000000000","promptId":"u19","type":"user","message":{"role":"user","content":"Fail."},"uuid":"u20","timestamp":"2027-01-15T08:00:00.004Z","userType":"external","entrypoint":"sdk-cli","cwd":"${GOLDEN_ROOT}/workspace","sessionId":"sess-fake-1","version":"2.1.215","gitBranch":"offline"}
