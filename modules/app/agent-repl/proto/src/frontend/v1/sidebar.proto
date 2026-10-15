@@ -35,9 +35,7 @@
 //   └───────────────────────────────────────┘
 //
 // A repo section and the recently-merged section share one header shape
-// (label + fold); a task section's header also carries the task's done
-// check, so it is its own header message rather than a shared one with a
-// field that means nothing for repos.
+// (label + fold).
 
 
 
@@ -62,36 +60,32 @@ option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 message WorkspaceRoster {
   reserved 12;
   reserved "viewed";
-  // EVERY grouping, fully resolved. WHICH ONE IS DRAWN is `shown`: the client
-  // shows one pane and hides the others — a selection between resolved
-  // views, exactly as folding hides rows, never a derivation.
+  // `task` (2), `maturity` (7) and the `shown` choice between groupings (5,
+  // 6, 8) are RETIRED and reserved: the rail draws ONE grouping, by
+  // repository, and nothing else (owner ruling, 2026-10-15).
+  reserved 2, 5, 6, 7, 8;
+  reserved "task", "maturity", "shown_repository", "shown_task", "shown_maturity";
+  // The open workspaces, one section per repository: the rail's one grouping.
   RosterRepositoryView repository = 1;
-  RosterTaskView task = 2;
-  // The maturity grouping: one section per stage of a workspace's work.
-  RosterMaturityView maturity = 7;
-  // Workspaces whose merge has settled, hoisted out of the groupings above
-  // and rendered under EVERY one: that they are done is the interesting fact.
-  // Under the maturity grouping it is the last stage, done.
+  // Workspaces whose merge has settled, hoisted out of the repository
+  // sections and drawn below them: that they are done is the interesting fact.
   RosterMergedSection recently_merged = 3;
   // Workspaces the user has hidden (agentrepl.v1.SetWorkspaceHidden),
-  // hoisted out of every grouping above and rendered under EVERY one, above
+  // hoisted out of the repository sections and drawn below them, above
   // the recently-merged band. A hidden workspace keeps its session and its
   // editor tab, but the Emacs tab bar does not draw, number or navigate to it,
   // exactly as for a workspace of a collapsed repository section. A merged
   // workspace is in recently_merged, never here. Always set.
   RosterHiddenSection hidden = 9;
-  // THE OPEN-WORKSPACES SECTION's heading and fold: the box every grouping
-  // above draws its sections in, under one "Open" header, above the hidden
-  // section. Its count is the shown grouping's own (RosterRepositoryView,
-  // RosterTaskView and RosterMaturityView each carry `open_count`), because
-  // the groupings do not list the same workspaces: the task grouping leaves
-  // an unassigned workspace out. Always set.
+  // THE OPEN-WORKSPACES SECTION's heading and fold: the box the repository
+  // sections are drawn in, under one "Open" header, above the hidden
+  // section. Its count is RosterRepositoryView.open_count. Always set.
   RosterOpenSection open = 13;
   // THE EDITOR'S TAB BAR, in registry order. The registry holds one order
   // of every workspace; this is that order restricted to open workspaces,
-  // and it is independent of the groupings above, so repositories
+  // and it is independent of the repository sections above, so repositories
   // interleave and a child need not follow its parent. Clients draw it as
-  // sent and never derive a tab order from the groupings. Always set.
+  // sent and never derive a tab order from the sections. Always set.
   RosterTabBar tab_bar = 10;
   // THE ROSTER'S REVISION: the daemon raises it for every roster it
   // resolves, so of two rosters (or a roster and an OpenTabs answer's row,
@@ -102,25 +96,7 @@ message WorkspaceRoster {
   // The selected workspace — the last SelectWorkspace the daemon received.
   // UNSET when there is none.
   optional RosterCurrentWorkspace current = 4;
-  // WHICH GROUPING EVERY PAGE SHOWS. DAEMON-HELD (UpdateSidebarView), because
-  // the sidebar looks the same in every workspace's page (owner ruling,
-  // 2026-10-06). Never shown otherwise, it is the repository grouping. Never
-  // unset on the wire.
-  oneof shown {
-    RosterShownRepository shown_repository = 5;
-    RosterShownTask shown_task = 6;
-    RosterShownMaturity shown_maturity = 8;
-  }
 }
-
-// The repository grouping is shown. DELIBERATELY EMPTY: the arm is the fact.
-message RosterShownRepository {}
-
-// The task grouping is shown. DELIBERATELY EMPTY: the arm is the fact.
-message RosterShownTask {}
-
-// The maturity grouping is shown. DELIBERATELY EMPTY: the arm is the fact.
-message RosterShownMaturity {}
 
 // Every open workspace, one tab each, first tab first. A closed workspace
 // has no tab and is absent. Withheld tabs stay in the list so a client
@@ -132,7 +108,7 @@ message RosterTabBar {
 // One open workspace's tab.
 message RosterTab {
   // Which workspace the tab is. The row carrying its name and status is
-  // the one in the groupings with the same ref.
+  // the one in the roster's sections with the same ref.
   workspace.v1.WorkspaceRef workspace = 1;
   // Whether the tab is drawn. Only a drawn tab takes a number and a stop
   // for left/right navigation; the two withheld arms say why it is not.
@@ -393,39 +369,20 @@ message RosterCurrentWorkspace {
 }
 
 
-// The repository grouping's sections, in the order they render.
+// The rail's one grouping: the open workspaces, one section per repository,
+// in the order they render.
 message RosterRepositoryView {
   // One section per repository. Order is the resolver's; clients do not
   // re-sort.
   repeated RosterRepoSection sections = 1;
-  // How many rows the open-workspaces section lists under this grouping
-  // (RosterOpenCount). Always set.
+  // How many rows the open-workspaces section lists (RosterOpenCount).
+  // Always set.
   RosterOpenCount open_count = 2;
 }
 
-// The task grouping's sections, in the order they render.
-message RosterTaskView {
-  // One section per task. Order is the resolver's; clients do not re-sort.
-  repeated RosterTaskSection sections = 1;
-  // How many rows the open-workspaces section lists under this grouping
-  // (RosterOpenCount). Always set.
-  RosterOpenCount open_count = 2;
-}
-
-// The maturity grouping's sections, in the order they render: EVERY stage,
-// in the order work moves through them (backlog, in progress, merging), each
-// exactly once. A stage with no workspaces still draws its section, so the
-// grouping keeps its shape as work moves on. Clients do not re-sort.
-message RosterMaturityView {
-  repeated RosterMaturitySection sections = 1;
-  // How many rows the open-workspaces section lists under this grouping
-  // (RosterOpenCount). Always set.
-  RosterOpenCount open_count = 2;
-}
-
-// The open-workspaces section: the heading over whichever grouping is shown,
+// The open-workspaces section: the heading over the repository sections,
 // drawn like the hidden and recently-merged sections' (fold toggle and label),
-// with the shown grouping's open_count beside the label whether the section
+// with RosterRepositoryView.open_count beside the label whether the section
 // is folded or not (owner request, 2026-10-13).
 message RosterOpenSection {
   RosterLabel label = 1;
@@ -434,9 +391,9 @@ message RosterOpenSection {
   // tab bar draws an open workspace whichever arm is set. Never folded or
   // unfolded by anyone, it is EXPANDED. Never unset on the wire.
   oneof fold {
-    // The groupings' sections are shown.
+    // The repository sections are shown.
     RosterOpenSectionExpanded expanded = 2;
-    // The groupings' sections are folded away; the header and its count stay.
+    // The repository sections are folded away; the header and its count stay.
     RosterOpenSectionCollapsed collapsed = 3;
   }
 }
@@ -447,44 +404,13 @@ message RosterOpenSectionExpanded {}
 // A collapsed open-workspaces section. DELIBERATELY EMPTY: the arm is the fact.
 message RosterOpenSectionCollapsed {}
 
-// How many rows the open-workspaces section lists under one grouping: every
-// row of every one of the grouping's sections, nested family rows included,
-// that is not closed. It is the sum of the grouping's section counts
+// How many rows the open-workspaces section lists: every row of every
+// repository section, nested family rows included, that is not closed. It is
+// the sum of the repository sections' counts
 // (RosterSectionCount), so it is the number a person arrives at by counting
 // every entry, a folded section's included.
 message RosterOpenCount {
   uint32 workspaces = 1;
-}
-
-// One stage's section: identity, header, rows.
-message RosterMaturitySection {
-  // The stage's identity: the fold key, echoed to UpdateSidebarView.
-  RosterMaturityKey key = 1;
-  // The header box: label, fold toggle, and the folded count.
-  RosterSectionHeader header = 2;
-  // The rows below the header, nested by branch lineage WITHIN the stage: a
-  // workspace whose parent is in another stage is a root here.
-  RosterRows rows = 3;
-  // WHETHER THE SECTION IS FOLDED. DAEMON-HELD (UpdateSidebarView), because a
-  // fold is no page's own (owner ruling, 2026-10-06). A stage never folded is
-  // expanded. Never unset on a wire section.
-  oneof fold {
-    // The rows are shown.
-    RosterMaturitySectionExpanded expanded = 4;
-    // The rows are hidden; the header and its count stay.
-    RosterMaturitySectionCollapsed collapsed = 5;
-  }
-}
-
-// An expanded stage section. DELIBERATELY EMPTY: the arm is the fact.
-message RosterMaturitySectionExpanded {}
-
-// A collapsed stage section. DELIBERATELY EMPTY: the arm is the fact.
-message RosterMaturitySectionCollapsed {}
-
-// A stage's stable identity — the imported join key.
-message RosterMaturityKey {
-  workspace.v1.MaturityStage stage = 1;
 }
 
 // One repository's section: identity, header, rows.
@@ -577,43 +503,11 @@ message RosterRepoKey {
   workspace.v1.RepositoryRef repository = 1;
 }
 
-// One task's section: identity, header (with the done check), rows.
-message RosterTaskSection {
-  // The task's stable identity — the ID, NOT the title: a task can be renamed
-  // without becoming a different task.
-  RosterTaskKey key = 1;
-  // The header box: label, fold toggle, done check.
-  RosterTaskSectionHeader header = 2;
-  // The rows below the header.
-  RosterRows rows = 3;
-  // WHETHER THE SECTION IS FOLDED. DAEMON-HELD (UpdateSidebarView), because a
-  // fold is no page's own: every workspace's page draws the same one (owner
-  // ruling, 2026-10-06). A task never folded is expanded. Never unset on a
-  // wire section.
-  oneof fold {
-    // The rows are shown.
-    RosterTaskSectionExpanded expanded = 4;
-    // The rows are hidden; the header stays.
-    RosterTaskSectionCollapsed collapsed = 5;
-  }
-}
-
-// An expanded task section. DELIBERATELY EMPTY: the arm is the fact.
-message RosterTaskSectionExpanded {}
-
-// A collapsed task section. DELIBERATELY EMPTY: the arm is the fact.
-message RosterTaskSectionCollapsed {}
-
-// A task's stable identity.
-message RosterTaskKey {
-  string task_id = 1;
-}
-
 // The recently-merged section: header and one group per repository. It has
 // no key of its own — the roster carries exactly one, so its fold identity is
-// fixed. It holds a WEEK of merges (owner request, 2026-10-11): a merge older
-// than that is drawn in no section, and the daemon re-renders the instant one
-// ages out.
+// fixed. It holds the 100 MOST RECENT merges (owner ruling, 2026-10-15): an
+// older merge is drawn in no section, and leaves the band in the push that
+// carries the newer merge displacing it.
 //
 //   ▾ Recently Merged            (2)        RosterMergedSection
 //     repo-a                                  RosterMergedRepoGroup → header
@@ -622,7 +516,7 @@ message RosterTaskKey {
 //       ✓ merged-row               1d           RosterRow
 //
 // THE REPOSITORY FOLD IS THE ONLY FOLD A GROUP HAS. A group draws no fold
-// toggle of its own: collapsing a repository in the repository grouping
+// toggle of its own: collapsing a repository's section
 // (RosterRepoSection.fold) takes that repository's group out of this band,
 // and expanding it puts the group back. The band's own fold still folds the
 // whole band.
@@ -634,7 +528,7 @@ message RosterMergedSection {
   reserved 2;
   reserved "rows";
   // One group per repository that has at least one merged workspace, in the
-  // repository grouping's order (by repository name, then id). A repository
+  // repository sections' order (by repository name, then id). A repository
   // with no merged workspace has no group. Rows are FLAT within a group, most
   // recently merged first: a settled merge has no family left to draw.
   //
@@ -698,8 +592,8 @@ message RosterMergedRepoGroupHeader {
 // arm is the fact.
 message RosterMergedRepoGroupShown {}
 
-// An undrawn merged group: its repository is collapsed in the repository
-// grouping. DELIBERATELY EMPTY: the arm is the fact.
+// An undrawn merged group: its repository's section is collapsed.
+// DELIBERATELY EMPTY: the arm is the fact.
 message RosterMergedRepoGroupRepositoryCollapsed {}
 
 // The hidden-workspaces section: header and rows. It has no key of its own --
@@ -735,10 +629,9 @@ message RosterHiddenSectionExpanded {}
 // A collapsed hidden-workspaces section. DELIBERATELY EMPTY: the arm is the fact.
 message RosterHiddenSectionCollapsed {}
 
-// A section header as repos, maturity stages and the merged section draw it.
+// A section header as repos and the merged section draw it.
 // The fold it toggles is the SECTION's (RosterRepoSection.fold,
-// RosterMaturitySection.fold, RosterMergedSection.fold), never an element of
-// the header.
+// RosterMergedSection.fold), never an element of the header.
 message RosterSectionHeader {
   RosterLabel label = 1;
   // How many workspaces the section SHOWS UNFOLDED, drawn as "(N)" beside the
@@ -755,7 +648,7 @@ message RosterSectionHeader {
   RosterSectionCount count = 2;
 }
 
-// A section's workspace count. A repository or maturity section's is every row of its
+// A section's workspace count. A repository section's is every row of its
 // rows region, nested family rows included, that is NOT closed
 // (RosterRowClosed): a closed row rides the wire for Emacs but is never
 // drawn, and its live descendants are drawn in its place. The merged band's
@@ -765,26 +658,12 @@ message RosterSectionCount {
   uint32 workspaces = 1;
 }
 
-// A task section's header: label + the task's done check. Its own message
-// because the done axis exists ONLY for tasks — a repository is never
-// "done", and a shared header with a done field would carry a value that
-// means nothing there.
-message RosterTaskSectionHeader {
-  RosterLabel label = 1;
-  RosterTaskDone done = 2;
-}
-
 // A section's display label. DISPLAY ONLY, never the identity: the repo key
-// or task id beside the header is. Carried so the heading has one author.
+// beside the header is. Carried so the heading has one author.
 message RosterLabel {
   string text = 1;
 }
 
-
-// A task's done check.
-message RosterTaskDone {
-  bool done = 1;
-}
 
 // The rows region of a section, in render order.
 message RosterRows {

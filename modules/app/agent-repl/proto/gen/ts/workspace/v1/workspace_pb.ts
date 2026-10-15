@@ -21,7 +21,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file workspace/v1/workspace.proto.
  */
 export const file_workspace_v1_workspace: GenFile = /*@__PURE__*/
-  fileDesc("Chx3b3Jrc3BhY2UvdjEvd29ya3NwYWNlLnByb3RvEgx3b3Jrc3BhY2UudjEiJwoMV29ya3NwYWNlUmVmEgoKAmlkGAEgASgJEgsKA2RpchgCIAEoCSIoCg1SZXBvc2l0b3J5UmVmEgoKAmlkGAEgASgJEgsKA2RpchgCIAEoCSLEAQoNTWF0dXJpdHlTdGFnZRI1CgdiYWNrbG9nGAEgASgLMiIud29ya3NwYWNlLnYxLk1hdHVyaXR5U3RhZ2VCYWNrbG9nSAASPAoLaW5fcHJvZ3Jlc3MYAiABKAsyJS53b3Jrc3BhY2UudjEuTWF0dXJpdHlTdGFnZUluUHJvZ3Jlc3NIABI1CgdtZXJnaW5nGAMgASgLMiIud29ya3NwYWNlLnYxLk1hdHVyaXR5U3RhZ2VNZXJnaW5nSABCBwoFc3RhZ2UiFgoUTWF0dXJpdHlTdGFnZUJhY2tsb2ciGQoXTWF0dXJpdHlTdGFnZUluUHJvZ3Jlc3MiFgoUTWF0dXJpdHlTdGFnZU1lcmdpbmdCKlooYWdlbnRyZXBsL3Byb3RvL3dvcmtzcGFjZS92MTt3b3Jrc3BhY2V2MWIGcHJvdG8z");
+  fileDesc("Chx3b3Jrc3BhY2UvdjEvd29ya3NwYWNlLnByb3RvEgx3b3Jrc3BhY2UudjEiJwoMV29ya3NwYWNlUmVmEgoKAmlkGAEgASgJEgsKA2RpchgCIAEoCSIoCg1SZXBvc2l0b3J5UmVmEgoKAmlkGAEgASgJEgsKA2RpchgCIAEoCUIqWihhZ2VudHJlcGwvcHJvdG8vd29ya3NwYWNlL3YxO3dvcmtzcGFjZXYxYgZwcm90bzM");
 
 /**
  * A workspace, as the daemon identifies it.
@@ -83,104 +83,4 @@ export type RepositoryRef = Message<"workspace.v1.RepositoryRef"> & {
  */
 export const RepositoryRefSchema: GenMessage<RepositoryRef> = /*@__PURE__*/
   messageDesc(file_workspace_v1_workspace, 1);
-
-/**
- * How far along a workspace's work is: the stage the sidebar's maturity
- * grouping files it under. The daemon resolves it and clients echo it back
- * (UpdateSidebarView folds a stage's section); a client never derives one.
- *
- * THE STAGES, in the order work moves through them:
- *
- *   - backlog: registered, and no turn has ever run in it;
- *   - in_progress: a turn has run, and no merge is in hand;
- *   - merging: a merge is queued, running, or failed and back with the user.
- *
- * DONE IS NOT A STAGE HERE. A settled merge is the roster's recently-merged
- * band (frontend.v1.WorkspaceRoster.recently_merged), which every grouping
- * draws under its sections, so the maturity grouping's last stage is that
- * band rather than a section of its own.
- *
- * @generated from message workspace.v1.MaturityStage
- */
-export type MaturityStage = Message<"workspace.v1.MaturityStage"> & {
-  /**
-   * THE ARM IS THE STAGE. Unset is malformed.
-   *
-   * @generated from oneof workspace.v1.MaturityStage.stage
-   */
-  stage: {
-    /**
-     * @generated from field: workspace.v1.MaturityStageBacklog backlog = 1;
-     */
-    value: MaturityStageBacklog;
-    case: "backlog";
-  } | {
-    /**
-     * @generated from field: workspace.v1.MaturityStageInProgress in_progress = 2;
-     */
-    value: MaturityStageInProgress;
-    case: "inProgress";
-  } | {
-    /**
-     * @generated from field: workspace.v1.MaturityStageMerging merging = 3;
-     */
-    value: MaturityStageMerging;
-    case: "merging";
-  } | { case: undefined; value?: undefined };
-};
-
-/**
- * Describes the message workspace.v1.MaturityStage.
- * Use `create(MaturityStageSchema)` to create a new message.
- */
-export const MaturityStageSchema: GenMessage<MaturityStage> = /*@__PURE__*/
-  messageDesc(file_workspace_v1_workspace, 2);
-
-/**
- * No turn has ever run in the workspace. DELIBERATELY EMPTY: the arm is the
- * fact.
- *
- * @generated from message workspace.v1.MaturityStageBacklog
- */
-export type MaturityStageBacklog = Message<"workspace.v1.MaturityStageBacklog"> & {
-};
-
-/**
- * Describes the message workspace.v1.MaturityStageBacklog.
- * Use `create(MaturityStageBacklogSchema)` to create a new message.
- */
-export const MaturityStageBacklogSchema: GenMessage<MaturityStageBacklog> = /*@__PURE__*/
-  messageDesc(file_workspace_v1_workspace, 3);
-
-/**
- * A turn has run and no merge is in hand. DELIBERATELY EMPTY: the arm is the
- * fact.
- *
- * @generated from message workspace.v1.MaturityStageInProgress
- */
-export type MaturityStageInProgress = Message<"workspace.v1.MaturityStageInProgress"> & {
-};
-
-/**
- * Describes the message workspace.v1.MaturityStageInProgress.
- * Use `create(MaturityStageInProgressSchema)` to create a new message.
- */
-export const MaturityStageInProgressSchema: GenMessage<MaturityStageInProgress> = /*@__PURE__*/
-  messageDesc(file_workspace_v1_workspace, 4);
-
-/**
- * A merge is queued, running, or failed. DELIBERATELY EMPTY: the arm is the
- * fact.
- *
- * @generated from message workspace.v1.MaturityStageMerging
- */
-export type MaturityStageMerging = Message<"workspace.v1.MaturityStageMerging"> & {
-};
-
-/**
- * Describes the message workspace.v1.MaturityStageMerging.
- * Use `create(MaturityStageMergingSchema)` to create a new message.
- */
-export const MaturityStageMergingSchema: GenMessage<MaturityStageMerging> = /*@__PURE__*/
-  messageDesc(file_workspace_v1_workspace, 5);
 

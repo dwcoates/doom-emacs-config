@@ -147,234 +147,6 @@ func (x *RepositoryRef) GetDir() string {
 	return ""
 }
 
-// How far along a workspace's work is: the stage the sidebar's maturity
-// grouping files it under. The daemon resolves it and clients echo it back
-// (UpdateSidebarView folds a stage's section); a client never derives one.
-//
-// THE STAGES, in the order work moves through them:
-//
-//   - backlog: registered, and no turn has ever run in it;
-//   - in_progress: a turn has run, and no merge is in hand;
-//   - merging: a merge is queued, running, or failed and back with the user.
-//
-// DONE IS NOT A STAGE HERE. A settled merge is the roster's recently-merged
-// band (frontend.v1.WorkspaceRoster.recently_merged), which every grouping
-// draws under its sections, so the maturity grouping's last stage is that
-// band rather than a section of its own.
-type MaturityStage struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// THE ARM IS THE STAGE. Unset is malformed.
-	//
-	// Types that are valid to be assigned to Stage:
-	//
-	//	*MaturityStage_Backlog
-	//	*MaturityStage_InProgress
-	//	*MaturityStage_Merging
-	Stage         isMaturityStage_Stage `protobuf_oneof:"stage"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *MaturityStage) Reset() {
-	*x = MaturityStage{}
-	mi := &file_workspace_v1_workspace_proto_msgTypes[2]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *MaturityStage) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*MaturityStage) ProtoMessage() {}
-
-func (x *MaturityStage) ProtoReflect() protoreflect.Message {
-	mi := &file_workspace_v1_workspace_proto_msgTypes[2]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use MaturityStage.ProtoReflect.Descriptor instead.
-func (*MaturityStage) Descriptor() ([]byte, []int) {
-	return file_workspace_v1_workspace_proto_rawDescGZIP(), []int{2}
-}
-
-func (x *MaturityStage) GetStage() isMaturityStage_Stage {
-	if x != nil {
-		return x.Stage
-	}
-	return nil
-}
-
-func (x *MaturityStage) GetBacklog() *MaturityStageBacklog {
-	if x != nil {
-		if x, ok := x.Stage.(*MaturityStage_Backlog); ok {
-			return x.Backlog
-		}
-	}
-	return nil
-}
-
-func (x *MaturityStage) GetInProgress() *MaturityStageInProgress {
-	if x != nil {
-		if x, ok := x.Stage.(*MaturityStage_InProgress); ok {
-			return x.InProgress
-		}
-	}
-	return nil
-}
-
-func (x *MaturityStage) GetMerging() *MaturityStageMerging {
-	if x != nil {
-		if x, ok := x.Stage.(*MaturityStage_Merging); ok {
-			return x.Merging
-		}
-	}
-	return nil
-}
-
-type isMaturityStage_Stage interface {
-	isMaturityStage_Stage()
-}
-
-type MaturityStage_Backlog struct {
-	Backlog *MaturityStageBacklog `protobuf:"bytes,1,opt,name=backlog,proto3,oneof"`
-}
-
-type MaturityStage_InProgress struct {
-	InProgress *MaturityStageInProgress `protobuf:"bytes,2,opt,name=in_progress,json=inProgress,proto3,oneof"`
-}
-
-type MaturityStage_Merging struct {
-	Merging *MaturityStageMerging `protobuf:"bytes,3,opt,name=merging,proto3,oneof"`
-}
-
-func (*MaturityStage_Backlog) isMaturityStage_Stage() {}
-
-func (*MaturityStage_InProgress) isMaturityStage_Stage() {}
-
-func (*MaturityStage_Merging) isMaturityStage_Stage() {}
-
-// No turn has ever run in the workspace. DELIBERATELY EMPTY: the arm is the
-// fact.
-type MaturityStageBacklog struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *MaturityStageBacklog) Reset() {
-	*x = MaturityStageBacklog{}
-	mi := &file_workspace_v1_workspace_proto_msgTypes[3]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *MaturityStageBacklog) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*MaturityStageBacklog) ProtoMessage() {}
-
-func (x *MaturityStageBacklog) ProtoReflect() protoreflect.Message {
-	mi := &file_workspace_v1_workspace_proto_msgTypes[3]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use MaturityStageBacklog.ProtoReflect.Descriptor instead.
-func (*MaturityStageBacklog) Descriptor() ([]byte, []int) {
-	return file_workspace_v1_workspace_proto_rawDescGZIP(), []int{3}
-}
-
-// A turn has run and no merge is in hand. DELIBERATELY EMPTY: the arm is the
-// fact.
-type MaturityStageInProgress struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *MaturityStageInProgress) Reset() {
-	*x = MaturityStageInProgress{}
-	mi := &file_workspace_v1_workspace_proto_msgTypes[4]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *MaturityStageInProgress) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*MaturityStageInProgress) ProtoMessage() {}
-
-func (x *MaturityStageInProgress) ProtoReflect() protoreflect.Message {
-	mi := &file_workspace_v1_workspace_proto_msgTypes[4]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use MaturityStageInProgress.ProtoReflect.Descriptor instead.
-func (*MaturityStageInProgress) Descriptor() ([]byte, []int) {
-	return file_workspace_v1_workspace_proto_rawDescGZIP(), []int{4}
-}
-
-// A merge is queued, running, or failed. DELIBERATELY EMPTY: the arm is the
-// fact.
-type MaturityStageMerging struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *MaturityStageMerging) Reset() {
-	*x = MaturityStageMerging{}
-	mi := &file_workspace_v1_workspace_proto_msgTypes[5]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *MaturityStageMerging) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*MaturityStageMerging) ProtoMessage() {}
-
-func (x *MaturityStageMerging) ProtoReflect() protoreflect.Message {
-	mi := &file_workspace_v1_workspace_proto_msgTypes[5]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use MaturityStageMerging.ProtoReflect.Descriptor instead.
-func (*MaturityStageMerging) Descriptor() ([]byte, []int) {
-	return file_workspace_v1_workspace_proto_rawDescGZIP(), []int{5}
-}
-
 var File_workspace_v1_workspace_proto protoreflect.FileDescriptor
 
 const file_workspace_v1_workspace_proto_rawDesc = "" +
@@ -385,16 +157,7 @@ const file_workspace_v1_workspace_proto_rawDesc = "" +
 	"\x03dir\x18\x02 \x01(\tR\x03dir\"1\n" +
 	"\rRepositoryRef\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x10\n" +
-	"\x03dir\x18\x02 \x01(\tR\x03dir\"\xe2\x01\n" +
-	"\rMaturityStage\x12>\n" +
-	"\abacklog\x18\x01 \x01(\v2\".workspace.v1.MaturityStageBacklogH\x00R\abacklog\x12H\n" +
-	"\vin_progress\x18\x02 \x01(\v2%.workspace.v1.MaturityStageInProgressH\x00R\n" +
-	"inProgress\x12>\n" +
-	"\amerging\x18\x03 \x01(\v2\".workspace.v1.MaturityStageMergingH\x00R\amergingB\a\n" +
-	"\x05stage\"\x16\n" +
-	"\x14MaturityStageBacklog\"\x19\n" +
-	"\x17MaturityStageInProgress\"\x16\n" +
-	"\x14MaturityStageMergingB*Z(agentrepl/proto/workspace/v1;workspacev1b\x06proto3"
+	"\x03dir\x18\x02 \x01(\tR\x03dirB*Z(agentrepl/proto/workspace/v1;workspacev1b\x06proto3"
 
 var (
 	file_workspace_v1_workspace_proto_rawDescOnce sync.Once
@@ -408,24 +171,17 @@ func file_workspace_v1_workspace_proto_rawDescGZIP() []byte {
 	return file_workspace_v1_workspace_proto_rawDescData
 }
 
-var file_workspace_v1_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_workspace_v1_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
 var file_workspace_v1_workspace_proto_goTypes = []any{
-	(*WorkspaceRef)(nil),            // 0: workspace.v1.WorkspaceRef
-	(*RepositoryRef)(nil),           // 1: workspace.v1.RepositoryRef
-	(*MaturityStage)(nil),           // 2: workspace.v1.MaturityStage
-	(*MaturityStageBacklog)(nil),    // 3: workspace.v1.MaturityStageBacklog
-	(*MaturityStageInProgress)(nil), // 4: workspace.v1.MaturityStageInProgress
-	(*MaturityStageMerging)(nil),    // 5: workspace.v1.MaturityStageMerging
+	(*WorkspaceRef)(nil),  // 0: workspace.v1.WorkspaceRef
+	(*RepositoryRef)(nil), // 1: workspace.v1.RepositoryRef
 }
 var file_workspace_v1_workspace_proto_depIdxs = []int32{
-	3, // 0: workspace.v1.MaturityStage.backlog:type_name -> workspace.v1.MaturityStageBacklog
-	4, // 1: workspace.v1.MaturityStage.in_progress:type_name -> workspace.v1.MaturityStageInProgress
-	5, // 2: workspace.v1.MaturityStage.merging:type_name -> workspace.v1.MaturityStageMerging
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	0, // [0:0] is the sub-list for method output_type
+	0, // [0:0] is the sub-list for method input_type
+	0, // [0:0] is the sub-list for extension type_name
+	0, // [0:0] is the sub-list for extension extendee
+	0, // [0:0] is the sub-list for field type_name
 }
 
 func init() { file_workspace_v1_workspace_proto_init() }
@@ -433,18 +189,13 @@ func file_workspace_v1_workspace_proto_init() {
 	if File_workspace_v1_workspace_proto != nil {
 		return
 	}
-	file_workspace_v1_workspace_proto_msgTypes[2].OneofWrappers = []any{
-		(*MaturityStage_Backlog)(nil),
-		(*MaturityStage_InProgress)(nil),
-		(*MaturityStage_Merging)(nil),
-	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_workspace_v1_workspace_proto_rawDesc), len(file_workspace_v1_workspace_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   6,
+			NumMessages:   2,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
