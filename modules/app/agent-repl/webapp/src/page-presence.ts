@@ -21,6 +21,7 @@
 import { log } from "./log.js";
 import { pagePresence, type Presence } from "./presence.js";
 import { nextFrame } from "./frame.js";
+import { pageSize } from "./page-size.js";
 
 /** What the presence log needs from its environment, injectable for tests. */
 export interface PagePresenceEnv {
@@ -66,11 +67,6 @@ export function installPagePresenceLog(env: PagePresenceEnv = pagePresenceEnv())
     return since;
   };
 
-  const pageSize = (): Record<string, number> => ({
-    dom_nodes: doc.getElementsByTagName("*").length,
-    feed_rows: doc.querySelectorAll("[data-feed-row]").length,
-  });
-
   const measureRepaint = (cause: string): void => {
     const started = now();
     frame(() => {
@@ -82,7 +78,7 @@ export function installPagePresenceLog(env: PagePresenceEnv = pagePresenceEnv())
             paint_ms: Math.round(now() - started),
             width: win.innerWidth,
             height: win.innerHeight,
-            ...pageSize(),
+            ...pageSize(doc),
           },
         });
       });
