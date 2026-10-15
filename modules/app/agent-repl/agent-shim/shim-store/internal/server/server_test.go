@@ -2956,3 +2956,116 @@ func TestAnUnusableWatchTokenIsRefusedInOneRecordCarryingItsHash(t *testing.T) {
 		})
 	}
 }
+
+// storeTouched reports whether any read or write reached the fake store.
+func storeTouched(f *fakeStore) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.writes) != 0 || len(f.openedWith) != 0 || f.pageReadBy != "" || f.cursorsScope || f.liveAsked
+}
+
+func TestAServerOriginRefusalNeverReachesTheStore(t *testing.T) {
+	writeReq := func(req *storev1.WriteBatchRequest) func(h *harness) (bool, error) {
+		return func(h *harness) (bool, error) {
+			resp, err := h.client.WriteBatch(context.Background(), connect.NewRequest(req))
+			return err == nil && resp.Msg.GetFailure() != nil, err
+		}
+	}
+	entries := func(e *storev1.StoreEntry) *storev1.WriteBatchRequest {
+		return &storev1.WriteBatchRequest{WriteClass: interactiveClass(), Producer: "claude-shim:s1",
+			Batch: &storev1.EntryBatch{Entries: []*storev1.StoreEntry{e}}}
+	}
+	withPlane := func(plane *storev1.Plane) *storev1.StoreEntry {
+		e := validEntry("w-1", "u-1")
+		e.Plane = plane
+		return e
+	}
+	openReq := func(req *storev1.OpenAgentSessionRequest) func(h *harness) (bool, error) {
+		return func(h *harness) (bool, error) {
+			resp, err := h.client.OpenAgentSession(context.Background(), connect.NewRequest(req))
+			return err == nil && resp.Msg.GetFailure() != nil, err
+		}
+	}
+	readReq := func(req *storev1.ReadAgentPageRequest) func(h *harness) (bool, error) {
+		return func(h *harness) (bool, error) {
+			resp, err := h.client.ReadAgentPage(context.Background(), connect.NewRequest(req))
+			return err == nil && resp.Msg.GetFailure() != nil, err
+		}
+	}
+	after := &storev1.ReadAgentPageRequest_After{After: &storev1.StoreItemPointer{Value: "p"}}
+	empty := ""
+	tests := []struct {
+		name string
+		call func(h *harness) (bool, error)
+	}{
+		{name: "WriteBatch: missing write_id", call: writeReq(entries(validEntry("", "u-1")))},
+		{name: "WriteBatch: missing upsert_key", call: writeReq(entries(validEntry("w-1", "")))},
+		{name: "WriteBatch: missing plane arm", call: writeReq(entries(withPlane(&storev1.Plane{})))},
+		{name: "WriteBatch: missing plane message", call: writeReq(entries(withPlane(nil)))},
+		{name: "WriteBatch: missing entry arm", call: writeReq(entries(&storev1.StoreEntry{Plane: validEntry("w", "u").Plane, WriteId: "w-1", UpsertKey: "u-1"}))},
+		{name: "WriteBatch: empty producer", call: writeReq(&storev1.WriteBatchRequest{WriteClass: interactiveClass(),
+			Batch: &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w-1", "u-1")}}})},
+		{name: "WriteBatch: no write class", call: writeReq(&storev1.WriteBatchRequest{Producer: "claude-shim:s1",
+			Batch: &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w-1", "u-1")}}})},
+		{name: "WriteBatch: missing batch", call: writeReq(&storev1.WriteBatchRequest{WriteClass: interactiveClass(), Producer: "claude-shim:s1"})},
+		{name: "WriteBatch: empty batch", call: writeReq(&storev1.WriteBatchRequest{WriteClass: interactiveClass(), Producer: "claude-shim:s1", Batch: &storev1.EntryBatch{}})},
+		{name: "WriteBatch: cursor advance naming no file", call: writeReq(&storev1.WriteBatchRequest{WriteClass: interactiveClass(), Producer: "claude-sidecar",
+			Batch: &storev1.EntryBatch{CursorAdvance: &storev1.CursorState{Path: "/t/a.jsonl", Offset: 4096}}})},
+		{name: "OpenAgentSession: missing agent", call: openReq(&storev1.OpenAgentSessionRequest{})},
+		{name: "OpenAgentSession: empty agent value", call: openReq(&storev1.OpenAgentSessionRequest{Agent: agentID("")})},
+		{name: "OpenAgentSession: empty known_through", call: openReq(&storev1.OpenAgentSessionRequest{Agent: agentID("main"),
+			Opening: &storev1.OpenAgentSessionRequest_KnownThrough{KnownThrough: &storev1.StoreItemPointer{}}})},
+		{name: "ReadAgentPage: missing book", call: readReq(&storev1.ReadAgentPageRequest{Position: after})},
+		{name: "ReadAgentPage: empty book value", call: readReq(&storev1.ReadAgentPageRequest{Book: agentID(""), Position: after})},
+		{name: "ReadAgentPage: unset position", call: readReq(&storev1.ReadAgentPageRequest{Book: agentID("main")})},
+		{name: "ReadAgentPage: non-positive through", call: readReq(&storev1.ReadAgentPageRequest{Book: agentID("main"),
+			Position: &storev1.ReadAgentPageRequest_Through{Through: &conversationv1.ConversationThrough{AtMs: 0}}})},
+		{name: "ReadAgentPage: empty after pointer", call: readReq(&storev1.ReadAgentPageRequest{Book: agentID("main"),
+			Position: &storev1.ReadAgentPageRequest_After{After: &storev1.StoreItemPointer{}}})},
+		{name: "GetSidecarCursors: empty file_id", call: func(h *harness) (bool, error) {
+			resp, err := h.client.GetSidecarCursors(context.Background(), connect.NewRequest(&storev1.GetSidecarCursorsRequest{FileId: &empty}))
+			return err == nil && resp.Msg.GetFailure() != nil, err
+		}},
+		{name: "GetLiveWork: no session", call: func(h *harness) (bool, error) {
+			resp, err := h.client.GetLiveWork(context.Background(), connect.NewRequest(&storev1.GetLiveWorkRequest{}))
+			return err == nil && resp.Msg.GetFailure() != nil, err
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			store := newFakeStore()
+			h := newHarness(t, store, 0)
+			h.logs.Reset()
+
+			// Act.
+			failed, err := tc.call(h)
+
+			// Assert.
+			if err != nil || !failed {
+				t.Fatalf("answer = (failed=%v, %v), want a typed failure", failed, err)
+			}
+			if storeTouched(store) {
+				t.Fatal("a request refused by the server reached the store")
+			}
+			if rec := oneNormalRecord(t, h.logs); rec.Context["refusal_site"] == nil {
+				t.Fatalf("the refusal record names no site: %+v", rec)
+			}
+		})
+	}
+}
+
+func TestAnUnknownProcedureIsUnimplementedRatherThanAHang(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, newFakeStore(), 0)
+	wrong := connect.NewClient[storev1.GetLiveWorkRequest, storev1.GetLiveWorkResponse](
+		h.http, h.url+"/store.v1.ShimStore/NoSuchProcedure")
+
+	// Act.
+	_, err := wrong.CallUnary(context.Background(), connect.NewRequest(&storev1.GetLiveWorkRequest{Session: agentID("main")}))
+
+	// Assert.
+	if code := connect.CodeOf(err); code != connect.CodeUnimplemented {
+		t.Fatalf("code = %v (err %v), want %v", code, err, connect.CodeUnimplemented)
+	}
+}
