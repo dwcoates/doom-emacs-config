@@ -38,6 +38,7 @@ import {
 } from "../../src/held/section.js";
 import { resetLoggingForTests } from "../../src/log.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
+import { type DeferredAnimation, deferredAnimation } from "../deferred-animation.js";
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
 const NOW = 1_700_000_000_000;
@@ -318,19 +319,10 @@ describe("mountHeldSection's folds", () => {
     create(WatchFeedHeldFoldSchema, { folded: { value: folded }, into: { value: into } });
 
   /** Every fade the section starts finishes when the test says. */
-  function deferredFades(): { finish: () => Promise<void> } {
-    let resolve: () => void = () => undefined;
-    const finished = new Promise<void>((res) => {
-      resolve = res;
-    });
-    vi.spyOn(Element.prototype, "animate").mockReturnValue({ finished } as unknown as Animation);
-    return {
-      finish: async () => {
-        resolve();
-        await finished;
-        await Promise.resolve();
-      },
-    };
+  function deferredFades(): DeferredAnimation {
+    const fade = deferredAnimation();
+    vi.spyOn(Element.prototype, "animate").mockReturnValue(fade.animation);
+    return fade;
   }
 
   /** A section holding t1 then t2, whose next change folds t2 into t1. */

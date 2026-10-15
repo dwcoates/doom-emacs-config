@@ -12,6 +12,7 @@ import {
 import { HELD_BADGE_CLASS } from "../../src/held/held-prompt.js";
 import { resetLoggingForTests } from "../../src/log.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
+import { type DeferredAnimation, deferredAnimation } from "../deferred-animation.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -32,32 +33,10 @@ function animationEnd(target: Element, name: string): void {
   target.dispatchEvent(event);
 }
 
-/** An `animate` whose fade finishes when the test says. */
-function deferredFade(el: HTMLElement): {
-  animate: MockInstance<Element["animate"]>;
-  finish: () => Promise<void>;
-  cancel: () => Promise<void>;
-} {
-  let resolve: () => void = () => undefined;
-  let reject: (cause: unknown) => void = () => undefined;
-  const finished = new Promise<void>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  const animate = vi.spyOn(el, "animate").mockReturnValue({ finished } as unknown as Animation);
-  return {
-    animate,
-    finish: async () => {
-      resolve();
-      await finished.catch(() => undefined);
-      await Promise.resolve();
-    },
-    cancel: async () => {
-      reject(new DOMException("cancelled", "AbortError"));
-      await finished.catch(() => undefined);
-      await Promise.resolve();
-    },
-  };
+/** An `animate` on EL whose fade finishes when the test says. */
+function deferredFade(el: HTMLElement): DeferredAnimation & { animate: MockInstance<Element["animate"]> } {
+  const fade = deferredAnimation();
+  return { ...fade, animate: vi.spyOn(el, "animate").mockReturnValue(fade.animation) };
 }
 
 describe("flashFoldedInto", () => {
