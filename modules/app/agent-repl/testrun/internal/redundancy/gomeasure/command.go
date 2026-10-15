@@ -13,6 +13,8 @@ import (
 
 	"agentrepl/testrun/internal/redundancy"
 	"agentrepl/testrun/internal/run"
+	"agentrepl/testrun/internal/suites"
+	"agentrepl/testrun/roster"
 )
 
 // EnvBackground is the marker bin/background.sh exports; the measurement is
@@ -41,6 +43,45 @@ func splitList(s string) []string {
 		}
 	}
 	return out
+}
+
+// rosterSuites are the suites of roster Go suite name: every ordinary tested
+// package and every package of its tagged integration pass, each with the
+// programs the roster says it spawns. Its module is module, or the suite's
+// own found from the working directory when module is "".
+func rosterSuites(name, module string) ([]Suite, string, error) {
+	s, ok := roster.Lookup(name)
+	if !ok || s.Kind != roster.GoModule {
+		return nil, "", fmt.Errorf("-roster-suite %q is no Go suite of the roster", name)
+	}
+	start := module
+	if start == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			return nil, "", fmt.Errorf("resolve the working directory: %w", err)
+		}
+		start = wd
+	}
+	root, err := FindRoot(start)
+	if err != nil {
+		return nil, "", err
+	}
+	l := suites.Layout{Module: root}
+	if module == "" {
+		module = filepath.Join(root, s.Path)
+	}
+	pkgs, ipkgs, err := suites.GoSuitePackages(l, s)
+	if err != nil {
+		return nil, "", err
+	}
+	var out []Suite
+	for _, rel := range pkgs {
+		out = append(out, Suite{Package: "./" + rel, Programs: s.Programs[rel]})
+	}
+	for _, rel := range ipkgs {
+		out = append(out, Suite{Package: "./" + rel, Tags: s.IntegrationTags, Programs: s.Programs[rel]})
+	}
+	return out, module, nil
 }
 
 // readDeleteSet reads a -delete file: one case per line; blank lines and
@@ -95,6 +136,7 @@ func ParseArgs(argv []string, stderr io.Writer) (Args, error) {
 	fs.StringVar(&tags, "tags", "", "the build tags -pkg's tests compile under")
 	fs.StringVar(&programs, "programs", "", "comma-separated roster programs -pkg's tests spawn")
 	fs.StringVar(&suitesFile, "suites", "", "a JSON file listing the suites to measure ([{Package, Tags, Tests, Programs, Kept}]), instead of -pkg")
+	rosterSuite := fs.String("roster-suite", "", "measure every package of this roster Go suite (e.g. daemon), its integration pass included, instead of -pkg; -module defaults to its module")
 	fs.StringVar(&mutate, "mutate", "", "comma-separated packages to mutate, relative to -module (default: the one -pkg)")
 	fs.IntVar(&a.Runs, "runs", 3, "coverage runs per case, unioned")
 	fs.StringVar(&pinCalls, "pin-calls", "FindRecord,Records", "comma-separated calls that make a test a log-record assertion")
@@ -115,16 +157,26 @@ func ParseArgs(argv []string, stderr io.Writer) (Args, error) {
 	if fs.NArg() != 0 {
 		return Args{}, fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
 	}
-	for name, v := range map[string]string{"-module": a.Module, "-out": a.Out} {
-		if v == "" {
-			return Args{}, fmt.Errorf("%s is required", name)
+	if a.Out == "" {
+		return Args{}, fmt.Errorf("-out is required")
+	}
+	named := 0
+	for _, v := range []string{pkg, suitesFile, *rosterSuite} {
+		if v != "" {
+			named++
 		}
 	}
 	switch {
-	case (pkg == "") == (suitesFile == ""):
-		return Args{}, fmt.Errorf("name exactly one of -pkg and -suites")
-	case suitesFile != "" && (tests != "" || tags != "" || programs != ""):
-		return Args{}, fmt.Errorf("-tests, -tags and -programs describe -pkg; with -suites each suite says its own")
+	case named != 1:
+		return Args{}, fmt.Errorf("name exactly one of -pkg, -suites and -roster-suite")
+	case pkg == "" && (tests != "" || tags != "" || programs != ""):
+		return Args{}, fmt.Errorf("-tests, -tags and -programs describe -pkg; with -suites or -roster-suite each suite says its own")
+	case *rosterSuite != "":
+		s, module, err := rosterSuites(*rosterSuite, a.Module)
+		if err != nil {
+			return Args{}, err
+		}
+		a.Suites, a.Module = s, module
 	case pkg != "":
 		a.Suites = []Suite{{Package: pkg, Tags: tags, Tests: splitList(tests), Programs: splitList(programs)}}
 	default:
@@ -133,6 +185,9 @@ func ParseArgs(argv []string, stderr io.Writer) (Args, error) {
 			return Args{}, err
 		}
 		a.Suites = s
+	}
+	if a.Module == "" {
+		return Args{}, fmt.Errorf("-module is required")
 	}
 	u, err := redundancy.ParseUniverse(universe)
 	if err != nil {

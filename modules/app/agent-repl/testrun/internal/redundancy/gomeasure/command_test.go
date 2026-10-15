@@ -39,9 +39,9 @@ func TestParseArgsRefuses(t *testing.T) {
 		want string
 	}{
 		{name: "no -module", argv: []string{"-pkg", "./p", "-tests", "a_test.go", "-out", "/o"}, want: "-module is required"},
-		{name: "neither -pkg nor -suites", argv: []string{"-module", "/m", "-out", "/o"}, want: "exactly one of -pkg and -suites"},
-		{name: "both -pkg and -suites", argv: []string{"-module", "/m", "-pkg", "./p", "-suites", "/s.json", "-out", "/o"}, want: "exactly one of -pkg and -suites"},
-		{name: "-tests beside -suites", argv: []string{"-module", "/m", "-suites", "/s.json", "-tests", "a_test.go", "-out", "/o"}, want: "with -suites each suite says its own"},
+		{name: "neither -pkg nor -suites", argv: []string{"-module", "/m", "-out", "/o"}, want: "exactly one of -pkg, -suites and -roster-suite"},
+		{name: "both -pkg and -suites", argv: []string{"-module", "/m", "-pkg", "./p", "-suites", "/s.json", "-out", "/o"}, want: "exactly one of -pkg, -suites and -roster-suite"},
+		{name: "-tests beside -suites", argv: []string{"-module", "/m", "-suites", "/s.json", "-tests", "a_test.go", "-out", "/o"}, want: "each suite says its own"},
 		{name: "an unreadable -suites", argv: []string{"-module", "/m", "-suites", "/gone.json", "-out", "/o"}, want: "read -suites /gone.json"},
 		{name: "an unknown universe", argv: append(base, "-universe", "lines"), want: "unknown universe"},
 		{name: "a stray argument", argv: append(base, "extra"), want: "unexpected arguments: extra"},
@@ -239,3 +239,50 @@ func TestParseArgsRefusesADeletionSet(t *testing.T) {
 }
 
 func strPtr(s string) *string { return &s }
+
+func TestParseArgsMeasuresARosterSuitesEveryPackage(t *testing.T) {
+	// Act: the daemon, found from this test's own place in the repository.
+	a, err := ParseArgs([]string{"-roster-suite", "daemon", "-mutate", "./internal/...", "-out", "/o"}, &bytes.Buffer{})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Base(a.Module) != "daemon" {
+		t.Fatalf("module = %s, want the daemon's", a.Module)
+	}
+	var sawUnit, sawIntegration bool
+	for _, s := range a.Suites {
+		if s.Package == "./internal/workspace" && s.Tags == "" && len(s.Programs) == 0 {
+			sawUnit = true
+		}
+		if s.Package == "./integration" && s.Tags == "integration" && reflect.DeepEqual(s.Programs, []string{"agent-repld", "fakeshim", "git"}) {
+			sawIntegration = true
+		}
+	}
+	if !sawUnit || !sawIntegration {
+		t.Fatalf("suites lack the workspace unit package (%t) or the tagged integration pass with its programs (%t): %+v", sawUnit, sawIntegration, a.Suites)
+	}
+}
+
+func TestParseArgsRefusesARosterSuiteThatIsNoGoSuite(t *testing.T) {
+	for _, name := range []string{"webapp", "no-such"} {
+		// Act
+		_, err := ParseArgs([]string{"-roster-suite", name, "-out", "/o"}, &bytes.Buffer{})
+
+		// Assert
+		if err == nil || !strings.Contains(err.Error(), "is no Go suite of the roster") {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+}
+
+func TestFindRootRefusesADirectoryOutsideTheRepository(t *testing.T) {
+	// Act
+	_, err := FindRoot(t.TempDir())
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "holds testrun/roster") {
+		t.Fatalf("err = %v", err)
+	}
+}

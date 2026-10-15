@@ -312,8 +312,8 @@ func Measure(ctx context.Context, cfg Config, exec Exec, log *run.Log) (*redunda
 	return out, nil
 }
 
-// importPaths maps each package to mutate, relative to the module, to its
-// import path and directory.
+// importPaths maps each package to mutate, relative to the module (a
+// pattern such as ./... names several), to its import path and directory.
 func (m *measurer) importPaths(ctx context.Context, pkgs []string) (map[string]string, error) {
 	res, err := m.gocmd(ctx, BuildTimeout, append([]string{"list", "-f", "{{.ImportPath}}\t{{.Dir}}"}, pkgs...)...)
 	if err != nil {
@@ -330,8 +330,8 @@ func (m *measurer) importPaths(ctx context.Context, pkgs []string) (map[string]s
 		}
 		out[imp] = dir
 	}
-	if len(out) != len(pkgs) {
-		return nil, fmt.Errorf("gomeasure: go list named %d packages for %d asked", len(out), len(pkgs))
+	if len(out) == 0 {
+		return nil, fmt.Errorf("gomeasure: go list named no package for %s", strings.Join(pkgs, " "))
 	}
 	return out, nil
 }
@@ -368,18 +368,23 @@ func (m *measurer) testBuild(st *suiteState, bin string, flags ...string) []stri
 	return append(append(argv, flags...), st.Package)
 }
 
-// root is the agent-repl module root: the nearest directory above Module
-// holding the roster.
+// root is the agent-repl module root the roster resolves in.
 func (m *measurer) root() (string, error) {
 	if m.cfg.Root != "" {
 		return m.cfg.Root, nil
 	}
-	for dir := m.cfg.Module; ; dir = filepath.Dir(dir) {
-		if _, err := os.Stat(filepath.Join(dir, "testrun", "roster", "roster.go")); err == nil {
-			return dir, nil
+	return FindRoot(m.cfg.Module)
+}
+
+// FindRoot is the agent-repl module root: the nearest directory at or above
+// dir holding the roster.
+func FindRoot(dir string) (string, error) {
+	for d := dir; ; d = filepath.Dir(d) {
+		if _, err := os.Stat(filepath.Join(d, "testrun", "roster", "roster.go")); err == nil {
+			return d, nil
 		}
-		if dir == filepath.Dir(dir) {
-			return "", fmt.Errorf("gomeasure: no directory above %s holds testrun/roster; name the agent-repl root", m.cfg.Module)
+		if d == filepath.Dir(d) {
+			return "", fmt.Errorf("gomeasure: no directory at or above %s holds testrun/roster", dir)
 		}
 	}
 }
