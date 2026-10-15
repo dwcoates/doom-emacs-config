@@ -96,7 +96,7 @@ func recordSkip(kind skipKind, test, reason string) {
 // It FAILS the calling test by default — a suite that covered nothing must
 // not report a pass — and skips it only under the allowMissingDepsEnv
 // opt-out, in which case the skip is recorded for the summary block.
-func requireDependency(t *testing.T, format string, args ...any) {
+func requireDependency(t testing.TB, format string, args ...any) {
 	t.Helper()
 	reason := fmt.Sprintf(format, args...)
 	if allowMissingDeps() {

@@ -179,7 +179,7 @@ type SidecarStaleness struct {
 // elapse inside this suite's budget, so the three DetachedLost arms are
 // unreachable without it — and a test that reaches them must say, at its
 // construction site, which window it is buying.
-func NewWorldWithSidecarStaleness(t *testing.T, opts WorldOpts, staleness SidecarStaleness) *World {
+func NewWorldWithSidecarStaleness(t testing.TB, opts WorldOpts, staleness SidecarStaleness) *World {
 	t.Helper()
 	opts.SidecarStaleness = staleness
 	return NewWorld(t, opts)
@@ -216,7 +216,7 @@ func worldDaemonEnv(extra []string, spoolRoot, lockBin string) []string {
 // installed (names the exact `npm ci` command — never runs it), no `go` on
 // PATH. A store or sidecar build FAILURE (not a missing precondition) fails
 // the test outright: that is a real defect this suite exists to catch.
-func NewWorld(t *testing.T, opts WorldOpts) *World {
+func NewWorld(t testing.TB, opts WorldOpts) *World {
 	t.Helper()
 	node := requireNode(t)
 	shimMain := requireShimBundle(t)
@@ -418,7 +418,7 @@ const artifactTailBytes = 2 << 20
 // what a book held when a page was read from it. It is copied while the store
 // still runs -- this cleanup is registered after the store's, so it runs
 // first -- which is safe once the test has stopped writing.
-func preserveLogsOnFailure(t *testing.T, daemon **harness.Daemon, storeDB string) {
+func preserveLogsOnFailure(t testing.TB, daemon **harness.Daemon, storeDB string) {
 	t.Helper()
 	t.Cleanup(func() {
 		if !t.Failed() {
@@ -516,7 +516,7 @@ func artifactDirName(name string) string {
 // the roots are handed to the sidecar (ConfigRoots below) and read by tests
 // through the embedded Daemon, and there is exactly one string only if the
 // single source is resolved.
-func resolveConfigRoots(t *testing.T, d *harness.Daemon) {
+func resolveConfigRoots(t testing.TB, d *harness.Daemon) {
 	t.Helper()
 	for _, root := range []*string{&d.DefaultConfigDir, &d.MultiRepoConfigDir} {
 		resolved, err := resolvedPath(*root)
@@ -542,7 +542,7 @@ func resolvedPath(path string) (string, error) {
 // tailStoreLog reads back the store's own log file for the failure message
 // above, so a test that trips this assertion does not have to go find the
 // log file itself to learn why the store died.
-func tailStoreLog(t *testing.T, s *Store) string {
+func tailStoreLog(t testing.TB, s *Store) string {
 	t.Helper()
 	body, err := os.ReadFile(s.LogPath)
 	if err != nil {
@@ -554,7 +554,7 @@ func tailStoreLog(t *testing.T, s *Store) string {
 // shortSocketPath mints a short-enough UDS path directly under the OS temp
 // dir. t.TempDir() encodes the whole test name, which blows the ~103-byte
 // sockaddr_un budget for this suite's longer test names.
-func shortSocketPath(t *testing.T, tag string) string {
+func shortSocketPath(t testing.TB, tag string) string {
 	t.Helper()
 	buf := make([]byte, 4)
 	if _, err := rand.Read(buf); err != nil {
@@ -584,7 +584,7 @@ func shortSocketPath(t *testing.T, tag string) string {
 // directory `<world>/locks` — per-world, still shared across the
 // restarts that reuse the root (which is the invariant it exists for), and
 // removed with the root at cleanup.
-func shortStateRoot(t *testing.T) string {
+func shortStateRoot(t testing.TB) string {
 	t.Helper()
 	// Under the harness's owner-locked run root: removed at cleanup, and
 	// reclaimed by the next run if this one dies before cleanup runs.
@@ -685,7 +685,7 @@ func (p *processExit) awaitWithin(budget time.Duration) bool {
 // twice missed its SIGTERM bound in one full-suite run, and the failure said
 // only that -- the log that timestamps its drain, checkpoint and close was in
 // a temp directory deleted with the test.
-func stopProcess(t *testing.T, name string, cmd *exec.Cmd, exit *processExit, logPath string) {
+func stopProcess(t testing.TB, name string, cmd *exec.Cmd, exit *processExit, logPath string) {
 	t.Helper()
 	if cmd.Process == nil || exit.exited() {
 		return
@@ -726,7 +726,7 @@ func logTailOf(path string) string {
 
 // Store is one running real shim-store.
 type Store struct {
-	t       *testing.T
+	t       testing.TB
 	bin     string
 	Socket  string
 	DBPath  string
@@ -747,7 +747,7 @@ type Store struct {
 // statement, never an elapsed duration. lockDir is its AGENT_REPL_LOCK_DIR:
 // the daemon's own lock dir, so the build report the store writes at boot is
 // the one the daemon's deploy reads.
-func startStore(t *testing.T, socket, dbPath, logPath, lockDir string) *Store {
+func startStore(t testing.TB, socket, dbPath, logPath, lockDir string) *Store {
 	t.Helper()
 	bin := requireStoreBinary(t)
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
@@ -890,7 +890,7 @@ func (s *Store) Stop() {
 // StartSameDB relaunches the store on the SAME socket and database path this
 // Store was minted with, and waits for it to become ready again. Pairs with
 // Stop for ruling 2's real outage window.
-func (s *Store) StartSameDB(t *testing.T) {
+func (s *Store) StartSameDB(t testing.TB) {
 	t.Helper()
 	cmd := exec.Command(s.bin, "--socket", s.Socket, "--db", s.DBPath, "--log", s.LogPath)
 	cmd.Env = append(os.Environ(),
@@ -919,7 +919,7 @@ func (s *Store) StartSameDB(t *testing.T) {
 }
 
 // Cursors answers the store's current durable sidecar cursors.
-func (s *Store) Cursors(t *testing.T, ctx context.Context) []*storev1.CursorState {
+func (s *Store) Cursors(t testing.TB, ctx context.Context) []*storev1.CursorState {
 	t.Helper()
 	resp, err := s.Client.GetSidecarCursors(ctx, connect.NewRequest(&storev1.GetSidecarCursorsRequest{}))
 	if err != nil {
@@ -938,7 +938,7 @@ func (s *Store) Cursors(t *testing.T, ctx context.Context) []*storev1.CursorStat
 
 // Sidecar is one running real shim-claude-sidecar.
 type Sidecar struct {
-	t       *testing.T
+	t       testing.TB
 	LogPath string
 	// SpoolRoot is the tree this sidecar was told to glob. Kept on the
 	// struct purely so NewWorld's self-check can compare it against what the
@@ -965,7 +965,7 @@ type Sidecar struct {
 // turn that completed but whose task output the sidecar never files), and
 // makes an unset value silently target the developer's real
 // /tmp/claude-<uid>.
-func assertOneSpoolRoot(t *testing.T, shimEnv []string, s *Sidecar) {
+func assertOneSpoolRoot(t testing.TB, shimEnv []string, s *Sidecar) {
 	t.Helper()
 	const key = "AGENT_REPL_FAKE_SPOOL_ROOT="
 	var exported string
@@ -1009,7 +1009,7 @@ type sidecarOpts struct {
 // roots (d.DefaultConfigDir, d.MultiRepoConfigDir), which is ALREADY the
 // per-account CLAUDE_CONFIG_DIR the daemon hands each spawned shim — no new
 // harness plumbing is needed to make the sidecar watch the right trees.
-func startSidecar(t *testing.T, bin string, opts sidecarOpts) *Sidecar {
+func startSidecar(t testing.TB, bin string, opts sidecarOpts) *Sidecar {
 	t.Helper()
 	if opts.StateDir == "" {
 		// An empty --state-dir resolves to $AGENT_REPL_STATE_DIR and then to
@@ -1099,7 +1099,7 @@ func (w *World) ServiceBinaries() harness.ServiceBinaries {
 // claim dies `spawn ENOENT`, and the start is refused `lock_holder_unavailable`
 // (once `conversation_owned`, for a conversation nobody holds); without the fake spool root they spool where
 // the sidecar never globs.
-func (w *World) SuccessorOpts(t *testing.T) harness.Opts {
+func (w *World) SuccessorOpts(t testing.TB) harness.Opts {
 	t.Helper()
 	return harness.Opts{
 		StateDir:        w.StateDir,
@@ -1114,7 +1114,7 @@ func (w *World) SuccessorOpts(t *testing.T) harness.Opts {
 // awaitBuildReport waits until service's build report in lockDir names pid —
 // the process's own statement of its build, written at boot — bounded by
 // ctx, never a fixed sleep.
-func awaitBuildReport(t *testing.T, ctx context.Context, lockDir, service string, pid int) {
+func awaitBuildReport(t testing.TB, ctx context.Context, lockDir, service string, pid int) {
 	t.Helper()
 	ticker := time.NewTicker(5 * time.Millisecond)
 	defer ticker.Stop()
@@ -1145,7 +1145,7 @@ func awaitBuildReport(t *testing.T, ctx context.Context, lockDir, service string
 // Cursor recovery makes this safe to do mid-test: the new process recovers
 // its read positions from the store before it reads a byte (cycle.go's
 // beginCycle), so nothing already ingested is ingested twice.
-func (s *Sidecar) Restart(t *testing.T) {
+func (s *Sidecar) Restart(t testing.TB) {
 	t.Helper()
 	s.Stop()
 	cmd := exec.Command(s.bin, s.args...)
@@ -1191,7 +1191,7 @@ func (s *Sidecar) Stop() {
 }
 
 // Log reads every structured-log record the sidecar has written so far.
-func (s *Sidecar) Log(t *testing.T) []harness.LogRecord {
+func (s *Sidecar) Log(t testing.TB) []harness.LogRecord {
 	t.Helper()
 	return harness.ReadLog(t, s.LogPath)
 }
@@ -1219,7 +1219,7 @@ func (s *Sidecar) Exited() bool { return s.exit.exited() }
 // a convenience on top of the automatic end-of-test guarantee NewWorld
 // always registers, never a substitute for it — that one requires no call
 // and has no opt-out.
-func (w *World) RequireNoUnexpectedExit(t *testing.T) {
+func (w *World) RequireNoUnexpectedExit(t testing.TB) {
 	t.Helper()
 	if w.Store.Exited() && !w.Store.stopped {
 		t.Errorf("e2e: the store has already exited, and was never stopped by the test")
@@ -1244,7 +1244,7 @@ const e2ePromptOrigin = conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT
 // refused or did not mint a turn (a command-panel/command-acted/
 // command-refused arm) — callers that expect one of those other arms should
 // call the client's SubmitPrompt directly instead.
-func SubmitPrompt(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, text string) *conversationv1.TurnId {
+func SubmitPrompt(t testing.TB, w *World, ws *workspacev1.WorkspaceRef, text string) *conversationv1.TurnId {
 	t.Helper()
 	resp, err := w.Client().SubmitPrompt(w.Ctx(), connect.NewRequest(&agentreplv1.SubmitPromptRequest{
 		Workspace: ws,
@@ -1264,7 +1264,7 @@ func SubmitPrompt(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, text str
 	return turn
 }
 
-func newIdempotencyKey(t *testing.T) string {
+func newIdempotencyKey(t testing.TB) string {
 	t.Helper()
 	buf := make([]byte, 16)
 	if _, err := rand.Read(buf); err != nil {
@@ -1275,7 +1275,7 @@ func newIdempotencyKey(t *testing.T) string {
 
 // AwaitTurnEnded opens the workspace's root feed, watches it until the given
 // turn's FeedTurnEnded row arrives, and answers that row.
-func AwaitTurnEnded(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, turn *conversationv1.TurnId) *frontendv1.FeedRow {
+func AwaitTurnEnded(t testing.TB, w *World, ws *workspacev1.WorkspaceRef, turn *conversationv1.TurnId) *frontendv1.FeedRow {
 	t.Helper()
 	return awaitFeedRowOn(t, w, w.Client(), ws, "turn "+turn.GetValue()+" to end", endsTurn(turn))
 }
@@ -1290,7 +1290,7 @@ func endsTurn(turn *conversationv1.TurnId) func(*frontendv1.FeedRow) bool {
 // turnEndedRow finds the given turn's terminal row in a feed snapshot, or
 // fails the test loudly — every hook test needs this to confirm hook
 // activity never froze or misclassified the turn's own outcome.
-func turnEndedRow(t *testing.T, rows []*frontendv1.FeedRow, turn *conversationv1.TurnId) *frontendv1.FeedTurnEnded {
+func turnEndedRow(t testing.TB, rows []*frontendv1.FeedRow, turn *conversationv1.TurnId) *frontendv1.FeedTurnEnded {
 	t.Helper()
 	ends := endsTurn(turn)
 	for _, row := range rows {
@@ -1304,7 +1304,7 @@ func turnEndedRow(t *testing.T, rows []*frontendv1.FeedRow, turn *conversationv1
 
 // awaitFeedRow opens ws's root feed and answers the first row satisfying
 // pred (awaitFeedRowOn, against the world's own daemon).
-func awaitFeedRow(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, what string, pred func(*frontendv1.FeedRow) bool) *frontendv1.FeedRow {
+func awaitFeedRow(t testing.TB, w *World, ws *workspacev1.WorkspaceRef, what string, pred func(*frontendv1.FeedRow) bool) *frontendv1.FeedRow {
 	t.Helper()
 	return awaitFeedRowOn(t, w, w.Client(), ws, what, pred)
 }
@@ -1316,7 +1316,7 @@ func awaitFeedRow(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, what str
 // here), falling back to watching the tail otherwise. CLIENT is the world's
 // own daemon, or a successor a handover moved the workspace to. Bound by the
 // watch stream's own DefaultTimeout via harness.AwaitView; never sleeps.
-func awaitFeedRowOn(t *testing.T, w *World, client agentreplv1connect.AgentReplClient, ws *workspacev1.WorkspaceRef, what string, pred func(*frontendv1.FeedRow) bool) *frontendv1.FeedRow {
+func awaitFeedRowOn(t testing.TB, w *World, client agentreplv1connect.AgentReplClient, ws *workspacev1.WorkspaceRef, what string, pred func(*frontendv1.FeedRow) bool) *frontendv1.FeedRow {
 	t.Helper()
 	opened, err := client.OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
 	if err != nil {
@@ -1352,7 +1352,7 @@ func awaitFeedRowOn(t *testing.T, w *World, client agentreplv1connect.AgentReplC
 // configDir is the account root the workspace routes through
 // (w.DefaultConfigDir or w.MultiRepoConfigDir) — the caller names it because
 // only the caller knows which account root registered the workspace.
-func driveScenarioToCompletion(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, configDir, scenario string) *conversationv1.TurnId {
+func driveScenarioToCompletion(t testing.TB, w *World, ws *workspacev1.WorkspaceRef, configDir, scenario string) *conversationv1.TurnId {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
 	defer cancel()
@@ -1368,7 +1368,7 @@ func driveScenarioToCompletion(t *testing.T, w *World, ws *workspacev1.Workspace
 
 // driveDocumentedPrompt is driveScenarioToCompletion for the scenarios whose
 // documented invocation is not a bare "!"+scenario (e.g. "!compact [summary]").
-func driveDocumentedPrompt(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, configDir, prompt string) *conversationv1.TurnId {
+func driveDocumentedPrompt(t testing.TB, w *World, ws *workspacev1.WorkspaceRef, configDir, prompt string) *conversationv1.TurnId {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
 	defer cancel()
@@ -1396,7 +1396,7 @@ func cursorOffsetsUnder(cursors []*storev1.CursorState, projectDir string) map[s
 // projectDir has advanced past its baseline offset (or a cursor under it now
 // exists that did not before) — the store's own durable statement that the
 // sidecar has committed the turn's resulting facts.
-func awaitCursorAdvance(t *testing.T, w *World, projectDir string, baseline map[string]int64) {
+func awaitCursorAdvance(t testing.TB, w *World, projectDir string, baseline map[string]int64) {
 	t.Helper()
 	awaitCursorAdvanceWithin(t, w, projectDir, baseline, DefaultTimeout)
 }
@@ -1407,7 +1407,7 @@ func awaitCursorAdvance(t *testing.T, w *World, projectDir string, baseline map[
 // It exists because that constant used to bound only the BASELINE read beside
 // this call, leaving the wait it documents running on DefaultTimeout — a bound
 // stated at a site that was not the bound in force.
-func awaitCursorAdvanceWithin(t *testing.T, w *World, projectDir string, baseline map[string]int64, bound time.Duration) {
+func awaitCursorAdvanceWithin(t testing.TB, w *World, projectDir string, baseline map[string]int64, bound time.Duration) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(w.Ctx(), bound)
 	defer cancel()
