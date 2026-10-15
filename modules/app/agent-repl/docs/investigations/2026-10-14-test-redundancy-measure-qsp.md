@@ -61,6 +61,14 @@ compile, where one compile per mutant would have cost 794.
 - A case asserting a canonical log record: its body, or a test-file helper
   it reaches by name, calls `-pin-calls` (default `FindRecord,Records`).
 - A case named with `-pin`.
+- A vitest case that reads a source Stryker mutates. Stryker mutates in
+  place, because its sandbox copy breaks every import out of the package
+  (the shim's `vitest.config.ts` imports `../../../bin/require-background.mjs`).
+  A case that reads a mutated file's text, such as the shim's one-shape
+  guards over `engine/session.ts`, would read the mutant switches instead.
+  The traced runs record every file a case reads through `node:fs`, and
+  such a case is pinned with that file as its reason. Stryker's runs skip it
+  (`testrun/vitest/redundancy-skip.mjs`).
 
 ## The minimization
 
@@ -150,4 +158,38 @@ load under 32 throughout, against the pinned baseline; the full report is
 
 ## Rollout
 
-Not yet written (paused).
+Scope as narrowed by the parent on 2026-10-15. Each tier audit deletes the
+rows whose cover it confirmed by reading both bodies, checking coverage
+only. This tool proves the rest, the rows whose evidence is weaker.
+
+1. **Daemon and store integration rows the audit could not confirm by
+   reading.** These are `prover-daemon.txt` (262 rows) and
+   `prover-store.txt` (106 rows), from test-tier-audit-integration at master
+   `3bf667fcc0`. Each is proved together with the audit's confirmed rows
+   (`confirmed-daemon.txt`, 164; `confirmed-store.txt`, 20). No kill a
+   to-be-deleted case gives can then vouch for a prover row.
+   - `-estimate` first. It reports |R|, the mutants no kept unit case
+     settles, and the cost bounds of steps 2 and 3.
+   - A projected cost under 12 hours of serial CPU goes straight to the
+     proving batch. A larger one goes to the parent first.
+   - Every put-back is named in the report with the mutant that needs it.
+     The proven set lands as its own merge, and the put-backs stay.
+2. **The sidecar's rows**, once its audit sends them, the same way.
+3. **The shim and webapp sets, with the vitest adapter.** Their baselines
+   in `testrun/coverage-baseline.json` stay provisional until the adapter
+   re-measures each package all-tier. No shim or webapp case is removed
+   before then.
+4. **ERT**, after vitest: an in-process mutator that re-evaluates a
+   mutated defun, since Emacs Lisp has no compile step to overlay.
+5. **The 45 `TestEmacs*` e2e rows**, last. They need a Docker sandbox to run
+   under the measurement, and they stay out of every deletion until then.
+
+Measuring conditions, for every batch:
+- AC power only.
+- Nothing starts while the 1-minute load is over 32, and a hang seen above
+  it is invalid.
+- One batch at a time, through `bin/background.sh`.
+- `GOCACHE=/tmp/agent-repl-slimming-gocache`.
+
+The coverage budget is one point of cumulative loss per workspace. The
+parent arbitrates the shared five.
