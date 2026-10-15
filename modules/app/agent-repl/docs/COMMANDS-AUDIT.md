@@ -231,7 +231,8 @@ Scope keys, shared by every generated diff family: `w` worktree, `s` staged,
 
 | Command | Does | Evil key | Context | Emacs mode |
 | --- | --- | --- | --- | --- |
-| `agent-repl-reload-config` | Reload the agent-repl module config for the workspace. | `SPC j R` | leader | leader |
+| `agent-repl-reload-config` | Reload the agent-repl module config for the workspace. | `SPC j C-r` | leader | leader |
+| `agent-repl-send-hidden-keepalives` | Send one keep-alive to every hidden workspace's session, moving each cache lapse later. | `SPC j R` | leader | leader |
 | `agent-repl-revert-and-eval-buffer` | Revert the buffer from disk, then evaluate it. | `SPC b R`, `SPC m e B` | leader | leader |
 
 ## 20. Machine and environment

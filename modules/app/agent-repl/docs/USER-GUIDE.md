@@ -339,6 +339,10 @@ The top bar's effort selector sits between the model selector and the permission
   - The open workspaces section, headed "OPEN", holds the grouping you picked (repositories, tasks or stages).
   - "HIDDEN" holds the workspaces you hid.
   - "RECENTLY MERGED" holds the merges of the last week.
+- **`SPC j R` sends every hidden workspace one keep-alive.**
+  - A hidden workspace's cache is otherwise left to lapse, and its session stops when it does.
+  - The keep-alive moves each lapse later, so the "HIDDEN" countdowns grow back.
+  - The echo area counts the keep-alives sent and names each workspace that got none, with why.
 - **Each heading folds its section with the chevron beside it.**
   - Every workspace's page shows the same folds.
 - **"OPEN" shows how many workspaces it lists, folded or not.**
