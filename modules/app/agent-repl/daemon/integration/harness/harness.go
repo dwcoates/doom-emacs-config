@@ -280,7 +280,7 @@ func newPinnedCheckout(dir, repo string) (string, error) {
 
 // PinnedCheckout is the harness-owned checkout root, or a fatal failure if
 // Main did not lay it out.
-func PinnedCheckout(t *testing.T) string {
+func PinnedCheckout(t testing.TB) string {
 	t.Helper()
 	if pinnedCheckout == "" {
 		t.Fatal("harness: the suite's TestMain must call harness.Main")
@@ -335,7 +335,7 @@ func valueOf(env []string, key string) string {
 }
 
 // DaemonBinary is the built daemon, or a fatal failure if Main did not build.
-func DaemonBinary(t *testing.T) string {
+func DaemonBinary(t testing.TB) string {
 	t.Helper()
 	if buildErr != nil {
 		t.Fatalf("%v", buildErr)
@@ -347,7 +347,7 @@ func DaemonBinary(t *testing.T) string {
 }
 
 // MockedGitBinary is the mocked git every test daemon is linked to run.
-func MockedGitBinary(t *testing.T) string {
+func MockedGitBinary(t testing.TB) string {
 	t.Helper()
 	if gitBinary == "" {
 		t.Fatal("harness: the suite's TestMain must call harness.Main")
@@ -356,7 +356,7 @@ func MockedGitBinary(t *testing.T) string {
 }
 
 // FakeShimBinary is the built fake shim.
-func FakeShimBinary(t *testing.T) string {
+func FakeShimBinary(t testing.TB) string {
 	t.Helper()
 	if fakeshimBinary == "" {
 		t.Fatal("harness: the suite's TestMain must call harness.Main")
@@ -365,7 +365,7 @@ func FakeShimBinary(t *testing.T) string {
 }
 
 // FakeGitBinary is the built scripted `git`.
-func FakeGitBinary(t *testing.T) string {
+func FakeGitBinary(t testing.TB) string {
 	t.Helper()
 	if gitBinary == "" {
 		t.Fatal("harness: the suite's TestMain must call harness.Main")
@@ -394,7 +394,7 @@ func moduleRoot() (string, error) {
 
 // RepoRoot is the agent-repl module directory (the daemon module's parent),
 // from which prompts/ and the other shipped assets are copied.
-func RepoRoot(t *testing.T) string {
+func RepoRoot(t testing.TB) string {
 	t.Helper()
 	module, err := moduleRoot()
 	if err != nil {

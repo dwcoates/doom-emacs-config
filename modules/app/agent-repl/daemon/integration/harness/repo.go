@@ -26,18 +26,18 @@ type GitWorld struct {
 	StateFile string
 
 	root string
-	t    *testing.T
+	t    testing.TB
 }
 
 // worlds holds one world per test, so a repository can be built before or
 // after the daemon that will read it.
 var (
 	worldsMu sync.Mutex
-	worlds   = map[*testing.T]*GitWorld{}
+	worlds   = map[testing.TB]*GitWorld{}
 )
 
 // World answers this test's git world, minting it on first use.
-func World(t *testing.T) *GitWorld {
+func World(t testing.TB) *GitWorld {
 	t.Helper()
 	worldsMu.Lock()
 	defer worldsMu.Unlock()
@@ -72,11 +72,11 @@ type Repo struct {
 	Dir string
 
 	w *GitWorld
-	t *testing.T
+	t testing.TB
 }
 
 // NewRepo mints a fake repository under the test's own tree.
-func NewRepo(t *testing.T) *Repo {
+func NewRepo(t testing.TB) *Repo {
 	t.Helper()
 	w := World(t)
 	return NewRepoAt(t, filepath.Join(w.root, "repo-"+mintName(w)))
@@ -84,7 +84,7 @@ func NewRepo(t *testing.T) *Repo {
 
 // NewRepoAt mints a fake repository at an exact path, for the tests that care
 // where the workspace lives (the multi-repo root, the daemon's self repo).
-func NewRepoAt(t *testing.T, dir string) *Repo {
+func NewRepoAt(t testing.TB, dir string) *Repo {
 	t.Helper()
 	w := World(t)
 	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
@@ -200,7 +200,7 @@ const DefaultWorkPath = "modules/app/agent-repl/work.txt"
 // concludes at once with nothing to land (merge: "already on <target>"); a
 // test that means to exercise a merge's phases commits work first. paths are
 // what the commit touches, DefaultWorkPath when none are named.
-func CommitWork(t *testing.T, dir string, paths ...string) string {
+func CommitWork(t testing.TB, dir string, paths ...string) string {
 	t.Helper()
 	if len(paths) == 0 {
 		paths = []string{DefaultWorkPath}

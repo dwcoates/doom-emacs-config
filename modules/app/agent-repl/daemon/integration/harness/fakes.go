@@ -23,7 +23,7 @@ type Recorder struct {
 	// Control is a file the fake reads its exit status from; absent means 0.
 	Control string
 
-	t *testing.T
+	t testing.TB
 }
 
 // Invocation is one recorded run of a fake executable.
@@ -143,7 +143,7 @@ exit 0
 
 // NewRecorderExecutable writes a fake executable that records its argv. `name`
 // names the script and its record and control files inside `dir`.
-func NewRecorderExecutable(t *testing.T, dir, name string) *Recorder {
+func NewRecorderExecutable(t testing.TB, dir, name string) *Recorder {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("harness: mkdir %s: %v", dir, err)
@@ -167,7 +167,7 @@ func NewRecorderExecutable(t *testing.T, dir, name string) *Recorder {
 
 // NewTestAllScript installs a fake bin/test-all.sh inside a repository, the
 // executable the merge orchestrator's tests tab runs.
-func NewTestAllScript(t *testing.T, repoDir string) *Recorder {
+func NewTestAllScript(t testing.TB, repoDir string) *Recorder {
 	t.Helper()
 	return NewRecorderExecutable(t, filepath.Join(repoDir, "bin"), "test-all.sh")
 }
@@ -218,7 +218,7 @@ done
 
 // NewFakeClaude writes a fake `claude` onto a directory the daemon's PATH
 // carries, so OpenLogin's pty runs it instead of the real CLI.
-func NewFakeClaude(t *testing.T, dir string) string {
+func NewFakeClaude(t testing.TB, dir string) string {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("harness: mkdir %s: %v", dir, err)
@@ -231,7 +231,7 @@ func NewFakeClaude(t *testing.T, dir string) string {
 }
 
 // NewFakeBrowser writes the external browser launcher OpenExternal invokes.
-func NewFakeBrowser(t *testing.T, dir string) *Recorder {
+func NewFakeBrowser(t testing.TB, dir string) *Recorder {
 	t.Helper()
 	return NewRecorderExecutable(t, dir, "browser")
 }
@@ -249,7 +249,7 @@ const NotifierVersionQuery = "-version"
 // (AGENT_REPL_NOTIFIER_CMD). It records the platform argv and prints
 // FakeNotifierVersion, which the macOS boot check accepts and every
 // read-back platform reads as a dismissal; SetStdout scripts a click.
-func NewFakeNotifier(t *testing.T, dir string) *Recorder {
+func NewFakeNotifier(t testing.TB, dir string) *Recorder {
 	t.Helper()
 	r := NewRecorderExecutable(t, dir, "notifier")
 	r.SetStdout(FakeNotifierVersion)
@@ -259,7 +259,7 @@ func NewFakeNotifier(t *testing.T, dir string) *Recorder {
 // NewFakeChime writes the banner sound player the daemon rings through
 // (AGENT_REPL_CHIME_CMD). It records the platform argv and plays nothing, so
 // no test ever sounds on the host.
-func NewFakeChime(t *testing.T, dir string) *Recorder {
+func NewFakeChime(t testing.TB, dir string) *Recorder {
 	t.Helper()
 	return NewRecorderExecutable(t, dir, "chime")
 }
@@ -272,14 +272,14 @@ const FakeDeployBuildRefusal = "fake deploy build: a harness never builds"
 // NewFakeLaunchctl writes the launchctl a service restart would drive
 // (AGENT_REPL_LAUNCHCTL), so nothing the daemon runs can reach the live
 // launchd.
-func NewFakeLaunchctl(t *testing.T, dir string) *Recorder {
+func NewFakeLaunchctl(t testing.TB, dir string) *Recorder {
 	t.Helper()
 	return NewRecorderExecutable(t, dir, "launchctl")
 }
 
 // NewFakeWebappDist writes a minimal webapp dist: an index.html entry point
 // and one hashed asset.
-func NewFakeWebappDist(t *testing.T, dir string) string {
+func NewFakeWebappDist(t testing.TB, dir string) string {
 	t.Helper()
 	assets := filepath.Join(dir, "assets")
 	if err := os.MkdirAll(assets, 0o755); err != nil {
@@ -296,7 +296,7 @@ func NewFakeWebappDist(t *testing.T, dir string) string {
 // NewConfigRoot writes an account root: a CLAUDE_CONFIG_DIR whose .claude.json
 // names the logged-in account. An empty email leaves the file out, which is
 // how a logged-out root is drawn.
-func NewConfigRoot(t *testing.T, dir, email string) string {
+func NewConfigRoot(t testing.TB, dir, email string) string {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("harness: mkdir %s: %v", dir, err)
@@ -316,7 +316,7 @@ func NewConfigRoot(t *testing.T, dir, email string) string {
 
 // CopyPrompts copies the shipped prompts/ directory into the test's own tree,
 // so a test can edit a brief or delete one without touching the repository.
-func CopyPrompts(t *testing.T, dst string) string {
+func CopyPrompts(t testing.TB, dst string) string {
 	t.Helper()
 	src := filepath.Join(RepoRoot(t), "prompts")
 	entries, err := os.ReadDir(src)
@@ -339,7 +339,7 @@ func CopyPrompts(t *testing.T, dst string) string {
 	return dst
 }
 
-func writeFile(t *testing.T, path, content string) {
+func writeFile(t testing.TB, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("harness: mkdir %s: %v", filepath.Dir(path), err)
@@ -389,7 +389,7 @@ printf '<dictionary> {\n  InterfaceType : WiFi\n  LinkStatusActive : TRUE\n  SSI
 // NewFakeHostTools writes the persistent-wifi host tools into dir
 // (AGENT_REPL_PERSISTENT_WIFI_TOOLS_DIR) and answers it. The machine they
 // describe starts joined to FakeHostNetwork with the mode off.
-func NewFakeHostTools(t *testing.T, dir string) string {
+func NewFakeHostTools(t testing.TB, dir string) string {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("harness: mkdir %s: %v", dir, err)

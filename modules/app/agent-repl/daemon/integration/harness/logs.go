@@ -136,7 +136,7 @@ func (d *Daemon) AwaitRunLogRecordFromAnyProcess(what string, pred func(LogRecor
 
 // awaitLogRecord polls path for the first record pred accepts, failing t when
 // wait ends first.
-func awaitLogRecord(t *testing.T, wait context.Context, path, what string, pred func(LogRecord) bool) LogRecord {
+func awaitLogRecord(t testing.TB, wait context.Context, path, what string, pred func(LogRecord) bool) LogRecord {
 	t.Helper()
 	return awaitLogRecordAfter(t, wait, path, what, func(LogRecord) bool { return true }, pred)
 }
@@ -146,7 +146,7 @@ func awaitLogRecord(t *testing.T, wait context.Context, path, what string, pred 
 // an anchor that is itself the awaited record is found), failing t when wait
 // ends first. Each poll re-reads the log from its start and re-finds the
 // anchor, so the order judged is always the file's own.
-func awaitLogRecordAfter(t *testing.T, wait context.Context, path, what string, after, pred func(LogRecord) bool) LogRecord {
+func awaitLogRecordAfter(t testing.TB, wait context.Context, path, what string, after, pred func(LogRecord) bool) LogRecord {
 	t.Helper()
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
@@ -260,7 +260,7 @@ func (d *Daemon) AwaitWorkspaceLogOperation(workspaceDir, operation string) LogR
 // ReadLog reads every record from an arbitrary log file, including all process
 // generations in the shared run log when a restart-history assertion needs
 // them together.
-func ReadLog(t *testing.T, path string) []LogRecord { return readLog(t, path) }
+func ReadLog(t testing.TB, path string) []LogRecord { return readLog(t, path) }
 
 // readLog reads a log file that is being APPENDED TO WHILE IT IS READ, which is
 // what makes the newline the boundary rather than an incidental separator.
@@ -290,7 +290,7 @@ func ReadLog(t *testing.T, path string) []LogRecord { return readLog(t, path) }
 // offset (truncated) is read again from its start. Callers share the decoded
 // records and only read them; the slice is clipped, so a caller's append
 // never writes into the shared one.
-func readLog(t *testing.T, path string) []LogRecord {
+func readLog(t testing.TB, path string) []LogRecord {
 	t.Helper()
 	tail := logReaderFor(t, path)
 	tail.mu.Lock()
@@ -366,7 +366,7 @@ var logReaders sync.Map
 // logReaderFor answers path's tail, creating it for t: the tail is dropped when
 // t ends, so a test process holds the decoded records of its live tests'
 // files only. A later reader of the same path after that reads it afresh.
-func logReaderFor(t *testing.T, path string) *logReader {
+func logReaderFor(t testing.TB, path string) *logReader {
 	if v, ok := logReaders.Load(path); ok {
 		return v.(*logReader)
 	}
@@ -554,7 +554,7 @@ func (d *Daemon) AwaitWorkspaceLogRecordInState(what string, pred func(LogRecord
 // It exists for the verbs that END the shim: the fake's in-memory recorder dies
 // with the process, so a forced KillSession can only be asserted from something
 // that outlived it.
-func ShimLoggedRequest(t *testing.T, workspaceDir, rpc string, into proto.Message) bool {
+func ShimLoggedRequest(t testing.TB, workspaceDir, rpc string, into proto.Message) bool {
 	t.Helper()
 	found := false
 	for _, r := range readLog(t, WorkspaceLogPath(workspaceDir, "shim")) {
@@ -695,7 +695,7 @@ func (d *Daemon) WorkspaceLogOperationCount(workspaceDir, operation string) int 
 // generation or an instance found nothing safe to append to, which is exactly
 // when a test that spans a crash and a cold boot would otherwise read only
 // part of the narrative.
-func WorkspaceLogTargets(t *testing.T, workspaceDir, sink string) []string {
+func WorkspaceLogTargets(t testing.TB, workspaceDir, sink string) []string {
 	t.Helper()
 	link := WorkspaceLogPath(workspaceDir, sink)
 	current, err := filepath.EvalSymlinks(link)
@@ -735,7 +735,7 @@ func WorkspaceLogTargets(t *testing.T, workspaceDir, sink string) []string {
 
 // ReadCumulativeWorkspaceLog reads one workspace sink's records across EVERY
 // daemon runtime that wrote it, oldest runtime first.
-func ReadCumulativeWorkspaceLog(t *testing.T, workspaceDir, sink string) []LogRecord {
+func ReadCumulativeWorkspaceLog(t testing.TB, workspaceDir, sink string) []LogRecord {
 	t.Helper()
 	var out []LogRecord
 	for _, target := range WorkspaceLogTargets(t, workspaceDir, sink) {
@@ -846,7 +846,7 @@ const OpTurnEnded = "daemon.promptqueue.turn_ended"
 // verb, so a test asking "did Hibernate arrive before KillSession" has nothing
 // to compare; the durable shim sink records every verb on one timeline, and
 // this reads that timeline back.
-func ShimVerbOrder(t *testing.T, workspaceDir string) []string {
+func ShimVerbOrder(t testing.TB, workspaceDir string) []string {
 	t.Helper()
 	var out []string
 	for _, r := range readLog(t, WorkspaceLogPath(workspaceDir, "shim")) {

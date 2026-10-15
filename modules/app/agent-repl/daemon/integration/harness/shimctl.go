@@ -92,7 +92,7 @@ type ShimProfile struct {
 
 // EncodeHistory renders history entries for a ShimProfile's ResumeHistory
 // field. They are stated NEWEST FIRST, exactly as a producer serves a page.
-func EncodeHistory(t *testing.T, newestFirst ...*conversationv1.HistoryEntry) [][]byte {
+func EncodeHistory(t testing.TB, newestFirst ...*conversationv1.HistoryEntry) [][]byte {
 	t.Helper()
 	out := make([][]byte, 0, len(newestFirst))
 	for _, entry := range newestFirst {
@@ -107,7 +107,7 @@ func EncodeHistory(t *testing.T, newestFirst ...*conversationv1.HistoryEntry) []
 
 // EncodeLiveWork renders detached-work announcements for a ShimProfile's
 // LiveWork field.
-func EncodeLiveWork(t *testing.T, items ...*conversationv1.AgentDetachedWork) [][]byte {
+func EncodeLiveWork(t testing.TB, items ...*conversationv1.AgentDetachedWork) [][]byte {
 	t.Helper()
 	out := make([][]byte, 0, len(items))
 	for _, item := range items {
@@ -235,7 +235,7 @@ type ShimControl struct {
 	// Socket is the control listener's path.
 	Socket string
 
-	t   *testing.T
+	t   testing.TB
 	d   *Daemon
 	mu  sync.Mutex
 	c   net.Conn
@@ -911,7 +911,7 @@ func (s *ShimControl) AwaitGone() {
 	AwaitProcessGone(s.t, s.d.Ctx(), s.pid)
 }
 
-func encode(t *testing.T, m proto.Message) string {
+func encode(t testing.TB, m proto.Message) string {
 	t.Helper()
 	raw, err := proto.Marshal(m)
 	if err != nil {
@@ -920,7 +920,7 @@ func encode(t *testing.T, m proto.Message) string {
 	return base64.StdEncoding.EncodeToString(raw)
 }
 
-func writeJSON(t *testing.T, path string, v any) {
+func writeJSON(t testing.TB, path string, v any) {
 	t.Helper()
 	body, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {

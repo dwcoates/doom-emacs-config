@@ -67,7 +67,7 @@ var (
 // acquireDaemonSlot admits t's top-level test to the suite's live-daemon cap
 // and registers the release. It is reentrant within one top-level test,
 // including from its subtests.
-func acquireDaemonSlot(t *testing.T) {
+func acquireDaemonSlot(t testing.TB) {
 	t.Helper()
 	root, _, _ := strings.Cut(t.Name(), "/")
 

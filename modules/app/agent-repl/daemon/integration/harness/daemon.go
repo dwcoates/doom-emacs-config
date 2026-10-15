@@ -439,7 +439,7 @@ type Daemon struct {
 	// Git is the fake git world every scripted `git` answers from.
 	Git *GitWorld
 
-	t   *testing.T
+	t   testing.TB
 	ctx context.Context
 	// waitBound is ONE wait's failure bound; ctx above is the whole run's.
 	waitBound  time.Duration
@@ -496,7 +496,7 @@ type Daemon struct {
 // tree exactly as the copy's did. The suite's binaries and every fakebin sit
 // under the one run root, so the link never crosses a file system; one that
 // would is a failed test, never a silent copy.
-func InstallFakeGit(t *testing.T, dir string) {
+func InstallFakeGit(t testing.TB, dir string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("harness: mkdir %s: %v", dir, err)
@@ -583,7 +583,7 @@ func cleanGitEnv(env []string) []string {
 
 // StartDaemon lays out a hermetic environment, starts the daemon, waits for
 // daemon.addr, and dials it. Every process it starts is killed on cleanup.
-func StartDaemon(t *testing.T, opts Opts) *Daemon {
+func StartDaemon(t testing.TB, opts Opts) *Daemon {
 	t.Helper()
 	// The suite's live-daemon cap, held for this top-level test's whole run.
 	// See slots.go: DefaultTimeout's measured basis is eight concurrent
@@ -949,7 +949,7 @@ func (d *Daemon) awaitServing() {
 // Non-socket paths (config roots, fake dists, prompt copies, repos) have no
 // such budget and stay under t.TempDir(), where a failed run's leftovers are
 // named after the test that left them.
-func ShortTempDir(t *testing.T) string {
+func ShortTempDir(t testing.TB) string {
 	t.Helper()
 	// Under the run root (runroot.go), so an abnormally ended run's state
 	// roots are reclaimed with it. It is itself under /tmp and short.
@@ -969,7 +969,7 @@ func ShortTempDir(t *testing.T) string {
 // the state root cannot hold a shim socket. The daemon refuses such a root at
 // boot; without this the failure surfaces as a DefaultTimeout wait for
 // daemon.addr instead.
-func requireSocketPathBudget(t *testing.T, stateDir string) {
+func requireSocketPathBudget(t testing.TB, stateDir string) {
 	t.Helper()
 	layout, err := stateroot.Root(stateDir, "")
 	if err != nil {
@@ -1808,7 +1808,7 @@ func (d *Daemon) Stderr() string {
 }
 
 // Register registers a repository's worktree and answers the minted ref.
-func Register(t *testing.T, d *Daemon, dir string) *workspacev1.WorkspaceRef {
+func Register(t testing.TB, d *Daemon, dir string) *workspacev1.WorkspaceRef {
 	t.Helper()
 	resp, err := d.Client().RegisterWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.RegisterWorkspaceRequest{Dir: dir}))
 	if err != nil {
@@ -1889,7 +1889,7 @@ var (
 // the daemon's process tree, so no Daemon's ReapStrays will signal it. The
 // exemption is dropped at the end of the test that declared it, because the pid
 // is free for reuse the moment that process is reaped.
-func SpareFromStrayReaping(t *testing.T, pid int) {
+func SpareFromStrayReaping(t testing.TB, pid int) {
 	t.Helper()
 	sparedMu.Lock()
 	sparedFromReaping[pid] = true
