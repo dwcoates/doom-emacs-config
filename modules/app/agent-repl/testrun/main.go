@@ -391,11 +391,11 @@ func redundancyCmd(log *run.Log, argv []string) int {
 	}
 	switch argv[0] {
 	case "go":
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		ctx, stop := proc.Interrupted(context.Background())
 		defer stop()
 		return gomeasure.Command(ctx, log, argv[1:], gomeasure.OSExec)
 	case "vitest":
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		ctx, stop := proc.Interrupted(context.Background())
 		defer stop()
 		return vitestmeasure.Command(ctx, log, argv[1:], proc.OSExec)
 	case "report":
