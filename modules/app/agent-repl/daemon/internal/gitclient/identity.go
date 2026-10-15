@@ -4,7 +4,6 @@ package gitclient
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"agent-repld/internal/dlog"
@@ -70,20 +69,12 @@ func (c *client) CommitIdentities(ctx context.Context, dir, base, tip string) ([
 	if err != nil {
 		return nil, err
 	}
-	trimmed := strings.TrimRight(out, "\n")
-	if trimmed == "" {
-		return nil, nil
+	records, err := c.formattedRecords(operation, dir, out, 6, dlog.Context{"base": base, "tip": tip})
+	if err != nil || records == nil {
+		return nil, err
 	}
-	lines := strings.Split(trimmed, "\n")
-	commits := make([]CommitIdentity, 0, len(lines))
-	for _, line := range lines {
-		fields := strings.Split(line, fieldSep)
-		if len(fields) != 6 {
-			c.log.Global().Error(operation, "a commit line did not carry every field", dlog.Context{
-				"dir": dir, "base": base, "tip": tip, "line": line, "fields": len(fields),
-			})
-			return nil, fmt.Errorf("gitclient: unreadable commit identity line %q in %s", line, dir)
-		}
+	commits := make([]CommitIdentity, 0, len(records))
+	for _, fields := range records {
 		commits = append(commits, CommitIdentity{
 			SHA:       fields[0],
 			Subject:   fields[1],

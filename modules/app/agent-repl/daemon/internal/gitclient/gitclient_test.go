@@ -3,12 +3,15 @@ package gitclient
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"agent-repld/internal/dlog"
 )
 
 // commitLine renders one line of commitFormat output.
@@ -2730,5 +2733,82 @@ func TestPreserveWorktreeWithoutAPrivateIndexRunsNoGit(t *testing.T) {
 	record, found := recordFor(surfaces.records(), "error", "daemon.gitclient.preserve_worktree")
 	if !found || record.Context["worktree_dir"] != "/wt" || record.Context["ref"] != "refs/agent-repl/reaped/wt/x" {
 		t.Fatalf("the refusal record = %v (found %v), want the worktree and ref", record, found)
+	}
+}
+
+func TestFormattedRecordsAnswersNoRecordsForEmptyOutput(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+
+	// Act.
+	got, err := git.(*client).formattedRecords("op", "/repo", "\n", 2, nil)
+
+	// Assert.
+	if err != nil || got != nil {
+		t.Fatalf("formattedRecords = %v, %v; want no records", got, err)
+	}
+}
+
+func TestFormattedRecordsSplitsEveryLineIntoItsFields(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	out := strings.Join([]string{"a", "b"}, fieldSep) + "\n" + strings.Join([]string{"c", "d"}, fieldSep) + "\n"
+
+	// Act.
+	got, err := git.(*client).formattedRecords("op", "/repo", out, 2, nil)
+
+	// Assert.
+	if want := [][]string{{"a", "b"}, {"c", "d"}}; err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("formattedRecords = %v, %v; want %v", got, err, want)
+	}
+}
+
+func TestFormattedRecordsRefusesALineWithAnotherFieldCount(t *testing.T) {
+	// Arrange.
+	git, surfaces := newTestClient(t)
+	out := strings.Join([]string{"a", "b"}, fieldSep) + "\n" + "c\n"
+
+	// Act.
+	got, err := git.(*client).formattedRecords("op", "/repo", out, 2, dlog.Context{"tip": "t"})
+
+	// Assert.
+	if err == nil || got != nil || !strings.Contains(err.Error(), `unreadable commit line "c" in /repo`) {
+		t.Fatalf("formattedRecords = %v, %v; want a refusal naming the line", got, err)
+	}
+	record, logged := recordFor(surfaces.records(), "error", "op")
+	if !logged || record.Context["line"] != "c" || record.Context["fields"] != 1 || record.Context["dir"] != "/repo" || record.Context["tip"] != "t" {
+		t.Fatalf("refusal record = %+v (logged %v), want an ERROR carrying the line, its field count, the dir and the caller's context", record, logged)
+	}
+}
+
+// TestEveryFormattedOutputIsSplitByFormattedRecords holds the call sites to
+// the one parser: no other code in the package splits a line by fieldSep.
+func TestEveryFormattedOutputIsSplitByFormattedRecords(t *testing.T) {
+	// Arrange.
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("listing the package: %v", err)
+	}
+
+	// Act.
+	var splits []string
+	for _, file := range files {
+		if strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		src, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("reading %s: %v", file, err)
+		}
+		for i, line := range strings.Split(string(src), "\n") {
+			if strings.Contains(line, ", fieldSep)") && strings.Contains(line, "strings.Split(") {
+				splits = append(splits, fmt.Sprintf("%s:%d", file, i+1))
+			}
+		}
+	}
+
+	// Assert.
+	if len(splits) != 1 {
+		t.Fatalf("lines split by fieldSep at %v, want exactly one: formattedRecords's own", splits)
 	}
 }
