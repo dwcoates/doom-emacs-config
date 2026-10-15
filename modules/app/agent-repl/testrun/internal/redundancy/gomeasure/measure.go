@@ -33,6 +33,10 @@ const (
 	// TimeoutSlack is added to twice a process's measured healthy latency:
 	// its start-up varies by more than twice its few milliseconds of tests.
 	TimeoutSlack = 500 * time.Millisecond
+	// DefaultHangBound confirms a hang: just over twice the longest real
+	// wait any internal/workspace test allows itself (5s; its longer bounds
+	// run on a fake clock), so a case still running at it has stalled.
+	DefaultHangBound = 11 * time.Second
 )
 
 // Config is one measurement.
@@ -56,6 +60,9 @@ type Config struct {
 	Scratch string
 	// Go is the go command.
 	Go string
+	// HangBound confirms a hang: a case that hung at twice its healthy
+	// latency reruns alone this long.
+	HangBound time.Duration
 }
 
 type measurer struct {
@@ -94,6 +101,9 @@ func Measure(ctx context.Context, cfg Config, exec Exec, log *run.Log) (*redunda
 	}
 	if len(cfg.Mutate) == 0 {
 		return nil, fmt.Errorf("gomeasure: no package to mutate")
+	}
+	if cfg.HangBound <= 0 {
+		return nil, fmt.Errorf("gomeasure: the hang bound must be positive, got %s", cfg.HangBound)
 	}
 	m := &measurer{cfg: cfg, exec: exec, log: log}
 	start := time.Now()
@@ -541,7 +551,7 @@ func (m *measurer) killers(ctx context.Context, bin string, mu gomut.Mutant, lea
 	for _, l := range leaves {
 		pending[l] = true
 	}
-	var killed, anomalies []string
+	var killed, hung, anomalies []string
 	settle := func(r Run, res Result, asked []string) {
 		parentFailed := map[string]bool{}
 		for _, l := range asked {
@@ -606,14 +616,69 @@ func (m *measurer) killers(ctx context.Context, bin string, mu gomut.Mutant, lea
 		if res.Exit == 0 && !res.TimedOut && len(r.TimedOut) == 0 {
 			return nil, nil, fmt.Errorf("gomeasure: %s ran clean under %s yet reported no result:\n%s", l, mu.Key(), res.Text())
 		}
+		delete(pending, l)
 		if res.TimedOut || len(r.TimedOut) > 0 {
-			m.hangs = append(m.hangs, fmt.Sprintf("%s hung under %s past its %s bound", l, mu.Key(), timeout))
+			hung = append(hung, l)
+			continue
 		}
 		killed = append(killed, l)
-		delete(pending, l)
 	}
+	confirmed, err := m.confirmHangs(ctx, bin, mu, env, hung)
+	if err != nil {
+		return nil, nil, err
+	}
+	killed = append(killed, confirmed...)
 	sort.Strings(killed)
 	return slices.Compact(killed), anomalies, nil
+}
+
+// confirmHangs judges the leaves that hung alone at twice their healthy
+// latency. A mutant can merely SLOW a case (a fallback timer), and a slowed
+// case is not a kill. So one of them reruns at the hang bound, past every
+// real wait the measured tests allow themselves: still hung there, the
+// mutant stalls, and every leaf that hung under it is a kill; finished, each
+// hung leaf reruns at the hang bound and is a kill only if it fails or hangs
+// again.
+func (m *measurer) confirmHangs(ctx context.Context, bin string, mu gomut.Mutant, env string, hung []string) ([]string, error) {
+	if len(hung) == 0 {
+		return nil, nil
+	}
+	lone := func(l string) (bool, error) {
+		res, r, err := m.runTests(ctx, bin, RunPattern(l), m.cfg.HangBound, nil, env)
+		if err != nil {
+			return false, err
+		}
+		switch r.Outcomes[l] {
+		case Pass, Skip:
+			return false, nil
+		case Fail:
+			return true, nil
+		}
+		if res.Exit == 0 && !res.TimedOut && len(r.TimedOut) == 0 {
+			return false, fmt.Errorf("gomeasure: %s ran clean under %s yet reported no result:\n%s", l, mu.Key(), res.Text())
+		}
+		return true, nil
+	}
+	first, err := lone(hung[0])
+	if err != nil {
+		return nil, err
+	}
+	if first {
+		m.hangs = append(m.hangs, fmt.Sprintf("%s: %d cases hung (confirmed on %s at %s): %s", mu.Key(), len(hung), hung[0], m.cfg.HangBound, strings.Join(hung, ", ")))
+		return hung, nil
+	}
+	var killed []string
+	for _, l := range hung[1:] {
+		k, err := lone(l)
+		if err != nil {
+			return nil, err
+		}
+		if k {
+			killed = append(killed, l)
+		}
+	}
+	m.hangs = append(m.hangs, fmt.Sprintf("%s: %d cases were only slowed (%s finished within %s); %d failed when rerun", mu.Key(), len(hung), hung[0], m.cfg.HangBound, len(killed)))
+	return killed, nil
 }
 
 func isAncestor(n string, leaves []string) bool {

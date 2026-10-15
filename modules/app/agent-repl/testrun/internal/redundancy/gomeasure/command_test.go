@@ -20,7 +20,7 @@ func TestParseArgsDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(a.Mutate, []string{"./p"}) || a.Runs != 3 || a.Universe != redundancy.KillsOnly || a.Overhead != DefaultOverhead {
+	if !reflect.DeepEqual(a.Mutate, []string{"./p"}) || a.Runs != 3 || a.Universe != redundancy.KillsOnly || a.Overhead != DefaultOverhead || a.HangBound != DefaultHangBound || a.Budget.MaxDrop != redundancy.DefaultMaxDrop {
 		t.Fatalf("defaults = %+v", a)
 	}
 	if !reflect.DeepEqual(a.Tests, []string{"a_test.go", "b_test.go"}) || !reflect.DeepEqual(a.PinCalls, []string{"FindRecord", "Records"}) {

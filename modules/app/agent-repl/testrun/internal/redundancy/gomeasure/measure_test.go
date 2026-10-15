@@ -55,6 +55,8 @@ type fakeGo struct {
 	schemaErr string
 	// mutant scripts each mutant's group run, then each lone rerun.
 	mutant map[string]func(pattern string) Result
+	// mutantCmd, when it holds the mutant, scripts it from the whole command.
+	mutantCmd map[string]func(Cmd) Result
 	calls  []string
 }
 
@@ -165,6 +167,9 @@ func (f *fakeGo) exec(_ context.Context, c Cmd) (Result, error) {
 			}
 			return Result{Lines: passLines(withParents(leaves)...)}, nil
 		}
+		if fn, ok := f.mutantCmd[id]; ok {
+			return fn(c), nil
+		}
 		return f.mutant[id](pattern), nil
 	}
 	return Result{}, fmt.Errorf("fake: unexpected command %s %v", c.Path, c.Args)
@@ -175,7 +180,7 @@ func fakeConfig(t *testing.T) (Config, string) {
 	dir := writeFiles(t, map[string]string{"p.go": fakeProd, "p_test.go": fakeTests})
 	return Config{
 		Module: dir, Package: ".", Tests: []string{"p_test.go"}, Mutate: []string{"."},
-		Runs: 2, PinCalls: []string{"FindRecord"}, Scratch: t.TempDir(), Go: "go",
+		Runs: 2, PinCalls: []string{"FindRecord"}, Scratch: t.TempDir(), Go: "go", HangBound: 3 * time.Second,
 	}, dir
 }
 
@@ -417,8 +422,47 @@ func TestMeasureCountsAHangAloneAsAKill(t *testing.T) {
 			t.Fatalf("TestA kills %v, want the mutant it hangs under", c.Kills)
 		}
 	}
-	if len(m.Hangs) != 1 || !strings.HasPrefix(m.Hangs[0], "TestA hung under p.go:3:29:< -> <= past its") {
-		t.Fatalf("hangs = %v, want TestA's listed", m.Hangs)
+	if len(m.Hangs) != 1 || !strings.HasPrefix(m.Hangs[0], "p.go:3:29:< -> <=: 1 cases hung (confirmed on TestA at 3s)") {
+		t.Fatalf("hangs = %v, want TestA's confirmed hang listed", m.Hangs)
+	}
+}
+
+func TestMeasureCountsACaseAMutantOnlySlowsAsNoKill(t *testing.T) {
+	// Arrange: under mutant 1 TestA and TestB/y run past their healthy bound
+	// but finish within the hang bound; TestB/y then fails, TestA passes.
+	cfg, dir := fakeConfig(t)
+	f := &fakeGo{dir: dir, reaches: map[string]bool{"TestA": true, "TestB/y": true}}
+	slow := func(c Cmd) Result {
+		p := argAfter(c.Args, "-test.run")
+		if argAfter(c.Args, "-test.timeout") != cfg.HangBound.String() {
+			return Result{Exit: 2, TimedOut: true}
+		}
+		if p == RunPattern("TestB/y") {
+			return Result{Exit: 1, Lines: lines("=== RUN   TestB", "=== RUN   TestB/y", "--- FAIL: TestB (0.00s)", "    --- FAIL: TestB/y (0.00s)")}
+		}
+		return Result{Lines: passLines("TestA")}
+	}
+	f.mutantCmd = map[string]func(Cmd) Result{"1": slow}
+	pass := func(string) Result { return Result{Lines: passLines("TestA", "TestB", "TestB/y")} }
+	f.mutant = map[string]func(string) Result{"2": pass}
+	log, _ := quietLog()
+
+	// Act
+	m, err := Measure(context.Background(), cfg, f.exec, log)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	kills := map[string][]string{}
+	for _, c := range m.Cases {
+		kills[c.ID] = c.Kills
+	}
+	if kills["TestA"] != nil || !reflect.DeepEqual(kills["TestB/y"], []string{"p.go:3:29:< -> <="}) {
+		t.Fatalf("kills = %v, want TestB/y's alone", kills)
+	}
+	if len(m.Hangs) != 1 || !strings.Contains(m.Hangs[0], "2 cases were only slowed (TestA finished within 3s); 1 failed when rerun") {
+		t.Fatalf("hangs = %v", m.Hangs)
 	}
 }
 
@@ -482,5 +526,21 @@ func TestMeasureEndsAtAnInterruptRatherThanReadingItAsAHang(t *testing.T) {
 	// Assert
 	if err == nil || !strings.Contains(err.Error(), "interrupted during mutants.test") {
 		t.Fatalf("err = %v, want the interrupt", err)
+	}
+}
+
+func TestMeasureRefusesANonPositiveHangBound(t *testing.T) {
+	// Arrange
+	cfg, dir := fakeConfig(t)
+	cfg.HangBound = 0
+	f := &fakeGo{dir: dir}
+	log, _ := quietLog()
+
+	// Act
+	_, err := Measure(context.Background(), cfg, f.exec, log)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "hang bound must be positive") {
+		t.Fatalf("err = %v", err)
 	}
 }
