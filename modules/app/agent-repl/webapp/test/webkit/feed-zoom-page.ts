@@ -7,17 +7,9 @@
  */
 import { markdownSlot } from "../../src/bubble/body.js";
 import { drawBubble } from "../../src/bubble/draw.js";
-import { ForwardingLogger, bindLogContext, setLogger } from "../../src/log.js";
+import { installPageLogger } from "./page-logger";
 
-setLogger(
-  new ForwardingLogger(
-    () => Promise.resolve("accepted"),
-    () => undefined,
-    {},
-    "debug",
-  ),
-);
-bindLogContext({ connection_id: "webkit-feed-zoom-page" });
+installPageLogger("feed-zoom");
 
 /** Draw a response bubble of MARKDOWN as the feed's next row, under ID. */
 export function drawResponse(id: string, markdown: string): void {

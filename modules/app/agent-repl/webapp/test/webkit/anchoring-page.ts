@@ -17,7 +17,7 @@
  * task between two frames -- sees growth no rendering update has corrected
  * yet, a state that is never painted.
  */
-import { ForwardingLogger, bindLogContext, setLogger } from "../../src/log.js";
+import { installPageLogger } from "./page-logger";
 import { TailFollow, feedAnchorRows, observeScrollBox, revealGeometry } from "../../src/scroll.js";
 
 /** The rows the page draws, and the real height of row I (60px to 759px). */
@@ -144,18 +144,7 @@ function rowAbove(box: HTMLElement, host: HTMLElement): HTMLElement {
  * test to read, as `level operation`; the forwarding sink accepts and drops.
  */
 const written: string[] = [];
-setLogger(
-  new ForwardingLogger(
-    () => Promise.resolve("accepted"),
-    (level, line) => {
-      const { operation } = JSON.parse(line) as { operation: string };
-      written.push(`${level} ${operation}`);
-    },
-    {},
-    "debug",
-  ),
-);
-bindLogContext({ connection_id: "webkit-anchoring-page" });
+installPageLogger("anchoring", { written });
 
 const { box, host, tail } = mount();
 const frame = paintedFrames();

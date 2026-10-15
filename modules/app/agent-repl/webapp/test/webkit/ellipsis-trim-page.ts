@@ -5,18 +5,10 @@
  * on `window.EllipsisTrim` beside the trim's own first-line walk
  * (`domClampGeometry`), which the suite reads each clamp's characters through.
  */
-import { ForwardingLogger, bindLogContext, setLogger } from "../../src/log.js";
+import { installPageLogger } from "./page-logger";
 import { refreshHasMore } from "../../src/feed/bubble-more.js";
 import { domClampGeometry } from "../../src/feed/ellipsis-trim.js";
 
-setLogger(
-  new ForwardingLogger(
-    () => Promise.resolve("accepted"),
-    () => undefined,
-    {},
-    "debug",
-  ),
-);
-bindLogContext({ connection_id: "webkit-ellipsis-trim-page" });
+installPageLogger("ellipsis-trim");
 
 export { domClampGeometry, refreshHasMore };

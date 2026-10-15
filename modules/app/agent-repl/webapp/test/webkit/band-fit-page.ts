@@ -3,17 +3,9 @@
  * under the webapp's own logger (which the module writes through), exposed on
  * `window.BandFit`.
  */
-import { ForwardingLogger, bindLogContext, setLogger } from "../../src/log.js";
+import { installPageLogger } from "./page-logger";
 import { fitBands } from "../../src/sidebar/band-fit.js";
 
-setLogger(
-  new ForwardingLogger(
-    () => Promise.resolve("accepted"),
-    () => undefined,
-    {},
-    "debug",
-  ),
-);
-bindLogContext({ connection_id: "webkit-band-fit-page" });
+installPageLogger("band-fit");
 
 export { fitBands };
