@@ -1494,6 +1494,15 @@ func (d *Daemon) signalGroup(pgid int, sig syscall.Signal) bool {
 	return true
 }
 
+// KillGroup SIGKILLs process group pgid, answering nil once every live member
+// was killed or was already gone. A group whose members have all exited is no
+// failure, including Darwin's EPERM for a killpg that reached only exiting
+// members, which procgroup.Signal answers by signalling the live members by
+// pid.
+func KillGroup(pgid int) error {
+	return procgroup.Signal(pgid, syscall.SIGKILL)
+}
+
 // killLeader SIGKILLs the daemon's own process, and only it, continues it out
 // of the group stop (killStopped), and reports whether the kill should go on.
 // The caller holds sigMu and found the reap not begun, so its pid is still

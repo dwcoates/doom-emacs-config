@@ -343,13 +343,10 @@ func (s *wlServer) killGroup() error {
 }
 
 // killProcessGroup SIGKILLs process group pgid, answering nil when the group
-// is already gone.
+// is already gone. The kill is the harness's, which also takes Darwin's EPERM
+// for a group whose only member is still exiting.
 func killProcessGroup(pgid int) error {
-	err := syscall.Kill(-pgid, syscall.SIGKILL)
-	if errors.Is(err, syscall.ESRCH) {
-		return nil
-	}
-	if err != nil {
+	if err := harness.KillGroup(pgid); err != nil {
 		return fmt.Errorf("kill the layer driver's process group %d: %w", pgid, err)
 	}
 	return nil
