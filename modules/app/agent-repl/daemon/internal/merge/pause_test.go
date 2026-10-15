@@ -2,6 +2,7 @@ package merge
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -119,5 +120,168 @@ func TestThePausesTakeBackRecordsThatTheMergeStaysSuspended(t *testing.T) {
 	}
 	if rec.Context["paused"] != true || !strings.Contains(rec.Message, "stays suspended until the queue is resumed") {
 		t.Fatalf("recover record = %q %v, want that the merge stays suspended on its paused queue", rec.Message, rec.Context)
+	}
+}
+
+// otherQueueKey is a second repository's queue key, for the tests that need
+// more than the harness's one queue.
+const otherQueueKey = wsm.RepoKey("/other/checkout/.git")
+
+// seedQueue gives a repository's queue one waiting entry, which is all an
+// unscoped pause needs to count the queue as one to change.
+func seedQueue(h *harness, repo wsm.RepoKey, paused bool) {
+	h.db.mu.Lock()
+	defer h.db.mu.Unlock()
+	h.db.queues[repo] = append(h.db.queues[repo], wsm.MergeQueueEntry{State: wsm.MergeQueued})
+	h.db.paused[repo] = paused
+}
+
+// pauseVerb runs Pause or Unpause, the two verbs every pause test drives.
+func pauseVerb(h *harness, pause bool, scope *RepositoryScope) error {
+	if pause {
+		return h.o.Pause(context.Background(), scope)
+	}
+	return h.o.Unpause(context.Background(), scope)
+}
+
+func TestAPauseChangeThatWouldChangeNothingIsRefusedAndWritesNothing(t *testing.T) {
+	tests := []struct {
+		name    string
+		pause   bool
+		wantArm string
+		wantOp  string
+	}{
+		{name: "pausing a paused queue", pause: true, wantArm: ArmAlreadyPaused, wantOp: "daemon.merge.pause"},
+		{name: "resuming a running queue", pause: false, wantArm: ArmNotPaused, wantOp: "daemon.merge.unpause"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the queue already stands where the verb would put it, and
+			// any write would answer an error the refusal could not be confused
+			// with.
+			h := newHarness(t)
+			seedQueue(h, h.repoKey(), tt.pause)
+			h.db.pauseWriteErr = errors.New("a no-op pause wrote the state database")
+
+			// Act.
+			err := pauseVerb(h, tt.pause, nil)
+
+			// Assert.
+			var refused *RefusalError
+			if !errors.As(err, &refused) || refused.Arm != tt.wantArm {
+				t.Fatalf("error = %v, want the %s refusal", err, tt.wantArm)
+			}
+			if rec, ok := h.recordFor("warn", tt.wantOp); !ok || rec.Context["arm"] != tt.wantArm {
+				t.Fatalf("WARN %s record = %v (%v), want one naming the arm", tt.wantOp, rec.Context, ok)
+			}
+		})
+	}
+}
+
+func TestAnUnscopedPauseChangeWithNoQueueAnywhereIsRefused(t *testing.T) {
+	tests := []struct {
+		name    string
+		pause   bool
+		wantArm string
+		wantOp  string
+	}{
+		{name: "pause", pause: true, wantArm: ArmAlreadyPaused, wantOp: "daemon.merge.pause"},
+		{name: "resume", pause: false, wantArm: ArmNotPaused, wantOp: "daemon.merge.unpause"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the harness holds no queue at all.
+			h := newHarness(t)
+
+			// Act.
+			err := pauseVerb(h, tt.pause, nil)
+
+			// Assert.
+			var refused *RefusalError
+			if !errors.As(err, &refused) || refused.Arm != tt.wantArm {
+				t.Fatalf("error = %v, want the %s refusal", err, tt.wantArm)
+			}
+			if rec, ok := h.recordFor("warn", tt.wantOp); !ok || rec.Context["arm"] != tt.wantArm {
+				t.Fatalf("WARN %s record = %v (%v), want one naming the arm", tt.wantOp, rec.Context, ok)
+			}
+		})
+	}
+}
+
+func TestAnUnscopedPausePausesEveryRepositoryWithAQueue(t *testing.T) {
+	// Arrange: two repositories, each with a running queue.
+	h := newHarness(t)
+	seedQueue(h, h.repoKey(), false)
+	seedQueue(h, otherQueueKey, false)
+
+	// Act.
+	err := h.o.Pause(context.Background(), nil)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+	h.db.mu.Lock()
+	defer h.db.mu.Unlock()
+	if !h.db.paused[h.repoKey()] || !h.db.paused[otherQueueKey] {
+		t.Fatalf("paused = %v, want both repositories' queues paused", h.db.paused)
+	}
+}
+
+func TestAnUnscopedResumeResumesOnlyTheQueuesThatWerePaused(t *testing.T) {
+	// Arrange: one paused queue and one running queue; the resume changes the
+	// paused one and is not refused for the other.
+	h := newHarness(t)
+	seedQueue(h, h.repoKey(), true)
+	seedQueue(h, otherQueueKey, false)
+
+	// Act.
+	err := h.o.Unpause(context.Background(), nil)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Unpause: %v", err)
+	}
+	h.db.mu.Lock()
+	defer h.db.mu.Unlock()
+	if h.db.paused[h.repoKey()] || h.db.paused[otherQueueKey] {
+		t.Fatalf("paused = %v, want neither queue paused", h.db.paused)
+	}
+}
+
+func TestAScopedPauseOfARepositoryTheRegistryDoesNotHoldIsRefused(t *testing.T) {
+	tests := []struct {
+		name    string
+		scope   *RepositoryScope
+		wantMsg string
+	}{
+		{name: "an unknown id", scope: &RepositoryScope{ID: "no-such-repo"}, wantMsg: "refused a pause change for a repository the registry does not hold"},
+		{name: "an unknown dir", scope: &RepositoryScope{Dir: "/no/such/checkout"}, wantMsg: "refused a pause change for a repository the registry does not hold"},
+		{name: "an empty ref", scope: &RepositoryScope{}, wantMsg: "refused a pause change scoped by an empty repository ref"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a running queue the refusal must leave alone.
+			h := newHarness(t)
+			seedQueue(h, h.repoKey(), false)
+
+			// Act.
+			err := h.o.Pause(context.Background(), tt.scope)
+
+			// Assert.
+			var refused *RefusalError
+			if !errors.As(err, &refused) || refused.Arm != ArmUnknownRepository {
+				t.Fatalf("error = %v, want the %s refusal", err, ArmUnknownRepository)
+			}
+			rec, ok := h.recordFor("warn", "daemon.merge.pause")
+			if !ok || rec.Message != tt.wantMsg || rec.Context["arm"] != ArmUnknownRepository {
+				t.Fatalf("WARN record = %+v (%v), want %q naming the arm", rec, ok, tt.wantMsg)
+			}
+			h.db.mu.Lock()
+			defer h.db.mu.Unlock()
+			if h.db.paused[h.repoKey()] {
+				t.Fatal("a refused scoped pause paused the queue")
+			}
+		})
 	}
 }
