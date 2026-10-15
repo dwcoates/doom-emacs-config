@@ -134,3 +134,30 @@ func useDefaultArtifacts() error {
 	}
 	return os.Setenv(ArtifactsEnv, dir)
 }
+
+// cleanupT is what registerLogChecks needs of a test: *testing.T's cleanup
+// registration and its verdict.
+type cleanupT interface {
+	Cleanup(func())
+	Failed() bool
+}
+
+// registerLogChecks registers a daemon's log sweeps and, AHEAD of them, KEEP,
+// which runs once the test has failed. t.Cleanup unwinds last-registered
+// first, so KEEP runs AFTER every sweep and a test failed by a sweep alone
+// keeps its logs too. Registered after the sweeps, KEEP read only the body's
+// verdict, and an unexpected warning record failed a full run with nothing
+// kept to say what the daemon did around it (2026-10-15,
+// TestUpdateMergeQueuePauseWithNoRepositoryPausesEveryRepositoryWithAQueue:
+// daemon.feed.pin_refused). The state root KEEP reads is a temp dir the
+// testing package removes only after every cleanup.
+func registerLogChecks(t cleanupT, keep func(), sweeps ...func()) {
+	t.Cleanup(func() {
+		if t.Failed() {
+			keep()
+		}
+	})
+	for _, sweep := range sweeps {
+		t.Cleanup(sweep)
+	}
+}

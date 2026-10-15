@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -169,5 +170,61 @@ func TestUseDefaultArtifactsNamesAFreshRunUnderTheUserCache(t *testing.T) {
 	}
 	if info, statErr := os.Stat(got); statErr != nil || !info.IsDir() {
 		t.Fatalf("the run directory %s was not created: %v", got, statErr)
+	}
+}
+
+// fakeCleanupT records cleanups and runs them last-registered first, as
+// *testing.T does; a step marks it failed through fail.
+type fakeCleanupT struct {
+	cleanups []func()
+	failed   bool
+}
+
+func (f *fakeCleanupT) Cleanup(fn func()) { f.cleanups = append(f.cleanups, fn) }
+func (f *fakeCleanupT) Failed() bool      { return f.failed }
+
+func (f *fakeCleanupT) finish() {
+	for i := len(f.cleanups) - 1; i >= 0; i-- {
+		f.cleanups[i]()
+	}
+}
+
+func TestRegisterLogChecks(t *testing.T) {
+	tests := []struct {
+		name       string
+		bodyFails  bool
+		sweepFails bool
+		wantKept   bool
+	}{
+		{name: "a passing test keeps nothing"},
+		{name: "a test whose body failed keeps its logs", bodyFails: true, wantKept: true},
+		{name: "a test failed by a sweep alone keeps its logs", sweepFails: true, wantKept: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			ft := &fakeCleanupT{failed: tt.bodyFails}
+			var ran []string
+			keep := func() { ran = append(ran, "keep") }
+			sweep := func() {
+				ran = append(ran, "sweep")
+				if tt.sweepFails {
+					ft.failed = true
+				}
+			}
+			registerLogChecks(ft, keep, sweep, func() { ran = append(ran, "sweep") })
+
+			// Act
+			ft.finish()
+
+			// Assert
+			want := []string{"sweep", "sweep"}
+			if tt.wantKept {
+				want = append(want, "keep")
+			}
+			if !slices.Equal(ran, want) {
+				t.Fatalf("cleanups ran %v, want %v", ran, want)
+			}
+		})
 	}
 }
