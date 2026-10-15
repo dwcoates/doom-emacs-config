@@ -2147,3 +2147,71 @@ func TestARequestItsCallerAbandonedIsRecordedAtInfo(t *testing.T) {
 		})
 	}
 }
+
+// TestTransportCut pins which failures can be the link breaking under a call:
+// only those this side read off a cut stream, never an answer the shim sent.
+func TestTransportCut(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "unavailable", err: connect.NewError(connect.CodeUnavailable, errors.New("unexpected EOF")), want: true},
+		{name: "a response cut partway through an envelope",
+			err: connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("protocol error: incomplete envelope: %w", io.ErrUnexpectedEOF)), want: true},
+		{name: "an invalid_argument with no cut beneath it", err: connect.NewError(connect.CodeInvalidArgument, errors.New("bad request")), want: false},
+		{name: "a refusal the shim answered", err: connect.NewError(connect.CodeInternal, errors.New("the fold came apart")), want: false},
+		{name: "not found", err: connect.NewError(connect.CodeNotFound, io.ErrUnexpectedEOF), want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := transportCut(tt.err)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("transportCut(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestACutEnvelopeOnADyingShimIsItsDeath pins that a stream the dying shim
+// cut mid-envelope is attributed to the death, as an unavailable one is.
+func TestACutEnvelopeOnADyingShimIsItsDeath(t *testing.T) {
+	// Arrange
+	c := newClient(dlog.NewTestLogger(), ids.WorkspaceID("ws-1"), "", defaultBackoff, nil, nil)
+	stageDeath(c, exitingUnreaped)
+	cut := connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("protocol error: incomplete envelope: %w", io.ErrUnexpectedEOF))
+
+	// Act
+	_, died := c.diedUnder(cut)
+
+	// Assert
+	if !died {
+		t.Fatal("a cut envelope on an exiting shim was not attributed to its death")
+	}
+}
+
+// TestAnInvalidArgumentTheShimAnsweredIsNeverItsDeath pins, across the
+// wire, that a shim's own invalid_argument naming an unexpected EOF reaches
+// this side without the cause, so it stays the shim's refusal.
+func TestAnInvalidArgumentTheShimAnsweredIsNeverItsDeath(t *testing.T) {
+	// Arrange
+	f, uds := startFakeShim(t, shortDir(t))
+	f.watchBashRefusal = connect.NewError(connect.CodeInvalidArgument, io.ErrUnexpectedEOF)
+	log := dlog.NewTestLogger()
+	c := newClient(log, ids.WorkspaceID("ws-1"), uds, defaultBackoff, nil, nil)
+	stageDeath(c, diedBefore)
+
+	// Act
+	_, err := c.WatchBash(context.Background(), &conversationv1.DetachedWorkId{Value: "toolu_1"})
+
+	// Assert
+	if errors.Is(err, ErrShimDied) {
+		t.Fatalf("a refusal the shim answered was attributed to its death: %v", err)
+	}
+	if !hasRecordAt(log, "error", "daemon.shimclient.watch_bash") {
+		t.Fatalf("the shim's own refusal was not recorded at error: %+v", log.Records())
+	}
+}
