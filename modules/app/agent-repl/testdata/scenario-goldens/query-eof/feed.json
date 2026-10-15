@@ -25,8 +25,64 @@
               }
             ]
           }
-        },
-        "working": true
+        }
+      }
+    },
+    {
+      "id": {
+        "value": "${ROW_2}"
+      },
+      "order": {
+        "key": "${ORDER_2}"
+      },
+      "turn": {
+        "value": "${TURN}"
+      },
+      "turnEnded": {
+        "endedAtMs": "${NOW}",
+        "errored": {
+          "headline": {
+            "text": "the query died — the agent binary's stream ended without closing"
+          },
+          "marker": {
+            "agentReplFault": {
+              "expansion": {
+                "resend": {
+                  "said": {
+                    "content": {
+                      "blocks": [
+                        {
+                          "text": {
+                            "text": "!query-eof"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                },
+                "time": {
+                  "atMs": "${NOW}"
+                },
+                "whatDied": {
+                  "query": {
+                    "line": {
+                      "text": "the query died — the agent binary's stream ended without closing"
+                    }
+                  }
+                }
+              }
+            },
+            "detail": {
+              "text": "query died"
+            },
+            "label": {
+              "text": "agent-repl"
+            }
+          },
+          "queryDied": {
+            "unexpectedEof": {}
+          }
+        }
       }
     }
   ],

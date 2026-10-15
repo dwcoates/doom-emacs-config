@@ -33,7 +33,7 @@
         "simpleToolCall": {
           "clock": {
             "running": {},
-            "startedAtMs": "1800000000008"
+            "startedAtMs": "1800000000009"
           },
           "input": {
             "text": "ws://127.0.0.1:8787/echo"
@@ -64,7 +64,7 @@
             }
           },
           "usage": {
-            "atMs": "1800000000006",
+            "atMs": "1800000000007",
             "heat": {
               "position": 0.07186666666666668
             },

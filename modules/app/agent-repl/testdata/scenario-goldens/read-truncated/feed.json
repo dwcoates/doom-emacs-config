@@ -32,9 +32,9 @@
       "activity": {
         "simpleToolCall": {
           "clock": {
-            "startedAtMs": "1800000000009",
+            "startedAtMs": "1800000000010",
             "stopped": {
-              "endedAtMs": "1800000000009"
+              "endedAtMs": "1800000000010"
             }
           },
           "input": {
@@ -137,7 +137,7 @@
             }
           },
           "usage": {
-            "atMs": "1800000000007",
+            "atMs": "1800000000008",
             "heat": {
               "position": 0.07186666666666668
             },

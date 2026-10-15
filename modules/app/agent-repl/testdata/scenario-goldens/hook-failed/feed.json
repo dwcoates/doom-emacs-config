@@ -32,9 +32,9 @@
       "activity": {
         "hook": {
           "clock": {
-            "startedAtMs": "1800000000006",
+            "startedAtMs": "1800000000007",
             "stopped": {
-              "endedAtMs": "1800000000006"
+              "endedAtMs": "1800000000007"
             }
           },
           "failed": {
@@ -68,7 +68,7 @@
             }
           },
           "usage": {
-            "atMs": "1800000000004",
+            "atMs": "1800000000005",
             "heat": {
               "position": 0.03593333333333334
             },

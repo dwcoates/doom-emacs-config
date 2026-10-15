@@ -32,9 +32,9 @@
       "activity": {
         "simpleToolCall": {
           "clock": {
-            "startedAtMs": "1800000000004",
+            "startedAtMs": "1800000000007",
             "stopped": {
-              "endedAtMs": "1800000000005"
+              "endedAtMs": "1800000000007"
             }
           },
           "input": {

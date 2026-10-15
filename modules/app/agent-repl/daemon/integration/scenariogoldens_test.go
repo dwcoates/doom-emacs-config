@@ -25,9 +25,6 @@ import (
 // per scenario (agent-shim/claude/shim/test/fake/goldens.ts).
 const scenarioGoldensDir = "../../testdata/scenario-goldens"
 
-// goldenMainBook is the book the goldens' drive names the main agent's.
-const goldenMainBook = "main-agent"
-
 // goldenRow is one row of a scenario's frames.json: the fold's output, in
 // order, as the shim writes it to its store.
 type goldenRow struct {
@@ -39,6 +36,7 @@ type goldenRow struct {
 	} `json:"recordPlace"`
 	Item struct {
 		Kind   string          `json:"kind"`
+		Prompt json.RawMessage `json:"prompt"`
 		Frame  json.RawMessage `json:"frame"`
 		Update json.RawMessage `json:"update"`
 	} `json:"item"`
@@ -144,31 +142,48 @@ func projectScenario(t *testing.T, f *fixture, name string, rows []goldenRow) js
 		t.Fatalf("SubmitPrompt(%q) minted no turn", prompt)
 	}
 	f.shim.ExpectStartTurn()
+	// THE DRIVE'S IDENTITIES ARE THIS FIXTURE'S: its main agent's book (the
+	// book its turn's prompt was written to) and its turn name this daemon's.
+	ids := goldenIdentities(t, name, rows, turn)
 	// Counted BEFORE the first push, so no routing it causes is in the base.
 	routed := map[string]int{"": countRouted(f, entryRouted(""))}
 	updates := countRouted(f, updateRouted)
-	// The real shim serves the delivered prompt first, as the turn's first
-	// entry, placed at the instant the drive began: the goldens' own clock,
-	// never this daemon's, so every row sorts on one timeline.
-	f.shim.PushUserPromptStamped(mainAgent, harness.EntryStamp{Pointer: "g-0", Turn: turn, PlaceMs: readGoldenNowMs(t, name)},
-		&conversationv1.AgentPrompt{
-			Id: &conversationv1.TurnId{Value: turn}, Agent: &conversationv1.AgentId{Value: mainAgent},
-			Said: said(prompt), Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT,
-		})
-	routed[""]++
-	awaitRouted(t, f, "the delivered prompt", entryRouted(""), routed[""])
 
 	pointers := map[string]string{}
 	terminal := false
 	for _, r := range rows {
+		// THE STORE'S POINTER RULE: minted at a key's first write and kept
+		// across every later upsert of the key.
+		key := r.Book + "\x00" + r.UpsertKey
+		if pointers[key] == "" {
+			pointers[key] = "g-" + strconv.Itoa(len(pointers)+1)
+		}
+		var place int64
+		if r.RecordPlace != nil {
+			place = r.RecordPlace.AtMs
+		}
 		switch r.Item.Kind {
+		case "prompt":
+			prompt := &conversationv1.AgentPrompt{}
+			if err := protojson.Unmarshal(ids.rename(t, r.Item.Prompt), prompt); err != nil {
+				t.Fatalf("decode the prompt of %s: %v", name, err)
+			}
+			if place == 0 {
+				// THE STORE PLACES AN UNPLACED ROW AT ITS ARRIVAL, which for the
+				// turn's prompt is the instant the drive began: the goldens' own
+				// clock, never this daemon's, so every row sorts on one timeline.
+				place = readGoldenNowMs(t, name)
+			}
+			f.shim.PushUserPromptStamped(mainAgent, harness.EntryStamp{Pointer: pointers[key], Turn: turn, PlaceMs: place}, prompt)
+			routed[""]++
+			awaitRouted(t, f, "the delivered prompt", entryRouted(""), routed[""])
 		case "frame":
 			frame := &conversationv1.AgentFrame{}
-			if err := protojson.Unmarshal(asFixtureMain(t, r.Item.Frame), frame); err != nil {
+			if err := protojson.Unmarshal(ids.rename(t, r.Item.Frame), frame); err != nil {
 				t.Fatalf("decode a frame of %s: %v", name, err)
 			}
 			agent, watch := r.Book, r.Book
-			if agent == goldenMainBook {
+			if agent == ids.mainBook {
 				agent, watch = mainAgent, ""
 				terminal = terminal || frame.GetSuccess() != nil || frame.GetFailure() != nil
 			}
@@ -183,22 +198,12 @@ func projectScenario(t *testing.T, f *fixture, name string, rows []goldenRow) js
 					})
 				routed[watch] = countRouted(f, entryRouted(watch))
 			}
-			// THE STORE'S POINTER RULE: minted at a key's first write and kept
-			// across every later upsert of the key.
-			key := r.Book + "\x00" + r.UpsertKey
-			if pointers[key] == "" {
-				pointers[key] = "g-" + strconv.Itoa(len(pointers)+1)
-			}
-			var place int64
-			if r.RecordPlace != nil {
-				place = r.RecordPlace.AtMs
-			}
 			f.shim.PushAgentFrameStamped(agent, harness.EntryStamp{Pointer: pointers[key], Turn: turn, PlaceMs: place}, frame)
 			routed[watch]++
 			awaitRouted(t, f, "a frame of "+agent, entryRouted(watch), routed[watch])
 		case "session_update":
 			u := &conversationv1.SessionUpdate{}
-			if err := protojson.Unmarshal(asFixtureMain(t, r.Item.Update), u); err != nil {
+			if err := protojson.Unmarshal(ids.rename(t, r.Item.Update), u); err != nil {
 				t.Fatalf("decode a session update of %s: %v", name, err)
 			}
 			f.shim.PushSessionUpdate(u)
@@ -267,12 +272,34 @@ func awaitRouted(t *testing.T, f *fixture, what string, match func(harness.LogRe
 	}
 }
 
-// asFixtureMain renames the drive's main agent to this fixture's in RAW, an
-// item of frames.json: every string value that IS the drive's main-agent id
-// (the frame's own agent_id, an announcement's owner, a parent named by a
-// subagent's frame) names the fixture's main agent instead. A value merely
-// containing the id is left alone; only the identity is renamed.
-func asFixtureMain(t *testing.T, raw json.RawMessage) []byte {
+// goldenIDs maps a drive's identities to this fixture's.
+type goldenIDs struct {
+	// mainBook is the drive's main agent: the book its turn's prompt is in.
+	mainBook string
+	// names maps each drive identity to the fixture's.
+	names map[string]string
+}
+
+// goldenIdentities reads a drive's identities off its rows: the main agent
+// is the book the turn's prompt was written to, and the turn is that prompt's.
+// A drive with no prompt row is refused: every golden opens one turn.
+func goldenIdentities(t *testing.T, name string, rows []goldenRow, turn string) goldenIDs {
+	t.Helper()
+	for _, r := range rows {
+		if r.Item.Kind == "prompt" {
+			return goldenIDs{mainBook: r.Book, names: map[string]string{r.Book: mainAgent, r.Turn: turn}}
+		}
+	}
+	t.Fatalf("%s's frames.json writes no prompt row, so it names no main agent and no turn", name)
+	return goldenIDs{}
+}
+
+// rename renames the drive's identities to the fixture's in RAW, an item of
+// frames.json: every string value that IS a drive identity (a frame's
+// agent_id, an announcement's owner, a prompt's turn) names the fixture's
+// instead. A value merely containing one is left alone; only an identity is
+// renamed.
+func (ids goldenIDs) rename(t *testing.T, raw json.RawMessage) []byte {
 	t.Helper()
 	var v any
 	if err := json.Unmarshal(raw, &v); err != nil {
@@ -290,8 +317,8 @@ func asFixtureMain(t *testing.T, raw json.RawMessage) []byte {
 				x[i] = walk(child)
 			}
 		case string:
-			if x == goldenMainBook {
-				return mainAgent
+			if renamed, ok := ids.names[x]; ok {
+				return renamed
 			}
 		}
 		return v
@@ -448,6 +475,10 @@ func normalizeFeed(t *testing.T, rows []*frontendv1.FeedRow, turn, ws string, in
 			}
 			sort.Strings(keys)
 			for _, k := range keys {
+				if wallClockFields[k] {
+					delete(x, k)
+					continue
+				}
 				x[k] = walk(k, x[k])
 			}
 			return x
@@ -488,6 +519,13 @@ func normalizeFeed(t *testing.T, rows []*frontendv1.FeedRow, turn, ws string, in
 	}
 	return canonical
 }
+
+// wallClockFields are the row fields the daemon derives from ITS OWN wall
+// clock between arrivals, never from the frames: a response's reveal pace
+// (frontend.v1 FeedResponse.reveal_pace, from the gaps between its streamed
+// updates) differs between two projections of the same frames and is pinned
+// on a fake clock by the resolver's own suite (resolve/feed/revealpace_test.go).
+var wallClockFields = map[string]bool{"revealPace": true}
 
 // isOrderKey reports whether S is a feed row's order key (FeedRowOrder.key):
 // a class byte, then hex.

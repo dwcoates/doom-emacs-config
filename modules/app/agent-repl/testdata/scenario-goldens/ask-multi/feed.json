@@ -29,6 +29,111 @@
       }
     },
     {
+      "id": {
+        "value": "${ROW_2}"
+      },
+      "order": {
+        "key": "${ORDER_2}"
+      },
+      "question": {
+        "answered": {
+          "answers": [
+            {
+              "chosen": [
+                "Unit"
+              ],
+              "header": {
+                "text": "Suites"
+              }
+            },
+            {
+              "chosen": [
+                "Now"
+              ],
+              "header": {
+                "text": "When"
+              }
+            }
+          ]
+        },
+        "clock": {
+          "startedAtMs": "1800000000005",
+          "stopped": {
+            "endedAtMs": "1800000000005"
+          }
+        },
+        "questions": [
+          {
+            "header": {
+              "text": "Suites"
+            },
+            "multiSelect": {
+              "options": [
+                {
+                  "description": {
+                    "text": "The vitest unit suites."
+                  },
+                  "label": {
+                    "text": "Unit"
+                  }
+                },
+                {
+                  "description": {
+                    "text": "The shim.v1 integration suite."
+                  },
+                  "label": {
+                    "text": "Integration"
+                  }
+                },
+                {
+                  "description": {
+                    "text": "The batch ert suites."
+                  },
+                  "label": {
+                    "text": "Elisp"
+                  }
+                }
+              ]
+            },
+            "text": {
+              "text": "Which suites should run?"
+            }
+          },
+          {
+            "header": {
+              "text": "When"
+            },
+            "singleSelect": {
+              "options": [
+                {
+                  "description": {
+                    "text": "Start immediately."
+                  },
+                  "label": {
+                    "text": "Now"
+                  }
+                },
+                {
+                  "description": {
+                    "text": "Wait for the branch to land."
+                  },
+                  "label": {
+                    "text": "After the merge"
+                  }
+                }
+              ]
+            },
+            "text": {
+              "text": "Run them now?"
+            }
+          }
+        ]
+      },
+      "turn": {
+        "value": "${TURN}"
+      }
+    },
+    {
       "activity": {
         "response": {
           "finalAnswer": true,
@@ -38,7 +143,7 @@
             }
           },
           "usage": {
-            "atMs": "1800000000006",
+            "atMs": "1800000000007",
             "heat": {
               "position": 0.07186666666666668
             },
@@ -47,10 +152,10 @@
         }
       },
       "id": {
-        "value": "${ROW_2}"
+        "value": "${ROW_3}"
       },
       "order": {
-        "key": "${ORDER_2}"
+        "key": "${ORDER_3}"
       },
       "selectable": {},
       "turn": {
@@ -59,10 +164,10 @@
     },
     {
       "id": {
-        "value": "${ROW_3}"
+        "value": "${ROW_4}"
       },
       "order": {
-        "key": "${ORDER_3}"
+        "key": "${ORDER_4}"
       },
       "turn": {
         "value": "${TURN}"
@@ -70,7 +175,7 @@
       "turnEnded": {
         "concluded": {
           "answer": {
-            "value": "${ROW_2}"
+            "value": "${ROW_3}"
           }
         },
         "endedAtMs": "${NOW}"

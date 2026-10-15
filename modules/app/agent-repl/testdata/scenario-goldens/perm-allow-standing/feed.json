@@ -29,12 +29,49 @@
       }
     },
     {
+      "id": {
+        "value": "${ROW_2}"
+      },
+      "order": {
+        "key": "${ORDER_2}"
+      },
+      "permission": {
+        "answered": {
+          "allowedOnce": {}
+        },
+        "arguments": {
+          "lines": [
+            "npm test"
+          ]
+        },
+        "clock": {
+          "startedAtMs": "1800000000005",
+          "stopped": {
+            "endedAtMs": "1800000000005"
+          }
+        },
+        "headline": {
+          "text": "Claude wants to run npm test"
+        },
+        "standingOffered": {},
+        "subtitle": {
+          "text": "Claude will use Bash"
+        },
+        "trigger": {
+          "text": "the command is not covered by an existing rule"
+        }
+      },
+      "turn": {
+        "value": "${TURN}"
+      }
+    },
+    {
       "activity": {
         "simpleToolCall": {
           "clock": {
-            "startedAtMs": "1800000000008",
+            "startedAtMs": "1800000000009",
             "stopped": {
-              "endedAtMs": "1800000000008"
+              "endedAtMs": "1800000000009"
             }
           },
           "input": {
@@ -53,10 +90,10 @@
         }
       },
       "id": {
-        "value": "${ROW_2}"
+        "value": "${ROW_3}"
       },
       "order": {
-        "key": "${ORDER_2}"
+        "key": "${ORDER_3}"
       },
       "turn": {
         "value": "${TURN}"
@@ -72,7 +109,7 @@
             }
           },
           "usage": {
-            "atMs": "1800000000006",
+            "atMs": "1800000000007",
             "heat": {
               "position": 0.07186666666666668
             },
@@ -81,10 +118,10 @@
         }
       },
       "id": {
-        "value": "${ROW_3}"
+        "value": "${ROW_4}"
       },
       "order": {
-        "key": "${ORDER_3}"
+        "key": "${ORDER_4}"
       },
       "selectable": {},
       "turn": {
@@ -93,10 +130,10 @@
     },
     {
       "id": {
-        "value": "${ROW_4}"
+        "value": "${ROW_5}"
       },
       "order": {
-        "key": "${ORDER_4}"
+        "key": "${ORDER_5}"
       },
       "turn": {
         "value": "${TURN}"
@@ -104,7 +141,7 @@
       "turnEnded": {
         "concluded": {
           "answer": {
-            "value": "${ROW_3}"
+            "value": "${ROW_4}"
           }
         },
         "endedAtMs": "${NOW}"
