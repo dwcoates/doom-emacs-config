@@ -2,14 +2,20 @@
 
 Every workspace page lives in one WebKit process, and a page the host does not
 show kept every row it ever drew, with each pushed row appended to it. The owner
-ruled on 2026-10-15 that a page the host stops showing frees the rows it does not
-need, and that what it keeps depends on where the reader was:
+ruled on 2026-10-15 that two properties hold instead:
 
-- A reader within the newest daemon page (the store's page of 50 entries) is
-  snapped back to the tail, and the page keeps only the newest daemon page.
-- A reader scrolled up further keeps the daemon page holding the top of their
-  screen (the OLDER page when the screen spans two) and everything newer, and
-  frees everything older.
+- A page the host stops showing frees every row older than its newest daemon
+  page (the store's page of 50 entries), whatever the reader's scroll position;
+  a switch back lands at the tail (the 2026-10-02 switch ruling), so the freed
+  history is never on screen on return. Each switch away trims again; there is
+  no re-trim while a page stays hidden, and a long-hidden busy workspace grows
+  until it is next visited and left (accepted).
+- A hidden page keeps its stream open and draws every update as it arrives, so
+  a switch back finds everything already there.
+
+The trim runs on the hidden page after the switch, never blocking it. Keeping a
+scrolled-up reader's place across a switch was considered and dropped: it
+contradicts the switch ruling and adds restore state for little benefit.
 
 Freeing rows breaks the daemon's walk, which held its own position: a `next`
 after a free would continue below rows the reader no longer holds, leaving a
