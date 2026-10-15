@@ -354,3 +354,39 @@ Ruled 2026-10-14:
 - The scenario matrix was ruled (a), so C-M1 and C-M2 are contingent.
 - `ExpectWarningsFor(ws, ...)` is approved in principle. K1b depends on it.
 - Sidecar `sharePrebuilt` is contingent on the mock shards surviving, and they are slated to become unit-level golden checks.
+
+## Implementation (2026-10-15)
+
+The owner ruled on 2026-10-14 through the parent workspace:
+
+- The shared-fixture rule is approved.
+- The shape is the package-wide shared default World, with every Test func keeping its name.
+- `ExpectWarningsFor` is approved.
+
+This workspace then built the following on branch `test-shared-setup-lzb`.
+
+- **Harness** (`daemon/integration/harness`):
+  - It takes `testing.TB` instead of `*testing.T`.
+  - A daemon's process state sits behind one shared pointer (`daemonProc`).
+  - `Daemon.View(t)`: one test's daemon over a process a suite fixture owns (`view.go`).
+    - A view's sweep reads only the workspaces it claimed; `Register` claims for a view.
+    - The owner sweeps everything unclaimed, plus any claimed record logged after its view's sweep, named by that view's test.
+    - A view binds its test to the daemon's fake-git world, and repository names are taken with `os.Mkdir`, so parallel tests cannot collide.
+  - `ExpectWarningsFor(ws, ...)`.
+  - `harness.Suite()` (`suite.go`): the process as a `testing.TB`. Teardown runs after `m.Run`, a failure turns the exit code red, and Fatal and Skip panic in a form `RecoverSuiteBuild` hands to the test that asked.
+  - `RecordingTB` for tests of test machinery.
+- **e2e:**
+  - `SharedWorld(t)`.
+  - `World.NewWorkspace` and `NewRepoWorkspace` replace 66 hand-paired `NewRepo` + `Register` sites and three wrappers.
+  - `World.RequireOpen` replaces seven hand-rolled opens.
+  - The 17 K1/K1b rows run on the shared World. No case was dropped, so this is expected to cost no coverage.
+- **Defects found and fixed on the way:**
+  - `daemon/internal/health`: a workspace's opened fault was logged on the global sink with no workspace identity. It is now on the workspace's own sink.
+  - `TestCreateWorkspaceWhoseShimWillNotComeUpAnswersTheSpawnFailedArm`: its verdict depended on whether an asynchronous failure report landed before the sweep. It now awaits that report.
+  - The harness's unreadable-argv error now names the process: comm, parent, start time and flags. A full e2e run had failed seven tests' stray sweeps on processes it could not identify. The cause is still open, and the next occurrence will name it.
+- **Measured:** a two-test proof on the shared World ran its second test in 0.30s against 9.08s for the first, which built the World. The 18 converted tests ran in one 25.6s process.
+
+**Still waiting:**
+
+- D1, the three clean-landing merge tests becoming one act, waits for test-redundancy-measure's tool.
+- The run-to-run e2e CPU comparison waits for a quiet host.
