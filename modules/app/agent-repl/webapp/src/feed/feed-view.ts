@@ -1018,13 +1018,23 @@ export function createFeedController(
    *    prompt) and off every other row's -- a re-push (M-s-j/M-s-k)
    *    marks one row and clears the rest, and `none` clears them all;
    *  - while a row is selected the follow is released, so new rows append
-   *    without pulling the viewport off the centered selection. When the
-   *    selection ends the feed either returns to its tail (`return_to_tail`:
-   *    the reader dismissed it, `selectionCleared`) or stays where the reader
-   *    has it (`stay`: the row left the viewport, or the reader clicked the
-   *    selected bubble, `selectionEnded`);
-   *  - a newly selected row is scrolled to the middle of the viewport, clamped
-   *    at the feed edges (`selectionMoved`).
+   *    without pulling the viewport off the selection. When the selection
+   *    ends the feed either returns to its tail (`return_to_tail`: the reader
+   *    dismissed it, `selectionCleared`), stays where the reader has it
+   *    (`stay`: the row left the viewport, `selectionEnded`), or holds still
+   *    under the bubble the reader clicked to deselect (`hold`,
+   *    `selectionClicked`);
+   *  - a newly selected row moves the viewport as its arm's `viewport` says:
+   *    a selection STEPPED from Emacs (`center`) is scrolled to the middle of
+   *    the viewport, clamped at the feed edges (`selectionMoved`).
+   *
+   * THE READER'S CLICK NEVER MOVES THE FEED (owner request, 2026-10-15). A
+   * selection the reader made or ended by CLICKING a bubble (`hold`) centers
+   * nothing: the clicked bubble holds still where the reader sees it while it
+   * expands, and while the bubble selected before it collapses
+   * (`selectionClicked`). The hold is taken BEFORE either changes height, so
+   * the anchoring measures the change against the clicked row. This is
+   * specific to the click: a step from Emacs still centers.
    *
    * ONLY A CHANGE MOVES THE FEED (owner rule, 2026-09-23: the user owns the
    * scroll). A push that restates the state already applied -- `none` re-sent
@@ -1039,22 +1049,32 @@ export function createFeedController(
           arm.value.viewport,
           "FeedSelectionNone.viewport",
         );
-        markSelectedRow(null);
-        selectedRow = null;
-        expandSelected(null);
         if (was === null) {
+          markSelectedRow(null);
+          expandSelected(null);
           log.debug("an empty selection was restated; the feed stays", {
             operation: "feed.selection-unchanged",
             context: { feed: feedName(), selected: "none" },
           });
           return;
         }
+        if (viewport.case === "hold") {
+          opts.scroll?.tail.selectionClicked(
+            states.get(was)?.element ?? null,
+            false,
+          );
+        }
+        markSelectedRow(null);
+        selectedRow = null;
+        expandSelected(null);
         switch (viewport.case) {
           case "returnToTail":
             opts.scroll?.tail.selectionCleared();
             return;
           case "stay":
             opts.scroll?.tail.selectionEnded();
+            return;
+          case "hold":
             return;
           default: {
             const other: { case: string } = viewport;
@@ -1065,22 +1085,37 @@ export function createFeedController(
       case "response":
       case "prompt":
       case "bubble": {
-        const row = requireMessage(
-          arm.value.row,
-          `${SELECTION_ARM_MESSAGE[arm.case]}.row`,
+        const message = SELECTION_ARM_MESSAGE[arm.case];
+        const row = requireMessage(arm.value.row, `${message}.row`);
+        const viewport = requireCase(
+          requireMessage(arm.value.viewport, `${message}.viewport`).viewport,
+          "FeedSelectionRowViewport.viewport",
         );
+        const changed = was !== row.value;
+        if (changed && viewport.case === "hold") {
+          opts.scroll?.tail.selectionClicked(findRowElement(row), true);
+        }
         markSelectedRow({ kind: arm.case, row });
         selectedRow = row.value;
         expandSelected(row.value);
-        if (was === row.value) {
+        if (!changed) {
           log.debug("the selection restated its row; the feed stays", {
             operation: "feed.selection-unchanged",
             context: { feed: feedName(), selected: arm.case, row: row.value },
           });
           return;
         }
-        centerOnRow(row);
-        return;
+        switch (viewport.case) {
+          case "center":
+            centerOnRow(row);
+            return;
+          case "hold":
+            return;
+          default: {
+            const other: { case: string } = viewport;
+            return unreachableArm("FeedSelectionRowViewport.viewport", other.case);
+          }
+        }
       }
       default: {
         const other: { case: string } = arm;

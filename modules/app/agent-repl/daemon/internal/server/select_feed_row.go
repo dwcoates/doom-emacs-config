@@ -97,18 +97,35 @@ func (k selectionKind) String() string {
 	return "response"
 }
 
-// selectionOf composes the selection of ROW as KIND.
-func selectionOf(kind selectionKind, row *frontendv1.FeedId) *frontendv1.FeedSelection {
+// selectionOf composes the selection of ROW as KIND, with what the webapp's
+// viewport does about it: a step centers the row (centerRow), a click holds
+// the feed still under it (holdUnderClick).
+func selectionOf(kind selectionKind, row *frontendv1.FeedId, viewport *frontendv1.FeedSelectionRowViewport) *frontendv1.FeedSelection {
 	switch kind {
 	case selectionPrompt:
 		return &frontendv1.FeedSelection{Selection: &frontendv1.FeedSelection_Prompt{
-			Prompt: &frontendv1.FeedSelectionPrompt{Row: row}}}
+			Prompt: &frontendv1.FeedSelectionPrompt{Row: row, Viewport: viewport}}}
 	case selectionBubble:
 		return &frontendv1.FeedSelection{Selection: &frontendv1.FeedSelection_Bubble{
-			Bubble: &frontendv1.FeedSelectionBubble{Row: row}}}
+			Bubble: &frontendv1.FeedSelectionBubble{Row: row, Viewport: viewport}}}
 	}
 	return &frontendv1.FeedSelection{Selection: &frontendv1.FeedSelection_Response{
-		Response: &frontendv1.FeedSelectionResponse{Row: row}}}
+		Response: &frontendv1.FeedSelectionResponse{Row: row, Viewport: viewport}}}
+}
+
+// centerRow is the viewport of a selection a step from Emacs made: the webapp
+// centers the newly selected row.
+func centerRow() *frontendv1.FeedSelectionRowViewport {
+	return &frontendv1.FeedSelectionRowViewport{Viewport: &frontendv1.FeedSelectionRowViewport_Center{
+		Center: &frontendv1.FeedSelectionRowViewportCenter{}}}
+}
+
+// holdUnderClick is the viewport of a selection the reader's click made. THE
+// READER'S CLICK NEVER MOVES THE FEED: the webapp holds the clicked bubble
+// still while it expands, and centers nothing.
+func holdUnderClick() *frontendv1.FeedSelectionRowViewport {
+	return &frontendv1.FeedSelectionRowViewport{Viewport: &frontendv1.FeedSelectionRowViewport_Hold{
+		Hold: &frontendv1.FeedSelectionRowViewportHold{}}}
 }
 
 // selectedRow answers the row a selection names, and of which kind; ok is
@@ -133,6 +150,13 @@ func returnToTail() *frontendv1.FeedSelectionNone {
 func stayInView() *frontendv1.FeedSelectionNone {
 	return &frontendv1.FeedSelectionNone{Viewport: &frontendv1.FeedSelectionNone_Stay{
 		Stay: &frontendv1.FeedSelectionNoneStay{}}}
+}
+
+// holdUnderClickNone ends a selection the reader clicked off: the webapp holds
+// the clicked bubble still while it collapses (see holdUnderClick).
+func holdUnderClickNone() *frontendv1.FeedSelectionNone {
+	return &frontendv1.FeedSelectionNone{Viewport: &frontendv1.FeedSelectionNone_Hold{
+		Hold: &frontendv1.FeedSelectionNoneHold{}}}
 }
 
 func selectedNone() *agentreplv1.SelectFeedRowSuccess {
@@ -241,7 +265,7 @@ func (s *server) stepSelection(
 	}
 	landed := rows[at]
 	kind := turnBoundaryKind(landed.Kind)
-	sel := selectionOf(kind, landed.Row)
+	sel := selectionOf(kind, landed.Row, centerRow())
 	if err := s.setRowSelection(ws, sel); err != nil {
 		return nil, err
 	}
@@ -259,8 +283,9 @@ func selectedSuccess(sel *frontendv1.FeedSelection) *agentreplv1.SelectFeedRowSu
 // its kind takes: a final response is a `response`, a prompt a rollback can
 // reach a `prompt`, and any other selectable bubble a `bubble`. selectable is
 // false (and nothing changes) for a row the resolver did not publish
-// selectable. A click naming the SELECTED row deselects it, leaving the
-// viewport where the reader has it (stay): the daemon, the selection's one
+// selectable. A click never moves the feed: a selection holds the clicked
+// bubble still (holdUnderClick), and a click naming the SELECTED row
+// deselects it, holding it still too (holdUnderClickNone). The daemon, the selection's one
 // holder, decides the toggle, so a click can never act on a selection the
 // webapp has not yet heard has moved.
 func (s *server) selectBubble(log dlog.Logger, ws ids.WorkspaceID, row *frontendv1.FeedId) (*agentreplv1.SelectFeedRowSuccess, bool, error) {
@@ -268,7 +293,7 @@ func (s *server) selectBubble(log dlog.Logger, ws ids.WorkspaceID, row *frontend
 		log.Info(opSelectFeedRow, "a clicked row is not selectable", dlog.Context{"row": row.GetValue()})
 		return nil, false, nil
 	}
-	if s.endSelection(log, ws, row, stayInView(), "clicked_selected") {
+	if s.endSelection(log, ws, row, holdUnderClickNone(), "clicked_selected") {
 		return selectedNone(), true, nil
 	}
 	kind := selectionBubble
@@ -278,7 +303,7 @@ func (s *server) selectBubble(log dlog.Logger, ws ids.WorkspaceID, row *frontend
 	case indexOfFeedID(s.deps.Feed.RollbackPrompts(ws), row) >= 0:
 		kind = selectionPrompt
 	}
-	sel := selectionOf(kind, row)
+	sel := selectionOf(kind, row, holdUnderClick())
 	s.selectionMu.Lock()
 	defer s.selectionMu.Unlock()
 	if err := s.setRowSelection(ws, sel); err != nil {

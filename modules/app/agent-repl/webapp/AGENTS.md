@@ -550,7 +550,7 @@ hand any more:
   FIRST time parks the feed at its tail and follows, as a sent prompt does; a
   re-push or a removal moves nothing), `selectionMoved`, `detachedWorkSelected`,
   `entryJumped` (every other jump: a breadcrumb, a hook's gated-call link,
-  centered by the same `revealCenterDelta`), `itemExpanded`, `initialPlacement`,
+  centered by the same `revealCenterDelta`), `initialPlacement`,
   `replaceRestore`, `workspaceSelected` (the roster's `current` moved to this
   page's workspace, by any switch path: `src/sidebar/selection-edge.ts` parks
   the feed at its tail and follows; returning to Emacs from another
@@ -575,20 +575,24 @@ hand any more:
   (`revealCenterDelta`: midpoint onto midpoint, a card taller than the
   viewport top-aligned, clamped at the feed's edges); the walk opens only the
   containers selecting the row requires, and the landing then expands the
-  entry itself (owner request, 2026-10-01). `itemExpanded` (owner request,
-  2026-09-30, widening the bubble-only ruling of 2026-09-29) puts the vertical
-  middle of ANY feed item the reader expands on the feed viewport's vertical
-  middle at once (`expandCenterDelta`: midpoint onto midpoint whatever the
-  item's height, clamped at the feed's edges), through the same
-  `TailFollow.centerReveal`, while no follow stands. A STANDING FOLLOW SURVIVES
-  AN EXPANSION (owner ruling, 2026-10-14): the feed stays parked at its tail
-  under the follow's own cause instead of centering, and the follow ends only
-  when the reader scrolls away, as it otherwise does. The item is the expanded
-  element's nearest feed row. A capped section the click owner toggles centers through its callback;
-  an item owning its own fold (a sub-feed bubble)
-  dispatches `ITEM_EXPANDED_EVENT` (`announceItemExpanded`, src/expand.ts) on
-  the reader's toggle only — a reveal opening bubbles never announces. A
-  collapse moves nothing.
+  entry itself (owner request, 2026-10-01). THE READER'S CLICK NEVER MOVES
+  THE FEED (owner request, 2026-10-15, superseding the expand-centering
+  rulings of 2026-09-29, 2026-09-30 and 2026-10-14): expanding or collapsing
+  any feed item BY CLICKING IT, and pressing a merge bubble's control, is no
+  cause. The click dispatches `READER_CLICK_EVENT` (`announceReaderClick`,
+  src/expand.ts) BEFORE it changes anything — a capped section's toggle, a
+  sub-feed bubble's fold, a merge control — and the root feed's listener
+  calls `TailFollow.readerClicked`: the follow ends, the latest-visible latch
+  waits for the reader's next input, and until then the anchoring holds the
+  clicked root row still, wherever its top sits. A click on a selection-governed
+  bubble goes through the daemon: its push carries
+  `frontend.v1.FeedSelectionRowViewport.hold` (or
+  `frontend.v1.FeedSelectionNone.viewport` `hold` for a click on the selected
+  bubble) and `applySelection` holds through `TailFollow.selectionClicked`
+  before the bubble expands. This is specific to the click: a jump that
+  expands an entry centers it (`entryJumped`), and a selection stepped from
+  Emacs (`frontend.v1.FeedSelectionRowViewport.center`) centers its row
+  (`selectionMoved`).
   THE EXPANDED-ITEM CEILING (owner request, 2026-09-30): an expanded item that
   is neither a response nor a prompt (a tool or skill card, a subagent's,
   detached work's or merge bubble, a detached shell, a hook card, a standalone

@@ -793,12 +793,17 @@ export function pushScale(scale: number): WatchFeedResponse {
 /**
  * The feed selection the daemon holds, in the test's shorthand: nothing
  * selected (and what the viewport does), or the id of a selected final
- * response or prompt.
+ * response, prompt or other bubble, with what the viewport does about it
+ * (`center`, a step from Emacs, unless the shorthand says `hold`, a click).
  */
 export type SelectionShape =
-  | { none: "returnToTail" | "stay" }
-  | { response: string }
-  | { prompt: string };
+  | { none: "returnToTail" | "stay" | "hold" }
+  | { response: string; viewport?: RowViewport }
+  | { prompt: string; viewport?: RowViewport }
+  | { bubble: string; viewport?: RowViewport };
+
+/** What the viewport does about a newly selected row. */
+type RowViewport = "center" | "hold";
 
 /** The daemon's `FeedSelection` for SHAPE. */
 export function selectionOf(shape: SelectionShape): FeedSelection {
@@ -807,13 +812,19 @@ export function selectionOf(shape: SelectionShape): FeedSelection {
       selection: { case: "none", value: { viewport: { case: shape.none, value: {} } } },
     });
   }
+  const viewport = { viewport: { case: shape.viewport ?? "center", value: {} } } as const;
   if ("response" in shape) {
     return create(FeedSelectionSchema, {
-      selection: { case: "response", value: { row: feedId(shape.response) } },
+      selection: { case: "response", value: { row: feedId(shape.response), viewport } },
+    });
+  }
+  if ("prompt" in shape) {
+    return create(FeedSelectionSchema, {
+      selection: { case: "prompt", value: { row: feedId(shape.prompt), viewport } },
     });
   }
   return create(FeedSelectionSchema, {
-    selection: { case: "prompt", value: { row: feedId(shape.prompt) } },
+    selection: { case: "bubble", value: { row: feedId(shape.bubble), viewport } },
   });
 }
 

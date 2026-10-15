@@ -22,7 +22,7 @@ import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
 import {
-  ITEM_EXPANDED_EVENT,
+  READER_CLICK_EVENT,
   autoCollapseFor,
   cappedSectionsOf,
   collapseSection,
@@ -252,16 +252,14 @@ export function mountFeed(
   // open section the reader scrolled away from or left, since that close goes
   // through the one collapse a click uses.
   //
-  // AN EXPANDED FEED ITEM IS CENTERED (owner request, 2026-09-30, widening
-  // the bubble-only ruling of 2026-09-29): the reader expanding any feed item
-  // puts that item's vertical middle on the feed viewport's vertical middle at
-  // once (`itemExpanded`, one of the closed set of scroll causes). A capped
-  // section this click owner toggles centers here, AFTER the class lands, so
-  // the geometry read is the expanded layout; an item that owns its own fold (a
-  // sub-feed bubble) announces ITEM_EXPANDED_EVENT and
-  // centers through the listener below. A collapse never moves the feed.
-  // A STANDING FOLLOW SURVIVES AN EXPANSION (owner ruling, 2026-10-14): the
-  // feed stays at its tail instead of centering (`TailFollow.itemExpanded`).
+  // THE READER'S CLICK NEVER MOVES THE FEED (owner request, 2026-10-15,
+  // superseding the expand-centering rulings of 2026-09-29, 2026-09-30 and
+  // 2026-10-14). Expanding or collapsing any feed item BY CLICKING IT (a
+  // capped section this click owner toggles, a sub-feed bubble's fold) and
+  // pressing a merge bubble's control announce READER_CLICK_EVENT before
+  // anything changes, and the listener below holds the clicked row still
+  // (`TailFollow.readerClicked`). This is specific to the click: a jump that
+  // expands an entry, or a selection stepped from Emacs, still centers it.
   //
   // A READER'S TOGGLE MAKES THE ENTRY THEIRS: an entry a jump expanded and the
   // reader then toggled by hand is no longer the jump's to close. The one
@@ -283,16 +281,15 @@ export function mountFeed(
       if (!expanded) return;
       watchOwnClick(section);
       intentScroll?.arm(section);
-      centerExpandedItem(section);
     },
     ownedBySelection,
   );
-  const onItemExpanded = (event: Event): void => {
-    if (!(event.target instanceof HTMLElement)) return;
+  const onReaderClick = (event: Event): void => {
+    if (!(event.target instanceof Element)) return;
     releaseOutOfView(event.target);
-    centerExpandedItem(event.target);
+    tail?.readerClicked(event.target);
   };
-  host.addEventListener(ITEM_EXPANDED_EVENT, onItemExpanded);
+  host.addEventListener(READER_CLICK_EVENT, onReaderClick);
 
   const root: FeedController = createFeedController({
     ctx,
@@ -869,33 +866,6 @@ export function mountFeed(
   }
 
   /**
-   * Center the feed item the reader just expanded: the feed row EXPANDED
-   * belongs to, the nearest one, so an item inside a subagent's sub-feed is
-   * centered as itself. Every expandable item is drawn in a row, so an
-   * expansion with none above it is a drawing fault, reported and thrown. A
-   * fixture feed with no scroll box has nothing to move.
-   */
-  function centerExpandedItem(expanded: HTMLElement): void {
-    const row = expanded.closest<HTMLElement>(FEED_ROW_SELECTOR);
-    if (row === null) {
-      log.error("an expanded feed item hangs in no feed row", {
-        operation: "feed.center-expanded-item",
-        context: { element: expanded.className },
-      });
-      throw new Error("feed: an expanded feed item hangs in no feed row");
-    }
-    if (scrollBox === null || tail === null) return;
-    log.debug("centering an expanded feed item", {
-      operation: "feed.center-expanded-item",
-      context: {
-        row: row.getAttribute("data-feed-row") ?? "unset",
-        element: expanded.className,
-      },
-    });
-    tail.itemExpanded(revealGeometry(scrollBox, row));
-  }
-
-  /**
    * Land a jump on ELEMENT (the row ID names): expand the entry, then center
    * it under CAUSE, reading the EXPANDED layout, and mark it, briefly, as the
    * one meant.
@@ -1069,8 +1039,9 @@ export function mountFeed(
 
   /**
    * What the selection's expand and collapse of a governed bubble re-measures:
-   * a click's toggle minus the centering, since the selection push centers its
-   * own row, and minus the jump release, since no reader toggled anything.
+   * a click's toggle minus the jump release, since the selection push, not a
+   * toggle of the reader's, opened or closed it. Its viewport (centered or
+   * held) is the push's own (`applySelection`).
    */
   function afterSelectionToggle(section: HTMLElement, expanded: boolean): void {
     afterSectionToggle(section);
@@ -1078,7 +1049,7 @@ export function mountFeed(
   }
 
   /** The reader toggled something inside EL's row: the row is theirs now. */
-  function releaseOutOfView(el: HTMLElement): void {
+  function releaseOutOfView(el: Element): void {
     const row = el.closest<HTMLElement>(FEED_ROW_SELECTOR);
     if (row !== null) outOfView?.release(row);
   }
@@ -1132,7 +1103,7 @@ export function mountFeed(
     intentScroll?.uninstall();
     uninstallExpand();
     uninstallSelect();
-    host.removeEventListener(ITEM_EXPANDED_EVENT, onItemExpanded);
+    host.removeEventListener(READER_CLICK_EVENT, onReaderClick);
     held?.dispose();
     uninstallClear?.();
     selectionVisibility?.dispose();

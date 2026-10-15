@@ -86,8 +86,11 @@ export type SelectFeedRowRequest = Message<"agentrepl.v1.SelectFeedRowRequest"> 
      * arm the selection takes (a final response, a prompt a rollback can
      * reach, or any other bubble); a row it did not publish selectable is
      * refused with `not_selectable`. A click naming the SELECTED row
-     * deselects it instead (success `none`), and the push leaves the
-     * viewport where it is (frontend.v1.FeedSelectionNoneStay).
+     * deselects it instead (success `none`). THE READER'S CLICK NEVER MOVES
+     * THE FEED: a selection pushes frontend.v1.FeedSelectionRowViewportHold
+     * and a deselection frontend.v1.FeedSelectionNoneHold. A step (`response`,
+     * `prompt`) is not a click, and pushes
+     * frontend.v1.FeedSelectionRowViewportCenter.
      *
      * @generated from field: agentrepl.v1.SelectFeedRowBubble bubble = 6;
      */

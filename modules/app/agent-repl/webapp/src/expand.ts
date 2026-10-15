@@ -69,16 +69,19 @@ export const CAPPED_CLASSES = [
 ] as const;
 
 /**
- * The DOM event a feed item's OWN expansion dispatches from the expanded
- * element, bubbling, when the READER expanded it (a sub-feed bubble's fold). The root feed, which owns the scroll box,
- * centers the item's row on it (`itemExpanded`). The capped sections this
- * module toggles center through the click owner's own callback instead.
+ * The DOM event the READER'S CLICK on a feed entry dispatches, bubbling, from
+ * the clicked element, BEFORE the click changes anything: a capped section
+ * this module toggles, a sub-feed bubble's fold (bubble.ts), a merge bubble's
+ * control. The root feed, which owns the scroll box, holds the clicked row
+ * still (`TailFollow.readerClicked`): THE READER'S CLICK NEVER MOVES THE FEED
+ * (owner request, 2026-10-15). Only a click dispatches it: a jump, a
+ * selection push or an auto-collapse that opens or closes an entry does not.
  */
-export const ITEM_EXPANDED_EVENT = "feed-item-expanded";
+export const READER_CLICK_EVENT = "feed-reader-click";
 
-/** Announce that the reader expanded the feed item EL belongs to. */
-export function announceItemExpanded(el: HTMLElement): void {
-  el.dispatchEvent(new CustomEvent(ITEM_EXPANDED_EVENT, { bubbles: true }));
+/** Announce that the reader clicked EL to change the feed entry it belongs to. */
+export function announceReaderClick(el: Element): void {
+  el.dispatchEvent(new CustomEvent(READER_CLICK_EVENT, { bubbles: true }));
 }
 
 /** Selector matching every capped section (an element may carry several). */
@@ -348,7 +351,8 @@ function requireCapped(section: HTMLElement): void {
 
 /**
  * Arm click-to-expand on `feed`: a click on a capped section lifts its
- * height cap, and the next click on it restores the capped preview.
+ * height cap, and the next click on it restores the capped preview. Each
+ * click is announced (`announceReaderClick`) before it toggles.
  *
  * `afterToggle` runs once per toggle with the section and the state it landed
  * in, so a caller can keep a class it draws (the bubble's "more below" fade,
@@ -376,6 +380,9 @@ export function installClickExpand(
       });
       return;
     }
+    // THE READER'S CLICK NEVER MOVES THE FEED: announced before the toggle, so
+    // the hold is taken on the layout the reader clicked.
+    announceReaderClick(section);
     toggleSection(section, afterToggle);
   };
   feed.addEventListener("click", onClick);

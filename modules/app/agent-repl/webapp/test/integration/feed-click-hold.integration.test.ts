@@ -1,20 +1,16 @@
 /**
- * EXPANDING A BUBBLE CENTERS IT — on the booted app.
+ * THE READER'S CLICK NEVER MOVES THE FEED — on the booted app.
  *
- * Owner request, 2026-09-30: the reader expanding a feed item puts that item's
- * vertical middle on the feed's vertical middle at once (`itemExpanded`, one
- * of the closed set of scroll causes in scroll.ts). It supersedes, for
- * expansion, the rule of 2026-09-23 that the caret never moves the feed; a
- * collapse still moves nothing. A STANDING FOLLOW SURVIVES THE EXPANSION
- * (owner ruling, 2026-10-14): the feed stays at its tail instead of centering,
- * and only the reader's own scroll up ends the follow. A reader who can see the
- * latest entry is following (`latestVisible`), so only a reader with the
- * latest entry out of sight is centered.
+ * Owner request, 2026-10-15, superseding the expand-centering rulings of
+ * 2026-09-29, 2026-09-30 and 2026-10-14: expanding or collapsing a bubble BY
+ * CLICKING IT holds the clicked row still where the reader sees it
+ * (`TailFollow.readerClicked`), whether or not a follow stood. Only the click
+ * holds the view: a jump that expands an entry still centers it.
  *
  * WHAT IS ASSERTED HERE and not in the unit suite: that the caret of a bubble
  * built by the REAL mount, in the real shell, against a real sub-feed page,
- * centers the bubble's row in the page's own `#feed-scroll` for a reader away
- * from the tail, and keeps a following reader at the tail.
+ * leaves the page's own `#feed-scroll` where the reader had it, both at once
+ * and once the expansion's size change reaches the tail owner.
  *
  * THE GEOMETRY IS SCRIPTED, exactly as test/integration/feed-tail.integration
  * .test.ts scripts it and for the same reason: jsdom lays nothing out, so a
@@ -122,32 +118,36 @@ async function bootWithBubble(scrollTop: number, panelTop: number) {
 }
 
 describe("the caret on the booted app", () => {
-  it("centers the opened bubble for a reader holding a place", async () => {
+  it("leaves a reader holding a place where they are when the click opens the bubble", async () => {
     // Arrange — 40px down, the bubble (the latest entry) below the 300px box,
-    // so no follow stands; the row will hang from 370 to 600.
+    // so no follow stands; centering would have moved to 375.
     const view = await bootWithBubble(40, 400);
     // Act
     await harness.click('[data-feed-row="bubble"] [data-expand]');
-    // Assert — its middle (485) onto the box's (150): 40 + 335.
-    expect(view.top()).toBe(375);
+    fireResize(harness.shell.feed);
+    // Assert
+    expect(view.top()).toBe(40);
   });
 
-  it("keeps a reader following the tail at the grown tail instead of centering", async () => {
+  it("leaves a reader following the tail where they are when the click opens the bubble", async () => {
     // Arrange — parked at the tail: 1000 - 300 = 700.
     const view = await bootWithBubble(700, 250);
     // Act — the expansion grows the feed by the panel's 200px.
     await harness.click('[data-feed-row="bubble"] [data-expand]');
-    // Assert — the grown range's end (1200 - 300 = 900), not centered (885).
-    expect(view.top()).toBe(900);
+    fireResize(harness.shell.feed);
+    // Assert — not parked at the grown tail (900).
+    expect(view.top()).toBe(700);
   });
 
-  it("keeps the follow standing through the expansion", async () => {
-    // Arrange — the reader was following the tail when the bubble expanded.
+  it("leaves the reader where they are when the click closes the bubble", async () => {
+    // Arrange — the reader opened the bubble from the tail, then the view held.
     const view = await bootWithBubble(700, 250);
     await harness.click('[data-feed-row="bubble"] [data-expand]');
-    // Act — the content's size change reaches the tail owner.
     fireResize(harness.shell.feed);
-    // Assert — the latched follow keeps the grown feed's tail.
-    expect(view.top()).toBe(900);
+    // Act
+    await harness.click('[data-feed-row="bubble"] [data-expand]');
+    fireResize(harness.shell.feed);
+    // Assert
+    expect(view.top()).toBe(700);
   });
 });

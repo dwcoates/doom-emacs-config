@@ -3707,11 +3707,12 @@ webapp's alone."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-select-feed-row-response
                     (agent-repl-test-wire-verbs--parse
-                     "{\"success\":{\"selected\":{\"selection\":{\"response\":{\"row\":{\"value\":\"feed-9\"}}}}}}"))
+                     "{\"success\":{\"selected\":{\"selection\":{\"response\":{\"row\":{\"value\":\"feed-9\"},\"viewport\":{\"center\":{}}}}}}}"))
                    '(:arm :success
                      :value (:outcome (:arm :selected
                                        :value (:selection (:arm :response
-                                                           :value (:row (:value "feed-9")))))))))))
+                                                           :value (:row (:value "feed-9")
+                                                                   :viewport (:viewport (:arm :center :value nil))))))))))))
 
 (ert-deftest agent-repl-test-wire-verbs-select-feed-row-success-selected-prompt ()
   "A step that lands on a prompt acks the selection naming it."
@@ -3723,7 +3724,7 @@ webapp's alone."
                        (plist-get
                         (agent-repl-wire-decode-select-feed-row-response
                          (agent-repl-test-wire-verbs--parse
-                          "{\"success\":{\"selected\":{\"selection\":{\"prompt\":{\"row\":{\"value\":\"p-1\"}}}}}}"))
+                          "{\"success\":{\"selected\":{\"selection\":{\"prompt\":{\"row\":{\"value\":\"p-1\"},\"viewport\":{\"center\":{}}}}}}}"))
                         :value)
                        :outcome)
                       :value)
@@ -3874,18 +3875,58 @@ webapp's alone."
                  '("bubble" "none" "prompt" "response"))))
 
 (ert-deftest agent-repl-test-wire-verbs-feed-selection-bubble-decodes-its-row ()
-  "A selected bubble decodes to the `:bubble' arm with its row."
+  "A selected bubble decodes to the `:bubble' arm with its row and viewport."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-feed-selection
-                    (agent-repl-test-wire-verbs--parse "{\"bubble\":{\"row\":{\"value\":\"r1\"}}}"))
-                   '(:arm :bubble :value (:row (:value "r1")))))))
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"bubble\":{\"row\":{\"value\":\"r1\"},\"viewport\":{\"hold\":{}}}}"))
+                   '(:arm :bubble :value (:row (:value "r1")
+                                          :viewport (:viewport (:arm :hold :value nil))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-feed-selection-response-decodes-center ()
+  "A response a step selected decodes its `:center' viewport."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-feed-selection
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"response\":{\"row\":{\"value\":\"r1\"},\"viewport\":{\"center\":{}}}}"))
+                   '(:arm :response :value (:row (:value "r1")
+                                            :viewport (:viewport (:arm :center :value nil))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-feed-selection-row-without-viewport-refused ()
+  "A selected row with no viewport is a contract breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-feed-selection
+                   (agent-repl-test-wire-verbs--parse "{\"prompt\":{\"row\":{\"value\":\"r1\"}}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-feed-selection-row-viewport-unset-refused ()
+  "A row viewport with no arm set is a contract breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-feed-selection
+                   (agent-repl-test-wire-verbs--parse
+                    "{\"prompt\":{\"row\":{\"value\":\"r1\"},\"viewport\":{}}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-feed-selection-none-hold ()
+  "Nothing selected after a click on the selected bubble decodes to `:hold'."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-feed-selection
+                    (agent-repl-test-wire-verbs--parse "{\"none\":{\"hold\":{}}}"))
+                   '(:arm :none :value (:viewport (:arm :hold :value nil)))))))
 
 (ert-deftest agent-repl-test-wire-verbs-feed-selection-none-arms-pinned ()
   "FeedSelectionNone's viewport oneof has exactly the arms decoded here."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "frontend/v1/feed.pb.go" "FeedSelectionNone")
                        #'string<)
-                 '("returnToTail" "stay"))))
+                 '("hold" "returnToTail" "stay"))))
+
+(ert-deftest agent-repl-test-wire-verbs-feed-selection-row-viewport-arms-pinned ()
+  "FeedSelectionRowViewport's viewport oneof has exactly the arms decoded here."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "frontend/v1/feed.pb.go" "FeedSelectionRowViewport")
+                       #'string<)
+                 '("center" "hold"))))
 
 ;;;; ---- PlanRollback -----------------------------------------------------
 

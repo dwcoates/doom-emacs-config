@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { createControl } from "../../src/control.js";
-import { ITEM_EXPANDED_EVENT } from "../../src/expand.js";
+import { createControl, isControl } from "../../src/control.js";
+import { READER_CLICK_EVENT } from "../../src/expand.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clone, create } from "@bufbuild/protobuf";
 import { OpenFeedResponseSchema, type OpenFeedResponse } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_feed_pb";
@@ -796,39 +796,41 @@ describe("mountBubble: clicking the head is the toggle", () => {
     expect(h.calls.openFeed[0]?.feed?.value).toBe("b1");
   });
 
-  /** Count the expansions ELEMENT announces. */
-  function countAnnouncements(element: HTMLElement): { count: number } {
-    const seen = { count: 0 };
-    element.addEventListener(ITEM_EXPANDED_EVENT, () => {
-      seen.count++;
+  /** Record every reader click ELEMENT announces, with whether the bubble was expanded then. */
+  function recordAnnouncements(
+    bubble: { element: HTMLElement; isExpanded(): boolean },
+  ): Array<{ target: EventTarget | null; expanded: boolean }> {
+    const seen: Array<{ target: EventTarget | null; expanded: boolean }> = [];
+    bubble.element.addEventListener(READER_CLICK_EVENT, (e) => {
+      seen.push({ target: e.target, expanded: bubble.isExpanded() });
     });
     return seen;
   }
 
-  it("announces itself expanded once the reader's head click opened it", async () => {
+  it("announces the reader's expanding head click from the bubble before it opens", async () => {
     const { bubble } = mount(subagentRow("b1"));
-    const seen = countAnnouncements(bubble.element);
+    const seen = recordAnnouncements(bubble);
     headOf(bubble).click();
     await settle();
-    expect(seen.count).toBe(1);
+    expect(seen).toEqual([{ target: bubble.element, expanded: false }]);
   });
 
-  it("announces nothing when a reveal opens it, which never scrolls", async () => {
+  it("announces the reader's collapsing head click from the bubble before it closes", async () => {
     const { bubble } = mount(subagentRow("b1"));
-    const seen = countAnnouncements(bubble.element);
+    headOf(bubble).click();
+    await settle();
+    const seen = recordAnnouncements(bubble);
+    headOf(bubble).click();
+    await settle();
+    expect(seen).toEqual([{ target: bubble.element, expanded: true }]);
+  });
+
+  it("announces nothing when a reveal opens it, which is no click", async () => {
+    const { bubble } = mount(subagentRow("b1"));
+    const seen = recordAnnouncements(bubble);
     await bubble.expand();
     await settle();
-    expect(seen.count).toBe(0);
-  });
-
-  it("announces nothing when the head click collapses it", async () => {
-    const { bubble } = mount(subagentRow("b1"));
-    headOf(bubble).click();
-    await settle();
-    const seen = countAnnouncements(bubble.element);
-    headOf(bubble).click();
-    await settle();
-    expect(seen.count).toBe(0);
+    expect(seen).toEqual([]);
   });
 
   it("collapses again on a second head click", async () => {
@@ -2102,12 +2104,13 @@ describe("mountBubble: an overlay question in place of the sub-feed", () => {
 });
 
 describe("mountBubble: a press on a merge bubble's control holds the view", () => {
-  /** A scroll box and a tail owner whose press hold is counted. */
-  function scrollWatch(): { scroll: { box: Element; tail: TailFollow }; presses: () => number } {
-    const box = document.createElement("div");
-    const tail = new TailFollow(box);
-    const spy = vi.spyOn(tail, "mergeControlPressed");
-    return { scroll: { box, tail }, presses: () => spy.mock.calls.length };
+  /** Record every reader click BUBBLE announces from one of its controls. */
+  function controlAnnouncements(bubble: { element: HTMLElement }): EventTarget[] {
+    const targets: EventTarget[] = [];
+    bubble.element.addEventListener(READER_CLICK_EVENT, (e) => {
+      if (e.target instanceof Element && isControl(e.target)) targets.push(e.target);
+    });
+    return targets;
   }
 
   /** A control placed in BUBBLE's sub-feed panel, as a merge tab is drawn there. */
@@ -2119,33 +2122,34 @@ describe("mountBubble: a press on a merge bubble's control holds the view", () =
     return control;
   }
 
-  it("holds the view when a control in a merge bubble is clicked", () => {
+  it("announces the reader's click from a control in a merge bubble", () => {
     // Arrange
-    const watch = scrollWatch();
-    const { bubble } = mount(mergeRow("m1"), harness(), { merge: true, scroll: watch.scroll });
+    const { bubble } = mount(mergeRow("m1"), harness(), { merge: true });
+    const seen = controlAnnouncements(bubble);
+    const control = controlIn(bubble);
+    // Act
+    control.click();
+    // Assert
+    expect(seen).toEqual([control]);
+  });
+
+  it("announces nothing from a control in a subagent bubble", () => {
+    // Arrange
+    const { bubble } = mount(subagentRow("b1"), harness());
+    const seen = controlAnnouncements(bubble);
     // Act
     controlIn(bubble).click();
     // Assert
-    expect(watch.presses()).toBe(1);
+    expect(seen).toEqual([]);
   });
 
-  it("holds nothing when a control in a subagent bubble is clicked", () => {
+  it("announces no control click when the merge bubble's bare head is clicked", () => {
     // Arrange
-    const watch = scrollWatch();
-    const { bubble } = mount(subagentRow("b1"), harness(), { scroll: watch.scroll });
-    // Act
-    controlIn(bubble).click();
-    // Assert
-    expect(watch.presses()).toBe(0);
-  });
-
-  it("holds nothing when the merge bubble's bare head is clicked", () => {
-    // Arrange
-    const watch = scrollWatch();
-    const { bubble } = mount(mergeRow("m1"), harness(), { merge: true, scroll: watch.scroll });
+    const { bubble } = mount(mergeRow("m1"), harness(), { merge: true });
+    const seen = controlAnnouncements(bubble);
     // Act
     bubble.element.querySelector<HTMLElement>(".bubble-head")?.click();
     // Assert
-    expect(watch.presses()).toBe(0);
+    expect(seen).toEqual([]);
   });
 });
