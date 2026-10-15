@@ -20,6 +20,7 @@ the log records that show it, so the failures can be fixed at their source.
 | 9 | 2026-10-15 | `sandbox-no-host-mounts` (tip `a54186877d`, the structural fix for entry 8, at the FRONT) | `sandbox-no-host-mounts-merge` | requested, pending; the queue is paused for the Go cache |
 | 10 | 2026-10-15 | `test-suite-skip-hdv-land` (35 commits, suite reuse) | `test-suite-reuse-merge` | requested, pending; the queue is paused for the Go cache |
 | 11 | 2026-10-15 | `test-timer-waits-land` (tip `087c0e4da4`) | `timer-waits-landing` | requested, pending; the queue is paused for the Go cache |
+| 12 | 2026-10-15 | `redundancy-tool` (tip `620766ed4d`, the redundancy tool and pinned baseline, minor) | `redundancy-tool-land` | requested, pending; the queue is paused for the Go cache |
 
 ## 1. `test-tier-rule` (landed)
 
