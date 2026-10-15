@@ -652,6 +652,8 @@ export class RecordingFold implements EngineFold {
   readonly queryEnds: string[] = [];
   /** When it answers a detail, the fold REFUSED this message and says so. */
   faultFor: (message: SdkMessage) => string | undefined = () => undefined;
+  /** The terminal a `result` folds to; an unset result unless a suite says so. */
+  resultFor: (message: SdkMessage) => conversationv1.AgentFrame["result"] = () => ({ case: undefined });
 
   onSdkMessage(message: SdkMessage, context: FoldContext): EngineFoldOutput {
     this.seen.push(message);
@@ -666,7 +668,10 @@ export class RecordingFold implements EngineFold {
       ? {
           entries,
           turnEnded: {
-            frame: create(conversationv1.AgentFrameSchema, { agentId: context.mainAgentId }),
+            frame: create(conversationv1.AgentFrameSchema, {
+              agentId: context.mainAgentId,
+              result: this.resultFor(message),
+            }),
           },
         }
       : { entries };

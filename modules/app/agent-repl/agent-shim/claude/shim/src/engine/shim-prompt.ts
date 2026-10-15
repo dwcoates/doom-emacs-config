@@ -32,3 +32,10 @@ export const NETWORK_RESUME_SOURCE: ShimPromptSource = {
   firstMessage: "network_resume",
   label: "network-resume",
 };
+
+/** The vendor-error retry's source. */
+export const VENDOR_ERROR_RETRY_SOURCE: ShimPromptSource = {
+  cause: "the shim asked the main agent to continue a turn the vendor gave up retrying",
+  firstMessage: "vendor_error_retry",
+  label: "vendor-error-retry",
+};

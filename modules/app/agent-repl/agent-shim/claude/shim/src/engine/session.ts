@@ -182,7 +182,8 @@ import { SessionPushes } from "./pushes.js";
 import { probeVendorFact } from "./vendor-probe.js";
 import { VendorCadence } from "./vendor-cadence.js";
 import { classifyAgentFailure, NetworkResume, type ReachabilityProbe, type ResumeDelivery } from "./network-resume.js";
-import { NETWORK_RESUME_SOURCE, type ShimPromptDelivery, type ShimPromptSource } from "./shim-prompt.js";
+import { NETWORK_RESUME_SOURCE, VENDOR_ERROR_RETRY_SOURCE, type ShimPromptDelivery, type ShimPromptSource } from "./shim-prompt.js";
+import { VendorErrorRetry, type UsageReading } from "./vendor-error-retry.js";
 import { networkReach, type NetworkReach } from "./network-reach.js";
 import {
   KEEPALIVE_YIELD_BUDGET_MS,
@@ -360,6 +361,8 @@ interface EngineDeps {
    */
   readonly networkResumeIntervalMs?: number;
   readonly networkResumeWindowMs?: number;
+  /** Injected so a suite drives the vendor-error retry without a clock. */
+  readonly vendorErrorRetryScheduler?: KeepaliveScheduler;
   /**
    * End the process, once the session has been stood down.
    *
@@ -756,6 +759,19 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     },
     ...(deps.networkResumeIntervalMs === undefined ? {} : { intervalMs: deps.networkResumeIntervalMs }),
     ...(deps.networkResumeWindowMs === undefined ? {} : { windowMs: deps.networkResumeWindowMs }),
+  });
+  /**
+   * THE ONE VENDOR-ERROR RETRY STATE of this process
+   * (engine/vendor-error-retry.ts). Fed every non-keep-alive SDK message and
+   * every non-keep-alive turn's terminal; delivers through
+   * {@link deliverShimPrompt}; told when a StartTurn opens; stopped with the
+   * session.
+   */
+  const vendorErrorRetry = new VendorErrorRetry({
+    deliver: (prompt) => deliverShimPrompt(prompt, VENDOR_ERROR_RETRY_SOURCE),
+    readUsage: () => readUsageForRetry(),
+    nowMs: deps.nowMs,
+    scheduler: deps.vendorErrorRetryScheduler ?? REAL_SCHEDULER,
   });
 
   let identity: SessionIdentity | undefined;
@@ -2090,6 +2106,34 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     void accountUsageProbe.refresh();
   }
 
+  /** The latest account usage sample's own answer, and how many samples answered. */
+  let lastUsageReading: UsageReading | undefined;
+  let usageReadings = 0;
+
+  function noteUsageReading(reading: UsageReading): void {
+    lastUsageReading = reading;
+    usageReadings += 1;
+  }
+
+  /**
+   * THE ACCOUNT'S USAGE AFTER A USAGE-LIMIT FAILURE, for the vendor-error
+   * retry (engine/vendor-error-retry.ts). A probe queued behind every one
+   * already asked for (`run`, never coalesced), so the reading answers after
+   * the failure, never a sample taken before it.
+   */
+  async function readUsageForRetry(): Promise<UsageReading> {
+    const before = usageReadings;
+    try {
+      await accountUsageProbe.run();
+    } catch (err) {
+      return { kind: "unavailable", detail: err instanceof Error ? err.message : String(err) };
+    }
+    if (usageReadings === before || lastUsageReading === undefined) {
+      return { kind: "unavailable", detail: "no vendor query was up to sample the account's usage" };
+    }
+    return lastUsageReading;
+  }
+
   /**
    * A LIVE RATE-LIMIT EVENT MEANS THE ACCOUNT'S USAGE MOVED, so it asks for a
    * fresh sample. The event's own utilization is never the drawn figure: it
@@ -2112,10 +2156,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (active === undefined) return;
     const observedAtMs = BigInt(deps.nowMs());
     try {
-      pushes.push(
-        accountUsageUpdate(await active.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET(), observedAtMs),
-      );
+      const usage = await active.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET();
+      noteUsageReading({ kind: "sampled", usage });
+      pushes.push(accountUsageUpdate(usage, observedAtMs));
     } catch (err) {
+      noteUsageReading({ kind: "unavailable", detail: err instanceof Error ? err.message : String(err) });
       pushes.push(
         create(conversationv1.SessionUpdateSchema, {
           update: {
@@ -2264,6 +2309,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     settleStartOnErrorResult(message);
     noteDetachedWork(message, attribution, verdict.turn);
     networkResume.observe(message);
+    if (!attribution.keepalive) vendorErrorRetry.observe(message);
     const reach = networkReach(message);
     if (reach !== undefined) noteNetworkReach(reach);
     // A RESUMED SUBAGENT THIS PROCESS NEVER SAW SPAWN IS NAMED BY THE STORE,
@@ -2303,7 +2349,21 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // the window closes only at the end of a turn that refused nothing.
     if (!converterDefectThisTurn) noteConverterHealthy();
     converterDefectThisTurn = false;
+    if (!attribution.keepalive) vendorErrorRetry.turnEnded(shimTurnOf(verdict.turn), output.turnEnded.frame);
     await endVendorTurn(verdict.turn);
+  }
+
+  /** The shim turn a vendor turn answers, or absence when it answers none of ours. */
+  function shimTurnOf(running: VendorTurn): string | undefined {
+    switch (running.kind) {
+      case "send":
+        return running.send.turnId;
+      case "vendor":
+        return adopted?.id.value;
+      case "unknown":
+      case "unstated":
+        return undefined;
+    }
   }
 
   /**
@@ -3561,6 +3621,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     keepaliveScope.abandon(`the vendor query died: ${detail}`);
     cadence?.stop();
     networkResume.stop(`the vendor query died: ${detail}`);
+    vendorErrorRetry.stop(`the vendor query died: ${detail}`);
     // NO RECOVERY PATH, DELIBERATELY. Nothing in this process restarts a query
     // it lost, so this fault is meant to stand for the session's life -- and it
     // holds its own component so a probe that still answers cannot clear it.
@@ -5972,7 +6033,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     keepaliveYieldBudgetMs: deps.keepaliveYieldBudgetMs ?? KEEPALIVE_YIELD_BUDGET_MS,
     submit,
     setOpenTurn: (turn) => {
-      if (!turn.keepalive) retireStopCommand("a real turn opened");
+      if (!turn.keepalive) {
+        retireStopCommand("a real turn opened");
+        vendorErrorRetry.promptSubmitted(turn.id.value);
+      }
       setOpen(turn);
       cadence?.pause();
     },
@@ -6675,6 +6739,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     );
     cadence?.stop();
     networkResume.stop(reason);
+    vendorErrorRetry.stop(reason);
     if (accountUsageHandle !== undefined) {
       (deps.scheduler ?? REAL_SCHEDULER).clearInterval(accountUsageHandle);
       accountUsageHandle = undefined;
