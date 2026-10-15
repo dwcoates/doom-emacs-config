@@ -2100,3 +2100,52 @@ describe("mountBubble: an overlay question in place of the sub-feed", () => {
     expect(sets.length === 0 || (last.selectors.join(", ").includes("[hidden]") && /display\s*:\s*none/.test(last.declarations))).toBe(true);
   });
 });
+
+describe("mountBubble: a press on a merge bubble's control holds the view", () => {
+  /** A scroll box and a tail owner whose press hold is counted. */
+  function scrollWatch(): { scroll: { box: Element; tail: TailFollow }; presses: () => number } {
+    const box = document.createElement("div");
+    const tail = new TailFollow(box);
+    const spy = vi.spyOn(tail, "mergeControlPressed");
+    return { scroll: { box, tail }, presses: () => spy.mock.calls.length };
+  }
+
+  /** A control placed in BUBBLE's sub-feed panel, as a merge tab is drawn there. */
+  function controlIn(bubble: { element: HTMLElement }): HTMLElement {
+    const panel = bubble.element.querySelector<HTMLElement>("[data-subfeed]");
+    if (panel === null) throw new Error("the bubble mounted no sub-feed panel");
+    const control = createControl();
+    panel.append(control);
+    return control;
+  }
+
+  it("holds the view when a control in a merge bubble is clicked", () => {
+    // Arrange
+    const watch = scrollWatch();
+    const { bubble } = mount(mergeRow("m1"), harness(), { merge: true, scroll: watch.scroll });
+    // Act
+    controlIn(bubble).click();
+    // Assert
+    expect(watch.presses()).toBe(1);
+  });
+
+  it("holds nothing when a control in a subagent bubble is clicked", () => {
+    // Arrange
+    const watch = scrollWatch();
+    const { bubble } = mount(subagentRow("b1"), harness(), { scroll: watch.scroll });
+    // Act
+    controlIn(bubble).click();
+    // Assert
+    expect(watch.presses()).toBe(0);
+  });
+
+  it("holds nothing when the merge bubble's bare head is clicked", () => {
+    // Arrange
+    const watch = scrollWatch();
+    const { bubble } = mount(mergeRow("m1"), harness(), { merge: true, scroll: watch.scroll });
+    // Act
+    bubble.element.querySelector<HTMLElement>(".bubble-head")?.click();
+    // Assert
+    expect(watch.presses()).toBe(0);
+  });
+});

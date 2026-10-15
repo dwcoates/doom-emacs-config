@@ -1483,6 +1483,68 @@ describe("TailFollow's latest-visible latch", () => {
     const record = await forwardedRecord(capture, "scroll.latest-geometry-invalid");
     expect(record.level.case).toBe("error");
   });
+
+  describe("TailFollow.mergeControlPressed", () => {
+    /** A reader following at the tail, with the merge bubble as the latest entry. */
+    function following(): ReturnType<typeof withLatest> {
+      const l = withLatest(650);
+      l.scroll();
+      return l;
+    }
+
+    it("ends a standing follow", () => {
+      // Arrange
+      const l = following();
+      // Act
+      l.tail.mergeControlPressed();
+      // Assert
+      expect(l.tail.isFollowing()).toBe(false);
+    });
+
+    it("moves nothing when the pressed control's redraw grows the latest entry", () => {
+      // Arrange
+      const l = following();
+      l.input();
+      l.tail.mergeControlPressed();
+      // Act -- the panel the press drew is 200px taller.
+      l.entry.height += 200;
+      l.box.scrollHeight += 200;
+      l.resize();
+      // Assert
+      expect(l.box.scrollTop).toBe(650);
+    });
+
+    it("holds the latest-visible latch off through a scroll event with no reader input", () => {
+      // Arrange
+      const l = following();
+      l.tail.mergeControlPressed();
+      // Act
+      l.scroll();
+      // Assert
+      expect(l.tail.isFollowing()).toBe(false);
+    });
+
+    it("lets the reader's next input latch the follow again", () => {
+      // Arrange
+      const l = following();
+      l.tail.mergeControlPressed();
+      // Act
+      l.gesture();
+      // Assert
+      expect(l.tail.isFollowing()).toBe(true);
+    });
+
+    it("records the hold with where the view stands", async () => {
+      // Arrange
+      const l = following();
+      const capture = captureLogRecords("debug");
+      // Act
+      l.tail.mergeControlPressed();
+      // Assert
+      const record = await forwardedRecord(capture, "scroll.merge-press-held");
+      expect([record.level.case, record.context]).toMatchObject(["debug", { at: 650 }]);
+    });
+  });
 });
 
 describe("revealGeometry", () => {
