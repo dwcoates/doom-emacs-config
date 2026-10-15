@@ -517,6 +517,16 @@ type workspaceColumn struct {
 // rather than silently affecting no rows.
 func (s *store) setWorkspaceColumns(ctx context.Context, op string, id WorkspaceID, fields dlog.Context, columns ...workspaceColumn) error {
 	fields["workspace"] = string(id)
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		return updateWorkspaceColumns(ctx, tx, id, columns...)
+	})
+}
+
+// updateWorkspaceColumns is setWorkspaceColumns's statement, inside a
+// transaction the caller already holds: for a write whose columns depend on a
+// read of the same row (Reopen), so the read and the update cannot interleave
+// with another write.
+func updateWorkspaceColumns(ctx context.Context, tx *sql.Tx, id WorkspaceID, columns ...workspaceColumn) error {
 	assignments := make([]string, len(columns))
 	args := make([]any, 0, len(columns)+1)
 	for i, column := range columns {
@@ -524,13 +534,11 @@ func (s *store) setWorkspaceColumns(ctx context.Context, op string, id Workspace
 		args = append(args, column.value)
 	}
 	args = append(args, id)
-	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `UPDATE workspaces SET `+strings.Join(assignments, ", ")+` WHERE id = ?`, args...)
-		if err != nil {
-			return err
-		}
-		return requireOneRow(res, fmt.Sprintf("wsm: workspace %s", id))
-	})
+	res, err := tx.ExecContext(ctx, `UPDATE workspaces SET `+strings.Join(assignments, ", ")+` WHERE id = ?`, args...)
+	if err != nil {
+		return err
+	}
+	return requireOneRow(res, fmt.Sprintf("wsm: workspace %s", id))
 }
 
 // requireOneRow turns "no rows affected" into a refusal. A write that matched
@@ -617,20 +625,27 @@ func (s *store) Reopen(ctx context.Context, id WorkspaceID) error {
 	fields := dlog.Context{"workspace": string(id)}
 	return s.write(ctx, "daemon.wsm.reopen", fields, func(ctx context.Context, tx *sql.Tx) error {
 		var merged sql.NullInt64
-		if err := scanWorkspaceRow(ctx, tx, id, "merged_at", &merged); err != nil {
+		var mergeOf sql.NullString
+		if err := scanWorkspaceRow(ctx, tx, id, "merged_at, merge_of", &merged, &mergeOf); err != nil {
 			return err
 		}
 		fields["was_merged"] = merged.Valid
-		if !merged.Valid {
-			_, err := tx.ExecContext(ctx,
-				`UPDATE workspaces SET closed = 0, closure_at = NULL, closure_by = NULL WHERE id = ?`, id)
-			return err
+		columns := []workspaceColumn{
+			{name: "closed", value: false},
+			{name: "closure_at", value: nil},
+			{name: "closure_by", value: nil},
 		}
-		_, err := tx.ExecContext(ctx, `UPDATE workspaces SET closed = 0, closure_at = NULL, closure_by = NULL,
-  merged_at = NULL, commit_count = NULL, landed_head = NULL, landed_at = NULL,
-  merge_revealed = CASE WHEN merge_of IS NULL THEN merge_revealed ELSE 1 END
- WHERE id = ?`, id)
-		return err
+		if merged.Valid {
+			columns = append(columns,
+				workspaceColumn{name: "merged_at", value: nil},
+				workspaceColumn{name: "commit_count", value: nil},
+				workspaceColumn{name: "landed_head", value: nil},
+				workspaceColumn{name: "landed_at", value: nil})
+			if mergeOf.Valid {
+				columns = append(columns, workspaceColumn{name: "merge_revealed", value: true})
+			}
+		}
+		return updateWorkspaceColumns(ctx, tx, id, columns...)
 	})
 }
 

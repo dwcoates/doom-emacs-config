@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -1617,13 +1618,22 @@ func TestRequireOnPrimary(t *testing.T) {
 }
 
 // TestEveryAncestryCheckGoesThroughRequireOnPrimary pins that no create path
-// asks git whether a base is on the primary branch by hand.
+// asks git whether a base is on the primary branch by hand. The package's one
+// other ancestry question is a different one -- whether a reopened merged
+// workspace's branch lies inside its parent (advanceMerged, open.go) -- and is
+// pinned to its own file, so neither site can grow a sibling unseen.
 func TestEveryAncestryCheckGoesThroughRequireOnPrimary(t *testing.T) {
 	// Act.
-	calls := sourcescan.Count(t, "Git.IsAncestor(")
+	perFile := map[string]int{}
+	for _, file := range sourcescan.Production(t) {
+		if n := strings.Count(string(file.Source), "Git.IsAncestor("); n > 0 {
+			perFile[file.Name] = n
+		}
+	}
 
-	// Assert: the one call is requireOnPrimary's own.
-	if calls != 1 {
-		t.Fatalf("Git.IsAncestor( appears %d times in this package, want only requireOnPrimary's", calls)
+	// Assert: requireOnPrimary's own call, and advanceMerged's.
+	want := map[string]int{"create.go": 1, "open.go": 1}
+	if !reflect.DeepEqual(perFile, want) {
+		t.Fatalf("Git.IsAncestor( calls per file = %v, want %v", perFile, want)
 	}
 }
