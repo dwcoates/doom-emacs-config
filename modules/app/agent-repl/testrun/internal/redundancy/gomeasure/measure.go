@@ -758,7 +758,21 @@ func (m *measurer) schema(ctx context.Context, cases []redundancy.Case, imports 
 			return nil, err
 		}
 		var failed []Result
+		// The mutated packages alone first: one build, cached across
+		// attempts, finds the sites that do not type-check far faster than
+		// every suite's binary would.
+		check := append([]string{"go", "build", "-overlay", ov}, m.cfg.Mutate...)
+		res, err := m.goBuild(ctx, m.cfg.Module, check)
+		if err != nil {
+			return nil, err
+		}
+		if res.Exit != 0 || res.TimedOut {
+			failed = append(failed, res)
+		}
 		for i, st := range m.suites {
+			if len(failed) > 0 {
+				break
+			}
 			st.mutBin = filepath.Join(m.cfg.Scratch, fmt.Sprintf("mutants-%02d.test", i))
 			res, err := m.goBuild(ctx, st.module, m.testBuild(st, st.mutBin, "-overlay", ov))
 			if err != nil {
@@ -768,12 +782,14 @@ func (m *measurer) schema(ctx context.Context, cases []redundancy.Case, imports 
 				failed = append(failed, res)
 			}
 		}
-		progs, progFailed, err := m.buildPrograms(ctx, filepath.Join(m.cfg.Scratch, "mutant-programs-"+strconv.Itoa(attempt)), false, "-overlay", ov)
-		if err != nil {
-			return nil, err
+		if len(failed) == 0 {
+			progs, progFailed, err := m.buildPrograms(ctx, filepath.Join(m.cfg.Scratch, "mutant-programs-"+strconv.Itoa(attempt)), false, "-overlay", ov)
+			if err != nil {
+				return nil, err
+			}
+			m.mutPrograms = progs
+			failed = append(failed, progFailed...)
 		}
-		m.mutPrograms = progs
-		failed = append(failed, progFailed...)
 		if len(failed) == 0 {
 			live := 0
 			for _, s := range schemas {

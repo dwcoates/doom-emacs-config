@@ -138,6 +138,11 @@ func (f *fakeGo) exec(_ context.Context, c Cmd) (Result, error) {
 	case base == "go" && c.Args[0] == "list":
 		return Result{Lines: lines("fix/p\t" + f.dir)}, nil
 	case base == "go" && c.Args[0] == "build":
+		if slices.Contains(c.Args, "-overlay") && f.schemaErr != "" {
+			out := f.schemaErr
+			f.schemaErr = ""
+			return Result{Exit: 1, Lines: lines(strings.Split(out, "\n")...)}, nil
+		}
 		return Result{}, nil
 	case base == "go" && c.Args[0] == "test":
 		if slices.Contains(c.Args, "-overlay") && f.schemaErr != "" {
@@ -334,6 +339,16 @@ func TestMeasureDropsTheSiteASchemaCompileErrorNames(t *testing.T) {
 		if r.Status != "dropped" {
 			t.Errorf("%s is %s, want dropped", r.Key, r.Status)
 		}
+	}
+	// The failing attempt built the mutated packages alone and no suite.
+	var overlays []string
+	for _, call := range f.calls {
+		if strings.Contains(call, "-overlay") {
+			overlays = append(overlays, call)
+		}
+	}
+	if len(overlays) < 3 || !strings.HasPrefix(overlays[0], "go build -overlay") || !strings.HasPrefix(overlays[1], "go build -overlay") || !strings.HasPrefix(overlays[2], "go test -c") {
+		t.Fatalf("overlay builds, in order:\n%s", strings.Join(overlays, "\n"))
 	}
 }
 
