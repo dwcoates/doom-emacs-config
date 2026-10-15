@@ -429,7 +429,7 @@ func TestAGatesStartIsRecordedWithItsSelection(t *testing.T) {
 
 	// Assert.
 	got := gateRecord(t, h, "the merge's test gate started")
-	if got["suites"] != "daemon,e2e,e2e-emacs" || got["speculative"] != false {
+	if got["suites"] != "daemon,repo-scans,e2e,e2e-emacs" || got["speculative"] != false {
 		t.Fatalf("start = %v, want the daemon's selection, not speculative", got)
 	}
 }
