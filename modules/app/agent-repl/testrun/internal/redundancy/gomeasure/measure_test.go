@@ -57,7 +57,7 @@ type fakeGo struct {
 	mutant map[string]func(pattern string) Result
 	// mutantCmd, when it holds the mutant, scripts it from the whole command.
 	mutantCmd map[string]func(Cmd) Result
-	calls  []string
+	calls     []string
 }
 
 func passLines(names ...string) []Line {
