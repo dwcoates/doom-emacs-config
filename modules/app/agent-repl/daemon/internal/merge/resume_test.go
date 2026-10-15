@@ -448,10 +448,19 @@ func TestAMergeResumedAtItsTestsFailsWhenARebaseStands(t *testing.T) {
 	}
 }
 
-// atFix stands a record at fixing attempt 1, whose turn is deadTurn.
-func atFix(d *progressDoc) {
-	atStep(TabFixes, 1)(d)
-	d.FixAttempt, d.Turn, d.FailingSuites = 1, string(deadTurn), []string{"daemon"}
+// atFix stands a record at fixing attempt 1, whose turn is deadTurn, with the
+// failing run's archive on disk: a resumed fixing attempt reads its failing
+// tests from it, for the file and for the brief alike.
+func atFix(t *testing.T) func(*progressDoc) {
+	archive := filepath.Join(t.TempDir(), "tests-1.log")
+	if err := os.WriteFile(archive, []byte(failedUnit("daemon:internal/merge#00", "daemon", "--- FAIL: TestResumed (0.01s)")), 0o644); err != nil {
+		t.Fatalf("writing the archive: %v", err)
+	}
+	return func(d *progressDoc) {
+		atStep(TabFixes, 1)(d)
+		d.FixAttempt, d.Turn, d.FailingSuites = 1, string(deadTurn), []string{"daemon"}
+		d.FailingArchive = archive
+	}
 }
 
 // recordTurn stands the dead run's turn in the store, closed when how is set.
@@ -469,7 +478,7 @@ func recordTurn(h *harness, how *wsm.TurnClose) {
 func TestAMergeResumedAtAFixReattachesToItsRunningTurn(t *testing.T) {
 	// Arrange: the fixing turn still runs in the session.
 	h := newHarness(t)
-	interruptedAt(t, h, atFix)
+	interruptedAt(t, h, atFix(t))
 	recordTurn(h, nil)
 	landsAfterResume(h)
 
@@ -488,7 +497,7 @@ func TestAMergeResumedAtAFixReattachesToItsRunningTurn(t *testing.T) {
 func TestAMergeResumedAtAFixWhoseTurnEndedGoesOnWithoutWaiting(t *testing.T) {
 	// Arrange: the fixing turn ended while the daemon was down.
 	h := newHarness(t)
-	interruptedAt(t, h, atFix)
+	interruptedAt(t, h, atFix(t))
 	completed := wsm.CloseCompleted
 	recordTurn(h, &completed)
 	landsAfterResume(h)
@@ -505,7 +514,7 @@ func TestAMergeResumedAtAFixWhoseTurnEndedGoesOnWithoutWaiting(t *testing.T) {
 func TestAMergeResumedAtAFixWhoseTurnNeverReachedTheSessionSubmitsIt(t *testing.T) {
 	// Arrange: the record names a turn no store knows.
 	h := newHarness(t)
-	interruptedAt(t, h, atFix)
+	interruptedAt(t, h, atFix(t))
 	landsAfterResume(h)
 
 	// Act.
@@ -772,23 +781,10 @@ func fixingAttemptsDrawn(h *harness) []int {
 	return attempts
 }
 
-// atFixArchived is atFix with the failing run's archive on disk, which a
-// fixing attempt prompted again reads its failing tests from.
-func atFixArchived(t *testing.T) func(*progressDoc) {
-	archive := filepath.Join(t.TempDir(), "tests-1.log")
-	if err := os.WriteFile(archive, []byte("[agent-repl-tests] ERROR: daemon failed after 4s with exit code 1\n"), 0o644); err != nil {
-		t.Fatalf("writing the archive: %v", err)
-	}
-	return func(d *progressDoc) {
-		atFix(d)
-		d.FailingArchive = archive
-	}
-}
-
 func TestAResumedFixTheRestartOrphanedIsPromptedAgain(t *testing.T) {
 	// Arrange: the fixing turn was reconciled with no terminal.
 	h := newHarness(t)
-	interruptedAt(t, h, atFixArchived(t))
+	interruptedAt(t, h, atFix(t))
 	orphaned := wsm.CloseOrphaned
 	recordTurn(h, &orphaned)
 	landsAfterResume(h)
@@ -805,7 +801,7 @@ func TestAResumedFixTheRestartOrphanedIsPromptedAgain(t *testing.T) {
 func TestAResumedFixTheRestartCutSpendsNoAttempt(t *testing.T) {
 	// Arrange: the fixing turn was reconciled with no terminal.
 	h := newHarness(t)
-	interruptedAt(t, h, atFixArchived(t))
+	interruptedAt(t, h, atFix(t))
 	orphaned := wsm.CloseOrphaned
 	recordTurn(h, &orphaned)
 	landsAfterResume(h)
@@ -822,7 +818,7 @@ func TestAResumedFixTheRestartCutSpendsNoAttempt(t *testing.T) {
 func TestAResumedFixWhoseAgentDiedWhileSuspendedIsPromptedAgain(t *testing.T) {
 	// Arrange: the fixing turn's agent died while the daemon was down.
 	h := newHarness(t)
-	interruptedAt(t, h, atFixArchived(t))
+	interruptedAt(t, h, atFix(t))
 	died := wsm.CloseAgentDied
 	recordTurn(h, &died)
 	landsAfterResume(h)
@@ -956,7 +952,7 @@ func testsRoundOutcome(h *harness, round int) string {
 func TestAMergeResumedAtAFixRebasesOntoATargetThatMovedBeforeItsGate(t *testing.T) {
 	// Arrange: the fixing turn ended while the daemon was down.
 	h := newHarness(t)
-	interruptedAt(t, h, atFix)
+	interruptedAt(t, h, atFix(t))
 	closed := wsm.CloseCompleted
 	recordTurn(h, &closed)
 	landsAfterResume(h)

@@ -383,7 +383,9 @@ func (f failingTests) render(archive string) string {
 // writeFailingTests reads the failing gate run's archive and writes its
 // failing tests to FailingTestsFile at the root of the merging worktree,
 // excluded from commits through the repository's info/exclude. It answers the
-// file's path.
+// file's body, which the fixing brief also carries inline: the agent is handed
+// the failing tests in the prompt itself, and the file keeps them at hand
+// through the turn.
 func (r *run) writeFailingTests(ctx context.Context, archive string) (string, error) {
 	const op = "daemon.merge.fixes"
 	output, err := os.ReadFile(archive)
@@ -396,7 +398,8 @@ func (r *run) writeFailingTests(ctx context.Context, archive string) (string, er
 	module := filepath.Join(r.subject.dir, moduleRoot)
 	found := readFailingTests(string(output), module)
 	path := filepath.Join(r.subject.dir, FailingTestsFile)
-	if err := os.WriteFile(path, []byte(found.render(archive)), 0o644); err != nil {
+	body := found.render(archive)
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		return "", fmt.Errorf("merge: writing the failing tests to %s: %w", path, err)
 	}
 	named, unnamed := 0, 0
@@ -408,7 +411,7 @@ func (r *run) writeFailingTests(ctx context.Context, archive string) (string, er
 	}
 	r.o.log(ctx, r.ws).Info(op, "wrote the failing tests the fixing attempt runs", dlog.Context{
 		"workspace": string(r.ws), "path": path, "archive": archive, "tests": named, "unnamed_units": unnamed})
-	return path, nil
+	return body, nil
 }
 
 // excludeFromCommits adds name to the repository's info/exclude, once. The

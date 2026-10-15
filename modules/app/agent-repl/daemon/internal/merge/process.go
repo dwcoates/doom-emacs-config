@@ -903,12 +903,13 @@ func (r *run) promptFix(ctx context.Context, attempt int, suites []string, archi
 		return nil, err
 	}
 	// THE AGENT RUNS EXACTLY THE FAILING TESTS (owner ruling, 2026-10-12):
-	// they are read off the failing run's archive into the worktree before the
-	// brief that names the file is sent.
-	if _, err := r.writeFailingTests(ctx, archive); err != nil {
+	// they are read off the failing run's archive into the worktree, and into
+	// the brief itself, before the brief is sent.
+	failingTests, err := r.writeFailingTests(ctx, archive)
+	if err != nil {
 		return nil, err
 	}
-	text, err := r.fixBrief(attempt, suites, archive, tail, targetBranch)
+	text, err := r.fixBrief(attempt, suites, archive, tail, failingTests, targetBranch)
 	if err != nil {
 		return nil, err
 	}
@@ -930,7 +931,7 @@ func (r *run) promptFix(ctx context.Context, attempt int, suites []string, archi
 }
 
 // fixBrief composes one fixing attempt's brief.
-func (r *run) fixBrief(attempt int, suites []string, archive, tail, targetBranch string) (string, error) {
+func (r *run) fixBrief(attempt int, suites []string, archive, tail, failingTests, targetBranch string) (string, error) {
 	text, err := r.o.deps.Briefs(BriefTestFailureResolve, map[string]string{
 		"source_branch":      r.subject.branch,
 		"worktree_dir":       r.subject.dir,
@@ -943,6 +944,7 @@ func (r *run) fixBrief(attempt int, suites []string, archive, tail, targetBranch
 		"escalation_file":    EscalationFile,
 		"escalation_marker":  EscalationMarker,
 		"failing_tests_file": filepath.Join(r.subject.dir, FailingTestsFile),
+		"failing_tests":      failingTests,
 	})
 	if err != nil {
 		return "", fmt.Errorf("merge: composing the test-failure brief: %w", err)
@@ -998,7 +1000,13 @@ func (r *run) resumeFix(ctx context.Context, res *progressDoc, targetBranch stri
 	round := r.activeRound()
 	n := r.testsRound()
 	r.drawFixing(ctx, round, n, res.FixAttempt, res.FailingSuites)
-	text, err := r.fixBrief(res.FixAttempt, res.FailingSuites, res.FailingArchive, res.FailingTail, targetBranch)
+	// THE REATTACHED BRIEF CARRIES THE SAME FAILING TESTS: they are read off
+	// the same archive again, so the file and the brief agree after a restart.
+	failingTests, err := r.writeFailingTests(ctx, res.FailingArchive)
+	if err != nil {
+		return nil, err
+	}
+	text, err := r.fixBrief(res.FixAttempt, res.FailingSuites, res.FailingArchive, res.FailingTail, failingTests, targetBranch)
 	if err != nil {
 		return nil, err
 	}

@@ -317,7 +317,7 @@ func TestTheRebaseConflictBriefKeepsItsPlaceholderSet(t *testing.T) {
 
 func TestTheFixingAttemptBriefKeepsItsPlaceholderSet(t *testing.T) {
 	// Arrange.
-	want := []string{"source_branch", "worktree_dir", "target_branch", "failing_suites", "archive_path", "failure_tail", "attempt", "max_attempts", "escalation_file", "escalation_marker", "failing_tests_file"}
+	want := []string{"source_branch", "worktree_dir", "target_branch", "failing_suites", "archive_path", "failure_tail", "attempt", "max_attempts", "escalation_file", "escalation_marker", "failing_tests_file", "failing_tests"}
 
 	// Act.
 	got, err := Load(repoPromptsDir, "merge-test-failure-resolve")
@@ -389,10 +389,12 @@ func TestEveryBriefWordingPinAssertsThroughUnsaid(t *testing.T) {
 func TestTheFixingAttemptBriefPrescribesRunningOnlyTheFailingTestsUntilTheyPass(t *testing.T) {
 	// Arrange.
 	want := []string{
-		"RUN ONLY THE FAILING TESTS, AND KEEP FIXING UNTIL THEY PASS, BEFORE YOU END YOUR TURN",
+		"{{failing_tests}}",
+		"RUN ONLY THE FAILING TEST CASES, AND KEEP FIXING AND RERUNNING THEM UNTIL THEY PASS, BEFORE YOU END YOUR TURN",
 		"never the whole suite and never `bin/test-all.sh`",
-		"Repeat until every one of them passes",
-		"Only then commit and end your turn",
+		"Fix what fails, then rerun those same targeted cases. Repeat until every one of them passes.",
+		"Only then is the remediation resolved: commit and end your turn",
+		"The queue then runs the selected suites in full again",
 	}
 
 	// Act.

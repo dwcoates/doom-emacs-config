@@ -2,6 +2,7 @@ package merge
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -429,12 +430,28 @@ func TestWriteFailingTestsWritesTheFileAtTheWorktreesRoot(t *testing.T) {
 	archive := writeArchive(t, failedUnit("daemon:internal/merge#00", "daemon", "--- FAIL: TestA (0.01s)"))
 
 	// Act.
-	path, err := r.writeFailingTests(context.Background(), archive)
+	_, err := r.writeFailingTests(context.Background(), archive)
 
 	// Assert.
 	body, readErr := os.ReadFile(filepath.Join(h.sourceD, FailingTestsFile))
-	if err != nil || readErr != nil || path != filepath.Join(h.sourceD, FailingTestsFile) || !strings.Contains(string(body), "- TestA") {
-		t.Fatalf("path %q, err %v, read %v, body %q: want TestA written at the worktree's root", path, err, readErr, body)
+	if err != nil || readErr != nil || !strings.Contains(string(body), "- TestA") {
+		t.Fatalf("err %v, read %v, body %q: want TestA written at the worktree's root", err, readErr, body)
+	}
+}
+
+func TestWriteFailingTestsAnswersTheBodyItWrote(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	r := failingTestsRun(t, h)
+	archive := writeArchive(t, failedUnit("daemon:internal/merge#00", "daemon", "--- FAIL: TestA (0.01s)"))
+
+	// Act.
+	answered, err := r.writeFailingTests(context.Background(), archive)
+
+	// Assert.
+	written, readErr := os.ReadFile(filepath.Join(h.sourceD, FailingTestsFile))
+	if err != nil || readErr != nil || answered != string(written) {
+		t.Fatalf("err %v, read %v: answered %q, wrote %q, want the same body", err, readErr, answered, written)
 	}
 }
 
@@ -534,6 +551,86 @@ func TestAFixingAttemptsBriefNamesTheFailingTestsFile(t *testing.T) {
 		}
 	}
 	t.Fatal("no fixing brief named the failing tests file")
+}
+
+// fixingBriefValues answers the values the first fixing brief was spliced
+// with, failing the test when no fixing brief was composed.
+func fixingBriefValues(t *testing.T, h *harness) map[string]string {
+	t.Helper()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, values := range h.briefValues {
+		if _, ok := values["failing_tests"]; ok {
+			return values
+		}
+	}
+	t.Fatal("no fixing brief was composed")
+	return nil
+}
+
+func TestAFixingAttemptsBriefCarriesTheFailingTestCasesInline(t *testing.T) {
+	// Arrange: one gate failing in one named test, then a pass.
+	h := newHarness(t)
+	landing(h, 1)
+	h.runner.runs = []scriptedRun{{
+		Output: failedUnit("daemon:internal/merge#00", "daemon", "--- FAIL: TestInline (0.01s)") +
+			"[agent-repl-tests] ERROR: daemon failed after 4s with exit code 1\n",
+		Code: 1,
+	}}
+	h.gatePasses("daemon")
+
+	// Act.
+	admitted(t, h)
+
+	// Assert.
+	got := fixingBriefValues(t, h)["failing_tests"]
+	written, err := os.ReadFile(filepath.Join(h.sourceD, FailingTestsFile))
+	if err != nil || got != string(written) || !strings.Contains(got, "- TestInline") || !strings.Contains(got, "-run '^(TestInline)$'") {
+		t.Fatalf("err %v: brief carries %q, file holds %q, want the file's body naming TestInline and its targeted run", err, got, written)
+	}
+}
+
+func TestAResumedFixingAttemptsBriefCarriesTheFailingTestCasesInline(t *testing.T) {
+	// Arrange: a fixing turn no store knows, so the resume submits its brief.
+	h := newHarness(t)
+	interruptedAt(t, h, atFix(t))
+	landsAfterResume(h)
+
+	// Act.
+	resume(t, h)
+
+	// Assert.
+	if got := fixingBriefValues(t, h)["failing_tests"]; !strings.Contains(got, "- TestResumed") {
+		t.Fatalf("failing_tests = %q, want the resumed attempt's failing test named", got)
+	}
+}
+
+func TestAResumedFixingAttemptWithNoArchiveFailsLoudly(t *testing.T) {
+	// Arrange: a fixing record whose archive is gone.
+	h := newHarness(t)
+	gone := filepath.Join(t.TempDir(), "gone.log")
+	interruptedAt(t, h, func(d *progressDoc) {
+		atFix(t)(d)
+		d.FailingArchive = gone
+	})
+
+	// Act.
+	resume(t, h)
+
+	// Assert.
+	if facts := h.footer.last(); facts.State != StateFailed || !strings.Contains(facts.Detail, gone) {
+		t.Fatalf("facts = %+v, want a failure naming the missing archive", facts)
+	}
+	if rec, ok := h.recordFor("error", "daemon.merge.fault"); !ok || !strings.Contains(fmt.Sprint(rec.Context["summary"]), gone) {
+		t.Fatalf("record %+v (found %v), want the fault at ERROR naming the missing archive", rec, ok)
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, values := range h.briefValues {
+		if _, ok := values["failing_tests"]; ok {
+			t.Fatalf("a fixing brief was composed with no archive: %v", values)
+		}
+	}
 }
 
 func TestAFixingAttemptWritesTheFailingTestsBeforeItsBrief(t *testing.T) {

@@ -1,4 +1,4 @@
-<!-- used by: daemon internal/merge/process.go (run.fix); placeholders: {{source_branch}}, {{worktree_dir}}, {{target_branch}}, {{failing_suites}}, {{archive_path}}, {{failure_tail}}, {{attempt}}, {{max_attempts}}, {{escalation_file}}, {{escalation_marker}}, {{failing_tests_file}} -->
+<!-- used by: daemon internal/merge/process.go (run.fix); placeholders: {{source_branch}}, {{worktree_dir}}, {{target_branch}}, {{failing_suites}}, {{archive_path}}, {{failure_tail}}, {{attempt}}, {{max_attempts}}, {{escalation_file}}, {{escalation_marker}}, {{failing_tests_file}}, {{failing_tests}} -->
 The merge queue rebased {{source_branch}} onto {{target_branch}}'s tip in the worktree {{worktree_dir}}, and the repository's test suite FAILS on the rebased branch. Failing suites: {{failing_suites}}. {{target_branch}} has NOT moved: it moves only once the suite passes.
 
 Failing output (tail; the whole run is archived at {{archive_path}}):
@@ -8,10 +8,15 @@ Failing output (tail; the whole run is archived at {{archive_path}}):
 
 This is fixing attempt {{attempt}} of {{max_attempts}}. Fix it in {{worktree_dir}}: change the tests or the code so the suite passes, and COMMIT the fix to {{source_branch}} there. When your turn ends the queue rebases the branch onto {{target_branch}}'s tip and runs the selected suites again. If the last attempt still fails, the merge fails and the workspace is handed back to the user.
 
-RUN ONLY THE FAILING TESTS, AND KEEP FIXING UNTIL THEY PASS, BEFORE YOU END YOUR TURN. As the final stage of every fix:
-1. Run exactly the tests listed in {{failing_tests_file}}: it names every failing test, grouped by suite, with the targeted command that runs each group -- never the whole suite and never `bin/test-all.sh`. Where it says a unit's tests could not be named (a build, vet or typecheck failure, a crash, a timeout), read that unit's output in the archive and run the smallest invocation that reaches it. Do not commit that file; it is excluded from commits already.
-2. If any of them still fails, fix again and run them again. Repeat until every one of them passes.
-3. Only then commit and end your turn. The queue's own run of the selected suites (after its rebase) is what checks everything else; a turn that ends with a failing test it was asked to fix spends an attempt and a run of the selected suites on a known failure.
+The failing test cases, read off that run (also written to {{failing_tests_file}}):
+---
+{{failing_tests}}
+---
+
+RUN ONLY THE FAILING TEST CASES, AND KEEP FIXING AND RERUNNING THEM UNTIL THEY PASS, BEFORE YOU END YOUR TURN. Your remediation is a loop over exactly those cases:
+1. Run exactly the tests listed in {{failing_tests_file}}, the cases above: each group comes with the targeted command that runs only its failing cases -- never the whole suite and never `bin/test-all.sh`. Where it says a unit's tests could not be named (a build, vet or typecheck failure, a crash, a timeout), read that unit's output in the archive and run the smallest invocation that reaches it. Do not commit that file; it is excluded from commits already.
+2. Fix what fails, then rerun those same targeted cases. Repeat until every one of them passes.
+3. Only then is the remediation resolved: commit and end your turn. The queue then runs the selected suites in full again (after its rebase), which is what checks everything else; a turn that ends with a failing case it was asked to fix spends an attempt and a full run of the selected suites on a known failure.
 
 IF A FAILING TEST CANNOT BE RUN ON ITS OWN (its suite has no targeted invocation, or the test only fails inside the whole suite), do not stop, and do not weaken the test or the code to get around it:
 - Run the smallest invocation that does reach it (its package, its file, its suite) and keep fixing until it passes there, then commit and end your turn as above.
