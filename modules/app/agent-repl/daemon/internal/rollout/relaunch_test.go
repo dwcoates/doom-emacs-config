@@ -1243,6 +1243,43 @@ func TestALiveRefusalOfAnUnforcedStandDownDefersTheBounce(t *testing.T) {
 	}
 }
 
+// THE REFUSAL NAMES ITS WORK (2026-10-14, cpu-orphaned-test-processes): the
+// shim refused over "1 live item(s)" the daemon's ledger read as free, and the
+// record carried only the count, so which item they disagreed on was lost.
+func TestALiveRefusalRecordsTheWorkItNames(t *testing.T) {
+	// Arrange: a refusal over one background shell and no turn.
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	old := h.fleet.live[ws]
+	old.killAnswer = &shimv1.KillSessionResponse{
+		Result: &shimv1.KillSessionResponse_Failure{Failure: &shimv1.KillSessionFailure{
+			Cause: &shimv1.KillSessionFailure_Live{Live: &conversationv1.SessionLive{
+				LiveWork: []*conversationv1.DetachedWorkId{{Value: "toolu_shell"}},
+			}},
+			Detail: "the session has no turn in flight and 1 live item(s)",
+		}},
+	}
+
+	// Act
+	if _, err := h.c.BounceShim(context.Background(), ws, ReasonBuildStale, false, nil); err != nil {
+		t.Fatalf("BounceShim: %v", err)
+	}
+	h.registry.wait()
+
+	// Assert
+	rec, ok := dlog.FindRecord(records(h.log, opRelaunch), dlog.RecordQuery{
+		Level:   dlog.LevelInfo,
+		Message: "the shim refused the unforced stand-down: work is live in it. The replacement is never forced over it; it is deferred behind that work",
+	})
+	if !ok {
+		t.Fatalf("records = %+v, want the live refusal recorded", records(h.log, opRelaunch))
+	}
+	ids, _ := rec.Context["live_work_ids"].([]string)
+	if len(ids) != 1 || ids[0] != "toolu_shell" || rec.Context["turn_in_flight"] != false || rec.Context["turn_id"] != "" {
+		t.Fatalf("context = %+v, want the refused shell named and no turn", rec.Context)
+	}
+}
+
 func TestADeferredBounceRunsAtTheNextFreeness(t *testing.T) {
 	// Arrange: the shim refused once; its turn then ends and it accepts.
 	h := newHarness(t)

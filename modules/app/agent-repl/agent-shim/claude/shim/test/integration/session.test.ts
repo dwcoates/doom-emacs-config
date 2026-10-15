@@ -1239,6 +1239,31 @@ describe("KillSession", () => {
     agent.close();
   });
 
+  test("a live refusal is recorded at INFO, naming each live item and its kind", async () => {
+    // Arrange: a detached shell is live (2026-10-14: a refusal over "1 live
+    // item(s)" the daemon read as free, with no record of which item it was).
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const agent = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
+    await awaitAgentEntry(agent, (entry) => entryFrame(entry)?.result.case === "detachedWork");
+    agent.close();
+
+    // Act
+    await shim.clients.h1.killSession(create(shimv1.KillSessionRequestSchema, { force: false }));
+
+    // Assert
+    const refusal = await shim.log.record(
+      (record) => record.message === "refused KillSession because the session is live and force was not set",
+    );
+    expect(refusal.level).toBe("info");
+    const items = refusal.context.live_items as { task_type: string; tool_use_id: string }[];
+    expect(items.map((item) => item.task_type)).toEqual(["local_bash"]);
+    expect(items[0]?.tool_use_id).not.toBe("");
+  });
+
   test("force ends it, naming the stopped work", async () => {
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());

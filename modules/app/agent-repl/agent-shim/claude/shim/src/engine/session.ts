@@ -3467,6 +3467,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     return live.announceable().filter((entry) => taskKindOf(entry.taskType) !== "bash");
   }
 
+  /** The SHELLS this process's own table holds running: the announceable work the level leaves out. */
+  function tableShellEntries(): readonly LiveWorkEntry[] {
+    return live.announceable().filter((entry) => taskKindOf(entry.taskType) === "bash");
+  }
+
   /** The vendor process ended or was replaced: its work ends with it, and the level says so. */
   function endVendorProcessWork(why: string): void {
     live.clear(why);
@@ -6438,13 +6443,31 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // resolving only on the non-empty path is why the owner's fault outlived
       // a store that had been healthy for hours.
       pushes.resolveComponent(LIVE_WORK_COMPONENT, 0);
-      // THE MEMBERSHIP: the level's items, and the SHELLS the record holds
-      // open -- a shell's liveness is the record's until the sidecar writes
-      // its end. A record candidate that turns out not to be a shell is no
-      // claim about liveness, so it is described and dropped.
+      // THE MEMBERSHIP: the level's items, the shells this process's own
+      // table holds running, and the SHELLS the record holds open -- a
+      // shell's liveness is the record's until the sidecar writes its end. A
+      // record candidate that turns out not to be a shell is no claim about
+      // liveness, so it is described and dropped.
+      //
+      // THE TABLE'S SHELLS ARE OWED A DESCRIPTION like the level's items: the
+      // stand-down refusal counts them (killSession), so a re-announcement
+      // without them told an adopting daemon the workspace was free while
+      // the shim refused to stand down over a running shell (2026-10-14,
+      // cpu-orphaned-test-processes).
       const levelIds = live.workIds(levelEntries());
-      const inLevel = new Set(levelIds.map((id) => id.value));
-      const handles = [...levelIds, ...open.liveDetached.filter((id) => !inLevel.has(id.value))];
+      const tableShellIds = live.workIds(tableShellEntries());
+      const owed = [...levelIds, ...tableShellIds];
+      const inLevel = new Set(owed.map((id) => id.value));
+      const fromRecord = open.liveDetached.filter((id) => !inLevel.has(id.value));
+      const handles = [...owed, ...fromRecord];
+      LOGGER.info(
+        {
+          level_items: levelIds.map((id) => id.value),
+          table_shells: tableShellIds.map((id) => id.value),
+          record_only: fromRecord.map((id) => id.value),
+        },
+        "gathered the live membership to re-announce to a new watch",
+      );
       if (handles.length === 0) return [];
       // READ, NOT WATCH: the one-shot verb, so no watch token is minted for a
       // tail this description never stands.
@@ -6461,7 +6484,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           // ONLY A LEVEL ITEM IS OWED A DESCRIPTION: a record candidate the
           // book cannot describe is not known to be a shell, so it is not live.
           if (inLevel.has(handle.value)) undescribed.push(handle);
-          else LOGGER.debug({ work: handle.value }, "a record candidate the book cannot describe is not a live shell; it is not re-announced");
+          else LOGGER.info({ work: handle.value }, "a record candidate the book cannot describe is not a live shell; it is not re-announced");
         },
         await bashStartsFor(bashUnitsWithoutCommand(book, handles)),
       );
@@ -6663,8 +6686,19 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     const served = servedOpenTurn();
     const busy = served !== undefined || announceable.length > 0;
     if (busy && !request.force) {
-      LOGGER.debug(
-        { turn_in_flight: served?.id.value ?? "", live_work: announceable.length },
+      // THE REFUSAL NAMES WHAT IS LIVE, each item's kind included: a refusal
+      // the daemon's ledger reads as free is the two disagreeing, and this
+      // record is the shim's half of that evidence.
+      LOGGER.info(
+        {
+          turn_in_flight: served?.id.value ?? "",
+          live_work: announceable.length,
+          live_items: announceable.map((entry) => ({
+            task_id: entry.taskId,
+            tool_use_id: entry.toolUseId ?? "",
+            task_type: entry.taskType,
+          })),
+        },
         "refused KillSession because the session is live and force was not set",
       );
       return killSessionRefused(

@@ -130,7 +130,7 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 	// for the new shim rather than started on the one about to be stood down.
 	// Deciding it here, under the delivery lock, is what makes the race
 	// "a queued prompt starts a turn between is-free and bounce" impossible.
-	if q.checkRegistryLocked(d, log) {
+	if q.checkRegistryLocked(d, edgeWork, log) {
 		log.Info(opTurnEnded, "the turn ended into a bounce; what is queued waits for the new shim", nil)
 		return
 	}
@@ -456,8 +456,9 @@ func (q *queue) OnLeaseChanged(ws ids.WorkspaceID) {
 	// A LEASE CHANGE IS A FREENESS EDGE for a registered bounce: a merge's
 	// release frees the workspace a stale-build bounce was deferred behind
 	// (rollout shimBounce), and nothing else would take it. Taken as a turn's
-	// end takes one, deferring to a shim call in flight.
-	defer q.checkRegistryLocked(d, log)
+	// end takes one, deferring to a shim call in flight. It is a LEASE edge:
+	// it never re-judges a replacement deferred behind live work (edgeSet).
+	defer q.checkRegistryLocked(d, edgeLease, log)
 
 	standing, err := q.deps.DB.HeldPrompts(ctx, ws)
 	if err != nil {
