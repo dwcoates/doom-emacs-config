@@ -9,6 +9,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/workspace"
 )
@@ -868,5 +869,90 @@ func TestWhichDaemonStreamsSubscribeToTheLoudFaults(t *testing.T) {
 				t.Fatalf("loud-fault subscribers = %d, want %d", got, tc.want)
 			}
 		})
+	}
+}
+
+// perWorkspaceWatch opens one per-workspace standing stream and answers the
+// error its open or first receive ended on.
+type perWorkspaceWatch struct {
+	rpc  string
+	open func(h *harness, ctx context.Context, ws *workspacev1.WorkspaceRef) error
+}
+
+// firstStreamErr is the error a stream open ends on: the dial's own, else the
+// first receive's.
+func firstStreamErr[T any](stream *connect.ServerStreamForClient[T], err error) error {
+	if err != nil {
+		return err
+	}
+	if stream.Receive() {
+		return nil
+	}
+	return stream.Err()
+}
+
+// perWorkspaceWatches is every standing stream a workspace ref opens.
+func perWorkspaceWatches() []perWorkspaceWatch {
+	return []perWorkspaceWatch{
+		{"WatchFooter", func(h *harness, ctx context.Context, ws *workspacev1.WorkspaceRef) error {
+			return firstStreamErr(h.Client.WatchFooter(ctx, connect.NewRequest(&agentreplv1.WatchFooterRequest{Workspace: ws})))
+		}},
+		{"WatchTopbar", func(h *harness, ctx context.Context, ws *workspacev1.WorkspaceRef) error {
+			return firstStreamErr(h.Client.WatchTopbar(ctx, connect.NewRequest(&agentreplv1.WatchTopbarRequest{Workspace: ws})))
+		}},
+		{"WatchHostWorkspace", func(h *harness, ctx context.Context, ws *workspacev1.WorkspaceRef) error {
+			return firstStreamErr(h.Client.WatchHostWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{Workspace: ws})))
+		}},
+		{"WatchWebWorkspace", func(h *harness, ctx context.Context, ws *workspacev1.WorkspaceRef) error {
+			return firstStreamErr(h.Client.WatchWebWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchWebWorkspaceRequest{Workspace: ws, WebappBuild: "webapp-test"})))
+		}},
+		{"WatchLoginTerminal", func(h *harness, ctx context.Context, ws *workspacev1.WorkspaceRef) error {
+			return firstStreamErr(h.Client.WatchLoginTerminal(ctx, connect.NewRequest(&agentreplv1.WatchLoginTerminalRequest{Workspace: ws})))
+		}},
+	}
+}
+
+// TestAPerWorkspaceWatchOnARefTheRegistryRefusesIsTransportClosed pins every
+// per-workspace stream's refused open: transport-closed, recorded once at INFO
+// naming the rpc and the cause.
+func TestAPerWorkspaceWatchOnARefTheRegistryRefusesIsTransportClosed(t *testing.T) {
+	refs := []struct {
+		name      string
+		ref       *workspacev1.WorkspaceRef
+		wantCause string
+	}{
+		{name: "an unknown id", ref: &workspacev1.WorkspaceRef{Id: "ws-nope"}, wantCause: workspace.ArmUnknownWorkspace},
+		{name: "a mismatched dir", ref: &workspacev1.WorkspaceRef{Id: string(testWorkspaceID), Dir: testWorkspaceDir + "-mismatched"}, wantCause: workspace.ArmWorkspaceRefMismatch},
+	}
+	for _, watch := range perWorkspaceWatches() {
+		for _, tc := range refs {
+			t.Run(watch.rpc+" on "+tc.name, func(t *testing.T) {
+				// Arrange.
+				log := &recordingLogger{}
+				h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+
+				// Act.
+				err := watch.open(h, ctx, tc.ref)
+
+				// Assert.
+				if err == nil {
+					t.Fatalf("%s(%s) opened, want a transport-level refusal", watch.rpc, tc.name)
+				}
+				var closed []map[string]any
+				for _, rec := range log.at("INFO") {
+					if rec.Operation == "daemon.refusal.transport_closed" {
+						closed = append(closed, rec.Context)
+					}
+				}
+				if len(closed) != 1 || closed[0]["rpc"] != watch.rpc || closed[0]["cause"] != tc.wantCause {
+					t.Fatalf("transport-closed records = %v, want one naming rpc %s and cause %s", closed, watch.rpc, tc.wantCause)
+				}
+				for _, rec := range log.at("WARN") {
+					t.Fatalf("a refused stream open was warned: %+v", rec)
+				}
+			})
+		}
 	}
 }
