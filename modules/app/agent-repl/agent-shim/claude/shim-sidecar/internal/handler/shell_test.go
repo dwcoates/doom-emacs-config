@@ -57,6 +57,22 @@ func TestSpoolBytesBecomeTheRunsTail(t *testing.T) {
 	}
 }
 
+func TestATruncatedSpoolRestartsTheTailWithItsNewLife(t *testing.T) {
+	// Arrange: the run's first life was read whole.
+	h := NewShellOutputHandler(testLogger(t))
+	ctx := spoolContext("/t/b1.output", "bbkq1", "toolu_run1")
+	h.Handle(spoolFrames("a long first life of this spool\nand a second line too\n", 0), ctx)
+
+	// Act: the file was truncated in place, so the reader re-reads it from 0.
+	entries := h.Handle(spoolFrames("a shorter second life\n", 0), ctx)
+
+	// Assert: the window restarts with the file; the tail is the new life alone.
+	got := entryByKey(t, entries, convert.BashTailKey("toolu_run1")).GetAgentUpdate().GetBash().GetFrame().GetTail()
+	if got.GetText() != "a shorter second life\n" || got.GetBytesOmitted() != 0 || got.GetLinesOmitted() != 0 {
+		t.Fatalf("tail = {%q, %d, %d}, want only the new life and nothing omitted", got.GetText(), got.GetBytesOmitted(), got.GetLinesOmitted())
+	}
+}
+
 func TestALaterBatchSupersedesTheTailWithTheWholeWindow(t *testing.T) {
 	// Arrange. The tail is a snapshot of the run, not of the batch: the second
 	// batch's row states everything drawn so far.
