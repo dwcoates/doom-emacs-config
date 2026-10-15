@@ -122,14 +122,21 @@ func blockForever() {
 }
 
 // testSurfaces is the dlog.Surfaces every test hands the supervisor: one
-// capturing logger for every sink.
+// capturing logger for every sink, unless global is set, in which case the
+// run log is a sink of its own so a test can tell the two apart.
 type testSurfaces struct {
-	log *dlog.TestLogger
+	log    *dlog.TestLogger
+	global *dlog.TestLogger
 }
 
 func newTestSurfaces() testSurfaces { return testSurfaces{log: dlog.NewTestLogger()} }
 
-func (s testSurfaces) Global() dlog.Logger { return s.log }
+func (s testSurfaces) Global() dlog.Logger {
+	if s.global != nil {
+		return s.global
+	}
+	return s.log
+}
 
 func (s testSurfaces) Workspace(string) (dlog.Logger, error) { return s.log, nil }
 

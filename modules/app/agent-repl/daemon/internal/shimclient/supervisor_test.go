@@ -608,6 +608,39 @@ func TestSpawnStopsTheShimWhenBringUpIsCanceled(t *testing.T) {
 	waitForExit(t, record.PID)
 }
 
+func TestAnAbandonedBringUpIsRecordedOnTheWorkspacesLogNotTheRunLog(t *testing.T) {
+	// Arrange: the run log and the workspace's log are separate sinks, and
+	// nothing listens, so bring-up keeps dialing until it is canceled.
+	dir := shortDir(t)
+	spec, sink := newTestSpec(t, dir, filepath.Join(dir, "never.sock"), helperIdle)
+	surfaces := testSurfaces{log: dlog.NewTestLogger(), global: dlog.NewTestLogger()}
+	sup, err := NewSupervisor(surfaces, testBackoff(), WithKillGrace(50*time.Millisecond))
+	if err != nil {
+		t.Fatalf("NewSupervisor() error = %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := sup.Spawn(ctx, spec)
+		done <- err
+	}()
+
+	// Act.
+	record := sink.record(t)
+	cancel()
+	<-done
+	waitForExit(t, record.PID)
+
+	// Assert.
+	query := dlog.RecordQuery{Level: "warn", Operation: "daemon.shimclient.spawn"}
+	if _, ok := dlog.FindRecord(surfaces.log.Records(), query); !ok {
+		t.Fatalf("workspace records = %+v, want the abandoned bring-up's WARN", surfaces.log.Records())
+	}
+	if rec, ok := dlog.FindRecord(surfaces.global.Records(), query); ok {
+		t.Fatalf("the run log carried the workspace-bound WARN: %+v", rec)
+	}
+}
+
 // waitForExit blocks until the pid is gone.
 func waitForExit(t *testing.T, pid int) {
 	t.Helper()
