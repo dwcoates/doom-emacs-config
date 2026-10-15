@@ -83,7 +83,7 @@ func (r *run) concludedTerminal(ctx context.Context, log dlog.Logger, op string,
 		r.head(landedHead{success: &frontendv1.FeedMergeSuccess{EndedAtMs: endedMS, Commit: out.landed}, version: headVersion(out.version)})
 		r.concluded(MergeFacts{State: StateMerged})
 		r.stampClosed(ctx, log, op, landedCount(out))
-		r.o.ended(ctx, r.ws, DetachedOutcome{Kind: DetachedLanded, Summary: fmt.Sprintf("it landed as commit %s", out.landed), Deploy: r.landingDeploy(ctx, out)})
+		r.o.ended(ctx, r.ws, DetachedOutcome{Kind: DetachedLanded, Summary: fmt.Sprintf("it landed as commit %s", out.landed), MergedInto: out.target, Deploy: r.landingDeploy(ctx, out)})
 		fields := dlog.Context{
 			"workspace": string(r.ws), "lease": string(r.lease.ID), "commit": out.landed, "commits": len(out.commits),
 			"source": r.source.Kind.String(), "closes": string(r.subject.closes)}
@@ -130,9 +130,9 @@ func (o *orchestrator) ended(ctx context.Context, ws ids.WorkspaceID, out Detach
 
 // raiseResolved raises the resolved desktop banner of a merge's outcome on ws.
 // It is the ONE place a resolved banner is raised from, so every end words it
-// the same way.
+// the same way (DetachedOutcome.bannerLine).
 func (o *orchestrator) raiseResolved(ws ids.WorkspaceID, out DetachedOutcome) {
-	o.deps.Banners.Resolved(ws, out.Kind.mergeEnd(), out.Summary)
+	o.deps.Banners.Resolved(ws, out.Kind.mergeEnd(), out.bannerLine())
 }
 
 // handBack reports how a merge ended to the workspace whose feed carries the

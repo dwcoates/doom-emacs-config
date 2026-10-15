@@ -3,6 +3,7 @@ package merge
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"agent-repld/internal/dlog"
@@ -369,8 +370,8 @@ func TestALandedVersionRoundTripsThroughTheRecord(t *testing.T) {
 		name string
 		in   outcome
 	}{
-		{name: "with a version", in: outcome{landed: "abc", version: &landedVersion{tag: "0.5.0", part: semver.Minor}}},
-		{name: "without one", in: outcome{landed: "abc"}},
+		{name: "with a version", in: outcome{landed: "abc", target: "master", version: &landedVersion{tag: "0.5.0", part: semver.Minor}}},
+		{name: "without one", in: outcome{landed: "abc", target: "master"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -378,11 +379,24 @@ func TestALandedVersionRoundTripsThroughTheRecord(t *testing.T) {
 			got, err := toOutcomeDoc(tt.in).outcome()
 
 			// Assert
-			if err != nil || got.landed != tt.in.landed || (got.version == nil) != (tt.in.version == nil) ||
+			if err != nil || got.landed != tt.in.landed || got.target != tt.in.target || (got.version == nil) != (tt.in.version == nil) ||
 				(got.version != nil && *got.version != *tt.in.version) {
 				t.Fatalf("outcome = %+v, %v; want %+v", got, err, tt.in)
 			}
 		})
+	}
+}
+
+func TestARecordedLandingThatNamesNoTargetIsRefused(t *testing.T) {
+	// Arrange: a landing recorded before the record carried its target.
+	doc := &outcomeDoc{Landed: "abc"}
+
+	// Act
+	got, err := doc.outcome()
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "names no target branch") || got.landed != "" {
+		t.Fatalf("outcome = %+v, %v; want it refused for naming no target branch", got, err)
 	}
 }
 

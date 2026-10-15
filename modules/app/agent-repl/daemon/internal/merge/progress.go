@@ -181,7 +181,9 @@ type commitDoc struct {
 
 // outcomeDoc is the durable outcome of a method that moved its target.
 type outcomeDoc struct {
-	Landed    string      `json:"landed"`
+	Landed string `json:"landed"`
+	// Target is the branch the landing moved.
+	Target    string      `json:"target"`
 	Commits   []commitDoc `json:"commits,omitempty"`
 	AlreadyOn string      `json:"already_on,omitempty"`
 	// Version is the version tag the landing created, absent when it created
@@ -214,20 +216,24 @@ func fromCommitDocs(docs []commitDoc) []gitclient.Commit {
 
 // toOutcomeDoc and outcome carry a landing through the record.
 func toOutcomeDoc(out outcome) *outcomeDoc {
-	return &outcomeDoc{Landed: out.landed, Commits: toCommitDocs(out.commits), AlreadyOn: out.alreadyOn, Version: toVersionDoc(out.version)}
+	return &outcomeDoc{Landed: out.landed, Target: out.target, Commits: toCommitDocs(out.commits), AlreadyOn: out.alreadyOn, Version: toVersionDoc(out.version)}
 }
 
-// outcome reads the landing back. A recorded version that does not parse was
-// not written by toOutcomeDoc, and is refused rather than dropped.
+// outcome reads the landing back. A recorded version that does not parse, or a
+// landing that names no target, was not written by toOutcomeDoc, and is
+// refused rather than dropped.
 func (d *outcomeDoc) outcome() (outcome, error) {
 	if d == nil {
 		return outcome{}, nil
+	}
+	if d.Target == "" {
+		return outcome{}, fmt.Errorf("merge: the recorded landing at %s names no target branch", d.Landed)
 	}
 	version, err := d.Version.landed()
 	if err != nil {
 		return outcome{}, fmt.Errorf("merge: reading the recorded landing's version: %w", err)
 	}
-	return outcome{landed: d.Landed, commits: fromCommitDocs(d.Commits), alreadyOn: d.AlreadyOn, version: version}, nil
+	return outcome{landed: d.Landed, target: d.Target, commits: fromCommitDocs(d.Commits), alreadyOn: d.AlreadyOn, version: version}, nil
 }
 
 // subject and toSubjectDoc carry the subject through the record.

@@ -334,6 +334,10 @@ type DetachedOutcome struct {
 	Kind    DetachedOutcomeKind
 	Summary string
 	Branch  string
+	// MergedInto is the branch a landing merged the source into, empty for
+	// every end that merged nothing (a branch already on its target among
+	// them). The resolved banner says it in place of Summary.
+	MergedInto string
 	// Requested marks an abandonment somebody asked for (AbandonCause's
 	// releases): the requester's roster is told the merge ended, and its
 	// conversation is not handed the end back, since nothing failed.
@@ -391,6 +395,15 @@ func (k DetachedOutcomeKind) mergeEnd() desktopnotify.MergeEnd {
 		return desktopnotify.MergeAbandoned
 	}
 	panic(fmt.Sprintf("merge: no banner end for %s", k))
+}
+
+// bannerLine is the outcome's line on its resolved desktop banner: where a
+// landing merged the source, and Summary for every other end.
+func (o DetachedOutcome) bannerLine() string {
+	if o.MergedInto != "" {
+		return "Merged into " + o.MergedInto
+	}
+	return o.Summary
 }
 
 // String names the kind for the log record.
