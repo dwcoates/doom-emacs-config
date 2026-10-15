@@ -89,6 +89,10 @@ const (
 	testrunSuite = "testrun"
 	// worktreesLibHarness greps every .claude shell script.
 	worktreesLibHarness = "worktrees-lib-harness"
+	// repoScans reads every system's go.mod, Vitest imports and integration
+	// sources, and checks this selection against them (daemon/reposcans): a
+	// change to any system can move its verdict.
+	repoScans = "repo-scans"
 )
 
 // suiteRules is the mapping, most specific first: the FIRST rule that matches a
@@ -108,29 +112,31 @@ var suiteRules = []suiteRule{
 	// never touches them.
 	{Kind: matchSubtree, Path: moduleRoot + "e2e/sandbox/", Suites: []string{"e2e-emacs"}},
 	// Both cross-system suites live in e2e/ and share its harness.
-	{Kind: matchSubtree, Path: moduleRoot + "e2e/", Suites: []string{"e2e", "e2e-emacs"}},
+	{Kind: matchSubtree, Path: moduleRoot + "e2e/", Suites: []string{"e2e", "e2e-emacs", repoScans}},
 
 	// ONE SYSTEM, ITS OWN SUITES, PLUS THE END-TO-END SUITES THAT RUN IT.
 	// Every world of both end-to-end suites runs the store, the sidecar, the
 	// daemon and its shims for real, and the Emacs layer draws the built
 	// webapp, so each system selects both. The daemon suite carries the
 	// daemon's integration tests (daemon/integration) with it.
-	{Kind: matchSubtree, Path: moduleRoot + "webapp/", Suites: []string{"webapp", "build-frontend-harness", "e2e", "e2e-emacs"}},
-	{Kind: matchSubtree, Path: moduleRoot + "daemon/", Suites: []string{"daemon", "e2e", "e2e-emacs"}},
+	{Kind: matchSubtree, Path: moduleRoot + "webapp/", Suites: []string{"webapp", "build-frontend-harness", "e2e", "e2e-emacs", repoScans}},
+	// The whole-module scans are their own suite; nothing else reads them.
+	{Kind: matchSubtree, Path: moduleRoot + "daemon/reposcans/", Suites: []string{repoScans}},
+	{Kind: matchSubtree, Path: moduleRoot + "daemon/", Suites: []string{"daemon", "e2e", "e2e-emacs", repoScans}},
 	// The sidecar's mocked vendor IS the shim's fake mode, built from this tree.
-	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/claude/shim/", Suites: []string{"shim", "sidecar", "e2e", "e2e-emacs"}},
-	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/claude/shim-sidecar/", Suites: []string{"sidecar", "e2e", "e2e-emacs"}},
-	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/shim-store/", Suites: []string{"store", "e2e", "e2e-emacs"}},
+	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/claude/shim/", Suites: []string{"shim", "sidecar", "e2e", "e2e-emacs", repoScans}},
+	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/claude/shim-sidecar/", Suites: []string{"sidecar", "e2e", "e2e-emacs", repoScans}},
+	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/shim-store/", Suites: []string{"store", "e2e", "e2e-emacs", repoScans}},
 	// The shim's integration files, and the sidecar's mocked vendor, spawn the
 	// real lock helper.
-	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/shim-lock/", Suites: []string{"lock", "shim", "sidecar", "e2e", "e2e-emacs"}},
+	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/shim-lock/", Suites: []string{"lock", "shim", "sidecar", "e2e", "e2e-emacs", repoScans}},
 
 	// SHARED BY SEVERAL SYSTEMS: their consumers, plus the end-to-end suites.
 	// The logging module's Go half is replaced into the daemon, the store, the
 	// sidecar and the lock helper; its TS half is imported by the shim and the
 	// webapp (whose build harness builds the webapp).
 	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/logging/", Suites: []string{
-		"logging", "logging-density", "daemon", "store", "sidecar", "lock", "shim", "webapp", "build-frontend-harness", "e2e", "e2e-emacs"}},
+		"logging", "logging-density", "daemon", "store", "sidecar", "lock", "shim", "webapp", "build-frontend-harness", "e2e", "e2e-emacs", repoScans}},
 	// The wire contract every producer and consumer is generated from, and the
 	// Go helpers beside it: every system and suite reads it, so every suite
 	// runs.

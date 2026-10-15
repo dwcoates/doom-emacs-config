@@ -1119,7 +1119,9 @@ like an improvement still needs that conversation. Code:
     - `e2e/`: `e2e` and `e2e-emacs`, and `e2e/sandbox/` only `e2e-emacs`;
   - two tests keep the map honest: every local module a Go suite's `go.mod`
     replaces, and every tree a Vitest suite imports outside itself, must select
-    that suite (`daemon/internal/merge/suiteselect_test.go`);
+    that suite. They and the mock-rule source scan are the `repo-scans` suite
+    (`daemon/reposcans`, its own module so no system's reuse key covers the
+    other systems' trees), which a change to any system selects;
   - the runner itself (`testrun/`, `bin/test-all.sh` and the two report
     scripts it delegates to) runs every suite;
   - the briefs (`prompts/`) run `daemon`, `e2e` and `e2e-emacs`: the daemon

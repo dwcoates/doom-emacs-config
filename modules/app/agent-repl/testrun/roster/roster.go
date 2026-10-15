@@ -204,13 +204,6 @@ var Suites = []Suite{
 			"daemon/", "prompts/", "proto/vocab/",
 			// The harness's session-serving scan walks the e2e tree.
 			"e2e/",
-			// internal/merge's selection tests read every Go suite's go.mod,
-			// every Vitest suite's sources, and every system's integration
-			// sources (suiteselect_test.go).
-			"agent-shim/claude/shim-sidecar/go.mod", "agent-shim/shim-store/go.mod", "agent-shim/shim-lock/go.mod",
-			"agent-shim/logging/go/go.mod", "proto/helpers/go/go.mod", "e2e/go.mod",
-			"webapp/src/", "webapp/test/", "agent-shim/claude/shim/src/", "agent-shim/claude/shim/test/",
-			"agent-shim/claude/shim-sidecar/integration/", "agent-shim/shim-store/integration/",
 			// The command-file tests run the emitter script.
 			"skills/emit-workspace-commands.sh",
 			// gitclient pins the markers the merge queue's hook spells.
@@ -234,6 +227,11 @@ var Suites = []Suite{
 	{Name: "lock", Kind: GoModule, Path: "agent-shim/shim-lock", Reuse: &Reuse{}},
 	{Name: "logging", Kind: GoModule, Path: "agent-shim/logging/go", Reuse: &Reuse{Inputs: []string{"proto/vocab/"}}},
 	{Name: "protohelpers", Kind: GoModule, Path: "proto/helpers/go"},
+	// The tests that read the whole module rather than one system's tree:
+	// the merge gate's selection checked against every suite's real
+	// dependencies, and the mock-rule source scan. Their own module, so no
+	// system's reuse key covers the other systems' trees; they always run.
+	{Name: "repo-scans", Kind: GoModule, Path: "daemon/reposcans"},
 	{Name: "webapp", Kind: Vitest, Path: "webapp", IntegrationConfig: "vitest.integration.config.ts"},
 	// The shim's integration files spawn its bundle and its lock helper
 	// (dist/main.js, dist/shim-lock): `pretest:integration` builds both, as
