@@ -17,6 +17,7 @@ the log records that show it, so the failures can be fixed at their source.
 | 6 | 2026-10-15 | `tier-audit-e2e-step-a` (tip `75e781c362`, e2e audit report plus lower-tier tests) | `tier-audit-e2e-step-a-merge` | LANDED (`f330c112a4`), deployed |
 | 7 | 2026-10-15 | `test-tier-audit-integration-step3` (tip `6ff96ad124`, shim-lock stand-in plus removal lists) | `tier-step3-shim-lock` | LANDED (`ec6fbaa1ce`), deployed |
 | 8 | 2026-10-15 | `tier-audit-e2e-step-c` (tip `32d6f55b9e`, instruction: rebase onto master keeping only the two step-(c) commits) | `tier-audit-e2e-step-c-merge` | FAILED: the e2e-emacs gate hit host file-table exhaustion from Docker's VM, see entry 8 |
+| 9 | 2026-10-15 | `sandbox-no-host-mounts` (tip `a54186877d`, the structural fix for entry 8, at the FRONT) | `sandbox-no-host-mounts-merge` | requested, pending; the queue is paused for the Go cache |
 
 ## 1. `test-tier-rule` (landed)
 
@@ -63,8 +64,8 @@ the log records that show it, so the failures can be fixed at their source.
 - Measured 2026-10-15 01:08: `kern.num_files` 59,871 of `kern.maxfiles` 65,536. Docker's VM process (`com.apple.Virtualization.VirtualMachine`, pid 24424, up about 53 min) holds 51,851 of them.
   - About 45,500 of those are files inside agent-repl checkouts, about 4,500 per checkout across 10 checkouts (measured by the merge workspace `tier-audit-e2e-step-c-merge`).
 - Cause: every e2e-emacs run bind-mounts its live checkout and rsyncs it inside the container, and Docker's file sharing never releases the host files it served. Each run permanently adds about 4,500 descriptors, so the table fills after about a dozen runs. Every e2e-emacs gate on the host fails from then on.
-- Immediate relief needs the owner: restarting Docker Desktop releases the descriptors. Agents may not cycle Docker.
-- Structural fix, in progress in `test-tier-audit-e2e`: stream the staged allowlist into the container through the Docker API (a tar over `docker run -i`, or `docker cp`), so the VM never opens host files and the leak is impossible. A test pins that no checkout path is bind-mounted.
+- Immediate relief needs the owner: restarting Docker Desktop releases the descriptors. Agents may not cycle Docker. Docker's VM had in fact restarted by about 01:40 (new pid), and the table fell back to about 7,800.
+- Structural fix (entry 9, by `test-tier-audit-e2e`): no host path is mounted at all. `e2e-sandbox.sh` lists the allowlist host-side and streams it as one tar on `docker run -i` stdin; the entrypoint refuses a mounted checkout; artifacts leave through a VM-side volume and `docker cp`. Verified: the VM held 49 descriptors before and after each of three sandbox runs, staging 4,531 files. Pinned by `TestSandboxRunStreamsTheWorkingCopyAndMountsNoHostPath` and an in-container check rejecting host-shared file systems. Earlier plan: stream the staged allowlist into the container through the Docker API (a tar over `docker run -i`, or `docker cp`), so the VM never opens host files and the leak is impossible. A test pins that no checkout path is bind-mounted.
 - The merge workspace was left open at `~/.config/doom-worktrees/tier-audit-e2e-step-c-merge`. Step (c) is re-requested unchanged after the fix lands.
 
 ## Host incident, 2026-10-15 ~01:30: the shared Go build cache is corrupted, so the queue is PAUSED
