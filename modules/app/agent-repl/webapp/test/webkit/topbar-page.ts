@@ -7,7 +7,7 @@
  */
 import { create } from "@bufbuild/protobuf";
 import { TopbarPersistentWifiSchema, TopbarViewSchema } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
-import { installPageLogger } from "./page-logger";
+import { ForwardingLogger, bindLogContext, setLogger } from "../../src/log.js";
 import type { TopbarContext } from "../../src/topbar/context.js";
 import { drawTopbarPersistentWifi } from "../../src/topbar/persistent-wifi.js";
 import { mountRevealLayer } from "../../src/topbar/reveal.js";
@@ -69,7 +69,18 @@ function host(): HTMLElement {
  * read, and the forwarding sink accepts and drops.
  */
 const written: string[] = [];
-installPageLogger("topbar", { written });
+setLogger(
+  new ForwardingLogger(
+    () => Promise.resolve("accepted"),
+    (level, line) => {
+      const { operation } = JSON.parse(line) as { operation: string };
+      written.push(`${level} ${operation}`);
+    },
+    {},
+    "debug",
+  ),
+);
+bindLogContext({ connection_id: "webkit-topbar-page" });
 
 /** The context every drawn cell is handed; nothing here clicks, so no rpc is scripted. */
 function topbarContext(): TopbarContext {

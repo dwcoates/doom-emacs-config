@@ -14,7 +14,7 @@
  * target is resized on every animation frame, so it reads the layout the
  * feed's own corrections left — the frame the reader sees.
  */
-import { installPageLogger } from "./page-logger";
+import { ForwardingLogger, bindLogContext, setLogger } from "../../src/log.js";
 import { TailFollow, feedAnchorRows, observeScrollBox, revealGeometry } from "../../src/scroll.js";
 import { latestEntry } from "../../src/feed/feed.js";
 import { MERGE_BUBBLE_ATTRIBUTE } from "../../src/feed/merge-bubble.js";
@@ -43,7 +43,8 @@ declare global {
   }
 }
 
-installPageLogger("pinned-tail", { level: "info" });
+setLogger(new ForwardingLogger(() => Promise.resolve("accepted"), () => undefined, {}, "info"));
+bindLogContext({ connection_id: "webkit-pinned-tail-page" });
 
 document.body.innerHTML = `
   <div id="main-col" style="height:100vh">
