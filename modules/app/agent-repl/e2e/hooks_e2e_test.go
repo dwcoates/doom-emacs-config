@@ -121,12 +121,34 @@ func awaitHookCard(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, what st
 // feed drew none — which, per bubbles.go's drawHook, is the CORRECT outcome
 // for a succeeded or a cancelled hook, not a gap in this test.
 func hookRow(rows []*frontendv1.FeedRow) *frontendv1.FeedHook {
-	for _, row := range rows {
-		if hook := row.GetActivity().GetHook(); hook != nil {
-			return hook
-		}
+	if hooks := hookRows(rows); len(hooks) > 0 {
+		return hooks[0]
 	}
 	return nil
+}
+
+// hookRows answers every FeedHook card in a feed snapshot, in feed order.
+func hookRows(rows []*frontendv1.FeedRow) []*frontendv1.FeedHook {
+	var hooks []*frontendv1.FeedHook
+	for _, row := range rows {
+		if hook := row.GetActivity().GetHook(); hook != nil {
+			hooks = append(hooks, hook)
+		}
+	}
+	return hooks
+}
+
+// assertOneHookCard fails unless a feed snapshot holds exactly one hook card.
+//
+// ONE FIRING, ONE ROW, ACROSS BOTH PLANES. The shim's stream and the sidecar's
+// transcript each carry the firing, and they must key it as one unit; two
+// cards for one firing is the two planes disagreeing, which no single
+// system's own suite can see.
+func assertOneHookCard(t *testing.T, rows []*frontendv1.FeedRow) {
+	t.Helper()
+	if got := hookRows(rows); len(got) != 1 {
+		t.Fatalf("hook cards = %d (%v), want exactly one for the one firing", len(got), got)
+	}
 }
 
 // TestHookSucceeded is #77 (golden hook-succeeded): the fake SDK's
@@ -204,6 +226,7 @@ func TestHookBlocked(t *testing.T) {
 		t.Fatalf("turn ended = %v, want a plain conclusion (a blocked tool never stops the turn)", ended)
 	}
 	h := awaitHookCard(t, w, ws, "the blocked hook's card")
+	assertOneHookCard(t, openFeedPage(t, w, ws))
 	blocked := h.GetBlocked()
 	if blocked == nil {
 		t.Fatalf("hook card = %v, want the blocked outcome arm", h)
@@ -237,6 +260,7 @@ func TestHookFailed(t *testing.T) {
 		t.Fatalf("turn ended = %v, want a plain conclusion (a failed hook blocks nothing)", ended)
 	}
 	h := awaitHookCard(t, w, ws, "the failed hook's card")
+	assertOneHookCard(t, openFeedPage(t, w, ws))
 	failed := h.GetFailed()
 	if failed == nil {
 		t.Fatalf("hook card = %v, want the failed outcome arm", h)

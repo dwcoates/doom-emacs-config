@@ -69,3 +69,27 @@ func TestTurnEndedMatchIsShared(t *testing.T) {
 		t.Fatalf("hand-rolled turn-ended matches in %v; call endsTurn(turn) instead", offenders)
 	}
 }
+
+// TestHookRowsAnswersEveryHookCardInFeedOrder pins the one hook-card scan the
+// hook tests' single-card and one-per-firing checks go through.
+func TestHookRowsAnswersEveryHookCardInFeedOrder(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	hookCard := func(name string) *frontendv1.FeedRow {
+		return &frontendv1.FeedRow{Row: &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{
+			Unit: &frontendv1.FeedTurnActivity_Hook{Hook: &frontendv1.FeedHook{Headline: &frontendv1.FeedHookHeadline{Text: name}}},
+		}}}
+	}
+	rows := []*frontendv1.FeedRow{hookCard("first"), {Turn: &conversationv1.TurnId{Value: "t1"}}, hookCard("second")}
+
+	// Act
+	got := hookRows(rows)
+
+	// Assert
+	if len(got) != 2 || got[0].GetHeadline().GetText() != "first" || got[1].GetHeadline().GetText() != "second" {
+		t.Fatalf("hookRows = %v, want the two hook cards in feed order", got)
+	}
+	if hookRow(rows) != got[0] {
+		t.Fatalf("hookRow = %v, want the first of hookRows", hookRow(rows))
+	}
+}
