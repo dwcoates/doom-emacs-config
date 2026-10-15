@@ -962,6 +962,29 @@ symptom is visible in the logs. Inference is not a diagnosis.
 - The fix is verified the same way: reproduce again and show the records that
   prove the chain is now broken.
 
+### Instrumentation reaches the running runtime through an async merge (owner technique, 2026-10-14)
+
+A logging gap in the daemon, shim, webapp or sidecar is closed in the RUNNING
+runtime by landing the new records on master, not by a hand deploy from a
+feature branch.
+
+- Commit the instrumentation (with its tests) on a branch of its own, cut from
+  the investigation's branch or from master, and request an `async` merge of
+  it through `/merge-queue`. The investigating workspace stays open and keeps
+  working while the merge runs.
+- The queue's landing deploys the build, and the async merge's report arrives
+  in the investigating session only once the running runtime carries it.
+  THAT REPORT IS THE CUE: from then on the new records are live, so reproduce
+  and read them.
+- The loop is: decide what the logs cannot show yet, land the instrumentation
+  async, wait for the landing report, reproduce, read the chain, and repeat
+  until every link is evidenced. Work the next open question while a merge
+  runs rather than idling on it.
+- A report saying the rollouts are held or the deploy failed means the
+  runtime does NOT carry the records yet; it is not the cue.
+- Elisp instrumentation needs no merge: it is hot-loaded through
+  `/runtime-eval-code`, as the debug skill's observability loop says.
+
 ## Runtime operations go through one door and one skill
 
 Building, bouncing, hard bouncing, deploying, hot-reloading, health checks,
@@ -1522,6 +1545,18 @@ who wrote it, and no person's value is a default.
 - Two kinds of file are exempt.
   - Dated reports under `docs/` are a historical record and are not rewritten.
   - A skill's `lineage_root:` line is the GNS address it was first published under, and stays as published.
+
+## Nothing in this repository is ever published to GNS (owner ruling, 2026-10-14)
+
+No skill, plugin, document or other artifact of this repository is published to
+GNS, ever, by any agent, at any scope (personal, team, org or public).
+
+- A skill workflow that offers to publish (`/create-or-update-skill`'s publish
+  and `--promote-to-gns` steps) is declined without asking the owner.
+- Skills here live in the repository and are committed with it; they reach
+  master through the merge queue like any other change.
+- An existing `lineage_root:` line is left as it stands (see the section
+  above); it records history, not a reason to publish again.
 
 ## Requirements: the manifests are the one record of what a machine needs
 

@@ -52,6 +52,7 @@ Asks the merge queue, from this workspace, to land work in its merge target: mas
     - iv. Otherwise: use `async`. It is the mode for:
       - a tangential or piecemeal fix landed while this workspace keeps working on its main task;
       - an implementation attempt landed so this workspace and the user can test it on master;
+      - a round of an instrumentation loop: new log records (or a fix) landed so the running runtime carries them, inspected once the landing report arrives (step 3e);
       - the main workspace landing its subagents' branches, or combining several of them through an `instruction`, and deciding whether to have the branch rebased onto master so the main workspace's own unlanded commits stay out.
   - For `one-shot`: this workspace's requested changes are FULLY implemented.
     - Every ruling the user gave in this workspace is implemented.
@@ -159,11 +160,18 @@ Asks the merge queue, from this workspace, to land work in its merge target: mas
     - iv. Only then is the remediation resolved: commit the fix with its tests and end the turn. The queue then runs the selected suites in full again.
     - CRITICAL: NEVER run a whole suite or `bin/test-all.sh` while remediating; the queue's own full run checks everything else.
     - CRITICAL: NEVER end the turn while a failing case the prompt handed over still fails.
-  - c. A report of how a merge ended (landed, failed, or did not run): report it in one line and STOP.
+  - c. A report of how a merge ended (landed, failed, or did not run): report it in one line, then go to step 3e if the merge was a round of an instrumentation loop; otherwise STOP.
     - *NOTE*: a report of a landing on agent-repl's master arrives only once the build that carries it is running, this session's own included, and says so; NEVER wait for, poll, or check the restart before acting on it.
     - *NOTE*: a report saying the rollouts are held or the deploy failed means the running build does NOT carry the landing.
   - d. A notice that a subscribed queue changed (after `subscribe`): act on it ONLY as far as the work the subscription was taken for calls for (e.g. land once the queue is empty); otherwise report it in one line and STOP.
     - CRITICAL: NEVER poll or re-read the queue between notices; the next change arrives as its own notice.
+  - e. A landing report for a round of an instrumentation loop: the running runtime now carries what the round landed.
+    - i. Reproduce the behavior under investigation and read the records the round added.
+    - ii. If they evidence every link of the chain, remediate, and land the fix as the next round.
+    - iii. If a link is still not shown, add the records that would show it, commit them with their tests on a branch of their own, and request the next round as an `async` merge (step 1b).
+    - iv. Repeat until the fix's own round lands and a reproduction shows the chain broken.
+    - *NOTE*: a landing report saying the rollouts are held or the deploy failed is NOT the cue; the round's records are not running yet.
+    - *NOTE*: while a round's merge runs, work the next open question; NEVER wait on it.
 
 4. Refused.
   - Report the printed refusal verbatim and STOP.

@@ -33,6 +33,7 @@ import { createDaemonContext } from "../rpc/context.js";
 import { createDaemonTransport } from "../rpc/transport.js";
 import { mountWebhostSidebar } from "../sidebar/sidebar.js";
 import type { Host } from "./host.js";
+import { installLoadCensus, type LoadCensus } from "./load-census.js";
 
 /** The id the webhost's sidebar element wears: the page's own, so one stylesheet draws both. */
 export const WEBHOST_SIDEBAR_ID = "ws-sidebar";
@@ -45,6 +46,8 @@ export interface WebhostSidebarStartDeps {
   installLogger?: (logger: ForwardingLogger) => void;
   /** Mount the sidebar; the real one opens the roster stream. */
   mount?: typeof mountWebhostSidebar;
+  /** Install the load census; the real one times the webhost's own document. */
+  installCensus?: (doc: Document) => LoadCensus;
 }
 
 /**
@@ -72,6 +75,10 @@ export function startWebhostSidebar(
   failures.subscribe(() => {
     host.setFailures(failures.standing());
   });
+
+  // THE LOAD EVERY PAGE PUTS ON THE ONE WEB PROCESS (load-census.ts), once
+  // the webhost's records have somewhere to go.
+  const census = (deps.installCensus ?? installLoadCensus)(doc);
 
   let stop = (): void => undefined;
   try {
@@ -103,5 +110,10 @@ export function startWebhostSidebar(
     });
     failures.report(bootFailed(cause));
   }
-  return { dispose: () => stop() };
+  return {
+    dispose: () => {
+      census.stop();
+      stop();
+    },
+  };
 }

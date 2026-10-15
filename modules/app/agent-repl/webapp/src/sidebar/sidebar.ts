@@ -23,6 +23,7 @@ import { createControl, type Control } from "../control.js";
 import { WatchWorkspaceRosterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_roster_pb";
 import { createDrawnStatusLog } from "../drawn-status.js";
 import { log } from "../log.js";
+import { drawTimingEnv, timeRosterDraw, type DrawTimingEnv } from "./draw-timing.js";
 import type { AppContext, DaemonContext } from "../rpc/context.js";
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { requireCase, requireMessage, unreachablePushArm } from "../rpc/strict.js";
@@ -75,6 +76,8 @@ export interface SidebarDeps {
   wallPhase?: WallPhaseEnv;
   /** What the unseen gate reads (`unseen.ts`). Defaults to the page. */
   unseen?: UnseenEnv;
+  /** What a roster draw's timing reads (`draw-timing.ts`). Defaults to the page. */
+  drawTiming?: DrawTimingEnv;
 }
 
 /**
@@ -163,6 +166,7 @@ function mountSidebarIn(
 
   retireStoredPrefs(deps.storage === undefined ? pageStorage() : deps.storage);
   const view = createSidebarView();
+  const drawTiming = deps.drawTiming ?? drawTimingEnv();
   const attention = new AttentionRegistry(deps.timers);
   // THE ROSTER IS WHERE A SWITCH TO THIS WORKSPACE IS STATED, whichever path
   // made it, so the one edge every switch crosses is watched here.
@@ -283,8 +287,13 @@ function mountSidebarIn(
     },
   });
 
-  /** Draw one whole roster into the rail. */
+  /** Draw one whole roster into the rail, recording what the draw cost. */
   function drawRoster(roster: WorkspaceRoster): void {
+    timeRosterDraw(body, placement.case, () => drawRosterNow(roster), drawTiming);
+  }
+
+  /** Draw one whole roster into the rail. */
+  function drawRosterNow(roster: WorkspaceRoster): void {
     // The teardowns come down BEFORE the draw, so a ticking age about to be
     // replaced cannot paint a node already detached.
     clear();
