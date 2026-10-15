@@ -23,6 +23,7 @@ import (
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/stateroot"
 )
 
@@ -212,21 +213,14 @@ func TestEveryVerbOpensItsServerStreamsThroughOpenDaemonStream(t *testing.T) {
 	if len(streaming) == 0 {
 		t.Fatal("the daemon client has no server-streaming method; the scan below would pass vacuously")
 	}
-	sources, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("glob: %v", err)
-	}
 	fset := token.NewFileSet()
 	var direct []string
 
 	// Act.
-	for _, source := range sources {
-		if strings.HasSuffix(source, "_test.go") {
-			continue
-		}
-		file, err := parser.ParseFile(fset, source, nil, 0)
+	for _, source := range sourcescan.Production(t) {
+		file, err := parser.ParseFile(fset, source.Name, source.Source, 0)
 		if err != nil {
-			t.Fatalf("parse %s: %v", source, err)
+			t.Fatalf("parse %s: %v", source.Name, err)
 		}
 		ast.Inspect(file, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
