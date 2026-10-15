@@ -66,11 +66,15 @@ func TestTheLayerDriverIsKilledOnlyThroughKillGroup(t *testing.T) {
 
 	// Act
 	raw := regexp.MustCompile(`syscall\.Kill\(`).FindAllIndex(src, -1)
+	group := regexp.MustCompile(`harness\.KillGroup\(`).FindAllIndex(src, -1)
 	viaHelper := regexp.MustCompile(`s\.killGroup\(\)`).FindAllIndex(src, -1)
 
-	// Assert: the one raw kill is killProcessGroup's own.
-	if len(raw) != 1 {
-		t.Fatalf("webapplayer_server_test.go calls syscall.Kill %d time(s), want only killProcessGroup's one", len(raw))
+	// Assert: no raw kill, and the one group kill is killProcessGroup's own.
+	if len(raw) != 0 {
+		t.Fatalf("webapplayer_server_test.go calls syscall.Kill %d time(s), want none: the group kill is harness.KillGroup's", len(raw))
+	}
+	if len(group) != 1 {
+		t.Fatalf("webapplayer_server_test.go calls harness.KillGroup %d time(s), want only killProcessGroup's one", len(group))
 	}
 	if len(viaHelper) < 3 {
 		t.Fatalf("webapplayer_server_test.go calls s.killGroup() %d time(s), want the warm-up, run and stop sites", len(viaHelper))
