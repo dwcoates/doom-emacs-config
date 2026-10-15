@@ -81,11 +81,9 @@ func (s *surfaces) link(state shimclient.LinkState) {
 	s.roster.OnLink(theWS, state)
 }
 
-// startTurn accepts a turn on both.
+// startTurn accepts a prompt's turn on both.
 func (s *surfaces) startTurn() {
-	turn := &footer.TurnStarted{At: epoch, Act: footer.ActPrompt}
-	s.footer.SetTurn(theWS, turn)
-	s.roster.SetTurn(theWS, turn)
+	s.startAct(footer.ActPrompt)
 }
 
 // endTurn delivers the main agent's terminal to both, and the daemon's own
@@ -335,6 +333,27 @@ func rosterClaim(t *testing.T, r sidebar.Resolver) (ladder.Claim, string) {
 	return claim, arm
 }
 
+// requireOneClaim fails unless the footer's status and the roster's arm
+// project onto one ladder claim and neither resolver recorded drawing off its
+// own claim, and answers the roster's arm.
+func requireOneClaim(t *testing.T, s *surfaces) string {
+	t.Helper()
+	fClaim, fStatus := footerClaim(t, s.footer)
+	rClaim, rArm := rosterClaim(t, s.roster)
+	if fClaim != rClaim {
+		t.Fatalf("the footer claims %q (%v) where the roster claims %q (%s)",
+			fClaim, fStatus.GetStatus(), rClaim, rArm)
+	}
+	for _, logs := range s.logs {
+		for _, op := range []string{"daemon.footer.status_claim", "daemon.sidebar.status_claim"} {
+			if hasError(logs.Records(), op) {
+				t.Fatalf("a resolver recorded %s: it drew an arm off its own claim", op)
+			}
+		}
+	}
+	return rArm
+}
+
 func TestTheFooterAndTheRosterAlwaysMakeTheSameCoarseClaim(t *testing.T) {
 	for merge, mergeFacts := range mergeStates {
 		for _, lc := range linkCases {
@@ -368,25 +387,20 @@ func TestTheFooterAndTheRosterAlwaysMakeTheSameCoarseClaim(t *testing.T) {
 							if read {
 								s.roster.SetViewed(theWS)
 							}
-							fClaim, fStatus := footerClaim(t, s.footer)
-							rClaim, rArm := rosterClaim(t, s.roster)
 
 							// Assert
-							if fClaim != rClaim {
-								t.Fatalf("the footer claims %q (%v) where the roster claims %q (%s)",
-									fClaim, fStatus.GetStatus(), rClaim, rArm)
-							}
-							for _, logs := range s.logs {
-								for _, op := range []string{"daemon.footer.status_claim", "daemon.sidebar.status_claim"} {
-									if hasError(logs.Records(), op) {
-										t.Fatalf("a resolver recorded %s: it drew an arm off its own claim", op)
-									}
-								}
-							}
+							requireOneClaim(t, s)
 						})
 					}
 				}
 			}
 		}
 	}
+}
+
+// startAct accepts a turn of the given act on both.
+func (s *surfaces) startAct(act footer.SessionAct) {
+	turn := &footer.TurnStarted{At: epoch, Act: act}
+	s.footer.SetTurn(theWS, turn)
+	s.roster.SetTurn(theWS, turn)
 }
