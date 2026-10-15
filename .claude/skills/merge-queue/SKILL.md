@@ -139,7 +139,13 @@ Asks the merge queue, from this workspace, to land work in its merge target: mas
   - *NOTE*: an `async` merge sends its resolving, conflict and test-failure prompts to its merge workspace, never to this session; this session receives only the report of how the merge ended, which needs no answer beyond step 3c.
   - a. A conflict-resolution prompt (a `one-shot`): resolve the conflicted files in the worktree the prompt names and `git add` them.
     - CRITICAL: NEVER run `git rebase --continue`, `--abort` or `--skip`; the queue continues the rebase itself.
-  - b. A test-failure prompt (a `one-shot`): fix the failure in the worktree the prompt names and commit the fix with its tests.
+  - b. A test-failure prompt (a `one-shot`): remediate in the worktree the prompt names, as a TARGETED loop over exactly the failing test cases the prompt hands over.
+    - i. Run exactly those failing cases, each group with the targeted command the prompt gives for it.
+    - ii. Fix what fails, then rerun those same cases.
+    - iii. Repeat until every one of those cases passes.
+    - iv. Only then is the remediation resolved: commit the fix with its tests and end the turn. The queue then runs the selected suites in full again.
+    - CRITICAL: NEVER run a whole suite or `bin/test-all.sh` while remediating; the queue's own full run checks everything else.
+    - CRITICAL: NEVER end the turn while a failing case the prompt handed over still fails.
   - c. A report of how a merge ended (landed, failed, or did not run): report it in one line and STOP.
     - *NOTE*: a report of a landing on agent-repl's master arrives only once the build that carries it is running, this session's own included, and says so; NEVER wait for, poll, or check the restart before acting on it.
     - *NOTE*: a report saying the rollouts are held or the deploy failed means the running build does NOT carry the landing.

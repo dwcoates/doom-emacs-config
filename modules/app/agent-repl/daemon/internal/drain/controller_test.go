@@ -3,6 +3,7 @@ package drain
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -1299,4 +1301,59 @@ func TestScheduleRecordsWhyTheDaemonWillGoDown(t *testing.T) {
 		}
 	}
 	t.Fatalf("no schedule record; records = %v", records(h.log, opSchedule))
+}
+
+// TestReadFailedLevelsByTheCause pins the one place the drain loop decides a
+// failed read's level: a context ending records the cut at debug, anything
+// else the failure at error, each with its cause and the caller's fields.
+func TestReadFailedLevelsByTheCause(t *testing.T) {
+	tests := []struct {
+		name        string
+		err         error
+		wantLevel   string
+		wantMessage string
+	}{
+		{name: "cancelled", err: context.Canceled, wantLevel: "debug", wantMessage: "cut"},
+		{name: "deadline", err: fmt.Errorf("wrapped: %w", context.DeadlineExceeded), wantLevel: "debug", wantMessage: "cut"},
+		{name: "a failure", err: errFake, wantLevel: "error", wantMessage: "failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			fields := dlog.Context{"workspace": "ws-1"}
+
+			// Act
+			readFailed(h.c.log, "daemon.drain.test", "failed", "cut", fields, tt.err)
+
+			// Assert
+			got := records(h.log, "daemon.drain.test")
+			if len(got) != 1 || got[0].Level != tt.wantLevel || got[0].Message != tt.wantMessage ||
+				got[0].Context["cause"] != tt.err.Error() || got[0].Context["workspace"] != "ws-1" {
+				t.Fatalf("records = %+v, want one %s %q carrying the cause and the fields", got, tt.wantLevel, tt.wantMessage)
+			}
+			if _, stamped := fields["cause"]; stamped {
+				t.Fatalf("the caller's fields were mutated: %v", fields)
+			}
+		})
+	}
+}
+
+// TestEveryDrainReadIsLevelledThroughReadFailed keeps the cut-or-failed split
+// in one place: no drain source but readFailed asks ctxend for it.
+func TestEveryDrainReadIsLevelledThroughReadFailed(t *testing.T) {
+	// Act
+	var sites []string
+	for _, f := range sourcescan.Production(t) {
+		for i, line := range strings.Split(string(f.Source), "\n") {
+			if strings.Contains(line, "ctxend.") && !strings.Contains(line, "\"agent-repld/internal/ctxend\"") {
+				sites = append(sites, fmt.Sprintf("%s:%d", f.Name, i+1))
+			}
+		}
+	}
+
+	// Assert
+	if len(sites) != 1 || !strings.HasPrefix(sites[0], "controller.go:") {
+		t.Fatalf("ctxend is asked at %v, want only inside readFailed", sites)
+	}
 }

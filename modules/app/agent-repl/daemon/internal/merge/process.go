@@ -12,6 +12,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
@@ -903,12 +904,13 @@ func (r *run) promptFix(ctx context.Context, attempt int, suites []string, archi
 		return nil, err
 	}
 	// THE AGENT RUNS EXACTLY THE FAILING TESTS (owner ruling, 2026-10-12):
-	// they are read off the failing run's archive into the worktree before the
-	// brief that names the file is sent.
-	if _, err := r.writeFailingTests(ctx, archive); err != nil {
+	// they are read off the failing run's archive into the worktree, and into
+	// the brief itself, before the brief is sent.
+	failingTests, err := r.writeFailingTests(ctx, archive)
+	if err != nil {
 		return nil, err
 	}
-	text, err := r.fixBrief(attempt, suites, archive, tail, targetBranch)
+	text, err := r.fixBrief(attempt, suites, archive, tail, failingTests, targetBranch)
 	if err != nil {
 		return nil, err
 	}
@@ -930,7 +932,7 @@ func (r *run) promptFix(ctx context.Context, attempt int, suites []string, archi
 }
 
 // fixBrief composes one fixing attempt's brief.
-func (r *run) fixBrief(attempt int, suites []string, archive, tail, targetBranch string) (string, error) {
+func (r *run) fixBrief(attempt int, suites []string, archive, tail, failingTests, targetBranch string) (string, error) {
 	text, err := r.o.deps.Briefs(BriefTestFailureResolve, map[string]string{
 		"source_branch":      r.subject.branch,
 		"worktree_dir":       r.subject.dir,
@@ -943,6 +945,7 @@ func (r *run) fixBrief(attempt int, suites []string, archive, tail, targetBranch
 		"escalation_file":    EscalationFile,
 		"escalation_marker":  EscalationMarker,
 		"failing_tests_file": filepath.Join(r.subject.dir, FailingTestsFile),
+		"failing_tests":      failingTests,
 	})
 	if err != nil {
 		return "", fmt.Errorf("merge: composing the test-failure brief: %w", err)
@@ -998,7 +1001,13 @@ func (r *run) resumeFix(ctx context.Context, res *progressDoc, targetBranch stri
 	round := r.activeRound()
 	n := r.testsRound()
 	r.drawFixing(ctx, round, n, res.FixAttempt, res.FailingSuites)
-	text, err := r.fixBrief(res.FixAttempt, res.FailingSuites, res.FailingArchive, res.FailingTail, targetBranch)
+	// THE REATTACHED BRIEF CARRIES THE SAME FAILING TESTS: they are read off
+	// the same archive again, so the file and the brief agree after a restart.
+	failingTests, err := r.writeFailingTests(ctx, res.FailingArchive)
+	if err != nil {
+		return nil, err
+	}
+	text, err := r.fixBrief(res.FixAttempt, res.FailingSuites, res.FailingArchive, res.FailingTail, failingTests, targetBranch)
 	if err != nil {
 		return nil, err
 	}
@@ -1122,7 +1131,7 @@ func (r *run) landed(ctx context.Context, commit, base string) (outcome, error) 
 		return outcome{}, err
 	}
 	commits, err := r.git.LandedRange(ctx, r.subject.targetDir, commit)
-	if err != nil && r.stopping(err) {
+	if err != nil && (r.stopping(err) || r.cut(err)) {
 		return outcome{landed: commit, version: version}, nil
 	}
 	if err != nil {
@@ -1462,4 +1471,11 @@ func short(sha string) string {
 // alone.
 func (r *run) stopping(err error) bool {
 	return errors.Is(err, errMergeStopping) || r.exiting()
+}
+
+// cut reports whether a step's error is the run's own context ending under
+// it: an abandon or the daemon's exit took the run away mid-command, so the
+// error says nothing about the step, and the run's end records why.
+func (r *run) cut(err error) bool {
+	return ctxend.Is(err) && r.ctx.Err() != nil
 }

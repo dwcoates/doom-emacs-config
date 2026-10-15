@@ -699,6 +699,14 @@ func (s *ShimControl) ExpectWatchSession() *shimv1.WatchSessionRequest {
 	return msg
 }
 
+// EndTurnUnwatched ends the turn on the shim with AGENT's terminal F, filed
+// into AGENT's book and delivered on no stream: the turn ends while no daemon
+// watches it, whatever state any daemon is in.
+func (s *ShimControl) EndTurnUnwatched(agent string, f *conversationv1.AgentFrame) {
+	s.t.Helper()
+	s.send(controlCommand{Op: "end_turn_unwatched", Agent: agent, Payload: encode(s.t, f)})
+}
+
 // ExpectWatchBash pops the next WatchBash open.
 func (s *ShimControl) ExpectWatchBash() *shimv1.WatchBashRequest {
 	s.t.Helper()

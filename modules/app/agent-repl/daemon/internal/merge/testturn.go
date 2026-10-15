@@ -167,11 +167,13 @@ func (r *run) awaitTestTurn(ctx context.Context, round tabRound) error {
 		return nil
 	}
 	defer o.stopWaiting(r)
+	o.log(ctx, r.ws).Info(op, "the merge joined the line for its repository's test turn; another merge's tests are running", dlog.Context{
+		"workspace": string(r.ws), "repo": string(r.repo), "round": round.n, "holder": string(place.holder.ws), "place": place.place})
+	// THE SEAM FIRES ONLY ONCE THE JOIN IS RECORDED, so a test woken by it
+	// finds the record already written.
 	if o.onTestTurnLine != nil {
 		o.onTestTurnLine(r.ws)
 	}
-	o.log(ctx, r.ws).Info(op, "the merge joined the line for its repository's test turn; another merge's tests are running", dlog.Context{
-		"workspace": string(r.ws), "repo": string(r.repo), "round": round.n, "holder": string(place.holder.ws), "place": place.place})
 	// A RESTART THAT ASKED THIS RUN TO STOP AT ITS NEXT BOUNDARY while its
 	// step ran finds it here: the line is a boundary.
 	if r.stopAtStepBoundary() {

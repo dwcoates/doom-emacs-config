@@ -8,7 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"sync/atomic"
+	"sync"
 	"testing"
 	"time"
 
@@ -151,12 +151,12 @@ func TestStandingStreamPathsComeFromTheDescriptor(t *testing.T) {
 func TestAwaitQuietWaitsForTheAnswerToLeaveNotForTheHandlerToReturn(t *testing.T) {
 	// Arrange: one h2c call whose response frames cannot reach the socket
 	// until the test lets them.
-	var held atomic.Bool
+	var held writeHold
 	release := make(chan struct{})
 	returned := make(chan struct{})
 	serving := H2C(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, "ok")
-		held.Store(true)
+		held.hold()
 		close(returned)
 	}), nil)
 	tcp, err := net.Listen("tcp", "127.0.0.1:0")
@@ -198,11 +198,27 @@ func TestAwaitQuietWaitsForTheAnswerToLeaveNotForTheHandlerToReturn(t *testing.T
 	}
 }
 
+// writeHold is the switch that parks a connection's writes. Taking it waits
+// out every write already passing through, so once hold returns no write that
+// began before it can still complete: every write the socket takes from then
+// on waits for the test's release.
+type writeHold struct {
+	mu   sync.RWMutex
+	held bool
+}
+
+// hold parks every write from now on, once the writes in flight have ended.
+func (h *writeHold) hold() {
+	h.mu.Lock()
+	h.held = true
+	h.mu.Unlock()
+}
+
 // heldWriteListener hands out connections whose writes park until the test
 // releases them, standing in for a socket that has not taken the answer yet.
 type heldWriteListener struct {
 	net.Listener
-	held    *atomic.Bool
+	held    *writeHold
 	release chan struct{}
 }
 
@@ -216,14 +232,18 @@ func (l *heldWriteListener) Accept() (net.Conn, error) {
 
 type heldWriteConn struct {
 	net.Conn
-	held    *atomic.Bool
+	held    *writeHold
 	release chan struct{}
 }
 
 func (c *heldWriteConn) Write(p []byte) (int, error) {
-	if c.held.Load() {
+	c.held.mu.RLock()
+	if c.held.held {
+		c.held.mu.RUnlock()
 		<-c.release
+		return c.Conn.Write(p)
 	}
+	defer c.held.mu.RUnlock()
 	return c.Conn.Write(p)
 }
 
@@ -398,19 +418,19 @@ func TestAwaitWritesQuietSettlesOnceThePushHasLeft(t *testing.T) {
 // standingStreamServing serves one standing stream whose handler flushes its
 // headers and then holds until ended is closed, through a listener whose
 // writes park once the handler has returned, until release is closed.
-func standingStreamServing(t *testing.T, ended <-chan struct{}, held *atomic.Bool, release chan struct{}) (*Serving, string) {
+func standingStreamServing(t *testing.T, ended <-chan struct{}, held *writeHold, release chan struct{}) (*Serving, string) {
 	t.Helper()
 	return standingStreamServingLogged(t, ended, held, release, nil)
 }
 
 // standingStreamServingLogged is standingStreamServing recording into log.
-func standingStreamServingLogged(t *testing.T, ended <-chan struct{}, held *atomic.Bool, release chan struct{}, log dlog.Logger) (*Serving, string) {
+func standingStreamServingLogged(t *testing.T, ended <-chan struct{}, held *writeHold, release chan struct{}, log dlog.Logger) (*Serving, string) {
 	t.Helper()
 	serving := H2C(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.(http.Flusher).Flush()
 		<-ended
-		held.Store(true)
+		held.hold()
 	}), log)
 	tcp, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -446,7 +466,7 @@ func openStream(t *testing.T, url string) {
 // holds until the socket has taken it.
 func TestAwaitStreamsEndedWaitsForTheEndFrameToLeave(t *testing.T) {
 	// Arrange
-	var held atomic.Bool
+	var held writeHold
 	ended, release := make(chan struct{}), make(chan struct{})
 	serving, url := standingStreamServing(t, ended, &held, release)
 	openStream(t, url)
@@ -473,7 +493,7 @@ func TestAwaitStreamsEndedWaitsForTheEndFrameToLeave(t *testing.T) {
 // a cut connection rather than an end frame.
 func TestAwaitStreamsEndedReportsTheStreamsStillOpen(t *testing.T) {
 	// Arrange
-	var held atomic.Bool
+	var held writeHold
 	ended, release := make(chan struct{}), make(chan struct{})
 	t.Cleanup(func() { close(ended); close(release) })
 	serving, url := standingStreamServing(t, ended, &held, release)
@@ -495,7 +515,7 @@ func TestAwaitStreamsEndedReportsTheStreamsStillOpen(t *testing.T) {
 // open and the deadline that passed.
 func TestAStreamStillOpenAtTheExitsDeadlineIsRecordedAtError(t *testing.T) {
 	// Arrange
-	var held atomic.Bool
+	var held writeHold
 	ended, release := make(chan struct{}), make(chan struct{})
 	t.Cleanup(func() { close(ended); close(release) })
 	log := dlog.NewTestLogger()
@@ -528,7 +548,7 @@ func TestAStreamStillOpenAtTheExitsDeadlineIsRecordedAtError(t *testing.T) {
 // socket is recorded once the exit's deadline passes, and is uncounted after.
 func TestAnEndFrameNotWrittenByTheExitsDeadlineIsRecordedAtError(t *testing.T) {
 	// Arrange
-	var held atomic.Bool
+	var held writeHold
 	ended, release := make(chan struct{}), make(chan struct{})
 	t.Cleanup(func() { close(release) })
 	log := dlog.NewTestLogger()
@@ -561,7 +581,7 @@ func TestAnEndFrameNotWrittenByTheExitsDeadlineIsRecordedAtError(t *testing.T) {
 // an exit whose streams end within the deadline records no error.
 func TestAnEndFrameWrittenBeforeTheDeadlineRecordsNothing(t *testing.T) {
 	// Arrange
-	var held atomic.Bool
+	var held writeHold
 	ended, release := make(chan struct{}), make(chan struct{})
 	log := dlog.NewTestLogger()
 	serving, url := standingStreamServingLogged(t, ended, &held, release, log)
@@ -606,7 +626,7 @@ func TestAwaitStreamsEndedWithNoStreamSettlesAtOnce(t *testing.T) {
 // connection's writes are parked.
 func TestAStreamItsClientEndedIsNotHeldForAnEndFrame(t *testing.T) {
 	// Arrange
-	var held atomic.Bool
+	var held writeHold
 	ended, release := make(chan struct{}), make(chan struct{})
 	t.Cleanup(func() { close(release) })
 	serving, url := standingStreamServing(t, ended, &held, release)

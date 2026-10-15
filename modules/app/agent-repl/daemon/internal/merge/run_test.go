@@ -18,6 +18,7 @@ import (
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -875,5 +876,86 @@ func TestAMergePromptIsHandedToTheQueueWholeAfterItsRunWasCut(t *testing.T) {
 	defer h.queue.mu.Unlock()
 	if len(h.queue.submitCtxErrs) != 1 || h.queue.submitCtxErrs[0] != nil {
 		t.Fatalf("submissions made under %v, want one under a live context", h.queue.submitCtxErrs)
+	}
+}
+
+func TestRecordFailedLevelsByTheCause(t *testing.T) {
+	tests := []struct {
+		name        string
+		err         error
+		wantLevel   string
+		wantMessage string
+	}{
+		{name: "cancelled", err: context.Canceled, wantLevel: dlog.LevelInfo, wantMessage: "cut"},
+		{name: "a wrapped deadline", err: fmt.Errorf("git diff: %w", context.DeadlineExceeded), wantLevel: dlog.LevelInfo, wantMessage: "cut"},
+		{name: "a failure", err: errors.New("database is locked"), wantLevel: dlog.LevelError, wantMessage: "failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			fields := dlog.Context{"workspace": "ws-1"}
+
+			// Act.
+			recordFailed(h.logs.Global(), "daemon.merge.test", "failed", "cut", fields, tt.err)
+
+			// Assert.
+			rec, ok := h.recordFor(tt.wantLevel, "daemon.merge.test")
+			if !ok || rec.Message != tt.wantMessage || rec.Context["error"] != tt.err.Error() || rec.Context["workspace"] != "ws-1" {
+				t.Fatalf("record %+v (found %v), want %s %q carrying the cause and the fields", rec, ok, tt.wantLevel, tt.wantMessage)
+			}
+			if _, stamped := fields["error"]; stamped {
+				t.Fatalf("the caller's fields were mutated: %v", fields)
+			}
+		})
+	}
+}
+
+func TestRunCutNamesOnlyItsOwnContextEndingUnderTheError(t *testing.T) {
+	tests := []struct {
+		name      string
+		cancelled bool
+		err       error
+		want      bool
+	}{
+		{name: "the run's context ended under a context error", cancelled: true, err: fmt.Errorf("git: %w", context.Canceled), want: true},
+		{name: "a context error while the run is wanted", cancelled: false, err: context.DeadlineExceeded, want: false},
+		{name: "another error after the run's context ended", cancelled: true, err: errors.New("git diff failed"), want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			ctx, cancel := context.WithCancelCause(context.Background())
+			defer cancel(nil)
+			r := &run{ctx: ctx, cancel: cancel}
+			if tt.cancelled {
+				cancel(errors.New("abandoned"))
+			}
+
+			// Act.
+			got := r.cut(tt.err)
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("cut(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTheMergeAsksWhetherAContextEndedOnlyThroughItsTwoHelpers(t *testing.T) {
+	// Act.
+	var sites []string
+	for _, f := range sourcescan.Production(t) {
+		for i, line := range strings.Split(string(f.Source), "\n") {
+			if strings.Contains(line, "ctxend.") && !strings.Contains(line, "\"agent-repld/internal/ctxend\"") {
+				sites = append(sites, fmt.Sprintf("%s:%d", f.Name, i+1))
+			}
+		}
+	}
+
+	// Assert: one in run.cut (process.go), one in recordFailed (run.go).
+	if len(sites) != 2 || !strings.HasPrefix(sites[0], "process.go:") || !strings.HasPrefix(sites[1], "run.go:") {
+		t.Fatalf("ctxend is asked at %v, want only inside run.cut and recordFailed", sites)
 	}
 }

@@ -945,7 +945,8 @@ park, failure or refusal it reports and stops, and never merges by hand.
 ## The merge queue's test gate and remediation contract
 
 Owner rulings, 2026-10-12, amended 2026-10-14 (end-to-end suites ride along
-with the system they run). THIS IS THE INTENDED DESIGN. Do not change any rule
+with the system they run; the failing test cases ride inline in the fixing
+brief, rerun until they pass). THIS IS THE INTENDED DESIGN. Do not change any rule
 below without a conversation with the owner first; a change that only looks
 like an improvement still needs that conversation. Code:
 `daemon/internal/merge/suiteselect.go`, `gate.go`, `failingtests.go`,
@@ -1010,8 +1011,11 @@ like an improvement still needs that conversation. Code:
   `.agent-repl-merge-failing-tests` at the root of the merging worktree. The
   file is kept out of commits through the repository's `info/exclude`. A failed
   unit whose tests cannot be named is said so, pointing at its block in the
-  archive. The fixing brief names the file and tells the agent to run exactly
-  those tests while it fixes.
+  archive. The fixing brief carries the same list inline and names the file;
+  a fixing attempt resumed after a restart reads the list off the same archive
+  again. The agent loops on exactly those test cases: run them with their
+  targeted commands, fix, rerun them, and repeat until every one passes. Only
+  then is the remediation resolved, and the agent commits and ends its turn.
 - **After remediation, the selected suites run again**, selected afresh from
   the branch's whole diff, fixing commits included.
 - **Five consecutive failures per cycle, and interruptions never count.**

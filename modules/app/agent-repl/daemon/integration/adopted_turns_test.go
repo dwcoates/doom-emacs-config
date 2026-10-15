@@ -213,11 +213,10 @@ func TestTheTakeoversOrphanRecoveryReconcilesItsOpenTurn(t *testing.T) {
 				StateDir: f.d.StateDir, Joining: f.d.Addr,
 				ExtraEnv: []string{"AGENT_REPL_LOCK_DIR=" + f.d.LockDir},
 			})
-			// The incumbent is FROZEN before the turn ends, so the end is
-			// written to a daemon that never reads it: it ends unwatched.
+			// The turn ends on the shim with its end delivered to no
+			// stream, so no daemon ever reads it: it ends unwatched.
 			if tc.finishUnwatched {
-				f.d.Freeze()
-				f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
+				f.shim.EndTurnUnwatched(mainAgent, successFrame(mainAgent, nil))
 			}
 
 			// Act: the incumbent dies having handed nothing over.
@@ -261,12 +260,11 @@ func TestAForcedHandoversAdoptionReconcilesItsOpenTurn(t *testing.T) {
 			harness.AwaitView(t, d.Ctx(), host, "transferred", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
 				return r.GetTransferred() != nil
 			})
-			// The incumbent's watches outlive the transfer notice, so it is
-			// FROZEN before the turn ends: between the transfer and the
-			// adoption no daemon watches the turn end.
+			// The incumbent's watches outlive the transfer notice, so the
+			// turn ends on the shim with its end delivered to no stream:
+			// between the transfer and the adoption no daemon sees it end.
 			if tc.finishUnwatched {
-				d.Freeze()
-				f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
+				f.shim.EndTurnUnwatched(mainAgent, successFrame(mainAgent, nil))
 			}
 			// Both participants adopt together: the rendezvous waits for both.
 			successor := drainDial(announced.GetAddress())

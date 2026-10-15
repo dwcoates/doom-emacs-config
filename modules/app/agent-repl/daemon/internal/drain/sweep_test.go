@@ -1304,3 +1304,77 @@ func TestSweepHibernatesAQueuedSessionIdlePastTheCutoffSinceItJoined(t *testing.
 		t.Fatalf("hibernated = %v, want [%s]", hibernated, ws)
 	}
 }
+
+// sweepReadErrDB fails one of the sweep's reads with one error, leaving the
+// rest of the store exactly as it is.
+type sweepReadErrDB struct {
+	wsm.DB
+	read string
+	err  error
+}
+
+func (d sweepReadErrDB) ListWorkspaces(ctx context.Context) ([]wsm.Workspace, error) {
+	if d.read == "list" {
+		return nil, d.err
+	}
+	return d.DB.ListWorkspaces(ctx)
+}
+
+func (d sweepReadErrDB) AllMergeQueues(ctx context.Context) (map[wsm.RepoKey][]wsm.MergeQueueEntry, error) {
+	if d.read == "queues" {
+		return nil, d.err
+	}
+	return d.DB.AllMergeQueues(ctx)
+}
+
+func (d sweepReadErrDB) Session(ctx context.Context, ws wsm.WorkspaceID) (wsm.Session, bool, error) {
+	if d.read == "session" {
+		return wsm.Session{}, false, d.err
+	}
+	return d.DB.Session(ctx, ws)
+}
+
+// TestSweepLevelsEachReadByWhetherTheLoopWasCancelled pins the level of every
+// read the sweep makes: the daemon's own exit cutting a read under it records
+// at debug, and a read that fails while serving is still an error. Either way
+// the sweep answers the read's error.
+func TestSweepLevelsEachReadByWhetherTheLoopWasCancelled(t *testing.T) {
+	tests := []struct {
+		name      string
+		read      string
+		readErr   error
+		wantLevel string
+	}{
+		{name: "the workspace list cut by the exit", read: "list", readErr: context.Canceled, wantLevel: "debug"},
+		{name: "the workspace list failing while serving", read: "list", readErr: errFake, wantLevel: "error"},
+		{name: "the merge queues cut by the exit", read: "queues", readErr: context.Canceled, wantLevel: "debug"},
+		{name: "the merge queues failing while serving", read: "queues", readErr: errFake, wantLevel: "error"},
+		{name: "a session read cut by the exit", read: "session", readErr: context.Canceled, wantLevel: "debug"},
+		{name: "a session read timing out", read: "session", readErr: context.DeadlineExceeded, wantLevel: "debug"},
+		{name: "a session read failing while serving", read: "session", readErr: errFake, wantLevel: "error"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t, func(d *Deps) { d.DB = sweepReadErrDB{DB: d.DB, read: tt.read, err: tt.readErr} })
+			h.workspace(t, instant.Add(-2*time.Hour))
+
+			// Act
+			_, err := h.c.Sweep(context.Background(), instant)
+
+			// Assert
+			if !errors.Is(err, tt.readErr) {
+				t.Fatalf("Sweep err = %v, want %v", err, tt.readErr)
+			}
+			var levels []string
+			for _, rec := range h.log.Records() {
+				if rec.Operation == opSweep && (rec.Level == "error" || rec.Context["cause"] == tt.readErr.Error()) {
+					levels = append(levels, rec.Level)
+				}
+			}
+			if len(levels) != 1 || levels[0] != tt.wantLevel {
+				t.Fatalf("read levels = %v, want exactly [%s]", levels, tt.wantLevel)
+			}
+		})
+	}
+}

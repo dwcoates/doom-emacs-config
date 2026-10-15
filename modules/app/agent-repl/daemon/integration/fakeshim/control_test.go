@@ -40,6 +40,11 @@ func TestParseCommandAcceptsWellFormedOps(t *testing.T) {
 			want: Command{Op: OpFileAgentFrame, Agent: "book-parent", Turn: "t1", Payload: payload},
 		},
 		{
+			name: "end_turn_unwatched ends a turn in a named book",
+			line: `{"op":"end_turn_unwatched","agent":"main","payload":"` + payload + `"}`,
+			want: Command{Op: OpEndTurnUnwatched, Agent: "main", Payload: payload},
+		},
+		{
 			name: "file_user_prompt files into a named book",
 			line: `{"op":"file_user_prompt","agent":"book-parent","payload":"` + payload + `"}`,
 			want: Command{Op: OpFileUserPrompt, Agent: "book-parent", Payload: payload},
@@ -148,6 +153,8 @@ func TestParseCommandRejectsMalformedOps(t *testing.T) {
 		{name: "push_bash without work", line: `{"op":"push_bash","payload":"AA=="}`, wantSub: "work is required"},
 		{name: "file_agent_frame without a book", line: `{"op":"file_agent_frame","payload":"AA=="}`, wantSub: "agent is required"},
 		{name: "file_user_prompt without a book", line: `{"op":"file_user_prompt","payload":"AA=="}`, wantSub: "agent is required"},
+		{name: "end_turn_unwatched without a book", line: `{"op":"end_turn_unwatched","payload":"AA=="}`, wantSub: "agent is required"},
+		{name: "end_turn_unwatched without a terminal", line: `{"op":"end_turn_unwatched","agent":"main"}`, wantSub: "payload is required"},
 		{name: "file_agent_frame without payload", line: `{"op":"file_agent_frame","agent":"b"}`, wantSub: "payload is required"},
 		{name: "answer without rpc", line: `{"op":"answer","payload":"AA=="}`, wantSub: "rpc is required"},
 		{name: "answer for a stream verb", line: `{"op":"answer","rpc":"WatchSession","payload":"AA=="}`, wantSub: "takes no scripted answer"},

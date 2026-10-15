@@ -706,3 +706,44 @@ func TestEveryLoopingStandInIsStartedByStandIn(t *testing.T) {
 		t.Fatalf("kill_test.go starts %d shells by hand, want 3: start a looping stand-in with standIn", byHand)
 	}
 }
+
+func TestKillGroupKillsALiveGroupAndTakesAGoneOneAsNoFailure(t *testing.T) {
+	tests := []struct {
+		name string
+		reap bool // the group's leader has exited and been reaped before the kill
+	}{
+		{name: "a running group is killed"},
+		{name: "a group already gone is no failure", reap: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a process leading its own group.
+			cmd := exec.Command("/bin/sleep", "60")
+			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+			if err := cmd.Start(); err != nil {
+				t.Fatalf("start: %v", err)
+			}
+			if tt.reap {
+				if err := cmd.Process.Kill(); err != nil {
+					t.Fatalf("kill: %v", err)
+				}
+				_ = cmd.Wait()
+			}
+
+			// Act.
+			err := KillGroup(cmd.Process.Pid)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("KillGroup = %v, want nil", err)
+			}
+			if !tt.reap {
+				_ = cmd.Wait()
+				ws, ok := cmd.ProcessState.Sys().(syscall.WaitStatus)
+				if !ok || !ws.Signaled() || ws.Signal() != syscall.SIGKILL {
+					t.Fatalf("the group's leader ended with %v, want SIGKILL", cmd.ProcessState)
+				}
+			}
+		})
+	}
+}

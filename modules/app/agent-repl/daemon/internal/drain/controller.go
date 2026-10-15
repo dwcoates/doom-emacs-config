@@ -11,6 +11,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
+	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
@@ -537,6 +538,15 @@ func (c *controller) wake() {
 	case c.rearm <- struct{}{}:
 	default:
 	}
+}
+
+// readFailed records a drain-loop read that answered err, at the level its
+// cause earns. The loop's context ending under the read is this daemon's own
+// exit withdrawing the loop, not a read that could not be made: there is
+// nothing to remediate, so it records at debug as cut. A read that fails while
+// serving is an error.
+func readFailed(log dlog.Logger, op, failed, cut string, fields dlog.Context, err error) {
+	ctxend.Log(err, log.Debug, log.Error, op, cut, failed, withCause(fields, err))
 }
 
 // withCause stamps an error onto a record's context without mutating the

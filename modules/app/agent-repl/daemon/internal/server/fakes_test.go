@@ -896,6 +896,8 @@ type fakeHealth struct {
 	health.Reporter
 	daemon  *agentreplv1.DaemonHealthResponse
 	session *agentreplv1.SessionHealthResponse
+	// daemonErr, when set, fails every daemon report.
+	daemonErr error
 	// faults are the open faults every scope answers with.
 	faults []wsm.Fault
 	// faultsErr fails every open-fault read.
@@ -928,6 +930,9 @@ func (f *fakeSessionFacts) HostSessionFacts(ws ids.WorkspaceID) (HostFacts, bool
 }
 
 func (f *fakeHealth) Daemon(context.Context) (*agentreplv1.DaemonHealthResponse, error) {
+	if f.daemonErr != nil {
+		return nil, f.daemonErr
+	}
 	return f.daemon, nil
 }
 
