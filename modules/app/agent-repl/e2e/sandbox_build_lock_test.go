@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -77,7 +78,9 @@ case "${1:-}" in
     [[ -e "` + f.dir + `/missing" ]] && exit 1
     exit 0 ;;
   build) exit 0 ;;
-  run) exit 0 ;;
+  # run keeps what arrived on its stdin: the streamed working copy.
+  # and says it is staged, as the image's entrypoint does once it extracted it.
+  run) cat > "` + f.dir + `/run-stdin"; printf 'sandbox: staged 1 files, 4.0K total\n' >&2; exit 0 ;;
   *) exit 0 ;;
 esac
 `
@@ -772,5 +775,105 @@ esac
 	// Assert.
 	if code != 77 || strings.Contains(out, "BUILT\n") || strings.Contains(out, "RAN\n") {
 		t.Fatalf("test-e2e-emacs.sh exit %d, want the decline (77) with no build and no run:\n%s", code, out)
+	}
+}
+
+// TestSandboxRunStreamsTheWorkingCopyAndMountsNoHostPath pins the fix for the
+// host's file-table exhaustion: Docker Desktop's file sharing opened every
+// file of a bind-mounted checkout and never released them, ~4,500 host
+// descriptors per run, until every e2e-emacs gate failed staging with "Too
+// many open files in system". So `run` must mount NO host path at all: the
+// working copy rides the container's stdin as a tar, and the failure
+// artifacts live in a VM-side volume that `docker cp` copies out.
+func TestSandboxRunStreamsTheWorkingCopyAndMountsNoHostPath(t *testing.T) {
+	t.Parallel()
+	// Arrange: an image carrying this checkout's stamp, a private slot dir, no
+	// host webapp build, and artifacts requested.
+	f := newFakeDocker(t)
+	f.setLabel(t, currentSandboxStamp(t, f))
+	artifacts := t.TempDir()
+	cmd := exec.Command("bash", sandboxScript(t), "run", "true")
+	cmd.Env = sandboxEnv(f, filepath.Join(t.TempDir(), "build.lock"),
+		"AGENT_REPL_SANDBOX_SLOT_DIR="+t.TempDir(), "AGENT_REPL_SANDBOX_NO_WEBAPP_BUILD=1",
+		"AGENT_REPL_E2E_ARTIFACTS="+artifacts)
+
+	// Act
+	out, err := cmd.CombinedOutput()
+
+	// Assert: the run went through, with no bind mount and stdin open.
+	if err != nil {
+		t.Fatalf("run = %v\n%s", err, out)
+	}
+	var run string
+	for _, c := range f.calls(t) {
+		if strings.HasPrefix(c, "run ") {
+			run = c
+		}
+	}
+	if run == "" {
+		t.Fatalf("no `run` invocation recorded:\n%s", strings.Join(f.calls(t), "\n"))
+	}
+	for _, banned := range []string{"type=bind", " -v ", "--volume", "/repo-src"} {
+		if strings.Contains(run, banned) {
+			t.Fatalf("docker run names %q, want no host path mounted:\n%s", banned, run)
+		}
+	}
+	if !strings.Contains(run, "--interactive") || !strings.Contains(run, "type=volume,target=/artifacts") {
+		t.Fatalf("docker run = %q, want --interactive and the artifacts on a VM-side volume", run)
+	}
+
+	// Assert: what arrived on stdin is the staged working copy.
+	list, err := exec.Command("tar", "-tf", filepath.Join(f.dir, "run-stdin")).Output()
+	if err != nil {
+		t.Fatalf("the run's stdin is not a tar: %v", err)
+	}
+	entries := strings.Split(strings.TrimSpace(string(list)), "\n")
+	if !slices.Contains(entries, "e2e/go.mod") || !slices.Contains(entries, "metaprompt.md") {
+		t.Fatalf("the streamed copy (%d entries) lacks e2e/go.mod or metaprompt.md", len(entries))
+	}
+	for _, e := range entries {
+		if strings.Contains("/"+e+"/", "/.git/") || strings.Contains("/"+e+"/", "/node_modules/") {
+			t.Fatalf("the streamed copy carries %q, which staging excludes", e)
+		}
+	}
+
+	// Assert: the artifacts left through the API, and the container was removed.
+	var copied, removed bool
+	for _, c := range f.calls(t) {
+		copied = copied || (strings.HasPrefix(c, "cp ") && strings.Contains(c, ":/artifacts/."))
+		removed = removed || strings.HasPrefix(c, "rm -f -v agent-repl-e2e-")
+	}
+	if !copied || !removed {
+		t.Fatalf("calls = %q, want a `docker cp` of /artifacts and the container removed", f.calls(t))
+	}
+}
+
+// TestSandboxShellExecsALoginShellOnceTheCopyIsStaged pins `shell` under the
+// streamed working copy: stdin carries the tar, so the shell cannot be the
+// container's own command. The container holds itself open, and the login
+// shell is exec'd into it once the entrypoint's "staged" line arrives.
+func TestSandboxShellExecsALoginShellOnceTheCopyIsStaged(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newFakeDocker(t)
+	f.setLabel(t, currentSandboxStamp(t, f))
+	cmd := exec.Command("bash", sandboxScript(t), "shell")
+	cmd.Env = sandboxEnv(f, filepath.Join(t.TempDir(), "build.lock"),
+		"AGENT_REPL_SANDBOX_SLOT_DIR="+t.TempDir(), "AGENT_REPL_SANDBOX_NO_WEBAPP_BUILD=1")
+
+	// Act
+	out, err := cmd.CombinedOutput()
+
+	// Assert: the container ran on the stream, then the shell was exec'd in.
+	if err != nil {
+		t.Fatalf("shell = %v\n%s", err, out)
+	}
+	calls := f.calls(t)
+	ran := slices.IndexFunc(calls, func(c string) bool { return strings.HasPrefix(c, "run ") && strings.HasSuffix(c, " sleep infinity") })
+	execd := slices.IndexFunc(calls, func(c string) bool {
+		return strings.HasPrefix(c, "exec -it --workdir /work/repo/modules/app/agent-repl agent-repl-e2e-") && strings.HasSuffix(c, " bash -l")
+	})
+	if ran < 0 || execd < ran {
+		t.Fatalf("calls = %q, want the held container run, then a login shell exec'd into it", calls)
 	}
 }

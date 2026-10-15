@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -103,10 +104,17 @@ const sandboxScriptRel = "modules/app/agent-repl/e2e/sandbox/bin/e2e-sandbox.sh"
 // starts, and is this layer's primary in-container signal.
 const insideSandboxEnv = "AGENT_REPL_SANDBOX_SHA"
 
-// sandboxReadOnlyMount is where the sandbox bind-mounts the repo read-only.
+// sandboxEntrypoint is the image's own entrypoint, a path no host carries.
 // Checked alongside the env var so a stray environment variable on the host
 // cannot convince this layer it is containerized.
-const sandboxReadOnlyMount = "/repo-src"
+const sandboxEntrypoint = "/sandbox/entrypoint.sh"
+
+// hostSharedFilesystems are the filesystem types a container runtime uses to
+// serve HOST paths into a container (Docker Desktop's virtiofs, shown as
+// virtiofs or fakeowner, its older gRPC FUSE and osxfs, and 9p). A mount of
+// any of them is a host path inside the sandbox, which the run never makes:
+// the working copy is streamed in (e2e-sandbox.sh stage_stream).
+var hostSharedFilesystems = []string{"virtiofs", "fakeowner", "grpcfuse", "fuse.grpcfuse", "osxfs", "fuse.osxfs", "9p"}
 
 // requireSandbox returns the sandbox for one test, or skips loudly.
 func requireSandbox(t *testing.T) sandbox {
@@ -187,16 +195,15 @@ func assertHostIsolation(t *testing.T) {
 		}
 	}
 
-	// 3. The repo mount is READ-ONLY. The entrypoint checks this too; it is
-	//    re-checked here because the check that matters is the one in the
-	//    process that is about to write.
-	if _, ok := mounts[sandboxReadOnlyMount]; !ok {
-		t.Fatalf("sandbox isolation: %s is not a mount point; the repo is not bind-mounted", sandboxReadOnlyMount)
-	}
-	probe := filepath.Join(sandboxReadOnlyMount, ".e2e-write-probe")
-	if err := os.WriteFile(probe, []byte("x"), 0o644); err == nil {
-		_ = os.Remove(probe)
-		t.Fatalf("sandbox isolation: %s is WRITABLE; the repo must be mounted read-only", sandboxReadOnlyMount)
+	// 3. NO HOST PATH IS MOUNTED. The working copy arrives as a stream, so
+	//    nothing here can write the host and the runtime's file sharing opens
+	//    no host file (a bind-mounted checkout leaked thousands of host
+	//    descriptors per run). The entrypoint refuses a mounted checkout too;
+	//    it is re-checked here, in the process about to start Emacs.
+	for dir, fstype := range mounts {
+		if slices.Contains(hostSharedFilesystems, fstype) {
+			t.Fatalf("sandbox isolation: %s is a %q mount, a host path; the sandbox mounts none", dir, fstype)
+		}
 	}
 }
 
@@ -395,14 +402,14 @@ func repoRoot() string {
 }
 
 // insideSandbox reports whether this process is running in the sandbox. It
-// requires BOTH signals: the env var the runner sets, and the read-only mount
-// the entrypoint verifies.
+// requires BOTH signals: the env var the runner sets, and the image's own
+// entrypoint.
 func insideSandbox() bool {
 	if os.Getenv(insideSandboxEnv) == "" {
 		return false
 	}
-	info, err := os.Stat(sandboxReadOnlyMount)
-	return err == nil && info.IsDir()
+	info, err := os.Stat(sandboxEntrypoint)
+	return err == nil && info.Mode().IsRegular()
 }
 
 // HasEmacs asks the Emacs in the image for its own version.

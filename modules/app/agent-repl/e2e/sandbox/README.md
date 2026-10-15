@@ -35,10 +35,17 @@ The sandbox makes all five container-local, so a run cannot reach the host's.
 
 Not by convention — by construction, at four independent layers:
 
-1. The repo is bind-mounted **read-only** at `/repo-src`. The entrypoint
-   probes `[[ -w /repo-src ]]` and refuses to run if the mount turns out to
-   be writable, so a mis-specified mount fails loudly instead of quietly
-   writing to the checkout.
+1. **No host path is mounted at all.** `e2e-sandbox.sh run` streams the
+   module's staged allowlist into the container as a tar on `docker run -i`'s
+   stdin (`stage_stream`), and the entrypoint extracts it; failure artifacts
+   come back out of a VM-side volume through `docker cp`. The entrypoint
+   refuses a mounted checkout, and the Emacs layer's `assertHostIsolation`
+   fails on any host-shared filesystem in the mount table.
+   - Why: a bind-mounted checkout made Docker Desktop's file sharing open every
+     staged file on the host and never release them, about 4,500 host
+     descriptors per run, until the host's file table was full (2026-10-15:
+     51,851 of 65,536 held by the VM) and every e2e-emacs gate failed staging
+     with "Too many open files in system".
 
 2. `HOME` is `/sandbox/home`, a path that exists only inside the image and
    that no mount ever covers. `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`,
@@ -283,13 +290,12 @@ artifacts (`world_test.go`'s `ArtifactsEnv`) land on the host.
 
 | container path | source | mode | why |
 |---|---|---|---|
-| `/repo-src` | the repo root on the host | **read-only** bind | the source under test |
 | `/work` | tmpfs | rw | holds `/work/repo`, the writable working copy |
-| `/work/repo` | `rsync` of an ALLOWLIST of `/repo-src/modules/app/agent-repl` (see `STAGE_ENTRIES` in `bin/entrypoint.sh`) | rw | builds and `npm ci` need to write; the read-only source cannot be written. Nothing outside the module is copied — no repo-root `go.work`, `.nvmrc` or shared config exists, and a whole-checkout copy dragged in `.claude/worktrees` (18 GB of stale agent worktrees) until the host ran out of file descriptors. Staged at the module's real relative path, so the checkout-root-relative resolutions in the Go `replace` directives and the TypeScript `../../../proto/...` imports still land. A missing entry is a loud refusal, not a late confusing failure. Because the mount is a LIVE checkout, rsync's exit 24 (source files vanished mid-copy) is tolerated with a loud per-path summary; every other nonzero exit is fatal. |
+| `/work/repo` | a tar of an ALLOWLIST of the host's `modules/app/agent-repl`, streamed on stdin (see `STAGE_ENTRIES` and `stage_stream` in `bin/e2e-sandbox.sh`) | rw | builds and `npm ci` need to write, and no host path is mounted. Nothing outside the module is copied — no repo-root `go.work`, `.nvmrc` or shared config exists, and a whole-checkout copy dragged in `.claude/worktrees` (18 GB of stale agent worktrees) until the host ran out of file descriptors. Staged at the module's real relative path, so the checkout-root-relative resolutions in the Go `replace` directives and the TypeScript `../../../proto/...` imports still land. A missing entry is a loud refusal, not a late confusing failure. Because the source is a LIVE checkout, a file listed and then deleted before tar reads it is tolerated with a loud count; every other tar failure fails the run. |
 | `/sandbox/home` | tmpfs | rw | `HOME`: `~/.claude`, `~/.emacs.d` caches, git config, npm/Go caches |
-| `/sandbox/doom/modules` | tmpfs | rw | the entrypoint symlinks `:app agent-repl` here at the mounted source |
+| `/sandbox/doom/modules` | tmpfs | rw | the entrypoint symlinks `:app agent-repl` here at the staged working copy |
 | `/tmp` | tmpfs (exec) | rw | UDS paths, per-run temp dirs |
-| `/artifacts` | `$AGENT_REPL_E2E_ARTIFACTS`, if set | rw bind | the only writable host path, and only on request |
+| `/artifacts` | a fresh VM-side volume, when `$AGENT_REPL_E2E_ARTIFACTS` is set | rw | copied out to `$AGENT_REPL_E2E_ARTIFACTS` with `docker cp` after the run; never a host path |
 
 ## What is baked vs mounted
 

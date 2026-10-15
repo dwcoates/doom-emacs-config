@@ -757,7 +757,13 @@ RUN set -eux; \
       'export PATH' \
       > /etc/profile.d/10-agent-repl-sandbox.sh; \
     chmod 0644 /etc/profile.d/10-agent-repl-sandbox.sh; \
-    rm -f /etc/skel/.bash_logout /sandbox/home/.bash_logout /root/.bash_logout
+    rm -f /etc/skel/.bash_logout /sandbox/home/.bash_logout /root/.bash_logout; \
+    # THE FAILURE ARTIFACTS' VOLUME TAKES ITS OWNER FROM HERE. e2e-sandbox.sh
+    # mounts a fresh VM-side volume at /artifacts (never a host path) and
+    # copies it out through the API; a new volume copies this directory's
+    # owner, so the non-root sandbox uid can write into it.
+    mkdir -p /artifacts; \
+    chown sandbox:sandbox /artifacts
 USER sandbox
 
 COPY --chown=sandbox:sandbox bin/entrypoint.sh /sandbox/entrypoint.sh
