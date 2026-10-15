@@ -17,11 +17,11 @@ the log records that show it, so the failures can be fixed at their source.
 | 6 | 2026-10-15 | `tier-audit-e2e-step-a` (tip `75e781c362`, e2e audit report plus lower-tier tests) | `tier-audit-e2e-step-a-merge` | LANDED (`f330c112a4`), deployed |
 | 7 | 2026-10-15 | `test-tier-audit-integration-step3` (tip `6ff96ad124`, shim-lock stand-in plus removal lists) | `tier-step3-shim-lock` | LANDED (`ec6fbaa1ce`), deployed |
 | 8 | 2026-10-15 | `tier-audit-e2e-step-c` (tip `32d6f55b9e`, instruction: rebase onto master keeping only the two step-(c) commits) | `tier-audit-e2e-step-c-merge` | FAILED: the e2e-emacs gate hit host file-table exhaustion from Docker's VM, see entry 8 |
-| 9 | 2026-10-15 | `sandbox-no-host-mounts` (tip `a54186877d`, the structural fix for entry 8, at the FRONT) | `sandbox-no-host-mounts-merge` | requested, pending; the queue is paused for the Go cache |
-| 10 | 2026-10-15 | `test-suite-skip-hdv-land` (35 commits, suite reuse) | `test-suite-reuse-merge` | requested, pending; the queue is paused for the Go cache |
-| 11 | 2026-10-15 | `test-timer-waits-land` (tip `087c0e4da4`) | `timer-waits-landing` | requested, pending; the queue is paused for the Go cache |
-| 12 | 2026-10-15 | `redundancy-tool` (tip `764923476a`, the redundancy tool and pinned baseline, minor) | `redundancy-tool-land` | requested, pending; the queue is paused for the Go cache |
-| 13 | 2026-10-15 | `sessions-test-slim` (one commit: 117 redundant cases removed from `sessions_test.go`, -0.04 coverage points) | `sessions-test-slim-land` | requested, pending; the queue is paused for the Go cache |
+| 9 | 2026-10-15 | `sandbox-no-host-mounts` (tip `a54186877d`, the structural fix for entry 8, at the FRONT) | `sandbox-no-host-mounts-merge` | requested, pending (queue resumed ~10:00) |
+| 10 | 2026-10-15 | `test-suite-skip-hdv-land` (35 commits, suite reuse) | `test-suite-reuse-merge` | requested, pending (queue resumed ~10:00) |
+| 11 | 2026-10-15 | `test-timer-waits-land` (tip `087c0e4da4`) | `timer-waits-landing` | requested, pending (queue resumed ~10:00) |
+| 12 | 2026-10-15 | `redundancy-tool` (tip `764923476a`, the redundancy tool and pinned baseline, minor) | `redundancy-tool-land` | requested, pending (queue resumed ~10:00) |
+| 13 | 2026-10-15 | `sessions-test-slim` (one commit: 117 redundant cases removed from `sessions_test.go`, -0.04 coverage points) | `sessions-test-slim-land` | requested, pending (queue resumed ~10:00) |
 
 ## 1. `test-tier-rule` (landed)
 
@@ -81,3 +81,4 @@ the log records that show it, so the failures can be fixed at their source.
 - Every merge gate's Go suites would fail to build, burning attempts and handing merges back. So I paused the doom repository's merge queue at about 01:30 (`/merge-queue pause ~/.config/doom`, outcome `paused`).
   - Resume with `/merge-queue resume ~/.config/doom` after the cache is cleaned.
 - Children verify locally with a private `GOCACHE` in the meantime.
+- Resolved 2026-10-15 ~10:00: the owner ran `go clean -cache`, and a `go vet` through the shared cache passed again. My resume request was refused `not_paused`, because the queue had already been resumed by then (by the owner or by `agent-repl-perf-regression`, which had asked about the pause).
