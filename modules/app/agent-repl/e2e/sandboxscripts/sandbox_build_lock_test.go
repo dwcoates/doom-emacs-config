@@ -920,8 +920,7 @@ func TestEachSandboxedSuiteRunsItsOwnTestsInTheSandbox(t *testing.T) {
 	tests := []struct {
 		name, script, pattern, label string
 	}{
-		{name: "the Emacs client layer", script: "test-e2e-emacs.sh", pattern: "TestEmacs", label: "e2e-emacs"},
-		{name: "the Doom tier", script: "test-emacs-doom.sh", pattern: "TestDoom", label: "emacs-doom"},
+		{name: "the Emacs client layer and the Doom tier", script: "test-e2e-emacs.sh", pattern: "TestEmacs|TestDoom", label: "e2e-emacs"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name+" runs its tests", func(t *testing.T) {

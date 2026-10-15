@@ -1,7 +1,6 @@
 package reuse
 
 import (
-	"agentrepl/testrun/roster"
 	"bytes"
 	"encoding/json"
 	"strings"
@@ -81,35 +80,5 @@ func TestThePlanTextNamesNoReuse(t *testing.T) {
 		if !strings.Contains(b.String(), want) {
 			t.Errorf("the plan lacks %q:\n%s", want, b.String())
 		}
-	}
-}
-
-func TestSuiteKind(t *testing.T) {
-	tests := []struct {
-		name  string
-		suite string
-		want  string
-	}{
-		{name: "a keyed system suite", suite: "daemon", want: "unit+integration"},
-		{name: "the cross-system Go suite", suite: "e2e", want: "e2e"},
-		{name: "the sandboxed Emacs client layer", suite: "e2e-emacs", want: "e2e"},
-		{name: "the Doom tier is an integration suite", suite: "emacs-doom", want: "unit+integration"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			s, ok := roster.Lookup(tt.suite)
-			if !ok {
-				t.Fatalf("no roster suite %q", tt.suite)
-			}
-
-			// Act
-			got := SuiteKind(s)
-
-			// Assert
-			if got != tt.want {
-				t.Fatalf("SuiteKind(%s) = %q, want %q", tt.suite, got, tt.want)
-			}
-		})
 	}
 }

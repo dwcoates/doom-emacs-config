@@ -46,7 +46,7 @@ Owner rule, 2026-10-14. A test lives at the cheapest tier whose fakes still let 
 - An e2e test (`e2e/`, `e2e-emacs`) is warranted only when its assertion needs several real agent-repl systems running together: a contract, an ordering or a handover that crosses a seam between two real processes.
 - A test names its seam in its doc comment (`Seam: <producer> -> <consumer>, <what crosses>`). A test that cannot name one does not belong in `e2e/`.
 - A behavior that one system computes alone is proven in that system's own tiers above. That covers a refusal the daemon formats, a row the daemon projects from frames, what the webapp draws for a view, an Emacs-local command and the fake vendor's own output.
-- What only a booted Doom shows -- a `map!` leader binding, a popup's placement, persp-mode's workspace recycling -- is Emacs's own behavior too: it is proven in the Doom tier (`emacs-doom`, `bin/test-emacs-doom.sh`, `TestDoom*` in `e2e/doomtier_test.go`), a sandboxed Doom Emacs against the fake daemon, never in `e2e-emacs`.
+- What only a booted Doom shows -- a `map!` leader binding, a popup's placement, persp-mode's workspace recycling -- is Emacs's own behavior too: it is proven in the Doom tier (`TestDoom*` in `e2e/doomtier_test.go`), a sandboxed Doom Emacs against the fake daemon, never in a `TestEmacs*` full-stack world. The Doom tier runs in `e2e-emacs`'s container, which saves it a second container start.
 - A behavior that crosses systems is covered three ways:
   - the producer's tier proves what the producer emits;
   - the consumer's tier proves what the consumer does with it;
@@ -1167,8 +1167,8 @@ like an improvement still needs that conversation. Code:
     system's own suites run every other system as a mock ("A system's
     integration tests run that system alone"), so only the end-to-end suites
     test the systems together:
-    - Emacs elisp (`lisp/` and the module-root `.el` files): `ert`,
-      `e2e-emacs` and `emacs-doom`;
+    - Emacs elisp (`lisp/` and the module-root `.el` files): `ert` and
+      `e2e-emacs`;
     - `daemon/`: `daemon`, `e2e` and `e2e-emacs`;
     - the shim, the sidecar and the store: `shim`, `sidecar` and `store`,
       each with `e2e` and `e2e-emacs`, and the shim also `sidecar`, whose
@@ -1184,8 +1184,7 @@ like an improvement still needs that conversation. Code:
       of its Go half (`daemon`, `store`, `sidecar`, `lock`) and its TS half
       (`shim`, `webapp`, `build-frontend-harness`), with `e2e` and
       `e2e-emacs`;
-    - `e2e/`: `e2e`, `e2e-emacs` and `emacs-doom`, and `e2e/sandbox/` only
-      the two sandboxed suites, `e2e-emacs` and `emacs-doom`;
+    - `e2e/`: `e2e` and `e2e-emacs`, and `e2e/sandbox/` only `e2e-emacs`;
   - two tests keep the map honest: every local module a Go suite's `go.mod`
     replaces, and every tree a Vitest suite imports outside itself, must select
     that suite. They and the mock-rule source scan are the `repo-scans` suite

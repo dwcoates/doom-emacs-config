@@ -1,13 +1,10 @@
 #!/usr/bin/env bash
 #
 # lib-sandbox-suite.sh — the ONE way a gate suite runs Go tests inside the
-# e2e sandbox. Sourced, never run, by the sandboxed suites:
-#
-#   bin/test-e2e-emacs.sh   the Emacs client layer (TestEmacs*)
-#   bin/test-emacs-doom.sh  the Doom tier (TestDoom*)
-#
-# Both are the same sandbox, the same image and the same preflight, so they
-# share this rather than each carrying a copy that drifts.
+# e2e sandbox. Sourced, never run, by bin/test-e2e-emacs.sh, which runs the
+# Emacs client layer (TestEmacs*) and the Doom tier (TestDoom*) in one
+# container. A further sandboxed suite sources it too rather than carrying a
+# copy of the preflight, build and decline that drifts.
 #
 # THE CONTAINER IS A PRECONDITION, NOT A FAILURE. A sandboxed suite must never
 # run unsandboxed -- it starts an editor that would otherwise reach the

@@ -49,8 +49,8 @@ func TestLookup(t *testing.T) {
 }
 
 // sandboxed are the suites that run inside the e2e sandbox
-// (bin/lib-sandbox-suite.sh): the Emacs client layer and the Doom tier.
-var sandboxed = map[string]bool{"e2e-emacs": true, "emacs-doom": true}
+// (bin/lib-sandbox-suite.sh): the Emacs client layer, the Doom tier with it.
+var sandboxed = map[string]bool{"e2e-emacs": true}
 
 func TestOnlyTheSandboxSuiteMayDecline(t *testing.T) {
 	// The exit-77 disposition exists for a precondition the run cannot meet
@@ -234,18 +234,5 @@ func TestEverySuiteThatReadsTheScenarioGoldensDeclaresThem(t *testing.T) {
 				t.Fatalf("%s's inputs = %+v, want testdata/scenario-goldens/ among them", name, s.Reuse)
 			}
 		})
-	}
-}
-
-func TestTheDoomTierIsTheOneIntegrationScriptSuite(t *testing.T) {
-	// The Doom tier is Emacs's integration tier run by a script, and the plan
-	// reports it as one; every other script suite is a harness.
-	for _, s := range Suites {
-		if s.Integration != (s.Name == "emacs-doom") {
-			t.Errorf("%s Integration = %v", s.Name, s.Integration)
-		}
-	}
-	if s, ok := Lookup("emacs-doom"); !ok || s.Kind != Script || s.Slots != 2 || s.Path != "bin/test-emacs-doom.sh" {
-		t.Fatalf("emacs-doom = %+v, want the sandboxed Script suite at bin/test-emacs-doom.sh holding the sandbox's two cores", s)
 	}
 }

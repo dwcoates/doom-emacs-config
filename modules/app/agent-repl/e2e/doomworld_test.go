@@ -6,7 +6,8 @@ package e2e
 // workspace recycling -- with no real daemon, shim, store or sidecar
 // (docs/investigations/2026-10-14-test-tier-audit-e2e-edj.md, "The Doom
 // tier"). It is an Emacs INTEGRATION tier: one real system, Emacs, plus the
-// fake of its one neighbor, run as the `emacs-doom` suite (TestDoom*).
+// fake of its one neighbor. TestDoom* runs inside the e2e-emacs suite's
+// container (bin/test-e2e-emacs.sh), saving a second container start.
 //
 // The fake answers every unary call with a default success and serves the
 // three standing streams; a test scripts what it needs and pushes the roster
