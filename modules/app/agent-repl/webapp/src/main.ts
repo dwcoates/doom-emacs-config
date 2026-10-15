@@ -53,6 +53,7 @@ import { createLocalFailures, type LocalFailures } from "./failure/local.js";
 import { LEVEL_WINDOW_OPERATION, bindLogContext, log } from "./log.js";
 import { LevelWindow, selectionContext, selectionNote, selectLevel } from "../../agent-shim/logging/ts/level-window.js";
 import { installPagePresenceLog } from "./page-presence.js";
+import { installPageCensus } from "./page-census.js";
 import { connectToHost } from "./host/embed.js";
 import { installForwardingLogger, installTextAffordances } from "./document-runtime.js";
 import { mintConnectionId } from "./connection-id.js";
@@ -139,6 +140,9 @@ export async function boot(): Promise<void> {
     // The page's presence — hidden/shown, focused/blurred, resized, and the
     // repaint after each — is recorded from here on (src/page-presence.ts).
     installPagePresenceLog();
+    // THE PAGE STATES ITS OWN SIZE (page-census.ts): the webhost holding it
+    // cannot read a cross-origin page's document.
+    installPageCensus(document);
 
     // THE TOPBAR IS MOUNTED HERE, BEFORE ANY STREAM, because its warning chip
     // is the ONE place this page shows an error -- including the ones that
