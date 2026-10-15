@@ -979,7 +979,10 @@ func (m *measurer) baseline(ctx context.Context, leaves []leaf, healthy map[leaf
 				}
 			}
 		}
-		res, r, err := m.runTests(ctx, st, st.mutBin, gotest.TopPattern(tops), 2*bound+TimeoutSlack, nil, m.mutEnv(st)...)
+		// The cases' healthy latency was measured in the coverage runs, under
+		// whatever load those met; a case slower here is not changed, and
+		// only one past the hang bound hangs.
+		res, r, err := m.runTests(ctx, st, st.mutBin, gotest.TopPattern(tops), 2*bound+m.cfg.HangBound, nil, m.mutEnv(st)...)
 		if err != nil {
 			return err
 		}
