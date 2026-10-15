@@ -527,11 +527,14 @@ when the daemon answered the register with REFUSAL, a decoded error."
 
 ;;;; ---- Navigation over roster order ----
 
-(defun agent-repl-test-commands--row (name id at-ms &optional closed)
-  "Return a decoded roster row for NAME carrying the last-selected AT-MS."
+(defun agent-repl-test-commands--row (name id at-ms &optional closed updated-ms)
+  "Return a decoded roster row for NAME carrying the last-selected AT-MS.
+UPDATED-MS is its update recency (`RosterRowLastUpdated'), defaulting to
+AT-MS, or 0 when neither is given: every row states one."
   (list :workspace (list :workspace (list :id id :dir (concat "/tmp/" name)))
         :attention nil :priority nil
         :last-selected (when at-ms (list :at-ms at-ms))
+        :last-updated (list :at-ms (or updated-ms at-ms 0))
         :name (list :text name)
         :status (list :arm :ready :value nil)
         :current (list :current nil)
@@ -562,11 +565,11 @@ in one group."
   "Return a decoded CLOSED roster row for NAME, closed BY (an arm) at AT-MS.
 BY nil is a close that predates the daemon's record: no `closure'."
   (append (list :closure (and by (list :at-ms at-ms :by (list :arm by :value nil))))
-          (agent-repl-test-commands--row name (concat "id-" name) 100 t)))
+          (agent-repl-test-commands--row name (concat "id-" name) 100 t at-ms)))
 
 (defun agent-repl-test-commands--merged-row (name at-ms)
   "Return a decoded merged roster row for NAME, landed at AT-MS."
-  (let ((row (agent-repl-test-commands--row name (concat "id-" name) 100 t)))
+  (let ((row (agent-repl-test-commands--row name (concat "id-" name) 100 t at-ms)))
     (plist-put row :status '(:arm :merged :value nil))
     (plist-put row :when (list :arm :merged :value (list :at-ms at-ms)))))
 
@@ -1430,7 +1433,70 @@ and `--switched' to the workspace whose switch was requested of the daemon."
     (let ((offered (agent-repl-test-commands--offered-by
                     #'agent-repl-switch-to-project rows hidden merged)))
       ;; Assert
-      (should (equal offered '("open" "tucked" "landed" "mine"))))))
+      (should (equal (sort (copy-sequence offered) #'string<)
+                     '("landed" "mine" "open" "tucked"))))))
+
+(ert-deftest agent-repl-test-commands-switcher-offers-the-most-recently-updated-first ()
+  "`SPC p p' offers every section's workspaces most recently updated first."
+  ;; Arrange
+  (let ((rows (list (agent-repl-test-commands--row "stale" "id-stale" 100 nil 100)
+                    (agent-repl-test-commands--row "fresh" "id-fresh" 100 nil 900)
+                    (agent-repl-test-commands--closed-row "mine" :user 500)))
+        (hidden (list (agent-repl-test-commands--row "tucked" "id-tucked" 100 nil 800)))
+        (merged (list (agent-repl-test-commands--merged-row "landed" 700))))
+    ;; Act
+    (let ((offered (agent-repl-test-commands--offered-by
+                    #'agent-repl-switch-to-project rows hidden merged)))
+      ;; Assert
+      (should (equal offered '("fresh" "tucked" "landed" "mine" "stale"))))))
+
+(ert-deftest agent-repl-test-commands-switcher-keeps-roster-order-between-ties ()
+  "Workspaces updated at the same instant keep the roster's own order."
+  ;; Arrange
+  (let ((rows (list (agent-repl-test-commands--row "first" "id-first" 100 nil 300)
+                    (agent-repl-test-commands--row "second" "id-second" 100 nil 300))))
+    ;; Act
+    (let ((offered (agent-repl-test-commands--offered-by
+                    #'agent-repl-switch-to-project rows)))
+      ;; Assert
+      (should (equal offered '("first" "second"))))))
+
+(ert-deftest agent-repl-test-commands-switch-to-any-offers-the-most-recently-updated-first ()
+  "`SPC p P' orders every known workspace most recently updated first too."
+  ;; Arrange
+  (let ((rows (list (agent-repl-test-commands--closed-row "by-daemon" :daemon 200)
+                    (agent-repl-test-commands--row "open" "id-open" 100 nil 900)))
+        (merged (list (agent-repl-test-commands--merged-row "landed" 500))))
+    ;; Act
+    (let ((offered (agent-repl-test-commands--offered-by
+                    #'agent-repl-switch-to-any-workspace rows nil merged)))
+      ;; Assert
+      (should (equal offered '("open" "landed" "by-daemon"))))))
+
+(ert-deftest agent-repl-test-commands-switch-by-recency-ranks-a-rowless-workspace-first ()
+  "A live local workspace no roster push carries yet is the newest there is."
+  ;; Arrange
+  (let ((entries (list (list :name "known" :row (agent-repl-test-commands--row "known" "id-k" 1 nil 900))
+                       (list :name "registering" :row nil))))
+    ;; Act
+    (let ((ranked (agent-repl--switch-by-recency entries)))
+      ;; Assert
+      (should (equal (mapcar (lambda (e) (plist-get e :name)) ranked)
+                     '("registering" "known"))))))
+
+(ert-deftest agent-repl-test-commands-switch-by-recency-without-an-update-recency-fails-hard ()
+  "A row that states no update recency is a violated invariant."
+  ;; Arrange
+  (let ((errors nil)
+        (row (agent-repl-test-commands--row "bare" "id-bare" 1)))
+    (plist-put row :last-updated nil)
+    (cl-letf (((symbol-function 'agent-repl--error)
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+      ;; Act / Assert
+      (should-error (agent-repl--switch-by-recency
+                     (list (list :name "bare" :row row)
+                           (list :name "other" :row (agent-repl-test-commands--row "o" "id-o" 2)))))
+      (should (string-match-p "switch-update-ms: name=bare has no update recency" (car errors))))))
 
 (ert-deftest agent-repl-test-commands-switcher-leaves-out-what-the-user-did-not-close ()
   "A workspace the daemon, an agent or a merge closed is left to `SPC p P'."
@@ -1500,6 +1566,34 @@ and `--switched' to the workspace whose switch was requested of the daemon."
       (should (= (length offered) 33))
       (should (member "by-daemon" offered))
       (should (member "old" offered)))))
+
+(ert-deftest agent-repl-test-commands-switch-entry-invariant-failed-logs-then-signals ()
+  "The shared failure records the operation, the entry and what it lacks, then signals."
+  ;; Arrange
+  (let ((logged nil))
+    (cl-letf (((symbol-function 'agent-repl--error)
+               (lambda (ws fmt &rest args) (push (list ws (apply #'format fmt args)) logged))))
+      ;; Act
+      (let ((err (should-error (agent-repl--switch-entry-invariant-failed
+                                "some-op" '(:name "e1") "thing"))))
+        ;; Assert
+        (should (equal (cadr err) "agent-repl: switcher entry e1 has no thing"))
+        (should (equal (cadr (car logged)) "elisp.commands.some-op: name=e1 has no thing"))
+        (should (eq (car (car (car logged))) :agent-repl-central))))))
+
+(ert-deftest agent-repl-test-commands-switch-rankings-share-the-invariant-failure ()
+  "Both switcher rankings report a broken entry through the one shared failure."
+  ;; Arrange
+  (let ((calls nil)
+        (row (agent-repl-test-commands--row "bare" "id-bare" 1)))
+    (plist-put row :last-updated nil)
+    (cl-letf (((symbol-function 'agent-repl--switch-entry-invariant-failed)
+               (lambda (op _entry _missing) (push op calls) (error "stop"))))
+      ;; Act
+      (ignore-errors (agent-repl--switch-most-recent '((:name "x")) #'ignore))
+      (ignore-errors (agent-repl--switch-update-ms (list :name "bare" :row row)))
+      ;; Assert
+      (should (equal (reverse calls) '("switch-most-recent" "switch-update-ms"))))))
 
 (ert-deftest agent-repl-test-commands-switcher-ranking-without-an-instant-fails-hard ()
   "An entry handed to the ranking with no instant is a violated invariant."
@@ -1622,6 +1716,16 @@ and `--switched' to the workspace whose switch was requested of the daemon."
     ;; Act / Assert
     (should (functionp (alist-get 'affixation-function (cdr (funcall table "" nil 'metadata)))))
     (should (equal (all-completions "" table) '("one")))))
+
+(ert-deftest agent-repl-test-commands-switch-table-keeps-its-own-order ()
+  "The table states identity sort functions, so no UI re-sorts the recency order."
+  ;; Arrange
+  (let ((metadata (cdr (funcall (agent-repl--switch-table
+                                 (list (cons "one" '(:row nil :section nil :state :open))) 0)
+                                "" nil 'metadata))))
+    ;; Act / Assert
+    (should (eq (alist-get 'display-sort-function metadata) 'identity))
+    (should (eq (alist-get 'cycle-sort-function metadata) 'identity))))
 
 ;;;; ---- A project switch lands on the workspace's own panel ----
 

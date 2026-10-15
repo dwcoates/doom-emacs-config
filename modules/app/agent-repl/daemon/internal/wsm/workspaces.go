@@ -44,7 +44,7 @@ func normalizeDir(dir string) (string, error) {
 // the row, so it cannot drift from the closes it summarizes: CloseTurn's one
 // write of closed_at is the only edge, and turns_by_workspace keeps the MAX an
 // index range.
-const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at, result_end, result_read, hidden, hidden_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, landed_head, landed_at, commit_count, place, merge_revealed, cache_lapses_at, cache_lapse_gated_tokens, closure_at, closure_by, ` +
+const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at, result_end, result_read, hidden, hidden_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, landed_head, landed_at, commit_count, place, merge_revealed, cache_lapses_at, cache_lapse_gated_tokens, closure_at, closure_by, status_changed_at, ` +
 	`EXISTS (SELECT 1 FROM creation_jobs WHERE creation_jobs.workspace_id = workspaces.id AND creation_jobs.one_shot = 1), ` +
 	`EXISTS (SELECT 1 FROM merge_queue WHERE merge_queue.workspace_id = workspaces.id ` +
 	`OR merge_queue.workspace_id IN (SELECT merge_ws.id FROM workspaces AS merge_ws WHERE merge_ws.merge_of = workspaces.id)), ` +
@@ -54,35 +54,36 @@ const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_
 // priority is a decode failure, never a silently substituted default.
 func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 	var (
-		ws       Workspace
-		parent   sql.NullString
-		priority sql.NullInt64
-		task     sql.NullString
-		selected sql.NullInt64
-		activity sql.NullInt64
-		merged   sql.NullInt64
-		spawned  sql.NullInt64
-		created  int64
-		end      sql.NullString
-		read     bool
-		mergeOf  sql.NullString
-		request  sql.NullString
-		forkHead sql.NullString
-		compact  bool
-		closes   sql.NullString
-		cleanup  bool
-		cleanDir sql.NullString
-		landHead sql.NullString
-		landAt   sql.NullInt64
-		commits  sql.NullInt64
-		ended    sql.NullInt64
-		hiddenAt sql.NullInt64
-		lapsesAt sql.NullInt64
-		gated    sql.NullInt64
-		closedAt sql.NullInt64
-		closedBy sql.NullString
+		ws            Workspace
+		parent        sql.NullString
+		priority      sql.NullInt64
+		task          sql.NullString
+		selected      sql.NullInt64
+		activity      sql.NullInt64
+		merged        sql.NullInt64
+		spawned       sql.NullInt64
+		created       int64
+		end           sql.NullString
+		read          bool
+		mergeOf       sql.NullString
+		request       sql.NullString
+		forkHead      sql.NullString
+		compact       bool
+		closes        sql.NullString
+		cleanup       bool
+		cleanDir      sql.NullString
+		landHead      sql.NullString
+		landAt        sql.NullInt64
+		commits       sql.NullInt64
+		ended         sql.NullInt64
+		hiddenAt      sql.NullInt64
+		lapsesAt      sql.NullInt64
+		gated         sql.NullInt64
+		closedAt      sql.NullInt64
+		closedBy      sql.NullString
+		statusChanged sql.NullInt64
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &ws.OneShot, &ws.MergePending, &ended); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.OneShot, &ws.MergePending, &ended); err != nil {
 		return Workspace{}, err
 	}
 	if mergeOf.Valid != request.Valid {
@@ -139,6 +140,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 	ws.LastSelectedAt = optTime(selected)
 	ws.LastActivityAt = optTime(activity)
 	ws.LastTurnEndedAt = optTime(ended)
+	ws.StatusChangedAt = optTime(statusChanged)
 	ws.MergedAt = optTime(merged)
 	ws.CreatedAt = fromNanos(created)
 	// HIDDEN AND ITS INSTANT STAND AND FALL TOGETHER (SetHidden writes both in

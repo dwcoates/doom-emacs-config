@@ -811,6 +811,12 @@ message RosterRow {
   // is open. See RosterRowClosure, which carries the field's whole contract.
   optional RosterRowClosure closure = 66;
 
+  // When this workspace was LAST UPDATED: the latest of its durable lifecycle
+  // instants and of its last status change, resolved by the daemon. ALWAYS
+  // SET, because every workspace has at least its creation instant. See
+  // RosterRowLastUpdated, which carries the field's whole contract.
+  RosterRowLastUpdated last_updated = 67;
+
   // Whether this workspace may be OPENED by an editor yet: its session is
   // being brought up, is up, or could not be brought up. See
   // RosterRowAvailability, which carries the field's whole contract. ALWAYS
@@ -1128,6 +1134,30 @@ message RosterRowClosure {
     // The daemon itself, unasked: the workspace's directory was gone.
     RosterRowClosureByDaemon daemon = 5;
   }
+}
+
+// When the workspace was LAST UPDATED, in epoch MILLISECONDS: the LATEST of
+// every instant at which something happened to it, resolved by the daemon so
+// every client ranks by the same value. The instants it covers:
+//
+//   - its creation;
+//   - its latest turn start or turn close (any close kind: a turn resolving);
+//   - its close, kill, hide and merge landing (the durable close record, the
+//     hidden instant, the merge's landing);
+//   - its latest STATUS CHANGE: the instant the row's status arm last moved
+//     (an open, a re-open, a permission ask, a fault), kept durable by the
+//     daemon so it survives a restart of the daemon and of every client.
+//
+// It is UPDATE RECENCY, and it exists so a client can order workspaces
+// most-recently-updated first -- the editor's workspace switcher (owner
+// request, 2026-10-14). Clients order by it and never derive it, and never
+// draw it: the when-column is RosterRowWhen.
+//
+// SELECTING the workspace does not move it: viewing is not an update, and
+// selection recency is RosterRow.last_selected. It only ever moves forward.
+message RosterRowLastUpdated {
+  // The instant of the workspace's latest update, epoch milliseconds.
+  int64 at_ms = 1;
 }
 
 // The user closed the workspace. DELIBERATELY EMPTY: the arm is the fact.

@@ -14,6 +14,7 @@ package sidebar
 
 import (
 	"strconv"
+	"time"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -206,12 +207,23 @@ func New(colors vocab.RenderColors, log dlog.Surfaces, footer FooterStatus, opts
 // turn end draws the row as it stood. It is called off the resolver's lock.
 type ResultSink func(ws ids.WorkspaceID, result *wsm.TurnResult)
 
+// StatusChangeSink is told every instant a workspace's published status arm
+// moves. The daemon keeps it durable (wsm.SetStatusChangedAt), so a daemon
+// that did not see the change still ranks the row by it
+// (frontend.v1.RosterRowLastUpdated). It is called off the resolver's lock.
+type StatusChangeSink func(ws ids.WorkspaceID, at time.Time)
+
 // Option adjusts the resolver.
 type Option func(*resolver)
 
 // WithResultSink installs the sink the resolver tells its result changes.
 func WithResultSink(sink ResultSink) Option {
 	return func(r *resolver) { r.results = sink }
+}
+
+// WithStatusChangeSink installs the sink the resolver tells its status changes.
+func WithStatusChangeSink(sink StatusChangeSink) Option {
+	return func(r *resolver) { r.statusChanges = sink }
 }
 
 // VendorStart is where a workspace's vendor-start run stands, as the roster

@@ -75,10 +75,20 @@ func scanTurn(row interface{ Scan(...any) error }) (Turn, error) {
 // caller already guarded is the id's existence check, and a turn whose
 // workspace vanished under the same transaction is that guard's to catch.
 func bumpLastActivity(ctx context.Context, tx *sql.Tx, id WorkspaceID, at time.Time) error {
-	_, err := tx.ExecContext(ctx,
-		`UPDATE workspaces SET last_activity_at = MAX(COALESCE(last_activity_at, 0), ?) WHERE id = ?`,
-		nanos(at), id)
+	_, err := advanceInstant(ctx, tx, "last_activity_at", id, at)
 	return err
+}
+
+// advanceInstant advances one workspace's instant COLUMN to at, in the
+// caller's transaction, and ONLY EVER FORWARD: `MAX(existing, at)` leaves a
+// later recorded instant standing, and a NULL one reads as 0 through COALESCE
+// so the first write always wins. It is the one statement every forward-only
+// workspace instant is written with. COLUMN is always a constant of this
+// package, never caller input.
+func advanceInstant(ctx context.Context, tx *sql.Tx, column string, id WorkspaceID, at time.Time) (sql.Result, error) {
+	return tx.ExecContext(ctx,
+		`UPDATE workspaces SET `+column+` = MAX(COALESCE(`+column+`, 0), ?) WHERE id = ?`,
+		nanos(at), id)
 }
 
 // PutTurn records a turn's durable origin and address.

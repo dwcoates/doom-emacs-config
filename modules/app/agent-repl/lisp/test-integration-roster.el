@@ -79,7 +79,8 @@ presence itself is the fact for RosterRowDetail's three lines."
             (when . ((noTurnRunning . ())))
             (detail . ())
             (closed . ((closed . :false)))
-            (availability . ((available . ()))))))
+            (availability . ((available . ())))
+            (lastUpdated . ((atMs . "1"))))))
 
 (defun agent-repl-itest-roster--roster (rows &rest overrides)
   "Return a WorkspaceRoster protojson alist carrying ROWS in one repo section.

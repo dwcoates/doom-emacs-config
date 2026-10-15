@@ -103,6 +103,9 @@ type DB interface {
 	SetAttention(ctx context.Context, id WorkspaceID, on bool) error
 	// SetResult records, or clears with nil, the roster's last turn result.
 	SetResult(ctx context.Context, id WorkspaceID, result *TurnResult) error
+	// SetStatusChangedAt advances the instant the roster's status arm for the
+	// workspace last moved; it never moves backward (see statuschanged.go).
+	SetStatusChangedAt(ctx context.Context, id WorkspaceID, at time.Time) error
 	// SetMergedAt records that the workspace's merge landed and, when commits
 	// is set, the commit count it brought in (see commitcount.go).
 	SetMergedAt(ctx context.Context, id WorkspaceID, at time.Time, commits *uint32) error

@@ -254,6 +254,14 @@ restart.  Emacs orders by it and never draws it
 \(`agent-repl-roster-last-finished-name')."
   (agent-repl-wire-roster--decode-instant "RosterRowLastTurnEnded" value))
 
+(defun agent-repl-wire-decode-roster-row-last-updated (value)
+  "Decode VALUE as `RosterRowLastUpdated', a plist `(:at-ms)'.
+The instant the workspace was LAST UPDATED, epoch MILLISECONDS: the
+latest of its lifecycle instants and of its last status change, resolved
+by the daemon.  Every row carries it.  Emacs orders by it and never
+draws it \(`agent-repl--switch-curated')."
+  (agent-repl-wire-roster--decode-instant "RosterRowLastUpdated" value))
+
 ;;;; ---- The close record ----
 
 (defun agent-repl-wire-decode-roster-row-closure-by-user (value)
@@ -670,7 +678,7 @@ Nested workspaces — a spawned family under its parent — in render order."
   (agent-repl-wire-decode-roster-row value))
 
 (defconst agent-repl-wire--roster-row-keys
-  (append '(workspace attention priority viewed reviving detachedLive oneShot opening asyncMerging lastSelected lastTurnEnded closure availability name current children when detail closed)
+  (append '(workspace attention priority viewed reviving detachedLive oneShot opening asyncMerging lastSelected lastTurnEnded closure lastUpdated availability name current children when detail closed)
           (mapcar #'car agent-repl-wire-roster-row-status-arms))
   "Every key `RosterRow' may carry: its own fields plus the 22 status arms.")
 
@@ -678,7 +686,8 @@ Nested workspaces — a spawned family under its parent — in render order."
   "Decode VALUE as `RosterRow'.
 Returns `(:workspace W :attention A :priority P :viewed V :reviving R
 :detached-live DL :one-shot OS :opening O :async-merging AM
-:last-selected L :last-turn-ended LT :closure CL :availability AV
+:last-selected L :last-turn-ended LT :closure CL :last-updated LU
+:availability AV
 :name N :status
 S :current C :children ROWS :when WHEN :detail D :closed CLOSED)', with
 the message tree preserved as the contract spells it."
@@ -722,6 +731,9 @@ the message tree preserved as the contract spells it."
            :closure (agent-repl-wire--decode-optional-message
                      "RosterRow" 'closure object
                      #'agent-repl-wire-decode-roster-row-closure)
+           :last-updated (agent-repl-wire--decode-message
+                          "RosterRow" 'lastUpdated object
+                          #'agent-repl-wire-decode-roster-row-last-updated)
            :availability (agent-repl-wire--decode-message
                           "RosterRow" 'availability object
                           #'agent-repl-wire-decode-roster-row-availability)

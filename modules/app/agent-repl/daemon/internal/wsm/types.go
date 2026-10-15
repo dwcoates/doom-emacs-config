@@ -100,6 +100,9 @@ type Workspace struct {
 	// counts the idle time since work last finished and stays stable across
 	// mere selection, navigation, and the start of the next turn.
 	LastTurnEndedAt *time.Time
+	// StatusChangedAt is when the roster's status arm for the workspace last
+	// moved (SetStatusChangedAt); nil when no change has been recorded.
+	StatusChangedAt *time.Time
 	// MergedAt is when the workspace's merge landed, nil when it has not.
 	MergedAt *time.Time
 	// CommitCount is how many commits the workspace's branch holds beyond its

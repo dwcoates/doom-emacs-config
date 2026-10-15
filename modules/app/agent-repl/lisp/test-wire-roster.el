@@ -48,7 +48,7 @@ status arm and whatever else the case is about."
   (concat "{\"workspace\":{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/1\"}},"
           "\"name\":{\"text\":\"fix-flaky\"},"
           "\"current\":{},\"when\":{\"noTurnRunning\":{}},\"detail\":{},\"closed\":{},"
-          "\"availability\":{\"available\":{}}"
+          "\"availability\":{\"available\":{}},\"lastUpdated\":{\"atMs\":\"1\"}"
           (mapconcat (lambda (f) (concat "," f)) fragments "")
           "}"))
 
@@ -71,6 +71,7 @@ status arm and whatever else the case is about."
                    :last-selected nil
                    :last-turn-ended nil
                    :closure nil
+                   :last-updated (:at-ms 1)
                    :availability (:arm :available :value nil)
                    :name (:text "fix-flaky")
                    :status (:arm :ready :value nil)
@@ -223,6 +224,40 @@ status arm and whatever else the case is about."
                   (agent-repl-test-wire-roster--row
                    "\"done\":{}" "\"lastTurnEnded\":{\"atMs\":\"1\",\"kind\":\"done\"}"))
                  '("RosterRowLastTurnEnded" kind "unknown field"))))
+
+(defun agent-repl-test-wire-roster--row-updated-at (last-updated)
+  "Return a minimal valid RosterRow JSON whose `lastUpdated' is LAST-UPDATED.
+LAST-UPDATED is the field's raw JSON, or nil to leave the field absent."
+  (concat "{\"workspace\":{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/1\"}},"
+          "\"name\":{\"text\":\"fix-flaky\"},\"ready\":{},"
+          "\"current\":{},\"when\":{\"noTurnRunning\":{}},\"detail\":{},\"closed\":{},"
+          "\"availability\":{\"available\":{}}"
+          (if last-updated (concat ",\"lastUpdated\":" last-updated) "")
+          "}"))
+
+(ert-deftest agent-repl-test-wire-roster-row-decodes-the-last-updated-instant ()
+  "A row's `lastUpdated' decodes to its update recency in epoch ms."
+  (should (equal (plist-get (agent-repl-test-wire-roster--decode
+                             #'agent-repl-wire-decode-roster-row
+                             (agent-repl-test-wire-roster--row-updated-at
+                              "{\"atMs\":\"1756400000000\"}"))
+                            :last-updated)
+                 '(:at-ms 1756400000000))))
+
+(ert-deftest agent-repl-test-wire-roster-row-without-last-updated-is-a-breach ()
+  "Every row states its update recency: an absent one is a contract breach."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row
+                  (agent-repl-test-wire-roster--row-updated-at nil))
+                 '("RosterRow" lastUpdated "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-roster-row-last-updated-refuses-an-unknown-field ()
+  "`RosterRowLastUpdated' carries only its instant: anything else is a breach."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row
+                  (agent-repl-test-wire-roster--row-updated-at
+                   "{\"atMs\":\"1\",\"by\":\"emacs\"}"))
+                 '("RosterRowLastUpdated" by "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-row-decodes-the-close-record ()
   "A row carrying `closure' decodes its durable close instant and its cause."
@@ -415,7 +450,7 @@ reserved."
   "The row's join key is not optional."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row
-                  (concat "{\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"current\":{},"
+                  (concat "{\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"lastUpdated\":{\"atMs\":\"1\"},\"current\":{},"
                           "\"when\":{\"noTurnRunning\":{}},\"detail\":{},\"closed\":{}}"))
                  '("RosterRow" workspace "required message field is absent"))))
 
@@ -423,7 +458,7 @@ reserved."
   "Every row has a display name element."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row
-                  (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},\"ready\":{},\"availability\":{\"available\":{}},"
+                  (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},\"ready\":{},\"availability\":{\"available\":{}},\"lastUpdated\":{\"atMs\":\"1\"},"
                           "\"current\":{},\"when\":{\"noTurnRunning\":{}},\"detail\":{},\"closed\":{}}"))
                  '("RosterRow" name "required message field is absent"))))
 
@@ -432,7 +467,7 @@ reserved."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row
                   (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},"
-                          "\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"current\":{},"
+                          "\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"lastUpdated\":{\"atMs\":\"1\"},\"current\":{},"
                           "\"when\":{\"noTurnRunning\":{}},\"detail\":{}}"))
                  '("RosterRow" closed "required message field is absent"))))
 
@@ -441,7 +476,7 @@ reserved."
   (should (equal (plist-get (agent-repl-test-wire-roster--decode
                              #'agent-repl-wire-decode-roster-row
                              (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},"
-                                     "\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},"
+                                     "\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"lastUpdated\":{\"atMs\":\"1\"},"
                                      "\"current\":{},\"when\":{\"noTurnRunning\":{}},\"detail\":{},"
                                      "\"closed\":{\"closed\":true}}"))
                             :closed)
@@ -657,7 +692,7 @@ message."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row
                   (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},"
-                          "\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"current\":{},"
+                          "\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"lastUpdated\":{\"atMs\":\"1\"},\"current\":{},"
                           "\"detail\":{},\"closed\":{}}"))
                  '("RosterRow" when "required message field is absent"))))
 
@@ -720,7 +755,7 @@ message."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row
                   (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},"
-                          "\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"current\":{},"
+                          "\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"lastUpdated\":{\"atMs\":\"1\"},\"current\":{},"
                           "\"when\":{\"noTurnRunning\":{}},\"closed\":{}}"))
                  '("RosterRow" detail "required message field is absent"))))
 
@@ -1377,7 +1412,7 @@ A hand-rolled hidden-section decoder would skip the shared helper and fail here.
                   #'agent-repl-wire-decode-roster-row
                   (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},"
                           "\"name\":{\"text\":\"n\"},\"ready\":{},\"current\":{},"
-                          "\"when\":{\"noTurnRunning\":{}},\"detail\":{},\"closed\":{}}"))
+                          "\"when\":{\"noTurnRunning\":{}},\"detail\":{},\"closed\":{},\"lastUpdated\":{\"atMs\":\"1\"}}"))
                  '("RosterRow" availability "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-roster-section-header-decodes-its-count ()

@@ -1340,6 +1340,14 @@ whose close predates the record. `SPC p P`
 (`agent-repl-switch-to-any-workspace`) offers every known workspace, which is
 what `SPC p p` offered before.
 
+Both offer their workspaces MOST RECENTLY UPDATED FIRST, whichever section
+each sits in (owner request, 2026-10-14; `agent-repl--switch-by-recency`). The
+instant is the daemon's `frontend.v1.RosterRow.last_updated`: the latest of the
+workspace's lifecycle instants (created, turn start or close, closed or
+killed, hidden, merged) and of its last status change, which the daemon keeps
+durable (`wsm` layout 54, `status_changed_at`). Emacs orders by it and never
+derives it. See `docs/protobuf-design/roster-last-updated.md`.
+
 Both draw each line with the sidebar's status mark before the name (a grey
 dot for a closed or merged row, `◌` in the status color for a hidden one,
 `agent-repl-status-roster-mark` otherwise) and three columns after it: the

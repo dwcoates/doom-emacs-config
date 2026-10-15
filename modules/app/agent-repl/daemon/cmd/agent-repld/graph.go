@@ -439,9 +439,11 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// surfaces: the network fault reaches it through the same door as the
 	// footer. It raises no fault itself, so it needs no decorated client.
 	// THE ROSTER'S LAST TURN RESULT IS DURABLE: a daemon that did not see a
-	// workspace's turn end draws its row as it stood, not `ready`.
+	// workspace's turn end draws its row as it stood, not `ready`. SO IS THE
+	// INSTANT ITS STATUS LAST CHANGED: a restart still ranks the row by it.
 	sidebarResolver, err := sidebar.New(colors, p.Surfaces, footerResolver,
-		sidebar.WithResultSink(rosterResults(p.DB, p.Surfaces.Global())))
+		sidebar.WithResultSink(rosterResults(p.DB, p.Surfaces.Global())),
+		sidebar.WithStatusChangeSink(rosterStatusChanges(p.DB, p.Surfaces.Global())))
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the sidebar resolver: %w", err)
 	}

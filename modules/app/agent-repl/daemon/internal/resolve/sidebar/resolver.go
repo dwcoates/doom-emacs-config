@@ -50,7 +50,16 @@ type resolver struct {
 	// is released.
 	pendingResults []resultChange
 
-	// now is the clock the Recently Merged window is measured against, and
+	// statusChanges is told every instant a workspace's published status arm
+	// moves, so the daemon keeps it durable (wsm.SetStatusChangedAt). nil
+	// tells nobody.
+	statusChanges StatusChangeSink
+	// pendingStatusChanges are the arm moves a render found, reported after
+	// the lock is released.
+	pendingStatusChanges []statusChange
+
+	// now is the clock the Recently Merged window is measured against and a
+	// status change is stamped by, and
 	// after arms the re-render that drops a merge the moment it ages out of
 	// that window (WithClock). agingOut stops the one armed re-render, nil
 	// when none is armed.
@@ -63,6 +72,12 @@ type resolver struct {
 type resultChange struct {
 	ws     ids.WorkspaceID
 	result *wsm.TurnResult
+}
+
+// statusChange is one workspace's published status arm moving, and when.
+type statusChange struct {
+	ws ids.WorkspaceID
+	at time.Time
 }
 
 // newResolver builds the resolver, asserting the render-colors tables against
@@ -183,6 +198,8 @@ func (r *resolver) mutate(operation, message string, ctx dlog.Context, log dlog.
 	}
 	changes := r.pendingResults
 	r.pendingResults = nil
+	statusChanges := r.pendingStatusChanges
+	r.pendingStatusChanges = nil
 	// PUBLISHED UNDER THE LOCK THAT RENDERED IT, so views reach the topic in
 	// the order the changes were made. Published after the unlock, a change
 	// rendered first could be published second, and a stale view overwrote a
@@ -195,6 +212,9 @@ func (r *resolver) mutate(operation, message string, ctx dlog.Context, log dlog.
 	r.mu.Unlock()
 	for _, change := range changes {
 		r.results(change.ws, change.result)
+	}
+	for _, change := range statusChanges {
+		r.statusChanges(change.ws, change.at)
 	}
 
 	if ctx == nil {
