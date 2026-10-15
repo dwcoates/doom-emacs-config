@@ -20,9 +20,10 @@ the log records that show it, so the failures can be fixed at their source.
 | 9 | 2026-10-15 | `sandbox-no-host-mounts` (tip `a54186877d`, the structural fix for entry 8, at the FRONT) | `sandbox-no-host-mounts-merge` | LANDED (`55fd63fe5d`), deployed |
 | 10 | 2026-10-15 | `test-suite-skip-hdv-land` (35 commits, suite reuse) | `test-suite-reuse-merge` | LANDED (`a980538e8b`), deployed |
 | 11 | 2026-10-15 | `test-timer-waits-land` (tip `087c0e4da4`) | `timer-waits-landing` | LANDED (`9076bd2ecf`), deployed |
-| 12 | 2026-10-15 | `redundancy-tool` (tip `764923476a`, the redundancy tool and pinned baseline, minor) | `redundancy-tool-land` | requested, pending (queue resumed ~10:00) |
+| 12 | 2026-10-15 | `redundancy-tool` (tip `764923476a`, the redundancy tool and pinned baseline, minor) | `redundancy-tool-land` | LANDED (`c31781c36b`), deployed; landed the branch as it stood when the merge forked, missing six later fixes, see entry 12 |
 | 13 | 2026-10-15 | `sessions-test-slim` (one commit: 117 redundant cases removed from `sessions_test.go`, -0.04 coverage points) | `sessions-test-slim-land` | requested, pending (queue resumed ~10:00) |
 | 14 | 2026-10-15 | `tier-audit-e2e-step-c2` (tip `4b99b4a9cc`, step (c) rebased onto the fd fix; the retry of entry 8) | `tier-audit-e2e-step-c2-merge` | requested, pending |
+| 15 | 2026-10-15 | `redundancy-tool-fixes` (the six fixes entry 12 missed, cut from master) | `redundancy-tool-fixes-land` | requested, pending |
 
 ## 1. `test-tier-rule` (landed)
 
@@ -83,3 +84,10 @@ the log records that show it, so the failures can be fixed at their source.
   - Resume with `/merge-queue resume ~/.config/doom` after the cache is cleaned.
 - Children verify locally with a private `GOCACHE` in the meantime.
 - Resolved 2026-10-15 ~10:00: the owner ran `go clean -cache`, and a `go vet` through the shared cache passed again. My resume request was refused `not_paused`, because the queue had already been resumed by then (by the owner or by `agent-repl-perf-regression`, which had asked about the pause).
+
+## 12. `redundancy-tool` (landed as `c31781c36b`, without six later fixes)
+
+- The merge landed the branch's tip as of the moment the merge workspace forked. The child kept committing to the same branch afterwards (the branch moved from `620766ed4d` to `764923476a` while the merge waited), and those commits did not land.
+- Six fixes were missing, found with `git cherry`: real-path `FindRoot`, integration-tier pins, the ruled pin clauses, the daemon scratch-repository race fix, naming every case that fails with no mutant, and the per-package overlay fix.
+- Not a queue defect as such. A waiting async merge pins its branch at fork time, which is reasonable. But nothing told the requester that its later commits were left out. Possible source fix: when a merge lands and the branch has moved past what landed, report the commits left behind.
+- The child cut `redundancy-tool-fixes` from master with the six fixes and requested it as entry 15.
