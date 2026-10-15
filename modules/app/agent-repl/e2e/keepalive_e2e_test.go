@@ -76,12 +76,13 @@ func keepaliveWorld(t *testing.T) (*World, *workspacev1.WorkspaceRef, string) {
 	return w, ws, harness.WorkspaceLogPath(repo.Dir, "shim")
 }
 
-// awaitShimRecords awaits COUNT records satisfying pred, each strictly after
-// the one before it in the log's own order.
-func awaitShimRecords(t *testing.T, w *World, path, what string, count int, pred func(harness.LogRecord) bool) []harness.LogRecord {
+// awaitShimRecords awaits COUNT records satisfying pred, the first at or after
+// the first record `from` accepts and each strictly after the one before it,
+// in the log's own order.
+func awaitShimRecords(t *testing.T, w *World, path, what string, from func(harness.LogRecord) bool, count int, pred func(harness.LogRecord) bool) []harness.LogRecord {
 	t.Helper()
 	var got []harness.LogRecord
-	after := func(harness.LogRecord) bool { return true }
+	after := from
 	previous := ""
 	for len(got) < count {
 		// The anchor is the previous match itself, which pred also accepts,
@@ -95,6 +96,17 @@ func awaitShimRecords(t *testing.T, w *World, path, what string, count int, pred
 		after = func(c harness.LogRecord) bool { return c.Raw == raw }
 	}
 	return got
+}
+
+// anyShimRecord anchors a wait at the shim log's first record.
+func anyShimRecord(harness.LogRecord) bool { return true }
+
+// turnOpened anchors a wait at the shim opening TURN: what the shim does for
+// the conversation after it, never what a keep-alive did before it.
+func turnOpened(turn string) func(harness.LogRecord) bool {
+	return func(r harness.LogRecord) bool {
+		return r.Operation == "shim.engine.turn" && strings.HasPrefix(r.Message, "opened a turn") && r.Context["turn_id"] == turn
+	}
 }
 
 // isRewind reports a rewind record performed before `before` ("keepalive" or
@@ -149,7 +161,11 @@ func TestPromptDuringKeepAliveRewindsPastTheKeepAliveAlone(t *testing.T) {
 	// Arrange
 	w, ws, shimLog := keepaliveWorld(t)
 	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
-	awaitShimRecords(t, w, shimLog, "a keep-alive submitted after the real turn", 1,
+	// THE KEEP-ALIVE IS AWAITED AFTER THE REAL TURN OPENED. The suite's short
+	// interval fires a keep-alive before the first real prompt too, and that
+	// one satisfied an unanchored wait: the "during" prompt then arrived with
+	// no keep-alive in flight and no rewind to observe (2026-10-15 full run).
+	awaitShimRecords(t, w, shimLog, "a keep-alive submitted after the real turn", turnOpened(turn.GetValue()), 1,
 		func(r harness.LogRecord) bool { return r.Context["outcome"] == "keepalive_submitted" })
 
 	// Act
@@ -290,9 +306,9 @@ func TestStopReplayedByEveryRewindNeverLoops(t *testing.T) {
 			// Act: three replays, each answered beside a keep-alive, then a
 			// real prompt whose turn ending proves the ordered writer flushed
 			// everything before it.
-			awaitShimRecords(t, w, shimLog, "a stop replayed by a rewind", 3,
+			awaitShimRecords(t, w, shimLog, "a stop replayed by a rewind", anyShimRecord, 3,
 				func(r harness.LogRecord) bool { return r.Message == stopReplayMessage })
-			rewinds := awaitShimRecords(t, w, shimLog, "a rewind before a keep-alive beat", 3, isRewind("keepalive"))
+			rewinds := awaitShimRecords(t, w, shimLog, "a rewind before a keep-alive beat", anyShimRecord, 3, isRewind("keepalive"))
 			after := SubmitPrompt(t, w, ws, "after the replays")
 			AwaitTurnEnded(t, w, ws, after)
 
