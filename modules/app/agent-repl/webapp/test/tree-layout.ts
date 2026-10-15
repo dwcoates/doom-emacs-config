@@ -16,8 +16,11 @@
  *     ancestor-or-self, and none for one inside a hidden subtree — the way an
  *     engine answers a `display: none` element — which is what the body's
  *     "laid out" test reads;
- *   - a `.mp-tree` element's rect is `CHARPX` per character of its text (the
- *     measure's probe is one);
+ *   - a `.mp-tree` element's rect is `CHARPX` per character of its text at the
+ *     zoom it is drawn at (the measure's probe is one);
+ *   - a `.bubble`'s rect is its held breadth (`--bubble-held-breadth`) while it
+ *     holds one, and otherwise NATURALPX at the zoom it is drawn at, either
+ *     capped at its `max-width`;
  *   - an element holding a `.bubble` child reports `CONTAININGPX` as its
  *     `clientWidth` (the bubble's containing block);
  *   - `getComputedStyle` answers the bubble's `max-width` as MAXWIDTH, the
@@ -28,6 +31,11 @@
  *     a gutter), SCROLLBOXPX less SCROLLBARPX as its `clientWidth`, so the
  *     measured scrollbar gutter is SCROLLBARPX (a negative one stages an
  *     impossible measurement); an uncapped box measures no gutter.
+ * THE ZOOM an element is drawn at is the nearest `--feed-text-scale` set
+ * inline on it or an ancestor, as the stylesheet's inheritance resolves it:
+ * the document element's (the scale `applyFeedTextScale` wrote) or a bubble's
+ * own (the painter's 100% read), and 1 where none is set.
+ *
  * Every other read passes through to jsdom untouched.
  */
 import { afterEach, beforeEach } from "vitest";
@@ -47,6 +55,8 @@ export interface TreeLayout {
   scrollbarPx: number;
   /** The scroll box's `offsetWidth`, in px. */
   scrollBoxPx: number;
+  /** A bubble's fit-content border-box width at 100% zoom, in px. */
+  naturalPx: number;
 }
 
 /** A layout with the stylesheet's real 77% cap and round numbers. */
@@ -57,7 +67,23 @@ export const DEFAULT_TEST_LAYOUT: TreeLayout = {
   bodyPaddingPx: 10,
   scrollbarPx: 8,
   scrollBoxPx: 700,
+  naturalPx: 400,
 };
+
+/** The zoom EL is drawn at: the nearest inline `--feed-text-scale` on it or an ancestor, else 1. */
+function zoomOf(el: Element): number {
+  for (let at: Element | null = el; at !== null; at = at.parentElement) {
+    const raw = (at as HTMLElement).style?.getPropertyValue("--feed-text-scale") ?? "";
+    if (raw !== "") return Number(raw);
+  }
+  return 1;
+}
+
+/** LAYOUT's bubble cap resolved to px, as the measure resolves it. */
+function capPxOf(layout: TreeLayout): number {
+  const pct = /^([\d.]+)%$/.exec(layout.maxWidth);
+  return pct === null ? Number.parseFloat(layout.maxWidth) : (Number.parseFloat(pct[1]) / 100) * layout.containingPx;
+}
 
 /** The horizontal lengths the measure reads off computed styles. */
 const LENGTHS = new Set([
@@ -89,7 +115,14 @@ export function installTreeLayout(overrides: Partial<TreeLayout> = {}): {
   const originalRect = Element.prototype.getBoundingClientRect;
   Element.prototype.getBoundingClientRect = function staged(this: Element): DOMRect {
     if (!this.isConnected) return rect(0);
-    if (this.classList.contains("mp-tree")) return rect((this.textContent ?? "").length * layout.charPx);
+    if (this.classList.contains("mp-tree")) {
+      return rect((this.textContent ?? "").length * layout.charPx * zoomOf(this));
+    }
+    if (this.classList.contains("bubble")) {
+      const held = (this as HTMLElement).style.getPropertyValue("--bubble-held-breadth");
+      const fitPx = held === "" ? layout.naturalPx * zoomOf(this) : Number.parseFloat(held);
+      return rect(Math.min(capPxOf(layout), fitPx));
+    }
     return originalRect.call(this);
   };
 
@@ -160,9 +193,7 @@ export function installTreeLayout(overrides: Partial<TreeLayout> = {}): {
  * box (src/bubble/draw.ts `BUBBLE_UNCAPPED`) reserves no gutter.
  */
 export function stagedCols(layout: TreeLayout, box: "capped" | "uncapped" = "capped"): number {
-  const pct = /^([\d.]+)%$/.exec(layout.maxWidth);
-  const capPx =
-    pct === null ? Number.parseFloat(layout.maxWidth) : (Number.parseFloat(pct[1]) / 100) * layout.containingPx;
+  const capPx = capPxOf(layout);
   const gutterPx = box === "capped" ? layout.scrollbarPx : 0;
   return Math.floor((capPx - 2 * layout.bodyPaddingPx - gutterPx) / layout.charPx);
 }

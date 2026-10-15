@@ -95,6 +95,50 @@ describe("installTreeLayout", () => {
   });
 });
 
+describe("installTreeLayout's zoom", () => {
+  const staged = useTreeLayout();
+
+  afterEach(() => {
+    document.documentElement.style.removeProperty("--feed-text-scale");
+  });
+
+  it.each([
+    ["no zoom set anywhere", null, null, 80, 400],
+    ["the document's zoom", "1.5", null, 120, 600],
+    ["a bubble's own zoom over the document's", "1.5", "1", 80, 400],
+  ] as const)("draws a tree probe and a bubble at %s", (_label, root, own, probePx, bubblePx) => {
+    // Arrange
+    const { bubble, probe } = stage(true);
+    if (root !== null) document.documentElement.style.setProperty("--feed-text-scale", root);
+    if (own !== null) bubble.style.setProperty("--feed-text-scale", own);
+    // Act
+    const reads = [probe.getBoundingClientRect().width, bubble.getBoundingClientRect().width];
+    // Assert
+    expect(reads).toEqual([probePx, bubblePx]);
+  });
+
+  it("draws a held bubble at its held breadth, whatever the zoom", () => {
+    // Arrange
+    const { bubble } = stage(true);
+    document.documentElement.style.setProperty("--feed-text-scale", "1.5");
+    bubble.style.setProperty("--bubble-held-breadth", "321px");
+    // Act / Assert
+    expect(bubble.getBoundingClientRect().width).toBe(321);
+  });
+
+  it.each([
+    ["an unheld bubble", null],
+    ["a held bubble", "900px"],
+  ] as const)("caps %s at its max-width", (_label, held) => {
+    // Arrange — 77% of the 1000px column.
+    staged.layout.naturalPx = 2000;
+    const { bubble } = stage(true);
+    if (held !== null) bubble.style.setProperty("--bubble-held-breadth", held);
+    // Act / Assert
+    expect(bubble.getBoundingClientRect().width).toBe(770);
+  });
+});
+
 describe("stagedCols", () => {
   it.each([
     { name: "a percentage cap", maxWidth: "77%", scrollbarPx: 8, want: 92 },
@@ -102,7 +146,7 @@ describe("stagedCols", () => {
     { name: "a cap with no gutter", maxWidth: "77%", scrollbarPx: 0, want: 93 },
   ])("computes the budget of $name", ({ maxWidth, scrollbarPx, want }) => {
     // Act + Assert
-    expect(stagedCols({ charPx: 8, containingPx: 1000, maxWidth, bodyPaddingPx: 10, scrollbarPx, scrollBoxPx: 700 })).toBe(want);
+    expect(stagedCols({ charPx: 8, containingPx: 1000, maxWidth, bodyPaddingPx: 10, scrollbarPx, scrollBoxPx: 700, naturalPx: 400 })).toBe(want);
   });
 });
 

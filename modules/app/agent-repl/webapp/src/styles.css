@@ -1694,6 +1694,13 @@ pre {
    #login-overlay, #composer, the sidebar panes and the create forms); this
    one was missed. */
 .bubble[hidden] { display: none; }
+/* THE FEED TEXT ZOOM CHANGES ONLY THE TEXT (owner ruling, 2026-10-15): under
+   any zoom but 100% a bubble is as broad as its content is at 100%, and the
+   zoomed text re-wraps inside that breadth. The body painter measures the
+   breadth and holds it here (src/bubble/body.ts `holdBreadth`), re-holding it
+   whenever the content, the column or the zoom changes; the cap still has the
+   last word. At 100% nothing is held and the bubble fits its text. */
+.bubble[data-held-breadth] { width: var(--bubble-held-breadth); }
 /* THE BOX. It is the bubble's own child, its right edge IS the bubble's
    inner edge, and it carries no horizontal padding of its own — the two facts
    that put the scrollbar on the bubble's right-hand side. Every bubble's box
@@ -5183,25 +5190,31 @@ bubble-body.bubble-body { display: block; }
   transition: margin-right var(--usage-grow) ease;
 }
 .bubble.interim-response {
-  transition: max-width var(--usage-grow) ease;
+  transition: max-width var(--usage-grow) ease, width var(--usage-grow) ease;
 }
 /* The reveal, under the one trigger every reveal reads: the bubble hovered or
    holding focus (the corner's own triggers are inside it). An arriving corner
-   has no duration, so nothing opens for it. */
-.bubble.interim-response:hover:has(> .bubble-scroll > .usage-corner:not([data-arriving])),
-.bubble.interim-response:focus-within:has(> .bubble-scroll > .usage-corner:not([data-arriving])) {
+   has no duration, so nothing opens for it. Never while the body painter
+   reads the bubble's 100%-zoom breadth (`data-breadth-measuring`): the breadth
+   is the closed bubble's, and a held bubble opens by the reveal on top of it. */
+.bubble.interim-response:not([data-breadth-measuring]):hover:has(> .bubble-scroll > .usage-corner:not([data-arriving])),
+.bubble.interim-response:not([data-breadth-measuring]):focus-within:has(> .bubble-scroll > .usage-corner:not([data-arriving])) {
   max-width: calc(var(--bubble-max-width) + var(--usage-reveal-w));
 }
-.bubble.interim-response:hover > .bubble-scroll > .usage-corner:not([data-arriving]) > .usage-slider,
-.bubble.interim-response:focus-within > .bubble-scroll > .usage-corner:not([data-arriving]) > .usage-slider {
+.bubble.interim-response[data-held-breadth]:not([data-breadth-measuring]):hover:has(> .bubble-scroll > .usage-corner:not([data-arriving])),
+.bubble.interim-response[data-held-breadth]:not([data-breadth-measuring]):focus-within:has(> .bubble-scroll > .usage-corner:not([data-arriving])) {
+  width: calc(var(--bubble-held-breadth) + var(--usage-reveal-w));
+}
+.bubble.interim-response:not([data-breadth-measuring]):hover > .bubble-scroll > .usage-corner:not([data-arriving]) > .usage-slider,
+.bubble.interim-response:not([data-breadth-measuring]):focus-within > .bubble-scroll > .usage-corner:not([data-arriving]) > .usage-slider {
   width: var(--usage-reveal-w);
 }
-.bubble.interim-response:hover > .bubble-scroll.expanded > .usage-corner:not([data-arriving]) + .bubble-body,
-.bubble.interim-response:focus-within > .bubble-scroll.expanded > .usage-corner:not([data-arriving]) + .bubble-body {
+.bubble.interim-response:not([data-breadth-measuring]):hover > .bubble-scroll.expanded > .usage-corner:not([data-arriving]) + .bubble-body,
+.bubble.interim-response:not([data-breadth-measuring]):focus-within > .bubble-scroll.expanded > .usage-corner:not([data-arriving]) + .bubble-body {
   margin-right: var(--usage-reveal-w);
 }
-.bubble.interim-response:hover > .bubble-scroll > .usage-corner .usage-ago,
-.bubble.interim-response:focus-within > .bubble-scroll > .usage-corner .usage-ago {
+.bubble.interim-response:not([data-breadth-measuring]):hover > .bubble-scroll > .usage-corner .usage-ago,
+.bubble.interim-response:not([data-breadth-measuring]):focus-within > .bubble-scroll > .usage-corner .usage-ago {
   opacity: 1;
   transform: translateX(0);
 }

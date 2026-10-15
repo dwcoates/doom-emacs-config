@@ -2018,6 +2018,37 @@ const FORBIDDEN_CHROME: readonly string[] = [
   "#login",
 ];
 
+/**
+ * THE FEED TEXT ZOOM CHANGES ONLY THE TEXT (owner ruling, 2026-10-15): a
+ * bubble the body painter holds at its 100%-zoom breadth is sized by that
+ * breadth alone (src/bubble/body.ts `holdBreadth`).
+ */
+describe("a bubble's held breadth", () => {
+  it("sizes a held bubble to the breadth the painter holds", () => {
+    // Arrange / Act
+    const held = declarationsOf(".bubble[data-held-breadth]") ?? "";
+    // Assert
+    expect(held).toMatch(/width:\s*var\(--bubble-held-breadth\)/);
+  });
+
+  it("leaves an unheld bubble fitting its text", () => {
+    // Arrange / Act
+    const bubble = declarationsOf(".bubble") ?? "";
+    // Assert
+    expect(bubble).toMatch(/(?:^|;)\s*width:\s*fit-content/);
+  });
+
+  it("lets the transition carry an interim's held reveal as it carries its cap", () => {
+    // Arrange / Act
+    const transitions = rulesOf(stylesheet)
+      .filter((rule) => rule.selectors.length === 1 && rule.selectors[0] === ".bubble.interim-response")
+      .map((rule) => valueOf(rule.declarations, "transition"))
+      .filter((value) => value !== undefined);
+    // Assert — the second is the reduced-motion rule's.
+    expect(transitions).toEqual(["max-width var(--usage-grow) ease, width var(--usage-grow) ease", "none"]);
+  });
+});
+
 describe("the feed text zoom scoping", () => {
   it("defines the scale property once, at :root, with a unity default", () => {
     // Arrange / Act
@@ -3311,7 +3342,14 @@ describe("the one bubble rule set", () => {
     // Arrange / Act — every rule keyed on a variant, a state or a hook class.
     const keyed = rulesOf(stylesheet).filter((rule) =>
       rule.selectors.some(
-        (sel) => onBubble(sel) && sel !== ".bubble" && !/^\.bubble\[data-(?:role|cap-lines)=/.test(sel) && !sel.includes("[hidden]"),
+        // A held breadth is the body painter's (src/bubble/body.ts
+        // `holdBreadth`), not a variant's or a state's; its own suite pins it.
+        (sel) =>
+          onBubble(sel) &&
+          sel !== ".bubble" &&
+          !/^\.bubble\[data-(?:role|cap-lines)=/.test(sel) &&
+          !sel.includes("[hidden]") &&
+          sel !== ".bubble[data-held-breadth]",
       ),
     );
     const beyondBorder = keyed.filter((rule) =>
@@ -5205,16 +5243,28 @@ describe("the interim corner's shared tokens", () => {
   it("opens the cap, the slider and the open body by the one reveal width", () => {
     // Arrange / Act
     const sites = rulesOf(stylesheet)
-      .filter((rule) => rule.selectors.some((sel) => sel.startsWith(".bubble.interim-response:hover")))
+      .filter((rule) => rule.selectors.some((sel) => /^\.bubble\.interim-response[^ >]*:hover/.test(sel)))
       .map((rule) => /(?:max-width|width|margin-right):\s*([^;]+);/.exec(rule.declarations)?.[1])
       .filter((value) => value !== undefined);
 
     // Assert
     expect(sites).toEqual([
       "calc(var(--bubble-max-width) + var(--usage-reveal-w))",
+      "calc(var(--bubble-held-breadth) + var(--usage-reveal-w))",
       "var(--usage-reveal-w)",
       "var(--usage-reveal-w)",
     ]);
+  });
+
+  it("never opens the reveal while the bubble's 100%-zoom breadth is read", () => {
+    // Arrange / Act
+    const unguarded = rulesOf(stylesheet)
+      .flatMap((rule) => rule.selectors)
+      .filter((sel) => /^\.bubble\.interim-response[^ >]*:(?:hover|focus-within)/.test(sel))
+      .filter((sel) => !sel.includes(":not([data-breadth-measuring])"));
+
+    // Assert
+    expect(unguarded).toEqual([]);
   });
 
   it("never hand-rolls the reveal width outside its token", () => {
