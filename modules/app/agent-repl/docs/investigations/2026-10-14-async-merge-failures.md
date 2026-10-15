@@ -16,6 +16,7 @@ the log records that show it, so the failures can be fixed at their source.
 | 5 | 2026-10-15 | `test-fixture-table-rules-2` (entry 2's two rule commits, rebuilt on master `3e33b5963d`) | `fixture-rules-retry` | LANDED (`13f99f54a2`), deployed; the retry of entry 2 forked fine from a turn whose prompt is a normal transcript record, which supports entry 2's diagnosis |
 | 6 | 2026-10-15 | `tier-audit-e2e-step-a` (tip `75e781c362`, e2e audit report plus lower-tier tests) | `tier-audit-e2e-step-a-merge` | LANDED (`f330c112a4`), deployed |
 | 7 | 2026-10-15 | `test-tier-audit-integration-step3` (tip `6ff96ad124`, shim-lock stand-in plus removal lists) | `tier-step3-shim-lock` | requested, pending |
+| 8 | 2026-10-15 | `tier-audit-e2e-step-c` (tip `32d6f55b9e`, instruction: rebase onto master keeping only the two step-(c) commits) | `tier-audit-e2e-step-c-merge` | requested, pending |
 
 ## 1. `test-tier-rule` (landed)
 
