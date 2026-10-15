@@ -163,6 +163,19 @@ const (
 	// anything the user said or needs to read, and the agent's reply is drawn
 	// as any reply is.
 	PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE PromptOrigin = 36
+	// The daemon's brief asking a reopened merged workspace's agent to revert
+	// the merge that workspace landed (agentrepl.v1.OpenWorkspaceRequest
+	// .revert_merge). It names the branch, the branch the merge landed on, and
+	// the commit the branch held when it landed, and asks the agent to revert
+	// the merge and land the revert the way the workspace lands any work.
+	// Submitted through the prompt queue as a deferred prompt once the
+	// workspace is open. UNLIKE every other daemon-born prompt it WAITS OUT A
+	// STANDING COLD GATE instead of being refused by it: it is held at the gate
+	// and meets whatever fate the gate's answer gives the prompts held there,
+	// because a reopened workspace whose conversation is large parks at its
+	// gate on the very bring-up the brief follows. Drawn as an ordinary prompt
+	// bubble, so the user follows the revert from the workspace's feed.
+	PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT PromptOrigin = 37
 )
 
 // Enum value maps for PromptOrigin.
@@ -204,6 +217,7 @@ var (
 		34: "PROMPT_ORIGIN_MERGE_COMPACT_AFTER",
 		35: "PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED",
 		36: "PROMPT_ORIGIN_MERGE_QUEUE_NOTICE",
+		37: "PROMPT_ORIGIN_MERGE_REVERT",
 	}
 	PromptOrigin_value = map[string]int32{
 		"PROMPT_ORIGIN_UNSPECIFIED":                 0,
@@ -242,6 +256,7 @@ var (
 		"PROMPT_ORIGIN_MERGE_COMPACT_AFTER":         34,
 		"PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED":     35,
 		"PROMPT_ORIGIN_MERGE_QUEUE_NOTICE":          36,
+		"PROMPT_ORIGIN_MERGE_REVERT":                37,
 	}
 )
 
@@ -276,8 +291,7 @@ var File_conversation_v1_prompt_origin_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"\n" +
-	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1*\xeb\n" +
-	"\n" +
+	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1*\x8b\v\n" +
 	"\fPromptOrigin\x12\x1d\n" +
 	"\x19PROMPT_ORIGIN_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17PROMPT_ORIGIN_USER_SENT\x10\x01\x12$\n" +
@@ -315,7 +329,8 @@ const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"\x18PROMPT_ORIGIN_MERGE_PICK\x10!\x12%\n" +
 	"!PROMPT_ORIGIN_MERGE_COMPACT_AFTER\x10\"\x12)\n" +
 	"%PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED\x10#\x12$\n" +
-	" PROMPT_ORIGIN_MERGE_QUEUE_NOTICE\x10$B0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
+	" PROMPT_ORIGIN_MERGE_QUEUE_NOTICE\x10$\x12\x1e\n" +
+	"\x1aPROMPT_ORIGIN_MERGE_REVERT\x10%B0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
 
 var (
 	file_conversation_v1_prompt_origin_proto_rawDescOnce sync.Once

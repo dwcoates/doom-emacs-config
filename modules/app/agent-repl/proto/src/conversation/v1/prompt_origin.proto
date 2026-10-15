@@ -152,4 +152,17 @@ enum PromptOrigin {
   // anything the user said or needs to read, and the agent's reply is drawn
   // as any reply is.
   PROMPT_ORIGIN_MERGE_QUEUE_NOTICE = 36;
+  // The daemon's brief asking a reopened merged workspace's agent to revert
+  // the merge that workspace landed (agentrepl.v1.OpenWorkspaceRequest
+  // .revert_merge). It names the branch, the branch the merge landed on, and
+  // the commit the branch held when it landed, and asks the agent to revert
+  // the merge and land the revert the way the workspace lands any work.
+  // Submitted through the prompt queue as a deferred prompt once the
+  // workspace is open. UNLIKE every other daemon-born prompt it WAITS OUT A
+  // STANDING COLD GATE instead of being refused by it: it is held at the gate
+  // and meets whatever fate the gate's answer gives the prompts held there,
+  // because a reopened workspace whose conversation is large parks at its
+  // gate on the very bring-up the brief follows. Drawn as an ordinary prompt
+  // bubble, so the user follows the revert from the workspace's feed.
+  PROMPT_ORIGIN_MERGE_REVERT = 37;
 }
