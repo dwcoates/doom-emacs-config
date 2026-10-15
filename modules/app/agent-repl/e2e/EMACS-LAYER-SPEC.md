@@ -487,8 +487,10 @@ the inside rather than trusting the flags it was launched with.**
 `assertHostIsolation` runs once, before anything starts, and fails the test
 unless: `HOME` is under `/sandbox/`; `/tmp` and `HOME` are each a **tmpfs**
 mount of their own, read from `/proc/self/mountinfo` rather than inferred;
-`/repo-src` is a mount point; and a write probe into `/repo-src` **fails**.
-The run script's `docker run` flags are what establish all four, but a test
+and no mount is a host-shared filesystem (virtiofs, fakeowner, gRPC FUSE,
+osxfs, 9p): the working copy is streamed in, never mounted (sandbox README,
+"How host-state safety is enforced").
+The run script's `docker run` flags are what establish all three, but a test
 invoked some other way could satisfy `insideSandbox()` and still reach the
 host, and this layer starts a real Emacs that spawns a real daemon. `modules/app/agent-repl/e2e/sandbox/`
 has since landed (`cfaea2bdb`), and **its model is inside-out from what the
@@ -534,7 +536,7 @@ different answers and a reader of a skipped run must tell them apart:
 
 | situation | detected by | skip says |
 |---|---|---|
-| inside the sandbox | `AGENT_REPL_SANDBOX_SHA` set **and** `/repo-src` is a directory | nothing; it runs |
+| inside the sandbox | `AGENT_REPL_SANDBOX_SHA` set **and** the image's `/sandbox/entrypoint.sh` exists | nothing; it runs |
 | on the host, image usable | `preflight` exits 0 | the exact `e2e-sandbox.sh run --dir e2e go test ...` command to use instead |
 | on the host, image unusable | `preflight` exits non-zero | preflight's own output, **verbatim** |
 

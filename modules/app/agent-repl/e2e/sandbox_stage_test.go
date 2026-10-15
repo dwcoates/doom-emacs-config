@@ -10,7 +10,7 @@ import (
 )
 
 // The sandbox stages an ENUMERATED set of the module's top-level entries
-// (STAGE_ENTRIES in sandbox/bin/entrypoint.sh), and every Go module inside
+// (STAGE_ENTRIES in sandbox/bin/e2e-sandbox.sh), and every Go module inside
 // it must build there. A `replace` pointing at a local module outside that
 // set builds on the host and fails only inside the container, as
 // "replacement directory ... does not exist" -- which is how the test
@@ -56,7 +56,7 @@ func TestEveryLocalGoReplaceIsStagedInTheSandbox(t *testing.T) {
 		t.Fatalf("getwd: %v", err)
 	}
 	module := filepath.Dir(wd)
-	staged := stageEntries(t, filepath.Join(wd, "sandbox", "bin", "entrypoint.sh"))
+	staged := stageEntries(t, filepath.Join(wd, "sandbox", "bin", "e2e-sandbox.sh"))
 
 	// Act: resolve every local replace target of every go.mod in the module.
 	var unstaged []string

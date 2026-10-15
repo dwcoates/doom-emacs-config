@@ -7,15 +7,17 @@
 #   e2e-sandbox.sh preflight
 #
 # HOST-STATE SAFETY, structurally:
-#   * the repo is bind-mounted READ-ONLY at /repo-src, and the entrypoint
-#     refuses to proceed if that mount turns out to be writable;
+#   * NO HOST PATH IS EVER MOUNTED. The working copy is STREAMED in: the host
+#     tars the module's staged allowlist onto `docker run -i`'s stdin and the
+#     entrypoint extracts it, so the container's VM never opens a host file.
+#     Failure artifacts come back the same way, out of a VM-side volume
+#     through `docker cp`. (A bind mount of the checkout leaked ~4,500 host
+#     descriptors per run into Docker's file sharing, which never released
+#     them, until the host's file table was full; see stage_stream.)
 #   * HOME inside the container is /sandbox/home, an image-local path that no
 #     mount ever covers, so ~/.claude, ~/.emacs.d, the Doom cache and the git
 #     config a run touches are all container-local;
-#   * NO host path other than /repo-src (ro) and the artifacts dir (rw, and
-#     only when the caller names one) is mounted at all;
-#   * the container runs as a non-root uid, so even a bind mount it should
-#     not have could not be written as root;
+#   * the container runs as a non-root uid;
 #   * --network none: every dependency is baked into the image at build time.
 set -euo pipefail
 
@@ -648,9 +650,156 @@ container_cpu_args() {
   printf -- '--cpus %s --env GOMAXPROCS=%s\n' "$cpus" "$cpus"
 }
 
+# --- the streamed working copy ------------------------------------------------
+
+# STAGE_ENTRIES is what of the module a sandbox run gets: an ALLOWLIST, not a
+# denylist.
+#
+# An earlier revision copied the WHOLE checkout. On a developer's live
+# checkout that is 19 GB, 18 of which is `.claude/worktrees` (a hundred-plus
+# stale agent worktrees, each a full checkout), and the copy exhausted the
+# host's file table outright.
+#
+# Nothing any suite touches lives outside `modules/app/agent-repl`: there is
+# no repo-root `go.work`, no `.nvmrc`, no shared config. Every `replace`
+# directive in every go.mod resolves within the module, every TypeScript
+# `../../../proto/...` import resolves within it, and the one test that
+# reaches for the checkout root (shim's metaprompt test, seven levels up)
+# only reads `<root>/modules/app/agent-repl/metaprompt.md` back out of it.
+# So the module tree IS the dependency set, and it is staged at its real
+# relative path so those root-relative resolutions still land.
+#
+# The set is enumerated rather than globbed so a MISSING path is a loud
+# refusal instead of a suite that fails later for an unrelated-looking
+# reason, and so an unexpected NEW top-level directory cannot silently join
+# the copy.
+STAGE_ENTRIES=(
+  # Go modules (daemon, e2e, shim-store, shim-sidecar, logging, fakedaemon,
+  # generated protos, and the test runner whose testenv package the e2e and
+  # daemon harnesses import) and their go.mod/go.sum manifests.
+  daemon
+  e2e
+  agent-shim
+  proto
+  testrun
+  # Elisp sources and suites; also carries lisp/testsupport/fakedaemon.
+  lisp
+  # The three files Doom's module loader resolves by exact path.
+  config.el
+  packages.el
+  doctor.el
+  # The webapp module (TypeScript/Vitest) and its lockfile.
+  webapp
+  # Build and helper scripts the suites shell out to (bin/build-frontend.sh).
+  bin
+  scripts
+  hooks
+  # Data and prompt/skill/doc trees the suites and the running system read.
+  testdata
+  prompts
+  skills
+  plans
+  docs
+  images
+  # Read by the shim's committed-metaprompt test and by AGENTS.md assertions.
+  metaprompt.md
+  AGENTS.md
+)
+
+# stage_find lists, NUL-separated and relative to the module root, every
+# directory, file and symlink of the staged set. DIRECTORIES ARE LISTED TOO,
+# for their mtimes: tar archives each entry without recursion (-n) and restores
+# a listed directory's mtime, while a directory it only creates on the way to a
+# file gets the extraction time, and the webapp dist's staleness rule
+# (webapp-dist.sh: `find src -newer dist/index.html`) counts directories, so
+# every freshly built dist read as stale. Inside the allowlist none of these is
+# ever taken:
+#   * `.git`, file or directory: in a git WORKTREE checkout .git is a FILE
+#     holding an absolute host path that does not exist in the container, and
+#     the suite gets its build identity from .sandbox-sha instead;
+#   * node_modules, every `dist/` but the webapp's own, the host's vite cache
+#     (keyed to the host's absolute paths), worktrees, virtualenvs, Python
+#     caches, compiled `*.test` binaries and a stale `.sandbox-sha`.
+# THE WEBAPP DIST IS STAGED, and it is the one `dist/` that is: the Emacs
+# layer's panel is a real webview on the daemon's own origin, so it needs the
+# REAL built webapp, which the host builds (stage_webapp_dist) before the run.
+stage_find() {
+  local module_src=$1
+  ( cd -- "$module_src" && find "${STAGE_ENTRIES[@]}" \
+      \( -name .git \
+         -o \( -type d \( -name .claude -o -name .agents-sandbox -o -name node_modules \
+                         -o -name .vite-cache -o -name worktrees -o -name .venv -o -name __pycache__ \) \) \
+         -o \( -type d -name dist ! -path webapp/dist \) \
+         -o -name .worktree -o -name '*.test' -o -name .sandbox-sha \) -prune \
+      -o -print0 )
+}
+
+# stage_stream MODULE_SRC STATUS_FILE writes the staged working copy to stdout
+# as one tar stream, for `docker run -i` to carry into the container.
+#
+# THIS IS THE ONLY WAY THE CHECKOUT REACHES THE CONTAINER. A bind mount made
+# Docker Desktop's file sharing open every staged file on the host, and it
+# never released them: each run leaked ~4,500 descriptors into the VM's
+# process (measured 2026-10-15: 51,851 of the host's 65,536 held by it), until
+# the table was full and every e2e-emacs gate on the host failed staging with
+# "Too many open files in system". A stream is read by THIS process, closed as
+# it goes, and handed over through the runtime's API; the VM opens nothing.
+#
+# A LIVE CHECKOUT RACES: a file listed and then deleted before tar reads it is
+# reported, tolerated, and summarized, exactly as the old rsync's exit 24 was.
+# Any OTHER tar failure is recorded in STATUS_FILE, which do_run checks after
+# the container exits, so a broken stream can never pass as a green run.
+stage_stream() {
+  local module_src=$1 status=$2 errs rc=0
+  errs=$(mktemp)
+  stage_find "$module_src" \
+    | COPYFILE_DISABLE=1 tar -c -f - --null -n -T - \
+        --no-xattrs --no-acls --no-mac-metadata -C "$module_src" 2>"$errs" || rc=$?
+  if (( rc != 0 )) && ! grep -v -E 'No such file or directory|Error exit delayed from previous errors' "$errs" >/dev/null; then
+    log "WARNING: $(grep -c 'No such file or directory' "$errs") staged file(s) vanished mid-stream (a LIVE checkout); continuing"
+    rc=0
+  fi
+  if (( rc != 0 )); then
+    cat "$errs" >&2
+  fi
+  printf '%s\n' "$rc" > "$status"
+  rm -f "$errs"
+}
+
+# stage_check refuses a run whose allowlist names a path the checkout lacks.
+stage_check() {
+  local module_src=$1 entry missing=()
+  for entry in "${STAGE_ENTRIES[@]}"; do
+    [[ -e $module_src/$entry ]] || missing+=("$MODULE_REL/$entry")
+  done
+  if (( ${#missing[@]} )); then
+    log "refusing to stage: these required paths are absent from the checkout:"
+    printf '  - %s\n' "${missing[@]}" >&2
+    exit 1
+  fi
+}
+
+# SANDBOX_CONTAINER names this run's container, so it can be removed however
+# the run ends. Not `local`: the EXIT trap runs after do_run's frame is gone.
+SANDBOX_CONTAINER=""
+SANDBOX_RT=""
+
+remove_container() {
+  [[ -n ${SANDBOX_CONTAINER:-} ]] || return 0
+  "$SANDBOX_RT" rm -f -v "$SANDBOX_CONTAINER" >/dev/null 2>&1 || true
+  SANDBOX_CONTAINER=""
+}
+
 # --- run -------------------------------------------------------------------
 
 do_run() {
+  # --shell: hold the container open on the staged copy and hand the user an
+  # interactive login shell in it (see the end of this function).
+  local shell=0
+  if [[ ${1:-} == --shell ]]; then
+    shell=1
+    shift
+  fi
   (( $# )) || die "run: no command given"
   local rt
   rt=$(runtime) || die "no container runtime on PATH; run 'e2e-sandbox.sh preflight' for details"
@@ -694,17 +843,18 @@ do_run() {
     --cap-add SYS_PTRACE
     # EVERY writable tmpfs carries uid/gid=1000 EXPLICITLY. Docker mounts a
     # tmpfs root:root 0755, so without this the container's non-root uid
-    # cannot create anything in /work at all and the entrypoint's rsync dies
+    # cannot create anything in /work at all and the entrypoint's extraction dies
     # with "mkdir ... Permission denied" on the first directory. /tmp keeps
     # the conventional 1777 instead, since anything may write there.
     --tmpfs "/tmp:rw,exec,size=2g,mode=1777"
     --tmpfs "/work:rw,exec,size=8g,uid=1000,gid=1000,mode=0755"
-    --mount "type=bind,source=$repo_root,target=/repo-src,readonly"
+    # THE WORKING COPY ARRIVES ON STDIN (stage_stream), never through a mount.
+    --interactive
     --env "AGENT_REPL_SANDBOX_SHA=$sha"
     # --workdir IS DELIBERATELY THE TMPFS ROOT, not the module directory.
     # Docker CREATES a missing workdir itself, as ROOT, before the entrypoint
     # runs — so naming /work/repo/<module> here pre-created that whole chain
-    # root-owned inside the tmpfs, and the entrypoint's rsync then failed
+    # root-owned inside the tmpfs, and the entrypoint's extraction then failed
     # "mkdir ... Permission denied" on every directory under it. /work is the
     # tmpfs mountpoint, already owned by the sandbox uid, so nothing is
     # created; the entrypoint cd's to the module directory before exec.
@@ -737,20 +887,84 @@ do_run() {
     fi
   done
 
+  # THE CONTAINER IS NAMED AND REMOVED HERE, never `--rm`: the failure
+  # artifacts are copied out of it after it exits, and the EXIT trap removes it
+  # (with its volume) however the run ends.
+  SANDBOX_RT=$rt
+  SANDBOX_CONTAINER="agent-repl-e2e-$$-$RANDOM"
+  trap 'release_slot; remove_container' EXIT
+  args+=(--name "$SANDBOX_CONTAINER")
+
+  # FAILURE ARTIFACTS LEAVE THROUGH THE API TOO. They are written to a volume
+  # that lives in the VM, and `docker cp` streams them out once the container
+  # has exited; a bind mount would have the VM open host files to write them.
+  # The image owns /artifacts as the sandbox uid, which a fresh volume copies.
   if [[ -n ${AGENT_REPL_E2E_ARTIFACTS:-} ]]; then
     mkdir -p "$AGENT_REPL_E2E_ARTIFACTS"
-    args+=(--mount "type=bind,source=$AGENT_REPL_E2E_ARTIFACTS,target=/artifacts")
+    args+=(--mount "type=volume,target=/artifacts")
     args+=(--env "AGENT_REPL_E2E_ARTIFACTS=/artifacts")
-    log "artifacts -> $AGENT_REPL_E2E_ARTIFACTS"
+    log "artifacts -> $AGENT_REPL_E2E_ARTIFACTS (copied out after the run)"
   fi
 
-  if [[ -t 1 ]]; then args+=(-t); fi
-
+  local module_src=$repo_root/$MODULE_REL status rc=0
+  stage_check "$module_src"
+  status=$(mktemp)
   args+=("$IMAGE" "$@")
   log "running: $*"
+  if (( shell )); then
+    shell_session "$rt" "$module_src" "$status" "${args[@]}"
+    return 0
+  fi
   # Logs stream straight through: no capture, no buffering, stderr stays
-  # stderr so a failing test's output is the caller's output.
-  "$rt" "${args[@]}"
+  # stderr so a failing test's output is the caller's output. Stdin is the
+  # staged working copy, so no tty is allocated.
+  set +e
+  stage_stream "$module_src" "$status" | "$rt" "${args[@]}"
+  rc=${PIPESTATUS[1]}
+  set -e
+
+  if [[ -n ${AGENT_REPL_E2E_ARTIFACTS:-} ]]; then
+    "$rt" cp "$SANDBOX_CONTAINER:/artifacts/." "$AGENT_REPL_E2E_ARTIFACTS/" \
+      || log "WARNING: copying the failure artifacts out of $SANDBOX_CONTAINER failed"
+  fi
+
+  local staged
+  staged=$(cat "$status" 2>/dev/null || echo missing)
+  rm -f "$status"
+  if [[ $staged != 0 ]]; then
+    die "streaming the working copy into the container FAILED (tar status: $staged); the run's result is not trusted"
+  fi
+  return "$rc"
+}
+
+# shell_session RT MODULE_SRC STATUS ARGS... runs the container (ARGS end with
+# the image and a command that holds it open) on the streamed working copy,
+# waits until the entrypoint says the copy is staged, and then gives the user
+# an interactive login shell in it through `exec`. Stdin carries the tar, so
+# the shell cannot be the container's own command.
+#
+# THE WAIT IS A LATCH, NOT A DELAY: the entrypoint writes its "staged" line to
+# stderr once the copy is complete, and this blocks reading the container's
+# stderr until that line arrives (or the container exits first).
+shell_session() {
+  local rt=$1 module_src=$2 status=$3 fifo line ready=0
+  shift 3
+  fifo=$(mktemp -u)
+  mkfifo "$fifo"
+  stage_stream "$module_src" "$status" | "$rt" "$@" 2>"$fifo" &
+  exec 3<"$fifo"
+  rm -f "$fifo"
+  while IFS= read -r line <&3; do
+    printf '%s\n' "$line" >&2
+    if [[ $line == "sandbox: staged "* ]]; then
+      ready=1
+      break
+    fi
+  done
+  (( ready )) || die "the container exited before its working copy was staged"
+  # Keep draining the container's stderr, so it never blocks on a full pipe.
+  cat <&3 >&2 &
+  "$rt" exec -it --workdir "/work/repo/$MODULE_REL" "$SANDBOX_CONTAINER" bash -l || true
 }
 
 # --- dispatch --------------------------------------------------------------
@@ -763,7 +977,7 @@ case $cmd in
     [[ ${1:-} == -- ]] && shift
     do_run "$@"
     ;;
-  shell) do_run bash -l ;;
+  shell) do_run --shell sleep infinity ;;
   preflight) preflight ;;
   ""|-h|--help)
     sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
