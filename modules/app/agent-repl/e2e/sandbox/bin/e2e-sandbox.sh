@@ -969,18 +969,27 @@ shell_session() {
 
 # --- dispatch --------------------------------------------------------------
 
-cmd=${1:-}
-[[ $# -gt 0 ]] && shift || true
-case $cmd in
-  build) do_build "$@" ;;
-  run)
-    [[ ${1:-} == -- ]] && shift
-    do_run "$@"
-    ;;
-  shell) do_run --shell sleep infinity ;;
-  preflight) preflight ;;
-  ""|-h|--help)
-    sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
-    ;;
-  *) die "unknown subcommand '$cmd'; one of build|run|shell|preflight" ;;
-esac
+main() {
+  local cmd=${1:-}
+  [[ $# -gt 0 ]] && shift || true
+  case $cmd in
+    build) do_build "$@" ;;
+    run)
+      [[ ${1:-} == -- ]] && shift
+      do_run "$@"
+      ;;
+    shell) do_run --shell sleep infinity ;;
+    preflight) preflight ;;
+    ""|-h|--help)
+      sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+      ;;
+    *) die "unknown subcommand '$cmd'; one of build|run|shell|preflight" ;;
+  esac
+}
+
+# SOURCED, THE SCRIPT DEFINES ITS FUNCTIONS AND RUNS NOTHING. The build-lock
+# tests (e2e/sandboxscripts) source it to replace stage_context, whose tar of
+# every .go file in the module is not what those tests assert.
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+  main "$@"
+fi

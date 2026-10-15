@@ -166,6 +166,23 @@ func sandboxScript(t *testing.T) string {
 	return p
 }
 
+// sandboxBuildUnstaged is `e2e-sandbox.sh build ARGS` with the build context's
+// staging replaced by an empty one. It sources the script, which then defines
+// its functions and dispatches nothing, and calls do_build itself.
+//
+// WHY: stage_context tars every .go file in the module into the context, and
+// the tests that use this assert only the lock, the stamp and the docker argv,
+// none of which reads the context. TestSandboxBuildLabelsImageWithTheSandboxStamp
+// runs the real staging, so the step is still executed in this suite.
+func sandboxBuildUnstaged(t *testing.T, args ...string) *exec.Cmd {
+	t.Helper()
+	// The script path rides as $1, never as bash's $0: a $0 equal to the
+	// sourced file's own path is exactly what the guard reads as a direct run.
+	return exec.Command("bash", append([]string{"-c",
+		`set -euo pipefail; script=$1; shift; . "$script"; stage_context() { :; }; do_build "$@"`,
+		"bash", sandboxScript(t)}, args...)...)
+}
+
 // currentSandboxStamp asks the scripts' own image library, so the test never
 // re-derives the stamp rule and cannot drift from it.
 func currentSandboxStamp(t *testing.T, f *fakeDocker) string {
@@ -246,7 +263,7 @@ func TestSandboxBuildForceRebuildsDespiteMatchingStamp(t *testing.T) {
 	lock := filepath.Join(t.TempDir(), "build.lock")
 
 	// Act.
-	cmd := exec.Command("bash", sandboxScript(t), "build", "--force")
+	cmd := sandboxBuildUnstaged(t, "--force")
 	cmd.Env = sandboxEnv(f, lock)
 	out, err := cmd.CombinedOutput()
 
@@ -306,7 +323,7 @@ func TestSandboxBuildTakesOverALockHeldByADeadPid(t *testing.T) {
 	}
 
 	// Act.
-	cmd := exec.Command("bash", sandboxScript(t), "build")
+	cmd := sandboxBuildUnstaged(t)
 	cmd.Env = sandboxEnv(f, lock)
 	out, err := cmd.CombinedOutput()
 
@@ -341,7 +358,7 @@ func TestSandboxBuildWaitsForALockHeldByALivePid(t *testing.T) {
 	}
 	defer reader.Close()
 
-	cmd := exec.Command("bash", sandboxScript(t), "build")
+	cmd := sandboxBuildUnstaged(t)
 	cmd.Env = sandboxEnv(f, lock)
 	cmd.Stdout, cmd.Stderr = writer, writer
 	announced := make(chan struct{}, 1)
@@ -461,11 +478,14 @@ func TestSandboxRunAllowsAStaleImageWhenOverridden(t *testing.T) {
 
 	// Act.
 	cmd := exec.Command("bash", sandboxScript(t), "run", "true")
-	cmd.Env = sandboxEnv(f, lock, "AGENT_REPL_SANDBOX_ALLOW_STALE=1")
+	// ISOLATED FROM THE HOST past the gate: a private slot directory, so the
+	// run never queues behind a real sandbox holding the host's shared slots,
+	// and no host webapp build, which would rewrite the checkout's dist.
+	cmd.Env = sandboxEnv(f, lock, "AGENT_REPL_SANDBOX_ALLOW_STALE=1",
+		"AGENT_REPL_SANDBOX_SLOT_DIR="+t.TempDir(), "AGENT_REPL_SANDBOX_NO_WEBAPP_BUILD=1")
 	out, _ := cmd.CombinedOutput()
 
-	// Assert: whatever happens later (this host has no preflight-able
-	// runtime), the stamp gate did not refuse.
+	// Assert: the stamp gate did not refuse.
 	if strings.Contains(string(out), "REFUSING TO RUN") {
 		t.Fatalf("ALLOW_STALE=1 was ignored:\n%s", out)
 	}
@@ -632,7 +652,7 @@ func TestSandboxBuildTagsTheStampImage(t *testing.T) {
 	lock := filepath.Join(t.TempDir(), "build.lock")
 
 	// Act.
-	cmd := exec.Command("bash", sandboxScript(t), "build")
+	cmd := sandboxBuildUnstaged(t)
 	cmd.Env = sandboxEnv(f, lock)
 	out, err := cmd.CombinedOutput()
 
@@ -881,5 +901,22 @@ func TestSandboxShellExecsALoginShellOnceTheCopyIsStaged(t *testing.T) {
 	})
 	if ran < 0 || execd < ran {
 		t.Fatalf("calls = %q, want the held container run, then a login shell exec'd into it", calls)
+	}
+}
+
+// TestSourcingTheSandboxScriptDispatchesNothing pins the guard
+// sandboxBuildUnstaged depends on: sourced, e2e-sandbox.sh defines its
+// functions and runs no subcommand, not even the help a bare run prints.
+func TestSourcingTheSandboxScriptDispatchesNothing(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	cmd := exec.Command("bash", "-c", `set -euo pipefail; . "$1"; declare -F do_build do_run main >/dev/null; echo sourced`, "bash", sandboxScript(t))
+
+	// Act
+	out, err := cmd.CombinedOutput()
+
+	// Assert
+	if err != nil || strings.TrimSpace(string(out)) != "sourced" {
+		t.Fatalf("sourcing the script = %v, %q; want its functions defined and nothing dispatched", err, out)
 	}
 }
