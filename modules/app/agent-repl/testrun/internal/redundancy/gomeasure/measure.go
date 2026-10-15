@@ -825,11 +825,19 @@ func (m *measurer) dropUntyped(schemas []*gomut.Schema, failed []Result) error {
 	for _, res := range failed {
 		text.WriteString(res.Text())
 	}
+	// The compiler can name one position twice (its "too many errors"
+	// line repeats the last error's), and the first drops the site.
+	seen := map[string]bool{}
 	for _, mm := range compileErr.FindAllStringSubmatch(text.String(), -1) {
 		path := mm[1]
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(m.cfg.Module, path)
 		}
+		pos := path + ":" + mm[2] + ":" + mm[3]
+		if seen[pos] {
+			continue
+		}
+		seen[pos] = true
 		line, _ := strconv.Atoi(mm[2])
 		col, _ := strconv.Atoi(mm[3])
 		for _, s := range schemas {

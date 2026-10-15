@@ -854,3 +854,26 @@ func TestThePreflightAndTheSchemaBuildTheMutatedPackagesAlike(t *testing.T) {
 		t.Fatalf("mutated-package builds differ:\n%s", strings.Join(shapes, "\n"))
 	}
 }
+
+func TestMeasureDropsASiteOnceThoughTheCompilerNamesItTwice(t *testing.T) {
+	// Arrange: go's "too many errors" line repeats the last error's position.
+	cfg, dir := fakeConfig(t)
+	pos := filepath.Join(dir, "p.go") + ":3:29: "
+	f := &fakeGo{dir: dir, reaches: map[string]bool{"TestA": true},
+		schemaErr: pos + "cannot use x\n" + pos + "too many errors\n"}
+	f.mutant = map[string]func(string) Result{}
+	log, _ := quietLog()
+
+	// Act
+	m, err := Measure(context.Background(), cfg, f.exec, log)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range m.Mutants {
+		if r.Status != "dropped" {
+			t.Errorf("%s is %s, want dropped", r.Key, r.Status)
+		}
+	}
+}
