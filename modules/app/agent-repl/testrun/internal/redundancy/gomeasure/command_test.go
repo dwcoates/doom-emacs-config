@@ -24,7 +24,7 @@ func TestParseArgsDefaults(t *testing.T) {
 	if !reflect.DeepEqual(a.Suites, []Suite{{Package: "./p", Tests: []string{"a_test.go", "b_test.go"}}}) {
 		t.Fatalf("suites = %+v", a.Suites)
 	}
-	if !reflect.DeepEqual(a.Mutate, []string{"./p"}) || a.Runs != 3 || a.Universe != redundancy.KillsOnly || a.Overhead != DefaultOverhead || a.HangBound != DefaultHangBound || a.Budget.MaxDrop != redundancy.DefaultMaxDrop {
+	if !reflect.DeepEqual(a.Mutate, []string{"./p"}) || a.Runs != 3 || a.Common.Universe != redundancy.KillsOnly || a.Common.Overhead != DefaultOverhead || a.HangBound != DefaultHangBound || a.Common.Budget.MaxDrop != redundancy.DefaultMaxDrop {
 		t.Fatalf("defaults = %+v", a)
 	}
 	if !reflect.DeepEqual(a.PinCalls, []string{"FindRecord", "Records"}) {

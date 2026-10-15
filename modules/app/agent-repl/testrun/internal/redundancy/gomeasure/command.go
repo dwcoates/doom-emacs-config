@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"agentrepl/testrun/internal/redundancy"
 	"agentrepl/testrun/internal/run"
@@ -17,32 +16,17 @@ import (
 	"agentrepl/testrun/roster"
 )
 
-// EnvBackground is the marker bin/background.sh exports; the measurement is
-// the heaviest test load there is and never runs at normal priority.
-const EnvBackground = "AGENT_REPL_BACKGROUND_PRIORITY"
+// EnvBackground is redundancy's, kept here for this package's callers.
+const EnvBackground = redundancy.EnvBackground
 
-// DefaultOverhead is the fixed weight each kept case adds to its runtime,
-// so that among sets of equal runtime the smaller one wins.
-const DefaultOverhead = 100 * time.Microsecond
+// DefaultOverhead is redundancy's.
+const DefaultOverhead = redundancy.DefaultOverhead
 
-// Args are `testrun redundancy go`'s arguments.
+// Args are `testrun redundancy go`'s arguments: the measurement's own and
+// the flags every adapter shares.
 type Args struct {
 	Config
-	Out         string
-	Universe    redundancy.Universe
-	Overhead    time.Duration
-	Budget      redundancy.Budget
-	KeepScratch bool
-}
-
-func splitList(s string) []string {
-	var out []string
-	for _, p := range strings.Split(s, ",") {
-		if p = strings.TrimSpace(p); p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
+	Common redundancy.Common
 }
 
 // rosterSuites are the suites of the named roster Go suites (comma
@@ -65,7 +49,7 @@ func rosterSuites(names, module string) ([]Suite, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	list := splitList(names)
+	list := redundancy.SplitList(names)
 	if len(list) > 1 && module == "" {
 		return nil, "", fmt.Errorf("-roster-suite names several suites, so -module must name the mutated one")
 	}
@@ -97,25 +81,6 @@ func rosterSuites(names, module string) ([]Suite, string, error) {
 	return out, module, nil
 }
 
-// readDeleteSet reads a -delete file: one case per line; blank lines and
-// lines starting with # are skipped.
-func readDeleteSet(path string) ([]string, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read -delete %s: %w", path, err)
-	}
-	var out []string
-	for _, l := range strings.Split(string(b), "\n") {
-		if l = strings.TrimSpace(l); l != "" && !strings.HasPrefix(l, "#") {
-			out = append(out, l)
-		}
-	}
-	if len(out) == 0 {
-		return nil, fmt.Errorf("-delete %s names no case", path)
-	}
-	return out, nil
-}
-
 // readSuites reads a -suites file.
 func readSuites(path string) ([]Suite, error) {
 	b, err := os.ReadFile(path)
@@ -142,7 +107,8 @@ func ParseArgs(argv []string, stderr io.Writer) (Args, error) {
 	fs := flag.NewFlagSet("testrun redundancy go", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var a Args
-	var pkg, tests, tags, programs, suitesFile, mutate, pinCalls, pins, universe string
+	var pkg, tests, tags, programs, suitesFile, mutate, pinCalls string
+	finish := a.Common.Register(fs)
 	fs.StringVar(&a.Module, "module", "", "the Go module's root (required)")
 	fs.StringVar(&pkg, "pkg", "", "one package under measurement, relative to -module, e.g. ./internal/workspace")
 	fs.StringVar(&tests, "tests", "", "comma-separated test files of -pkg whose cases are measured (default: all of its tests)")
@@ -153,18 +119,8 @@ func ParseArgs(argv []string, stderr io.Writer) (Args, error) {
 	fs.StringVar(&mutate, "mutate", "", "comma-separated packages to mutate, relative to -module (default: the one -pkg)")
 	fs.IntVar(&a.Runs, "runs", 3, "coverage runs per case, unioned")
 	fs.StringVar(&pinCalls, "pin-calls", "FindRecord,Records", "comma-separated calls that make a test a log-record assertion")
-	fs.StringVar(&pins, "pin", "", "comma-separated tests kept whatever they cover")
-	fs.StringVar(&a.Out, "out", "", "directory the measurement and report are written to (required)")
-	fs.StringVar(&universe, "universe", "kills-only", "kills-only or strict (killed mutants and reached blocks)")
-	fs.DurationVar(&a.Overhead, "overhead", DefaultOverhead, "fixed weight per kept case")
-	fs.BoolVar(&a.KeepScratch, "keep-scratch", false, "keep the scratch directory")
-	deleteFile := fs.String("delete", "", "a file naming a deletion set to verify, one case ID or top-level test per line, instead of minimizing")
 	fs.BoolVar(&a.Estimate, "estimate", false, "with -delete: stop after the unit tier and report what the rest would cost")
-	maxDrop := fs.Float64("max-coverage-drop", redundancy.DefaultMaxDrop, "the most statement-coverage points any system may lose")
-	baseline := fs.String("baseline", "", "the pinned coverage baseline (testrun/coverage-baseline.json); without it each system is held to the measured population's own coverage")
 	fs.StringVar(&a.Go, "go", "go", "the go command")
-	fs.Float64Var(&a.MaxLoad, "max-load", DefaultMaxLoad, "the most one-minute load average a phase or a mutant starts under")
-	fs.DurationVar(&a.QuietWait, "quiet-wait", DefaultQuietWait, "how long to wait for the load to drop before failing")
 	fs.DurationVar(&a.HangBound, "hang-bound", DefaultHangBound, "how long a case that hung reruns alone to confirm the hang; just over twice the longest real wait the measured tests allow themselves")
 	if err := fs.Parse(argv); err != nil {
 		return Args{}, err
@@ -172,9 +128,10 @@ func ParseArgs(argv []string, stderr io.Writer) (Args, error) {
 	if fs.NArg() != 0 {
 		return Args{}, fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
 	}
-	if a.Out == "" {
-		return Args{}, fmt.Errorf("-out is required")
+	if err := finish(); err != nil {
+		return Args{}, err
 	}
+	a.Delete, a.Pins, a.MaxLoad, a.QuietWait = a.Common.Delete, a.Common.Pins, a.Common.MaxLoad, a.Common.QuietWait
 	named := 0
 	for _, v := range []string{pkg, suitesFile, *rosterSuite} {
 		if v != "" {
@@ -193,7 +150,7 @@ func ParseArgs(argv []string, stderr io.Writer) (Args, error) {
 		}
 		a.Suites, a.Module = s, module
 	case pkg != "":
-		a.Suites = []Suite{{Package: pkg, Tags: tags, Tests: splitList(tests), Programs: splitList(programs)}}
+		a.Suites = []Suite{{Package: pkg, Tags: tags, Tests: redundancy.SplitList(tests), Programs: redundancy.SplitList(programs)}}
 	default:
 		s, err := readSuites(suitesFile)
 		if err != nil {
@@ -204,30 +161,18 @@ func ParseArgs(argv []string, stderr io.Writer) (Args, error) {
 	if a.Module == "" {
 		return Args{}, fmt.Errorf("-module is required")
 	}
-	u, err := redundancy.ParseUniverse(universe)
-	if err != nil {
-		return Args{}, err
-	}
-	a.Universe = u
-	if a.Budget, err = redundancy.LoadBudget(*maxDrop, *baseline); err != nil {
-		return Args{}, err
-	}
-	a.Mutate = splitList(mutate)
+	a.Mutate = redundancy.SplitList(mutate)
 	if len(a.Mutate) == 0 {
 		if len(a.Suites) != 1 {
 			return Args{}, fmt.Errorf("-mutate is required when -suites names several")
 		}
 		a.Mutate = []string{a.Suites[0].Package}
 	}
-	if *deleteFile != "" {
-		if a.Delete, err = readDeleteSet(*deleteFile); err != nil {
-			return Args{}, err
-		}
-	} else if a.Estimate {
+	if a.Estimate && len(a.Delete) == 0 {
 		return Args{}, fmt.Errorf("-estimate needs -delete")
 	}
-	a.PinCalls = splitList(pinCalls)
-	a.Pins = splitList(pins)
+	a.PinCalls = redundancy.SplitList(pinCalls)
+	var err error
 	if a.Module, err = filepath.Abs(a.Module); err != nil {
 		return Args{}, fmt.Errorf("resolve -module: %w", err)
 	}
@@ -235,64 +180,23 @@ func ParseArgs(argv []string, stderr io.Writer) (Args, error) {
 }
 
 // Command is `testrun redundancy go`: measure, then write measurement.json
-// and report.md under -out.
+// and report.md under -out (redundancy.Run).
 func Command(ctx context.Context, log *run.Log, argv []string, exec Exec) int {
-	if os.Getenv(EnvBackground) == "" {
-		log.Errorf("redundancy: refused at normal priority; run it through bin/background.sh")
-		return 78
+	if code := redundancy.RefusedAtNormalPriority(log); code != 0 {
+		return code
 	}
 	a, err := ParseArgs(argv, os.Stderr)
 	if err != nil {
 		log.Errorf("redundancy: %v", err)
 		return 2
 	}
-	if err := os.MkdirAll(a.Out, 0o755); err != nil {
-		log.Errorf("redundancy: create -out %s: %v", a.Out, err)
-		return 1
+	var names []string
+	for _, s := range a.Suites {
+		names = append(names, s.Package)
 	}
-	scratch, err := os.MkdirTemp("/tmp", "agent-repl-redundancy-")
-	if err != nil {
-		log.Errorf("redundancy: make the scratch directory: %v", err)
-		return 1
-	}
-	if a.KeepScratch {
-		log.Infof("redundancy: scratch kept at %s", scratch)
-	} else {
-		defer os.RemoveAll(scratch)
-	}
-	a.Scratch = scratch
-	m, err := Measure(ctx, a.Config, exec, log)
-	if err != nil {
-		var names []string
-		for _, s := range a.Suites {
-			names = append(names, s.Package)
-		}
-		log.Errorf("redundancy: measure %s: %v", strings.Join(names, ", "), err)
-		return 1
-	}
-	if err := WriteOutputs(a.Out, m, redundancy.Options{Universe: a.Universe, Overhead: a.Overhead, Budget: a.Budget}); err != nil {
-		log.Errorf("redundancy: %v", err)
-		return 1
-	}
-	log.Infof("redundancy: wrote %s and %s", filepath.Join(a.Out, "measurement.json"), filepath.Join(a.Out, "report.md"))
-	return 0
-}
-
-// WriteOutputs writes measurement.json and report.md under dir.
-func WriteOutputs(dir string, m *redundancy.Measurement, o redundancy.Options) error {
-	if err := redundancy.WriteMeasurement(filepath.Join(dir, "measurement.json"), m); err != nil {
-		return err
-	}
-	f, err := os.Create(filepath.Join(dir, "report.md"))
-	if err != nil {
-		return fmt.Errorf("redundancy: create the report: %w", err)
-	}
-	if err := redundancy.Report(f, m, o); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("redundancy: close the report: %w", err)
-	}
-	return nil
+	return redundancy.Run(log, a.Common, strings.Join(names, ", "), func(scratch string) (*redundancy.Measurement, error) {
+		cfg := a.Config
+		cfg.Scratch = scratch
+		return Measure(ctx, cfg, exec, log)
+	})
 }
