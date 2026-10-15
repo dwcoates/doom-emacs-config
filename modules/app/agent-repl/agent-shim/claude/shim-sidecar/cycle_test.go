@@ -2134,6 +2134,27 @@ func TestTheWithheldRecordAnnouncesNoRow(t *testing.T) {
 	}
 }
 
+func TestTheWithheldRecordNamesTheFileItWasReadFrom(t *testing.T) {
+	// Arrange: a residue line is classified against its file, so the record
+	// that withholds it names that file.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+
+	// Act.
+	if _, err := h.sc.storeWrite("subject", &storev1.EntryBatch{
+		Entries:       []*storev1.StoreEntry{convert.UnknownEntry(residueAttribution(), "a_new_line_type", "type", map[string]any{})},
+		CursorAdvance: &storev1.CursorState{FileId: residueAttribution().FileID, Offset: 512},
+	}); err != nil {
+		t.Fatalf("storeWrite: %v", err)
+	}
+
+	// Assert.
+	rec := h.requireOnce(t, "residue-drop", "debug")
+	if got := ctxString(t, rec, "file_id"); got != residueAttribution().FileID {
+		t.Fatalf("the record's file_id = %q, want the file the line was read from (%q)", got, residueAttribution().FileID)
+	}
+}
+
 // ---- the residue shape catalog at the write door ----
 
 // residueEntryFor builds one vendor_specific residue entry over a JSON literal,
