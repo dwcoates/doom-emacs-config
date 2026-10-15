@@ -2817,13 +2817,20 @@ html[data-page-unshown] *::after {
    `line-break: anywhere` lets the line break between any two characters, so
    the kept line fills to the content edge and the `…` lands as far from the
    right side as the text starts from the left. Collapsed only: the title's
-   lift resets it, and the bubble's clamp never matches an expanded box. */
+   lift resets it, and the bubble's clamp never matches an expanded box.
+   THE `…` NEVER FOLLOWS A SPACE, PERIOD, COMMA OR HYPHEN (owner request,
+   2026-10-15: "hello world…", never "hello world …" or "hello world.…").
+   src/feed/ellipsis-trim.ts measures the kept line and, when it would end in
+   such a run, sets `--ellipsis-trim`, drawn here as a TRANSPARENT right
+   border: the content box narrows until the engine drops the run to fit its
+   `…`, while the box, its background and everything around it stay put. */
 .title-fold,
 .bubble[data-more="ellipsis"] > .bubble-scroll:not(.expanded) > .bubble-body {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   overflow: hidden;
   line-break: anywhere;
+  border-right: var(--ellipsis-trim, 0px) solid transparent;
 }
 .title-fold {
   -webkit-line-clamp: 1;
@@ -2842,6 +2849,7 @@ html[data-page-unshown] *::after {
   overflow: visible;
   max-height: none;
   line-break: auto;
+  border-right-width: 0;
 }
 /* A STANDALONE TITLE IS ITS OWN EXPANDED ITEM, so it stays under the
    expanded-item ceiling (--feed-item-max-h, on #feed-scroll) and scrolls the

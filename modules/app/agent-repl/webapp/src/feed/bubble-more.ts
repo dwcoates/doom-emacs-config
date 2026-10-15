@@ -38,6 +38,7 @@ import { BUBBLE_BODY_CLASS } from "../bubble/body.js";
 import { EXPANDED_CLASS } from "../expand.js";
 import { pageResizeObserver } from "../dom.js";
 import { log } from "../log.js";
+import { applyEllipsisTrim, clearEllipsisTrim } from "./ellipsis-trim.js";
 import { onDiscard } from "./ticking.js";
 
 /** The class the stylesheet turns into the bottom fade. */
@@ -177,6 +178,11 @@ interface MoreKind {
   readonly selector: string;
   isOpen(box: HTMLElement): boolean;
   hidesContent(box: HTMLElement): boolean;
+  /**
+   * The element whose one-line clamp writes the box's `…`, whose ellipsis
+   * ellipsis-trim.ts places; null for a box that draws no `…` (a fade bubble).
+   */
+  clamp(box: HTMLElement): HTMLElement | null;
 }
 
 /**
@@ -189,13 +195,23 @@ const MORE_KINDS: readonly MoreKind[] = [
     selector: MORE_BUBBLE_SELECTOR,
     isOpen: (box) => box.classList.contains(EXPANDED_CLASS),
     hidesContent: hidesContentBeyondCap,
+    clamp: (box) =>
+      box.parentElement?.getAttribute(BUBBLE_MORE_ATTRIBUTE) === BUBBLE_MORE_ELLIPSIS
+        ? box.querySelector<HTMLElement>(BODY_SELECTOR)
+        : null,
   },
   {
     selector: `.${TITLE_FOLD_CLASS}`,
     isOpen: (box) => box.matches(TITLE_FOLD_OPEN_SELECTOR),
     hidesContent: overflowsCap,
+    clamp: (box) => box,
   },
 ];
+
+/** The kind BOX is, or undefined for a box the affordance does not serve. */
+function kindOf(box: HTMLElement): MoreKind | undefined {
+  return MORE_KINDS.find((k) => box.matches(k.selector));
+}
 
 /**
  * True when the box should wear `has-more`: it is one of the kinds the
@@ -204,14 +220,28 @@ const MORE_KINDS: readonly MoreKind[] = [
  * has nothing below the fold to point at.
  */
 export function shouldShowMore(box: HTMLElement): boolean {
-  const kind = MORE_KINDS.find((k) => box.matches(k.selector));
+  const kind = kindOf(box);
   return kind !== undefined && !kind.isOpen(box) && kind.hidesContent(box);
 }
 
-/** Add or drop `has-more` on BOX to match its current overflow and state. */
+/**
+ * Add or drop `has-more` on BOX to match its current overflow and state, and
+ * place a clamp's `…` (ellipsis-trim.ts). The clamp's trim is cleared BEFORE
+ * the overflow is measured, since a trim narrows the line and a stale one
+ * could make text that now fits read as overflowing; it is put back only on a
+ * collapsed box whose clamp is writing its `…`.
+ */
 export function refreshHasMore(box: HTMLElement): void {
-  if (shouldShowMore(box)) box.classList.add(HAS_MORE_CLASS);
-  else box.classList.remove(HAS_MORE_CLASS);
+  const clamp = kindOf(box)?.clamp(box) ?? null;
+  if (clamp !== null) clearEllipsisTrim(clamp);
+  const more = shouldShowMore(box);
+  box.classList.toggle(HAS_MORE_CLASS, more);
+  if (clamp !== null && more) applyEllipsisTrim(clamp);
+}
+
+/** True when BOX draws a `…` whose place follows its text (see `refreshHasMore`). */
+function writesEllipsis(box: HTMLElement): boolean {
+  return (kindOf(box)?.clamp(box) ?? null) !== null;
 }
 
 /** The content a bubble's scroll box holds: its body, never the corner beside it. */
@@ -259,8 +289,16 @@ export function installHasMore(
     if (body !== null) observer.observe(body);
     refresh(scroll);
   };
-  const children = typeof view.MutationObserver === "function" ? new view.MutationObserver(retarget) : null;
-  children?.observe(scroll, { childList: true });
+  // A box that writes a `…` also follows its TEXT: the type-out and the body
+  // painter rewrite a clamp's text without resizing it, and the `…`'s place
+  // moves with the text. A fade bubble's text is not followed, so a
+  // streaming response re-measures only on resize, as before.
+  const mutated = (): void => {
+    retarget();
+    if (writesEllipsis(scroll)) refresh(scroll);
+  };
+  const children = typeof view.MutationObserver === "function" ? new view.MutationObserver(mutated) : null;
+  children?.observe(scroll, { childList: true, subtree: true, characterData: true });
   onDiscard(scroll, () => {
     observer.disconnect();
     children?.disconnect();

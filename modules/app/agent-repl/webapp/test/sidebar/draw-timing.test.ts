@@ -26,7 +26,7 @@ async function drawRecords(level: "info" | "debug"): Promise<{ level: string; co
   await Promise.resolve();
   return capture.sent
     .filter((record) => record.operation === "sidebar.roster-draw")
-    .map((record) => ({ level: record.level.case ?? "", context: (record.context ?? {}) as Record<string, unknown> }))
+    .map((record) => ({ level: record.level.case ?? "", context: record.context ?? {} }))
     .filter((record) => record.level === level);
 }
 
