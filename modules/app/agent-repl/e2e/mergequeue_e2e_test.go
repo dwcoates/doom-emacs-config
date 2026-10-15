@@ -375,6 +375,9 @@ func TestMergeBubbleCoalescesIntoOneFeedRow(t *testing.T) {
 			opts := harness.Opts{}
 			if tc.selfRepo {
 				opts.SelfRepo = repo.Dir
+				// A whole merge is a subprocess chain on one wait; see
+				// harness.MergeChainTimeout and mqSelfRepoWorld.
+				opts.Timeout = harness.MergeChainTimeout
 				// The self-repo method runs the merge TEST GATE, whose
 				// command line defaults to `bash bin/test-all.sh` in the
 				// merge target worktree (daemon/AGENTS.md's
