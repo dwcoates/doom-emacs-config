@@ -400,9 +400,11 @@ Two standing notes on tokens that LOOK dead and are not:
 
 ## Sidecar mock-scenario reconciliation (context only — not counted coverage)
 
-The sidecar's own table
-(`agent-shim/claude/shim-sidecar/integration/mock_scenarios_test.go`,
-`mockScenarios`, 133 rows) is drawn from the SAME registry and is explicitly
+The sidecar's own table (then
+`agent-shim/claude/shim-sidecar/integration/mock_scenarios_test.go`,
+`mockScenarios`, 133 rows; now `shim-sidecar/mockgoldens_test.go`,
+`goldenScenarios`, one row per distinct on-disk shape over the shim's
+`testdata/scenario-goldens`) is drawn from the SAME registry and is explicitly
 documented as restating AGENTS.md's table as data. Reconciling its 133
 prompts against the registry's 147 named scenarios:
 
