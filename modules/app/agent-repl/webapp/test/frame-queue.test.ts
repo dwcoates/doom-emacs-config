@@ -1,6 +1,6 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { filesUnder } from "./files-under.js";
 import { frameQueue } from "./frame-queue.js";
 
 describe("frameQueue", () => {
@@ -80,15 +80,6 @@ describe("frameQueue", () => {
   });
 });
 
-/** Every test source under DIR, recursively. */
-function testSources(dir: string): string[] {
-  return readdirSync(dir).flatMap((name) => {
-    const path = join(dir, name);
-    if (statSync(path).isDirectory()) return testSources(path);
-    return path.endsWith(".ts") ? [path] : [];
-  });
-}
-
 describe("the tests' frame seams", () => {
   it("all take frameQueue rather than a hand-rolled array of callbacks", () => {
     // Arrange
@@ -96,7 +87,7 @@ describe("the tests' frame seams", () => {
     const handRolled = /frames\s*(?:\.push\(|:\s*(?:Array<\(\) => void>|\(\(\) => void\)\[\]))/;
 
     // Act
-    const offenders = testSources(root).filter((path) => handRolled.test(readFileSync(path, "utf8")));
+    const offenders = filesUnder(root).filter((path) => handRolled.test(readFileSync(path, "utf8")));
 
     // Assert
     expect(offenders).toEqual([]);
