@@ -32,36 +32,40 @@ Three binary dimensions, each against the main branch:
 - **MERGES INTO**: main, or another branch.
 - **CONTEXT**: fresh, or forked from another workspace's transcript.
 
-Each cell says whether it is supported today (from agent-repl-skill-migration's
-report of 2026-10-15). "Another branch" in both of the first two dimensions
-means the same other branch; from one other branch into a different one is not
-supported anywhere.
+Scope: THE AGENT API only, which is what an agent can ask for: the
+`/create-or-update-workspace` command file and `/merge-queue`. The editor's and
+the webapp's create commands are out of scope here.
+
+Each cell says whether the agent API supports it today (from
+agent-repl-skill-migration's report of 2026-10-15). "Another branch" in both of
+the first two dimensions means the same other branch; from one other branch
+into a different one is not supported.
 
 Fresh context:
 
 | branches from \ merges into | main | another branch |
 |---|---|---|
-| **main** | yes (`SPC TAB n/N`, `--master`, a one-shot) | no |
-| **another branch** | no | yes (a child: the skill's default from any workspace not on main) |
+| **main** | yes (`create --master`) | no |
+| **another branch** | no | yes (a child: `create`'s default from a requester not on main) |
 
 Forked context:
 
 | branches from \ merges into | main | another branch |
 |---|---|---|
-| **main** | partly (`SPC TAB f`; the skill cannot ask for it) | no |
-| **another branch** | internal only (the async merge workspace: the branch's tip, into the requester's target, forked from the requester) | yes (a forked child, `SPC TAB c/C`; the fork must come from that same branch's workspace) |
+| **main** | no (`fork_from` forces the forked workspace as parent and refuses a base) | no |
+| **another branch** | only as `/merge-queue` async's own merge workspace, never as a create | yes (`create` with `fork_from`: a forked child of the forked workspace) |
 
 The "no" cells are refused by the contract's rule that a workspace is never cut
-from one branch and merged into another; the async merge workspace is the one
-exception, and it is internal.
+from one branch and merged into another, except "forked, main into main", which
+is refused only because the command file couples a fork to its parent.
 
 ## Questions for the designing agent
 
 1. Which cells should the API support, and which should it refuse? Give the
    reason for each refusal (a real invariant, not cost).
 2. What should each supported cell be called?
-3. What are the defaults per entry point (the skill, `SPC TAB`, the webapp form,
-   the async merge workspace)? The owner's principles above say: source main,
-   context fork of the requester.
+3. What are the agent API's defaults (`create`, and `/merge-queue` async's merge
+   workspace)? The owner's principles above say: branch from and merge into
+   main, with the context forked from the requester.
 4. Which invariants change? For example the merge target is always the source,
    a fork child's inherited priority, and the merge workspace's `MergeOf` check.
