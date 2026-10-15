@@ -825,11 +825,19 @@ func (m *measurer) dropUntyped(schemas []*gomut.Schema, failed []Result) error {
 	for _, res := range failed {
 		text.WriteString(res.Text())
 	}
+	// The compiler can name one position twice (its "too many errors"
+	// line repeats the last error's), and the first drops the site.
+	seen := map[string]bool{}
 	for _, mm := range compileErr.FindAllStringSubmatch(text.String(), -1) {
 		path := mm[1]
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(m.cfg.Module, path)
 		}
+		pos := path + ":" + mm[2] + ":" + mm[3]
+		if seen[pos] {
+			continue
+		}
+		seen[pos] = true
 		line, _ := strconv.Atoi(mm[2])
 		col, _ := strconv.Atoi(mm[3])
 		for _, s := range schemas {
@@ -893,9 +901,11 @@ func writeOverlay(dir string, schemas []*gomut.Schema) (string, error) {
 	return ov, nil
 }
 
-// buildMutated builds the -mutate packages alone under overlay ov.
+// buildMutated builds the -mutate packages alone under overlay ov, with
+// -gcflags=-e so a package names every untyped site, not its first ten,
+// and one attempt drops them all.
 func (m *measurer) buildMutated(ctx context.Context, ov string) (Result, error) {
-	return m.goBuild(ctx, m.cfg.Module, append([]string{"go", "build", "-buildvcs=false", "-overlay", ov}, m.cfg.Mutate...))
+	return m.goBuild(ctx, m.cfg.Module, append([]string{"go", "build", "-buildvcs=false", "-gcflags=-e", "-overlay", ov}, m.cfg.Mutate...))
 }
 
 // typeCheck builds the schemas' mutated packages alone (one go build over

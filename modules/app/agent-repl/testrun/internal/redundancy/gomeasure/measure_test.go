@@ -854,3 +854,54 @@ func TestThePreflightAndTheSchemaBuildTheMutatedPackagesAlike(t *testing.T) {
 		t.Fatalf("mutated-package builds differ:\n%s", strings.Join(shapes, "\n"))
 	}
 }
+
+func TestMeasureDropsASiteOnceThoughTheCompilerNamesItTwice(t *testing.T) {
+	// Arrange: go's "too many errors" line repeats the last error's position.
+	cfg, dir := fakeConfig(t)
+	pos := filepath.Join(dir, "p.go") + ":3:29: "
+	f := &fakeGo{dir: dir, reaches: map[string]bool{"TestA": true},
+		schemaErr: pos + "cannot use x\n" + pos + "too many errors\n"}
+	f.mutant = map[string]func(string) Result{}
+	log, _ := quietLog()
+
+	// Act
+	m, err := Measure(context.Background(), cfg, f.exec, log)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range m.Mutants {
+		if r.Status != "dropped" {
+			t.Errorf("%s is %s, want dropped", r.Key, r.Status)
+		}
+	}
+}
+
+func TestTheMutatedPackagesBuildNamingEveryError(t *testing.T) {
+	// Arrange
+	cfg, dir := fakeConfig(t)
+	f := &fakeGo{dir: dir, reaches: map[string]bool{"TestA": true},
+		schemaErr: filepath.Join(dir, "p.go") + ":3:29: cannot use x\n"}
+	f.mutant = map[string]func(string) Result{}
+	log, _ := quietLog()
+
+	// Act
+	if _, err := Measure(context.Background(), cfg, f.exec, log); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	checks := 0
+	for _, call := range f.calls {
+		if strings.Contains(call, "go build") && strings.Contains(call, "-overlay") && !strings.Contains(call, "-o ") {
+			checks++
+			if !strings.Contains(call, "-gcflags=-e") {
+				t.Errorf("a type-check stops at ten errors: %s", call)
+			}
+		}
+	}
+	if checks == 0 {
+		t.Fatal("no type-check build ran")
+	}
+}

@@ -121,7 +121,7 @@ func (g Gate) AwaitQuiet(ctx context.Context, before string) error {
 		}
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("interrupted waiting for the load to drop: %w", ctx.Err())
+			return fmt.Errorf("interrupted waiting for the load to drop: %w", context.Cause(ctx))
 		case <-g.clock().After(min(LoadPoll, g.QuietWait)):
 		}
 	}

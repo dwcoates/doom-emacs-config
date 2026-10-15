@@ -138,14 +138,14 @@ type Counter struct {
 
 // Run runs one process.
 func (c *Counter) Run(ctx context.Context, cmd Cmd) (Result, error) {
-	if err := ctx.Err(); err != nil {
-		return Result{}, fmt.Errorf("%s: interrupted: %w", c.Name, err)
+	if ctx.Err() != nil {
+		return Result{}, fmt.Errorf("%s: interrupted: %w", c.Name, context.Cause(ctx))
 	}
 	res, err := c.Exec(ctx, cmd)
 	c.Processes++
 	c.CPU += res.CPU
 	if err == nil && ctx.Err() != nil {
-		return Result{}, fmt.Errorf("%s: interrupted during %s: %w", c.Name, filepath.Base(cmd.Path), ctx.Err())
+		return Result{}, fmt.Errorf("%s: interrupted during %s: %w", c.Name, filepath.Base(cmd.Path), context.Cause(ctx))
 	}
 	return res, err
 }
