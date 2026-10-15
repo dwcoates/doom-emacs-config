@@ -148,7 +148,7 @@ func TestVerifyPutsBackAPinnedCaseFirst(t *testing.T) {
 	v := verified(t, cfg, f)
 
 	// Assert
-	if len(v.PutBack) != 1 || v.PutBack[0].Case != ".:TestLog" || !strings.HasPrefix(v.PutBack[0].Mutant, "(pinned: asserts a log record") {
+	if len(v.PutBack) != 1 || v.PutBack[0].Case != ".:TestLog" || !strings.HasPrefix(v.PutBack[0].Mutant, "(pinned: (a) a WARN or ERROR record") {
 		t.Fatalf("put back %v, want TestLog as pinned", v.PutBack)
 	}
 }

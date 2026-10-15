@@ -29,7 +29,9 @@ const fakeTests = `package p
 
 import "testing"
 
-func FindRecord() {}
+const LevelError = "error"
+
+func FindRecord(string) {}
 
 func TestA(t *testing.T) {}
 
@@ -38,7 +40,7 @@ func TestB(t *testing.T) {
 	t.Run("y", func(t *testing.T) {})
 }
 
-func TestLog(t *testing.T) { FindRecord() }
+func TestLog(t *testing.T) { FindRecord(LevelError) }
 `
 
 // fakeBlock is F's body; the comparison's mutants sit at 3.29.
@@ -328,7 +330,7 @@ func TestMeasurePinsTheLogAssertionAndUnionsTheBlocks(t *testing.T) {
 	}
 	want := map[string]string{
 		"TestA": "", "TestB/x": "named with -pin", "TestB/y": "",
-		"TestLog": "asserts a log record: TestLog -> FindRecord",
+		"TestLog": "(a) a WARN or ERROR record: TestLog -> FindRecord",
 	}
 	if !reflect.DeepEqual(pinned, want) {
 		t.Fatalf("pins = %v, want %v", pinned, want)
@@ -379,7 +381,7 @@ func TestMeasureRefuses(t *testing.T) {
 		{
 			name:  "a case that fails a coverage run with no mutant",
 			setup: func(_ *Config, f *fakeGo) { f.coverFail = "TestB/y" },
-			want:  "TestB/y failed on measurement run 1 with no mutant",
+			want:  "TestB/y on measurement run 1 (exit 1)",
 		},
 		{
 			name:  "a case the schema fails with no mutant active",
@@ -671,6 +673,11 @@ func TestMeasureRunsASpawningSuiteThroughItsOwnPrograms(t *testing.T) {
 			plainInteg = !strings.Contains(call, "-cover")
 		}
 	}
+	for _, call := range f.calls {
+		if strings.HasPrefix(call, "cover-01.test") && strings.Contains(call, "-test.gocoverdir") {
+			t.Fatalf("the plain integration binary was given -test.gocoverdir, which it refuses: %s", call)
+		}
+	}
 	if !coverProg || !mutProg || !plainInteg {
 		t.Fatalf("instrumented program %t, mutant program %t, plain integration binary %t; calls:\n%s", coverProg, mutProg, plainInteg, strings.Join(f.calls, "\n"))
 	}
@@ -735,5 +742,28 @@ func TestConfirmRestKillsWhatRunsOutTheBoundAndRerunsWhatTheTimeoutCutShort(t *t
 	}
 	if !reflect.DeepEqual(kills["TestB/x"], []string{"p.go:3:29:< -> <="}) || kills["TestB/y"] != nil || kills["TestA"] != nil {
 		t.Fatalf("kills = %v, want TestB/x's alone", kills)
+	}
+}
+
+func TestMeasureNamesEveryCaseThatFailsWithNoMutant(t *testing.T) {
+	// Arrange: TestA and TestB/y both fail their coverage runs.
+	cfg, dir := fakeConfig(t)
+	f := &fakeGo{dir: dir, reaches: map[string]bool{"TestA": true}}
+	f.coverFail = "TestA"
+	failBoth := f.exec
+	exec := func(ctx context.Context, c Cmd) (Result, error) {
+		if strings.HasPrefix(filepath.Base(c.Path), "cover-") && argAfter(c.Args, "-test.run") == RunPattern("TestB/y") {
+			return Result{Exit: 1, Lines: lines("=== RUN   TestB", "=== RUN   TestB/y", "    b_test.go:9: boom", "--- FAIL: TestB/y (0.00s)")}, nil
+		}
+		return failBoth(ctx, c)
+	}
+	log, _ := quietLog()
+
+	// Act
+	_, err := Measure(context.Background(), cfg, exec, log)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "2 cases failed with no mutant") || !strings.Contains(err.Error(), "TestB/y on measurement run 1") || !strings.Contains(err.Error(), "b_test.go:9: boom") {
+		t.Fatalf("err = %v", err)
 	}
 }

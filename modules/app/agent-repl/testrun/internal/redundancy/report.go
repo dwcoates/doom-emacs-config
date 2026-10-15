@@ -255,6 +255,7 @@ func Report(w io.Writer, m *Measurement, o Options) error {
 	}
 
 	b.WriteString("## Pinned cases\n\n")
+	b.WriteString(pinClauses(m.Cases))
 	var pins []string
 	for _, c := range m.Cases {
 		if c.Pinned != "" {
@@ -454,4 +455,26 @@ func reportVerification(w io.Writer, m *Measurement, o Options) error {
 		return fmt.Errorf("redundancy: write the report: %w", err)
 	}
 	return nil
+}
+
+// pinClauses counts the pinned cases by the clause that pinned them (the
+// pin reasons' leading tag: (a), (b), (uncertain), or another reason).
+func pinClauses(cases []Case) string {
+	counts := map[string]int{}
+	for _, c := range cases {
+		if c.Pinned == "" {
+			continue
+		}
+		tag := "other"
+		for _, t := range []string{"(a)", "(b)", "(uncertain)"} {
+			if strings.HasPrefix(c.Pinned, t) {
+				tag = t
+			}
+		}
+		counts[tag]++
+	}
+	if len(counts) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("By clause: (a) WARN/ERROR %d, (b) fields %d, (uncertain) %d, other %d\n\n", counts["(a)"], counts["(b)"], counts["(uncertain)"], counts["other"])
 }

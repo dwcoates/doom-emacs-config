@@ -19,6 +19,12 @@ import (
 // root -- a scratch folder under /tmp the run does not own, exactly what the
 // 2026-09-02 capture run had registered -- and answers it with the temporary
 // root it lies inside.
+//
+// CALL IT BEFORE newDaemon. Cleanups run last first, so a daemon started
+// after it stops before the folder goes; the other way round the folder is
+// removed under a daemon still running, and any later look the daemon takes
+// at the path (an instrumented, slower daemon took one) logs an error that
+// fails the test at the warning sweep.
 func scratchRepo(t *testing.T) (*harness.Repo, string) {
 	t.Helper()
 	dir, err := os.MkdirTemp("/tmp", "arscratch")
@@ -44,8 +50,8 @@ func awaitTypedRefusal(t *testing.T, d *harness.Daemon) {
 func TestRegisterRepositoryRefusesARepositoryInsideATemporaryFolder(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	d := newDaemon(t, harness.Opts{})
 	repo, root := scratchRepo(t)
+	d := newDaemon(t, harness.Opts{})
 
 	// Act
 	msg := registerRepository(t, d, filepath.Join(repo.Dir, "README.md"))
@@ -64,8 +70,8 @@ func TestRegisterRepositoryRefusesARepositoryInsideATemporaryFolder(t *testing.T
 func TestRegisterWorkspaceRefusesAWorktreeInsideATemporaryFolder(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	d := newDaemon(t, harness.Opts{})
 	repo, root := scratchRepo(t)
+	d := newDaemon(t, harness.Opts{})
 
 	// Act
 	resp, err := d.Client().RegisterWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.RegisterWorkspaceRequest{Dir: repo.Dir}))
@@ -89,8 +95,8 @@ func TestRegisterWorkspaceRefusesAWorktreeInsideATemporaryFolder(t *testing.T) {
 func TestACreateEntryNamingATemporaryRepositoryIsQuarantined(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	d := newDaemon(t, harness.Opts{})
 	repo, _ := scratchRepo(t)
+	d := newDaemon(t, harness.Opts{})
 
 	// Act
 	path := commandfileWrite(t, d, "workspace_commands_scratch.json",

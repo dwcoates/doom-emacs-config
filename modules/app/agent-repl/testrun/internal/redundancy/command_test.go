@@ -189,3 +189,30 @@ func TestNoAdapterRollsItsOwnCommandScaffold(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestFindRootAnswersTheRealPathBehindASymlink(t *testing.T) {
+	// Arrange: a root reached through a symlinked directory.
+	real := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(real, "testrun", "roster"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(real, "testrun", "roster", "roster.go"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	want, err := filepath.EvalSymlinks(real)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	got, err := FindRoot(filepath.Join(link, "testrun"))
+
+	// Assert
+	if err != nil || got != want {
+		t.Fatalf("FindRoot = %q, %v; want %q", got, err, want)
+	}
+}

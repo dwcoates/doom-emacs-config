@@ -393,3 +393,62 @@ func TestMutantKeyIsTheFileLineColumnAndOperator(t *testing.T) {
 		t.Fatalf("Key() = %q", got)
 	}
 }
+
+func TestOverlaysOfTwoPackagesInOneScratchKeepEachPackagesOwn(t *testing.T) {
+	// Arrange: two packages whose files share a name, as daemon packages do.
+	root := t.TempDir()
+	var schemas []*Schema
+	next := 1
+	for _, pkg := range []string{"alpha", "beta"} {
+		dir := filepath.Join(root, pkg)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		src := "package " + pkg + "\n\nfunc F(a int) bool { return a < 1 }\n"
+		if err := os.WriteFile(filepath.Join(dir, "activity.go"), []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		s, err := Build(dir, []string{"activity.go"}, next)
+		if err != nil {
+			t.Fatal(err)
+		}
+		next += len(s.Mutants)
+		schemas = append(schemas, s)
+	}
+	scratch := t.TempDir()
+
+	// Act
+	replace := map[string]string{}
+	for _, s := range schemas {
+		r, err := s.Overlay(scratch)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for k, v := range r {
+			if _, dup := replace[k]; dup {
+				t.Fatalf("%s is replaced twice", k)
+			}
+			replace[k] = v
+		}
+	}
+
+	// Assert: every replacement is its own file, of its own package.
+	seen := map[string]string{}
+	for orig, out := range replace {
+		if other, dup := seen[out]; dup {
+			t.Fatalf("%s and %s are replaced by the one file %s", orig, other, out)
+		}
+		seen[out] = orig
+		b, err := os.ReadFile(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := "package " + filepath.Base(filepath.Dir(orig))
+		if !strings.Contains(string(b), "\n"+want+"\n") && !strings.HasPrefix(string(b), want+"\n") {
+			t.Errorf("%s's replacement %s is not %s:\n%s", orig, out, want, b)
+		}
+	}
+	if len(replace) != 4 {
+		t.Fatalf("%d replacements, want each package's file and switch file", len(replace))
+	}
+}
