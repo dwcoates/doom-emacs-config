@@ -96,58 +96,42 @@ afterEach(() => {
 });
 
 describe("summarize", () => {
-  it("totals every page and names the largest first", () => {
+  it("counts the pages and names the shown one", () => {
     // Arrange
-    addPage("small", 1);
-    addPage("big", 30, true);
-    addPage("middle", 10);
+    addPage("a", 0);
+    addPage("b", 0, true);
 
     // Act
     const summary = summarize(document);
 
     // Assert
-    expect(summary.pages).toBe(3);
-    expect(summary.total_feed_rows).toBe(41);
-    expect(summary.shown_workspace).toBe("big");
-    expect(summary.largest.map((page) => page.workspace)).toEqual(["big", "middle", "small"]);
-  });
-
-  it("names at most three pages", () => {
-    // Arrange
-    for (const name of ["a", "b", "c", "d"]) addPage(name, 1);
-
-    // Act
-    const summary = summarize(document);
-
-    // Assert
-    expect(summary.largest).toHaveLength(3);
-  });
-
-  it("counts a page whose document is not loaded apart, never as an empty page", () => {
-    // Arrange
-    addPage("loaded", 2);
-    const unloaded = document.createElement("iframe");
-    unloaded.setAttribute(FRAME_WORKSPACE_ATTRIBUTE, "unloaded");
-    Object.defineProperty(unloaded, "contentDocument", { value: null });
-    document.body.append(unloaded);
-
-    // Act
-    const summary = summarize(document);
-
-    // Assert
-    expect(summary.pages).toBe(1);
-    expect(summary.pages_unloaded).toBe(1);
+    expect(summary.pages).toBe(2);
+    expect(summary.shown_workspace).toBe("b");
   });
 
   it("states no shown workspace when no page is shown", () => {
     // Arrange
-    addPage("a", 1);
+    addPage("a", 0);
 
     // Act
     const summary = summarize(document);
 
     // Assert
     expect(summary.shown_workspace).toBe("");
+  });
+
+  it("states the size of its own document, never a page's", () => {
+    // Arrange
+    addPage("a", 40);
+    const rail = document.createElement("nav");
+    rail.append(document.createElement("div"));
+    document.body.append(rail);
+
+    // Act
+    const summary = summarize(document);
+
+    // Assert
+    expect(summary.host).toEqual({ dom_nodes: document.getElementsByTagName("*").length, feed_rows: 0 });
   });
 });
 
@@ -254,7 +238,7 @@ describe("the census", () => {
     expect(counts).toHaveLength(1);
     expect(counts[0]?.level).toBe("info");
     expect(counts[0]?.pages).toBe(2);
-    expect(counts[0]?.total_feed_rows).toBe(5);
+    expect(counts[0]?.shown_workspace).toBe("a");
   });
 
   it("records nothing before the first interval has passed", async () => {

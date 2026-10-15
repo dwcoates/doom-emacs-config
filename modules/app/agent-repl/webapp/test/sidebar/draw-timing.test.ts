@@ -79,4 +79,30 @@ describe("timeRosterDraw", () => {
     expect(drew).toBe(true);
     expect(frames).toHaveLength(1);
   });
+
+  it("records each phase the draw marks as the time since the mark before it", async () => {
+    // Arrange
+    const steps = { build: 30, mount: 4, layout: 20, hooks: 6 } as const;
+
+    // Act
+    timeRosterDraw(
+      rail(2),
+      "webhost",
+      (mark) => {
+        for (const [phase, ms] of Object.entries(steps)) {
+          clock += ms;
+          mark(phase as keyof typeof steps);
+        }
+      },
+      env,
+    );
+    frames.shift()?.();
+
+    // Assert
+    const records = await drawRecords("info");
+    expect(records[0]?.context).toEqual(
+      expect.objectContaining({ build_ms: 30, mount_ms: 4, layout_ms: 20, hooks_ms: 6, draw_ms: 60 }),
+    );
+  });
 });
+
