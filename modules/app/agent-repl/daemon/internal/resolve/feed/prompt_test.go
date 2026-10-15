@@ -133,6 +133,17 @@ func TestTheAuthorLabelOfAMergeQueueNoticeIsTheMergeQueue(t *testing.T) {
 	}
 }
 
+// The merge-revert brief is the daemon's, drawn under its own author.
+func TestTheAuthorLabelOfAMergeRevertBriefIsMergeRevert(t *testing.T) {
+	// Arrange, Act.
+	got := AuthorLabel(conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT)
+
+	// Assert.
+	if got != "Merge revert" {
+		t.Fatalf("author = %q, want Merge revert", got)
+	}
+}
+
 func TestPromptRowHiddenNamesEveryOriginTheFeedDrawsNoRowFor(t *testing.T) {
 	tests := []struct {
 		origin conversationv1.PromptOrigin
@@ -141,6 +152,7 @@ func TestPromptRowHiddenNamesEveryOriginTheFeedDrawsNoRowFor(t *testing.T) {
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART, true},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE, true},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK, false},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT, false},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, false},
 	}
 	for _, tt := range tests {

@@ -42,7 +42,12 @@ func (q *queue) Submit(ctx context.Context, sub Submission) (Disposition, error)
 	// through the session lookup it answered `no_session` — a sentence about a
 	// session that was up and serving, which sent three prompts to the wrong
 	// explanation on 2026-09-14. The gate is the fact; it is named as the fact.
-	if q.deps.ColdGate != nil {
+	//
+	// A PROMPT WHOSE ORIGIN WAITS OUT THE GATE (waitsOutColdGate) is not
+	// refused: it falls through to the session wait below, which holds it
+	// under wsm.HoldColdGate, and the gate's answer settles it as it settles
+	// every prompt held there (gatefate.go).
+	if q.deps.ColdGate != nil && !waitsOutColdGate(sub.Origin) {
 		if detail, gated := q.deps.ColdGate(sub.WS); gated {
 			refusalLevel(ctx, log, log.Info)(opSubmit, "the session is parked at its cold gate, so the submission is refused by the gate's own name",
 				dlog.Context{"detail": detail})
@@ -270,6 +275,17 @@ func (q *queue) noteDrainRefusal(holder wsm.LeaseHolder, ws ids.WorkspaceID) {
 // is waiting on and the brief waits for the merge to end.
 func exemptFromLease(lease wsm.Lease, origin conversationv1.PromptOrigin) bool {
 	return lease.Holder == wsm.HolderMerge && mergeOrigin(origin)
+}
+
+// waitsOutColdGate reports whether a prompt of ORIGIN is HELD at a standing
+// cold gate rather than refused by it. Only the merge-revert brief is: it is
+// queued right after the open that brings a reopened merged workspace's
+// session up, and that bring-up is exactly where a large conversation parks
+// at its gate, so refusing it there would drop the revert the user asked
+// for. A prompt the user types is still refused, so the user knows it did
+// not go.
+func waitsOutColdGate(origin conversationv1.PromptOrigin) bool {
+	return origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT
 }
 
 // mergeOrigin reports whether an origin is one the merge orchestrator submits
