@@ -34,6 +34,7 @@ import { createSidebarView } from "./view.js";
 import type { RailContext } from "./context.js";
 import { disposeWorkspaceRoster, drawWorkspaceRoster } from "./roster.js";
 import { nextFrame } from "../frame.js";
+import { createRowReveal } from "./reveal.js";
 import { guardMalformedNow } from "../rpc/guard.js";
 import { placeOpenRowDetails } from "./row.js";
 import { installBandFit } from "./band-fit.js";
@@ -181,6 +182,13 @@ function mountSidebarIn(
 
   const openDetails = new Set<string>();
   const dropdowns = createDropdowns();
+  // A ROW DRAWN WHEN IT COMES INTO VIEW (reveal.ts) is drawn after the
+  // roster's own draw ran the search and placed the open panels, so both are
+  // run again over the rail.
+  const reveal = createRowReveal(() => {
+    applySearch(body, search.query());
+    placeOpenRowDetails(body);
+  });
   const rail: RailContext = {
     ctx,
     parentWorkspace: () => (placement.case === "page" ? placement.ctx.workspace : current),
@@ -190,6 +198,7 @@ function mountSidebarIn(
     dropdowns,
     rowHover: createRowHover(dropdowns, openDetails),
     attention,
+    reveal,
   };
 
   const body = document.createElement("div");
@@ -199,7 +208,8 @@ function mountSidebarIn(
   // a pane.
   const bandFit = installBandFit(body);
   // THE SEARCH NARROWS THE DRAWN ROWS (search.ts): on every keystroke, and
-  // again after every push, since a push throws the narrowed drawing away.
+  // again after every push and every row drawn as it came into view, since
+  // either draws rows the query has not narrowed.
   const search = createRailSearch((query) => {
     const outcome = applySearch(body, query);
     log.debug("narrowed the rail to the search", {
@@ -350,6 +360,7 @@ function mountSidebarIn(
       host.removeEventListener("mouseleave", pointerLeft);
       rail.rowHover.dispose();
       disposeWorkspaceRoster(rail);
+      reveal.dispose();
       attention.dispose();
       host.replaceChildren();
       host.hidden = true;

@@ -40,6 +40,7 @@ import type { RailContext, SidebarContext } from "../../src/sidebar/context.js";
 import { createSidebarView, type DrawnView, type SidebarView } from "../../src/sidebar/view.js";
 import { createDropdowns } from "../../src/sidebar/dropdowns.js";
 import { createRowHover } from "../../src/sidebar/row-hover.js";
+import type { RowReveal } from "../../src/sidebar/reveal.js";
 
 /** The webview's own workspace. */
 export const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-self", dir: "/w/self" });
@@ -129,6 +130,32 @@ export function appContext(impl: Partial<ServiceImpl<typeof AgentRepl>> = {}, ti
   });
 }
 
+/** A reveal that draws every row the moment it is waited on, as if every row were in view. */
+export const drawsAtOnce: RowReveal = {
+  whenShown: (_target, draw) => {
+    draw();
+    return () => undefined;
+  },
+};
+
+/** A reveal the test runs by hand: `show(target)` draws a waiting row as if it came into view. */
+export function manualReveal(): RowReveal & { waiting(): Element[]; show(target: Element): void } {
+  const waiting = new Map<Element, () => void>();
+  return {
+    whenShown: (target, draw) => {
+      waiting.set(target, draw);
+      return () => void waiting.delete(target);
+    },
+    waiting: () => [...waiting.keys()],
+    show: (target) => {
+      const draw = waiting.get(target);
+      if (draw === undefined) throw new Error("manualReveal: nothing waits on that element");
+      waiting.delete(target);
+      draw();
+    },
+  };
+}
+
 /**
  * A context over CTX, with a fresh view and no ask in flight, that serves both
  * as a rail's (`RailContext`, what the roster drawer takes) and as one drawn
@@ -141,6 +168,7 @@ export function sidebarContext(
   timers: BlinkTimers = fakeTimers(),
   view: SidebarView = createSidebarView(),
   openDetails: Set<string> = new Set(),
+  reveal: RowReveal = drawsAtOnce,
 ): SidebarContext & RailContext & { view: DrawnView & SidebarView; attention: AttentionRegistry; disposers: Array<() => void> } {
   const disposers: Array<() => void> = [];
   const dropdowns = createDropdowns();
@@ -159,6 +187,7 @@ export function sidebarContext(
     dropdowns,
     rowHover: createRowHover(dropdowns, openDetails),
     attention: new AttentionRegistry(timers),
+    reveal,
     disposers,
     onDispose: (fn) => {
       disposers.push(fn);

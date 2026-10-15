@@ -17,6 +17,8 @@ import {
   drawRosterRow,
   returnFromBand,
   type BandReturn,
+  drawRosterRowStandIn,
+  STAND_IN_ATTRIBUTE,
   drawRosterRowOneShot,
   drawRosterRowAsyncMerging,
   drawRosterRowMergePaused,
@@ -2155,6 +2157,54 @@ describe("the hidden section's rows", () => {
       "hidden",
     );
     expect(drawn.querySelector('[data-roster-row="ws-2"]')?.classList.contains("tone-blue")).toBe(false);
+  });
+});
+
+describe("drawRosterRowStandIn", () => {
+  it("is the row's box, line and name, marked as a stand-in", () => {
+    // Act
+    const standIn = drawRosterRowStandIn(row({ id: "ws-1", name: "alpha" }), "row");
+
+    // Assert
+    expect([
+      standIn.getAttribute("data-roster-row"),
+      standIn.hasAttribute(STAND_IN_ATTRIBUTE),
+      standIn.querySelector(":scope > .row > .name")?.textContent,
+    ]).toEqual(["ws-1", true, "alpha"]);
+  });
+
+  it("draws nothing of the row but its line", () => {
+    // Act
+    const standIn = drawRosterRowStandIn(row({ id: "ws-1" }), "row");
+
+    // Assert
+    expect(standIn.querySelectorAll("*").length).toBe(2);
+  });
+
+  it("carries a stand-in for each visible child, where the search looks for one", () => {
+    // Act
+    const standIn = drawRosterRowStandIn(row({ id: "ws-1", children: [row({ id: "ws-2", name: "beta" })] }), "row");
+
+    // Assert
+    expect(standIn.querySelector(":scope > .kids > [data-roster-row='ws-2'] > .row > .name")?.textContent).toBe("beta");
+  });
+
+  it("refuses a row naming no workspace as a malformed view", () => {
+    // Arrange
+    const bad = row({ id: "ws-1" });
+    bad.workspace = undefined;
+
+    // Act / Assert
+    expect(() => drawRosterRowStandIn(bad, "row")).toThrow(MalformedView);
+  });
+
+  it("refuses a row with no name as a malformed view", () => {
+    // Arrange
+    const bad = row({ id: "ws-1" });
+    bad.name = undefined;
+
+    // Act / Assert
+    expect(() => drawRosterRowStandIn(bad, "row")).toThrow(MalformedView);
   });
 });
 

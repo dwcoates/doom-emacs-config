@@ -15,8 +15,13 @@ import {
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { SetWorkspaceHiddenResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
+import { STAND_IN_ATTRIBUTE } from "../../src/sidebar/row.js";
+import { createSidebarView } from "../../src/sidebar/view.js";
+import type { FailureSink } from "../../src/failure/sink.js";
 import { repoFoldKey } from "../../src/sidebar/context.js";
 import {
+  MERGED_DRAWN_AT_ONCE,
+  MERGED_AT_ATTRIBUTE,
   createRosterDrawer,
   disposeWorkspaceRoster,
   drawFoldHeader,
@@ -33,10 +38,12 @@ import {
   todaysMerges,
 } from "../../src/sidebar/roster.js";
 import { cascadedValue, inRail } from "../stylesheet.js";
+import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import {
   appContext,
   fakeTicker,
   hiddenSection,
+  manualReveal,
   mergedBand,
   mergedGroup,
   mergedSection,
@@ -1614,6 +1621,141 @@ describe("the roster drawer: a push redraws only what it changed", () => {
 
     // Assert
     expect([after === before, ticker.subscribers()]).toEqual([false, 1]);
+  });
+});
+
+describe("the recently-merged band: rows out of view are not drawn", () => {
+  /** N merged rows, ws-0 first. */
+  const merges = (n: number, from = 0): ReturnType<typeof row>[] =>
+    Array.from({ length: n }, (_, i) => row({ id: `ws-${from + i}` }));
+
+  /** Draw a band of GROUPS through a hand-run reveal. */
+  function drawBand(groups: ReturnType<typeof mergedGroup>[], failures?: FailureSink) {
+    const reveal = manualReveal();
+    const ctx = appContext();
+    const sc = sidebarContext(
+      failures === undefined ? ctx : { ...ctx, failures },
+      undefined,
+      createSidebarView(),
+      new Set(),
+      reveal,
+    );
+    const drawer = createRosterDrawer(sc);
+    const drawn = drawer.draw(roster({ merged: mergedBand(groups, undefined, false) }));
+    return { drawn, reveal, drawer };
+  }
+
+  const standIns = (drawn: HTMLElement): string[] =>
+    [...drawn.querySelectorAll(`[${STAND_IN_ATTRIBUTE}]`)].map((el) => el.getAttribute("data-roster-row") ?? "");
+
+  it("draws the band's first rows with the band", () => {
+    // Act
+    const { drawn } = drawBand([mergedGroup({ id: "r", rows: merges(MERGED_DRAWN_AT_ONCE + 3) })]);
+
+    // Assert
+    expect(drawn.querySelector(`[data-roster-row='ws-${MERGED_DRAWN_AT_ONCE - 1}']`)?.hasAttribute(STAND_IN_ATTRIBUTE)).toBe(false);
+  });
+
+  it("draws a stand-in for every row after the first ones", () => {
+    // Act
+    const { drawn } = drawBand([mergedGroup({ id: "r", rows: merges(MERGED_DRAWN_AT_ONCE + 3) })]);
+
+    // Assert
+    expect(standIns(drawn)).toEqual([0, 1, 2].map((i) => `ws-${MERGED_DRAWN_AT_ONCE + i}`));
+  });
+
+  it("counts the rows drawn at once across the band's groups", () => {
+    // Act
+    const { drawn } = drawBand([
+      mergedGroup({ id: "r1", rows: merges(MERGED_DRAWN_AT_ONCE - 1) }),
+      mergedGroup({ id: "r2", rows: merges(3, 100) }),
+    ]);
+
+    // Assert
+    expect(standIns(drawn)).toEqual(["ws-101", "ws-102"]);
+  });
+
+  it("gives a stand-in the row's name on a line, as the fit and the search read it", () => {
+    // Act
+    const { drawn } = drawBand([mergedGroup({ id: "r", rows: merges(MERGED_DRAWN_AT_ONCE + 1) })]);
+
+    // Assert
+    const standIn = drawn.querySelector(`[${STAND_IN_ATTRIBUTE}]`);
+    expect(standIn?.querySelector(":scope > .row > .name")?.textContent).toBe(`ws-${MERGED_DRAWN_AT_ONCE}`);
+  });
+
+  it("stamps a stand-in with the row's merged instant", () => {
+    // Act
+    const { drawn } = drawBand([mergedGroup({ id: "r", rows: merges(MERGED_DRAWN_AT_ONCE + 1) })]);
+
+    // Assert
+    expect(drawn.querySelector(`[${STAND_IN_ATTRIBUTE}]`)?.getAttribute(MERGED_AT_ATTRIBUTE)).toBe(
+      String(1_000_000_000 - MERGED_DRAWN_AT_ONCE * 60_000),
+    );
+  });
+
+  it("draws the row in its stand-in's place once it comes into view", () => {
+    // Arrange
+    const { drawn, reveal } = drawBand([mergedGroup({ id: "r", rows: merges(MERGED_DRAWN_AT_ONCE + 1) })]);
+    const [standIn] = reveal.waiting();
+
+    // Act
+    reveal.show(standIn);
+
+    // Assert
+    const shown = drawn.querySelector(`[data-roster-row='ws-${MERGED_DRAWN_AT_ONCE}']`);
+    expect([shown?.hasAttribute(STAND_IN_ATTRIBUTE), shown?.getAttribute(MERGED_AT_ATTRIBUTE), standIn.parentElement !== null]).toEqual([
+      false,
+      String(1_000_000_000 - MERGED_DRAWN_AT_ONCE * 60_000),
+      false,
+    ]);
+  });
+
+  it("stops waiting on a stand-in whose band is drawn anew", () => {
+    // Arrange
+    const { reveal, drawer } = drawBand([mergedGroup({ id: "r", rows: merges(MERGED_DRAWN_AT_ONCE + 1) })]);
+
+    // Act
+    drawer.draw(roster({ merged: mergedBand([mergedGroup({ id: "r", rows: merges(MERGED_DRAWN_AT_ONCE) })], undefined, false) }));
+
+    // Assert
+    expect(reveal.waiting()).toEqual([]);
+  });
+
+  it("files a row it finds malformed when it comes into view, leaving the stand-in", () => {
+    // Arrange
+    const reports: string[] = [];
+    const bad = row({ id: "ws-bad" });
+    bad.status = { case: undefined };
+    const { reveal } = drawBand(
+      [mergedGroup({ id: "r", rows: [...merges(MERGED_DRAWN_AT_ONCE), bad] })],
+      { report: (kind) => void reports.push(kind.kind.case ?? ""), retract: () => undefined },
+    );
+    const [standIn] = reveal.waiting();
+
+    // Act
+    reveal.show(standIn);
+
+    // Assert
+    expect([reports, standIn.parentElement !== null]).toEqual([["frameUndecodable"], true]);
+  });
+
+  it("logs a row it finds malformed when it comes into view", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const bad = row({ id: "ws-bad" });
+    bad.status = { case: undefined };
+    const { reveal } = drawBand([mergedGroup({ id: "r", rows: [...merges(MERGED_DRAWN_AT_ONCE), bad] })]);
+
+    // Act
+    reveal.show(reveal.waiting()[0]);
+
+    // Assert
+    const record = await forwardedRecord(capture, "sidebar.row.reveal-undecodable");
+    expect([record.level.case, record.context?.path]).toEqual([
+      "error",
+      `WorkspaceRoster.recently_merged.groups[0].rows.rows[${MERGED_DRAWN_AT_ONCE}].status`,
+    ]);
   });
 });
 

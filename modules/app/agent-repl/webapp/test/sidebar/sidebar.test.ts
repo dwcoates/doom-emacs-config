@@ -42,6 +42,9 @@ import {
   row,
 } from "./harness.js";
 import { frameQueue, type FrameQueue } from "../frame-queue.js";
+import { fireIntersection } from "../intersection-observer.js";
+import { MERGED_DRAWN_AT_ONCE } from "../../src/sidebar/roster.js";
+import { STAND_IN_ATTRIBUTE } from "../../src/sidebar/row.js";
 import type { FailureSink } from "../../src/failure/sink.js";
 
 /** A storage a test can inspect, and one that throws on every access. */
@@ -101,6 +104,14 @@ function ctxFor(
     failures,
     composerEnabled: false,
   });
+}
+
+/** Type QUERY into HOST's rail search. */
+function search(host: HTMLElement, query: string): void {
+  (host.querySelector("[data-search-toggle]") as HTMLElement).click();
+  const input = host.querySelector("[data-search-input]") as HTMLInputElement;
+  input.value = query;
+  input.dispatchEvent(new Event("input"));
 }
 
 /** The rail's frames, where it draws each push; run by `settle`. */
@@ -232,13 +243,6 @@ describe("mounting the rail: the view is the daemon's", () => {
 
 describe("mounting the rail: the search", () => {
   /** Open HOST's search and type QUERY into it. */
-  function search(host: HTMLElement, query: string): void {
-    (host.querySelector("[data-search-toggle]") as HTMLElement).click();
-    const input = host.querySelector("[data-search-input]") as HTMLInputElement;
-    input.value = query;
-    input.dispatchEvent(new Event("input"));
-  }
-
   const pushes = (): WorkspaceRoster[] => [
     roster({
       repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-1", name: "alpha" }), row({ id: "ws-2", name: "beta" })] })],
@@ -1277,6 +1281,64 @@ describe("mounting the rail: a roster its frame cannot draw", () => {
 
     // Assert
     expect(host.querySelector("[data-roster-row='ws-1']")).not.toBeNull();
+  });
+});
+
+describe("mounting the rail: a merged row drawn when it comes into view", () => {
+  /** A rail whose open merged band holds one row past those drawn at once, the last named NAME. */
+  async function mountLong(name: string): Promise<{ host: HTMLElement; standIn: Element }> {
+    const host = document.createElement("nav");
+    const rows = Array.from({ length: MERGED_DRAWN_AT_ONCE }, (_, i) => row({ id: `ws-${i}`, name: "kept" }));
+    rows.push(row({ id: "ws-late", name }));
+    mountSidebar(host, ctxFor([roster({ merged: mergedSection(rows, rows.length, false) })]), {
+      storage: null,
+      timers: fakeTimers(),
+    });
+    await settle();
+    const standIn = host.querySelector(`[${STAND_IN_ATTRIBUTE}]`);
+    if (standIn === null) throw new Error("the band drew no stand-in");
+    return { host, standIn };
+  }
+
+  it("draws the row in its stand-in's place", async () => {
+    // Arrange
+    const { host, standIn } = await mountLong("late");
+
+    // Act
+    fireIntersection(standIn, true);
+
+    // Assert
+    expect(host.querySelector("[data-roster-row='ws-late']")?.hasAttribute(STAND_IN_ATTRIBUTE)).toBe(false);
+  });
+
+  it("narrows the drawn row to the search the rail already holds", async () => {
+    // Arrange
+    const { host, standIn } = await mountLong("late");
+    search(host, "kept");
+
+    // Act
+    fireIntersection(standIn, true);
+
+    // Assert
+    expect(host.querySelector("[data-roster-row='ws-late']")?.classList.contains("sb-search-miss")).toBe(true);
+  });
+
+  it("stops watching its stand-ins once the rail is disposed", async () => {
+    // Arrange
+    const host = document.createElement("nav");
+    const rows = Array.from({ length: MERGED_DRAWN_AT_ONCE + 1 }, (_, i) => row({ id: `ws-${i}` }));
+    const handle = mountSidebar(host, ctxFor([roster({ merged: mergedSection(rows, rows.length, false) })]), {
+      storage: null,
+      timers: fakeTimers(),
+    });
+    await settle();
+    const standIn = host.querySelector(`[${STAND_IN_ATTRIBUTE}]`);
+
+    // Act
+    handle?.dispose();
+
+    // Assert
+    expect(() => fireIntersection(standIn as Element, true)).toThrow(/no IntersectionObserver/);
   });
 });
 

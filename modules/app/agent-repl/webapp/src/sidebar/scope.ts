@@ -38,6 +38,7 @@ export function openScope(rail: RailContext): DrawScope {
     drawnStatus: rail.drawnStatus,
     dropdowns: rail.dropdowns,
     rowHover: rail.rowHover,
+    reveal: rail.reveal,
     view: {
       track: (key, wire, paint) => viewScope.track(key, wire, paint),
       ask: (key, value) => rail.view.ask(key, value),

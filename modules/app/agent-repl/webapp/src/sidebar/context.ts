@@ -13,6 +13,7 @@ import type { DaemonContext } from "../rpc/context.js";
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import type { Dropdowns } from "./dropdowns.js";
 import type { RowHover } from "./row-hover.js";
+import type { RowReveal } from "./reveal.js";
 import type { DrawnView, SidebarView } from "./view.js";
 
 /** The one thing a drawn row asks of the attention registry. */
@@ -59,6 +60,8 @@ export interface RailContext {
   rowHover: RowHover;
   /** Where a drawn row's attention marker is registered (`attention.ts`). */
   attention: AttentionMarks;
+  /** Draws a row the first time it comes into view (`reveal.ts`). */
+  reveal: RowReveal;
 }
 
 /** What one drawn section of the rail is handed: the rail's context, bound to the section's scope. */

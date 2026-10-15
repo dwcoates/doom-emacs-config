@@ -4,9 +4,9 @@
  * caused.
  *
  * WHY IT EXISTS (2026-10-14). Workspace switching lagged most in the sidebar,
- * and every push redraws the whole roster and re-measures its panels and
- * bands; nothing recorded what a draw cost or how big the rail was when it
- * did. A draw that costs a frame or more is recorded at INFO with the rail's
+ * and every push redrew the whole roster (it now redraws only the sections
+ * it changed, `roster.ts`) and re-measures its panels and bands; nothing
+ * recorded what a draw cost or how big the rail was when it did. A draw that costs a frame or more is recorded at INFO with the rail's
  * size; a cheaper one at DEBUG, so an ordinary push adds nothing at `info`.
  */
 import { log } from "../log.js";

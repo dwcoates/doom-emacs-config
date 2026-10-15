@@ -16,7 +16,7 @@
  * highlight through `RosterRowCurrent`, deliberately, so no client can compute
  * it differently. The field is validated and logged, and that is all.
  */
-import { HIDDEN_SECTION_CLASS, MERGED_SECTION_CLASS } from "./band-fit.js";
+import { BAND_CAP, HIDDEN_SECTION_CLASS, MERGED_SECTION_CLASS } from "./band-fit.js";
 import {
   RosterHiddenSectionSchema,
   RosterMergedSectionSchema,
@@ -60,6 +60,7 @@ import {
   drawRosterRow,
   drawRosterRowDetailCommits,
   drawRosterRowWhenMerged,
+  drawRosterRowWhenShown,
   expandVisibleRows,
   mergedToday,
   tickPaint,
@@ -510,7 +511,10 @@ export function drawRosterMergedSection(
   sc: SidebarContext,
   path: string,
 ): HTMLElement {
-  const groups = u.groups.map((group, index) => drawRosterMergedRepoGroup(group, sc, `${path}.groups[${index}]`));
+  const drawnNow = { left: MERGED_DRAWN_AT_ONCE };
+  const groups = u.groups.map((group, index) =>
+    drawRosterMergedRepoGroup(group, sc, `${path}.groups[${index}]`, drawnNow),
+  );
   const section = drawHeadedBox(
     u,
     sc,
@@ -539,6 +543,14 @@ export function drawRosterMergedSection(
   );
   return section;
 }
+
+/**
+ * How many of the band's rows are drawn with the band; every later one is a
+ * stand-in until it comes into view (`reveal.ts`, owner ruling 2026-10-15:
+ * a row scrolled out of the band's viewport is not drawn). Twice the band's
+ * capped viewport, so a band opened or fitted shows drawn rows at once.
+ */
+export const MERGED_DRAWN_AT_ONCE = BAND_CAP * 2;
 
 /** The class of one repository's group inside the band, and of its header. */
 export const MERGED_GROUP_CLASS = "merged-group";
@@ -582,6 +594,7 @@ export function drawRosterMergedRepoGroup(
   u: RosterMergedRepoGroup,
   sc: SidebarContext,
   path: string,
+  drawnNow: { left: number },
 ): DrawnMergedRepoGroup {
   const key = drawRosterRepoKey(requireMessage(u.key, `${path}.key`), `${path}.key`);
   const rows = requireMessage(u.rows, `${path}.rows`);
@@ -600,8 +613,20 @@ export function drawRosterMergedRepoGroup(
   group.className = MERGED_GROUP_CLASS;
   group.setAttribute("data-repository", key.id);
   group.appendChild(drawRosterMergedRepoGroupHeader(requireMessage(u.header, `${path}.header`), `${path}.header`));
-  const region = drawRosterRows(rows, sc, `${path}.rows`, false, "merged");
-  [...region.children].forEach((row, i) => row.setAttribute(MERGED_AT_ATTRIBUTE, String(merges[i].atMs)));
+  const region = document.createElement("div");
+  region.className = "rows";
+  rows.rows.forEach((row, i) => {
+    const rowPath = `${path}.rows.rows[${i}]`;
+    const stamp = (drawn: HTMLElement): void => drawn.setAttribute(MERGED_AT_ATTRIBUTE, String(merges[i].atMs));
+    if (drawnNow.left > 0) {
+      drawnNow.left -= 1;
+      const drawn = drawRosterRow(row, sc, rowPath, "merged");
+      stamp(drawn);
+      region.appendChild(drawn);
+      return;
+    }
+    drawRosterRowWhenShown(region, row, sc, rowPath, "merged", stamp);
+  });
   group.appendChild(region);
   const collapsed = sc.view.track(foldViewKey(repoFoldKey(key.id)), wireCollapsed, (folded) =>
     paintMergedRepoGroup(group, folded),
