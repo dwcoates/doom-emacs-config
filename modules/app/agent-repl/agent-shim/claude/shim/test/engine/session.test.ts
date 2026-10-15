@@ -5043,12 +5043,16 @@ describe("SetSessionPermissionMode", () => {
   });
 });
 
+/** A SetKeepalive asking for the hold: the request every keep-alive suite holds a session with. */
+function holdKeepaliveRequest(): shimv1.SetKeepaliveRequest {
+  return create(shimv1.SetKeepaliveRequestSchema, {
+    cadence: { case: "hold", value: create(shimv1.SetKeepaliveHoldSchema, {}) },
+  });
+}
+
 describe("SendKeepalive", () => {
   const request = (): shimv1.SendKeepaliveRequest => create(shimv1.SendKeepaliveRequestSchema, {});
-  const hold = (): shimv1.SetKeepaliveRequest =>
-    create(shimv1.SetKeepaliveRequestSchema, {
-      cadence: { case: "hold", value: create(shimv1.SetKeepaliveHoldSchema, {}) },
-    });
+  const hold = holdKeepaliveRequest;
 
   /** The response's arm path, e.g. `success.sent` or `error.noSession`. */
   function armOf(response: shimv1.SendKeepaliveResponse): string {
@@ -5185,11 +5189,7 @@ describe("SendKeepalive", () => {
 });
 
 describe("SetKeepalive", () => {
-  function hold(): shimv1.SetKeepaliveRequest {
-    return create(shimv1.SetKeepaliveRequestSchema, {
-      cadence: { case: "hold", value: create(shimv1.SetKeepaliveHoldSchema, {}) },
-    });
-  }
+  const hold = holdKeepaliveRequest;
 
   function run(): shimv1.SetKeepaliveRequest {
     return create(shimv1.SetKeepaliveRequestSchema, {

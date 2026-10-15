@@ -123,6 +123,17 @@ func TestShowingAHiddenWorkspaceRunsItsKeepalivesAgain(t *testing.T) {
 	})
 }
 
+// sendHiddenKeepalives asks the daemon for SPC j R's keep-alives and answers
+// its response, failing the test on a transport error.
+func sendHiddenKeepalives(t *testing.T, d *harness.Daemon) *agentreplv1.SendHiddenKeepalivesResponse {
+	t.Helper()
+	resp, err := d.Client().SendHiddenKeepalives(d.Ctx(), connect.NewRequest(&agentreplv1.SendHiddenKeepalivesRequest{}))
+	if err != nil {
+		t.Fatalf("SendHiddenKeepalives = error %v", err)
+	}
+	return resp.Msg
+}
+
 // SPC j R: one keep-alive to every hidden workspace, each cadence left held
 // (docs/protobuf-design/hidden-keepalives-on-demand.md).
 func TestSendingTheHiddenKeepalivesAsksEachHeldShimForOneAndLeavesItHeld(t *testing.T) {
@@ -131,15 +142,12 @@ func TestSendingTheHiddenKeepalivesAsksEachHeldShimForOneAndLeavesItHeld(t *test
 	f := hiddenAndHeld(t)
 
 	// Act
-	resp, err := f.d.Client().SendHiddenKeepalives(f.d.Ctx(), connect.NewRequest(&agentreplv1.SendHiddenKeepalivesRequest{}))
+	resp := sendHiddenKeepalives(t, f.d)
 
 	// Assert: the shim was asked once, answered sent, and its cadence is still held.
-	if err != nil {
-		t.Fatalf("SendHiddenKeepalives = error %v", err)
-	}
-	workspaces := resp.Msg.GetSuccess().GetWorkspaces()
+	workspaces := resp.GetSuccess().GetWorkspaces()
 	if len(workspaces) != 1 || workspaces[0].GetWorkspace().GetId() != f.ws.GetId() || workspaces[0].GetSent() == nil {
-		t.Fatalf("SendHiddenKeepalives = %v, want the one hidden workspace sent", resp.Msg)
+		t.Fatalf("SendHiddenKeepalives = %v, want the one hidden workspace sent", resp)
 	}
 	shim := f.d.OpenedShim(f.ws)
 	if n := shim.Count(harness.RPCSendKeepalive); n != 1 {
@@ -163,9 +171,7 @@ func TestTheKeepalivesAnswerMovesTheHiddenRowsCountdown(t *testing.T) {
 	roster := f.d.WatchRoster()
 	shim := f.d.OpenedShim(f.ws)
 	shim.PushSessionUpdate(cacheLapse(time.Now().Add(10*time.Minute), 0))
-	if _, err := f.d.Client().SendHiddenKeepalives(f.d.Ctx(), connect.NewRequest(&agentreplv1.SendHiddenKeepalivesRequest{})); err != nil {
-		t.Fatalf("SendHiddenKeepalives = error %v", err)
-	}
+	sendHiddenKeepalives(t, f.d)
 	later := time.Now().Add(time.Hour)
 
 	// Act: the held shim restates its lapse once the keep-alive's answer re-anchors.
