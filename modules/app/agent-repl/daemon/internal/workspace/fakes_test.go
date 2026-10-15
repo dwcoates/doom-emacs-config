@@ -117,8 +117,10 @@ type fakeDB struct {
 	// reach the roster's session-read error branch: the fake's own map
 	// cannot fail.
 	sessionErr error
-	jobs       map[ids.WorkspaceID]wsm.CreationJob
-	held       map[ids.WorkspaceID][]wsm.HeldPrompt
+	// tasksErr is what every Tasks read answers.
+	tasksErr error
+	jobs     map[ids.WorkspaceID]wsm.CreationJob
+	held     map[ids.WorkspaceID][]wsm.HeldPrompt
 	// landedWrites is every SetLanded, in order; setLandedErr fails it.
 	landedWrites []*wsm.Landing
 	setLandedErr error
@@ -447,7 +449,7 @@ func (d *fakeDB) ListRepositories(context.Context) ([]wsm.Repository, error) {
 	return d.repositories, nil
 }
 
-func (d *fakeDB) Tasks(context.Context) ([]wsm.Task, error) { return d.tasks, nil }
+func (d *fakeDB) Tasks(context.Context) ([]wsm.Task, error) { return d.tasks, d.tasksErr }
 
 func (d *fakeDB) Current(context.Context) (*ids.WorkspaceID, error) {
 	if d.currentErr != nil {

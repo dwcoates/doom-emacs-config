@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
 )
@@ -273,6 +274,30 @@ func TestPublishRegistryRefusesWhenASessionRecordCannotBeRead(t *testing.T) {
 	}
 	if len(f.sidebar.registries) != before {
 		t.Fatalf("roster publications = %d, want no roster published from records that could not be read", len(f.sidebar.registries))
+	}
+}
+
+func TestPublishRegistryRefusesWhenTheTasksCannotBeRead(t *testing.T) {
+	// Arrange: a task row that does not decode is a failed read.
+	f := newFixture(t)
+	if _, err := f.verbs.Register(context.Background(), worktreeDir(t), wsm.RegisterFacts{}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	f.db.tasksErr = errors.New("decode task row: invalid json")
+	before := len(f.sidebar.registries)
+
+	// Act
+	err := f.verbs.PublishRegistry(context.Background())
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "list the tasks") {
+		t.Fatalf("PublishRegistry = %v, want the task read's failure surfaced", err)
+	}
+	if len(f.sidebar.registries) != before {
+		t.Fatalf("roster publications = %d, want no roster published from records that could not be read", len(f.sidebar.registries))
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opRegister}); !ok {
+		t.Fatalf("records = %+v, want the failed task read at ERROR", f.log.logger.Records())
 	}
 }
 
