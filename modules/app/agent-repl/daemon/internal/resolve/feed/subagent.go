@@ -7,6 +7,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
+	"agent-repld/internal/protoarm"
 	"agent-repld/internal/sessionwatcher"
 )
 
@@ -595,6 +596,10 @@ func bubbleLabel(bubble *frontendv1.FeedSubagent) string {
 // drawDetachedWork draws work that left the stream. It is announced HERE and
 // nowhere else, so this is where a bubble first becomes a detached one.
 func (r *resolver) drawDetachedWork(s *wsState, announcer *conversationv1.AgentId, work *conversationv1.AgentDetachedWork) {
+	// THE KIND IS REQUIRED on a live announcement and a replayed one alike: the
+	// session watcher refuses a live one without it before any view takes it
+	// (resolveDetachedLocked), and the shim never records one.
+	protoarm.Must(work.GetKind().ProtoReflect(), "kind", "daemon.feed.draw_detached_work")
 	log := r.logger(s.id)
 	workID := work.GetWork().GetValue()
 	stated := work.GetOwner().GetValue()

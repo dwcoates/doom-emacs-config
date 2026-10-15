@@ -4032,3 +4032,41 @@ func TestAJudgedReplayIsRecordedWithItsCause(t *testing.T) {
 	}
 	t.Fatalf("records = %+v, want the judged replay recorded at info with its cause", h.records())
 }
+
+// TestAKindlessDetachmentFailsHardAndDrawsNothing pins the invariant the
+// session watcher's gate guarantees (AgentDetachedWork.kind is required, and
+// resolveDetachedLocked refuses an announcement without one): reaching the
+// feed without a kind, live or replayed, panics through protoarm.Must before
+// anything is drawn.
+func TestAKindlessDetachmentFailsHardAndDrawsNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	startForegroundBash(h, "unit-1", "sleep 600")
+	before := h.rows(rootFeed())
+	defer func() {
+		// Assert
+		got, _ := recover().(string)
+		if !strings.Contains(got, "protoarm:") || !strings.Contains(got, "daemon.feed.draw_detached_work") {
+			t.Fatalf("panic = %q, want protoarm.Must naming daemon.feed.draw_detached_work", got)
+		}
+		after := h.rows(rootFeed())
+		if len(after) != len(before) {
+			t.Fatalf("rows = %d after, %d before: a kindless detachment drew", len(after), len(before))
+		}
+		for i := range before {
+			if !proto.Equal(before[i], after[i]) {
+				t.Fatalf("row %d moved: before %v, after %v", i, before[i], after[i])
+			}
+		}
+	}()
+
+	// Act
+	h.resolver.OnDetachedWork(testWorkspace, mainAgent(), &conversationv1.AgentDetachedWork{
+		Owner: mainAgent(),
+		Work:  &conversationv1.DetachedWorkId{Value: "work-1"},
+		Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
+			DetachedFromId: &conversationv1.AgentActivityId{Value: "unit-1"},
+		}},
+	}, nil, nil)
+	t.Fatal("a kindless detachment returned, want a panic")
+}

@@ -1900,3 +1900,34 @@ func TestAToolCallStartRaisesNoTransient(t *testing.T) {
 		t.Fatalf("transient = %+v, want none for a tool call's start", got)
 	}
 }
+
+// TestAKindlessDetachmentFailsHardAndChangesNothing pins the invariant the
+// session watcher's gate guarantees (AgentDetachedWork.kind is required, and
+// resolveDetachedLocked refuses an announcement without one): reaching the
+// footer without a kind panics through protoarm.Must, before any state moves.
+func TestAKindlessDetachmentFailsHardAndChangesNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	before := h.view(t)
+	defer func() {
+		// Assert
+		got, _ := recover().(string)
+		if !strings.Contains(got, "protoarm:") || !strings.Contains(got, "daemon.footer.on_detached_work") {
+			t.Fatalf("panic = %q, want protoarm.Must naming daemon.footer.on_detached_work", got)
+		}
+		if after := h.view(t); !proto.Equal(before, after) {
+			t.Fatalf("the view moved: before %v, after %v", before, after)
+		}
+	}()
+
+	// Act
+	h.r.OnDetachedWork(testWS, mainAgent, &conversationv1.AgentDetachedWork{
+		Owner: mainAgent,
+		Work:  &conversationv1.DetachedWorkId{Value: "work-1"},
+		Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
+			DetachedFromId: &conversationv1.AgentActivityId{Value: "unit-1"},
+		}},
+	})
+	t.Fatal("a kindless detachment returned, want a panic")
+}
