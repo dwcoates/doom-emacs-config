@@ -731,10 +731,35 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 	serverStarted := time.Now()
 	e.awaitServer()
 	e.record("server-answers", time.Since(serverStarted))
+	if err := serverSocketDirConfined(e.EvalString(`server-socket-dir`), e.Root); err != nil {
+		t.Fatal(err)
+	}
 	e.armHeartbeat()
 	e.assertTrampolinesWerePrewarmed()
 	t.Cleanup(e.reportPhases)
 	return e
+}
+
+// serverSocketDirConfined refuses a `server-socket-dir' outside the
+// scenario's own scratch ROOT, checked on EVERY boot.
+//
+// `lisp/doom-editor.el' starts a server on a graphical frame from a
+// `with-eval-after-load' on `server', so it once fired inside the boot hook's
+// own `(require 'server)', BEFORE the hook had set `server-name'. Concurrent
+// boots then raced for /tmp/emacs<uid>/server, and the losers died with
+// "Cannot bind server socket: Address already in use" for a path in no
+// scenario's scratch root (measured 2026-09-05: 2 of 45 scenarios on a quiet
+// box). `sandbox/doom/init.el' pins both variables before anything can load
+// `server'; the boot hook asserts the name, and this asserts the directory,
+// which has no other witness: a default-named `server-start' -- Doom's own, a
+// with-editor's, an interactive M-x -- must still land inside this root.
+func serverSocketDirConfined(dir, root string) error {
+	if !strings.HasPrefix(dir, root+string(filepath.Separator)) {
+		return fmt.Errorf("`server-socket-dir' is %q, outside this scenario's scratch root %s: "+
+			"a default-named `server-start' would bind a path every scenario in this container "+
+			"shares, and concurrent boots would race for it", dir, root)
+	}
+	return nil
 }
 
 // settingsPath is the ONE elisp file this layer writes. It is not a

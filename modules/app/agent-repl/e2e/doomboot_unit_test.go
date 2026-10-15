@@ -137,3 +137,26 @@ func TestEmacsCPUOfAnUnknownPidIsNothingSpent(t *testing.T) {
 		t.Fatalf("emacsCPU(0) = %s, %v; want nothing spent", got, err)
 	}
 }
+
+func TestServerSocketDirConfined(t *testing.T) {
+	tests := []struct {
+		name    string
+		dir     string
+		wantErr string
+	}{
+		{name: "a socket dir inside the scratch root is confined", dir: "/tmp/x/emacs/server"},
+		{name: "the shared default socket dir is refused", dir: "/tmp/emacs1000", wantErr: "outside this scenario's scratch root"},
+		{name: "a sibling root sharing the prefix is refused", dir: "/tmp/x/emacs-other/server", wantErr: "outside"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			err := serverSocketDirConfined(tt.dir, "/tmp/x/emacs")
+
+			// Assert
+			if tt.wantErr == "" && err != nil || tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
+				t.Fatalf("serverSocketDirConfined(%q) = %v, want %q", tt.dir, err, tt.wantErr)
+			}
+		})
+	}
+}
