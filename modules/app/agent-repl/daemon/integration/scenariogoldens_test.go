@@ -4,8 +4,10 @@ package integration
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -219,7 +221,7 @@ func projectScenario(t *testing.T, f *fixture, name string, rows []goldenRow) js
 		})
 	}
 	page, _ := f.openFeed(nil)
-	return normalizeFeed(t, page.GetSuccess().GetRows(), turn, f.ws.GetId(), goldenInstants(rows))
+	return normalizeFeed(t, page.GetSuccess().GetRows(), turn, f.ws.GetId(), goldenInstants(t, rows))
 }
 
 // entryRouted is the routing record of an entry on AGENT's watch ("" for
@@ -305,25 +307,15 @@ func (ids goldenIDs) rename(t *testing.T, raw json.RawMessage) []byte {
 	if err := json.Unmarshal(raw, &v); err != nil {
 		t.Fatalf("decode a golden item: %v", err)
 	}
-	var walk func(v any) any
-	walk = func(v any) any {
-		switch x := v.(type) {
-		case map[string]any:
-			for k, child := range x {
-				x[k] = walk(child)
-			}
-		case []any:
-			for i, child := range x {
-				x[i] = walk(child)
-			}
-		case string:
-			if renamed, ok := ids.names[x]; ok {
-				return renamed
+	renamed := mapJSONLeaves(v, func(_ string, leaf any) any {
+		if x, ok := leaf.(string); ok {
+			if name, ok := ids.names[x]; ok {
+				return name
 			}
 		}
-		return v
-	}
-	out, err := json.Marshal(walk(v))
+		return leaf
+	}, nil)
+	out, err := json.Marshal(renamed)
 	if err != nil {
 		t.Fatalf("encode a golden item: %v", err)
 	}
@@ -402,32 +394,29 @@ func warningOperations(records []harness.LogRecord) []string {
 // a frame's own times): a feed value equal to one of them came from the
 // frames and is kept, while any other wall-clock value is the daemon's own
 // clock and is normalized away.
-func goldenInstants(rows []goldenRow) map[string]bool {
+func goldenInstants(t *testing.T, rows []goldenRow) map[string]bool {
+	t.Helper()
 	out := map[string]bool{}
-	var walk func(v any)
-	walk = func(v any) {
-		switch x := v.(type) {
-		case map[string]any:
-			for _, child := range x {
-				walk(child)
-			}
-		case []any:
-			for _, child := range x {
-				walk(child)
-			}
-		case string:
-			if isInstant(x) {
-				out[x] = true
-			}
-		case float64:
-			out[strconv.FormatInt(int64(x), 10)] = true
-		}
-	}
 	for _, r := range rows {
+		raw, err := json.Marshal(r)
+		if err != nil {
+			t.Fatalf("encode a golden row: %v", err)
+		}
 		var v any
-		raw, _ := json.Marshal(r)
-		_ = json.Unmarshal(raw, &v)
-		walk(v)
+		if err := json.Unmarshal(raw, &v); err != nil {
+			t.Fatalf("decode a golden row: %v", err)
+		}
+		mapJSONLeaves(v, func(_ string, leaf any) any {
+			switch x := leaf.(type) {
+			case string:
+				if isInstant(x) {
+					out[x] = true
+				}
+			case float64:
+				out[strconv.FormatInt(int64(x), 10)] = true
+			}
+			return leaf
+		}, nil)
 	}
 	return out
 }
@@ -465,50 +454,29 @@ func normalizeFeed(t *testing.T, rows []*frontendv1.FeedRow, turn, ws string, in
 		all = append(all, v)
 	}
 	ids, orders := map[string]string{}, map[string]string{}
-	var walk func(key string, v any) any
-	walk = func(key string, v any) any {
-		switch x := v.(type) {
-		case map[string]any:
-			keys := make([]string, 0, len(x))
-			for k := range x {
-				keys = append(keys, k)
-			}
-			sort.Strings(keys)
-			for _, k := range keys {
-				if wallClockFields[k] {
-					delete(x, k)
-					continue
-				}
-				x[k] = walk(k, x[k])
-			}
-			return x
-		case []any:
-			for i := range x {
-				x[i] = walk(key, x[i])
-			}
-			return x
-		case string:
-			switch {
-			case x == turn:
-				return "${TURN}"
-			case strings.HasPrefix(x, "f1."):
-				if ids[x] == "" {
-					ids[x] = "${ROW_" + strconv.Itoa(len(ids)+1) + "}"
-				}
-				return ids[x]
-			case key == "key" && orders[x] == "" && isOrderKey(x):
-				orders[x] = "${ORDER_" + strconv.Itoa(len(orders)+1) + "}"
-				return orders[x]
-			case orders[x] != "":
-				return orders[x]
-			case isInstant(x) && !instants[x]:
-				return "${NOW}"
-			}
-			return strings.ReplaceAll(x, ws, "${WS}")
+	normalized := mapJSONLeaves(all, func(key string, leaf any) any {
+		x, ok := leaf.(string)
+		if !ok {
+			return leaf
 		}
-		return v
-	}
-	normalized := walk("", all)
+		switch {
+		case x == turn:
+			return "${TURN}"
+		case strings.HasPrefix(x, "f1."):
+			if ids[x] == "" {
+				ids[x] = "${ROW_" + strconv.Itoa(len(ids)+1) + "}"
+			}
+			return ids[x]
+		case key == "key" && orders[x] == "" && isOrderKey(x):
+			orders[x] = "${ORDER_" + strconv.Itoa(len(orders)+1) + "}"
+			return orders[x]
+		case orders[x] != "":
+			return orders[x]
+		case isInstant(x) && !instants[x]:
+			return "${NOW}"
+		}
+		return strings.ReplaceAll(x, ws, "${WS}")
+	}, func(key string) bool { return wallClockFields[key] })
 	raw, err := json.Marshal(normalized)
 	if err != nil {
 		t.Fatalf("encode the normalized feed: %v", err)
@@ -533,6 +501,42 @@ func isOrderKey(s string) bool {
 	return len(s) > 17 && (s[0] == '1' || s[0] == '2' || s[0] == '~')
 }
 
+// mapJSONLeaves rewrites V, a decoded JSON value, in place: every leaf (a
+// value that is no object and no array) becomes LEAF(key, leaf), where key is
+// the object key it sits under (an array's elements carry their array's), and
+// every object field DROP accepts is removed. Objects are walked in sorted key
+// order, so a LEAF that mints tokens by first appearance mints the same ones
+// for the same value every time.
+func mapJSONLeaves(v any, leaf func(key string, v any) any, drop func(key string) bool) any {
+	var walk func(key string, v any) any
+	walk = func(key string, v any) any {
+		switch x := v.(type) {
+		case map[string]any:
+			keys := make([]string, 0, len(x))
+			for k := range x {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				if drop != nil && drop(k) {
+					delete(x, k)
+					continue
+				}
+				x[k] = walk(k, x[k])
+			}
+			return x
+		case []any:
+			for i := range x {
+				x[i] = walk(key, x[i])
+			}
+			return x
+		default:
+			return leaf(key, v)
+		}
+	}
+	return walk("", v)
+}
+
 // canonicalJSON re-encodes RAW indented with sorted keys, so two encodings of
 // one value compare equal byte for byte.
 func canonicalJSON(raw []byte) (json.RawMessage, error) {
@@ -541,4 +545,71 @@ func canonicalJSON(raw []byte) (json.RawMessage, error) {
 		return nil, err
 	}
 	return json.MarshalIndent(v, "", "  ")
+}
+
+func TestMapJSONLeaves(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		drop []string
+		want string
+	}{
+		{name: "every leaf is mapped with the key it sits under", in: `{"a":"x","b":{"c":"y"}}`, want: `{"a":"a=x","b":{"c":"c=y"}}`},
+		{name: "an array's elements carry their array's key", in: `{"list":["x","y"]}`, want: `{"list":["list=x","list=y"]}`},
+		{name: "a dropped field is removed, wherever it sits", in: `{"a":"x","gone":"y","b":{"gone":"z"}}`, drop: []string{"gone"}, want: `{"a":"a=x","b":{}}`},
+		{name: "non-string leaves reach the mapper too", in: `{"n":1,"t":true}`, want: `{"n":"n=1","t":"t=true"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			var v any
+			if err := json.Unmarshal([]byte(tt.in), &v); err != nil {
+				t.Fatal(err)
+			}
+			drop := func(key string) bool { return slices.Contains(tt.drop, key) }
+
+			// Act
+			got := mapJSONLeaves(v, func(key string, leaf any) any { return key + "=" + fmt.Sprint(leaf) }, drop)
+
+			// Assert
+			raw, err := json.Marshal(got)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(raw) != tt.want {
+				t.Fatalf("mapJSONLeaves = %s, want %s", raw, tt.want)
+			}
+		})
+	}
+}
+
+func TestMapJSONLeavesMintsTokensInSortedKeyOrder(t *testing.T) {
+	// Arrange: one object decoded twice, whose map iteration order Go randomizes.
+	minted := func() string {
+		var v any
+		if err := json.Unmarshal([]byte(`{"z":"a","m":"b","a":"c"}`), &v); err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		out := mapJSONLeaves(v, func(_ string, _ any) any { n++; return n }, nil)
+		raw, _ := json.Marshal(out)
+		return string(raw)
+	}
+
+	// Act / Assert
+	if got := minted(); got != `{"a":1,"m":2,"z":3}` {
+		t.Fatalf("tokens = %s, want them minted in sorted key order", got)
+	}
+}
+
+func TestTheScenarioGoldensWalkJSONOnlyThroughMapJSONLeaves(t *testing.T) {
+	// A hand-rolled walk drifts from the shared one's sorted order and drops;
+	// only mapJSONLeaves may recurse over a decoded value here.
+	src, err := os.ReadFile("scenariogoldens_test.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(src), "\n\tvar walk func("); n != 1 {
+		t.Fatalf("scenariogoldens_test.go declares %d JSON walks, want one, inside mapJSONLeaves", n)
+	}
 }
