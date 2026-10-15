@@ -625,6 +625,55 @@ func TestOpenPageNeverReturnsAnUnservedRow(t *testing.T) {
 	}
 }
 
+func TestAnUnservedRowTakesNoSlotOfAFullPage(t *testing.T) {
+	// Arrange: a real row, an unserved row, then PageSize-1 more real rows:
+	// exactly one page of real rows around the unserved one.
+	d, _ := newStore(t)
+	seedBook(t, d, "agent-1", 1)
+	writeOK(t, d, unservedEntry("w-k", "u-k", &storev1.StoreUnservedItem{
+		UnservedItem: &storev1.StoreUnservedItem_VendorSpecific{VendorSpecific: &storev1.StoreVendorSpecific{Kind: "hook", Raw: rawRecord("hook")}},
+	}))
+	seedBook(t, d, "agent-1", PageSize-1)
+
+	// Act
+	opened, err := d.OpenPage(ctx(), "agent-1", Repaint())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("OpenPage: %v", err)
+	}
+	if got := len(opened.Page.GetLines()); got != PageSize {
+		t.Fatalf("lines = %d, want every one of the %d real rows", got, PageSize)
+	}
+	if opened.Page.GetFloor() == nil {
+		t.Fatal("boundary = more, want floor: no real row is older than the page")
+	}
+}
+
+func TestAPromptLandsInItsRecipientsBookAlone(t *testing.T) {
+	// Arrange: a prompt to the main agent, and one to its subagent.
+	d, _ := newStore(t)
+	writeOK(t, d,
+		pageEntry("w-main", "turn-main", "main", promptItem("main")),
+		pageEntry("w-sub", "turn-sub", "sub-1", promptItem("sub-1")),
+	)
+
+	// Act
+	mainBook, mainErr := d.OpenPage(ctx(), "main", Repaint())
+	subBook, subErr := d.OpenPage(ctx(), "sub-1", Repaint())
+
+	// Assert
+	if mainErr != nil || subErr != nil {
+		t.Fatalf("OpenPage: %v, %v", mainErr, subErr)
+	}
+	if got := len(mainBook.Page.GetLines()); got != 1 {
+		t.Fatalf("main's book holds %d line(s), want only its own prompt", got)
+	}
+	if got := len(subBook.Page.GetLines()); got != 1 {
+		t.Fatalf("the subagent's book holds %d line(s), want its own prompt", got)
+	}
+}
+
 // ---- ReadPage ----
 
 func TestReadPageWalksOlderThanTheServedPointer(t *testing.T) {
@@ -647,6 +696,38 @@ func TestReadPageWalksOlderThanTheServedPointer(t *testing.T) {
 	}
 	if got := page.GetMore().GetLastItem().GetValue(); got != pointers[2].GetValue() {
 		t.Fatalf("last_item = %q, want %q", got, pointers[2].GetValue())
+	}
+}
+
+func TestAnUpsertMidWalkKeepsTheRowsPlaceInTheContinuation(t *testing.T) {
+	// Arrange: A and B are older than one whole page; the walk is opened, then
+	// B settles under its own key.
+	d, _ := newStore(t)
+	writeOK(t, d, pageEntry("w-a", "u-a", "agent-1", frameItem(activityFrame("agent-1", "act-a", prose()))))
+	writeOK(t, d, pageEntry("w-b", "u-b", "agent-1", frameItem(activityFrame("agent-1", "act-b", prose()))))
+	seedBook(t, d, "agent-1", PageSize)
+	opened, err := d.OpenPage(ctx(), "agent-1", Repaint())
+	if err != nil || opened.Page.GetMore() == nil {
+		t.Fatalf("OpenPage = %v (more %v), want a page with more behind it", err, opened.Page.GetMore())
+	}
+	writeOK(t, d, pageEntry("w-b2", "u-b", "agent-1", frameItem(activityFrame("agent-1", "act-b", bashSuccess()))))
+
+	// Act
+	page, err := d.ReadPage(ctx(), "agent-1", opened.Page.GetMore().GetLastItem())
+
+	// Assert: the settled B is still where B was, newest first, before A.
+	if err != nil {
+		t.Fatalf("ReadPage: %v", err)
+	}
+	var ids []string
+	for _, line := range page.GetLines() {
+		ids = append(ids, line.GetLine().GetAgentItem().GetAgentFrame().GetUpdate().GetActivity().GetActivityId().GetValue())
+	}
+	if strings.Join(ids, ",") != "act-b,act-a" {
+		t.Fatalf("continuation = %v, want act-b then act-a", ids)
+	}
+	if page.GetLines()[0].GetLine().GetAgentItem().GetAgentFrame().GetUpdate().GetActivity().GetBash() == nil {
+		t.Fatal("the continuation served B's old content, want its settled row")
 	}
 }
 
