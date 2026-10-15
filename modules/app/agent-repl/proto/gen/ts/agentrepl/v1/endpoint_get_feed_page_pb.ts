@@ -2,14 +2,13 @@
 // feed. FEED section. The first page of a feed is OpenFeed's answer; this
 // verb walks the pages beyond it into the past.
 //
-// THE WALK IS NAMED, ITS POSITION IS THE DAEMON'S. Every opening (OpenFeed,
-// GetFeedPage `first`) mints a walk and answers its identity on the page's
-// `has_more`; `next` echoes that identity and continues older from where the
-// walk stands. A `next` naming a walk the daemon does not hold is a refusal,
-// not an empty page. The walk was once keyed by the CONNECTION, but a webview
-// spreads its requests over several connections, so an `older` click often
-// arrived on a connection with no walk and was refused (owner's report,
-// 2026-10-03).
+// THE READER'S OLDEST HELD ROW IS THE WALK'S POSITION. An older page is asked
+// for by naming the order of the oldest row the reader holds (`older_than`),
+// and the daemon answers the page of rows sorting before it. The daemon keeps
+// no position of its own, so a reader that frees rows (an unshown page keeps
+// only its newest rows), repaints, or arrives on another connection always
+// asks for exactly the rows above what it holds, and no request can find its
+// walk missing or standing somewhere else.
 //
 // A PAGE IS THE STORE'S PAGE (50 entries, the one size for the whole stack),
 // drawn as however many rows those entries make. The daemon holds only the
@@ -26,7 +25,7 @@ import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { WorkspaceRef } from "../../workspace/v1/workspace_pb";
 import { file_workspace_v1_workspace } from "../../workspace/v1/workspace_pb";
-import type { FeedId, FeedPage, FeedWalkId } from "../../frontend/v1/feed_pb";
+import type { FeedId, FeedPage, FeedRowOrder } from "../../frontend/v1/feed_pb";
 import { file_frontend_v1_feed } from "../../frontend/v1/feed_pb";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -34,7 +33,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_get_feed_page.proto.
  */
 export const file_agentrepl_v1_endpoint_get_feed_page: GenFile = /*@__PURE__*/
-  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfZ2V0X2ZlZWRfcGFnZS5wcm90bxIMYWdlbnRyZXBsLnYxItwBChJHZXRGZWVkUGFnZVJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhImCgRmZWVkGAIgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkSAGIAQESLwoFZmlyc3QYAyABKAsyHi5hZ2VudHJlcGwudjEuR2V0RmVlZFBhZ2VGaXJzdEgAEi0KBG5leHQYBCABKAsyHS5hZ2VudHJlcGwudjEuR2V0RmVlZFBhZ2VOZXh0SABCBgoEcGFnZUIHCgVfZmVlZCISChBHZXRGZWVkUGFnZUZpcnN0IjgKD0dldEZlZWRQYWdlTmV4dBIlCgR3YWxrGAEgASgLMhcuZnJvbnRlbmQudjEuRmVlZFdhbGtJZCJ6ChNHZXRGZWVkUGFnZVJlc3BvbnNlEigKB3N1Y2Nlc3MYASABKAsyFS5mcm9udGVuZC52MS5GZWVkUGFnZUgAEi8KBWVycm9yGAIgASgLMh4uYWdlbnRyZXBsLnYxLkdldEZlZWRQYWdlRXJyb3JIAEIICgZyZXN1bHQimAQKEEdldEZlZWRQYWdlRXJyb3ISRgoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyKS5hZ2VudHJlcGwudjEuR2V0RmVlZFBhZ2VVbmtub3duV29ya3NwYWNlSAASTwoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzItLmFnZW50cmVwbC52MS5HZXRGZWVkUGFnZVdvcmtzcGFjZVJlZk1pc21hdGNoSAASRgoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyKS5hZ2VudHJlcGwudjEuR2V0RmVlZFBhZ2VUcmFuc2ZlcnJpbmdBd2F5SAASQQoPbm90X3lldF9hZG9wdGVkGAQgASgLMiYuYWdlbnRyZXBsLnYxLkdldEZlZWRQYWdlTm90WWV0QWRvcHRlZEgAEkMKEG5vX3dhbGtfc3RhbmRpbmcYBSABKAsyJy5hZ2VudHJlcGwudjEuR2V0RmVlZFBhZ2VOb1dhbGtTdGFuZGluZ0gAEkQKEGZlZWRfdW5kZWNvZGFibGUYBiABKAsyKC5hZ2VudHJlcGwudjEuR2V0RmVlZFBhZ2VGZWVkVW5kZWNvZGFibGVIABJMChVmZWVkX25vdF9pbl93b3Jrc3BhY2UYByABKAsyKy5hZ2VudHJlcGwudjEuR2V0RmVlZFBhZ2VGZWVkTm90SW5Xb3Jrc3BhY2VIAEIHCgVjYXVzZSIdChtHZXRGZWVkUGFnZVVua25vd25Xb3Jrc3BhY2UiNwofR2V0RmVlZFBhZ2VXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiLgobR2V0RmVlZFBhZ2VUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiGgoYR2V0RmVlZFBhZ2VOb3RZZXRBZG9wdGVkIhsKGUdldEZlZWRQYWdlTm9XYWxrU3RhbmRpbmciHAoaR2V0RmVlZFBhZ2VGZWVkVW5kZWNvZGFibGUiHwodR2V0RmVlZFBhZ2VGZWVkTm90SW5Xb3Jrc3BhY2VCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace, file_frontend_v1_feed]);
+  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfZ2V0X2ZlZWRfcGFnZS5wcm90bxIMYWdlbnRyZXBsLnYxIvMBChJHZXRGZWVkUGFnZVJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhImCgRmZWVkGAIgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkSAGIAQESLwoFZmlyc3QYAyABKAsyHi5hZ2VudHJlcGwudjEuR2V0RmVlZFBhZ2VGaXJzdEgAEjgKCm9sZGVyX3RoYW4YBSABKAsyIi5hZ2VudHJlcGwudjEuR2V0RmVlZFBhZ2VPbGRlclRoYW5IAEIGCgRwYWdlQgcKBV9mZWVkSgQIBBAFUgRuZXh0IhIKEEdldEZlZWRQYWdlRmlyc3QiRgoUR2V0RmVlZFBhZ2VPbGRlclRoYW4SLgoLb2xkZXN0X2hlbGQYASABKAsyGS5mcm9udGVuZC52MS5GZWVkUm93T3JkZXIiegoTR2V0RmVlZFBhZ2VSZXNwb25zZRIoCgdzdWNjZXNzGAEgASgLMhUuZnJvbnRlbmQudjEuRmVlZFBhZ2VIABIvCgVlcnJvchgCIAEoCzIeLmFnZW50cmVwbC52MS5HZXRGZWVkUGFnZUVycm9ySABCCAoGcmVzdWx0IusDChBHZXRGZWVkUGFnZUVycm9yEkYKEXVua25vd25fd29ya3NwYWNlGAEgASgLMikuYWdlbnRyZXBsLnYxLkdldEZlZWRQYWdlVW5rbm93bldvcmtzcGFjZUgAEk8KFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAiABKAsyLS5hZ2VudHJlcGwudjEuR2V0RmVlZFBhZ2VXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkYKEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMikuYWdlbnRyZXBsLnYxLkdldEZlZWRQYWdlVHJhbnNmZXJyaW5nQXdheUgAEkEKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzImLmFnZW50cmVwbC52MS5HZXRGZWVkUGFnZU5vdFlldEFkb3B0ZWRIABJEChBmZWVkX3VuZGVjb2RhYmxlGAYgASgLMiguYWdlbnRyZXBsLnYxLkdldEZlZWRQYWdlRmVlZFVuZGVjb2RhYmxlSAASTAoVZmVlZF9ub3RfaW5fd29ya3NwYWNlGAcgASgLMisuYWdlbnRyZXBsLnYxLkdldEZlZWRQYWdlRmVlZE5vdEluV29ya3NwYWNlSABCBwoFY2F1c2VKBAgFEAZSEG5vX3dhbGtfc3RhbmRpbmciHQobR2V0RmVlZFBhZ2VVbmtub3duV29ya3NwYWNlIjcKH0dldEZlZWRQYWdlV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIi4KG0dldEZlZWRQYWdlVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIhoKGEdldEZlZWRQYWdlTm90WWV0QWRvcHRlZCIcChpHZXRGZWVkUGFnZUZlZWRVbmRlY29kYWJsZSIfCh1HZXRGZWVkUGFnZUZlZWROb3RJbldvcmtzcGFjZUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace, file_frontend_v1_feed]);
 
 /**
  * @generated from message agentrepl.v1.GetFeedPageRequest
@@ -54,13 +53,14 @@ export type GetFeedPageRequest = Message<"agentrepl.v1.GetFeedPageRequest"> & {
   feed?: FeedId | undefined;
 
   /**
-   * WHICH page of the walk. THE ARM IS THE ASK.
+   * WHICH page. THE ARM IS THE ASK: the newest page, or the page above the
+   * rows the reader holds.
    *
    * @generated from oneof agentrepl.v1.GetFeedPageRequest.page
    */
   page: {
     /**
-     * The newest page; the walk resets to it.
+     * The newest page.
      *
      * @generated from field: agentrepl.v1.GetFeedPageFirst first = 3;
      */
@@ -68,12 +68,12 @@ export type GetFeedPageRequest = Message<"agentrepl.v1.GetFeedPageRequest"> & {
     case: "first";
   } | {
     /**
-     * The next-older page from where this feed's walk stands.
+     * The page of rows sorting before the reader's oldest held row.
      *
-     * @generated from field: agentrepl.v1.GetFeedPageNext next = 4;
+     * @generated from field: agentrepl.v1.GetFeedPageOlderThan older_than = 5;
      */
-    value: GetFeedPageNext;
-    case: "next";
+    value: GetFeedPageOlderThan;
+    case: "olderThan";
   } | { case: undefined; value?: undefined };
 };
 
@@ -85,6 +85,9 @@ export const GetFeedPageRequestSchema: GenMessage<GetFeedPageRequest> = /*@__PUR
   messageDesc(file_agentrepl_v1_endpoint_get_feed_page, 0);
 
 /**
+ * The newest page of the feed: what OpenFeed answers, without minting a
+ * watch token. EMPTY: the arm is the whole ask.
+ *
  * @generated from message agentrepl.v1.GetFeedPageFirst
  */
 export type GetFeedPageFirst = Message<"agentrepl.v1.GetFeedPageFirst"> & {
@@ -98,23 +101,30 @@ export const GetFeedPageFirstSchema: GenMessage<GetFeedPageFirst> = /*@__PURE__*
   messageDesc(file_agentrepl_v1_endpoint_get_feed_page, 1);
 
 /**
- * @generated from message agentrepl.v1.GetFeedPageNext
+ * The page above the rows the reader holds: the store page of rows whose
+ * order sorts before `oldest_held`, read from the store on the spot when the
+ * daemon does not hold it.
+ *
+ * @generated from message agentrepl.v1.GetFeedPageOlderThan
  */
-export type GetFeedPageNext = Message<"agentrepl.v1.GetFeedPageNext"> & {
+export type GetFeedPageOlderThan = Message<"agentrepl.v1.GetFeedPageOlderThan"> & {
   /**
-   * The walk to continue: the `has_more.walk` of the page it last served.
-   * REQUIRED; unset or unknown is `no_walk_standing`.
+   * The order of the oldest row the reader holds, echoed exactly as the
+   * daemon served it on that row. REQUIRED. The row itself need not still be
+   * held by the daemon: the answer is decided by key order alone, so a reader
+   * that freed every row older than one it kept asks with that kept row's
+   * order and is answered the rows directly above it.
    *
-   * @generated from field: frontend.v1.FeedWalkId walk = 1;
+   * @generated from field: frontend.v1.FeedRowOrder oldest_held = 1;
    */
-  walk?: FeedWalkId | undefined;
+  oldestHeld?: FeedRowOrder | undefined;
 };
 
 /**
- * Describes the message agentrepl.v1.GetFeedPageNext.
- * Use `create(GetFeedPageNextSchema)` to create a new message.
+ * Describes the message agentrepl.v1.GetFeedPageOlderThan.
+ * Use `create(GetFeedPageOlderThanSchema)` to create a new message.
  */
-export const GetFeedPageNextSchema: GenMessage<GetFeedPageNext> = /*@__PURE__*/
+export const GetFeedPageOlderThanSchema: GenMessage<GetFeedPageOlderThan> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_get_feed_page, 2);
 
 /**
@@ -196,15 +206,6 @@ export type GetFeedPageError = Message<"agentrepl.v1.GetFeedPageError"> & {
      */
     value: GetFeedPageNotYetAdopted;
     case: "notYetAdopted";
-  } | {
-    /**
-     * A next page named a walk the daemon does not hold (never minted, or
-     * dropped as one of the feed's least recently used walks).
-     *
-     * @generated from field: agentrepl.v1.GetFeedPageNoWalkStanding no_walk_standing = 5;
-     */
-    value: GetFeedPageNoWalkStanding;
-    case: "noWalkStanding";
   } | {
     /**
      * The FeedId does not decode.
@@ -296,19 +297,6 @@ export const GetFeedPageNotYetAdoptedSchema: GenMessage<GetFeedPageNotYetAdopted
   messageDesc(file_agentrepl_v1_endpoint_get_feed_page, 8);
 
 /**
- * @generated from message agentrepl.v1.GetFeedPageNoWalkStanding
- */
-export type GetFeedPageNoWalkStanding = Message<"agentrepl.v1.GetFeedPageNoWalkStanding"> & {
-};
-
-/**
- * Describes the message agentrepl.v1.GetFeedPageNoWalkStanding.
- * Use `create(GetFeedPageNoWalkStandingSchema)` to create a new message.
- */
-export const GetFeedPageNoWalkStandingSchema: GenMessage<GetFeedPageNoWalkStanding> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_get_feed_page, 9);
-
-/**
  * @generated from message agentrepl.v1.GetFeedPageFeedUndecodable
  */
 export type GetFeedPageFeedUndecodable = Message<"agentrepl.v1.GetFeedPageFeedUndecodable"> & {
@@ -319,7 +307,7 @@ export type GetFeedPageFeedUndecodable = Message<"agentrepl.v1.GetFeedPageFeedUn
  * Use `create(GetFeedPageFeedUndecodableSchema)` to create a new message.
  */
 export const GetFeedPageFeedUndecodableSchema: GenMessage<GetFeedPageFeedUndecodable> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_get_feed_page, 10);
+  messageDesc(file_agentrepl_v1_endpoint_get_feed_page, 9);
 
 /**
  * @generated from message agentrepl.v1.GetFeedPageFeedNotInWorkspace
@@ -332,5 +320,5 @@ export type GetFeedPageFeedNotInWorkspace = Message<"agentrepl.v1.GetFeedPageFee
  * Use `create(GetFeedPageFeedNotInWorkspaceSchema)` to create a new message.
  */
 export const GetFeedPageFeedNotInWorkspaceSchema: GenMessage<GetFeedPageFeedNotInWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_get_feed_page, 11);
+  messageDesc(file_agentrepl_v1_endpoint_get_feed_page, 10);
 
