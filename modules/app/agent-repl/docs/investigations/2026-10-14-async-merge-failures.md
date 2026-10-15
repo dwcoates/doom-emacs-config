@@ -66,3 +66,13 @@ the log records that show it, so the failures can be fixed at their source.
 - Immediate relief needs the owner: restarting Docker Desktop releases the descriptors. Agents may not cycle Docker.
 - Structural fix, in progress in `test-tier-audit-e2e`: stream the staged allowlist into the container through the Docker API (a tar over `docker run -i`, or `docker cp`), so the VM never opens host files and the leak is impossible. A test pins that no checkout path is bind-mounted.
 - The merge workspace was left open at `~/.config/doom-worktrees/tier-audit-e2e-step-c-merge`. Step (c) is re-requested unchanged after the fix lands.
+
+## Host incident, 2026-10-15 ~01:30: the shared Go build cache is corrupted, so the queue is PAUSED
+
+- Every Go build through `~/Library/Caches/go-build` (8.0G) fails with "package bytes is not in std" and "package crypto/internal/fips140only is not in std", even though GOROOT (`/opt/homebrew/Cellar/go@1.24/1.24.6/libexec`, go1.24.6) is intact.
+  - Verified: `go vet ./internal/merge/` in the daemon fails with the shared cache and passes with a fresh `GOCACHE`.
+- Likely cause: the owner's partial manual deletion of cache files earlier in the night left the cache's index pointing at missing entries.
+- Fix (owner's call, because it touches files outside the project): `go clean -cache`, or removing `~/Library/Caches/go-build`.
+- Every merge gate's Go suites would fail to build, burning attempts and handing merges back. So I paused the doom repository's merge queue at about 01:30 (`/merge-queue pause ~/.config/doom`, outcome `paused`).
+  - Resume with `/merge-queue resume ~/.config/doom` after the cache is cleaned.
+- Children verify locally with a private `GOCACHE` in the meantime.
