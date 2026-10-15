@@ -303,18 +303,12 @@ func (k *Keeper) reconcile(ctx context.Context, ws ids.WorkspaceID, why string) 
 			log.Debug(opCadence, "the shim holds no session yet; the session's coming up sets its cadence", fields)
 			return
 		}
-		// A SHIM THAT DIED UNDER THE CALL is not this keeper's failure: the
-		// death is recorded once, by daemon.shimclient.exit, and the session
-		// it served is gone with it. The next session's coming up sets the
-		// cadence again.
-		if errors.Is(err, shimclient.ErrShimDied) {
-			log.Info(opCadence, "the shim died under the cadence call; the death is recorded by daemon.shimclient.exit, and the next session's coming up sets its cadence", withCause(fields, err))
-			return
-		}
-		if leaving(ctx, log, opCadence, "setting the shim's keep-alive cadence", err) {
-			return
-		}
-		log.Error(opCadence, "could not set the shim's keep-alive cadence", withCause(fields, err))
+		// The next session's coming up sets the cadence again.
+		shimCallFailed(ctx, log, opCadence, shimFailure{
+			doing:  "setting the shim's keep-alive cadence",
+			died:   "the shim died under the cadence call; the death is recorded by daemon.shimclient.exit, and the next session's coming up sets its cadence",
+			failed: "could not set the shim's keep-alive cadence",
+		}, fields, err)
 		return
 	}
 	log.Info(opCadence, "set the shim's keep-alive cadence to match the workspace's visibility", fields)
@@ -376,6 +370,34 @@ func (k *Keeper) publish(ctx context.Context, log dlog.Logger, op string) {
 			return
 		}
 		log.Error(op, "could not republish the roster", dlog.Context{"cause": err.Error()})
+	}
+}
+
+// shimFailure words one shim call's failure records.
+type shimFailure struct {
+	// doing names the call for the leaving record ("setting the shim's
+	// keep-alive cadence").
+	doing string
+	// died is the INFO record of a shim that died under the call.
+	died string
+	// failed is the ERROR record of any other failure.
+	failed string
+}
+
+// shimCallFailed records a shim call that failed for a reason other than the
+// shim holding no session, which each caller answers in its own terms. A
+// SHIM THAT DIED UNDER THE CALL is not this keeper's failure: the death is
+// recorded once, by daemon.shimclient.exit, so it is INFO here. A call the
+// daemon's exit cancelled is INFO (leaving). Anything else is an ERROR. It is
+// THE ONE triage of a failed shim call in this package
+// (TestShimCallFailureTriageHasOneHome).
+func shimCallFailed(ctx context.Context, log dlog.Logger, op string, words shimFailure, fields dlog.Context, err error) {
+	switch {
+	case errors.Is(err, shimclient.ErrShimDied):
+		log.Info(op, words.died, withCause(fields, err))
+	case leaving(ctx, log, op, words.doing, err):
+	default:
+		log.Error(op, words.failed, withCause(fields, err))
 	}
 }
 

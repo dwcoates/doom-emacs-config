@@ -11,7 +11,6 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
 )
 
@@ -102,19 +101,16 @@ func (k *Keeper) beat(ctx context.Context, ws wsm.Workspace) *agentreplv1.SendHi
 // beatFailure sets OUT's outcome for a keep-alive call that did not answer
 // a judgment, and makes its one record.
 func (k *Keeper) beatFailure(ctx context.Context, log dlog.Logger, out *agentreplv1.SendHiddenKeepalivesWorkspace, err error) {
-	fields := dlog.Context{"cause": err.Error()}
-	switch {
-	case errors.Is(err, ErrNoSession):
-		log.Info(opBeat, "the hidden workspace's shim holds no session; it has no cache to keep", fields)
+	if errors.Is(err, ErrNoSession) {
+		log.Info(opBeat, "the hidden workspace's shim holds no session; it has no cache to keep", dlog.Context{"cause": err.Error()})
 		setNotRunning(out)
 		return
-	case errors.Is(err, shimclient.ErrShimDied):
-		// THE DEATH IS RECORDED ONCE, by daemon.shimclient.exit.
-		log.Info(opBeat, "the shim died under the keep-alive call; the death is recorded by daemon.shimclient.exit", fields)
-	case leaving(ctx, log, opBeat, "sending a hidden workspace its keep-alive", err):
-	default:
-		log.Error(opBeat, "could not send the hidden workspace its keep-alive", fields)
 	}
+	shimCallFailed(ctx, log, opBeat, shimFailure{
+		doing:  "sending a hidden workspace its keep-alive",
+		died:   "the shim died under the keep-alive call; the death is recorded by daemon.shimclient.exit",
+		failed: "could not send the hidden workspace its keep-alive",
+	}, nil, err)
 	var submit *BeatSubmitFailed
 	detail := err.Error()
 	if errors.As(err, &submit) {
