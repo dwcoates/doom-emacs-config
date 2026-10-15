@@ -467,7 +467,7 @@ func (r *run) head(result any) {
 	if r.exiting() {
 		return
 	}
-	r.o.publishHead(r.ws, r.lease.ID, r.label(), r.startedMS, result)
+	r.o.publishHead(r.ws, r.lease.ID, r.label(), r.startedMS, result, headRun)
 }
 
 // label is the bubble's head line: what is merged, and where to.

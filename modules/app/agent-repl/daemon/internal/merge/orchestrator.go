@@ -159,9 +159,9 @@ type orchestrator struct {
 	// merge origin and dir are fixed at its registration, so the answer never
 	// changes once read.
 	originsOf map[ids.WorkspaceID]*mergeOrigin
-	// heads is the head each merging workspace's bubble last drew, so a
-	// reveal of its merge workspace can restate it with its switch.
-	heads map[ids.WorkspaceID]headArgs
+	// heads orders every head publication (headBook). It is its own lock,
+	// taken BEFORE mu and never under it.
+	heads headBook
 	// picks are the async picks running now, keyed by merge workspace, so an
 	// ask change redraws the live pick tab.
 	picks map[ids.WorkspaceID]*pick
@@ -299,7 +299,7 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		requested:       map[ids.WorkspaceID]*requestWait{},
 		ledgerOf:        map[ids.WorkspaceID]ids.LeaseID{},
 		originsOf:       map[ids.WorkspaceID]*mergeOrigin{},
-		heads:           map[ids.WorkspaceID]headArgs{},
+		heads:           newHeadBook(),
 		picks:           map[ids.WorkspaceID]*pick{},
 		resumes:         map[ids.WorkspaceID]progressDoc{},
 		transferred:     map[ids.WorkspaceID]bool{},
@@ -502,7 +502,7 @@ func (o *orchestrator) reveal(ctx context.Context, ws ids.WorkspaceID, cause str
 		return
 	}
 	o.log(ctx, ws).Info(op, "revealed the merge workspace: it needs the user", dlog.Context{"workspace": string(ws), "cause": cause})
-	o.restateHead(ws)
+	o.restateHead(ws, headReveal)
 }
 
 // RevealMergeWorkspace reveals hidden merge workspace WS (Orchestrator).

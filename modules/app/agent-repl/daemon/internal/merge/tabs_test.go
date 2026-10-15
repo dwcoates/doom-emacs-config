@@ -1,10 +1,12 @@
 package merge
 
 import (
+	"context"
 	"testing"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
@@ -346,12 +348,202 @@ func TestPublishHeadPinsALiveHeadAndSettlesAResolvedOne(t *testing.T) {
 			h := newHarness(t)
 
 			// Act.
-			h.o.publishHead(theWorkspace, "lease-1", "feature → master", 1, tt.result)
+			h.o.publishHead(theWorkspace, "lease-1", "feature → master", 1, tt.result, headRun)
 
 			// Assert.
 			heads := h.feed.headPublications()
 			if len(heads) != 1 || heads[0].Pinned != tt.wantPinned || !heads[0].Feed.Root {
 				t.Fatalf("heads = %+v, want one root head published pinned=%v", heads, tt.wantPinned)
+			}
+		})
+	}
+}
+
+// failedHead is a head result: the merge failed.
+func failedHead() *frontendv1.FeedMergeError {
+	return &frontendv1.FeedMergeError{Reason: &frontendv1.FeedMergeError_Failed{Failed: &frontendv1.FeedMergeFailed{Summary: "conflicts"}}}
+}
+
+// TestAQueueRedrawReadBeforeTheMergeResolvedNeverRepinsItsHead reproduces the
+// race behind daemon.feed.pin_refused: the queue's redraw reads the stored
+// queue while the merge is still in it, the run resolves and publishes its
+// failed head, and the redraw then draws the merge's head live from what it
+// read. The resolved head must stand.
+func TestAQueueRedrawReadBeforeTheMergeResolvedNeverRepinsItsHead(t *testing.T) {
+	// Arrange: one merge in line, and the run resolving between the redraw's
+	// read of the queue and its drawing of the heads.
+	h := newHarness(t)
+	h.emacsRepo()
+	enqueue(t, h)
+	ledger, ok := h.o.leaseOf(theWorkspace)
+	if !ok {
+		t.Fatal("the queued merge has no ledger identity")
+	}
+	resolved := false
+	h.db.onQueueRead = func() {
+		if resolved {
+			return
+		}
+		resolved = true
+		h.o.publishHead(theWorkspace, ledger, "feature → master", 1, failedHead(), headRun)
+	}
+	before := len(h.feed.headPublications())
+
+	// Act.
+	if err := h.o.republishQueue(context.Background(), h.repoKey()); err != nil {
+		t.Fatalf("republishQueue: %v", err)
+	}
+
+	// Assert: the resolved head is the last head drawn, and it is unpinned.
+	heads := h.feed.headPublications()[before:]
+	if len(heads) != 1 || heads[0].Pinned || heads[0].Row.GetActivity().GetMerge().GetError() == nil {
+		t.Fatalf("heads after the redraw = %+v, want only the resolved head, unpinned", heads)
+	}
+}
+
+// TestAStaleLiveHeadIsRecordedWithTheCauseThatDrewIt covers the record of a
+// live publication the head book does not draw: it names the caller, so a
+// reader of the log knows which redraw was stale.
+func TestAStaleLiveHeadIsRecordedWithTheCauseThatDrewIt(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.o.publishHead(theWorkspace, "lease-1", "feature → master", 1, failedHead(), headRun)
+
+	// Act.
+	h.o.publishHead(theWorkspace, "lease-1", "feature → master", 1, nil, headQueue)
+
+	// Assert.
+	rec, found := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{
+		Level: "debug", Operation: "daemon.merge.head",
+		Message: "a live head publication came after its ledger resolved; the resolved head stands and the live one is not drawn"})
+	if !found || rec.Context["cause"] != "queue" || rec.Context["ledger"] != "lease-1" || rec.Context["workspace"] != string(theWorkspace) {
+		t.Fatalf("record = %+v (found %v), want the stale publication recorded with its cause, ledger and workspace", rec, found)
+	}
+}
+
+// TestEveryDrawnHeadIsRecordedWithTheCauseThatDrewIt covers the record of a
+// drawn publication: who drew it, for which ledger, and whether it pinned.
+func TestEveryDrawnHeadIsRecordedWithTheCauseThatDrewIt(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	h.o.publishHead(theWorkspace, "lease-1", "feature → master", 1, nil, headRecover)
+
+	// Assert.
+	rec, found := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{
+		Level: "debug", Operation: "daemon.merge.head", Message: "published the merge head"})
+	if !found || rec.Context["cause"] != "recover" || rec.Context["ledger"] != "lease-1" || rec.Context["pinned"] != true || rec.Context["resolved"] != false {
+		t.Fatalf("record = %+v (found %v), want the publication recorded with its cause, ledger and pin", rec, found)
+	}
+}
+
+// TestTheHeadBookOrdersEveryPublication covers the head book's decision: a
+// live publication of a resolved ledger is not drawn, and everything else is.
+func TestTheHeadBookOrdersEveryPublication(t *testing.T) {
+	tests := []struct {
+		name       string
+		first      any
+		lease      ids.LeaseID
+		then       any
+		wantDrawn  bool
+		wantPinned bool
+	}{
+		{name: "live after its ledger resolved is not drawn", first: failedHead(), lease: "lease-1", then: nil, wantDrawn: false},
+		{name: "live after another ledger resolved is drawn pinned", first: failedHead(), lease: "lease-2", then: nil, wantDrawn: true, wantPinned: true},
+		{name: "an outcome after an outcome is drawn", first: failedHead(), lease: "lease-1", then: &frontendv1.FeedMergeSuccess{Commit: "abc123"}, wantDrawn: true, wantPinned: false},
+		{name: "live after live is drawn pinned", first: nil, lease: "lease-1", then: nil, wantDrawn: true, wantPinned: true},
+		{name: "an outcome after live is drawn settled", first: nil, lease: "lease-1", then: failedHead(), wantDrawn: true, wantPinned: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.o.publishHead(theWorkspace, "lease-1", "feature → master", 1, tt.first, headRun)
+
+			// Act.
+			h.o.publishHead(theWorkspace, tt.lease, "feature → master", 1, tt.then, headQueue)
+
+			// Assert.
+			heads := h.feed.headPublications()
+			if drawn := len(heads) == 2; drawn != tt.wantDrawn {
+				t.Fatalf("heads = %+v, want the second drawn=%v", heads, tt.wantDrawn)
+			}
+			if tt.wantDrawn && heads[1].Pinned != tt.wantPinned {
+				t.Fatalf("second head pinned=%v, want %v", heads[1].Pinned, tt.wantPinned)
+			}
+		})
+	}
+}
+
+// TestRestateHeadDrawsTheHeadAsItLastStood covers the restate: a resolved
+// head is restated resolved, never live, and a head never drawn is not drawn.
+func TestRestateHeadDrawsTheHeadAsItLastStood(t *testing.T) {
+	tests := []struct {
+		name       string
+		drawn      bool
+		result     any
+		wantHeads  int
+		wantPinned bool
+	}{
+		{name: "never drawn", drawn: false, wantHeads: 0},
+		{name: "live", drawn: true, result: nil, wantHeads: 2, wantPinned: true},
+		{name: "resolved", drawn: true, result: failedHead(), wantHeads: 2, wantPinned: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			if tt.drawn {
+				h.o.publishHead(theWorkspace, "lease-1", "feature → master", 1, tt.result, headRun)
+			}
+
+			// Act.
+			h.o.restateHead(theWorkspace, headReveal)
+
+			// Assert.
+			heads := h.feed.headPublications()
+			if len(heads) != tt.wantHeads {
+				t.Fatalf("heads = %+v, want %d", heads, tt.wantHeads)
+			}
+			if tt.wantHeads > 0 && heads[len(heads)-1].Pinned != tt.wantPinned {
+				t.Fatalf("restated head pinned=%v, want %v", heads[len(heads)-1].Pinned, tt.wantPinned)
+			}
+		})
+	}
+}
+
+// TestRestateLiveHeadRestatesOnlyALiveHead covers the live restate: MARK and
+// the restate run only while the head is drawn and has no result.
+func TestRestateLiveHeadRestatesOnlyALiveHead(t *testing.T) {
+	tests := []struct {
+		name      string
+		drawn     bool
+		result    any
+		wantDrawn bool
+		wantLive  bool
+	}{
+		{name: "never drawn", drawn: false, wantDrawn: false, wantLive: false},
+		{name: "resolved", drawn: true, result: failedHead(), wantDrawn: true, wantLive: false},
+		{name: "live", drawn: true, result: nil, wantDrawn: true, wantLive: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			if tt.drawn {
+				h.o.publishHead(theWorkspace, "lease-1", "feature → master", 1, tt.result, headRun)
+			}
+			before := len(h.feed.headPublications())
+			marked := false
+
+			// Act.
+			drawn, live := h.o.restateLiveHead(theWorkspace, headOffer, func() { marked = true })
+
+			// Assert.
+			restated := len(h.feed.headPublications()) - before
+			if drawn != tt.wantDrawn || live != tt.wantLive || marked != tt.wantLive || (restated == 1) != tt.wantLive {
+				t.Fatalf("drawn=%v live=%v marked=%v restated=%d, want drawn=%v live=%v", drawn, live, marked, restated, tt.wantDrawn, tt.wantLive)
 			}
 		})
 	}

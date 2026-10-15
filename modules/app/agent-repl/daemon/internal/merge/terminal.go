@@ -1062,7 +1062,7 @@ func (o *orchestrator) publishAbandonedWith(ctx context.Context, ws ids.Workspac
 				Reason: &frontendv1.FeedMergeError_Abandoned{
 					Abandoned: &frontendv1.FeedMergeAbandoned{Summary: summary},
 				},
-			})
+			}, headAbandoned)
 		o.closeReleasedBubble(ctx, ws, ledger, cause)
 	}
 	out := DetachedOutcome{Kind: DetachedAbandoned, Summary: summary, Requested: cause.releases()}
@@ -1136,19 +1136,16 @@ func (o *orchestrator) OnInterrupt(ctx context.Context, ws ids.WorkspaceID) bool
 			dlog.Context{"workspace": string(ws)})
 		return false
 	}
-	o.mu.Lock()
-	head, drawn := o.heads[ws]
-	live := drawn && head.result == nil
-	if live {
+	drawn, live := o.restateLiveHead(ws, headOffer, func() {
+		o.mu.Lock()
 		o.offers[ws] = true
-	}
-	o.mu.Unlock()
+		o.mu.Unlock()
+	})
 	if !live {
 		log.Debug(op, "the interrupted workspace's merge has no live bubble yet; no question is raised",
 			dlog.Context{"workspace": string(ws), "drawn": drawn})
 		return false
 	}
-	o.restateHead(ws)
 	log.Info(op, "raised the merge-queue question in the pinned merge bubble", dlog.Context{"workspace": string(ws)})
 	return true
 }
@@ -1212,10 +1209,9 @@ func (o *orchestrator) clearOffer(ws ids.WorkspaceID) {
 	o.mu.Lock()
 	had := o.offers[ws]
 	delete(o.offers, ws)
-	head, drawn := o.heads[ws]
 	o.mu.Unlock()
-	if had && drawn && head.result == nil {
-		o.restateHead(ws)
+	if had {
+		o.restateLiveHead(ws, headOffer, func() {})
 	}
 }
 
