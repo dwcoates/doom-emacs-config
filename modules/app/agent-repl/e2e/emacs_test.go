@@ -216,12 +216,15 @@ const emacsSignalBound = 500 * time.Millisecond
 // answer and a shorter interval would buy nothing but queued probes.
 const heartbeatInterval = 250 * time.Millisecond
 
-// emacsBootBound is how long emacsclient may take to reach the server socket
-// once Doom's readiness stamp says the server was started.
+// emacsBootBound is the module's boot budget, which the launcher's settling,
+// the daemon's first state writes, a panel's settling and the composer's
+// appearance are bounded by.
 //
-// MEASURED: the longest healthy wait was 49ms. The multiple here is 10x
-// rather than 3x, and deliberately: three times a number this small is not a
-// bound, it is a race with the scheduler.
+// MEASURED: it was sized from the server socket's first answer after the
+// readiness stamp, whose longest healthy wait was 49ms. The multiple here is
+// 10x rather than 3x, and deliberately: three times a number this small is
+// not a bound, it is a race with the scheduler. That first answer itself is
+// now awaitServer's single probe under HeartbeatBound.
 const emacsBootBound = 500 * time.Millisecond
 
 // daemonLinkBound is how long EnsureDaemon may take: the launcher spawning
@@ -1202,35 +1205,42 @@ func envPrefix(env []string) []string {
 	return append([]string{"env"}, env...)
 }
 
-// awaitServer waits for the server socket to answer.
+// awaitServer asks the server socket one question and waits for its answer.
 //
 // It runs AFTER awaitDoom, and is not redundant with it: the stamp says the
 // server was started, and this says emacsclient can actually reach it, which
 // is the transport every readback below rides.
+//
+// REACHABILITY IS NOT RACED, SO IT IS NOT POLLED. The boot hook writes the
+// stamp only after `server-start' has bound the socket
+// (sandbox/doom/config.el, agent-repl-e2e--boot), so the connect lands on a
+// listening socket and is answered as soon as the command loop reads it.
+// What is left to wait for is Emacs's responsiveness, which is exactly the
+// heartbeat's question, so it is bounded by HeartbeatBound, the bound sized
+// from loaded runs. MEASURED, merge gate 2026-10-15 at a one-minute load of
+// 47: TestEmacsGuiCannotAdoptANamedSession's first probe was cut by the
+// 500ms emacsBootBound this used to poll under, while the same run's
+// heartbeat probes peaked at 816ms.
 func (e *Emacs) awaitServer() {
 	e.t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), emacsBootBound)
+	if err := e.probeServer(); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+// probeServer is awaitServer's one probe, answering why it failed.
+func (e *Emacs) probeServer() error {
+	ctx, cancel := context.WithTimeout(context.Background(), HeartbeatBound)
 	defer cancel()
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
-	var last error
-	for {
-		if e.proc.Exited() {
-			e.t.Fatalf("emacs exited during boot; pty output:\n%s", e.proc.Output())
-		}
-		probe, probeCancel := context.WithTimeout(ctx, HeartbeatBound)
-		_, err := e.box.Exec(probe, "emacsclient", "--socket-name", e.ServerSocket, "--eval", "(emacs-pid)")
-		probeCancel()
-		if err == nil {
-			return
-		}
-		last = err
-		select {
-		case <-ctx.Done():
-			e.t.Fatalf("emacs server did not answer within %s: %v; pty output:\n%s",
-				emacsBootBound, last, e.proc.Output())
-		case <-ticker.C:
-		}
+	_, err := e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket, "--eval", "(emacs-pid)")
+	switch {
+	case err == nil:
+		return nil
+	case e.proc.Exited():
+		return fmt.Errorf("emacs exited during boot; pty output:\n%s", e.proc.Output())
+	default:
+		return fmt.Errorf("emacs server did not answer within %s: %w; pty output:\n%s",
+			HeartbeatBound, err, e.proc.Output())
 	}
 }
 

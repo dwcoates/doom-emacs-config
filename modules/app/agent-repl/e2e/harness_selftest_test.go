@@ -1,10 +1,14 @@
 package e2e
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The harness's own unit tests: the two helpers whose silent misbehavior does
@@ -261,5 +265,75 @@ func TestPreserveWorkspaceElispLogsFindsASinkBesideTheEmacsRoot(t *testing.T) {
 	// Assert
 	if _, err := os.Stat(filepath.Join(out, "workspace-elisp-logs", "repo-a", ".claude", "emacs", "emacs.log")); err != nil {
 		t.Fatalf("stat of the preserved workspace sink = %v, want it collected from beside the Emacs root", err)
+	}
+}
+
+// probeSandbox answers Exec with execErr and records each call's argv and
+// deadline; nothing else of the sandbox is reached by probeServer.
+type probeSandbox struct {
+	sandbox
+	execErr   error
+	calls     [][]string
+	deadlines []time.Duration
+}
+
+func (s *probeSandbox) Exec(ctx context.Context, argv ...string) (string, error) {
+	s.calls = append(s.calls, argv)
+	if d, ok := ctx.Deadline(); ok {
+		s.deadlines = append(s.deadlines, time.Until(d))
+	}
+	return "", s.execErr
+}
+
+// probeProc is an Emacs process that has or has not exited.
+type probeProc struct {
+	sandboxProc
+	exited bool
+}
+
+func (p probeProc) Exited() bool   { return p.exited }
+func (p probeProc) Output() string { return "pty text" }
+
+// TestProbeServerAsksOnceUnderTheHeartbeatBound pins awaitServer's probe: ONE
+// emacsclient question bounded by HeartbeatBound (the socket is bound before
+// the stamp, so there is nothing to poll for), and a failure named by
+// whether Emacs is still alive.
+func TestProbeServerAsksOnceUnderTheHeartbeatBound(t *testing.T) {
+	tests := []struct {
+		name    string
+		execErr error
+		exited  bool
+		wantErr string
+	}{
+		{name: "an answer is the server up"},
+		{name: "no answer from a live Emacs names the bound", execErr: context.DeadlineExceeded,
+			wantErr: "emacs server did not answer within " + HeartbeatBound.String()},
+		{name: "no answer from an Emacs that exited names the exit", execErr: errors.New("exit status 1"), exited: true,
+			wantErr: "emacs exited during boot"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			box := &probeSandbox{execErr: tt.execErr}
+			e := &Emacs{t: t, box: box, proc: probeProc{exited: tt.exited}, ServerSocket: "/s/server"}
+
+			// Act
+			err := e.probeServer()
+
+			// Assert
+			if tt.wantErr == "" && err != nil {
+				t.Fatalf("probeServer() = %v, want nil", err)
+			}
+			if tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
+				t.Fatalf("probeServer() = %v, want an error naming %q", err, tt.wantErr)
+			}
+			want := []string{"emacsclient", "--socket-name", "/s/server", "--eval", "(emacs-pid)"}
+			if len(box.calls) != 1 || !slices.Equal(box.calls[0], want) {
+				t.Fatalf("Exec calls = %v, want exactly one %v", box.calls, want)
+			}
+			if d := box.deadlines[0]; d > HeartbeatBound || d < HeartbeatBound-time.Second {
+				t.Fatalf("the probe's deadline was %s away, want HeartbeatBound (%s)", d, HeartbeatBound)
+			}
+		})
 	}
 }
