@@ -2340,25 +2340,11 @@ func TestInterruptTurnAgainstAShimReportingNoSessionAnswersNoSession(t *testing.
 // "A typed shim refusal relayed"). Per its doc comment this is meant for a
 // shim refusal the daemon does not otherwise have a specific arm for.
 //
-// EXPECTED RED, for two independent reasons found by grepping the whole
-// production tree:
-//  1. AnswerFailure is a TRANSPORT-level failure (fakeshim/server.go's
-//     `scripted` returns connect.NewError(CodeInternal, ...)), and
-//     internal/workspace/sender.go's KillTurn passes a transport error
-//     straight through UNWRAPPED — it is never a *workspace.ShimRefusal. So
-//     interrupt.go's `AsShimRefusal(err)` fails, the confirm/no_session
-//     branches are never reached, and the verb returns a plain wrapped error,
-//     which the server answers as a raw Connect error, not a typed arm at
-//     all.
-//  2. Even where a real *ShimRefusal DOES reach server/refuse.go, the arm
-//     name it carries is switched onto the CONCRETE named field the shim
-//     itself reported (e.g. "no_session", "live", "not_the_open_turn" —
-//     server.setArm matches the refusal's Arm string directly against
-//     InterruptError's oneof field names by reflection). No production code
-//     anywhere ever sets Arm to the literal string "shim_refused": grepping
-//     `"shim_refused"` and `ShimRefused` across internal/**/*.go (excluding
-//     _test.go) returns zero producers. The arm is UNREACHABLE as things
-//     stand.
+// A TRANSPORT failure of the kill (fakeshim's scripted answer is a Connect
+// internal error, never a typed refusal) lands on this arm too:
+// internal/workspace/interrupt.go's fallthrough records it at ERROR and
+// answers shim_refused with shimclient.Detail of the error, because which
+// layer refused is nothing the caller can act on.
 func TestInterruptTurnWithATransportFailureAnswersShimRefused(t *testing.T) {
 	t.Parallel()
 	// Arrange
