@@ -28,7 +28,7 @@ ALTER TABLE workspaces ADD COLUMN status_changed_at INTEGER;
 
 // SetStatusChangedAt advances the workspace's status change instant to at.
 //
-// IT ONLY EVER MOVES FORWARD, exactly as bumpLastActivity does: an instant
+// IT ONLY EVER MOVES FORWARD (advanceInstant), as bumpLastActivity does: an instant
 // older than the one recorded (a report a slower write overtook) leaves the
 // recorded one standing, so the update recency it feeds never runs backward.
 // An unknown workspace is refused rather than silently affecting no rows.
@@ -36,9 +36,7 @@ func (s *store) SetStatusChangedAt(ctx context.Context, id WorkspaceID, at time.
 	const op = "daemon.wsm.set_status_changed_at"
 	fields := dlog.Context{"workspace": string(id), "status_changed_at": at}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx,
-			`UPDATE workspaces SET status_changed_at = MAX(COALESCE(status_changed_at, 0), ?) WHERE id = ?`,
-			nanos(at), id)
+		res, err := advanceInstant(ctx, tx, "status_changed_at", id, at)
 		if err != nil {
 			return err
 		}
