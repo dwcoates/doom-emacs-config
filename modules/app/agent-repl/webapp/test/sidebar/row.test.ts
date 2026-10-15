@@ -12,8 +12,11 @@ import { MalformedView } from "../../src/rpc/malformed.js";
 import { heatColor } from "../../src/heat.js";
 import { HOVER_CLOSE_GRACE_MS } from "../../src/sidebar/row-hover.js";
 import {
+  BAND_RETURNS,
   MERGED_TODAY_CLASS,
   drawRosterRow,
+  returnFromBand,
+  type BandReturn,
   drawRosterRowOneShot,
   drawRosterRowAsyncMerging,
   mergedToday,
@@ -752,6 +755,62 @@ describe("the row click in the hidden section", () => {
       "the daemon does not know this workspace",
       "warn",
     ]);
+  });
+});
+
+describe("returnFromBand", () => {
+  const ws = create(WorkspaceRefSchema, { id: "ws-1" });
+  function band(answer: boolean, calls: string[]): BandReturn {
+    return {
+      operation: "sidebar.row.test-band",
+      message: "returning a workspace from a test band",
+      bringBack: (_line, _sc, workspace) => {
+        calls.push(`back:${workspace.id}`);
+        return Promise.resolve(answer);
+      },
+    };
+  }
+
+  it("brings the workspace back before it selects it", async () => {
+    const calls: string[] = [];
+    const sc = sidebarContext(
+      appContext({
+        selectWorkspace: (request) => {
+          calls.push(`select:${request.workspace?.id ?? ""}`);
+          return SELECT_OK;
+        },
+      }),
+    );
+    await returnFromBand(band(true, calls), document.createElement("div"), sc, ws);
+    expect(calls).toEqual(["back:ws-1", "select:ws-1"]);
+  });
+
+  it("selects nothing when the workspace was not brought back", async () => {
+    const calls: string[] = [];
+    const sc = sidebarContext(
+      appContext({
+        selectWorkspace: () => {
+          calls.push("select");
+          return SELECT_OK;
+        },
+      }),
+    );
+    await returnFromBand(band(false, calls), document.createElement("div"), sc, ws);
+    expect(calls).toEqual(["back:ws-1"]);
+  });
+
+  it("records the click at info under the band's operation", async () => {
+    const capture = captureLogRecords();
+    await returnFromBand(band(false, []), document.createElement("div"), sidebarContext(), ws);
+    const record = await forwardedRecord(capture, "sidebar.row.test-band");
+    expect(record.level.case).toBe("info");
+  });
+
+  // EVERY BAND'S CLICK GOES THROUGH returnFromBand: a band the table lacks
+  // would be a place whose click is spelled some other way.
+  it("names a return for every band a row can be drawn in", () => {
+    const bands: RowPlace[] = ["hidden", "merged"];
+    expect(Object.keys(BAND_RETURNS).sort()).toEqual([...bands].sort());
   });
 });
 
