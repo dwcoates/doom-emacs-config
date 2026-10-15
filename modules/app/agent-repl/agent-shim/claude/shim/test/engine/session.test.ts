@@ -12993,6 +12993,21 @@ describe("re-announcing live background work whose row moved past its start", ()
     ]);
   });
 
+  it("re-announces a shell its own table holds running when the store's live set omits it", async () => {
+    // Arrange: the store holds the shell's row but not as open live work
+    // (2026-10-14: the re-announcement named no shell while the stand-down
+    // refusal counted one).
+    const h = await adoptedWith("toolu_bg_shell", BACKGROUND_SHELL);
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, { liveDetached: [] });
+    h.persistence.bashFrames = [SHELL_START];
+
+    // Act.
+    const live = await reannounced(h);
+
+    // Assert.
+    expect(live.map((work) => work.work?.value)).toEqual(["toolu_bg_shell"]);
+  });
+
   it("re-announces a live background shell described from its run's own start row", async () => {
     // Arrange.
     const h = await adoptedWith("toolu_bg_shell", BACKGROUND_SHELL);

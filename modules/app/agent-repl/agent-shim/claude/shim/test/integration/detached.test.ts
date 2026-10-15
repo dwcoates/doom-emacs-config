@@ -809,6 +809,30 @@ describe("a detached shell's lifecycle: the shim writes its start, the sidecar i
     }
   });
 
+  test("a run still running is re-announced as live work to a new watch", async () => {
+    // Arrange: the run parks on its gate, live in the shim's own table
+    // (2026-10-14: a daemon adopting this shim was re-announced no shell while
+    // the shim refused its stand-down over that shell).
+    const gate = detachGate();
+    try {
+      const shim = await spawnShim({ env: { AGENT_REPL_FAKE_DETACH_GATE: gate.path } });
+      await shim.clients.h1.startSession(freshSession());
+      const stream = await openAgentStream(shim);
+      await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach" }));
+      const run = (await awaitAnnouncement(stream)).work?.value ?? "";
+
+      // Act.
+      const live = await reannouncedLiveWork(shim);
+
+      // Assert.
+      expect(live).toContain(run);
+      stream.close();
+      gate.release();
+    } finally {
+      gate.dispose();
+    }
+  });
+
   test("a concluded run stays live work until the sidecar writes its end", async () => {
     // Arrange: the vendor notified, and no sidecar has read the spool yet.
     const shim = await spawnShim();
