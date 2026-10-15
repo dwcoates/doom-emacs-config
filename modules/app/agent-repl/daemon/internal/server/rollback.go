@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -207,6 +208,38 @@ func (s *server) planLatestPrompt(ctx context.Context, ws ids.WorkspaceID, log d
 		return rollbackPlan{}, false, nil
 	}
 	return plan, true, nil
+}
+
+// unansweredRollback plans the rollback a turn stop that asked for one
+// performs (agentrepl.v1.InterruptTurn.roll_back_unanswered): the latest
+// prompt's, when a turn is open and nothing the agent produced follows the
+// prompt. ok is false, and the stop only stops, otherwise.
+func (s *server) unansweredRollback(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) (rollbackPlan, bool, error) {
+	plan, ok, err := s.planLatestPrompt(ctx, ws, log, "the stop key found a turn to stop")
+	if err != nil || !ok {
+		return rollbackPlan{}, false, err
+	}
+	if !plan.running || plan.followed {
+		log.Info(opRollback, "the stop key's prompt is answered or no turn is open, so the stop rolls nothing back", plan.context())
+		return rollbackPlan{}, false, nil
+	}
+	log.Info(opRollback, "nothing follows the stop key's prompt, so the stop rolls it back", plan.context())
+	return plan, true, nil
+}
+
+// rollBackErrorOf answers the RollBackError a refused rollback ERR is
+// relayed as. ERR is always a refusal (workspace.InterruptOutcome
+// .RollbackRefused), so a failure here is a defect, answered as one.
+func (s *server) rollBackErrorOf(log dlog.Logger, rpc string, err error) (*agentreplv1.RollBackError, error) {
+	r, ok := s.rollBackRefusalOf(err)
+	if !ok {
+		return nil, fail(log, rpc, fmt.Errorf("a refused rollback carried a failure, not a refusal: %w", err))
+	}
+	holder := &agentreplv1.RollBackResponse{}
+	if !setResponseError(holder, r.Arm, r.Fields) {
+		return nil, UnlandedArm(log, rpc, r.Arm, r.Reason, r.NotFound)
+	}
+	return holder.GetError(), nil
 }
 
 // interruptRollbackOffer answers what the stop key's second press offers for

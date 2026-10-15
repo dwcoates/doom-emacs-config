@@ -932,3 +932,228 @@ func TestPlanLatestPromptSurfacesAPlanningFailure(t *testing.T) {
 		t.Fatalf("planLatestPrompt = (%v, %v), want the failure", ok, err)
 	}
 }
+
+// stopRollingBack sends the stop key's turn stop, which asks to roll an
+// unanswered prompt back.
+func stopRollingBack(t *testing.T, h *harness) (*connect.Response[agentreplv1.InterruptResponse], error) {
+	t.Helper()
+	return h.Client.Interrupt(context.Background(), connect.NewRequest(&agentreplv1.InterruptRequest{
+		Workspace: ref(),
+		Target: &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{
+			RollBackUnanswered: &agentreplv1.InterruptTurnRollBackUnanswered{},
+		}},
+	}))
+}
+
+// seedUnanswered arranges a running turn whose prompt has nothing after it.
+func seedUnanswered(h *harness) {
+	seedPlannable(h)
+	h.DB.openTurns = []wsm.Turn{{ID: "t1"}}
+}
+
+func TestInterruptRollingBackAsksTheVerbsToRollBackAnUnansweredPrompt(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	seedUnanswered(h)
+	h.Verbs.interruptOutcome = workspace.InterruptOutcome{RolledBack: true}
+
+	// Act.
+	_, err := stopRollingBack(t, h)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	got := h.Verbs.interruptTarget.RollBack
+	if got == nil || len(got.Turns) != 1 || got.Turns[0] != "t1" || got.RestoreFiles {
+		t.Fatalf("target rollback = %+v, want t1 keeping files", got)
+	}
+}
+
+func TestInterruptRollingBackAnswersThePromptsWords(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	seedUnanswered(h)
+	h.Verbs.interruptOutcome = workspace.InterruptOutcome{RolledBack: true}
+
+	// Act.
+	resp, err := stopRollingBack(t, h)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	rolled := resp.Msg.GetSuccess().GetRolledBackUnanswered()
+	if rolled == nil || !proto.Equal(rolled.GetPrompt(), replyquote.Words(said("rolled back prompt"))) {
+		t.Fatalf("result = %v, want rolled_back_unanswered carrying the prompt", resp.Msg.GetResult())
+	}
+}
+
+func TestInterruptRollingBackLeavesTheTurnStopOnlyWhenTheRollbackDoesNotApply(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(h *harness)
+	}{
+		{name: "output follows the prompt", arrange: func(h *harness) { seedUnanswered(h); h.Feed.promptFollowed = true }},
+		{name: "no turn is open", arrange: func(h *harness) { seedPlannable(h) }},
+		{name: "no prompt is reachable", arrange: func(h *harness) { h.DB.openTurns = []wsm.Turn{{ID: "t1"}} }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			tc.arrange(h)
+			h.Verbs.interruptOutcome = workspace.InterruptOutcome{Turn: true}
+
+			// Act.
+			resp, err := stopRollingBack(t, h)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("Interrupt: %v", err)
+			}
+			if h.Verbs.interruptTarget.RollBack != nil {
+				t.Fatalf("target rollback = %+v, want none", h.Verbs.interruptTarget.RollBack)
+			}
+			if resp.Msg.GetSuccess().GetInterruptedTurn() == nil {
+				t.Fatalf("result = %v, want interrupted_turn", resp.Msg.GetResult())
+			}
+		})
+	}
+}
+
+func TestInterruptWithoutTheOptInNeverRollsBack(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	seedUnanswered(h)
+	h.Verbs.interruptOutcome = workspace.InterruptOutcome{Turn: true}
+
+	// Act.
+	_, err := h.Client.Interrupt(context.Background(), connect.NewRequest(&agentreplv1.InterruptRequest{
+		Workspace: ref(),
+		Target:    &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},
+	}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	if h.Verbs.interruptTarget.RollBack != nil {
+		t.Fatalf("target rollback = %+v, want none without the opt-in", h.Verbs.interruptTarget.RollBack)
+	}
+}
+
+func TestInterruptRollingBackRefusedRelaysWhyThePromptStayed(t *testing.T) {
+	tests := []struct {
+		name  string
+		err   error
+		check func(*agentreplv1.RollBackError) bool
+	}{
+		{name: "first prompt", err: &workspace.ShimRefusal{Arm: workspace.ArmShimFirstPrompt},
+			check: func(c *agentreplv1.RollBackError) bool { return c.GetFirstPrompt() != nil }},
+		{name: "holds changed", err: promptqueue.ErrHoldsChanged,
+			check: func(c *agentreplv1.RollBackError) bool { return c.GetPlanStale() != nil }},
+		{name: "vendor refused", err: &workspace.ShimRefusal{Arm: workspace.ArmShimVendorRefused, Detail: "no"},
+			check: func(c *agentreplv1.RollBackError) bool { return c.GetVendorRefused().GetVendorMessage() == "no" }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			seedUnanswered(h)
+			h.Verbs.interruptOutcome = workspace.InterruptOutcome{Turn: true, RollbackRefused: tc.err}
+
+			// Act.
+			resp, err := stopRollingBack(t, h)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("Interrupt: %v", err)
+			}
+			cause := resp.Msg.GetSuccess().GetInterruptedTurn().GetNotRolledBack().GetCause()
+			if cause == nil || !tc.check(cause) {
+				t.Fatalf("result = %v, want interrupted_turn naming why", resp.Msg.GetResult())
+			}
+		})
+	}
+}
+
+func TestInterruptRollingBackARefusalThatIsAFailureIsAnInternalError(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	h := newHarness(t)
+	h.Surfaces.workspace = log
+	seedUnanswered(h)
+	h.Verbs.interruptOutcome = workspace.InterruptOutcome{Turn: true, RollbackRefused: errors.New("not a refusal")}
+
+	// Act.
+	_, err := stopRollingBack(t, h)
+
+	// Assert.
+	if code := connectCode(t, err); code != connect.CodeInternal {
+		t.Fatalf("code = %v, want Internal", code)
+	}
+	if _, found := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: "Interrupt"}); !found {
+		t.Fatalf("records = %+v, want the defect recorded at ERROR", log.Records())
+	}
+}
+
+func TestInterruptRolledBackWithoutAPlanIsAnInternalError(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Verbs.interruptOutcome = workspace.InterruptOutcome{RolledBack: true}
+
+	// Act.
+	_, err := stopRollingBack(t, h)
+
+	// Assert.
+	if code := connectCode(t, err); code != connect.CodeInternal {
+		t.Fatalf("code = %v, want Internal", code)
+	}
+}
+
+func TestInterruptRollingBackSurfacesAPlanningFailure(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	seedUnanswered(h)
+	h.DB.turnStartedErr = errors.New("database is locked")
+
+	// Act.
+	_, err := stopRollingBack(t, h)
+
+	// Assert.
+	if code := connectCode(t, err); code != connect.CodeInternal {
+		t.Fatalf("code = %v, want Internal", code)
+	}
+	if h.Verbs.interruptTarget.Turn {
+		t.Fatal("the verbs were asked to stop the turn after the planning failed")
+	}
+}
+
+func TestInterruptRollingBackEndsTheRolledBackPromptsSelection(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Feed.prompts = feedIDs("p1", "p2")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := openRootWatch(t, h, ctx)
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(promptStep(older))); err != nil {
+		t.Fatalf("select the newest prompt: %v", err)
+	}
+	receiveSelection(t, stream)
+	h.Feed.rollbackTargetOK = true
+	h.Feed.rollbackTarget = feed.RollbackTarget{Turns: []ids.TurnID{"t2"}, Said: said("x")}
+	h.DB.openTurns = []wsm.Turn{{ID: "t2"}}
+	h.Verbs.interruptOutcome = workspace.InterruptOutcome{RolledBack: true}
+
+	// Act.
+	if _, err := stopRollingBack(t, h); err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+
+	// Assert.
+	sel := receiveSelection(t, stream)
+	if sel.GetNone().GetReturnToTail() == nil {
+		t.Fatalf("selection = %v, want none{return_to_tail} after the rolled-back prompt's selection ended", sel)
+	}
+}

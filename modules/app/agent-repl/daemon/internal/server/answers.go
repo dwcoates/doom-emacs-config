@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"connectrpc.com/connect"
@@ -16,6 +17,7 @@ import (
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
+	"agent-repld/internal/replyquote"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/workspace"
 )
@@ -139,9 +141,21 @@ func (s *server) Interrupt(
 		return s.interruptMergeTab(ctx, rpc, subject, tab, resp)
 	}
 	var target workspace.InterruptTarget
+	// unanswered is the plan of a stop that rolls its unanswered prompt back.
+	var unanswered *rollbackPlan
 	switch {
 	case req.Msg.GetTurn() != nil:
 		target.Turn = true
+		if req.Msg.GetTurn().GetRollBackUnanswered() != nil {
+			plan, ok, err := s.unansweredRollback(ctx, subject.Record.ID, subject.Log)
+			if err != nil {
+				return nil, fail(subject.Log, rpc, err)
+			}
+			if ok {
+				unanswered = &plan
+				target.RollBack = &workspace.RollbackRequest{Turns: plan.turns, Since: plan.since, DropHeld: plan.dropHeld}
+			}
+		}
 	case req.Msg.GetAllAgents() != nil:
 		target.AllAgents = true
 	default:
@@ -179,10 +193,25 @@ func (s *server) Interrupt(
 			nothing.Rollback = offer
 		}
 		success.Outcome = &agentreplv1.InterruptSuccess_NothingRunning{NothingRunning: nothing}
-	case outcome.Turn:
-		success.Outcome = &agentreplv1.InterruptSuccess_InterruptedTurn{
-			InterruptedTurn: &agentreplv1.InterruptedTurn{},
+	case outcome.RolledBack:
+		if unanswered == nil {
+			return nil, fail(subject.Log, rpc, errors.New("the verbs rolled back a prompt the stop never planned"))
 		}
+		// THE ROLLED-BACK PROMPT'S SELECTION ENDS WITH IT: its row is gone.
+		s.endSelection(subject.Log, subject.Record.ID, unanswered.row, returnToTail(), "rolled_back")
+		success.Outcome = &agentreplv1.InterruptSuccess_RolledBackUnanswered{
+			RolledBackUnanswered: &agentreplv1.InterruptRolledBackUnanswered{Prompt: replyquote.Words(unanswered.said)},
+		}
+	case outcome.Turn:
+		interrupted := &agentreplv1.InterruptedTurn{}
+		if outcome.RollbackRefused != nil {
+			cause, err := s.rollBackErrorOf(subject.Log, rpc, outcome.RollbackRefused)
+			if err != nil {
+				return nil, err
+			}
+			interrupted.NotRolledBack = &agentreplv1.InterruptedTurnNotRolledBack{Cause: cause}
+		}
+		success.Outcome = &agentreplv1.InterruptSuccess_InterruptedTurn{InterruptedTurn: interrupted}
 	default:
 		success.Outcome = &agentreplv1.InterruptSuccess_InterruptedDetached{
 			InterruptedDetached: &agentreplv1.InterruptedDetached{
@@ -191,7 +220,8 @@ func (s *server) Interrupt(
 		}
 	}
 	subject.Log.Debug("daemon.server.interrupt", "answered what the interrupt stopped",
-		dlog.Context{"nothing_running": outcome.NothingRunning, "merge_queue_offered": outcome.MergeQueueOffered, "detached": outcome.DetachedCount})
+		dlog.Context{"nothing_running": outcome.NothingRunning, "merge_queue_offered": outcome.MergeQueueOffered, "detached": outcome.DetachedCount,
+			"rolled_back": outcome.RolledBack, "rollback_refused": outcome.RollbackRefused != nil})
 	resp.Result = &agentreplv1.InterruptResponse_Success{Success: success}
 	return connect.NewResponse(resp), nil
 }
