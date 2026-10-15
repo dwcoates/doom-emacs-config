@@ -16,6 +16,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"agent-repld/internal/commandcatalog"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
@@ -114,6 +115,9 @@ func (p *fakePainter) Highlight(language, code string) (paint.Spans, error) {
 type harness struct {
 	t        *testing.T
 	resolver *resolver
+	// catalogs is the slash-command catalog table the resolver stamps user
+	// prompts' known commands from (Deps.Commands).
+	catalogs *commandcatalog.Catalogs
 	log      *dlog.TestLogger
 	painter  *fakePainter
 	// nowMs is the injected clock, advanced explicitly rather than slept on.
@@ -203,10 +207,11 @@ func newDurableHarness(t *testing.T, rolledBack RolledBackTurnStore, signedIn Si
 	h := &harness{
 		t: t, log: log, painter: painter, nowMs: 1_700_000_000_000,
 		faults: &fakeFaults{}, clock: &fakeStallClock{}, warnings: &fakeWarnings{},
-		boards: newFakeChessBoards(),
+		boards: newFakeChessBoards(), catalogs: commandcatalog.New(),
 	}
 
 	resolver, err := newResolver(Deps{
+		Commands:     h.catalogs.Catalog,
 		Log:          &fakeSurfaces{log: log},
 		WorkspaceDir: func(ids.WorkspaceID) (string, error) { return "/tmp/ws", nil },
 		Encode:       testEncode,

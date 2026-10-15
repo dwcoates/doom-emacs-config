@@ -21,7 +21,9 @@ import type {
   FeedUserPromptBlock,
   FeedUserPromptBody,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
+import type { SlotMark } from "../../bubble/body.js";
 import { drawPromptBlockArm } from "./blocks.js";
+import { markKnownCommands } from "./known-commands.js";
 
 /** The path prefix every refusal from this file is reported under. */
 const PATH = "FeedUserPrompt";
@@ -39,7 +41,7 @@ const PATH = "FeedUserPrompt";
 export function drawFeedUserPrompt(msg: FeedUserPrompt, previous?: HTMLElement): HTMLElement {
   log.info("drawing a user prompt row", {
     operation: "feed.draw-user-prompt",
-    context: { arm: msg.result.case ?? "unset" },
+    context: { arm: msg.result.case ?? "unset", commands: msg.commands.length },
   });
   // The author is still a required field on the wire (a message with none is
   // malformed, not merely unattributed) — validated but no longer drawn: the
@@ -61,6 +63,7 @@ export function drawFeedUserPrompt(msg: FeedUserPrompt, previous?: HTMLElement):
           content: drawFeedUserPromptBody(
             requireMessage(result.value.body, `${PATH}.success.body`),
             `${PATH}.success.body`,
+            knownCommandsMark(msg),
           ),
           capLines: USER_PROMPT_CAP_LINES,
         },
@@ -71,14 +74,33 @@ export function drawFeedUserPrompt(msg: FeedUserPrompt, previous?: HTMLElement):
   }
 }
 
+/**
+ * The mark a prompt's text blocks take: every slash word naming one of the
+ * known commands the row lists (`msg.commands`, the daemon's), marked as the
+ * composer marks it. A row listing none takes no mark.
+ */
+export function knownCommandsMark(msg: FeedUserPrompt): SlotMark | undefined {
+  if (msg.commands.length === 0) return undefined;
+  const names = new Set(msg.commands.map((command) => command.name));
+  return (rendered) => markKnownCommands(rendered, names);
+}
+
 /** The blocks the person composed, in order: the bubble's content. */
-export function drawFeedUserPromptBody(body: FeedUserPromptBody, path: string): HTMLElement[] {
+export function drawFeedUserPromptBody(
+  body: FeedUserPromptBody,
+  path: string,
+  mark?: SlotMark,
+): HTMLElement[] {
   return body.blocks.map((block, index) =>
-    drawFeedUserPromptBlock(block, `${path}.blocks[${index}]`),
+    drawFeedUserPromptBlock(block, `${path}.blocks[${index}]`, mark),
   );
 }
 
 /** One block of a user prompt — the shared drawn block vocabulary. */
-export function drawFeedUserPromptBlock(block: FeedUserPromptBlock, path: string): HTMLElement {
-  return drawPromptBlockArm(block.block, `${path}.block`);
+export function drawFeedUserPromptBlock(
+  block: FeedUserPromptBlock,
+  path: string,
+  mark?: SlotMark,
+): HTMLElement {
+  return drawPromptBlockArm(block.block, `${path}.block`, mark);
 }

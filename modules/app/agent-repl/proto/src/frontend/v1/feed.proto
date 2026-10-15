@@ -2388,6 +2388,28 @@ message FeedUserPrompt {
   // row is a prompt a fork inherited (settled in its parent). The client
   // draws the wave from this flag verbatim and from nothing else.
   bool working = 3;
+  // THE KNOWN SLASH COMMANDS THE PROMPT'S TEXT NAMES, so the bubble marks
+  // them as the Emacs composer marks them while they are typed. One entry per
+  // name or alias in the workspace's standing catalog
+  // (conversation.v1.SessionCommandCatalog) whose slashed form ("/" + name)
+  // occurs in one of the row's text blocks, sorted and without repeats. A
+  // DAEMON FACT, stated on every publication of the row from the catalog in
+  // hand: a newly stated catalog RE-PUBLISHES every user-prompt row whose
+  // list it changes, so a row drawn before its session stated the catalog
+  // (a replay at daemon start) gains its marks the moment it is stated.
+  //
+  // The list is the CANDIDATES, not the spans: the client marks a slash word
+  // of the drawn text — a `/` beginning a whitespace-bounded run after its
+  // opening brackets and quotes, ending before its closing brackets, quotes
+  // and sentence punctuation — exactly when the word less its slash is in
+  // this list, the composer's own rule. Empty while no catalog is known.
+  repeated FeedUserPromptCommand commands = 4;
+}
+
+// One known slash command a user prompt names.
+message FeedUserPromptCommand {
+  // The catalog name or alias, without its slash ("merge-queue").
+  string name = 1;
 }
 
 // The row's content.

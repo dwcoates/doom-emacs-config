@@ -15,7 +15,7 @@
  */
 import { requireCase, unreachableArm } from "../../rpc/strict.js";
 import { log } from "../../log.js";
-import { markdownSlot } from "../../bubble/body.js";
+import { markdownSlot, type SlotMark } from "../../bubble/body.js";
 import { quoteSlot } from "../../bubble/quote.js";
 import { armName } from "../renderers.js";
 import type {
@@ -41,13 +41,15 @@ export type PromptBlockArm =
 /**
  * A text block: a markdown slot the bubble's body paints, so a tree the person
  * typed wraps at the prompt bubble's own cap exactly as one in a response does.
+ * MARK, when the prompt kind has one, is applied to every paint of the slot
+ * (a user prompt's known slash commands).
  */
-export function drawFeedTextBlock(block: FeedTextBlock): HTMLElement {
+export function drawFeedTextBlock(block: FeedTextBlock, mark?: SlotMark): HTMLElement {
   log.info("drawing a prompt text block", {
     operation: "feed.draw-text-block",
-    context: { characters: block.text.length },
+    context: { characters: block.text.length, marked: mark !== undefined },
   });
-  return markdownSlot("prompt-block prompt-block-text", block.text);
+  return markdownSlot("prompt-block prompt-block-text", block.text, mark);
 }
 
 /**
@@ -99,13 +101,14 @@ export function drawFeedQuoteBlock(block: FeedQuoteBlock): HTMLElement {
  * One block of either prompt kind, by arm.
  *
  * PATH names the field this block came from, so a refusal points at the
- * producer's own field rather than at "a block somewhere".
+ * producer's own field rather than at "a block somewhere". MARK is the text
+ * blocks' (`drawFeedTextBlock`).
  */
-export function drawPromptBlockArm(arm: PromptBlockArm, path: string): HTMLElement {
+export function drawPromptBlockArm(arm: PromptBlockArm, path: string, mark?: SlotMark): HTMLElement {
   const block = requireCase(arm, path);
   switch (block.case) {
     case "text":
-      return drawFeedTextBlock(block.value);
+      return drawFeedTextBlock(block.value, mark);
     case "image":
       return drawFeedImageBlock(block.value);
     case "unsupported":

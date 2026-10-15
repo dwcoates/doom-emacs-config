@@ -1,0 +1,36 @@
+{
+  "_comment": [
+    "THE cross-language slash word. A slash word is what the Emacs composer",
+    "marks while it is typed (lisp/command-completion.el) and what the webapp",
+    "marks in a drawn user prompt (webapp/src/feed/rows/known-commands.ts),",
+    "when its name is a known command. The two are one rule in two languages:",
+    "the webapp reads this file as its rule's punctuation, and the elisp test",
+    "asserts its own constants against it and runs every case below, which is",
+    "the only mechanism that makes a divergence between the two fail loudly",
+    "instead of quietly.",
+    "",
+    "THE RULE. A slash word lies in a run of non-whitespace. It begins with",
+    "'/' at the run's start or after the run's leading 'opening' punctuation,",
+    "and ends at the run's end less its trailing 'closing' punctuation, never",
+    "before the slash's next character. Its name is the word less its slash.",
+    "",
+    "Each case is a text, the command names known, and the words marked, in",
+    "order."
+  ],
+
+  "opening": "([{<\"'`“‘",
+  "closing": ")]}>\"'`.,;:!?”’…",
+
+  "cases": [
+    { "text": "please /merge-queue now", "known": ["merge-queue"], "marked": ["/merge-queue"] },
+    { "text": "/usr/local /nope", "known": ["merge-queue"], "marked": [] },
+    { "text": "see a/usage", "known": ["usage"], "marked": [] },
+    { "text": "/usage /clear", "known": ["usage", "clear"], "marked": ["/usage", "/clear"] },
+    { "text": "first line\n/clear", "known": ["clear"], "marked": ["/clear"] },
+    { "text": "hello (/merge-queue) here", "known": ["merge-queue"], "marked": ["/merge-queue"] },
+    { "text": "hello /merge-queue.", "known": ["merge-queue"], "marked": ["/merge-queue"] },
+    { "text": "run \"/clear\", then", "known": ["clear"], "marked": ["/clear"] },
+    { "text": "say “/clear”…", "known": ["clear"], "marked": ["/clear"] },
+    { "text": "/clear)x", "known": ["clear"], "marked": [] }
+  ]
+}

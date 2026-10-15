@@ -258,6 +258,17 @@ const painters = new WeakMap<Element, Painter>();
 /** Every markdown slot's source, held beside the element it paints. */
 const slotSources = new WeakMap<Element, string>();
 
+/**
+ * What a slot's kind adds to its rendered markdown before it is placed: a
+ * prompt's known slash commands marked, say. It runs on the DETACHED render of
+ * every paint, so a repaint reconciles against marked text and never drops a
+ * mark it would otherwise have to add back.
+ */
+export type SlotMark = (rendered: HTMLElement) => void;
+
+/** Every marked slot's mark, held beside the element it paints. */
+const slotMarks = new WeakMap<Element, SlotMark>();
+
 /** A fresh bubble body, the custom element defined on first use, its painter armed. */
 export function createBubbleBody(): BubbleBody {
   const body = createConnectHookElement(BUBBLE_BODY_TAG);
@@ -274,11 +285,12 @@ export function createBubbleBody(): BubbleBody {
  * bubble's own cap. A slot is an ordinary element (CLASSNAME is the kind's), so
  * a kind can nest it in whatever structure it draws around its prose.
  */
-export function markdownSlot(className: string, markdown: string): HTMLElement {
+export function markdownSlot(className: string, markdown: string, mark?: SlotMark): HTMLElement {
   const slot = document.createElement("div");
   slot.className = className;
   slot.setAttribute(MARKDOWN_SLOT_ATTRIBUTE, "");
   slotSources.set(slot, markdown);
+  if (mark !== undefined) slotMarks.set(slot, mark);
   return slot;
 }
 
@@ -302,6 +314,9 @@ export function paintBody(body: BubbleBody, content: readonly ChildNode[]): read
     const have = live[i];
     if (isSlot(have) && isSlot(want) && have.className === want.className) {
       slotSources.set(have, sourceOf(want));
+      const mark = slotMarks.get(want);
+      if (mark === undefined) slotMarks.delete(have);
+      else slotMarks.set(have, mark);
       return have;
     }
     return want;
@@ -451,6 +466,7 @@ function armPainter(body: BubbleBody): Painter {
     for (const slot of targets) {
       const target = document.createElement("div");
       target.innerHTML = proseHtml(sourceOf(slot), budget);
+      slotMarks.get(slot)?.(target);
       // The reconcile compares whole text with whole text, so a revealing slot
       // is restored first and cut again after (`revealSlot`).
       clearTextReveal(slot);

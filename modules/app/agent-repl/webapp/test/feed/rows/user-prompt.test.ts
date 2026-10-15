@@ -18,17 +18,75 @@ import {
   BUBBLE_VARIANT_ATTRIBUTE,
 } from "../../../src/bubble/draw.js";
 import { BUBBLE_QUOTE_CLASS } from "../../../src/bubble/quote.js";
+import { KNOWN_COMMAND_CLASS } from "../../../src/feed/rows/known-commands.js";
 import { cascadedValue, installStylesheet } from "../../stylesheet.js";
 import { FITTING_TREE, WIDE_TREE, stagedCols, treeLineWidths, useTreeLayout } from "../../tree-layout.js";
 
 /** A prompt with the given blocks. */
-function prompt(blocks: unknown[], author = "You", working = false) {
+function prompt(blocks: unknown[], author = "You", working = false, commands: string[] = []) {
   return create(FeedUserPromptSchema, {
     author: { label: author },
     result: { case: "success", value: { body: { blocks: blocks as never } } },
     working,
+    commands: commands.map((name) => ({ name })),
   });
 }
+
+/** A prompt of one text block naming COMMANDS as known. */
+function said(text: string, commands: string[]) {
+  return prompt([{ block: { case: "text", value: { text } } }], "You", false, commands);
+}
+
+describe("drawFeedUserPrompt: the known commands", () => {
+  it("marks a slash word naming a command the row lists", () => {
+    // Arrange / Act
+    const el = drawFeedUserPrompt(said("/merge-queue own", ["merge-queue"]));
+    // Assert
+    expect(el.querySelector(`.${KNOWN_COMMAND_CLASS}`)?.textContent).toBe("/merge-queue");
+  });
+
+  it("marks nothing when the row lists no command", () => {
+    // Arrange / Act
+    const el = drawFeedUserPrompt(said("/merge-queue own", []));
+    // Assert
+    expect(el.querySelector(`.${KNOWN_COMMAND_CLASS}`)).toBeNull();
+  });
+
+  it("marks a command the row gains when it is redrawn in place", () => {
+    // Arrange
+    const before = drawFeedUserPrompt(said("/merge-queue own", []));
+    // Act
+    const after = drawFeedUserPrompt(said("/merge-queue own", ["merge-queue"]), before);
+    // Assert
+    expect(after.querySelector(`.${KNOWN_COMMAND_CLASS}`)?.textContent).toBe("/merge-queue");
+  });
+
+  it("records how many commands the row lists", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    // Act
+    drawFeedUserPrompt(said("/a /b", ["a", "b"]));
+    // Assert
+    const record = await forwardedRecord(capture, "feed.draw-user-prompt");
+    expect(record.context).toEqual(expect.objectContaining({ commands: 2 }));
+  });
+
+  it("colors a marked command with the known-command color", () => {
+    // Arrange
+    const restore = installStylesheet();
+    const el = drawFeedUserPrompt(said("/merge-queue", ["merge-queue"]));
+    document.body.append(el);
+    try {
+      // Act
+      const mark = el.querySelector(`.${KNOWN_COMMAND_CLASS}`) as Element;
+      // Assert
+      expect(cascadedValue(mark, "color")).toBe("var(--known-command)");
+    } finally {
+      el.remove();
+      restore();
+    }
+  });
+});
 
 describe("drawFeedUserPrompt: the bubble", () => {
   it("wears the one bubble's classes and the prompt hook the feed finds it by", () => {
