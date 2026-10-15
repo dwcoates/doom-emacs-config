@@ -43,8 +43,9 @@ func (r *run) setStep(ctx context.Context, step footer.MergeStep, apply func(*fo
 	r.o.publish(r.ws, facts)
 	if changed && step != footer.StepEnqueued {
 		if err := r.o.republishQueue(ctx, r.repo); err != nil {
-			r.o.log(ctx, r.ws).Error("daemon.merge.step", "could not tell the merges waiting behind this one its new step",
-				dlog.Context{"workspace": string(r.ws), "step": string(step), "error": err.Error()})
+			recordFailed(r.o.log(ctx, r.ws), "daemon.merge.step", "could not tell the merges waiting behind this one its new step",
+				"the merges waiting behind this one were not told its new step: its context ended under the read",
+				dlog.Context{"workspace": string(r.ws), "step": string(step)}, err)
 		}
 	}
 }

@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
+
+	"agent-repld/internal/dlog"
 )
 
 // streamingGate scripts one passing gate run that announces each suite.
@@ -325,6 +327,34 @@ func TestUnreadablePathsRunEverySuite(t *testing.T) {
 	defer h.runner.mu.Unlock()
 	if len(h.runner.argv) != 1 || strings.Contains(strings.Join(h.runner.argv[0], " "), "--suites") {
 		t.Fatalf("runner argv = %v, want one unnarrowed run", h.runner.argv)
+	}
+}
+
+func TestAGateWhosePathsReadIsCutByTheRunsEndRunsNothing(t *testing.T) {
+	// Arrange: the run is abandoned, and its git diff answers the cut.
+	h := newHarness(t)
+	r := failingTestsRun(t, h)
+	ctx, cancel := context.WithCancelCause(context.Background())
+	r.ctx, r.cancel = ctx, cancel
+	cancel(errors.New("abandoned"))
+	h.git.changedErr = fmt.Errorf("git diff was cancelled: %w", context.Canceled)
+	round := r.openTab(context.Background(), TabTests)
+
+	// Act.
+	_, err := r.gate(ctx, round, "tip", "head", nil)
+
+	// Assert.
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("gate err = %v, want the cut answered", err)
+	}
+	h.runner.mu.Lock()
+	started := len(h.runner.argv)
+	h.runner.mu.Unlock()
+	if started != 0 {
+		t.Fatalf("the runner was started %d times for an abandoned run, want none", started)
+	}
+	if rec, ok := h.recordFor(dlog.LevelWarn, "daemon.merge.tests"); ok {
+		t.Fatalf("the cut was recorded as a warning: %+v", rec)
 	}
 }
 

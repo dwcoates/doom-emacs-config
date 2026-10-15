@@ -134,6 +134,29 @@ func TestAnUnreadableQueueTellsTheRosterNothingAndIsAnError(t *testing.T) {
 	}
 }
 
+func TestAQueueReadCutByItsContextTellsTheRosterNothingAtInfo(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.mu.Lock()
+	h.db.queueReadErr = context.Canceled
+	h.db.mu.Unlock()
+
+	// Act
+	h.o.publishAsyncMerges(context.Background(), h.repoKey())
+
+	// Assert
+	if told := len(h.sidebar.asyncTold); told != 0 {
+		t.Fatalf("the roster was told %d async sets, want none", told)
+	}
+	if rec, ok := h.recordFor(dlog.LevelError, "daemon.merge.async_merges"); ok {
+		t.Fatalf("the cut read was recorded at ERROR: %+v", rec)
+	}
+	rec, ok := h.recordFor(dlog.LevelInfo, "daemon.merge.async_merges")
+	if !ok || rec.Context["repo"] != string(h.repoKey()) || rec.Context["error"] != context.Canceled.Error() {
+		t.Fatalf("record %+v (found %v), want the cut at INFO with the repo and the cause", rec, ok)
+	}
+}
+
 func TestAnUnreadableQueuedWorkspaceTellsTheRosterNothingAndIsAnError(t *testing.T) {
 	// Arrange: a queue row naming a workspace with no record.
 	h := newHarness(t)

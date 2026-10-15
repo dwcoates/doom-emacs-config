@@ -111,7 +111,7 @@ func (o *orchestrator) claimRace(ctx context.Context, r *run, base string) {
 	log := o.log(ctx, r.ws)
 	tip, err := r.git.ResolveRef(ctx, r.subject.targetDir, "HEAD")
 	if err != nil {
-		if r.stopping(err) {
+		if r.stopping(err) || r.cut(err) {
 			return
 		}
 		log.Error(op, "could not read the target's tip to claim the race to land", dlog.Context{"workspace": string(r.ws), "error": err.Error()})

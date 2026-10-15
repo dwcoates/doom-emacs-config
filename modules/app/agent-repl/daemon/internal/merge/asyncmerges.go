@@ -80,7 +80,8 @@ type asyncMergesPublisher struct {
 
 // publishAsyncMerges reads REPO's queue and tells the roster, whole, which
 // workspaces' own branches merge async in it. A queue that cannot be read is
-// recorded at ERROR and nothing is published: the roster keeps the last set
+// recorded (at ERROR, or at INFO when its context ended under the read) and
+// nothing is published: the roster keeps the last set
 // it was told until the next change of the queue republishes it.
 func (o *orchestrator) publishAsyncMerges(ctx context.Context, repo wsm.RepoKey) {
 	const op = "daemon.merge.async_merges"
@@ -88,14 +89,16 @@ func (o *orchestrator) publishAsyncMerges(ctx context.Context, repo wsm.RepoKey)
 	defer o.asyncMerges.mu.Unlock()
 	entries, err := o.deps.DB.MergeQueue(ctx, repo)
 	if err != nil {
-		o.deps.Log.Global().Error(op, "could not read the merge queue, so the roster is not told which workspaces' branches merge async",
-			dlog.Context{"repo": string(repo), "error": err.Error()})
+		recordFailed(o.deps.Log.Global(), op, "could not read the merge queue, so the roster is not told which workspaces' branches merge async",
+			"the merge queue's read ended when its context was cancelled; the roster is not told which workspaces' branches merge async",
+			dlog.Context{"repo": string(repo)}, err)
 		return
 	}
 	requesters, err := o.asyncRequesters(ctx, entries)
 	if err != nil {
-		o.deps.Log.Global().Error(op, "could not resolve the requester of a merge workspace on the queue, so the roster is not told which workspaces' branches merge async",
-			dlog.Context{"repo": string(repo), "entries": len(entries), "error": err.Error()})
+		recordFailed(o.deps.Log.Global(), op, "could not resolve the requester of a merge workspace on the queue, so the roster is not told which workspaces' branches merge async",
+			"the requesters' read ended when its context was cancelled; the roster is not told which workspaces' branches merge async",
+			dlog.Context{"repo": string(repo), "entries": len(entries)}, err)
 		return
 	}
 	names := make([]string, 0, len(requesters))

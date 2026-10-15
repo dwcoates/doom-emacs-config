@@ -68,7 +68,7 @@ func (r *run) gate(ctx context.Context, round tabRound, tip, head string, adm *g
 	dir := r.subject.dir
 	rangeSpec := tip + ".." + head
 	paths, err := r.git.ChangedPaths(ctx, dir, rangeSpec)
-	if err != nil && r.stopping(err) {
+	if err != nil && (r.stopping(err) || r.cut(err)) {
 		return gateVerdict{}, err
 	}
 	var selection SuiteSelection

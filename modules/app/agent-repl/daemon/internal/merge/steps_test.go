@@ -2,8 +2,10 @@ package merge
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/resolve/footer"
 )
 
@@ -95,5 +97,35 @@ func TestPromptLinesCarryTheFirstLineOfThePrompt(t *testing.T) {
 	// Assert.
 	if pre.GetPreprocessing().GetText() != "run the review" || post.GetPostprocessing().GetText() != "tidy up" {
 		t.Fatalf("prompt lines = %+v and %+v", pre, post)
+	}
+}
+
+func TestAStepsRepublishLevelsTheQueueReadByItsCause(t *testing.T) {
+	tests := []struct {
+		name      string
+		readErr   error
+		wantLevel string
+	}{
+		{name: "a read cut by its context", readErr: context.Canceled, wantLevel: dlog.LevelInfo},
+		{name: "a read that failed", readErr: errors.New("database is locked"), wantLevel: dlog.LevelError},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			r := steppedRun(h)
+			h.db.mu.Lock()
+			h.db.queueReadErr = tt.readErr
+			h.db.mu.Unlock()
+
+			// Act.
+			r.setStep(context.Background(), footer.StepTesting, nil)
+
+			// Assert.
+			rec, ok := h.recordFor(tt.wantLevel, "daemon.merge.step")
+			if !ok || rec.Context["step"] != string(footer.StepTesting) || rec.Context["error"] != tt.readErr.Error() {
+				t.Fatalf("record %+v (found %v), want the step's republish at %s with the step and the cause", rec, ok, tt.wantLevel)
+			}
+		})
 	}
 }

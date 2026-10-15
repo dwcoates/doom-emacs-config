@@ -12,6 +12,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
@@ -1130,7 +1131,7 @@ func (r *run) landed(ctx context.Context, commit, base string) (outcome, error) 
 		return outcome{}, err
 	}
 	commits, err := r.git.LandedRange(ctx, r.subject.targetDir, commit)
-	if err != nil && r.stopping(err) {
+	if err != nil && (r.stopping(err) || r.cut(err)) {
 		return outcome{landed: commit, version: version}, nil
 	}
 	if err != nil {
@@ -1470,4 +1471,11 @@ func short(sha string) string {
 // alone.
 func (r *run) stopping(err error) bool {
 	return errors.Is(err, errMergeStopping) || r.exiting()
+}
+
+// cut reports whether a step's error is the run's own context ending under
+// it: an abandon or the daemon's exit took the run away mid-command, so the
+// error says nothing about the step, and the run's end records why.
+func (r *run) cut(err error) bool {
+	return ctxend.Is(err) && r.ctx.Err() != nil
 }
