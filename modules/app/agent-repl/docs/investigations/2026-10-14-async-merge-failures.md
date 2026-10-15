@@ -11,6 +11,7 @@ the log records that show it, so the failures can be fixed at their source.
 |---|---|---|---|---|
 | 1 | 2026-10-14 23:29 | `test-tier-rule` | `test-tier-rule-land` | waiting in line (not failed); an error record on every rebase, see entry 1 |
 | 2 | 2026-10-14 23:41 | `test-fixture-table-rules` | `test-fixture-table-rules-land` | FAILED: the merge workspace could not be forked |
+| 3 | 2026-10-15 (approved) | `test-cross-product-audit-psv` | requested by the child itself | pending |
 
 ## 1. `test-tier-rule` (waiting in line)
 
