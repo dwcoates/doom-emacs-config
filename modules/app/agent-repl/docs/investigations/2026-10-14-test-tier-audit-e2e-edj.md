@@ -166,7 +166,7 @@ Two different measures, labelled each time they appear:
     - The shim's `turn.test.ts` says `!refusal-no-fallback` ends on `modelError` and publishes no refusal reason. So the daemon infers the refusal; the shim never states it.
     - That the test passes is inferred, not observed: master's merge gates run the full e2e suite and keep landing. No run log seen here prints its result.
 - **Possible product defects:**
-  - A roster drain scheduled one hour out fires at once.
+  - Retracted: "a roster drain scheduled one hour out fires at once". The drain case's comment in `webapp/test/webapp-layer/roster.layer.test.ts` describes an earlier PAGE-clock instant, decades in the daemon's past, firing at once, which is correct. The case now schedules on the real clock.
   - The page's `SetModel` fails at the transport for an option the daemon itself served, and no test pins it.
 - **Gaps that block a move:**
   - Interrupt-all's shell half is checked only by `TestFanWideCancel`. An integration test must exist before that test can move.
