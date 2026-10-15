@@ -172,11 +172,16 @@ func WriteOutputs(dir string, m *Measurement, o Options) error {
 	return nil
 }
 
-// FindRoot is the agent-repl module root: the nearest directory at or above
-// dir holding the roster.
+// FindRoot is the agent-repl module root, by its real path: the nearest
+// directory at or above dir holding the roster.
 func FindRoot(dir string) (string, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
+		return "", fmt.Errorf("redundancy: resolve %s: %w", dir, err)
+	}
+	// The real path: go list answers real paths, and a directory may sit
+	// behind a symlink (/tmp is /private/tmp on macOS).
+	if abs, err = filepath.EvalSymlinks(abs); err != nil {
 		return "", fmt.Errorf("redundancy: resolve %s: %w", dir, err)
 	}
 	for d := abs; ; d = filepath.Dir(d) {
