@@ -59,17 +59,27 @@ func TestWatchFeedTailsExactlyAfterTheOpenedPageWithNoGapOrOverlap(t *testing.T)
 	if !sawFirst {
 		t.Fatalf("OpenFeed's page = %v, want it to already carry the row pushed before the open", page)
 	}
-	// RESP-1'S INTERIM RESTATEMENT IS NOT AN OVERLAP: resp-2 landing proves
-	// resp-1 is not the turn's answer, and resp-1 is re-pushed carrying
-	// `interim` (resolve/feed/interim.go) — a change the page did not hold.
-	// The tail's first SETTLED row that is not that restatement is resp-2's.
-	got := awaitRow(t, f, tail, "the tail's first row after the open", func(r *frontendv1.FeedRow) bool {
-		resp := r.GetActivity().GetResponse()
-		return resp.GetSuccess() != nil && !resp.GetInterim()
-	})
-	if md := got.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown(); md != "second" {
-		t.Fatalf("the tail's first row = %q, want %q (resp-1 must not be re-delivered)", md, "second")
+	// AN OVERLAP IS RESP-1 RE-DELIVERED EXACTLY AS THE PAGE HELD IT. A
+	// restatement CARRYING A CHANGE the page did not hold is not one: resp-2
+	// landing re-pushes resp-1 as `interim` (resolve/feed/interim.go), and the
+	// reveal pace can be stamped on resp-1 just after the open (measured
+	// 2026-10-15: `reveal_pace` republished 1ms after the page was served).
+	// So every resp-1 row the tail delivers before resp-2's settled row must
+	// differ from the page's, and resp-2's settled row must arrive (no gap).
+	var held *frontendv1.FeedRow
+	for _, r := range page.GetSuccess().GetRows() {
+		if r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == "first" {
+			held = r
+		}
 	}
+	// awaitRow fails the test if resp-2's settled row never arrives.
+	awaitRow(t, f, tail, "resp-2's settled row on the tail", func(r *frontendv1.FeedRow) bool {
+		resp := r.GetActivity().GetResponse()
+		if resp.GetSuccess().GetProse().GetMarkdown() == "first" && proto.Equal(r, held) {
+			t.Errorf("the tail re-delivered resp-1 exactly as the page held it: %v", r)
+		}
+		return resp.GetSuccess().GetProse().GetMarkdown() == "second" && !resp.GetInterim()
+	})
 }
 
 // TestALateRowIsPushedAtItsTruePlace reproduces the 2026-09-27 incident end to
