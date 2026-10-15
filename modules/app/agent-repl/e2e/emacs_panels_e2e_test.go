@@ -54,7 +54,7 @@ func emacsPanelWorld(t *testing.T, count int) (*EmacsWorld, []string) {
 		e.Eval(`(agent-repl-add-project-workspace ` + elispString(repository.Dir) + `)`)
 		want := i + 1
 		raw := e.AwaitEval("the workspace registry to hold the new workspace",
-			`(let (names) (maphash (lambda (k v) (when (plist-get v :project-dir) (push k names))) agent-repl--workspaces) names)`,
+			workspaceRegistryNamesForm,
 			func(raw json.RawMessage) bool { return len(decodeStrings(raw)) == want })
 		names = registryNames(raw)
 		awaitRegistrationLanding(e, repository.Dir)

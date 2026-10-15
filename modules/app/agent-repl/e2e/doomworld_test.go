@@ -396,17 +396,13 @@ type doomWorkspace struct {
 	Name, ID, Dir string
 }
 
-// registryNamesForm reads the names of every workspace Emacs's registry
-// holds a project directory for.
-const registryNamesForm = `(let (names) (maphash (lambda (k v) (when (plist-get v :project-dir) (push k names))) agent-repl--workspaces) names)`
-
 // register onboards a fresh repository NAME through the ordinary command,
 // the fake answering with ref ws-NAME, and returns it once it has landed.
 func (w *DoomWorld) register(t *testing.T, box sandbox, name string) doomWorkspace {
 	t.Helper()
 	dir := harness.NewRepoAt(t, filepath.Join(box.Scratch(), name)).Dir
 	ws := doomWorkspace{ID: "ws-" + name, Dir: dir}
-	before := w.Emacs.EvalStrings(registryNamesForm)
+	before := w.Emacs.EvalStrings(workspaceRegistryNamesForm)
 	w.registerAs(t, ws.ID, dir)
 	w.Emacs.Eval(`(agent-repl-add-project-workspace ` + elispString(dir) + `)`)
 	return w.land(t, ws, before)
@@ -419,7 +415,7 @@ func (w *DoomWorld) create(t *testing.T, box sandbox, name string) doomWorkspace
 	t.Helper()
 	dir := harness.NewRepoAt(t, filepath.Join(box.Scratch(), name)).Dir
 	ws := doomWorkspace{ID: "ws-" + name, Dir: dir}
-	before := w.Emacs.EvalStrings(registryNamesForm)
+	before := w.Emacs.EvalStrings(workspaceRegistryNamesForm)
 	created, _ := json.Marshal(map[string]any{"success": map[string]any{"workspace": map[string]any{"id": ws.ID, "dir": dir}}})
 	w.Fake.Script("CreateWorkspace", created)
 	w.Emacs.Eval(`(cl-letf (((symbol-function 'completing-read)
@@ -443,7 +439,7 @@ func (w *DoomWorld) land(t *testing.T, ws doomWorkspace, before []string) doomWo
 	ws.Name = filepath.Base(ws.Dir)
 	w.registered = append(w.registered, ws)
 	w.pushRoster(t, ws, w.registered...)
-	raw := e.AwaitEvalFor(emacsVerbBound, "the workspace at "+ws.Dir+" to appear in Emacs's registry", registryNamesForm,
+	raw := e.AwaitEvalFor(emacsVerbBound, "the workspace at "+ws.Dir+" to appear in Emacs's registry", workspaceRegistryNamesForm,
 		func(raw json.RawMessage) bool { return len(decodeStrings(raw)) > len(before) })
 	for _, n := range decodeStrings(raw) {
 		if !containsString(before, n) {

@@ -485,6 +485,11 @@ type EmacsOpts struct {
 	StopDaemon func()
 }
 
+// workspaceRegistryNamesForm reads the name of every workspace Emacs's
+// registry (`agent-repl--workspaces') holds a project directory for: the ONE
+// spelling every scenario reads the registry with.
+const workspaceRegistryNamesForm = `(let (names) (maphash (lambda (k v) (when (plist-get v :project-dir) (push k names))) agent-repl--workspaces) names)`
+
 // emacsRoot is a scenario's Emacs HOME: its scratch root's `emacs`.
 func emacsRoot(box sandbox) string { return filepath.Join(box.Scratch(), "emacs") }
 

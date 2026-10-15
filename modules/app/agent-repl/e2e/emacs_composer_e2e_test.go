@@ -82,11 +82,11 @@ func newEmacsScenario(t *testing.T, options ...EmacsWorldOption) *emacsScenario 
 // asserting its own arithmetic.
 func addProjectWorkspace(t *testing.T, e *Emacs, dir string) string {
 	t.Helper()
-	before := decodeStrings(e.Eval(workspaceNamesForm))
+	before := decodeStrings(e.Eval(workspaceRegistryNamesForm))
 	e.Eval(`(agent-repl-add-project-workspace ` + elispString(dir) + `)`)
 	raw := e.AwaitEvalFor(emacsVerbBound,
 		"the workspace to appear in Emacs's registry",
-		workspaceNamesForm,
+		workspaceRegistryNamesForm,
 		func(raw json.RawMessage) bool { return len(decodeStrings(raw)) == len(before)+1 })
 	for _, name := range decodeStrings(raw) {
 		if !contains(before, name) {
@@ -103,10 +103,6 @@ func addProjectWorkspace(t *testing.T, e *Emacs, dir string) string {
 	t.Fatalf("e2e: no new workspace name appeared for %s", dir)
 	return ""
 }
-
-// workspaceNamesForm reads Emacs's own workspace registry as DATA, per the
-// spec's readback table ("workspace registry <- agent-repl--workspaces").
-const workspaceNamesForm = `(let (names) (maphash (lambda (k v) (when (plist-get v :project-dir) (push k names))) agent-repl--workspaces) names)`
 
 func contains(xs []string, want string) bool {
 	for _, x := range xs {

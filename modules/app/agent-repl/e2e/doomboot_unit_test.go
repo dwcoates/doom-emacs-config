@@ -2,6 +2,8 @@ package e2e
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -158,5 +160,26 @@ func TestServerSocketDirConfined(t *testing.T) {
 				t.Fatalf("serverSocketDirConfined(%q) = %v, want %q", tt.dir, err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestTheRegistryIsReadThroughOneForm(t *testing.T) {
+	// A scenario that spelled its own registry read could drift from the one
+	// every other scenario reads; only workspaceRegistryNamesForm spells it.
+	files, err := filepath.Glob("*_test.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	spelled := 0
+	for _, f := range files {
+		body, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Joined here, so this test does not spell the form itself.
+		spelled += strings.Count(string(body), "(push k names))) "+"agent-repl--workspaces) names)`")
+	}
+	if spelled != 1 {
+		t.Fatalf("the registry-names form is spelled %d times across the e2e tests, want once, in workspaceRegistryNamesForm", spelled)
 	}
 }

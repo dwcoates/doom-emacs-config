@@ -387,7 +387,7 @@ func TestEmacsProofOfLife(t *testing.T) {
 	// hook records anything about them, and the module filters those out of
 	// every workspace render (workspace.el, agent-repl--ws-put-1).
 	name := e.AwaitEval("the workspace to appear in Emacs's registry",
-		`(let (names) (maphash (lambda (k v) (when (plist-get v :project-dir) (push k names))) agent-repl--workspaces) names)`,
+		workspaceRegistryNamesForm,
 		func(raw json.RawMessage) bool { return len(decodeStrings(raw)) == 1 })
 	wsName := decodeStrings(name)[0]
 
