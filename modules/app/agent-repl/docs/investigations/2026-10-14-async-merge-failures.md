@@ -98,3 +98,4 @@ the log records that show it, so the failures can be fixed at their source.
 - Branch `fix-ert-and-dist-land` (from `test-tier-audit-e2e`). The queue reported: workspace `6fc59458a3ed456d` "has no live session to await turn `76ef7e9a4d394225` on". The gate never ran.
 - Daemon at 12:35:25: `daemon.merge.fault` "a merge could not continue past an error; it fails", then `ReadHistory refused: unknown_agent: no session has been started on this shim and the workspace holds no persisted main agent`.
 - So the merge workspace's shim came up with no session started, and the queue tried to drive a turn on it. Not traced further. Re-requested under a new name.
+- Recurred 2026-10-15 ~15:50 on `matrix-halves-2` after its 4th gate attempt: "workspace `776c48e13c694622` has no live session to await turn `ed95c4f47c3f452f` on". The same fault as above, now twice. Re-requested as `halves-and-removals`.
