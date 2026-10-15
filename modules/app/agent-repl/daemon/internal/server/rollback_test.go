@@ -882,3 +882,53 @@ func TestRollBackRefusalOfMapsEachRefusalAndRejectsAFailure(t *testing.T) {
 		})
 	}
 }
+
+func TestPlanLatestPromptPlansTheNewestReachablePrompt(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	seedPlannable(h)
+	h.Feed.prompts = feedIDs("p1", "p2")
+
+	// Act.
+	plan, ok, err := h.Server.(*server).planLatestPrompt(context.Background(), "ws-1", dlog.NewTestLogger(), "testing")
+
+	// Assert.
+	if err != nil || !ok {
+		t.Fatalf("planLatestPrompt = (%v, %v), want a plan", ok, err)
+	}
+	if plan.row.GetValue() != "p2" || plan.restore {
+		t.Fatalf("plan = row %q restore %v, want p2 keeping files", plan.row.GetValue(), plan.restore)
+	}
+}
+
+func TestPlanLatestPromptWithNoPromptPlansNothingAndSaysSo(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	log := dlog.NewTestLogger()
+
+	// Act.
+	_, ok, err := h.Server.(*server).planLatestPrompt(context.Background(), "ws-1", log, "testing")
+
+	// Assert.
+	if err != nil || ok {
+		t.Fatalf("planLatestPrompt = (%v, %v), want no plan and no error", ok, err)
+	}
+	if _, found := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Operation: opRollback}); !found {
+		t.Fatalf("records = %+v, want the empty answer recorded", log.Records())
+	}
+}
+
+func TestPlanLatestPromptSurfacesAPlanningFailure(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	seedPlannable(h)
+	h.DB.turnStartedErr = errors.New("database is locked")
+
+	// Act.
+	_, ok, err := h.Server.(*server).planLatestPrompt(context.Background(), "ws-1", dlog.NewTestLogger(), "testing")
+
+	// Assert.
+	if err == nil || ok {
+		t.Fatalf("planLatestPrompt = (%v, %v), want the failure", ok, err)
+	}
+}

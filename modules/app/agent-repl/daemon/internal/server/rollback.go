@@ -188,23 +188,35 @@ func (s *server) mintRollbackToken(plan rollbackPlan) string {
 	return token
 }
 
+// planLatestPrompt plans a files-keeping rollback to just before WS's latest
+// reachable prompt: what the stop key rolls back. ok is false, logged under
+// SITUATION, when no prompt is reachable or the latest cannot be planned.
+func (s *server) planLatestPrompt(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger, situation string) (rollbackPlan, bool, error) {
+	prompts := s.deps.Feed.RollbackPrompts(ws)
+	if len(prompts) == 0 {
+		log.Info(opRollback, situation+" and no prompt to roll back", nil)
+		return rollbackPlan{}, false, nil
+	}
+	latest := prompts[len(prompts)-1]
+	plan, ok, err := s.planRollback(ctx, ws, false, latest)
+	if err != nil {
+		return rollbackPlan{}, false, err
+	}
+	if !ok {
+		log.Info(opRollback, situation+" and the latest prompt could not be planned", dlog.Context{"row": latest.GetValue()})
+		return rollbackPlan{}, false, nil
+	}
+	return plan, true, nil
+}
+
 // interruptRollbackOffer answers what the stop key's second press offers for
 // WS: nil when no prompt can be rolled back; `immediate`, with a token minted
 // for the latest prompt, when nothing the agent produced follows it; `choose`
 // when agent output does. See endpoint_interrupt.proto.
 func (s *server) interruptRollbackOffer(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) (*agentreplv1.InterruptNothingRunningRollback, error) {
-	prompts := s.deps.Feed.RollbackPrompts(ws)
-	if len(prompts) == 0 {
-		log.Info(opRollback, "the stop key found nothing running and no prompt to roll back", nil)
-		return nil, nil
-	}
-	plan, ok, err := s.planRollback(ctx, ws, false, prompts[len(prompts)-1])
-	if err != nil {
+	plan, ok, err := s.planLatestPrompt(ctx, ws, log, "the stop key found nothing running")
+	if err != nil || !ok {
 		return nil, err
-	}
-	if !ok {
-		log.Info(opRollback, "the stop key found nothing running and the latest prompt could not be planned", dlog.Context{"row": prompts[len(prompts)-1].GetValue()})
-		return nil, nil
 	}
 	if plan.followed {
 		log.Info(opRollback, "the stop key found nothing running; agent output follows the latest prompt, so the reader chooses", plan.context())
