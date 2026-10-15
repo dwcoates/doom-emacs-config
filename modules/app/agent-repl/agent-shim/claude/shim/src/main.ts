@@ -279,11 +279,12 @@ function resolveFakeMsOverride(
   variable: string,
   outcomePrefix: string,
   subject: string,
+  log: typeof MAIN_LIFECYCLE_LOGGER,
 ): number | undefined {
   const raw = env[variable];
   if (raw === undefined || raw === "") return undefined;
   if (!fake) {
-    MAIN_LIFECYCLE_LOGGER.debug(
+    log.debug(
       { env: variable, value: raw, outcome: `${outcomePrefix}_refused` },
       `the ${subject} override is honored only under --fake; ignoring it for this real session`,
     );
@@ -291,13 +292,13 @@ function resolveFakeMsOverride(
   }
   const parsed = Number(raw);
   if (!Number.isInteger(parsed) || parsed <= 0) {
-    MAIN_LIFECYCLE_LOGGER.debug(
+    log.debug(
       { env: variable, value: raw, outcome: `${outcomePrefix}_invalid` },
       `the ${subject} override is not a positive whole number of milliseconds; ignoring it`,
     );
     return undefined;
   }
-  MAIN_LIFECYCLE_LOGGER.debug(
+  log.debug(
     { env: variable, value_ms: parsed, outcome: `${outcomePrefix}_applied` },
     `a fake session took its ${subject} from the environment`,
   );
@@ -309,8 +310,8 @@ function resolveFakeMsOverride(
  *
  * Answers `undefined` for "judge at now".
  */
-export function resolveColdGateLaterMs(env: NodeJS.ProcessEnv, fake: boolean): number | undefined {
-  return resolveFakeMsOverride(env, fake, FAKE_COLD_GATE_LATER_ENV, "cold_gate_later_override", "cold-gate lateness");
+export function resolveColdGateLaterMs(env: NodeJS.ProcessEnv, fake: boolean, log: typeof MAIN_LIFECYCLE_LOGGER = MAIN_LIFECYCLE_LOGGER): number | undefined {
+  return resolveFakeMsOverride(env, fake, FAKE_COLD_GATE_LATER_ENV, "cold_gate_later_override", "cold-gate lateness", log);
 }
 
 /**
@@ -321,14 +322,14 @@ export function resolveColdGateLaterMs(env: NodeJS.ProcessEnv, fake: boolean): n
 export function resolveKeepaliveIntervalMs(
   env: NodeJS.ProcessEnv,
   fake: boolean,
+  log: typeof MAIN_LIFECYCLE_LOGGER = MAIN_LIFECYCLE_LOGGER,
 ): number | undefined {
   return resolveFakeMsOverride(
     env,
     fake,
     FAKE_KEEPALIVE_INTERVAL_ENV,
     "keepalive_override",
-    "keep-alive interval",
-  );
+    "keep-alive interval", log);
 }
 
 /**
@@ -354,14 +355,14 @@ export const FAKE_WATCHER_CONCLUSION_BUDGET_ENV = "AGENT_REPL_FAKE_WATCHER_CONCL
 export function resolveWatcherConclusionBudgetMs(
   env: NodeJS.ProcessEnv,
   fake: boolean,
+  log: typeof MAIN_LIFECYCLE_LOGGER = MAIN_LIFECYCLE_LOGGER,
 ): number | undefined {
   return resolveFakeMsOverride(
     env,
     fake,
     FAKE_WATCHER_CONCLUSION_BUDGET_ENV,
     "watcher_conclusion_budget_override",
-    "watcher-conclusion budget",
-  );
+    "watcher-conclusion budget", log);
 }
 
 /**
@@ -394,11 +395,12 @@ export const FAKE_STORE_BACKOFF_ENV = "AGENT_REPL_FAKE_STORE_BACKOFF_MS";
 export function resolveRetryPolicy(
   env: NodeJS.ProcessEnv,
   fake: boolean,
+  log: typeof MAIN_LIFECYCLE_LOGGER = MAIN_LIFECYCLE_LOGGER,
 ): PersistenceRetryPolicy {
   const raw = env[FAKE_STORE_BACKOFF_ENV];
   if (raw === undefined || raw === "") return DEFAULT_RETRY_POLICY;
   if (!fake) {
-    MAIN_LIFECYCLE_LOGGER.debug(
+    log.debug(
       {
         env: FAKE_STORE_BACKOFF_ENV,
         value: raw,
@@ -413,7 +415,7 @@ export function resolveRetryPolicy(
   // An empty slot is checked SEPARATELY because `Number("")` is 0, so a
   // malformed "1,,2" would otherwise be read silently as a valid "1,0,2".
   if (parts.some((part) => part === "") || parsed.some((ms) => !Number.isInteger(ms) || ms < 0)) {
-    MAIN_LIFECYCLE_LOGGER.debug(
+    log.debug(
       {
         env: FAKE_STORE_BACKOFF_ENV,
         value: raw,
@@ -423,7 +425,7 @@ export function resolveRetryPolicy(
     );
     return DEFAULT_RETRY_POLICY;
   }
-  MAIN_LIFECYCLE_LOGGER.debug(
+  log.debug(
     {
       env: FAKE_STORE_BACKOFF_ENV,
       backoff_ms: parsed,
@@ -460,25 +462,23 @@ export const FAKE_NETWORK_RESUME_WINDOW_ENV = "AGENT_REPL_FAKE_NETWORK_RESUME_WI
 export const FAKE_API_REACHABLE_GATE_ENV = "AGENT_REPL_FAKE_API_REACHABLE_GATE";
 
 /** Resolve the network-resume probe interval; `undefined` means the module constant. */
-export function resolveNetworkResumeIntervalMs(env: NodeJS.ProcessEnv, fake: boolean): number | undefined {
+export function resolveNetworkResumeIntervalMs(env: NodeJS.ProcessEnv, fake: boolean, log: typeof MAIN_LIFECYCLE_LOGGER = MAIN_LIFECYCLE_LOGGER): number | undefined {
   return resolveFakeMsOverride(
     env,
     fake,
     FAKE_NETWORK_RESUME_INTERVAL_ENV,
     "network_resume_interval_override",
-    "network-resume probe interval",
-  );
+    "network-resume probe interval", log);
 }
 
 /** Resolve the network-resume give-up window; `undefined` means the module constant. */
-export function resolveNetworkResumeWindowMs(env: NodeJS.ProcessEnv, fake: boolean): number | undefined {
+export function resolveNetworkResumeWindowMs(env: NodeJS.ProcessEnv, fake: boolean, log: typeof MAIN_LIFECYCLE_LOGGER = MAIN_LIFECYCLE_LOGGER): number | undefined {
   return resolveFakeMsOverride(
     env,
     fake,
     FAKE_NETWORK_RESUME_WINDOW_ENV,
     "network_resume_window_override",
-    "network-resume window",
-  );
+    "network-resume window", log);
 }
 
 /**
@@ -490,11 +490,11 @@ export function resolveNetworkResumeWindowMs(env: NodeJS.ProcessEnv, fake: boole
  * "unreachable" with the reason, so the wait gives up loudly rather than
  * probing a host the vendor does not use.
  */
-export function resolveReachabilityProbe(env: NodeJS.ProcessEnv, fake: boolean): ReachabilityProbe {
+export function resolveReachabilityProbe(env: NodeJS.ProcessEnv, fake: boolean, log: typeof MAIN_LIFECYCLE_LOGGER = MAIN_LIFECYCLE_LOGGER): ReachabilityProbe {
   const gate = env[FAKE_API_REACHABLE_GATE_ENV];
   if (fake) return createFakeReachabilityProbe(gate === undefined || gate === "" ? undefined : gate);
   if (gate !== undefined && gate !== "") {
-    MAIN_LIFECYCLE_LOGGER.debug(
+    log.debug(
       { env: FAKE_API_REACHABLE_GATE_ENV, value: gate, outcome: "api_reachable_gate_refused" },
       "the API reachability gate is honored only under --fake; ignoring it for this real session",
     );
@@ -616,6 +616,10 @@ export interface SignalTargets {
   readonly server: Pick<ShimServer, "close">;
   /** How the process ends. Injected so a test observes the code. */
   readonly exit: (code: number) => void;
+  /** Where the handlers' lifecycle records go; the process's own by default. */
+  readonly lifecycle?: typeof MAIN_LIFECYCLE_LOGGER;
+  /** Where a failed stand-down is reported; the process's own by default. */
+  readonly reportFatal?: typeof reportFatal;
 }
 
 /** The handler set, exposed so a test can invoke it without raising a signal. */
@@ -634,17 +638,19 @@ export interface SignalHandlers {
  * teardowns race over the same pending callbacks and store acks.
  */
 export function shutdownSignalHandlers(targets: SignalTargets): SignalHandlers {
+  const lifecycle = targets.lifecycle ?? MAIN_LIFECYCLE_LOGGER;
+  const fatal = targets.reportFatal ?? reportFatal;
   let standDown: Promise<void> | null = null;
   return {
     onSigterm(): void {
       if (standDown !== null) {
-        MAIN_LIFECYCLE_LOGGER.debug(
+        lifecycle.debug(
           { signal: "SIGTERM", outcome: "shutdown_already_in_flight" },
           "ignored a second SIGTERM: the graceful stand-down is already running",
         );
         return;
       }
-      MAIN_LIFECYCLE_LOGGER.info(
+      lifecycle.info(
         { signal: "SIGTERM", outcome: "graceful_stand_down_started" },
         "received the authorized shutdown signal; standing the session down",
       );
@@ -662,21 +668,21 @@ export function shutdownSignalHandlers(targets: SignalTargets): SignalHandlers {
             code === 0
               ? "stood down cleanly"
               : "stood down with writes the store never acked; exiting nonzero";
-          if (code === 0) MAIN_LIFECYCLE_LOGGER.info(fields, message);
-          else MAIN_LIFECYCLE_LOGGER.error({ ...fields, detail: message }, message);
+          if (code === 0) lifecycle.info(fields, message);
+          else lifecycle.error({ ...fields, detail: message }, message);
           targets.exit(code);
         } catch (err) {
           // A failed stand-down is still an exit, but NOT a clean one: reporting
           // 0 here would tell the daemon the session ended in good order when
           // writes may have been lost.
-          reportFatal(err);
+          fatal(err);
           targets.exit(1);
         }
       })();
     },
     onSigint(): void {
       // warn: a decision because SIGINT must not terminate a live vendor turn.
-      MAIN_LIFECYCLE_LOGGER.warn(
+      lifecycle.warn(
         {
           signal: "SIGINT",
           outcome: "refused_shutdown",
@@ -703,10 +709,13 @@ export interface KeepaliveResetSignalHandlers {
  * check of its own — it always fires, and the engine decides whether there is
  * anything to collapse.
  */
-export function keepaliveResetSignalHandler(engine: SessionEngine): KeepaliveResetSignalHandlers {
+export function keepaliveResetSignalHandler(
+  engine: SessionEngine,
+  lifecycle: typeof MAIN_LIFECYCLE_LOGGER = MAIN_LIFECYCLE_LOGGER,
+): KeepaliveResetSignalHandlers {
   return {
     onSigusr2(): void {
-      MAIN_LIFECYCLE_LOGGER.info(
+      lifecycle.info(
         { signal: "SIGUSR2", outcome: "keepalive_reset_requested" },
         "received SIGUSR2: resetting all outstanding keep-alive turns back to the last real record",
       );
@@ -890,7 +899,40 @@ export function forkFactory(fake: boolean, environment: ShimEnvironment): ForkVe
   return (spec) => Promise.resolve(forkFakeSession(environment.claudeConfigDir, spec));
 }
 
-export async function main(): Promise<void> {
+/**
+ * What `main` reaches outside its own arithmetic: the log, the lifecycle
+ * record, the fatal path, and the components it wires together.
+ *
+ * INJECTED, WITH THE REAL MODULES AS THE DEFAULT. The log is configured once
+ * per process by design (`configureLog` refuses a second configuration), so a
+ * suite that drove `main` through its real modules had to reset and re-import
+ * the whole module graph for every case, and that import alone (1.5s idle)
+ * timed tests out under a loaded run. A suite hands `main` its own.
+ */
+export interface MainDeps {
+  readonly configureLog: typeof configureLog;
+  readonly lifecycle: typeof MAIN_LIFECYCLE_LOGGER;
+  readonly reportFatal: typeof reportFatal;
+  readonly createEngine: typeof createEngine;
+  readonly createPersistence: typeof createPersistence;
+  readonly createStoreClient: typeof createStoreClient;
+  readonly serve: typeof serve;
+  readonly shimRoutes: typeof shimRoutes;
+}
+
+/** The real modules: what the program runs on. */
+export const PRODUCTION_MAIN_DEPS: MainDeps = {
+  configureLog,
+  lifecycle: MAIN_LIFECYCLE_LOGGER,
+  reportFatal,
+  createEngine,
+  createPersistence,
+  createStoreClient,
+  serve,
+  shimRoutes,
+};
+
+export async function main(deps: MainDeps = PRODUCTION_MAIN_DEPS): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
   // `--version` is a dependency-free smoke of the bundle: it loads every static
@@ -910,7 +952,7 @@ export async function main(): Promise<void> {
   // path, the same as any other spawn-contract disagreement.
   const workspaceId = workspaceIdFromListenSocket(args.listen);
   const correlation = logCorrelation(environment, workspaceId);
-  configureLog({
+  deps.configureLog({
     fd: args.logFd,
     cwd,
     workspaceId,
@@ -918,7 +960,7 @@ export async function main(): Promise<void> {
   });
 
   const identity = runtimeIdentity();
-  MAIN_LIFECYCLE_LOGGER.info(
+  deps.lifecycle.info(
     {
       workspace_dir: cwd,
       listen_socket: args.listen,
@@ -949,13 +991,13 @@ export async function main(): Promise<void> {
   if (args.spawnGateFd !== undefined) {
     const gate = await awaitSpawnGate(args.spawnGateFd);
     if (gate === "abandoned") {
-      MAIN_LIFECYCLE_LOGGER.info(
+      deps.lifecycle.info(
         { outcome: "spawn_gate_abandoned" },
         "the daemon that spawned this shim died before recording it; exiting without binding",
       );
       process.exit(0);
     }
-    MAIN_LIFECYCLE_LOGGER.debug({ outcome: "spawn_gate_opened" }, "the daemon recorded this shim; binding");
+    deps.lifecycle.debug({ outcome: "spawn_gate_opened" }, "the daemon recorded this shim; binding");
   }
 
   // NO LOCK IS TAKEN HERE. Startup is parse argv -> configure the log -> bind
@@ -967,13 +1009,13 @@ export async function main(): Promise<void> {
   // while the daemon's probe still reads a held lock as "a live shim owns this
   // conversation".
 
-  const keepaliveIntervalMs = resolveKeepaliveIntervalMs(process.env, args.fake);
-  const coldGateLaterMs = resolveColdGateLaterMs(process.env, args.fake);
-  const watcherConclusionBudgetMs = resolveWatcherConclusionBudgetMs(process.env, args.fake);
-  const retry = resolveRetryPolicy(process.env, args.fake);
-  const networkResumeIntervalMs = resolveNetworkResumeIntervalMs(process.env, args.fake);
-  const networkResumeWindowMs = resolveNetworkResumeWindowMs(process.env, args.fake);
-  const probeApiReachable = resolveReachabilityProbe(process.env, args.fake);
+  const keepaliveIntervalMs = resolveKeepaliveIntervalMs(process.env, args.fake, deps.lifecycle);
+  const coldGateLaterMs = resolveColdGateLaterMs(process.env, args.fake, deps.lifecycle);
+  const watcherConclusionBudgetMs = resolveWatcherConclusionBudgetMs(process.env, args.fake, deps.lifecycle);
+  const retry = resolveRetryPolicy(process.env, args.fake, deps.lifecycle);
+  const networkResumeIntervalMs = resolveNetworkResumeIntervalMs(process.env, args.fake, deps.lifecycle);
+  const networkResumeWindowMs = resolveNetworkResumeWindowMs(process.env, args.fake, deps.lifecycle);
+  const probeApiReachable = resolveReachabilityProbe(process.env, args.fake, deps.lifecycle);
 
   // THE SESSION ENGINE, with the real record plane behind it.
   //
@@ -985,19 +1027,19 @@ export async function main(): Promise<void> {
   // Filled the moment the listener exists; `KillSession` cannot fire before
   // then, because it arrives over that listener.
   let endProcess: (code: number) => void = (code) => {
-    MAIN_LIFECYCLE_LOGGER.error(
+    deps.lifecycle.error(
       { outcome: "exit_before_serving", exit_code: code, detail: "the listener did not exist when process exit was requested" },
       "a session end was requested before the listener existed; exiting immediately",
     );
     process.exit(code);
   };
 
-  const engine: SessionEngine = createEngine({
+  const engine: SessionEngine = deps.createEngine({
     endProcess: (code) => {
       endProcess(code);
     },
-    persistence: createPersistence({
-      client: createStoreClient(environment.storeSocket),
+    persistence: deps.createPersistence({
+      client: deps.createStoreClient(environment.storeSocket),
       nowMs: () => Date.now(),
       retry,
     }),
@@ -1015,7 +1057,7 @@ export async function main(): Promise<void> {
     ...(networkResumeWindowMs === undefined ? {} : { networkResumeWindowMs }),
   });
 
-  const server = await serve(args.listen, shimRoutes(engine));
+  const server = await deps.serve(args.listen, deps.shimRoutes(engine));
 
   // KillSession's own exit. The engine has already torn the session down and
   // built its response; the process may only end once the daemon has READ it
@@ -1040,10 +1082,10 @@ export async function main(): Promise<void> {
           code === 0
             ? "the session was killed over the wire; the process is ending"
             : "the session was killed with writes the store never acked; exiting nonzero";
-        if (code === 0) MAIN_LIFECYCLE_LOGGER.info(fields, message);
-        else MAIN_LIFECYCLE_LOGGER.error({ ...fields, detail: message }, message);
+        if (code === 0) deps.lifecycle.info(fields, message);
+        else deps.lifecycle.error({ ...fields, detail: message }, message);
       } catch (err) {
-        reportFatal(err);
+        deps.reportFatal(err);
         process.exit(1);
       }
       process.exit(code);
@@ -1061,14 +1103,16 @@ export async function main(): Promise<void> {
     engine,
     server,
     exit: (code) => process.exit(code),
+    lifecycle: deps.lifecycle,
+    reportFatal: deps.reportFatal,
   });
   process.on("SIGTERM", handlers.onSigterm);
   process.on("SIGINT", handlers.onSigint);
-  const keepaliveResetHandlers = keepaliveResetSignalHandler(engine);
+  const keepaliveResetHandlers = keepaliveResetSignalHandler(engine, deps.lifecycle);
   process.on("SIGUSR2", keepaliveResetHandlers.onSigusr2);
   // RUNTIME PROFILING: bin/profile-agent-repl.sh opens a session and sends
   // SIGWINCH, and the shim profiles itself into it (src/profiling.ts).
-  armRuntimeProfiling(MAIN_LIFECYCLE_LOGGER, {
+  armRuntimeProfiling(deps.lifecycle, {
     env: process.env,
     home: os.homedir(),
     pid: process.pid,
@@ -1076,7 +1120,7 @@ export async function main(): Promise<void> {
     onExit: (handler) => process.on("exit", handler),
   });
 
-  MAIN_LIFECYCLE_LOGGER.info(
+  deps.lifecycle.info(
     { listen_socket: args.listen, outcome: "serving" },
     "shim.v1 is being served; the daemon may dial",
   );
@@ -1085,7 +1129,7 @@ export async function main(): Promise<void> {
   // is wholly up.
   if (args.readyFd !== undefined) {
     if (reportReady(args.readyFd) === "daemon_gone") {
-      MAIN_LIFECYCLE_LOGGER.info(
+      deps.lifecycle.info(
         { outcome: "ready_daemon_gone" },
         "the daemon that spawned this shim was gone before it heard the shim is listening; serving on for a successor",
       );
