@@ -7,6 +7,12 @@ import {
   paintTriangle,
 } from "../../src/sidebar/view.js";
 
+/** A fresh view, and one scope of it to track copies in. */
+function scopedView() {
+  const view = createSidebarView();
+  return { view, scope: view.scope() };
+}
+
 /** A paint that records every value it was handed. */
 function recorder<T>(): { paint: (value: T) => void; painted: T[] } {
   const painted: T[] = [];
@@ -21,44 +27,55 @@ describe("the view keys", () => {
 
 describe("track", () => {
   it("answers the wire when nothing is asked", () => {
-    expect(createSidebarView().track("k", true, () => undefined)).toBe(true);
+    expect(scopedView().scope.track("k", true, () => undefined)).toBe(true);
   });
 
   it("answers the held ask over a wire that still disagrees", () => {
-    const view = createSidebarView();
-    view.track("k", false, () => undefined);
+    const { view, scope } = scopedView();
+    scope.track("k", false, () => undefined);
     view.ask("k", true);
-    expect(view.track("k", false, () => undefined)).toBe(true);
+    expect(scope.track("k", false, () => undefined)).toBe(true);
   });
 
   it("releases the ask once the wire agrees", () => {
-    const view = createSidebarView();
-    view.track("k", false, () => undefined);
+    const { view, scope } = scopedView();
+    scope.track("k", false, () => undefined);
     view.ask("k", true);
-    view.track("k", true, () => undefined);
-    expect(view.track("k", false, () => undefined)).toBe(false);
+    scope.track("k", true, () => undefined);
+    expect(scope.track("k", false, () => undefined)).toBe(false);
   });
 
 });
 
 describe("ask", () => {
   it("paints every copy at once", () => {
-    const view = createSidebarView();
+    const { view, scope } = scopedView();
     const one = recorder<boolean>();
     const two = recorder<boolean>();
-    view.track("k", false, one.paint);
-    view.track("k", false, two.paint);
+    scope.track("k", false, one.paint);
+    scope.track("k", false, two.paint);
     view.ask("k", true);
     expect([one.painted, two.painted]).toEqual([[true], [true]]);
   });
 
-  it("paints no copy from a roster already thrown away", () => {
-    const view = createSidebarView();
+  it("paints no copy of a disposed scope", () => {
+    const { view, scope } = scopedView();
     const old = recorder<boolean>();
-    view.track("k", false, old.paint);
-    view.beginDraw();
+    scope.track("k", false, old.paint);
+    scope.dispose();
     view.ask("k", true);
     expect(old.painted).toEqual([]);
+  });
+
+  it("paints another scope's copies after one scope is disposed", () => {
+    const { view, scope } = scopedView();
+    const kept = view.scope();
+    const copy = recorder<boolean>();
+    scope.track("k", false, () => undefined);
+    kept.track("k", false, copy.paint);
+    scope.dispose();
+    view.ask("k", true);
+    expect(copy.painted).toEqual([true]);
   });
 
   it("answers a fresh token for every ask", () => {
@@ -69,29 +86,29 @@ describe("ask", () => {
 
 describe("abandon", () => {
   it("repaints every copy from the wire", () => {
-    const view = createSidebarView();
+    const { view, scope } = scopedView();
     const copy = recorder<boolean>();
-    view.track("k", false, copy.paint);
+    scope.track("k", false, copy.paint);
     const token = view.ask("k", true);
     view.abandon("k", token);
     expect(copy.painted).toEqual([true, false]);
   });
 
   it("releases the hold, so the next push draws the wire", () => {
-    const view = createSidebarView();
-    view.track("k", false, () => undefined);
+    const { view, scope } = scopedView();
+    scope.track("k", false, () => undefined);
     view.abandon("k", view.ask("k", true));
-    expect(view.track("k", false, () => undefined)).toBe(false);
+    expect(scope.track("k", false, () => undefined)).toBe(false);
   });
 
   it("leaves a later ask's hold alone", () => {
-    const view = createSidebarView();
-    view.track("k", false, () => undefined);
+    const { view, scope } = scopedView();
+    scope.track("k", false, () => undefined);
     const first = view.ask("k", true);
     view.ask("k", false);
     view.ask("k", true);
     view.abandon("k", first);
-    expect(view.track("k", false, () => undefined)).toBe(true);
+    expect(scope.track("k", false, () => undefined)).toBe(true);
   });
 
   it("fails hard on a key no push ever drew", () => {

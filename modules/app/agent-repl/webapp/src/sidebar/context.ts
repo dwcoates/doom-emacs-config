@@ -11,13 +11,25 @@
 import type { DrawnStatusLog } from "../drawn-status.js";
 import type { DaemonContext } from "../rpc/context.js";
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
-import type { AttentionRegistry } from "./attention.js";
 import type { Dropdowns } from "./dropdowns.js";
 import type { RowHover } from "./row-hover.js";
-import type { SidebarView } from "./view.js";
+import type { DrawnView, SidebarView } from "./view.js";
 
-/** What a draw of the rail carries with it. */
-export interface SidebarContext {
+/** The one thing a drawn row asks of the attention registry. */
+export interface AttentionMarks {
+  /** ELEMENT carries the attention marker for workspace ID. */
+  mark(id: string, element: HTMLElement): void;
+}
+
+/**
+ * What the rail holds for the life of its mount.
+ *
+ * IT REGISTERS NOTHING. Every copy of the view and every teardown belongs to
+ * the one drawn section that made it (`scope.ts`), so the rail's own context
+ * has no way to make one: a section is drawn through `SidebarContext`, which
+ * only a scope hands out.
+ */
+export interface RailContext {
   /** What talking to the daemon takes: client, stream, ticker, failures. */
   ctx: DaemonContext;
   /**
@@ -45,9 +57,15 @@ export interface SidebarContext {
    * thrown-away row (`row-hover.ts`).
    */
   rowHover: RowHover;
-  /** The blink registry the attention markers are driven from. */
-  attention: AttentionRegistry;
-  /** Register a teardown the NEXT push (or dispose) runs. */
+  /** Where a drawn row's attention marker is registered (`attention.ts`). */
+  attention: AttentionMarks;
+}
+
+/** What one drawn section of the rail is handed: the rail's context, bound to the section's scope. */
+export interface SidebarContext extends Omit<RailContext, "view"> {
+  /** The view, its copies the section's own. */
+  view: DrawnView;
+  /** Register a teardown that runs when the section's drawing is replaced or the rail disposed. */
   onDispose(fn: () => void): void;
 }
 

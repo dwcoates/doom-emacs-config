@@ -65,13 +65,24 @@ describe("dismissOutside", () => {
     expect(d.closes).toBe(0);
   });
 
-  it("forgets the dropdowns of a roster a new draw replaced", () => {
+  it("forgets the dropdowns drawn under a drawing thrown away", () => {
+    const dropdowns = createDropdowns();
+    const d = dropdown();
+    const drawing = document.createElement("div");
+    drawing.appendChild(d.element);
+    dropdowns.opened(d);
+    dropdowns.forgetWithin(drawing);
+    dropdowns.dismissOutside(null);
+    expect(d.closes).toBe(0);
+  });
+
+  it("keeps the dropdowns drawn outside a drawing thrown away", () => {
     const dropdowns = createDropdowns();
     const d = dropdown();
     dropdowns.opened(d);
-    dropdowns.beginDraw();
+    dropdowns.forgetWithin(document.createElement("div"));
     dropdowns.dismissOutside(null);
-    expect(d.closes).toBe(0);
+    expect(d.closes).toBe(1);
   });
 
   it("keeps every copy of a dropdown when a click lands inside one", () => {

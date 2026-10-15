@@ -31,8 +31,9 @@ import { AttentionRegistry, type BlinkTimers } from "./attention.js";
 import { createDropdowns } from "./dropdowns.js";
 import { createRowHover } from "./row-hover.js";
 import { createSidebarView } from "./view.js";
-import type { SidebarContext } from "./context.js";
-import { drawWorkspaceRoster } from "./roster.js";
+import type { RailContext } from "./context.js";
+import { disposeWorkspaceRoster, drawWorkspaceRoster } from "./roster.js";
+import { nextFrame } from "../frame.js";
 import { placeOpenRowDetails } from "./row.js";
 import { installBandFit } from "./band-fit.js";
 import { applySearch, createRailSearch, type RailSearch } from "./search.js";
@@ -76,6 +77,8 @@ export interface SidebarDeps {
   unseen?: UnseenEnv;
   /** What a roster draw's timing reads (`draw-timing.ts`). Defaults to the page. */
   drawTiming?: DrawTimingEnv;
+  /** Schedules a callback for the next animation frame, where a push is drawn. Defaults to the page's. */
+  frame?: (callback: () => void) => void;
 }
 
 /**
@@ -142,7 +145,7 @@ export function mountWebhostSidebar(host: HTMLElement, ctx: DaemonContext, deps:
 }
 
 /** What the webhost's sidebar may have injected, beside the shared deps. */
-export type WebhostSidebarDeps = Pick<SidebarDeps, "storage" | "timers" | "wallPhase"> & {
+export type WebhostSidebarDeps = Pick<SidebarDeps, "storage" | "timers" | "wallPhase" | "frame"> & {
   /** Told once, when the first push reveals the sidebar. */
   revealed?: () => void;
 };
@@ -175,16 +178,9 @@ function mountSidebarIn(
   /** The workspace the roster last named current, for the webhost's create form. */
   let current: WorkspaceRef | null = null;
 
-  /** Teardowns the CURRENT drawing owns; replaced wholesale on every push. */
-  let disposers: Array<() => void> = [];
-  const clear = (): void => {
-    for (const fn of disposers) fn();
-    disposers = [];
-  };
-
   const openDetails = new Set<string>();
   const dropdowns = createDropdowns();
-  const sc: SidebarContext = {
+  const rail: RailContext = {
     ctx,
     parentWorkspace: () => (placement.case === "page" ? placement.ctx.workspace : current),
     view,
@@ -193,9 +189,6 @@ function mountSidebarIn(
     dropdowns,
     rowHover: createRowHover(dropdowns, openDetails),
     attention,
-    onDispose: (fn) => {
-      disposers.push(fn);
-    },
   };
 
   const body = document.createElement("div");
@@ -233,17 +226,17 @@ function mountSidebarIn(
   // ANY CLICK IN THE RAIL OUTSIDE AN OPEN DROPDOWN CLOSES IT (owner ruling,
   // 2026-10-06), empty space included; `dropdowns.ts` is the one rule.
   const dismiss = (event: MouseEvent): void => {
-    sc.dropdowns.dismissOutside(event.target);
+    rail.dropdowns.dismissOutside(event.target);
   };
   host.addEventListener("click", dismiss);
   // THE RAIL SAYS WHERE THE POINTER IS (row-hover.ts): a row drawn under a
   // resting pointer never sees it leave, but the host, which no draw
   // replaces, sees every move and the pointer leaving the rail.
   const pointerMoved = (event: MouseEvent): void => {
-    sc.rowHover.pointerAt(event.target);
+    rail.rowHover.pointerAt(event.target);
   };
   const pointerLeft = (): void => {
-    sc.rowHover.pointerAt(null);
+    rail.rowHover.pointerAt(null);
   };
   host.addEventListener("mousemove", pointerMoved);
   host.addEventListener("mouseleave", pointerLeft);
@@ -284,20 +277,34 @@ function mountSidebarIn(
     },
   });
 
-  /** Draw one whole roster into the rail, recording what the draw cost. */
+  // AT MOST ONE DRAW PER FRAME, OF THE NEWEST ROSTER (2026-10-15). Pushes
+  // arrive in bursts (ten inside one second at a page's boot), and each used
+  // to draw at once, so a burst paid for every roster in it while only the
+  // last was ever seen. A push now replaces the one waiting, and the frame
+  // draws whichever is newest.
+  const frame = deps.frame ?? nextFrame;
+  let waiting: WorkspaceRoster | null = null;
+  let disposed = false;
+
+  /** Draw ROSTER on the next frame, replacing any roster still waiting for it. */
   function drawRoster(roster: WorkspaceRoster): void {
-    timeRosterDraw(body, placement.case, (mark) => drawRosterNow(roster, mark), drawTiming);
+    const scheduled = waiting !== null;
+    waiting = roster;
+    if (scheduled) return;
+    frame(() => {
+      const newest = waiting;
+      waiting = null;
+      if (disposed || newest === null) return;
+      timeRosterDraw(body, placement.case, (mark) => drawRosterNow(newest, mark), drawTiming);
+    });
   }
 
-  /** Draw one whole roster into the rail, marking each phase's end. */
+  /** Draw one roster into the rail, marking each phase's end. */
   function drawRosterNow(roster: WorkspaceRoster, mark: MarkPhase): void {
-    // The teardowns come down BEFORE the draw, so a ticking age about to be
-    // replaced cannot paint a node already detached.
-    clear();
     // The blink pass brackets the draw: markers are re-attached to the phases
     // already running, and any marker the daemon cleared is forgotten.
     attention.beginPass();
-    const drawn = drawWorkspaceRoster(roster, sc);
+    const drawn = drawWorkspaceRoster(roster, rail);
     attention.endPass();
     mark("build");
     body.replaceChildren(drawn);
@@ -326,6 +333,7 @@ function mountSidebarIn(
   return {
     dispose(): void {
       log.debug("disposing the workspaces rail", { operation: "sidebar.dispose" });
+      disposed = true;
       stream.cancel();
       unseen?.dispose();
       bandFit.dispose();
@@ -335,8 +343,8 @@ function mountSidebarIn(
       host.removeEventListener("click", dismiss);
       host.removeEventListener("mousemove", pointerMoved);
       host.removeEventListener("mouseleave", pointerLeft);
-      sc.rowHover.dispose();
-      clear();
+      rail.rowHover.dispose();
+      disposeWorkspaceRoster(rail);
       attention.dispose();
       host.replaceChildren();
       host.hidden = true;

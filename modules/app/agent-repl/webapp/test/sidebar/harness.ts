@@ -36,8 +36,8 @@ import { createAgentReplClient } from "../../src/rpc/client.js";
 import { type AppContext } from "../../src/rpc/context.js";
 import { testAppContext } from "../rpc/app-context.js";
 import { AttentionRegistry, type BlinkTimers } from "../../src/sidebar/attention.js";
-import type { SidebarContext } from "../../src/sidebar/context.js";
-import { createSidebarView, type SidebarView } from "../../src/sidebar/view.js";
+import type { RailContext, SidebarContext } from "../../src/sidebar/context.js";
+import { createSidebarView, type DrawnView, type SidebarView } from "../../src/sidebar/view.js";
 import { createDropdowns } from "../../src/sidebar/dropdowns.js";
 import { createRowHover } from "../../src/sidebar/row-hover.js";
 
@@ -129,19 +129,31 @@ export function appContext(impl: Partial<ServiceImpl<typeof AgentRepl>> = {}, ti
   });
 }
 
-/** A SidebarContext over CTX, with a fresh view and no ask in flight. */
+/**
+ * A context over CTX, with a fresh view and no ask in flight, that serves both
+ * as a rail's (`RailContext`, what the roster drawer takes) and as one drawn
+ * section's (`SidebarContext`, what a section or row draws through). As the
+ * latter, its copies of the view are one scope's and its teardowns are kept
+ * in `disposers` for the test to read.
+ */
 export function sidebarContext(
   ctx: AppContext = appContext(),
   timers: BlinkTimers = fakeTimers(),
   view: SidebarView = createSidebarView(),
   openDetails: Set<string> = new Set(),
-): SidebarContext & { disposers: Array<() => void> } {
+): SidebarContext & RailContext & { view: DrawnView & SidebarView; attention: AttentionRegistry; disposers: Array<() => void> } {
   const disposers: Array<() => void> = [];
   const dropdowns = createDropdowns();
+  const own = view.scope();
   return {
     ctx,
     parentWorkspace: () => ctx.workspace,
-    view,
+    view: {
+      track: (key, wire, paint) => own.track(key, wire, paint),
+      ask: (key, value) => view.ask(key, value),
+      abandon: (key, token) => view.abandon(key, token),
+      scope: () => view.scope(),
+    },
     openDetails,
     drawnStatus: createDrawnStatusLog("sidebar row", "sidebar.drawn-status"),
     dropdowns,

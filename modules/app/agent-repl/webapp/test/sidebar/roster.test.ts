@@ -17,6 +17,8 @@ import { SetWorkspaceHiddenResponseSchema } from "../../../proto/gen/ts/agentrep
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { repoFoldKey } from "../../src/sidebar/context.js";
 import {
+  createRosterDrawer,
+  disposeWorkspaceRoster,
   drawFoldHeader,
   drawHeadedSection,
   drawRosterRepoDivergence,
@@ -1435,3 +1437,183 @@ describe("the open workspaces section", () => {
     expect(() => drawWorkspaceRoster(bare, sidebarContext())).toThrow(MalformedView);
   });
 });
+
+describe("the roster drawer: a push redraws only what it changed", () => {
+  /** A repository section whose one row counts a running turn, so it ticks. */
+  const ticking = (id: string, label = id): ReturnType<typeof repoSection> =>
+    repoSection({ id, label, rows: [row({ id: `ws-${id}`, when: { case: "turnRunning", value: { startedAtMs: BigInt(NOW) } } })] });
+
+  /** The element of repository ID's section. */
+  const repoElement = (drawn: HTMLElement, id: string): Element | null =>
+    drawn.querySelector(`[data-roster-row='ws-${id}']`)?.closest(".sb-sections > *") ?? null;
+
+  it("keeps a repository section the push leaves unchanged", () => {
+    // Arrange
+    const sc = sidebarContext();
+    const drawer = createRosterDrawer(sc);
+    const first = drawer.draw(roster({ repos: [ticking("a"), ticking("b")] }));
+    const before = repoElement(first, "a");
+
+    // Act
+    const second = drawer.draw(roster({ repos: [ticking("a"), ticking("b", "b renamed")] }));
+
+    // Assert
+    expect(repoElement(second, "a")).toBe(before);
+  });
+
+  it("redraws a repository section the push changed", () => {
+    // Arrange
+    const sc = sidebarContext();
+    const drawer = createRosterDrawer(sc);
+    const before = repoElement(drawer.draw(roster({ repos: [ticking("a")] })), "a");
+
+    // Act
+    const after = repoElement(drawer.draw(roster({ repos: [ticking("a", "a renamed")] })), "a");
+
+    // Assert
+    expect([after === before, after?.textContent?.includes("a renamed")]).toEqual([false, true]);
+  });
+
+  it("tears down a changed section's clocks with its old drawing", () => {
+    // Arrange
+    const ticker = fakeTicker();
+    const sc = sidebarContext(appContext(undefined, ticker));
+    const drawer = createRosterDrawer(sc);
+    drawer.draw(roster({ repos: [ticking("a")] }));
+    const drawnOnce = ticker.subscribers();
+
+    // Act
+    drawer.draw(roster({ repos: [ticking("a", "a renamed")] }));
+
+    // Assert
+    expect(ticker.subscribers()).toBe(drawnOnce);
+  });
+
+  it("tears down a section the push no longer carries", () => {
+    // Arrange
+    const ticker = fakeTicker();
+    const sc = sidebarContext(appContext(undefined, ticker));
+    const drawer = createRosterDrawer(sc);
+    drawer.draw(roster({ repos: [ticking("a")] }));
+    const withA = ticker.subscribers();
+    drawer.draw(roster({ repos: [ticking("a"), ticking("b")] }));
+
+    // Act
+    const drawn = drawer.draw(roster({ repos: [ticking("a")] }));
+
+    // Assert
+    expect([ticker.subscribers(), drawn.querySelector("[data-roster-row='ws-b']")]).toEqual([withA, null]);
+  });
+
+  it("places kept sections in the push's order", () => {
+    // Arrange
+    const drawer = createRosterDrawer(sidebarContext());
+    drawer.draw(roster({ repos: [ticking("a"), ticking("b")] }));
+
+    // Act
+    const drawn = drawer.draw(roster({ repos: [ticking("b"), ticking("a")] }));
+
+    // Assert
+    expect([...drawn.querySelectorAll("[data-roster-row]")].map((el) => el.getAttribute("data-roster-row"))).toEqual([
+      "ws-b",
+      "ws-a",
+    ]);
+  });
+
+  it("keeps the repository sections when only the open section's heading changes", () => {
+    // Arrange
+    const drawer = createRosterDrawer(sidebarContext());
+    const before = repoElement(drawer.draw(roster({ repos: [ticking("a")], openCount: 1 })), "a");
+
+    // Act
+    const drawn = drawer.draw(roster({ repos: [ticking("a")], openCount: 2 }));
+
+    // Assert
+    expect([repoElement(drawn, "a"), drawn.querySelector(`.${OPEN_COUNT_CLASS}`)?.textContent]).toEqual([before, "(2)"]);
+  });
+
+  it("keeps the recently-merged band the push leaves unchanged", () => {
+    // Arrange
+    const band = mergedSection([row({ id: "ws-m", when: { case: "merged", value: { atMs: BigInt(NOW) } } })], 1, false);
+    const drawer = createRosterDrawer(sidebarContext());
+    const before = drawer.draw(roster({ merged: band })).querySelector("[data-roster-row='ws-m']");
+
+    // Act
+    const after = drawer.draw(roster({ merged: band, repos: [ticking("a")] })).querySelector("[data-roster-row='ws-m']");
+
+    // Assert
+    expect(after).toBe(before);
+  });
+
+  it("keeps the hidden band the push leaves unchanged", () => {
+    // Arrange
+    const band = hiddenSection([row({ id: "ws-h" })]);
+    const drawer = createRosterDrawer(sidebarContext());
+    const before = drawer.draw(roster({ hidden: band })).querySelector("[data-roster-row='ws-h']");
+
+    // Act
+    const after = drawer.draw(roster({ hidden: band, repos: [ticking("a")] })).querySelector("[data-roster-row='ws-h']");
+
+    // Assert
+    expect(after).toBe(before);
+  });
+
+  it("keeps a kept section's attention marker alive across the pass", () => {
+    // Arrange
+    const sc = sidebarContext();
+    const attention = sc.attention;
+    const drawer = createRosterDrawer(sc);
+    const marked = repoSection({ id: "a", rows: [row({ id: "ws-a", attention: true })] });
+    attention.beginPass();
+    drawer.draw(roster({ repos: [marked] }));
+    attention.endPass();
+
+    // Act
+    attention.beginPass();
+    drawer.draw(roster({ repos: [marked, ticking("b")] }));
+    attention.endPass();
+
+    // Assert
+    expect(attention.stateOf("ws-a")).not.toBeNull();
+  });
+
+  it("refuses a push naming one repository twice as a malformed view", () => {
+    // Arrange
+    const drawer = createRosterDrawer(sidebarContext());
+
+    // Act
+    const draw = (): HTMLElement => drawer.draw(roster({ repos: [ticking("a"), ticking("a", "again")] }));
+
+    // Assert
+    expect(draw).toThrow(MalformedView);
+  });
+
+  it("tears down every section when the rail is disposed", () => {
+    // Arrange
+    const ticker = fakeTicker();
+    const sc = sidebarContext(appContext(undefined, ticker));
+    const drawer = createRosterDrawer(sc);
+    drawer.draw(roster({ repos: [ticking("a"), ticking("b")] }));
+
+    // Act
+    drawer.dispose();
+
+    // Assert
+    expect(ticker.subscribers()).toBe(0);
+  });
+
+  it("gives each rail its own drawer, disposed with it", () => {
+    // Arrange
+    const ticker = fakeTicker();
+    const sc = sidebarContext(appContext(undefined, ticker));
+    const before = repoElement(drawWorkspaceRoster(roster({ repos: [ticking("a")] }), sc), "a");
+
+    // Act
+    disposeWorkspaceRoster(sc);
+    const after = repoElement(drawWorkspaceRoster(roster({ repos: [ticking("a")] }), sc), "a");
+
+    // Assert
+    expect([after === before, ticker.subscribers()]).toEqual([false, 1]);
+  });
+});
+

@@ -52,9 +52,10 @@ describe("the row hover gesture", () => {
     return copy;
   }
 
-  /** Throw the drawing away and draw ID's row again, as a roster push does. */
+  /** Throw OLD's drawing away and draw ID's row again, as a push changing its section does. */
   function redraw(id: string, old: DrawnRow): DrawnRow {
-    hover.beginDraw();
+    hover.forgetWithin(old.ws);
+    dropdowns.forgetWithin(old.ws);
     old.ws.remove();
     return draw(id);
   }
@@ -63,6 +64,29 @@ describe("the row hover gesture", () => {
   function openByHover(id: string): void {
     hover.enter(id, "trigger");
   }
+
+  describe("forgetting a thrown-away drawing", () => {
+    it("opens no copy drawn under the drawing thrown away", () => {
+      // ARRANGE
+      const gone = draw("ws-1");
+      hover.forgetWithin(gone.ws);
+      // ACT
+      openByHover("ws-1");
+      // ASSERT
+      expect(isOpen(gone)).toBe(false);
+    });
+
+    it("still opens a copy drawn outside the drawing thrown away", () => {
+      // ARRANGE
+      const gone = draw("ws-1");
+      const kept = draw("ws-1");
+      hover.forgetWithin(gone.ws);
+      // ACT
+      openByHover("ws-1");
+      // ASSERT
+      expect(isOpen(kept)).toBe(true);
+    });
+  });
 
   describe("opening", () => {
     it("opens every drawn copy the moment the pointer reaches the trigger", () => {
@@ -312,7 +336,6 @@ describe("the row hover gesture", () => {
       // ARRANGE
       const old = draw("ws-1");
       openByHover("ws-1");
-      dropdowns.beginDraw();
       const fresh = redraw("ws-1", old);
       // ACT
       dropdowns.dismissOutside(document.body);

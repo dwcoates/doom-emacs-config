@@ -10,7 +10,15 @@ import { type AppContext } from "../../src/rpc/context.js";
 import { testAppContext } from "../rpc/app-context.js";
 import { UpdateSidebarViewResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import type { ServiceImpl } from "@connectrpc/connect";
-import { PREFS_KEY, drawRailHead, mountSidebar, mountWebhostSidebar, retireStoredPrefs } from "../../src/sidebar/sidebar.js";
+import {
+  PREFS_KEY,
+  drawRailHead,
+  mountSidebar as mountSidebarNow,
+  mountWebhostSidebar as mountWebhostSidebarNow,
+  retireStoredPrefs,
+  type SidebarDeps,
+  type WebhostSidebarDeps,
+} from "../../src/sidebar/sidebar.js";
 import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { createRailSearch } from "../../src/sidebar/search.js";
 import { HOVER_CLOSE_GRACE_MS } from "../../src/sidebar/row-hover.js";
@@ -33,7 +41,7 @@ import {
   rosterStream,
   row,
 } from "./harness.js";
-import { frameQueue } from "../frame-queue.js";
+import { frameQueue, type FrameQueue } from "../frame-queue.js";
 
 /** A storage a test can inspect, and one that throws on every access. */
 function memoryStorage(seed: Record<string, string> = {}): Storage {
@@ -90,9 +98,31 @@ function ctxFor(rosters = [roster()], impl: Partial<ServiceImpl<typeof AgentRepl
   });
 }
 
-/** Let the stream deliver its pushes. */
+/** The rail's frames, where it draws each push; run by `settle`. */
+let frames: FrameQueue;
+
+beforeEach(() => {
+  frames = frameQueue();
+});
+
+/** Mount the rail drawing on the suite's frames. */
+function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDeps = {}): ReturnType<typeof mountSidebarNow> {
+  return mountSidebarNow(host, ctx, { frame: frames.frame, ...deps });
+}
+
+/** Mount the webhost's sidebar drawing on the suite's frames. */
+function mountWebhostSidebar(
+  host: HTMLElement,
+  ctx: Parameters<typeof mountWebhostSidebarNow>[1],
+  deps: WebhostSidebarDeps = {},
+): ReturnType<typeof mountWebhostSidebarNow> {
+  return mountWebhostSidebarNow(host, ctx, { frame: frames.frame, ...deps });
+}
+
+/** Let the stream deliver its pushes, and the rail draw them. */
 async function settle(): Promise<void> {
   await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
+  frames.drain();
 }
 
 async function click(control: Element): Promise<void> {
@@ -266,8 +296,9 @@ function loopAnimation(duration: number): PhasedAnimation {
 }
 
 describe("mounting the rail: its looping animations", () => {
-  it("seeks the drawn rail's loops to the wall clock after every push", async () => {
-    // Arrange: each push draws a fresh dot, whose animation starts at 0%.
+  it("seeks the drawn rail's loops to the wall clock after every draw", async () => {
+    // Arrange: each draw makes a fresh dot, whose animation starts at 0%, and
+    // a frame per push draws each push on its own.
     const drawn: PhasedAnimation[] = [];
     const host = document.createElement("nav");
 
@@ -275,6 +306,7 @@ describe("mounting the rail: its looping animations", () => {
     mountSidebar(host, ctxFor([roster({ current: "ws-other" }), roster({ current: WORKSPACE.id })]), {
       storage: null,
       timers: fakeTimers(),
+      frame: (callback) => callback(),
       wallPhase: {
         animations: () => {
           const dot = loopAnimation(1300);
@@ -878,6 +910,7 @@ describe("mounting the rail: a page no one can see", () => {
 
     // Act
     unseen.show();
+    await settle();
 
     // Assert
     expect([
@@ -1092,5 +1125,92 @@ describe("the rail under a paused merge queue", () => {
       false,
       true,
     ]);
+  });
+});
+
+describe("mounting the rail: one draw per frame", () => {
+  /** Mount on a two-push stream, counting the rail's draws. */
+  async function mountCounting(host: HTMLElement, deps: SidebarDeps = {}): Promise<{ draws: () => number; handle: ReturnType<typeof mountSidebarNow> }> {
+    let draws = 0;
+    const handle = mountSidebar(
+      host,
+      ctxFor([
+        roster({ current: "ws-other", repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-1" })] })] }),
+        roster({ current: "ws-other", repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-2" })] })] }),
+      ]),
+      {
+        storage: null,
+        timers: fakeTimers(),
+        wallPhase: {
+          animations: () => {
+            draws += 1;
+            return [];
+          },
+          now: () => NOW,
+        },
+        ...deps,
+      },
+    );
+    await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
+    return { draws: () => draws, handle };
+  }
+
+  it("draws nothing before the frame", async () => {
+    // Arrange
+    const host = document.createElement("nav");
+
+    // Act
+    const { draws } = await mountCounting(host);
+
+    // Assert
+    expect([draws(), host.querySelector("[data-roster-row]")]).toEqual([0, null]);
+  });
+
+  it("draws a burst of pushes once, at the frame", async () => {
+    // Arrange
+    const host = document.createElement("nav");
+    const { draws } = await mountCounting(host);
+
+    // Act
+    frames.drain();
+
+    // Assert
+    expect(draws()).toBe(1);
+  });
+
+  it("draws the newest push of the burst", async () => {
+    // Arrange
+    const host = document.createElement("nav");
+    await mountCounting(host);
+
+    // Act
+    frames.drain();
+
+    // Assert
+    expect([
+      host.querySelector("[data-roster-row='ws-1']"),
+      host.querySelector("[data-roster-row='ws-2']") === null,
+    ]).toEqual([null, false]);
+  });
+
+  it("asks for one frame for the whole burst", async () => {
+    // Act
+    await mountCounting(document.createElement("nav"));
+
+    // Assert
+    expect(frames.asked()).toBe(1);
+  });
+
+  it("draws nothing at a frame that comes after the rail is disposed", async () => {
+    // Arrange
+    const host = document.createElement("nav");
+    const { draws, handle } = await mountCounting(host);
+
+    // Act
+    handle?.dispose();
+    frames.drain();
+
+    // Assert
+    expect([draws(), host.querySelector("[data-roster-row]")]).toEqual([0, null]);
   });
 });
