@@ -282,7 +282,6 @@ func TestAnUnownedSpoolIsAttributedOnceItsOwnerAppears(t *testing.T) {
 			t.Errorf("a spool that was claimed inside its window still had bytes classified as residue: %v", r.Context)
 		}
 	}
-	requireNoResidueStored(t, fake.Entries())
 }
 
 // TestAnUnclassifiableSpoolPrefixIsRefusedLoudly asserts a task id with no

@@ -115,7 +115,7 @@ func TestATaskStopForATaskNoLaunchOpenedIsClassifiedWholeAndLoudly(t *testing.T)
 	if key, ok := rec.Context["upsert_key"]; ok && key != "" {
 		t.Errorf("the withholding record names upsert_key %v; a withheld stop announces no row", key)
 	}
-	requireNoResidueStored(t, fake.Entries())
+	fake.awaitResidueShape(ctx, t, "vendor_specific/task_stop/unlaunched")
 	// …and said so.
 	awaitLog(ctx, t, opts.LogPath, "the unlaunched-stop warning", func(r logRecord) bool {
 		return r.Level == "warn" && r.Operation == "task-stop" && r.Context["task_id"] == unlaunched

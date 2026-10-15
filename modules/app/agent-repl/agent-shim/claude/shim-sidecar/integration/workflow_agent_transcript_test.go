@@ -68,9 +68,9 @@ func TestAWorkflowPerAgentTranscriptIsClassifiedAsDeclaredWorkflowResidue(t *tes
 			t.Errorf("a workflow per-agent transcript record failed to parse")
 		}
 	}
-	// ...none of it was persisted, because residue never is...
+	// ...its shape reached the store, the one trace a withheld record leaves...
+	fake.awaitResidueShape(ctx, t, "vendor_specific/workflow/agent_transcript")
 	entries := fake.Entries()
-	requireNoResidueStored(t, entries)
 	// ...and none of it reached a page, because a kicked kind is unservable.
 	if n := len(pageLinesOf(entries)); n != 0 {
 		t.Errorf("a workflow per-agent transcript produced %d page line(s) while workflow is kicked", n)

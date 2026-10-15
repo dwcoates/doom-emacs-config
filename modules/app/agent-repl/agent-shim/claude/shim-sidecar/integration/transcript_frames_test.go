@@ -286,7 +286,6 @@ func TestCapturedTranscriptLandsNothingAsUnparsed(t *testing.T) {
 	if containsString(labels, "unparsed") {
 		t.Fatalf("a real capture produced unparsed residue; a recognizable kind reaching residue is a producer defect. Withheld: %v", labels)
 	}
-	requireNoResidueStored(t, fake.Entries())
 }
 
 // TestCapturedTranscriptLandsNothingAsUnknown asserts the allow-list is EMPTY:
@@ -323,7 +322,6 @@ func TestCapturedTranscriptLandsNothingAsUnknown(t *testing.T) {
 	if len(got) != 0 {
 		t.Fatalf("the allowed `unknown` set is empty; the capture produced %v", sortedStrings(got))
 	}
-	requireNoResidueStored(t, fake.Entries())
 }
 
 // TestEveryWriteCarriesTheFilePlaneEnvelope asserts the producer's envelope
@@ -485,8 +483,8 @@ func TestWithheldMachineryNeverReachesAPage(t *testing.T) {
 	// a last-prompt record) are withheld, and nothing modeled joined them.
 	for _, want := range []string{"queue-operation", "last-prompt"} {
 		awaitResidueWithheld(ctx, t, opts.LogPath, "vendor_specific/"+want)
+		fake.awaitResidueShape(ctx, t, "vendor_specific/"+want)
 	}
-	requireNoResidueStored(t, fake.Entries())
 	for _, line := range linesForBook(fake.Entries(), captured.Session) {
 		if frameOf(line) == nil && line.GetAgentItem().GetAgentPrompt() == nil {
 			t.Errorf("a page line carries neither a frame nor a prompt: %v", line)
@@ -520,7 +518,7 @@ func TestFilePlaneUserPromptIsWithheldRatherThanServed(t *testing.T) {
 	// Assert.
 	awaitResidueWithheld(ctx, t, opts.LogPath, "vendor_specific/"+vendorSpecificUserPrompt)
 	entries := fake.Entries()
-	requireNoResidueStored(t, entries)
+	fake.awaitResidueShape(ctx, t, "vendor_specific/"+vendorSpecificUserPrompt)
 	for _, line := range pageLinesOf(entries) {
 		if line.GetAgentItem().GetAgentPrompt() != nil {
 			t.Errorf("the file plane minted an AgentPrompt page line, which is the shim's alone: %v", line)
@@ -794,6 +792,6 @@ func TestUnmodeledAttachmentsAreWithheldAsVendorSpecific(t *testing.T) {
 	// agent_listing_delta, neither of which this contract models.
 	for _, want := range []string{"attachment/deferred_tools_delta", "attachment/agent_listing_delta"} {
 		awaitResidueWithheld(ctx, t, opts.LogPath, "vendor_specific/"+want)
+		fake.awaitResidueShape(ctx, t, "vendor_specific/"+want)
 	}
-	requireNoResidueStored(t, fake.Entries())
 }

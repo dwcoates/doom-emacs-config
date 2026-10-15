@@ -59,7 +59,7 @@ func TestAWithheldRecordIsClassifiedByItsVendorKind(t *testing.T) {
 
 	// Assert: the reader named the vendor's own kind, and stored nothing for it.
 	awaitResidueWithheld(ctx, t, opts.LogPath, "vendor_specific/system/local_command")
-	requireNoResidueStored(t, fake.Entries())
+	fake.awaitResidueShape(ctx, t, "vendor_specific/system/local_command")
 	// The record reached no row AT ALL — not a page line and not an unserved
 	// one — so nothing anywhere in the store names it.
 	for _, e := range fake.Entries() {
@@ -104,7 +104,7 @@ func TestAnUnparsableLineIsClassifiedAgainstItsFile(t *testing.T) {
 	if got, want := rec.Context["file_id"], fileID(t, g.Path()); got != want {
 		t.Errorf("the withheld unparsed record names file_id %v, wanted the file it was read from %q", got, want)
 	}
-	requireNoResidueStored(t, fake.Entries())
+	fake.awaitResidueShape(ctx, t, "unparsed")
 }
 
 // TestTheTwoResiduePopulationsStayDistinct asserts what the two key spaces
@@ -141,8 +141,8 @@ func TestTheTwoResiduePopulationsStayDistinct(t *testing.T) {
 	// Assert.
 	for _, label := range []string{"vendor_specific/system/local_command", "unparsed"} {
 		awaitResidueWithheld(ctx, t, opts.LogPath, label)
+		fake.awaitResidueShape(ctx, t, label)
 	}
-	requireNoResidueStored(t, fake.Entries())
 }
 
 // TestWithheldResidueAnnouncesNoRow asserts residue attributes itself to
@@ -174,5 +174,5 @@ func TestWithheldResidueAnnouncesNoRow(t *testing.T) {
 	if key, ok := rec.Context["upsert_key"]; ok && key != "" {
 		t.Errorf("the withholding record names upsert_key %v; it announces no row, and a key nobody can look up is untraceable", key)
 	}
-	requireNoResidueStored(t, fake.Entries())
+	fake.awaitResidueShape(ctx, t, "unparsed")
 }

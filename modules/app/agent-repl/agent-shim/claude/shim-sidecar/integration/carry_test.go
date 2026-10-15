@@ -61,8 +61,8 @@ func TestATranscriptLineSplitAcrossThreePollsConvertsOnceAndWhole(t *testing.T) 
 		t.Fatalf("the split record produced %d entries for unit %q, wanted exactly one; keys were %v",
 			n, capturedThinking1, upsertKeysOf(entries))
 	}
-	if got := unparsedOf(entries); len(got) != 0 {
-		t.Errorf("a line cut across polls landed as unparsed residue: %v", got)
+	if got := withheldShapesOf(fake.Batches(), "unparsed"); len(got) != 0 {
+		t.Errorf("a line cut across polls was withheld as unparsed residue: %v", got)
 	}
 }
 
@@ -147,7 +147,7 @@ func TestASeededCarryIsResumedFromTheStoreOnBoot(t *testing.T) {
 		t.Fatalf("a boot onto a seeded carry produced %d entries for unit %q, wanted exactly one; keys were %v",
 			n, capturedThinking1, upsertKeysOf(entries))
 	}
-	if got := unparsedOf(entries); len(got) != 0 {
-		t.Errorf("the seeded carry was not prepended to the bytes read: %v", got)
+	if got := withheldShapesOf(fake.Batches(), "unparsed"); len(got) != 0 {
+		t.Errorf("the seeded carry was not prepended to the bytes read; a fragment was withheld as unparsed: %v", got)
 	}
 }

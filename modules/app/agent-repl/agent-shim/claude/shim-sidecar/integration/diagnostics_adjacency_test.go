@@ -113,7 +113,7 @@ func TestDiagnosticsWithNoObservedChangeAreKeptWholeRatherThanGuessed(t *testing
 
 	// Assert.
 	awaitResidueWithheld(ctx, t, opts.LogPath, "vendor_specific/attachment/diagnostics")
-	requireNoResidueStored(t, fake.Entries())
+	fake.awaitResidueShape(ctx, t, "vendor_specific/attachment/diagnostics")
 	for _, line := range pageLinesOf(fake.Entries()) {
 		a := activityOf(line)
 		if a.GetWrite().GetDiagnostics() != nil || a.GetEdit().GetDiagnostics() != nil {

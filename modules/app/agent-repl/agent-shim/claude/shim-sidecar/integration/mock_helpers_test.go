@@ -1241,15 +1241,21 @@ var (
 // converter had simply stopped performing.
 const orphanToolResultKind = "orphan_tool_result"
 
+// errorReporter is the part of testing.T a residue guard reports through, so
+// a self-test can prove the guard fails.
+type errorReporter interface {
+	Helper()
+	Errorf(format string, args ...any)
+}
+
 // requireNoOrphanToolResults: every tool_result the mock writes must settle the
-// call it answers.
-func requireNoOrphanToolResults(t *testing.T, scenario string, entries []*storev1.StoreEntry) {
+// call it answers. An orphan is withheld as residue, so its trace is the
+// shape observation the sidecar sends in its place.
+func requireNoOrphanToolResults(t errorReporter, scenario string, batches []*storev1.WriteBatchRequest) {
 	t.Helper()
-	for _, v := range vendorSpecificOf(entries) {
-		if v.GetKind() == orphanToolResultKind {
-			t.Errorf("%s: a tool_result landed as %q — its call was never joined, so that unit stays open in every reader downstream: %v",
-				scenario, orphanToolResultKind, v.GetRaw().AsMap())
-		}
+	for _, shape := range withheldShapesOf(batches, "vendor_specific/"+orphanToolResultKind) {
+		t.Errorf("%s: a tool_result was withheld as %q — its call was never joined, so that unit stays open in every reader downstream: %s",
+			scenario, orphanToolResultKind, shape.GetFirstExample())
 	}
 }
 
@@ -1268,11 +1274,10 @@ func vendorSpecificKindAllowed(kind string) bool {
 // requireNoUnparsedResidue: NOTHING the mocked vendor writes may fail to parse.
 // `unparsed` is the reader's last resort for bytes that are not JSON at all, and
 // the mock writes JSON lines exclusively.
-func requireNoUnparsedResidue(t *testing.T, scenario string, entries []*storev1.StoreEntry) {
+func requireNoUnparsedResidue(t errorReporter, scenario string, batches []*storev1.WriteBatchRequest) {
 	t.Helper()
-	for _, u := range unparsedOf(entries) {
-		t.Errorf("%s: the sidecar could not PARSE a line the mocked vendor wrote: source=%q offset=%d error=%q",
-			scenario, u.GetSource(), u.GetOffset(), u.GetParseError())
+	for _, shape := range withheldShapesOf(batches, "unparsed") {
+		t.Errorf("%s: the sidecar could not PARSE a line the mocked vendor wrote: %q", scenario, shape.GetFirstExample())
 	}
 }
 
@@ -1280,20 +1285,20 @@ func requireNoUnparsedResidue(t *testing.T, scenario string, entries []*storev1.
 // converter models or deliberately withholds. An `unknown` is the converter
 // saying it parsed a record and does not know what it is — for a scenario built
 // from the corpus that is a producer defect by definition.
-func requireNoUnknownResidue(t *testing.T, scenario string, entries []*storev1.StoreEntry) {
+func requireNoUnknownResidue(t errorReporter, scenario string, batches []*storev1.WriteBatchRequest) {
 	t.Helper()
-	for _, u := range unknownsOf(entries) {
-		t.Errorf("%s: the sidecar parsed a record it does not model: field=%q discriminator=%q",
-			scenario, u.GetDiscriminatorField(), u.GetDiscriminator())
+	for _, shape := range withheldShapesOf(batches, "unknown/") {
+		t.Errorf("%s: the sidecar parsed a record it does not model: %s (example %s)", scenario, shape.GetKind(), shape.GetFirstExample())
 	}
 }
 
 // requireDocumentedVendorSpecificKinds: withholding is deliberate and its
 // classes are enumerated. A kind outside the documented set means the converter
 // withheld something nobody decided to withhold.
-func requireDocumentedVendorSpecificKinds(t *testing.T, scenario string, entries []*storev1.StoreEntry) {
+func requireDocumentedVendorSpecificKinds(t errorReporter, scenario string, batches []*storev1.WriteBatchRequest) {
 	t.Helper()
-	for _, kind := range vendorSpecificKinds(entries) {
+	for _, shape := range withheldShapesOf(batches, "vendor_specific/") {
+		kind := strings.TrimPrefix(shape.GetKind(), "vendor_specific/")
 		if !vendorSpecificKindAllowed(kind) {
 			t.Errorf("%s: vendor_specific kind %q is outside the documented withholding classes", scenario, kind)
 		}
@@ -1635,5 +1640,53 @@ func requireNoSettledShellForMovedWork(t *testing.T, scenario string, entries []
 	}
 	if started == 0 {
 		t.Errorf("%s: no shell START reached a page line, so the negative above asserts nothing", scenario)
+	}
+}
+
+// recordingReporter is an errorReporter that keeps what it was told.
+type recordingReporter struct{ errors []string }
+
+func (r *recordingReporter) Helper() {}
+func (r *recordingReporter) Errorf(format string, args ...any) {
+	r.errors = append(r.errors, fmt.Sprintf(format, args...))
+}
+
+// batchWithShapes is a recorded batch carrying shape observations of KINDS.
+func batchWithShapes(kinds ...string) []*storev1.WriteBatchRequest {
+	b := &storev1.WriteBatchRequest{}
+	for _, kind := range kinds {
+		b.Shapes = append(b.Shapes, &storev1.ShapeObservation{Kind: kind, FirstExample: []byte(`{"k":1}`)})
+	}
+	return []*storev1.WriteBatchRequest{b}
+}
+
+func TestTheMockResidueGuardsReadTheShapesSent(t *testing.T) {
+	tests := []struct {
+		name  string
+		guard func(errorReporter, string, []*storev1.WriteBatchRequest)
+		kind  string
+		fails bool
+	}{
+		{"an unparsed shape fails the unparsed guard", requireNoUnparsedResidue, "unparsed", true},
+		{"a vendor_specific shape passes the unparsed guard", requireNoUnparsedResidue, "vendor_specific/queue-operation", false},
+		{"an unknown shape fails the unknown guard", requireNoUnknownResidue, "unknown/type:mystery", true},
+		{"an unparsed shape passes the unknown guard", requireNoUnknownResidue, "unparsed", false},
+		{"an undocumented vendor_specific kind fails the documented-kinds guard", requireDocumentedVendorSpecificKinds, "vendor_specific/nobody-decided-this", true},
+		{"an orphan tool_result fails the orphan guard", requireNoOrphanToolResults, "vendor_specific/" + orphanToolResultKind, true},
+		{"another vendor_specific kind passes the orphan guard", requireNoOrphanToolResults, "vendor_specific/queue-operation", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			r := &recordingReporter{}
+
+			// Act.
+			tt.guard(r, "scenario", batchWithShapes(tt.kind))
+
+			// Assert.
+			if failed := len(r.errors) > 0; failed != tt.fails {
+				t.Fatalf("guard over a %q shape failed = %v (%v), want %v", tt.kind, failed, r.errors, tt.fails)
+			}
+		})
 	}
 }

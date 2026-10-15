@@ -54,6 +54,7 @@ func TestAWorkflowJournalIsClassifiedAsDeclaredResidueAndReachesNoPage(t *testin
 	// declared kind and withheld...
 	for _, want := range []string{"vendor_specific/workflow_journal/started", "vendor_specific/workflow_journal/result"} {
 		awaitResidueWithheld(ctx, t, opts.LogPath, want)
+		fake.awaitResidueShape(ctx, t, want)
 	}
 	// ...nothing failed to parse or fell to `unknown`, which would mean the
 	// records were being classified rather than deliberately held...
@@ -62,9 +63,7 @@ func TestAWorkflowJournalIsClassifiedAsDeclaredResidueAndReachesNoPage(t *testin
 			t.Errorf("the journal produced residue %q; both of the capture's record types are declared shapes", label)
 		}
 	}
-	// ...none of it was persisted, because residue never is...
 	entries := fake.Entries()
-	requireNoResidueStored(t, entries)
 	// ...and none of it reached a page.
 	if n := len(pageLinesOf(entries)); n != 0 {
 		t.Errorf("a workflow journal produced %d page line(s) while workflow is kicked", n)
