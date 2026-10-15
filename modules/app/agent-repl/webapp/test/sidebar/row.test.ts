@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { captureLogRecords, forwardedRecord, type LogCapture } from "../log-capture.js";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
@@ -18,6 +20,7 @@ import {
   returnFromBand,
   type BandReturn,
   drawRosterRowStandIn,
+  appendRowKids,
   STAND_IN_ATTRIBUTE,
   drawRosterRowOneShot,
   drawRosterRowAsyncMerging,
@@ -2205,6 +2208,60 @@ describe("drawRosterRowStandIn", () => {
 
     // Act / Assert
     expect(() => drawRosterRowStandIn(bad, "row")).toThrow(MalformedView);
+  });
+});
+
+describe("appendRowKids", () => {
+  it("draws each visible child into one kids box, in order", () => {
+    // Arrange
+    const ws = document.createElement("div");
+    const parent = row({ id: "ws-1", children: [row({ id: "ws-2" }), row({ id: "ws-3" })] });
+
+    // Act
+    appendRowKids(ws, parent, "row", (child) => drawRosterRowStandIn(child, "child"));
+
+    // Assert
+    expect([...ws.querySelectorAll(":scope > .kids > [data-roster-row]")].map((el) => el.getAttribute("data-roster-row"))).toEqual([
+      "ws-2",
+      "ws-3",
+    ]);
+  });
+
+  it("hands each child its path under the parent's", () => {
+    // Arrange
+    const paths: string[] = [];
+    const parent = row({ id: "ws-1", children: [row({ id: "ws-2" })] });
+
+    // Act
+    appendRowKids(document.createElement("div"), parent, "row", (child, childPath) => {
+      paths.push(childPath);
+      return document.createElement("div");
+    });
+
+    // Assert
+    expect(paths).toEqual(["row.children[0]"]);
+  });
+
+  it("draws no kids box for a row with no visible child", () => {
+    // Arrange
+    const ws = document.createElement("div");
+
+    // Act
+    appendRowKids(ws, row({ id: "ws-1" }), "row", () => document.createElement("div"));
+
+    // Assert
+    expect(ws.querySelector(".kids")).toBeNull();
+  });
+
+  it("is how both a drawn row and its stand-in nest their children", () => {
+    // Arrange
+    const source = readFileSync(join(__dirname, "../../src/sidebar/row.ts"), "utf8");
+
+    // Act
+    const handRolled = source.match(/kids\.className = "kids"/g) ?? [];
+
+    // Assert
+    expect(handRolled).toHaveLength(1);
   });
 });
 

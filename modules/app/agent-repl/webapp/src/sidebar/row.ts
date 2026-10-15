@@ -315,15 +315,7 @@ export function drawRosterRow(
   // the row into it without it closing.
   installHoverPanel(ws, line, duration, detail, sc, workspace.id);
 
-  const visibleChildren = expandVisibleRows(u.children, `${path}.children`);
-  if (visibleChildren.length > 0) {
-    const kids = document.createElement("div");
-    kids.className = "kids";
-    for (const child of visibleChildren) {
-      kids.appendChild(drawRosterRow(child.row, sc, child.path, place));
-    }
-    ws.appendChild(kids);
-  }
+  appendRowKids(ws, u, path, (child, childPath) => drawRosterRow(child, sc, childPath, place));
   return ws;
 }
 
@@ -351,14 +343,27 @@ export function drawRosterRowStandIn(u: RosterRow, path: string): HTMLElement {
   label.textContent = drawRosterRowName(requireMessage(u.name, `${path}.name`), `${path}.name`);
   line.appendChild(label);
   ws.appendChild(line);
-  const visibleChildren = expandVisibleRows(u.children, `${path}.children`);
-  if (visibleChildren.length > 0) {
-    const kids = document.createElement("div");
-    kids.className = "kids";
-    for (const child of visibleChildren) kids.appendChild(drawRosterRowStandIn(child.row, child.path));
-    ws.appendChild(kids);
-  }
+  appendRowKids(ws, u, path, drawRosterRowStandIn);
   return ws;
+}
+
+/**
+ * Append U's visible children to its box WS, each drawn by DRAW, in the one
+ * `.kids` box the search and the stylesheet look for a nested row in. A row
+ * with no visible child draws no box.
+ */
+export function appendRowKids(
+  ws: HTMLElement,
+  u: RosterRow,
+  path: string,
+  draw: (child: RosterRow, childPath: string) => HTMLElement,
+): void {
+  const visibleChildren = expandVisibleRows(u.children, `${path}.children`);
+  if (visibleChildren.length === 0) return;
+  const kids = document.createElement("div");
+  kids.className = "kids";
+  for (const child of visibleChildren) kids.appendChild(draw(child.row, child.path));
+  ws.appendChild(kids);
 }
 
 /**
