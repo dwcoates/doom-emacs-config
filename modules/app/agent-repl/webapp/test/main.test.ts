@@ -398,11 +398,13 @@ const COLD_BOOT_TIMEOUT_MS = 15_000;
 
 /**
  * ONE WARM BOOT: a fresh evaluation of the whole mocked graph plus its settle.
- * ~3x the 1.45s slowest warm test measured above. It is a per-site bound
- * rather than a raised global because nothing else in the unit suite imports
- * its subject at run time; the 850ms global stays sized for what it covers.
+ * Was 4.5s, ~3x the 1.45s slowest warm test measured above, until a full
+ * webapp run at a load average of ~85 (2026-10-14) saw one warm boot take
+ * 5.39s; 12s is ~2.2x that. It is a per-site bound rather than a raised
+ * global because nothing else in the unit suite imports its subject at run
+ * time; the 850ms global stays sized for what it covers.
  */
-const BOOT_TIMEOUT_MS = 4_500;
+const BOOT_TIMEOUT_MS = 12_000;
 beforeAll(async () => {
   arrangePage();
   try {

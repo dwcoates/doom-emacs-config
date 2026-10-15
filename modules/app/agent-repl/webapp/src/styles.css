@@ -29,9 +29,14 @@
      near-white #f9fafb, so a card lifts off the feed instead of melting into
      it, while staying above the composer well (--composer-bg) below it. */
   --card: #eef1f4;
-  /* The tool card's and the footer dock's fill. It is --card itself in this
-     theme; the dark theme sets its own (owner ruling, 2026-09-27). */
-  --tool-card-bg: var(--card);
+  /* The fill the response bubble (--assistant), the merge bubble and its tab
+     chrome, and the footer dock share. It is --card itself in this theme; the
+     dark theme sets its own (owner ruling, 2026-09-27). */
+  --panel-bg: var(--card);
+  /* The tool card's fill (Bash, Skill, Question, ...). It is --panel-bg in
+     this theme; the dark theme takes it its own step darker (owner request,
+     2026-10-14). */
+  --tool-card-bg: var(--panel-bg);
   /* The workspaces rail's fill: a touch LIGHTER than the feed (--bg), so the
      sidebar reads as a lifted dock rather than the same sheet the
      conversation scrolls on. In the light theme --bg is already pure white —
@@ -82,14 +87,16 @@
      the same step again (owner request, 2026-10-13, "just slightly
      darker"): #ccdfff -> #b8d2ff. */
   --user: #b8d2ff;
-  /* THE RESPONSE BUBBLE'S FILL IS THE TOOL CARD'S (owner ruling, 2026-10-11,
-     "a slightly darker background ... same color as the toolcard
-     backgrounds"): derived from --tool-card-bg rather than copied, so a
-     response and a tool card share one fill in either theme, and every state
-     a response passes through (in flight, interim, final, cut short) wears it.
-     Resolved where it is declared, on :root, so the dark theme's own
-     --tool-card-bg carries through without a dark override of this token. */
-  --assistant: var(--tool-card-bg);
+  /* THE RESPONSE BUBBLE'S FILL IS THE SHARED PANEL FILL (owner ruling,
+     2026-10-11, "a slightly darker background ... same color as the toolcard
+     backgrounds"; narrowed by owner request, 2026-10-14, when the dark
+     theme's tool cards stepped darker on their own while responses, notes and
+     merge bubbles kept this fill): derived from --panel-bg rather than
+     copied, so every state a response passes through (in flight, interim,
+     final, cut short) wears it. Resolved where it is declared, on :root, so
+     the dark theme's own --panel-bg carries through without a dark override
+     of this token. */
+  --assistant: var(--panel-bg);
   --accent: #2563eb;
   /* A link inside a blue prompt bubble. It is --accent in this theme; the dark
      theme's bright prompt blue swallows --accent, so it sets its own. */
@@ -442,11 +449,16 @@
     --merged-today-gutter: #ece8df;
     --border: #2a2e37;
     --card: #16191f;
-    /* The dark theme's tool card and footer dock (owner ruling, 2026-09-27):
-       a notch darker than --card, still lighter than the feed's #111318. The
+    /* The dark theme's shared panel fill (owner ruling, 2026-09-27): a notch
+       darker than --card, still lighter than the feed's #111318. The
        response bubble's --assistant is this same fill (owner ruling,
        2026-10-11). */
-    --tool-card-bg: #14171c;
+    --panel-bg: #14171c;
+    /* The dark theme's tool card, a touch darker than --panel-bg (owner
+       request, 2026-10-14, "halfway closer to the background color of the
+       feed"): each channel the midpoint of --panel-bg's #14171c and the
+       feed's #111318, rounded down, so a card still lifts off the feed. */
+    --tool-card-bg: #12151a;
     /* Lighter than the feed's #111318, darker than --card, so the rail lifts
        off the conversation while its --card hover/detail washes still lift
        off the rail. */
@@ -511,7 +523,7 @@
        the selected-entry ring still reads against the dark page. */
     --selected-entry: #60a5fa;
     /* A moderate grey a little lighter than the dark --assistant (the dark
-       --tool-card-bg, #14171c). */
+       --panel-bg, #14171c). */
     --selected-bubble-bg: #2c3039;
     /* True eggshell for the dark theme, as the other state borders lift. */
     --expanded-response-border: #f0ead6;
@@ -2505,6 +2517,12 @@ html[data-page-unshown] *::after {
 .tool-card.bubble-fold[data-merge-bubble][data-expanded="true"] {
   max-height: calc(var(--feed-item-max-h) * 0.45);
 }
+/* A MERGE BUBBLE KEEPS THE SHARED PANEL FILL (owner request, 2026-10-14):
+   it wears the tool-card shell, but when the dark theme's tool cards stepped
+   darker the merge bubble stayed on --panel-bg with the response bubble. */
+.tool-card.bubble-fold[data-merge-bubble] {
+  background: var(--panel-bg);
+}
 .bubble-fold[data-expanded="true"] > .bubble-head { flex: 0 0 auto; }
 .bubble-fold[data-expanded="true"] > .bubble-subfeed {
   flex: 0 1 auto;
@@ -3802,7 +3820,7 @@ html[data-page-unshown] *::after {
 .pfooter {
   max-width: var(--agent-bubble-cap);
   margin: 0 auto;
-  background: var(--tool-card-bg);
+  background: var(--panel-bg);
   border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: var(--sidebar-shadow);
@@ -7621,7 +7639,7 @@ ar-button.outcome-marker-pill {
   position: sticky;
   top: 0;
   z-index: 1;
-  background: var(--tool-card-bg);
+  background: var(--panel-bg);
 }
 .merge-tab {
   display: inline-flex;
@@ -7724,7 +7742,7 @@ ar-button.outcome-marker-pill {
   min-width: 8em;
   border: 1px solid var(--border);
   border-radius: var(--tab-radius);
-  background: var(--tool-card-bg);
+  background: var(--panel-bg);
   font-size: 0.85em;
 }
 ar-button.merge-run-view-item {

@@ -3453,7 +3453,7 @@ describe("themeRgbOf", () => {
   it.each([
     ["a hex the block declares", "--a: #010203;", "--a", [1, 2, 3]],
     ["a var() chain inside the block", "--a: var(--b); --b: var(--c); --c: #0a0b0c;", "--a", [10, 11, 12]],
-    ["a reference the block overrides", "--card: #102030;", "--tool-card-bg", [16, 32, 48]],
+    ["a reference the block overrides", "--card: #102030;", "--panel-bg", [16, 32, 48]],
   ] as const)("resolves %s", (_case, block, token, expected) => {
     // Arrange / Act
     const rgb = themeRgbOf(block, token);
@@ -3480,17 +3480,19 @@ describe("themeRgbOf", () => {
 });
 
 /**
- * THE RESPONSE BUBBLE'S FILL IS THE TOOL CARD'S (owner ruling, 2026-10-11):
- * `--assistant` is derived from `--tool-card-bg` once, on the light `:root`, so
- * the dark theme's card fill carries through without a copied override.
+ * THE RESPONSE BUBBLE'S FILL IS THE SHARED PANEL FILL (owner ruling,
+ * 2026-10-11, narrowed 2026-10-14): `--assistant` is derived from `--panel-bg`
+ * once, on the light `:root`, so the dark theme's panel fill carries through
+ * without a copied override, and the dark tool card's own darker step never
+ * reaches a response.
  */
 describe("the response bubble's fill", () => {
-  it("derives --assistant from --tool-card-bg on the light :root", () => {
+  it("derives --assistant from --panel-bg on the light :root", () => {
     // Arrange / Act
     const decls = withoutBlockComments(declarationsOf(":root") ?? "");
 
     // Assert
-    expect(decls).toMatch(/--assistant:\s*var\(--tool-card-bg\)\s*;/);
+    expect(decls).toMatch(/--assistant:\s*var\(--panel-bg\)\s*;/);
   });
 
   it("leaves --assistant unset in the dark theme so the derivation carries", () => {
@@ -3501,15 +3503,26 @@ describe("the response bubble's fill", () => {
     expect(decls).not.toMatch(/--assistant:/);
   });
 
-  it.each(THEME_BLOCKS)("matches the tool card's fill in the %s theme", (_theme, block) => {
+  it("matches the tool card's fill in the light theme", () => {
     // Arrange
-    const css = block();
+    const css = declarationsOf(":root") ?? "";
 
     // Act
     const [response, card] = [themeRgbOf(css, "--assistant"), themeRgbOf(css, "--tool-card-bg")];
 
     // Assert
     expect(response).toEqual(card);
+  });
+
+  it("keeps the dark theme's response on its pre-2026-10-14 fill while the tool card darkens", () => {
+    // Arrange
+    const css = darkThemeBlock();
+
+    // Act
+    const response = themeRgbOf(css, "--assistant");
+
+    // Assert
+    expect(response).toEqual([0x14, 0x17, 0x1c]);
   });
 
   it("is what a response bubble paints", () => {
@@ -3720,7 +3733,8 @@ describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
 
   it.each([
     ["the tool card sits lighter than the feed", "--bg", "--tool-card-bg"],
-    ["the tool card sits darker than the old card grey", "--tool-card-bg", "--card"],
+    ["the tool card sits darker than the shared panel fill", "--tool-card-bg", "--panel-bg"],
+    ["the shared panel fill sits darker than the old card grey", "--panel-bg", "--card"],
   ])("%s", (_name, darker, lighter) => {
     // Arrange
     const block = darkThemeBlock();
@@ -3745,13 +3759,31 @@ describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
     expect(Math.max(r, g, b) - Math.min(r, g, b)).toBeLessThanOrEqual(12);
   });
 
-  it.each([".tool-card", ".pfooter"])("fills %s with the tool-card token", (selector) => {
+  it("takes the tool card halfway from the shared panel fill to the feed (owner request, 2026-10-14)", () => {
+    // Arrange
+    const block = darkThemeBlock();
+    const [panel, feed] = [rgbOf(block, "--panel-bg"), rgbOf(block, "--bg")];
+
+    // Act
+    const card = rgbOf(block, "--tool-card-bg");
+
+    // Assert — each channel the midpoint, rounded down.
+    expect(card).toEqual(panel.map((c, i) => Math.floor((c + feed[i]) / 2)));
+  });
+
+  it.each([
+    [".tool-card", "--tool-card-bg"],
+    [".pfooter", "--panel-bg"],
+    [".tool-card.bubble-fold[data-merge-bubble]", "--panel-bg"],
+    [".merge-strip", "--panel-bg"],
+    [".merge-run-views", "--panel-bg"],
+  ])("fills %s with %s", (selector, token) => {
     // Arrange / Act
     const rule = rulesOf(stylesheet).find(
       (r) => r.selectors.includes(selector) && /(^|;)\s*background:/.test(r.declarations),
     );
     // Assert
-    expect(rule?.declarations).toMatch(/background:\s*var\(--tool-card-bg\)/);
+    expect(rule?.declarations).toMatch(new RegExp(`background:\\s*var\\(${token}\\)`));
   });
 });
 
