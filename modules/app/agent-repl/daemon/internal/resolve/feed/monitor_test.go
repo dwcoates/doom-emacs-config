@@ -6,6 +6,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	kinds "agent-repld/internal/detachedkindtest"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/sessionwatcher"
 )
@@ -182,7 +183,7 @@ func TestAMonitorsDetachmentKeepsItsCardRatherThanDrawingAShellHead(t *testing.T
 	h.send(monitorArmed("toolu_monitor", watchedCommand("tail -f build.log")))
 
 	// Act.
-	h.announceDetachment(mainAgent(), mainAgent(), "toolu_monitor", "toolu_monitor")
+	h.announceDetachment(mainAgent(), mainAgent(), "toolu_monitor", "toolu_monitor", kinds.Monitor())
 
 	// Assert.
 	if got := h.rowKinds(rootFeed()); len(got) != 1 || got[0] != "tool_card" {
@@ -193,7 +194,7 @@ func TestAMonitorsDetachmentKeepsItsCardRatherThanDrawingAShellHead(t *testing.T
 func TestADetachmentHeldBeforeAMonitorsCardDrawsFindsTheCard(t *testing.T) {
 	// Arrange: the announcement beats the call's own frame.
 	h := newHarness(t)
-	h.detachWork("toolu_monitor", "toolu_monitor")
+	h.detachWork("toolu_monitor", "toolu_monitor", kinds.Monitor())
 
 	// Act.
 	h.send(monitorArmed("toolu_monitor", watchedCommand("tail -f build.log")))
@@ -207,7 +208,7 @@ func TestADetachmentHeldBeforeAMonitorsCardDrawsFindsTheCard(t *testing.T) {
 func TestAHeldMonitorDetachmentIsNotReportedUnplaceableAtTheTurnsEnd(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	h.detachWork("toolu_monitor", "toolu_monitor")
+	h.detachWork("toolu_monitor", "toolu_monitor", kinds.Monitor())
 	h.send(monitorArmed("toolu_monitor", watchedCommand("tail -f build.log")))
 
 	// Act.

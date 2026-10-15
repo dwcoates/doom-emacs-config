@@ -9,6 +9,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	kinds "agent-repld/internal/detachedkindtest"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/turnfault"
@@ -1497,7 +1498,7 @@ func TestALeftoverDetachmentIsReportedOnlyWhenItArrivedLive(t *testing.T) {
 	}{
 		{
 			name:       "a live detachment is reported unplaceable",
-			arrange:    func(h *harness) { h.detachWork("work-1", "never-seen") },
+			arrange:    func(h *harness) { h.detachWork("work-1", "never-seen", kinds.Bash()) },
 			wantError:  true,
 			wantRecord: "daemon.feed.detached_unplaceable",
 		},
@@ -1505,6 +1506,7 @@ func TestALeftoverDetachmentIsReportedOnlyWhenItArrivedLive(t *testing.T) {
 			name: "a replayed detachment is recorded at debug",
 			arrange: func(h *harness) {
 				h.replay(historyPage(&conversationv1.HistoryMore{}, frameEntry(mainAgent(), &conversationv1.AgentDetachedWork{
+					Kind: kinds.Bash(),
 					Work: &conversationv1.DetachedWorkId{Value: "work-1"},
 					Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
 						DetachedFromId: &conversationv1.AgentActivityId{Value: "never-seen"},

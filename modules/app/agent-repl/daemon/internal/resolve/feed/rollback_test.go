@@ -11,6 +11,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	kinds "agent-repld/internal/detachedkindtest"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 )
@@ -283,7 +284,7 @@ func TestLiveDetachedInDoesNotCountASettledDetachedHead(t *testing.T) {
 	h.deliverPromptAt("t1", "go look", 1_000)
 	created := &conversationv1.AgentId{Value: "agent-explore"}
 	h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
-	h.detachWork("work-1", "spawn-1")
+	h.detachWork("work-1", "spawn-1", kinds.Subagent(created))
 	if got := h.resolver.LiveDetachedIn(testWorkspace, []ids.TurnID{"t1"}); got != 1 {
 		t.Fatalf("LiveDetachedIn() = %d before settling, want 1", got)
 	}
@@ -303,7 +304,7 @@ func TestLiveDetachedInDoesNotCountOtherTurns(t *testing.T) {
 	h.deliverPromptAt("t1", "go look", 1_000)
 	created := &conversationv1.AgentId{Value: "agent-explore"}
 	h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
-	h.detachWork("work-1", "spawn-1")
+	h.detachWork("work-1", "spawn-1", kinds.Subagent(created))
 
 	// Act: asking about a different turn.
 	got := h.resolver.LiveDetachedIn(testWorkspace, []ids.TurnID{"t2"})
@@ -320,12 +321,12 @@ func TestLiveDetachedInSumsAcrossMultipleNamedTurns(t *testing.T) {
 	h.deliverPromptAt("t1", "go look", 1_000)
 	first := &conversationv1.AgentId{Value: "agent-explore-1"}
 	h.spawnSubagent("spawn-1", first, "Explore", "map the daemon")
-	h.detachWork("work-1", "spawn-1")
+	h.detachWork("work-1", "spawn-1", kinds.Subagent(first))
 
 	h.deliverPromptAt("t2", "go look again", 2_000)
 	second := &conversationv1.AgentId{Value: "agent-explore-2"}
 	h.spawnSubagent("spawn-2", second, "Explore", "map it again")
-	h.detachWork("work-2", "spawn-2")
+	h.detachWork("work-2", "spawn-2", kinds.Subagent(second))
 
 	// Act
 	got := h.resolver.LiveDetachedIn(testWorkspace, []ids.TurnID{"t1", "t2"})
@@ -346,7 +347,7 @@ func TestLiveDetachedInDoesNotCountAMonitor(t *testing.T) {
 	h := newHarness(t)
 	h.deliverPromptAt("t1", "watch the build", 1_000)
 	h.resolver.OnActivity(testWorkspace, mainAgent(), monitorActivity("mon-1"), nil, nil)
-	h.detachWork("work-1", "mon-1")
+	h.detachWork("work-1", "mon-1", kinds.Monitor())
 
 	// Act
 	got := h.resolver.LiveDetachedIn(testWorkspace, []ids.TurnID{"t1"})
@@ -363,9 +364,9 @@ func TestLiveDetachedInCountsLiveDetachedSubagentsAndShellsOfTheNamedTurns(t *te
 	h := newHarness(t)
 	h.deliverPromptAt("t1", "start background work", 1_000)
 	h.spawnSubagent("toolu_sub", &conversationv1.AgentId{Value: "agent-sub"}, "Explore", "look around")
-	h.detachWork("work-sub", "toolu_sub")
+	h.detachWork("work-sub", "toolu_sub", kinds.Subagent(&conversationv1.AgentId{Value: "agent-sub"}))
 	h.send(bashCall("toolu_bash", "npm test"))
-	h.detachWork("work-bash", "toolu_bash")
+	h.detachWork("work-bash", "toolu_bash", kinds.Bash())
 
 	// Act
 	got := h.resolver.LiveDetachedIn(testWorkspace, []ids.TurnID{"t1"})
@@ -382,7 +383,7 @@ func TestLiveDetachedInDoesNotCountASubagentThatLeftTheLiveSet(t *testing.T) {
 	h := newHarness(t)
 	h.deliverPromptAt("t1", "start background work", 1_000)
 	h.spawnSubagent("toolu_sub", &conversationv1.AgentId{Value: "agent-sub"}, "Explore", "look around")
-	h.detachWork("work-sub", "toolu_sub")
+	h.detachWork("work-sub", "toolu_sub", kinds.Subagent(&conversationv1.AgentId{Value: "agent-sub"}))
 	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents("agent-sub"))
 	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents())
 

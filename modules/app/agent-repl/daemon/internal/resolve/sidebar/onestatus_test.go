@@ -8,6 +8,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	kinds "agent-repld/internal/detachedkindtest"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
@@ -448,6 +449,7 @@ func TestTheFooterAndTheRosterAgreeWhereTheWalkNeverReaches(t *testing.T) {
 			// A subagent spawned detached, announced as the shim announces it.
 			subagentType := "general-purpose"
 			work := &conversationv1.AgentDetachedWork{
+				Kind:  kinds.Subagent(agent("sub-1")),
 				Owner: agent("main"),
 				Work:  &conversationv1.DetachedWorkId{Value: "work-1"},
 				Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{

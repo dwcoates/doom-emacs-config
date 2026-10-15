@@ -8,6 +8,8 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	kinds "agent-repld/internal/detachedkindtest"
+
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -1156,7 +1158,7 @@ func TestACommandWhoseWorkMovedToTheBackgroundRetiresTheRunningCard(t *testing.T
 	}
 
 	// Act: the work leaves for the background.
-	h.detachWork("unit-1", "unit-1")
+	h.detachWork("unit-1", "unit-1", kinds.Bash())
 
 	// Assert: the running card is gone and the shell HEAD bubble stands in its
 	// place, carrying the command.
@@ -1173,7 +1175,7 @@ func TestTheDetachedRunsOwnSettleSettlesTheHeadNotAMovedCard(t *testing.T) {
 	// reports.
 	h := newHarness(t)
 	startForegroundBash(h, "unit-1", "sleep 600")
-	h.detachWork("unit-1", "unit-1")
+	h.detachWork("unit-1", "unit-1", kinds.Bash())
 
 	// Act: the run ends, on the shell's own stream.
 	h.bash("unit-1", &conversationv1.AgentBashSuccess{
@@ -1229,7 +1231,7 @@ func TestAReplayedUnitFrameAfterTheMoveDrawsNoCard(t *testing.T) {
 	// other plane -- and none of them says the work left.
 	h := newHarness(t)
 	startForegroundBash(h, "unit-1", "sleep 600")
-	h.detachWork("unit-1", "unit-1")
+	h.detachWork("unit-1", "unit-1", kinds.Bash())
 
 	// Act
 	h.send(activityOf("unit-1", &conversationv1.AgentBash{
@@ -1281,7 +1283,7 @@ func TestAMovedCallsOwnSuccessSettlesTheHeadItBecame(t *testing.T) {
 	// Arrange: the call's work moved and the head stands in the card's place.
 	h := newHarness(t)
 	startForegroundBash(h, "unit-1", "go test ./...")
-	h.detachWork("work-1", "unit-1")
+	h.detachWork("work-1", "unit-1", kinds.Bash())
 
 	// Act: the call's own result arrives on the unit.
 	h.send(activityOf("unit-1", exitedSuccess("go test ./...", 3, 9_000)))
@@ -1297,7 +1299,7 @@ func TestAMovedCallsOwnFailureSettlesTheHeadAsCancelled(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	startForegroundBash(h, "unit-1", "go test ./...")
-	h.detachWork("work-1", "unit-1")
+	h.detachWork("work-1", "unit-1", kinds.Bash())
 
 	// Act.
 	h.send(activityOf("unit-1", failedCall(9_000)))
@@ -1313,7 +1315,7 @@ func TestAMovedCallsOwnTerminalDrawsNoCardBesideTheHead(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	startForegroundBash(h, "unit-1", "go test ./...")
-	h.detachWork("work-1", "unit-1")
+	h.detachWork("work-1", "unit-1", kinds.Bash())
 
 	// Act.
 	h.send(activityOf("unit-1", exitedSuccess("go test ./...", 0, 9_000)))
@@ -1328,7 +1330,7 @@ func TestAMovedCallsOwnTerminalIsRecordedAsSettlingTheHead(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	startForegroundBash(h, "unit-1", "go test ./...")
-	h.detachWork("work-1", "unit-1")
+	h.detachWork("work-1", "unit-1", kinds.Bash())
 
 	// Act.
 	h.send(activityOf("unit-1", exitedSuccess("go test ./...", 0, 9_000)))
@@ -1343,7 +1345,7 @@ func TestAMovedCallsNonTerminalFrameLeavesTheHeadLive(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	startForegroundBash(h, "unit-1", "go test ./...")
-	h.detachWork("work-1", "unit-1")
+	h.detachWork("work-1", "unit-1", kinds.Bash())
 
 	// Act: a restated start is not an ending.
 	h.send(activityOf("unit-1", &conversationv1.AgentBash{
