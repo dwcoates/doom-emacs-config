@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -55,6 +56,9 @@ type fakeGo struct {
 	coverFail string
 	// baselineFail fails a leaf in the schema with no mutant active.
 	baselineFail string
+	// baselineNeeds is how long the schema's no-mutant run takes: a
+	// -test.timeout under it times the run out.
+	baselineNeeds time.Duration
 	// schemaErr is the schema build's output; it fails once with it.
 	schemaErr string
 	// mutant scripts each mutant's group run, then each lone rerun.
@@ -214,6 +218,9 @@ func (f *fakeGo) exec(_ context.Context, c Cmd) (Result, error) {
 		id := envOf(c.Env, gomut.EnvMutant)
 		if id == "" {
 			leaves := leavesOf(pattern)
+			if bound, err := time.ParseDuration(argAfter(c.Args, "-test.timeout")); err == nil && bound < f.baselineNeeds {
+				return Result{Exit: 2, Lines: lines("panic: test timed out after " + bound.String())}, nil
+			}
 			if slices.Contains(leaves, f.baselineFail) {
 				return Result{Exit: 1, Lines: lines("=== RUN   "+f.baselineFail, "--- FAIL: "+f.baselineFail+" (0.00s)")}, nil
 			}
@@ -903,5 +910,26 @@ func TestTheMutatedPackagesBuildNamingEveryError(t *testing.T) {
 	}
 	if checks == 0 {
 		t.Fatal("no type-check build ran")
+	}
+}
+
+func TestMeasureBoundsTheNoMutantRunByTheHangBound(t *testing.T) {
+	// Arrange: the schema's no-mutant run takes far past twice the cases'
+	// healthy latency (a filesystem walk under load), but within the hang
+	// bound, so it is slow, not changed.
+	cfg, dir := fakeConfig(t)
+	f := &fakeGo{dir: dir, reaches: map[string]bool{"TestA": true}, baselineNeeds: cfg.HangBound}
+	f.mutant = map[string]func(string) Result{}
+	for i := 1; i <= 64; i++ {
+		f.mutant[strconv.Itoa(i)] = func(string) Result { return Result{Lines: passLines("TestA", "TestB", "TestB/x", "TestB/y", "TestLog")} }
+	}
+	log, _ := quietLog()
+
+	// Act
+	_, err := Measure(context.Background(), cfg, f.exec, log)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("a slow no-mutant run read as a changed one: %v", err)
 	}
 }
