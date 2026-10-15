@@ -767,30 +767,15 @@ func (m *measurer) schema(ctx context.Context, cases []redundancy.Case, imports 
 		m.log.Infof("redundancy: %d mutants the pre-flight found untyped are dropped", pre)
 	}
 	for attempt := 0; ; attempt++ {
-		dir := filepath.Join(m.cfg.Scratch, "overlay-"+strconv.Itoa(attempt))
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return nil, fmt.Errorf("gomeasure: %w", err)
-		}
-		replace := map[string]string{}
-		for _, s := range schemas {
-			r, err := s.Overlay(dir)
-			if err != nil {
-				return nil, err
-			}
-			for k, v := range r {
-				replace[k] = v
-			}
-		}
-		ov := filepath.Join(dir, "overlay.json")
-		if err := gomut.WriteOverlay(ov, replace); err != nil {
+		ov, err := writeOverlay(filepath.Join(m.cfg.Scratch, "overlay-"+strconv.Itoa(attempt)), schemas)
+		if err != nil {
 			return nil, err
 		}
 		var failed []Result
 		// The mutated packages alone first: one build, cached across
 		// attempts, finds the sites that do not type-check far faster than
 		// every suite's binary would.
-		check := append([]string{"go", "build", "-buildvcs=false", "-overlay", ov}, m.cfg.Mutate...)
-		res, err := m.goBuild(ctx, m.cfg.Module, check)
+		res, err := m.buildMutated(ctx, ov)
 		if err != nil {
 			return nil, err
 		}
@@ -885,30 +870,44 @@ func layoutSchemas(imports map[string]string, files map[string][]string) ([]*gom
 	return schemas, next, nil
 }
 
+// writeOverlay writes every schema's mutated files under dir and the
+// go -overlay file mapping them over the sources, answering its path.
+func writeOverlay(dir string, schemas []*gomut.Schema) (string, error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("gomeasure: %w", err)
+	}
+	replace := map[string]string{}
+	for _, s := range schemas {
+		r, err := s.Overlay(dir)
+		if err != nil {
+			return "", err
+		}
+		for k, v := range r {
+			replace[k] = v
+		}
+	}
+	ov := filepath.Join(dir, "overlay.json")
+	if err := gomut.WriteOverlay(ov, replace); err != nil {
+		return "", err
+	}
+	return ov, nil
+}
+
+// buildMutated builds the -mutate packages alone under overlay ov.
+func (m *measurer) buildMutated(ctx context.Context, ov string) (Result, error) {
+	return m.goBuild(ctx, m.cfg.Module, append([]string{"go", "build", "-buildvcs=false", "-overlay", ov}, m.cfg.Mutate...))
+}
+
 // typeCheck builds the schemas' mutated packages alone (one go build over
 // -mutate, cached across attempts), dropping each site a compile error
 // names, until they build.
 func (m *measurer) typeCheck(ctx context.Context, schemas []*gomut.Schema, tag string) error {
 	for attempt := 0; ; attempt++ {
-		dir := filepath.Join(m.cfg.Scratch, tag+"-"+strconv.Itoa(attempt))
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return fmt.Errorf("gomeasure: %w", err)
-		}
-		replace := map[string]string{}
-		for _, s := range schemas {
-			r, err := s.Overlay(dir)
-			if err != nil {
-				return err
-			}
-			for k, v := range r {
-				replace[k] = v
-			}
-		}
-		ov := filepath.Join(dir, "overlay.json")
-		if err := gomut.WriteOverlay(ov, replace); err != nil {
+		ov, err := writeOverlay(filepath.Join(m.cfg.Scratch, tag+"-"+strconv.Itoa(attempt)), schemas)
+		if err != nil {
 			return err
 		}
-		res, err := m.goBuild(ctx, m.cfg.Module, append([]string{"go", "build", "-buildvcs=false", "-overlay", ov}, m.cfg.Mutate...))
+		res, err := m.buildMutated(ctx, ov)
 		if err != nil {
 			return err
 		}

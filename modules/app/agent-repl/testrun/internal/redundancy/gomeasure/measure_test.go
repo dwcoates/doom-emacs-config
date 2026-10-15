@@ -778,3 +778,79 @@ func TestMeasureNamesEveryCaseThatFailsWithNoMutant(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestWriteOverlayMapsEverySchemasFilesUnderItsDirectory(t *testing.T) {
+	// Arrange
+	_, dir := fakeConfig(t)
+	s, err := gomut.Build(dir, []string{"p.go"}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(t.TempDir(), "overlay-0")
+
+	// Act
+	ov, err := writeOverlay(out, []*gomut.Schema{s})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ov != filepath.Join(out, "overlay.json") {
+		t.Fatalf("overlay at %s, want under %s", ov, out)
+	}
+	raw, err := os.ReadFile(ov)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), filepath.Join(dir, "p.go")) || !strings.Contains(string(raw), out) {
+		t.Fatalf("overlay %s maps no source into %s", raw, out)
+	}
+}
+
+func TestWriteOverlayRefusesADirectoryItCannotCreate(t *testing.T) {
+	// Arrange
+	_, dir := fakeConfig(t)
+	s, err := gomut.Build(dir, []string{"p.go"}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	_, err = writeOverlay(filepath.Join(file, "overlay-0"), []*gomut.Schema{s})
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "gomeasure:") {
+		t.Fatalf("err = %v, want the directory refused", err)
+	}
+}
+
+func TestThePreflightAndTheSchemaBuildTheMutatedPackagesAlike(t *testing.T) {
+	// Arrange: an untyped site, so the pre-flight and the schema both build.
+	cfg, dir := fakeConfig(t)
+	f := &fakeGo{dir: dir, reaches: map[string]bool{"TestA": true},
+		schemaErr: filepath.Join(dir, "p.go") + ":3:29: cannot use x\n"}
+	f.mutant = map[string]func(string) Result{}
+	log, _ := quietLog()
+
+	// Act
+	if _, err := Measure(context.Background(), cfg, f.exec, log); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert: both type-check builds are buildMutated's, differing only in
+	// the overlay's directory.
+	overlayDir := regexp.MustCompile(`/(preflight|overlay)-\d+/`)
+	var shapes []string
+	for _, call := range f.calls {
+		if strings.Contains(call, "go build") && strings.Contains(call, "-overlay") && !strings.Contains(call, "-o ") {
+			shapes = append(shapes, overlayDir.ReplaceAllString(call, "/DIR/"))
+		}
+	}
+	if len(shapes) < 3 || len(slices.Compact(slices.Clone(shapes))) != 1 {
+		t.Fatalf("mutated-package builds differ:\n%s", strings.Join(shapes, "\n"))
+	}
+}
