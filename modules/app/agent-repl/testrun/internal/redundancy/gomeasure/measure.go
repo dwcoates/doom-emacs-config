@@ -190,10 +190,10 @@ func Measure(ctx context.Context, cfg Config, exec Exec, log *run.Log) (*redunda
 	if cfg.HangBound <= 0 {
 		return nil, fmt.Errorf("gomeasure: the hang bound must be positive, got %s", cfg.HangBound)
 	}
-	if cfg.MaxLoad <= 0 || cfg.QuietWait <= 0 {
-		return nil, fmt.Errorf("gomeasure: the load gate needs a positive max load and quiet wait, got %g and %s", cfg.MaxLoad, cfg.QuietWait)
-	}
 	m := &measurer{cfg: cfg, exec: exec, log: log}
+	if err := m.gate().Check(); err != nil {
+		return nil, fmt.Errorf("gomeasure: %w", err)
+	}
 	start := time.Now()
 	phaseStart := start
 	phase := func(name string) {
