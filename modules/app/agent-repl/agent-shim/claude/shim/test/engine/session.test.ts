@@ -45,6 +45,7 @@ import {
   NETWORK_RESUME_PROBE_INTERVAL_MS,
 } from "../../src/engine/network-resume.js";
 import { isNetworkResumePrompt, resumePromptTargets } from "../../src/engine/network-resume-prompt.js";
+import { NETWORK_RESUME_SOURCE } from "../../src/engine/shim-prompt.js";
 import { rollBackSessionRequestFor } from "../service/requests.js";
 import type { ForkVendorSession } from "../../src/engine/fork-session.js";
 import { ManualScheduler, RecordingFold, RecordingPersistence, ScriptedProbe, ScriptedQuery, errorResultMessage, hookResponse, initMessage, resultMessage, unexpectedVendorFork } from "./fakes.js";
@@ -13769,6 +13770,23 @@ describe("a background agent a network outage cut off", () => {
 
     // Assert
     expect(sends.map((send) => send.uuid)).toEqual([h.minted.at(-1)]);
+  });
+
+  it("delivers the resume through the one shim-prompt delivery, named as the network resume", async () => {
+    // Arrange
+    const h = harness({ drainPrompts: [] });
+    await started(h);
+    await cutOff(h);
+    const before = logSinkMark();
+
+    // Act
+    await beat(h);
+
+    // Assert
+    const submitted = logRecordsSince(before).filter(
+      (record) => record.message === "submitted the shim's own prompt; the main agent answers it in an adopted turn",
+    );
+    expect(submitted.map((record) => record.context["prompt"])).toEqual([NETWORK_RESUME_SOURCE.label]);
   });
 
   it("sends the resume prompt under the uuid derived from its adopted turn's id", async () => {

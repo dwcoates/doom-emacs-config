@@ -182,6 +182,7 @@ import { SessionPushes } from "./pushes.js";
 import { probeVendorFact } from "./vendor-probe.js";
 import { VendorCadence } from "./vendor-cadence.js";
 import { classifyAgentFailure, NetworkResume, type ReachabilityProbe, type ResumeDelivery } from "./network-resume.js";
+import { NETWORK_RESUME_SOURCE, type ShimPromptDelivery, type ShimPromptSource } from "./shim-prompt.js";
 import { networkReach, type NetworkReach } from "./network-reach.js";
 import {
   KEEPALIVE_YIELD_BUDGET_MS,
@@ -5875,8 +5876,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     }
   }
 
+  /** Deliver the network-resume prompt as the main agent's next turn ({@link deliverShimPrompt}). */
+  async function deliverNetworkResume(text: string): Promise<ResumeDelivery> {
+    return deliverShimPrompt(text, NETWORK_RESUME_SOURCE);
+  }
+
   /**
-   * Deliver the network-resume prompt as the main agent's next turn.
+   * Deliver a prompt the SHIM authored as the main agent's next turn.
    *
    * ONLY ON AN IDLE MAIN AGENT: a turn in either slot (a keep-alive's
    * included) or a `StartTurn` being processed answers `busy`, and the loop
@@ -5893,46 +5899,46 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * does (engine/turn.ts), rather than being refused.
    *
    * THE KEEP-ALIVE ROLLBACK IS OWED FIRST, as it is before any real prompt:
-   * the resume must not build on keep-alive context.
+   * the prompt must not build on keep-alive context.
    */
-  async function deliverNetworkResume(text: string): Promise<ResumeDelivery> {
+  async function deliverShimPrompt(text: string, source: ShimPromptSource): Promise<ShimPromptDelivery> {
     if (standingDown) return { kind: "unavailable", detail: "the session is standing down" };
     if (identity === undefined || query === undefined || prompts === undefined) {
       return { kind: "unavailable", detail: "no vendor query is accepting prompts" };
     }
     const busy = mainAgentBusy();
     if (busy !== undefined) return { kind: "busy", detail: busy };
-    const resume = mintAdoptedTurn();
-    const uuid = promptUuid(resume.id.value);
+    const turn = mintAdoptedTurn();
+    const uuid = promptUuid(turn.id.value);
     await yieldObligation(textSaid(text), false, uuid);
     // THE ROLLBACK AWAITED. A `StartTurn` that arrived meanwhile owns the next
-    // turn; the resume waits for the next beat rather than riding into it.
+    // turn; the prompt waits for the next beat rather than riding into it.
     const busyAfter = mainAgentBusy();
     if (busyAfter !== undefined) return { kind: "busy", detail: busyAfter };
     const queue = prompts;
     if (queue === undefined) {
       return { kind: "unavailable", detail: "the keep-alive rollback left no vendor query accepting prompts" };
     }
-    setOpen(resume);
+    setOpen(turn);
     cadence?.pause();
-    writeAdoptedPrompt(resume, "the shim asked the main agent to resume network-killed agents", "network_resume");
+    writeAdoptedPrompt(turn, source.cause, source.firstMessage);
     try {
-      pushSend(queue, text, { uuid, turnId: resume.id.value, keepalive: false });
+      pushSend(queue, text, { uuid, turnId: turn.id.value, keepalive: false });
     } catch (err) {
       // THE TURN LEAVES THE SLOT WITH THE PUSH THAT FAILED: nothing will ever
       // end it, and a slot held by it would hold every StartTurn behind it.
-      releaseTurn(resume);
+      releaseTurn(turn);
       LOGGER.error(
-        { turn_id: resume.id.value, cause: err instanceof Error ? err.message : String(err) },
-        "the vendor refused the network-resume prompt; the adopted turn is released",
+        { turn_id: turn.id.value, prompt: source.label, cause: err instanceof Error ? err.message : String(err) },
+        "the vendor refused the shim's own prompt; the adopted turn is released",
       );
       throw err;
     }
     LOGGER.info(
-      { turn_id: resume.id.value, client_uuid: uuid, characters: text.length },
-      "submitted the network-resume prompt; the main agent continues the cut-off agents in an adopted turn",
+      { turn_id: turn.id.value, client_uuid: uuid, prompt: source.label, characters: text.length },
+      "submitted the shim's own prompt; the main agent answers it in an adopted turn",
     );
-    return { kind: "delivered" };
+    return { kind: "delivered", turnId: turn.id.value };
   }
 
   /** Why the main agent cannot take a prompt now, or absence when it is idle. */
