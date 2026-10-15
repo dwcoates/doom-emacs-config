@@ -713,6 +713,76 @@ answer's is: the link-up re-asserts it."
     (should-not (cl-find-if (lambda (entry) (eq (car entry) :error))
                             agent-repl-test-host--logs))))
 
+(defun agent-repl-test-host--drop-every-connection ()
+  "Leave every subscribed workspace with no connection, as a link-down does."
+  (maphash (lambda (ws _) (agent-repl-host--put ws :conn nil)) agent-repl-host--by-name))
+
+(ert-deftest agent-repl-test-host-select-with-no-connection-records-the-selection ()
+  "A select with no daemon to send it to is still the user's: the next
+link-up re-asserts it."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (agent-repl-test-host--drop-every-connection)
+    ;; Act
+    (agent-repl-host-select "ws-1")
+    ;; Assert
+    (should (equal agent-repl-host-last-selected-id "ws-id-1"))))
+
+(ert-deftest agent-repl-test-host-select-with-no-connection-sends-nothing ()
+  "No SelectWorkspace goes out with no connection to carry it."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (agent-repl-test-host--drop-every-connection)
+    (setq agent-repl-test-host--calls nil)
+    ;; Act
+    (agent-repl-host-select "ws-1")
+    ;; Assert
+    (should (null (agent-repl-test-host--selected-ids)))))
+
+(ert-deftest agent-repl-test-host-select-with-no-connection-settles-as-standing-down ()
+  "Its caller is settled as a leaving daemon's answer settles it, so a
+re-assertion waiting on it lets go."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (agent-repl-test-host--drop-every-connection)
+    (let ((outcome nil))
+      ;; Act
+      (agent-repl-host-select "ws-1" (lambda (o) (setq outcome o)))
+      ;; Assert
+      (should (eq outcome :standing-down)))))
+
+(ert-deftest agent-repl-test-host-select-with-no-connection-is-logged-at-info ()
+  "An expected deferral, recorded at INFO with the id, and no WARN."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (agent-repl-test-host--drop-every-connection)
+    ;; Act
+    (agent-repl-host-select "ws-1")
+    ;; Assert
+    (should (agent-repl-test-host--logged-p
+             :info "elisp.host.select-deferred ws=ws-1 id=\"ws-id-1\" reason=no-connection reassert=next-link-up"))
+    (should-not (cl-find-if (lambda (entry) (eq (car entry) :warn))
+                            agent-repl-test-host--logs))))
+
+(ert-deftest agent-repl-test-host-a-queued-selection-outlives-the-link-going-down ()
+  "The user's newest choice is the one re-asserted: a selection queued
+behind one a leaving daemon answers is recorded once the queue drains onto
+a dead link, not lost to the older one (2026-10-14)."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    (agent-repl-host-select "ws-1")
+    (agent-repl-host-select "ws-2")
+    (agent-repl-test-host--drop-every-connection)
+    ;; Act
+    (agent-repl-test-host--answer-held (plist-get (agent-repl-test-host--standing-down-answer) :response))
+    ;; Assert
+    (should (equal agent-repl-host-last-selected-id "ws-id-2"))))
+
 ;;;; ---- Select: one at a time, the last press wins ----
 
 (defconst agent-repl-test-host--success '(:arm :success :value nil)
