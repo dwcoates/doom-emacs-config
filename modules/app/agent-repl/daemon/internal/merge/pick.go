@@ -120,7 +120,7 @@ func (o *orchestrator) resumePick(ctx context.Context, repo wsm.RepoKey, entry w
 // drawPickLive draws the head and the live pick tab, and stands the mirror the
 // pick turn is drawn at in the requester's bubble.
 func (o *orchestrator) drawPickLive(p *pick) {
-	o.publishHead(p.ws, p.ledger, p.label, p.startedMS, nil)
+	o.publishHead(p.ws, p.ledger, p.label, p.startedMS, nil, headPick)
 	o.publishRoundTab(p.ws, p.ledger, TabPick, 1, pickTab(tabState{startedMS: p.startedMS, waiting: o.deps.Asks.Waiting(p.ws)}))
 	o.deps.Feed.SetOutputMirror(p.ws, &wsm.MirrorAddress{
 		Workspace: p.requester, Feed: mergeFeed(p.ledger), Parent: tabRef(p.requester, p.ledger, roundTabKey(TabPick, 1)),
@@ -282,7 +282,7 @@ func (o *orchestrator) pickFailed(ctx context.Context, p *pick, summary string) 
 	o.publishHead(p.ws, p.ledger, p.label, p.startedMS, &frontendv1.FeedMergeError{
 		EndedAtMs: o.nowMS(),
 		Reason:    &frontendv1.FeedMergeError_Failed{Failed: &frontendv1.FeedMergeFailed{Summary: summary}},
-	})
+	}, headPick)
 	if err := o.deps.DB.RemoveMergeQueueEntry(ctx, p.repo, p.ws, causePickFailed); err != nil {
 		o.log(ctx, p.ws).Error(op, "could not drop the merge whose pick failed", dlog.Context{"workspace": string(p.ws), "repo": string(p.repo), "error": err.Error()})
 	}

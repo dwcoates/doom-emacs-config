@@ -3,6 +3,7 @@ package merge
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -287,7 +288,67 @@ func (o *orchestrator) mergeWorkspaceVisible(ws ids.WorkspaceID) bool {
 	return !record.MergeHidden()
 }
 
-// publishHead publishes the bubble's head with RESULT, the arm in force.
+// headBook orders every publication of every merge head. ONE LOCK, OWNED BY
+// THE HEADS, is held across each publication's decision and its feed upsert,
+// so publications reach the feed in the order they were decided.
+//
+// A RESOLVED HEAD IS FINAL FOR ITS LEDGER. Once a head carrying a result is
+// published for a ledger, a later publication of that ledger WITHOUT one is
+// not drawn: it was decided from a read taken before the merge resolved (a
+// queue redraw whose stored queue still held the merge, a restate of the head
+// as it stood). Decided under the same lock as the resolved publication, it
+// can never reach the feed after it, so a settled head is never pinned again
+// (daemon.feed.pin_refused) and an async head never reverts to in flight.
+// A publication carrying a result is always drawn: an outcome replaces an
+// outcome.
+type headBook struct {
+	mu sync.Mutex
+	// last is the head each merging workspace's bubble last drew, so a reveal
+	// of its merge workspace can restate it with its switch.
+	last map[ids.WorkspaceID]headArgs
+	// resolved are the ledgers whose head was published with a result. A
+	// ledger identity is minted once and never reused, so the set only grows,
+	// by one per merge resolved in this daemon's life.
+	resolved map[ids.LeaseID]bool
+}
+
+func newHeadBook() headBook {
+	return headBook{last: map[ids.WorkspaceID]headArgs{}, resolved: map[ids.LeaseID]bool{}}
+}
+
+// headCause names which caller published a merge head, so every
+// publication's record says who drew it.
+type headCause string
+
+const (
+	// headRun is a run drawing its own head: live as it steps, then its
+	// outcome.
+	headRun headCause = "run"
+	// headQueue is the queue's redraw of every merge in line (republishQueue).
+	headQueue headCause = "queue"
+	// headPick is an async merge's pick, live or failed.
+	headPick headCause = "pick"
+	// headRecover is the boot recovery redrawing a merge a restart found.
+	headRecover headCause = "recover"
+	// headAbandoned is a merge that left the queue without running.
+	headAbandoned headCause = "abandoned"
+	// headReveal is the restate a merge workspace's reveal draws.
+	headReveal headCause = "reveal"
+	// headOffer is the restate the merge-queue question's raising or
+	// retirement draws.
+	headOffer headCause = "offer"
+)
+
+// headArgs is the last head publishHead drew for one merging workspace.
+type headArgs struct {
+	lease     ids.LeaseID
+	label     string
+	startedMS int64
+	result    any
+}
+
+// publishHead publishes the bubble's head with RESULT, the arm in force, as
+// CAUSE drew it.
 //
 // A SYNC HEAD IS PINNED TO THE ROOT FEED'S BOTTOM WHILE THE MERGE IS IN FLIGHT
 // and settles where it stands when the merge resolves (owner ruling,
@@ -298,16 +359,61 @@ func (o *orchestrator) mergeWorkspaceVisible(ws ids.WorkspaceID) bool {
 // where it is first drawn. An async head carries the switch to the merge
 // workspace once that workspace is visible.
 //
-// The arguments are kept, so a reveal can restate the head with its switch
-// (restateHead).
-func (o *orchestrator) publishHead(ws ids.WorkspaceID, lease ids.LeaseID, label string, startedMS int64, result any) {
-	o.mu.Lock()
-	o.heads[ws] = headArgs{lease: lease, label: label, startedMS: startedMS, result: result}
-	o.mu.Unlock()
+// The publication is ordered by the head book (headBook): a live publication
+// of a ledger already resolved is not drawn. The arguments are kept, so a
+// reveal can restate the head with its switch (restateHead).
+func (o *orchestrator) publishHead(ws ids.WorkspaceID, lease ids.LeaseID, label string, startedMS int64, result any, cause headCause) {
+	o.heads.mu.Lock()
+	defer o.heads.mu.Unlock()
+	o.drawHead(ws, headArgs{lease: lease, label: label, startedMS: startedMS, result: result}, cause)
+}
+
+// restateHead draws WS's merge head again as it was last drawn, so a change
+// of the merge workspace's visibility reaches its switch. A workspace whose
+// head was never drawn has nothing to restate.
+func (o *orchestrator) restateHead(ws ids.WorkspaceID, cause headCause) {
+	o.heads.mu.Lock()
+	defer o.heads.mu.Unlock()
+	if head, drawn := o.heads.last[ws]; drawn {
+		o.drawHead(ws, head, cause)
+	}
+}
+
+// restateLiveHead restates WS's merge head only while it is LIVE (drawn, with
+// no result), running MARK first, and answers whether a head was drawn and
+// whether it was live and restated. The liveness, MARK and the restate are
+// one step under the head book's lock, so a head that resolves meanwhile is
+// never restated as live.
+func (o *orchestrator) restateLiveHead(ws ids.WorkspaceID, cause headCause, mark func()) (drawn, live bool) {
+	o.heads.mu.Lock()
+	defer o.heads.mu.Unlock()
+	head, drawn := o.heads.last[ws]
+	if !drawn || head.result != nil {
+		return drawn, false
+	}
+	mark()
+	o.drawHead(ws, head, cause)
+	return true, true
+}
+
+// drawHead decides and upserts one head publication. The caller holds the
+// head book's lock.
+func (o *orchestrator) drawHead(ws ids.WorkspaceID, head headArgs, cause headCause) {
+	fields := dlog.Context{"workspace": string(ws), "ledger": string(head.lease), "cause": string(cause), "resolved": head.result != nil}
+	if head.result == nil && o.heads.resolved[head.lease] {
+		o.log(context.Background(), ws).Debug("daemon.merge.head", "a live head publication came after its ledger resolved; the resolved head stands and the live one is not drawn", fields)
+		return
+	}
+	o.heads.last[ws] = head
+	if head.result != nil {
+		o.heads.resolved[head.lease] = true
+	}
 	at := o.bubbleOf(ws)
-	row := headRow(at.ws, lease, label, startedMS, result)
+	row := headRow(at.ws, head.lease, head.label, head.startedMS, head.result)
 	row.GetActivity().GetMerge().Head.Mode = o.headMode(ws, at)
-	if result == nil && !at.async() {
+	pinned := head.result == nil && !at.async()
+	fields["pinned"] = pinned
+	if pinned {
 		o.mu.Lock()
 		offered := o.offers[ws]
 		o.mu.Unlock()
@@ -315,9 +421,10 @@ func (o *orchestrator) publishHead(ws ids.WorkspaceID, lease ids.LeaseID, label 
 			row.GetActivity().GetMerge().QueueOffer = queueOffer()
 		}
 		o.deps.Feed.UpsertDurablePinned(at.ws, feedid.Feed{Root: true}, row)
-		return
+	} else {
+		o.deps.Feed.UpsertDurable(at.ws, feedid.Feed{Root: true}, row)
 	}
-	o.deps.Feed.UpsertDurable(at.ws, feedid.Feed{Root: true}, row)
+	o.log(context.Background(), ws).Debug("daemon.merge.head", "published the merge head", fields)
 }
 
 // headMode is the head's mode for the bubble AT of merging workspace WS: sync,
@@ -337,27 +444,6 @@ func (o *orchestrator) headMode(ws ids.WorkspaceID, at bubble) *frontendv1.FeedM
 		}
 	}
 	return &frontendv1.FeedMergeMode{Mode: &frontendv1.FeedMergeMode_Async{Async: async}}
-}
-
-// headArgs is the last head publishHead drew for one merging workspace.
-type headArgs struct {
-	lease     ids.LeaseID
-	label     string
-	startedMS int64
-	result    any
-}
-
-// restateHead draws WS's merge head again as it was last drawn, so a change
-// of the merge workspace's visibility reaches its switch. A workspace whose
-// head was never drawn has nothing to restate.
-func (o *orchestrator) restateHead(ws ids.WorkspaceID) {
-	o.mu.Lock()
-	head, drawn := o.heads[ws]
-	o.mu.Unlock()
-	if !drawn {
-		return
-	}
-	o.publishHead(ws, head.lease, head.label, head.startedMS, head.result)
 }
 
 // publishRoundTab publishes one top-level tab round in the bubble's feed,

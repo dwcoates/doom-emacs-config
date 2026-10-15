@@ -1203,7 +1203,14 @@ Owner rulings, 2026-09-30 (`internal/merge`; the contract is
   and republishes the queue so the queue tab settles. A restart, resume or
   adoption draws the bubble again still pinned. Only a restatement by its
   producer moves a row: the resolver's own restatements (a fold, a
-  supersede) keep a pinned row pinned. `integration/merge_placement_test.go`
+  supersede) keep a pinned row pinned. A RESOLVED HEAD IS FINAL FOR ITS
+  LEDGER: every head publication is decided and upserted under the one lock
+  the heads own (`headBook`, `tabs.go`), which latches a ledger once a head
+  carrying a result is published, so a live publication decided from an
+  earlier read (the queue's redraw, a restate) is not drawn after it and the
+  feed never sees a settled head re-pinned (`daemon.feed.pin_refused`). Every
+  publication's DEBUG `daemon.merge.head` record names the caller that drew
+  it (`cause`). `integration/merge_placement_test.go`
   pins the invariant; design record
   `docs/protobuf-design/merge-bubble-tail.md` (repository root).
 - **THE PROCESS, IN ORDER** (`process.go`): preprocessing; rebasing k/n, one

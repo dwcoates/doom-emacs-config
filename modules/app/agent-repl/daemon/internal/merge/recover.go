@@ -269,7 +269,7 @@ func (o *orchestrator) recoverAdmitted(ctx context.Context, repo wsm.RepoKey, en
 				&frontendv1.FeedMergeError{
 					EndedAtMs: o.nowMS(),
 					Reason:    &frontendv1.FeedMergeError_Failed{Failed: &frontendv1.FeedMergeFailed{Summary: summary}},
-				})
+				}, headRecover)
 		}
 		o.publish(repo, ws, MergeFacts{State: StateFailed, FailedArea: footer.FailedOther, Detail: summary})
 		o.ended(ctx, ws, DetachedOutcome{Kind: DetachedFailed, Summary: summary})
@@ -372,7 +372,7 @@ func (o *orchestrator) recoverResumable(ctx context.Context, repo wsm.RepoKey, l
 	// always had, and the footer shows the step the merge stands on before the
 	// resumed run's first word.
 	label := branchLabel(doc.Subject.Branch, doc.Subject.subject().targetLabel())
-	o.publishHead(ws, lease.ID, label, doc.StartedMS, nil)
+	o.publishHead(ws, lease.ID, label, doc.StartedMS, nil, headRecover)
 	o.publish(repo, ws, doc.footerFacts(o.deps.Now()))
 	// THE RUN LOG CARRIES IT TOO: a merge resumed is a fact about the
 	// restart, and the durable run log is where a boot sequence is read.

@@ -479,7 +479,7 @@ func TestAnAsyncMergesHeadIsNeverPinned(t *testing.T) {
 	h.registerMergeWorkspace(theWorkspace, "request-1", "feature")
 
 	// Act: a live head, the one a sync merge would pin.
-	h.o.publishHead(theMergeWorkspace, "lease-1", "reconnect-fix → master", 1, nil)
+	h.o.publishHead(theMergeWorkspace, "lease-1", "reconnect-fix → master", 1, nil, headRun)
 
 	// Assert
 	h.feed.mu.Lock()
@@ -494,7 +494,7 @@ func TestASyncMergesLiveHeadIsPinnedInItsOwnFeed(t *testing.T) {
 	h := newHarness(t)
 
 	// Act
-	h.o.publishHead(theWorkspace, "lease-1", "feature → master", 1, nil)
+	h.o.publishHead(theWorkspace, "lease-1", "feature → master", 1, nil, headRun)
 
 	// Assert
 	h.feed.mu.Lock()
@@ -511,7 +511,7 @@ func TestAnAsyncHeadCarriesNoSwitchWhileItsWorkspaceIsHidden(t *testing.T) {
 	h.registerMergeWorkspace(theWorkspace, "request-1", "feature")
 
 	// Act
-	h.o.publishHead(theMergeWorkspace, "lease-1", "reconnect-fix → master", 1, nil)
+	h.o.publishHead(theMergeWorkspace, "lease-1", "reconnect-fix → master", 1, nil, headRun)
 
 	// Assert
 	heads := h.feed.headsOn(theWorkspace)
@@ -525,7 +525,7 @@ func TestARevealRestatesTheAsyncHeadWithTheSwitch(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.registerMergeWorkspace(theWorkspace, "request-1", "feature")
-	h.o.publishHead(theMergeWorkspace, "lease-1", "reconnect-fix → master", 1, nil)
+	h.o.publishHead(theMergeWorkspace, "lease-1", "reconnect-fix → master", 1, nil, headRun)
 
 	// Act
 	if err := h.o.RevealMergeWorkspace(context.Background(), theMergeWorkspace, "the user selected it"); err != nil {
@@ -557,7 +557,7 @@ func TestEveryHeadAnAsyncMergePublishesIsAsync(t *testing.T) {
 			h.registerMergeWorkspace(theWorkspace, "request-1", "feature")
 
 			// Act
-			h.o.publishHead(theMergeWorkspace, "lease-1", "reconnect-fix → master", 1, tt.result)
+			h.o.publishHead(theMergeWorkspace, "lease-1", "reconnect-fix → master", 1, tt.result, headRun)
 
 			// Assert
 			heads := h.feed.headsOn(theWorkspace)
@@ -583,7 +583,7 @@ func TestEveryHeadASyncMergePublishesIsSync(t *testing.T) {
 			h := newHarness(t)
 
 			// Act
-			h.o.publishHead(theWorkspace, "lease-1", "feature → master", 1, tt.result)
+			h.o.publishHead(theWorkspace, "lease-1", "feature → master", 1, tt.result, headRun)
 
 			// Assert
 			heads := h.feed.headsOn(theWorkspace)

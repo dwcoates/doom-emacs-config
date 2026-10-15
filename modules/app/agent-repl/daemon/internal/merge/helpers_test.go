@@ -136,6 +136,10 @@ type fakeDB struct {
 	beforeRelease func(f *fakeDB)
 	// queueReadErr, when set, fails every MergeQueue read.
 	queueReadErr error
+	// onQueueRead, when set, runs after every MergeQueue read has taken its
+	// copy, outside the fake's lock, so a test can change the world between
+	// the read and whatever its reader does with the answer.
+	onQueueRead func()
 	// beforeRemove, when set, runs under the fake's lock as a queue entry's
 	// removal begins.
 	beforeRemove func(id ids.WorkspaceID)
@@ -751,11 +755,17 @@ func (f *fakeDB) DropAdmittedMerge(_ context.Context, repo wsm.RepoKey, id ids.W
 
 func (f *fakeDB) MergeQueue(_ context.Context, repo wsm.RepoKey) ([]wsm.MergeQueueEntry, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	if f.queueReadErr != nil {
+		f.mu.Unlock()
 		return nil, f.queueReadErr
 	}
-	return append([]wsm.MergeQueueEntry(nil), f.queues[repo]...), nil
+	entries := append([]wsm.MergeQueueEntry(nil), f.queues[repo]...)
+	hook := f.onQueueRead
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
+	return entries, nil
 }
 
 func (f *fakeDB) AllMergeQueues(_ context.Context) (map[wsm.RepoKey][]wsm.MergeQueueEntry, error) {

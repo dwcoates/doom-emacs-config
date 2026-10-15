@@ -545,7 +545,7 @@ func (o *orchestrator) republishQueue(ctx context.Context, repo wsm.RepoKey) err
 				return err
 			}
 			if clocked {
-				o.publishHead(entry.Workspace, lease, o.bubbleLabel(ctx, entry), clock, nil)
+				o.publishHead(entry.Workspace, lease, o.bubbleLabel(ctx, entry), clock, nil, headQueue)
 			}
 			state, shown, err := o.queueTabState(entry)
 			if err != nil {
