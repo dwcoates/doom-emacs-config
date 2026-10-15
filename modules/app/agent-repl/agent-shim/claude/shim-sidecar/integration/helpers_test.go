@@ -114,7 +114,6 @@ type layout struct {
 	integrationDir string // .../agent-shim/claude/shim-sidecar/integration
 	sidecarDir     string // .../agent-shim/claude/shim-sidecar
 	agentShimDir   string // .../agent-shim
-	lockDir        string // .../agent-shim/shim-lock
 	moduleRoot     string // .../modules/app/agent-repl
 	corpusDir      string // .../modules/app/agent-repl/testdata/corpus
 	projectsDir    string // .../modules/app/agent-repl/testdata/projects
@@ -128,7 +127,6 @@ func resolveLayout() (layout, error) {
 	l := layout{integrationDir: filepath.Dir(self)}
 	l.sidecarDir = filepath.Dir(l.integrationDir)
 	l.agentShimDir = filepath.Dir(filepath.Dir(l.sidecarDir)) // shim-sidecar -> claude -> agent-shim
-	l.lockDir = filepath.Join(l.agentShimDir, "shim-lock")
 	l.moduleRoot = filepath.Dir(l.agentShimDir)
 	l.corpusDir = filepath.Join(l.moduleRoot, "testdata", "corpus")
 	l.projectsDir = filepath.Join(l.moduleRoot, "testdata", "projects")
@@ -156,13 +154,6 @@ var (
 	// not hand it, made on the first such build (itestBinDirOnce) and removed
 	// as the suite ends.
 	itestBinDir string
-
-	// The shim's lock holder, built LAZILY: only the mocked-vendor subjects
-	// spawn a real shim, and a real shim takes its kernel claims by spawning
-	// this binary.
-	lockBinOnce sync.Once
-	lockBinPath string
-	lockBinErr  error
 )
 
 func TestMain(m *testing.M) {
@@ -246,11 +237,6 @@ func runSuite(m *testing.M) int {
 		fmt.Fprintf(os.Stderr, "integration: %v\n", err)
 		return 1
 	}
-	// The mocked vendor's shared throwaway store outlives every subject, so
-	// nothing else can stand it down. It is a no-op when nothing started it.
-	defer stopSharedVendorStore()
-	// The mocked vendor's private bundle (mock_helpers_test.go) goes with it.
-	defer removeMockShimRoot()
 	return m.Run()
 }
 
@@ -1027,29 +1013,6 @@ func storeClientOver(hc *http.Client) storev1connect.ShimStoreClient {
 // ---------------------------------------------------------------------------
 // The REAL store, as a subprocess on a private socket.
 // ---------------------------------------------------------------------------
-
-// lockBinary builds the shim's lock holder on first use and answers its path.
-//
-// EVERY REAL SHIM NEEDS IT. Node cannot take a flock, so the shim's session and
-// workspace claims are shim-lock child processes; without the binary the shim
-// refuses every StartSession and the mocked vendor generates nothing.
-func lockBinary(t *testing.T) string {
-	t.Helper()
-	lockBinOnce.Do(func() {
-		lockBinPath, lockBinErr = testenv.ProgramOr(os.Getenv, "shim-lock", func() (string, error) {
-			dir, err := itestBinDirOnce()
-			if err != nil {
-				return "", err
-			}
-			out := filepath.Join(dir, "shim-lock")
-			return out, goBuild(repo.lockDir, out)
-		})
-	})
-	if lockBinErr != nil {
-		t.Fatalf("the real shim takes its kernel claims with shim-lock, which does not build: %v", lockBinErr)
-	}
-	return lockBinPath
-}
 
 // ---------------------------------------------------------------------------
 // Reading a book back out of the real store.

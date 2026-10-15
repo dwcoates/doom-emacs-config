@@ -1,0 +1,2 @@
+{"type":"queue-operation","operation":"enqueue","timestamp":"2027-01-15T08:00:00.000Z","sessionId":"sess-fake-1"}
+{"parentUuid":null,"isSidechain":false,"promptId":"u3","type":"user","message":{"role":"user","content":[{"type":"text","text":"!query-fail"}]},"uuid":"u4","timestamp":"2027-01-15T08:00:00.001Z","permissionMode":"default","promptSource":"sdk","userType":"external","entrypoint":"sdk-cli","cwd":"${GOLDEN_ROOT}/workspace","sessionId":"sess-fake-1","version":"2.1.215","gitBranch":"offline"}

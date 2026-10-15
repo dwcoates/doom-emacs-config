@@ -1,0 +1,9 @@
+{
+  "scenario": "!cron",
+  "seam": null,
+  "nowMs": 1800000000000,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

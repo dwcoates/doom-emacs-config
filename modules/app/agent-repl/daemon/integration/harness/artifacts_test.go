@@ -51,6 +51,64 @@ func TestPreserveFailureLogsSkipsWhatIsNotALog(t *testing.T) {
 	}
 }
 
+func TestPreserveFailureLogsKeepsARotatedGenerationOfTheRunLog(t *testing.T) {
+	// Arrange
+	logs := writeLogs(t, map[string]string{"daemon.run.log.1": "{\"operation\":\"daemon.older\"}\n"})
+	dest := filepath.Join(t.TempDir(), "TestX")
+
+	// Act
+	preserveFailureLogs(func(string, ...any) {}, logs, dest)
+
+	// Assert
+	if got, err := os.ReadFile(filepath.Join(dest, "daemon.run.log.1")); err != nil || !strings.Contains(string(got), "daemon.older") {
+		t.Fatalf("preserved generation = %q, %v; want the rotated records kept", got, err)
+	}
+}
+
+func TestPreserveFailureLogsKeepsAnExtraFileFromOutsideTheLogsDir(t *testing.T) {
+	// Arrange: the stderr file a handover's successor inherits lives beside
+	// the state root, not in its logs directory.
+	logs := writeLogs(t, map[string]string{"daemon.run.log": "{}\n"})
+	stderr := filepath.Join(t.TempDir(), "daemon.stderr.log")
+	if err := os.WriteFile(stderr, []byte("panic: the successor died\n"), 0o600); err != nil {
+		t.Fatalf("write the stderr file: %v", err)
+	}
+	dest := filepath.Join(t.TempDir(), "TestX")
+
+	// Act
+	preserveFailureLogs(func(string, ...any) {}, logs, dest, stderr)
+
+	// Assert
+	if got, err := os.ReadFile(filepath.Join(dest, "daemon.stderr.log")); err != nil || !strings.Contains(string(got), "panic: the successor died") {
+		t.Fatalf("preserved stderr = %q, %v; want the successor's words kept", got, err)
+	}
+}
+
+func TestIsLogGenerationTellsALogFromOtherFiles(t *testing.T) {
+	tests := []struct {
+		name string
+		want bool
+	}{
+		{name: "daemon.run.log", want: true},
+		{name: "daemon.run.log.1", want: true},
+		{name: "daemon.run.log.12", want: true},
+		{name: "daemon.run.log.bak", want: false},
+		{name: "daemon.run.log.", want: false},
+		{name: "daemon.addr", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange, Act
+			got := isLogGeneration(tt.name)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("isLogGeneration(%q) = %v, want %v", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestPreserveFailureLogsTailsEachLogWithoutAnArtifactsDir(t *testing.T) {
 	// Arrange
 	logs := writeLogs(t, map[string]string{"daemon.run.log": "{\"operation\":\"daemon.marker\"}\n"})

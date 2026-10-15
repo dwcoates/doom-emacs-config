@@ -1333,7 +1333,6 @@ subtest **0.87s**.
 | --- | --- | --- | --- | --- |
 | `waitBudget` | `integration/helpers_test.go` | 50s | **10s** | ~3x the slowest whole subject (2.82s, `TestMockKeepAliveTurnsStoreNothing`; 0.92s alone). A subject's own wall time bounds every wait inside it. The old 50s cited a ~16.6s max for `TestMockScenarios/!subagent`, which measures **0.33s** — the number was ~50x its own premise. Costs nothing on green. |
 | `snapshotBudget` | `integration/helpers_test.go` | 1s | 1s, **no longer paid** | Unchanged as a number and no longer reached: `watchBashRun` ends on the row count its caller read off the wire, and cancels its context BEFORE closing the stream (closing first waits for the server, which is how the whole budget used to be paid on the way out of a healthy call). Three subjects paid 1s each on every green run; they now pay ~0. |
-| `standDownGrace` | `integration/mock_helpers_test.go` | 3s | 3s | Unchanged. The mocked vendor writes every file synchronously and exits promptly on SIGTERM; "did not leave within" has never appeared in a green run. Costs nothing on green. |
 | `growthSilence` | `integration/lost_policy_test.go` | (was `shortSilence`, 150ms) | **750ms** | ~5x the worst observed iteration (~150ms under this package's parallelism; ~10ms quiet) of the one subject that must KEEP a file alive across a silence window. INHERENT: the policy under test IS a silence window. Every other short-window subject keeps `shortSilence` (150ms). |
 | `RecoverBackoffMin`/`Max` (suite) | `integration/helpers_test.go` | (no override existed) | **5ms / 20ms** | The same ladder shape — first rung, doubling, ceiling held forever — at a scale the suite observes rather than sits through. Production's 250ms/10s is untouched; see `--recover-backoff-min` / `--recover-backoff-max`. |
 | `UnownedSpoolWindow` (suite) | `integration/helpers_test.go` | 200ms | 200ms | Unchanged, and now used by the spool-ownership subject too, which rode its own 2s. Its "held is not tailed" assertion is an ORDERING on the write stream, so no window length can make it race. |
@@ -1362,11 +1361,16 @@ to: each owns its own `t.TempDir()` trees, its own randomly-named sockets, and
 its own sidecar and store processes, and the only package-level state is
 `sync.Once`-guarded build output written before `m.Run`.
 
-- **The mocked-vendor drives are bounded structurally**, not by `-parallel`.
-  One scenario is FOUR real processes, and the table has 133 rows.
-  `takeMockDriveSlot` (in `generateMock`, so no call site can escape it) caps
-  concurrent drives at `GOMAXPROCS/2`, floored at 2 and capped at 8. `-parallel`
-  only decides how much of the rest of the package overlaps with them.
+- **The mocked vendor's scenarios are NOT driven here.** The shim's suite
+  drives each one in-process and checks its files in at
+  `testdata/scenario-goldens/<scenario>/tree` (`shim/test/fake/goldens.ts`,
+  rewritten by `AGENT_REPL_SCENARIO_GOLDENS_WRITE=1`). This module's
+  `mockgoldens_test.go` materializes each golden into the unit harness's roots
+  and runs the real cycle over it, so the scenario table boots no shim and no
+  process at all ("A system's integration tests run that system alone").
+  It holds one row per distinct on-disk shape: scenarios whose files
+  fingerprint identically and whose rows declare nothing of their own share
+  one row.
 - **A Connect client of the SHIM keeps the request body it promised.**
   `udsHTTPClient` wraps its transport in `ownedRequestBody`
   (`integration/helpers_transport_test.go`), and the wrapper is not optional.

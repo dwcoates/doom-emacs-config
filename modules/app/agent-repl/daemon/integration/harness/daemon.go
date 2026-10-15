@@ -661,7 +661,11 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		if root := os.Getenv(ArtifactsEnv); root != "" {
 			dest = filepath.Join(root, artifactDirName(t.Name()))
 		}
-		preserveFailureLogs(t.Logf, filepath.Join(d.StateDir, "logs"), dest)
+		var extra []string
+		if d.stderrPath != "" {
+			extra = append(extra, d.stderrPath)
+		}
+		preserveFailureLogs(t.Logf, filepath.Join(d.StateDir, "logs"), dest, extra...)
 	}, d.assertNoUnexpectedWarnings, d.assertNoUnproducedRequiredWarnings)
 	// THE LOCK DIRECTORY IS A CROSS-DAEMON RENDEZVOUS, not a per-start temp
 	// dir, so it is keyed to the STATE ROOT and settled only now that the root

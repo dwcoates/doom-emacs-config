@@ -29,13 +29,33 @@ const ArtifactsEnv = "AGENT_REPL_INTEGRATION_ARTIFACTS"
 // log, never an unbounded file in a full run's transcript.
 const artifactTailBytes = 64 << 10
 
-// preserveFailureLogs keeps every `.log` under logsDir past the test: copied
-// into dest when dest is non-empty, otherwise logged as a bounded tail.
-// Every step it cannot take is said through logf rather than dropped.
-func preserveFailureLogs(logf func(format string, args ...any), logsDir, dest string) {
+// preserveFailureLogs keeps every log under logsDir past the test, and each of
+// extra (a file outside it): copied into dest when dest is non-empty, otherwise
+// logged as a bounded tail. Every step it cannot take is said through logf
+// rather than dropped.
+//
+// A LOG IS EVERY GENERATION OF ONE. A rotated run log's older records live in
+// `daemon.run.log.1` and on, and a copy that kept only the `.log` file lost
+// whatever the rotation had moved aside.
+//
+// THE STDERR FILE IS AN EXTRA because it lives beside the state root, and it
+// is the ONLY place a daemon the harness did not start says anything once its
+// structured log stops: a handover's successor inherits it, so its panic or
+// runtime fatal lands there and nowhere else (2026-10-15, a successor went
+// silent mid-bounce and the artifact held no word from it).
+func preserveFailureLogs(logf func(format string, args ...any), logsDir, dest string, extra ...string) {
+	var sources []string
 	entries, err := os.ReadDir(logsDir)
 	if err != nil {
 		logf("integration artifacts: no logs to preserve from %s: %v", logsDir, err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() && isLogGeneration(entry.Name()) {
+			sources = append(sources, filepath.Join(logsDir, entry.Name()))
+		}
+	}
+	sources = append(sources, extra...)
+	if len(sources) == 0 {
 		return
 	}
 	if dest != "" {
@@ -44,28 +64,43 @@ func preserveFailureLogs(logf func(format string, args ...any), logsDir, dest st
 			dest = ""
 		}
 	}
-	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".log" {
-			continue
-		}
-		src := filepath.Join(logsDir, entry.Name())
+	for _, src := range sources {
 		body, err := os.ReadFile(src)
 		if err != nil {
 			logf("integration artifacts: read %s: %v", src, err)
 			continue
 		}
+		name := filepath.Base(src)
 		if dest != "" {
-			if err := os.WriteFile(filepath.Join(dest, entry.Name()), body, 0o644); err != nil {
-				logf("integration artifacts: write %s: %v", filepath.Join(dest, entry.Name()), err)
+			if err := os.WriteFile(filepath.Join(dest, name), body, 0o644); err != nil {
+				logf("integration artifacts: write %s: %v", filepath.Join(dest, name), err)
 			}
 			continue
 		}
 		logf("integration artifacts: %s (last %d bytes of %d):\n%s",
-			entry.Name(), min(len(body), artifactTailBytes), len(body), tailBytes(body, artifactTailBytes))
+			name, min(len(body), artifactTailBytes), len(body), tailBytes(body, artifactTailBytes))
 	}
 	if dest != "" {
 		logf("integration artifacts: the daemon's structured logs are preserved under %s", dest)
 	}
+}
+
+// isLogGeneration reports whether name is a log or one of its rotated
+// generations (`<name>.log` or `<name>.log.<n>`).
+func isLogGeneration(name string) bool {
+	if filepath.Ext(name) == ".log" {
+		return true
+	}
+	base, generation, ok := strings.Cut(name, ".log.")
+	if !ok || base == "" || generation == "" {
+		return false
+	}
+	for _, r := range generation {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // tailBytes answers the last limit bytes of body, cut forward to the next
