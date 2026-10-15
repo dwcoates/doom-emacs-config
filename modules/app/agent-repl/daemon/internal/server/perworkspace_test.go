@@ -4,12 +4,11 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"agent-repld/internal/ids"
+	"agent-repld/internal/sourcescan"
 )
 
 func TestPerWorkspaceMintsAnEntryOnFirstUse(t *testing.T) {
@@ -61,22 +60,12 @@ func TestPerWorkspaceKeepsWorkspacesApart(t *testing.T) {
 // perWorkspace, so no accessor reimplements the lock-and-mint by hand.
 func TestNoAccessorHandRollsPerWorkspace(t *testing.T) {
 	// Arrange.
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("glob the package: %v", err)
-	}
 	fset := token.NewFileSet()
 	checked := 0
 
 	// Act and Assert.
-	for _, name := range files {
-		if strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		src, err := os.ReadFile(name)
-		if err != nil {
-			t.Fatalf("read %s: %v", name, err)
-		}
+	for _, f := range sourcescan.Production(t) {
+		name, src := f.Name, f.Source
 		file, err := parser.ParseFile(fset, name, src, 0)
 		if err != nil {
 			t.Fatalf("parse %s: %v", name, err)
