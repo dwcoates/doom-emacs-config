@@ -5,6 +5,11 @@
 // longer drift apart the way a hand-copied list did.
 package roster
 
+import (
+	"path/filepath"
+	"strings"
+)
+
 // Kind is how a suite is turned into units.
 type Kind int
 
@@ -327,6 +332,17 @@ var NotSuites = map[string]string{
 	// A container-free entry to the e2e Go suite, which the roster runs as
 	// the "e2e" suite directly (Kind E2E); rostering this would run it twice.
 	"bin/test-e2e.sh": "a manual entry to the e2e suite the roster already runs",
+}
+
+// Resolve turns a roster path into an absolute one: a path starting with "/"
+// is relative to the repository root REPO, any other to the agent-repl module
+// root MODULE. It is the one reading of the convention Suite.Path, Reuse's
+// paths and the placement lists are spelled in.
+func Resolve(repo, module, p string) string {
+	if strings.HasPrefix(p, "/") {
+		return filepath.Join(repo, filepath.FromSlash(p[1:]))
+	}
+	return filepath.Join(module, filepath.FromSlash(p))
 }
 
 // Names is the roster's names, in roster order.

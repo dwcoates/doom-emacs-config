@@ -111,10 +111,7 @@ func spec(id, suite, dir string, argv []string, env ...string) run.Spec {
 // resolve is a roster path: relative to the module, or to the repository when
 // it starts with "/".
 func (l Layout) resolve(p string) string {
-	if strings.HasPrefix(p, "/") {
-		return filepath.Join(l.Repo, p[1:])
-	}
-	return filepath.Join(l.Module, p)
+	return roster.Resolve(l.Repo, l.Module, p)
 }
 
 func scriptUnits(l Layout, s roster.Suite) (Units, error) {

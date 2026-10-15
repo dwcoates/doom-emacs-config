@@ -212,7 +212,7 @@ func SuiteInputs(d Deps, s roster.Suite) (*InputSet, error) {
 	set := NewInputSet()
 	switch s.Kind {
 	case roster.GoModule:
-		dir := filepath.Join(d.Module, filepath.FromSlash(s.Path))
+		dir := roster.Resolve(d.Repo, d.Module, s.Path)
 		tagSets := []string{""}
 		if s.IntegrationTags != "" {
 			tagSets = append(tagSets, s.IntegrationTags)
@@ -257,7 +257,7 @@ func SuiteInputs(d Deps, s roster.Suite) (*InputSet, error) {
 		if err := addRunnerDir(d, set, "testrun/ert"); err != nil {
 			return nil, err
 		}
-		pkgs, err := d.GoList(filepath.Join(d.Module, filepath.FromSlash(s.Path), "testsupport", "fakedaemon"), "", false, ".")
+		pkgs, err := d.GoList(filepath.Join(roster.Resolve(d.Repo, d.Module, s.Path), "testsupport", "fakedaemon"), "", false, ".")
 		if err != nil {
 			return nil, err
 		}
@@ -272,7 +272,7 @@ func SuiteInputs(d Deps, s roster.Suite) (*InputSet, error) {
 	}
 	// The runner decides how every unit is built, split and run, so its own
 	// code is an input of every keyed suite.
-	runner, err := d.GoList(filepath.Join(d.Module, "testrun"), "", false, ".")
+	runner, err := d.GoList(roster.Resolve(d.Repo, d.Module, "testrun"), "", false, ".")
 	if err != nil {
 		return nil, err
 	}
@@ -324,7 +324,7 @@ func addPrograms(d Deps, set *InputSet, s roster.Suite) error {
 		if !ok {
 			return fmt.Errorf("reuse: %s runs the program %q, which the roster does not declare", s.Name, n)
 		}
-		pkgs, err := d.GoList(filepath.Join(d.Module, filepath.FromSlash(p.Module)), "", false, p.Package)
+		pkgs, err := d.GoList(roster.Resolve(d.Repo, d.Module, p.Module), "", false, p.Package)
 		if err != nil {
 			return err
 		}
@@ -340,13 +340,7 @@ func addPrograms(d Deps, set *InputSet, s roster.Suite) error {
 // subtree (a trailing "/").
 func RepoPath(d Deps, p string) (string, bool, error) {
 	tree := strings.HasSuffix(p, "/")
-	var abs string
-	if strings.HasPrefix(p, "/") {
-		abs = filepath.Join(d.Repo, filepath.FromSlash(p[1:]))
-	} else {
-		abs = filepath.Join(d.Module, filepath.FromSlash(p))
-	}
-	rel, err := filepath.Rel(d.Repo, abs)
+	rel, err := filepath.Rel(d.Repo, roster.Resolve(d.Repo, d.Module, p))
 	if err != nil {
 		return "", false, err
 	}
