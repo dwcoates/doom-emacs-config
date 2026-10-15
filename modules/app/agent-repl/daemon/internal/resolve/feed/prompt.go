@@ -277,23 +277,33 @@ func stampPromptWorking(s *wsState, row *frontendv1.FeedRow) {
 // a terminal replayed across planes re-publishes nothing.
 func (r *resolver) settleTurnPrompts(s *wsState, turn ids.TurnID) {
 	s.endedTurns[turn] = true
-	settled := 0
-	for key, f := range s.feeds {
-		for _, id := range f.order {
-			row := f.rows[id]
-			if row.GetTurn().GetValue() != string(turn) {
-				continue
-			}
-			if !row.GetUserPrompt().GetWorking() && !row.GetAgentPrompt().GetWorking() {
-				continue
-			}
-			r.upsert(s, placement{feed: s.feedAddrs[key]}, row, !f.nonDurable[id])
-			settled++
-		}
-	}
+	settled := r.republishRows(s, func(row *frontendv1.FeedRow) bool {
+		return row.GetTurn().GetValue() == string(turn) &&
+			(row.GetUserPrompt().GetWorking() || row.GetAgentPrompt().GetWorking())
+	})
 	r.logger(s.id).Debug("daemon.feed.turn_prompts_settled",
 		"the turn ended; its prompt rows were re-published no longer working",
 		dlog.Context{"turn": string(turn), "rows": settled})
+}
+
+// republishRows re-publishes, in place on its own feed, every stored row of
+// the workspace that MATCH accepts, so each restates whatever upsert stamps
+// from state that just changed (a prompt's `working`, its `commands`). A row
+// whose snapshot comes out equal is dropped by upsert as churn. It answers how
+// many rows MATCH accepted.
+func (r *resolver) republishRows(s *wsState, match func(*frontendv1.FeedRow) bool) int {
+	matched := 0
+	for key, f := range s.feeds {
+		for _, id := range f.order {
+			row := f.rows[id]
+			if !match(row) {
+				continue
+			}
+			r.upsert(s, placement{feed: s.feedAddrs[key]}, row, !f.nonDurable[id])
+			matched++
+		}
+	}
+	return matched
 }
 
 // SaidText composes the one canonical prompt form from plain text.

@@ -3,6 +3,9 @@ package feed
 import (
 	"context"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -901,5 +904,115 @@ func TestAgentBlocksCarryAQuote(t *testing.T) {
 	// Assert.
 	if len(got) != 1 || got[0].GetQuote() != quote {
 		t.Fatalf("agent blocks = %v, want the quote carried", got)
+	}
+}
+
+// republishRowsMatched runs republishRows under the resolver's lock.
+func (h *harness) republishRowsMatched(match func(*frontendv1.FeedRow) bool) int {
+	h.t.Helper()
+	h.resolver.mu.Lock()
+	defer h.resolver.mu.Unlock()
+	return h.resolver.republishRows(h.resolver.state(testWorkspace), match)
+}
+
+func TestRepublishRowsCountsTheRowsItsMatchAccepts(t *testing.T) {
+	cases := []struct {
+		name  string
+		match func(h *harness) func(*frontendv1.FeedRow) bool
+		want  int
+	}{
+		{name: "every row", match: func(*harness) func(*frontendv1.FeedRow) bool {
+			return func(*frontendv1.FeedRow) bool { return true }
+		}, want: 2},
+		{name: "one row", match: func(h *harness) func(*frontendv1.FeedRow) bool {
+			id := h.promptRowID("turn-1")
+			return func(row *frontendv1.FeedRow) bool { return row.GetId().GetValue() == id }
+		}, want: 1},
+		{name: "no row", match: func(*harness) func(*frontendv1.FeedRow) bool {
+			return func(*frontendv1.FeedRow) bool { return false }
+		}, want: 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.deliverPrompt("turn-1", "one")
+			h.deliverPrompt("turn-2", "two")
+
+			// Act.
+			got := h.republishRowsMatched(tc.match(h))
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("matched = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// A REPUBLISHED ROW RESTATES WHAT UPSERT STAMPS NOW: a prompt whose turn ended
+// behind upsert's back comes out settled.
+func TestRepublishRowsRestatesTheStampsOfTheRowsItMatches(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "one")
+	h.resolver.mu.Lock()
+	h.resolver.state(testWorkspace).endedTurns["turn-1"] = true
+	h.resolver.mu.Unlock()
+
+	// Act.
+	h.republishRowsMatched(func(row *frontendv1.FeedRow) bool { return row.GetUserPrompt() != nil })
+
+	// Assert.
+	if h.promptWorking("turn-1") {
+		t.Fatal("the republished prompt still works")
+	}
+}
+
+// EVERY ROW RE-PUBLICATION GOES THROUGH republishRows: neither caller walks
+// the feeds itself, so a hand-rolled loop that drifts from it fails here.
+func TestTheRowRepublishersShareRepublishRows(t *testing.T) {
+	files := map[string]string{
+		"settleTurnPrompts":     "prompt.go",
+		"restampPromptCommands": "commands.go",
+	}
+	for fn, file := range files {
+		t.Run(fn, func(t *testing.T) {
+			// Arrange.
+			parsed, err := parser.ParseFile(token.NewFileSet(), file, nil, 0)
+			if err != nil {
+				t.Fatalf("parse %s: %v", file, err)
+			}
+			var body *ast.BlockStmt
+			for _, decl := range parsed.Decls {
+				if d, ok := decl.(*ast.FuncDecl); ok && d.Name.Name == fn {
+					body = d.Body
+				}
+			}
+			if body == nil {
+				t.Fatalf("%s declares no %s", file, fn)
+			}
+
+			// Act.
+			calls, ranges := false, false
+			ast.Inspect(body, func(n ast.Node) bool {
+				switch n := n.(type) {
+				case *ast.SelectorExpr:
+					if n.Sel.Name == "republishRows" {
+						calls = true
+					}
+				case *ast.RangeStmt:
+					if sel, ok := n.X.(*ast.SelectorExpr); ok && sel.Sel.Name == "feeds" {
+						ranges = true
+					}
+				}
+				return true
+			})
+
+			// Assert.
+			if !calls || ranges {
+				t.Fatalf("%s: calls republishRows = %v, walks the feeds itself = %v", fn, calls, ranges)
+			}
+		})
 	}
 }

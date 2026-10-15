@@ -82,17 +82,9 @@ func (r *resolver) catalogOf(s *wsState) *conversationv1.SessionCommandCatalog {
 // whose list did not change upserts to an equal snapshot, which upsert drops
 // as churn, so a catalog restated unchanged re-publishes nothing.
 func (r *resolver) restampPromptCommands(s *wsState) {
-	considered := 0
-	for key, f := range s.feeds {
-		for _, id := range f.order {
-			row := f.rows[id]
-			if row.GetUserPrompt() == nil {
-				continue
-			}
-			r.upsert(s, placement{feed: s.feedAddrs[key]}, row, !f.nonDurable[id])
-			considered++
-		}
-	}
+	considered := r.republishRows(s, func(row *frontendv1.FeedRow) bool {
+		return row.GetUserPrompt() != nil
+	})
 	r.logger(s.id).Debug("daemon.feed.prompt_commands_restamped",
 		"the session stated its command catalog; every user-prompt row was re-stamped with the commands it names",
 		dlog.Context{"rows": considered, "commands": len(r.catalogOf(s).GetCommands())})
