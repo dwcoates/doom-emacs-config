@@ -299,19 +299,13 @@ func TestSigtermDuringAWedgedBootStillExitsNonZeroWithoutASocket(t *testing.T) {
 func awaitOperationRecord(t *testing.T, store *storeProcess, operation string) {
 	t.Helper()
 
-	deadline := time.NewTimer(readyTimeout)
-	defer deadline.Stop()
-	ticker := time.NewTicker(2 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		if len(recordsAtOperation(store.logRecords(), operation)) > 0 {
-			return
-		}
-		select {
-		case <-deadline.C:
-			t.Fatalf("the store never logged a %q record within %s\nstderr:\n%s", operation, readyTimeout, store.stderrText())
-		case <-ticker.C:
-		}
+	stalled, err := store.await(func() bool {
+		return len(recordsAtOperation(store.logRecords(), operation)) > 0
+	})
+	if err != nil {
+		t.Fatalf("waiting for the store's %q record: %v\nstderr:\n%s", operation, err, store.stderrText())
+	}
+	if stalled != "" {
+		t.Fatalf("the store never logged a %q record: %s\nstderr:\n%s", operation, stalled, store.stderrText())
 	}
 }
