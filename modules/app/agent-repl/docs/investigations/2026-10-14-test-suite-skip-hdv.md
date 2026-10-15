@@ -145,3 +145,10 @@ improbable to change behavior; none is structurally excluded.
   keyed suite's tests read only declared inputs, and a test that needs
   another system's tree belongs in `repo-scans`. The runner now prints that
   hint when a keyed suite fails.
+
+## For the owner
+
+- **A proposed memory, not saved.** It would add
+  `feedback_pgrep_self_match.md`, saying that a `pgrep -f` wait loop must use
+  a pattern that cannot match its own command line. This session's first such
+  loop matched itself and would never have ended.
