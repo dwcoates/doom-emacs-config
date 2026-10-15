@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { createRouterTransport } from "@connectrpc/connect";
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
@@ -10,6 +10,10 @@ import {
   type FeedHeldItem,
 } from "../../../proto/gen/ts/frontend/v1/feed_held_pb";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
+import {
+  WatchFeedHeldFoldSchema,
+  type WatchFeedHeldFold,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_feed_pb";
 import type { Ticker } from "../../src/clock.js";
 import type { FailureSink } from "../../src/failure/sink.js";
 import { createAgentReplClient } from "../../src/rpc/client.js";
@@ -20,6 +24,12 @@ import type { HeldContext } from "../../src/held/context.js";
 import { testHeldContext } from "./held-context.js";
 import { heldPromptItem } from "../feed/harness.js";
 import {
+  FOLDING_BADGE_CLASS,
+  FOLDING_BADGE_LABEL,
+  FOLD_FLASH_CLASS,
+} from "../../src/held/fold-motion.js";
+import {
+  FOLDING_ATTRIBUTE,
   HELD_ENTRY_SELECTOR,
   HELD_ITEM_ATTRIBUTE,
   drawHeldItem,
@@ -28,6 +38,7 @@ import {
 } from "../../src/held/section.js";
 import { resetLoggingForTests } from "../../src/log.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
+import { type DeferredAnimation, deferredAnimation } from "../deferred-animation.js";
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
 const NOW = 1_700_000_000_000;
@@ -299,5 +310,228 @@ describe("mountHeldSection's park on a held prompt's first draw", () => {
     expect(record.context).toMatchObject({ turns: ["t1"] });
     m.dispose();
     resetLoggingForTests();
+  });
+});
+
+describe("mountHeldSection's folds", () => {
+  /** The fold of item FOLDED into item INTO, as a held change names it. */
+  const fold = (folded: string, into: string): WatchFeedHeldFold =>
+    create(WatchFeedHeldFoldSchema, { folded: { value: folded }, into: { value: into } });
+
+  /** Every fade the section starts finishes when the test says. */
+  function deferredFades(): DeferredAnimation {
+    const fade = deferredAnimation();
+    vi.spyOn(Element.prototype, "animate").mockReturnValue(fade.animation);
+    return fade;
+  }
+
+  /** A section holding t1 then t2, whose next change folds t2 into t1. */
+  function foldedT2(): ReturnType<typeof mounted> {
+    const m = mounted();
+    m.held.apply(section([promptItem("t1"), promptItem("t2")]));
+    m.held.apply(section([promptItem("t1")]), [fold("prompt:t2", "prompt:t1")]);
+    return m;
+  }
+
+  /** The list's children, each named by its held item or its leaving id. */
+  const listed = (host: HTMLElement): string[] =>
+    [...(host.querySelector(".held-section-items")?.children ?? [])].map(
+      (el) => el.getAttribute(HELD_ITEM_ATTRIBUTE) ?? `leaving ${el.getAttribute(FOLDING_ATTRIBUTE) ?? "?"}`,
+    );
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetLoggingForTests();
+  });
+
+  it("flashes the entry folded into", () => {
+    // Arrange
+    deferredFades();
+    // Act
+    const m = foldedT2();
+    // Assert
+    expect(m.host.querySelector('[data-held-turn="t1"]')?.classList.contains(FOLD_FLASH_CLASS)).toBe(true);
+    m.held.dispose();
+  });
+
+  it("keeps the folded card, leaving, just under the entry it was folded into", () => {
+    // Arrange
+    deferredFades();
+    const m = mounted();
+    m.held.apply(section([promptItem("t1"), promptItem("t2"), promptItem("t3")]));
+    // Act
+    m.held.apply(section([promptItem("t1"), promptItem("t3")]), [fold("prompt:t2", "prompt:t1")]);
+    // Assert
+    expect(listed(m.host)).toEqual(["prompt:t1", "leaving prompt:t2", "prompt:t3"]);
+    m.held.dispose();
+  });
+
+  it("badges the leaving card folding above", () => {
+    // Arrange
+    deferredFades();
+    // Act
+    const m = foldedT2();
+    // Assert
+    expect(m.host.querySelector(`[${FOLDING_ATTRIBUTE}] .${FOLDING_BADGE_CLASS}`)?.textContent).toBe(FOLDING_BADGE_LABEL);
+    m.held.dispose();
+  });
+
+  it("does not count the leaving card among the held entries", () => {
+    // Arrange
+    deferredFades();
+    // Act
+    const m = foldedT2();
+    // Assert
+    expect([...m.host.querySelectorAll(HELD_ENTRY_SELECTOR)].map((el) => el.getAttribute(HELD_ITEM_ATTRIBUTE))).toEqual([
+      "prompt:t1",
+    ]);
+    m.held.dispose();
+  });
+
+  it("keeps the leaving card under its entry across a later change", () => {
+    // Arrange
+    deferredFades();
+    const m = foldedT2();
+    // Act
+    m.held.apply(section([promptItem("t1"), promptItem("t4")]));
+    // Assert
+    expect(listed(m.host)).toEqual(["prompt:t1", "leaving prompt:t2", "prompt:t4"]);
+    m.held.dispose();
+  });
+
+  it("takes the leaving card down once its fade has run", async () => {
+    // Arrange
+    const fades = deferredFades();
+    const m = foldedT2();
+    // Act
+    await fades.finish();
+    // Assert
+    expect(listed(m.host)).toEqual(["prompt:t1"]);
+    m.held.dispose();
+  });
+
+  it("leaves the host empty once the last leaving card goes from an emptied section", async () => {
+    // Arrange: the entry folded into is one this section draws no card for.
+    const fades = deferredFades();
+    const m = mounted();
+    m.held.apply(section([promptItem("t2")]));
+    m.held.apply(section([]), [fold("prompt:t2", "prompt:hidden")]);
+    // Act
+    await fades.finish();
+    // Assert
+    expect(m.host.childElementCount).toBe(0);
+    m.held.dispose();
+  });
+
+  it("draws the leaving card last when the entry folded into is not drawn", () => {
+    // Arrange
+    deferredFades();
+    const m = mounted();
+    m.held.apply(section([promptItem("t1"), promptItem("t2")]));
+    // Act
+    m.held.apply(section([promptItem("t1")]), [fold("prompt:t2", "prompt:hidden")]);
+    // Assert
+    expect(listed(m.host)).toEqual(["prompt:t1", "leaving prompt:t2"]);
+    m.held.dispose();
+  });
+
+  it("draws no leaving card for a prompt it never drew, and still flashes", () => {
+    // Arrange
+    const animate = vi.spyOn(Element.prototype, "animate");
+    const m = mounted();
+    m.held.apply(section([promptItem("t1")]));
+    // Act
+    m.held.apply(section([promptItem("t1")]), [fold("prompt:t2", "prompt:t1")]);
+    // Assert
+    expect([listed(m.host), animate.mock.calls.length, m.host.querySelector(`.${FOLD_FLASH_CLASS}`) !== null]).toEqual([
+      ["prompt:t1"],
+      0,
+      true,
+    ]);
+    m.held.dispose();
+  });
+
+  it("logs a fold of a prompt it never drew", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const m = mounted();
+    m.held.apply(section([promptItem("t1")]));
+    // Act
+    m.held.apply(section([promptItem("t1")]), [fold("prompt:t2", "prompt:t1")]);
+    // Assert
+    expect((await forwardedRecord(capture, "held.fold.undrawn")).context).toMatchObject({
+      folded: "prompt:t2",
+      into: "prompt:t1",
+    });
+    m.held.dispose();
+  });
+
+  it("logs a fold into an entry it draws no card for", async () => {
+    // Arrange
+    deferredFades();
+    const capture = captureLogRecords("debug");
+    const m = mounted();
+    m.held.apply(section([promptItem("t2")]));
+    // Act
+    m.held.apply(section([]), [fold("prompt:t2", "prompt:hidden")]);
+    // Assert
+    expect((await forwardedRecord(capture, "held.fold.into-undrawn")).context).toMatchObject({ into: "prompt:hidden" });
+    m.held.dispose();
+  });
+
+  it("refuses a fold of a prompt the same change still holds, logging it", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const m = mounted();
+    m.held.apply(section([promptItem("t1"), promptItem("t2")]));
+    // Act
+    const act = (): void => m.held.apply(section([promptItem("t1"), promptItem("t2")]), [fold("prompt:t2", "prompt:t1")]);
+    // Assert
+    expect(act).toThrow(MalformedView);
+    expect((await forwardedRecord(capture, "held.fold.still-held")).context).toMatchObject({
+      folded: "prompt:t2",
+      into: "prompt:t1",
+    });
+    m.held.dispose();
+  });
+
+  it("leaves the drawing as it was when it refuses a fold", () => {
+    // Arrange
+    const m = mounted();
+    m.held.apply(section([promptItem("t1"), promptItem("t2")]));
+    // Act
+    expect(() => m.held.apply(section([promptItem("t1"), promptItem("t2")]), [fold("prompt:t2", "prompt:t1")])).toThrow();
+    // Assert
+    expect([listed(m.host), m.host.querySelector(`.${FOLD_FLASH_CLASS}`)]).toEqual([["prompt:t1", "prompt:t2"], null]);
+    m.held.dispose();
+  });
+
+  it("refuses a fold naming no folded item", () => {
+    // Arrange
+    const m = mounted();
+    const anonymous = create(WatchFeedHeldFoldSchema, { into: { value: "prompt:t1" } });
+    // Act + Assert
+    expect(() => m.held.apply(section([promptItem("t1")]), [anonymous])).toThrow(MalformedView);
+    m.held.dispose();
+  });
+
+  it("refuses a fold naming no item folded into", () => {
+    // Arrange
+    const m = mounted();
+    const unaimed = create(WatchFeedHeldFoldSchema, { folded: { value: "prompt:t2" } });
+    // Act + Assert
+    expect(() => m.held.apply(section([promptItem("t1")]), [unaimed])).toThrow(MalformedView);
+    m.held.dispose();
+  });
+
+  it("does not redraw once disposed when a leaving card's fade ends", async () => {
+    // Arrange
+    const fades = deferredFades();
+    const m = foldedT2();
+    m.held.dispose();
+    // Act
+    await fades.finish();
+    // Assert
+    expect(m.host.childElementCount).toBe(0);
   });
 });

@@ -440,13 +440,14 @@ export function mountFeed(
   /**
    * One change of the held section, applied whole BEFORE the page can paint:
    * every row that moved first (an item that settled, drawn at the bottom, or
-   * a row whose item returned, as its removal), then the section itself. So no
-   * frame ever draws an item in both places or in neither (WatchFeedHeldChange).
+   * a row whose item returned, as its removal), then the section itself with
+   * the folds the change made. So no frame ever draws an item in both places
+   * or in neither (WatchFeedHeldChange).
    */
   function applyHeldChange(change: WatchFeedHeldChange): void {
     for (const row of change.rows) root.upsert(row);
     const section = requireMessage(change.held, "WatchFeedHeldChange.held");
-    held?.apply(section);
+    held?.apply(section, change.folds);
   }
 
   /**

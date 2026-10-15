@@ -716,6 +716,16 @@ describe("mountFeed: the held section", () => {
     ]);
   });
 
+  it("hands a held frame's folds to the section, which flashes the entry folded into", async () => {
+    // Arrange
+    const m = await mountedSection(heldSection([heldPromptItem("prompt:t1", "t1"), heldPromptItem("prompt:t2", "t2")]));
+    // Act
+    m.channel.push(pushHeld(heldSection([heldPromptItem("prompt:t1", "t1")]), [], [["prompt:t2", "prompt:t1"]]));
+    await settle();
+    // Assert
+    expect(m.heldHost.querySelector('[data-held-turn="t1"]')?.classList.contains("held-coalesce-flash")).toBe(true);
+  });
+
   it("drops a row a held frame removes as its item returns to the section", async () => {
     // Arrange
     const m = await mountedSection();

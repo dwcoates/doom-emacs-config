@@ -1370,6 +1370,9 @@ type fakeHolds struct {
 	holds.Sink
 	mu     sync.Mutex
 	pushes [][]wsm.HeldPrompt
+	// folds records the fold every push made, in push order: the zero Fold
+	// for a SetHeldPrompts push, which folded nothing.
+	folds []holds.Fold
 	// editing records every SetEditing, in order.
 	editing []ids.TurnID
 }
@@ -1391,6 +1394,29 @@ func (h *fakeHolds) SetHeldPrompts(_ ids.WorkspaceID, held []wsm.HeldPrompt) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.pushes = append(h.pushes, held)
+	h.folds = append(h.folds, holds.Fold{})
+}
+
+// FoldHeldPrompts records the push as SetHeldPrompts does, and the fold it made.
+func (h *fakeHolds) FoldHeldPrompts(_ ids.WorkspaceID, held []wsm.HeldPrompt, fold holds.Fold) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.pushes = append(h.pushes, held)
+	h.folds = append(h.folds, fold)
+}
+
+// pushedFolds answers every fold a push named, in order, skipping the
+// pushes that folded nothing.
+func (h *fakeHolds) pushedFolds() []holds.Fold {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var out []holds.Fold
+	for _, f := range h.folds {
+		if f != (holds.Fold{}) {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 func (h *fakeHolds) last() []wsm.HeldPrompt {

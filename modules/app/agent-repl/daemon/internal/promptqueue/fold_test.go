@@ -9,6 +9,7 @@ import (
 
 	"agent-repld/internal/classifier"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/holds"
 	"agent-repld/internal/wsm"
 )
 
@@ -115,6 +116,20 @@ func TestFoldRepublishesTheTray(t *testing.T) {
 	// Assert
 	if last := h.holds.last(); len(last) != 1 || last[0].Turn != "t1" {
 		t.Fatalf("the tray's last push = %+v, want t1 alone", last)
+	}
+}
+
+func TestFoldNamesTheFoldOnTheTraysPush(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	twoQueued(t, h)
+
+	// Act
+	fold(t, h, "t2", "t1")
+
+	// Assert
+	if got := h.holds.pushedFolds(); len(got) != 1 || got[0] != (holds.Fold{From: "t2", Into: "t1"}) {
+		t.Fatalf("pushed folds = %+v, want t2 folded into t1 alone", got)
 	}
 }
 
@@ -309,6 +324,9 @@ func TestFoldRefuses(t *testing.T) {
 			if h.db.coalescences != 0 {
 				t.Fatalf("coalescences = %d, want no fold attempted", h.db.coalescences)
 			}
+			if got := h.holds.pushedFolds(); len(got) != 0 {
+				t.Fatalf("pushed folds = %+v, want none for a refused fold", got)
+			}
 		})
 	}
 }
@@ -364,6 +382,9 @@ func TestAFoldTheStoreRefusesChangesNothing(t *testing.T) {
 	unchanged(t, h, before)
 	if len(h.judge.questions()) != asked {
 		t.Fatalf("the judge was asked again after a failed fold")
+	}
+	if got := h.holds.pushedFolds(); len(got) != 0 {
+		t.Fatalf("pushed folds = %+v, want none for a fold the store refused", got)
 	}
 	if !logged(h.log.Records(), "error", opFold, "the fold could not be recorded; both entries stand as they were") {
 		t.Fatalf("records = %+v, want the failure at error", h.log.Records())

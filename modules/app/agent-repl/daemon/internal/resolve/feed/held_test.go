@@ -10,6 +10,7 @@ import (
 
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/holds"
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/wsm"
 )
@@ -146,6 +147,61 @@ func TestAHoldsChangeIsPublishedOnTheRootFeed(t *testing.T) {
 	}
 	if got := itemIDs(pub.Held.GetHeld()); !sameIDs(got, []string{h.promptRowID("turn-1")}) {
 		t.Fatalf("held ids = %v, want the one prompt", got)
+	}
+}
+
+func TestAnOrdinaryHoldsChangeNamesNoFold(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	_, pubs := h.rootPublications()
+
+	// Act
+	h.resolver.SetHeldPrompts(testWorkspace, []wsm.HeldPrompt{standingHold("turn-1", "first", 0)})
+
+	// Assert
+	if folds := next(t, pubs).Held.GetFolds(); len(folds) != 0 {
+		t.Fatalf("folds = %v, want none", folds)
+	}
+}
+
+func TestAFoldIsPublishedNamingBothHeldItems(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.resolver.SetHeldPrompts(testWorkspace, []wsm.HeldPrompt{
+		standingHold("turn-1", "first", 0), standingHold("turn-2", "second", 10),
+	})
+	_, pubs := h.rootPublications()
+
+	// Act
+	h.resolver.FoldHeldPrompts(testWorkspace, []wsm.HeldPrompt{standingHold("turn-1", "first\n\nsecond", 0)},
+		holds.Fold{From: "turn-2", Into: "turn-1"})
+
+	// Assert
+	pub := next(t, pubs)
+	if got := itemIDs(pub.Held.GetHeld()); !sameIDs(got, []string{h.promptRowID("turn-1")}) {
+		t.Fatalf("held ids = %v, want the entry folded into alone", got)
+	}
+	folds := pub.Held.GetFolds()
+	if len(folds) != 1 || folds[0].GetFolded().GetValue() != h.promptRowID("turn-2") ||
+		folds[0].GetInto().GetValue() != h.promptRowID("turn-1") {
+		t.Fatalf("folds = %v, want turn-2's item folded into turn-1's", folds)
+	}
+}
+
+func TestAFoldIsPublishedWhenTheSectionDrawsNeitherItem(t *testing.T) {
+	// Arrange: the section looks the same before and after, yet the fold is
+	// still the change's to name.
+	h := newHarness(t)
+	standing := []wsm.HeldPrompt{standingHold("turn-1", "first", 0)}
+	h.resolver.SetHeldPrompts(testWorkspace, standing)
+	_, pubs := h.rootPublications()
+
+	// Act
+	h.resolver.FoldHeldPrompts(testWorkspace, standing, holds.Fold{From: "turn-8", Into: "turn-9"})
+
+	// Assert
+	if folds := next(t, pubs).Held.GetFolds(); len(folds) != 1 {
+		t.Fatalf("folds = %v, want the one fold", folds)
 	}
 }
 

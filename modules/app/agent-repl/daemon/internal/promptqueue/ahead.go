@@ -9,6 +9,7 @@ import (
 	"agent-repld/internal/holdfold"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/resolve/holds"
 	"agent-repld/internal/wsm"
 )
 
@@ -237,5 +238,5 @@ func (q *queue) coalesce(ctx context.Context, sub Submission, into wsm.HeldPromp
 		"turn": string(sub.Turn), "into_turn": string(into.Turn),
 	})
 	q.deps.Footer.OnSubmission(sub.WS, footer.Submission{Stage: footer.StageCoalesced})
-	return q.pushTray(ctx, sub.WS, log)
+	return q.pushFold(ctx, sub.WS, holds.Fold{From: sub.Turn, Into: into.Turn}, log)
 }

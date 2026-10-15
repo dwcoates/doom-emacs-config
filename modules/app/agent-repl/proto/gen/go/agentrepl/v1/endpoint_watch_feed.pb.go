@@ -195,7 +195,19 @@ type WatchFeedHeldChange struct {
 	// returned to the section (a prompt's acceptance withdrawn when its
 	// delivery found no session). These rows ride ONLY here, never also as
 	// `row` frames. Empty when the change only reshaped the section.
-	Rows          []*v1.FeedRow `protobuf:"bytes,2,rep,name=rows,proto3" json:"rows,omitempty"`
+	Rows []*v1.FeedRow `protobuf:"bytes,2,rep,name=rows,proto3" json:"rows,omitempty"`
+	// THE FOLDS THIS CHANGE MADE: every held prompt that left the section in
+	// this change because it was folded into the entry ahead of it, whether the
+	// user folded it (FoldHeldPrompt) or the classifier coalesced it. Empty
+	// when no prompt was folded.
+	//
+	// A CHANGE, NOT A STATE, so it rides only here and never on OpenFeed's
+	// section: a reader that opens after the fold sees the merged entry and
+	// nothing to animate. A client flashes the entry folded into once, and,
+	// when it was drawing the folded prompt's card, shows that card for a
+	// moment with a "folding above" badge before taking it down. A folded
+	// prompt a client never drew is not drawn now.
+	Folds         []*WatchFeedHeldFold `protobuf:"bytes,3,rep,name=folds,proto3" json:"folds,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -244,6 +256,71 @@ func (x *WatchFeedHeldChange) GetRows() []*v1.FeedRow {
 	return nil
 }
 
+func (x *WatchFeedHeldChange) GetFolds() []*WatchFeedHeldFold {
+	if x != nil {
+		return x.Folds
+	}
+	return nil
+}
+
+// One held prompt folded into the held entry directly ahead of it.
+type WatchFeedHeldFold struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The folded prompt's held item id (FeedHeldItem.id), absent from `held`
+	// in the same change. REQUIRED.
+	Folded *v1.FeedId `protobuf:"bytes,1,opt,name=folded,proto3" json:"folded,omitempty"`
+	// The held item id of the entry it was folded into, which now carries both
+	// prompts' content. REQUIRED. Not always drawn: an entry of an origin the
+	// section draws no card for takes a fold all the same.
+	Into          *v1.FeedId `protobuf:"bytes,2,opt,name=into,proto3" json:"into,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WatchFeedHeldFold) Reset() {
+	*x = WatchFeedHeldFold{}
+	mi := &file_agentrepl_v1_endpoint_watch_feed_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WatchFeedHeldFold) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WatchFeedHeldFold) ProtoMessage() {}
+
+func (x *WatchFeedHeldFold) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_watch_feed_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WatchFeedHeldFold.ProtoReflect.Descriptor instead.
+func (*WatchFeedHeldFold) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_watch_feed_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *WatchFeedHeldFold) GetFolded() *v1.FeedId {
+	if x != nil {
+		return x.Folded
+	}
+	return nil
+}
+
+func (x *WatchFeedHeldFold) GetInto() *v1.FeedId {
+	if x != nil {
+		return x.Into
+	}
+	return nil
+}
+
 var File_agentrepl_v1_endpoint_watch_feed_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_watch_feed_proto_rawDesc = "" +
@@ -259,10 +336,14 @@ const file_agentrepl_v1_endpoint_watch_feed_proto_rawDesc = "" +
 	"\n" +
 	"_selectionB\x12\n" +
 	"\x10_feed_text_scaleB\a\n" +
-	"\x05_held\"j\n" +
+	"\x05_held\"\xa1\x01\n" +
 	"\x13WatchFeedHeldChange\x12)\n" +
 	"\x04held\x18\x01 \x01(\v2\x15.frontend.v1.FeedHeldR\x04held\x12(\n" +
-	"\x04rows\x18\x02 \x03(\v2\x14.frontend.v1.FeedRowR\x04rowsB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x04rows\x18\x02 \x03(\v2\x14.frontend.v1.FeedRowR\x04rows\x125\n" +
+	"\x05folds\x18\x03 \x03(\v2\x1f.agentrepl.v1.WatchFeedHeldFoldR\x05folds\"i\n" +
+	"\x11WatchFeedHeldFold\x12+\n" +
+	"\x06folded\x18\x01 \x01(\v2\x13.frontend.v1.FeedIdR\x06folded\x12'\n" +
+	"\x04into\x18\x02 \x01(\v2\x13.frontend.v1.FeedIdR\x04intoB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_watch_feed_proto_rawDescOnce sync.Once
@@ -276,30 +357,35 @@ func file_agentrepl_v1_endpoint_watch_feed_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_watch_feed_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_watch_feed_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_agentrepl_v1_endpoint_watch_feed_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_agentrepl_v1_endpoint_watch_feed_proto_goTypes = []any{
 	(*WatchFeedRequest)(nil),    // 0: agentrepl.v1.WatchFeedRequest
 	(*WatchFeedResponse)(nil),   // 1: agentrepl.v1.WatchFeedResponse
 	(*WatchFeedHeldChange)(nil), // 2: agentrepl.v1.WatchFeedHeldChange
-	(*FeedWatchToken)(nil),      // 3: agentrepl.v1.FeedWatchToken
-	(*v1.FeedRow)(nil),          // 4: frontend.v1.FeedRow
-	(*v1.FeedSelection)(nil),    // 5: frontend.v1.FeedSelection
-	(*v1.FeedTextScale)(nil),    // 6: frontend.v1.FeedTextScale
-	(*v1.FeedHeld)(nil),         // 7: frontend.v1.FeedHeld
+	(*WatchFeedHeldFold)(nil),   // 3: agentrepl.v1.WatchFeedHeldFold
+	(*FeedWatchToken)(nil),      // 4: agentrepl.v1.FeedWatchToken
+	(*v1.FeedRow)(nil),          // 5: frontend.v1.FeedRow
+	(*v1.FeedSelection)(nil),    // 6: frontend.v1.FeedSelection
+	(*v1.FeedTextScale)(nil),    // 7: frontend.v1.FeedTextScale
+	(*v1.FeedHeld)(nil),         // 8: frontend.v1.FeedHeld
+	(*v1.FeedId)(nil),           // 9: frontend.v1.FeedId
 }
 var file_agentrepl_v1_endpoint_watch_feed_proto_depIdxs = []int32{
-	3, // 0: agentrepl.v1.WatchFeedRequest.watch:type_name -> agentrepl.v1.FeedWatchToken
-	4, // 1: agentrepl.v1.WatchFeedResponse.row:type_name -> frontend.v1.FeedRow
-	5, // 2: agentrepl.v1.WatchFeedResponse.selection:type_name -> frontend.v1.FeedSelection
-	6, // 3: agentrepl.v1.WatchFeedResponse.feed_text_scale:type_name -> frontend.v1.FeedTextScale
-	2, // 4: agentrepl.v1.WatchFeedResponse.held:type_name -> agentrepl.v1.WatchFeedHeldChange
-	7, // 5: agentrepl.v1.WatchFeedHeldChange.held:type_name -> frontend.v1.FeedHeld
-	4, // 6: agentrepl.v1.WatchFeedHeldChange.rows:type_name -> frontend.v1.FeedRow
-	7, // [7:7] is the sub-list for method output_type
-	7, // [7:7] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	4,  // 0: agentrepl.v1.WatchFeedRequest.watch:type_name -> agentrepl.v1.FeedWatchToken
+	5,  // 1: agentrepl.v1.WatchFeedResponse.row:type_name -> frontend.v1.FeedRow
+	6,  // 2: agentrepl.v1.WatchFeedResponse.selection:type_name -> frontend.v1.FeedSelection
+	7,  // 3: agentrepl.v1.WatchFeedResponse.feed_text_scale:type_name -> frontend.v1.FeedTextScale
+	2,  // 4: agentrepl.v1.WatchFeedResponse.held:type_name -> agentrepl.v1.WatchFeedHeldChange
+	8,  // 5: agentrepl.v1.WatchFeedHeldChange.held:type_name -> frontend.v1.FeedHeld
+	5,  // 6: agentrepl.v1.WatchFeedHeldChange.rows:type_name -> frontend.v1.FeedRow
+	3,  // 7: agentrepl.v1.WatchFeedHeldChange.folds:type_name -> agentrepl.v1.WatchFeedHeldFold
+	9,  // 8: agentrepl.v1.WatchFeedHeldFold.folded:type_name -> frontend.v1.FeedId
+	9,  // 9: agentrepl.v1.WatchFeedHeldFold.into:type_name -> frontend.v1.FeedId
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_watch_feed_proto_init() }
@@ -315,7 +401,7 @@ func file_agentrepl_v1_endpoint_watch_feed_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_watch_feed_proto_rawDesc), len(file_agentrepl_v1_endpoint_watch_feed_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
