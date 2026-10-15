@@ -368,6 +368,8 @@ export class TailFollow {
   private selectionActive = false;
   /** Whether the held-off latch was last reported, so it is reported once per spell. */
   private heldOffReported = false;
+  /** Whether a press on a merge bubble's control holds the view, until the reader's next input. */
+  private pressHeld = false;
   /** The row the anchoring holds, and its top in the box's content coordinates. */
   private anchor: { row: Element; at: number; starts: boolean } | null = null;
   /** Where the next anchor search starts: the last anchor, kept across a follow. */
@@ -499,6 +501,27 @@ export class TailFollow {
   }
 
   /**
+   * THE READER PRESSED A CONTROL INSIDE A MERGE BUBBLE (owner request,
+   * 2026-10-14: a click on any of a merge bubble's controls never scrolls the
+   * feed). A tab, a run's view or any other control redraws the bubble's
+   * content, and the bubble is most often the feed's latest entry, so a
+   * standing follow would park the tail on the height change and carry the
+   * control the reader just pressed out from under them. So the follow ends
+   * and the latest-visible latch is held off until the reader's NEXT input
+   * (`onInput`): the anchoring keeps the content under them, and their own
+   * next scroll latches again as always. Moves nothing.
+   */
+  mergeControlPressed(): void {
+    this.release();
+    this.pressHeld = true;
+    this.takeAnchor();
+    log.debug("a merge bubble control was pressed; the view holds until the reader's next input", {
+      operation: "scroll.merge-press-held",
+      context: { at: this.box.scrollTop },
+    });
+  }
+
+  /**
    * The reader expanded a feed item. A standing follow is KEPT (owner ruling,
    * 2026-10-14): expanding is not scrolling away, so only the reader's own
    * scroll up ends the follow, and the follow keeps the tail in view as the
@@ -569,6 +592,7 @@ export class TailFollow {
    */
   onInput(): void {
     this.touched = true;
+    this.pressHeld = false;
   }
 
   /**
@@ -802,7 +826,7 @@ export class TailFollow {
    * reader has scrolled back to the tail: `onTailReached`'s listener runs.
    */
   private latchIfLatestVisible(trigger: LatchTrigger): void {
-    if (this.following) return;
+    if (this.following || this.pressHeld) return;
     const latest = this.readLatest();
     const visible = latest !== null && latestEntryVisible(latest);
     if (!visible) {

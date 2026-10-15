@@ -275,6 +275,18 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
     }
     toggleFold();
   });
+  // A PRESS ON A MERGE BUBBLE'S CONTROL NEVER SCROLLS THE FEED (owner request,
+  // 2026-10-14): captured, so the view is held before the control redraws
+  // anything (`TailFollow.mergeControlPressed`).
+  if (opts.merge === true) {
+    el.addEventListener(
+      "click",
+      (event) => {
+        if (isInteractiveTarget(event.target)) opts.scroll?.tail.mergeControlPressed();
+      },
+      { capture: true },
+    );
+  }
   // KEYBOARD PARITY WITH THE REMOVED BUTTON comes from `armButtonRole`
   // above: Enter and Space click the head, and the click is the toggle. A key
   // pressed while an inner control holds focus belongs to that control.
@@ -495,8 +507,9 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
   }
 
   /**
-   * Whether an event's target is an interactive control the head carries (the
-   * stop button, a link), which owns the event rather than the fold. The head
+   * Whether an event's target is an interactive control (the head's stop
+   * button, a link, a merge bubble's tab), which owns the event rather than
+   * the fold, and whose press on a merge bubble holds the view. The head
    * itself is a `<div>` and matches none of these, so a bare head click always
    * falls through to the toggle.
    */
