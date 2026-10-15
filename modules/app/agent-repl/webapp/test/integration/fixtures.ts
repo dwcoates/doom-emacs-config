@@ -1561,10 +1561,9 @@ export function feedPageSuccess(
       case: "success",
       value: {
         rows,
-        // A page with more NAMES ITS WALK, as the daemon's does.
         edge:
           init?.edge === "hasMore"
-            ? { case: "hasMore", value: { walk: { value: "w-fixture" } } }
+            ? { case: "hasMore", value: {} }
             : { case: "atStart", value: {} },
         // ALWAYS PRESENT, EVEN WHEN EMPTY. `breadcrumbs` is a non-optional
         // message on the wire, so a page without a trail carries an EMPTY

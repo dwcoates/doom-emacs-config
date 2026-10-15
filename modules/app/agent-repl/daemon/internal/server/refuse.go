@@ -171,8 +171,6 @@ func (s *server) asRefusal(err error) (refusal, bool) {
 		return s.fill(refusal{Arm: "above_not_a_prompt", Reason: err.Error()}), true
 
 	// The feed resolver's page-walk refusals.
-	case errors.Is(err, feed.ErrNoWalk):
-		return s.fill(refusal{Arm: "no_walk_standing", Reason: err.Error()}), true
 	case errors.Is(err, feed.ErrUnknownFeed):
 		return s.fill(refusal{Arm: "feed_not_in_workspace", Reason: err.Error()}), true
 

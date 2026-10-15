@@ -634,7 +634,6 @@ func (r *resolver) loadPushedSourced(ctx context.Context, ws ids.WorkspaceID, ad
 		plan, ok = r.planLoad(s, f, false)
 		ok = ok && !bounded
 	}
-	prevLow := f.book.lowest()
 	r.mu.Unlock()
 	if !ok {
 		r.lockedLogger(ws).Debug("daemon.feed.load_pushed_nothing",
@@ -659,33 +658,11 @@ func (r *resolver) loadPushedSourced(ctx context.Context, ws ids.WorkspaceID, ad
 		return false, err
 	}
 
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	moved := 0
-	for _, w := range s.readers {
-		if w.feedKey != f.key || !got.drew {
-			continue
-		}
-		if w.top {
-			// A WALK SERVED NOTHING HOLDS EXACTLY WHAT WAS PUSHED TO IT: its
-			// next page is the one below the rows this load drew.
-			low := got.low
-			w.oldest, w.top = &low, false
-			moved++
-			continue
-		}
-		if w.oldest == nil || (prevLow != "" && *w.oldest > prevLow) {
-			continue
-		}
-		if got.low < *w.oldest {
-			low := got.low
-			w.oldest = &low
-			moved++
-		}
-	}
-	r.logger(ws).Debug("daemon.feed.load_pushed",
-		"a page was loaded for no reader's page and pushed; the walks that held everything loaded were moved to it",
-		dlog.Context{"feed": f.key, "newest": newest, "walks_moved": moved, "drew_rows": got.drew})
+	// Every tail was pushed the rows this load drew, so each reader holds them
+	// and names the oldest of them when it next asks for an older page.
+	r.lockedLogger(ws).Debug("daemon.feed.load_pushed",
+		"a page was loaded for no reader's page and pushed to every tail",
+		dlog.Context{"feed": f.key, "newest": newest, "drew_rows": got.drew})
 	return true, nil
 }
 

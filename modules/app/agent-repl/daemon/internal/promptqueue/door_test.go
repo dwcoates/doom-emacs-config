@@ -86,7 +86,7 @@ func newDoorWorld(t *testing.T) *doorWorld {
 // endings counts the turn's turn_ended rows on the root feed of RESOLVER.
 func (w *doorWorld) endings(t *testing.T, resolver feed.Resolver) int {
 	t.Helper()
-	page, _, _, err := resolver.OpenPage(context.Background(), w.ws, feedid.Feed{Root: true}, feed.ReaderID("reader"))
+	page, _, _, err := resolver.OpenPage(context.Background(), w.ws, feedid.Feed{Root: true})
 	if err != nil {
 		t.Fatalf("OpenPage: %v", err)
 	}

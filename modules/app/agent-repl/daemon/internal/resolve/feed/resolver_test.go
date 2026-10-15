@@ -113,7 +113,11 @@ func (p *fakePainter) Highlight(language, code string) (paint.Spans, error) {
 
 // harness is one resolver under test plus what a test needs to inspect it.
 type harness struct {
-	t        *testing.T
+	t *testing.T
+	// held is each test reader's oldest held row's order key, as a client
+	// holds it: the oldest row of every page served to it. It is what an
+	// older page is asked for by (GetFeedPage older_than).
+	held     map[testReader]string
 	resolver *resolver
 	// catalogs is the slash-command catalog table the resolver stamps user
 	// prompts' known commands from (Deps.Commands).
@@ -942,14 +946,51 @@ func responseSuccessActivity(unit, markdown string) *conversationv1.AgentActivit
 	}
 }
 
-// openPage opens a reader's page, failing the test on a refusal.
-func (h *harness) openPage(feed feedid.Feed, reader ReaderID) (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken) {
+// testReader names one stand-in client in a test, which holds the rows the
+// pages served to it.
+type testReader string
+
+// openPage opens a reader's page, failing the test on a refusal. The reader
+// then holds the page's rows, and holds nothing when it served none.
+func (h *harness) openPage(feed feedid.Feed, reader testReader) (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken) {
 	h.t.Helper()
-	page, token, _, err := h.resolver.OpenPage(context.Background(), testWorkspace, feed, reader)
+	page, token, _, err := h.resolver.OpenPage(context.Background(), testWorkspace, feed)
 	if err != nil {
 		h.t.Fatalf("OpenPage: %v", err)
 	}
+	if h.held == nil {
+		h.held = map[testReader]string{}
+	}
+	delete(h.held, reader)
+	h.hold(reader, page)
 	return page, token
+}
+
+// olderPageOf asks for the page above READER's oldest held row on FEED, as
+// the reader's client asks, and the reader then holds its rows too. A reader
+// holding no row asks for the newest page again, as a client does.
+func (h *harness) olderPageOf(feed feedid.Feed, reader testReader) (*frontendv1.FeedPage, error) {
+	h.t.Helper()
+	oldest, ok := h.held[reader]
+	if !ok {
+		page, _, _, err := h.resolver.OpenPage(context.Background(), testWorkspace, feed)
+		if err == nil {
+			h.hold(reader, page)
+		}
+		return page, err
+	}
+	page, err := h.resolver.OlderPage(context.Background(), testWorkspace, feed, oldest)
+	if err == nil {
+		h.hold(reader, page)
+	}
+	return page, err
+}
+
+// hold records the oldest row of PAGE as READER's oldest held row.
+func (h *harness) hold(reader testReader, page *frontendv1.FeedPage) {
+	if rows := page.GetSuccess().GetRows(); len(rows) > 0 {
+		h.held[reader] = rows[0].GetOrder().GetKey()
+	}
 }
 
 // ---- THE MERGE BUBBLE: synthesized by the orchestrator, placed by us ----

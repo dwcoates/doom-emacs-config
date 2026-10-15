@@ -60,17 +60,18 @@ func (s *server) LoadFeedThrough(
 		}))
 	}
 
-	// THE READER'S OWN WALK, advanced; an unnamed one begins at the newest page.
-	walk := req.Msg.GetWalk().GetValue()
-	if walk == "" {
-		walk = mintWalk()
+	// THE WALK BEGINS ABOVE THE READER'S OLDEST HELD ROW; a reader holding no
+	// row begins at the newest page.
+	var oldestHeld *string
+	if held := req.Msg.OldestHeld; held != nil {
+		key := held.GetKey()
+		oldestHeld = &key
 	}
-	reader := readerFor(walk, ws, nil)
 	pages := 0
-	reached, err := s.deps.Feed.LoadThrough(ctx, ws, reader, target, func(page *frontendv1.FeedPage) error {
+	reached, err := s.deps.Feed.LoadThrough(ctx, ws, oldestHeld, target, func(page *frontendv1.FeedPage) error {
 		pages++
 		return out.Send(&agentreplv1.LoadFeedThroughResponse{
-			Frame: &agentreplv1.LoadFeedThroughResponse_Page{Page: stampWalk(page, walk)},
+			Frame: &agentreplv1.LoadFeedThroughResponse_Page{Page: page},
 		})
 	})
 	switch {

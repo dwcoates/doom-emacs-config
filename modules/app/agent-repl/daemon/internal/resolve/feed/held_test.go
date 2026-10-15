@@ -62,7 +62,7 @@ func (h *harness) mirror(turn, text string) {
 // held section the page was served with and the tail's publications.
 func (h *harness) rootPublications() (*frontendv1.FeedHeld, <-chan Publication) {
 	h.t.Helper()
-	_, token, held, err := h.resolver.OpenPage(context.Background(), testWorkspace, rootFeed(), "reader-held")
+	_, token, held, err := h.resolver.OpenPage(context.Background(), testWorkspace, rootFeed())
 	if err != nil {
 		h.t.Fatalf("OpenPage: %v", err)
 	}
@@ -243,7 +243,7 @@ func TestAnOpenedSubFeedCarriesNoSection(t *testing.T) {
 	lease := ids.LeaseID("lease-7")
 
 	// Act
-	_, _, held, err := h.resolver.OpenPage(context.Background(), testWorkspace, feedid.Feed{Merge: &lease}, "reader-sub")
+	_, _, held, err := h.resolver.OpenPage(context.Background(), testWorkspace, feedid.Feed{Merge: &lease})
 
 	// Assert
 	if err != nil {

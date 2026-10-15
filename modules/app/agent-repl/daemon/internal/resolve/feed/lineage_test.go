@@ -92,7 +92,7 @@ func newestFirstFrom(oldestFirst []bookEntry, firstMs int64) []*conversationv1.H
 // walkRows opens the root feed and asks for older pages until the walk
 // reports the conversation's start, answering every row it served, oldest
 // first.
-func (h *harness) walkRows(reader ReaderID) []*frontendv1.FeedRow {
+func (h *harness) walkRows(reader testReader) []*frontendv1.FeedRow {
 	h.t.Helper()
 	page, _ := h.openPage(rootFeed(), reader)
 	served := slices.Clone(pageRows(h.t, page))

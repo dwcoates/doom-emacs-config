@@ -318,7 +318,7 @@ const tailWait = 2 * time.Second
 
 // follow opens a reader's page on a feed and the tail its token pins, and
 // answers the tail's row stream. The tail ends with the test.
-func (h *harness) follow(feed feedid.Feed, reader ReaderID) <-chan *frontendv1.FeedRow {
+func (h *harness) follow(feed feedid.Feed, reader testReader) <-chan *frontendv1.FeedRow {
 	h.t.Helper()
 	_, token := h.openPage(feed, reader)
 	return h.tailFrom(feed, token)

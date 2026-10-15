@@ -12,6 +12,8 @@
  * target is found across the open ones.
  */
 import { markConversationDrawn } from "./conversation-drawn.js";
+import { installUnshownTrim } from "./unshown-trim.js";
+import { pagePresence, type Presence } from "../presence.js";
 import { log } from "../log.js";
 import { create } from "@bufbuild/protobuf";
 import { reportClientFailure } from "../rpc/link.js";
@@ -125,6 +127,11 @@ export interface FeedDeps {
    * is neither (a fixture rendering the feed on its own).
    */
   scrollBox?: HTMLElement;
+  /**
+   * Whether the host shows this page (`presence.ts`); the root feed frees its
+   * older rows each time it stops (`unshown-trim.ts`). Defaults to the page's.
+   */
+  presence?: Pick<Presence, "shown" | "onChange">;
   /**
    * Where the root feed's held section draws: the page's own `#hold-tray`,
    * after the rows in the same scroll zone. Absent in a fixture rendering the
@@ -302,6 +309,14 @@ export function mountFeed(
         : { box: scrollBox, tail },
     selectionVisibility: selectionVisibility ?? undefined,
     onSelectionExpand: afterSelectionToggle,
+  });
+
+  // A PAGE THE HOST STOPS SHOWING FREES ITS OLDER ROWS (unshown-trim.ts),
+  // while its stream keeps drawing every update for the switch back.
+  const uninstallTrim = installUnshownTrim({
+    presence: deps.presence ?? pagePresence(),
+    ctx,
+    trim: () => root.freeOlderThanNewestPage(),
   });
 
   // A CLICK ON A ROOT-FEED PROMPT OR RESPONSE BUBBLE selects it, or, on the
@@ -1112,6 +1127,7 @@ export function mountFeed(
     if (disposed) return;
     disposed = true;
     watch?.cancel();
+    uninstallTrim();
     unobserve?.();
     intentScroll?.uninstall();
     uninstallExpand();

@@ -1807,7 +1807,7 @@ describe("an earlier-steps fold", () => {
     // Assert
     const calls = harness.fake.calls<GetFeedPageRequest>("getFeedPage");
     expect(calls).toHaveLength(before + 1);
-    expect(calls[calls.length - 1]?.page.case).toBe("next");
+    expect(calls[calls.length - 1]?.page.case).toBe("olderThan");
   });
 });
 

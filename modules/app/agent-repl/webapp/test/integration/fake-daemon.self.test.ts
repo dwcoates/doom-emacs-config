@@ -431,14 +431,14 @@ describe("the feed universe", () => {
     expect(pushes).toHaveLength(0);
   });
 
-  it("answers GetFeedPage `next` with the next page when one is scripted", async () => {
+  it("answers GetFeedPage `older_than` with the older page when one is scripted", async () => {
     // Arrange
     fake.setPage(WORKSPACE_ID, ROOT_FEED, feedPageSuccess([userPromptRow("newest")]));
     fake.setNextPage(WORKSPACE_ID, ROOT_FEED, feedPageSuccess([userPromptRow("older")]));
     // Act
     const response = await client.getFeedPage({
       workspace: workspaceRef(),
-      page: { case: "next", value: {} },
+      page: { case: "olderThan", value: { oldestHeld: { key: "k-1" } } },
     });
     // Assert
     const page = response.result.case === "success" ? response.result.value : undefined;

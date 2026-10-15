@@ -11,8 +11,10 @@
 // it) and streams each to the reader as it lands, so the reader paints the
 // walk progressively instead of waiting on the whole of it.
 //
-// The walk is the reader's ordinary `older` walk, advanced: once this stream
-// ends, GetFeedPage `next` continues from the oldest page it delivered.
+// The walk begins directly above the reader's oldest held row, exactly where
+// a GetFeedPage `older_than` would, so the pages it streams join what the
+// reader holds with no gap and no repeat; once it ends, the reader's next
+// `older_than` names the oldest row this streamed.
 
 syntax = "proto3";
 
@@ -28,11 +30,12 @@ message LoadFeedThroughRequest {
   // The row to bring into the loaded pages: the root-feed row the selected
   // footer item names, echoed exactly as the daemon served it.
   frontend.v1.FeedId target = 2;
-  // The walk to advance: the reader's current walk (the `has_more.walk` of the
-  // last page it holds), so a later `next` continues below what this streamed.
-  // UNSET begins a new walk at the newest page; every page this streams names
-  // the walk on its `has_more`.
-  optional frontend.v1.FeedWalkId walk = 3;
+  // The order of the oldest row the reader holds, echoed exactly as the
+  // daemon served it; the walk streams the pages above it. UNSET when the
+  // reader holds no row of the feed: the walk then begins at the newest page.
+  optional frontend.v1.FeedRowOrder oldest_held = 4;
+  reserved 3;
+  reserved "walk";
 }
 
 // One frame of the walk. THE ARM IS THE FRAME. Zero or more `page` frames,

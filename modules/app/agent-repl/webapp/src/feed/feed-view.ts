@@ -79,13 +79,13 @@ import {
   type FeedSelection,
   type FeedTurnActivity,
   type FeedRow,
-  type FeedWalkId,
+  type FeedRowOrder,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import {
   GetFeedPageResponseSchema,
   type GetFeedPageResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_get_feed_page_pb";
-import { buildGetFeedPageRequest, buildLoadFeedThroughRequest } from "./requests.js";
+import { buildGetFeedPageRequest, buildLoadFeedThroughRequest, type FeedPageAsk } from "./requests.js";
 import { armName } from "./renderers.js";
 import type {
   BubbleBodyRenderer,
@@ -230,6 +230,14 @@ export interface FeedController extends Handle {
    * words it in the footer.
    */
   loadThrough(target: FeedId): Promise<LoadThroughOutcome>;
+  /**
+   * Free every row older than the feed's newest daemon page, for a page the
+   * host stopped showing (`unshown-trim.ts`). The newest page's oldest row is
+   * learned from the daemon, and every row sorting at or after it — rows
+   * pushed meanwhile included — stays. Runs in the walk queue, after any
+   * older page or walk to a row already asked for.
+   */
+  freeOlderThanNewestPage(): Promise<void>;
   /** One live upsert. */
   upsert(row: FeedRow): void;
   /**
@@ -295,10 +303,6 @@ export function createFeedController(
   // what decides whether a pushed row sorting before every held row is drawn
   // (the feed is at its start) or left to the walk (unloaded history).
   let walkEdge: "hasMore" | "atStart" | null = null;
-  // THE WALK the last page with more named (FeedPageHasMore.walk): what
-  // "load previous page" and a LoadFeedThrough continue. Kept across an
-  // at-start page, so a further ask still names the walk it belongs to.
-  let walk: FeedWalkId | undefined;
   // THE LoadFeedThrough WALKS IN FLIGHT: serialized through `throughTail`, and
   // the "load previous page" control stays disabled while `throughRunning`
   // is above zero.
@@ -335,6 +339,7 @@ export function createFeedController(
     applyPage,
     hasMoreHistory: () => walkEdge === "hasMore",
     loadThrough,
+    freeOlderThanNewestPage: () => serializeWalk(freeBelowNewestPage),
     upsert,
     applySelection,
     selectionActive: () => selectedRow !== null,
@@ -377,12 +382,7 @@ export function createFeedController(
   // ---- the row store ----------------------------------------------------
 
   function rows(): readonly FeedRow[] {
-    return order.map((id) => {
-      const state = states.get(id);
-      if (state === undefined)
-        throw new Error(`feed: row ${id} is ordered but not held`);
-      return state.row;
-    });
+    return order.map((id) => heldState(id).row);
   }
 
   function onChange(fn: () => void): () => void {
@@ -520,17 +520,22 @@ export function createFeedController(
     }
   }
 
-  /**
-   * Take a page's EDGE as the walk's: the walk it names and whether
-   * "load previous page" is offered.
-   */
+  /** Take a page's EDGE as the walk's: whether "load previous page" is offered. */
   function applyEdge(success: FeedPageSuccess): void {
     const edge = requireCase(success.edge, "FeedPageSuccess.edge");
-    if (edge.case === "hasMore") {
-      walk = requireMessage(edge.value.walk, "FeedPageHasMore.walk");
-      opts.host.prepend(loadMore);
-    } else loadMore.remove();
+    if (edge.case === "hasMore") opts.host.prepend(loadMore);
+    else loadMore.remove();
     walkEdge = edge.case;
+  }
+
+  /**
+   * The order of the oldest row this feed holds, exactly as the daemon served
+   * it: what an older page is asked for above. Undefined while it holds none.
+   */
+  function oldestHeld(): FeedRowOrder | undefined {
+    const id = order[0];
+    if (id === undefined) return undefined;
+    return requireMessage(heldState(id).row.order, "FeedRow.order");
   }
 
   /** The rows whose MERGE bubble the reader left open on this page, by row id. */
@@ -837,11 +842,7 @@ export function createFeedController(
 
   /** The key of the row held at INDEX. */
   function keyAt(index: number): string {
-    const id = order[index];
-    const state = states.get(id);
-    if (state === undefined)
-      throw new Error(`feed: row ${id} is ordered but not held`);
-    return state.key;
+    return heldState(order[index]).key;
   }
 
   /**
@@ -852,9 +853,7 @@ export function createFeedController(
   function sampleSuccessor(index: number): InsertSample | null {
     if (opts.scroll === undefined) return null;
     const id = order[index];
-    const state = states.get(id);
-    if (state === undefined)
-      throw new Error(`feed: row ${id} is ordered but not held`);
+    const state = heldState(id);
     return {
       id,
       element: state.element,
@@ -1229,20 +1228,94 @@ export function createFeedController(
     }
     const at = order.indexOf(id);
     if (at <= 0) return;
-    const dropped = order.splice(0, at);
-    for (const gone of dropped) {
-      const state = states.get(gone);
-      if (state === undefined) continue;
-      discardRow(state);
-      states.delete(gone);
-    }
+    const dropped = dropRowsBefore(at);
     log.info(
-      `dropped ${dropped.length.toString()} rows above the newest separation`,
+      `dropped ${dropped.toString()} rows above the newest separation`,
       {
         operation: "feed.truncated-at-separation",
-        context: { feed: feedName(), row: id, dropped: dropped.length },
+        context: { feed: feedName(), row: id, dropped },
       },
     );
+  }
+
+  /**
+   * Drop the AT oldest rows, each torn down as a retired row is, and answer
+   * how many went. The one way rows leave the top of the feed: above a
+   * separation, and above the newest daemon page of a page no one sees.
+   */
+  function dropRowsBefore(at: number): number {
+    const dropped = order.splice(0, at);
+    for (const gone of dropped) {
+      discardRow(heldState(gone));
+      states.delete(gone);
+    }
+    return dropped.length;
+  }
+
+  /**
+   * FREE THE ROWS OLDER THAN THE NEWEST DAEMON PAGE (owner ruling,
+   * 2026-10-15). A page the host stopped showing keeps its newest daemon page
+   * and everything pushed after it, and frees the rest; its stream stays open,
+   * so a switch back finds every update already drawn, at the tail where a
+   * switch lands.
+   *
+   * THE CUT IS A KEY, NOT A MOMENT. The daemon's newest page is asked for
+   * (`first`) only to learn its oldest row's key; rows sorting before that key
+   * go, and every row at or after it stays. A row pushed while the ask is in
+   * flight, or after, sorts after the cut, so no timing frees a new row.
+   *
+   * SEARCHING FREED HISTORY is a future feature that must keep this paging
+   * scheme: for example the daemon answering a search request with the pages
+   * it needs, so the page loads exactly those, rather than a page keeping its
+   * whole history loaded to be searchable.
+   */
+  async function freeBelowNewestPage(): Promise<void> {
+    const answer = await askFeedPage({ case: "first" }, (arm, text) => {
+      log.warn("a hidden page could not learn its newest daemon page; it keeps every row", {
+        operation: "feed.unshown-trim-refused",
+        context: { feed: feedName(), arm, cause: text },
+      });
+    });
+    if (answer === null) return;
+    const page = requireCase(answer.result, "FeedPage.result");
+    switch (page.case) {
+      case "success":
+        break;
+      case "error":
+        log.warn("a hidden page's newest daemon page came back as a page error; it keeps every row", {
+          operation: "feed.unshown-trim-page-error",
+          context: { feed: feedName(), headline: page.value.headline?.text ?? "" },
+        });
+        return;
+      default:
+        unreachableArm("FeedPage.result", armName(page));
+    }
+    const oldest = page.value.rows[0];
+    if (oldest === undefined) {
+      log.debug("a hidden page's newest daemon page holds no row; nothing is freed", {
+        operation: "feed.unshown-trim-empty",
+        context: { feed: feedName() },
+      });
+      return;
+    }
+    const cut = orderKeyOf(oldest);
+    const at = order.findIndex((id) => heldState(id).key >= cut);
+    const dropped = dropRowsBefore(at < 0 ? order.length : at);
+    if (dropped > 0) applyEdge(page.value);
+    log.info(`a hidden page freed ${dropped.toString()} rows older than its newest daemon page`, {
+      operation: "feed.unshown-trim",
+      context: { feed: feedName(), cut, dropped, kept: order.length },
+    });
+    if (dropped > 0) announce();
+  }
+
+  /** The state of held row ID; a row in the order is always held. */
+  function heldState(id: string): RowState {
+    const state = states.get(id);
+    if (state === undefined) {
+      throw new Error(`feed: row ${id} is ordered but not held`);
+    }
+    return state;
   }
 
   /**
@@ -1591,46 +1664,44 @@ export function createFeedController(
   // ---- the walk ---------------------------------------------------------
 
   /**
-   * Ask for the next-older page.
-   *
-   * `next` continues the walk the DAEMON holds for this feed, so there is
-   * nothing to send but which feed and which direction — and a `next` with no
-   * walk standing is the daemon's refusal, drawn at this control.
+   * Ask for the page above the oldest row this feed holds; a feed holding no
+   * row (its opening was served none) asks for the newest page instead.
    */
   async function loadOlder(): Promise<void> {
+    const oldest = oldestHeld();
     log.info("walking one page older", {
       operation: "feed.load-older",
-      context: { feed: feedName() },
+      context: { feed: feedName(), oldest_held: oldest?.key ?? "none" },
     });
     clearRefusals();
     loadMore.disabled = true;
-    const page = await askFeedPage("next");
+    const page = await askFeedPage(oldest === undefined ? { case: "first" } : { case: "olderThan", oldestHeld: oldest });
     releaseLoadMore();
     if (page !== null) applyPage(page, "prepend");
   }
 
   /**
-   * Ask the daemon for one page of this feed's walk: the next older (`next`,
-   * continuing the walk this feed holds) or a fresh newest (`first`, which
-   * starts a new one). A request that never reached the daemon, or that it
-   * refused, is drawn as a refusal at the control and answers null.
+   * Ask the daemon for one page of this feed (`FeedPageAsk`). A request that
+   * never reached the daemon, or that it refused, is handed to REFUSED —
+   * drawn at the "load previous page" control unless the asker says
+   * otherwise — and answers null.
    */
-  async function askFeedPage(which: "first" | "next"): Promise<FeedPage | null> {
+  async function askFeedPage(
+    ask: FeedPageAsk,
+    refused: (arm: "transport" | "error", text: string) => void = (arm, text) => {
+      loadMore.after(refusalAt(arm, text));
+    },
+  ): Promise<FeedPage | null> {
     let response: GetFeedPageResponse;
     try {
       response = await callUnary(
         opts.ctx,
         "GetFeedPage",
-        (client) =>
-          client.getFeedPage(
-            which === "next"
-              ? buildGetFeedPageRequest(opts.ctx.workspace, feedId(), "next", walk)
-              : buildGetFeedPageRequest(opts.ctx.workspace, feedId(), "first"),
-          ),
+        (client) => client.getFeedPage(buildGetFeedPageRequest(opts.ctx.workspace, feedId(), ask)),
         GetFeedPageResponseSchema,
       );
     } catch {
-      loadMore.after(refusalAt("transport", "the daemon could not be reached"));
+      refused("transport", "the daemon could not be reached");
       return null;
     }
     const result = requireCase(response.result, "GetFeedPageResponse.result");
@@ -1638,7 +1709,7 @@ export function createFeedController(
       case "success":
         return result.value;
       case "error":
-        loadMore.after(refusalAt("error", "older pages are not available"));
+        refused("error", "older pages are not available");
         return null;
       default:
         return unreachableArm("GetFeedPageResponse.result", armName(result));
@@ -1654,17 +1725,15 @@ export function createFeedController(
   }
 
   /**
-   * A COMPACTION THAT ARRIVES ON AN OPEN FEED STARTS A NEW WALK AT ITS DIVIDER.
+   * A COMPACTION THAT ARRIVES ON AN OPEN FEED RE-READS THE EDGE AT ITS DIVIDER.
    *
    * The rows above the divider were just dropped from the screen, but the
-   * daemon still serves them to a walk paging back (owner ruling, 2026-10-10).
-   * The walk this feed held stands wherever its last page left it — below the
-   * rows just dropped, or at a start the compaction moved — so its next page
-   * would skip them. A fresh opening (`GetFeedPage` `first`) is asked for only
-   * after the divider was placed, so the daemon's opening starts at that
-   * divider, and only its EDGE is taken: the rows on screen are already the
-   * divider and what follows it. "load previous page" is held disabled until
-   * the new walk lands, so no page of the old walk is asked for meanwhile.
+   * daemon still serves them to a reader paging back (owner ruling,
+   * 2026-10-10); the divider is now the oldest held row, so "load previous
+   * page" asks for exactly the rows above it. Whether any exist is the
+   * daemon's to say: a fresh opening (`GetFeedPage` `first`) is asked for
+   * after the divider was placed, so it starts at that divider, and only its
+   * EDGE is taken. "load previous page" is held disabled until it lands.
    */
   async function reanchorAtCompaction(divider: string): Promise<void> {
     log.info("a compaction arrived; the walk starts again at its divider", {
@@ -1674,7 +1743,7 @@ export function createFeedController(
     clearRefusals();
     let answer: FeedPage | null;
     try {
-      answer = await askFeedPage("first");
+      answer = await askFeedPage({ case: "first" });
     } finally {
       reanchoring -= 1;
       releaseLoadMore();
@@ -1701,10 +1770,10 @@ export function createFeedController(
   /**
    * The walk to ONE row: `LoadFeedThrough` streams every older page between
    * the oldest loaded page and the page holding TARGET, then ends with
-   * `reached` or `error`. Walks are serialized (a second request waits for the
-   * first), and the "load previous page" control is disabled while one runs
-   * so the two
-   * cannot race over the daemon's one walk.
+   * `reached` or `error`. It begins above the oldest held row, so walks are
+   * serialized (a second request waits for the first) and the "load previous
+   * page" control is disabled while one runs: two asks from one oldest row
+   * would load the same pages twice.
    */
   function loadThrough(target: FeedId): Promise<LoadThroughOutcome> {
     return serializeWalk(() => runLoadThrough(target));
@@ -1712,8 +1781,9 @@ export function createFeedController(
 
   /**
    * Run STEP after every walk request already queued, so no two of them —
-   * an older page, a walk to a row, a re-anchor at a compaction — are ever in
-   * flight together, and none lands on a walk another has replaced.
+   * an older page, a walk to a row, a re-read of the edge at a compaction —
+   * are ever in flight together, and each asks from the oldest row the one
+   * before it left held.
    */
   function serializeWalk<T>(step: () => Promise<T>): Promise<T> {
     const run = throughTail.then(step);
@@ -1757,7 +1827,7 @@ export function createFeedController(
     let pages = 0;
     try {
       for await (const frame of opts.ctx.client.loadFeedThrough(
-        buildLoadFeedThroughRequest(opts.ctx.workspace, target, walk),
+        buildLoadFeedThroughRequest(opts.ctx.workspace, target, oldestHeld()),
       )) {
         assertNoUnknownFields(LoadFeedThroughResponseSchema, frame);
         const arm = requireCase(

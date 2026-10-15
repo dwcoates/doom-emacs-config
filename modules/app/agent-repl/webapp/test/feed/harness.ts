@@ -87,8 +87,6 @@ import { testAppContext } from "../rpc/app-context.js";
 import { orderFor } from "../feed-order.js";
 import type { RowContext, RowRenderers } from "../../src/feed/renderers.js";
 
-/** The walk every fixture page with more names (FeedPageHasMore.walk). */
-export const FIXTURE_WALK = "w-fixture";
 
 export const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
 
@@ -414,7 +412,7 @@ export function page(
         rows: [...rows],
         edge:
           opts.hasMore === true
-            ? { case: "hasMore", value: { walk: { value: FIXTURE_WALK } } }
+            ? { case: "hasMore", value: {} }
             : { case: "atStart", value: {} },
         breadcrumbs: create(FeedBreadcrumbsSchema, { crumbs: [...(opts.crumbs ?? [])] }),
       },

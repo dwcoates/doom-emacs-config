@@ -59,11 +59,13 @@ func pagedFeedRows(t *testing.T) (*fixture, map[string]*frontendv1.FeedRow) {
 	return f, rows
 }
 
-// feedPage asks GetFeedPage for the first or next page of the root feed; a
-// next continues the walk the fixture's last page named (f.walk).
+// feedPage asks GetFeedPage for the first page of the root feed, or the page
+// above the oldest row the fixture's pages served it (f.oldestHeld).
 func (f *fixture) feedPage(first bool) *frontendv1.FeedPage {
 	f.t.Helper()
-	req := &agentreplv1.GetFeedPageRequest{Workspace: f.ws, Page: &agentreplv1.GetFeedPageRequest_Next{Next: &agentreplv1.GetFeedPageNext{Walk: f.walk}}}
+	req := &agentreplv1.GetFeedPageRequest{Workspace: f.ws, Page: &agentreplv1.GetFeedPageRequest_OlderThan{
+		OlderThan: &agentreplv1.GetFeedPageOlderThan{OldestHeld: f.oldestHeld},
+	}}
 	if first {
 		req.Page = &agentreplv1.GetFeedPageRequest_First{First: &agentreplv1.GetFeedPageFirst{}}
 	}
@@ -71,8 +73,8 @@ func (f *fixture) feedPage(first bool) *frontendv1.FeedPage {
 	if err != nil || resp.Msg.GetSuccess().GetSuccess() == nil {
 		f.t.Fatalf("GetFeedPage = %v, %v; want a page", resp, err)
 	}
-	if more := resp.Msg.GetSuccess().GetSuccess().GetHasMore(); more != nil {
-		f.walk = more.GetWalk()
+	if rows := resp.Msg.GetSuccess().GetSuccess().GetRows(); len(rows) > 0 {
+		f.oldestHeld = rows[0].GetOrder()
 	}
 	return resp.Msg.GetSuccess()
 }
@@ -121,7 +123,7 @@ func TestLoadFeedThroughStreamsEveryPageDownToTheTarget(t *testing.T) {
 
 	// Act.
 	stream, err := f.d.Client().LoadFeedThrough(f.d.Ctx(), connect.NewRequest(&agentreplv1.LoadFeedThroughRequest{
-		Workspace: f.ws, Walk: f.walk, Target: oldest.GetId(),
+		Workspace: f.ws, OldestHeld: f.oldestHeld, Target: oldest.GetId(),
 	}))
 	if err != nil {
 		t.Fatalf("LoadFeedThrough: %v", err)
@@ -156,15 +158,20 @@ func TestANextAfterLoadFeedThroughContinuesBelowIt(t *testing.T) {
 	f, rows := pagedFeedRows(t)
 	f.feedPage(true)
 	stream, err := f.d.Client().LoadFeedThrough(f.d.Ctx(), connect.NewRequest(&agentreplv1.LoadFeedThroughRequest{
-		Workspace: f.ws, Walk: f.walk, Target: rows["row 6"].GetId(),
+		Workspace: f.ws, OldestHeld: f.oldestHeld, Target: rows["row 6"].GetId(),
 	}))
 	if err != nil {
 		t.Fatalf("LoadFeedThrough: %v", err)
 	}
 	served := map[string]bool{}
 	for stream.Receive() {
-		for _, row := range stream.Msg().GetPage().GetSuccess().GetRows() {
+		rows := stream.Msg().GetPage().GetSuccess().GetRows()
+		for _, row := range rows {
 			served[row.GetId().GetValue()] = true
+		}
+		// The reader holds every page the walk streamed it.
+		if len(rows) > 0 {
+			f.oldestHeld = rows[0].GetOrder()
 		}
 	}
 	if err := stream.Err(); err != nil {
@@ -198,7 +205,7 @@ func TestLoadFeedThroughATargetTheConversationNeverHadIsNotFound(t *testing.T) {
 
 	// Act.
 	stream, err := f.d.Client().LoadFeedThrough(f.d.Ctx(), connect.NewRequest(&agentreplv1.LoadFeedThroughRequest{
-		Workspace: f.ws, Walk: f.walk, Target: ghost,
+		Workspace: f.ws, OldestHeld: f.oldestHeld, Target: ghost,
 	}))
 	if err != nil {
 		t.Fatalf("LoadFeedThrough: %v", err)

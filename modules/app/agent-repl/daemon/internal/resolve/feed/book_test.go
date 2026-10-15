@@ -240,12 +240,13 @@ func (h *harness) mainBook(page int, oldestFirst []bookEntry) *fakeHistory {
 	return f
 }
 
-// nextPage asks for a reader's next page, failing the test on an error.
-func (h *harness) nextPage(reader ReaderID) *frontendv1.FeedPage {
+// nextPage asks for the root-feed page above a reader's oldest held row,
+// failing the test on an error.
+func (h *harness) nextPage(reader testReader) *frontendv1.FeedPage {
 	h.t.Helper()
-	page, err := h.resolver.NextPage(context.Background(), testWorkspace, rootFeed(), reader)
+	page, err := h.olderPageOf(rootFeed(), reader)
 	if err != nil {
-		h.t.Fatalf("NextPage: %v", err)
+		h.t.Fatalf("OlderPage: %v", err)
 	}
 	return page
 }
@@ -381,7 +382,7 @@ func TestOpenFeedWithNoSessionServesWhatIsHeld(t *testing.T) {
 	h.deliverPromptAt("turn-1", "live", 100)
 
 	// Act.
-	page, _, _, err := h.resolver.OpenPage(context.Background(), testWorkspace, rootFeed(), "reader-1")
+	page, _, _, err := h.resolver.OpenPage(context.Background(), testWorkspace, rootFeed())
 
 	// Assert.
 	if err != nil {
@@ -399,7 +400,7 @@ func TestOpenFeedWhoseReadFailsIsHistoryUnavailable(t *testing.T) {
 	store.failFrom = 1
 
 	// Act.
-	_, _, _, err := h.resolver.OpenPage(context.Background(), testWorkspace, rootFeed(), "reader-1")
+	_, _, _, err := h.resolver.OpenPage(context.Background(), testWorkspace, rootFeed())
 
 	// Assert.
 	if !errors.Is(err, ErrHistoryUnavailable) {
@@ -462,8 +463,8 @@ func TestASubFeedsNextPageWalksItsOwnAgentsBook(t *testing.T) {
 	h.openPage(sub, "reader-1")
 
 	// Act.
-	if _, err := h.resolver.NextPage(context.Background(), testWorkspace, sub, "reader-1"); err != nil {
-		t.Fatalf("NextPage: %v", err)
+	if _, err := h.olderPageOf(sub, "reader-1"); err != nil {
+		t.Fatalf("OlderPage: %v", err)
 	}
 
 	// Assert: the older page is read from the sub-agent's book, past its own
@@ -540,9 +541,9 @@ func TestAWalkNeverAnswersHistoryReplayTruncated(t *testing.T) {
 
 	// Act, Assert: every page of the walk to the start is a success.
 	for range 3 {
-		page, err := h.resolver.NextPage(context.Background(), testWorkspace, rootFeed(), "reader-1")
+		page, err := h.olderPageOf(rootFeed(), "reader-1")
 		if err != nil {
-			t.Fatalf("NextPage: %v", err)
+			t.Fatalf("OlderPage: %v", err)
 		}
 		if page.GetError() != nil {
 			t.Fatalf("page = %v, want a success", page.GetError())
@@ -558,11 +559,11 @@ func TestNextWhoseReadFailsIsHistoryUnavailable(t *testing.T) {
 	store.failFrom = 2
 
 	// Act.
-	_, err := h.resolver.NextPage(context.Background(), testWorkspace, rootFeed(), "reader-1")
+	_, err := h.olderPageOf(rootFeed(), "reader-1")
 
 	// Assert.
 	if !errors.Is(err, ErrHistoryUnavailable) {
-		t.Fatalf("NextPage err = %v, want ErrHistoryUnavailable", err)
+		t.Fatalf("OlderPage err = %v, want ErrHistoryUnavailable", err)
 	}
 }
 
@@ -574,7 +575,7 @@ func TestAPageWithNoBoundaryIsHistoryUnavailable(t *testing.T) {
 	})
 
 	// Act.
-	_, _, _, err := h.resolver.OpenPage(context.Background(), testWorkspace, rootFeed(), "reader-1")
+	_, _, _, err := h.resolver.OpenPage(context.Background(), testWorkspace, rootFeed())
 
 	// Assert.
 	if !errors.Is(err, ErrHistoryUnavailable) {
@@ -1198,7 +1199,7 @@ func TestAKickedLoadOfAFullyWithheldNewestPagePushesTheWholeLastTurn(t *testing.
 	awaitPushed(t, rows, append([]string{h.promptRowID("turn-1")}, h.answerRowIDs("ans-1", "ans-2", "ans-3", "ans-4", "ans-5")...)...)
 }
 
-func TestAWalkServedNothingContinuesBelowAChainedPushedLoad(t *testing.T) {
+func TestAReaderHoldingAChainedPushedLoadIsServedThePageBelowIt(t *testing.T) {
 	// Arrange: the reader's opening was served nothing; a pushed load then
 	// chained down to turn-1's prompt.
 	h := newHarness(t)
@@ -1211,6 +1212,8 @@ func TestAWalkServedNothingContinuesBelowAChainedPushedLoad(t *testing.T) {
 	if _, err := h.resolver.loadPushed(context.Background(), testWorkspace, rootFeed(), true); err != nil {
 		t.Fatalf("loadPushed: %v", err)
 	}
+	// The reader's tail delivered every row the load pushed, so it holds them.
+	h.held = map[testReader]string{"reader-1": h.rowKey(h.promptRowID("turn-1"))}
 
 	// Act.
 	page := h.nextPage("reader-1")

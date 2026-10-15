@@ -2,14 +2,12 @@ package server
 
 import (
 	"context"
-	"net/http"
 	"strings"
 	"testing"
 
 	"connectrpc.com/connect"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
-	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
@@ -112,33 +110,9 @@ func TestOpenFeedRefusesAForeignFeed(t *testing.T) {
 	}
 }
 
-// TestGetFeedPageNextWithNoWalkIsRefused pins that the page walk is EPHEMERAL
-// and per-connection: a `next` with no walk standing is refused rather than
-// silently restarted from the top.
-func TestGetFeedPageNextWithNoWalkIsRefused(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	h.Feed.nextErr = feed.ErrNoWalk
-
-	// Act.
-	resp, err := h.Client.GetFeedPage(context.Background(),
-		connect.NewRequest(&agentreplv1.GetFeedPageRequest{
-			Workspace: ref(),
-			Page:      &agentreplv1.GetFeedPageRequest_Next{Next: &agentreplv1.GetFeedPageNext{}},
-		}))
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("GetFeedPage: %v", err)
-	}
-	if resp.Msg.GetError().GetNoWalkStanding() == nil {
-		t.Fatalf("result = %v, want no_walk_standing", resp.Msg.GetResult())
-	}
-}
-
-// TestGetFeedPageFirstOpensTheWalk pins that `first` opens the per-connection
-// walk through the resolver's OpenPage.
-func TestGetFeedPageFirstOpensTheWalk(t *testing.T) {
+// TestGetFeedPageFirstServesTheNewestPage pins that `first` is answered by the
+// resolver's OpenPage.
+func TestGetFeedPageFirstServesTheNewestPage(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.Feed.page = page()
@@ -160,31 +134,59 @@ func TestGetFeedPageFirstOpensTheWalk(t *testing.T) {
 	}
 }
 
-// morePage is a page with older history still to walk, which is the page a
-// walk identity is stamped on.
-func morePage() *frontendv1.FeedPage {
-	return &frontendv1.FeedPage{
-		Result: &frontendv1.FeedPage_Success{
-			Success: &frontendv1.FeedPageSuccess{
-				Edge: &frontendv1.FeedPageSuccess_HasMore{HasMore: &frontendv1.FeedPageHasMore{}},
-			},
-		},
+// TestGetFeedPageOlderThanAsksAboveTheNamedRow pins that `older_than` asks the
+// resolver for the page above exactly the oldest held row the reader names.
+func TestGetFeedPageOlderThanAsksAboveTheNamedRow(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Feed.olderPage = page()
+
+	// Act.
+	resp, err := h.Client.GetFeedPage(context.Background(),
+		connect.NewRequest(&agentreplv1.GetFeedPageRequest{
+			Workspace: ref(),
+			Page: &agentreplv1.GetFeedPageRequest_OlderThan{OlderThan: &agentreplv1.GetFeedPageOlderThan{
+				OldestHeld: &frontendv1.FeedRowOrder{Key: "k-7"},
+			}},
+		}))
+
+	// Assert.
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("GetFeedPage{older_than} = %v, %v; want the older page", resp, err)
+	}
+	if len(h.Feed.olderKeys) != 1 || h.Feed.olderKeys[0] != "k-7" || h.Feed.openCalls != 0 {
+		t.Fatalf("older asked above %v after %d openings, want exactly k-7 and no opening", h.Feed.olderKeys, h.Feed.openCalls)
 	}
 }
 
-// firstPage asks for a {first} page on one client and answers the walk it was
-// stamped with.
-func firstPage(t *testing.T, client agentreplv1connect.AgentReplClient) *frontendv1.FeedWalkId {
-	t.Helper()
-	resp, err := client.GetFeedPage(context.Background(),
-		connect.NewRequest(&agentreplv1.GetFeedPageRequest{
-			Workspace: ref(),
-			Page:      &agentreplv1.GetFeedPageRequest_First{First: &agentreplv1.GetFeedPageFirst{}},
-		}))
-	if err != nil {
-		t.Fatalf("GetFeedPage{first}: %v", err)
+// TestGetFeedPageOlderThanWithoutAKeyIsInvalid pins that an older_than naming
+// no oldest held row, or one without its key, is refused before the resolver.
+func TestGetFeedPageOlderThanWithoutAKeyIsInvalid(t *testing.T) {
+	tests := []struct {
+		name  string
+		older *agentreplv1.GetFeedPageOlderThan
+	}{
+		{name: "no oldest held row", older: &agentreplv1.GetFeedPageOlderThan{}},
+		{name: "an oldest held row without its key", older: &agentreplv1.GetFeedPageOlderThan{OldestHeld: &frontendv1.FeedRowOrder{}}},
 	}
-	return resp.Msg.GetSuccess().GetSuccess().GetHasMore().GetWalk()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			_, err := h.Client.GetFeedPage(context.Background(),
+				connect.NewRequest(&agentreplv1.GetFeedPageRequest{
+					Workspace: ref(),
+					Page:      &agentreplv1.GetFeedPageRequest_OlderThan{OlderThan: tt.older},
+				}))
+
+			// Assert.
+			if connect.CodeOf(err) != connect.CodeInvalidArgument || len(h.Feed.olderKeys) != 0 {
+				t.Fatalf("err = %v after %d older asks, want InvalidArgument and none", err, len(h.Feed.olderKeys))
+			}
+		})
+	}
 }
 
 // TestGetFeedPageRefusesAForeignFeed pins that a feed id belonging to another
@@ -230,56 +232,6 @@ func TestGetFeedPageRefusesAnUndecodableFeed(t *testing.T) {
 	}
 	if resp.Msg.GetError().GetFeedUndecodable() == nil || h.Feed.openCalls != 0 {
 		t.Fatalf("result = %v after %d openings, want feed_undecodable and no walk", resp.Msg.GetResult(), h.Feed.openCalls)
-	}
-}
-
-// TestEachFirstPageMintsItsOwnWalk pins that two openings are two walks: each
-// {first} stamps a walk of its own and reads as its own reader.
-func TestEachFirstPageMintsItsOwnWalk(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	h.Feed.page = morePage()
-
-	// Act.
-	one := firstPage(t, h.Client)
-	h.Feed.page = morePage()
-	two := firstPage(t, h.Client)
-
-	// Assert.
-	if one.GetValue() == "" || one.GetValue() == two.GetValue() {
-		t.Fatalf("walks = %q and %q, want two distinct walks", one.GetValue(), two.GetValue())
-	}
-	if len(h.Feed.openReads) != 2 || h.Feed.openReads[0] == h.Feed.openReads[1] {
-		t.Fatalf("readers = %v, want two distinct readers", h.Feed.openReads)
-	}
-}
-
-// TestAWalkContinuesOnAnotherConnection pins the 2026-10-03 regression: a walk
-// is keyed by its identity, never by the connection, so a {next} on a second
-// connection continues the walk the first connection opened.
-func TestAWalkContinuesOnAnotherConnection(t *testing.T) {
-	// Arrange: the walk is opened on the harness's client.
-	h := newHarness(t)
-	h.Feed.page = morePage()
-	h.Feed.nextPage = page()
-	walk := firstPage(t, h.Client)
-	transport := &http.Transport{}
-	t.Cleanup(transport.CloseIdleConnections)
-	other := agentreplv1connect.NewAgentReplClient(&http.Client{Transport: transport}, h.HTTP.URL)
-
-	// Act.
-	resp, err := other.GetFeedPage(context.Background(),
-		connect.NewRequest(&agentreplv1.GetFeedPageRequest{
-			Workspace: ref(),
-			Page:      &agentreplv1.GetFeedPageRequest_Next{Next: &agentreplv1.GetFeedPageNext{Walk: walk}},
-		}))
-
-	// Assert.
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("GetFeedPage{next} on another connection = %v, %v; want the walk's next page", resp, err)
-	}
-	if len(h.Feed.nextReads) != 1 || h.Feed.nextReads[0] != h.Feed.openReads[0] {
-		t.Fatalf("next read as %v, want the reader the walk opened as %v", h.Feed.nextReads, h.Feed.openReads)
 	}
 }
 
