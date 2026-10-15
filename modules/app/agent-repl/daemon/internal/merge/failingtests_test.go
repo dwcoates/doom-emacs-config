@@ -528,31 +528,6 @@ func TestWriteFailingTestsFailsLoudlyOnAMissingArchive(t *testing.T) {
 	}
 }
 
-func TestAFixingAttemptsBriefNamesTheFailingTestsFile(t *testing.T) {
-	// Arrange: one failing gate, then a pass.
-	h := newHarness(t)
-	landing(h, 1)
-	h.runner.runs = nil
-	h.gateFails("daemon")
-	h.gatePasses("daemon")
-
-	// Act.
-	admitted(t, h)
-
-	// Assert.
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	for _, values := range h.briefValues {
-		if got, ok := values["failing_tests_file"]; ok {
-			if got != filepath.Join(h.sourceD, FailingTestsFile) {
-				t.Fatalf("failing_tests_file = %q, want the worktree's file", got)
-			}
-			return
-		}
-	}
-	t.Fatal("no fixing brief named the failing tests file")
-}
-
 // fixingBriefValues answers the values the first fixing brief was spliced
 // with, failing the test when no fixing brief was composed.
 func fixingBriefValues(t *testing.T, h *harness) map[string]string {
@@ -566,6 +541,23 @@ func fixingBriefValues(t *testing.T, h *harness) map[string]string {
 	}
 	t.Fatal("no fixing brief was composed")
 	return nil
+}
+
+func TestAFixingAttemptsBriefNamesTheFailingTestsFile(t *testing.T) {
+	// Arrange: one failing gate, then a pass.
+	h := newHarness(t)
+	landing(h, 1)
+	h.runner.runs = nil
+	h.gateFails("daemon")
+	h.gatePasses("daemon")
+
+	// Act.
+	admitted(t, h)
+
+	// Assert.
+	if got := fixingBriefValues(t, h)["failing_tests_file"]; got != filepath.Join(h.sourceD, FailingTestsFile) {
+		t.Fatalf("failing_tests_file = %q, want the worktree's file", got)
+	}
 }
 
 func TestAFixingAttemptsBriefCarriesTheFailingTestCasesInline(t *testing.T) {
