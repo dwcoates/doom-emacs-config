@@ -136,10 +136,14 @@ over a good image:
   and then does nothing at all if the tag already carries this checkout's
   sandbox sources. `--force` (or `--no-cache`) rebuilds anyway.
 
-* **The image is labelled with its sources.** The git tree hash of
-  `e2e/sandbox` is written on as `org.agent-repl.sandbox-tree` (a dirty
-  sandbox directory gets a `dirty-<digest>` stamp instead, so it never claims
-  to be the committed tree). `run` reads it back and **refuses**, naming both
+* **The image is labelled with its inputs.** An `inputs-<digest>` stamp, a
+  content digest over every file the image cannot survive going stale, is
+  written on as `org.agent-repl.sandbox-tree`. That is `e2e/sandbox` and also
+  the files its offline caches are primed from: the shim's and the webapp's
+  `package.json` and `package-lock.json`, every `go.mod` and `go.sum`, and
+  `packages.el` (`sandbox-image.sh`, `sandbox_stamp_inputs`). A lockfile
+  change therefore names a new image instead of leaving `npm ci --offline` to
+  fail on a package the old cache never held. `run` reads it back and **refuses**, naming both
   stamps, when it is not this checkout's — including when the image carries no
   stamp at all. `AGENT_REPL_SANDBOX_ALLOW_STALE=1` overrides it deliberately
   and says so.
