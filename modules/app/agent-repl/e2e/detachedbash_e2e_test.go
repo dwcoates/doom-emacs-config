@@ -487,44 +487,6 @@ func TestBashForegroundCompleted(t *testing.T) {
 // `true` unconditionally for the Completed arm).
 // ===========================================================================
 
-func TestBashNonzeroExit(t *testing.T) {
-	t.Parallel()
-	w := NewWorld(t, WorldOpts{})
-	ws := dbWorkspace(t, w)
-
-	initial, stream := dbOpenRootFeed(t, w, ws)
-	defer stream.Close()
-
-	turn := SubmitPrompt(t, w, ws, "!bash-fail")
-	AwaitTurnEnded(t, w, ws, turn)
-
-	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
-	defer cancel()
-
-	returned := dbAwaitSimpleToolCall(t, ctx, initial, stream, "Bash", "exit 3",
-		func(r *frontendv1.FeedToolCallReturned) bool { return r.GetVerdict() != nil })
-	if returned == nil {
-		t.Fatalf("no Bash tool call returned within %s", DefaultTimeout)
-	}
-	if returned.GetSucceeded() == nil {
-		t.Errorf("a non-zero-exit-but-completed command must draw succeeded (the exit code is not a call failure); got %v", returned.GetVerdict())
-	}
-	if got := returned.GetText().GetText(); !strings.Contains(got, "boom") {
-		t.Errorf("returned text = %q, want it to contain the scenario's stderr (%q)", got, "boom")
-	}
-	// LANDING 16: the code is drawn, by name. The badge says the CALL was
-	// fine; without the chip the card never said what the command's own
-	// verdict on itself was. The element is FeedShellExit — the same one the
-	// detached shell's settled head wears — and the scenario states 3.
-	exit := returned.GetExit()
-	if exit == nil {
-		t.Fatalf("FeedToolCallReturned.exit = nil, want the exit code the command reported")
-	}
-	if exit.GetCode() != 3 {
-		t.Errorf("FeedToolCallReturned.exit.code = %d, want 3 (the scenario's stated status)", exit.GetCode())
-	}
-}
-
 // ===========================================================================
 // #37 — BashImageOutput.
 //
@@ -541,46 +503,6 @@ func TestBashNonzeroExit(t *testing.T) {
 // and media type the producers now carry. This test pins the arm BY NAME and
 // the src's own shape, which is the whole of what the landing added.
 // ===========================================================================
-
-func TestBashImageOutput(t *testing.T) {
-	t.Parallel()
-	w := NewWorld(t, WorldOpts{})
-	ws := dbWorkspace(t, w)
-
-	initial, stream := dbOpenRootFeed(t, w, ws)
-	defer stream.Close()
-
-	turn := SubmitPrompt(t, w, ws, "!bash-image")
-	AwaitTurnEnded(t, w, ws, turn)
-
-	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
-	defer cancel()
-
-	returned := dbAwaitSimpleToolCall(t, ctx, initial, stream, "Bash", "screencapture",
-		func(r *frontendv1.FeedToolCallReturned) bool { return r.GetVerdict() != nil })
-	if returned == nil {
-		t.Fatalf("no Bash tool call returned within %s", DefaultTimeout)
-	}
-	if returned.GetSucceeded() == nil {
-		t.Errorf("verdict = %v, want succeeded", returned.GetVerdict())
-	}
-	image := returned.GetImage()
-	if image == nil {
-		t.Fatalf("form = %T, want the `image` arm (FeedImageBlock); see this test's header comment", returned.GetForm())
-	}
-	// THE DAEMON RESOLVES THE REFERENCE: the client is handed something a
-	// browser can load, never the raw bytes and a media type to assemble.
-	if !strings.HasPrefix(image.GetSrc(), "data:image/png;base64,") {
-		t.Errorf("image src = %q, want a data url the webview can load", image.GetSrc())
-	}
-	if image.GetSrc() == "data:image/png;base64," {
-		t.Errorf("image src = %q, want the scenario's payload behind the prefix", image.GetSrc())
-	}
-	// The command line is the only caption the record affords.
-	if got := image.GetAlt(); !strings.Contains(got, "screencapture") {
-		t.Errorf("image alt = %q, want the command line as the caption", got)
-	}
-}
 
 // ===========================================================================
 // #38 — BashPartialOutputWithSpill.

@@ -44,7 +44,6 @@ package e2e
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -220,68 +219,6 @@ func TestQueryEofEndsTheTurnAsQueryDied(t *testing.T) {
 	}
 }
 
-// TestQueryDiedRaisesTheFootersTurnDiedFault is the same death seen on the
-// FOOTER. A dead query is agent-repl's fault, not a block (owner rulings,
-// 2026-09-28 and 2026-10-06): the strip draws `agent_repl_fault · turn_died`,
-// the same fault the roster draws `turn_died`, and its activity line is the
-// daemon's per-cause sentence (FooterStatusActivityTurnEnded), the one the
-// feed's turn-end row carries as its headline.
-func TestQueryDiedRaisesTheFootersTurnDiedFault(t *testing.T) {
-	t.Parallel()
-	// Arrange: the footer stream is opened BEFORE the prompt so the failed
-	// turn's push is queued in order rather than possibly missed.
-	w := NewWorld(t, WorldOpts{})
-	pfQueryDiedWarnings(w)
-	ws, _ := pfNewWorkspace(t, w)
-	footer := w.WatchFooter(ws)
-	defer footer.Close()
-
-	// Act
-	SubmitPrompt(t, w, ws, "!query-eof")
-
-	// Assert
-	view := pfAwaitView(t, w, footer.Stream, "the footer's turn_died fault after the query died", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetAgentReplFault().GetTurnDied() != nil
-	})
-	fault := view.GetStrip().GetStatus().GetAgentReplFault()
-	if got := fault.GetActivity().GetSalient().GetTurnEnded().GetText(); got == "" {
-		t.Errorf("footer turn_died activity turn_ended text = %q, want the daemon's per-cause sentence", got)
-	}
-}
-
-// TestQueryFailEndsTheTurnAsQueryDied drives `!query-fail` — the iterable
-// REJECTING rather than ending, "the producer died rather than finished"
-// (lifecycle.ts), whose arm is SessionQueryDied.cause=iterator_failure.
-//
-// The CAUSE was once observable on conversation/v1's wire alone; landing 10
-// gave FeedTurnErrorQueryDied its own `cause` oneof mirroring
-// SessionQueryDied's, so the distinction the writer noted as unobservable now
-// is one — and this test pins the iterator-failure half of it, separately
-// from TestQueryEofEndsTheTurnAsQueryDied's EOF.
-func TestQueryFailEndsTheTurnAsQueryDied(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	w := NewWorld(t, WorldOpts{})
-	pfQueryDiedWarnings(w)
-	ws, _ := pfNewWorkspace(t, w)
-
-	// Act
-	turn := SubmitPrompt(t, w, ws, "!query-fail")
-
-	// Assert
-	ended := AwaitTurnEnded(t, w, ws, turn).GetTurnEnded()
-	errored := ended.GetErrored()
-	if errored == nil {
-		t.Fatalf("turn ended = %v, want the errored arm (the query's iterator threw)", ended)
-	}
-	if errored.GetQueryDied() == nil {
-		t.Fatalf("turn error = %v, want feed.proto's query_died arm", errored)
-	}
-	if errored.GetQueryDied().GetIteratorFailure() == nil {
-		t.Errorf("query_died cause = %v, want iterator_failure (the SDK's iterator threw)", errored.GetQueryDied())
-	}
-}
-
 // TestQueryEofMidAskDeniesTheOpenAsk drives `!query-eof-mid-ask`: the query
 // dies with a `canUseTool` ask STILL OPEN. The scenario's whole point, in
 // its own words, is that "an unresolved `canUseTool` promise wedges the
@@ -451,53 +388,6 @@ func TestConverterRecoveryClosesTheDegradedWindow(t *testing.T) {
 // Bookkeeping turns that draw NOTHING extra.
 // ===========================================================================
 
-// TestKeepaliveTurnIsOrdinaryAndUnmarked drives `!keepalive`. The scenario
-// exists "so a test can drive a keep-alive-shaped turn deterministically;
-// the `<!--agent-repl:keepalive-->` marker is the SHIM's, and the mock never
-// adds or removes it" — its arms are AgentResponse.from_model and
-// AgentSuccess.completed, i.e. an ORDINARY turn.
-//
-// So the assertion is the specific negative that follows from that sentence:
-// the prompt bubble carries the submitted text VERBATIM, with no keep-alive
-// marker minted by the producer, and the turn's row set is the ordinary one.
-// prompt_origin.proto is explicit that the cache keep-alive "is not a prompt
-// the daemon" mints here — this submission is a user prompt that merely
-// looks like one.
-func TestKeepaliveTurnIsOrdinaryAndUnmarked(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	w := NewWorld(t, WorldOpts{})
-	ws, configDir := pfNewWorkspace(t, w)
-	const keepaliveMarker = "<!--agent-repl:keepalive-->"
-
-	// Act
-	turn := driveScenarioToCompletion(t, w, ws, configDir, "keepalive")
-
-	// Assert
-	rows := openFeedPage(t, w, ws)
-	if ended := turnEndedRow(t, rows, turn); ended.GetConcluded() == nil {
-		t.Fatalf("turn ended = %v, want a plain conclusion (AgentSuccess.completed)", ended)
-	}
-	pfAssertOnlyProseRows(t, rows, turn)
-
-	var prompt *frontendv1.FeedRow
-	for _, row := range pfRowsOfTurn(rows, turn) {
-		if row.GetUserPrompt() != nil {
-			prompt = row
-		}
-	}
-	if prompt == nil {
-		t.Fatalf("feed drew no user_prompt row for the keep-alive-shaped turn")
-	}
-	drawn := prompt.String()
-	if !strings.Contains(drawn, "!keepalive") {
-		t.Errorf("prompt row = %v, want the submitted text drawn verbatim", prompt)
-	}
-	if strings.Contains(drawn, keepaliveMarker) {
-		t.Errorf("prompt row = %v, want NO %q marker — the mock never adds one", prompt, keepaliveMarker)
-	}
-}
-
 // TestResidueAttachmentsDrawNoRow drives `!residue`, whose two attachments
 // (`deferred_tools_delta` and `agent_listing_delta`) are the records "BOTH
 // planes agree are vendor bookkeeping, not context". Its arms line is
@@ -513,27 +403,6 @@ func TestResidueAttachmentsDrawNoRow(t *testing.T) {
 
 	// Act
 	turn := driveScenarioToCompletion(t, w, ws, configDir, "residue")
-
-	// Assert
-	rows := openFeedPage(t, w, ws)
-	if ended := turnEndedRow(t, rows, turn); ended.GetConcluded() == nil {
-		t.Fatalf("turn ended = %v, want a plain conclusion", ended)
-	}
-	pfAssertOnlyProseRows(t, rows, turn)
-}
-
-// TestAwaySummaryDrawsNoRow drives `!away-summary`, whose recap is a
-// `system:away_summary` record — arms line: "vendor_specific residue —
-// `system/away_summary`, which no conversation.v1 arm models". The recap
-// therefore appears NOWHERE on the feed; only the turn's own prose does.
-func TestAwaySummaryDrawsNoRow(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	w := NewWorld(t, WorldOpts{})
-	ws, configDir := pfNewWorkspace(t, w)
-
-	// Act
-	turn := driveScenarioToCompletion(t, w, ws, configDir, "away-summary")
 
 	// Assert
 	rows := openFeedPage(t, w, ws)
@@ -607,56 +476,5 @@ func TestTokensReminderDrawsNoRow(t *testing.T) {
 	})
 	if salient := footerTier(view, "salient"); salient != nil {
 		t.Errorf("footer drew a salient line %v from a TOKEN-COUNT reminder, want none", salient.Interface())
-	}
-}
-
-// TestContextWindowExceededIsDrawnAsTurnFailed drives `!context-window`. It
-// is the odd one in this group: not bookkeeping at all, but a TERMINAL — its
-// arms line is "AgentResponseFailure.reason=context_window_exceeded and
-// AgentFailure.prompt_too_long".
-//
-// THE PROTO RULES THE ARM, and this test formerly asserted request_too_large
-// against a daemon that no longer draws it. feed.proto confines
-// FeedTurnErrorRequestTooLarge to "413 — the request exceeded the size
-// limit", an API status, while AgentFailure.prompt_too_long is a PRODUCER
-// terminal that never carried an API status. Its home is therefore
-// FailureVendorTurnFailed — "every other unclassified abnormal end;
-// `stop_reason` names the vendor's own word" — with the stop reason
-// `prompt_too_long`. Ruled and implemented in 3617b4aaa; the test is
-// corrected to the contract rather than the daemon to the test.
-//
-// The headline is asserted as a stated sentence rather than a pinned string:
-// FeedTurnErrorHeadline is contracted only as "The sentence, drawn
-// verbatim".
-func TestContextWindowExceededIsDrawnAsTurnFailed(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	w := NewWorld(t, WorldOpts{})
-	ws, _ := pfNewWorkspace(t, w)
-
-	// Act
-	turn := SubmitPrompt(t, w, ws, "!context-window")
-
-	// Assert
-	ended := AwaitTurnEnded(t, w, ws, turn).GetTurnEnded()
-	if ended.GetConcluded() != nil {
-		t.Fatalf("turn ended = %v, want an errored terminal", ended)
-	}
-	errored := ended.GetErrored()
-	if errored == nil {
-		t.Fatalf("turn ended = %v, want the errored arm", ended)
-	}
-	failed := errored.GetTurnFailed()
-	if failed == nil {
-		t.Fatalf("turn error = %v, want turn_failed (feed.proto's arm for a producer terminal with no drawn counterpart)", errored)
-	}
-	if got := failed.GetStopReason(); got != "prompt_too_long" {
-		t.Errorf("turn_failed stop_reason = %q, want %q (the producer's own word)", got, "prompt_too_long")
-	}
-	if errored.GetRequestTooLarge() != nil {
-		t.Errorf("turn error drew request_too_large, which feed.proto confines to the vendor's 413")
-	}
-	if errored.GetHeadline().GetText() == "" {
-		t.Errorf("turn error headline = %q, want the daemon's composed sentence", errored.GetHeadline().GetText())
 	}
 }

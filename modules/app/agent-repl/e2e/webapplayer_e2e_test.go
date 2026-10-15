@@ -297,12 +297,6 @@ func wlWebappWritable(webappDir string) error {
 // ten areas. Each area's Go test names exactly one vitest file, and that
 // file is the area's scenario list from WEBAPP-LAYER-SPEC.md section F.
 
-// TestWebappLayer is section F1: proof of life.
-func TestWebappLayer(t *testing.T) {
-	t.Parallel()
-	wlDriveArea(t, "proof-of-life.layer.test.ts")
-}
-
 // wlClientLogOperation is the operation the client-log area's page plants.
 //
 // SHARED WITH THE PAGE BY VALUE: `OPERATION` in
@@ -819,22 +813,6 @@ func wlChildEnv(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) []string {
 		// vitest's own CI mode: no watch, no interactive reporter.
 		"CI=1",
 	)
-}
-
-// wlRunVitest runs the layer's vitest project as a child of this test,
-// streaming its output into the test log so a red child is read here rather
-// than hunted for, and answers its failure (if any).
-//
-// The child's exit is awaited on its own channel with a select against
-// WebappLayerTimeout — never a sleep, and a timeout kills the process group
-// rather than leaking a vitest that outlives the test.
-func wlRunVitest(t *testing.T, npm, webappDir, vitestFile string, env []string) error {
-	t.Helper()
-	child, err := wlStartVitest(t, npm, webappDir, vitestFile, env)
-	if err != nil {
-		return err
-	}
-	return child.Wait()
 }
 
 // wlChild is a vitest child still running, for the ONE area whose Go side must

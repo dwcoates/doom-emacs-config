@@ -293,6 +293,13 @@ interface EngineDeps {
   /** Injected so a suite can take no kernel lock. */
   readonly acquireLock?: (sessionId: string) => LockRelease | Promise<LockRelease>;
   /**
+   * How the engine hears that the shim's durable log sink was poisoned;
+   * `log.ts`'s own subscription when unset. Injected so a suite can poison a
+   * sink of its own without touching the process-wide one, which a poisoning
+   * would end for every later test.
+   */
+  readonly onLogSinkPoisoned?: (listener: (cause: Error) => void) => () => void;
+  /**
    * Injected so a suite can take no kernel workspace lock.
    *
    * THE WORKSPACE LOCK IS A SESSION CLAIM, NOT A PROCESS ONE (rollout ruling,
@@ -1068,7 +1075,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   // no durable channel left to complain through, so WatchSession is the only
   // place the loss can still be stated -- and it is stated ONCE, as a fault and
   // a window that never closes, because nothing restores a lost record.
-  onLogSinkPoisoned((cause) => {
+  (deps.onLogSinkPoisoned ?? onLogSinkPoisoned)((cause) => {
     pushes.fault(sessionFault({ kind: "logSinkPoisoned" }, LOG_SINK_COMPONENT, cause.message));
     pushes.openDegradedWindow(LOG_SINK_COMPONENT, `the durable log sink is poisoned: ${cause.message}`);
   });

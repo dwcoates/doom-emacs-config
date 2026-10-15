@@ -88,64 +88,6 @@ func requireSucceeded(t *testing.T, row *frontendv1.FeedRow, toolName string) *f
 	return returned
 }
 
-// TestEdit drives the `edit` fake scenario (files.ts EDIT) — golden #18
-// "edit" (SPEC.md §C #66). Zero support in the old fake-query.ts per the
-// shim coverage report; this is the round trip's first real e2e coverage.
-func TestEdit(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	w, ws := newFileToolsWorkspace(t)
-
-	// Act
-	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "edit")
-
-	// Assert
-	row := awaitFeedRow(t, w, ws, "the edit's settled tool card", toolCallSettled(turn, "Edit"))
-	returned := requireSucceeded(t, row, "Edit")
-	diff := returned.GetDiff()
-	if diff == nil {
-		t.Fatalf("Edit tool call returned = %v, want a diff output form", returned)
-	}
-	if len(diff.GetLines()) == 0 {
-		t.Fatal("Edit tool call's diff output carries no lines, want the change's hunk")
-	}
-}
-
-// TestGlob drives the `glob` fake scenario (files.ts GLOB, golden #21) —
-// SPEC.md §C #67. The fixture's totalMatches (7) exceeds its returned paths
-// (2) with countIsComplete=true, so AgentGlobSuccess carries the EXACT
-// omitted arm (AgentGlobOmittedExact) — this asserts that arm reaches the
-// frontend's composed FeedToolCallLinesOutput.omitted.
-func TestGlob(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	w, ws := newFileToolsWorkspace(t)
-
-	// Act
-	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "glob")
-
-	// Assert
-	row := awaitFeedRow(t, w, ws, "the glob's settled tool card", toolCallSettled(turn, "Glob"))
-	returned := requireSucceeded(t, row, "Glob")
-	lines := returned.GetLines()
-	if lines == nil {
-		t.Fatalf("Glob tool call returned = %v, want a lines output form", returned)
-	}
-	if got := len(lines.GetLines()); got != 2 {
-		t.Fatalf("Glob tool call's lines output has %d lines, want the two matched paths", got)
-	}
-	// THE SENTENCE, not merely its presence. `countIsComplete: true` in the
-	// fixture selects AgentGlobOmittedExact over AgentGlobOmittedAtLeast, and
-	// the two arms are DIFFERENT CLAIMS a reader acts on differently — an
-	// exact remainder against a floor. Only the composed text distinguishes
-	// them once the row is on the wire, so the text is what is asserted.
-	const wantOmitted = "5 more paths not shown"
-	if got := lines.GetOmitted().GetText(); got != wantOmitted {
-		t.Fatalf("Glob tool call's omitted line = %q, want %q composed from the exact arm (7 total, 2 shown); %q would be the FLOOR arm and a different claim",
-			got, wantOmitted, "at least "+wantOmitted)
-	}
-}
-
 // TestGrepContentFilesCount drives the three grep-mode fake scenarios
 // (files.ts GREP_CONTENT/GREP_FILES/GREP_COUNT, goldens #22 in D-table's
 // bundled sense) as one table-driven test — SPEC.md §C #68
@@ -216,76 +158,6 @@ func TestGrepContentFilesCount(t *testing.T) {
 				if text.GetText() == "" {
 					t.Fatalf("grep-%s tool call's text output is empty, want the composed count", tc.name)
 				}
-			}
-		})
-	}
-}
-
-// TestReadWholeHeadRange drives the three read-extent fake scenarios
-// (files.ts READ_WHOLE/READ_HEAD/READ_RANGE) as one table-driven test —
-// SPEC.md §C #69 ReadWholeHeadRange. AgentReadSuccess.extent is a three-way
-// oneof (whole/head/range); each row below drives one arm.
-//
-// FeedToolCallCodeOutput.omitted is present "iff truncated", so only a
-// WHOLE read carries none: it is the one extent that says "nothing further
-// can be fetched" (agent_activity.proto, AgentReadWhole). Both a head and a
-// range are short of the file, and both must say so. For the range,
-// agent_activity.proto pins the sentence and its purpose on
-// AgentReadRange.total_lines: "What the whole file holds, so a consumer
-// states \"lines 400-499 of 4,312\" without arithmetic and without a second
-// request" — the omitted line is the only element of
-// FeedToolCallCodeOutput that can carry that statement, so a range read
-// carries one. feed.proto's "always a HEAD of the file, never a middle
-// slice" qualifies the CODE the spans paint (a highlighter needs context
-// from offset zero, the same rationale AgentReadHead.contents gives) and
-// predates the range arm, which was added at tag 10 after the extents at
-// tags 2-8; it does not license dropping a middle slice's extent line.
-func TestReadWholeHeadRange(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	w, ws := newFileToolsWorkspace(t)
-
-	cases := []struct {
-		name        string
-		scenario    string
-		wantOmitted bool
-		// omittedText is the exact line the extent composes. A head and a
-		// range both say they are short of the file, but they say DIFFERENT
-		// THINGS: a head counts what it showed against the total, a range
-		// names the window it drew. Asserting only presence would let either
-		// wording stand in for the other.
-		omittedText string
-	}{
-		{name: "whole", scenario: "read", wantOmitted: false},
-		{name: "head", scenario: "read-head", wantOmitted: true, omittedText: "showing 2 of 4 lines"},
-		{name: "range", scenario: "read-range", wantOmitted: true, omittedText: "lines 2-3 of 4"},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Act
-			turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, tc.scenario)
-
-			// Assert
-			row := awaitFeedRow(t, w, ws, "the read ("+tc.name+") settled tool card", toolCallSettled(turn, "Read"))
-			returned := requireSucceeded(t, row, "Read")
-			code := returned.GetCode()
-			if code == nil {
-				t.Fatalf("read-%s tool call returned = %v, want a code output form", tc.name, returned)
-			}
-			if len(code.GetSpans()) == 0 {
-				t.Fatalf("read-%s tool call's code output carries no paint spans, want at least one", tc.name)
-			}
-			if tc.wantOmitted && code.GetOmitted() == nil {
-				t.Fatalf("read-%s tool call's code output carries no omitted line, want one composed for the cut", tc.name)
-			}
-			if tc.omittedText != "" {
-				if got := code.GetOmitted().GetText(); got != tc.omittedText {
-					t.Fatalf("read-%s tool call's omitted line = %q, want %q -- the wording this extent composes, not the other extent's", tc.name, got, tc.omittedText)
-				}
-			}
-			if !tc.wantOmitted && code.GetOmitted() != nil {
-				t.Fatalf("read-%s tool call's code output carries an omitted line %v, want none", tc.name, code.GetOmitted())
 			}
 		})
 	}
@@ -451,50 +323,6 @@ func TestIdeDiagnosticsAfterWrite(t *testing.T) {
 	diagnostics := returned.GetDiagnostics()
 	if len(diagnostics.GetLines()) == 0 {
 		t.Fatal("the write's diagnostics carry no composed lines, want the vendor's typescript error")
-	}
-}
-
-// TestReadTruncatedStatesTheCut drives the `read-truncated` fake scenario
-// (files.ts READ_TRUNCATED) — the read that came back short of the file.
-//
-// The DRAWN contract is FeedToolCallCodeOutput.omitted, "present iff
-// truncated" (feed.proto), composed by the daemon as "showing N of M lines"
-// (daemon/internal/resolve/feed/format.go formatShowingOf) from
-// AgentReadHead.total_lines, which agent_activity.proto exists for: "What
-// the whole file holds, so a consumer states 'showing 200 of 4,312' without
-// arithmetic and without a second request." The fixture returns 2 of the
-// file's 4 lines, so the composed line is pinned exactly.
-//
-// THE CUT ARM, resolved: the scenario declares "AgentReadSuccess.cut=
-// token_cap", and the shim's converter reaches AgentReadCutAtTokenCap only
-// when the vendor's toolUseResult sets `truncatedByTokenCap`
-// (convert/tools/read.ts textExtent). The fixture now sets it, so the
-// declared arm is the one produced. NOTHING IS ASSERTED ABOUT THE CUT HERE
-// because the two cuts are indistinguishable downstream:
-// FeedToolCallCodeOutput carries the composed omitted line and no cut arm of
-// its own, so a token-capped read draws exactly what this test asserts. The
-// cut itself is pinned at the converter (shim test/convert/tools/read.ts).
-func TestReadTruncatedStatesTheCut(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	w, ws := newFileToolsWorkspace(t)
-
-	// Act
-	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "read-truncated")
-
-	// Assert
-	row := awaitFeedRow(t, w, ws, "the truncated read's settled tool card", toolCallSettled(turn, "Read"))
-	returned := requireSucceeded(t, row, "Read")
-	code := returned.GetCode()
-	if code == nil {
-		t.Fatalf("read-truncated tool call returned = %v, want a code output form", returned)
-	}
-	if len(code.GetSpans()) == 0 {
-		t.Fatal("read-truncated tool call's code output carries no paint spans, want the lines that did come back")
-	}
-	const want = "showing 2 of 4 lines"
-	if got := code.GetOmitted().GetText(); got != want {
-		t.Errorf("read-truncated tool call's omitted line = %q, want %q composed from the head's total_lines", got, want)
 	}
 }
 

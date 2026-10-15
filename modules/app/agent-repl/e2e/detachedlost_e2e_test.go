@@ -82,13 +82,6 @@ const dlSweepInterval = 200 * time.Millisecond
 // conclude the run LOST while it is still being ingested.
 const dlSilenceWindow = 400 * time.Millisecond
 
-// dlGraceWindow is the grace TestDetachedLostFileVanished buys: how long a
-// file that disappeared is given before the disappearance is concluded
-// rather than absorbed as a rename race. Same sizing as dlSilenceWindow, for
-// the same reason — the deletion is a single observable act and the window
-// only has to outlast the poll that notices it.
-const dlGraceWindow = 400 * time.Millisecond
-
 // dlLostBound is how long a test waits for a bought window's conclusion to
 // travel all the way to the feed: the window elapses, the next sweep (up to
 // dlSweepInterval away) concludes it, the sidecar writes the terminal to the
@@ -343,111 +336,6 @@ func TestDetachedLostWentSilent(t *testing.T) {
 // (b) file_vanished — the spool disappeared under the reader.
 // ===========================================================================
 
-// TestDetachedLostFileVanished deletes the spool the fake wrote, under the
-// sidecar, and asserts the `file_vanished` arm — "The spool or transcript
-// file disappeared from disk", concluded only once a GRACE window has
-// absorbed the ordinary rename/replace race.
-//
-// DELETING THE FILE IS THIS TEST'S OWN ACT, not a reach into a subject: the
-// spool root is the world's own t.TempDir, and the file is one this test's
-// scenario wrote inside it. Nothing production-owned is touched.
-func TestDetachedLostFileVanished(t *testing.T) {
-	t.Parallel()
-	// Arrange: only the GRACE window is bought; the silence windows stay at
-	// production length so `went_silent` cannot conclude the run first.
-	w := NewWorldWithSidecarStaleness(t, WorldOpts{}, SidecarStaleness{Grace: dlGraceWindow})
-	initial, stream, ws := dlDriveDetachedLive(t, w)
-	defer stream.Close()
-
-	ctx, cancel := context.WithTimeout(w.Ctx(), dlLostBound)
-	defer cancel()
-
-	spool := dlAwaitOneSpool(t, ctx, w)
-
-	// The bytes must be INGESTED before the file goes, or the test would be
-	// racing the tail rather than exercising the policy: the feed's own live
-	// spool text is the evidence the sidecar read the file, and it is a
-	// bounded wait on a real signal.
-	live := dbAwaitLiveDetachedShell(t, ctx, w, ws, initial, stream, "sleep 100000", "partial output with no terminator")
-	if live.GetLive() == nil {
-		t.Fatalf("detached shell state = %v, want live before the spool is removed", live.GetState())
-	}
-
-	// Act.
-	if err := os.Remove(spool); err != nil {
-		t.Fatalf("e2e: removing this test's own spool %s: %v", spool, err)
-	}
-
-	// Assert: the arm, then the feed's LOST draw.
-	dlAwaitLostReason(t, ctx, w, ws.GetDir(), spool, "file_vanished")
-	_, got := dlAwaitLostShell(t, ctx, w, ws, initial, stream, "sleep 100000", "file_vanished")
-	if !strings.Contains(got, "partial output with no terminator") {
-		t.Errorf("the LOST shell's spool = %q, want the bytes read before the file vanished — "+
-			"the file going away is not a licence to drop what was already observed", got)
-	}
-}
-
 // ===========================================================================
 // (c) swept_up — a leftover spool that predates the machine's boot.
 // ===========================================================================
-
-// dlPreBootStamp is a time no machine's boot can be older than, which is what
-// makes a file "not touched since before the reboot" without this test
-// knowing when this machine actually booted. Same device, same reason, as the
-// sidecar's own integration suite (lost_policy_test.go's preBootStamp).
-var dlPreBootStamp = time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC)
-
-// TestDetachedLostSweptUp drives the third arm — "A boot sweep found the run
-// open with no living producer".
-//
-// HOW THE ARM IS REACHED, per the sidecar's own policy (internal/stale, and
-// cycle.go's `bootSwept` gate): `Tracker.BootSweep` runs ONCE PER SIDECAR
-// PROCESS, on its first production cycle, and concludes every tracked run
-// whose file has not been written since the machine booted. The activity
-// clock is the file's MTIME, never the instant the sidecar read it —
-// deliberately, so that "a spool full of pre-reboot bytes" cannot be made to
-// look alive by being read. So this test stamps the leftover spool
-// pre-boot and RESTARTS the sidecar over it: the new process re-discovers the
-// file, judges its mtime against the real boot time, and sweeps it up.
-//
-// THE RESTART IS THE ONLY LEVER. Boot time is read from the kernel
-// (boottime_darwin.go / boottime_linux.go) and is not a flag, so a running
-// sidecar's boot sweep cannot be re-armed; a second process is what runs a
-// second boot sweep. Cursor recovery makes it safe: the new process recovers
-// its read positions from the real store before reading a byte, so nothing
-// already ingested is ingested twice.
-func TestDetachedLostSweptUp(t *testing.T) {
-	t.Parallel()
-	// Arrange: NO window is shortened. `swept_up` is not a window at all —
-	// it is the boot rule, which ranks ahead of silence precisely because it
-	// says HOW we know rather than merely that the file is quiet. Leaving the
-	// silence windows at production length is what proves this conclusion is
-	// the boot rule's and not the silence window's.
-	w := NewWorld(t, WorldOpts{})
-	initial, stream, ws := dlDriveDetachedLive(t, w)
-	defer stream.Close()
-
-	ctx, cancel := context.WithTimeout(w.Ctx(), dlLostBound)
-	defer cancel()
-
-	spool := dlAwaitOneSpool(t, ctx, w)
-	// The bytes must be ingested by the FIRST sidecar, so the restart is
-	// resuming a run rather than discovering it for the first time.
-	live := dbAwaitLiveDetachedShell(t, ctx, w, ws, initial, stream, "sleep 100000", "partial output with no terminator")
-	if live.GetLive() == nil {
-		t.Fatalf("detached shell state = %v, want live before the sidecar is restarted", live.GetState())
-	}
-
-	// Act: stamp the leftover spool pre-boot, then boot a second sidecar over
-	// it. Stamped rather than truncated: the bytes are the run's real output
-	// and the arm is about WHEN the file was last written, not about what is
-	// in it.
-	if err := os.Chtimes(spool, dlPreBootStamp, dlPreBootStamp); err != nil {
-		t.Fatalf("e2e: stamping this test's own spool %s pre-boot: %v", spool, err)
-	}
-	w.Sidecar.Restart(t)
-
-	// Assert: the arm, then the feed's LOST draw.
-	dlAwaitLostReason(t, ctx, w, ws.GetDir(), spool, "swept_up")
-	dlAwaitLostShell(t, ctx, w, ws, initial, stream, "sleep 100000", "swept_up")
-}

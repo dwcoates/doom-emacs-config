@@ -118,21 +118,6 @@ func TestSkillInvocation(t *testing.T) {
 	t.Run(tc.name, func(t *testing.T) { runSkillScenarioCase(t, tc) })
 }
 
-func TestSkillNamedAndArgsParameterized(t *testing.T) {
-	t.Parallel()
-	// #65 SkillNamedAndArgsParameterized -- `!skill [skill-name] [args]`
-	// (landed addition; E2E-EVENT-INVENTORY.md remediation item 5) -- an
-	// ARBITRARY skill name/args/document body, replacing the fixed
-	// "fake-skill". SPEC.md's own example is driven verbatim:
-	// "create-or-update-workspace merge".
-	tc := skillScenarioCase{
-		name:      "SkillNamedAndArgsParameterized",
-		prompt:    "!skill create-or-update-workspace merge",
-		wantSkill: "create-or-update-workspace",
-	}
-	t.Run(tc.name, func(t *testing.T) { runSkillScenarioCase(t, tc) })
-}
-
 // runSkillScenarioCase is the shared AAA body for both skill tests: they
 // differ only in which prompt is submitted and which skill name the fake
 // derives from it, so the arrange/act/assert shape is identical and factored

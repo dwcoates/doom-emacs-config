@@ -249,6 +249,8 @@ function harness(
      * from the same graph. Everything else gets this file's own engine.
      */
     engineFactory?: typeof createEngine;
+    /** The engine's subscription to the log sink's poisoning (EngineDeps). */
+    onLogSinkPoisoned?: (listener: (cause: Error) => void) => () => void;
     /** The vendor's session fork; absent: a fork no test asked for fails the test. */
     forkVendorSession?: ForkVendorSession;
     /**
@@ -277,6 +279,7 @@ function harness(
   const minted: string[] = [];
   const engine = (options.engineFactory ?? createEngine)({
     ...(options.withoutEndProcess === true ? {} : { endProcess: (code: number) => exits.push(code) }),
+    ...(options.onLogSinkPoisoned === undefined ? {} : { onLogSinkPoisoned: options.onLogSinkPoisoned }),
     persistence,
     fold,
     forkVendorSession: options.forkVendorSession ?? unexpectedVendorFork,
@@ -12514,26 +12517,25 @@ describe("StartSession's remaining steps when the query died under them", () => 
  * logger is never touched, and this describe may run in any position.
  */
 describe("the durable log sink being poisoned", () => {
-  it("states the loss on WatchSession, the only channel left once fd 3 is gone", async () => {
-    vi.resetModules();
-    const freshFs = await import("node:fs");
-    const freshLog = await import("../../src/log.js");
-    const { createEngine: freshCreateEngine } = await import("../../src/engine/session.js");
-    freshLog.configureLog({ fd: 3, cwd: "/ws", workspaceId: "000000000000ab01", agentReplSessionId: "poison-suite" });
-    vi.mocked(freshFs.writeSync).mockImplementationOnce(() => {
-      throw new Error("fd 3 is gone");
+  it("states the loss on WatchSession, the only channel left once fd 3 is gone", () => {
+    // Arrange: the engine hears poisonings through a subscription of this
+    // test's own, never the process-wide sink, whose poisoning is one-way and
+    // would decide every later test that reads a log line (log.test.ts pins
+    // that a poisoning reaches the sink's subscribers).
+    let poison: (cause: Error) => void = () => undefined;
+    const h = harness({
+      onLogSinkPoisoned: (listener) => {
+        poison = listener;
+        return () => undefined;
+      },
     });
-    freshLog.bindLog({ operation: "shim.test.poison" }).debug({}, "the record this sink cannot take");
 
-    const h = harness({ engineFactory: freshCreateEngine });
+    // Act
+    poison(new Error("fd 3 is gone"));
 
+    // Assert
     expect(h.engine.pushes.faultCount).toBeGreaterThan(0);
-    // ITS OWN BOUND, NOT THE SUITE'S 2.5s. The poisoning is permanent and the
-    // suite's logger is configured once, so this test re-imports the engine's
-    // whole module graph over a fresh logger (`vi.resetModules`): 1.2s on an
-    // idle host, and past 2.5s under a loaded full run (2026-10-12). The cost
-    // is the isolation, not the engine; the bound is about 4x the idle cost.
-  }, 5000);
+  });
 });
 
 /**
