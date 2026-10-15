@@ -18,9 +18,9 @@ func reportFixture() *Measurement {
 	return &Measurement{
 		Adapter: "go", Subject: "d/p/a_test.go", Scope: []string{"./p"},
 		Cases: []Case{
-			{ID: "Big", Cost: 2 * ms, Kills: []string{"m1", "m2"}, Blocks: []string{"b1"}},
-			{ID: "Line", Cost: 2 * ms, Kills: []string{"m1"}, Blocks: []string{"b2"}},
-			{ID: "Dup", Cost: 1 * ms, Kills: []string{"m2"}, Blocks: []string{"b1"}},
+			{ID: "Big", Cost: 2 * ms, Kills: []string{"m1", "m2"}, Blocks: []string{"a/b1"}},
+			{ID: "Line", Cost: 2 * ms, Kills: []string{"m1"}, Blocks: []string{"a/b2"}},
+			{ID: "Dup", Cost: 1 * ms, Kills: []string{"m2"}, Blocks: []string{"a/b1"}},
 			{ID: "Log", Cost: 1 * ms, Kills: []string{"m3"}, Pinned: "asserts a log record: Log -> FindRecord"},
 		},
 		Mutants: []MutantResult{
@@ -29,7 +29,8 @@ func reportFixture() *Measurement {
 			{Key: "a.go:3:1:true -> false", Status: "unreached"},
 			{Key: "a.go:4:1:+ -> -", Status: "dropped"},
 		},
-		Anomalies: []string{"X failed under M, which it does not reach"},
+		Statements: map[string]int{"a/b1": 5, "a/b2": 5, "a/b3": 10},
+		Anomalies:  []string{"X failed under M, which it does not reach"},
 		Hangs:     []string{"Big hung under M past its 1s bound"},
 		Cost:      Cost{Wall: 90 * time.Second, CPU: 30 * time.Second, Processes: 12, Phases: []Phase{{Name: "mutant runs", Wall: time.Minute}}},
 	}
@@ -40,7 +41,7 @@ func TestReportUnderKillsOnly(t *testing.T) {
 	var out bytes.Buffer
 
 	// Act
-	err := Report(&out, reportFixture(), KillsOnly, 0)
+	err := Report(&out, reportFixture(), Options{Universe: KillsOnly, Budget: Budget{MaxDrop: 100}})
 
 	// Assert
 	if err != nil {
@@ -58,6 +59,7 @@ func TestReportUnderKillsOnly(t *testing.T) {
 		"## Anomalies\n\n- X failed under M, which it does not reach",
 		"## Kills by hang (1)\n\n- Big hung under M past its 1s bound",
 		"- `Log`: asserts a log record: Log -> FindRecord",
+		"| a | measured population | 20 | 50.00% | 25.00% | 25.00 | -50.00% |",
 		"- Wall: 1m30s, CPU: 30s, processes: 12\n- mutant runs: 1m0s",
 	} {
 		if !strings.Contains(out.String(), want) {
@@ -71,7 +73,7 @@ func TestReportUnderStrictListsWhatKillsOnlyWouldAlsoRemove(t *testing.T) {
 	var out bytes.Buffer
 
 	// Act
-	err := Report(&out, reportFixture(), Strict, 0)
+	err := Report(&out, reportFixture(), Options{Universe: Strict, Budget: Budget{MaxDrop: 100}})
 
 	// Assert
 	if err != nil {
@@ -89,13 +91,36 @@ func TestReportUnderStrictListsWhatKillsOnlyWouldAlsoRemove(t *testing.T) {
 	}
 }
 
+func TestReportListsWhatTheBudgetPutBack(t *testing.T) {
+	// Arrange: kills-only drops Line, whose block nothing kept reaches.
+	var out bytes.Buffer
+
+	// Act
+	err := Report(&out, reportFixture(), Options{Universe: KillsOnly, Budget: Budget{MaxDrop: 1}})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"- Cases: 4, pinned: 1, removable: 1, kept: 3",
+		"| a | measured population | 20 | 50.00% | 50.00% | 0.00 | 49.00% |",
+		"Request limit: 1.00 points.",
+		"Put back by the budget (1), best statements per runtime first:\n\n- `Line`",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("the report lacks %q:\n%s", want, out.String())
+		}
+	}
+}
+
 func TestReportRefusesAMeasurementWithACaseTwice(t *testing.T) {
 	// Arrange
 	m := reportFixture()
 	m.Cases = append(m.Cases, m.Cases[0])
 
 	// Act
-	err := Report(&bytes.Buffer{}, m, KillsOnly, 0)
+	err := Report(&bytes.Buffer{}, m, Options{Universe: KillsOnly, Budget: Budget{MaxDrop: 100}})
 
 	// Assert
 	if err == nil || !strings.Contains(err.Error(), "measured twice") {
@@ -109,7 +134,7 @@ func (failWriter) Write([]byte) (int, error) { return 0, errors.New("disk full")
 
 func TestReportSurfacesAFailedWrite(t *testing.T) {
 	// Act
-	err := Report(failWriter{}, reportFixture(), KillsOnly, 0)
+	err := Report(failWriter{}, reportFixture(), Options{Universe: KillsOnly, Budget: Budget{MaxDrop: 100}})
 
 	// Assert
 	if err == nil || !strings.Contains(err.Error(), "write the report: disk full") {
@@ -186,10 +211,12 @@ func TestReportCommand(t *testing.T) {
 		wantOut  string
 		wantErrs int
 	}{
-		{name: "redraws a saved measurement", argv: []string{"-in", path, "-universe", "strict"}, wantCode: 0, wantOut: "- Universe: strict"},
+		{name: "redraws a saved measurement", argv: []string{"-in", path, "-universe", "strict", "-max-coverage-drop", "100"}, wantCode: 0, wantOut: "- Universe: strict"},
 		{name: "refuses no -in", argv: nil, wantCode: 2, wantErrs: 1},
 		{name: "refuses an unknown universe", argv: []string{"-in", path, "-universe", "lines"}, wantCode: 2, wantErrs: 1},
 		{name: "fails on an unreadable measurement", argv: []string{"-in", path + ".gone"}, wantCode: 1, wantErrs: 1},
+		{name: "fails on an unreadable baseline", argv: []string{"-in", path, "-baseline", path + ".gone"}, wantCode: 1, wantErrs: 1},
+		{name: "fails on a negative coverage drop", argv: []string{"-in", path, "-max-coverage-drop", "-1"}, wantCode: 1, wantErrs: 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

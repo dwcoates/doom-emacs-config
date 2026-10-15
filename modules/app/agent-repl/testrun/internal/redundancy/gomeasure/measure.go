@@ -139,11 +139,12 @@ func Measure(ctx context.Context, cfg Config, exec Exec, log *run.Log) (*redunda
 	log.Infof("redundancy: %d leaf cases", len(leaves))
 	phase("discovery")
 
-	cases, healthy, err := m.coverage(ctx, coverBin, leaves)
+	cases, statements, healthy, err := m.coverage(ctx, coverBin, leaves)
 	if err != nil {
 		return nil, err
 	}
 	phase("per-case coverage")
+	out.Statements = statements
 	for i := range cases {
 		if why := pins[Top(cases[i].ID)]; why != "" {
 			cases[i].Pinned = why
@@ -276,9 +277,10 @@ func (m *measurer) discover(ctx context.Context, bin string, tops []string) ([]s
 }
 
 // coverage measures every leaf alone, Runs times, and returns its cases
-// (blocks unioned over the runs, cost the median runtime) and each leaf's
-// healthy process latency (its slowest run's wall).
-func (m *measurer) coverage(ctx context.Context, bin string, leaves []string) ([]redundancy.Case, map[string]time.Duration, error) {
+// (blocks unioned over the runs, cost the median runtime), every block of the
+// covered packages with its statement count, and each leaf's healthy process
+// latency (its slowest run's wall).
+func (m *measurer) coverage(ctx context.Context, bin string, leaves []string) ([]redundancy.Case, map[string]int, map[string]time.Duration, error) {
 	elapsed := make([][]time.Duration, len(leaves))
 	healthy := map[string]time.Duration{}
 	dirs := make([][]string, len(leaves))
@@ -286,17 +288,17 @@ func (m *measurer) coverage(ctx context.Context, bin string, leaves []string) ([
 		for i, leaf := range leaves {
 			dir := filepath.Join(m.cfg.Scratch, "cov", strconv.Itoa(r), strconv.Itoa(i))
 			if err := os.MkdirAll(dir, 0o755); err != nil {
-				return nil, nil, fmt.Errorf("gomeasure: %w", err)
+				return nil, nil, nil, fmt.Errorf("gomeasure: %w", err)
 			}
 			res, run, err := m.runTests(ctx, bin, RunPattern(leaf), FirstContactTimeout, []string{"-test.gocoverdir", dir})
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 			if !run.Ran[leaf] {
-				return nil, nil, fmt.Errorf("gomeasure: the pattern %s did not run %s:\n%s", RunPattern(leaf), leaf, res.Text())
+				return nil, nil, nil, fmt.Errorf("gomeasure: the pattern %s did not run %s:\n%s", RunPattern(leaf), leaf, res.Text())
 			}
 			if o := run.Outcomes[leaf]; res.Exit != 0 || (o != Pass && o != Skip) {
-				return nil, nil, fmt.Errorf("gomeasure: %s failed on measurement run %d with no mutant, a flaky or broken case (exit %d):\n%s", leaf, r+1, res.Exit, res.Text())
+				return nil, nil, nil, fmt.Errorf("gomeasure: %s failed on measurement run %d with no mutant, a flaky or broken case (exit %d):\n%s", leaf, r+1, res.Exit, res.Text())
 			}
 			elapsed[i] = append(elapsed[i], run.Elapsed[leaf])
 			healthy[leaf] = max(healthy[leaf], res.Wall)
@@ -305,22 +307,26 @@ func (m *measurer) coverage(ctx context.Context, bin string, leaves []string) ([
 		m.log.Infof("redundancy: coverage run %d of %d done", r+1, m.cfg.Runs)
 	}
 	cases := make([]redundancy.Case, len(leaves))
+	statements := map[string]int{}
 	for i, leaf := range leaves {
 		prof := filepath.Join(m.cfg.Scratch, "prof-"+strconv.Itoa(i)+".txt")
 		res, err := m.gocmd(ctx, ToolTimeout, "tool", "covdata", "textfmt", "-i="+strings.Join(dirs[i], ","), "-o="+prof)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		if res.Exit != 0 || res.TimedOut {
-			return nil, nil, fmt.Errorf("gomeasure: covdata textfmt for %s failed:\n%s", leaf, res.Text())
+			return nil, nil, nil, fmt.Errorf("gomeasure: covdata textfmt for %s failed:\n%s", leaf, res.Text())
 		}
 		text, err := os.ReadFile(prof)
 		if err != nil {
-			return nil, nil, fmt.Errorf("gomeasure: read %s's profile: %w", leaf, err)
+			return nil, nil, nil, fmt.Errorf("gomeasure: read %s's profile: %w", leaf, err)
 		}
-		_, covered, err := ParseProfile(string(text))
+		all, covered, err := ParseProfile(string(text))
 		if err != nil {
-			return nil, nil, fmt.Errorf("gomeasure: %s's profile: %w", leaf, err)
+			return nil, nil, nil, fmt.Errorf("gomeasure: %s's profile: %w", leaf, err)
+		}
+		for _, b := range all {
+			statements[b.Key()] = b.Statements
 		}
 		c := redundancy.Case{ID: leaf, Cost: median(elapsed[i])}
 		for _, b := range covered {
@@ -328,7 +334,7 @@ func (m *measurer) coverage(ctx context.Context, bin string, leaves []string) ([
 		}
 		cases[i] = c
 	}
-	return cases, healthy, nil
+	return cases, statements, healthy, nil
 }
 
 func median(ds []time.Duration) time.Duration {

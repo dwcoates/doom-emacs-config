@@ -11,6 +11,8 @@ import (
 type Block struct {
 	File                     string
 	Line0, Col0, Line1, Col1 int
+	// Statements is the block's statement count; not part of its Key.
+	Statements int
 }
 
 // Key is the block's identity in a measurement.
@@ -81,11 +83,15 @@ func parseProfileLine(l string) (Block, int, error) {
 			nums[2*i+j] = n
 		}
 	}
+	stmts, err := strconv.Atoi(fields[1])
+	if err != nil {
+		return bad()
+	}
 	count, err := strconv.Atoi(fields[2])
 	if err != nil {
 		return bad()
 	}
-	return Block{File: l[:colon], Line0: nums[0], Col0: nums[1], Line1: nums[2], Col1: nums[3]}, count, nil
+	return Block{File: l[:colon], Line0: nums[0], Col0: nums[1], Line1: nums[2], Col1: nums[3], Statements: stmts}, count, nil
 }
 
 // blockIndex finds the blocks of one file that hold a position.

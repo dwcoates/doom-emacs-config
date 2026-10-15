@@ -20,7 +20,7 @@ func TestParseProfileSplitsReachedBlocksFromAll(t *testing.T) {
 	if len(all) != 2 {
 		t.Fatalf("all = %v, want both blocks", all)
 	}
-	want := []Block{{File: "m/p/a.go", Line0: 3, Col0: 10, Line1: 5, Col1: 2}}
+	want := []Block{{File: "m/p/a.go", Line0: 3, Col0: 10, Line1: 5, Col1: 2, Statements: 2}}
 	if !reflect.DeepEqual(covered, want) {
 		t.Fatalf("covered = %v, want %v", covered, want)
 	}
@@ -40,6 +40,7 @@ func TestParseProfileRefuses(t *testing.T) {
 		{name: "a span without a comma", text: "mode: set\nm/p/a.go:3.10 2 1\n", want: "malformed"},
 		{name: "a position without a column", text: "mode: set\nm/p/a.go:3,5.2 2 1\n", want: "malformed"},
 		{name: "a count that is not a number", text: "mode: set\nm/p/a.go:3.1,5.2 2 x\n", want: "malformed"},
+		{name: "a statement count that is not a number", text: "mode: set\nm/p/a.go:3.1,5.2 x 1\n", want: "malformed"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

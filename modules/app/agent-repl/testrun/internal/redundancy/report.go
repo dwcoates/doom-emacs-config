@@ -50,6 +50,9 @@ type Measurement struct {
 	Mutants []MutantResult
 	// Anomalies are failures the measurement could not attribute.
 	Anomalies []string `json:",omitempty"`
+	// Statements maps every block of the measured scope, reached or not, to
+	// its statement count: what the coverage budget weighs.
+	Statements map[string]int `json:",omitempty"`
 	// Hangs are the kills that were a case hanging alone past its bound,
 	// listed because load, not the mutant, can cause one.
 	Hangs []string `json:",omitempty"`
@@ -81,11 +84,29 @@ func ReadMeasurement(path string) (*Measurement, error) {
 	return &m, nil
 }
 
+// Options are what a report is drawn under.
+type Options struct {
+	Universe Universe
+	Overhead time.Duration
+	Budget   Budget
+}
+
+// budgeted is one universe's minimization held to the coverage budget.
+func budgeted(m *Measurement, u Universe, o Options) (Result, []string, []SystemCoverage, error) {
+	r, err := Minimize(m.Cases, u, o.Overhead)
+	if err != nil {
+		return Result{}, nil, nil, err
+	}
+	return ApplyBudget(m.Cases, r, m.Statements, o.Budget, o.Overhead)
+}
+
 // Report writes the markdown report of m: the minimization under the chosen
-// universe, the cases the other universe disagrees on, the mutants and the
-// measurement's own cost.
-func Report(w io.Writer, m *Measurement, u Universe, overhead time.Duration) error {
-	main, err := Minimize(m.Cases, u, overhead)
+// universe held to the coverage budget, each system's coverage around it, the
+// cases the other universe disagrees on, the mutants and the measurement's
+// own cost.
+func Report(w io.Writer, m *Measurement, o Options) error {
+	u := o.Universe
+	main, restored, systems, err := budgeted(m, u, o)
 	if err != nil {
 		return err
 	}
@@ -93,7 +114,7 @@ func Report(w io.Writer, m *Measurement, u Universe, overhead time.Duration) err
 	if u == Strict {
 		other = KillsOnly
 	}
-	alt, err := Minimize(m.Cases, other, overhead)
+	alt, _, _, err := budgeted(m, other, o)
 	if err != nil {
 		return err
 	}
@@ -113,6 +134,20 @@ func Report(w io.Writer, m *Measurement, u Universe, overhead time.Duration) err
 	fmt.Fprintf(&b, "- Cases: %d, pinned: %d, removable: %d, kept: %d\n", len(m.Cases), pinned, len(main.Removed), len(main.Kept))
 	fmt.Fprintf(&b, "- Case runtime: %s total, %s kept, %s saved\n", round(total), round(main.KeptCost), round(saved))
 	fmt.Fprintf(&b, "- Proven cheapest: %t\n\n", main.Optimal)
+
+	b.WriteString("## Statement coverage\n\n")
+	b.WriteString("| System | Reference | Statements | Before | After | Drop | Floor |\n|---|---|---|---|---|---|---|\n")
+	for _, sc := range systems {
+		fmt.Fprintf(&b, "| %s | %s | %d | %.2f%% | %.2f%% | %.2f | %.2f%% |\n", sc.System, sc.Reference, sc.Statements, sc.Before, sc.After, sc.Drop(), sc.Floor)
+	}
+	fmt.Fprintf(&b, "\nAfter counts a statement lost when only removed cases reach it, so it errs low. Request limit: %.2f points.\n\n", o.Budget.MaxDrop)
+	if len(restored) > 0 {
+		fmt.Fprintf(&b, "Put back by the budget (%d), best statements per runtime first:\n\n", len(restored))
+		for _, id := range restored {
+			fmt.Fprintf(&b, "- `%s`\n", id)
+		}
+		b.WriteString("\n")
+	}
 
 	b.WriteString("## Mutants\n\n")
 	status := map[string]int{}
@@ -259,6 +294,8 @@ func ReportCommand(log Logger, argv []string, out io.Writer) int {
 	in := fs.String("in", "", "a measurement.json (required)")
 	universe := fs.String("universe", "kills-only", "kills-only or strict")
 	overhead := fs.Duration("overhead", 100*time.Microsecond, "fixed weight per kept case")
+	maxDrop := fs.Float64("max-coverage-drop", DefaultMaxDrop, "the most statement-coverage points any system may lose")
+	baseline := fs.String("baseline", "", "the pinned coverage baseline (testrun/coverage-baseline.json); without it each system is held to the measured population's own coverage")
 	if err := fs.Parse(argv); err != nil {
 		log.Errorf("redundancy report: %v", err)
 		return 2
@@ -277,7 +314,12 @@ func ReportCommand(log Logger, argv []string, out io.Writer) int {
 		log.Errorf("redundancy report: %v", err)
 		return 1
 	}
-	if err := Report(out, m, u, *overhead); err != nil {
+	b, err := LoadBudget(*maxDrop, *baseline)
+	if err != nil {
+		log.Errorf("redundancy report: %v", err)
+		return 1
+	}
+	if err := Report(out, m, Options{Universe: u, Overhead: *overhead, Budget: b}); err != nil {
 		log.Errorf("redundancy report %s: %v", *in, err)
 		return 1
 	}

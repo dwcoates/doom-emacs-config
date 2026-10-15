@@ -2,10 +2,8 @@ package gomeasure
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -46,32 +44,28 @@ func TestOSExecPassesTheAddedEnvironment(t *testing.T) {
 }
 
 func TestOSExecEndsTheWholeGroupAtItsTimeout(t *testing.T) {
-	// Arrange: the shell leaves a grandchild that would hold the pipe open.
-	pidFile := filepath.Join(t.TempDir(), "pid")
-	script := "sleep 30 & echo $! > " + pidFile + "; wait"
-	c := Cmd{Path: "/bin/sh", Args: []string{"-c", script}, Timeout: 300 * time.Millisecond}
+	// Arrange: the shell leaves a grandchild that holds the output pipe open
+	// for 30s. OSExec reads that pipe to its end, so it can return before
+	// then only if the timeout ended the grandchild too. (Its pid cannot be
+	// probed instead: a killed orphan answers kill(pid, 0) until init reaps
+	// it.)
+	c := Cmd{Path: "/bin/sh", Args: []string{"-c", "sleep 30 & wait"}, Timeout: 300 * time.Millisecond}
+
+	start := time.Now()
 
 	// Act
 	res, err := OSExec(context.Background(), c)
 
 	// Assert
+	returned := time.Since(start)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !res.TimedOut {
 		t.Fatal("TimedOut = false")
 	}
-	b, err := os.ReadFile(pidFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pid := strings.TrimSpace(string(b))
-	var n int
-	for _, ch := range pid {
-		n = n*10 + int(ch-'0')
-	}
-	if err := syscall.Kill(n, 0); err == nil {
-		t.Fatalf("the grandchild %d outlived the timeout", n)
+	if returned >= 30*time.Second {
+		t.Fatalf("OSExec returned after %v: the grandchild held the pipe to its end", returned)
 	}
 }
 

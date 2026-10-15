@@ -28,6 +28,7 @@ type Args struct {
 	Out         string
 	Universe    redundancy.Universe
 	Overhead    time.Duration
+	Budget      redundancy.Budget
 	KeepScratch bool
 }
 
@@ -58,6 +59,8 @@ func ParseArgs(argv []string, stderr io.Writer) (Args, error) {
 	fs.StringVar(&universe, "universe", "kills-only", "kills-only or strict (killed mutants and reached blocks)")
 	fs.DurationVar(&a.Overhead, "overhead", DefaultOverhead, "fixed weight per kept case")
 	fs.BoolVar(&a.KeepScratch, "keep-scratch", false, "keep the scratch directory")
+	maxDrop := fs.Float64("max-coverage-drop", redundancy.DefaultMaxDrop, "the most statement-coverage points any system may lose")
+	baseline := fs.String("baseline", "", "the pinned coverage baseline (testrun/coverage-baseline.json); without it each system is held to the measured population's own coverage")
 	fs.StringVar(&a.Go, "go", "go", "the go command")
 	if err := fs.Parse(argv); err != nil {
 		return Args{}, err
@@ -75,6 +78,9 @@ func ParseArgs(argv []string, stderr io.Writer) (Args, error) {
 		return Args{}, err
 	}
 	a.Universe = u
+	if a.Budget, err = redundancy.LoadBudget(*maxDrop, *baseline); err != nil {
+		return Args{}, err
+	}
 	a.Tests = splitList(tests)
 	a.Mutate = splitList(mutate)
 	if len(a.Mutate) == 0 {
@@ -120,7 +126,7 @@ func Command(ctx context.Context, log *run.Log, argv []string, exec Exec) int {
 		log.Errorf("redundancy: measure %s %s: %v", a.Package, strings.Join(a.Tests, ","), err)
 		return 1
 	}
-	if err := WriteOutputs(a.Out, m, a.Universe, a.Overhead); err != nil {
+	if err := WriteOutputs(a.Out, m, redundancy.Options{Universe: a.Universe, Overhead: a.Overhead, Budget: a.Budget}); err != nil {
 		log.Errorf("redundancy: %v", err)
 		return 1
 	}
@@ -129,7 +135,7 @@ func Command(ctx context.Context, log *run.Log, argv []string, exec Exec) int {
 }
 
 // WriteOutputs writes measurement.json and report.md under dir.
-func WriteOutputs(dir string, m *redundancy.Measurement, u redundancy.Universe, overhead time.Duration) error {
+func WriteOutputs(dir string, m *redundancy.Measurement, o redundancy.Options) error {
 	if err := redundancy.WriteMeasurement(filepath.Join(dir, "measurement.json"), m); err != nil {
 		return err
 	}
@@ -137,7 +143,7 @@ func WriteOutputs(dir string, m *redundancy.Measurement, u redundancy.Universe, 
 	if err != nil {
 		return fmt.Errorf("redundancy: create the report: %w", err)
 	}
-	if err := redundancy.Report(f, m, u, overhead); err != nil {
+	if err := redundancy.Report(f, m, o); err != nil {
 		f.Close()
 		return err
 	}
