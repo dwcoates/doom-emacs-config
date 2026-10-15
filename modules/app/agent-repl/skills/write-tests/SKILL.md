@@ -87,6 +87,10 @@ coverage impact (always none).
 
 ## Measuring a test change
 
+- Whether a case is REDUNDANT (may be deleted): `testrun redundancy`, never
+  judgement. It measures the mutants each case kills and proves which cases
+  the rest dominate; see AGENTS.md, "Which tests are redundant".
+
 - Wall and CPU: `/usr/bin/time -p <command>` (user+sys is CPU), before and after, same host load.
 - Bytes written: sample each process's `proc_pid_rusage` `ri_diskio_byteswritten` (per process; short-lived processes and root processes are invisible to it), and the SSD's cumulative counter (`ioreg -c IOBlockStorageDriver -r -l`, "Bytes (Write)") with a quiet baseline before and after. Other sessions' runs contaminate the system counter: say so.
 - Flakes: stress with `-count=N -parallel <high>` (or the suite's repeat equivalent) and report pass counts; never `bin/with-cpu-load.sh` unless the owner asks, never a hand-written busy loop. A flaky test is root-caused and fixed, never retried.

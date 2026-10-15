@@ -344,6 +344,58 @@ runs outside `testrun`:
   wrapper: signalling the npm pid alone leaves vitest's worker pool reparented
   to init and burning CPU for the rest of the run.
 
+### Which tests are redundant: `testrun redundancy`
+
+A test case may be removed only if the cases that remain catch every bug it
+catches. "Catches" is measured by MUTANTS KILLED, not lines reached (owner
+ruling, 2026-10-14), and `testrun redundancy` is the one tool that measures
+it. Never delete a test on a judgement of overlap alone.
+
+- `bin/background.sh testrun redundancy go -module daemon -pkg ./internal/workspace -tests sessions_test.go -out DIR`
+  measures each leaf case alone: its reached blocks (unioned over `-runs`,
+  default 3, so a path only a race reaches still counts), its runtime, and
+  the mutants it kills. It writes `measurement.json` and `report.md`: the
+  cheapest set that still kills every killed mutant, each removable case
+  with what catches its bugs instead.
+  - `-roster-suite daemon` measures a whole Go suite, integration pass
+    included; `-suites FILE` names suites by hand. A suite that spawns
+    programs runs them from the tool's own programs directories:
+    cover-built for coverage, built from the mutant schema for mutants.
+  - `-delete FILE` VERIFIES an audit's deletion set instead: each mutant a
+    deleted case reaches is settled by a kept unit case, then by the
+    deleted cases (none kills it: nothing lost), then by a kept integration
+    or e2e case; a mutant only a deleted case kills puts that case back.
+    `-estimate` stops after the unit tier and reports the rest's cost.
+  - `testrun redundancy report -in measurement.json` redraws a report under
+    either universe (`-universe kills-only`, the default, or `strict`,
+    which also keeps every reached block) without measuring again.
+- Mutants are a SCHEMA (`internal/redundancy/gomut`): every mutant is
+  compiled into one binary behind `AGENT_REPL_MUTANT`, applied through `go
+  -overlay`, so no source file is ever written.
+- What stays regardless: a case that asserts a canonical log record (its
+  body or a helper it calls uses `-pin-calls`, default `FindRecord,Records`),
+  and any case named with `-pin`.
+- A kill by hang counts only when it reproduces at `-hang-bound` (11s): a
+  mutant that merely slows a case is no kill, and a false kill would make
+  other cases look dominated.
+- COVERAGE BUDGET (owner ruling, 2026-10-14): the owner's 5 points of
+  statement coverage per system is ONE budget across every workspace, which
+  the parent workspace of the test-slimming effort shares out. The report
+  holds a removal set to `-max-coverage-drop` (default 1, where a workspace
+  reports to that parent) against `-baseline testrun/coverage-baseline.json`
+  and puts back the cases that bring back the most lost statements per unit
+  of runtime.
+  - The baseline is each system's all-tier statement coverage at one master
+    commit. `bin/test-all.sh --coverage` cover-builds every system program,
+    measures what the integration and e2e tiers' spawned systems reach, and
+    ends with a `coverage:baseline` unit that writes
+    `coverage-baseline.json` beside the run's log. It becomes
+    `testrun/coverage-baseline.json` only by the owner's decision, and
+    nothing rewrites it after a removal.
+- It is the heaviest test load there is: it refuses to run at normal
+  priority, runs one process at a time, and a multi-hour batch runs only on
+  AC power.
+
 ### No test writes to the user's temp directory
 
 Every temp file a test makes lives under a root its runner owns and removes.
