@@ -28,10 +28,31 @@ export function drawTimingEnv(): DrawTimingEnv {
   return { now: () => performance.now(), frame: nextFrame };
 }
 
-/** Run DRAW, the whole of one roster push into RAIL, and record what it cost. */
-export function timeRosterDraw(rail: ParentNode, placement: string, draw: () => void, env: DrawTimingEnv): void {
+/**
+ * The phases a draw marks, in order; each is recorded as `<phase>_ms`, the
+ * time since the mark before it.
+ */
+export const ROSTER_DRAW_PHASES = ["build", "mount", "layout", "hooks"] as const;
+
+/** One phase of a roster draw. */
+export type RosterDrawPhase = (typeof ROSTER_DRAW_PHASES)[number];
+
+/** Marks the end of one phase of a draw. */
+export type MarkPhase = (phase: RosterDrawPhase) => void;
+
+/**
+ * Run DRAW, the whole of one roster push into RAIL, and record what it cost,
+ * phase by phase: DRAW calls MARK at the end of each phase it runs.
+ */
+export function timeRosterDraw(rail: ParentNode, placement: string, draw: (mark: MarkPhase) => void, env: DrawTimingEnv): void {
   const started = env.now();
-  draw();
+  const phases: Partial<Record<`${RosterDrawPhase}_ms`, number>> = {};
+  let last = started;
+  draw((phase) => {
+    const at = env.now();
+    phases[`${phase}_ms`] = Math.round(at - last);
+    last = at;
+  });
   const drawn = env.now();
   env.frame(() => {
     const settled = env.now();
@@ -40,6 +61,7 @@ export function timeRosterDraw(rail: ParentNode, placement: string, draw: () => 
     const context = {
       placement,
       draw_ms: drawMs,
+      ...phases,
       frame_ms: Math.round(settled - drawn),
       total_ms: totalMs,
       rows: rail.querySelectorAll(".row").length,

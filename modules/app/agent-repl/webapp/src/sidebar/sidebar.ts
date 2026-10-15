@@ -23,7 +23,7 @@ import { createControl, type Control } from "../control.js";
 import { WatchWorkspaceRosterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_roster_pb";
 import { createDrawnStatusLog } from "../drawn-status.js";
 import { log } from "../log.js";
-import { drawTimingEnv, timeRosterDraw, type DrawTimingEnv } from "./draw-timing.js";
+import { drawTimingEnv, timeRosterDraw, type DrawTimingEnv, type MarkPhase } from "./draw-timing.js";
 import type { AppContext, DaemonContext } from "../rpc/context.js";
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { requireCase, requireMessage, unreachablePushArm } from "../rpc/strict.js";
@@ -289,11 +289,11 @@ function mountSidebarIn(
 
   /** Draw one whole roster into the rail, recording what the draw cost. */
   function drawRoster(roster: WorkspaceRoster): void {
-    timeRosterDraw(body, placement.case, () => drawRosterNow(roster), drawTiming);
+    timeRosterDraw(body, placement.case, (mark) => drawRosterNow(roster, mark), drawTiming);
   }
 
-  /** Draw one whole roster into the rail. */
-  function drawRosterNow(roster: WorkspaceRoster): void {
+  /** Draw one whole roster into the rail, marking each phase's end. */
+  function drawRosterNow(roster: WorkspaceRoster, mark: MarkPhase): void {
     // The teardowns come down BEFORE the draw, so a ticking age about to be
     // replaced cannot paint a node already detached.
     clear();
@@ -302,7 +302,13 @@ function mountSidebarIn(
     attention.beginPass();
     const drawn = drawWorkspaceRoster(roster, sc);
     attention.endPass();
+    mark("build");
     body.replaceChildren(drawn);
+    mark("mount");
+    // THE LAYOUT IS MEASURED ON ITS OWN: the hooks below read rectangles, so
+    // the style and layout the mount caused are paid here either way.
+    void body.offsetHeight;
+    mark("layout");
     applySearch(body, search.query());
     // The picker is a copy of the grouping too, drawn once at mount.
     head.paintGrouping(sc.view.track(GROUPING_VIEW_KEY, drawRosterShown(roster.shown, "WorkspaceRoster.shown"), head.paintGrouping));
@@ -319,6 +325,7 @@ function mountSidebarIn(
     bandFit.refit();
     // Seeked once the draw is in the document, where its animations run.
     wallPhase.seek();
+    mark("hooks");
   }
 
   return {
