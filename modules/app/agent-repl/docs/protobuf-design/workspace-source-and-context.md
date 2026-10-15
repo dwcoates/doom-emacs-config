@@ -30,7 +30,9 @@ Three binary dimensions, each against the main branch:
 
 - **BRANCHES FROM**: main, or another branch.
 - **MERGES INTO**: main, or another branch.
-- **CONTEXT**: fresh, or forked from another workspace's transcript.
+- **CONTEXT**: fresh, forked from the requester's own transcript, or forked from
+  another workspace's transcript. Forking from another workspace is sometimes
+  what is wanted, so it is its own value, not a variant of forking from self.
 
 Scope: THE AGENT API only, which is what an agent can ask for: the
 `/create-or-update-workspace` command file and `/merge-queue`. The editor's and
@@ -48,16 +50,27 @@ Fresh context:
 | **main** | yes (`create --master`) | no |
 | **another branch** | no | yes (a child: `create`'s default from a requester not on main) |
 
-Forked context:
+Context forked from the requester itself:
 
 | branches from \ merges into | main | another branch |
 |---|---|---|
 | **main** | no (`fork_from` forces the forked workspace as parent and refuses a base) | no |
-| **another branch** | only as `/merge-queue` async's own merge workspace, never as a create | yes (`create` with `fork_from`: a forked child of the forked workspace) |
+| **another branch** | only as `/merge-queue` async's own merge workspace (the requester's branch tip, into its merge target), never as a `create` | yes, the requester's own branch (`create` with `fork_from` naming the requester: a forked child of itself) |
+
+Context forked from another workspace X:
+
+| branches from \ merges into | main | another branch |
+|---|---|---|
+| **main** | no (same coupling) | no |
+| **another branch** | no | yes, but only X's own branch (`create` with `fork_from` naming X: a forked child of X) |
+
+In every forked cell today, "another branch" can only be the forked
+workspace's own branch: the command file makes the forked workspace the parent.
 
 The "no" cells are refused by the contract's rule that a workspace is never cut
-from one branch and merged into another, except "forked, main into main", which
-is refused only because the command file couples a fork to its parent.
+from one branch and merged into another, except the two forked "main into main"
+cells, which are refused only because the command file couples a fork to its
+parent.
 
 ## Questions for the designing agent
 
