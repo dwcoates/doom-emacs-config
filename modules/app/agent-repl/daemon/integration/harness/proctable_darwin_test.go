@@ -3,6 +3,7 @@ package harness
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -77,5 +78,23 @@ func TestProcArgs(t *testing.T) {
 				t.Fatalf("procArgs = %q, live %v; want %q, live %v", args, live, tc.wantArgs, tc.wantLive)
 			}
 		})
+	}
+}
+
+func TestKinfoIdentityNamesTheProcessWithoutItsArgv(t *testing.T) {
+	// Arrange
+	var p unix.KinfoProc
+	copy(p.Proc.P_comm[:], "node")
+	p.Eproc.Ppid = 7
+	p.Proc.P_starttime = unix.Timeval{Sec: 1760500000, Usec: 250000}
+	p.Proc.P_flag = 0x100
+
+	// Act
+	got := kinfoIdentity(p)
+
+	// Assert
+	want := `comm="node" ppid=7 started=` + time.Unix(1760500000, 250000000).Format(time.RFC3339Nano) + ` flags=0x100`
+	if got != want {
+		t.Fatalf("kinfoIdentity = %s, want %s", got, want)
 	}
 }

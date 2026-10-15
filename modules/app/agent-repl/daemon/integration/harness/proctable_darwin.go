@@ -25,7 +25,7 @@ func processTable() ([]procEntry, error) {
 		pid := int(p.Proc.P_pid)
 		args, live, err := procArgs(pid, readProcArgs2, readProcessState)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w (%s)", err, kinfoIdentity(p))
 		}
 		if !live {
 			continue
@@ -81,4 +81,13 @@ func procArgs(pid int, read func(int) ([]byte, error), state func(int) (processS
 		case <-poll.C:
 		}
 	}
+}
+
+// kinfoIdentity names a process from the process table alone, for an error
+// about a process whose argv cannot be read: its command name, parent, start
+// time and kernel flags (P_SUGID among them) are what identify it then.
+func kinfoIdentity(p unix.KinfoProc) string {
+	comm := unix.ByteSliceToString(p.Proc.P_comm[:])
+	start := time.Unix(p.Proc.P_starttime.Sec, int64(p.Proc.P_starttime.Usec)*1000)
+	return fmt.Sprintf("comm=%q ppid=%d started=%s flags=%#x", comm, p.Eproc.Ppid, start.Format(time.RFC3339Nano), p.Proc.P_flag)
 }
