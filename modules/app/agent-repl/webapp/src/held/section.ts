@@ -30,11 +30,21 @@
  * handler never reaches it: the section arms the same one
  * (`installClickExpand`) on its own host, with the same has-more refresh after
  * each toggle.
+ *
+ * A FOLD IS SEEN (owner request, 2026-10-15). A change that folded a held
+ * prompt into the entry ahead of it names the fold (WatchFeedHeldChange.folds).
+ * The entry folded into flashes once, and the folded prompt's card, when this
+ * section was drawing it, stays as a LEAVING card under that entry, wearing
+ * "folding above", until its fade has run (fold-motion.ts). A leaving card is
+ * no held item: it carries `FOLDING_ATTRIBUTE` instead of the item's id, so
+ * no reader of the held entries counts it.
  */
 import type { FeedHeld, FeedHeldItem } from "../../../proto/gen/ts/frontend/v1/feed_held_pb";
+import type { WatchFeedHeldFold } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_feed_pb";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
+import { MalformedView } from "../rpc/malformed.js";
 import type { HeldContext } from "./context.js";
 import { drawHeldPrompt } from "./held-prompt.js";
 import { ClassifierUpdateForms } from "./classifier-update.js";
@@ -42,6 +52,7 @@ import { placeChildren } from "../dom.js";
 import { installClickExpand } from "../expand.js";
 import { refreshHasMore } from "../feed/bubble-more.js";
 import { stopTicking } from "../feed/ticking.js";
+import { flashFoldedInto, showFolding } from "./fold-motion.js";
 
 /** What the section is handed by the feed that owns it. */
 export interface HeldSectionDeps {
@@ -54,8 +65,12 @@ export interface HeldSectionDeps {
 
 /** The root feed's held section, as the feed drives it. */
 export interface HeldSection {
-  /** Draw SECTION, whole, over the previous drawing. */
-  apply(section: FeedHeld): void;
+  /**
+   * Draw SECTION, whole, over the previous drawing. FOLDS are the folds the
+   * change that brought it made (WatchFeedHeldChange.folds), none for a
+   * section served whole by OpenFeed.
+   */
+  apply(section: FeedHeld, folds?: readonly WatchFeedHeldFold[]): void;
   dispose(): void;
 }
 
@@ -66,12 +81,24 @@ const SECTION_LIST_CLASS = "held-section-items";
 /** The attribute every held item's element carries: its FeedHeldItem id. */
 export const HELD_ITEM_ATTRIBUTE = "data-held-item";
 
+/** The attribute a leaving card wears in place of `HELD_ITEM_ATTRIBUTE`: the folded item's id. */
+export const FOLDING_ATTRIBUTE = "data-held-folding";
+
+
 /**
  * Every held entry the section draws, in the daemon's order: the list's own
- * items. The section sits after the feed in the scroll zone, so its last item,
- * when there is one, is the feed column's latest entry (`latestEntry`, feed.ts).
+ * items, a leaving card not among them. The section sits after the feed in the
+ * scroll zone, so its last item, when there is one, is the feed column's latest
+ * entry (`latestEntry`, feed.ts).
  */
-export const HELD_ENTRY_SELECTOR = `.${SECTION_LIST_CLASS} > *`;
+export const HELD_ENTRY_SELECTOR = `.${SECTION_LIST_CLASS} > :not([${FOLDING_ATTRIBUTE}])`;
+
+/** A folded prompt's card while it leaves, and the held item it was folded into. */
+export interface LeavingCard {
+  readonly card: HTMLElement;
+  /** The id of the held item it was folded into: it is drawn just after that item. */
+  readonly into: string;
+}
 
 /**
  * Mount the held section on HOST. It draws nothing until the feed applies a
@@ -94,7 +121,53 @@ export function mountHeldSection(host: HTMLElement, ctx: AppContext, deps: HeldS
     disposers = [];
   };
 
-  const apply = (section: FeedHeld): void => {
+  /** The folded prompts' cards still leaving, by the folded item's id. */
+  const leaving = new Map<string, LeavingCard>();
+  /** The section last applied, which a leaving card's departure redraws. */
+  let last: FeedHeld | null = null;
+  let disposed = false;
+
+  /**
+   * Take FOLDS in: each folded card this section draws starts leaving, and
+   * the ids of the entries folded into are answered, to flash once placed.
+   */
+  const startFolds = (section: FeedHeld, folds: readonly WatchFeedHeldFold[]): string[] => {
+    const served = new Set(section.items.map((item) => item.id?.value));
+    return folds.map((fold, index) => {
+      const path = `WatchFeedHeldChange.folds[${index.toString()}]`;
+      const folded = requireMessage(fold.folded, `${path}.folded`).value;
+      const into = requireMessage(fold.into, `${path}.into`).value;
+      if (served.has(folded)) {
+        log.error("a fold named a prompt the same change still holds", {
+          operation: "held.fold.still-held",
+          context: { folded, into },
+        });
+        throw new MalformedView(`${path}.folded`, `item ${folded} was folded yet is still held`);
+      }
+      const card = heldCard(host, folded);
+      if (card === null) {
+        log.debug("a prompt this section never drew was folded; there is no card to show leaving", {
+          operation: "held.fold.undrawn",
+          context: { folded, into },
+        });
+        return into;
+      }
+      card.removeAttribute(HELD_ITEM_ATTRIBUTE);
+      card.removeAttribute("data-held-turn");
+      card.setAttribute(FOLDING_ATTRIBUTE, folded);
+      leaving.set(folded, { card, into });
+      showFolding(card, folded, () => {
+        leaving.delete(folded);
+        card.remove();
+        if (disposed || last === null) return;
+        apply(last);
+      });
+      return into;
+    });
+  };
+
+  const apply = (section: FeedHeld, folds: readonly WatchFeedHeldFold[] = []): void => {
+    last = section;
     // The teardowns come down BEFORE the draw, so a card whose subscription
     // is about to be replaced cannot tick a node already detached.
     clear();
@@ -107,7 +180,8 @@ export function mountHeldSection(host: HTMLElement, ctx: AppContext, deps: HeldS
     };
     const before = heldTurns(host);
     const current = host.firstElementChild instanceof HTMLElement ? host.firstElementChild : null;
-    const drawn = drawSection(section, tc, current);
+    const intos = startFolds(section, folds);
+    const drawn = drawSection(section, tc, current, leaving);
     if (current !== null && current !== drawn) stopTicking(current);
     // AN EMPTY SECTION DRAWS NOTHING (owner ruling 3, 2026-09-13), so the host
     // is emptied rather than given a region: `#hold-tray:empty` is what
@@ -115,6 +189,18 @@ export function mountHeldSection(host: HTMLElement, ctx: AppContext, deps: HeldS
     placeChildren(host, drawn === null ? [] : [drawn]);
     // A form whose card left with this push goes with it.
     classifierForms.retain(heldTurns(host));
+    // Flashed once placed, so the flash runs on the card in the document.
+    for (const into of intos) {
+      const card = heldCard(host, into);
+      if (card === null) {
+        log.debug("a prompt was folded into an entry this section draws no card for; nothing flashes", {
+          operation: "held.fold.into-undrawn",
+          context: { into },
+        });
+        continue;
+      }
+      flashFoldedInto(card, into);
+    }
     // Only a FIRST draw parks, and only once it is placed; one park covers
     // every card the push landed, since each parks at the same tail.
     const landed = heldTurns(host).filter((turn) => !before.includes(turn));
@@ -130,6 +216,8 @@ export function mountHeldSection(host: HTMLElement, ctx: AppContext, deps: HeldS
     apply,
     dispose(): void {
       log.debug("disposing the held section", { operation: "held.dispose" });
+      disposed = true;
+      leaving.clear();
       clear();
       uninstallExpand();
       for (const child of host.children) stopTicking(child);
@@ -139,8 +227,9 @@ export function mountHeldSection(host: HTMLElement, ctx: AppContext, deps: HeldS
 }
 
 /**
- * The section, whole: the held items, in the order the daemon served them —
- * or `null` when nothing is held.
+ * The section, whole: the held items, in the order the daemon served them,
+ * each LEAVING card just after the item it was folded into (at the end when
+ * that item is not drawn) — or `null` when nothing is held or leaving.
  *
  * AN EMPTY SECTION DRAWS NOTHING (owner ruling 3, 2026-09-13). Not a "nothing
  * held" line, not an empty region: the answer to "what is the daemon holding
@@ -152,14 +241,15 @@ export function drawSection(
   u: FeedHeld,
   tc: HeldContext,
   previous: HTMLElement | null,
+  leaving: ReadonlyMap<string, LeavingCard> = new Map(),
 ): HTMLElement | null {
   const path = "FeedHeld";
   log.debug("drawing the held section", {
     operation: "held.draw",
-    context: { items: u.items.length, in_place: previous !== null },
+    context: { items: u.items.length, leaving: leaving.size, in_place: previous !== null },
   });
 
-  if (u.items.length === 0) return null;
+  if (u.items.length === 0 && leaving.size === 0) return null;
 
   // THE PREVIOUS DRAWING IS REUSED, region and list alike, so an item updated
   // in place never leaves the document (see the file header).
@@ -180,12 +270,25 @@ export function drawSection(
   const items = u.items.map((item, index) =>
     drawHeldItem(item, tc, `${path}.items[${index.toString()}]`, cards),
   );
+  for (const { card, into } of leaving.values()) {
+    const at = items.findIndex((item) => item.getAttribute(HELD_ITEM_ATTRIBUTE) === into);
+    if (at === -1) items.push(card);
+    else items.splice(at + 1, 0, card);
+  }
   const kept = new Set<Element>(items);
   for (const child of list.children) {
     if (!kept.has(child)) stopTicking(child);
   }
   placeChildren(list, items);
   return region;
+}
+
+/** The card HOST draws for the held item ID, or null when it draws none. */
+function heldCard(host: HTMLElement, id: string): HTMLElement | null {
+  for (const card of host.querySelectorAll<HTMLElement>(HELD_ENTRY_SELECTOR)) {
+    if (card.getAttribute(HELD_ITEM_ATTRIBUTE) === id) return card;
+  }
+  return null;
 }
 
 /**

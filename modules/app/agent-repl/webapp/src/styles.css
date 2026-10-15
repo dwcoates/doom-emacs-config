@@ -5552,6 +5552,17 @@ ar-button.outcome-marker-pill {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.45; }
 }
+/* A FOLD IS SEEN (src/held/fold-motion.ts, owner request 2026-10-15). The
+   folded card's badge reads "folding above" in the accent while the card
+   fades out under the entry it joined, and that entry flashes once: an
+   accent ring that fades away. An outline, so the bubble's own shadow and
+   fill are untouched. */
+.badge.held-badge.held-folding { color: var(--accent); }
+.held-fold-flash { animation: held-fold-flash 0.9s ease-out 1; }
+@keyframes held-fold-flash {
+  0% { outline: 2px solid var(--accent); outline-offset: 1px; }
+  100% { outline: 2px solid transparent; outline-offset: 1px; }
+}
 /* An attached image, capped so a paste cannot take over the tray. */
 .queued-image { max-width: 100%; max-height: 8rem; border-radius: 6px; }
 /* A host-local image the webview cannot fetch: named, not drawn broken. */

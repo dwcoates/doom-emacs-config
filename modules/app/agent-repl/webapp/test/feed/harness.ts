@@ -388,11 +388,18 @@ export function heldPromptItem(id: string, turn: string, text = "held words"): F
 }
 
 /**
- * A tail push carrying a change of the held section: HELD whole, and the ROWS
- * that moved with it.
+ * A tail push carrying a change of the held section: HELD whole, the ROWS
+ * that moved with it, and the FOLDS it made, each a folded item id and the
+ * item id it was folded into.
  */
-export function pushHeld(held: FeedHeld, rows: readonly FeedRow[] = []): WatchFeedResponse {
-  return create(WatchFeedResponseSchema, { held: { held, rows: [...rows] } });
+export function pushHeld(
+  held: FeedHeld,
+  rows: readonly FeedRow[] = [],
+  folds: ReadonlyArray<readonly [folded: string, into: string]> = [],
+): WatchFeedResponse {
+  return create(WatchFeedResponseSchema, {
+    held: { held, rows: [...rows], folds: folds.map(([folded, into]) => ({ folded: feedId(folded), into: feedId(into) })) },
+  });
 }
 
 /** A page of ROWS. */
