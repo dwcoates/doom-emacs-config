@@ -2431,8 +2431,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   }
 
   /**
-   * ONE SEND, BOOKED AS A RECORD: the vendor files it as a `user` record under
-   * its client uuid, so the rewind's span and the fork point both count it.
+   * ONE SEND, BOOKED AS A RECORD under its client uuid, so the rewind's span
+   * and the fork point both count it. The vendor files the send as a `user`
+   * record under that uuid, or, folded in mid-turn, as a `queued_command`
+   * attachment whose `source_uuid` it is; the stream never shows that
+   * attachment's own uuid, so the client uuid is the token, and the fork
+   * resolves it against the transcript (engine/fork-session.ts
+   * `recordOfToken`).
    */
   function noteSendRecord(uuid: string, turn: RecordTurn): void {
     rewind.noteSend(uuid, turn);

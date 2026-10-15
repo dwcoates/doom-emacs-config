@@ -4,8 +4,9 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  forkableRecordUuids,
+  forkableRecords,
   forkSession,
+  recordOfToken,
   resolveUpTo,
   type ForkVendorSession,
   remapForkedCompactBoundaries,
@@ -65,41 +66,83 @@ async function fixture(options: { book?: boolean } = {}): Promise<{ configDir: s
   return { configDir, stateDir };
 }
 
-describe("forkableRecordUuids", () => {
-  it("answers the vendor's message records in file order, skipping metadata and torn lines", () => {
-    // Arrange
-    const dir = testTempDir("fork-uuids-");
-    const file = path.join(dir, "t.jsonl");
-    writeFileSync(
-      file,
-      [
-        JSON.stringify({ type: "user", uuid: "u1" }),
-        JSON.stringify({ type: "last-prompt", uuid: "meta" }),
-        "{not json",
-        JSON.stringify({ type: "progress", uuid: "p1" }),
-        JSON.stringify({ type: "attachment", uuid: "" }),
-        JSON.stringify({ type: "system", uuid: "s1" }),
-        "",
-      ].join("\n"),
-    );
+/** A `queued_command` attachment: the vendor's filing of a send folded in mid-turn. */
+function queuedCommand(uuid: string, source: string | undefined): Record<string, unknown> {
+  return { type: "attachment", uuid, attachment: { type: "queued_command", commandMode: "prompt", ...(source === undefined ? {} : { source_uuid: source }) } };
+}
 
-    // Act
-    const uuids = forkableRecordUuids(file);
+describe("forkableRecords", () => {
+  /** Write `lines` as a transcript and read its forkable records. */
+  function read(lines: readonly string[]): ReturnType<typeof forkableRecords> {
+    const file = path.join(testTempDir("fork-records-"), "t.jsonl");
+    writeFileSync(file, [...lines, ""].join("\n"));
+    return forkableRecords(file);
+  }
+
+  it("answers the vendor's message records in file order, skipping metadata and torn lines", () => {
+    // Arrange, Act
+    const records = read([
+      JSON.stringify({ type: "user", uuid: "u1" }),
+      JSON.stringify({ type: "last-prompt", uuid: "meta" }),
+      "{not json",
+      JSON.stringify({ type: "progress", uuid: "p1" }),
+      JSON.stringify({ type: "attachment", uuid: "" }),
+      JSON.stringify({ type: "system", uuid: "s1" }),
+    ]);
 
     // Assert
-    expect(uuids).toEqual(["u1", "p1", "s1"]);
+    expect(records).toEqual([{ uuid: "u1" }, { uuid: "p1" }, { uuid: "s1" }]);
+  });
+
+  it.each([
+    { name: "a queued command carries the send it files", line: queuedCommand("q1", "send-1"), expected: [{ uuid: "q1", queuedSend: "send-1" }] },
+    { name: "a queued command with no source files no send", line: queuedCommand("q1", undefined), expected: [{ uuid: "q1" }] },
+    { name: "another attachment files no send", line: { type: "attachment", uuid: "h1", attachment: { type: "hook_success", source_uuid: "send-1" } }, expected: [{ uuid: "h1" }] },
+    { name: "a user record files no send of its own", line: { type: "user", uuid: "u1", attachment: { type: "queued_command", source_uuid: "send-1" } }, expected: [{ uuid: "u1" }] },
+  ])("$name", ({ line, expected }) => {
+    // Arrange, Act
+    const records = read([JSON.stringify(line)]);
+
+    // Assert
+    expect(records).toEqual(expected);
+  });
+});
+
+describe("recordOfToken", () => {
+  it.each([
+    { name: "a send filed as a record of its own is that record", records: [{ uuid: "u1" }, { uuid: "send-1" }], expected: "send-1" },
+    { name: "a send folded in mid-turn is its queued command", records: [{ uuid: "u1" }, { uuid: "q1", queuedSend: "send-1" }], expected: "q1" },
+    { name: "a repeated queued-command line is still one record", records: [{ uuid: "q1", queuedSend: "send-1" }, { uuid: "a1" }, { uuid: "q1", queuedSend: "send-1" }], expected: "q1" },
+    { name: "a send filed nowhere is absent", records: [{ uuid: "u1" }, { uuid: "q1", queuedSend: "send-2" }], expected: undefined },
+  ])("$name", ({ records, expected }) => {
+    // Act
+    const record = recordOfToken(records, "send-1");
+
+    // Assert
+    expect(record).toBe(expected);
+  });
+
+  it.each([
+    { name: "filed both as its own record and as a queued command", records: [{ uuid: "send-1" }, { uuid: "q1", queuedSend: "send-1" }], error: /filed both as a record of its own and as the queued command q1/ },
+    { name: "filed as two distinct queued commands", records: [{ uuid: "q1", queuedSend: "send-1" }, { uuid: "q2", queuedSend: "send-1" }], error: /filed as 2 distinct queued commands: q1, q2/ },
+  ])("fails hard on a send $name", ({ records, error }) => {
+    // Act / Assert
+    expect(() => recordOfToken(records, "send-1")).toThrow(error);
   });
 });
 
 describe("resolveUpTo", () => {
-  const uuids = ["u1", "a1", "u2"];
+  const chain = [{ uuid: "u1" }, { uuid: "a1" }, { uuid: "u2" }];
+  const folded = [{ uuid: "u1" }, { uuid: "a1" }, { uuid: "q1", queuedSend: "send-1" }, { uuid: "a2" }];
   it.each([
-    { name: "whole forks everything", point: whole(), expected: { kind: "ok", upTo: undefined } },
-    { name: "through a present record ends on it", point: throughRecord("a1"), expected: { kind: "ok", upTo: "a1" } },
-    { name: "before a present opener ends on the record before it", point: beforeRecord("u2"), expected: { kind: "ok", upTo: "a1" } },
-  ])("$name", ({ point, expected }) => {
+    { name: "whole forks everything", records: chain, point: whole(), expected: { kind: "ok", upTo: undefined } },
+    { name: "through a present record ends on it", records: chain, point: throughRecord("a1"), expected: { kind: "ok", upTo: "a1" } },
+    { name: "before a present opener ends on the record before it", records: chain, point: beforeRecord("u2"), expected: { kind: "ok", upTo: "a1" } },
+    { name: "through a send folded in mid-turn ends on its queued command", records: folded, point: throughRecord("send-1"), expected: { kind: "ok", upTo: "q1" } },
+    { name: "before a send folded in mid-turn ends on the record before its queued command", records: folded, point: beforeRecord("send-1"), expected: { kind: "ok", upTo: "a1" } },
+  ])("$name", ({ records, point, expected }) => {
     // Act
-    const resolved = resolveUpTo(uuids, point);
+    const resolved = resolveUpTo(records, point);
 
     // Assert
     expect(resolved).toEqual(expected);
@@ -111,7 +154,7 @@ describe("resolveUpTo", () => {
     { name: "before the very first record", point: beforeRecord("u1"), detail: "no finished turn precedes it" },
   ])("refuses $name", ({ point, detail }) => {
     // Act
-    const resolved = resolveUpTo(uuids, point);
+    const resolved = resolveUpTo(chain, point);
 
     // Assert
     expect(resolved.kind).toBe("absent");
@@ -120,7 +163,7 @@ describe("resolveUpTo", () => {
 
   it("throws on a point with no extent, which the validator never lets through", () => {
     // Act / Assert
-    expect(() => resolveUpTo(uuids, create(shimv1.ForkPointSchema, {}))).toThrow(/no extent/);
+    expect(() => resolveUpTo(chain, create(shimv1.ForkPointSchema, {}))).toThrow(/no extent/);
   });
 });
 
@@ -145,6 +188,30 @@ describe("forkSession", () => {
     expect(forkRecordsSince(mark)).toMatchObject([
       { level: "info", context: { vendor_session_id: "id-1", up_to: "a1", parent_book: "book-original" } },
     ]);
+  });
+
+  it("forks through a send folded in mid-turn, cutting at the queued command the vendor filed it as", async () => {
+    // Arrange: the newest concluded turn ended on a mid-turn send, which the
+    // vendor filed as a queued command sourcing the send's client uuid (the
+    // 2026-10-15 refusal: 7a249645… filed as 05d1e772…).
+    const { configDir, stateDir } = await fixture();
+    writeTranscript(configDir, PARENT_DIR, PARENT_ID, [
+      { type: "user", uuid: "u1", parentUuid: null, message: { role: "user", content: "hello" } },
+      { type: "assistant", uuid: "a1", parentUuid: "u1", message: { role: "assistant", content: [{ type: "text", text: "hi" }] } },
+      { ...queuedCommand("q1", "send-1"), parentUuid: "a1" },
+      { type: "assistant", uuid: "a2", parentUuid: "q1", message: { role: "assistant", content: [{ type: "text", text: "noted" }] } },
+    ]);
+    const fork = vi.fn<ForkVendorSession>((spec) => Promise.resolve(forkFakeSession(configDir, spec, sequentialIds())));
+
+    // Act
+    const outcome = await forkSession(
+      { configDir, stateDir, cwd: CHILD_DIR, forkVendorSession: fork },
+      { parentVendorSessionId: PARENT_ID, parentWorkspaceDir: PARENT_DIR, point: throughRecord("send-1") },
+    );
+
+    // Assert
+    expect(outcome.kind).toBe("forked");
+    expect(fork).toHaveBeenCalledWith({ parentSessionId: PARENT_ID, parentDir: PARENT_DIR, upToMessageId: "q1" });
   });
 
   it("asks the vendor for the whole transcript when the point is whole", async () => {
