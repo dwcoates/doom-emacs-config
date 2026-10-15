@@ -205,6 +205,9 @@ const (
 	// AgentReplReportEditorFocusProcedure is the fully-qualified name of the AgentRepl's
 	// ReportEditorFocus RPC.
 	AgentReplReportEditorFocusProcedure = "/agentrepl.v1.AgentRepl/ReportEditorFocus"
+	// AgentReplClaimLiveNotificationProcedure is the fully-qualified name of the AgentRepl's
+	// ClaimLiveNotification RPC.
+	AgentReplClaimLiveNotificationProcedure = "/agentrepl.v1.AgentRepl/ClaimLiveNotification"
 	// AgentReplWatchHostWorkspaceProcedure is the fully-qualified name of the AgentRepl's
 	// WatchHostWorkspace RPC.
 	AgentReplWatchHostWorkspaceProcedure = "/agentrepl.v1.AgentRepl/WatchHostWorkspace"
@@ -321,6 +324,7 @@ var (
 	agentReplSelectWorkspaceMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("SelectWorkspace")
 	agentReplMarkWorkspaceViewedMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("MarkWorkspaceViewed")
 	agentReplReportEditorFocusMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("ReportEditorFocus")
+	agentReplClaimLiveNotificationMethodDescriptor    = agentReplServiceDescriptor.Methods().ByName("ClaimLiveNotification")
 	agentReplWatchHostWorkspaceMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("WatchHostWorkspace")
 	agentReplWatchDaemonMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("WatchDaemon")
 	agentReplOpenTabsMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("OpenTabs")
@@ -536,6 +540,10 @@ type AgentReplClient interface {
 	// Emacs gained or lost desktop focus; the daemon decides every desktop
 	// banner on it. Idempotent. See endpoint_report_editor_focus.proto.
 	ReportEditorFocus(context.Context, *connect.Request[v1.ReportEditorFocusRequest]) (*connect.Response[v1.ReportEditorFocusResponse], error)
+	// Emacs gained desktop focus: answer the workspace of the newest desktop
+	// banner still live, which Emacs then selects, and forget the rest. See
+	// endpoint_claim_live_notification.proto.
+	ClaimLiveNotification(context.Context, *connect.Request[v1.ClaimLiveNotificationRequest]) (*connect.Response[v1.ClaimLiveNotificationResponse], error)
 	// The host-facing view of one workspace, per-workspace subscription. See
 	// endpoint_watch_host_workspace.proto.
 	WatchHostWorkspace(context.Context, *connect.Request[v1.WatchHostWorkspaceRequest]) (*connect.ServerStreamForClient[v1.WatchHostWorkspaceResponse], error)
@@ -982,6 +990,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplReportEditorFocusMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		claimLiveNotification: connect.NewClient[v1.ClaimLiveNotificationRequest, v1.ClaimLiveNotificationResponse](
+			httpClient,
+			baseURL+AgentReplClaimLiveNotificationProcedure,
+			connect.WithSchema(agentReplClaimLiveNotificationMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		watchHostWorkspace: connect.NewClient[v1.WatchHostWorkspaceRequest, v1.WatchHostWorkspaceResponse](
 			httpClient,
 			baseURL+AgentReplWatchHostWorkspaceProcedure,
@@ -1163,6 +1177,7 @@ type agentReplClient struct {
 	selectWorkspace          *connect.Client[v1.SelectWorkspaceRequest, v1.SelectWorkspaceResponse]
 	markWorkspaceViewed      *connect.Client[v1.MarkWorkspaceViewedRequest, v1.MarkWorkspaceViewedResponse]
 	reportEditorFocus        *connect.Client[v1.ReportEditorFocusRequest, v1.ReportEditorFocusResponse]
+	claimLiveNotification    *connect.Client[v1.ClaimLiveNotificationRequest, v1.ClaimLiveNotificationResponse]
 	watchHostWorkspace       *connect.Client[v1.WatchHostWorkspaceRequest, v1.WatchHostWorkspaceResponse]
 	watchDaemon              *connect.Client[v1.WatchDaemonRequest, v1.WatchDaemonResponse]
 	openTabs                 *connect.Client[v1.OpenTabsRequest, v1.OpenTabsResponse]
@@ -1494,6 +1509,11 @@ func (c *agentReplClient) ReportEditorFocus(ctx context.Context, req *connect.Re
 	return c.reportEditorFocus.CallUnary(ctx, req)
 }
 
+// ClaimLiveNotification calls agentrepl.v1.AgentRepl.ClaimLiveNotification.
+func (c *agentReplClient) ClaimLiveNotification(ctx context.Context, req *connect.Request[v1.ClaimLiveNotificationRequest]) (*connect.Response[v1.ClaimLiveNotificationResponse], error) {
+	return c.claimLiveNotification.CallUnary(ctx, req)
+}
+
 // WatchHostWorkspace calls agentrepl.v1.AgentRepl.WatchHostWorkspace.
 func (c *agentReplClient) WatchHostWorkspace(ctx context.Context, req *connect.Request[v1.WatchHostWorkspaceRequest]) (*connect.ServerStreamForClient[v1.WatchHostWorkspaceResponse], error) {
 	return c.watchHostWorkspace.CallServerStream(ctx, req)
@@ -1783,6 +1803,10 @@ type AgentReplHandler interface {
 	// Emacs gained or lost desktop focus; the daemon decides every desktop
 	// banner on it. Idempotent. See endpoint_report_editor_focus.proto.
 	ReportEditorFocus(context.Context, *connect.Request[v1.ReportEditorFocusRequest]) (*connect.Response[v1.ReportEditorFocusResponse], error)
+	// Emacs gained desktop focus: answer the workspace of the newest desktop
+	// banner still live, which Emacs then selects, and forget the rest. See
+	// endpoint_claim_live_notification.proto.
+	ClaimLiveNotification(context.Context, *connect.Request[v1.ClaimLiveNotificationRequest]) (*connect.Response[v1.ClaimLiveNotificationResponse], error)
 	// The host-facing view of one workspace, per-workspace subscription. See
 	// endpoint_watch_host_workspace.proto.
 	WatchHostWorkspace(context.Context, *connect.Request[v1.WatchHostWorkspaceRequest], *connect.ServerStream[v1.WatchHostWorkspaceResponse]) error
@@ -2225,6 +2249,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplReportEditorFocusMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplClaimLiveNotificationHandler := connect.NewUnaryHandler(
+		AgentReplClaimLiveNotificationProcedure,
+		svc.ClaimLiveNotification,
+		connect.WithSchema(agentReplClaimLiveNotificationMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplWatchHostWorkspaceHandler := connect.NewServerStreamHandler(
 		AgentReplWatchHostWorkspaceProcedure,
 		svc.WatchHostWorkspace,
@@ -2465,6 +2495,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplMarkWorkspaceViewedHandler.ServeHTTP(w, r)
 		case AgentReplReportEditorFocusProcedure:
 			agentReplReportEditorFocusHandler.ServeHTTP(w, r)
+		case AgentReplClaimLiveNotificationProcedure:
+			agentReplClaimLiveNotificationHandler.ServeHTTP(w, r)
 		case AgentReplWatchHostWorkspaceProcedure:
 			agentReplWatchHostWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplWatchDaemonProcedure:
@@ -2758,6 +2790,10 @@ func (UnimplementedAgentReplHandler) MarkWorkspaceViewed(context.Context, *conne
 
 func (UnimplementedAgentReplHandler) ReportEditorFocus(context.Context, *connect.Request[v1.ReportEditorFocusRequest]) (*connect.Response[v1.ReportEditorFocusResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ReportEditorFocus is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) ClaimLiveNotification(context.Context, *connect.Request[v1.ClaimLiveNotificationRequest]) (*connect.Response[v1.ClaimLiveNotificationResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ClaimLiveNotification is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) WatchHostWorkspace(context.Context, *connect.Request[v1.WatchHostWorkspaceRequest], *connect.ServerStream[v1.WatchHostWorkspaceResponse]) error {
