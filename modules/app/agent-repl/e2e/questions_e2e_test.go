@@ -90,8 +90,7 @@ import (
 func newQuestionWorkspace(t *testing.T) (*World, *workspacev1.WorkspaceRef) {
 	t.Helper()
 	w := NewWorld(t, WorldOpts{})
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	ws := w.NewWorkspace(t)
 	return w, ws
 }
 

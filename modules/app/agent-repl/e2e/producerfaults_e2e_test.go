@@ -64,8 +64,7 @@ import (
 // touching another area's file.
 func pfNewWorkspace(t *testing.T, w *World) (*workspacev1.WorkspaceRef, string) {
 	t.Helper()
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	ws := w.NewWorkspace(t)
 	return ws, w.DefaultConfigDir
 }
 

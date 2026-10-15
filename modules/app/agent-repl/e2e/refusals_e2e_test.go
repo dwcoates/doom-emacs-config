@@ -163,8 +163,7 @@ func TestBubbleRefusedNotDeliverable(t *testing.T) {
 	// subagent has no SDK route at all, the shim answers `not_deliverable`,
 	// and the delivery path records that refusal on its way to the caller.
 	w.ExpectWarnings("daemon.promptqueue.deliver")
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	ws := w.NewWorkspace(t)
 
 	turn := SubmitPrompt(t, w, ws, "!subagent")
 	AwaitTurnEnded(t, w, ws, turn)
@@ -216,8 +215,7 @@ func TestBubbleRefusedAgentBusy(t *testing.T) {
 	// subagent whose own turn is open, the shim answers `agent_busy`, and the
 	// delivery path records that refusal on its way to the caller.
 	w.ExpectWarnings("daemon.promptqueue.deliver")
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	ws := w.NewWorkspace(t)
 
 	turn := SubmitPrompt(t, w, ws, "!subagent-detached-utterance")
 	AwaitTurnEnded(t, w, ws, turn)
@@ -291,8 +289,7 @@ func TestUnknownAgentOnUpdateAgent(t *testing.T) {
 	// every such refusal under this operation so the ledger reconciles against
 	// the log. The assertion below pins that exact spelling.
 	w.ExpectWarnings("daemon.refusal.unlanded_arm")
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	ws := w.NewWorkspace(t)
 
 	turn := SubmitPrompt(t, w, ws, "!subagent-detached-live")
 	AwaitTurnEnded(t, w, ws, turn)
@@ -426,8 +423,7 @@ func TestStartSessionVendorStartFailedRecovers(t *testing.T) {
 	// the refused start left the shim process up and inert, so the second
 	// open attaches to that survivor rather than spawning a second one.
 	w.ExpectWarnings(append(rfVendorStartFaultWarnings, "daemon.workspace.bring_up")...)
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	ws := w.NewWorkspace(t)
 
 	// Act: the first open attempt consumes the one scripted refusal.
 	rfAwaitVendorStartFailed(t, w, ws)

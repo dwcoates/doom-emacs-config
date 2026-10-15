@@ -13,7 +13,7 @@ func TestTheSharedWorldGivesEachTestItsOwnViewOfOneDaemon(t *testing.T) {
 		t.Run("a test", func(t *testing.T) {
 			// Arrange
 			w := SharedWorld(t)
-			ws := tlNewWorkspace(t, w)
+			ws := w.NewWorkspace(t)
 
 			// Act
 			turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "fail-max-turns")

@@ -66,8 +66,7 @@ import (
 // fresh harness.NewRepo directory is never under MultiRepoRoot).
 func cpNewWorkspace(t *testing.T, w *World) (*workspacev1.WorkspaceRef, string) {
 	t.Helper()
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	repo, ws := w.NewRepoWorkspace(t)
 	resp, err := w.Client().OpenWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws}))
 	if err != nil {
 		t.Fatalf("OpenWorkspace(%s): %v", repo.Dir, err)

@@ -579,8 +579,7 @@ func TestWebappLayerRestartHandover(t *testing.T) {
 	selfRepo, w := adSelfRepoWorld(t)
 	w.ExpectWarnings("daemon.refusal.unlanded_arm.standing")
 
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	ws := w.NewWorkspace(t)
 
 	// THE HOST PARTICIPANT, WHICH EMACS WOULD BE (see wlDriveArea): the
 	// footer's connectivity truth is the PAIR of participants, and this hop is
@@ -730,8 +729,7 @@ func wlDriveAreaWorld(t *testing.T, vitestFile string, expectWarnings ...string)
 	if len(expectWarnings) > 0 {
 		w.ExpectWarnings(expectWarnings...)
 	}
-	repoFixture := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repoFixture.Dir)
+	ws := w.NewWorkspace(t)
 
 	// THE HOST PARTICIPANT, WHICH EMACS WOULD BE.
 	//

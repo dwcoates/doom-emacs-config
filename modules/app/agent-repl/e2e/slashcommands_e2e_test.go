@@ -191,8 +191,7 @@ func TestSlashShapeAUnnamed(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	w := NewWorld(t, WorldOpts{})
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	ws := w.NewWorkspace(t)
 	projectDir := harness.ProjectDir(w.DefaultConfigDir, ws.GetDir())
 
 	// Act.

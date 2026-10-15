@@ -68,8 +68,7 @@ import (
 func pmNewPermissionWorld(t *testing.T) (*World, *workspacev1.WorkspaceRef) {
 	t.Helper()
 	w := NewWorld(t, WorldOpts{})
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	ws := w.NewWorkspace(t)
 	pmOpenWorkspace(t, w, ws)
 	return w, ws
 }

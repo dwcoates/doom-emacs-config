@@ -108,8 +108,7 @@ func TestARelaunchedDaemonKeepsTheConversationItStoodDown(t *testing.T) {
 	// the conversation's own rows.
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{DurableState: true}})
 	w.ExpectWarnings("daemon.rollout.reconcile")
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	repo, ws := w.NewRepoWorkspace(t)
 	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
 
 	// Act: the host's stop, a fresh daemon, and the announcement Emacs makes

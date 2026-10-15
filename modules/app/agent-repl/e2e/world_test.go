@@ -324,6 +324,23 @@ func NewWorld(t testing.TB, opts WorldOpts) *World {
 	return w
 }
 
+// NewWorkspace registers a fresh workspace on w's daemon, backed by a fresh
+// fake-git repository (no test runs real git). Through a shared World's view
+// the workspace is the test's own: the view claims it (harness.Register).
+func (w *World) NewWorkspace(t testing.TB) *workspacev1.WorkspaceRef {
+	t.Helper()
+	_, ws := w.NewRepoWorkspace(t)
+	return ws
+}
+
+// NewRepoWorkspace is NewWorkspace for a test that also needs the repository
+// behind the workspace.
+func (w *World) NewRepoWorkspace(t testing.TB) (*harness.Repo, *workspacev1.WorkspaceRef) {
+	t.Helper()
+	repo := harness.NewRepo(t)
+	return repo, harness.Register(t, w.Daemon, repo.Dir)
+}
+
 // requireServicesOutlivedTheTest fails t if the store or the sidecar exited
 // on its own before t's cleanup: one a test stopped on purpose (Store.Stop,
 // Store.StartSameDB) is the test's own doing. Every World's test asks it, an

@@ -87,8 +87,7 @@ func TestADeployThatFindsTheDaemonStaleHandsOverAFreeWorkspace(t *testing.T) {
 	t.Parallel()
 	// Arrange: a HEADLESS workspace, which is free and has no rendezvous.
 	w := dpStaleDaemonWorld(t)
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	ws := w.NewWorkspace(t)
 	daemonStream := w.WatchDaemonStream()
 	defer daemonStream.Close()
 
@@ -145,7 +144,7 @@ func TestADeployOverARunningTurnHandsItOverAndEndsNothing(t *testing.T) {
 	// adoption_e2e_test.go's TestRefusalOrderingDuringHandover declares the
 	// same record for the same reason.
 	w.ExpectWarnings("daemon.refusal.unlanded_arm.standing", "daemon.refusal.unlanded_arm")
-	ws := dbWorkspace(t, w)
+	ws := w.NewWorkspace(t)
 	initial, feed := dbOpenRootFeed(t, w, ws)
 	defer feed.Close()
 	turn := SubmitPrompt(t, w, ws, "!bash-hold")
@@ -222,8 +221,7 @@ func TestASuccessorThatFinishedJoiningAcceptsADeploy(t *testing.T) {
 	// staged build stays the stale-daemon one, so the successor — running the
 	// same binary the incumbent did — finds itself stale in turn.
 	w := dpStaleDaemonWorld(t)
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	ws := w.NewWorkspace(t)
 	daemonStream := w.WatchDaemonStream()
 	defer daemonStream.Close()
 	if resp, err := w.Client().Deploy(w.Ctx(), dpUnforced()); err != nil {

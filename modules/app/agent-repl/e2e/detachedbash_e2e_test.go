@@ -60,16 +60,6 @@ import (
 	"agent-repld/integration/harness"
 )
 
-// dbWorkspace registers a fresh workspace against a fresh scripted-git
-// repo, the same pattern every area file in this suite uses (harness.NewRepo
-// backs the daemon's OWN git facts with the scripted fake, which this file
-// never inspects — these scenarios never touch git at all).
-func dbWorkspace(t *testing.T, w *World) *workspacev1.WorkspaceRef {
-	t.Helper()
-	repo := harness.NewRepo(t)
-	return harness.Register(t, w.Daemon, repo.Dir)
-}
-
 // dbOpenRootFeed opens a workspace's root feed and answers its initial page
 // plus a tailing watch. Distinct from AwaitTurnEnded's private one-shot open
 // (world_test.go) because this file needs to observe SEVERAL successive
@@ -299,7 +289,7 @@ func TestBashDetachedStartAndComplete(t *testing.T) {
 	// Detached work outliving its turn opens a health fault; that is the
 	// shape this test provokes.
 	w.ExpectWarnings("daemon.health.open_fault")
-	ws := dbWorkspace(t, w)
+	ws := w.NewWorkspace(t)
 
 	initial, stream := dbOpenRootFeed(t, w, ws)
 	defer stream.Close()
@@ -383,7 +373,7 @@ func TestBashDetachExplicitPoll(t *testing.T) {
 	// Detached work outliving its turn opens a health fault; that is the
 	// shape this test provokes.
 	w.ExpectWarnings("daemon.health.open_fault")
-	ws := dbWorkspace(t, w)
+	ws := w.NewWorkspace(t)
 
 	initial, feedStream := dbOpenRootFeed(t, w, ws)
 	defer feedStream.Close()
@@ -448,7 +438,7 @@ func dbExpectNoUnmodeledWarning(t *testing.T, stream *harness.Stream[*frontendv1
 func TestBashForegroundCompleted(t *testing.T) {
 	t.Parallel()
 	w := NewWorld(t, WorldOpts{})
-	ws := dbWorkspace(t, w)
+	ws := w.NewWorkspace(t)
 
 	initial, stream := dbOpenRootFeed(t, w, ws)
 	defer stream.Close()

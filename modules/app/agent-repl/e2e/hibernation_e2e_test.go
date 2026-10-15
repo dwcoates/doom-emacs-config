@@ -291,8 +291,7 @@ func TestKeepAliveAnswerAfterVendorTurnNeverServed(t *testing.T) {
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
 		ExtraEnv: []string{fmt.Sprintf("%s=%d", fakeKeepaliveIntervalEnv, fakeKeepaliveIntervalMS)},
 	}})
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	repo, ws := w.NewRepoWorkspace(t)
 	queued := SubmitPrompt(t, w, ws, "!queue-vendor-turn")
 	AwaitTurnEnded(t, w, ws, queued)
 
@@ -343,8 +342,7 @@ func TestKeepAliveStoresNothingOnEitherPlane(t *testing.T) {
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
 		ExtraEnv: []string{fmt.Sprintf("%s=%d", fakeKeepaliveIntervalEnv, fakeKeepaliveIntervalMS)},
 	}})
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	repo, ws := w.NewRepoWorkspace(t)
 	projectDir := harness.ProjectDir(w.DefaultConfigDir, ws.GetDir())
 	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
 
@@ -404,8 +402,7 @@ func TestPromptDuringKeepAliveTurnsOnce(t *testing.T) {
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
 		ExtraEnv: []string{fmt.Sprintf("%s=%d", fakeKeepaliveIntervalEnv, fakeKeepaliveIntervalMS)},
 	}})
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	repo, ws := w.NewRepoWorkspace(t)
 	turn1 := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
 	w.Daemon.AwaitLogRecord(harness.WorkspaceLogPath(repo.Dir, "shim"), "a keep-alive to be submitted",
 		func(r harness.LogRecord) bool { return r.Context["outcome"] == "keepalive_submitted" })
@@ -480,8 +477,7 @@ func TestRevivalAfterHibernate(t *testing.T) {
 		"daemon.sessionwatcher.link_fault", "daemon.shimclient.redial",
 		"daemon.shimclient.kill_session", "daemon.workspace.bring_up",
 		"daemon.shimclient.exit")
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	ws := w.NewWorkspace(t)
 	host := w.WatchHost(ws)
 	defer host.Close()
 
@@ -654,8 +650,7 @@ func TestRevivalRunsInTheSessionsModeNotTheSummarizers(t *testing.T) {
 		"daemon.sessionwatcher.link_fault", "daemon.shimclient.redial",
 		"daemon.shimclient.kill_session", "daemon.workspace.bring_up",
 		"daemon.shimclient.exit")
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	ws := w.NewWorkspace(t)
 	host := w.WatchHost(ws)
 	defer host.Close()
 

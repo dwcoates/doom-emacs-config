@@ -66,8 +66,7 @@ import (
 // for the test's life exactly as that convention does.
 func openWorkspace(t *testing.T, w *World) *workspacev1.WorkspaceRef {
 	t.Helper()
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	ws := w.NewWorkspace(t)
 
 	resp, err := w.Client().OpenWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws}))
 	if err != nil {

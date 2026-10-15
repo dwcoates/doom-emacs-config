@@ -71,8 +71,7 @@ func keepaliveWorld(t *testing.T) (*World, *workspacev1.WorkspaceRef, string) {
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
 		ExtraEnv: []string{fmt.Sprintf("%s=%d", fakeKeepaliveIntervalEnv, fakeKeepaliveIntervalMS)},
 	}})
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	repo, ws := w.NewRepoWorkspace(t)
 	return w, ws, harness.WorkspaceLogPath(repo.Dir, "shim")
 }
 

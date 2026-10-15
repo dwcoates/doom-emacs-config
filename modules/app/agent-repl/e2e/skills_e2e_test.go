@@ -133,8 +133,7 @@ func runSkillScenarioCase(t *testing.T, tc skillScenarioCase) {
 	// harness's own scripted fakegit world, exactly as daemon/integration's
 	// own tests register a workspace (harness.NewRepo + harness.Register).
 	w := NewWorld(t, WorldOpts{})
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	ws := w.NewWorkspace(t)
 
 	// Act: drive the real `!skill ...` prompt through the daemon's real
 	// SubmitPrompt, to the real shim's `--fake` vendor, through to a
