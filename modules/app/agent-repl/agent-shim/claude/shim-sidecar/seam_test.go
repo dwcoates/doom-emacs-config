@@ -1,6 +1,7 @@
 package main
 
 import (
+	"path/filepath"
 	"testing"
 
 	storev1 "agentrepl/proto/store/v1"
@@ -448,5 +449,35 @@ func TestTranscriptFactPlumbingSharesOneShape(t *testing.T) {
 			// Assert.
 			h.requireOnce(t, tc.operation, "error")
 		})
+	}
+}
+
+func TestAWorkflowJournalIsReadByTheJournalHandlerAsDeclaredResidue(t *testing.T) {
+	// Arrange: a live session's workflow journal, one record of each type the
+	// captured journal carries.
+	h := newHarness(t, &fakeStore{})
+	h.transcript(t, "sess-live", promptLine)
+	journal := filepath.Join(h.rootA, "projects", "proj", "sess-live", "subagents", "workflows", "wf_0001", "journal.jsonl")
+	h.write(t, journal, `{"type":"started","key":"v2:k","agentId":"a1"}`+"\n"+
+		`{"type":"result","key":"v2:k","agentId":"a1","result":{}}`+"\n")
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Act.
+	h.sc.producing(h.sc.pollAll)
+
+	// Assert: each record withheld under its declared journal kind, which
+	// only the journal handler names.
+	seen := map[string]bool{}
+	for _, rec := range h.ops(t, "residue-drop") {
+		if reason, ok := rec.Context["reason"].(string); ok {
+			seen[reason] = true
+		}
+	}
+	for _, want := range []string{"vendor_specific/workflow_journal/started", "vendor_specific/workflow_journal/result"} {
+		if !seen[want] {
+			t.Fatalf("residue withheld = %v, want %q", seen, want)
+		}
 	}
 }
