@@ -36,6 +36,10 @@ func TestParseProcArgs2(t *testing.T) {
 		{name: "a buffer too short for argc is refused", buf: []byte{1, 0}, wantErr: true},
 		{name: "an unterminated executable path is refused", buf: append(binary.LittleEndian.AppendUint32(nil, 1), "/bin/x"...), wantErr: true},
 		{name: "an unterminated argument is refused", buf: append(binary.LittleEndian.AppendUint32(nil, 2), "/bin/x\x00/bin/x\x00tail"...), wantErr: true},
+		{name: "an argv holding no argument at all is refused", buf: append(binary.LittleEndian.AppendUint32(nil, 3), "/bin/x\x00"...), wantErr: true},
+		{name: "a title written over the argv is what the process names",
+			buf:  append(binary.LittleEndian.AppendUint32(nil, 6), "/usr/bin/node\x00npm exec vitest run a.test.ts b.test.ts\x00HOME=/h\x00"...),
+			want: "npm exec vitest run a.test.ts b.test.ts HOME=/h"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
