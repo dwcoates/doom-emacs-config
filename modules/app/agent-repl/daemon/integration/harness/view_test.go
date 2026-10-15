@@ -3,13 +3,10 @@ package harness
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -22,80 +19,6 @@ import (
 
 // viewPID is the pid every record of these tests' fake daemon carries.
 const viewPID = 4242
-
-// recordingTB is a test the code under test may fail: it records Errorf and
-// Fatalf instead of failing the real test, ends the calling goroutine on a
-// Fatal as the testing package does, and keeps its cleanups for the test to
-// run when it chooses. Everything else is the real test's.
-type recordingTB struct {
-	testing.TB
-	name string
-
-	mu       sync.Mutex
-	errors   []string
-	fatal    bool
-	cleanups []func()
-}
-
-func newRecordingTB(t *testing.T, name string) *recordingTB {
-	return &recordingTB{TB: t, name: name}
-}
-
-func (r *recordingTB) Name() string { return r.name }
-func (r *recordingTB) Helper()      {}
-func (r *recordingTB) Cleanup(f func()) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.cleanups = append(r.cleanups, f)
-}
-func (r *recordingTB) Errorf(format string, args ...any) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.errors = append(r.errors, fmt.Sprintf(format, args...))
-}
-func (r *recordingTB) Fatalf(format string, args ...any) {
-	r.Errorf(format, args...)
-	r.mu.Lock()
-	r.fatal = true
-	r.mu.Unlock()
-	runtime.Goexit()
-}
-func (r *recordingTB) Failed() bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return len(r.errors) > 0
-}
-
-// runCleanups runs the recorded cleanups last-registered-first, as the testing
-// package would at the test's end.
-func (r *recordingTB) runCleanups() {
-	r.mu.Lock()
-	cleanups := r.cleanups
-	r.cleanups = nil
-	r.mu.Unlock()
-	for i := len(cleanups) - 1; i >= 0; i-- {
-		cleanups[i]()
-	}
-}
-
-func (r *recordingTB) failures() string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return strings.Join(r.errors, "\n")
-}
-
-// within runs act on its own goroutine, so a Fatalf ends act and not the test,
-// and answers whether act ran to its end.
-func within(act func()) (completed bool) {
-	done := make(chan bool, 1)
-	go func() {
-		finished := false
-		defer func() { done <- finished }()
-		act()
-		finished = true
-	}()
-	return <-done
-}
 
 // newOwnerForViews is a bare owning Daemon over a state root whose run log
 // the test writes, carrying viewPID as its process.
@@ -146,7 +69,7 @@ func warnFor(dir, op string) LogRecord {
 func TestAViewSweepsOnlyTheWorkspacesItClaimed(t *testing.T) {
 	// Arrange
 	owner := newOwnerForViews(t, t)
-	viewTB := newRecordingTB(t, "TestMine")
+	viewTB := NewRecordingTB(t, "TestMine")
 	view := owner.View(viewTB)
 	mine, theirs := t.TempDir(), t.TempDir()
 	view.Claim(mine)
@@ -164,7 +87,7 @@ func TestAViewSweepsOnlyTheWorkspacesItClaimed(t *testing.T) {
 func TestTheOwnerSweepsEveryRecordNoViewClaimed(t *testing.T) {
 	// Arrange
 	owner := newOwnerForViews(t, t)
-	view := owner.View(newRecordingTB(t, "TestMine"))
+	view := owner.View(NewRecordingTB(t, "TestMine"))
 	mine, theirs := t.TempDir(), t.TempDir()
 	view.Claim(mine)
 	appendRecords(t, owner, warnFor(mine, "daemon.mine"), warnFor(theirs, "daemon.theirs"), warnFor("", "daemon.unscoped"))
@@ -182,8 +105,8 @@ func TestAViewsDeclarationLicensesNoOtherViewsRecord(t *testing.T) {
 	// Arrange: two views, each claiming one workspace that logs the same op;
 	// only the first declares it.
 	owner := newOwnerForViews(t, t)
-	declaring := owner.View(newRecordingTB(t, "TestDeclaring"))
-	silent := owner.View(newRecordingTB(t, "TestSilent"))
+	declaring := owner.View(NewRecordingTB(t, "TestDeclaring"))
+	silent := owner.View(NewRecordingTB(t, "TestSilent"))
 	a, b := t.TempDir(), t.TempDir()
 	declaring.Claim(a)
 	silent.Claim(b)
@@ -223,7 +146,7 @@ func TestAClaimMatchesRecordsThatNameTheResolvedDirectory(t *testing.T) {
 	// Arrange: the view claims through a symlink; the daemon writes the
 	// resolved path.
 	owner := newOwnerForViews(t, t)
-	view := owner.View(newRecordingTB(t, "TestMine"))
+	view := owner.View(NewRecordingTB(t, "TestMine"))
 	real := t.TempDir()
 	link := filepath.Join(t.TempDir(), "link")
 	if err := os.Symlink(real, link); err != nil {
@@ -249,7 +172,7 @@ func TestAViewRequiresOnlyWhatItsOwnWorkspacesProduced(t *testing.T) {
 	// Arrange: the required op is produced, but by a workspace the view does
 	// not own.
 	owner := newOwnerForViews(t, t)
-	view := owner.View(newRecordingTB(t, "TestMine"))
+	view := owner.View(NewRecordingTB(t, "TestMine"))
 	mine, theirs := t.TempDir(), t.TempDir()
 	view.Claim(mine)
 	view.RequireWarnings("daemon.op")
@@ -267,26 +190,26 @@ func TestAViewRequiresOnlyWhatItsOwnWorkspacesProduced(t *testing.T) {
 func TestAViewRefusesWhatOnlyAnOwnerMayDo(t *testing.T) {
 	tests := []struct {
 		name string
-		act  func(view *Daemon, viewTB *recordingTB)
+		act  func(view *Daemon, viewTB *RecordingTB)
 		want string
 	}{
-		{"a view of a view", func(view *Daemon, viewTB *recordingTB) { view.View(viewTB) }, "View of a view"},
-		{"stopping the process", func(view *Daemon, _ *recordingTB) { view.Stop() }, "Stop on a view"},
-		{"killing the process", func(view *Daemon, _ *recordingTB) { view.Kill() }, "Kill on a view"},
+		{"a view of a view", func(view *Daemon, viewTB *RecordingTB) { view.View(viewTB) }, "View of a view"},
+		{"stopping the process", func(view *Daemon, _ *RecordingTB) { view.Stop() }, "Stop on a view"},
+		{"killing the process", func(view *Daemon, _ *RecordingTB) { view.Kill() }, "Kill on a view"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			owner := newOwnerForViews(t, t)
-			viewTB := newRecordingTB(t, "TestMine")
+			viewTB := NewRecordingTB(t, "TestMine")
 			view := owner.View(viewTB)
 
 			// Act
-			completed := within(func() { tt.act(view, viewTB) })
+			completed := Within(func() { tt.act(view, viewTB) })
 
 			// Assert
-			if completed || !strings.Contains(viewTB.failures(), tt.want) {
-				t.Fatalf("completed=%v failures=%q, want a fatal naming %q", completed, viewTB.failures(), tt.want)
+			if completed || !strings.Contains(viewTB.Failures(), tt.want) {
+				t.Fatalf("completed=%v failures=%q, want a fatal naming %q", completed, viewTB.Failures(), tt.want)
 			}
 		})
 	}
@@ -294,65 +217,65 @@ func TestAViewRefusesWhatOnlyAnOwnerMayDo(t *testing.T) {
 
 func TestClaimingOnTheOwnerIsRefused(t *testing.T) {
 	// Arrange
-	ownerTB := newRecordingTB(t, "TestOwner")
+	ownerTB := NewRecordingTB(t, "TestOwner")
 	owner := newOwnerForViews(t, ownerTB)
 	dir := t.TempDir()
 
 	// Act
-	completed := within(func() { owner.Claim(dir) })
+	completed := Within(func() { owner.Claim(dir) })
 
 	// Assert
-	if completed || !strings.Contains(ownerTB.failures(), "only a view claims") {
-		t.Fatalf("completed=%v failures=%q, want the owner's claim refused", completed, ownerTB.failures())
+	if completed || !strings.Contains(ownerTB.Failures(), "only a view claims") {
+		t.Fatalf("completed=%v failures=%q, want the owner's claim refused", completed, ownerTB.Failures())
 	}
 }
 
 func TestASecondTestClaimingAClaimedWorkspaceIsRefused(t *testing.T) {
 	// Arrange
 	owner := newOwnerForViews(t, t)
-	first := owner.View(newRecordingTB(t, "TestFirst"))
-	secondTB := newRecordingTB(t, "TestSecond")
+	first := owner.View(NewRecordingTB(t, "TestFirst"))
+	secondTB := NewRecordingTB(t, "TestSecond")
 	second := owner.View(secondTB)
 	dir := t.TempDir()
 	first.Claim(dir)
 
 	// Act
-	completed := within(func() { second.Claim(dir) })
+	completed := Within(func() { second.Claim(dir) })
 
 	// Assert
-	if completed || !strings.Contains(secondTB.failures(), "already claimed by TestFirst") {
-		t.Fatalf("completed=%v failures=%q, want the second claim refused naming TestFirst", completed, secondTB.failures())
+	if completed || !strings.Contains(secondTB.Failures(), "already claimed by TestFirst") {
+		t.Fatalf("completed=%v failures=%q, want the second claim refused naming TestFirst", completed, secondTB.Failures())
 	}
 }
 
 func TestTheViewsSweepFailsItsOwnTestAtItsEnd(t *testing.T) {
 	// Arrange
 	owner := newOwnerForViews(t, t)
-	viewTB := newRecordingTB(t, "TestMine")
+	viewTB := NewRecordingTB(t, "TestMine")
 	view := owner.View(viewTB)
 	dir := t.TempDir()
 	view.Claim(dir)
 	appendRecords(t, owner, warnFor(dir, "daemon.undeclared"))
 
 	// Act
-	viewTB.runCleanups()
+	viewTB.RunCleanups()
 
 	// Assert
-	if !strings.Contains(viewTB.failures(), "daemon.undeclared") {
-		t.Fatalf("view test failures = %q, want the undeclared warning", viewTB.failures())
+	if !strings.Contains(viewTB.Failures(), "daemon.undeclared") {
+		t.Fatalf("view test failures = %q, want the undeclared warning", viewTB.Failures())
 	}
 }
 
 func TestTheOwnerNamesTheViewWhoseWorkspaceLoggedAfterItsSweep(t *testing.T) {
 	// Arrange: the view's test ends cleanly, then its workspace logs an
 	// undeclared warning.
-	ownerTB := newRecordingTB(t, "TestOwner")
+	ownerTB := NewRecordingTB(t, "TestOwner")
 	owner := newOwnerForViews(t, ownerTB)
-	viewTB := newRecordingTB(t, "TestMine")
+	viewTB := NewRecordingTB(t, "TestMine")
 	view := owner.View(viewTB)
 	dir := t.TempDir()
 	view.Claim(dir)
-	viewTB.runCleanups()
+	viewTB.RunCleanups()
 	later := time.Now().Add(time.Second).UTC().Format(time.RFC3339Nano)
 	late := warnFor(dir, "daemon.late")
 	late.Timestamp = later
@@ -363,46 +286,46 @@ func TestTheOwnerNamesTheViewWhoseWorkspaceLoggedAfterItsSweep(t *testing.T) {
 
 	// Assert
 	if viewTB.Failed() {
-		t.Errorf("the view's own test failed: %q, want it clean", viewTB.failures())
+		t.Errorf("the view's own test failed: %q, want it clean", viewTB.Failures())
 	}
-	if !strings.Contains(ownerTB.failures(), "TestMine: warn daemon.late") {
-		t.Errorf("owner failures = %q, want the late record named by TestMine", ownerTB.failures())
+	if !strings.Contains(ownerTB.Failures(), "TestMine: warn daemon.late") {
+		t.Errorf("owner failures = %q, want the late record named by TestMine", ownerTB.Failures())
 	}
 }
 
 func TestTheOwnerLeavesARecordTheViewAlreadySweptToTheView(t *testing.T) {
 	// Arrange: the record predates the view's sweep, which reported it.
-	ownerTB := newRecordingTB(t, "TestOwner")
+	ownerTB := NewRecordingTB(t, "TestOwner")
 	owner := newOwnerForViews(t, ownerTB)
-	viewTB := newRecordingTB(t, "TestMine")
+	viewTB := NewRecordingTB(t, "TestMine")
 	view := owner.View(viewTB)
 	dir := t.TempDir()
 	view.Claim(dir)
 	appendRecords(t, owner, warnFor(dir, "daemon.early"))
-	viewTB.runCleanups()
+	viewTB.RunCleanups()
 
 	// Act
 	owner.assertNoUnexpectedWarnings()
 
 	// Assert
-	if !strings.Contains(viewTB.failures(), "daemon.early") {
-		t.Errorf("view failures = %q, want daemon.early reported by the view", viewTB.failures())
+	if !strings.Contains(viewTB.Failures(), "daemon.early") {
+		t.Errorf("view failures = %q, want daemon.early reported by the view", viewTB.Failures())
 	}
 	if ownerTB.Failed() {
-		t.Errorf("owner failures = %q, want none: the view already answered for the record", ownerTB.failures())
+		t.Errorf("owner failures = %q, want none: the view already answered for the record", ownerTB.Failures())
 	}
 }
 
 func TestALateRecordTheViewDeclaredIsNotReported(t *testing.T) {
 	// Arrange
-	ownerTB := newRecordingTB(t, "TestOwner")
+	ownerTB := NewRecordingTB(t, "TestOwner")
 	owner := newOwnerForViews(t, ownerTB)
-	viewTB := newRecordingTB(t, "TestMine")
+	viewTB := NewRecordingTB(t, "TestMine")
 	view := owner.View(viewTB)
 	dir := t.TempDir()
 	view.Claim(dir)
 	view.ExpectWarnings("daemon.late")
-	viewTB.runCleanups()
+	viewTB.RunCleanups()
 	late := warnFor(dir, "daemon.late")
 	late.Timestamp = time.Now().Add(time.Second).UTC().Format(time.RFC3339Nano)
 	appendRecords(t, owner, late)
@@ -412,7 +335,7 @@ func TestALateRecordTheViewDeclaredIsNotReported(t *testing.T) {
 
 	// Assert
 	if ownerTB.Failed() {
-		t.Fatalf("owner failures = %q, want none: the view declared daemon.late", ownerTB.failures())
+		t.Fatalf("owner failures = %q, want none: the view declared daemon.late", ownerTB.Failures())
 	}
 }
 
@@ -434,7 +357,7 @@ func TestRegisterThroughAViewClaimsTheWorkspace(t *testing.T) {
 	owner := newOwnerForViews(t, t)
 	dir := t.TempDir()
 	owner.client = registeringClient{ref: &workspacev1.WorkspaceRef{Id: "w1", Dir: dir}}
-	view := owner.View(newRecordingTB(t, "TestMine"))
+	view := owner.View(NewRecordingTB(t, "TestMine"))
 	appendRecords(t, owner, warnFor(dir, "daemon.mine"))
 
 	// Act
@@ -467,13 +390,13 @@ func TestRegisterThroughTheOwnerClaimsNothing(t *testing.T) {
 
 func TestALateRecordWithAnUnparseableTimestampFailsTheOwner(t *testing.T) {
 	// Arrange
-	ownerTB := newRecordingTB(t, "TestOwner")
+	ownerTB := NewRecordingTB(t, "TestOwner")
 	owner := newOwnerForViews(t, ownerTB)
-	viewTB := newRecordingTB(t, "TestMine")
+	viewTB := NewRecordingTB(t, "TestMine")
 	view := owner.View(viewTB)
 	dir := t.TempDir()
 	view.Claim(dir)
-	viewTB.runCleanups()
+	viewTB.RunCleanups()
 	broken := warnFor(dir, "daemon.late")
 	broken.Timestamp = "not a time"
 	appendRecords(t, owner, broken)
@@ -482,23 +405,23 @@ func TestALateRecordWithAnUnparseableTimestampFailsTheOwner(t *testing.T) {
 	owner.assertNoUnexpectedWarnings()
 
 	// Assert
-	if !strings.Contains(ownerTB.failures(), `unparseable timestamp "not a time"`) {
-		t.Fatalf("owner failures = %q, want the unparseable timestamp named", ownerTB.failures())
+	if !strings.Contains(ownerTB.Failures(), `unparseable timestamp "not a time"`) {
+		t.Fatalf("owner failures = %q, want the unparseable timestamp named", ownerTB.Failures())
 	}
 }
 
 func TestClaimingADirectoryThatDoesNotExistIsRefused(t *testing.T) {
 	// Arrange
 	owner := newOwnerForViews(t, t)
-	viewTB := newRecordingTB(t, "TestMine")
+	viewTB := NewRecordingTB(t, "TestMine")
 	view := owner.View(viewTB)
 	missing := filepath.Join(t.TempDir(), "gone")
 
 	// Act
-	completed := within(func() { view.Claim(missing) })
+	completed := Within(func() { view.Claim(missing) })
 
 	// Assert
-	if completed || !strings.Contains(viewTB.failures(), "resolve workspace dir "+missing) {
-		t.Fatalf("completed=%v failures=%q, want the missing dir refused", completed, viewTB.failures())
+	if completed || !strings.Contains(viewTB.Failures(), "resolve workspace dir "+missing) {
+		t.Fatalf("completed=%v failures=%q, want the missing dir refused", completed, viewTB.Failures())
 	}
 }

@@ -304,7 +304,7 @@ func TestKeepFailureLogsKeepsTheLogsAndTheStderrUnderTheTestsName(t *testing.T) 
 	t.Setenv(ArtifactsEnv, root)
 
 	// Act
-	keepFailureLogs(newRecordingTB(t, "TestFailedOne"), state, stderr)
+	keepFailureLogs(NewRecordingTB(t, "TestFailedOne"), state, stderr)
 
 	// Assert
 	dest := filepath.Join(root, artifactDirName("TestFailedOne"))
