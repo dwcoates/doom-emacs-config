@@ -236,3 +236,29 @@ func TestApplyBudgetHoldsARequestTighterThanTheBaselineFloor(t *testing.T) {
 		t.Fatalf("restored %v, floor %.1f; want both back against a floor of 91", restored, systems[0].Floor)
 	}
 }
+
+func TestSystemForAnswersFalseForABlockOfNoModule(t *testing.T) {
+	if _, ok := SystemFor("agentrepl/e2e/h.go:1.1,2.1", []string{"agent-repld"}); ok {
+		t.Fatal("a block of no module was given a system")
+	}
+}
+
+func TestBaselineRoundTrips(t *testing.T) {
+	// Arrange
+	path := filepath.Join(t.TempDir(), "coverage-baseline.json")
+	want := &BaselineFile{Commit: "abc", Measured: "2026-10-15T00:00:00Z", Systems: map[string]SystemBaseline{
+		"agent-repld": {Percent: 80, Statements: 100, Floor: 75, Tiers: "go"},
+	}}
+
+	// Act
+	err := WriteBaseline(path, want)
+	got, rerr := ReadBaseline(path)
+
+	// Assert
+	if err != nil || rerr != nil {
+		t.Fatal(err, rerr)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("read back %+v, want %+v", got, want)
+	}
+}

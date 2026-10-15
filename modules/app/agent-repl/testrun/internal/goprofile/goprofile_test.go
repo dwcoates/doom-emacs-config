@@ -1,7 +1,11 @@
 package goprofile
 
 import (
+	"io/fs"
+	"os"
+	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -91,5 +95,44 @@ func TestHoldingIsInnermostFirstAndPerFile(t *testing.T) {
 	}
 	if len(idx.Holding("f", 10, 1)) != 0 {
 		t.Fatal("a position past every block is held")
+	}
+}
+
+// TestNoOtherFileReadsAProfileItself holds every testrun source to this
+// reader: a second parser of the "mode: " format would drift from it.
+func TestNoOtherFileReadsAProfileItself(t *testing.T) {
+	// Arrange
+	_, self, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller could not locate this file")
+	}
+	module := filepath.Clean(filepath.Join(filepath.Dir(self), "..", ".."))
+	var found []string
+
+	// Act
+	err := filepath.WalkDir(module, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || filepath.Dir(path) == filepath.Dir(self) {
+			return nil
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(b), `"mode: "`) {
+			rel, _ := filepath.Rel(module, path)
+			found = append(found, rel)
+		}
+		return nil
+	})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) > 0 {
+		t.Fatalf("read profiles with internal/goprofile instead: %v", found)
 	}
 }

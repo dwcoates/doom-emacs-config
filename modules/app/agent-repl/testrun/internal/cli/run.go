@@ -43,6 +43,9 @@ type Deps struct {
 	// confines the keyed ones, and records their passes
 	// (agentrepl/testrun/internal/reuse).
 	Reuse Reuser
+	// RunLog is the run's own log file; a coverage run writes its merged
+	// baseline beside it. "" when testrun was started directly.
+	RunLog string
 }
 
 // Reuser is the run's pass-record seam (reuse.Runner).
@@ -183,6 +186,18 @@ func Run(ctx context.Context, d Deps, a Args) int {
 	}
 	if len(programs.Atomic) > 0 {
 		planned = append(planned, programs)
+	}
+	if a.Coverage {
+		baseline, ok, err := baselineUnit(layout, d, planned)
+		if err != nil {
+			log.Errorf("planning the coverage baseline failed: %v", err)
+			return 1
+		}
+		if ok {
+			planned = append(planned, baseline)
+		} else {
+			log.Infof("coverage: no run log to keep a baseline beside (testrun started directly); the all-tier baseline is not merged")
+		}
 	}
 
 	p, err := plan.Build(hist, planned, d.Slots)
@@ -475,6 +490,47 @@ func printClosing(log *run.Log, a Args, passed, declined []run.SuiteResult) {
 		skipped = []string{"none"}
 	}
 	log.Infof("not selected, NOT run: %s", strings.Join(skipped, " "))
+}
+
+// BaselineUnitID is a coverage run's last unit, which merges every counter
+// the run wrote into each coverage system's all-tier statement coverage.
+const BaselineUnitID = "coverage:baseline"
+
+// BaselineFile is where a coverage run writes its merged baseline: beside
+// its own log, so it outlives the run's scratch directory.
+func BaselineFile(runLog string) string {
+	return filepath.Join(filepath.Dir(runLog), "coverage-baseline.json")
+}
+
+// baselineUnit is the coverage run's baseline merge, after every chunk and
+// every coverage report of the run. false when the run has no log to keep it
+// beside.
+func baselineUnit(layout suites.Layout, d Deps, planned []suites.Units) (suites.Units, bool, error) {
+	if d.RunLog == "" {
+		return suites.Units{}, false, nil
+	}
+	_, commit, err := d.Git(layout.Repo)
+	if err != nil {
+		return suites.Units{}, false, fmt.Errorf("resolve the commit the coverage run measures: %w", err)
+	}
+	var deps []string
+	for _, u := range planned {
+		for _, sp := range u.Splits {
+			deps = append(deps, sp.Group)
+		}
+		for _, at := range u.Atomic {
+			if strings.HasSuffix(at.ID, ":coverage") {
+				deps = append(deps, at.ID)
+			}
+		}
+	}
+	sp := run.Spec{
+		Argv: []string{d.Self, "coverage-baseline", "-module", layout.Module, "-work", layout.Work, "-commit", commit, "-out", BaselineFile(d.RunLog)},
+		Dir:  layout.Module,
+		Env:  suites.PinnedEnv(),
+	}
+	sp.ID, sp.Suite, sp.Deps = BaselineUnitID, "coverage", deps
+	return suites.Units{Atomic: []run.Spec{sp}}, true, nil
 }
 
 // programUnits is the run's one build of every shared program a planned suite

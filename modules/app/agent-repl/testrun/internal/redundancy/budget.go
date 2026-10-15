@@ -15,12 +15,19 @@ import (
 // parent workspace shares out, and each workspace reports at 1 point.
 const DefaultMaxDrop = 1.0
 
+// TotalBudget is the owner's whole coverage budget: no system may fall more
+// than this many points under its pinned baseline, across every workspace.
+// A baseline's floor is its percent minus this.
+const TotalBudget = 5.0
+
 // SystemBaseline is one system's pinned all-tier coverage.
 type SystemBaseline struct {
 	Percent    float64
 	Statements int
 	// Floor is the least coverage the system may fall to.
 	Floor float64
+	// Tiers says which tiers' counters the percent counts.
+	Tiers string `json:",omitempty"`
 }
 
 // Budget is the coverage a removal set may cost.
@@ -53,16 +60,24 @@ func (s SystemCoverage) Drop() float64 { return s.Before - s.After }
 // whose path is the longest prefix of the block's file
 // ("agentrepl/shim-store/internal/db/x.go:1.1,2.2" is agentrepl/shim-store's).
 func SystemOf(block string, modules []string) (string, error) {
+	sys, ok := SystemFor(block, modules)
+	if !ok {
+		return "", fmt.Errorf("redundancy: block %s belongs to none of the measured modules %v", block, modules)
+	}
+	return sys, nil
+}
+
+// SystemFor is SystemOf for a caller to whom a block of no module is
+// expected (a merged profile holds the harness's own blocks too): false
+// when no module prefixes the block.
+func SystemFor(block string, modules []string) (string, bool) {
 	best := ""
 	for _, mod := range modules {
 		if strings.HasPrefix(block, mod+"/") && len(mod) > len(best) {
 			best = mod
 		}
 	}
-	if best == "" {
-		return "", fmt.Errorf("redundancy: block %s belongs to none of the measured modules %v", block, modules)
-	}
-	return best, nil
+	return best, best != ""
 }
 
 // ApplyBudget holds a minimization to the budget. Statements maps every
@@ -288,4 +303,16 @@ func LoadBudget(maxDrop float64, path string) (Budget, error) {
 	}
 	b.Baseline = f.Systems
 	return b, nil
+}
+
+// WriteBaseline writes a baseline file to path.
+func WriteBaseline(path string, f *BaselineFile) error {
+	b, err := json.MarshalIndent(f, "", "  ")
+	if err != nil {
+		return fmt.Errorf("redundancy: encode the coverage baseline: %w", err)
+	}
+	if err := os.WriteFile(path, append(b, '\n'), 0o644); err != nil {
+		return fmt.Errorf("redundancy: write the coverage baseline %s: %w", path, err)
+	}
+	return nil
 }
