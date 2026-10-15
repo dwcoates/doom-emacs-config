@@ -11,7 +11,7 @@ the log records that show it, so the failures can be fixed at their source.
 |---|---|---|---|---|
 | 1 | 2026-10-14 23:29 | `test-tier-rule` | `test-tier-rule-land` | waiting in line (not failed); an error record on every rebase, see entry 1 |
 | 2 | 2026-10-14 23:41 | `test-fixture-table-rules` | `test-fixture-table-rules-land` | FAILED: the merge workspace could not be forked |
-| 3 | 2026-10-15 (approved) | `test-cross-product-audit-psv` | requested by the child itself | pending |
+| 3 | 2026-10-15 | `cross-product-additions` (from `test-cross-product-audit-psv`, tip `44eee96334`) | `xprod-additions-merge` | requested, pending; a first request was refused `name_taken`, see entry 3 |
 
 ## 1. `test-tier-rule` (waiting in line)
 
@@ -41,3 +41,10 @@ the log records that show it, so the failures can be fixed at their source.
   - the daemon names the fork point by a record that is actually in the transcript.
   - Either way, a prompt delivered mid-turn must never make a later fork impossible. Any workspace whose user typed during a turn hits this until it is fixed.
 - The work is NOT landed. Nothing was retried or landed another way.
+
+## 3. `cross-product-additions` (requested, pending)
+
+- Requested by the `test-cross-product-audit` workspace for its additive work: the kind invariant through `protoarm.Must`, the 9-state footer/roster test, and the webapp vocabulary gate rows.
+- The first request was refused `name_taken`, because the merge workspace was named after the branch. The re-request under the name `xprod-additions-merge` was accepted.
+  - Not a defect: the refusal is documented, and the skill says to retry under another name.
+  - Possible source fix: say in the refusal that the name collides with the BRANCH, since that is easy to trip over.
