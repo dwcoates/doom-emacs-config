@@ -59,6 +59,11 @@ func TestTheMergeBubbleIsPinnedLastFromItsQueueingAndSettlesWhereItLands(t *test
 	d.AwaitLogRecord(workspaceLog, "the merge waiting for the workspace to fall free", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.merge.await_free" && strings.HasPrefix(r.Message, "the merge waits")
 	})
+	// THE BUBBLE IS AWAITED WHILE THE MERGE IS HELD: the subagent still runs,
+	// so the merge cannot move until the test settles it below, and a head
+	// row arriving now was drawn while the merge waited, however its push
+	// was scheduled against the log record above.
+	awaitRow(t, f, tail, "the merge bubble drawn while the merge waits", collect(isMergeHead))
 
 	// Act: the vendor starts a turn of its own while the merge waits, and
 	// answers in it; then the subagent settles and the workspace falls free.
@@ -78,21 +83,13 @@ func TestTheMergeBubbleIsPinnedLastFromItsQueueingAndSettlesWhereItLands(t *test
 		return r.GetActivity().GetResponse().GetSuccess() != nil
 	}))
 	f.shim.PushAgentFrameIn(mainAgent, vendorTurn, successFrame(mainAgent, activityID("resp-while-waiting")))
-	headDrawnWhileWaiting := false
-	for _, r := range seen {
-		headDrawnWhileWaiting = headDrawnWhileWaiting || isMergeHead(r)
-	}
 	f.shim.PushAgentFrame("toolu-1", activityFrame("toolu-1", ftSubagentSettled("sub-unit-9", "toolu-1")))
 	awaitRow(t, f, tail, "the merge bubble's landed head", collect(func(r *frontendv1.FeedRow) bool {
 		return isMergeHead(r) && r.GetActivity().GetMerge().GetSuccess() != nil
 	}))
 
-	// Assert: the bubble was drawn pinned while the merge waited; the woken
-	// turn's row sorts above it; the landed head settled after every row drawn
-	// before it.
-	if !headDrawnWhileWaiting {
-		t.Fatal("no merge bubble was drawn while the merge waited for the workspace to fall free")
-	}
+	// Assert: the woken turn's row sorts above the pinned bubble; the landed
+	// head settled after every row drawn before it.
 	var landed *frontendv1.FeedRow
 	for _, r := range seen {
 		if !isMergeHead(r) {
