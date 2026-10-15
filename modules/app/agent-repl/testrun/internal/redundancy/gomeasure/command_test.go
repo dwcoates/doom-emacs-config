@@ -90,7 +90,7 @@ func TestCommandLogsAFailedMeasurementOnce(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("code %d", code)
 	}
-	if n := strings.Count(out.String(), "ERROR:"); n != 1 || !strings.Contains(out.String(), "redundancy: measure .: gomeasure: TestA failed on measurement run 1") {
+	if n := strings.Count(out.String(), "ERROR:"); n != 1 || !strings.Contains(out.String(), "redundancy: measure .: gomeasure: 1 cases failed with no mutant") {
 		t.Fatalf("log = %q, want one error naming the package and the cause", out.String())
 	}
 	if _, err := os.Stat(filepath.Join(outDir, "measurement.json")); !os.IsNotExist(err) {

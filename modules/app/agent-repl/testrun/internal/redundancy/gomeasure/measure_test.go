@@ -381,7 +381,7 @@ func TestMeasureRefuses(t *testing.T) {
 		{
 			name:  "a case that fails a coverage run with no mutant",
 			setup: func(_ *Config, f *fakeGo) { f.coverFail = "TestB/y" },
-			want:  "TestB/y failed on measurement run 1 with no mutant",
+			want:  "TestB/y on measurement run 1 (exit 1)",
 		},
 		{
 			name:  "a case the schema fails with no mutant active",
@@ -742,5 +742,28 @@ func TestConfirmRestKillsWhatRunsOutTheBoundAndRerunsWhatTheTimeoutCutShort(t *t
 	}
 	if !reflect.DeepEqual(kills["TestB/x"], []string{"p.go:3:29:< -> <="}) || kills["TestB/y"] != nil || kills["TestA"] != nil {
 		t.Fatalf("kills = %v, want TestB/x's alone", kills)
+	}
+}
+
+func TestMeasureNamesEveryCaseThatFailsWithNoMutant(t *testing.T) {
+	// Arrange: TestA and TestB/y both fail their coverage runs.
+	cfg, dir := fakeConfig(t)
+	f := &fakeGo{dir: dir, reaches: map[string]bool{"TestA": true}}
+	f.coverFail = "TestA"
+	failBoth := f.exec
+	exec := func(ctx context.Context, c Cmd) (Result, error) {
+		if strings.HasPrefix(filepath.Base(c.Path), "cover-") && argAfter(c.Args, "-test.run") == RunPattern("TestB/y") {
+			return Result{Exit: 1, Lines: lines("=== RUN   TestB", "=== RUN   TestB/y", "    b_test.go:9: boom", "--- FAIL: TestB/y (0.00s)")}, nil
+		}
+		return failBoth(ctx, c)
+	}
+	log, _ := quietLog()
+
+	// Act
+	_, err := Measure(context.Background(), cfg, exec, log)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "2 cases failed with no mutant") || !strings.Contains(err.Error(), "TestB/y on measurement run 1") || !strings.Contains(err.Error(), "b_test.go:9: boom") {
+		t.Fatalf("err = %v", err)
 	}
 }

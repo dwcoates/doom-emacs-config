@@ -589,6 +589,7 @@ func (m *measurer) discover(ctx context.Context, tops [][]string) ([]leaf, error
 		return nil, fmt.Errorf("gomeasure: %w", err)
 	}
 	var leaves []leaf
+	var broken []string
 	for i, st := range m.suites {
 		for _, top := range tops[i] {
 			res, r, err := m.runTests(ctx, st, st.coverBin, gotest.TopPattern([]string{top}), FirstContactTimeout, st.coverDirFlag(dir), m.coverEnv(st, dir)...)
@@ -596,7 +597,8 @@ func (m *measurer) discover(ctx context.Context, tops [][]string) ([]leaf, error
 				return nil, err
 			}
 			if res.Exit != 0 || r.Outcomes[top] != Pass && r.Outcomes[top] != Skip {
-				return nil, fmt.Errorf("gomeasure: %s %s does not pass with no mutant (exit %d):\n%s", st.Package, top, res.Exit, res.Text())
+				broken = append(broken, fmt.Sprintf("%s %s (exit %d):\n%s", st.Package, top, res.Exit, failureExcerpt(res)))
+				continue
 			}
 			var names []string
 			for n := range r.Ran {
@@ -610,6 +612,9 @@ func (m *measurer) discover(ctx context.Context, tops [][]string) ([]leaf, error
 			}
 		}
 	}
+	if len(broken) > 0 {
+		return nil, fmt.Errorf("gomeasure: %d top-level tests do not pass with no mutant, so nothing about them can be measured:\n%s", len(broken), strings.Join(broken, "\n"))
+	}
 	return leaves, nil
 }
 
@@ -622,11 +627,13 @@ func (m *measurer) discover(ctx context.Context, tops [][]string) ([]leaf, error
 // slowest run's wall).
 func (m *measurer) coverage(ctx context.Context, leaves []leaf, deleted map[leaf]bool) ([]redundancy.Case, map[string]int, map[leaf]time.Duration, error) {
 	elapsed := make([][]time.Duration, len(leaves))
+	var broken []string
+	isBroken := map[leaf]bool{}
 	healthy := map[leaf]time.Duration{}
 	roots := make([]string, len(leaves))
 	for r := 0; r < m.cfg.Runs; r++ {
 		for i, l := range leaves {
-			if r > 0 && deleted != nil && !deleted[l] {
+			if (r > 0 && deleted != nil && !deleted[l]) || isBroken[l] {
 				continue
 			}
 			st := m.suites[l.suite]
@@ -646,12 +653,19 @@ func (m *measurer) coverage(ctx context.Context, leaves []leaf, deleted map[leaf
 				return nil, nil, nil, fmt.Errorf("gomeasure: the pattern %s did not run %s %s:\n%s", RunPattern(l.name), st.Package, l.name, res.Text())
 			}
 			if o := run.Outcomes[l.name]; res.Exit != 0 || (o != Pass && o != Skip) {
-				return nil, nil, nil, fmt.Errorf("gomeasure: %s failed on measurement run %d with no mutant, a flaky or broken case (exit %d):\n%s", m.id(l), r+1, res.Exit, res.Text())
+				broken = append(broken, fmt.Sprintf("%s on measurement run %d (exit %d):\n%s", m.id(l), r+1, res.Exit, failureExcerpt(res)))
+				isBroken[l] = true
+				continue
 			}
 			elapsed[i] = append(elapsed[i], run.Elapsed[l.name])
 			healthy[l] = max(healthy[l], res.Wall)
 		}
 		m.log.Infof("redundancy: coverage run %d of %d done", r+1, m.cfg.Runs)
+	}
+	// Every case runs before a broken one fails the measurement, so one
+	// run names every case that fails with no mutant, not the first.
+	if len(broken) > 0 {
+		return nil, nil, nil, fmt.Errorf("gomeasure: %d cases failed with no mutant, flaky or broken:\n%s", len(broken), strings.Join(broken, "\n"))
 	}
 	cases := make([]redundancy.Case, len(leaves))
 	statements := map[string]int{}
@@ -1191,4 +1205,23 @@ func isAncestor(n string, names []string) bool {
 		}
 	}
 	return false
+}
+
+// failureExcerpt is the lines of a failed test run that say why: its
+// failures and the test-file lines they cite, at most twenty.
+func failureExcerpt(res Result) string {
+	var out []string
+	for _, l := range res.Lines {
+		t := strings.TrimSpace(l.Text)
+		if strings.HasPrefix(t, "--- FAIL") || strings.Contains(t, "_test.go:") || strings.HasPrefix(t, "panic:") || strings.Contains(t, "error ") {
+			out = append(out, "  "+t)
+			if len(out) == 20 {
+				break
+			}
+		}
+	}
+	if len(out) == 0 {
+		return "  (no failure line; the whole output follows)\n" + res.Text()
+	}
+	return strings.Join(out, "\n")
 }
