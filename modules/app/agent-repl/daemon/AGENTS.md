@@ -92,7 +92,6 @@ Read `ARCHITECTURE.md` first: the package map, the seams, the conventions.
   | the `harness.Daemon` context (`DefaultTimeout * runBudgetWaits`) | 35s | the WHOLE-RUN budget one daemon process's test shares, and the lifetime of every watch stream held across it | **it used to be `DefaultTimeout` itself**, so a test's whole run was as short as its single longest permitted wait, and the LAST call in a test answered `deadline_exceeded` for budget the earlier ones had spent. That is what made `TestHostRequestedStopLeavesNoProcessBehind` fail ~1 in 20 at ~5.09s on the stop -- a step measured at 9ms p50 and 15ms max across 104 runs. Sized as five `DefaultTimeout` waits (25s) plus one `drain.DefaultStandBound` stand-down (6s, now 7s) = 31s (32s), rounded up to the next whole multiple (7 x 5s = 35s); it is a MULTIPLE so an `Opts.Timeout` override widens the run in the same proportion it widens the wait |
   | `harness.HandoverChainTimeout` (`Opts.Timeout`) | 15s wait bound (3x default), 90s run budget | the handful of tests whose ONE daemon context must span an entire self-reload handover — a merge landing, the rollout trigger, a SECOND real `agent-repld`'s full boot and adoption, and the incumbent's orderly exit, all on the incumbent's own budget rather than a fresh one | structurally two real process lifecycles sharing one budget, not one; run 8 already saw this chain finish inside 1.7s, so 15s is headroom, not a measured need |
   | `harness.MergeChainTimeout` (`Opts.Timeout`) | 15s wait bound (3x default), 105s run budget | every daemon that runs a merge's test gate (`AGENT_REPL_TEST_ALL_SCRIPT`) outside a handover: `mergeCleanRepo` and its siblings in `merge_test.go`, and `create_test.go`'s parent-target merge | one wait spans the WHOLE merge, a sequential chain of 36-52 subprocesses (fake git per call, plus the gate script), so its cost scales with process-spawn latency. MEASURED 2026-10-06 from the daemon logs, `-test.parallel=1 GOMAXPROCS=2` chunks: ~0.1s unloaded; 2.82s max under 24 chunks + `with-cpu-load.sh 24`; 4.22s passing max under 48 chunks + `with-cpu-load.sh 32`, where 16 runs were cut at 5s while still advancing (no record gap over 1.54s, target fast-forwarded at +3.9-4.95s). A bound under the healthy chain, not a stall; 15s is ~3.5x the passing max |
-  | `harness.ClaimRefusalTimeout` (`Opts.Timeout`) | `daemonaddr.ClaimWaitBound` + 5s (17.32s) | a second daemon that refuses to boot beside a SERVING incumbent (`TestSecondDaemonOnTheSameStateRootRefusesToBoot`) | the refusal is decided only once the claim wait expires, and that wait (12.32s) must outlast the incumbent's merge drain including its wait for a merge's git in flight (`merge.MergeGitStopBound`), so the exit lands one DefaultTimeout after it |
   | `harness.ProbeWindow` | 500ms | `harness.ExpectNoPush`, `harness.Daemon.ExpectFileUnchanged` | negative assertions that must wait out a bound rather than an event, so unlike every other row here it is paid IN FULL on a green run, at 27 sites. MEASURED BASIS (`AwaitView` arrival times over the whole suite at `-parallel 8`, 472 samples): p50 0.4ms, p90 5.8ms, p95 47ms, p97 99ms, max 294ms. The 294ms is `commandfile_test.go`'s ingress, which the daemon polls every 250ms and which is itself one of the negative-probe sites; the only slower arrivals in the run were the two gated by the footer's own 1.5s dwell. 500ms is ~1.7x that measured maximum, so it is NOT shrinkable on this evidence — shortening it would make the command-file and handover probes report "nothing came" about a push that was still on its way |
   | `shortTimeout` (integration/support_session_test.go) | 200ms | `TestSessionSurvivesADaemonRestart`-style old-PID-gone probes | a structural "is it already true" check that should fail fast rather than ride the whole test's deadline |
   | inline `context.WithTimeout` (drain_rollout_test.go, the drain-schedule-survives-a-restart test) | 2s | asserting the drain banner does NOT reappear after a restart | an expected-to-time-out negative probe, deliberately tighter than `DefaultTimeout` |
@@ -276,7 +275,21 @@ environment. Every flag is optional.
 5. the ONE loopback listener, bound FIRST as the boot-exclusivity claim (an
    exclusive kernel lock on `daemon.lock` beside `daemon.addr`); an UNFLAGGED
    second daemon loses there and exits without touching the incumbent's
-   listener or its advertisement;
+   listener or its advertisement. The claim's holder ALSO holds
+   `daemon.serving` (`daemonaddr.ServingName`) from bind, or from a
+   successor's takeover, until the FIRST step of its shutdown
+   (`beginShutdown`: the serving lock is released, then `daemon.addr` is
+   withdrawn, and only then can any answer owed leave). A booting daemon that
+   finds `daemon.lock` held probes `daemon.serving` with a shared non-blocking
+   flock: HELD means the holder is serving and staying, and the boot refuses AT
+   ONCE (verdict `incumbent_serving`); FREE means the holder is departing (or
+   predates the serving lock, or is still booting), and the boot waits up to
+   `daemonaddr.ClaimWaitBound` in the kernel for `daemon.lock` exactly as
+   before. A `--replacing` daemon skips the probe, because its incumbent spawned
+   it while still serving. `daemon.serving` is created once and NEVER unlinked
+   or replaced: a second inode would let two holders lock it at once. Every
+   claim record (`daemon.cmd.claim`) carries the `verdict`, whether the boot
+   `probed`, the `state_dir` and `waited_ms`;
 6. `daemon.addr`, written atomically by an incumbent; a `--joining` successor
    DEFERS it and instead writes `joining.addr` where the incumbent that spawned
    it is waiting, and `daemon.addr` is written only once every workspace is

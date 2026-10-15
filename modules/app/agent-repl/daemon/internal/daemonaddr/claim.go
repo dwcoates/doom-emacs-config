@@ -39,6 +39,9 @@ type claim struct {
 	// closed is true once Close ran: a boot claim that lands after it is
 	// released at once, never kept by a closed claim.
 	closed bool
+	// departed is true once Depart ran: a boot claim taken after it takes no
+	// serving lock, because this daemon is no longer serving.
+	departed bool
 	// taken is closed the moment this claim holds the boot claim, by
 	// whichever path took it (bind, Publish, or the wait below).
 	taken chan struct{}
@@ -49,11 +52,23 @@ type claim struct {
 	bootWaitErr error
 }
 
-// holdLocked makes LOCK this claim's boot claim and tells every waiter. The
-// caller holds c.mu and c.lock is nil.
-func (c *claim) holdLocked(lock *bootLock) {
+// holdLocked makes LOCK this claim's boot claim, takes the serving lock
+// beside it unless this daemon has already departed, and tells every waiter.
+// The caller holds c.mu and c.lock is nil. A serving lock that cannot be
+// taken releases the boot claim and is the answer: a claim held without its
+// serving lock would read as departing to every booting daemon.
+func (c *claim) holdLocked(lock *bootLock) error {
+	if !c.departed {
+		if err := lock.takeServing(); err != nil {
+			if rerr := lock.release(); rerr != nil {
+				return fmt.Errorf("%w (and releasing the boot claim: %v)", err, rerr)
+			}
+			return err
+		}
+	}
 	c.lock = lock
 	close(c.taken)
+	return nil
 }
 
 // pidLinePrefix marks the second line of a daemon.addr advertisement, which
@@ -117,8 +132,8 @@ func ReadAdvertisement(addrPath string) (Advertisement, error) {
 // comes FIRST so a second daemon loses before it has bound anything: it never
 // creates a listener, never writes daemon.addr, and so cannot disturb the
 // incumbent on its way out.
-func bind(addrPath string, port int, wait time.Duration) (Claim, error) {
-	return bindWith(addrPath, port, true, wait)
+func bind(addrPath string, port int, wait time.Duration, mode BootMode) (Claim, ClaimVerdict, error) {
+	return bindWith(addrPath, port, true, wait, mode)
 }
 
 // bindJoining binds WITHOUT the boot claim, for a successor.
@@ -130,28 +145,39 @@ func bind(addrPath string, port int, wait time.Duration) (Claim, error) {
 // over, at Publish, by which point the incumbent has stood down.
 func bindJoining(addrPath string, port int) (Claim, error) {
 	// A SUCCESSOR TAKES NO CLAIM HERE, so there is nothing for it to wait on.
-	return bindWith(addrPath, port, false, 0)
+	c, _, err := bindWith(addrPath, port, false, 0, BootOrdinary)
+	return c, err
 }
 
-func bindWith(addrPath string, port int, claimBoot bool, wait time.Duration) (Claim, error) {
+func bindWith(addrPath string, port int, claimBoot bool, wait time.Duration, mode BootMode) (Claim, ClaimVerdict, error) {
+	verdict := VerdictFree
 	if addrPath == "" {
-		return nil, fmt.Errorf("daemon.addr path is empty")
+		return nil, VerdictUndecided, fmt.Errorf("daemon.addr path is empty")
 	}
 	if port < 0 || port > 65535 {
-		return nil, fmt.Errorf("port %d is out of range", port)
+		return nil, VerdictUndecided, fmt.Errorf("port %d is out of range", port)
 	}
 	dir := filepath.Dir(addrPath)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, fmt.Errorf("create the state root %q: %w", dir, err)
+		return nil, VerdictUndecided, fmt.Errorf("create the state root %q: %w", dir, err)
 	}
 	var lock *bootLock
 	if claimBoot {
 		var err error
-		// THE HELD CLAIM IS WAITED ON, not read as a live incumbent on sight:
-		// an outgoing daemon holds it until its process ends, and its
-		// replacement is spawned into exactly that window. See ClaimWaitBound.
-		if lock, err = acquireBootLockWithin(LockPath(addrPath), wait, nil); err != nil {
-			return nil, err
+		// A HELD CLAIM IS REFUSED AT ONCE ONLY WHILE ITS HOLDER SERVES; a
+		// departing holder is waited for, because an outgoing daemon holds the
+		// claim until its process ends and its replacement is spawned into
+		// exactly that window. See acquireBootLockWithin and ClaimWaitBound.
+		if lock, verdict, err = acquireBootLockWithin(LockPath(addrPath), wait, mode, nil); err != nil {
+			return nil, verdict, err
+		}
+		// THE SERVING LOCK IS TAKEN BEFORE ANYTHING IS BOUND: from here on a
+		// booting daemon reads this one as serving.
+		if err := lock.takeServing(); err != nil {
+			if rerr := lock.release(); rerr != nil {
+				return nil, VerdictUndecided, fmt.Errorf("%w (and releasing the boot claim: %v)", err, rerr)
+			}
+			return nil, VerdictUndecided, err
 		}
 	}
 	release := func() {
@@ -162,19 +188,19 @@ func bindWith(addrPath string, port int, claimBoot bool, wait time.Duration) (Cl
 	ln, err := net.Listen("tcp", net.JoinHostPort(LoopbackHost, strconv.Itoa(port)))
 	if err != nil {
 		release()
-		return nil, fmt.Errorf("bind the daemon listener on %s:%d: %w", LoopbackHost, port, err)
+		return nil, verdict, fmt.Errorf("bind the daemon listener on %s:%d: %w", LoopbackHost, port, err)
 	}
 	bound, ok := ln.Addr().(*net.TCPAddr)
 	if !ok {
 		ln.Close()
 		release()
-		return nil, fmt.Errorf("bound listener address %q is not TCP", ln.Addr())
+		return nil, verdict, fmt.Errorf("bound listener address %q is not TCP", ln.Addr())
 	}
 	root, err := os.Stat(dir)
 	if err != nil {
 		ln.Close()
 		release()
-		return nil, fmt.Errorf("stat the state root %q: %w", dir, err)
+		return nil, verdict, fmt.Errorf("stat the state root %q: %w", dir, err)
 	}
 	taken := make(chan struct{})
 	if lock != nil {
@@ -188,7 +214,7 @@ func bindWith(addrPath string, port int, claimBoot bool, wait time.Duration) (Cl
 		address:  net.JoinHostPort(LoopbackHost, strconv.Itoa(bound.Port)),
 		pid:      os.Getpid(),
 		root:     root,
-	}, nil
+	}, verdict, nil
 }
 
 // Listener implements Claim.
@@ -229,7 +255,9 @@ func (c *claim) Publish() error {
 		if err != nil {
 			return fmt.Errorf("take the boot claim before advertising %q: %w", c.addrPath, err)
 		}
-		c.holdLocked(lock)
+		if err := c.holdLocked(lock); err != nil {
+			return fmt.Errorf("take the boot claim before advertising %q: %w", c.addrPath, err)
+		}
 	}
 	if err := atomicfile.Replace(c.addrPath, []byte(c.advertisement()), atomicfile.Options{Mode: 0o644, Sync: true}); err != nil {
 		return fmt.Errorf("advertise the daemon address in %q: %w", c.addrPath, err)
@@ -271,6 +299,21 @@ func (c *claim) Withdraw() (bool, error) {
 		return false, fmt.Errorf("remove %q: %w", c.addrPath, err)
 	}
 	return true, nil
+}
+
+// Depart implements Claim. It releases the serving lock and keeps the boot
+// claim, and is idempotent.
+func (c *claim) Depart() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.departed = true
+	if c.lock == nil {
+		return nil
+	}
+	if err := c.lock.depart(); err != nil {
+		return fmt.Errorf("depart from the state root beside %q: %w", c.addrPath, err)
+	}
+	return nil
 }
 
 // ProbeBound is how long the staleness probe waits for a loopback connect. It
@@ -410,7 +453,9 @@ func (c *claim) waitForBootClaim(f *os.File, settled chan struct{}) {
 		}
 		return
 	}
-	c.holdLocked(lock)
+	if err := c.holdLocked(lock); err != nil {
+		c.bootWaitErr = err
+	}
 }
 
 // Verify implements Claim.

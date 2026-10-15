@@ -57,8 +57,10 @@ func TestSecondDaemonOnTheSameStateRootRefusesToBoot(t *testing.T) {
 	}
 
 	// Act
-	// The refusal waits the whole claim bound first; see harness.ClaimRefusalTimeout.
-	second := harness.StartDaemon(t, harness.Opts{StateDir: incumbent.StateDir, ExpectEarlyExit: true, Timeout: harness.ClaimRefusalTimeout})
+	// The incumbent holds daemon.serving, so the refusal is decided at once
+	// by the serving probe, inside the default wait bound; it no longer
+	// waits out daemonaddr.ClaimWaitBound.
+	second := harness.StartDaemon(t, harness.Opts{StateDir: incumbent.StateDir, ExpectEarlyExit: true})
 	// The sweep covers every test; the declared records are evidence of the second daemon the test boots.
 	second.ExpectWarnings("daemon.cmd.claim")
 	code := second.AwaitExit()
@@ -76,6 +78,13 @@ func TestSecondDaemonOnTheSameStateRootRefusesToBoot(t *testing.T) {
 	}
 	if _, err := incumbent.Client().DaemonHealth(incumbent.Ctx(), healthRequest()); err != nil {
 		t.Fatalf("the incumbent stopped serving after a refused second daemon: %v", err)
+	}
+	// Assert: the refusal was the serving probe's, not a waited-out bound.
+	refusal := second.AwaitLogRecord(second.RunLogPath(), "the refusal's claim record", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.cmd.claim" && r.Message == "another daemon holds the boot claim; exiting without disturbing it"
+	})
+	if got := refusal.Context["verdict"]; got != "incumbent_serving" {
+		t.Fatalf("the refusal's verdict = %v, want incumbent_serving: a serving incumbent is refused at once", got)
 	}
 }
 

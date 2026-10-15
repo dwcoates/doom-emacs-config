@@ -1358,3 +1358,139 @@ func TestCloseRequestlessClosesOnlyConnectionsWithNoRequest(t *testing.T) {
 		t.Fatalf("the idle connection was closed (%v), want it left to Shutdown", err)
 	}
 }
+
+// orderingClaim records the order of the shutdown's first steps, so a test
+// asserts the serving lock is released before daemon.addr is withdrawn.
+type orderingClaim struct {
+	steps     []string
+	departErr error
+}
+
+func (o *orderingClaim) Depart() error {
+	o.steps = append(o.steps, "depart")
+	return o.departErr
+}
+
+func (o *orderingClaim) Withdraw() (bool, error) {
+	o.steps = append(o.steps, "withdraw")
+	return true, nil
+}
+
+func (o *orderingClaim) Address() string { return "127.0.0.1:0" }
+
+// TestBeginShutdownDepartsBeforeItWithdraws pins the load-bearing order: a
+// daemon spawned because daemon.addr went away must find this one departed,
+// or it refuses to replace a daemon on its way out. (That the whole step runs
+// before any answer owed leaves is
+// TestServeWithdrawsTheAdvertisementBeforeItStopsAccepting.)
+func TestBeginShutdownDepartsBeforeItWithdraws(t *testing.T) {
+	// Arrange.
+	claim := &orderingClaim{}
+	withdrawal := &addrWithdrawal{claim: claim, log: &spyLogger{}}
+
+	// Act.
+	beginShutdown(claim, withdrawal, &spyLogger{})()
+
+	// Assert.
+	if got, want := strings.Join(claim.steps, ","), "depart,withdraw"; got != want {
+		t.Fatalf("the shutdown's first steps = %s, want %s", got, want)
+	}
+}
+
+func TestBeginShutdownReportsAFailedDepartureAndStillWithdraws(t *testing.T) {
+	// Arrange.
+	claim := &orderingClaim{departErr: errors.New("flock: bad file descriptor")}
+	log := &spyLogger{}
+	withdrawal := &addrWithdrawal{claim: claim, log: &spyLogger{}}
+
+	// Act.
+	beginShutdown(claim, withdrawal, log)()
+
+	// Assert.
+	msg, ok := log.message(dlog.LevelError)
+	if !ok || !strings.Contains(msg, "serving lock") {
+		t.Fatalf("records = %+v, want an ERROR naming the serving lock", log.records)
+	}
+	if got, want := strings.Join(claim.steps, ","), "depart,withdraw"; got != want {
+		t.Fatalf("the shutdown's first steps = %s, want %s", got, want)
+	}
+}
+
+func TestBootModeFor(t *testing.T) {
+	tests := []struct {
+		name string
+		opts options
+		want daemonaddr.BootMode
+	}{
+		{"an ordinary boot probes the serving lock", options{}, daemonaddr.BootOrdinary},
+		{"a replacement skips the probe", options{replacing: true}, daemonaddr.BootReplacing},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			got := bootModeFor(tt.opts)
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("bootModeFor = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// claimRecord is the daemon.cmd.claim record's context, as the run log has it.
+type claimRecord struct {
+	Level     string `json:"level"`
+	Operation string `json:"operation"`
+	Context   struct {
+		Verdict  string `json:"verdict"`
+		StateDir string `json:"state_dir"`
+		Probed   bool   `json:"probed"`
+	} `json:"context"`
+}
+
+// TestASecondDaemonBesideAServingIncumbentRefusesAtOnceAndSaysWhy runs the
+// spine with the PRODUCTION claim wait beside a serving incumbent: the refusal
+// is decided by the serving lock, recorded with its verdict and state root.
+func TestASecondDaemonBesideAServingIncumbentRefusesAtOnceAndSaysWhy(t *testing.T) {
+	// Arrange.
+	root := shortRoot(t)
+	t.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1")
+	t.Setenv(wsm.EnvTestUnsyncedWrites, "1")
+	t.Setenv(dlog.LevelEnvironment, "info")
+	incumbent, err := daemonaddr.Bind(filepath.Join(root, "daemon.addr"), 0)
+	if err != nil {
+		t.Fatalf("the incumbent could not bind: %v", err)
+	}
+	defer incumbent.Close()
+	h := newTestHooks().hooks
+	h.ClaimWait = daemonaddr.ClaimWaitBound
+
+	// Act.
+	got := run(context.Background(), options{stateDir: root}, h)
+
+	// Assert.
+	if !errors.Is(got, daemonaddr.ErrClaimed) {
+		t.Fatalf("run error = %v, want it to wrap %v", got, daemonaddr.ErrClaimed)
+	}
+	raw, err := os.ReadFile(filepath.Join(root, "logs", "daemon.run.log"))
+	if err != nil {
+		t.Fatalf("ReadFile daemon.run.log: %v", err)
+	}
+	var found *claimRecord
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		var r claimRecord
+		if err := json.Unmarshal([]byte(line), &r); err != nil {
+			t.Fatalf("parse daemon.run.log record %q: %v", line, err)
+		}
+		if r.Operation == "daemon.cmd.claim" && r.Context.Verdict != "" {
+			found = &r
+		}
+	}
+	if found == nil {
+		t.Fatalf("daemon.run.log = %q, want a daemon.cmd.claim record with a verdict", raw)
+	}
+	if found.Context.Verdict != string(daemonaddr.VerdictIncumbentServing) || !found.Context.Probed || found.Context.StateDir != root {
+		t.Fatalf("claim record = %+v, want verdict %q, probed, state_dir %q", found.Context, daemonaddr.VerdictIncumbentServing, root)
+	}
+}

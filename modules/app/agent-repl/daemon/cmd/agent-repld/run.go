@@ -205,14 +205,21 @@ func run(ctx context.Context, opts options, h hooks) error {
 		// released only when the exit ends.
 		claimWait = rollout.ReplacementClaimWait
 	}
-	bindClaim := func(addrPath string, port int) (daemonaddr.Claim, error) {
-		return daemonaddr.BindWithin(addrPath, port, claimWait)
+	// A REPLACEMENT SKIPS THE SERVING PROBE: its incumbent spawned it while
+	// still serving, just before its own exit, so the incumbent is departing
+	// by construction. Every other boot refuses a SERVING incumbent at once.
+	bootMode := bootModeFor(opts)
+	bindClaim := func(addrPath string, port int) (daemonaddr.Claim, daemonaddr.ClaimVerdict, error) {
+		return daemonaddr.BindWithin(addrPath, port, claimWait, bootMode)
 	}
 	if joining {
-		bindClaim = daemonaddr.BindJoining
+		bindClaim = func(addrPath string, port int) (daemonaddr.Claim, daemonaddr.ClaimVerdict, error) {
+			c, err := daemonaddr.BindJoining(addrPath, port)
+			return c, joiningVerdict, err
+		}
 	}
 	claimStart := time.Now()
-	claim, err := bindClaim(layout.DaemonAddr(), 0)
+	claim, verdict, err := bindClaim(layout.DaemonAddr(), 0)
 	claimWaited := time.Since(claimStart)
 	if err != nil {
 		if errors.Is(err, daemonaddr.ErrClaimed) {
@@ -223,12 +230,18 @@ func run(ctx context.Context, opts options, h hooks) error {
 			// this process exits having written nothing.
 			log.Info("daemon.cmd.claim", "another daemon holds the boot claim; exiting without disturbing it", dlog.Context{
 				"addr_path":  layout.DaemonAddr(),
+				"state_dir":  layout.Dir(),
 				"claim_wait": claimWait.String(),
+				"verdict":    string(verdict),
+				"probed":     bootMode == daemonaddr.BootOrdinary,
+				"waited_ms":  claimWaited.Milliseconds(),
 			})
 			return err
 		}
 		log.Error("daemon.cmd.claim", "the loopback listener could not be claimed", dlog.Context{
 			"addr_path": layout.DaemonAddr(),
+			"state_dir": layout.Dir(),
+			"verdict":   string(verdict),
 			"error":     err.Error(),
 		})
 		return fmt.Errorf("agent-repld: claim the daemon address: %w", err)
@@ -238,6 +251,9 @@ func run(ctx context.Context, opts options, h hooks) error {
 	// a replacement waiting it out was a silent gap in the run log.
 	log.Info("daemon.cmd.claim", "took the boot claim", dlog.Context{
 		"joining":   joining,
+		"state_dir": layout.Dir(),
+		"verdict":   string(verdict),
+		"probed":    bootMode == daemonaddr.BootOrdinary && !joining,
 		"waited_ms": claimWaited.Milliseconds(),
 	})
 
@@ -600,7 +616,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 		}
 	}
 	serveErr := h.Serve(serving, server.RetryAccept(claim.Listener(), log), server.H2C(srv, log), serveExit{
-		OnShuttingDown: withdrawal.begin,
+		OnShuttingDown: beginShutdown(claim, withdrawal, log),
 		EndStreams:     endStreams,
 		Mark:           teardown.mark,
 		Log:            log,
@@ -958,6 +974,47 @@ func (c *connStates) summary() string {
 // shutdownGrace is how long in-flight requests have to finish before the
 // standing streams are closed underneath them.
 const shutdownGrace = 2 * time.Second
+
+// bootModeFor is how this boot reads a held boot claim: a replacement waits
+// for its incumbent without probing the serving lock, because the incumbent
+// spawned it while still serving; every other boot refuses a serving holder.
+func bootModeFor(opts options) daemonaddr.BootMode {
+	if opts.replacing {
+		return daemonaddr.BootReplacing
+	}
+	return daemonaddr.BootOrdinary
+}
+
+// joiningVerdict is the claim record's verdict for a joining successor, which
+// takes no boot claim at bind and so decided none.
+const joiningVerdict daemonaddr.ClaimVerdict = "joining_no_claim"
+
+// departer is the slice of daemonaddr.Claim that beginShutdown needs.
+type departer interface {
+	Depart() error
+}
+
+// beginShutdown is the shutdown's first step: the claim DEPARTS -- releasing
+// the serving lock, so a daemon booting from here on waits for this one's exit
+// rather than refusing at once -- and only then is daemon.addr withdrawn.
+//
+// THE ORDER IS LOAD-BEARING. Emacs spawns a daemon when it finds no address,
+// and every answer this daemon still owes leaves after this step (serve runs
+// it before AwaitQuiet). A daemon spawned in response to either must find
+// this one departed; a withdrawal first would let one find the address gone
+// and the serving lock still held, and refuse to replace a daemon on its way
+// out. A failed departure is ERROR and the withdrawal still runs: the worst it
+// leaves is a booting daemon that refuses where it would have waited.
+func beginShutdown(claim departer, withdrawal *addrWithdrawal, log dlog.Logger) func() {
+	return func() {
+		if err := claim.Depart(); err != nil {
+			log.Error("daemon.cmd.exit", "the serving lock could not be released at the start of shutdown", dlog.Context{
+				"error": err.Error(),
+			})
+		}
+		withdrawal.begin()
+	}
+}
 
 // withdrawer is the slice of daemonaddr.Claim that addrWithdrawal needs: the
 // idempotent, address/pid-guarded removal and the address it names.
