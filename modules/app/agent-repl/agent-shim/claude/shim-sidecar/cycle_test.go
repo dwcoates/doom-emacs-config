@@ -263,6 +263,40 @@ func TestWriteFailureLeavesTheCursorUnchanged(t *testing.T) {
 	}
 }
 
+func TestASignalDuringAnUnansweredWriteLeavesTheCursorAtTheLastAck(t *testing.T) {
+	// Arrange: the store takes the batch and never answers it.
+	store := &fakeStore{writeWedged: true, entered: make(chan struct{})}
+	h := newHarness(t, store)
+	path := h.transcript(t, "sess-1", promptLine)
+	h.sc.options.PollInterval = time.Millisecond
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	tailer := h.sc.watchers[path].tailer
+	stop := make(chan os.Signal, 1)
+	returned := make(chan error, 1)
+	go func() { returned <- h.sc.Run(stop) }()
+	select {
+	case <-store.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the store was never asked to write, so nothing is in flight")
+	}
+
+	// Act.
+	stop <- syscall.SIGTERM
+	select {
+	case <-returned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return within 2s of the signal")
+	}
+
+	// Assert: the batch was never answered, so the reader never took the
+	// position it offered.
+	if got := tailer.Offset(); got != 0 {
+		t.Fatalf("committed offset = %d, want 0: the batch that would have earned it was never answered", got)
+	}
+}
+
 func TestWriteFailureAbandonsTheRestOfThePass(t *testing.T) {
 	// Arrange: two files, one failing write.
 	store := &fakeStore{}
