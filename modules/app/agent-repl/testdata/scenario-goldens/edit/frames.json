@@ -1,9 +1,9 @@
 [
   {
     "upsertKey": "session:mcp_server:u2:echo",
-    "book": "main-agent",
+    "book": "601de000-0000-4000-8000-000000000001",
     "keepalive": false,
-    "turn": "turn-1",
+    "turn": null,
     "recordPlace": null,
     "source": {
       "vendorUuid": "u2:echo",
@@ -21,9 +21,9 @@
   },
   {
     "upsertKey": "session:mcp_server:u2:broken",
-    "book": "main-agent",
+    "book": "601de000-0000-4000-8000-000000000001",
     "keepalive": false,
-    "turn": "turn-1",
+    "turn": null,
     "recordPlace": null,
     "source": {
       "vendorUuid": "u2:broken",
@@ -43,9 +43,9 @@
   },
   {
     "upsertKey": "session:mcp_server:u2:needs-login",
-    "book": "main-agent",
+    "book": "601de000-0000-4000-8000-000000000001",
     "keepalive": false,
-    "turn": "turn-1",
+    "turn": null,
     "recordPlace": null,
     "source": {
       "vendorUuid": "u2:needs-login",
@@ -63,9 +63,9 @@
   },
   {
     "upsertKey": "session:mcp_server:u2:slow",
-    "book": "main-agent",
+    "book": "601de000-0000-4000-8000-000000000001",
     "keepalive": false,
-    "turn": "turn-1",
+    "turn": null,
     "recordPlace": null,
     "source": {
       "vendorUuid": "u2:slow",
@@ -83,9 +83,9 @@
   },
   {
     "upsertKey": "session:mcp_server:u2:switched-off",
-    "book": "main-agent",
+    "book": "601de000-0000-4000-8000-000000000001",
     "keepalive": false,
-    "turn": "turn-1",
+    "turn": null,
     "recordPlace": null,
     "source": {
       "vendorUuid": "u2:switched-off",
@@ -103,9 +103,9 @@
   },
   {
     "upsertKey": "session:fast_mode:u2",
-    "book": "main-agent",
+    "book": "601de000-0000-4000-8000-000000000001",
     "keepalive": false,
-    "turn": "turn-1",
+    "turn": null,
     "recordPlace": null,
     "source": {
       "vendorUuid": "u2",
@@ -123,13 +123,47 @@
     }
   },
   {
-    "upsertKey": "activity:msg_fake_g0000000_1:0",
-    "book": "main-agent",
+    "upsertKey": "prompt:turn-1",
+    "book": "601de000-0000-4000-8000-000000000001",
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": null,
     "source": {
-      "vendorUuid": "u6",
+      "vendorUuid": "turn-1",
+      "discriminator": "agent_prompt"
+    },
+    "item": {
+      "kind": "prompt",
+      "prompt": {
+        "id": {
+          "value": "turn-1"
+        },
+        "agent": {
+          "value": "601de000-0000-4000-8000-000000000001"
+        },
+        "said": {
+          "content": {
+            "blocks": [
+              {
+                "text": {
+                  "text": "!edit"
+                }
+              }
+            ]
+          }
+        },
+        "origin": "PROMPT_ORIGIN_USER_SENT"
+      }
+    }
+  },
+  {
+    "upsertKey": "activity:msg_fake_g0000000_1:0",
+    "book": "601de000-0000-4000-8000-000000000001",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u5",
       "blockIndex": 0,
       "discriminator": "activity.thinking.start"
     },
@@ -148,22 +182,22 @@
           }
         },
         "agentId": {
-          "value": "main-agent"
+          "value": "601de000-0000-4000-8000-000000000001"
         }
       }
     }
   },
   {
     "upsertKey": "activity:msg_fake_g0000000_1:0",
-    "book": "main-agent",
+    "book": "601de000-0000-4000-8000-000000000001",
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1800000000002,
+      "atMs": 1800000000003,
       "ordinal": 0
     },
     "source": {
-      "vendorUuid": "u8",
+      "vendorUuid": "u7",
       "blockIndex": 0,
       "discriminator": "activity.thinking.success"
     },
@@ -194,22 +228,22 @@
           }
         },
         "agentId": {
-          "value": "main-agent"
+          "value": "601de000-0000-4000-8000-000000000001"
         }
       }
     }
   },
   {
     "upsertKey": "activity:toolu_fake_g0000000_1",
-    "book": "main-agent",
+    "book": "601de000-0000-4000-8000-000000000001",
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1800000000008,
+      "atMs": 1800000000009,
       "ordinal": 0
     },
     "source": {
-      "vendorUuid": "u12",
+      "vendorUuid": "u11",
       "blockIndex": 1,
       "discriminator": "activity.edit.start"
     },
@@ -227,7 +261,7 @@
                   "path": "/w/s/example.ts"
                 },
                 "startedAt": {
-                  "atMs": "1800000000008"
+                  "atMs": "1800000000009"
                 }
               }
             },
@@ -235,22 +269,22 @@
           }
         },
         "agentId": {
-          "value": "main-agent"
+          "value": "601de000-0000-4000-8000-000000000001"
         }
       }
     }
   },
   {
     "upsertKey": "activity:toolu_fake_g0000000_1",
-    "book": "main-agent",
+    "book": "601de000-0000-4000-8000-000000000001",
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1800000000008,
+      "atMs": 1800000000009,
       "ordinal": 0
     },
     "source": {
-      "vendorUuid": "u16",
+      "vendorUuid": "u15",
       "discriminator": "activity.edit.success"
     },
     "item": {
@@ -283,9 +317,9 @@
                   }
                 ],
                 "settledAt": {
-                  "atMs": "1800000000008",
+                  "atMs": "1800000000009",
                   "startedAt": {
-                    "atMs": "1800000000008"
+                    "atMs": "1800000000009"
                   }
                 }
               }
@@ -294,19 +328,19 @@
           }
         },
         "agentId": {
-          "value": "main-agent"
+          "value": "601de000-0000-4000-8000-000000000001"
         }
       }
     }
   },
   {
     "upsertKey": "activity:msg_fake_g0000000_2:0",
-    "book": "main-agent",
+    "book": "601de000-0000-4000-8000-000000000001",
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": null,
     "source": {
-      "vendorUuid": "u18",
+      "vendorUuid": "u17",
       "blockIndex": 0,
       "discriminator": "activity.thinking.start"
     },
@@ -325,22 +359,22 @@
           }
         },
         "agentId": {
-          "value": "main-agent"
+          "value": "601de000-0000-4000-8000-000000000001"
         }
       }
     }
   },
   {
     "upsertKey": "activity:msg_fake_g0000000_2:0",
-    "book": "main-agent",
+    "book": "601de000-0000-4000-8000-000000000001",
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1800000000005,
+      "atMs": 1800000000006,
       "ordinal": 0
     },
     "source": {
-      "vendorUuid": "u20",
+      "vendorUuid": "u19",
       "blockIndex": 0,
       "discriminator": "activity.thinking.success"
     },
@@ -371,19 +405,19 @@
           }
         },
         "agentId": {
-          "value": "main-agent"
+          "value": "601de000-0000-4000-8000-000000000001"
         }
       }
     }
   },
   {
     "upsertKey": "activity:msg_fake_g0000000_2:1",
-    "book": "main-agent",
+    "book": "601de000-0000-4000-8000-000000000001",
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": null,
     "source": {
-      "vendorUuid": "u22",
+      "vendorUuid": "u21",
       "blockIndex": 1,
       "discriminator": "activity.response.start"
     },
@@ -402,19 +436,19 @@
           }
         },
         "agentId": {
-          "value": "main-agent"
+          "value": "601de000-0000-4000-8000-000000000001"
         }
       }
     }
   },
   {
     "upsertKey": "activity:msg_fake_g0000000_2:1",
-    "book": "main-agent",
+    "book": "601de000-0000-4000-8000-000000000001",
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": null,
     "source": {
-      "vendorUuid": "u23",
+      "vendorUuid": "u22",
       "blockIndex": 1,
       "discriminator": "activity.response.update"
     },
@@ -435,19 +469,19 @@
           }
         },
         "agentId": {
-          "value": "main-agent"
+          "value": "601de000-0000-4000-8000-000000000001"
         }
       }
     }
   },
   {
     "upsertKey": "activity:msg_fake_g0000000_2:1",
-    "book": "main-agent",
+    "book": "601de000-0000-4000-8000-000000000001",
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": null,
     "source": {
-      "vendorUuid": "u24",
+      "vendorUuid": "u23",
       "blockIndex": 1,
       "discriminator": "activity.response.update"
     },
@@ -468,22 +502,22 @@
           }
         },
         "agentId": {
-          "value": "main-agent"
+          "value": "601de000-0000-4000-8000-000000000001"
         }
       }
     }
   },
   {
     "upsertKey": "activity:msg_fake_g0000000_2:1",
-    "book": "main-agent",
+    "book": "601de000-0000-4000-8000-000000000001",
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1800000000006,
+      "atMs": 1800000000007,
       "ordinal": 0
     },
     "source": {
-      "vendorUuid": "u25",
+      "vendorUuid": "u24",
       "blockIndex": 1,
       "discriminator": "activity.response.success"
     },
@@ -502,7 +536,7 @@
                 },
                 "fromModel": {},
                 "settledAt": {
-                  "atMs": "1800000000006"
+                  "atMs": "1800000000007"
                 }
               }
             },
@@ -510,19 +544,19 @@
           }
         },
         "agentId": {
-          "value": "main-agent"
+          "value": "601de000-0000-4000-8000-000000000001"
         }
       }
     }
   },
   {
-    "upsertKey": "terminal:main-agent:u29",
-    "book": "main-agent",
+    "upsertKey": "terminal:601de000-0000-4000-8000-000000000001:u28",
+    "book": "601de000-0000-4000-8000-000000000001",
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": null,
     "source": {
-      "vendorUuid": "u29",
+      "vendorUuid": "u28",
       "discriminator": "agent_frame.success.completed"
     },
     "item": {
@@ -536,7 +570,7 @@
           }
         },
         "agentId": {
-          "value": "main-agent"
+          "value": "601de000-0000-4000-8000-000000000001"
         }
       }
     }

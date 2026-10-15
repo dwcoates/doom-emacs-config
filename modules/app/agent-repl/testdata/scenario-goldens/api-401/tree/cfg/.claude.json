@@ -1,0 +1,7 @@
+{
+  "projects": {
+    "${GOLDEN_ROOT}/workspace": {
+      "hasTrustDialogAccepted": true
+    }
+  }
+}
