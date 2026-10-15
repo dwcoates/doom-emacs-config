@@ -1318,6 +1318,16 @@ type fakeGit struct {
 	// between answers CommitsBetween; nil answers one commit of work.
 	between    []gitclient.Commit
 	betweenErr error
+	// globalIdentity answers GlobalIdentity (fakeIdentity unless a test
+	// scripts another); globalIdentityErr fails it.
+	globalIdentity    gitclient.Identity
+	globalIdentityErr error
+	// identities answers CommitIdentities; nil answers one commit authored and
+	// committed by globalIdentity. identitiesErr fails it, and identityRanges
+	// records every range asked, as "<base>..<tip>".
+	identities     []gitclient.CommitIdentity
+	identitiesErr  error
+	identityRanges []string
 	// rebase is the scripted rebase: the commits it replays, the replay index
 	// (1-based) whose first replay conflicts with the files named, and a
 	// failure every rebase command answers.
@@ -1357,14 +1367,15 @@ type fakeGit struct {
 
 func newFakeGit(seq func() int) *fakeGit {
 	return &fakeGit{
-		seq:           seq,
-		at:            map[string]int{},
-		defaultBranch: "master",
-		commonDirs:    map[string]string{},
-		refs:          map[string]string{"refs/heads/" + asyncBranch: "a5ync"},
-		trees:         map[string]string{},
-		refSeqs:       map[string][]string{},
-		changedIn:     map[string][][]string{},
+		seq:            seq,
+		at:             map[string]int{},
+		defaultBranch:  "master",
+		globalIdentity: fakeIdentity,
+		commonDirs:     map[string]string{},
+		refs:           map[string]string{"refs/heads/" + asyncBranch: "a5ync"},
+		trees:          map[string]string{},
+		refSeqs:        map[string][]string{},
+		changedIn:      map[string][][]string{},
 		// A BRANCH CHANGES SOMETHING BY DEFAULT, and something no rule maps,
 		// so the gate selects (and runs) every suite: a test that cares what
 		// the gate selects says what the branch changed.
@@ -1660,6 +1671,27 @@ func (g *fakeGit) CommitsBetween(_ context.Context, _, _, tip string) ([]gitclie
 		return []gitclient.Commit{{SHA: "c0ffee0000001", Subject: "the work"}}, g.betweenErr
 	}
 	return g.between, g.betweenErr
+}
+
+// fakeIdentity is the fixtures' global git identity.
+var fakeIdentity = gitclient.Identity{Name: "Pat Example", Email: "pat@example.com"}
+
+func (g *fakeGit) GlobalIdentity(context.Context, string) (gitclient.Identity, error) {
+	g.record("global_identity")
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.globalIdentity, g.globalIdentityErr
+}
+
+func (g *fakeGit) CommitIdentities(_ context.Context, _, base, tip string) ([]gitclient.CommitIdentity, error) {
+	g.record("commit_identities")
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.identityRanges = append(g.identityRanges, base+".."+tip)
+	if g.identities == nil {
+		return []gitclient.CommitIdentity{{SHA: tip, Subject: "the work", Author: g.globalIdentity, Committer: g.globalIdentity}}, g.identitiesErr
+	}
+	return g.identities, g.identitiesErr
 }
 
 func (g *fakeGit) StartRebase(_ context.Context, _, onto string, commits []string) (gitclient.RebaseStep, error) {

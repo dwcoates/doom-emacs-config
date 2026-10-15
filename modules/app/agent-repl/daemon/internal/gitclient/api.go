@@ -146,6 +146,13 @@ type Git interface {
 	// CommitsBetween lists the commits reachable from tip and not from base,
 	// oldest first, merges excluded: what a rebase of tip onto base replays.
 	CommitsBetween(ctx context.Context, dir, base, tip string) ([]Commit, error)
+	// GlobalIdentity reads the user's global git identity (`git config
+	// --global user.name` / `user.email`). An unset key is an ordinary answer:
+	// its field is empty.
+	GlobalIdentity(ctx context.Context, dir string) (Identity, error)
+	// CommitIdentities lists the author and committer of every commit
+	// reachable from tip and not from base, oldest first, merges included.
+	CommitIdentities(ctx context.Context, dir, base, tip string) ([]CommitIdentity, error)
 	// StartRebase begins replaying commits onto onto in dir's checkout, one
 	// commit per command, and answers where it stands after the first.
 	StartRebase(ctx context.Context, dir, onto string, commits []string) (RebaseStep, error)

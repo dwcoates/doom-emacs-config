@@ -1210,6 +1210,18 @@ func (r *run) commitIn(ctx context.Context, round tabRound, tip, head, targetBra
 			r.subject.branch, strings.Join(result.Conflicted, ", "))
 	}
 	commit := result.Landed.SHA
+	// NOTHING LANDS UNDER ANOTHER IDENTITY (identity.go): every commit the
+	// fast-forward would bring in, the merge commit included, is the global
+	// identity's.
+	refused, err := r.checkIdentities(ctx, tip, commit, targetBranch)
+	if err != nil {
+		settle("the identities of the commits to land could not be read")
+		return outcome{}, false, err
+	}
+	if refused != "" {
+		settle(refused)
+		return failedIn(footer.FailedOther, refused), false, nil
+	}
 	// AN ABANDONED MERGE NEVER MOVES THE TARGET, whatever its steps managed to
 	// finish before the abandon reached them.
 	if err := stillWanted(ctx); err != nil {
