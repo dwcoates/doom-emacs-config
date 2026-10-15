@@ -683,17 +683,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 	// The warning sweep is UNCONDITIONAL: every daemon sweeps its logs at test
 	// end with an empty expected set, so a test that never calls ExpectWarnings
 	// still gets the assertion. ExpectWarnings only widens this set.
-	registerLogChecks(t, func() {
-		dest := ""
-		if root := os.Getenv(ArtifactsEnv); root != "" {
-			dest = filepath.Join(root, artifactDirName(t.Name()))
-		}
-		var extra []string
-		if d.stderrPath != "" {
-			extra = append(extra, d.stderrPath)
-		}
-		preserveFailureLogs(t.Logf, filepath.Join(d.StateDir, "logs"), dest, extra...)
-	}, d.assertNoUnexpectedWarnings, d.assertNoUnproducedRequiredWarnings)
+	registerLogChecks(t, func() { keepFailureLogs(t, d.StateDir, d.stderrPath) }, d.assertNoUnexpectedWarnings, d.assertNoUnproducedRequiredWarnings)
 	// THE LOCK DIRECTORY IS A CROSS-DAEMON RENDEZVOUS, not a per-start temp
 	// dir, so it is keyed to the STATE ROOT and settled only now that the root
 	// is known.

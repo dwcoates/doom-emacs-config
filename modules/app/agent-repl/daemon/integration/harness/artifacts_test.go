@@ -286,3 +286,70 @@ func TestRegisterLogChecks(t *testing.T) {
 		})
 	}
 }
+
+func TestKeepFailureLogsKeepsTheLogsAndTheStderrUnderTheTestsName(t *testing.T) {
+	// Arrange
+	state := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(state, "logs"), 0o755); err != nil {
+		t.Fatalf("mkdir logs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(state, "logs", "daemon.run.log"), []byte("x\n"), 0o600); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+	stderr := filepath.Join(t.TempDir(), "daemon.stderr")
+	if err := os.WriteFile(stderr, []byte("panic: boom\n"), 0o600); err != nil {
+		t.Fatalf("write stderr: %v", err)
+	}
+	root := t.TempDir()
+	t.Setenv(ArtifactsEnv, root)
+
+	// Act
+	keepFailureLogs(newRecordingTB(t, "TestFailedOne"), state, stderr)
+
+	// Assert
+	dest := filepath.Join(root, artifactDirName("TestFailedOne"))
+	for _, name := range []string{"daemon.run.log", "daemon.stderr"} {
+		if _, err := os.Stat(filepath.Join(dest, name)); err != nil {
+			t.Errorf("kept %s: %v; want it under the failed test's name", name, err)
+		}
+	}
+}
+
+// TestEveryDaemonKeepsItsFailureLogsThroughOneHelper pins the extraction: an
+// owned daemon and a view both keep their logs through keepFailureLogs under
+// registerLogChecks, and no other harness file calls preserveFailureLogs by
+// hand.
+func TestEveryDaemonKeepsItsFailureLogsThroughOneHelper(t *testing.T) {
+	// Arrange
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+
+	// Act
+	var handRolled, helperSites []string
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		body, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		src := string(body)
+		if f != "artifacts.go" && strings.Contains(src, "preserveFailureLogs(") {
+			handRolled = append(handRolled, f)
+		}
+		if strings.Contains(src, "registerLogChecks(t, func() { keepFailureLogs(t, ") {
+			helperSites = append(helperSites, f)
+		}
+	}
+
+	// Assert
+	if len(handRolled) != 0 {
+		t.Errorf("files calling preserveFailureLogs by hand: %v; keep failure logs through keepFailureLogs", handRolled)
+	}
+	if strings.Join(helperSites, ",") != "daemon.go,view.go" {
+		t.Errorf("files keeping logs through the helper = %v, want daemon.go and view.go", helperSites)
+	}
+}

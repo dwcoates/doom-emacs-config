@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"testing"
 	"time"
 )
 
@@ -28,6 +29,23 @@ const ArtifactsEnv = "AGENT_REPL_INTEGRATION_ARTIFACTS"
 // artifacts directory is configured: the whole of an ordinary single-test run
 // log, never an unbounded file in a full run's transcript.
 const artifactTailBytes = 64 << 10
+
+// keepFailureLogs keeps, for the failed test t, every log a daemon over
+// stateDir wrote, and its stderr file when it has one, filed under t's name
+// in the artifacts directory when ArtifactsEnv names one. Every daemon a test
+// holds, owned or a view, keeps its logs this one way (registerLogChecks
+// decides when).
+func keepFailureLogs(t testing.TB, stateDir, stderrPath string) {
+	dest := ""
+	if root := os.Getenv(ArtifactsEnv); root != "" {
+		dest = filepath.Join(root, artifactDirName(t.Name()))
+	}
+	var extra []string
+	if stderrPath != "" {
+		extra = append(extra, stderrPath)
+	}
+	preserveFailureLogs(t.Logf, filepath.Join(stateDir, "logs"), dest, extra...)
+}
 
 // preserveFailureLogs keeps every log under logsDir past the test, and each of
 // extra (a file outside it): copied into dest when dest is non-empty, otherwise

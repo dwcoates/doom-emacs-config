@@ -2,7 +2,6 @@ package harness
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -70,21 +69,11 @@ func (d *Daemon) View(t testing.TB) *Daemon {
 	// the budget must outlive them.
 	t.Cleanup(cancel)
 	t.Cleanup(v.leaveClaim)
-	t.Cleanup(v.assertNoUnexpectedWarnings)
-	t.Cleanup(v.assertNoUnproducedRequiredWarnings)
-	// A FAILED TEST KEEPS ITS LOGS, exactly as an owned daemon's does. The
-	// logs directory is the shared process's, so it holds other tests'
-	// records beside this one's; each record names its workspace.
-	t.Cleanup(func() {
-		if !t.Failed() {
-			return
-		}
-		dest := ""
-		if root := os.Getenv(ArtifactsEnv); root != "" {
-			dest = filepath.Join(root, artifactDirName(t.Name()))
-		}
-		preserveFailureLogs(t.Logf, filepath.Join(v.StateDir, "logs"), dest)
-	})
+	// The sweeps answer for what this view claimed, and A FAILED TEST KEEPS ITS
+	// LOGS exactly as an owned daemon's does: the logs directory is the
+	// shared process's, so it holds other tests' records beside this one's,
+	// and each record names its workspace.
+	registerLogChecks(t, func() { keepFailureLogs(t, v.StateDir, v.stderrPath) }, v.assertNoUnexpectedWarnings, v.assertNoUnproducedRequiredWarnings)
 	return &v
 }
 
