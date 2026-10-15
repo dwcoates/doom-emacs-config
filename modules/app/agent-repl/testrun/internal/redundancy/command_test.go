@@ -216,3 +216,36 @@ func TestFindRootAnswersTheRealPathBehindASymlink(t *testing.T) {
 		t.Fatalf("FindRoot = %q, %v; want %q", got, err, want)
 	}
 }
+
+func TestRealPathResolvesASymlinkedDirectory(t *testing.T) {
+	// Arrange
+	real, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	got, err := RealPath(link)
+
+	// Assert
+	if err != nil || got != real {
+		t.Fatalf("RealPath = %q, %v, want %q", got, err, real)
+	}
+}
+
+func TestRealPathRefusesAMissingDirectory(t *testing.T) {
+	// Arrange
+	missing := filepath.Join(t.TempDir(), "gone")
+
+	// Act
+	_, err := RealPath(missing)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "redundancy: resolve "+missing) {
+		t.Fatalf("err = %v, want the directory named", err)
+	}
+}
