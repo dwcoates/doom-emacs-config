@@ -53,7 +53,10 @@ const shimReadyFD = 5
 // spawns, "shim spawned" to "shim reported healthy" -- which ALSO includes the
 // dial ladder's overshoot, so it bounds the true readiness latency from
 // above): p50 162ms, p99 1.71s, max 6.62s, the slow tail all in mass boots of
-// ~30 shims at once. 14s is just over 2x that maximum.
+// ~30 shims at once. 14s is just over 2x that maximum. Those figures are the
+// LADDER'S, inflated by its overshoot; once the readiness pipe has run live,
+// RE-SIZE this to just over 2x the measured max of the `waited_ms` on INFO
+// `daemon.shimclient.ready` outcome=ready.
 const ShimReadyBound = 14 * time.Second
 
 // ActorStandDown is the kill attribution the supervisor's own sweep records.
@@ -481,7 +484,9 @@ func (c *client) awaitReady(ctx context.Context, ready io.ReadCloser, bound time
 	case err := <-read:
 		switch {
 		case err == nil:
-			c.log.Debug("daemon.shimclient.ready", "the shim reported it is listening", fields("ready", nil))
+			// INFO, ONE PER SPAWN: waited_ms is the readiness latency the
+			// bound is to be re-sized from (see ShimReadyBound).
+			c.log.Info("daemon.shimclient.ready", "the shim reported it is listening", fields("ready", nil))
 			return nil
 		case errors.Is(err, io.EOF):
 			select {

@@ -1188,9 +1188,9 @@ func TestASpawnedShimThatReportsReadyIsBroughtUp(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatalf("Spawn() error = %v, want the shim brought up", err)
 	}
-	record, ok := readyRecord(surfaces, dlog.LevelDebug)
-	if !ok || record.Context["outcome"] != "ready" {
-		t.Fatalf("readiness record = %+v (found %v), want a DEBUG outcome=ready", record, ok)
+	record, ok := readyRecord(surfaces, dlog.LevelInfo)
+	if !ok || record.Context["outcome"] != "ready" || record.Context["waited_ms"] == nil {
+		t.Fatalf("readiness record = %+v (found %v), want an INFO outcome=ready with its waited_ms", record, ok)
 	}
 }
 
