@@ -160,6 +160,26 @@ func TestCreateGivesAMergeWorkspaceNoActionWhenItsRequestNamedNone(t *testing.T)
 	}
 }
 
+func TestCreateRecordsTheActionsAMergeWorkspacesRequestNamed(t *testing.T) {
+	// Arrange: an async request that names a prompt to run before its merge
+	// and one after it lands.
+	f := newFixture(t)
+	requester, _ := mergeRequester(t, f)
+	spec := mergeWorkspaceSpec(t, f, requester.ID)
+	named := wsm.MergeActions{Before: []string{"tidy the branch"}, After: []string{"announce the landing"}}
+	spec.MergeOf.Actions = named
+
+	// Act
+	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert
+	if job := f.db.putJobs[len(f.db.putJobs)-1]; !reflect.DeepEqual(job.Actions, named) {
+		t.Fatalf("job actions = %+v, want the request's own %+v", job.Actions, named)
+	}
+}
+
 func TestCreateFailsAMergeWorkspaceWhoseOriginCarriesNoLandingWithNothingBuilt(t *testing.T) {
 	tests := []struct {
 		name  string
