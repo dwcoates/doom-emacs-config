@@ -117,6 +117,12 @@ about 63% of them sit in tests whose assertion a unit test already makes.
      goldens, with the shim's suite asserting the goldens are fresh.
    - Then they become `MOVE-TO-UNIT(new)`, driven through `internal/handler` and
      `main.newHarness`.
+   - The row-level drop list is test-cross-product-audit's 45 rows with fingerprinted
+     on-disk shapes. It supersedes this audit's estimate of about 41 rows, and the two lists
+     diff cleanly.
+   - The `!perm-*` and `!ask-*` rows write different files depending on how the gate is
+     answered. Generate their goldens from the integration drive's answers, never from a
+     default allow.
 5. **The shim suite starts a real peer in every case.** Each `StartSession` spawns the
    real `shim-lock` helper twice.
    - Fix: point `AGENT_REPL_SHIM_LOCK_BIN` at the stand-in holder that
