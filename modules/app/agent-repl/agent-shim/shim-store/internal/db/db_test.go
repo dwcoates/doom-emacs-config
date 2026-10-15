@@ -1131,6 +1131,65 @@ func TestOpenNukesAFileThatIsNotADatabaseAtAll(t *testing.T) {
 	s.assertLogged(t, "error", "cannot be read by this binary")
 }
 
+func TestNukingAnUnreadableDatabaseIsOneErrorRecordNamingTheCauseAndTheFile(t *testing.T) {
+	// Arrange.
+	path := filepath.Join(t.TempDir(), "store.db")
+	if err := os.WriteFile(path, []byte("this is not a SQLite database"), 0o600); err != nil {
+		t.Fatalf("stage garbage: %v", err)
+	}
+	s, log := newSink(t)
+
+	// Act
+	d, err := OpenWithOptions(path, log, Options{unsynced: true})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("OpenWithOptions = %v, want the file removed and recreated", err)
+	}
+	defer d.Close() //nolint:errcheck // test teardown
+	var errored []map[string]any
+	for _, record := range s.records(t) {
+		if record["operation"] == "store.db.schema" && record["level"] == "error" {
+			errored = append(errored, record)
+		}
+	}
+	if len(errored) != 1 {
+		t.Fatalf("store.db.schema error records = %d, want exactly one: %v", len(errored), errored)
+	}
+	context, _ := errored[0]["context"].(map[string]any)
+	if cause, _ := context["error"].(string); cause == "" || context["db"] != path {
+		t.Fatalf("the nuke record's context = %v, want the cause and db %q", context, path)
+	}
+}
+
+func TestOpenRefusesADirectoryAtTheDatabasePathAndLeavesItIntact(t *testing.T) {
+	// Arrange: somebody's directory, with something in it, sits at --db.
+	path := filepath.Join(t.TempDir(), "store.db")
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatalf("stage a directory: %v", err)
+	}
+	witness := filepath.Join(path, "somebody-elses-file")
+	if err := os.WriteFile(witness, []byte("do not delete me"), 0o600); err != nil {
+		t.Fatalf("stage the directory's contents: %v", err)
+	}
+	_, log := newSink(t)
+
+	// Act
+	d, err := OpenWithOptions(path, log, Options{unsynced: true})
+
+	// Assert
+	if err == nil {
+		d.Close() //nolint:errcheck // test teardown
+		t.Fatal("OpenWithOptions over a directory succeeded, want a refusal")
+	}
+	if info, statErr := os.Stat(path); statErr != nil || !info.IsDir() {
+		t.Fatalf("the directory at the path is gone or replaced: %v", statErr)
+	}
+	if _, statErr := os.Stat(witness); statErr != nil {
+		t.Fatalf("the directory's contents were removed: %v", statErr)
+	}
+}
+
 func TestOpenRemovesTheWalSiblingsOfAnUnreadableDatabase(t *testing.T) {
 	// Arrange: SQLite opening a fresh database beside a stale WAL is how a
 	// "recreated" store comes up carrying fragments of the one it replaced.

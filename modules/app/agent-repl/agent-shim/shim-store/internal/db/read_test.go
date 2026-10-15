@@ -259,6 +259,26 @@ func TestOpenPageReportsMoreWhenTheGapExceedsThePageSize(t *testing.T) {
 	}
 }
 
+func TestOpenPageReachesTheFloorWhenTheGapIsExactlyThePageSize(t *testing.T) {
+	// Arrange: exactly PageSize lines are newer than the caller's mark.
+	d, _ := newStore(t)
+	pointers := seedBook(t, d, "agent-1", PageSize+1)
+
+	// Act
+	opened, err := d.OpenPage(ctx(), "agent-1", CatchUp(pointers[0]))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("OpenPage: %v", err)
+	}
+	if got := len(opened.Page.GetLines()); got != PageSize {
+		t.Fatalf("lines = %d, want the whole gap of %d", got, PageSize)
+	}
+	if opened.Page.GetFloor() == nil {
+		t.Fatal("boundary = more, want floor: the page holds every line newer than the mark")
+	}
+}
+
 func TestOpenPageRefusesAPointerFromAnotherBook(t *testing.T) {
 	// Arrange: answering it would serve one agent's lines under another's name.
 	d, s := newStore(t)
