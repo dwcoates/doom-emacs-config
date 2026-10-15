@@ -319,18 +319,24 @@ func NewWorld(t testing.TB, opts WorldOpts) *World {
 	// Store.StartSameDB) records the exit as INTENTIONAL by setting
 	// Store.stopped; this assertion is the only reader of that bit that
 	// treats it as authoritative.
-	t.Cleanup(func() {
-		if store.Exited() && !store.stopped {
-			t.Errorf("e2e: the store exited before test cleanup (%s), and was never stopped by the test:\n%s",
-				store.exit.status(), tailStoreLog(t, store))
-		}
-		if sidecar.Exited() && !sidecar.stopped {
-			t.Errorf("e2e: the sidecar exited before test cleanup (%s), and was never stopped by the test",
-				sidecar.exit.status())
-		}
-	})
+	t.Cleanup(func() { requireServicesOutlivedTheTest(t, store, sidecar) })
 
 	return w
+}
+
+// requireServicesOutlivedTheTest fails t if the store or the sidecar exited
+// on its own before t's cleanup: one a test stopped on purpose (Store.Stop,
+// Store.StartSameDB) is the test's own doing.
+func requireServicesOutlivedTheTest(t testing.TB, store *Store, sidecar *Sidecar) {
+	t.Helper()
+	if store.Exited() && !store.stopped {
+		t.Errorf("e2e: the store exited before test cleanup (%s), and was never stopped by the test:\n%s",
+			store.exit.status(), tailStoreLog(t, store))
+	}
+	if sidecar.Exited() && !sidecar.stopped {
+		t.Errorf("e2e: the sidecar exited before test cleanup (%s), and was never stopped by the test",
+			sidecar.exit.status())
+	}
 }
 
 // ===========================================================================
