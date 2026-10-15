@@ -877,3 +877,35 @@ func TestAMergePromptIsHandedToTheQueueWholeAfterItsRunWasCut(t *testing.T) {
 		t.Fatalf("submissions made under %v, want one under a live context", h.queue.submitCtxErrs)
 	}
 }
+
+func TestRecordFailedLevelsByTheCause(t *testing.T) {
+	tests := []struct {
+		name        string
+		err         error
+		wantLevel   string
+		wantMessage string
+	}{
+		{name: "cancelled", err: context.Canceled, wantLevel: dlog.LevelInfo, wantMessage: "cut"},
+		{name: "a wrapped deadline", err: fmt.Errorf("git diff: %w", context.DeadlineExceeded), wantLevel: dlog.LevelInfo, wantMessage: "cut"},
+		{name: "a failure", err: errors.New("database is locked"), wantLevel: dlog.LevelError, wantMessage: "failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			fields := dlog.Context{"workspace": "ws-1"}
+
+			// Act.
+			recordFailed(h.logs.Global(), "daemon.merge.test", "failed", "cut", fields, tt.err)
+
+			// Assert.
+			rec, ok := h.recordFor(tt.wantLevel, "daemon.merge.test")
+			if !ok || rec.Message != tt.wantMessage || rec.Context["error"] != tt.err.Error() || rec.Context["workspace"] != "ws-1" {
+				t.Fatalf("record %+v (found %v), want %s %q carrying the cause and the fields", rec, ok, tt.wantLevel, tt.wantMessage)
+			}
+			if _, stamped := fields["error"]; stamped {
+				t.Fatalf("the caller's fields were mutated: %v", fields)
+			}
+		})
+	}
+}

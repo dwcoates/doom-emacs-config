@@ -384,12 +384,22 @@ func (r *run) closeTab(ctx context.Context, round tabRound, outcome string) {
 // or an abandon), which the store has already recorded as an abandoned write
 // and the run's end settles, and at ERROR when anything else broke it.
 func (r *run) tabRecordFailed(ctx context.Context, op, message string, round tabRound, err error) {
-	fields := dlog.Context{"workspace": string(r.ws), "tab": round.kind, "round": round.n, "error": err.Error()}
-	if ctxend.Is(err) {
-		r.o.log(ctx, r.ws).Info(op, message+": the run's context ended under the write", fields)
-		return
+	fields := dlog.Context{"workspace": string(r.ws), "tab": round.kind, "round": round.n}
+	recordFailed(r.o.log(ctx, r.ws), op, message, message+": the run's context ended under the write", fields, err)
+}
+
+// recordFailed records a step that answered err, at the level its cause
+// earns: a context ending under it is the step's caller going away (an
+// abandon, the daemon's exit, a request that ended) and records at INFO as
+// cut; anything else broke it and records at ERROR as failed. The error is
+// stamped on a copy of fields.
+func recordFailed(log dlog.Logger, op, failed, cut string, fields dlog.Context, err error) {
+	stamped := make(dlog.Context, len(fields)+1)
+	for k, v := range fields {
+		stamped[k] = v
 	}
-	r.o.log(ctx, r.ws).Error(op, message, fields)
+	stamped["error"] = err.Error()
+	ctxend.Log(err, log.Info, log.Error, op, cut, failed, stamped)
 }
 
 // address stands one tab row as where the merge's OWN turns draw: the prompt
