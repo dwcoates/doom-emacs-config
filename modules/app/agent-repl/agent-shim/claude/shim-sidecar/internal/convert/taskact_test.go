@@ -186,3 +186,45 @@ func TestTaskActSettledPrefersTheTrackersEchoedSubject(t *testing.T) {
 		t.Fatalf("State.Subject = %v, want the tracker's own echo", subject)
 	}
 }
+
+// taskUpdateThroughLine converts a TaskUpdate call and its result through the
+// converter's Line path and answers the task act the unit settled as.
+func taskUpdateThroughLine(t *testing.T, input, toolUseResult string, isError bool) *conversationv1.AgentTaskAct {
+	t.Helper()
+	c := newTestConverter(t)
+	call := assistantWith("a1", "msg_1", ts1, toolCall("toolu_task", "TaskUpdate", input))
+	result := toolResultLineWithError("u1", "toolu_task", ts2, `"the tracker's prose, never read for a status"`, toolUseResult, isError)
+	entries := convertLines(t, c, call, result)
+	return activityOf(lastEntryByKey(t, entries, ActivityKey("toolu_task"))).GetTaskAct()
+}
+
+func TestARejectedTaskUpdateThroughLineResolvesNoStatus(t *testing.T) {
+	// Arrange, Act: the tracker refused `TaskUpdate(9, completed)`.
+	act := taskUpdateThroughLine(t,
+		`{"taskId":"9","status":"completed"}`,
+		`{"success":false,"taskId":"9","error":"no task with id 9"}`, true)
+
+	// Assert.
+	if act.GetRejected() == nil {
+		t.Fatalf("Act = %T, want the rejected arm", act.GetAct())
+	}
+	if act.GetState().GetStatus() != nil {
+		t.Fatalf("a refused update resolved status %+v, want none", act.GetState().GetStatus())
+	}
+}
+
+func TestAnEdgeOnlyTaskUpdateThroughLineResolvesNoStatus(t *testing.T) {
+	// Arrange, Act: an update that links one task behind another and says
+	// nothing about where it stands.
+	act := taskUpdateThroughLine(t,
+		`{"taskId":"2","blockedBy":["1"]}`,
+		`{"success":true,"taskId":"2","updatedFields":["blockedBy"]}`, false)
+
+	// Assert.
+	if act == nil {
+		t.Fatal("the update settled as no task act")
+	}
+	if act.GetState().GetStatus() != nil {
+		t.Fatalf("an edge-only update resolved status %+v, want none", act.GetState().GetStatus())
+	}
+}
