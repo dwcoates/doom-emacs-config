@@ -522,6 +522,62 @@ func TestTheTabBarWithholdsAMergedWorkspaceOfACollapsedRepository(t *testing.T) 
 	}
 }
 
+// tabsRegistry is one registry holding every kind of tab: drawn, hidden,
+// collapsed, closed and hidden-merge, placed out of slice order.
+func tabsRegistry() sidebar.Registry {
+	folded := wsm.Repository{ID: "repo-2", Dir: "/repos/two", Name: "beta", DefaultBranch: "main", Folded: true}
+	collapsed := placed(workspace("w-c", "collapsed"), 2)
+	collapsed.Repo = folded.ID
+	closed := placed(workspace("w-x", "closed"), 4)
+	closed.Closed = true
+	mergeHidden := placed(workspace("w-q", "merge"), 5)
+	mergeHidden.MergeOf = &wsm.MergeOrigin{}
+	reg := registry(placed(workspace("w-d", "drawn"), 3), collapsed, closed, mergeHidden, placed(hiddenWorkspace("w-h", "hidden"), 1))
+	reg.Repositories = append(reg.Repositories, folded)
+	return reg
+}
+
+func TestTabs(t *testing.T) {
+	// Arrange
+	reg := tabsRegistry()
+
+	// Act
+	got := sidebar.Tabs(reg)
+
+	// Assert: registry order, closed and hidden-merge workspaces have no tab.
+	want := []sidebar.Tab{
+		{Workspace: reg.Workspaces[4], Withheld: wsm.WithheldHidden},
+		{Workspace: reg.Workspaces[1], Withheld: wsm.WithheldCollapsed},
+		{Workspace: reg.Workspaces[0], Withheld: wsm.Drawn},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("Tabs = %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i].Workspace.ID != want[i].Workspace.ID || got[i].Withheld != want[i].Withheld {
+			t.Fatalf("Tabs[%d] = (%q, %v), want (%q, %v)", i, got[i].Workspace.ID, got[i].Withheld, want[i].Workspace.ID, want[i].Withheld)
+		}
+	}
+}
+
+func TestTheTabBarIsDrawnFromTabs(t *testing.T) {
+	// Arrange
+	r, _ := newResolver(t)
+	reg := tabsRegistry()
+	var want []string
+	for _, tab := range sidebar.Tabs(reg) {
+		want = append(want, string(tab.Workspace.ID)+":"+tab.Withheld.String())
+	}
+
+	// Act
+	r.SetRegistry(reg)
+
+	// Assert
+	if got := tabIDsOf(latest(t, r)); !equal(got, want) {
+		t.Fatalf("tab bar = %v, want Tabs %v", got, want)
+	}
+}
+
 func TestSortHiddenNewestFirst(t *testing.T) {
 	// Arrange: hide order disagrees with place.
 	in := []wsm.Workspace{

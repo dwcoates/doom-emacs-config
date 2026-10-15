@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
 )
@@ -237,8 +239,8 @@ func (v *verbs) MarkViewed(ctx context.Context, ws ids.WorkspaceID) error {
 // is left to lapse, and its session is stood down when it does, so the user
 // can still show it again warm until then. SHOWING runs them again, and starts
 // nothing by itself; the editor asks with OpenTabs. HIDING THE WORKSPACE THE
-// USER STANDS ON LANDS THEM somewhere familiar (landAfterHiding). Asking for
-// the place it already holds is success.
+// USER STANDS ON LANDS THEM on its neighbour in the tab bar
+// (landAfterHiding). Asking for the place it already holds is success.
 func (v *verbs) SetHidden(ctx context.Context, ws ids.WorkspaceID, hidden bool) error {
 	_, log, err := v.owned(ctx, "SetWorkspaceHidden", ws)
 	if err != nil {
@@ -260,21 +262,20 @@ func (v *verbs) SetHidden(ctx context.Context, ws ids.WorkspaceID, hidden bool) 
 }
 
 // landAfterHiding moves the user, when they stand on the workspace just
-// hidden, to the visible workspace they most recently LOOKED AT for at least
-// wsm.DwellThreshold (owner request, 2026-10-13): somewhere familiar, which
-// the most recently selected workspace need not be. The select is conditional
-// on the hidden workspace still being current, under the selection lock, so a
-// switch the user made meanwhile stands. With no such workspace the selection
+// hidden, to its neighbour in the tab bar (owner request, 2026-10-14): the
+// nearest tab to its LEFT the bar still draws, or, when none is drawn left of
+// it, the nearest drawn to its right. The select is conditional on the hidden
+// workspace still being current, under the selection lock, so a switch the
+// user made meanwhile stands. With no drawn tab either side the selection
 // stays where it is, and the record says so.
 func (v *verbs) landAfterHiding(ctx context.Context, log dlog.Logger, hidden ids.WorkspaceID) error {
 	reg, ok := v.readRegistry(ctx, log, opSetHidden)
 	if !ok {
 		return fmt.Errorf("land after hiding %q: the registry could not be read", hidden)
 	}
-	target, found := hideLandingTarget(reg.Workspaces, hidden)
+	target, found := hideLandingTarget(sidebar.Tabs(reg), hidden)
 	if !found {
-		log.Info(opSetHidden, "no other visible workspace has held the user for the dwell threshold; the selection stays",
-			dlog.Context{"dwell_threshold": wsm.DwellThreshold.String()})
+		log.Info(opSetHidden, "the tab bar draws no other workspace beside the hidden one; the selection stays", nil)
 		return nil
 	}
 	// THE LANDING IS A SELECT LIKE ANY OTHER, so it is taken only by the
@@ -292,28 +293,31 @@ func (v *verbs) landAfterHiding(ctx context.Context, log dlog.Logger, hidden ids
 	if !applied {
 		return nil
 	}
-	targetLog.Info(opSetHidden, "landed the user on the workspace they most recently dwelt on",
-		dlog.Context{"dwelt_at": target.DweltAt.UTC()})
+	targetLog.Info(opSetHidden, "landed the user on the hidden workspace's neighbour in the tab bar",
+		dlog.Context{"place": target.Place})
 	return v.reviveSelected(ctx, targetLog, target.ID)
 }
 
-// hideLandingTarget picks where hiding HIDDEN lands the user: among the
-// workspaces still drawn in a grouping (not hidden, not merged, not closed,
-// not a hidden merge workspace) other than HIDDEN, the one most recently
-// dwelt on. Roster order breaks a tie. It answers false when none was ever
-// dwelt on.
-func hideLandingTarget(workspaces []wsm.Workspace, hidden ids.WorkspaceID) (wsm.Workspace, bool) {
-	var best wsm.Workspace
-	found := false
-	for _, ws := range workspaces {
-		if ws.ID == hidden || ws.DweltAt == nil || ws.Hidden || ws.MergedAt != nil || ws.Closed || ws.MergeHidden() {
-			continue
-		}
-		if !found || ws.DweltAt.After(*best.DweltAt) || ws.DweltAt.Equal(*best.DweltAt) && ws.Place < best.Place {
-			best, found = ws, true
+// hideLandingTarget picks where hiding HIDDEN lands the user among TABS, the
+// tab bar in registry order (sidebar.Tabs): the nearest drawn tab left of
+// HIDDEN's own, else the nearest drawn to its right. It answers false when
+// HIDDEN has no tab, or no other tab is drawn.
+func hideLandingTarget(tabs []sidebar.Tab, hidden ids.WorkspaceID) (wsm.Workspace, bool) {
+	at := slices.IndexFunc(tabs, func(t sidebar.Tab) bool { return t.Workspace.ID == hidden })
+	if at < 0 {
+		return wsm.Workspace{}, false
+	}
+	for i := at - 1; i >= 0; i-- {
+		if tabs[i].Withheld == wsm.Drawn {
+			return tabs[i].Workspace, true
 		}
 	}
-	return best, found
+	for i := at + 1; i < len(tabs); i++ {
+		if tabs[i].Withheld == wsm.Drawn {
+			return tabs[i].Workspace, true
+		}
+	}
+	return wsm.Workspace{}, false
 }
 
 // RevealMergeWorkspace draws a hidden merge workspace in the tab bar and the

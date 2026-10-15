@@ -803,50 +803,6 @@ func TestAHiddenRowWithNoHideInstantIsCorrupt(t *testing.T) {
 	}
 }
 
-func TestSetCurrentStampsTheDwellOfTheWorkspaceLeft(t *testing.T) {
-	tests := []struct {
-		name      string
-		held      time.Duration
-		reselect  bool
-		wantDwelt bool
-	}{
-		{name: "a workspace held for the threshold is dwelt on", held: DwellThreshold, wantDwelt: true},
-		{name: "a workspace held longer is dwelt on", held: time.Minute, wantDwelt: true},
-		{name: "a workspace held a moment is not", held: DwellThreshold - time.Millisecond, wantDwelt: false},
-		{name: "a re-selection leaves no dwell", held: time.Minute, reselect: true, wantDwelt: false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			s, _ := testStore(t)
-			left := testWorkspace(t, s)
-			next := testWorkspace(t, s)
-			if err := s.SetCurrent(context.Background(), left.ID, instant); err != nil {
-				t.Fatalf("SetCurrent: %v", err)
-			}
-			target := next.ID
-			if tt.reselect {
-				target = left.ID
-			}
-			switchAt := instant.Add(tt.held)
-
-			// Act
-			if err := s.SetCurrent(context.Background(), target, switchAt); err != nil {
-				t.Fatalf("SetCurrent: %v", err)
-			}
-
-			// Assert
-			got, err := s.Workspace(context.Background(), left.ID)
-			if err != nil {
-				t.Fatalf("Workspace: %v", err)
-			}
-			if (got.DweltAt != nil) != tt.wantDwelt || got.DweltAt != nil && !got.DweltAt.Equal(switchAt) {
-				t.Fatalf("dwelt at = %v, want dwelt %v at %v", got.DweltAt, tt.wantDwelt, switchAt)
-			}
-		})
-	}
-}
-
 func TestSetHiddenRefusesAnUnknownWorkspace(t *testing.T) {
 	// Arrange
 	s, log := testStore(t)
