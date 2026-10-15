@@ -438,6 +438,10 @@ The footer's `disconnected` status has three vendor substatuses for a Claude SDK
   - Send now is refused while the gate stands, and Cancel still drops the prompt.
 - **A held prompt reads "classifying" only while the classifier is actually deciding it.**
   - A prompt that nothing is classifying and nothing holds reads "queued", and it is delivered in order.
+- **A held prompt folded into the one above it is seen joining it.**
+  - It happens when you press its "fold above" button, or when the classifier rules it should interrupt a prompt that has not started yet.
+  - The prompt above flashes once.
+  - The folded prompt's card stays a moment under it, badged "folding above", then fades away.
 
 ## Restarting a stuck workspace
 
