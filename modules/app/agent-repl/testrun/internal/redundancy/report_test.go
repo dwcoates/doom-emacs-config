@@ -31,8 +31,8 @@ func reportFixture() *Measurement {
 		},
 		Statements: map[string]int{"a/b1": 5, "a/b2": 5, "a/b3": 10},
 		Anomalies:  []string{"X failed under M, which it does not reach"},
-		Hangs:     []string{"Big hung under M past its 1s bound"},
-		Cost:      Cost{Wall: 90 * time.Second, CPU: 30 * time.Second, Processes: 12, Phases: []Phase{{Name: "mutant runs", Wall: time.Minute}}},
+		Hangs:      []string{"Big hung under M past its 1s bound"},
+		Cost:       Cost{Wall: 90 * time.Second, CPU: 30 * time.Second, Processes: 12, Phases: []Phase{{Name: "mutant runs", Wall: time.Minute}}},
 	}
 }
 
