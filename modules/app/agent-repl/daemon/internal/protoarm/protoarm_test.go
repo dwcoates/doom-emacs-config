@@ -103,6 +103,53 @@ func TestName(t *testing.T) {
 	}
 }
 
+func TestMustAnswersTheSetArmsName(t *testing.T) {
+	// Arrange
+	m := (&frontendv1.FeedMerge{Result: &frontendv1.FeedMerge_Update{Update: &frontendv1.FeedMergeUpdate{}}}).ProtoReflect()
+
+	// Act
+	got := Must(m, "result", "test.op")
+
+	// Assert
+	if got != "update" {
+		t.Fatalf("Must = %q, want update", got)
+	}
+}
+
+func TestMustPanicsNamingTheMessageTheOneofAndTheOperationWhenNoArmIsSet(t *testing.T) {
+	// Arrange
+	m := (&frontendv1.FeedMerge{}).ProtoReflect()
+	defer func() {
+		// Assert
+		got, _ := recover().(string)
+		for _, want := range []string{"frontend.v1.FeedMerge", `"result"`, "test.op"} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("panic = %q, want it to name %s", got, want)
+			}
+		}
+	}()
+
+	// Act
+	Must(m, "result", "test.op")
+	t.Fatal("Must returned for an unset required oneof, want a panic")
+}
+
+func TestMustPanicsNamingAOneofTheMessageDoesNotDeclare(t *testing.T) {
+	// Arrange
+	m := (&frontendv1.FeedMerge{}).ProtoReflect()
+	defer func() {
+		// Assert
+		got, _ := recover().(string)
+		if !strings.Contains(got, `"nope"`) {
+			t.Fatalf("panic = %q, want it to name the undeclared oneof", got)
+		}
+	}()
+
+	// Act
+	Must(m, "nope", "test.op")
+	t.Fatal("Must returned for an undeclared oneof, want a panic")
+}
+
 // TestNoSiteResolvesANamedOneofByHand holds every production site in the
 // daemon to the one shape: an arm of a oneof named in the source is read
 // through Set or Name, never by handing WhichOneof a ByName lookup.
