@@ -1098,6 +1098,22 @@ feature branch.
 - Elisp instrumentation needs no merge: it is hot-loaded through
   `/runtime-eval-code`, as the debug skill's observability loop says.
 
+## The sidebar's arrangement is the tab bar's order
+
+The repository grouping's ARRANGEMENT is daemon state (`agentrepl.v1.ArrangeSidebar`,
+`wsm/arrange.go`): the repositories' order, each repository's named subsections,
+and which subsection a ROOT workspace sits in. A child sits wherever its root
+does, at every depth (owner ruling, 2026-10-14), and SQLite refuses a child
+that stores a subsection of its own.
+
+- The sidebar and the Emacs tab bar walk ONE order (`resolve/sidebar/arrangement.go`):
+  repository by repository, its unsectioned families, then each subsection's,
+  each family depth-first, so a child always sits right of its parent.
+- `SwapWorkspaces` exchanges any two workspaces' places; two roots of one
+  repository also exchange their subsections, so each lands on the other's tab.
+- Agents read the arrangement with `GetSidebarArrangement` and change it with
+  `ArrangeSidebar` (`place_workspaces` files several workspaces at once).
+
 ## Runtime operations go through one door and one skill
 
 Building, bouncing, hard bouncing, deploying, hot-reloading, health checks,

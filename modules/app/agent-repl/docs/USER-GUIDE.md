@@ -490,6 +490,24 @@ The top bar's effort selector sits between the model selector and the permission
   - The panel lists the branch, the branch it was cut from, its commit count and its last prompt.
   - This works in all three sections; the status dot does not open it.
 
+## Arranging the sidebar and the tab bar
+
+- **The "+" in a repository's header adds a subsection to it.**
+  - A box asks for the subsection's name, and the subsection appears at the bottom of the repository.
+  - Double-click a subsection's name to rename it, and click its "×" to remove it; its workspaces return to the repository.
+- **Drag a workspace's row to move it.**
+  - Drop it among the repository's own rows or into any of its subsections, an empty one included.
+  - A workspace's children move with it, and a child cannot be moved on its own.
+- **Drag a subsection's header to reorder the subsections, and a repository's header to reorder the repositories.**
+  - Escape while dragging puts the item back.
+- **The Emacs tab bar follows the sidebar's order.**
+  - Every workspace of a repository comes before the next repository's.
+  - Inside a repository, its own workspaces come first, then each subsection's in turn.
+  - A child always sits right after its parent.
+  - So a workspace dragged into an empty subsection at the bottom of its repository becomes that repository's last tab.
+- **Agents can arrange it too, with `/arrange-sidebar`.**
+  - Ask an agent to organize the sidebar, or to group the workspaces it just created into a named subsection.
+
 ## Searching the sidebar
 
 - **The magnifier left of "Workspaces" opens a search bar under the sidebar's header.**

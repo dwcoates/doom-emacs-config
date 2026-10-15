@@ -270,6 +270,16 @@
       }
     },
     {
+      "id": "skill-arrange-sidebar",
+      "kind": "skill_link",
+      "why": "the /arrange-sidebar skill, through which agents read and organize the sidebar's repository grouping",
+      "profile": "run",
+      "name": "arrange-sidebar",
+      "source": {
+        "repo": "modules/app/agent-repl/skills/arrange-sidebar"
+      }
+    },
+    {
       "id": "skill-workspace-close",
       "kind": "skill_link",
       "why": "retired: /create-or-update-workspace close replaces it, so every machine's old link comes out",
