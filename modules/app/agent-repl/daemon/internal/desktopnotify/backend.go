@@ -86,6 +86,15 @@ type Runner interface {
 	Run(ctx context.Context, bin string, args []string, started func()) (string, error)
 }
 
+// runWithin runs one program through runner under bound: EVERY run of a
+// notifier program is bounded, so a hung program costs its bound and never
+// holds a banner's or a claim's goroutine forever.
+func runWithin(ctx context.Context, bound time.Duration, runner Runner, bin string, args []string, started func()) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, bound)
+	defer cancel()
+	return runner.Run(ctx, bin, args, started)
+}
+
 // ExecRunner is the production Runner.
 type ExecRunner struct{}
 
@@ -277,9 +286,7 @@ func NewBackend(ctx context.Context, platform Platform, override string, lookPat
 // checkMajor refuses a program older than the platform's minimum major
 // version, or one whose version cannot be read.
 func checkMajor(ctx context.Context, runner Runner, bin string, platform Platform) error {
-	ctx, cancel := context.WithTimeout(ctx, versionBound)
-	defer cancel()
-	out, err := runner.Run(ctx, bin, platform.versionArgs, nil)
+	out, err := runWithin(ctx, versionBound, runner, bin, platform.versionArgs, nil)
 	if err != nil {
 		return fmt.Errorf("ask the banner program %s its version: %w", bin, err)
 	}
@@ -327,13 +334,11 @@ func (b *programBackend) Program() string { return b.bin }
 
 // Post implements Backend.
 func (b *programBackend) Post(ctx context.Context, target Target, banner Banner, made func()) (Outcome, error) {
-	ctx, cancel := context.WithTimeout(ctx, postBound)
-	defer cancel()
 	var started func()
 	if b.platform.readBack {
 		started = made
 	}
-	stdout, err := b.runner.Run(ctx, b.bin, b.platform.args(target, banner), started)
+	stdout, err := runWithin(ctx, postBound, b.runner, b.bin, b.platform.args(target, banner), started)
 	if err != nil {
 		return Unclicked, err
 	}
@@ -348,9 +353,7 @@ func (b *programBackend) Delivered(ctx context.Context) (map[ids.WorkspaceID]boo
 	if b.platform.delivered == nil {
 		panic("desktopnotify: a read-back banner program was asked which banners the platform holds")
 	}
-	ctx, cancel := context.WithTimeout(ctx, deliveredBound)
-	defer cancel()
-	stdout, err := b.runner.Run(ctx, b.bin, b.platform.deliveredArgs, nil)
+	stdout, err := runWithin(ctx, deliveredBound, b.runner, b.bin, b.platform.deliveredArgs, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -419,8 +422,6 @@ func (c *programChime) Program() string { return c.bin }
 
 // Play implements Chime.
 func (c *programChime) Play(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, chimeBound)
-	defer cancel()
-	_, err := c.runner.Run(ctx, c.bin, c.platform.Args, nil)
+	_, err := runWithin(ctx, chimeBound, c.runner, c.bin, c.platform.Args, nil)
 	return err
 }

@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"agent-repld/internal/ids"
 )
@@ -692,5 +693,59 @@ func TestExecRunnerCallsNoStartedForAProgramThatNeverStarted(t *testing.T) {
 	// Assert
 	if err == nil || started != 0 {
 		t.Fatalf("Run = %v with started called %d times, want an error and no start", err, started)
+	}
+}
+
+func TestRunWithinBoundsTheRun(t *testing.T) {
+	cases := []struct {
+		name    string
+		block   bool
+		wantErr error
+	}{
+		{name: "a run inside its bound answers the program's output", block: false, wantErr: nil},
+		{name: "a run past its bound answers the deadline", block: true, wantErr: context.DeadlineExceeded},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			runner := &fakeRunner{stdout: "out"}
+			if tc.block {
+				runner.block = make(chan struct{})
+			}
+			started := false
+
+			// Act
+			out, err := runWithin(context.Background(), time.Millisecond, runner, "/bin/x", []string{"a"}, func() { started = true })
+
+			// Assert
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("runWithin = %v, want %v", err, tc.wantErr)
+			}
+			if tc.wantErr == nil && out != "out" {
+				t.Fatalf("runWithin answered %q, want the program's output", out)
+			}
+			if !started || runner.bin != "/bin/x" || !reflect.DeepEqual(runner.args, []string{"a"}) {
+				t.Fatalf("ran %s %q (started=%v), want /bin/x [a] started", runner.bin, runner.args, started)
+			}
+		})
+	}
+}
+
+// TestEveryProgramRunGoesThroughRunWithin pins that no backend or chime
+// bounds a run of its own: the one bounded run is runWithin.
+func TestEveryProgramRunGoesThroughRunWithin(t *testing.T) {
+	// Arrange
+	source, err := os.ReadFile("backend.go")
+	if err != nil {
+		t.Fatalf("read backend.go: %v", err)
+	}
+
+	// Act
+	timeouts := strings.Count(string(source), "context.WithTimeout(")
+	runs := strings.Count(string(source), "runner.Run(")
+
+	// Assert
+	if timeouts != 1 || runs != 1 {
+		t.Fatalf("backend.go bounds %d runs and calls runner.Run %d times, want both only in runWithin", timeouts, runs)
 	}
 }
