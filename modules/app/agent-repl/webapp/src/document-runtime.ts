@@ -6,7 +6,7 @@
  * their own source (`ClientLogRequest.source`), and both make their text
  * copyable and selectable. Done here once, so the two cannot drift.
  */
-import { installCopyFallback } from "./copy.js";
+import { installCopyChords, installCopyFallback } from "./copy.js";
 import type { LevelWindow } from "../../agent-shim/logging/ts/level-window.js";
 import { ForwardingLogger, setLogger, type ClientLogLevel } from "./log.js";
 import type { AgentReplClient } from "./rpc/client.js";
@@ -30,14 +30,17 @@ export function installForwardingLogger(
 }
 
 /**
- * Make every surface of DOC copyable (copy.ts's fallback) and every drag-select
- * activate nothing (selection.ts's click guard). Answers the uninstall.
+ * Make every surface of DOC copyable (copy.ts's fallback and copy chords) and
+ * every drag-select activate nothing (selection.ts's click guard). Answers the
+ * uninstall.
  */
 export function installTextAffordances(doc: Document): () => void {
   const removeCopy = installCopyFallback(doc);
+  const removeChords = installCopyChords(doc);
   const removeGuard = installSelectionClickGuard(doc);
   return () => {
     removeCopy();
+    removeChords();
     removeGuard();
   };
 }
