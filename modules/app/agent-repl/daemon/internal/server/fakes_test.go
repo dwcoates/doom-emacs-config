@@ -1017,6 +1017,10 @@ type fakeFeed struct {
 	lastFeed  feedid.Feed
 	lastRead  feed.ReaderID
 	openCalls int
+	// openReads and nextReads are the readers OpenPage and NextPage were
+	// asked for, in order.
+	openReads []feed.ReaderID
+	nextReads []feed.ReaderID
 	// finals is the ordered selectable final-response set SelectFeedRow's
 	// response step walks; prompts is the ordered selectable rollback-prompt
 	// set its prompt step walks; markdown is each selectable row's copied
@@ -1193,10 +1197,12 @@ func (f *fakeFeed) OpenPage(_ context.Context, _ ids.WorkspaceID, target feedid.
 	f.openCalls++
 	f.lastFeed = target
 	f.lastRead = reader
+	f.openReads = append(f.openReads, reader)
 	return f.page, f.token, f.held, f.openErr
 }
 
-func (f *fakeFeed) NextPage(context.Context, ids.WorkspaceID, feedid.Feed, feed.ReaderID) (*frontendv1.FeedPage, error) {
+func (f *fakeFeed) NextPage(_ context.Context, _ ids.WorkspaceID, _ feedid.Feed, reader feed.ReaderID) (*frontendv1.FeedPage, error) {
+	f.nextReads = append(f.nextReads, reader)
 	return f.nextPage, f.nextErr
 }
 
