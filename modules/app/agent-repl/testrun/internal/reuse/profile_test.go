@@ -36,6 +36,7 @@ func TestTheProfileRefusesEveryReadOutsideTheInputSet(t *testing.T) {
 		{"the metadata of a file outside the set", func(root string) []string {
 			return []string{"/usr/bin/stat", filepath.Join(root, "other", "x.go")}
 		}, false},
+		{"a listed setuid tool", func(string) []string { return []string{"/bin/ps", "-o", "pid=", "-p", "1"} }, true},
 		{"a file outside the set, read by a child process", func(root string) []string {
 			return []string{"/bin/sh", "-c", "cat " + filepath.Join(root, "other", "x.go")}
 		}, false},

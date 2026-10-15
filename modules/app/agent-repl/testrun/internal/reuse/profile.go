@@ -32,6 +32,9 @@ func Profile(repo string, denyRoots []string, set *InputSet) (string, error) {
 	}
 	var b strings.Builder
 	b.WriteString("(version 1)\n(allow default)\n")
+	for _, tool := range unsandboxedTools {
+		fmt.Fprintf(&b, "(allow process-exec (literal %s) (with no-sandbox))\n", quote(tool))
+	}
 	roots := append([]string(nil), denyRoots...)
 	sort.Strings(roots)
 	for _, r := range roots {
@@ -103,6 +106,13 @@ func Profile(repo string, denyRoots []string, set *InputSet) (string, error) {
 	}
 	return b.String(), nil
 }
+
+// unsandboxedTools are the setuid programs a confined test may still run. The
+// kernel refuses to exec a setuid binary inside a sandbox, so each runs
+// outside it, and each is listed only because it reads no file of a checkout
+// on its caller's behalf: ps lists processes (the integration harness reaps
+// its runs with it).
+var unsandboxedTools = []string{"/bin/ps"}
 
 // entryPattern is the profile regex matching every direct entry of dir. The
 // pattern is a raw #"..." literal, which cannot hold a double quote, so a
