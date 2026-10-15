@@ -385,11 +385,19 @@ func (c *controller) standDown(ctx context.Context, old shimclient.Client, ws id
 		return c.awaitUnansweredStandDown(ctx, exited, ws, err, fields)
 	case answer.GetFailure().GetLive() != nil && !force:
 		live := answer.GetFailure().GetLive()
+		// THE REFUSAL NAMES ITS WORK, so a refusal the daemon's ledger reads
+		// as free shows which item the two disagree on.
+		named := make([]string, 0, len(live.GetLiveWork()))
+		for _, work := range live.GetLiveWork() {
+			named = append(named, work.GetValue())
+		}
 		c.log.Info(opRelaunch, "the shim refused the unforced stand-down: work is live in it. The replacement is never forced over it; it is deferred behind that work",
 			merge(fields, dlog.Context{
 				"refusal":        "live",
 				"turn_in_flight": live.GetTurnInFlight() != nil,
+				"turn_id":        live.GetTurnInFlight().GetValue(),
 				"live_work":      len(live.GetLiveWork()),
+				"live_work_ids":  named,
 				"detail":         answer.GetFailure().GetDetail(),
 			}))
 		return fmt.Errorf("rollout: relaunch %q: stand down: %w", ws, ErrStandDownLive)

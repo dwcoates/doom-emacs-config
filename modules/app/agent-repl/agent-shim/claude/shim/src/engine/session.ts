@@ -6663,8 +6663,19 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     const served = servedOpenTurn();
     const busy = served !== undefined || announceable.length > 0;
     if (busy && !request.force) {
-      LOGGER.debug(
-        { turn_in_flight: served?.id.value ?? "", live_work: announceable.length },
+      // THE REFUSAL NAMES WHAT IS LIVE, each item's kind included: a refusal
+      // the daemon's ledger reads as free is the two disagreeing, and this
+      // record is the shim's half of that evidence.
+      LOGGER.info(
+        {
+          turn_in_flight: served?.id.value ?? "",
+          live_work: announceable.length,
+          live_items: announceable.map((entry) => ({
+            task_id: entry.taskId,
+            tool_use_id: entry.toolUseId ?? "",
+            task_type: entry.taskType,
+          })),
+        },
         "refused KillSession because the session is live and force was not set",
       );
       return killSessionRefused(
