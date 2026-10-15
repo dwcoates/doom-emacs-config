@@ -127,18 +127,6 @@ func TestRunPatternSelectsExactlyTheLeaf(t *testing.T) {
 	}
 }
 
-func TestTopPatternSelectsEveryNamedTopAndNoOther(t *testing.T) {
-	// Arrange
-	re := regexp.MustCompile(TopPattern([]string{"TestA", "TestB"}))
-
-	// Act / Assert
-	for name, want := range map[string]bool{"TestA": true, "TestB": true, "TestAB": false, "TestC": false} {
-		if re.MatchString(name) != want {
-			t.Errorf("TopPattern matches %s = %t, want %t", name, !want, want)
-		}
-	}
-}
-
 func TestTopIsTheFirstLevel(t *testing.T) {
 	for in, want := range map[string]string{"TestA": "TestA", "TestA/x/y": "TestA"} {
 		if got := Top(in); got != want {

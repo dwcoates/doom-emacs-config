@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"agentrepl/testrun/internal/gotest"
 )
 
 // Outcome is a test's result line.
@@ -30,7 +32,6 @@ type Run struct {
 
 var (
 	runLine     = regexp.MustCompile(`^=== RUN\s+(\S+)$`)
-	resultLine  = regexp.MustCompile(`^\s*--- (PASS|FAIL|SKIP): (\S+) \(`)
 	runningLine = regexp.MustCompile(`^\s+(\S+) \(`)
 )
 
@@ -60,7 +61,7 @@ func ParseRun(lines []Line) Run {
 			open = append(open, name)
 			continue
 		}
-		if m := resultLine.FindStringSubmatch(l.Text); m != nil {
+		if m := gotest.ResultLine.FindStringSubmatch(l.Text); m != nil {
 			closeOpen(l.At, func(string) bool { return false })
 			r.Outcomes[m[2]] = map[string]Outcome{"PASS": Pass, "FAIL": Fail, "SKIP": Skip}[m[1]]
 			continue
@@ -89,15 +90,6 @@ func RunPattern(name string) string {
 		parts[i] = "^" + regexp.QuoteMeta(p) + "$"
 	}
 	return strings.Join(parts, "/")
-}
-
-// TopPattern selects every named top-level test.
-func TopPattern(tops []string) string {
-	q := make([]string, len(tops))
-	for i, t := range tops {
-		q[i] = regexp.QuoteMeta(t)
-	}
-	return "^(" + strings.Join(q, "|") + ")$"
 }
 
 // Top is the top-level test a case belongs to.

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"agentrepl/testrun/internal/gotest"
 	"agentrepl/testrun/internal/redundancy"
 	"agentrepl/testrun/internal/redundancy/gomut"
 	"agentrepl/testrun/internal/run"
@@ -246,7 +247,7 @@ func (m *measurer) discover(ctx context.Context, bin string, tops []string) ([]s
 	}
 	var leaves []string
 	for _, top := range tops {
-		res, r, err := m.runTests(ctx, bin, TopPattern([]string{top}), FirstContactTimeout, []string{"-test.gocoverdir", dir})
+		res, r, err := m.runTests(ctx, bin, gotest.TopPattern([]string{top}), FirstContactTimeout, []string{"-test.gocoverdir", dir})
 		if err != nil {
 			return nil, err
 		}
@@ -445,7 +446,7 @@ func (m *measurer) baseline(ctx context.Context, bin string, tops, leaves []stri
 	for _, l := range leaves {
 		bound += healthy[l]
 	}
-	res, r, err := m.runTests(ctx, bin, TopPattern(tops), 2*bound+TimeoutSlack, nil)
+	res, r, err := m.runTests(ctx, bin, gotest.TopPattern(tops), 2*bound+TimeoutSlack, nil)
 	if err != nil {
 		return err
 	}
@@ -577,7 +578,7 @@ func (m *measurer) killers(ctx context.Context, bin string, mu gomut.Mutant, lea
 		}
 		bound += healthy[l]
 	}
-	res, r, err := m.runTests(ctx, bin, TopPattern(tops), 2*bound+TimeoutSlack, nil, env)
+	res, r, err := m.runTests(ctx, bin, gotest.TopPattern(tops), 2*bound+TimeoutSlack, nil, env)
 	if err != nil {
 		return nil, nil, err
 	}

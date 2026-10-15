@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"agentrepl/testrun/internal/gotest"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/roster"
 )
@@ -738,7 +739,7 @@ func TestQuietGoTestOutput(t *testing.T) {
 
 func TestRunPatternMatchesExactlyTheNamedTests(t *testing.T) {
 	// Arrange
-	re := regexp.MustCompile(runPattern([]string{"TestA", "TestB"}))
+	re := regexp.MustCompile(gotest.TopPattern([]string{"TestA", "TestB"}))
 
 	// Act / Assert
 	for name, want := range map[string]bool{"TestA": true, "TestB": true, "TestAB": false, "XTestA": false} {

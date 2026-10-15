@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"agentrepl/testrun/internal/gotest"
 )
 
 // TestFuncs are the top-level tests the named test files of dir declare.
@@ -21,7 +23,7 @@ func TestFuncs(dir string, files []string) ([]string, error) {
 		}
 		for _, d := range af.Decls {
 			fd, ok := d.(*ast.FuncDecl)
-			if ok && fd.Recv == nil && isTestFunc(fd) {
+			if ok && fd.Recv == nil && gotest.IsTestFunc(fd, "Test", "T") {
 				out = append(out, fd.Name.Name)
 			}
 		}
@@ -30,18 +32,6 @@ func TestFuncs(dir string, files []string) ([]string, error) {
 		return nil, fmt.Errorf("gomeasure: %s declare no tests", strings.Join(files, ", "))
 	}
 	return out, nil
-}
-
-func isTestFunc(fd *ast.FuncDecl) bool {
-	n := fd.Name.Name
-	if !strings.HasPrefix(n, "Test") || n == "TestMain" {
-		return false
-	}
-	if len(n) > 4 && strings.ToLower(n[4:5]) == n[4:5] && n[4] != '_' {
-		return false // Testable is not a test
-	}
-	p := fd.Type.Params
-	return p != nil && len(p.List) == 1 && len(p.List[0].Names) <= 1
 }
 
 // LogPins finds the tests that assert a canonical log record: a test whose
