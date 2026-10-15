@@ -281,10 +281,7 @@ func TestWatchDaemonRefusesARequestNamingNoBuild(t *testing.T) {
 
 			// Act
 			stream, err := h.Client.WatchDaemon(ctx, connect.NewRequest(tc.req))
-			if err == nil {
-				stream.Receive()
-				err = stream.Err()
-			}
+			err = firstStreamErr(stream, err)
 
 			// Assert
 			if connect.CodeOf(err) != connect.CodeInvalidArgument {
@@ -302,10 +299,7 @@ func TestWatchWebWorkspaceRefusesAPageNamingNoBuild(t *testing.T) {
 
 	// Act
 	stream, err := h.Client.WatchWebWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchWebWorkspaceRequest{Workspace: ref()}))
-	if err == nil {
-		stream.Receive()
-		err = stream.Err()
-	}
+	err = firstStreamErr(stream, err)
 
 	// Assert
 	if connect.CodeOf(err) != connect.CodeInvalidArgument {

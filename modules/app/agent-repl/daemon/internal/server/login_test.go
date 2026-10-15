@@ -168,10 +168,7 @@ func TestWatchLoginTerminalRefusesWithNoLoginOpen(t *testing.T) {
 	// Act.
 	stream, err := h.Client.WatchLoginTerminal(ctx,
 		connect.NewRequest(&agentreplv1.WatchLoginTerminalRequest{Workspace: ref()}))
-	if err == nil {
-		stream.Receive()
-		err = stream.Err()
-	}
+	err = firstStreamErr(stream, err)
 
 	// Assert.
 	if err == nil || !strings.Contains(err.Error(), "WatchLoginTerminal closed the stream: no_login_open") {

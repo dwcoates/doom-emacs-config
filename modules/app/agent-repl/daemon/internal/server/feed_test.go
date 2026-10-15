@@ -295,10 +295,7 @@ func TestWatchFeedRefusesAnUnmintedToken(t *testing.T) {
 	stream, err := h.Client.WatchFeed(ctx, connect.NewRequest(&agentreplv1.WatchFeedRequest{
 		Watch: &agentreplv1.FeedWatchToken{Value: "ft-never"},
 	}))
-	if err == nil {
-		stream.Receive()
-		err = stream.Err()
-	}
+	err = firstStreamErr(stream, err)
 
 	// Assert.
 	if err == nil || !strings.Contains(err.Error(), "WatchFeed closed the stream: unknown_token") {
