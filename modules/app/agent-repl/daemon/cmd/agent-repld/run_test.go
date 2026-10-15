@@ -88,19 +88,27 @@ func runIn(t *testing.T, root string, adjust ...func(*options)) error {
 
 func hasRunLogLevel(t *testing.T, raw []byte, operation, level string) bool {
 	t.Helper()
-	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
-		var record struct {
-			Level     string `json:"level"`
-			Operation string `json:"operation"`
-		}
-		if err := json.Unmarshal([]byte(line), &record); err != nil {
-			t.Fatalf("parse daemon.run.log record %q: %v", line, err)
-		}
+	for _, record := range parseRunLog(t, raw) {
 		if record.Operation == operation && record.Level == level {
 			return true
 		}
 	}
 	return false
+}
+
+// parseRunLog decodes every record of a run log's bytes, failing the test on
+// a line that is not one.
+func parseRunLog(t *testing.T, raw []byte) []dlog.Record {
+	t.Helper()
+	var out []dlog.Record
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		var record dlog.Record
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatalf("parse daemon.run.log record %q: %v", line, err)
+		}
+		out = append(out, record)
+	}
+	return out
 }
 
 // TestRunRecordsProcessBringUpAtInfo pins that the process lifecycle remains
@@ -657,15 +665,7 @@ func runLogRecords(t *testing.T, root string) []dlog.Record {
 	if err != nil {
 		t.Fatalf("read daemon.run.log: %v", err)
 	}
-	var out []dlog.Record
-	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
-		var record dlog.Record
-		if err := json.Unmarshal([]byte(line), &record); err != nil {
-			t.Fatalf("parse daemon.run.log record %q: %v", line, err)
-		}
-		out = append(out, record)
-	}
-	return out
+	return parseRunLog(t, raw)
 }
 
 func TestTheBootOpensAFreshWorkspaceStateAndLeavesTheLegacyDatabaseAlone(t *testing.T) {
