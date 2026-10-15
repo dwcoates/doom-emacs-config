@@ -438,7 +438,7 @@ describe("the boot", { timeout: BOOT_TIMEOUT_MS }, () => {
       await bootMain();
       const windowCall = armed.mock.calls.findIndex(([, ms]) => ms === STREAM_COST_WINDOW_MS);
       expect(windowCall).toBeGreaterThanOrEqual(0);
-      const timer = armed.mock.results[windowCall]?.value;
+      const timer: unknown = armed.mock.results[windowCall]?.value;
 
       // Act
       page.bootedContext?.quiesce();
