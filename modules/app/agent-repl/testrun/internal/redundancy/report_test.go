@@ -317,3 +317,20 @@ func TestReportOfAVerificationHoldsTheProvenSetToTheBudget(t *testing.T) {
 		t.Fatalf("report:\n%s", out.String())
 	}
 }
+
+func TestPinClausesCountsEachClause(t *testing.T) {
+	// Arrange
+	cases := []Case{
+		{ID: "a", Pinned: "(a) a WARN or ERROR record: x"}, {ID: "a2", Pinned: "(a) a WARN or ERROR record: y"},
+		{ID: "b", Pinned: "(b) asserts a record's fields: z"}, {ID: "u", Pinned: "(uncertain): w"},
+		{ID: "n", Pinned: "named with -pin"}, {ID: "free"},
+	}
+
+	// Act
+	got := pinClauses(cases)
+
+	// Assert
+	if got != "By clause: (a) WARN/ERROR 2, (b) fields 1, (uncertain) 1, other 1\n\n" {
+		t.Fatalf("pinClauses = %q", got)
+	}
+}

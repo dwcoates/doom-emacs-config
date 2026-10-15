@@ -29,7 +29,9 @@ const fakeTests = `package p
 
 import "testing"
 
-func FindRecord() {}
+const LevelError = "error"
+
+func FindRecord(string) {}
 
 func TestA(t *testing.T) {}
 
@@ -38,7 +40,7 @@ func TestB(t *testing.T) {
 	t.Run("y", func(t *testing.T) {})
 }
 
-func TestLog(t *testing.T) { FindRecord() }
+func TestLog(t *testing.T) { FindRecord(LevelError) }
 `
 
 // fakeBlock is F's body; the comparison's mutants sit at 3.29.
@@ -328,7 +330,7 @@ func TestMeasurePinsTheLogAssertionAndUnionsTheBlocks(t *testing.T) {
 	}
 	want := map[string]string{
 		"TestA": "", "TestB/x": "named with -pin", "TestB/y": "",
-		"TestLog": "asserts a log record: TestLog -> FindRecord",
+		"TestLog": "(a) a WARN or ERROR record: TestLog -> FindRecord",
 	}
 	if !reflect.DeepEqual(pinned, want) {
 		t.Fatalf("pins = %v, want %v", pinned, want)
