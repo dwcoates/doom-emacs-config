@@ -42,6 +42,7 @@ package e2e
 // nothing and drives no scenario.
 
 import (
+	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -1129,6 +1130,196 @@ func tsCallArgs(text string) []tsArgSpan {
 }
 
 // ---------------------------------------------------------------------------
+// (2b) Ruling (a): the two halves and the seam that joins them.
+// ---------------------------------------------------------------------------
+//
+// Under the owner's ruling of 2026-10-14, a scenario is covered without an
+// e2e driver when its SHIM half and its DAEMON half are each pinned by the
+// cheapest tier that can see them, and the seam they meet over has ONE e2e
+// test wiring it. Both halves are goldens in the module's shared testdata,
+// one directory per scenario:
+//
+//   - frames.json, what the shim's fold produces for the scenario
+//     (agent-shim/claude/shim/test/fake/goldens.test.ts keeps it fresh);
+//   - feed.json, what the daemon's root feed draws from those frames
+//     (daemon/integration/scenariogoldens_test.go keeps it fresh);
+//   - meta.json's `seam`, the family whose wiring test joins the two.
+//
+// The wiring test of a family says so in its doc comment, on a line of its
+// own: `Seam: <family>`.
+
+// halvesCellPinned is a half's cell when its golden exists.
+const halvesCellPinned = "✓"
+
+// scenarioGoldensRoot is the shared testdata both halves read.
+func scenarioGoldensRoot() string {
+	return filepath.Join(repo.e2eDir, "..", "testdata", "scenario-goldens")
+}
+
+// scenarioHalves is what the goldens state for one scenario.
+type scenarioHalves struct {
+	shim, daemon bool
+	seam         string
+}
+
+// halvesByScenario is every scenario's halves, keyed by its registry name.
+type halvesByScenario map[string]scenarioHalves
+
+// cells renders SCENARIO's halves as table (a) writes them.
+func (h halvesByScenario) cells(scenario string) halvesCells {
+	got := h[scenario]
+	pinned := func(ok bool) string {
+		if ok {
+			return halvesCellPinned
+		}
+		return emDash
+	}
+	seam := got.seam
+	if seam == "" {
+		seam = emDash
+	}
+	return halvesCells{shim: pinned(got.shim), daemon: pinned(got.daemon), seam: seam}
+}
+
+// deriveHalves reads every scenario golden. A golden directory naming no
+// canonical scenario, and one stating no seam, are failures: the first is a
+// golden nothing can be covered by, the second a pair of halves no wiring
+// test is answerable for.
+func deriveHalves(t *testing.T, r registry) halvesByScenario {
+	t.Helper()
+	root := scenarioGoldensRoot()
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatalf("read the scenario goldens at %s: %v", root, err)
+	}
+	canonical := map[string]bool{}
+	for _, name := range r.canonical {
+		canonical[name] = true
+	}
+	out := halvesByScenario{}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !canonical[name] {
+			t.Errorf("the scenario golden %s names no canonical scenario", filepath.Join(root, name))
+			continue
+		}
+		dir := filepath.Join(root, name)
+		h := scenarioHalves{shim: fileExists(t, filepath.Join(dir, "frames.json")), daemon: fileExists(t, filepath.Join(dir, "feed.json"))}
+		raw, err := os.ReadFile(filepath.Join(dir, "meta.json"))
+		if err != nil {
+			t.Fatalf("read %s's meta.json: %v", name, err)
+		}
+		var meta struct {
+			Seam *string `json:"seam"`
+		}
+		if err := json.Unmarshal(raw, &meta); err != nil {
+			t.Fatalf("decode %s's meta.json: %v", name, err)
+		}
+		if meta.Seam == nil || *meta.Seam == "" {
+			t.Errorf("the scenario golden %s states no seam family: set meta.json's seam to the family whose e2e test wires its halves", dir)
+		} else {
+			h.seam = *meta.Seam
+		}
+		out[name] = h
+	}
+	return out
+}
+
+// fileExists reports whether PATH exists; any other failure to stat it fails.
+func fileExists(t *testing.T, path string) bool {
+	t.Helper()
+	_, err := os.Stat(path)
+	if err == nil {
+		return true
+	}
+	if !os.IsNotExist(err) {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	return false
+}
+
+// seamLine is a wiring test's `Seam: <family>` doc-comment line.
+var seamLine = regexp.MustCompile(`(?m)^Seam: ([a-z0-9-]+)$`)
+
+// deriveSeamWiring reads every Go e2e test's doc comment for the seam
+// families it wires: family -> the tests that say they wire it, sorted.
+func deriveSeamWiring(t *testing.T) map[string][]string {
+	t.Helper()
+	fset := token.NewFileSet()
+	files, err := filepath.Glob(filepath.Join(repo.e2eDir, "*_e2e_test.go"))
+	if err != nil {
+		t.Fatalf("glob the e2e tests: %v", err)
+	}
+	wiring := map[string][]string{}
+	for _, path := range files {
+		f, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
+		if err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		for _, decl := range f.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Doc == nil || !strings.HasPrefix(fn.Name.Name, "Test") {
+				continue
+			}
+			for _, m := range seamLine.FindAllStringSubmatch(fn.Doc.Text(), -1) {
+				wiring[m[1]] = append(wiring[m[1]], fn.Name.Name)
+			}
+		}
+	}
+	for family := range wiring {
+		sort.Strings(wiring[family])
+	}
+	return wiring
+}
+
+// scenarioCovered is check (iv)'s mechanical verdict: a counted layer drives
+// SCENARIO, or both its halves are pinned and its seam is wired.
+func scenarioCovered(scenario string, derived coverage, halves halvesByScenario, wiring map[string][]string) bool {
+	for _, layer := range matrixLayers {
+		if len(derived.files(scenario, layer)) > 0 {
+			return true
+		}
+	}
+	h := halves[scenario]
+	return h.shim && h.daemon && h.seam != "" && len(wiring[h.seam]) > 0
+}
+
+// checkSeamWiring is check (vii): every family a golden names has a wiring
+// test, and every wiring test's family is one some golden names.
+func checkSeamWiring(t *testing.T, halves halvesByScenario, wiring map[string][]string) {
+	t.Helper()
+	named := map[string]bool{}
+	for _, h := range halves {
+		if h.seam != "" {
+			named[h.seam] = true
+		}
+	}
+	for _, family := range sortedKeys(named) {
+		if len(wiring[family]) == 0 {
+			t.Errorf("the seam family %q has no e2e wiring test: a Go e2e test that wires it says `Seam: %s` in its doc comment", family, family)
+		}
+	}
+	for _, family := range sortedKeys(wiring) {
+		if !named[family] {
+			t.Errorf("%v say `Seam: %s`, a family no scenario golden is in", wiring[family], family)
+		}
+	}
+}
+
+// sortedKeys is M's keys, sorted.
+func sortedKeys[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// ---------------------------------------------------------------------------
 // (3) The document, and the check.
 // ---------------------------------------------------------------------------
 
@@ -1137,8 +1328,16 @@ type matrixRow struct {
 	scenario  string
 	grounded  string
 	files     map[string][]string
+	halves    halvesCells
 	assertion string
 	verdict   string
+}
+
+// halvesCells are a row's three ruling-(a) cells as written: whether the
+// shim's half and the daemon's half are pinned, and the seam family whose e2e
+// wiring test joins them.
+type halvesCells struct {
+	shim, daemon, seam string
 }
 
 // matrixUnreadAssertion is what a newly-derived row carries until someone
@@ -1190,15 +1389,16 @@ func parseMatrix(t *testing.T) matrixDoc {
 		}
 		doc.tableTo = i + 1
 		cells := matrixCells(line)
-		if len(cells) != 7 {
-			t.Fatalf("%s:%d: row has %d cells, want 7: %s", matrixPath, i+1, len(cells), line)
+		if len(cells) != 10 {
+			t.Fatalf("%s:%d: row has %d cells, want 10: %s", matrixPath, i+1, len(cells), line)
 		}
 		row := matrixRow{
 			scenario:  parseScenarioCell(cells[0]),
 			grounded:  cells[1],
 			files:     map[string][]string{},
-			assertion: cells[5],
-			verdict:   cells[6],
+			halves:    halvesCells{shim: cells[5], daemon: cells[6], seam: cells[7]},
+			assertion: cells[8],
+			verdict:   cells[9],
 		}
 		for j, layer := range matrixLayers {
 			row.files[layer] = matrixFileCell(cells[2+j])
@@ -1270,6 +1470,9 @@ func renderRow(row matrixRow) string {
 		renderFileCell(row.files[layerGo]),
 		renderFileCell(row.files[layerWebapp]),
 		renderFileCell(row.files[layerEmacs]),
+		row.halves.shim,
+		row.halves.daemon,
+		row.halves.seam,
 		row.assertion,
 		row.verdict,
 	}
@@ -1281,12 +1484,18 @@ func TestScenarioMatrixMatchesReality(t *testing.T) {
 	t.Parallel()
 	r := deriveRegistry(t)
 	derived := deriveCoverage(t, r)
+	halves := deriveHalves(t, r)
+	wiring := deriveSeamWiring(t)
 	doc := parseMatrix(t)
 
 	if os.Getenv(matrixWriteEnv) == "1" {
-		rewriteMatrix(t, r, derived, doc)
+		rewriteMatrix(t, r, derived, halves, wiring, doc)
 		doc = parseMatrix(t)
 	}
+
+	// (vii) Every seam family a golden names has its e2e wiring test, and
+	// every wiring test names a family some golden is in.
+	checkSeamWiring(t, halves, wiring)
 
 	byScenario := map[string]matrixRow{}
 	for _, row := range doc.rows {
@@ -1334,19 +1543,24 @@ func TestScenarioMatrixMatchesReality(t *testing.T) {
 			t.Errorf("%s: %s / %s column says %q, but the tests themselves drive it from %q",
 				matrixPath, scenarioCell(scenario), layer, renderFileCell(got), renderFileCell(want))
 		}
+		if want := halves.cells(scenario); row.halves != want {
+			t.Errorf("%s: %s's halves read %+v, but the goldens state %+v", matrixPath, scenarioCell(scenario), row.halves, want)
+		}
 		// (iv) The verdict's MECHANICAL half. Strong-vs-weak is a reading of
-		// the test body and stays hand-written; whether ANY counted layer
-		// drives the scenario is not.
-		driven := len(derived.files(scenario, layerGo))+len(derived.files(scenario, layerWebapp))+
-			len(derived.files(scenario, layerEmacs)) > 0
+		// the test body and stays hand-written; whether the scenario is
+		// covered at all is not. Under ruling (a) (2026-10-14) a scenario is
+		// covered when a counted layer drives it end to end, OR when both of
+		// its halves are pinned by the goldens and its seam has its wiring
+		// test.
+		covered := scenarioCovered(scenario, derived, halves, wiring)
 		switch row.verdict {
 		case verdictUncovered:
-			if driven {
-				t.Errorf("%s: %s reads %q, but a counted layer drives it", matrixPath, scenarioCell(scenario), verdictUncovered)
+			if covered {
+				t.Errorf("%s: %s reads %q, but a counted layer drives it or both halves are pinned with a wired seam", matrixPath, scenarioCell(scenario), verdictUncovered)
 			}
 		case verdictCovered, verdictWeak:
-			if !driven {
-				t.Errorf("%s: %s reads %q, but no counted layer drives it", matrixPath, scenarioCell(scenario), row.verdict)
+			if !covered {
+				t.Errorf("%s: %s reads %q, but no counted layer drives it and its halves are not both pinned with a wired seam", matrixPath, scenarioCell(scenario), row.verdict)
 			}
 		default:
 			t.Errorf("%s: %s has verdict %q, want one of %q/%q/%q",
@@ -1467,7 +1681,11 @@ func checkMatrixCounts(t *testing.T, doc matrixDoc) {
 			}
 		}
 	}
+	halvesCounts := countHalves(doc.rows)
 	want := []countLine{
+		{marker: halvesShimLine, want: halvesCounts.shim},
+		{marker: halvesDaemonLine, want: halvesCounts.daemon},
+		{marker: halvesSeamLine, want: halvesCounts.seams},
 		{marker: "- Covered ", want: verdicts[verdictCovered]},
 		{marker: "- Weak ", want: verdicts[verdictWeak]},
 		{marker: "- Uncovered ", want: verdicts[verdictUncovered]},
@@ -1505,6 +1723,37 @@ func checkMatrixCounts(t *testing.T, doc matrixDoc) {
 	}
 }
 
+// Section (b)'s ruling-(a) count lines, by the marker each starts with.
+const (
+	halvesShimLine   = "- Shim half pinned:"
+	halvesDaemonLine = "- Daemon half pinned:"
+	halvesSeamLine   = "- Seam families:"
+)
+
+// halvesCount is section (b)'s ruling-(a) counts of a table.
+type halvesCount struct {
+	shim, daemon, seams int
+}
+
+// countHalves counts ROWS' pinned halves and their distinct seam families.
+func countHalves(rows []matrixRow) halvesCount {
+	var c halvesCount
+	seams := map[string]bool{}
+	for _, row := range rows {
+		if row.halves.shim == halvesCellPinned {
+			c.shim++
+		}
+		if row.halves.daemon == halvesCellPinned {
+			c.daemon++
+		}
+		if row.halves.seam != emDash && row.halves.seam != "" {
+			seams[row.halves.seam] = true
+		}
+	}
+	c.seams = len(seams)
+	return c
+}
+
 func findLine(lines []string, marker string) (string, bool) {
 	for _, line := range lines {
 		if strings.HasPrefix(line, marker) {
@@ -1536,7 +1785,7 @@ func firstInt(line string) (int, bool) {
 // counts, carrying every hand-written cell forward unchanged. A scenario with
 // no row yet gets one whose hand-written cells are placeholders for a human
 // to fill in.
-func rewriteMatrix(t *testing.T, r registry, derived coverage, doc matrixDoc) {
+func rewriteMatrix(t *testing.T, r registry, derived coverage, halves halvesByScenario, wiring map[string][]string, doc matrixDoc) {
 	t.Helper()
 	existing := map[string]matrixRow{}
 	for _, row := range doc.rows {
@@ -1557,6 +1806,7 @@ func rewriteMatrix(t *testing.T, r registry, derived coverage, doc matrixDoc) {
 		}
 		row.scenario = scenario
 		row.files = map[string][]string{}
+		row.halves = halves.cells(scenario)
 		driven := false
 		for _, layer := range matrixLayers {
 			files := derived.files(scenario, layer)
@@ -1571,11 +1821,19 @@ func rewriteMatrix(t *testing.T, r registry, derived coverage, doc matrixDoc) {
 			}
 		}
 		switch {
-		case !driven:
+		case !scenarioCovered(scenario, derived, halves, wiring):
 			if row.verdict != verdictUncovered {
-				row.assertion = "No counted e2e layer drives this scenario."
+				row.assertion = "No counted e2e layer drives this scenario, and its halves are not both pinned with a wired seam."
 			}
 			row.verdict = verdictUncovered
+		case !driven:
+			// COVERED BY ITS HALVES. A golden compared byte for byte is the
+			// strongest assertion there is, so the verdict is covered, and the
+			// cell names what pins it.
+			h := halves[scenario]
+			row.assertion = fmt.Sprintf("Both halves are pinned by its goldens (frames.json, feed.json); the `%s` seam is wired by %s.",
+				h.seam, strings.Join(wiring[h.seam], ", "))
+			row.verdict = verdictCovered
 		case row.verdict == verdictUncovered || row.verdict == "":
 			// It IS driven, and the document said otherwise. Only a human can
 			// say whether the assertion is strong, so the verdict defaults to
@@ -1593,8 +1851,15 @@ func rewriteMatrix(t *testing.T, r registry, derived coverage, doc matrixDoc) {
 	lines = append(lines, rendered...)
 	lines = append(lines, doc.lines[doc.tableTo:]...)
 
+	halvesCounts := countHalves(renderedRows)
 	for i, line := range lines {
 		switch {
+		case strings.HasPrefix(line, halvesShimLine):
+			lines[i] = fmt.Sprintf("%s %d scenarios", halvesShimLine, halvesCounts.shim)
+		case strings.HasPrefix(line, halvesDaemonLine):
+			lines[i] = fmt.Sprintf("%s %d scenarios", halvesDaemonLine, halvesCounts.daemon)
+		case strings.HasPrefix(line, halvesSeamLine):
+			lines[i] = fmt.Sprintf("%s %d, each wired by its e2e test", halvesSeamLine, halvesCounts.seams)
 		case strings.HasPrefix(line, "- Covered "):
 			lines[i] = replaceBoldInt(line, verdicts[verdictCovered])
 		case strings.HasPrefix(line, "- Weak "):

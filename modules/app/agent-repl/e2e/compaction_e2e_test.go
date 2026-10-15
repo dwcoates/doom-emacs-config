@@ -182,6 +182,7 @@ func cpDriveObservingInProgress(t *testing.T, w *World, ws *workspacev1.Workspac
 // AgentUpdate.context_cut is "drawn as the separation divider").
 // ---------------------------------------------------------------------------
 
+// Seam: compaction
 func TestCompactionDirected(t *testing.T) {
 	t.Parallel()
 	// Arrange

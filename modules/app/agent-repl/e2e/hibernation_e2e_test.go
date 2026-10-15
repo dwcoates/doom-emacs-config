@@ -522,6 +522,8 @@ func TestKeepAliveAnswerAfterVendorTurnNeverServed(t *testing.T) {
 // plane read the keep-alive's transcript bytes, which precede it. Only then is
 // absence asserted — in the store's own database, where an unserved row would
 // be, since no read verb ever returns one.
+//
+// Seam: keepalive-marker
 func TestKeepAliveStoresNothingOnEitherPlane(t *testing.T) {
 	// Arrange
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{

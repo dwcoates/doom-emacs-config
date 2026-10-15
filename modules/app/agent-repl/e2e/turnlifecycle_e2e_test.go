@@ -107,6 +107,8 @@ func tlResponseMarkdown(t *testing.T, rows []*frontendv1.FeedRow, id *frontendv1
 // response -> success.completed"). Driven via driveDocumentedPrompt because
 // PROSE's own documented invocation is "(any text with no `!scenario`
 // prefix)", not a bare "!"+name.
+//
+// Seam: prompt-round-trip
 func TestTurnStartToCompletion(t *testing.T) {
 	t.Parallel()
 	// Arrange

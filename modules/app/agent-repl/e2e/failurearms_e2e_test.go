@@ -174,6 +174,8 @@ func faAssertPartialWorkSurvives(t *testing.T, w *World, ws *workspacev1.Workspa
 // field the client counts down from, so the join IS made rather than
 // dropped" — so the exact millisecond count the fake stated is asserted, not
 // merely its presence. This shape is the fake's declaration, not a capture.
+//
+// Seam: turn-failure
 func TestApiRateLimitedCarriesTheVendorWait(t *testing.T) {
 	t.Parallel()
 	// Arrange

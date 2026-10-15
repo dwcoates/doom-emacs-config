@@ -213,6 +213,8 @@ func assertNoResponseTextEver(t *testing.T, stream *harness.Stream[*frontendv1.F
 // and the subagent's own nested activity (its commission, its Read tool
 // call, its own response) is reachable ONLY via that bubble's own sub-feed
 // — never inlined as a second top-level row on the root feed.
+//
+// Seam: subagent-frames
 func TestSubagentSyncNestedActivity(t *testing.T) {
 	t.Parallel()
 	// Arrange.
@@ -316,6 +318,8 @@ func pageHasAgentPromptText(rows []*frontendv1.FeedRow, text string) bool {
 // component; feed.proto's FeedDetachedSubagent wrapper: "identical to the
 // sync arm's; the wrapper carries the placement fact, never a second
 // drawing").
+//
+// Seam: subagent-file
 func TestSubagentDetached(t *testing.T) {
 	t.Parallel()
 	// Arrange.

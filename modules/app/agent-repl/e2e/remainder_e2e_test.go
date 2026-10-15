@@ -495,6 +495,8 @@ func TestDiagnostics(t *testing.T) {
 // sidecar's file-plane cursor to advance past this turn's transcript lines as
 // well as for the turn's own terminal row: both planes have delivered
 // everything they are going to deliver for this turn before the page is read.
+//
+// Seam: two-plane-episode
 func TestPlanModeCoalescesOntoOneBubble(t *testing.T) {
 	t.Parallel()
 	// Arrange

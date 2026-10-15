@@ -289,6 +289,7 @@ func dbAwaitSimpleToolCall(
 // test's own act.
 // ===========================================================================
 
+// Seam: shell-spool
 func TestBashDetachedStartAndComplete(t *testing.T) {
 	t.Parallel()
 	gatePath := filepath.Join(t.TempDir(), "detach-gate")
@@ -443,6 +444,7 @@ func dbExpectNoUnmodeledWarning(t *testing.T, stream *harness.Stream[*frontendv1
 // should ever appear for this command.
 // ===========================================================================
 
+// Seam: stream-tool-card
 func TestBashForegroundCompleted(t *testing.T) {
 	t.Parallel()
 	w := NewWorld(t, WorldOpts{})

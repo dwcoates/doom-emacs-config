@@ -125,6 +125,8 @@ func submitCommand(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, command
 // record for the arm — see this file's header comment for why the figures
 // this scenario carries never cross the footer's separate newsworthiness
 // threshold and so are not asserted as a drawn status line.
+//
+// Seam: session-footer
 func TestAccountUsage(t *testing.T) {
 	t.Parallel()
 	// Arrange: one world, one (fake-git) repository registered as a

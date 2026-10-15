@@ -177,6 +177,8 @@ func pmExpectNoTurnEndedPush(t *testing.T, ctx context.Context, stream *harness.
 // "declining a permission denies that tool and the agent may route around
 // it; the turn does NOT end") — every arm reaches the manifest's
 // success.completed terminal, deny included.
+//
+// Seam: answer-path
 func TestPermissionAskAnsweredArms(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
