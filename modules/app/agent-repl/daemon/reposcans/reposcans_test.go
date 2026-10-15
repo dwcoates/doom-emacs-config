@@ -18,16 +18,24 @@ import (
 // repository root.
 const moduleRoot = "modules/app/agent-repl/"
 
+// moduleRootDir is the agent-repl module root on disk, two directories up:
+// the tree every scan here reads.
+func moduleRootDir(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("resolve the module root: %v", err)
+	}
+	return root
+}
+
 // TestEveryGoSuiteIsSelectedByEveryLocalModuleItReplaces derives each Go
 // suite's local dependencies from its own go.mod (`replace ... => ../...`) and
 // checks a change in any of them selects the suite, so a new cross-module
 // import can never leave a merge's gate blind to it.
 func TestEveryGoSuiteIsSelectedByEveryLocalModuleItReplaces(t *testing.T) {
 	// Arrange: the module root on disk, two directories up.
-	root, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatalf("resolve the module root: %v", err)
-	}
+	root := moduleRootDir(t)
 	replace := regexp.MustCompile(`=>\s*(\.\.?/\S*)`)
 	checked := 0
 	for _, suite := range roster.Suites {
@@ -66,10 +74,7 @@ func TestEveryGoSuiteIsSelectedByEveryLocalModuleItReplaces(t *testing.T) {
 // module) selects the suite.
 func TestEveryVitestSuiteIsSelectedByEveryTreeItImports(t *testing.T) {
 	// Arrange: the module root on disk, two directories up.
-	root, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatalf("resolve the module root: %v", err)
-	}
+	root := moduleRootDir(t)
 	importRe := regexp.MustCompile(`(?:from|import)\s*\(?\s*['"](\.\.?/[^'"]+)['"]`)
 	checked := map[string]bool{}
 	for _, suite := range roster.Suites {
@@ -134,10 +139,7 @@ func TestEveryVitestSuiteIsSelectedByEveryTreeItImports(t *testing.T) {
 // a source to say; a line that is only a comment is not read.
 func TestNoSystemsIntegrationSuiteRunsAnotherSystem(t *testing.T) {
 	// Arrange: the module root on disk, two directories up.
-	root, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatalf("resolve the module root: %v", err)
-	}
+	root := moduleRootDir(t)
 	tests := []struct {
 		dir string
 		// skip is a subdirectory that is not this system's own suite: the
@@ -200,10 +202,7 @@ func TestNoSystemsIntegrationSuiteRunsAnotherSystem(t *testing.T) {
 // how one reader came to miss child workspaces while the others saw them.
 func TestRosterwalkIsTheOnlyChildWalk(t *testing.T) {
 	// Arrange: the agent-repl root, two directories up.
-	root, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatalf("resolve the agent-repl root: %v", err)
-	}
+	root := moduleRootDir(t)
 	if _, err := os.Stat(filepath.Join(root, "daemon", "go.mod")); err != nil {
 		t.Fatalf("%s is not the agent-repl root: %v", root, err)
 	}
@@ -258,10 +257,7 @@ func TestRosterwalkIsTheOnlyChildWalk(t *testing.T) {
 // ValidateWriteBatchRequest, and no other Go file restates its rules.
 func TestTheStoreAndEveryFakeValidateThroughThisPackage(t *testing.T) {
 	// Arrange: the agent-repl root, two directories up.
-	root, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatalf("resolve the agent-repl root: %v", err)
-	}
+	root := moduleRootDir(t)
 	callers := []string{
 		"agent-shim/shim-store/internal/server/validate.go",
 		"agent-shim/claude/shim-sidecar/integration/helpers_test.go",
@@ -314,10 +310,7 @@ func TestTheStoreAndEveryFakeValidateThroughThisPackage(t *testing.T) {
 // Name.
 func TestTestsNameArmsOnlyThroughOneofarm(t *testing.T) {
 	// Arrange: the agent-repl root, two directories up.
-	root, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatalf("resolve the agent-repl root: %v", err)
-	}
+	root := moduleRootDir(t)
 	var offenders []string
 
 	// Act.
