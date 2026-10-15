@@ -84,12 +84,30 @@ scripts/
 ## The spawn contract
 
 ```
-node dist/main.js --listen <uds> --store-socket <uds> --log-fd 3 [--fake]
+node dist/main.js --listen <uds> --store-socket <uds> --log-fd 3 [--spawn-gate-fd 4] [--ready-fd 5] [--fake]
 node dist/main.js --version
 ```
 
 Nothing else. An unrecognized flag is a startup **failure**, not a warning: it
 means the daemon and this build disagree about the contract.
+
+- **The inherited descriptors.** This section is their one home; the daemon's
+  `shimclient` (`shimLogFD`, `shimSpawnGateFD`, `shimReadyFD`) and the
+  integration suite's `fakeshim` both honor it as written here.
+  - **fd 3** is the durable log sink, already open.
+  - **fd 4, the spawn gate** (`src/spawn-gate.ts`): the read end of a pipe.
+    The shim binds NOTHING until it reads one byte, which the daemon writes
+    only once the shim's pid is durable; EOF is a daemon that died first, and
+    the shim exits unbound.
+  - **fd 5, the readiness pipe** (`src/ready.ts`): the write end of a pipe.
+    Once its listen socket accepts (after the `serving` record and the signal
+    handlers), the shim writes ONE byte and closes it; the daemon dials on that
+    byte instead of polling for the socket. A daemon gone by then leaves EPIPE,
+    which is INFO `ready_daemon_gone`, and the shim serves on for a successor.
+    The shim's death closes the pipe too. A shim that closes it WITHOUT the
+    byte broke the contract: the daemon fails the bring-up at ERROR
+    (`daemon.shimclient.ready`, `closed_without_ready`) and never falls back to
+    polling. The daemon bounds the wait at `shimclient.ShimReadyBound`.
 
 - **cwd** is the workspace directory, set by the spawner. It is not a flag —
   two sources for one fact can disagree.

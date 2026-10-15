@@ -39,6 +39,7 @@ func TestSpawnArgvIsTheContractVerbatim(t *testing.T) {
 		"--store-socket", spec.StoreSocket,
 		"--log-fd", "3",
 		"--spawn-gate-fd", "4",
+		"--ready-fd", "5",
 		"--fake",
 	}
 	if !reflect.DeepEqual(record.Argv, want) {
@@ -1154,5 +1155,152 @@ func TestSpawnGoesOnOnceTheServicesAreReady(t *testing.T) {
 	// Assert
 	if c == nil {
 		t.Fatal("Spawn() answered no client once the services were ready")
+	}
+}
+
+// readyRecord finds the readiness record of LEVEL, if any.
+func readyRecord(surfaces testSurfaces, level string) (dlog.Record, bool) {
+	return dlog.FindRecord(surfaces.log.Records(), dlog.RecordQuery{Level: level, Operation: "daemon.shimclient.ready"})
+}
+
+// TestASpawnedShimThatReportsReadyIsBroughtUp: the child's readiness byte
+// lets the bring-up dial a shim that is listening.
+func TestASpawnedShimThatReportsReadyIsBroughtUp(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	spec, _ := newTestSpec(t, dir, uds, helperIdle)
+	sup, surfaces := newSupervisorLogging(t)
+	done := make(chan error, 1)
+
+	// Act.
+	go func() {
+		c, err := sup.Spawn(context.Background(), spec)
+		if err == nil {
+			t.Cleanup(func() { _ = c.Kill(context.Background(), KillAttribution{Actor: "test", Reason: "cleanup"}) })
+		}
+		done <- err
+	}()
+	waitForSessionOpen(t, f)
+	f.push(healthyUpdate())
+
+	// Assert.
+	if err := <-done; err != nil {
+		t.Fatalf("Spawn() error = %v, want the shim brought up", err)
+	}
+	record, ok := readyRecord(surfaces, dlog.LevelDebug)
+	if !ok || record.Context["outcome"] != "ready" {
+		t.Fatalf("readiness record = %+v (found %v), want a DEBUG outcome=ready", record, ok)
+	}
+}
+
+// TestAShimThatDiesBeforeReportingReadyEndsTheBringUpWithItsDeath: the
+// child's death closes the pipe, and the death -- not the closed pipe -- is
+// the answer.
+func TestAShimThatDiesBeforeReportingReadyEndsTheBringUpWithItsDeath(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	spec, _ := newTestSpec(t, dir, filepath.Join(dir, "never.sock"), helperDie)
+	t.Setenv(helperExitEnv, "9")
+	sup, surfaces := newSupervisorLogging(t)
+
+	// Act.
+	_, err := sup.Spawn(context.Background(), spec)
+
+	// Assert.
+	var death *BringUpDeathError
+	if !errors.As(err, &death) || death.Exit.Code != 9 {
+		t.Fatalf("Spawn() error = %v, want *BringUpDeathError with exit 9", err)
+	}
+	if record, ok := readyRecord(surfaces, dlog.LevelError); ok {
+		t.Fatalf("a death was recorded as a readiness failure: %+v", record)
+	}
+}
+
+// TestAShimThatClosesItsReadinessPipeWithoutTheByteIsALoudFailure: a shim
+// alive with its pipe closed broke the spawn contract; the bring-up fails and
+// says so, and never falls back to polling for the socket.
+func TestAShimThatClosesItsReadinessPipeWithoutTheByteIsALoudFailure(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	spec, _ := newTestSpec(t, dir, filepath.Join(dir, "never.sock"), helperCloseReady)
+	sup, surfaces := newSupervisorLogging(t, WithReadyBound(200*time.Millisecond))
+
+	// Act.
+	_, err := sup.Spawn(context.Background(), spec)
+
+	// Assert.
+	if !errors.Is(err, ErrShimReadyPipeClosed) {
+		t.Fatalf("Spawn() error = %v, want ErrShimReadyPipeClosed", err)
+	}
+	record, ok := readyRecord(surfaces, dlog.LevelError)
+	if !ok || record.Context["outcome"] != "closed_without_ready" || record.Context["pid"] == nil || record.Context["uds"] != spec.UDSPath {
+		t.Fatalf("readiness record = %+v (found %v), want an ERROR outcome=closed_without_ready naming the pid and socket", record, ok)
+	}
+}
+
+// TestAShimThatNeverReportsReadyFailsAtTheBound.
+func TestAShimThatNeverReportsReadyFailsAtTheBound(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	spec, _ := newTestSpec(t, dir, filepath.Join(dir, "never.sock"), helperNeverReady)
+	sup, surfaces := newSupervisorLogging(t, WithReadyBound(100*time.Millisecond))
+
+	// Act.
+	_, err := sup.Spawn(context.Background(), spec)
+
+	// Assert.
+	if !errors.Is(err, ErrShimReadyBound) {
+		t.Fatalf("Spawn() error = %v, want ErrShimReadyBound", err)
+	}
+	record, ok := readyRecord(surfaces, dlog.LevelError)
+	if !ok || record.Context["outcome"] != "bound_expired" || record.Context["bound"] != "100ms" {
+		t.Fatalf("readiness record = %+v (found %v), want an ERROR outcome=bound_expired with its bound", record, ok)
+	}
+}
+
+// failingReader is a readiness pipe whose read fails outright.
+type failingReader struct{ err error }
+
+func (f failingReader) Read([]byte) (int, error) { return 0, f.err }
+func (f failingReader) Close() error             { return nil }
+
+func TestAReadinessPipeThatCannotBeReadIsALoudFailure(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	c := newClient(log, ids.WorkspaceID("ws-1"), "/tmp/ws-1.sock", defaultBackoff, nil, func() bool { return false })
+	cause := errors.New("read |0: bad file descriptor")
+
+	// Act.
+	err := c.awaitReady(context.Background(), failingReader{err: cause}, time.Minute)
+
+	// Assert.
+	if !errors.Is(err, cause) {
+		t.Fatalf("awaitReady = %v, want the read's own failure", err)
+	}
+	record, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: "daemon.shimclient.ready"})
+	if !ok || record.Context["outcome"] != "read_failed" || record.Context["error"] != cause.Error() {
+		t.Fatalf("readiness record = %+v (found %v), want an ERROR outcome=read_failed with the cause", record, ok)
+	}
+}
+
+func TestAReadinessWaitWhoseContextEndsAnswersItsCause(t *testing.T) {
+	// Arrange: a pipe nobody writes, and a context already ended.
+	log := dlog.NewTestLogger()
+	c := newClient(log, ids.WorkspaceID("ws-1"), "/tmp/ws-1.sock", defaultBackoff, nil, func() bool { return false })
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("Pipe: %v", err)
+	}
+	defer w.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act.
+	err = c.awaitReady(ctx, r, time.Minute)
+
+	// Assert.
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("awaitReady = %v, want context.Canceled", err)
 	}
 }

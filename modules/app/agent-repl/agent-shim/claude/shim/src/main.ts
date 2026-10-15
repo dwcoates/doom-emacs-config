@@ -3,8 +3,11 @@
  *
  * # The spawn contract, whole
  *
- *   node dist/main.js --listen <uds> --store-socket <uds> --log-fd 3 [--fake]
+ *   node dist/main.js --listen <uds> --store-socket <uds> --log-fd 3 [--spawn-gate-fd 4] [--ready-fd 5] [--fake]
  *   node dist/main.js --version
+ *
+ * The inherited descriptors (fd 3 the log, fd 4 the spawn gate, fd 5 the
+ * readiness pipe) are specified once, in AGENTS.md "The spawn contract".
  *
  * NOTHING ELSE. Every legacy flag is gone, and an unrecognized one is a startup
  * FAILURE rather than a warning: a daemon that spawns a shim with a flag this
@@ -62,6 +65,7 @@ import path from "node:path";
 import { configureLog } from "./log.js";
 import { armRuntimeProfiling } from "./profiling.js";
 import { MAIN_LIFECYCLE_LOGGER, reportFatal } from "./fatal.js";
+import { READY_FD, reportReady } from "./ready.js";
 import { SPAWN_GATE_FD, awaitSpawnGate } from "./spawn-gate.js";
 import { lockBinaryPath, lockDir, LOCK_DIR_ENV } from "./locks.js";
 import { runtimeIdentity } from "./build-identity.js";
@@ -112,6 +116,8 @@ export interface CliArgs {
   readonly logFd?: 3;
   /** The inherited spawn gate (spawn-gate.ts). Always 4; absent, nothing gates. */
   readonly spawnGateFd?: 4;
+  /** The inherited readiness pipe (ready.ts). Always 5; absent, nothing is reported. */
+  readonly readyFd?: 5;
   /** Drive the mocked vendor instead of the real SDK. */
   readonly fake: boolean;
   /** Print the version and exit, touching nothing. */
@@ -124,6 +130,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
   let storeSocket: string | undefined;
   let logFd: 3 | undefined;
   let spawnGateFd: 4 | undefined;
+  let readyFd: 5 | undefined;
   let fake = false;
   let version = false;
 
@@ -163,6 +170,15 @@ export function parseArgs(argv: readonly string[]): CliArgs {
         spawnGateFd = SPAWN_GATE_FD;
         break;
       }
+      case "--ready-fd": {
+        const value = next();
+        // Only fd 5, for the reason --log-fd takes only fd 3.
+        if (value !== String(READY_FD)) {
+          throw new Error(`shim: invalid --ready-fd ${JSON.stringify(value)}; the readiness pipe is inherited fd 5`);
+        }
+        readyFd = READY_FD;
+        break;
+      }
       case "--fake":
         fake = true;
         break;
@@ -172,7 +188,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
       default:
         throw new Error(
           `shim: unknown argument ${JSON.stringify(String(arg))}; the spawn contract is ` +
-            "--listen <uds> --store-socket <uds> --log-fd 3 [--spawn-gate-fd 4] [--fake] [--version]",
+            "--listen <uds> --store-socket <uds> --log-fd 3 [--spawn-gate-fd 4] [--ready-fd 5] [--fake] [--version]",
         );
     }
   }
@@ -182,6 +198,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     ...(storeSocket === undefined ? {} : { storeSocket }),
     ...(logFd === undefined ? {} : { logFd }),
     ...(spawnGateFd === undefined ? {} : { spawnGateFd }),
+    ...(readyFd === undefined ? {} : { readyFd }),
     fake,
     version,
   };
@@ -1063,6 +1080,17 @@ export async function main(): Promise<void> {
     { listen_socket: args.listen, outcome: "serving" },
     "shim.v1 is being served; the daemon may dial",
   );
+  // THE DAEMON IS TOLD ON THE READINESS PIPE (ready.ts), after the record and
+  // the signal handlers, so a daemon that dials on the byte meets a shim that
+  // is wholly up.
+  if (args.readyFd !== undefined) {
+    if (reportReady(args.readyFd) === "daemon_gone") {
+      MAIN_LIFECYCLE_LOGGER.info(
+        { outcome: "ready_daemon_gone" },
+        "the daemon that spawned this shim was gone before it heard the shim is listening; serving on for a successor",
+      );
+    }
+  }
 
   // Nothing else to do: the listener holds the process open, and it is closed
   // only by the stand-down. A shim outlives its daemon by design, so there is

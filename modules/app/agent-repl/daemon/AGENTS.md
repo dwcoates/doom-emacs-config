@@ -416,6 +416,16 @@ daemon that dies first closes the write end, the shim reads EOF and exits
 unbound (`shim.main.lifecycle` `spawn_gate_abandoned`). A shim that ever binds
 is therefore always one whose pid is on record.
 
+A SPAWNED SHIM IS DIALED ON ITS WORD, NEVER FOUND BY A POLL: the readiness
+pipe. The shim inherits the write end of a second pipe on fd 5 (`--ready-fd 5`)
+and writes one byte once its listen socket accepts; `client.awaitReady` waits
+for that byte, the process's death, or `shimclient.ShimReadyBound` (14s, just
+over 2x the measured worst live spawn), and only then does the bring-up dial.
+The dial ladder remains for ADOPTION alone, whose survivor is already
+listening. A pipe closed without the byte by a shim still alive at the bound is
+ERROR `daemon.shimclient.ready` and a failed bring-up. The contract's one home
+is `agent-shim/claude/shim/AGENTS.md` "The spawn contract".
+
 A predecessor's shim is not this daemon's own spawn, so
 `refuseAdoptingOurOwnSpawn` does not fire on it: the supervisor's `SpawnedFor`
 ledger is the in-memory `held` set of one process and holds nothing across a
