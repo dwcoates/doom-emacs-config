@@ -58,6 +58,10 @@ import {
 } from "./harness.js";
 import { recordingFailures } from "../failure-sink.js";
 
+// Imported at collection, not inside a test, so the transform never counts
+// against a test's timeout.
+import css from "../../src/styles.css?raw";
+
 const VIEW_OK = create(UpdateSidebarViewResponseSchema, { result: { case: "success", value: {} } });
 const VIEW_UNKNOWN_REPOSITORY = create(UpdateSidebarViewResponseSchema, {
   result: { case: "error", value: { cause: { case: "unknownRepository", value: {} } } },
@@ -1208,23 +1212,19 @@ describe("recently merged rows", () => {
     expect([name?.classList.contains("band-name"), name?.classList.contains("viewed")]).toEqual([true, false]);
   });
 
-  it("styles a merged name with the repository headers' colour variable", async () => {
-    const css = (await import("../../src/styles.css?raw")).default;
+  it("styles a merged name with the repository headers' colour variable", () => {
     expect(css).toContain("#ws-sidebar .row .name.band-name { color: var(--repo-head-expanded); }");
   });
 
-  it("draws a row merged today with the off-white gutter bar", async () => {
-    const css = (await import("../../src/styles.css?raw")).default;
+  it("draws a row merged today with the off-white gutter bar", () => {
     expect(css).toContain("#ws-sidebar .row.merged-today {\n  border-left: var(--row-gutter-w) solid var(--merged-today-gutter);");
   });
 
-  it("declares the one rail gutter width every row bar draws in", async () => {
-    const css = (await import("../../src/styles.css?raw")).default;
+  it("declares the one rail gutter width every row bar draws in", () => {
     expect(css).toContain("#ws-sidebar { --row-gutter-w: 3px; }");
   });
 
-  it("draws the selection's bar and the merge-today bar at the shared width", async () => {
-    const css = (await import("../../src/styles.css?raw")).default;
+  it("draws the selection's bar and the merge-today bar at the shared width", () => {
     const bar = (selector: string): string | undefined =>
       css.split(`${selector} {\n`)[1]?.split("}")[0];
     expect([bar("#ws-sidebar .ws.current > .row"), bar("#ws-sidebar .row.merged-today")].map((b) =>
@@ -1232,8 +1232,7 @@ describe("recently merged rows", () => {
     )).toEqual([true, true]);
   });
 
-  it("no longer colours a name merged today", async () => {
-    const css = (await import("../../src/styles.css?raw")).default;
+  it("no longer colours a name merged today", () => {
     expect(css).not.toContain(".name.band-name.merged-today");
   });
 

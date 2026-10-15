@@ -29,6 +29,10 @@ import { MalformedView } from "../../src/rpc/malformed.js";
 import { cascadedValue, installStylesheet } from "../stylesheet.js";
 import { RecordingSink, appContext } from "../topbar/fixtures.js";
 
+// Imported at collection, not inside a test, so the transform never counts
+// against a test's timeout.
+import source from "../../src/news-digest/news-digest.ts?raw";
+
 type OverlayInit = MessageInitShape<typeof NewsDigestOverlaySchema>;
 
 const FROM_MS = 1_727_769_600_000n;
@@ -896,9 +900,8 @@ describe("the digest's shared builders", () => {
     ]);
   });
 
-  it("is the only place news-digest.ts builds a heading, a prose block or a link row", async () => {
+  it("is the only place news-digest.ts builds a heading, a prose block or a link row", () => {
     // ARRANGE
-    const source = (await import("../../src/news-digest/news-digest.ts?raw")).default;
     // ACT
     const counts = ['createElement("h2")', '"news-digest-summary md"', '"news-digest-links"', "renderMarkdown("].map(
       (shape) => source.split(shape).length - 1,
