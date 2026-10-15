@@ -100,6 +100,14 @@ Consequences:
 - "Any branch" (open): whether "another branch into another branch" means the
   same branch it was cut from, or may also mean a different one.
 
+## One fork-source field (owner ruling, 2026-10-15)
+
+Forked from the requester and forked from another workspace have the same
+target matrix, so the API does not distinguish them: a create carries ONE
+optional fork source, the workspace whose transcript it forks, which may be
+the requester itself. Unset is a fresh context. So a create has three
+independent fields: branches from, merges into, and an optional fork source.
+
 ## The merge queue, one-shot and async, the skill and the API
 
 What "merges into" means for each landing path:
@@ -114,6 +122,15 @@ What "merges into" means for each landing path:
 - Open for the owner: whether async's merge workspace counts toward "rare" in
   that cell (async merges are common), and whether a merge's target is fixed at
   creation or may be chosen when the merge is asked for (one-shot or async).
+- Which of the three fields each landing path has:
+  - ONE-SHOT makes no workspace: it lands the requester's own branch in place,
+    in the requester's own conversation. Its branch and context are the
+    requester's already, so the only field it could take is merges into (if
+    the target may be chosen at merge time).
+  - ASYNC makes a workspace, so it has all three: branches from (the branch
+    being landed, any branch), merges into (its target), and the optional fork
+    source (today always the requester). An async merge is then a create with
+    those three fields plus "land this when done", and needs no separate shape.
 - SKILL AND API: `/create-or-update-workspace` writes a command file the daemon
   reads, and `/merge-queue` enqueues through the same ingress; neither calls the
   daemon's RPCs directly. Every supported cell should be expressible the same
