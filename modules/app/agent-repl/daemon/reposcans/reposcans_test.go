@@ -348,3 +348,43 @@ func TestTestsNameArmsOnlyThroughOneofarm(t *testing.T) {
 		t.Fatalf("these tests read WhichOneof by hand; read the arm through oneofarm.Field or oneofarm.Name instead: %v", offenders)
 	}
 }
+
+// TestNoSuiteSpellsTheServingPredicateItself pins that the integration and
+// e2e suites wait on a serving session through SessionServes rather than a
+// copy of its predicate.
+func TestNoSuiteSpellsTheServingPredicateItself(t *testing.T) {
+	// Arrange
+	// The negated form (a shim DETACHED with the composer open) is a different
+	// predicate and is not a copy.
+	copy := regexp.MustCompile(`(^|[^!])live\.GetShimAttached\(\) && live\.GetOpen\(\) != nil`)
+	var copies []string
+
+	// Act
+	// The daemon's integration tree and the e2e suite's, from the module root.
+	for _, root := range []string{filepath.Join("..", "integration"), filepath.Join("..", "..", "e2e")} {
+		err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() || !strings.HasSuffix(path, ".go") || filepath.Base(path) == "watch.go" || filepath.Base(path) == "sessionserves_test.go" {
+				return nil
+			}
+			src, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			if copy.Match(src) {
+				copies = append(copies, path)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("walk %s: %v", root, err)
+		}
+	}
+
+	// Assert
+	if len(copies) != 0 {
+		t.Fatalf("files spell the serving predicate themselves; use harness.SessionServes:\n%s", strings.Join(copies, "\n"))
+	}
+}

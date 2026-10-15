@@ -202,8 +202,6 @@ var Suites = []Suite{
 			// Source scans walk the daemon's own tree; the briefs and the
 			// vocabulary are read as data.
 			"daemon/", "prompts/", "proto/vocab/",
-			// The harness's session-serving scan walks the e2e tree.
-			"e2e/",
 			// The command-file tests run the emitter script.
 			"skills/emit-workspace-commands.sh",
 			// gitclient pins the markers the merge queue's hook spells.
