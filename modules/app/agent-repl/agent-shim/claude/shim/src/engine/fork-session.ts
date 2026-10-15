@@ -72,11 +72,24 @@ export type ForkSessionOutcome =
  * The record types the vendor's fork counts as transcript messages (its own
  * set, read from the shipped SDK): only these carry a uuid it can cut at.
  */
-const FORKABLE_TYPES: ReadonlySet<string> = new Set(["user", "assistant", "attachment", "system", "progress"]);
+export const FORKABLE_TYPES: ReadonlySet<string> = new Set(["user", "assistant", "attachment", "system", "progress"]);
 
-/** Every forkable record's uuid in `file`, in file order. */
-export function forkableRecordUuids(file: string): string[] {
-  const uuids: string[] = [];
+/**
+ * One forkable record: its uuid, and the send it files when it is a
+ * `queued_command` attachment.
+ */
+export interface ForkableRecord {
+  readonly uuid: string;
+  /**
+   * The client uuid of the send this record files: a `queued_command`
+   * attachment's `source_uuid`. Absent on every other record.
+   */
+  readonly queuedSend?: string;
+}
+
+/** Every forkable record in `file`, in file order. */
+export function forkableRecords(file: string): ForkableRecord[] {
+  const records: ForkableRecord[] = [];
   for (const line of readFileSync(file, "utf8").split("\n")) {
     const trimmed = line.trim();
     if (trimmed === "") continue;
@@ -88,12 +101,49 @@ export function forkableRecordUuids(file: string): string[] {
       // own reader skips it, so skipping is faithful, not lenient.
       continue;
     }
-    const { type, uuid } = record as { type?: unknown; uuid?: unknown };
+    const { type, uuid, attachment } = record as { type?: unknown; uuid?: unknown; attachment?: unknown };
     if (typeof type === "string" && FORKABLE_TYPES.has(type) && typeof uuid === "string" && uuid !== "") {
-      uuids.push(uuid);
+      const queuedSend = queuedCommandSource(type, attachment);
+      records.push(queuedSend === undefined ? { uuid } : { uuid, queuedSend });
     }
   }
-  return uuids;
+  return records;
+}
+
+/** The send a `queued_command` attachment files, or absence for any other record. */
+function queuedCommandSource(type: string, attachment: unknown): string | undefined {
+  if (type !== "attachment" || typeof attachment !== "object" || attachment === null) return undefined;
+  const { type: kind, source_uuid: source } = attachment as { type?: unknown; source_uuid?: unknown };
+  return kind === "queued_command" && typeof source === "string" && source !== "" ? source : undefined;
+}
+
+/**
+ * THE RECORD A FORK-POINT TOKEN NAMES, or absence when the transcript holds
+ * none.
+ *
+ * The parent books each of its sends under the send's CLIENT uuid
+ * (engine/session.ts `noteSendRecord`), and the vendor files a send as exactly
+ * one record: a `user` record under that uuid when the send opened a turn, or
+ * a `queued_command` attachment of its own uuid, whose `source_uuid` is the
+ * client uuid, when the send arrived mid-turn and was folded in. The SDK
+ * stream never carries the attachment's uuid, so the parent cannot book it;
+ * the transcript is the one place both filings are visible, and this is the
+ * one place they are resolved. (Measured 2026-10-15 over every local
+ * transcript: 2,660 sourced queued commands, none of whose client uuids is
+ * also a record's uuid; a repeated attachment line repeats its uuid too.) A
+ * send filed both ways, or as two distinct attachments, breaks that filing and
+ * fails hard.
+ */
+export function recordOfToken(records: readonly ForkableRecord[], token: string): string | undefined {
+  const direct = records.some((record) => record.uuid === token);
+  const queued = [...new Set(records.filter((record) => record.queuedSend === token).map((record) => record.uuid))];
+  if (direct && queued.length > 0) {
+    throw new Error(`fork session: the send ${token} is filed both as a record of its own and as the queued command ${queued.join(", ")}`);
+  }
+  if (queued.length > 1) {
+    throw new Error(`fork session: the send ${token} is filed as ${queued.length} distinct queued commands: ${queued.join(", ")}`);
+  }
+  return direct ? token : queued[0];
 }
 
 /**
@@ -101,26 +151,28 @@ export function forkableRecordUuids(file: string): string[] {
  * transcript, or the refusal when the point's record is not in it.
  */
 export function resolveUpTo(
-  uuids: readonly string[],
+  records: readonly ForkableRecord[],
   point: shimv1.ForkPoint,
 ): { readonly kind: "ok"; readonly upTo: string | undefined } | { readonly kind: "absent"; readonly detail: string } {
   switch (point.extent.case) {
     case "whole":
       return { kind: "ok", upTo: undefined };
     case "throughRecord": {
-      const record = point.extent.value.record?.value ?? "";
-      return uuids.includes(record)
+      const token = point.extent.value.record?.value ?? "";
+      const record = recordOfToken(records, token);
+      return record !== undefined
         ? { kind: "ok", upTo: record }
-        : { kind: "absent", detail: `the fork point's record ${record} is not in the parent transcript` };
+        : { kind: "absent", detail: `the fork point's record ${token} is not in the parent transcript` };
     }
     case "beforeRecord": {
-      const record = point.extent.value.record?.value ?? "";
-      const at = uuids.indexOf(record);
-      if (at < 0) return { kind: "absent", detail: `the turn-opening record ${record} is not in the parent transcript` };
+      const token = point.extent.value.record?.value ?? "";
+      const record = recordOfToken(records, token);
+      const at = record === undefined ? -1 : records.findIndex((each) => each.uuid === record);
+      if (at < 0) return { kind: "absent", detail: `the turn-opening record ${token} is not in the parent transcript` };
       if (at === 0) {
-        return { kind: "absent", detail: `the turn-opening record ${record} is the parent's first; no finished turn precedes it` };
+        return { kind: "absent", detail: `the turn-opening record ${token} is the parent's first; no finished turn precedes it` };
       }
-      return { kind: "ok", upTo: uuids[at - 1] };
+      return { kind: "ok", upTo: records[at - 1]?.uuid };
     }
     case undefined:
       break;
@@ -143,7 +195,7 @@ export async function forkSession(deps: ForkSessionDeps, ask: ForkSessionAsk): P
     LOGGER.error({ ...context, parent_transcript: parentFile, detail }, "the fork was refused: no parent transcript under this account root");
     return { kind: "unknown_session", detail };
   }
-  const upTo = resolveUpTo(forkableRecordUuids(parentFile), ask.point);
+  const upTo = resolveUpTo(forkableRecords(parentFile), ask.point);
   if (upTo.kind === "absent") {
     LOGGER.error({ ...context, parent_transcript: parentFile, cause: upTo.detail }, "the fork was refused: the fork point is not in the parent transcript");
     return { kind: "record_absent", detail: upTo.detail };

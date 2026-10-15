@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { forkFakeSession } from "../../src/fake/fork.js";
+import { forkableRecords } from "../../src/engine/fork-session.js";
 
 import { testTempDir } from "../temp-dir.js";
 import { sequentialIds, writeTranscript } from "../vendor-transcript.js";
@@ -108,5 +109,28 @@ describe("forkFakeSession", () => {
     expect(() =>
       forkFakeSession(configDir, { parentSessionId, parentDir: PARENT_DIR, ...(upTo === undefined ? {} : { upToMessageId: upTo }) }),
     ).toThrow(error);
+  });
+
+  it("cuts at exactly the records the fork point resolves against, so the two read one set of types", () => {
+    // Arrange: one record of every type a transcript holds, forkable or not.
+    const configDir = testTempDir("fake-fork-");
+    const types = ["user", "assistant", "attachment", "system", "progress", "queue-operation", "file-history-snapshot", "custom-title"];
+    writeTranscript(configDir, PARENT_DIR, PARENT_ID, types.map((type) => ({ type, uuid: `r-${type}`, parentUuid: null })));
+    const readable = new Set(forkableRecords(transcriptPath(configDir, PARENT_DIR, PARENT_ID)).map((record) => record.uuid));
+
+    // Act: ask the fake vendor to cut at each record in turn.
+    const cuttable = types
+      .map((type) => `r-${type}`)
+      .filter((uuid) => {
+        try {
+          forkFakeSession(configDir, { parentSessionId: PARENT_ID, parentDir: PARENT_DIR, upToMessageId: uuid }, sequentialIds());
+          return true;
+        } catch {
+          return false;
+        }
+      });
+
+    // Assert
+    expect(new Set(cuttable)).toEqual(readable);
   });
 });

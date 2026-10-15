@@ -14,11 +14,8 @@
  */
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import type { VendorForkSpec } from "../engine/fork-session.js";
+import { FORKABLE_TYPES, type VendorForkSpec } from "../engine/fork-session.js";
 import { transcriptPath } from "../engine/vendor-paths.js";
-
-/** The record types the vendor's fork reads as transcript messages. */
-const MESSAGE_TYPES: ReadonlySet<string> = new Set(["user", "assistant", "attachment", "system", "progress"]);
 
 interface ForkableRecord {
   readonly type: string;
@@ -45,7 +42,7 @@ export function forkFakeSession(configDir: string, spec: VendorForkSpec, newId: 
       continue;
     }
     const record = parsed as Partial<ForkableRecord>;
-    if (typeof record.type === "string" && MESSAGE_TYPES.has(record.type) && typeof record.uuid === "string") {
+    if (typeof record.type === "string" && FORKABLE_TYPES.has(record.type) && typeof record.uuid === "string") {
       records.push(record as ForkableRecord);
     }
   }
