@@ -326,7 +326,8 @@ func NewWorld(t testing.TB, opts WorldOpts) *World {
 
 // requireServicesOutlivedTheTest fails t if the store or the sidecar exited
 // on its own before t's cleanup: one a test stopped on purpose (Store.Stop,
-// Store.StartSameDB) is the test's own doing.
+// Store.StartSameDB) is the test's own doing. Every World's test asks it, an
+// owned World's and a shared World's alike.
 func requireServicesOutlivedTheTest(t testing.TB, store *Store, sidecar *Sidecar) {
 	t.Helper()
 	if store.Exited() && !store.stopped {
@@ -746,6 +747,9 @@ type Store struct {
 	cmd     *exec.Cmd
 	exit    *processExit
 	stopped bool
+	// shared is set while the suite's shared World holds this store: no test
+	// may stop or restart it (sharedworld_test.go).
+	shared bool
 }
 
 // startStore launches the store on a named socket + database and blocks
@@ -883,6 +887,9 @@ func (s *Store) Exited() bool { return s.exit.exited() }
 // legitimate way to produce a real one.
 func (s *Store) Stop() {
 	s.t.Helper()
+	if s.shared {
+		panic("e2e: Stop on the shared World's store; a test that stops the store owns its own World")
+	}
 	if s.stopped {
 		return
 	}
@@ -898,6 +905,9 @@ func (s *Store) Stop() {
 // Stop for ruling 2's real outage window.
 func (s *Store) StartSameDB(t testing.TB) {
 	t.Helper()
+	if s.shared {
+		t.Fatalf("e2e: StartSameDB on the shared World's store; a test that restarts the store owns its own World")
+	}
 	cmd := exec.Command(s.bin, "--socket", s.Socket, "--db", s.DBPath, "--log", s.LogPath)
 	cmd.Env = append(os.Environ(),
 		"AGENT_REPL_STORE_SOCKET="+s.Socket,
@@ -961,6 +971,9 @@ type Sidecar struct {
 	cmd     *exec.Cmd
 	exit    *processExit
 	stopped bool
+	// shared is set while the suite's shared World holds this sidecar: no
+	// test may stop or restart it (sharedworld_test.go).
+	shared bool
 }
 
 // assertOneSpoolRoot fails the world's construction unless the spool root
@@ -1153,6 +1166,9 @@ func awaitBuildReport(t testing.TB, ctx context.Context, lockDir, service string
 // beginCycle), so nothing already ingested is ingested twice.
 func (s *Sidecar) Restart(t testing.TB) {
 	t.Helper()
+	if s.shared {
+		t.Fatalf("e2e: Restart on the shared World's sidecar; a test that restarts the sidecar owns its own World")
+	}
 	s.Stop()
 	cmd := exec.Command(s.bin, s.args...)
 	cmd.Env = append(os.Environ(),
@@ -1189,6 +1205,9 @@ func storeSocketOf(args []string) string {
 // Stop sends SIGTERM and waits for the sidecar to leave.
 func (s *Sidecar) Stop() {
 	s.t.Helper()
+	if s.shared {
+		panic("e2e: Stop on the shared World's sidecar; a test that stops the sidecar owns its own World")
+	}
 	if s.stopped {
 		return
 	}
