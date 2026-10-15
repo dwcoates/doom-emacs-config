@@ -270,9 +270,10 @@ type FooterSink interface {
 	// compaction BEGAN and nothing upstream says it finished, so this record
 	// is what clears the footer's compacting and clearing states — which is
 	// why the footer sees a page line the feed also draws. A FAILED compaction
-	// ends the status too: nothing was cut, so the session is idle again, and
-	// the producer's account becomes the footer's evidence rather than passing
-	// silently.
+	// ends the compacting state too, and the producer's account becomes the
+	// footer's evidence rather than passing silently. The cut never ends the
+	// TURN: an auto-compaction runs inside one that carries on after it, and
+	// the main agent's terminal ends every turn, a `/compact` included.
 	OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentId, cut *conversationv1.ContextCut)
 	// OnContextCutRestated is a cut this watch already routed, served again:
 	// it carries only what a second serving can add, the identity of the

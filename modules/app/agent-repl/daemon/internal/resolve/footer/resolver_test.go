@@ -266,35 +266,108 @@ func TestAFrameForAnUnboundWorkspaceIsRecordedLoudly(t *testing.T) {
 	}
 }
 
-func TestAContextCutEndsTheCompaction(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActCompact})
+// TestAContextCutEndsItsActButNotItsTurn — the cut ends the clear or
+// compaction it carries, never the turn: a `/clear` or `/compact` turn runs on
+// to the vendor's `result`, and an auto-compaction runs inside a turn that
+// carries on working after it (owner's report, 2026-10-14).
+func TestAContextCutEndsItsActButNotItsTurn(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(h *harness)
+		cut     *conversationv1.ContextCut
+	}{
+		{
+			name:    "a /compact turn",
+			arrange: func(h *harness) { h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActCompact}) },
+			cut:     compactedCut(),
+		},
+		{
+			name:    "a /clear turn",
+			arrange: func(h *harness) { h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActClear}) },
+			cut:     clearedCut(),
+		},
+		{
+			name: "an auto-compaction inside a prompt's turn",
+			arrange: func(h *harness) {
+				h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+				h.r.OnSessionUpdate(testWS, vendorCompacting())
+			},
+			cut: compactedCut(),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			tt.arrange(h)
 
-	// Act
-	h.r.OnContextCut(testWS, mainAgent, &conversationv1.ContextCut{
-		Cut: &conversationv1.ContextCut_Compacted{Compacted: &conversationv1.ContextCompacted{}},
-	})
+			// Act
+			h.r.OnContextCut(testWS, mainAgent, tt.cut)
 
-	// Assert
-	if got := h.status(t); got != "idle" {
-		t.Fatalf("status = %q, want idle: the cut record is the compaction's only end signal", got)
+			// Assert
+			if got := h.status(t); got != "working" {
+				t.Fatalf("status = %q, want working: the turn runs on past its cut", got)
+			}
+			working := h.view(t).GetStrip().GetStatus().GetWorking()
+			if working.GetCompacting() != nil || working.GetClearing() != nil {
+				t.Fatalf("substatus = %v, want neither compacting nor clearing once the cut landed", working.GetSubstatus())
+			}
+			if _, ended := clockSpan(t, h); ended != nil {
+				t.Fatalf("ended = %v, want the clock running: the cut is not the turn's end", *ended)
+			}
+		})
 	}
 }
 
-func TestAContextCutEndsTheClear(t *testing.T) {
+// TestADirectiveTurnEndsAtItsTerminalAfterItsCut — the vendor's `result` for
+// a `/compact` or `/clear` is the turn's terminal, and it is what ends the
+// turn the cut left running.
+func TestADirectiveTurnEndsAtItsTerminalAfterItsCut(t *testing.T) {
+	tests := []struct {
+		name string
+		act  SessionAct
+		cut  *conversationv1.ContextCut
+	}{
+		{name: "a /compact turn", act: ActCompact, cut: compactedCut()},
+		{name: "a /clear turn", act: ActClear, cut: clearedCut()},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: tt.act})
+			h.r.OnContextCut(testWS, mainAgent, tt.cut)
+
+			// Act
+			endTurn(h, testTurnID)
+
+			// Assert
+			if got := h.status(t); got != "idle" {
+				t.Fatalf("status = %q, want idle once the turn's terminal landed", got)
+			}
+		})
+	}
+}
+
+// TestAnAutoCompactedTurnStaysWorkingThroughItsLaterActivity — the activity
+// the vendor streams after an auto-compaction's cut is the same turn's, so it
+// draws as the turn's working step rather than a momentary `loading`.
+func TestAnAutoCompactedTurnStaysWorkingThroughItsLaterActivity(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActClear})
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+	h.r.OnSessionUpdate(testWS, vendorCompacting())
+	h.r.OnContextCut(testWS, mainAgent, compactedCut())
 
 	// Act
-	h.r.OnContextCut(testWS, mainAgent, &conversationv1.ContextCut{
-		Cut: &conversationv1.ContextCut_Cleared{Cleared: &conversationv1.ContextCleared{}},
-	})
+	h.r.OnActivity(testWS, mainAgent, responseFrame("main-1", "success", usage(0, 1_000, 0, 0, 0)))
 
 	// Assert
-	if got := h.status(t); got != "idle" {
-		t.Fatalf("status = %q, want idle", got)
+	if got := h.status(t); got != "working" {
+		t.Fatalf("status = %q, want working: the activity after the cut is the turn's own", got)
 	}
 }
 
@@ -347,22 +420,20 @@ func TestTheStatusArmIsRecordedWhenItChanges(t *testing.T) {
 	}
 }
 
-// TestAContextCutRecordsTheArmItMoves — the cut ends the turn, so it moves the
-// published arm, and that move is recorded like every other one.
-func TestAContextCutRecordsTheArmItMoves(t *testing.T) {
+// TestAContextCutMovesNoArm — the cut ends the compaction, not the turn, so
+// the published arm stays working and no move is recorded for it.
+func TestAContextCutMovesNoArm(t *testing.T) {
 	// Arrange: a turn is in flight.
 	h := newHarness(t)
 	connected(h)
 	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActCompact})
 
 	// Act
-	h.r.OnContextCut(testWS, mainAgent, &conversationv1.ContextCut{
-		Cut: &conversationv1.ContextCut_Compacted{Compacted: &conversationv1.ContextCompacted{}},
-	})
+	h.r.OnContextCut(testWS, mainAgent, compactedCut())
 
 	// Assert
-	if got := armChanges(h.log.Records()); !slices.Equal(got, []string{"idle", "working", "idle"}) {
-		t.Fatalf("recorded arms = %v, want idle, working, idle", got)
+	if got := armChanges(h.log.Records()); !slices.Equal(got, []string{"idle", "working"}) {
+		t.Fatalf("recorded arms = %v, want idle, working", got)
 	}
 }
 
@@ -911,12 +982,10 @@ func TestTheActivityLineIsRecordedWhenItChanges(t *testing.T) {
 			name: "a line cleared",
 			act: func(h *harness) {
 				h.r.OnSessionUpdate(testWS, vendorCompacting())
-				h.r.OnContextCut(testWS, mainAgent, &conversationv1.ContextCut{
-					Cut: &conversationv1.ContextCut_Compacted{Compacted: &conversationv1.ContextCompacted{}},
-				})
+				h.r.OnContextCut(testWS, mainAgent, compactedCut())
 			},
 			want: map[string]any{
-				"arm": "idle", "kind": "enduring", "text": "",
+				"arm": "working", "kind": "enduring", "text": "",
 				"previous_kind": "salient.compaction", "previous_text": "compacting the context…",
 				"cause": "daemon.footer.on_context_cut",
 			},
@@ -1249,9 +1318,6 @@ func TestTheClockFreezesAtTheTurnsEnd(t *testing.T) {
 		}},
 		{name: "a dead query", end: func(h *harness) {
 			h.r.OnSessionUpdate(testWS, queryDiedUpdate())
-		}},
-		{name: "a compaction's cut", end: func(h *harness) {
-			h.r.OnContextCut(testWS, mainAgent, compactedCut())
 		}},
 	}
 	for _, tt := range tests {

@@ -1172,9 +1172,7 @@ func TestTheContextCutClearsCompacting(t *testing.T) {
 	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
 
 	// Act
-	h.r.OnContextCut(testWS, mainAgent, &conversationv1.ContextCut{
-		Cut: &conversationv1.ContextCut_Compacted{Compacted: &conversationv1.ContextCompacted{}},
-	})
+	h.r.OnContextCut(testWS, mainAgent, compactedCut())
 	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
 
 	// Assert

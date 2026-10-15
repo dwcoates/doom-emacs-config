@@ -820,10 +820,11 @@ func TestTheIdleCellIsTheStatedDash(t *testing.T) {
 			},
 		},
 		{
-			name: "a context cut that spent nothing ended the turn",
+			name: "a /compact turn that spent nothing ended at its terminal",
 			arrange: func(h *harness) {
 				h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActCompact})
 				h.r.OnContextCut(testWS, mainAgent, compactedCut())
+				h.r.OnAgentTerminal(testWS, mainAgent, &turn, completed(), nil)
 			},
 		},
 		{

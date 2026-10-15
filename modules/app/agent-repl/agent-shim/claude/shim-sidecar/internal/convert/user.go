@@ -43,12 +43,11 @@ func (c *Converter) userLine(record map[string]any, at Attribution) []*storev1.S
 		// here would render the summary twice and attribute the harness's text
 		// to the person.
 		//
-		// CONSUMED HERE TOO WHEN IT WAS NOT THE NEXT LINE. The boundary's own
-		// lookahead reaches exactly one record, and the harness does not always
-		// write the summary there — an observed transcript put a
-		// `system/scheduled_task_fire` between them. A summary that names a
-		// boundary this converter drew with the placeholder supersedes that
-		// draw on the cut's own key rather than being dropped.
+		// CONSUMED HERE TOO WHEN IT WAS NOT IN THE BOUNDARY'S BATCH. The
+		// boundary's own lookahead reaches only the rest of its batch, and the
+		// summary may be written after the batch ended. A summary descending
+		// from a boundary this converter drew with the placeholder supersedes
+		// that draw on the cut's own key rather than being dropped.
 		if attached := c.attachCompactSummary(record, at); attached != nil {
 			return append(out, attached)
 		}
