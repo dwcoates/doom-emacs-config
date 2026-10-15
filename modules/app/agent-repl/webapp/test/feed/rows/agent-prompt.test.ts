@@ -8,7 +8,7 @@ import {
   FeedAgentPromptSchema,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { MalformedView } from "../../../src/rpc/malformed.js";
-import { DELIVERY_WORDS, drawFeedAgentPrompt } from "../../../src/feed/rows/agent-prompt.js";
+import { drawFeedAgentPrompt } from "../../../src/feed/rows/agent-prompt.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
 import {
   PROMPT_WAVE_ATTRIBUTE,
@@ -69,78 +69,23 @@ describe("drawFeedAgentPrompt", () => {
     expect(el.querySelector(".bubble-body")?.children).toHaveLength(1);
   });
 
-  it("marks the sender's row queued when the recipient was already live", () => {
-    const msg = agentPrompt();
-    msg.delivery = { case: "queuedToLive", value: create(FeedAgentPromptQueuedToLiveSchema, {}) };
+  it.each([
+    ["queuedToLive", () => create(FeedAgentPromptQueuedToLiveSchema, {})],
+    ["resumedRecipient", () => create(FeedAgentPromptResumedRecipientSchema, {})],
+    [
+      "refused",
+      () => create(FeedAgentPromptRefusedSchema, { reason: { text: "The agent was stopped." } }),
+    ],
+  ] as const)("draws no delivery line for a %s send, the strip being the address alone", (arm, value) => {
+    // Arrange
+    const msg = agentPrompt("→ Explore");
+    msg.delivery = { case: arm, value: value() } as never;
+    // Act
     const el = drawFeedAgentPrompt(msg);
-    expect(el.querySelector("[data-delivery]")?.getAttribute("data-delivery")).toBe("queuedToLive");
-  });
-
-  it("marks the sender's row resumed when the send woke the recipient", () => {
-    const msg = agentPrompt();
-    msg.delivery = {
-      case: "resumedRecipient",
-      value: create(FeedAgentPromptResumedRecipientSchema, {}),
-    };
-    const el = drawFeedAgentPrompt(msg);
-    expect(el.querySelector("[data-delivery]")?.textContent).toBe(
-      DELIVERY_WORDS.resumedRecipient,
-    );
-  });
-
-  it("marks the sender's row refused when the send reached nobody", () => {
-    const msg = agentPrompt();
-    msg.delivery = {
-      case: "refused",
-      value: create(FeedAgentPromptRefusedSchema, {}),
-    };
-    const el = drawFeedAgentPrompt(msg);
-    expect(el.querySelector("[data-delivery]")?.getAttribute("data-delivery")).toBe("refused");
-  });
-
-  it("draws a refusal apart from a landing, so the two are not read alike", () => {
-    const msg = agentPrompt();
-    msg.delivery = {
-      case: "refused",
-      value: create(FeedAgentPromptRefusedSchema, {}),
-    };
-    const el = drawFeedAgentPrompt(msg);
-    expect(el.querySelector("[data-delivery]")?.classList.contains("refused")).toBe(true);
-  });
-
-  it("draws the producer's refusal words verbatim beside the marker", () => {
-    const msg = agentPrompt();
-    msg.delivery = {
-      case: "refused",
-      value: create(FeedAgentPromptRefusedSchema, {
-        reason: { text: "The agent was stopped by the user." },
-      }),
-    };
-    const el = drawFeedAgentPrompt(msg);
-    expect(el.querySelector(".prompt-refusal-reason")?.textContent).toBe(
-      "The agent was stopped by the user.",
-    );
-  });
-
-  it("draws a refusal that gave no account with the marker and no reason", () => {
-    const msg = agentPrompt();
-    msg.delivery = {
-      case: "refused",
-      value: create(FeedAgentPromptRefusedSchema, {}),
-    };
-    const el = drawFeedAgentPrompt(msg);
-    expect(el.querySelector("[data-delivery]")?.textContent).toBe(DELIVERY_WORDS.refused);
-    expect(el.querySelector(".prompt-refusal-reason")).toBeNull();
-  });
-
-  it("draws no delivery marker on the recipient's copy, whose delivery is unset", () => {
-    expect(drawFeedAgentPrompt(agentPrompt()).querySelector("[data-delivery]")).toBeNull();
-  });
-
-  it("refuses a delivery arm this build does not know", () => {
-    const msg = agentPrompt();
-    msg.delivery = { case: "invented" as never, value: {} as never };
-    expect(() => drawFeedAgentPrompt(msg)).toThrow(MalformedView);
+    // Assert
+    expect(
+      [...el.querySelectorAll(`.${BUBBLE_STRIP_CLASS}`)].map((c) => c.textContent),
+    ).toEqual(["→ Explore"]);
   });
 
   it("refuses a prompt with no address, rather than drawing an unaddressed one", () => {
@@ -196,8 +141,8 @@ describe("drawFeedAgentPrompt: a re-push", () => {
   });
 });
 
-describe("drawFeedAgentPrompt: the delivery line", () => {
-  it("rides the header strip, under the address", () => {
+describe("drawFeedAgentPrompt: the header strip", () => {
+  it("holds the address and then the body, with no delivery line between", () => {
     // Arrange / Act
     const el = drawFeedAgentPrompt(
       create(FeedAgentPromptSchema, {
@@ -209,7 +154,6 @@ describe("drawFeedAgentPrompt: the delivery line", () => {
     // Assert
     expect([...el.children].map((c) => c.classList[0])).toEqual([
       "prompt-author",
-      "prompt-delivery",
       "bubble-scroll",
     ]);
   });

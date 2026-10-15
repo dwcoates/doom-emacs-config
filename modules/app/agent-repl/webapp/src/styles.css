@@ -7949,15 +7949,6 @@ ar-button.merge-queue-move[aria-disabled="true"] {
 }
 #ws-sidebar .sb-refusal-paths > li { overflow-wrap: anywhere; }
 
-/* ---- agent prompt delivery (src/feed/rows/agent-prompt.ts) ---- */
-/* The delivery line is the second line of the agent prompt's header strip,
-   under its address (owner ruling, 2026-09-23). */
-.prompt-delivery {
-  display: block;
-  font-size: 0.85em;
-  opacity: 0.7;
-}
-
 /* ---- undecidable permission verdict (src/feed/asks/permission.ts) ---- */
 .badge.arm-deniedUndecidable {
   font-style: italic;
@@ -7973,16 +7964,6 @@ ar-button.merge-queue-move[aria-disabled="true"] {
 .footer-notice {
   padding: 2px 8px;
   font-size: 0.85em;
-}
-
-/* The refused delivery (src/feed/rows/agent-prompt.ts). A send that reached
-   nobody wears the feed's error color, so it is not read as one of the two
-   landings the same marker otherwise announces. */
-.prompt-delivery.refused { color: var(--err); }
-.prompt-delivery.refused .prompt-refusal-reason {
-  display: block;
-  color: var(--muted);
-  font-style: italic;
 }
 
 /* THE NO-SESSION DASH takes the same declarations, deliberately: it is

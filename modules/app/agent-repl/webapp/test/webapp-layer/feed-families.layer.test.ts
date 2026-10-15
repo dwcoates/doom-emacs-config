@@ -494,18 +494,18 @@ it(
   TURN_TEST_MS,
 );
 
-// §F2 — agent_prompt, and landing 10's delivery outcome on the SENDER's row.
+// §F2 — agent_prompt: the SENDER's row states no delivery outcome, its
+// header strip being the address alone (owner ruling, 2026-10-14).
 it(
-  "names the resumption on the sender's agent-prompt row when the send woke the recipient",
+  "draws no delivery line on the sender's agent-prompt row when the send woke the recipient",
   async () => {
     // Arrange / Act — `!send-message-resumed` sends to an IDLE agent, which the
-    // vendor resumes to receive it.
+    // vendor resumes to receive it, so the row's delivery arm is set.
     const row = await family("send-message-resumed", "agentPrompt");
 
-    // Assert — the delivery arm is stated, and it is the resumption.
-    expect(row.querySelector("[data-delivery]")?.getAttribute("data-delivery")).toBe(
-      "resumedRecipient",
-    );
+    // Assert
+    expect(row.querySelector(".prompt-address")).not.toBeNull();
+    expect(row.querySelector("[data-delivery]")).toBeNull();
   },
   TURN_TEST_MS,
 );
