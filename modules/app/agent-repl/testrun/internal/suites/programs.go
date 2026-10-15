@@ -47,8 +47,18 @@ func ProgramUnits(l Layout, needed []string, owner func(roster.Program) string) 
 			}
 			argv = append(argv, "-ldflags="+strings.Join(links, " "))
 		}
+		dir := filepath.Join(l.Module, p.Module)
+		// A coverage run instruments every system it spawns, so the reach of
+		// its integration and e2e tiers counts; never a fake (roster.Fake).
+		if l.Coverage && !p.Fake {
+			pkgs, err := coverPkg(l, dir)
+			if err != nil {
+				return nil, err
+			}
+			argv = append(argv, "-cover", "-coverpkg="+pkgs)
+		}
 		argv = append(argv, "-o", filepath.Join(l.ProgramsDir(), p.Name), p.Package)
-		specs = append(specs, spec(ProgramUnitID(p.Name), owner(p), filepath.Join(l.Module, p.Module), argv))
+		specs = append(specs, spec(ProgramUnitID(p.Name), owner(p), dir, argv))
 	}
 	return specs, nil
 }

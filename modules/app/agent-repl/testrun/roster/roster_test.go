@@ -175,3 +175,28 @@ func TestRosterPathsResolveOnlyThroughResolve(t *testing.T) {
 		t.Fatalf("these files read the roster's path convention themselves; call roster.Resolve: %v", offenders)
 	}
 }
+
+func TestCoverageSystemsAreGoOrVitestSuites(t *testing.T) {
+	for _, name := range CoverageSystems {
+		s, ok := Lookup(name)
+		if !ok {
+			t.Errorf("coverage system %q is no roster suite", name)
+			continue
+		}
+		if s.Kind != GoModule && s.Kind != Vitest {
+			t.Errorf("coverage system %q is a %v suite; only Go modules and vitest packages have statement coverage", name, s.Kind)
+		}
+	}
+}
+
+func TestAProgramBuiltFromAnIntegrationDirectoryIsAFake(t *testing.T) {
+	// The fakes live beside the integration suites that run them; a system
+	// under test never does. Either way round, a mismatch would instrument a
+	// fake into a system's coverage or leave a system uninstrumented.
+	for _, p := range Programs {
+		underIntegration := strings.Contains(p.Package, "/integration/")
+		if underIntegration != p.Fake {
+			t.Errorf("program %s (package %s): Fake = %t, but it is built from an integration directory: %t", p.Name, p.Package, p.Fake, underIntegration)
+		}
+	}
+}

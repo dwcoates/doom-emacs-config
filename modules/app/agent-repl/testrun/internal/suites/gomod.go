@@ -138,6 +138,9 @@ func goModuleUnitsForPackages(l Layout, s roster.Suite, dir string, pkgs []strin
 		u.Programs = append(u.Programs, p.Programs...)
 		if l.Coverage {
 			p.CovDir = filepath.Join(covRoot, fmt.Sprintf("%03d", i))
+			if len(p.Programs) > 0 {
+				p.SpawnedCovDir = SpawnedCovDir(l, s.Name, i)
+			}
 		}
 		build, split, err := p.units()
 		if err != nil {

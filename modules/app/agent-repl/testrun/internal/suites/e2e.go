@@ -11,8 +11,9 @@ import (
 // e2eUnits is the root package split the one Go way (goPkg), with a build
 // that also installs the npm deps and fills the shared prebuilt directory
 // every chunk reads; every other package of the e2e module is an ordinary Go
-// package. The module is vetted like every Go module (goVet). The e2e suite
-// runs without coverage, as it always has here.
+// package. The module is vetted like every Go module (goVet). Under
+// coverage the e2e module's own code is not measured (it is the harness, not
+// a system), but the systems its tests spawn are (SpawnedCovDir).
 func e2eUnits(l Layout, s roster.Suite) (Units, error) {
 	dir := l.resolve(s.Path)
 	pkgs, err := goTestedPackages(dir)
@@ -29,6 +30,9 @@ func e2eUnitsForPackages(l Layout, s roster.Suite, dir string, pkgs []string) (U
 		p := goPkg{Suite: s.Name, Module: dir, Rel: rel, Parallel: s.TestParallel[rel], Bin: filepath.Join(work, fmt.Sprintf("%03d.test", i)),
 			Programs: s.Programs[rel], ProgramsDir: l.ProgramsDir()}
 		u.Programs = append(u.Programs, p.Programs...)
+		if l.Coverage {
+			p.SpawnedCovDir = SpawnedCovDir(l, s.Name, i)
+		}
 		if rel == "." {
 			prebuilt := filepath.Join(work, "prebuilt")
 			p.sharePrebuilt(prebuilt, strconv.Quote(filepath.Join(l.Module, "bin", "ensure-e2e-deps.sh")))

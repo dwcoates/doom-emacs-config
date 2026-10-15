@@ -124,6 +124,11 @@ type Program struct {
 	// Links are the -X bindings the build sets, each pointing a variable at
 	// another program of the same run.
 	Links []ProgramLink
+	// Fake marks harness scaffolding rather than a system under test. A
+	// coverage run never instruments one: a fake inherits the environment of
+	// the system that spawns it, so its counters would land in that system's
+	// coverage directory and read as covered production code.
+	Fake bool
 }
 
 // ProgramLink binds the package variable Var, at link time, to the path of the
@@ -139,12 +144,18 @@ type ProgramLink struct {
 var Programs = []Program{
 	{Name: "agent-repld", Owner: "daemon", Module: "daemon", Package: "./cmd/agent-repld",
 		Links: []ProgramLink{{Var: "agent-repld/internal/gitclient.gitBinary", Program: "git"}}},
-	{Name: "fakeshim", Owner: "daemon", Module: "daemon", Package: "./integration/fakeshim"},
-	{Name: "git", Owner: "daemon", Module: "daemon", Package: "./integration/fakegit/git"},
+	{Name: "fakeshim", Owner: "daemon", Module: "daemon", Package: "./integration/fakeshim", Fake: true},
+	{Name: "git", Owner: "daemon", Module: "daemon", Package: "./integration/fakegit/git", Fake: true},
 	{Name: "shim-store", Owner: "store", Module: "agent-shim/shim-store", Package: "."},
 	{Name: "shim-claude-sidecar", Owner: "sidecar", Module: "agent-shim/claude/shim-sidecar", Package: "."},
 	{Name: "shim-lock", Owner: "lock", Module: "agent-shim/shim-lock", Package: "."},
 }
+
+// CoverageSystems are the suites whose code is a system the coverage
+// baseline measures: each one's statement coverage, every tier together, is
+// the reference a test removal is held to (testrun/coverage-baseline.json).
+// The generated protobufs, the test tooling and the e2e harness are not.
+var CoverageSystems = []string{"daemon", "sidecar", "store", "lock", "logging", "protohelpers", "webapp", "shim"}
 
 // LookupProgram answers the program named name.
 func LookupProgram(name string) (Program, bool) {

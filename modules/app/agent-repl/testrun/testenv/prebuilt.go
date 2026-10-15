@@ -14,8 +14,10 @@
 //     is built by ONE of its processes into a directory, which then exits
 //     (Prebuild), and every chunk reads it from there (Prebuilt).
 //
-// Neither may be combined with coverage: a prebuilt binary is uninstrumented,
-// so a coverage run that read one would silently measure nothing.
+// Neither may be combined with coverage unless the run marks them
+// instrumented (ProgramsInstrumented): an ordinary prebuilt binary is
+// uninstrumented, so a coverage run that read one would silently measure
+// nothing.
 package testenv
 
 import (
@@ -51,7 +53,7 @@ func BinaryMode(getenv func(string) string) (BuildMode, string, error) {
 	switch {
 	case into != "" && from != "":
 		return 0, "", fmt.Errorf("testenv: %s and %s are both set; a process either builds shared binaries or reads them", Prebuild, Prebuilt)
-	case (into != "" || from != "") && getenv(Coverage) != "":
+	case (into != "" || from != "") && getenv(Coverage) != "" && getenv(ProgramsInstrumented) == "":
 		return 0, "", fmt.Errorf("testenv: shared prebuilt binaries are uninstrumented, so they cannot serve a coverage run (%s is set)", Coverage)
 	case into != "":
 		return BuildInto, into, nil
@@ -95,9 +97,11 @@ func PrebuildDir(shared, sub string) (string, error) {
 // again, whichever suite it belongs to.
 const Programs = "AGENT_REPL_TEST_PROGRAMS"
 
-// ProgramsInstrumented says the programs directory was cover-built, so it may
-// serve a coverage run. Only `testrun redundancy` sets it, for the programs
-// directory it builds itself; a run's own programs are never instrumented.
+// ProgramsInstrumented says the programs directory and the shared prebuilt
+// binaries were cover-built, so they may serve a coverage run. Only a run
+// that built them so sets it: `testrun run --coverage`, and `testrun
+// redundancy` for the programs directory it builds itself. An ordinary run's
+// programs are never instrumented.
 const ProgramsInstrumented = "AGENT_REPL_TEST_PROGRAMS_INSTRUMENTED"
 
 // Program answers the run's built program name: its path and true when the

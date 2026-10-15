@@ -88,6 +88,11 @@ type goPkg struct {
 	Programs []string
 	// ProgramsDir is the run's programs directory (Layout.ProgramsDir).
 	ProgramsDir string
+	// SpawnedCovDir, under coverage, is where the systems this package's
+	// tests spawn write their counters (testenv.Coverage): the build and every
+	// chunk carry it, with the programs marked instrumented, so the reach of
+	// an integration or e2e tier counts. "" spawns uninstrumented systems.
+	SpawnedCovDir string
 }
 
 // sharePrebuilt makes this package's build process compile its test binary,
@@ -134,7 +139,17 @@ func (p goPkg) units() (run.Spec, *Split, error) {
 		}
 		argv = append(argv, goPackageArg(p.Rel))
 	}
-	buildUnit := spec(p.group()+":build", p.Suite, p.Module, argv)
+	var spawnedEnv []string
+	if p.SpawnedCovDir != "" {
+		if err := os.MkdirAll(p.SpawnedCovDir, 0o755); err != nil {
+			return run.Spec{}, nil, fmt.Errorf("suites: create %s: %w", p.SpawnedCovDir, err)
+		}
+		spawnedEnv = []string{testenv.ProgramsInstrumented + "=1", testenv.Coverage + "=" + p.SpawnedCovDir}
+		p.ChunkEnv = append(p.ChunkEnv, spawnedEnv...)
+	}
+	// A shared prebuild builds the systems its chunks spawn, so under
+	// coverage it builds them instrumented too.
+	buildUnit := spec(p.group()+":build", p.Suite, p.Module, argv, spawnedEnv...)
 	if len(tests) == 0 {
 		// Nothing to run: compiling the test files is the whole check.
 		return buildUnit, nil, nil
