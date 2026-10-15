@@ -36,11 +36,13 @@ type Case struct {
 type Universe int
 
 const (
+	// KillsOnly keeps every killed mutant and nothing else: a case is
+	// removable when the kept cases kill every mutant it kills. It is the
+	// default (owner ruling, 2026-10-14).
+	KillsOnly Universe = iota
 	// Strict keeps every killed mutant AND every reached block. Mutation
 	// operators are incomplete, so a line no operator touches still counts.
-	Strict Universe = iota
-	// KillsOnly keeps every killed mutant and nothing else.
-	KillsOnly
+	Strict
 )
 
 func (u Universe) String() string {
