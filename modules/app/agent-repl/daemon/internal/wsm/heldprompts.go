@@ -540,24 +540,9 @@ func (s *store) AllHeldPrompts(ctx context.Context) ([]HeldPrompt, error) {
 func (s *store) loadHeldPrompts(ctx context.Context, op string, fields dlog.Context, query string, args ...any) ([]HeldPrompt, error) {
 	var out []HeldPrompt
 	err := s.read(ctx, op, fields, func(ctx context.Context) error {
-		rows, err := s.db().QueryContext(ctx, query, args...)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		var loaded []HeldPrompt
-		for rows.Next() {
-			h, err := scanHeldPrompt(rows)
-			if err != nil {
-				return err
-			}
-			loaded = append(loaded, h)
-		}
-		if err := rows.Err(); err != nil {
-			return err
-		}
+		loaded, err := listRows(ctx, s.db(), query, scanHeldPrompt, args...)
 		out = loaded
-		return nil
+		return err
 	})
 	if err != nil {
 		return nil, err
