@@ -706,9 +706,14 @@ STAGE_ENTRIES=(
   AGENTS.md
 )
 
-# stage_find lists, NUL-separated and relative to the module root, every file
-# and symlink of the staged set. Inside the allowlist none of these is ever
-# taken:
+# stage_find lists, NUL-separated and relative to the module root, every
+# directory, file and symlink of the staged set. DIRECTORIES ARE LISTED TOO,
+# for their mtimes: tar archives each entry without recursion (-n) and restores
+# a listed directory's mtime, while a directory it only creates on the way to a
+# file gets the extraction time, and the webapp dist's staleness rule
+# (webapp-dist.sh: `find src -newer dist/index.html`) counts directories, so
+# every freshly built dist read as stale. Inside the allowlist none of these is
+# ever taken:
 #   * `.git`, file or directory: in a git WORKTREE checkout .git is a FILE
 #     holding an absolute host path that does not exist in the container, and
 #     the suite gets its build identity from .sandbox-sha instead;
@@ -726,7 +731,7 @@ stage_find() {
                          -o -name .vite-cache -o -name worktrees -o -name .venv -o -name __pycache__ \) \) \
          -o \( -type d -name dist ! -path webapp/dist \) \
          -o -name .worktree -o -name '*.test' -o -name .sandbox-sha \) -prune \
-      -o ! -type d -print0 )
+      -o -print0 )
 }
 
 # stage_stream MODULE_SRC STATUS_FILE writes the staged working copy to stdout

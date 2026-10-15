@@ -831,6 +831,12 @@ func TestSandboxRunStreamsTheWorkingCopyAndMountsNoHostPath(t *testing.T) {
 	if !slices.Contains(entries, "e2e/go.mod") || !slices.Contains(entries, "metaprompt.md") {
 		t.Fatalf("the streamed copy (%d entries) lacks e2e/go.mod or metaprompt.md", len(entries))
 	}
+	// Directories ride as entries of their own, so their mtimes survive: the
+	// webapp dist's staleness rule counts directories, and one created only
+	// on the way to a file is stamped with the extraction time.
+	if !slices.Contains(entries, "webapp/src/") && !slices.Contains(entries, "webapp/src") {
+		t.Fatalf("the streamed copy carries no entry for the directory webapp/src, so its mtime is lost")
+	}
 	for _, e := range entries {
 		if strings.Contains("/"+e+"/", "/.git/") || strings.Contains("/"+e+"/", "/node_modules/") {
 			t.Fatalf("the streamed copy carries %q, which staging excludes", e)
