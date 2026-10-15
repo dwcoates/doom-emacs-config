@@ -606,9 +606,8 @@ func TestFanWideCancel(t *testing.T) {
 	t.Parallel()
 	// Arrange: a plain registered, opened workspace (no repository/merge
 	// machinery needed for this scenario).
-	repo := harness.NewRepo(t)
-	w := NewWorld(t, WorldOpts{})
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	w := SharedWorld(t)
+	ws := w.NewWorkspace(t)
 	if _, err := w.Client().OpenWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws})); err != nil {
 		t.Fatalf("OpenWorkspace = error %v, want a success", err)
 	}

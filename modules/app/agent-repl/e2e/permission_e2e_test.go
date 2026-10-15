@@ -68,9 +68,16 @@ import (
 func pmNewPermissionWorld(t *testing.T) (*World, *workspacev1.WorkspaceRef) {
 	t.Helper()
 	w := NewWorld(t, WorldOpts{})
+	return w, pmNewPermissionWorkspace(t, w)
+}
+
+// pmNewPermissionWorkspace registers and opens a fresh workspace on w, for a
+// test that brings its own World (the shared one).
+func pmNewPermissionWorkspace(t *testing.T, w *World) *workspacev1.WorkspaceRef {
+	t.Helper()
 	ws := w.NewWorkspace(t)
 	pmOpenWorkspace(t, w, ws)
-	return w, ws
+	return ws
 }
 
 // pmOpenWorkspace sends OpenWorkspace, which is what spawns the real shim
@@ -162,7 +169,8 @@ func TestPermissionAskAnsweredArms(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
-			w, ws := pmNewPermissionWorld(t)
+			w := SharedWorld(t)
+			ws := pmNewPermissionWorkspace(t, w)
 			turn := SubmitPrompt(t, w, ws, tc.prompt)
 			askRow := pmAwaitFeedRow(t, w, ws, "the open permission ask", func(r *frontendv1.FeedRow) bool {
 				return r.GetTurn().GetValue() == turn.GetValue() && r.GetPermission().GetOpen() != nil

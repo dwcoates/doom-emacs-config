@@ -190,7 +190,7 @@ func awaitSubagentSettled(t *testing.T, w *World, page *frontendv1.FeedPage, str
 func TestSubagentSyncNestedActivity(t *testing.T) {
 	t.Parallel()
 	// Arrange.
-	w := NewWorld(t, WorldOpts{})
+	w := SharedWorld(t)
 	ws := w.NewWorkspace(t)
 
 	// Act.
@@ -294,7 +294,7 @@ func pageHasAgentPromptText(rows []*frontendv1.FeedRow, text string) bool {
 func TestSubagentDetached(t *testing.T) {
 	t.Parallel()
 	// Arrange.
-	w := NewWorld(t, WorldOpts{})
+	w := SharedWorld(t)
 	ws := w.NewWorkspace(t)
 
 	// Act: the main turn ends on the async-launch ack, well before the
@@ -506,7 +506,7 @@ func TestSubagentBubbleFromAReplayIsStillAddressable(t *testing.T) {
 func TestSubagentDetachedSurvivesAnInterjection(t *testing.T) {
 	t.Parallel()
 	// Arrange: the held turn, with its detached agent live beneath it.
-	w := NewWorld(t, WorldOpts{})
+	w := SharedWorld(t)
 	ws := w.NewWorkspace(t)
 	_, rootToken := openFeed(t, w, ws, nil)
 	rootStream := w.WatchFeed(rootToken)

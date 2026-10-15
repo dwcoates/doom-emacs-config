@@ -165,7 +165,7 @@ func cpDriveObservingInProgress(t *testing.T, w *World, ws *workspacev1.Workspac
 func TestCompactionDirected(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	w := NewWorld(t, WorldOpts{})
+	w := SharedWorld(t)
 	ws, configDir := cpNewWorkspace(t, w)
 	const wantSummary = "Compacted the conversation."
 

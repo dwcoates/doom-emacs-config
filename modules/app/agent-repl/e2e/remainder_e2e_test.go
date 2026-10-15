@@ -253,7 +253,8 @@ func TestCronCreateSetsTheFootersCronsChip(t *testing.T) {
 func TestPlanModeCoalescesOntoOneBubble(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	w, ws := rmNewWorkspace(t)
+	w := SharedWorld(t)
+	ws := w.NewWorkspace(t)
 
 	// Act
 	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "plan")

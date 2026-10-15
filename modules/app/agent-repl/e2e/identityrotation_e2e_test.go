@@ -165,7 +165,7 @@ func awaitTopbarSessionLineNonEmpty(t *testing.T, w *World, topbar *harness.Stre
 func TestClearRotatesIdentity(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	w := NewWorld(t, WorldOpts{})
+	w := SharedWorld(t)
 	ws := w.NewWorkspace(t)
 	topbar := w.WatchTopbar(ws)
 

@@ -90,7 +90,7 @@ func faDriveErrored(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, scenar
 func TestApiRateLimitedCarriesTheVendorWait(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	w := NewWorld(t, WorldOpts{})
+	w := SharedWorld(t)
 	w.ExpectWarnings(faApiErrorWarnings...)
 	ws := w.NewWorkspace(t)
 

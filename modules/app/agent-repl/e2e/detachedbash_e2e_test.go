@@ -437,7 +437,7 @@ func dbExpectNoUnmodeledWarning(t *testing.T, stream *harness.Stream[*frontendv1
 // Seam: stream-tool-card
 func TestBashForegroundCompleted(t *testing.T) {
 	t.Parallel()
-	w := NewWorld(t, WorldOpts{})
+	w := SharedWorld(t)
 	ws := w.NewWorkspace(t)
 
 	initial, stream := dbOpenRootFeed(t, w, ws)

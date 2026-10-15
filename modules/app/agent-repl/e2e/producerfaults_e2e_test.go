@@ -191,7 +191,7 @@ func pfQueryDiedWarnings(w *World) {
 func TestQueryEofEndsTheTurnAsQueryDied(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	w := NewWorld(t, WorldOpts{})
+	w := SharedWorld(t)
 	pfQueryDiedWarnings(w)
 	ws, _ := pfNewWorkspace(t, w)
 
@@ -287,7 +287,7 @@ func TestQueryEofMidAskDeniesTheOpenAsk(t *testing.T) {
 func TestConverterRecoveryClosesTheDegradedWindow(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	w := NewWorld(t, WorldOpts{})
+	w := SharedWorld(t)
 	w.ExpectWarnings("daemon.health.open_fault")
 	ws, configDir := pfNewWorkspace(t, w)
 	topbar := w.WatchTopbar(ws)
@@ -345,7 +345,7 @@ func TestConverterRecoveryClosesTheDegradedWindow(t *testing.T) {
 func TestResidueAttachmentsDrawNoRow(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	w := NewWorld(t, WorldOpts{})
+	w := SharedWorld(t)
 	ws, configDir := pfNewWorkspace(t, w)
 
 	// Act

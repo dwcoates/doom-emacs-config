@@ -158,7 +158,7 @@ func TestBubbleRefusedNotDeliverable(t *testing.T) {
 	t.Parallel()
 	// Arrange: drive a synchronous subagent to completion, then find its
 	// settled bubble row.
-	w := NewWorld(t, WorldOpts{})
+	w := SharedWorld(t)
 	// THE SHIM'S REFUSAL IS THE ASSERTION BELOW. A prompt addressed to a
 	// subagent has no SDK route at all, the shim answers `not_deliverable`,
 	// and the delivery path records that refusal on its way to the caller.

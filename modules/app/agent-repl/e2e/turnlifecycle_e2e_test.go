@@ -97,7 +97,7 @@ func tlResponseMarkdown(t *testing.T, rows []*frontendv1.FeedRow, id *frontendv1
 func TestTurnStartToCompletion(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	w := NewWorld(t, WorldOpts{})
+	w := SharedWorld(t)
 	ws := w.NewWorkspace(t)
 
 	// Act

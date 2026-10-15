@@ -86,7 +86,7 @@ func TestInterruptAfterTextDelta(t *testing.T) {
 	// ruling reversed real git: only agent-repld, the shim, shim-store, and
 	// shim-sidecar run for real), and a feed watch opened BEFORE the prompt
 	// is submitted, so no push in between can be missed.
-	w := NewWorld(t, WorldOpts{})
+	w := SharedWorld(t)
 	ws := w.NewWorkspace(t)
 
 	opened, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
