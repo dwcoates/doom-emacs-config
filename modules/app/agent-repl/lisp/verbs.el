@@ -119,6 +119,7 @@
 (declare-function agent-repl-rpc-update-shutdown-schedule "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-update-merge-queue "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-daemon-health "agent-repl-rpc" (conn request &rest keys))
+(declare-function agent-repl-rpc-send-hidden-keepalives "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-session-health "agent-repl-rpc" (conn request &rest keys))
 
 ;; Defined by roster.el.  Declared, never defined here.
@@ -874,6 +875,60 @@ of its own beyond the echo: the push is the new state."
      (lambda (_)
        (message "agent-repl: %s %s" ws (if hidden "hidden" "shown"))
        (agent-repl-verbs--land-after-visibility ws hidden)))))
+
+(defun agent-repl-verbs--keepalive-outcome-text (outcome)
+  "Return the words for one hidden workspace's decoded keep-alive OUTCOME."
+  (let ((v (plist-get outcome :value)))
+    (pcase (plist-get outcome :arm)
+      (:sent "sent")
+      (:not-running "not running")
+      (:failed (format "failed (%s)" (plist-get v :detail)))
+      (:skipped
+       (let* ((reason (plist-get v :reason))
+              (rv (plist-get reason :value)))
+         (pcase (plist-get reason :arm)
+           (:busy (format "skipped: %s" (plist-get rv :detail)))
+           (:detached-work-live
+            (format "skipped: %d background item(s) running" (plist-get rv :live-items)))
+           (:cache-lapsed "skipped: its cache already lapsed")
+           (arm (error "agent-repl-verbs: keep-alive skip arm %S has no wording" arm)))))
+      (arm (error "agent-repl-verbs: keep-alive outcome arm %S has no wording" arm)))))
+
+(defun agent-repl-verbs-describe-hidden-keepalives (workspaces)
+  "Return the one line reporting the decoded keep-alive WORKSPACES.
+Every workspace whose keep-alive was sent is counted; every other one is
+named, by its directory's base name, beside what happened to it."
+  (if (null workspaces)
+      "no hidden workspaces to keep warm"
+    (let ((sent (cl-count-if (lambda (ws) (eq (plist-get (plist-get ws :outcome) :arm) :sent))
+                             workspaces))
+          (others (cl-remove-if (lambda (ws) (eq (plist-get (plist-get ws :outcome) :arm) :sent))
+                                workspaces)))
+      (string-join
+       (cons (format "keep-alive sent to %d of %d hidden workspace(s)" sent (length workspaces))
+             (mapcar (lambda (ws)
+                       (format "%s %s"
+                               (file-name-nondirectory
+                                (directory-file-name (plist-get (plist-get ws :workspace) :dir)))
+                               (agent-repl-verbs--keepalive-outcome-text (plist-get ws :outcome))))
+                     others))
+       " · "))))
+
+(defun agent-repl-send-hidden-keepalives ()
+  "Send one keep-alive to every hidden workspace's session.
+Each hidden workspace's cache is otherwise left to lapse; the keep-alive
+moves its lapse later, and the hidden section's countdowns follow on the
+roster stream.  The echo says how each one went."
+  (interactive)
+  (agent-repl-verbs--send
+   #'agent-repl-rpc-send-hidden-keepalives (agent-repl-verbs--conn) nil
+   :op "send-hidden-keepalives"
+   :on-success
+   (lambda (value)
+     (let ((workspaces (plist-get value :workspaces)))
+       (agent-repl--info agent-repl--global-log-scope
+                         "elisp.verbs.hidden-keepalives workspaces=%S" workspaces)
+       (message "agent-repl: %s" (agent-repl-verbs-describe-hidden-keepalives workspaces))))))
 
 (defun agent-repl-verbs--land-after-visibility (ws hidden)
   "Request the switch an accepted visibility change of WS lands on.

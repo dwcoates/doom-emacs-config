@@ -50,6 +50,8 @@
 
 ;; The codec.  Defined in wire-*.el; named, never implemented, here.
 (declare-function agent-repl-wire-encode-register-workspace-request "wire-host" (request))
+(declare-function agent-repl-wire-encode-send-hidden-keepalives-request "wire-verbs" (&optional request))
+(declare-function agent-repl-wire-decode-send-hidden-keepalives-response "wire-verbs" (json))
 (declare-function agent-repl-wire-encode-update-persistent-wifi-mode-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-update-persistent-wifi-mode-response "wire-verbs" (json))
 (declare-function agent-repl-wire-decode-register-workspace-response "wire-host" (alist))
@@ -382,6 +384,16 @@ answer, not as a failure.")
   agent-repl-wire-decode-set-workspace-priority-response
   "Set or clear a workspace's priority.
 Clearing is the ABSENCE of the priority field, never a sentinel value.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-send-hidden-keepalives
+  "SendHiddenKeepalives"
+  agent-repl-wire-encode-send-hidden-keepalives-request
+  agent-repl-wire-decode-send-hidden-keepalives-response
+  "Send one keep-alive to every hidden workspace's session.
+Daemon-scoped: nothing names a workspace.  Each cadence stays held; the
+keep-alive's answer moves each cache's lapse later, which reaches the
+hidden section's countdown on the roster stream.  The success reports
+each hidden workspace's outcome; only an unreadable registry is an error.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-set-workspace-hidden
   "SetWorkspaceHidden"

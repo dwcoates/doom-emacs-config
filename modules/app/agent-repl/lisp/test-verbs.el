@@ -230,6 +230,8 @@ answers a bare success, which is what almost every verb's success is."
                  (agent-repl-test-verbs--stub :deploy))
                 ((symbol-function 'agent-repl-rpc-daemon-health)
                  (agent-repl-test-verbs--stub :daemon-health))
+                ((symbol-function 'agent-repl-rpc-send-hidden-keepalives)
+                 (agent-repl-test-verbs--stub :hidden-keepalives))
                 ((symbol-function 'agent-repl-rpc-session-health)
                  (agent-repl-test-verbs--stub :session-health)))
        (agent-repl-test--recording-popups ,@body))))
@@ -753,6 +755,84 @@ still says where the question stands."
     (let ((request (agent-repl-test-verbs--request :set-hidden)))
       (should (equal (plist-get request :workspace) (agent-repl-test-verbs--ref)))
       (should (eq (plist-get (plist-get request :visibility) :arm) :hide)))))
+
+;;;; ---- SendHiddenKeepalives (`SPC j R') ---------------------------------
+
+(defun agent-repl-test-verbs--keepalive (name arm &optional value)
+  "Return a decoded SendHiddenKeepalivesWorkspace for NAME with outcome ARM."
+  (list :workspace (list :id (concat "id-" name) :dir (concat "/work/" name))
+        :outcome (list :arm arm :value value)))
+
+(defun agent-repl-test-verbs--keepalives-answer (workspaces)
+  "Return the answers alist for a SendHiddenKeepalives success over WORKSPACES."
+  (list (cons :hidden-keepalives
+              (list :response (list :arm :success :value (list :workspaces workspaces))))))
+
+(ert-deftest agent-repl-verbs-hidden-keepalives-sends-the-empty-request ()
+  "The command asks the daemon once, naming no workspace."
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--keepalives-answer nil)
+    (agent-repl-send-hidden-keepalives)
+    (should (assq :hidden-keepalives agent-repl-test-verbs--sent))
+    (should-not (agent-repl-test-verbs--request :hidden-keepalives))))
+
+(ert-deftest agent-repl-verbs-hidden-keepalives-counts-the-sent ()
+  "Every workspace whose keep-alive went out is counted, not named."
+  (agent-repl-test-verbs--with
+      (agent-repl-test-verbs--keepalives-answer
+       (list (agent-repl-test-verbs--keepalive "alpha" :sent)
+             (agent-repl-test-verbs--keepalive "beta" :sent)))
+    (agent-repl-send-hidden-keepalives)
+    (should (agent-repl-test-verbs--messaged-p "keep-alive sent to 2 of 2 hidden workspace(s)"))))
+
+(ert-deftest agent-repl-verbs-hidden-keepalives-names-each-one-not-sent ()
+  "A workspace whose keep-alive did not go out is named beside why."
+  (agent-repl-test-verbs--with
+      (agent-repl-test-verbs--keepalives-answer
+       (list (agent-repl-test-verbs--keepalive "alpha" :sent)
+             (agent-repl-test-verbs--keepalive "beta" :not-running)))
+    (agent-repl-send-hidden-keepalives)
+    (should (agent-repl-test-verbs--messaged-p
+             "keep-alive sent to 1 of 2 hidden workspace(s) · beta not running"))))
+
+(ert-deftest agent-repl-verbs-hidden-keepalives-says-so-when-none-are-hidden ()
+  "An empty hidden section is an answer, said in words."
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--keepalives-answer nil)
+    (agent-repl-send-hidden-keepalives)
+    (should (agent-repl-test-verbs--messaged-p "no hidden workspaces to keep warm"))))
+
+(ert-deftest agent-repl-verbs-hidden-keepalives-words-each-outcome ()
+  "Each outcome the daemon names has its own words."
+  (dolist (case `((:failed (:detail "stream closed") "failed (stream closed)")
+                  (:skipped (:reason (:arm :busy :value (:detail "a turn is in flight")))
+                            "skipped: a turn is in flight")
+                  (:skipped (:reason (:arm :detached-work-live :value (:live-items 2)))
+                            "skipped: 2 background item(s) running")
+                  (:skipped (:reason (:arm :cache-lapsed :value (:lapsed-at-ms 1)))
+                            "skipped: its cache already lapsed")))
+    (should (equal (agent-repl-verbs--keepalive-outcome-text
+                    (list :arm (nth 0 case) :value (nth 1 case)))
+                   (nth 2 case)))))
+
+(ert-deftest agent-repl-verbs-hidden-keepalives-unknown-outcome-fails-loudly ()
+  "An outcome arm with no wording is a contract breach, never silence."
+  (should-error (agent-repl-verbs--keepalive-outcome-text (list :arm :mystery :value nil))))
+
+(ert-deftest agent-repl-verbs-hidden-keepalives-refusal-is-reported ()
+  "An unreadable registry reaches the generic refusal report."
+  (agent-repl-test-verbs--with
+      '((:hidden-keepalives
+         . (:response (:arm :error
+                       :value (:cause (:arm :registry-unreadable
+                                       :value (:detail "database is locked")))))))
+    (agent-repl-send-hidden-keepalives)
+    (should (agent-repl-test-verbs--messaged-p "send-hidden-keepalives refused"))))
+
+(ert-deftest agent-repl-verbs-hidden-keepalives-transport-failure-is-loud ()
+  "A daemon that does not answer is reported, never swallowed."
+  (agent-repl-test-verbs--with
+      '((:hidden-keepalives . (:failure (:kind :unreachable :message "boom"))))
+    (agent-repl-send-hidden-keepalives)
+    (should (agent-repl-test-verbs--messaged-p "send-hidden-keepalives failed"))))
 
 (ert-deftest agent-repl-verbs-roster-or-view-prefers-the-given-roster ()
   "A given roster is answered verbatim, whatever the view holds."

@@ -252,6 +252,10 @@ func (s *fakeServer) UpdatePersistentWifiMode(ctx context.Context, req *connect.
 	return handleUnary[v1.UpdatePersistentWifiModeRequest, v1.UpdatePersistentWifiModeResponse](ctx, s, "UpdatePersistentWifiMode", req.Msg)
 }
 
+func (s *fakeServer) SendHiddenKeepalives(ctx context.Context, req *connect.Request[v1.SendHiddenKeepalivesRequest]) (*connect.Response[v1.SendHiddenKeepalivesResponse], error) {
+	return handleUnary[v1.SendHiddenKeepalivesRequest, v1.SendHiddenKeepalivesResponse](ctx, s, "SendHiddenKeepalives", req.Msg)
+}
+
 func (s *fakeServer) RegisterWorkspace(ctx context.Context, req *connect.Request[v1.RegisterWorkspaceRequest]) (*connect.Response[v1.RegisterWorkspaceResponse], error) {
 	return handleUnary[v1.RegisterWorkspaceRequest, v1.RegisterWorkspaceResponse](ctx, s, "RegisterWorkspace", req.Msg)
 }
