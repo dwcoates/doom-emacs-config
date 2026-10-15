@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -212,5 +213,22 @@ func TestOnlyTheSandboxSuiteReadsTheWebappDist(t *testing.T) {
 		if s.NeedsWebappDist && s.Kind != Script {
 			t.Errorf("%s needs the webapp dist but is not a Script suite", s.Name)
 		}
+	}
+}
+
+func TestEverySuiteThatReadsTheScenarioGoldensDeclaresThem(t *testing.T) {
+	// A keyed suite runs confined to its declared inputs, and its reuse key is
+	// taken over them: a suite reading the goldens undeclared is refused the
+	// read, and a golden change would not rerun it.
+	for _, name := range []string{"daemon", "sidecar"} {
+		t.Run(name, func(t *testing.T) {
+			// Arrange
+			s, ok := Lookup(name)
+
+			// Assert
+			if !ok || s.Reuse == nil || !slices.Contains(s.Reuse.Inputs, "testdata/scenario-goldens/") {
+				t.Fatalf("%s's inputs = %+v, want testdata/scenario-goldens/ among them", name, s.Reuse)
+			}
+		})
 	}
 }

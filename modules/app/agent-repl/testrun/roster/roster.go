@@ -233,6 +233,10 @@ var Suites = []Suite{
 			"skills/emit-workspace-commands.sh",
 			// gitclient pins the markers the merge queue's hook spells.
 			"/.githooks/reference-transaction",
+			// The daemon half of every mocked-vendor scenario
+			// (integration/scenariogoldens_test.go) reads the shim's goldens
+			// and keeps its own feed.json beside them.
+			"testdata/scenario-goldens/",
 		}}},
 	{Name: "sidecar", Kind: GoModule, Path: "agent-shim/claude/shim-sidecar", TestParallel: map[string]int{"integration": 8},
 		Programs: map[string][]string{"integration": {"shim-claude-sidecar"}},
