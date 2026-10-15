@@ -163,6 +163,8 @@ func ParseArgs(argv []string, stderr io.Writer) (Args, error) {
 	maxDrop := fs.Float64("max-coverage-drop", redundancy.DefaultMaxDrop, "the most statement-coverage points any system may lose")
 	baseline := fs.String("baseline", "", "the pinned coverage baseline (testrun/coverage-baseline.json); without it each system is held to the measured population's own coverage")
 	fs.StringVar(&a.Go, "go", "go", "the go command")
+	fs.Float64Var(&a.MaxLoad, "max-load", DefaultMaxLoad, "the most one-minute load average a phase or a mutant starts under")
+	fs.DurationVar(&a.QuietWait, "quiet-wait", DefaultQuietWait, "how long to wait for the load to drop before failing")
 	fs.DurationVar(&a.HangBound, "hang-bound", DefaultHangBound, "how long a case that hung reruns alone to confirm the hang; just over twice the longest real wait the measured tests allow themselves")
 	if err := fs.Parse(argv); err != nil {
 		return Args{}, err

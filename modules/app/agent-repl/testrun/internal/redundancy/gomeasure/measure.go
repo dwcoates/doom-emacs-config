@@ -103,6 +103,12 @@ type Config struct {
 	// Estimate stops a verification after the unit tier, reporting how many
 	// mutants it leaves unsettled and what settling them would cost.
 	Estimate bool
+	// MaxLoad is the most one-minute load a phase or a mutant starts under,
+	// and QuietWait how long it waits for less (load.go).
+	MaxLoad   float64
+	QuietWait time.Duration
+	// Clock is what the load gate waits by; nil is the wall clock.
+	Clock Clock `json:"-"`
 }
 
 // leaf is one case: a leaf test of one suite.
@@ -179,6 +185,9 @@ func Measure(ctx context.Context, cfg Config, exec Exec, log *run.Log) (*redunda
 	if cfg.HangBound <= 0 {
 		return nil, fmt.Errorf("gomeasure: the hang bound must be positive, got %s", cfg.HangBound)
 	}
+	if cfg.MaxLoad <= 0 || cfg.QuietWait <= 0 {
+		return nil, fmt.Errorf("gomeasure: the load gate needs a positive max load and quiet wait, got %g and %s", cfg.MaxLoad, cfg.QuietWait)
+	}
 	m := &measurer{cfg: cfg, exec: exec, log: log}
 	start := time.Now()
 	phaseStart := start
@@ -253,6 +262,9 @@ func Measure(ctx context.Context, cfg Config, exec Exec, log *run.Log) (*redunda
 	}
 	phase("coverage build")
 
+	if err := m.awaitQuiet(ctx, "discovery"); err != nil {
+		return nil, err
+	}
 	leaves, err := m.discover(ctx, tops)
 	if err != nil {
 		return nil, err
@@ -267,6 +279,9 @@ func Measure(ctx context.Context, cfg Config, exec Exec, log *run.Log) (*redunda
 		}
 	} else if cfg.Estimate {
 		return nil, fmt.Errorf("gomeasure: an estimate is of a deletion set; name one")
+	}
+	if err := m.awaitQuiet(ctx, "the per-case coverage runs"); err != nil {
+		return nil, err
 	}
 	cases, statements, healthy, err := m.coverage(ctx, leaves, deleted)
 	if err != nil {
@@ -294,6 +309,9 @@ func Measure(ctx context.Context, cfg Config, exec Exec, log *run.Log) (*redunda
 	}
 	phase("mutant schema build")
 
+	if err := m.awaitQuiet(ctx, "the schema baseline"); err != nil {
+		return nil, err
+	}
 	if err := m.baseline(ctx, leaves, healthy); err != nil {
 		return nil, err
 	}
@@ -880,6 +898,11 @@ func (m *measurer) mutate(ctx context.Context, schemas []*gomut.Schema, imports 
 				m.log.Infof("redundancy: %d of %d mutants done", done, total)
 			}
 			covering := reaching.of(mu)
+			if covering != nil {
+				if err := m.awaitQuiet(ctx, "mutant "+mu.Key()); err != nil {
+					return nil, nil, err
+				}
+			}
 			if covering == nil {
 				results = append(results, redundancy.MutantResult{Key: mu.Key(), Status: "unreached"})
 				continue

@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"agentrepl/testrun/internal/redundancy"
 )
@@ -322,5 +323,18 @@ func TestParseArgsRefusesSeveralRosterSuitesWithNoModule(t *testing.T) {
 	// Assert
 	if err == nil || !strings.Contains(err.Error(), "-module must name the mutated one") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestParseArgsHasTheParentsLoadGateByDefault(t *testing.T) {
+	// Act
+	a, err := ParseArgs([]string{"-module", "/m", "-pkg", "./p", "-out", "/o"}, &bytes.Buffer{})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.MaxLoad != 32 || a.QuietWait != time.Hour {
+		t.Fatalf("max load %g, quiet wait %s", a.MaxLoad, a.QuietWait)
 	}
 }

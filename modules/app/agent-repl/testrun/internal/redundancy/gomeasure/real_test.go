@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"agentrepl/testrun/internal/redundancy"
 )
@@ -62,7 +63,7 @@ func TestMeasureEndToEndWithTheRealToolchain(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	cfg := Config{Module: dir, Suites: []Suite{{Package: ".", Tests: []string{"sign_test.go"}}}, Mutate: []string{"."}, Runs: 2, Scratch: t.TempDir(), Go: "go", HangBound: DefaultHangBound}
+	cfg := Config{Module: dir, Suites: []Suite{{Package: ".", Tests: []string{"sign_test.go"}}}, Mutate: []string{"."}, Runs: 2, Scratch: t.TempDir(), Go: "go", HangBound: DefaultHangBound, MaxLoad: 1e9, QuietWait: time.Minute}
 	log, _ := quietLog()
 
 	// Act

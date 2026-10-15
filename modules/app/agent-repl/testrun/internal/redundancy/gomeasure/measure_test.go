@@ -62,6 +62,20 @@ type fakeGo struct {
 	calls     []string
 	// mutantEnvs are the environments mutant-phase runs were given.
 	mutantEnvs [][]string
+	// loads, when set, are the load averages sysctl answers in turn, the
+	// last one ever after; unset answers a quiet host.
+	loads []string
+}
+
+func (f *fakeGo) loadAvg() string {
+	if len(f.loads) == 0 {
+		return "{ 1.00 1.00 1.00 }"
+	}
+	l := f.loads[0]
+	if len(f.loads) > 1 {
+		f.loads = f.loads[1:]
+	}
+	return l
 }
 
 func passLines(names ...string) []Line {
@@ -134,6 +148,8 @@ func (f *fakeGo) exec(_ context.Context, c Cmd) (Result, error) {
 	}
 	f.calls = append(f.calls, call)
 	switch {
+	case base == "sysctl":
+		return Result{Lines: lines(f.loadAvg())}, nil
 	case base == "go" && c.Args[0] == "list" && c.Args[1] == "-m":
 		return Result{Lines: lines("fix")}, nil
 	case base == "go" && c.Args[0] == "list":
@@ -215,6 +231,7 @@ func fakeConfig(t *testing.T) (Config, string) {
 	return Config{
 		Module: dir, Suites: []Suite{{Package: ".", Tests: []string{"p_test.go"}}}, Mutate: []string{"."},
 		Runs: 2, PinCalls: []string{"FindRecord"}, Scratch: t.TempDir(), Go: "go", HangBound: 3 * time.Second,
+		MaxLoad: DefaultMaxLoad, QuietWait: time.Minute,
 	}, dir
 }
 
@@ -700,7 +717,9 @@ func TestConfirmRestKillsWhatRunsOutTheBoundAndRerunsWhatTheTimeoutCutShort(t *t
 			return Result{Lines: passLines("TestB", "TestB/y")}
 		}
 		return Result{Exit: 2, TimedOut: true}
-	}, "2": func(c Cmd) Result { return Result{Lines: passLines(withParents(leavesOf(argAfter(c.Args, "-test.run")))...)} }}
+	}, "2": func(c Cmd) Result {
+		return Result{Lines: passLines(withParents(leavesOf(argAfter(c.Args, "-test.run")))...)}
+	}}
 	log, _ := quietLog()
 
 	// Act

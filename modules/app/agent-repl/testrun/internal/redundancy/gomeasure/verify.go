@@ -141,6 +141,9 @@ func (m *measurer) verify(ctx context.Context, schemas []*gomut.Schema, imports 
 			if len(dReach) == 0 {
 				continue
 			}
+			if err := m.awaitQuiet(ctx, "mutant "+mu.Key()); err != nil {
+				return nil, nil, err
+			}
 			v.Reached++
 			if len(unitReach) > 0 {
 				k, anom, err := m.killers(ctx, mu, unitReach, healthy)
