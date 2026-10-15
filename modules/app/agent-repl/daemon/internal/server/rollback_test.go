@@ -1137,7 +1137,7 @@ func TestInterruptRollingBackEndsTheRolledBackPromptsSelection(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stream := openRootWatch(t, h, ctx)
-	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(promptStep(older))); err != nil {
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(boundaryStep(older))); err != nil {
 		t.Fatalf("select the newest prompt: %v", err)
 	}
 	receiveSelection(t, stream)
