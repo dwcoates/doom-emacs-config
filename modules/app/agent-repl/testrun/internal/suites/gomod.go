@@ -96,8 +96,10 @@ func goModuleUnits(l Layout, s roster.Suite) (Units, error) {
 
 // goIntegrationUnitsForPackages is the suite's build-tagged integration pass:
 // its own vet over the tagged packages, and each package built and split under
-// the tags, exactly as the ordinary pass does it. It is never instrumented for
-// coverage; that question is the ordinary pass's.
+// the tags, exactly as the ordinary pass does it. Its test binaries are never
+// instrumented (in-process coverage is the ordinary pass's question), but
+// under coverage the systems its tests spawn are: that is the integration
+// tier's reach.
 func goIntegrationUnitsForPackages(l Layout, s roster.Suite, dir string, pkgs []string) (Units, error) {
 	tag := s.IntegrationTags
 	vet := goVetTagged(s.Name, dir, tag, s.IntegrationPackages)
@@ -107,6 +109,9 @@ func goIntegrationUnitsForPackages(l Layout, s roster.Suite, dir string, pkgs []
 			Suite: s.Name, Module: dir, Rel: rel, Tags: tag, Parallel: s.TestParallel[rel],
 			Bin:      filepath.Join(l.Work, "bin", s.Name+"-"+tag, fmt.Sprintf("%03d.test", i)),
 			Programs: s.Programs[rel], ProgramsDir: l.ProgramsDir(),
+		}
+		if l.Coverage && len(p.Programs) > 0 {
+			p.SpawnedCovDir = SpawnedCovDir(l, s.Name+"-"+tag, i)
 		}
 		u.Programs = append(u.Programs, p.Programs...)
 		build, split, err := p.units()

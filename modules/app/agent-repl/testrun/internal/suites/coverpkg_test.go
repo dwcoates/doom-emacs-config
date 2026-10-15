@@ -210,3 +210,22 @@ func TestACoverageRunsE2EChunksMeasureTheSystemsTheySpawn(t *testing.T) {
 		t.Fatalf("the e2e module's own code was measured: %v", chunk.Argv)
 	}
 }
+
+func TestACoverageRunsTaggedIntegrationPassMeasuresTheSystemsItSpawns(t *testing.T) {
+	// Arrange: the daemon's integration tier is a build-tagged pass of its own.
+	module := goPackageFixture(t, "func TestA(t *testing.T) {}\n")
+	l := Layout{Module: module, Work: t.TempDir(), Self: "/testrun", Coverage: true}
+	s := roster.Suite{Name: "daemon", IntegrationTags: "integration", Programs: map[string][]string{"p": {"agent-repld"}}}
+
+	// Act
+	u, err := goIntegrationUnitsForPackages(l, s, module, []string{"p"})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunk := u.Splits[0].Chunk("daemon:p[integration]#00", []string{"TestA"})
+	if !envHas(chunk.Env, testenv.Coverage+"="+SpawnedCovDir(l, "daemon-integration", 0)) || !envHas(chunk.Env, testenv.ProgramsInstrumented+"=1") {
+		t.Fatalf("the tagged integration chunk's env %v lacks spawned coverage", chunk.Env)
+	}
+}
