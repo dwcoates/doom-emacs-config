@@ -190,6 +190,57 @@ Two different measures, labelled each time they appear:
 - The parent lands it in `modules/app/agent-repl/AGENTS.md` through the merge queue, as branch `test-tier-rule`.
 - This branch carries no copy of the rule. Once this report lands, a follow-up points the rule's Why bullet at this report's path.
 
+## Step (a) implemented: the lower tiers that must exist before any removal
+
+Written on this branch, each as its own commit:
+- **Daemon units:**
+  - the bash spill count;
+  - an unmodeled vendor class drawn by name;
+  - reached prose outliving a failed turn and an interrupted one;
+  - a not-sent push's footer line;
+  - every unread usage reason;
+  - a second clear's lone divider;
+  - a second identity rotation.
+- **Daemon integration:**
+  - an open question on both the strip and the rail;
+  - a chess board with no checkout;
+  - the retired quiet tier;
+  - a prompt after a failed merge;
+  - a successor's deploy;
+  - a session-less handover;
+  - an unknown-agent answer;
+  - the one opening replay;
+  - interrupt-all reaching shells;
+  - a deferred prompt across a workspace restart;
+  - the host's vendor conversation unmoved by a turn.
+  - The harness gained `StateServiceBuilds`, so a successor's deploy reads live service build reports.
+- **Shim integration:**
+  - the refusal stated on the live stream;
+  - a chained rotation;
+  - a prompt during a keep-alive;
+  - an interrupted turn anchoring the rewind;
+  - `KillTurn` on an open ask;
+  - the weekly window under `!usage-opus-absent`;
+  - healthy diagnostics after an ordinary turn.
+- **ERT:** discard empties the composer and submits nothing.
+- **e2e:** `TestHookBlocked` and `TestHookFailed` now assert exactly one hook card per firing.
+  - That count was the two-plane half of a webapp-layer case, and it stays at e2e.
+
+Rows re-ruled while implementing:
+- **Already covered; the audit missed the covering test, so nothing new was needed:**
+  - `TestSubagentBubbleFromAReplayIsStillAddressable`: `daemon/internal/resolve/feed/subagent_test.go:TestASettledOnlyFramesRowAddressesItsSubFeed`.
+  - `TestContextInjectedSkills`: `shim-sidecar/integration/diagnostics_adjacency_test.go:TestInjectedSkillsReachTheAgentsBook`.
+  - `TestBubbleRefusedAgentBusy`: the shim's `test/engine/turn.test.ts` agent_busy cases, plus the daemon relay in `prompt_test.go`.
+  - `TestADetachedSubagentWhoseProcessDiedIsNotLiveAfterAColdBoot`: the daemon level rule in `subagent_test.go`, plus the shim's "the session stream states the empty set once the resume is delivered".
+  - `TestMonitorDeadline`: `footer/chips_test.go` persistent and deadline cases, plus the shim's `convert/tools/monitor.test.ts`.
+  - `TestSampledAllowanceResetsAfterItWasRead`: the shim fake's "still resets AFTER now", plus `enduring_test.go`.
+- **`TestHookFailed`'s relaunch half: now KEEP.**
+  - The shim writes a failed firing's start and outcome (`convert/hooks.test.ts`), yet a relaunched daemon draws no card. No single tier shows where the replayed card is dropped, so only the full chain proves "the card is live only".
+- **`TestEmacsRegisteringAWorkspaceMakesItTheDaemonsCurrentRow`: moved to the Doom-tier rows.**
+  - Its landing goes through projectile and Doom's workspace switch, which batch ERT cannot run. It stays in `e2e-emacs` until the Doom tier exists.
+- **The five `perf_go` rows: not moved.**
+  - They run only under the `perf` build tag, never in the functional e2e suite, so moving them saves no e2e time.
+
 ## The scenario-matrix change (ruling 1, drafted for the implementation)
 
 ### The problem the change has to solve
