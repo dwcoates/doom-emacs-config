@@ -436,7 +436,6 @@ const e2eSharedSub = "e2e-bin"
 // shimBundleName is the staged shim bundle's path under e2eBinDir.
 const shimBundleName = "shim-dist/main.js"
 
-
 // sharedOr answers a binary from the shared prebuilt directory when this
 // process was told to read one, and builds it otherwise.
 func sharedOr(name string, build func() (string, error)) (string, error) {
