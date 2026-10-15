@@ -15,10 +15,6 @@ import {
   OpenWorkspaceVendorStartFailedSchema,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_workspace_pb";
 import {
-  AssignWorkspaceTaskErrorSchema,
-  AssignWorkspaceTaskResponseSchema,
-} from "../../../proto/gen/ts/agentrepl/v1/endpoint_assign_workspace_task_pb";
-import {
   KillWorkspaceErrorSchema,
   KillWorkspaceResponseSchema,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_kill_workspace_pb";
@@ -46,7 +42,6 @@ import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace
 import { LockHolderFailureSchema } from "../../../proto/gen/ts/conversation/v1/session_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import {
-  buildAssignWorkspaceTaskRequest,
   buildCloseWorkspaceRequest,
   buildKillWorkspaceRequest,
   buildMergeWorkspaceRequest,
@@ -59,10 +54,8 @@ import {
   buildSetWorkspaceHiddenRequest,
   drawKillConfirm,
   drawNukeConfirm,
-  assignWorkspaceTaskRefusal,
   closeWorkspaceRefusal,
   drawRowMenu,
-  fillAssignSubmenu,
   mergeWorkspaceRefusal,
   nukeWorkspaceRefusal,
   lockHolderHowText,
@@ -141,13 +134,6 @@ describe("the requests each verb is", () => {
     expect([request.workspace, request.visibility.case]).toEqual([TARGET_WS, arm]);
   });
 
-  it("assigns a task by echoing its id", () => {
-    expect(buildAssignWorkspaceTaskRequest(TARGET_WS, "task-3").task?.id).toBe("task-3");
-  });
-
-  it("unassigns by omitting the task, never by an empty id", () => {
-    expect(buildAssignWorkspaceTaskRequest(TARGET_WS, null).task).toBeUndefined();
-  });
 });
 
 describe("the menu", () => {
@@ -195,16 +181,6 @@ describe("the menu", () => {
     expect(levels).toEqual(["p05", "p1", "p2", "p3", "clear"]);
   });
 
-  it("offers the task view's own sections as assignment choices", () => {
-    const t = target();
-    t.sc.tasks.push({ id: "task-3", label: "ship the rail" });
-    const submenu = document.createElement("div");
-    fillAssignSubmenu(submenu, t);
-    const ids = [...submenu.querySelectorAll("[data-assign-task]")].map((el) =>
-      el.getAttribute("data-assign-task"),
-    );
-    expect(ids).toEqual(["", "task-3"]);
-  });
 });
 
 describe("the two destructive verbs", () => {
@@ -378,21 +354,6 @@ const VERBS: readonly VerbUnderTest[] = [
         call: (client) =>
           client.setWorkspacePriority(buildSetWorkspacePriorityRequest(TARGET_WS, "p1")),
         schema: SetWorkspacePriorityResponseSchema,
-      }),
-  },
-  {
-    rpc: "AssignWorkspaceTask",
-    method: "assignWorkspaceTask",
-    responseSchema: AssignWorkspaceTaskResponseSchema,
-    errorSchema: AssignWorkspaceTaskErrorSchema,
-    call: (t, control) =>
-      runVerb(control, {
-        sc: t.sc,
-        rpc: "AssignWorkspaceTask",
-        call: (client) =>
-          client.assignWorkspaceTask(buildAssignWorkspaceTaskRequest(TARGET_WS, "task-3")),
-        schema: AssignWorkspaceTaskResponseSchema,
-        refusalText: (cause) => assignWorkspaceTaskRefusal(cause as never),
       }),
   },
   {
@@ -594,10 +555,6 @@ describe("the per-rpc causes, worded at their own site", () => {
     expect(refusal?.textContent).toContain("already in the merge queue");
   });
 
-  it("says an assignment names a task the daemon does not know", async () => {
-    const refusal = await refuseWith(VERBS[7], "unknownTask");
-    expect(refusal?.textContent).toContain("does not know that task");
-  });
 });
 
 describe("a refusal", () => {
@@ -948,77 +905,6 @@ describe("the menu's own controls, clicked", () => {
     expect(priority).toBeUndefined();
   });
 
-  it("reveals the assignment choices when their entry is clicked", async () => {
-    const t = target();
-    const menu = drawRowMenu(t);
-    const submenu = (menu.querySelector("[data-assign-task]") as HTMLElement)
-      .parentElement as HTMLElement;
-    await click(submenu.previousElementSibling as Element);
-    expect(submenu.hidden).toBe(false);
-  });
-
-  it("rebuilds the assignment choices from the last push each time it opens", async () => {
-    const t = target();
-    const menu = drawRowMenu(t);
-    const submenu = (menu.querySelector("[data-assign-task]") as HTMLElement)
-      .parentElement as HTMLElement;
-    // Arrange: a roster push landed a task AFTER the menu was drawn.
-    t.sc.tasks.push({ id: "task-9", label: "land the rail" });
-    // Act
-    await click(submenu.previousElementSibling as Element);
-    // Assert
-    expect([...submenu.querySelectorAll("[data-assign-task]")].map((el) => el.textContent)).toEqual(
-      ["Unassign", "land the rail"],
-    );
-  });
-
-  it("assigns the task the clicked choice names", async () => {
-    let id: unknown = null;
-    const t = target({
-      assignWorkspaceTask: (req: unknown) => {
-        id = (req as { task?: { id: string } }).task?.id;
-        return create(AssignWorkspaceTaskResponseSchema, {
-          result: { case: "success", value: {} },
-        });
-      },
-    });
-    t.sc.tasks.push({ id: "task-3", label: "ship the rail" });
-    const submenu = document.createElement("div");
-    fillAssignSubmenu(submenu, t);
-    await click(submenu.querySelector("[data-assign-task='task-3']") as Element);
-    expect(id).toBe("task-3");
-  });
-
-  it("unassigns by omitting the task from the Unassign choice", async () => {
-    let task: unknown = "unset-was-not-read";
-    const t = target({
-      assignWorkspaceTask: (req: unknown) => {
-        task = (req as { task?: unknown }).task;
-        return create(AssignWorkspaceTaskResponseSchema, {
-          result: { case: "success", value: {} },
-        });
-      },
-    });
-    const submenu = document.createElement("div");
-    fillAssignSubmenu(submenu, t);
-    await click(submenu.querySelector("[data-assign-task='']") as Element);
-    expect(task).toBeUndefined();
-  });
-
-  it("draws an assignment refusal at the choice that made the call", async () => {
-    const t = target({
-      assignWorkspaceTask: () =>
-        create(AssignWorkspaceTaskResponseSchema, {
-          result: { case: "error", value: { cause: { case: "unknownTask", value: {} } } },
-        }),
-    });
-    t.sc.tasks.push({ id: "task-3", label: "ship the rail" });
-    const submenu = document.createElement("div");
-    fillAssignSubmenu(submenu, t);
-    const entry = submenu.querySelector("[data-assign-task='task-3']") as HTMLElement;
-    await click(entry);
-    expect(entry.nextElementSibling?.textContent).toBe("the daemon does not know that task");
-  });
 });
 
 describe("an arm no wording table knows", () => {
@@ -1028,7 +914,6 @@ describe("an arm no wording table knows", () => {
     ["CloseWorkspaceError.cause", closeWorkspaceRefusal],
     ["NukeWorkspaceError.cause", nukeWorkspaceRefusal],
     ["MergeWorkspaceError.cause", mergeWorkspaceRefusal],
-    ["AssignWorkspaceTaskError.cause", assignWorkspaceTaskRefusal],
   ];
 
   it.each(WORDINGS)("refuses %s rather than inventing a sentence", (path, word) => {

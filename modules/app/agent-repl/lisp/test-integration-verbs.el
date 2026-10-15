@@ -1719,16 +1719,13 @@ rest of this suite already asserts against."
              (rows . ((rows . ,(vconcat rows))))
              (divergence . ((pending . ()))) (expanded . ()))])
          (openCount . ((workspaces . 1)))))
-    (task . ((sections . []) (openCount . ())))
-    (maturity . ((sections . []) (openCount . ())))
     (open . ((label . ((text . "Open"))) (expanded . ())))
     (hidden . ((header . ((label . ((text . "Hidden"))) (count . ((workspaces . 0)))))
                (rows . ((rows . [])))
                (expanded . ())))
     (recentlyMerged . ((header . ((label . ((text . "recently merged"))) (count . ((workspaces . 1)))))
                         (groups . [])
-                        (collapsed . ())))
-    (shownRepository . ())))
+                        (collapsed . ())))))
 
 (defmacro agent-repl-itest-verbs--with-roster (daemon rows &rest body)
   "Subscribe to DAEMON's roster stream, push ROWS, wait for the view, run BODY.

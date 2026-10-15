@@ -95,16 +95,13 @@ OVERRIDES replaces top-level entries (notably `current')."
               (rows . ((rows . ,(vconcat rows))))
              (divergence . ((pending . ()))) (expanded . ()))])
          (openCount . ((workspaces . 1)))))
-     (task . ((sections . []) (openCount . ())))
-     (maturity . ((sections . []) (openCount . ())))
      (open . ((label . ((text . "Open"))) (expanded . ())))
      (hidden . ((header . ((label . ((text . "Hidden"))) (count . ((workspaces . 0)))))
                 (rows . ((rows . [])))
                 (expanded . ())))
      (recentlyMerged . ((header . ((label . ((text . "recently merged"))) (count . ((workspaces . 1)))))
                          (groups . [])
-                         (collapsed . ())))
-     (shownRepository . ()))))
+                         (collapsed . ()))))))
 
 (defun agent-repl-itest-roster--merged-group (rows arm)
   "Return a RosterMergedRepoGroup protojson alist of the fixture repository.
@@ -156,16 +153,13 @@ order apart from declaration order."
              (rows . ((rows . ,(vconcat rows-b))))
              (divergence . ((pending . ()))) (expanded . ()))])
          (openCount . ((workspaces . 1)))))
-    (task . ((sections . []) (openCount . ())))
-    (maturity . ((sections . []) (openCount . ())))
     (open . ((label . ((text . "Open"))) (expanded . ())))
     (hidden . ((header . ((label . ((text . "Hidden"))) (count . ((workspaces . 0)))))
                (rows . ((rows . [])))
                (expanded . ())))
     (recentlyMerged . ((header . ((label . ((text . "recently merged"))) (count . ((workspaces . 1)))))
                         (groups . [])
-                        (collapsed . ())))
-    (shownRepository . ())))
+                        (collapsed . ())))))
 
 (defun agent-repl-itest-roster--row-missing (id name status omit)
   "Return a RosterRow like `--row', but with field OMIT entirely absent.
@@ -777,38 +771,6 @@ sections by, say, label."
        (lambda () (equal (agent-repl-roster-tab-order) '("ws-a1" "ws-b1")))
        nil "section A's row before section B's")
       (should (equal (agent-repl-roster-tab-order) '("ws-a1" "ws-b1"))))))
-
-(ert-deftest agent-repl-itest-roster-task-view-is-ignored-for-tab-order ()
-  "The task view's rows and order never reach the tab bar; no duplicate tabs.
-Fanout §8: \"The task view is ignored (the same rows regrouped)\" —
-walking it too would double every tab and let its order override the
-repository view's."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-roster--with-subscription daemon
-      ;; Act: the task view regroups the SAME two workspaces, reversed.
-      (agent-repl-itest-roster--push
-       daemon (agent-repl-itest-roster--roster
-               (list (agent-repl-itest-roster--row "ws-t1" "ws-t1" 'ready)
-                     (agent-repl-itest-roster--row "ws-t2" "ws-t2" 'ready))
-               `(task
-                 . ((sections
-                     . [((key . ((taskId . "task-1")))
-                         (header . ((label . ((text . "task")))
-                                    (done . ((done . :false)))))
-                         (rows
-                          . ((rows
-                              . ,(vector
-                                  (agent-repl-itest-roster--row "ws-t2" "ws-t2" 'ready)
-                                  (agent-repl-itest-roster--row "ws-t1" "ws-t1" 'ready)))))
-                         (expanded . ()))])
-                    (openCount . ((workspaces . 2)))))))
-      ;; Assert.
-      (agent-repl-itest--wait-until
-       (lambda () (equal (agent-repl-roster-tab-order) '("ws-t1" "ws-t2")))
-       nil "the repository view's order, never the task view's")
-      (should (equal (agent-repl-roster-tab-order) '("ws-t1" "ws-t2")))
-      (should (equal (length (agent-repl-roster-tab-order)) 2)))))
 
 (ert-deftest agent-repl-itest-roster-colliding-names-get-the-repo-label-suffix ()
   "Two rows named identically in different repos both get \"·<repo label>\".
@@ -1661,8 +1623,6 @@ pinned directly."
                             (when . ((noTurnRunning . ())))
                             (detail . nil)
                             (closed . ((closed . :false))))]))))])))
-          (task . ((sections . []) (openCount . ())))
-          (maturity . ((sections . []) (openCount . ())))
           (open . ((label . ((text . "Open"))) (expanded . ())))
           (recentlyMerged . ((header . ((label . ((text . "recently merged"))) (count . ((workspaces . 1)))))
                              (groups . [])))))))
@@ -2004,26 +1964,6 @@ the wire decoder."
                  (agent-repl-itest--log-entries daemon "elisp.roster.push" "error")))
         (should (null (agent-repl--ws-by-ref-id "itest-dup-id")))
         (should (equal agent-repl-roster-view kept))))))
-
-;; audit-3 #39
-(ert-deftest agent-repl-itest-roster-roster-missing-task-is-refused ()
-  "A `WorkspaceRoster' with no `task' field at all is a contract breach.
-sidebar.proto:60 marks `task' non-optional; audit-1 #49 pinned
-`repository' and `recentlyMerged' only, leaving this field unguarded."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-roster--with-subscription daemon
-      ;; Act.
-      (agent-repl-itest-roster--push
-       daemon (agent-repl-itest-roster--roster-missing
-               (list (agent-repl-itest-roster--row
-                      "ws-no-task-marker" "ws-no-task-marker" 'ready))
-               'task))
-      ;; Assert.
-      (agent-repl-itest--await-log daemon "elisp.rpc.push-invalid" "error")
-      (should (agent-repl-itest--logged-p daemon "elisp.rpc.push-invalid" "error"))
-      (should (agent-repl-itest-roster--push-invalid-carries-raw
-               daemon "ws-no-task-marker")))))
 
 (ert-deftest agent-repl-itest-roster-roster-missing-hidden-is-refused ()
   "A `WorkspaceRoster' with no `hidden' field at all is a contract breach.

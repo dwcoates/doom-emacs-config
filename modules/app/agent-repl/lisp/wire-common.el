@@ -408,34 +408,6 @@ The ref is a daemon-minted echo token: both halves travel back verbatim."
          (cons 'dir (agent-repl-wire--encode-string
                      "RepositoryRef" 'dir (plist-get value :dir))))))
 
-;;;; ---- workspace.v1.MaturityStage ----
-
-(defun agent-repl-wire-decode-maturity-stage-backlog (value)
-  "Decode VALUE as the empty message `MaturityStageBacklog'."
-  (agent-repl-wire--decode-empty "MaturityStageBacklog" value))
-
-(defun agent-repl-wire-decode-maturity-stage-in-progress (value)
-  "Decode VALUE as the empty message `MaturityStageInProgress'."
-  (agent-repl-wire--decode-empty "MaturityStageInProgress" value))
-
-(defun agent-repl-wire-decode-maturity-stage-merging (value)
-  "Decode VALUE as the empty message `MaturityStageMerging'."
-  (agent-repl-wire--decode-empty "MaturityStageMerging" value))
-
-(defun agent-repl-wire-decode-maturity-stage (value)
-  "Decode VALUE as a `workspace.v1.MaturityStage' plist `(:stage ARM)'.
-THE ARM IS THE STAGE; an unset one is a breach."
-  (let ((object (agent-repl-wire--object "MaturityStage" value)))
-    (agent-repl-wire--check-keys "MaturityStage" object
-                                 '(backlog inProgress merging))
-    (agent-repl-wire--decoded
-     "MaturityStage"
-     (list :stage (agent-repl-wire--decode-oneof
-                   "MaturityStage" 'stage object
-                   '((backlog :backlog agent-repl-wire-decode-maturity-stage-backlog)
-                     (inProgress :in-progress agent-repl-wire-decode-maturity-stage-in-progress)
-                     (merging :merging agent-repl-wire-decode-maturity-stage-merging)))))))
-
 ;;;; ---- conversation.v1.TurnId ----
 
 (defun agent-repl-wire-decode-turn-id (value)

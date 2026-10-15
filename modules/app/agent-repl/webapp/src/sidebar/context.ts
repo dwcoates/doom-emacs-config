@@ -2,7 +2,7 @@
  * context — what every part of the rail is handed while it draws.
  *
  * The rail is a stateless renderer of the roster like every other component.
- * Its VIEW STATE — folds and the grouping shown — is the daemon's, carried on
+ * Its VIEW STATE — the folds — is the daemon's, carried on
  * the roster push so the sidebar looks the same in every workspace's page
  * (owner rulings, 2026-10-06); `view.ts` holds only this page's asks still in
  * flight. A dropdown open mid-gesture (a row's menu or detail popover) is NOT
@@ -15,23 +15,6 @@ import type { AttentionRegistry } from "./attention.js";
 import type { Dropdowns } from "./dropdowns.js";
 import type { RowHover } from "./row-hover.js";
 import type { SidebarView } from "./view.js";
-
-/** The resolved groupings; which one is drawn is the daemon's view state. */
-export type Grouping = "repository" | "task" | "maturity";
-
-/** Every grouping, in the order the rail's picker offers them. */
-export const GROUPINGS: readonly Grouping[] = ["repository", "task", "maturity"];
-
-/** A maturity stage, as `workspace.v1.MaturityStage`'s arm spells it. */
-export type MaturityStageName = "backlog" | "inProgress" | "merging";
-
-/** A task the assign menu can offer, taken from the task view's sections. */
-export interface TaskChoice {
-  /** `RosterTaskKey.task_id`, echoed back to AssignWorkspaceTask verbatim. */
-  id: string;
-  /** The section header's label, drawn as the menu entry. */
-  label: string;
-}
 
 /** What a draw of the rail carries with it. */
 export interface SidebarContext {
@@ -64,12 +47,6 @@ export interface SidebarContext {
   rowHover: RowHover;
   /** The blink registry the attention markers are driven from. */
   attention: AttentionRegistry;
-  /**
-   * The tasks the assign menu offers, refreshed from the task view at the top
-   * of every draw. A live array rather than a snapshot: a menu opened later
-   * reads whatever the last push resolved.
-   */
-  tasks: TaskChoice[];
   /** Register a teardown the NEXT push (or dispose) runs. */
   onDispose(fn: () => void): void;
 }
@@ -77,16 +54,6 @@ export interface SidebarContext {
 /** The key a repository section is identified by on this page. */
 export function repoFoldKey(repositoryId: string): string {
   return `repo:${repositoryId}`;
-}
-
-/** The key a task section is identified by on this page (`view.ts`). */
-export function taskFoldKey(taskId: string): string {
-  return `task:${taskId}`;
-}
-
-/** The key a maturity stage's section is identified by on this page (`view.ts`). */
-export function maturityFoldKey(stage: MaturityStageName): string {
-  return `maturity:${stage}`;
 }
 
 /**

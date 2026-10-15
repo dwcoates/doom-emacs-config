@@ -34,8 +34,8 @@
  * answers many times a second (2026-10-11). A fit that moves its room is an
  * error and refuses.
  *
- * AN UNLAID PANE KEEPS ITS DRAWN STATE. A pane that is not shown (the other
- * grouping) or a rail not yet on the page cannot be fitted; its bands are left
+ * AN UNLAID PANE KEEPS ITS DRAWN STATE. A rail not yet on the page cannot be
+ * fitted; its bands are left
  * as drawn, every line shown, and fitted the moment they lay out (the rail
  * observes its scroller and its panes).
  */
@@ -258,7 +258,7 @@ export interface BandFit {
 
 /**
  * Keep SCROLLER's bands fitted: a resize of the rail (the window, the editor
- * pane) or of a pane (a section folded or unfolded, the grouping switched)
+ * pane) or of a pane (a section folded or unfolded)
  * re-fits, because the split is a function of exactly that layout. The fit
  * never moves its own room (see the module note), so the re-fit its own
  * resize of the pane provokes draws the same lines and stops there.

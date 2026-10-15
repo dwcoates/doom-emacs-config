@@ -113,7 +113,6 @@ HIDDEN-ROWS, when given, are the hidden section's rows."
                   (list (list :key (list :repository (agent-repl-test-verbs--repo-ref))
                               :header (list :label (list :text "repo-one"))
                               :rows (list :rows rows)))))
-        :task (list :sections nil)
         :hidden (list :header (list :label (list :text "Hidden"))
                       :rows (list :rows hidden-rows))
         :recently-merged (list :header (list :label (list :text "Recently Merged"))
@@ -2855,7 +2854,6 @@ supplies a default section precisely so the other tests have one, and
 this test needs the genuinely sectionless roster."
   (let ((agent-repl-roster-view
          (list :repository (list :sections nil)
-               :task (list :sections nil)
                :recently-merged (list :header (list :label (list :text "Recently Merged"))
                                       :groups nil)
                :current nil)))

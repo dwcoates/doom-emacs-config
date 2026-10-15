@@ -12,14 +12,13 @@
  * that never receives a roster keeps the single-column layout instead of
  * reserving a fifth of the window for an empty dock.
  *
- * NOTHING ABOUT THE VIEW IS LOCAL. Which grouping is shown, which sections
- * are folded and which rows have their detail open are the daemon's, carried
+ * NOTHING ABOUT THE VIEW IS LOCAL. Which sections are folded and which rows
+ * have their detail open are the daemon's, carried
  * on the roster push, so the sidebar looks the same in every workspace's page
  * (owner rulings, 2026-10-06; `view.ts`). A page that still carries the
  * preferences it once stored in `localStorage` starts from the daemon's view
  * instead, says so once at INFO, and drops what it stored.
  */
-import { createControl, type Control } from "../control.js";
 import { WatchWorkspaceRosterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_roster_pb";
 import { createDrawnStatusLog } from "../drawn-status.js";
 import { log } from "../log.js";
@@ -31,10 +30,9 @@ import { watchStream } from "../rpc/streams.js";
 import { AttentionRegistry, type BlinkTimers } from "./attention.js";
 import { createDropdowns } from "./dropdowns.js";
 import { createRowHover } from "./row-hover.js";
-import { changeView } from "./view-change.js";
-import { createSidebarView, GROUPING_VIEW_KEY } from "./view.js";
-import { GROUPINGS, type Grouping, type SidebarContext } from "./context.js";
-import { drawRosterShown, drawWorkspaceRoster } from "./roster.js";
+import { createSidebarView } from "./view.js";
+import type { SidebarContext } from "./context.js";
+import { drawWorkspaceRoster } from "./roster.js";
 import { placeOpenRowDetails } from "./row.js";
 import { installBandFit } from "./band-fit.js";
 import { applySearch, createRailSearch, type RailSearch } from "./search.js";
@@ -195,7 +193,6 @@ function mountSidebarIn(
     dropdowns,
     rowHover: createRowHover(dropdowns, openDetails),
     attention,
-    tasks: [],
     onDispose: (fn) => {
       disposers.push(fn);
     },
@@ -217,7 +214,7 @@ function mountSidebarIn(
     });
     bandFit.refit();
   });
-  const head = drawRailHead(sc, search);
+  const head = drawRailHead(search);
   host.replaceChildren(head.element, search.bar, body);
   // THE RAIL'S LOOPS RUN ON THE WALL CLOCK (wall-phase.ts), so neither a
   // redraw nor a switch to another workspace's page restarts one.
@@ -310,8 +307,6 @@ function mountSidebarIn(
     void body.offsetHeight;
     mark("layout");
     applySearch(body, search.query());
-    // The picker is a copy of the grouping too, drawn once at mount.
-    head.paintGrouping(sc.view.track(GROUPING_VIEW_KEY, drawRosterShown(roster.shown, "WorkspaceRoster.shown"), head.paintGrouping));
     // A detail panel is fixed-positioned so it can leave the rail, which
     // means it can only be measured once it is ON the page: a row drawn
     // already-expanded is placed here, after the draw is in the document.
@@ -349,31 +344,13 @@ function mountSidebarIn(
   };
 }
 
-/** What each grouping's picker button reads. */
-export const GROUPING_PICK_LABELS: Readonly<Record<Grouping, string>> = Object.freeze({
-  repository: "Repo",
-  task: "Task",
-  maturity: "Stage",
-});
-
-/** The rail's header, and how to paint its picker. */
+/** The rail's header. */
 export interface RailHead {
   element: HTMLElement;
-  /** Light the picker button for GROUPING. */
-  paintGrouping: (grouping: Grouping) => void;
 }
 
-/**
- * The rail's header: the search toggle, its title and the grouping picker.
- *
- * The picker SELECTS between resolved views — it shows one pane and hides
- * the others — so switching costs no round trip to draw and derives nothing.
- * Which one is shown is the daemon's view state: the click paints at once and
- * asks (`view-change.ts`), and the push lights every page's picker alike. It
- * is drawn once at mount, outside what a push replaces, so each push paints
- * it again.
- */
-export function drawRailHead(sc: SidebarContext, search: RailSearch): RailHead {
+/** The rail's header: the search toggle and its title. */
+export function drawRailHead(search: RailSearch): RailHead {
   const head = document.createElement("div");
   head.className = "sb-head";
   head.appendChild(search.toggle);
@@ -382,45 +359,5 @@ export function drawRailHead(sc: SidebarContext, search: RailSearch): RailHead {
   title.className = "sb-title";
   title.textContent = "Workspaces";
   head.appendChild(title);
-
-  const views = document.createElement("div");
-  views.className = "sb-views";
-  const buttons = new Map<Grouping, Control>();
-  for (const grouping of GROUPINGS) {
-    const button = createControl();
-    button.className = "sb-view-btn";
-    button.setAttribute("data-grouping-pick", grouping);
-    button.textContent = GROUPING_PICK_LABELS[grouping];
-    button.addEventListener("click", (event) => {
-      event.preventDefault();
-      selectGrouping(grouping, sc, button);
-    });
-    buttons.set(grouping, button);
-    views.appendChild(button);
-  }
-  head.appendChild(views);
-  return {
-    element: head,
-    paintGrouping: (grouping) => {
-      for (const [name, button] of buttons) button.classList.toggle("active", name === grouping);
-    },
-  };
-}
-
-/** Show one grouping in every page: painted here at once, asked of the daemon. */
-function selectGrouping(grouping: Grouping, sc: SidebarContext, button: Control): void {
-  log.info("switching the rail's grouping for every page", {
-    operation: "sidebar.grouping",
-    context: { grouping },
-  });
-  void changeView(sc, {
-    key: GROUPING_VIEW_KEY,
-    value: grouping,
-    control: button,
-    outlivesPush: true,
-    change: {
-      case: "showGrouping",
-      value: { grouping: { case: grouping, value: {} } },
-    },
-  });
+  return { element: head };
 }

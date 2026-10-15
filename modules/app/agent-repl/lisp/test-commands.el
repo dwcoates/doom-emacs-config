@@ -551,7 +551,6 @@ in one group."
         (list :sections (list (list :key (list :repository (list :id "r" :dir "/tmp"))
                                     :header (list :label (list :text "repo"))
                                     :rows (list :rows rows))))
-        :task (list :sections nil)
         :hidden (list :header (list :label (list :text "Hidden"))
                       :rows (list :rows hidden))
         :recently-merged (list :header (list :label (list :text "m"))

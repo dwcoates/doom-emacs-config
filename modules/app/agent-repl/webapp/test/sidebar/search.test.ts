@@ -12,7 +12,6 @@ import {
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import {
   hiddenSection,
-  maturitySection,
   mergedBand,
   mergedGroup,
   mergedSection,
@@ -20,7 +19,6 @@ import {
   roster,
   row,
   sidebarContext,
-  taskSection,
 } from "./harness.js";
 
 /** Whether the drawn row for ID is hidden by the search. */
@@ -68,37 +66,25 @@ describe("applySearch", () => {
     // Act
     applySearch(root, "beta");
     // Assert
-    expect(missed(root.querySelector("[data-grouping='repository']") as Element, "ws-1")).toEqual([true]);
+    expect(missed(root.querySelector(".sb-pane") as Element, "ws-1")).toEqual([true]);
   });
 
   it("keeps a repository section's row the query matches", () => {
     const root = drawn({ repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-1", name: "alpha" })] })] });
     applySearch(root, "alp");
-    expect(missed(root.querySelector("[data-grouping='repository']") as Element, "ws-1")).toEqual([false]);
+    expect(missed(root.querySelector(".sb-pane") as Element, "ws-1")).toEqual([false]);
   });
 
-  it("narrows the task grouping's sections", () => {
-    const root = drawn({ tasks: [taskSection({ id: "task-1", rows: [row({ id: "ws-1", name: "alpha" })] })] });
-    applySearch(root, "beta");
-    expect(missed(root.querySelector("[data-grouping='task']") as Element, "ws-1")).toEqual([true]);
-  });
-
-  it("narrows the maturity grouping's sections", () => {
-    const root = drawn({ maturity: [maturitySection({ stage: "inProgress", rows: [row({ id: "ws-1", name: "alpha" })] })] });
-    applySearch(root, "beta");
-    expect(missed(root.querySelector("[data-grouping='maturity']") as Element, "ws-1")).toEqual([true]);
-  });
-
-  it("narrows Hidden Workspaces in every pane", () => {
+  it("narrows Hidden Workspaces", () => {
     const root = drawn({ hidden: hiddenSection([row({ id: "ws-h", name: "alpha" })]) });
     applySearch(root, "beta");
-    expect(missed(root, "ws-h")).toEqual([true, true, true]);
+    expect(missed(root, "ws-h")).toEqual([true]);
   });
 
-  it("narrows Recently Merged in every pane", () => {
+  it("narrows Recently Merged", () => {
     const root = drawn({ merged: mergedSection([row({ id: "ws-m", name: "alpha" })], 1, false) });
     applySearch(root, "beta");
-    expect(missed(root, "ws-m")).toEqual([true, true, true]);
+    expect(missed(root, "ws-m")).toEqual([true]);
   });
 
   it("keeps a row whose nested child matches, so the child keeps its family", () => {
@@ -106,7 +92,7 @@ describe("applySearch", () => {
       repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-p", name: "parent", children: [row({ id: "ws-c", name: "child" })] })] })],
     });
     applySearch(root, "child");
-    const pane = root.querySelector("[data-grouping='repository']") as Element;
+    const pane = root.querySelector(".sb-pane") as Element;
     expect([missed(pane, "ws-p"), missed(pane, "ws-c")]).toEqual([[false], [false]]);
   });
 
@@ -115,7 +101,7 @@ describe("applySearch", () => {
       repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-p", name: "parent", children: [row({ id: "ws-c", name: "child" })] })] })],
     });
     applySearch(root, "parent");
-    expect(missed(root.querySelector("[data-grouping='repository']") as Element, "ws-c")).toEqual([true]);
+    expect(missed(root.querySelector(".sb-pane") as Element, "ws-c")).toEqual([true]);
   });
 
   it("hides a section the query leaves no row in", () => {
@@ -172,7 +158,7 @@ describe("applySearch", () => {
     // Arrange
     const capture = captureLogRecords();
     const root = drawn({ repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-1" })] })] });
-    root.querySelector("[data-grouping='repository'] [data-roster-row='ws-1'] .name")?.remove();
+    root.querySelector(".sb-pane [data-roster-row='ws-1'] .name")?.remove();
     // Act
     expect(() => applySearch(root, "x")).toThrow(/ws-1 has no name/);
     // Assert

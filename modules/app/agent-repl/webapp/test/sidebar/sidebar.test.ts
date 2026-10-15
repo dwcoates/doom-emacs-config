@@ -10,12 +10,10 @@ import { type AppContext } from "../../src/rpc/context.js";
 import { testAppContext } from "../rpc/app-context.js";
 import { UpdateSidebarViewResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import type { ServiceImpl } from "@connectrpc/connect";
-import { GROUPING_PICK_LABELS, PREFS_KEY, drawRailHead, mountSidebar, mountWebhostSidebar, retireStoredPrefs } from "../../src/sidebar/sidebar.js";
+import { PREFS_KEY, drawRailHead, mountSidebar, mountWebhostSidebar, retireStoredPrefs } from "../../src/sidebar/sidebar.js";
 import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
-import { GROUPINGS, type SidebarContext } from "../../src/sidebar/context.js";
 import { createRailSearch } from "../../src/sidebar/search.js";
 import { HOVER_CLOSE_GRACE_MS } from "../../src/sidebar/row-hover.js";
-import { GROUPING_VIEW_KEY } from "../../src/sidebar/view.js";
 import { captureLogRecords, forwardedRecord, type LogCapture } from "../log-capture.js";
 import type { PhasedAnimation } from "../../src/sidebar/wall-phase.js";
 import type { UnseenEnv } from "../../src/sidebar/unseen.js";
@@ -33,7 +31,6 @@ import {
   mergedSection,
   repoSection,
   sidebarContext,
-  taskSection,
   roster,
   rosterStream,
   row,
@@ -150,136 +147,29 @@ describe("the preferences a page stored before the view was the daemon's", () =>
       timers: fakeTimers(),
     });
     await settle();
-    expect([
-      host.querySelector(".merged-section")?.classList.contains("folded"),
-      host.querySelector("[data-grouping-pick='repository']")?.classList.contains("active"),
-    ]).toEqual([true, true]);
+    expect(host.querySelector(".merged-section")?.classList.contains("folded")).toBe(true);
   });
 });
 
 /** The rail's header, with a search no test here types into. */
-function railHead(sc: SidebarContext): ReturnType<typeof drawRailHead> {
-  return drawRailHead(sc, createRailSearch(() => {}));
+function railHead(): ReturnType<typeof drawRailHead> {
+  return drawRailHead(createRailSearch(() => {}));
 }
 
 describe("the rail's header", () => {
   it("draws the search toggle immediately left of the title", () => {
-    const head = railHead(sidebarContext());
+    const head = railHead();
     const title = head.element.querySelector(".sb-title") as Element;
     expect(title.previousElementSibling?.hasAttribute("data-search-toggle")).toBe(true);
   });
 
-  it("offers every grouping as a picker", () => {
-    const head = railHead(sidebarContext());
-    const picks = [...head.element.querySelectorAll("[data-grouping-pick]")].map((el) =>
-      el.getAttribute("data-grouping-pick"),
-    );
-    expect(picks).toEqual([...GROUPINGS]);
-  });
-
-  it("labels each grouping's button from the one label table", () => {
-    const head = railHead(sidebarContext());
-    const labels = [...head.element.querySelectorAll("[data-grouping-pick]")].map((el) => el.textContent);
-    expect(labels).toEqual(GROUPINGS.map((grouping) => GROUPING_PICK_LABELS[grouping]));
-  });
-
-  it("names the maturity grouping's button Stage", () => {
-    const head = railHead(sidebarContext());
-    expect(head.element.querySelector("[data-grouping-pick='maturity']")?.textContent).toBe("Stage");
-  });
-
-  it("lights the grouping it is painted with", () => {
-    const head = railHead(sidebarContext());
-    head.paintGrouping("task");
-    expect(head.element.querySelector("[data-grouping-pick='task']")?.classList.contains("active")).toBe(true);
-  });
-
-  it("asks the daemon to show the chosen grouping in every page", async () => {
-    const asked: string[] = [];
-    const sc = sidebarContext(
-      appContext({
-        updateSidebarView: (request) => {
-          if (request.change.case === "showGrouping") asked.push(request.change.value.grouping.case ?? "unset");
-          return create(UpdateSidebarViewResponseSchema, { result: { case: "success", value: {} } });
-        },
-      }),
-    );
-    const head = railHead(sc);
-    sc.view.track(GROUPING_VIEW_KEY, "repository", head.paintGrouping);
-    await click(head.element.querySelector("[data-grouping-pick='task']") as Element);
-    expect(asked).toEqual(["task"]);
-  });
-
-  it("asks the daemon to show the maturity grouping through its own arm", async () => {
-    const asked: string[] = [];
-    const sc = sidebarContext(
-      appContext({
-        updateSidebarView: (request) => {
-          if (request.change.case === "showGrouping") asked.push(request.change.value.grouping.case ?? "unset");
-          return create(UpdateSidebarViewResponseSchema, { result: { case: "success", value: {} } });
-        },
-      }),
-    );
-    const head = railHead(sc);
-    sc.view.track(GROUPING_VIEW_KEY, "repository", head.paintGrouping);
-    await click(head.element.querySelector("[data-grouping-pick='maturity']") as Element);
-    expect(asked).toEqual(["maturity"]);
-  });
-
-  it("lights the chosen grouping at once, before any push", async () => {
-    const sc = sidebarContext();
-    const head = railHead(sc);
-    sc.view.track(GROUPING_VIEW_KEY, "repository", head.paintGrouping);
-    await click(head.element.querySelector("[data-grouping-pick='task']") as Element);
-    expect(head.element.querySelector("[data-grouping-pick='task']")?.classList.contains("active")).toBe(true);
-  });
-
-  it("stays clickable after a choice the daemon took, because no push redraws it", async () => {
-    const sc = sidebarContext();
-    const head = railHead(sc);
-    sc.view.track(GROUPING_VIEW_KEY, "repository", head.paintGrouping);
-    const pick = head.element.querySelector("[data-grouping-pick='task']") as HTMLButtonElement;
-    await click(pick);
-    expect([pick.disabled, pick.classList.contains("is-busy")]).toEqual([false, false]);
-  });
-
-  it("puts the old grouping back when the daemon cannot be reached", async () => {
-    const sc = sidebarContext(
-      appContext({
-        updateSidebarView: () => {
-          throw new Error("down");
-        },
-      }),
-    );
-    const head = railHead(sc);
-    sc.view.track(GROUPING_VIEW_KEY, "repository", head.paintGrouping);
-    await click(head.element.querySelector("[data-grouping-pick='task']") as Element);
-    expect(head.element.querySelector("[data-grouping-pick='repository']")?.classList.contains("active")).toBe(true);
-  });
 });
 
 describe("mounting the rail: the view is the daemon's", () => {
-  it("lights the picker for the grouping the push says", async () => {
-    const host = document.createElement("nav");
-    mountSidebar(host, ctxFor([roster({ shown: "task" })]), { timers: fakeTimers() });
-    await settle();
-    expect(host.querySelector("[data-grouping-pick='task']")?.classList.contains("active")).toBe(true);
-  });
-
-  it("shows the grouping's pane in the rail on a picker click, before any push", async () => {
-    const host = document.createElement("nav");
-    mountSidebar(host, ctxFor([roster()]), { timers: fakeTimers() });
-    await settle();
-    await click(host.querySelector("[data-grouping-pick='task']") as Element);
-    expect((host.querySelector("[data-grouping='task']") as HTMLElement).hidden).toBe(false);
-  });
-
   it("draws two pages fed the same pushes identically", async () => {
     const pushes = [
       roster({
-        shown: "task",
         repos: [repoSection({ id: "repo-1", collapsed: true, rows: [row({ id: "ws-1" })] })],
-        tasks: [taskSection({ id: "task-1", collapsed: true, rows: [row({ id: "ws-1" })] })],
         merged: mergedSection([row({ id: "ws-9" })], 1, false),
       }),
     ];
@@ -366,16 +256,6 @@ describe("mounting the rail: the Recently Merged fit", () => {
     expect(() => fireResize(host.querySelector(".sb-scroll") as Element)).not.toThrow();
   });
 
-  it("watches each drawn pane, so a fold or a grouping switch re-fits the band", async () => {
-    // Arrange
-    const host = document.createElement("nav");
-    mountSidebar(host, ctxFor([roster({ merged: mergedSection([row({ id: "ws-9" })], 1, false) })]), {
-      timers: fakeTimers(),
-    });
-    await settle();
-    // Act / Assert
-    expect(() => fireResize(host.querySelector('.sb-pane[data-grouping="task"]') as Element)).not.toThrow();
-  });
 });
 
 /** An endless loop of DURATION milliseconds, at no phase until sought. */
@@ -710,7 +590,7 @@ describe("a click in the rail closes its open dropdowns", () => {
     for (const host of hosts.splice(0)) host.remove();
   });
 
-  /** A rail with one row (in a repository and a task section), in the document. */
+  /** A rail with two rows in a repository section, in the document. */
   async function mountRail(): Promise<HTMLElement> {
     const host = document.createElement("nav");
     document.body.appendChild(host);
@@ -721,7 +601,6 @@ describe("a click in the rail closes its open dropdowns", () => {
         ctxFor([
           roster({
             repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-1" }), row({ id: "ws-2" })] })],
-            tasks: [taskSection({ id: "task-1" })],
           }),
         ]),
         { timers: fakeTimers() },
@@ -732,11 +611,9 @@ describe("a click in the rail closes its open dropdowns", () => {
   }
 
   const rowOf = (host: HTMLElement, id: string): HTMLElement =>
-    host.querySelector(`[data-grouping='repository'] [data-roster-row='${id}']`) as HTMLElement;
+    host.querySelector(`.sb-pane [data-roster-row='${id}']`) as HTMLElement;
   const rowMenu = (host: HTMLElement, id: string): HTMLElement =>
     rowOf(host, id).querySelector(":scope > .sb-menu") as HTMLElement;
-  const taskMenu = (host: HTMLElement): HTMLElement =>
-    host.querySelector(".task-head .sb-menu") as HTMLElement;
   const emptySpace = (host: HTMLElement): HTMLElement => host.querySelector(".sb-head") as HTMLElement;
 
   /** Open the row's detail popover the way the keyboard does, at once. */
@@ -751,13 +628,6 @@ describe("a click in the rail closes its open dropdowns", () => {
     await click(rowOf(host, "ws-1").querySelector(".sb-more") as Element);
     await click(emptySpace(host));
     expect(rowMenu(host, "ws-1").hidden).toBe(true);
-  });
-
-  it("closes a task's menu on a click in empty space", async () => {
-    const host = await mountRail();
-    await click(host.querySelector(".task-head .sb-more") as Element);
-    await click(emptySpace(host));
-    expect(taskMenu(host).hidden).toBe(true);
   });
 
   it("closes a row's detail popover on a click in empty space", async () => {
@@ -786,13 +656,6 @@ describe("a click in the rail closes its open dropdowns", () => {
     await click(rowOf(host, "ws-1").querySelector(".sb-more") as Element);
     await click(rowOf(host, "ws-2").querySelector(".sb-more") as Element);
     expect([rowMenu(host, "ws-1").hidden, rowMenu(host, "ws-2").hidden]).toEqual([true, false]);
-  });
-
-  it("swaps a row's menu for a task's menu when the task's opener is clicked", async () => {
-    const host = await mountRail();
-    await click(rowOf(host, "ws-1").querySelector(".sb-more") as Element);
-    await click(host.querySelector(".task-head .sb-more") as Element);
-    expect([rowMenu(host, "ws-1").hidden, taskMenu(host).hidden]).toEqual([true, false]);
   });
 
   it("closes a row's detail popover when a menu opens", async () => {
@@ -1142,7 +1005,7 @@ describe("the rail reports where the pointer is to the row hover gesture", () =>
     );
     await settle();
     vi.useFakeTimers();
-    const ws = host.querySelector("[data-grouping='repository'] [data-roster-row='ws-1']") as HTMLElement;
+    const ws = host.querySelector(".sb-pane [data-roster-row='ws-1']") as HTMLElement;
     (ws.querySelector(":scope > .row > [data-when]") as HTMLElement).dispatchEvent(new MouseEvent("mouseenter"));
     return { host, ws };
   }
