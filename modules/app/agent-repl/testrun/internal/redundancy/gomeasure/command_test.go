@@ -286,3 +286,41 @@ func TestFindRootRefusesADirectoryOutsideTheRepository(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestParseArgsMeasuresTheE2ESuiteBesideTheDaemon(t *testing.T) {
+	// Arrange
+	root, err := FindRoot(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	a, err := ParseArgs([]string{"-roster-suite", "daemon,e2e", "-module", filepath.Join(root, "daemon"), "-mutate", "./internal/...", "-out", "/o"}, &bytes.Buffer{})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	sawE2E := false
+	for _, s := range a.Suites {
+		if s.Module == "e2e" && s.Package == "./." && s.Prebuild && len(s.Programs) == 6 {
+			sawE2E = true
+		}
+		if s.Module == "" {
+			t.Errorf("suite %s names no module though the measurement spans two", s.Package)
+		}
+	}
+	if !sawE2E {
+		t.Fatalf("no e2e root suite with its prebuild and six programs: %+v", a.Suites)
+	}
+}
+
+func TestParseArgsRefusesSeveralRosterSuitesWithNoModule(t *testing.T) {
+	// Act
+	_, err := ParseArgs([]string{"-roster-suite", "daemon,e2e", "-out", "/o"}, &bytes.Buffer{})
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "-module must name the mutated one") {
+		t.Fatalf("err = %v", err)
+	}
+}

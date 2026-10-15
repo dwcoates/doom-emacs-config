@@ -45,15 +45,14 @@ func splitList(s string) []string {
 	return out
 }
 
-// rosterSuites are the suites of roster Go suite name: every ordinary tested
-// package and every package of its tagged integration pass, each with the
-// programs the roster says it spawns. Its module is module, or the suite's
-// own found from the working directory when module is "".
-func rosterSuites(name, module string) ([]Suite, string, error) {
-	s, ok := roster.Lookup(name)
-	if !ok || s.Kind != roster.GoModule {
-		return nil, "", fmt.Errorf("-roster-suite %q is no Go suite of the roster", name)
-	}
+// rosterSuites are the suites of the named roster Go suites (comma
+// separated): every ordinary tested package and every package of a tagged
+// integration pass, each with the programs the roster says it spawns; an
+// e2e suite's root package fills its shared prebuild first, as a run's does.
+// The measurement's module is module, or the one named suite's own, found
+// from the working directory, when module is "". With several suites each
+// names its own module.
+func rosterSuites(names, module string) ([]Suite, string, error) {
 	start := module
 	if start == "" {
 		wd, err := os.Getwd()
@@ -66,20 +65,34 @@ func rosterSuites(name, module string) ([]Suite, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
+	list := splitList(names)
+	if len(list) > 1 && module == "" {
+		return nil, "", fmt.Errorf("-roster-suite names several suites, so -module must name the mutated one")
+	}
 	l := suites.Layout{Module: root}
-	if module == "" {
-		module = filepath.Join(root, s.Path)
-	}
-	pkgs, ipkgs, err := suites.GoSuitePackages(l, s)
-	if err != nil {
-		return nil, "", err
-	}
 	var out []Suite
-	for _, rel := range pkgs {
-		out = append(out, Suite{Package: "./" + rel, Programs: s.Programs[rel]})
-	}
-	for _, rel := range ipkgs {
-		out = append(out, Suite{Package: "./" + rel, Tags: s.IntegrationTags, Programs: s.Programs[rel]})
+	for _, name := range list {
+		s, ok := roster.Lookup(name)
+		if !ok || (s.Kind != roster.GoModule && s.Kind != roster.E2E) {
+			return nil, "", fmt.Errorf("-roster-suite %q is no Go suite of the roster", name)
+		}
+		if module == "" {
+			module = filepath.Join(root, s.Path)
+		}
+		own := ""
+		if len(list) > 1 {
+			own = s.Path
+		}
+		pkgs, ipkgs, err := suites.GoSuitePackages(l, s)
+		if err != nil {
+			return nil, "", err
+		}
+		for _, rel := range pkgs {
+			out = append(out, Suite{Package: "./" + rel, Programs: s.Programs[rel], Module: own, Prebuild: s.Kind == roster.E2E && rel == "."})
+		}
+		for _, rel := range ipkgs {
+			out = append(out, Suite{Package: "./" + rel, Tags: s.IntegrationTags, Programs: s.Programs[rel], Module: own})
+		}
 	}
 	return out, module, nil
 }
@@ -136,7 +149,7 @@ func ParseArgs(argv []string, stderr io.Writer) (Args, error) {
 	fs.StringVar(&tags, "tags", "", "the build tags -pkg's tests compile under")
 	fs.StringVar(&programs, "programs", "", "comma-separated roster programs -pkg's tests spawn")
 	fs.StringVar(&suitesFile, "suites", "", "a JSON file listing the suites to measure ([{Package, Tags, Tests, Programs, Kept}]), instead of -pkg")
-	rosterSuite := fs.String("roster-suite", "", "measure every package of this roster Go suite (e.g. daemon), its integration pass included, instead of -pkg; -module defaults to its module")
+	rosterSuite := fs.String("roster-suite", "", "measure every package of these roster Go suites (comma separated, e.g. daemon or daemon,e2e), integration passes included, instead of -pkg; -module defaults to the one suite's module")
 	fs.StringVar(&mutate, "mutate", "", "comma-separated packages to mutate, relative to -module (default: the one -pkg)")
 	fs.IntVar(&a.Runs, "runs", 3, "coverage runs per case, unioned")
 	fs.StringVar(&pinCalls, "pin-calls", "FindRecord,Records", "comma-separated calls that make a test a log-record assertion")

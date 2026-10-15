@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"agentrepl/testrun/internal/redundancy"
+	"agentrepl/testrun/testenv"
 )
 
 // verifyConfig is fakeConfig's unit suite plus a kept integration suite
@@ -201,5 +202,48 @@ func TestVerifyNamesAWholeTopLevelTest(t *testing.T) {
 	// Assert
 	if !reflect.DeepEqual(v.Deleted, []string{".:TestB/x", ".:TestB/y"}) {
 		t.Fatalf("deleted = %v", v.Deleted)
+	}
+}
+
+func TestMeasurePrebuildsAnE2ESuiteOnceAndEveryCaseReadsIt(t *testing.T) {
+	// Arrange: the integration suite lives in a module of its own under the
+	// root, spawns shim-store, and fills a shared prebuild first.
+	cfg, f := verifyConfig(t)
+	root := cfg.Root
+	e2eDir := filepath.Join(root, "e2e", "integ")
+	if err := os.MkdirAll(e2eDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(e2eDir, "i_test.go"), []byte("package integ\n\nimport \"testing\"\n\nfunc TestI(t *testing.T) {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Suites[1].Module = "e2e"
+	cfg.Suites[1].Prebuild = true
+	script(f, map[string][]string{"1": {"TestA"}, "2": {"TestA"}})
+	log, _ := quietLog()
+
+	// Act
+	m, err := Measure(context.Background(), cfg, f.exec, log)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Cases) != 5 {
+		t.Fatalf("%d cases, want the e2e module's TestI among 5", len(m.Cases))
+	}
+	prebuilds := 0
+	for _, call := range f.calls {
+		if strings.HasPrefix(call, "cover-01.test -test.run ^$") {
+			prebuilds++
+		}
+	}
+	if prebuilds != 1 {
+		t.Fatalf("%d prebuilds, want 1; calls:\n%s", prebuilds, strings.Join(f.calls, "\n"))
+	}
+	for _, env := range f.mutantEnvs {
+		if envOf(env, testenv.Programs) != "" && !strings.HasSuffix(envOf(env, testenv.Prebuilt), "prebuilt-01") {
+			t.Fatalf("an e2e mutant run read no shared prebuild: %v", env)
+		}
 	}
 }

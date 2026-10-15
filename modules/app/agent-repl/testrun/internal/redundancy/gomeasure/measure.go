@@ -61,6 +61,14 @@ type Suite struct {
 	// Kept marks the kept population: its cases are measured so that what
 	// they catch counts, and none of them is a removal candidate.
 	Kept bool
+	// Module is the suite's Go module directory, relative to the agent-repl
+	// root, when it is not Config.Module (the e2e suite's own module spawns
+	// the daemon whose packages are mutated); "" is Config.Module.
+	Module string `json:",omitempty"`
+	// Prebuild runs the suite's test binary once to fill a shared prebuilt
+	// directory (testenv.Prebuild) every case then reads, as the e2e
+	// suite's chunks do in a run.
+	Prebuild bool `json:",omitempty"`
 }
 
 // Config is one measurement.
@@ -106,9 +114,13 @@ type leaf struct {
 // suiteState is what the measurement built for one suite.
 type suiteState struct {
 	Suite
+	// module is the suite's module directory; dir its package's.
+	module   string
 	dir      string
 	coverBin string
 	mutBin   string
+	// prebuilt is its shared prebuilt directory, "" without Prebuild.
+	prebuilt string
 }
 
 type measurer struct {
@@ -197,7 +209,15 @@ func Measure(ctx context.Context, cfg Config, exec Exec, log *run.Log) (*redunda
 	tops := make([][]string, len(cfg.Suites))
 	pins := map[leaf]string{}
 	for i, s := range cfg.Suites {
-		st := &suiteState{Suite: s, dir: filepath.Join(cfg.Module, s.Package)}
+		st := &suiteState{Suite: s, module: cfg.Module}
+		if s.Module != "" {
+			root, err := m.root()
+			if err != nil {
+				return nil, err
+			}
+			st.module = filepath.Join(root, s.Module)
+		}
+		st.dir = filepath.Join(st.module, s.Package)
 		m.suites = append(m.suites, st)
 		var err error
 		if len(s.Tests) > 0 {
@@ -379,7 +399,11 @@ func (m *measurer) root() (string, error) {
 // FindRoot is the agent-repl module root: the nearest directory at or above
 // dir holding the roster.
 func FindRoot(dir string) (string, error) {
-	for d := dir; ; d = filepath.Dir(d) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", fmt.Errorf("gomeasure: resolve %s: %w", dir, err)
+	}
+	for d := abs; ; d = filepath.Dir(d) {
 		if _, err := os.Stat(filepath.Join(d, "testrun", "roster", "roster.go")); err == nil {
 			return d, nil
 		}
@@ -456,7 +480,7 @@ func (m *measurer) coverBuilds(ctx context.Context) error {
 			flags = []string{"-cover", "-covermode=atomic", "-coverpkg=" + strings.Join(m.cfg.Mutate, ",")}
 		}
 		argv := m.testBuild(st, st.coverBin, flags...)
-		res, err := m.goBuild(ctx, m.cfg.Module, argv)
+		res, err := m.goBuild(ctx, st.module, argv)
 		if err != nil {
 			return err
 		}
@@ -465,8 +489,42 @@ func (m *measurer) coverBuilds(ctx context.Context) error {
 		}
 	}
 	dir, _, err := m.buildPrograms(ctx, filepath.Join(m.cfg.Scratch, "cover-programs"), true)
+	if err != nil {
+		return err
+	}
 	m.coverPrograms = dir
-	return err
+	for i, st := range m.suites {
+		if st.Prebuild {
+			if err := m.prebuild(ctx, st, i); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// prebuild runs st's test binary once as its shared prebuild, as a run's
+// e2e build unit does. What it builds (the shim bundle) is no system a
+// mutant touches, so both phases read the one directory; it runs with the
+// coverage phase's programs so the harness builds nothing of its own.
+func (m *measurer) prebuild(ctx context.Context, st *suiteState, i int) error {
+	dir := filepath.Join(m.cfg.Scratch, fmt.Sprintf("prebuilt-%02d", i))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("gomeasure: %w", err)
+	}
+	spawned := filepath.Join(m.cfg.Scratch, "prebuild-spawned")
+	// coverEnv names no prebuilt directory yet: a process either fills one
+	// or reads one (testenv.BinaryMode).
+	env := append([]string{testenv.Prebuild + "=" + dir}, m.coverEnv(st, spawned)...)
+	res, err := m.run(ctx, Cmd{Dir: st.dir, Path: st.coverBin, Args: []string{"-test.run", "^$"}, Env: append(m.testEnv(), env...), Timeout: BuildTimeout})
+	if err != nil {
+		return err
+	}
+	if res.Exit != 0 || res.TimedOut {
+		return fmt.Errorf("gomeasure: the %s prebuild failed (exit %d, timed out %t):\n%s", st.Package, res.Exit, res.TimedOut, res.Text())
+	}
+	st.prebuilt = dir
+	return nil
 }
 
 func (m *measurer) testEnv() []string {
@@ -476,18 +534,26 @@ func (m *measurer) testEnv() []string {
 // coverEnv is the environment of a coverage-phase run of st whose spawned
 // systems write their counters under spawned.
 func (m *measurer) coverEnv(st *suiteState, spawned string) []string {
-	if len(st.Programs) == 0 {
-		return nil
+	var env []string
+	if st.prebuilt != "" {
+		env = append(env, testenv.Prebuilt+"="+st.prebuilt)
 	}
-	return []string{testenv.Programs + "=" + m.coverPrograms, testenv.ProgramsInstrumented + "=1", testenv.Coverage + "=" + spawned}
+	if len(st.Programs) == 0 {
+		return env
+	}
+	return append(env, testenv.Programs+"="+m.coverPrograms, testenv.ProgramsInstrumented+"=1", testenv.Coverage+"="+spawned)
 }
 
 // mutEnv is the environment of a mutant-phase run of st.
 func (m *measurer) mutEnv(st *suiteState) []string {
-	if len(st.Programs) == 0 {
-		return nil
+	var env []string
+	if st.prebuilt != "" {
+		env = append(env, testenv.Prebuilt+"="+st.prebuilt)
 	}
-	return []string{testenv.Programs + "=" + m.mutPrograms}
+	if len(st.Programs) == 0 {
+		return env
+	}
+	return append(env, testenv.Programs+"="+m.mutPrograms)
 }
 
 func (m *measurer) runTests(ctx context.Context, st *suiteState, bin, pattern string, timeout time.Duration, extra []string, env ...string) (Result, Run, error) {
@@ -694,7 +760,7 @@ func (m *measurer) schema(ctx context.Context, cases []redundancy.Case, imports 
 		var failed []Result
 		for i, st := range m.suites {
 			st.mutBin = filepath.Join(m.cfg.Scratch, fmt.Sprintf("mutants-%02d.test", i))
-			res, err := m.goBuild(ctx, m.cfg.Module, m.testBuild(st, st.mutBin, "-overlay", ov))
+			res, err := m.goBuild(ctx, st.module, m.testBuild(st, st.mutBin, "-overlay", ov))
 			if err != nil {
 				return nil, err
 			}
