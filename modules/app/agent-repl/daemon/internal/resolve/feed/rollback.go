@@ -11,8 +11,6 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
-
-	"google.golang.org/protobuf/proto"
 )
 
 // ROLLED-BACK TURNS (agentrepl.v1.RollBack): turns the user rolled the
@@ -301,9 +299,13 @@ func (r *resolver) withheldRollingBack(s *wsState, f *feedState, at placement, r
 	if turn == "" || !s.rollingBack[turn] {
 		return false
 	}
-	snapshot, ok := proto.Clone(row).(*frontendv1.FeedRow)
+	snapshot, ok := r.snapshotRow(s, row, unclonable{
+		operation: opRollbackHold,
+		message:   "a row of a turn being rolled back could not be snapshotted; it is not drawn even if the rollback is refused",
+		context:   dlog.Context{"feed": f.key, "row": row.GetId().GetValue(), "turn": string(turn)},
+	})
 	if !ok {
-		panic(fmt.Sprintf("feed: a row of turn %s cloned to a non-row", turn))
+		return true
 	}
 	s.withheld = append(s.withheld, withheldRow{turn: turn, at: at, row: snapshot, durable: durable})
 	r.logger(s.id).Debug(opRollbackHold, "a row of a turn being rolled back was withheld",
