@@ -33,7 +33,7 @@ func newOwnerForViews(t *testing.T, owner testing.TB) *Daemon {
 		t.Fatalf("FindProcess: %v", err)
 	}
 	return &Daemon{
-		t: owner, ctx: context.Background(), StateDir: state, waitBound: DefaultTimeout,
+		t: owner, ctx: context.Background(), StateDir: state, waitBound: DefaultTimeout, Git: World(owner),
 		expected: map[string]bool{}, required: map[string]bool{},
 		daemonProc: &daemonProc{cmd: &exec.Cmd{Process: process}},
 	}
@@ -423,5 +423,50 @@ func TestClaimingADirectoryThatDoesNotExistIsRefused(t *testing.T) {
 	// Assert
 	if completed || !strings.Contains(viewTB.Failures(), "resolve workspace dir "+missing) {
 		t.Fatalf("completed=%v failures=%q, want the missing dir refused", completed, viewTB.Failures())
+	}
+}
+
+func TestARepositoryAViewsTestMintsIsInTheSharedDaemonsGitWorld(t *testing.T) {
+	// Arrange
+	owner := newOwnerForViews(t, t)
+	viewTB := NewRecordingTB(t, "TestMine")
+	owner.View(viewTB)
+
+	// Act
+	repo := NewRepo(viewTB)
+
+	// Assert
+	if owner.Git.read().Repo(repo.Dir) == nil {
+		t.Fatalf("the shared daemon's git world has no row for %s, want the view's repository there", repo.Dir)
+	}
+}
+
+func TestAViewOverATestThatAlreadyHasItsOwnGitWorldIsRefused(t *testing.T) {
+	// Arrange
+	owner := newOwnerForViews(t, t)
+	viewTB := NewRecordingTB(t, "TestMine")
+	World(viewTB)
+
+	// Act
+	completed := Within(func() { owner.View(viewTB) })
+
+	// Assert
+	if completed || !strings.Contains(viewTB.Failures(), "already has a git world of its own") {
+		t.Fatalf("completed=%v failures=%q, want the view refused", completed, viewTB.Failures())
+	}
+}
+
+func TestAViewOfADaemonWithNoGitWorldIsRefused(t *testing.T) {
+	// Arrange
+	owner := newOwnerForViews(t, t)
+	owner.Git = nil
+	viewTB := NewRecordingTB(t, "TestMine")
+
+	// Act
+	completed := Within(func() { owner.View(viewTB) })
+
+	// Assert
+	if completed || !strings.Contains(viewTB.Failures(), "views a daemon with no git world") {
+		t.Fatalf("completed=%v failures=%q, want the view refused", completed, viewTB.Failures())
 	}
 }

@@ -1,7 +1,10 @@
 package harness
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -22,5 +25,52 @@ func TestReflogEntriesWritesOneGitShapedEntryPerInstant(t *testing.T) {
 		if !strings.Contains(lines[i], want) {
 			t.Fatalf("line %d = %q, want %q in git's reflog shape", i, lines[i], want)
 		}
+	}
+}
+
+func TestMintRepoDirSkipsANameAlreadyTaken(t *testing.T) {
+	// Arrange
+	w := World(t)
+	if err := os.Mkdir(filepath.Join(w.root, "repo-a"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// Act
+	got := mintRepoDir(t, w)
+
+	// Assert
+	if filepath.Base(got) != "repo-b" {
+		t.Fatalf("mintRepoDir = %s, want repo-b", got)
+	}
+}
+
+func TestConcurrentMintsNeverShareARepositoryName(t *testing.T) {
+	// Arrange
+	w := World(t)
+	const n = 16
+	names := make(chan string, n)
+	var wg sync.WaitGroup
+
+	// Act
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			names <- mintRepoDir(t, w)
+		}()
+	}
+	wg.Wait()
+	close(names)
+
+	// Assert
+	seen := map[string]bool{}
+	for name := range names {
+		if seen[name] {
+			t.Fatalf("two mints answered %s", name)
+		}
+		seen[name] = true
+	}
+	if len(seen) != n {
+		t.Fatalf("minted %d names, want %d", len(seen), n)
 	}
 }

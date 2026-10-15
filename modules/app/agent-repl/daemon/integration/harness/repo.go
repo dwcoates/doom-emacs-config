@@ -79,7 +79,7 @@ type Repo struct {
 func NewRepo(t testing.TB) *Repo {
 	t.Helper()
 	w := World(t)
-	return NewRepoAt(t, filepath.Join(w.root, "repo-"+mintName(w)))
+	return NewRepoAt(t, mintRepoDir(t, w))
 }
 
 // NewRepoAt mints a fake repository at an exact path, for the tests that care
@@ -122,13 +122,47 @@ func (r *Repo) PolicyDir() string {
 	return filepath.Join(r.Dir, ".agent-repl", "prompts")
 }
 
-// mintName answers a fresh repository directory name.
-func mintName(w *GitWorld) string {
-	entries, err := os.ReadDir(w.root)
-	if err != nil {
-		return "0"
+// mintRepoDir creates and answers a fresh repository directory under the
+// world's root: repo-a, repo-b and so on, the first name not yet taken.
+//
+// THE NAME IS TAKEN BY THE KERNEL, NOT BY A COUNT. Tests that share one
+// daemon (a View) mint into one world concurrently, and two that counted the
+// same entries would mint the same name. os.Mkdir succeeds for exactly one
+// caller per name, so a name is never handed out twice.
+func mintRepoDir(t testing.TB, w *GitWorld) string {
+	t.Helper()
+	for i := 0; ; i++ {
+		dir := filepath.Join(w.root, "repo-"+string(rune('a'+i)))
+		err := os.Mkdir(dir, 0o755)
+		if err == nil {
+			return dir
+		}
+		if !os.IsExist(err) {
+			t.Fatalf("harness: mint a repository directory %s: %v", dir, err)
+		}
 	}
-	return string(rune('a' + len(entries)))
+}
+
+// bindWorld makes w the git world of the test t: the world of the daemon t
+// views, so the repositories t mints are ones that daemon's git can see. A
+// test that already minted a world of its own is refused rather than split
+// across two.
+func bindWorld(t testing.TB, w *GitWorld) {
+	t.Helper()
+	if w == nil {
+		t.Fatalf("harness: %s views a daemon with no git world", t.Name())
+	}
+	worldsMu.Lock()
+	defer worldsMu.Unlock()
+	if own, ok := worlds[t]; ok && own != w {
+		t.Fatalf("harness: %s already has a git world of its own; take the shared daemon's view before minting any repository", t.Name())
+	}
+	worlds[t] = w
+	t.Cleanup(func() {
+		worldsMu.Lock()
+		delete(worlds, t)
+		worldsMu.Unlock()
+	})
 }
 
 // edit mutates the fixture file under the same lock the scripted `git` takes.
