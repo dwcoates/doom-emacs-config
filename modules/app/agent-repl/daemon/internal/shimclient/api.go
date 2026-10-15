@@ -155,6 +155,9 @@ type Client interface {
 	// SetKeepalive holds the session's keep-alive cadence (its workspace is
 	// hidden, so its cache is left to lapse) or runs it again.
 	SetKeepalive(ctx context.Context, req *shimv1.SetKeepaliveRequest) (*shimv1.SetKeepaliveResponse, error)
+	// SendKeepalive asks the session for one keep-alive now, leaving its
+	// cadence as it is (the user keeping a hidden workspace's cache warm).
+	SendKeepalive(ctx context.Context, req *shimv1.SendKeepaliveRequest) (*shimv1.SendKeepaliveResponse, error)
 	// KillSession ends the session, gracefully unless forced.
 	KillSession(ctx context.Context, req *shimv1.KillSessionRequest) (*shimv1.KillSessionResponse, error)
 	// StartTurn opens a turn with the daemon's minted TurnId and the required

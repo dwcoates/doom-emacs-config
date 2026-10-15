@@ -74,6 +74,9 @@ export interface Engine {
   /** Hold the keep-alive cadence (the workspace is hidden) or run it again. */
   setKeepalive(request: shimv1.SetKeepaliveRequest): Promise<shimv1.SetKeepaliveResponse>;
 
+  /** Send one keep-alive now, leaving the cadence as it is. */
+  sendKeepalive(request: shimv1.SendKeepaliveRequest): Promise<shimv1.SendKeepaliveResponse>;
+
   /** End the session and everything live in it; refuses unless forced. */
   killSession(request: shimv1.KillSessionRequest): Promise<shimv1.KillSessionResponse>;
 
@@ -217,6 +220,10 @@ export class NotImplementedEngine implements Engine {
 
   setKeepalive(): Promise<shimv1.SetKeepaliveResponse> {
     return Promise.reject(unimplemented("SetKeepalive"));
+  }
+
+  sendKeepalive(): Promise<shimv1.SendKeepaliveResponse> {
+    return Promise.reject(unimplemented("SendKeepalive"));
   }
 
   killSession(): Promise<shimv1.KillSessionResponse> {

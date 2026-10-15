@@ -225,6 +225,15 @@ describe("validateHibernateRequest", () => {
   });
 });
 
+describe("validateSendKeepaliveRequest", () => {
+  it("accepts the empty request the contract declares", () => {
+    // Arrange, Act, Assert.
+    expect(
+      codeOf(() => validate.validateSendKeepaliveRequest(requests.sendKeepaliveRequest())),
+    ).toBeUndefined();
+  });
+});
+
 describe("validateSetKeepaliveRequest", () => {
   it.each([
     ["a hold", "hold", undefined],

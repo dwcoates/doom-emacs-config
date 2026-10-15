@@ -416,6 +416,34 @@ func TestValidateSetKeepaliveRequest(t *testing.T) {
 	}
 }
 
+// TestValidateSendKeepaliveRequest asserts the empty keep-alive request is
+// sent, and only its absence refused.
+func TestValidateSendKeepaliveRequest(t *testing.T) {
+	tests := []struct {
+		name    string
+		req     *shimv1.SendKeepaliveRequest
+		invalid string
+	}{
+		{"nil", nil, "SendKeepaliveRequest"},
+		{"empty", &shimv1.SendKeepaliveRequest{}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			err := validateSendKeepaliveRequest(tt.req)
+
+			// Assert.
+			if tt.invalid == "" {
+				if err != nil {
+					t.Fatalf("validateSendKeepaliveRequest = %v, want nil", err)
+				}
+				return
+			}
+			assertInvalidField(t, err, tt.invalid)
+		})
+	}
+}
+
 // TestValidateNilRequestIsRefused asserts a nil request body is refused rather
 // than sent.
 func TestValidateNilRequestIsRefused(t *testing.T) {

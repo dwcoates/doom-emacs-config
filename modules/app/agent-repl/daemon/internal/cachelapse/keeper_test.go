@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	shimv1 "agentrepl/proto/shim/v1"
 
 	"agent-repld/internal/clock/clocktest"
 	"agent-repld/internal/dlog"
@@ -43,6 +46,9 @@ func (f *fakeDB) ListWorkspaces(context.Context) ([]wsm.Workspace, error) {
 	for _, rec := range f.records {
 		out = append(out, rec)
 	}
+	// THE REGISTRY'S ORDER, made deterministic: the real store lists by
+	// creation, and these records are created in ID order.
+	slices.SortFunc(out, func(a, b wsm.Workspace) int { return strings.Compare(string(a.ID), string(b.ID)) })
 	return out, nil
 }
 
@@ -83,10 +89,22 @@ type fakeShim struct {
 	cadence []string
 	err     error
 	set     chan string
+
+	// answer and beatErr are what Beat answers; beats counts its calls.
+	answer  *shimv1.SendKeepaliveSuccess
+	beatErr error
+	beats   int
 }
 
 func (f *fakeShim) Hold(context.Context) error { return f.note("hold") }
 func (f *fakeShim) Run(context.Context) error  { return f.note("run") }
+
+func (f *fakeShim) Beat(context.Context) (*shimv1.SendKeepaliveSuccess, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.beats++
+	return f.answer, f.beatErr
+}
 
 func (f *fakeShim) note(cadence string) error {
 	f.mu.Lock()
@@ -105,9 +123,12 @@ type fakeStandDowns struct {
 func (f *fakeStandDowns) StandDownWithheld(ws ids.WorkspaceID) { f.stood <- ws }
 
 type harness struct {
-	keeper     *Keeper
-	db         *fakeDB
-	shim       *fakeShim
+	keeper *Keeper
+	db     *fakeDB
+	shim   *fakeShim
+	// shims, when set, is the shim serving each workspace; a workspace absent
+	// from it is served by none.
+	shims      map[ids.WorkspaceID]*fakeShim
 	serving    bool
 	standDowns *fakeStandDowns
 	publishes  int
@@ -136,7 +157,11 @@ func newHarness(t *testing.T, rec wsm.Workspace) *harness {
 	}
 	keeper, err := New(Deps{
 		DB: h.db,
-		Shim: func(ids.WorkspaceID) (Keepalives, bool) {
+		Shim: func(ws ids.WorkspaceID) (Keepalives, bool) {
+			if h.shims != nil {
+				shim, ok := h.shims[ws]
+				return shim, ok
+			}
 			if !h.serving {
 				return nil, false
 			}

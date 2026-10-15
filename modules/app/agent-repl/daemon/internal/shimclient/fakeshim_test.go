@@ -285,6 +285,11 @@ func (f *fakeShim) SetKeepalive(_ context.Context, _ *connect.Request[shimv1.Set
 	return connect.NewResponse(&shimv1.SetKeepaliveResponse{}), nil
 }
 
+func (f *fakeShim) SendKeepalive(_ context.Context, _ *connect.Request[shimv1.SendKeepaliveRequest]) (*connect.Response[shimv1.SendKeepaliveResponse], error) {
+	f.record("SendKeepalive")
+	return connect.NewResponse(&shimv1.SendKeepaliveResponse{}), nil
+}
+
 func (f *fakeShim) Hibernate(_ context.Context, _ *connect.Request[shimv1.HibernateRequest]) (*connect.Response[shimv1.HibernateResponse], error) {
 	f.record("Hibernate")
 	return connect.NewResponse(&shimv1.HibernateResponse{}), nil

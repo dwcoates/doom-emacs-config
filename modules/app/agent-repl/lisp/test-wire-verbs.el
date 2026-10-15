@@ -4782,22 +4782,91 @@ cheapest, so an absent `context_tokens' decodes to nil rather than 0."
                              "transcriptHeld" "turnInFlight" "stopFailed" "startFailed")
                        #'string<))))
 
-;;;; ---- UpdatePersistentWifiMode ----------------------------------------
+;;;; ---- Quiet decoding, shared by the verbs below -----------------------
 
-(defun agent-repl-test-wire-verbs--wifi (decoder json)
-  "Decode JSON with DECODER, quietly."
+(defun agent-repl-test-wire-verbs--decode-quietly (decoder json)
+  "Decode JSON with DECODER, quietly.
+THE ONE quiet decode the verb suites below share; a suite decoding by hand
+instead diverges from it unseen."
   (agent-repl-test-wire-verbs--with-common
     (funcall decoder (agent-repl-test-wire-verbs--parse json))))
 
-(defun agent-repl-test-wire-verbs--wifi-breach (decoder json)
+(defun agent-repl-test-wire-verbs--decode-breach (decoder json)
   "Return the `agent-repl-wire-error' data decoding JSON with DECODER raises."
   (condition-case err
-      (progn (agent-repl-test-wire-verbs--wifi decoder json) nil)
+      (progn (agent-repl-test-wire-verbs--decode-quietly decoder json) nil)
     (agent-repl-wire-error (cdr err))))
+
+;;;; ---- SendHiddenKeepalives -------------------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-hidden-keepalives-request-is-empty ()
+  "The request carries nothing: the call is the request."
+  (should (equal (json-serialize
+                  (or (agent-repl-test-wire-verbs--with-common
+                        (agent-repl-wire-encode-send-hidden-keepalives-request))
+                      (make-hash-table)))
+                 "{}")))
+
+(ert-deftest agent-repl-test-wire-verbs-hidden-keepalives-success-decodes-each-outcome ()
+  "A success decodes every workspace's ref and outcome arm, in order."
+  (should (equal (agent-repl-test-wire-verbs--decode-quietly
+                  #'agent-repl-wire-decode-send-hidden-keepalives-response
+                  (concat "{\"success\":{\"workspaces\":["
+                          "{\"workspace\":{\"id\":\"a\",\"dir\":\"/w/a\"},\"sent\":{}},"
+                          "{\"workspace\":{\"id\":\"b\",\"dir\":\"/w/b\"},\"notRunning\":{}},"
+                          "{\"workspace\":{\"id\":\"c\",\"dir\":\"/w/c\"},\"failed\":{\"detail\":\"gone\"}},"
+                          "{\"workspace\":{\"id\":\"d\",\"dir\":\"/w/d\"},\"skipped\":{\"busy\":{\"detail\":\"a turn\"}}},"
+                          "{\"workspace\":{\"id\":\"e\",\"dir\":\"/w/e\"},\"skipped\":{\"detachedWorkLive\":{\"liveItems\":2}}},"
+                          "{\"workspace\":{\"id\":\"f\",\"dir\":\"/w/f\"},\"skipped\":{\"cacheLapsed\":{\"lapsedAtMs\":\"1800000000000\"}}}"
+                          "]}}"))
+                 '(:arm :success
+                   :value (:workspaces
+                           ((:workspace (:id "a" :dir "/w/a") :outcome (:arm :sent :value nil))
+                            (:workspace (:id "b" :dir "/w/b") :outcome (:arm :not-running :value nil))
+                            (:workspace (:id "c" :dir "/w/c") :outcome (:arm :failed :value (:detail "gone")))
+                            (:workspace (:id "d" :dir "/w/d")
+                             :outcome (:arm :skipped :value (:reason (:arm :busy :value (:detail "a turn")))))
+                            (:workspace (:id "e" :dir "/w/e")
+                             :outcome (:arm :skipped :value (:reason (:arm :detached-work-live :value (:live-items 2)))))
+                            (:workspace (:id "f" :dir "/w/f")
+                             :outcome (:arm :skipped :value (:reason (:arm :cache-lapsed
+                                                                     :value (:lapsed-at-ms 1800000000000)))))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-hidden-keepalives-empty-section-decodes-empty ()
+  "An empty hidden section is protojson's `{}' success: no workspaces."
+  (should (equal (agent-repl-test-wire-verbs--decode-quietly
+                  #'agent-repl-wire-decode-send-hidden-keepalives-response
+                  "{\"success\":{}}")
+                 '(:arm :success :value (:workspaces nil)))))
+
+(ert-deftest agent-repl-test-wire-verbs-hidden-keepalives-workspace-without-outcome-refused ()
+  "A workspace entry naming no outcome is a breach."
+  (should (equal (agent-repl-test-wire-verbs--decode-breach
+                  #'agent-repl-wire-decode-send-hidden-keepalives-workspace
+                  "{\"workspace\":{\"id\":\"a\",\"dir\":\"/w/a\"}}")
+                 '("SendHiddenKeepalivesWorkspace" "outcome" "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-verbs-hidden-keepalives-unknown-field-refused ()
+  "A field the codec does not hold is refused, not dropped."
+  (should (equal (agent-repl-test-wire-verbs--decode-breach
+                  #'agent-repl-wire-decode-send-hidden-keepalives-workspace
+                  "{\"workspace\":{\"id\":\"a\",\"dir\":\"/w/a\"},\"sent\":{},\"extra\":1}")
+                 '("SendHiddenKeepalivesWorkspace" "extra" "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-verbs-hidden-keepalives-error-decodes-its-cause ()
+  "An unreadable registry decodes its cause and the read's words."
+  (should (equal (agent-repl-test-wire-verbs--decode-quietly
+                  #'agent-repl-wire-decode-send-hidden-keepalives-response
+                  "{\"error\":{\"registryUnreadable\":{\"detail\":\"database is locked\"}}}")
+                 '(:arm :error
+                   :value (:cause (:arm :registry-unreadable
+                                   :value (:detail "database is locked")))))))
+
+;;;; ---- UpdatePersistentWifiMode ----------------------------------------
 
 (ert-deftest agent-repl-test-wire-verbs-persistent-wifi-state-joined-with-a-name ()
   "A joined network with its name and the mode on decode arm for arm."
-  (should (equal (agent-repl-test-wire-verbs--wifi
+  (should (equal (agent-repl-test-wire-verbs--decode-quietly
                   #'agent-repl-wire-decode-persistent-wifi-state
                   "{\"joined\":{\"networkName\":\"Home\"},\"on\":{}}")
                  '(:wifi (:arm :joined :value (:network-name "Home"))
@@ -4805,7 +4874,7 @@ cheapest, so an absent `context_tokens' decodes to nil rather than 0."
 
 (ert-deftest agent-repl-test-wire-verbs-persistent-wifi-state-withheld-name-is-nil ()
   "A joined network whose name macOS withholds decodes with no name."
-  (should (equal (agent-repl-test-wire-verbs--wifi
+  (should (equal (agent-repl-test-wire-verbs--decode-quietly
                   #'agent-repl-wire-decode-persistent-wifi-state
                   "{\"joined\":{},\"off\":{}}")
                  '(:wifi (:arm :joined :value (:network-name nil))
@@ -4813,13 +4882,13 @@ cheapest, so an absent `context_tokens' decodes to nil rather than 0."
 
 (ert-deftest agent-repl-test-wire-verbs-persistent-wifi-state-unread-facts-are-nil ()
   "Facts the daemon could not read are unassigned oneofs, never a breach."
-  (should (equal (agent-repl-test-wire-verbs--wifi
+  (should (equal (agent-repl-test-wire-verbs--decode-quietly
                   #'agent-repl-wire-decode-persistent-wifi-state "{}")
                  '(:wifi nil :mode nil))))
 
 (ert-deftest agent-repl-test-wire-verbs-persistent-wifi-state-unknown-field-refused ()
   "A field the codec does not hold is refused, not dropped."
-  (should (equal (agent-repl-test-wire-verbs--wifi-breach
+  (should (equal (agent-repl-test-wire-verbs--decode-breach
                   #'agent-repl-wire-decode-persistent-wifi-state "{\"radio\":{}}")
                  '("PersistentWifiState" radio "unknown field"))))
 
@@ -4840,7 +4909,7 @@ cheapest, so an absent `context_tokens' decodes to nil rather than 0."
 
 (ert-deftest agent-repl-test-wire-verbs-persistent-wifi-success-decodes-every-step ()
   "A success decodes the re-read standing and both steps' outcomes."
-  (should (equal (agent-repl-test-wire-verbs--wifi
+  (should (equal (agent-repl-test-wire-verbs--decode-quietly
                   #'agent-repl-wire-decode-update-persistent-wifi-mode-response
                   (concat "{\"success\":{\"state\":{\"joined\":{},\"on\":{}},"
                           "\"hotspot\":{\"failed\":{\"networkName\":\"Phone\",\"detail\":\"not visible\"}},"
@@ -4853,7 +4922,7 @@ cheapest, so an absent `context_tokens' decodes to nil rather than 0."
 
 (ert-deftest agent-repl-test-wire-verbs-persistent-wifi-success-with-an-unread-state ()
   "A success whose standing could not be re-read carries the empty state."
-  (should (equal (plist-get (plist-get (agent-repl-test-wire-verbs--wifi
+  (should (equal (plist-get (plist-get (agent-repl-test-wire-verbs--decode-quietly
                                         #'agent-repl-wire-decode-update-persistent-wifi-mode-response
                                         (concat "{\"success\":{\"state\":{},"
                                                 "\"hotspot\":{\"notOnHotspot\":{}},"
@@ -4864,14 +4933,14 @@ cheapest, so an absent `context_tokens' decodes to nil rather than 0."
 
 (ert-deftest agent-repl-test-wire-verbs-persistent-wifi-success-without-hotspot-refused ()
   "A success missing its required hotspot outcome is a breach."
-  (should (equal (agent-repl-test-wire-verbs--wifi-breach
+  (should (equal (agent-repl-test-wire-verbs--decode-breach
                   #'agent-repl-wire-decode-update-persistent-wifi-mode-response
                   "{\"success\":{\"state\":{},\"display\":{\"dimmed\":{}}}}")
                  '("UpdatePersistentWifiModeSuccess" hotspot "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-verbs-persistent-wifi-error-decodes-its-cause ()
   "A refused power step decodes its cause and the refusal's words."
-  (should (equal (agent-repl-test-wire-verbs--wifi
+  (should (equal (agent-repl-test-wire-verbs--decode-quietly
                   #'agent-repl-wire-decode-update-persistent-wifi-mode-response
                   "{\"error\":{\"powerSettingsRefused\":{\"detail\":\"sudo: a password is required\"}}}")
                  '(:arm :error
@@ -4880,7 +4949,7 @@ cheapest, so an absent `context_tokens' decodes to nil rather than 0."
 
 (ert-deftest agent-repl-test-wire-verbs-persistent-wifi-arm-with-an-unknown-field-refused ()
   "An outcome arm carrying a field its table does not name is refused."
-  (should (equal (agent-repl-test-wire-verbs--wifi-breach
+  (should (equal (agent-repl-test-wire-verbs--decode-breach
                   #'agent-repl-wire-decode-update-persistent-wifi-mode-error
                   "{\"modeUnreadable\":{\"detail\":\"x\",\"code\":1}}")
                  '("UpdatePersistentWifiModeError.modeUnreadable" "code" "unknown field"))))

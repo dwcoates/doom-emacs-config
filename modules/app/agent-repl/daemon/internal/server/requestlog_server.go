@@ -417,6 +417,13 @@ func (s *requestLoggingServer) ClientLog(
 	return serveUnary(s, ctx, "ClientLog", req, s.server.ClientLog)
 }
 
+func (s *requestLoggingServer) SendHiddenKeepalives(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.SendHiddenKeepalivesRequest],
+) (*connect.Response[agentreplv1.SendHiddenKeepalivesResponse], error) {
+	return serveUnary(s, ctx, "SendHiddenKeepalives", req, s.server.SendHiddenKeepalives)
+}
+
 func (s *requestLoggingServer) UpdatePersistentWifiMode(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.UpdatePersistentWifiModeRequest],

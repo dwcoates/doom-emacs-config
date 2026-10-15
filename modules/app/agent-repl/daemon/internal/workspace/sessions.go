@@ -3286,6 +3286,31 @@ func (a *shimAdapter) setKeepalive(ctx context.Context, req *shimv1.SetKeepalive
 	return nil
 }
 
+// Beat asks the session for one keep-alive now, leaving its cadence as it is
+// (cachelapse.Keepalives). The shim's refusals are cachelapse.ErrNoSession and
+// a *cachelapse.BeatSubmitFailed; its judgment is the success, whole.
+func (a *shimAdapter) Beat(ctx context.Context) (*shimv1.SendKeepaliveSuccess, error) {
+	response, err := a.client.SendKeepalive(ctx, &shimv1.SendKeepaliveRequest{})
+	if err != nil {
+		return nil, err
+	}
+	if failure := response.GetError(); failure != nil {
+		switch kind := failure.GetKind().(type) {
+		case *shimv1.SendKeepaliveError_NoSession:
+			return nil, cachelapse.ErrNoSession
+		case *shimv1.SendKeepaliveError_SubmitFailed:
+			return nil, &cachelapse.BeatSubmitFailed{Detail: kind.SubmitFailed.GetDetail()}
+		default:
+			return nil, &ShimRefusal{Verb: "SendKeepalive", Arm: "unknown", Detail: "the shim refused with an arm this daemon does not name"}
+		}
+	}
+	success := response.GetSuccess()
+	if success == nil {
+		return nil, fmt.Errorf("workspace: SendKeepalive answered no outcome")
+	}
+	return success, nil
+}
+
 // StandDown arms the client's stand-down latch. See Shim.StandDown.
 func (a *shimAdapter) StandDown() bool { return a.client.StandDown() }
 

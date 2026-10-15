@@ -951,6 +951,33 @@ export class KeepaliveCadence {
     this.arm("keep-alives run again");
   }
 
+  /**
+   * Whether a keep-alive the user ASKED for may go out now
+   * (shim.v1.SendKeepalive), or why not. The cadence is left exactly as it
+   * was: a held cadence stays held, and the keep-alive's own answer re-anchors
+   * it, which restates the projected lapse.
+   *
+   * THE SCHEDULED BEAT'S GUARDS, BUT FOR ONE: the tier rule is not applied. It
+   * exists because a beat every interval cannot keep a short-tier cache warm;
+   * one beat into a cache still warm keeps it warm whatever its tier. Only a
+   * cache already lapsed is refused, because a keep-alive into it is the
+   * full-price cold read the cold gate owns.
+   */
+  askedBeat(): AskedBeatRefusal | undefined {
+    const anchor = this.anchor;
+    if (anchor === undefined) {
+      throw new Error("a keep-alive was asked of a cadence that was never started or has stopped; the session guards both");
+    }
+    if (this.paused) return { kind: "turnInFlight" };
+    const work = this.detachedWork();
+    if (work.length > 0) return { kind: "detachedWorkLive", liveItems: work.length };
+    if (anchor.ttlMs !== undefined) {
+      const lapsedAtMs = anchor.atMs + anchor.ttlMs;
+      if (this.nowMs() >= lapsedAtMs) return { kind: "cacheLapsed", lapsedAtMs };
+    }
+    return undefined;
+  }
+
   /** The session is ending. */
   stop(): void {
     const running = this.handle !== undefined;
@@ -1072,6 +1099,12 @@ export class KeepaliveCadence {
     }
   }
 }
+
+/** Why an asked-for keep-alive may not go out now ({@link KeepaliveCadence.askedBeat}). */
+export type AskedBeatRefusal =
+  | { readonly kind: "turnInFlight" }
+  | { readonly kind: "detachedWorkLive"; readonly liveItems: number }
+  | { readonly kind: "cacheLapsed"; readonly lapsedAtMs: number };
 
 /** One live detached-work item, as the cadence and the rewind's invariant name it. */
 export interface DetachedWorkItem {

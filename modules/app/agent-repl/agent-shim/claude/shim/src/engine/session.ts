@@ -91,6 +91,11 @@ import {
   hibernateRefused,
   setKeepaliveApplied,
   setKeepaliveNoSession,
+  sendKeepaliveNoSession,
+  sendKeepaliveSent,
+  sendKeepaliveSkipped,
+  sendKeepaliveSubmitFailed,
+  type SendKeepaliveSkipReason,
   killSessionClosed,
   killSessionRefused,
   rollBackSessionRefused,
@@ -159,6 +164,7 @@ import {
   KeepaliveScope,
   keepalivePromptText,
   REAL_SCHEDULER,
+  type AskedBeatRefusal,
   type CacheAnchor,
   type KeepaliveAttribution,
   type KeepaliveScheduler,
@@ -551,6 +557,13 @@ const LIVE_WORK_COMPONENT = "store-live-work";
 const HISTORY_READ_COMPONENT = "shim-store-reader";
 /** The shim's own keep-alive prompt: transient, recovered by the next beat. */
 const KEEPALIVE_COMPONENT = "shim-engine-keepalive";
+
+/** What one keep-alive beat did: submitted, or why not. */
+type KeepaliveBeatOutcome =
+  | { readonly kind: "sent" }
+  | { readonly kind: "noQuery" }
+  | { readonly kind: "busy"; readonly detail: string }
+  | { readonly kind: "failed"; readonly detail: string };
 /**
  * The keep-alive REWIND: its own name, recovered by the next rewind that lands.
  *
@@ -5808,25 +5821,20 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     cadence?.noteRequest(request.writtenTtlMs, request.contextTokens);
   }
 
-  async function keepaliveBeat(): Promise<void> {
-    if (open !== undefined || query === undefined || identity === undefined) return;
-    // A ROLLBACK IS REPLACING THE QUERY: a beat now would send onto the query
-    // it is about to close, past the fork point it is about to resume at.
-    if (rollingBack) {
-      LOGGER.logVerbose({ outcome: "skipped_rollback" }, "keep-alive beat skipped: a rollback is in progress");
-      return;
-    }
-    // A VENDOR TURN IS RUNNING: the cache is warm, and a keep-alive pushed now
-    // would be queued or folded into a real turn.
-    if (adopted !== undefined) {
-      LOGGER.logVerbose({ outcome: "skipped_adopted_turn" }, "keep-alive beat skipped: an adopted turn is running");
-      return;
-    }
-    // A REAL START IN FLIGHT OWNS THE SLOT IT IS ABOUT TO OPEN, even before
-    // `open` says so: it is still writing its prompt row or reading its page.
-    if (turns.startInFlight()) {
-      LOGGER.logVerbose({ outcome: "skipped_start_in_flight" }, "keep-alive beat skipped: a StartTurn is being processed");
-      return;
+  /**
+   * Submit one of the shim's own keep-alive turns, or answer why none went
+   * out. The scheduled beat ignores the answer; SendKeepalive reports it.
+   */
+  async function keepaliveBeat(): Promise<KeepaliveBeatOutcome> {
+    if (query === undefined || identity === undefined) return { kind: "noQuery" };
+    // THE MAIN AGENT'S SLOT IS TAKEN: a turn is open (a keep-alive's
+    // included), a vendor-started turn is running and the cache is warm, a
+    // real start owns the slot it is about to open, or a rollback is replacing
+    // the query a send would go onto.
+    const busy = mainAgentBusy();
+    if (busy !== undefined) {
+      LOGGER.logVerbose({ outcome: "skipped_busy", busy }, `keep-alive beat skipped: ${busy}`);
+      return { kind: "busy", detail: busy };
     }
     // A keep-alive turn's id NEVER reaches the wire: TurnIds are daemon-minted
     // and adopted, and this turn has no daemon behind it. The value exists only
@@ -5856,17 +5864,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         "submitted one of the shim's own keep-alive prompts; nothing of its turn is stored or served",
       );
       pushes.resolveComponent(KEEPALIVE_COMPONENT, 0);
+      return { kind: "sent" };
     } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
       if (open === beat) setOpen(undefined);
       sends.forget(turn.value, "the keep-alive could not be submitted");
-      keepaliveScope.abandon(`the keep-alive could not be submitted: ${err instanceof Error ? err.message : String(err)}`);
-      pushes.fault(
-        sessionFault(
-          { kind: "keepaliveFailed" },
-          KEEPALIVE_COMPONENT,
-          err instanceof Error ? err.message : String(err),
-        ),
-      );
+      keepaliveScope.abandon(`the keep-alive could not be submitted: ${detail}`);
+      pushes.fault(sessionFault({ kind: "keepaliveFailed" }, KEEPALIVE_COMPONENT, detail));
+      return { kind: "failed", detail };
     }
   }
 
@@ -6231,6 +6236,46 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         throw new Error(`SetKeepalive reached the engine with no cadence arm (${String(request.cadence.case)}); validation admits none`);
     }
     return setKeepaliveApplied();
+  }
+
+  /**
+   * Send one keep-alive now, leaving the cadence as it is
+   * (shim.v1.SendKeepalive). The cadence judges first, by the guards its own
+   * beat honors; the beat then answers whether it went out. Its answer
+   * re-anchors the cache, and a held cadence restates the projected lapse on
+   * the session stream.
+   */
+  async function sendKeepalive(): Promise<shimv1.SendKeepaliveResponse> {
+    // A SESSION WHOSE VENDOR QUERY ENDED has nothing to send a keep-alive on,
+    // and no cache this process can keep: it answers as no session.
+    if (!started || identity === undefined || cadence === undefined || query === undefined) {
+      LOGGER.info({ started, query: query !== undefined }, "refused SendKeepalive: no session is open");
+      return sendKeepaliveNoSession();
+    }
+    const refusal = cadence.askedBeat();
+    if (refusal !== undefined) return skippedKeepalive(refusal);
+    const outcome = await keepaliveBeat();
+    switch (outcome.kind) {
+      case "sent":
+        LOGGER.info({ outcome: "sent" }, "sent the keep-alive SendKeepalive asked for");
+        return sendKeepaliveSent();
+      case "busy":
+        return skippedKeepalive({ kind: "busy", detail: outcome.detail });
+      case "noQuery":
+        throw new Error("SendKeepalive's beat found no vendor query after the guard above found one");
+      case "failed":
+        // THE BEAT RAISED ITS OWN STANDING FAULT (keepaliveFailed); the answer
+        // carries the failure to the daemon, which records it.
+        return sendKeepaliveSubmitFailed(outcome.detail);
+    }
+  }
+
+  /** The skipped answer, recorded once at INFO with its reason. */
+  function skippedKeepalive(reason: AskedBeatRefusal | SendKeepaliveSkipReason): shimv1.SendKeepaliveResponse {
+    const skip: SendKeepaliveSkipReason =
+      reason.kind === "turnInFlight" ? { kind: "busy", detail: "a turn is in flight" } : reason;
+    LOGGER.info({ outcome: "skipped", ...skip }, "SendKeepalive sent no keep-alive");
+    return sendKeepaliveSkipped(skip);
   }
 
   async function hibernate(): Promise<shimv1.HibernateResponse> {
@@ -6985,6 +7030,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     setSessionPermissionMode,
     hibernate,
     setKeepalive,
+    sendKeepalive,
     killSession,
     startTurn: (request, signal) => turns.startTurn(request, signal),
     watchAgent: (request, signal) => turns.watchAgent(request, signal),

@@ -1344,6 +1344,8 @@ type harness struct {
 	Focus *desktopnotify.Focus
 	// PersistentWifi is the persistent-wifi controller the rpc delegates to.
 	PersistentWifi *fakePersistentWifi
+	// HiddenKeepalives is the cache keeper SendHiddenKeepalives delegates to.
+	HiddenKeepalives *fakeHiddenKeepalives
 	// NewsDigest is the news digest the two rpcs delegate to.
 	NewsDigest *fakeNewsDigest
 	// ClassifierPrompt is the routing brief's updater the rpc delegates to.
@@ -1400,6 +1402,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		WebappDist: dist,
 
 		PersistentWifi:   &fakePersistentWifi{},
+		HiddenKeepalives: &fakeHiddenKeepalives{},
 		NewsDigest:       &fakeNewsDigest{},
 		ClassifierPrompt: &fakeClassifierPrompt{},
 		EditorInstances:  &fakeEditorInstances{},
@@ -1437,6 +1440,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		LoudFaults:        &h.LoudFaults,
 		Focus:             h.Focus,
 		PersistentWifi:    h.PersistentWifi,
+		HiddenKeepalives:  h.HiddenKeepalives,
 		NewsDigest:        h.NewsDigest,
 		ClassifierPrompt:  h.ClassifierPrompt,
 		EditorInstances:   h.EditorInstances,
@@ -1629,6 +1633,17 @@ func (v *fakeVerbs) FoldMaturitySection(_ context.Context, stage wsm.MaturitySta
 func (v *fakeVerbs) ShowGrouping(_ context.Context, grouping wsm.Grouping) error {
 	v.groupings = append(v.groupings, grouping)
 	return v.sectionFoldErr
+}
+
+// fakeHiddenKeepalives counts every call and answers a scripted response.
+type fakeHiddenKeepalives struct {
+	calls    int
+	response *agentreplv1.SendHiddenKeepalivesResponse
+}
+
+func (f *fakeHiddenKeepalives) SendHiddenKeepalives(context.Context) *agentreplv1.SendHiddenKeepalivesResponse {
+	f.calls++
+	return f.response
 }
 
 // fakePersistentWifi records every action and answers a scripted response.

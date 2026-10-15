@@ -71,6 +71,10 @@ export function setKeepaliveRequest(): shimv1.SetKeepaliveRequest {
   });
 }
 
+export function sendKeepaliveRequest(): shimv1.SendKeepaliveRequest {
+  return create(shimv1.SendKeepaliveRequestSchema, {});
+}
+
 export function killSessionRequest(): shimv1.KillSessionRequest {
   return create(shimv1.KillSessionRequestSchema, { force: false });
 }

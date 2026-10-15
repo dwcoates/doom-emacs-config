@@ -514,6 +514,8 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "confirms the user's priority command")
     ("verbs.el" agent-repl-verb-set-hidden "agent-repl: %s %s"
      "confirms the user's hide or show of a workspace")
+    ("verbs.el" agent-repl-send-hidden-keepalives "agent-repl: %s"
+     "reports how the user's keep-alive to the hidden workspaces went")
     ("verbs.el" agent-repl-verb-move "agent-repl: moved %s to %s's place"
      "confirms the user's move command")
     ("verbs.el" agent-repl-verbs-select-minted

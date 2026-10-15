@@ -4989,6 +4989,81 @@ THE ARM IS THE REFUSAL: the four cross-cutting ownership arms."
    #'agent-repl-wire-decode-set-workspace-hidden-success
    #'agent-repl-wire-decode-set-workspace-hidden-error))
 
+;;;; ---- SendHiddenKeepalives ------------------------------------------
+
+(defun agent-repl-wire-encode-send-hidden-keepalives-request (&optional _request)
+  "Encode SendHiddenKeepalivesRequest.  Empty: the call is the request."
+  (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-send-hidden-keepalives-request")
+  nil)
+
+(defun agent-repl-wire-decode-send-hidden-keepalives-skipped (json)
+  "Decode SendHiddenKeepalivesSkipped from JSON into (:reason ONEOF).
+ONEOF is (:arm :busy :value (:detail S)), (:arm :detached-work-live :value
+\(:live-items N)) or (:arm :cache-lapsed :value (:lapsed-at-ms MS))."
+  (let ((message "SendHiddenKeepalivesSkipped"))
+    (agent-repl-wire-verbs--check-keys message json '(busy detachedWorkLive cacheLapsed))
+    (list :reason
+          (agent-repl-wire-verbs--decode-oneof
+           message "reason" json
+           (list (list 'busy :busy
+                       (lambda (value)
+                         (agent-repl-wire-verbs--decode-string-fields
+                          "SendHiddenKeepalivesSkippedBusy" value '((detail :detail)))))
+                 (list 'detachedWorkLive :detached-work-live
+                       (lambda (value)
+                         (let ((arm "SendHiddenKeepalivesSkippedDetachedWorkLive"))
+                           (agent-repl-wire-verbs--check-keys arm value '(liveItems))
+                           (list :live-items (agent-repl-wire--decode-uint32 arm 'liveItems value)))))
+                 (list 'cacheLapsed :cache-lapsed
+                       (lambda (value)
+                         (let ((arm "SendHiddenKeepalivesSkippedCacheLapsed"))
+                           (agent-repl-wire-verbs--check-keys arm value '(lapsedAtMs))
+                           (list :lapsed-at-ms (agent-repl-wire--decode-int64 arm 'lapsedAtMs value))))))))))
+
+(defun agent-repl-wire-decode-send-hidden-keepalives-workspace (json)
+  "Decode SendHiddenKeepalivesWorkspace from JSON.
+Returns (:workspace REF :outcome ONEOF), ONEOF's arm one of `:sent',
+`:skipped', `:not-running' or `:failed' (whose value is (:detail S))."
+  (let ((message "SendHiddenKeepalivesWorkspace"))
+    (agent-repl-wire-verbs--check-keys message json '(workspace sent skipped notRunning failed))
+    (list :workspace (agent-repl-wire--decode-message
+                      message 'workspace json #'agent-repl-wire-decode-workspace-ref)
+          :outcome
+          (agent-repl-wire-verbs--decode-oneof
+           message "outcome" json
+           (list (list 'sent :sent
+                       (lambda (value) (agent-repl-wire-verbs--decode-empty "SendHiddenKeepalivesSent" value)))
+                 (list 'skipped :skipped #'agent-repl-wire-decode-send-hidden-keepalives-skipped)
+                 (list 'notRunning :not-running
+                       (lambda (value) (agent-repl-wire-verbs--decode-empty "SendHiddenKeepalivesNotRunning" value)))
+                 (list 'failed :failed
+                       (lambda (value)
+                         (agent-repl-wire-verbs--decode-string-fields
+                          "SendHiddenKeepalivesFailed" value '((detail :detail))))))))))
+
+(defun agent-repl-wire-decode-send-hidden-keepalives-success (json)
+  "Decode SendHiddenKeepalivesSuccess from JSON into (:workspaces LIST).
+LIST holds one decoded SendHiddenKeepalivesWorkspace per hidden
+workspace, in the registry's order; empty when the section is."
+  (let ((message "SendHiddenKeepalivesSuccess"))
+    (agent-repl-wire-verbs--check-keys message json '(workspaces))
+    (list :workspaces (agent-repl-wire-verbs--decode-repeated
+                       message 'workspaces json
+                       #'agent-repl-wire-decode-send-hidden-keepalives-workspace))))
+
+(defun agent-repl-wire-decode-send-hidden-keepalives-error (json)
+  "Decode SendHiddenKeepalivesError from JSON into (:cause (:arm ARM :value V))."
+  (list :cause (agent-repl-wire-verbs--decode-string-arms
+                "SendHiddenKeepalivesError" "cause" json
+                '((registryUnreadable :registry-unreadable ((detail :detail)))))))
+
+(defun agent-repl-wire-decode-send-hidden-keepalives-response (json)
+  "Decode SendHiddenKeepalivesResponse from JSON into (:arm ARM :value V)."
+  (agent-repl-wire-verbs--decode-result
+   "SendHiddenKeepalivesResponse" json
+   #'agent-repl-wire-decode-send-hidden-keepalives-success
+   #'agent-repl-wire-decode-send-hidden-keepalives-error))
+
 (provide 'agent-repl-wire-verbs)
 
 ;;; wire-verbs.el ends here

@@ -64,8 +64,21 @@
                  agent-repl-register-repository
                  agent-repl-set-priority
                  agent-repl-hide-workspace
-                 agent-repl-show-hidden-workspace))
+                 agent-repl-show-hidden-workspace
+                 agent-repl-send-hidden-keepalives))
     (should (commandp cmd))))
+
+(ert-deftest agent-repl-test-keybindings-spc-j-R-sends-the-hidden-keepalives ()
+  "`SPC j R' sends a keep-alive to every hidden workspace."
+  (should (string-match-p
+           (regexp-quote "\"R\"  #'agent-repl-send-hidden-keepalives")
+           (agent-repl-test-keybindings--source))))
+
+(ert-deftest agent-repl-test-keybindings-spc-j-C-r-reloads-the-config ()
+  "`SPC j C-r' reloads the agent-repl config, `SPC j R' being the keep-alives."
+  (should (string-match-p
+           (regexp-quote "\"C-r\" #'agent-repl-reload-config")
+           (agent-repl-test-keybindings--source))))
 
 (ert-deftest agent-repl-test-keybindings-admin-verbs-are-defined ()
   "The SPC j a daemon-admin commands all exist."

@@ -1129,6 +1129,104 @@ describe("the cadence held while the workspace is hidden", () => {
  * not handed a scheduler override. Pin the real timer wiring directly rather
  * than only through the fake.
  */
+describe("a keep-alive asked for (SendKeepalive)", () => {
+  it("allows one into a held cache that is still warm", () => {
+    // Arrange
+    const { cadence } = cadenceAt(TURN_AT + 30 * MINUTE);
+    cadence.start(HELD_CACHE, "restart");
+    cadence.hold();
+
+    // Act
+    const refusal = cadence.askedBeat();
+
+    // Assert
+    expect(refusal).toBeUndefined();
+  });
+
+  it("allows one into a short-tier cache the scheduled beat would leave alone", () => {
+    // Arrange
+    const { cadence } = cadenceAt(TURN_AT + 2 * MINUTE);
+    cadence.start({ atMs: TURN_AT, ttlMs: CACHE_TTL_5M_MS, contextTokens: 0 }, "restart");
+
+    // Act
+    const refusal = cadence.askedBeat();
+
+    // Assert
+    expect(refusal).toBeUndefined();
+  });
+
+  it("allows one when no tier is stated", () => {
+    // Arrange
+    const { cadence } = cadenceAt(TURN_AT);
+    cadence.start(undefined, "a fresh conversation");
+
+    // Act
+    const refusal = cadence.askedBeat();
+
+    // Assert
+    expect(refusal).toBeUndefined();
+  });
+
+  it("refuses one while a turn is in flight", () => {
+    // Arrange
+    const { cadence } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HOUR_CACHE, "restart");
+    cadence.pause();
+
+    // Act
+    const refusal = cadence.askedBeat();
+
+    // Assert
+    expect(refusal).toEqual({ kind: "turnInFlight" });
+  });
+
+  it("refuses one while detached work is live, naming how much", () => {
+    // Arrange
+    const { cadence, detached } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HOUR_CACHE, "restart");
+    detached.push(WATCHER);
+
+    // Act
+    const refusal = cadence.askedBeat();
+
+    // Assert
+    expect(refusal).toEqual({ kind: "detachedWorkLive", liveItems: 1 });
+  });
+
+  it("refuses one into a cache that has lapsed, naming when it lapsed", () => {
+    // Arrange
+    const { cadence } = cadenceAt(TURN_AT + CACHE_TTL_1H_MS);
+    cadence.start(HOUR_CACHE, "restart");
+
+    // Act
+    const refusal = cadence.askedBeat();
+
+    // Assert
+    expect(refusal).toEqual({ kind: "cacheLapsed", lapsedAtMs: TURN_AT + CACHE_TTL_1H_MS });
+  });
+
+  it("leaves a held cadence held: no beat is scheduled after asking", () => {
+    // Arrange
+    const { cadence, scheduler } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HELD_CACHE, "restart");
+    cadence.hold();
+
+    // Act
+    cadence.askedBeat();
+
+    // Assert
+    expect(scheduler.pendingTimeout()).toBeUndefined();
+  });
+
+  it("fails hard when asked of a cadence that was never started", () => {
+    // Arrange
+    const { cadence } = cadenceAt(TURN_AT);
+
+    // Act, Assert
+    expect(() => cadence.askedBeat()).toThrow(/never started or has stopped/);
+  });
+});
+
 describe("REAL_SCHEDULER", () => {
   beforeEach(() => {
     vi.useFakeTimers();

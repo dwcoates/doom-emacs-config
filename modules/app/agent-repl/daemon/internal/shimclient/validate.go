@@ -186,6 +186,16 @@ func validateSetKeepaliveRequest(req *shimv1.SetKeepaliveRequest) error {
 	return nil
 }
 
+// validateSendKeepaliveRequest is SendKeepaliveRequest's base function: the
+// request is empty by design, so only its absence is refused.
+func validateSendKeepaliveRequest(req *shimv1.SendKeepaliveRequest) error {
+	const m = "SendKeepaliveRequest"
+	if req == nil {
+		return invalid(m, m, "request is nil")
+	}
+	return nil
+}
+
 // validateKillSessionRequest is KillSessionRequest's base function.
 func validateKillSessionRequest(req *shimv1.KillSessionRequest) error {
 	const m = "KillSessionRequest"

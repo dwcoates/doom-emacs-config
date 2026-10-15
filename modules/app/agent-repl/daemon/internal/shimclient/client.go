@@ -1582,6 +1582,11 @@ func (c *client) Hibernate(ctx context.Context, req *shimv1.HibernateRequest) (*
 	return unary(ctx, c, "hibernate", req, validateHibernateRequest, c.rpc.Hibernate)
 }
 
+// SendKeepalive asks the session for one keep-alive now.
+func (c *client) SendKeepalive(ctx context.Context, req *shimv1.SendKeepaliveRequest) (*shimv1.SendKeepaliveResponse, error) {
+	return unary(ctx, c, "send_keepalive", req, validateSendKeepaliveRequest, c.rpc.SendKeepalive)
+}
+
 // SetKeepalive holds the session's keep-alive cadence, or runs it again.
 func (c *client) SetKeepalive(ctx context.Context, req *shimv1.SetKeepaliveRequest) (*shimv1.SetKeepaliveResponse, error) {
 	return unary(ctx, c, "set_keepalive", req, validateSetKeepaliveRequest, c.rpc.SetKeepalive)
