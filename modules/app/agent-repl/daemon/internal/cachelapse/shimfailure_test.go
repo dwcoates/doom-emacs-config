@@ -4,13 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/shimclient"
+	"agent-repld/internal/sourcescan"
 )
 
 func TestShimCallFailedTriagesTheFailure(t *testing.T) {
@@ -70,23 +69,13 @@ func TestShimCallFailedKeepsTheCallersFields(t *testing.T) {
 // package triages a dead shim by hand instead of through shimCallFailed.
 func TestShimCallFailureTriageHasOneHome(t *testing.T) {
 	// Arrange
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("glob: %v", err)
-	}
+	files := sourcescan.Production(t)
 
 	// Act
 	var sites []string
 	for _, file := range files {
-		if strings.HasSuffix(file, "_test.go") {
-			continue
-		}
-		src, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatalf("read %s: %v", file, err)
-		}
-		for range strings.Count(string(src), "shimclient.ErrShimDied") {
-			sites = append(sites, file)
+		for range strings.Count(string(file.Source), "shimclient.ErrShimDied") {
+			sites = append(sites, file.Name)
 		}
 	}
 
