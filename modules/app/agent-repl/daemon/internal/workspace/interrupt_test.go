@@ -11,6 +11,8 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/feedid"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/wsm"
 )
@@ -1024,5 +1026,159 @@ func TestInterruptAllAgentsNeverWithdrawsAnAcceptedTurn(t *testing.T) {
 	// Assert.
 	if len(f.queue.withdraws) != 0 {
 		t.Fatalf("withdrawals = %v, want none: only a turn stop withdraws", f.queue.withdraws)
+	}
+}
+
+// rollingBackTarget is a turn stop that asks to roll its prompt back.
+func rollingBackTarget() InterruptTarget {
+	return InterruptTarget{Turn: true, RollBack: &RollbackRequest{Turns: []ids.TurnID{"t1"}}}
+}
+
+func TestInterruptRollingBackStopsTheTurnByTheRollback(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	runningTurn(f, 0)
+
+	// Act.
+	outcome, err := f.verbs.Interrupt(context.Background(), "w1", rollingBackTarget(), false)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	if outcome != (InterruptOutcome{RolledBack: true}) {
+		t.Fatalf("outcome = %+v, want only the rolled-back answer", outcome)
+	}
+	if len(f.shim.rollBacks) != 1 || f.shim.rollBacks[0].Turns[0] != "t1" {
+		t.Fatalf("shim rollbacks = %+v, want one cut before t1", f.shim.rollBacks)
+	}
+	if len(f.shim.killedTurns) != 0 {
+		t.Fatalf("killed turns = %+v, want none: the rollback's own interrupt stops the turn", f.shim.killedTurns)
+	}
+	if !hasRecord(f, "info", opInterrupt) {
+		t.Fatalf("records = %+v, want the rolled-back stop recorded", f.log.logger.Records())
+	}
+}
+
+func TestInterruptRollingBackWithLiveAgentsIsTheOrdinaryChallenge(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	runningTurn(f, 2)
+
+	// Act.
+	_, err := f.verbs.Interrupt(context.Background(), "w1", rollingBackTarget(), false)
+
+	// Assert.
+	var challenge *ConfirmRequired
+	if !errors.As(err, &challenge) || challenge.LiveAgentCount != 2 {
+		t.Fatalf("Interrupt error = %v, want the confirm challenge for 2 agents", err)
+	}
+	if len(f.shim.rollBacks) != 0 {
+		t.Fatalf("shim rollbacks = %+v, want none while agents are live", f.shim.rollBacks)
+	}
+}
+
+func TestInterruptRollingBackWithNothingRunningRollsNothingBack(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	outcome, err := f.verbs.Interrupt(context.Background(), "w1", rollingBackTarget(), false)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	if !outcome.NothingRunning || outcome.RolledBack {
+		t.Fatalf("outcome = %+v, want nothing running and no rollback", outcome)
+	}
+	if len(f.shim.rollBacks) != 0 {
+		t.Fatalf("shim rollbacks = %+v, want none", f.shim.rollBacks)
+	}
+}
+
+func TestInterruptRollingBackRefusedKillsTheTurnAndCarriesTheRefusal(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(f *fixture)
+	}{
+		{name: "shim refusal", arrange: func(f *fixture) {
+			f.shim.rollBackErr = &ShimRefusal{Verb: "RollBackSession", Arm: ArmShimFirstPrompt, Detail: "first"}
+		}},
+		{name: "holds changed", arrange: func(f *fixture) { f.queue.rollBackErr = promptqueue.ErrHoldsChanged }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			runningTurn(f, 0)
+			tt.arrange(f)
+
+			// Act.
+			outcome, err := f.verbs.Interrupt(context.Background(), "w1", rollingBackTarget(), false)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("Interrupt: %v", err)
+			}
+			if !outcome.Turn || outcome.RolledBack || outcome.RollbackRefused == nil {
+				t.Fatalf("outcome = %+v, want the turn stopped with the refusal carried", outcome)
+			}
+			if len(f.shim.killedTurns) != 1 || f.shim.killedTurns[0].Force {
+				t.Fatalf("killed turns = %+v, want one unforced kill", f.shim.killedTurns)
+			}
+			if !hasRecord(f, "info", opInterrupt) {
+				t.Fatalf("records = %+v, want the refused rollback recorded", f.log.logger.Records())
+			}
+		})
+	}
+}
+
+func TestInterruptRollingBackRefusedAfterItsInterruptStillAnswersTheStop(t *testing.T) {
+	// Arrange: the vendor refused the cut after the shim interrupted the turn.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	runningTurn(f, 0)
+	f.shim.rollBackErr = &ShimRefusal{Verb: "RollBackSession", Arm: ArmShimVendorRefused, Detail: "no"}
+	f.shim.killTurnErr = &ShimRefusal{Verb: "KillTurn", Arm: ArmShimNoTurnOpen}
+
+	// Act.
+	outcome, err := f.verbs.Interrupt(context.Background(), "w1", rollingBackTarget(), false)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	if !outcome.Turn || outcome.NothingRunning || outcome.RollbackRefused == nil {
+		t.Fatalf("outcome = %+v, want the stop answered with the refusal", outcome)
+	}
+}
+
+func TestInterruptRollingBackFailureIsTheStopsError(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	runningTurn(f, 0)
+	f.shim.rollBackErr = errors.New("shim transport gone")
+
+	// Act.
+	outcome, err := f.verbs.Interrupt(context.Background(), "w1", rollingBackTarget(), false)
+
+	// Assert.
+	if err == nil || !errors.Is(err, f.shim.rollBackErr) {
+		t.Fatalf("Interrupt error = %v, want the rollback failure", err)
+	}
+	if outcome != (InterruptOutcome{}) {
+		t.Fatalf("outcome = %+v, want none", outcome)
+	}
+	if len(f.shim.killedTurns) != 0 {
+		t.Fatalf("killed turns = %+v, want none after a failed rollback", f.shim.killedTurns)
+	}
+	if !hasRecord(f, "error", opRollBack) {
+		t.Fatalf("records = %+v, want the failure recorded at ERROR", f.log.logger.Records())
 	}
 }
