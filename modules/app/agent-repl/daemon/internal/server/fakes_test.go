@@ -1335,6 +1335,9 @@ func (f *fakeTopbar) SetParticipants(ws ids.WorkspaceID, host, web bool) {
 // Participants is the recorded edges, in order.
 func (f *fakeTopbar) Participants() []participantEdge { return f.edges.all() }
 
+// AwaitEdge blocks for the next participant edge the topbar was told.
+func (f *fakeTopbar) AwaitEdge(t *testing.T) participantEdge { return f.edges.await(t) }
+
 type fakeSidebar struct {
 	sidebar.Resolver
 	topic publish.Topic[*frontendv1.WorkspaceRoster]

@@ -364,6 +364,60 @@ func TestAHostStreamOpenStatesTheHopToTheTopbar(t *testing.T) {
 	}
 }
 
+// TestAWebStreamOpenStatesTheWebHopToTheFooter pins the web stream's open
+// edge: it is the page's hop of connectivity truth, stated rather than waited for.
+func TestAWebStreamOpenStatesTheWebHopToTheFooter(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Act.
+	openWebStream(t, h, ctx)
+	edge := h.Footer.AwaitEdge(t)
+
+	// Assert.
+	if !edge.Web || edge.Host || edge.WS != testWorkspaceID {
+		t.Fatalf("footer participant edge = %+v, want the web hop alone stated live", edge)
+	}
+}
+
+// TestAWebStreamOpenStatesTheWebHopToTheTopbar pins the same edge on the
+// topbar, which draws the connectivity glyph from it.
+func TestAWebStreamOpenStatesTheWebHopToTheTopbar(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Act.
+	openWebStream(t, h, ctx)
+	edge := h.Topbar.AwaitEdge(t)
+
+	// Assert.
+	if !edge.Web || edge.Host || edge.WS != testWorkspaceID {
+		t.Fatalf("topbar participant edge = %+v, want the web hop alone stated live", edge)
+	}
+}
+
+// TestAWebStreamCloseStatesTheWebHopDown pins the web stream's CLOSE edge.
+func TestAWebStreamCloseStatesTheWebHopDown(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	openWebStream(t, h, ctx)
+	h.Footer.AwaitEdge(t) // the open edge
+
+	// Act: the page goes away, and the handler's deferred release runs.
+	cancel()
+	edge := h.Footer.AwaitEdge(t)
+
+	// Assert.
+	if edge.Web {
+		t.Fatalf("footer participant edge = %+v, want the web hop stated down", edge)
+	}
+}
+
 // TestAHostStreamCloseStatesTheHopDown pins the CLOSE edge: a hop going down
 // is published rather than waited for.
 func TestAHostStreamCloseStatesTheHopDown(t *testing.T) {
