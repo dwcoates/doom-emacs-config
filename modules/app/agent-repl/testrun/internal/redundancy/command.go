@@ -171,3 +171,20 @@ func WriteOutputs(dir string, m *Measurement, o Options) error {
 	}
 	return nil
 }
+
+// FindRoot is the agent-repl module root: the nearest directory at or above
+// dir holding the roster.
+func FindRoot(dir string) (string, error) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", fmt.Errorf("redundancy: resolve %s: %w", dir, err)
+	}
+	for d := abs; ; d = filepath.Dir(d) {
+		if _, err := os.Stat(filepath.Join(d, "testrun", "roster", "roster.go")); err == nil {
+			return d, nil
+		}
+		if d == filepath.Dir(d) {
+			return "", fmt.Errorf("redundancy: no directory at or above %s holds testrun/roster", dir)
+		}
+	}
+}

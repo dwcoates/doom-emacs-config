@@ -419,22 +419,8 @@ func (m *measurer) root() (string, error) {
 	return FindRoot(m.cfg.Module)
 }
 
-// FindRoot is the agent-repl module root: the nearest directory at or above
-// dir holding the roster.
-func FindRoot(dir string) (string, error) {
-	abs, err := filepath.Abs(dir)
-	if err != nil {
-		return "", fmt.Errorf("gomeasure: resolve %s: %w", dir, err)
-	}
-	for d := abs; ; d = filepath.Dir(d) {
-		if _, err := os.Stat(filepath.Join(d, "testrun", "roster", "roster.go")); err == nil {
-			return d, nil
-		}
-		if d == filepath.Dir(d) {
-			return "", fmt.Errorf("gomeasure: no directory at or above %s holds testrun/roster", dir)
-		}
-	}
-}
+// FindRoot is redundancy's.
+var FindRoot = redundancy.FindRoot
 
 // programs is every roster program some suite spawns, in roster order.
 func (m *measurer) programs() ([]roster.Program, error) {
