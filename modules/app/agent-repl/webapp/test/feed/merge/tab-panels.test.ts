@@ -29,6 +29,16 @@ function tabOf(row: ReturnType<typeof tabRow>): MergeTab {
 /** The row context every panel here draws in. */
 const rc = () => rowContext(harness().ctx, mergeRow("m1"));
 
+/** A run's suites: a failed one, and a running one that has passed PASSED of 4. */
+const RUN_SUITES = (passed: number) => [
+  { name: "unit", state: { case: "failed", value: {} }, counts: { passed: 2, failed: 1, total: 3 } },
+  {
+    name: "e2e",
+    state: { case: "running", value: { soFar: { case: "passing", value: {} } } },
+    counts: { passed, failed: 0, total: 4 },
+  },
+];
+
 const SWITCH = {
   workspaceSwitch: {
     label: { text: "in the merge workspace" },
@@ -152,6 +162,33 @@ describe("mergeTabPanel", () => {
     const host = document.createElement("div");
     host.append(...panel.nodes);
     expect(host.querySelector('.merge-strip.is-nested [data-merge-tab="testsRun"]')).not.toBeNull();
+  });
+
+  it("hands a run's tally, every suite's counts summed, to its strip", () => {
+    const run = tabRow("t-run", { kind: "testsRun", state: "live", parent: "t-tests", payload: { output: { suites: RUN_SUITES(1) } } });
+    const panel = mergeTabPanel(tabOf(run), new FakeSubfeed([run]), rc());
+    expect([panel.accessory?.className, panel.accessory?.textContent]).toEqual(["merge-run-tally", "3/1/7"]);
+  });
+
+  it("moves a run's tally on a push of new counts", () => {
+    const run = tabRow("t-run", { kind: "testsRun", state: "live", parent: "t-tests", payload: { output: { suites: RUN_SUITES(1) } } });
+    const view = new FakeSubfeed([run]);
+    const panel = mergeTabPanel(tabOf(run), view, rc());
+    const next = tabRow("t-run", { kind: "testsRun", state: "live", parent: "t-tests", payload: { output: { suites: RUN_SUITES(2) } } });
+    view.push([next]);
+    panel.update(tabOf(next));
+    expect(panel.accessory?.textContent).toBe("4/1/7");
+  });
+
+  it("draws the shown run's tally at the right end of the tests tab's run strip", () => {
+    const rows = [
+      tabRow("t-tests", { kind: "tests", state: "live" }),
+      tabRow("t-run", { kind: "testsRun", state: "live", parent: "t-tests", payload: { output: { suites: RUN_SUITES(1) } } }),
+    ];
+    const panel = mergeTabPanel(childTabsOf(rows, undefined)[0], new FakeSubfeed(rows), rc());
+    const host = document.createElement("div");
+    host.append(...panel.nodes);
+    expect(host.querySelector(".merge-strip.is-nested")?.lastElementChild?.classList.contains("merge-run-tally")).toBe(true);
   });
 
   it("draws a run as its views, with no strip of its own", () => {

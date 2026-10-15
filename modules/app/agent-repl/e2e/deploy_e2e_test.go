@@ -238,15 +238,13 @@ func TestASuccessorThatFinishedJoiningAcceptsADeploy(t *testing.T) {
 	adAwaitAddrFileChange(t, w.Daemon, first)
 	successor := adDial(first)
 
-	// Act: the next deploy asks the successor.
-	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
-	defer cancel()
+	// Act: the next deploy asks the successor. Its announcement stream is the
+	// first deploy's shape, on the world's context: a stream bounded by one
+	// wait's DefaultTimeout from before the Deploy also bounded the whole
+	// deploy (its build and its takeover settle), and timed out under load.
 	// The Emacs states the checkout's own elisp, so the deploy pushes it no
 	// reload and the only thing it is shown is the handover.
-	announcements, err := successor.WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{ElispBuild: harness.PinnedElispBuild, Focus: harness.UnfocusedEditor(), Instance: harness.EditorInstance()}}}))
-	if err != nil {
-		t.Fatalf("WatchDaemon on the successor: %v", err)
-	}
+	announcements := w.Daemon.WatchDaemonStreamOn(successor)
 	defer announcements.Close()
 	resp, err := successor.Deploy(w.Ctx(), dpUnforced())
 
@@ -260,13 +258,7 @@ func TestASuccessorThatFinishedJoiningAcceptsADeploy(t *testing.T) {
 	dpHandingOver(t, resp)
 
 	// Assert: it hands over to a THIRD daemon, which then serves the workspace.
-	second := ""
-	for second == "" && announcements.Receive() {
-		second = announcements.Msg().GetShutdownAnnounced().GetAddress()
-	}
-	if second == "" {
-		t.Fatalf("the successor never announced its own handover: %v", announcements.Err())
-	}
+	second := dpAwaitAnnounced(t, w, announcements).GetAddress()
 	if second == first {
 		t.Fatalf("the second handover announced %q, the successor's own address", second)
 	}

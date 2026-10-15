@@ -108,7 +108,8 @@ first one arrives).")
 (defvar agent-repl-host-last-selected-id nil
   "The `WorkspaceRef' id of the last workspace Emacs itself selected.
 Recorded when the daemon acknowledged it, when a leaving daemon answered
-`standing_down', and when nobody answered at all: in every case it is the
+`standing_down', when nobody answered at all, and when there was no
+daemon to send it to: in every case it is the
 selection the next link-up re-asserts (`agent-repl-host--selected-dir').
 A refusal records nothing, because the daemon said it stamped nothing.")
 
@@ -523,8 +524,8 @@ naming another workspace until it is answered."
 (defun agent-repl-host-select (ws &optional on-settled)
   "Tell the daemon the user switched to workspace WS.
 ON-SETTLED, when given, is called with `:success', `:error',
-`:standing-down' (the daemon is leaving: it stamped the selection, the
-next daemon is asked again) or `:failure' once the call has an outcome
+`:standing-down' (the daemon is leaving or already gone: the next daemon
+is asked again) or `:failure' once the call has an outcome
 — the one moment a caller holding state on the selection\='s behalf
 \(the link-up re-assertion) may let go of it, whichever way it went —
 and with `:superseded' when a
@@ -536,9 +537,10 @@ workspace's attention marker, which is why no ack verb exists.
 While another selection is in flight this one WAITS
 \(`agent-repl-host--select-in-flight'), replacing any older one already
 waiting, and is sent when the one in flight is answered.  Answers t when
-the selection was sent or queued, nil when it was skipped because WS has
-no ref yet (an unregistered workspace has no identity to select) or there
-is no connection to send it on."
+the selection was sent or queued, nil when it was not sent: WS has no ref
+yet (an unregistered workspace has no identity to select, and it is
+skipped), or there is no connection to send it on (it is recorded for the
+next link-up to re-assert, and settled `:standing-down')."
   (if agent-repl-host--select-in-flight
       (let ((older agent-repl-host--select-queued))
         (setq agent-repl-host--select-queued (cons ws on-settled))
@@ -559,7 +561,19 @@ ON-SETTLED is as `agent-repl-host-select' documents."
       (agent-repl--log ws "elisp.host.select-skipped ws=%s reason=no-ref" ws)
       nil)
      ((null conn)
-      (agent-repl--warn ws "elisp.host.select-skipped ws=%s reason=no-connection" ws)
+      ;; A SELECTION WITH NO DAEMON TO SEND IT TO IS STILL THE USER'S, as
+      ;; one nobody answered is (`agent-repl-host--select-failed'): it is
+      ;; recorded as the selection the next link-up re-asserts, and its
+      ;; caller is settled.  Dropping it lost the user's newest choice
+      ;; whenever the link went down between a select and the one queued
+      ;; behind it: the drained queued select found no connection, the
+      ;; in-flight one's standing-down answer was the last id recorded, and
+      ;; the next daemon was told the selection the user had already left
+      ;; (2026-10-14, e2e TestEmacsRestartKeepsTheSelectedWorkspace).
+      (setq agent-repl-host-last-selected-id (plist-get ref :id))
+      (agent-repl--info ws "elisp.host.select-deferred ws=%s id=%S reason=no-connection reassert=next-link-up"
+                        ws (plist-get ref :id))
+      (when on-settled (funcall on-settled :standing-down))
       nil)
      (t
       (agent-repl--info ws "elisp.host.select ws=%s id=%S" ws (plist-get ref :id))

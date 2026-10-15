@@ -2152,11 +2152,12 @@ synthesize a call."
       (should (null (agent-repl-itest--calls daemon "SelectWorkspace"))))))
 
 ;; audit-3 #24
-(ert-deftest agent-repl-itest-host-select-with-no-connection-warns-and-sends-nothing ()
-  "Select with a ref but NO connection anywhere WARNS and sends nothing.
-host.el `elisp.host.select-skipped reason=no-connection' -- distinct from
+(ert-deftest agent-repl-itest-host-select-with-no-connection-defers-and-sends-nothing ()
+  "Select with a ref but NO connection anywhere sends nothing and DEFERS.
+host.el `elisp.host.select-deferred reason=no-connection' -- distinct from
 the no-ref case: the workspace IS registered, but neither its own `:conn'
-nor a standing primary exists to send on."
+nor a standing primary exists to send on, so the selection is recorded for
+the next link-up to re-assert, an expected path logged at INFO."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-host--with-subscription daemon ref
@@ -2166,8 +2167,8 @@ nor a standing primary exists to send on."
         ;; Act.
         (agent-repl-host-select agent-repl-itest-host--ws)
         ;; Assert.
-        (agent-repl-itest--await-log daemon "elisp.host.select-skipped" "warn")
-        (should (agent-repl-itest--logged-p daemon "elisp.host.select-skipped" "warn"))
+        (agent-repl-itest--await-log daemon "elisp.host.select-deferred" "info")
+        (should (agent-repl-itest--logged-p daemon "elisp.host.select-deferred" "info"))
         (should (null (agent-repl-itest--calls daemon "SelectWorkspace")))))))
 
 ;; audit-3 #24

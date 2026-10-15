@@ -12,6 +12,11 @@
  * THE OUTPUT IS ALREADY CAPPED by the daemon; the client scrolls what it was
  * given inside the block rather than growing the bubble without bound.
  *
+ * FAILED SUITES LEAD THE LIST (owner request, 2026-10-14): the failed first,
+ * then the still running, then the passed, each group in served order
+ * (`suitesInListOrder`). The run's TALLY, every suite's counts summed, rides
+ * at the right end of the run strip (`drawFeedMergeTestsRunTally`).
+ *
  * THE RUN'S FULL LOG IS A LINK (owner, 2026-09-30), drawn under the suites
  * once the daemon has written it: the shared editor-link verb with the log's
  * token, in the response bubble's link blue (`renderMergeTestLogLink`).
@@ -22,8 +27,9 @@ import { requireCase } from "../../rpc/strict.js";
 import { paintSpanClass } from "../cards/paint.js";
 import { armName } from "../renderers.js";
 import { unreachableArm } from "../../rpc/strict.js";
-import { equals } from "@bufbuild/protobuf";
+import { create, equals } from "@bufbuild/protobuf";
 import {
+  FeedMergeTestCountsSchema,
   FeedMergeTestLogSchema,
   type FeedMergeTestsRunOutput,
   type FeedMergeTestCounts,
@@ -88,11 +94,40 @@ export function drawFeedMergeTestLog(u: FeedMergeTestLog, ctx: AppContext, path:
   return el;
 }
 
-/** Every suite of a run, in served order. */
+/** Where each suite state sorts in a run's list: the failed lead, the passed trail. */
+const SUITE_LIST_RANK = {
+  failed: 0,
+  running: 1,
+  passed: 2,
+} as const satisfies Record<keyof typeof SUITE_GLYPHS, number>;
+
+/**
+ * SUITES as a run lists them: the failed, then the still running, then the
+ * passed, each group in served order.
+ */
+export function suitesInListOrder(suites: readonly FeedMergeTestSuite[]): FeedMergeTestSuite[] {
+  const rank = (suite: FeedMergeTestSuite): number => {
+    const state = requireCase(suite.state, `${PATH}.state`);
+    switch (state.case) {
+      case "failed":
+      case "running":
+      case "passed":
+        return SUITE_LIST_RANK[state.case];
+      default:
+        return unreachableArm(`${PATH}.state`, armName(state));
+    }
+  };
+  return suites
+    .map((suite, served) => ({ suite, served, rank: rank(suite) }))
+    .sort((a, b) => a.rank - b.rank || a.served - b.served)
+    .map((entry) => entry.suite);
+}
+
+/** Every suite of a run, in list order (`suitesInListOrder`). */
 export function drawTestSuites(suites: readonly FeedMergeTestSuite[]): HTMLElement {
   const el = document.createElement("div");
   el.className = "merge-suites list-rows";
-  for (const suite of suites) el.append(drawFeedMergeTestSuite(suite));
+  for (const suite of suitesInListOrder(suites)) el.append(drawFeedMergeTestSuite(suite));
   return el;
 }
 
@@ -100,7 +135,8 @@ export function drawTestSuites(suites: readonly FeedMergeTestSuite[]): HTMLEleme
  * Bring EL, a run's suites as `drawTestSuites` drew them, to SUITES IN
  * PLACE: each suite keeps its element, keyed by its name, and is repainted
  * where it changed (`updateFeedMergeTestSuite`); a new suite is drawn into its
- * place, and one no longer served is dropped. A push that only moved a running
+ * place, one no longer served is dropped, and a suite whose state moved moves
+ * to its group (`suitesInListOrder`). A push that only moved a running
  * suite's counts therefore moves only those figures, and its live dot breathes
  * on unbroken.
  */
@@ -109,7 +145,7 @@ export function updateTestSuites(el: HTMLElement, suites: readonly FeedMergeTest
   for (const child of el.querySelectorAll<HTMLElement>(":scope > .merge-suite")) {
     held.set(child.getAttribute(SUITE_NAME_ATTRIBUTE) ?? "", child);
   }
-  const next = suites.map((suite) => {
+  const next = suitesInListOrder(suites).map((suite) => {
     const existing = held.get(suite.name);
     if (existing === undefined) return drawFeedMergeTestSuite(suite);
     updateFeedMergeTestSuite(existing, suite);
@@ -198,12 +234,7 @@ function paintSuite(el: HTMLElement, suite: FeedMergeTestSuite): void {
       unreachableArm(`${PATH}.state`, armName(state));
   }
 
-  const head = glyph.parentElement as HTMLElement;
-  const counts = head.querySelector(":scope > .merge-suite-counts");
-  const nextCounts = suite.counts === undefined ? null : drawFeedMergeTestCounts(suite.counts);
-  if (nextCounts === null) counts?.remove();
-  else if (counts === null) head.append(nextCounts);
-  else if (counts.textContent !== nextCounts.textContent) counts.replaceWith(nextCounts);
+  placeFeedMergeTestCounts(glyph.parentElement as HTMLElement, suite.counts);
 
   let pre = el.querySelector<HTMLElement>(":scope > .merge-suite-output");
   if (suite.output.length === 0) {
@@ -248,6 +279,53 @@ export function drawFeedMergeTestCounts(counts: FeedMergeTestCounts): HTMLElemen
   }
   el.append(String(counts.total));
   return el;
+}
+
+/**
+ * Bring HOST's counts (`drawFeedMergeTestCounts`, its last child) to COUNTS:
+ * drawn once known, redrawn only when a figure moved, and dropped while
+ * nothing is known. The one placement of counts, for a suite's head line and
+ * a run's tally alike.
+ */
+export function placeFeedMergeTestCounts(host: HTMLElement, counts: FeedMergeTestCounts | undefined): void {
+  const drawn = host.querySelector(":scope > .merge-suite-counts");
+  const next = counts === undefined ? null : drawFeedMergeTestCounts(counts);
+  if (next === null) drawn?.remove();
+  else if (drawn === null) host.append(next);
+  else if (drawn.textContent !== next.textContent) drawn.replaceWith(next);
+}
+
+/**
+ * Every counted suite's counts summed, figure by figure; undefined while no
+ * suite carries any. The sum is of the daemon's figures, never a count of
+ * the suites themselves.
+ */
+export function sumFeedMergeTestCounts(suites: readonly FeedMergeTestSuite[]): FeedMergeTestCounts | undefined {
+  const counted = suites.flatMap((suite) => (suite.counts === undefined ? [] : [suite.counts]));
+  if (counted.length === 0) return undefined;
+  return create(FeedMergeTestCountsSchema, {
+    passed: counted.reduce((sum, c) => sum + c.passed, 0),
+    failed: counted.reduce((sum, c) => sum + c.failed, 0),
+    total: counted.reduce((sum, c) => sum + c.total, 0),
+  });
+}
+
+/**
+ * A run's tally: every suite's counts summed (`sumFeedMergeTestCounts`), drawn
+ * as a suite's own counts are, so its figures read in the rows' colors. The
+ * run panel hands it to the run strip, which draws it at the strip's right
+ * end; it is empty while no suite carries counts.
+ */
+export function drawFeedMergeTestsRunTally(suites: readonly FeedMergeTestSuite[]): HTMLElement {
+  const el = document.createElement("span");
+  el.className = "merge-run-tally";
+  updateFeedMergeTestsRunTally(el, suites);
+  return el;
+}
+
+/** Bring EL, a tally as `drawFeedMergeTestsRunTally` drew it, to SUITES in place. */
+export function updateFeedMergeTestsRunTally(el: HTMLElement, suites: readonly FeedMergeTestSuite[]): void {
+  placeFeedMergeTestCounts(el, sumFeedMergeTestCounts(suites));
 }
 
 /** One painted span of a suite's output. */
