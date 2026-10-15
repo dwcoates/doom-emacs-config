@@ -46,7 +46,10 @@ import {
   shutdownSignalHandlers,
   keepaliveResetSignalHandler,
   versionLine,
+  main,
+  PRODUCTION_MAIN_DEPS,
   type CliArgs,
+  type MainDeps,
   type ShimEnvironment,
 } from "../src/main.js";
 import { VendorCallsForbiddenError } from "../src/vendor-guard.js";
@@ -1037,19 +1040,36 @@ describe("queryFactory", () => {
  * a failed wait for the daemon's hang-up or a kill that arrives before the
  * listener exists.
  */
+describe("PRODUCTION_MAIN_DEPS", () => {
+  it("is the real modules main runs on when nothing is injected", async () => {
+    // Arrange: the modules themselves, as the program imports them.
+    const log = await import("../src/log.js");
+    const fatal = await import("../src/fatal.js");
+    const session = await import("../src/engine/session.js");
+    const persistence = await import("../src/store/persistence.js");
+    const client = await import("../src/store/client.js");
+    const server = await import("../src/service/server.js");
+    const routes = await import("../src/service/routes.js");
+
+    // Act, Assert: each injected collaborator IS the module's own export.
+    expect(PRODUCTION_MAIN_DEPS).toEqual({
+      configureLog: log.configureLog,
+      lifecycle: fatal.MAIN_LIFECYCLE_LOGGER,
+      reportFatal: fatal.reportFatal,
+      createEngine: session.createEngine,
+      createPersistence: persistence.createPersistence,
+      createStoreClient: client.createStoreClient,
+      serve: server.serve,
+      shimRoutes: routes.shimRoutes,
+    });
+  });
+});
+
 describe("main", () => {
   const priorArgv = process.argv;
   const priorEnv = { ...process.env };
 
   afterEach(() => {
-    vi.doUnmock("../src/service/server.js");
-    vi.doUnmock("../src/service/routes.js");
-    vi.doUnmock("../src/engine/session.js");
-    vi.doUnmock("../src/store/client.js");
-    vi.doUnmock("../src/store/persistence.js");
-    vi.doUnmock("../src/sdk/real-query.js");
-    vi.doUnmock("../src/fatal.js");
-    vi.resetModules();
     vi.restoreAllMocks();
     process.argv = priorArgv;
     for (const key of Object.keys(process.env)) {
@@ -1123,7 +1143,6 @@ describe("main", () => {
     }
     Object.assign(process.env, spawnEnv(env));
 
-    vi.resetModules();
     const recordLifecycle =
       (level: "debug" | "info" | "warn" | "error") =>
       (fields: Record<string, unknown>, message: string): void => {
@@ -1132,10 +1151,12 @@ describe("main", () => {
         const outcome = typeof fields["outcome"] === "string" ? fields["outcome"] : "";
         waiters.get(outcome)?.(record);
       };
-    vi.doMock("../src/fatal.js", () => ({
-      MAIN_LIFECYCLE_OPERATION: "shim.main.lifecycle",
-      MAIN_FATAL_OPERATION: "shim.main.fatal",
-      MAIN_LIFECYCLE_LOGGER: {
+    // MAIN'S COLLABORATORS, HANDED IN (MainDeps), never mocked into a fresh
+    // module graph: re-importing main.js per case cost 1.5s idle and timed
+    // cases out under a loaded run.
+    const mainDeps: MainDeps = {
+      configureLog: () => undefined,
+      lifecycle: {
         debug: recordLifecycle("debug"),
         info: recordLifecycle("info"),
         warn: recordLifecycle("warn"),
@@ -1149,27 +1170,18 @@ describe("main", () => {
         fatals.push(err);
         announceFatal(err);
       },
-    }));
-    vi.doMock("../src/service/server.js", () => ({
       serve: async () => {
         await serveGate;
         return { socketPath: "/tmp/0100059cb65649bc.sock", hungUp, close };
       },
-    }));
-    vi.doMock("../src/service/routes.js", () => ({ shimRoutes: () => (): void => {} }));
-    vi.doMock("../src/store/client.js", () => ({ createStoreClient: () => ({}) }));
-    vi.doMock("../src/store/persistence.js", () => ({
-      createPersistence: () => ({}),
-      DEFAULT_RETRY_POLICY: { attempts: 1, baseDelayMs: 1, maxDelayMs: 1 },
-    }));
-    vi.doMock("../src/engine/session.js", () => ({
-      createEngine: (given: Record<string, unknown>) => {
+      shimRoutes: () => (): void => {},
+      createStoreClient: (() => ({})) as unknown as MainDeps["createStoreClient"],
+      createPersistence: (() => ({})) as unknown as MainDeps["createPersistence"],
+      createEngine: ((given: Record<string, unknown>) => {
         deps = given;
         return { standDown: async (): Promise<number> => 0 };
-      },
-    }));
-
-    const mainModule = await import("../src/main.js");
+      }) as unknown as MainDeps["createEngine"],
+    };
     vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
       exits.push(code ?? 0);
       return undefined as never;
@@ -1204,9 +1216,9 @@ describe("main", () => {
         }),
       engineDeps: () => deps,
       run: () => {
-        void mainModule.main();
+        void main(mainDeps);
       },
-      runToCompletion: () => mainModule.main(),
+      runToCompletion: () => main(mainDeps),
     };
   }
 
