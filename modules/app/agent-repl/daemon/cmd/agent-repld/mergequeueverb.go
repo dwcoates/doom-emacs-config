@@ -14,8 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"connectrpc.com/connect"
-
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -207,7 +205,7 @@ func dialMergeQueueDaemon(address string) mergeQueueDaemon {
 
 // WatchRoster streams WatchWorkspaceRoster.
 func (d connectMergeQueueDaemon) WatchRoster(ctx context.Context, yield func(*frontendv1.WorkspaceRoster) error) error {
-	stream, err := d.client.WatchWorkspaceRoster(ctx, connect.NewRequest(&agentreplv1.WatchWorkspaceRosterRequest{}))
+	stream, err := openDaemonStream(ctx, d.client.WatchWorkspaceRoster, &agentreplv1.WatchWorkspaceRosterRequest{})
 	if err != nil {
 		return err
 	}
@@ -232,9 +230,7 @@ func (d connectMergeQueueDaemon) WatchRoster(ctx context.Context, yield func(*fr
 
 // Footer reads WatchFooter's first frame, which is the footer whole.
 func (d connectMergeQueueDaemon) Footer(ctx context.Context, ref *workspacev1.WorkspaceRef) (*frontendv1.FooterView, error) {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	stream, err := d.client.WatchFooter(ctx, connect.NewRequest(&agentreplv1.WatchFooterRequest{Workspace: ref}))
+	stream, err := openDaemonStream(ctx, d.client.WatchFooter, &agentreplv1.WatchFooterRequest{Workspace: ref})
 	if err != nil {
 		return nil, err
 	}

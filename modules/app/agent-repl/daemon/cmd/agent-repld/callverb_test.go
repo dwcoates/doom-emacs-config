@@ -212,3 +212,40 @@ func TestInvokeUnaryOverSendsADynamicRequestAndDecodesTheAnswer(t *testing.T) {
 		t.Fatalf("answer %v, want the error arm decoded", resp)
 	}
 }
+
+func TestLookupWorkspaceRefReturnsFromAStandingRosterStream(t *testing.T) {
+	// Arrange.
+	dir := canonicalDir(t.TempDir())
+	daemon, address := serveStandingDaemon(t, roster(rosterRow(dir, "done", 0)))
+	ctx := boundedContext(t)
+
+	// Act.
+	ref, err := lookupWorkspaceRef(ctx, address, dir)
+
+	// Assert.
+	if err != nil || ref.GetId() != "ws-1" {
+		t.Fatalf("lookupWorkspaceRef = %v, %v; want ws-1", ref, err)
+	}
+	assertStreamEnded(t, ctx, daemon)
+}
+
+func TestCallVerbFillsTheWorkspaceFromAStandingRosterStream(t *testing.T) {
+	// Arrange.
+	dir := canonicalDir(t.TempDir())
+	daemon, address := serveStandingDaemon(t, roster(rosterRow(dir, "done", 0)))
+	ctx := boundedContext(t)
+	fake := &callFake{answer: `{}`}
+	deps := fake.deps()
+	deps.lookup = lookupWorkspaceRef
+	deps.address = func(string) (string, error) { return address, nil }
+	var out, errOut bytes.Buffer
+
+	// Act.
+	code := runCallVerb(ctx, []string{"-workspace", dir, "SessionHealth"}, deps, &out, &errOut)
+
+	// Assert.
+	if code != exitSuccess || !strings.Contains(fake.sentJSON, `"id":"ws-1"`) {
+		t.Fatalf("call -workspace = %d, sent %s, stderr %q; want the request sent with ws-1", code, fake.sentJSON, errOut.String())
+	}
+	assertStreamEnded(t, ctx, daemon)
+}
