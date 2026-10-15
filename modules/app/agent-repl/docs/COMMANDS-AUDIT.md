@@ -76,7 +76,7 @@ Findings are collected at the end, in "Audit findings".
 | --- | --- | --- | --- | --- |
 | `agent-repl-feed-text-scale-increase` | Zoom the feed text in one step. | `C-+`, `C-=` (all states) | composer, webview | works |
 | `agent-repl-feed-text-scale-decrease` | Zoom the feed text out one step. | `C--` (all states) | composer, webview | works |
-| `agent-repl-frontend-copy-selection` | Copy the webview's highlighted text. | `y`, `C-c`, `s-c` (all states) | webview | works |
+| `agent-repl-frontend-copy-selection` | Copy the webview's highlighted text. | `y`, `C-c`, `s-c` (all states); `C-c` and `s-c` reach it only when Emacs's view holds the keyboard, and the page copies them itself otherwise (`webapp/src/copy.ts`) | webview | works |
 | `agent-repl-frontend-reload-webview` | Reload the served webapp in the webview. | `SPC o l`, remap of `xwidget-webkit-reload` | leader, webview | leader |
 | `agent-repl-frontend-rescue-webview` | Bring a webview that navigated away back home. | `SPC o L` | leader | leader |
 

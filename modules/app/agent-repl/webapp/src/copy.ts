@@ -9,13 +9,12 @@
  * text actually reaches the clipboard.
  *
  * WHY A FALLBACK AT ALL. The page's production host is an Emacs xwidget, a
- * WebKit view embedded in an application that owns the keymap. The page itself
- * never intercepts Cmd/Ctrl-C — no keydown handler in `src/` looks at the C
- * key. On the NS port the xwidget forwards every key to Emacs unless a page
- * input has focus, so `y`, `C-c` and Cmd-c over highlighted page text are
- * Emacs's to handle: `agent-repl-frontend-copy-selection` (lisp/frontend.el)
- * asks this page for its selection and writes it with `kill-new`. A copy the
- * browser itself performs is the other path, and this module backs it.
+ * WebKit view embedded in an application that owns the keymap. On the NS port
+ * the xwidget's `keyDown:` forwards a plain key to Emacs unless a page input
+ * has focus, so `y` over highlighted page text is Emacs's to handle:
+ * `agent-repl-frontend-copy-selection` (lisp/frontend.el) asks this page for
+ * its selection and writes it with `kill-new`. A copy the browser itself
+ * performs is the other path, and this module backs it.
  * But the xwidget's native copy is not something this page can verify, and a
  * `copy` event that fires with an empty clipboard payload would silently hand
  * the reader nothing. So: when a `copy` event DOES reach the document and the
@@ -29,6 +28,15 @@
  * keeps the browser's behaviour untouched.
  *
  * It adds no visible element. There is no copy button anywhere in this app.
+ *
+ * THE COPY CHORDS. `C-c` and Cmd-c never reach that `keyDown:`: a key with
+ * Control or Command held is a key equivalent, which WKWebView's
+ * `performKeyEquivalent:` takes first and hands to the page as a DOM
+ * `keydown` (the reason src/nsxwidget.m already listens for `C-g` in the page
+ * rather than in `keyDown:`). So the page answers those two chords itself:
+ * over a nonempty selection it runs the browser's own copy command, whose
+ * `copy` event the fallback above answers with the selection's text. Every
+ * other chord, and either chord with nothing selected, is left untouched.
  */
 import { log } from "./log.js";
 import { selectedText } from "./selection.js";
@@ -55,4 +63,48 @@ export function installCopyFallback(doc: Document): () => void {
 
   doc.addEventListener("copy", onCopy);
   return () => doc.removeEventListener("copy", onCopy);
+}
+
+/** Whether EVENT is `C-c` or Cmd-c: the C key under exactly one of Control and Command. */
+export function isCopyChord(event: KeyboardEvent): boolean {
+  return (
+    event.key.toLowerCase() === "c" &&
+    event.ctrlKey !== event.metaKey &&
+    !event.altKey &&
+    !event.shiftKey
+  );
+}
+
+/**
+ * Install the `C-c` / Cmd-c copy chords on DOC, and answer a teardown that
+ * removes them. COPY runs the browser's copy command and answers whether the
+ * browser carried it out; the default is `document.execCommand("copy")`, which
+ * fires the `copy` event `installCopyFallback` answers.
+ */
+export function installCopyChords(
+  doc: Document,
+  copy: () => boolean = () => doc.execCommand("copy"),
+): () => void {
+  const onKeyDown = (event: KeyboardEvent): void => {
+    if (!isCopyChord(event)) return;
+    const characters = selectedText(doc).length;
+    if (characters === 0) return;
+
+    const chord = event.metaKey ? "Cmd-c" : "C-c";
+    if (!copy()) {
+      log.error("the browser refused to copy the selection", {
+        operation: "copy.chord",
+        context: { chord, characters, outcome: "refused" },
+      });
+      return;
+    }
+    event.preventDefault();
+    log.debug("a copy chord copied the selection", {
+      operation: "copy.chord",
+      context: { chord, characters, outcome: "copied" },
+    });
+  };
+
+  doc.addEventListener("keydown", onKeyDown);
+  return () => doc.removeEventListener("keydown", onKeyDown);
 }

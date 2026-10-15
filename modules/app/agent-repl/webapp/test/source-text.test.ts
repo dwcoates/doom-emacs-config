@@ -63,4 +63,16 @@ describe("the call sites", () => {
     // Assert
     expect(handRolled.map((file) => path.relative(here, file))).toEqual([]);
   });
+
+  it("import raw source text at collection, never inside a test", () => {
+    // Arrange: a dynamic `?raw` import inside a test body pays Vite's transform
+    // against that test's timeout, which a loaded run overruns.
+    const inTest = /await import\([^)]*\?raw["'`]\)/;
+    // Act
+    const offenders = filesUnder(here).filter(
+      (file) => file !== fileURLToPath(import.meta.url) && inTest.test(readFileSync(file, "utf8")),
+    );
+    // Assert
+    expect(offenders.map((file) => path.relative(here, file))).toEqual([]);
+  });
 });

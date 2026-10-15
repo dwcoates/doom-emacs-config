@@ -47,6 +47,10 @@ import { orderFor } from "../../feed-order.js";
 import { stopClocks } from "../../../src/feed/ticking.js";
 import { recordingFailures } from "../../failure-sink.js";
 
+// Imported at collection, not inside a test, so the transform never counts
+// against a test's timeout.
+import css from "../../../src/styles.css?raw";
+
 type InitState = MessageInitShape<typeof FeedColdGateSchema>["state"];
 
 const MODEL = "claude-opus-5";
@@ -313,14 +317,12 @@ describe("the standing gate", () => {
     ]);
   });
 
-  it("gives compact the pay button's fill and a green border", async () => {
-    const css = (await import("../../../src/styles.css?raw")).default;
+  it("gives compact the pay button's fill and a green border", () => {
     const rule = /\.cold-gate-buttons > ar-button\.hibernation-compact\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
     expect([rule.includes("background: var(--bg)"), rule.includes("border-color: var(--cold-gate-compact-border)")]).toEqual([true, true]);
   });
 
-  it("draws clear's label in the shared colour, borders half again as thick", async () => {
-    const css = (await import("../../../src/styles.css?raw")).default;
+  it("draws clear's label in the shared colour, borders half again as thick", () => {
     expect([
       css.includes(".cold-gate-buttons > ar-button.hibernation-clear { color: var(--fg); border-color: var(--info-tokens); }"),
       css.includes(".cold-gate-buttons > ar-button { border-width: 1.5px; }"),
@@ -339,9 +341,8 @@ describe("the standing gate", () => {
     expect(card?.style.getPropertyValue(COLD_GATE_HEAT_PROPERTY)).toBe(figure?.style.color);
   });
 
-  it("draws the frame and the submenu divider in the card's heat", async () => {
+  it("draws the frame and the submenu divider in the card's heat", () => {
     // Arrange
-    const css = (await import("../../../src/styles.css?raw")).default;
     // Act
     const frame = /\n\.cold-gate\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
     const divider = /\.cold-gate-submenu\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
@@ -352,9 +353,8 @@ describe("the standing gate", () => {
     ]).toEqual([true, true]);
   });
 
-  it("draws pay and resume with the red border", async () => {
+  it("draws pay and resume with the red border", () => {
     // Arrange
-    const css = (await import("../../../src/styles.css?raw")).default;
     // Act
     const rule = /\.cold-gate-buttons > ar-button\.hibernation-direct\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
     // Assert
@@ -368,8 +368,7 @@ describe("the standing gate", () => {
     expect(el.querySelector(".cold-gate-buttons > .hibernation-clear")?.textContent).toBe("clear context");
   });
 
-  it("sizes the buttons equal, to the widest label, centred", async () => {
-    const css = (await import("../../../src/styles.css?raw")).default;
+  it("sizes the buttons equal, to the widest label, centred", () => {
     const rule = /\.cold-gate-buttons\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
     const label = /\.cold-gate-buttons > ar-button\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
     expect([
@@ -1232,8 +1231,7 @@ describe("the hide workspace button", () => {
     expect(hideButton(el)?.textContent).toBe("hide workspace");
   });
 
-  it("is drawn grey", async () => {
-    const css = (await import("../../../src/styles.css?raw")).default;
+  it("is drawn grey", () => {
     expect(
       css.includes(".cold-gate-buttons > ar-button.cold-gate-hide { color: var(--muted); border-color: var(--muted); }"),
     ).toBe(true);

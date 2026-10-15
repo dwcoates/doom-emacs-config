@@ -1,11 +1,12 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 
-describe("the digest overlay's surface", () => {
-  it("is opaque, so the feed is not seen through it", async () => {
-    // Arrange
-    const css = (await import("../../src/styles.css?raw")).default;
+// Imported at collection, not inside a test, so the stylesheet's transform
+// never counts against a test's timeout.
+import css from "../../src/styles.css?raw";
 
+describe("the digest overlay's surface", () => {
+  it("is opaque, so the feed is not seen through it", () => {
     // Act
     const rule = /\[data-component="news-digest"\]\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
 
@@ -19,10 +20,7 @@ describe("the digest overlay's surface", () => {
 });
 
 describe("the IPO outlook's color", () => {
-  it("is defined for both themes and worn only by the digest", async () => {
-    // Arrange
-    const css = (await import("../../src/styles.css?raw")).default;
-
+  it("is defined for both themes and worn only by the digest", () => {
     // Act
     const definitions = css.match(/--news-digest-ipo:/g)?.length ?? 0;
     const users = [...css.matchAll(/^([^{}\n]*)\{[^}]*var\(--news-digest-ipo\)/gm)].map((m) => m[1].trim());

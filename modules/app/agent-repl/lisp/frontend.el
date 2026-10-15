@@ -509,13 +509,20 @@ other stock xwidget binding still resolves through the parent."
 ;;
 ;; WHERE THE KEYS GO.  On the NS port the WKWebView's `keyDown:' override
 ;; (src/nsxwidget.m) evaluates the injected `xwHasFocus()' and FORWARDS
-;; every key to Emacs unless an INPUT or TEXTAREA holds DOM focus.  A
-;; reader who drag-selected feed text has focused neither, so `y', `C-c'
-;; and Command-c (`s-c') all arrive HERE, in the webview buffer's keymaps,
-;; and never reach the page.  The page cannot copy for them; Emacs must,
-;; and it writes the system clipboard through `kill-new' (the kill ring's
-;; `interprogram-cut-function' end), the same write every agent-repl copy
-;; command makes.
+;; a plain key to Emacs unless an INPUT or TEXTAREA holds DOM focus.  A
+;; reader who drag-selected feed text has focused neither, so `y' arrives
+;; HERE, in the webview buffer's keymaps, and never reaches the page.  The
+;; page cannot copy for it; Emacs must, and it writes the system clipboard
+;; through `kill-new' (the kill ring's `interprogram-cut-function' end),
+;; the same write every agent-repl copy command makes.
+;;
+;; `C-c' and Command-c (`s-c') never reach `keyDown:' while the web view
+;; holds the keyboard: a Control or Command chord is a key equivalent,
+;; which WKWebView's `performKeyEquivalent:' takes first and hands to the
+;; page as a DOM keydown.  The page copies those two itself (webapp
+;; src/copy.ts).  They arrive HERE only when Emacs's own view holds the
+;; keyboard over the webview buffer (after a `C-g' in the page, say), so
+;; they are bound here too.
 ;;
 ;; THE OWNER'S RULING (2026-10-02).  The three keys copy ONLY when the page
 ;; holds a NONEMPTY selection AND has focus (`document.hasFocus()'); in

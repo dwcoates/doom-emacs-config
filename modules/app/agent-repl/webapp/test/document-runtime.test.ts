@@ -83,6 +83,30 @@ describe("installTextAffordances", () => {
     paragraph.remove();
   });
 
+  it("copies a selection on C-c", () => {
+    // Arrange
+    const uninstall = installTextAffordances(document);
+    let copied = 0;
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: (command: string) => command === "copy" && ++copied > 0,
+    });
+    const paragraph = document.createElement("p");
+    paragraph.textContent = "frame unreadable";
+    document.body.append(paragraph);
+    window.getSelection()?.selectAllChildren(paragraph);
+
+    // Act
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "c", ctrlKey: true, bubbles: true }));
+
+    // Assert
+    expect(copied).toBe(1);
+    uninstall();
+    Reflect.deleteProperty(document, "execCommand");
+    window.getSelection()?.removeAllRanges();
+    paragraph.remove();
+  });
+
   it("is what both documents set themselves up with", () => {
     // Arrange
     const here = path.dirname(fileURLToPath(import.meta.url));
@@ -99,10 +123,11 @@ describe("installTextAffordances", () => {
         s.includes("installTextAffordances("),
         s.includes("new ForwardingLogger("),
         s.includes("installCopyFallback("),
+        s.includes("installCopyChords("),
       ]),
     ).toEqual([
-      [true, true, false, false],
-      [true, true, false, false],
+      [true, true, false, false, false],
+      [true, true, false, false, false],
     ]);
   });
 });

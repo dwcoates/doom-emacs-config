@@ -4,7 +4,7 @@
  * own copy would have handed the reader nothing.
  */
 import { afterEach, describe, expect, it } from "vitest";
-import { installCopyFallback } from "../src/copy.js";
+import { installCopyChords, installCopyFallback, isCopyChord } from "../src/copy.js";
 import { captureLogRecords, forwardedRecord } from "./log-capture.js";
 
 let teardown: (() => void) | undefined;
@@ -128,5 +128,170 @@ describe("the copy fallback", () => {
     expect((await forwardedRecord(capture, "copy.fallback")).message).toBe(
       "the copy fallback wrote the selection to the clipboard",
     );
+  });
+});
+
+/** A `keydown` of KEY under MODIFIERS, dispatched on the document; answers the event. */
+function pressChord(key: string, modifiers: KeyboardEventInit): KeyboardEvent {
+  const event = new KeyboardEvent("keydown", { key, ...modifiers, bubbles: true, cancelable: true });
+  document.dispatchEvent(event);
+  return event;
+}
+
+describe("isCopyChord", () => {
+  it.each<[string, string, KeyboardEventInit, boolean]>([
+    ["C-c", "c", { ctrlKey: true }, true],
+    ["Cmd-c", "c", { metaKey: true }, true],
+    ["Cmd-c with caps lock", "C", { metaKey: true }, true],
+    ["a bare c", "c", {}, false],
+    ["Control and Command together", "c", { ctrlKey: true, metaKey: true }, false],
+    ["C-M-c", "c", { ctrlKey: true, altKey: true }, false],
+    ["Cmd-Shift-c", "c", { metaKey: true, shiftKey: true }, false],
+    ["C-v", "v", { ctrlKey: true }, false],
+  ])("answers %s", (_name, key, modifiers, expected) => {
+    // Arrange
+    const event = new KeyboardEvent("keydown", { key, ...modifiers });
+
+    // Act
+    const answer = isCopyChord(event);
+
+    // Assert
+    expect(answer).toBe(expected);
+  });
+});
+
+describe("the copy chords", () => {
+  it.each<[string, KeyboardEventInit]>([
+    ["C-c", { ctrlKey: true }],
+    ["Cmd-c", { metaKey: true }],
+  ])("%s runs the copy command over a selection", (_name, modifiers) => {
+    // Arrange
+    let copies = 0;
+    teardown = installCopyChords(document, () => ++copies > 0);
+    selectText("a fault sentence");
+
+    // Act
+    pressChord("c", modifiers);
+
+    // Assert
+    expect(copies).toBe(1);
+  });
+
+  it("takes the chord's default once the copy is done", () => {
+    // Arrange
+    teardown = installCopyChords(document, () => true);
+    selectText("a fault sentence");
+
+    // Act
+    const event = pressChord("c", { metaKey: true });
+
+    // Assert
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("hands the fallback the selection's text through the copy event", () => {
+    // Arrange
+    const removeFallback = installCopyFallback(document);
+    const clipboard = fakeClipboard();
+    const removeChords = installCopyChords(document, () => dispatchCopy(clipboard.api).defaultPrevented);
+    teardown = () => {
+      removeChords();
+      removeFallback();
+    };
+    selectText("boot_failed: the daemon refused the adoption");
+
+    // Act
+    pressChord("c", { ctrlKey: true });
+
+    // Assert
+    expect(clipboard.written.get("text/plain")).toBe("boot_failed: the daemon refused the adoption");
+  });
+
+  it("leaves a chord over a collapsed selection entirely alone", () => {
+    // Arrange
+    let copies = 0;
+    teardown = installCopyChords(document, () => ++copies > 0);
+    document.getSelection()?.removeAllRanges();
+
+    // Act
+    const event = pressChord("c", { ctrlKey: true });
+
+    // Assert
+    expect([copies, event.defaultPrevented]).toEqual([0, false]);
+  });
+
+  it("leaves every other chord alone", () => {
+    // Arrange
+    let copies = 0;
+    teardown = installCopyChords(document, () => ++copies > 0);
+    selectText("a fault sentence");
+
+    // Act
+    const event = pressChord("v", { ctrlKey: true });
+
+    // Assert
+    expect([copies, event.defaultPrevented]).toEqual([0, false]);
+  });
+
+  it("stops copying once the chords are torn down", () => {
+    // Arrange
+    let copies = 0;
+    const remove = installCopyChords(document, () => ++copies > 0);
+    selectText("a fault sentence");
+    remove();
+
+    // Act
+    pressChord("c", { ctrlKey: true });
+
+    // Assert
+    expect(copies).toBe(0);
+  });
+
+  it("records a done copy at debug", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    teardown = installCopyChords(document, () => true);
+    selectText("a fault sentence");
+
+    // Act
+    pressChord("c", { metaKey: true });
+
+    // Assert
+    const record = await forwardedRecord(capture, "copy.chord");
+    expect([record.level.case, record.message, record.context]).toMatchObject([
+      "debug",
+      "a copy chord copied the selection",
+      { chord: "Cmd-c", characters: 16, outcome: "copied" },
+    ]);
+  });
+
+  it("leaves the chord's default to the browser when the browser refuses the copy", () => {
+    // Arrange
+    teardown = installCopyChords(document, () => false);
+    selectText("a fault sentence");
+
+    // Act
+    const event = pressChord("c", { ctrlKey: true });
+
+    // Assert
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it("records a refused copy at error", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    teardown = installCopyChords(document, () => false);
+    selectText("a fault sentence");
+
+    // Act
+    pressChord("c", { ctrlKey: true });
+
+    // Assert
+    const record = await forwardedRecord(capture, "copy.chord");
+    expect([record.level.case, record.message, record.context]).toMatchObject([
+      "error",
+      "the browser refused to copy the selection",
+      { chord: "C-c", characters: 16, outcome: "refused" },
+    ]);
   });
 });

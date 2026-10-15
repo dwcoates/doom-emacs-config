@@ -14,6 +14,10 @@ import { shellElements } from "../../src/shell.js";
 import { shellHTML } from "../shell-html.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 
+// Imported at collection, not inside a test, so the transform never counts
+// against a test's timeout.
+import css from "../../src/styles.css?raw";
+
 /** MutationObserver delivers on a microtask; this lets it run. */
 async function settle(): Promise<void> {
   await Promise.resolve();
@@ -109,9 +113,8 @@ describe("installGateDock", () => {
     ]).toEqual([Node.DOCUMENT_POSITION_FOLLOWING, "BODY", "main-col"]);
   });
 
-  it("spans every column of the page's second row", async () => {
+  it("spans every column of the page's second row", () => {
     // Arrange
-    const css = (await import("../../src/styles.css?raw")).default;
 
     // Act
     const rule = /#gate-dock\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
@@ -120,9 +123,8 @@ describe("installGateDock", () => {
     expect([rule.includes("grid-column: 1 / -1"), rule.includes("grid-row: 2")]).toEqual([true, true]);
   });
 
-  it("keeps the rail in the first row, so it never reaches down beside the dock", async () => {
+  it("keeps the rail in the first row, so it never reaches down beside the dock", () => {
     // Arrange
-    const css = (await import("../../src/styles.css?raw")).default;
 
     // Act
     const rail = /#ws-sidebar\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
@@ -267,9 +269,8 @@ describe("installGateDock", () => {
     expect(toldDockHeight(document)).toBeNull();
   });
 
-  it("sizes the dock to exactly the told property (the fraction only as fallback)", async () => {
+  it("sizes the dock to exactly the told property (the fraction only as fallback)", () => {
     // Arrange
-    const css = (await import("../../src/styles.css?raw")).default;
 
     // Act
     const rule = /#gate-dock\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
@@ -293,9 +294,8 @@ describe("the docked gate's background", () => {
     expect(toldDockBackground(document)).toBeNull();
   });
 
-  it("paints the docked card from the told property, the card's own background only as fallback", async () => {
+  it("paints the docked card from the told property, the card's own background only as fallback", () => {
     // Arrange
-    const css = (await import("../../src/styles.css?raw")).default;
 
     // Act
     const rule = /#gate-dock > \.cold-gate\.cold-gate-docked\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
@@ -304,27 +304,24 @@ describe("the docked gate's background", () => {
     expect(rule).toContain("background: var(--input-bg, var(--bg))");
   });
 
-  it("frames the docked gate on every side, not only above it", async () => {
+  it("frames the docked gate on every side, not only above it", () => {
     // Arrange
-    const css = (await import("../../src/styles.css?raw")).default;
     // Act
     const rule = /#gate-dock > \.cold-gate\.cold-gate-docked\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
     // Assert
     expect([rule.includes("border-width: 1px;"), rule.includes("border-width: 1px 0 0")]).toEqual([true, false]);
   });
 
-  it("lifts the docked gate off the page's last row so its bottom edge is whole", async () => {
+  it("lifts the docked gate off the page's last row so its bottom edge is whole", () => {
     // Arrange
-    const css = (await import("../../src/styles.css?raw")).default;
     // Act
     const rule = /#gate-dock\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
     // Assert
     expect(rule.includes("padding-bottom: 1px;")).toBe(true);
   });
 
-  it("paints the undocked card the input window's color too, never the revival yellow", async () => {
+  it("paints the undocked card the input window's color too, never the revival yellow", () => {
     // Arrange
-    const css = (await import("../../src/styles.css?raw")).default;
     // Act
     const rule = /\n\.cold-gate\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
     // Assert
