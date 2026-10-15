@@ -517,6 +517,16 @@ type workspaceColumn struct {
 // rather than silently affecting no rows.
 func (s *store) setWorkspaceColumns(ctx context.Context, op string, id WorkspaceID, fields dlog.Context, columns ...workspaceColumn) error {
 	fields["workspace"] = string(id)
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		return updateWorkspaceColumns(ctx, tx, id, columns...)
+	})
+}
+
+// updateWorkspaceColumns is setWorkspaceColumns's statement, inside a
+// transaction the caller already holds: for a write whose columns depend on a
+// read of the same row (Reopen), so the read and the update cannot interleave
+// with another write.
+func updateWorkspaceColumns(ctx context.Context, tx *sql.Tx, id WorkspaceID, columns ...workspaceColumn) error {
 	assignments := make([]string, len(columns))
 	args := make([]any, 0, len(columns)+1)
 	for i, column := range columns {
@@ -524,13 +534,11 @@ func (s *store) setWorkspaceColumns(ctx context.Context, op string, id Workspace
 		args = append(args, column.value)
 	}
 	args = append(args, id)
-	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `UPDATE workspaces SET `+strings.Join(assignments, ", ")+` WHERE id = ?`, args...)
-		if err != nil {
-			return err
-		}
-		return requireOneRow(res, fmt.Sprintf("wsm: workspace %s", id))
-	})
+	res, err := tx.ExecContext(ctx, `UPDATE workspaces SET `+strings.Join(assignments, ", ")+` WHERE id = ?`, args...)
+	if err != nil {
+		return err
+	}
+	return requireOneRow(res, fmt.Sprintf("wsm: workspace %s", id))
 }
 
 // requireOneRow turns "no rows affected" into a refusal. A write that matched
@@ -600,13 +608,45 @@ func (s *store) MarkClosed(ctx context.Context, id WorkspaceID, closure Closure)
 // close record in the same statement.
 //
 // A RE-OPEN MOVES NOTHING: the workspace returns to the place it held in the
-// registry when it was closed (place.go). Re-opening touches only the flag
-// and the record, because the bring-up claims serving itself.
+// registry when it was closed (place.go). Re-opening touches only the flag,
+// the record and a merge's settlement, because the bring-up claims serving
+// itself.
+//
+// AN OPEN WORKSPACE IS NEVER MERGED. Re-opening a merged workspace is the user
+// taking it back to revise what it landed, so the same statement retires the
+// merge's settlement: merged_at (the row leaves Recently Merged for its
+// groupings), the count the merge landed (commit_count goes back to "never
+// counted", and the next turn close recounts it live), the detached merge's
+// landing (landed_head, landed_at), which would otherwise have the merge
+// workspace sweep retire it again, and, for a merge workspace, its hiding: a
+// merge workspace the user opened is revealed, never drawn nowhere. A row that
+// is not merged keeps every one of those columns as it stands.
 func (s *store) Reopen(ctx context.Context, id WorkspaceID) error {
-	return s.setWorkspaceColumns(ctx, "daemon.wsm.reopen", id, dlog.Context{},
-		workspaceColumn{name: "closed", value: false},
-		workspaceColumn{name: "closure_at", value: nil},
-		workspaceColumn{name: "closure_by", value: nil})
+	fields := dlog.Context{"workspace": string(id)}
+	return s.write(ctx, "daemon.wsm.reopen", fields, func(ctx context.Context, tx *sql.Tx) error {
+		var merged sql.NullInt64
+		var mergeOf sql.NullString
+		if err := scanWorkspaceRow(ctx, tx, id, "merged_at, merge_of", &merged, &mergeOf); err != nil {
+			return err
+		}
+		fields["was_merged"] = merged.Valid
+		columns := []workspaceColumn{
+			{name: "closed", value: false},
+			{name: "closure_at", value: nil},
+			{name: "closure_by", value: nil},
+		}
+		if merged.Valid {
+			columns = append(columns,
+				workspaceColumn{name: "merged_at", value: nil},
+				workspaceColumn{name: "commit_count", value: nil},
+				workspaceColumn{name: "landed_head", value: nil},
+				workspaceColumn{name: "landed_at", value: nil})
+			if mergeOf.Valid {
+				columns = append(columns, workspaceColumn{name: "merge_revealed", value: true})
+			}
+		}
+		return updateWorkspaceColumns(ctx, tx, id, columns...)
+	})
 }
 
 // SetSpawnedShimPID records, or clears with nil, the pid of a shim a daemon

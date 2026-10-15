@@ -185,13 +185,7 @@ async function runSimpleVerb(
 ): Promise<void> {
   switch (verb) {
     case "open":
-      await runVerb(button, {
-        sc: target.sc,
-        rpc: "OpenWorkspace",
-        call: (client) => client.openWorkspace(buildOpenWorkspaceRequest(target.workspace)),
-        schema: OpenWorkspaceResponseSchema,
-        refusalText: (cause) => openWorkspaceRefusal(cause as CauseOf<OpenWorkspaceError>),
-      });
+      await runOpenWorkspace(button, target.sc, target.workspace);
       return;
     case "close":
       await runVerb(button, {
@@ -619,6 +613,21 @@ export function refusalCause(rpc: string, error: unknown): RefusalCause & { case
 type CauseOf<E extends { cause: { case?: string | undefined } }> = NonNullable<E["cause"]> & {
   case: string;
 };
+
+/**
+ * Issue OpenWorkspace for WORKSPACE, saying a refusal at CONTROL. The ONE
+ * spelling of the open: the menu's Open and the Recently Merged row click
+ * both run it. Answers whether the daemon opened the workspace.
+ */
+export function runOpenWorkspace(control: HTMLElement, sc: SidebarContext, workspace: WorkspaceRef): Promise<boolean> {
+  return runVerb(control, {
+    sc,
+    rpc: "OpenWorkspace",
+    call: (client) => client.openWorkspace(buildOpenWorkspaceRequest(workspace)),
+    schema: OpenWorkspaceResponseSchema,
+    refusalText: (cause) => openWorkspaceRefusal(cause as CauseOf<OpenWorkspaceError>),
+  });
+}
 
 /** OpenWorkspace's own arms: the ways bringing one back up can fail. */
 export function openWorkspaceRefusal(cause: CauseOf<OpenWorkspaceError>): string {

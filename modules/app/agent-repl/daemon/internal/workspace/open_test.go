@@ -409,16 +409,6 @@ func TestOpenRefusesAGoneWorkspaceWithNothingToRestoreFrom(t *testing.T) {
 			says: "no branch was recorded",
 		},
 		{
-			name: "the workspace was merged",
-			arrange: func(_ *testing.T, f *fixture, ws wsm.Workspace) {
-				withBranch(f, ws)
-				merged := time.Unix(1, 0)
-				ws.MergedAt = &merged
-				f.db.with(ws)
-			},
-			says: "merged",
-		},
-		{
 			name: "the repository is gone too",
 			arrange: func(t *testing.T, f *fixture, ws wsm.Workspace) {
 				withBranch(f, ws)
@@ -994,4 +984,294 @@ func TestRestoreMissingWorktreeNeverRecreatesAMergedWorkspace(t *testing.T) {
 	if len(f.git.restored) != 0 || len(f.git.gitCalls) != 0 {
 		t.Fatalf("restored = %v, git calls = %v, want no git at all for a merged workspace", f.git.restored, f.git.gitCalls)
 	}
+}
+
+// mergedWorkspace registers w1 as the merge queue leaves a landed requester:
+// merged, closed, its worktree removed, its branch and its parent branch kept.
+func mergedWorkspace(t *testing.T, f *fixture) wsm.Workspace {
+	t.Helper()
+	ws := goneWorkspace(t, f)
+	merged := time.Unix(1, 0)
+	ws.MergedAt = &merged
+	ws.Closed = true
+	ws.ParentBranch = "master"
+	f.db.with(ws)
+	f.git.existingBranches = map[string]bool{ws.Branch: true, ws.ParentBranch: true}
+	return ws
+}
+
+func TestOpenRestoresAMergedWorkspaceFromItsBranch(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	ws := mergedWorkspace(t, f)
+
+	// Act.
+	err := f.verbs.Open(context.Background(), "w1", nil)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	want := restoredWorktree{RepoDir: filepath.Dir(ws.Dir), WorktreeDir: ws.Dir, Branch: ws.Branch}
+	if len(f.git.restored) != 1 || f.git.restored[0] != want {
+		t.Fatalf("restored = %+v, want exactly %+v", f.git.restored, want)
+	}
+}
+
+func TestOpenStartsTheSessionOfAReopenedMergedWorkspace(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	mergedWorkspace(t, f)
+
+	// Act.
+	if err := f.verbs.Open(context.Background(), "w1", nil); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Assert.
+	if len(f.fleet.started) != 1 {
+		t.Fatalf("sessions started = %d, want the reopened merged workspace's session", len(f.fleet.started))
+	}
+}
+
+func TestOpenAdvancesAReopenedMergedWorkspaceToItsParentsTip(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	ws := mergedWorkspace(t, f)
+
+	// Act.
+	if err := f.verbs.Open(context.Background(), "w1", nil); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Assert.
+	want := ws.Dir + "->" + ws.ParentBranch
+	if len(f.git.fastForwarded) != 1 || f.git.fastForwarded[0] != want {
+		t.Fatalf("fast-forwards = %v, want exactly %q", f.git.fastForwarded, want)
+	}
+}
+
+func TestOpenAdvancesAMergedWorkspaceOnlyFromInsideItsParent(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	ws := mergedWorkspace(t, f)
+
+	// Act.
+	if err := f.verbs.Open(context.Background(), "w1", nil); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Assert.
+	want := "HEAD.." + ws.ParentBranch
+	if len(f.git.ancestorChecks) != 1 || f.git.ancestorChecks[0] != want {
+		t.Fatalf("ancestor checks = %v, want exactly %q", f.git.ancestorChecks, want)
+	}
+}
+
+// TestOpenLeavesAMergedWorkspaceTheAdvanceCannotCarryAtItsTip pins every way a
+// reopened merged workspace stays where its branch stands: no fast-forward,
+// the open succeeds, and an INFO record says why.
+func TestOpenLeavesAMergedWorkspaceTheAdvanceCannotCarryAtItsTip(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(f *fixture, ws wsm.Workspace)
+		why     string
+	}{
+		{name: "no parent branch was recorded", arrange: func(f *fixture, ws wsm.Workspace) {
+			ws.ParentBranch = ""
+			f.db.with(ws)
+		}, why: "no parent branch was recorded"},
+		{name: "the parent branch is gone", arrange: func(f *fixture, ws wsm.Workspace) {
+			delete(f.git.existingBranches, ws.ParentBranch)
+		}, why: "the parent branch no longer exists"},
+		{name: "the worktree is dirty", arrange: func(f *fixture, _ wsm.Workspace) {
+			f.git.dirty = true
+		}, why: "the worktree holds uncommitted changes"},
+		{name: "the branch moved on after landing", arrange: func(f *fixture, _ wsm.Workspace) {
+			f.git.offPrimary = map[string]bool{"HEAD": true}
+		}, why: "the branch holds commits its parent does not"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			ws := mergedWorkspace(t, f)
+			tc.arrange(f, ws)
+
+			// Act.
+			err := f.verbs.Open(context.Background(), "w1", nil)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+			if len(f.git.fastForwarded) != 0 {
+				t.Fatalf("fast-forwards = %v, want none", f.git.fastForwarded)
+			}
+			for _, r := range f.log.logger.Records() {
+				if r.Level == dlog.LevelInfo && r.Operation == opOpen && r.Context["why"] == tc.why {
+					return
+				}
+			}
+			t.Fatalf("no INFO record saying %q; records = %+v", tc.why, f.log.logger.Records())
+		})
+	}
+}
+
+// TestOpenFailsLoudlyWhenTheMergedAdvanceCannotRun pins that a git the advance
+// depends on failing is an ERROR naming the step and a returned failure, and
+// that no session comes up in a tree whose state the open could not settle.
+func TestOpenFailsLoudlyWhenTheMergedAdvanceCannotRun(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(f *fixture)
+		step    string
+	}{
+		{name: "the parent probe fails", arrange: func(f *fixture) {
+			f.git.branchExistsErr = errors.New("git exploded")
+		}, step: "probe the parent branch"},
+		{name: "the cleanliness read fails", arrange: func(f *fixture) {
+			f.git.isCleanErr = errors.New("git exploded")
+		}, step: "read whether the worktree is clean"},
+		{name: "the ancestry read fails", arrange: func(f *fixture) {
+			f.git.ancestorErr = errors.New("git exploded")
+		}, step: "read whether the branch is inside its parent"},
+		{name: "the fast-forward fails", arrange: func(f *fixture) {
+			f.git.fastForwardErr = errors.New("git exploded")
+		}, step: "fast-forward"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the worktree is present, so the advance is the first git.
+			f := newFixture(t)
+			ws := f.workspace("w1", t.TempDir())
+			merged := time.Unix(1, 0)
+			ws.MergedAt, ws.Closed, ws.ParentBranch = &merged, true, "master"
+			f.db.with(ws)
+			f.git.existingBranches = map[string]bool{ws.Branch: true, ws.ParentBranch: true}
+			tc.arrange(f)
+
+			// Act.
+			err := f.verbs.Open(context.Background(), "w1", nil)
+
+			// Assert.
+			if err == nil || !strings.Contains(err.Error(), tc.step) || !strings.Contains(err.Error(), "git exploded") {
+				t.Fatalf("Open = %v, want a failure naming %q and its cause", err, tc.step)
+			}
+			if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opOpen}); !ok {
+				t.Fatalf("no ERROR record of the failed advance; records = %+v", f.log.logger.Records())
+			}
+			if len(f.fleet.started) != 0 || len(f.db.reopened) != 0 {
+				t.Fatalf("started = %d, reopened = %v, want nothing after a failed advance", len(f.fleet.started), f.db.reopened)
+			}
+		})
+	}
+}
+
+func TestOpenReopensAMergedWorkspace(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	mergedWorkspace(t, f)
+
+	// Act.
+	if err := f.verbs.Open(context.Background(), "w1", nil); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Assert.
+	if len(f.db.reopened) != 1 || f.db.reopened[0] != "w1" {
+		t.Fatalf("reopened = %v, want w1 reopened once", f.db.reopened)
+	}
+}
+
+func TestOpenReopensAMergedRowACrashLeftOpen(t *testing.T) {
+	// Arrange: the queue stamps merged_at before it closes the row.
+	f := newFixture(t)
+	ws := mergedWorkspace(t, f)
+	ws.Closed = false
+	f.db.with(ws)
+
+	// Act.
+	if err := f.verbs.Open(context.Background(), "w1", nil); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Assert.
+	if len(f.db.reopened) != 1 {
+		t.Fatalf("reopened = %v, want the open merged row reopened", f.db.reopened)
+	}
+}
+
+func TestOpenRetiresTheLandedMergeOfAReopenedMergedWorkspace(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	mergedWorkspace(t, f)
+
+	// Act.
+	if err := f.verbs.Open(context.Background(), "w1", nil); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Assert.
+	if len(f.merge.retired) != 1 || f.merge.retired[0] != "w1" {
+		t.Fatalf("retired merges = %v, want w1's", f.merge.retired)
+	}
+}
+
+func TestOpenRecordsTheReopenedMergeAtInfo(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	ws := mergedWorkspace(t, f)
+
+	// Act.
+	if err := f.verbs.Open(context.Background(), "w1", nil); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Assert.
+	for _, r := range f.log.logger.Records() {
+		if r.Level == dlog.LevelInfo && r.Operation == opOpen && strings.Contains(r.Message, "reopened a merged workspace") {
+			if r.Context["branch"] != ws.Branch {
+				t.Fatalf("reopen record context = %v, want branch %q", r.Context, ws.Branch)
+			}
+			return
+		}
+	}
+	t.Fatalf("no INFO record of the reopened merge; records = %+v", f.log.logger.Records())
+}
+
+func TestOpenTouchesNoMergeOfAWorkspaceThatIsNotMerged(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	ws := f.workspace("w1", t.TempDir())
+	ws.Closed, ws.ParentBranch = true, "master"
+	f.db.with(ws)
+
+	// Act.
+	if err := f.verbs.Open(context.Background(), "w1", nil); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Assert.
+	if len(f.merge.retired) != 0 || len(f.git.fastForwarded) != 0 || len(f.git.ancestorChecks) != 0 {
+		t.Fatalf("retired = %v, fast-forwards = %v, ancestor checks = %v, want none for an unmerged workspace",
+			f.merge.retired, f.git.fastForwarded, f.git.ancestorChecks)
+	}
+}
+
+func TestRestoreMissingWorktreeRecordsTheMergedWorkspaceItLeavesAtInfo(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	ws := mergedWorkspace(t, f)
+
+	// Act.
+	_, _ = f.verbs.RestoreMissingWorktree(context.Background(), ws)
+
+	// Assert.
+	for _, r := range f.log.logger.Records() {
+		if r.Level == dlog.LevelInfo && strings.Contains(r.Message, "the boot does not restore it") {
+			return
+		}
+	}
+	t.Fatalf("no INFO record of the merged workspace the boot left; records = %+v", f.log.logger.Records())
 }

@@ -58,6 +58,13 @@ func (v *verbs) Open(ctx context.Context, ws ids.WorkspaceID, progress OpenProgr
 		}
 		log = restored
 	}
+	// A MERGED WORKSPACE COMES BACK TO BE REVISED, so it comes back at its
+	// parent's tip, where the work it landed now lives (advanceMerged).
+	if record.MergedAt != nil {
+		if err := v.advanceMerged(ctx, log, record); err != nil {
+			return err
+		}
+	}
 
 	// A PARKED WORKSPACE IS REVIVED THROUGH THE SAME PATH, and the park is
 	// LIFTED by it. The start below would have spawned the session either way
@@ -108,13 +115,26 @@ func (v *verbs) Open(ctx context.Context, ws ids.WorkspaceID, progress OpenProgr
 		log.Info(opOpen, "revived the hibernated workspace", nil)
 	}
 
-	if record.Closed {
+	// A MERGED ROW IS REOPENED EVEN WHEN IT IS NOT CLOSED: the merge queue
+	// stamps merged_at before it closes the row, so a crash can leave an open
+	// one, and an open workspace is never merged (wsm.Reopen).
+	if record.Closed || record.MergedAt != nil {
 		reportOpenStage(progress, OpenStageClearingClosed)
 		if err := v.deps.DB.Reopen(ctx, ws); err != nil {
-			log.Error(opOpen, "could not clear the closed flag", dlog.Context{"cause": err.Error()})
+			log.Error(opOpen, "could not clear the closed flag", dlog.Context{
+				"merged": record.MergedAt != nil, "cause": err.Error()})
 			return fmt.Errorf("open %q: clear closed: %w", ws, err)
 		}
-		log.Debug(opOpen, "cleared the closed flag", nil)
+		if record.MergedAt != nil {
+			// THE LANDED MERGE'S STANDING STATE GOES WITH ITS SETTLEMENT: the
+			// workspace moved on, and its row and footer would otherwise go on
+			// drawing it merged.
+			v.deps.Merge.RetireConcluded(ctx, ws)
+			log.Info(opOpen, "reopened a merged workspace; its merge's settlement is retired", dlog.Context{
+				"merged_at": record.MergedAt.UTC(), "branch": record.Branch})
+		} else {
+			log.Debug(opOpen, "cleared the closed flag", nil)
+		}
 	}
 
 	// A close refusal is drawn in the footer; re-opening retires it, because
@@ -211,6 +231,16 @@ func mergeIsPending(state string) bool {
 // unrestorable workspace is an answer (false) rather than a refusal.
 func (v *verbs) RestoreMissingWorktree(ctx context.Context, ws wsm.Workspace) (bool, error) {
 	log := v.deps.Log.WorkspaceOrCentral(ws.Dir).With(dlog.Context{"workspace": string(ws.ID)})
+	// A MERGED WORKSPACE'S WORKTREE WAS REMOVED ON PURPOSE. The merge queue
+	// stamps merged_at before it closes the row and removes the tree, so the
+	// stamp alone -- even on a row a crash left open -- says the directory's
+	// absence is the merge's doing. Only the user's own open brings a merged
+	// workspace back; the boot never does.
+	if ws.MergedAt != nil {
+		log.Info("daemon.boot.close_missing_dir", "the merged workspace's directory is gone on purpose; the boot does not restore it", dlog.Context{
+			"dir": ws.Dir, "branch": ws.Branch, "merged_at": ws.MergedAt.UTC()})
+		return false, nil
+	}
 	_, err := v.restoreWorktree(ctx, log, ws, nil, "daemon.boot.close_missing_dir")
 	if _, refused := AsRefusal(err); refused {
 		return false, nil
@@ -238,14 +268,8 @@ func (v *verbs) restoreWorktree(ctx context.Context, log dlog.Logger, record wsm
 		return refuseWith(log, rpc, ArmWorktreeUnrestorable, detail, false,
 			map[string]any{"dir": record.Dir, "branch": record.Branch})
 	}
-	// A MERGED WORKSPACE'S WORKTREE WAS REMOVED ON PURPOSE. The merge queue
-	// stamps merged_at before it closes the row and removes the tree, so the
-	// stamp alone -- even on a row a crash left open -- says the directory's
-	// absence is the merge's doing, and it is never undone here.
-	if record.MergedAt != nil {
-		return nil, unrestorable(fmt.Sprintf(
-			"the workspace's directory %s is gone because the workspace was merged; a merged worktree is not restored", record.Dir))
-	}
+	// A MERGED WORKSPACE IS RESTORED LIKE ANY OTHER: the merge keeps its
+	// branch, and opening one is the user taking it back to revise it.
 	if record.Branch == "" {
 		return nil, unrestorable(fmt.Sprintf(
 			"the workspace's directory %s is gone and no branch was recorded to restore it from", record.Dir))
@@ -316,6 +340,60 @@ func (v *verbs) restoreWorktree(ctx context.Context, log dlog.Logger, record wsm
 		return nil, fmt.Errorf("open %q: publish the restored workspace's naming: %w", record.ID, err)
 	}
 	return log, nil
+}
+
+// advanceMerged fast-forwards a merged workspace being reopened to its parent
+// branch's tip. Its branch landed there, so the branch's tip is inside the
+// parent and the advance carries nothing away: the reopened workspace starts
+// from the code as it stands now, which is what a revision of landed work is
+// made against, and its next merge carries only the revision.
+//
+// A WORKSPACE THE ADVANCE CANNOT CARRY STAYS AT ITS BRANCH'S TIP, and says why
+// at INFO: one that names no parent branch, one whose parent branch is gone,
+// one holding uncommitted changes, and one whose branch has commits its parent
+// does not (it moved on after landing). Nothing here ever moves a branch any
+// way but forward. A git that could not answer or act fails the open.
+func (v *verbs) advanceMerged(ctx context.Context, log dlog.Logger, record wsm.Workspace) error {
+	fields := dlog.Context{"dir": record.Dir, "branch": record.Branch, "parent_branch": record.ParentBranch}
+	stays := func(why string) error {
+		fields["why"] = why
+		log.Info(opOpen, "the reopened merged workspace stays at its branch's tip", fields)
+		return nil
+	}
+	fail := func(what string, err error) error {
+		fields["cause"] = err.Error()
+		log.Error(opOpen, "could not advance the reopened merged workspace to its parent's tip: "+what, fields)
+		return fmt.Errorf("open %q: advance the merged workspace to %q: %s: %w", record.ID, record.ParentBranch, what, err)
+	}
+	if record.ParentBranch == "" {
+		return stays("no parent branch was recorded")
+	}
+	exists, err := v.deps.Git.BranchExists(ctx, record.Dir, record.ParentBranch)
+	if err != nil {
+		return fail("probe the parent branch", err)
+	}
+	if !exists {
+		return stays("the parent branch no longer exists")
+	}
+	clean, err := v.deps.Git.IsClean(ctx, record.Dir)
+	if err != nil {
+		return fail("read whether the worktree is clean", err)
+	}
+	if !clean {
+		return stays("the worktree holds uncommitted changes")
+	}
+	inside, err := v.deps.Git.IsAncestor(ctx, record.Dir, "HEAD", record.ParentBranch)
+	if err != nil {
+		return fail("read whether the branch is inside its parent", err)
+	}
+	if !inside {
+		return stays("the branch holds commits its parent does not")
+	}
+	if err := v.deps.Git.FastForward(ctx, record.Dir, record.ParentBranch); err != nil {
+		return fail("fast-forward", err)
+	}
+	log.Info(opOpen, "advanced the reopened merged workspace to its parent's tip", fields)
+	return nil
 }
 
 // clearStaleRegistration retires the registration git still holds for the

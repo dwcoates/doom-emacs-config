@@ -321,9 +321,9 @@ keyword, and the fields."
      ((eq keyword :worktree-unrestorable)
       ;; NOT A FAULT OF AGENT-REPL.  The user picked a row whose directory is
       ;; gone with nothing left to restore it from (its branch is gone, none
-      ;; was recorded, its repository is gone, or it was merged); a deleted
-      ;; worktree whose branch survives is restored by the daemon and never
-      ;; reaches here.  So it is an ordinary answer, recorded at INFO, and the
+      ;; was recorded, or its repository is gone); a deleted worktree whose
+      ;; branch survives -- a merged workspace's included -- is restored by
+      ;; the daemon and never reaches here.  So it is an ordinary answer, recorded at INFO, and the
       ;; daemon's own sentence -- which names the directory, the branch and
       ;; the reason -- is what the user reads, not an arm keyword.
       (let ((fields (plist-get arm :value)))

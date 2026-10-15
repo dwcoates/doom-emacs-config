@@ -72,6 +72,7 @@ import {
   buildSelectWorkspaceRequest,
   buildSetWorkspaceHiddenRequest,
   drawRowMenu,
+  runOpenWorkspace,
   runVerb,
   type VerbTarget,
 } from "./verbs.js";
@@ -120,7 +121,9 @@ export function expandVisibleRows(rows: readonly RosterRow[], basePath: string):
  * and what a click on it does:
  *
  *   - `grouping`: a live grouping's section. Drawn whole; a click selects it.
- *   - `merged`: the recently-merged band. Drawn plain; a click selects it.
+ *   - `merged`: the recently-merged band. Drawn plain; a click REOPENS the
+ *     workspace and then selects it (`OpenWorkspace`, owner request
+ *     2026-10-14): a merged workspace is taken back to revise what it landed.
  *   - `hidden`: the hidden-workspaces section. Drawn with NO STATE (owner
  *     request, 2026-10-13): no status color, no status mark, no read greying,
  *     no reviving shimmer and no attention marker; its name is in the
@@ -222,8 +225,9 @@ export function drawRosterRow(
       });
       return;
     }
-    if (place === "hidden") {
-      void guardMalformed(sc.ctx, "sidebar.row.show", showWorkspace(line, sc, workspace));
+    if (place !== "grouping") {
+      const band = BAND_RETURNS[place];
+      void guardMalformed(sc.ctx, band.operation, returnFromBand(band, line, sc, workspace));
       return;
     }
     void guardMalformed(sc.ctx, "sidebar.row.select", selectWorkspace(line, sc, workspace));
@@ -802,28 +806,62 @@ async function selectWorkspace(
 }
 
 /**
- * Show a hidden workspace again, then select it: the click on its row in the
- * hidden section (owner request, 2026-10-13). The push that follows moves it
- * back into its groupings and onto the tab bar; once the daemon has answered
- * the show, the same click selects it, so the user lands on what they clicked.
- * A refused show selects nothing: the refusal stands on the row instead.
+ * How a band row's click brings its workspace back before selecting it, one
+ * entry per band. Every band's click is the same two steps (`returnFromBand`)
+ * and only the first differs, so a band added later says its step here rather
+ * than spelling a second click of its own.
+ *
+ *   - `hidden`: SHOW the workspace again (owner request, 2026-10-13); the push
+ *     that follows moves it back into its groupings and onto the tab bar.
+ *   - `merged`: REOPEN it (owner request, 2026-10-14); a merged workspace is
+ *     taken back to revise what it landed, so the daemon restores its worktree
+ *     and brings its session back, and the push moves it out of the band.
  */
-async function showWorkspace(
+export interface BandReturn {
+  /** The click's log operation. */
+  operation: string;
+  /** The click's info record. */
+  message: string;
+  /** The verb that brings the workspace back; answers whether it did. */
+  bringBack: (line: HTMLElement, sc: SidebarContext, workspace: WorkspaceRef) => Promise<boolean>;
+}
+
+export const BAND_RETURNS: Readonly<Record<Exclude<RowPlace, "grouping">, BandReturn>> = {
+  hidden: {
+    operation: "sidebar.row.show",
+    message: "showing a hidden workspace from the rail",
+    bringBack: (line, sc, workspace) =>
+      runVerb(line, {
+        sc,
+        rpc: "SetWorkspaceHidden",
+        call: (client) => client.setWorkspaceHidden(buildSetWorkspaceHiddenRequest(workspace, false)),
+        schema: SetWorkspaceHiddenResponseSchema,
+      }),
+  },
+  merged: {
+    operation: "sidebar.row.reopen",
+    message: "reopening a merged workspace from the rail",
+    bringBack: runOpenWorkspace,
+  },
+};
+
+/**
+ * A band row's click: bring the workspace back (`BandReturn.bringBack`), then
+ * select it, so the user lands on what they clicked. A refused first step
+ * selects nothing: the refusal stands on the row instead.
+ */
+export async function returnFromBand(
+  band: BandReturn,
   line: HTMLElement,
   sc: SidebarContext,
   workspace: WorkspaceRef,
 ): Promise<void> {
-  log.info("showing a hidden workspace from the rail", {
-    operation: "sidebar.row.show",
+  log.info(band.message, {
+    operation: band.operation,
     context: { workspace: workspace.id },
   });
-  const shown = await runVerb(line, {
-    sc,
-    rpc: "SetWorkspaceHidden",
-    call: (client) => client.setWorkspaceHidden(buildSetWorkspaceHiddenRequest(workspace, false)),
-    schema: SetWorkspaceHiddenResponseSchema,
-  });
-  if (!shown) return;
+  const back = await band.bringBack(line, sc, workspace);
+  if (!back) return;
   await selectWorkspace(line, sc, workspace);
 }
 
