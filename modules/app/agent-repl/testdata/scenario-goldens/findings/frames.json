@@ -205,7 +205,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1000,
+      "atMs": 1800000000008,
       "ordinal": 0
     },
     "source": {
@@ -224,7 +224,7 @@
             "reportFindings": {
               "start": {
                 "startedAt": {
-                  "atMs": "1000"
+                  "atMs": "1800000000008"
                 }
               }
             },
@@ -243,7 +243,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1000,
+      "atMs": 1800000000008,
       "ordinal": 0
     },
     "source": {
@@ -290,9 +290,9 @@
                 ],
                 "level": "AGENT_EFFORT_LEVEL_HIGH",
                 "settledAt": {
-                  "atMs": "1000",
+                  "atMs": "1800000000008",
                   "startedAt": {
-                    "atMs": "1000"
+                    "atMs": "1800000000008"
                   }
                 }
               }

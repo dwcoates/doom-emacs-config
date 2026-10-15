@@ -205,7 +205,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1000,
+      "atMs": 1800000000013,
       "ordinal": 0
     },
     "source": {
@@ -225,7 +225,7 @@
               "start": {
                 "enter": {},
                 "startedAt": {
-                  "atMs": "1000"
+                  "atMs": "1800000000013"
                 }
               }
             },
@@ -244,7 +244,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1000,
+      "atMs": 1800000000013,
       "ordinal": 0
     },
     "source": {
@@ -265,9 +265,9 @@
                   "message": "Entered plan mode."
                 },
                 "settledAt": {
-                  "atMs": "1000",
+                  "atMs": "1800000000013",
                   "startedAt": {
-                    "atMs": "1000"
+                    "atMs": "1800000000013"
                   }
                 }
               }
@@ -513,7 +513,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1000,
+      "atMs": 1800000000013,
       "ordinal": 0
     },
     "source": {
@@ -533,7 +533,7 @@
               "start": {
                 "exit": {},
                 "startedAt": {
-                  "atMs": "1000"
+                  "atMs": "1800000000013"
                 }
               }
             },
@@ -552,7 +552,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1000,
+      "atMs": 1800000000013,
       "ordinal": 0
     },
     "source": {
@@ -577,9 +577,9 @@
                   "hasTaskTool": true
                 },
                 "settledAt": {
-                  "atMs": "1000",
+                  "atMs": "1800000000013",
                   "startedAt": {
-                    "atMs": "1000"
+                    "atMs": "1800000000013"
                   }
                 }
               }

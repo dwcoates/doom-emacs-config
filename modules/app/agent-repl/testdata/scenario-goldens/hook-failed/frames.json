@@ -145,7 +145,7 @@
                 "hookName": "SessionStart:startup",
                 "event": "AGENT_HOOK_EVENT_SESSION_START",
                 "startedAt": {
-                  "atMs": "1000"
+                  "atMs": "1800000000006"
                 }
               }
             },

@@ -228,7 +228,7 @@
                 "websocket": {
                   "url": "ws://127.0.0.1:8787/echo"
                 },
-                "startedAtMs": "1000"
+                "startedAtMs": "1800000000008"
               }
             },
             "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"

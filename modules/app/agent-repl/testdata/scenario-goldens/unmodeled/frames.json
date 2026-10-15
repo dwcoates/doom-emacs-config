@@ -205,7 +205,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1000,
+      "atMs": 1800000000008,
       "ordinal": 0
     },
     "source": {
@@ -228,7 +228,7 @@
                   "answer": "offline"
                 },
                 "startedAt": {
-                  "atMs": "1000"
+                  "atMs": "1800000000008"
                 }
               }
             },
@@ -247,7 +247,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1000,
+      "atMs": 1800000000008,
       "ordinal": 0
     },
     "source": {
@@ -275,9 +275,9 @@
                   ]
                 },
                 "settledAt": {
-                  "atMs": "1000",
+                  "atMs": "1800000000008",
                   "startedAt": {
-                    "atMs": "1000"
+                    "atMs": "1800000000008"
                   }
                 }
               }

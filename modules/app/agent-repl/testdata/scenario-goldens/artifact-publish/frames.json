@@ -227,7 +227,7 @@
                   "filePath": "/tmp/offline-report.html",
                   "favicon": "📊"
                 },
-                "startedAtMs": "1000"
+                "startedAtMs": "1800000000009"
               }
             },
             "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"

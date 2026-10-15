@@ -1,6 +1,7 @@
 {
   "scenario": "!hook-cancelled",
   "seam": null,
+  "nowMs": 1800000000000,
   "planes": [
     "stream",
     "file"

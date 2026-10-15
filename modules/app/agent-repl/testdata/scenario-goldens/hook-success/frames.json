@@ -205,7 +205,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1000,
+      "atMs": 1800000000009,
       "ordinal": 0
     },
     "source": {
@@ -227,7 +227,7 @@
                   "path": "${GOLDEN_ROOT}/workspace/AGENTS.md"
                 },
                 "startedAt": {
-                  "atMs": "1000"
+                  "atMs": "1800000000009"
                 }
               }
             },
@@ -282,7 +282,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1000,
+      "atMs": 1800000000009,
       "ordinal": 0
     },
     "source": {
@@ -306,9 +306,9 @@
                   "contents": "the file"
                 },
                 "settledAt": {
-                  "atMs": "1000",
+                  "atMs": "1800000000009",
                   "startedAt": {
-                    "atMs": "1000"
+                    "atMs": "1800000000009"
                   }
                 }
               }

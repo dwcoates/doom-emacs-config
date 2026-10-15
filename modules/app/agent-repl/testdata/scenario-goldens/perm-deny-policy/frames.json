@@ -205,7 +205,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1000,
+      "atMs": 1800000000007,
       "ordinal": 0
     },
     "source": {
@@ -228,7 +228,7 @@
                   "sandboxed": {}
                 },
                 "startedAt": {
-                  "atMs": "1000"
+                  "atMs": "1800000000007"
                 }
               }
             },
@@ -285,7 +285,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1000,
+      "atMs": 1800000000007,
       "ordinal": 0
     },
     "source": {
@@ -313,9 +313,9 @@
                     ]
                   },
                   "settledAt": {
-                    "atMs": "1000",
+                    "atMs": "1800000000007",
                     "startedAt": {
-                      "atMs": "1000"
+                      "atMs": "1800000000007"
                     }
                   }
                 },

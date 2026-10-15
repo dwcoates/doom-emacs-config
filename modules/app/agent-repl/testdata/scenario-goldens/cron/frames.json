@@ -205,7 +205,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1000,
+      "atMs": 1800000000014,
       "ordinal": 0
     },
     "source": {
@@ -228,7 +228,7 @@
                   "prompt": "weekly standup"
                 },
                 "startedAt": {
-                  "atMs": "1000"
+                  "atMs": "1800000000014"
                 }
               }
             },
@@ -247,7 +247,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1000,
+      "atMs": 1800000000014,
       "ordinal": 0
     },
     "source": {
@@ -271,9 +271,9 @@
                   "durable": true
                 },
                 "settledAt": {
-                  "atMs": "1000",
+                  "atMs": "1800000000014",
                   "startedAt": {
-                    "atMs": "1000"
+                    "atMs": "1800000000014"
                   }
                 }
               }
@@ -370,7 +370,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1000,
+      "atMs": 1800000000014,
       "ordinal": 0
     },
     "source": {
@@ -390,7 +390,7 @@
               "start": {
                 "list": {},
                 "startedAt": {
-                  "atMs": "1000"
+                  "atMs": "1800000000014"
                 }
               }
             },
@@ -409,7 +409,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1000,
+      "atMs": 1800000000014,
       "ordinal": 0
     },
     "source": {
@@ -439,9 +439,9 @@
                   ]
                 },
                 "settledAt": {
-                  "atMs": "1000",
+                  "atMs": "1800000000014",
                   "startedAt": {
-                    "atMs": "1000"
+                    "atMs": "1800000000014"
                   }
                 }
               }
@@ -538,7 +538,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1000,
+      "atMs": 1800000000014,
       "ordinal": 0
     },
     "source": {
@@ -560,7 +560,7 @@
                   "jobId": "cron-1"
                 },
                 "startedAt": {
-                  "atMs": "1000"
+                  "atMs": "1800000000014"
                 }
               }
             },
@@ -579,7 +579,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1000,
+      "atMs": 1800000000014,
       "ordinal": 0
     },
     "source": {
@@ -600,9 +600,9 @@
                   "jobId": "cron-1"
                 },
                 "settledAt": {
-                  "atMs": "1000",
+                  "atMs": "1800000000014",
                   "startedAt": {
-                    "atMs": "1000"
+                    "atMs": "1800000000014"
                   }
                 }
               }

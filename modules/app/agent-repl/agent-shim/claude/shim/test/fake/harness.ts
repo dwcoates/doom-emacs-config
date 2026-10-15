@@ -83,6 +83,12 @@ export interface DriveOptions {
     messages: Line[],
     roots: { readonly cwd: string; readonly configDir: string; readonly spoolRoot: string; readonly sessionId: string },
   ) => Promise<void> | void;
+  /**
+   * Called with each message AS IT ARRIVES, before the next is read: a caller
+   * that folds the stream reads the drive's own clock at the moment the shim
+   * would have observed the message.
+   */
+  readonly onMessage?: (message: SdkMessage) => void;
   /** Extra `createFakeQuery` options. */
   readonly opts?: Partial<FakeQueryOpts>;
   /** Resume this vendor session instead of starting fresh. */
@@ -191,7 +197,10 @@ export async function driveScenario(
   let failure: unknown;
   const collect = (async () => {
     try {
-      for await (const message of query) messages.push(message);
+      for await (const message of query) {
+        messages.push(message);
+        options.onMessage?.(message);
+      }
     } catch (err) {
       // A scenario that FAILS its iterable is a fact under test, not a suite
       // failure; `messages` still holds everything delivered before the death.

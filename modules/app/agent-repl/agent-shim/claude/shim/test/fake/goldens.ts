@@ -11,7 +11,9 @@
  *   its spool root, which is what the sidecar reads.
  *
  * They live at `testdata/scenario-goldens/<scenario>/` beside `meta.json`
- * (`{scenario, seam, planes}`; `seam` is the e2e matrix's to fill). Other
+ * (`{scenario, seam, nowMs, planes}`; `seam` is the e2e matrix's to fill, and
+ * `nowMs` is the drive's clock origin, which every instant in the golden counts
+ * from). Other
  * systems' unit suites read them instead of booting this shim
  * (`agent-repl/AGENTS.md`, "A system's integration tests run that system
  * alone"); goldens.test.ts keeps them fresh, and
@@ -121,9 +123,18 @@ async function settle(): Promise<void> {
   for (let i = 0; i < 4; i++) await new Promise((r) => setImmediate(r));
 }
 
-function driveOptions(policy: Policy): DriveOptions {
-  let now = HARNESS_NOW_MS;
-  const base: DriveOptions = { opts: { nowMs: () => now++, spawnTag: "g0000000" } };
+/**
+ * The drive's ONE clock: the fake reads it (advancing a millisecond per read)
+ * and the fold reads it (without advancing) as each message arrives, so a row
+ * the fold places at observation sits on the same timeline as the records the
+ * fake stamped.
+ */
+interface DriveClock {
+  now: number;
+}
+
+function driveOptions(policy: Policy, clock: DriveClock): DriveOptions {
+  const base: DriveOptions = { opts: { nowMs: () => clock.now++, spawnTag: "g0000000" } };
   switch (policy) {
     case "allow":
       return { ...base, canUseTool: ALLOW };
@@ -159,7 +170,7 @@ export interface GoldenOutput {
   /** frames.json's content. */
   readonly frames: string;
   /** meta.json's fields this drive owns; `seam` is the e2e matrix's, never the drive's. */
-  readonly meta: { readonly scenario: string; readonly planes: readonly string[] };
+  readonly meta: { readonly scenario: string; readonly nowMs: number; readonly planes: readonly string[] };
   /** Every file the mock wrote, by its substituted path under the root. */
   readonly tree: ReadonlyMap<string, string>;
 }
@@ -171,14 +182,23 @@ export function goldenName(prompt: string): string {
 
 /** Drive one scenario and render both planes. Must run inside a test (its temp root is the test's). */
 export async function driveGolden(scenario: GoldenScenario): Promise<GoldenOutput> {
-  const driven = await driveScenario([scenario.prompt], driveOptions(scenario.policy));
+  const clock: DriveClock = { now: HARNESS_NOW_MS };
+  const fold = createFold();
+  const context = { ...foldContext(), nowMs: () => clock.now };
+  const rows: unknown[] = [];
+  const driven = await driveScenario([scenario.prompt], {
+    ...driveOptions(scenario.policy, clock),
+    onMessage: (message) => {
+      for (const entry of fold.onSdkMessage(message, context).entries) rows.push(renderEntry(entry));
+    },
+  });
   if (driven.failure !== undefined && !scenario.prompt.startsWith("!query-")) {
     throw new Error(`goldens: the drive of ${scenario.prompt} died: ${String(driven.failure)}`);
   }
   const substitute = substitution(rootOf(driven));
   return {
-    frames: substitute(renderFrames(driven)),
-    meta: { scenario: scenario.prompt, planes: ["stream", "file"] },
+    frames: substitute(`${JSON.stringify(rows, null, 2)}\n`),
+    meta: { scenario: scenario.prompt, nowMs: HARNESS_NOW_MS, planes: ["stream", "file"] },
     tree: readTree(rootOf(driven), substitute),
   };
 }
@@ -211,17 +231,6 @@ function readTree(root: string, substitute: (text: string) => string): Map<strin
   };
   walk(root);
   return tree;
-}
-
-/** The fold's rows for the drive's messages, one JSON object per row. */
-function renderFrames(driven: Driven): string {
-  const fold = createFold();
-  const context = foldContext();
-  const rows: unknown[] = [];
-  for (const message of driven.messages) {
-    for (const entry of fold.onSdkMessage(message, context).entries) rows.push(renderEntry(entry));
-  }
-  return `${JSON.stringify(rows, null, 2)}\n`;
 }
 
 function renderEntry(entry: PersistEntry): unknown {
@@ -265,5 +274,9 @@ function renderItem(item: PersistEntry["item"]): unknown {
  * erase it.
  */
 export function renderMeta(output: GoldenOutput, existingSeam: unknown): string {
-  return `${JSON.stringify({ scenario: output.meta.scenario, seam: existingSeam ?? null, planes: output.meta.planes }, null, 2)}\n`;
+  return `${JSON.stringify(
+    { scenario: output.meta.scenario, seam: existingSeam ?? null, nowMs: output.meta.nowMs, planes: output.meta.planes },
+    null,
+    2,
+  )}\n`;
 }
