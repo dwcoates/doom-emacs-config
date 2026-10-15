@@ -243,8 +243,10 @@ export default tseslint.config(
   // ---- the command-line tooling ----------------------------------------
   {
     // scripts/ and its capture harness are CLIs: stdout is how they report,
-    // and they run under node with no logger to route through.
-    files: ["scripts/**", "*.mjs"],
+    // and they run under node with no logger to route through. The suite's
+    // own .mjs build helpers (test/fakes/build-store-server.mjs) are the same
+    // kind of node CLI.
+    files: ["scripts/**", "*.mjs", "test/**/*.mjs"],
     languageOptions: { globals: globals.node },
     rules: { "no-console": "off" },
   },
