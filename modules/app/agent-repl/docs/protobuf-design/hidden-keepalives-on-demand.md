@@ -25,7 +25,8 @@ countdown to it) moves later. Contracts are the owner's standing delegation
 - WHAT: a new rpc that submits one ordinary keep-alive turn now and leaves
   the cadence (held or running) untouched.
   - Outcome: success with `sent` or `skipped{main_agent_busy |
-    detached_work_live | cache_lapsed}`, or error `no_session`.
+    detached_work_live | cache_lapsed}`, or error `no_session` or
+    `submit_failed{detail}`.
 - WHY: the hidden workspace's cadence is held on purpose; the user asking for
   one more keep-alive must not un-hold it.
 - Decisions.
@@ -36,6 +37,11 @@ countdown to it) moves later. Contracts are the owner's standing delegation
   - The 5-minute-tier rule of the cadence (no beat when the tier is no longer
     than the 52-minute interval) does NOT apply: one beat into a still-warm
     cache keeps it warm whatever its tier. Only a lapsed cache is refused.
+  - A submission that fails is ANSWERED (`submit_failed`), never thrown, so
+    the daemon maps it like any outcome; the shim also raises its standing
+    `keepalive_failed` fault exactly as a failed scheduled beat does.
+  - `no_session` also covers a session whose vendor query has ended: nothing
+    can carry a keep-alive, and the cadence has stopped.
   - The answer carries no lapse. The new lapse arrives as
     `conversation.v1.SessionCacheLapse` on the session stream once the
     keep-alive's response re-anchors the cache, through the one existing path.
@@ -67,3 +73,5 @@ countdown to it) moves later. Contracts are the owner's standing delegation
 - Daemon: `cachelapse.Keepalives` gains `Beat`; the Keeper gains the fleet
   fan-out; the server gains the handler and its validation and request log.
 - Emacs: a command on `SPC j R`, its wire verb, and the fake daemon's handler.
+  - Owner ruling, 2026-10-14: `SPC j R` was `agent-repl-reload-config`; reload
+    moved to `SPC j C-r` so the keep-alive takes the key asked for.
