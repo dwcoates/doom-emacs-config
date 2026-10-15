@@ -268,13 +268,17 @@ func (s *server) interruptRollbackOffer(ctx context.Context, ws ids.WorkspaceID,
 // the shim's refusal names its own arm. false when ERR is a failure rather
 // than a refusal.
 func (s *server) rollBackRefusalOf(err error) (refusal, bool) {
+	if !workspace.IsRollbackRefusal(err) {
+		return refusal{}, false
+	}
 	if errors.Is(err, promptqueue.ErrHoldsChanged) {
 		return s.fill(refusal{Arm: "plan_stale", Reason: "the held prompts changed since the rollback was planned", Info: true}), true
 	}
-	if shim, ok := workspace.AsShimRefusal(err); ok {
-		return rollbackRefusal(s, shim), true
+	shim, ok := workspace.AsShimRefusal(err)
+	if !ok {
+		panic(fmt.Sprintf("server: a rollback refusal is neither changed holds nor the shim's: %v", err))
 	}
-	return refusal{}, false
+	return rollbackRefusal(s, shim), true
 }
 
 // rollbackRefusal maps the shim's refusal onto RollBackError's arm.

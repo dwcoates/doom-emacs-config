@@ -97,6 +97,17 @@ func (v *verbs) RollBack(ctx context.Context, ws ids.WorkspaceID, req RollbackRe
 	return RollbackResult{FilesRestored: len(restored)}, nil
 }
 
+// IsRollbackRefusal reports whether ERR from RollBack is a refusal, which
+// leaves the conversation whole and is answered to the caller as why, rather
+// than a failure: the shim's refusal, or the queue's held prompts having
+// changed since the plan.
+func IsRollbackRefusal(err error) bool {
+	if _, ok := AsShimRefusal(err); ok {
+		return true
+	}
+	return errors.Is(err, promptqueue.ErrHoldsChanged)
+}
+
 func firstTurnOf(turns []ids.TurnID) string {
 	if len(turns) == 0 {
 		return ""

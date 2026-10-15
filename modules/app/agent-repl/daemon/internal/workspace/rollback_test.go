@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	shimv1 "agentrepl/proto/shim/v1"
@@ -395,6 +396,29 @@ func TestShimAdapterRollBackSessionFailureArms(t *testing.T) {
 			}
 			if refusal.Detail != tt.wantDetail {
 				t.Fatalf("detail = %q, want %q", refusal.Detail, tt.wantDetail)
+			}
+		})
+	}
+}
+
+func TestIsRollbackRefusal(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "a shim refusal", err: &ShimRefusal{Arm: ArmShimFirstPrompt}, want: true},
+		{name: "changed holds, wrapped", err: fmt.Errorf("queue: %w", promptqueue.ErrHoldsChanged), want: true},
+		{name: "a transport failure", err: errors.New("shim gone"), want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			got := IsRollbackRefusal(tt.err)
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("IsRollbackRefusal(%v) = %v, want %v", tt.err, got, tt.want)
 			}
 		})
 	}

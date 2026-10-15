@@ -2,7 +2,6 @@ package workspace
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -10,7 +9,6 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
-	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/shimclient"
 )
 
@@ -159,8 +157,7 @@ func (v *verbs) interruptRollingBack(ctx context.Context, log dlog.Logger, ws id
 		})
 		return InterruptOutcome{RolledBack: true}, nil
 	}
-	_, shimRefused := AsShimRefusal(err)
-	if !shimRefused && !errors.Is(err, promptqueue.ErrHoldsChanged) {
+	if !IsRollbackRefusal(err) {
 		return InterruptOutcome{}, fmt.Errorf("interrupt %q: roll back the unanswered prompt: %w", ws, err)
 	}
 	outcome, killErr := v.interruptTurn(ctx, log, ws, shim, running, confirm)
