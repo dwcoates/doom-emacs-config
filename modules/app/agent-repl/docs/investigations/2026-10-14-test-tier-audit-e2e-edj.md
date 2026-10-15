@@ -43,18 +43,40 @@ Workspace `test-tier-audit-e2e-edj`, child of `agent-repl-test-slimming`, 2026-1
 
 ## Estimated e2e runtime saved
 
+Two different measures, labelled each time they appear:
+
+- **History seconds.** The `test-history.json` item means: each test's WALL time inside a full run, with 8 tests overlapping per chunk on one loaded core. They rank tests against each other, but they are inflated well past cost. test-shared-setup measured about 16x for median daemon integration tests.
+- **CPU seconds.** rusage user+sys of each chunk's whole process tree (test binary, daemons, shims, node, store, sidecar), as testrun prints it per unit. Source: the e2e-only run of 2026-10-14 19:57 (`testrun run --suites e2e`, branch `repl-merge-racing-toggle`, 13 chunks):
+  - the chunks used 27.9-40.6 CPU-seconds each, about 430 CPU-seconds in all;
+  - the whole run reported 435.8 CPU-seconds and 118s wall on 13 slots;
+  - vet and build together used under 5 CPU-seconds, since the build is mostly cached.
+- testrun records CPU per chunk, not per test. The per-ruling CPU figures below therefore split the 430 CPU-seconds in proportion to each test's history seconds. That split is an approximation, and it is labelled as one.
+- **No solo-second figures.** Measuring them would mean running the e2e tests one by one, which this investigation did not do (battery, shared suite slot). test-redundancy-measure's per-test runs can supply them.
+
+| ruling | host history seconds | host CPU seconds, apportioned |
+|---|---|---|
+| KEEP | 93.8 | about 63 |
+| DELETE | 217.9 | about 147 |
+| MOVE | 274.2 | about 185 |
+| MOVE-HARNESS | 50.2 | about 34 |
+| total | 636.1 | about 430 (measured) |
+
 - **Host `e2e` suite.**
-  - Test time goes from about 636 item-seconds to about 94 if every non-KEEP row leaves. That cuts the suite's test time by about 85%.
-  - About 49 item-seconds of the cut moves to a cheaper harness suite rather than disappearing.
-  - The fixed costs stay: the `e2e:.:build` unit (77s mean) and vet.
-  - Wall time scales with item time divided by 8 tests per chunk per core. On the measured mix, the suite's chunk work drops by the same ~85%.
-- **`e2e-emacs` suite.** About 4.4 slot-seconds per scenario. Keeping 6 scenarios plus the 7 Linux-only teardown harness tests should take it from 130s wall to roughly 20-30s. This is an estimate, not a measurement.
-- **Biggest single items:**
-  - The webapp layer: 263s, of which 34s is KEEP.
-  - `failurearms`: 42s, of which about 2s is KEEP. It builds 22 full stacks to check a 22-row mapping.
-  - `sandbox_build_lock_test.go`: 46s, all of it harness.
-  - The merge queue: 29s, of which 4.4s is KEEP.
-- **Cost added at lower tiers.** About 37 new daemon integration, shim vitest, webapp integration or ERT cases, at 0.1-1s each against a fake peer. None of them starts a full stack.
+  - If every non-KEEP row leaves, the suite drops from about 430 to about 63 CPU-seconds per run, roughly 85% less. History seconds drop from 636 to 94.
+  - The fixed costs stay: the `e2e:.:build` unit (77s history wall, mostly cached compile) and the vet units.
+- **What the moves add back elsewhere:**
+  - DELETE rows (about 147 CPU-seconds) add nothing.
+  - MOVE rows already covered at their target tier add nothing, or one extension case.
+  - About 37 MOVE rows need a new lower-tier test against a fake peer. None of them builds a full stack.
+  - MOVE-HARNESS rows keep most of their cost: the `sandbox_build_lock_test.go` tests run elsewhere, at about 3-5 history seconds after the fixes in the side findings, against 46 now.
+- **`e2e-emacs` suite.**
+  - Only wall time is available: 130s on 2 slots (`unit:e2e-emacs`). Its CPU runs inside the Docker VM, where testrun's rusage cannot see it (`testrun/internal/cli/run.go`).
+  - At about 4.4 slot-seconds per scenario, keeping 6 scenarios plus the 7 Linux-only teardown harness tests should take it to roughly 20-30s wall. This is an estimate, not a measurement.
+- **Biggest single items (history seconds, with apportioned CPU):**
+  - The webapp layer: 263, about 178 CPU, of which 34 history (about 23 CPU) is KEEP.
+  - `failurearms`: 42, about 28 CPU, of which about 2 is KEEP.
+  - `sandbox_build_lock_test.go`: 46, about 31 CPU, all of it harness.
+  - The merge queue: 29, about 20 CPU, of which 4.4 is KEEP.
 
 ## The seams that keep a wiring test (the KEEP set)
 
