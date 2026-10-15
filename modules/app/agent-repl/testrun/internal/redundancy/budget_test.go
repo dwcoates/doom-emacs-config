@@ -262,3 +262,47 @@ func TestBaselineRoundTrips(t *testing.T) {
 		t.Fatalf("read back %+v, want %+v", got, want)
 	}
 }
+
+func TestApplyBudgetRefusesARemovalReachingAProvisionalSystem(t *testing.T) {
+	// Arrange
+	cases, statements := budgetCases()
+	r, err := Minimize(cases, KillsOnly, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := Budget{MaxDrop: 5, Baseline: map[string]SystemBaseline{"a": {Percent: 92, Statements: 100, Floor: 87, Provisional: true, Reason: "integration tiers not merged"}}}
+
+	// Act
+	_, _, _, err = ApplyBudget(cases, r, statements, []string{"a"}, b, 0)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "the baseline of a (removed") || !strings.Contains(err.Error(), "integration tiers not merged") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// TestTheCheckedInBaselineHoldsEveryCoverageSystem reads
+// testrun/coverage-baseline.json, the one reference every workspace's
+// removals are held to: it must read, and name each coverage system.
+func TestTheCheckedInBaselineHoldsEveryCoverageSystem(t *testing.T) {
+	// Arrange
+	path := filepath.Join("..", "..", "coverage-baseline.json")
+
+	// Act
+	f, err := ReadBaseline(path)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sys := range []string{"agent-repld", "agentrepl/shim-claude-sidecar", "agentrepl/shim-store", "agentrepl/shim-lock", "agentrepl/logging", "agentrepl/protohelpers", "shim", "webapp"} {
+		if _, ok := f.Systems[sys]; !ok {
+			t.Errorf("the baseline names no %s", sys)
+		}
+	}
+	for _, sys := range []string{"shim", "webapp"} {
+		if s := f.Systems[sys]; !s.Provisional || s.Reason == "" {
+			t.Errorf("%s is not marked provisional with its reason (owner ruling, 2026-10-15)", sys)
+		}
+	}
+}

@@ -1,0 +1,58 @@
+{
+  "Commit": "9e2f7e48747bf2097391bf451e5cfcaf263984f2",
+  "Measured": "2026-10-15T05:52:25Z",
+  "Systems": {
+    "agent-repld": {
+      "Percent": 87.85222732632839,
+      "Statements": 56817,
+      "Floor": 82.85222732632839,
+      "Tiers": "go: unit, integration and e2e, spawned systems included"
+    },
+    "agentrepl/logging": {
+      "Percent": 80.67484662576688,
+      "Statements": 326,
+      "Floor": 75.67484662576688,
+      "Tiers": "go: unit, integration and e2e, spawned systems included"
+    },
+    "agentrepl/protohelpers": {
+      "Percent": 100,
+      "Statements": 76,
+      "Floor": 95,
+      "Tiers": "go: unit, integration and e2e, spawned systems included"
+    },
+    "agentrepl/shim-claude-sidecar": {
+      "Percent": 93.0909090909091,
+      "Statements": 5775,
+      "Floor": 88.0909090909091,
+      "Tiers": "go: unit, integration and e2e, spawned systems included"
+    },
+    "agentrepl/shim-lock": {
+      "Percent": 90,
+      "Statements": 50,
+      "Floor": 85,
+      "Tiers": "go: unit, integration and e2e, spawned systems included"
+    },
+    "agentrepl/shim-store": {
+      "Percent": 90.26864035087719,
+      "Statements": 3648,
+      "Floor": 85.26864035087719,
+      "Tiers": "go: unit, integration and e2e, spawned systems included"
+    },
+    "shim": {
+      "Percent": 96.91681210005817,
+      "Statements": 12033,
+      "Floor": 91.91681210005817,
+      "Tiers": "vitest: the files its --coverage run measures",
+      "Provisional": true,
+      "Reason": "the vitest integration configs, the webapp e2e layer and the shim's e2e reach are not merged; no shim or webapp case may be removed against this (owner ruling, 2026-10-15) until the vitest adapter re-measures it all-tier"
+    },
+    "webapp": {
+      "Percent": 52.469094102546784,
+      "Statements": 14803,
+      "Floor": 47.469094102546784,
+      "Tiers": "vitest: the files its --coverage run measures",
+      "Provisional": true,
+      "Reason": "the vitest integration configs, the webapp e2e layer and the shim's e2e reach are not merged; no shim or webapp case may be removed against this (owner ruling, 2026-10-15) until the vitest adapter re-measures it all-tier"
+    }
+  }
+}

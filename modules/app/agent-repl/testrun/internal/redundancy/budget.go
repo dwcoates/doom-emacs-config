@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -28,6 +29,11 @@ type SystemBaseline struct {
 	Floor float64
 	// Tiers says which tiers' counters the percent counts.
 	Tiers string `json:",omitempty"`
+	// Provisional marks a measurement that does not count every tier, with
+	// why. No removal may be held to it (owner ruling, 2026-10-15): one
+	// reaching a provisional system is refused until it is re-measured.
+	Provisional bool   `json:",omitempty"`
+	Reason      string `json:",omitempty"`
 }
 
 // Budget is the coverage a removal set may cost.
@@ -175,6 +181,21 @@ func ApplyBudget(cases []Case, r Result, statements map[string]int, modules []st
 			}
 		}
 		return out
+	}
+	var provisional []string
+	for sys := range total {
+		if bl, ok := b.Baseline[sys]; ok && bl.Provisional {
+			for _, rm := range r.Removed {
+				if slices.ContainsFunc(byID[rm.Case].Blocks, func(blk string) bool { return SystemOf(blk) == sys }) {
+					provisional = append(provisional, fmt.Sprintf("%s (removed %s reaches it; %s)", sys, rm.Case, bl.Reason))
+					break
+				}
+			}
+		}
+	}
+	if len(provisional) > 0 {
+		sort.Strings(provisional)
+		return Result{}, nil, nil, fmt.Errorf("redundancy: the baseline of %s is provisional, so no removal reaching it is held to it", strings.Join(provisional, "; "))
 	}
 	if bad := failing(estimate(allCov)); len(bad) > 0 {
 		return Result{}, nil, nil, fmt.Errorf("redundancy: %s already under the coverage floor with every measured case kept, so no removal fits the budget", strings.Join(keys(bad), ", "))
