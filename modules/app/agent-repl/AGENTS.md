@@ -21,6 +21,38 @@ Owner rule, 2026-10-14. A system's unit and integration tests run exactly one re
 - Each test directory's own `AGENTS.md` names the mocks it uses for each peer.
 - A test that needs a real peer to say anything useful belongs in `e2e/`, never in the system's integration suite.
 
+## A test lives at the cheapest tier that can prove it
+
+Owner rule, 2026-10-14. A test lives at the cheapest tier whose fakes still let its assertion fail on the bug. The tiers, cheapest first, are unit, integration and e2e. Each step up a tier is justified by what the cheaper tier cannot see, and the test's doc comment says what that is whenever it is not obvious.
+
+- A behavior has ONE wiring test per seam or family, at the highest tier it needs. Its arms, cases and variants live one tier down. A new arm of an already-wired family is never another test at the wiring test's tier.
+- A test is never added at a tier only to check a box, such as a scenario-matrix row or "every feature gets an e2e test".
+- Why: the 2026-10-14 tier audits (workspaces `test-tier-audit-integration` and `test-tier-audit-e2e`) found most of the integration and e2e suites' time in tests that boot a process, or a whole stack, to assert logic a cheaper tier in the same system already asserts. About 61% of the daemon integration suite's daemon boots, and about 85% of the host e2e suite's CPU, went to such tests.
+
+### An integration test proves what needs the system's own process
+
+- An integration test boots the real process of the system under test, with every peer a mock (the rule above). It is warranted only when its assertion needs that process:
+  - the boot and exit path (flags, env, exit status, refusals that reach `main`);
+  - process lifecycle (signals, children, stray reaping, shutdown ordering);
+  - the wire (socket framing, stream ordering, concurrent RPCs or connections);
+  - state that must outlive the process (a successor on the same state root, restart recovery, a handover);
+  - real kernel or filesystem behavior the logic relies on (flock across processes, rename, a spool growing under a tail).
+- Logic a unit test can call directly is proven at the unit tier: a resolver's row, a refusal branch, a projection, a converter arm, a validation. The integration tier keeps only the family's one wiring test, which proves the process reaches that logic on its real path.
+- A test never boots a process only to check a branch a unit test reaches.
+- A test that waits out a real time window (a hold, a poll interval, a refusal timeout) says why a fake clock cannot stand in.
+
+### An e2e test proves a seam between real systems, and nothing else
+
+- An e2e test (`e2e/`, `e2e-emacs`) is warranted only when its assertion needs several real agent-repl systems running together: a contract, an ordering or a handover that crosses a seam between two real processes.
+- A test names its seam in its doc comment (`Seam: <producer> -> <consumer>, <what crosses>`). A test that cannot name one does not belong in `e2e/`.
+- A behavior that one system computes alone is proven in that system's own tiers above. That covers a refusal the daemon formats, a row the daemon projects from frames, what the webapp draws for a view, an Emacs-local command and the fake vendor's own output.
+- A behavior that crosses systems is covered three ways:
+  - the producer's tier proves what the producer emits;
+  - the consumer's tier proves what the consumer does with it;
+  - the seam's one e2e wiring test proves the two agree.
+- A second e2e test over a seam that already has its wiring test states, in its doc comment, what it proves that the wiring test and the two halves do not.
+- One e2e test builds a whole stack (store, sidecar, daemon, node shim, and a page or a sandboxed Emacs) to check its assertion, which makes it the most expensive place any assertion can live.
+
 ## Elisp layout
 
 Every elisp source and every ERT suite lives in `lisp/`. Exactly three files
