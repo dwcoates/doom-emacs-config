@@ -355,3 +355,22 @@ func TestSourceNeverClaimsACommitHoldsDirtyBytes(t *testing.T) {
 		})
 	}
 }
+
+// TestTheReusedLineIsTheOneTheMergeGateReads pins the line literally: the
+// daemon's merge gate parses it (daemon/internal/merge testgate.go, whose
+// test pins the same literal).
+func TestTheReusedLineIsTheOneTheMergeGateReads(t *testing.T) {
+	// Arrange
+	log := &logLines{}
+	v := []Verdict{{Suite: roster.Suite{Name: "daemon"}, Keyed: true, Key: Key{Digest: "4ad2933f8e55" + strings.Repeat("0", 52)},
+		Reused: &Record{PassedAt: time.Date(2026, 10, 14, 23, 37, 0, 0, time.Local), Branch: "master", Commit: "0123456789abcdef", Dirty: true}}}
+
+	// Act
+	Report(log, v)
+
+	// Assert
+	want := "daemon: reused a green run (inputs 4ad2933f8e55, passed 2026-10-14 23:37 on master 0123456789 with uncommitted changes)"
+	if len(log.info) != 1 || log.info[0] != want {
+		t.Fatalf("info = %q, want %q", log.info, want)
+	}
+}
