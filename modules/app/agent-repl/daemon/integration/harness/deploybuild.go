@@ -197,9 +197,18 @@ func (d *Daemon) StageDeployBuild(build DeployBuild) {
 	if build == DeployFails || d.Deploy.sources.realServices() {
 		return
 	}
+	d.StateServiceBuilds(d.PID())
+}
+
+// StateServiceBuilds states the placeholder store and sidecar builds as run by
+// PID. A report names a live process, so a world whose deploys reach a
+// handover successor restates them under the successor's pid once the
+// incumbent that StageDeployBuild named has exited.
+func (d *Daemon) StateServiceBuilds(pid int) {
+	d.t.Helper()
 	for _, service := range []string{buildreport.ServiceStore, buildreport.ServiceSidecar} {
 		sum := sha256.Sum256([]byte(fakeServiceBinary(service)))
-		if err := buildreport.Write(d.LockDir, service, buildreport.Report{PID: d.PID(), Build: hex.EncodeToString(sum[:])}); err != nil {
+		if err := buildreport.Write(d.LockDir, service, buildreport.Report{PID: pid, Build: hex.EncodeToString(sum[:])}); err != nil {
 			d.t.Fatalf("harness: state the %s build report: %v", service, err)
 		}
 	}

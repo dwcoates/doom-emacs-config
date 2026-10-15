@@ -1,10 +1,14 @@
 package harness
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"agentrepl/logging/buildreport"
 )
 
 // TestFakeDeployBuilderStagesTheServicesTheWorldRuns pins what the staged
@@ -83,4 +87,30 @@ func readOrFail(t *testing.T, path string) string {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return string(raw)
+}
+
+// TestStateServiceBuildsNamesThePidItIsGiven pins that each placeholder
+// service's stated report names the pid it is handed and the placeholder's own
+// build, so a world can restate them under a handover successor once the
+// incumbent StageDeployBuild named has exited.
+func TestStateServiceBuildsNamesThePidItIsGiven(t *testing.T) {
+	for _, service := range []string{buildreport.ServiceStore, buildreport.ServiceSidecar} {
+		t.Run(service, func(t *testing.T) {
+			// Arrange
+			d := &Daemon{t: t, LockDir: t.TempDir()}
+			sum := sha256.Sum256([]byte(fakeServiceBinary(service)))
+
+			// Act
+			d.StateServiceBuilds(4242)
+
+			// Assert
+			got, ok, err := buildreport.Read(d.LockDir, service)
+			if err != nil || !ok {
+				t.Fatalf("Read(%s) = %v, %v, %v, want the stated report", service, got, ok, err)
+			}
+			if got.PID != 4242 || got.Build != hex.EncodeToString(sum[:]) {
+				t.Fatalf("report = %+v, want pid 4242 and the placeholder's build", got)
+			}
+		})
+	}
 }
