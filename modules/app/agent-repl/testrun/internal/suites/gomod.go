@@ -67,23 +67,13 @@ func goPackageArg(rel string) string {
 // unit only when the caller explicitly asks for it.
 func goModuleUnits(l Layout, s roster.Suite) (Units, error) {
 	dir := l.resolve(s.Path)
-	pkgs, err := goTestedPackages(dir)
+	pkgs, ipkgs, err := GoSuitePackages(l, s)
 	if err != nil {
 		return Units{}, err
-	}
-	if len(pkgs) == 0 {
-		return Units{}, fmt.Errorf("suites: %s has no tested packages under %s", s.Name, dir)
 	}
 	u, err := goModuleUnitsForPackages(l, s, dir, pkgs)
 	if err != nil || s.IntegrationTags == "" {
 		return u, err
-	}
-	ipkgs, err := goTestedPackagesTagged(dir, s.IntegrationTags, s.IntegrationPackages)
-	if err != nil {
-		return Units{}, err
-	}
-	if len(ipkgs) == 0 {
-		return Units{}, fmt.Errorf("suites: %s has no %s-tagged tested packages in %s under %s", s.Name, s.IntegrationTags, s.IntegrationPackages, dir)
 	}
 	iu, err := goIntegrationUnitsForPackages(l, s, dir, ipkgs)
 	if err != nil {
@@ -94,10 +84,38 @@ func goModuleUnits(l Layout, s roster.Suite) (Units, error) {
 	return u, nil
 }
 
+// GoSuitePackages is a Go suite's tested packages, relative to its module:
+// the ordinary pass's, and its build-tagged integration pass's (none without
+// IntegrationTags). Every caller that runs a suite's packages lists them
+// here: the run, and `testrun redundancy`'s -roster-suite.
+func GoSuitePackages(l Layout, s roster.Suite) ([]string, []string, error) {
+	dir := l.resolve(s.Path)
+	pkgs, err := goTestedPackages(dir)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(pkgs) == 0 {
+		return nil, nil, fmt.Errorf("suites: %s has no tested packages under %s", s.Name, dir)
+	}
+	if s.IntegrationTags == "" {
+		return pkgs, nil, nil
+	}
+	ipkgs, err := goTestedPackagesTagged(dir, s.IntegrationTags, s.IntegrationPackages)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(ipkgs) == 0 {
+		return nil, nil, fmt.Errorf("suites: %s has no %s-tagged tested packages in %s under %s", s.Name, s.IntegrationTags, s.IntegrationPackages, dir)
+	}
+	return pkgs, ipkgs, nil
+}
+
 // goIntegrationUnitsForPackages is the suite's build-tagged integration pass:
 // its own vet over the tagged packages, and each package built and split under
-// the tags, exactly as the ordinary pass does it. It is never instrumented for
-// coverage; that question is the ordinary pass's.
+// the tags, exactly as the ordinary pass does it. Its test binaries are never
+// instrumented (in-process coverage is the ordinary pass's question), but
+// under coverage the systems its tests spawn are: that is the integration
+// tier's reach.
 func goIntegrationUnitsForPackages(l Layout, s roster.Suite, dir string, pkgs []string) (Units, error) {
 	tag := s.IntegrationTags
 	vet := goVetTagged(s.Name, dir, tag, s.IntegrationPackages)
@@ -107,6 +125,9 @@ func goIntegrationUnitsForPackages(l Layout, s roster.Suite, dir string, pkgs []
 			Suite: s.Name, Module: dir, Rel: rel, Tags: tag, Parallel: s.TestParallel[rel],
 			Bin:      filepath.Join(l.Work, "bin", s.Name+"-"+tag, fmt.Sprintf("%03d.test", i)),
 			Programs: s.Programs[rel], ProgramsDir: l.ProgramsDir(),
+		}
+		if l.Coverage && len(p.Programs) > 0 {
+			p.SpawnedCovDir = SpawnedCovDir(l, s.Name+"-"+tag, i)
 		}
 		u.Programs = append(u.Programs, p.Programs...)
 		build, split, err := p.units()
@@ -138,6 +159,9 @@ func goModuleUnitsForPackages(l Layout, s roster.Suite, dir string, pkgs []strin
 		u.Programs = append(u.Programs, p.Programs...)
 		if l.Coverage {
 			p.CovDir = filepath.Join(covRoot, fmt.Sprintf("%03d", i))
+			if len(p.Programs) > 0 {
+				p.SpawnedCovDir = SpawnedCovDir(l, s.Name, i)
+			}
 		}
 		build, split, err := p.units()
 		if err != nil {

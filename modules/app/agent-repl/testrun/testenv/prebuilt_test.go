@@ -21,6 +21,8 @@ func TestBinaryMode(t *testing.T) {
 		{name: "both modes are refused", env: map[string]string{Prebuild: "/a", Prebuilt: "/b"}, wantErr: "both set"},
 		{name: "prebuilt under coverage is refused", env: map[string]string{Prebuilt: "/s", Coverage: "/c"}, wantErr: "uninstrumented"},
 		{name: "prebuild under coverage is refused", env: map[string]string{Prebuild: "/s", Coverage: "/c"}, wantErr: "uninstrumented"},
+		{name: "an instrumented prebuild serves coverage", env: map[string]string{Prebuild: "/s", Coverage: "/c", ProgramsInstrumented: "1"}, wantMode: BuildInto, wantDir: "/s"},
+		{name: "an instrumented prebuilt serves coverage", env: map[string]string{Prebuilt: "/s", Coverage: "/c", ProgramsInstrumented: "1"}, wantMode: UsePrebuilt, wantDir: "/s"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

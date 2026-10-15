@@ -109,3 +109,39 @@ func TestTheTaggedIntegrationPassWaitsForItsPrograms(t *testing.T) {
 		t.Fatalf("deps = %v, want both programs", got)
 	}
 }
+
+func TestProgramBuildPutsExtraFlagsBeforeTheOutput(t *testing.T) {
+	// Arrange
+	p, _ := roster.LookupProgram("shim-store")
+
+	// Act
+	argv, dir, err := ProgramBuild(Layout{Module: "/m", Work: "/w"}, p, "-overlay", "/o.json")
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"go", "build", "-buildvcs=false", "-overlay", "/o.json", "-o", "/w/programs/shim-store", "."}
+	if !reflect.DeepEqual(argv, want) || dir != "/m/agent-shim/shim-store" {
+		t.Fatalf("ProgramBuild = %v in %s, want %v", argv, dir, want)
+	}
+}
+
+func TestProgramUnitsBuildWhatProgramBuildSays(t *testing.T) {
+	// Every roster program's unit is exactly its ProgramBuild, so no build
+	// of a program drifts from the run's.
+	l := Layout{Module: "/m", Work: "/w"}
+	for _, p := range roster.Programs {
+		specs, err := ProgramUnits(l, []string{p.Name}, func(roster.Program) string { return "x" })
+		if err != nil {
+			t.Fatal(err)
+		}
+		argv, dir, err := ProgramBuild(l, p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(specs[0].Argv, argv) || specs[0].Dir != dir {
+			t.Errorf("%s: unit %v in %s, ProgramBuild %v in %s", p.Name, specs[0].Argv, specs[0].Dir, argv, dir)
+		}
+	}
+}

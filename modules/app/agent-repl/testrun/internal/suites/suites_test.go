@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"agentrepl/testrun/internal/gotest"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/roster"
 )
@@ -738,7 +739,7 @@ func TestQuietGoTestOutput(t *testing.T) {
 
 func TestRunPatternMatchesExactlyTheNamedTests(t *testing.T) {
 	// Arrange
-	re := regexp.MustCompile(runPattern([]string{"TestA", "TestB"}))
+	re := regexp.MustCompile(gotest.TopPattern([]string{"TestA", "TestB"}))
 
 	// Act / Assert
 	for name, want := range map[string]bool{"TestA": true, "TestB": true, "TestAB": false, "XTestA": false} {
@@ -1095,14 +1096,14 @@ func TestGoTopLevelTestsUnderTagsIncludesTheTaggedTests(t *testing.T) {
 	write(t, filepath.Join(dir, "i_test.go"), "//go:build integration\n\npackage x\nimport \"testing\"\nfunc TestI(t *testing.T) {}\n", 0o644)
 
 	// Act
-	got, err := goTopLevelTestsTagged(dir, "integration")
+	got, err := GoTopLevelTestsTagged(dir, "integration")
 
 	// Assert
 	if err != nil {
 		t.Fatal(err)
 	}
 	if want := []string{"TestA", "TestI"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("goTopLevelTestsTagged = %v, want %v", got, want)
+		t.Fatalf("GoTopLevelTestsTagged = %v, want %v", got, want)
 	}
 }
 

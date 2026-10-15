@@ -8,6 +8,10 @@
 //	testrun finish-record --module DIR --record-out PATH
 //	testrun cover-report -name N -module DIR -covdirs ROOT
 //	testrun roster
+//	testrun coverage-baseline -module DIR -work DIR -commit SHA -out FILE (a --coverage run's last unit)
+//	testrun redundancy go -module DIR -pkg PKG -tests FILES -out DIR [...]
+//	testrun redundancy vitest -package DIR -mutate GLOBS -out DIR [...]
+//	testrun redundancy report -in measurement.json [-universe U] [-overhead D]
 package main
 
 import (
@@ -17,6 +21,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -27,6 +32,10 @@ import (
 	"agentrepl/testrun/internal/history"
 	"agentrepl/testrun/internal/life"
 	"agentrepl/testrun/internal/ramdisk"
+	"agentrepl/testrun/internal/redundancy"
+	"agentrepl/testrun/internal/redundancy/gomeasure"
+	"agentrepl/testrun/internal/redundancy/proc"
+	"agentrepl/testrun/internal/redundancy/vitestmeasure"
 	"agentrepl/testrun/internal/reuse"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/internal/suites"
@@ -60,6 +69,10 @@ func main() {
 		os.Exit(planCmd(log, os.Args[2:]))
 	case "confine":
 		os.Exit(confineCmd(log, os.Args[2:]))
+	case "redundancy":
+		os.Exit(redundancyCmd(log, os.Args[2:]))
+	case "coverage-baseline":
+		os.Exit(coverageBaselineCmd(log, os.Args[2:]))
 	default:
 		log.Errorf("unknown subcommand %q", os.Args[1])
 		os.Exit(2)
@@ -302,6 +315,7 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 		Self:        self,
 		Work:        work,
 		Pid:         os.Getpid(),
+		RunLog:      os.Getenv(ramdisk.EnvRunLog),
 	}, args)
 }
 
@@ -330,6 +344,65 @@ func coverCmd(log *run.Log, argv []string) int {
 		return 1
 	}
 	return 0
+}
+
+// coverageBaselineCmd merges a finished --coverage run into each coverage
+// system's all-tier statement coverage (internal/cover, baseline.go).
+func coverageBaselineCmd(log *run.Log, argv []string) int {
+	a, err := cover.ParseBaselineArgs(argv)
+	if err != nil {
+		log.Errorf("%v", err)
+		return 2
+	}
+	goSystems, err := suites.SystemModules(suites.Layout{Module: a.Module})
+	if err != nil {
+		log.Errorf("coverage-baseline: %v", err)
+		return 1
+	}
+	var vitest []string
+	for _, name := range roster.CoverageSystems {
+		if s, ok := roster.Lookup(name); ok && s.Kind == roster.Vitest {
+			vitest = append(vitest, name)
+		}
+	}
+	f, err := cover.RunBaseline(cover.GoTool, a, goSystems, vitest, time.Now())
+	if err != nil {
+		log.Errorf("coverage-baseline of %s at %s: %v", a.Work, a.Commit, err)
+		return 1
+	}
+	names := make([]string, 0, len(f.Systems))
+	for name := range f.Systems {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		s := f.Systems[name]
+		log.Infof("coverage-baseline: %s %.2f%% of %d statements (floor %.2f%%; %s)", name, s.Percent, s.Statements, s.Floor, s.Tiers)
+	}
+	log.Infof("coverage-baseline: wrote %s; it becomes testrun/coverage-baseline.json only by the owner's decision", a.Out)
+	return 0
+}
+
+// redundancyCmd is `testrun redundancy go|vitest|report`.
+func redundancyCmd(log *run.Log, argv []string) int {
+	if len(argv) == 0 {
+		log.Errorf("usage: testrun redundancy go|vitest|report ...")
+		return 2
+	}
+	switch argv[0] {
+	case "go":
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		return gomeasure.Command(ctx, log, argv[1:], gomeasure.OSExec)
+	case "vitest":
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		return vitestmeasure.Command(ctx, log, argv[1:], proc.OSExec)
+	case "report":
+		return redundancy.ReportCommand(log, argv[1:], os.Stdout)
+	}
+	log.Errorf("unknown redundancy subcommand %q", argv[0])
+	return 2
 }
 
 // confineCmd is a keyed unit's launcher: it scrubs the environment and execs
