@@ -146,3 +146,37 @@ func TestDoomANewProjectDoesNotRecycleTheWorkspaceBeingLeft(t *testing.T) {
 		t.Fatalf("persp-names-cache = %v, want the created workspace %q still in it: Doom recycled the workspace being left", persps, created.Name)
 	}
 }
+
+// TestDoomPlainCloseHidesPanelsAndLeavesTheTabAlone: `SPC o c' -- the
+// module's `map!' leader form, live only in a booted Doom -- is the plain
+// close, which hides the panel windows and leaves the tab order alone (only
+// the deprioritizing close may touch it).
+func TestDoomPlainCloseHidesPanelsAndLeavesTheTabAlone(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	box := requireSandbox(t)
+	w := NewDoomWorld(t, box)
+	e := w.Emacs
+	w.register(t, box, "repo-0")
+	w.register(t, box, "repo-1")
+	frontendPrefix, panelPrefix := bufferNamePrefixes(e)
+	openPanel(e)
+	awaitPanelWindows(e, frontendPrefix, panelPrefix)
+	orderBefore := e.EvalStrings(emacsTabOrderForm)
+	if want, got := "agent-repl-simple", e.LeaderBinding("o c"); got != want {
+		t.Fatalf("SPC o c resolves to %q, want %q: the module's `map!' leader form did not take", got, want)
+	}
+
+	// Act
+	e.Leader("o c")
+
+	// Assert
+	e.AwaitEvalFor(panelSettleBound, "the panel windows to go away",
+		`(mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list))`,
+		func(raw json.RawMessage) bool {
+			return panelBufferCount(decodeStrings(raw), frontendPrefix, panelPrefix) == 0
+		})
+	if orderAfter := e.EvalStrings(emacsTabOrderForm); strings.Join(orderBefore, "\x00") != strings.Join(orderAfter, "\x00") {
+		t.Fatalf("the plain close moved the tab order: %q -> %q; only the deprio close may touch it", orderBefore, orderAfter)
+	}
+}

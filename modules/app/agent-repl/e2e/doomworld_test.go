@@ -27,9 +27,6 @@ import (
 	"testing"
 	"time"
 
-	"google.golang.org/protobuf/encoding/protojson"
-	"google.golang.org/protobuf/proto"
-
 	"agent-repld/integration/harness"
 )
 
@@ -145,17 +142,6 @@ func (f *fakeDaemon) do(method, path string, body []byte) (json.RawMessage, erro
 		return nil, fmt.Errorf("%s %s answered %d: %s", method, path, resp.StatusCode, out)
 	}
 	return out, nil
-}
-
-// protoJSON encodes M as the protojson the fake validates against the
-// generated types.
-func protoJSON(t *testing.T, m proto.Message) json.RawMessage {
-	t.Helper()
-	raw, err := protojson.Marshal(m)
-	if err != nil {
-		t.Fatalf("doom: encode %T: %v", m, err)
-	}
-	return raw
 }
 
 // Script makes METHOD answer RESPONSE from now on.

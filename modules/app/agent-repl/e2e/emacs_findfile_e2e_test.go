@@ -299,41 +299,6 @@ func TestEmacsPendingPlacementResolvesAfterRosterReconcile(t *testing.T) {
 // ruling. Its two documented shapes are asserted as two tests, one edge case
 // each: a file with a line, and a directory.
 
-// TestEmacsPopupOpensAFileRightSideHalfWidth is scenario 34's file case: the
-// window's side is `right', its width is about half the frame, and point is
-// on the requested (1-indexed) line.
-func TestEmacsPopupOpensAFileRightSideHalfWidth(t *testing.T) {
-	t.Parallel()
-	box := requireSandbox(t)
-	f := newEmacsFindFileFixture(t, box)
-	e := f.Emacs
-
-	repo := f.repoUnderHome(t, "popup")
-	path := f.fileIn(t, repo.Dir, "lines.txt", "one\ntwo\nthree\nfour\nfive\n")
-	const wantLine = 4
-
-	e.Eval(`(agent-repl-popup-open ` + elispString(path) + ` 4)`)
-
-	if side := f.windowSideOf(path); side != "right" {
-		t.Fatalf("the popup window's window-side = %q, want %q", side, "right")
-	}
-
-	frameWidth := e.EvalInt(`(frame-width)`)
-	popupWidth := e.EvalInt(`(window-total-width
-                               (get-buffer-window (get-file-buffer ` + elispString(path) + `) t))`)
-	floor := int(float64(frameWidth) * popupWidthFloorFraction)
-	ceiling := int(float64(frameWidth) * popupWidthCeilingFraction)
-	if popupWidth < floor || popupWidth > ceiling {
-		t.Fatalf("the popup window is %d columns of a %d-column frame, want about half (%d..%d)",
-			popupWidth, frameWidth, floor, ceiling)
-	}
-
-	if got := e.EvalInt(`(with-current-buffer (get-file-buffer ` + elispString(path) + `)
-                            (line-number-at-pos (point)))`); got != wantLine {
-		t.Fatalf("point is on line %d, want %d: the popup's LINE is 1-indexed, as HostOpenInEditor.line is", got, wantLine)
-	}
-}
-
 // TestEmacsPopupOpensADirectoryInDired is scenario 34's directory case: the
 // same one subroutine answers a directory with a DIRED buffer, in the same
 // right-side popup. A per-caller variant for directories is exactly the

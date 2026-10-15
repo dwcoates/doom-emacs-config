@@ -180,35 +180,6 @@ func TestEmacsPanelOpensIntoTheMainArea(t *testing.T) {
 	}
 }
 
-// TestEmacsPlainCloseHidesPanelsAndLeavesTheTabAlone is scenario 15: the
-// close variant that only hides, pressed as `SPC o c`.
-func TestEmacsPlainCloseHidesPanelsAndLeavesTheTabAlone(t *testing.T) {
-	t.Parallel()
-	w, _ := emacsPanelWorld(t, 2)
-	e := w.Emacs
-	frontendPrefix, panelPrefix := bufferNamePrefixes(e)
-
-	openPanel(e)
-	awaitPanelWindows(e, frontendPrefix, panelPrefix)
-	orderBefore := e.EvalStrings(emacsTabOrderForm)
-
-	if want, got := "agent-repl-simple", e.LeaderBinding("o c"); got != want {
-		t.Fatalf("SPC o c resolves to %q, want %q: the module's `map!' leader form did not take", got, want)
-	}
-	e.Leader("o c")
-
-	e.AwaitEvalFor(panelSettleBound, "the panel windows to go away",
-		`(mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list))`,
-		func(raw json.RawMessage) bool {
-			return panelBufferCount(decodeStrings(raw), frontendPrefix, panelPrefix) == 0
-		})
-
-	orderAfter := e.EvalStrings(emacsTabOrderForm)
-	if strings.Join(orderBefore, "\x00") != strings.Join(orderAfter, "\x00") {
-		t.Fatalf("the plain close moved the tab order: %q -> %q; only the deprio close may touch it", orderBefore, orderAfter)
-	}
-}
-
 // TestEmacsPlainCloseTogglesThePanelsBack is the other half of scenario 15:
 // `SPC o c` is a TOGGLE, so a second press on a workspace whose panels are
 // merely hidden must put them back.
