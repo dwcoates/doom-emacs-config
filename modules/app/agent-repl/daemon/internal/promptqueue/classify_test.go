@@ -348,6 +348,24 @@ func TestInterjectStatesTheStopAsAnInterjection(t *testing.T) {
 	}
 }
 
+// TestInterjectKillsTheRunningTurnUnforced covers the interjection's stop:
+// it is the graceful kill, so the turn's detached work runs on past it.
+func TestInterjectKillsTheRunningTurnUnforced(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "it countermands the work"}
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "stop doing that")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+	// Assert
+	if forces := h.sender.killedForces(); len(forces) != 1 || forces[0] {
+		t.Fatalf("kill forces = %v, want exactly one unforced kill", forces)
+	}
+}
+
 func TestInterjectWaitsForTheTurnsRealEndBeforeDelivering(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
