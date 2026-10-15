@@ -434,20 +434,18 @@ func TestContextInjectedSkills(t *testing.T) {
 // FOOTER's ⏱ chip (footer.proto FooterChipCrons, "Set iff at least one"),
 // which the daemon's footer resolver maintains from the very AgentCron
 // facts this scenario produces (internal/resolve/footer/chips.go
-// applyCron). So this asserts the turn's own conclusion plus that chip —
-// never a tool card.
+// applyCron). The chip is asserted by TestCronCreateSetsTheFootersCronsChip
+// below, never here: this scenario deletes its job inside the same turn, so
+// the chip is set only mid-turn, and the footer stream is LATEST-ONLY (a
+// reader that falls behind is handed only the newest view), so a loaded run
+// could legitimately never see it (2026-10-14: it timed out under the full
+// gate). This test asserts the turn's own conclusion, never a tool card.
 // ===========================================================================
 
 func TestCronCreateListDelete(t *testing.T) {
 	t.Parallel()
-	// Arrange. The footer is watched BEFORE the turn is driven: the
-	// scenario CREATES and then DELETES the job inside one turn, so the
-	// non-empty job set the chip is set from exists only in the middle of
-	// the turn. A stream opened afterwards could legitimately never carry
-	// it.
+	// Arrange.
 	w, ws := rmNewWorkspace(t)
-	footer := w.WatchFooter(ws)
-	defer footer.Close()
 
 	// Act
 	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "cron")
@@ -457,16 +455,34 @@ func TestCronCreateListDelete(t *testing.T) {
 	if ended.GetConcluded() == nil {
 		t.Fatalf("the cron turn ended = %v, want a concluded outcome", ended)
 	}
+}
 
-	// Assert: the cron acts reached the ONE surface they are contracted to
-	// reach — the footer's ⏱ chip, set while the created job stands.
+// TestCronCreateSetsTheFootersCronsChip drives `!cron-create`, which creates a
+// job and leaves it standing, so the footer's ⏱ chip stays set once the turn
+// has ended: a state every footer reader is handed, however far behind.
+func TestCronCreateSetsTheFootersCronsChip(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	w, ws := rmNewWorkspace(t)
+
+	// Act
+	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "cron-create")
+	ended := AwaitTurnEnded(t, w, ws, turn).GetTurnEnded()
+	if ended.GetConcluded() == nil {
+		t.Fatalf("the cron-create turn ended = %v, want a concluded outcome", ended)
+	}
+	footer := w.WatchFooter(ws)
+	defer footer.Close()
+
+	// Assert: the standing job reached the ONE surface cron is contracted to
+	// reach -- the footer's ⏱ chip.
 	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
 	defer cancel()
-	view := harness.AwaitView(t, ctx, footer.Stream, "the footer's crons chip while the created job stands", func(v *frontendv1.FooterView) bool {
+	view := harness.AwaitView(t, ctx, footer.Stream, "the footer's crons chip for the standing job", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetLiveWork().GetCrons() != nil
 	})
-	if got := view.GetStrip().GetLiveWork().GetCrons().GetCount(); got == 0 {
-		t.Fatalf("the footer's crons chip is set with count %d, want a positive job count", got)
+	if got := view.GetStrip().GetLiveWork().GetCrons().GetCount(); got != 1 {
+		t.Fatalf("the footer's crons chip counts %d jobs, want the 1 standing job", got)
 	}
 }
 
