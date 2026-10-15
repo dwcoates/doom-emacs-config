@@ -774,25 +774,40 @@ func TestKillGroupKillsALiveGroupAndTakesAGoneOneAsNoFailure(t *testing.T) {
 	}
 }
 
-// TestKillReturnsOnceEveryMemberHasExited pins that Kill awaits the whole
-// group, not only its leader: a member still exiting when Kill returned held
-// the killed daemon's boot claim, and the next daemon refused to boot.
-func TestKillReturnsOnceEveryMemberHasExited(t *testing.T) {
+// TestKillReturnsOnceEveryMemberHasReleasedItsFiles pins that Kill awaits the
+// whole group, not only its leader: a member still exiting when Kill returned
+// held the killed daemon's boot claim, and the next daemon refused to boot.
+// It reads what the claim needs, every member's files released, through a
+// FIFO whose only writer is the member: a read answers end of file exactly
+// when no writer is left. A zombie listing is NOT that property: Darwin posts
+// the exit event Kill awaits after the files are closed but before the
+// process turns zombie, so a member can be listed as exiting after Kill has
+// rightly returned.
+func TestKillReturnsOnceEveryMemberHasReleasedItsFiles(t *testing.T) {
 	// Arrange
-	d, member := groupUnderKill(t, "/bin/sleep 100 & echo $!; wait")
+	fifo := filepath.Join(t.TempDir(), "member")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatalf("mkfifo: %v", err)
+	}
+	d, _ := groupUnderKill(t, "/bin/sleep 100 >"+fifo+" & echo $!; wait")
+	// A blocking open of a FIFO's read end returns once a writer has opened
+	// it: the member holds the file before Kill runs, with no clock.
+	r, err := syscall.Open(fifo, syscall.O_RDONLY, 0)
+	if err != nil {
+		t.Fatalf("open the FIFO's read end: %v", err)
+	}
+	t.Cleanup(func() { syscall.Close(r) })
+	if err := syscall.SetNonblock(r, true); err != nil {
+		t.Fatalf("set the read end non-blocking: %v", err)
+	}
 
 	// Act
 	d.Kill()
 
 	// Assert
-	unended, err := procgroup.UnendedMembers(d.cmd.Process.Pid)
-	if err != nil {
-		t.Fatalf("procgroup.UnendedMembers: %v", err)
-	}
-	for _, m := range unended {
-		if m.Pid == member {
-			t.Fatalf("the member %d (%s) had not exited when Kill returned", m.Pid, m.State)
-		}
+	n, err := syscall.Read(r, make([]byte, 1))
+	if n != 0 || err != nil {
+		t.Fatalf("read the FIFO after Kill = %d, %v; want end of file: a member still held its write end", n, err)
 	}
 }
 
