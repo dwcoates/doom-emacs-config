@@ -95,7 +95,11 @@ Two different measures, labelled each time they appear:
   - `TestSubagentDetached`: the file side;
   - `TestSubagentDetachedSurvivesAnInterjection`: the cancel round trip;
   - `TestBubbleRefusedNotDeliverable`: an id the shim mints, addressed back.
-- **Answers:** daemon -> shim -> fake SDK and back, kept as `TestPermissionAskAnsweredArms/AllowOnce`.
+- **Answers:** daemon -> shim -> fake SDK and back, kept as `TestPermissionAskAnsweredArms/AllowStanding`.
+  - The test's table first kept `AllowOnce`. It was switched after test-cross-product-audit pointed out that `AllowStanding` proves strictly more at the same cost.
+  - The standing offer the real daemon stored must echo byte-exact into the real shim's `answer_mismatch` check.
+  - Each half pins that echo only against its own copy of the proto: `daemon/integration/prompt_test.go:1674` with a fake shim, and the shim's `gate.test.ts:233` with a fake daemon.
+  - `AllowOnce` becomes DELETE, and `DeniedByUser` stays DELETE.
 - **Session updates reaching the footer:**
   - `TestAccountUsage`;
   - `TestRateLimitSevenDayWindowFeedsTheWeeklyAllowance`.
@@ -131,7 +135,7 @@ Two different measures, labelled each time they appear:
 ## Same-seam groups (one wiring test would do)
 
 - **Tool card over the live stream.** 23 tests: filetools, webtools, bash foreground, hooks, MCP, monitors, SkillFailed and the vendor-answered slash command. Keep `TestBashForegroundCompleted`.
-- **Answer path.** 13 permission and question tests. Keep `AllowOnce`; optionally keep `TestQuestionSingleSelect`.
+- **Answer path.** 13 permission and question tests. Keep `AllowStanding` (see the KEEP set); optionally keep `TestQuestionSingleSelect`.
 - **Failure arms.** `TestApiRequestFailedArms` and `TestTerminalReasonTurnFailedArms`, 22 stacks between them. The shim half is pinned arm by arm in `agent-shim/claude/shim/test/integration/turn.test.ts`; the daemon half is pinned in `daemon/internal/resolve/feed/turnended_test.go` and `daemon/internal/resolve/turnfault/words_test.go`.
 - **Merge queue.** 11 of 16 rows assert the daemon's own merge logic, and an identical integration or unit assertion already exists for each.
 - **Emacs launcher, link and adoption.** 13 tests, wired by `TestEmacsProofOfLife`.
@@ -639,7 +643,7 @@ Seconds for t.Run subtests: TestPermissionAskAnsweredArms (3.36s) is split evenl
 | filetools | TestReadTruncatedStatesTheCut | 1.26 | DELETE-CANDIDATE | - | e2e TestReadWholeHeadRange/head (same "showing 2 of 4 lines"); toolcall_test.go:TestAHeadReadStatesTheCut | STREAM-TOOLCARD | high | duplicates a sibling subtest's assertion word for word |
 | filetools | TestReadImageSettlesWithNoOutput | 1.22 | DELETE-CANDIDATE | - | toolcall_test.go:TestAReadWithNoExtentDrawsTheNoneArm; shim read.test.ts | STREAM-TOOLCARD | med | the none arm is unit-pinned |
 | webtools | TestWebFetchRedirect | 1.10 | MOVE | unit: shim convert/tools/web-fetch.test.ts + daemon toolcall_test.go | web-fetch.test.ts "restates the CALL's url on the settled frame, not the result's redirect"; toolcall_test.go:TestAWebFetchLinksItsInputLineToThePage, TestAnHttpErrorPageIsAServedAnswerAndBadgedFailed | STREAM-TOOLCARD | med | the "302 Found\n\n" prefix and the verbatim body should be checked in web-fetch.test.ts; otherwise this is a delete |
-| permission | TestPermissionAskAnsweredArms/AllowOnce | 1.12 | KEEP-AT-E2E | daemon AnswerPermission -> shim UpdateAgent(answer) -> fake SDK canUseTool resolves -> gated tool runs -> frames back -> daemon card answered, tool returned, turn concluded | daemon integration prompt_test.go:TestAnswerPermissionForwardsTheCorrectDecision; shim integration gate.test.ts "allow-once settles allowed.once..." | ANSWER (wiring) | high | the one real round trip in the daemon->shim direction that releases a parked vendor callback |
+| permission | TestPermissionAskAnsweredArms/AllowOnce (superseded: AllowStanding is the wiring row, see the KEEP set; this row is now DELETE) | 1.12 | KEEP-AT-E2E | daemon AnswerPermission -> shim UpdateAgent(answer) -> fake SDK canUseTool resolves -> gated tool runs -> frames back -> daemon card answered, tool returned, turn concluded | daemon integration prompt_test.go:TestAnswerPermissionForwardsTheCorrectDecision; shim integration gate.test.ts "allow-once settles allowed.once..." | ANSWER (wiring) | high | the one real round trip in the daemon->shim direction that releases a parked vendor callback |
 | permission | TestPermissionAskAnsweredArms/AllowStanding | 1.12 | DELETE-CANDIDATE | - | prompt_test.go:TestAnswerPermissionForwardsTheCorrectDecision/allow_standing; gate.test.ts "allow-standing echoes the OFFERED standing back" | ANSWER | high | both halves pin the arm against the same proto |
 | permission | TestPermissionAskAnsweredArms/DeniedByUser | 1.12 | DELETE-CANDIDATE | - | prompt_test.go:TestAnswerPermissionForwardsTheCorrectDecision/deny; gate.test.ts "a user deny settles denied.user..."; permission_test.go:TestADeniedGateMarksTheGatedCallAsNeverHavingRun | ANSWER | high | as above |
 | permission | TestPermissionDeniedByPolicy | 1.29 | DELETE-CANDIDATE | - | gate.test.ts "!perm-deny-policy settles denied.policy with NO open ask"; permission_test.go:TestEveryVerdictHasItsOwnTreatment, TestAPolicyDenialThatPosedNoAskHasNoClock | ANSWER | high | no answer crosses the seam; it is shim emission plus daemon drawing |
