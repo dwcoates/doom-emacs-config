@@ -550,11 +550,7 @@ func (s *store) write(ctx context.Context, op string, fields dlog.Context, fn fu
 	tx, err := current.db.BeginTx(ctx, nil)
 	if err != nil {
 		wrapped := fmt.Errorf("wsm: begin transaction: %w", err)
-		if ctxend.Is(err) {
-			s.log.Info(op, writeCancelledMessage, withError(fields, wrapped))
-			return wrapped
-		}
-		s.log.Error(op, "could not begin the transaction", withError(fields, wrapped))
+		ctxend.Log(err, s.log.Info, s.log.Error, op, writeCancelledMessage, "could not begin the transaction", withError(fields, wrapped))
 		return wrapped
 	}
 	if err := fn(ctx, tx); err != nil {
@@ -603,20 +599,12 @@ func (s *store) write(ctx context.Context, op string, fields dlog.Context, fn fu
 			s.log.Debug(op, "the retarget was refused; nothing was written", withError(fields, err))
 			return err
 		}
-		if ctxend.Is(err) {
-			s.log.Info(op, writeCancelledMessage, withError(fields, err))
-			return err
-		}
-		s.log.Error(op, "refused the write", withError(fields, err))
+		ctxend.Log(err, s.log.Info, s.log.Error, op, writeCancelledMessage, "refused the write", withError(fields, err))
 		return err
 	}
 	if err := tx.Commit(); err != nil {
 		wrapped := fmt.Errorf("wsm: commit transaction: %w", err)
-		if ctxend.Is(err) {
-			s.log.Info(op, writeCancelledMessage, withError(fields, wrapped))
-			return wrapped
-		}
-		s.log.Error(op, "could not commit the transaction", withError(fields, wrapped))
+		ctxend.Log(err, s.log.Info, s.log.Error, op, writeCancelledMessage, "could not commit the transaction", withError(fields, wrapped))
 		return wrapped
 	}
 	s.log.Debug(op, "wrote durable state", fields)
@@ -643,12 +631,7 @@ func (s *store) read(ctx context.Context, op string, fields dlog.Context, fn fun
 			s.log.Debug(op, "the read found no such record", withError(fields, err))
 			return err
 		}
-		if ctxend.Is(err) {
-			s.log.Info(op, "the read ended when its caller's context was cancelled",
-				withError(fields, err))
-			return err
-		}
-		s.log.Error(op, "refused the read", withError(fields, err))
+		ctxend.Log(err, s.log.Info, s.log.Error, op, "the read ended when its caller's context was cancelled", "refused the read", withError(fields, err))
 		return err
 	}
 	s.log.Debug(op, "read durable state", fields)

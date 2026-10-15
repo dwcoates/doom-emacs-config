@@ -149,11 +149,8 @@ func (v *verbs) readRegistry(ctx context.Context, log dlog.Logger, operation str
 		// flight, and a roster nobody is left to receive is no loss. Every
 		// other refusal keeps its ERROR. The precedent is the state client's
 		// own read, which has always answered a cancellation at info.
-		if ctxend.Is(err) {
-			log.Info(operation, "the roster read ended when its context was cancelled", dlog.Context{"cause": err.Error()})
-			return sidebar.Registry{}, false
-		}
-		log.Error(operation, "could not list the workspaces for the roster", dlog.Context{"cause": err.Error()})
+		ctxend.Log(err, log.Info, log.Error, operation, "the roster read ended when its context was cancelled",
+			"could not list the workspaces for the roster", dlog.Context{"cause": err.Error()})
 		return sidebar.Registry{}, false
 	}
 	repositories, err := v.deps.DB.ListRepositories(ctx)

@@ -107,11 +107,8 @@ func (f *Follower) Run(ctx context.Context) error {
 func (f *Follower) Check(ctx context.Context) {
 	version, err := f.deps.Versions.DataVersion(ctx)
 	if err != nil {
-		if ctxend.Is(err) {
-			f.deps.Log.Debug(opCheck, "the data_version read ended with its context", dlog.Context{"cause": err.Error()})
-			return
-		}
-		f.deps.Log.Error(opCheck, "could not read the state file's data_version; another daemon's selection is not followed this tick",
+		ctxend.Log(err, f.deps.Log.Debug, f.deps.Log.Error, opCheck, "the data_version read ended with its context",
+			"could not read the state file's data_version; another daemon's selection is not followed this tick",
 			dlog.Context{"cause": err.Error()})
 		return
 	}
