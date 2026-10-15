@@ -63,6 +63,11 @@ func TestWorkspaceLogPathIsTheContractedSymlink(t *testing.T) {
 	}
 }
 
+// declared licenses exactly the named operations, as ExpectWarnings would.
+func declared(operations ...string) func(LogRecord) bool {
+	return func(r LogRecord) bool { return slices.Contains(operations, r.Operation) }
+}
+
 func TestUnexpectedWarningsWithNothingDeclaredFlagsEveryWarningRecord(t *testing.T) {
 	// Arrange: the set StartDaemon arms every daemon with.
 	records := []LogRecord{
@@ -71,7 +76,7 @@ func TestUnexpectedWarningsWithNothingDeclaredFlagsEveryWarningRecord(t *testing
 	}
 
 	// Act
-	got := unexpectedWarnings(records, map[string]bool{})
+	got := unexpectedWarnings(records, declared())
 
 	// Assert
 	if len(got) != 2 {
@@ -87,7 +92,7 @@ func TestUnexpectedWarningsSkipsADeclaredOperation(t *testing.T) {
 	}
 
 	// Act
-	got := unexpectedWarnings(records, map[string]bool{"daemon.shimclient.redial": true})
+	got := unexpectedWarnings(records, declared("daemon.shimclient.redial"))
 
 	// Assert
 	if len(got) != 1 || got[0].Operation != "daemon.workspace.open" {
@@ -103,7 +108,7 @@ func TestUnexpectedWarningsIgnoresRecordsBelowAWarningLevel(t *testing.T) {
 	}
 
 	// Act
-	got := unexpectedWarnings(records, map[string]bool{})
+	got := unexpectedWarnings(records, declared())
 
 	// Assert
 	if len(got) != 0 {

@@ -447,6 +447,13 @@ type Daemon struct {
 	// required are the expected operations a test also REQUIRES to have been
 	// produced (RequireWarnings): the sweep fails on one that never was.
 	required map[string]bool
+	// expectedFor are the operations ExpectWarningsFor licensed for one
+	// workspace's records only, keyed by the workspace's directory forms.
+	expectedFor map[string]map[string]bool
+	// view is whether this Daemon is a View of a process another fixture
+	// owns; claims are the workspace directory forms the view answers for.
+	view   bool
+	claims map[string]bool
 
 	// daemonProc is the PROCESS's state, as opposed to one test's: its
 	// command, its client, its exit and the locks that order them. Every
@@ -494,6 +501,12 @@ type daemonProc struct {
 	// inMemoryState is whether this daemon's state lives in memory (see
 	// Opts.DurableState).
 	inMemoryState bool
+	// claimed maps every workspace directory form a view claimed to that
+	// view's test, so the owner's sweep leaves those records to the view.
+	claimed map[string]string
+	// leftClaims are the claims of views whose tests have ended, for the
+	// owner's final sweep of what their workspaces logged afterwards.
+	leftClaims []claim
 }
 
 // InstallFakeGit installs the scripted `git` into dir, the directory that
@@ -1242,6 +1255,7 @@ const reapGrace = 2 * time.Second
 // indefinitely.
 func (d *Daemon) Stop() {
 	d.t.Helper()
+	d.refuseOnView("Stop")
 	d.signal(syscall.SIGTERM)
 	if d.awaitReapWithin(DefaultTimeout) {
 		return
@@ -1333,6 +1347,7 @@ func (d *Daemon) standDownStraysForCoverage() {
 // SIGCONT, so the group kill follows the leader's exit at once.
 func (d *Daemon) Kill() {
 	d.t.Helper()
+	d.refuseOnView("Kill")
 	if d.cmd == nil || d.cmd.Process == nil {
 		return
 	}
@@ -1828,6 +1843,14 @@ func Register(t testing.TB, d *Daemon, dir string) *workspacev1.WorkspaceRef {
 	ref := resp.Msg.GetSuccess().GetWorkspace()
 	if ref.GetId() == "" {
 		t.Fatalf("RegisterWorkspace(%s) = %v, want a success carrying a workspace id", dir, resp.Msg)
+	}
+	// A VIEW ANSWERS FOR WHAT IT REGISTERS (view.go): the daemon may name the
+	// workspace by the directory given or by its own resolved form.
+	if d.view {
+		d.Claim(dir)
+		if ref.GetDir() != dir {
+			d.Claim(ref.GetDir())
+		}
 	}
 	return ref
 }

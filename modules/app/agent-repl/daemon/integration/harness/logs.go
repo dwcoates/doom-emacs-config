@@ -423,7 +423,7 @@ func (d *Daemon) UnproducedRequiredWarnings() []string {
 	}
 	d.mu.Unlock()
 	produced := map[string]bool{}
-	for _, r := range append(d.RunLog(), d.WorkspaceLogRecords()...) {
+	for _, r := range d.sweptRecords() {
 		if warningLevels[strings.ToLower(r.Level)] {
 			produced[r.Operation] = true
 		}
@@ -447,40 +447,33 @@ func (d *Daemon) assertNoUnproducedRequiredWarnings() {
 // UnexpectedWarnings is the sweep's own material: every WARN or worse this
 // daemon recorded whose operation no ExpectWarnings declared. The cleanup sweep
 // fails the test on it; a test ABOUT the sweep reads it.
+//
+// It reads the run log and every per-workspace daemon sink this daemon wrote,
+// narrowed to the records this Daemon answers for (view.go): a view's claimed
+// workspaces, or everything no view claimed.
 func (d *Daemon) UnexpectedWarnings() []LogRecord {
+	records := d.sweptRecords()
 	d.mu.Lock()
-	expected := make(map[string]bool, len(d.expected))
-	for k, v := range d.expected {
-		expected[k] = v
-	}
-	d.mu.Unlock()
-	return d.unexpectedWarnings(expected)
-}
-
-// unexpectedWarnings sweeps the run log and every per-workspace daemon sink
-// this daemon wrote.
-func (d *Daemon) unexpectedWarnings(expected map[string]bool) []LogRecord {
-	return append(unexpectedWarnings(d.RunLog(), expected),
-		unexpectedWarnings(d.WorkspaceLogRecords(), expected)...)
+	defer d.mu.Unlock()
+	return unexpectedWarnings(records, d.expects)
 }
 
 func (d *Daemon) assertNoUnexpectedWarnings() {
-	d.mu.Lock()
-	expected := make(map[string]bool, len(d.expected))
-	for k, v := range d.expected {
-		expected[k] = v
+	unexpected := d.UnexpectedWarnings()
+	if len(unexpected) > 0 {
+		var b strings.Builder
+		for _, r := range unexpected {
+			b.WriteString("\n  " + r.Level + " " + r.Operation + ": " + r.Message + contextSuffix(r))
+		}
+		d.t.Errorf("the daemon produced %d unexpected warning records; declare them with ExpectWarnings if they are intended:%s", len(unexpected), b.String())
 	}
-	d.mu.Unlock()
-
-	unexpected := d.unexpectedWarnings(expected)
-	if len(unexpected) == 0 {
+	if d.view {
 		return
 	}
-	var b strings.Builder
-	for _, r := range unexpected {
-		b.WriteString("\n  " + r.Level + " " + r.Operation + ": " + r.Message + contextSuffix(r))
+	if late := d.lateClaimedWarnings(); len(late) > 0 {
+		d.t.Errorf("the daemon produced %d unexpected warning records for workspaces whose tests had already ended, named by the test that claimed each:\n  %s",
+			len(late), strings.Join(late, "\n  "))
 	}
-	d.t.Errorf("the daemon produced %d unexpected warning records; declare them with ExpectWarnings if they are intended:%s", len(unexpected), b.String())
 }
 
 // WorkspaceLogTargets are the per-workspace daemon sinks minted under THIS
@@ -919,13 +912,14 @@ func contextSuffix(r LogRecord) string {
 	return " {" + strings.Join(parts, " ") + "}"
 }
 
-// unexpectedWarnings answers the records at a warning level whose operation the
-// test did not declare. An EMPTY expected set flags every one of them, which is
-// what makes the sweep StartDaemon arms an assertion rather than a no-op.
-func unexpectedWarnings(records []LogRecord, expected map[string]bool) []LogRecord {
+// unexpectedWarnings answers the records at a warning level that the test's
+// declarations do not license. A predicate licensing nothing flags every one of
+// them, which is what makes the sweep StartDaemon arms an assertion rather than
+// a no-op.
+func unexpectedWarnings(records []LogRecord, expected func(LogRecord) bool) []LogRecord {
 	var out []LogRecord
 	for _, r := range records {
-		if warningLevels[strings.ToLower(r.Level)] && !expected[r.Operation] {
+		if warningLevels[strings.ToLower(r.Level)] && !expected(r) {
 			out = append(out, r)
 		}
 	}
