@@ -288,10 +288,11 @@ Code: `testrun/internal/reuse`; the declarations: `testrun/roster` (`Suite.Reuse
   writing into its inputs) or a `node_modules` it read was not installed from
   its lock, nothing is recorded and the run says why. A record from a dirty
   checkout says "with uncommitted changes": the commit does not hold the bytes.
-- **Which suites are keyed.** `daemon`, `sidecar`, `store`, `lock` and
-  `logging`. The end-to-end suites ALWAYS run, and so do the shell harnesses,
-  `protohelpers` (its scans walk the whole module) and `testrun` (its tests
-  start real sandboxes, which a confined test cannot).
+- **Which suites are keyed.** `daemon`, `sidecar`, `store`, `lock`,
+  `logging` and `protohelpers`. The end-to-end suites ALWAYS run, and so do
+  the shell harnesses, `repo-scans` (the tests that read the whole module,
+  kept apart so no system's key covers the others' trees) and `testrun` (its
+  tests start real sandboxes, which a confined test cannot).
 - **`--no-reuse` runs everything** and still records. `--record` and
   `--coverage` imply it. A targeted run, narrowed below whole suites (a
   test-name filter), neither reuses nor records.

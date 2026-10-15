@@ -89,9 +89,10 @@ const (
 	testrunSuite = "testrun"
 	// worktreesLibHarness greps every .claude shell script.
 	worktreesLibHarness = "worktrees-lib-harness"
-	// repoScans reads every system's go.mod, Vitest imports and integration
-	// sources, and checks this selection against them (daemon/reposcans): a
-	// change to any system can move its verdict.
+	// repoScans reads every system's go.mod, Vitest imports, integration
+	// sources and Go sources, and checks this selection and the proto helpers'
+	// call sites against them (daemon/reposcans): a change to any system can
+	// move its verdict.
 	repoScans = "repo-scans"
 )
 
@@ -105,7 +106,8 @@ var suiteRules = []suiteRule{
 	{Kind: matchExact, Path: moduleRoot + "bin/test-all.sh", Full: true},
 	{Kind: matchExact, Path: moduleRoot + "bin/report-nonlisp-coverage.sh", Full: true},
 	{Kind: matchExact, Path: moduleRoot + "bin/report-logging-density.sh", Full: true},
-	{Kind: matchSubtree, Path: moduleRoot + "bin/", Suites: scriptHarnessSuites},
+	// repo-scans reads the Go sources here too.
+	{Kind: matchSubtree, Path: moduleRoot + "bin/", Suites: append(append([]string(nil), scriptHarnessSuites...), repoScans)},
 
 	// The sandbox image and its runner are the Emacs client layer's
 	// precondition and nothing else's: the containerless cross-system suite

@@ -40,7 +40,7 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 		{
 			name:  "an ordinary bin script selects the script harnesses",
 			paths: []string{"modules/app/agent-repl/bin/build-frontend.sh"},
-			want:  scriptHarnessSuites,
+			want:  append(append([]string(nil), scriptHarnessSuites...), "repo-scans"),
 		},
 		{
 			name:  "module-root elisp selects ert and the Emacs layer",
@@ -246,14 +246,16 @@ func TestSelectSuitesMapsShimLockToItsSuiteAndTheShims(t *testing.T) {
 }
 
 // TestSelectSuitesABinScriptSelectsEveryHarness covers bin/: a change there
-// can break any of the harnesses that test the module's scripts.
+// can break any of the harnesses that test the module's scripts, and the
+// repo-scans suite reads the Go sources there.
 func TestSelectSuitesABinScriptSelectsEveryHarness(t *testing.T) {
 	// Act.
 	got := SelectSuites([]string{"modules/app/agent-repl/bin/background.sh"})
 
 	// Assert.
-	if got.Full || strings.Join(got.Suites, ",") != strings.Join(roster.Harnesses(), ",") {
-		t.Fatalf("a bin/ change selected %v, want every bin/ harness %v", got.Suites, roster.Harnesses())
+	want := strings.Join(inRosterOrder(setOf(append(roster.Harnesses(), "repo-scans"))), ",")
+	if got.Full || strings.Join(got.Suites, ",") != want {
+		t.Fatalf("a bin/ change selected %v, want every bin/ harness and repo-scans: %s", got.Suites, want)
 	}
 }
 

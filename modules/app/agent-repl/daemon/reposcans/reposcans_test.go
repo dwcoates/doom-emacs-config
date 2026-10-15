@@ -194,3 +194,157 @@ func TestNoSystemsIntegrationSuiteRunsAnotherSystem(t *testing.T) {
 		})
 	}
 }
+
+// TestRosterwalkIsTheOnlyChildWalk pins that no Go reader anywhere in
+// agent-repl walks RosterRow.children by hand: a hand-rolled walk is exactly
+// how one reader came to miss child workspaces while the others saw them.
+func TestRosterwalkIsTheOnlyChildWalk(t *testing.T) {
+	// Arrange: the agent-repl root, two directories up.
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("resolve the agent-repl root: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "daemon", "go.mod")); err != nil {
+		t.Fatalf("%s is not the agent-repl root: %v", root, err)
+	}
+	generated := filepath.Join(root, "proto", "gen")
+	e2e := filepath.Join(root, "e2e") + string(filepath.Separator)
+	// rosterwalk itself walks the children, and this suite spells the call
+	// it looks for.
+	self := filepath.Join(root, "proto", "helpers", "go", "rosterwalk")
+	scans, err := filepath.Abs(".")
+	if err != nil {
+		t.Fatalf("resolve this package: %v", err)
+	}
+	var offenders []string
+
+	// Act.
+	err = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if path == generated || path == self || path == scans || d.Name() == "node_modules" || d.Name() == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		// The e2e suite reads live rosters, so its tests are readers too; every
+		// other _test.go builds rows rather than walking them.
+		if !strings.HasSuffix(path, ".go") || (strings.HasSuffix(path, "_test.go") && !strings.HasPrefix(path, e2e)) {
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(body), "GetChildren()") {
+			offenders = append(offenders, path)
+		}
+		return nil
+	})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("walk agent-repl: %v", err)
+	}
+	if len(offenders) > 0 {
+		t.Fatalf("these files walk RosterRow.children by hand; flatten through rosterwalk instead: %v", offenders)
+	}
+}
+
+// TestTheStoreAndEveryFakeValidateThroughThisPackage pins the call sites: the
+// store's server and every fake store a producer's suite runs against call
+// ValidateWriteBatchRequest, and no other Go file restates its rules.
+func TestTheStoreAndEveryFakeValidateThroughThisPackage(t *testing.T) {
+	// Arrange: the agent-repl root, two directories up.
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("resolve the agent-repl root: %v", err)
+	}
+	callers := []string{
+		"agent-shim/shim-store/internal/server/validate.go",
+		"agent-shim/claude/shim-sidecar/integration/helpers_test.go",
+	}
+	// storewrite itself states the rule, and this suite spells it.
+	self := filepath.Join(root, "proto", "helpers", "go", "storewrite")
+	scans, err := filepath.Abs(".")
+	if err != nil {
+		t.Fatalf("resolve this package: %v", err)
+	}
+	rule := "carries neither entries nor a cursor advance nor an agent locator"
+
+	// Act, Assert: each caller goes through this package.
+	for _, rel := range callers {
+		body, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		if !strings.Contains(string(body), "storewrite.Validate") {
+			t.Errorf("%s does not validate writes through storewrite", rel)
+		}
+	}
+	// Assert: no other file restates the empty-batch rule.
+	err = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() && (d.Name() == "node_modules" || d.Name() == ".git" || path == self || path == scans) {
+			return filepath.SkipDir
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(body), rule) {
+			t.Errorf("%s restates the store's write validation; call storewrite instead", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk agent-repl: %v", err)
+	}
+}
+
+// TestTestsNameArmsOnlyThroughOneofarm pins the call sites: a test under e2e/
+// or daemon/integration/ that reads WhichOneof by hand is a drifted copy of
+// Name.
+func TestTestsNameArmsOnlyThroughOneofarm(t *testing.T) {
+	// Arrange: the agent-repl root, two directories up.
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("resolve the agent-repl root: %v", err)
+	}
+	var offenders []string
+
+	// Act.
+	for _, dir := range []string{"e2e", filepath.Join("daemon", "integration")} {
+		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() || !strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			body, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			if strings.Contains(string(body), "WhichOneof(") {
+				offenders = append(offenders, path)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("walk %s: %v", dir, err)
+		}
+	}
+
+	// Assert.
+	if len(offenders) > 0 {
+		t.Fatalf("these tests read WhichOneof by hand; read the arm through oneofarm.Field or oneofarm.Name instead: %v", offenders)
+	}
+}

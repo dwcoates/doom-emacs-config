@@ -226,10 +226,11 @@ var Suites = []Suite{
 		Reuse: &Reuse{Inputs: []string{"agent-shim/shim-store/"}}},
 	{Name: "lock", Kind: GoModule, Path: "agent-shim/shim-lock", Reuse: &Reuse{}},
 	{Name: "logging", Kind: GoModule, Path: "agent-shim/logging/go", Reuse: &Reuse{Inputs: []string{"proto/vocab/"}}},
-	{Name: "protohelpers", Kind: GoModule, Path: "proto/helpers/go"},
+	{Name: "protohelpers", Kind: GoModule, Path: "proto/helpers/go", Reuse: &Reuse{}},
 	// The tests that read the whole module rather than one system's tree:
 	// the merge gate's selection checked against every suite's real
-	// dependencies, and the mock-rule source scan. Their own module, so no
+	// dependencies, the mock-rule source scan, and the scans pinning that
+	// every Go reader goes through the proto helpers. Their own module, so no
 	// system's reuse key covers the other systems' trees; they always run.
 	{Name: "repo-scans", Kind: GoModule, Path: "daemon/reposcans"},
 	{Name: "webapp", Kind: Vitest, Path: "webapp", IntegrationConfig: "vitest.integration.config.ts"},
