@@ -106,6 +106,25 @@ export function repaintMark(el: HTMLElement, className: string, text: string): v
 }
 
 /**
+ * Bring HOST's optional child matching SELECTOR to NEXT: dropped while NEXT is
+ * null, put in place by INSERT the first time it is known, and replaced only
+ * when its text changed, so a child the push did not change keeps its element.
+ * The one placement of a small element a component draws only while the
+ * daemon knows its value (a suite's counts, a reused suite's source).
+ */
+export function placeOptional(
+  host: HTMLElement,
+  selector: string,
+  next: HTMLElement | null,
+  insert: (el: HTMLElement) => void,
+): void {
+  const drawn = host.querySelector(selector);
+  if (next === null) drawn?.remove();
+  else if (drawn === null) insert(next);
+  else if (drawn.textContent !== next.textContent) drawn.replaceWith(next);
+}
+
+/**
  * The `ResizeObserver` of the page EL lives in, or null when that page has
  * none (a detached document, or a host without the capability). Every
  * measurer asks through here; what an absent observer means is each

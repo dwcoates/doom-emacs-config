@@ -27,7 +27,7 @@
  * token, in the response bubble's link blue (`renderMergeTestLogLink`).
  */
 import { log } from "../../log.js";
-import { placeChildren, repaintMark } from "../../dom.js";
+import { placeChildren, placeOptional, repaintMark } from "../../dom.js";
 import { requireCase, requireMessage } from "../../rpc/strict.js";
 import { paintSpanClass } from "../cards/paint.js";
 import { armName } from "../renderers.js";
@@ -272,23 +272,20 @@ function paintSuite(el: HTMLElement, suite: FeedMergeTestSuite): void {
  * daemon's, and dropped otherwise.
  */
 function placeReusedSource(head: HTMLElement, reused: FeedMergeTestSuiteReused | undefined): void {
-  const drawn = head.querySelector<HTMLElement>(":scope > .merge-suite-reused");
-  if (reused === undefined) {
-    drawn?.remove();
-    return;
-  }
+  placeOptional(head, ":scope > .merge-suite-reused", reused === undefined ? null : drawReusedSource(reused), (el) => {
+    const name = head.querySelector(":scope > .merge-suite-name");
+    if (name === null) throw new Error("merge: a drawn suite lost its name");
+    name.after(el);
+  });
+}
+
+/** The earlier run a reused suite names, as the daemon resolved it. */
+function drawReusedSource(reused: FeedMergeTestSuiteReused): HTMLElement {
   const source = requireMessage(reused.source, `${PATH}.state.reused.source`);
-  const text = `reused: ${source.text}`;
-  if (drawn !== null) {
-    if (drawn.textContent !== text) drawn.textContent = text;
-    return;
-  }
   const el = document.createElement("span");
   el.className = "merge-suite-reused";
-  el.textContent = text;
-  const name = head.querySelector(":scope > .merge-suite-name");
-  if (name === null) throw new Error("merge: a drawn suite lost its name");
-  name.after(el);
+  el.textContent = `reused: ${source.text}`;
+  return el;
 }
 
 /** Set EL's NAME to VALUE only when it differs. */
@@ -327,11 +324,9 @@ export function drawFeedMergeTestCounts(counts: FeedMergeTestCounts): HTMLElemen
  * a run's tally alike.
  */
 export function placeFeedMergeTestCounts(host: HTMLElement, counts: FeedMergeTestCounts | undefined): void {
-  const drawn = host.querySelector(":scope > .merge-suite-counts");
-  const next = counts === undefined ? null : drawFeedMergeTestCounts(counts);
-  if (next === null) drawn?.remove();
-  else if (drawn === null) host.append(next);
-  else if (drawn.textContent !== next.textContent) drawn.replaceWith(next);
+  placeOptional(host, ":scope > .merge-suite-counts", counts === undefined ? null : drawFeedMergeTestCounts(counts), (el) =>
+    host.append(el),
+  );
 }
 
 /**

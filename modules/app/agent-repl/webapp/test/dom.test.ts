@@ -8,6 +8,7 @@ import {
   computedPx,
   pageResizeObserver,
   placeChildren,
+  placeOptional,
   repaintMark,
   scrollbarWidthPx,
 } from "../src/dom.js";
@@ -271,6 +272,71 @@ describe("repaintMark", () => {
     const shared = sites.filter((source) => source.includes("repaintMark("));
     // Assert
     expect([handRolled.length, shared.length]).toEqual([0, sites.length]);
+  });
+});
+
+describe("placeOptional", () => {
+  /** A host holding a name, and a value element of TEXT drawn as "value". */
+  const value = (text: string): HTMLElement => {
+    const el = document.createElement("span");
+    el.className = "value";
+    el.textContent = text;
+    return el;
+  };
+  const host = (): HTMLElement => {
+    const el = document.createElement("div");
+    el.append(Object.assign(document.createElement("span"), { className: "name" }));
+    return el;
+  };
+
+  it("puts a first-known value in place through INSERT", () => {
+    // Arrange
+    const el = host();
+    // Act
+    placeOptional(el, ":scope > .value", value("3"), (next) => el.prepend(next));
+    // Assert
+    expect([...el.children].map((c) => c.className)).toEqual(["value", "name"]);
+  });
+
+  it("drops the value once it is unknown", () => {
+    // Arrange
+    const el = host();
+    el.append(value("3"));
+    // Act
+    placeOptional(el, ":scope > .value", null, () => undefined);
+    // Assert
+    expect(el.querySelector(".value")).toBeNull();
+  });
+
+  it("replaces the value whose text changed", () => {
+    // Arrange
+    const el = host();
+    el.append(value("3"));
+    // Act
+    placeOptional(el, ":scope > .value", value("4"), () => undefined);
+    // Assert
+    expect(el.querySelector(".value")?.textContent).toBe("4");
+  });
+
+  it("keeps the element of a value whose text did not change", () => {
+    // Arrange
+    const el = host();
+    const drawn = value("3");
+    el.append(drawn);
+    // Act
+    placeOptional(el, ":scope > .value", value("3"), () => undefined);
+    // Assert
+    expect(el.querySelector(".value")).toBe(drawn);
+  });
+
+  it("is how the merge tests tab places its optional elements", () => {
+    // Arrange — the module whose suite rows draw counts and a reused source.
+    const source = readFileSync(join(__dirname, "../src/feed/merge/tests-tab.ts"), "utf8");
+    // Act
+    const handRolled = /drawn\?\.remove\(\)/.test(source);
+    const shared = source.match(/placeOptional\(/g)?.length ?? 0;
+    // Assert
+    expect([handRolled, shared]).toEqual([false, 2]);
   });
 });
 
