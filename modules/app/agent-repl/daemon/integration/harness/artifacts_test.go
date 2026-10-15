@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"agent-repld/internal/sourcescan"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -321,27 +322,17 @@ func TestKeepFailureLogsKeepsTheLogsAndTheStderrUnderTheTestsName(t *testing.T) 
 // hand.
 func TestEveryDaemonKeepsItsFailureLogsThroughOneHelper(t *testing.T) {
 	// Arrange
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("glob: %v", err)
-	}
+	files := sourcescan.Production(t)
 
 	// Act
 	var handRolled, helperSites []string
 	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") {
-			continue
-		}
-		body, err := os.ReadFile(f)
-		if err != nil {
-			t.Fatalf("read %s: %v", f, err)
-		}
-		src := string(body)
-		if f != "artifacts.go" && strings.Contains(src, "preserveFailureLogs(") {
-			handRolled = append(handRolled, f)
+		src := string(f.Source)
+		if f.Name != "artifacts.go" && strings.Contains(src, "preserveFailureLogs(") {
+			handRolled = append(handRolled, f.Name)
 		}
 		if strings.Contains(src, "registerLogChecks(t, func() { keepFailureLogs(t, ") {
-			helperSites = append(helperSites, f)
+			helperSites = append(helperSites, f.Name)
 		}
 	}
 
