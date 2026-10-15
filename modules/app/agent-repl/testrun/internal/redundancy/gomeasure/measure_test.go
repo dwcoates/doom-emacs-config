@@ -335,8 +335,8 @@ func TestMeasurePinsTheLogAssertionAndUnionsTheBlocks(t *testing.T) {
 	if !reflect.DeepEqual(pinned, want) {
 		t.Fatalf("pins = %v, want %v", pinned, want)
 	}
-	if got := len(m.Cost.Phases); got != 6 {
-		t.Errorf("%d phases timed, want 6", got)
+	if got := len(m.Cost.Phases); got != 7 {
+		t.Errorf("%d phases timed, want 7 (the schema pre-flight among them)", got)
 	}
 }
 
@@ -360,15 +360,26 @@ func TestMeasureDropsTheSiteASchemaCompileErrorNames(t *testing.T) {
 			t.Errorf("%s is %s, want dropped", r.Key, r.Status)
 		}
 	}
-	// The failing attempt built the mutated packages alone and no suite.
+	// The pre-flight met the untyped site, with the mutated packages built
+	// alone, before any case ran; the real schema dropped it before its
+	// first build, so no suite binary was ever built over it.
 	var overlays []string
-	for _, call := range f.calls {
+	firstCase := -1
+	for i, call := range f.calls {
 		if strings.Contains(call, "-overlay") {
 			overlays = append(overlays, call)
 		}
+		if firstCase < 0 && strings.HasPrefix(call, "cover-") {
+			firstCase = i
+		}
 	}
-	if len(overlays) < 3 || !strings.HasPrefix(overlays[0], "go build -buildvcs=false -overlay") || !strings.HasPrefix(overlays[1], "go build -buildvcs=false -overlay") || !strings.HasPrefix(overlays[2], "go test -c") {
+	if len(overlays) < 3 || !strings.Contains(overlays[0], "preflight-0") || !strings.Contains(overlays[1], "preflight-1") {
 		t.Fatalf("overlay builds, in order:\n%s", strings.Join(overlays, "\n"))
+	}
+	for i, call := range f.calls {
+		if strings.Contains(call, "preflight-") && i > firstCase {
+			t.Fatalf("the pre-flight ran after a case: %s", call)
+		}
 	}
 }
 
