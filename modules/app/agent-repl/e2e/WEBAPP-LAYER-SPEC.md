@@ -485,12 +485,13 @@ found it, and NONE is papered over with a fixture.
    no `.usage-stamp` anywhere on the page. Production/contract gap, for the
    daemon owner. (`feed-families.layer.test.ts`)
 
-2. **`SetModel` on a SERVED option fails at the transport.** Picking an option
-   the daemon itself served comes back as a transport refusal ("the daemon
-   could not be reached", drawn in `.topbar-model`) rather than the echoed
-   `AgentModel` token the contract promises. Production fault. The placement
-   rule still holds over it, which is what §F8's test pins.
-   (`refusals.layer.test.ts`)
+2. **`SetModel` on a SERVED option failed at the transport — FIXED, and the
+   finding is now a pin.** Picking an option the daemon itself served once came
+   back as a transport refusal ("the daemon could not be reached", drawn in
+   `.topbar-model`) rather than the echoed `AgentModel` token. Against this
+   chain today the pick is taken: "takes a served model option as the
+   selection, refusing nothing" picks an option other than the selection and
+   awaits the selector reading it. (`refusals.layer.test.ts`)
 
 3. **`agent_prompt` was drawn from nothing this chain produced — FIXED, and
    the finding is now §F3's two assertions.** The family map's "no scenario

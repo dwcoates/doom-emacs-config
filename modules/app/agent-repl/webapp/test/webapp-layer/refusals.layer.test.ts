@@ -105,17 +105,9 @@ it(
   TURN_TEST_MS,
 );
 
-// §F8 #34 — a refusal renders AT THE CALL SITE. What is asserted is the
-// PLACEMENT rule, not that any particular call succeeds: whatever answer the
-// daemon gives a control, the consequence stays inside that control and the
-// page's failure overlay stays empty.
-//
-// FINDING, REPORTED, NOT ASSERTED AS PASSING: against this real chain, picking
-// a SERVED model option comes back as a TRANSPORT refusal
-// ("the daemon could not be reached", drawn in `.topbar-model`) rather than
-// the echoed `AgentModel` token the contract promises for `SetModel`. That is
-// a production fault this layer surfaced; the placement rule below still holds
-// over it, which is exactly why placement is what this test pins.
+// §F8 #34 — a refusal renders AT THE CALL SITE. Whatever answer the daemon
+// gives a control, the consequence stays inside that control and the page's
+// failure overlay stays empty.
 it(
   "keeps a control's own answer inside that control, and out of the page's failure overlay",
   async () => {
@@ -136,6 +128,38 @@ it(
     // failure card, and no refusal drawn anywhere outside the selector.
     expect(app.failureArms()).toHaveLength(0);
     expect(app.$$(".refusal").filter((el) => el.closest(".topbar-model") === null)).toHaveLength(0);
+  },
+  TURN_TEST_MS,
+);
+
+// §F8 #34b — SetModel on an option the daemon itself SERVED is taken: the
+// echoed AgentModel token comes back as the selection, and the selector draws
+// no refusal. (This layer once found it answered as a transport refusal, "the
+// daemon could not be reached"; WEBAPP-LAYER-SPEC.md §G finding 2.)
+it(
+  "takes a served model option as the selection, refusing nothing",
+  async () => {
+    // Arrange — a session and its selector open on the served options, and
+    // the option to pick: one that is not already the selection, so the
+    // selection can only read it if the pick was taken.
+    const before = rows(app, "turnEnded").length;
+    await submit(app, "open a session to pick a served model");
+    await awaitDrawn(app, "the opening turn to end", () => rows(app, "turnEnded").length > before);
+    await awaitDrawn(app, "the model button", () => app.$(".topbar-model-button") !== null);
+    await app.click(".topbar-model-button");
+    await awaitDrawn(app, "the model options", () => app.$$("[data-model-option]").length > 0);
+    const current = app.$(".topbar-model")?.getAttribute("data-model") ?? null;
+    const options = app.$$("[data-model-option]");
+    const pick = options.find((el) => el.getAttribute("data-model-option") !== current);
+    if (pick === undefined) throw new Error(`the served catalog offers no model besides the selection ${String(current)}`);
+    const picked = pick.getAttribute("data-model-option");
+
+    // Act.
+    await app.clickElement(pick);
+
+    // Assert — the selection is the echoed token, and no refusal was drawn.
+    await awaitDrawn(app, "the picked model as the selection", () => app.$(".topbar-model")?.getAttribute("data-model") === picked);
+    expect(app.$$(".topbar-model .refusal")).toHaveLength(0);
   },
   TURN_TEST_MS,
 );
