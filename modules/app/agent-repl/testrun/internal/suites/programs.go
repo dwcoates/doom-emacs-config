@@ -39,26 +39,39 @@ func ProgramUnits(l Layout, needed []string, owner func(roster.Program) string) 
 		if !want[p.Name] {
 			continue
 		}
-		argv := []string{"go", "build", "-buildvcs=false"}
-		if len(p.Links) > 0 {
-			var links []string
-			for _, link := range p.Links {
-				links = append(links, "-X "+link.Var+"="+filepath.Join(l.ProgramsDir(), link.Program))
-			}
-			argv = append(argv, "-ldflags="+strings.Join(links, " "))
+		argv, dir, err := ProgramBuild(l, p)
+		if err != nil {
+			return nil, err
 		}
-		dir := filepath.Join(l.Module, p.Module)
-		// A coverage run instruments every system it spawns, so the reach of
-		// its integration and e2e tiers counts; never a fake (roster.Fake).
-		if l.Coverage && !p.Fake {
-			pkgs, err := coverPkg(l, dir)
-			if err != nil {
-				return nil, err
-			}
-			argv = append(argv, "-cover", "-coverpkg="+pkgs)
-		}
-		argv = append(argv, "-o", filepath.Join(l.ProgramsDir(), p.Name), p.Package)
 		specs = append(specs, spec(ProgramUnitID(p.Name), owner(p), dir, argv))
 	}
 	return specs, nil
+}
+
+// ProgramBuild is the command that builds program p into l's programs
+// directory, and the directory it runs in. Every build of a roster program
+// goes through it, the run's own and `testrun redundancy`'s; extra flags
+// (e.g. an -overlay) go before the output.
+func ProgramBuild(l Layout, p roster.Program, extra ...string) ([]string, string, error) {
+	argv := []string{"go", "build", "-buildvcs=false"}
+	if len(p.Links) > 0 {
+		var links []string
+		for _, link := range p.Links {
+			links = append(links, "-X "+link.Var+"="+filepath.Join(l.ProgramsDir(), link.Program))
+		}
+		argv = append(argv, "-ldflags="+strings.Join(links, " "))
+	}
+	dir := filepath.Join(l.Module, p.Module)
+	// A coverage run instruments every system it spawns, so the reach of its
+	// integration and e2e tiers counts; never a fake (roster.Fake).
+	if l.Coverage && !p.Fake {
+		pkgs, err := coverPkg(l, dir)
+		if err != nil {
+			return nil, "", err
+		}
+		argv = append(argv, "-cover", "-coverpkg="+pkgs)
+	}
+	argv = append(argv, extra...)
+	argv = append(argv, "-o", filepath.Join(l.ProgramsDir(), p.Name), p.Package)
+	return argv, dir, nil
 }
