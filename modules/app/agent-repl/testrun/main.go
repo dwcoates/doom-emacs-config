@@ -1,7 +1,9 @@
 // Command testrun runs the agent-repl test suites spread across the host's
 // cores. bin/test-all.sh is its entry point; see that script and AGENTS.md.
 //
-//	testrun run --module DIR [--suites a,b] [--record --record-out PATH]
+//	testrun run --module DIR [--suites a,b] [--no-reuse] [--record --record-out PATH]
+//	testrun plan --module DIR [--suites a,b] [--no-reuse] [--json]
+//	testrun confine --profile P --keep A,B -- argv... (a keyed unit's launcher; see internal/reuse)
 //	testrun warden --runner PID --since UNIX (started by the runner; see internal/life)
 //	testrun finish-record --module DIR --record-out PATH
 //	testrun cover-report -name N -module DIR -covdirs ROOT
@@ -25,6 +27,7 @@ import (
 	"agentrepl/testrun/internal/history"
 	"agentrepl/testrun/internal/life"
 	"agentrepl/testrun/internal/ramdisk"
+	"agentrepl/testrun/internal/reuse"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/internal/suites"
 	"agentrepl/testrun/reap"
@@ -53,6 +56,10 @@ func main() {
 		os.Exit(coverCmd(log, os.Args[2:]))
 	case "roster":
 		fmt.Println(strings.Join(roster.Names(), "\n"))
+	case "plan":
+		os.Exit(planCmd(log, os.Args[2:]))
+	case "confine":
+		os.Exit(confineCmd(log, os.Args[2:]))
 	default:
 		log.Errorf("unknown subcommand %q", os.Args[1])
 		os.Exit(2)
@@ -276,9 +283,15 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 		log.Errorf("size the run: %v", err)
 		return 1
 	}
+	reuseDeps, err := reuse.HostDeps(args.Module, self, work, log)
+	if err != nil {
+		log.Errorf("%v", err)
+		return 1
+	}
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	return cli.Run(ctx, cli.Deps{
+		Reuse: reuse.Runner{Deps: reuseDeps, Files: func() ([]string, error) { return reuse.ExecRepoFiles(reuseDeps.Repo) }},
 		Log:         log,
 		Exec:        run.OSExec{Log: log, Grace: run.KillGrace, TmpParent: root, Prefix: prefix},
 		Clock:       run.WallClock{},
@@ -329,4 +342,81 @@ func gitHead(repo string) (string, string, error) {
 		return "", "", fmt.Errorf("git rev-parse HEAD: %w", err)
 	}
 	return strings.TrimSpace(string(branch)), strings.TrimSpace(string(commit)), nil
+}
+
+// confineCmd is a keyed unit's launcher: it scrubs the environment and execs
+// the unit's command under its suite's profile. It returns only on failure.
+func confineCmd(log *run.Log, argv []string) int {
+	c, err := reuse.ParseConfine(argv)
+	if err != nil {
+		log.Errorf("%v", err)
+		return 2
+	}
+	log.Errorf("%v", reuse.Exec(c, os.Environ()))
+	return 1
+}
+
+// planCmd prints what `run` with the same arguments would run and reuse,
+// running nothing.
+func planCmd(log *run.Log, argv []string) int {
+	asJSON := false
+	var rest []string
+	for _, a := range argv {
+		if a == "--json" {
+			asJSON = true
+			continue
+		}
+		rest = append(rest, a)
+	}
+	args, err := cli.ParseArgs(rest)
+	if err != nil {
+		log.Errorf("%v", err)
+		return 2
+	}
+	self, err := os.Executable()
+	if err != nil {
+		log.Errorf("resolve the testrun binary: %v", err)
+		return 1
+	}
+	work, err := os.MkdirTemp("", "testrun-plan-")
+	if err != nil {
+		log.Errorf("create the plan's scratch directory: %v", err)
+		return 1
+	}
+	defer os.RemoveAll(work)
+	// The plan's own notes go to stderr, so --json leaves stdout one document.
+	quiet := &run.Log{Out: os.Stderr, Err: os.Stderr}
+	d, err := reuse.HostDeps(args.Module, self, work, quiet)
+	if err != nil {
+		log.Errorf("%v", err)
+		return 1
+	}
+	var selected []roster.Suite
+	for _, s := range roster.Suites {
+		if args.Selects(s.Name) {
+			selected = append(selected, s)
+		}
+	}
+	r := reuse.Runner{Deps: d, Files: func() ([]string, error) { return reuse.ExecRepoFiles(d.Repo) }}
+	verdicts, err := r.Decide(selected, args.ReuseMode())
+	if err != nil {
+		log.Errorf("%v", err)
+		return 1
+	}
+	unplaced, err := r.Unplaced(verdicts)
+	if err != nil {
+		log.Errorf("%v", err)
+		return 1
+	}
+	doc := reuse.BuildPlan(verdicts, unplaced, d.Probe() == nil)
+	if asJSON {
+		err = reuse.WritePlanJSON(os.Stdout, doc)
+	} else {
+		err = reuse.WritePlanText(os.Stdout, doc)
+	}
+	if err != nil {
+		log.Errorf("%v", err)
+		return 1
+	}
+	return 0
 }

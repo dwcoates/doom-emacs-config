@@ -11,26 +11,35 @@ import (
 
 func TestProgramUnitsAreReportedUnderTheirOwnersOrTheFirstConsumer(t *testing.T) {
 	tests := []struct {
-		name     string
-		selected []string
-		want     map[string]string
+		name    string
+		running []string
+		want    map[string]string
 	}{
-		{name: "an owner in the run takes its program", selected: nil,
+		{name: "an owner in the run takes its program", running: []string{"daemon", "store", "e2e"},
 			want: map[string]string{"program:shim-store": "store", "program:agent-repld": "daemon"}},
-		{name: "an owner outside the run hands it to the first consumer", selected: []string{"e2e"},
+		{name: "an owner outside the run hands it to the first consumer", running: []string{"e2e"},
 			want: map[string]string{"program:shim-store": "e2e", "program:agent-repld": "e2e"}},
+		{name: "an owner the run reuses hands it to the first consumer", running: []string{"store", "e2e"},
+			want: map[string]string{"program:shim-store": "store", "program:agent-repld": "e2e"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Arrange: e2e runs both; store runs its own.
-			selected := []roster.Suite{{Name: "store"}, {Name: "e2e"}}
-			built := []suites.Units{{Programs: []string{"shim-store"}}, {Programs: []string{"agent-repld", "shim-store"}}}
-			if tt.selected != nil {
-				selected, built = selected[1:], built[1:]
+			// Arrange: e2e runs both programs; store runs its own; daemon runs
+			// none in this fixture, so only its ownership is at stake.
+			units := map[string]suites.Units{
+				"daemon": {},
+				"store":  {Programs: []string{"shim-store"}},
+				"e2e":    {Programs: []string{"agent-repld", "shim-store"}},
+			}
+			var selected []roster.Suite
+			var built []suites.Units
+			for _, name := range tt.running {
+				selected = append(selected, roster.Suite{Name: name})
+				built = append(built, units[name])
 			}
 
 			// Act.
-			u, err := programUnits(suites.Layout{Module: "/m", Work: "/w"}, Args{Selected: tt.selected}, selected, built, make([]error, len(selected)))
+			u, err := programUnits(suites.Layout{Module: "/m", Work: "/w"}, selected, built, make([]error, len(selected)))
 
 			// Assert.
 			if err != nil {
@@ -53,7 +62,7 @@ func TestProgramUnitsSkipASuiteThatCouldNotBePlanned(t *testing.T) {
 	built := []suites.Units{{Programs: []string{"shim-store"}}}
 
 	// Act.
-	u, err := programUnits(suites.Layout{}, Args{}, selected, built, []error{errors.New("no plan")})
+	u, err := programUnits(suites.Layout{}, selected, built, []error{errors.New("no plan")})
 
 	// Assert.
 	if err != nil || len(u.Atomic) != 0 {

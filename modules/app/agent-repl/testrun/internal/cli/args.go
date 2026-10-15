@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"agentrepl/testrun/internal/reuse"
 	"agentrepl/testrun/roster"
 )
 
@@ -28,10 +29,29 @@ type Args struct {
 	Coverage bool
 	// Selected is the --suites narrowing; EMPTY MEANS EVERY SUITE.
 	Selected []string
+	// NoReuse (--no-reuse) runs every selected suite even when an earlier
+	// run passed its exact inputs (agentrepl/testrun/internal/reuse).
+	NoReuse bool
+	// Targeted marks a run narrowed below whole suites (a test-name filter):
+	// it neither reuses nor records a pass, because a pass of some of a
+	// suite's tests says nothing about the rest.
+	Targeted bool
+}
+
+// ReuseMode is how the run treats pass records. A --record run measures and a
+// --coverage run instruments every suite it selects, so neither may skip one.
+func (a Args) ReuseMode() reuse.Mode {
+	switch {
+	case a.Targeted:
+		return reuse.Targeted
+	case a.NoReuse, a.Record, a.Coverage:
+		return reuse.NoReuse
+	}
+	return reuse.Reusing
 }
 
 // ParseArgs reads `--module DIR [--record --record-out PATH] [--coverage]
-// [--suites a,b]`. An unknown suite is an error, never a silently empty run:
+// [--no-reuse] [--suites a,b]`. An unknown suite is an error, never a silently empty run:
 // a caller that misspells a suite must not be told it passed.
 func ParseArgs(argv []string) (Args, error) {
 	var a Args
@@ -48,6 +68,8 @@ func ParseArgs(argv []string) (Args, error) {
 			a.RecordOut = argv[i]
 		case arg == "--coverage":
 			a.Coverage = true
+		case arg == "--no-reuse":
+			a.NoReuse = true
 		case arg == "--module":
 			if i+1 >= len(argv) {
 				return Args{}, errors.New("--module needs a directory")
@@ -71,7 +93,7 @@ func ParseArgs(argv []string) (Args, error) {
 			}
 			a.Selected = append(a.Selected, sel...)
 		default:
-			return Args{}, fmt.Errorf("unknown argument '%s', expected --record, --record-out, --coverage, or --suites <list>", arg)
+			return Args{}, fmt.Errorf("unknown argument '%s', expected --record, --record-out, --coverage, --no-reuse, or --suites <list>", arg)
 		}
 	}
 	if a.Module == "" {
