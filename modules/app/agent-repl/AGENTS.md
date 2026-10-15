@@ -259,6 +259,51 @@ dependency chain first. Parallelism belongs to this scheduler:
 ordinary and merge-gate runs omit them. `--record` is reserved for the
 canonical post-merge timing run on master.
 
+### A run reuses an earlier pass of a suite's exact inputs (owner ruling, 2026-10-14)
+
+A system's unit and integration suites run every other system as a mock, so
+what they can observe is exactly what they read. Every run (`bin/test-all.sh`,
+the merge gate, a development run) therefore SKIPS a keyed suite whose INPUT
+KEY already has a green record, and says so:
+`<suite>: reused a green run (inputs <key>, passed <when> on <branch> <commit>)`.
+Code: `testrun/internal/reuse`; the declarations: `testrun/roster` (`Suite.Reuse`).
+
+- **The key is content, not history.** It hashes every file the suite reads
+  (its Go build graph from `go list -deps -test`, every directory a `./...`
+  pattern walks, the programs its tests run, the runner's own code, and the
+  `Reuse.Inputs` its tests read as data), its roster entry, its toolchain
+  (go, node, npm) and its environment. The same bytes key the same in any
+  worktree, on any branch, in any queue order.
+- **The input set is ENFORCED, not trusted.** Every unit of a keyed suite runs
+  under `testrun confine`: a seatbelt profile that refuses every file read
+  under every checkout of the repository except the suite's input set, in the
+  unit's whole process tree, and an environment scrubbed to what the key
+  covers. A test that reads an undeclared file fails with "Operation not
+  permitted"; the fix is to declare the read in the suite's `Reuse.Inputs`
+  (or move the test that reads far beyond its system), never to widen the
+  profile. A run that is itself sandboxed cannot confine, so it reuses and
+  records nothing, and says so.
+- **A record is written only for a whole green suite on unmoved inputs.** The
+  suite is re-keyed after its run; if anything moved (an edit mid-run, a test
+  writing into its inputs) or a `node_modules` it read was not installed from
+  its lock, nothing is recorded and the run says why. A record from a dirty
+  checkout says "with uncommitted changes": the commit does not hold the bytes.
+- **Which suites are keyed.** `daemon`, `sidecar`, `store`, `lock` and
+  `logging`. The end-to-end suites ALWAYS run, and so do the shell harnesses,
+  `protohelpers` (its scans walk the whole module) and `testrun` (its tests
+  start real sandboxes, which a confined test cannot).
+- **`--no-reuse` runs everything** and still records. `--record` and
+  `--coverage` imply it. A targeted run, narrowed below whole suites (a
+  test-name filter), neither reuses nor records.
+- **Every file is placed.** Each file of the checkout is in a keyed suite's
+  input set, in `roster.AlwaysRunRegions`, or in `roster.ReadByNoSuite`; an
+  unplaced file fails the run (`placement: <file> is read by no suite and
+  listed nowhere`) without stopping reuse, because no keyed suite can read it.
+- **`testrun plan [--json] [--suites a,b] [--no-reuse]`** prints what a run
+  would run and reuse, and why, without running anything. The records live in
+  `~/.cache/agent-repl/test-passes/<suite>/<key>.json` (`AGENT_REPL_TEST_PASSES`
+  overrides it).
+
 OVERLAPPING RUNS SHARE THE HOST BY PRIORITY, AND RATION ONLY MEMORY (owner
 ruling, 2026-10-14, the hybrid):
 
@@ -1039,6 +1084,11 @@ like an improvement still needs that conversation. Code:
 `daemon/internal/merge/suiteselect.go`, `gate.go`, `failingtests.go`,
 `process.go`, `chain.go`, `queue.go`.
 
+- **A selected suite whose exact inputs passed before is reused, not run**
+  ("A run reuses an earlier pass of a suite's exact inputs"): its row reads
+  reused and names the run that passed it, and it draws no footer edge. Only
+  the keyed unit and integration suites are ever reused; the end-to-end suites
+  always run.
 - **Runs go to completion past failures.** The runner keeps going after a suite
   fails, every selected suite reports, and the whole run is archived under
   `<state>/merge-logs/<lease>-tests-<round>.log`. There is no flake re-run.
