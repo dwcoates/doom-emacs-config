@@ -186,7 +186,11 @@ var Suites = []Suite{
 	{Name: "install-harness", Kind: Script, Path: "/.claude/test-install.sh"},
 	{Name: "workspace-cli-harness", Kind: Script, Path: "/bin/test-agent_repl_workspace.sh"},
 	{Name: "workspace-open-cli-harness", Kind: Script, Path: "/bin/test-agent_repl_workspace_open.sh"},
-	{Name: "ert", Kind: ERT, Path: "lisp"},
+	{Name: "ert", Kind: ERT, Path: "lisp", Reuse: &Reuse{Inputs: []string{
+		// The Doom module files and the data the Emacs layer reads.
+		"config.el", "doctor.el", "packages.el", "proto/vocab/", "images/", "skills/", "hooks/",
+		"logging-contract.md", "metaprompt.md",
+	}}},
 	{Name: "testrun", Kind: GoModule, Path: "testrun"},
 	// THE INTEGRATION SUITES RIDE THEIR SYSTEM'S SUITE, so a full run and
 	// `--suites daemon` (or webapp, shim) run unit and integration together,
@@ -231,12 +235,27 @@ var Suites = []Suite{
 	// every Go reader goes through the proto helpers. Their own module, so no
 	// system's reuse key covers the other systems' trees; they always run.
 	{Name: "repo-scans", Kind: GoModule, Path: "daemon/reposcans"},
-	{Name: "webapp", Kind: Vitest, Path: "webapp", IntegrationConfig: "vitest.integration.config.ts"},
+	{Name: "webapp", Kind: Vitest, Path: "webapp", IntegrationConfig: "vitest.integration.config.ts",
+		Reuse: &Reuse{Inputs: []string{
+			// What the webapp imports from outside its package, the glyph
+			// pictures its tests compare, and the scripts its npm hooks run.
+			"proto/gen/ts/", "proto/ts/", "proto/vocab/", "agent-shim/logging/ts/", "images/",
+			"bin/ensure-deps.sh", "bin/lib-node-store.sh", "bin/background.sh", "bin/require-background.mjs",
+		}, Generated: []string{"webapp/node_modules/", "webapp/.vite-cache/"}}},
 	// The shim's integration files spawn its bundle and its lock helper
 	// (dist/main.js, dist/shim-lock): `pretest:integration` builds both, as
 	// `npm run test:integration` always has.
 	{Name: "shim", Kind: Vitest, Path: "agent-shim/claude/shim", IntegrationConfig: "vitest.integration.config.ts",
-		IntegrationBuild: []string{"npm", "run", "pretest:integration"}},
+		IntegrationBuild: []string{"npm", "run", "pretest:integration"},
+		Reuse: &Reuse{Inputs: []string{
+			// What the shim imports from outside its package, the lock helper
+			// its integration build compiles, the metaprompt its suite reads
+			// back, and the scripts its npm hooks run.
+			"proto/gen/ts/", "proto/ts/", "proto/vocab/", "agent-shim/logging/", "agent-shim/shim-lock/", "metaprompt.md", "testdata/",
+			"bin/ensure-deps.sh", "bin/lib-node-store.sh", "bin/background.sh", "bin/require-background.mjs",
+			// The capture script's tests run the fake git, which builds its model.
+			"bin/fake-git.sh", "bin/fake-git.go",
+		}, Generated: []string{"agent-shim/claude/shim/node_modules/", "agent-shim/claude/shim/dist/"}}},
 	{Name: "proto", Kind: Script, Path: "bin/report-nonlisp-coverage.sh", Args: []string{"proto"}},
 	{Name: "logging-density", Kind: Script, Path: "bin/report-logging-density.sh"},
 	{Name: "e2e", Kind: E2E, Path: "e2e", TestParallel: map[string]int{".": 8}, VetTags: []string{"perf", "realtest"},
