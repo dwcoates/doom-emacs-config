@@ -299,6 +299,8 @@ type fakeVerbs struct {
 
 	createTask    wsm.Task
 	createTaskErr error
+	// taskChanges records every UpdateTask change the handler resolved.
+	taskChanges []wsm.TaskChange
 
 	selectErr error
 	// selectEntered, when set, is closed as Select begins; Select then waits
@@ -549,6 +551,11 @@ func (f *fakeVerbs) SetHidden(_ context.Context, ws ids.WorkspaceID, hidden bool
 func (f *fakeVerbs) RegisterRepository(_ context.Context, path string) (workspace.RegisteredRepository, error) {
 	f.registeredPaths = append(f.registeredPaths, path)
 	return workspace.RegisteredRepository{}, nil
+}
+
+func (f *fakeVerbs) UpdateTask(_ context.Context, _ ids.TaskID, change wsm.TaskChange) error {
+	f.taskChanges = append(f.taskChanges, change)
+	return nil
 }
 
 func (f *fakeVerbs) MarkViewed(_ context.Context, ws ids.WorkspaceID) error {

@@ -69,6 +69,58 @@ func TestUpdateTaskRequiresAChangeArm(t *testing.T) {
 	}
 }
 
+// TestUpdateTaskResolvesEachChangeArm pins how each arm of the change oneof
+// reaches the verb: a retitle, a completion, and a reopening.
+func TestUpdateTaskResolvesEachChangeArm(t *testing.T) {
+	tests := []struct {
+		name      string
+		req       *agentreplv1.UpdateTaskRequest
+		wantTitle string
+		wantDone  *bool
+	}{
+		{
+			name:      "set_title",
+			req:       &agentreplv1.UpdateTaskRequest{Change: &agentreplv1.UpdateTaskRequest_SetTitle{SetTitle: &agentreplv1.UpdateTaskSetTitle{Title: "renamed"}}},
+			wantTitle: "renamed",
+		},
+		{
+			name:     "set_done",
+			req:      &agentreplv1.UpdateTaskRequest{Change: &agentreplv1.UpdateTaskRequest_SetDone{SetDone: &agentreplv1.UpdateTaskSetDone{}}},
+			wantDone: func() *bool { b := true; return &b }(),
+		},
+		{
+			name:     "set_open",
+			req:      &agentreplv1.UpdateTaskRequest{Change: &agentreplv1.UpdateTaskRequest_SetOpen{SetOpen: &agentreplv1.UpdateTaskSetOpen{}}},
+			wantDone: func() *bool { b := false; return &b }(),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			tt.req.Task = &agentreplv1.TaskRef{Id: "task-1"}
+
+			// Act.
+			resp, err := h.Client.UpdateTask(context.Background(), connect.NewRequest(tt.req))
+
+			// Assert.
+			if err != nil || resp.Msg.GetSuccess() == nil {
+				t.Fatalf("UpdateTask = %v, %v; want success", resp, err)
+			}
+			if len(h.Verbs.taskChanges) != 1 {
+				t.Fatalf("changes = %+v, want exactly one", h.Verbs.taskChanges)
+			}
+			got := h.Verbs.taskChanges[0]
+			if (got.Title == nil) != (tt.wantTitle == "") || (got.Title != nil && *got.Title != tt.wantTitle) {
+				t.Fatalf("title = %v, want %q", got.Title, tt.wantTitle)
+			}
+			if (got.Done == nil) != (tt.wantDone == nil) || (got.Done != nil && *got.Done != *tt.wantDone) {
+				t.Fatalf("done = %v, want %v", got.Done, tt.wantDone)
+			}
+		})
+	}
+}
+
 // TestAssignWorkspaceTaskAcceptsAnUnsetTaskAsUnassign pins that the optional
 // ref's ABSENCE is the unassign spelling.
 func TestAssignWorkspaceTaskAcceptsAnUnsetTaskAsUnassign(t *testing.T) {

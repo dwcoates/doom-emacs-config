@@ -114,6 +114,24 @@ func TestUpdateTaskCompletesATask(t *testing.T) {
 	}
 }
 
+func TestUpdateTaskReopensADoneTask(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	arrangeTask(f, "task-1", "original", true)
+	open := false
+
+	// Act.
+	if err := f.verbs.UpdateTask(context.Background(), "task-1", wsm.TaskChange{Done: &open}); err != nil {
+		t.Fatalf("UpdateTask: %v", err)
+	}
+
+	// Assert.
+	change := f.db.taskChanges["task-1"]
+	if change.Done == nil || *change.Done {
+		t.Fatalf("recorded change = %+v, want the reopening", change)
+	}
+}
+
 func TestAssignTaskRecordsTheAssignment(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
