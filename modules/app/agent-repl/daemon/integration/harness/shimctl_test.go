@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"net"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -252,5 +254,44 @@ func TestASessionPushIsRetriedUntilASessionStreamReceivesIt(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestAgentFrameCommand(t *testing.T) {
+	tests := []struct {
+		name  string
+		agent string
+		at    EntryStamp
+		want  controlCommand
+	}{
+		{name: "an unstamped push names only the agent and the frame", agent: "main",
+			want: controlCommand{Op: "push_agent_frame", Agent: "main", Payload: "p"}},
+		{name: "every stamp rides at once", agent: "main", at: EntryStamp{Pointer: "7", Turn: "turn-1", PlaceMs: 1000},
+			want: controlCommand{Op: "push_agent_frame", Agent: "main", Pointer: "7", Turn: "turn-1", PlaceMs: 1000, Payload: "p"}},
+		{name: "an empty agent leaves the frame's own agent_id to the fake", at: EntryStamp{Turn: "turn-1"},
+			want: controlCommand{Op: "push_agent_frame", Turn: "turn-1", Payload: "p"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := agentFrameCommand(tt.agent, tt.at, "p")
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("agentFrameCommand = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEveryAgentFramePushSendsAgentFrameCommand(t *testing.T) {
+	// A push variant that builds its own push_agent_frame command can drop a
+	// stamp the others carry; only agentFrameCommand may spell the op.
+	src, err := os.ReadFile("shimctl.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(src), `"push_agent_frame"`); n != 1 {
+		t.Fatalf("shimctl.go spells \"push_agent_frame\" %d times, want once, in agentFrameCommand", n)
 	}
 }
