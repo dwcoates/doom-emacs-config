@@ -12,7 +12,7 @@ the log records that show it, so the failures can be fixed at their source.
 | 1 | 2026-10-14 23:29 | `test-tier-rule` | `test-tier-rule-land` | LANDED (`3e33b5963d`); an error record on every rebase while waiting, see entry 1 |
 | 2 | 2026-10-14 23:41 | `test-fixture-table-rules` | `test-fixture-table-rules-land` | FAILED: the merge workspace could not be forked |
 | 3 | 2026-10-15 | `cross-product-additions` (from `test-cross-product-audit-psv`, tip `44eee96334`) | `xprod-additions-merge` | LANDED (`3841cbba64`), deployed; a first request was refused `name_taken`, see entry 3 |
-| 4 | 2026-10-15 | `test-tier-audit-integration-step1` (tip `3e73dfd165`, 41 additive commits) | `tier-step1-units` | requested, pending |
+| 4 | 2026-10-15 | `test-tier-audit-integration-step1` (tip `3e73dfd165`, 41 additive commits) | `tier-step1-units` | LANDED (`98f4bee425`), deployed |
 | 5 | 2026-10-15 | `test-fixture-table-rules-2` (entry 2's two rule commits, rebuilt on master `3e33b5963d`) | `fixture-rules-retry` | requested, pending; a retry of entry 2 from a turn whose prompt is a normal transcript record |
 | 6 | 2026-10-15 | `tier-audit-e2e-step-a` (tip `75e781c362`, e2e audit report plus lower-tier tests) | `tier-audit-e2e-step-a-merge` | requested, pending |
 
