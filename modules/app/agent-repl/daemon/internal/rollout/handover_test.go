@@ -1764,3 +1764,28 @@ func TestARestartWritesNoHandOverRecordToTheWorkspacesLog(t *testing.T) {
 		t.Fatalf("hand-over records = %+v, want none for a restart", got)
 	}
 }
+
+func TestRendezvousClosed(t *testing.T) {
+	closed := make(chan struct{})
+	close(closed)
+	tests := []struct {
+		name string
+		done <-chan struct{}
+		want bool
+	}{
+		{name: "a closed rendezvous", done: closed, want: true},
+		{name: "an open rendezvous", done: make(chan struct{}), want: false},
+		{name: "no rendezvous", done: nil, want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := rendezvousClosed(tc.done)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("rendezvousClosed = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

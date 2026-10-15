@@ -894,6 +894,15 @@ func (c *controller) awaitAdoption(ctx context.Context, ws ids.WorkspaceID, leas
 				c.log.Debug(opAdoption, "the successor claimed the workspace; the window stays open until it drains the handover hold", fields)
 			}
 		case <-expired:
+			// A RENDEZVOUS THAT CLOSED BEFORE THE WINDOW FIRED IS A LANDING.
+			// When both are ready at once, select picks between them at random,
+			// so the expiry could take back a workspace its successor had
+			// already adopted. The closed rendezvous is read first, so a landed
+			// adoption always wins.
+			if rendezvousClosed(done) && c.carryConsumed(ws, move, fields) {
+				c.log.Debug(opAdoption, "the rendezvous completed as its window fired; the adoption landed", fields)
+				return adoptionLanded
+			}
 			waiting = false
 		}
 	}
@@ -998,6 +1007,20 @@ func (c *controller) fallBackToFreeness(ctx context.Context, ws wsm.Workspace, p
 					"cadence":  c.deps.HoldoutWarnEvery.String(),
 				}))
 		}
+	}
+}
+
+// rendezvousClosed reports, without waiting, whether done has closed. A nil
+// done (no rendezvous, or one already read) is not closed.
+func rendezvousClosed(done <-chan struct{}) bool {
+	if done == nil {
+		return false
+	}
+	select {
+	case <-done:
+		return true
+	default:
+		return false
 	}
 }
 
