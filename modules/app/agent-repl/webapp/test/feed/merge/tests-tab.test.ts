@@ -32,10 +32,16 @@ import { oneofArms } from "../../arms.js";
 import STYLESHEET from "../../../src/styles.css?raw";
 import { rulesOf } from "../../stylesheet.js";
 
-/** A suite in STATE, carrying OUTPUT; a running one has reported nothing yet. */
+/** The source text a reused suite names in these tests. */
+const REUSED_SOURCE = "passed 2026-10-14 23:37 on master 0123456789";
+
+/**
+ * A suite in STATE, carrying OUTPUT; a running one has reported nothing yet,
+ * and a reused one names REUSED_SOURCE.
+ */
 function suite(
   name: string,
-  state: "running" | "passed" | "failed",
+  state: "running" | "passed" | "failed" | "reused",
   output: readonly { text: string; paintClass: string }[] = [],
 ): FeedMergeTestSuite {
   return create(FeedMergeTestSuiteSchema, {
@@ -43,7 +49,9 @@ function suite(
     state:
       state === "running"
         ? { case: "running", value: { soFar: { case: "unreported", value: {} } } }
-        : { case: state, value: {} },
+        : state === "reused"
+          ? { case: "reused", value: { source: { text: REUSED_SOURCE } } }
+          : { case: state, value: {} },
     output: output.map((s) => ({ text: s.text, paintClass: s.paintClass })),
   });
 }
@@ -183,6 +191,7 @@ describe("drawFeedMergeTestSuite: every state arm", () => {
     ["running", "●"],
     ["passed", "✓"],
     ["failed", "✗"],
+    ["reused", "✓"],
   ] as const)("draws %s with its own glyph", (state, glyph) => {
     const el = drawFeedMergeTestSuite(suite("unit", state));
     expect(el.getAttribute("data-suite-state")).toBe(state);
@@ -193,6 +202,7 @@ describe("drawFeedMergeTestSuite: every state arm", () => {
     expect([...oneofArms(FeedMergeTestSuiteSchema, "state")].sort()).toEqual([
       "failed",
       "passed",
+      "reused",
       "running",
     ]);
   });
@@ -567,5 +577,45 @@ describe("the stylesheet's run tally", () => {
   it("draws the tally at the run strip's right end", () => {
     const rules = rulesOf(STYLESHEET).filter((rule) => rule.selectors.includes(".merge-strip > .merge-run-tally"));
     expect(rules.map((rule) => rule.declarations).join(";")).toContain("margin-left: auto");
+  });
+});
+
+describe("a reused suite names the earlier run that passed its inputs", () => {
+  it("draws the run's source after the suite's name", () => {
+    const head = drawFeedMergeTestSuite(suite("daemon", "reused")).querySelector(".merge-suite-head");
+    expect([...(head?.children ?? [])].map((e) => e.className)).toEqual([
+      "merge-suite-glyph is-succeeded",
+      "merge-suite-name",
+      "merge-suite-reused",
+    ]);
+    expect(head?.querySelector(".merge-suite-reused")?.textContent).toBe(`reused: ${REUSED_SOURCE}`);
+  });
+
+  it("draws no source for a suite that ran", () => {
+    expect(drawFeedMergeTestSuite(suite("daemon", "passed")).querySelector(".merge-suite-reused")).toBeNull();
+  });
+
+  it("drops the source when a push says the suite runs after all", () => {
+    const host = drawTestSuites([suite("daemon", "reused")]);
+
+    updateTestSuites(host, [suite("daemon", "running")]);
+
+    expect(host.querySelector(".merge-suite-reused")).toBeNull();
+    expect(host.querySelector(".merge-suite")?.getAttribute("data-suite-state")).toBe("running");
+  });
+
+  it("lists the reused after the passed", () => {
+    const ordered = suitesInListOrder([suite("lock", "reused"), suite("ert", "passed"), suite("e2e", "failed")]);
+    expect(ordered.map((s) => s.name)).toEqual(["e2e", "ert", "lock"]);
+  });
+
+  it("refuses a reused suite that names no run", () => {
+    const bare = create(FeedMergeTestSuiteSchema, { name: "daemon", state: { case: "reused", value: {} } });
+    expect(() => drawFeedMergeTestSuite(bare)).toThrow(MalformedView);
+  });
+
+  it("styles the source quieter than the name", () => {
+    const rules = rulesOf(STYLESHEET).filter((rule) => rule.selectors.includes(".merge-suite-reused"));
+    expect(rules.map((rule) => rule.declarations)).toEqual([expect.stringContaining("var(--muted)")]);
   });
 });
