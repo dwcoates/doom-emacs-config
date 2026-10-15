@@ -42,6 +42,7 @@ import {
   row,
 } from "./harness.js";
 import { frameQueue, type FrameQueue } from "../frame-queue.js";
+import type { FailureSink } from "../../src/failure/sink.js";
 
 /** A storage a test can inspect, and one that throws on every access. */
 function memoryStorage(seed: Record<string, string> = {}): Storage {
@@ -81,7 +82,11 @@ function throwingStorage(): Storage {
   };
 }
 
-function ctxFor(rosters = [roster()], impl: Partial<ServiceImpl<typeof AgentRepl>> = {}): AppContext {
+function ctxFor(
+  rosters = [roster()],
+  impl: Partial<ServiceImpl<typeof AgentRepl>> = {},
+  failures: FailureSink = SINK,
+): AppContext {
   const transport = createRouterTransport(({ service }) => {
     service(AgentRepl, {
       updateSidebarView: () => create(UpdateSidebarViewResponseSchema, { result: { case: "success", value: {} } }),
@@ -93,7 +98,7 @@ function ctxFor(rosters = [roster()], impl: Partial<ServiceImpl<typeof AgentRepl
     client: createAgentReplClient(transport),
     workspace: WORKSPACE,
     ticker: fakeTicker(NOW),
-    failures: SINK,
+    failures,
     composerEnabled: false,
   });
 }
@@ -1214,3 +1219,64 @@ describe("mounting the rail: one draw per frame", () => {
     expect([draws(), host.querySelector("[data-roster-row]")]).toEqual([0, null]);
   });
 });
+
+describe("mounting the rail: a roster its frame cannot draw", () => {
+  /** Mount on PUSHES, its failures recorded. */
+  function mountRecording(pushes: WorkspaceRoster[]): { host: HTMLElement; reports: string[] } {
+    const host = document.createElement("nav");
+    const reports: string[] = [];
+    const failures: FailureSink = { report: (kind) => void reports.push(kind.kind.case ?? ""), retract: () => undefined };
+    mountSidebar(host, ctxFor(pushes, {}, failures), { storage: null, timers: fakeTimers() });
+    return { host, reports };
+  }
+
+  /** A roster whose repository section names no repository. */
+  const malformed = (): WorkspaceRoster => {
+    const bad = roster({ repos: [repoSection({ id: "repo-1" })] });
+    const section = bad.repository?.sections[0];
+    if (section === undefined) throw new Error("the fixture drew no section");
+    section.key = undefined;
+    return bad;
+  };
+
+  it("files the malformed roster as an undecodable frame", async () => {
+    // Act
+    const { reports } = mountRecording([malformed()]);
+    await settle();
+
+    // Assert
+    expect(reports).toEqual(["frameUndecodable"]);
+  });
+
+  it("logs the malformed roster at error with the path that refused", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+
+    // Act
+    mountRecording([malformed()]);
+    await settle();
+    capture.logger.flush();
+    await settle();
+
+    // Assert
+    const record = capture.sent.find((r) => r.operation === "sidebar.roster-draw-undecodable");
+    expect([record?.level.case, record?.context]).toEqual([
+      "error",
+      expect.objectContaining({ path: "WorkspaceRoster.repository.sections[0].key" }),
+    ]);
+  });
+
+  it("draws the next roster after one it could not draw", async () => {
+    // Arrange
+    const pushes = [malformed(), roster({ repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-1" })] })] })];
+    const host = document.createElement("nav");
+    mountSidebar(host, ctxFor(pushes), { storage: null, timers: fakeTimers(), frame: (callback) => callback() });
+
+    // Act
+    await settle();
+
+    // Assert
+    expect(host.querySelector("[data-roster-row='ws-1']")).not.toBeNull();
+  });
+});
+

@@ -34,6 +34,7 @@ import { createSidebarView } from "./view.js";
 import type { RailContext } from "./context.js";
 import { disposeWorkspaceRoster, drawWorkspaceRoster } from "./roster.js";
 import { nextFrame } from "../frame.js";
+import { guardMalformedNow } from "../rpc/guard.js";
 import { placeOpenRowDetails } from "./row.js";
 import { installBandFit } from "./band-fit.js";
 import { applySearch, createRailSearch, type RailSearch } from "./search.js";
@@ -295,7 +296,11 @@ function mountSidebarIn(
       const newest = waiting;
       waiting = null;
       if (disposed || newest === null) return;
-      timeRosterDraw(body, placement.case, (mark) => drawRosterNow(newest, mark), drawTiming);
+      // The push's stream returned before this frame, so a roster the draw
+      // finds malformed is filed here, as the stream would have filed it.
+      guardMalformedNow(ctx, "sidebar.roster-draw", () =>
+        timeRosterDraw(body, placement.case, (mark) => drawRosterNow(newest, mark), drawTiming),
+      );
     });
   }
 
