@@ -9,16 +9,17 @@ the log records that show it, so the failures can be fixed at their source.
 
 | # | Requested (local time) | Branch | Merge workspace | Outcome |
 |---|---|---|---|---|
-| 1 | 2026-10-14 23:29 | `test-tier-rule` | `test-tier-rule-land` | waiting in line (not failed); an error record on every rebase, see entry 1 |
+| 1 | 2026-10-14 23:29 | `test-tier-rule` | `test-tier-rule-land` | LANDED (`3e33b5963d`); an error record on every rebase while waiting, see entry 1 |
 | 2 | 2026-10-14 23:41 | `test-fixture-table-rules` | `test-fixture-table-rules-land` | FAILED: the merge workspace could not be forked |
 | 3 | 2026-10-15 | `cross-product-additions` (from `test-cross-product-audit-psv`, tip `44eee96334`) | `xprod-additions-merge` | requested, pending; a first request was refused `name_taken`, see entry 3 |
 | 4 | 2026-10-15 | `test-tier-audit-integration-step1` (tip `3e73dfd165`, 41 additive commits) | `tier-step1-units` | requested, pending |
 
-## 1. `test-tier-rule` (waiting in line)
+## 1. `test-tier-rule` (landed)
 
 - Carries `d5637e2f78` "a test lives at the cheapest tier that can prove it".
 - Handed to its merge workspace at 23:29:59 (`daemon.merge.detached`), then put in line.
-- Not a failure so far: it rebased onto each new master tip at 23:36, 23:41 and 23:51 and kept its place.
+- Landed as `3e33b5963d` (merge of `test-tier-rule-land`, rule commit `4a5aa3ee02`) after waiting in line.
+- While waiting it rebased onto each new master tip at 23:36, 23:41 and 23:51 and kept its place.
 - Anomaly worth fixing at the source: every one of those rebases also logged an ERROR,
   `daemon.merge.publish` "a merge in line or in flight was published with no queue instant"
   (state `merging`), at 23:36:45, 23:36:46, 23:41:47, 23:51:56 and 23:51:57.
@@ -42,6 +43,8 @@ the log records that show it, so the failures can be fixed at their source.
   - the daemon names the fork point by a record that is actually in the transcript.
   - Either way, a prompt delivered mid-turn must never make a later fork impossible. Any workspace whose user typed during a turn hits this until it is fixed.
 - The work is NOT landed. Nothing was retried or landed another way.
+- Second defect found 2026-10-15: the failed create left an orphan. The daemon logged `daemon.workspace.create` ERROR "the session did not come up" at 23:41:15 and dropped the merge, yet a session named `test-fixture-table-rules-land-8b` is running idle after the later restart, with no merge attached to it.
+  - A create that fails should leave no workspace behind, or the restart should not bring up a workspace whose merge was dropped.
 
 ## 3. `cross-product-additions` (requested, pending)
 
