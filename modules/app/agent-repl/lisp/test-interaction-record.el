@@ -305,18 +305,15 @@ EVENTS is a list of recorder-shaped plists (`:time', `:keys',
 ;; `agent-repl--interaction-record-capture' reading the genuine
 ;; `this-command' and `this-command-keys-vector', not from a simulation.
 ;;
-;; `sleep-for' here is the TEST SUBJECT, not a synchronization device:
-;; the assertion is about whether the recorder's timestamps reproduce
-;; deliberately introduced inter-command gaps, so real elapsed time must
-;; actually pass between the driven commands.  The repo's no-sleep rule
-;; is about waiting for another agent's work to land; nothing is being
-;; waited on here.
-;;
-;; Tolerance is max(5% of the interval, 30ms).  The percentage is the
-;; user-specified fidelity bar; the absolute floor exists because a batch
-;; Emacs's timer and `sleep-for' resolution jitters by milliseconds
-;; regardless of the interval, so 5% of a 300ms gap (15ms) is inside the
-;; scheduler's own noise.
+;; THE CLOCK IS THE TEST'S. The recorder stamps each command with
+;; `float-time' as `pre-command-hook' runs, and an offset is the difference
+;; between two stamps, so the fidelity under test is that the recorded
+;; intervals ARE the clock's intervals between the commands.  The test
+;; advances a stubbed clock by binary-exact gaps between the driven
+;; commands and asserts the offsets equal them exactly, which is stricter
+;; than the user's 5% fidelity bar it replaces.  It used to sleep for real
+;; and allow max(5%, 30ms): that measured the host's scheduler, and a
+;; loaded full run overshot a 300ms sleep by 40ms (2026-10-15).
 
 (defvar agent-repl-test--interaction-e2e-log nil
   "Commands executed by the end-to-end timing test, for identity assertions.")
@@ -336,48 +333,49 @@ EVENTS is a list of recorder-shaped plists (`:time', `:keys',
   (interactive)
   (push 'gamma agent-repl-test--interaction-e2e-log))
 
-(defun agent-repl-test--interaction-e2e-tolerance (expected)
-  "Return the allowed absolute error for an EXPECTED interval in seconds."
-  (max (* 0.05 expected) 0.030))
-
 (ert-deftest agent-repl-test-interaction-record-e2e-timing-fidelity ()
-  "Recorded intervals match deliberately driven delays within tolerance."
+  "Recorded intervals are the clock's intervals between commands, exactly.
+The commands run through the real command loop, recording and the saved
+file; only the clock is the test's.  It advances by binary-exact gaps
+between the commands, so the offsets read back equal them exactly: real
+sleeps measured the host's scheduler under load (a 40ms overshoot of a
+30ms tolerance in a loaded full run), not the recorder."
   (agent-repl-test--with-interaction-recorder
     (let ((map (make-sparse-keymap))
           (agent-repl-test--interaction-e2e-log nil)
-          (gap-a-b 0.3)
+          (now 1000.0)
+          (gap-a-b 0.25)
           (gap-b-c 0.5)
           (path nil))
       (define-key map (kbd "C-c C-v a") #'agent-repl-test--interaction-e2e-alpha)
       (define-key map (kbd "C-c C-v b") #'agent-repl-test--interaction-e2e-beta)
       (define-key map (kbd "C-c C-v g") #'agent-repl-test--interaction-e2e-gamma)
       (unwind-protect
-          (let ((overriding-terminal-local-map map))
-            ;; Arrange: real recording, driven through the real command loop.
-            (agent-repl-interaction-record-mode 1)
-            ;; Act.
-            (execute-kbd-macro (kbd "C-c C-v a"))
-            (sleep-for gap-a-b)
-            (execute-kbd-macro (kbd "C-c C-v b"))
-            (sleep-for gap-b-c)
-            (execute-kbd-macro (kbd "C-c C-v g"))
-            (agent-repl-interaction-record-mode -1)
-            (setq path (agent-repl-interaction-record-save
-                        (make-temp-file "agent-repl-test-e2e-" nil ".el")))
-            ;; Assert: identities and order first, then interval fidelity.
-            (let* ((events (plist-get (agent-repl--interaction-replay-load path) :events))
-                   (commands (mapcar (lambda (e) (plist-get e :command)) events))
-                   (offsets (mapcar (lambda (e) (plist-get e :offset)) events)))
-              (should (equal commands
-                             '(agent-repl-test--interaction-e2e-alpha
-                               agent-repl-test--interaction-e2e-beta
-                               agent-repl-test--interaction-e2e-gamma)))
-              (should (equal (reverse agent-repl-test--interaction-e2e-log)
-                             '(alpha beta gamma)))
-              (should (< (abs (- (nth 1 offsets) gap-a-b))
-                         (agent-repl-test--interaction-e2e-tolerance gap-a-b)))
-              (should (< (abs (- (- (nth 2 offsets) (nth 1 offsets)) gap-b-c))
-                         (agent-repl-test--interaction-e2e-tolerance gap-b-c)))))
+          (cl-letf (((symbol-function 'float-time) (lambda (&optional _time) now)))
+            (let ((overriding-terminal-local-map map))
+              ;; Arrange: real recording, driven through the real command loop.
+              (agent-repl-interaction-record-mode 1)
+              ;; Act.
+              (execute-kbd-macro (kbd "C-c C-v a"))
+              (setq now (+ now gap-a-b))
+              (execute-kbd-macro (kbd "C-c C-v b"))
+              (setq now (+ now gap-b-c))
+              (execute-kbd-macro (kbd "C-c C-v g"))
+              (agent-repl-interaction-record-mode -1)
+              (setq path (agent-repl-interaction-record-save
+                          (make-temp-file "agent-repl-test-e2e-" nil ".el")))
+              ;; Assert: identities and order first, then the intervals.
+              (let* ((events (plist-get (agent-repl--interaction-replay-load path) :events))
+                     (commands (mapcar (lambda (e) (plist-get e :command)) events))
+                     (offsets (mapcar (lambda (e) (plist-get e :offset)) events)))
+                (should (equal commands
+                               '(agent-repl-test--interaction-e2e-alpha
+                                 agent-repl-test--interaction-e2e-beta
+                                 agent-repl-test--interaction-e2e-gamma)))
+                (should (equal (reverse agent-repl-test--interaction-e2e-log)
+                               '(alpha beta gamma)))
+                (should (= (nth 1 offsets) gap-a-b))
+                (should (= (- (nth 2 offsets) (nth 1 offsets)) gap-b-c)))))
         (agent-repl-interaction-record-mode -1)
         (when (and path (file-exists-p path)) (delete-file path))))))
 
