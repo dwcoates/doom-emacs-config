@@ -1112,12 +1112,40 @@ describe("the turn stop", () => {
     expect(harness.refusalArms()).toEqual([]);
   });
 
+  it("never asks the turn stop to roll its prompt back", async () => {
+    // Arrange: the footer holds no composer for a rolled-back prompt's words.
+    await withFooter({ status: "working" });
+    // Act
+    await harness.click(".footer-clock [data-interrupt]");
+    // Assert
+    const [request] = harness.fake.calls<{ target: { case?: string; value?: { rollBackUnanswered?: unknown } } }>(
+      "interrupt",
+    );
+    expect(request.target.value?.rollBackUnanswered).toBeUndefined();
+  });
+
+  it("refuses a rolled-back answer it never asked for as malformed", async () => {
+    // Arrange
+    await withFooter({ status: "working" });
+    harness.fake.answer(
+      "interrupt",
+      create(InterruptResponseSchema, {
+        result: { case: "success", value: { outcome: { case: "rolledBackUnanswered", value: {} } } },
+      }),
+    );
+    // Act
+    await harness.click(".footer-clock [data-interrupt]");
+    // Assert
+    expect(harness.refusalArms()).toEqual(["malformed"]);
+  });
+
   it("covers every Interrupt success outcome", () => {
     assertCoversOneof(InterruptSuccessSchema, "outcome", [
       "interruptedTurn",
       "interruptedDetached",
       "nothingRunning",
       "mergeQueueOffered",
+      "rolledBackUnanswered",
     ]);
   });
 });
