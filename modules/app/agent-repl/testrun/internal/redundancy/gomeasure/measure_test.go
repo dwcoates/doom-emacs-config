@@ -921,7 +921,9 @@ func TestMeasureBoundsTheNoMutantRunByTheHangBound(t *testing.T) {
 	f := &fakeGo{dir: dir, reaches: map[string]bool{"TestA": true}, baselineNeeds: cfg.HangBound}
 	f.mutant = map[string]func(string) Result{}
 	for i := 1; i <= 64; i++ {
-		f.mutant[strconv.Itoa(i)] = func(string) Result { return Result{Lines: passLines("TestA", "TestB", "TestB/x", "TestB/y", "TestLog")} }
+		f.mutant[strconv.Itoa(i)] = func(string) Result {
+			return Result{Lines: passLines("TestA", "TestB", "TestB/x", "TestB/y", "TestLog")}
+		}
 	}
 	log, _ := quietLog()
 

@@ -319,11 +319,11 @@ func (m *measurer) strykerConfig(report string) (string, error) {
 		// (vitest.config.ts's ../../../bin/require-background.mjs), so Stryker
 		// mutates the package's own sources and restores them; the clean-tree
 		// check on both sides of the run makes a leftover mutant loud.
-		"inPlace":          true,
-		"cleanTempDir":     true,
-		"tempDirName":      ".stryker-tmp",
-		"thresholds":       map[string]any{"break": nil},
-		"ignoreStatic":     false,
+		"inPlace":      true,
+		"cleanTempDir": true,
+		"tempDirName":  ".stryker-tmp",
+		"thresholds":   map[string]any{"break": nil},
+		"ignoreStatic": false,
 	}
 	b, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
