@@ -10,6 +10,7 @@
 //	testrun roster
 //	testrun coverage-baseline -module DIR -work DIR -commit SHA -out FILE (a --coverage run's last unit)
 //	testrun redundancy go -module DIR -pkg PKG -tests FILES -out DIR [...]
+//	testrun redundancy vitest -package DIR -mutate GLOBS -out DIR [...]
 //	testrun redundancy report -in measurement.json [-universe U] [-overhead D]
 package main
 
@@ -33,6 +34,8 @@ import (
 	"agentrepl/testrun/internal/ramdisk"
 	"agentrepl/testrun/internal/redundancy"
 	"agentrepl/testrun/internal/redundancy/gomeasure"
+	"agentrepl/testrun/internal/redundancy/proc"
+	"agentrepl/testrun/internal/redundancy/vitestmeasure"
 	"agentrepl/testrun/internal/reuse"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/internal/suites"
@@ -380,10 +383,10 @@ func coverageBaselineCmd(log *run.Log, argv []string) int {
 	return 0
 }
 
-// redundancyCmd is `testrun redundancy go|report`.
+// redundancyCmd is `testrun redundancy go|vitest|report`.
 func redundancyCmd(log *run.Log, argv []string) int {
 	if len(argv) == 0 {
-		log.Errorf("usage: testrun redundancy go|report ...")
+		log.Errorf("usage: testrun redundancy go|vitest|report ...")
 		return 2
 	}
 	switch argv[0] {
@@ -391,6 +394,10 @@ func redundancyCmd(log *run.Log, argv []string) int {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 		return gomeasure.Command(ctx, log, argv[1:], gomeasure.OSExec)
+	case "vitest":
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		return vitestmeasure.Command(ctx, log, argv[1:], proc.OSExec)
 	case "report":
 		return redundancy.ReportCommand(log, argv[1:], os.Stdout)
 	}
