@@ -442,7 +442,13 @@ func (s *server) OpenWorkspace(
 	if opID := req.Msg.GetOpId(); opID != "" {
 		progress = openProgressReporter{server: s, opID: opID}
 	}
-	if err := s.deps.Verbs.Open(ctx, subject.Record.ID, progress); err != nil {
+	// A REVERT IS AN OPEN TOO: the same open runs, and the verb then queues
+	// the merge-revert brief into the reopened session.
+	open := s.deps.Verbs.Open
+	if req.Msg.GetRevertMerge() != nil {
+		open = s.deps.Verbs.OpenToRevertMerge
+	}
+	if err := open(ctx, subject.Record.ID, progress); err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
 	// The verb moved the session's standing or the composer's gate; the host

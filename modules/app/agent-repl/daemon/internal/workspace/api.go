@@ -287,6 +287,12 @@ type Verbs interface {
 	// semantics). progress receives the open's stages as it reaches them, for
 	// a caller relaying them to a client; nil reports nothing.
 	Open(ctx context.Context, ws ids.WorkspaceID, progress OpenProgress) error
+	// OpenToRevertMerge reopens a MERGED workspace as Open does and queues the
+	// merge-revert brief into its session (OpenWorkspaceRequest.revert_merge).
+	// A workspace whose merge has not landed is refused ArmNotMerged, and a
+	// brief that cannot be composed ArmBriefMissing, both before anything is
+	// opened.
+	OpenToRevertMerge(ctx context.Context, ws ids.WorkspaceID, progress OpenProgress) error
 	// Close tears down a workspace's editor state. It REQUIRES QUIET: no turn
 	// in flight, no live work, no held prompts, no queued merge. The refusal
 	// manifests in the footer, not only in the answer. BY is who asked for it,
