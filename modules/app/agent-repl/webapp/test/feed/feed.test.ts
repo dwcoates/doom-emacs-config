@@ -723,7 +723,7 @@ describe("mountFeed: the held section", () => {
     m.channel.push(pushHeld(heldSection([heldPromptItem("prompt:t1", "t1")]), [], [["prompt:t2", "prompt:t1"]]));
     await settle();
     // Assert
-    expect(m.heldHost.querySelector('[data-held-turn="t1"]')?.classList.contains("held-fold-flash")).toBe(true);
+    expect(m.heldHost.querySelector('[data-held-turn="t1"]')?.classList.contains("held-coalesce-flash")).toBe(true);
   });
 
   it("drops a row a held frame removes as its item returns to the section", async () => {

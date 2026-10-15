@@ -31,10 +31,10 @@ export const FOLDING_BADGE_LABEL = "folding above";
 export const FOLDING_BADGE_CLASS = "held-folding";
 
 /** The class whose one-shot animation is the flash of the entry folded into. */
-export const FOLD_FLASH_CLASS = "held-fold-flash";
+export const FOLD_FLASH_CLASS = "held-coalesce-flash";
 
 /** The stylesheet's keyframes the flash runs (styles.css). */
-export const FOLD_FLASH_ANIMATION = "held-fold-flash";
+export const FOLD_FLASH_ANIMATION = "held-coalesce-flash";
 
 /**
  * Flash CARD once: the entry a held prompt was just folded into, its held item

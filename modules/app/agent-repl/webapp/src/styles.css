@@ -5558,8 +5558,8 @@ ar-button.outcome-marker-pill {
    accent ring that fades away. An outline, so the bubble's own shadow and
    fill are untouched. */
 .badge.held-badge.held-folding { color: var(--accent); }
-.held-fold-flash { animation: held-fold-flash 0.9s ease-out 1; }
-@keyframes held-fold-flash {
+.held-coalesce-flash { animation: held-coalesce-flash 0.9s ease-out 1; }
+@keyframes held-coalesce-flash {
   0% { outline: 2px solid var(--accent); outline-offset: 1px; }
   100% { outline: 2px solid transparent; outline-offset: 1px; }
 }
