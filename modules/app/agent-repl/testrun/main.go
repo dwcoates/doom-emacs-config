@@ -14,7 +14,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
@@ -24,6 +23,7 @@ import (
 
 	"agentrepl/testrun/internal/cli"
 	"agentrepl/testrun/internal/cover"
+	"agentrepl/testrun/internal/gitinfo"
 	"agentrepl/testrun/internal/history"
 	"agentrepl/testrun/internal/life"
 	"agentrepl/testrun/internal/ramdisk"
@@ -291,14 +291,14 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	return cli.Run(ctx, cli.Deps{
-		Reuse: reuse.Runner{Deps: reuseDeps, Files: func() ([]string, error) { return reuse.ExecRepoFiles(reuseDeps.Repo) }},
+		Reuse:       reuse.Runner{Deps: reuseDeps, Files: func() ([]string, error) { return reuse.ExecRepoFiles(reuseDeps.Repo) }},
 		Log:         log,
 		Exec:        run.OSExec{Log: log, Grace: run.KillGrace, TmpParent: root, Prefix: prefix},
 		Clock:       run.WallClock{},
 		Slots:       slots,
 		HistoryPath: histPath,
 		Build:       suites.Build,
-		Git:         gitHead,
+		Git:         gitinfo.Head,
 		Self:        self,
 		Work:        work,
 		Pid:         os.Getpid(),
@@ -316,7 +316,7 @@ func finishRecordCmd(log *run.Log, argv []string) int {
 		log.Errorf("resolve the module root %s: %v", a.Module, err)
 		return 1
 	}
-	return cli.FinishRecord(cli.Deps{Log: log, Git: gitHead}, moduleRoot, a.RecordOut)
+	return cli.FinishRecord(cli.Deps{Log: log, Git: gitinfo.Head}, moduleRoot, a.RecordOut)
 }
 
 func coverCmd(log *run.Log, argv []string) int {
@@ -330,18 +330,6 @@ func coverCmd(log *run.Log, argv []string) int {
 		return 1
 	}
 	return 0
-}
-
-func gitHead(repo string) (string, string, error) {
-	branch, err := exec.Command("git", "-C", repo, "branch", "--show-current").Output()
-	if err != nil {
-		return "", "", fmt.Errorf("git branch --show-current: %w", err)
-	}
-	commit, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
-	if err != nil {
-		return "", "", fmt.Errorf("git rev-parse HEAD: %w", err)
-	}
-	return strings.TrimSpace(string(branch)), strings.TrimSpace(string(commit)), nil
 }
 
 // confineCmd is a keyed unit's launcher: it scrubs the environment and execs

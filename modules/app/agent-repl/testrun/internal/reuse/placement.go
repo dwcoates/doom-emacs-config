@@ -1,12 +1,11 @@
 package reuse
 
 import (
-	"bytes"
 	"fmt"
-	"os/exec"
 	"sort"
 	"strings"
 
+	"agentrepl/testrun/internal/gitinfo"
 	"agentrepl/testrun/roster"
 )
 
@@ -89,12 +88,9 @@ func (r Regions) Unplaced(files []string) []string {
 // ExecRepoFiles lists the checkout's files the way a commit would see them:
 // tracked, plus untracked ones git does not ignore.
 func ExecRepoFiles(repo string) ([]string, error) {
-	cmd := exec.Command("git", "-C", repo, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
+	out, err := gitinfo.Output(repo, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
 	if err != nil {
-		return nil, fmt.Errorf("reuse: list %s's files: %w: %s", repo, err, strings.TrimSpace(stderr.String()))
+		return nil, fmt.Errorf("reuse: list %s's files: %w", repo, err)
 	}
 	var files []string
 	for _, f := range strings.Split(string(out), "\x00") {

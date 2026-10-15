@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"agentrepl/testrun/internal/gitinfo"
 	"agentrepl/testrun/roster"
 )
 
@@ -49,16 +50,23 @@ func HostDeps(module, self, profileDir string, log Logger) (Deps, error) {
 				return nil
 			})
 		},
-		Head: func() (string, string, bool, error) { return head(repo) },
-		Now:  time.Now,
-		Log:  log,
+		Head: func() (string, string, bool, error) {
+			branch, commit, err := gitinfo.Head(repo)
+			if err != nil {
+				return "", "", false, err
+			}
+			dirty, err := gitinfo.Dirty(repo)
+			return branch, commit, dirty, err
+		},
+		Now: time.Now,
+		Log: log,
 	}, nil
 }
 
 // checkouts is every worktree of the repository at repo, resolved through
 // symlinks: `git worktree list` names the main checkout and every linked one.
 func checkouts(repo string) ([]string, error) {
-	out, err := gitOutput(repo, "worktree", "list", "--porcelain")
+	out, err := gitinfo.Output(repo, "worktree", "list", "--porcelain")
 	if err != nil {
 		return nil, err
 	}
@@ -91,35 +99,6 @@ func checkouts(repo string) ([]string, error) {
 		return nil, fmt.Errorf("reuse: git worktree list does not name the checkout %s", repo)
 	}
 	return roots, nil
-}
-
-// head is the checkout's branch, commit, and whether any file differs from
-// that commit (tracked or untracked-and-not-ignored).
-func head(repo string) (string, string, bool, error) {
-	branch, err := gitOutput(repo, "branch", "--show-current")
-	if err != nil {
-		return "", "", false, err
-	}
-	commit, err := gitOutput(repo, "rev-parse", "HEAD")
-	if err != nil {
-		return "", "", false, err
-	}
-	status, err := gitOutput(repo, "status", "--porcelain", "--untracked-files=normal")
-	if err != nil {
-		return "", "", false, err
-	}
-	return strings.TrimSpace(string(branch)), strings.TrimSpace(string(commit)), len(bytes.TrimSpace(status)) > 0, nil
-}
-
-func gitOutput(repo string, args ...string) ([]byte, error) {
-	cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("reuse: git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
-	}
-	return out, nil
 }
 
 // hostToolchain answers the tool versions every keyed suite is built and run
