@@ -480,15 +480,6 @@ func (d *fakeDB) Reopen(_ context.Context, id ids.WorkspaceID) error {
 }
 
 func (d *fakeDB) SetCurrent(_ context.Context, id ids.WorkspaceID, at time.Time) error {
-	// As WSM does: the workspace the user leaves after DwellThreshold or more
-	// was dwelt on.
-	if d.current != nil && *d.current != id {
-		if left, ok := d.workspaces[*d.current]; ok && left.LastSelectedAt != nil && !left.LastSelectedAt.After(at.Add(-wsm.DwellThreshold)) {
-			dwelt := at
-			left.DweltAt = &dwelt
-			d.workspaces[*d.current] = left
-		}
-	}
 	d.current, d.currentAt = &id, at
 	// As WSM does: the selection stamps the durable last-selected instant
 	// the roster row carries.

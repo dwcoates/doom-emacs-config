@@ -80,10 +80,10 @@ ALTER TABLE sidebar_view ADD COLUMN open_folded INTEGER NOT NULL DEFAULT 0;
 //     build can vouch for: from here on `hidden` and `hidden_at` stand and
 //     fall together.
 //   - workspaces.dwelt_at, the last instant the user LEFT the workspace after
-//     looking at it for at least DwellThreshold (SetCurrent): hiding the
-//     workspace the user stands on lands them on the one most recently dwelt
-//     on. NULL is "never looked at that long", which no workspace is
-//     guessed at.
+//     looking at it for five seconds, which hiding the workspace the user
+//     stood on once landed by. RETIRED 2026-10-14: hiding now lands on the
+//     tab bar's neighbour, and no build reads or writes the column; a later
+//     breaking step drops it (MigrationKind's two deploys).
 //
 // IT IS ADDITIVE: the previous build names neither column.
 const hiddenAndDweltAtDDL = `

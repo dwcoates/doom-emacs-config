@@ -86,9 +86,6 @@ type Workspace struct {
 	// last stated it (SetCacheLapse); nil when none is known. Never set on a
 	// workspace that is not hidden.
 	CacheLapse *CacheLapse
-	// DweltAt is the last instant the user LEFT the workspace after looking at
-	// it for at least DwellThreshold (SetCurrent); nil when they never have.
-	DweltAt *time.Time
 	// LastActivityAt is when the workspace LAST DID REAL WORK: the most recent
 	// turn start or turn close, stamped at the genuine activity edge inside the
 	// turn writes (PutTurn/CloseTurn), never at compose or select time. Nil
