@@ -37,6 +37,7 @@ import { resolve } from "node:path";
 import { transferableAbortController } from "node:util";
 import { Agent } from "undici";
 import { beforeAll, vi } from "vitest";
+import { frameQueue } from "../frame-queue.js";
 import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 
 import { composerClosedFor } from "../../src/vocab.js";
@@ -675,7 +676,11 @@ async function mountApp(
   });
   handles.push(login);
   topbar.watch(ctx, { openLogin: (control) => login.open(control) });
-  handles.push(mountSidebar(shell.sidebar, ctx));
+  // THE RAIL DRAWS A PUSH ON ITS NEXT FRAME (sidebar.ts), and this harness
+  // fakes the page's frames, so the rail's own are a queue `settle()` runs:
+  // a push waiting for its frame is a DOM change that has not happened yet.
+  const railFrames = frameQueue();
+  handles.push(mountSidebar(shell.sidebar, ctx, { frame: railFrames.frame }));
 
   if (composerEnabled) {
     shell.composer.hidden = false;
@@ -769,6 +774,7 @@ async function mountApp(
       await vi.advanceTimersByTimeAsync(0);
       await yieldToIo();
       for (let flush = 0; flush < 5; flush += 1) await Promise.resolve();
+      railFrames.drain();
       // AN OUTSTANDING REQUEST IS WAITED FOR, NOT SPUN ON. A round used to
       // cost ~7ms of serialization, which made the round cap a wall-clock
       // allowance of ~400ms as a side effect, and a loopback unary under
