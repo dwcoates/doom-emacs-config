@@ -117,6 +117,40 @@ Always run:
    - `proto/ts` and `bin/require-background.mjs` (`webapp`);
    - `lib-node-store.sh` (`sidecar`).
 
+7. **The daemon harness's stray sweep could not read a rewritten argv.**
+   - `npm exec` and vitest write their process titles over their own
+     argument memory, while the kernel keeps the exec's argc. A real
+     `npm exec vitest run <230 files>` buffer decodes 207 of 234 strings
+     and then runs out.
+   - The sweep refused such buffers and, after 2s, failed every daemon
+     integration and e2e test that ran beside a long vitest chunk. The
+     confined units' scrubbed environment (fewer strings to run into) made
+     this certain in a full run.
+   - Fixed in `daemon/integration/harness/proctable.go`: a buffer whose
+     strings are all complete is read as far as it goes, as `ps` reads it.
+     A buffer ending mid-string, or holding no argument, is still an exec
+     writing it, and is read again.
+8. **A suite must not declare another suite's build output.** The sidecar
+   declared the shim's whole tree, `dist/` included. The shim suite rewrites
+   `dist/` in its integration build, so in a full run the sidecar always
+   refused to record. It now declares the shim's sources entry by entry.
+9. **One webapp test missed its 850ms bound under concurrent load.**
+   - The test is `feed.test.ts` "keeps the rows under a scrolled-away reader
+     still when any row above them grows".
+   - It took 1,014ms, against about 28ms alone; its other runs passed.
+   - It is a starvation stall, not a reuse defect, and its cause is not
+     yet found.
+
+## Verification
+
+- **The final full run of every suite except `e2e-emacs` was green.**
+  - Seven keyed suites were reused from earlier green runs of their exact
+    inputs: ert, daemon, store, lock, logging, protohelpers and shim.
+  - Every other suite ran and passed.
+- **`e2e-emacs` is blocked on the host's Docker file-descriptor leak.** That
+  fix is `test-tier-audit-e2e-edj-04`'s and goes to the front of the merge
+  queue, so this branch's gate runs `e2e-emacs` only after it lands.
+
 ## Residual surfaces, stated plainly
 
 These are inputs a test can observe that the key does not hash. Each is
