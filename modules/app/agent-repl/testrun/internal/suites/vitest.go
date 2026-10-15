@@ -23,10 +23,8 @@ func vitestFiles(module, dir string) ([]string, error) {
 
 // vitestFilesUnder is vitestFiles under CONFIG ("" is the default config).
 func vitestFilesUnder(module, dir, config string) ([]string, error) {
-	ensure := exec.Command(filepath.Join(module, "bin", "ensure-deps.sh"), dir)
-	ensure.Env = os.Environ()
-	if out, err := ensure.CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("suites: ensure the npm deps of %s: %w\n%s", dir, err, out)
+	if err := runEnsure(fmt.Sprintf("ensure the npm deps of %s", dir), filepath.Join(module, "bin", "ensure-deps.sh"), dir); err != nil {
+		return nil, err
 	}
 	args := []string{"vitest", "list", "--filesOnly", "--json"}
 	if config != "" {
