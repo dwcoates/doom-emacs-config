@@ -144,7 +144,13 @@ func (p goPkg) units() (run.Spec, *Split, error) {
 		if err := os.MkdirAll(p.SpawnedCovDir, 0o755); err != nil {
 			return run.Spec{}, nil, fmt.Errorf("suites: create %s: %w", p.SpawnedCovDir, err)
 		}
-		spawnedEnv = []string{testenv.ProgramsInstrumented + "=1", testenv.Coverage + "=" + p.SpawnedCovDir}
+		// GOCOVERDIR too, so a system spawned by a harness that only
+		// inherits its environment (the sidecar's, the store's, the shim's
+		// lock helper) has a directory for its counters: an instrumented
+		// binary started without one warns on its stderr, which the tests
+		// read. A cover-built test binary writes its own counters by its
+		// -test.gocoverdir flag, which takes precedence.
+		spawnedEnv = []string{testenv.ProgramsInstrumented + "=1", testenv.Coverage + "=" + p.SpawnedCovDir, "GOCOVERDIR=" + p.SpawnedCovDir}
 		p.ChunkEnv = append(p.ChunkEnv, spawnedEnv...)
 	}
 	// A shared prebuild builds the systems its chunks spawn, so under

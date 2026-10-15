@@ -177,7 +177,8 @@ func TestSpawnedSystemCoverageReachesTheChunksThatSpawnThem(t *testing.T) {
 				t.Fatal(err)
 			}
 			chunk := u.Splits[0].Chunk("m:p#00", []string{"TestA"})
-			if got := envHas(chunk.Env, spawned) && envHas(chunk.Env, testenv.ProgramsInstrumented+"=1"); got != tt.want {
+			goCoverDir := "GOCOVERDIR=" + SpawnedCovDir(l, "m", 0)
+			if got := envHas(chunk.Env, spawned) && envHas(chunk.Env, testenv.ProgramsInstrumented+"=1") && envHas(chunk.Env, goCoverDir); got != tt.want {
 				t.Fatalf("chunk carries spawned coverage = %t, want %t; env %v", got, tt.want, chunk.Env)
 			}
 			for _, unit := range u.Atomic {

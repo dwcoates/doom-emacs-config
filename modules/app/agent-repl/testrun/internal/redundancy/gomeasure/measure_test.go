@@ -365,7 +365,7 @@ func TestMeasureDropsTheSiteASchemaCompileErrorNames(t *testing.T) {
 			overlays = append(overlays, call)
 		}
 	}
-	if len(overlays) < 3 || !strings.HasPrefix(overlays[0], "go build -overlay") || !strings.HasPrefix(overlays[1], "go build -overlay") || !strings.HasPrefix(overlays[2], "go test -c") {
+	if len(overlays) < 3 || !strings.HasPrefix(overlays[0], "go build -buildvcs=false -overlay") || !strings.HasPrefix(overlays[1], "go build -buildvcs=false -overlay") || !strings.HasPrefix(overlays[2], "go test -c") {
 		t.Fatalf("overlay builds, in order:\n%s", strings.Join(overlays, "\n"))
 	}
 }

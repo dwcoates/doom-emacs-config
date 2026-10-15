@@ -559,7 +559,10 @@ func (m *measurer) coverEnv(st *suiteState, spawned string) []string {
 	if len(st.Programs) == 0 {
 		return env
 	}
-	return append(env, testenv.Programs+"="+m.coverPrograms, testenv.ProgramsInstrumented+"=1", testenv.Coverage+"="+spawned)
+	// GOCOVERDIR as a run's coverage chunk carries it (suites.goPkg.units):
+	// a system spawned by a harness that only inherits its environment
+	// needs a directory for its counters.
+	return append(env, testenv.Programs+"="+m.coverPrograms, testenv.ProgramsInstrumented+"=1", testenv.Coverage+"="+spawned, "GOCOVERDIR="+spawned)
 }
 
 // mutEnv is the environment of a mutant-phase run of st.
@@ -779,7 +782,7 @@ func (m *measurer) schema(ctx context.Context, cases []redundancy.Case, imports 
 		// The mutated packages alone first: one build, cached across
 		// attempts, finds the sites that do not type-check far faster than
 		// every suite's binary would.
-		check := append([]string{"go", "build", "-overlay", ov}, m.cfg.Mutate...)
+		check := append([]string{"go", "build", "-buildvcs=false", "-overlay", ov}, m.cfg.Mutate...)
 		res, err := m.goBuild(ctx, m.cfg.Module, check)
 		if err != nil {
 			return nil, err
