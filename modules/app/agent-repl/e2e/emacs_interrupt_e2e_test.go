@@ -32,9 +32,6 @@ import (
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
-	storev1 "agentrepl/proto/store/v1"
-
-	"connectrpc.com/connect"
 
 	"agent-repld/integration/harness"
 )
@@ -401,11 +398,9 @@ func emAwaitBookPrompt(t *testing.T, w *EmacsWorld, agent, text, what string) {
 	var said []string
 	for {
 		said = said[:0]
-		resp, err := w.Store.Client.OpenAgentSession(ctx, connect.NewRequest(&storev1.OpenAgentSessionRequest{
-			Agent: &conversationv1.AgentId{Value: agent},
-		}))
+		page, err := readAgentBook(ctx, w.Store.Client, &conversationv1.AgentId{Value: agent})
 		if err == nil {
-			for _, line := range resp.Msg.GetSuccess().GetPage().GetLines() {
+			for _, line := range page.GetLines() {
 				prompt := line.GetLine().GetAgentItem().GetAgentPrompt()
 				if prompt == nil {
 					continue
