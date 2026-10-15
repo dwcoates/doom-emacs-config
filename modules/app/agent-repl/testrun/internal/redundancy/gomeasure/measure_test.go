@@ -671,6 +671,11 @@ func TestMeasureRunsASpawningSuiteThroughItsOwnPrograms(t *testing.T) {
 			plainInteg = !strings.Contains(call, "-cover")
 		}
 	}
+	for _, call := range f.calls {
+		if strings.HasPrefix(call, "cover-01.test") && strings.Contains(call, "-test.gocoverdir") {
+			t.Fatalf("the plain integration binary was given -test.gocoverdir, which it refuses: %s", call)
+		}
+	}
 	if !coverProg || !mutProg || !plainInteg {
 		t.Fatalf("instrumented program %t, mutant program %t, plain integration binary %t; calls:\n%s", coverProg, mutProg, plainInteg, strings.Join(f.calls, "\n"))
 	}

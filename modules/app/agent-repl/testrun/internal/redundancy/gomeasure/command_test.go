@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -27,7 +28,7 @@ func TestParseArgsDefaults(t *testing.T) {
 	if !reflect.DeepEqual(a.Mutate, []string{"./p"}) || a.Runs != 3 || a.Common.Universe != redundancy.KillsOnly || a.Common.Overhead != DefaultOverhead || a.HangBound != DefaultHangBound || a.Common.Budget.MaxDrop != redundancy.DefaultMaxDrop {
 		t.Fatalf("defaults = %+v", a)
 	}
-	if !reflect.DeepEqual(a.PinCalls, []string{"FindRecord", "Records"}) {
+	if !reflect.DeepEqual(a.PinCalls, DefaultPinCalls) {
 		t.Fatalf("pin calls = %v", a.PinCalls)
 	}
 }
@@ -336,5 +337,33 @@ func TestParseArgsHasTheParentsLoadGateByDefault(t *testing.T) {
 	}
 	if a.MaxLoad != 32 || a.QuietWait != time.Hour {
 		t.Fatalf("max load %g, quiet wait %s", a.MaxLoad, a.QuietWait)
+	}
+}
+
+// TestEveryDefaultPinCallIsAHarnessOrLoggerFunction holds the default pin
+// list to the code: a renamed helper would silently stop pinning.
+func TestEveryDefaultPinCallIsAHarnessOrLoggerFunction(t *testing.T) {
+	root, err := FindRoot(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var src strings.Builder
+	for _, glob := range []string{"daemon/internal/dlog/*.go", "daemon/integration/harness/*.go"} {
+		files, err := filepath.Glob(filepath.Join(root, glob))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range files {
+			b, err := os.ReadFile(f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			src.Write(b)
+		}
+	}
+	for _, name := range DefaultPinCalls {
+		if !regexp.MustCompile(`func (\([^)]*\) )?` + name + `\(`).MatchString(src.String()) {
+			t.Errorf("no dlog or harness function is named %s", name)
+		}
 	}
 }

@@ -470,6 +470,16 @@ func (m *measurer) buildPrograms(ctx context.Context, work string, cover bool, e
 	return l.ProgramsDir(), failed, nil
 }
 
+// coverDirFlag is the -test.gocoverdir a coverage-phase run of st's binary
+// takes: none for a suite that spawns programs, whose binary is a plain one
+// (coverBuilds) and refuses the flag.
+func (st *suiteState) coverDirFlag(dir string) []string {
+	if len(st.Programs) > 0 {
+		return nil
+	}
+	return []string{"-test.gocoverdir", dir}
+}
+
 // coverBuilds builds each suite's coverage binary and the instrumented
 // programs. A suite that spawns programs is measured through them, so its
 // own test binary is a plain one.
@@ -581,7 +591,7 @@ func (m *measurer) discover(ctx context.Context, tops [][]string) ([]leaf, error
 	var leaves []leaf
 	for i, st := range m.suites {
 		for _, top := range tops[i] {
-			res, r, err := m.runTests(ctx, st, st.coverBin, gotest.TopPattern([]string{top}), FirstContactTimeout, []string{"-test.gocoverdir", dir}, m.coverEnv(st, dir)...)
+			res, r, err := m.runTests(ctx, st, st.coverBin, gotest.TopPattern([]string{top}), FirstContactTimeout, st.coverDirFlag(dir), m.coverEnv(st, dir)...)
 			if err != nil {
 				return nil, err
 			}
@@ -628,7 +638,7 @@ func (m *measurer) coverage(ctx context.Context, leaves []leaf, deleted map[leaf
 					return nil, nil, nil, fmt.Errorf("gomeasure: %w", err)
 				}
 			}
-			res, run, err := m.runTests(ctx, st, st.coverBin, RunPattern(l.name), FirstContactTimeout, []string{"-test.gocoverdir", self}, m.coverEnv(st, spawned)...)
+			res, run, err := m.runTests(ctx, st, st.coverBin, RunPattern(l.name), FirstContactTimeout, st.coverDirFlag(self), m.coverEnv(st, spawned)...)
 			if err != nil {
 				return nil, nil, nil, err
 			}

@@ -22,6 +22,19 @@ const EnvBackground = redundancy.EnvBackground
 // DefaultOverhead is redundancy's.
 const DefaultOverhead = redundancy.DefaultOverhead
 
+// DefaultPinCalls are the calls that assert a canonical log record: the
+// unit tier's dlog test logger (FindRecord, Records) and the integration
+// harness's record and operation awaits. A test reaching one stays whatever
+// it covers (owner rule: a test pinning an error path and its canonical log
+// record stays). The harness's AwaitShimLoggedRequest reads the fake shim's
+// request log, not a record, and is not one.
+var DefaultPinCalls = []string{
+	"FindRecord", "Records",
+	"AwaitLogRecord", "AwaitLogRecordWithin", "AwaitLogRecordAfter",
+	"AwaitWorkspaceLogRecord", "AwaitWorkspaceLogRecordInState", "AwaitRunLogRecordFromAnyProcess",
+	"AwaitRunLogOperation", "AwaitWorkspaceLogOperation", "AwaitWorkspaceLogOperationCount",
+}
+
 // Args are `testrun redundancy go`'s arguments: the measurement's own and
 // the flags every adapter shares.
 type Args struct {
@@ -118,7 +131,7 @@ func ParseArgs(argv []string, stderr io.Writer) (Args, error) {
 	rosterSuite := fs.String("roster-suite", "", "measure every package of these roster Go suites (comma separated, e.g. daemon or daemon,e2e), integration passes included, instead of -pkg; -module defaults to the one suite's module")
 	fs.StringVar(&mutate, "mutate", "", "comma-separated packages to mutate, relative to -module (default: the one -pkg)")
 	fs.IntVar(&a.Runs, "runs", 3, "coverage runs per case, unioned")
-	fs.StringVar(&pinCalls, "pin-calls", "FindRecord,Records", "comma-separated calls that make a test a log-record assertion")
+	fs.StringVar(&pinCalls, "pin-calls", strings.Join(DefaultPinCalls, ","), "comma-separated calls that make a test a log-record assertion")
 	fs.BoolVar(&a.Estimate, "estimate", false, "with -delete: stop after the unit tier and report what the rest would cost")
 	fs.StringVar(&a.Go, "go", "go", "the go command")
 	fs.DurationVar(&a.HangBound, "hang-bound", DefaultHangBound, "how long a case that hung reruns alone to confirm the hang; just over twice the longest real wait the measured tests allow themselves")
