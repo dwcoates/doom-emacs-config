@@ -799,7 +799,8 @@ func gateArgv(argv []string, speculative bool) []string {
 }
 
 // queueWindow is the window in force: the test override when one is set, else
-// the governor's, which the host's power source decides (power.go).
+// the governor's, which the host's power source and the racing switch decide
+// (power.go).
 func (o *orchestrator) queueWindow() int {
 	if o.window > 0 {
 		return o.window

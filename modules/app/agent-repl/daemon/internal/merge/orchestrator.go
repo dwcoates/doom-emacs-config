@@ -309,7 +309,7 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 	// the wrapped DB.
 	o.deps.DB = asyncMergesDB{DB: deps.DB, o: o}
 	deps.Asks.bind(o.askChanged)
-	deps.Governor.OnPowerChange(o.powerChanged)
+	deps.Governor.OnModeChange(o.modeChanged)
 	return o, nil
 }
 

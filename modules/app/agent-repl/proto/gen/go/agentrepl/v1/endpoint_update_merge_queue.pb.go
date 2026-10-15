@@ -41,6 +41,8 @@ type UpdateMergeQueueRequest struct {
 	//	*UpdateMergeQueueRequest_ReleaseRollouts
 	//	*UpdateMergeQueueRequest_MoveUp
 	//	*UpdateMergeQueueRequest_MoveDown
+	//	*UpdateMergeQueueRequest_DisableRacing
+	//	*UpdateMergeQueueRequest_EnableRacing
 	Action        isUpdateMergeQueueRequest_Action `protobuf_oneof:"action"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -146,6 +148,24 @@ func (x *UpdateMergeQueueRequest) GetMoveDown() *UpdateMergeQueueMoveDown {
 	return nil
 }
 
+func (x *UpdateMergeQueueRequest) GetDisableRacing() *UpdateMergeQueueDisableRacing {
+	if x != nil {
+		if x, ok := x.Action.(*UpdateMergeQueueRequest_DisableRacing); ok {
+			return x.DisableRacing
+		}
+	}
+	return nil
+}
+
+func (x *UpdateMergeQueueRequest) GetEnableRacing() *UpdateMergeQueueEnableRacing {
+	if x != nil {
+		if x, ok := x.Action.(*UpdateMergeQueueRequest_EnableRacing); ok {
+			return x.EnableRacing
+		}
+	}
+	return nil
+}
+
 type isUpdateMergeQueueRequest_Action interface {
 	isUpdateMergeQueueRequest_Action()
 }
@@ -193,6 +213,23 @@ type UpdateMergeQueueRequest_MoveDown struct {
 	MoveDown *UpdateMergeQueueMoveDown `protobuf:"bytes,8,opt,name=move_down,json=moveDown,proto3,oneof"`
 }
 
+type UpdateMergeQueueRequest_DisableRacing struct {
+	// DISABLE THE RACE, daemon-wide: every queue works its head alone, as on
+	// battery, whatever the host's power source. On AC power a queue otherwise
+	// works its top two merges, which race to land and take turns at the
+	// tests; a merge racing behind its head is suspended at the step it
+	// stands on and resumes there once it heads its queue. DURABLE: it
+	// survives a daemon restart and a handover until enabled. (Added
+	// 2026-10-14.)
+	DisableRacing *UpdateMergeQueueDisableRacing `protobuf:"bytes,9,opt,name=disable_racing,json=disableRacing,proto3,oneof"`
+}
+
+type UpdateMergeQueueRequest_EnableRacing struct {
+	// Enable the race again: on AC power the merge behind each head starts
+	// racing it at once.
+	EnableRacing *UpdateMergeQueueEnableRacing `protobuf:"bytes,10,opt,name=enable_racing,json=enableRacing,proto3,oneof"`
+}
+
 func (*UpdateMergeQueueRequest_Pause) isUpdateMergeQueueRequest_Action() {}
 
 func (*UpdateMergeQueueRequest_Resume) isUpdateMergeQueueRequest_Action() {}
@@ -206,6 +243,10 @@ func (*UpdateMergeQueueRequest_ReleaseRollouts) isUpdateMergeQueueRequest_Action
 func (*UpdateMergeQueueRequest_MoveUp) isUpdateMergeQueueRequest_Action() {}
 
 func (*UpdateMergeQueueRequest_MoveDown) isUpdateMergeQueueRequest_Action() {}
+
+func (*UpdateMergeQueueRequest_DisableRacing) isUpdateMergeQueueRequest_Action() {}
+
+func (*UpdateMergeQueueRequest_EnableRacing) isUpdateMergeQueueRequest_Action() {}
 
 type UpdateMergeQueuePause struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -420,6 +461,80 @@ func (*UpdateMergeQueueReleaseRollouts) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{5}
 }
 
+// Daemon-wide: one switch covers every repository's queue, since the window
+// it narrows is the gate governor's, which every queue shares.
+type UpdateMergeQueueDisableRacing struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateMergeQueueDisableRacing) Reset() {
+	*x = UpdateMergeQueueDisableRacing{}
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateMergeQueueDisableRacing) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateMergeQueueDisableRacing) ProtoMessage() {}
+
+func (x *UpdateMergeQueueDisableRacing) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateMergeQueueDisableRacing.ProtoReflect.Descriptor instead.
+func (*UpdateMergeQueueDisableRacing) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{6}
+}
+
+type UpdateMergeQueueEnableRacing struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateMergeQueueEnableRacing) Reset() {
+	*x = UpdateMergeQueueEnableRacing{}
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateMergeQueueEnableRacing) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateMergeQueueEnableRacing) ProtoMessage() {}
+
+func (x *UpdateMergeQueueEnableRacing) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateMergeQueueEnableRacing.ProtoReflect.Descriptor instead.
+func (*UpdateMergeQueueEnableRacing) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{7}
+}
+
 // A ONE-PLACE MOVE passes exactly one WAITING merge: never the merge running,
 // and never a merge only requested (in nobody's line yet). The moved merge
 // takes the passed merge's front mark, so every merge put at the front still
@@ -437,7 +552,7 @@ type UpdateMergeQueueMoveUp struct {
 
 func (x *UpdateMergeQueueMoveUp) Reset() {
 	*x = UpdateMergeQueueMoveUp{}
-	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -449,7 +564,7 @@ func (x *UpdateMergeQueueMoveUp) String() string {
 func (*UpdateMergeQueueMoveUp) ProtoMessage() {}
 
 func (x *UpdateMergeQueueMoveUp) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -462,7 +577,7 @@ func (x *UpdateMergeQueueMoveUp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateMergeQueueMoveUp.ProtoReflect.Descriptor instead.
 func (*UpdateMergeQueueMoveUp) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{6}
+	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *UpdateMergeQueueMoveUp) GetWorkspace() *v1.WorkspaceRef {
@@ -483,7 +598,7 @@ type UpdateMergeQueueMoveDown struct {
 
 func (x *UpdateMergeQueueMoveDown) Reset() {
 	*x = UpdateMergeQueueMoveDown{}
-	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -495,7 +610,7 @@ func (x *UpdateMergeQueueMoveDown) String() string {
 func (*UpdateMergeQueueMoveDown) ProtoMessage() {}
 
 func (x *UpdateMergeQueueMoveDown) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -508,7 +623,7 @@ func (x *UpdateMergeQueueMoveDown) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateMergeQueueMoveDown.ProtoReflect.Descriptor instead.
 func (*UpdateMergeQueueMoveDown) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{7}
+	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *UpdateMergeQueueMoveDown) GetWorkspace() *v1.WorkspaceRef {
@@ -532,7 +647,7 @@ type UpdateMergeQueueResponse struct {
 
 func (x *UpdateMergeQueueResponse) Reset() {
 	*x = UpdateMergeQueueResponse{}
-	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -544,7 +659,7 @@ func (x *UpdateMergeQueueResponse) String() string {
 func (*UpdateMergeQueueResponse) ProtoMessage() {}
 
 func (x *UpdateMergeQueueResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -557,7 +672,7 @@ func (x *UpdateMergeQueueResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateMergeQueueResponse.ProtoReflect.Descriptor instead.
 func (*UpdateMergeQueueResponse) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{8}
+	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *UpdateMergeQueueResponse) GetResult() isUpdateMergeQueueResponse_Result {
@@ -610,7 +725,7 @@ type UpdateMergeQueueSuccess struct {
 
 func (x *UpdateMergeQueueSuccess) Reset() {
 	*x = UpdateMergeQueueSuccess{}
-	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -622,7 +737,7 @@ func (x *UpdateMergeQueueSuccess) String() string {
 func (*UpdateMergeQueueSuccess) ProtoMessage() {}
 
 func (x *UpdateMergeQueueSuccess) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -635,7 +750,7 @@ func (x *UpdateMergeQueueSuccess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateMergeQueueSuccess.ProtoReflect.Descriptor instead.
 func (*UpdateMergeQueueSuccess) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{9}
+	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{11}
 }
 
 // Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
@@ -654,6 +769,8 @@ type UpdateMergeQueueError struct {
 	//	*UpdateMergeQueueError_UnknownRepository
 	//	*UpdateMergeQueueError_RolloutsAlreadyHeld
 	//	*UpdateMergeQueueError_RolloutsNotHeld
+	//	*UpdateMergeQueueError_RacingAlreadyDisabled
+	//	*UpdateMergeQueueError_RacingNotDisabled
 	Cause         isUpdateMergeQueueError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -661,7 +778,7 @@ type UpdateMergeQueueError struct {
 
 func (x *UpdateMergeQueueError) Reset() {
 	*x = UpdateMergeQueueError{}
-	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -673,7 +790,7 @@ func (x *UpdateMergeQueueError) String() string {
 func (*UpdateMergeQueueError) ProtoMessage() {}
 
 func (x *UpdateMergeQueueError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -686,7 +803,7 @@ func (x *UpdateMergeQueueError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateMergeQueueError.ProtoReflect.Descriptor instead.
 func (*UpdateMergeQueueError) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{10}
+	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *UpdateMergeQueueError) GetCause() isUpdateMergeQueueError_Cause {
@@ -786,6 +903,24 @@ func (x *UpdateMergeQueueError) GetRolloutsNotHeld() *UpdateMergeQueueRolloutsNo
 	return nil
 }
 
+func (x *UpdateMergeQueueError) GetRacingAlreadyDisabled() *UpdateMergeQueueRacingAlreadyDisabled {
+	if x != nil {
+		if x, ok := x.Cause.(*UpdateMergeQueueError_RacingAlreadyDisabled); ok {
+			return x.RacingAlreadyDisabled
+		}
+	}
+	return nil
+}
+
+func (x *UpdateMergeQueueError) GetRacingNotDisabled() *UpdateMergeQueueRacingNotDisabled {
+	if x != nil {
+		if x, ok := x.Cause.(*UpdateMergeQueueError_RacingNotDisabled); ok {
+			return x.RacingNotDisabled
+		}
+	}
+	return nil
+}
+
 type isUpdateMergeQueueError_Cause interface {
 	isUpdateMergeQueueError_Cause()
 }
@@ -842,6 +977,16 @@ type UpdateMergeQueueError_RolloutsNotHeld struct {
 	RolloutsNotHeld *UpdateMergeQueueRolloutsNotHeld `protobuf:"bytes,10,opt,name=rollouts_not_held,json=rolloutsNotHeld,proto3,oneof"`
 }
 
+type UpdateMergeQueueError_RacingAlreadyDisabled struct {
+	// `disable_racing` while racing is already disabled. (2026-10-14.)
+	RacingAlreadyDisabled *UpdateMergeQueueRacingAlreadyDisabled `protobuf:"bytes,11,opt,name=racing_already_disabled,json=racingAlreadyDisabled,proto3,oneof"`
+}
+
+type UpdateMergeQueueError_RacingNotDisabled struct {
+	// `enable_racing` while racing is not disabled. (2026-10-14.)
+	RacingNotDisabled *UpdateMergeQueueRacingNotDisabled `protobuf:"bytes,12,opt,name=racing_not_disabled,json=racingNotDisabled,proto3,oneof"`
+}
+
 func (*UpdateMergeQueueError_UnknownWorkspace) isUpdateMergeQueueError_Cause() {}
 
 func (*UpdateMergeQueueError_WorkspaceRefMismatch) isUpdateMergeQueueError_Cause() {}
@@ -862,6 +1007,10 @@ func (*UpdateMergeQueueError_RolloutsAlreadyHeld) isUpdateMergeQueueError_Cause(
 
 func (*UpdateMergeQueueError_RolloutsNotHeld) isUpdateMergeQueueError_Cause() {}
 
+func (*UpdateMergeQueueError_RacingAlreadyDisabled) isUpdateMergeQueueError_Cause() {}
+
+func (*UpdateMergeQueueError_RacingNotDisabled) isUpdateMergeQueueError_Cause() {}
+
 type UpdateMergeQueueUnknownWorkspace struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -870,7 +1019,7 @@ type UpdateMergeQueueUnknownWorkspace struct {
 
 func (x *UpdateMergeQueueUnknownWorkspace) Reset() {
 	*x = UpdateMergeQueueUnknownWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -882,7 +1031,7 @@ func (x *UpdateMergeQueueUnknownWorkspace) String() string {
 func (*UpdateMergeQueueUnknownWorkspace) ProtoMessage() {}
 
 func (x *UpdateMergeQueueUnknownWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -895,7 +1044,7 @@ func (x *UpdateMergeQueueUnknownWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateMergeQueueUnknownWorkspace.ProtoReflect.Descriptor instead.
 func (*UpdateMergeQueueUnknownWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{11}
+	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{13}
 }
 
 type UpdateMergeQueueWorkspaceRefMismatch struct {
@@ -908,7 +1057,7 @@ type UpdateMergeQueueWorkspaceRefMismatch struct {
 
 func (x *UpdateMergeQueueWorkspaceRefMismatch) Reset() {
 	*x = UpdateMergeQueueWorkspaceRefMismatch{}
-	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -920,7 +1069,7 @@ func (x *UpdateMergeQueueWorkspaceRefMismatch) String() string {
 func (*UpdateMergeQueueWorkspaceRefMismatch) ProtoMessage() {}
 
 func (x *UpdateMergeQueueWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -933,7 +1082,7 @@ func (x *UpdateMergeQueueWorkspaceRefMismatch) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use UpdateMergeQueueWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
 func (*UpdateMergeQueueWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{12}
+	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *UpdateMergeQueueWorkspaceRefMismatch) GetRegistryDir() string {
@@ -953,7 +1102,7 @@ type UpdateMergeQueueTransferringAway struct {
 
 func (x *UpdateMergeQueueTransferringAway) Reset() {
 	*x = UpdateMergeQueueTransferringAway{}
-	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -965,7 +1114,7 @@ func (x *UpdateMergeQueueTransferringAway) String() string {
 func (*UpdateMergeQueueTransferringAway) ProtoMessage() {}
 
 func (x *UpdateMergeQueueTransferringAway) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -978,7 +1127,7 @@ func (x *UpdateMergeQueueTransferringAway) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateMergeQueueTransferringAway.ProtoReflect.Descriptor instead.
 func (*UpdateMergeQueueTransferringAway) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{13}
+	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *UpdateMergeQueueTransferringAway) GetAddress() string {
@@ -996,7 +1145,7 @@ type UpdateMergeQueueNotYetAdopted struct {
 
 func (x *UpdateMergeQueueNotYetAdopted) Reset() {
 	*x = UpdateMergeQueueNotYetAdopted{}
-	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1008,7 +1157,7 @@ func (x *UpdateMergeQueueNotYetAdopted) String() string {
 func (*UpdateMergeQueueNotYetAdopted) ProtoMessage() {}
 
 func (x *UpdateMergeQueueNotYetAdopted) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1021,7 +1170,7 @@ func (x *UpdateMergeQueueNotYetAdopted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateMergeQueueNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*UpdateMergeQueueNotYetAdopted) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{14}
+	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{16}
 }
 
 type UpdateMergeQueueAlreadyPaused struct {
@@ -1032,7 +1181,7 @@ type UpdateMergeQueueAlreadyPaused struct {
 
 func (x *UpdateMergeQueueAlreadyPaused) Reset() {
 	*x = UpdateMergeQueueAlreadyPaused{}
-	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1044,7 +1193,7 @@ func (x *UpdateMergeQueueAlreadyPaused) String() string {
 func (*UpdateMergeQueueAlreadyPaused) ProtoMessage() {}
 
 func (x *UpdateMergeQueueAlreadyPaused) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1057,7 +1206,7 @@ func (x *UpdateMergeQueueAlreadyPaused) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateMergeQueueAlreadyPaused.ProtoReflect.Descriptor instead.
 func (*UpdateMergeQueueAlreadyPaused) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{15}
+	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{17}
 }
 
 type UpdateMergeQueueNotPaused struct {
@@ -1068,7 +1217,7 @@ type UpdateMergeQueueNotPaused struct {
 
 func (x *UpdateMergeQueueNotPaused) Reset() {
 	*x = UpdateMergeQueueNotPaused{}
-	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1080,7 +1229,7 @@ func (x *UpdateMergeQueueNotPaused) String() string {
 func (*UpdateMergeQueueNotPaused) ProtoMessage() {}
 
 func (x *UpdateMergeQueueNotPaused) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1093,7 +1242,7 @@ func (x *UpdateMergeQueueNotPaused) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateMergeQueueNotPaused.ProtoReflect.Descriptor instead.
 func (*UpdateMergeQueueNotPaused) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{16}
+	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{18}
 }
 
 type UpdateMergeQueueNoSuchQueuedMerge struct {
@@ -1104,7 +1253,7 @@ type UpdateMergeQueueNoSuchQueuedMerge struct {
 
 func (x *UpdateMergeQueueNoSuchQueuedMerge) Reset() {
 	*x = UpdateMergeQueueNoSuchQueuedMerge{}
-	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1116,7 +1265,7 @@ func (x *UpdateMergeQueueNoSuchQueuedMerge) String() string {
 func (*UpdateMergeQueueNoSuchQueuedMerge) ProtoMessage() {}
 
 func (x *UpdateMergeQueueNoSuchQueuedMerge) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1129,7 +1278,7 @@ func (x *UpdateMergeQueueNoSuchQueuedMerge) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use UpdateMergeQueueNoSuchQueuedMerge.ProtoReflect.Descriptor instead.
 func (*UpdateMergeQueueNoSuchQueuedMerge) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{17}
+	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{19}
 }
 
 // The unknown-repository refusal. Empty on purpose (see the arm).
@@ -1141,7 +1290,7 @@ type UpdateMergeQueueUnknownRepository struct {
 
 func (x *UpdateMergeQueueUnknownRepository) Reset() {
 	*x = UpdateMergeQueueUnknownRepository{}
-	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[18]
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1153,7 +1302,7 @@ func (x *UpdateMergeQueueUnknownRepository) String() string {
 func (*UpdateMergeQueueUnknownRepository) ProtoMessage() {}
 
 func (x *UpdateMergeQueueUnknownRepository) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[18]
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1166,7 +1315,7 @@ func (x *UpdateMergeQueueUnknownRepository) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use UpdateMergeQueueUnknownRepository.ProtoReflect.Descriptor instead.
 func (*UpdateMergeQueueUnknownRepository) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{18}
+	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{20}
 }
 
 type UpdateMergeQueueRolloutsAlreadyHeld struct {
@@ -1177,7 +1326,7 @@ type UpdateMergeQueueRolloutsAlreadyHeld struct {
 
 func (x *UpdateMergeQueueRolloutsAlreadyHeld) Reset() {
 	*x = UpdateMergeQueueRolloutsAlreadyHeld{}
-	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[19]
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1189,7 +1338,7 @@ func (x *UpdateMergeQueueRolloutsAlreadyHeld) String() string {
 func (*UpdateMergeQueueRolloutsAlreadyHeld) ProtoMessage() {}
 
 func (x *UpdateMergeQueueRolloutsAlreadyHeld) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[19]
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1202,7 +1351,7 @@ func (x *UpdateMergeQueueRolloutsAlreadyHeld) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use UpdateMergeQueueRolloutsAlreadyHeld.ProtoReflect.Descriptor instead.
 func (*UpdateMergeQueueRolloutsAlreadyHeld) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{19}
+	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{21}
 }
 
 type UpdateMergeQueueRolloutsNotHeld struct {
@@ -1213,7 +1362,7 @@ type UpdateMergeQueueRolloutsNotHeld struct {
 
 func (x *UpdateMergeQueueRolloutsNotHeld) Reset() {
 	*x = UpdateMergeQueueRolloutsNotHeld{}
-	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[20]
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1225,7 +1374,7 @@ func (x *UpdateMergeQueueRolloutsNotHeld) String() string {
 func (*UpdateMergeQueueRolloutsNotHeld) ProtoMessage() {}
 
 func (x *UpdateMergeQueueRolloutsNotHeld) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[20]
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1238,14 +1387,86 @@ func (x *UpdateMergeQueueRolloutsNotHeld) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateMergeQueueRolloutsNotHeld.ProtoReflect.Descriptor instead.
 func (*UpdateMergeQueueRolloutsNotHeld) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{20}
+	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{22}
+}
+
+type UpdateMergeQueueRacingAlreadyDisabled struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateMergeQueueRacingAlreadyDisabled) Reset() {
+	*x = UpdateMergeQueueRacingAlreadyDisabled{}
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateMergeQueueRacingAlreadyDisabled) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateMergeQueueRacingAlreadyDisabled) ProtoMessage() {}
+
+func (x *UpdateMergeQueueRacingAlreadyDisabled) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateMergeQueueRacingAlreadyDisabled.ProtoReflect.Descriptor instead.
+func (*UpdateMergeQueueRacingAlreadyDisabled) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{23}
+}
+
+type UpdateMergeQueueRacingNotDisabled struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateMergeQueueRacingNotDisabled) Reset() {
+	*x = UpdateMergeQueueRacingNotDisabled{}
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateMergeQueueRacingNotDisabled) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateMergeQueueRacingNotDisabled) ProtoMessage() {}
+
+func (x *UpdateMergeQueueRacingNotDisabled) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateMergeQueueRacingNotDisabled.ProtoReflect.Descriptor instead.
+func (*UpdateMergeQueueRacingNotDisabled) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{24}
 }
 
 var File_agentrepl_v1_endpoint_update_merge_queue_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDesc = "" +
 	"\n" +
-	".agentrepl/v1/endpoint_update_merge_queue.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\"\xa1\x04\n" +
+	".agentrepl/v1/endpoint_update_merge_queue.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\"\xca\x05\n" +
 	"\x17UpdateMergeQueueRequest\x12;\n" +
 	"\x05pause\x18\x01 \x01(\v2#.agentrepl.v1.UpdateMergeQueuePauseH\x00R\x05pause\x12>\n" +
 	"\x06resume\x18\x02 \x01(\v2$.agentrepl.v1.UpdateMergeQueueResumeH\x00R\x06resume\x12;\n" +
@@ -1253,7 +1474,10 @@ const file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDesc = "" +
 	"\rhold_rollouts\x18\x05 \x01(\v2*.agentrepl.v1.UpdateMergeQueueHoldRolloutsH\x00R\fholdRollouts\x12Z\n" +
 	"\x10release_rollouts\x18\x06 \x01(\v2-.agentrepl.v1.UpdateMergeQueueReleaseRolloutsH\x00R\x0freleaseRollouts\x12?\n" +
 	"\amove_up\x18\a \x01(\v2$.agentrepl.v1.UpdateMergeQueueMoveUpH\x00R\x06moveUp\x12E\n" +
-	"\tmove_down\x18\b \x01(\v2&.agentrepl.v1.UpdateMergeQueueMoveDownH\x00R\bmoveDownB\b\n" +
+	"\tmove_down\x18\b \x01(\v2&.agentrepl.v1.UpdateMergeQueueMoveDownH\x00R\bmoveDown\x12T\n" +
+	"\x0edisable_racing\x18\t \x01(\v2+.agentrepl.v1.UpdateMergeQueueDisableRacingH\x00R\rdisableRacing\x12Q\n" +
+	"\renable_racing\x18\n" +
+	" \x01(\v2*.agentrepl.v1.UpdateMergeQueueEnableRacingH\x00R\fenableRacingB\b\n" +
 	"\x06actionJ\x04\b\x04\x10\x05R\x05front\"h\n" +
 	"\x15UpdateMergeQueuePause\x12@\n" +
 	"\n" +
@@ -1268,7 +1492,9 @@ const file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDesc = "" +
 	"\x15UpdateMergeQueueEvict\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\x1e\n" +
 	"\x1cUpdateMergeQueueHoldRollouts\"!\n" +
-	"\x1fUpdateMergeQueueReleaseRollouts\"R\n" +
+	"\x1fUpdateMergeQueueReleaseRollouts\"\x1f\n" +
+	"\x1dUpdateMergeQueueDisableRacing\"\x1e\n" +
+	"\x1cUpdateMergeQueueEnableRacing\"R\n" +
 	"\x16UpdateMergeQueueMoveUp\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"T\n" +
 	"\x18UpdateMergeQueueMoveDown\x128\n" +
@@ -1277,7 +1503,7 @@ const file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2%.agentrepl.v1.UpdateMergeQueueSuccessH\x00R\asuccess\x12;\n" +
 	"\x05error\x18\x02 \x01(\v2#.agentrepl.v1.UpdateMergeQueueErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x19\n" +
-	"\x17UpdateMergeQueueSuccess\"\xcd\a\n" +
+	"\x17UpdateMergeQueueSuccess\"\x9f\t\n" +
 	"\x15UpdateMergeQueueError\x12]\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2..agentrepl.v1.UpdateMergeQueueUnknownWorkspaceH\x00R\x10unknownWorkspace\x12j\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v22.agentrepl.v1.UpdateMergeQueueWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12]\n" +
@@ -1290,7 +1516,9 @@ const file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDesc = "" +
 	"\x12unknown_repository\x18\b \x01(\v2/.agentrepl.v1.UpdateMergeQueueUnknownRepositoryH\x00R\x11unknownRepository\x12g\n" +
 	"\x15rollouts_already_held\x18\t \x01(\v21.agentrepl.v1.UpdateMergeQueueRolloutsAlreadyHeldH\x00R\x13rolloutsAlreadyHeld\x12[\n" +
 	"\x11rollouts_not_held\x18\n" +
-	" \x01(\v2-.agentrepl.v1.UpdateMergeQueueRolloutsNotHeldH\x00R\x0frolloutsNotHeldB\a\n" +
+	" \x01(\v2-.agentrepl.v1.UpdateMergeQueueRolloutsNotHeldH\x00R\x0frolloutsNotHeld\x12m\n" +
+	"\x17racing_already_disabled\x18\v \x01(\v23.agentrepl.v1.UpdateMergeQueueRacingAlreadyDisabledH\x00R\x15racingAlreadyDisabled\x12a\n" +
+	"\x13racing_not_disabled\x18\f \x01(\v2/.agentrepl.v1.UpdateMergeQueueRacingNotDisabledH\x00R\x11racingNotDisabledB\a\n" +
 	"\x05cause\"\"\n" +
 	" UpdateMergeQueueUnknownWorkspace\"I\n" +
 	"$UpdateMergeQueueWorkspaceRefMismatch\x12!\n" +
@@ -1303,7 +1531,9 @@ const file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDesc = "" +
 	"!UpdateMergeQueueNoSuchQueuedMerge\"#\n" +
 	"!UpdateMergeQueueUnknownRepository\"%\n" +
 	"#UpdateMergeQueueRolloutsAlreadyHeld\"!\n" +
-	"\x1fUpdateMergeQueueRolloutsNotHeldB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x1fUpdateMergeQueueRolloutsNotHeld\"'\n" +
+	"%UpdateMergeQueueRacingAlreadyDisabled\"#\n" +
+	"!UpdateMergeQueueRacingNotDisabledB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescOnce sync.Once
@@ -1317,31 +1547,35 @@ func file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
+var file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
 var file_agentrepl_v1_endpoint_update_merge_queue_proto_goTypes = []any{
-	(*UpdateMergeQueueRequest)(nil),              // 0: agentrepl.v1.UpdateMergeQueueRequest
-	(*UpdateMergeQueuePause)(nil),                // 1: agentrepl.v1.UpdateMergeQueuePause
-	(*UpdateMergeQueueResume)(nil),               // 2: agentrepl.v1.UpdateMergeQueueResume
-	(*UpdateMergeQueueEvict)(nil),                // 3: agentrepl.v1.UpdateMergeQueueEvict
-	(*UpdateMergeQueueHoldRollouts)(nil),         // 4: agentrepl.v1.UpdateMergeQueueHoldRollouts
-	(*UpdateMergeQueueReleaseRollouts)(nil),      // 5: agentrepl.v1.UpdateMergeQueueReleaseRollouts
-	(*UpdateMergeQueueMoveUp)(nil),               // 6: agentrepl.v1.UpdateMergeQueueMoveUp
-	(*UpdateMergeQueueMoveDown)(nil),             // 7: agentrepl.v1.UpdateMergeQueueMoveDown
-	(*UpdateMergeQueueResponse)(nil),             // 8: agentrepl.v1.UpdateMergeQueueResponse
-	(*UpdateMergeQueueSuccess)(nil),              // 9: agentrepl.v1.UpdateMergeQueueSuccess
-	(*UpdateMergeQueueError)(nil),                // 10: agentrepl.v1.UpdateMergeQueueError
-	(*UpdateMergeQueueUnknownWorkspace)(nil),     // 11: agentrepl.v1.UpdateMergeQueueUnknownWorkspace
-	(*UpdateMergeQueueWorkspaceRefMismatch)(nil), // 12: agentrepl.v1.UpdateMergeQueueWorkspaceRefMismatch
-	(*UpdateMergeQueueTransferringAway)(nil),     // 13: agentrepl.v1.UpdateMergeQueueTransferringAway
-	(*UpdateMergeQueueNotYetAdopted)(nil),        // 14: agentrepl.v1.UpdateMergeQueueNotYetAdopted
-	(*UpdateMergeQueueAlreadyPaused)(nil),        // 15: agentrepl.v1.UpdateMergeQueueAlreadyPaused
-	(*UpdateMergeQueueNotPaused)(nil),            // 16: agentrepl.v1.UpdateMergeQueueNotPaused
-	(*UpdateMergeQueueNoSuchQueuedMerge)(nil),    // 17: agentrepl.v1.UpdateMergeQueueNoSuchQueuedMerge
-	(*UpdateMergeQueueUnknownRepository)(nil),    // 18: agentrepl.v1.UpdateMergeQueueUnknownRepository
-	(*UpdateMergeQueueRolloutsAlreadyHeld)(nil),  // 19: agentrepl.v1.UpdateMergeQueueRolloutsAlreadyHeld
-	(*UpdateMergeQueueRolloutsNotHeld)(nil),      // 20: agentrepl.v1.UpdateMergeQueueRolloutsNotHeld
-	(*v1.RepositoryRef)(nil),                     // 21: workspace.v1.RepositoryRef
-	(*v1.WorkspaceRef)(nil),                      // 22: workspace.v1.WorkspaceRef
+	(*UpdateMergeQueueRequest)(nil),               // 0: agentrepl.v1.UpdateMergeQueueRequest
+	(*UpdateMergeQueuePause)(nil),                 // 1: agentrepl.v1.UpdateMergeQueuePause
+	(*UpdateMergeQueueResume)(nil),                // 2: agentrepl.v1.UpdateMergeQueueResume
+	(*UpdateMergeQueueEvict)(nil),                 // 3: agentrepl.v1.UpdateMergeQueueEvict
+	(*UpdateMergeQueueHoldRollouts)(nil),          // 4: agentrepl.v1.UpdateMergeQueueHoldRollouts
+	(*UpdateMergeQueueReleaseRollouts)(nil),       // 5: agentrepl.v1.UpdateMergeQueueReleaseRollouts
+	(*UpdateMergeQueueDisableRacing)(nil),         // 6: agentrepl.v1.UpdateMergeQueueDisableRacing
+	(*UpdateMergeQueueEnableRacing)(nil),          // 7: agentrepl.v1.UpdateMergeQueueEnableRacing
+	(*UpdateMergeQueueMoveUp)(nil),                // 8: agentrepl.v1.UpdateMergeQueueMoveUp
+	(*UpdateMergeQueueMoveDown)(nil),              // 9: agentrepl.v1.UpdateMergeQueueMoveDown
+	(*UpdateMergeQueueResponse)(nil),              // 10: agentrepl.v1.UpdateMergeQueueResponse
+	(*UpdateMergeQueueSuccess)(nil),               // 11: agentrepl.v1.UpdateMergeQueueSuccess
+	(*UpdateMergeQueueError)(nil),                 // 12: agentrepl.v1.UpdateMergeQueueError
+	(*UpdateMergeQueueUnknownWorkspace)(nil),      // 13: agentrepl.v1.UpdateMergeQueueUnknownWorkspace
+	(*UpdateMergeQueueWorkspaceRefMismatch)(nil),  // 14: agentrepl.v1.UpdateMergeQueueWorkspaceRefMismatch
+	(*UpdateMergeQueueTransferringAway)(nil),      // 15: agentrepl.v1.UpdateMergeQueueTransferringAway
+	(*UpdateMergeQueueNotYetAdopted)(nil),         // 16: agentrepl.v1.UpdateMergeQueueNotYetAdopted
+	(*UpdateMergeQueueAlreadyPaused)(nil),         // 17: agentrepl.v1.UpdateMergeQueueAlreadyPaused
+	(*UpdateMergeQueueNotPaused)(nil),             // 18: agentrepl.v1.UpdateMergeQueueNotPaused
+	(*UpdateMergeQueueNoSuchQueuedMerge)(nil),     // 19: agentrepl.v1.UpdateMergeQueueNoSuchQueuedMerge
+	(*UpdateMergeQueueUnknownRepository)(nil),     // 20: agentrepl.v1.UpdateMergeQueueUnknownRepository
+	(*UpdateMergeQueueRolloutsAlreadyHeld)(nil),   // 21: agentrepl.v1.UpdateMergeQueueRolloutsAlreadyHeld
+	(*UpdateMergeQueueRolloutsNotHeld)(nil),       // 22: agentrepl.v1.UpdateMergeQueueRolloutsNotHeld
+	(*UpdateMergeQueueRacingAlreadyDisabled)(nil), // 23: agentrepl.v1.UpdateMergeQueueRacingAlreadyDisabled
+	(*UpdateMergeQueueRacingNotDisabled)(nil),     // 24: agentrepl.v1.UpdateMergeQueueRacingNotDisabled
+	(*v1.RepositoryRef)(nil),                      // 25: workspace.v1.RepositoryRef
+	(*v1.WorkspaceRef)(nil),                       // 26: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_update_merge_queue_proto_depIdxs = []int32{
 	1,  // 0: agentrepl.v1.UpdateMergeQueueRequest.pause:type_name -> agentrepl.v1.UpdateMergeQueuePause
@@ -1349,30 +1583,34 @@ var file_agentrepl_v1_endpoint_update_merge_queue_proto_depIdxs = []int32{
 	3,  // 2: agentrepl.v1.UpdateMergeQueueRequest.evict:type_name -> agentrepl.v1.UpdateMergeQueueEvict
 	4,  // 3: agentrepl.v1.UpdateMergeQueueRequest.hold_rollouts:type_name -> agentrepl.v1.UpdateMergeQueueHoldRollouts
 	5,  // 4: agentrepl.v1.UpdateMergeQueueRequest.release_rollouts:type_name -> agentrepl.v1.UpdateMergeQueueReleaseRollouts
-	6,  // 5: agentrepl.v1.UpdateMergeQueueRequest.move_up:type_name -> agentrepl.v1.UpdateMergeQueueMoveUp
-	7,  // 6: agentrepl.v1.UpdateMergeQueueRequest.move_down:type_name -> agentrepl.v1.UpdateMergeQueueMoveDown
-	21, // 7: agentrepl.v1.UpdateMergeQueuePause.repository:type_name -> workspace.v1.RepositoryRef
-	21, // 8: agentrepl.v1.UpdateMergeQueueResume.repository:type_name -> workspace.v1.RepositoryRef
-	22, // 9: agentrepl.v1.UpdateMergeQueueEvict.workspace:type_name -> workspace.v1.WorkspaceRef
-	22, // 10: agentrepl.v1.UpdateMergeQueueMoveUp.workspace:type_name -> workspace.v1.WorkspaceRef
-	22, // 11: agentrepl.v1.UpdateMergeQueueMoveDown.workspace:type_name -> workspace.v1.WorkspaceRef
-	9,  // 12: agentrepl.v1.UpdateMergeQueueResponse.success:type_name -> agentrepl.v1.UpdateMergeQueueSuccess
-	10, // 13: agentrepl.v1.UpdateMergeQueueResponse.error:type_name -> agentrepl.v1.UpdateMergeQueueError
-	11, // 14: agentrepl.v1.UpdateMergeQueueError.unknown_workspace:type_name -> agentrepl.v1.UpdateMergeQueueUnknownWorkspace
-	12, // 15: agentrepl.v1.UpdateMergeQueueError.workspace_ref_mismatch:type_name -> agentrepl.v1.UpdateMergeQueueWorkspaceRefMismatch
-	13, // 16: agentrepl.v1.UpdateMergeQueueError.transferring_away:type_name -> agentrepl.v1.UpdateMergeQueueTransferringAway
-	14, // 17: agentrepl.v1.UpdateMergeQueueError.not_yet_adopted:type_name -> agentrepl.v1.UpdateMergeQueueNotYetAdopted
-	15, // 18: agentrepl.v1.UpdateMergeQueueError.already_paused:type_name -> agentrepl.v1.UpdateMergeQueueAlreadyPaused
-	16, // 19: agentrepl.v1.UpdateMergeQueueError.not_paused:type_name -> agentrepl.v1.UpdateMergeQueueNotPaused
-	17, // 20: agentrepl.v1.UpdateMergeQueueError.no_such_queued_merge:type_name -> agentrepl.v1.UpdateMergeQueueNoSuchQueuedMerge
-	18, // 21: agentrepl.v1.UpdateMergeQueueError.unknown_repository:type_name -> agentrepl.v1.UpdateMergeQueueUnknownRepository
-	19, // 22: agentrepl.v1.UpdateMergeQueueError.rollouts_already_held:type_name -> agentrepl.v1.UpdateMergeQueueRolloutsAlreadyHeld
-	20, // 23: agentrepl.v1.UpdateMergeQueueError.rollouts_not_held:type_name -> agentrepl.v1.UpdateMergeQueueRolloutsNotHeld
-	24, // [24:24] is the sub-list for method output_type
-	24, // [24:24] is the sub-list for method input_type
-	24, // [24:24] is the sub-list for extension type_name
-	24, // [24:24] is the sub-list for extension extendee
-	0,  // [0:24] is the sub-list for field type_name
+	8,  // 5: agentrepl.v1.UpdateMergeQueueRequest.move_up:type_name -> agentrepl.v1.UpdateMergeQueueMoveUp
+	9,  // 6: agentrepl.v1.UpdateMergeQueueRequest.move_down:type_name -> agentrepl.v1.UpdateMergeQueueMoveDown
+	6,  // 7: agentrepl.v1.UpdateMergeQueueRequest.disable_racing:type_name -> agentrepl.v1.UpdateMergeQueueDisableRacing
+	7,  // 8: agentrepl.v1.UpdateMergeQueueRequest.enable_racing:type_name -> agentrepl.v1.UpdateMergeQueueEnableRacing
+	25, // 9: agentrepl.v1.UpdateMergeQueuePause.repository:type_name -> workspace.v1.RepositoryRef
+	25, // 10: agentrepl.v1.UpdateMergeQueueResume.repository:type_name -> workspace.v1.RepositoryRef
+	26, // 11: agentrepl.v1.UpdateMergeQueueEvict.workspace:type_name -> workspace.v1.WorkspaceRef
+	26, // 12: agentrepl.v1.UpdateMergeQueueMoveUp.workspace:type_name -> workspace.v1.WorkspaceRef
+	26, // 13: agentrepl.v1.UpdateMergeQueueMoveDown.workspace:type_name -> workspace.v1.WorkspaceRef
+	11, // 14: agentrepl.v1.UpdateMergeQueueResponse.success:type_name -> agentrepl.v1.UpdateMergeQueueSuccess
+	12, // 15: agentrepl.v1.UpdateMergeQueueResponse.error:type_name -> agentrepl.v1.UpdateMergeQueueError
+	13, // 16: agentrepl.v1.UpdateMergeQueueError.unknown_workspace:type_name -> agentrepl.v1.UpdateMergeQueueUnknownWorkspace
+	14, // 17: agentrepl.v1.UpdateMergeQueueError.workspace_ref_mismatch:type_name -> agentrepl.v1.UpdateMergeQueueWorkspaceRefMismatch
+	15, // 18: agentrepl.v1.UpdateMergeQueueError.transferring_away:type_name -> agentrepl.v1.UpdateMergeQueueTransferringAway
+	16, // 19: agentrepl.v1.UpdateMergeQueueError.not_yet_adopted:type_name -> agentrepl.v1.UpdateMergeQueueNotYetAdopted
+	17, // 20: agentrepl.v1.UpdateMergeQueueError.already_paused:type_name -> agentrepl.v1.UpdateMergeQueueAlreadyPaused
+	18, // 21: agentrepl.v1.UpdateMergeQueueError.not_paused:type_name -> agentrepl.v1.UpdateMergeQueueNotPaused
+	19, // 22: agentrepl.v1.UpdateMergeQueueError.no_such_queued_merge:type_name -> agentrepl.v1.UpdateMergeQueueNoSuchQueuedMerge
+	20, // 23: agentrepl.v1.UpdateMergeQueueError.unknown_repository:type_name -> agentrepl.v1.UpdateMergeQueueUnknownRepository
+	21, // 24: agentrepl.v1.UpdateMergeQueueError.rollouts_already_held:type_name -> agentrepl.v1.UpdateMergeQueueRolloutsAlreadyHeld
+	22, // 25: agentrepl.v1.UpdateMergeQueueError.rollouts_not_held:type_name -> agentrepl.v1.UpdateMergeQueueRolloutsNotHeld
+	23, // 26: agentrepl.v1.UpdateMergeQueueError.racing_already_disabled:type_name -> agentrepl.v1.UpdateMergeQueueRacingAlreadyDisabled
+	24, // 27: agentrepl.v1.UpdateMergeQueueError.racing_not_disabled:type_name -> agentrepl.v1.UpdateMergeQueueRacingNotDisabled
+	28, // [28:28] is the sub-list for method output_type
+	28, // [28:28] is the sub-list for method input_type
+	28, // [28:28] is the sub-list for extension type_name
+	28, // [28:28] is the sub-list for extension extendee
+	0,  // [0:28] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_update_merge_queue_proto_init() }
@@ -1388,14 +1626,16 @@ func file_agentrepl_v1_endpoint_update_merge_queue_proto_init() {
 		(*UpdateMergeQueueRequest_ReleaseRollouts)(nil),
 		(*UpdateMergeQueueRequest_MoveUp)(nil),
 		(*UpdateMergeQueueRequest_MoveDown)(nil),
+		(*UpdateMergeQueueRequest_DisableRacing)(nil),
+		(*UpdateMergeQueueRequest_EnableRacing)(nil),
 	}
 	file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[1].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[2].OneofWrappers = []any{}
-	file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[8].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[10].OneofWrappers = []any{
 		(*UpdateMergeQueueResponse_Success)(nil),
 		(*UpdateMergeQueueResponse_Error)(nil),
 	}
-	file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[10].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[12].OneofWrappers = []any{
 		(*UpdateMergeQueueError_UnknownWorkspace)(nil),
 		(*UpdateMergeQueueError_WorkspaceRefMismatch)(nil),
 		(*UpdateMergeQueueError_TransferringAway)(nil),
@@ -1406,6 +1646,8 @@ func file_agentrepl_v1_endpoint_update_merge_queue_proto_init() {
 		(*UpdateMergeQueueError_UnknownRepository)(nil),
 		(*UpdateMergeQueueError_RolloutsAlreadyHeld)(nil),
 		(*UpdateMergeQueueError_RolloutsNotHeld)(nil),
+		(*UpdateMergeQueueError_RacingAlreadyDisabled)(nil),
+		(*UpdateMergeQueueError_RacingNotDisabled)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1413,7 +1655,7 @@ func file_agentrepl_v1_endpoint_update_merge_queue_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDesc), len(file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   21,
+			NumMessages:   25,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

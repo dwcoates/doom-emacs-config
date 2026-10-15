@@ -56,6 +56,12 @@ const (
 	// ArmRolloutsNotHeld refuses a release of rollouts that are not held
 	// (UpdateMergeQueueError.rollouts_not_held).
 	ArmRolloutsNotHeld = "rollouts_not_held"
+	// ArmRacingAlreadyDisabled refuses a disable of racing that is already
+	// disabled (UpdateMergeQueueError.racing_already_disabled).
+	ArmRacingAlreadyDisabled = "racing_already_disabled"
+	// ArmRacingNotDisabled refuses an enable of racing that is not disabled
+	// (UpdateMergeQueueError.racing_not_disabled).
+	ArmRacingNotDisabled = "racing_not_disabled"
 	// ArmUnknownOneShotWorkspace refuses an async request whose one-shot
 	// workspace is not open, is in another repository, or is the requester
 	// itself (MergeWorkspaceError.unknown_one_shot_workspace).

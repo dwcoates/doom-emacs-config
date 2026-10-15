@@ -438,6 +438,11 @@ type DB interface {
 	SetMergeRolloutHold(ctx context.Context, held bool, at time.Time) error
 	// MergeRolloutHold reports the daemon-wide rollout hold.
 	MergeRolloutHold(ctx context.Context) (RolloutHold, error)
+	// SetMergeRacingDisabled disables the merge queue's racing daemon-wide
+	// from at, or (disabled false) enables it again.
+	SetMergeRacingDisabled(ctx context.Context, disabled bool, at time.Time) error
+	// MergeRacing reports the daemon-wide racing switch.
+	MergeRacing(ctx context.Context) (RacingSwitch, error)
 
 	// OpenFault records a fault and returns its id.
 	OpenFault(ctx context.Context, f Fault) (FaultID, error)

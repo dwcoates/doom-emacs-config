@@ -712,9 +712,16 @@ func holdRollouts(t *testing.T, d *harness.Daemon, release bool) *agentreplv1.Up
 	if release {
 		req.Action = &agentreplv1.UpdateMergeQueueRequest_ReleaseRollouts{ReleaseRollouts: &agentreplv1.UpdateMergeQueueReleaseRollouts{}}
 	}
+	return askMergeQueue(t, d, req)
+}
+
+// askMergeQueue sends d one UpdateMergeQueue request and answers its reply,
+// failing the test on a transport error: every queue control is answered.
+func askMergeQueue(t *testing.T, d *harness.Daemon, req *agentreplv1.UpdateMergeQueueRequest) *agentreplv1.UpdateMergeQueueResponse {
+	t.Helper()
 	resp, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(req))
 	if err != nil {
-		t.Fatalf("UpdateMergeQueue(release=%v) = error %v, want an answer", release, err)
+		t.Fatalf("UpdateMergeQueue(%v) = error %v, want an answer", req.GetAction(), err)
 	}
 	return resp.Msg
 }

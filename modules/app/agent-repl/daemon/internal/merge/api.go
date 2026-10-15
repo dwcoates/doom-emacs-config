@@ -118,6 +118,15 @@ type Orchestrator interface {
 	// ReleaseRollouts ends the hold; nothing is deployed retroactively. A
 	// release of rollouts that are not held is refused (rollouts_not_held).
 	ReleaseRollouts(ctx context.Context) error
+	// DisableRacing disables the queue's racing, daemon-wide and durably:
+	// every queue works its head alone whatever the host's power source, and
+	// a merge racing behind its head is suspended at the step it stands on.
+	// A disable of disabled racing is refused (racing_already_disabled).
+	DisableRacing(ctx context.Context) error
+	// EnableRacing enables racing again: on AC power the merge behind each
+	// head starts racing it at once. An enable of racing that is not disabled
+	// is refused (racing_not_disabled).
+	EnableRacing(ctx context.Context) error
 	// Evict removes a workspace's merge from the queue. A merge that is
 	// already RUNNING is ABANDONED: it is ended through the one release path,
 	// which gives back its lease, its queue entry, its ledger interval and its

@@ -79,6 +79,12 @@ const (
 	TypeMergeHoldRollouts = "merge_hold_rollouts"
 	// TypeMergeReleaseRollouts ends the hold (UpdateMergeQueueReleaseRollouts).
 	TypeMergeReleaseRollouts = "merge_release_rollouts"
+	// TypeMergeDisableRacing disables the queue's racing daemon-wide
+	// (UpdateMergeQueueDisableRacing): every queue works its head alone,
+	// whatever the host's power source.
+	TypeMergeDisableRacing = "merge_disable_racing"
+	// TypeMergeEnableRacing enables racing again (UpdateMergeQueueEnableRacing).
+	TypeMergeEnableRacing = "merge_enable_racing"
 )
 
 // Entry is one decoded command-file entry. Every field the accepted types use
@@ -352,7 +358,8 @@ func (e Entry) Validate() error {
 		}
 		return nil
 	case TypeClose, TypeForget, TypeOpen, TypeSwitch, TypeMergeEvict, TypeMergeMoveUp, TypeMergeMoveDown,
-		TypeMergePause, TypeMergeResume, TypeMergeHoldRollouts, TypeMergeReleaseRollouts:
+		TypeMergePause, TypeMergeResume, TypeMergeHoldRollouts, TypeMergeReleaseRollouts,
+		TypeMergeDisableRacing, TypeMergeEnableRacing:
 		return e.requireTarget()
 	case TypeTaskCreate:
 		if e.Title == "" {

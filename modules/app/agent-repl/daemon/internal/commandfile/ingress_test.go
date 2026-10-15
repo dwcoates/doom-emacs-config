@@ -1586,3 +1586,110 @@ func TestApplyFileQuarantinesAMergeTheQueueRefusesForItsVersion(t *testing.T) {
 		t.Fatalf("ApplyFile = %v, want the file quarantined naming %s", err, merge.ArmVersionIncrementRequired)
 	}
 }
+
+// TestEveryDaemonWideSwitchTypeAppliesThroughItsTableEntry pins that every
+// entry type daemonWideSwitches names is dispatched to applyDaemonWideSwitch
+// and answers its table entry's outcome, so a type routed elsewhere fails.
+func TestEveryDaemonWideSwitchTypeAppliesThroughItsTableEntry(t *testing.T) {
+	for typ, sw := range daemonWideSwitches {
+		t.Run(typ, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", "/tree/w1")
+			path := f.write(t, "workspace_commands_switch.json", `[{"type":"`+typ+`","project_dir":"/tree/w1"}]`)
+
+			// Act.
+			err := f.ingress.ApplyFile(context.Background(), path)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("ApplyFile: %v", err)
+			}
+			record := f.record(t, opMergeQueue, "info")
+			if record.Context["outcome"] != sw.outcome || record.Context["type"] != typ || record.Message != sw.message {
+				t.Fatalf("record %v %q, want outcome=%s type=%s and the table's message", record.Context, record.Message, sw.outcome, typ)
+			}
+		})
+	}
+}
+
+func TestApplyDaemonWideSwitchPanicsOnATypeWithNoSwitch(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	defer func() {
+		// Assert.
+		if recover() == nil {
+			t.Fatal("a type with no switch was applied instead of failing hard")
+		}
+	}()
+
+	// Act.
+	_ = f.ingress.(*ingress).applyDaemonWideSwitch(context.Background(), dlog.NewTestLogger(), Entry{Type: TypeMergePause})
+}
+
+func TestApplyFileDisablesAndEnablesRacing(t *testing.T) {
+	tests := []struct {
+		name                      string
+		body                      string
+		wantDisables, wantEnables int
+		wantOutcome               string
+	}{
+		{name: "disable", body: `[{"type":"merge_disable_racing","project_dir":"/tree/w1"}]`, wantDisables: 1, wantOutcome: "racing_disabled"},
+		{name: "enable", body: `[{"type":"merge_enable_racing","project_dir":"/tree/w1"}]`, wantEnables: 1, wantOutcome: "racing_enabled"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", "/tree/w1")
+			path := f.write(t, "workspace_commands_racing.json", tt.body)
+
+			// Act.
+			err := f.ingress.ApplyFile(context.Background(), path)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("ApplyFile: %v", err)
+			}
+			if f.merge.disables != tt.wantDisables || f.merge.enables != tt.wantEnables {
+				t.Fatalf("disables, enables = %d, %d; want %d, %d", f.merge.disables, f.merge.enables, tt.wantDisables, tt.wantEnables)
+			}
+			record := f.record(t, opMergeQueue, "info")
+			if record.Context["outcome"] != tt.wantOutcome || record.Context["requester"] != "w1" {
+				t.Fatalf("record context %v, want outcome=%s requester=w1", record.Context, tt.wantOutcome)
+			}
+		})
+	}
+}
+
+func TestApplyFileQuarantinesARacingFlipTheOrchestratorRefuses(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		arm  string
+	}{
+		{name: "disabling disabled racing", body: `[{"type":"merge_disable_racing","project_dir":"/tree/w1"}]`, arm: merge.ArmRacingAlreadyDisabled},
+		{name: "enabling racing not disabled", body: `[{"type":"merge_enable_racing","project_dir":"/tree/w1"}]`, arm: merge.ArmRacingNotDisabled},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", "/tree/w1")
+			f.merge.racingErr = &merge.RefusalError{Arm: tt.arm, Reason: "arranged"}
+			path := f.write(t, "workspace_commands_racing.json", tt.body)
+
+			// Act.
+			err := f.ingress.ApplyFile(context.Background(), path)
+
+			// Assert.
+			if !errors.Is(err, ErrQuarantined) {
+				t.Fatalf("ApplyFile = %v, want the file quarantined", err)
+			}
+			record := f.record(t, opEntry, "info")
+			if cause, _ := record.Context["cause"].(string); !strings.Contains(cause, tt.arm) {
+				t.Fatalf("record cause %q, want the %s arm named", cause, tt.arm)
+			}
+		})
+	}
+}

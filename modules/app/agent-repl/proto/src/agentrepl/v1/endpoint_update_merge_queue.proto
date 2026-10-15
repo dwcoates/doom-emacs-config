@@ -37,6 +37,17 @@ message UpdateMergeQueueRequest {
     // Move ONE workspace's waiting merge one place DOWN its queue, swapping it
     // with the waiting merge directly behind it.
     UpdateMergeQueueMoveDown move_down = 8;
+    // DISABLE THE RACE, daemon-wide: every queue works its head alone, as on
+    // battery, whatever the host's power source. On AC power a queue otherwise
+    // works its top two merges, which race to land and take turns at the
+    // tests; a merge racing behind its head is suspended at the step it
+    // stands on and resumes there once it heads its queue. DURABLE: it
+    // survives a daemon restart and a handover until enabled. (Added
+    // 2026-10-14.)
+    UpdateMergeQueueDisableRacing disable_racing = 9;
+    // Enable the race again: on AC power the merge behind each head starts
+    // racing it at once.
+    UpdateMergeQueueEnableRacing enable_racing = 10;
   }
   // The retired move-to-front action (2026-10-12): one-place moves replaced it.
   reserved 4;
@@ -62,6 +73,10 @@ message UpdateMergeQueueEvict {
 // stops is the daemon's own.
 message UpdateMergeQueueHoldRollouts {}
 message UpdateMergeQueueReleaseRollouts {}
+// Daemon-wide: one switch covers every repository's queue, since the window
+// it narrows is the gate governor's, which every queue shares.
+message UpdateMergeQueueDisableRacing {}
+message UpdateMergeQueueEnableRacing {}
 // A ONE-PLACE MOVE passes exactly one WAITING merge: never the merge running,
 // and never a merge only requested (in nobody's line yet). The moved merge
 // takes the passed merge's front mark, so every merge put at the front still
@@ -114,6 +129,10 @@ message UpdateMergeQueueError {
     UpdateMergeQueueRolloutsAlreadyHeld rollouts_already_held = 9;
     // `release_rollouts` while the rollouts are not held. (2026-10-12.)
     UpdateMergeQueueRolloutsNotHeld rollouts_not_held = 10;
+    // `disable_racing` while racing is already disabled. (2026-10-14.)
+    UpdateMergeQueueRacingAlreadyDisabled racing_already_disabled = 11;
+    // `enable_racing` while racing is not disabled. (2026-10-14.)
+    UpdateMergeQueueRacingNotDisabled racing_not_disabled = 12;
   }
 }
 message UpdateMergeQueueUnknownWorkspace {}
@@ -133,3 +152,5 @@ message UpdateMergeQueueNoSuchQueuedMerge {}
 message UpdateMergeQueueUnknownRepository {}
 message UpdateMergeQueueRolloutsAlreadyHeld {}
 message UpdateMergeQueueRolloutsNotHeld {}
+message UpdateMergeQueueRacingAlreadyDisabled {}
+message UpdateMergeQueueRacingNotDisabled {}

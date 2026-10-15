@@ -994,7 +994,16 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		p.Surfaces.Global().Info("daemon.boot.gate_governor", "the gate governor reads a fixed power source, not the host's own", dlog.Context{
 			"env": cpugov.FixedPowerEnv, "value": fixedPower})
 	}
-	gateGovernor, err := cpugov.New(cpugov.DefaultConfig(), powerSource, p.Surfaces.Global())
+	// THE GOVERNOR IS BORN WITH THE OPERATOR'S RACING SWITCH, read from the
+	// state database before any merge can be admitted, so no merge ever races
+	// under a switch that disabled racing (merge's racing.go flips it live).
+	racing, err := p.DB.MergeRacing(ctx)
+	if err != nil {
+		p.Surfaces.Global().Error("daemon.boot.gate_governor", "could not read the merge queue's racing switch", dlog.Context{
+			"error": err.Error()})
+		return nil, fmt.Errorf("agent-repld: read the merge queue's racing switch: %w", err)
+	}
+	gateGovernor, err := cpugov.New(cpugov.DefaultConfig(), powerSource, racing.Disabled, p.Surfaces.Global())
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the gate governor: %w", err)
 	}

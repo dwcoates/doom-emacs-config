@@ -1,13 +1,13 @@
 ---
 name: merge-queue
-description: 'Land work on master through the agent-repl merge queue — the ONLY way into master in this repository. A merge is one of two modes. A ONE-SHOT concludes this workspace: its own branch merges SYNC, in place once the current turn ends, holding the feed, and this workspace closes once it lands (a failure leaves it open and is reported back to it). An ASYNC merge lands a NAMED BRANCH in a hidden merge workspace forked from this conversation while this workspace keeps working, optionally preparing the branch first from a free-text instruction (rebase onto master, drop unlanded commits, combine branches), closing another workspace (a child''s or a subagent''s) and removing the branch''s worktree once it lands, running only the before and after merge prompts the request names, and reporting how it ended back here. Any merge may be asked for at the FRONT of the queue (a hotfix). A merge onto agent-repl''s master names how it moves the version (minor or patch) and the changelog line its version tag carries. Also controls the queue itself, taking this workspace''s or another workspace''s merge off the queue, moving a waiting merge one place up or down the queue, pausing or resuming the queue for one repository or all, and holding or releasing the queue''s rollouts (merges still land, but a landing no longer redeploys the running runtime). Use whenever work is finished and must reach master, whenever a tangential fix or an attempt to test on master should land while work goes on, whenever you would otherwise run git merge, git commit, git cherry-pick or git push onto master, when a subagent reports a finished branch, whenever a queued merge must be removed, moved up or down, or the queue paused or resumed, whenever a hand-deployed build (a profiling build) must not be replaced by the next landing, or when invoked as /merge-queue.'
-argument-hint: "one-shot [pr-merged] [front] [minor|patch <changelog-line>] | async <name> <branch> [instruction <text>] [close <worktree-dir>] [cleanup] [compact-after] [before-merge <prompt>] [after-merge <prompt>] [front] [minor|patch <changelog-line>] | dequeue own | dequeue workspace <worktree-dir> | move-up own | move-up workspace <worktree-dir> | move-down own | move-down workspace <worktree-dir> | pause [<repo-dir>] | resume [<repo-dir>] | hold-rollouts | release-rollouts"
+description: 'Land work on master through the agent-repl merge queue — the ONLY way into master in this repository. A merge is one of two modes. A ONE-SHOT concludes this workspace: its own branch merges SYNC, in place once the current turn ends, holding the feed, and this workspace closes once it lands (a failure leaves it open and is reported back to it). An ASYNC merge lands a NAMED BRANCH in a hidden merge workspace forked from this conversation while this workspace keeps working, optionally preparing the branch first from a free-text instruction (rebase onto master, drop unlanded commits, combine branches), closing another workspace (a child''s or a subagent''s) and removing the branch''s worktree once it lands, running only the before and after merge prompts the request names, and reporting how it ended back here. Any merge may be asked for at the FRONT of the queue (a hotfix). A merge onto agent-repl''s master names how it moves the version (minor or patch) and the changelog line its version tag carries. Also controls the queue itself, taking this workspace''s or another workspace''s merge off the queue, moving a waiting merge one place up or down the queue, pausing or resuming the queue for one repository or all, holding or releasing the queue''s rollouts (merges still land, but a landing no longer redeploys the running runtime), and disabling or enabling the queue''s racing (on AC power its top two merges race; disabled, every queue works its head alone). Use whenever work is finished and must reach master, whenever a tangential fix or an attempt to test on master should land while work goes on, whenever you would otherwise run git merge, git commit, git cherry-pick or git push onto master, when a subagent reports a finished branch, whenever a queued merge must be removed, moved up or down, or the queue paused or resumed, whenever a hand-deployed build (a profiling build) must not be replaced by the next landing, whenever two merges must stop racing at the tests, or when invoked as /merge-queue.'
+argument-hint: "one-shot [pr-merged] [front] [minor|patch <changelog-line>] | async <name> <branch> [instruction <text>] [close <worktree-dir>] [cleanup] [compact-after] [before-merge <prompt>] [after-merge <prompt>] [front] [minor|patch <changelog-line>] | dequeue own | dequeue workspace <worktree-dir> | move-up own | move-up workspace <worktree-dir> | move-down own | move-down workspace <worktree-dir> | pause [<repo-dir>] | resume [<repo-dir>] | hold-rollouts | release-rollouts | disable-racing | enable-racing"
 allowed-tools: Bash(~/.claude/skills/merge-queue/run.sh:*)
 ---
 
 ## What This Skill Does
 
-Asks the merge queue, from this workspace, to land work in its merge target: master for a workspace made off the main checkout, the PARENT workspace's checkout for a workspace created explicitly as a child of another. A `one-shot` merges this workspace's own branch SYNC once the turn ends, in this workspace, and closes it once it lands. An `async` merge lands a named branch in a hidden merge workspace forked from this conversation, while this workspace stays free; its progress streams into the merge bubble here, the merge workspace is revealed when it fails, asks a question or permission, is stopped from the bubble, or is selected, and how it ended is reported back here. Nothing merges by hand. It also removes a queued merge, moves a waiting merge one place up or down the queue, pauses or resumes the queue, and holds or releases the queue's rollouts, answering at once.
+Asks the merge queue, from this workspace, to land work in its merge target: master for a workspace made off the main checkout, the PARENT workspace's checkout for a workspace created explicitly as a child of another. A `one-shot` merges this workspace's own branch SYNC once the turn ends, in this workspace, and closes it once it lands. An `async` merge lands a named branch in a hidden merge workspace forked from this conversation, while this workspace stays free; its progress streams into the merge bubble here, the merge workspace is revealed when it fails, asks a question or permission, is stopped from the bubble, or is selected, and how it ended is reported back here. Nothing merges by hand. It also removes a queued merge, moves a waiting merge one place up or down the queue, pauses or resumes the queue, holds or releases the queue's rollouts, and disables or enables its racing, answering at once.
 
 ## Arguments
 
@@ -35,10 +35,12 @@ Asks the merge queue, from this workspace, to land work in its merge target: mas
 | `resume [<repo-dir>]` | Resume a paused queue, scoped as `pause` is. |
 | `hold-rollouts` | Hold the queue's ROLLOUTS, daemon-wide and durably: merges keep landing, but a landing in the daemon's own checkout no longer redeploys, hot-reloads or bounces the running runtime. |
 | `release-rollouts` | End the hold; the next landing redeploys. Nothing that landed while held is deployed until then. |
+| `disable-racing` | Disable the queue's RACING, daemon-wide and durably (it survives daemon restarts and bounces): every queue works its head alone whatever the host's power source; on AC power the top two merges otherwise race, taking turns at the tests. A merge racing behind its head is suspended where it stands and resumes once it heads the queue. |
+| `enable-racing` | Enable racing again; on AC power the merge behind each head starts racing it at once. |
 
 ## Steps
 
-0. Choose the mode and confirm the work is ready (merge arguments only; skip to step 1 for `dequeue`, `move-up`, `move-down`, `pause`, `resume`, `hold-rollouts` and `release-rollouts`).
+0. Choose the mode and confirm the work is ready (merge arguments only; skip to step 1 for `dequeue`, `move-up`, `move-down`, `pause`, `resume`, `hold-rollouts`, `release-rollouts`, `disable-racing` and `enable-racing`).
   - Choose the mode by these rules, in order.
     - i. The user named a mode: use it.
     - ii. This workspace's worktree is the repository's MAIN worktree: use `async`. NEVER `one-shot`.
@@ -112,6 +114,7 @@ Asks the merge queue, from this workspace, to land work in its merge target: mas
     - `EXIT CODE 0:` The hold or release is applied. Go to step 5.
     - `EXIT CODE 2:` IMMEDIATELY terminate and surface the raw error.
     - `EXIT CODE 5:` Refused: the rollouts were already held, or were not held. Go to step 4.
+    - `EXIT CODE 8:` No answer arrived in time. Go to step 6.
   - h. If `move-up own` or `move-down own`: call `~/.claude/skills/merge-queue/run.sh --move-up-own` or `~/.claude/skills/merge-queue/run.sh --move-down-own` respectively.
     - `EXIT CODE 0:` The move is applied. Go to step 5.
     - `EXIT CODE 2:` IMMEDIATELY terminate and surface the raw error.
@@ -121,6 +124,11 @@ Asks the merge queue, from this workspace, to land work in its merge target: mas
     - `EXIT CODE 0:` The move is applied. Go to step 5.
     - `EXIT CODE 2:` IMMEDIATELY terminate and surface the raw error.
     - `EXIT CODE 5:` The move was refused. Go to step 4.
+    - `EXIT CODE 8:` No answer arrived in time. Go to step 6.
+  - j. If `disable-racing` or `enable-racing`: call `~/.claude/skills/merge-queue/run.sh --disable-racing` or `~/.claude/skills/merge-queue/run.sh --enable-racing`.
+    - `EXIT CODE 0:` The disable or enable is applied. Go to step 5.
+    - `EXIT CODE 2:` IMMEDIATELY terminate and surface the raw error.
+    - `EXIT CODE 5:` Refused: racing was already disabled, or was not disabled. Go to step 4.
     - `EXIT CODE 8:` No answer arrived in time. Go to step 6.
 
 2. End the turn (`async`).
@@ -139,12 +147,12 @@ Asks the merge queue, from this workspace, to land work in its merge target: mas
 4. Refused.
   - Report the printed refusal verbatim and STOP.
 
-5. Applied (`dequeue`, `move-up`, `move-down`, `pause`, `resume`, `hold-rollouts`, `release-rollouts`).
-  - Report the printed outcome (`evicted`, `moved_up`, `moved_down`, `unmoved`, `not_queued`, `paused`, `resumed`, `held`, `released`, or `unread`) and any other printed lines verbatim, then STOP.
+5. Applied (`dequeue`, `move-up`, `move-down`, `pause`, `resume`, `hold-rollouts`, `release-rollouts`, `disable-racing`, `enable-racing`).
+  - Report the printed outcome (`evicted`, `moved_up`, `moved_down`, `unmoved`, `not_queued`, `paused`, `resumed`, `held`, `released`, `racing_disabled`, `racing_enabled`, or `unread`) and any other printed lines verbatim, then STOP.
   - *NOTE*: removing or moving a merge that is not queued is applied with `not_queued`, not refused.
   - *NOTE*: a move with no waiting merge to pass on that side is applied with `unmoved`.
 
-6. Unanswered (`dequeue`, `move-up`, `move-down`, `pause`, `resume`, `hold-rollouts`, `release-rollouts`).
+6. Unanswered (`dequeue`, `move-up`, `move-down`, `pause`, `resume`, `hold-rollouts`, `release-rollouts`, `disable-racing`, `enable-racing`).
   - Report the printed lines verbatim and STOP.
   - CRITICAL: NEVER re-issue the request; it stays pending.
 

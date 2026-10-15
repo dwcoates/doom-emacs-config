@@ -66,7 +66,8 @@ func (s *server) UpdateShutdownSchedule(
 
 // UpdateMergeQueue is the operator's control of the merge queue: pause or
 // resume (daemon-wide when the repository ref is UNSET), evict one
-// workspace's queued merge, or move one a place up or down its queue.
+// workspace's queued merge, move one a place up or down its queue, or flip a
+// daemon-wide switch (the rollout hold, the racing switch).
 func (s *server) UpdateMergeQueue(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.UpdateMergeQueueRequest],
@@ -90,11 +91,7 @@ func (s *server) UpdateMergeQueue(
 		})
 	}
 
-	if req.Msg.GetHoldRollouts() != nil || req.Msg.GetReleaseRollouts() != nil {
-		action, apply := "hold_rollouts", s.deps.Merge.HoldRollouts
-		if req.Msg.GetReleaseRollouts() != nil {
-			action, apply = "release_rollouts", s.deps.Merge.ReleaseRollouts
-		}
+	if action, apply, ok := s.daemonWideMergeAction(req.Msg); ok {
 		if err := apply(ctx); err != nil {
 			return answer(resp, s.answerRefusal(s.log, rpc, resp, err, nil))
 		}
@@ -147,6 +144,23 @@ func (s *server) actOnQueuedMerge(
 		Success: &agentreplv1.UpdateMergeQueueSuccess{},
 	}
 	return connect.NewResponse(resp), nil
+}
+
+// daemonWideMergeAction reads a daemon-wide operator switch's arm -- the
+// rollout hold or the racing switch -- as its action name and the
+// orchestrator verb that applies it; ok is false for every other arm.
+func (s *server) daemonWideMergeAction(req *agentreplv1.UpdateMergeQueueRequest) (string, func(context.Context) error, bool) {
+	switch req.GetAction().(type) {
+	case *agentreplv1.UpdateMergeQueueRequest_HoldRollouts:
+		return "hold_rollouts", s.deps.Merge.HoldRollouts, true
+	case *agentreplv1.UpdateMergeQueueRequest_ReleaseRollouts:
+		return "release_rollouts", s.deps.Merge.ReleaseRollouts, true
+	case *agentreplv1.UpdateMergeQueueRequest_DisableRacing:
+		return "disable_racing", s.deps.Merge.DisableRacing, true
+	case *agentreplv1.UpdateMergeQueueRequest_EnableRacing:
+		return "enable_racing", s.deps.Merge.EnableRacing, true
+	}
+	return "", nil, false
 }
 
 // mergeMoveOf reads a move_up or move_down arm as the workspace it names and
