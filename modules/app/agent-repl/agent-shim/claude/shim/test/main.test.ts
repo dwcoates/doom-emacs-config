@@ -10,7 +10,7 @@
 import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { logRecordsDuring } from "./log-records.js";
 import { keepGeneratedProtosAcrossResets } from "./stateless-modules.js";
 import { LOCK_DIR_ENV, lockBinaryPath, lockDir } from "../src/locks.js";
@@ -30,6 +30,8 @@ import {
   resolveWatcherConclusionBudgetMs,
   logCorrelation,
   queryFactory,
+  QUERY_VENDORS,
+  type QueryVendors,
   resolveKeepaliveIntervalMs,
   resolveColdGateLaterMs,
   FAKE_COLD_GATE_LATER_ENV,
@@ -49,6 +51,8 @@ import {
 } from "../src/main.js";
 import { VendorCallsForbiddenError } from "../src/vendor-guard.js";
 import type { Engine } from "../src/engine/engine.js";
+import { createFakeQuery } from "../src/fake/index.js";
+import { createRealQuery } from "../src/sdk/real-query.js";
 import type { QuerySpec, SessionEngine } from "../src/engine/session.js";
 
 // EVERY `main` TEST RE-IMPORTS `main.js` AFTER A MODULE RESET, so the generated
@@ -1485,31 +1489,34 @@ describe("main", () => {
  * handed — the ones a dropped field made unobservable before — are asserted at
  * the seam instead.
  */
+describe("QUERY_VENDORS", () => {
+  it.each([
+    ["the real vendor", "real", createRealQuery],
+    ["the mocked vendor", "fake", createFakeQuery],
+  ] as const)("hands production %s's own constructor", (_name, key, constructor) => {
+    // Arrange / Act
+    const vendor: unknown = QUERY_VENDORS[key];
+    // Assert
+    expect(vendor).toBe(constructor);
+  });
+});
+
 describe("queryFactory forwards the whole spec to the real query", () => {
   const calls: Array<Record<string, unknown>> = [];
-  let factory: typeof queryFactory;
-
-  beforeAll(async () => {
-    vi.resetModules();
-    vi.doMock("../src/sdk/real-query.js", () => ({
-      createRealQuery: (options: Record<string, unknown>) => {
-        calls.push(options);
-        return Promise.resolve({ interrupt: async (): Promise<void> => {} });
-      },
-      PER_TASK_STOP_AFFORDANCE: true,
-    }));
-    const log = await import("../src/log.js");
-    log.configureLog({ fd: 3, cwd: "/ws", workspaceId: "00000000000000ee", agentReplSessionId: "main-query-factory" });
-    factory = (await import("../src/main.js")).queryFactory;
-  });
+  // THE REAL VENDOR'S SEAM, recorded through the factory's own vendors
+  // parameter: no module is mocked or re-imported.
+  const vendors: QueryVendors = {
+    ...QUERY_VENDORS,
+    real: ((options: Record<string, unknown>) => {
+      calls.push(options);
+      return Promise.resolve({ interrupt: async (): Promise<void> => {} });
+    }) as unknown as QueryVendors["real"],
+  };
+  const factory = (fake: boolean, environment: ShimEnvironment, cwd: string): ReturnType<typeof queryFactory> =>
+    queryFactory(fake, environment, cwd, vendors);
 
   beforeEach(() => {
     calls.length = 0;
-  });
-
-  afterAll(() => {
-    vi.doUnmock("../src/sdk/real-query.js");
-    vi.resetModules();
   });
 
   // A REAL DIRECTORY, because the factory now grants the workspace folder trust
@@ -1605,28 +1612,20 @@ describe("queryFactory forwards the whole spec to the real query", () => {
  */
 describe("queryFactory hands the mocked vendor the per-task stop declaration", () => {
   const handed: Array<Record<string, unknown>> = [];
-  let factory: typeof queryFactory;
-
-  beforeAll(async () => {
-    vi.resetModules();
-    vi.doMock("../src/fake/index.js", () => ({
-      createFakeQuery: (_prompt: unknown, _canUseTool: unknown, opts: Record<string, unknown>) => {
-        handed.push(opts);
-        return { interrupt: async (): Promise<void> => {} };
-      },
-    }));
-    const log = await import("../src/log.js");
-    log.configureLog({ fd: 3, cwd: "/ws", workspaceId: "00000000000000ef", agentReplSessionId: "main-fake-factory" });
-    factory = (await import("../src/main.js")).queryFactory;
-  });
+  // THE MOCKED VENDOR'S SEAM, recorded through the factory's own vendors
+  // parameter: no module is mocked or re-imported.
+  const vendors: QueryVendors = {
+    ...QUERY_VENDORS,
+    fake: ((_prompt: unknown, _canUseTool: unknown, opts: Record<string, unknown>) => {
+      handed.push(opts);
+      return { interrupt: async (): Promise<void> => {} };
+    }) as unknown as QueryVendors["fake"],
+  };
+  const factory = (fake: boolean, environment: ShimEnvironment, cwd: string): ReturnType<typeof queryFactory> =>
+    queryFactory(fake, environment, cwd, vendors);
 
   beforeEach(() => {
     handed.length = 0;
-  });
-
-  afterAll(() => {
-    vi.doUnmock("../src/fake/index.js");
-    vi.resetModules();
   });
 
   const env: ShimEnvironment = {
