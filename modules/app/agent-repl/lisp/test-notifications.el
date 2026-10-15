@@ -17,20 +17,29 @@
 (defmacro agent-repl-test-notifications--with-reporter (focused conn &rest body)
   "Run BODY with the focus reporter's state fresh, Emacs FOCUSED, and CONN live.
 Every `ReportEditorFocus' call is recorded into `calls' as (CONN . REQUEST)
-with its callbacks in `answers', so a test answers each one itself."
+with its callbacks in `answers', so a test answers each one itself.  Every
+`ClaimLiveNotification' call is recorded the same way into `claims' and
+`claim-answers'.  The daemon has accepted no focus yet."
   (declare (indent 2))
   `(let ((agent-repl--focus-report-in-flight nil)
          (agent-repl--focus-report-owed nil)
          (agent-repl--focus-report-timer nil)
+         (agent-repl--focus-accepted nil)
          (focused-now ,focused)
          (calls nil)
-         (answers nil))
+         (answers nil)
+         (claims nil)
+         (claim-answers nil))
      (cl-letf (((symbol-function 'agent-repl-link-live) (lambda () ,conn))
                ((symbol-function 'agent-repl--emacs-focused-p) (lambda (&optional _ws) focused-now))
                ((symbol-function 'agent-repl-rpc-report-editor-focus)
                 (lambda (c request &rest keys)
                   (push (cons c request) calls)
-                  (push keys answers))))
+                  (push keys answers)))
+               ((symbol-function 'agent-repl-rpc-claim-live-notification)
+                (lambda (c request &rest keys)
+                  (push (cons c request) claims)
+                  (push keys claim-answers))))
        ,@body)))
 
 (defun agent-repl-test-notifications--answer (keys response)
@@ -136,6 +145,139 @@ with its callbacks in `answers', so a test answers each one itself."
   (should (memq #'agent-repl--focus-report-on-link agent-repl-link-up-functions))
   (should (memq #'agent-repl--focus-report-on-link agent-repl-link-promote-functions))
   (should (advice-function-member-p #'agent-repl--focus-changed after-focus-change-function)))
+
+;;;; ---- Tests: claiming the live banner on a focus gain ----
+
+(defconst agent-repl-test-notifications--success '(:arm :success :value nil)
+  "The empty success a focus report is answered with.")
+
+(defun agent-repl-test-notifications--live (id)
+  "Answer the claim response naming workspace ID's banner live."
+  (list :arm :success
+        :value (list :outcome (list :arm :live
+                                    :value (list :workspace (list :id id :dir "/work/x"))))))
+
+(defmacro agent-repl-test-notifications--with-claim-answer (&rest body)
+  "Run BODY with the switch request and every log level recorded.
+`switches' collects (WS . TRIGGER), `records' each (LEVEL . LINE)."
+  `(let ((switches nil)
+         (records nil))
+     (cl-letf (((symbol-function 'agent-repl-host-request-switch)
+                (lambda (ws trigger) (push (cons ws trigger) switches) t))
+               ((symbol-function 'agent-repl--log)
+                (lambda (_scope fmt &rest args) (push (cons 'debug (apply #'format fmt args)) records)))
+               ((symbol-function 'agent-repl--info)
+                (lambda (_scope fmt &rest args) (push (cons 'info (apply #'format fmt args)) records)))
+               ((symbol-function 'agent-repl--error)
+                (lambda (_scope fmt &rest args) (push (cons 'error (apply #'format fmt args)) records))))
+       ,@body)))
+
+(defun agent-repl-test-notifications--recorded-p (records level pattern)
+  "Non-nil when RECORDS holds a LEVEL line matching PATTERN."
+  (seq-some (lambda (record) (and (eq (car record) level) (string-match-p pattern (cdr record))))
+            records))
+
+(ert-deftest agent-repl-test-focus-gain-claims-the-live-banner ()
+  "An accepted focused report after an unfocused one claims, on the live link."
+  (agent-repl-test-notifications--with-reporter t 'conn
+    (agent-repl--focus-report)
+    (agent-repl-test-notifications--answer (car answers) agent-repl-test-notifications--success)
+    (should (equal claims '((conn . nil))))
+    (should agent-repl--focus-accepted)))
+
+(ert-deftest agent-repl-test-focus-staying-focused-claims-nothing ()
+  "A focused report after an accepted focused one (frame to frame) is no gain."
+  (agent-repl-test-notifications--with-reporter t 'conn
+    (setq agent-repl--focus-accepted t)
+    (agent-repl--focus-report)
+    (agent-repl-test-notifications--answer (car answers) agent-repl-test-notifications--success)
+    (should-not claims)))
+
+(ert-deftest agent-repl-test-focus-loss-claims-nothing-and-rearms-the-gain ()
+  "An accepted unfocused report claims nothing, and the next focused one gains."
+  (agent-repl-test-notifications--with-reporter nil 'conn
+    (setq agent-repl--focus-accepted t)
+    (agent-repl--focus-report)
+    (agent-repl-test-notifications--answer (car answers) agent-repl-test-notifications--success)
+    (should-not claims)
+    (should-not agent-repl--focus-accepted)
+    (setq focused-now t)
+    (agent-repl--focus-report)
+    (agent-repl-test-notifications--answer (car answers) agent-repl-test-notifications--success)
+    (should (= (length claims) 1))))
+
+(ert-deftest agent-repl-test-refused-focus-report-claims-nothing ()
+  "A focus the daemon refused is no accepted gain: nothing is claimed."
+  (agent-repl-test-notifications--with-reporter t 'conn
+    (agent-repl-test-notifications--with-claim-answer
+     (agent-repl--focus-report)
+     (agent-repl-test-notifications--answer
+      (car answers) '(:arm :error :value (:cause (:arm :no-emacs-stream :value nil)))))
+    (should-not claims)
+    (should-not agent-repl--focus-accepted)))
+
+(ert-deftest agent-repl-test-claim-with-no-link-sends-nothing ()
+  "With no link standing no daemon holds banners, and nothing is claimed."
+  (agent-repl-test-notifications--with-reporter t nil
+    (agent-repl-test-notifications--with-claim-answer
+     (agent-repl--claim-live-notification)
+     (should-not claims)
+     (should (agent-repl-test-notifications--recorded-p records 'debug "claim skipped reason=no-link")))))
+
+(ert-deftest agent-repl-test-claim-live-selects-the-banners-tab ()
+  "A live answer requests the switch to the tab whose ref id it names."
+  (agent-repl-test-notifications--with-claim-answer
+   (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id)
+              (lambda (id) (and (equal id "id-1") "tab-1"))))
+     (agent-repl--claim-live-notification-answered (agent-repl-test-notifications--live "id-1")))
+   (should (equal switches '(("tab-1" . notification-focus))))
+   (should (agent-repl-test-notifications--recorded-p records 'info "claim live ws=tab-1 id=id-1"))))
+
+(ert-deftest agent-repl-test-claim-live-without-a-tab-moves-nothing ()
+  "A live banner whose workspace has no tab here moves the user nowhere."
+  (agent-repl-test-notifications--with-claim-answer
+   (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil)))
+     (agent-repl--claim-live-notification-answered (agent-repl-test-notifications--live "id-gone")))
+   (should-not switches)
+   (should (agent-repl-test-notifications--recorded-p records 'info "claim live-without-tab id=id-gone"))))
+
+(ert-deftest agent-repl-test-claim-none-moves-nothing ()
+  "No live banner: the user stays where they are."
+  (agent-repl-test-notifications--with-claim-answer
+   (agent-repl--claim-live-notification-answered
+    '(:arm :success :value (:outcome (:arm :none :value nil))))
+   (should-not switches)
+   (should (agent-repl-test-notifications--recorded-p records 'debug "claim none"))))
+
+(ert-deftest agent-repl-test-claim-refused-is-recorded-at-info ()
+  "A claim the daemon refused (Emacs unfocused again) moves nothing, at INFO."
+  (agent-repl-test-notifications--with-claim-answer
+   (agent-repl--claim-live-notification-answered
+    '(:arm :error :value (:cause (:arm :editor-unfocused :value nil))))
+   (should-not switches)
+   (should (agent-repl-test-notifications--recorded-p records 'info "claim refused cause=.*editor-unfocused"))))
+
+(ert-deftest agent-repl-test-claim-failure-is-an-error ()
+  "A claim failed in transport or on the daemon is recorded at ERROR."
+  (agent-repl-test-notifications--with-claim-answer
+   (agent-repl--claim-live-notification-failed '(:kind :connect :message "internal"))
+   (should-not switches)
+   (should (agent-repl-test-notifications--recorded-p records 'error "claim failed detail=.*internal"))))
+
+(ert-deftest agent-repl-test-claim-unknown-arm-is-an-error ()
+  "An answer arm the claim does not know is recorded at ERROR."
+  (agent-repl-test-notifications--with-claim-answer
+   (agent-repl--claim-live-notification-answered '(:arm :mystery :value nil))
+   (should-not switches)
+   (should (agent-repl-test-notifications--recorded-p records 'error "claim unknown-arm arm=:mystery"))))
+
+(ert-deftest agent-repl-test-claim-unknown-outcome-is-an-error ()
+  "An outcome arm the claim does not know is recorded at ERROR."
+  (agent-repl-test-notifications--with-claim-answer
+   (agent-repl--claim-live-notification-answered
+    '(:arm :success :value (:outcome (:arm :mystery :value nil))))
+   (should-not switches)
+   (should (agent-repl-test-notifications--recorded-p records 'error "claim unknown-outcome arm=:mystery"))))
 
 ;;;; ---- Tests: agent-repl--notification-activate ----
 
