@@ -112,6 +112,60 @@ func TestAFailedMergeRaisesTheFailedBannerWithItsSummary(t *testing.T) {
 	}
 }
 
+// TestALandedMergeRaisesTheLandedBannerNamingItsTarget pins the landed
+// banner's line: the branch the source was merged into, read from the target
+// checkout, not the commit it landed as.
+func TestALandedMergeRaisesTheLandedBannerNamingItsTarget(t *testing.T) {
+	tests := []struct {
+		name   string
+		target string
+		want   string
+	}{
+		{name: "the default branch", target: "", want: "Merged into master"},
+		{name: "another branch", target: "develop", want: "Merged into develop"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange and Act
+			h := endedObserved(t, phaseLanded, resolution{}, func(h *harness) {
+				if tt.target != "" {
+					h.git.branches[h.targetD] = tt.target
+				}
+			})
+
+			// Assert
+			got := h.banners.seen()
+			if len(got) != 2 || got[1].kind != "landed" || got[1].ws != theWorkspace || got[1].text != tt.want {
+				t.Fatalf("banners = %+v, want the queued banner then the landed one reading %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDetachedOutcomeBannerLine(t *testing.T) {
+	tests := []struct {
+		name string
+		out  DetachedOutcome
+		want string
+	}{
+		{name: "a landing names its target", out: DetachedOutcome{Kind: DetachedLanded, Summary: "it landed as commit abc", MergedInto: "master"}, want: "Merged into master"},
+		{name: "a branch already on its target keeps its summary", out: DetachedOutcome{Kind: DetachedLanded, Summary: "the branch was already on master; nothing needed merging"}, want: "the branch was already on master; nothing needed merging"},
+		{name: "a failure keeps its summary", out: DetachedOutcome{Kind: DetachedFailed, Summary: "the tests failed"}, want: "the tests failed"},
+		{name: "an abandonment keeps its summary", out: DetachedOutcome{Kind: DetachedAbandoned, Summary: "taken off the queue"}, want: "taken off the queue"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := tt.out.bannerLine()
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("bannerLine() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestAnAgentsRequestRaisesNoBannerBeforeItsTurnEnds(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -290,20 +344,25 @@ func TestDetachedOutcomeKindMergeEndPanicsOnAnUnknownKind(t *testing.T) {
 }
 
 // TestEveryResolutionIsAnnouncedThroughEnded pins the one funnel: a merge's
-// resolved banner is raised only by ended (and by the fork that never made a
-// merge workspace), and a handback skips ended only for a merge never put in
-// line, so no terminal can hand back without announcing its end.
+// resolved banner is raised only through raiseResolved, by ended (and by the
+// fork that never made a merge workspace), and a handback skips ended only for
+// a merge never put in line, so no terminal can hand back without announcing
+// its end, and every end's banner is worded by the one bannerLine.
 func TestEveryResolutionIsAnnouncedThroughEnded(t *testing.T) {
 	// Arrange / Act: the package's own production sources.
-	resolved, handBacks := 0, 0
+	resolved, raised, handBacks := 0, 0, 0
 	for _, file := range sourcescan.Production(t) {
 		resolved += strings.Count(string(file.Source), "Banners.Resolved(")
+		raised += strings.Count(string(file.Source), "o.raiseResolved(")
 		handBacks += strings.Count(string(file.Source), "o.handBack(ctx")
 	}
 
 	// Assert
-	if resolved != 2 {
-		t.Errorf("Banners.Resolved is called at %d sites, want 2: ended and the failed fork", resolved)
+	if resolved != 1 {
+		t.Errorf("Banners.Resolved is called at %d sites, want 1: raiseResolved", resolved)
+	}
+	if raised != 2 {
+		t.Errorf("raiseResolved is called at %d sites, want 2: ended and the failed fork", raised)
 	}
 	if handBacks != 2 {
 		t.Errorf("handBack is called at %d sites, want 2: ended and a merge never put in line", handBacks)

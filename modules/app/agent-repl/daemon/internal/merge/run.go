@@ -857,6 +857,9 @@ type outcome struct {
 	// landed is the commit the target now carries, empty when nothing landed
 	// locally.
 	landed string
+	// target is the branch the landing moved, or the one that already carried
+	// the source (alreadyOn); empty when nothing landed.
+	target string
 	// commits are what the merge brought in, for the self-reload's classifier.
 	commits []gitclient.Commit
 	// failed is the failure's one-line account, empty on success; area is

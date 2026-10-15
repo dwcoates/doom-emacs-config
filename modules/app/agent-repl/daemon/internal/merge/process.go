@@ -250,7 +250,7 @@ func (r *run) alreadyOn(ctx context.Context, targetBranch string) (outcome, erro
 	}
 	r.o.log(ctx, r.ws).Info("daemon.merge.rebase", "the branch is already on its target; the merge concludes with nothing to land", dlog.Context{
 		"workspace": string(r.ws), "branch": r.subject.branch, "target": targetBranch, "tip": tip})
-	return outcome{landed: tip, alreadyOn: targetBranch}, nil
+	return outcome{landed: tip, target: targetBranch, alreadyOn: targetBranch}, nil
 }
 
 // replay is one rebase's progress: the ledger round it stands in, the commits
@@ -1112,16 +1112,16 @@ func (r *run) commitIn(ctx context.Context, round tabRound, tip, head, targetBra
 	settle("")
 	r.o.log(ctx, r.ws).Info(op, "the target was fast-forwarded to the merge commit of the gated branch", dlog.Context{
 		"workspace": string(r.ws), "target": targetBranch, "commit": commit, "gated": head})
-	out, err := r.landed(ctx, commit, tip)
+	out, err := r.landed(ctx, commit, tip, targetBranch)
 	return out, false, err
 }
 
-// landed reads what a merge commit the target now carries brought in, and
+// landed reads what a merge commit targetBranch now carries brought in, and
 // tags it with the merge's version, counted from base, the tip it landed on.
 //
 // It answers an error only for the daemon's exit while tagging, which stops
 // the step before its landing is recorded (tagVersion).
-func (r *run) landed(ctx context.Context, commit, base string) (outcome, error) {
+func (r *run) landed(ctx context.Context, commit, base, targetBranch string) (outcome, error) {
 	r.o.noteTargetTip(r.repo, commit)
 	version, err := r.tagVersion(ctx, commit, base)
 	if err != nil {
@@ -1129,7 +1129,7 @@ func (r *run) landed(ctx context.Context, commit, base string) (outcome, error) 
 	}
 	commits, err := r.git.LandedRange(ctx, r.subject.targetDir, commit)
 	if err != nil && (r.stopping(err) || r.cut(err)) {
-		return outcome{landed: commit, version: version}, nil
+		return outcome{landed: commit, target: targetBranch, version: version}, nil
 	}
 	if err != nil {
 		// THE LANDING HAS HAPPENED. A range that will not read is a fault in
@@ -1139,7 +1139,7 @@ func (r *run) landed(ctx context.Context, commit, base string) (outcome, error) 
 			"workspace": string(r.ws), "commit": commit, "error": err.Error()})
 		commits = nil
 	}
-	return outcome{landed: commit, commits: commits, version: version}, nil
+	return outcome{landed: commit, target: targetBranch, commits: commits, version: version}, nil
 }
 
 // resumeCommit goes on with a committing step a restart interrupted. What the
@@ -1162,7 +1162,7 @@ func (r *run) resumeCommit(ctx context.Context, res *progressDoc) (outcome, bool
 			"workspace": string(r.ws), "target": res.TargetBranch, "commit": res.MergeCommit})
 		r.upsert(round, committingTab(round.settled(r.o.nowMS(), ""), message))
 		r.closeTab(ctx, round, "succeeded")
-		out, err := r.landed(ctx, res.MergeCommit, res.Tip)
+		out, err := r.landed(ctx, res.MergeCommit, res.Tip, res.TargetBranch)
 		return out, false, err
 	}
 	head, err := r.git.ResolveRef(ctx, r.subject.dir, branch)
@@ -1281,7 +1281,7 @@ func (r *run) updateMain(ctx context.Context) (outcome, error) {
 	}
 	r.o.log(ctx, r.ws).Info(op, "the default branch was fast-forwarded to upstream", dlog.Context{
 		"workspace": string(r.ws), "main": main, "branch": defaultBranch, "from": before, "to": upstream, "commits": len(commits)})
-	return outcome{landed: upstream, commits: commits}, nil
+	return outcome{landed: upstream, target: defaultBranch, commits: commits}, nil
 }
 
 // stillWanted answers the reason a run must stop -- an abandon, the daemon's
