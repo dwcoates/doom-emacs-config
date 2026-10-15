@@ -6,6 +6,7 @@ import {
   SVG_NS,
   ancestorMatching,
   computedPx,
+  pageIntersectionObserver,
   pageResizeObserver,
   placeChildren,
   placeOptional,
@@ -399,3 +400,34 @@ describe("pageResizeObserver", () => {
     expect(rolled).toEqual(["dom.ts"]);
   });
 });
+
+describe("pageIntersectionObserver", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("answers the page's observer", () => {
+    // Act / Assert
+    expect(pageIntersectionObserver()).toBe(globalThis.IntersectionObserver);
+  });
+
+  it("answers null for a page with no observer", () => {
+    // Arrange
+    vi.stubGlobal("IntersectionObserver", undefined);
+    // Act / Assert
+    expect(pageIntersectionObserver()).toBeNull();
+  });
+
+  it("is the one availability check every viewport watch asks", () => {
+    // Arrange: every source file under src.
+    const src = join(__dirname, "../src");
+    const files = filesUnder(src);
+    // Act: a hand-rolled check reads `IntersectionObserver` off the global.
+    const rolled = files
+      .filter((f) => /IntersectionObserver\?:/.test(readFileSync(f, "utf8")))
+      .map((f) => relative(src, f));
+    // Assert: only the helper's own module.
+    expect(rolled).toEqual(["dom.ts"]);
+  });
+});
+

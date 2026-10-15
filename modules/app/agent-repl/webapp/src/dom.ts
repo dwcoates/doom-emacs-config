@@ -135,3 +135,13 @@ export function pageResizeObserver(el: Node): typeof ResizeObserver | null {
   if (view === null || view === undefined || typeof view.ResizeObserver !== "function") return null;
   return view.ResizeObserver;
 }
+
+/**
+ * The page's `IntersectionObserver`, or null when it has none (a host without
+ * the capability). Every viewport watch asks through here; what an absent
+ * observer means is each caller's own to say.
+ */
+export function pageIntersectionObserver(): typeof IntersectionObserver | null {
+  const Ctor = (globalThis as { IntersectionObserver?: typeof IntersectionObserver }).IntersectionObserver;
+  return Ctor ?? null;
+}
