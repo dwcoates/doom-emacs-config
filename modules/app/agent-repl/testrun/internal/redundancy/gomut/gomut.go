@@ -16,6 +16,8 @@ package gomut
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -115,19 +117,28 @@ func Build(dir string, files []string, first int) (*Schema, error) {
 	return s, nil
 }
 
-// Overlay writes the rewritten files and the switch file under scratch and
-// returns the `go -overlay` replacements, original path to rewrite.
+// Overlay writes the rewritten files and the switch file under a directory
+// of scratch that is this package's alone, and returns the `go -overlay`
+// replacements, original path to rewrite. Schemas of several packages share
+// one scratch directory and one overlay, so a path named only by the file
+// would let one package's switch file (its package clause) or rewrite stand
+// in for another's.
 func (s *Schema) Overlay(scratch string) (map[string]string, error) {
+	sum := sha256.Sum256([]byte(s.Dir))
+	dir := filepath.Join(scratch, s.Package+"-"+hex.EncodeToString(sum[:6]))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, fmt.Errorf("gomut: make %s: %w", dir, err)
+	}
 	replace := map[string]string{}
-	for i, f := range s.files {
-		out := filepath.Join(scratch, fmt.Sprintf("%03d-%s", i, filepath.Base(f.path)))
+	for _, f := range s.files {
+		out := filepath.Join(dir, filepath.Base(f.path))
 		if err := os.WriteFile(out, f.rewrite(), 0o644); err != nil {
 			return nil, fmt.Errorf("gomut: write %s: %w", out, err)
 		}
 		replace[f.path] = out
 		f.overlay = out
 	}
-	sw := filepath.Join(scratch, SwitchFile)
+	sw := filepath.Join(dir, SwitchFile)
 	if err := os.WriteFile(sw, []byte(strings.ReplaceAll(switchSource, "PACKAGE", s.Package)), 0o644); err != nil {
 		return nil, fmt.Errorf("gomut: write %s: %w", sw, err)
 	}
