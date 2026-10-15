@@ -23,10 +23,15 @@
 package e2e
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"testing"
+	"time"
+
+	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/integration/harness"
 )
@@ -370,6 +375,50 @@ func TestEmacsRestartHoldsPromptsMeanwhile(t *testing.T) {
 	// ingress. An empty ingress is the daemon having taken it.
 	emGHIAwaitStatus(t, e, ws, "the turn to settle after the restart", emGHISettledArms...)
 	emGHIAssertIngressEmpty(t, e, ws, "once the restart has settled")
+
+	// Assert: the held prompt SURVIVED the restart: the daemon delivered it
+	// as its own turn, so the conversation's own book in the store holds it.
+	vendor := e.EvalString(`(or (agent-repl-host-vendor-session-id ` + elispString(ws) + `) "")`)
+	if vendor == "" {
+		t.Fatalf("workspace %s names no vendor conversation after the restart, so its book cannot be read", ws)
+	}
+	emAwaitBookPrompt(t, w, vendor, heldText, "the held prompt to be delivered after the restart")
+}
+
+// emAwaitBookPrompt waits until the store's book for AGENT holds a prompt
+// saying TEXT, failing at DefaultTimeout. The store is read directly and
+// read-only: this Emacs-layer world exposes no daemon client, and a prompt
+// the daemon delivered is a line of its agent's book.
+func emAwaitBookPrompt(t *testing.T, w *EmacsWorld, agent, text, what string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
+	defer cancel()
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+	var said []string
+	for {
+		said = said[:0]
+		page, err := readAgentBook(ctx, w.Store.Client, &conversationv1.AgentId{Value: agent})
+		if err == nil {
+			for _, line := range page.GetLines() {
+				prompt := line.GetLine().GetAgentItem().GetAgentPrompt()
+				if prompt == nil {
+					continue
+				}
+				for _, block := range prompt.GetSaid().GetContent().GetBlocks() {
+					said = append(said, block.GetText().GetText())
+				}
+			}
+			if slices.Contains(said, text) {
+				return
+			}
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("await %s: the book of %s never held a prompt saying %q within %s (prompts seen: %q, last error: %v)", what, agent, text, DefaultTimeout, said, err)
+		case <-ticker.C:
+		}
+	}
 }
 
 // TestEmacsRestartDoesNotWedgeEmacs is scenario 37, and the HEARTBEAT is the

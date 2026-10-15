@@ -57,8 +57,10 @@ func TestSecondDaemonOnTheSameStateRootRefusesToBoot(t *testing.T) {
 	}
 
 	// Act
-	// The refusal waits the whole claim bound first; see harness.ClaimRefusalTimeout.
-	second := harness.StartDaemon(t, harness.Opts{StateDir: incumbent.StateDir, ExpectEarlyExit: true, Timeout: harness.ClaimRefusalTimeout})
+	// The incumbent holds daemon.serving, so the refusal is decided at once
+	// by the serving probe, inside the default wait bound; it no longer
+	// waits out daemonaddr.ClaimWaitBound.
+	second := harness.StartDaemon(t, harness.Opts{StateDir: incumbent.StateDir, ExpectEarlyExit: true})
 	// The sweep covers every test; the declared records are evidence of the second daemon the test boots.
 	second.ExpectWarnings("daemon.cmd.claim")
 	code := second.AwaitExit()
@@ -76,6 +78,13 @@ func TestSecondDaemonOnTheSameStateRootRefusesToBoot(t *testing.T) {
 	}
 	if _, err := incumbent.Client().DaemonHealth(incumbent.Ctx(), healthRequest()); err != nil {
 		t.Fatalf("the incumbent stopped serving after a refused second daemon: %v", err)
+	}
+	// Assert: the refusal was the serving probe's, not a waited-out bound.
+	refusal := second.AwaitLogRecord(second.RunLogPath(), "the refusal's claim record", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.cmd.claim" && r.Message == "another daemon holds the boot claim; exiting without disturbing it"
+	})
+	if got := refusal.Context["verdict"]; got != "incumbent_serving" {
+		t.Fatalf("the refusal's verdict = %v, want incumbent_serving: a serving incumbent is refused at once", got)
 	}
 }
 
@@ -545,17 +554,12 @@ func TestBootRefusesACorruptSessionRowOfAnAdoptedWorkspace(t *testing.T) {
 // contract for `creation_jobs`: a half-written row is a CORRUPTION, and the
 // boot refuses it loudly rather than coming up with the row dropped.
 //
-// IT IS EXPECTED TO BE RED, and the defect it exposes is stated here so the
-// failure is read as the finding it is. The only boot path that reads a
-// workspace's creation job is the in-flight-merge recovery
-// (internal/boot/sequence.go: recoverMerges -> internal/merge/recover.go:
-// Recover -> recoverAdmitted -> layoutFor -> DB.CreationJob), and
-// recoverAdmitted's switch folds ANY layoutFor error -- a genuine corrupt-row
-// *wsm.DecodeError included -- into "the workspace's merge geometry is gone".
-// A data-corruption refusal is thereby downgraded to an ordinary
-// "unmergeable" business outcome: the row IS dropped and the daemon serves on.
-// The remediation belongs in internal/merge/recover.go, which is outside this
-// file's boundary; the test states the contract, not the defect.
+// The only boot path that reads a workspace's creation job is the in-flight
+// merge recovery (internal/boot/sequence.go: recoverMerges ->
+// internal/merge/recover.go: Recover -> recoverAdmitted -> recoverTarget ->
+// DB.CreationJob). recoverAdmitted refuses a *wsm.DecodeError there, at ERROR
+// in the run log, before anything else folds the error into "the workspace's
+// merge geometry is gone"; internal/merge/recover_test.go pins the branch.
 func TestBootRefusesACorruptCreationJobOfAnAdmittedMerge(t *testing.T) {
 	t.Parallel()
 	// Arrange: register a workspace, then seed its merge geometry and an

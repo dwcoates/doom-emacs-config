@@ -374,12 +374,19 @@ func WithServicesReady(ready <-chan struct{}) Option {
 	return func(s *supervisor) { s.servicesReady = ready }
 }
 
+// WithReadyBound replaces how long a spawned shim has to report itself
+// listening on its readiness pipe (ShimReadyBound). Tests whose subject is
+// the bound shorten it; nothing else may.
+func WithReadyBound(bound time.Duration) Option {
+	return func(s *supervisor) { s.readyBound = bound }
+}
+
 // NewSupervisor builds the supervisor. It is the daemon's only one.
 func NewSupervisor(log dlog.Surfaces, opts ...Option) (Supervisor, error) {
 	if log == nil {
 		return nil, errors.New("shimclient: log surfaces are required")
 	}
-	s := &supervisor{surfaces: log, back: defaultBackoff, grace: DefaultKillGrace}
+	s := &supervisor{surfaces: log, back: defaultBackoff, grace: DefaultKillGrace, readyBound: ShimReadyBound}
 	for _, opt := range opts {
 		opt(s)
 	}

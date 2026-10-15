@@ -103,6 +103,12 @@ export type OpenFeedSuccess = Message<"agentrepl.v1.OpenFeedSuccess"> & {
    * The tail's address, pinned to begin exactly after this page's newest
    * row and this held section. Echoed verbatim to WatchFeed.
    *
+   * NO GAP, NO OVERLAP: every change published after the pin reaches the
+   * tail, and nothing the page already holds is delivered again AS IT IS. A
+   * row on the page arrives on the tail again only when it CHANGED after the
+   * pin (a response restated as interim, a reveal pace stamped after the
+   * open), as the whole replacement WatchFeedResponse.row carries.
+   *
    * @generated from field: agentrepl.v1.FeedWatchToken watch = 2;
    */
   watch?: FeedWatchToken | undefined;

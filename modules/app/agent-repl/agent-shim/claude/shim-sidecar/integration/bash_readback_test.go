@@ -10,15 +10,18 @@ import (
 // newline-terminated `EXIT=<code>` as the last line of a batch.
 const exitMarker = "EXIT=0\n"
 
-// CRITIQUE 4 — a detached run read back through the REAL store's WatchBashRun.
+// CRITIQUE 4 — a detached run read back over ONE WatchBashRun stream.
 //
-// Every other bash subject reads the fake store's own re-implementation of the
-// endpoint, which proves what the SIDECAR wrote and nothing about what a
-// consumer can get out of the store. These two drive the real endpoint: the
-// sidecar supersedes its one `bash:<run>:tail` row and finally writes
-// `bash:<run>:terminal` under the spawning call's identity, and the store must hand them back over ONE
-// stream — the stored rows replayed first, then the rows that land afterwards
-// followed live, the terminal LAST, and the stream ending after it.
+// These drive the FAKE store's WatchBashRun (helpers_test.go), never the real
+// store: this suite runs the sidecar alone and every peer is a mock (AGENTS.md,
+// "A system's integration tests run that system alone"). The fake serves the
+// endpoint's contract -- the stored rows replayed first, then the rows that
+// land afterwards followed live, the terminal LAST, and the stream ending after
+// it -- so what these pin is that the rows the SIDECAR writes (its one
+// superseded `bash:<run>:tail` row, then `bash:<run>:terminal` under the
+// spawning call's identity) read back whole and in order through it. The real
+// endpoint's own side of the contract is shim-store's
+// integration/bashwatch_test.go.
 
 // TestABashRunReplaysThenFollowsOnOneStream opens the stream after some output
 // is already durable and appends the rest while it is open, so both phases run

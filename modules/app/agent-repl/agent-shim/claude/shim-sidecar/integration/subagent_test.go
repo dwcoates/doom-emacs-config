@@ -242,5 +242,5 @@ func TestASubagentsFirstUserMessageIsWithheld(t *testing.T) {
 		}
 	}
 	awaitResidueWithheld(ctx, t, opts.LogPath, "vendor_specific/"+vendorSpecificUserPrompt)
-	requireNoResidueStored(t, fake.Entries())
+	fake.awaitResidueShape(ctx, t, "vendor_specific/"+vendorSpecificUserPrompt)
 }

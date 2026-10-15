@@ -112,7 +112,6 @@ func TestAnAgentSpoolIsNotIngestedAsRawResidue(t *testing.T) {
 			t.Errorf("an a* spool's bytes were read raw and classified unparsed rather than converted: %v", r.Context)
 		}
 	}
-	requireNoResidueStored(t, fake.Entries())
 }
 
 // TestAnUnclaimedWorkflowSpoolIsNeverRead asserts the w* routing while

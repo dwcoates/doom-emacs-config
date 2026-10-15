@@ -692,11 +692,9 @@ func TestModelRefusalWithFallback(t *testing.T) {
 // prose. FeedTurnErrorRefusal refusal = 12". Ungrounded — declared, not
 // captured.
 //
-// WRITTEN TO THE PROTO, EXPECTED TO FAIL: `refusal` has NO producer anywhere
-// in the daemon (nothing in resolve/feed constructs
-// FeedTurnEndedErrored_Refusal), so the proto's refusal arm is unreachable
-// and the fake's `model_error` terminal reason is drawn as an unmodeled
-// producer arm instead, which tells the reader nothing about a refusal.
+// The producer is daemon/internal/resolve/feed/turnended.go's
+// producerErrorArm: a `model_error` terminal whose turn already drew the
+// refusal response frame is answered as FeedTurnEndedErrored_Refusal.
 func TestModelRefusalWithoutFallback(t *testing.T) {
 	t.Parallel()
 	// Arrange

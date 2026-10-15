@@ -34,6 +34,11 @@ const (
 	helperDie = "die"
 	// helperIgnoreTerm ignores SIGTERM, so the kill must escalate.
 	helperIgnoreTerm = "ignore-term"
+	// helperCloseReady closes its readiness pipe WITHOUT the byte and lives
+	// on, which is the spawn-contract violation awaitReady refuses.
+	helperCloseReady = "close-ready"
+	// helperNeverReady holds its readiness pipe open and never writes it.
+	helperNeverReady = "never-ready"
 )
 
 // helperRecord is what the child writes to fd 3 — the log sink the parent
@@ -85,6 +90,18 @@ func runHelper(mode string) {
 		gate = "opened"
 	}
 	record := helperRecord{Argv: os.Args, Env: env, Cwd: cwd, PID: os.Getpid(), PGID: pgid, Gate: gate}
+	// THE READINESS PIPE, as the shim honors it: the test's in-process fake
+	// shim is already listening, so a child that is to come up reports ready
+	// at once. A dying child never writes it: its death closes it.
+	ready := os.NewFile(shimReadyFD, "ready")
+	switch mode {
+	case helperDie, helperNeverReady:
+	case helperCloseReady:
+		_ = ready.Close()
+	default:
+		_, _ = ready.Write([]byte{1})
+		_ = ready.Close()
+	}
 
 	sink := os.NewFile(shimLogFD, "shim-log")
 	if sink != nil {

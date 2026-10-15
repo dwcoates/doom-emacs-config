@@ -174,16 +174,16 @@ func runMockScenarioShard(t *testing.T, shard int) {
 			// here, on THIS scenario's already-generated tree, rather than
 			// by a second function regenerating all 133 scenarios to run
 			// one assertion.
-			requireNoOrphanToolResults(t, tc.Prompt, entries)
+			requireNoOrphanToolResults(t, tc.Prompt, in.Proxy.Batches())
 			if tc.Blocked != "" {
 				// Generated and ingested regardless: the fixture is the evidence.
 				t.Skipf("this row is BLOCKED: %s", tc.Blocked)
 			}
 
 			// The invariants that bind every scenario.
-			requireNoUnparsedResidue(t, tc.Prompt, entries)
-			requireNoUnknownResidue(t, tc.Prompt, entries)
-			requireDocumentedVendorSpecificKinds(t, tc.Prompt, entries)
+			requireNoUnparsedResidue(t, tc.Prompt, in.Proxy.Batches())
+			requireNoUnknownResidue(t, tc.Prompt, in.Proxy.Batches())
+			requireDocumentedVendorSpecificKinds(t, tc.Prompt, in.Proxy.Batches())
 			requireBooksAreKnownAgents(t, tc.Prompt, tree, entries)
 			requireBlockUnitsAreAddressedByBlock(t, tc.Prompt, entries)
 			requireUsageOnTheFirstBlockOnly(t, tc.Prompt, entries)
@@ -393,7 +393,7 @@ func TestMockKeepAliveTurnsStoreNothing(t *testing.T) {
 	in := ingestMock(t, tree)
 	entries := in.Entries()
 
-	requireNoUnparsedResidue(t, keepaliveMarker, entries)
-	requireNoUnknownResidue(t, keepaliveMarker, entries)
+	requireNoUnparsedResidue(t, keepaliveMarker, in.Proxy.Batches())
+	requireNoUnknownResidue(t, keepaliveMarker, in.Proxy.Batches())
 	requireKeepAliveStoresNothing(t, keepaliveMarker, entries)
 }

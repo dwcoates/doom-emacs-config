@@ -195,26 +195,26 @@ describe("how a hook firing went", () => {
 });
 
 /**
- * NO HOOK RECORD THAT DRAWS NOTHING IS STORED (owner ruling 2026-10-06): a
- * start, a success, a cancellation and a progress report produce no entry, and
- * a drawn outcome brings its start with it.
+ * A HOOK RECORD THAT DRAWS NOTHING PRODUCES NO ENTRY (owner ruling
+ * 2026-10-06): a start, a success, a cancellation and a progress report are
+ * never handed to the record plane.
  */
-describe("the hook records that are not stored", () => {
-  it("stores nothing for a hook's start", () => {
+describe("the hook records that produce no entry", () => {
+  it("produces no entry for a hook's start", () => {
     const entries = convertHookStarted(started("SessionStart"), foldContext(), createHookRegistry());
 
     expect(entries).toEqual([]);
   });
 
-  it("stores nothing for a hook that succeeded", () => {
+  it("produces no entry for a hook that succeeded", () => {
     expect(armsOf(response({ outcome: "success", stdout: "{}\n" }))).toEqual([]);
   });
 
-  it("stores nothing for a hook that was cancelled", () => {
+  it("produces no entry for a hook that was cancelled", () => {
     expect(armsOf(response({ outcome: "cancelled" }))).toEqual([]);
   });
 
-  it("stores nothing for a hook's progress report", () => {
+  it("produces no entry for a hook's progress report", () => {
     expect(convertHookProgress(progress(), createHookRegistry())).toEqual([]);
   });
 
@@ -231,6 +231,23 @@ describe("the hook records that are not stored", () => {
     expect([dropped?.level, dropped?.context.hook_record, dropped?.context.dropped_total]).toEqual(["debug", "succeeded", 2]);
   });
 
+  it("refuses a start with no firing id as a converter defect", () => {
+    expect(() => convertHookStarted(started("PreToolUse", ""), foldContext(), createHookRegistry())).toThrow();
+  });
+
+  it("refuses a response with no firing id as a converter defect", () => {
+    expect(() => convertHookResponse(response({ hook_id: "" }), foldContext(), createHookRegistry())).toThrow();
+  });
+});
+
+/**
+ * A FAILED OR BLOCKED FIRING IS HANDED TO THE RECORD PLANE, its start beside its
+ * outcome, because its card is drawn live. The store delivers those lines to
+ * the standing watches and keeps only each row's identity (shim-store
+ * `kindHookDropped`), so no page or replay ever carries the card: a restarted
+ * daemon does not redraw it (e2e TestHookFailed).
+ */
+describe("the hook records handed to the record plane", () => {
   it("writes the start of a FAILED firing beside its outcome, start first", () => {
     const registry = createHookRegistry();
     convertHookStarted(started("SessionStart"), foldContext(), registry);
@@ -251,14 +268,6 @@ describe("the hook records that are not stored", () => {
 
     const hook = activityOf(entries[0])?.item.value as conversationv1.AgentHook;
     expect((hook.result.value as conversationv1.AgentHookStart).hookName).toBe("SessionStart:one");
-  });
-
-  it("refuses a start with no firing id as a converter defect", () => {
-    expect(() => convertHookStarted(started("PreToolUse", ""), foldContext(), createHookRegistry())).toThrow();
-  });
-
-  it("refuses a response with no firing id as a converter defect", () => {
-    expect(() => convertHookResponse(response({ hook_id: "" }), foldContext(), createHookRegistry())).toThrow();
   });
 
   it("writes only the outcome of a failed firing whose start this shim never saw", () => {

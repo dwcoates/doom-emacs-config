@@ -59,7 +59,7 @@ func TestAHookOnTheFilePlaneServesNoActivityRow(t *testing.T) {
 	// Assert: the reader kept the vendor's own attachment type whole in what it
 	// said it withheld, and the hook reached no row of any sort.
 	awaitResidueWithheld(ctx, t, opts.LogPath, "vendor_specific/attachment/hook_non_blocking_error")
-	requireNoResidueStored(t, fake.Entries())
+	fake.awaitResidueShape(ctx, t, "vendor_specific/attachment/hook_non_blocking_error")
 	for _, e := range fake.Entries() {
 		if strings.Contains(e.GetUpsertKey(), uuid) {
 			t.Fatalf("the hook attachment produced a row keyed %q", e.GetUpsertKey())

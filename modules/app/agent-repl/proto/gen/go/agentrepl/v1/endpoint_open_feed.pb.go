@@ -176,6 +176,12 @@ type OpenFeedSuccess struct {
 	Page *v11.FeedPage `protobuf:"bytes,1,opt,name=page,proto3" json:"page,omitempty"`
 	// The tail's address, pinned to begin exactly after this page's newest
 	// row and this held section. Echoed verbatim to WatchFeed.
+	//
+	// NO GAP, NO OVERLAP: every change published after the pin reaches the
+	// tail, and nothing the page already holds is delivered again AS IT IS. A
+	// row on the page arrives on the tail again only when it CHANGED after the
+	// pin (a response restated as interim, a reveal pace stamped after the
+	// open), as the whole replacement WatchFeedResponse.row carries.
 	Watch *FeedWatchToken `protobuf:"bytes,2,opt,name=watch,proto3" json:"watch,omitempty"`
 	// The root feed's held section as it stands at the pin, drawn after the
 	// page's rows. SET for the root feed and UNSET for every sub-feed, which has

@@ -112,6 +112,15 @@ func (e *SpecError) Error() string {
 	return fmt.Sprintf("shimclient: invalid Spec: %s: %s", e.Field, e.Reason)
 }
 
+// ErrShimReadyPipeClosed ends a bring-up whose shim closed its readiness pipe
+// without the one byte that says it is listening, and did not die within the
+// readiness bound. It is a spawn-contract violation, never a reason to poll.
+var ErrShimReadyPipeClosed = errors.New("shimclient: the shim closed its readiness pipe without reporting it is listening")
+
+// ErrShimReadyBound ends a bring-up whose shim neither reported itself
+// listening nor died within ShimReadyBound.
+var ErrShimReadyBound = errors.New("shimclient: the shim did not report it is listening within the readiness bound")
+
 // errProcessDead ends a wait because the supervised process is gone. It is
 // internal: callers learn of death through Exited and Connectivity.
 var errProcessDead = errors.New("shimclient: process is dead")

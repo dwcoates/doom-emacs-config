@@ -253,17 +253,11 @@ func rmOpenAgentBook(t *testing.T, w *World, agent *conversationv1.AgentId) *sto
 	t.Helper()
 	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
 	defer cancel()
-	resp, err := w.Store.Client.OpenAgentSession(ctx, connect.NewRequest(&storev1.OpenAgentSessionRequest{
-		Agent: agent,
-	}))
+	page, err := readAgentBook(ctx, w.Store.Client, agent)
 	if err != nil {
-		t.Fatalf("OpenAgentSession(%s): %v", agent.GetValue(), err)
+		t.Fatal(err)
 	}
-	success := resp.Msg.GetSuccess()
-	if success == nil {
-		t.Fatalf("OpenAgentSession(%s) = %v, want success", agent.GetValue(), resp.Msg)
-	}
-	return success.GetPage()
+	return page
 }
 
 // rmFindContextInjected scans an agent book's page for a line carrying

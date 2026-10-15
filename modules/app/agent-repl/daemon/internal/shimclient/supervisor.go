@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -39,6 +40,25 @@ const shimLogFD = 3
 // the read end of the spawn gate, second of cmd.ExtraFiles. See Spawn.
 const shimSpawnGateFD = 4
 
+// shimReadyFD is the descriptor the shim reports readiness on: fd 5, the
+// write end of the readiness pipe, third of cmd.ExtraFiles. The shim writes
+// ONE byte to it once its listen socket accepts, and closes it. See
+// client.awaitReady.
+const shimReadyFD = 5
+
+// ShimReadyBound is how long a spawned shim has, from its spawn gate opening,
+// to report itself listening on the readiness pipe before the bring-up fails.
+//
+// MEASURED (2026-10-14, every live spawn in ~/.claude-emacs/logs, 8795
+// spawns, "shim spawned" to "shim reported healthy" -- which ALSO includes the
+// dial ladder's overshoot, so it bounds the true readiness latency from
+// above): p50 162ms, p99 1.71s, max 6.62s, the slow tail all in mass boots of
+// ~30 shims at once. 14s is just over 2x that maximum. Those figures are the
+// LADDER'S, inflated by its overshoot; once the readiness pipe has run live,
+// RE-SIZE this to just over 2x the measured max of the `waited_ms` on INFO
+// `daemon.shimclient.ready` outcome=ready.
+const ShimReadyBound = 14 * time.Second
+
 // ActorStandDown is the kill attribution the supervisor's own sweep records.
 // It is how the exit of an in-flight spawn is told from a crash: nothing else
 // in the daemon knew that process existed, so nothing else could have named
@@ -51,6 +71,9 @@ type supervisor struct {
 	back      backoff
 	grace     time.Duration
 	lockProbe func(workspaceDir string) (free bool, err error)
+	// readyBound is how long a spawned shim has to report itself listening
+	// (ShimReadyBound unless WithReadyBound says otherwise).
+	readyBound time.Duration
 	// servicesReady closes once the launchd services this daemon's shims
 	// write into have been made current (WithServicesReady); nil gates
 	// nothing.
@@ -311,7 +334,19 @@ func (s *supervisor) Spawn(ctx context.Context, spec Spec) (Client, error) {
 		log.Error("daemon.shimclient.spawn", "could not make the spawn gate", dlog.Context{"error": err.Error()})
 		return nil, fmt.Errorf("shimclient: make the spawn gate: %w", err)
 	}
-	cmd.ExtraFiles = []*os.File{spec.LogSink, gate}
+	// THE READINESS PIPE. The child inherits its write end and writes one byte
+	// once its listen socket accepts, so the bring-up dials a shim it KNOWS is
+	// listening instead of polling for the socket on a backoff ladder, which
+	// overshot a ready shim by up to a whole step (measured 2026-10-14: mass
+	// boot readiness clustered at 2.6s and 3.1s, the ladder's cumulative
+	// steps). The child's death closes it too, so a death is never waited out.
+	readyR, readyW, err := os.Pipe()
+	if err != nil {
+		closeGate(log, gate, opener)
+		log.Error("daemon.shimclient.spawn", "could not make the readiness pipe", dlog.Context{"error": err.Error()})
+		return nil, fmt.Errorf("shimclient: make the readiness pipe: %w", err)
+	}
+	cmd.ExtraFiles = []*os.File{spec.LogSink, gate, readyW}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	log.Debug("daemon.shimclient.spawn", "spawning shim", dlog.Context{
@@ -347,14 +382,16 @@ func (s *supervisor) Spawn(ctx context.Context, spec Spec) (Client, error) {
 		log.Info("daemon.shimclient.spawn", "refused a spawn: this daemon is standing down", dlog.Context{
 			"node": spec.NodeBin, "uds": spec.UDSPath,
 		})
-		closeGate(log, gate, opener)
+		closeGate(log, gate, opener, readyR, readyW)
 		return nil, ErrStandingDown
 	}
 	startErr := cmd.Start()
-	// The child holds its own copy of the read end; this process never reads.
-	closeGate(log, gate, nil)
+	// The child holds its own copies of the gate's read end and the readiness
+	// pipe's write end; this process never reads the one nor writes the other,
+	// and holding the write end would keep a dead child's EOF from arriving.
+	closeGate(log, gate, readyW)
 	if err := startErr; err != nil {
-		closeGate(log, nil, opener)
+		closeGate(log, opener, readyR)
 		s.mu.Unlock()
 		log.Error("daemon.shimclient.spawn", "spawn failed", dlog.Context{
 			"node": spec.NodeBin, "error": err.Error(),
@@ -381,6 +418,10 @@ func (s *supervisor) Spawn(ctx context.Context, spec Spec) (Client, error) {
 	openGate(log, opener, cmd.Process.Pid)
 	go c.reap()
 
+	if err := c.awaitReady(ctx, readyR, s.readyBound); err != nil {
+		c.abandonBringUp(ctx, err)
+		return nil, err
+	}
 	if err := c.bringUp(ctx); err != nil {
 		c.abandonBringUp(ctx, err)
 		return nil, err
@@ -400,14 +441,86 @@ func openGate(log dlog.Logger, opener *os.File, pid int) {
 	closeGate(log, nil, opener)
 }
 
-// closeGate closes whichever ends of the spawn gate it is handed.
+// awaitReady waits for the spawned shim's one readiness byte on READY, the
+// read end of the readiness pipe, and closes READY. It answers nil once the
+// shim is listening; a death's BringUpDeathError when the process dies first;
+// and, recorded at ERROR, ErrShimReadyPipeClosed for a pipe closed without
+// the byte by a process still alive at the bound, ErrShimReadyBound for no
+// answer within BOUND, or the read's own failure.
+//
+// A CLOSED PIPE IS NOT YET A VERDICT. The child's death closes it too, and
+// the reaper's word on that death can arrive after the EOF, so an EOF waits
+// for the death -- within the same bound -- and only a process still alive at
+// the bound is the contract violation.
+func (c *client) awaitReady(ctx context.Context, ready io.ReadCloser, bound time.Duration) error {
+	start := time.Now()
+	read := make(chan error, 1)
+	go func() {
+		var b [1]byte
+		n, err := ready.Read(b[:])
+		switch {
+		case n == 1:
+			read <- nil
+		case err == nil || errors.Is(err, io.EOF):
+			read <- io.EOF
+		default:
+			read <- err
+		}
+	}()
+	// Closing READY ends a read still blocked on it, so the goroutine never
+	// outlives this call by more than its one send.
+	defer ready.Close()
+	timer := time.NewTimer(bound)
+	defer timer.Stop()
+	fields := func(outcome string, extra dlog.Context) dlog.Context {
+		f := dlog.Context{"pid": c.PID(), "uds": c.udsPath, "bound": bound.String(),
+			"waited_ms": time.Since(start).Milliseconds(), "outcome": outcome}
+		for k, v := range extra {
+			f[k] = v
+		}
+		return f
+	}
+	select {
+	case err := <-read:
+		switch {
+		case err == nil:
+			// INFO, ONE PER SPAWN: waited_ms is the readiness latency the
+			// bound is to be re-sized from (see ShimReadyBound).
+			c.log.Info("daemon.shimclient.ready", "the shim reported it is listening", fields("ready", nil))
+			return nil
+		case errors.Is(err, io.EOF):
+			select {
+			case <-c.dead:
+				return c.deathError()
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-timer.C:
+				c.log.Error("daemon.shimclient.ready", "the shim closed its readiness pipe without reporting it is listening, and is still running", fields("closed_without_ready", nil))
+				return ErrShimReadyPipeClosed
+			}
+		default:
+			c.log.Error("daemon.shimclient.ready", "the shim's readiness pipe could not be read", fields("read_failed", dlog.Context{"error": err.Error()}))
+			return fmt.Errorf("shimclient: read the shim's readiness pipe: %w", err)
+		}
+	case <-c.dead:
+		return c.deathError()
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		c.log.Error("daemon.shimclient.ready", "the shim did not report it is listening within the readiness bound", fields("bound_expired", nil))
+		return fmt.Errorf("%w (%s)", ErrShimReadyBound, bound)
+	}
+}
+
+// closeGate closes whichever ends of the spawn's pipes (the spawn gate, the
+// readiness pipe) it is handed.
 func closeGate(log dlog.Logger, ends ...*os.File) {
 	for _, end := range ends {
 		if end == nil {
 			continue
 		}
 		if err := end.Close(); err != nil {
-			log.Error("daemon.shimclient.spawn", "could not close an end of the spawn gate", dlog.Context{"error": err.Error()})
+			log.Error("daemon.shimclient.spawn", "could not close an end of a spawn pipe", dlog.Context{"error": err.Error()})
 		}
 	}
 }
@@ -532,6 +645,7 @@ func shimArgs(spec Spec) []string {
 		"--store-socket", spec.StoreSocket,
 		"--log-fd", fmt.Sprintf("%d", shimLogFD),
 		"--spawn-gate-fd", fmt.Sprintf("%d", shimSpawnGateFD),
+		"--ready-fd", fmt.Sprintf("%d", shimReadyFD),
 	}
 	if spec.Fake {
 		args = append(args, "--fake")

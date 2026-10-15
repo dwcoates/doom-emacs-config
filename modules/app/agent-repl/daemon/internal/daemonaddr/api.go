@@ -47,7 +47,15 @@ type Claim interface {
 	// naming this claim's address. A loss wraps ErrVanished and names what
 	// vanished; any other error means the question could not be answered.
 	Verify() error
-	// Close closes the listener. It does not withdraw the advertisement.
+	// Depart releases the serving lock (ServingName) and keeps the boot
+	// claim: from this call on, a booting daemon reads this one as DEPARTING
+	// and waits for its exit, where before it refused at once. The orderly
+	// exit calls it first, before daemon.addr is withdrawn and before any
+	// answer owed leaves, so every daemon spawned in response to a shutdown
+	// finds it departed. It is idempotent.
+	Depart() error
+	// Close closes the listener and releases the boot claim, serving lock
+	// first. It does not withdraw the advertisement.
 	Close() error
 	// AwaitBootClaim returns once this claim HOLDS the boot claim: at once
 	// for a claim that already does, and for a successor the moment the
@@ -74,23 +82,29 @@ var ErrVanished = errors.New("the daemon's state on disk vanished")
 // loses there, before it has bound or written anything, and Bind returns
 // ErrClaimed.
 //
-// A HELD CLAIM IS WAITED ON FOR ClaimWaitBound BEFORE IT IS BELIEVED. An
-// outgoing daemon holds the claim until its process ends, and it withdraws
-// daemon.addr at the START of its shutdown, so a replacement is spawned into
-// a window where the address is already gone and the claim is not yet free.
-// Exiting on the first refusal there destroyed the daemon instead of
-// replacing it. Only a claim still held after the bound is a live incumbent.
+// A HELD CLAIM IS REFUSED AT ONCE ONLY WHILE ITS HOLDER SERVES. The holder
+// of the boot claim also holds the serving lock (ServingName) until the first
+// instant of its shutdown; a held claim beside a held serving lock is a
+// daemon serving and staying, and Bind returns ErrClaimed at once. A held
+// claim beside a FREE serving lock is an outgoing daemon -- it withdraws
+// daemon.addr at the start of its shutdown and holds the claim until its
+// process ends, and its replacement is spawned into exactly that window -- so
+// Bind waits up to ClaimWaitBound for it. Exiting on the first refusal there
+// destroyed the daemon instead of replacing it (2026-09-12).
 func Bind(addrPath string, port int) (Claim, error) {
-	return BindWithin(addrPath, port, ClaimWaitBound)
+	c, _, err := BindWithin(addrPath, port, ClaimWaitBound, BootOrdinary)
+	return c, err
 }
 
-// BindWithin is Bind with the claim wait named explicitly, so a caller that
-// must not pay the production bound -- a test, or a boot whose caller already
-// knows the incumbent is gone -- can say so. A wait of zero or less refuses a
-// held claim on sight, which is the pre-2026-09-12 behavior and is correct
-// only where nothing can be departing.
-func BindWithin(addrPath string, port int, wait time.Duration) (Claim, error) {
-	return bind(addrPath, port, wait)
+// BindWithin is Bind with the claim wait and the boot mode named explicitly,
+// answering how the claim was decided (ClaimVerdict) for the boot's record. A
+// caller that must not pay the production bound -- a test, or a boot whose
+// caller already knows the incumbent is gone -- can say so. A wait of zero or
+// less refuses a held claim on sight, which is correct only where nothing can
+// be departing. BootReplacing waits without probing the serving lock: its
+// incumbent spawned it while still serving, just before its own exit.
+func BindWithin(addrPath string, port int, wait time.Duration, mode BootMode) (Claim, ClaimVerdict, error) {
+	return bind(addrPath, port, wait, mode)
 }
 
 // BindJoining binds a SUCCESSOR's listener WITHOUT the boot claim. The

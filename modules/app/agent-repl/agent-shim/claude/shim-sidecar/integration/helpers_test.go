@@ -2346,55 +2346,6 @@ func linesForBook(entries []*storev1.StoreEntry, agent string) []*storev1.StoreP
 	return out
 }
 
-func unservedOf(entries []*storev1.StoreEntry) []*storev1.StoreUnservedItem {
-	var out []*storev1.StoreUnservedItem
-	for _, e := range entries {
-		if u := e.GetAgentUpdate().GetUnservedItem(); u != nil {
-			out = append(out, u)
-		}
-	}
-	return out
-}
-
-func unknownsOf(entries []*storev1.StoreEntry) []*storev1.StoreUnknown {
-	var out []*storev1.StoreUnknown
-	for _, u := range unservedOf(entries) {
-		if k := u.GetUnknown(); k != nil {
-			out = append(out, k)
-		}
-	}
-	return out
-}
-
-func unparsedOf(entries []*storev1.StoreEntry) []*storev1.StoreUnparsed {
-	var out []*storev1.StoreUnparsed
-	for _, u := range unservedOf(entries) {
-		if p := u.GetUnparsed(); p != nil {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
-func vendorSpecificOf(entries []*storev1.StoreEntry) []*storev1.StoreVendorSpecific {
-	var out []*storev1.StoreVendorSpecific
-	for _, u := range unservedOf(entries) {
-		if v := u.GetVendorSpecific(); v != nil {
-			out = append(out, v)
-		}
-	}
-	return out
-}
-
-func vendorSpecificKinds(entries []*storev1.StoreEntry) []string {
-	var out []string
-	for _, v := range vendorSpecificOf(entries) {
-		out = append(out, v.GetKind())
-	}
-	sort.Strings(out)
-	return out
-}
-
 func bashFramesOf(entries []*storev1.StoreEntry) []*storev1.StoreAgentBash {
 	var out []*storev1.StoreAgentBash
 	for _, e := range entries {
@@ -3203,28 +3154,87 @@ func residueWithheldLabels(t *testing.T, logPath string) []string {
 	return out
 }
 
-// requireNoResidueStored asserts the invariant itself: whatever the reader
-// classified, the store holds no residue row of any arm.
-func requireNoResidueStored(t *testing.T, entries []*storev1.StoreEntry) {
+// THE ONE TRACE WITHHELD RESIDUE LEAVES IN THE STORE IS ITS SHAPE. The
+// sidecar's one write door (cycle.go withholdResidue) takes every residue
+// entry out of the batch before it is sent, so a stored entry can never be
+// residue and an assertion over stored entries can never fail; what the door
+// sends in its place is one ShapeObservation per residue shape, on
+// WriteBatchRequest.shapes, whose kind is the withheld tally's own label
+// ("unparsed", "unknown/<field>:<discriminator>", "vendor_specific/<kind>").
+// Every residue assertion reads that.
+
+// withheldShapes answers every residue shape observation in BATCHES.
+func withheldShapes(batches []*storev1.WriteBatchRequest) []*storev1.ShapeObservation {
+	var out []*storev1.ShapeObservation
+	for _, b := range batches {
+		out = append(out, b.GetShapes()...)
+	}
+	return out
+}
+
+// withheldShapesOf answers the shape observations in BATCHES whose kind is
+// KIND or, for a KIND ending in "/", starts with it.
+func withheldShapesOf(batches []*storev1.WriteBatchRequest, kind string) []*storev1.ShapeObservation {
+	var out []*storev1.ShapeObservation
+	for _, shape := range withheldShapes(batches) {
+		if shape.GetKind() == kind || (strings.HasSuffix(kind, "/") && strings.HasPrefix(shape.GetKind(), kind)) {
+			out = append(out, shape)
+		}
+	}
+	return out
+}
+
+// awaitResidueShape waits until a batch the fake recorded carries a shape
+// observation of KIND, and fails the subject if none arrives within ctx: the
+// withheld record's one durable trace reached the store.
+func (f *fakeStore) awaitResidueShape(ctx context.Context, t *testing.T, kind string) *storev1.ShapeObservation {
 	t.Helper()
-	for _, e := range entries {
-		if label := residueLabelOf(e); label != "" {
-			t.Errorf("the store holds residue %q (upsert_key %q); only typed entries are persisted", label, e.GetUpsertKey())
+	tick := time.NewTicker(pollTick)
+	defer tick.Stop()
+	for {
+		if shapes := withheldShapesOf(f.Batches(), kind); len(shapes) > 0 {
+			return shapes[0]
+		}
+		select {
+		case <-ctx.Done():
+			var kinds []string
+			for _, shape := range withheldShapes(f.Batches()) {
+				kinds = append(kinds, shape.GetKind())
+			}
+			t.Fatalf("no residue shape of kind %q reached the store within the deadline (shapes sent: %v); the withheld record left no trace", kind, kinds)
+		case <-tick.C:
 		}
 	}
 }
 
-// residueLabelOf mirrors convert.ResidueLabel over a stored entry, so a subject
-// can name what leaked without importing the reader's own package.
-func residueLabelOf(e *storev1.StoreEntry) string {
-	switch arm := e.GetAgentUpdate().GetUnservedItem().GetUnservedItem().(type) {
-	case *storev1.StoreUnservedItem_VendorSpecific:
-		return "vendor_specific/" + arm.VendorSpecific.GetKind()
-	case *storev1.StoreUnservedItem_Unknown:
-		return fmt.Sprintf("unknown/%s:%s", arm.Unknown.GetDiscriminatorField(), arm.Unknown.GetDiscriminator())
-	case *storev1.StoreUnservedItem_Unparsed:
-		return "unparsed"
-	default:
-		return ""
+func TestWithheldShapesOf(t *testing.T) {
+	tests := []struct {
+		name string
+		kind string
+		want []string
+	}{
+		{"an exact kind matches itself alone", "unparsed", []string{"unparsed"}},
+		{"a kind ending in a slash matches its family", "vendor_specific/", []string{"vendor_specific/a", "vendor_specific/b"}},
+		{"a kind with no slash does not match a family by prefix", "vendor_specific", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			batches := []*storev1.WriteBatchRequest{
+				{Shapes: []*storev1.ShapeObservation{{Kind: "unparsed"}, {Kind: "vendor_specific/a"}}},
+				{Shapes: []*storev1.ShapeObservation{{Kind: "vendor_specific/b"}, {Kind: "unknown/type:x"}}},
+			}
+
+			// Act.
+			var got []string
+			for _, shape := range withheldShapesOf(batches, tt.kind) {
+				got = append(got, shape.GetKind())
+			}
+
+			// Assert.
+			if strings.Join(got, ",") != strings.Join(tt.want, ",") {
+				t.Fatalf("withheldShapesOf(%q) = %v, want %v", tt.kind, got, tt.want)
+			}
+		})
 	}
 }

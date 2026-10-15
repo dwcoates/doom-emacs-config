@@ -758,9 +758,11 @@ they drive the same verbs, and assert Emacs's own state rather than frames.
 18. **FullscreenTogglesAndRestores** -- `agent-repl-fullscreen-and-focus`
     twice -- `agent-repl--window-fullscreen-config` becomes non-nil then nil
     and the window count returns to its starting value.
-19. **OpenProgressLadderReachesRendered** -- `agent-repl-frontend-open-panel`
-    -- `agent-repl--open-progress` walks `agent-repl--open-progress-stages`
-    to a non-terminal end (not in `agent-repl--open-progress-terminal-phases`).
+19. **OpenProgressLadderReachesRendered** -- `SPC o c` (the toggle, the one
+    path that raises the ladder) -- `agent-repl--open-progress` opens on
+    `:requested`, walks `agent-repl--open-progress-stages` and finishes once
+    the real panel is displayed, never resting on a phase of
+    `agent-repl--open-progress-terminal-phases`.
     The ladder is blessed host-native UX over Emacs-observable stages.
 
 ### D. Composer and prompt submission (7)

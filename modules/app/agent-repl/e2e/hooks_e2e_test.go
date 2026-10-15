@@ -240,9 +240,13 @@ func TestHookBlocked(t *testing.T) {
 // TestHookFailed is #79 (golden hook-failed): the fake SDK's non-blocking
 // failing SessionStart hook (exit 1 on stderr, no gated tool call at all).
 //
-// THE CARD IS LIVE ONLY: it is drawn by the daemon that watched the firing,
-// and a relaunched daemon, which reads history from a store that kept nothing
-// of the hook, draws the turn and no card (owner rulings 2026-10-06).
+// THE CARD IS LIVE ONLY: the shim hands the failed firing's start and outcome
+// to the store, which delivers them to the standing watches and keeps only
+// each row's identity (shim-store `kindHookDropped`). So the daemon that
+// watched the firing draws the card, and a relaunched daemon, whose history
+// pages carry no hook line, draws the turn and no card (owner rulings
+// 2026-10-06; the shim's convert/hooks.test.ts "the hook records handed to the
+// record plane").
 func TestHookFailed(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -280,7 +284,7 @@ func TestHookFailed(t *testing.T) {
 	// Assert: the turn is replayed from the store, and the card is not.
 	adAwaitReplayedFeedRow(t, successor, again, "the hook turn's terminal, replayed after the relaunch", endsTurn(turn))
 	if h := hookRow(openFeedPageOn(t, successor, again)); h != nil {
-		t.Fatalf("the relaunched daemon drew hook card %v from history, want none: no hook record is stored", h)
+		t.Fatalf("the relaunched daemon drew hook card %v from history, want none: the store keeps no hook line a page can serve", h)
 	}
 }
 

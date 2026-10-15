@@ -25,11 +25,15 @@ package e2e
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
@@ -41,7 +45,8 @@ import (
 // ---------------------------------------------------------------------------
 // Small helpers, local to this file. They read the daemon's feed surface the
 // same way a real client would (OpenFeed for a page + watch token, WatchFeed
-// to tail it) — no store reads, no hand-authored rows.
+// to tail it) — no store reads, no hand-authored rows. The one exception is
+// uhNestedBookUsage, for a file-plane-only fact no daemon surface carries.
 // ---------------------------------------------------------------------------
 
 // openFeed opens the workspace's root feed (feed == nil) or a bubble's own
@@ -429,20 +434,14 @@ func TestSubagentDetachedUtteranceStaysOffTopLevel(t *testing.T) {
 // no paired stream-plane message_start; the main turn itself emits prose
 // only.
 //
-// OPEN QUESTION (flagged, not resolved here — the contract docs read for
-// this test do not say): daemon.md's own correctness ruling states context/
-// account usage on the topbar and footer "arrives as WatchSession's pushed
-// context_usage arm (the vendor's own answer, NEVER derived from usage
-// frames)" — i.e. the daemon does not itself aggregate scattered subagent
-// usage records into a client-visible figure. Nothing in daemon.md, shim.md,
-// sidecar.md, or PROTO-CHANGES.md names a daemon-visible surface this
-// FILE-plane-only record is expected to reach. This test therefore asserts
-// only what the contract does commit to: the record is durably captured
-// (driveScenarioToCompletion's own cursor-advance wait) without disrupting
-// the ordinary turn, and — since no spawning call for this nested agent
-// ever appears on the wire — the daemon fabricates NO subagent bubble for
-// it. If a future capture or doc grounds a specific wire consequence, this
-// test should gain that assertion; it is not invented here.
+// NO DAEMON SURFACE DRAWS THIS FIGURE: every spend figure is one agent's own
+// (AGENTS.md "Fresh input"), and a nested agent nothing spawned on the wire has
+// no bubble to carry one. Its usage is a FILE-PLANE-ONLY fact, so its figure
+// is read where it lands: the nested agent's own book in the store, opened
+// read-only exactly as rmOpenAgentBook does for the other file-plane-only
+// facts, keyed by the spawning call's tool_use_id its `.meta.json` names.
+// The test asserts that figure, that the ordinary turn is undisturbed, and
+// that the daemon fabricates NO subagent bubble for the agent.
 func TestNestedSubagentHistoricalUsage(t *testing.T) {
 	t.Parallel()
 	// Arrange.
@@ -470,11 +469,59 @@ func TestNestedSubagentHistoricalUsage(t *testing.T) {
 		t.Errorf("root feed page %v, want no subagent bubble (no Agent tool_use ever spawned one in this scenario)", rootPage)
 	}
 
+	// Assert: the record's usage figure is retained, whole, in the nested
+	// agent's own book: 100 input, 75 cache-written, 800 cache-read, 200 out.
+	usage := uhNestedBookUsage(t, w)
+	if got := usage.GetInputMisses().GetUnwritten(); got != 100 {
+		t.Errorf("usage.input_misses.unwritten = %d, want the record's input_tokens 100", got)
+	}
+	if got := usage.GetInputMisses().GetWritten(); got != 75 {
+		t.Errorf("usage.input_misses.written = %d, want the record's cache_creation_input_tokens 75", got)
+	}
+	if got := usage.GetInputHits().GetRead(); got != 800 {
+		t.Errorf("usage.input_hits.read = %d, want the record's cache_read_input_tokens 800", got)
+	}
+	if got := usage.GetOutputTokens(); got != 200 {
+		t.Errorf("usage.output_tokens = %d, want the record's output_tokens 200", got)
+	}
+
 	// Assert: the world is still healthy after ingesting the odd record —
 	// pinned explicitly here (in addition to NewWorld's own end-of-test
 	// guarantee) at the point most likely to expose a sidecar/store crash
 	// on an unusual file shape.
 	w.RequireNoUnexpectedExit(t)
+}
+
+// uhNestedBookUsage answers the one usage the `!usage-historical` nested
+// agent's book carries, failing unless there is exactly one: the scenario
+// writes one `.meta.json` and one assistant record, and its book is keyed by
+// the spawning call's tool_use_id that file names.
+func uhNestedBookUsage(t *testing.T, w *World) *conversationv1.TokenUsage {
+	t.Helper()
+	metas, err := filepath.Glob(filepath.Join(w.DefaultConfigDir, "projects", "*", "*", "subagents", "agent-*.meta.json"))
+	if err != nil || len(metas) != 1 {
+		t.Fatalf("the nested agent's .meta.json files = %v (%v), want exactly one", metas, err)
+	}
+	raw, err := os.ReadFile(metas[0])
+	if err != nil {
+		t.Fatalf("read %s: %v", metas[0], err)
+	}
+	var meta struct {
+		ToolUseID string `json:"toolUseId"`
+	}
+	if err := json.Unmarshal(raw, &meta); err != nil || meta.ToolUseID == "" {
+		t.Fatalf("%s names no toolUseId (%v): %s", metas[0], err, raw)
+	}
+	var usages []*conversationv1.TokenUsage
+	for _, line := range rmOpenAgentBook(t, w, &conversationv1.AgentId{Value: meta.ToolUseID}).GetLines() {
+		if u := line.GetLine().GetAgentItem().GetAgentFrame().GetUpdate().GetActivity().GetUsage(); u != nil {
+			usages = append(usages, u)
+		}
+	}
+	if len(usages) != 1 {
+		t.Fatalf("the nested agent's book carries %d usage(s), want exactly the one record's", len(usages))
+	}
+	return usages[0]
 }
 
 // ---------------------------------------------------------------------------

@@ -285,17 +285,9 @@ func TestACompletedTurnAndTeardownLeaveNoWatchTokenOutstanding(t *testing.T) {
 	t.Parallel()
 	// Arrange: a live session whose turn has run and ended.
 	w, ws := pmNewPermissionWorld(t)
-	// Standing a live session down on purpose is what produces the teardown
-	// this test is about; these are that act's own trail.
-	w.ExpectWarnings(
-		"daemon.shimclient.exit", "daemon.shimclient.kill_session",
-		"daemon.shimclient.kill", "daemon.shimclient.redial",
-		"daemon.sessionwatcher.link_fault", "daemon.sessionwatcher.watch_session",
-		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.reopen",
-		"daemon.shimclient.watch_agent", "daemon.shimclient.watch_session",
-		"daemon.workspace.kill", "daemon.workspace.bring_up",
-		"daemon.health.open_fault", "daemon.health.session",
-	)
+	// THE STOP IS THE DAEMON'S OWN ORDERED STAND-DOWN, which writes no WARN or
+	// ERROR in any system (TestAStopAfterACompletedTurnLeavesOnTheStop runs
+	// the same stop and asserts exactly that), so nothing is declared.
 	turn := SubmitPrompt(t, w, ws, "!prose-streamed")
 	AwaitTurnEnded(t, w, ws, turn)
 

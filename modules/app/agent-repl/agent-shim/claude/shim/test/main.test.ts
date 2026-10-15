@@ -173,6 +173,18 @@ describe("parseArgs", () => {
   it("gates nothing when the launcher hands no spawn gate", () => {
     expect(parseArgs(["--log-fd", "3"]).spawnGateFd).toBeUndefined();
   });
+
+  it("accepts the readiness pipe on fd 5", () => {
+    expect(parseArgs(["--ready-fd", "5"]).readyFd).toBe(5);
+  });
+
+  it("refuses a readiness pipe on any other descriptor", () => {
+    expect(() => parseArgs(["--ready-fd", "4"])).toThrow(/the readiness pipe is inherited fd 5/);
+  });
+
+  it("reports nothing when the launcher hands no readiness pipe", () => {
+    expect(parseArgs(["--log-fd", "3"]).readyFd).toBeUndefined();
+  });
 });
 
 describe("requireServingArgs", () => {

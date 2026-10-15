@@ -84,7 +84,7 @@ func TestSecondBindLosesTheClaim(t *testing.T) {
 
 	// Act: no wait, because the incumbent here is not departing -- the
 	// production bound is exercised in lock_test.go.
-	loser, err := BindWithin(addrPath, 0, 0)
+	loser, _, err := BindWithin(addrPath, 0, 0, BootOrdinary)
 
 	// Assert.
 	if err == nil {
@@ -102,7 +102,7 @@ func TestALosingBindLeavesTheIncumbentsListenerAlone(t *testing.T) {
 	incumbent := mustBind(t, addrPath)
 
 	// Act.
-	if _, err := BindWithin(addrPath, 0, 0); err == nil {
+	if _, _, err := BindWithin(addrPath, 0, 0, BootOrdinary); err == nil {
 		t.Fatalf("the second bind was supposed to lose")
 	}
 
@@ -123,7 +123,7 @@ func TestALosingBindLeavesTheIncumbentsAdvertisementAlone(t *testing.T) {
 	}
 
 	// Act.
-	if _, err := BindWithin(addrPath, 0, 0); err == nil {
+	if _, _, err := BindWithin(addrPath, 0, 0, BootOrdinary); err == nil {
 		t.Fatalf("the second bind was supposed to lose")
 	}
 
@@ -559,7 +559,7 @@ func TestAJoiningClaimTakesTheBootClaimWhenItAdvertises(t *testing.T) {
 	}
 
 	// Assert: nobody else can take the claim now.
-	if _, err := BindWithin(path, 0, 0); !errors.Is(err, ErrClaimed) {
+	if _, _, err := BindWithin(path, 0, 0, BootOrdinary); !errors.Is(err, ErrClaimed) {
 		t.Fatalf("Bind after the successor advertised = %v, want ErrClaimed", err)
 	}
 }
@@ -763,7 +763,7 @@ func TestASuccessorTakesTheBootClaimTheMomentTheIncumbentLetsGo(t *testing.T) {
 	if err := successor.Publish(); err != nil {
 		t.Fatalf("Publish under the awaited claim: %v", err)
 	}
-	if _, err := BindWithin(path, 0, 0); !errors.Is(err, ErrClaimed) {
+	if _, _, err := BindWithin(path, 0, 0, BootOrdinary); !errors.Is(err, ErrClaimed) {
 		t.Fatalf("Bind after the takeover = %v, want ErrClaimed", err)
 	}
 }
@@ -956,7 +956,7 @@ func TestAClaimClosedWhileItWaitsReleasesTheClaimItLaterTakes(t *testing.T) {
 	case <-time.After(awaitBound):
 		t.Fatal("the closed successor's waiter was not answered")
 	}
-	next, err := BindWithin(path, 0, 0)
+	next, _, err := BindWithin(path, 0, 0, BootOrdinary)
 	if err != nil {
 		t.Fatalf("Bind after the closed successor = %v, want the claim free", err)
 	}
@@ -993,7 +993,7 @@ func TestPublishLeavesTheClaimToAWaitAlreadyUnderWay(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Publish under the awaited claim = %v, want nil", err)
 	}
-	if _, err := BindWithin(path, 0, 0); !errors.Is(err, ErrClaimed) {
+	if _, _, err := BindWithin(path, 0, 0, BootOrdinary); !errors.Is(err, ErrClaimed) {
 		t.Fatalf("Bind after the takeover = %v, want ErrClaimed", err)
 	}
 }
@@ -1082,5 +1082,247 @@ func TestAwaitBootClaimOnAClosedClaimStartsNoWait(t *testing.T) {
 	}
 	if _, err := os.Stat(LockPath(path)); !os.IsNotExist(err) {
 		t.Fatalf("stat the lock file = %v, want it absent", err)
+	}
+}
+
+// requireServing asserts whether the serving lock beside addrPath is held.
+func requireServing(t *testing.T, addrPath string, want bool) {
+	t.Helper()
+	held, err := servingHeld(ServingPath(addrPath))
+	if err != nil {
+		t.Fatalf("servingHeld: %v", err)
+	}
+	if held != want {
+		t.Fatalf("serving lock held = %v, want %v", held, want)
+	}
+}
+
+func TestBindTakesTheServingLock(t *testing.T) {
+	// Arrange.
+	addrPath := newAddrPath(t)
+
+	// Act.
+	mustBind(t, addrPath)
+
+	// Assert.
+	requireServing(t, addrPath, true)
+}
+
+func TestASecondBindBesideAServingClaimIsRefusedAtOnce(t *testing.T) {
+	// Arrange.
+	addrPath := newAddrPath(t)
+	mustBind(t, addrPath)
+
+	// Act: the production bound, which a serving incumbent must not cost.
+	loser, verdict, err := BindWithin(addrPath, 0, ClaimWaitBound, BootOrdinary)
+
+	// Assert.
+	if err == nil {
+		loser.Close()
+		t.Fatalf("a second daemon took the claim of a serving incumbent")
+	}
+	if !errors.Is(err, ErrClaimed) || verdict != VerdictIncumbentServing {
+		t.Fatalf("BindWithin = (%q, %v), want (%q, ErrClaimed)", verdict, err, VerdictIncumbentServing)
+	}
+}
+
+func TestDepartReleasesTheServingLockAndKeepsTheBootClaim(t *testing.T) {
+	// Arrange.
+	addrPath := newAddrPath(t)
+	c := mustBind(t, addrPath)
+
+	// Act.
+	if err := c.Depart(); err != nil {
+		t.Fatalf("Depart: %v", err)
+	}
+
+	// Assert.
+	requireServing(t, addrPath, false)
+	if _, _, err := BindWithin(addrPath, 0, 0, BootOrdinary); !errors.Is(err, ErrClaimed) {
+		t.Fatalf("BindWithin after Depart = %v, want ErrClaimed: the boot claim is held until exit", err)
+	}
+}
+
+func TestCloseReleasesTheServingLock(t *testing.T) {
+	// Arrange.
+	addrPath := newAddrPath(t)
+	c, err := Bind(addrPath, 0)
+	if err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+
+	// Act.
+	if err := c.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Assert.
+	requireServing(t, addrPath, false)
+}
+
+func TestAJoiningClaimTakesTheServingLockWhenItAdvertises(t *testing.T) {
+	// Arrange.
+	addrPath := newAddrPath(t)
+	successor, err := BindJoining(addrPath, 0)
+	if err != nil {
+		t.Fatalf("BindJoining: %v", err)
+	}
+	defer successor.Close()
+	requireServing(t, addrPath, false)
+
+	// Act.
+	if err := successor.Publish(); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+
+	// Assert.
+	requireServing(t, addrPath, true)
+}
+
+func TestASuccessorTakesTheServingLockWithTheAwaitedClaim(t *testing.T) {
+	// Arrange.
+	addrPath := newAddrPath(t)
+	incumbent, err := Bind(addrPath, 0)
+	if err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	successor, err := BindJoining(addrPath, 0)
+	if err != nil {
+		t.Fatalf("BindJoining: %v", err)
+	}
+	defer successor.Close()
+	waiter := awaitResult(context.Background(), successor)
+
+	// Act.
+	if err := incumbent.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	select {
+	case err := <-waiter:
+		if err != nil {
+			t.Fatalf("AwaitBootClaim = %v, want nil", err)
+		}
+	case <-time.After(awaitBound):
+		t.Fatalf("the successor was not answered once the incumbent let go")
+	}
+
+	// Assert.
+	requireServing(t, addrPath, true)
+}
+
+func TestAClaimThatDepartedTakesNoServingLockWithALaterClaim(t *testing.T) {
+	// Arrange: a successor that departs before it ever takes over.
+	addrPath := newAddrPath(t)
+	successor, err := BindJoining(addrPath, 0)
+	if err != nil {
+		t.Fatalf("BindJoining: %v", err)
+	}
+	defer successor.Close()
+	if err := successor.Depart(); err != nil {
+		t.Fatalf("Depart: %v", err)
+	}
+
+	// Act.
+	if err := successor.Publish(); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+
+	// Assert.
+	requireServing(t, addrPath, false)
+}
+
+func TestAServingLockThatCannotBeTakenRefusesTheBind(t *testing.T) {
+	// Arrange: the serving lock unopenable, the boot claim free.
+	if os.Geteuid() == 0 {
+		t.Fatal("this test needs a non-root user: root opens a mode-000 file")
+	}
+	addrPath := newAddrPath(t)
+	if err := os.WriteFile(ServingPath(addrPath), nil, 0); err != nil {
+		t.Fatalf("write an unopenable serving lock: %v", err)
+	}
+
+	// Act.
+	c, verdict, err := BindWithin(addrPath, 0, 0, BootOrdinary)
+
+	// Assert: refused, and the boot claim it took first was released.
+	if err == nil {
+		c.Close()
+		t.Fatalf("BindWithin took a claim it could not mark serving")
+	}
+	if !errors.Is(err, os.ErrPermission) || verdict != VerdictUndecided {
+		t.Fatalf("BindWithin = (%q, %v), want (%q, a permission error)", verdict, err, VerdictUndecided)
+	}
+	if err := ProbeBootClaim(addrPath); err != nil {
+		t.Fatalf("ProbeBootClaim after the refused bind = %v, want the claim free", err)
+	}
+}
+
+func TestPublishWhoseServingLockCannotBeTakenAdvertisesNothing(t *testing.T) {
+	// Arrange.
+	if os.Geteuid() == 0 {
+		t.Fatal("this test needs a non-root user: root opens a mode-000 file")
+	}
+	addrPath := newAddrPath(t)
+	successor, err := BindJoining(addrPath, 0)
+	if err != nil {
+		t.Fatalf("BindJoining: %v", err)
+	}
+	defer successor.Close()
+	if err := os.WriteFile(ServingPath(addrPath), nil, 0); err != nil {
+		t.Fatalf("write an unopenable serving lock: %v", err)
+	}
+
+	// Act.
+	err = successor.Publish()
+
+	// Assert: refused, nothing advertised, and the boot claim released.
+	if !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("Publish = %v, want the serving lock's permission error", err)
+	}
+	if _, statErr := os.Stat(addrPath); !os.IsNotExist(statErr) {
+		t.Fatalf("daemon.addr after a refused Publish: stat err = %v, want it absent", statErr)
+	}
+	if err := ProbeBootClaim(addrPath); err != nil {
+		t.Fatalf("ProbeBootClaim after the refused Publish = %v, want the claim free", err)
+	}
+}
+
+func TestAnAwaitedClaimWhoseServingLockCannotBeTakenIsAnsweredWithTheCause(t *testing.T) {
+	// Arrange: the successor waits; the serving lock becomes unopenable
+	// while the incumbent still holds it open.
+	if os.Geteuid() == 0 {
+		t.Fatal("this test needs a non-root user: root opens a mode-000 file")
+	}
+	addrPath := newAddrPath(t)
+	incumbent, err := Bind(addrPath, 0)
+	if err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	successor, err := BindJoining(addrPath, 0)
+	if err != nil {
+		t.Fatalf("BindJoining: %v", err)
+	}
+	defer successor.Close()
+	waiter := awaitResult(context.Background(), successor)
+	if err := os.Chmod(ServingPath(addrPath), 0); err != nil {
+		t.Fatalf("chmod the serving lock: %v", err)
+	}
+
+	// Act.
+	if err := incumbent.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Assert: the wait is answered with the cause, and holds no claim.
+	select {
+	case err := <-waiter:
+		if !errors.Is(err, os.ErrPermission) {
+			t.Fatalf("AwaitBootClaim = %v, want the serving lock's permission error", err)
+		}
+	case <-time.After(awaitBound):
+		t.Fatalf("the successor was not answered once the incumbent let go")
+	}
+	if err := ProbeBootClaim(addrPath); err != nil {
+		t.Fatalf("ProbeBootClaim after the failed takeover = %v, want the claim free", err)
 	}
 }

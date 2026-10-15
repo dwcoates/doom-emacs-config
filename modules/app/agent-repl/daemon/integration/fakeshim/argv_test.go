@@ -7,7 +7,7 @@ import (
 
 func TestParseArgvAcceptsTheSpawnContract(t *testing.T) {
 	// Arrange
-	args := []string{"/opt/shim/dist/main.js", "--listen", "/tmp/ws.sock", "--store-socket", "/tmp/store.sock", "--log-fd", "3", "--spawn-gate-fd", "4", "--fake"}
+	args := []string{"/opt/shim/dist/main.js", "--listen", "/tmp/ws.sock", "--store-socket", "/tmp/store.sock", "--log-fd", "3", "--spawn-gate-fd", "4", "--ready-fd", "5", "--fake"}
 
 	// Act
 	got, err := ParseArgv(args)
@@ -16,7 +16,7 @@ func TestParseArgvAcceptsTheSpawnContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseArgv = error %v, want the parsed contract", err)
 	}
-	want := Argv{MainJS: "/opt/shim/dist/main.js", Listen: "/tmp/ws.sock", StoreSocket: "/tmp/store.sock", LogFD: 3, SpawnGateFD: 4, Fake: true}
+	want := Argv{MainJS: "/opt/shim/dist/main.js", Listen: "/tmp/ws.sock", StoreSocket: "/tmp/store.sock", LogFD: 3, SpawnGateFD: 4, ReadyFD: 5, Fake: true}
 	if got != want {
 		t.Fatalf("ParseArgv = %+v, want %+v", got, want)
 	}
@@ -80,5 +80,18 @@ func TestParseArgvGatesNothingWhenTheLauncherGatesNothing(t *testing.T) {
 	// Assert
 	if err != nil || got.SpawnGateFD != -1 {
 		t.Fatalf("ParseArgv = (%+v, %v), want no spawn gate", got, err)
+	}
+}
+
+func TestParseArgvAsksForNoReadinessReportWhenTheLauncherAsksNone(t *testing.T) {
+	// Arrange
+	args := []string{"main.js", "--listen", "a", "--store-socket", "b", "--log-fd", "3"}
+
+	// Act
+	got, err := ParseArgv(args)
+
+	// Assert
+	if err != nil || got.ReadyFD != -1 {
+		t.Fatalf("ParseArgv = (%+v, %v), want no readiness pipe", got, err)
 	}
 }

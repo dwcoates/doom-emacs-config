@@ -155,6 +155,14 @@ func run(args []string) error {
 	}))
 	httpSrv := &http.Server{Handler: h2c.NewHandler(mux, &http2.Server{}), ConnContext: hangup.ConnContext}
 
+	// READY ONCE BOTH SOCKETS ACCEPT, as the real shim reports it: a bound
+	// listener queues the daemon's connect until Serve takes it.
+	if argv.ReadyFD >= 0 {
+		if err := reportReady(argv.ReadyFD); err != nil {
+			log.write("ready-unreported", map[string]any{"fd": argv.ReadyFD, "error": err.Error()})
+		}
+	}
+
 	go proc.serveControl(ctlListener)
 
 	signals := make(chan os.Signal, 1)
@@ -531,6 +539,22 @@ func commandContext(cmd Command) (context.Context, context.CancelFunc) {
 // awaitSpawnGate blocks until the daemon opens the spawn gate on fd, and
 // reports whether it did: one byte is the opening, EOF a daemon that died
 // before recording this process.
+// reportReady writes the readiness pipe's one byte to FD and closes it. A
+// daemon gone since it opened the spawn gate leaves no reader; that is the
+// answer's to say, and the shim serves on for a successor to adopt.
+func reportReady(fd int) error {
+	ready := os.NewFile(uintptr(fd), "ready")
+	_, werr := ready.Write([]byte{1})
+	cerr := ready.Close()
+	if werr != nil {
+		return fmt.Errorf("fakeshim: report ready: %w", werr)
+	}
+	if cerr != nil {
+		return fmt.Errorf("fakeshim: close the readiness pipe: %w", cerr)
+	}
+	return nil
+}
+
 func awaitSpawnGate(fd int) (bool, error) {
 	gate := os.NewFile(uintptr(fd), "spawn-gate")
 	defer gate.Close()

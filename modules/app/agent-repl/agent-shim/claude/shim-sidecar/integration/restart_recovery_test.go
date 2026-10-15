@@ -456,8 +456,6 @@ func TestAReReadOfAResidueRecordStoresNothingTwice(t *testing.T) {
 	}
 	// The second reader classified it again — the re-read happened.
 	awaitResidueDropsAtLeast(ctx, t, opts.LogPath, firstPassDrops+1)
-	// And stored none of it, on either pass.
-	requireNoResidueStored(t, fake.Entries())
 	// Nor anything else the first pass had not already written: a replay lands
 	// on the rows it landed on before, never beside them.
 	for _, e := range secondPass {
