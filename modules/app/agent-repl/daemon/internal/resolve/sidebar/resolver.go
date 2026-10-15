@@ -14,6 +14,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/protoarm"
 	"agent-repld/internal/publish"
 	"agent-repld/internal/repodivergence"
 	"agent-repld/internal/resolve/footer"
@@ -779,6 +780,9 @@ func (r *resolver) OnPermission(ws ids.WorkspaceID, agent *conversationv1.AgentI
 
 // OnDetachedWork moves the row to background.
 func (r *resolver) OnDetachedWork(ws ids.WorkspaceID, agent *conversationv1.AgentId, work *conversationv1.AgentDetachedWork) {
+	// THE KIND IS REQUIRED, and the session watcher refuses an announcement
+	// without one before any view takes it (resolveDetachedLocked).
+	protoarm.Must(work.GetKind().ProtoReflect(), "kind", "daemon.sidebar.on_detached_work")
 	r.mutateWorkspace(ws, "daemon.sidebar.on_detached_work", "the roster took a detached-work announcement",
 		dlog.Context{"agent_id": agent.GetValue()}, func(s *wsState) {
 			s.detached[detachedKey(agent, work)] = struct{}{}

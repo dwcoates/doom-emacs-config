@@ -9,12 +9,13 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"google.golang.org/protobuf/proto"
-
+	kinds "agent-repld/internal/detachedkindtest"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/sessionwatcher"
+
+	"google.golang.org/protobuf/proto"
 )
 
 // THE BUBBLE IS A FEED, and sync-vs-detached is PLACEMENT rather than a second
@@ -313,6 +314,7 @@ func TestDetachingMovesTheSameBubbleIntoItsPlacementWrapper(t *testing.T) {
 
 	// Act.
 	h.resolver.OnDetachedWork(testWorkspace, mainAgent(), &conversationv1.AgentDetachedWork{
+		Kind: kinds.Subagent(created),
 		Work: &conversationv1.DetachedWorkId{Value: "work-1"},
 		Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
 			DetachedFromId: &conversationv1.AgentActivityId{Value: "spawn-1"},
@@ -345,7 +347,7 @@ func TestDetachingMovesTheSameBubbleIntoItsPlacementWrapper(t *testing.T) {
 func TestWorkDetachedFromAUnitWeNeverDrewIsReportedUnplaceableWhenTheTurnEnds(t *testing.T) {
 	// Arrange: a detachment naming a unit nothing ever draws.
 	h := newHarness(t)
-	h.detachWork("work-1", "never-seen")
+	h.detachWork("work-1", "never-seen", kinds.Bash())
 
 	// Act: the turn ends, which is the last moment the mark could have been
 	// claimed.
@@ -372,6 +374,7 @@ func TestASubagentCreatedDetachedDrawsThroughTheWrapperAtOnce(t *testing.T) {
 	h := newHarness(t)
 	created := &conversationv1.AgentId{Value: "agent-remote"}
 	h.resolver.OnDetachedWork(testWorkspace, mainAgent(), &conversationv1.AgentDetachedWork{
+		Kind:  kinds.Subagent(created),
 		Work:  &conversationv1.DetachedWorkId{Value: "work-1"},
 		Owner: mainAgent(),
 		Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{
@@ -399,6 +402,7 @@ func TestACreatedMonitorsAnnouncementDrawsNoRowOfItsOwn(t *testing.T) {
 	// call's frames; the announcement describes the watch for the footer.
 	h := newHarness(t)
 	h.resolver.OnDetachedWork(testWorkspace, mainAgent(), &conversationv1.AgentDetachedWork{
+		Kind:  kinds.Monitor(),
 		Work:  &conversationv1.DetachedWorkId{Value: "work-1"},
 		Owner: mainAgent(),
 		Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{
@@ -940,6 +944,7 @@ func TestAForegroundShellThatDetachesKeepsItsCommandAndClock(t *testing.T) {
 
 	// Act: it moves rather than ending.
 	h.resolver.OnDetachedWork(testWorkspace, mainAgent(), &conversationv1.AgentDetachedWork{
+		Kind: kinds.Bash(),
 		Work: &conversationv1.DetachedWorkId{Value: "work-1"},
 		Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
 			DetachedFromId: &conversationv1.AgentActivityId{Value: "unit-1"},
@@ -1018,6 +1023,7 @@ func TestAReannouncedDetachmentDoesNotUnsettleASettledShell(t *testing.T) {
 
 	// Act: the next turn's live-work reconciliation announces it again.
 	h.resolver.OnDetachedWork(testWorkspace, mainAgent(), &conversationv1.AgentDetachedWork{
+		Kind: kinds.Bash(),
 		Work: &conversationv1.DetachedWorkId{Value: "work-1"},
 		Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
 			DetachedFromId: &conversationv1.AgentActivityId{Value: "unit-1"},
@@ -1127,9 +1133,10 @@ func last(rows []*frontendv1.FeedRow) *frontendv1.FeedRow {
 }
 
 // detachWork announces one detachment of a unit.
-func (h *harness) detachWork(work, unit string) {
+func (h *harness) detachWork(work, unit string, kind *conversationv1.DetachedWorkKind) {
 	h.t.Helper()
 	h.resolver.OnDetachedWork(testWorkspace, mainAgent(), &conversationv1.AgentDetachedWork{
+		Kind: kind,
 		Work: &conversationv1.DetachedWorkId{Value: work},
 		Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
 			DetachedFromId: &conversationv1.AgentActivityId{Value: unit},
@@ -1241,7 +1248,7 @@ func TestADetachmentAnnouncedBeforeItsSpawnStillDrawsTheWrapper(t *testing.T) {
 	// the unit's row replays at its LAST upsert, after the announcement.
 	h := newHarness(t)
 	created := &conversationv1.AgentId{Value: "agent-explore"}
-	h.detachWork("spawn-1", "spawn-1")
+	h.detachWork("spawn-1", "spawn-1", kinds.Subagent(created))
 
 	// Act.
 	row := h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
@@ -1256,7 +1263,7 @@ func TestAClaimedDetachmentIsNotReportedAsUnknownWhenTheTurnEnds(t *testing.T) {
 	// Arrange: the detachment arrives before its spawn, and the spawn draws.
 	h := newHarness(t)
 	created := &conversationv1.AgentId{Value: "agent-explore"}
-	h.detachWork("spawn-1", "spawn-1")
+	h.detachWork("spawn-1", "spawn-1", kinds.Subagent(created))
 	h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
 
 	// Act.
@@ -1356,7 +1363,7 @@ func TestADetachedForegroundShellsTerminalKeepsTheCallsOwnCommand(t *testing.T) 
 			StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
 		}},
 	}))
-	h.detachWork("unit-1", "unit-1")
+	h.detachWork("unit-1", "unit-1", kinds.Bash())
 
 	// Act: the run's terminal, composed by a reader that knows only the handle.
 	h.bash("unit-1", &conversationv1.AgentBashSuccess{
@@ -1534,6 +1541,14 @@ func monitorActivity(unit string) *conversationv1.AgentActivity {
 	}
 }
 
+// footerOnlyKind is the kind a detachment from a footer-only unit states. The
+// feed routes a detachment by its UNIT, so which kind rides beside a unit
+// whose kind draws no row changes nothing it draws; a workflow is the one
+// detachable kind with no feed row of its own (drawDetachedWork).
+func footerOnlyKind() *conversationv1.DetachedWorkKind {
+	return kinds.Workflow()
+}
+
 // wakeupActivity is a self-wakeup's start: a kind that draws no feed row.
 func wakeupActivity(unit string) *conversationv1.AgentActivity {
 	return &conversationv1.AgentActivity{
@@ -1548,7 +1563,7 @@ func TestADetachmentNamingAFooterOnlyUnitIsNotWarnedWhenTheTurnEnds(t *testing.T
 	// Arrange: the footer-only unit arrives first, then a detachment naming it.
 	h := newHarness(t)
 	h.resolver.OnActivity(testWorkspace, mainAgent(), wakeupActivity("wakeup-1"), nil, nil)
-	h.detachWork("work-1", "wakeup-1")
+	h.detachWork("work-1", "wakeup-1", footerOnlyKind())
 
 	// Act.
 	h.terminal("turn-1", &conversationv1.AgentSuccess{
@@ -1565,7 +1580,7 @@ func TestADetachmentNamingAFooterOnlyUnitIsNotWarnedWhenTheTurnEnds(t *testing.T
 func TestADetachmentHeldBeforeAFooterOnlyUnitDrawsIsRetired(t *testing.T) {
 	// Arrange: the announcement beats the unit, so it is held first.
 	h := newHarness(t)
-	h.detachWork("work-1", "wakeup-1")
+	h.detachWork("work-1", "wakeup-1", footerOnlyKind())
 
 	// Act: the unit arrives, and its kind draws no row.
 	h.resolver.OnActivity(testWorkspace, mainAgent(), wakeupActivity("wakeup-1"), nil, nil)
@@ -2089,7 +2104,7 @@ func TestAMoveAnnouncedAfterTheCallSucceededDrawsTheHeadSettled(t *testing.T) {
 	h.send(activityOf("unit-1", exitedSuccess("go test ./...", 0, 9_000)))
 
 	// Act: the move is announced late.
-	h.detachWork("work-1", "unit-1")
+	h.detachWork("work-1", "unit-1", kinds.Bash())
 
 	// Assert.
 	settled := h.shellHead().GetSettled()
@@ -2105,7 +2120,7 @@ func TestAMoveAnnouncedAfterTheCallFailedDrawsTheHeadCancelled(t *testing.T) {
 	h.send(activityOf("unit-1", failedCall(9_000)))
 
 	// Act.
-	h.detachWork("work-1", "unit-1")
+	h.detachWork("work-1", "unit-1", kinds.Bash())
 
 	// Assert.
 	settled := h.shellHead().GetSettled()
@@ -2120,7 +2135,7 @@ func TestAMoveOfAStillRunningCallDrawsTheHeadLive(t *testing.T) {
 	startForegroundBash(h, "unit-1", "go test ./...")
 
 	// Act.
-	h.detachWork("work-1", "unit-1")
+	h.detachWork("work-1", "unit-1", kinds.Bash())
 
 	// Assert.
 	if h.shellHead().GetLive() == nil {
@@ -2306,7 +2321,7 @@ func liveAgents(agents ...string) sessionwatcher.LiveWorkSet {
 func runningDetachedSubagent(h *harness) *conversationv1.AgentId {
 	h.t.Helper()
 	created := &conversationv1.AgentId{Value: "agent-explore"}
-	h.detachWork("spawn-1", "spawn-1")
+	h.detachWork("spawn-1", "spawn-1", kinds.Subagent(created))
 	h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
 	return created
 }
@@ -2460,9 +2475,10 @@ func spawnCall(unit string, created *conversationv1.AgentId) *conversationv1.Age
 
 // announceDetachment announces, on the announcer's book, that the unit's work
 // left — naming its owner when owner is non-nil.
-func (h *harness) announceDetachment(announcer, owner *conversationv1.AgentId, work, unit string) {
+func (h *harness) announceDetachment(announcer, owner *conversationv1.AgentId, work, unit string, kind *conversationv1.DetachedWorkKind) {
 	h.t.Helper()
 	h.resolver.OnDetachedWork(testWorkspace, announcer, &conversationv1.AgentDetachedWork{
+		Kind:  kind,
 		Work:  &conversationv1.DetachedWorkId{Value: work},
 		Owner: owner,
 		Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
@@ -2599,7 +2615,7 @@ func TestADetachedShellIsDrawnInItsOwnersFeedAtItsCallsRow(t *testing.T) {
 			carrier := tc.arrange(h)
 
 			// Act: the task stream announces it on the MAIN agent's book.
-			h.announceDetachment(mainAgent(), tc.owner(carrier), "toolu_bash", "toolu_bash")
+			h.announceDetachment(mainAgent(), tc.owner(carrier), "toolu_bash", "toolu_bash", kinds.Bash())
 
 			// Assert: one head, on the owner's feed only, where the card stood.
 			want := testFeedValue(tc.wantFeed(carrier))
@@ -2624,7 +2640,7 @@ func TestADetachedShellHeadCarriesItsSpawningTurn(t *testing.T) {
 	h.resolver.OnTurnOpened(testWorkspace, ids.TurnID("turn-2"))
 
 	// Act.
-	h.announceDetachment(mainAgent(), mainAgent(), "toolu_bash", "toolu_bash")
+	h.announceDetachment(mainAgent(), mainAgent(), "toolu_bash", "toolu_bash", kinds.Bash())
 
 	// Assert.
 	for _, row := range h.rows(rootFeed()) {
@@ -2648,7 +2664,7 @@ func TestADetachedSubagentShellHeadNeverTakesTheRunningTurn(t *testing.T) {
 	h.resolver.OnTurnOpened(testWorkspace, ids.TurnID("turn-later"))
 
 	// Act.
-	h.announceDetachment(mainAgent(), nil, "toolu_bash", "toolu_bash")
+	h.announceDetachment(mainAgent(), nil, "toolu_bash", "toolu_bash", kinds.Bash())
 
 	// Assert.
 	for _, row := range h.rows(agentFeed(sub)) {
@@ -2668,7 +2684,7 @@ func TestADetachmentWhoseOwnerContradictsItsCallsCarrierDrawsNothing(t *testing.
 	h.send(bashCall("toolu_bash", "npm test"))
 
 	// Act.
-	h.announceDetachment(mainAgent(), &conversationv1.AgentId{Value: "agent-other"}, "toolu_bash", "toolu_bash")
+	h.announceDetachment(mainAgent(), &conversationv1.AgentId{Value: "agent-other"}, "toolu_bash", "toolu_bash", kinds.Bash())
 
 	// Assert.
 	if got := h.shellHeadFeeds(); len(got) != 0 {
@@ -2691,7 +2707,7 @@ func TestTheUnplaceableRecordNamesTheWorkKindOwnerAnnouncerAndReason(t *testing.
 	h.send(bashCall("toolu_bash", "npm test"))
 
 	// Act.
-	h.announceDetachment(mainAgent(), &conversationv1.AgentId{Value: "agent-other"}, "toolu_bash", "toolu_bash")
+	h.announceDetachment(mainAgent(), &conversationv1.AgentId{Value: "agent-other"}, "toolu_bash", "toolu_bash", kinds.Bash())
 
 	// Assert.
 	for _, record := range h.records() {
@@ -2721,7 +2737,7 @@ func TestASubagentsMonitorDrawsItsCardInTheSubagentsFeed(t *testing.T) {
 	h.sendAs(sub, monitorActivity("toolu_monitor"))
 
 	// Act: the task stream announces it on the MAIN book.
-	h.announceDetachment(mainAgent(), nil, "toolu_monitor", "toolu_monitor")
+	h.announceDetachment(mainAgent(), nil, "toolu_monitor", "toolu_monitor", kinds.Monitor())
 
 	// Assert: the card stays a card in the subagent's feed, and the root holds
 	// only the spawn.
@@ -2746,7 +2762,7 @@ func TestANestedSubagentsDetachmentKeepsItsBubbleInItsSpawnersFeed(t *testing.T)
 
 	// Act: the task stream announces the move on the MAIN book, then reports
 	// the run's progress there too.
-	h.announceDetachment(mainAgent(), nil, "toolu_nested", "toolu_nested")
+	h.announceDetachment(mainAgent(), nil, "toolu_nested", "toolu_nested", kinds.Subagent(nested))
 	h.progressBeat("toolu_nested", 1_200)
 
 	// Assert.
@@ -2763,6 +2779,7 @@ func TestACreatedSubagentWithNoKnownOwnerDrawsNothing(t *testing.T) {
 	// was never drawn.
 	h := newHarness(t)
 	h.resolver.OnDetachedWork(testWorkspace, mainAgent(), &conversationv1.AgentDetachedWork{
+		Kind: kinds.Subagent(&conversationv1.AgentId{Value: "agent-remote"}),
 		Work: &conversationv1.DetachedWorkId{Value: "work-1"},
 		Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{
 			WorkCreated: &conversationv1.DetachableWork{Work: &conversationv1.DetachableWork_Subagent{
@@ -2787,6 +2804,7 @@ func TestACreatedShellIsHeldUntilItsCallDrawsAndThenReplacesIt(t *testing.T) {
 	// Arrange: a re-announced live shell whose call the feed has not drawn.
 	h := newHarness(t)
 	h.resolver.OnDetachedWork(testWorkspace, mainAgent(), &conversationv1.AgentDetachedWork{
+		Kind:  kinds.Bash(),
 		Work:  &conversationv1.DetachedWorkId{Value: "toolu_bash"},
 		Owner: mainAgent(),
 		Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{
@@ -2829,7 +2847,7 @@ func TestAnUnplacedShellsFramesPublishNothing(t *testing.T) {
 func TestAnUnplacedShellsSpoolIsDrawnWholeOnceItsCallPlacesIt(t *testing.T) {
 	// Arrange: output arrives on the run's stream before its call's card.
 	h := newHarness(t)
-	h.announceDetachment(mainAgent(), mainAgent(), "toolu_bash", "toolu_bash")
+	h.announceDetachment(mainAgent(), mainAgent(), "toolu_bash", "toolu_bash", kinds.Bash())
 	h.bashUnplaced("toolu_bash", tailOf("PASS\n"))
 
 	// Act.
@@ -2847,11 +2865,11 @@ func TestARestatedMoveKeepsTheHeadWhereAndWhenItWasSpawned(t *testing.T) {
 	h.deliverPrompt("turn-1", "run the tests")
 	h.send(bashCall("toolu_bash", "npm test"))
 	h.send(responseSuccessActivity("unit-later", "still working"))
-	h.announceDetachment(mainAgent(), mainAgent(), "toolu_bash", "toolu_bash")
+	h.announceDetachment(mainAgent(), mainAgent(), "toolu_bash", "toolu_bash", kinds.Bash())
 	h.resolver.OnTurnOpened(testWorkspace, ids.TurnID("turn-2"))
 
 	// Act: the next turn's reconciliation restates the same move.
-	h.announceDetachment(mainAgent(), mainAgent(), "toolu_bash", "toolu_bash")
+	h.announceDetachment(mainAgent(), mainAgent(), "toolu_bash", "toolu_bash", kinds.Bash())
 
 	// Assert.
 	if got := h.rowKinds(rootFeed()); !slices.Equal(got, []string{"other", "shell_head", "response"}) {
@@ -2884,7 +2902,7 @@ func TestTheDetachedWorkIdIsOnEveryAsyncHeadAndNoSyncOne(t *testing.T) {
 			name: "a spawn that detached names the announcement's handle",
 			act: func(h *harness) *frontendv1.FeedDetachedWorkId {
 				h.spawnSubagent("spawn-1", created, "Explore", "map")
-				h.detachWork("work-1", "spawn-1")
+				h.detachWork("work-1", "spawn-1", kinds.Subagent(created))
 				return bubbleOf(h.bubbleRow("spawn-1", created)).GetWorkId()
 			},
 			want: "work-1",
@@ -2892,7 +2910,7 @@ func TestTheDetachedWorkIdIsOnEveryAsyncHeadAndNoSyncOne(t *testing.T) {
 		{
 			name: "a detachment announced before the spawn drew is named once it draws",
 			act: func(h *harness) *frontendv1.FeedDetachedWorkId {
-				h.detachWork("work-1", "spawn-1")
+				h.detachWork("work-1", "spawn-1", kinds.Subagent(created))
 				return bubbleOf(h.spawnSubagent("spawn-1", created, "Explore", "map")).GetWorkId()
 			},
 			want: "work-1",
@@ -2901,6 +2919,7 @@ func TestTheDetachedWorkIdIsOnEveryAsyncHeadAndNoSyncOne(t *testing.T) {
 			name: "a subagent created detached names its own handle",
 			act: func(h *harness) *frontendv1.FeedDetachedWorkId {
 				h.resolver.OnDetachedWork(testWorkspace, mainAgent(), &conversationv1.AgentDetachedWork{
+					Kind: kinds.Subagent(created),
 					Work: &conversationv1.DetachedWorkId{Value: "work-7"},
 					// The producer states the owner of work created detached.
 					Owner: mainAgent(),
@@ -3086,7 +3105,7 @@ func TestADetachedShellsHeadIsAnnouncedOnItsOwnersFeed(t *testing.T) {
 			carrier := tc.arrange(h)
 
 			// Act: the task stream announces it on the MAIN agent's book.
-			h.announceDetachment(mainAgent(), nil, "toolu_bash", "toolu_bash")
+			h.announceDetachment(mainAgent(), nil, "toolu_bash", "toolu_bash", kinds.Bash())
 
 			// Assert: the last address announced for the work is its head on
 			// the owner's feed.
@@ -3789,6 +3808,7 @@ func (h *harness) replayedRunningSubagent() *frontendv1.FeedSubagent {
 	h.t.Helper()
 	h.replay(historyPage(&conversationv1.HistoryFloor{},
 		frameEntry(mainAgent(), &conversationv1.AgentDetachedWork{
+			Kind:  kinds.Subagent(&conversationv1.AgentId{Value: "agent-remote"}),
 			Work:  &conversationv1.DetachedWorkId{Value: "work-1"},
 			Owner: mainAgent(),
 			Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{
@@ -4011,4 +4031,42 @@ func TestAJudgedReplayIsRecordedWithItsCause(t *testing.T) {
 		}
 	}
 	t.Fatalf("records = %+v, want the judged replay recorded at info with its cause", h.records())
+}
+
+// TestAKindlessDetachmentFailsHardAndDrawsNothing pins the invariant the
+// session watcher's gate guarantees (AgentDetachedWork.kind is required, and
+// resolveDetachedLocked refuses an announcement without one): reaching the
+// feed without a kind, live or replayed, panics through protoarm.Must before
+// anything is drawn.
+func TestAKindlessDetachmentFailsHardAndDrawsNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	startForegroundBash(h, "unit-1", "sleep 600")
+	before := h.rows(rootFeed())
+	defer func() {
+		// Assert
+		got, _ := recover().(string)
+		if !strings.Contains(got, "protoarm:") || !strings.Contains(got, "daemon.feed.draw_detached_work") {
+			t.Fatalf("panic = %q, want protoarm.Must naming daemon.feed.draw_detached_work", got)
+		}
+		after := h.rows(rootFeed())
+		if len(after) != len(before) {
+			t.Fatalf("rows = %d after, %d before: a kindless detachment drew", len(after), len(before))
+		}
+		for i := range before {
+			if !proto.Equal(before[i], after[i]) {
+				t.Fatalf("row %d moved: before %v, after %v", i, before[i], after[i])
+			}
+		}
+	}()
+
+	// Act
+	h.resolver.OnDetachedWork(testWorkspace, mainAgent(), &conversationv1.AgentDetachedWork{
+		Owner: mainAgent(),
+		Work:  &conversationv1.DetachedWorkId{Value: "work-1"},
+		Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
+			DetachedFromId: &conversationv1.AgentActivityId{Value: "unit-1"},
+		}},
+	}, nil, nil)
+	t.Fatal("a kindless detachment returned, want a panic")
 }

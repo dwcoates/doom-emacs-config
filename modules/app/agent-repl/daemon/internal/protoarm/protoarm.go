@@ -37,3 +37,20 @@ func Name(m protoreflect.Message, oneof protoreflect.Name) (protoreflect.Name, b
 	}
 	return field.Name(), true
 }
+
+// Must answers the name of M's set arm in the oneof named ONEOF, for a oneof
+// the contract REQUIRES: an unset arm is an invariant violation, and Must
+// panics naming the message, the oneof and BY, the operation that relied on
+// it. It panics as Set does for an undeclared oneof.
+//
+// It is for consumers behind a gate that already refuses a message with the
+// arm unset, so reaching one unset means the gate was bypassed: failing there
+// is the bug's origin, where drawing the message as if its arm were absent
+// would only hide it.
+func Must(m protoreflect.Message, oneof protoreflect.Name, by string) protoreflect.Name {
+	name, ok := Name(m, oneof)
+	if !ok {
+		panic(fmt.Sprintf("protoarm: %s reached %s with its required oneof %q unset", m.Descriptor().FullName(), by, oneof))
+	}
+	return name
+}

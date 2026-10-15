@@ -8,6 +8,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	kinds "agent-repld/internal/detachedkindtest"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 )
@@ -30,6 +31,7 @@ func liveSet(agents, shells, monitors []string) LiveWorkSet {
 // createdMonitor is a monitor announced already detached, as the main agent's.
 func createdMonitor(work, description string) *conversationv1.AgentDetachedWork {
 	return &conversationv1.AgentDetachedWork{
+		Kind:  kinds.Monitor(),
 		Owner: mainAgent,
 		Work:  &conversationv1.DetachedWorkId{Value: work},
 		Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{

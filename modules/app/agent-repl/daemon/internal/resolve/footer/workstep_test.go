@@ -9,6 +9,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	kinds "agent-repld/internal/detachedkindtest"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/shimclient"
 )
@@ -181,6 +182,7 @@ func TestADetachedUnitsLaterFramesAreIgnored(t *testing.T) {
 	inTurn(h)
 	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "bash", "start"))
 	h.r.OnDetachedWork(testWS, mainAgent, &conversationv1.AgentDetachedWork{
+		Kind:  kinds.Bash(),
 		Owner: mainAgent,
 		Work:  workID("u-1"),
 		Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
@@ -300,7 +302,7 @@ func TestADetachedCallLeavesTheStep(t *testing.T) {
 	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "subagent", "start"))
 
 	// Act
-	h.r.OnDetachedWork(testWS, mainAgent, movedSubagent("u-1"))
+	h.r.OnDetachedWork(testWS, mainAgent, movedSubagent("u-1", "agent-u-1"))
 
 	// Assert
 	if got := stepName(working(t, h)); got != "thinking" {

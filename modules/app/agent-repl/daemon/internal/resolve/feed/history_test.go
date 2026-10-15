@@ -8,6 +8,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	kinds "agent-repld/internal/detachedkindtest"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/sessionwatcher"
@@ -545,6 +546,7 @@ func TestAReplayedDetachedWorkDrawsItsBubble(t *testing.T) {
 	created := &conversationv1.AgentId{Value: "agent-remote"}
 	h.replay(historyPage(&conversationv1.HistoryFloor{},
 		frameEntry(mainAgent(), &conversationv1.AgentDetachedWork{
+			Kind:  kinds.Subagent(created),
 			Work:  &conversationv1.DetachedWorkId{Value: "work-1"},
 			Owner: mainAgent(),
 			Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{
@@ -650,6 +652,7 @@ func TestAReplayedDetachedSubagentSettlesSucceededNeverFailed(t *testing.T) {
 			}},
 		}),
 		frameEntry(mainAgent(), &conversationv1.AgentDetachedWork{
+			Kind:  kinds.Subagent(created),
 			Work:  &conversationv1.DetachedWorkId{Value: "work-1"},
 			Owner: mainAgent(),
 			Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{

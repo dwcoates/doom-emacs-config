@@ -11,6 +11,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	kinds "agent-repld/internal/detachedkindtest"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
@@ -619,6 +620,7 @@ func wakeupScheduled(at time.Time) *conversationv1.AgentActivity {
 // createdShell is a shell announced already detached.
 func createdShell(work, command string) *conversationv1.AgentDetachedWork {
 	return &conversationv1.AgentDetachedWork{
+		Kind:  kinds.Bash(),
 		Owner: mainAgent,
 		Work:  &conversationv1.DetachedWorkId{Value: work},
 		Origin: &conversationv1.AgentDetachedWork_Created{

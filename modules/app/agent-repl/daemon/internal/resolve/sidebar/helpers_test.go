@@ -9,6 +9,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	kinds "agent-repld/internal/detachedkindtest"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
@@ -493,6 +494,7 @@ func permissionDecided(id string) *conversationv1.AgentPermission {
 // detachedWork builds a detached-work announcement with the given handle.
 func detachedWork(id string) *conversationv1.AgentDetachedWork {
 	return &conversationv1.AgentDetachedWork{
+		Kind: kinds.Bash(),
 		Work: &conversationv1.DetachedWorkId{Value: id},
 	}
 }

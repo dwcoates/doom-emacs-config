@@ -1,6 +1,7 @@
 package sidebar_test
 
 import (
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -13,6 +14,8 @@ import (
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/vocab"
 	"agent-repld/internal/wsm"
+
+	"google.golang.org/protobuf/proto"
 )
 
 func TestNewRefusesWithoutLogSurfaces(t *testing.T) {
@@ -548,4 +551,35 @@ func TestARegistryWithTheSelectionRefusesAViewGroupingThatIsNeither(t *testing.T
 		}
 	}()
 	r.SetRegistrySelected(reg, ids.WorkspaceID("w1"))
+}
+
+// TestAKindlessDetachmentFailsHardAndChangesNothing pins the invariant the
+// session watcher's gate guarantees (AgentDetachedWork.kind is required, and
+// resolveDetachedLocked refuses an announcement without one): reaching the
+// roster without a kind panics through protoarm.Must, before any state moves.
+func TestAKindlessDetachmentFailsHardAndChangesNothing(t *testing.T) {
+	// Arrange
+	r := live(t, arrange(t))
+	before := onlyRow(t, r)
+	defer func() {
+		// Assert
+		got, _ := recover().(string)
+		if !strings.Contains(got, "protoarm:") || !strings.Contains(got, "daemon.sidebar.on_detached_work") {
+			t.Fatalf("panic = %q, want protoarm.Must naming daemon.sidebar.on_detached_work", got)
+		}
+		if after := onlyRow(t, r); !proto.Equal(before, after) {
+			t.Fatalf("the row moved: before %v, after %v", before, after)
+		}
+	}()
+
+	// Act: the roster alone, past the footer the test pair also feeds.
+	roster := r.Resolver.(*fanned).Resolver
+	roster.OnDetachedWork(theWS, agent("main"), &conversationv1.AgentDetachedWork{
+		Owner: agent("main"),
+		Work:  &conversationv1.DetachedWorkId{Value: "work-1"},
+		Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
+			DetachedFromId: &conversationv1.AgentActivityId{Value: "unit-1"},
+		}},
+	})
+	t.Fatal("a kindless detachment returned, want a panic")
 }

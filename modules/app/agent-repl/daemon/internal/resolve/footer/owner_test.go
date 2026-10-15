@@ -6,6 +6,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/deployprogress"
+	kinds "agent-repld/internal/detachedkindtest"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/shimclient"
@@ -39,7 +40,7 @@ func ownedBy(owner *conversationv1.AgentId, work *conversationv1.AgentDetachedWo
 // movedShell is a shell call LEAVING the turn under its own handle, with the
 // owner the producer stated.
 func movedShell(unit string, owner *conversationv1.AgentId) *conversationv1.AgentDetachedWork {
-	work := movedSubagent(unit)
+	work := movedWork(unit, kinds.Bash())
 	work.Owner = owner
 	return work
 }

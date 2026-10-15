@@ -7,12 +7,13 @@ import (
 	"testing"
 	"time"
 
-	"google.golang.org/protobuf/proto"
-
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	kinds "agent-repld/internal/detachedkindtest"
 	"agent-repld/internal/dlog"
+
+	"google.golang.org/protobuf/proto"
 )
 
 // subagentStart is a spawn announcing the agent it created.
@@ -275,26 +276,19 @@ func TestASubagentsTerminalRetiresItsRow(t *testing.T) {
 // detachedSubagentWork announces a spawn that is detached from the moment the
 // footer hears of it -- the `created` origin.
 func detachedSubagentWork(work, created, subagentType string) *conversationv1.AgentDetachedWork {
-	return &conversationv1.AgentDetachedWork{
-		Owner: mainAgent,
-		Work:  &conversationv1.DetachedWorkId{Value: work},
-		Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{
-			WorkCreated: &conversationv1.DetachableWork{
-				Work: &conversationv1.DetachableWork_Subagent{Subagent: &conversationv1.AgentSubagent{
-					Result: &conversationv1.AgentSubagent_Start{Start: &conversationv1.AgentSubagentStart{
-						CreatedAgentId: &conversationv1.AgentId{Value: created},
-						Prompt:         &conversationv1.AgentSubagentPrompt{SubagentType: &subagentType},
-						StartedAt:      &conversationv1.AgentActivityStartedAt{AtMs: instant.UnixMilli()},
-					}},
-				}},
-			},
-		}},
-	}
+	return kinds.CreatedSubagent(mainAgent, work, created, subagentType, instant.UnixMilli())
 }
 
-// movedSubagent announces an in-turn spawn LEAVING the turn under a handle.
-func movedSubagent(unit string) *conversationv1.AgentDetachedWork {
+// movedSubagent announces an in-turn spawn LEAVING the turn under a handle,
+// running as AGENT.
+func movedSubagent(unit, agent string) *conversationv1.AgentDetachedWork {
+	return movedWork(unit, kinds.Subagent(&conversationv1.AgentId{Value: agent}))
+}
+
+// movedWork announces in-turn work of KIND leaving the turn under a handle.
+func movedWork(unit string, kind *conversationv1.DetachedWorkKind) *conversationv1.AgentDetachedWork {
 	return &conversationv1.AgentDetachedWork{
+		Kind:  kind,
 		Owner: mainAgent,
 		Work:  &conversationv1.DetachedWorkId{Value: unit},
 		Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
@@ -373,7 +367,7 @@ func TestADetachedSubagentsTerminalRetiresItsChip(t *testing.T) {
 	h := newHarness(t)
 	connected(h)
 	h.r.OnActivity(testWS, mainAgent, subagentStart("spawn-1", "agent-2", "Explore", ""))
-	h.r.OnDetachedWork(testWS, mainAgent, movedSubagent("spawn-1"))
+	h.r.OnDetachedWork(testWS, mainAgent, movedSubagent("spawn-1", "agent-2"))
 
 	// Act
 	h.r.OnSubagent(testWS, workID("spawn-1"), subagentSettled(false))
@@ -409,7 +403,7 @@ func TestTheSpawningCallsReturnDoesNotRetireADetachedRun(t *testing.T) {
 	h := newHarness(t)
 	connected(h)
 	h.r.OnActivity(testWS, mainAgent, subagentStart("spawn-1", "agent-2", "Explore", ""))
-	h.r.OnDetachedWork(testWS, mainAgent, movedSubagent("spawn-1"))
+	h.r.OnDetachedWork(testWS, mainAgent, movedSubagent("spawn-1", "agent-2"))
 
 	// Act: the spawn unit's own settled arm on the CALLER's activity stream.
 	h.r.OnActivity(testWS, mainAgent, &conversationv1.AgentActivity{
@@ -634,6 +628,7 @@ func TestAShellDetachedFromAnInTurnUnitKeepsItsCommand(t *testing.T) {
 
 	// Act
 	h.r.OnDetachedWork(testWS, mainAgent, &conversationv1.AgentDetachedWork{
+		Kind:  kinds.Bash(),
 		Owner: mainAgent,
 		Work:  &conversationv1.DetachedWorkId{Value: "work-9"},
 		Origin: &conversationv1.AgentDetachedWork_Detached{
@@ -1114,7 +1109,7 @@ func TestASpawnUnitReplayedAfterItsRunSettledDoesNotCountItLiveAgain(t *testing.
 	h := newHarness(t)
 	connected(h)
 	h.r.OnActivity(testWS, mainAgent, subagentStart("spawn-1", "agent-2", "Explore", ""))
-	h.r.OnDetachedWork(testWS, mainAgent, movedSubagent("spawn-1"))
+	h.r.OnDetachedWork(testWS, mainAgent, movedSubagent("spawn-1", "agent-2"))
 	h.r.OnSubagent(testWS, workID("spawn-1"), subagentSettled(false))
 
 	// Act: the caller's stream re-read from its own start.
@@ -1228,6 +1223,7 @@ func TestEveryDetachedWorkRowStatesExactlyOneJumpArm(t *testing.T) {
 			arrange: func(h *harness) {
 				h.r.OnEntryPlaced(testWS, "mon-1", &frontendv1.FeedId{Value: "r|activity|mon-1"})
 				h.r.OnDetachedWork(testWS, mainAgent, &conversationv1.AgentDetachedWork{
+					Kind:  kinds.Monitor(),
 					Owner: mainAgent,
 					Work:  &conversationv1.DetachedWorkId{Value: "mon-1"},
 					Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{
@@ -1545,7 +1541,7 @@ func commissionBeat(subagentType, description string, tokens uint64) *conversati
 // shim", 900 tokens) from its launch to its own terminal, so it is retired.
 func launchedThenSettled(h *harness) {
 	h.r.OnActivity(testWS, mainAgent, subagentStart("spawn-1", "spawn-1", "opus-medium", "fix the shim"))
-	h.r.OnDetachedWork(testWS, mainAgent, movedSubagent("spawn-1"))
+	h.r.OnDetachedWork(testWS, mainAgent, movedSubagent("spawn-1", "spawn-1"))
 	h.r.OnSubagent(testWS, workID("spawn-1"), detachedProgress(900))
 	h.r.OnSubagent(testWS, workID("spawn-1"), subagentSettled(false))
 }
@@ -1584,7 +1580,7 @@ func TestAResumeOfALiveAgentReAddressesItsRow(t *testing.T) {
 	h := newHarness(t)
 	connected(h)
 	h.r.OnActivity(testWS, mainAgent, subagentStart("spawn-1", "spawn-1", "opus-medium", "fix the shim"))
-	h.r.OnDetachedWork(testWS, mainAgent, movedSubagent("spawn-1"))
+	h.r.OnDetachedWork(testWS, mainAgent, movedSubagent("spawn-1", "spawn-1"))
 
 	// Act
 	h.r.OnDetachedWork(testWS, mainAgent, resumedSubagent("send-1", "spawn-1"))
@@ -1888,4 +1884,35 @@ func TestAToolCallStartRaisesNoTransient(t *testing.T) {
 	if got := transientOf(t, h); got != nil {
 		t.Fatalf("transient = %+v, want none for a tool call's start", got)
 	}
+}
+
+// TestAKindlessDetachmentFailsHardAndChangesNothing pins the invariant the
+// session watcher's gate guarantees (AgentDetachedWork.kind is required, and
+// resolveDetachedLocked refuses an announcement without one): reaching the
+// footer without a kind panics through protoarm.Must, before any state moves.
+func TestAKindlessDetachmentFailsHardAndChangesNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	before := h.view(t)
+	defer func() {
+		// Assert
+		got, _ := recover().(string)
+		if !strings.Contains(got, "protoarm:") || !strings.Contains(got, "daemon.footer.on_detached_work") {
+			t.Fatalf("panic = %q, want protoarm.Must naming daemon.footer.on_detached_work", got)
+		}
+		if after := h.view(t); !proto.Equal(before, after) {
+			t.Fatalf("the view moved: before %v, after %v", before, after)
+		}
+	}()
+
+	// Act
+	h.r.OnDetachedWork(testWS, mainAgent, &conversationv1.AgentDetachedWork{
+		Owner: mainAgent,
+		Work:  &conversationv1.DetachedWorkId{Value: "work-1"},
+		Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
+			DetachedFromId: &conversationv1.AgentActivityId{Value: "unit-1"},
+		}},
+	})
+	t.Fatal("a kindless detachment returned, want a panic")
 }

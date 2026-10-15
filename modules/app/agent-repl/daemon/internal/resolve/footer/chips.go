@@ -10,6 +10,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/figures"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/protoarm"
 	"agent-repld/internal/resolve/ladder"
 	"agent-repld/internal/resolve/turnfault"
 )
@@ -581,6 +582,9 @@ func (r *resolver) OnDetachedWork(ws ids.WorkspaceID, agent *conversationv1.Agen
 	if work == nil {
 		return
 	}
+	// THE KIND IS REQUIRED, and the session watcher refuses an announcement
+	// without one before any view takes it (resolveDetachedLocked).
+	protoarm.Must(work.GetKind().ProtoReflect(), "kind", "daemon.footer.on_detached_work")
 	id := work.GetWork().GetValue()
 	r.mutate(ws, "daemon.footer.on_detached_work", "the footer took a detached-work announcement",
 		dlog.Context{"work_id": id, "adopted": agent == nil}, func(s *wsState) {

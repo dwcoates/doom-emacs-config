@@ -8,9 +8,11 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	kinds "agent-repld/internal/detachedkindtest"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/protoarm"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/ladder"
 	"agent-repld/internal/resolve/sidebar"
@@ -81,11 +83,9 @@ func (s *surfaces) link(state shimclient.LinkState) {
 	s.roster.OnLink(theWS, state)
 }
 
-// startTurn accepts a turn on both.
+// startTurn accepts a prompt's turn on both.
 func (s *surfaces) startTurn() {
-	turn := &footer.TurnStarted{At: epoch, Act: footer.ActPrompt}
-	s.footer.SetTurn(theWS, turn)
-	s.roster.SetTurn(theWS, turn)
+	s.startAct(footer.ActPrompt)
 }
 
 // endTurn delivers the main agent's terminal to both, and the daemon's own
@@ -335,6 +335,27 @@ func rosterClaim(t *testing.T, r sidebar.Resolver) (ladder.Claim, string) {
 	return claim, arm
 }
 
+// requireOneClaim fails unless the footer's status and the roster's arm
+// project onto one ladder claim and neither resolver recorded drawing off its
+// own claim, and answers the roster's arm.
+func requireOneClaim(t *testing.T, s *surfaces) string {
+	t.Helper()
+	fClaim, fStatus := footerClaim(t, s.footer)
+	rClaim, rArm := rosterClaim(t, s.roster)
+	if fClaim != rClaim {
+		t.Fatalf("the footer claims %q (%v) where the roster claims %q (%s)",
+			fClaim, fStatus.GetStatus(), rClaim, rArm)
+	}
+	for _, logs := range s.logs {
+		for _, op := range []string{"daemon.footer.status_claim", "daemon.sidebar.status_claim"} {
+			if hasError(logs.Records(), op) {
+				t.Fatalf("a resolver recorded %s: it drew an arm off its own claim", op)
+			}
+		}
+	}
+	return rArm
+}
+
 func TestTheFooterAndTheRosterAlwaysMakeTheSameCoarseClaim(t *testing.T) {
 	for merge, mergeFacts := range mergeStates {
 		for _, lc := range linkCases {
@@ -368,25 +389,135 @@ func TestTheFooterAndTheRosterAlwaysMakeTheSameCoarseClaim(t *testing.T) {
 							if read {
 								s.roster.SetViewed(theWS)
 							}
-							fClaim, fStatus := footerClaim(t, s.footer)
-							rClaim, rArm := rosterClaim(t, s.roster)
 
 							// Assert
-							if fClaim != rClaim {
-								t.Fatalf("the footer claims %q (%v) where the roster claims %q (%s)",
-									fClaim, fStatus.GetStatus(), rClaim, rArm)
-							}
-							for _, logs := range s.logs {
-								for _, op := range []string{"daemon.footer.status_claim", "daemon.sidebar.status_claim"} {
-									if hasError(logs.Records(), op) {
-										t.Fatalf("a resolver recorded %s: it drew an arm off its own claim", op)
-									}
-								}
-							}
+							requireOneClaim(t, s)
 						})
 					}
 				}
 			}
 		}
 	}
+}
+
+// TestTheFooterAndTheRosterAgreeWhereTheWalkNeverReaches covers the roster
+// arms the fact walk above never draws: its link, turn and merge facts reach
+// 44 distinct outcomes and none of these
+// (docs/investigations/2026-10-14-test-cross-product-audit-psv.md, section 5).
+// Each row is the fact that draws its arm, on a session whose link is up, and
+// each must make one claim on both surfaces and land on its own arm.
+func TestTheFooterAndTheRosterAgreeWhereTheWalkNeverReaches(t *testing.T) {
+	tests := []struct {
+		name       string
+		apply      func(t *testing.T, s *surfaces)
+		wantFooter string
+		want       string
+	}{
+		{name: "an interrupt registered mid-turn", wantFooter: "waiting/interrupting", want: "waiting", apply: func(t *testing.T, s *surfaces) {
+			s.ackedTurn()
+			s.footer.SetInterrupting(theWS, true)
+		}},
+		{name: "an open question", wantFooter: "question", want: "question", apply: func(t *testing.T, s *surfaces) {
+			s.ackedTurn()
+			s.footer.OnQuestion(theWS, agent("main"), &conversationv1.AgentQuestion{
+				Id: &conversationv1.AgentQuestionId{Value: "q1"},
+				Result: &conversationv1.AgentQuestion_Start{Start: &conversationv1.AgentQuestionStart{
+					Batch: &conversationv1.AgentQuestionBatch{Questions: []*conversationv1.AgentQuestionAsked{{
+						Question: &conversationv1.AgentQuestionText{Text: "which one?"},
+					}}},
+				}},
+			})
+		}},
+		{name: "a standing cold gate", wantFooter: "waiting/cold_gate", want: "cold_gate", apply: func(t *testing.T, s *surfaces) {
+			s.ackedTurn()
+			s.footer.SetColdGate(theWS, footer.ColdGate{Standing: true, Cost: footer.ColdGateCost{Lead: "cold"}})
+		}},
+		{name: "a refused close", wantFooter: "closing/blocked", want: "closing", apply: func(t *testing.T, s *surfaces) {
+			s.footer.SetClosing(theWS, &footer.CloseBlocked{Reason: "held_prompts", Detail: "a prompt is held"})
+		}},
+		{name: "a daemon-scoped fault", wantFooter: "agent_repl_fault/daemon_impaired", want: "daemon_impaired", apply: func(t *testing.T, s *surfaces) {
+			s.footer.OpenFault("", footerFault(t, "fault-1", health.KindWsmReadOnly, true))
+		}},
+		{name: "a clear running", wantFooter: "working/clearing", want: "clearing", apply: func(t *testing.T, s *surfaces) {
+			s.startAct(footer.ActClear)
+		}},
+		{name: "a compaction running", wantFooter: "working/compacting", want: "compacting", apply: func(t *testing.T, s *surfaces) {
+			s.startAct(footer.ActCompact)
+		}},
+		{name: "detached work outliving a read turn end", wantFooter: "background", want: "idle_async", apply: func(t *testing.T, s *surfaces) {
+			s.startTurn()
+			// A subagent spawned detached, announced as the shim announces it.
+			work := kinds.CreatedSubagent(agent("main"), "work-1", "sub-1", "general-purpose", epoch.UnixMilli())
+			s.footer.OnDetachedWork(theWS, agent("main"), work)
+			s.roster.OnDetachedWork(theWS, agent("main"), work)
+			s.closeTurn(wsm.CloseCompleted)
+			s.roster.SetViewed(theWS)
+		}},
+		{name: "a self-scheduled wakeup where the footer reads idle", wantFooter: "waiting/wakeup", want: "ready", apply: func(t *testing.T, s *surfaces) {
+			wakeup := &conversationv1.AgentActivity{
+				ActivityId: &conversationv1.AgentActivityId{Value: "wake-1"},
+				Item: &conversationv1.AgentActivity_ScheduleWakeup{ScheduleWakeup: &conversationv1.AgentScheduleWakeup{
+					Result: &conversationv1.AgentScheduleWakeup_Success{Success: &conversationv1.AgentScheduleWakeupSuccess{
+						Outcome: &conversationv1.AgentScheduleWakeupSuccess_Scheduled{
+							Scheduled: &conversationv1.AgentScheduleWakeupScheduled{WakeAtMs: epoch.Add(5 * time.Minute).UnixMilli()},
+						},
+					}},
+				}},
+			}
+			s.footer.OnActivity(theWS, agent("main"), wakeup)
+			s.roster.OnActivity(theWS, agent("main"), wakeup)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s := newSurfaces(t, &wsm.Session{Workspace: theWS})
+			s.link(shimclient.LinkConnected)
+
+			// Act
+			tt.apply(t, s)
+
+			// Assert
+			got := requireOneClaim(t, s)
+			if _, status := footerClaim(t, s.footer); footerShape(status) != tt.wantFooter {
+				t.Fatalf("the footer drew %s, want %s", footerShape(status), tt.wantFooter)
+			}
+			if got != tt.want {
+				t.Fatalf("the roster drew %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// footerShape names a footer status by its arm and, where the arm states one,
+// its substatus: "waiting/wakeup", "question".
+func footerShape(status *frontendv1.FooterStatus) string {
+	arm, ok := protoarm.Set(status.ProtoReflect(), "status")
+	if !ok {
+		return "unset"
+	}
+	name := string(arm.Name())
+	armMessage := status.ProtoReflect().Get(arm).Message()
+	if armMessage.Descriptor().Oneofs().ByName("substatus") == nil {
+		return name
+	}
+	if sub, ok := protoarm.Name(armMessage, "substatus"); ok {
+		return name + "/" + string(sub)
+	}
+	return name
+}
+
+// startAct accepts a turn of the given act on both.
+func (s *surfaces) startAct(act footer.SessionAct) {
+	turn := &footer.TurnStarted{At: epoch, Act: act}
+	s.footer.SetTurn(theWS, turn)
+	s.roster.SetTurn(theWS, turn)
+}
+
+// ackedTurn accepts a turn on both and acknowledges it on both, as the shim
+// taking it does.
+func (s *surfaces) ackedTurn() {
+	s.startTurn()
+	s.footer.AckTurn(theWS)
+	s.roster.AckTurn(theWS)
 }

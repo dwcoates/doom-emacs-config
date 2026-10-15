@@ -103,6 +103,53 @@ func TestName(t *testing.T) {
 	}
 }
 
+func TestMustAnswersTheSetArmsName(t *testing.T) {
+	// Arrange
+	m := (&frontendv1.FeedMerge{Result: &frontendv1.FeedMerge_Update{Update: &frontendv1.FeedMergeUpdate{}}}).ProtoReflect()
+
+	// Act
+	got := Must(m, "result", "test.op")
+
+	// Assert
+	if got != "update" {
+		t.Fatalf("Must = %q, want update", got)
+	}
+}
+
+func TestMustPanicsNamingTheMessageTheOneofAndTheOperationWhenNoArmIsSet(t *testing.T) {
+	// Arrange
+	m := (&frontendv1.FeedMerge{}).ProtoReflect()
+	defer func() {
+		// Assert
+		got, _ := recover().(string)
+		for _, want := range []string{"frontend.v1.FeedMerge", `"result"`, "test.op"} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("panic = %q, want it to name %s", got, want)
+			}
+		}
+	}()
+
+	// Act
+	Must(m, "result", "test.op")
+	t.Fatal("Must returned for an unset required oneof, want a panic")
+}
+
+func TestMustPanicsNamingAOneofTheMessageDoesNotDeclare(t *testing.T) {
+	// Arrange
+	m := (&frontendv1.FeedMerge{}).ProtoReflect()
+	defer func() {
+		// Assert
+		got, _ := recover().(string)
+		if !strings.Contains(got, `"nope"`) {
+			t.Fatalf("panic = %q, want it to name the undeclared oneof", got)
+		}
+	}()
+
+	// Act
+	Must(m, "nope", "test.op")
+	t.Fatal("Must returned for an undeclared oneof, want a panic")
+}
+
 // TestNoSiteResolvesANamedOneofByHand holds every production site in the
 // daemon to the one shape: an arm of a oneof named in the source is read
 // through Set or Name, never by handing WhichOneof a ByName lookup.
@@ -137,5 +184,45 @@ func TestNoSiteResolvesANamedOneofByHand(t *testing.T) {
 	}
 	if len(offenders) > 0 {
 		t.Fatalf("named oneofs resolved by hand, want protoarm.Set or protoarm.Name: %v", offenders)
+	}
+}
+
+// TestNoSiteHandRollsARequiredOneofPanic holds every production site that
+// treats an unset oneof as a bug to Must, so each one names the message, the
+// oneof and the operation alike: a Set or Name whose unset branch panics by
+// hand is a divergent copy of it.
+func TestNoSiteHandRollsARequiredOneofPanic(t *testing.T) {
+	// Arrange
+	root := filepath.Join("..", "..")
+	var offenders []string
+
+	// Act
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		lines := strings.Split(string(body), "\n")
+		for i := 0; i+2 < len(lines); i++ {
+			resolves := strings.Contains(lines[i], "protoarm.Name(") || strings.Contains(lines[i], "protoarm.Set(")
+			if resolves && strings.TrimSpace(lines[i+1]) == "if !ok {" && strings.Contains(lines[i+2], "panic(") {
+				offenders = append(offenders, path+":"+strconv.Itoa(i+1))
+			}
+		}
+		return nil
+	})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+	if len(offenders) > 0 {
+		t.Fatalf("required oneofs checked by hand, want protoarm.Must: %v", offenders)
 	}
 }
