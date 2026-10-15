@@ -380,6 +380,20 @@ The top bar's effort selector sits between the model selector and the permission
   - How long ago its last turn ended.
   - How many commits its branch has past where it was cut.
 - **Picking a workspace that is not open here opens it first.**
+  - A merged workspace opens too, to revise what it landed (see "Reopening a merged workspace").
+
+## Reopening a merged workspace
+
+- **A merged workspace can be opened again, from the sidebar or from Emacs.**
+  - Clicking its row under Recently Merged opens it and switches to it.
+  - `SPC p p`, `SPC p P` and the row menu's Open do the same.
+- **It comes back as an ordinary open workspace.**
+  - Its worktree is checked out again from its branch, and its conversation comes back.
+  - It leaves Recently Merged and returns to its groupings and the tab bar.
+- **Its branch moves up to where its parent branch is now.**
+  - The work it merged is already there, so nothing is lost.
+  - It stays where it was if its branch has commits its parent lacks, or the worktree has uncommitted changes.
+- **Merging it again carries only the new work.**
 
 ## Hidden workspaces
 
