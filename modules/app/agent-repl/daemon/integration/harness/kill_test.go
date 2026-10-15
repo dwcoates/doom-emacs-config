@@ -110,7 +110,7 @@ func TestReapStraysSparesATestOwnedProcess(t *testing.T) {
 			// Arrange: a child whose argv carries the state directory, the
 			// same way the store's and the sidecar's --log paths do.
 			stateDir := t.TempDir()
-			cmd := standIn(t, sleepLoop+" # --log "+stateDir+"/logs/x.log")
+			cmd := standIn(t, idleShell+" # --log "+stateDir+"/logs/x.log")
 			if tc.spare {
 				SpareFromStrayReaping(t, cmd.Process.Pid)
 			}
@@ -137,8 +137,17 @@ func TestReapStraysSparesATestOwnedProcess(t *testing.T) {
 // sleepLoop is a stand-in shell's loop: it always has a `sleep 1` running.
 const sleepLoop = "while :; do /bin/sleep 1; done"
 
+// idleShell is a stand-in shell that runs no child at all: the `read` builtin
+// blocks on the stdin pipe standIn holds open. A stand-in that must be the
+// ONLY process naming its arguments uses it, because sleepLoop's every fork is
+// a copy of the shell, argv and all, until its exec: killing the leader
+// orphaned one such copy mid-fork, which a stray listing then read as a
+// running process naming the state directory (2026-10-14, TestLeakedStrays).
+const idleShell = "read line"
+
 // standIn starts the shell script (with args as $0...) in a process group of
-// its own, and kills the whole group at cleanup, before reaping its leader.
+// its own, with a stdin pipe held open until it exits, and kills the whole
+// group at cleanup, before reaping its leader.
 //
 // KILLING THE SHELL ALONE ORPHANED ITS LOOP'S `sleep 1`, which outlived the
 // test: the test runner's last reap found one still running out of a harness
@@ -155,6 +164,11 @@ func standInTo(t *testing.T, out *os.File, script string, args ...string) *exec.
 	cmd := exec.Command("/bin/sh", append([]string{"-c", script}, args...)...)
 	cmd.Stdout = out
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// THE WRITE END IS NEVER WRITTEN, and Wait closes it once the shell
+	// exits, so idleShell's read blocks for the shell's whole life.
+	if _, err := cmd.StdinPipe(); err != nil {
+		t.Fatalf("the stand-in's stdin: %v", err)
+	}
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start the stand-in %q: %v", script, err)
 	}
@@ -460,14 +474,14 @@ func TestLeakedStrays(t *testing.T) {
 		{
 			name: "a running process naming the state directory is a leak",
 			arrange: func(t *testing.T, stateDir string) {
-				standIn(t, sleepLoop, stateDir+"/sock/s.sock")
+				standIn(t, idleShell, stateDir+"/sock/s.sock")
 			},
 			wantLeaked: true,
 		},
 		{
 			name: "an exited, unreaped process naming the state directory is not a leak",
 			arrange: func(t *testing.T, stateDir string) {
-				cmd := standIn(t, sleepLoop, stateDir+"/sock/s.sock")
+				cmd := standIn(t, idleShell, stateDir+"/sock/s.sock")
 				if err := cmd.Process.Kill(); err != nil {
 					t.Fatalf("SIGKILL: %v", err)
 				}
