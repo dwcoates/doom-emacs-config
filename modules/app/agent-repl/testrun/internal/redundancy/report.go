@@ -19,6 +19,9 @@ type MutantResult struct {
 	// case reaches it) or dropped (its site did not type-check).
 	Status   string
 	KilledBy []string `json:",omitempty"`
+	// CoveredBy are the cases reaching it, when the adapter answers them
+	// (a whole matrix, as Stryker's); empty otherwise.
+	CoveredBy []string `json:",omitempty"`
 }
 
 // Cost is a measurement's own price.
