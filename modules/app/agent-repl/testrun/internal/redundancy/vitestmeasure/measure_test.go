@@ -291,3 +291,49 @@ func TestMeasureRefusesATreeThatIsNotClean(t *testing.T) {
 		})
 	}
 }
+
+func TestWrapConfigMergesTheTestOverThePackagesOwnConfig(t *testing.T) {
+	// Arrange
+	cfg, _ := fakePackage(t)
+	m := &measurer{cfg: cfg}
+	dir := t.TempDir()
+
+	// Act
+	path, err := m.wrapConfig(dir, "x.config.mjs", `{ isolate: true }`)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`import { mergeConfig } from "` + filepath.Join(cfg.Package, "node_modules", "vitest", "dist", "config.js") + `"`,
+		`import base from "` + filepath.Join(cfg.Package, "vitest.config.ts") + `"`,
+		`root: "` + cfg.Package + `"`,
+		`test: { isolate: true }`,
+	} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("config lacks %s:\n%s", want, b)
+		}
+	}
+}
+
+func TestWrapConfigRefusesAPackageWithNoVitest(t *testing.T) {
+	// Arrange
+	cfg, _ := fakePackage(t)
+	if err := os.RemoveAll(filepath.Join(cfg.Package, "node_modules")); err != nil {
+		t.Fatal(err)
+	}
+	m := &measurer{cfg: cfg}
+
+	// Act
+	_, err := m.wrapConfig(t.TempDir(), "x.config.mjs", `{}`)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "has no vitest installed") {
+		t.Fatalf("err = %v, want the missing vitest named", err)
+	}
+}

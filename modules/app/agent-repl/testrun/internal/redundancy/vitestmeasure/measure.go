@@ -159,6 +159,19 @@ func Measure(ctx context.Context, cfg Config, exec proc.Exec, log *run.Log) (*re
 // with the trace setup file added, istanbul coverage on, isolated, and one
 // worker, so no two tests' counters interleave.
 func (m *measurer) traceConfig(dir string) (string, error) {
+	return m.wrapConfig(dir, "trace.config.mjs", fmt.Sprintf(`{
+    setupFiles: [%q],
+    isolate: true,
+    maxWorkers: 1,
+    minWorkers: 1,
+    coverage: { enabled: true, provider: "istanbul", reporter: ["json"], reportsDirectory: %q },
+  }`, m.cfg.Trace, filepath.Join(dir, "coverage")))
+}
+
+// wrapConfig writes dir/name, a vitest config that is the package's own with
+// test merged over it (vite's mergeConfig: arrays such as setupFiles append),
+// rooted at the package, and answers its path.
+func (m *measurer) wrapConfig(dir, name, test string) (string, error) {
 	pkg := m.cfg.Package
 	vitestConfig := filepath.Join(pkg, "node_modules", "vitest", "dist", "config.js")
 	if _, err := os.Stat(vitestConfig); err != nil {
@@ -169,16 +182,10 @@ import { mergeConfig } from %q;
 import base from %q;
 export default mergeConfig(base, {
   root: %q,
-  test: {
-    setupFiles: [%q],
-    isolate: true,
-    maxWorkers: 1,
-    minWorkers: 1,
-    coverage: { enabled: true, provider: "istanbul", reporter: ["json"], reportsDirectory: %q },
-  },
+  test: %s,
 });
-`, vitestConfig, filepath.Join(pkg, m.cfg.ConfigFile), pkg, m.cfg.Trace, filepath.Join(dir, "coverage"))
-	path := filepath.Join(dir, "trace.config.mjs")
+`, vitestConfig, filepath.Join(pkg, m.cfg.ConfigFile), pkg, test)
+	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
 		return "", fmt.Errorf("vitestmeasure: write %s: %w", path, err)
 	}
