@@ -303,6 +303,14 @@ describe("message ids", () => {
       /^msg_fake_[0-9a-f]{8}_\d+$/,
     );
   });
+
+  it("mints its ids under an injected spawn tag, so a golden drive is repeatable", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["hi"], { opts: { spawnTag: "g0000000" } });
+
+    // Assert
+    expect((ofType(driven, "assistant")[0]?.message as { id: string }).id).toBe("msg_fake_g0000000_1");
+  });
 });
 
 describe("interrupt", () => {

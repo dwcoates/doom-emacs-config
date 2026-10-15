@@ -480,6 +480,11 @@ export interface FakeQueryOpts {
   readonly newUuid: () => string;
   /** Milliseconds since the epoch. Injectable so goldens are stable. */
   readonly nowMs?: () => number;
+  /**
+   * The tag that makes this query's API message and tool ids unique across
+   * queries. Random by default; injectable so goldens are stable.
+   */
+  readonly spawnTag?: string;
   /** The model the session starts on. */
   readonly model?: string;
   /** The gate's mode at start. */
@@ -686,7 +691,7 @@ export function createFakeQuery(
   // first turn re-minted the same id under the SAME session, which the store
   // correctly refuses as a divergent duplicate. Per CREATED QUERY is the right
   // scope: two queries in one process must not share it either.
-  const spawnTag = randomBytes(4).toString("hex");
+  const spawnTag = opts.spawnTag ?? randomBytes(4).toString("hex");
   let messageCounter = 0;
   let toolCounter = 0;
 
