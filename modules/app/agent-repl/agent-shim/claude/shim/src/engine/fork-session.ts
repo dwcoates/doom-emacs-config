@@ -72,7 +72,7 @@ export type ForkSessionOutcome =
  * The record types the vendor's fork counts as transcript messages (its own
  * set, read from the shipped SDK): only these carry a uuid it can cut at.
  */
-const FORKABLE_TYPES: ReadonlySet<string> = new Set(["user", "assistant", "attachment", "system", "progress"]);
+export const FORKABLE_TYPES: ReadonlySet<string> = new Set(["user", "assistant", "attachment", "system", "progress"]);
 
 /**
  * One forkable record: its uuid, and the send it files when it is a
