@@ -287,6 +287,22 @@ func (l *bootLock) takeServing() error {
 	return nil
 }
 
+// holdServing takes the serving lock beside the held boot lock, or, when it
+// cannot, RELEASES THE BOOT CLAIM TOO and answers why: a claim held without
+// its serving lock would read as departing to every booting daemon, so it is
+// never kept. Every path that comes to hold the boot claim for a serving
+// daemon goes through it.
+func (l *bootLock) holdServing() error {
+	err := l.takeServing()
+	if err == nil {
+		return nil
+	}
+	if rerr := l.release(); rerr != nil {
+		return fmt.Errorf("%w (and releasing the boot claim: %v)", err, rerr)
+	}
+	return err
+}
+
 // depart releases the serving lock and keeps the boot claim: from here on a
 // booting daemon reads this holder as departing and waits for its exit. It
 // is idempotent.

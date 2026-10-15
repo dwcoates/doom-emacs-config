@@ -59,10 +59,7 @@ type claim struct {
 // serving lock would read as departing to every booting daemon.
 func (c *claim) holdLocked(lock *bootLock) error {
 	if !c.departed {
-		if err := lock.takeServing(); err != nil {
-			if rerr := lock.release(); rerr != nil {
-				return fmt.Errorf("%w (and releasing the boot claim: %v)", err, rerr)
-			}
+		if err := lock.holdServing(); err != nil {
 			return err
 		}
 	}
@@ -173,10 +170,7 @@ func bindWith(addrPath string, port int, claimBoot bool, wait time.Duration, mod
 		}
 		// THE SERVING LOCK IS TAKEN BEFORE ANYTHING IS BOUND: from here on a
 		// booting daemon reads this one as serving.
-		if err := lock.takeServing(); err != nil {
-			if rerr := lock.release(); rerr != nil {
-				return nil, VerdictUndecided, fmt.Errorf("%w (and releasing the boot claim: %v)", err, rerr)
-			}
+		if err := lock.holdServing(); err != nil {
 			return nil, VerdictUndecided, err
 		}
 	}

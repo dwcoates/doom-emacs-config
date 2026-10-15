@@ -668,3 +668,72 @@ func TestTheServingLockFileOutlivesEveryRelease(t *testing.T) {
 		t.Fatalf("the serving lock's inode changed across depart and release")
 	}
 }
+
+func TestHoldServingTakesTheServingLock(t *testing.T) {
+	// Arrange.
+	path := filepath.Join(t.TempDir(), LockName)
+	lock, err := acquireBootLock(path)
+	if err != nil {
+		t.Fatalf("acquireBootLock: %v", err)
+	}
+	defer lock.release()
+
+	// Act.
+	err = lock.holdServing()
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("holdServing: %v", err)
+	}
+	if held, err := servingHeld(servingLockPath(path)); err != nil || !held {
+		t.Fatalf("servingHeld = (%v, %v), want (true, nil)", held, err)
+	}
+}
+
+func TestHoldServingThatFailsReleasesTheBootClaim(t *testing.T) {
+	// Arrange.
+	if os.Geteuid() == 0 {
+		t.Fatal("this test needs a non-root user: root opens a mode-000 file")
+	}
+	path := filepath.Join(t.TempDir(), LockName)
+	lock, err := acquireBootLock(path)
+	if err != nil {
+		t.Fatalf("acquireBootLock: %v", err)
+	}
+	if err := os.WriteFile(servingLockPath(path), nil, 0); err != nil {
+		t.Fatalf("write an unopenable serving lock: %v", err)
+	}
+
+	// Act.
+	err = lock.holdServing()
+
+	// Assert: the cause is the answer, and the boot claim is free again.
+	if !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("holdServing = %v, want the permission error", err)
+	}
+	next, err := acquireBootLock(path)
+	if err != nil {
+		t.Fatalf("acquireBootLock after the failed holdServing = %v, want the claim free", err)
+	}
+	next.release()
+}
+
+// TestEveryServingHolderGoesThroughHoldServing pins that no path takes the
+// serving lock by hand: one that did could keep a boot claim with no serving
+// lock beside it, which every booting daemon reads as departing.
+func TestEveryServingHolderGoesThroughHoldServing(t *testing.T) {
+	// Arrange.
+	files := []string{"claim.go", "api.go"}
+	for _, name := range files {
+		// Act.
+		raw, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+
+		// Assert.
+		if strings.Contains(string(raw), ".takeServing()") {
+			t.Fatalf("%s takes the serving lock by hand; use holdServing", name)
+		}
+	}
+}
