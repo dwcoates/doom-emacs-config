@@ -69,6 +69,7 @@
 (declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl-refill-keymap "core" (map fill))
 (declare-function agent-repl--fatal "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--buffer-owner "agent-repl-core" (buf))
 (declare-function agent-repl--with-log-context "agent-repl-core"
@@ -580,9 +581,13 @@ on a refusal would be silently lost user intent."
 ;; A click in the webview selects too, and any landed bubble can be selected
 ;; that way (the `:bubble' kind); the host watch reports every change the
 ;; same way, whoever made it.  While anything is selected,
-;; `agent-repl-input-selection-mode' stands, and `/' and `?' open the
-;; selected bubble's markdown in a read-only popup and search it with real
-;; Evil (`agent-repl-response-search-forward').
+;; `agent-repl-input-selection-mode' stands: `/' and `?' (command mode) and
+;; `C-s' (every state) open the selected bubble's markdown in a read-only
+;; popup and search it there (`agent-repl-response-search-forward'), and
+;; `RET' rolls back to a selected prompt, or sends the composer as a reply
+;; to any other selected bubble (`agent-repl-input-selection-return').  The
+;; webapp expands a bubble the moment it is selected, so the bubble searched
+;; is the one drawn open.
 
 (defconst agent-repl--input-selection-escape-warning
   "selection: press escape again to clear the selection"
@@ -604,7 +609,20 @@ clears the selection, so the user reads it before anything is cleared.")
   (memq (agent-repl-host-selection ws) '(:response :prompt :bubble)))
 
 (defvar agent-repl-input-selection-mode-map (make-sparse-keymap)
-  "Keymap of `agent-repl-input-selection-mode': `/' and `?' in normal state.")
+  "Keymap of `agent-repl-input-selection-mode'.
+`RET' and `C-s' in every state, `/' and `?' in normal state.")
+
+(defun agent-repl--input-fill-selection-map (map)
+  "Bind MAP's plain `RET' and `C-s', which emacs state reads.
+The evil states read the auxiliary maps `agent-repl--input-selection-bind-keys'
+fills, which outrank the composer's own `RET'."
+  (define-key map (kbd "RET") #'agent-repl-input-selection-return)
+  (define-key map (kbd "C-s") #'agent-repl-response-search-buffer))
+
+;; Refilled on every load, BEFORE the evil binder below, so a reload drops a
+;; removed binding and the evil auxiliary maps are rebuilt on top.
+(agent-repl-refill-keymap agent-repl-input-selection-mode-map
+                          #'agent-repl--input-fill-selection-map)
 
 (define-minor-mode agent-repl-input-selection-mode
   "The composer's behavior while a feed row is selected.
@@ -614,10 +632,28 @@ alone, so it stands exactly while the daemon's selection does."
   :keymap agent-repl-input-selection-mode-map)
 
 (defun agent-repl--input-selection-bind-keys ()
-  "Bind `/' and `?' in Evil normal state in the selection mode's map."
+  "Bind the selection mode's keys in its Evil auxiliary maps.
+`/' and `?' in normal state; `RET' and `C-s' in normal and insert state."
   (evil-define-key* 'normal agent-repl-input-selection-mode-map
     "/" #'agent-repl-response-search-forward
-    "?" #'agent-repl-response-search-backward))
+    "?" #'agent-repl-response-search-backward)
+  (evil-define-key* '(normal insert) agent-repl-input-selection-mode-map
+    (kbd "RET") #'agent-repl-input-selection-return
+    (kbd "C-s") #'agent-repl-response-search-buffer))
+
+(defun agent-repl-input-selection-return ()
+  "Act on the selected bubble with `RET'.
+A selected prompt a rollback can reach is rolled back to, keeping files,
+exactly as `C-c C-RET' does.  Any other selected bubble (a final response
+in particular) is replied to: the composer is sent, and the daemon quotes
+the selected bubble ahead of it."
+  (interactive)
+  (let* ((ws (agent-repl--ws-current-name))
+         (kind (agent-repl-host-selection ws)))
+    (agent-repl--info ws "elisp.input.selection-return ws=%s kind=%S" ws kind)
+    (if (eq kind :prompt)
+        (agent-repl-rollback-keep-files)
+      (agent-repl-send))))
 
 (with-eval-after-load 'evil
   (agent-repl--input-selection-bind-keys))
@@ -691,6 +727,27 @@ read-only in the shared popup and the search runs there, so `n', `N',
 `RET' and every read-only Evil motion and yank work on it as in any buffer."
   (interactive)
   (agent-repl--response-search #'evil-ex-search-forward))
+
+(defun agent-repl--response-view-search-key ()
+  "Run what `C-s' runs in the response view, the current buffer.
+The view is an ordinary buffer, so `C-s' there is the user's own buffer
+search.  An unbound `C-s' is a broken invariant (Emacs binds it globally),
+so it signals rather than doing nothing."
+  (interactive)
+  (let ((command (key-binding (kbd "C-s"))))
+    (unless (commandp command)
+      (let ((ws (agent-repl--ws-current-name)))
+        (agent-repl--error ws "elisp.input.response-view-search-key-unbound ws=%s binding=%S"
+                           ws command)
+        (error "agent-repl: `C-s' runs no command in the response view")))
+    (call-interactively command)))
+
+(defun agent-repl-response-search-buffer ()
+  "Search the selected bubble's markdown with what `C-s' runs.
+The bubble opens read-only in the shared popup, as for `/', and the
+buffer search `C-s' runs anywhere else runs there."
+  (interactive)
+  (agent-repl--response-search #'agent-repl--response-view-search-key))
 
 (defun agent-repl-response-search-backward ()
   "Search the selected bubble's markdown BACKWARD with Evil's `?'.

@@ -56,6 +56,8 @@ Findings are collected at the end, in "Audit findings".
 | --- | --- | --- | --- | --- |
 | `agent-repl-turn-boundary-select-prev` | Select the previous prompt or final response, moving up the feed. | `M-s-k` | composer | works |
 | `agent-repl-turn-boundary-select-next` | Select the next prompt or final response, moving down the feed. | `M-s-j` | composer | works |
+| `agent-repl-input-selection-return` | Roll back to the selected prompt, or reply to any other selected bubble. | `RET` (normal, insert) | composer with a selection | works |
+| `agent-repl-response-search-buffer` | Search the selected bubble's markdown with what `C-s` runs. | `C-s` (normal, insert) | composer with a selection | works |
 | `agent-repl-input-selection-escape` | Clear the feed selection (first press warns). | `<escape>` (normal) | composer | missing |
 | `agent-repl-response-search-forward` | Search the selected bubble's markdown forward. | `/` (normal) | composer with a selection | missing |
 | `agent-repl-response-search-backward` | Search the selected bubble's markdown backward. | `?` (normal) | composer with a selection | missing |

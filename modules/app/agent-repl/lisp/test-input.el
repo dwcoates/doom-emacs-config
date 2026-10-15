@@ -3402,18 +3402,116 @@ recorded; the response view is killed afterwards."
         ;; Assert
         (should (cl-some (lambda (m) (string-match-p "response-view-no-text" m)) errors))))))
 
-(ert-deftest agent-repl-test-input-selection-mode-binds-slash-and-question-mark ()
-  "`/' and `?' are bound in normal state on the selection mode's map."
-  ;; Arrange
+(defun agent-repl-test-input--evil-bindings ()
+  "Run the selection mode's key binder; return every `evil-define-key*' call."
   (let (bound)
     (cl-letf (((symbol-function 'evil-define-key*)
-               (lambda (state keymap &rest bindings) (setq bound (list state keymap bindings)))))
-      ;; Act
+               (lambda (state keymap &rest bindings)
+                 (push (list state keymap bindings) bound))))
       (agent-repl--input-selection-bind-keys))
+    (nreverse bound)))
+
+(ert-deftest agent-repl-test-input-selection-mode-binds-slash-and-question-mark ()
+  "`/' and `?' are bound in normal state on the selection mode's map."
+  ;; Act
+  (let ((bound (agent-repl-test-input--evil-bindings)))
     ;; Assert
-    (should (equal bound (list 'normal agent-repl-input-selection-mode-map
-                               (list "/" #'agent-repl-response-search-forward
-                                     "?" #'agent-repl-response-search-backward))))))
+    (should (member (list 'normal agent-repl-input-selection-mode-map
+                          (list "/" #'agent-repl-response-search-forward
+                                "?" #'agent-repl-response-search-backward))
+                    bound))))
+
+(ert-deftest agent-repl-test-input-selection-mode-binds-return-and-c-s-in-evil ()
+  "`RET' and `C-s' are bound in normal and insert state on the selection mode's map."
+  ;; Act
+  (let ((bound (agent-repl-test-input--evil-bindings)))
+    ;; Assert
+    (should (member (list '(normal insert) agent-repl-input-selection-mode-map
+                          (list (kbd "RET") #'agent-repl-input-selection-return
+                                (kbd "C-s") #'agent-repl-response-search-buffer))
+                    bound))))
+
+(ert-deftest agent-repl-test-input-selection-mode-binds-return-in-emacs-state ()
+  "`RET' acts on the selection in the plain map, which emacs state reads."
+  (should (eq (lookup-key agent-repl-input-selection-mode-map (kbd "RET"))
+              #'agent-repl-input-selection-return)))
+
+(ert-deftest agent-repl-test-input-selection-mode-binds-c-s-in-emacs-state ()
+  "`C-s' searches the selection in the plain map, which emacs state reads."
+  (should (eq (lookup-key agent-repl-input-selection-mode-map (kbd "C-s"))
+              #'agent-repl-response-search-buffer)))
+
+(defmacro agent-repl-test-input--with-return-stubs (&rest body)
+  "Run BODY with the rollback and send commands recording which one ran.
+The record is bound as `ran'."
+  (declare (indent 0))
+  `(let (ran)
+     (cl-letf (((symbol-function 'agent-repl-rollback-keep-files)
+                (lambda () (interactive) (push :rollback-keep-files ran)))
+               ((symbol-function 'agent-repl-send)
+                (lambda () (interactive) (push :send ran))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-input-selection-return-acts-on-the-selected-kind ()
+  "`RET' rolls back to a selected prompt and sends a reply to anything else."
+  (dolist (case '((:prompt :rollback-keep-files)
+                  (:response :send)
+                  (:bubble :send)))
+    (agent-repl-test-input--with-host-selection (car case) "text"
+      (agent-repl-test-input--with-return-stubs
+        ;; Act
+        (agent-repl-input-selection-return)
+        ;; Assert
+        (should (equal ran (cdr case)))))))
+
+(ert-deftest agent-repl-test-input-selection-return-is-recorded-at-info ()
+  "`RET' over a selection records which kind it acted on."
+  (agent-repl-test-input--with-host-selection :prompt "a prompt"
+    (agent-repl-test-input--with-return-stubs
+      (agent-repl-test-input--capturing-rungs
+        ;; Act
+        (agent-repl-input-selection-return)
+        ;; Assert
+        (should (cl-some (lambda (m) (string-match-p "elisp.input.selection-return.*:prompt" m))
+                         agent-repl-test-input--info))))))
+
+(ert-deftest agent-repl-test-input-search-buffer-shows-the-view-in-the-popup ()
+  "`C-s' shows the selected bubble's view through the shared popup."
+  (agent-repl-test-input--with-host-selection :response "# The answer"
+    (cl-letf (((symbol-function 'key-binding)
+               (lambda (_key &rest _) (lambda () (interactive) nil))))
+      ;; Act
+      (agent-repl-response-search-buffer))
+    ;; Assert
+    (should (equal (mapcar #'buffer-name agent-repl-test--popups-shown)
+                   (list (agent-repl--response-view-name "ws-one"))))))
+
+(ert-deftest agent-repl-test-input-search-buffer-runs-c-s-in-the-view ()
+  "`C-s' runs, in the view buffer, the command `C-s' is bound to there."
+  (agent-repl-test-input--with-host-selection :prompt "a prompt"
+    ;; Arrange
+    (let (ran-in)
+      (cl-letf (((symbol-function 'key-binding)
+                 (lambda (_key &rest _)
+                   (lambda () (interactive) (push (buffer-name) ran-in)))))
+        ;; Act
+        (agent-repl-response-search-buffer))
+      ;; Assert
+      (should (equal ran-in (list (agent-repl--response-view-name "ws-one")))))))
+
+(ert-deftest agent-repl-test-input-search-buffer-with-c-s-unbound-signals-and-logs ()
+  "An unbound `C-s' in the view is a broken invariant: it signals and logs."
+  (agent-repl-test-input--with-host-selection :response "the answer"
+    ;; Arrange
+    (let (errors)
+      (cl-letf (((symbol-function 'key-binding) (lambda (_key &rest _) nil))
+                ((symbol-function 'agent-repl--error)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+        ;; Act
+        (should-error (agent-repl-response-search-buffer))
+        ;; Assert
+        (should (cl-some (lambda (m) (string-match-p "response-view-search-key-unbound" m))
+                         errors))))))
 
 (ert-deftest agent-repl-test-input-a-bubble-selection-is-active ()
   "A selected `:bubble' counts as a selection for escape and the mode."

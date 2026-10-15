@@ -36,3 +36,17 @@ lands, from rows in the order it draws them. Emacs sends only the direction.
   - A step from a selected `bubble` (a click on a row the walk does not hold) starts at the newest boundary in either direction, as a step from "another kind" did before.
   - The Elisp flash prefix for a step is now `selection`, and the empty walk says `selection: no prompt or final response to select`.
 
+## Composer keys on a selection (no contract change)
+
+The owner asked (2026-10-15) for the selected row to answer `RET` and the
+search keys. These are Emacs-only. They read the selection's kind off the
+host watch, which already carries it.
+
+- **`RET` on a selected prompt rolls back to it.**
+  - It keeps files, as `C-c C-RET` does. `C-c M-RET` stays the way to restore files.
+  - This replaces the 2026-10-01 ruling for prompts a rollback can reach, which said `RET` quotes a selected prompt as a reply.
+  - A prompt selected as `bubble` (one a rollback cannot reach) is still replied to.
+- **`RET` on any other selected bubble sends a reply.** The daemon quotes the bubble, as before.
+- **`C-s` searches the selected bubble.**
+  - It opens the same read-only popup `/` uses, and runs whatever `C-s` is bound to in that buffer.
+  - A selected bubble is already expanded in the webapp, because selected and expanded are one state.
