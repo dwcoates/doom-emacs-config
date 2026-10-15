@@ -842,11 +842,7 @@ export function createFeedController(
 
   /** The key of the row held at INDEX. */
   function keyAt(index: number): string {
-    const id = order[index];
-    const state = states.get(id);
-    if (state === undefined)
-      throw new Error(`feed: row ${id} is ordered but not held`);
-    return state.key;
+    return heldState(order[index]).key;
   }
 
   /**
@@ -857,9 +853,7 @@ export function createFeedController(
   function sampleSuccessor(index: number): InsertSample | null {
     if (opts.scroll === undefined) return null;
     const id = order[index];
-    const state = states.get(id);
-    if (state === undefined)
-      throw new Error(`feed: row ${id} is ordered but not held`);
+    const state = heldState(id);
     return {
       id,
       element: state.element,

@@ -4199,3 +4199,16 @@ describe("createFeedController: freeing rows older than the newest daemon page",
     ]);
   });
 });
+
+describe("createFeedController's held-row lookup", () => {
+  it("is the one place a row in the order is looked up as held", () => {
+    // Arrange
+    const source = readFileSync(join(__dirname, "../../src/feed/feed-view.ts"), "utf8");
+
+    // Act
+    const throws = source.match(/is ordered but not held/g) ?? [];
+
+    // Assert
+    expect(throws).toHaveLength(1);
+  });
+});
