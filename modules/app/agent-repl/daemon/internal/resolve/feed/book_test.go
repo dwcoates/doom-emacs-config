@@ -453,6 +453,26 @@ func TestASubFeedReadsItsOwnAgentsBook(t *testing.T) {
 	}
 }
 
+func TestASubFeedsNextPageWalksItsOwnAgentsBook(t *testing.T) {
+	// Arrange: the sub-agent's book holds two store pages; the root holds none.
+	h := newHarness(t)
+	store := h.withHistory(newFakeHistory(3))
+	store.books["agent-sub"] = newestFirst(promptsBook(5))
+	sub := feedid.Feed{Agent: &conversationv1.AgentId{Value: "agent-sub"}}
+	h.openPage(sub, "reader-1")
+
+	// Act.
+	if _, err := h.resolver.NextPage(context.Background(), testWorkspace, sub, "reader-1"); err != nil {
+		t.Fatalf("NextPage: %v", err)
+	}
+
+	// Assert: the older page is read from the sub-agent's book, past its own
+	// newest page, never from the root.
+	if got := store.lastRead(); got.target != "agent-sub" || got.after == "" {
+		t.Fatalf("last read = %+v, want agent-sub's book read past its newest page", got)
+	}
+}
+
 // ---- the walk ----
 
 func TestNextFetchesThePageItDoesNotHold(t *testing.T) {
