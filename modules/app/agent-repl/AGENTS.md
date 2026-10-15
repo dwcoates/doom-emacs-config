@@ -962,6 +962,29 @@ symptom is visible in the logs. Inference is not a diagnosis.
 - The fix is verified the same way: reproduce again and show the records that
   prove the chain is now broken.
 
+### Instrumentation reaches the running runtime through an async merge (owner technique, 2026-10-14)
+
+A logging gap in the daemon, shim, webapp or sidecar is closed in the RUNNING
+runtime by landing the new records on master, not by a hand deploy from a
+feature branch.
+
+- Commit the instrumentation (with its tests) on a branch of its own, cut from
+  the investigation's branch or from master, and request an `async` merge of
+  it through `/merge-queue`. The investigating workspace stays open and keeps
+  working while the merge runs.
+- The queue's landing deploys the build, and the async merge's report arrives
+  in the investigating session only once the running runtime carries it.
+  THAT REPORT IS THE CUE: from then on the new records are live, so reproduce
+  and read them.
+- The loop is: decide what the logs cannot show yet, land the instrumentation
+  async, wait for the landing report, reproduce, read the chain, and repeat
+  until every link is evidenced. Work the next open question while a merge
+  runs rather than idling on it.
+- A report saying the rollouts are held or the deploy failed means the
+  runtime does NOT carry the records yet; it is not the cue.
+- Elisp instrumentation needs no merge: it is hot-loaded through
+  `/runtime-eval-code`, as the debug skill's observability loop says.
+
 ## Runtime operations go through one door and one skill
 
 Building, bouncing, hard bouncing, deploying, hot-reloading, health checks,

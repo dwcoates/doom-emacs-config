@@ -93,9 +93,21 @@ For Emacs:
    that proves the new definition is active.
 5. Treat a queued eval as incomplete until the verification read returns.
 
-For daemon, shim, webapp, sidecar, or store changes, follow the component's
-deploy and restart policy. Never restart the store or sidecar without explicit
-permission. Re-run readiness after a deploy or restart.
+For daemon, shim, webapp, sidecar, or store instrumentation, land it in the
+running runtime through an async merge (agent-repl `AGENTS.md`,
+"Instrumentation reaches the running runtime through an async merge"):
+
+1. Commit the instrumentation and its focused tests on a branch of its own,
+   never the branch this workspace has checked out.
+2. Request an `async` merge of that branch through `/merge-queue`, then work
+   the next open question while it runs; never idle on it.
+3. Take the merge's landing report as the cue that the new records are live:
+   it arrives only once the running build carries the landing.
+4. A report that the rollouts are held or the deploy failed is NOT the cue:
+   the running build does not carry the records yet.
+5. Re-run readiness, then run the capture below.
+
+Never restart the store or sidecar without explicit permission.
 
 A reload error is part of the bug investigation. Instrument and fix it before
 continuing; never reason from source that is not proven loaded.
@@ -139,7 +151,9 @@ If the capture does not establish a root cause:
 2. Add or correct the minimum instrumentation needed to distinguish the
    surviving hypotheses.
 3. Add or update focused tests.
-4. Reload and prove the new source is active.
+4. Reload and prove the new source is active: hot-load elisp, and land
+   anything else through an async merge, waiting for its landing report
+   (see "Reload and prove loaded state").
 5. Repeat the bounded provoke, deprovoke, and log capture.
 
 Do not stop merely because one plausible explanation fits. Continue until the
