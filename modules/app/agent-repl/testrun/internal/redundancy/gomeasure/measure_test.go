@@ -877,3 +877,31 @@ func TestMeasureDropsASiteOnceThoughTheCompilerNamesItTwice(t *testing.T) {
 		}
 	}
 }
+
+func TestTheMutatedPackagesBuildNamingEveryError(t *testing.T) {
+	// Arrange
+	cfg, dir := fakeConfig(t)
+	f := &fakeGo{dir: dir, reaches: map[string]bool{"TestA": true},
+		schemaErr: filepath.Join(dir, "p.go") + ":3:29: cannot use x\n"}
+	f.mutant = map[string]func(string) Result{}
+	log, _ := quietLog()
+
+	// Act
+	if _, err := Measure(context.Background(), cfg, f.exec, log); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	checks := 0
+	for _, call := range f.calls {
+		if strings.Contains(call, "go build") && strings.Contains(call, "-overlay") && !strings.Contains(call, "-o ") {
+			checks++
+			if !strings.Contains(call, "-gcflags=-e") {
+				t.Errorf("a type-check stops at ten errors: %s", call)
+			}
+		}
+	}
+	if checks == 0 {
+		t.Fatal("no type-check build ran")
+	}
+}

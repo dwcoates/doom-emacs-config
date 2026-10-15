@@ -901,9 +901,11 @@ func writeOverlay(dir string, schemas []*gomut.Schema) (string, error) {
 	return ov, nil
 }
 
-// buildMutated builds the -mutate packages alone under overlay ov.
+// buildMutated builds the -mutate packages alone under overlay ov, with
+// -gcflags=-e so a package names every untyped site, not its first ten,
+// and one attempt drops them all.
 func (m *measurer) buildMutated(ctx context.Context, ov string) (Result, error) {
-	return m.goBuild(ctx, m.cfg.Module, append([]string{"go", "build", "-buildvcs=false", "-overlay", ov}, m.cfg.Mutate...))
+	return m.goBuild(ctx, m.cfg.Module, append([]string{"go", "build", "-buildvcs=false", "-gcflags=-e", "-overlay", ov}, m.cfg.Mutate...))
 }
 
 // typeCheck builds the schemas' mutated packages alone (one go build over
