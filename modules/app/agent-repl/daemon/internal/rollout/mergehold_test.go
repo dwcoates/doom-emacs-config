@@ -70,8 +70,8 @@ func TestAStaleBuildBounceOverAMergesLeaseIsDeferred(t *testing.T) {
 	err := h.c.shimBounce(ReasonBuildStale, false)(context.Background(), ws)
 
 	// Assert.
-	if !errors.Is(err, bounce.ErrDeferred) {
-		t.Fatalf("bounce = %v, want it deferred behind the merge", err)
+	if !errors.Is(err, bounce.ErrDeferredBehindLease) {
+		t.Fatalf("bounce = %v, want it deferred behind the merge's lease", err)
 	}
 	if len(h.fleet.resumes) != 0 {
 		t.Fatalf("resumes = %v, want nothing replaced under the merge", h.fleet.resumes)
@@ -95,5 +95,28 @@ func TestAFailedStaleBuildBounceLeavesItsBuildToBeBouncedAgain(t *testing.T) {
 	// Assert.
 	if got := h.c.claimStaleBounce(ws, "old-build"); got != staleBounceClaimed {
 		t.Fatalf("claim after a failed bounce = %v, want the build claimed again", got)
+	}
+}
+
+// A shim's own refusal is a deferral behind its WORK, never behind a lease: a
+// lease change must not re-judge it (promptqueue edgeSet).
+func TestAStandDownRefusalIsNeverADeferralBehindALease(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{name: "refused as live", err: ErrStandDownLive},
+		{name: "unanswered", err: ErrStandDownUnanswered},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			behindLease := errors.Is(tc.err, bounce.ErrDeferredBehindLease)
+
+			// Assert
+			if behindLease || !errors.Is(tc.err, bounce.ErrDeferred) {
+				t.Fatalf("%v: behind a lease = %v, want a deferral behind work only", tc.err, behindLease)
+			}
+		})
 	}
 }

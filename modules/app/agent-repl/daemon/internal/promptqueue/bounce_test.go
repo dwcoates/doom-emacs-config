@@ -14,6 +14,7 @@ import (
 
 	"agent-repld/internal/bounce"
 	"agent-repld/internal/classifier"
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/wsm"
@@ -1608,6 +1609,90 @@ func TestADeferredReplacementWithNoEdgeSinceItsRunIsNotRetakenAtOnce(t *testing.
 	}
 	if stage := registeredReplacement(h); stage == nil || stage.started {
 		t.Fatalf("replacement = %+v, want it registered, unstarted", stage)
+	}
+}
+
+// THE RUN'S OWN RESTART HOLD IS NOT AN EDGE (2026-10-14 15:24-15:36,
+// cpu-orphaned-test-processes): the replacement releases its restart hold as
+// it gives the bounce back, that release is a lease change, and taking it as a
+// freeness edge retook the bounce 2ms later, about five times a second for as
+// long as the shim's background shell ran.
+func TestADeferredReplacementIsNotRetakenOnALeaseChangeDuringItsRun(t *testing.T) {
+	// Arrange: the watcher reads the workspace free throughout, and the run's
+	// own hold release lands while it drains. A spare outcome lets a wrong
+	// rerun finish rather than hang the test.
+	h := newHarness(t)
+	g := newGate()
+	g.release = make(chan error, 2)
+	startFreeReplacement(t, h, g)
+	h.q.OnLeaseChanged(theWorkspace)
+
+	// Act
+	g.release <- errDeferredRun
+	g.release <- errDeferredRun
+	h.q.bouncing.Wait()
+
+	// Assert
+	if got := g.runs.Load(); got != 1 {
+		t.Fatalf("the replacement ran %d times, want once: a lease change never ends live work", got)
+	}
+	if stage := registeredReplacement(h); stage == nil || stage.started {
+		t.Fatalf("replacement = %+v, want it registered, unstarted", stage)
+	}
+}
+
+func TestABounceDeferredBehindALeaseIsRetakenAtOnceWhenTheLeaseChangedWhileItRan(t *testing.T) {
+	// Arrange: the merge releases its lease while the run is deciding.
+	h := newHarness(t)
+	g := newGate()
+	startFreeReplacement(t, h, g)
+	h.q.OnLeaseChanged(theWorkspace)
+
+	// Act
+	g.releaseStage(bounce.ErrDeferredBehindLease)
+
+	// Assert
+	g.awaitStart(t)
+	g.finish(h, nil)
+	if err := g.awaitDone(t); err != nil {
+		t.Fatalf("done = %v, want the rerun's clean finish", err)
+	}
+}
+
+func TestADeferralBehindALeaseIsRecordedAsTheLeaseNotLiveWork(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	g := newGate()
+	startFreeReplacement(t, h, g)
+
+	// Act
+	g.finish(h, bounce.ErrDeferredBehindLease)
+
+	// Assert
+	if !logged(h.log.Records(), "info", opBounce, "another holder's lease holds the workspace; the bounce is re-registered behind it and dispatch resumes on the shim that keeps serving") {
+		t.Fatalf("records = %+v, want the lease deferral at INFO", h.log.Records())
+	}
+}
+
+func TestADeferralRecordsTheWatchersOwnReadingBesideTheRefusal(t *testing.T) {
+	// Arrange: the watcher reads the workspace free while the shim refuses.
+	h := newHarness(t)
+	g := newGate()
+	startFreeReplacement(t, h, g)
+
+	// Act
+	g.finish(h, errDeferredRun)
+
+	// Assert
+	r, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{
+		Operation: opBounce,
+		Message:   "the shim refused to stand down over live work; the bounce is re-registered behind that work and dispatch resumes on the shim that keeps serving",
+	})
+	if !ok {
+		t.Fatalf("records = %+v, want the deferral recorded", h.log.Records())
+	}
+	if r.Context["watcher_free"] != true || r.Context["watcher_detached_work"] != 0 || r.Context["watcher_turn_in_flight"] != false {
+		t.Fatalf("context = %+v, want the watcher's free reading recorded", r.Context)
 	}
 }
 

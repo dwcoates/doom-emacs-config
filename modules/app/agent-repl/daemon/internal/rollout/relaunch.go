@@ -133,7 +133,7 @@ func (c *controller) shimBounce(reason RelaunchReason, force bool) bounce.Func {
 				return fmt.Errorf("rollout: relaunch %q: read the lease: %w", ws, err)
 			} else if merging && held.Holder == wsm.HolderMerge {
 				c.log.Info(opRelaunch, "a merge holds the workspace; the stale-build bounce waits for the merge to release it", merge(fields, dlog.Context{"lease": string(held.ID)}))
-				return fmt.Errorf("rollout: relaunch %q: a merge holds the workspace: %w", ws, bounce.ErrDeferred)
+				return fmt.Errorf("rollout: relaunch %q: a merge holds the workspace: %w", ws, bounce.ErrDeferredBehindLease)
 			}
 		}
 		var lease *wsm.Lease

@@ -23,6 +23,7 @@ package bounce
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"agent-repld/internal/ids"
 )
@@ -132,6 +133,20 @@ var ErrHandedAcross = errors.New("bounce: handed across; the daemon the workspac
 // bounce behind the work in flight, taking it at the next freeness edge. It is
 // an outcome, not a failure.
 var ErrDeferred = errors.New("bounce: deferred; the shim refused to stand down over live work, so the replacement waits for its next freeness")
+
+// ErrDeferredBehindLease is a deferral (it wraps ErrDeferred) whose run gave
+// the bounce back because ANOTHER HOLDER's lease holds the workspace -- a
+// merge driving the session between its turns -- not because the shim
+// refused over live work.
+//
+// WHAT RE-JUDGES A DEFERRAL IS WHAT IT WAITS ON. A lease release can end this
+// one, so a lease change during its run re-judges it. A shim's `live` refusal
+// is ended only by the shim's work ending; a lease change says nothing about
+// that work, and the replacement's own restart hold, released as its run
+// gives the bounce back, is a lease change. Re-judging that refusal on it
+// retook the bounce 2ms later, about five times a second for as long as the
+// work ran (2026-10-14 15:24-15:36, cpu-orphaned-test-processes).
+var ErrDeferredBehindLease = fmt.Errorf("bounce: deferred behind another holder's lease, so the replacement waits for its release: %w", ErrDeferred)
 
 // Outcome is what a bounce's Done error MEANS. Every Done that reports a shim
 // replacement's end classifies it here, so no caller reads a non-failure
