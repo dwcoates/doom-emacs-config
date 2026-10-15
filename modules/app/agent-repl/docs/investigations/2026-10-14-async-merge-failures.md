@@ -16,7 +16,7 @@ the log records that show it, so the failures can be fixed at their source.
 | 5 | 2026-10-15 | `test-fixture-table-rules-2` (entry 2's two rule commits, rebuilt on master `3e33b5963d`) | `fixture-rules-retry` | LANDED (`13f99f54a2`), deployed; the retry of entry 2 forked fine from a turn whose prompt is a normal transcript record, which supports entry 2's diagnosis |
 | 6 | 2026-10-15 | `tier-audit-e2e-step-a` (tip `75e781c362`, e2e audit report plus lower-tier tests) | `tier-audit-e2e-step-a-merge` | LANDED (`f330c112a4`), deployed |
 | 7 | 2026-10-15 | `test-tier-audit-integration-step3` (tip `6ff96ad124`, shim-lock stand-in plus removal lists) | `tier-step3-shim-lock` | LANDED (`ec6fbaa1ce`), deployed |
-| 8 | 2026-10-15 | `tier-audit-e2e-step-c` (tip `32d6f55b9e`, instruction: rebase onto master keeping only the two step-(c) commits) | `tier-audit-e2e-step-c-merge` | requested, pending |
+| 8 | 2026-10-15 | `tier-audit-e2e-step-c` (tip `32d6f55b9e`, instruction: rebase onto master keeping only the two step-(c) commits) | `tier-audit-e2e-step-c-merge` | FAILED: the e2e-emacs gate hit host file-table exhaustion from Docker's VM, see entry 8 |
 
 ## 1. `test-tier-rule` (landed)
 
@@ -56,3 +56,13 @@ the log records that show it, so the failures can be fixed at their source.
 - The first request was refused `name_taken`, because the merge workspace was named after the branch. The re-request under the name `xprod-additions-merge` was accepted.
   - Not a defect: the refusal is documented, and the skill says to retry under another name.
   - Possible source fix: say in the refusal that the name collides with the BRANCH, since that is easy to trip over.
+
+## 8. `tier-audit-e2e-step-c` (FAILED: host file table exhausted by Docker's VM)
+
+- The e2e-emacs gate's sandbox staging died: rsync "Too many open files in system (23)", 188 "file has vanished" lines, `entrypoint.sh` exited 23, and no test ran. The branch did not cause it.
+- Measured 2026-10-15 01:08: `kern.num_files` 59,871 of `kern.maxfiles` 65,536. Docker's VM process (`com.apple.Virtualization.VirtualMachine`, pid 24424, up about 53 min) holds 51,851 of them.
+  - About 45,500 of those are files inside agent-repl checkouts, about 4,500 per checkout across 10 checkouts (measured by the merge workspace `tier-audit-e2e-step-c-merge`).
+- Cause: every e2e-emacs run bind-mounts its live checkout and rsyncs it inside the container, and Docker's file sharing never releases the host files it served. Each run permanently adds about 4,500 descriptors, so the table fills after about a dozen runs. Every e2e-emacs gate on the host fails from then on.
+- Immediate relief needs the owner: restarting Docker Desktop releases the descriptors. Agents may not cycle Docker.
+- Structural fix, in progress in `test-tier-audit-e2e`: stream the staged allowlist into the container through the Docker API (a tar over `docker run -i`, or `docker cp`), so the VM never opens host files and the leak is impossible. A test pins that no checkout path is bind-mounted.
+- The merge workspace was left open at `~/.config/doom-worktrees/tier-audit-e2e-step-c-merge`. Step (c) is re-requested unchanged after the fix lands.
