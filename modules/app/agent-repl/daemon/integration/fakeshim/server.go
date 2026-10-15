@@ -630,6 +630,15 @@ func (s *server) settleTurn(agent, turn string, frame *conversationv1.AgentFrame
 	}
 }
 
+// endTurnUnwatched ends a turn with its terminal while no stream carries it:
+// the turn is settled exactly as a pushed terminal settles it, and the
+// terminal is filed into the agent's book, where a later reader finds it.
+// Nothing is delivered, so no daemon can observe the end, whatever its state.
+func (s *server) endTurnUnwatched(f agentFrame) {
+	s.settleTurn(f.agent, f.turn, f.frame)
+	s.book.record(f)
+}
+
 // claimFirstSessionStream reports whether this open is the FIRST session
 // stream, which is the one DelayDiagnostics withholds its opening frames from.
 func (s *server) claimFirstSessionStream() bool {

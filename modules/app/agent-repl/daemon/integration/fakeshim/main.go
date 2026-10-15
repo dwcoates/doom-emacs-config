@@ -433,6 +433,14 @@ func (p *process) apply(line []byte) Reply {
 		p.srv.book.record(agentFrame{agent: cmd.Agent, frame: f, turn: cmd.Turn, placeMs: cmd.PlaceMs})
 		return Reply{OK: true}
 
+	case OpEndTurnUnwatched:
+		f := &conversationv1.AgentFrame{}
+		if err := proto.Unmarshal(payload, f); err != nil {
+			return Reply{Error: fmt.Sprintf("fakeshim: decode agent frame: %v", err)}
+		}
+		p.srv.endTurnUnwatched(agentFrame{agent: cmd.Agent, frame: f, turn: cmd.Turn, placeMs: cmd.PlaceMs})
+		return Reply{OK: true}
+
 	case OpFileUserPrompt:
 		prompt := &conversationv1.AgentPrompt{}
 		if err := proto.Unmarshal(payload, prompt); err != nil {

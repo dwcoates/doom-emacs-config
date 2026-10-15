@@ -21,6 +21,12 @@ const (
 	// required, Turn and PlaceMs stamp it as on a push.
 	OpFileAgentFrame = "file_agent_frame"
 	OpFileUserPrompt = "file_user_prompt"
+	// OpEndTurnUnwatched ends a turn on the shim with one agent terminal that
+	// is filed into the agent's book and delivered on NO stream, as a turn
+	// that ended while no daemon watched it: the turn leaves the shim's
+	// turn_in_flight, and only a later reader of the book sees its end. Agent
+	// is required, and Turn stamps it as on a push.
+	OpEndTurnUnwatched = "end_turn_unwatched"
 	// OpPushRetired delivers WatchAgentResponse.retired: its payload is the
 	// conversation.v1 HistoryEntryAt as last served, at its own pointer.
 	OpPushRetired = "push_retired"
@@ -156,7 +162,7 @@ func ParseCommand(line []byte) (Command, error) {
 		if c.Payload == "" {
 			return Command{}, fmt.Errorf("%s: payload is required", c.Op)
 		}
-	case OpFileAgentFrame, OpFileUserPrompt:
+	case OpFileAgentFrame, OpFileUserPrompt, OpEndTurnUnwatched:
 		if c.Agent == "" {
 			return Command{}, fmt.Errorf("%s: agent is required", c.Op)
 		}

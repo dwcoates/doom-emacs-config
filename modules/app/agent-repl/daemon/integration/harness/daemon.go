@@ -1464,32 +1464,6 @@ func killStopped(pid int, kill func(int, syscall.Signal) error) error {
 	return nil
 }
 
-// Freeze stops the daemon's process group and waits for the kernel to confirm
-// the stop, leaving it to a later Kill. A frozen daemon reads nothing, so a
-// shim's frame pushed while it is frozen reaches no daemon at all: it is how a
-// test ends a turn while no daemon is watching, before the daemon dies.
-func (d *Daemon) Freeze() {
-	d.t.Helper()
-	if d.cmd == nil || d.cmd.Process == nil {
-		d.t.Fatal("harness: Freeze needs a running daemon")
-		return
-	}
-	d.sigMu.Lock()
-	defer d.sigMu.Unlock()
-	if d.reapBegun {
-		d.t.Fatal("harness: Freeze needs a running daemon")
-		return
-	}
-	pgid := d.cmd.Process.Pid
-	if !d.signalGroup(pgid, syscall.SIGSTOP) {
-		d.t.Fatal("harness: the daemon's group left before it could be frozen")
-		return
-	}
-	if err := awaitFrozen(pgid, freezeBound); err != nil {
-		d.t.Fatalf("harness: the daemon's group was not frozen: %v", err)
-	}
-}
-
 // signalGroup sends sig to the daemon's process group and reports whether the
 // kill should go on.
 //

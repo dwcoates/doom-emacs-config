@@ -107,6 +107,30 @@ func openAsk(id, gated string) *conversationv1.AgentFrame {
 	}
 }
 
+// TestEndTurnUnwatchedFilesTheTerminalAndDeliversNothing covers the turn end
+// no daemon can observe: the terminal is in the agent's book for a later
+// reader, and no agent stream carries it.
+func TestEndTurnUnwatchedFilesTheTerminalAndDeliversNothing(t *testing.T) {
+	// Arrange
+	srv := newServer(NewRecorder(), Profile{}, nil)
+	srv.openTurn(&conversationv1.TurnId{Value: "turn-1"})
+	_, stream := srv.agents.subscribe()
+
+	// Act
+	srv.endTurnUnwatched(agentFrame{agent: MainAgentID, frame: &conversationv1.AgentFrame{Result: &conversationv1.AgentFrame_Success{Success: &conversationv1.AgentSuccess{}}}})
+
+	// Assert
+	select {
+	case got := <-stream:
+		t.Fatalf("an agent stream carried %v, want nothing delivered", got)
+	default:
+	}
+	page, _ := srv.book.page(MainAgentID, nil, 10)
+	if n := len(page.GetEntries()); n != 1 || page.GetEntries()[0].GetEntry().GetAgentFrame().GetSuccess() == nil {
+		t.Fatalf("the main book holds %d entries (%v), want the one filed terminal", n, page.GetEntries())
+	}
+}
+
 // TestSettlePermissionPublishesADenialsSettleFrame covers the decision the
 // daemon draws the answered card from: the fake must put the ask's own settle
 // frame on the agent's stream, as the real shim does.
@@ -419,6 +443,14 @@ func TestTheReannouncementStatesTheTurnInFlightNow(t *testing.T) {
 			act: func(srv *server) {
 				srv.openTurn(turn)
 				srv.settleTurn(MainAgentID, "", &conversationv1.AgentFrame{Result: &conversationv1.AgentFrame_Failure{Failure: &conversationv1.AgentFailure{}}})
+			},
+			want: "",
+		},
+		{
+			name: "the main agent's unwatched end ends it",
+			act: func(srv *server) {
+				srv.openTurn(turn)
+				srv.endTurnUnwatched(agentFrame{agent: MainAgentID, frame: &conversationv1.AgentFrame{Result: &conversationv1.AgentFrame_Success{Success: &conversationv1.AgentSuccess{}}}})
 			},
 			want: "",
 		},
