@@ -92,7 +92,7 @@ func MergeQueuedTitle(name string, at time.Time) string {
 func mergeEndWords(end MergeEnd) (mark, what string) {
 	switch end {
 	case MergeLanded:
-		return "✅", "merge landed"
+		return "🎉", "merge landed"
 	case MergeFailed:
 		return "❌", "merge failed"
 	case MergeAbandoned:

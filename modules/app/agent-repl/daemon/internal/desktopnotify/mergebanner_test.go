@@ -32,7 +32,7 @@ func TestMergeBannersResolvedPostsEachEnd(t *testing.T) {
 		end       MergeEnd
 		wantTitle string
 	}{
-		{name: "landed", end: MergeLanded, wantTitle: "✅ my-ws merge landed 09:41"},
+		{name: "landed", end: MergeLanded, wantTitle: "🎉 my-ws merge landed 09:41"},
 		{name: "failed", end: MergeFailed, wantTitle: "❌ my-ws merge failed 09:41"},
 		{name: "abandoned", end: MergeAbandoned, wantTitle: "⛔ my-ws merge abandoned 09:41"},
 	}
