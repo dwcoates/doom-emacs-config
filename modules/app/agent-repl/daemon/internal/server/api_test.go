@@ -287,28 +287,28 @@ func TestRetractTransferredLetsTheNextIdenticalNoticeReachTheHostStream(t *testi
 	}
 }
 
-// TestRetractTransferredLeavesAnotherStandingEvent pins that only the
-// transfer notice is withdrawn: a host topic whose latest event is something
-// else keeps replaying it.
-func TestRetractTransferredLeavesAnotherStandingEvent(t *testing.T) {
+// TestAHostEventIsNotReplayedToALateHostStream pins that reload_webapp is an
+// event, not a standing notice: a host stream opened after it is never handed
+// it, so a reconnecting Emacs does not reload its webview a second time.
+func TestAHostEventIsNotReplayedToALateHostStream(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	h.Server.PushReloadWebapp(testWorkspaceID)
-
-	// Act.
-	h.Server.RetractTransferred(testWorkspaceID)
 	stream, err := h.Client.WatchHostWorkspace(ctx,
 		connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{Workspace: ref()}))
 	if err != nil {
 		t.Fatalf("open the host stream: %v", err)
 	}
+
+	// Act: a later event marks where the stream's first event must be.
+	h.Server.NotificationClicked(testWorkspaceID)
 	push := receiveHostEvent(t, stream)
 
 	// Assert.
-	if push.GetReloadWebapp() == nil {
-		t.Fatalf("replayed event = %v, want the standing reload_webapp", push)
+	if push.GetNotificationClicked() == nil {
+		t.Fatalf("first event = %v, want notification_clicked (reload_webapp is never replayed)", push)
 	}
 }
 

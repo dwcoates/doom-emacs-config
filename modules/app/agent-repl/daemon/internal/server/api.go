@@ -239,8 +239,16 @@ type server struct {
 	registryClosed bool
 
 	mu sync.Mutex
-	// hostTopics is one EVENT topic per workspace's WatchHostWorkspace stream.
-	hostTopics map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WatchHostWorkspaceResponse]
+	// hostNoticeTopics is one NOTICE topic per workspace's WatchHostWorkspace
+	// stream, carrying `transferred`: a notice stands until retracted, so a
+	// subscriber arriving after it is handed it.
+	hostNoticeTopics map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WatchHostWorkspaceResponse]
+	// hostEvents carries the host stream's EVENTS (open_in_editor,
+	// notification_clicked, reload_webapp). They are not on a Topic because a
+	// Topic replays its latest value and drops an identical repeat: a second
+	// click on the same link was dropped, and a late subscriber was handed the
+	// last click again (2026-10-14).
+	hostEvents map[ids.WorkspaceID]*publish.Events[*agentreplv1.WatchHostWorkspaceResponse]
 	// hostStateTopics is one STATE topic per workspace, carrying the `host`
 	// arm. It is separate from the event topic because a Topic replays exactly
 	// its latest value: sharing one would hand a late subscriber whichever
@@ -250,7 +258,7 @@ type server struct {
 	webTopics map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WatchWebWorkspaceResponse]
 	// webStateTopics is one STATE topic per workspace, carrying the
 	// `session_identity` arm. It is separate from the event topic for the same
-	// reason hostStateTopics is separate from hostTopics: a Topic replays
+	// reason hostStateTopics is separate from hostNoticeTopics: a Topic replays
 	// exactly its latest value, so a subscriber arriving after `transferred`
 	// would be handed the identity instead of the transfer notice, and never
 	// learn the workspace had moved.
@@ -440,7 +448,8 @@ func New(deps Deps) (Server, error) {
 		log:                 deps.Log.Global(),
 		life:                life,
 		cancel:              cancel,
-		hostTopics:          make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WatchHostWorkspaceResponse]),
+		hostNoticeTopics:    make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WatchHostWorkspaceResponse]),
+		hostEvents:          make(map[ids.WorkspaceID]*publish.Events[*agentreplv1.WatchHostWorkspaceResponse]),
 		hostStateTopics:     make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.HostWorkspace]),
 		webStateTopics:      make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WebWorkspaceSessionIdentity]),
 		webTopics:           make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WatchWebWorkspaceResponse]),
@@ -491,16 +500,30 @@ func (s *server) Close() error {
 	return nil
 }
 
-// hostTopic answers a workspace's host push topic, creating it on first use.
-func (s *server) hostTopic(ws ids.WorkspaceID) *publish.Topic[*agentreplv1.WatchHostWorkspaceResponse] {
+// hostNoticeTopic answers a workspace's host notice topic, creating it on
+// first use.
+func (s *server) hostNoticeTopic(ws ids.WorkspaceID) *publish.Topic[*agentreplv1.WatchHostWorkspaceResponse] {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	t, ok := s.hostTopics[ws]
+	t, ok := s.hostNoticeTopics[ws]
 	if !ok {
 		t = &publish.Topic[*agentreplv1.WatchHostWorkspaceResponse]{}
-		s.hostTopics[ws] = t
+		s.hostNoticeTopics[ws] = t
 	}
 	return t
+}
+
+// hostEventStream answers a workspace's host events, creating them on first
+// use.
+func (s *server) hostEventStream(ws ids.WorkspaceID) *publish.Events[*agentreplv1.WatchHostWorkspaceResponse] {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e, ok := s.hostEvents[ws]
+	if !ok {
+		e = &publish.Events[*agentreplv1.WatchHostWorkspaceResponse]{}
+		s.hostEvents[ws] = e
+	}
+	return e
 }
 
 // webTopic answers a workspace's web push topic, creating it on first use.
@@ -564,7 +587,7 @@ func (r hostRelay) ReturnFeedToTail(ws ids.WorkspaceID) {
 func (s *server) pushOpenInEditor(ws ids.WorkspaceID, path string, line *uint32) {
 	s.log.Debug("daemon.server.open_in_editor", "relayed a link click to the host stream",
 		dlog.Context{"workspace": string(ws), "path": path})
-	s.hostTopic(ws).Publish(&agentreplv1.WatchHostWorkspaceResponse{
+	s.hostEventStream(ws).Emit(&agentreplv1.WatchHostWorkspaceResponse{
 		Push: &agentreplv1.WatchHostWorkspaceResponse_OpenInEditor{
 			OpenInEditor: &agentreplv1.HostOpenInEditor{Path: path, Line: line},
 		},
@@ -575,7 +598,7 @@ func (s *server) pushOpenInEditor(ws ids.WorkspaceID, path string, line *uint32)
 func (s *server) ReloadWebapp(ws ids.WorkspaceID) {
 	s.log.Debug("daemon.server.reload_webapp", "asked the host to reload the webview",
 		dlog.Context{"workspace": string(ws)})
-	s.hostTopic(ws).Publish(&agentreplv1.WatchHostWorkspaceResponse{
+	s.hostEventStream(ws).Emit(&agentreplv1.WatchHostWorkspaceResponse{
 		Push: &agentreplv1.WatchHostWorkspaceResponse_ReloadWebapp{
 			ReloadWebapp: &agentreplv1.HostWorkspaceReloadWebapp{},
 		},
@@ -591,7 +614,7 @@ func (s *server) PushReloadWebapp(ws ids.WorkspaceID) { s.ReloadWebapp(ws) }
 func (s *server) NotificationClicked(ws ids.WorkspaceID) {
 	s.log.Info("daemon.server.notification_clicked", "relayed a desktop banner click to the host stream",
 		dlog.Context{"workspace": string(ws)})
-	s.hostTopic(ws).Publish(&agentreplv1.WatchHostWorkspaceResponse{
+	s.hostEventStream(ws).Emit(&agentreplv1.WatchHostWorkspaceResponse{
 		Push: &agentreplv1.WatchHostWorkspaceResponse_NotificationClicked{
 			NotificationClicked: &agentreplv1.HostWorkspaceNotificationClicked{},
 		},
@@ -615,7 +638,7 @@ func (s *server) PushTransferred(ws ids.WorkspaceID, successorAddress string) {
 			"host_stream": live.Host,
 			"web_stream":  live.Web,
 		})
-	s.hostTopic(ws).Publish(&agentreplv1.WatchHostWorkspaceResponse{
+	s.hostNoticeTopic(ws).Publish(&agentreplv1.WatchHostWorkspaceResponse{
 		Push: &agentreplv1.WatchHostWorkspaceResponse_Transferred{
 			Transferred: &agentreplv1.HostWorkspaceTransferred{},
 		},
@@ -637,7 +660,7 @@ func (s *server) PushTransferred(ws ids.WorkspaceID, successorAddress string) {
 // next transfer's notice, identical to it, was dropped as a repeat -- so no
 // participant heard of it and that adoption window expired too (2026-10-12).
 func (s *server) RetractTransferred(ws ids.WorkspaceID) {
-	host := s.hostTopic(ws).ClearIf(func(push *agentreplv1.WatchHostWorkspaceResponse) bool {
+	host := s.hostNoticeTopic(ws).ClearIf(func(push *agentreplv1.WatchHostWorkspaceResponse) bool {
 		return push.GetTransferred() != nil
 	})
 	web := s.webTopic(ws).ClearIf(func(push *agentreplv1.WatchWebWorkspaceResponse) bool {

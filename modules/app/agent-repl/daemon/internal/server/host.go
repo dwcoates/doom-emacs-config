@@ -17,11 +17,13 @@ import (
 )
 
 // THE HOST VIEW. WatchHostWorkspace carries one STATE arm (`host`, whole-
-// replaced per push) beside four EVENT arms (notification, transferred,
-// reload_webapp, open_in_editor). State and events cannot share one topic: a
-// Topic replays exactly its latest value to a late subscriber, so a subscriber
-// arriving after an event would be handed that event and never the state. The
-// state therefore gets its own topic, and the stream serves both.
+// replaced per push), one NOTICE arm (`transferred`) and three EVENT arms
+// (notification_clicked, reload_webapp, open_in_editor). Each kind has its own
+// source. A Topic replays exactly its latest value to a late subscriber, so
+// the state and the notice cannot share one: a subscriber arriving after the
+// notice would be handed it and never the state. The events ride
+// publish.Events, never a Topic: a Topic drops a repeat identical to its
+// latest value, so the same link clicked twice opened once (2026-10-14).
 //
 // The view is composed HERE rather than resolved in a package of its own
 // because every fact it carries is already a dependency of the server: the
@@ -104,7 +106,7 @@ const (
 )
 
 // hostStateTopic answers a workspace's host STATE topic, minting it on first
-// use exactly as hostTopic mints the event one.
+// use exactly as hostNoticeTopic mints the notice one.
 func (s *server) hostStateTopic(ws ids.WorkspaceID) *publish.Topic[*agentreplv1.HostWorkspace] {
 	s.mu.Lock()
 	defer s.mu.Unlock()

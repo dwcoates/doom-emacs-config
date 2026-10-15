@@ -182,6 +182,58 @@ func TestOpenInEditorRelaysOntoTheHostStream(t *testing.T) {
 	}
 }
 
+// TestOpenInEditorRelaysTheSameClickTwice pins the defect of 2026-10-14: the
+// host stream's events rode a Topic, which dropped a push identical to its
+// latest value, so clicking the same link a second time opened nothing.
+func TestOpenInEditorRelaysTheSameClickTwice(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream, err := h.Client.WatchHostWorkspace(ctx,
+		connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{Workspace: ref()}))
+	if err != nil {
+		t.Fatalf("open the host stream: %v", err)
+	}
+
+	// Act.
+	h.Server.Relay().OpenInEditor(testWorkspaceID, "lisp/core.el", nil)
+	first := receiveHostEvent(t, stream)
+	h.Server.Relay().OpenInEditor(testWorkspaceID, "lisp/core.el", nil)
+	second := receiveHostEvent(t, stream)
+
+	// Assert.
+	for i, push := range []*agentreplv1.WatchHostWorkspaceResponse{first, second} {
+		if push.GetOpenInEditor().GetPath() != "lisp/core.el" {
+			t.Fatalf("event %d = %v, want open_in_editor lisp/core.el", i+1, push)
+		}
+	}
+}
+
+// TestOpenInEditorIsNotReplayedToALateHostStream pins that a click belongs to
+// the moment it was made: a host stream opened after it never reopens the file.
+func TestOpenInEditorIsNotReplayedToALateHostStream(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h.Server.Relay().OpenInEditor(testWorkspaceID, "lisp/old.el", nil)
+	stream, err := h.Client.WatchHostWorkspace(ctx,
+		connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{Workspace: ref()}))
+	if err != nil {
+		t.Fatalf("open the host stream: %v", err)
+	}
+
+	// Act.
+	h.Server.Relay().OpenInEditor(testWorkspaceID, "lisp/new.el", nil)
+	push := receiveHostEvent(t, stream)
+
+	// Assert.
+	if push.GetOpenInEditor().GetPath() != "lisp/new.el" {
+		t.Fatalf("first event = %v, want lisp/new.el (the earlier click is never replayed)", push)
+	}
+}
+
 func TestOpenInEditorOpensAWorkspaceFileThroughTheVerb(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
