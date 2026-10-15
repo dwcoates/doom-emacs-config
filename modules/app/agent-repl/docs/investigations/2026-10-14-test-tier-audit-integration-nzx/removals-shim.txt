@@ -1,0 +1,311 @@
+test/integration/turn.test.ts:StartTurn > the answer echoes the turn id, the said and the origin
+test/integration/turn.test.ts:StartTurn > prompt.agent is the MAIN AgentId — the WatchAgent address
+test/integration/turn.test.ts:StartTurn > a second StartTurn while one is open is refused turn_already_open
+test/integration/turn.test.ts:StartTurn > StartTurn with no session is refused no_session
+test/integration/turn.test.ts:StartTurn > a later turn's page carries the previous turn's settled entries, newest first
+test/integration/turn.test.ts:StartTurn > the page replays NO start frames
+test/integration/turn.test.ts:StartTurn > the page carries prompts as user_prompt entries
+test/integration/turn.test.ts:StartTurn > R15: the AgentPrompt row is written BEFORE any activity row
+test/integration/turn.test.ts:the turn-stop taxonomy > '!fail-execution' reaches its declared terminal
+test/integration/turn.test.ts:the turn-stop taxonomy > '!fail-max-turns' reaches its declared terminal
+test/integration/turn.test.ts:the turn-stop taxonomy > '!fail-budget' reaches its declared terminal
+test/integration/turn.test.ts:the turn-stop taxonomy > '!fail-structured-output' reaches its declared terminal
+test/integration/turn.test.ts:the turn-stop taxonomy > '!fail-blocking-limit' reaches its declared terminal
+test/integration/turn.test.ts:the turn-stop taxonomy > '!fail-rapid-refill' reaches its declared terminal
+test/integration/turn.test.ts:the turn-stop taxonomy > '!fail-prompt-too-long' reaches its declared terminal
+test/integration/turn.test.ts:the turn-stop taxonomy > '!fail-image' reaches its declared terminal
+test/integration/turn.test.ts:the turn-stop taxonomy > '!fail-model' reaches its declared terminal
+test/integration/turn.test.ts:the turn-stop taxonomy > '!fail-malformed-tool-use' reaches its declared terminal
+test/integration/turn.test.ts:the turn-stop taxonomy > '!fail-tool-deferred' reaches its declared terminal
+test/integration/turn.test.ts:the turn-stop taxonomy > '!fail-tool-deferred-unavailable' reaches its declared terminal
+test/integration/turn.test.ts:the turn-stop taxonomy > '!fail-turn-setup' reaches its declared terminal
+test/integration/turn.test.ts:the turn-stop taxonomy > '!fail-hook-stopped' reaches its declared terminal
+test/integration/turn.test.ts:the turn-stop taxonomy > '!fail-stop-hook' reaches its declared terminal
+test/integration/turn.test.ts:the turn-stop taxonomy > '!fail-continuation-prevented' reaches its declared terminal
+test/integration/turn.test.ts:the turn-stop taxonomy > '!api-400' reaches its declared terminal
+test/integration/turn.test.ts:the turn-stop taxonomy > '!api-401' reaches its declared terminal
+test/integration/turn.test.ts:the turn-stop taxonomy > '!api-403' reaches its declared terminal
+test/integration/turn.test.ts:the turn-stop taxonomy > '!api-404' reaches its declared terminal
+test/integration/turn.test.ts:the turn-stop taxonomy > '!api-413' reaches its declared terminal
+test/integration/turn.test.ts:the turn-stop taxonomy > '!api-429' reaches its declared terminal
+test/integration/turn.test.ts:the turn-stop taxonomy > '!api-500' reaches its declared terminal
+test/integration/turn.test.ts:the turn-stop taxonomy > '!api-529' reaches its declared terminal
+test/integration/turn.test.ts:the turn-stop taxonomy > '!api-billing' reaches its declared terminal
+test/integration/turn.test.ts:the turn-stop taxonomy > '!api-oauth-org' reaches its declared terminal
+test/integration/turn.test.ts:the turn-stop taxonomy > '!api-max-output' reaches its declared terminal
+test/integration/turn.test.ts:the turn-stop taxonomy > '!api-unmodeled' reaches its declared terminal
+test/integration/turn.test.ts:the turn-stop taxonomy > '!max-tokens' reaches its declared terminal
+test/integration/turn.test.ts:the turn-stop taxonomy > '!refusal-no-fallback' reaches its declared terminal
+test/integration/turn.test.ts:the turn-stop taxonomy > '!context-window' reaches its declared terminal
+test/integration/turn.test.ts:the turn-stop taxonomy > '!interrupt' reaches its declared terminal
+test/integration/turn.test.ts:WatchAgent > opened before any turn, it opens with an EMPTY page and a floor boundary
+test/integration/turn.test.ts:WatchAgent > a tailed entry carries the place the shim observed it at
+test/integration/turn.test.ts:WatchAgent > it opens with a page and then tails one POINTERED entry per write
+test/integration/turn.test.ts:WatchAgent > StartTurn with tail_only answers an EMPTY opening page
+test/integration/turn.test.ts:WatchAgent > known_through serves ONLY newer entries
+test/integration/turn.test.ts:WatchAgent > tail_only opens on an EMPTY page at the floor
+test/integration/turn.test.ts:WatchAgent > a tail_only watch carries only what is written after it opened
+test/integration/turn.test.ts:WatchAgent > a reattach with known_through misses nothing and doubles nothing
+test/integration/turn.test.ts:WatchAgent > a known_through GAP wider than the store's page serves a page and `more` INTO the gap
+test/integration/turn.test.ts:WatchAgent > an unknown watch target is refused NOT_FOUND, naming the agent
+test/integration/turn.test.ts:ReadHistory > after(last_entry) walks older until the floor
+test/integration/turn.test.ts:ReadHistory > every page of a walk is the store's page, and only the last runs short
+test/integration/turn.test.ts:ReadHistory > every entry it serves carries the place the shim observed it at
+test/integration/turn.test.ts:ReadHistory > through reads the book as it stood at an instant
+test/integration/turn.test.ts:ReadHistory > through a book the store never heard of is refused unknown_agent
+test/integration/turn.test.ts:ReadHistory > an unknown agent is refused unknown_agent
+test/integration/turn.test.ts:ReadHistory > a stale pointer is refused stale_pointer
+test/integration/turn.test.ts:ReadHistory > the refusal follows the ARM, not the store's prose
+test/integration/turn.test.ts:ReadHistory > an unreachable store is refused store_unavailable
+test/integration/turn.test.ts:ReadHistory > an unreachable store also raises a store_unreachable fault
+test/integration/turn.test.ts:UpdateAgent > stop with nothing running is refused nothing_running
+test/integration/turn.test.ts:UpdateAgent > a prompt to an existing subagent is refused not_deliverable
+test/integration/turn.test.ts:UpdateAgent > an answer with no open ask is refused no_open_ask
+test/integration/turn.test.ts:UpdateAgent > an unknown target agent is refused unknown_agent
+test/integration/turn.test.ts:KillTurn > the interrupted terminal records the caller's commanded_by verbatim
+test/integration/turn.test.ts:KillTurn > the shell the stop landed inside SETTLES, interrupted by the user
+test/integration/turn.test.ts:KillTurn > unforced, it interrupts a turn beside its own live background agent and the agent runs on
+test/integration/turn.test.ts:KillTurn > force ends it, naming the stopped work
+test/integration/turn.test.ts:KillTurn > a TurnId that is not the open turn is refused not_the_open_turn
+test/integration/turn.test.ts:KillTurn > with no turn open it is refused no_turn_open
+test/integration/turn.test.ts:keep-alives > a keep-alive turn works end to end and stores nothing
+test/integration/turn.test.ts:keep-alives > a rewind past a keep-alive lands with nothing of the keep-alive stored
+test/integration/turn.test.ts:keep-alives > no keep-alive prompt appears in any page
+test/integration/turn.test.ts:keep-alives > a keep-alive stores nothing when the vendor runs a turn of its own first
+test/integration/turn.test.ts:keep-alives > the vendor's own turn ahead of a keep-alive is still served
+test/integration/turn.test.ts:keep-alives > the vendor's own turn is adopted: a VENDOR_STARTED prompt row opens it and its answer carries its id
+test/integration/turn.test.ts:keep-alives > the rewind target is an ASSISTANT record of the transcript
+test/integration/turn.test.ts:keep-alives > a keep-alive the first prompt carried costs the next keep-alive no rewind
+test/integration/turn.test.ts:keep-alives > a task completing beside a keep-alive anchors the next rewind, which keeps its served turn
+test/integration/turn.test.ts:keep-alives > a task completing beside a keep-alive trips no refusal, and the next prompt is served
+test/integration/turn.test.ts:keep-alives > a stop every rewind replays never loops: each rewind resumes at the same real anchor
+test/integration/turn.test.ts:keep-alives > a stop every rewind replays stores no turn
+test/integration/turn.test.ts:keep-alives > a stop every rewind replays never trips the span invariant
+test/integration/turn.test.ts:keep-alives > a restarted shim holds no anchor: its keep-alives are carried, never rewound, until a real reply
+test/integration/turn.test.ts:keep-alives > a restarted shim's first real reply anchors the next rewind
+test/integration/turn.test.ts:keep-alives > a restarted shim schedules its keep-alive from the transcript's last request, not its own start
+test/integration/turn.test.ts:keep-alives > a background shell outlives what used to be a rewind: no keep-alive beats over it, and the cadence resumes when it ends
+test/integration/turn.test.ts:keep-alives > a StartTurn sent the moment a keep-alive is submitted opens its turn exactly once
+test/integration/turn.test.ts:keep-alives > a real prompt's transcript record carries NO keep-alive marker
+test/integration/turn.test.ts:replies matched to their send by id > the vendor's own turn racing a StartTurn is served under its adopted id
+test/integration/turn.test.ts:replies matched to their send by id > the StartTurn racing the vendor's own turn is answered under its own turn id
+test/integration/turn.test.ts:replies matched to their send by id > the StartTurn racing the vendor's own turn ends on its own result, naming its own answer
+test/integration/turn.test.ts:scope, arms and ordering the verbs owe > KillTurn kills THIS TURN ONLY: an earlier turn's live run survives
+test/integration/turn.test.ts:scope, arms and ordering the verbs owe > an unforced KillTurn spares a background agent an EARLIER turn spawned
+test/integration/turn.test.ts:scope, arms and ordering the verbs owe > UpdateAgent.stop targeted at a LIVE detached subagent concludes it stopped_by_user
+test/integration/turn.test.ts:scope, arms and ordering the verbs owe > StartTurn after the query DIED is refused query_dead
+test/integration/turn.test.ts:scope, arms and ordering the verbs owe > KillTurn before StartSession is refused no_session
+test/integration/turn.test.ts:scope, arms and ordering the verbs owe > UpdateAgent before StartSession is refused no_session
+test/integration/turn.test.ts:scope, arms and ordering the verbs owe > an answer arriving AFTER the turn was killed is refused no_open_ask
+test/integration/turn.test.ts:RollBackSession > the vendor files each prompt under its turn id's derived uuid
+test/integration/turn.test.ts:RollBackSession > a prompt the caller did not name after the cut refuses unseen_prompt
+test/integration/turn.test.ts:RollBackSession > a shim restarted before the next prompt resumes at the rollback's cut
+test/integration/turn.test.ts:RollBackSession > files the vendor cannot restore refuse files_not_restorable
+test/integration/session.test.ts:StartSession, fresh > the vendor transcript materializes after the first turn
+test/integration/session.test.ts:StartSession, fresh > a second StartSession is refused already_started
+test/integration/session.test.ts:WatchSession's opening frames > the FIRST frame is diagnostics, immediately on open
+test/integration/session.test.ts:WatchSession's opening frames > a SECOND concurrent subscriber also opens with diagnostics
+test/integration/session.test.ts:WatchSession's opening frames > the opening frame reports healthy on a well-formed session
+test/integration/session.test.ts:WatchSession's opening frames > the SECOND frame re-announces the session's opening
+test/integration/session.test.ts:WatchSession's opening frames > re-announces on EVERY new watch, not only the first
+test/integration/session.test.ts:WatchSession's opening frames > context_usage is pushed on open
+test/integration/session.test.ts:WatchSession's opening frames > model_changed is present on open
+test/integration/session.test.ts:WatchSession's opening frames > permission_mode_changed is present on open
+test/integration/session.test.ts:SetSessionEffort > with no turn open it succeeds carrying the level now in effect
+test/integration/session.test.ts:SetSessionEffort > the vendor's applied level is pushed on WatchSession, and moves with a change
+test/integration/session.test.ts:SetSessionEffort > a model that takes no effort level answers not_supported
+test/integration/session.test.ts:SetSessionModel > with no turn open it succeeds and pushes model_changed
+test/integration/session.test.ts:SetSessionModel > a model the catalog does not carry is refused model_not_in_catalog
+test/integration/session.test.ts:SetSessionModel > during an open turn it resolves only after the turn ends
+test/integration/session.test.ts:the cold gate > remediation.pay resumes and reports the recovered model and mode
+test/integration/session.test.ts:the cold gate > remediation.clear resumes on a cleared context
+test/integration/session.test.ts:the cold gate > remediation.compact resumes and the first page carries a compacted context_cut
+test/integration/session.test.ts:the cold gate > a resume of an unknown vendor session id is refused unknown_session
+test/integration/session.test.ts:identity rotation > a /clear rotates the vendor id and pushes identity_rotated
+test/integration/session.test.ts:identity rotation > the main AgentId is UNCHANGED across a rotation, judged against agent-id.json
+test/integration/session.test.ts:session facts with no message behind them > the rate-limit event's threshold rides surpassed_threshold_percent
+test/integration/session.test.ts:session facts with no message behind them > !usage-full reports account usage AVAILABLE with its windows
+test/integration/session.test.ts:session facts with no message behind them > !usage-full's sampled five-hour window resets AFTER the sample was taken
+test/integration/session.test.ts:session facts with no message behind them > !usage-seat-spend reports the seat's spend against its allotment
+test/integration/session.test.ts:session facts with no message behind them > !usage-service-unavailable reports account usage unavailable as serviceUnavailable
+test/integration/session.test.ts:session facts with no message behind them > !usage-window-unavailable reports account usage unavailable as windowUnavailable
+test/integration/session.test.ts:session facts with no message behind them > !usage-utilization-unavailable reports account usage unavailable as utilizationUnavailable
+test/integration/session.test.ts:session facts with no message behind them > !fast-on produces fast_mode.on
+test/integration/session.test.ts:session facts with no message behind them > !fast-off produces fast_mode.off
+test/integration/session.test.ts:session facts with no message behind them > !fast-cooldown produces fast_mode.cooldown
+test/integration/session.test.ts:session facts with no message behind them > !mcp-all produces one mcp_server arm per declared health
+test/integration/session.test.ts:session facts with no message behind them > !context-tip pushes NO session-level budget arm
+test/integration/session.test.ts:session facts with no message behind them > !context-usage-drift pushes a NEW context_usage at the turn end
+test/integration/session.test.ts:session facts with no message behind them > !model-fallback pushes model_changed for a model the shim did not ask for
+test/integration/session.test.ts:compaction, as the vendor does it > !compact-auto produces compacting and then a compacted context_cut
+test/integration/session.test.ts:compaction, as the vendor does it > !compact-failed produces a compaction_failed context_cut and no boundary
+test/integration/session.test.ts:query death > !query-eof reports query_died.unexpected_eof
+test/integration/session.test.ts:query death > !query-fail reports query_died.iterator_failure
+test/integration/session.test.ts:the shim's own faults > !fault-converter surfaces a converter_defect fault on diagnostics
+test/integration/session.test.ts:the shim's own faults > a recovered fault closes its degraded window
+test/integration/session.test.ts:Hibernate > a turn in flight refuses turn_in_flight
+test/integration/session.test.ts:Hibernate > an idle session acks on the FIRST ask, writing no compaction boundary
+test/integration/session.test.ts:Hibernate > a second hibernation is as cheap as the first, and still writes no boundary
+test/integration/session.test.ts:Hibernate > KillSession after a hibernation still tears the session down and exits
+test/integration/session.test.ts:KillSession > live detached work refuses, NAMING the work
+test/integration/session.test.ts:rotation, against the session's own facts > identity_rotated.new is the POST-CLEAR init id, and new_conversation_id is never adopted
+test/integration/session.test.ts:rotation, against the session's own facts > a resume BY THE ROTATED id still reports the ORIGINAL AgentId
+test/integration/session.test.ts:context usage at the turn boundary > an ORDINARY turn pushes context_usage when it ends
+test/integration/session.test.ts:turn_in_flight, on both messages that carry it > a killed shim's detached announcement already on the opening page still revives as live work
+test/integration/session.test.ts:turn_in_flight, on both messages that carry it > SessionLive.turn_in_flight names the open turn when KillSession refuses
+test/integration/session.test.ts:Hibernate and revival > a shim killed AFTER the ack revives, and the hibernation cut nothing
+test/integration/session.test.ts:Hibernate and revival > Hibernate before any turn acks, having nothing to stop but the shim
+test/integration/session.test.ts:the arms every verb declares before a session exists > Hibernate with no session refuses no_session
+test/integration/session.test.ts:the arms every verb declares before a session exists > KillSession with no session refuses no_session
+test/integration/session.test.ts:the arms every verb declares before a session exists > SetSessionModel with no session refuses no_session
+test/integration/session.test.ts:the arms every verb declares before a session exists > SetSessionPermissionMode with no session refuses no_session
+test/integration/session.test.ts:the vendor refusing a CONTROL call > SetSessionModel answers vendor_refused when the vendor rejects setModel
+test/integration/session.test.ts:the vendor refusing a CONTROL call > SetSessionEffort answers vendor_refused when the vendor rejects the flag settings
+test/integration/session.test.ts:the vendor refusing a CONTROL call > SetSessionPermissionMode answers vendor_refused when the vendor rejects it
+test/integration/session.test.ts:the vendor refusing a CONTROL call > StartSession answers vendor_start_failed when the vendor cannot be started
+test/integration/session.test.ts:the vendor refusing a CONTROL call > StartSession answers at once when the vendor's stream ENDS before its init
+test/integration/session.test.ts:the vendor refusing a CONTROL call > a stream that ends before the init names the query's end as the reason
+test/integration/session.test.ts:the vendor refusing a CONTROL call > StartSession relays the vendor's own words when it refuses the opening
+test/integration/session.test.ts:the vendor refusing a CONTROL call > StartSession settles against a vendor that withholds its init
+test/integration/session.test.ts:the vendor refusing a CONTROL call > a start with no init still carries the catalog the round-trip answered
+test/integration/session.test.ts:the vendor refusing a CONTROL call > a retried start serves an ordinary turn
+test/integration/session.test.ts:SetSessionModel's cold gate > a switch above the caller's threshold is REFUSED with its cost
+test/integration/session.test.ts:SetSessionModel's cold gate > the same switch with a remediation SUCCEEDS
+test/integration/session.test.ts:a stand-down with an ask still open > SIGTERM settles the open ask DENIED and concludes the turn
+test/integration/session.test.ts:WatchAgent before the session's first turn > an UNSET target on a fresh session yields an empty opening page
+test/integration/session.test.ts:WatchAgent before the session's first turn > that stream STAYS OPEN and tails the first turn
+test/integration/detached.test.ts:a detached shell's announcement > the announcement's origin is detached, naming the call it left
+test/integration/detached.test.ts:a detached shell's announcement > the DetachedWorkId IS the spawning call's activity id
+test/integration/detached.test.ts:a detached shell's announcement > the announcement is a page line keyed detached:<work id>
+test/integration/detached.test.ts:WatchBash serves the SIDECAR's rows > it opens with start carrying the ORIGINAL instant, then the tail, then the terminal
+test/integration/detached.test.ts:WatchBash serves the SIDECAR's rows > the tail frames carry the rendered window, never the whole spool
+test/integration/detached.test.ts:WatchBash serves the SIDECAR's rows > an unknown work id is refused NOT_FOUND, naming the work
+test/integration/detached.test.ts:WatchBash and the rows it relays > an ANNOUNCED run opens with `start` at once, before the sidecar has written a row
+test/integration/detached.test.ts:WatchBash and the rows it relays > it FOLLOWS: tails and the terminal seeded after the open still arrive, in order
+test/integration/detached.test.ts:WatchBash and the rows it relays > the terminal is served ONCE and ENDS the run's stream; a later tail is not served
+test/integration/detached.test.ts:what the PRODUCER states about a shell run > !bash-fail: a NON-ZERO exit is a completed run carrying the code
+test/integration/detached.test.ts:what the PRODUCER states about a shell run > !bash-timeout: the run MOVES rather than ends, and the receipt settles nothing
+test/integration/detached.test.ts:what the PRODUCER states about a shell run > termination is SET for a detached shell and UNSET for a foreground one
+test/integration/detached.test.ts:a detached shell's lifecycle: the shim writes its start, the sidecar its end > a concluded run the sidecar never tailed still has its start
+test/integration/detached.test.ts:a detached shell's lifecycle: the shim writes its start, the sidecar its end > the shim writes NO terminal for a concluded run: its end is the sidecar's
+test/integration/detached.test.ts:a detached shell's lifecycle: the shim writes its start, the sidecar its end > the sidecar's terminal ENDS a WatchBash opened while the run was live
+test/integration/detached.test.ts:a detached shell's lifecycle: the shim writes its start, the sidecar its end > a run still running is re-announced as live work to a new watch
+test/integration/detached.test.ts:a detached shell's lifecycle: the shim writes its start, the sidecar its end > a concluded run stays live work until the sidecar writes its end
+test/integration/detached.test.ts:a detached shell's lifecycle: the shim writes its start, the sidecar its end > a run the sidecar ended is no longer re-announced as live work
+test/integration/detached.test.ts:a detached shell's lifecycle: the shim writes its start, the sidecar its end > a sidecar row landing AFTER the run's terminal does not reopen the run
+test/integration/detached.test.ts:a detached shell's lifecycle: the shim writes its start, the sidecar its end > the run's stream is its start, then the sidecar's ONE terminal
+test/integration/detached.test.ts:a detached shell's lifecycle: the shim writes its start, the sidecar its end > the sidecar's terminal carries the spool's evidence
+test/integration/detached.test.ts:StopBash > the stopped run's own stream concludes with an interrupted arm
+test/integration/detached.test.ts:StopBash > an unknown work id is refused unknown_work
+test/integration/detached.test.ts:StopBash > a run that already ended is refused already_ended
+test/integration/detached.test.ts:subagents > the subagent's AgentId IS the spawning call's activity id
+test/integration/detached.test.ts:subagents > a synchronous subagent's unit settles with its report
+test/integration/detached.test.ts:subagents > !subagent-detached announces detached work for the subagent
+test/integration/detached.test.ts:a subagent resumed by SendMessage after the shim restarted > the restarted shim asks the store for the locator the resume names
+test/integration/detached.test.ts:a subagent a network outage cut off > waits while the API is unreachable
+test/integration/detached.test.ts:a subagent a network outage cut off > gives up at ERROR when the API stays unreachable for the whole window
+test/integration/detached.test.ts:a subagent a network outage cut off > an agent that failed for another reason is not resumed
+test/integration/detached.test.ts:a subagent a network outage cut off > the session stream states the wait, its window and no resumes yet
+test/integration/detached.test.ts:a subagent a network outage cut off > a consumer that opens mid-wait is told the standing wait
+test/integration/detached.test.ts:a subagent a network outage cut off > the session stream states the resume for the work that waited
+test/integration/detached.test.ts:a subagent a network outage cut off > the session stream states the empty set once the resume is delivered
+test/integration/detached.test.ts:a subagent a network outage cut off > the session stream states a give-up
+test/integration/detached.test.ts:a subagent a network outage cut off > the session stream states the wait abandoned at stand-down, then the empty set
+test/integration/detached.test.ts:a subagent a network outage cut off > stand-down abandons the wait
+test/integration/detached.test.ts:DetachForeground > a vendor-moved shell's WatchBash opens with `start` at once
+test/integration/detached.test.ts:DetachForeground > a live unit the vendor matched to no foreground task is refused not_in_foreground
+test/integration/detached.test.ts:DetachForeground > DetachForeground before StartSession is refused no_session
+test/integration/detached.test.ts:DetachForeground > an unknown unit is refused unknown_unit
+test/integration/detached.test.ts:DetachForeground > a unit of a non-detachable kind is refused not_detachable
+test/integration/detached.test.ts:reconciliation at session start > a subagent the replaced CLI process ran is closed at revival, never re-adopted
+test/integration/detached.test.ts:reconciliation at session start > a spool-backed shell is left live at revival, its terminal the sidecar's
+test/integration/detached.test.ts:reconciliation at session start > a session start never closes ANOTHER session's live work (2026-09-23)
+test/integration/detached.test.ts:a task notification this process cannot type > a re-report of a run the store holds as ended is recorded at INFO
+test/integration/detached.test.ts:a task notification this process cannot type > a re-report of a run the store holds as ended is not refused
+test/integration/detached.test.ts:a task notification this process cannot type > a re-report of a run the store holds as ended writes nothing for the run
+test/integration/detached.test.ts:a task notification this process cannot type > the shim asks the store by the run's unit
+test/integration/detached.test.ts:a task notification this process cannot type > a notification of a task neither this process nor the store knows is refused at ERROR
+test/integration/detached.test.ts:a task notification this process cannot type > a store that cannot answer is recorded at ERROR
+test/integration/gate.test.ts:a permission ask > the ask arrives as AgentPermission.start with the vendor's rendered prompt
+test/integration/gate.test.ts:a permission ask > the permission's id IS the gated call's activity id
+test/integration/gate.test.ts:a permission ask > the OFFERED standing carrying set_mode is accepted and pushes permission_mode_changed
+test/integration/gate.test.ts:a permission ask > a standing ALTERED from the offer is refused answer_mismatch
+test/integration/gate.test.ts:a permission ask > a standing grant on an ask that offered NONE is refused answer_mismatch
+test/integration/gate.test.ts:a permission ask > !perm-deny-policy settles denied.policy with NO open ask
+test/integration/gate.test.ts:a permission ask > !perm-undecidable settles denied.undecidable
+test/integration/gate.test.ts:a permission ask > an answer naming the WRONG ask is refused answer_mismatch
+test/integration/gate.test.ts:a question ask > !ask-single arrives as a single-select batch
+test/integration/gate.test.ts:a question ask > !ask-multi arrives as a TWO-question batch mixing both choice kinds
+test/integration/gate.test.ts:a question ask > a multi-select's labels round-trip as the vendor's comma-joined string
+test/integration/gate.test.ts:a question ask > a label the batch never offered is refused answer_mismatch
+test/integration/gate.test.ts:a question ask > !ask-unanswered settles success.unanswered when the agent is STOPPED
+test/integration/gate.test.ts:a question ask > an answer with no open ask is refused no_open_ask
+test/integration/gate.test.ts:a question ask > a two-question batch answered OUT OF BATCH ORDER round-trips by question TEXT
+test/integration/task-board.test.ts:a task update the tracker refuses > never states the status the refused act asked for
+test/integration/task-board.test.ts:a task update the tracker refuses > settles as the rejected arm
+test/integration/task-board.test.ts:a task update the tracker takes > states the status only once the tracker has answered it
+test/integration/process.test.ts:required environment > a missing AGENT_REPL_OWNED refuses to start
+test/integration/process.test.ts:required environment > a missing CLAUDE_CONFIG_DIR refuses to start
+test/integration/process.test.ts:required environment > a missing SHIM_BUILD_SHA refuses to start
+test/integration/process.test.ts:the spawn contract's argv > the legacy flag --session-id is refused
+test/integration/process.test.ts:the spawn contract's argv > the legacy flag --model is refused
+test/integration/process.test.ts:the spawn contract's argv > the legacy flag --resume is refused
+test/integration/process.test.ts:the spawn contract's argv > the legacy flag --claude-bin is refused
+test/integration/process.test.ts:the spawn contract's argv > the legacy flag --daemon-socket is refused
+test/integration/process.test.ts:an unspawnable lock holder > StartSession is refused lock_holder_unavailable, never conversation_owned
+test/integration/process.test.ts:an unspawnable lock holder > the refusal names the binary the shim could not spawn
+test/integration/process.test.ts:the workspace lock > a second shim over one workspace SERVES, because an inert shim owns nothing
+test/integration/process.test.ts:the workspace lock > the refused shim released NOTHING it did not hold: the first shim still owns the lock
+test/integration/process.test.ts:the workspace lock > KillSession on an INERT shim is refused no_session and holds no lock
+test/integration/process.test.ts:the workspace lock > the session lock appears once StartSession has minted a vendor id
+test/integration/process.test.ts:--listen over an existing socket file > a STALE socket file is unlinked and bound
+test/integration/process.test.ts:signals > SIGTERM with no session exits 0 with the stand-down record
+test/integration/process.test.ts:the durable log sink > AGENT_REPL_SESSION_ID names the records when the daemon set it
+test/integration/process.test.ts:the durable log sink > without AGENT_REPL_SESSION_ID the shim names itself shim-<workspace-id>-<pid>
+test/integration/process.test.ts:the durable log sink > every record keeps the shim's own md5 workspace key beside it
+test/integration/process.test.ts:the durable log sink > a listen socket that is not named after a workspace id is refused
+test/integration/process.test.ts:the store socket > neither --store-socket nor AGENT_REPL_STORE_SOCKET refuses to start
+test/integration/process.test.ts:the store socket > the flag beats the env when both name a socket
+test/integration/transport.test.ts:both dialects over one socket > Connect over HTTP/1.1 reaches the service
+test/integration/transport.test.ts:both dialects over one socket > Connect over h2c reaches the SAME service on the SAME socket
+test/integration/transport.test.ts:validation refuses before the engine > an unset request oneof is InvalidArgument
+test/integration/transport.test.ts:validation refuses before the engine > an UNSPECIFIED effort level is InvalidArgument
+test/integration/transport.test.ts:validation refuses before the engine > an unset ReadHistory position is InvalidArgument
+test/integration/transport.test.ts:validation refuses before the engine > an unset UpdateAgent input is InvalidArgument
+test/integration/transport.test.ts:the workflow trio (WORKFLOW IS KICKED) > GetWorkflow answers Unimplemented
+test/integration/transport.test.ts:the workflow trio (WORKFLOW IS KICKED) > StopWorkflow answers Unimplemented
+test/integration/transport.test.ts:the workflow trio (WORKFLOW IS KICKED) > WatchWorkflow answers Unimplemented at the stream open
+test/integration/transport.test.ts:acceptance is observable before the first frame > WatchSession's acceptance is decidable from the HTTP/1.1 head alone
+test/integration/transport.test.ts:acceptance is observable before the first frame > WatchSession's response headers precede the first data frame over h2c
+test/integration/transport.test.ts:acceptance is observable before the first frame > WatchAgent's acceptance is decidable from the HTTP/1.1 head alone
+test/integration/transport.test.ts:acceptance is observable before the first frame > WatchBash's acceptance is decidable from the HTTP/1.1 head alone
+test/integration/record.test.ts:every entry's envelope > the plane is STREAM on everything the shim writes
+test/integration/record.test.ts:every entry's envelope > the producer is claude-shim:<original vendor session id>
+test/integration/record.test.ts:every entry's envelope > the prompt row is keyed prompt:<TurnId>
+test/integration/record.test.ts:every entry's envelope > a tool unit's rows are keyed activity:<its tool_use_id>
+test/integration/record.test.ts:every entry's envelope > the activity key's SUFFIX is the vendor's own tool_use_id from the transcript
+test/integration/record.test.ts:every entry's envelope > a compaction's cut is keyed session:context_cut:<the boundary's own uuid>
+test/integration/record.test.ts:every entry's envelope > a clear's cut is keyed session:context_cut:<the session it rotated to>
+test/integration/record.test.ts:every entry's envelope > a clear writes exactly one context-cut row, however many planes saw it
+test/integration/record.test.ts:every entry's envelope > a question's rows are keyed question:<the ask's tool_use_id>
+test/integration/record.test.ts:every entry's envelope > the question key's SUFFIX is the ASK's own tool_use_id from the transcript
+test/integration/record.test.ts:every entry's envelope > a permission's rows are keyed permission:<the GATED call's id>
+test/integration/record.test.ts:every entry's envelope > an agent's terminal is keyed terminal:<AgentId>:<vendor record uuid>
+test/integration/record.test.ts:write ids and absorption > a re-sent frame mints the SAME write_id and the store absorbs it
+test/integration/record.test.ts:write ids and absorption > an exhausted schedule is a LOUD ERROR naming the held keys, and nothing is dropped
+test/integration/record.test.ts:write ids and absorption > an outage opens a degraded window and reports store_unreachable
+test/integration/record.test.ts:write ids and absorption > a recovered outage closes the window with nothing dropped
+test/integration/record.test.ts:write ids and absorption > the rows a persistent outage held all land once the store answers
+test/integration/record.test.ts:the mocked vendor's files, at the ruled paths > the session transcript exists where the sidecar will look for it
+test/integration/record.test.ts:the mocked vendor's files, at the ruled paths > a subagent gets its own transcript beside its meta sidecar
+test/integration/record.test.ts:the mocked vendor's files, at the ruled paths > the meta sidecar carries EXACTLY the four camelCase fields
+test/integration/record.test.ts:the mocked vendor's files, at the ruled paths > a detached shell's spool is terminated by its EXIT= line
+test/integration/record.test.ts:the mocked vendor's files, at the ruled paths > a run that never ends leaves an UNTERMINATED spool
+test/integration/record.test.ts:residue > !residue writes the two attachment records as vendor_specific, on no page
+test/integration/record.test.ts:residue > a residue row is keyed residue:<the vendor record's own uuid>
+test/integration/record.test.ts:R9: the identity the files carry > agent-id.json exists BEFORE the first record, with the three ruled fields
+test/integration/record.test.ts:rotation, on the FILE plane > a new transcript appears under the POST-CLEAR init id and the old file just stops
+test/integration/record.test.ts:rotation, on the FILE plane > vendor-id/<new>.json holds the three ruled link fields
+test/integration/record.test.ts:rotation, on the FILE plane > the rotation's SessionUpdate row is keyed session:identity_rotated:<vendor uuid>
+test/integration/record.test.ts:the transcript backup > the copies are BOUNDED by the keep constant
+test/integration/record.test.ts:a detached shell run's key spellings > the shim's bash rows are keyed bash:<run>:start and bash:<run>:terminal, with the VENDOR's run id

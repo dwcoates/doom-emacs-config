@@ -62,6 +62,14 @@ export const SHIM_BUNDLE = path.join(PACKAGE_ROOT, "dist", "main.js");
  */
 export const SHIM_LOCK_BINARY = path.join(PACKAGE_ROOT, "dist", "shim-lock");
 
+/**
+ * The lock holder every spawn here uses unless it asks for the real one: a
+ * stand-in speaking `shim-lock`'s protocol with no kernel lock behind it
+ * (shim-lock-stand-in.sh). The cases about the lock itself pass
+ * `AGENT_REPL_SHIM_LOCK_BIN: SHIM_LOCK_BINARY`.
+ */
+export const STAND_IN_LOCK_BINARY = path.join(PACKAGE_ROOT, "test", "integration-support", "shim-lock-stand-in.sh");
+
 /** The build identity every spawned shim reports on `SessionStarted`. */
 export const ITEST_BUILD_SHA = "itest";
 
@@ -233,7 +241,7 @@ export async function spawnShim(options: SpawnShimOptions = {}): Promise<ShimHan
     AGENT_REPL_OWNED: "1",
     AGENT_REPL_STATE_DIR: dirs.stateDir,
     AGENT_REPL_LOCK_DIR: dirs.lockDir,
-    AGENT_REPL_SHIM_LOCK_BIN: SHIM_LOCK_BINARY,
+    AGENT_REPL_SHIM_LOCK_BIN: STAND_IN_LOCK_BINARY,
     AGENT_REPL_FAKE_SPOOL_ROOT: dirs.spoolRoot,
     SHIM_BUILD_SHA: ITEST_BUILD_SHA,
     AGENT_REPL_SESSION_ID: `host-itest-${++spawnCounter}`,
