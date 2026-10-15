@@ -1635,8 +1635,8 @@ func TestInterruptDetachedStopsTheNamedWorkAndAnUnknownFeedIdAnswersNotDetachedW
 
 func TestInterruptAllAgentsStopsEveryLiveDetachedAgent(t *testing.T) {
 	t.Parallel()
-	// Arrange: interruptAllAgents sweeps AGENTS only, so a lone detached
-	// subagent is the fixture (internal/workspace/interrupt.go).
+	// Arrange: a lone detached subagent. Shells are swept too; that half is
+	// TestInterruptAllAgentsStopsEveryLiveShellBesideTheAgents.
 	f := newOpened(t, harness.Opts{})
 	feed := f.watchRootFeed()
 	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedSubagent("work-1", "sub-1", "reviewing the diff")))
@@ -1667,9 +1667,82 @@ func TestInterruptAllAgentsStopsEveryLiveDetachedAgent(t *testing.T) {
 	}
 }
 
+// THE FAN-WIDE STOP REACHES SHELLS AS WELL AS AGENTS. interruptAllAgents
+// stops every live detached item (internal/workspace/interrupt.go), so a live
+// shell beside a live agent is stopped in the same call.
+func TestInterruptAllAgentsStopsEveryLiveShellBesideTheAgents(t *testing.T) {
+	t.Parallel()
+	// Arrange: one live detached agent and one live detached shell.
+	f := newOpened(t, harness.Opts{})
+	feed := f.watchRootFeed()
+	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedSubagent("work-1", "sub-1", "reviewing the diff")))
+	pushDetachedShell(f.shim, "work-2", "sleep 5")
+	awaitRow(t, f, feed, "the subagent bubble row", func(r *frontendv1.FeedRow) bool {
+		return r.GetDetachedSubagent() != nil
+	})
+	awaitShellHead(t, f, feed, "the shell bubble's head on the root feed")
+	awaitLiveWork(t, f, 2)
+
+	// Act
+	resp, err := f.d.Client().Interrupt(f.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
+		Workspace: f.ws,
+		Target:    &agentreplv1.InterruptRequest_AllAgents{AllAgents: &agentreplv1.InterruptAllAgents{}},
+	}))
+
+	// Assert: both stopped in one call.
+	if err != nil {
+		t.Fatalf("Interrupt{all_agents} = error %v, want a success", err)
+	}
+	if got := resp.Msg.GetSuccess().GetInterruptedDetached().GetCount(); got != 2 {
+		t.Fatalf("InterruptedDetached.count = %d, want 2 (the agent and the shell)", got)
+	}
+	if req := f.shim.ExpectUpdateAgent(); req.GetTarget().GetValue() != "sub-1" || req.GetInput().GetStop() == nil {
+		t.Fatalf("UpdateAgent = %v, want a stop of the live subagent sub-1", req)
+	}
+	f.shim.ExpectStopBash()
+}
+
 // ---------------------------------------------------------------------------
 // AnswerPermission
 // ---------------------------------------------------------------------------
+
+// AN ANSWER TO AN AGENT THE SHIM NO LONGER KNOWS IS REFUSED BY ITS LEDGERED
+// ARM. AnswerPermissionError carries no `unknown_agent` arm
+// (endpoint_answer_permission.proto); the gap is a row in daemon/ERROR-ARMS.md,
+// and server.UnlandedArm refuses it failed_precondition naming the intended
+// arm, recorded under daemon.refusal.unlanded_arm so the ledger reconciles
+// against the log.
+func TestAnAnswerTheShimRefusesUnknownAgentIsRefusedByItsUnlandedArm(t *testing.T) {
+	t.Parallel()
+	// Arrange: an open ask, and a shim that no longer knows its agent.
+	f := newOpened(t, harness.Opts{})
+	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
+	feed := f.watchRootFeed()
+	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
+		Update: &conversationv1.AgentUpdate_Permission{Permission: openPermission("perm-gone", "act-gone")},
+	}))
+	row := awaitRow(t, f, feed, "the permission card", func(r *frontendv1.FeedRow) bool { return r.GetPermission() != nil })
+	f.shim.Answer(harness.RPCUpdateAgent, &shimv1.UpdateAgentResponse{
+		Result: &shimv1.UpdateAgentResponse_Failure{Failure: &shimv1.UpdateAgentFailure{
+			Detail: "no such agent",
+			Kind:   &shimv1.UpdateAgentFailure_UnknownAgent{UnknownAgent: &shimv1.UpdateAgentUnknownAgent{}},
+		}},
+	})
+
+	// Act
+	_, err := f.d.Client().AnswerPermission(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerPermissionRequest{
+		Workspace: f.ws, Permission: row.GetId(),
+		Answer: &agentreplv1.AnswerPermissionRequest_Deny{Deny: &agentreplv1.AnswerPermissionDeny{}},
+	}))
+
+	// Assert
+	if code := connect.CodeOf(err); code != connect.CodeFailedPrecondition {
+		t.Fatalf("AnswerPermission to a forgotten agent = %v, want failed_precondition", err)
+	}
+	if msg := err.Error(); !strings.Contains(msg, "intended arm: ") || !strings.Contains(msg, "AnswerPermissionError.unknown_agent") {
+		t.Fatalf("AnswerPermission refusal = %q, want it to name the intended arm AnswerPermissionError.unknown_agent", msg)
+	}
+}
 
 func TestAnswerPermissionForwardsTheCorrectDecision(t *testing.T) {
 	t.Parallel()

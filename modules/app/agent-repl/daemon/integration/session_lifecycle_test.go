@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -211,6 +212,36 @@ func TestOpenWorkspaceWithNoPriorConversationStartsAFreshSession(t *testing.T) {
 	req := f.shim.ExpectStartSession()
 	if req.GetFresh() == nil {
 		t.Fatalf("StartSession request = %v, want a fresh source for a workspace with no prior conversation", req)
+	}
+}
+
+// THE WORKSPACE'S OPENING IS ITS ONE REPLAY. Opening the workspace starts the
+// session watcher on a workspace_opened bring-up, and the turns that follow
+// start no watcher of their own.
+func TestAWorkspaceOpenReplaysItsFirstPageOnce(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.shim.ExpectStartSession()
+
+	// Act: two turns, each run to its end.
+	for i, key := range []string{"k-replay-once-1", "k-replay-once-2"} {
+		f.submit("say something", key, conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+		f.shim.ExpectStartTurn()
+		f.d.AwaitWorkspaceLogOperationCount(f.repo.Dir, harness.OpTurnOpened, i+1)
+		pushConcludedTurn(f.shim, mainAgent, fmt.Sprintf("resp-%d", i))
+		f.d.AwaitWorkspaceLogOperationCount(f.repo.Dir, "daemon.promptqueue.turn_ended", i+1)
+	}
+
+	// Assert
+	var openings []any
+	for _, rec := range f.d.WorkspaceLog(f.repo.Dir, "daemon") {
+		if opening, ok := rec.Context["opening"]; ok && rec.Operation == "daemon.workspace.bring_up" {
+			openings = append(openings, opening)
+		}
+	}
+	if len(openings) != 1 || openings[0] != "workspace_opened" {
+		t.Fatalf("watcher openings = %v, want exactly one workspace_opened", openings)
 	}
 }
 
