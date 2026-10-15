@@ -124,7 +124,7 @@ func (p goPkg) group() string {
 // units is the package's build unit and, when it has tests, its split.
 func (p goPkg) units() (run.Spec, *Split, error) {
 	dir := filepath.Join(p.Module, p.Rel)
-	tests, err := goTopLevelTestsTagged(dir, p.Tags)
+	tests, err := GoTopLevelTestsTagged(dir, p.Tags)
 	if err != nil {
 		return run.Spec{}, nil, err
 	}
@@ -197,11 +197,11 @@ func (p goPkg) units() (run.Spec, *Split, error) {
 // in dir under the default build context: Test and Fuzz functions, and the
 // examples that carry an output comment. Name order.
 func GoTopLevelTests(dir string) ([]string, error) {
-	return goTopLevelTestsTagged(dir, "")
+	return GoTopLevelTestsTagged(dir, "")
 }
 
-// goTopLevelTestsTagged is GoTopLevelTests under build TAGS (comma-separated).
-func goTopLevelTestsTagged(dir, tags string) ([]string, error) {
+// GoTopLevelTestsTagged is GoTopLevelTests under build TAGS (comma-separated).
+func GoTopLevelTestsTagged(dir, tags string) ([]string, error) {
 	ctx := build.Default
 	if tags != "" {
 		ctx.BuildTags = append(append([]string(nil), ctx.BuildTags...), strings.Split(tags, ",")...)

@@ -62,7 +62,7 @@ func TestMeasureEndToEndWithTheRealToolchain(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	cfg := Config{Module: dir, Package: ".", Tests: []string{"sign_test.go"}, Mutate: []string{"."}, Runs: 2, Scratch: t.TempDir(), Go: "go", HangBound: DefaultHangBound}
+	cfg := Config{Module: dir, Suites: []Suite{{Package: ".", Tests: []string{"sign_test.go"}}}, Mutate: []string{"."}, Runs: 2, Scratch: t.TempDir(), Go: "go", HangBound: DefaultHangBound}
 	log, _ := quietLog()
 
 	// Act

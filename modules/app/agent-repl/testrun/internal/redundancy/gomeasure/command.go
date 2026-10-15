@@ -2,6 +2,7 @@ package gomeasure
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -42,16 +43,40 @@ func splitList(s string) []string {
 	return out
 }
 
+// readSuites reads a -suites file.
+func readSuites(path string) ([]Suite, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read -suites %s: %w", path, err)
+	}
+	var s []Suite
+	if err := json.Unmarshal(b, &s); err != nil {
+		return nil, fmt.Errorf("decode -suites %s: %w", path, err)
+	}
+	if len(s) == 0 {
+		return nil, fmt.Errorf("-suites %s names no suite", path)
+	}
+	for i, x := range s {
+		if x.Package == "" {
+			return nil, fmt.Errorf("-suites %s: suite %d names no Package", path, i)
+		}
+	}
+	return s, nil
+}
+
 // ParseArgs reads `testrun redundancy go`'s command line.
 func ParseArgs(argv []string, stderr io.Writer) (Args, error) {
 	fs := flag.NewFlagSet("testrun redundancy go", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var a Args
-	var tests, mutate, pinCalls, pins, universe string
+	var pkg, tests, tags, programs, suitesFile, mutate, pinCalls, pins, universe string
 	fs.StringVar(&a.Module, "module", "", "the Go module's root (required)")
-	fs.StringVar(&a.Package, "pkg", "", "the package under measurement, relative to -module, e.g. ./internal/workspace (required)")
-	fs.StringVar(&tests, "tests", "", "comma-separated test files of -pkg whose cases are the candidates (required)")
-	fs.StringVar(&mutate, "mutate", "", "comma-separated packages to mutate, relative to -module (default: -pkg)")
+	fs.StringVar(&pkg, "pkg", "", "one package under measurement, relative to -module, e.g. ./internal/workspace")
+	fs.StringVar(&tests, "tests", "", "comma-separated test files of -pkg whose cases are measured (default: all of its tests)")
+	fs.StringVar(&tags, "tags", "", "the build tags -pkg's tests compile under")
+	fs.StringVar(&programs, "programs", "", "comma-separated roster programs -pkg's tests spawn")
+	fs.StringVar(&suitesFile, "suites", "", "a JSON file listing the suites to measure ([{Package, Tags, Tests, Programs, Kept}]), instead of -pkg")
+	fs.StringVar(&mutate, "mutate", "", "comma-separated packages to mutate, relative to -module (default: the one -pkg)")
 	fs.IntVar(&a.Runs, "runs", 3, "coverage runs per case, unioned")
 	fs.StringVar(&pinCalls, "pin-calls", "FindRecord,Records", "comma-separated calls that make a test a log-record assertion")
 	fs.StringVar(&pins, "pin", "", "comma-separated tests kept whatever they cover")
@@ -69,10 +94,24 @@ func ParseArgs(argv []string, stderr io.Writer) (Args, error) {
 	if fs.NArg() != 0 {
 		return Args{}, fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
 	}
-	for name, v := range map[string]string{"-module": a.Module, "-pkg": a.Package, "-tests": tests, "-out": a.Out} {
+	for name, v := range map[string]string{"-module": a.Module, "-out": a.Out} {
 		if v == "" {
 			return Args{}, fmt.Errorf("%s is required", name)
 		}
+	}
+	switch {
+	case (pkg == "") == (suitesFile == ""):
+		return Args{}, fmt.Errorf("name exactly one of -pkg and -suites")
+	case suitesFile != "" && (tests != "" || tags != "" || programs != ""):
+		return Args{}, fmt.Errorf("-tests, -tags and -programs describe -pkg; with -suites each suite says its own")
+	case pkg != "":
+		a.Suites = []Suite{{Package: pkg, Tags: tags, Tests: splitList(tests), Programs: splitList(programs)}}
+	default:
+		s, err := readSuites(suitesFile)
+		if err != nil {
+			return Args{}, err
+		}
+		a.Suites = s
 	}
 	u, err := redundancy.ParseUniverse(universe)
 	if err != nil {
@@ -82,10 +121,12 @@ func ParseArgs(argv []string, stderr io.Writer) (Args, error) {
 	if a.Budget, err = redundancy.LoadBudget(*maxDrop, *baseline); err != nil {
 		return Args{}, err
 	}
-	a.Tests = splitList(tests)
 	a.Mutate = splitList(mutate)
 	if len(a.Mutate) == 0 {
-		a.Mutate = []string{a.Package}
+		if len(a.Suites) != 1 {
+			return Args{}, fmt.Errorf("-mutate is required when -suites names several")
+		}
+		a.Mutate = []string{a.Suites[0].Package}
 	}
 	a.PinCalls = splitList(pinCalls)
 	a.Pins = splitList(pins)
@@ -124,7 +165,11 @@ func Command(ctx context.Context, log *run.Log, argv []string, exec Exec) int {
 	a.Scratch = scratch
 	m, err := Measure(ctx, a.Config, exec, log)
 	if err != nil {
-		log.Errorf("redundancy: measure %s %s: %v", a.Package, strings.Join(a.Tests, ","), err)
+		var names []string
+		for _, s := range a.Suites {
+			names = append(names, s.Package)
+		}
+		log.Errorf("redundancy: measure %s: %v", strings.Join(names, ", "), err)
 		return 1
 	}
 	if err := WriteOutputs(a.Out, m, redundancy.Options{Universe: a.Universe, Overhead: a.Overhead, Budget: a.Budget}); err != nil {

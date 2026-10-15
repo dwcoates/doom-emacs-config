@@ -1096,14 +1096,14 @@ func TestGoTopLevelTestsUnderTagsIncludesTheTaggedTests(t *testing.T) {
 	write(t, filepath.Join(dir, "i_test.go"), "//go:build integration\n\npackage x\nimport \"testing\"\nfunc TestI(t *testing.T) {}\n", 0o644)
 
 	// Act
-	got, err := goTopLevelTestsTagged(dir, "integration")
+	got, err := GoTopLevelTestsTagged(dir, "integration")
 
 	// Assert
 	if err != nil {
 		t.Fatal(err)
 	}
 	if want := []string{"TestA", "TestI"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("goTopLevelTestsTagged = %v, want %v", got, want)
+		t.Fatalf("GoTopLevelTestsTagged = %v, want %v", got, want)
 	}
 }
 

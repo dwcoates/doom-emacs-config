@@ -16,6 +16,7 @@ import (
 	"agentrepl/testrun/internal/redundancy"
 	"agentrepl/testrun/internal/redundancy/gomut"
 	"agentrepl/testrun/internal/run"
+	"agentrepl/testrun/testenv"
 )
 
 // The fake package: one production function whose comparison is two
@@ -58,6 +59,8 @@ type fakeGo struct {
 	// mutantCmd, when it holds the mutant, scripts it from the whole command.
 	mutantCmd map[string]func(Cmd) Result
 	calls     []string
+	// mutantEnvs are the environments mutant-phase runs were given.
+	mutantEnvs [][]string
 }
 
 func passLines(names ...string) []Line {
@@ -95,7 +98,7 @@ func envOf(env []string, key string) string {
 func leavesOf(pattern string) []string {
 	levels := strings.Split(pattern, "/")
 	var out []string
-	for _, l := range []string{"TestA", "TestB/x", "TestB/y", "TestLog"} {
+	for _, l := range []string{"TestA", "TestB/x", "TestB/y", "TestLog", "TestI"} {
 		parts := strings.Split(l, "/")
 		ok := true
 		for i, lv := range levels {
@@ -130,6 +133,8 @@ func (f *fakeGo) exec(_ context.Context, c Cmd) (Result, error) {
 		return Result{Lines: lines("fix")}, nil
 	case base == "go" && c.Args[0] == "list":
 		return Result{Lines: lines("fix/p\t" + f.dir)}, nil
+	case base == "go" && c.Args[0] == "build":
+		return Result{}, nil
 	case base == "go" && c.Args[0] == "test":
 		if slices.Contains(c.Args, "-overlay") && f.schemaErr != "" {
 			out := f.schemaErr
@@ -141,8 +146,8 @@ func (f *fakeGo) exec(_ context.Context, c Cmd) (Result, error) {
 		out := strings.TrimPrefix(c.Args[len(c.Args)-1], "-o=")
 		in := strings.TrimPrefix(c.Args[len(c.Args)-2], "-i=")
 		leaf := ""
-		for _, l := range []string{"TestA", "TestB/x", "TestB/y", "TestLog"} {
-			if strings.Contains(in, "/"+fmt.Sprint(slices.Index([]string{"TestA", "TestB/x", "TestB/y", "TestLog"}, l))+",") || strings.HasSuffix(in, "/"+fmt.Sprint(slices.Index([]string{"TestA", "TestB/x", "TestB/y", "TestLog"}, l))) {
+		for i, l := range []string{"TestA", "TestB/x", "TestB/y", "TestLog", "TestI"} {
+			if strings.Contains(in, string(filepath.Separator)+filepath.Join("cov", fmt.Sprint(i))+string(filepath.Separator)) {
 				leaf = l
 			}
 		}
@@ -152,14 +157,31 @@ func (f *fakeGo) exec(_ context.Context, c Cmd) (Result, error) {
 		}
 		prof := fmt.Sprintf("mode: atomic\n%s 1 %d\n", fakeBlock, count)
 		return Result{}, os.WriteFile(out, []byte(prof), 0o644)
-	case base == "cover.test":
+	case strings.HasPrefix(base, "cover-"):
+		// An instrumented binary writes its meta file into its counter
+		// directory as it exits.
+		// A plain binary's spawned systems write theirs under the coverage
+		// directory the harness is given.
+		dir := argAfter(c.Args, "-test.gocoverdir")
+		if spawned := envOf(c.Env, testenv.Coverage); spawned != "" {
+			dir = filepath.Join(spawned, "shim-store")
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return Result{}, err
+			}
+		}
+		if dir != "" {
+			if err := os.WriteFile(filepath.Join(dir, "covmeta.fake"), nil, 0o644); err != nil {
+				return Result{}, err
+			}
+		}
 		pattern := argAfter(c.Args, "-test.run")
 		leaves := leavesOf(pattern)
 		if f.coverFail != "" && pattern == RunPattern(f.coverFail) {
 			return Result{Exit: 1, Lines: lines("=== RUN   "+f.coverFail, "--- FAIL: "+f.coverFail+" (0.00s)")}, nil
 		}
 		return Result{Lines: passLines(withParents(leaves)...), Wall: 50 * time.Millisecond}, nil
-	case base == "mutants.test":
+	case strings.HasPrefix(base, "mutants-"):
+		f.mutantEnvs = append(f.mutantEnvs, c.Env)
 		pattern := argAfter(c.Args, "-test.run")
 		id := envOf(c.Env, gomut.EnvMutant)
 		if id == "" {
@@ -181,7 +203,7 @@ func fakeConfig(t *testing.T) (Config, string) {
 	t.Helper()
 	dir := writeFiles(t, map[string]string{"p.go": fakeProd, "p_test.go": fakeTests})
 	return Config{
-		Module: dir, Package: ".", Tests: []string{"p_test.go"}, Mutate: []string{"."},
+		Module: dir, Suites: []Suite{{Package: ".", Tests: []string{"p_test.go"}}}, Mutate: []string{"."},
 		Runs: 2, PinCalls: []string{"FindRecord"}, Scratch: t.TempDir(), Go: "go", HangBound: 3 * time.Second,
 	}, dir
 }
@@ -526,7 +548,7 @@ func TestMeasureEndsAtAnInterruptRatherThanReadingItAsAHang(t *testing.T) {
 	_, err := Measure(ctx, cfg, f.exec, log)
 
 	// Assert
-	if err == nil || !strings.Contains(err.Error(), "interrupted during mutants.test") {
+	if err == nil || !strings.Contains(err.Error(), "interrupted during mutants-00.test") {
 		t.Fatalf("err = %v, want the interrupt", err)
 	}
 }
@@ -544,5 +566,92 @@ func TestMeasureRefusesANonPositiveHangBound(t *testing.T) {
 	// Assert
 	if err == nil || !strings.Contains(err.Error(), "hang bound must be positive") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// rootTree is an agent-repl root the roster's program builds resolve in.
+func rootTree(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	mods := map[string]string{
+		"daemon": "agent-repld", "agent-shim/claude/shim-sidecar": "agentrepl/shim-claude-sidecar",
+		"agent-shim/shim-store": "agentrepl/shim-store", "agent-shim/shim-lock": "agentrepl/shim-lock",
+		"agent-shim/logging/go": "agentrepl/logging", "proto/helpers/go": "agentrepl/protohelpers",
+	}
+	for dir, mod := range mods {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, dir, "go.mod"), []byte("module "+mod+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
+}
+
+func TestMeasureRunsASpawningSuiteThroughItsOwnPrograms(t *testing.T) {
+	// Arrange: the unit suite is the candidate; the integration suite, which
+	// spawns shim-store, is the kept population.
+	cfg, dir := fakeConfig(t)
+	if err := os.MkdirAll(filepath.Join(dir, "integ"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "integ", "i_test.go"), []byte("package integ\n\nimport \"testing\"\n\nfunc TestI(t *testing.T) {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Suites = append(cfg.Suites, Suite{Package: "./integ", Tags: "integration", Tests: []string{"i_test.go"}, Programs: []string{"shim-store"}, Kept: true})
+	cfg.Root = rootTree(t)
+	f := &fakeGo{dir: dir, reaches: map[string]bool{"TestA": true, "TestI": true}}
+	pass := func(p string) Result { return Result{Lines: passLines(withParents(leavesOf(p))...)} }
+	f.mutant = map[string]func(string) Result{"1": pass, "2": pass}
+	log, _ := quietLog()
+
+	// Act
+	m, err := Measure(context.Background(), cfg, f.exec, log)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, c := range m.Cases {
+		ids = append(ids, c.ID)
+		if c.ID == "./integ:TestI" && !strings.HasPrefix(c.Pinned, "the kept population (./integ)") {
+			t.Errorf("TestI pinned %q, want the kept population", c.Pinned)
+		}
+	}
+	if !slices.Contains(ids, "./integ:TestI") || !slices.Contains(ids, ".:TestA") {
+		t.Fatalf("case ids %v are not qualified by package", ids)
+	}
+	var coverProg, mutProg, plainInteg bool
+	for _, call := range f.calls {
+		switch {
+		case strings.HasPrefix(call, "go build") && strings.Contains(call, "-cover -coverpkg=./...") && strings.Contains(call, "cover-programs/programs/shim-store"):
+			coverProg = true
+		case strings.HasPrefix(call, "go build") && strings.Contains(call, "-overlay") && strings.Contains(call, "mutant-programs-0/programs/shim-store"):
+			mutProg = true
+		case strings.HasPrefix(call, "go test -c") && strings.Contains(call, "cover-01.test") && strings.Contains(call, "-tags integration"):
+			plainInteg = !strings.Contains(call, "-cover")
+		}
+	}
+	if !coverProg || !mutProg || !plainInteg {
+		t.Fatalf("instrumented program %t, mutant program %t, plain integration binary %t; calls:\n%s", coverProg, mutProg, plainInteg, strings.Join(f.calls, "\n"))
+	}
+	sawMutantPrograms := false
+	for _, env := range f.mutantEnvs {
+		if p := envOf(env, testenv.Programs); strings.HasSuffix(p, "mutant-programs-0/programs") {
+			sawMutantPrograms = true
+		}
+		if envOf(env, testenv.Coverage) != "" {
+			t.Errorf("a mutant run carried coverage: %v", env)
+		}
+	}
+	if !sawMutantPrograms {
+		t.Error("no mutant-phase run of the spawning suite was pointed at the mutant programs")
+	}
+	for _, c := range m.Cases {
+		if c.ID == "./integ:TestI" && !reflect.DeepEqual(c.Blocks, []string{fakeBlock}) {
+			t.Errorf("TestI's blocks = %v, want its spawned system's", c.Blocks)
+		}
 	}
 }

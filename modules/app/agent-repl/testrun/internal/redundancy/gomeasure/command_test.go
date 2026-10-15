@@ -20,11 +20,14 @@ func TestParseArgsDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !reflect.DeepEqual(a.Suites, []Suite{{Package: "./p", Tests: []string{"a_test.go", "b_test.go"}}}) {
+		t.Fatalf("suites = %+v", a.Suites)
+	}
 	if !reflect.DeepEqual(a.Mutate, []string{"./p"}) || a.Runs != 3 || a.Universe != redundancy.KillsOnly || a.Overhead != DefaultOverhead || a.HangBound != DefaultHangBound || a.Budget.MaxDrop != redundancy.DefaultMaxDrop {
 		t.Fatalf("defaults = %+v", a)
 	}
-	if !reflect.DeepEqual(a.Tests, []string{"a_test.go", "b_test.go"}) || !reflect.DeepEqual(a.PinCalls, []string{"FindRecord", "Records"}) {
-		t.Fatalf("lists = %v, %v", a.Tests, a.PinCalls)
+	if !reflect.DeepEqual(a.PinCalls, []string{"FindRecord", "Records"}) {
+		t.Fatalf("pin calls = %v", a.PinCalls)
 	}
 }
 
@@ -36,7 +39,10 @@ func TestParseArgsRefuses(t *testing.T) {
 		want string
 	}{
 		{name: "no -module", argv: []string{"-pkg", "./p", "-tests", "a_test.go", "-out", "/o"}, want: "-module is required"},
-		{name: "no -tests", argv: []string{"-module", "/m", "-pkg", "./p", "-out", "/o"}, want: "-tests is required"},
+		{name: "neither -pkg nor -suites", argv: []string{"-module", "/m", "-out", "/o"}, want: "exactly one of -pkg and -suites"},
+		{name: "both -pkg and -suites", argv: []string{"-module", "/m", "-pkg", "./p", "-suites", "/s.json", "-out", "/o"}, want: "exactly one of -pkg and -suites"},
+		{name: "-tests beside -suites", argv: []string{"-module", "/m", "-suites", "/s.json", "-tests", "a_test.go", "-out", "/o"}, want: "with -suites each suite says its own"},
+		{name: "an unreadable -suites", argv: []string{"-module", "/m", "-suites", "/gone.json", "-out", "/o"}, want: "read -suites /gone.json"},
 		{name: "an unknown universe", argv: append(base, "-universe", "lines"), want: "unknown universe"},
 		{name: "a stray argument", argv: append(base, "extra"), want: "unexpected arguments: extra"},
 	}
@@ -82,8 +88,8 @@ func TestCommandLogsAFailedMeasurementOnce(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("code %d", code)
 	}
-	if n := strings.Count(out.String(), "ERROR:"); n != 1 || !strings.Contains(out.String(), "redundancy: measure . p_test.go: gomeasure: TestA failed on measurement run 1") {
-		t.Fatalf("log = %q, want one error naming the package, files and cause", out.String())
+	if n := strings.Count(out.String(), "ERROR:"); n != 1 || !strings.Contains(out.String(), "redundancy: measure .: gomeasure: TestA failed on measurement run 1") {
+		t.Fatalf("log = %q, want one error naming the package and the cause", out.String())
 	}
 	if _, err := os.Stat(filepath.Join(outDir, "measurement.json")); !os.IsNotExist(err) {
 		t.Fatalf("a failed measurement wrote measurement.json (stat err %v)", err)
@@ -120,5 +126,59 @@ func TestCommandWritesTheMeasurementAndTheReport(t *testing.T) {
 	}
 	if !strings.Contains(string(report), "- Cases: 4, pinned: 1,") {
 		t.Fatalf("report = %s", report)
+	}
+}
+
+func TestParseArgsReadsASuitesFile(t *testing.T) {
+	// Arrange
+	path := filepath.Join(t.TempDir(), "suites.json")
+	body := `[{"Package":"./internal/workspace"},{"Package":"./integration","Tags":"integration","Programs":["agent-repld"],"Kept":true}]`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	a, err := ParseArgs([]string{"-module", "/m", "-suites", path, "-mutate", "./internal/workspace", "-out", "/o"}, &bytes.Buffer{})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Suite{{Package: "./internal/workspace"}, {Package: "./integration", Tags: "integration", Programs: []string{"agent-repld"}, Kept: true}}
+	if !reflect.DeepEqual(a.Suites, want) {
+		t.Fatalf("suites = %+v", a.Suites)
+	}
+}
+
+func TestParseArgsRefusesASuitesFile(t *testing.T) {
+	tests := []struct {
+		name, body, want string
+		mutate           bool
+	}{
+		{name: "several suites with no -mutate", body: `[{"Package":"a"},{"Package":"b"}]`, want: "-mutate is required"},
+		{name: "no suite", body: `[]`, mutate: true, want: "names no suite"},
+		{name: "a suite with no package", body: `[{"Tags":"x"}]`, mutate: true, want: "suite 0 names no Package"},
+		{name: "not JSON", body: `[`, mutate: true, want: "decode -suites"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			path := filepath.Join(t.TempDir(), "suites.json")
+			if err := os.WriteFile(path, []byte(tt.body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			argv := []string{"-module", "/m", "-suites", path, "-out", "/o"}
+			if tt.mutate {
+				argv = append(argv, "-mutate", "a")
+			}
+
+			// Act
+			_, err := ParseArgs(argv, &bytes.Buffer{})
+
+			// Assert
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("err = %v, want %q", err, tt.want)
+			}
+		})
 	}
 }
