@@ -321,9 +321,9 @@ type Resolver interface {
 	// the turns are still live: what a files-restoring rollback stops.
 	LiveDetachedIn(ws ids.WorkspaceID, turns []ids.TurnID) int
 	// SelectableText answers the text of one selectable root-feed row
-	// (FeedRow.selectable: a prompt or a landed response bubble that is not a
-	// thinking bubble) as markdown, with whether it is a prompt, and whether
-	// the feedid is selectable at all. A miss is a feedid the daemon does not
+	// (FeedRow.selectable: a prompt or a landed response bubble that is
+	// neither a thinking bubble nor an interim response) as markdown, with
+	// whether it is a prompt, and whether the feedid is selectable at all. A miss is a feedid the daemon does not
 	// deem selectable — the submit path and the selection refuse it rather
 	// than using an empty text.
 	SelectableText(ws ids.WorkspaceID, id *frontendv1.FeedId) (RowText, bool)

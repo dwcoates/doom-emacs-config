@@ -110,6 +110,40 @@ func TestSubmitPromptPrependsTheReferencedResponse(t *testing.T) {
 	}
 }
 
+// TestSubmitPromptQuotesASelectedResponseProvedInterimSinceItsSelection pins
+// that a response selected while it was its turn's latest row is still quoted
+// once a later row proves it interim: selectability gates only making the
+// selection, and the quote reads the selected bubble's text.
+func TestSubmitPromptQuotesASelectedResponseProvedInterimSinceItsSelection(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Feed.markdown = map[string]string{"resp-1": "Looking into it."}
+	h.Prompts.outcome = prompthandler.Outcome{
+		Recognition: prompthandler.RecognizedNone,
+		Turn:        "turn-9",
+		Disposition: promptqueue.Disposition{Delivered: true},
+	}
+	clickRow(t, h, "resp-1")
+	// A later row of its turn lands: the response is interim, unselectable.
+	delete(h.Feed.markdown, "resp-1")
+	h.Feed.unselectable = map[string]string{"resp-1": "Looking into it."}
+	req := submitRequest()
+	req.Said = said("Why that file?")
+
+	// Act.
+	if _, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(req)); err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+
+	// Assert.
+	want := said("Why that file?")
+	want.Content.Blocks = append([]*conversationv1.UserContentBlock{replyquote.Block("Looking into it.", false)},
+		want.Content.Blocks...)
+	if !proto.Equal(h.Prompts.lastSaid, want) {
+		t.Fatalf("delivered prompt =\n%v\nwant\n%v", h.Prompts.lastSaid, want)
+	}
+}
+
 // TestSubmitPromptRefusesAnUnresolvableReference pins that a selected response
 // the daemon cannot resolve to markdown is REFUSED, never silently dropped:
 // the user's message is not delivered shorn of the reply they asked for, and

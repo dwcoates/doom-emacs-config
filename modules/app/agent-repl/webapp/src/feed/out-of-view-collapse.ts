@@ -11,10 +11,11 @@
  *     entry, then centers it. The expansion is the jump's, not the reader's.
  *     An entry that was already open when the jump landed (the reader opened
  *     it by hand) is never tracked.
- *   - `thinkingClick` (owner specification, 2026-10-14): a click on a
- *     root-feed THINKING bubble only expands it, with no selection
- *     (bubble-selection.ts). Scrolling away still closes it, as it did while
- *     the expansion was the selection's (which ended on leaving the view).
+ *   - `ownClick` (owner specification, 2026-10-14): a click on a root-feed
+ *     THINKING bubble or INTERIM response only expands it, with no selection
+ *     (bubble-selection.ts `expandsOnOwnClick`). Scrolling away still closes
+ *     it, as it did while the expansion was the selection's (which ended on
+ *     leaving the view).
  *
  * A HAND TOGGLE AFTER THE WATCH BEGINS ENDS IT: `release` drops the entry's
  * watch, and it is left as the reader leaves it.
@@ -34,7 +35,7 @@ import { log } from "../log.js";
 import { createLeftViewWatch } from "./left-view.js";
 
 /** The act that opened a watched entry (see the module comment). */
-export type OutOfViewCause = "jump" | "thinkingClick";
+export type OutOfViewCause = "jump" | "ownClick";
 
 /** An entry that closes once out of view, and how to close it again. */
 export interface CollapsingEntry {

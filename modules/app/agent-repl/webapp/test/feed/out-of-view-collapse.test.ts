@@ -195,18 +195,18 @@ describe("createOutOfViewCollapse", () => {
     expect([record.level.case, record.context?.row, record.context?.cause]).toEqual(["info", "a", "jump"]);
   });
 
-  it("names a thinking click's cause in the collapse record", async () => {
+  it("names an own click's cause in the collapse record", async () => {
     // Arrange
     const capture = captureLogRecords();
     const w = watching();
-    const thinking = entry(w.box, "t", "thinkingClick");
-    w.jumps.track(thinking);
-    fireIntersection(thinking.row, true);
+    const clicked = entry(w.box, "t", "ownClick");
+    w.jumps.track(clicked);
+    fireIntersection(clicked.row, true);
     // Act
-    fireIntersection(thinking.row, false);
+    fireIntersection(clicked.row, false);
     // Assert
     const record = await forwardedRecord(capture, "feed.out-of-view-collapse");
-    expect([record.context?.row, record.context?.cause]).toEqual(["t", "thinkingClick"]);
+    expect([record.context?.row, record.context?.cause]).toEqual(["t", "ownClick"]);
   });
 
   it("logs a detached entry at debug", async () => {

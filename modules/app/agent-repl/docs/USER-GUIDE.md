@@ -62,9 +62,11 @@ response, and the other way round.
 - Only the main agent's prompts in the current conversation can be selected.
   - Prompts before the last `/clear` or compaction can't be selected.
   - Neither can a subagent's prompts, or a prompt folded into a turn that was already running.
-- **A thinking bubble is never selected.**
+- **A thinking bubble or an interim response is never selected.**
+  - An interim response is one the agent wrote mid-turn, before the turn's answer.
   - Clicking one only opens it to its full text, and clicking it again closes it.
-  - An open thinking bubble has no selection fill or border, and the selection stays where it was.
+  - An open one has no selection fill or border, and the selection stays where it was.
+  - A response you selected while it was the newest row stays selected once the agent moves on, and a reply still quotes it.
   - It closes again once it scrolls entirely out of view, or when you return to the newest row.
 
 ## Jumping to an entry

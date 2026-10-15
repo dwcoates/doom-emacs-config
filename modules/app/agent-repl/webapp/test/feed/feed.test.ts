@@ -47,6 +47,7 @@ import {
   scrollHost,
   subagentRow,
   thinkingRow,
+  interimRow,
   tokenFor,
   toolCallRow,
   userPromptRow,
@@ -2828,12 +2829,15 @@ describe("mountFeed: the selected row leaving the viewport ends the selection", 
   });
 });
 
-describe("mountFeed: a click on a thinking bubble only expands it", () => {
-  /** A mounted root feed drawing the real thinking bubble k1 and a response r1. */
+describe.each([
+  ["a thinking bubble", thinkingRow],
+  ["an interim response", interimRow],
+] as const)("mountFeed: a click on %s only expands it", (_kind, rowOfKind) => {
+  /** A mounted root feed drawing the real bubble k1 of the kind and a response r1. */
   async function mounted() {
     const { h, channel } = liveRootHarness({
       openFeed: (req) =>
-        openSuccess(page([thinkingRow("k1"), responseRow("r1")]), tokenFor(req)),
+        openSuccess(page([rowOfKind("k1"), responseRow("r1")]), tokenFor(req)),
     });
     const { scroll, host } = scrollHost();
     const feed = mountFeed(host, h.ctx, {
@@ -2848,7 +2852,7 @@ describe("mountFeed: a click on a thinking bubble only expands it", () => {
     };
     const box = (): HTMLElement => {
       const el = row("k1").querySelector<HTMLElement>(".bubble > .bubble-scroll");
-      if (el === null) throw new Error("the thinking bubble drew no capped box");
+      if (el === null) throw new Error("the bubble drew no capped box");
       return el;
     };
     const click = async (): Promise<void> => {
@@ -2858,7 +2862,7 @@ describe("mountFeed: a click on a thinking bubble only expands it", () => {
     return { feed, h, channel, row, box, click };
   }
 
-  it("expands the thinking bubble", async () => {
+  it("expands the bubble", async () => {
     // Arrange
     const m = await mounted();
     // Act
@@ -2868,7 +2872,7 @@ describe("mountFeed: a click on a thinking bubble only expands it", () => {
     m.feed.dispose();
   });
 
-  it("collapses the thinking bubble on a second click", async () => {
+  it("collapses the bubble on a second click", async () => {
     // Arrange
     const m = await mounted();
     await m.click();
@@ -2889,7 +2893,7 @@ describe("mountFeed: a click on a thinking bubble only expands it", () => {
     m.feed.dispose();
   });
 
-  it("marks the thinking bubble neither selected nor as the selected entry", async () => {
+  it("marks the bubble neither selected nor as the selected entry", async () => {
     // Arrange
     const m = await mounted();
     // Act
@@ -2918,7 +2922,7 @@ describe("mountFeed: a click on a thinking bubble only expands it", () => {
     m.feed.dispose();
   });
 
-  it("collapses the thinking bubble once it is scrolled wholly out of view", async () => {
+  it("collapses the bubble once it is scrolled wholly out of view", async () => {
     // Arrange
     const m = await mounted();
     await m.click();
@@ -2930,7 +2934,7 @@ describe("mountFeed: a click on a thinking bubble only expands it", () => {
     m.feed.dispose();
   });
 
-  it("keeps the thinking bubble open while any part of it is in view", async () => {
+  it("keeps the bubble open while any part of it is in view", async () => {
     // Arrange
     const m = await mounted();
     await m.click();
@@ -2941,7 +2945,7 @@ describe("mountFeed: a click on a thinking bubble only expands it", () => {
     m.feed.dispose();
   });
 
-  it("stops watching the thinking bubble once a click closes it", async () => {
+  it("stops watching the bubble once a click closes it", async () => {
     // Arrange
     const m = await mounted();
     await m.click();
@@ -2952,7 +2956,7 @@ describe("mountFeed: a click on a thinking bubble only expands it", () => {
     m.feed.dispose();
   });
 
-  it("records the collapse under the thinkingClick cause", async () => {
+  it("records the collapse under the ownClick cause", async () => {
     // Arrange
     const capture = captureLogRecords();
     const m = await mounted();
@@ -2962,7 +2966,7 @@ describe("mountFeed: a click on a thinking bubble only expands it", () => {
     fireIntersection(m.row("k1"), false);
     // Assert
     const record = await forwardedRecord(capture, "feed.out-of-view-collapse");
-    expect([record.context?.row, record.context?.cause]).toEqual(["k1", "thinkingClick"]);
+    expect([record.context?.row, record.context?.cause]).toEqual(["k1", "ownClick"]);
     m.feed.dispose();
   });
 

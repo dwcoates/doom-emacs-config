@@ -302,9 +302,12 @@ message FeedRow {
   // which kinds are selectable, so the two can never disagree.
   //
   // Set only on ROOT-feed rows that have LANDED: a user prompt, an agent
-  // prompt, and a settled (`success`) response bubble, whether final or
-  // interim. A THINKING bubble never carries it (owner specification,
-  // 2026-10-14): a click on one only expands it, with no selection. A
+  // prompt, and a settled (`success`) response bubble that is not interim.
+  // A THINKING bubble and an INTERIM response (`interim` set and
+  // `final_answer` unset) never carry it (owner
+  // specification, 2026-10-14, extended to the interim the same day): a click
+  // on either only expands it, with no selection. A response loses it on the
+  // publication that proves it interim. A
   // response still arriving, a broken one, a vendor notice, every other row
   // kind, and every row of a sub-feed leave it UNSET. A response row gains it
   // on the publication that settles it.

@@ -572,8 +572,11 @@ export function responseRow(
   });
 }
 
-/** A settled thinking bubble's row: a response the daemon flags `thinking`. */
-export function thinkingRow(id: string, markdown = "reasoning"): FeedRow {
+/** The flags a settled response row of `settledResponseRow` wears. */
+export type SettledResponseFlags = { thinking: true } | { interim: true };
+
+/** A settled response row reading MARKDOWN and wearing FLAGS. */
+export function settledResponseRow(id: string, markdown: string, flags: SettledResponseFlags): FeedRow {
   return create(FeedRowSchema, {
     id: feedId(id),
     order: orderFor(id),
@@ -582,11 +585,21 @@ export function thinkingRow(id: string, markdown = "reasoning"): FeedRow {
       value: {
         unit: {
           case: "response",
-          value: { thinking: true, result: { case: "success", value: { prose: { markdown } } } },
+          value: { ...flags, result: { case: "success", value: { prose: { markdown } } } },
         },
       },
     },
   });
+}
+
+/** A settled thinking bubble's row: a response the daemon flags `thinking`. */
+export function thinkingRow(id: string, markdown = "reasoning"): FeedRow {
+  return settledResponseRow(id, markdown, { thinking: true });
+}
+
+/** A settled INTERIM response row: the daemon proved a later row of its turn landed. */
+export function interimRow(id: string, markdown = "meanwhile"): FeedRow {
+  return settledResponseRow(id, markdown, { interim: true });
 }
 
 /**

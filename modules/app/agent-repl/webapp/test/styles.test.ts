@@ -2884,7 +2884,7 @@ describe("the warning chip as the one error surface", () => {
 describe("the expanded response's eggshell border", () => {
   /** The one rule that paints it. */
   const EGGSHELL_SELECTOR =
-    '.bubble[data-role="response"]:not(.entry-selected):not([data-variant="thinking"]):has(> .bubble-scroll.expanded)';
+    '.bubble[data-role="response"]:not(.entry-selected):not([data-variant="thinking"]):not(.interim-response):has(> .bubble-scroll.expanded)';
 
   /** A bubble wearing ATTRS and HOOKS, its scroll box open when OPEN. */
   function bubbleOf(attrs: Readonly<Record<string, string>>, hooks: readonly string[], open: boolean): HTMLElement {
@@ -2915,7 +2915,7 @@ describe("the expanded response's eggshell border", () => {
 
   const RESPONSES = [
     ["a streaming response", { "data-role": "response", "data-variant": "response" }, []],
-    ["an interim response", { "data-role": "response", "data-variant": "response", "data-state": "success" }, []],
+    ["a settled response that is its turn's latest row", { "data-role": "response", "data-variant": "response", "data-state": "success" }, []],
     ["the turn's answer (green)", { "data-role": "response", "data-variant": "response", "data-state": "success" }, ["final-response"]],
     ["an agentic card", { "data-role": "response", "data-variant": "agentic" }, []],
     ["a compaction summary", { "data-role": "response", "data-variant": "compaction" }, []],
@@ -2952,6 +2952,21 @@ describe("the expanded response's eggshell border", () => {
   it("never borders an open thinking bubble eggshell", () => {
     // Arrange
     const el = bubbleOf({ "data-role": "response", "data-variant": "thinking" }, [], true);
+    // Act
+    const border = borderOf(el);
+    // Assert
+    expect(border).toBeNull();
+  });
+
+  // A CLICK ON AN INTERIM RESPONSE ONLY EXPANDS IT TOO (owner specification,
+  // 2026-10-14): its open box wears no highlight its closed one does not.
+  it("never borders an open interim response eggshell", () => {
+    // Arrange
+    const el = bubbleOf(
+      { "data-role": "response", "data-variant": "response", "data-state": "success" },
+      ["assistant", "interim-response"],
+      true,
+    );
     // Act
     const border = borderOf(el);
     // Assert

@@ -69,18 +69,22 @@ func (s *server) SubmitPrompt(
 	// the record keeps the quote apart from the person's words (replyquote). The daemon is the
 	// selection's only holder, so the reply is always the one the webapp was
 	// drawing. The selection is read ONCE, and only that selection is ended
-	// after the send: a row selected in the meantime stays selected. A selected
-	// row the daemon cannot resolve to a selectable bubble is REFUSED, never
-	// dropped: delivering the user's message shorn of the reference they saw
-	// would silently change what they said.
+	// after the send: a row selected in the meantime stays selected.
+	// THE QUOTE READS THE SELECTED BUBBLE, WHETHER OR NOT IT CAN STILL BE
+	// SELECTED: selectability gates only MAKING a selection, and a response
+	// selected while it was its turn's latest row turns unselectable the moment
+	// a later row proves it interim, with the reader's selection still on it.
+	// A selected row the daemon cannot resolve to a landed bubble is REFUSED,
+	// never dropped: delivering the user's message shorn of the reference they
+	// saw would silently change what they said.
 	said := req.Msg.GetSaid()
 	sentWith, _, sentWithSelection := s.currentSelection(subject.Record.ID)
 	if ref := sentWith; sentWithSelection {
-		quoted, ok := s.deps.Feed.SelectableText(subject.Record.ID, ref)
+		quoted, ok := s.deps.Feed.BubbleText(subject.Record.ID, ref)
 		if !ok {
 			return answer(resp, s.refuse(subject.Log, rpc, resp, submitRefusal(s.fill(refusal{
 				Arm: "reference_response_unresolvable",
-				Reason: fmt.Sprintf("the referenced row %q is not a selectable bubble of this workspace's root feed",
+				Reason: fmt.Sprintf("the referenced row %q is not a landed bubble of this workspace's root feed",
 					ref.GetValue()),
 				NotFound: true,
 			}))))

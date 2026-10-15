@@ -786,8 +786,26 @@ export function logCorrelation(
  * `--fake` swaps THIS and nothing else: the real shim runs unchanged over the
  * mocked vendor, which is what makes an offline test a test of the shim rather
  * than of a second implementation of it.
+ *
+ * VENDORS is the pair of vendor constructors the factory hands each spec to,
+ * production's own by default. A test passes recorders here to observe what
+ * crosses the seam, rather than mocking the modules and re-importing this
+ * whole module graph inside a timed hook.
  */
-export function queryFactory(fake: boolean, environment: ShimEnvironment, cwd: string): CreateQuery {
+export interface QueryVendors {
+  real: typeof createRealQuery;
+  fake: typeof createFakeQuery;
+}
+
+/** Production's vendor constructors. */
+export const QUERY_VENDORS: QueryVendors = { real: createRealQuery, fake: createFakeQuery };
+
+export function queryFactory(
+  fake: boolean,
+  environment: ShimEnvironment,
+  cwd: string,
+  vendors: QueryVendors = QUERY_VENDORS,
+): CreateQuery {
   // THE WORKSPACE IS TRUSTED BEFORE ANY VENDOR IS CONSTRUCTED, mocked one
   // included. This is the single place a query comes into being, so trust
   // cannot be forgotten on one path and remembered on another; and the mocked
@@ -801,7 +819,7 @@ export function queryFactory(fake: boolean, environment: ShimEnvironment, cwd: s
   if (!fake) {
     return (spec: QuerySpec) => {
       trusted();
-      return createRealQuery(
+      return vendors.real(
         {
           cwd,
           claudeConfigDir: environment.claudeConfigDir,
@@ -822,7 +840,7 @@ export function queryFactory(fake: boolean, environment: ShimEnvironment, cwd: s
   return (spec: QuerySpec) => {
     trusted();
     return Promise.resolve(
-      createFakeQuery(spec.prompt, spec.canUseTool, {
+      vendors.fake(spec.prompt, spec.canUseTool, {
         cwd,
         configDir: environment.claudeConfigDir,
         sessionId:

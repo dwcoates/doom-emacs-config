@@ -258,11 +258,11 @@ export function mountFeed(
   //
   // A READER'S TOGGLE MAKES THE ENTRY THEIRS: an entry a jump expanded and the
   // reader then toggled by hand is no longer the jump's to close. The one
-  // exception is a root-feed THINKING bubble a click opens: it closes again
-  // once wholly out of view (`watchThinkingClick`).
+  // exception is a root-feed THINKING bubble or INTERIM response a click
+  // opens: it closes again once wholly out of view (`watchOwnClick`).
   //
   // A ROOT-FEED PROMPT OR RESPONSE BUBBLE'S BOX IS THE SELECTION'S
-  // (bubble-selection.ts), a thinking bubble's apart: a click on it selects
+  // (bubble-selection.ts), a thinking or interim one's apart: a click on it selects
   // instead of toggling, and the auto-collapse never closes it, because
   // selected and expanded are one state the daemon owns.
   const ownedBySelection = (section: HTMLElement): boolean =>
@@ -274,7 +274,7 @@ export function mountFeed(
       afterSectionToggle(section);
       releaseOutOfView(section);
       if (!expanded) return;
-      watchThinkingClick(section);
+      watchOwnClick(section);
       intentScroll?.arm(section);
       centerExpandedItem(section);
     },
@@ -1010,15 +1010,16 @@ export function mountFeed(
   }
 
   /**
-   * A CLICK THAT OPENS A ROOT-FEED THINKING BUBBLE (owner specification,
-   * 2026-10-14) only expands it, with no selection (bubble-selection.ts), so
-   * the selection's leaving-the-view end no longer closes it: the out-of-view
-   * watch does instead. Any other section a click opens stays the reader's.
+   * A CLICK THAT OPENS A ROOT-FEED THINKING BUBBLE OR INTERIM RESPONSE (owner
+   * specification, 2026-10-14) only expands it, with no selection
+   * (bubble-selection.ts `expandsOnOwnClick`), so the selection's
+   * leaving-the-view end no longer closes it: the out-of-view watch does
+   * instead. Any other section a click opens stays the reader's.
    */
-  function watchThinkingClick(section: HTMLElement): void {
+  function watchOwnClick(section: HTMLElement): void {
     const row = section.closest<HTMLElement>(FEED_ROW_SELECTOR);
     if (row === null || !row.hasAttribute(OUT_OF_VIEW_COLLAPSE_ATTRIBUTE)) return;
-    outOfView?.track(ownSectionsEntry(row, "thinkingClick"));
+    outOfView?.track(ownSectionsEntry(row, "ownClick"));
   }
 
   /** Watch a bubble a jump opened, keyed by its row. */

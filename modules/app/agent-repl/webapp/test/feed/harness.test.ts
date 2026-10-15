@@ -17,8 +17,11 @@ import {
   openSuccess,
   page,
   push,
+  interimRow,
   responseRow,
   scrollHost,
+  settledResponseRow,
+  thinkingRow,
   stubRenderers,
   tokenFor,
 } from "./harness.js";
@@ -110,5 +113,42 @@ describe("the feed suite's setup call sites", () => {
     const handRolled = /const scroll = document\.createElement\("div"\);\s*const host = document\.createElement\("div"\);\s*scroll\.append\(host\);/.test(suite);
     // Assert
     expect([handRolled, suite.includes("scrollHost()")]).toEqual([false, true]);
+  });
+});
+
+describe("settledResponseRow", () => {
+  it.each([
+    ["thinking", { thinking: true }, [true, false]],
+    ["interim", { interim: true }, [false, true]],
+  ] as const)("stamps a %s row's flag alone", (_name, flags, want) => {
+    // Arrange / Act
+    const row = settledResponseRow("k1", "words", flags);
+    // Assert
+    const unit = row.row.case === "activity" ? row.row.value.unit : undefined;
+    const response = unit?.case === "response" ? unit.value : undefined;
+    expect([response?.thinking, response?.interim]).toEqual(want);
+  });
+
+  it("settles the row with its markdown under its own id", () => {
+    // Arrange / Act
+    const row = settledResponseRow("k1", "words", { interim: true });
+    // Assert
+    const unit = row.row.case === "activity" ? row.row.value.unit : undefined;
+    const result = unit?.case === "response" ? unit.value.result : undefined;
+    expect([row.id?.value, result?.case, result?.case === "success" ? result.value.prose?.markdown : undefined]).toEqual([
+      "k1",
+      "success",
+      "words",
+    ]);
+  });
+
+  it.each([
+    ["thinkingRow", thinkingRow, { thinking: true }],
+    ["interimRow", interimRow, { interim: true }],
+  ] as const)("is the shape %s builds", (_name, build, flags) => {
+    // Arrange / Act
+    const built = build("k1", "words");
+    // Assert
+    expect(built).toEqual(settledResponseRow("k1", "words", flags));
   });
 });
