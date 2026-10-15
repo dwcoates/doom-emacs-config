@@ -11,7 +11,7 @@ the log records that show it, so the failures can be fixed at their source.
 |---|---|---|---|---|
 | 1 | 2026-10-14 23:29 | `test-tier-rule` | `test-tier-rule-land` | LANDED (`3e33b5963d`); an error record on every rebase while waiting, see entry 1 |
 | 2 | 2026-10-14 23:41 | `test-fixture-table-rules` | `test-fixture-table-rules-land` | FAILED: the merge workspace could not be forked |
-| 3 | 2026-10-15 | `cross-product-additions` (from `test-cross-product-audit-psv`, tip `44eee96334`) | `xprod-additions-merge` | requested, pending; a first request was refused `name_taken`, see entry 3 |
+| 3 | 2026-10-15 | `cross-product-additions` (from `test-cross-product-audit-psv`, tip `44eee96334`) | `xprod-additions-merge` | LANDED (`3841cbba64`), deployed; a first request was refused `name_taken`, see entry 3 |
 | 4 | 2026-10-15 | `test-tier-audit-integration-step1` (tip `3e73dfd165`, 41 additive commits) | `tier-step1-units` | requested, pending |
 | 5 | 2026-10-15 | `test-fixture-table-rules-2` (entry 2's two rule commits, rebuilt on master `3e33b5963d`) | `fixture-rules-retry` | requested, pending; a retry of entry 2 from a turn whose prompt is a normal transcript record |
 | 6 | 2026-10-15 | `tier-audit-e2e-step-a` (tip `75e781c362`, e2e audit report plus lower-tier tests) | `tier-audit-e2e-step-a-merge` | requested, pending |
@@ -48,7 +48,7 @@ the log records that show it, so the failures can be fixed at their source.
 - Second defect found 2026-10-15: the failed create left an orphan. The daemon logged `daemon.workspace.create` ERROR "the session did not come up" at 23:41:15 and dropped the merge, yet a session named `test-fixture-table-rules-land-8b` is running idle after the later restart, with no merge attached to it.
   - A create that fails should leave no workspace behind, or the restart should not bring up a workspace whose merge was dropped.
 
-## 3. `cross-product-additions` (requested, pending)
+## 3. `cross-product-additions` (landed as `3841cbba64`)
 
 - Requested by the `test-cross-product-audit` workspace for its additive work: the kind invariant through `protoarm.Must`, the 9-state footer/roster test, and the webapp vocabulary gate rows.
 - The first request was refused `name_taken`, because the merge workspace was named after the branch. The re-request under the name `xprod-additions-merge` was accepted.
