@@ -464,6 +464,11 @@ func (r *resolver) OnSessionUpdate(ws ids.WorkspaceID, update *conversationv1.Se
 		// The query died out from under the turn. A consumer with no stream
 		// open still needs the turn's terminal, so the feed draws it here.
 		r.drawQueryDied(s, update.GetQueryDied())
+	case *conversationv1.SessionUpdate_CommandCatalog:
+		// THE CATALOG CHANGES WHICH COMMANDS A PROMPT NAMES (commands.go). The
+		// watcher installs it in the one table (Deps.Commands) before routing
+		// it here, so the re-stamp reads the catalog just stated.
+		r.restampPromptCommands(s)
 	default:
 		log.Debug("daemon.feed.session_update_ignored",
 			"a session update changes no feed row",
@@ -494,6 +499,8 @@ func sessionUpdateArm(update *conversationv1.SessionUpdate) string {
 		return "context_usage"
 	case *conversationv1.SessionUpdate_Compacting:
 		return "compacting"
+	case *conversationv1.SessionUpdate_CommandCatalog:
+		return "command_catalog"
 	}
 	return "unset"
 }

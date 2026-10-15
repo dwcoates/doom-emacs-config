@@ -951,10 +951,11 @@ func TestRouteSessionUpdateArms(t *testing.T) {
 			want:   []string{"footer.OnSessionUpdate"},
 		},
 		{
-			// The composer's completions and no view's: nothing drawn changes.
-			name:   "the command catalog is the command catalog table's alone",
+			// The composer's completions and the feed's prompt marks: the
+			// table takes it first, because the feed's re-stamp reads it there.
+			name:   "the command catalog is the table's, then the feed's",
 			update: commandCatalogUpdate("merge-queue"),
-			want:   []string{"commands.OnCommandCatalog"},
+			want:   []string{"commands.OnCommandCatalog", "feed.OnSessionUpdate"},
 		},
 		{
 			name:   "account usage is the footer's",

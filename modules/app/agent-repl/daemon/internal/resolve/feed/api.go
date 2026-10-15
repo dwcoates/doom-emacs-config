@@ -460,6 +460,15 @@ type Deps struct {
 	// into this resolver. nil tells nobody, which is what a test that is not
 	// about the footer wants.
 	EntryPlaced func(ws ids.WorkspaceID, unit string, row *frontendv1.FeedId)
+	// Commands answers the workspace's standing slash-command catalog
+	// (commandcatalog.Catalogs, the one table ListSlashCommands also reads),
+	// and false while none has been stated. A user-prompt row's `commands`
+	// is stamped from it on every publication (commands.go). Called with the
+	// resolver's lock held; the table never calls back into this resolver.
+	//
+	// nil knows no catalog and stamps no commands, which is what a test that
+	// is not about slash commands wants. Production always wires it.
+	Commands func(ids.WorkspaceID) (*conversationv1.SessionCommandCatalog, bool)
 	// RolledBack is the durable record of rolled-back turns (wsm.DB). nil
 	// records and loads nothing, which is what a test that is not about
 	// surviving a restart wants.

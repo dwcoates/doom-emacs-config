@@ -144,13 +144,16 @@ func (w *watcher) routeSessionUpdateLocked(update *conversationv1.SessionUpdate)
 		w.sinks.Footer.OnSessionUpdate(w.ws, update)
 
 	case *conversationv1.SessionUpdate_CommandCatalog:
-		// THE COMPOSER'S COMPLETIONS, and no view's: the catalog is kept whole
-		// for ListSlashCommands, and nothing drawn changes.
-		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the command catalog", dlog.Context{
+		// THE COMPOSER'S COMPLETIONS AND THE FEED'S MARKS: the catalog is kept
+		// whole for ListSlashCommands, and the feed re-stamps its user prompts
+		// with the commands they name. The table takes it FIRST, because the
+		// feed's re-stamp reads the catalog from it.
+		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the command catalog and the feed", dlog.Context{
 			"arm":      sessionArm(update),
 			"commands": len(u.CommandCatalog.GetCommands()),
 		})
 		w.sinks.Commands.OnCommandCatalog(w.ws, u.CommandCatalog)
+		w.sinks.Feed.OnSessionUpdate(w.ws, update)
 
 	case *conversationv1.SessionUpdate_CacheLapse:
 		// A HIDDEN WORKSPACE'S PROJECTED LAPSE, and no view's: the keeper

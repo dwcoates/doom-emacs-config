@@ -1013,6 +1013,9 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 	// so no producer can publish a prompt that disagrees with the turn's
 	// lifecycle.
 	stampPromptWorking(s, snapshot)
+	// A USER PROMPT'S `commands` IS STATED HERE TOO, from the catalog in hand,
+	// on the same one path (commands.go).
+	stampPromptCommands(snapshot, r.catalogOf(s))
 	// A THINKING ROW'S `superseded` IS STATED HERE TOO, from the feed's own
 	// record, so every draw of the fold restates it (superseded.go).
 	stampSuperseded(f, id, snapshot)

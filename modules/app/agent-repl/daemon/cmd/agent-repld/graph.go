@@ -506,6 +506,11 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("agent-repld: build the chess boards: %w", err)
 	}
 
+	// THE SESSIONS' SLASH-COMMAND CATALOGS, as the Emacs composer completes
+	// from them and the feed marks them in user prompts. Fed by the fleet's
+	// watchers and read by ListSlashCommands and the feed resolver.
+	slashCommands := commandcatalog.New()
+
 	history := &historyForwarder{}
 	deliveries := &deliveryForwarder{}
 	feedResolver, err := feed.New(feed.Deps{
@@ -549,6 +554,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Pacing: pacer,
 		// A CHESS BOARD's body is the board state's.
 		ChessBoards: chessBoards,
+		// A USER PROMPT'S KNOWN COMMANDS are the standing catalog's.
+		Commands: slashCommands.Catalog,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the feed resolver: %w", err)
@@ -628,10 +635,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// fleet is built before the merge orchestrator, so the eviction is bound
 	// once the orchestrator exists.
 	var ejectCold func(ids.WorkspaceID)
-
-	// THE SESSIONS' SLASH-COMMAND CATALOGS, as the Emacs composer completes
-	// from them. Fed by the fleet's watchers and read by ListSlashCommands.
-	slashCommands := commandcatalog.New()
 
 	// THE HIDDEN WORKSPACES' CACHE KEEPER, fed by the fleet's watchers (a held
 	// shim's projected lapse), the lifecycle sink (a session coming up) and
