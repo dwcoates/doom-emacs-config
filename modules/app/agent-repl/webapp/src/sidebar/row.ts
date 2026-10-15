@@ -72,6 +72,8 @@ import { clampBeside } from "../topbar/clamp.js";
 import {
   buildSelectWorkspaceRequest,
   buildSetWorkspaceHiddenRequest,
+  buildOpenWorkspaceRequest,
+  buildRevertMergeRequest,
   drawRowMenu,
   runOpenWorkspace,
   runVerb,
@@ -228,8 +230,7 @@ export function drawRosterRow(
       return;
     }
     if (place !== "grouping") {
-      const band = BAND_RETURNS[place];
-      void guardMalformed(sc.ctx, band.operation, returnFromBand(band, line, sc, workspace));
+      clickBandRow(BAND_RETURNS[place], ws, line, sc, workspace);
       return;
     }
     void guardMalformed(sc.ctx, "sidebar.row.select", selectWorkspace(line, sc, workspace));
@@ -308,6 +309,11 @@ export function drawRosterRow(
   // made the row's verbs exist only after a click, which is a different DOM
   // than the contract describes; the reveal is now visibility alone.
   ws.appendChild(drawRowMenu(target));
+  // A BAND WITH SEVERAL RETURNS OFFERS THEM, drawn with the row and hidden
+  // until the row is clicked, like the verb menu.
+  if (place !== "grouping" && BAND_RETURNS[place].length > 1) {
+    ws.appendChild(drawBandChoices(BAND_RETURNS[place], line, sc, workspace));
+  }
 
   const detail = drawRosterRowDetail(requireMessage(u.detail, `${path}.detail`), `${path}.detail`);
   ws.appendChild(detail);
@@ -888,18 +894,24 @@ async function selectWorkspace(
 }
 
 /**
- * How a band row's click brings its workspace back before selecting it, one
- * entry per band. Every band's click is the same two steps (`returnFromBand`)
- * and only the first differs, so a band added later says its step here rather
- * than spelling a second click of its own.
+ * How a band row's click brings its workspace back before selecting it: the
+ * returns each band offers. Every return is the same two steps
+ * (`returnFromBand`) and only the first differs, so a band added later says
+ * its returns here rather than spelling a click of its own. A band with ONE
+ * return runs it on the click; a band with several offers them as a choice
+ * list under the row (`drawBandChoices`), and the user's pick runs.
  *
  *   - `hidden`: SHOW the workspace again (owner request, 2026-10-13); the push
  *     that follows moves it back into its groupings and onto the tab bar.
- *   - `merged`: REOPEN it (owner request, 2026-10-14); a merged workspace is
- *     taken back to revise what it landed, so the daemon restores its worktree
- *     and brings its session back, and the push moves it out of the band.
+ *   - `merged`: REOPEN it, or REOPEN IT AND REVERT ITS MERGE (owner requests,
+ *     2026-10-14 and 2026-10-15). Either way the daemon restores its worktree
+ *     and brings its session back, and the push moves it out of the band; the
+ *     revert also queues the brief that has its agent revert the merge, which
+ *     the user then follows from the workspace.
  */
 export interface BandReturn {
+  /** The return's label in the choice list. */
+  label: string;
   /** The click's log operation. */
   operation: string;
   /** The click's info record. */
@@ -908,27 +920,92 @@ export interface BandReturn {
   bringBack: (line: HTMLElement, sc: SidebarContext, workspace: WorkspaceRef) => Promise<boolean>;
 }
 
-export const BAND_RETURNS: Readonly<Record<Exclude<RowPlace, "grouping">, BandReturn>> = {
-  hidden: {
-    operation: "sidebar.row.show",
-    message: "showing a hidden workspace from the rail",
-    bringBack: (line, sc, workspace) =>
-      runVerb(line, {
-        sc,
-        rpc: "SetWorkspaceHidden",
-        call: (client) => client.setWorkspaceHidden(buildSetWorkspaceHiddenRequest(workspace, false)),
-        schema: SetWorkspaceHiddenResponseSchema,
-      }),
-  },
-  merged: {
-    operation: "sidebar.row.reopen",
-    message: "reopening a merged workspace from the rail",
-    bringBack: runOpenWorkspace,
-  },
+export const BAND_RETURNS: Readonly<Record<Exclude<RowPlace, "grouping">, readonly BandReturn[]>> = {
+  hidden: [
+    {
+      label: "Show",
+      operation: "sidebar.row.show",
+      message: "showing a hidden workspace from the rail",
+      bringBack: (line, sc, workspace) =>
+        runVerb(line, {
+          sc,
+          rpc: "SetWorkspaceHidden",
+          call: (client) => client.setWorkspaceHidden(buildSetWorkspaceHiddenRequest(workspace, false)),
+          schema: SetWorkspaceHiddenResponseSchema,
+        }),
+    },
+  ],
+  merged: [
+    {
+      label: "Reopen",
+      operation: "sidebar.row.reopen",
+      message: "reopening a merged workspace from the rail",
+      bringBack: (line, sc, workspace) => runOpenWorkspace(line, sc, buildOpenWorkspaceRequest(workspace)),
+    },
+    {
+      label: "Reopen and revert the merge",
+      operation: "sidebar.row.revert-merge",
+      message: "reopening a merged workspace to revert its merge from the rail",
+      bringBack: (line, sc, workspace) => runOpenWorkspace(line, sc, buildRevertMergeRequest(workspace)),
+    },
+  ],
 };
 
 /**
- * A band row's click: bring the workspace back (`BandReturn.bringBack`), then
+ * A band row's click: its one return runs at once, and several are offered
+ * (the row's `.sb-band-choices` list is revealed or hidden).
+ */
+function clickBandRow(
+  returns: readonly BandReturn[],
+  ws: HTMLElement,
+  line: HTMLElement,
+  sc: SidebarContext,
+  workspace: WorkspaceRef,
+): void {
+  const [only] = returns;
+  if (returns.length === 1 && only !== undefined) {
+    void guardMalformed(sc.ctx, only.operation, returnFromBand(only, line, sc, workspace));
+    return;
+  }
+  const choices = ws.querySelector<HTMLElement>(":scope > .sb-band-choices");
+  if (choices === null) throw new Error(`band row ${workspace.id} offers ${returns.length} returns and drew no choice list`);
+  toggleHiddenDropdown(sc.dropdowns, "band-choices", choices, [line]);
+}
+
+/**
+ * The choice list a band with several returns offers: one entry per return,
+ * each running it. It opens DOWNWARD inside the row's own box, as the verb
+ * menu does, and a pick closes it before the return runs; a refusal lands on
+ * the row line, where every band return's refusal lands.
+ */
+export function drawBandChoices(
+  returns: readonly BandReturn[],
+  line: HTMLElement,
+  sc: SidebarContext,
+  workspace: WorkspaceRef,
+): HTMLElement {
+  const choices = document.createElement("div");
+  choices.className = "sb-band-choices list-rows";
+  choices.hidden = true;
+  for (const band of returns) {
+    const entry = createControl();
+    entry.className = "sb-menu-item";
+    entry.setAttribute("data-band-return", band.operation);
+    entry.textContent = band.label;
+    entry.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      choices.hidden = true;
+      sc.dropdowns.released(choices);
+      void guardMalformed(sc.ctx, band.operation, returnFromBand(band, line, sc, workspace));
+    });
+    choices.appendChild(entry);
+  }
+  return choices;
+}
+
+/**
+ * A band return run: bring the workspace back (`BandReturn.bringBack`), then
  * select it, so the user lands on what they clicked. A refused first step
  * selects nothing: the refusal stands on the row instead.
  */

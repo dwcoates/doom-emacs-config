@@ -47,6 +47,7 @@ import {
   buildMergeWorkspaceRequest,
   buildNukeWorkspaceRequest,
   buildOpenWorkspaceRequest,
+  buildRevertMergeRequest,
   buildRestartWorkspaceRequest,
   restartWorkspaceRefusal,
   buildSelectWorkspaceRequest,
@@ -91,6 +92,18 @@ describe("the requests each verb is", () => {
 
   it("addresses OpenWorkspace with the row's echoed identity", () => {
     expect(buildOpenWorkspaceRequest(TARGET_WS).workspace).toEqual(TARGET_WS);
+  });
+
+  it("asks no revert of an ordinary OpenWorkspace", () => {
+    expect(buildOpenWorkspaceRequest(TARGET_WS).revertMerge).toBeUndefined();
+  });
+
+  it("addresses the revert's OpenWorkspace with the row's echoed identity", () => {
+    expect(buildRevertMergeRequest(TARGET_WS).workspace).toEqual(TARGET_WS);
+  });
+
+  it("asks the revert of the merge on the revert's OpenWorkspace", () => {
+    expect(buildRevertMergeRequest(TARGET_WS).revertMerge).toBeDefined();
   });
 
   it("addresses CloseWorkspace with the row's echoed identity", () => {
@@ -252,6 +265,7 @@ const CAUSE_FILL: Readonly<Record<string, Record<string, unknown>>> = {
     failure: { binary: "/b/shim-lock", how: { case: "exited", value: { code: 1, stderr: "EACCES" } } },
   },
   gitFailed: { detail: "worktree is dirty" },
+  briefMissing: { detail: "the workspace-merge-revert brief is unreadable" },
 };
 
 /** One verb, enough to issue it and to enumerate what it can refuse with. */
@@ -271,7 +285,7 @@ const VERBS: readonly VerbUnderTest[] = [
     method: "openWorkspace",
     responseSchema: OpenWorkspaceResponseSchema,
     errorSchema: OpenWorkspaceErrorSchema,
-    call: (t, control) => runOpenWorkspace(control, t.sc, TARGET_WS),
+    call: (t, control) => runOpenWorkspace(control, t.sc, buildOpenWorkspaceRequest(TARGET_WS)),
   },
   {
     rpc: "CloseWorkspace",
@@ -499,6 +513,18 @@ describe("the per-rpc causes, worded at their own site", () => {
     const refusal = await refuseWith(VERBS[0], "worktreeUnrestorable");
     expect(refusal?.textContent).toContain(
       "the workspace's directory /w/gone is gone and its branch feature/gone no longer exists in /w; there is nothing to restore it from",
+    );
+  });
+
+  it("says a revert asked of a workspace with no landed merge", async () => {
+    const refusal = await refuseWith(VERBS[0], "notMerged");
+    expect(refusal?.textContent).toContain("this workspace has no landed merge to revert");
+  });
+
+  it("draws the daemon's own sentence for a revert brief that would not compose", async () => {
+    const refusal = await refuseWith(VERBS[0], "briefMissing");
+    expect(refusal?.textContent).toContain(
+      "the merge could not be reverted: the workspace-merge-revert brief is unreadable",
     );
   });
 
