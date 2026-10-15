@@ -629,7 +629,8 @@ function atomSubwords(a: Atom): Subword[] {
  * with no span at all: kept open, it would swallow every space after it into
  * one atom no line could wrap.
  */
-function tokenize(raw: string): Atom[] {
+function tokenize(raw: string, markdown: boolean): Atom[] {
+  if (!markdown) return tokenizeWith(raw, false).atoms;
   const spans = tokenizeWith(raw, true);
   return spans.balanced ? spans.atoms : tokenizeWith(raw, false).atoms;
 }
@@ -979,7 +980,7 @@ function scanCode(raw: string, state: CodeState): CodeState {
  * itself overflows. Triple-backtick FENCED blocks are handled opaquely elsewhere
  * (splitTreeSegments / renderFenceBlock) and never reach here.
  */
-function pack(pieces: Piece[], width: number): { lines: string[]; overflows: string[] } {
+function pack(pieces: Piece[], width: number, markdown: boolean): { lines: string[]; overflows: string[] } {
   const lines: string[] = [];
   const overflows: string[] = [];
   // The inline-code state entering and leaving each piece. `before[i]` is the
@@ -991,7 +992,8 @@ function pack(pieces: Piece[], width: number): { lines: string[]; overflows: str
   let state = CODE_CLOSED;
   for (const piece of pieces) {
     before.push(state);
-    state = scanCode(piece.raw, state);
+    // An HTML body has no backtick spans left to balance: inline() drew them.
+    if (markdown) state = scanCode(piece.raw, state);
     after.push(state);
   }
   let current = "";
@@ -1034,7 +1036,8 @@ export interface RenderLine {
   /** Connectors + label (first line) or continuation indent (wrap lines);
    * empty for a passed-through non-branch line. */
   prefix: string;
-  /** The branch text on this line, or the whole line for a raw passthrough. */
+  /** The branch text on this line, or the whole line for a raw passthrough:
+   * raw markdown, or the inline HTML when `formatTree` was handed INLINE. */
   body: string;
   /** True for a non-branch line the wrapper passed through untouched. */
   raw: boolean;
@@ -1050,6 +1053,7 @@ function wrapBranch(
   branch: Branch,
   width: number,
   hasChildren: boolean,
+  inline: InlineMarkup | undefined,
 ): { lines: RenderLine[]; overflows: string[] } {
   const prefixWidth = textColumn(branch);
   const field = width - prefixWidth;
@@ -1058,7 +1062,9 @@ function wrapBranch(
       `branch prefix occupies ${prefixWidth} columns, leaving no room within ${width}: ${branch.prefix}${branch.label}`,
     );
   }
-  const packed = pack(toPieces(tokenize(branch.body), field), field);
+  const markdown = inline === undefined;
+  const body = markdown ? branch.body : inline(escapeHtml(branch.body));
+  const packed = pack(toPieces(tokenize(body, markdown), field), field, markdown);
   const indent = continuationIndent(branch, hasChildren);
   const lines: RenderLine[] = [
     { prefix: branch.indent + branch.prefix + branch.label, body: packed.lines[0], raw: false },
@@ -1105,21 +1111,32 @@ function joinWrapped(lines: string[]): Entry[] {
  * TreeOverflowError when a branch's prefix alone exceeds WIDTH — the one
  * condition the formatter refuses. Returns the rendered lines plus every word
  * that could not be made to fit (served wider, never truncated).
+ *
+ * WITHOUT INLINE, every body is the RAW MARKDOWN it arrived as, wrapped with its
+ * backtick spans balanced, which is the daemon formatter's own output. WITH
+ * INLINE, every body is drawn to HTML first and wrapped as HTML, so a line is
+ * measured by the text it DRAWS: a file link counts as its file name
+ * (`fileLinkLabel`), never its path or its `[text](href)` markup, and a link
+ * or a bold phrase is an element no wrap can cut into broken markdown.
  */
-export function formatTree(lines: string[], width: number): { lines: RenderLine[]; overflows: string[] } {
+export function formatTree(
+  lines: string[],
+  width: number,
+  inline?: InlineMarkup,
+): { lines: RenderLine[]; overflows: string[] } {
   const entries = joinWrapped(lines);
   const out: RenderLine[] = [];
   const overflows: string[] = [];
   for (let i = 0; i < entries.length; i++) {
     const entry = entries[i];
     if (!entry.branch) {
-      out.push({ prefix: "", body: entry.raw, raw: true });
+      out.push({ prefix: "", body: inline === undefined ? entry.raw : inline(escapeHtml(entry.raw)), raw: true });
       continue;
     }
     let hasChildren = false;
     const next = entries[i + 1];
     if (next && next.branch) hasChildren = isParentOf(entry.branch, next.branch);
-    const wrapped = wrapBranch(entry.branch, width, hasChildren);
+    const wrapped = wrapBranch(entry.branch, width, hasChildren, inline);
     out.push(...wrapped.lines);
     overflows.push(...wrapped.overflows);
   }
@@ -1130,6 +1147,9 @@ export function formatTree(lines: string[], width: number): { lines: RenderLine[
 // Rendering
 // ---------------------------------------------------------------------------
 
+/** markdown.ts's inline pass: already-escaped text in, inline HTML out. */
+export type InlineMarkup = (escaped: string) => string;
+
 /** A callback the renderer surfaces a wrap issue through (the caller logs it). */
 export type TreeIssue = (message: string, context: Record<string, unknown>) => void;
 
@@ -1137,7 +1157,9 @@ export type TreeIssue = (message: string, context: Record<string, unknown>) => v
  * Render TEXT as wrapped tree lines at WIDTH columns. Each output line is an
  * `.mp-line` div carrying its structural prefix verbatim and its branch body
  * with INLINE markdown applied (markdown.ts's inline pass, injected rather than
- * imported so this module never depends back on markdown.ts).
+ * imported so this module never depends back on markdown.ts). INLINE runs
+ * BEFORE the wrap (`formatTree`), so the width a line is wrapped to is the
+ * width it draws.
  *
  * When a branch's prefix alone exceeds WIDTH the wrapper refuses (the tree is
  * too deep for the width); the issue is surfaced through ONISSUE and the tree is
@@ -1145,7 +1167,7 @@ export type TreeIssue = (message: string, context: Record<string, unknown>) => v
  */
 export function renderTreeHtml(
   text: string,
-  inline: (escaped: string) => string,
+  inline: InlineMarkup,
   width: number,
   onIssue?: TreeIssue,
 ): string {
@@ -1169,7 +1191,7 @@ export function renderTreeHtml(
     }
     let rendered: RenderLine[];
     try {
-      const formatted = formatTree(segment.lines, cols);
+      const formatted = formatTree(segment.lines, cols, inline);
       rendered = formatted.lines;
       overflowCount += formatted.overflows.length;
     } catch (err) {
@@ -1181,9 +1203,9 @@ export function renderTreeHtml(
           error: err.message,
         });
       }
-      rendered = segment.lines.map((line) => ({ prefix: "", body: line, raw: true }));
+      rendered = segment.lines.map((line) => ({ prefix: "", body: inline(escapeHtml(line)), raw: true }));
     }
-    parts.push(rendered.map((l) => renderLine(l, inline)).join(""));
+    parts.push(rendered.map(renderLine).join(""));
   }
   if (onIssue && overflowCount > 0) {
     onIssue("a metaprompt tree holds words wider than the column limit; served wider, never truncated", {
@@ -1277,9 +1299,9 @@ function renderFenceBlock(segment: FenceSegment): string {
   return `<pre class="md-code"><code class="hljs${langClass}">${html}</code></pre>`;
 }
 
-function renderLine(l: RenderLine, inline: (escaped: string) => string): string {
+function renderLine(l: RenderLine): string {
   if (l.raw && l.body.trim() === "") return `<div class="mp-line mp-blank"></div>`;
-  const content = boxWideChars(inline(escapeHtml(l.body)));
+  const content = boxWideChars(l.body);
   if (l.raw) {
     return `<div class="mp-line"><span class="mp-content">${content}</span></div>`;
   }

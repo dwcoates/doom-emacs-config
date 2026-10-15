@@ -13,6 +13,7 @@ import {
   visibleWidth,
 } from "../src/metaprompt-tree.js";
 import { captureLogRecords, forwardedRecord } from "./log-capture.js";
+import { inline } from "../src/markdown.js";
 
 const TREE = [
   "Response (✏️ changes made)",
@@ -750,5 +751,69 @@ describe("inline code keeps its runs of spaces", () => {
     // Assert
     expect(lines.length).toBeGreaterThan(2);
     expect(lines.every((line) => line.length <= 40)).toBe(true);
+  });
+});
+
+describe("renderTreeHtml wraps by the width a line draws", () => {
+  const lineContents = (html: string): string[] =>
+    [...html.matchAll(/<span class="mp-content">(.*?)<\/span><\/div>/g)].map((m) => m[1]);
+  const drawn = (content: string): string => content.replace(/<[^>]*>/g, "");
+
+  it.each([
+    {
+      name: "a ~/ code span file link",
+      src: "└── 1.1 see `~/a/very/long/directory/path/to/b.ts:12` now",
+      text: "see b.ts:12 now",
+    },
+    {
+      name: "an explicit link whose text is a path",
+      src: "└── 1.1 see [~/a/very/long/directory/b.ts](~/a/very/long/directory/b.ts) now",
+      text: "see b.ts now",
+    },
+  ])("keeps a branch on one line when $name draws only its file name", ({ src, text }) => {
+    // Arrange — "└── 1.1 " is 8 columns; the drawn text fits 8 + 16, the source does not.
+    // Act
+    const contents = lineContents(renderTreeHtml(src, inline, 24));
+    // Assert
+    expect(contents.map(drawn)).toEqual([text]);
+  });
+
+  it("wraps before a link rather than cutting its markdown apart", () => {
+    // Act — the drawn "aaaa the long config" is 20 columns, wider than the 16-column field.
+    const contents = lineContents(renderTreeHtml("└── 1.1 aaaa [the long config](~/x.el)", inline, 24));
+    // Assert — the link is one whole anchor on the continuation, never a literal "[" or "](".
+    expect(contents.map(drawn)).toEqual(["aaaa", "the long config"]);
+    expect(contents[1]).toMatch(/^<a href="~\/x.el"[^>]*>the long config<\/a>$/);
+  });
+
+  it("draws a bold phrase that crosses no wrap with no literal asterisks", () => {
+    // Act
+    const contents = lineContents(renderTreeHtml("└── 1.1 aaaa **bold words**", inline, 18));
+    // Assert
+    expect(contents.join("")).not.toContain("*");
+    expect(contents.join("")).toContain("<strong>bold words</strong>");
+  });
+
+  it("does not count a code span's backticks toward the width", () => {
+    // Act — "abc defgh" draws 9 columns, exactly the field; with backticks it is 11.
+    const contents = lineContents(renderTreeHtml("└── 1.1 abc `defgh`", inline, 17));
+    // Assert
+    expect(contents).toEqual(["abc <code>defgh</code>"]);
+  });
+
+  it("runs a header line outside any branch through the inline pass", () => {
+    // Act
+    const html = renderTreeHtml("Response (`x`)\n\n1 🔧 A", inline, 40);
+    // Assert
+    expect(html).toContain("Response (<code>x</code>)");
+  });
+});
+
+describe("formatTree without an inline pass", () => {
+  it("still wraps the raw markdown, backticks counted, as the daemon formatter does", () => {
+    // Act
+    const { lines } = formatTree(["└── 1.1 abc `defgh`"], 17);
+    // Assert
+    expect(lines.map(lineText)).toEqual(["└── 1.1 abc", "        `defgh`"]);
   });
 });
