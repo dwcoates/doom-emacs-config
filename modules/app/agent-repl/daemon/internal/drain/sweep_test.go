@@ -1304,3 +1304,4 @@ func TestSweepHibernatesAQueuedSessionIdlePastTheCutoffSinceItJoined(t *testing.
 		t.Fatalf("hibernated = %v, want [%s]", hibernated, ws)
 	}
 }
+

@@ -8,7 +8,6 @@ import (
 
 	shimv1 "agentrepl/proto/shim/v1"
 
-	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
@@ -402,15 +401,8 @@ func (c *controller) Run(ctx context.Context) error {
 	for {
 		schedule, err := c.deps.DB.DrainSchedule(ctx)
 		if err != nil {
-			// The serving lifetime ending under the read is this daemon's own
-			// exit withdrawing the loop, not a schedule that could not be read:
-			// there is no drain left to fire and nothing to remediate. A read
-			// that fails while serving is still an error.
-			if ctxend.Is(err) {
-				c.log.Debug(opRun, "the schedule read ended when the drain loop's context was cancelled", withCause(nil, err))
-			} else {
-				c.log.Error(opRun, "could not read the standing drain schedule", withCause(nil, err))
-			}
+			readFailed(c.log, opRun, "could not read the standing drain schedule",
+				"the schedule read ended when the drain loop's context was cancelled", nil, err)
 			return fmt.Errorf("drain: run: %w", err)
 		}
 		now := c.deps.Clock.Now()
