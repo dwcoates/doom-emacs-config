@@ -2206,6 +2206,39 @@ func TestADeferredHoldSurvivesADaemonRestartStillDeferred(t *testing.T) {
 	}
 }
 
+// TestADeferredPromptSurvivesAWorkspaceRestartAndRunsAsItsOwnTurn pins that a
+// prompt deferred behind a running turn is never lost to a workspace restart:
+// the restart stops the running turn, and the deferred prompt is delivered to
+// the restarted session as its own turn.
+func TestADeferredPromptSurvivesAWorkspaceRestartAndRunsAsItsOwnTurn(t *testing.T) {
+	t.Parallel()
+	// Arrange: a running turn with a prompt deferred behind it.
+	f := newOpened(t, harness.Opts{})
+	// The sweep covers every test; the declared records are evidence of the
+	// restart's own stand-down of the shim, which the fake answers by exiting.
+	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.watch_session",
+		"daemon.rollout.relaunch", "daemon.sessionwatcher.link_fault",
+		"daemon.sessionwatcher.watch_agent", "daemon.shimclient.exit", "daemon.shimclient.kill_session")
+	f.shim.ExpectStartSession()
+	f.submit("start the work", "k-running-restart", origin)
+	f.shim.ExpectStartTurn()
+	turn := f.submitDeferred("run the tests afterwards", "k-deferred-restart").GetSuccess().GetTurn().GetTurn()
+
+	// Act
+	resp, err := f.d.Client().RestartWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.RestartWorkspaceRequest{Workspace: f.ws}))
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("RestartWorkspace = %v, %v, want a success", resp, err)
+	}
+
+	// Assert: the restarted session is handed the deferred prompt as its own
+	// turn. READ FROM THE SHIM'S DURABLE LOG: the restart answers once it
+	// happened, and a live dial of the new shim races its bring-up.
+	started := &shimv1.StartTurnRequest{}
+	f.d.AwaitShimLoggedRequestMatching(f.repo.Dir, harness.RPCStartTurn,
+		"the deferred prompt's StartTurn on the restarted session", started,
+		func() bool { return started.GetTurn().GetValue() == turn.GetValue() })
+}
+
 // ---------------------------------------------------------------------------
 // A reply to a selected bubble
 // ---------------------------------------------------------------------------

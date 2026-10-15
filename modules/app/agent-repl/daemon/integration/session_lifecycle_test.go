@@ -927,6 +927,36 @@ func TestHostVendorClaudeConfigDirIsTheRoutedRootForAMultiRepoWorkspace(t *testi
 	}
 }
 
+// THE VENDOR CONVERSATION A HOST NAMES IS THE BRING-UP'S, AND A TURN DOES NOT
+// MOVE IT. The host stream's vendor arm carries the conversation the session
+// started on, and a turn run in that conversation leaves it naming the same
+// one: only a rotation changes it.
+func TestTheHostsVendorConversationIsUnchangedByATurn(t *testing.T) {
+	t.Parallel()
+	// Arrange: an opened workspace whose host names its conversation.
+	f := newOpened(t, harness.Opts{})
+	f.shim.ExpectStartSession()
+	f.shim.PushHealthy()
+	named := func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
+		return r.GetHost().GetExisting().GetLive().GetClaude().GetSessionId() != ""
+	}
+	before := harness.AwaitView(t, f.d.Ctx(), f.host, "the host naming its vendor conversation", named).
+		GetHost().GetExisting().GetLive().GetClaude().GetSessionId()
+
+	// Act: a turn, run to its close.
+	f.submit("go", "k-vendor-stable", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	f.shim.ExpectStartTurn()
+	pushConcludedTurn(f.shim, mainAgent, "resp-1")
+	f.d.AwaitWorkspaceLogOperationCount(f.repo.Dir, "daemon.promptqueue.turn_ended", 1)
+
+	// Assert: a fresh host watch names the same conversation.
+	after := harness.AwaitView(t, f.d.Ctx(), f.d.WatchHost(f.ws), "the host after the turn", named).
+		GetHost().GetExisting().GetLive().GetClaude().GetSessionId()
+	if after != before {
+		t.Fatalf("the host names vendor conversation %q after a turn, want the bring-up's %q", after, before)
+	}
+}
+
 // ---- critique 5: account-switch transcript porting ----
 
 func TestAForkedChildOutsideTheMultiRepoRootDoesNotInheritTheParentsAccount(t *testing.T) {
