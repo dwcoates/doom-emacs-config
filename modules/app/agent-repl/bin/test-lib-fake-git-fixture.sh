@@ -27,9 +27,12 @@ trap 'rm -rf "$TMP"' EXIT
 test_clear_live_git_bindings_unsets_every_binding() {
   local left
   left="$(
-    export GIT_DIR=a GIT_WORK_TREE=b GIT_INDEX_FILE=c GIT_PREFIX=d GIT_COMMON_DIR=e
+    export GIT_DIR=a GIT_WORK_TREE=b GIT_INDEX_FILE=c GIT_PREFIX=d GIT_COMMON_DIR=e \
+      GIT_AUTHOR_NAME=f GIT_AUTHOR_EMAIL=g GIT_AUTHOR_DATE=h \
+      GIT_COMMITTER_NAME=i GIT_COMMITTER_EMAIL=j GIT_COMMITTER_DATE=k \
+      GIT_CONFIG_PARAMETERS=l GIT_CONFIG_COUNT=m
     clear_live_git_bindings
-    env | grep -E '^(GIT_DIR|GIT_WORK_TREE|GIT_INDEX_FILE|GIT_PREFIX|GIT_COMMON_DIR)=' || true
+    env | grep -E '^(GIT_DIR|GIT_WORK_TREE|GIT_INDEX_FILE|GIT_PREFIX|GIT_COMMON_DIR|GIT_(AUTHOR|COMMITTER)_(NAME|EMAIL|DATE)|GIT_CONFIG_(PARAMETERS|COUNT))=' || true
   )"
   if [ -z "$left" ]; then pass "clear_live_git_bindings unsets every live git binding"; else fail "bindings left set" "$left"; fi
 }

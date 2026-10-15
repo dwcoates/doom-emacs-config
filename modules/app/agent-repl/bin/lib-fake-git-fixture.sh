@@ -4,8 +4,9 @@
 # TEST SUPPORT ONLY.
 #
 # clear_live_git_bindings unsets what a caller's live git exports to its
-# children (a hook's index, a session's work tree), so no fixture command
-# can read the caller's repository as its own. Harnesses run from hooks,
+# children (a hook's index, a session's work tree, a commit's identity, a
+# `git -c` override), so no fixture command can read the caller's repository
+# or identity as its own. Harnesses run from hooks,
 # agent sessions and the safe-test-run net, so each calls it before any
 # fixture exists.
 #
@@ -24,7 +25,10 @@
 LIB_FAKE_GIT_FIXTURE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 
 clear_live_git_bindings() {
-    unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_COMMON_DIR
+    unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_COMMON_DIR \
+        GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_AUTHOR_DATE \
+        GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL GIT_COMMITTER_DATE \
+        GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT
 }
 
 install_checked_in_hook() {
