@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"agent-repld/internal/dlog"
 )
 
 func TestIsNamesOnlyAContextEnding(t *testing.T) {
@@ -77,5 +79,36 @@ func TestNoSiteHandRollsTheClassification(t *testing.T) {
 	// Assert.
 	if len(offenders) > 0 {
 		t.Fatalf("these sites classify a context ending by hand instead of through ctxend.Is: %v", offenders)
+	}
+}
+
+func TestLogSplitsByWhetherTheContextEnded(t *testing.T) {
+	tests := []struct {
+		name        string
+		err         error
+		wantVia     string
+		wantMessage string
+	}{
+		{name: "cancelled", err: context.Canceled, wantVia: "cut", wantMessage: "the call was cut"},
+		{name: "wrapped deadline", err: fmt.Errorf("read: %w", context.DeadlineExceeded), wantVia: "cut", wantMessage: "the call was cut"},
+		{name: "a failure", err: errors.New("database is locked"), wantVia: "failed", wantMessage: "the call failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			var via, message, operation string
+			var fields dlog.Context
+			recorder := func(name string) func(string, string, dlog.Context) {
+				return func(op, msg string, ctx dlog.Context) { via, operation, message, fields = name, op, msg, ctx }
+			}
+
+			// Act.
+			Log(tt.err, recorder("cut"), recorder("failed"), "daemon.test", "the call was cut", "the call failed", dlog.Context{"k": "v"})
+
+			// Assert.
+			if via != tt.wantVia || message != tt.wantMessage || operation != "daemon.test" || fields["k"] != "v" {
+				t.Fatalf("recorded via %q: %q %q %v, want via %q: %q with the fields", via, operation, message, fields, tt.wantVia, tt.wantMessage)
+			}
+		})
 	}
 }

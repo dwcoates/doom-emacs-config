@@ -1340,13 +1340,13 @@ func TestReadFailedLevelsByTheCause(t *testing.T) {
 }
 
 // TestEveryDrainReadIsLevelledThroughReadFailed keeps the cut-or-failed split
-// in one place: no drain source but readFailed asks ctxend itself.
+// in one place: no drain source but readFailed asks ctxend for it.
 func TestEveryDrainReadIsLevelledThroughReadFailed(t *testing.T) {
 	// Act
 	var sites []string
 	for _, f := range sourcescan.Production(t) {
 		for i, line := range strings.Split(string(f.Source), "\n") {
-			if strings.Contains(line, "ctxend.Is(") {
+			if strings.Contains(line, "ctxend.") && !strings.Contains(line, "\"agent-repld/internal/ctxend\"") {
 				sites = append(sites, fmt.Sprintf("%s:%d", f.Name, i+1))
 			}
 		}
@@ -1354,6 +1354,6 @@ func TestEveryDrainReadIsLevelledThroughReadFailed(t *testing.T) {
 
 	// Assert
 	if len(sites) != 1 || !strings.HasPrefix(sites[0], "controller.go:") {
-		t.Fatalf("ctxend.Is is asked at %v, want only inside readFailed", sites)
+		t.Fatalf("ctxend is asked at %v, want only inside readFailed", sites)
 	}
 }

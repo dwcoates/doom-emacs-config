@@ -546,11 +546,7 @@ func (c *controller) wake() {
 // nothing to remediate, so it records at debug as cut. A read that fails while
 // serving is an error.
 func readFailed(log dlog.Logger, op, failed, cut string, fields dlog.Context, err error) {
-	if ctxend.Is(err) {
-		log.Debug(op, cut, withCause(fields, err))
-		return
-	}
-	log.Error(op, failed, withCause(fields, err))
+	ctxend.Log(err, log.Debug, log.Error, op, cut, failed, withCause(fields, err))
 }
 
 // withCause stamps an error onto a record's context without mutating the
