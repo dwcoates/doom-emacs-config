@@ -266,8 +266,13 @@ func buildShimBundle(node string) (string, error) {
 	// map beside it, and both are read by the REPORTER, after this process
 	// (and with it e2eBinDir) is gone. Under coverage the bundle is therefore
 	// staged beneath the coverage root, which the reporter owns.
+	// A shared prebuild's bundle stays in the shared directory every chunk
+	// reads, coverage or not: that directory lives as long as the run, and a
+	// chunk looks for the bundle nowhere else (sharedOr).
 	root := e2eBinDir()
-	if covRoot := harness.CoverageRoot(); covRoot != "" {
+	if mode, _, err := testenv.BinaryMode(os.Getenv); err != nil {
+		return "", err
+	} else if covRoot := harness.CoverageRoot(); covRoot != "" && mode == testenv.BuildHere {
 		root = filepath.Join(covRoot, "shim-bundle")
 	}
 	out := filepath.Join(root, shimBundleName)
