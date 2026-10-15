@@ -242,6 +242,9 @@ var Suites = []Suite{
 			// keeps them fresh: this suite reads their files and never boots
 			// the shim.
 			"testdata/scenario-goldens/",
+			// internal/recorded holds its home-token rule to the shim's capture
+			// tooling's own vectors and script.
+			"agent-shim/claude/shim/scripts/capture/",
 		}}},
 	{Name: "store", Kind: GoModule, Path: "agent-shim/shim-store", TestParallel: map[string]int{"integration": 8},
 		Programs: map[string][]string{"integration": {"shim-store"}},
