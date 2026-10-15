@@ -793,8 +793,13 @@ func TestCreateWorkspaceWhoseShimWillNotComeUpAnswersTheSpawnFailedArm(t *testin
 	// scripted through the profile EVERY spawn falls back to.
 	d := newDaemon(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of the bring-up death the test scripts.
+	// The failed create is then reported to the repository's main-worktree
+	// workspace (workspace.reportCreateFailure), whose open dies the same
+	// scripted death: daemon.workspace.create_failed_report records that at
+	// ERROR, on its own goroutine, so it is declared but not required.
 	d.ExpectWarnings("daemon.shimclient.redial", "daemon.shimclient.exit", "daemon.shimclient.spawn",
-		"daemon.workspace.bring_up", "daemon.workspace.open", "daemon.workspace.create")
+		"daemon.workspace.bring_up", "daemon.workspace.open", "daemon.workspace.create",
+		"daemon.workspace.create_failed_report")
 	d.WriteDefaultShimProfile(harness.ShimProfile{
 		ExitOn: harness.ExitOnStartup, ExitCode: 7, Stderr: "boom: fake bring-up death",
 	})
