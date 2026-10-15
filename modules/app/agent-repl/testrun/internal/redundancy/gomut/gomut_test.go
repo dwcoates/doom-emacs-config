@@ -88,6 +88,20 @@ func build(t *testing.T, dir string, overlay string) (string, string) {
 	return bin, ""
 }
 
+func overlay(t *testing.T, s *Schema) string {
+	t.Helper()
+	dir := t.TempDir()
+	replace, err := s.Overlay(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "overlay.json")
+	if err := WriteOverlay(path, replace); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func runFixture(t *testing.T, bin string, mutant int) string {
 	t.Helper()
 	cmd := exec.Command(bin)
@@ -110,14 +124,11 @@ func TestSchemaEveryMutantChangesTheFixtureAndNoneActiveIsTheOriginal(t *testing
 		t.Fatal(errs)
 	}
 	want := runFixture(t, orig, 0)
-	s, err := Build(dir, []string{"main.go"})
+	s, err := Build(dir, []string{"main.go"}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ov, err := s.Overlay(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+	ov := overlay(t, s)
 
 	// Act
 	bin, errs := build(t, dir, ov)
@@ -141,7 +152,7 @@ func TestSchemaLaysOutEachOperator(t *testing.T) {
 	dir := module(t, fixture)
 
 	// Act
-	s, err := Build(dir, []string{"main.go"})
+	s, err := Build(dir, []string{"main.go"}, 1)
 
 	// Assert
 	if err != nil {
@@ -179,7 +190,7 @@ func main() {
 	dir := module(t, src)
 
 	// Act
-	s, err := Build(dir, []string{"main.go"})
+	s, err := Build(dir, []string{"main.go"}, 1)
 
 	// Assert
 	if err != nil {
@@ -190,10 +201,7 @@ func main() {
 			t.Fatalf("laid out %s on a statement outside a statement list", m.Key())
 		}
 	}
-	ov, err := s.Overlay(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+	ov := overlay(t, s)
 	if _, errs := build(t, dir, ov); errs != "" {
 		t.Fatalf("the schema does not build:\n%s", errs)
 	}
@@ -213,14 +221,11 @@ func main() {
 }
 `
 	dir := module(t, src)
-	s, err := Build(dir, []string{"main.go"})
+	s, err := Build(dir, []string{"main.go"}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ov, err := s.Overlay(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+	ov := overlay(t, s)
 	_, errs := build(t, dir, ov)
 	m := compileError.FindStringSubmatch(errs)
 	if m == nil {
@@ -243,10 +248,7 @@ func main() {
 	if len(dropped) != 1 || s.Mutants[dropped[0]-1].Op != "+ -> -" || s.Mutants[dropped[0]-1].Col != 14 {
 		t.Fatalf("dropped %v, want the a+b site", dropped)
 	}
-	ov, err = s.Overlay(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+	ov = overlay(t, s)
 	if _, errs := build(t, dir, ov); errs != "" {
 		t.Fatalf("the schema still does not build:\n%s", errs)
 	}
@@ -261,7 +263,7 @@ func main() {
 func TestDropRefusesAPositionInNoSite(t *testing.T) {
 	// Arrange
 	dir := module(t, fixture)
-	s, err := Build(dir, []string{"main.go"})
+	s, err := Build(dir, []string{"main.go"}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -317,13 +319,65 @@ func TestBuildRefuses(t *testing.T) {
 			}
 
 			// Act
-			_, err := Build(dir, tt.build)
+			_, err := Build(dir, tt.build, 1)
 
 			// Assert
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("err = %v, want %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestBuildNumbersFromFirst(t *testing.T) {
+	// Arrange
+	dir := module(t, fixture)
+
+	// Act
+	s, err := Build(dir, []string{"main.go"}, 100)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Mutants[0].ID != 100 || s.Mutants[len(s.Mutants)-1].ID != 100+len(s.Mutants)-1 {
+		t.Fatalf("ids run %d..%d, want 100..%d", s.Mutants[0].ID, s.Mutants[len(s.Mutants)-1].ID, 100+len(s.Mutants)-1)
+	}
+}
+
+func TestBuildRefusesAFirstIDBelowOne(t *testing.T) {
+	// Arrange
+	dir := module(t, fixture)
+
+	// Act
+	_, err := Build(dir, []string{"main.go"}, 0)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "start at 1") {
+		t.Fatalf("err = %v, want the first id refused", err)
+	}
+}
+
+func TestHoldsNamesTheOriginalAndTheOverlayPath(t *testing.T) {
+	// Arrange
+	dir := module(t, fixture)
+	s, err := Build(dir, []string{"main.go"}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scratch := t.TempDir()
+	replace, err := s.Overlay(scratch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := filepath.Join(dir, "main.go")
+
+	// Act / Assert
+	if !s.Holds(orig) || !s.Holds(replace[orig]) {
+		t.Fatalf("Holds misses %s or its overlay %s", orig, replace[orig])
+	}
+	if s.Holds(filepath.Join(dir, "other.go")) {
+		t.Fatal("Holds claims a file outside the schema")
 	}
 }
 

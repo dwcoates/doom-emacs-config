@@ -138,7 +138,8 @@ func TestMinimize(t *testing.T) {
 				{ID: "Empty", Cost: 1 * ms},
 			},
 			wantRemoved: []string{"Empty"},
-			wantSingle:  map[string]string{"Empty": "Real"},
+			wantSingle:  map[string]string{"Empty": ""},
+			wantBy:      map[string][]string{"Empty": nil},
 		},
 	}
 	for _, tt := range tests {

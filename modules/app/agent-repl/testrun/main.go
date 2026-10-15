@@ -8,6 +8,8 @@
 //	testrun finish-record --module DIR --record-out PATH
 //	testrun cover-report -name N -module DIR -covdirs ROOT
 //	testrun roster
+//	testrun redundancy go -module DIR -pkg PKG -tests FILES -out DIR [...]
+//	testrun redundancy report -in measurement.json [-universe U] [-overhead D]
 package main
 
 import (
@@ -27,6 +29,8 @@ import (
 	"agentrepl/testrun/internal/history"
 	"agentrepl/testrun/internal/life"
 	"agentrepl/testrun/internal/ramdisk"
+	"agentrepl/testrun/internal/redundancy"
+	"agentrepl/testrun/internal/redundancy/gomeasure"
 	"agentrepl/testrun/internal/reuse"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/internal/suites"
@@ -60,6 +64,8 @@ func main() {
 		os.Exit(planCmd(log, os.Args[2:]))
 	case "confine":
 		os.Exit(confineCmd(log, os.Args[2:]))
+	case "redundancy":
+		os.Exit(redundancyCmd(log, os.Args[2:]))
 	default:
 		log.Errorf("unknown subcommand %q", os.Args[1])
 		os.Exit(2)
@@ -330,6 +336,24 @@ func coverCmd(log *run.Log, argv []string) int {
 		return 1
 	}
 	return 0
+}
+
+// redundancyCmd is `testrun redundancy go|report`.
+func redundancyCmd(log *run.Log, argv []string) int {
+	if len(argv) == 0 {
+		log.Errorf("usage: testrun redundancy go|report ...")
+		return 2
+	}
+	switch argv[0] {
+	case "go":
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		return gomeasure.Command(ctx, log, argv[1:], gomeasure.OSExec)
+	case "report":
+		return redundancy.ReportCommand(log, argv[1:], os.Stdout)
+	}
+	log.Errorf("unknown redundancy subcommand %q", argv[0])
+	return 2
 }
 
 // confineCmd is a keyed unit's launcher: it scrubs the environment and execs

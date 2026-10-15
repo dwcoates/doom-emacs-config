@@ -72,12 +72,18 @@ type Schema struct {
 	Mutants []Mutant
 	files   []*file
 	byID    map[int]*site
+	first   int
 }
 
 // Build parses the named production files of the package in dir and lays out
-// every mutant. files are base names; test and generated files are refused.
-func Build(dir string, files []string) (*Schema, error) {
-	s := &Schema{Dir: dir, byID: map[int]*site{}}
+// every mutant, numbering them from first so that schemas of several packages
+// share one binary. files are base names; test and generated files are
+// refused.
+func Build(dir string, files []string, first int) (*Schema, error) {
+	if first < 1 {
+		return nil, fmt.Errorf("gomut: mutant ids start at 1, not %d", first)
+	}
+	s := &Schema{Dir: dir, byID: map[int]*site{}, first: first}
 	sort.Strings(files)
 	for _, name := range files {
 		if strings.HasSuffix(name, "_test.go") {
@@ -110,22 +116,27 @@ func Build(dir string, files []string) (*Schema, error) {
 }
 
 // Overlay writes the rewritten files and the switch file under scratch and
-// returns the `go -overlay` JSON's path.
-func (s *Schema) Overlay(scratch string) (string, error) {
+// returns the `go -overlay` replacements, original path to rewrite.
+func (s *Schema) Overlay(scratch string) (map[string]string, error) {
 	replace := map[string]string{}
 	for i, f := range s.files {
 		out := filepath.Join(scratch, fmt.Sprintf("%03d-%s", i, filepath.Base(f.path)))
 		if err := os.WriteFile(out, f.rewrite(), 0o644); err != nil {
-			return "", fmt.Errorf("gomut: write %s: %w", out, err)
+			return nil, fmt.Errorf("gomut: write %s: %w", out, err)
 		}
 		replace[f.path] = out
 		f.overlay = out
 	}
 	sw := filepath.Join(scratch, SwitchFile)
 	if err := os.WriteFile(sw, []byte(strings.ReplaceAll(switchSource, "PACKAGE", s.Package)), 0o644); err != nil {
-		return "", fmt.Errorf("gomut: write %s: %w", sw, err)
+		return nil, fmt.Errorf("gomut: write %s: %w", sw, err)
 	}
 	replace[filepath.Join(s.Dir, SwitchFile)] = sw
+	return replace, nil
+}
+
+// WriteOverlay writes the `go -overlay` JSON for replace to path.
+func WriteOverlay(path string, replace map[string]string) error {
 	var b bytes.Buffer
 	b.WriteString(`{"Replace":{`)
 	keys := make([]string, 0, len(replace))
@@ -140,11 +151,20 @@ func (s *Schema) Overlay(scratch string) (string, error) {
 		fmt.Fprintf(&b, "%s:%s", strconv.Quote(k), strconv.Quote(replace[k]))
 	}
 	b.WriteString("}}")
-	path := filepath.Join(scratch, "overlay.json")
 	if err := os.WriteFile(path, b.Bytes(), 0o644); err != nil {
-		return "", fmt.Errorf("gomut: write %s: %w", path, err)
+		return fmt.Errorf("gomut: write %s: %w", path, err)
 	}
-	return path, nil
+	return nil
+}
+
+// Holds says path, original or overlay, is a file of the schema.
+func (s *Schema) Holds(path string) bool {
+	for _, f := range s.files {
+		if f.path == path || f.overlay == path {
+			return true
+		}
+	}
+	return false
 }
 
 // Live are the mutants whose sites are still in the schema.
@@ -292,7 +312,7 @@ func (w *walker) off(p token.Pos) int { return w.fset.Position(p).Offset }
 
 func (w *walker) mutant(n ast.Node, op string) int {
 	pos := w.fset.Position(n.Pos())
-	id := len(w.s.Mutants) + 1
+	id := w.s.first + len(w.s.Mutants)
 	w.s.Mutants = append(w.s.Mutants, Mutant{ID: id, File: w.f.path, Line: pos.Line, Col: pos.Column, Op: op})
 	return id
 }

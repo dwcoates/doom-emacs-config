@@ -73,10 +73,12 @@ type Removal struct {
 	// Saves is the case's cost.
 	Saves time.Duration
 	// DominatedBy is the cheapest kept case that alone catches everything
-	// this one does; empty when no single kept case does.
+	// this one does; empty when no single kept case does, or when this case
+	// catches nothing at all.
 	DominatedBy string
 	// CoveredBy is the kept cases that between them catch everything this
-	// one does. It is DominatedBy alone when DominatedBy is set.
+	// one does. It is DominatedBy alone when DominatedBy is set, and empty
+	// when this case catches nothing.
 	CoveredBy []string
 }
 
@@ -439,6 +441,9 @@ func (s *search) branch(covered bitset, chosen []int, cost time.Duration) {
 // dominators names what catches removed case i's elements among the kept.
 func (p *problem) dominators(i int, kept []int) Removal {
 	r := Removal{Case: p.cases[i].ID, Saves: p.cases[i].Cost}
+	if p.elems[i].andNotCount(newBitset(p.nElem)) == 0 {
+		return r // it catches nothing, so nothing has to catch it instead
+	}
 	single := -1
 	for _, k := range kept {
 		if p.elems[i].subsetOf(p.elems[k]) && (single == -1 || p.weight[k] < p.weight[single]) {
