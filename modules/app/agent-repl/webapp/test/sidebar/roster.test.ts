@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
-import { UpdateTaskResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_task_pb";
 import {
   UpdateSidebarViewResponseSchema,
   type UpdateSidebarViewRequest,
@@ -49,7 +48,6 @@ import {
   startOfTomorrow,
 } from "./harness.js";
 
-const UPDATE_OK = create(UpdateTaskResponseSchema, { result: { case: "success", value: {} } });
 const VIEW_OK = create(UpdateSidebarViewResponseSchema, { result: { case: "success", value: {} } });
 const VIEW_UNKNOWN_REPOSITORY = create(UpdateSidebarViewResponseSchema, {
   result: { case: "error", value: { cause: { case: "unknownRepository", value: {} } } },
