@@ -22,6 +22,7 @@ import "shim/v1/endpoint_set_session_model.proto";
 import "shim/v1/endpoint_set_session_effort.proto";
 import "shim/v1/endpoint_set_session_permission_mode.proto";
 import "shim/v1/endpoint_set_keepalive.proto";
+import "shim/v1/endpoint_send_keepalive.proto";
 import "shim/v1/endpoint_start_session.proto";
 import "shim/v1/endpoint_start_turn.proto";
 import "shim/v1/endpoint_stop_bash.proto";
@@ -74,6 +75,9 @@ service Shim {
   // to lapse and the projected lapse is stated on the session stream), or run
   // it again. See endpoint_set_keepalive.proto.
   rpc SetKeepalive(SetKeepaliveRequest) returns (SetKeepaliveResponse);
+  // Send one keep-alive now, leaving the cadence as it is (the user keeping a
+  // hidden workspace's cache warm). See endpoint_send_keepalive.proto.
+  rpc SendKeepalive(SendKeepaliveRequest) returns (SendKeepaliveResponse);
 
   // END: the session and EVERYTHING live in it — the turn if one is open and
   // every live task, whichever turn spawned it. Refuses while anything is

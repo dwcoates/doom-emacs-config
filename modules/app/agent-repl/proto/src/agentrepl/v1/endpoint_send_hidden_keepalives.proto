@@ -1,0 +1,122 @@
+// endpoint_send_hidden_keepalives.proto — SendHiddenKeepalives: send one
+// keep-alive to the session of every workspace in the HIDDEN WORKSPACES
+// section. SIDEBAR section. Daemon-scoped: the request names no workspace,
+// and Emacs calls it over its one daemon-level connection (`SPC j R`).
+//
+// A hidden workspace's keep-alives are HELD (SetWorkspaceHidden), so its
+// prompt cache lapses on its own clock and its session is stood down when it
+// does. This request asks each hidden workspace's shim for ONE keep-alive now
+// (shim.v1.SendKeepalive), leaving every cadence held: the cache is
+// re-anchored by the keep-alive's own request, each shim restates its
+// projected lapse, and the hidden section's countdowns move later on the
+// roster stream. Nothing in this answer carries a lapse; the roster does.
+//
+// THE DAEMON ASKS EVERY HIDDEN WORKSPACE AT ONCE, and answers when every one
+// has answered, so one slow shim delays the answer but never another
+// workspace's keep-alive.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// DELIBERATELY EMPTY: the call is the request. The set of workspaces is the
+// hidden section as the daemon reads it when the request arrives.
+message SendHiddenKeepalivesRequest {}
+
+// THE ARM IS THE OUTCOME.
+message SendHiddenKeepalivesResponse {
+  oneof result {
+    SendHiddenKeepalivesSuccess success = 1;
+    SendHiddenKeepalivesError error = 2;
+  }
+}
+
+// Every hidden workspace was asked. An empty list is a legitimate answer:
+// the hidden section is empty.
+message SendHiddenKeepalivesSuccess {
+  // One entry per workspace in the hidden section, in the registry's order.
+  // A merged workspace is never here: it files under recently merged
+  // whatever its hidden flag.
+  repeated SendHiddenKeepalivesWorkspace workspaces = 1;
+}
+
+// How one hidden workspace's keep-alive went.
+message SendHiddenKeepalivesWorkspace {
+  // The workspace, as the roster names it.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // THE ARM IS WHAT HAPPENED for this workspace. None of these fails the
+  // request: each workspace's outcome is reported beside the others'.
+  oneof outcome {
+    SendHiddenKeepalivesSent sent = 2;
+    SendHiddenKeepalivesSkipped skipped = 3;
+    SendHiddenKeepalivesNotRunning not_running = 4;
+    SendHiddenKeepalivesFailed failed = 5;
+  }
+}
+
+// The keep-alive was submitted. Its answer moves the workspace's cache lapse
+// later, which reaches the hidden section on the roster stream.
+// DELIBERATELY EMPTY: the arm is the outcome.
+message SendHiddenKeepalivesSent {}
+
+// The workspace's shim judged that no keep-alive may go out now. THE ARM IS
+// WHY.
+message SendHiddenKeepalivesSkipped {
+  oneof reason {
+    SendHiddenKeepalivesSkippedBusy busy = 1;
+    SendHiddenKeepalivesSkippedDetachedWorkLive detached_work_live = 2;
+    SendHiddenKeepalivesSkippedCacheLapsed cache_lapsed = 3;
+  }
+}
+
+// The session's main agent is occupied (a turn, a rollback, a start), whose
+// own requests are keeping the cache warm.
+message SendHiddenKeepalivesSkippedBusy {
+  // What occupies it, as the shim states it.
+  string detail = 1;
+}
+
+// Background work is live in the session, and the rewind a keep-alive owes
+// would kill it.
+message SendHiddenKeepalivesSkippedDetachedWorkLive {
+  // How many background items are live.
+  uint32 live_items = 1;
+}
+
+// The cache has already lapsed; the next request belongs to the cold gate.
+message SendHiddenKeepalivesSkippedCacheLapsed {
+  // When the cache lapsed, in epoch milliseconds.
+  int64 lapsed_at_ms = 1;
+}
+
+// No session runs for the workspace, so it has no cache to keep: its lapse
+// already came and stood the session down, or it was never brought up.
+// DELIBERATELY EMPTY: the arm is the outcome.
+message SendHiddenKeepalivesNotRunning {}
+
+// The daemon could not ask the workspace's shim: the call itself failed (the
+// shim died under it, the transport broke). The failure is recorded in the
+// daemon's log.
+message SendHiddenKeepalivesFailed {
+  // What went wrong, composed by the daemon from the call's own failure.
+  string detail = 1;
+}
+
+// No workspace was asked. Validation failures are Connect InvalidArgument,
+// never an arm.
+message SendHiddenKeepalivesError {
+  oneof cause {
+    // The daemon could not read its registry to find the hidden section.
+    SendHiddenKeepalivesRegistryUnreadable registry_unreadable = 1;
+  }
+}
+
+// The registry read failed.
+message SendHiddenKeepalivesRegistryUnreadable {
+  // The read's own failure, verbatim.
+  string detail = 1;
+}

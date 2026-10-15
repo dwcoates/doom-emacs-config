@@ -127,6 +127,9 @@ const (
 	// AgentReplSetWorkspaceHiddenProcedure is the fully-qualified name of the AgentRepl's
 	// SetWorkspaceHidden RPC.
 	AgentReplSetWorkspaceHiddenProcedure = "/agentrepl.v1.AgentRepl/SetWorkspaceHidden"
+	// AgentReplSendHiddenKeepalivesProcedure is the fully-qualified name of the AgentRepl's
+	// SendHiddenKeepalives RPC.
+	AgentReplSendHiddenKeepalivesProcedure = "/agentrepl.v1.AgentRepl/SendHiddenKeepalives"
 	// AgentReplSetWorkspaceParentProcedure is the fully-qualified name of the AgentRepl's
 	// SetWorkspaceParent RPC.
 	AgentReplSetWorkspaceParentProcedure = "/agentrepl.v1.AgentRepl/SetWorkspaceParent"
@@ -288,6 +291,7 @@ var (
 	agentReplRestartWorkspaceMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("RestartWorkspace")
 	agentReplSetWorkspacePriorityMethodDescriptor     = agentReplServiceDescriptor.Methods().ByName("SetWorkspacePriority")
 	agentReplSetWorkspaceHiddenMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("SetWorkspaceHidden")
+	agentReplSendHiddenKeepalivesMethodDescriptor     = agentReplServiceDescriptor.Methods().ByName("SendHiddenKeepalives")
 	agentReplSetWorkspaceParentMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("SetWorkspaceParent")
 	agentReplMoveWorkspaceMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("MoveWorkspace")
 	agentReplFoldRepositoryMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("FoldRepository")
@@ -439,6 +443,9 @@ type AgentReplClient interface {
 	// Move a workspace into the hidden section or back out; a hidden workspace
 	// is off the Emacs tab bar. See endpoint_set_workspace_hidden.proto.
 	SetWorkspaceHidden(context.Context, *connect.Request[v1.SetWorkspaceHiddenRequest]) (*connect.Response[v1.SetWorkspaceHiddenResponse], error)
+	// Send one keep-alive to every hidden workspace's session, so each cache's
+	// lapse moves later. See endpoint_send_hidden_keepalives.proto.
+	SendHiddenKeepalives(context.Context, *connect.Request[v1.SendHiddenKeepalivesRequest]) (*connect.Response[v1.SendHiddenKeepalivesResponse], error)
 	// Retarget a workspace's merge: make it a child of another workspace of the
 	// same repository, or top-level. Its session is told in the same operation.
 	// See endpoint_set_workspace_parent.proto.
@@ -795,6 +802,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplSetWorkspaceHiddenMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		sendHiddenKeepalives: connect.NewClient[v1.SendHiddenKeepalivesRequest, v1.SendHiddenKeepalivesResponse](
+			httpClient,
+			baseURL+AgentReplSendHiddenKeepalivesProcedure,
+			connect.WithSchema(agentReplSendHiddenKeepalivesMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		setWorkspaceParent: connect.NewClient[v1.SetWorkspaceParentRequest, v1.SetWorkspaceParentResponse](
 			httpClient,
 			baseURL+AgentReplSetWorkspaceParentProcedure,
@@ -1120,6 +1133,7 @@ type agentReplClient struct {
 	restartWorkspace         *connect.Client[v1.RestartWorkspaceRequest, v1.RestartWorkspaceResponse]
 	setWorkspacePriority     *connect.Client[v1.SetWorkspacePriorityRequest, v1.SetWorkspacePriorityResponse]
 	setWorkspaceHidden       *connect.Client[v1.SetWorkspaceHiddenRequest, v1.SetWorkspaceHiddenResponse]
+	sendHiddenKeepalives     *connect.Client[v1.SendHiddenKeepalivesRequest, v1.SendHiddenKeepalivesResponse]
 	setWorkspaceParent       *connect.Client[v1.SetWorkspaceParentRequest, v1.SetWorkspaceParentResponse]
 	moveWorkspace            *connect.Client[v1.MoveWorkspaceRequest, v1.MoveWorkspaceResponse]
 	foldRepository           *connect.Client[v1.FoldRepositoryRequest, v1.FoldRepositoryResponse]
@@ -1328,6 +1342,11 @@ func (c *agentReplClient) SetWorkspacePriority(ctx context.Context, req *connect
 // SetWorkspaceHidden calls agentrepl.v1.AgentRepl.SetWorkspaceHidden.
 func (c *agentReplClient) SetWorkspaceHidden(ctx context.Context, req *connect.Request[v1.SetWorkspaceHiddenRequest]) (*connect.Response[v1.SetWorkspaceHiddenResponse], error) {
 	return c.setWorkspaceHidden.CallUnary(ctx, req)
+}
+
+// SendHiddenKeepalives calls agentrepl.v1.AgentRepl.SendHiddenKeepalives.
+func (c *agentReplClient) SendHiddenKeepalives(ctx context.Context, req *connect.Request[v1.SendHiddenKeepalivesRequest]) (*connect.Response[v1.SendHiddenKeepalivesResponse], error) {
+	return c.sendHiddenKeepalives.CallUnary(ctx, req)
 }
 
 // SetWorkspaceParent calls agentrepl.v1.AgentRepl.SetWorkspaceParent.
@@ -1671,6 +1690,9 @@ type AgentReplHandler interface {
 	// Move a workspace into the hidden section or back out; a hidden workspace
 	// is off the Emacs tab bar. See endpoint_set_workspace_hidden.proto.
 	SetWorkspaceHidden(context.Context, *connect.Request[v1.SetWorkspaceHiddenRequest]) (*connect.Response[v1.SetWorkspaceHiddenResponse], error)
+	// Send one keep-alive to every hidden workspace's session, so each cache's
+	// lapse moves later. See endpoint_send_hidden_keepalives.proto.
+	SendHiddenKeepalives(context.Context, *connect.Request[v1.SendHiddenKeepalivesRequest]) (*connect.Response[v1.SendHiddenKeepalivesResponse], error)
 	// Retarget a workspace's merge: make it a child of another workspace of the
 	// same repository, or top-level. Its session is told in the same operation.
 	// See endpoint_set_workspace_parent.proto.
@@ -2021,6 +2043,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		AgentReplSetWorkspaceHiddenProcedure,
 		svc.SetWorkspaceHidden,
 		connect.WithSchema(agentReplSetWorkspaceHiddenMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplSendHiddenKeepalivesHandler := connect.NewUnaryHandler(
+		AgentReplSendHiddenKeepalivesProcedure,
+		svc.SendHiddenKeepalives,
+		connect.WithSchema(agentReplSendHiddenKeepalivesMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplSetWorkspaceParentHandler := connect.NewUnaryHandler(
@@ -2377,6 +2405,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplSetWorkspacePriorityHandler.ServeHTTP(w, r)
 		case AgentReplSetWorkspaceHiddenProcedure:
 			agentReplSetWorkspaceHiddenHandler.ServeHTTP(w, r)
+		case AgentReplSendHiddenKeepalivesProcedure:
+			agentReplSendHiddenKeepalivesHandler.ServeHTTP(w, r)
 		case AgentReplSetWorkspaceParentProcedure:
 			agentReplSetWorkspaceParentHandler.ServeHTTP(w, r)
 		case AgentReplMoveWorkspaceProcedure:
@@ -2608,6 +2638,10 @@ func (UnimplementedAgentReplHandler) SetWorkspacePriority(context.Context, *conn
 
 func (UnimplementedAgentReplHandler) SetWorkspaceHidden(context.Context, *connect.Request[v1.SetWorkspaceHiddenRequest]) (*connect.Response[v1.SetWorkspaceHiddenResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SetWorkspaceHidden is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) SendHiddenKeepalives(context.Context, *connect.Request[v1.SendHiddenKeepalivesRequest]) (*connect.Response[v1.SendHiddenKeepalivesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SendHiddenKeepalives is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) SetWorkspaceParent(context.Context, *connect.Request[v1.SetWorkspaceParentRequest]) (*connect.Response[v1.SetWorkspaceParentResponse], error) {

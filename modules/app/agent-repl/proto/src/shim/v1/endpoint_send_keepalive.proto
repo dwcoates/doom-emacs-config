@@ -1,0 +1,99 @@
+// endpoint_send_keepalive.proto — SendKeepalive: send ONE keep-alive now,
+// whatever the cadence. SESSION section.
+//
+// A HIDDEN WORKSPACE'S CACHE CAN BE KEPT ON DEMAND (owner request,
+// 2026-10-14). A hidden workspace's cadence is HELD (SetKeepalive), so its
+// cache lapses on its own clock. SendKeepalive is the user asking for one more
+// keep-alive anyway: the shim submits its ordinary keep-alive turn at once,
+// and leaves the cadence exactly as it was, held or running.
+//
+// THE NEW LAPSE FOLLOWS ON THE SESSION STREAM, never in this answer. The
+// keep-alive's own API response re-anchors the cache like any request does,
+// and a held cadence restates the projected lapse on every anchor change
+// (conversation.v1.SessionCacheLapse), so the daemon counts down to the later
+// lapse with no second path for it. `sent` therefore means the turn was
+// SUBMITTED; its answer, and the lapse it moves, arrive afterwards.
+
+syntax = "proto3";
+
+package shim.v1;
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// DELIBERATELY EMPTY: the call is the request. The keep-alive targets the one
+// session this shim serves.
+message SendKeepaliveRequest {}
+
+// THE ARM IS THE OUTCOME.
+message SendKeepaliveResponse {
+  oneof result {
+    SendKeepaliveSuccess success = 1;
+    SendKeepaliveError error = 2;
+  }
+}
+
+// The session answered. Whether a keep-alive actually went out is the
+// shim's judgment of the session as it stands, and both answers are
+// legitimate: a skipped keep-alive is never a failure of the request.
+message SendKeepaliveSuccess {
+  // THE ARM IS WHAT HAPPENED: a keep-alive was submitted, or the shim judged
+  // that none may go out now.
+  oneof outcome {
+    SendKeepaliveSent sent = 1;
+    SendKeepaliveSkipped skipped = 2;
+  }
+}
+
+// The keep-alive turn was submitted. Its answer re-anchors the cache, and a
+// held cadence restates the projected lapse on the session stream when it
+// does. DELIBERATELY EMPTY: the arm is the outcome.
+message SendKeepaliveSent {}
+
+// No keep-alive went out. THE ARM IS WHY, and each reason is one the
+// cadence's own beat honors, so an asked-for keep-alive can never do what a
+// scheduled one is forbidden to.
+message SendKeepaliveSkipped {
+  oneof reason {
+    SendKeepaliveSkippedMainAgentBusy main_agent_busy = 1;
+    SendKeepaliveSkippedDetachedWorkLive detached_work_live = 2;
+    SendKeepaliveSkippedCacheLapsed cache_lapsed = 3;
+  }
+}
+
+// The main agent's slot is taken: a turn is in flight (a keep-alive's
+// included), a vendor-started turn is running, a StartTurn is being
+// processed, or a rollback is replacing the query. A keep-alive submitted now
+// would be a second submitter. The cache needs none: whatever holds the slot
+// is itself reading the cache, and its requests re-anchor it.
+message SendKeepaliveSkippedMainAgentBusy {
+  // What holds the slot, composed by the shim for the records ("a turn is in
+  // flight", "a rollback is in progress").
+  string detail = 1;
+}
+
+// Detached work (a background shell or agent) is live in the session. A
+// keep-alive owes the yield obligation's rewind, and the rewind replaces the
+// vendor's query, which kills every piece of detached work the old query ran.
+message SendKeepaliveSkippedDetachedWorkLive {
+  // How many detached-work items are live.
+  uint32 live_items = 1;
+}
+
+// The cache has already lapsed. A keep-alive now would buy the full-price
+// cold read the cold gate exists to make the user decide on, so the cold
+// gate owns the next request.
+message SendKeepaliveSkippedCacheLapsed {
+  // When the cache lapsed, in epoch milliseconds.
+  int64 lapsed_at_ms = 1;
+}
+
+// Not applied. THE ARM IS WHY.
+message SendKeepaliveError {
+  oneof kind {
+    // No session is open on this shim, so there is no cache to keep.
+    SendKeepaliveNoSession no_session = 1;
+  }
+}
+
+// No session is open on this shim.
+message SendKeepaliveNoSession {}

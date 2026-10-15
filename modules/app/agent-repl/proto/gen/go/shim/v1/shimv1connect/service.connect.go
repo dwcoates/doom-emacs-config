@@ -54,6 +54,8 @@ const (
 	ShimHibernateProcedure = "/shim.v1.Shim/Hibernate"
 	// ShimSetKeepaliveProcedure is the fully-qualified name of the Shim's SetKeepalive RPC.
 	ShimSetKeepaliveProcedure = "/shim.v1.Shim/SetKeepalive"
+	// ShimSendKeepaliveProcedure is the fully-qualified name of the Shim's SendKeepalive RPC.
+	ShimSendKeepaliveProcedure = "/shim.v1.Shim/SendKeepalive"
 	// ShimKillSessionProcedure is the fully-qualified name of the Shim's KillSession RPC.
 	ShimKillSessionProcedure = "/shim.v1.Shim/KillSession"
 	// ShimStartTurnProcedure is the fully-qualified name of the Shim's StartTurn RPC.
@@ -100,6 +102,7 @@ var (
 	shimSetSessionPermissionModeMethodDescriptor = shimServiceDescriptor.Methods().ByName("SetSessionPermissionMode")
 	shimHibernateMethodDescriptor                = shimServiceDescriptor.Methods().ByName("Hibernate")
 	shimSetKeepaliveMethodDescriptor             = shimServiceDescriptor.Methods().ByName("SetKeepalive")
+	shimSendKeepaliveMethodDescriptor            = shimServiceDescriptor.Methods().ByName("SendKeepalive")
 	shimKillSessionMethodDescriptor              = shimServiceDescriptor.Methods().ByName("KillSession")
 	shimStartTurnMethodDescriptor                = shimServiceDescriptor.Methods().ByName("StartTurn")
 	shimWatchAgentMethodDescriptor               = shimServiceDescriptor.Methods().ByName("WatchAgent")
@@ -148,6 +151,9 @@ type ShimClient interface {
 	// to lapse and the projected lapse is stated on the session stream), or run
 	// it again. See endpoint_set_keepalive.proto.
 	SetKeepalive(context.Context, *connect.Request[v1.SetKeepaliveRequest]) (*connect.Response[v1.SetKeepaliveResponse], error)
+	// Send one keep-alive now, leaving the cadence as it is (the user keeping a
+	// hidden workspace's cache warm). See endpoint_send_keepalive.proto.
+	SendKeepalive(context.Context, *connect.Request[v1.SendKeepaliveRequest]) (*connect.Response[v1.SendKeepaliveResponse], error)
 	// END: the session and EVERYTHING live in it — the turn if one is open and
 	// every live task, whichever turn spawned it. Refuses while anything is
 	// live unless forced; names what it killed.
@@ -258,6 +264,12 @@ func NewShimClient(httpClient connect.HTTPClient, baseURL string, opts ...connec
 			httpClient,
 			baseURL+ShimSetKeepaliveProcedure,
 			connect.WithSchema(shimSetKeepaliveMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		sendKeepalive: connect.NewClient[v1.SendKeepaliveRequest, v1.SendKeepaliveResponse](
+			httpClient,
+			baseURL+ShimSendKeepaliveProcedure,
+			connect.WithSchema(shimSendKeepaliveMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		killSession: connect.NewClient[v1.KillSessionRequest, v1.KillSessionResponse](
@@ -374,6 +386,7 @@ type shimClient struct {
 	setSessionPermissionMode *connect.Client[v1.SetSessionPermissionModeRequest, v1.SetSessionPermissionModeResponse]
 	hibernate                *connect.Client[v1.HibernateRequest, v1.HibernateResponse]
 	setKeepalive             *connect.Client[v1.SetKeepaliveRequest, v1.SetKeepaliveResponse]
+	sendKeepalive            *connect.Client[v1.SendKeepaliveRequest, v1.SendKeepaliveResponse]
 	killSession              *connect.Client[v1.KillSessionRequest, v1.KillSessionResponse]
 	startTurn                *connect.Client[v1.StartTurnRequest, v1.StartTurnResponse]
 	watchAgent               *connect.Client[v1.WatchAgentRequest, v1.WatchAgentResponse]
@@ -426,6 +439,11 @@ func (c *shimClient) Hibernate(ctx context.Context, req *connect.Request[v1.Hibe
 // SetKeepalive calls shim.v1.Shim.SetKeepalive.
 func (c *shimClient) SetKeepalive(ctx context.Context, req *connect.Request[v1.SetKeepaliveRequest]) (*connect.Response[v1.SetKeepaliveResponse], error) {
 	return c.setKeepalive.CallUnary(ctx, req)
+}
+
+// SendKeepalive calls shim.v1.Shim.SendKeepalive.
+func (c *shimClient) SendKeepalive(ctx context.Context, req *connect.Request[v1.SendKeepaliveRequest]) (*connect.Response[v1.SendKeepaliveResponse], error) {
+	return c.sendKeepalive.CallUnary(ctx, req)
 }
 
 // KillSession calls shim.v1.Shim.KillSession.
@@ -542,6 +560,9 @@ type ShimHandler interface {
 	// to lapse and the projected lapse is stated on the session stream), or run
 	// it again. See endpoint_set_keepalive.proto.
 	SetKeepalive(context.Context, *connect.Request[v1.SetKeepaliveRequest]) (*connect.Response[v1.SetKeepaliveResponse], error)
+	// Send one keep-alive now, leaving the cadence as it is (the user keeping a
+	// hidden workspace's cache warm). See endpoint_send_keepalive.proto.
+	SendKeepalive(context.Context, *connect.Request[v1.SendKeepaliveRequest]) (*connect.Response[v1.SendKeepaliveResponse], error)
 	// END: the session and EVERYTHING live in it — the turn if one is open and
 	// every live task, whichever turn spawned it. Refuses while anything is
 	// live unless forced; names what it killed.
@@ -648,6 +669,12 @@ func NewShimHandler(svc ShimHandler, opts ...connect.HandlerOption) (string, htt
 		ShimSetKeepaliveProcedure,
 		svc.SetKeepalive,
 		connect.WithSchema(shimSetKeepaliveMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	shimSendKeepaliveHandler := connect.NewUnaryHandler(
+		ShimSendKeepaliveProcedure,
+		svc.SendKeepalive,
+		connect.WithSchema(shimSendKeepaliveMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	shimKillSessionHandler := connect.NewUnaryHandler(
@@ -768,6 +795,8 @@ func NewShimHandler(svc ShimHandler, opts ...connect.HandlerOption) (string, htt
 			shimHibernateHandler.ServeHTTP(w, r)
 		case ShimSetKeepaliveProcedure:
 			shimSetKeepaliveHandler.ServeHTTP(w, r)
+		case ShimSendKeepaliveProcedure:
+			shimSendKeepaliveHandler.ServeHTTP(w, r)
 		case ShimKillSessionProcedure:
 			shimKillSessionHandler.ServeHTTP(w, r)
 		case ShimStartTurnProcedure:
@@ -837,6 +866,10 @@ func (UnimplementedShimHandler) Hibernate(context.Context, *connect.Request[v1.H
 
 func (UnimplementedShimHandler) SetKeepalive(context.Context, *connect.Request[v1.SetKeepaliveRequest]) (*connect.Response[v1.SetKeepaliveResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("shim.v1.Shim.SetKeepalive is not implemented"))
+}
+
+func (UnimplementedShimHandler) SendKeepalive(context.Context, *connect.Request[v1.SendKeepaliveRequest]) (*connect.Response[v1.SendKeepaliveResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("shim.v1.Shim.SendKeepalive is not implemented"))
 }
 
 func (UnimplementedShimHandler) KillSession(context.Context, *connect.Request[v1.KillSessionRequest]) (*connect.Response[v1.KillSessionResponse], error) {
