@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -852,5 +853,32 @@ func TestRollBackOfAConfirmedPlanIgnoresOutputThatFollowsSince(t *testing.T) {
 	}
 	if resp.Msg.GetSuccess() == nil {
 		t.Fatalf("result = %v, want success", resp.Msg.GetResult())
+	}
+}
+
+func TestRollBackRefusalOfMapsEachRefusalAndRejectsAFailure(t *testing.T) {
+	tests := []struct {
+		name    string
+		err     error
+		wantArm string
+		wantOK  bool
+	}{
+		{name: "changed holds are a stale plan", err: fmt.Errorf("wrapped: %w", promptqueue.ErrHoldsChanged), wantArm: "plan_stale", wantOK: true},
+		{name: "a shim refusal names its arm", err: &workspace.ShimRefusal{Arm: workspace.ArmShimFirstPrompt}, wantArm: workspace.ArmShimFirstPrompt, wantOK: true},
+		{name: "a failure is no refusal", err: errors.New("transport gone"), wantOK: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			r, ok := h.Server.(*server).rollBackRefusalOf(tc.err)
+
+			// Assert.
+			if ok != tc.wantOK || r.Arm != tc.wantArm {
+				t.Fatalf("rollBackRefusalOf = (%q, %v), want (%q, %v)", r.Arm, ok, tc.wantArm, tc.wantOK)
+			}
+		})
 	}
 }

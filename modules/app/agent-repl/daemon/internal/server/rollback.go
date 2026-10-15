@@ -154,11 +154,8 @@ func (s *server) RollBack(
 		Turns: planned.turns, Since: planned.since, DropHeld: planned.dropHeld, RestoreFiles: planned.restore,
 	})
 	if err != nil {
-		if errors.Is(err, promptqueue.ErrHoldsChanged) {
-			return stale("the held prompts changed since the rollback was planned")
-		}
-		if refusal, ok := workspace.AsShimRefusal(err); ok {
-			return answer(resp, s.refuse(subject.Log, rpc, resp, rollbackRefusal(s, refusal)))
+		if r, ok := s.rollBackRefusalOf(err); ok {
+			return answer(resp, s.refuse(subject.Log, rpc, resp, r))
 		}
 		if r, ok := s.asRefusal(err); ok {
 			return answer(resp, s.refuse(subject.Log, rpc, resp, r))
@@ -219,6 +216,20 @@ func (s *server) interruptRollbackOffer(ctx context.Context, ws ids.WorkspaceID,
 	log.Info(opRollback, "the stop key found nothing running and nothing after the latest prompt; it is offered for rollback at once", plan.context())
 	return &agentreplv1.InterruptNothingRunningRollback{Offer: &agentreplv1.InterruptNothingRunningRollback_Immediate{
 		Immediate: &agentreplv1.InterruptNothingRunningRollbackImmediate{Token: &agentreplv1.RollbackToken{Value: token}}}}, nil
+}
+
+// rollBackRefusalOf answers the RollBackError arm a rollback the verbs
+// refused is answered with: the queue's changed holds are a stale plan, and
+// the shim's refusal names its own arm. false when ERR is a failure rather
+// than a refusal.
+func (s *server) rollBackRefusalOf(err error) (refusal, bool) {
+	if errors.Is(err, promptqueue.ErrHoldsChanged) {
+		return s.fill(refusal{Arm: "plan_stale", Reason: "the held prompts changed since the rollback was planned", Info: true}), true
+	}
+	if shim, ok := workspace.AsShimRefusal(err); ok {
+		return rollbackRefusal(s, shim), true
+	}
+	return refusal{}, false
 }
 
 // rollbackRefusal maps the shim's refusal onto RollBackError's arm.
