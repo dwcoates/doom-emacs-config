@@ -81,7 +81,7 @@ coverage impact (always none).
 
 - Skipping a test, or moving it behind a flag nobody sets: coverage loss.
 - Weakening an assertion (checking less of the result, matching a prefix): coverage loss.
-- Sharing mutable state across tests to save setup: hides order-dependent failures; isolation is the contract.
+- Sharing state that more than one case READS or CHANGES: hides order-dependent failures. Sharing an expensive fixture in which every case owns its own slice is allowed, under AGENTS.md "A case may share an expensive fixture, never a slice another case reads".
 - Raising a timeout instead of fixing the wait: hides the race and makes every failure slower.
 - Replacing one of our own systems with a mock outside the owner-approved list above: loses integration coverage.
 

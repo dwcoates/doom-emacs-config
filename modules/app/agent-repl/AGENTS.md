@@ -53,6 +53,24 @@ Owner rule, 2026-10-14. A test lives at the cheapest tier whose fakes still let 
 - A second e2e test over a seam that already has its wiring test states, in its doc comment, what it proves that the wiring test and the two halves do not.
 - One e2e test builds a whole stack (store, sidecar, daemon, node shim, and a page or a sandboxed Emacs) to check its assertion, which makes it the most expensive place any assertion can live.
 
+## A table's cases are chosen, never enumerated
+
+Owner rule, 2026-10-14. A table test runs the cases that reach distinct behavior in the code under test, not every combination of its input dimensions and not every arm of an enum. The work of finding those cases is done before the table is written, by reading the code each row reaches, and it is preferred over the convenience of a full product.
+
+- A row earns its place when it reaches a branch, mapping entry or wire field that no other row of the table reaches. A row that reaches only what another row reaches is a duplicate, however different its input looks.
+- Two dimensions that meet in one shared function do not interact. The table covers each value of each dimension once (a covering set), not their product. Their full product is warranted only where the code really branches on the pair, and the table's comment names that branch.
+- Every arm of an enum is enumerated at the tier that OWNS the per-arm mapping: the switch, table or decoder that maps it, usually a ms unit test. A tier that reaches the mapping through a generic path proves that path with one or two representatives.
+- A row whose input never reaches the code under test is not a row of that test. Example: a vendor scenario whose difference lives only on the stream plane, driven through the file-plane sidecar.
+- A table whose dimensions were justified by a design that has since changed is re-judged against the code as it is now. Example: two resolvers that once decided independently and now share one decision.
+- A hand-picked subset states, in the table's comment, which branch each kept row reaches and where the dropped combinations are pinned (`lisp/test-integration-roster.el` "finish-edge-fires-for-every-running-source…" is the model).
+- Why: the 2026-10-14 cross-product audit (workspace `test-cross-product-audit`) found the costliest redundancy in full products and per-arm tables. Examples:
+  - 133 sidecar rows of four processes each, reaching 79 distinct on-disk shapes;
+  - a 5040-row unit walk reaching 44 distinct outcomes;
+  - per-arm e2e and integration tables re-proving mappings that ms unit tables already pin.
+- This rule decides only how many cases a table runs. Which tier a test belongs at is the tier rule's question ("A test lives at the cheapest tier that can prove it").
+- Whether cases may share one expensive fixture is the shared-setup rule's question ("A case may share an expensive fixture, never a slice another case reads").
+- Removing a row from an existing table follows the coverage rule in `skills/write-tests/SKILL.md`: the remaining rows must kill every mutant the removed one killed.
+
 ## Elisp layout
 
 Every elisp source and every ERT suite lives in `lisp/`. Exactly three files
@@ -773,6 +791,20 @@ successor through `agent-repl-itest--with-second-daemon`, which re-publishes
 the primary's address once the successor is reaped. Those two are the only
 sanctioned reasons to pay a spawn; `test-integration-fixture.el` pins the
 isolation guarantee that makes the sharing safe.
+
+### A case may share an expensive fixture, never a slice another case reads
+
+Owner rule, 2026-10-14. A fixture that costs more than the cases it serves (an e2e `World`, a merge-queue fixture, a Doom boot) may be built once and shared by several cases, on these conditions:
+
+- **Each case owns its slice.** It opens its own workspace (so its own session, shim, feed and per-workspace logs), fresh, and asserts only on that slice.
+- **Fixture-wide views keep their own fixture.** A case that asserts on a view spanning the fixture (roster, sidebar, daemon stream, account usage or allowances, counts across workspaces, a log not scoped to its workspace) keeps its own fixture.
+- **Warning declarations are scoped to the case's workspace, never fixture-wide.** A case that must declare a warning the harness can only declare fixture-wide, or a record with no workspace, keeps its own fixture.
+- **A case that changes the fixture keeps its own.** That means stopping, restarting, deploying or relaunching the daemon, store or sidecar, or needing different fixture options or env. Two cases share only a fixture built with identical options.
+- **Each case is its own named case**, run in parallel with its siblings where the product allows. `t.Fatalf` ends only that case. The shared fixture's own failure fails every case that shares it, and that is reported once, as the fixture's.
+- **One act, several observers.** Tests that perform the byte-identical act and each assert a different view of its result are one test. Its observations are separate named cases using `t.Errorf`, so each one reports even when another fails.
+- **Sequential walks are the exception.** A case may start from another's end state only when the sequence is itself the subject. The walk's head states which later steps an early fatal failure hides.
+- **Mutation evidence first.** Merging existing tests under this section lands only with `testrun redundancy`'s evidence that no killed mutant is lost.
+- Why: the 2026-10-14 shared-setup audit (workspace `test-shared-setup`) measured an e2e test's `World` at about 2.7s of its 3.4s solo cost, while a fresh workspace in a running `World` costs 0.3-0.4s.
 
 ### A fixture workspace directory is process-private and swept per scenario
 

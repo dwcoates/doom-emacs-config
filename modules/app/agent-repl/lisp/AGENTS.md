@@ -246,7 +246,8 @@ bin/background.sh bin/byte-compile.sh
 
 Every changed source has its matching `test-<source>.el` suite. Tests are
 table-driven where cases share a contract, use Arrange/Act/Assert structure,
-and keep one edge case per test. Tests never launch external processes or
+and keep one edge case per test case (an `ert-deftest`, or one named case of
+a table). Tests never launch external processes or
 mutate state outside `temporary-file-directory`; use the repository fakes and
 single-purpose boundary stubs.
 
