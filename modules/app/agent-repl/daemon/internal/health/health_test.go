@@ -712,3 +712,81 @@ func TestSessionLevelsACallerCancelledFaultReadAtDebug(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenFaultRecordsAWorkspacesFaultOnThatWorkspacesSink(t *testing.T) {
+	// Arrange.
+	ws := ids.WorkspaceID("w1")
+	log := newStubSurfaces()
+	db := &stubDB{openedID: "f1", workspaces: map[ids.WorkspaceID]wsm.Workspace{ws: {ID: ws, Dir: "/repo/w1"}}}
+	r := newReporter(t, db, alwaysLive, log)
+
+	// Act.
+	if _, err := r.OpenFault(context.Background(), wsm.Fault{Kind: KindShimDied, Workspace: &ws}); err != nil {
+		t.Fatalf("OpenFault: %v", err)
+	}
+
+	// Assert.
+	for _, record := range log.logger.Records() {
+		if record.Operation == opOpenFault {
+			if record.Context["dir"] != "/repo/w1" {
+				t.Fatalf("the open was recorded with context %v, want it on the workspace's sink (dir /repo/w1)", record.Context)
+			}
+			return
+		}
+	}
+	t.Fatalf("records = %v, want the open recorded", log.logger.Records())
+}
+
+func TestOpenFaultRecordsADaemonScopedFaultGlobally(t *testing.T) {
+	// Arrange.
+	log := newStubSurfaces()
+	r := newReporter(t, &stubDB{openedID: "f1"}, alwaysLive, log)
+
+	// Act.
+	if _, err := r.OpenFault(context.Background(), wsm.Fault{Kind: KindShimDied}); err != nil {
+		t.Fatalf("OpenFault: %v", err)
+	}
+
+	// Assert.
+	for _, record := range log.logger.Records() {
+		if record.Operation == opOpenFault {
+			if _, onAWorkspace := record.Context["dir"]; onAWorkspace {
+				t.Fatalf("a daemon-scoped open was recorded with context %v, want the global sink", record.Context)
+			}
+			return
+		}
+	}
+	t.Fatalf("records = %v, want the open recorded", log.logger.Records())
+}
+
+func TestOpenFaultWhoseWorkspaceCannotBeResolvedStillOpensAndSaysSo(t *testing.T) {
+	// Arrange: the fault is stored, but the registry cannot answer its
+	// workspace's directory.
+	ws := ids.WorkspaceID("w1")
+	log := newStubSurfaces()
+	db := &stubDB{openedID: "f1", workspaceErr: errors.New("registry read failed")}
+	r := newReporter(t, db, alwaysLive, log)
+
+	// Act.
+	id, err := r.OpenFault(context.Background(), wsm.Fault{Kind: KindShimDied, Workspace: &ws})
+
+	// Assert.
+	if err != nil || id != "f1" {
+		t.Fatalf("OpenFault = %q, %v; want the fault opened as f1", id, err)
+	}
+	var resolveErr, opened bool
+	for _, record := range log.logger.Records() {
+		if record.Operation != opOpenFault || record.Context["workspace"] != "w1" {
+			continue
+		}
+		switch record.Level {
+		case dlog.LevelError:
+			resolveErr = record.Context["cause"] == "registry read failed"
+		case dlog.LevelWarn:
+			opened = true
+		}
+	}
+	if !resolveErr || !opened {
+		t.Fatalf("records = %v, want an error naming the unresolved workspace and the open still recorded", log.logger.Records())
+	}
+}

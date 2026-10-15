@@ -183,8 +183,16 @@ func (r *reporter) Session(ctx context.Context, ws ids.WorkspaceID) (*agentreplv
 }
 
 // OpenFault records a fault and returns its id.
+//
+// A WORKSPACE'S FAULT IS RECORDED ON THAT WORKSPACE'S SINK. The global
+// logger is for what concerns no workspace (dlog.Surfaces.Global), so the
+// opened record goes where the workspace's other records go, and a record
+// about the open that could not reach that sink names the workspace by id.
 func (r *reporter) OpenFault(ctx context.Context, f wsm.Fault) (ids.FaultID, error) {
 	log := r.log.Global()
+	if f.Workspace != nil {
+		log = log.With(dlog.Context{"workspace": string(*f.Workspace)})
+	}
 	if f.Kind == "" {
 		log.Error(opOpenFault, "refusing a fault with no kind", nil)
 		return "", fmt.Errorf("health: a fault must name its kind")
@@ -211,6 +219,7 @@ func (r *reporter) OpenFault(ctx context.Context, f wsm.Fault) (ids.FaultID, err
 		})
 		return "", fmt.Errorf("health: open fault %q: %w", f.Kind, err)
 	}
+	log = r.openedFaultLog(ctx, f, log)
 	fields := dlog.Context{"fault": string(id), "kind": f.Kind, "detail": f.Detail}
 	if EnvironmentKind(f.Kind) {
 		log.Info(opOpenFault, "fault opened: this machine's environment, not agent-repl, is what failed", fields)
@@ -218,6 +227,25 @@ func (r *reporter) OpenFault(ctx context.Context, f wsm.Fault) (ids.FaultID, err
 		log.Warn(opOpenFault, "fault opened", fields)
 	}
 	return id, nil
+}
+
+// openedFaultLog answers the logger an opened fault is recorded on: its
+// workspace's sink, resolved totally (WorkspaceOrCentral), or global for a
+// daemon-scoped fault. A workspace the registry cannot answer is recorded as
+// an error and the open is recorded on global, still naming the workspace:
+// the fault itself is already stored, and its record is never dropped.
+func (r *reporter) openedFaultLog(ctx context.Context, f wsm.Fault, global dlog.Logger) dlog.Logger {
+	if f.Workspace == nil {
+		return global
+	}
+	record, err := r.db.Workspace(ctx, *f.Workspace)
+	if err != nil {
+		global.Error(opOpenFault, "could not resolve the fault's workspace for its record", dlog.Context{
+			"kind": f.Kind, "cause": err.Error(),
+		})
+		return global
+	}
+	return r.log.WorkspaceOrCentral(record.Dir)
 }
 
 // EnvironmentKind reports a fault kind that records THIS MACHINE'S
