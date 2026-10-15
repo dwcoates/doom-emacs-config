@@ -327,8 +327,8 @@ needs the network:
 
 Mounted / materialized at **run** time:
 
-- the repo source (read-only) and its writable `rsync` copy — which now
-  includes `webapp/dist`, the one `dist/` the allowlist admits (see
+- the writable working copy, streamed in from the host as a tar (no host
+  path is mounted) — which includes `webapp/dist`, the one `dist/` the allowlist admits (see
   "The webapp dist" below);
 - `node_modules` **symlinked** at the image's baked trees, after checking the
   checkout's lockfile hashes to the digest the image installed from. On a

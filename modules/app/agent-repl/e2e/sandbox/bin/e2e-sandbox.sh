@@ -843,7 +843,7 @@ do_run() {
     --cap-add SYS_PTRACE
     # EVERY writable tmpfs carries uid/gid=1000 EXPLICITLY. Docker mounts a
     # tmpfs root:root 0755, so without this the container's non-root uid
-    # cannot create anything in /work at all and the entrypoint's rsync dies
+    # cannot create anything in /work at all and the entrypoint's extraction dies
     # with "mkdir ... Permission denied" on the first directory. /tmp keeps
     # the conventional 1777 instead, since anything may write there.
     --tmpfs "/tmp:rw,exec,size=2g,mode=1777"
@@ -854,7 +854,7 @@ do_run() {
     # --workdir IS DELIBERATELY THE TMPFS ROOT, not the module directory.
     # Docker CREATES a missing workdir itself, as ROOT, before the entrypoint
     # runs — so naming /work/repo/<module> here pre-created that whole chain
-    # root-owned inside the tmpfs, and the entrypoint's rsync then failed
+    # root-owned inside the tmpfs, and the entrypoint's extraction then failed
     # "mkdir ... Permission denied" on every directory under it. /work is the
     # tmpfs mountpoint, already owned by the sandbox uid, so nothing is
     # created; the entrypoint cd's to the module directory before exec.
