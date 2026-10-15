@@ -2,7 +2,6 @@ package sidebar
 
 import (
 	"fmt"
-	"sort"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
@@ -24,48 +23,45 @@ const HiddenSectionLabel = "Hidden"
 // OpenSectionLabel is the open-workspaces section's heading.
 const OpenSectionLabel = "Open"
 
-// repositoryView resolves the repository grouping: ONE SECTION PER REPOSITORY,
-// its rows nested by branch lineage and ordered in roster order.
+// repositoryView resolves the repository grouping: ONE SECTION PER REPOSITORY
+// in the arrangement's order (arrangement.go), its unsectioned rows first and
+// then one subsection per subsection, each nested by lineage among its own
+// workspaces and ordered in roster order.
 //
-// A repository with no rows still draws a section: the repository is
-// registered, and a section that vanished when its last workspace merged would
-// make the grouping flicker.
+// A repository with no rows still draws a section, and a subsection with no
+// rows still draws: both are registered, and a section that vanished when its
+// last workspace left would make the grouping flicker (and leave an empty
+// subsection nowhere to drag a workspace into).
 func (r *resolver) repositoryView(live []wsm.Workspace, rc rowContext, log dlog.Logger) *frontendv1.RosterRepositoryView {
-	byRepo := map[ids.RepoID][]wsm.Workspace{}
-	for _, ws := range live {
-		byRepo[ws.Repo] = append(byRepo[ws.Repo], ws)
-	}
-
+	arranged, orphans := arrange(r.state.reg, live)
 	out := &frontendv1.RosterRepositoryView{}
-	for _, repo := range sortRepositories(r.state.reg.Repositories) {
-		rows := r.sectionRows(byRepo[repo.ID], rc, log.With(dlog.Context{"repo_id": string(repo.ID)}))
-		delete(byRepo, repo.ID)
+	shown := 0
+	for _, placed := range arranged {
+		repoLog := log.With(dlog.Context{"repo_id": string(placed.repo.ID)})
+		rows := r.sectionRows(placed.buckets[0].workspaces, rc, repoLog)
+		count := drawnLiveRowCount(rows)
 		section := &frontendv1.RosterRepoSection{
-			Key:        repoKey(repo),
-			Header:     sectionHeader(repo.Name, drawnLiveRowCount(rows)),
+			Key:        repoKey(placed.repo),
 			Rows:       rows,
-			Divergence: repoDivergence(r.state.divergence[repo.ID]),
+			Divergence: repoDivergence(r.state.divergence[placed.repo.ID]),
 		}
-		setRepoFold(section, repo.Folded)
+		for _, b := range placed.buckets[1:] {
+			subRows := r.sectionRows(b.workspaces, rc, repoLog.With(dlog.Context{"subsection": string(b.subsection.ID)}))
+			subCount := drawnLiveRowCount(subRows)
+			count += subCount
+			section.Subsections = append(section.Subsections, &frontendv1.RosterSubsection{
+				Key:    &frontendv1.RosterSubsectionKey{SubsectionId: string(b.subsection.ID)},
+				Header: sectionHeader(b.subsection.Name, subCount),
+				Rows:   subRows,
+			})
+		}
+		section.Header = sectionHeader(placed.repo.Name, count)
+		shown += count
+		setRepoFold(section, placed.repo.Folded)
 		out.Sections = append(out.Sections, section)
 	}
-	r.assertRepositoryInvariant(byRepo, "daemon.sidebar.repository_view", "the repo grouping", log)
-	out.OpenCount = openCount(out.GetSections())
-	return out
-}
-
-// sortRepositories is THE repository order every per-repository list in the
-// roster takes, by name and then id: the repository grouping's sections and
-// the recently-merged band's groups, so the two read in the same order.
-func sortRepositories(in []wsm.Repository) []wsm.Repository {
-	out := make([]wsm.Repository, len(in))
-	copy(out, in)
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].Name != out[j].Name {
-			return out[i].Name < out[j].Name
-		}
-		return out[i].ID < out[j].ID
-	})
+	r.assertRepositoryInvariant(orphans, "daemon.sidebar.repository_view", "the repo grouping", log)
+	out.OpenCount = &frontendv1.RosterOpenCount{Workspaces: uint32(shown)}
 	return out
 }
 

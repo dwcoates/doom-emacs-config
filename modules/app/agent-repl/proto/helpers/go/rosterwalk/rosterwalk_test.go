@@ -87,6 +87,14 @@ func TestAllRows(t *testing.T) {
 				RecentlyMerged: mergedOf(rowsOf(row("m", row("m1")))),
 			},
 			want: []string{"r", "r1", "m", "m1"}},
+		{name: "a repository section's subsections follow its own rows",
+			roster: &frontendv1.WorkspaceRoster{
+				Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{
+					{Rows: rowsOf(row("r")), Subsections: []*frontendv1.RosterSubsection{
+						{Rows: rowsOf(row("s", row("s1")))}, {Rows: rowsOf(row("u"))}}},
+					{Rows: rowsOf(row("next"))}}},
+			},
+			want: []string{"r", "s", "s1", "u", "next"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -96,6 +104,37 @@ func TestAllRows(t *testing.T) {
 			// Assert.
 			if !slices.Equal(got, tc.want) {
 				t.Fatalf("AllRows = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRepoSectionRegions(t *testing.T) {
+	cases := []struct {
+		name    string
+		section *frontendv1.RosterRepoSection
+		want    [][]string
+	}{
+		{name: "a section with no subsections is its own rows", section: &frontendv1.RosterRepoSection{Rows: rowsOf(row("r"))},
+			want: [][]string{{"r"}}},
+		{name: "subsections follow in their order, an empty one included",
+			section: &frontendv1.RosterRepoSection{Rows: rowsOf(row("r")), Subsections: []*frontendv1.RosterSubsection{
+				{Rows: rowsOf()}, {Rows: rowsOf(row("s"))}}},
+			want: [][]string{{"r"}, nil, {"s"}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			regions := RepoSectionRegions(tc.section)
+
+			// Assert.
+			if len(regions) != len(tc.want) {
+				t.Fatalf("regions = %d, want %d", len(regions), len(tc.want))
+			}
+			for i, region := range regions {
+				if got := ids(region.GetRows()); !slices.Equal(got, tc.want[i]) {
+					t.Fatalf("region %d = %v, want %v", i, got, tc.want[i])
+				}
 			}
 		})
 	}

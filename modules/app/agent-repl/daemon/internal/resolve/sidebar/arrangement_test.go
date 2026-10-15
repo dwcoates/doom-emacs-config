@@ -1,0 +1,217 @@
+package sidebar_test
+
+import (
+	"testing"
+
+	frontendv1 "agentrepl/proto/frontend/v1"
+
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/sidebar"
+	"agent-repld/internal/wsm"
+)
+
+// subsection builds one of repo's subsections at PLACE.
+func subsection(id, name string, place int64) wsm.Subsection {
+	return wsm.Subsection{ID: ids.SubsectionID(id), Repo: repo.ID, Name: name, Place: place}
+}
+
+// in puts WS into subsection SUB.
+func in(ws wsm.Workspace, sub wsm.Subsection) wsm.Workspace {
+	id := sub.ID
+	ws.Subsection = &id
+	return ws
+}
+
+// arrangedRegistry is the owner's example: three workspaces of one
+// repository, the FIRST of them moved into a subsection at the bottom, and a
+// second, empty subsection placed BEFORE it.
+func arrangedRegistry() sidebar.Registry {
+	later := subsection("sub-later", "later", 2)
+	empty := subsection("sub-empty", "empty", 1)
+	reg := registry(
+		in(placed(workspace("w1", "first"), 1), later),
+		placed(workspace("w2", "second"), 2),
+		placed(workspace("w3", "third"), 3),
+	)
+	reg.Subsections = []wsm.Subsection{later, empty}
+	return reg
+}
+
+// subsectionNamesOf is SECTION's subsections' labels and row names.
+func subsectionNamesOf(section *frontendv1.RosterRepoSection) []string {
+	var out []string
+	for _, sub := range section.GetSubsections() {
+		out = append(out, sub.GetHeader().GetLabel().GetText()+"="+joinNames(rowNames(sub.GetRows().GetRows())))
+	}
+	return out
+}
+
+func joinNames(names []string) string {
+	out := ""
+	for i, name := range names {
+		if i > 0 {
+			out += ","
+		}
+		out += name
+	}
+	return out
+}
+
+func TestTheRepositorySectionDrawsItsUnsectionedRowsAboveItsSubsections(t *testing.T) {
+	// Arrange
+	r, _ := newResolver(t)
+
+	// Act
+	r.SetRegistry(arrangedRegistry())
+
+	// Assert
+	section := latest(t, r).GetRepository().GetSections()[0]
+	if got := rowNames(section.GetRows().GetRows()); !equal(got, []string{"second", "third"}) {
+		t.Fatalf("unsectioned rows = %v, want [second third]", got)
+	}
+	if got := subsectionNamesOf(section); !equal(got, []string{"empty=", "later=first"}) {
+		t.Fatalf("subsections = %v, want the empty one, then later holding first", got)
+	}
+}
+
+func TestASubsectionCarriesItsKeyAndCount(t *testing.T) {
+	// Arrange
+	r, _ := newResolver(t)
+
+	// Act
+	r.SetRegistry(arrangedRegistry())
+
+	// Assert
+	later := latest(t, r).GetRepository().GetSections()[0].GetSubsections()[1]
+	if got := later.GetKey().GetSubsectionId(); got != "sub-later" {
+		t.Fatalf("key = %q, want sub-later", got)
+	}
+	if got := later.GetHeader().GetCount().GetWorkspaces(); got != 1 {
+		t.Fatalf("count = %d, want 1", got)
+	}
+}
+
+func TestTheRepositorySectionsCountsCoverItsSubsections(t *testing.T) {
+	// Arrange
+	r, _ := newResolver(t)
+
+	// Act
+	r.SetRegistry(arrangedRegistry())
+
+	// Assert
+	roster := latest(t, r)
+	if got := roster.GetRepository().GetSections()[0].GetHeader().GetCount().GetWorkspaces(); got != 3 {
+		t.Fatalf("section count = %d, want 3", got)
+	}
+	if got := roster.GetRepository().GetOpenCount().GetWorkspaces(); got != 3 {
+		t.Fatalf("open count = %d, want 3", got)
+	}
+}
+
+func TestTheTabBarPutsASubsectionsWorkspacesAfterTheUnsectionedOnes(t *testing.T) {
+	// Arrange -- the owner's example: the first workspace, dragged into a
+	// subsection at the bottom of its repository, becomes the last tab.
+	reg := arrangedRegistry()
+
+	// Act
+	got := sidebar.Tabs(reg)
+
+	// Assert
+	var ids []string
+	for _, tab := range got {
+		ids = append(ids, string(tab.Workspace.ID))
+	}
+	if !equal(ids, []string{"w2", "w3", "w1"}) {
+		t.Fatalf("tabs = %v, want [w2 w3 w1]", ids)
+	}
+}
+
+func TestTheTabBarWalksSubsectionsInTheirPlace(t *testing.T) {
+	// Arrange
+	a, b := subsection("sub-a", "a", 2), subsection("sub-b", "b", 1)
+	reg := registry(in(placed(workspace("w1", "one"), 1), a), in(placed(workspace("w2", "two"), 2), b))
+	reg.Subsections = []wsm.Subsection{a, b}
+
+	// Act
+	got := sidebar.Tabs(reg)
+
+	// Assert
+	if len(got) != 2 || got[0].Workspace.ID != "w2" || got[1].Workspace.ID != "w1" {
+		t.Fatalf("tabs = %+v, want w2 (subsection b) then w1 (subsection a)", got)
+	}
+}
+
+func TestASubsectionNestsAChildUnderItsParent(t *testing.T) {
+	// Arrange
+	r, _ := newResolver(t)
+	later := subsection("sub-later", "later", 1)
+	parent := in(placed(workspace("w-p", "parent"), 1), later)
+	child := in(placed(workspace("w-k", "child"), 2), later)
+	child.Parent = &parent.ID
+	reg := registry(parent, child)
+	reg.Subsections = []wsm.Subsection{later}
+
+	// Act
+	r.SetRegistry(reg)
+
+	// Assert
+	rows := latest(t, r).GetRepository().GetSections()[0].GetSubsections()[0].GetRows().GetRows()
+	if len(rows) != 1 || rowNames(rows[0].GetChildren()) == nil || rowNames(rows[0].GetChildren())[0] != "child" {
+		t.Fatalf("subsection rows = %v, want parent with child nested", rowNames(rows))
+	}
+}
+
+func TestSetRegistryRefusesAnArrangementItCannotDraw(t *testing.T) {
+	foreign := wsm.Subsection{ID: "sub-foreign", Repo: otherRepo.ID, Name: "foreign", Place: 1}
+	tests := []struct {
+		name    string
+		reg     func() sidebar.Registry
+		message string
+	}{
+		{
+			name: "a workspace naming a subsection the registry does not carry",
+			reg: func() sidebar.Registry {
+				return registry(in(placed(workspace("w1", "one"), 1), subsection("sub-gone", "gone", 1)))
+			},
+			message: "a workspace names a subsection the registry does not carry",
+		},
+		{
+			name: "a workspace in another repository's subsection",
+			reg: func() sidebar.Registry {
+				reg := registry(in(placed(workspace("w1", "one"), 1), foreign))
+				reg.Repositories = append(reg.Repositories, otherRepo)
+				reg.Subsections = []wsm.Subsection{foreign}
+				return reg
+			},
+			message: "a workspace sits in another repository's subsection",
+		},
+		{
+			name: "a subsection of an unregistered repository",
+			reg: func() sidebar.Registry {
+				reg := registry()
+				reg.Subsections = []wsm.Subsection{foreign}
+				return reg
+			},
+			message: "a subsection names a repository the registry does not carry",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			r, surfaces := newResolver(t)
+			defer func() {
+				// Assert
+				if recover() == nil {
+					t.Fatal("the registry was installed, not refused")
+				}
+				if _, ok := dlog.FindRecord(surfaces.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.sidebar.set_registry", Message: tt.message}); !ok {
+					t.Fatalf("no %q error record: %v", tt.message, surfaces.Records())
+				}
+			}()
+
+			// Act
+			r.SetRegistry(tt.reg())
+		})
+	}
+}

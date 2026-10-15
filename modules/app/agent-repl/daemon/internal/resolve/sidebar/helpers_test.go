@@ -276,6 +276,7 @@ var repo = wsm.Repository{
 	Dir:           "/repos/one",
 	Name:          "alpha",
 	DefaultBranch: "master",
+	Place:         1,
 }
 
 // workspace builds a registered workspace record with a distinct dir and
@@ -476,4 +477,4 @@ func twoRepoRegistry(ws ...wsm.Workspace) sidebar.Registry {
 }
 
 // otherRepo is a second repository, so a section or the merged band can span two.
-var otherRepo = wsm.Repository{ID: "repo-2", Dir: "/repos/two", Name: "beta", DefaultBranch: "main"}
+var otherRepo = wsm.Repository{ID: "repo-2", Dir: "/repos/two", Name: "beta", DefaultBranch: "main", Place: 2}

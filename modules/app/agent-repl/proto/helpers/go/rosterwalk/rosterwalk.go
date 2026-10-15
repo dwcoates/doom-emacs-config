@@ -27,10 +27,23 @@ func FlattenRows(rows []*frontendv1.RosterRow) []*frontendv1.RosterRow {
 func AllRows(roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterRow {
 	var out []*frontendv1.RosterRow
 	for _, section := range roster.GetRepository().GetSections() {
-		out = append(out, FlattenRows(section.GetRows().GetRows())...)
+		for _, region := range RepoSectionRegions(section) {
+			out = append(out, FlattenRows(region.GetRows())...)
+		}
 	}
 	out = append(out, FlattenRows(roster.GetHidden().GetRows().GetRows())...)
 	return append(out, MergedRows(roster)...)
+}
+
+// RepoSectionRegions lists a repository section's rows regions in drawn
+// order: its unsectioned rows, then each subsection's. A reader that walks
+// only the section's own `rows` misses every workspace in a subsection.
+func RepoSectionRegions(section *frontendv1.RosterRepoSection) []*frontendv1.RosterRows {
+	out := []*frontendv1.RosterRows{section.GetRows()}
+	for _, sub := range section.GetSubsections() {
+		out = append(out, sub.GetRows())
+	}
+	return out
 }
 
 // MergedRows lists every row of the recently-merged band, group by group in

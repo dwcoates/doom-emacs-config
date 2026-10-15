@@ -561,7 +561,7 @@ func mergedIn(id string, repository wsm.Repository, d time.Duration) wsm.Workspa
 }
 
 func TestRecentlyMergedGroupsByRepositoryInTheRepositoryGroupingsOrder(t *testing.T) {
-	// Arrange: beta is registered first, alpha sorts first by name.
+	// Arrange: beta is listed first, alpha's place is first.
 	r, _ := newResolver(t)
 	reg := twoRepoRegistry(mergedIn("b1", otherRepo, 0), mergedIn("a1", repo, 0))
 	reg.Repositories = []wsm.Repository{otherRepo, repo}

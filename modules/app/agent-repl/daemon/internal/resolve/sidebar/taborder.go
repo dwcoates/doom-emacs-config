@@ -4,7 +4,6 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
-	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
 
@@ -15,29 +14,33 @@ type Tab struct {
 	Withheld  wsm.Withholding
 }
 
-// Tabs answers the editor's tab bar: every open workspace in REGISTRY ORDER
-// (sortWorkspaces), independent of the groupings, so repositories interleave
-// and a child need not follow its parent. A closed workspace has no tab. A tab
-// is withheld, not dropped, when the user hid its workspace or its
-// repository's section is collapsed, so a client cycling from a withheld
-// current workspace still knows its neighbours. A merged workspace files under
-// recently merged whatever its hidden flag (wsm.Workspace.Withheld, the one
-// statement of visibility the daemon also runs sessions by). A hidden merge
-// workspace has no tab at all until it is revealed
-// (wsm.Workspace.MergeHidden). It is THE ONE STATEMENT of the tab bar: the
-// roster draws it (tabBar), and hiding the current workspace lands the user
-// on its neighbour in it.
+// Tabs answers the editor's tab bar: every open workspace in the
+// ARRANGEMENT'S order (arrangement.go): repository by repository, and inside
+// one, its unsectioned workspaces and then each subsection's, each run in
+// roster order. A closed workspace has no tab. A tab is withheld, not
+// dropped, when the user hid its workspace or its repository's section is
+// collapsed, so a client cycling from a withheld current workspace still
+// knows its neighbours. A merged workspace files under recently merged
+// whatever its hidden flag (wsm.Workspace.Withheld, the one statement of
+// visibility the daemon also runs sessions by). A hidden merge workspace has
+// no tab at all until it is revealed (wsm.Workspace.MergeHidden). It is THE
+// ONE STATEMENT of the tab bar: the roster draws it (tabBar), and hiding the
+// current workspace lands the user on its neighbour in it.
 func Tabs(reg Registry) []Tab {
-	folded := map[ids.RepoID]bool{}
-	for _, repo := range reg.Repositories {
-		folded[repo.ID] = repo.Folded
-	}
-	var out []Tab
-	for _, ws := range sortWorkspaces(reg.Workspaces) {
-		if ws.Closed || ws.MergeHidden() {
-			continue
+	var open []wsm.Workspace
+	for _, ws := range reg.Workspaces {
+		if !ws.Closed && !ws.MergeHidden() {
+			open = append(open, ws)
 		}
-		out = append(out, Tab{Workspace: ws, Withheld: ws.Withheld(folded[ws.Repo])})
+	}
+	arranged, _ := arrange(reg, open)
+	var out []Tab
+	for _, placed := range arranged {
+		for _, b := range placed.buckets {
+			for _, ws := range b.workspaces {
+				out = append(out, Tab{Workspace: ws, Withheld: ws.Withheld(placed.repo.Folded)})
+			}
+		}
 	}
 	return out
 }

@@ -315,6 +315,7 @@ func (r *resolver) currentWorkspace() *frontendv1.RosterCurrentWorkspace {
 // draw around: the store refuses one on write and on read, so a registry
 // carrying one was composed by a caller that skipped the store.
 func (r *resolver) SetRegistry(reg Registry) {
+	r.assertArrangement(reg)
 	r.mutate("daemon.sidebar.set_registry", "the roster took a registry snapshot",
 		registryContext(reg), r.log.Global(), func() { r.installRegistry(reg) })
 }
@@ -328,6 +329,7 @@ func (r *resolver) SetRegistry(reg Registry) {
 // selection is installed AFTER the registry, exactly as the two calls did, so
 // a registry that no longer carries ws leaves the roster with no current.
 func (r *resolver) SetRegistrySelected(reg Registry, ws ids.WorkspaceID) {
+	r.assertArrangement(reg)
 	ctx := registryContext(reg)
 	ctx["workspace_id"] = string(ws)
 	r.mutate("daemon.sidebar.set_registry_selected",

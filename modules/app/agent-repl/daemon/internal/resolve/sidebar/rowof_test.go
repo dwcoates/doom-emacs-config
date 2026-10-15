@@ -6,6 +6,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 func TestTheRosterRevisionRisesWithEveryResolvedRoster(t *testing.T) {
@@ -105,6 +106,23 @@ func TestRowFindsAHiddenWorkspace(t *testing.T) {
 	// Assert.
 	if !ok {
 		t.Fatal("Row found no row for a hidden workspace the roster carries")
+	}
+}
+
+func TestRowFindsAWorkspaceInASubsection(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+	later := subsection("sub-later", "later", 1)
+	reg := registry(in(workspace(string(theWS), "one"), later))
+	reg.Subsections = []wsm.Subsection{later}
+	r.SetRegistry(reg)
+
+	// Act.
+	_, _, ok := r.Row(theWS)
+
+	// Assert.
+	if !ok {
+		t.Fatal("Row found no row for a workspace in a subsection")
 	}
 }
 
