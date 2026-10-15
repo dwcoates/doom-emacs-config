@@ -241,6 +241,17 @@ Rows re-ruled while implementing:
 - **The five `perf_go` rows: not moved.**
   - They run only under the `perf` build tag, never in the functional e2e suite, so moving them saves no e2e time.
 
+## Ruling (a) implemented: the scenario-arm rows deleted (2026-10-15)
+
+- The matrix now counts a scenario covered by its two golden halves and its seam's wiring test (`e2e/SCENARIO-MATRIX.md`).
+  - The shim half is `frames.json`: the session engine's writes for the scenario, driven in process (`agent-shim/claude/shim/test/fake/golden-engine.ts`).
+  - The daemon half is `feed.json`: the root feed and the warnings the daemon draws from those writes (`daemon/integration/scenariogoldens_test.go`).
+- 13 e2e tests whose assertion is a feed or turn arm their scenario's halves pin were deleted:
+  - `TestApiUnmodeledKeepsTheVendorClassByName`, `TestTerminalReasonTurnFailedArms`, `TestTurnAbortedWhileToolsRunning`, `TestModelRefusalWithoutFallback`, `TestMaxTokens`;
+  - `TestCompactionAuto`, `TestCompactionFailed`, `TestWebFetchRedirect`, `TestSubagentFailed`, `TestBashPartialOutputWithSpill`;
+  - `TestSendMessageQueuedAndResumed`, `TestSendMessageRefused`, `TestTaskActsCreateChangeReject`.
+- Kept, though their rows read MOVE: a test whose scenario has no golden, whose assertion is the footer, the topbar or a log record rather than the feed, or whose scenario takes an argument the golden drive does not pass. Each still needs its named lower-tier test before it can go.
+
 ## The scenario-matrix change (ruling 1, drafted for the implementation)
 
 ### The problem the change has to solve
