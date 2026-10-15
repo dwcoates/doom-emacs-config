@@ -16,11 +16,22 @@ import (
 
 // ---- the session's standing stream ----
 
-// routeSessionUpdateLocked routes one SessionUpdate arm to the views that
+// routeSessionUpdateLocked routes one SessionUpdate and then records, at
+// DEBUG, that it was routed: every view it reaches under the watcher's lock
+// has taken it by the time the record is written, so a reader of the log
+// knows the update's effect is in place rather than on its way.
+func (w *watcher) routeSessionUpdateLocked(update *conversationv1.SessionUpdate) {
+	w.routeSessionUpdateArmLocked(update)
+	w.log.Debug("daemon.sessionwatcher.session_update_routed", "a session update was routed: every view it reaches under the watcher's lock has taken it", dlog.Context{
+		"arm": sessionArm(update),
+	})
+}
+
+// routeSessionUpdateArmLocked routes one SessionUpdate arm to the views that
 // resolve from it. The split is per arm and stated once here: session identity
 // and health are the topbar's, accounting and the rate-limit status are the
 // footer's, and the session's death is everyone's.
-func (w *watcher) routeSessionUpdateLocked(update *conversationv1.SessionUpdate) {
+func (w *watcher) routeSessionUpdateArmLocked(update *conversationv1.SessionUpdate) {
 	switch u := update.GetUpdate().(type) {
 	case *conversationv1.SessionUpdate_LiveWork:
 		// A LEVEL AHEAD OF THE FACTS IS NOT JUDGED: the shim's update stream
@@ -508,8 +519,34 @@ func (w *watcher) routePageCutLocked(a *agentWatch, frame *conversationv1.AgentF
 	w.routeContextCutLocked(agent, frame.GetUpdate().GetContextCut(), at, nil, place, cutCaughtUp)
 }
 
-// routeEntryLocked routes one live history entry.
+// routeEntryLocked routes one live history entry and then records, at DEBUG,
+// that it was routed: the record follows every sink call made under the lock,
+// so a reader of the log knows the entry's rows are drawn rather than on
+// their way.
 func (w *watcher) routeEntryLocked(a *agentWatch, at *conversationv1.HistoryEntryAt) {
+	w.routeEntryArmLocked(a, at)
+	w.log.Debug("daemon.sessionwatcher.entry_routed", "a history entry was routed: every view it reaches under the watcher's lock has taken it, and a turn end it closed is dispatched once the lock is released", dlog.Context{
+		"agent_id": a.id.GetValue(), "main": a.id == nil, "pointer": at.GetAt().GetValue(), "turn": at.GetTurn().GetValue(), "arm": entryArm(at.GetEntry()),
+	})
+}
+
+// entryArm names a history entry's arm for the routing record.
+func entryArm(entry *conversationv1.HistoryEntry) string {
+	switch {
+	case entry.GetUserPrompt() != nil:
+		return "user_prompt"
+	case entry.GetAgentFrame() != nil:
+		return "agent_frame"
+	case entry.GetPeerMessage() != nil:
+		return "peer_message"
+	default:
+		return "unset"
+	}
+}
+
+// routeEntryArmLocked routes one entry's arm, adopting its pointer as the
+// watch's mark first.
+func (w *watcher) routeEntryArmLocked(a *agentWatch, at *conversationv1.HistoryEntryAt) {
 	if ptr := at.GetAt(); ptr != nil {
 		key := watchKey(a.id)
 		if w.noteServedLocked(key, ptr) {

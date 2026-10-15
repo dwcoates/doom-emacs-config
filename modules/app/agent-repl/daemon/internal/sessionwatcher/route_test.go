@@ -3287,3 +3287,63 @@ func TestAPushNotificationsLaterStateRaisesNoSecondNotification(t *testing.T) {
 		t.Fatalf("a push notification's later state raised a notification: %v", names(got))
 	}
 }
+
+// TestRoutingAnEntryRecordsThatItWasRouted pins the DEBUG record that follows
+// every routed entry: its arm, its pointer, its turn and whether it was the
+// main watch's, so a reader of the log knows each entry's rows are drawn.
+func TestRoutingAnEntryRecordsThatItWasRouted(t *testing.T) {
+	tests := []struct {
+		name        string
+		resp        *shimv1.WatchAgentResponse
+		wantArm     string
+		wantPointer string
+	}{
+		{name: "a user prompt", resp: entryPrompt("turn-1", "main-1"), wantArm: "user_prompt", wantPointer: "ptr-turn-1"},
+		{name: "an agent frame", resp: entryFrameAt(frameUpdate("main-1", activityUpdate(readActivity("act-1"))), "ptr-7"), wantArm: "agent_frame", wantPointer: "ptr-7"},
+		{name: "a peer message", resp: entryPeer("peer-1", "main-1", "other"), wantArm: "peer_message", wantPointer: "ptr-peer-1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, Session{Started: sessionStarted("turn-1")})
+			h.quiet()
+
+			// Act.
+			h.routeNow(func(w *watcher) { w.routeAgentResponseLocked(w.main, tt.resp) })
+
+			// Assert.
+			var routed []map[string]any
+			for _, r := range h.log.Records() {
+				// h.quiet() routed its own sentinel entry; only this one counts.
+				if r.Level == "debug" && r.Operation == "daemon.sessionwatcher.entry_routed" && r.Context["pointer"] == tt.wantPointer {
+					routed = append(routed, r.Context)
+				}
+			}
+			if len(routed) != 1 || routed[0]["arm"] != tt.wantArm || routed[0]["main"] != true {
+				t.Fatalf("entry_routed records = %v, want one main-watch %s record at %s", routed, tt.wantArm, tt.wantPointer)
+			}
+		})
+	}
+}
+
+// TestRoutingASessionUpdateRecordsThatItWasRouted pins the DEBUG record that
+// follows every routed session update, naming its arm.
+func TestRoutingASessionUpdateRecordsThatItWasRouted(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	h.routeNow(func(w *watcher) { w.routeSessionUpdateLocked(diagnosticsUpdate()) })
+
+	// Assert.
+	var routed []map[string]any
+	for _, r := range h.log.Records() {
+		if r.Level == "debug" && r.Operation == "daemon.sessionwatcher.session_update_routed" {
+			routed = append(routed, r.Context)
+		}
+	}
+	if len(routed) != 1 || routed[0]["arm"] != "diagnostics" {
+		t.Fatalf("session_update_routed records = %v, want one naming the diagnostics arm", routed)
+	}
+}
