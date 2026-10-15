@@ -96,3 +96,37 @@ func TestTheRostersPlacementListsAreNarrow(t *testing.T) {
 		}
 	}
 }
+
+func TestPlaceRosterPath(t *testing.T) {
+	tests := []struct {
+		name    string
+		path    string
+		listDir bool
+		files   []string
+		dirs    []string
+		trees   []string
+	}{
+		{"a subtree", "prompts/", false, nil, nil, []string{fixtureModule + "/prompts"}},
+		{"a file", "bin/x.sh", false, []string{fixtureModule + "/bin/x.sh"}, nil, nil},
+		{"a file with its directory's listing", "bin/x.sh", true, []string{fixtureModule + "/bin/x.sh"}, []string{fixtureModule + "/bin"}, nil},
+		{"a repository-relative file", "/README.md", false, []string{"README.md"}, nil, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			set := NewInputSet()
+
+			// Act
+			err := placeRosterPath(f.d, set, tt.path, tt.listDir)
+
+			// Assert
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(set.Files(), tt.files) || !slices.Equal(set.Dirs(), tt.dirs) || !slices.Equal(set.Trees(), tt.trees) {
+				t.Fatalf("files %v dirs %v trees %v, want %v %v %v", set.Files(), set.Dirs(), set.Trees(), tt.files, tt.dirs, tt.trees)
+			}
+		})
+	}
+}

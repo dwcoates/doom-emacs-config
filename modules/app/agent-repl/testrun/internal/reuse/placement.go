@@ -34,32 +34,21 @@ func BuildRegions(d Deps, all []roster.Suite, alwaysRun, readByNone []string, se
 		if s.Kind != roster.Script && s.Kind != roster.SplitScript {
 			p += "/"
 		}
-		if err := placeRosterPath(d, r.always, p); err != nil {
+		if err := placeRosterPath(d, r.always, p, false); err != nil {
 			return Regions{}, fmt.Errorf("reuse: place %s's path: %w", s.Name, err)
 		}
 	}
 	for _, p := range alwaysRun {
-		if err := placeRosterPath(d, r.always, p); err != nil {
+		if err := placeRosterPath(d, r.always, p, false); err != nil {
 			return Regions{}, err
 		}
 	}
 	for _, p := range readByNone {
-		if err := placeRosterPath(d, r.nobody, p); err != nil {
+		if err := placeRosterPath(d, r.nobody, p, false); err != nil {
 			return Regions{}, err
 		}
 	}
 	return r, nil
-}
-
-func placeRosterPath(d Deps, set *InputSet, p string) error {
-	rel, tree, err := RepoPath(d, p)
-	if err != nil {
-		return err
-	}
-	if tree {
-		return set.AddTree(rel)
-	}
-	return set.AddFile(rel)
 }
 
 // Unplaced is every file of files (repository-relative) that no region

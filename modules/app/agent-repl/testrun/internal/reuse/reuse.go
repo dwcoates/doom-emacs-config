@@ -353,18 +353,9 @@ func RepoPath(d Deps, p string) (string, bool, error) {
 
 func addDeclared(d Deps, set *InputSet, r *roster.Reuse) error {
 	for _, p := range r.Inputs {
-		rel, tree, err := RepoPath(d, p)
-		if err != nil {
-			return err
-		}
-		if tree {
-			err = set.AddTree(rel)
-		} else {
-			// A module resolver (esbuild, node) lists a file's directory to
-			// find it, so the directory's listing is read too, and hashed.
-			err = errors.Join(set.AddFile(rel), set.AddDir(path.Dir(rel)))
-		}
-		if err != nil {
+		// A module resolver (esbuild, node) lists a file's directory to find
+		// it, so a declared file's directory listing is read too, and hashed.
+		if err := placeRosterPath(d, set, p, true); err != nil {
 			return err
 		}
 	}
@@ -381,6 +372,22 @@ func addDeclared(d Deps, set *InputSet, r *roster.Reuse) error {
 		}
 	}
 	return nil
+}
+
+// placeRosterPath places one roster path in set: a subtree when it ends in
+// "/", else one file, and with listDir also the file's directory listing.
+func placeRosterPath(d Deps, set *InputSet, p string, listDir bool) error {
+	rel, tree, err := RepoPath(d, p)
+	if err != nil {
+		return err
+	}
+	if tree {
+		return set.AddTree(rel)
+	}
+	if listDir {
+		return errors.Join(set.AddFile(rel), set.AddDir(path.Dir(rel)))
+	}
+	return set.AddFile(rel)
 }
 
 // Report prints each verdict's line: a reused suite's in the shape the merge
