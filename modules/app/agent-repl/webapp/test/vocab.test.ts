@@ -440,6 +440,12 @@ describe("composerClosedFor", () => {
     ["a close under way", "closing", "blocked", true],
     ["a turn that died with agent-repl's machinery", "agentReplFault", "turnDied", false],
     ["a red status", "working", undefined, false],
+    ["a merge in flight, purple, holding its prompts", "merging", "testing", false],
+    ["a stopped merge that failed", "mergeFailed", "conflicts", false],
+    ["a landed merge", "merged", undefined, false],
+    ["a degraded session, still usable", "degraded", "observation", false],
+    ["a failed turn's idle end", "turnFailed", undefined, false],
+    ["a green idle workspace", "idle", "ready", false],
   ])("%s", (_name, arm, substatus, closed) => {
     // Act
     const got = composerClosedFor(arm, substatus);
