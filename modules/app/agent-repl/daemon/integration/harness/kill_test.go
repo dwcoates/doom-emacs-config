@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"agent-repld/internal/procgroup"
 	"bufio"
 	"context"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -767,6 +769,88 @@ func TestKillGroupKillsALiveGroupAndTakesAGoneOneAsNoFailure(t *testing.T) {
 				if !ok || !ws.Signaled() || ws.Signal() != syscall.SIGKILL {
 					t.Fatalf("the group's leader ended with %v, want SIGKILL", cmd.ProcessState)
 				}
+			}
+		})
+	}
+}
+
+// TestKillReturnsOnceEveryMemberHasExited pins that Kill awaits the whole
+// group, not only its leader: a member still exiting when Kill returned held
+// the killed daemon's boot claim, and the next daemon refused to boot.
+func TestKillReturnsOnceEveryMemberHasExited(t *testing.T) {
+	// Arrange
+	d, member := groupUnderKill(t, "/bin/sleep 100 & echo $!; wait")
+
+	// Act
+	d.Kill()
+
+	// Assert
+	unended, err := procgroup.UnendedMembers(d.cmd.Process.Pid)
+	if err != nil {
+		t.Fatalf("procgroup.UnendedMembers: %v", err)
+	}
+	for _, m := range unended {
+		if m.Pid == member {
+			t.Fatalf("the member %d (%s) had not exited when Kill returned", m.Pid, m.State)
+		}
+	}
+}
+
+// TestAwaitGroupEnd pins the group wait: every listed member is awaited once,
+// a member forked while the kill was under way is awaited on the next
+// listing, and a failure is answered naming the member.
+func TestAwaitGroupEnd(t *testing.T) {
+	errList := errors.New("the group could not be listed")
+	errWait := errors.New("the exit event could not be registered")
+	m := func(pid int) procgroup.Member { return procgroup.Member{Pid: pid, Comm: "c", State: "running"} }
+	tests := []struct {
+		name      string
+		listings  [][]procgroup.Member // answered in turn; the last repeats
+		listErr   error
+		waitErr   error
+		wantWaits []int
+		wantErr   error
+	}{
+		{name: "an empty group awaits nothing", listings: [][]procgroup.Member{nil}},
+		{name: "each member is awaited once though it stays listed until it is a zombie",
+			listings: [][]procgroup.Member{{m(1), m(2)}}, wantWaits: []int{1, 2}},
+		{name: "a member forked during the kill is awaited on the next listing",
+			listings: [][]procgroup.Member{{m(1)}, {m(1), m(3)}}, wantWaits: []int{1, 3}},
+		{name: "a listing that fails is answered", listErr: errList, wantErr: errList},
+		{name: "a wait that fails is answered", listings: [][]procgroup.Member{{m(1)}}, waitErr: errWait,
+			wantWaits: []int{1}, wantErr: errWait},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			calls := 0
+			list := func(int) ([]procgroup.Member, error) {
+				if tt.listErr != nil {
+					return nil, tt.listErr
+				}
+				l := tt.listings[min(calls, len(tt.listings)-1)]
+				calls++
+				return l, nil
+			}
+			var waits []int
+			wait := func(_ context.Context, pid int) error {
+				waits = append(waits, pid)
+				return tt.waitErr
+			}
+			stalled := func(int, time.Duration) { t.Error("a stall was reported") }
+
+			// Act
+			err := awaitGroupEnd(7, time.Minute, list, wait, stalled)
+
+			// Assert
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("err = %v, want %v", err, tt.wantErr)
+			}
+			if tt.waitErr != nil && !strings.Contains(err.Error(), "member 1") {
+				t.Errorf("err = %v, want the member named", err)
+			}
+			if !slices.Equal(waits, tt.wantWaits) {
+				t.Errorf("waits = %v, want %v", waits, tt.wantWaits)
 			}
 		})
 	}

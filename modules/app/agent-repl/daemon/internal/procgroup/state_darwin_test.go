@@ -36,3 +36,38 @@ func TestStateOf(t *testing.T) {
 		})
 	}
 }
+
+// TestMemberFilters pins which process-table entries each group listing
+// keeps: an exit under way is no longer live, but it is not yet ended, since
+// it may still hold its open files.
+func TestMemberFilters(t *testing.T) {
+	cases := []struct {
+		name        string
+		stat        int8
+		flag        int32
+		wantLive    bool
+		wantUnended bool
+	}{
+		{name: "a running process", stat: pStatRun, wantLive: true, wantUnended: true},
+		{name: "a stopped process", stat: pStatStop, wantLive: true, wantUnended: true},
+		{name: "a process whose exit is under way", stat: pStatRun, flag: pWExit, wantLive: false, wantUnended: true},
+		{name: "a zombie", stat: pStatZombie, wantLive: false, wantUnended: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			state, err := StateOf(tc.stat, tc.flag)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Act
+			gotLive, gotUnended := live(tc.stat, state), unended(tc.stat, state)
+
+			// Assert
+			if gotLive != tc.wantLive || gotUnended != tc.wantUnended {
+				t.Fatalf("live, unended = %v, %v; want %v, %v", gotLive, gotUnended, tc.wantLive, tc.wantUnended)
+			}
+		})
+	}
+}

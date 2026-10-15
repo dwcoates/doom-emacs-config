@@ -67,25 +67,44 @@ func StateOf(stat int8, flag int32) (State, error) {
 // LiveMembers answers the members of process group pgid that have not
 // exited: everything in the group but its zombies and exiting processes.
 func LiveMembers(pgid int) ([]Member, error) {
-	members, err := unix.SysctlKinfoProcSlice("kern.proc.pgrp", pgid)
+	return members(pgid, live)
+}
+
+// UnendedMembers answers the members of process group pgid that are not yet
+// zombies: the live ones and those whose exit is under way. An exiting
+// process may still hold its open files (its exit closes them on the way to
+// SZOMB), so a caller that needs a group's files released waits on these.
+func UnendedMembers(pgid int) ([]Member, error) {
+	return members(pgid, unended)
+}
+
+// live keeps a member that has not exited (LiveMembers).
+func live(_ int8, state State) bool { return !state.Exited }
+
+// unended keeps a member that is not yet a zombie (UnendedMembers).
+func unended(stat int8, _ State) bool { return stat != pStatZombie }
+
+// members answers the members of process group pgid that keep selects.
+func members(pgid int, keep func(stat int8, state State) bool) ([]Member, error) {
+	all, err := unix.SysctlKinfoProcSlice("kern.proc.pgrp", pgid)
 	if err != nil {
 		return nil, fmt.Errorf("list process group %d: %w", pgid, err)
 	}
-	var live []Member
-	for _, m := range members {
+	var out []Member
+	for _, m := range all {
 		state, err := StateOf(m.Proc.P_stat, m.Proc.P_flag)
 		if err != nil {
 			return nil, fmt.Errorf("process %d of group %d: %w", m.Proc.P_pid, pgid, err)
 		}
-		if !state.Exited {
-			live = append(live, Member{
+		if keep(m.Proc.P_stat, state) {
+			out = append(out, Member{
 				Pid:   int(m.Proc.P_pid),
 				Comm:  unix.ByteSliceToString(m.Proc.P_comm[:]),
 				State: state.Name,
 			})
 		}
 	}
-	return live, nil
+	return out, nil
 }
 
 // Exiting answers whether pid's process has begun exiting: its exit under way
