@@ -45,6 +45,14 @@ type syncBuffer struct {
 	buf bytes.Buffer
 }
 
+// Reset drops everything recorded so far, so a test asserts only what its
+// own act wrote.
+func (b *syncBuffer) Reset() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.buf.Reset()
+}
+
 func (b *syncBuffer) Write(p []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -89,6 +97,24 @@ func findRecord(t *testing.T, sink *syncBuffer, operation, level string) (logRec
 		}
 	}
 	return logRecord{}, false
+}
+
+// oneNormalRecord answers the ONE record a refusal leaves at a level an
+// operator reads (info, warn or error), failing when there is not exactly one:
+// a refusal recorded twice, or by two layers, is the defect this guards.
+func oneNormalRecord(t *testing.T, sink *syncBuffer) logRecord {
+	t.Helper()
+	var normal []logRecord
+	for _, rec := range records(t, sink) {
+		switch rec.Level {
+		case "info", "warn", "error":
+			normal = append(normal, rec)
+		}
+	}
+	if len(normal) != 1 {
+		t.Fatalf("normal-level records = %+v, want exactly one", normal)
+	}
+	return normal[0]
 }
 
 // fakeStore is the storage layer as internal/server needs it: every answer is
@@ -2840,4 +2866,93 @@ func interactiveClass() *storev1.WriteClass {
 
 func bulkClass() *storev1.WriteClass {
 	return &storev1.WriteClass{WriteClass: &storev1.WriteClass_Bulk{Bulk: &storev1.WriteClassBulk{}}}
+}
+
+func TestARefusedWriteLeavesOneWarnRecordNamingItsCall(t *testing.T) {
+	// Arrange: an entry with no upsert_key is refused by the server itself.
+	h := newHarness(t, newFakeStore(), 0)
+	h.logs.Reset()
+
+	// Act.
+	if _, err := h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{
+		WriteClass: interactiveClass(),
+		Producer:   "claude-shim:s1",
+		Batch:      &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w-1", "")}},
+	})); err != nil {
+		t.Fatalf("WriteBatch = %v, want nil", err)
+	}
+
+	// Assert.
+	rec := oneNormalRecord(t, h.logs)
+	if rec.Level != "warn" {
+		t.Fatalf("the refusal record is level %q, want warn", rec.Level)
+	}
+	for _, key := range []string{"rpc", "refusal_site", "producer"} {
+		if _, ok := rec.Context[key]; !ok {
+			t.Fatalf("the refusal record carries no %q: %v", key, rec.Context)
+		}
+	}
+}
+
+func TestARefusedCallsRequestIdReachesItsOneRecord(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, newFakeStore(), 0)
+	h.logs.Reset()
+	const requestID = "req-unit-refused-01"
+	req := connect.NewRequest(&storev1.OpenAgentSessionRequest{Agent: agentID("")})
+	req.Header().Set("X-Agent-Repl-Request-Id", requestID)
+
+	// Act.
+	resp, err := h.client.OpenAgentSession(context.Background(), req)
+
+	// Assert.
+	if err != nil || resp.Msg.GetFailure() == nil {
+		t.Fatalf("OpenAgentSession = %v, %v; want the refusal", resp, err)
+	}
+	if rec := oneNormalRecord(t, h.logs); rec.RequestID != requestID {
+		t.Fatalf("the refusal record's request_id = %q, want %q", rec.RequestID, requestID)
+	}
+}
+
+func TestAnUnusableWatchTokenIsRefusedInOneRecordCarryingItsHash(t *testing.T) {
+	tests := []struct {
+		name  string
+		token func(t *testing.T, h *harness, store *fakeStore) string
+	}{
+		{name: "a token this store never minted", token: func(*testing.T, *harness, *fakeStore) string {
+			return "0123456789abcdef0123456789abcdef"
+		}},
+		{name: "a token already consumed", token: func(t *testing.T, h *harness, store *fakeStore) string {
+			token := openSession(t, h, "a1")
+			ctx, cancel := context.WithCancel(context.Background())
+			t.Cleanup(cancel)
+			startWatch(h, ctx, token)
+			<-store.sinceEntered
+			return token
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			store := newFakeStore()
+			h := newHarness(t, store, 0)
+			token := tc.token(t, h, store)
+			h.logs.Reset()
+
+			// Act.
+			err := startWatch(h, context.Background(), token).refusal(t)
+
+			// Assert.
+			if connect.CodeOf(err) != connect.CodeNotFound {
+				t.Fatalf("code = %v (err %v), want %v", connect.CodeOf(err), err, connect.CodeNotFound)
+			}
+			rec := oneNormalRecord(t, h.logs)
+			if rec.Context["refusal_site"] != SiteUnknownWatchToken || rec.Context["refusal_kind"] != "invalid_request" {
+				t.Fatalf("refusal context = %v, want site %q kind invalid_request", rec.Context, SiteUnknownWatchToken)
+			}
+			if hash, ok := rec.Context["watch_token_hash"].(string); !ok || hash == "" {
+				t.Fatalf("the refusal record carries no watch_token_hash: %v", rec.Context)
+			}
+		})
+	}
 }

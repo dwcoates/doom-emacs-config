@@ -3,6 +3,7 @@ package server
 import (
 	"agentrepl/shim-store/internal/testclose"
 	"context"
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -337,5 +338,71 @@ func TestWatchBashRunReplaysARowStoredAfterTheTerminal(t *testing.T) {
 	}
 	if rows != 3 {
 		t.Fatalf("rows = %d, want every stored row including the one after the terminal", rows)
+	}
+}
+
+func TestAnOverflowedBashWatcherIsRecordedOnceNamingItsRunAndTheLoss(t *testing.T) {
+	// Arrange: a watcher whose buffer of one is far outrun.
+	store := newFakeStore()
+	store.bashRun = BashRunReplay{Rows: []BashRowWritten{
+		{RunID: "run-slow", Row: bashRow("run-slow", false).Row, WriteSeq: 1},
+	}, PinSeq: 1}
+	h := newHarness(t, store, 1)
+	stream := startBashWatch(h, context.Background(), "run-slow").open(t)
+	if !stream.Receive() {
+		t.Fatalf("the replay delivered nothing: %v", stream.Err())
+	}
+	rows := make([]BashRowWritten, 0, 8)
+	for i := 0; i < 8; i++ {
+		rows = append(rows, BashRowWritten{RunID: "run-slow", Row: bashRow("run-slow", false).Row, WriteSeq: uint64(10 + i)})
+	}
+
+	// Act.
+	h.server.publishBashRows(h.server.log, "producer", rows)
+	for stream.Receive() {
+	}
+
+	// Assert.
+	var overflows []logRecord
+	for _, rec := range records(t, h.logs) {
+		if rec.Operation == "store.fanout.overflow" {
+			overflows = append(overflows, rec)
+		}
+	}
+	if len(overflows) != 1 {
+		t.Fatalf("overflow records = %+v, want exactly one", overflows)
+	}
+	rec := overflows[0]
+	if rec.Level != "warn" || rec.Context["task_id"] != "run-slow" || !strings.Contains(rec.Message, "dropped=") {
+		t.Fatalf("overflow record = %+v, want a warn naming run-slow and how much was dropped", rec)
+	}
+}
+
+func TestARefusedBashRunOpenIsRecordedOnceAtItsLevel(t *testing.T) {
+	tests := []struct {
+		name      string
+		run       string
+		wantSite  string
+		wantKind  string
+		wantLevel string
+	}{
+		{name: "a run the store holds no row for", run: "never-ran-at-all", wantSite: "unknown_bash_run", wantKind: "not_found", wantLevel: "info"},
+		{name: "a run named by nothing", run: "", wantSite: "run_empty", wantKind: "invalid_request", wantLevel: "warn"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, newFakeStore(), 0)
+			h.logs.Reset()
+
+			// Act.
+			_ = startBashWatch(h, context.Background(), tc.run).refusal(t)
+
+			// Assert.
+			rec := oneNormalRecord(t, h.logs)
+			if rec.Level != tc.wantLevel || rec.Context["refusal_site"] != tc.wantSite || rec.Context["refusal_kind"] != tc.wantKind || rec.Context["rpc"] == nil {
+				t.Fatalf("refusal record = %+v, want %s at site %s kind %s naming its rpc", rec, tc.wantLevel, tc.wantSite, tc.wantKind)
+			}
+		})
 	}
 }
