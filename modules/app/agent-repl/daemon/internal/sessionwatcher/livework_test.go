@@ -517,3 +517,30 @@ func TestADisplacedWatchersDepartureStillEmptiesItsOwnLedger(t *testing.T) {
 	// Assert.
 	assertLiveWork(t, old.w.LiveWork(), LiveWorkSet{})
 }
+
+// TestAStartlessShellsFailureTerminalRetiresItAsABashTerminal is the
+// 2026-09-28 phantom shell: a shell the vendor's timeout backgrounded has no
+// `start`, so the first frame its watch carries is the spool's terminal, and
+// that terminal alone retires it.
+func TestAStartlessShellsFailureTerminalRetiresItAsABashTerminal(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("", createdWork("w-1", bashWork()))})
+	h.client.nextBashOpen(t)
+	h.quiet()
+	entry := h.shellWatchFor("w-1")
+
+	// Act.
+	h.routeNow(func(w *watcher) {
+		w.routeBashLocked(entry, &conversationv1.AgentBash{
+			Result: &conversationv1.AgentBash_Failure{Failure: &conversationv1.AgentBashFailure{}},
+		})
+	})
+
+	// Assert.
+	if !h.w.LiveWork().Empty() {
+		t.Fatalf("the shell is still live after its terminal: %+v", h.w.LiveWork())
+	}
+	if got := h.retiredRecord(t, "w-1")["conclusion"]; got != string(concludedBashTerminal) {
+		t.Fatalf("conclusion = %v, want %s", got, concludedBashTerminal)
+	}
+}
