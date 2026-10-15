@@ -43,7 +43,7 @@ func TestAwaitReapWithinBoundsTheWait(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatalf("start child: %v", err)
 			}
-			d := &Daemon{t: t, cmd: cmd}
+			d := &Daemon{t: t, daemonProc: &daemonProc{cmd: cmd}}
 			if tc.kill {
 				t.Cleanup(func() {
 					if err := cmd.Process.Kill(); err != nil {

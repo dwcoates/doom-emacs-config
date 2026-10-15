@@ -442,7 +442,22 @@ type Daemon struct {
 	t   testing.TB
 	ctx context.Context
 	// waitBound is ONE wait's failure bound; ctx above is the whole run's.
-	waitBound  time.Duration
+	waitBound time.Duration
+	expected  map[string]bool
+	// required are the expected operations a test also REQUIRES to have been
+	// produced (RequireWarnings): the sweep fails on one that never was.
+	required map[string]bool
+
+	// daemonProc is the PROCESS's state, as opposed to one test's: its
+	// command, its client, its exit and the locks that order them. Every
+	// Daemon over one process shares the one daemonProc.
+	*daemonProc
+}
+
+// daemonProc is the state of one daemon PROCESS, shared by everything that
+// names it. Its mu also guards the per-test expectation maps on Daemon, so one
+// lock orders every read and write the sweep makes.
+type daemonProc struct {
 	cmd        *exec.Cmd
 	stderrPath string
 	// afterGroupStopped, when set, runs inside Kill between the group's
@@ -475,11 +490,7 @@ type Daemon struct {
 	reapBegun bool
 	exitErr   error
 	waitOnce  sync.Once
-	expected  map[string]bool
-	// required are the expected operations a test also REQUIRES to have been
-	// produced (RequireWarnings): the sweep fails on one that never was.
-	required map[string]bool
-	shims    map[string]*ShimControl
+	shims     map[string]*ShimControl
 	// inMemoryState is whether this daemon's state lives in memory (see
 	// Opts.DurableState).
 	inMemoryState bool
@@ -613,7 +624,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		t:                  t,
 		expected:           map[string]bool{},
 		required:           map[string]bool{},
-		shims:              map[string]*ShimControl{},
+		daemonProc:         &daemonProc{shims: map[string]*ShimControl{}},
 	}
 	if opts.DefaultSettings != "" {
 		writeFile(t, filepath.Join(d.DefaultConfigDir, "settings.json"), opts.DefaultSettings)

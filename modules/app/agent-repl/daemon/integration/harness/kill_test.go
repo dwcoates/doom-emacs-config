@@ -56,7 +56,7 @@ func TestKillNeverSignalsAReapedProcess(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatalf("start child: %v", err)
 			}
-			d := &Daemon{t: t, cmd: cmd}
+			d := &Daemon{t: t, daemonProc: &daemonProc{cmd: cmd}}
 			if tc.reaped {
 				d.sigMu.Lock()
 				d.reapBegun = true
@@ -118,7 +118,7 @@ func TestReapStraysSparesATestOwnedProcess(t *testing.T) {
 			if tc.spare {
 				SpareFromStrayReaping(t, cmd.Process.Pid)
 			}
-			d := &Daemon{t: t, StateDir: stateDir}
+			d := &Daemon{t: t, StateDir: stateDir, daemonProc: &daemonProc{}}
 
 			// Act.
 			strays := d.StrayPIDs()
@@ -198,7 +198,7 @@ func groupUnderKill(t *testing.T, script string) (*Daemon, int) {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start the group: %v", err)
 	}
-	d := &Daemon{t: t, cmd: cmd}
+	d := &Daemon{t: t, daemonProc: &daemonProc{cmd: cmd}}
 	t.Cleanup(func() {
 		if !d.reaped() {
 			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
@@ -374,7 +374,7 @@ func TestReapStraysFreezesEveryStrayBeforeKillingAny(t *testing.T) {
 	// Arrange
 	stateDir := t.TempDir()
 	respawner, child, _ := respawningStray(t, stateDir)
-	d := &Daemon{t: t, StateDir: stateDir}
+	d := &Daemon{t: t, StateDir: stateDir, daemonProc: &daemonProc{}}
 	var respawnerState processState
 	var stateErr, exitErr error
 	var frozenView string
@@ -432,7 +432,7 @@ func TestReapStraysLeavesNoReplacementOfAStrayKilledFirst(t *testing.T) {
 	// Arrange
 	stateDir := t.TempDir()
 	_, child, _ := respawningStray(t, stateDir)
-	d := &Daemon{t: t, StateDir: stateDir}
+	d := &Daemon{t: t, StateDir: stateDir, daemonProc: &daemonProc{}}
 	d.afterStraysFrozen = func() { _ = syscall.Kill(child, syscall.SIGKILL) }
 
 	// Act
@@ -454,7 +454,7 @@ func TestReapStraysLeavesNoReplacementSpawnedThroughADiscardedStop(t *testing.T)
 	// Arrange
 	stateDir := t.TempDir()
 	respawner, child, next := respawningStray(t, stateDir)
-	d := &Daemon{t: t, StateDir: stateDir}
+	d := &Daemon{t: t, StateDir: stateDir, daemonProc: &daemonProc{}}
 	escaped := false
 	var escapeErr error
 	d.afterStraysFrozen = func() {
@@ -524,7 +524,7 @@ func TestLeakedStrays(t *testing.T) {
 			// Arrange
 			stateDir := t.TempDir()
 			tc.arrange(t, stateDir)
-			d := &Daemon{t: t, StateDir: stateDir}
+			d := &Daemon{t: t, StateDir: stateDir, daemonProc: &daemonProc{}}
 
 			// Act
 			err := d.leakedStrays()

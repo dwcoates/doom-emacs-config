@@ -547,7 +547,7 @@ func TestAnchorAccountSaysWhetherTheAnchorWasWritten(t *testing.T) {
 
 func TestAwaitLogRecordWithinReturnsTheRecordThePredicateAccepts(t *testing.T) {
 	// Arrange: a workspace log beside a bare Daemon carrying its run budget.
-	d := &Daemon{t: t, ctx: context.Background(), StateDir: t.TempDir()}
+	d := &Daemon{t: t, ctx: context.Background(), StateDir: t.TempDir(), daemonProc: &daemonProc{}}
 	path := filepath.Join(t.TempDir(), "webapp.log")
 	lines := `{"timestamp":"2026-10-06T12:00:00Z","level":"info","pid":7,"operation":"webapp-layer.other","message":"not this"}
 {"timestamp":"2026-10-06T12:00:01Z","level":"info","pid":7,"operation":"webapp-layer.handover.page-mounted","message":"mounted"}
