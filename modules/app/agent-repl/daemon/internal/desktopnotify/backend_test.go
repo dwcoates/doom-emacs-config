@@ -9,6 +9,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"agent-repld/internal/ids"
 )
 
 // fakeRunner answers one scripted stdout and records the argv it was handed.
@@ -314,6 +316,112 @@ func TestBackendSurfacesAFailedProgram(t *testing.T) {
 	if !errors.Is(err, cause) || outcome != Unclicked {
 		t.Fatalf("Post = (%v, %v), want (Unclicked, the program's failure)", outcome, err)
 	}
+}
+
+// TestTerminalNotifierBackendListsTheBannersItStillHolds pins the macOS
+// delivered query: terminal-notifier -list ALL, read as the workspaces whose
+// group Notification Center still lists.
+func TestTerminalNotifierBackendListsTheBannersItStillHolds(t *testing.T) {
+	cases := []struct {
+		name   string
+		stdout string
+		want   map[ids.WorkspaceID]bool
+	}{
+		{name: "a list naming no banner is empty output", stdout: "", want: map[ids.WorkspaceID]bool{}},
+		{name: "the header row alone names no banner", stdout: "GroupID\tTitle\tSubtitle\tMessage\tDelivered At\n",
+			want: map[ids.WorkspaceID]bool{}},
+		{name: "each workspace group is a delivered banner",
+			stdout: "GroupID\tTitle\tSubtitle\tMessage\tDelivered At\n" +
+				"agent-repl:ws1\tT1\t\tB1\t2026-10-15 16:16:08 +0000\n" +
+				"agent-repl:ws2\tT2\t\tB2\t2026-10-15 16:17:08 +0000\n",
+			want: map[ids.WorkspaceID]bool{"ws1": true, "ws2": true}},
+		{name: "a group that is no workspace's is skipped",
+			stdout: "GroupID\tTitle\tSubtitle\tMessage\tDelivered At\n" +
+				"agent-repl-docker-fd\tT\t\tB\t2026-10-15 05:21:33 +0000\n" +
+				"agent-repl:\tT\t\tB\t2026-10-15 05:21:33 +0000\n" +
+				"other-app\tT\t\tB\t2026-10-15 05:21:33 +0000\n" +
+				"agent-repl:ws3\tT\t\tB\t2026-10-15 05:21:33 +0000",
+			want: map[ids.WorkspaceID]bool{"ws3": true}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			runner := &fakeRunner{stdout: version3}
+			b, err := NewBackend(context.Background(), mustPlatform(t, "darwin"), "", onPath, runner)
+			if err != nil {
+				t.Fatalf("NewBackend: %v", err)
+			}
+			runner.stdout = tc.stdout
+
+			// Act
+			got, err := b.Delivered(context.Background())
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Delivered: %v", err)
+			}
+			if !reflect.DeepEqual(runner.args, []string{"-list", "ALL"}) {
+				t.Fatalf("ran %q, want -list ALL", runner.args)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("Delivered = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBackendDeliveredSurfacesAFailedProgram(t *testing.T) {
+	// Arrange
+	cause := errors.New("exit status 1: list refused")
+	runner := &fakeRunner{stdout: version3}
+	b, err := NewBackend(context.Background(), mustPlatform(t, "darwin"), "", onPath, runner)
+	if err != nil {
+		t.Fatalf("NewBackend: %v", err)
+	}
+	runner.err = cause
+
+	// Act
+	got, err := b.Delivered(context.Background())
+
+	// Assert
+	if !errors.Is(err, cause) || got != nil {
+		t.Fatalf("Delivered = (%v, %v), want (nil, the program's failure)", got, err)
+	}
+}
+
+func TestBackendDeliveredIsBoundedByTheDeliveredBound(t *testing.T) {
+	// Arrange
+	runner := &fakeRunner{stdout: version3}
+	b, err := NewBackend(context.Background(), mustPlatform(t, "darwin"), "", onPath, runner)
+	if err != nil {
+		t.Fatalf("NewBackend: %v", err)
+	}
+	runner.block = make(chan struct{})
+
+	// Act
+	_, err = b.Delivered(context.Background())
+
+	// Assert
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Delivered = %v, want the bound's deadline", err)
+	}
+}
+
+func TestReadBackBackendIsNeverAskedWhatIsDelivered(t *testing.T) {
+	// Arrange
+	b, err := NewBackend(context.Background(), mustPlatform(t, "linux"), "", onPath, &fakeRunner{})
+	if err != nil {
+		t.Fatalf("NewBackend: %v", err)
+	}
+	defer func() {
+		// Assert
+		if recover() == nil {
+			t.Fatal("Delivered on a read-back backend did not panic")
+		}
+	}()
+
+	// Act
+	_, _ = b.Delivered(context.Background())
 }
 
 // TestBackendReportsTheBannerMadeExactlyWhenItIsMade pins the made edge the

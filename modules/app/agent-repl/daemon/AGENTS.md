@@ -584,6 +584,16 @@ is Emacs-wide: a focused Emacs, whatever workspace it shows, gets no banner.
   - Linux READS the click BACK: `notify-send --wait` blocks until a click, a
     dismissal or its 60s timeout, and a click is relayed to Emacs as the host
     stream's `notification_clicked`.
+- **Emacs coming forward claims the newest live banner**
+  (`ClaimLiveNotification`, `desktopnotify/held.go`). The notifier holds each
+  banner from the edge it is made on, the newest per workspace. A read-back
+  banner is live while its program runs. A handed banner is live while
+  `terminal-notifier -list ALL` still lists its group, asked once per claim
+  under a 100ms bound (40ms measured). The claim answers the newest live one
+  and lets go of every banner it read. A successful `SelectWorkspace` and a
+  read-back click let go of all of them, so a banner made before the user
+  chose a workspace never moves them later. A claim while Emacs reads as
+  unfocused is refused (`editor_unfocused`) and consumes nothing.
 - **Every banner runs on its own goroutine**; focus is read before composing
   and again after, and `Notifier.Close` cancels and joins them before the state
   client closes.

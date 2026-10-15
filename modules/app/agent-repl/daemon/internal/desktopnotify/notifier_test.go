@@ -22,9 +22,34 @@ type fakeBackend struct {
 	madeTwice bool
 	// block, when set, holds Post until closed or ctx ends.
 	block chan struct{}
+	// madeSignal, when set, is closed once the banner is reported made.
+	madeSignal chan struct{}
 	// onPost, when set, runs as Post is called, which is where a test reads
 	// what the notifier had already done when it handed the banner over.
 	onPost func()
+	// delivered and deliveredErr answer Delivered; asked counts its calls.
+	delivered    map[ids.WorkspaceID]bool
+	deliveredErr error
+	asked        int
+	// onDelivered, when set, runs as Delivered is called: a test's window
+	// between a claim reading the held banners and letting them go.
+	onDelivered func()
+}
+
+func (b *fakeBackend) Delivered(context.Context) (map[ids.WorkspaceID]bool, error) {
+	if b.onDelivered != nil {
+		b.onDelivered()
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.asked++
+	return b.delivered, b.deliveredErr
+}
+
+func (b *fakeBackend) deliveredAsks() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.asked
 }
 
 func (b *fakeBackend) Program() string { return "fake-banner" }
@@ -41,6 +66,9 @@ func (b *fakeBackend) Post(ctx context.Context, target Target, banner Banner, ma
 		made()
 		if b.madeTwice {
 			made()
+		}
+		if b.madeSignal != nil {
+			close(b.madeSignal)
 		}
 	}
 	if b.block != nil {

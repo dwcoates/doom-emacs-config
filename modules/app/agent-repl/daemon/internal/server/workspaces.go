@@ -805,6 +805,9 @@ func (s *server) SelectWorkspace(
 		}
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
+	// THE USER CHOSE A WORKSPACE (a switch in Emacs, a handed banner's click),
+	// so no banner made before the choice may steer a later return to Emacs.
+	s.deps.Banners.Forget("a workspace was selected")
 	resp.Result = &agentreplv1.SelectWorkspaceResponse_Success{
 		Success: &agentreplv1.SelectWorkspaceSuccess{},
 	}

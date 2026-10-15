@@ -123,6 +123,9 @@ type Deps struct {
 	// Focus is Emacs's desktop focus: an Emacs WatchDaemon stream attaches it
 	// for the stream's lifetime, and ReportEditorFocus moves it.
 	Focus *desktopnotify.Focus
+	// Banners backs ClaimLiveNotification, and SelectWorkspace lets every held
+	// banner go: a workspace the user chose outranks any banner made before.
+	Banners Banners
 	// PersistentWifi backs UpdatePersistentWifiMode, and its topic is the
 	// `persistent_wifi` state every Emacs WatchDaemon stream subscribes to (a
 	// webview's never does: its topbar view carries the same standing).
@@ -416,6 +419,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("the standing loud faults")
 	case deps.Focus == nil:
 		return nil, missing("Emacs's focus")
+	case deps.Banners == nil:
+		return nil, missing("the desktop banners")
 	case deps.PersistentWifi == nil:
 		return nil, missing("the persistent-wifi controller")
 	case deps.HiddenKeepalives == nil:
