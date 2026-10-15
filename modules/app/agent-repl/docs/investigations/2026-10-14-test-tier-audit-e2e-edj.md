@@ -50,6 +50,7 @@ Two different measures, labelled each time they appear:
   - the chunks used 27.9-40.6 CPU-seconds each, about 430 CPU-seconds in all;
   - the whole run reported 435.8 CPU-seconds and 118s wall on 13 slots;
   - vet and build together used under 5 CPU-seconds, since the build is mostly cached.
+  - Caveat: that run was not green. Five tests failed on bounded waits (`TestPushNotificationNotSent`, `TestHookFailed`, `TestASuccessorThatFinishedJoiningAcceptsADeploy`, `TestInterruptAfterTextDelta`, `TestVendorBackgroundedTaskStartIsNoDetachment`), and their chunks paid those waits in full. Waiting burns little CPU, but treat about 430 as an upper bound.
 - testrun records CPU per chunk, not per test. The per-ruling CPU figures below therefore split the 430 CPU-seconds in proportion to each test's history seconds. That split is an approximation, and it is labelled as one.
 - **No solo-second figures.** Measuring them would mean running the e2e tests one by one, which this investigation did not do (battery, shared suite slot). test-redundancy-measure's per-test runs can supply them.
 
@@ -139,17 +140,16 @@ Two different measures, labelled each time they appear:
 - **Six identical worlds** in `TestStopReplayedByEveryRewindNeverLoops`.
 - **Identical setups:** the rebasing and committing merge-tab tests, and the stop-after-turn and no-watch-token tests.
 
-## Questions for the owner (sent to the parent)
+## Rulings (owner, through the parent, 2026-10-14)
 
-1. **SCENARIO-MATRIX coverage.** `TestScenarioMatrixMatchesReality` counts only e2e drivers as coverage.
-   - Moving the failurearms, turnlifecycle and producerfaults tests would turn many `!api-*`, `!fail-*`, `!query-*`, residue and usage rows uncovered.
-   - Recommended (a): a scenario is covered when its shim half and its daemon half are each proven at their own tier, plus one e2e wiring scenario per seam.
-   - Those MOVE rows are **conditional on ruling (a)**.
-2. **A missing Emacs tier.** About 6 Emacs MOVE rows have no existing tier to move to.
-   - The behaviors: key bindings, Doom popup placement and Doom workspace recycling.
-   - Batch ERT runs `emacs -Q`, where Doom's `map!` does nothing.
-   - Moving them needs a daemonless, Doom-booted Emacs pointed at the fake daemon. Until the owner rules on building that tier, those rows stay in e2e-emacs.
-3. **Merging webapp-layer areas into one world.** `WEBAPP-LAYER-SPEC.md` gives each area its own world. That only matters if more areas stay than recommended here.
+1. **Scenario-matrix coverage is (a).** A scenario is covered when the shim tier proves its shim half and a daemon tier proves its daemon half. e2e is required only for one wiring scenario per seam.
+   - The MOVE rows that depended on this ruling are now unconditional.
+   - The exact change to the matrix check is drafted below ("The scenario-matrix change").
+2. **A new tier for the Emacs rows no current tier can see:** a Doom-booted Emacs with no real daemon, against the fake daemon.
+   - The affected rows are about 6: key bindings, Doom popup placement and Doom workspace recycling.
+   - Those rows stay in `e2e-emacs` until the new tier exists.
+   - Design sketch below ("The Doom tier").
+3. **The combined tier rule's content is approved** (`d06bf0f99e`). It lands with the implementation, not before.
 
 ## Side findings (defects and weak tests found while auditing)
 
@@ -157,7 +157,10 @@ Two different measures, labelled each time they appear:
   - `TestEmacsOpenProgressLadderReachesRendered` passes before the page has loaded.
   - `TestEmacsRestartHoldsPromptsMeanwhile` never checks that the held prompt survives.
   - `TestNestedSubagentHistoricalUsage` never checks the usage figure its scenario exists for.
-  - `TestModelRefusalWithoutFallback`'s doc says "expected to fail", but `daemon/internal/resolve/feed/turnended.go` now produces the refusal arm. The test passes on master; only the doc is stale.
+  - `TestModelRefusalWithoutFallback`'s doc says "expected to fail". The doc is stale.
+    - `daemon/internal/resolve/feed/turnended.go` now draws the refusal arm from a model error that follows a refused response (`TestAModelErrorAfterARefusedResponseDrawsTheRefusalArm`).
+    - The shim's `turn.test.ts` says `!refusal-no-fallback` ends on `modelError` and publishes no refusal reason. So the daemon infers the refusal; the shim never states it.
+    - That the test passes is inferred, not observed: master's merge gates run the full e2e suite and keep landing. No run log seen here prints its result.
 - **Possible product defects:**
   - A roster drain scheduled one hour out fires at once.
   - The page's `SetModel` fails at the transport for an option the daemon itself served, and no test pins it.
@@ -179,7 +182,92 @@ Two different measures, labelled each time they appear:
 
 ## Proposed AGENTS.md rule
 
-The draft is on this branch in `modules/app/agent-repl/AGENTS.md`, right after "A system's integration tests run that system alone". Its wording is being coordinated with test-tier-audit-integration through the parent.
+The combined draft, settled with test-tier-audit-integration and approved by the owner (`d06bf0f99e`), is on this branch in `modules/app/agent-repl/AGENTS.md`, right after "A system's integration tests run that system alone". It lands with the implementation.
+
+## The scenario-matrix change (ruling 1, drafted for the implementation)
+
+### The problem the change has to solve
+
+- Today a matrix row counts as covered only when an e2e file submits the scenario's prompt (`scenariomatrix_test.go`, check (iv)).
+- Under ruling (a), a row is covered by a shim half plus a daemon half. But daemon tests never name a vendor scenario: they push frames through `daemon/integration/fakeshim` (`push_agent_frame`, `push_session_update`).
+- So "this daemon test proves scenario X's daemon half" cannot be derived from a literal the way the e2e columns are. A hand-written annotation would be an unchecked claim, which is exactly how the matrix lied before it was derived.
+- The two halves must be bound by something both of them read. Otherwise the shim half can prove one stream while the daemon half proves a different, hand-written one.
+
+### The design: one per-scenario frame fixture that both halves read
+
+1. **The fixture is the contract between the halves.**
+   - `testdata/scenario-frames/<scenario>.json` sits at the module root, beside the shared `testdata/`, so neither system's suite depends on the other's source.
+   - It holds the canonical protojson of what the real shim emits for the scenario on its stream plane: WatchAgent frames and session updates, with ids and times normalized.
+   - Its header names the scenario's `seam` family, for example `stream-tool-card`, `turn-failure` or `two-plane-episode`.
+2. **The shim half: one vitest table**, `agent-shim/claude/shim/test/integration/scenario-frames.test.ts`.
+   - It drives every scenario `fake/registry.ts` registers through a real shim with the fake SDK, the way `turn.test.ts` does, and compares the output to the committed fixture.
+   - A missing fixture fails, and so does a stale one. `AGENT_REPL_SCENARIO_FRAMES_WRITE=1` regenerates them, the same convention as the matrix's own `AGENT_REPL_MATRIX_WRITE`.
+   - Result: a fixture is exactly what the shim emits. This is structural; the fixture cannot drift from the shim.
+3. **The daemon half: one table** in the cheapest daemon tier that can project frames.
+   - The target is `daemon/internal/resolve/feed` (unit) wherever the resolver accepts the entries directly, and `daemon/integration` with fakeshim only where the projection needs the session's wiring.
+   - It loads EVERY fixture in the directory, feeds it through, and asserts the projected rows and terminal against `scenarioExpectations`, a map keyed by scenario name.
+   - A fixture with no expectation fails, and so does an expectation with no fixture. So every shim half has a daemon half, or the daemon suite is red. That is structural too.
+4. **Scenarios whose daemon-visible result needs the sidecar's file plane**, such as detached shells and subagent transcripts:
+   - their fixture header says `planes: stream+file`;
+   - their seam family is a two-plane family, which by the tier rule has its one e2e wiring test.
+   - The sidecar's own half stays in its integration suite, as today.
+5. **Changes to `e2e/scenariomatrix_test.go`:**
+   - Two new derived columns. `Shim half`: the fixture file exists. `Daemon half`: the scenario's key is present in `scenarioExpectations`, read with `go/parser` from the composite literal's keys, the technique `goFieldLiterals` already uses.
+   - A new derived `Seam` column, taken from the fixture header. A new check that every seam family named by a fixture has at least one e2e test whose doc comment carries `Seam: <family>`, read with `go/parser` (plus the `.layer.test.ts` scan for the webapp layer). The reverse check: every `Seam:` comment names a family that exists.
+   - Check (iv) is redefined so that `covered` or `weak` requires shim half AND daemon half AND a wired seam, and `uncovered` is anything else.
+     - The three e2e columns stay derived and stay exact; check (iii) is unchanged.
+     - The e2e columns become informational: they no longer decide the verdict.
+   - Section (b) gains count lines for the two halves and for seam families. `matrixLayerCount` and `checkMatrixCounts` are extended to match.
+   - In `SCENARIO-MATRIX.md`, "Counted layers are Go, webapp and Emacs ... daemon/integration, shim test/integration and sidecar integration tests do NOT count" is replaced by the (a) definition, citing the 2026-10-14 ruling.
+6. **Order of landing, so that no commit leaves a scenario uncovered:**
+   - first the fixtures, the shim table and the daemon table, which only add coverage;
+   - then the matrix change;
+   - then the e2e deletions, one area per commit, each confirmed by the mutation tool.
+- What the draft does not settle: the shim table's runtime over about 150 scenarios. Each scenario costs one `spawnShim` with the fake SDK and no daemon, store or sidecar. It must be measured before it lands.
+
+## The Doom tier (ruling 2, design sketch)
+
+### What it must see that no current tier sees
+
+- Doom's `map!` bindings, the leader map included. In batch `emacs -Q`, `keybindings.el` compiles `map!` to a no-op.
+- Doom's popup rules (`set-popup-rule!` into `display-buffer-alist`) and where a buffer actually lands.
+- Doom's workspace recycling (persp-mode).
+- It does NOT need a real daemon, shim, store, sidecar or vendor. The fake daemon (`lisp/testsupport/fakedaemon`) already speaks `agentrepl.v1` with the strict codec, and the ERT integration suites drive it.
+
+### How Doom boots in it
+
+- **Recommended: the existing e2e sandbox image, a GUI frame on Xvfb, the image's real Doom profile.** The boot mechanism is exactly `e2e-emacs`'s (`EMACS-LAYER-SPEC.md`, "It boots real Doom"):
+  - `HOME` is staged from the image's `EMACSDIR`;
+  - the `sandbox/doom/` profile is used;
+  - the one readiness stamp is written from Doom's after-init edge.
+- **Daemonless.** The fake daemon starts first, on the test's state root, and writes `daemon.addr`. Emacs's ensure then takes the adoption path for an already-answering daemon (`test-integration-daemon.el` `daemon-answering-daemon-is-adopted`), so no launcher, no `agent-repld` build and no shim are ever spawned.
+- **Rejected: running against the host's own Doom.** It would reach the developer's `~/.config/doom` and `~/.emacs.d`, which is the reason the Emacs layer is sandboxed at all.
+- **Considered, unverified: a batch Emacs that loads Doom's core** (noninteractive, the way the `doom` CLI loads it). It would skip Xvfb, but three obstacles stand in the way:
+  - the spec's reasons against batch still hold for popups: no window system, no redisplay, no tab-bar;
+  - `config.el` gates cold start on `(not noninteractive)`;
+  - persp-mode behavior in batch is unknown.
+  - First step if pursued: measure whether `map!` lookups and `display-buffer-alist` resolution are faithful in a Doom-loaded batch Emacs. Until that is measured, the GUI frame is the design.
+
+### Cost per process
+
+- Measured today (`testrun/roster/roster.go`, 2026-10-12): the worst Doom boot inside the sandbox is 0.88s on 2 CPUs, against its 3.5s bound.
+- An `e2e-emacs` scenario costs about 4.4 slot-seconds. That includes the real daemon's spawn and its first link, and for turn scenarios the shim, store and sidecar.
+- The Doom tier pays Xvfb plus the Doom boot plus a fake-daemon start (a Go binary built once per run, like the ERT suites' `AGENT_REPL_ITEST_FAKEDAEMON` prebuild). The container start is shared by the whole suite.
+- This is unmeasured; the first implementation step measures one case end to end.
+
+### Sharing one boot across cases
+
+- **Recommended: one Emacs per test FILE, with cases as ERT tests inside it.** That is the convention every existing ERT suite already follows (`lisp/test-integration-*.el`: one Emacs per file, fake-daemon state reset between tests through `/_fake/reset`).
+  - Files would be `lisp/test-doom-<module>.el`, one per source module (the module's one-test-file-per-source rule), run inside the booted Doom by the suite script.
+  - Each test's fixture resets the module's state and the fake daemon, the same discipline as `test-integration-helpers.el`.
+- **Not recommended: one booted Emacs shared by every file.** That is the "sharing mutable state across tests to save setup" which `skills/write-tests/SKILL.md` refuses. It is also test-shared-setup's question (Option C), not this tier's.
+- At about 6 cases today, per-file booting costs a few seconds in total, so sharing more buys nothing.
+
+### Where it runs
+
+- A new roster suite, for example `emacs-doom`, run by a script beside `bin/test-e2e-emacs.sh` in the same container image. It declines with exit 77 when the sandbox is unusable, exactly as `e2e-emacs` does.
+- It is an Emacs INTEGRATION tier (one real system, Emacs, plus the fake daemon), so it follows the integration rule, not the e2e one. It sits under `lisp/`, not `e2e/`.
+- Until it exists, the ~6 rows stay in `e2e-emacs`, per the ruling.
 
 ## Per-test tables
 
