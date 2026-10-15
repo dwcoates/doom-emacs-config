@@ -4387,9 +4387,9 @@ it.  An incomplete request errors here rather than reaching the wire."
            (agent-repl-wire-verbs--require message "move" (plist-get request :move))))))
 
 (defun agent-repl-wire-decode-feed-selection-row-viewport (json)
-  "Decode FeedSelectionRowViewport from JSON into (:viewport (:arm ARM :value nil)).
-ARM is `:center' (a step from Emacs) or `:hold' (a click in the webapp);
-exactly one is set."
+  "Decode FeedSelectionRowViewport from JSON into (:viewport VP).
+VP is (:arm ARM :value nil), and ARM is `:center' (a step from
+Emacs) or `:hold' (a click in the webapp); exactly one is set."
   (let ((message "FeedSelectionRowViewport"))
     (agent-repl-wire-verbs--check-keys message json '(center hold))
     (list :viewport
