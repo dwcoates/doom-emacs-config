@@ -9,19 +9,21 @@
  * it finds the slash words in what it drew and marks one exactly when its name
  * is listed.
  *
- * THE SLASH WORD IS THE COMPOSER'S. A slash word lies in a run of
- * non-whitespace: it begins with `/` at the run's start or after the run's
- * leading opening brackets and quotes, and ends at the run's end less its
- * trailing closing brackets, quotes and sentence punctuation, never before the
- * slash's next character. So `(/merge-queue).` marks `/merge-queue`, and
- * `/usr/local` names `usr/local`, which no catalog lists.
+ * THE SLASH WORD IS THE COMPOSER'S, held to one contract with it
+ * (proto/vocab/slash-word.json). A slash word lies in a run of non-whitespace:
+ * it begins with `/` at the run's start or after the run's leading opening
+ * brackets and quotes, and ends at the run's end less its trailing closing
+ * brackets, quotes and sentence punctuation, never before the slash's next
+ * character. So `(/merge-queue).` marks `/merge-queue`, and `/usr/local`
+ * names `usr/local`, which no catalog lists.
  */
+import slashWord from "../../../../proto/vocab/slash-word.json";
 
-/** The punctuation a slash word may follow inside its run (the composer's set). */
-const OPENING = "([{<\"'`“‘";
-
-/** The punctuation a slash word's run may end in, outside the word (the composer's set). */
-const CLOSING = ")]}>\"'`.,;:!?”’…";
+/**
+ * The punctuation a slash word may follow inside its run (`OPENING`), and the
+ * punctuation its run may end in outside the word (`CLOSING`): the contract's.
+ */
+const { opening: OPENING, closing: CLOSING } = slashWord;
 
 /** The class a marked slash word wears; the stylesheet colors it. */
 export const KNOWN_COMMAND_CLASS = "known-command";

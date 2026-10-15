@@ -5,6 +5,7 @@ import {
   markKnownCommands,
   slashWords,
 } from "../../../src/feed/rows/known-commands.js";
+import slashWord from "../../../../proto/vocab/slash-word.json";
 
 /** The names of TEXT's slash words, in order. */
 function names(text: string): string[] {
@@ -99,5 +100,17 @@ describe("markKnownCommands", () => {
     markKnownCommands(root, new Set());
     // Assert
     expect(root.innerHTML).toBe("<p>/compact</p>");
+  });
+});
+
+describe("the cross-language slash word (proto/vocab/slash-word.json)", () => {
+  it.each(slashWord.cases)("marks $marked in $text", ({ text, known, marked }) => {
+    // Arrange
+    const root = rendered("<p></p>");
+    root.firstElementChild?.append(text);
+    // Act
+    markKnownCommands(root, new Set(known));
+    // Assert
+    expect(marks(root)).toEqual(marked);
   });
 });

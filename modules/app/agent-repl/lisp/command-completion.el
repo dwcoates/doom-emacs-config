@@ -33,7 +33,9 @@
 ;; PUNCTUATION AROUND A SLASH WORD IS NOT PART OF IT.  A slash word may
 ;; follow opening brackets and quotes, and drops trailing closing brackets,
 ;; quotes and sentence punctuation, so `(/merge-queue).' completes and marks
-;; `/merge-queue' just as a whitespace-bounded one does.
+;; `/merge-queue' just as a whitespace-bounded one does.  The webapp marks a
+;; drawn user prompt's known commands by the same rule; both are held to
+;; proto/vocab/slash-word.json.
 ;;
 ;; A KNOWN COMMAND IS PURPLE IN THE COMPOSER.  Every slash word naming a
 ;; command in the catalog in hand -- typed, completed or pasted -- takes

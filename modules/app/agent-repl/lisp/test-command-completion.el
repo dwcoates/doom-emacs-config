@@ -17,6 +17,7 @@
       nil t)
 
 (require 'cl-lib)
+(require 'json)
 
 ;;;; ---- Fixtures ----
 
@@ -623,6 +624,56 @@ ANSWER is `(:response PLIST)', `(:failure DETAIL)', or nil to answer nothing."
       (should-not agent-repl-test-command-completion--requests)
       (should (cl-some (lambda (m) (string-match-p "refresh-skipped.*reason=no-connection" m))
                        logged)))))
+
+;;;; ---- The cross-language slash word ----
+
+;; The webapp marks the known commands of a drawn user prompt by the same rule
+;; (webapp/src/feed/rows/known-commands.ts), read from
+;; proto/vocab/slash-word.json.  This is the composer's corner of that
+;; contract: its punctuation sets are the file's, and it marks every case of
+;; the file as the file says.
+
+(defconst agent-repl-test-command-completion--slash-word
+  (let ((path (expand-file-name "../proto/vocab/slash-word.json"
+                                (file-name-directory (or load-file-name buffer-file-name)))))
+    (with-temp-buffer
+      (insert-file-contents path)
+      (let ((json-object-type 'alist)
+            (json-array-type 'list)
+            (json-key-type 'string))
+        (json-read))))
+  "The checked-in cross-language slash-word contract, decoded.")
+
+(defun agent-repl-test-command-completion--slash-word (key)
+  "Return the slash-word contract's KEY value."
+  (cdr (assoc key agent-repl-test-command-completion--slash-word)))
+
+(ert-deftest agent-repl-test-command-completion-opening-chars-are-the-contracts ()
+  "The opening punctuation is the contract's."
+  (should (equal agent-repl--command-completion-opening-chars
+                 (agent-repl-test-command-completion--slash-word "opening"))))
+
+(ert-deftest agent-repl-test-command-completion-closing-chars-are-the-contracts ()
+  "The closing punctuation is the contract's."
+  (should (equal agent-repl--command-completion-closing-chars
+                 (agent-repl-test-command-completion--slash-word "closing"))))
+
+(ert-deftest agent-repl-test-command-completion-marks-every-contract-case ()
+  "Every case of the contract marks the words it names, in order."
+  (dolist (case (agent-repl-test-command-completion--slash-word "cases"))
+    (let ((text (cdr (assoc "text" case)))
+          (known (cdr (assoc "known" case)))
+          (marked (cdr (assoc "marked" case))))
+      (with-temp-buffer
+        ;; Arrange
+        (setq agent-repl--command-completion-catalog
+              (mapcar (lambda (name) (list :name name)) known))
+        (insert text)
+        ;; Act
+        (agent-repl--command-completion-mark (point-min) (point-max))
+        ;; Assert
+        (should (equal (cons text (agent-repl-test-command-completion--marked))
+                       (cons text marked)))))))
 
 (provide 'test-command-completion)
 ;;; test-command-completion.el ends here
