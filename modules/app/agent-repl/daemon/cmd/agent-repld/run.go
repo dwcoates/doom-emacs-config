@@ -439,6 +439,13 @@ func run(ctx context.Context, opts options, h hooks) error {
 	// to failed transactions and left the lease held. The wait is BOUNDED
 	// (merge.TerminalDrainBound) and takes its own context, because the
 	// process's signal context is already cancelled by the time it runs.
+	// THE MERGE QUEUE NOTICES STOP RIGHT AFTER THE MERGE DRAIN, and before
+	// the watchers and the state client: deferred here, before DrainMerges
+	// is, so it runs after it. A merge landing inside the drain reports its
+	// landing, and the notices deliver every pending change before they stop.
+	if built.Notices != nil {
+		defer teardown.step("stop_merge_notices", built.Notices.Stop)
+	}
 	if built.DrainMerges != nil {
 		defer teardown.step("drain_merges", func() { built.DrainMerges(context.Background()) })
 	}
@@ -503,6 +510,11 @@ func run(ctx context.Context, opts options, h hooks) error {
 	var loops runningLoops
 	for _, loop := range built.Background {
 		loops.Go(loop.Name, func() { loop.run(serving, log) })
+	}
+	// THE MERGE QUEUE NOTICES start with the loops, for the same reason, but
+	// on their own lifetime, which ends after the merge drain (above).
+	if built.Notices != nil {
+		built.Notices.Start()
 	}
 	// THE BRING-UP IS THE ONE BOOT STEP THAT DOES NOT GATE READINESS, and it
 	// starts here: after the bindings and the opening views, because it starts

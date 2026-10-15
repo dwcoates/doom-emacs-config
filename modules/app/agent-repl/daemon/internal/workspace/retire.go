@@ -62,7 +62,7 @@ func (v *verbs) RetireLanded(ctx context.Context, ws ids.WorkspaceID) (string, e
 
 	parent, err := v.parentOfOpen(ctx, record)
 	if err != nil {
-		log.Error(opRetire, "could not read whether an open workspace was cut from the requester; it is kept", withCause(fields, err))
+		log.Error(opRetire, "could not read whether an open workspace was cut from the requester; it is kept", dlog.WithCause(fields, err))
 		return "", fmt.Errorf("retire %q: %w", ws, err)
 	}
 	if parent != "" {
@@ -71,7 +71,7 @@ func (v *verbs) RetireLanded(ctx context.Context, ws ids.WorkspaceID) (string, e
 	}
 	blocked, err := v.closeBlocker(ctx, ws)
 	if err != nil {
-		log.Error(opRetire, "could not judge whether the requester is quiet; it is kept", withCause(fields, err))
+		log.Error(opRetire, "could not judge whether the requester is quiet; it is kept", dlog.WithCause(fields, err))
 		return "", fmt.Errorf("retire %q: %w", ws, err)
 	}
 	if blocked != nil {
@@ -82,18 +82,18 @@ func (v *verbs) RetireLanded(ctx context.Context, ws ids.WorkspaceID) (string, e
 	if _, err := os.Stat(record.Dir); errors.Is(err, fs.ErrNotExist) {
 		return v.keepRetire(log, RetireKeptMissing, fields), nil
 	} else if err != nil {
-		log.Error(opRetire, "could not read the requester's worktree; it is kept", withCause(fields, err))
+		log.Error(opRetire, "could not read the requester's worktree; it is kept", dlog.WithCause(fields, err))
 		return "", fmt.Errorf("retire %q: stat %s: %w", ws, record.Dir, err)
 	}
 	head, err := v.deps.Git.ResolveRef(ctx, record.Dir, "HEAD")
 	if err != nil {
-		log.Error(opRetire, "could not read the requester's HEAD; it is kept", withCause(fields, err))
+		log.Error(opRetire, "could not read the requester's HEAD; it is kept", dlog.WithCause(fields, err))
 		return "", fmt.Errorf("retire %q: resolve HEAD: %w", ws, err)
 	}
 	fields["head"] = head
 	if head != landing.Head {
 		if err := v.deps.DB.SetLanded(ctx, ws, nil); err != nil {
-			log.Error(opRetire, "could not clear the landing of a requester that moved past it; it is kept", withCause(fields, err))
+			log.Error(opRetire, "could not clear the landing of a requester that moved past it; it is kept", dlog.WithCause(fields, err))
 			return "", fmt.Errorf("retire %q: clear the landing: %w", ws, err)
 		}
 		log.Info(opRetire, "the requester moved past the commit that landed; its landing is cleared and it is kept", fields)
@@ -101,7 +101,7 @@ func (v *verbs) RetireLanded(ctx context.Context, ws ids.WorkspaceID) (string, e
 	}
 	clean, err := v.deps.Git.IsClean(ctx, record.Dir)
 	if err != nil {
-		log.Error(opRetire, "could not read whether the requester's worktree is clean; it is kept", withCause(fields, err))
+		log.Error(opRetire, "could not read whether the requester's worktree is clean; it is kept", dlog.WithCause(fields, err))
 		return "", fmt.Errorf("retire %q: cleanliness: %w", ws, err)
 	}
 	if !clean {
@@ -109,7 +109,7 @@ func (v *verbs) RetireLanded(ctx context.Context, ws ids.WorkspaceID) (string, e
 	}
 	repoDir, err := v.repoDirOf(ctx, record)
 	if err != nil {
-		log.Error(opRetire, "could not resolve the repository the requester's worktree is removed from; it is kept", withCause(fields, err))
+		log.Error(opRetire, "could not resolve the repository the requester's worktree is removed from; it is kept", dlog.WithCause(fields, err))
 		return "", fmt.Errorf("retire %q: %w", ws, err)
 	}
 	fields["repo"] = repoDir
@@ -120,11 +120,11 @@ func (v *verbs) RetireLanded(ctx context.Context, ws ids.WorkspaceID) (string, e
 		return "", fmt.Errorf("retire %q: %w", ws, err)
 	}
 	if err := v.deps.Git.RemoveCleanWorktree(ctx, repoDir, record.Dir); err != nil {
-		log.Error(opRetire, "could not remove the requester's worktree; it is closed and its worktree is kept", withCause(fields, err))
+		log.Error(opRetire, "could not remove the requester's worktree; it is closed and its worktree is kept", dlog.WithCause(fields, err))
 		return "", fmt.Errorf("retire %q: remove the worktree: %w", ws, err)
 	}
 	if err := v.deps.DB.SetMergedAt(ctx, ws, landing.At, nil); err != nil {
-		log.Error(opRetire, "could not stamp the retired requester merged; its worktree is gone and it stays closed", withCause(fields, err))
+		log.Error(opRetire, "could not stamp the retired requester merged; its worktree is gone and it stays closed", dlog.WithCause(fields, err))
 		return "", fmt.Errorf("retire %q: stamp merged: %w", ws, err)
 	}
 	log.Info(opRetire, "retired a requester whose detached merge landed: its session stopped, its worktree removed, its branch kept", fields)

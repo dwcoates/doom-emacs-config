@@ -110,7 +110,7 @@ func (q *queue) oweResumption(ctx context.Context, ws ids.WorkspaceID, turn ids.
 	fields := dlog.Context{"turn": string(turn)}
 	if err := q.deps.DB.OweResumption(ctx, ws, turn, q.deps.Now()); err != nil {
 		log.Error(opResume, "could not record the resumption the stand-down owes; the cut turn will not be resumed",
-			merged(fields, dlog.Context{"cause": err.Error()}))
+			dlog.Merge(fields, dlog.Context{"cause": err.Error()}))
 		return
 	}
 	log.Info(opResume, "the daemon's own stand-down cut the turn; the next session that serves the workspace resumes it", fields)

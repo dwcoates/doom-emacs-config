@@ -157,6 +157,34 @@ type fakeMerge struct {
 	// racingErr is what either answers.
 	disables, enables int
 	racingErr         error
+	// subscriptions and unsubscriptions record every Subscribe and
+	// Unsubscribe; subscribeErr and unsubscribeErr are what they answer, and
+	// replaced makes a successful Subscribe answer that it replaced one.
+	subscriptions   []fakeSubscription
+	unsubscriptions []fakeSubscription
+	subscribeErr    error
+	unsubscribeErr  error
+	replaced        bool
+}
+
+// fakeSubscription is one Subscribe or Unsubscribe the fake was asked for.
+type fakeSubscription struct {
+	ws     ids.WorkspaceID
+	scope  *merge.RepositoryScope
+	detail wsm.MergeQueueDetail
+}
+
+func (m *fakeMerge) Subscribe(_ context.Context, ws ids.WorkspaceID, scope *merge.RepositoryScope, detail wsm.MergeQueueDetail) (bool, error) {
+	m.subscriptions = append(m.subscriptions, fakeSubscription{ws: ws, scope: scope, detail: detail})
+	if m.subscribeErr != nil {
+		return false, m.subscribeErr
+	}
+	return m.replaced, nil
+}
+
+func (m *fakeMerge) Unsubscribe(_ context.Context, ws ids.WorkspaceID, scope *merge.RepositoryScope) error {
+	m.unsubscriptions = append(m.unsubscriptions, fakeSubscription{ws: ws, scope: scope})
+	return m.unsubscribeErr
 }
 
 // DisableRacing and EnableRacing count into disables and enables, and

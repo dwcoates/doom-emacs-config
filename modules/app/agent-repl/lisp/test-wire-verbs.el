@@ -1615,13 +1615,75 @@ encoded here."
                  '("cancel" "now" "schedule"))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-action-arms-pinned ()
-  "UpdateMergeQueueRequest's action oneof has exactly the nine arms encoded
+  "UpdateMergeQueueRequest's action oneof has exactly the eleven arms encoded
 here."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_update_merge_queue.pb.go"
                         "UpdateMergeQueueRequest")
                        #'string<)
-                 '("disableRacing" "enableRacing" "evict" "holdRollouts" "moveDown" "moveUp" "pause" "releaseRollouts" "resume"))))
+                 '("disableRacing" "enableRacing" "evict" "holdRollouts" "moveDown" "moveUp" "pause" "releaseRollouts" "resume" "subscribe" "unsubscribe"))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-subscribe-detail-arms-pinned ()
+  "UpdateMergeQueueSubscribeDetail's level oneof has exactly the three arms
+encoded here."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_update_merge_queue.pb.go"
+                        "UpdateMergeQueueSubscribeDetail")
+                       #'string<)
+                 '("advances" "depletes" "everyChange"))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-subscribe-every-repository ()
+  "A subscription with no repository is every repository's; it carries its
+subscriber and its level."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize
+                    (agent-repl-wire-encode-update-merge-queue-request
+                     (list :action (list :arm :subscribe
+                                         :value (list :subscriber agent-repl-test-wire-verbs--ref
+                                                      :detail '(:arm :every-change))))))
+                   "{\"subscribe\":{\"subscriber\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"detail\":{\"everyChange\":{}}}}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-subscribe-one-repository ()
+  "A subscription scoped to a repository carries its ref."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize
+                    (agent-repl-wire-encode-update-merge-queue-request
+                     (list :action (list :arm :subscribe
+                                         :value (list :subscriber agent-repl-test-wire-verbs--ref
+                                                      :repository agent-repl-test-wire-verbs--repo
+                                                      :detail '(:arm :depletes))))))
+                   "{\"subscribe\":{\"subscriber\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"repository\":{\"id\":\"repo-1\",\"dir\":\"/r/one\"},\"detail\":{\"depletes\":{}}}}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-subscribe-without-detail ()
+  "A subscription with no detail is incomplete and errors before send."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-update-merge-queue-request
+                   (list :action (list :arm :subscribe :value (list :subscriber agent-repl-test-wire-verbs--ref))))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-subscribe-without-subscriber ()
+  "A subscription with no subscriber is incomplete and errors before send."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-update-merge-queue-request
+                   '(:action (:arm :subscribe :value (:detail (:arm :advances)))))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-unsubscribe ()
+  "An unsubscribe with no repository ends the every-repository subscription."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize
+                    (agent-repl-wire-encode-update-merge-queue-request
+                     (list :action (list :arm :unsubscribe
+                                         :value (list :subscriber agent-repl-test-wire-verbs--ref)))))
+                   "{\"unsubscribe\":{\"subscriber\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"}}}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-scoped-subscriber-arms-share-one-encoder ()
+  "Both subscription arms encode their subscriber and scope through one helper."
+  (dolist (fn '(agent-repl-wire-encode-update-merge-queue-subscribe
+                agent-repl-wire-encode-update-merge-queue-unsubscribe))
+    (should (string-match-p
+             "agent-repl-wire-verbs--encode-merge-queue-scoped-subscriber"
+             (prin1-to-string (symbol-function fn))))))
 
 (ert-deftest agent-repl-test-wire-verbs-daemon-health-arms-pinned ()
   "DaemonHealthSuccess's health oneof has exactly the two verdict arms decoded
@@ -2945,6 +3007,22 @@ carries."
                     (agent-repl-test-wire-verbs--parse "{\"rolloutsNotHeld\":{}}"))
                    '(:cause (:arm :rollouts-not-held :value nil))))))
 
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-not-subscribed-arm ()
+  "UpdateMergeQueueError's `not_subscribed' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-update-merge-queue-error
+                    (agent-repl-test-wire-verbs--parse "{\"notSubscribed\":{}}"))
+                   '(:cause (:arm :not-subscribed :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-subscriber-closed-arm ()
+  "UpdateMergeQueueError's `subscriber_closed' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-update-merge-queue-error
+                    (agent-repl-test-wire-verbs--parse "{\"subscriberClosed\":{}}"))
+                   '(:cause (:arm :subscriber-closed :value nil))))))
+
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-error-unset-cause-is-a-breach ()
   "UpdateMergeQueueError with no arm set says nothing actionable, so it is a
 breach."
@@ -2965,7 +3043,7 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_update_merge_queue.pb.go" "UpdateMergeQueueError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "alreadyPaused" "notPaused" "noSuchQueuedMerge" "unknownRepository" "rolloutsAlreadyHeld" "rolloutsNotHeld" "racingAlreadyDisabled" "racingNotDisabled")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "alreadyPaused" "notPaused" "noSuchQueuedMerge" "unknownRepository" "rolloutsAlreadyHeld" "rolloutsNotHeld" "racingAlreadyDisabled" "racingNotDisabled" "notSubscribed" "subscriberClosed")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-session-health-error-unknown-workspace-arm ()

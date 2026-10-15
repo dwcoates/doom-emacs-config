@@ -52,7 +52,7 @@ func (c *controller) recoverOrphans(fields dlog.Context) {
 	lifetime := c.lifetime(context.Background())
 	workspaces, err := c.deps.DB.ListWorkspaces(lifetime)
 	if err != nil {
-		c.log.Error(opOrphans, "could not list the workspaces to look for shims nothing adopted", withCause(fields, err))
+		c.log.Error(opOrphans, "could not list the workspaces to look for shims nothing adopted", dlog.WithCause(fields, err))
 		return
 	}
 	c.mu.Lock()
@@ -65,7 +65,7 @@ func (c *controller) recoverOrphans(fields dlog.Context) {
 	var orphans []ids.WorkspaceID
 	var sessionless []wsm.Workspace
 	for _, ws := range workspaces {
-		wsFields := merge(fields, dlog.Context{"workspace": string(ws.ID)})
+		wsFields := dlog.Merge(fields, dlog.Context{"workspace": string(ws.ID)})
 		switch {
 		case ws.Closed:
 			continue
@@ -80,7 +80,7 @@ func (c *controller) recoverOrphans(fields dlog.Context) {
 			if errors.Is(statErr, fs.ErrNotExist) {
 				c.log.Debug(opOrphans, "the workspace's worktree is gone; there is no session here to recover", wsFields)
 			} else {
-				c.log.Warn(opOrphans, "the workspace's worktree could not be stat-ed; its shim is not recovered", withCause(wsFields, statErr))
+				c.log.Warn(opOrphans, "the workspace's worktree could not be stat-ed; its shim is not recovered", dlog.WithCause(wsFields, statErr))
 			}
 			continue
 		}
@@ -88,7 +88,7 @@ func (c *controller) recoverOrphans(fields dlog.Context) {
 		switch {
 		case probeErr != nil:
 			// "Could not tell" is never read as held or free.
-			c.log.Warn(opOrphans, "the workspace lock probe could not tell; a shim that may be running is not recovered", withCause(wsFields, probeErr))
+			c.log.Warn(opOrphans, "the workspace lock probe could not tell; a shim that may be running is not recovered", dlog.WithCause(wsFields, probeErr))
 		case state == sessionlock.StateUnknown:
 			c.log.Warn(opOrphans, "the workspace lock probe could not tell; a shim that may be running is not recovered", wsFields)
 		case state == sessionlock.StateHeld:
@@ -104,12 +104,12 @@ func (c *controller) recoverOrphans(fields dlog.Context) {
 		return
 	}
 	c.log.Info(opOrphans, "adopting the shims a gone daemon left running that nothing adopted",
-		merge(fields, dlog.Context{"workspaces": len(orphans)}))
+		dlog.Merge(fields, dlog.Context{"workspaces": len(orphans)}))
 	for _, ws := range orphans {
 		c.stragglerAdoptions.Add(1)
 		go func(ws ids.WorkspaceID) {
 			defer c.stragglerAdoptions.Done()
-			c.recoverOrphan(lifetime, ws, merge(fields, dlog.Context{"workspace": string(ws)}))
+			c.recoverOrphan(lifetime, ws, dlog.Merge(fields, dlog.Context{"workspace": string(ws)}))
 		}(ws)
 	}
 }
@@ -120,17 +120,17 @@ func (c *controller) recoverOrphans(fields dlog.Context) {
 func (c *controller) recoverOrphan(ctx context.Context, ws ids.WorkspaceID, fields dlog.Context) {
 	client, err := c.deps.Shims.Adopt(ctx, ws)
 	if err != nil {
-		c.log.Error(opOrphans, "a shim nothing adopted could not be adopted; it is left running unserved", withCause(fields, err))
+		c.log.Error(opOrphans, "a shim nothing adopted could not be adopted; it is left running unserved", dlog.WithCause(fields, err))
 		return
 	}
 	if err := c.deps.DB.ClaimServing(ctx, ws, c.deps.Instance); err != nil {
-		c.log.Error(opOrphans, "an adopted orphan's workspace could not be claimed; a handover will reclaim it from the live session", withCause(fields, err))
+		c.log.Error(opOrphans, "an adopted orphan's workspace could not be claimed; a handover will reclaim it from the live session", dlog.WithCause(fields, err))
 		return
 	}
-	c.log.Info(opOrphans, "adopted a shim a gone daemon left running", merge(fields, dlog.Context{"shim_pid": client.PID()}))
+	c.log.Info(opOrphans, "adopted a shim a gone daemon left running", dlog.Merge(fields, dlog.Context{"shim_pid": client.PID()}))
 	// A GONE DAEMON'S SHIM IS JUDGED like every other adopted one: the
 	// takeover's own staleness pass ran before this adoption finished.
 	if _, err := c.checkStale(ctx, ws, false); err != nil {
-		c.log.Error(opStaleness, "an adopted orphan could not be judged against the installed build", withCause(fields, err))
+		c.log.Error(opStaleness, "an adopted orphan could not be judged against the installed build", dlog.WithCause(fields, err))
 	}
 }

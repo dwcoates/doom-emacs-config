@@ -89,7 +89,7 @@ func (v *verbs) ClaimMergeName(ctx context.Context, repoDir, name string) (strin
 	defer v.names.mu.Unlock()
 	taken, err := v.takenLocked(ctx, "")
 	if err != nil {
-		log.Error(opNaming, "could not read the names already taken; the async merge's name is not checked", withCause(fields, err))
+		log.Error(opNaming, "could not read the names already taken; the async merge's name is not checked", dlog.WithCause(fields, err))
 		return "", nil, false, err
 	}
 	if taken[branch] {
@@ -98,7 +98,7 @@ func (v *verbs) ClaimMergeName(ctx context.Context, repoDir, name string) (strin
 	}
 	exists, err := v.deps.Git.BranchExists(ctx, repoDir, branch)
 	if err != nil {
-		log.Error(opNaming, "could not ask whether the async merge's branch exists", withCause(fields, err))
+		log.Error(opNaming, "could not ask whether the async merge's branch exists", dlog.WithCause(fields, err))
 		return "", nil, false, fmt.Errorf("probe the branch %q: %w", branch, err)
 	}
 	if exists {

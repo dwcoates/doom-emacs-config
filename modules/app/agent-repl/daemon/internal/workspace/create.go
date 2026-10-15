@@ -790,7 +790,7 @@ func (v *verbs) settleParentAndBase(ctx context.Context, log dlog.Logger, spec C
 	fields := dlog.Context{"parent": string(*parent), "base_ref": spec.BaseRef, "primary_branch": defaultBranch}
 	parentRecord, err := v.deps.DB.Workspace(ctx, *parent)
 	if err != nil {
-		log.Error(opCreate, "could not read the parent workspace", withCause(fields, err))
+		log.Error(opCreate, "could not read the parent workspace", dlog.WithCause(fields, err))
 		return CreateSpec{}, fmt.Errorf("create: parent workspace %q: %w", *parent, err)
 	}
 	base, err := v.resolveBase(ctx, log, repoDir, spec.BaseRef)
@@ -799,7 +799,7 @@ func (v *verbs) settleParentAndBase(ctx context.Context, log dlog.Logger, spec C
 	}
 	tip, err := v.deps.Git.ResolveRef(ctx, repoDir, parentRecord.Branch)
 	if err != nil {
-		log.Error(opCreate, "could not resolve the parent's tip", withCause(fields, err))
+		log.Error(opCreate, "could not resolve the parent's tip", dlog.WithCause(fields, err))
 		return CreateSpec{}, fmt.Errorf("create: resolve the tip of %q: %w", parentRecord.Branch, err)
 	}
 	if base == tip {

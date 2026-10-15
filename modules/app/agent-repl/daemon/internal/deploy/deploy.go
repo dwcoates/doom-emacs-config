@@ -354,7 +354,7 @@ func (d *Deployer) Deploy(ctx context.Context, force bool) (result Result, err e
 		return Result{}, rollout.ErrJoining
 	}
 	if waiting, rolling := d.deps.Rollout.RollingOut(); rolling {
-		d.log.Info(opDeploy, "refused a deploy while a handover is in flight", merge(fields, dlog.Context{"waiting_on": ids.Strings(waiting)}))
+		d.log.Info(opDeploy, "refused a deploy while a handover is in flight", dlog.Merge(fields, dlog.Context{"waiting_on": ids.Strings(waiting)}))
 		return Result{}, &rollout.ErrAlreadyRollingOut{WaitingOn: waiting}
 	}
 
@@ -386,12 +386,12 @@ func (d *Deployer) Deploy(ctx context.Context, force bool) (result Result, err e
 	nonce := nonceOf(d.deps.Clock.Now().UnixNano())
 	staging := filepath.Join(d.deps.StagingRoot, nonce)
 	if err := os.MkdirAll(staging, 0o755); err != nil {
-		d.log.Error(opDeploy, "could not create the staging directory; nothing was built", withCause(merge(fields, dlog.Context{"staging": staging}), err))
+		d.log.Error(opDeploy, "could not create the staging directory; nothing was built", dlog.WithCause(dlog.Merge(fields, dlog.Context{"staging": staging}), err))
 		return Result{}, &BuildFailed{Step: "setup", Detail: err.Error(), Log: staging}
 	}
 	defer func() {
 		if err := os.RemoveAll(staging); err != nil {
-			d.log.Error(opDeploy, "could not remove the staging directory", withCause(dlog.Context{"staging": staging}, err))
+			d.log.Error(opDeploy, "could not remove the staging directory", dlog.WithCause(dlog.Context{"staging": staging}, err))
 		}
 	}()
 	fields["staging"] = staging
@@ -414,7 +414,7 @@ func (d *Deployer) Deploy(ctx context.Context, force bool) (result Result, err e
 		if !errors.As(err, &failed) {
 			failed = &BuildFailed{Step: "build", Detail: err.Error()}
 		}
-		d.log.Error(opDeploy, "the build failed; NOTHING WAS DEPLOYED", merge(fields, dlog.Context{
+		d.log.Error(opDeploy, "the build failed; NOTHING WAS DEPLOYED", dlog.Merge(fields, dlog.Context{
 			"step": failed.Step, "detail": failed.Detail, "log": failed.Log,
 		}))
 		return Result{}, failed
@@ -422,15 +422,15 @@ func (d *Deployer) Deploy(ctx context.Context, force bool) (result Result, err e
 
 	fresh, err := d.hashStaged(Staged{Dir: staging})
 	if err != nil {
-		d.log.Error(opDeploy, "a staged artifact could not be hashed; NOTHING WAS DEPLOYED", withCause(fields, err))
+		d.log.Error(opDeploy, "a staged artifact could not be hashed; NOTHING WAS DEPLOYED", dlog.WithCause(fields, err))
 		return Result{}, err
 	}
-	d.log.Info(opDeploy, "built", merge(fields, dlog.Context{"builds": fresh.fields()}))
+	d.log.Info(opDeploy, "built", dlog.Merge(fields, dlog.Context{"builds": fresh.fields()}))
 	d.stepSucceeded(ctx, health.DeployStepBuild)
 
 	d.progress(&deployprogress.Progress{Phase: deployprogress.Installing})
 	if err = d.install(Staged{Dir: staging}, fresh, nonce, prev); err != nil {
-		d.log.Error(opDeploy, "the staged build could not be installed; nothing was restarted", withCause(fields, err))
+		d.log.Error(opDeploy, "the staged build could not be installed; nothing was restarted", dlog.WithCause(fields, err))
 		return Result{}, err
 	}
 	d.stepSucceeded(ctx, health.DeployStepInstall)
@@ -450,7 +450,7 @@ func (d *Deployer) Deploy(ctx context.Context, force bool) (result Result, err e
 	// A DEPLOY THAT GOT ALL THE WAY THROUGH installed and decided every
 	// component, so no earlier rollback's partial state stands.
 	d.stepSucceeded(ctx, health.DeployStepRollback)
-	d.log.Info(opDeploy, "deployed: every component decided", merge(fields, dlog.Context{"decisions": summarize(result)}))
+	d.log.Info(opDeploy, "deployed: every component decided", dlog.Merge(fields, dlog.Context{"decisions": summarize(result)}))
 	if !movesDaemon(result) {
 		// THIS DAEMON STAYS, so it ends its own story. A daemon that moves
 		// leaves `updated` to its successor, whose streams are the ones left.
@@ -543,7 +543,7 @@ func (d *Deployer) deployLanding(ctx context.Context) {
 			// holding the slot starts one more when it ends.
 			d.log.Debug(opLanding, "another deploy holds the slot; it deploys the landing when it ends", nil)
 		case err != nil:
-			d.log.Error(opLanding, "the landing's deploy failed", withCause(nil, err))
+			d.log.Error(opLanding, "the landing's deploy failed", dlog.WithCause(nil, err))
 		default:
 			d.log.Info(opLanding, "the landing is deployed", dlog.Context{"decisions": summarize(result)})
 		}
@@ -765,12 +765,12 @@ func (d *Deployer) install(s Staged, fresh builds, nonce string, prev *previous)
 		// put it back. A path that cannot be kept is not replaced.
 		for _, path := range a.writes {
 			if err := prev.keep(a.component, a.name, path, a.tree, a.bundle); err != nil {
-				d.log.Error(opInstall, "could not keep the previous build before replacing it; it is not replaced", withCause(fields, err))
+				d.log.Error(opInstall, "could not keep the previous build before replacing it; it is not replaced", dlog.WithCause(fields, err))
 				return &InstallFailed{Component: a.component, Detail: err.Error()}
 			}
 		}
 		if err := a.install(); err != nil {
-			d.log.Error(opInstall, "could not install the fresh build", withCause(fields, err))
+			d.log.Error(opInstall, "could not install the fresh build", dlog.WithCause(fields, err))
 			return &InstallFailed{Component: a.component, Detail: err.Error()}
 		}
 		d.log.Info(opInstall, "installed the fresh build", fields)
@@ -794,7 +794,7 @@ func (d *Deployer) services(ctx context.Context, fresh builds, prev *previous) (
 		// the store restarts, and a fresh pair is the known-good state.
 		prev.store = true
 		if err := d.deps.Services.RestartStore(ctx); err != nil {
-			d.log.Error(opDecide, "the store restart failed", withCause(dlog.Context{"component": string(ComponentStore)}, err))
+			d.log.Error(opDecide, "the store restart failed", dlog.WithCause(dlog.Context{"component": string(ComponentStore)}, err))
 			return []Outcome{store, sidecar}, &ServiceRestartFailed{Component: ComponentStore, Detail: err.Error()}
 		}
 		store.Kind, sidecar.Kind = Restarted, Restarted
@@ -806,7 +806,7 @@ func (d *Deployer) services(ctx context.Context, fresh builds, prev *previous) (
 			Components: []deployprogress.Component{deployprogress.Sidecar}})
 		prev.sidecar = true
 		if err := d.deps.Services.RestartSidecar(ctx); err != nil {
-			d.log.Error(opDecide, "the sidecar restart failed", withCause(dlog.Context{"component": string(ComponentSidecar)}, err))
+			d.log.Error(opDecide, "the sidecar restart failed", dlog.WithCause(dlog.Context{"component": string(ComponentSidecar)}, err))
 			return []Outcome{store, sidecar}, &ServiceRestartFailed{Component: ComponentSidecar, Detail: err.Error()}
 		}
 		sidecar.Kind = Restarted
@@ -843,16 +843,16 @@ func (s serviceStaleness) stale(component Component, service, fresh string) bool
 	report, found, err := buildreport.Read(s.reportDir, service)
 	switch {
 	case err != nil:
-		s.log.Error(s.op, "the service's build report is unreadable; it cannot be proven current, so it is restarted", withCause(fields, err))
+		s.log.Error(s.op, "the service's build report is unreadable; it cannot be proven current, so it is restarted", dlog.WithCause(fields, err))
 		return true
 	case !found:
 		s.log.Info(s.op, "the service reports no build; restarting it", fields)
 		return true
 	case !s.alive(report.PID):
-		s.log.Info(s.op, "the process that reported the service's build is gone; restarting it", merge(fields, dlog.Context{"pid": report.PID}))
+		s.log.Info(s.op, "the process that reported the service's build is gone; restarting it", dlog.Merge(fields, dlog.Context{"pid": report.PID}))
 		return true
 	case report.Build != fresh:
-		s.log.Info(s.op, "the service runs an older build; restarting it", merge(fields, dlog.Context{"running": report.Build, "pid": report.PID}))
+		s.log.Info(s.op, "the service runs an older build; restarting it", dlog.Merge(fields, dlog.Context{"running": report.Build, "pid": report.PID}))
 		return true
 	default:
 		s.log.Debug(s.op, "the service runs the fresh build", fields)
@@ -898,7 +898,7 @@ func (d *Deployer) daemonShimWebapp(ctx context.Context, staged Staged, fresh bu
 		layout, err := d.deps.StateLayout(ctx, staged.DaemonBin())
 		fields := dlog.Context{"running": d.deps.DaemonBuild, "fresh": fresh.daemon, "forced": force}
 		if err != nil {
-			d.log.Error(opDecide, "the fresh daemon's state layout could not be read; the daemon is neither handed over nor restarted", withCause(fields, err))
+			d.log.Error(opDecide, "the fresh daemon's state layout could not be read; the daemon is neither handed over nor restarted", dlog.WithCause(fields, err))
 			return []Outcome{daemon}, fmt.Errorf("deploy: read the fresh daemon's state layout: %w", err)
 		}
 		fields["running_layout"], fields["fresh_layout"] = d.deps.RunningLayout, layout
@@ -912,7 +912,7 @@ func (d *Deployer) daemonShimWebapp(ctx context.Context, staged Staged, fresh bu
 				Components: []deployprogress.Component{deployprogress.Daemon}, Draining: !force})
 			accepted, err := d.deps.Rollout.Restart(ctx, force)
 			if err != nil {
-				d.log.Error(opDecide, "the restart was not accepted", withCause(fields, err))
+				d.log.Error(opDecide, "the restart was not accepted", dlog.WithCause(fields, err))
 				return []Outcome{daemon}, err
 			}
 			daemon.Kind, daemon.Handover = RestartingAcrossLayout, accepted
@@ -927,7 +927,7 @@ func (d *Deployer) daemonShimWebapp(ctx context.Context, staged Staged, fresh bu
 		d.progress(&deployprogress.Progress{Phase: deployprogress.HandingOver, Draining: !force})
 		accepted, err := d.deps.Rollout.HandOver(ctx, force)
 		if err != nil {
-			d.log.Error(opDecide, "the handover was not accepted", withCause(dlog.Context{"forced": force}, err))
+			d.log.Error(opDecide, "the handover was not accepted", dlog.WithCause(dlog.Context{"forced": force}, err))
 			return []Outcome{daemon}, err
 		}
 		daemon.Kind, daemon.Handover = HandingOver, accepted
@@ -961,7 +961,7 @@ func (d *Deployer) restartsAcrossLayout(ctx context.Context, staged Staged, layo
 	}
 	kind, err := d.deps.MigrationKind(ctx, staged.DaemonBin(), d.deps.RunningLayout)
 	if err != nil {
-		d.log.Error(opDecide, "the fresh daemon could not say whether its migrations are additive; the daemon is neither handed over nor restarted", withCause(fields, err))
+		d.log.Error(opDecide, "the fresh daemon could not say whether its migrations are additive; the daemon is neither handed over nor restarted", dlog.WithCause(fields, err))
 		return false, fmt.Errorf("deploy: read the fresh daemon's migration kind: %w", err)
 	}
 	fields["migration_kind"] = kind.String()
@@ -978,7 +978,7 @@ func (d *Deployer) shims(ctx context.Context, fresh builds, force bool) (Outcome
 	out := Outcome{Component: ComponentShim, Build: fresh.shim, Kind: UpToDate}
 	workspaces, err := d.deps.Workspaces(ctx)
 	if err != nil {
-		d.log.Error(opDecide, "could not list the workspaces whose shims are judged", withCause(nil, err))
+		d.log.Error(opDecide, "could not list the workspaces whose shims are judged", dlog.WithCause(nil, err))
 		return out, fmt.Errorf("deploy: list the workspaces: %w", err)
 	}
 	for _, ws := range workspaces {
@@ -986,7 +986,7 @@ func (d *Deployer) shims(ctx context.Context, fresh builds, force bool) (Outcome
 		if err != nil {
 			// ONE WORKSPACE THAT CANNOT BE JUDGED IS ITS OWN LOUD FAILURE; the
 			// rest are still judged.
-			d.log.Error(opDecide, "a workspace's shim could not be judged", withCause(dlog.Context{"workspace": string(ws)}, err))
+			d.log.Error(opDecide, "a workspace's shim could not be judged", dlog.WithCause(dlog.Context{"workspace": string(ws)}, err))
 			continue
 		}
 		if !check.Stale || check.Skipped != "" {
@@ -1045,21 +1045,4 @@ func processAlive(pid int) bool {
 		return false
 	}
 	return syscall.Kill(pid, 0) == nil
-}
-
-func withCause(fields dlog.Context, err error) dlog.Context {
-	out := merge(fields, nil)
-	out["cause"] = err.Error()
-	return out
-}
-
-func merge(base, extra dlog.Context) dlog.Context {
-	out := make(dlog.Context, len(base)+len(extra)+1)
-	for k, v := range base {
-		out[k] = v
-	}
-	for k, v := range extra {
-		out[k] = v
-	}
-	return out
 }

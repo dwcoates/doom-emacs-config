@@ -1123,7 +1123,7 @@ func TestApplyFileQuarantinesAMalformedMergeQueueControl(t *testing.T) {
 	}{
 		{name: "an eviction naming no requester", body: `[{"type":"merge_evict"}]`, wantCause: "merge_evict: a project_dir (or a dir, or a workspace id) is required"},
 		{name: "a pause naming no requester", body: `[{"type":"merge_pause"}]`, wantCause: "merge_pause: a project_dir (or a dir, or a workspace id) is required"},
-		{name: "an eviction scoped by a repository", body: `[{"type":"merge_evict","project_dir":"/tree/w1","repository_dir":"/repo"}]`, wantCause: "merge_evict: repository_dir is a merge_pause's or a merge_resume's field"},
+		{name: "an eviction scoped by a repository", body: `[{"type":"merge_evict","project_dir":"/tree/w1","repository_dir":"/repo"}]`, wantCause: "merge_evict: repository_dir is a merge_pause's, a merge_resume's, a merge_subscribe's or a merge_unsubscribe's field"},
 		{name: "a resume naming a workspace to evict", body: `[{"type":"merge_resume","project_dir":"/tree/w1","evict_dir":"/tree/w2"}]`, wantCause: "merge_resume: evict_dir is a merge_evict's field"},
 		{name: "a move naming no requester", body: `[{"type":"merge_move_up"}]`, wantCause: "merge_move_up: a project_dir (or a dir, or a workspace id) is required"},
 		{name: "an eviction naming a workspace to move", body: `[{"type":"merge_evict","project_dir":"/tree/w1","move_dir":"/tree/w2"}]`, wantCause: "merge_evict: move_dir is a merge_move_up's or a merge_move_down's field"},
@@ -1691,5 +1691,145 @@ func TestApplyFileQuarantinesARacingFlipTheOrchestratorRefuses(t *testing.T) {
 				t.Fatalf("record cause %q, want the %s arm named", cause, tt.arm)
 			}
 		})
+	}
+}
+
+// THE SUBSCRIPTION CONTROLS (merge_subscribe, merge_unsubscribe) reach the
+// orchestrator's Subscribe and Unsubscribe for the requester, and answer it
+// through the file's fate and a daemon.commandfile.merge_queue record.
+
+func TestApplyFileSubscribesTheRequesterAtItsDetailInItsScope(t *testing.T) {
+	tests := []struct {
+		name      string
+		body      string
+		wantScope *merge.RepositoryScope
+		want      wsm.MergeQueueDetail
+	}{
+		{name: "every repository at every change", body: `[{"type":"merge_subscribe","project_dir":"/tree/w1","detail":"every_change"}]`,
+			want: wsm.MergeQueueDetailEveryChange},
+		{name: "one repository as it advances", body: `[{"type":"merge_subscribe","project_dir":"/tree/w1","repository_dir":"/repo","detail":"advances"}]`,
+			wantScope: &merge.RepositoryScope{Dir: "/repo"}, want: wsm.MergeQueueDetailAdvances},
+		{name: "every repository as it depletes", body: `[{"type":"merge_subscribe","project_dir":"/tree/w1","detail":"depletes"}]`,
+			want: wsm.MergeQueueDetailDepletes},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", "/tree/w1")
+			path := f.write(t, "workspace_commands_subscribe.json", tt.body)
+
+			// Act.
+			err := f.ingress.ApplyFile(context.Background(), path)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("ApplyFile: %v", err)
+			}
+			want := []fakeSubscription{{ws: "w1", scope: tt.wantScope, detail: tt.want}}
+			if !reflect.DeepEqual(f.merge.subscriptions, want) {
+				t.Fatalf("subscriptions = %+v, want %+v", f.merge.subscriptions, want)
+			}
+			record := f.record(t, opMergeQueue, "info")
+			if record.Context["outcome"] != "subscribed" || record.Context["detail"] != tt.want.String() || record.Context["requester"] != "w1" {
+				t.Fatalf("record context %v, want outcome=subscribed at %s for w1", record.Context, tt.want)
+			}
+		})
+	}
+}
+
+func TestApplyFileAnswersAReplacedSubscriptionAsResubscribed(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", "/tree/w1")
+	f.merge.replaced = true
+	path := f.write(t, "workspace_commands_subscribe.json", `[{"type":"merge_subscribe","project_dir":"/tree/w1","detail":"advances"}]`)
+
+	// Act.
+	err := f.ingress.ApplyFile(context.Background(), path)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ApplyFile: %v", err)
+	}
+	if record := f.record(t, opMergeQueue, "info"); record.Context["outcome"] != "resubscribed" {
+		t.Fatalf("record context %v, want outcome=resubscribed", record.Context)
+	}
+}
+
+func TestApplyFileQuarantinesASubscriptionTheOrchestratorRefuses(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", "/tree/w1")
+	f.merge.subscribeErr = &merge.RefusalError{Arm: merge.ArmSubscriberClosed, Workspace: "w1", Reason: "a closed workspace cannot subscribe to a merge queue"}
+	path := f.write(t, "workspace_commands_subscribe.json", `[{"type":"merge_subscribe","project_dir":"/tree/w1","detail":"advances"}]`)
+
+	// Act.
+	err := f.ingress.ApplyFile(context.Background(), path)
+
+	// Assert.
+	if !errors.Is(err, ErrQuarantined) {
+		t.Fatalf("ApplyFile = %v, want the file quarantined", err)
+	}
+	record := f.record(t, opEntry, "info")
+	if record.Context["type"] != TypeMergeSubscribe || !strings.Contains(record.Context["cause"].(string), "a closed workspace cannot subscribe") {
+		t.Fatalf("record context %v, want the merge_subscribe refusal and its cause", record.Context)
+	}
+}
+
+func TestApplyFileUnsubscribesTheRequesterInItsScope(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", "/tree/w1")
+	path := f.write(t, "workspace_commands_unsubscribe.json", `[{"type":"merge_unsubscribe","project_dir":"/tree/w1","repository_dir":"/repo"}]`)
+
+	// Act.
+	err := f.ingress.ApplyFile(context.Background(), path)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ApplyFile: %v", err)
+	}
+	want := []fakeSubscription{{ws: "w1", scope: &merge.RepositoryScope{Dir: "/repo"}}}
+	if !reflect.DeepEqual(f.merge.unsubscriptions, want) {
+		t.Fatalf("unsubscriptions = %+v, want %+v", f.merge.unsubscriptions, want)
+	}
+	if record := f.record(t, opMergeQueue, "info"); record.Context["outcome"] != "unsubscribed" {
+		t.Fatalf("record context %v, want outcome=unsubscribed", record.Context)
+	}
+}
+
+func TestApplyFileAnswersAnUnsubscribeOfNothingAsAnOrdinaryOutcome(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", "/tree/w1")
+	f.merge.unsubscribeErr = &merge.RefusalError{Arm: merge.ArmNotSubscribed, Workspace: "w1", Reason: "none"}
+	path := f.write(t, "workspace_commands_unsubscribe.json", `[{"type":"merge_unsubscribe","project_dir":"/tree/w1"}]`)
+
+	// Act.
+	err := f.ingress.ApplyFile(context.Background(), path)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ApplyFile = %v, want the file applied", err)
+	}
+	if record := f.record(t, opMergeQueue, "info"); record.Context["outcome"] != "not_subscribed" {
+		t.Fatalf("record context %v, want outcome=not_subscribed", record.Context)
+	}
+}
+
+func TestApplyFileQuarantinesAnUnsubscribeTheOrchestratorFails(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", "/tree/w1")
+	f.merge.unsubscribeErr = errFake
+	path := f.write(t, "workspace_commands_unsubscribe.json", `[{"type":"merge_unsubscribe","project_dir":"/tree/w1"}]`)
+
+	// Act.
+	err := f.ingress.ApplyFile(context.Background(), path)
+
+	// Assert.
+	if !errors.Is(err, ErrQuarantined) {
+		t.Fatalf("ApplyFile = %v, want the file quarantined", err)
 	}
 }

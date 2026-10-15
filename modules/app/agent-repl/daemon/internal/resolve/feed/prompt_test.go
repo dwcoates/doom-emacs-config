@@ -105,6 +105,57 @@ func TestAResumptionAfterRestartDrawsNoPromptRow(t *testing.T) {
 	}
 }
 
+// A MERGE QUEUE NOTICE IS DRAWN NOWHERE (promptorigin.Unseen): its turn runs
+// and its reply is drawn, but the daemon's words to the agent are not.
+func TestAMergeQueueNoticeDrawsNoPromptRow(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	h.promptWith("turn-1", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE, textBlock("merge queue of doom: fix landed"))
+
+	// Assert.
+	for _, row := range h.rows(rootFeed()) {
+		if row.GetUserPrompt() != nil || row.GetMergeHandback() != nil {
+			t.Fatalf("drew a row %v for the daemon's notice", row)
+		}
+	}
+}
+
+// The notice's author is never the user, for any reader that asks.
+func TestTheAuthorLabelOfAMergeQueueNoticeIsTheMergeQueue(t *testing.T) {
+	// Arrange, Act.
+	got := AuthorLabel(conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE)
+
+	// Assert.
+	if got != "Merge queue" {
+		t.Fatalf("author = %q, want Merge queue", got)
+	}
+}
+
+func TestPromptRowHiddenNamesEveryOriginTheFeedDrawsNoRowFor(t *testing.T) {
+	tests := []struct {
+		origin conversationv1.PromptOrigin
+		want   bool
+	}{
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART, true},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE, true},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK, false},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.origin.String(), func(t *testing.T) {
+			// Act.
+			got := PromptRowHidden(tt.origin)
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("PromptRowHidden(%s) = %v, want %v", tt.origin, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestTheDrawnPromptHasItsSentinelSpansStripped(t *testing.T) {
 	// Arrange: a resolver whose injected stripper removes the host's spans.
 	h := newHarness(t)

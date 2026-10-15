@@ -284,6 +284,55 @@ test_resume_queue_names_one_repository() {
   expect_args "--resume-queue <dir> resumes that repository only" "merge-queue -resume -repository-dir $FX/main"
 }
 
+test_subscribe_carries_each_detail() {
+  local spelled wire
+  for spelled in every-change advances depletes; do
+    wire="$spelled"
+    [ "$spelled" != every-change ] || wire=every_change
+    mkfixture
+    invoke --subscribe "$spelled"
+    expect_args "--subscribe $spelled subscribes to every repository at $wire" "merge-queue -subscribe $wire"
+  done
+}
+
+test_subscribe_names_one_repository() {
+  mkfixture
+  invoke --subscribe advances "$FX/main"
+  expect_args "--subscribe <detail> <dir> subscribes to that repository only" "merge-queue -subscribe advances -repository-dir $FX/main"
+}
+
+test_unsubscribe_ends_every_repositorys_subscription() {
+  mkfixture
+  invoke --unsubscribe
+  expect_args "--unsubscribe with no directory ends the every-repository subscription" "merge-queue -unsubscribe"
+}
+
+test_unsubscribe_names_one_repository() {
+  mkfixture
+  invoke --unsubscribe "$FX/main"
+  expect_args "--unsubscribe <dir> ends that repository's subscription only" "merge-queue -unsubscribe -repository-dir $FX/main"
+}
+
+test_subscription_verbs_refuse_malformed_forms() {
+  expect_refused "--subscribe refuses a missing detail" --subscribe
+  expect_refused "--subscribe refuses an undeclared detail" --subscribe sometimes
+  expect_refused "--subscribe refuses the wire spelling of a detail" --subscribe every_change
+  expect_refused "--subscribe refuses a second directory" --subscribe advances /a /b
+  expect_refused "--unsubscribe refuses a second directory" --unsubscribe /a /b
+  expect_refused "--subscribe refuses --front" --subscribe advances --front
+  expect_refused "--unsubscribe refuses --patch" --unsubscribe --patch "Fix the footer"
+}
+
+test_every_scoped_verb_dispatches_through_run_scoped() {
+  local direct
+  direct="$(grep -c -- '-repository-dir "\$' "$RUN" || true)"
+  if [ "$direct" -eq 1 ]; then
+    pass "only run_scoped passes -repository-dir"
+  else
+    fail "only run_scoped passes -repository-dir" "found $direct sites"
+  fi
+}
+
 test_hold_rollouts_holds_the_rollouts() {
   mkfixture
   invoke --hold-rollouts
@@ -531,6 +580,12 @@ test_pause_queue_pauses_every_repository
 test_pause_queue_names_one_repository
 test_resume_queue_resumes_every_repository
 test_resume_queue_names_one_repository
+test_subscribe_carries_each_detail
+test_subscribe_names_one_repository
+test_unsubscribe_ends_every_repositorys_subscription
+test_unsubscribe_names_one_repository
+test_subscription_verbs_refuse_malformed_forms
+test_every_scoped_verb_dispatches_through_run_scoped
 test_hold_rollouts_holds_the_rollouts
 test_release_rollouts_releases_the_rollouts
 test_hold_rollouts_refuses_an_argument

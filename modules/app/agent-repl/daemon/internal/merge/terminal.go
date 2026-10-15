@@ -195,7 +195,7 @@ func (r *run) concluded(facts MergeFacts) {
 	r.mu.Lock()
 	r.facts = facts
 	r.mu.Unlock()
-	r.o.publish(r.ws, facts)
+	r.o.publish(r.repo, r.ws, facts)
 }
 
 // landedCount is the commit count a landed merge brought in: the commits its
@@ -878,9 +878,9 @@ func terminalCause(out outcome) string {
 	case out.abandoned != "":
 		return string(out.abandoned)
 	case out.failed != "":
-		return "failed"
+		return causeFailed
 	}
-	return "merged"
+	return causeMerged
 }
 
 // resubmitDisplaced puts back the user turn the merge displaced, EXACTLY ONCE.

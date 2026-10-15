@@ -888,28 +888,89 @@ func TestMachineryTheBranchAlreadyChangedIsNotARepairsChange(t *testing.T) {
 	}
 }
 
-// TestTheRepairBriefForbidsChangingTheMergeMachinery pins the brief's half of
-// the ruling: the agent is told before it is refused.
-func TestTheRepairBriefForbidsChangingTheMergeMachinery(t *testing.T) {
-	tests := []struct{ brief string }{{brief: BriefConflictResolve}, {brief: BriefTestFailureResolve}}
-	for _, tc := range tests {
-		t.Run(tc.brief, func(t *testing.T) {
-			// Arrange.
-			dir := filepath.Join("..", "..", "..", "prompts")
+// TestTheTestRepairBriefForbidsChangingTheMergeMachinery pins the brief's
+// half of the ruling: the test repair agent is told before it is refused.
+func TestTheTestRepairBriefForbidsChangingTheMergeMachinery(t *testing.T) {
+	// Arrange.
+	dir := filepath.Join("..", "..", "..", "prompts")
 
-			// Act.
-			brief, err := LoadBrief(dir, tc.brief)
+	// Act.
+	brief, err := LoadBrief(dir, BriefTestFailureResolve)
 
-			// Assert.
-			if err != nil {
-				t.Fatalf("loading the %s brief: %v", tc.brief, err)
-			}
-			for _, m := range mergeMachinery {
-				if !strings.Contains(brief.Body, "`"+m+"`") {
-					t.Errorf("the %s brief does not forbid changing the merge machinery %s", tc.brief, m)
-				}
-			}
-		})
+	// Assert.
+	if err != nil {
+		t.Fatalf("loading the %s brief: %v", BriefTestFailureResolve, err)
+	}
+	for _, m := range mergeMachinery {
+		if !strings.Contains(brief.Body, "`"+m+"`") {
+			t.Errorf("the %s brief does not forbid changing the merge machinery %s", BriefTestFailureResolve, m)
+		}
+	}
+}
+
+// TestTheConflictBriefLeavesTheMergeMachineryOpen pins that a conflict
+// resolution is never told off the merge machinery: a conflict there is the
+// branch's own change meeting master's, and only a resolution there lands it.
+func TestTheConflictBriefLeavesTheMergeMachineryOpen(t *testing.T) {
+	// Arrange.
+	dir := filepath.Join("..", "..", "..", "prompts")
+
+	// Act.
+	brief, err := LoadBrief(dir, BriefConflictResolve)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("loading the %s brief: %v", BriefConflictResolve, err)
+	}
+	if strings.Contains(brief.Body, "merge machinery") {
+		t.Fatalf("the %s brief forbids the merge machinery to a conflict resolution:\n%s", BriefConflictResolve, brief.Body)
+	}
+}
+
+// TestAConflictResolutionMayChangeTheMergeMachinery covers the ruling: a
+// resolution that edits merge machinery the branch did not change before
+// still resolves, and the merge lands.
+func TestAConflictResolutionMayChangeTheMergeMachinery(t *testing.T) {
+	// Arrange: the branch changes no machinery, and its resolution does.
+	h := newHarness(t)
+	landing(h, 2)
+	h.git.rebaseConflicts[2] = []string{"modules/app/agent-repl/daemon/internal/merge/run.go"}
+	h.git.changedIn["master...feature"] = [][]string{{}, {"modules/app/agent-repl/daemon/internal/merge/run.go"}}
+
+	// Act.
+	admitted(t, h)
+
+	// Assert.
+	if got := h.footer.last().State; got != StateMerged {
+		t.Fatalf("state = %q, want the resolved merge landed", got)
+	}
+	if loggedLike(h, logLike{op: "daemon.merge.machinery"}) {
+		t.Fatalf("a conflict resolution was refused for the merge machinery: %+v", h.logs.Records())
+	}
+}
+
+// TestATestRepairKeepsAResolvedConflictsMachineryAsTheBranchs covers the
+// rebaseline: machinery a resolved conflict changed is the branch's own by
+// the time a test repair is judged, so the repair is not refused for it.
+func TestATestRepairKeepsAResolvedConflictsMachineryAsTheBranchs(t *testing.T) {
+	// Arrange: a resolution edits the merge package, then a test repair runs.
+	h := newHarness(t)
+	landing(h, 2)
+	h.git.rebaseConflicts[2] = []string{"modules/app/agent-repl/daemon/internal/merge/run.go"}
+	h.git.changed = []string{"modules/app/agent-repl/daemon/internal/merge/run.go"}
+	h.runner.runs = nil
+	h.gateFails("daemon")
+	h.gatePasses("daemon")
+
+	// Act.
+	admitted(t, h)
+
+	// Assert.
+	if got := h.footer.last().State; got != StateMerged {
+		t.Fatalf("state = %q, want the merge landed after its test repair", got)
+	}
+	if loggedLike(h, logLike{op: "daemon.merge.machinery"}) {
+		t.Fatalf("a test repair was refused for the resolution's machinery: %+v", h.logs.Records())
 	}
 }
 

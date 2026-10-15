@@ -27,7 +27,7 @@ import (
 //
 // A NEW VERSION IS A NEW ENTRY IN `migrations`. Bumping this constant alone
 // makes the daemon refuse every database the previous build wrote.
-const LayoutVersion = 54
+const LayoutVersion = 55
 
 // Option configures an open. Options exist so the logger can be supplied
 // without changing the two open functions' shape for callers that do not care.
@@ -597,6 +597,13 @@ func (s *store) write(ctx context.Context, op string, fields dlog.Context, fn fu
 		// turns it into the rpc's arm and records it at its own level.
 		if _, ok := AsParentRefused(err); ok {
 			s.log.Debug(op, "the retarget was refused; nothing was written", withError(fields, err))
+			return err
+		}
+		// A CLOSED SUBSCRIBER is the store refusing a subscription no close
+		// could end; the orchestrator turns it into the rpc's arm and records
+		// it at its own level.
+		if errors.Is(err, ErrSubscriberClosed) {
+			s.log.Debug(op, "the subscriber is closed; the subscription was refused", withError(fields, err))
 			return err
 		}
 		ctxend.Log(err, s.log.Info, s.log.Error, op, writeCancelledMessage, "refused the write", withError(fields, err))

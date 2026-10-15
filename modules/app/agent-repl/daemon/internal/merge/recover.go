@@ -253,7 +253,7 @@ func (o *orchestrator) recoverAdmitted(ctx context.Context, repo wsm.RepoKey, en
 		why := fmt.Sprintf("the workspace's merge geometry is gone: %v", jobErr)
 		log.Error(op, "failing a merge a restart left unfinished", dlog.Context{
 			"workspace": string(ws), "repo": string(repo), "reason": why})
-		if err := o.deps.DB.RemoveMergeQueueEntry(ctx, repo, ws, "restart_failed"); err != nil {
+		if err := o.deps.DB.RemoveMergeQueueEntry(ctx, repo, ws, causeRestartFailed); err != nil {
 			return err
 		}
 		o.mu.Lock()
@@ -271,7 +271,7 @@ func (o *orchestrator) recoverAdmitted(ctx context.Context, repo wsm.RepoKey, en
 					Reason:    &frontendv1.FeedMergeError_Failed{Failed: &frontendv1.FeedMergeFailed{Summary: summary}},
 				})
 		}
-		o.publish(ws, MergeFacts{State: StateFailed, FailedArea: footer.FailedOther, Detail: summary})
+		o.publish(repo, ws, MergeFacts{State: StateFailed, FailedArea: footer.FailedOther, Detail: summary})
 		o.ended(ctx, ws, DetachedOutcome{Kind: DetachedFailed, Summary: summary})
 		return nil
 	}
@@ -287,7 +287,7 @@ func (o *orchestrator) recoverAdmitted(ctx context.Context, repo wsm.RepoKey, en
 	o.mu.Unlock()
 	// The entry goes back in line, with the source it was asked with, so the
 	// ordinary admission path runs it again under a lease of its own.
-	if err := o.deps.DB.RemoveMergeQueueEntry(ctx, repo, ws, "restart_resume"); err != nil {
+	if err := o.deps.DB.RemoveMergeQueueEntry(ctx, repo, ws, causeRestartResume); err != nil {
 		return err
 	}
 	if err := o.deps.DB.RequestMerge(ctx, repo, ws, entry.Source, o.deps.Now()); err != nil {
@@ -373,7 +373,7 @@ func (o *orchestrator) recoverResumable(ctx context.Context, repo wsm.RepoKey, l
 	// resumed run's first word.
 	label := branchLabel(doc.Subject.Branch, doc.Subject.subject().targetLabel())
 	o.publishHead(ws, lease.ID, label, doc.StartedMS, nil)
-	o.publish(ws, doc.footerFacts(o.deps.Now()))
+	o.publish(repo, ws, doc.footerFacts(o.deps.Now()))
 	// THE RUN LOG CARRIES IT TOO: a merge resumed is a fact about the
 	// restart, and the durable run log is where a boot sequence is read.
 	fields := dlog.Context{"workspace": string(ws), "repo": string(repo), "lease": string(lease.ID), "step": doc.Step,

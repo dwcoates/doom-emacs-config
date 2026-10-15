@@ -57,9 +57,9 @@ func (c *controller) BounceShim(ctx context.Context, ws ids.WorkspaceID, reason 
 				// THE REGISTRY KEEPS A DEFERRED BOUNCE'S Done FOR THE RERUN and
 				// tells it only that rerun's outcome, so this is the registry
 				// breaking its own contract: said loudly, never taken as an end.
-				c.log.Error(opBounce, "the bounce registry told a deferral to the shim bounce's completion; it owes only the rerun's outcome", withCause(fields, err))
+				c.log.Error(opBounce, "the bounce registry told a deferral to the shim bounce's completion; it owes only the rerun's outcome", dlog.WithCause(fields, err))
 			case bounce.OutcomeFailed:
-				c.log.Error(opBounce, "the shim bounce failed; the workspace is served as it was", withCause(fields, err))
+				c.log.Error(opBounce, "the shim bounce failed; the workspace is served as it was", dlog.WithCause(fields, err))
 			case bounce.OutcomeFinished:
 				c.log.Info(opBounce, "the shim bounce finished; the workspace runs the installed build", fields)
 			}
@@ -69,18 +69,18 @@ func (c *controller) BounceShim(ctx context.Context, ws ids.WorkspaceID, reason 
 		},
 	})
 	if err != nil {
-		c.log.Error(opBounce, "the bounce registry refused the shim bounce", withCause(fields, err))
+		c.log.Error(opBounce, "the bounce registry refused the shim bounce", dlog.WithCause(fields, err))
 		return bounce.Decision{}, fmt.Errorf("rollout: bounce the shim of %q: %w", ws, err)
 	}
 	switch {
 	case decision.Now && decision.Forced:
-		c.log.Info(opBounce, "bouncing the shim now over its work in flight (forced)", merge(fields, dlog.Context{
+		c.log.Info(opBounce, "bouncing the shim now over its work in flight (forced)", dlog.Merge(fields, dlog.Context{
 			"turn_in_flight": decision.TurnInFlight, "detached_work": decision.DetachedWork,
 		}))
 	case decision.Now:
 		c.log.Info(opBounce, "bouncing the shim now; nothing was in flight", fields)
 	default:
-		c.log.Info(opBounce, "registered the shim bounce behind the workspace's work in flight", merge(fields, dlog.Context{
+		c.log.Info(opBounce, "registered the shim bounce behind the workspace's work in flight", dlog.Merge(fields, dlog.Context{
 			"turn_in_flight": decision.TurnInFlight, "detached_work": decision.DetachedWork,
 			"already_registered": decision.AlreadyPending,
 		}))
@@ -129,10 +129,10 @@ func (c *controller) shimBounce(reason RelaunchReason, force bool) bounce.Func {
 		// (promptqueue OnLeaseChanged).
 		if reason == ReasonBuildStale && !force {
 			if held, merging, err := c.deps.DB.Lease(ctx, ws); err != nil {
-				c.log.Error(opRelaunch, "could not read the workspace's lease before the stale-build bounce", withCause(fields, err))
+				c.log.Error(opRelaunch, "could not read the workspace's lease before the stale-build bounce", dlog.WithCause(fields, err))
 				return fmt.Errorf("rollout: relaunch %q: read the lease: %w", ws, err)
 			} else if merging && held.Holder == wsm.HolderMerge {
-				c.log.Info(opRelaunch, "a merge holds the workspace; the stale-build bounce waits for the merge to release it", merge(fields, dlog.Context{"lease": string(held.ID)}))
+				c.log.Info(opRelaunch, "a merge holds the workspace; the stale-build bounce waits for the merge to release it", dlog.Merge(fields, dlog.Context{"lease": string(held.ID)}))
 				return fmt.Errorf("rollout: relaunch %q: a merge holds the workspace: %w", ws, bounce.ErrDeferredBehindLease)
 			}
 		}
@@ -182,7 +182,7 @@ func (c *controller) relaunchOnce(ctx context.Context, ws ids.WorkspaceID, reaso
 	// the first, costing nothing until the swap.
 	fresh, err := c.deps.Shims.Prelaunch(ctx, ws)
 	if err != nil {
-		c.log.Error(opRelaunch, "the inert prelaunch failed; the old shim is untouched", withCause(fields, err))
+		c.log.Error(opRelaunch, "the inert prelaunch failed; the old shim is untouched", dlog.WithCause(fields, err))
 		return nil, Resumed{}, fmt.Errorf("rollout: relaunch %q: prelaunch: %w", ws, err)
 	}
 	c.log.Debug(opRelaunch, "prelaunched an inert shim beside the running one", fields)
@@ -200,9 +200,9 @@ func (c *controller) relaunchOnce(ctx context.Context, ws ids.WorkspaceID, reaso
 			// `doom`) and the restart did nothing.
 			*mergeHeld = true
 			fields["held_by"] = "merge"
-			c.log.Info(opRelaunch, "the workspace's suspended merge already holds its prompts; the restart takes no hold of its own", withCause(fields, err))
+			c.log.Info(opRelaunch, "the workspace's suspended merge already holds its prompts; the restart takes no hold of its own", dlog.WithCause(fields, err))
 		} else if err != nil {
-			c.log.Error(opRelaunch, "could not take the restart-pending hold", withCause(fields, err))
+			c.log.Error(opRelaunch, "could not take the restart-pending hold", dlog.WithCause(fields, err))
 			c.retirePrelaunch(ctx, fresh, reason, fields)
 			return nil, Resumed{}, fmt.Errorf("rollout: relaunch %q: take the restart hold: %w", ws, err)
 		} else {
@@ -244,7 +244,7 @@ func (c *controller) relaunchOnce(ctx context.Context, ws ids.WorkspaceID, reaso
 	if err := c.replacementAlive(fresh, ws, "while the old shim stood down; prelaunching another", fields); err != nil {
 		fresh, err = c.deps.Shims.Prelaunch(ctx, ws)
 		if err != nil {
-			c.log.Error(opRelaunch, "the second prelaunch failed; the workspace has no shim until it is revived", withCause(fields, err))
+			c.log.Error(opRelaunch, "the second prelaunch failed; the workspace has no shim until it is revived", dlog.WithCause(fields, err))
 			return nil, Resumed{}, fmt.Errorf("rollout: relaunch %q: prelaunch after the replacement died: %w", ws, err)
 		}
 	}
@@ -252,7 +252,7 @@ func (c *controller) relaunchOnce(ctx context.Context, ws ids.WorkspaceID, reaso
 	// THE REAP HAS PASSED, so both of the old shim's kernel locks are free
 	// and the prelaunched one takes them at its StartSession.
 	if err := c.deps.Shims.Install(ctx, ws, fresh); err != nil {
-		c.log.Error(opRelaunch, "could not install the prelaunched shim", withCause(fields, err))
+		c.log.Error(opRelaunch, "could not install the prelaunched shim", dlog.WithCause(fields, err))
 		c.retirePrelaunch(ctx, fresh, reason, fields)
 		return nil, Resumed{}, fmt.Errorf("rollout: relaunch %q: install the new shim: %w", ws, err)
 	}
@@ -276,14 +276,14 @@ func (c *controller) settleRelaunch(ctx context.Context, ws ids.WorkspaceID, fre
 		// cache is server-side, so this fires only on a genuinely lapsed TTL.
 		c.log.Info(opRelaunch, "the resume answered cold; raising the ordinary cold gate", fields)
 		if err := c.deps.ColdGate(ctx, ws, resumed.Cold); err != nil {
-			c.log.Error(opRelaunch, "could not raise the cold gate", withCause(fields, err))
+			c.log.Error(opRelaunch, "could not raise the cold gate", dlog.WithCause(fields, err))
 			return fmt.Errorf("rollout: relaunch %q: cold gate: %w", ws, err)
 		}
 	}
 
 	if pid := fresh.PID(); pid > 0 {
 		if err := c.deps.DB.SetShimPID(ctx, ws, &pid); err != nil {
-			c.log.Warn(opRelaunch, "could not record the new shim's pid", withCause(fields, err))
+			c.log.Warn(opRelaunch, "could not record the new shim's pid", dlog.WithCause(fields, err))
 		}
 	}
 
@@ -308,7 +308,7 @@ func (c *controller) replacementAlive(fresh shimclient.Client, ws ids.WorkspaceI
 	if !dead {
 		return nil
 	}
-	c.log.Error(opRelaunch, "the prelaunched replacement shim died "+when, merge(fields, dlog.Context{
+	c.log.Error(opRelaunch, "the prelaunched replacement shim died "+when, dlog.Merge(fields, dlog.Context{
 		"pid": info.PID, "exit_code": info.Code, "signal": info.Signal,
 	}))
 	return fmt.Errorf("rollout: relaunch %q: the prelaunched replacement (pid %d) exited with code %d", ws, info.PID, info.Code)
@@ -323,7 +323,7 @@ func (c *controller) retirePrelaunch(ctx context.Context, fresh shimclient.Clien
 		Reason: fmt.Sprintf("a %s bounce failed or was deferred before the prelaunched shim was installed", reason),
 		Force:  true,
 	}); err != nil {
-		c.log.Error(opRelaunch, "could not stop the prelaunched shim the failed bounce leaves behind", withCause(fields, err))
+		c.log.Error(opRelaunch, "could not stop the prelaunched shim the failed bounce leaves behind", dlog.WithCause(fields, err))
 		return
 	}
 	c.log.Info(opRelaunch, "stopped the prelaunched shim the failed or deferred bounce will not install", fields)
@@ -392,7 +392,7 @@ func (c *controller) standDown(ctx context.Context, old shimclient.Client, ws id
 			named = append(named, work.GetValue())
 		}
 		c.log.Info(opRelaunch, "the shim refused the unforced stand-down: work is live in it. The replacement is never forced over it; it is deferred behind that work",
-			merge(fields, dlog.Context{
+			dlog.Merge(fields, dlog.Context{
 				"refusal":        "live",
 				"turn_in_flight": live.GetTurnInFlight() != nil,
 				"turn_id":        live.GetTurnInFlight().GetValue(),
@@ -408,12 +408,12 @@ func (c *controller) standDown(ctx context.Context, old shimclient.Client, ws id
 		select {
 		case info := <-exited:
 			c.log.Warn(opRelaunch, "the forced stand-down call failed, but the shim left; the gate is passed",
-				merge(withCause(fields, err), dlog.Context{"pid": info.PID, "exit_code": info.Code, "signal": info.Signal}))
+				dlog.Merge(dlog.WithCause(fields, err), dlog.Context{"pid": info.PID, "exit_code": info.Code, "signal": info.Signal}))
 			return nil
 		default:
 		}
 		c.log.Warn(opRelaunch, "the forced stand-down call failed; killing the shim now",
-			merge(withCause(fields, err), dlog.Context{"call_bound": c.deps.StandDownCallBound.String()}))
+			dlog.Merge(dlog.WithCause(fields, err), dlog.Context{"call_bound": c.deps.StandDownCallBound.String()}))
 		return c.killAndReap(ctx, old, exited, ws, reason, "the forced stand-down went unanswered", fields)
 	case answer.GetFailure().GetNoSession() != nil:
 		// A SHIM HOLDING NO SESSION HAS NOTHING TO END: its vendor never
@@ -425,7 +425,7 @@ func (c *controller) standDown(ctx context.Context, old shimclient.Client, ws id
 		return c.killAndReap(ctx, old, exited, ws, reason, "the old shim held no session to stand down", fields)
 	case answer.GetFailure() != nil:
 		c.log.Warn(opRelaunch, "the shim refused the stand-down; waiting out the window before forcing",
-			merge(fields, dlog.Context{"refusal": killRefusal(answer.GetFailure())}))
+			dlog.Merge(fields, dlog.Context{"refusal": killRefusal(answer.GetFailure())}))
 	default:
 		c.log.Debug(opRelaunch, "the shim accepted the stand-down", fields)
 	}
@@ -433,17 +433,17 @@ func (c *controller) standDown(ctx context.Context, old shimclient.Client, ws id
 	select {
 	case info := <-exited:
 		c.log.Debug(opRelaunch, "the old shim is reaped; the gate is passed",
-			merge(fields, dlog.Context{"pid": info.PID, "exit_code": info.Code, "signal": info.Signal}))
+			dlog.Merge(fields, dlog.Context{"pid": info.PID, "exit_code": info.Code, "signal": info.Signal}))
 		return nil
 	case <-c.deps.Clock.After(c.deps.StandDownWindow):
 	case <-ctx.Done():
-		c.log.Error(opRelaunch, "the stand-down ended with its context", withCause(fields, ctx.Err()))
+		c.log.Error(opRelaunch, "the stand-down ended with its context", dlog.WithCause(fields, ctx.Err()))
 		return fmt.Errorf("rollout: relaunch %q: stand down: %w", ws, ctx.Err())
 	}
 
 	c.log.Error(opRelaunch, "the old shim did not exit inside the stand-down window; force-killing it. "+
 		"The stream-only residue of the window is lost",
-		merge(fields, dlog.Context{"stand_down_window": c.deps.StandDownWindow.String()}))
+		dlog.Merge(fields, dlog.Context{"stand_down_window": c.deps.StandDownWindow.String()}))
 	if err := c.killAndReap(ctx, old, exited, ws, reason, "the stand-down window expired", fields); err != nil {
 		return err
 	}
@@ -460,16 +460,16 @@ func (c *controller) killAndReap(ctx context.Context, old shimclient.Client, exi
 		Reason: fmt.Sprintf("%s during a %s relaunch", why, reason),
 		Force:  true,
 	}); err != nil {
-		c.log.Error(opRelaunch, "the force-kill failed", withCause(fields, err))
+		c.log.Error(opRelaunch, "the force-kill failed", dlog.WithCause(fields, err))
 		return fmt.Errorf("rollout: relaunch %q: force-kill the old shim: %w", ws, err)
 	}
 	select {
 	case info := <-exited:
 		c.log.Debug(opRelaunch, "the killed shim is reaped; the gate is passed",
-			merge(fields, dlog.Context{"pid": info.PID, "exit_code": info.Code, "signal": info.Signal}))
+			dlog.Merge(fields, dlog.Context{"pid": info.PID, "exit_code": info.Code, "signal": info.Signal}))
 		return nil
 	case <-ctx.Done():
-		c.log.Error(opRelaunch, "the reap ended with its context", withCause(fields, ctx.Err()))
+		c.log.Error(opRelaunch, "the reap ended with its context", dlog.WithCause(fields, ctx.Err()))
 		return fmt.Errorf("rollout: relaunch %q: reap the old shim: %w", ws, ctx.Err())
 	}
 }
@@ -482,21 +482,21 @@ func (c *controller) killAndReap(ctx context.Context, old shimclient.Client, exi
 // at ERROR: the shim did not answer.
 func (c *controller) awaitUnansweredStandDown(ctx context.Context, exited <-chan shimclient.ExitInfo, ws ids.WorkspaceID, callErr error, fields dlog.Context) error {
 	c.log.Debug(opRelaunch, "the unforced stand-down call failed; waiting out the window for the shim to leave, and never forcing it",
-		withCause(fields, callErr))
+		dlog.WithCause(fields, callErr))
 	select {
 	case info := <-exited:
 		// THE CALL STILL FAILED, so it is a fault; the shim's exit is the
 		// evidence that it took the stand-down, and the gate is passed.
 		c.log.Warn(opRelaunch, "the unforced stand-down call failed, but the shim left inside the window; the gate is passed",
-			merge(withCause(fields, callErr), dlog.Context{"pid": info.PID, "exit_code": info.Code, "signal": info.Signal}))
+			dlog.Merge(dlog.WithCause(fields, callErr), dlog.Context{"pid": info.PID, "exit_code": info.Code, "signal": info.Signal}))
 		return nil
 	case <-c.deps.Clock.After(c.deps.StandDownWindow):
 	case <-ctx.Done():
-		c.log.Error(opRelaunch, "the stand-down ended with its context", withCause(fields, ctx.Err()))
+		c.log.Error(opRelaunch, "the stand-down ended with its context", dlog.WithCause(fields, ctx.Err()))
 		return fmt.Errorf("rollout: relaunch %q: stand down: %w", ws, ctx.Err())
 	}
 	c.log.Error(opRelaunch, "the shim did not answer the unforced stand-down and did not leave inside the window; it is left serving untouched and the replacement is deferred, never forced",
-		merge(withCause(fields, callErr), dlog.Context{"stand_down_window": c.deps.StandDownWindow.String()}))
+		dlog.Merge(dlog.WithCause(fields, callErr), dlog.Context{"stand_down_window": c.deps.StandDownWindow.String()}))
 	return fmt.Errorf("rollout: relaunch %q: stand down: %w: %w", ws, ErrStandDownUnanswered, callErr)
 }
 
@@ -528,7 +528,7 @@ func mergeHoldsTheWorkspace(reason RelaunchReason, err error) bool {
 // watching, so a bounce without this leaves the intake held forever.
 func (c *controller) release(ctx context.Context, ws ids.WorkspaceID, lease ids.LeaseID, fields dlog.Context) {
 	if err := c.deps.DB.ReleaseLease(ctx, lease); err != nil {
-		c.log.Error(opRelaunch, "could not release the restart-pending hold", withCause(fields, err))
+		c.log.Error(opRelaunch, "could not release the restart-pending hold", dlog.WithCause(fields, err))
 		return
 	}
 	c.deps.LeaseChanged(ws)
@@ -539,7 +539,7 @@ func (c *controller) release(ctx context.Context, ws ids.WorkspaceID, lease ids.
 // recordRelaunchFault records a resume that failed hard as the WORKSPACE'S OWN
 // error. It is remediated as it comes up: there is no retry machinery.
 func (c *controller) recordRelaunchFault(ctx context.Context, ws ids.WorkspaceID, cause error, fields dlog.Context) {
-	c.log.Error(opRelaunch, "the resume failed; the workspace carries its own error", withCause(fields, cause))
+	c.log.Error(opRelaunch, "the resume failed; the workspace carries its own error", dlog.WithCause(fields, cause))
 	workspace := ws
 	if _, err := c.deps.DB.OpenFault(ctx, wsm.Fault{
 		Workspace: &workspace,
@@ -548,7 +548,7 @@ func (c *controller) recordRelaunchFault(ctx context.Context, ws ids.WorkspaceID
 		Evidence:  map[string]string{"cause": cause.Error()},
 		OpenedAt:  c.deps.Clock.Now(),
 	}); err != nil {
-		c.log.Error(opRelaunch, "could not record the failed relaunch", withCause(fields, err))
+		c.log.Error(opRelaunch, "could not record the failed relaunch", dlog.WithCause(fields, err))
 	}
 }
 
@@ -584,7 +584,7 @@ func (c *controller) judgeStaleAsync(ws ids.WorkspaceID) {
 		defer c.staleChecks.Done()
 		ctx := c.lifetime(context.Background())
 		if _, err := c.checkStale(ctx, ws, c.takeoverForce(ws)); err != nil {
-			c.log.Error(opStaleness, "the reported shim build could not be judged", withCause(dlog.Context{"workspace": string(ws)}, err))
+			c.log.Error(opStaleness, "the reported shim build could not be judged", dlog.WithCause(dlog.Context{"workspace": string(ws)}, err))
 		}
 	}()
 }
@@ -625,7 +625,7 @@ func (c *controller) checkStale(ctx context.Context, ws ids.WorkspaceID, force b
 	fields := dlog.Context{"workspace": string(ws), "force": force}
 	if standing := c.Standing(ws); standing != StandingOwned {
 		c.log.Debug(opStaleness, "the workspace is not this daemon's to bounce yet; its adoption re-checks it",
-			merge(fields, dlog.Context{"standing": standing.String()}))
+			dlog.Merge(fields, dlog.Context{"standing": standing.String()}))
 		return StaleCheck{}, nil
 	}
 	if _, live := c.deps.Shims.Client(ws); !live {
@@ -641,7 +641,7 @@ func (c *controller) checkStale(ctx context.Context, ws ids.WorkspaceID, force b
 	}
 	installed, err := c.deps.ShimBuild()
 	if err != nil {
-		c.log.Error(opStaleness, "could not read the installed shim build; nothing is bounced on a guess", withCause(fields, err))
+		c.log.Error(opStaleness, "could not read the installed shim build; nothing is bounced on a guess", dlog.WithCause(fields, err))
 		return StaleCheck{}, fmt.Errorf("rollout: judge the shim build of %q: %w", ws, err)
 	}
 	check := StaleCheck{Reported: reported, Installed: installed}

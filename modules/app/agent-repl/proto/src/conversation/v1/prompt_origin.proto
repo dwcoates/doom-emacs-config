@@ -143,4 +143,13 @@ enum PromptOrigin {
   // workspace (the hidden one an async merge runs in) is not reported here:
   // the merge queue hands its failure back to the requester.
   PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED = 35;
+  // The daemon's notice to a workspace's session that a merge queue it
+  // subscribed to changed (agentrepl.v1.UpdateMergeQueueSubscribe): it names
+  // each change and carries the queue as it stands after it. Submitted
+  // through the prompt queue as a deferred prompt, the way a merge handback
+  // is, so it waits behind a running turn and wakes an idle agent. The feed
+  // draws NO row for it: the notice is the daemon's word to the agent, not
+  // anything the user said or needs to read, and the agent's reply is drawn
+  // as any reply is.
+  PROMPT_ORIGIN_MERGE_QUEUE_NOTICE = 36;
 }

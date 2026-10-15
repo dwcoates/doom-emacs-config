@@ -79,7 +79,11 @@ daemon/
     headless/      the ONE exec site for the daemon's own `claude -p` calls:
                    the classifier's routing question and the workspace naming
                    call. Guard, binary resolution, stdin discipline, deadline
-    merge/         merge orchestrator (per-repo queue, two methods, tabs, lease, test gate and its per-repo test turn, briefs, ledger)
+    merge/         merge orchestrator (per-repo queue, two methods, tabs, lease, test gate and its per-repo test turn, briefs, ledger,
+                   queue-change reports and subscription records)
+    mergenotice/   merge queue subscription notices: buffers every reported queue change, and one loop tells each
+                   admitting subscriber's agent once, as a deferred prompt of origin MERGE_QUEUE_NOTICE
+    promptorigin/  leaf: which prompt origins are drawn nowhere (no feed row, no held card)
     drain/         shutdown schedule + idle sweep (hibernation policy incl. Hibernate directive);
                    the SAME stand-down for a workspace the user hid or collapsed (withheld.go),
                    deferred to its turn's end, never under it
@@ -480,8 +484,10 @@ the merges behind it proceed; once its guidance turn has ended it waits for
 the slot again and makes its merge afresh on the new tip. Every end of a run
 -- landed, failed, abandoned, stopped -- goes through the one teardown, which
 releases the lease, the queue entry, the open ledger intervals, the tree and
-the slot. A repair that changes the merge machinery (`daemon/internal/merge/`,
-`bin/test-all.sh`) is refused and parks. Every brief and every guidance is
+the slot. A TEST repair that changes merge machinery (`daemon/internal/merge/`,
+`testrun/`, `bin/test-all.sh`) the branch did not already change fails the
+merge; a CONFLICT resolution may edit it, since it lands the branch's own
+change, and its edits count as the branch's for any later test repair. Every brief and every guidance is
 addressed to the merging workspace's own session.
 
 Tabs are FeedMergeTab rows on the merge bubble's sub-feed
@@ -503,6 +509,20 @@ and resubmits it exactly once at lease release; an agent-requested one waits
 for the turn instead. A landing on the daemon's own checkout tells the deploy
 ONCE (`Trigger.Landed(landed []Commit)`, which `deploy.Deployer` implements)
 only after release + terminal, and never waits on the build.
+
+SUBSCRIPTIONS (docs/protobuf-design/merge-queue-subscriptions.md). Every
+write that changes a queue's LINE reports itself through a second DB wrapper
+(`queueEventsDB`, beside `asyncMergesDB`): put in line, requeued after a
+restart, started, landed, failed, taken off (with its cause), reordered,
+paused, resumed. A started merge's new step is reported from `publish`, which
+names the queue it publishes for. Each change carries the queue as it then
+stands (`merge.QueueSnapshot`: every member front first, name, branch, mode,
+started, step; paused). A change is reported by the write that made it,
+never found by diffing two looks, so a change is reported once across a
+handover; the events lock never nests with `o.mu`. Changes go to
+`Deps.QueueEvents` (`internal/mergenotice`), which never blocks the queue.
+Subscriptions are durable (wsm layout 55) and end with the workspace's close
+(`MarkClosed` deletes them in the close's transaction; `Forget` cascades).
 
 ### rollout (`internal/rollout`)
 
@@ -952,9 +972,10 @@ refused for the same reason. A create maps onto the `CreateSpec` the
 
 ### The merge queue's controls
 
-Five entry types mirror `UpdateMergeQueue`'s arms (all but `front`) and call
-the same orchestrator entry points (`merge.Orchestrator.Evict`, `Pause`,
-`Unpause`, `HoldRollouts`, `ReleaseRollouts`).
+The entry types mirror `UpdateMergeQueue`'s arms (all but `front`) and call
+the same orchestrator entry points (`merge.Orchestrator.Evict`, `Move`,
+`Pause`, `Unpause`, `HoldRollouts`, `ReleaseRollouts`, `Subscribe`,
+`Unsubscribe`).
 Each names its REQUESTER by `project_dir` (or `dir`, or a `workspace` id), as
 a `merge` entry does; that is the workspace whose agent wrote it.
 
@@ -967,12 +988,16 @@ a `merge` entry does; that is the workspace whose agent wrote it.
 | `merge_release_rollouts` | none | `ReleaseRollouts`: the next landing tells the deploy again; nothing is deployed retroactively |
 | `merge_disable_racing` | none: the switch is daemon-wide | `DisableRacing`: every queue works its head alone whatever the power source (the gate governor's window narrows to one); durable (wsm `merge_racing_disabled`) until enabled, and the governor is born with it at boot |
 | `merge_enable_racing` | none | `EnableRacing`: on AC power each queue works its top two merges again, the merge behind each head starting at once |
+| `merge_subscribe` | `detail` required (`every_change`, `advances`, `depletes`); `repository_dir` optional, as for a pause | `Subscribe` of the requester at that detail, to that repository's queue, else every repository's |
+| `merge_unsubscribe` | `repository_dir` optional, as for a subscribe | `Unsubscribe` of the requester in that scope |
 
-`evict_dir` is refused on any other type, and `repository_dir` on any but a
-pause or a resume. The OUTCOME is the file's fate plus one INFO
+`evict_dir` is refused on any other type, `repository_dir` on any but a
+pause, a resume, a subscribe or an unsubscribe, and `detail` on any but a
+subscribe. The OUTCOME is the file's fate plus one INFO
 `daemon.commandfile.merge_queue` record whose `path` is the file and whose
-`outcome` is `evicted`, `not_queued`, `paused`, `resumed`, `held` or
-`released`. EVICTING A
+`outcome` is `evicted`, `not_queued`, `paused`, `resumed`, `held`,
+`released`, `subscribed`, `resubscribed`, `unsubscribed` or `not_subscribed`
+(an unsubscribe of nothing is applied, as an evict of nothing is). EVICTING A
 WORKSPACE WITH NOTHING ON THE QUEUE IS AN ANSWER, NOT A FAILURE: the rpc's
 `no_such_queued_merge` applies the file with `outcome: not_queued`. Every other
 refusal (`already_paused`, `not_paused`, `unknown_repository`,

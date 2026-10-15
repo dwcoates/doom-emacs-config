@@ -40,7 +40,7 @@ func (s *server) Deploy(
 		if !ok {
 			return nil, fail(s.log, "Deploy", err)
 		}
-		s.log.Info(opDeployRPC, "answered a typed deploy refusal", withFields(fields, dlog.Context{"cause": err.Error()}))
+		s.log.Info(opDeployRPC, "answered a typed deploy refusal", dlog.Merge(fields, dlog.Context{"cause": err.Error()}))
 		return connect.NewResponse(&agentreplv1.DeployResponse{
 			Result: &agentreplv1.DeployResponse_Error{Error: cause},
 		}), nil
@@ -53,7 +53,7 @@ func (s *server) Deploy(
 		}
 		success.Components = append(success.Components, out)
 	}
-	s.log.Info(opDeployRPC, "answered the deploy's decisions", withFields(fields, dlog.Context{"components": len(success.Components)}))
+	s.log.Info(opDeployRPC, "answered the deploy's decisions", dlog.Merge(fields, dlog.Context{"components": len(success.Components)}))
 	return connect.NewResponse(&agentreplv1.DeployResponse{
 		Result: &agentreplv1.DeployResponse_Success{Success: success},
 	}), nil
@@ -278,16 +278,4 @@ func validateWatchWebWorkspaceRequest(req *agentreplv1.WatchWebWorkspaceRequest)
 		return invalid("webapp_build", "the webapp build this page runs is required")
 	}
 	return nil
-}
-
-// withFields copies base and overlays extra.
-func withFields(base, extra dlog.Context) dlog.Context {
-	out := make(dlog.Context, len(base)+len(extra))
-	for k, v := range base {
-		out[k] = v
-	}
-	for k, v := range extra {
-		out[k] = v
-	}
-	return out
 }

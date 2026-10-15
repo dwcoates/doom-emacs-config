@@ -91,6 +91,21 @@ func (s *server) UpdateMergeQueue(
 		})
 	}
 
+	if subscribe := req.Msg.GetSubscribe(); subscribe != nil {
+		scope, detail := scopeOf(subscribe.GetRepository()), subscriptionDetailOf(subscribe.GetDetail())
+		return s.actOnQueuedMerge(ctx, rpc, subscribe.GetSubscriber(), resp, func(ws ids.WorkspaceID) error {
+			_, err := s.deps.Merge.Subscribe(ctx, ws, scope, detail)
+			return err
+		})
+	}
+
+	if unsubscribe := req.Msg.GetUnsubscribe(); unsubscribe != nil {
+		scope := scopeOf(unsubscribe.GetRepository())
+		return s.actOnQueuedMerge(ctx, rpc, unsubscribe.GetSubscriber(), resp, func(ws ids.WorkspaceID) error {
+			return s.deps.Merge.Unsubscribe(ctx, ws, scope)
+		})
+	}
+
 	if action, apply, ok := s.daemonWideMergeAction(req.Msg); ok {
 		if err := apply(ctx); err != nil {
 			return answer(resp, s.answerRefusal(s.log, rpc, resp, err, nil))
@@ -124,8 +139,9 @@ func (s *server) UpdateMergeQueue(
 }
 
 // actOnQueuedMerge is the one body of every UpdateMergeQueue arm that acts on
-// ONE workspace's queued merge: the ref resolved to a registered workspace,
-// ACT run on it, a refusal answered as its typed arm, and success otherwise.
+// ONE workspace -- its queued merge, or its subscription: the ref resolved to
+// a registered workspace, ACT run on it, a refusal answered as its typed arm,
+// and success otherwise.
 func (s *server) actOnQueuedMerge(
 	ctx context.Context,
 	rpc string,
@@ -173,6 +189,22 @@ func mergeMoveOf(req *agentreplv1.UpdateMergeQueueRequest) (*workspacev1.Workspa
 		return action.MoveDown.GetWorkspace(), wsm.MergeMoveDown, true
 	}
 	return nil, 0, false
+}
+
+// subscriptionDetailOf renders a subscription's detail arm as the store's
+// detail. validateUpdateMergeQueueRequest has refused a detail with no arm,
+// so an arm this switch does not know is a contract arm added without its
+// mapping, and fails hard.
+func subscriptionDetailOf(detail *agentreplv1.UpdateMergeQueueSubscribeDetail) wsm.MergeQueueDetail {
+	switch detail.GetLevel().(type) {
+	case *agentreplv1.UpdateMergeQueueSubscribeDetail_EveryChange:
+		return wsm.MergeQueueDetailEveryChange
+	case *agentreplv1.UpdateMergeQueueSubscribeDetail_Advances:
+		return wsm.MergeQueueDetailAdvances
+	case *agentreplv1.UpdateMergeQueueSubscribeDetail_Depletes:
+		return wsm.MergeQueueDetailDepletes
+	}
+	panic(fmt.Sprintf("server: a merge queue subscription detail %T has no store detail", detail.GetLevel()))
 }
 
 // scopeOf renders an optional RepositoryRef as the orchestrator's scope. An

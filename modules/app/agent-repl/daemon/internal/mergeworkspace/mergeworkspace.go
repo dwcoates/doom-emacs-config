@@ -18,7 +18,6 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/feedid"
 	"agent-repld/internal/flock"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
@@ -66,9 +65,7 @@ const CompactCommand = "/compact"
 
 // Prompts submits the handback, and a compaction asked for after a landing, to
 // the requester's session.
-type Prompts interface {
-	Submit(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, idempotencyKey string, origin conversationv1.PromptOrigin, delivery wsm.Delivery, target *feedid.Ref) (prompthandler.Outcome, error)
-}
+type Prompts = prompthandler.Submitter
 
 // Feed restates a removed merge workspace's switches in its requester's feed.
 type Feed interface {
@@ -117,12 +114,12 @@ func (s *Service) Fork(ctx context.Context, requester wsm.Workspace, origin wsm.
 		"target_dir": origin.TargetDir, "parent_branch": origin.ParentBranch, "actions_before": len(origin.Actions.Before), "actions_after": len(origin.Actions.After)}
 	if origin.Requester != requester.ID {
 		err := fmt.Errorf("mergeworkspace: a fork for %s names %s as its requester", requester.ID, origin.Requester)
-		log.Error(op, "a detached merge's fork names another requester than the workspace it forks", withCause(fields, err))
+		log.Error(op, "a detached merge's fork names another requester than the workspace it forks", dlog.WithCause(fields, err))
 		return wsm.Workspace{}, err
 	}
 	existing, found, err := s.deps.DB.MergeWorkspaceFor(ctx, origin.Request)
 	if err != nil {
-		log.Error(op, "could not read whether a detached merge's workspace was already forked", withCause(fields, err))
+		log.Error(op, "could not read whether a detached merge's workspace was already forked", dlog.WithCause(fields, err))
 		return wsm.Workspace{}, err
 	}
 	if found {
@@ -165,12 +162,12 @@ func (s *Service) HandBack(ctx context.Context, requester ids.WorkspaceID, merge
 	fields := dlog.Context{"requester": string(requester), "merge_workspace": string(mergeWS.ID), "outcome": out.Kind.String(), "branch": out.Branch}
 	label, report, err := handbackText(mergeWS, out)
 	if err != nil {
-		log.Error(op, "a detached merge ended in an undeclared way; its requester is not told", withCause(fields, err))
+		log.Error(op, "a detached merge ended in an undeclared way; its requester is not told", dlog.WithCause(fields, err))
 		return err
 	}
 	key, err := s.deps.MintKey("merge-handback")
 	if err != nil {
-		log.Error(op, "could not mint a detached merge handback's idempotency key; its requester is not told", withCause(fields, err))
+		log.Error(op, "could not mint a detached merge handback's idempotency key; its requester is not told", dlog.WithCause(fields, err))
 		return err
 	}
 	if out.Kind == merge.DetachedLanded {
@@ -190,7 +187,7 @@ func (s *Service) owe(ctx context.Context, requester ids.WorkspaceID, mergeWS ws
 		Summary: out.Summary, CompactAfter: compactsAfter(mergeWS, out), IdempotencyKey: key, OwedAt: s.deps.Now(),
 	}
 	if err := s.deps.DB.OweHandBack(ctx, owed); err != nil {
-		log.Error(op, "could not record a landed merge's report as owed until its deploy; its requester is not told", withCause(fields, err))
+		log.Error(op, "could not record a landed merge's report as owed until its deploy; its requester is not told", dlog.WithCause(fields, err))
 		return err
 	}
 	log.Info(op, "a landed merge's report is owed until the deploy that carries it has run", fields)
@@ -203,7 +200,7 @@ func (s *Service) submit(ctx context.Context, requester ids.WorkspaceID, label, 
 	log := s.deps.Log.Global()
 	text, err := s.deps.Briefs(BriefHandback, map[string]string{"label": label, "report": report})
 	if err != nil {
-		log.Error(op, "could not compose a detached merge's handback; its requester is not told", withCause(fields, err))
+		log.Error(op, "could not compose a detached merge's handback; its requester is not told", dlog.WithCause(fields, err))
 		return err
 	}
 	outcome, err := s.deps.Prompts.Submit(ctx, requester, feed.SaidText(text), key,
@@ -233,7 +230,7 @@ func (s *Service) CoverOwed(ctx context.Context) error {
 	log := s.deps.Log.Global()
 	covered, err := s.deps.DB.CoverOwedHandBacks(ctx)
 	if err != nil {
-		log.Error(op, "could not mark the owed landing reports covered by the deploy; they wait for the next one", withCause(nil, err))
+		log.Error(op, "could not mark the owed landing reports covered by the deploy; they wait for the next one", dlog.WithCause(nil, err))
 		return err
 	}
 	log.Info(op, "the deploy covers the landing reports owed before it", dlog.Context{"covered": covered})
@@ -287,13 +284,13 @@ func (s *Service) compactAfter(ctx context.Context, requester ids.WorkspaceID, h
 	}
 	key, err := s.deps.MintKey("merge-compact-after")
 	if err != nil {
-		log.Error(op, "could not mint the idempotency key of a landed merge's compaction; its requester is not compacted", withCause(fields, err))
+		log.Error(op, "could not mint the idempotency key of a landed merge's compaction; its requester is not compacted", dlog.WithCause(fields, err))
 		return err
 	}
 	outcome, err := s.deps.Prompts.Submit(ctx, requester, feed.SaidText(CompactCommand), key,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_COMPACT_AFTER, wsm.DeliveryDeferred, nil)
 	if err != nil {
-		log.Error(op, "could not submit the compaction a landed merge asked for; its requester is not compacted", withCause(fields, err))
+		log.Error(op, "could not submit the compaction a landed merge asked for; its requester is not compacted", dlog.WithCause(fields, err))
 		return err
 	}
 	fields["turn"] = string(outcome.Turn)
@@ -317,7 +314,7 @@ func (s *Service) stampLanding(ctx context.Context, requester ids.WorkspaceID, m
 		stamp[k] = v
 	}
 	if err := s.deps.DB.SetLanded(ctx, requester, &landing); err != nil {
-		log.Error(op, "could not stamp the requester with its landed merge; it is never retired", withCause(stamp, err))
+		log.Error(op, "could not stamp the requester with its landed merge; it is never retired", dlog.WithCause(stamp, err))
 		return
 	}
 	log.Info(op, "stamped the requester with the commit its detached merge landed", stamp)
@@ -571,20 +568,10 @@ func sweepFailed(ctx context.Context, log dlog.Logger, level func(operation, mes
 // is, recorded at INFO with what it left undone.
 func failedUnlessStoodDown(ctx context.Context, log dlog.Logger, level func(operation, message string, ctx dlog.Context), during, message string, fields dlog.Context, err error) {
 	if standdown.CutShort(ctx, err) {
-		stood := withCause(fields, err)
+		stood := dlog.WithCause(fields, err)
 		stood["left_undone"] = message
 		log.Info(op, "the daemon stood down mid-"+during, stood)
 		return
 	}
-	level(op, message, withCause(fields, err))
-}
-
-// withCause adds an error's text to a record's fields.
-func withCause(fields dlog.Context, err error) dlog.Context {
-	out := dlog.Context{}
-	for k, v := range fields {
-		out[k] = v
-	}
-	out["cause"] = err.Error()
-	return out
+	level(op, message, dlog.WithCause(fields, err))
 }

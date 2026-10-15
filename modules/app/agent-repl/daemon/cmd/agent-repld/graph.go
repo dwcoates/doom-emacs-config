@@ -42,6 +42,7 @@ import (
 	"agent-repld/internal/lockwatch"
 	"agent-repld/internal/login"
 	"agent-repld/internal/merge"
+	"agent-repld/internal/mergenotice"
 	"agent-repld/internal/mergeworkspace"
 	"agent-repld/internal/opentabs"
 	"agent-repld/internal/paint"
@@ -159,6 +160,11 @@ type graph struct {
 	// started (deploy.Deployer.DrainLandings): `run` calls it before the log
 	// surfaces close, so a landing's deploy always records how it ended.
 	DrainLandings func(bound time.Duration) bool
+	// Notices is the merge queue subscriptions' delivery loop. `run` starts
+	// it with the background loops and stops it AFTER the merge drain, not
+	// with them: a merge that lands inside the drain reports its landing, and
+	// the loop delivers every pending change before it stops.
+	Notices *noticeLifetime
 	// DrainMerges is the BOUNDED wait for merge runs that have reached their
 	// terminal. `run` calls it BEFORE the watchers close and before the state
 	// client does: a SIGTERM landing mid-terminal used to close the store
@@ -1012,7 +1018,17 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the gate governor: %w", err)
 	}
+	// THE MERGE QUEUE'S SUBSCRIPTION NOTICES are told every queue change the
+	// orchestrator makes; they only buffer until their loop runs, which is
+	// handed the prompt handler built below.
+	queueNotices := mergenotice.New(mergenotice.Deps{
+		Subscriptions: p.DB,
+		Briefs:        merge.BriefsFrom(paths.PromptsDir),
+		MintKey:       prompthandler.MintKey,
+		Log:           p.Surfaces,
+	})
 	mergeOrchestrator, err := merge.New(merge.Deps{
+		QueueEvents:   queueNotices,
 		Detached:      detachedRef,
 		Names:         verbsRef,
 		InterruptTurn: verbsRef.interruptTurn,
@@ -1420,6 +1436,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		DrainStarts:   fleet.DrainStarts,
 		DrainLandings: deployer.DrainLandings,
 		DrainMerges:   mergeOrchestrator.Drain,
+		Notices:       newNoticeLifetime(func(ctx context.Context) { queueNotices.Run(ctx, handler) }),
 		StopShims:     stopEveryShim(fleet, supervisor, rootLossShimStopBound),
 		SettleBoot:    freshBootSettle(p.Opts.joining != "", rolloutController),
 	}, nil

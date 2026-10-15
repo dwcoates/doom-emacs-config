@@ -128,19 +128,19 @@ func (c *controller) writeCarry(carry Carry) error {
 	fields := dlog.Context{"workspace": string(carry.Workspace), "path": c.carryPath(carry.Workspace)}
 	if c.deps.IntentManifest == "" {
 		err := errors.New("rollout: no intent manifest path is configured, so there is nowhere to carry to")
-		c.log.Error(opCarry, "cannot write the handover carry", withCause(fields, err))
+		c.log.Error(opCarry, "cannot write the handover carry", dlog.WithCause(fields, err))
 		return err
 	}
 	body, err := json.MarshalIndent(carry, "", "  ")
 	if err != nil {
-		c.log.Error(opCarry, "could not encode the handover carry", withCause(fields, err))
+		c.log.Error(opCarry, "could not encode the handover carry", dlog.WithCause(fields, err))
 		return fmt.Errorf("rollout: encode the carry of %q: %w", carry.Workspace, err)
 	}
 	if err := writeAtomically(c.carryDir(), c.carryPath(carry.Workspace), "carry-*.json", body); err != nil {
-		c.log.Error(opCarry, "could not write the handover carry", withCause(fields, err))
+		c.log.Error(opCarry, "could not write the handover carry", dlog.WithCause(fields, err))
 		return fmt.Errorf("rollout: write the carry of %q: %w", carry.Workspace, err)
 	}
-	c.log.Info(opCarry, "wrote the handover carry", merge(fields, dlog.Context{
+	c.log.Info(opCarry, "wrote the handover carry", dlog.Merge(fields, dlog.Context{
 		"mid_work": carry.MidWork, "acts": len(carry.Queue.Acts), "running_cut": carry.Queue.Cut != nil,
 		"cold_gate": len(carry.ColdGate) > 0, "replacements": len(carry.Replacements),
 		"participants_host": carry.Participants != nil && carry.Participants.Host,
@@ -177,7 +177,7 @@ func (c *controller) removeCarry(ws ids.WorkspaceID) error {
 		}
 	}
 	if err := errors.Join(failures...); err != nil {
-		c.log.Error(opCarry, "could not retire the handover carry", withCause(dlog.Context{"workspace": string(ws)}, err))
+		c.log.Error(opCarry, "could not retire the handover carry", dlog.WithCause(dlog.Context{"workspace": string(ws)}, err))
 		return fmt.Errorf("rollout: retire the carry of %q: %w", ws, err)
 	}
 	return nil
@@ -188,7 +188,7 @@ func (c *controller) removeCarry(ws ids.WorkspaceID) error {
 // back and transfer it at freeness.
 func (c *controller) writeRefusal(ws ids.WorkspaceID, why string) error {
 	if err := writeAtomically(c.carryDir(), c.refusalPath(ws), "refused-*", []byte(why+"\n")); err != nil {
-		c.log.Error(opCarry, "could not record the refused mid-work adoption", withCause(dlog.Context{"workspace": string(ws)}, err))
+		c.log.Error(opCarry, "could not record the refused mid-work adoption", dlog.WithCause(dlog.Context{"workspace": string(ws)}, err))
 		return fmt.Errorf("rollout: record the refusal of %q: %w", ws, err)
 	}
 	return nil
@@ -205,7 +205,7 @@ func (c *controller) refusedMidWork(ws ids.WorkspaceID) bool {
 	case errors.Is(err, os.ErrNotExist):
 		return false
 	default:
-		c.log.Error(opCarry, "could not read the refusal marker; the adoption window bounds the wait", withCause(dlog.Context{"workspace": string(ws)}, err))
+		c.log.Error(opCarry, "could not read the refusal marker; the adoption window bounds the wait", dlog.WithCause(dlog.Context{"workspace": string(ws)}, err))
 		return false
 	}
 }
@@ -245,7 +245,7 @@ type sealedMove struct {
 func (c *controller) seal(ctx context.Context, ws ids.WorkspaceID, fields dlog.Context) (*sealedMove, error) {
 	handoff, carried, err := c.deps.Bounces.SealMove(ctx, ws)
 	if err != nil {
-		c.log.Error(opTransfer, "could not seal the workspace's queue for its move", withCause(fields, err))
+		c.log.Error(opTransfer, "could not seal the workspace's queue for its move", dlog.WithCause(fields, err))
 		return nil, fmt.Errorf("rollout: seal %q: %w", ws, err)
 	}
 	move := &sealedMove{handoff: handoff}
@@ -274,7 +274,7 @@ func (c *controller) seal(ctx context.Context, ws ids.WorkspaceID, fields dlog.C
 	if cold, standing := c.deps.Shims.ColdGateStanding(ws); standing {
 		raw, err := protojson.Marshal(cold)
 		if err != nil {
-			c.log.Error(opTransfer, "could not encode the standing cold gate for the carry; the seal is put back", withCause(fields, err))
+			c.log.Error(opTransfer, "could not encode the standing cold gate for the carry; the seal is put back", dlog.WithCause(fields, err))
 			return nil, errors.Join(fmt.Errorf("rollout: carry the cold gate of %q: %w", ws, err), c.unseal(ctx, ws, move, fields))
 		}
 		carry.ColdGate = raw
@@ -296,7 +296,7 @@ func (c *controller) unseal(ctx context.Context, ws ids.WorkspaceID, move *seale
 	}
 	var failures []error
 	if err := c.deps.Bounces.UnsealMove(ctx, ws, move.handoff); err != nil {
-		c.log.Error(opTransfer, "could not put the sealed queue memory back", withCause(fields, err))
+		c.log.Error(opTransfer, "could not put the sealed queue memory back", dlog.WithCause(fields, err))
 		failures = append(failures, fmt.Errorf("rollout: unseal %q: %w", ws, err))
 	}
 	if move.written {
@@ -317,7 +317,7 @@ func (c *controller) reRequest(ctx context.Context, ws ids.WorkspaceID, move *se
 	for _, req := range append(append([]bounce.Request(nil), move.carried...), move.rejudged...) {
 		if _, err := c.deps.Bounces.RequestBounce(ctx, ws, req); err != nil {
 			c.log.Error(opTransfer, "a replacement the move was carrying could not be asked for again here",
-				withCause(merge(fields, dlog.Context{"reason": req.Reason}), err))
+				dlog.WithCause(dlog.Merge(fields, dlog.Context{"reason": req.Reason}), err))
 			failures = append(failures, fmt.Errorf("rollout: ask again for %s on %q: %w", req.Reason, ws, err))
 			if req.Done != nil {
 				req.Done(err)
@@ -359,7 +359,7 @@ func decodeCold(raw json.RawMessage) (*conversationv1.SessionCold, error) {
 func (c *controller) takeCarry(ws ids.WorkspaceID, outgoing ids.InstanceID, fields dlog.Context) (Carry, bool, error) {
 	carry, found, err := c.readCarry(ws)
 	if err != nil {
-		c.log.Error(opCarry, "could not read the handover carry; the workspace is not adopted", withCause(fields, err))
+		c.log.Error(opCarry, "could not read the handover carry; the workspace is not adopted", dlog.WithCause(fields, err))
 		return Carry{}, false, err
 	}
 	if !found {
@@ -368,13 +368,13 @@ func (c *controller) takeCarry(ws ids.WorkspaceID, outgoing ids.InstanceID, fiel
 	}
 	if carry.Workspace != ws || carry.Daemon != outgoing {
 		c.log.Error(opCarry, "the handover carry was written by another daemon or for another workspace; it is stale and retired unread",
-			merge(fields, dlog.Context{"carry_daemon": string(carry.Daemon), "carry_workspace": string(carry.Workspace)}))
+			dlog.Merge(fields, dlog.Context{"carry_daemon": string(carry.Daemon), "carry_workspace": string(carry.Workspace)}))
 		if err := c.removeCarry(ws); err != nil {
 			return Carry{}, false, err
 		}
 		return Carry{}, false, nil
 	}
-	c.log.Info(opCarry, "read the handover carry", merge(fields, dlog.Context{
+	c.log.Info(opCarry, "read the handover carry", dlog.Merge(fields, dlog.Context{
 		"mid_work": carry.MidWork, "shim_build": carry.ShimBuild, "acts": len(carry.Queue.Acts),
 		"running_cut": carry.Queue.Cut != nil, "cold_gate": len(carry.ColdGate) > 0, "replacements": len(carry.Replacements),
 	}))
@@ -391,7 +391,7 @@ func (c *controller) refuseMidWork(ws ids.WorkspaceID, why string, fields dlog.C
 // incumbent takes the workspace back on.
 func (c *controller) recordRefusal(ws ids.WorkspaceID, why string, fields dlog.Context) error {
 	c.log.Info(opAdopt, "refused the mid-work adoption; the incumbent takes the workspace back and transfers it at freeness",
-		merge(fields, dlog.Context{"why": why}))
+		dlog.Merge(fields, dlog.Context{"why": why}))
 	return c.writeRefusal(ws, why)
 }
 
@@ -402,11 +402,11 @@ func (c *controller) recordRefusal(ws ids.WorkspaceID, why string, fields dlog.C
 func (c *controller) refuseAdopted(ctx context.Context, ws ids.WorkspaceID, why string, fields dlog.Context) error {
 	failures := []error{fmt.Errorf("rollout: adopt %q: %s: %w", ws, why, ErrMidWorkRefused)}
 	if _, err := c.deps.Shims.HandOver(ws); err != nil {
-		c.log.Error(opAdopt, "could not let go of the shim of a refused mid-work adoption", withCause(fields, err))
+		c.log.Error(opAdopt, "could not let go of the shim of a refused mid-work adoption", dlog.WithCause(fields, err))
 		failures = append(failures, fmt.Errorf("rollout: adopt %q: let go of the shim: %w", ws, err))
 	}
 	if err := c.deps.DB.ReleaseServing(ctx, ws, c.deps.Instance); err != nil {
-		c.log.Error(opAdopt, "could not give back the serving row of a refused mid-work adoption", withCause(fields, err))
+		c.log.Error(opAdopt, "could not give back the serving row of a refused mid-work adoption", dlog.WithCause(fields, err))
 		failures = append(failures, fmt.Errorf("rollout: adopt %q: give back serving: %w", ws, err))
 	}
 	if err := c.recordRefusal(ws, why, fields); err != nil {
@@ -421,13 +421,13 @@ func (c *controller) refuseAdopted(ctx context.Context, ws ids.WorkspaceID, why 
 func (c *controller) dialAdopted(ctx context.Context, ws ids.WorkspaceID, parked *conversationv1.SessionCold, fields dlog.Context) error {
 	if parked != nil {
 		if _, err := c.deps.Shims.AdoptParked(ctx, ws, parked); err != nil {
-			c.log.Error(opAdopt, "could not adopt the workspace's shim parked at its cold gate; its held intake is drained all the same", withCause(fields, err))
+			c.log.Error(opAdopt, "could not adopt the workspace's shim parked at its cold gate; its held intake is drained all the same", dlog.WithCause(fields, err))
 			return fmt.Errorf("rollout: adopt %q: dial the parked shim: %w", ws, err)
 		}
 		return nil
 	}
 	if _, err := c.deps.Shims.Adopt(ctx, ws); err != nil {
-		c.log.Error(opAdopt, "could not adopt the workspace's running shim; its held intake is drained all the same", withCause(fields, err))
+		c.log.Error(opAdopt, "could not adopt the workspace's running shim; its held intake is drained all the same", dlog.WithCause(fields, err))
 		return fmt.Errorf("rollout: adopt %q: dial the running shim: %w", ws, err)
 	}
 	return nil
@@ -447,13 +447,13 @@ func (c *controller) consumeCarry(ws ids.WorkspaceID, carried bool) error {
 func (c *controller) runCarried(ctx context.Context, ws ids.WorkspaceID, carried []CarriedReplacement, fields dlog.Context) {
 	for _, r := range carried {
 		reason := RelaunchReason(r.Reason)
-		rFields := merge(fields, dlog.Context{"reason": r.Reason, "force": r.Force})
+		rFields := dlog.Merge(fields, dlog.Context{"reason": r.Reason, "force": r.Force})
 		done := func(err error) {
 			if err != nil || reason != ReasonRestartVerb {
 				return
 			}
 			if err := c.ReloadWebapp(ctx, ws); err != nil {
-				c.log.Error(opCarry, "could not push the webapp reload after the carried restart", withCause(rFields, err))
+				c.log.Error(opCarry, "could not push the webapp reload after the carried restart", dlog.WithCause(rFields, err))
 			}
 		}
 		if _, err := c.BounceShim(ctx, ws, reason, r.Force, done); err != nil {
@@ -495,7 +495,7 @@ func (c *controller) TakeUpCarries(ctx context.Context, adopted []ids.WorkspaceI
 		return nil
 	}
 	if err != nil {
-		c.log.Error(opCarry, "could not list the carries the outgoing daemon wrote; the boot cannot know what its queue held", withCause(fields, err))
+		c.log.Error(opCarry, "could not list the carries the outgoing daemon wrote; the boot cannot know what its queue held", dlog.WithCause(fields, err))
 		return fmt.Errorf("rollout: list the carries in %s: %w", c.carryDir(), err)
 	}
 	survived := make(map[ids.WorkspaceID]bool, len(adopted))
@@ -509,7 +509,7 @@ func (c *controller) TakeUpCarries(ctx context.Context, adopted []ids.WorkspaceI
 		if !ok {
 			continue
 		}
-		wsFields := merge(fields, dlog.Context{"workspace": string(ws)})
+		wsFields := dlog.Merge(fields, dlog.Context{"workspace": string(ws)})
 		carry, carried, err := c.takeCarry(ws, outgoing, wsFields)
 		if err != nil {
 			failures = append(failures, err)
@@ -541,7 +541,7 @@ func (c *controller) TakeUpCarries(ctx context.Context, adopted []ids.WorkspaceI
 	if err := errors.Join(failures...); err != nil {
 		return err
 	}
-	c.log.Info(opCarry, "took up the carries the outgoing daemon wrote", merge(fields, dlog.Context{"taken_up": len(takenUp)}))
+	c.log.Info(opCarry, "took up the carries the outgoing daemon wrote", dlog.Merge(fields, dlog.Context{"taken_up": len(takenUp)}))
 	return nil
 }
 
@@ -553,18 +553,18 @@ func (c *controller) TakeUpCarries(ctx context.Context, adopted []ids.WorkspaceI
 func (c *controller) takeUp(ctx context.Context, ws ids.WorkspaceID, carry Carry, fields dlog.Context) error {
 	var failures []error
 	if err := c.deps.Bounces.AdoptHandoff(ctx, ws, carry.Queue); err != nil {
-		c.log.Error(opCarry, "could not install the carried queue memory; the held prompts are drained without it", withCause(fields, err))
+		c.log.Error(opCarry, "could not install the carried queue memory; the held prompts are drained without it", dlog.WithCause(fields, err))
 		failures = append(failures, fmt.Errorf("rollout: take up the carry of %q: install the queue memory: %w", ws, err))
 	}
 	if len(carry.ColdGate) > 0 {
 		cold, err := decodeCold(carry.ColdGate)
 		switch {
 		case err != nil:
-			c.log.Error(opCarry, "could not decode the carried cold gate; it is not raised", withCause(fields, err))
+			c.log.Error(opCarry, "could not decode the carried cold gate; it is not raised", dlog.WithCause(fields, err))
 			failures = append(failures, fmt.Errorf("rollout: take up the carry of %q: decode the cold gate: %w", ws, err))
 		default:
 			if err := c.deps.Shims.RaiseCarriedColdGate(ctx, ws, cold); err != nil {
-				c.log.Error(opCarry, "could not raise the carried cold gate over the adopted shim", withCause(fields, err))
+				c.log.Error(opCarry, "could not raise the carried cold gate over the adopted shim", dlog.WithCause(fields, err))
 				failures = append(failures, fmt.Errorf("rollout: take up the carry of %q: raise the cold gate: %w", ws, err))
 			}
 		}
@@ -584,7 +584,7 @@ func (c *controller) FinishCarries(ctx context.Context) {
 	for ws, carry := range takenUp {
 		fields := dlog.Context{"workspace": string(ws), "outgoing_daemon": string(carry.Daemon)}
 		if err := c.deps.Bounces.RejudgeHeld(ctx, ws); err != nil {
-			c.log.Error(opCarry, "could not re-judge the held prompts whose verdicts the move superseded", withCause(fields, err))
+			c.log.Error(opCarry, "could not re-judge the held prompts whose verdicts the move superseded", dlog.WithCause(fields, err))
 		}
 		c.runCarried(ctx, ws, carry.Replacements, fields)
 	}

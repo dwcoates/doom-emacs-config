@@ -68,6 +68,7 @@ func TestRecordTurnRecordsATurnNotStartedByTheMergeOnTheRootFeed(t *testing.T) {
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE,
 	}
 	for _, origin := range cases {
 		t.Run(origin.String(), func(t *testing.T) {

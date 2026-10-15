@@ -62,6 +62,12 @@ const (
 	// ArmRacingNotDisabled refuses an enable of racing that is not disabled
 	// (UpdateMergeQueueError.racing_not_disabled).
 	ArmRacingNotDisabled = "racing_not_disabled"
+	// ArmNotSubscribed refuses an unsubscribe naming a workspace and scope
+	// with no merge queue subscription (UpdateMergeQueueError.not_subscribed).
+	ArmNotSubscribed = "not_subscribed"
+	// ArmSubscriberClosed refuses a subscription of a closed workspace
+	// (UpdateMergeQueueError.subscriber_closed).
+	ArmSubscriberClosed = "subscriber_closed"
 	// ArmUnknownOneShotWorkspace refuses an async request whose one-shot
 	// workspace is not open, is in another repository, or is the requester
 	// itself (MergeWorkspaceError.unknown_one_shot_workspace).

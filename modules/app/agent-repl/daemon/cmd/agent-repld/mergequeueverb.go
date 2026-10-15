@@ -24,6 +24,7 @@ import (
 	"agent-repld/internal/envc"
 	"agent-repld/internal/protoarm"
 	"agent-repld/internal/stateroot"
+	"agent-repld/internal/wsm"
 )
 
 // THE `merge-queue` VERB:
@@ -35,6 +36,7 @@ import (
 //	agent-repld merge-queue -pause | -resume [-repository-dir DIR] [-answer-timeout D] [-state-dir DIR]
 //	agent-repld merge-queue -hold-rollouts | -release-rollouts [-answer-timeout D] [-state-dir DIR]
 //	agent-repld merge-queue -disable-racing | -enable-racing [-answer-timeout D] [-state-dir DIR]
+//	agent-repld merge-queue -subscribe DETAIL | -unsubscribe [-repository-dir DIR] [-answer-timeout D] [-state-dir DIR]
 //
 // A MERGE RUNS IN THE WORKSPACE THAT ASKED FOR IT, and the verb asks FROM THE
 // CALLING WORKSPACE: the workspace whose worktree contains the caller's working
@@ -100,13 +102,18 @@ import (
 //   - `-disable-racing` / `-enable-racing` disable or enable the queue's
 //     RACING, daemon-wide: while disabled, every queue works its head alone,
 //     whatever the host's power source (merge_disable_racing,
-//     merge_enable_racing).
+//     merge_enable_racing);
+//   - `-subscribe DETAIL` subscribes the calling workspace's agent to the
+//     queue of the repository whose main checkout is `-repository-dir`, else
+//     to every repository's, at DETAIL (every_change, advances or depletes),
+//     and `-unsubscribe` ends the subscription in that scope
+//     (merge_subscribe, merge_unsubscribe).
 //
 // A control is answered AT ONCE, so the verb waits (at most -answer-timeout)
 // for the file's fate and prints the daemon's own answer, read off the record
 // the ingress keys by the file's path in the run log: `outcome: <outcome>`
 // (evicted, moved_up, moved_down, unmoved, not_queued, paused, resumed, held, released, racing_disabled,
-// racing_enabled) when applied, or the refusal's cause
+// racing_enabled, subscribed, resubscribed, unsubscribed, not_subscribed) when applied, or the refusal's cause
 // when quarantined. An answer the run log does not carry is printed as unread,
 // on stderr, and the file's fate still decides the exit.
 
@@ -277,7 +284,9 @@ func runMergeQueueVerb(ctx context.Context, args []string, dial mergeQueueDialer
 	releaseRollouts := fs.Bool("release-rollouts", false, "release the merge queue's rollouts: the next landing redeploys")
 	disableRacing := fs.Bool("disable-racing", false, "disable the merge queue's racing: every queue works its head alone, whatever the power source")
 	enableRacing := fs.Bool("enable-racing", false, "enable the merge queue's racing: on AC power each queue works its top two merges")
-	repositoryDir := fs.String("repository-dir", "", "with -pause or -resume: the repository's main checkout")
+	subscribe := fs.String("subscribe", "", "subscribe the calling workspace's agent to the merge queue's changes at this detail: every_change, advances or depletes (every repository's queue, or -repository-dir's)")
+	unsubscribe := fs.Bool("unsubscribe", false, "end the calling workspace's merge queue subscription (every repository's, or -repository-dir's)")
+	repositoryDir := fs.String("repository-dir", "", "with -pause, -resume, -subscribe or -unsubscribe: the repository's main checkout")
 	answerTimeout := fs.Duration("answer-timeout", defaultAnswerTimeout, "with a queue control: how long to wait for the daemon's answer")
 	wait := fs.Bool("wait", false, "wait for the outcome: landed (0) or failed (5)")
 	stateDir := fs.String("state-dir", "", "state root, overriding $AGENT_REPL_STATE_DIR")
@@ -295,6 +304,7 @@ func runMergeQueueVerb(ctx context.Context, args []string, dial mergeQueueDialer
 		pause: *pause, resume: *resume, repositoryDir: *repositoryDir,
 		holdRollouts: *holdRollouts, releaseRollouts: *releaseRollouts,
 		disableRacing: *disableRacing, enableRacing: *enableRacing,
+		subscribe: *subscribe, unsubscribe: *unsubscribe,
 	})
 	if err != nil {
 		return fail("%v", err)
@@ -353,6 +363,10 @@ type mergeQueueFlags struct {
 	holdRollouts, releaseRollouts bool
 	// disableRacing and enableRacing disable or enable the queue's racing.
 	disableRacing, enableRacing bool
+	// subscribe is a subscription's detail, empty when none is asked for;
+	// unsubscribe ends one. Both are scoped by repositoryDir.
+	subscribe   string
+	unsubscribe bool
 }
 
 // resolveMergeQueueSource turns the flags into what the calling workspace
@@ -389,16 +403,16 @@ func resolveMergeQueueSource(f mergeQueueFlags) (mergeQueueSource, error) {
 // name.
 func resolveMergeQueueRequest(f mergeQueueFlags) (mergeQueueSource, error) {
 	named := 0
-	for _, set := range []bool{f.oneShot, f.async, f.evict, f.evictDir != "", f.moveUp, f.moveDown, f.pause, f.resume, f.holdRollouts, f.releaseRollouts, f.disableRacing, f.enableRacing} {
+	for _, set := range []bool{f.oneShot, f.async, f.evict, f.evictDir != "", f.moveUp, f.moveDown, f.pause, f.resume, f.holdRollouts, f.releaseRollouts, f.disableRacing, f.enableRacing, f.subscribe != "", f.unsubscribe} {
 		if set {
 			named++
 		}
 	}
 	switch {
 	case named == 0:
-		return mergeQueueSource{}, errors.New("name the merge or control: -one-shot, -async, -evict, -evict-dir WORKTREE, -move-up, -move-down, -pause, -resume, -hold-rollouts, -release-rollouts, -disable-racing or -enable-racing")
+		return mergeQueueSource{}, errors.New("name the merge or control: -one-shot, -async, -evict, -evict-dir WORKTREE, -move-up, -move-down, -pause, -resume, -hold-rollouts, -release-rollouts, -disable-racing, -enable-racing, -subscribe DETAIL or -unsubscribe")
 	case named > 1:
-		return mergeQueueSource{}, errors.New("-one-shot, -async, -evict, -evict-dir, -move-up, -move-down, -pause, -resume, -hold-rollouts, -release-rollouts, -disable-racing and -enable-racing each name a different request; give one")
+		return mergeQueueSource{}, errors.New("-one-shot, -async, -evict, -evict-dir, -move-up, -move-down, -pause, -resume, -hold-rollouts, -release-rollouts, -disable-racing, -enable-racing, -subscribe and -unsubscribe each name a different request; give one")
 	case f.prMerged && !f.oneShot:
 		return mergeQueueSource{}, errors.New("-pr-merged goes with -one-shot: it closes the calling workspace")
 	case !f.async && (f.name != "" || f.branch != "" || f.instruction != "" || f.closeDir != "" || f.cleanupWorktree || f.compactAfter || f.beforeMerge != "" || f.afterMerge != ""):
@@ -417,8 +431,8 @@ func resolveMergeQueueRequest(f mergeQueueFlags) (mergeQueueSource, error) {
 		return mergeQueueSource{}, errors.New("-after-merge is the prompt the merge workspace runs after the landing")
 	case f.moveDir != "" && !f.moveUp && !f.moveDown:
 		return mergeQueueSource{}, errors.New("-move-dir goes with -move-up or -move-down: it names the workspace whose merge they move")
-	case f.repositoryDir != "" && !f.pause && !f.resume:
-		return mergeQueueSource{}, errors.New("-repository-dir goes with -pause or -resume: it names the repository whose queue they address")
+	case f.repositoryDir != "" && !f.pause && !f.resume && f.subscribe == "" && !f.unsubscribe:
+		return mergeQueueSource{}, errors.New("-repository-dir goes with -pause, -resume, -subscribe or -unsubscribe: it names the repository whose queue they address")
 	}
 	switch {
 	case f.evict:
@@ -453,20 +467,19 @@ func resolveMergeQueueRequest(f mergeQueueFlags) (mergeQueueSource, error) {
 	case f.enableRacing:
 		return mergeQueueSource{label: "an enable of the merge queue's racing", control: true, entry: commandfile.Entry{Type: commandfile.TypeMergeEnableRacing}}, nil
 	case f.pause, f.resume:
-		typ, verb := commandfile.TypeMergePause, "a pause"
+		typ, phrase := commandfile.TypeMergePause, "a pause of"
 		if f.resume {
-			typ, verb = commandfile.TypeMergeResume, "a resume"
+			typ, phrase = commandfile.TypeMergeResume, "a resume of"
 		}
-		label := verb + " of every repository's queue"
-		var repo string
-		if f.repositoryDir != "" {
-			abs, err := existingDir("-repository-dir", f.repositoryDir)
-			if err != nil {
-				return mergeQueueSource{}, err
-			}
-			repo, label = abs, verb+" of "+abs+"'s queue"
+		return scopedControl(typ, phrase, f.repositoryDir, "")
+	case f.subscribe != "":
+		detail, err := wsm.ParseMergeQueueDetail(f.subscribe)
+		if err != nil {
+			return mergeQueueSource{}, fmt.Errorf("-subscribe: %w", err)
 		}
-		return mergeQueueSource{label: label, control: true, entry: commandfile.Entry{Type: typ, RepositoryDir: repo}}, nil
+		return scopedControl(commandfile.TypeMergeSubscribe, "a subscription at "+detail.String()+" to", f.repositoryDir, detail.String())
+	case f.unsubscribe:
+		return scopedControl(commandfile.TypeMergeUnsubscribe, "an end of its subscription to", f.repositoryDir, "")
 	}
 	// A ONE-SHOT is announced from inside the turn it follows: it runs in
 	// place and closes the calling workspace once it lands.
@@ -507,6 +520,22 @@ func resolveMergeQueueRequest(f mergeQueueFlags) (mergeQueueSource, error) {
 		label += ", running its after-merge prompt once it lands"
 	}
 	return mergeQueueSource{label: label, entry: entry}, nil
+}
+
+// scopedControl is a queue control scoped by -repository-dir: TYP, labelled
+// as PHRASE every repository's queue or REPOSITORY's, carrying a
+// subscription's DETAIL when it has one.
+func scopedControl(typ, phrase, repository, detail string) (mergeQueueSource, error) {
+	label := phrase + " every repository's queue"
+	var repo string
+	if repository != "" {
+		abs, err := existingDir("-repository-dir", repository)
+		if err != nil {
+			return mergeQueueSource{}, err
+		}
+		repo, label = abs, phrase+" "+abs+"'s queue"
+	}
+	return mergeQueueSource{label: label, control: true, entry: commandfile.Entry{Type: typ, RepositoryDir: repo, Detail: detail}}, nil
 }
 
 // existingDir resolves a flag's directory to an absolute path that is a

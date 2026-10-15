@@ -751,6 +751,7 @@ func TestCausedByMergeQueueNamesEveryTurnTheMergeQueueCauses(t *testing.T) {
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION, true},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK, true},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_COMPACT_AFTER, true},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE, true},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME, false},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_RETARGETED, false},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, false},

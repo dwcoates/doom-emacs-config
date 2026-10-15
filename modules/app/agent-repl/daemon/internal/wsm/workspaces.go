@@ -576,7 +576,10 @@ func (s *store) MarkClosed(ctx context.Context, id WorkspaceID, closure Closure)
 		s.log.Error(op, "refused a close with no declared cause", withError(fields, err))
 		return err
 	}
-	var released sql.NullString
+	var (
+		released      sql.NullString
+		subscriptions int64
+	)
 	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		err := scanWorkspaceRow(ctx, tx, id, "serving_instance", &released)
 		if err != nil {
@@ -592,7 +595,14 @@ func (s *store) MarkClosed(ctx context.Context, id WorkspaceID, closure Closure)
 		if err != nil {
 			return err
 		}
-		return requireOneRow(res, fmt.Sprintf("wsm: workspace %s", id))
+		if err := requireOneRow(res, fmt.Sprintf("wsm: workspace %s", id)); err != nil {
+			return err
+		}
+		// A CLOSE ENDS THE WORKSPACE'S MERGE QUEUE SUBSCRIPTIONS in the same
+		// transaction, so no close path can leave one standing
+		// (mergesubscriptions.go).
+		subscriptions, err = endSubscriptionsInTx(ctx, tx, id)
+		return err
 	})
 	if err != nil {
 		return err
@@ -600,6 +610,10 @@ func (s *store) MarkClosed(ctx context.Context, id WorkspaceID, closure Closure)
 	if released.Valid && released.String != "" {
 		s.log.Info(op, "the close released the workspace's serving ownership",
 			dlog.Context{"workspace": string(id), "instance": released.String})
+	}
+	if subscriptions > 0 {
+		s.log.Info(op, "the close ended the workspace's merge queue subscriptions",
+			dlog.Context{"workspace": string(id), "subscriptions": subscriptions})
 	}
 	return nil
 }

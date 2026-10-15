@@ -10,7 +10,7 @@
 #
 # The queue-control verbs (--dequeue-*, --move-*, --pause-queue,
 # --resume-queue, --hold-rollouts, --release-rollouts, --disable-racing,
-# --enable-racing) ask,
+# --enable-racing, --subscribe, --unsubscribe) ask,
 # from the workspace this shell is inside, for the queue itself to change, and
 # wait (bounded) for the answer, which they print: the outcome when applied, the
 # refusal's cause when refused.
@@ -66,6 +66,16 @@
 #                                host's power source. Durable until enabled.
 #   --enable-racing              Enable racing again; on AC power each queue
 #                                works its top two merges.
+#   --subscribe <detail> [<repo-dir>]
+#                                Subscribe this workspace's agent to the queue
+#                                of the repository whose main checkout is
+#                                <repo-dir>, else of every repository, at
+#                                <detail>: every-change, advances (a merge
+#                                leaves the queue) or depletes (the queue runs
+#                                out of merges). Subscribing again in the same
+#                                scope replaces the detail.
+#   --unsubscribe [<repo-dir>]   End this workspace's subscription in that
+#                                scope.
 #
 # Modifiers:
 #   --front                      With a merge verb (--one-shot, --async),
@@ -87,8 +97,9 @@
 #   0  requested (--async; the outcome reports into this session), announced
 #      (--one-shot; the turn goes on), or applied (queue-control verbs; the
 #      printed outcome line is evicted, moved_up, moved_down, unmoved,
-#      not_queued, paused, resumed, held, released, racing_disabled or
-#      racing_enabled, or unread)
+#      not_queued, paused, resumed, held, released, racing_disabled,
+#      racing_enabled, subscribed, resubscribed, unsubscribed or
+#      not_subscribed, or unread)
 #   2  script/usage error, or the merge or control could not be requested
 #   5  refused by the daemon; why (or how to read why) is printed (an async
 #      merge's name already taken, its branch checked out in this workspace,
@@ -192,6 +203,18 @@ run_verb() {
   exit $?
 }
 
+# run_scoped runs agent-repld merge-queue with ARGS, scoped to the
+# repository whose main checkout is DIR when DIR is given, else to every
+# repository, and exits with its mapped status.
+run_scoped() {
+  local dir="$1"
+  shift
+  if [ -n "$dir" ]; then
+    run_verb "$@" -repository-dir "$dir"
+  fi
+  run_verb "$@"
+}
+
 case "${1:-}" in
   --one-shot)
     shift
@@ -268,10 +291,23 @@ case "${1:-}" in
     no_front "$1"
     control=-pause
     [ "$1" = --pause-queue ] || control=-resume
-    if [ -n "${2:-}" ]; then
-      run_verb "$control" -repository-dir "$2"
-    fi
-    run_verb "$control"
+    run_scoped "${2:-}" "$control"
+    ;;
+  --subscribe)
+    no_front "$1"
+    case "${2:-}" in
+      every-change) detail=every_change ;;
+      advances | depletes) detail="$2" ;;
+      "") die "--subscribe needs the detail: every-change, advances or depletes" ;;
+      *) die "--subscribe takes every-change, advances or depletes, not $2" ;;
+    esac
+    [ -z "${4:-}" ] || die "--subscribe <detail> takes at most a repository directory after it, not $4"
+    run_scoped "${3:-}" -subscribe "$detail"
+    ;;
+  --unsubscribe)
+    no_front "$1"
+    [ -z "${3:-}" ] || die "--unsubscribe takes at most a repository directory, not $3"
+    run_scoped "${2:-}" -unsubscribe
     ;;
   --hold-rollouts | --release-rollouts | --disable-racing | --enable-racing)
     no_front "$1"
@@ -279,7 +315,7 @@ case "${1:-}" in
     run_verb "${1#-}"
     ;;
   *)
-    printf 'usage: run.sh --one-shot [--pr-merged] | --async <name> <branch> [--instruction <text>] [--close <dir>] [--cleanup] [--compact-after] [--before-merge <prompt>] [--after-merge <prompt>] | --dequeue-own | --dequeue-workspace <dir> | --move-up-own | --move-up-workspace <dir> | --move-down-own | --move-down-workspace <dir> | --pause-queue [<repo-dir>] | --resume-queue [<repo-dir>] | --hold-rollouts | --release-rollouts | --disable-racing | --enable-racing  (any merge verb also takes --front, and --minor <line> or --patch <line>)\n' >&2
+    printf 'usage: run.sh --one-shot [--pr-merged] | --async <name> <branch> [--instruction <text>] [--close <dir>] [--cleanup] [--compact-after] [--before-merge <prompt>] [--after-merge <prompt>] | --dequeue-own | --dequeue-workspace <dir> | --move-up-own | --move-up-workspace <dir> | --move-down-own | --move-down-workspace <dir> | --pause-queue [<repo-dir>] | --resume-queue [<repo-dir>] | --hold-rollouts | --release-rollouts | --disable-racing | --enable-racing | --subscribe <every-change|advances|depletes> [<repo-dir>] | --unsubscribe [<repo-dir>]  (any merge verb also takes --front, and --minor <line> or --patch <line>)\n' >&2
     exit 1
     ;;
 esac

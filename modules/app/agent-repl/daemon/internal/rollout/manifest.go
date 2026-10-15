@@ -206,21 +206,21 @@ func (c *controller) writeManifest(ctx context.Context, m Manifest) error {
 	fields := dlog.Context{"path": c.deps.IntentManifest, "sessions": len(m.Sessions)}
 	if c.deps.IntentManifest == "" {
 		err := errors.New("rollout: no intent manifest path is configured")
-		c.log.Error(opManifest, "cannot write the stand-down intent manifest", withCause(fields, err))
+		c.log.Error(opManifest, "cannot write the stand-down intent manifest", dlog.WithCause(fields, err))
 		return err
 	}
 	body, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
-		c.log.Error(opManifest, "could not encode the intent manifest", withCause(fields, err))
+		c.log.Error(opManifest, "could not encode the intent manifest", dlog.WithCause(fields, err))
 		return fmt.Errorf("rollout: encode the intent manifest: %w", err)
 	}
 	dir := filepath.Dir(c.deps.IntentManifest)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		c.log.Error(opManifest, "could not create the intent directory", withCause(fields, err))
+		c.log.Error(opManifest, "could not create the intent directory", dlog.WithCause(fields, err))
 		return fmt.Errorf("rollout: create %s: %w", dir, err)
 	}
 	if err := atomicfile.Replace(c.deps.IntentManifest, body, atomicfile.Options{Pattern: "manifest-*.json"}); err != nil {
-		c.log.Error(opManifest, "could not write the intent manifest", withCause(fields, err))
+		c.log.Error(opManifest, "could not write the intent manifest", dlog.WithCause(fields, err))
 		return fmt.Errorf("rollout: write the intent manifest: %w", err)
 	}
 	c.log.Info(opManifest, "wrote the stand-down intent manifest", fields)
@@ -295,7 +295,7 @@ func (c *controller) reconcile(ctx context.Context, survivors Survivors) ([]Disp
 	m, found, err := ReadManifest(c.deps.IntentManifest)
 	if err != nil {
 		c.log.Error(opReconcile, "could not read the intent manifest",
-			withCause(dlog.Context{"path": c.deps.IntentManifest}, err))
+			dlog.WithCause(dlog.Context{"path": c.deps.IntentManifest}, err))
 		return nil, "", false, err
 	}
 	if !found {
@@ -309,7 +309,7 @@ func (c *controller) reconcile(ctx context.Context, survivors Survivors) ([]Disp
 		if c.deps.LockProbe != nil {
 			probed, err := c.deps.LockProbe(session.Dir)
 			if err != nil {
-				c.log.Warn(opReconcile, "a workspace's lock probe could not tell", withCause(dlog.Context{
+				c.log.Warn(opReconcile, "a workspace's lock probe could not tell", dlog.WithCause(dlog.Context{
 					"workspace": string(session.Workspace), "dir": session.Dir,
 				}, err))
 			}
@@ -399,7 +399,7 @@ func (c *controller) retireManifest(why string) {
 		c.log.Debug(opManifest, "the stand-down intent manifest was already retired", fields)
 	default:
 		c.log.Error(opManifest, "could not retire the stand-down intent manifest; the next boot will account for it again",
-			withCause(fields, err))
+			dlog.WithCause(fields, err))
 	}
 }
 
@@ -420,19 +420,19 @@ func (c *controller) clearStaleManifest(fields dlog.Context) error {
 	if !found && readErr == nil {
 		return nil
 	}
-	evidence := merge(fields, dlog.Context{"path": c.deps.IntentManifest})
+	evidence := dlog.Merge(fields, dlog.Context{"path": c.deps.IntentManifest})
 	if readErr == nil {
-		evidence = merge(evidence, dlog.Context{
+		evidence = dlog.Merge(evidence, dlog.Context{
 			"stale_outgoing_daemon": string(m.Daemon),
 			"stale_written_at":      m.WrittenAt.Format(time.RFC3339Nano),
 			"stale_sessions":        len(m.Sessions),
 		})
 	} else {
-		evidence = merge(evidence, dlog.Context{"stale_read_error": readErr.Error()})
+		evidence = dlog.Merge(evidence, dlog.Context{"stale_read_error": readErr.Error()})
 	}
 	if err := os.Remove(c.deps.IntentManifest); err != nil && !errors.Is(err, os.ErrNotExist) {
 		c.log.Error(opHandover, "could not remove a stale intent manifest; a successor would read it as this handover's",
-			withCause(evidence, err))
+			dlog.WithCause(evidence, err))
 		return fmt.Errorf("rollout: remove the stale intent manifest %s: %w", c.deps.IntentManifest, err)
 	}
 	c.log.Info(opHandover, "removed an intent manifest an earlier bounce left unconsumed, before spawning the successor", evidence)
@@ -608,7 +608,7 @@ func (c *controller) recordDisposition(ctx context.Context, session ManifestSess
 		// which keeps the OPEN fault set meaningful without losing the per
 		// session accounting.
 		if _, err := health.RecordMomentary(ctx, c.deps.DB, c.log, record, c.deps.Clock.Now()); err != nil {
-			c.log.Error(opReconcile, "could not record an ordinary bounce disposition", withCause(fields, err))
+			c.log.Error(opReconcile, "could not record an ordinary bounce disposition", dlog.WithCause(fields, err))
 			return false
 		}
 		if d.Kind == DispositionDied {
@@ -630,7 +630,7 @@ func (c *controller) recordDisposition(ctx context.Context, session ManifestSess
 		return true
 	}
 	if _, err := c.deps.DB.OpenFault(ctx, record); err != nil {
-		c.log.Error(opReconcile, "could not record a session's bounce disposition", withCause(fields, err))
+		c.log.Error(opReconcile, "could not record a session's bounce disposition", dlog.WithCause(fields, err))
 		return false
 	}
 	// AN UNDETERMINED DISPOSITION STANDS until the workspace next attaches or

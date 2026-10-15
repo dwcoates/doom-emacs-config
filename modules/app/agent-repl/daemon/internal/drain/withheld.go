@@ -121,7 +121,7 @@ var withheldReason = standDownReason{
 func (c *controller) standDownWithheld(ctx context.Context, ws ids.WorkspaceID) withheldOutcome {
 	fields := dlog.Context{"workspace": string(ws)}
 	if err := ctx.Err(); err != nil {
-		c.log.Info(opWithheld, "the daemon is leaving; a withheld workspace's stand-down is not taken", withCause(fields, err))
+		c.log.Info(opWithheld, "the daemon is leaving; a withheld workspace's stand-down is not taken", dlog.WithCause(fields, err))
 		return withheldPending
 	}
 	record, err := c.deps.DB.Workspace(ctx, ws)
@@ -130,7 +130,7 @@ func (c *controller) standDownWithheld(ctx context.Context, ws ids.WorkspaceID) 
 			c.log.Info(opWithheld, "a withheld workspace is no longer registered; nothing is stood down", fields)
 			return withheldSettled
 		}
-		c.log.Error(opWithheld, "could not read a withheld workspace's record; its stand-down is dropped", withCause(fields, err))
+		c.log.Error(opWithheld, "could not read a withheld workspace's record; its stand-down is dropped", dlog.WithCause(fields, err))
 		return withheldSettled
 	}
 	log := c.workspaceLog(record)
@@ -138,7 +138,7 @@ func (c *controller) standDownWithheld(ctx context.Context, ws ids.WorkspaceID) 
 	// on every attempt.
 	visible, err := bringup.Visible(ctx, c.deps.DB, ws)
 	if err != nil {
-		log.Error(opWithheld, "could not read whether the workspace is still withheld; its stand-down is dropped", withCause(fields, err))
+		log.Error(opWithheld, "could not read whether the workspace is still withheld; its stand-down is dropped", dlog.WithCause(fields, err))
 		return withheldSettled
 	}
 	if visible {
@@ -147,7 +147,7 @@ func (c *controller) standDownWithheld(ctx context.Context, ws ids.WorkspaceID) 
 	}
 	session, found, err := c.deps.DB.Session(ctx, ws)
 	if err != nil {
-		log.Error(opWithheld, "could not read a withheld workspace's session; its stand-down is dropped", withCause(fields, err))
+		log.Error(opWithheld, "could not read a withheld workspace's session; its stand-down is dropped", dlog.WithCause(fields, err))
 		return withheldSettled
 	}
 	if !found || session.Terminal != nil {
@@ -161,11 +161,11 @@ func (c *controller) standDownWithheld(ctx context.Context, ws ids.WorkspaceID) 
 		return withheldSettled
 	case gateBusy, gateStarting, gateReviving:
 		log.Info(opWithheld, "a withheld workspace's session is busy; its stand-down waits for the turn to end",
-			merge(fields, dlog.Context{"gate": gate.String()}))
+			dlog.Merge(fields, dlog.Context{"gate": gate.String()}))
 		return withheldPending
 	default:
 		log.Error(opWithheld, "the stand-down gate answered a value this stand-down cannot read; it is dropped",
-			merge(fields, dlog.Context{"gate": gate.String(), "invariant_violation": "every gate value is handled"}))
+			dlog.Merge(fields, dlog.Context{"gate": gate.String(), "invariant_violation": "every gate value is handled"}))
 		return withheldSettled
 	}
 	switch c.hibernate(ctx, log, ws, fields, withheldReason) {

@@ -88,7 +88,7 @@ func (c *controller) awaitManifest(ctx context.Context) {
 		found, err := c.joinFromManifest(ctx)
 		if err != nil {
 			c.log.Error(opJoin, "the intent manifest could not be joined from",
-				withCause(dlog.Context{"path": c.deps.IntentManifest}, err))
+				dlog.WithCause(dlog.Context{"path": c.deps.IntentManifest}, err))
 			return
 		}
 		if found {
@@ -103,7 +103,7 @@ func (c *controller) joinFromManifest(ctx context.Context) (bool, error) {
 	m, found, err := ReadManifest(c.deps.IntentManifest)
 	if err != nil {
 		c.log.Error(opJoin, "could not read the intent manifest",
-			withCause(dlog.Context{"path": c.deps.IntentManifest}, err))
+			dlog.WithCause(dlog.Context{"path": c.deps.IntentManifest}, err))
 		return false, err
 	}
 	if !found {
@@ -156,7 +156,7 @@ func (c *controller) adoptHeadless(ctx context.Context, headless []ids.Workspace
 			// A headless workspace that will not adopt is that workspace's own
 			// failure, not the join's: the rest still transfer.
 			c.log.Error(opJoin, "a headless workspace could not be adopted",
-				withCause(dlog.Context{"workspace": string(ws)}, err))
+				dlog.WithCause(dlog.Context{"workspace": string(ws)}, err))
 			// THE CLAIM IS RELEASED ON FAILURE so this workspace can be tried
 			// again; an adoption that never happened must not look like one
 			// that did.
@@ -220,7 +220,7 @@ func (c *controller) retryHeadless(ctx context.Context, ws ids.WorkspaceID) {
 		fields := dlog.Context{"workspace": string(ws), "attempt": attempt}
 		if err := c.adopt(ctx, ws, "headless-retry"); err != nil {
 			c.log.Warn(opJoin, "a headless workspace could not be adopted; retrying",
-				withCause(fields, err))
+				dlog.WithCause(fields, err))
 			c.releaseHeadless(ws)
 			if delay *= 2; delay > headlessRetryMax {
 				delay = headlessRetryMax
@@ -424,7 +424,7 @@ func (c *controller) rendezvousCall(ctx context.Context, ws ids.WorkspaceID, ope
 		// silent wait. On 2026-10-06 queen-model's host adopt sat 10s on a
 		// page whose own adopt had been refused, and only DEBUG said so.
 		c.log.Info(operation, "an expected participant has not called yet; waiting for the rendezvous",
-			merge(fields, outstanding))
+			dlog.Merge(fields, outstanding))
 		return c.awaitRendezvous(ctx, e, done, operation, fields)
 	}
 	if e.adopting {
@@ -511,7 +511,7 @@ func (c *controller) awaitRendezvous(ctx context.Context, e *entry, done <-chan 
 			"host_called": e.hostCalled, "web_called": e.webCalled,
 		}
 		c.mu.Unlock()
-		c.log.Info(operation, "the caller gave up before the rendezvous completed", merge(fields, outstanding))
+		c.log.Info(operation, "the caller gave up before the rendezvous completed", dlog.Merge(fields, outstanding))
 		return ErrNotYetAdopted
 	}
 }
@@ -542,7 +542,7 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 	}()
 	outgoing, err := c.outgoingDaemon(ws)
 	if err != nil {
-		c.log.Error(opAdopt, "could not resolve the incumbent serving owner", withCause(fields, err))
+		c.log.Error(opAdopt, "could not resolve the incumbent serving owner", dlog.WithCause(fields, err))
 		return err
 	}
 	fields["outgoing_daemon"] = string(outgoing)
@@ -563,13 +563,13 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 	// above is the durable proof that the incumbent already passed freeness,
 	// quiesced the intake and stopped writing this workspace.
 	if err := c.deps.DB.Promote(ctx); err != nil {
-		c.log.Error(opAdopt, "the state handle could not be promoted to writing", withCause(fields, err))
+		c.log.Error(opAdopt, "the state handle could not be promoted to writing", dlog.WithCause(fields, err))
 		return fmt.Errorf("rollout: adopt %q: promote the state handle: %w", ws, err)
 	}
 	c.flushDispositions(ctx)
 	record, err := c.deps.DB.Workspace(ctx, ws)
 	if err != nil {
-		c.log.Error(opAdopt, "could not read the workspace being adopted", withCause(fields, err))
+		c.log.Error(opAdopt, "could not read the workspace being adopted", dlog.WithCause(fields, err))
 		return fmt.Errorf("rollout: adopt %q: %w", ws, err)
 	}
 	// A FREE LOCK MEANS THERE IS NO PROCESS TO DIAL. A workspace registered but
@@ -583,7 +583,7 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 		switch {
 		case probeErr != nil:
 			c.log.Warn(opAdopt, "the workspace lock probe could not tell; adopting on the WSM facts alone",
-				withCause(fields, probeErr))
+				dlog.WithCause(fields, probeErr))
 		case state == sessionlock.StateFree:
 			c.log.Debug(opAdopt, "no shim holds this workspace's lock; adopting its facts with no session", fields)
 			dial = false
@@ -612,7 +612,7 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 	if carried && len(carry.ColdGate) > 0 {
 		parked, err = decodeCold(carry.ColdGate)
 		if err != nil {
-			c.log.Error(opAdopt, "could not decode the carried cold gate; the workspace is not adopted", withCause(fields, err))
+			c.log.Error(opAdopt, "could not decode the carried cold gate; the workspace is not adopted", dlog.WithCause(fields, err))
 			return fmt.Errorf("rollout: adopt %q: decode the carried cold gate: %w", ws, err)
 		}
 	}
@@ -625,13 +625,13 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 	// impossible.
 	claimed, holder, err := c.deps.DB.ClaimUnownedServing(ctx, ws, c.deps.Instance)
 	if err != nil {
-		c.log.Error(opAdopt, "could not claim serving ownership", withCause(fields, err))
+		c.log.Error(opAdopt, "could not claim serving ownership", dlog.WithCause(fields, err))
 		return fmt.Errorf("rollout: adopt %q: claim serving: %w", ws, err)
 	}
 	if !claimed {
 		err := fmt.Errorf("rollout: adopt %q: the incumbent %s took the workspace back: %w", ws, holder, ErrReclaimed)
 		c.log.Error(opAdopt, "the incumbent took the workspace back before this adoption claimed it; it is not adopted here",
-			withCause(merge(fields, dlog.Context{"serving_daemon": string(holder)}), err))
+			dlog.WithCause(dlog.Merge(fields, dlog.Context{"serving_daemon": string(holder)}), err))
 		return err
 	}
 	// FROM THE CLAIM UNTIL THE WORKSPACE IS OWNED HERE, daemon.addr waits for
@@ -670,7 +670,7 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 		cancel()
 		if err != nil {
 			c.log.Info(opAdopt, "the adopted shim never re-announced its session facts; the mid-work adoption is refused",
-				withCause(merge(fields, dlog.Context{"facts_bound": c.deps.FactsBound.String()}), err))
+				dlog.WithCause(dlog.Merge(fields, dlog.Context{"facts_bound": c.deps.FactsBound.String()}), err))
 			return c.refuseAdopted(ctx, ws, "the adopted shim never re-announced its session facts within "+c.deps.FactsBound.String(), fields)
 		}
 	}
@@ -679,18 +679,18 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 	var carryErr error
 	if carried {
 		if err := c.deps.Bounces.AdoptHandoff(ctx, ws, carry.Queue); err != nil {
-			c.log.Error(opAdopt, "could not install the carried queue memory; the held intake is drained all the same", withCause(fields, err))
+			c.log.Error(opAdopt, "could not install the carried queue memory; the held intake is drained all the same", dlog.WithCause(fields, err))
 			carryErr = fmt.Errorf("rollout: adopt %q: install the carried queue memory: %w", ws, err)
 		}
 	}
 	if err := c.deps.DrainIntake(ctx, ws); err != nil {
-		c.log.Error(opAdopt, "could not drain the held intake", withCause(fields, err))
+		c.log.Error(opAdopt, "could not drain the held intake", dlog.WithCause(fields, err))
 		return errors.Join(dialErr, carryErr, c.consumeCarry(ws, carried),
 			fmt.Errorf("rollout: adopt %q: drain the held intake: %w", ws, err))
 	}
 	if carried && dialErr == nil && carryErr == nil {
 		if err := c.deps.Bounces.RejudgeHeld(ctx, ws); err != nil {
-			c.log.Error(opAdopt, "could not re-judge the held prompts whose verdicts the move superseded", withCause(fields, err))
+			c.log.Error(opAdopt, "could not re-judge the held prompts whose verdicts the move superseded", dlog.WithCause(fields, err))
 			carryErr = fmt.Errorf("rollout: adopt %q: re-judge the held prompts: %w", ws, err)
 		}
 	}
@@ -709,7 +709,7 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 		c.deps.BringingUp(ws, true)
 	}
 	if err := c.deps.PublishViews(ctx, ws); err != nil {
-		c.log.Error(opAdopt, "could not publish the workspace's fresh views", withCause(fields, err))
+		c.log.Error(opAdopt, "could not publish the workspace's fresh views", dlog.WithCause(fields, err))
 		if sessionless {
 			// The start this marker announced will not run: the adoption
 			// failed, and the straggler pass or the incumbent decides what
@@ -750,7 +750,7 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 	// suspended for the transfer resumes here at its recorded step, in the
 	// bubble it already had (merge/transfer.go).
 	if err := c.deps.Merges.AdoptWorkspace(ctx, ws); err != nil {
-		c.log.Error(opAdopt, "could not take the adopted workspace's merges", withCause(fields, err))
+		c.log.Error(opAdopt, "could not take the adopted workspace's merges", dlog.WithCause(fields, err))
 		return fmt.Errorf("rollout: adopt %q: take its merges: %w", ws, err)
 	}
 
@@ -779,7 +779,7 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 	// when the adoption dialed it, which was before this daemon owned the
 	// workspace and so before it could bounce it.
 	if _, err := c.checkStale(ctx, ws, c.takeoverForce(ws)); err != nil {
-		c.log.Error(opStaleness, "the adopted shim could not be judged against the installed build", withCause(fields, err))
+		c.log.Error(opStaleness, "the adopted shim could not be judged against the installed build", dlog.WithCause(fields, err))
 	}
 
 	if complete && c.deps.WriteDaemonAddr != nil {
@@ -857,7 +857,7 @@ func (c *controller) awaitArm(ctx context.Context, ws ids.WorkspaceID, operation
 	waiting := false
 	for {
 		if err := c.armFromManifest(); err != nil {
-			c.log.Error(operation, "could not re-read the intent manifest", withCause(fields, err))
+			c.log.Error(operation, "could not re-read the intent manifest", dlog.WithCause(fields, err))
 			return err
 		}
 		c.mu.Lock()
@@ -876,7 +876,7 @@ func (c *controller) awaitArm(ctx context.Context, ws ids.WorkspaceID, operation
 		}
 		if !waiting {
 			c.log.Info(operation, "no intent manifest yet; holding this adopt call until the incumbent writes one",
-				merge(fields, dlog.Context{
+				dlog.Merge(fields, dlog.Context{
 					"poll_interval": manifestPoll.String(),
 					"bound":         c.deps.AdoptionWindow.String(),
 				}))
@@ -892,7 +892,7 @@ func (c *controller) awaitArm(ctx context.Context, ws ids.WorkspaceID, operation
 			// record, reached the slow way; the ruling on `no_transfer_announced`
 			// is that it is never a warning and never a fault.
 			c.log.Info(operation, "no intent manifest arrived within the adoption window; nothing was announced for this workspace",
-				merge(fields, dlog.Context{"bound": c.deps.AdoptionWindow.String()}))
+				dlog.Merge(fields, dlog.Context{"bound": c.deps.AdoptionWindow.String()}))
 			return nil
 		case <-c.deps.Clock.After(manifestPoll):
 		}
@@ -925,27 +925,27 @@ func (c *controller) awaitServingRelease(ctx context.Context, ws ids.WorkspaceID
 	for {
 		owner, err := c.deps.DB.Serving(ctx, ws)
 		if err != nil {
-			c.log.Error(opAdopt, "could not read serving ownership while waiting for the incumbent", withCause(fields, err))
+			c.log.Error(opAdopt, "could not read serving ownership while waiting for the incumbent", dlog.WithCause(fields, err))
 			return fmt.Errorf("rollout: adopt %q: read serving ownership: %w", ws, err)
 		}
 		if owner == nil {
 			c.log.Debug(opAdopt, "the incumbent released serving ownership; adoption may begin",
-				merge(fields, dlog.Context{"serving_daemon": ""}))
+				dlog.Merge(fields, dlog.Context{"serving_daemon": ""}))
 			return nil
 		}
 		if *owner == c.deps.Instance {
 			c.log.Debug(opAdopt, "this daemon already owns the workspace; adoption may resume",
-				merge(fields, dlog.Context{"serving_daemon": string(*owner)}))
+				dlog.Merge(fields, dlog.Context{"serving_daemon": string(*owner)}))
 			return nil
 		}
 		if *owner != outgoing {
 			err := fmt.Errorf("rollout: adopt %q: workspace is served by unexpected daemon %q, want incumbent %q", ws, *owner, outgoing)
-			c.log.Error(opAdopt, "an unexpected daemon owns the workspace at the adoption boundary", withCause(merge(fields, dlog.Context{"serving_daemon": string(*owner)}), err))
+			c.log.Error(opAdopt, "an unexpected daemon owns the workspace at the adoption boundary", dlog.WithCause(dlog.Merge(fields, dlog.Context{"serving_daemon": string(*owner)}), err))
 			return err
 		}
 		if !waiting {
 			c.log.Info(opAdopt, "waiting for the incumbent to release serving ownership at freeness",
-				merge(fields, dlog.Context{
+				dlog.Merge(fields, dlog.Context{
 					"serving_daemon": string(*owner),
 					"poll_interval":  manifestPoll.String(),
 				}))
@@ -954,7 +954,7 @@ func (c *controller) awaitServingRelease(ctx context.Context, ws ids.WorkspaceID
 		select {
 		case <-ctx.Done():
 			err := context.Cause(ctx)
-			c.log.Error(opAdopt, "the adoption lifetime ended before the incumbent released serving ownership", withCause(fields, err))
+			c.log.Error(opAdopt, "the adoption lifetime ended before the incumbent released serving ownership", dlog.WithCause(fields, err))
 			return fmt.Errorf("rollout: adopt %q: wait for incumbent serving release: %w", ws, err)
 		case <-c.deps.Clock.After(manifestPoll):
 		}
@@ -987,10 +987,10 @@ func (c *controller) advertise(ctx context.Context, fields dlog.Context) {
 		return
 	}
 	if !errors.Is(err, daemonaddr.ErrClaimed) {
-		c.log.Error(opAdopt, "daemon.addr could not be written; not retrying a failure that is not a held boot claim", withCause(fields, err))
+		c.log.Error(opAdopt, "daemon.addr could not be written; not retrying a failure that is not a held boot claim", dlog.WithCause(fields, err))
 		return
 	}
-	c.log.Debug(opAdopt, "the outgoing daemon still holds the boot claim; advertising once it lets go", withCause(fields, err))
+	c.log.Debug(opAdopt, "the outgoing daemon still holds the boot claim; advertising once it lets go", dlog.WithCause(fields, err))
 	// THE RETRY OUTLIVES THE CALL. The context here is an rpc's, cancelled the
 	// moment the adopt answers — and the claim is released by the incumbent's
 	// exit, which happens after that answer. The daemon's own lifetime still
@@ -1034,7 +1034,7 @@ func (c *controller) becomeIncumbent(fields dlog.Context) {
 		return
 	}
 	c.log.Info(opAdopt, "the outgoing daemon is gone; this daemon now serves every workspace it was not handed",
-		merge(fields, dlog.Context{"state": "joining_mode", "before": true, "after": false}))
+		dlog.Merge(fields, dlog.Context{"state": "joining_mode", "before": true, "after": false}))
 	// THE HANDLE BECOMES A WRITING ONE AT THE TAKEOVER, whatever was handed
 	// over. It used to be promoted only inside a per-workspace adoption, so a
 	// successor handed NOTHING -- an incumbent whose handover listed no
@@ -1105,7 +1105,7 @@ func (c *controller) awaitTakeoverSettled(ctx context.Context, fields dlog.Conte
 		c.log.Info(opRollOut, "the takeover settled; the handover proceeds", fields)
 		return nil
 	case <-ctx.Done():
-		c.log.Info(opRollOut, "the handover's caller left before this daemon's takeover settled; nothing was started", withCause(fields, ctx.Err()))
+		c.log.Info(opRollOut, "the handover's caller left before this daemon's takeover settled; nothing was started", dlog.WithCause(fields, ctx.Err()))
 		return fmt.Errorf("rollout: handover: await the takeover: %w", ctx.Err())
 	}
 }
@@ -1115,7 +1115,7 @@ func (c *controller) awaitTakeoverSettled(ctx context.Context, fields dlog.Conte
 // adopt shims whose serving claims could not be written.
 func (c *controller) promoteAtTakeover(fields dlog.Context) bool {
 	if err := c.deps.DB.Promote(c.lifetime(context.Background())); err != nil {
-		c.log.Error(opAdopt, "the state handle could not be promoted to writing at the takeover; the shims nothing adopted are not recovered", withCause(fields, err))
+		c.log.Error(opAdopt, "the state handle could not be promoted to writing at the takeover; the shims nothing adopted are not recovered", dlog.WithCause(fields, err))
 		return false
 	}
 	return true
@@ -1173,14 +1173,14 @@ func (c *controller) adoptStragglers(fields dlog.Context) {
 		lifetime = context.Background()
 	}
 	c.log.Info(opAdopt, "adopting the workspaces whose handover never finished",
-		merge(fields, dlog.Context{"workspaces": len(stragglers)}))
+		dlog.Merge(fields, dlog.Context{"workspaces": len(stragglers)}))
 	for _, ws := range stragglers {
 		c.stragglerAdoptions.Add(1)
 		go func(ws ids.WorkspaceID) {
 			defer c.stragglerAdoptions.Done()
 			if err := c.adopt(lifetime, ws, "straggler"); err != nil {
 				c.log.Error(opAdopt, "a workspace whose handover never finished could not have its session adopted; it is served without one",
-					withCause(merge(fields, dlog.Context{"workspace": string(ws)}), err))
+					dlog.WithCause(dlog.Merge(fields, dlog.Context{"workspace": string(ws)}), err))
 			}
 		}(ws)
 	}
@@ -1221,11 +1221,11 @@ func (c *controller) judgeLiveShims(fields dlog.Context) (map[ids.WorkspaceID][]
 	lifetime := c.lifetime(context.Background())
 	workspaces, err := c.deps.DB.ListWorkspaces(lifetime)
 	if standdown.CutShort(lifetime, err) {
-		c.log.Info(opStaleness, "the daemon stood down before the shims were judged against the installed build", withCause(fields, err))
+		c.log.Info(opStaleness, "the daemon stood down before the shims were judged against the installed build", dlog.WithCause(fields, err))
 		return nil, false
 	}
 	if err != nil {
-		c.log.Error(opStaleness, "could not list the workspaces to check for stale shims", withCause(fields, err))
+		c.log.Error(opStaleness, "could not list the workspaces to check for stale shims", dlog.WithCause(fields, err))
 		return nil, false
 	}
 	checked := 0
@@ -1238,7 +1238,7 @@ func (c *controller) judgeLiveShims(fields dlog.Context) (map[ids.WorkspaceID][]
 		check, err := c.checkStale(lifetime, ws.ID, c.takeoverForce(ws.ID))
 		if err != nil {
 			c.log.Error(opStaleness, "an adopted shim could not be judged against the installed build",
-				withCause(merge(fields, dlog.Context{"workspace": string(ws.ID)}), err))
+				dlog.WithCause(dlog.Merge(fields, dlog.Context{"workspace": string(ws.ID)}), err))
 			continue
 		}
 		if shimDeferred(check) {
@@ -1246,7 +1246,7 @@ func (c *controller) judgeLiveShims(fields dlog.Context) (map[ids.WorkspaceID][]
 		}
 	}
 	c.log.Info(opStaleness, "judged every adopted shim against the installed build",
-		merge(fields, dlog.Context{"live_shims": checked}))
+		dlog.Merge(fields, dlog.Context{"live_shims": checked}))
 	return deferred, true
 }
 
@@ -1263,7 +1263,7 @@ func (c *controller) retryAdvertise(ctx context.Context, fields dlog.Context) {
 		return
 	case <-c.deps.Clock.After(advertiseRefusedBound):
 		c.log.Error(opAdopt, "the boot claim is still held long after the outgoing daemon should have exited; still waiting",
-			merge(fields, dlog.Context{"held_for": advertiseRefusedBound.String()}))
+			dlog.Merge(fields, dlog.Context{"held_for": advertiseRefusedBound.String()}))
 	case <-ctx.Done():
 		c.log.Debug(opAdopt, "the daemon's lifetime ended before daemon.addr could be written", fields)
 		return
@@ -1299,15 +1299,15 @@ func (c *controller) takeOverOnClaim(ctx context.Context, awaited error, fields 
 			c.log.Debug(opAdopt, "the daemon's lifetime ended before the incumbent exited", fields)
 			return
 		}
-		c.log.Error(opAdopt, "the boot claim could not be awaited; daemon.addr is not written", withCause(fields, awaited))
+		c.log.Error(opAdopt, "the boot claim could not be awaited; daemon.addr is not written", dlog.WithCause(fields, awaited))
 		return
 	}
 	if err := c.awaitClaimedOwned(ctx, fields); err != nil {
-		c.log.Debug(opAdopt, "the daemon's lifetime ended before the adoptions in flight were owned; daemon.addr is not written", withCause(fields, err))
+		c.log.Debug(opAdopt, "the daemon's lifetime ended before the adoptions in flight were owned; daemon.addr is not written", dlog.WithCause(fields, err))
 		return
 	}
 	if err := c.deps.WriteDaemonAddr(ctx); err != nil {
-		c.log.Error(opAdopt, "daemon.addr could not be written under the held boot claim", withCause(fields, err))
+		c.log.Error(opAdopt, "daemon.addr could not be written under the held boot claim", dlog.WithCause(fields, err))
 		return
 	}
 	c.log.Info(opAdopt, "the incumbent exited; wrote daemon.addr", fields)
@@ -1348,7 +1348,7 @@ func (c *controller) awaitClaimedOwned(ctx context.Context, fields dlog.Context)
 		return nil
 	}
 	c.log.Info(opAdopt, "the incumbent exited while adoptions were still finishing; daemon.addr waits for them to be owned",
-		merge(fields, dlog.Context{"claimed_adoptions": n}))
+		dlog.Merge(fields, dlog.Context{"claimed_adoptions": n}))
 	select {
 	case <-idle:
 		return nil

@@ -51,7 +51,7 @@ func (c *controller) HandOver(ctx context.Context, force bool) (HandoverAcceptan
 		Forced:     force,
 	}
 	c.log.Info(opRollOut, "accepted a handover: each workspace transfers through the bounce registry",
-		merge(fields, dlog.Context{"successor": plan.successor, "workspaces": accepted.Workspaces, "busy": accepted.Busy}))
+		dlog.Merge(fields, dlog.Context{"successor": plan.successor, "workspaces": accepted.Workspaces, "busy": accepted.Busy}))
 	c.completeHandover(c.lifetime(ctx), plan)
 	return accepted, nil
 }

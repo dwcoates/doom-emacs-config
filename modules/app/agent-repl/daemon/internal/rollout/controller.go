@@ -252,30 +252,10 @@ func (c *controller) ExpectedParticipants(ws ids.WorkspaceID) int {
 	return e.expected.Count()
 }
 
-// withCause stamps an error onto a record's context without mutating the
-// caller's map.
-func withCause(fields dlog.Context, err error) dlog.Context {
-	out := merge(fields, nil)
-	out["cause"] = err.Error()
-	return out
-}
-
-// merge copies base and overlays extra, so no record shares a map with another.
-func merge(base, extra dlog.Context) dlog.Context {
-	out := make(dlog.Context, len(base)+len(extra)+1)
-	for k, v := range base {
-		out[k] = v
-	}
-	for k, v := range extra {
-		out[k] = v
-	}
-	return out
-}
-
 // logTransition records one workspace-scoped rollout state change. The
 // before/after pair makes the in-memory ledger reconstructible from a trace.
 func (c *controller) logTransition(operation string, ws ids.WorkspaceID, state string, before, after any, extra dlog.Context) {
-	fields := merge(dlog.Context{
+	fields := dlog.Merge(dlog.Context{
 		"state":  state,
 		"before": before,
 		"after":  after,

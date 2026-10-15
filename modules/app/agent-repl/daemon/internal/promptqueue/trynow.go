@@ -82,7 +82,7 @@ func (q *queue) tryOldestHeld(ctx context.Context, d *delivery, held []wsm.HeldP
 	}
 	if oldest.Hold != nil {
 		if err := q.deps.DB.UpdateHeldPromptHold(ctx, oldest.Turn, nil, ""); err != nil {
-			log.Error(opSubmit, "could not lift the after-reconnect hold of the prompt tried now", merged(fields, dlog.Context{"cause": err.Error()}))
+			log.Error(opSubmit, "could not lift the after-reconnect hold of the prompt tried now", dlog.Merge(fields, dlog.Context{"cause": err.Error()}))
 			return
 		}
 		oldest.Hold = nil
@@ -124,7 +124,7 @@ func (q *queue) rehold(ctx context.Context, d *delivery, h wsm.HeldPrompt, cause
 	}
 	kind := wsm.HoldReconnect
 	if err := q.deps.DB.UpdateHeldPromptHold(ctx, h.Turn, &kind, ""); err != nil {
-		log.Error(opSubmit, "could not put the refused prompt back on the after-reconnect hold", merged(fields, dlog.Context{"store_cause": err.Error()}))
+		log.Error(opSubmit, "could not put the refused prompt back on the after-reconnect hold", dlog.Merge(fields, dlog.Context{"store_cause": err.Error()}))
 		return
 	}
 	q.deps.Feed.OnPromptRetired(d.ws, &conversationv1.AgentPrompt{Id: &conversationv1.TurnId{Value: string(h.Turn)}})

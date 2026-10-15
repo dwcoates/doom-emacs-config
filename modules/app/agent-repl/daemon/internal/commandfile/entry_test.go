@@ -2,10 +2,12 @@ package commandfile
 
 import (
 	"encoding/json"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
 
+	"agent-repld/internal/merge"
 	"agent-repld/internal/semver"
 	"agent-repld/internal/wsm"
 )
@@ -42,6 +44,11 @@ func TestValidateAcceptsEveryAcceptedShape(t *testing.T) {
 		{name: "merge release rollouts", entry: Entry{Type: TypeMergeReleaseRollouts, ProjectDir: "/tree"}},
 		{name: "merge disable racing", entry: Entry{Type: TypeMergeDisableRacing, ProjectDir: "/tree"}},
 		{name: "merge enable racing", entry: Entry{Type: TypeMergeEnableRacing, ProjectDir: "/tree"}},
+		{name: "merge subscribe to every repository at every change", entry: Entry{Type: TypeMergeSubscribe, ProjectDir: "/tree", Detail: "every_change"}},
+		{name: "merge subscribe to one repository as it advances", entry: Entry{Type: TypeMergeSubscribe, ProjectDir: "/tree", RepositoryDir: "/repo", Detail: "advances"}},
+		{name: "merge subscribe to every repository as it depletes", entry: Entry{Type: TypeMergeSubscribe, ProjectDir: "/tree", Detail: "depletes"}},
+		{name: "merge unsubscribe from every repository", entry: Entry{Type: TypeMergeUnsubscribe, ProjectDir: "/tree"}},
+		{name: "merge unsubscribe from one repository", entry: Entry{Type: TypeMergeUnsubscribe, ProjectDir: "/tree", RepositoryDir: "/repo"}},
 		{name: "retarget to a parent", entry: Entry{Type: TypeRetarget, ProjectDir: "/tree", Parent: PresentDir{Present: true, Dir: "/tree2"}}},
 		{name: "retarget to top-level", entry: Entry{Type: TypeRetarget, ProjectDir: "/tree", Parent: PresentDir{Present: true}}},
 	}
@@ -89,6 +96,12 @@ func TestValidateRefusesEveryIncompleteShape(t *testing.T) {
 		{name: "evict_dir on a close", entry: Entry{Type: TypeClose, Dir: "/tree", EvictDir: "/tree2"}},
 		{name: "move_dir on an evict", entry: Entry{Type: TypeMergeEvict, Dir: "/tree", MoveDir: "/tree2"}},
 		{name: "repository_dir on a merge", entry: Entry{Type: TypeMerge, Dir: "/tree", RepositoryDir: "/repo"}},
+		{name: "merge subscribe with no requester", entry: Entry{Type: TypeMergeSubscribe, Detail: "advances"}},
+		{name: "merge subscribe with no detail", entry: Entry{Type: TypeMergeSubscribe, ProjectDir: "/tree"}},
+		{name: "merge subscribe at an undeclared detail", entry: Entry{Type: TypeMergeSubscribe, ProjectDir: "/tree", Detail: "sometimes"}},
+		{name: "merge unsubscribe with no requester", entry: Entry{Type: TypeMergeUnsubscribe}},
+		{name: "detail on an unsubscribe", entry: Entry{Type: TypeMergeUnsubscribe, ProjectDir: "/tree", Detail: "advances"}},
+		{name: "detail on a pause", entry: Entry{Type: TypeMergePause, ProjectDir: "/tree", Detail: "advances"}},
 		{name: "retarget with no target", entry: Entry{Type: TypeRetarget, Parent: PresentDir{Present: true}}},
 		{name: "retarget with no parent key", entry: Entry{Type: TypeRetarget, ProjectDir: "/tree"}},
 		{name: "parent on a close", entry: Entry{Type: TypeClose, Dir: "/tree", Parent: PresentDir{Present: true}}},
@@ -774,5 +787,46 @@ func TestAMalformedVersionIncrementIsRefused(t *testing.T) {
 				t.Fatalf("Validate() = %v, want an error containing %q", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestQueueScopeReadsRepositoryDirAsTheRpcReadsItsRef(t *testing.T) {
+	tests := []struct {
+		name  string
+		entry Entry
+		want  *merge.RepositoryScope
+	}{
+		{name: "an unset repository_dir is every repository", entry: Entry{Type: TypeMergePause, ProjectDir: "/tree"}},
+		{name: "a repository_dir is that repository", entry: Entry{Type: TypeMergeSubscribe, ProjectDir: "/tree", RepositoryDir: "/repo"},
+			want: &merge.RepositoryScope{Dir: "/repo"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			got := tt.entry.queueScope()
+
+			// Assert.
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("queueScope = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestEveryQueueScopedEntryReadsItsScopeThroughQueueScope pins that the
+// ingress builds a RepositoryScope in one place only.
+func TestEveryQueueScopedEntryReadsItsScopeThroughQueueScope(t *testing.T) {
+	// Arrange.
+	src, err := os.ReadFile("ingress.go")
+	if err != nil {
+		t.Fatalf("read ingress.go: %v", err)
+	}
+
+	// Act.
+	built := strings.Count(string(src), "merge.RepositoryScope{")
+
+	// Assert.
+	if built != 0 {
+		t.Fatalf("ingress.go builds %d merge.RepositoryScope by hand; read entry.queueScope() instead", built)
 	}
 }

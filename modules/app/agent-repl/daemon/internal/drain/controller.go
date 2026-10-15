@@ -106,14 +106,14 @@ func (c *controller) Schedule(ctx context.Context, s wsm.DrainSchedule) error {
 	}
 	reason, err := DecodeReason(s.Reason)
 	if err != nil {
-		c.log.Error(opSchedule, "refused a schedule whose reason will not decode", withCause(fields, err))
+		c.log.Error(opSchedule, "refused a schedule whose reason will not decode", dlog.WithCause(fields, err))
 		return err
 	}
 	for k, v := range reasonFields(reason) {
 		fields[k] = v
 	}
 	if err := c.deps.DB.PutDrainSchedule(ctx, s); err != nil {
-		c.log.Error(opSchedule, "could not put the drain schedule in force", withCause(fields, err))
+		c.log.Error(opSchedule, "could not put the drain schedule in force", dlog.WithCause(fields, err))
 		return fmt.Errorf("drain: schedule: %w", err)
 	}
 	c.mu.Lock()
@@ -142,7 +142,7 @@ func (c *controller) Schedule(ctx context.Context, s wsm.DrainSchedule) error {
 func (c *controller) holdForSchedule(ctx context.Context, fields dlog.Context) {
 	workspaces, err := c.deps.DB.ListWorkspaces(ctx)
 	if err != nil {
-		c.log.Error(opSchedule, "could not list the workspaces to hold", withCause(fields, err))
+		c.log.Error(opSchedule, "could not list the workspaces to hold", dlog.WithCause(fields, err))
 		return
 	}
 	taken := map[ids.WorkspaceID]ids.LeaseID{}
@@ -152,7 +152,7 @@ func (c *controller) holdForSchedule(ctx context.Context, fields dlog.Context) {
 			// Another holder has the lease; its own policy already parks or
 			// refuses intake, so the drain needs none of its own.
 			c.log.Debug(opSchedule, "a workspace's lease is already held; leaving it as it stands",
-				merge(fields, dlog.Context{"workspace": string(ws.ID), "cause": err.Error()}))
+				dlog.Merge(fields, dlog.Context{"workspace": string(ws.ID), "cause": err.Error()}))
 			continue
 		}
 		taken[ws.ID] = lease.ID
@@ -164,7 +164,7 @@ func (c *controller) holdForSchedule(ctx context.Context, fields dlog.Context) {
 		c.leaseChanged(ws)
 	}
 	c.log.Debug(opSchedule, "held the intake on every workspace for the standing schedule",
-		merge(fields, dlog.Context{"workspaces": len(taken)}))
+		dlog.Merge(fields, dlog.Context{"workspaces": len(taken)}))
 }
 
 // releaseScheduleHolds drops the holds the standing schedule took.
@@ -176,7 +176,7 @@ func (c *controller) releaseScheduleHolds(ctx context.Context, operation string,
 	for ws, lease := range taken {
 		if err := c.deps.DB.ReleaseLease(context.WithoutCancel(ctx), lease); err != nil {
 			c.log.Warn(operation, "could not release a schedule's drain hold",
-				merge(fields, dlog.Context{"workspace": string(ws), "lease": string(lease), "cause": err.Error()}))
+				dlog.Merge(fields, dlog.Context{"workspace": string(ws), "lease": string(lease), "cause": err.Error()}))
 			continue
 		}
 		c.leaseChanged(ws)
@@ -207,7 +207,7 @@ func (c *controller) publishHost(ws ids.WorkspaceID) {
 func (c *controller) Cancel(ctx context.Context) error {
 	current, err := c.deps.DB.DrainSchedule(ctx)
 	if err != nil {
-		c.log.Error(opCancel, "could not read the standing drain schedule", withCause(nil, err))
+		c.log.Error(opCancel, "could not read the standing drain schedule", dlog.WithCause(nil, err))
 		return fmt.Errorf("drain: cancel: %w", err)
 	}
 	if current == nil {
@@ -216,7 +216,7 @@ func (c *controller) Cancel(ctx context.Context) error {
 	}
 	fields := dlog.Context{"schedule": ScheduleID(*current), "deadline": current.Deadline}
 	if err := c.deps.DB.ClearDrainSchedule(ctx); err != nil {
-		c.log.Error(opCancel, "could not clear the standing drain schedule", withCause(fields, err))
+		c.log.Error(opCancel, "could not clear the standing drain schedule", dlog.WithCause(fields, err))
 		return fmt.Errorf("drain: cancel: %w", err)
 	}
 	c.mu.Lock()
@@ -234,7 +234,7 @@ func (c *controller) Cancel(ctx context.Context) error {
 func (c *controller) Current(ctx context.Context) (*wsm.DrainSchedule, error) {
 	current, err := c.deps.DB.DrainSchedule(ctx)
 	if err != nil {
-		c.log.Error(opCurrent, "could not read the standing drain schedule", withCause(nil, err))
+		c.log.Error(opCurrent, "could not read the standing drain schedule", dlog.WithCause(nil, err))
 		return nil, fmt.Errorf("drain: current: %w", err)
 	}
 	if current == nil {
@@ -293,7 +293,7 @@ func (c *controller) Current(ctx context.Context) (*wsm.DrainSchedule, error) {
 func (c *controller) ShutdownNow(ctx context.Context, reason *agentreplv1.DrainReason) error {
 	if reason == nil || reason.GetKind() == nil {
 		err := errors.New("drain: an immediate shutdown states its reason")
-		c.log.Error(opNow, "refused an immediate shutdown with no reason", withCause(nil, err))
+		c.log.Error(opNow, "refused an immediate shutdown with no reason", dlog.WithCause(nil, err))
 		return err
 	}
 	c.deps.Announcer.ShutdownAnnounced(&agentreplv1.DaemonShutdownAnnounced{
@@ -324,7 +324,7 @@ func (c *controller) ShutdownNow(ctx context.Context, reason *agentreplv1.DrainR
 	c.standEverySessionDown(ctx)
 	c.sweepInFlightSpawns(ctx)
 	if err := c.deps.Exit(ctx); err != nil {
-		c.log.Error(opNow, "the orderly exit could not be started", withCause(nil, err))
+		c.log.Error(opNow, "the orderly exit could not be started", dlog.WithCause(nil, err))
 		return fmt.Errorf("drain: shutdown now: %w", err)
 	}
 	return nil
@@ -370,7 +370,7 @@ func (c *controller) standEverySessionDown(ctx context.Context) {
 	workspaces, err := c.deps.DB.ListWorkspaces(ctx)
 	if err != nil {
 		c.log.Error(opNow, "could not list the workspaces to stand down; the shims will outlive this daemon",
-			withCause(nil, err))
+			dlog.WithCause(nil, err))
 		return
 	}
 	for _, ws := range workspaces {
@@ -380,7 +380,7 @@ func (c *controller) standEverySessionDown(ctx context.Context) {
 		cancel()
 		if err != nil {
 			c.log.Error(opNow, "a session would not stand down before the immediate exit; its shim will outlive this daemon",
-				withCause(fields, err))
+				dlog.WithCause(fields, err))
 			continue
 		}
 		c.log.Debug(opNow, "stood a session down ahead of the immediate exit", fields)
@@ -417,7 +417,7 @@ func (c *controller) sweepInFlightSpawns(ctx context.Context) {
 	defer cancel()
 	if err := c.deps.Spawns.StandDownEverySpawn(sweep, "an immediate shutdown was requested"); err != nil {
 		c.log.Error(opNow, "a spawn in flight would not stand down before the immediate exit; its shim will outlive this daemon and hold the workspace lock",
-			withCause(nil, err))
+			dlog.WithCause(nil, err))
 		return
 	}
 	c.log.Debug(opNow, "swept the spawns still in flight ahead of the immediate exit", nil)
@@ -429,16 +429,16 @@ func (c *controller) fire(ctx context.Context, s wsm.DrainSchedule) error {
 	fields := dlog.Context{"schedule": ScheduleID(s), "deadline": s.Deadline}
 	reason, err := DecodeReason(s.Reason)
 	if err != nil {
-		c.log.Error(opFire, "the standing schedule's reason will not decode", withCause(fields, err))
+		c.log.Error(opFire, "the standing schedule's reason will not decode", dlog.WithCause(fields, err))
 		return err
 	}
 	workspaces, err := c.deps.DB.ListWorkspaces(ctx)
 	if err != nil {
-		c.log.Error(opFire, "could not list the workspaces to drain", withCause(fields, err))
+		c.log.Error(opFire, "could not list the workspaces to drain", dlog.WithCause(fields, err))
 		return fmt.Errorf("drain: fire: %w", err)
 	}
 	c.log.Info(opFire, "the drain deadline passed; holding intake on every workspace",
-		merge(fields, dlog.Context{"workspaces": len(workspaces)}))
+		dlog.Merge(fields, dlog.Context{"workspaces": len(workspaces)}))
 
 	// THE HOLD FIRST, ON EVERY WORKSPACE, before any wait: a workspace whose
 	// intake is still open while a sibling is being waited on would keep
@@ -456,7 +456,7 @@ func (c *controller) fire(ctx context.Context, s wsm.DrainSchedule) error {
 	for _, ws := range workspaces {
 		if lease, own := standing[ws.ID]; own {
 			c.log.Debug(opFire, "the standing schedule's own drain hold already holds this workspace",
-				merge(fields, dlog.Context{"workspace": string(ws.ID), "lease": string(lease)}))
+				dlog.Merge(fields, dlog.Context{"workspace": string(ws.ID), "lease": string(lease)}))
 			continue
 		}
 		lease, err := c.deps.DB.AcquireLease(ctx, ws.ID, wsm.HolderDrain, wsm.PolicyHold)
@@ -468,18 +468,18 @@ func (c *controller) fire(ctx context.Context, s wsm.DrainSchedule) error {
 			// is the arbitration answering, and waiting on it is the drain's
 			// ordinary course.
 			c.log.Info(opFire, "a workspace's lease is held by another holder; the drain will wait on it as it stands",
-				merge(fields, dlog.Context{
+				dlog.Merge(fields, dlog.Context{
 					"workspace": string(ws.ID), "holder": otherHolder.Holder.String(), "lease": string(otherHolder.Lease),
 				}))
 			continue
 		case err != nil:
 			c.log.Error(opFire, "could not take the drain hold on a workspace; the drain waits on it unheld",
-				merge(fields, dlog.Context{"workspace": string(ws.ID), "cause": err.Error()}))
+				dlog.Merge(fields, dlog.Context{"workspace": string(ws.ID), "cause": err.Error()}))
 			continue
 		}
 		held = append(held, lease)
 		c.log.Debug(opFire, "took the drain hold on a workspace",
-			merge(fields, dlog.Context{"workspace": string(ws.ID), "lease": string(lease.ID)}))
+			dlog.Merge(fields, dlog.Context{"workspace": string(ws.ID), "lease": string(lease.ID)}))
 	}
 
 	// THE HOLDS TAKEN HERE LIVE AS LONG AS THIS FIRE AND NO LONGER. A freeness
@@ -490,7 +490,7 @@ func (c *controller) fire(ctx context.Context, s wsm.DrainSchedule) error {
 		for _, lease := range held {
 			if err := c.deps.DB.ReleaseLease(context.WithoutCancel(ctx), lease.ID); err != nil {
 				c.log.Warn(opFire, "could not release a drain hold before exiting",
-					merge(fields, dlog.Context{"lease": string(lease.ID), "cause": err.Error()}))
+					dlog.Merge(fields, dlog.Context{"lease": string(lease.ID), "cause": err.Error()}))
 			}
 		}
 		held = nil
@@ -500,14 +500,14 @@ func (c *controller) fire(ctx context.Context, s wsm.DrainSchedule) error {
 	for _, ws := range workspaces {
 		if c.deps.Freeness.Free(ws.ID) {
 			c.log.Debug(opFire, "a workspace was already free",
-				merge(fields, dlog.Context{"workspace": string(ws.ID)}))
+				dlog.Merge(fields, dlog.Context{"workspace": string(ws.ID)}))
 			continue
 		}
 		c.log.Info(opFire, "waiting for a workspace to fall free; nothing is interrupted",
-			merge(fields, dlog.Context{"workspace": string(ws.ID)}))
+			dlog.Merge(fields, dlog.Context{"workspace": string(ws.ID)}))
 		if err := c.deps.Freeness.AwaitFree(ctx, ws.ID); err != nil {
 			c.log.Error(opFire, "the freeness wait ended before the workspace fell free",
-				merge(fields, dlog.Context{"workspace": string(ws.ID), "cause": err.Error()}))
+				dlog.Merge(fields, dlog.Context{"workspace": string(ws.ID), "cause": err.Error()}))
 			return fmt.Errorf("drain: fire: wait for %q: %w", ws.ID, err)
 		}
 	}
@@ -526,7 +526,7 @@ func (c *controller) fire(ctx context.Context, s wsm.DrainSchedule) error {
 	})
 	c.log.Info(opFire, "every workspace is quiet; announced the scheduled shutdown", fields)
 	if err := c.deps.Exit(ctx); err != nil {
-		c.log.Error(opFire, "the orderly exit could not be started", withCause(fields, err))
+		c.log.Error(opFire, "the orderly exit could not be started", dlog.WithCause(fields, err))
 		return fmt.Errorf("drain: fire: %w", err)
 	}
 	return nil
@@ -546,27 +546,7 @@ func (c *controller) wake() {
 // nothing to remediate, so it records at debug as cut. A read that fails while
 // serving is an error.
 func readFailed(log dlog.Logger, op, failed, cut string, fields dlog.Context, err error) {
-	ctxend.Log(err, log.Debug, log.Error, op, cut, failed, withCause(fields, err))
-}
-
-// withCause stamps an error onto a record's context without mutating the
-// caller's map.
-func withCause(fields dlog.Context, err error) dlog.Context {
-	out := merge(fields, nil)
-	out["cause"] = err.Error()
-	return out
-}
-
-// merge copies base and overlays extra, so no record shares a map with another.
-func merge(base, extra dlog.Context) dlog.Context {
-	out := make(dlog.Context, len(base)+len(extra)+1)
-	for k, v := range base {
-		out[k] = v
-	}
-	for k, v := range extra {
-		out[k] = v
-	}
-	return out
+	ctxend.Log(err, log.Debug, log.Error, op, cut, failed, dlog.WithCause(fields, err))
 }
 
 // Republish re-arms the schedule a previous process left in force: the row is
@@ -579,7 +559,7 @@ func merge(base, extra dlog.Context) dlog.Context {
 func (c *controller) Republish(ctx context.Context) error {
 	current, err := c.deps.DB.DrainSchedule(ctx)
 	if err != nil {
-		c.log.Error(opRepublish, "could not read the standing drain schedule at boot", withCause(nil, err))
+		c.log.Error(opRepublish, "could not read the standing drain schedule at boot", dlog.WithCause(nil, err))
 		return fmt.Errorf("drain: republish: %w", err)
 	}
 	if current == nil {
@@ -591,7 +571,7 @@ func (c *controller) Republish(ctx context.Context) error {
 		// A row that will not decode is corruption, not an absent schedule:
 		// the boot refuses rather than serving as though nothing were standing.
 		c.log.Error(opRepublish, "the persisted schedule's reason will not decode",
-			withCause(dlog.Context{"deadline": current.Deadline}, err))
+			dlog.WithCause(dlog.Context{"deadline": current.Deadline}, err))
 		return fmt.Errorf("drain: republish: %w", err)
 	}
 	fields := dlog.Context{

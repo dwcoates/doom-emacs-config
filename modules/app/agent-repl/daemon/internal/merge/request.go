@@ -568,7 +568,7 @@ func (o *orchestrator) handOffDetached(ctx context.Context, requester ids.Worksp
 // the requester's queue, and the requester is told it did not run.
 func (o *orchestrator) dropDetached(ctx context.Context, requester ids.WorkspaceID, repo wsm.RepoKey, source wsm.MergeSource, summary string) error {
 	const op = "daemon.merge.detached"
-	if err := o.deps.DB.RemoveMergeQueueEntry(ctx, repo, requester, "detached_fork_failed"); err != nil {
+	if err := o.deps.DB.RemoveMergeQueueEntry(ctx, repo, requester, causeDetachedForkFailed); err != nil {
 		o.log(ctx, requester).Error(op, "could not drop the detached request that could not be handed off", dlog.Context{
 			"workspace": string(requester), "repo": string(repo), "error": err.Error()})
 		return err

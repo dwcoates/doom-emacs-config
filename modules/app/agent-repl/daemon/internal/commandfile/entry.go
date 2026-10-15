@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"agent-repld/internal/dirpath"
+	"agent-repld/internal/merge"
 	"agent-repld/internal/semver"
 	"agent-repld/internal/wsm"
 )
@@ -85,6 +86,14 @@ const (
 	TypeMergeDisableRacing = "merge_disable_racing"
 	// TypeMergeEnableRacing enables racing again (UpdateMergeQueueEnableRacing).
 	TypeMergeEnableRacing = "merge_enable_racing"
+	// TypeMergeSubscribe subscribes the requester's agent to a merge queue's
+	// changes at a detail (UpdateMergeQueueSubscribe): the queue of the
+	// repository at repository_dir, or every repository's when it is unset.
+	TypeMergeSubscribe = "merge_subscribe"
+	// TypeMergeUnsubscribe ends the requester's subscription in the scope
+	// repository_dir names, as TypeMergeSubscribe scopes it
+	// (UpdateMergeQueueUnsubscribe).
+	TypeMergeUnsubscribe = "merge_unsubscribe"
 )
 
 // Entry is one decoded command-file entry. Every field the accepted types use
@@ -236,10 +245,18 @@ type Entry struct {
 	Parent PresentDir `json:"parent,omitzero"`
 
 	// RepositoryDir names the repository, by its main checkout, whose queue a
-	// merge_pause or merge_resume addresses (RepositoryRef.dir). Unset is
-	// every repository, the daemon-wide switch the rpc's unset ref means.
-	// Pause- and resume-only.
+	// merge_pause, merge_resume, merge_subscribe or merge_unsubscribe
+	// addresses (RepositoryRef.dir). Unset is every repository, the
+	// daemon-wide scope the rpc's unset ref means. Those four types only.
 	RepositoryDir string `json:"repository_dir,omitempty"`
+
+	// THE SUBSCRIPTION'S FIELD.
+
+	// Detail is how much of a queue's change a merge_subscribe asks to be told
+	// (UpdateMergeQueueSubscribe.detail), spelled as wsm.MergeQueueDetail
+	// names it: every_change, advances or depletes. Required on, and only on,
+	// a merge_subscribe.
+	Detail string `json:"detail,omitempty"`
 }
 
 // PresentDir is a directory field whose PRESENCE is meaningful apart from its
@@ -328,8 +345,12 @@ func (e Entry) Validate() error {
 	if e.Type != TypeRetarget && e.Parent.Present && e.Type != "" {
 		return fmt.Errorf("%s: parent is a %s's field, and no %s reads it", e.Type, TypeRetarget, e.Type)
 	}
-	if e.Type != TypeMergePause && e.Type != TypeMergeResume && e.RepositoryDir != "" && e.Type != "" {
-		return fmt.Errorf("%s: repository_dir is a %s's or a %s's field, and no %s reads it", e.Type, TypeMergePause, TypeMergeResume, e.Type)
+	if !e.queueScoped() && e.RepositoryDir != "" && e.Type != "" {
+		return fmt.Errorf("%s: repository_dir is a %s's, a %s's, a %s's or a %s's field, and no %s reads it",
+			e.Type, TypeMergePause, TypeMergeResume, TypeMergeSubscribe, TypeMergeUnsubscribe, e.Type)
+	}
+	if e.Type != TypeMergeSubscribe && e.Detail != "" && e.Type != "" {
+		return fmt.Errorf("%s: detail is a %s's field, and no %s reads it", e.Type, TypeMergeSubscribe, e.Type)
 	}
 	switch e.Type {
 	case "":
@@ -359,8 +380,16 @@ func (e Entry) Validate() error {
 		return nil
 	case TypeClose, TypeForget, TypeOpen, TypeSwitch, TypeMergeEvict, TypeMergeMoveUp, TypeMergeMoveDown,
 		TypeMergePause, TypeMergeResume, TypeMergeHoldRollouts, TypeMergeReleaseRollouts,
-		TypeMergeDisableRacing, TypeMergeEnableRacing:
+		TypeMergeDisableRacing, TypeMergeEnableRacing, TypeMergeUnsubscribe:
 		return e.requireTarget()
+	case TypeMergeSubscribe:
+		if err := e.requireTarget(); err != nil {
+			return err
+		}
+		if _, err := wsm.ParseMergeQueueDetail(e.Detail); err != nil {
+			return fmt.Errorf("%s: detail: %w", TypeMergeSubscribe, err)
+		}
+		return nil
 	case TypeTaskCreate:
 		if e.Title == "" {
 			return fmt.Errorf("%s: title is required", TypeTaskCreate)
@@ -382,6 +411,26 @@ func (e Entry) Validate() error {
 	default:
 		return fmt.Errorf("unknown entry type %q", e.Type)
 	}
+}
+
+// queueScoped reports whether the entry's type addresses a merge queue scoped
+// by repository_dir.
+func (e Entry) queueScoped() bool {
+	switch e.Type {
+	case TypeMergePause, TypeMergeResume, TypeMergeSubscribe, TypeMergeUnsubscribe:
+		return true
+	}
+	return false
+}
+
+// queueScope is the merge queue scope a queue-scoped entry addresses, as the
+// rpc's optional RepositoryRef reads: nil (every repository) for an unset
+// repository_dir, else that repository's main checkout.
+func (e Entry) queueScope() *merge.RepositoryScope {
+	if e.RepositoryDir == "" {
+		return nil
+	}
+	return &merge.RepositoryScope{Dir: e.RepositoryDir}
 }
 
 // validateCreate refuses a create whose fields contradict each other or name

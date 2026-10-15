@@ -609,9 +609,6 @@ func (r *run) promptConflict(ctx context.Context, p *replay, commit gitclient.Co
 	round := r.openTab(ctx, TabConflicts)
 	r.rebasing.Commits[i].Conflict = &conflictView{Span: span{StartedMS: round.started.UnixMilli()}, Files: append([]string(nil), files...)}
 	r.drawConflict(ctx, round, i, len(files))
-	if err := r.noteMachinery(ctx, targetBranch); err != nil {
-		return nil, err
-	}
 	text, err := r.conflictBrief(commit, files, targetBranch)
 	if err != nil {
 		return nil, err
@@ -694,19 +691,15 @@ func (r *run) conflictSettled(ctx context.Context, p *replay, round tabRound, cl
 	case len(remaining) > 0:
 		why = fmt.Sprintf("%d file(s) still conflict: %s", len(remaining), strings.Join(remaining, ", "))
 	}
-	machinery := false
-	if why == "" {
-		if line, refused, err := r.machineryChanged(ctx, targetBranch); err != nil {
-			return nil, err
-		} else if refused {
-			why, machinery = line, true
-		}
-	}
+	// A RESOLUTION MAY EDIT THE MERGE MACHINERY (owner ruling, 2026-10-14): a
+	// conflict there is the branch's own change meeting master's, and only a
+	// resolution in those files can land it. What it resolves is the branch's
+	// work, and the gate tests it like any of the branch's work.
+	//
 	// A RESOLUTION THAT DID NOT RESOLVE IS TRIED AGAIN on the same commit, up
 	// to MaxConflictAttempts in a row (owner ruling, 2026-10-12); only then
-	// does the merge fail. A change to the merge machinery is refused at once:
-	// another attempt cannot make it acceptable.
-	if why != "" && !machinery && r.conflictAttempts < MaxConflictAttempts {
+	// does the merge fail.
+	if why != "" && r.conflictAttempts < MaxConflictAttempts {
 		r.settleAgentic()
 		retry := fmt.Sprintf("attempt %d of %d did not resolve it (%s); trying again", r.conflictAttempts, MaxConflictAttempts, why)
 		r.settleConflictAttempt(p, retry)
@@ -749,6 +742,10 @@ func (r *run) conflictSettled(ctx context.Context, p *replay, round tabRound, cl
 	// A RESOLUTION THAT RESOLVED ENDS THE RUN OF FAILURES: the next conflict
 	// starts its count afresh.
 	r.conflictCommit, r.conflictAttempts = "", 0
+	// ITS EDITS ARE THE BRANCH'S OWN from here on: the next test repair takes
+	// the branch's merge machinery afresh (noteMachinery), so it is refused
+	// only for machinery it adds itself.
+	r.machinery = nil
 	// THE REBASE CONTINUES IN A NEW LEDGER ROUND, drawn in the same rebasing
 	// tab and the same commit's subtab.
 	p.round = r.openTab(ctx, TabRebasing)
@@ -1394,9 +1391,11 @@ func (r *run) machineryIn(ctx context.Context, targetBranch string) (map[string]
 	return found, nil
 }
 
-// noteMachinery records, before the FIRST repair turn, the merge machinery the
-// branch already changed: that is the author's own work, which the merge is
-// there to land. Only what a repair adds to it is refused.
+// noteMachinery records, before the first TEST repair turn since the branch
+// last changed (a resolved conflict changes it), the merge machinery the
+// branch already changes: that is the author's own work, which the merge is
+// there to land. Only what a test repair adds to it is refused; a conflict
+// resolution is never refused for it.
 func (r *run) noteMachinery(ctx context.Context, targetBranch string) error {
 	if r.machinery != nil {
 		return nil

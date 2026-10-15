@@ -128,7 +128,7 @@ func (r *resolver) mirrorRow(s *wsState, row *frontendv1.FeedRow) {
 	ref, err := r.deps.Decode(row.GetId())
 	if err != nil {
 		r.logger(s.id).Error("daemon.feed.mirror_undecodable", "a mirrored turn's row carries an identity that will not decode; it is not mirrored",
-			withCause(fields, err))
+			dlog.WithCause(fields, err))
 		return
 	}
 	parent := r.deps.Encode(m.Parent)
@@ -136,7 +136,7 @@ func (r *resolver) mirrorRow(s *wsState, row *frontendv1.FeedRow) {
 		nested, err := r.deps.Decode(row.GetParent().GetRow())
 		if err != nil {
 			r.logger(s.id).Error("daemon.feed.mirror_undecodable", "a mirrored turn's row names a parent that will not decode; it is not mirrored",
-				withCause(fields, err))
+				dlog.WithCause(fields, err))
 			return
 		}
 		parent = r.deps.Encode(feedid.Ref{WS: m.Workspace, Feed: m.Feed, Row: nested.Row})
@@ -152,14 +152,4 @@ func (r *resolver) mirrorRow(s *wsState, row *frontendv1.FeedRow) {
 	copied.Turn = nil
 	copied.Order = nil
 	r.upsertDurable(r.state(m.Workspace), placement{feed: m.Feed}, copied)
-}
-
-// withCause adds an error's text to a record's fields.
-func withCause(fields dlog.Context, err error) dlog.Context {
-	out := dlog.Context{}
-	for k, v := range fields {
-		out[k] = v
-	}
-	out["cause"] = err.Error()
-	return out
 }

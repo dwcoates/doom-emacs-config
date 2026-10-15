@@ -106,7 +106,7 @@ func (r *Restarter) RestartStore(ctx context.Context) error {
 	// to bootstrap back from would leave the host with no sidecar and no way
 	// to return one.
 	if _, err := os.Stat(plist); err != nil {
-		r.Log.Error(opServices, "the sidecar's plist is missing; nothing was stopped", withCause(fields, err))
+		r.Log.Error(opServices, "the sidecar's plist is missing; nothing was stopped", dlog.WithCause(fields, err))
 		return fmt.Errorf("deploy: the store restart boots the sidecar out and needs %s to bring it back: %w "+
 			"(re-run .claude/install.sh)", plist, err)
 	}
@@ -276,7 +276,7 @@ func (r *Restarter) runningStale(ctx context.Context, bootstrapped bool, compone
 	installed := filepath.Join(r.CacheBin, service)
 	fresh, err := buildid.File(installed)
 	if err != nil {
-		r.Log.Error(opServices, "the service's installed build could not be read; its running build cannot be judged", withCause(merge(fields, dlog.Context{"installed": installed}), err))
+		r.Log.Error(opServices, "the service's installed build could not be read; its running build cannot be judged", dlog.WithCause(dlog.Merge(fields, dlog.Context{"installed": installed}), err))
 		return false, fmt.Errorf("deploy: read the installed %s %s: %w", service, installed, err)
 	}
 	alive := r.Alive
@@ -290,7 +290,7 @@ func (r *Restarter) runningStale(ctx context.Context, bootstrapped bool, compone
 // and reports whether it did.
 func (r *Restarter) ensureLoaded(ctx context.Context, label string, fields dlog.Context) (bool, error) {
 	plist := filepath.Join(r.PlistDir, label+".plist")
-	fields = merge(fields, dlog.Context{"label": label, "plist": plist})
+	fields = dlog.Merge(fields, dlog.Context{"label": label, "plist": plist})
 	loaded, _, err := r.Launchd.Print(ctx, label)
 	if err != nil {
 		r.failed("could not read a service's launchd state", fields, err)
@@ -300,7 +300,7 @@ func (r *Restarter) ensureLoaded(ctx context.Context, label string, fields dlog.
 		return false, nil
 	}
 	if _, err := os.Stat(plist); err != nil {
-		r.Log.Error(opServices, "a service is not loaded and its plist is missing", withCause(fields, err))
+		r.Log.Error(opServices, "a service is not loaded and its plist is missing", dlog.WithCause(fields, err))
 		return false, fmt.Errorf("deploy: %s is not loaded and %s cannot bring it back: %w "+
 			"(re-run .claude/install.sh)", label, plist, err)
 	}
@@ -339,11 +339,11 @@ func (r *Restarter) stopSidecar(ctx context.Context, fields dlog.Context) error 
 	if err := r.Launchd.Bootout(ctx, SidecarLabel); errors.Is(err, ErrServiceNotLoaded) {
 		// THE SIDECAR LEFT BETWEEN THE LOOK AND THE BOOTOUT: the domain no
 		// longer holds it, which is the state the bootout was asked to reach.
-		r.Log.Info(opServices, "the sidecar had already left the user domain when it was booted out", withCause(fields, err))
+		r.Log.Info(opServices, "the sidecar had already left the user domain when it was booted out", dlog.WithCause(fields, err))
 	} else if err != nil {
 		// A bootout that errs may still have taken effect; the wait below is
 		// the authority on whether it did.
-		r.Log.Warn(opServices, "the sidecar bootout answered an error; waiting on launchd's own view", withCause(fields, err))
+		r.Log.Warn(opServices, "the sidecar bootout answered an error; waiting on launchd's own view", dlog.WithCause(fields, err))
 	}
 	deadline := r.Clock.Now().Add(r.Windows.Max)
 	for {
@@ -358,7 +358,7 @@ func (r *Restarter) stopSidecar(ctx context.Context, fields dlog.Context) error 
 		}
 		if !r.Clock.Now().Before(deadline) {
 			r.Log.Error(opServices, "the sidecar did not leave the user domain within the upper bound; the store was NOT kickstarted",
-				merge(fields, dlog.Context{"max": r.Windows.Max.String()}))
+				dlog.Merge(fields, dlog.Context{"max": r.Windows.Max.String()}))
 			return fmt.Errorf("deploy: %s did not leave the user domain within %s", SidecarLabel, r.Windows.Max)
 		}
 		if err := r.wait(ctx); err != nil {
@@ -374,13 +374,13 @@ func (r *Restarter) stopSidecar(ctx context.Context, fields dlog.Context) error 
 // pid), it is wedged (its log has not grown for the stall budget), or it is
 // past the upper bound.
 func (r *Restarter) awaitStoreSocket(ctx context.Context, fields dlog.Context) error {
-	fields = merge(fields, dlog.Context{"socket": r.StoreSocket, "store_log": r.StoreLog})
+	fields = dlog.Merge(fields, dlog.Context{"socket": r.StoreSocket, "store_log": r.StoreLog})
 	start := r.Clock.Now()
 	lastSize := r.storeLogSize()
 	progress := start
 	for {
 		if socketExists(r.StoreSocket) {
-			r.Log.Info(opServices, "the store's socket is up", merge(fields, dlog.Context{
+			r.Log.Info(opServices, "the store's socket is up", dlog.Merge(fields, dlog.Context{
 				"after": r.Clock.Now().Sub(start).String(),
 			}))
 			return nil
@@ -397,7 +397,7 @@ func (r *Restarter) awaitStoreSocket(ctx context.Context, fields dlog.Context) e
 				continue
 			}
 			r.Log.Error(opServices, "the store died before its socket appeared; the sidecar was NOT started again",
-				merge(fields, dlog.Context{"last_words": r.storeLogTail()}))
+				dlog.Merge(fields, dlog.Context{"last_words": r.storeLogTail()}))
 			return fmt.Errorf("deploy: %s died before %s appeared", StoreLabel, r.StoreSocket)
 		}
 		if size := r.storeLogSize(); size != lastSize {
@@ -407,12 +407,12 @@ func (r *Restarter) awaitStoreSocket(ctx context.Context, fields dlog.Context) e
 		now := r.Clock.Now()
 		if now.Sub(progress) >= r.Windows.Stall {
 			r.Log.Error(opServices, "the store is wedged: no socket and nothing written for the stall budget; the sidecar was NOT started again",
-				merge(fields, dlog.Context{"pid": pid, "stall": r.Windows.Stall.String(), "last_words": r.storeLogTail()}))
+				dlog.Merge(fields, dlog.Context{"pid": pid, "stall": r.Windows.Stall.String(), "last_words": r.storeLogTail()}))
 			return fmt.Errorf("deploy: %s (pid %d) wrote nothing for %s and its socket never appeared", StoreLabel, pid, r.Windows.Stall)
 		}
 		if now.Sub(start) >= r.Windows.Max {
 			r.Log.Error(opServices, "the store's socket did not appear within the upper bound; the sidecar was NOT started again",
-				merge(fields, dlog.Context{"pid": pid, "max": r.Windows.Max.String(), "last_words": r.storeLogTail()}))
+				dlog.Merge(fields, dlog.Context{"pid": pid, "max": r.Windows.Max.String(), "last_words": r.storeLogTail()}))
 			return fmt.Errorf("deploy: %s did not appear within %s", r.StoreSocket, r.Windows.Max)
 		}
 		if err := r.wait(ctx); err != nil {
@@ -428,10 +428,10 @@ func (r *Restarter) awaitStoreSocket(ctx context.Context, fields dlog.Context) e
 // that passed stays an ERROR: the step ran out of the time it was given.
 func (r *Restarter) failed(message string, fields dlog.Context, err error) {
 	if errors.Is(err, context.Canceled) {
-		r.Log.Info(opServices, "a service step was cut short by its caller: "+message, withCause(fields, err))
+		r.Log.Info(opServices, "a service step was cut short by its caller: "+message, dlog.WithCause(fields, err))
 		return
 	}
-	r.Log.Error(opServices, message, withCause(fields, err))
+	r.Log.Error(opServices, message, dlog.WithCause(fields, err))
 }
 
 // wait is one poll interval on the injected clock, or the context's end.

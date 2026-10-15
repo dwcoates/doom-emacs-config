@@ -38,7 +38,7 @@ func (c *controller) carriedParticipants(ws ids.WorkspaceID) (Participants, ids.
 	carry, found, err := c.readCarry(ws)
 	if err != nil {
 		c.log.Error(opJoin, "could not read the handover carry for its participants; the rendezvous keeps the expectations it has",
-			withCause(dlog.Context{"workspace": string(ws)}, err))
+			dlog.WithCause(dlog.Context{"workspace": string(ws)}, err))
 		return Participants{}, "", false
 	}
 	if !found || carry.Participants == nil || c.refusedMidWork(ws) {
@@ -129,7 +129,7 @@ func (c *controller) servingReleased(ws ids.WorkspaceID) bool {
 	owner, err := c.deps.DB.Serving(c.lifetime(context.Background()), ws)
 	if err != nil {
 		c.log.Error(opJoin, "could not read serving ownership while following a transfer's carry",
-			withCause(dlog.Context{"workspace": string(ws)}, err))
+			dlog.WithCause(dlog.Context{"workspace": string(ws)}, err))
 		return false
 	}
 	return owner == nil

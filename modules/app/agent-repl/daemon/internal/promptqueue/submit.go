@@ -257,19 +257,6 @@ func (q *queue) noteDrainRefusal(holder wsm.LeaseHolder, ws ids.WorkspaceID) {
 	}
 }
 
-// merged folds two record contexts into one, so a branch can add to the fields
-// its caller already assembled without mutating them.
-func merged(base, extra dlog.Context) dlog.Context {
-	out := make(dlog.Context, len(base)+len(extra))
-	for k, v := range base {
-		out[k] = v
-	}
-	for k, v := range extra {
-		out[k] = v
-	}
-	return out
-}
-
 // holderName renders a lease holder for a log record.
 // exemptFromLease reports whether a submission of origin passes the lease
 // untouched: THE ONE RULE both the submission path and the restamp of

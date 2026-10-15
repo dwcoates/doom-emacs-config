@@ -653,7 +653,7 @@ func TestAMergeWorkspacesFactsNeverReachItsFooter(t *testing.T) {
 	h.registerMergeWorkspace(theWorkspace, "request-1", "feature")
 
 	// Act
-	h.o.publish(theMergeWorkspace, MergeFacts{State: StateMerged})
+	h.o.publish(h.repoKey(), theMergeWorkspace, MergeFacts{State: StateMerged})
 	h.o.forget(theMergeWorkspace)
 
 	// Assert
@@ -667,7 +667,7 @@ func TestASyncMergesFactsReachItsFooter(t *testing.T) {
 	h := newHarness(t)
 
 	// Act
-	h.o.publish(theWorkspace, MergeFacts{State: StateMerged})
+	h.o.publish(h.repoKey(), theWorkspace, MergeFacts{State: StateMerged})
 
 	// Assert
 	if !h.footer.toldTo(theWorkspace) {

@@ -73,7 +73,7 @@ func NewIntake(db wsm.DB, queue promptqueue.Queue, log dlog.Logger) (*Intake, er
 func (i *Intake) Quiesce(ctx context.Context, ws ids.WorkspaceID) (wsm.LeaseID, error) {
 	fields := dlog.Context{"workspace": string(ws)}
 	if _, held, err := i.db.Lease(ctx, ws); err != nil {
-		i.log.Error(opQuiesce, "could not read the workspace's lease", withCause(fields, err))
+		i.log.Error(opQuiesce, "could not read the workspace's lease", dlog.WithCause(fields, err))
 		return "", fmt.Errorf("handover: quiesce %q: read the lease: %w", ws, err)
 	} else if held {
 		i.log.Debug(opQuiesce, "a lease already holds this workspace's intake", fields)
@@ -82,7 +82,7 @@ func (i *Intake) Quiesce(ctx context.Context, ws ids.WorkspaceID) (wsm.LeaseID, 
 	}
 	lease, err := i.db.AcquireLease(ctx, ws, QuiesceHolder, wsm.PolicyHold)
 	if err != nil {
-		i.log.Error(opQuiesce, "could not take the handover hold", withCause(fields, err))
+		i.log.Error(opQuiesce, "could not take the handover hold", dlog.WithCause(fields, err))
 		return "", fmt.Errorf("handover: quiesce %q: take the hold: %w", ws, err)
 	}
 	fields["lease"] = string(lease.ID)
@@ -104,7 +104,7 @@ func (i *Intake) DrainIntake(ctx context.Context, ws ids.WorkspaceID) error {
 	fields := dlog.Context{"workspace": string(ws)}
 	lease, held, err := i.db.Lease(ctx, ws)
 	if err != nil {
-		i.log.Error(opDrain, "could not read the workspace's lease", withCause(fields, err))
+		i.log.Error(opDrain, "could not read the workspace's lease", dlog.WithCause(fields, err))
 		return fmt.Errorf("handover: drain %q: read the lease: %w", ws, err)
 	}
 	if !held {
@@ -123,7 +123,7 @@ func (i *Intake) DrainIntake(ctx context.Context, ws ids.WorkspaceID) error {
 		return nil
 	}
 	if err := i.db.ReleaseLease(ctx, lease.ID); err != nil {
-		i.log.Error(opDrain, "could not release the handover hold", withCause(fields, err))
+		i.log.Error(opDrain, "could not release the handover hold", dlog.WithCause(fields, err))
 		return fmt.Errorf("handover: drain %q: release the hold: %w", ws, err)
 	}
 	i.queue.OnLeaseChanged(ws)
@@ -188,16 +188,4 @@ func republish[T any](topic *publish.Topic[T]) bool {
 		return false
 	}
 	return topic.Republish()
-}
-
-// withCause adds an error to a log context without a nil check at every site.
-func withCause(fields dlog.Context, err error) dlog.Context {
-	out := dlog.Context{}
-	for k, v := range fields {
-		out[k] = v
-	}
-	if err != nil {
-		out["cause"] = err.Error()
-	}
-	return out
 }

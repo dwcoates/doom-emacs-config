@@ -446,6 +446,15 @@ type DB interface {
 	SetMergeRacingDisabled(ctx context.Context, disabled bool, at time.Time) error
 	// MergeRacing reports the daemon-wide racing switch.
 	MergeRacing(ctx context.Context) (RacingSwitch, error)
+	// SubscribeMergeQueue records a merge queue subscription, replacing the
+	// detail of the one its subscriber holds in the same scope, and answers
+	// whether it replaced one. A closed subscriber is ErrSubscriberClosed.
+	SubscribeMergeQueue(ctx context.Context, sub MergeQueueSubscription) (bool, error)
+	// UnsubscribeMergeQueue ends a subscriber's subscription in one scope,
+	// answering whether one stood there.
+	UnsubscribeMergeQueue(ctx context.Context, subscriber WorkspaceID, repo RepoKey) (bool, error)
+	// MergeQueueSubscriptions loads every merge queue subscription.
+	MergeQueueSubscriptions(ctx context.Context) ([]MergeQueueSubscription, error)
 
 	// OpenFault records a fault and returns its id.
 	OpenFault(ctx context.Context, f Fault) (FaultID, error)
