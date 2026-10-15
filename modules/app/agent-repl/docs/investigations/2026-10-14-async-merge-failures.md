@@ -19,7 +19,7 @@ the log records that show it, so the failures can be fixed at their source.
 | 8 | 2026-10-15 | `tier-audit-e2e-step-c` (tip `32d6f55b9e`, instruction: rebase onto master keeping only the two step-(c) commits) | `tier-audit-e2e-step-c-merge` | FAILED: the e2e-emacs gate hit host file-table exhaustion from Docker's VM, see entry 8 |
 | 9 | 2026-10-15 | `sandbox-no-host-mounts` (tip `a54186877d`, the structural fix for entry 8, at the FRONT) | `sandbox-no-host-mounts-merge` | LANDED (`55fd63fe5d`), deployed |
 | 10 | 2026-10-15 | `test-suite-skip-hdv-land` (35 commits, suite reuse) | `test-suite-reuse-merge` | LANDED (`a980538e8b`), deployed |
-| 11 | 2026-10-15 | `test-timer-waits-land` (tip `087c0e4da4`) | `timer-waits-landing` | requested, pending (queue resumed ~10:00) |
+| 11 | 2026-10-15 | `test-timer-waits-land` (tip `087c0e4da4`) | `timer-waits-landing` | LANDED (`9076bd2ecf`), deployed |
 | 12 | 2026-10-15 | `redundancy-tool` (tip `764923476a`, the redundancy tool and pinned baseline, minor) | `redundancy-tool-land` | requested, pending (queue resumed ~10:00) |
 | 13 | 2026-10-15 | `sessions-test-slim` (one commit: 117 redundant cases removed from `sessions_test.go`, -0.04 coverage points) | `sessions-test-slim-land` | requested, pending (queue resumed ~10:00) |
 | 14 | 2026-10-15 | `tier-audit-e2e-step-c2` (tip `4b99b4a9cc`, step (c) rebased onto the fd fix; the retry of entry 8) | `tier-audit-e2e-step-c2-merge` | requested, pending |
