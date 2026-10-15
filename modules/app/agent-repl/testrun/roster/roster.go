@@ -213,6 +213,8 @@ var Suites = []Suite{
 			"agent-shim/claude/shim-sidecar/integration/", "agent-shim/shim-store/integration/",
 			// The command-file tests run the emitter script.
 			"skills/emit-workspace-commands.sh",
+			// gitclient pins the markers the merge queue's hook spells.
+			"/.githooks/reference-transaction",
 		}}},
 	{Name: "sidecar", Kind: GoModule, Path: "agent-shim/claude/shim-sidecar", TestParallel: map[string]int{"integration": 8},
 		Programs: map[string][]string{"integration": {"shim-claude-sidecar", "shim-lock"}},
