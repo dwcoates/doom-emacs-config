@@ -66,7 +66,6 @@ type fakeDB struct {
 	arrangements []string
 	arrangeErr   error
 
-
 	// rolledBack is each workspace's rolled-back turns; rolledBackErr fails
 	// the read.
 	rolledBack    map[ids.WorkspaceID][]ids.TurnID
@@ -557,8 +556,8 @@ func (d *fakeDB) MoveRepository(_ context.Context, id ids.RepoID, before *ids.Re
 	return d.arrange("MoveRepository " + string(id) + " " + ids.Optional(before))
 }
 
-func (d *fakeDB) PlaceWorkspace(_ context.Context, ws ids.WorkspaceID, into *ids.SubsectionID, before *ids.WorkspaceID) error {
-	return d.arrange("PlaceWorkspace " + string(ws) + " " + ids.Optional(into) + " " + ids.Optional(before))
+func (d *fakeDB) PlaceWorkspaces(_ context.Context, ws []ids.WorkspaceID, into *ids.SubsectionID, before *ids.WorkspaceID) error {
+	return d.arrange(fmt.Sprintf("PlaceWorkspaces %v %s %s", ws, ids.Optional(into), ids.Optional(before)))
 }
 
 func (d *fakeDB) SwapPlaces(_ context.Context, ws, target ids.WorkspaceID) error {

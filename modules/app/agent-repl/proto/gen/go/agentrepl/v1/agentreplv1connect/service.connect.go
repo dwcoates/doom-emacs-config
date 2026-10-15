@@ -145,6 +145,9 @@ const (
 	// AgentReplArrangeSidebarProcedure is the fully-qualified name of the AgentRepl's ArrangeSidebar
 	// RPC.
 	AgentReplArrangeSidebarProcedure = "/agentrepl.v1.AgentRepl/ArrangeSidebar"
+	// AgentReplGetSidebarArrangementProcedure is the fully-qualified name of the AgentRepl's
+	// GetSidebarArrangement RPC.
+	AgentReplGetSidebarArrangementProcedure = "/agentrepl.v1.AgentRepl/GetSidebarArrangement"
 	// AgentReplCreateTaskProcedure is the fully-qualified name of the AgentRepl's CreateTask RPC.
 	AgentReplCreateTaskProcedure = "/agentrepl.v1.AgentRepl/CreateTask"
 	// AgentReplUpdateTaskProcedure is the fully-qualified name of the AgentRepl's UpdateTask RPC.
@@ -307,6 +310,7 @@ var (
 	agentReplFoldRepositoryMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("FoldRepository")
 	agentReplUpdateSidebarViewMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("UpdateSidebarView")
 	agentReplArrangeSidebarMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("ArrangeSidebar")
+	agentReplGetSidebarArrangementMethodDescriptor    = agentReplServiceDescriptor.Methods().ByName("GetSidebarArrangement")
 	agentReplCreateTaskMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("CreateTask")
 	agentReplUpdateTaskMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("UpdateTask")
 	agentReplAssignWorkspaceTaskMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("AssignWorkspaceTask")
@@ -476,6 +480,9 @@ type AgentReplClient interface {
 	// where. The tab bar follows the arrangement. See
 	// endpoint_arrange_sidebar.proto.
 	ArrangeSidebar(context.Context, *connect.Request[v1.ArrangeSidebarRequest]) (*connect.Response[v1.ArrangeSidebarResponse], error)
+	// Read the repository grouping's arrangement, for an agent organizing it.
+	// See endpoint_get_sidebar_arrangement.proto.
+	GetSidebarArrangement(context.Context, *connect.Request[v1.GetSidebarArrangementRequest]) (*connect.Response[v1.GetSidebarArrangementResponse], error)
 	// A new user task; the roster's task view renders it. See
 	// endpoint_create_task.proto.
 	CreateTask(context.Context, *connect.Request[v1.CreateTaskRequest]) (*connect.Response[v1.CreateTaskResponse], error)
@@ -863,6 +870,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplArrangeSidebarMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		getSidebarArrangement: connect.NewClient[v1.GetSidebarArrangementRequest, v1.GetSidebarArrangementResponse](
+			httpClient,
+			baseURL+AgentReplGetSidebarArrangementProcedure,
+			connect.WithSchema(agentReplGetSidebarArrangementMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		createTask: connect.NewClient[v1.CreateTaskRequest, v1.CreateTaskResponse](
 			httpClient,
 			baseURL+AgentReplCreateTaskProcedure,
@@ -1182,6 +1195,7 @@ type agentReplClient struct {
 	foldRepository           *connect.Client[v1.FoldRepositoryRequest, v1.FoldRepositoryResponse]
 	updateSidebarView        *connect.Client[v1.UpdateSidebarViewRequest, v1.UpdateSidebarViewResponse]
 	arrangeSidebar           *connect.Client[v1.ArrangeSidebarRequest, v1.ArrangeSidebarResponse]
+	getSidebarArrangement    *connect.Client[v1.GetSidebarArrangementRequest, v1.GetSidebarArrangementResponse]
 	createTask               *connect.Client[v1.CreateTaskRequest, v1.CreateTaskResponse]
 	updateTask               *connect.Client[v1.UpdateTaskRequest, v1.UpdateTaskResponse]
 	assignWorkspaceTask      *connect.Client[v1.AssignWorkspaceTaskRequest, v1.AssignWorkspaceTaskResponse]
@@ -1418,6 +1432,11 @@ func (c *agentReplClient) UpdateSidebarView(ctx context.Context, req *connect.Re
 // ArrangeSidebar calls agentrepl.v1.AgentRepl.ArrangeSidebar.
 func (c *agentReplClient) ArrangeSidebar(ctx context.Context, req *connect.Request[v1.ArrangeSidebarRequest]) (*connect.Response[v1.ArrangeSidebarResponse], error) {
 	return c.arrangeSidebar.CallUnary(ctx, req)
+}
+
+// GetSidebarArrangement calls agentrepl.v1.AgentRepl.GetSidebarArrangement.
+func (c *agentReplClient) GetSidebarArrangement(ctx context.Context, req *connect.Request[v1.GetSidebarArrangementRequest]) (*connect.Response[v1.GetSidebarArrangementResponse], error) {
+	return c.getSidebarArrangement.CallUnary(ctx, req)
 }
 
 // CreateTask calls agentrepl.v1.AgentRepl.CreateTask.
@@ -1771,6 +1790,9 @@ type AgentReplHandler interface {
 	// where. The tab bar follows the arrangement. See
 	// endpoint_arrange_sidebar.proto.
 	ArrangeSidebar(context.Context, *connect.Request[v1.ArrangeSidebarRequest]) (*connect.Response[v1.ArrangeSidebarResponse], error)
+	// Read the repository grouping's arrangement, for an agent organizing it.
+	// See endpoint_get_sidebar_arrangement.proto.
+	GetSidebarArrangement(context.Context, *connect.Request[v1.GetSidebarArrangementRequest]) (*connect.Response[v1.GetSidebarArrangementResponse], error)
 	// A new user task; the roster's task view renders it. See
 	// endpoint_create_task.proto.
 	CreateTask(context.Context, *connect.Request[v1.CreateTaskRequest]) (*connect.Response[v1.CreateTaskResponse], error)
@@ -2154,6 +2176,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplArrangeSidebarMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplGetSidebarArrangementHandler := connect.NewUnaryHandler(
+		AgentReplGetSidebarArrangementProcedure,
+		svc.GetSidebarArrangement,
+		connect.WithSchema(agentReplGetSidebarArrangementMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplCreateTaskHandler := connect.NewUnaryHandler(
 		AgentReplCreateTaskProcedure,
 		svc.CreateTask,
@@ -2508,6 +2536,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplUpdateSidebarViewHandler.ServeHTTP(w, r)
 		case AgentReplArrangeSidebarProcedure:
 			agentReplArrangeSidebarHandler.ServeHTTP(w, r)
+		case AgentReplGetSidebarArrangementProcedure:
+			agentReplGetSidebarArrangementHandler.ServeHTTP(w, r)
 		case AgentReplCreateTaskProcedure:
 			agentReplCreateTaskHandler.ServeHTTP(w, r)
 		case AgentReplUpdateTaskProcedure:
@@ -2759,6 +2789,10 @@ func (UnimplementedAgentReplHandler) UpdateSidebarView(context.Context, *connect
 
 func (UnimplementedAgentReplHandler) ArrangeSidebar(context.Context, *connect.Request[v1.ArrangeSidebarRequest]) (*connect.Response[v1.ArrangeSidebarResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ArrangeSidebar is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) GetSidebarArrangement(context.Context, *connect.Request[v1.GetSidebarArrangementRequest]) (*connect.Response[v1.GetSidebarArrangementResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.GetSidebarArrangement is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) CreateTask(context.Context, *connect.Request[v1.CreateTaskRequest]) (*connect.Response[v1.CreateTaskResponse], error) {

@@ -49,7 +49,7 @@ func mustSubsection(t *testing.T, s *store, repo RepoID, name string) Subsection
 // mustPlace puts WS into INTO before BEFORE.
 func mustPlace(t *testing.T, s *store, ws WorkspaceID, into *SubsectionID, before *WorkspaceID) {
 	t.Helper()
-	if err := s.PlaceWorkspace(context.Background(), ws, into, before); err != nil {
+	if err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{ws}, into, before); err != nil {
 		t.Fatalf("PlaceWorkspace(%s): %v", ws, err)
 	}
 }
@@ -550,7 +550,7 @@ func TestPlaceWorkspaceIntoAnEmptySubsectionPutsItLast(t *testing.T) {
 	later := mustSubsection(t, s, first.Repo, "later")
 
 	// Act
-	err := s.PlaceWorkspace(context.Background(), first.ID, &later.ID, nil)
+	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{first.ID}, &later.ID, nil)
 
 	// Assert
 	if err != nil {
@@ -594,7 +594,7 @@ func TestPlaceWorkspaceBeforeAnAnchor(t *testing.T) {
 			}
 
 			// Act
-			err := s.PlaceWorkspace(context.Background(), byName[tt.move], nil, before)
+			err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{byName[tt.move]}, nil, before)
 
 			// Assert
 			if err != nil {
@@ -641,7 +641,7 @@ func TestPlaceWorkspaceRefusesAChild(t *testing.T) {
 	order := orderedNames(t, s)
 
 	// Act
-	err := s.PlaceWorkspace(context.Background(), child.ID, &later.ID, nil)
+	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{child.ID}, &later.ID, nil)
 
 	// Assert
 	if !errors.Is(err, ErrHasParent) {
@@ -653,7 +653,7 @@ func TestPlaceWorkspaceRefusesAChild(t *testing.T) {
 	if got := orderedNames(t, s); !slices.Equal(got, order) {
 		t.Fatalf("place order after a refusal = %v, want %v", got, order)
 	}
-	if !hasOperation(log, "daemon.wsm.place_workspace") {
+	if !hasOperation(log, "daemon.wsm.place_workspaces") {
 		t.Fatalf("no daemon.wsm.place_workspace record: %v", log.Records())
 	}
 }
@@ -780,7 +780,7 @@ func TestPlaceWorkspaceRefusals(t *testing.T) {
 			order := orderedNames(t, s)
 
 			// Act
-			err := s.PlaceWorkspace(context.Background(), tt.ws(w), tt.into(w), tt.before(w))
+			err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{tt.ws(w)}, tt.into(w), tt.before(w))
 
 			// Assert
 			if !errors.Is(err, tt.want) {
@@ -804,17 +804,17 @@ func TestPlaceWorkspaceRecordsARefusal(t *testing.T) {
 	foreign := mustSubsection(t, s, other.Repo, "foreign")
 
 	// Act
-	err := s.PlaceWorkspace(context.Background(), ws.ID, &foreign.ID, nil)
+	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{ws.ID}, &foreign.ID, nil)
 
 	// Assert
 	if !errors.Is(err, ErrOtherRepository) {
 		t.Fatalf("PlaceWorkspace = %v, want ErrOtherRepository", err)
 	}
-	rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Operation: "daemon.wsm.place_workspace", Message: "the arrangement was refused; nothing was written"})
+	rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Operation: "daemon.wsm.place_workspaces", Message: "the arrangement was refused; nothing was written"})
 	if !ok {
 		t.Fatalf("no daemon.wsm.place_workspace record: %v", log.Records())
 	}
-	if rec.Context["workspace"] != string(ws.ID) || rec.Context["into"] != string(foreign.ID) {
+	if !slices.Equal(rec.Context["workspaces"].([]WorkspaceID), []WorkspaceID{ws.ID}) || rec.Context["into"] != string(foreign.ID) {
 		t.Fatalf("the refusal's record context = %v", rec.Context)
 	}
 }
@@ -988,5 +988,101 @@ func TestSwapPlacesWithAChildExchangesPlacesAlone(t *testing.T) {
 	}
 	if sub := subsectionOf(t, s, root.ID); !sameSubsection(sub, &later.ID) {
 		t.Fatalf("root's subsection = %v, want it kept as %q", sub, later.ID)
+	}
+}
+
+func TestPlaceWorkspacesFilesSeveralAsOneBlockInTheirOrder(t *testing.T) {
+	// Arrange -- an agent filing the children it just created, in its order.
+	s, _ := testStore(t)
+	repoDir := arrangeRepo(t, "repo")
+	a := registerIn(t, s, repoDir, "a", nil)
+	b := registerIn(t, s, repoDir, "b", nil)
+	c := registerIn(t, s, repoDir, "c", nil)
+	stays := registerIn(t, s, repoDir, "stays", nil)
+	later := mustSubsection(t, s, a.Repo, "later")
+
+	// Act
+	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{c.ID, a.ID, b.ID}, &later.ID, nil)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("PlaceWorkspaces: %v", err)
+	}
+	for _, ws := range []WorkspaceID{a.ID, b.ID, c.ID} {
+		if got := subsectionOf(t, s, ws); !sameSubsection(got, &later.ID) {
+			t.Fatalf("workspace %s sits in %v, want %q", ws, got, later.ID)
+		}
+	}
+	if got := subsectionOf(t, s, stays.ID); got != nil {
+		t.Fatalf("an unnamed workspace moved into %q", *got)
+	}
+	names := orderedNames(t, s)
+	block := slices.DeleteFunc(names, func(name string) bool { return name == "stays" })
+	if !slices.Equal(block, []string{"c", "a", "b"}) {
+		t.Fatalf("placed order = %v, want [c a b]", block)
+	}
+}
+
+func TestPlaceWorkspacesIsAppliedWholeOrNotAtAll(t *testing.T) {
+	// Arrange -- the second of two workspaces is a child.
+	s, _ := testStore(t)
+	repoDir := arrangeRepo(t, "repo")
+	root := registerIn(t, s, repoDir, "root", nil)
+	child := registerChild(t, s, repoDir, "child", root.ID)
+	later := mustSubsection(t, s, root.Repo, "later")
+
+	// Act
+	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{root.ID, child.ID}, &later.ID, nil)
+
+	// Assert
+	if !errors.Is(err, ErrHasParent) {
+		t.Fatalf("PlaceWorkspaces = %v, want ErrHasParent", err)
+	}
+	if got := subsectionOf(t, s, root.ID); got != nil {
+		t.Fatalf("the first workspace moved into %q although the placement was refused", *got)
+	}
+}
+
+func TestPlaceWorkspacesRefusesWorkspacesOfTwoRepositories(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	a := registerIn(t, s, arrangeRepo(t, "one"), "a", nil)
+	b := registerIn(t, s, arrangeRepo(t, "two"), "b", nil)
+
+	// Act
+	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{a.ID, b.ID}, nil, nil)
+
+	// Assert
+	if !errors.Is(err, ErrOtherRepository) {
+		t.Fatalf("PlaceWorkspaces = %v, want ErrOtherRepository", err)
+	}
+}
+
+func TestPlaceWorkspacesRefusesAMalformedPlacement(t *testing.T) {
+	tests := []struct {
+		name   string
+		ws     []WorkspaceID
+		before *WorkspaceID
+	}{
+		{name: "no workspace", ws: nil},
+		{name: "one workspace twice", ws: []WorkspaceID{"w", "w"}},
+		{name: "before one it places", ws: []WorkspaceID{"w"}, before: &[]WorkspaceID{"w"}[0]},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, log := testStore(t)
+
+			// Act
+			err := s.PlaceWorkspaces(context.Background(), tt.ws, nil, tt.before)
+
+			// Assert
+			if err == nil {
+				t.Fatalf("PlaceWorkspaces accepted %s", tt.name)
+			}
+			if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: "daemon.wsm.place_workspaces"}); !ok {
+				t.Fatalf("no error record: %v", log.Records())
+			}
+		})
 	}
 }

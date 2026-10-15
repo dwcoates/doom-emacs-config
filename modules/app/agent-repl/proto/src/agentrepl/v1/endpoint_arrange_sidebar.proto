@@ -44,6 +44,9 @@ message ArrangeSidebarRequest {
     ArrangeMoveRepository move_repository = 5;
     // Put one workspace into a subsection (or none) at a place.
     ArrangePlaceWorkspace place_workspace = 6;
+    // Put several workspaces into a subsection (or none) at a place, as one
+    // block, in one change.
+    ArrangePlaceWorkspaces place_workspaces = 7;
   }
 }
 
@@ -123,6 +126,29 @@ message ArrangePlaceWorkspace {
   }
 }
 
+// Put several ROOT workspaces of one repository, in the order given, into a
+// subsection of it (or into none) as one block at a place among the roots
+// already there: ArrangePlaceWorkspace for many, applied whole or not at all.
+// The bulk form an agent files a batch of workspaces with.
+message ArrangePlaceWorkspaces {
+  // At least one; no workspace twice (InvalidArgument otherwise). Every one
+  // must be a root of the same repository (has_parent, other_repository).
+  repeated workspace.v1.WorkspaceRef workspaces = 1;
+  // WHERE THEY GO. THE ARM IS THE DESTINATION; unset is malformed.
+  oneof into {
+    ArrangeNoSubsection no_subsection = 2;
+    SubsectionRef subsection = 3;
+  }
+  // WHERE AMONG THE ROOTS THERE. THE ARM IS THE PLACE; unset is malformed.
+  oneof at {
+    // Just before this root of the destination, which is none of the placed
+    // workspaces (InvalidArgument otherwise).
+    workspace.v1.WorkspaceRef before = 4;
+    // After every root already there.
+    ArrangeEnd end = 5;
+  }
+}
+
 // The repository's unsectioned workspaces. DELIBERATELY EMPTY: the arm is
 // the destination.
 message ArrangeNoSubsection {}
@@ -150,6 +176,9 @@ message ArrangeSidebarSuccess {
   // older push that would put the moved item back for an instant. 0 when the
   // daemon has resolved no roster yet.
   uint64 roster_revision = 1;
+  // THE SUBSECTION THE CHANGE CREATED, present exactly when the change was
+  // create_subsection: the ref later changes name it by.
+  optional SubsectionRef created = 2;
 }
 
 // Validation failures (an unset field or arm, a blank id, an item placed

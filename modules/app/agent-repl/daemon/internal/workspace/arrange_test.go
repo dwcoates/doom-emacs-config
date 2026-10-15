@@ -27,7 +27,10 @@ func TestTheArrangementVerbsWriteAndRepublish(t *testing.T) {
 		want string
 	}{
 		{name: "create a subsection", op: opCreateSubsection, want: "CreateSubsection repo-1 later",
-			act: func(ctx context.Context, v Verbs) error { return v.CreateSubsection(ctx, "repo-1", "later") }},
+			act: func(ctx context.Context, v Verbs) error {
+				_, err := v.CreateSubsection(ctx, "repo-1", "later")
+				return err
+			}},
 		{name: "rename a subsection", op: opRenameSubsection, want: "RenameSubsection sub-1 sooner",
 			act: func(ctx context.Context, v Verbs) error { return v.RenameSubsection(ctx, "sub-1", "sooner") }},
 		{name: "delete a subsection", op: opDeleteSubsection, want: "DeleteSubsection sub-1",
@@ -36,10 +39,10 @@ func TestTheArrangementVerbsWriteAndRepublish(t *testing.T) {
 			act: func(ctx context.Context, v Verbs) error { return v.MoveSubsection(ctx, "sub-1", subsectionID("sub-2")) }},
 		{name: "move a repository", op: opMoveRepository, want: "MoveRepository repo-1 ",
 			act: func(ctx context.Context, v Verbs) error { return v.MoveRepository(ctx, "repo-1", nil) }},
-		{name: "place a workspace", op: opPlaceWorkspace, want: "PlaceWorkspace w1 sub-1 w2",
+		{name: "place workspaces", op: opPlaceWorkspace, want: "PlaceWorkspaces [w1] sub-1 w2",
 			act: func(ctx context.Context, v Verbs) error {
 				before := ids.WorkspaceID("w2")
-				return v.PlaceWorkspace(ctx, "w1", subsectionID("sub-1"), &before)
+				return v.PlaceWorkspaces(ctx, []ids.WorkspaceID{"w1"}, subsectionID("sub-1"), &before)
 			}},
 	}
 	for _, tt := range tests {
@@ -91,7 +94,7 @@ func TestTheArrangementVerbsAnswerTheStoresRefusalsOnTheirArms(t *testing.T) {
 			f.db.arrangeErr = tt.err
 
 			// Act
-			err := f.verbs.PlaceWorkspace(context.Background(), "w1", subsectionID("sub-1"), nil)
+			err := f.verbs.PlaceWorkspaces(context.Background(), []ids.WorkspaceID{"w1"}, subsectionID("sub-1"), nil)
 
 			// Assert
 			refusal := asRefusal(t, err, tt.arm)
@@ -130,7 +133,7 @@ func TestTheArrangementVerbsSurfaceAStoreFailure(t *testing.T) {
 	f.db.arrangeErr = errors.New("disk on fire")
 
 	// Act
-	err := f.verbs.CreateSubsection(context.Background(), "repo-1", "later")
+	_, err := f.verbs.CreateSubsection(context.Background(), "repo-1", "later")
 
 	// Assert
 	if !errors.Is(err, f.db.arrangeErr) {
@@ -151,14 +154,14 @@ func TestTheArrangementVerbsSurfaceAStoreFailure(t *testing.T) {
 	}
 }
 
-func TestPlaceWorkspaceRefusesAWorkspaceThisDaemonDoesNotServe(t *testing.T) {
+func TestPlaceWorkspacesRefusesAWorkspaceThisDaemonDoesNotServe(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	f.owner.standing = StandingTransferringAway
 
 	// Act
-	err := f.verbs.PlaceWorkspace(context.Background(), "w1", nil, nil)
+	err := f.verbs.PlaceWorkspaces(context.Background(), []ids.WorkspaceID{"w1"}, nil, nil)
 
 	// Assert
 	asRefusal(t, err, ArmTransferringAway)
@@ -167,14 +170,14 @@ func TestPlaceWorkspaceRefusesAWorkspaceThisDaemonDoesNotServe(t *testing.T) {
 	}
 }
 
-func TestPlaceWorkspaceRefusesAnUnknownAnchor(t *testing.T) {
+func TestPlaceWorkspacesRefusesAnUnknownAnchor(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	absent := ids.WorkspaceID("absent")
 
 	// Act
-	err := f.verbs.PlaceWorkspace(context.Background(), "w1", nil, &absent)
+	err := f.verbs.PlaceWorkspaces(context.Background(), []ids.WorkspaceID{"w1"}, nil, &absent)
 
 	// Assert
 	asRefusal(t, err, ArmUnknownWorkspace)
@@ -197,5 +200,70 @@ func TestTheRepublishedRosterCarriesTheSubsections(t *testing.T) {
 	// Assert
 	if got := f.sidebar.registries[0].Subsections; !slices.Equal(got, f.db.subsections) {
 		t.Fatalf("republished subsections = %v, want %v", got, f.db.subsections)
+	}
+}
+
+func TestCreateSubsectionAnswersTheSubsectionCreated(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+
+	// Act
+	sub, err := f.verbs.CreateSubsection(context.Background(), "repo-1", "later")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("CreateSubsection: %v", err)
+	}
+	if sub.ID != "sub-new" || sub.Name != "later" {
+		t.Fatalf("created = %+v, want sub-new named later", sub)
+	}
+}
+
+func TestPlaceWorkspacesRefusesAnyWorkspaceThisDaemonDoesNotKnow(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act
+	err := f.verbs.PlaceWorkspaces(context.Background(), []ids.WorkspaceID{"w1", "absent"}, nil, nil)
+
+	// Assert
+	asRefusal(t, err, ArmUnknownWorkspace)
+	if len(f.db.arrangements) != 0 {
+		t.Fatalf("a refused placement wrote %v", f.db.arrangements)
+	}
+}
+
+func TestSidebarArrangementReadsTheRegistrysArrangement(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act
+	got, err := f.verbs.SidebarArrangement(context.Background())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("SidebarArrangement: %v", err)
+	}
+	if len(got) != 1 || len(got[0].Workspaces) != 1 || got[0].Workspaces[0].Workspace.ID != "w1" {
+		t.Fatalf("arrangement = %+v, want the one workspace in its repository", got)
+	}
+}
+
+func TestSidebarArrangementSurfacesAnUnreadableRegistry(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.db.listWorkspacesErr = errors.New("disk on fire")
+
+	// Act
+	_, err := f.verbs.SidebarArrangement(context.Background())
+
+	// Assert
+	if err == nil {
+		t.Fatal("SidebarArrangement read an unreadable registry")
+	}
+	if !loggedAtError(f, opSidebarArrangement) {
+		t.Fatal("the failed read was not logged at error")
 	}
 }

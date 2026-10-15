@@ -380,7 +380,7 @@ type Verbs interface {
 	FoldOpenSection(ctx context.Context, folded bool) error
 	// CreateSubsection adds a named subsection at the bottom of a
 	// repository's section and republishes the roster (arrange.go).
-	CreateSubsection(ctx context.Context, repo ids.RepoID, name string) error
+	CreateSubsection(ctx context.Context, repo ids.RepoID, name string) (wsm.Subsection, error)
 	// RenameSubsection relabels one subsection and republishes the roster.
 	RenameSubsection(ctx context.Context, id ids.SubsectionID, name string) error
 	// DeleteSubsection removes one subsection, its workspaces returning to
@@ -392,10 +392,13 @@ type Verbs interface {
 	// MoveRepository moves one repository before another (nil: last) and
 	// republishes the roster.
 	MoveRepository(ctx context.Context, id ids.RepoID, before *ids.RepoID) error
-	// PlaceWorkspace puts one workspace, with its nested family, into a
-	// subsection of its repository (nil: none) before a workspace there
-	// (nil: last), and republishes the roster.
-	PlaceWorkspace(ctx context.Context, ws ids.WorkspaceID, into *ids.SubsectionID, before *ids.WorkspaceID) error
+	// PlaceWorkspaces puts root workspaces, with their families, into a
+	// subsection of their repository (nil: none) as one block before a root
+	// there (nil: last), and republishes the roster.
+	PlaceWorkspaces(ctx context.Context, ws []ids.WorkspaceID, into *ids.SubsectionID, before *ids.WorkspaceID) error
+	// SidebarArrangement reads the repository grouping's arrangement, for an
+	// agent organizing it (GetSidebarArrangement).
+	SidebarArrangement(ctx context.Context) ([]sidebar.ArrangedRepository, error)
 	// CreateTask records a new task.
 	CreateTask(ctx context.Context, title string) (wsm.Task, error)
 	// UpdateTask retitles, completes or reopens a task.

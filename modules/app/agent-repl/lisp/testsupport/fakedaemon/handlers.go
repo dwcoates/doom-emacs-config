@@ -160,6 +160,10 @@ func (s *fakeServer) ArrangeSidebar(ctx context.Context, req *connect.Request[v1
 	return handleUnary[v1.ArrangeSidebarRequest, v1.ArrangeSidebarResponse](ctx, s, "ArrangeSidebar", req.Msg)
 }
 
+func (s *fakeServer) GetSidebarArrangement(ctx context.Context, req *connect.Request[v1.GetSidebarArrangementRequest]) (*connect.Response[v1.GetSidebarArrangementResponse], error) {
+	return handleUnary[v1.GetSidebarArrangementRequest, v1.GetSidebarArrangementResponse](ctx, s, "GetSidebarArrangement", req.Msg)
+}
+
 func (s *fakeServer) CreateTask(ctx context.Context, req *connect.Request[v1.CreateTaskRequest]) (*connect.Response[v1.CreateTaskResponse], error) {
 	return handleUnary[v1.CreateTaskRequest, v1.CreateTaskResponse](ctx, s, "CreateTask", req.Msg)
 }

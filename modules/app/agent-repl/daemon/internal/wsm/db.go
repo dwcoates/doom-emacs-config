@@ -117,10 +117,10 @@ type DB interface {
 	MoveSubsection(ctx context.Context, id SubsectionID, before *SubsectionID) error
 	// MoveRepository moves one repository before another (nil: last).
 	MoveRepository(ctx context.Context, id RepoID, before *RepoID) error
-	// PlaceWorkspace puts one workspace, with its nested family, into a
-	// subsection of its repository (nil: none) before a workspace there (nil:
-	// last).
-	PlaceWorkspace(ctx context.Context, ws WorkspaceID, into *SubsectionID, before *WorkspaceID) error
+	// PlaceWorkspaces puts root workspaces, with their families, into a
+	// subsection of their repository (nil: none) as one block before a root
+	// there (nil: last).
+	PlaceWorkspaces(ctx context.Context, ws []WorkspaceID, into *SubsectionID, before *WorkspaceID) error
 	// SetAttention sets or clears the roster's attention marker.
 	SetAttention(ctx context.Context, id WorkspaceID, on bool) error
 	// SetResult records, or clears with nil, the roster's last turn result.

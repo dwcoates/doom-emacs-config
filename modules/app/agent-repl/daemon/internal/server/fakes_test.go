@@ -329,6 +329,10 @@ type fakeVerbs struct {
 	// "<method> <args>", and arrangeErr is what each answers instead.
 	arrangements []string
 	arrangeErr   error
+	// arrangement is what SidebarArrangement answers, arrangementErr its
+	// failure instead.
+	arrangement    []sidebar.ArrangedRepository
+	arrangementErr error
 
 	// folds records every FoldRepository the handler resolved onto the verb,
 	// and foldErr is what the verb answers instead.
@@ -1758,8 +1762,8 @@ func (v *fakeVerbs) arrange(call string) error {
 	return v.arrangeErr
 }
 
-func (v *fakeVerbs) CreateSubsection(_ context.Context, repo ids.RepoID, name string) error {
-	return v.arrange("CreateSubsection " + string(repo) + " " + name)
+func (v *fakeVerbs) CreateSubsection(_ context.Context, repo ids.RepoID, name string) (wsm.Subsection, error) {
+	return wsm.Subsection{ID: "sub-new", Repo: repo, Name: name, Place: 1}, v.arrange("CreateSubsection " + string(repo) + " " + name)
 }
 
 func (v *fakeVerbs) RenameSubsection(_ context.Context, id ids.SubsectionID, name string) error {
@@ -1778,8 +1782,12 @@ func (v *fakeVerbs) MoveRepository(_ context.Context, id ids.RepoID, before *ids
 	return v.arrange("MoveRepository " + string(id) + " " + ids.Optional(before))
 }
 
-func (v *fakeVerbs) PlaceWorkspace(_ context.Context, ws ids.WorkspaceID, into *ids.SubsectionID, before *ids.WorkspaceID) error {
-	return v.arrange("PlaceWorkspace " + string(ws) + " " + ids.Optional(into) + " " + ids.Optional(before))
+func (v *fakeVerbs) PlaceWorkspaces(_ context.Context, ws []ids.WorkspaceID, into *ids.SubsectionID, before *ids.WorkspaceID) error {
+	return v.arrange(fmt.Sprintf("PlaceWorkspaces %v %s %s", ws, ids.Optional(into), ids.Optional(before)))
+}
+
+func (v *fakeVerbs) SidebarArrangement(context.Context) ([]sidebar.ArrangedRepository, error) {
+	return v.arrangement, v.arrangementErr
 }
 
 func (v *fakeVerbs) FoldRepository(_ context.Context, repo ids.RepoID, folded bool) error {

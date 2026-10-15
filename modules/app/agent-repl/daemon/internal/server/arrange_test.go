@@ -12,6 +12,8 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
+	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
 )
@@ -86,9 +88,16 @@ func TestArrangeSidebarHandsEachChangeToItsVerb(t *testing.T) {
 		{name: "move a repository before another", req: moveRepository("repo-2", repoRef("repo-1")), want: "MoveRepository repo-2 repo-1"},
 		{name: "move a repository to the end", req: moveRepository("repo-1", nil), want: "MoveRepository repo-1 "},
 		{name: "place a workspace before another in a subsection", req: placeWorkspace(ref(), "sub-1", other),
-			want: "PlaceWorkspace " + string(testWorkspaceID) + " sub-1 ws-2"},
+			want: "PlaceWorkspaces [" + string(testWorkspaceID) + "] sub-1 ws-2"},
 		{name: "place a workspace last among the unsectioned", req: placeWorkspace(ref(), "", nil),
-			want: "PlaceWorkspace " + string(testWorkspaceID) + "  "},
+			want: "PlaceWorkspaces [" + string(testWorkspaceID) + "]  "},
+		{name: "place several workspaces as one block", want: "PlaceWorkspaces [ws-2 " + string(testWorkspaceID) + "] sub-1 ",
+			req: &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_PlaceWorkspaces{
+				PlaceWorkspaces: &agentreplv1.ArrangePlaceWorkspaces{
+					Workspaces: []*workspacev1.WorkspaceRef{other, ref()},
+					Into:       &agentreplv1.ArrangePlaceWorkspaces_Subsection{Subsection: subRef("sub-1")},
+					At:         &agentreplv1.ArrangePlaceWorkspaces_End{End: endPlace()},
+				}}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -257,6 +266,9 @@ func TestValidateArrangeSidebarRequestRefusesAnIncompleteRequest(t *testing.T) {
 			PlaceWorkspace: &agentreplv1.ArrangePlaceWorkspace{Workspace: ref(),
 				Into: &agentreplv1.ArrangePlaceWorkspace_NoSubsection{NoSubsection: &agentreplv1.ArrangeNoSubsection{}}}}}},
 		{"a workspace placed before itself", selfBefore},
+		{"a bulk placement of nothing", bulk(nil, nil)},
+		{"a bulk placement naming one workspace twice", bulk([]*workspacev1.WorkspaceRef{ref(), ref()}, nil)},
+		{"a bulk placement before one of its own", bulk([]*workspacev1.WorkspaceRef{ref()}, ref())},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -299,5 +311,116 @@ func TestArrangeSidebarAnswersTheRevisionOfTheRosterThatCarriesTheChange(t *test
 				t.Fatalf("roster revision = %d, want %d", got, tt.want)
 			}
 		})
+	}
+}
+
+// bulk is a place_workspaces change of WORKSPACES into no subsection, before
+// BEFORE or else last.
+func bulk(workspaces []*workspacev1.WorkspaceRef, before *workspacev1.WorkspaceRef) *agentreplv1.ArrangeSidebarRequest {
+	place := &agentreplv1.ArrangePlaceWorkspaces{
+		Workspaces: workspaces,
+		Into:       &agentreplv1.ArrangePlaceWorkspaces_NoSubsection{NoSubsection: &agentreplv1.ArrangeNoSubsection{}},
+		At:         &agentreplv1.ArrangePlaceWorkspaces_End{End: endPlace()},
+	}
+	if before != nil {
+		place.At = &agentreplv1.ArrangePlaceWorkspaces_Before{Before: before}
+	}
+	return &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_PlaceWorkspaces{PlaceWorkspaces: place}}
+}
+
+func TestArrangeSidebarNamesTheSubsectionItCreated(t *testing.T) {
+	tests := []struct {
+		name string
+		req  *agentreplv1.ArrangeSidebarRequest
+		want string
+	}{
+		{name: "a create names it", req: createSubsection("repo-1", "later"), want: "sub-new"},
+		{name: "any other change names none", req: moveRepository("repo-1", nil), want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h, _ := arrangeHarness(t)
+
+			// Act
+			resp, err := h.Client.ArrangeSidebar(context.Background(), connect.NewRequest(tt.req))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("ArrangeSidebar: %v", err)
+			}
+			if got := resp.Msg.GetSuccess().GetCreated().GetId(); got != tt.want {
+				t.Fatalf("created = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestArrangeSidebarResolvesEveryBulkWorkspaceBeforeTheVerb(t *testing.T) {
+	// Arrange
+	h, _ := arrangeHarness(t)
+
+	// Act
+	resp, err := h.Client.ArrangeSidebar(context.Background(), connect.NewRequest(
+		bulk([]*workspacev1.WorkspaceRef{ref(), {Id: "ws-nope"}}, nil)))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ArrangeSidebar: %v", err)
+	}
+	if got := resp.Msg.GetError().GetUnknownWorkspace(); got.GetWorkspace().GetId() != "ws-nope" {
+		t.Fatalf("result = %v, want unknown_workspace naming ws-nope", resp.Msg.GetResult())
+	}
+	if len(h.Verbs.arrangements) != 0 {
+		t.Fatalf("verb calls = %v, want none", h.Verbs.arrangements)
+	}
+}
+
+func TestGetSidebarArrangementAnswersTheArrangement(t *testing.T) {
+	// Arrange
+	h, _ := arrangeHarness(t)
+	parent := ids.WorkspaceID("ws-p")
+	h.Verbs.arrangement = []sidebar.ArrangedRepository{{
+		Repository: wsm.Repository{ID: "repo-1", Dir: "/repos/one", Name: "one"},
+		Workspaces: []sidebar.ArrangedWorkspace{{
+			Workspace: wsm.Workspace{ID: "ws-p", Dir: "/w/p", Name: "p", Branch: "bp"},
+			Children:  []sidebar.ArrangedWorkspace{{Workspace: wsm.Workspace{ID: "ws-k", Dir: "/w/k", Name: "k", Parent: &parent, Hidden: true}}},
+		}},
+		Subsections: []sidebar.ArrangedSubsection{{Subsection: wsm.Subsection{ID: "sub-1", Repo: "repo-1", Name: "later", Place: 1}}},
+	}}
+
+	// Act
+	resp, err := h.Client.GetSidebarArrangement(context.Background(), connect.NewRequest(&agentreplv1.GetSidebarArrangementRequest{}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("GetSidebarArrangement: %v", err)
+	}
+	repo := resp.Msg.GetRepositories()[0]
+	root := repo.GetWorkspaces()[0]
+	child := root.GetChildren()[0]
+	got := []any{
+		repo.GetRepository().GetId(), repo.GetName(),
+		root.GetWorkspace().GetId(), root.GetBranch(), root.Parent == nil,
+		child.GetWorkspace().GetId(), child.GetParent().GetId(), child.GetHidden(),
+		repo.GetSubsections()[0].GetSubsection().GetId(), repo.GetSubsections()[0].GetName(),
+	}
+	want := []any{"repo-1", "one", "ws-p", "bp", true, "ws-k", "ws-p", true, "sub-1", "later"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("arrangement = %v, want %v", got, want)
+	}
+}
+
+func TestGetSidebarArrangementFailsAnUnreadableRegistry(t *testing.T) {
+	// Arrange
+	h, _ := arrangeHarness(t)
+	h.Verbs.arrangementErr = errors.New("the registry could not be read")
+
+	// Act
+	_, err := h.Client.GetSidebarArrangement(context.Background(), connect.NewRequest(&agentreplv1.GetSidebarArrangementRequest{}))
+
+	// Assert
+	if connect.CodeOf(err) != connect.CodeInternal {
+		t.Fatalf("GetSidebarArrangement = %v, want an internal failure", err)
 	}
 }

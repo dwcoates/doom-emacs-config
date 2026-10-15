@@ -1,0 +1,72 @@
+// endpoint_get_sidebar_arrangement.proto — GetSidebarArrangement: read how the
+// repository grouping is arranged. SIDEBAR section.
+//
+// FOR AGENTS. The webapp draws the arrangement from the roster stream; an
+// agent asked to organize the sidebar (or to file the children it just
+// created into a subsection) reads it here, in one compact answer, and
+// changes it with ArrangeSidebar (endpoint_arrange_sidebar.proto). Every ref
+// in the answer is the echo token ArrangeSidebar takes back.
+//
+// PULL, NOT PUSH, and it costs nothing to ask: the daemon reads its own
+// registry.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/subsection.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Asks for the whole arrangement. DELIBERATELY EMPTY.
+message GetSidebarArrangementRequest {}
+
+// The repository grouping, in the order the sidebar draws it and the Emacs
+// tab bar walks it.
+message GetSidebarArrangementResponse {
+  // Every registered repository, in its stored order.
+  repeated ArrangedRepository repositories = 1;
+}
+
+// One repository: its unsectioned families, then each subsection's.
+message ArrangedRepository {
+  workspace.v1.RepositoryRef repository = 1;
+  // The repository's drawn name.
+  string name = 2;
+  // The families in no subsection, root by root in drawn order.
+  repeated ArrangedWorkspace workspaces = 3;
+  // The repository's subsections, in their stored order, empty ones
+  // included.
+  repeated ArrangedSubsection subsections = 4;
+}
+
+// One subsection: its name and its families.
+message ArrangedSubsection {
+  SubsectionRef subsection = 1;
+  string name = 2;
+  // The families in the subsection, root by root in drawn order.
+  repeated ArrangedWorkspace workspaces = 3;
+}
+
+// One open workspace and its nested family. Only a ROOT (one with no
+// recorded parent) can be placed with ArrangeSidebar; its children sit
+// wherever it does. Closed and merged workspaces are not listed; a closed
+// one's open children are listed in its place.
+message ArrangedWorkspace {
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The workspace's drawn name.
+  string name = 2;
+  // The workspace's branch.
+  string branch = 3;
+  // Whether the user hid the workspace: the sidebar draws it in its hidden
+  // section, not here, but it keeps this place for when it is shown again.
+  bool hidden = 4;
+  // Its children, depth-first in drawn order.
+  repeated ArrangedWorkspace children = 5;
+  // The workspace's recorded parent, present exactly when it has one. Such a
+  // workspace is listed at the top of its run only when its parent is not
+  // (a closed parent's live children take its place), and like every child
+  // it cannot be placed on its own.
+  optional workspace.v1.WorkspaceRef parent = 6;
+}

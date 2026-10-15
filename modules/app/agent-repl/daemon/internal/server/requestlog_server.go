@@ -289,6 +289,13 @@ func (s *requestLoggingServer) ArrangeSidebar(
 	return serveUnary(s, ctx, "ArrangeSidebar", req, s.server.ArrangeSidebar)
 }
 
+func (s *requestLoggingServer) GetSidebarArrangement(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.GetSidebarArrangementRequest],
+) (*connect.Response[agentreplv1.GetSidebarArrangementResponse], error) {
+	return serveUnary(s, ctx, "GetSidebarArrangement", req, s.server.GetSidebarArrangement)
+}
+
 func (s *requestLoggingServer) CreateTask(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.CreateTaskRequest],

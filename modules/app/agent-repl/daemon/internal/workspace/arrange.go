@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/wsm"
 )
 
@@ -24,7 +26,9 @@ const (
 	opDeleteSubsection = "daemon.workspace.delete_subsection"
 	opMoveSubsection   = "daemon.workspace.move_subsection"
 	opMoveRepository   = "daemon.workspace.move_repository"
-	opPlaceWorkspace   = "daemon.workspace.place_workspace"
+	opPlaceWorkspace   = "daemon.workspace.place_workspaces"
+	// opSidebarArrangement is the operation GetSidebarArrangement's reads carry.
+	opSidebarArrangement = "daemon.workspace.sidebar_arrangement"
 )
 
 // arrangeRPC is the rpc every arrangement verb answers.
@@ -32,12 +36,18 @@ const arrangeRPC = "ArrangeSidebar"
 
 // CreateSubsection adds a subsection named NAME at the bottom of REPO's
 // section.
-func (v *verbs) CreateSubsection(ctx context.Context, repo ids.RepoID, name string) error {
+func (v *verbs) CreateSubsection(ctx context.Context, repo ids.RepoID, name string) (wsm.Subsection, error) {
 	log := v.deps.Log.Global().With(dlog.Context{"repo_id": string(repo), "name": name})
-	return v.arrange(ctx, log, opCreateSubsection, "create the subsection", func() error {
-		_, err := v.deps.DB.CreateSubsection(ctx, repo, name)
+	var created wsm.Subsection
+	err := v.arrange(ctx, log, opCreateSubsection, "create the subsection", func() error {
+		sub, err := v.deps.DB.CreateSubsection(ctx, repo, name)
+		created = sub
 		return err
 	})
+	if err != nil {
+		return wsm.Subsection{}, err
+	}
+	return created, nil
 }
 
 // RenameSubsection relabels subsection ID to NAME.
@@ -72,23 +82,37 @@ func (v *verbs) MoveRepository(ctx context.Context, id ids.RepoID, before *ids.R
 	})
 }
 
-// PlaceWorkspace puts workspace WS, with its nested family, into subsection
-// INTO (nil: none) before workspace BEFORE (nil: last). Both workspaces must
-// be this daemon's to serve, as every per-workspace verb's are.
-func (v *verbs) PlaceWorkspace(ctx context.Context, ws ids.WorkspaceID, into *ids.SubsectionID, before *ids.WorkspaceID) error {
-	_, log, err := v.owned(ctx, arrangeRPC, ws)
-	if err != nil {
-		return err
-	}
+// PlaceWorkspaces puts root workspaces WS, in that order and with their
+// families, into subsection INTO (nil: none) as one block before root BEFORE
+// (nil: last). Every workspace named must be this daemon's to serve, as every
+// per-workspace verb's are.
+func (v *verbs) PlaceWorkspaces(ctx context.Context, ws []ids.WorkspaceID, into *ids.SubsectionID, before *ids.WorkspaceID) error {
+	named := slices.Clone(ws)
 	if before != nil {
-		if _, _, err := v.owned(ctx, arrangeRPC, *before); err != nil {
+		named = append(named, *before)
+	}
+	for _, id := range named {
+		if _, _, err := v.owned(ctx, arrangeRPC, id); err != nil {
 			return err
 		}
 	}
-	log = log.With(dlog.Context{"into": ids.Optional(into), "before": ids.Optional(before)})
-	return v.arrange(ctx, log, opPlaceWorkspace, "place the workspace", func() error {
-		return v.deps.DB.PlaceWorkspace(ctx, ws, into, before)
+	log := v.deps.Log.Global().With(dlog.Context{"workspaces": ws, "into": ids.Optional(into), "before": ids.Optional(before)})
+	return v.arrange(ctx, log, opPlaceWorkspace, "place the workspaces", func() error {
+		return v.deps.DB.PlaceWorkspaces(ctx, ws, into, before)
 	})
+}
+
+// SidebarArrangement reads the repository grouping's arrangement from the
+// one registry read every roster is drawn from.
+func (v *verbs) SidebarArrangement(ctx context.Context) ([]sidebar.ArrangedRepository, error) {
+	log := v.deps.Log.Global()
+	reg, ok := v.readRegistry(ctx, log, opSidebarArrangement)
+	if !ok {
+		return nil, errors.New("read the sidebar arrangement: the registry could not be read")
+	}
+	out := sidebar.Arranged(reg, log)
+	log.Debug(opSidebarArrangement, "read the sidebar arrangement", dlog.Context{"repositories": len(out)})
+	return out, nil
 }
 
 // arrange runs WRITE, turns the store's refusals into ArrangeSidebar's arms,

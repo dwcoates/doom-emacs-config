@@ -734,6 +734,8 @@ func validateArrangeSidebarRequest(req *agentreplv1.ArrangeSidebarRequest) *conn
 		return validateArrangeMoveRepository(change.MoveRepository)
 	case *agentreplv1.ArrangeSidebarRequest_PlaceWorkspace:
 		return validateArrangePlaceWorkspace(change.PlaceWorkspace)
+	case *agentreplv1.ArrangeSidebarRequest_PlaceWorkspaces:
+		return validateArrangePlaceWorkspaces(change.PlaceWorkspaces)
 	}
 	return nil
 }
@@ -793,6 +795,45 @@ func validateArrangePlaceWorkspace(place *agentreplv1.ArrangePlaceWorkspace) *co
 		}
 		if at.Before.GetId() == place.GetWorkspace().GetId() {
 			return invalid("place_workspace.before", "a workspace cannot be placed before itself")
+		}
+	}
+	return nil
+}
+
+// validateArrangePlaceWorkspaces is ArrangePlaceWorkspaces' base function: at
+// least one workspace, none twice, a destination and a place, and an anchor
+// that is none of the placed workspaces.
+func validateArrangePlaceWorkspaces(place *agentreplv1.ArrangePlaceWorkspaces) *connect.Error {
+	if len(place.GetWorkspaces()) == 0 {
+		return invalid("place_workspaces.workspaces", "at least one workspace is required")
+	}
+	seen := map[string]bool{}
+	for i, ref := range place.GetWorkspaces() {
+		if err := validateWorkspaceRef(fmt.Sprintf("place_workspaces.workspaces[%d]", i), ref); err != nil {
+			return err
+		}
+		if seen[ref.GetId()] {
+			return invalid(fmt.Sprintf("place_workspaces.workspaces[%d]", i), "a workspace is placed once")
+		}
+		seen[ref.GetId()] = true
+	}
+	switch into := place.GetInto().(type) {
+	case nil:
+		return invalid("place_workspaces.into", "a destination arm is required")
+	case *agentreplv1.ArrangePlaceWorkspaces_Subsection:
+		if err := validateSubsectionRef("place_workspaces.subsection", into.Subsection); err != nil {
+			return err
+		}
+	}
+	switch at := place.GetAt().(type) {
+	case nil:
+		return invalid("place_workspaces.at", "a place arm is required")
+	case *agentreplv1.ArrangePlaceWorkspaces_Before:
+		if err := validateWorkspaceRef("place_workspaces.before", at.Before); err != nil {
+			return err
+		}
+		if seen[at.Before.GetId()] {
+			return invalid("place_workspaces.before", "the workspaces cannot be placed before one of themselves")
 		}
 	}
 	return nil

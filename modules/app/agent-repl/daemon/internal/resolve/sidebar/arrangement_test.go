@@ -292,3 +292,64 @@ func TestTheTabBarMatchesTheSidebarsRowOrder(t *testing.T) {
 		t.Fatalf("tab bar = %v, sidebar rows = %v; want the same order", tabs, rows)
 	}
 }
+
+func TestArrangedListsEachRunsFamiliesInDrawnOrder(t *testing.T) {
+	// Arrange
+	later := subsection("sub-later", "later", 1)
+	parent := placed(workspace("w-p", "parent"), 1)
+	child := placed(workspace("w-k", "child"), 2)
+	child.Parent = &parent.ID
+	moved := in(placed(workspace("w-m", "moved"), 3), later)
+	reg := registry(child, moved, parent)
+	reg.Subsections = []wsm.Subsection{later}
+
+	// Act
+	got := sidebar.Arranged(reg, dlog.NewTestLogger())
+
+	// Assert
+	if len(got) != 1 || len(got[0].Workspaces) != 1 || got[0].Workspaces[0].Workspace.ID != "w-p" ||
+		len(got[0].Workspaces[0].Children) != 1 || got[0].Workspaces[0].Children[0].Workspace.ID != "w-k" {
+		t.Fatalf("unsectioned = %+v, want parent with its child", got)
+	}
+	if len(got[0].Subsections) != 1 || got[0].Subsections[0].Subsection.ID != "sub-later" ||
+		len(got[0].Subsections[0].Workspaces) != 1 || got[0].Subsections[0].Workspaces[0].Workspace.ID != "w-m" {
+		t.Fatalf("subsections = %+v, want later holding moved", got[0].Subsections)
+	}
+}
+
+func TestArrangedListsAnEmptySubsection(t *testing.T) {
+	// Arrange
+	reg := registry()
+	reg.Subsections = []wsm.Subsection{subsection("sub-empty", "empty", 1)}
+
+	// Act
+	got := sidebar.Arranged(reg, dlog.NewTestLogger())
+
+	// Assert
+	if len(got) != 1 || len(got[0].Subsections) != 1 || len(got[0].Subsections[0].Workspaces) != 0 {
+		t.Fatalf("got %+v, want one empty subsection", got)
+	}
+}
+
+func TestArrangedLeavesOutClosedAndMergedWorkspacesAndHoistsAClosedParentsChildren(t *testing.T) {
+	// Arrange
+	parent := placed(workspace("w-p", "parent"), 1)
+	parent.Closed = true
+	child := placed(workspace("w-k", "child"), 2)
+	child.Parent = &parent.ID
+	merged := placed(workspace("w-m", "merged"), 3)
+	merged.MergedAt = at(0)
+	hidden := placed(hiddenWorkspace("w-h", "hidden"), 4)
+
+	// Act
+	got := sidebar.Arranged(registry(parent, child, merged, hidden), dlog.NewTestLogger())
+
+	// Assert
+	var ids []string
+	for _, ws := range got[0].Workspaces {
+		ids = append(ids, string(ws.Workspace.ID))
+	}
+	if !equal(ids, []string{"w-k", "w-h"}) {
+		t.Fatalf("listed = %v, want the hoisted child and the hidden one", ids)
+	}
+}

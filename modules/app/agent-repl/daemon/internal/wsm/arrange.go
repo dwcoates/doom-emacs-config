@@ -307,30 +307,44 @@ func (s *store) MoveRepository(ctx context.Context, id RepoID, before *RepoID) e
 	})
 }
 
-// PlaceWorkspace puts ROOT workspace WS, and so its whole family, into
-// subsection INTO (nil: none) of its own repository, just before root
-// workspace BEFORE (nil: after every root already there).
+// PlaceWorkspaces puts ROOT workspaces WS, in that order, and so their whole
+// families, into subsection INTO (nil: none) of their own repository as one
+// block, just before root workspace BEFORE (nil: after every root already
+// there). One workspace is the ordinary drag; several are an agent filing a
+// batch. It is applied whole or not at all.
 //
-// Only WS's own place moves: its descendants are drawn, and walked by the tab
-// bar, under it whatever their places, which order them only among their own
-// siblings.
+// Only the placed workspaces' own places move: their descendants are drawn,
+// and walked by the tab bar, under them whatever their places, which order
+// them only among their own siblings.
 //
-// Refusals, each writing nothing: an unknown workspace is ErrNotFound, one
-// with a recorded parent ErrHasParent, an unknown subsection
-// ErrUnknownSubsection, a subsection of another repository
-// ErrOtherRepository, and a BEFORE that is not a root in the destination
+// Refusals, each writing nothing: no workspace, or one twice, or BEFORE among
+// them is refused as malformed; an unknown workspace is ErrNotFound, one with
+// a recorded parent ErrHasParent, workspaces of two repositories or a
+// subsection of another repository ErrOtherRepository, an unknown subsection
+// ErrUnknownSubsection, and a BEFORE that is not a root in the destination
 // ErrAnchorElsewhere.
-func (s *store) PlaceWorkspace(ctx context.Context, ws WorkspaceID, into *SubsectionID, before *WorkspaceID) error {
-	const op = "daemon.wsm.place_workspace"
-	fields := dlog.Context{"workspace": string(ws), "into": ids.Optional(into), "before": ids.Optional(before)}
+func (s *store) PlaceWorkspaces(ctx context.Context, ws []WorkspaceID, into *SubsectionID, before *WorkspaceID) error {
+	const op = "daemon.wsm.place_workspaces"
+	fields := dlog.Context{"workspaces": ws, "into": ids.Optional(into), "before": ids.Optional(before)}
+	if err := malformedPlacement(ws, before); err != nil {
+		s.log.Error(op, "refused a malformed placement", withError(fields, err))
+		return err
+	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		var repo RepoID
-		var parent sql.NullString
-		if err := scanWorkspaceRow(ctx, tx, ws, "repo_id, parent_id", &repo, &parent); err != nil {
-			return err
-		}
-		if parent.Valid {
-			return ErrHasParent
+		for i, id := range ws {
+			var own RepoID
+			var parent sql.NullString
+			if err := scanWorkspaceRow(ctx, tx, id, "repo_id, parent_id", &own, &parent); err != nil {
+				return err
+			}
+			if parent.Valid {
+				return ErrHasParent
+			}
+			if i > 0 && own != repo {
+				return ErrOtherRepository
+			}
+			repo = own
 		}
 		if into != nil {
 			sub, err := subsectionRow(ctx, tx, *into)
@@ -349,22 +363,42 @@ func (s *store) PlaceWorkspace(ctx context.Context, ws WorkspaceID, into *Subsec
 		if err != nil {
 			return err
 		}
-		destination = slices.DeleteFunc(destination, func(id WorkspaceID) bool { return id == ws })
-		moved := []WorkspaceID{ws}
+		destination = without(destination, ws)
 		var placed []WorkspaceID
 		if before != nil {
 			if !slices.Contains(destination, *before) {
 				return ErrAnchorElsewhere
 			}
-			placed = insertBefore(order, moved, *before)
+			placed = insertBefore(order, ws, *before)
 		} else {
-			placed = insertAfterBucket(order, moved, destination)
+			placed = insertAfterBucket(order, ws, destination)
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET subsection_id = ? WHERE id = ?`, nullableSubsection(into), ws); err != nil {
-			return err
+		for _, id := range ws {
+			if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET subsection_id = ? WHERE id = ?`, nullableSubsection(into), id); err != nil {
+				return err
+			}
 		}
 		return rewritePlaces(ctx, tx, placed)
 	})
+}
+
+// malformedPlacement refuses a placement of nothing, of one workspace twice,
+// or before one of the workspaces it places.
+func malformedPlacement(ws []WorkspaceID, before *WorkspaceID) error {
+	if len(ws) == 0 {
+		return errors.New("wsm: a placement names no workspace")
+	}
+	seen := map[WorkspaceID]bool{}
+	for _, id := range ws {
+		if seen[id] {
+			return fmt.Errorf("wsm: a placement names workspace %s twice", id)
+		}
+		seen[id] = true
+	}
+	if before != nil && seen[*before] {
+		return fmt.Errorf("wsm: a placement puts workspace %s before itself", *before)
+	}
+	return nil
 }
 
 // requireRepository refuses an id no repository carries with
