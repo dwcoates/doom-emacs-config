@@ -211,7 +211,12 @@ cat >"$R/logs.jsonl" <<'EOF'
 {"timestamp":"2026-10-12T12:00:10.080-04:00","runtime":"emacs","operation":"x","message":"elisp.panels.webview-on-switch: ws=b command=nil from-window=nil window=w windows=1 size=1x1 xwidgets=1 view=first selected=nil","workspace_id":"B"}
 {"timestamp":"2026-10-12T12:00:11.300-04:00","runtime":"webapp","operation":"feed.page-placed","message":"placed","workspace_id":"B","context":{"connection_id":"c2"}}
 {"timestamp":"2026-10-12T12:00:20.000-04:00","runtime":"emacs","operation":"x","message":"elisp.host.editor-switch ws=a origin=cycle count=2","workspace_id":"A"}
+{"timestamp":"2026-10-12T12:00:20.025-04:00","runtime":"emacs","operation":"x","message":"elisp.panels.switch-activation-won ws=a generation=2 waited-ms=25","workspace_id":"A"}
 {"timestamp":"2026-10-12T12:00:20.040-04:00","runtime":"emacs","operation":"x","message":"elisp.panels.webview-on-switch: ws=a command=nil from-window=nil window=w windows=1 size=1x1 xwidgets=1 view=same selected=nil","workspace_id":"A"}
+{"timestamp":"2026-10-12T12:00:20.070-04:00","runtime":"webapp","operation":"page.switched-to","message":"switched","workspace_id":"A","context":{"connection_id":"c1"}}
+{"timestamp":"2026-10-12T12:00:20.130-04:00","runtime":"webapp","operation":"page.shown-frame","message":"frame","workspace_id":"A","context":{"connection_id":"c1"}}
+{"timestamp":"2026-10-12T12:00:25.000-04:00","runtime":"emacs","operation":"x","message":"elisp.host.editor-switch ws=a origin=cycle count=3","workspace_id":"A"}
+{"timestamp":"2026-10-12T12:00:25.040-04:00","runtime":"emacs","operation":"x","message":"elisp.panels.webview-on-switch: ws=a command=nil from-window=nil window=w windows=1 size=1x1 xwidgets=1 view=same selected=nil","workspace_id":"A"}
 {"timestamp":"2026-10-12T12:00:30.000-04:00","runtime":"emacs","operation":"x","message":"elisp.input.submit ws=a origin=nil key=k blocks=1 selection=nil delivery=nil","workspace_id":"A"}
 {"timestamp":"2026-10-12T12:00:30.250-04:00","runtime":"webapp","operation":"feed.draw-user-prompt","message":"drew","workspace_id":"A","context":{"connection_id":"c1"}}
 EOF
@@ -250,10 +255,23 @@ if grep -q '| first switch to a never-shown workspace (keystroke to page painted
 else
     fail "a first switch is measured from the keystroke to the page painted" "$report"
 fi
-if grep -q '| switch to a shown workspace (keystroke to view visible) | 100ms | 1 | 40ms |' <<<"$report"; then
-    pass "a repeat switch is measured from the keystroke to the view visible"
+if grep -q "| switch to a shown workspace (keystroke to the page's first shown frame) | 100ms | 1 | 130ms |" <<<"$report"; then
+    pass "a repeat switch is measured from the keystroke to the page's first shown frame"
 else
-    fail "a repeat switch is measured from the keystroke to the view visible" "$report"
+    fail "a repeat switch is measured from the keystroke to the page's first shown frame" "$report"
+fi
+if grep -q '| Emacs, before its switch pass runs (its redisplay and hooks) | 1 | 25ms |' <<<"$report" &&
+    grep -q "| Emacs's switch pass, to its view shown | 1 | 15ms |" <<<"$report" &&
+    grep -q '| the webhost, to the page told it is shown | 1 | 30ms |' <<<"$report" &&
+    grep -q '| the page, to its first shown frame | 1 | 60ms |' <<<"$report"; then
+    pass "a repeat switch is split into its Emacs, webhost and page phases"
+else
+    fail "a repeat switch is split into its Emacs, webhost and page phases" "$report"
+fi
+if grep -q '1 switches left out: an edge of theirs is missing from the logs.' <<<"$report"; then
+    pass "a repeat switch missing an edge is left out of the phases, and counted"
+else
+    fail "a repeat switch missing an edge is left out of the phases, and counted" "$report"
 fi
 if grep -q '| page boot to first feed paint | 300ms | 1 | 450ms |' <<<"$report" &&
     grep -q '| workspace open (tab opened to session up) | 300ms | 1 | 200ms |' <<<"$report" &&
@@ -275,7 +293,7 @@ else
     fail "an interaction with no edges in the session is named as not exercised" "$report"
 fi
 if grep -q 'Daemon.s first record: +1000ms' <<<"$report" && grep -q 'Every workspace loaded: +12300ms after launch.' <<<"$report" &&
-    grep -q '| first | B | 1300ms |' <<<"$report" && grep -q '| repeat | A | 40ms |' <<<"$report"; then
+    grep -q '| first | B | 1300ms |' <<<"$report" && grep -q '| repeat | A | 130ms |' <<<"$report"; then
     pass "the startup assessment runs from launch to every workspace loaded, then every switch"
 else
     fail "the startup assessment runs from launch to every workspace loaded, then every switch" "$report"
