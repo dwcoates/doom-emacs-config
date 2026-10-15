@@ -1372,9 +1372,7 @@ func thirtyRowFileBatch(tag string, fileID string, offset int64) *storev1.EntryB
 	entries := make([]*storev1.StoreEntry, 0, 30)
 	for i := 0; i < 30; i++ {
 		key := fmt.Sprintf("%s-%d", tag, i)
-		entry := pageEntry(key, key, "agent-1", frameItem(activityFrame("agent-1", "act-"+key, prose())))
-		entry.Plane = &storev1.Plane{Plane: &storev1.Plane_File{File: &storev1.PlaneFile{}}}
-		entry.ConversionVersion = fileVersion()
+		entry := onFilePlane(pageEntry(key, key, "agent-1", frameItem(activityFrame("agent-1", "act-"+key, prose()))))
 		entries = append(entries, entry)
 	}
 	return &storev1.EntryBatch{

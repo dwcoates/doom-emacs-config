@@ -78,9 +78,7 @@ func TestPruneWriteLedgerNeverPrunesARowItCannotMeasure(t *testing.T) {
 		{
 			name: "a file-plane write in a batch that advanced no cursor",
 			arrange: func(t *testing.T, d *DB) {
-				entry := pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose())))
-				entry.Plane = &storev1.Plane{Plane: &storev1.Plane_File{File: &storev1.PlaneFile{}}}
-				entry.ConversionVersion = fileVersion()
+				entry := onFilePlane(pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose()))))
 				if _, err := d.WriteBatch(ctx(), "test-producer", WriteInteractive, batch(entry), nil); err != nil {
 					t.Fatalf("WriteBatch: %v", err)
 				}
@@ -340,9 +338,7 @@ func newClockedPruningStore(t *testing.T, window int64, clock *fakeClock) (*DB, 
 // ledger row with a source position.
 func writeFileBatch(t *testing.T, d *DB, fileID string, offset int64, writeID, upsertKey string) WriteResult {
 	t.Helper()
-	entry := pageEntry(writeID, upsertKey, "agent-1", frameItem(activityFrame("agent-1", "act-"+upsertKey, prose())))
-	entry.Plane = &storev1.Plane{Plane: &storev1.Plane_File{File: &storev1.PlaneFile{}}}
-	entry.ConversionVersion = fileVersion()
+	entry := onFilePlane(pageEntry(writeID, upsertKey, "agent-1", frameItem(activityFrame("agent-1", "act-"+upsertKey, prose()))))
 	result, err := d.WriteBatch(ctx(), "test-sidecar", WriteInteractive, &storev1.EntryBatch{
 		Entries:       []*storev1.StoreEntry{entry},
 		CursorAdvance: &storev1.CursorState{FileId: fileID, Path: "/t/a.jsonl", Offset: offset, Conversion: currentConversion()},

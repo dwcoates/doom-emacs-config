@@ -381,22 +381,14 @@ func TestTheBashRunReadBuildsNoAutomaticIndex(t *testing.T) {
 	assertNoAutomaticIndex(t, "the bash-run read", plan)
 }
 
-// fileBashEntry is a bash row the sidecar wrote from the run's spool.
-func fileBashEntry(writeID, upsertKey, run string, frame *conversationv1.AgentBash) *storev1.StoreEntry {
-	entry := bashEntry(writeID, upsertKey, run, frame)
-	entry.Plane = &storev1.Plane{Plane: &storev1.Plane_File{File: &storev1.PlaneFile{}}}
-	entry.ConversionVersion = fileVersion()
-	return entry
-}
-
 func TestARunWrittenFromBothPlanesReplaysInFirstInsertOrder(t *testing.T) {
 	// Arrange: the shim's start and terminal interleave with the sidecar's
 	// tail, which is superseded after the terminal.
 	d, _ := newStore(t)
 	writeOK(t, d, bashEntry("w-start", "bash:run-1:start", "run-1", bashStart()))
-	writeOK(t, d, fileBashEntry("w-t0", "bash:run-1:tail", "run-1", bashTail("chunk-0")))
+	writeOK(t, d, onFilePlane(bashEntry("w-t0", "bash:run-1:tail", "run-1", bashTail("chunk-0"))))
 	writeOK(t, d, bashEntry("w-term", "bash:run-1:terminal", "run-1", bashSuccess()))
-	writeOK(t, d, fileBashEntry("w-t1", "bash:run-1:tail", "run-1", bashTail("chunk-0chunk-1")))
+	writeOK(t, d, onFilePlane(bashEntry("w-t1", "bash:run-1:tail", "run-1", bashTail("chunk-0chunk-1"))))
 
 	// Act
 	replay, err := d.BashRun(ctx(), "run-1")
@@ -419,8 +411,8 @@ func TestAReplayDrawsTheSameTailTheLastWriteHandedTheLiveWatcher(t *testing.T) {
 	// Arrange: the live watcher sees exactly what each write returns.
 	d, _ := newStore(t)
 	writeOK(t, d, bashEntry("w-start", "bash:run-1:start", "run-1", bashStart()))
-	writeOK(t, d, fileBashEntry("w-t0", "bash:run-1:tail", "run-1", bashTail("chunk-0")))
-	live := writeOK(t, d, fileBashEntry("w-t1", "bash:run-1:tail", "run-1", bashTail("chunk-0chunk-1")))
+	writeOK(t, d, onFilePlane(bashEntry("w-t0", "bash:run-1:tail", "run-1", bashTail("chunk-0"))))
+	live := writeOK(t, d, onFilePlane(bashEntry("w-t1", "bash:run-1:tail", "run-1", bashTail("chunk-0chunk-1"))))
 
 	// Act
 	replay, err := d.BashRun(ctx(), "run-1")

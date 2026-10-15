@@ -15,8 +15,7 @@ const retireFileID = "12:34"
 
 // filePageEntry is a FILE-plane page line produced by conversion `version`.
 func filePageEntry(writeID, upsertKey, book string, item *storev1.StoreAgentItem, version uint32) *storev1.StoreEntry {
-	entry := pageEntry(writeID, upsertKey, book, item)
-	entry.Plane = &storev1.Plane{Plane: &storev1.Plane_File{File: &storev1.PlaneFile{}}}
+	entry := onFilePlane(pageEntry(writeID, upsertKey, book, item))
 	entry.ConversionVersion = &version
 	return entry
 }
