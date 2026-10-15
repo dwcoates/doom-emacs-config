@@ -1,9 +1,7 @@
-// Package gomeasure is the Go adapter of `testrun redundancy`: it measures
-// each leaf test case of a package on its own (the blocks it reaches, unioned
-// over several runs, and its runtime), runs every mutant of a gomut schema
-// against the cases that reach it, and hands the result to the minimization
-// as redundancy.Cases.
-package gomeasure
+// Package proc runs the processes every `testrun redundancy` adapter runs:
+// each bounded, its whole group ended at its bound, its merged output kept
+// line by line with when each line arrived, and its CPU counted.
+package proc
 
 import (
 	"bufio"
@@ -63,7 +61,7 @@ type Exec func(ctx context.Context, c Cmd) (Result, error)
 // ends everything it started.
 func OSExec(ctx context.Context, c Cmd) (Result, error) {
 	if c.Timeout <= 0 {
-		return Result{}, fmt.Errorf("gomeasure: %s has no timeout", c.Path)
+		return Result{}, fmt.Errorf("proc: %s has no timeout", c.Path)
 	}
 	ctx, cancel := context.WithTimeout(ctx, c.Timeout)
 	defer cancel()
@@ -73,14 +71,14 @@ func OSExec(ctx context.Context, c Cmd) (Result, error) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	pr, pw, err := os.Pipe()
 	if err != nil {
-		return Result{}, fmt.Errorf("gomeasure: pipe for %s: %w", c.Path, err)
+		return Result{}, fmt.Errorf("proc: pipe for %s: %w", c.Path, err)
 	}
 	cmd.Stdout, cmd.Stderr = pw, pw
 	start := time.Now()
 	if err := cmd.Start(); err != nil {
 		pr.Close()
 		pw.Close()
-		return Result{}, fmt.Errorf("gomeasure: start %s %s: %w", c.Path, strings.Join(c.Args, " "), err)
+		return Result{}, fmt.Errorf("proc: start %s %s: %w", c.Path, strings.Join(c.Args, " "), err)
 	}
 	pw.Close()
 	lines := make(chan []Line, 1)
@@ -107,7 +105,7 @@ func OSExec(ctx context.Context, c Cmd) (Result, error) {
 	}
 	var exitErr *exec.ExitError
 	if err != nil && !errors.As(err, &exitErr) {
-		return res, fmt.Errorf("gomeasure: wait for %s: %w", c.Path, err)
+		return res, fmt.Errorf("proc: wait for %s: %w", c.Path, err)
 	}
 	return res, nil
 }

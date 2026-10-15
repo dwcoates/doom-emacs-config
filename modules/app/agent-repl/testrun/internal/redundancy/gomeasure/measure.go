@@ -1,3 +1,8 @@
+// Package gomeasure is the Go adapter of `testrun redundancy`: it measures
+// each leaf test case of a package on its own (the blocks it reaches, unioned
+// over several runs, and its runtime), runs every mutant of a gomut schema
+// against the cases that reach it, and hands the result to the minimization
+// as redundancy.Cases.
 package gomeasure
 
 import (
