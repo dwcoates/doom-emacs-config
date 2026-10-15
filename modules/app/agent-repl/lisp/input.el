@@ -564,11 +564,12 @@ on a refusal would be silently lost user intent."
 
 ;;;; ---- Feed selection (reply to a response, roll back to a prompt) -------
 ;;
-;; The feed's SELECTION, command-mode side.  In the composer, `C-p'/`C-n'
-;; (evil normal state) step through the final responses -- the next prompt
-;; sent replies to the selected one -- and `C-S-p'/`C-S-n' (normal and insert
-;; state) step through the prompts a rollback can reach; escape-twice clears
-;; it.  The DAEMON owns the selection per workspace: it knows the ordered
+;; The feed's SELECTION, command-mode side.  In the composer, `M-s-j'/`M-s-k'
+;; (normal and insert state) step through the turn boundaries: the prompts a
+;; rollback can reach and the final responses, walked together in feed
+;; order.  A selected final response is what the next prompt sent replies to,
+;; and a selected prompt is what the rollback keys roll back to;
+;; escape-twice clears it.  The DAEMON owns the selection per workspace: it knows the ordered
 ;; rows, so it COMPUTES where a step lands (from no selection an older step
 ;; starts at the newest row and a newer one at the oldest; older wraps past
 ;; the oldest, and newer past the newest ends the selection, returning the
@@ -590,14 +591,12 @@ No y/n confirmation -- a plain warning that a SECOND consecutive escape
 clears the selection, so the user reads it before anything is cleared.")
 
 (defconst agent-repl--input-selection-flash-prefixes
-  '((:response . "reply-to-response")
-    (:prompt . "rollback")
+  '((:turn-boundary . "selection")
     (:clear . "selection"))
   "The composer-flash prefix each `SelectFeedRow' move speaks under.")
 
 (defconst agent-repl--input-selection-nothing-selectable-flashes
-  '((:response . "reply-to-response: no final response to select")
-    (:prompt . "rollback: no prompt to select"))
+  '((:turn-boundary . "selection: no prompt or final response to select"))
   "The composer flash when a step finds no row of its kind to select.")
 
 (defun agent-repl--input-selection-active-p (ws)
@@ -701,7 +700,7 @@ The mirror of `agent-repl-response-search-forward'."
 
 (defun agent-repl--input-select-feed-row (ws move)
   "Send the `SelectFeedRow' MOVE for WS and report how it went.
-MOVE is (:arm ARM :value V): ARM `:response' or `:prompt' with V
+MOVE is (:arm ARM :value V): ARM `:turn-boundary' with V
 \(:direction `:older'/`:newer'), or `:clear' with V nil.  THE ONE SEND of
 every composer selection move, so each answers alike: the outcome is the
 daemon's, and its push on the host watch is what changes Emacs's state; a
@@ -753,44 +752,29 @@ dropped just because the daemon is the authority."
                            ws move detail)
          (agent-repl--input-flash ws (format "%s: the daemon did not answer" prefix))))))))
 
-(defun agent-repl--input-select-step (kind direction)
-  "Step the current workspace's selection through KIND rows in DIRECTION.
-KIND is `:response' or `:prompt'; DIRECTION is `:older' or `:newer'."
+(defun agent-repl--input-select-step (direction)
+  "Step the current workspace's selection through the turn boundaries.
+DIRECTION is `:older' or `:newer'."
   (agent-repl--input-select-feed-row
    (agent-repl--ws-current-name)
-   (list :arm kind :value (list :direction direction))))
+   (list :arm :turn-boundary :value (list :direction direction))))
 
-(defun agent-repl-response-select-prev ()
-  "Select the PREVIOUS (older) final response, to reply to.
-Composer command mode only.  From no selection it starts at the newest
-final response; past the oldest it wraps to the newest -- the daemon owns
-the order and computes the row, Emacs sends the step."
+(defun agent-repl-turn-boundary-select-prev ()
+  "Select the PREVIOUS (older) prompt or final response, moving up the feed.
+The walk covers the prompts a rollback can reach and the final responses
+together, in feed order.  From no selection it starts at the newest; past
+the oldest it wraps to the newest -- the daemon owns the order and
+computes the row, Emacs sends the step."
   (interactive)
-  (agent-repl--input-select-step :response :older))
+  (agent-repl--input-select-step :older))
 
-(defun agent-repl-response-select-next ()
-  "Select the NEXT (newer) final response, to reply to.
-Composer command mode only.  From no selection it starts at the oldest
-final response; past the newest it ends the selection and the feed
-returns to its tail, so the next step rolls round to the oldest."
+(defun agent-repl-turn-boundary-select-next ()
+  "Select the NEXT (newer) prompt or final response, moving down the feed.
+From no selection it starts at the oldest; past the newest it ends the
+selection and the feed returns to its tail, so the next step rolls round
+to the oldest."
   (interactive)
-  (agent-repl--input-select-step :response :newer))
-
-(defun agent-repl-prompt-select-prev ()
-  "Select the PREVIOUS (older) prompt a rollback can reach.
-From no selection it starts at the newest such prompt; past the oldest
-it wraps to the newest -- the daemon owns which prompts a rollback
-can reach and computes the row, Emacs sends the step."
-  (interactive)
-  (agent-repl--input-select-step :prompt :older))
-
-(defun agent-repl-prompt-select-next ()
-  "Select the NEXT (newer) prompt a rollback can reach.
-From no selection it starts at the oldest such prompt; past the newest
-it ends the selection and the feed returns to its tail, so the next step
-rolls round to the oldest."
-  (interactive)
-  (agent-repl--input-select-step :prompt :newer))
+  (agent-repl--input-select-step :newer))
 
 ;;;; ---- Rollback (`C-c C-RET' / `C-c M-RET') -----------------------------
 ;;
@@ -2145,15 +2129,12 @@ sits behind a harness re-read."
       :ni "C-c C-c"   #'agent-repl-discard-input
       :n  "<up>"      #'agent-repl--history-prev
       :n  "<down>"    #'agent-repl--history-next
-      ;; Final-response selection is COMMAND MODE ONLY (`:n' = evil normal
+      ;; The selection's escape is COMMAND MODE ONLY (`:n' = evil normal
       ;; state), scoped to THIS composer's mode map like the history walk
-      ;; above -- never global, so `C-p'/`C-n' keep their meaning everywhere
-      ;; else and `<escape>' is only intercepted here.  The escape command
-      ;; itself no-ops back to the ordinary escape when no selection is active
-      ;; (see `agent-repl-input-selection-escape').  The prompt steps
-      ;; (`C-S-p'/`C-S-n') are bound below, in both states.
-      :n  "C-p"       #'agent-repl-response-select-prev
-      :n  "C-n"       #'agent-repl-response-select-next
+      ;; above -- never global, so `<escape>' is only intercepted here.  The
+      ;; escape command itself no-ops back to the ordinary escape when no
+      ;; selection is active (see `agent-repl-input-selection-escape').  The
+      ;; turn-boundary steps (`M-s-j'/`M-s-k') are bound below, in both states.
       :n  "<escape>"  #'agent-repl-input-selection-escape
       :i  "<escape>"  #'agent-repl-input-insert-escape
       ;; Prompt-history search sits on `C-M-r', not the `C-r' its shell
@@ -2193,14 +2174,13 @@ sits behind a harness re-read."
 (with-eval-after-load 'evil
   (agent-repl-bind-feed-zoom-keys agent-repl-input-mode-map))
 
-;; PROMPT SELECTION (`C-S-p' / `C-S-n'): step through the prompts a rollback
-;; can reach.  Bound with `define-key' for the same reasons as the zoom: the
+;; TURN-BOUNDARY SELECTION (`M-s-j' down / `M-s-k' up): step through the
+;; prompts a rollback can reach and the final responses, together, in feed
+;; order.  Bound with `define-key' for the same reasons as the zoom: the
 ;; binding is OBSERVABLE under `emacs -Q', and it lives in BOTH evil states,
-;; since no evil state map binds the shifted chord to shadow the mode map.
-;; The leader's `C-S-p' (keybindings.el) sits under its own prefix and does
-;; not collide.
-(define-key agent-repl-input-mode-map (kbd "C-S-p") #'agent-repl-prompt-select-prev)
-(define-key agent-repl-input-mode-map (kbd "C-S-n") #'agent-repl-prompt-select-next)
+;; since no evil state map binds the chord to shadow the mode map.
+(define-key agent-repl-input-mode-map (kbd "M-s-j") #'agent-repl-turn-boundary-select-next)
+(define-key agent-repl-input-mode-map (kbd "M-s-k") #'agent-repl-turn-boundary-select-prev)
 
 ;; ROLLBACK (`C-c C-RET' keeps files, `C-c M-RET' restores them).  Bound with
 ;; `define-key' like `C-c C-k': a `C-c'-prefixed chord is not shadowed by any

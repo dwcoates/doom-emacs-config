@@ -4323,9 +4323,9 @@ with the same accessor every other verb's error uses."
 ;;;; ---- SelectFeedRow --------------------------------------------------
 ;;
 ;; Moving the feed's selection.  THE ARM IS THE MOVE on the request: Emacs
-;; steps through the final responses (`C-p' / `C-n') or through the prompts a
-;; rollback can reach (`C-S-p' / `C-S-n'), or clears the selection (escape
-;; twice).  The daemon owns the ordered rows and the selection, computes where
+;; steps through the turn boundaries -- the prompts a rollback can reach and
+;; the final responses, together (`M-s-j' / `M-s-k') -- or clears the
+;; selection (escape twice).  The daemon owns the ordered rows and the selection, computes where
 ;; a step lands, pushes the result to the webapp and to Emacs's host watch,
 ;; and acks it here.  THE ARM IS THE OUTCOME on the success.  See
 ;; endpoint_select_feed_row.proto.  The webapp's own `left_view' move is
@@ -4366,12 +4366,11 @@ The direction is REQUIRED: a step names which way it moves."
 
 (defun agent-repl-wire-encode-select-feed-row-request-move (value)
   "Encode SelectFeedRowRequest's `move' oneof from VALUE.
-VALUE is (:arm KEYWORD :value V), KEYWORD one of `:response' and `:prompt'
-\(V a step plist) and `:clear' (V nil)."
+VALUE is (:arm KEYWORD :value V), KEYWORD `:turn-boundary' (V a step
+plist) or `:clear' (V nil)."
   (agent-repl-wire-verbs--encode-oneof
    "SelectFeedRowRequest" "move" value
-   (list (list :response 'response #'agent-repl-wire-encode-select-feed-row-step)
-         (list :prompt 'prompt #'agent-repl-wire-encode-select-feed-row-step)
+   (list (list :turn-boundary 'turnBoundary #'agent-repl-wire-encode-select-feed-row-step)
          (list :clear 'clear #'agent-repl-wire-encode-select-feed-row-clear))))
 
 (defun agent-repl-wire-encode-select-feed-row-request (request)

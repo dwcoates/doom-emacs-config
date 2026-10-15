@@ -12,6 +12,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/publish"
+	"agent-repld/internal/resolve/feed"
 )
 
 const opSelectFeedRow = "daemon.server.select_feed_row"
@@ -20,10 +21,10 @@ const opSelectFeedRow = "daemon.server.select_feed_row"
 // endpoint_select_feed_row.proto.
 //
 // THE DAEMON IS THE ONLY HOLDER OF THE SELECTION. A step reads the ordered
-// selectable rows of its kind from the feed resolver (final responses, or the
-// prompts a rollback can reach), computes the new row — see stepIndex for
-// where a step starts and how it runs off each end — and pushes the result to the webapp's root feed watch and to Emacs's host
-// watch. A sent prompt and a rollback read this same state, so nothing a
+// turn boundaries from the feed resolver (the prompts a rollback can reach and
+// the final responses, interleaved in feed order), computes the new row — see
+// stepIndex for where a step starts and how it runs off each end — and pushes
+// the result to the webapp's root feed watch and to Emacs's host watch. A sent prompt and a rollback read this same state, so nothing a
 // client holds can disagree with what the webapp draws.
 func (s *server) SelectFeedRow(
 	ctx context.Context,
@@ -45,17 +46,12 @@ func (s *server) SelectFeedRow(
 		err     error
 	)
 	switch move := req.Msg.GetMove().(type) {
-	case *agentreplv1.SelectFeedRowRequest_Response:
-		var rows []*frontendv1.FeedId
-		rows, err = s.selectableRows(ctx, subject.Log, ws, selectionResponse, move.Response.GetDirection())
+	case *agentreplv1.SelectFeedRowRequest_TurnBoundary:
+		direction := move.TurnBoundary.GetDirection()
+		var rows []feed.TurnBoundary
+		rows, err = s.turnBoundaries(ctx, subject.Log, ws, direction)
 		if err == nil {
-			success, err = s.stepSelection(subject.Log, ws, selectionResponse, rows, move.Response.GetDirection())
-		}
-	case *agentreplv1.SelectFeedRowRequest_Prompt:
-		var rows []*frontendv1.FeedId
-		rows, err = s.selectableRows(ctx, subject.Log, ws, selectionPrompt, move.Prompt.GetDirection())
-		if err == nil {
-			success, err = s.stepSelection(subject.Log, ws, selectionPrompt, rows, move.Prompt.GetDirection())
+			success, err = s.stepSelection(subject.Log, ws, rows, direction)
 		}
 	case *agentreplv1.SelectFeedRowRequest_Clear:
 		s.endSelection(subject.Log, ws, nil, returnToTail(), "cleared")
@@ -82,7 +78,7 @@ func (s *server) SelectFeedRow(
 	return connect.NewResponse(resp), nil
 }
 
-// selectionKind is which kind of row a step walks.
+// selectionKind is which kind of row is selected.
 type selectionKind int
 
 const (
@@ -144,28 +140,30 @@ func selectedNone() *agentreplv1.SelectFeedRowSuccess {
 		None: &agentreplv1.SelectFeedRowSuccessNone{}}}
 }
 
-// selectableRows answers the selectable rows of KIND, oldest first, from the
-// pages the daemon holds — LOADING THE NEXT OLDER ROOT PAGE while a step OLDER
-// would otherwise run past the oldest loaded row (feed paging on demand,
-// ruling 7). A loaded page's rows are pushed to the root feed's tails, so the
-// row the step lands on is on the reader's screen. Nothing older to load
-// leaves the rows as held, and the step wraps as it always has.
-func (s *server) selectableRows(
+// turnBoundaryKind is the selection kind a turn-boundary row is selected as.
+func turnBoundaryKind(k feed.TurnBoundaryKind) selectionKind {
+	if k == feed.TurnBoundaryPrompt {
+		return selectionPrompt
+	}
+	return selectionResponse
+}
+
+// turnBoundaries answers the turn boundaries, oldest first, from the pages the
+// daemon holds — LOADING THE NEXT OLDER ROOT PAGE while a step OLDER would
+// otherwise run past the oldest loaded row (feed paging on demand, ruling 7).
+// A loaded page's rows are pushed to the root feed's tails, so the row the
+// step lands on is on the reader's screen. Nothing older to load leaves the
+// rows as held, and the step wraps as it always has.
+func (s *server) turnBoundaries(
 	ctx context.Context,
 	log dlog.Logger,
 	ws ids.WorkspaceID,
-	kind selectionKind,
 	direction agentreplv1.SelectFeedRowDirection,
-) ([]*frontendv1.FeedId, error) {
-	read := func() []*frontendv1.FeedId {
-		if kind == selectionPrompt {
-			return s.deps.Feed.RollbackPrompts(ws)
-		}
-		return s.deps.Feed.FinalResponses(ws)
-	}
+) ([]feed.TurnBoundary, error) {
+	read := func() []feed.TurnBoundary { return s.deps.Feed.TurnBoundaries(ws) }
 	rows := read()
 	loads := 0
-	for direction == agentreplv1.SelectFeedRowDirection_SELECT_FEED_ROW_DIRECTION_OLDER && s.atOldestOf(ws, kind, rows) {
+	for direction == agentreplv1.SelectFeedRowDirection_SELECT_FEED_ROW_DIRECTION_OLDER && s.atOldestOf(ws, rows) {
 		loaded, err := s.deps.Feed.LoadOlder(ctx, ws)
 		if err != nil {
 			return nil, err
@@ -178,63 +176,77 @@ func (s *server) selectableRows(
 	}
 	if loads > 0 {
 		log.Info(opSelectFeedRow, "a step older ran past the oldest loaded row; older pages were loaded for it",
-			dlog.Context{"kind": kind.String(), "pages": loads, "rows": len(rows)})
+			dlog.Context{"pages": loads, "rows": len(rows)})
 	}
 	return rows, nil
 }
 
 // atOldestOf reports whether a step older along ROWS would run past the
-// oldest loaded row of KIND: none is loaded, or the selection stands on the
+// oldest loaded turn boundary: none is loaded, or the selection stands on the
 // oldest one.
-func (s *server) atOldestOf(ws ids.WorkspaceID, kind selectionKind, rows []*frontendv1.FeedId) bool {
+func (s *server) atOldestOf(ws ids.WorkspaceID, rows []feed.TurnBoundary) bool {
 	if len(rows) == 0 {
 		return true
 	}
 	s.selectionMu.Lock()
 	defer s.selectionMu.Unlock()
-	current, currentKind, held := selectedRow(s.selections[ws].GetSelection())
-	return held && currentKind == kind && indexOfFeedID(rows, current) == 0
+	return indexOfTurnBoundary(rows, s.selections[ws].GetSelection()) == 0
 }
 
-// stepSelection moves the selection one row of KIND in DIRECTION along ROWS
-// (oldest first) and pushes the result. No rows of that kind ends any
-// selection and answers nothing_selectable, so the caller can say so.
+// indexOfTurnBoundary answers the position in ROWS of the row SEL selects, or
+// -1 when SEL selects nothing or a row the walk does not hold as that kind (a
+// clicked bubble selected as `bubble`).
+func indexOfTurnBoundary(rows []feed.TurnBoundary, sel *frontendv1.FeedSelection) int {
+	current, currentKind, held := selectedRow(sel)
+	if !held {
+		return -1
+	}
+	for i, row := range rows {
+		if row.Row.GetValue() == current.GetValue() && turnBoundaryKind(row.Kind) == currentKind {
+			return i
+		}
+	}
+	return -1
+}
+
+// stepSelection moves the selection one turn boundary in DIRECTION along ROWS
+// (oldest first), selecting the landed row as its own kind, and pushes the
+// result. No rows ends any selection and answers nothing_selectable, so the
+// caller can say so.
 func (s *server) stepSelection(
 	log dlog.Logger,
 	ws ids.WorkspaceID,
-	kind selectionKind,
-	rows []*frontendv1.FeedId,
+	rows []feed.TurnBoundary,
 	direction agentreplv1.SelectFeedRowDirection,
 ) (*agentreplv1.SelectFeedRowSuccess, error) {
 	s.selectionMu.Lock()
 	defer s.selectionMu.Unlock()
-	current, currentKind, held := selectedRow(s.selections[ws].GetSelection())
+	selection := s.selections[ws].GetSelection()
+	current, currentKind, held := selectedRow(selection)
 	if len(rows) == 0 {
 		if held {
 			s.setNoSelection(ws, returnToTail())
 		}
-		log.Info(opSelectFeedRow, "a selection step found no row of its kind to select",
-			dlog.Context{"kind": kind.String(), "direction": direction.String(), "ended": held})
+		log.Info(opSelectFeedRow, "a selection step found no turn boundary to select",
+			dlog.Context{"direction": direction.String(), "ended": held})
 		return &agentreplv1.SelectFeedRowSuccess{Outcome: &agentreplv1.SelectFeedRowSuccess_NothingSelectable{
 			NothingSelectable: &agentreplv1.SelectFeedRowSuccessNothingSelectable{}}}, nil
 	}
-	at := -1
-	if held && currentKind == kind {
-		at = indexOfFeedID(rows, current)
-	}
-	at, ended := stepIndex(at, len(rows), held, direction)
+	at, ended := stepIndex(indexOfTurnBoundary(rows, selection), len(rows), held, direction)
 	if ended {
 		s.setNoSelection(ws, returnToTail())
 		log.Info(opSelectFeedRow, "a step newer ran past the newest row; the selection ended and the feed returns to its tail",
-			dlog.Context{"kind": kind.String(), "row": current.GetValue(), "of": len(rows)})
+			dlog.Context{"kind": currentKind.String(), "row": current.GetValue(), "of": len(rows)})
 		return selectedNone(), nil
 	}
-	sel := selectionOf(kind, rows[at])
+	landed := rows[at]
+	kind := turnBoundaryKind(landed.Kind)
+	sel := selectionOf(kind, landed.Row)
 	if err := s.setRowSelection(ws, sel); err != nil {
 		return nil, err
 	}
 	log.Info(opSelectFeedRow, "moved the feed selection",
-		dlog.Context{"kind": kind.String(), "direction": direction.String(), "row": rows[at].GetValue(), "index": at, "of": len(rows)})
+		dlog.Context{"kind": kind.String(), "direction": direction.String(), "row": landed.Row.GetValue(), "index": at, "of": len(rows)})
 	return selectedSuccess(sel), nil
 }
 
@@ -277,14 +289,15 @@ func (s *server) selectBubble(log dlog.Logger, ws ids.WorkspaceID, row *frontend
 }
 
 // stepIndex is the index a step lands on among N rows (oldest first) from AT,
-// -1 when no row of the kind is selected; HELD is whether any row (of any
+// -1 when no row the walk holds is selected; HELD is whether any row (of any
 // kind) is selected. ended is true, and the index meaningless, when the step
 // ends the selection instead.
 //
 //   - From nothing selected at all, OLDER starts at the newest row and NEWER
 //     at the oldest, so a NEWER right after a step ran past the newest rolls
 //     round to the oldest.
-//   - From a row of another kind, either direction starts at the newest.
+//   - From a selected row the walk does not hold, either direction starts at
+//     the newest.
 //   - OLDER past the oldest wraps to the newest.
 //   - NEWER past the newest ends the selection (the feed returns to its tail).
 func stepIndex(at, n int, held bool, direction agentreplv1.SelectFeedRowDirection) (index int, ended bool) {

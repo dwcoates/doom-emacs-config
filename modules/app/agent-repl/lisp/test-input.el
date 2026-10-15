@@ -2058,123 +2058,85 @@ The host watch's selection kind is `agent-repl-test-input--selection-kind'."
   "Return the move of the last `SelectFeedRow' request sent."
   (plist-get (car agent-repl-test-input--select-requests) :move))
 
-(ert-deftest agent-repl-test-input-response-select-prev-is-a-command ()
-  "The `C-p' target is a real interactive command."
-  (should (commandp #'agent-repl-response-select-prev)))
+(ert-deftest agent-repl-test-input-turn-boundary-select-prev-is-a-command ()
+  "The `M-s-k' target is a real interactive command."
+  (should (commandp #'agent-repl-turn-boundary-select-prev)))
 
-(ert-deftest agent-repl-test-input-response-select-next-is-a-command ()
-  "The `C-n' target is a real interactive command."
-  (should (commandp #'agent-repl-response-select-next)))
-
-(ert-deftest agent-repl-test-input-prompt-select-prev-is-a-command ()
-  "The `C-S-p' target is a real interactive command."
-  (should (commandp #'agent-repl-prompt-select-prev)))
-
-(ert-deftest agent-repl-test-input-prompt-select-next-is-a-command ()
-  "The `C-S-n' target is a real interactive command."
-  (should (commandp #'agent-repl-prompt-select-next)))
+(ert-deftest agent-repl-test-input-turn-boundary-select-next-is-a-command ()
+  "The `M-s-j' target is a real interactive command."
+  (should (commandp #'agent-repl-turn-boundary-select-next)))
 
 (ert-deftest agent-repl-test-input-selection-escape-is-a-command ()
   "The command-mode escape target is a real interactive command."
   (should (commandp #'agent-repl-input-selection-escape)))
 
-(ert-deftest agent-repl-test-input-c-shift-p-steps-prompts-older ()
-  "`C-S-p' in the composer is bound to the older prompt step, in both states."
-  (should (eq (lookup-key agent-repl-input-mode-map (kbd "C-S-p"))
-              #'agent-repl-prompt-select-prev)))
+(ert-deftest agent-repl-test-input-meta-super-k-steps-turn-boundaries-older ()
+  "`M-s-k' in the composer is bound to the older (upward) step, in both states."
+  (should (eq (lookup-key agent-repl-input-mode-map (kbd "M-s-k"))
+              #'agent-repl-turn-boundary-select-prev)))
 
-(ert-deftest agent-repl-test-input-c-shift-n-steps-prompts-newer ()
-  "`C-S-n' in the composer is bound to the newer prompt step, in both states."
-  (should (eq (lookup-key agent-repl-input-mode-map (kbd "C-S-n"))
-              #'agent-repl-prompt-select-next)))
+(ert-deftest agent-repl-test-input-meta-super-j-steps-turn-boundaries-newer ()
+  "`M-s-j' in the composer is bound to the newer (downward) step, in both states."
+  (should (eq (lookup-key agent-repl-input-mode-map (kbd "M-s-j"))
+              #'agent-repl-turn-boundary-select-next)))
 
-(ert-deftest agent-repl-test-input-response-select-prev-steps-responses-older ()
-  "`C-p' asks the daemon to step the final responses OLDER."
+(ert-deftest agent-repl-test-input-old-selection-chords-are-unbound ()
+  "The retired selection chords no longer step the selection in the composer."
+  (dolist (key '("C-S-p" "C-S-n"))
+    (should-not (lookup-key agent-repl-input-mode-map (kbd key)))))
+
+(ert-deftest agent-repl-test-input-turn-boundary-select-prev-steps-older ()
+  "`M-s-k' asks the daemon to step the turn boundaries OLDER."
   (agent-repl-test-input--with-select (agent-repl-test-input--select-outcome :selected)
     ;; Act
-    (agent-repl-response-select-prev)
+    (agent-repl-turn-boundary-select-prev)
     ;; Assert
     (should (equal (agent-repl-test-input--last-move)
-                   '(:arm :response :value (:direction :older))))))
+                   '(:arm :turn-boundary :value (:direction :older))))))
 
-(ert-deftest agent-repl-test-input-response-select-next-steps-responses-newer ()
-  "`C-n' asks the daemon to step the final responses NEWER."
+(ert-deftest agent-repl-test-input-turn-boundary-select-next-steps-newer ()
+  "`M-s-j' asks the daemon to step the turn boundaries NEWER."
   (agent-repl-test-input--with-select (agent-repl-test-input--select-outcome :selected)
     ;; Act
-    (agent-repl-response-select-next)
+    (agent-repl-turn-boundary-select-next)
     ;; Assert
     (should (equal (agent-repl-test-input--last-move)
-                   '(:arm :response :value (:direction :newer))))))
-
-(ert-deftest agent-repl-test-input-prompt-select-prev-steps-prompts-older ()
-  "`C-S-p' asks the daemon to step the prompts OLDER."
-  (agent-repl-test-input--with-select (agent-repl-test-input--select-outcome :selected)
-    ;; Act
-    (agent-repl-prompt-select-prev)
-    ;; Assert
-    (should (equal (agent-repl-test-input--last-move)
-                   '(:arm :prompt :value (:direction :older))))))
-
-(ert-deftest agent-repl-test-input-prompt-select-next-steps-prompts-newer ()
-  "`C-S-n' asks the daemon to step the prompts NEWER."
-  (agent-repl-test-input--with-select (agent-repl-test-input--select-outcome :selected)
-    ;; Act
-    (agent-repl-prompt-select-next)
-    ;; Assert
-    (should (equal (agent-repl-test-input--last-move)
-                   '(:arm :prompt :value (:direction :newer))))))
+                   '(:arm :turn-boundary :value (:direction :newer))))))
 
 (ert-deftest agent-repl-test-input-select-addresses-this-workspace ()
   "A step names its workspace by the daemon-minted ref."
   (agent-repl-test-input--with-select (agent-repl-test-input--select-outcome :selected)
     ;; Act
-    (agent-repl-response-select-prev)
+    (agent-repl-turn-boundary-select-prev)
     ;; Assert
     (should (equal (plist-get (car agent-repl-test-input--select-requests) :workspace)
                    agent-repl-test-input--ref))))
 
-(ert-deftest agent-repl-test-input-response-step-with-nothing-selectable-flashes ()
-  "A response step that finds no final response says so."
+(ert-deftest agent-repl-test-input-step-with-nothing-selectable-flashes ()
+  "A step that finds no prompt or final response says so."
   (agent-repl-test-input--with-select
       (agent-repl-test-input--select-outcome :nothing-selectable)
     ;; Act
-    (agent-repl-response-select-prev)
+    (agent-repl-turn-boundary-select-prev)
     ;; Assert
     (should (equal (agent-repl-test-input--notice)
-                   "reply-to-response: no final response to select"))))
-
-(ert-deftest agent-repl-test-input-prompt-step-with-nothing-selectable-flashes ()
-  "A prompt step that finds no prompt a rollback can reach says so."
-  (agent-repl-test-input--with-select
-      (agent-repl-test-input--select-outcome :nothing-selectable)
-    ;; Act
-    (agent-repl-prompt-select-prev)
-    ;; Assert
-    (should (equal (agent-repl-test-input--notice) "rollback: no prompt to select"))))
+                   "selection: no prompt or final response to select"))))
 
 (ert-deftest agent-repl-test-input-selected-step-flashes-nothing ()
   "A step that lands on a row leaves the composer quiet."
   (agent-repl-test-input--with-select (agent-repl-test-input--select-outcome :selected)
     ;; Act
-    (agent-repl-prompt-select-prev)
+    (agent-repl-turn-boundary-select-prev)
     ;; Assert
     (should-not (agent-repl-test-input--notice))))
 
-(ert-deftest agent-repl-test-input-refused-response-step-flashes ()
-  "A refused response step flashes the composer under its own prefix."
+(ert-deftest agent-repl-test-input-refused-step-flashes ()
+  "A refused step flashes the composer under the selection prefix."
   (agent-repl-test-input--with-select agent-repl-test-input--select-refused
     ;; Act
-    (agent-repl-response-select-prev)
+    (agent-repl-turn-boundary-select-next)
     ;; Assert
-    (should (equal (agent-repl-test-input--notice) "reply-to-response: selection refused"))))
-
-(ert-deftest agent-repl-test-input-refused-prompt-step-flashes ()
-  "A refused prompt step flashes the composer under the rollback prefix."
-  (agent-repl-test-input--with-select agent-repl-test-input--select-refused
-    ;; Act
-    (agent-repl-prompt-select-next)
-    ;; Assert
-    (should (equal (agent-repl-test-input--notice) "rollback: selection refused"))))
+    (should (equal (agent-repl-test-input--notice) "selection: selection refused"))))
 
 (ert-deftest agent-repl-test-input-refused-step-is-logged ()
   "A refused step is logged at WARN with its cause."
@@ -2184,7 +2146,7 @@ The host watch's selection kind is `agent-repl-test-input--selection-kind'."
       (cl-letf (((symbol-function 'agent-repl--warn)
                  (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned))))
         ;; Act
-        (agent-repl-prompt-select-prev))
+        (agent-repl-turn-boundary-select-prev))
       ;; Assert
       (should (cl-some (lambda (m) (string-match-p "select-feed-row-refused.*unknown-workspace" m))
                        warned)))))
@@ -2193,9 +2155,9 @@ The host watch's selection kind is `agent-repl-test-input--selection-kind'."
   "A step the daemon never answered flashes the composer."
   (agent-repl-test-input--with-select '(:failure (:kind :transport :message "down"))
     ;; Act
-    (agent-repl-prompt-select-prev)
+    (agent-repl-turn-boundary-select-prev)
     ;; Assert
-    (should (equal (agent-repl-test-input--notice) "rollback: the daemon did not answer"))))
+    (should (equal (agent-repl-test-input--notice) "selection: the daemon did not answer"))))
 
 (ert-deftest agent-repl-test-input-failed-step-is-logged ()
   "A step the daemon never answered is logged at WARN with the detail."
@@ -2205,7 +2167,7 @@ The host watch's selection kind is `agent-repl-test-input--selection-kind'."
       (cl-letf (((symbol-function 'agent-repl--warn)
                  (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned))))
         ;; Act
-        (agent-repl-response-select-next))
+        (agent-repl-turn-boundary-select-next))
       ;; Assert
       (should (cl-some (lambda (m) (string-match-p "select-feed-row-failure.*down" m))
                        warned)))))
@@ -2218,7 +2180,7 @@ The host watch's selection kind is `agent-repl-test-input--selection-kind'."
       (cl-letf (((symbol-function 'agent-repl--error)
                  (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
         ;; Act
-        (agent-repl-response-select-next))
+        (agent-repl-turn-boundary-select-next))
       ;; Assert
       (should (cl-some (lambda (m) (string-match-p "select-feed-row-unknown-arm" m))
                        errors)))))
@@ -2229,7 +2191,7 @@ The host watch's selection kind is `agent-repl-test-input--selection-kind'."
     ;; Arrange
     (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (_ws) nil)))
       ;; Act
-      (agent-repl-prompt-select-prev))
+      (agent-repl-turn-boundary-select-prev))
     ;; Assert
     (should-not agent-repl-test-input--select-requests)))
 
@@ -2239,9 +2201,9 @@ The host watch's selection kind is `agent-repl-test-input--selection-kind'."
     ;; Arrange
     (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (_ws) nil)))
       ;; Act
-      (agent-repl-prompt-select-prev))
+      (agent-repl-turn-boundary-select-prev))
     ;; Assert
-    (should (equal (agent-repl-test-input--notice) "rollback: workspace not ready"))))
+    (should (equal (agent-repl-test-input--notice) "selection: workspace not ready"))))
 
 (ert-deftest agent-repl-test-input-step-without-a-connection-flashes ()
   "No daemon connection says so under the step's prefix."
@@ -2250,9 +2212,9 @@ The host watch's selection kind is `agent-repl-test-input--selection-kind'."
     (cl-letf (((symbol-function 'agent-repl-host-conn) (lambda (_ws) nil))
               ((symbol-function 'agent-repl-link-primary) (lambda () nil)))
       ;; Act
-      (agent-repl-response-select-prev))
+      (agent-repl-turn-boundary-select-prev))
     ;; Assert
-    (should (equal (agent-repl-test-input--notice) "reply-to-response: no daemon connection"))))
+    (should (equal (agent-repl-test-input--notice) "selection: no daemon connection"))))
 
 (ert-deftest agent-repl-test-input-submit-carries-no-reply-target ()
   "A submit names no reply target: the daemon applies its own selection."
@@ -2310,7 +2272,7 @@ The host watch's selection kind is `agent-repl-test-input--selection-kind'."
     ;; Arrange
     (setq agent-repl-test-input--selection-kind :prompt)
     ;; Act -- the preceding command was a step, not another escape.
-    (let ((last-command 'agent-repl-prompt-select-prev))
+    (let ((last-command 'agent-repl-turn-boundary-select-prev))
       (agent-repl-input-selection-escape))
     ;; Assert
     (should (member "selection: press escape again to clear the selection"
@@ -2323,7 +2285,7 @@ The host watch's selection kind is `agent-repl-test-input--selection-kind'."
     (setq agent-repl-test-input--selection-kind :prompt)
     (agent-repl-test-input--capturing-rungs
       ;; Act
-      (let ((last-command 'agent-repl-prompt-select-prev))
+      (let ((last-command 'agent-repl-turn-boundary-select-prev))
         (agent-repl-input-selection-escape))
       ;; Assert
       (should (cl-some (lambda (m) (string-prefix-p "elisp.input.selection-escape-armed" m))
@@ -2336,7 +2298,7 @@ The host watch's selection kind is `agent-repl-test-input--selection-kind'."
     ;; Arrange
     (setq agent-repl-test-input--selection-kind :response)
     ;; Act
-    (let ((last-command 'agent-repl-response-select-prev))
+    (let ((last-command 'agent-repl-turn-boundary-select-prev))
       (agent-repl-input-selection-escape))
     ;; Assert
     (should-not agent-repl-test-input--select-requests)))
@@ -2370,7 +2332,7 @@ The second escape is treated as a FIRST again -- it warns, never clears."
     ;; Arrange
     (setq agent-repl-test-input--selection-kind :response)
     ;; Act -- an intervening command ran as `last-command'.
-    (let ((last-command 'agent-repl-response-select-next))
+    (let ((last-command 'agent-repl-turn-boundary-select-next))
       (agent-repl-input-selection-escape))
     ;; Assert
     (should-not agent-repl-test-input--select-requests)))
@@ -3215,7 +3177,7 @@ The candidates offered are kept in `agent-repl-test-input--offered'."
   (agent-repl-test-input--with-select
       (agent-repl-test-input--refusal :transferring-away '(:address "127.0.0.1:9"))
     ;; Act
-    (agent-repl-prompt-select-prev)
+    (agent-repl-turn-boundary-select-prev)
     ;; Assert
     (should (equal agent-repl-test-input--refusals
                    '(("ws-one" (:arm :transferring-away :value (:address "127.0.0.1:9"))))))))
@@ -3225,9 +3187,9 @@ The candidates offered are kept in `agent-repl-test-input--offered'."
   (agent-repl-test-input--with-select
       (agent-repl-test-input--refusal :not-yet-adopted)
     ;; Act
-    (agent-repl-response-select-prev)
+    (agent-repl-turn-boundary-select-prev)
     ;; Assert
-    (should (equal (agent-repl-test-input--notice) "reply-to-response: selection refused"))))
+    (should (equal (agent-repl-test-input--notice) "selection: selection refused"))))
 
 (ert-deftest agent-repl-test-input-select-handover-is-not-a-warning ()
   "A handover refusal is news, never logged as a refused move."
@@ -3238,7 +3200,7 @@ The candidates offered are kept in `agent-repl-test-input--offered'."
       (cl-letf (((symbol-function 'agent-repl--warn)
                  (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned))))
         ;; Act
-        (agent-repl-response-select-prev))
+        (agent-repl-turn-boundary-select-prev))
       ;; Assert
       (should-not warned))))
 
@@ -3246,7 +3208,7 @@ The candidates offered are kept in `agent-repl-test-input--offered'."
   "A refusal that is not a handover is not handed to host.el."
   (agent-repl-test-input--with-select agent-repl-test-input--select-refused
     ;; Act
-    (agent-repl-response-select-prev)
+    (agent-repl-turn-boundary-select-prev)
     ;; Assert
     (should-not agent-repl-test-input--refusals)))
 

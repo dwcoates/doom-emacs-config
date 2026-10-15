@@ -8,8 +8,8 @@
 // disagree. The result is pushed to the webapp on the feed watch and to
 // Emacs on the host workspace watch, and acked here.
 //
-// Emacs steps the selection (`C-p` / `C-n` through final responses, `C-S-p` /
-// `C-S-n` through prompts) and clears it (escape twice); the webapp selects the
+// Emacs steps the selection (`M-s-j` / `M-s-k` through the prompts and final
+// responses together) and clears it (escape twice); the webapp selects the
 // bubble the reader clicked, clears it (a click on the selected bubble or on
 // the feed's background) and ends it when the selected row has left the
 // viewport entirely.
@@ -30,7 +30,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_select_feed_row.proto.
  */
 export const file_agentrepl_v1_endpoint_select_feed_row: GenFile = /*@__PURE__*/
-  fileDesc("CithZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2VsZWN0X2ZlZWRfcm93LnByb3RvEgxhZ2VudHJlcGwudjEi1wIKFFNlbGVjdEZlZWRSb3dSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSMwoIcmVzcG9uc2UYAiABKAsyHy5hZ2VudHJlcGwudjEuU2VsZWN0RmVlZFJvd1N0ZXBIABIxCgZwcm9tcHQYAyABKAsyHy5hZ2VudHJlcGwudjEuU2VsZWN0RmVlZFJvd1N0ZXBIABIxCgVjbGVhchgEIAEoCzIgLmFnZW50cmVwbC52MS5TZWxlY3RGZWVkUm93Q2xlYXJIABI4CglsZWZ0X3ZpZXcYBSABKAsyIy5hZ2VudHJlcGwudjEuU2VsZWN0RmVlZFJvd0xlZnRWaWV3SAASMwoGYnViYmxlGAYgASgLMiEuYWdlbnRyZXBsLnYxLlNlbGVjdEZlZWRSb3dCdWJibGVIAEIGCgRtb3ZlIjcKE1NlbGVjdEZlZWRSb3dCdWJibGUSIAoDcm93GAEgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkIkwKEVNlbGVjdEZlZWRSb3dTdGVwEjcKCWRpcmVjdGlvbhgBIAEoDjIkLmFnZW50cmVwbC52MS5TZWxlY3RGZWVkUm93RGlyZWN0aW9uIhQKElNlbGVjdEZlZWRSb3dDbGVhciI5ChVTZWxlY3RGZWVkUm93TGVmdFZpZXcSIAoDcm93GAEgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkIosBChVTZWxlY3RGZWVkUm93UmVzcG9uc2USNQoHc3VjY2VzcxgBIAEoCzIiLmFnZW50cmVwbC52MS5TZWxlY3RGZWVkUm93U3VjY2Vzc0gAEjEKBWVycm9yGAIgASgLMiAuYWdlbnRyZXBsLnYxLlNlbGVjdEZlZWRSb3dFcnJvckgAQggKBnJlc3VsdCLsAQoUU2VsZWN0RmVlZFJvd1N1Y2Nlc3MSPgoIc2VsZWN0ZWQYASABKAsyKi5hZ2VudHJlcGwudjEuU2VsZWN0RmVlZFJvd1N1Y2Nlc3NTZWxlY3RlZEgAElEKEm5vdGhpbmdfc2VsZWN0YWJsZRgCIAEoCzIzLmFnZW50cmVwbC52MS5TZWxlY3RGZWVkUm93U3VjY2Vzc05vdGhpbmdTZWxlY3RhYmxlSAASNgoEbm9uZRgDIAEoCzImLmFnZW50cmVwbC52MS5TZWxlY3RGZWVkUm93U3VjY2Vzc05vbmVIAEIJCgdvdXRjb21lIk0KHFNlbGVjdEZlZWRSb3dTdWNjZXNzU2VsZWN0ZWQSLQoJc2VsZWN0aW9uGAEgASgLMhouZnJvbnRlbmQudjEuRmVlZFNlbGVjdGlvbiInCiVTZWxlY3RGZWVkUm93U3VjY2Vzc05vdGhpbmdTZWxlY3RhYmxlIhoKGFNlbGVjdEZlZWRSb3dTdWNjZXNzTm9uZSKNAwoSU2VsZWN0RmVlZFJvd0Vycm9yEkgKEXVua25vd25fd29ya3NwYWNlGAEgASgLMisuYWdlbnRyZXBsLnYxLlNlbGVjdEZlZWRSb3dVbmtub3duV29ya3NwYWNlSAASUQoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIvLmFnZW50cmVwbC52MS5TZWxlY3RGZWVkUm93V29ya3NwYWNlUmVmTWlzbWF0Y2hIABJIChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIrLmFnZW50cmVwbC52MS5TZWxlY3RGZWVkUm93VHJhbnNmZXJyaW5nQXdheUgAEkMKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIoLmFnZW50cmVwbC52MS5TZWxlY3RGZWVkUm93Tm90WWV0QWRvcHRlZEgAEkIKDm5vdF9zZWxlY3RhYmxlGAUgASgLMiguYWdlbnRyZXBsLnYxLlNlbGVjdEZlZWRSb3dOb3RTZWxlY3RhYmxlSABCBwoFY2F1c2UiPgoaU2VsZWN0RmVlZFJvd05vdFNlbGVjdGFibGUSIAoDcm93GAEgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkIh8KHVNlbGVjdEZlZWRSb3dVbmtub3duV29ya3NwYWNlIjkKIVNlbGVjdEZlZWRSb3dXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiMAodU2VsZWN0RmVlZFJvd1RyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIcChpTZWxlY3RGZWVkUm93Tm90WWV0QWRvcHRlZCqNAQoWU2VsZWN0RmVlZFJvd0RpcmVjdGlvbhIpCiVTRUxFQ1RfRkVFRF9ST1dfRElSRUNUSU9OX1VOU1BFQ0lGSUVEEAASIwofU0VMRUNUX0ZFRURfUk9XX0RJUkVDVElPTl9PTERFUhABEiMKH1NFTEVDVF9GRUVEX1JPV19ESVJFQ1RJT05fTkVXRVIQAkIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace, file_frontend_v1_feed]);
+  fileDesc("CithZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2VsZWN0X2ZlZWRfcm93LnByb3RvEgxhZ2VudHJlcGwudjEixwIKFFNlbGVjdEZlZWRSb3dSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSOAoNdHVybl9ib3VuZGFyeRgHIAEoCzIfLmFnZW50cmVwbC52MS5TZWxlY3RGZWVkUm93U3RlcEgAEjEKBWNsZWFyGAQgASgLMiAuYWdlbnRyZXBsLnYxLlNlbGVjdEZlZWRSb3dDbGVhckgAEjgKCWxlZnRfdmlldxgFIAEoCzIjLmFnZW50cmVwbC52MS5TZWxlY3RGZWVkUm93TGVmdFZpZXdIABIzCgZidWJibGUYBiABKAsyIS5hZ2VudHJlcGwudjEuU2VsZWN0RmVlZFJvd0J1YmJsZUgAQgYKBG1vdmVKBAgCEANKBAgDEARSCHJlc3BvbnNlUgZwcm9tcHQiNwoTU2VsZWN0RmVlZFJvd0J1YmJsZRIgCgNyb3cYASABKAsyEy5mcm9udGVuZC52MS5GZWVkSWQiTAoRU2VsZWN0RmVlZFJvd1N0ZXASNwoJZGlyZWN0aW9uGAEgASgOMiQuYWdlbnRyZXBsLnYxLlNlbGVjdEZlZWRSb3dEaXJlY3Rpb24iFAoSU2VsZWN0RmVlZFJvd0NsZWFyIjkKFVNlbGVjdEZlZWRSb3dMZWZ0VmlldxIgCgNyb3cYASABKAsyEy5mcm9udGVuZC52MS5GZWVkSWQiiwEKFVNlbGVjdEZlZWRSb3dSZXNwb25zZRI1CgdzdWNjZXNzGAEgASgLMiIuYWdlbnRyZXBsLnYxLlNlbGVjdEZlZWRSb3dTdWNjZXNzSAASMQoFZXJyb3IYAiABKAsyIC5hZ2VudHJlcGwudjEuU2VsZWN0RmVlZFJvd0Vycm9ySABCCAoGcmVzdWx0IuwBChRTZWxlY3RGZWVkUm93U3VjY2VzcxI+CghzZWxlY3RlZBgBIAEoCzIqLmFnZW50cmVwbC52MS5TZWxlY3RGZWVkUm93U3VjY2Vzc1NlbGVjdGVkSAASUQoSbm90aGluZ19zZWxlY3RhYmxlGAIgASgLMjMuYWdlbnRyZXBsLnYxLlNlbGVjdEZlZWRSb3dTdWNjZXNzTm90aGluZ1NlbGVjdGFibGVIABI2CgRub25lGAMgASgLMiYuYWdlbnRyZXBsLnYxLlNlbGVjdEZlZWRSb3dTdWNjZXNzTm9uZUgAQgkKB291dGNvbWUiTQocU2VsZWN0RmVlZFJvd1N1Y2Nlc3NTZWxlY3RlZBItCglzZWxlY3Rpb24YASABKAsyGi5mcm9udGVuZC52MS5GZWVkU2VsZWN0aW9uIicKJVNlbGVjdEZlZWRSb3dTdWNjZXNzTm90aGluZ1NlbGVjdGFibGUiGgoYU2VsZWN0RmVlZFJvd1N1Y2Nlc3NOb25lIo0DChJTZWxlY3RGZWVkUm93RXJyb3ISSAoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyKy5hZ2VudHJlcGwudjEuU2VsZWN0RmVlZFJvd1Vua25vd25Xb3Jrc3BhY2VIABJRChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMi8uYWdlbnRyZXBsLnYxLlNlbGVjdEZlZWRSb3dXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkgKEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMisuYWdlbnRyZXBsLnYxLlNlbGVjdEZlZWRSb3dUcmFuc2ZlcnJpbmdBd2F5SAASQwoPbm90X3lldF9hZG9wdGVkGAQgASgLMiguYWdlbnRyZXBsLnYxLlNlbGVjdEZlZWRSb3dOb3RZZXRBZG9wdGVkSAASQgoObm90X3NlbGVjdGFibGUYBSABKAsyKC5hZ2VudHJlcGwudjEuU2VsZWN0RmVlZFJvd05vdFNlbGVjdGFibGVIAEIHCgVjYXVzZSI+ChpTZWxlY3RGZWVkUm93Tm90U2VsZWN0YWJsZRIgCgNyb3cYASABKAsyEy5mcm9udGVuZC52MS5GZWVkSWQiHwodU2VsZWN0RmVlZFJvd1Vua25vd25Xb3Jrc3BhY2UiOQohU2VsZWN0RmVlZFJvd1dvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSIwCh1TZWxlY3RGZWVkUm93VHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIhwKGlNlbGVjdEZlZWRSb3dOb3RZZXRBZG9wdGVkKo0BChZTZWxlY3RGZWVkUm93RGlyZWN0aW9uEikKJVNFTEVDVF9GRUVEX1JPV19ESVJFQ1RJT05fVU5TUEVDSUZJRUQQABIjCh9TRUxFQ1RfRkVFRF9ST1dfRElSRUNUSU9OX09MREVSEAESIwofU0VMRUNUX0ZFRURfUk9XX0RJUkVDVElPTl9ORVdFUhACQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace, file_frontend_v1_feed]);
 
 /**
  * @generated from message agentrepl.v1.SelectFeedRowRequest
@@ -45,30 +45,21 @@ export type SelectFeedRowRequest = Message<"agentrepl.v1.SelectFeedRowRequest"> 
   workspace?: WorkspaceRef | undefined;
 
   /**
-   * What to do to the selection. Exactly one is set; an unset move is
-   * refused as InvalidArgument.
-   *
    * @generated from oneof agentrepl.v1.SelectFeedRowRequest.move
    */
   move: {
     /**
-     * Step through the final responses. A selected prompt is replaced by the
-     * newest final response.
+     * Step through the turn boundaries, in feed order: the prompts a rollback
+     * can reach (the main agent's prompts of the current vendor conversation,
+     * after its last compaction or clear) and the final responses, walked as
+     * ONE sequence. Each row is selected as its own kind, so a selected
+     * prompt arms the rollback keys and a selected final response is the one
+     * the next prompt replies to.
      *
-     * @generated from field: agentrepl.v1.SelectFeedRowStep response = 2;
+     * @generated from field: agentrepl.v1.SelectFeedRowStep turn_boundary = 7;
      */
     value: SelectFeedRowStep;
-    case: "response";
-  } | {
-    /**
-     * Step through the prompts a rollback can reach: the main agent's prompts
-     * of the current vendor conversation, after its last compaction or clear.
-     * A selected response is replaced by the newest such prompt.
-     *
-     * @generated from field: agentrepl.v1.SelectFeedRowStep prompt = 3;
-     */
-    value: SelectFeedRowStep;
-    case: "prompt";
+    case: "turnBoundary";
   } | {
     /**
      * The user dismissed the selection. The push returns the webapp to the
@@ -134,7 +125,7 @@ export const SelectFeedRowBubbleSchema: GenMessage<SelectFeedRowBubble> = /*@__P
   messageDesc(file_agentrepl_v1_endpoint_select_feed_row, 1);
 
 /**
- * One step along the selectable rows of one kind.
+ * One step along the turn boundaries.
  *
  * @generated from message agentrepl.v1.SelectFeedRowStep
  */
@@ -243,7 +234,7 @@ export type SelectFeedRowSuccess = Message<"agentrepl.v1.SelectFeedRowSuccess"> 
     case: "selected";
   } | {
     /**
-     * A step found no row of its kind to select (no final response yet, or no
+     * A step found no turn boundary to select (no final response yet and no
      * prompt a rollback can reach); nothing is selected. The caller says so,
      * so the gesture is not silent.
      *
@@ -292,7 +283,7 @@ export const SelectFeedRowSuccessSelectedSchema: GenMessage<SelectFeedRowSuccess
   messageDesc(file_agentrepl_v1_endpoint_select_feed_row, 7);
 
 /**
- * A step found nothing of its kind to select.
+ * A step found no turn boundary to select.
  *
  * @generated from message agentrepl.v1.SelectFeedRowSuccessNothingSelectable
  */
@@ -479,8 +470,10 @@ export const SelectFeedRowNotYetAdoptedSchema: GenMessage<SelectFeedRowNotYetAdo
 
 /**
  * Which way a step moves along the selectable rows. With nothing selected,
- * OLDER starts at the newest row and NEWER at the oldest; from a row of the
- * other kind, both start at the newest. OLDER wraps past the oldest; NEWER
+ * OLDER starts at the newest row and NEWER at the oldest; from a selected row
+ * the step does not walk (a clicked bubble that is neither a prompt a
+ * rollback can reach nor a final response), both start at the newest. OLDER
+ * wraps past the oldest; NEWER
  * past the newest ends the selection (success `none`, pushed as
  * frontend.v1.FeedSelectionNoneReturnToTail), so the next NEWER rolls round
  * to the oldest.
