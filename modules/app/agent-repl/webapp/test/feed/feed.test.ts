@@ -66,6 +66,7 @@ import { createBubbleBody } from "../../src/bubble/body.js";
 import { drawFeedResponse } from "../../src/feed/cards/response.js";
 import { resetLoggingForTests } from "../../src/log.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
+import { createPresence } from "../../src/presence.js";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -3218,5 +3219,45 @@ describe("mountFeed: an async merge bubble's default fold", () => {
     // Assert
     expect(mergeRowIn(reloaded.host).getAttribute("data-expanded")).toBe("false");
     reloaded.feed.dispose();
+  });
+});
+
+describe("mountFeed: a page the host stops showing", () => {
+  /** Mount on a presence the test switches, starting shown. */
+  function mountShown() {
+    const h = harness();
+    const { scroll, host } = scrollHost();
+    const presence = createPresence(document, true);
+    presence.setShown(true);
+    const feed = mountFeed(host, h.ctx, { renderers: stubRenderers(), scrollBox: scroll, presence });
+    const hide = (): void => presence.setShown(false);
+    return { feed, h, hide };
+  }
+
+  it("asks for the newest daemon page to free the rows older than it", async () => {
+    // Arrange
+    const { h, hide } = mountShown();
+    await settle();
+
+    // Act
+    hide();
+    await settle();
+
+    // Assert
+    expect(h.calls.getFeedPage.map((ask) => ask.page.case)).toEqual(["first"]);
+  });
+
+  it("stops trimming once disposed", async () => {
+    // Arrange
+    const { feed, h, hide } = mountShown();
+    await settle();
+    feed.dispose();
+
+    // Act
+    hide();
+    await settle();
+
+    // Assert
+    expect(h.calls.getFeedPage).toHaveLength(0);
   });
 });

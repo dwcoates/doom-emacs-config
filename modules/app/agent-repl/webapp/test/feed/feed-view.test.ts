@@ -3989,3 +3989,213 @@ describe("createFeedController: selected and expanded are one state", () => {
     ).toThrow(MalformedView);
   });
 });
+
+// A PAGE THE HOST STOPS SHOWING FREES EVERY ROW OLDER THAN ITS NEWEST DAEMON
+// PAGE (owner ruling, 2026-10-15); every row at or after that page's oldest
+// row stays, pushed ones included.
+describe("createFeedController: freeing rows older than the newest daemon page", () => {
+  /** The daemon's newest page, holding ROWS, with older rows above it. */
+  function newestPageAnswer(rows: readonly FeedRow[]) {
+    return create(GetFeedPageResponseSchema, { result: { case: "success", value: page(rows, { hasMore: true }) } });
+  }
+
+  /** A feed holding rows k1..k4, oldest first, at its start. */
+  function heldFeed(h: ReturnType<typeof harness>) {
+    const f = fixture(h);
+    f.controller.applyPage(
+      page(["k1", "k2", "k3", "k4"].map((key) => withOrder(responseRow(key), key))),
+      "replace",
+    );
+    return f;
+  }
+
+  it("frees every row sorting before the newest page's oldest row", async () => {
+    // Arrange
+    const h = harness({ getFeedPage: () => newestPageAnswer([withOrder(responseRow("k3"), "k3")]) });
+    const { controller, host } = heldFeed(h);
+
+    // Act
+    await controller.freeOlderThanNewestPage();
+
+    // Assert
+    expect(drawnIds(host)).toEqual(["k3", "k4"]);
+  });
+
+  it("asks the daemon for its newest page to learn where that page starts", async () => {
+    // Arrange
+    const h = harness({ getFeedPage: () => newestPageAnswer([withOrder(responseRow("k3"), "k3")]) });
+    const { controller } = heldFeed(h);
+
+    // Act
+    await controller.freeOlderThanNewestPage();
+
+    // Assert
+    expect(h.calls.getFeedPage.map((ask) => ask.page.case)).toEqual(["first"]);
+  });
+
+  it("keeps a row pushed while the ask was in flight", async () => {
+    // Arrange: the push lands before the daemon's answer does.
+    let pushLate: () => void = () => undefined;
+    const h = harness({
+      getFeedPage: () => {
+        pushLate();
+        return newestPageAnswer([withOrder(responseRow("k3"), "k3")]);
+      },
+    });
+    const { controller, host } = heldFeed(h);
+    pushLate = () => controller.upsert(withOrder(responseRow("k5"), "k5"));
+
+    // Act
+    await controller.freeOlderThanNewestPage();
+
+    // Assert
+    expect(drawnIds(host)).toEqual(["k3", "k4", "k5"]);
+  });
+
+  it("offers older pages again once it freed rows", async () => {
+    // Arrange
+    const h = harness({ getFeedPage: () => newestPageAnswer([withOrder(responseRow("k3"), "k3")]) });
+    const { controller, host } = heldFeed(h);
+
+    // Act
+    await controller.freeOlderThanNewestPage();
+
+    // Assert
+    expect([controller.hasMoreHistory(), host.querySelector("[data-load-more]") !== null]).toEqual([true, true]);
+  });
+
+  it("asks for the next older page above the oldest row it kept", async () => {
+    // Arrange
+    const h = harness({ getFeedPage: () => newestPageAnswer([withOrder(responseRow("k3"), "k3")]) });
+    const { controller, host } = heldFeed(h);
+    await controller.freeOlderThanNewestPage();
+
+    // Act
+    host.querySelector<HTMLElement>("[data-load-more]")?.click();
+    await settle();
+
+    // Assert
+    const ask = h.calls.getFeedPage[1]?.page;
+    expect(ask?.case === "olderThan" ? ask.value.oldestHeld?.key : undefined).toBe("k3");
+  });
+
+  it("frees nothing when the newest page holds no row", async () => {
+    // Arrange
+    const h = harness({ getFeedPage: () => newestPageAnswer([]) });
+    const { controller, host } = heldFeed(h);
+
+    // Act
+    await controller.freeOlderThanNewestPage();
+
+    // Assert
+    expect(drawnIds(host)).toEqual(["k1", "k2", "k3", "k4"]);
+  });
+
+  it("frees nothing, draws no refusal and logs why when the daemon cannot be reached", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const h = harness({
+      getFeedPage: () => {
+        throw new Error("gone");
+      },
+    });
+    const { controller, host } = heldFeed(h);
+
+    // Act
+    await controller.freeOlderThanNewestPage();
+
+    // Assert
+    const record = await forwardedRecord(capture, "feed.unshown-trim-refused");
+    expect([drawnIds(host).length, host.querySelector(".refusal"), record.level.case, record.context?.arm]).toEqual([
+      4,
+      null,
+      "warn",
+      "transport",
+    ]);
+  });
+
+  it("frees nothing and logs why when the daemon refuses the ask", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const h = harness({ getFeedPage: () => create(GetFeedPageResponseSchema, { result: { case: "error", value: {} } }) });
+    const { controller, host } = heldFeed(h);
+
+    // Act
+    await controller.freeOlderThanNewestPage();
+
+    // Assert
+    const record = await forwardedRecord(capture, "feed.unshown-trim-refused");
+    expect([drawnIds(host).length, record.context?.arm]).toEqual([4, "error"]);
+  });
+
+  it("frees nothing and logs why when the newest page is a page error", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const h = harness({
+      getFeedPage: () =>
+        create(GetFeedPageResponseSchema, {
+          result: {
+            case: "success",
+            value: create(FeedPageSchema, {
+              result: {
+                case: "error",
+                value: {
+                  headline: { text: "a gap", tone: "tone-red" },
+                  kind: { case: "historyReplayTruncated", value: { reason: "r" } },
+                },
+              },
+            }),
+          },
+        }),
+    });
+    const { controller, host } = heldFeed(h);
+
+    // Act
+    await controller.freeOlderThanNewestPage();
+
+    // Assert
+    const record = await forwardedRecord(capture, "feed.unshown-trim-page-error");
+    expect([drawnIds(host).length, record.level.case, record.context?.headline]).toEqual([4, "warn", "a gap"]);
+  });
+
+  it("records how many rows it freed and kept", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const h = harness({ getFeedPage: () => newestPageAnswer([withOrder(responseRow("k3"), "k3")]) });
+    const { controller } = heldFeed(h);
+
+    // Act
+    await controller.freeOlderThanNewestPage();
+
+    // Assert
+    const record = await forwardedRecord(capture, "feed.unshown-trim");
+    expect(record.context).toMatchObject({ cut: "k3", dropped: 2, kept: 2 });
+  });
+
+  it("runs after an older page already asked for", async () => {
+    // Arrange: the older page is asked first, then the trim.
+    const h = harness({
+      getFeedPage: (request) =>
+        request.page.case === "olderThan"
+          ? create(GetFeedPageResponseSchema, {
+              result: { case: "success", value: page([withOrder(responseRow("k0"), "k0")], { hasMore: true }) },
+            })
+          : newestPageAnswer([withOrder(responseRow("k3"), "k3")]),
+    });
+    const { controller, host } = fixture(h);
+    controller.applyPage(
+      page(["k1", "k2", "k3", "k4"].map((key) => withOrder(responseRow(key), key)), { hasMore: true }),
+      "replace",
+    );
+    host.querySelector<HTMLElement>("[data-load-more]")?.click();
+
+    // Act
+    await controller.freeOlderThanNewestPage();
+
+    // Assert: the older page landed first, so the trim freed it too.
+    expect([h.calls.getFeedPage.map((ask) => ask.page.case), drawnIds(host)]).toEqual([
+      ["olderThan", "first"],
+      ["k3", "k4"],
+    ]);
+  });
+});
