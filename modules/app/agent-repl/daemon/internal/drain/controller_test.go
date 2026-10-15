@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +12,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -1343,25 +1342,12 @@ func TestReadFailedLevelsByTheCause(t *testing.T) {
 // TestEveryDrainReadIsLevelledThroughReadFailed keeps the cut-or-failed split
 // in one place: no drain source but readFailed asks ctxend itself.
 func TestEveryDrainReadIsLevelledThroughReadFailed(t *testing.T) {
-	// Arrange
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	// Act
 	var sites []string
-	for _, file := range files {
-		if strings.HasSuffix(file, "_test.go") {
-			continue
-		}
-		body, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for i, line := range strings.Split(string(body), "\n") {
+	for _, f := range sourcescan.Production(t) {
+		for i, line := range strings.Split(string(f.Source), "\n") {
 			if strings.Contains(line, "ctxend.Is(") {
-				sites = append(sites, fmt.Sprintf("%s:%d", file, i+1))
+				sites = append(sites, fmt.Sprintf("%s:%d", f.Name, i+1))
 			}
 		}
 	}
